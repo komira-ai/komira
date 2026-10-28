@@ -49,6 +49,7 @@ mojo_library(
         "tests/test_join_multikey_entry_space_equiv.mojo",
         "tests/test_join_multikey_parallel_build.mojo",
         "tests/test_join_multikey_parallel_build_kinds.mojo",
+        "tests/test_join_multikey_parallel_fill.mojo",
         "tests/test_join_probe_multi_key_op.mojo",
         "tests/test_multi_key_merge_parallel.mojo",
         "tests/test_multi_key_parallel_probe.mojo",

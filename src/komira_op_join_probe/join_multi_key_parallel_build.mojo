@@ -373,7 +373,7 @@ def _run_mk_fill_wave[
     var cancel_token: CancellationToken,
 ) raises -> _MkFillSlots:
     """Thin `fork_join_shared` binding for the FILL wave. Same idiom (and same
-    reason) as `_run_mk_build_wave` below: `in_o` must be INFERRED from the
+    reason) as `_run_mk_build_wave` above: `in_o` must be INFERRED from the
     borrowed key Slab, whose origin the construction site cannot spell.
     """
     return fork_join_shared[

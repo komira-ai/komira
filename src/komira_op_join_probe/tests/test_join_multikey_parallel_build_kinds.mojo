@@ -1,5 +1,5 @@
 # The parallel composite build against the serial `MultiKeyHashJoinBuilder.build`
-# under every probe kind (INNER, LEFT, SEMI, ANTI, RIGHT, FULL): for 1, 2 and 4
+# under every probe kind (INNER, LEFT, SEMI, ANTI, RIGHT, FULL): for 1, 2, 3, 4 and 8
 # pool workers and chunk sizes from one row to larger than the build, on INT64
 # keys with NULL-keyed rows and duplicates, and on FLOAT64 (NaN, -0.0, NULL),
 # STRING (empty, duplicates, NULL) and DICTIONARY (NULL) keys extracted from
@@ -294,7 +294,7 @@ def test_every_probe_kind_agrees_across_workers_and_chunk_sizes() raises:
     var serial_rows = _chain_rows(ser)
     assert_equal(len(serial_rows), 300, "serial chains hold every row")
 
-    var workers: List[Int] = [1, 2, 4]
+    var workers: List[Int] = [1, 2, 3, 4, 8]
     var chunks: List[Int] = [1, 2, 7, 64, 299, 300, 1000]
     for w in range(len(workers)):
         for c in range(len(chunks)):
@@ -508,7 +508,7 @@ def test_float_string_and_dictionary_keys_agree_for_every_probe_kind() raises:
         assert_true(len(expect.inner) > 0, "key set " + String(set_id) + " joins")
         var serial_rows = _chain_rows(ser)
 
-        var workers: List[Int] = [1, 3]
+        var workers: List[Int] = [1, 3, 8]
         var chunks: List[Int] = [1, 17, 1000]
         for w in range(len(workers)):
             for c in range(len(chunks)):
