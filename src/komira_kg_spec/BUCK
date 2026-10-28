@@ -55,7 +55,7 @@ mojo_conda(
     manifest = "mopm.toml",
     members = {"../komira_kg_mode": "//src/komira_kg_mode:mopm.toml"},
     mojo = "1.0.0",
-    mopm = "toolchains//:mopm_0_0_73",
+    mopm = "toolchains//:mopm_0_0_86",
     package = "komira_kg_spec",
     version = "0.1.0",
     visibility = ["PUBLIC"],
