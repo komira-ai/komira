@@ -192,6 +192,24 @@ def test_close_frees_the_handle_once():
     t.__del__()
     t.__del__()
     assert t_freed == [t_ctx], t_freed
+    # The handle is let go of before it is freed: when the free raises, a second
+    # close() does not free it again (freeing first, then forgetting, would).
+    u = Session(lib_path())
+    u_free = u._native.ctx_free
+    tried = []
+
+    def failing_free(c):
+        tried.append(c)
+        raise RuntimeError("free failed")
+
+    u._native.ctx_free = failing_free
+    try:
+        u.close()
+    except RuntimeError:
+        pass
+    u.close()
+    assert len(tried) == 1, tried
+    u_free(tried[0])  # free the real handle the failing stand-in kept
 
 
 def test_plan_render_refuses_what_is_not_bytes():
@@ -206,6 +224,11 @@ def test_plan_render_refuses_what_is_not_bytes():
         text = s.plan_render(plan)
         assert s.plan_render(bytearray(plan)) == text
         assert s.plan_render(memoryview(plan)) == text
+        # Text from the library that is not UTF-8 is a KomiraError, not a
+        # UnicodeDecodeError (the read itself is stood in for).
+        s._native._bytes = lambda ctx, what, call: b"\xff\xfe"
+        e = raises(None, s.plan_render, plan)
+        assert "not UTF-8" in str(e), str(e)
 
 
 def test_parquet_schema_equals_pyarrow():
@@ -261,10 +284,14 @@ def test_wire_every_type_id():
     # The ids the engine has and this binding does not decode are refused by name,
     # never guessed: dictionary, list, struct, map, decimal256, intervals, unions,
     # large list, fixed-size binary and list, the views.
-    for type_id in (19, 20, 21, 28, 29, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49):
+    for type_id in (19, 20, 21, 28, 29, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 127):
         body = b"\x0a\x01c" + b"\x10" + bytes([type_id])
         e = raises(None, _wire.schema_from_wire, b"\x0a" + bytes([len(body)]) + body)
         assert "does not decode" in str(e), (type_id, str(e))
+    # An id past the engine's that takes two varint bytes (300) is refused too.
+    body = b"\x0a\x01c" + b"\x10\xac\x02"
+    e = raises(None, _wire.schema_from_wire, b"\x0a" + bytes([len(body)]) + body)
+    assert "type id 300" in str(e), str(e)
 
 
 def test_wire_truncated_and_hostile_input():
