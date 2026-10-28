@@ -1,0 +1,48 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The driver of a physical plan: the ready-set scheduler over its segments
+# (`run_plan`, `plan_check`, `edge_policy`), the run of one segment on a
+# `ParallelDispatch` (`run_segment`, `segment_task`), the closed variants of the
+# source, operator and sink traits (`source_variant`, `op_variant`,
+# `pipeline_sink`, `unused_members`), the builder seam through which a plan's
+# members are constructed (`segment_builder`) and the fakes that drive the
+# scheduler in tests (`fake_support`, `fake_members`, `fake_builder`).
+#
+# test_edge_policy_and_ready_set  the edge tag and order key policies, the plan
+#                                 checks and the ready set.
+# test_variants                   each variant slot forwards to its member.
+# test_run_segment                every row once, the end of input once per
+#                                 worker, the operator chain, combine once
+#                                 after every worker, a worker count of one to
+#                                 seven.
+# test_run_segment_failures       the first error wins, cancel stops the other
+#                                 workers, a denied memory grow fails the query,
+#                                 a caller's cancel, no output after a failure.
+# test_run_plan                   segments in dependency order, independent
+#                                 segments, a published output reaching its
+#                                 dependent, a failed segment stopping the rest.
+mojo_library(
+    name = "komira_pipeline_exec",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/komira_arrow:komira_arrow",
+        "//src/komira_async_api:komira_async_api",
+        "//src/komira_atomic_alias:komira_atomic_alias",
+        "//src/komira_collections:komira_collections",
+        "//src/komira_exec_types:komira_exec_types",
+        "//src/komira_metrics:komira_metrics",
+        "//src/komira_morsel:komira_morsel",
+        "//src/komira_physical_plan:komira_physical_plan",
+        "//src/komira_plan_expr:komira_plan_expr",
+        "//src/komira_plan_stats:komira_plan_stats",
+        "//src/komira_scan_source:komira_scan_source",
+    ],
+    test_srcs = [
+        "tests/test_edge_policy_and_ready_set.mojo",
+        "tests/test_run_plan.mojo",
+        "tests/test_run_segment.mojo",
+        "tests/test_run_segment_failures.mojo",
+        "tests/test_variants.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)

@@ -20,6 +20,7 @@ TARGETS = [
     "komira//src/komira_log_index:komira_log_index_conda",
     "komira//src/komira_op_agg_distinct:komira_op_agg_distinct_conda",
     "komira//src/komira_op_agg_slab:komira_op_agg_slab_conda",
+    "komira//src/komira_pipeline_exec:komira_pipeline_exec_conda",
     "komira//src/komira_plan_proto:optimized_golden_declared_needs_canonical",
     "komira//src/komira_plan_proto:optimized_golden_exchange_edge_canonical",
     "komira//src/komira_plan_proto:optimized_golden_optimized_plan_body_canonical",
