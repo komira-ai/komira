@@ -505,7 +505,14 @@ struct PartitionTopNHashState[
         rows is copied into a fresh slot and placed as if fed here, and its
         non-NULL counts are added. Its rows are numbered after this state's
         (see the module header), so the result equals one state fed this
-        state's rows and then the other's."""
+        state's rows and then the other's.
+
+        Combining the states of consecutive row ranges (each `other` holding
+        the rows right after `self`'s) equals one feed exactly, including
+        which tied rows are kept. Combining non-adjacent ranges gives a valid
+        top-N whose tied rows depend on the merge order, which
+        docs/design/query_semantics.md §4.7 permits: rows that tie on every
+        sort key come out in an unspecified order."""
         comptime if Self.N <= 0:
             # Nothing is kept at a zero limit; only the row count moves on.
             self.rows_fed += other.rows_fed

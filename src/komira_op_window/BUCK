@@ -35,6 +35,7 @@ mojo_library(
         "tests/test_partition_topn_build_shape.mojo",
         "tests/test_partition_topn_hash_state.mojo",
         "tests/test_partition_topn_hash_state_oracle.mojo",
+        "tests/test_partition_topn_hash_state_keytypes.mojo",
         "tests/test_partition_topn_oracle.mojo",
         "tests/test_partition_topn_sink.mojo",
         "tests/test_topn_sink.mojo",
