@@ -1,7 +1,7 @@
 # The composite join's NULL keys: a NULL key of every numeric arm (INT64,
 # INT32, FLOAT64, numeric dictionary) matches nothing, on the build side and on
-# the probe side, whatever value sits under its cleared validity bit; LEFT
-# keeps a NULL-keyed probe row unmatched; the widened key slots keep the
+# the probe side, whatever value sits under its cleared validity bit; LEFT and
+# ANTI keep a NULL-keyed probe row unmatched; the widened key slots keep the
 # source's validity; and the sentinel's one known collision.
 
 from std.testing import TestSuite, assert_equal, assert_true, assert_false
@@ -19,6 +19,9 @@ from komira_op_join_probe.join_key_extract import (
 from komira_op_join_probe.join_multi_key import _NAN_SENTINEL_BITS
 from komira_op_join_probe.join_multi_key_builder import (
     MultiKeyHashJoinBuilder,
+)
+from komira_op_join_probe.join_multi_key_filter import (
+    multi_key_probe_anti,
 )
 
 
@@ -437,10 +440,11 @@ def test_int32_widened_key_slots_preserve_validity() raises:
     )
 
 
-def test_null_probe_key_left_disposition() raises:
+def test_null_probe_key_left_and_anti_dispositions() raises:
     """`no match` is not `dropped`. A NULL probe key (row 0, with a real
-    build 42 under its cleared bit) must make LEFT emit BOTH probe rows, row 0
-    with build index -1.
+    build 42 under its cleared bit) must:
+      * LEFT: emit BOTH probe rows, row 0 with build index -1;
+      * ANTI: emit probe row 0 and ONLY probe row 0.
     """
     var bvals = List[Int64]()
     bvals.append(_TRAP)
@@ -476,6 +480,11 @@ def test_null_probe_key_left_disposition() raises:
     want_left.append(1)
     want_left.append(1)
     _assert_pairs(left, want_left, String("LEFT with a null probe key"))
+
+    var pkeys2 = extract_join_key_columns_serial(probe, names)
+    var anti = multi_key_probe_anti(builder, pkeys2)
+    assert_equal(len(anti), 1, "ANTI must emit exactly the unmatched probe row")
+    assert_equal(anti[0], 0, "ANTI must emit the NULL-keyed probe row")
 
 
 def test_non_nullable_int64_join_is_unchanged() raises:
@@ -607,7 +616,7 @@ def main() raises:
     suite.test[test_float64_null_key_matches_nothing_and_nan_matches_nan]()
     suite.test[test_numeric_dict_null_key_matches_nothing]()
     suite.test[test_int32_widened_key_slots_preserve_validity]()
-    suite.test[test_null_probe_key_left_disposition]()
+    suite.test[test_null_probe_key_left_and_anti_dispositions]()
     suite.test[test_non_nullable_int64_join_is_unchanged]()
     suite.test[test_int64_key_equal_to_the_sentinel_is_skipped_today]()
     suite^.run()

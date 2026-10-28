@@ -10,6 +10,11 @@ import from the modules.
   (`probe_inner_into`) and LEFT (`probe_left_into`) probes. Matches come back
   as parallel lists of build and probe row indices; LEFT marks an unmatched
   probe row with build index -1.
+- `komira_op_join_probe.join_multi_key_filter`: `multi_key_probe_semi` and
+  `multi_key_probe_anti`, which return the probe rows they keep.
+- `komira_op_join_probe.join_multi_key_outer`: `multi_key_probe_right_into`
+  and `multi_key_probe_full_into`, which also emit every unmatched build row
+  (probe index -1).
 - `komira_op_join_probe.join_key_extract`: `extract_join_key_columns_typed`
   (and `extract_join_key_columns_serial`, without a dispatcher) renders a
   batch's key columns into one Int64 key slot per row and key
@@ -20,7 +25,8 @@ import from the modules.
 - `komira_op_join_probe.join_multi_key`: the key slots' constants, the
   composite hash and the string hash and equality the probes share.
 
-A NULL key matches nothing: INNER drops the row, LEFT keeps it unmatched. FLOAT64 keys
+A NULL key matches nothing: INNER and SEMI drop the row, LEFT and ANTI keep
+it unmatched, RIGHT and FULL still emit a NULL-keyed build row. FLOAT64 keys
 follow the query semantics' float model, as DuckDB does: every NaN equals
 every NaN and `-0.0` equals `+0.0`. Nothing here reads the environment.
 
@@ -35,6 +41,7 @@ from komira_arrow.record_batch import RecordBatch, RecordBatchBuilder
 from komira_arrow.schema import Field, SchemaBuilder
 from komira_op_join_probe.join_key_extract import extract_join_key_columns_serial
 from komira_op_join_probe.join_multi_key_builder import MultiKeyHashJoinBuilder
+from komira_op_join_probe.join_multi_key_filter import multi_key_probe_anti
 
 # A two-key join on (a, b). Build rows: (1, 10), (1, 20), (2, 10).
 # Probe rows: (1, 20), (2, 99), (1, 10).
@@ -60,4 +67,9 @@ assert_equal(probe_rows[0], 0)  # (1, 20) matches build row 1
 assert_equal(build_rows[0], 1)
 assert_equal(probe_rows[1], 2)  # (1, 10) matches build row 0
 assert_equal(build_rows[1], 0)
+
+# ANTI keeps the probe row with no match: (2, 99).
+var anti = multi_key_probe_anti(join, extract_join_key_columns_serial(probe, keys))
+assert_equal(len(anti), 1)
+assert_equal(anti[0], 1)
 ```
