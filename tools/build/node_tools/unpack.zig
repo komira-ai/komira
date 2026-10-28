@@ -39,11 +39,11 @@ pub fn modeOf(tar_mode: u32) std.fs.File.Mode {
 }
 
 /// Extracts the tar read from `reader` into `dest`.
-pub fn unpackTar(dest: std.fs.Dir, reader: anytype) !Stats {
-    var name_buf: [std.fs.MAX_PATH_BYTES]u8 = undefined;
-    var link_buf: [std.fs.MAX_PATH_BYTES]u8 = undefined;
-    var rel_buf: [std.fs.MAX_PATH_BYTES]u8 = undefined;
-    var it = std.tar.iterator(reader, .{ .file_name_buffer = &name_buf, .link_name_buffer = &link_buf });
+pub fn unpackTar(dest: std.fs.Dir, reader: *std.Io.Reader) !Stats {
+    var name_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var link_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var rel_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var it = std.tar.Iterator.init(reader, .{ .file_name_buffer = &name_buf, .link_name_buffer = &link_buf });
     var stats = Stats{};
     while (try it.next()) |f| {
         if (f.kind == .sym_link) {
@@ -58,7 +58,10 @@ pub fn unpackTar(dest: std.fs.Dir, reader: anytype) !Stats {
                 if (std.fs.path.dirname(rel)) |d| try dest.makePath(d);
                 const file = try dest.createFile(rel, .{ .mode = modeOf(f.mode) });
                 defer file.close();
-                try f.writeAll(file);
+                var fbuf: [64 * 1024]u8 = undefined;
+                var fw = file.writer(&fbuf);
+                try it.streamRemaining(f, &fw.interface);
+                try fw.interface.flush();
                 try file.chmod(modeOf(f.mode));
                 stats.files += 1;
             },
@@ -70,7 +73,13 @@ pub fn unpackTar(dest: std.fs.Dir, reader: anytype) !Stats {
 
 /// Extracts the gzipped tar `bytes` into `dest`.
 pub fn unpackTgz(dest: std.fs.Dir, bytes: []const u8) !Stats {
-    var fbs = std.io.fixedBufferStream(bytes);
-    var dec = std.compress.gzip.decompressor(fbs.reader());
-    return unpackTar(dest, dec.reader());
+    var in: std.Io.Reader = .fixed(bytes);
+    var window: [std.compress.flate.max_window_len]u8 = undefined;
+    var dec = std.compress.flate.Decompress.init(&in, .gzip, &window);
+    const stats = try unpackTar(dest, &dec.reader);
+    // The tar ends at its zero blocks; reading the rest of the gzip stream is
+    // what checks its trailer (CRC and length), so a truncated or corrupt
+    // tarball is an error and not a short package.
+    _ = dec.reader.discardRemaining() catch return error.CorruptGzip;
+    return stats;
 }

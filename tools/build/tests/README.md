@@ -31,11 +31,11 @@ do:
   exit status); [`lint_weld.sh`](negative/lint_weld.sh) plants its defects
   in a snapshot of the tree. A fixture that fails to analyse, to compile
   or to pass its gate is fine as an ordinary package: the CI's
-  reverse-dependency query (`//tools/build/ci:affected`, a `cquery` over
-  `tests//...`) configures every target but analyses none. Only a
+  reverse-dependency query (`tools/build/ci/affected.bxl`, over
+  `tests//functional/...`) configures every target but analyses none. Only a
   configuration failure breaks it: a target with an unknown or invisible
   dependency makes the query fail for every change, and any failure of
-  that query answers BROKEN (with buck2's error, which names the target)
+  that query fails the selector (with buck2's error, which names the target)
   and fails the check, never a widening. Such a fixture must not
   be loadable: it is a `<case>.BUCK` file that the driver copies to
   `<case>/BUCK` for its one build and deletes, its directory gitignored, as
@@ -583,7 +583,7 @@ by the runner's own unit tests (below); mapping the runner's status to a
 verdict is Buck2's. The `bad_*` targets and the `test_deps` refusals at
 analysis are the scenario
 [`analysis_refusals_mojo`](../selftest/analysis_refusals_mojo.zig). The gate test
-of `komira//tools/build/mojo/runtime_paths:komira_runtime_paths` (built with
+of `komira//src/komira_runtime_paths:komira_runtime_paths` (built with
 the examples) covers the executable-relative helpers.
 The runner's unit tests ([`tools/build/run/mojo_test.zig`](../run/mojo_test.zig),
 welded to the runner, so a pull request that builds any test runs them) run
@@ -625,7 +625,8 @@ shell lints through `//:tests_lints` in the root [`BUCK`](../../../BUCK),
 because `//...` does not reach into another cell.
 [`lint_weld.sh`](negative/lint_weld.sh) requires the `_script_lint` lists of the Mojo
 and Rust toolchains ([`mojo/toolchain.bzl`](../mojo/toolchain.bzl),
-[`rust/defs.bzl`](../rust/defs.bzl)) to equal the lists it pins, so a lint
+[`rust/defs.bzl`](../rust/defs.bzl); the Rust rules run no script, so that list is
+empty) to equal the lists it pins, so a lint
 dropped from a toolchain fails it; for each lint target on them it plants
 an unused variable (SC2034) in one of that target's scripts, alone, in a
 snapshot of the tree, and requires the build of
@@ -797,6 +798,15 @@ cp "$out/komira_aws_logs.mojo" tools/build/tests/functional/aws_codegen/golden/l
 cp "$out/_layout_probe.mojo" tools/build/tests/functional/aws_codegen/golden/logs_client_probe.mojo
 ```
 
+A module the generator splits (1000 lines or more, which no generated file may
+reach) is a facade, whose golden is the module's, and parts, `_parts/<module>_pNN.mojo`,
+whose goldens are the `golden_parts` of the case, one file each under its own
+name (`golden/query_client_parts/`): copy `$out/_parts/*.mojo` there. The check
+refuses a split module with no `golden_parts`, `golden_parts` for a module that
+was not split, a part that differs, and any generated file of 1000 lines or more.
+`must_contain` reads the facade and the parts together. The proto goldens do the
+same: a part's golden is a `<name>.mojo.golden` in a directory named `_parts`.
+
 ## 35. Rust tests are part of the build
 
 `rust_test` ([`../rust/README.md`](../rust/README.md#tests-are-part-of-the-build))
@@ -837,6 +847,34 @@ runs the `rust_test` its `tests` names.
 buck2 build //tools/build/proto-codegen:komira_proto_codegen_unit
 buck2 build tests//functional/rust_test: //tools/build/examples/rust/ext:
 buck2 build tests//negative/rust_test:bin       # must fail: GATED TEST FAILED
+```
+
+## 35b. Rust attributes Cargo needs
+
+`env`, `renamed_deps`, `native_deps`, `patch` and `proc_macro_extern` of the
+Rust rules ([`../rust/README.md`](../rust/README.md#cargo-crates)). The greens are
+[`functional/rust_cargo`](functional/rust_cargo/BUCK), each a binary whose run
+check compares its stdout (or a test): `env_pkg` reads `env!("CARGO_PKG_*")`,
+`renamed` links two crates both named `shared` (one under an alias), `native`
+and `native_test` call a C archive, `out_dir_main` links a crate whose
+`include!(concat!(env!("OUT_DIR"), ..))` is rewritten and whose file is added
+by `patch`, `pm_main` uses a proc-macro that names `proc_macro` without
+`extern crate`. In [`negative/rust_cargo`](negative/rust_cargo/BUCK) each green
+is repeated over the same source with its attribute removed or broken, and must
+fail naming its cause ([`rust_tests.sh`](rust_tests.sh)): `env` missing
+(`not defined at compile time`) or wrong (the run check differs), the alias
+missing (`undeclared crate or module`), no `native_deps` (`undefined symbol`, for
+a binary and a test), no patch (`OUT_DIR` not defined), a rewritten include with
+no file added, a substitution whose `count` is wrong (`matched 1 times, expected
+2`), and no `proc_macro_extern` (`proc_macro` undeclared). The refusals at
+analysis (a reserved or malformed `env`, an unknown `patch` key, a malformed
+`sub`, `proc_macro_extern` on a library that is no proc-macro) are rows of
+[`analysis_refusals_rust`](../selftest/analysis_refusals_rust.zig). `patch` is
+run by [`crate_patch`](../rust/crate_patch.zig), whose unit tests gate it.
+
+```sh
+buck2 build tests//functional/rust_cargo:
+buck2 build tests//negative/rust_cargo:env_missing   # must fail
 ```
 
 ## 37. Platform table
@@ -1021,6 +1059,7 @@ With coverage, a library's conda package (what ships), not the library, waits fo
 ## 52. [API JSON: mojo_doc_json](../mojo/doc.md)
 ## 53. [Surface capability matrix](lint_tests.md#53-the-surface-capability-matrix)
 ## 54. [Hermetic Node.js: planted defects](../node/README.md#planted-defects) (self-test scenarios)
+## 55. [The ABI golden and the C header](../mojo/README.md#the-abi-golden-and-the-c-header): (self-test scenario [`planted_red_builds_abi_golden`](../selftest/planted_red_builds_abi_golden.zig))
 
 ## 49. Assert level, defines and memory cap
 

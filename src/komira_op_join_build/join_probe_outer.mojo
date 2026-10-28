@@ -74,7 +74,7 @@ def _probe_left_into[
     var mask = UInt64(b.capacity - 1)
 
     # A NULL probe key matches nothing. For LEFT outer the NULL probe
-    # row is STILL emitted (-1 build fill) — the no-match path — so the only
+    # row is STILL emitted (-1 build fill) -- the no-match path -- so the only
     # change is to skip the chain walk for NULL keys. `probe_has_nulls` gates.
     var probe_has_nulls = probe_keys.null_count != 0
 

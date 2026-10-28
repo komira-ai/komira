@@ -8,6 +8,8 @@ pub const Entry = struct {
     mode: u32 = 0o644,
     data: []const u8 = "",
     link: []const u8 = "",
+    /// Seconds since the epoch.
+    mtime: u64 = 0,
 };
 
 fn octal(buf: []u8, v: u64) void {
@@ -24,7 +26,7 @@ fn octal(buf: []u8, v: u64) void {
 }
 
 pub fn tar(a: std.mem.Allocator, entries: []const Entry) ![]u8 {
-    var out = std.ArrayList(u8).init(a);
+    var out = std.ArrayListUnmanaged(u8){};
     for (entries) |e| {
         var h = [_]u8{0} ** 512;
         @memcpy(h[0..e.name.len], e.name);
@@ -32,7 +34,7 @@ pub fn tar(a: std.mem.Allocator, entries: []const Entry) ![]u8 {
         octal(h[108..116], 0);
         octal(h[116..124], 0);
         octal(h[124..136], e.data.len);
-        octal(h[136..148], 0);
+        octal(h[136..148], e.mtime);
         @memset(h[148..156], ' ');
         h[156] = e.kind;
         @memcpy(h[157 .. 157 + e.link.len], e.link);
@@ -44,41 +46,41 @@ pub fn tar(a: std.mem.Allocator, entries: []const Entry) ![]u8 {
         octal(h[148..155], sum);
         h[154] = 0;
         h[155] = ' ';
-        try out.appendSlice(&h);
-        try out.appendSlice(e.data);
+        try out.appendSlice(a, &h);
+        try out.appendSlice(a, e.data);
         const pad = (512 - e.data.len % 512) % 512;
-        try out.appendNTimes(0, pad);
+        try out.appendNTimes(a, 0, pad);
     }
-    try out.appendNTimes(0, 1024);
-    return out.toOwnedSlice();
+    try out.appendNTimes(a, 0, 1024);
+    return out.toOwnedSlice(a);
 }
 
 /// A gzip stream of `bytes` in stored (uncompressed) deflate blocks.
 pub fn gzip(a: std.mem.Allocator, bytes: []const u8) ![]u8 {
-    var out = std.ArrayList(u8).init(a);
-    try out.appendSlice(&.{ 0x1f, 0x8b, 8, 0, 0, 0, 0, 0, 0, 3 });
+    var out = std.ArrayListUnmanaged(u8){};
+    try out.appendSlice(a, &.{ 0x1f, 0x8b, 8, 0, 0, 0, 0, 0, 0, 3 });
     var off: usize = 0;
     while (true) {
         const n = @min(bytes.len - off, 65535);
         const last = off + n == bytes.len;
-        try out.append(if (last) 1 else 0);
-        try out.writer().writeInt(u16, @intCast(n), .little);
-        try out.writer().writeInt(u16, @intCast(~@as(u16, @intCast(n))), .little);
-        try out.appendSlice(bytes[off .. off + n]);
+        try out.append(a, if (last) 1 else 0);
+        try out.writer(a).writeInt(u16, @intCast(n), .little);
+        try out.writer(a).writeInt(u16, @intCast(~@as(u16, @intCast(n))), .little);
+        try out.appendSlice(a, bytes[off .. off + n]);
         off += n;
         if (last) break;
     }
-    try out.writer().writeInt(u32, std.hash.Crc32.hash(bytes), .little);
-    try out.writer().writeInt(u32, @intCast(bytes.len), .little);
-    return out.toOwnedSlice();
+    try out.writer(a).writeInt(u32, std.hash.Crc32.hash(bytes), .little);
+    try out.writer(a).writeInt(u32, @intCast(bytes.len), .little);
+    return out.toOwnedSlice(a);
 }
 
 /// `package/package.json` of a package, and the files after it, as a .tgz.
 pub fn tgz(a: std.mem.Allocator, name: []const u8, version: []const u8, more: []const Entry) ![]u8 {
     const pj = try std.fmt.allocPrint(a, "{{\"name\":\"{s}\",\"version\":\"{s}\"}}", .{ name, version });
-    var all = std.ArrayList(Entry).init(a);
-    try all.append(.{ .name = "package/", .kind = '5', .mode = 0o755 });
-    try all.append(.{ .name = "package/package.json", .data = pj });
-    try all.appendSlice(more);
+    var all = std.ArrayListUnmanaged(Entry){};
+    try all.append(a, .{ .name = "package/", .kind = '5', .mode = 0o755 });
+    try all.append(a, .{ .name = "package/package.json", .data = pj });
+    try all.appendSlice(a, more);
     return gzip(a, try tar(a, all.items));
 }

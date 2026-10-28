@@ -170,6 +170,27 @@ def tail_text(text: String, max_bytes: Int) -> String:
     return String(text[byte = start:])
 
 
+trait RunClock:
+    """A monotonic clock a runner reads its timeout against. Production reads
+    `MonotonicClock`; a test passes a clock it moves, so a timeout is driven
+    by the clock and never by waiting."""
+
+    def now_ns(mut self) -> Int:
+        """Nanoseconds on a monotonic clock; only differences mean anything."""
+        ...
+
+
+struct MonotonicClock(RunClock, Movable):
+    """CLOCK_MONOTONIC through `std.time.perf_counter_ns` (the reading
+    `ProcessRunner.now_ns` documents)."""
+
+    def __init__(out self):
+        pass
+
+    def now_ns(mut self) -> Int:
+        return Int(perf_counter_ns())
+
+
 trait ProcessRunner(Movable):
     """Runs one process to completion (see the file header)."""
 

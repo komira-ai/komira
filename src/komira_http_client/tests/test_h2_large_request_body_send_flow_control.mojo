@@ -312,7 +312,7 @@ def _run_put_of_size(body_len: Int) raises -> Int:
     var client = HttpClient[SendFcH2Connector].with_defaults(connector^)
 
     var url = Url.https(
-        String("storage.googleapis.com"), UInt16(443),
+        String("192.0.2.1"), UInt16(443),
         String("/upload/storage/v1/b/x/o"),
     )
     var headers = HeaderMap()

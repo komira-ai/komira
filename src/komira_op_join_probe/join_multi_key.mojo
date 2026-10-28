@@ -13,7 +13,7 @@
 # chain walk's byte-for-byte equality. The composite hash and the bloom filter
 # read only the slots. A NULL key is the one slot value `_NAN_SENTINEL_BITS`:
 # every build and probe loop skips a row holding it in any key, so a NULL key
-# matches nothing (INNER and SEMI drop the row, ANTI and LEFT keep it
+# matches nothing (INNER drops the row, LEFT keeps it
 # unmatched). One known hazard follows from encoding NULL as a value: a
 # non-NULL INT64 key equal to 9,221,120,237,041,090,561 (the sentinel read as
 # Int64) is skipped as if it were NULL.
@@ -245,13 +245,11 @@ struct MultiKeyColumns(Movable):
 @always_inline
 def _null_ptr[T: AnyType, o: Origin]() -> UnsafePointer[T, o]:
     """A NULL typed pointer with a concrete origin: the placeholder a per-key
-    pointer list holds for a key whose arm never reads it.
-
+    pointer list holds for a key whose arm never reads it."""
+    var none: Optional[UnsafePointer[T, o]] = None
     # SAFETY: `Optional[UnsafePointer[...]]` is layout-compatible with the
     # bare pointer and `None` is the all-zero bit pattern. The result is never
     # dereferenced.
-    """
-    var none: Optional[UnsafePointer[T, o]] = None
     return UnsafePointer(to=none).bitcast[UnsafePointer[T, o]]()[]
 
 

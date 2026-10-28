@@ -1,4 +1,5 @@
 load("@komira//tools/build/mojo:cxx.bzl", "staged_files")
+load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_test")
 load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library", "mojo_shared_lib")
 load("@komira//tools/build/node:defs.bzl", "esbuild_bundle")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
@@ -215,6 +216,26 @@ mojo_binary(
         "//src/komira_json:komira_json",
         _ABI + ":komira_udf_spike_abi",
     ],
+)
+
+# Runs the bench program in its data directory (bench_run.zig), behind its unit test.
+zig_test(
+    name = "bench_run_unit",
+    exec_compatible_with = LINUX_X86_64,
+    imports = ["bench_run.zig"],
+    src = "bench_run_test.zig",
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
+)
+
+zig_exe(
+    name = "bench_run",
+    exec_compatible_with = LINUX_X86_64,
+    src = "bench_run.zig",
+    unit_tests = [":bench_run_unit", "komira//tools/build/toolchains:zig_next_version"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
+    visibility = ["PUBLIC"],
 )
 
 udf_bench(

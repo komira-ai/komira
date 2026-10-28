@@ -39,9 +39,9 @@ comptime JOIN_BUILD_PARALLEL_THRESHOLD: Int = 250_000
 gain, so AUTO takes the serial build."""
 
 comptime HT_FILL_MORSEL_SLOTS: Int = 16_384
-"""The fill grain in SLOTS: 128 KiB of `memset` per claim against ~20 ns for
-the `fetch_add` that claims it, so the per-morsel overhead is ~0.1%. Flat, not
-pool-shaped: a driver/worker disagreement about the grain is how a fill wave
+"""The fill grain in SLOTS: 128 KiB of `memset` per claim, large enough that
+the `fetch_add` that claims a morsel is negligible next to the fill it
+guards. Flat, not pool-shaped: a driver/worker disagreement about the grain is how a fill wave
 leaves a table TAIL uninitialised, and one flat constant cannot disagree with
 itself."""
 

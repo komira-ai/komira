@@ -55,6 +55,7 @@
 from std.math import sqrt
 
 from komira_arrow.batch_view import BatchView
+from komira_arrow.morsel_view import MorselView
 from komira_agg.aggregator import Aggregator
 
 
@@ -178,6 +179,13 @@ struct CorrF64Agg[dt_x: DType, dt_y: DType, col_x: Int, col_y: Int](Aggregator):
         state.m2_x = state.m2_x + dx * (x - state.mean_x)
         state.m2_y = state.m2_y + dy * (y - state.mean_y)
         state.c2 = state.c2 + dx * (y - state.mean_y)
+
+    @always_inline
+    def input_is_null[V: MorselView](self, view: V, i: Int) -> Bool:
+        """A row is skipped when either input is NULL (DuckDB corr())."""
+        return view.col_is_null(Self.col_x, i) or view.col_is_null(
+            Self.col_y, i
+        )
 
     @always_inline
     def combine(

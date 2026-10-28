@@ -37,25 +37,25 @@ pub const ConfigError = error{ BadConfig, OutOfMemory };
 
 /// The text of shim.cfg. A value holding a newline cannot be written.
 pub fn renderConfig(alloc: std.mem.Allocator, c: Config) ConfigError![]const u8 {
-    var out = std.ArrayList(u8).init(alloc);
+    var out = std.ArrayList(u8).empty;
     const head = [_][]const u8{ c.zig, c.target, c.runpath };
-    for (head) |v| try line(&out, v);
-    for (c.tail) |v| try line(&out, v);
-    return out.toOwnedSlice();
+    for (head) |v| try line(alloc, &out, v);
+    for (c.tail) |v| try line(alloc, &out, v);
+    return out.toOwnedSlice(alloc);
 }
 
-fn line(out: *std.ArrayList(u8), v: []const u8) ConfigError!void {
+fn line(alloc: std.mem.Allocator, out: *std.ArrayList(u8), v: []const u8) ConfigError!void {
     if (std.mem.indexOfScalar(u8, v, '\n') != null) return error.BadConfig;
-    try out.appendSlice(v);
-    try out.append('\n');
+    try out.appendSlice(alloc, v);
+    try out.append(alloc, '\n');
 }
 
 /// shim.cfg read back: at least three lines, every line ended by a newline.
 pub fn parseConfig(alloc: std.mem.Allocator, text: []const u8) ConfigError!Config {
     if (text.len == 0 or text[text.len - 1] != '\n') return error.BadConfig;
-    var lines = std.ArrayList([]const u8).init(alloc);
+    var lines = std.ArrayList([]const u8).empty;
     var it = std.mem.splitScalar(u8, text[0 .. text.len - 1], '\n');
-    while (it.next()) |l| try lines.append(l);
+    while (it.next()) |l| try lines.append(alloc, l);
     if (lines.items.len < 3) return error.BadConfig;
     return .{
         .zig = lines.items[0],
@@ -87,7 +87,7 @@ fn starts(a: []const u8, p: []const u8) bool {
 ///   -Wl,-L* / -Wl,-l*                    without the -Wl,
 ///   a trailing -Xlinker                  passed (unless a run path value was expected)
 pub fn rewriteLinux(alloc: std.mem.Allocator, args: []const []const u8) ![]const []const u8 {
-    var out = std.ArrayList([]const u8).init(alloc);
+    var out = std.ArrayList([]const u8).empty;
     var expect_val = false;
     var drop_val = false;
     var i: usize = 0;
@@ -103,7 +103,7 @@ pub fn rewriteLinux(alloc: std.mem.Allocator, args: []const []const u8) ![]const
             }
             if (expect_val) {
                 expect_val = false;
-                try out.appendSlice(&.{ a, b });
+                try out.appendSlice(alloc, &.{ a, b });
                 continue;
             }
             if (eql(b, "-rpath") or eql(b, "--rpath") or eql(b, "-R")) {
@@ -111,14 +111,14 @@ pub fn rewriteLinux(alloc: std.mem.Allocator, args: []const []const u8) ![]const
             } else if (starts(b, "-rpath=") or starts(b, "--rpath=")) {
                 // dropped
             } else if (starts(b, "-L") or starts(b, "-l")) {
-                try out.append(b);
+                try out.append(alloc, b);
             } else if (starts(b, "--")) {
-                try out.append(try std.fmt.allocPrint(alloc, "-Wl,{s}", .{b}));
+                try out.append(alloc, try std.fmt.allocPrint(alloc, "-Wl,{s}", .{b}));
             } else if (starts(b, "-")) {
                 expect_val = true;
-                try out.appendSlice(&.{ a, b });
+                try out.appendSlice(alloc, &.{ a, b });
             } else {
-                try out.append(b);
+                try out.append(alloc, b);
             }
             continue;
         }
@@ -140,18 +140,18 @@ pub fn rewriteLinux(alloc: std.mem.Allocator, args: []const []const u8) ![]const
             continue;
         }
         if (starts(a, "-Wl,-L") or starts(a, "-Wl,-l")) {
-            try out.append(a["-Wl,".len..]);
+            try out.append(alloc, a["-Wl,".len..]);
             continue;
         }
-        try out.append(a);
+        try out.append(alloc, a);
     }
-    return out.toOwnedSlice();
+    return out.toOwnedSlice(alloc);
 }
 
 /// The argv the shim executes (Linux): argv[0] is the absolute zig path.
 pub fn execLineLinux(alloc: std.mem.Allocator, c: Config, args: []const []const u8) ![]const []const u8 {
-    var out = std.ArrayList([]const u8).init(alloc);
-    try out.appendSlice(&.{
+    var out = std.ArrayList([]const u8).empty;
+    try out.appendSlice(alloc, &.{
         c.zig,
         "cc",
         "-target",
@@ -160,9 +160,9 @@ pub fn execLineLinux(alloc: std.mem.Allocator, c: Config, args: []const []const 
         "-Wl,--enable-new-dtags",
         try std.fmt.allocPrint(alloc, "-Wl,-rpath,{s}", .{c.runpath}),
     });
-    try out.appendSlice(try rewriteLinux(alloc, args));
-    try out.appendSlice(c.tail);
-    return out.toOwnedSlice();
+    try out.appendSlice(alloc, try rewriteLinux(alloc, args));
+    try out.appendSlice(alloc, c.tail);
+    return out.toOwnedSlice(alloc);
 }
 
 /// The compiler's link arguments as the host's cc gets them (macOS):
@@ -174,7 +174,7 @@ pub fn execLineLinux(alloc: std.mem.Allocator, c: Config, args: []const []const 
 ///   -rpath <p>                           dropped, both
 ///   a trailing -Xlinker                  passed
 pub fn rewriteMacos(alloc: std.mem.Allocator, args: []const []const u8) ![]const []const u8 {
-    var out = std.ArrayList([]const u8).init(alloc);
+    var out = std.ArrayList([]const u8).empty;
     var i: usize = 0;
     while (i < args.len) {
         const a = args[i];
@@ -185,7 +185,7 @@ pub fn rewriteMacos(alloc: std.mem.Allocator, args: []const []const u8) ![]const
                 if (args.len - i >= 2 and eql(args[i], "-Xlinker")) i += 2;
                 continue;
             }
-            try out.appendSlice(&.{ a, args[i] });
+            try out.appendSlice(alloc, &.{ a, args[i] });
             i += 1;
             continue;
         }
@@ -194,9 +194,9 @@ pub fn rewriteMacos(alloc: std.mem.Allocator, args: []const []const u8) ![]const
             if (i < args.len) i += 1;
             continue;
         }
-        try out.append(a);
+        try out.append(alloc, a);
     }
-    return out.toOwnedSlice();
+    return out.toOwnedSlice(alloc);
 }
 
 /// The argv the shim executes (macOS). shim.cfg's first line is the C driver
@@ -209,15 +209,15 @@ pub fn rewriteMacos(alloc: std.mem.Allocator, args: []const []const u8) ![]const
 /// `-Wl,-S` keeps debug-map entries (naming object files inside the sandbox)
 /// out of the output.
 pub fn execLineMacos(alloc: std.mem.Allocator, c: Config, args: []const []const u8) ![]const []const u8 {
-    var out = std.ArrayList([]const u8).init(alloc);
-    try out.appendSlice(&.{
+    var out = std.ArrayList([]const u8).empty;
+    try out.appendSlice(alloc, &.{
         c.zig,
         "-Wl,-S",
         try std.fmt.allocPrint(alloc, "-Wl,-rpath,{s}", .{c.runpath}),
     });
-    try out.appendSlice(try rewriteMacos(alloc, args));
-    try out.appendSlice(c.tail);
-    return out.toOwnedSlice();
+    try out.appendSlice(alloc, try rewriteMacos(alloc, args));
+    try out.appendSlice(alloc, c.tail);
+    return out.toOwnedSlice(alloc);
 }
 
 // ---- tests -------------------------------------------------------------------

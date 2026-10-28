@@ -51,7 +51,7 @@ def probe_inner_into(
 ) raises:
     """Inner join probe that appends to caller-provided output lists.
 
-    ⚠ THIS IS THE FOUR-WAY LAYOUT DISPATCHER, NOT THE LOOP. It reads the two
+    WARNING: THIS IS THE FOUR-WAY LAYOUT DISPATCHER, NOT THE LOOP. It reads the two
     layout dispositions the BUILD resolved and calls the COMPTIME-specialised
     body once; the gates are never read here and never inside the walk. The
     `[False, False]` instantiation is the split-layout loop, which is what
@@ -199,7 +199,7 @@ def _probe_inner_into[
         # Walk the chain at this bucket using raw pointer arithmetic.
         var chain_idx = (ht_ptr + slot)[]
         while chain_idx != _CHAIN_END:
-            # ⚠ THE LOAD ORDER IS PRESERVED EXACTLY. The chain link is read
+            # WARNING: THE LOAD ORDER IS PRESERVED EXACTLY. The chain link is read
             # AFTER the key compare, as it always was -- reading it first
             # would overlap the two loads and change the control arm, which
             # is precisely the confound this specialisation exists to avoid.
@@ -390,7 +390,7 @@ def probe_inner_chunk[
     entries (`pay_buf` only when the index carries an inlined payload);
     a shorter span is refused rather than written past.
 
-    ⛔ `pay_buf` IS REQUIRED, NOT DEFAULTED, AND THAT IS THE POINT. A
+    NOTE: `pay_buf` IS REQUIRED, NOT DEFAULTED, AND THAT IS THE POINT. A
     defaulted buffer would let a caller probe a PAYLOAD-INLINE index without
     anywhere to put the payload, and the only two things that code could
     then do are refuse at run time or silently drop a column. Making it a
@@ -398,7 +398,7 @@ def probe_inner_chunk[
     decided. A caller that knows the index is unarmed passes a one-element
     dummy span, which the `pay=False` instantiation never dereferences.
 
-    ⚠ THE FIRING MARKER IS HERE AND NOT ON `probe_inner_start`, WHICH WOULD
+    WARNING: THE FIRING MARKER IS HERE AND NOT ON `probe_inner_start`, WHICH WOULD
     HAVE BEEN THE TIDIER PLACE AND WOULD HAVE FIRED ON NOTHING: the live
     chunked driver constructs `ProbeInnerState()` directly and never calls
     `probe_inner_start`, so a marker there is a marker on a method with no
@@ -544,7 +544,7 @@ def _probe_inner_chunk[
             payload word carried IN the chain entry the walk just compared.
             Written ONLY when `pay`; on every other instantiation the
             parameter is dead and the caller may pass a one-element dummy.
-            ★ This is the whole lever: the value comes off a line the probe
+            NOTE: This is the whole lever: the value comes off a line the probe
             has already loaded, so the downstream random gather out of the
             build column is DELETED, not moved somewhere else.
         chunk_capacity: Maximum number of pairs to emit.
@@ -651,7 +651,7 @@ def _probe_inner_chunk[
                 else:
                     (build_buf + count)[] = (bi_ptr + chain_idx)[]
                 (probe_buf + count)[] = probe_idx
-                # ★ THE LEVER. Word 2 of the entry whose word 0 was just
+                # NOTE: THE LEVER. Word 2 of the entry whose word 0 was just
                 # compared -- the SAME 32-byte record, the same cache line,
                 # already resident. No second address is computed and no
                 # second array is touched.

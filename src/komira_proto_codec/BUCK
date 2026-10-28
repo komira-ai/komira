@@ -1,41 +1,85 @@
-load("@komira//tools/build/mojo:defs.bzl", "mojo_library", "mojo_test")
+load("@buildrules//rules/mojo:pack.bzl", "mojo_conda", "mojo_conda_holds")
+load("@komira//tools/build/mojo:adopt.bzl", "mojo_adopted_library")
+load("@komira//tools/build/mojo:defs.bzl", "mojo_test")
 load("@komira//tools/build/mojo:proto.bzl", "mojo_proto_library")
+load("@komira//tools/build/package:conda.bzl", "conda_package")
+load(":buildrules.mojo.bzl", "mojo_package")
 
 # The `Serializable` / `WireFormat` codec runtime every generated protobuf
 # message conforms to: one message description, serialized as protobuf-binary
 # or proto3-canonical-JSON with the format chosen at compile time. Its
 # dependencies (`komira_protobuf`, `komira_json`, `komira_encoding`) are small
 # and dependency-free, so every generated client can import it cheaply.
-mojo_library(
+#
+# Built with buildrules' `mojo_package` from mopm.toml (README.md, "Build files"): `:lib` is the
+# library file and exists only once the tests of tests/ have passed. The three programs of
+# tests/standalone/ (under tests/, which the coverage census counts as test code, and with no
+# `test_` prefix, which mopm's discovery of tests/**/test_*.mojo needs) are not part of that set: two need a generated message type and one needs
+# defines, so they are targets of their own below.
+mojo_package(path = ".")
+
+# `:komira_proto_codec`, the target the packages that depend on this library name, is `:lib` as
+# komira's Mojo rules take it (tools/build/mojo/adopt.bzl): the same file, so a dependent builds
+# only once the tests have passed. `deps` is `[dependencies]` of mopm.toml, as the adopted targets
+# of those packages: the rule refuses a list that is not the closure `:lib` was built from. It
+# carries the README gate too (`[tests][readme]`): the examples run against `:lib`.
+mojo_adopted_library(
     name = "komira_proto_codec",
-    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
-        "//src/komira_protobuf:komira_protobuf",
         "//src/komira_encoding:komira_encoding",
         "//src/komira_json:komira_json",
+        "//src/komira_protobuf:komira_protobuf",
     ],
-    test_srcs = [
-        "tests/test_proto_codec_json_float32.mojo",
-        "tests/test_proto_codec_json_float64.mojo",
-        "tests/test_proto_codec_json_nonascii_roundtrip.mojo",
-        "tests/test_proto_codec_proto3_json_conformance.mojo",
-        "tests/test_proto_codec_proto3_json_strictness.mojo",
-        "tests/test_proto_codec_null_value.mojo",
-        "tests/test_proto_codec_roundtrip.mojo",
-        "tests/test_proto_codec_repeated_bytes.mojo",
-        "tests/test_proto_codec_binary_refusals.mojo",
-        "tests/test_proto_codec_json_decoder_edges.mojo",
-        "tests/test_proto_codec_json_float_edges.mojo",
-        # The float32 sweep (S1 of test_proto_codec_json_float32), split
-        # over disjoint index ranges so that each shard finishes within a
-        # coverage build's time limit; they run as parallel actions.
-        "tests/test_proto_codec_json_float32_sweep_0.mojo",
-        "tests/test_proto_codec_json_float32_sweep_1.mojo",
-        "tests/test_proto_codec_json_float32_sweep_2.mojo",
-        "tests/test_proto_codec_json_float32_sweep_3.mojo",
-        "tests/test_proto_codec_json_float32_sweep_4.mojo",
-        "tests/test_proto_codec_json_float32_sweep_5.mojo",
+    lib = ":lib",
+    readme = "README.md",
+    srcs = glob(["src/komira_proto_codec/**/*.mojo"]),
+    test_srcs = glob(["tests/test_*.mojo"]),
+    test_runs = ":test",
+    visibility = ["PUBLIC"],
+)
+
+# The mopm package: `mopm pack` over `:lib`, the `.conda` a mopm registry serves. `members` is the
+# manifests of the path dependencies, staged at their repository paths, because `mopm pack` reads
+# the manifest of each beside the one it is given. `mopm` is the one `mojo_package` pins
+# (mopm-toolchain.toml).
+mojo_conda(
+    name = "conda",
+    dir = "src/komira_proto_codec",
+    lib = ":lib",
+    manifest = "mopm.toml",
+    members = {
+        "../komira_encoding": "//src/komira_encoding:mopm.toml",
+        "../komira_json": "//src/komira_json:mopm.toml",
+        "../komira_protobuf": "//src/komira_protobuf:mopm.toml",
+    },
+    mojo = "1.0.0",
+    mopm = "toolchains//:mopm_0_0_73",
+    package = "komira_proto_codec",
+    version = "0.1.0",
+    visibility = ["PUBLIC"],
+)
+
+# What `:conda` holds, read back from the built file: this package's own `.mojoc` and nothing else
+# under `lib/mojo/`, and exactly the three dependencies of mopm.toml.
+mojo_conda_holds(
+    name = "conda_holds",
+    conda = ":conda",
+    depends = [
+        "mojo-komira_encoding >=0.1,<0.2",
+        "mojo-komira_json >=0.1,<0.2",
+        "mojo-komira_protobuf >=0.1,<0.2",
     ],
+    package = "komira_proto_codec",
+    sole = True,
+    visibility = ["PUBLIC"],
+)
+
+# Kept for the release machine, which still builds it (release/BUCK, release/artifacts.textproto):
+# komira's conda packer over `:komira_proto_codec`. This library's mopm package is `:conda` above.
+conda_package(
+    name = "komira_proto_codec_conda",
+    lib = ":komira_proto_codec",
+    summary = "The `komira_proto_codec` Mojo library of komira, as a conda package.",
     visibility = ["PUBLIC"],
 )
 
@@ -63,12 +107,12 @@ mojo_proto_library(
     srcs = ["tests/implicit_presence.proto"],
     import_prefix = "example",
     deps = [":komira_proto_codec"],
-    test_srcs = ["tests/test_implicit_presence_json.mojo"],
+    test_srcs = ["tests/standalone/implicit_presence_json.mojo"],
 )
 
 mojo_test(
     name = "test_copy_hazard",
-    srcs = ["tests/test_copy_hazard.mojo"],
+    srcs = ["tests/standalone/copy_hazard.mojo"],
     deps = [
         ":komira_proto_codec",
         ":copy_hazard_proto",
@@ -76,11 +120,19 @@ mojo_test(
 )
 
 # Exhaustive round trip of the proto3-JSON float32 writer and reader over
-# four whole binades (about 34 million values; see the file header). Too slow
-# for the welded gate above, which samples every binade instead.
-mojo_test(
-    name = "test_float32_json_binades",
-    srcs = ["tests/test_float32_json_binades.mojo"],
-    deps = [":komira_proto_codec"],
-    optimization_level = "3",
-)
+# four whole binades (about 34 million values; see the file header), one target
+# per (binade, quarter) so the 16 units run in parallel. Too slow for the
+# welded gate above, which samples every binade instead.
+_BINADE_PARTS = 4
+
+[
+    mojo_test(
+        name = "test_float32_json_binades_{}_{}".format(binade, part),
+        srcs = ["tests/standalone/float32_json_binades.mojo"],
+        deps = [":komira_proto_codec"],
+        optimization_level = "3",
+        defines = ["BINADE={}".format(binade), "PART={}".format(part), "PARTS={}".format(_BINADE_PARTS)],
+    )
+    for binade in [0, 1, 43, 254]
+    for part in range(_BINADE_PARTS)
+]

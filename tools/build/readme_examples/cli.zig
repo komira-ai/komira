@@ -133,8 +133,8 @@ fn generate(alloc: Allocator, dir: std.fs.Dir, argv: []const []const u8) Outcome
         error.Refused => return .{ .code = 1, .stdout = fmt(alloc, "{s}\n", .{why}) },
         error.OutOfMemory => oom(),
     };
-    var lines = std.ArrayList(u8).init(alloc);
-    for (exs) |ex| lines.writer().print("{d}\n", .{ex.line}) catch oom();
+    var lines = std.ArrayList(u8).empty;
+    for (exs) |ex| lines.writer(alloc).print("{d}\n", .{ex.line}) catch oom();
     writeAll(alloc, dir, v[4], programs, v[5], lines.items) catch |e| {
         return .{ .code = 2, .stdout = fmt(alloc, "readme-examples: cannot write: {s}\n", .{@errorName(e)}) };
     };
@@ -230,20 +230,20 @@ fn releaseRefusal(alloc: Allocator, dir: std.fs.Dir, m: Member, passed: *std.Arr
     };
     switch (examples.extract(alloc, text, m.display, true) catch oom()) {
         .refused => |why| {
-            var out = std.ArrayList(u8).init(alloc);
+            var out = std.ArrayList(u8).empty;
             var it = std.mem.splitScalar(u8, why, '\n');
             var first = true;
             while (it.next()) |line| {
-                if (!first) out.append('\n') catch oom();
+                if (!first) out.append(alloc, '\n') catch oom();
                 first = false;
-                out.writer().print("release member {s}: kci's install validation would refuse its README after publish: {s}", .{ m.name, line }) catch oom();
+                out.writer(alloc).print("release member {s}: kci's install validation would refuse its README after publish: {s}", .{ m.name, line }) catch oom();
             }
             return .{ .why = out.items };
         },
         .examples => |exs| {
             if (exs.len == 0) return .{ .why = fmt(alloc, "release member {s}: {s} holds no ```mojo or ```mojo module example, so kci's install validation would refuse it after publish:" ++
                 " \"{s} holds no ```mojo example, so the validation would run nothing; add one\"", .{ m.name, m.display, m.display }) };
-            passed.writer().print("{s} {d}\n", .{ m.name, exs.len }) catch oom();
+            passed.writer(alloc).print("{s} {d}\n", .{ m.name, exs.len }) catch oom();
             return .{ .why = null };
         },
     }
@@ -252,7 +252,7 @@ fn releaseRefusal(alloc: Allocator, dir: std.fs.Dir, m: Member, passed: *std.Arr
 fn releaseCheck(alloc: Allocator, dir: std.fs.Dir, argv: []const []const u8) Outcome {
     var out: ?[]const u8 = null;
     var expect: ?[]const u8 = null;
-    var members = std.ArrayList(Member).init(alloc);
+    var members = std.ArrayList(Member).empty;
     var i: usize = 2;
     while (i < argv.len) {
         const a = argv[i];
@@ -272,17 +272,17 @@ fn releaseCheck(alloc: Allocator, dir: std.fs.Dir, argv: []const []const u8) Out
         for (argv[i + 1 .. i + 1 + n]) |v| {
             if (v.len == 0) return usage(alloc, fmt(alloc, "{s} has an empty value", .{a}));
         }
-        members.append(.{ .name = argv[i + 1], .display = argv[i + 2], .readme = if (n == 3) argv[i + 3] else null }) catch oom();
+        members.append(alloc, .{ .name = argv[i + 1], .display = argv[i + 2], .readme = if (n == 3) argv[i + 3] else null }) catch oom();
         i += 1 + n;
     }
     const out_path = out orelse return usage(alloc, "--out is required");
     if (members.items.len == 0) return usage(alloc, "no --member or --no-readme");
-    var refusals = std.ArrayList(u8).init(alloc);
-    var passed = std.ArrayList(u8).init(alloc);
+    var refusals = std.ArrayList(u8).empty;
+    var passed = std.ArrayList(u8).empty;
     for (members.items) |m| {
         switch (releaseRefusal(alloc, dir, m, &passed)) {
             .failed => |o| return o,
-            .why => |w| if (w) |why| refusals.writer().print("{s}\n", .{why}) catch oom(),
+            .why => |w| if (w) |why| refusals.writer(alloc).print("{s}\n", .{why}) catch oom(),
         }
     }
     var written = passed.items;

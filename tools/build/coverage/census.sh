@@ -6,13 +6,11 @@
 #
 # usage: census.sh run     --out <dir> [--cap <seconds>] [--attempts <n>] [--batch <n>] [--skip <file>]
 #        census.sh collect --out <dir> [--skip <file>] [--source <commit>] [--note <text>]
-#        census.sh render  <busybox> <target bp> <census.tsv> <held.tsv> <doc out>
-#        census.sh check   <busybox> <target bp> <census.tsv> <held.tsv> <result.json> <doc out>
 #
 # run and collect are run by hand at the top of a checkout (they call
-# ./buck2, so the coverage build runs where the build runs); render and
-# check use only the busybox given, and are the build actions of
-# //:coverage_census (check writes its doc and its validation).
+# ./buck2, so the coverage build runs where the build runs). They are not build
+# actions: the build actions of //:coverage_census (the doc and its check) are
+# census_render (census_render.zig).
 #
 #   run      lists the libraries under src/ (`kind(mojo_library_rule,
 #            //src/...)`, into <dir>/libraries.txt unless it exists) and
@@ -46,17 +44,6 @@
 #            the checkout) and --note says anything else the census line
 #            must (a fix applied to it, say). Then split the files into the
 #            packages (census_files; census.md says how).
-#   render   writes the doc from census.tsv and the holds (held.tsv, every
-#            package's coverage_held as census_files assembles it). A library
-#            row of census.tsv is a library under src/ but not under
-#            src/tests/ (`kind` library), shown with the metrics its package
-#            holds; one under <target bp> on a held metric (or, held on
-#            branch, with lines and no branch number) is marked: its gate
-#            fails.
-#   check    renders the doc to <doc out> and writes the validation result:
-#            failure when render refuses census.tsv. Exits 0 unless its
-#            usage is wrong.
-#
 # census.tsv: comment lines start with '#'; then the line
 # `census<TAB><date YYYY-MM-DD><TAB><source commit, 40 hex, or -><TAB><note or ->`; then one
 # row per library, sorted by label in byte order, 12 fields separated by tabs:
@@ -73,191 +60,18 @@
 #   published    release, conda or no
 #   unmeasured   the files no test compiles, comma-separated, or -
 #   note         why it is not OK, or -
+# then, when a gate left out generated sources (first line `# @generated`,
+# covcheck/generated.mojo), one line each, sorted, after every row:
+#   generated<TAB><repository path of the file>
+# census_files split writes each into the census file of the package that holds
+# the path, so a file that gains the marker is a diff of that file.
 set -eu
 
-usage() { echo "census.sh: $*" >&2; echo "usage: census.sh run|collect --out <dir> ... | render|check <busybox> ..." >&2; exit 2; }
+usage() { echo "census.sh: $*" >&2; echo "usage: census.sh run|collect --out <dir> ..." >&2; exit 2; }
 [ "$#" -ge 1 ] || usage "no command"
 CMD=$1
 shift
-
-# ---- render and check: the busybox is given -----------------------------
-
-render() { # busybox target census held doc_out
-    BB=$1 TARGET=$2 CENSUS=$3 HELD=$4 DOC=$5
-    T=$DOC.rows
-    # Pass 1: validate census.tsv and write the rows each section of the doc
-    # sorts (key<TAB>row), a library's with its package's holds and whether
-    # it is under the target on one.
-    "$BB" awk -F '\t' -v held="$HELD" -v target="$TARGET" -v tmp="$T" '
-        function die(m) { print "census.sh: error: " m > "/dev/stderr"; bad = 1; exit 1 }
-        function num(v, what) { if (v !~ /^(0|[1-9][0-9]*)$/) die(FILENAME ":" FNR ": " what " is not a count: " v); return v + 0 }
-        function bp(h, f) { return f == 0 ? -1 : int(h * 10000 / f) }
-        BEGIN { while ((getline l < held) > 0) if (l !~ /^#/) { split(l, r, "\t"); hd[r[1]] = r[2] } }
-        /^#/ { next }
-        !head {
-            if (NF != 4 || $1 != "census" || $2 !~ /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]$/ || $3 !~ /^([0-9a-f]{40}|-)$/ || $4 == "")
-                die(FILENAME ":" FNR ": the first line is census<TAB><date><TAB><commit or -><TAB><note or ->")
-            head = 1; print "H\t" $2 "\t" $3 "\t" $4 > tmp; next
-        }
-        {
-            if (NF != 12) die(FILENAME ":" FNR ": a row has 12 fields, not " NF)
-            if ($1 !~ /^komira\/\/src\/[^:]+:[A-Za-z0-9_]+$/) die(FILENAME ":" FNR ": not a library label under src/: " $1)
-            if (prev != "" && !(prev < $1)) die(FILENAME ":" FNR ": rows are not sorted by label: " $1 " after " prev)
-            prev = $1
-            pkg = $1; sub(/^komira\/\//, "", pkg); sub(/:.*/, "", pkg)
-            if ($2 != pkg) die(FILENAME ":" FNR ": package " $2 " is not the label'"'"'s " pkg)
-            if ($3 != (pkg ~ /^src\/tests\// ? "test" : "library")) die(FILENAME ":" FNR ": kind " $3 " is wrong for " pkg)
-            if ($4 !~ /^(OK|RUN_FAILED|GATE_FAILED)$/) die(FILENAME ":" FNR ": status " $4)
-            if ($9 !~ /^(yes|no)$/ || $10 !~ /^(release|conda|no)$/) die(FILENAME ":" FNR ": branch_gate or published")
-            if ($11 == "" || $12 == "") die(FILENAME ":" FNR ": an empty field")
-            lb = -1; bb = -1; lf = 0
-            if ($4 == "OK") {
-                lh = num($5, "line_hit"); lf = num($6, "line_found"); if (lh > lf) die(FILENAME ":" FNR ": line_hit > line_found")
-                lb = bp(lh, lf)
-                if ($7 != "-" || $8 != "-") { bh = num($7, "branch_hit"); bf = num($8, "branch_found"); if (bh > bf) die(FILENAME ":" FNR ": branch_hit > branch_found"); bb = bp(bh, bf) }
-                if ($12 != "-") die(FILENAME ":" FNR ": an OK row has no note")
-            } else if ($5 != "-" || $6 != "-" || $7 != "-" || $8 != "-" || $12 == "-") die(FILENAME ":" FNR ": a row that is not OK has no numbers and a note")
-            if ($3 == "test") { print "T\t" $1 "\t" $0 > tmp; next }
-            h = (pkg in hd) ? hd[pkg] : "-"
-            # Under the target on a held metric: its gate fails (a library
-            # with no line has nothing to cover).
-            below = lf > 0 && ((h ~ /line/ && lb < target) || (h ~ /branch/ && ($7 == "-" || (bb >= 0 && bb < target))))
-            if ($4 == "OK") print "L\t" sprintf("%05d", lb < 0 ? 10001 : lb) " " $1 "\t" $0 "\t" h "\t" below > tmp
-            else print "F\t" $1 "\t" $0 "\t" h > tmp
-        }
-        END { if (bad) exit 1; if (!head) die(FILENAME ": no census line") }
-    ' "$CENSUS" || return 1
-    LC_ALL=C "$BB" sort -t "$(printf '\t')" -k1,1 -k2,2 "$T" > "$T.sorted"
-    # Pass 2: the doc, from the sorted rows.
-    "$BB" awk -F '\t' -v target="$TARGET" '
-        function pct(b) { return sprintf("%d.%02d%%", int(b / 100), b % 100) }
-        function bp(h, f) { return int(h * 10000 / f) }
-        function frac(h, f) { return f == 0 ? "n/a" : pct(bp(h, f)) " (" h "/" f ")" }
-        function short(l) { sub(/^komira\/\//, "", l); return l }
-        function held(h) { gsub(/,/, ", ", h); return h }
-        function branch(gate, h, f) { return h == "-" ? (gate == "yes" ? "no record" : "not gated") : frac(h, f) }
-        function nfiles(u) { return u == "-" ? 0 : split(u, xx, ",") }
-        $1 == "H" { date = $2; src = $3; cnote = $4; next }
-        $1 == "L" {
-            # $3.. is the census row (12 fields), then the holds and below.
-            n++; lib[n] = $3; st[n] = $6; lh[n] = $7; lf[n] = $8; bh[n] = $9; bf[n] = $10; bg[n] = $11; pub[n] = $12; un[n] = $13
-            hd[n] = $15; below[n] = $16
-            th += $7; tf += $8; if ($9 != "-") { tbh += $9; tbf += $10; nb++ }
-            if ($8 > 0) { b = bp($7, $8); m++; v[m] = b; if (b == 10000) full++; else if (b >= 9000) hi++; else if (b >= 5000) mid++; else lo++ } else na++
-            if (nfiles($13) > 0) { nul++; nuf += nfiles($13) }
-            np[$12]++; if ($16 == 1) nbelow++
-            next
-        }
-        $1 == "F" { k++; flib[k] = $3; fst[k] = $6; fpub[k] = $12; fnote[k] = $14; fhd[k] = $15; np[$12]++; next }
-        $1 == "T" { t++; trow[t] = $0; next }
-        END {
-            print "# Coverage census"
-            print ""
-            print "Generated: `./buck2 build //:coverage_census` renders this file from each"
-            print "package'"'"'s coverage_census.tsv, the numbers of a coverage build of each"
-            print "library under `src/`, and each package'"'"'s coverage_held, the metrics it"
-            print "holds at the " pct(target) " target. The same build fails while a package the census"
-            print "measured at the target does not hold it. This file is not committed;"
-            print "tools/build/coverage/census.md says how to refresh"
-            print "them and what a hold does: a library under the target on a metric its"
-            print "package holds fails its coverage gate in every mode, so its conda package"
-            print "is not built; below the target and not held, it fails nothing."
-            print ""
-            # The commit stays in the census files: a commit id in this prose would
-            # be a finding of the public boundary lint.
-            print "Census of " date (cnote == "-" ? "" : " (" cnote ")") ", built with"
-            print "`-c komira.coverage=true`: line coverage from kcov over every test of the"
-            print "library, branch coverage from the branch records of the libraries in"
-            print "`COVERAGE_BRANCH_GATE` (tools/build/coverage/policy.bzl); the others show"
-            print "*not gated*. The libraries under `src/tests/` are test code, outside the"
-            print "target: they are listed for information at the end, held to nothing."
-            print ""
-            print "## Summary"
-            print ""
-            print "| | |"
-            print "|---|---:|"
-            print "| Libraries (under `src/`, not `src/tests/`) | " (n + k) " |"
-            print "| Measured | " n " |"
-            print "| Not measured (a run or the gate failed) | " k " |"
-            print "| Line coverage, all measured libraries | " frac(th, tf) " |"
-            # The median: the lower middle of the measured percentages.
-            for (i = 2; i <= m; i++) { x = v[i]; for (j = i - 1; j >= 1 && v[j] > x; j--) v[j + 1] = v[j]; v[j + 1] = x }
-            print "| Median line coverage (lower middle) | " (m ? pct(v[int((m + 1) / 2)]) : "n/a") " |"
-            print "| At 100% / 90% to 100% / 50% to 90% / under 50% / no line | " full + 0 " / " hi + 0 " / " mid + 0 " / " lo + 0 " / " na + 0 " |"
-            print "| Branch coverage of the libraries with branch records (" nb + 0 ") | " frac(tbh, tbf) " |"
-            print "| Libraries with files no test compiles | " nul + 0 " (" nuf + 0 " files) |"
-            print "| Published: in the release / a conda package only / neither | " np["release"] + 0 " / " np["conda"] + 0 " / " np["no"] + 0 " |"
-            print "| Held and below " pct(target) " | " nbelow + 0 " |"
-            print ""
-            print "## Ranked by line coverage"
-            print ""
-            print "Lowest first. *Uncovered* counts executable lines no test ran, the lines of"
-            print "files no test compiles included; *Held* is what the package holds"
-            print "(coverage_held), `-` for none; **below target** marks a library under the"
-            print "target on a held metric."
-            print ""
-            print "| # | Library | Line | Uncovered | Branch | Files no test compiles | Published | Held |"
-            print "|---:|---|---:|---:|---|---:|---|---|"
-            for (i = 1; i <= n; i++)
-                print "| " i " | `" short(lib[i]) "` | " frac(lh[i], lf[i]) " | " lf[i] - lh[i] " | " branch(bg[i], bh[i], bf[i]) " | " nfiles(un[i]) " | " pub[i] " | " held(hd[i]) (below[i] ? " **below target**" : "") " |"
-            print ""
-            print "## Not measured"
-            print ""
-            if (k == 0) print "None."
-            else {
-                print "| Library | Status | Why | Published | Held |"
-                print "|---|---|---|---|---|"
-                for (i = 1; i <= k; i++) print "| `" short(flib[i]) "` | " fst[i] " | " fnote[i] " | " fpub[i] " | " held(fhd[i]) " |"
-            }
-            print ""
-            print "## Files no test compiles"
-            print ""
-            print "Sources of a library that no test binary of it includes: each counts all its"
-            print "executable lines uncovered (covcheck'"'"'s UnmeasuredFile)."
-            print ""
-            if (nul == 0) print "None."
-            for (i = 1; i <= n; i++) if (un[i] != "-") { c = split(un[i], f, ","); s = ""; for (j = 1; j <= c; j++) s = s (j > 1 ? ", " : "") "`" f[j] "`"; print "- `" short(lib[i]) "`: " s }
-            print ""
-            print "## Test packages (information)"
-            print ""
-            print "Libraries under `src/tests/`: conformance suites, end-to-end tests and test"
-            print "helpers. They are not held to the target."
-            print ""
-            print "| Library | Line | Uncovered | Branch | Files no test compiles | Status |"
-            print "|---|---:|---:|---|---:|---|"
-            for (i = 1; i <= t; i++) {
-                split(trow[i], r, "\t")
-                if (r[6] == "OK") print "| `" short(r[3]) "` | " frac(r[7], r[8]) " | " r[8] - r[7] " | " branch(r[11], r[9], r[10]) " | " nfiles(r[13]) " | OK |"
-                else print "| `" short(r[3]) "` | - | - | - | - | " r[6] ": " r[14] " |"
-            }
-        }
-    ' "$T.sorted" > "$DOC"
-    "$BB" rm -f "$T" "$T.sorted"
-}
-
 case "$CMD" in
-render)
-    [ "$#" -eq 5 ] || usage "render takes 5 arguments"
-    render "$@"
-    exit $?
-    ;;
-check)
-    [ "$#" -eq 6 ] || usage "check takes 6 arguments"
-    BB=$1 RESULT=$5 DOC_OUT=$6
-    S=${BUCK_SCRATCH_PATH:-.}/census_check
-    "$BB" mkdir -p "$S" && : > "$DOC_OUT"
-    msg=""
-    if ! render "$BB" "$2" "$3" "$4" "$DOC_OUT" 2> "$S/err"; then
-        msg="the census is not one census.sh renders: $("$BB" grep '^census.sh: error' "$S/err" | "$BB" head -5)"
-    fi
-    if [ -n "$msg" ]; then
-        esc=$(printf '%s' "$msg" | "$BB" tr -d '\000-\010\013-\037' | "$BB" awk '{ gsub(/\\/, "\\\\"); gsub(/"/, "\\\""); gsub(/\t/, "\\t"); printf "%s\\n", $0 }')
-        printf '{"version": 1, "data": {"status": "failure", "message": "coverage_census: %s"}}\n' "$esc" > "$RESULT"
-    else
-        printf '{"version": 1, "data": {"status": "success", "message": "coverage_census: the census renders"}}\n' > "$RESULT"
-    fi
-    exit 0
-    ;;
 run | collect) ;;
 *) usage "unknown command $CMD" ;;
 esac
@@ -407,4 +221,14 @@ REPORT=$OUT/$(cat "$OUT/last").json
         fi
     done < "$OUT/collected.tsv" | LC_ALL=C "$BB" sort -t "$(printf '\t')" -k1,1
 } > "$OUT/census.tsv"
+# After the rows, one `generated<TAB><path>` line per generated source the
+# gates left out (a gate result's "generated_paths"), sorted, each once:
+# census_files generated reads the JSON (census_files.zig).
+set --
+while IFS="$(printf '\t')" read -r _ _ _ st f _; do
+    if [ "$st" = OK ]; then set -- "$@" "$PWD/$f"; fi
+done < "$OUT/collected.tsv"
+case $OUT in /*) ABS_OUT=$OUT ;; *) ABS_OUT=$PWD/$OUT ;; esac
+./buck2 run //tools/build/coverage:census_files -- generated "$ABS_OUT/generated.tsv" "$@"
+cat "$OUT/generated.tsv" >> "$OUT/census.tsv"
 echo "census.sh: wrote $OUT/census.tsv ($("$BB" grep -c -v '^#' "$OUT/census.tsv") lines)" >&2

@@ -62,15 +62,15 @@ pub fn assemble(a: std.mem.Allocator, spec: Spec, out: std.fs.Dir, out_path: []c
     }
     const packages = pk.?.object;
 
-    var problems = std.ArrayList([]const u8).init(a);
+    var problems = std.ArrayList([]const u8).empty;
     var installed: usize = 0;
-    var skipped = std.ArrayList([]const u8).init(a);
-    var scripts = std.ArrayList([]const u8).init(a);
-    var with_bin = std.ArrayList(WithBin).init(a);
+    var skipped = std.ArrayList([]const u8).empty;
+    var scripts = std.ArrayList([]const u8).empty;
+    var with_bin = std.ArrayList(WithBin).empty;
 
-    var paths = std.ArrayList([]const u8).init(a);
+    var paths = std.ArrayList([]const u8).empty;
     for (packages.keys()) |k| {
-        if (k.len > 0) try paths.append(k);
+        if (k.len > 0) try paths.append(a, k);
     }
     std.mem.sort([]const u8, paths.items, {}, shorterFirst);
 
@@ -82,12 +82,12 @@ pub fn assemble(a: std.mem.Allocator, spec: Spec, out: std.fs.Dir, out_path: []c
         const at = std.mem.lastIndexOf(u8, p, NM).?;
         const name = str(e, "name") orelse p[at + NM.len ..];
         const version = str(e, "version") orelse {
-            try problems.append(try std.fmt.allocPrint(a, "{s} ({s}) has no version", .{ name, p }));
+            try problems.append(a, try std.fmt.allocPrint(a, "{s} ({s}) has no version", .{ name, p }));
             continue;
         };
         const key = try std.fmt.allocPrint(a, "{s}@{s}", .{ name, version });
         const rel = p[NM.len..];
-        if (flag(e, "hasInstallScript")) try scripts.append(try std.fmt.allocPrint(a, "{s} {s}", .{ p, key }));
+        if (flag(e, "hasInstallScript")) try scripts.append(a, try std.fmt.allocPrint(a, "{s} {s}", .{ p, key }));
 
         const fields = [_]struct { name: []const u8, current: []const u8 }{
             .{ .name = "os", .current = platform.os },
@@ -105,11 +105,11 @@ pub fn assemble(a: std.mem.Allocator, spec: Spec, out: std.fs.Dir, out_path: []c
             }
         }
         if (refused) |field| {
-            const list = try std.json.stringifyAlloc(a, e.object.get(field).?, .{});
+            const list = try std.json.Stringify.valueAlloc(a, e.object.get(field).?, .{});
             if (flag(e, "optional")) {
-                try skipped.append(try std.fmt.allocPrint(a, "{s} {s}: optional, {s} {s} excludes {s}", .{ p, key, field, list, refused_current }));
+                try skipped.append(a, try std.fmt.allocPrint(a, "{s} {s}: optional, {s} {s} excludes {s}", .{ p, key, field, list, refused_current }));
             } else {
-                try problems.append(try std.fmt.allocPrint(a, "{s} ({s}) needs {s} {s} and is not optional", .{ key, p, field, list }));
+                try problems.append(a, try std.fmt.allocPrint(a, "{s} ({s}) needs {s} {s} and is not optional", .{ key, p, field, list }));
             }
             continue;
         }
@@ -118,62 +118,62 @@ pub fn assemble(a: std.mem.Allocator, spec: Spec, out: std.fs.Dir, out_path: []c
             // Inside its parent's tarball: it must be there.
             const pj = try std.fmt.allocPrint(a, "{s}/package.json", .{rel});
             out.access(pj, .{}) catch {
-                try problems.append(try std.fmt.allocPrint(a, "{s} ({s}) is bundled but its parent's tarball holds no {s}/package.json", .{ key, p, p }));
+                try problems.append(a, try std.fmt.allocPrint(a, "{s} ({s}) is bundled but its parent's tarball holds no {s}/package.json", .{ key, p, p }));
                 continue;
             };
-            if (e.object.get("bin") != null) try with_bin.append(.{ .path = p, .entry = e });
+            if (e.object.get("bin") != null) try with_bin.append(a, .{ .path = p, .entry = e });
             continue;
         }
 
         const tarball = spec.tarballs.get(key) orelse {
-            try problems.append(try std.fmt.allocPrint(a, "{s} ({s}) has no pinned tarball: pins.lock.bzl is stale (kpin update)", .{ key, p }));
+            try problems.append(a, try std.fmt.allocPrint(a, "{s} ({s}) has no pinned tarball: pins.lock.bzl is stale (kpin update)", .{ key, p }));
             continue;
         };
         const want = str(e, "integrity") orelse "";
         if (!std.mem.startsWith(u8, want, sri.prefix)) {
-            try problems.append(try std.fmt.allocPrint(a, "{s} ({s}) has no sha512 integrity in the lockfile", .{ key, p }));
+            try problems.append(a, try std.fmt.allocPrint(a, "{s} ({s}) has no sha512 integrity in the lockfile", .{ key, p }));
             continue;
         }
         const pinned = spec.sri512.get(key) orelse "undefined";
         if (!std.mem.eql(u8, pinned, want)) {
-            try problems.append(try std.fmt.allocPrint(a, "{s}: the lockfile says {s}, the pinned lock says {s} (kpin check)", .{ key, want, pinned }));
+            try problems.append(a, try std.fmt.allocPrint(a, "{s}: the lockfile says {s}, the pinned lock says {s} (kpin check)", .{ key, want, pinned }));
             continue;
         }
         const bytes = std.fs.cwd().readFileAlloc(a, tarball, 1 << 30) catch |err| {
-            try problems.append(try std.fmt.allocPrint(a, "{s}: cannot read {s}: {s}", .{ key, tarball, @errorName(err) }));
+            try problems.append(a, try std.fmt.allocPrint(a, "{s}: cannot read {s}: {s}", .{ key, tarball, @errorName(err) }));
             continue;
         };
         const got = try sri.of(a, bytes);
         if (!std.mem.eql(u8, got, want)) {
-            try problems.append(try std.fmt.allocPrint(a, "{s}: the tarball is {s}, the lockfile says {s}", .{ key, got, want }));
+            try problems.append(a, try std.fmt.allocPrint(a, "{s}: the tarball is {s}, the lockfile says {s}", .{ key, got, want }));
             continue;
         }
         try out.makePath(rel);
         var dest = try out.openDir(rel, .{});
         defer dest.close();
         const stats = unpack.unpackTgz(dest, bytes) catch |err| {
-            try problems.append(try std.fmt.allocPrint(a, "{s}: {s}", .{ key, @errorName(err) }));
+            try problems.append(a, try std.fmt.allocPrint(a, "{s}: {s}", .{ key, @errorName(err) }));
             continue;
         };
         const pj_text = dest.readFileAlloc(a, "package.json", 64 << 20) catch {
-            try problems.append(try std.fmt.allocPrint(a, "{s}: the tarball holds no package.json", .{key}));
+            try problems.append(a, try std.fmt.allocPrint(a, "{s}: the tarball holds no package.json", .{key}));
             continue;
         };
         const pj = std.json.parseFromSlice(std.json.Value, a, pj_text, .{}) catch {
-            try problems.append(try std.fmt.allocPrint(a, "{s}: package.json is not JSON", .{key}));
+            try problems.append(a, try std.fmt.allocPrint(a, "{s}: package.json is not JSON", .{key}));
             continue;
         };
         const pj_name = str(pj.value, "name") orelse "undefined";
         const pj_version = str(pj.value, "version") orelse "undefined";
         if (!std.mem.eql(u8, pj_name, name) or !std.mem.eql(u8, pj_version, version)) {
-            try problems.append(try std.fmt.allocPrint(a, "{s}: its package.json says {s}@{s}", .{ key, pj_name, pj_version }));
+            try problems.append(a, try std.fmt.allocPrint(a, "{s}: its package.json says {s}@{s}", .{ key, pj_name, pj_version }));
             continue;
         }
         installed += 1;
         if (stats.links > 0) {
-            try skipped.append(try std.fmt.allocPrint(a, "{s} {s}: {d} link entr{s} in the tarball, not extracted (npm drops them)", .{ p, key, stats.links, if (stats.links == 1) "y" else "ies" }));
+            try skipped.append(a, try std.fmt.allocPrint(a, "{s} {s}: {d} link entr{s} in the tarball, not extracted (npm drops them)", .{ p, key, stats.links, if (stats.links == 1) "y" else "ies" }));
         }
-        if (e.object.get("bin") != null) try with_bin.append(.{ .path = p, .entry = e });
+        if (e.object.get("bin") != null) try with_bin.append(a, .{ .path = p, .entry = e });
     }
 
     // .bin: for every package with executables, a relative symlink in the
@@ -212,12 +212,12 @@ pub fn assemble(a: std.mem.Allocator, spec: Spec, out: std.fs.Dir, out_path: []c
                 if (std.mem.eql(u8, s, "..")) bad = true;
             }
             if (bad) {
-                try problems.append(try std.fmt.allocPrint(a, "{s}: bin {s} leaves the package", .{ name, cmd }));
+                try problems.append(a, try std.fmt.allocPrint(a, "{s}: bin {s} leaves the package", .{ name, cmd }));
                 continue;
             }
             const target_rel = try std.fs.path.join(a, &.{ pkg_rel, file });
             out.access(target_rel, .{}) catch {
-                try skipped.append(try std.fmt.allocPrint(a, "{s}: bin {s} -> {s} is not in the tarball, no link", .{ p, cmd, file }));
+                try skipped.append(a, try std.fmt.allocPrint(a, "{s}: bin {s} -> {s} is not in the tarball, no link", .{ p, cmd, file }));
                 continue;
             };
             const bin_dir_rel = try std.fs.path.join(a, &.{ parent_rel, ".bin" });
@@ -245,7 +245,10 @@ pub fn assemble(a: std.mem.Allocator, spec: Spec, out: std.fs.Dir, out_path: []c
     const report = Report{ .installed = installed, .installScriptsNotRun = scripts.items, .skipped = skipped.items };
     var f = try out.createFile(".komira-node-modules.json", .{});
     defer f.close();
-    try std.json.stringify(report, .{ .whitespace = .indent_2 }, f.writer());
-    try f.writer().writeByte('\n');
+    var fbuf: [4096]u8 = undefined;
+    var fw = f.writer(&fbuf);
+    try std.json.Stringify.value(report, .{ .whitespace = .indent_2 }, &fw.interface);
+    try fw.interface.writeByte('\n');
+    try fw.interface.flush();
     try w.print("node_modules: {d} packages, {d} bin links, {d} skipped, {d} install scripts not run\n", .{ installed, links.count(), skipped.items.len, scripts.items.len });
 }

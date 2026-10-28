@@ -78,12 +78,13 @@ gen_check(
     name = "absence_check_can_fail",
     absent = ["struct GetItemRequest("],
     files = [
+        "_parts",
         "__init__.mojo",
         "_layout_probe.mojo",
         "item.mojo",
         "shop.mojo",
     ],
-    gen = "//functional/mojo_gcp_client:komira_gcp_shop[gen]",
+    gen = "//functional/mojo_gcp_client:komira_gcp_shop_gen",
     present = ["struct Item("],
 )
 

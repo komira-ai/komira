@@ -63,13 +63,14 @@ pub const Error = error{ Refused, Usage };
 /// (debug_relocate_test.zig) read the very messages a run prints.
 pub const Diag = struct {
     text: std.ArrayList(u8),
+    alloc: Alloc,
 
     pub fn init(alloc: Alloc) Diag {
-        return .{ .text = std.ArrayList(u8).init(alloc) };
+        return .{ .text = std.ArrayList(u8).empty, .alloc = alloc };
     }
 
     fn print(self: *Diag, comptime fmt: []const u8, args: anytype) void {
-        self.text.writer().print(fmt, args) catch oom();
+        self.text.writer(self.alloc).print(fmt, args) catch oom();
     }
 
     fn refuse(self: *Diag, comptime fmt: []const u8, args: anytype) error{Refused} {
@@ -99,7 +100,7 @@ fn oom() noreturn {
 const shf_compressed: u64 = 0x800;
 
 fn le(comptime T: type, buf: []const u8, at: u64) T {
-    const n = @divExact(@typeInfo(T).Int.bits, 8);
+    const n = @divExact(@typeInfo(T).int.bits, 8);
     return std.mem.readInt(T, buf[@intCast(at)..][0..n], .little);
 }
 
@@ -174,13 +175,14 @@ fn relocate(diag: *Diag, path: []const u8, buf: []u8, dir: []const u8) error{Ref
 /// when a step fails; `step` names the step.
 fn replace(dir: std.fs.Dir, path: []const u8, buf: []const u8, mode: std.fs.File.Mode, step: *[]const u8) !void {
     step.* = "temporary file";
-    var af = try dir.atomicFile(path, .{ .mode = mode });
+    var wbuf: [4096]u8 = undefined;
+    var af = try dir.atomicFile(path, .{ .mode = mode, .write_buffer = &wbuf });
     defer af.deinit();
     step.* = "write";
-    try af.file.writeAll(buf);
+    af.file_writer.interface.writeAll(buf) catch |e| return if (e == error.WriteFailed) (af.file_writer.err orelse e) else e;
     // The creation mode passed the umask; set the bits exactly.
     step.* = "chmod";
-    try af.file.chmod(mode);
+    try af.file_writer.file.chmod(mode);
     step.* = "rename";
     try af.finish();
 }
@@ -200,7 +202,7 @@ fn run(alloc: Alloc, diag: *Diag, cwd: std.fs.Dir, args: []const []const u8, std
 
     // A symbolic link is refused: the rename would replace the link with a
     // regular file and leave its target as it was.
-    var link_buf: [std.fs.MAX_PATH_BYTES]u8 = undefined;
+    var link_buf: [std.fs.max_path_bytes]u8 = undefined;
     if (cwd.readLink(path, &link_buf)) |_| {
         return diag.refuse("{s} is a symbolic link; give the file it names", .{path});
     } else |err| switch (err) {
@@ -248,5 +250,5 @@ pub fn main() u8 {
     const argv = std.process.argsAlloc(alloc) catch oom();
     const args = alloc.alloc([]const u8, argv.len -| 1) catch oom();
     for (args, 1..) |*a, i| a.* = argv[i];
-    return entry(alloc, std.fs.cwd(), args, std.io.getStdOut().writer(), std.io.getStdErr().writer());
+    return entry(alloc, std.fs.cwd(), args, std.fs.File.stdout().deprecatedWriter(), std.fs.File.stderr().deprecatedWriter());
 }

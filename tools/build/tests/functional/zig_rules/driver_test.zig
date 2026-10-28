@@ -27,7 +27,7 @@ test "a directory tool is the directory" {
     const r = try std.process.Child.run(.{ .allocator = a, .argv = &.{ exe, "version" } });
     defer a.free(r.stdout);
     defer a.free(r.stderr);
-    try std.testing.expectEqualStrings("0.12.0\n", r.stdout);
+    try std.testing.expectEqualStrings("0.15.2\n", r.stdout);
 }
 
 test "data is copied into a writable directory, executable bits kept" {
@@ -48,7 +48,7 @@ test "data is copied into a writable directory, executable bits kept" {
     // Writable: a fixture is changed in place, and a file is created.
     const f = try dir.openFile("fixtures/note.txt", .{ .mode = .write_only });
     f.close();
-    try dir.writeFile("fixtures/dir/created.txt", "new\n");
+    try dir.writeFile(.{ .sub_path = "fixtures/dir/created.txt", .data = "new\n" });
 }
 
 test "HOME, TMPDIR and the caches are in the action's scratch" {
@@ -65,7 +65,7 @@ test "HOME, TMPDIR and the caches are in the action's scratch" {
         try std.fs.cwd().makePath(v);
         var d = try std.fs.cwd().openDir(v, .{});
         defer d.close();
-        try d.writeFile("probe", "x");
+        try d.writeFile(.{ .sub_path = "probe", .data = "x" });
     }
 }
 
@@ -80,6 +80,8 @@ test "loopback works" {
     defer conn.stream.close();
     try client.writeAll("ping");
     var buf: [4]u8 = undefined;
-    try conn.stream.reader().readNoEof(&buf);
+    var rbuf: [16]u8 = undefined;
+    var rdr = conn.stream.reader(&rbuf);
+    try rdr.interface().readSliceAll(&buf);
     try std.testing.expectEqualStrings("ping", &buf);
 }

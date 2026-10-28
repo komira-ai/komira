@@ -14,16 +14,6 @@ load("@komira//tools/build/mojo:providers.bzl", "MojoInfo", "MojoToolchainInfo")
 # Two staging prefixes of different depth and length.
 _PREFIXES = ["a", "bb/ccc/dddd"]
 
-_COMPARE = """set -eu
-bb=$1
-"$bb" test -s "$2" && "$bb" test -s "$3" || { echo "BAD: a precompile wrote an empty package" >&2; exit 1; }
-if ! "$bb" cmp -s "$2" "$3"; then
-    echo "BAD: the same package precompiled under two staging paths differs: the .mojoc records where it was built ($2 $3)" >&2
-    exit 1
-fi
-echo "same bytes: $("$bb" sha256sum "$2" | "$bb" cut -c1-64)" > "$4"
-"""
-
 def _impl(ctx):
     tc = ctx.attrs._toolchain[MojoToolchainInfo]
     dep_name = ctx.attrs.dep[MojoInfo].import_name
@@ -44,7 +34,7 @@ def _impl(ctx):
         outs.append(out)
     report = ctx.actions.declare_output("same_bytes.txt")
     ctx.actions.run(
-        cmd_args(tc.busybox, "sh", "-c", _COMPARE, "--", tc.busybox, outs[0], outs[1], report.as_output()),
+        cmd_args(ctx.attrs._act[RunInfo], "same-bytes", outs[0], outs[1], report.as_output()),
         category = "mojoc_path_compare",
     )
     return [DefaultInfo(default_output = report, other_outputs = outs)]
@@ -55,6 +45,7 @@ mojoc_path_cases = rule(
         "dep": attrs.dep(providers = [MojoInfo]),
         "import_name": attrs.string(),
         "srcs": attrs.list(attrs.source()),
+        "_act": attrs.exec_dep(default = "tests//tools:tests_act", providers = [RunInfo]),
         "_toolchain": attrs.toolchain_dep(default = "toolchains//:mojo", providers = [MojoToolchainInfo]),
     },
 )

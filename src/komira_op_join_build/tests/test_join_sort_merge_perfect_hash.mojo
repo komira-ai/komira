@@ -7,6 +7,7 @@
 #   * `test_sort_merge_runs_and_nulls`: a run of equal keys on both sides must
 #     emit the full cross product of the two runs; a NULL key (whose value is
 #     the DType zero) must match nothing, not the real key 0 on the other side.
+#     A NULL row inside a run of equal keys, on either side, is skipped too.
 #   * `test_perfect_hash_declines`: the table refuses an empty build, a build
 #     with a NULL key, duplicate keys and a key range above the cap, so the
 #     caller falls back to the chained build.
@@ -70,12 +71,26 @@ def test_sort_merge_runs_and_nulls() raises:
         assert_equal(lm2[i], want_l[i + 1])
         assert_equal(rm2[i], want_r[i + 1])
 
+    # A NULL row inside an equal-key run, on either side: left [3, 3N, 3],
+    # right [3, 3N, 3] pairs only the four non-NULL rows with each other.
+    var lm3 = List[Int]()
+    var rm3 = List[Int]()
+    var n3: List[Bool] = [False, True, False]
+    var n3r: List[Bool] = [False, True, False]
+    sort_merge_join_inner_into(
+        _keys([3, 3, 3]), _keys([3, 3, 3]), lm3, rm3, n3^, n3r^
+    )
+    assert_equal(len(lm3), 4, "NULLs inside the run drop out")
+    for i in range(len(lm3)):
+        assert_true(lm3[i] != 1, "left NULL row is never emitted")
+        assert_true(rm3[i] != 1, "right NULL row is never emitted")
+
 
 def test_perfect_hash_declines() raises:
     assert_true(not PerfectHashJoin.try_build(_keys(List[Int]())), "empty")
     var nk = _nullable_keys([1, 2, 3], [False, True, False])
     assert_true(not PerfectHashJoin.try_build(nk), "a NULL build key")
-    assert_true(not PerfectHashJoin.try_build(_keys([4, 5, 4])), "duplicates")
+    assert_true(not PerfectHashJoin.try_build(_keys([4, 4, 6])), "duplicates")
     assert_true(
         not PerfectHashJoin.try_build(_keys([0, PERFECT_RANGE_CAP])),
         "range above the cap",

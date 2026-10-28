@@ -1,4 +1,3 @@
-load("@komira//tools/build/lint:defs.bzl", "shell_lint")
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 load(":runner_cases.bzl", "mojo_test_command_case")
 
@@ -41,14 +40,6 @@ mojo_library(
 # options and the artifacts they name), run as a build action.
 mojo_test_command_case(
     name = "mojo_test_args_action",
-    script = "test_command_case.sh",
     test = "komira//tools/build/mojo/mojo_test_testdata:mojo_test_args",
 )
 
-shell_lint(
-    name = "shell_lint",
-    srcs = [
-        "test_command_case.sh",
-    ],
-    visibility = ["komira//:tests_lints"],
-)

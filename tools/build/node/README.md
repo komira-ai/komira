@@ -16,11 +16,13 @@ Node.js here is test-only. Nothing built with these rules is shipped
 
 | rule | what it builds |
 |---|---|
-| `node_dist(name, archive, top, version, native_libs)` | a Node.js release archive (`.tar.gz`, linux-x64) unpacked by busybox `tar` and reduced to `bin/node`, `include/node` (the Node-API headers) and `LICENSE`; npm, npx and corepack are left out. Fails unless that `node` runs and prints `v<version>` (`node_dist: the node in <archive> is <got>, the pin says v<version>`). `native_libs` is a directory whose `lib/` holds the libraries `node` links beyond glibc. The sub-target `[include]` is the header directory. |
+| `node_dist(name, archive, top, version, native_libs)` | a Node.js release archive (`.tar.gz`, linux-x64) unpacked by `node_act dist` (no shell) and reduced to `bin/node`, `include/node` (the Node-API headers) and `LICENSE`; npm, npx and corepack are left out. Fails unless that `node` runs and prints `v<version>` (`node_dist: the node in <archive> is <got>, the pin says v<version>`). `native_libs` is a directory whose `lib/` holds the libraries `node` links beyond glibc. The sub-target `[include]` is the header directory. |
 | `npm_package(name, package, version, integrity, tarball, exe, deps)` | one npm tarball's `package/` directory. Before unpacking, the tarball's sha512 must equal `integrity`, the registry's `dist.integrity` (`sha512-<base64>`); after, the top-level `"name"` and `"version"` of its `package.json`, parsed by the pinned `node` (`JSON.parse`, as npm reads it), must be the strings `package` and `version` (a nested key, a missing key or a number does not count), and with `exe` (a path in the package), that file must run and print `version`. `deps` are the packages it imports; a closure holding one package at two versions fails analysis. |
 | `node_test(name, src, srcs, data, deps, args, expect_error, node)` | runs `src` with the pinned `node` as a build action; its output (`<name>.pass`) exists only if the script passed (exit 0), so building the target is running the test. With `expect_error`, the script passes only if it exits non-zero and its stderr holds that text. `srcs` are staged next to `src` at their package paths and `data` (`{dest: source}`, a build output allowed) at `dest`, so a script finds them through `__dirname`; the closure of the `npm_package` targets in `deps` is staged under `node_modules/<package>` beside the script, where node resolves a bare import (`import ... from 'apache-arrow'`). `args` are the script's arguments (`$(location ...)` expands, relative to the action's working directory). `node` defaults to `komira//third_party/node:node`. |
 | `esbuild_bundle(name, entry, srcs, deps, format, out, esbuild)` | `entry` bundled by the pinned esbuild (`--bundle --platform=node`) into one file, `out` (default `<name>.js`), in `format` (`cjs`, the default, or `esm`). `srcs` (JavaScript or TypeScript; esbuild strips the types) are staged next to `entry` at their package paths, and the closure of the `npm_package` targets in `deps` under `node_modules/<package>`. An import of anything else fails the build. A `node_test` runs the bundle as its `src`. |
 | `c_shared_lib(name, srcs, headers, include_dirs, copts, out, zig_triple)` | C `srcs` compiled and linked into one shared library by the pinned zig: `zig cc -target <zig_triple> -shared -fPIC -O2 -fvisibility=hidden -Wall -Werror -Wl,-z,undefs`. A symbol the sources use and do not define stays undefined, for the program that loads the library to resolve: a Node-API addon's `napi_*` functions are `node`'s. Only symbols with default visibility are exported (a Node-API module's `napi_register_module_v1`). `headers` are staged with the sources, and their directory is an `-I`; each of `include_dirs` is a directory output, an `-I` (`//third_party/node:node[include]`). `out` defaults to `lib<name>.so`; a Node addon names it `<x>.node`. `zig_triple` defaults to the linux x86_64 row's (its glibc floor, [platform table](../platforms/table.bzl)). |
+| `node_binding_test(name, srcs, data, deps, node)` | runs the test files `srcs` (plain `.mjs` or `.js` files using the built-in `node:test`; no npm install) with the pinned `node --test --test-reporter=tap` as a build action, from the staged directory (`srcs` at their package paths, `data` at its destinations, the `deps` closure under `node_modules/`). The output (`<name>.pass`) exists only if node exited 0 **and** the TAP summary reports tests that all passed, with none skipped or todo and no file standing in as its own test (node reports a file that registers no test as one passing test named by its path). `data` is where a built `.node` addon goes, so the test loads it with `require()`. `node` defaults to `komira//third_party/node:node`. |
+| `node_addon(name, srcs, headers, copts, node_include)` | a Node-API addon: `c_shared_lib` named `<name>.node`, compiled against the Node-API headers of the pinned node (`node_include`, default `komira//third_party/node:node[include]`, the `include/node` directory of the same archive as the runtime). |
 
 The macros set `exec_compatible_with` to the linux x86_64 execution
 platform: every action runs the linux binaries.
@@ -83,11 +85,15 @@ requires each one's exact message:
 | `exe_does_not_run` | `npm_package` refuses an `exe` that does not run |
 | `name_nested`, `name_absent`, `version_nested`, `version_number` | `npm_package` reads only the top level of `package.json`: it refuses another top-level name while a nested object holds the pinned one, no top-level name while a nested object and the description hold it, another top-level version while a nested object holds it, and the number `1` for the version `"1"` |
 | `nested_distractors` | the pinned top-level name and version pass with other ones nested before and after them: the target fails only at its `exe`, after the `package.json` check |
-| `exe_other_version` | `npm_package` refuses an `exe` that runs and prints another version (`bin/echo`, a symlink to `/proc/self/exe`, runs the busybox that executes it as `echo`) |
+| `exe_other_version` | `npm_package` refuses an `exe` that runs and prints another version (`bin/echo`, a 191-byte static program that writes its first argument, as `echo` does) |
 | `version_differs_node`, `version_prefix_node`, `version_suffix_node` | `node_dist` refuses a `node` that prints another version: `24.20.0`, `24.21` (a prefix of `24.21.0`) and `4.21.0` (a suffix) |
 | `not_node`, `no_bin_node`, `no_header`, `header_is_dir`, `node_not_executable` | `node_dist` refuses an archive that is no Node.js release, one with the Node-API header but no `bin/node`, one with `bin/node` but no header, one whose `node_api.h` is a directory, and one whose `bin/node` is not executable |
 | `node_does_not_run` | `node_dist` refuses a `bin/node` that exits non-zero (busybox under the name `node`) |
 | `warns` | `c_shared_lib` fails on a warning (`-Wall -Werror`) |
+| `binding_fails` | a failing test of a `node_binding_test` fails the target with node's status and its TAP output on stderr |
+| `binding_no_test`, `binding_skipped` | node exits 0 for a file that registers no test and for a skipped test; `node_binding_test` still fails, since nothing was checked |
+| `binding_addon_missing`, `binding_addon_wrong` | an addon test fails when the addon is not staged (not built), and when the addon is built and loads but returns another number |
+| `binding_no_srcs` | analysis refuses a `node_binding_test` of no file |
 
 The fixtures name the pinned runtime, packages and downloads, which
 [`third_party/node/BUCK`](../../../third_party/node/BUCK) makes visible to
@@ -154,6 +160,14 @@ row in scenario [`planted_red_builds_npm_modules`](../selftest/planted_red_build
 
 - linux x86_64 only: the archive is Node's `linux-x64` build, and the zig
   triple is that row's.
+- macOS needs three things: a pin of Node's `darwin-arm64` archive (and `darwin-x64` for Intel) in
+  [`third_party/node/pins.bzl`](../../../third_party/node/pins.bzl) with its sha256 from the release's signed
+  `SHASUMS256.txt`; a `node_dist` over it (the archive's `bin/node` and `include/node` have the same layout, and the
+  Darwin `node` links only system libraries, so `native_libs` is empty there); and the macOS rows of the
+  [platform table](../platforms/table.bzl) as the execution platform and `zig_triple` (`aarch64-macos`), which
+  `node_addon` takes from the table instead of the linux row. The macros fix the linux x86_64 execution platform
+  today. A macOS addon also links with `-undefined dynamic_lookup`, since `c_shared_lib` passes `-z undefs` (an ELF
+  flag) only on linux.
 - `c_shared_lib` links C sources only: no archive, shared library or other
   target is linked in.
 - `npm_package` runs the pinned `node` to parse `package.json`, so every

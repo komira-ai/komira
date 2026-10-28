@@ -85,7 +85,6 @@ and agreement across members beyond the stamp.
 
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
 load("@komira//tools/build/mojo:providers.bzl", "MojoInfo")
-load("@komira//tools/build/mojo:toolchain.bzl", "busybox_sh")
 load(
     "@komira//tools/build/package:conda.bzl",
     "MOJO_COMPILER_VERSION",
@@ -104,120 +103,23 @@ load("@komira//tools/build/rerun:rerun.bzl", "RERUN_ATTRS", "rerun_env", "rerun_
 # check holds it equal to release_set.txt's.
 _SUMMARY = "Every komira library of one release."
 
-_STAMP_CHECK = """
-BB="$1"; OUT="$2"; V="$3"; N="$4"; C="$5"; TS="$6"; B="$7"; META="$8"; MDIR="$9"; shift 9
-SET="$1"; LIC="$2"; SUM="$3"; HOME_URL="$4"; shift 4
-case "$BB" in /*) ;; *) BB="$PWD/$BB" ;; esac
-# Private scratch, as every busybox action here (defs.bzl `_PRELUDE`).
-case "${BUCK_SCRATCH_PATH:-}" in
-    "") T="$PWD/.komira_action" ;;
-    /*) T="$BUCK_SCRATCH_PATH/komira" ;;
-    *) T="$PWD/$BUCK_SCRATCH_PATH/komira" ;;
-esac
-"$BB" mkdir -p "$T/bin" "$T/tmp" "$T/home"
-"$BB" --install -s "$T/bin"
-PATH="$T/bin"; TMPDIR="$T/tmp"; HOME="$T/home"; export PATH TMPDIR HOME
-unset LD_LIBRARY_PATH LD_PRELOAD || true
-no() { echo "conda_release_set_check: $*" >&2; exit 1; }
-
-# The release set file against what this target was given.
-want=""; got_meta=""; got_lic=""; got_sum=""; got_home=""
-while IFS= read -r line || [ -n "$line" ]; do
-    case "$line" in ""|"#"*) continue ;; esac
-    k="${line%% *}"; v="${line#* }"
-    case "$k" in
-        metapackage) got_meta="$v" ;;
-        member) want="$want $v" ;;
-        license) got_lic="$v" ;;
-        summary) got_sum="$v" ;;
-        home) got_home="$v" ;;
-        *) no "$SET: unknown key '$k'" ;;
-    esac
-done < "$SET"
-[ "$got_meta" = "$META" ] || no "$SET names the metapackage '$got_meta', this target makes '$META'"
-[ "$got_lic" = "$LIC" ] || no "$SET's license is '$got_lic', conda-meta is given '$LIC'"
-[ "$got_sum" = "$SUM" ] || no "$SET's summary is '$got_sum', conda-meta is given '$SUM'"
-[ "$got_home" = "$HOME_URL" ] || no "$SET's home is '$got_home', conda-meta is given '$HOME_URL'"
-
-# The top level of a metadata.json: the metapackage's `members` rows (which
-# carry `build` and `version` too) removed.
-top() { sed 's/"members":\\[[^]]*\\],*//' "$1" > "$T/top.json"; }
-# A key and its value in compact sorted JSON: followed by `,` or `}`.
-has() { grep -qF -e "$1," -e "$1}" "$2"; }
-stamped() { # <what> <name> <dir>
-    f="$2-$V-$B.conda"
-    [ -f "$3/$f" ] || no "$1 $2: [$(ls -A "$3" | tr '\\n' ' ')] holds no $f (version $V, build $B: the test stamp)"
-    has "\\"file\\":\\"$f\\"" "$3/manifest.json" || no "$1 $2: manifest.json does not name $f: $(cat "$3/manifest.json")"
-    has "\\"version\\":\\"$V\\"" "$3/manifest.json" || no "$1 $2: manifest.json is not version $V: $(cat "$3/manifest.json")"
-    top "$3/metadata.json"
-    for kv in "\\"build\\":\\"$B\\"" "\\"build_number\\":$N" "\\"source_commit\\":\\"$C\\"" '"stamped":true' "\\"timestamp_ms\\":$TS"; do
-        has "$kv" "$T/top.json" || no "$1 $2: metadata.json does not carry $kv of the test stamp at its top level: $(cat "$3/metadata.json")"
-    done
-}
-names=""
-while [ "$#" -gt 0 ]; do
-    stamped member "$1" "$2"
-    names="$names $1"
-    shift 2
-done
-[ "$names" = "$want" ] || no "libs are [$names ], $SET's members are [$want ]: the two lists of the release set differ"
-stamped metapackage "$META" "$MDIR"
-for m in $names; do
-    grep -qF "\\"$m ==$V $B\\"" "$MDIR/metadata.json" ||
-        no "metapackage $META does not require member $m at $V $B: $(cat "$MDIR/metadata.json")"
-done
-printf 'stamped %s %s:%s\\n' "$V" "$B" "$names" > "$OUT"
-rm -rf "$T"
-"""
-
+# The stamp check (`pkg_act release-stamp-check`, tools/build/package/act/
+# release.zig) compares the release set file with what this target was given,
+# then every member's package and the metapackage with the test stamp.
+#
 # Release order (the module documentation): no member requires a member listed
 # after it. A release builds the members in this order, each after the members
-# it requires. Arguments: the busybox, the output, the release set file (named
-# in the message only), the version, the build string, then `<name>
+# it requires. `pkg_act release-order-check` reads the release set file's name
+# (in the message only), the version, the build string, then `<name>
 # <metadata.json>` per member in order. A requirement is `"<name> ==<V> <B>"`
-# in metadata.json's `depends` (komira_pack). release_order_test runs this
-# script over fixtures.
-_ORDER_CHECK = """
-BB="$1"; OUT="$2"; SET="$3"; V="$4"; B="$5"; shift 5
-case "$BB" in /*) ;; *) BB="$PWD/$BB" ;; esac
-case "${BUCK_SCRATCH_PATH:-}" in
-    "") T="$PWD/.komira_action" ;;
-    /*) T="$BUCK_SCRATCH_PATH/komira" ;;
-    *) T="$PWD/$BUCK_SCRATCH_PATH/komira" ;;
-esac
-"$BB" mkdir -p "$T/bin"
-"$BB" --install -s "$T/bin"
-PATH="$T/bin"; export PATH
-unset LD_LIBRARY_PATH LD_PRELOAD || true
-no() { echo "conda_release_set_check: $*" >&2; exit 1; }
-names=""; metas=""
-while [ "$#" -gt 0 ]; do
-    names="$names $1"
-    metas="$metas $2"
-    shift 2
-done
-later="$names"
-set -- $metas
-for m in $names; do
-    f="$1"; shift
-    later="${later# $m}"
-    for r in $later; do
-        if grep -qF "\\"$r ==$V $B\\"" "$f"; then
-            no "member $m requires $r, which $SET lists after it: list each member after the members it requires (here, in release/artifacts.textproto and in libs)"
-        fi
-    done
-done
-printf 'in order:%s\\n' "$names" > "$OUT"
-rm -rf "$T"
-"""
-
-_COPY_DIR = '"$1" mkdir -p "$3"; "$1" cp -R "$2"/. "$3"/'
+# in metadata.json's `depends` (komira_pack). release_order_test runs the check
+# over fixtures.
 
 def _impl(ctx):
     if len(ctx.attrs.libs) != len(ctx.attrs.packages) or not ctx.attrs.libs:
         fail("{}: libs and packages are one list of members (the macro writes both), and not empty".format(ctx.label))
     pack = ctx.attrs._pack[RunInfo]
-    bb = ctx.attrs._busybox[DefaultInfo].default_outputs[0]
+    tool = ctx.attrs._pkg_act[RunInfo]
     meta = ctx.attrs.metapackage
     members = []
     for lib, pkg in zip(ctx.attrs.libs, ctx.attrs.packages):
@@ -254,22 +156,34 @@ def _impl(ctx):
 
     stamp_ok = ctx.actions.declare_output(ctx.label.name + ".stamped")
     ctx.actions.run(
-        busybox_sh(
-            bb,
-            _STAMP_CHECK,
+        cmd_args(
+            tool,
+            "release-stamp-check",
+            "--out",
             stamp_ok.as_output(),
+            "--version",
             MOJO_COMPILER_VERSION,
+            "--build-number",
             TEST_STAMP,
+            "--commit",
             TEST_COMMIT,
+            "--timestamp-ms",
             TEST_TIMESTAMP_MS,
+            "--build",
             TEST_BUILD,
+            "--meta",
             meta,
+            "--meta-dir",
             raw,
+            "--set",
             ctx.attrs.release_set,
+            "--license",
             PACKAGE_LICENSE,
+            "--summary",
             _SUMMARY,
+            "--home",
             PACKAGE_HOME,
-            [cmd_args(n, d) for n, d in members],
+            [cmd_args("--member", n, d) for n, d in members],
         ),
         category = "conda_release_stamp_check",
         identifier = meta,
@@ -277,14 +191,18 @@ def _impl(ctx):
 
     in_order = ctx.actions.declare_output(ctx.label.name + ".in_order")
     ctx.actions.run(
-        busybox_sh(
-            bb,
-            _ORDER_CHECK,
+        cmd_args(
+            tool,
+            "release-order-check",
+            "--out",
             in_order.as_output(),
+            "--set",
             ctx.attrs.release_set,
+            "--version",
             MOJO_COMPILER_VERSION,
+            "--build",
             TEST_BUILD,
-            [cmd_args(n, cmd_args(d, format = "{}/metadata.json")) for n, d in members],
+            [cmd_args("--member", n, cmd_args(d, format = "{}/metadata.json")) for n, d in members],
         ),
         category = "conda_release_order_check",
         identifier = meta,
@@ -335,7 +253,7 @@ def _impl(ctx):
 
     out = ctx.actions.declare_output(meta, dir = True)
     ctx.actions.run(
-        cmd_args(bb, "sh", "-euc", _COPY_DIR, "sh", bb, raw, out.as_output(), hidden = [stamp_ok, in_order, readmes_ok, checked] + [t[DefaultInfo].default_outputs[0] for t in ctx.attrs.order_tests + ctx.attrs.readme_tests]),
+        cmd_args(tool, "copy-dir", raw, out.as_output(), hidden = [stamp_ok, in_order, readmes_ok, checked] + [t[DefaultInfo].default_outputs[0] for t in ctx.attrs.order_tests + ctx.attrs.readme_tests]),
         category = "conda_release_set_join",
         identifier = meta,
     )
@@ -350,8 +268,8 @@ _conda_release_set_check = rule(
         "packages": attrs.list(attrs.dep()),
         "readme_tests": attrs.list(attrs.dep(), default = []),
         "release_set": attrs.source(),
-        "_busybox": attrs.exec_dep(default = "komira//tools/build/toolchains:busybox"),
         "_license_file": attrs.source(default = "komira//:LICENSE"),
+        "_pkg_act": attrs.exec_dep(default = "komira//tools/build/package:pkg_act", providers = [RunInfo]),
         "_pack": attrs.exec_dep(default = "komira//tools/build/package:komira_pack", providers = [RunInfo]),
         "_readme_tool": attrs.exec_dep(default = "komira//tools/build/readme_examples:tool", providers = [RunInfo]),
     },
@@ -384,47 +302,25 @@ def _release_set_check(name, metapackage, libs, release_set, native = {}, **kwar
 
 conda_release_set_check = declares_docs(_release_set_check)
 
-_ORDER_TEST = """
-BB="$1"; OUT="$2"; S="$3"; WANT="$4"; shift 4
-case "$BB" in /*) ;; *) BB="$PWD/$BB" ;; esac
-# Not the order check's own scratch directory, which it removes.
-case "${BUCK_SCRATCH_PATH:-}" in
-    "") T="$PWD/.komira_order_test" ;;
-    /*) T="$BUCK_SCRATCH_PATH/komira_order_test" ;;
-    *) T="$PWD/$BUCK_SCRATCH_PATH/komira_order_test" ;;
-esac
-"$BB" mkdir -p "$T/bin"
-"$BB" --install -s "$T/bin"
-PATH="$T/bin"; export PATH
-no() { echo "release_order_test: $*" >&2; exit 1; }
-if "$BB" sh -euc "$S" sh "$BB" "$T/out" "$@" 2> "$T/err"; then
-    [ -z "$WANT" ] || no "the order check passed, expected a refusal containing '$WANT'"
-    [ ! -s "$T/err" ] || no "the order check passed with stderr: $(cat "$T/err")"
-else
-    [ -n "$WANT" ] || no "the order check refused, expected it to pass: $(cat "$T/err")"
-    [ "$(wc -l < "$T/err")" -eq 1 ] || no "the order check refused with more than one line of stderr: $(cat "$T/err")"
-    grep -qF "$WANT" "$T/err" || no "the order check refused without '$WANT': $(cat "$T/err")"
-fi
-echo ok > "$OUT"
-rm -rf "$T"
-"""
-
 def _release_order_test_impl(ctx):
     if len(ctx.attrs.members) != len(ctx.attrs.metadata_files) or not ctx.attrs.members:
         fail("{}: members and metadata_files are one list, and not empty".format(ctx.label))
-    bb = ctx.attrs._busybox[DefaultInfo].default_outputs[0]
     out = ctx.actions.declare_output(ctx.label.name + ".ok")
     ctx.actions.run(
-        busybox_sh(
-            bb,
-            _ORDER_TEST,
+        cmd_args(
+            ctx.attrs._pkg_act[RunInfo],
+            "release-order-test",
+            "--out",
             out.as_output(),
-            _ORDER_CHECK,
+            "--refuses",
             ctx.attrs.refuses,
+            "--set",
             "release_set",
+            "--version",
             ctx.attrs.version,
+            "--build",
             ctx.attrs.build,
-            [cmd_args(n, m) for n, m in zip(ctx.attrs.members, ctx.attrs.metadata_files)],
+            [cmd_args("--member", n, m) for n, m in zip(ctx.attrs.members, ctx.attrs.metadata_files)],
         ),
         env = rerun_env(ctx),
         category = "release_order_test",
@@ -440,7 +336,7 @@ _release_order_test = rule(
         "metadata_files": attrs.list(attrs.source()),
         "refuses": attrs.string(default = ""),
         "version": attrs.string(),
-        "_busybox": attrs.exec_dep(default = "komira//tools/build/toolchains:busybox"),
+        "_pkg_act": attrs.exec_dep(default = "komira//tools/build/package:pkg_act", providers = [RunInfo]),
     } | RERUN_ATTRS,
 )
 

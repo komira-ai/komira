@@ -75,7 +75,7 @@ pub fn read(a: std.mem.Allocator, label: []const u8, text: []const u8, diag: *Di
         },
     };
 
-    var list = std.ArrayListUnmanaged(Pkg){};
+    var list = std.ArrayList(Pkg).empty;
     var it = packages.iterator();
     while (it.next()) |kv| {
         const path = kv.key_ptr.*;
@@ -142,10 +142,10 @@ pub fn read(a: std.mem.Allocator, label: []const u8, text: []const u8, diag: *Di
 /// are not; the smaller is kept so the result does not depend on list order.
 pub fn merge(a: std.mem.Allocator, lists: []const []const Pkg, diag: *Diag) error{Invalid}![]Pkg {
     const before = diag.count();
-    var all = std.ArrayListUnmanaged(Pkg){};
+    var all = std.ArrayList(Pkg).empty;
     for (lists) |l| all.appendSlice(a, l) catch return error.Invalid;
     std.mem.sort(Pkg, all.items, {}, lessPkg);
-    var out = std.ArrayListUnmanaged(Pkg){};
+    var out = std.ArrayList(Pkg).empty;
     for (all.items) |p| {
         if (out.items.len > 0 and std.mem.eql(u8, out.items[out.items.len - 1].key, p.key)) {
             const last = &out.items[out.items.len - 1];

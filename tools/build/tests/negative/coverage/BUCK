@@ -7,6 +7,10 @@ load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load("//functional/coverage:defs.bzl", "cov_branch_check", "cov_debug_check", "cov_link_line_check", "cov_plant", "cov_report_check", "cov_zig_tree", "kcov_stub_dir")
 
+# Built with zig 0.15.2 (`:zig_next`); the executables are built behind the check
+# that the pin is that release.
+_ZIG = "komira//tools/build/toolchains:zig_next"
+
 # A coverage link whose relocator rewrites nothing (test 41). Its [coverage]
 # must fail with mojo_compile's exit 4, "contains this action's working
 # directory": the wrapper's check of every output stays on for coverage
@@ -16,7 +20,7 @@ zig_exe(
     src = "noop_relocate.zig",
     busybox = "komira//tools/build/toolchains:busybox",
     exec_compatible_with = LINUX_X86_64,
-    zig = "komira//tools/build/toolchains:zig",
+    zig = _ZIG,
 )
 
 cov_link_dir(
@@ -57,7 +61,6 @@ _DIRS = [
         dirs = _DIRS,
         mode = "hermetic",
         names = ["value.mojo"],
-        script = "//functional/coverage:check.sh",
     )
     for name in ("abs_relocated", "abs_other", "no_reldir")
 ]
@@ -82,16 +85,24 @@ mojo_library(
 # refuses them as unmapped. RED:
 # tests//negative/coverage:lost[coverage][tests][test_lost]
 cov_plant(
-    name = "lost_run_sh",
-    expr = 's|^cp -RL "\\$SRC/\\." "\\$R/share/\\$STAGE/"$|cp -RL "$SRC/." "$R/share/"|',
-    out = "cov_run.sh",
-    src = "komira//tools/build/coverage/kcov:cov_run.sh",
+    name = "lost_run_src",
+    expr = 's|^    copyTreeTo(src, staged_share);$|    copyTreeTo(src, try std.fs.path.join(a, \\&.{ r0, "share" }));|',
+    out = "cov_run.zig",
+    src = "komira//tools/build/coverage/kcov:cov_run.zig",
+)
+
+zig_exe(
+    name = "lost_run_bin",
+    src = ":lost_run_src",
+    busybox = "komira//tools/build/toolchains:busybox",
+    exec_compatible_with = LINUX_X86_64,
+    zig = "komira//tools/build/toolchains:zig_next",
 )
 
 cov_run_dir(
     name = "lost_run",
     exec_compatible_with = LINUX_X86_64,
-    script = ":lost_run_sh",
+    tool = ":lost_run_bin",
 )
 
 mojo_library(
@@ -148,16 +159,24 @@ mojo_library(
 # runs: the binary holds lostlib's code but no name under lostlibx/. RED:
 # tests//negative/coverage:lostdir[coverage][tests][test_lost]
 cov_plant(
-    name = "lostdir_run_sh",
-    expr = 's|^STAGE=\\$IMPORT$|STAGE=${IMPORT}x|',
-    out = "cov_run.sh",
-    src = "komira//tools/build/coverage/kcov:cov_run.sh",
+    name = "lostdir_run_src",
+    expr = 's|else args.import;$|else try std.fmt.allocPrint(a, "{s}x", .{args.import});|',
+    out = "cov_run.zig",
+    src = "komira//tools/build/coverage/kcov:cov_run.zig",
+)
+
+zig_exe(
+    name = "lostdir_run_bin",
+    src = ":lostdir_run_src",
+    busybox = "komira//tools/build/toolchains:busybox",
+    exec_compatible_with = LINUX_X86_64,
+    zig = "komira//tools/build/toolchains:zig_next",
 )
 
 cov_run_dir(
     name = "lostdir_run",
     exec_compatible_with = LINUX_X86_64,
-    script = ":lostdir_run_sh",
+    tool = ":lostdir_run_bin",
 )
 
 mojo_library(
@@ -179,16 +198,24 @@ mojo_library(
 # passes: the run fails before kcov starts, naming the argument. RED:
 # tests//negative/coverage:longarg[coverage][tests][test_lost]
 cov_plant(
-    name = "longarg_run_sh",
-    expr = "s|^KCOV_ARG_MAX=2047$|KCOV_ARG_MAX=64|",
-    out = "cov_run.sh",
-    src = "komira//tools/build/coverage/kcov:cov_run.sh",
+    name = "longarg_run_src",
+    expr = "s|^pub const kcov_arg_max = 2047;$|pub const kcov_arg_max = 64;|",
+    out = "cov_run.zig",
+    src = "komira//tools/build/coverage/kcov:cov_run.zig",
+)
+
+zig_exe(
+    name = "longarg_run_bin",
+    src = ":longarg_run_src",
+    busybox = "komira//tools/build/toolchains:busybox",
+    exec_compatible_with = LINUX_X86_64,
+    zig = "komira//tools/build/toolchains:zig_next",
 )
 
 cov_run_dir(
     name = "longarg_run",
     exec_compatible_with = LINUX_X86_64,
-    script = ":longarg_run_sh",
+    tool = ":longarg_run_bin",
 )
 
 mojo_library(
@@ -241,7 +268,7 @@ zig_exe(
     src = "kcov_refused.zig",
     busybox = "komira//tools/build/toolchains:busybox",
     exec_compatible_with = LINUX_X86_64,
-    zig = "komira//tools/build/toolchains:zig",
+    zig = _ZIG,
 )
 
 kcov_stub_dir(
@@ -254,7 +281,6 @@ cov_run_dir(
     name = "refused_run",
     exec_compatible_with = LINUX_X86_64,
     kcov = ":kcov_refused_dist",
-    script = "komira//tools/build/coverage/kcov:cov_run.sh",
 )
 
 mojo_library(
@@ -282,7 +308,6 @@ cov_run_dir(
     name = "linger_run",
     exec_compatible_with = LINUX_X86_64,
     limit_s = 20,
-    script = "komira//tools/build/coverage/kcov:cov_run.sh",
 )
 
 mojo_library(
@@ -514,7 +539,6 @@ _RESULTS = {
         expect = expect,
         mode = "result",
         reports = [":{}_census[coverage][gate][result]".format(name)],
-        script = "//functional/coverage:report.sh",
     )
     for name, expect in _RESULTS.items()
 ]
@@ -551,7 +575,6 @@ cov_report_check(
     ],
     mode = "result",
     reports = [":covtop_census[coverage][gate][result]"],
-    script = "//functional/coverage:report.sh",
 )
 
 # Test 46. A library that depends on covlow, whose gate (enforce) is red:
@@ -649,7 +672,6 @@ _CENSUS_OK = {p.removeprefix("census/ok/"): p for p in glob(["census/ok/**/cover
         goldens = ["census/" + golden],
         mode = "golden",
         reports = [":census_ok"],
-        script = "//functional/coverage:report.sh",
     )
     for name, golden in (
         ("census_ok_doc", "doc.txt"),
@@ -872,7 +894,7 @@ _TOOL_SRCS = [
             imports = [":{}_src[{}]".format(name, f) for f in _TOOL_SRCS],
             src = ":{}_src[cov_branch]".format(name),
             busybox = "komira//tools/build/toolchains:busybox",
-            zig = "komira//tools/build/toolchains:zig",
+            zig = _ZIG,
         ),
         cov_branch_dir(
             name = "{}_branch".format(name),
@@ -954,7 +976,7 @@ zig_exe(
     imports = [":branchlinkline_link_src[{}]".format(f) for f in _TOOL_SRCS],
     src = ":branchlinkline_link_src[cov_branch]",
     busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig",
+    zig = _ZIG,
 )
 
 cov_branch_dir(
@@ -969,7 +991,6 @@ cov_link_line_check(
     branch = ":branchlinkline_branch",
     exec_compatible_with = LINUX_X86_64,
     lib = ":branchnoprof",
-    script = "//functional/coverage:link_line.sh",
     src = "tests/test_one.mojo",
 )
 
@@ -981,7 +1002,7 @@ cov_link_line_check(
 # "the counters of quarter are '...' (sorted), not '0,2000000,2000000,6000000'".
 cov_plant(
     name = "branchnonatomic_link_zig",
-    expr = "s|try v.appendSlice(&.{ \"-mllvm\", \"-instrprof-atomic-counter-update-all\" });||",
+    expr = "s|try v.appendSlice(alloc, &.{ \"-mllvm\", \"-instrprof-atomic-counter-update-all\" });||",
     out = "cov_branch_link.zig",
     src = _BRANCH_SRC + "cov_branch_link.zig",
 )
@@ -1000,7 +1021,7 @@ zig_exe(
     imports = [":branchnonatomic_link_src[{}]".format(f) for f in _TOOL_SRCS],
     src = ":branchnonatomic_link_src[cov_branch]",
     busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig",
+    zig = _ZIG,
 )
 
 cov_branch_dir(
@@ -1025,7 +1046,6 @@ cov_branch_check(
     exec_compatible_with = LINUX_X86_64,
     function = "quarter",
     profdata = ":branchnonatomic_lib[coverage][branch][test_threads]",
-    script = "//functional/coverage:branch_check.sh",
 )
 
 # ---- Shared libraries (mojo_shared_lib) -----------------------------------------
@@ -1036,16 +1056,24 @@ cov_branch_check(
 # hold the library's first source (--must-contain). RED:
 # tests//negative/coverage:covso_skip[coverage][tests][covso_one_driver]
 cov_plant(
-    name = "covso_skip_run_sh",
-    expr = 's#^\\[ -n "\\$SOLIB" \\] || set -- "\\$@" --arg --skip-solibs$#set -- "$@" --arg --skip-solibs#',
-    out = "cov_run.sh",
-    src = "komira//tools/build/coverage/kcov:cov_run.sh",
+    name = "covso_skip_run_src",
+    expr = 's#^    if (args.solib == null) try kcov_args.append("--skip-solibs");$#    try kcov_args.append("--skip-solibs");#',
+    out = "cov_run.zig",
+    src = "komira//tools/build/coverage/kcov:cov_run.zig",
+)
+
+zig_exe(
+    name = "covso_skip_run_bin",
+    src = ":covso_skip_run_src",
+    busybox = "komira//tools/build/toolchains:busybox",
+    exec_compatible_with = LINUX_X86_64,
+    zig = "komira//tools/build/toolchains:zig_next",
 )
 
 cov_run_dir(
     name = "covso_skip_run",
     exec_compatible_with = LINUX_X86_64,
-    script = ":covso_skip_run_sh",
+    tool = ":covso_skip_run_bin",
 )
 
 mojo_shared_lib(

@@ -9,7 +9,7 @@
     directory: `bin/git`, `libexec/git-core/`, `share/git-core/templates/` and
     `share/licenses/`.
 
-`git_check` runs git_check.sh against the built git and the pinned git-lfs in
+`git_check` runs `git_check` (git_check.zig) against the built git and the pinned git-lfs in
 a build action and returns a `ValidationInfo`. `git_tool` is the distribution
 as other targets use it, with the checks as dependencies, so no build that uses
 the git oracle succeeds unless they pass. The check and the tool take the
@@ -65,18 +65,21 @@ _git_build = rule(
 def _check_impl(ctx):
     # One output: buck2 refuses a validation result whose action produces
     # more than one. The result is copied out of the report directory.
-    staged = _stage(ctx, "check_srcs", [ctx.attrs.script])
     report = ctx.actions.declare_output("report", dir = True)
     ctx.actions.run(
         cmd_args(
+            ctx.attrs._tool[RunInfo],
+            "--busybox",
             _out(ctx.attrs._busybox),
-            "sh",
-            staged.project(ctx.attrs.script.short_path),
-            _out(ctx.attrs._busybox),
+            "--report",
             report.as_output(),
+            "--git",
             _out(ctx.attrs.git),
+            "--lfs",
             _out(ctx.attrs.git_lfs),
+            "--version",
             ctx.attrs.version,
+            "--lfs-version",
             ctx.attrs.lfs_version,
         ),
         env = rerun_env(ctx),
@@ -92,14 +95,14 @@ def _check_impl(ctx):
 
 _git_check = rule(
     impl = _check_impl,
-    doc = "Runs git_check.sh against the `git` distribution and the `git_lfs` binary: files and licences, version, no host git (decoys on PATH), object ids against sha1sum, clone and push over the pack protocol, the HTTP transport, and git-lfs. Fails the build on a wrong result.",
+    doc = "Runs `git_check` (git_check.zig) against the `git` distribution and the `git_lfs` binary: files and licences, version, no host git (decoys on PATH), object ids against sha1sum, clone and push over the pack protocol, the HTTP transport, and git-lfs. Fails the build on a wrong result.",
     attrs = RERUN_ATTRS | {
         "git": attrs.exec_dep(doc = "The `git` mode output of git_build."),
         "git_lfs": attrs.exec_dep(doc = "The pinned git-lfs binary."),
         "lfs_version": attrs.string(doc = "What `git-lfs version` prints after `git-lfs/`, up to the space."),
-        "script": attrs.source(doc = "git_check.sh"),
         "version": attrs.string(doc = "What `git --version` prints after `git version `."),
         "_busybox": attrs.exec_dep(default = "komira//tools/build/toolchains:busybox"),
+        "_tool": attrs.exec_dep(default = "komira//third_party/git:git_check_exe", providers = [RunInfo]),
     },
 )
 

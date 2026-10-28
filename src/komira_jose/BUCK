@@ -1,9 +1,10 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
-# The RS256 signing tests read komira_http_core's 2048-bit RSA test key
-# (PKCS#8 PEM, exported there).
+# The RS256 signing tests read the package's own 2048-bit RSA test key
+# (PKCS#8 PEM, tests/fixtures/rsa_test_key.pem; komira_oauth and
+# komira_http_auth read it too).
 _RSA_KEY = {
-    "src/komira_http_core/tests/fixtures/tls/leaf_key.pem": "//src/komira_http_core:tests/fixtures/tls/leaf_key.pem",
+    "src/komira_jose/tests/fixtures/rsa_test_key.pem": "//src/komira_jose:tests/fixtures/rsa_test_key.pem",
 }
 
 # JSON Web Signature and JSON Web Token signing and verification (RFC 7515,
@@ -96,3 +97,7 @@ mojo_library(
     },
     visibility = ["PUBLIC"],
 )
+
+# The test key is the one RSA key of komira_oauth's and komira_http_auth's
+# tests too.
+export_file(name = "tests/fixtures/rsa_test_key.pem", visibility = ["PUBLIC"])

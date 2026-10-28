@@ -26,8 +26,76 @@ batch by it.
   `sort_batch_by_keys` uses when every key is INT32 / INT64 / STRING: keys
   are encoded as Int64 ranks and, when the ranks fit in 62 bits, packed into
   one Int64 and radix-sorted.
+- `sort_topn_sink`: the sort and top-N sink kernels (`_execute_sort_sink`,
+  `_execute_topn_sink` over `SortSinkData` / `TopNSinkData` of
+  `komira_physical_plan`), and `append_deterministic_tiebreak[_schema]`,
+  the one rule that makes a tied top-N cut deterministic across runs whose
+  input order differs. `_execute_sort_sink` does not resolve dictionary
+  keys: a numeric dictionary-encoded sort key raises an error (the message
+  differs between the single-key and multi-key paths).
+  `_execute_topn_sink` resolves a numeric dictionary key to its values first.
+- `sort_topn_heap`: `topn_heap_select`, multi-key top-K over a
+  `RecordBatch` by a bounded heap, O(N log K), for INT64 / INT32 / FLOAT64 /
+  STRING keys. Rows that tie on every key compare by row index, so the heap
+  keeps and orders tied rows as the stable full sort does. A numeric key
+  stored as a dictionary (codes plus values) is resolved to its values before
+  a top-N.
+- `sort_buffer_untyped`: `SortBuffer_Untyped`, a multi-key sort buffer
+  whose column types are known only at run time (a `ColDescriptor` layout
+  over `komira_column_format` storage), fed from `BatchView`s and read back
+  per DType; its cell codec is `sort_buffer_cells`. It does not track
+  validity: a NULL cell sorts as its value bytes, so callers keep nullable
+  keys out or place nulls themselves. TIMESTAMP, DECIMAL128 and BINARY
+  columns can be fed and ordered but have no typed reader; the order is in
+  `sorted_indices`.
 - `sort_loser_tree`: `LoserTree`, a tournament tree for the k-way merge of
   sorted runs, driven by a caller's `LoserTreeComparator`.
+- `sort_parallel`: `parallel_sort_single_key`, the single-key sort over an
+  INT64 / INT32 / FLOAT64 key on the engine's fork-join runtime (a stable
+  sort per slice, then a parallel co-rank merge of the slices), and
+  `merge_sorted_partitions_single_key`, the k-way merge of batches that are
+  each already sorted. `can_parallel_sort_single_key` is the gate (one key
+  of those types, `MIN_PARALLEL_SORT_ROWS` rows unless forced).
+- `sort_parallel_string`: the same for one STRING / BINARY key
+  (`parallel_sort_single_key_string`), and the merges of sorted STRING
+  partitions: `merge_sorted_partitions_single_key_string_parallel` (a
+  parallel pairwise tree) and `merge_sorted_partitions_single_key_string`
+  (its serial oracle). The per-slice string sort and its comparators are
+  `sort_parallel_string_kernels`; the pairwise-tree merge is
+  `sort_parallel_string_merge`.
+
+- `sort_dictrank`: `parallel_dictrank_sort_string`, the sort of one
+  low-cardinality STRING / BINARY key by dense ranks and a parallel stable
+  counting sort (no comparison merge), and its gate
+  `can_dictrank_sort_single_key_string` (a strided sampled distinct count
+  under a ceiling). Above the ceiling after the exact build it falls back to
+  `parallel_sort_single_key_string`. The dictionary build and the ranks are
+  `sort_dictrank_build`. The gate's sample is a fixed stride, so a periodic
+  key, or one that is distinct only past the last sampled row, can be
+  admitted although it is high-cardinality; the exact build is the backstop
+  (the rows stay correct and the sort falls back, at the cost of a full
+  dictionary build). On the multi-worker `SortSink` route the gate samples
+  partition 0 only. `dictrank_fallback_count` reports how many sorts took the
+  fallback.
+- `sort_sink`: `SortSink`, the sort as a `MorselSink` of
+  `komira_operator_api`: per-worker batches, and a route chosen once in
+  `combine` (partitioned parallel sort and merge, the counting sort, or the
+  serial kernel) that changes the cost and never the rows. The switches are
+  a value, `SortSinkRoutes`.
+
+Each parallel entry takes a `SharedForkJoinHandle` (the engine's dispatcher,
+or `serial_fork_join_handle()` to run the same chunks inline; the `*_serial`
+entries do that) and gives exactly the rows of the serial kernel, ties in
+input order. `num_workers` sets the slice count; 0 means one per physical
+core.
+
+The numeric parallel sort (`sort_parallel`) does not read the key's validity:
+a NULL cell sorts by its stored value, as the serial sort of a numeric key in
+`sort_topn_sink` does, and `can_parallel_sort_single_key` does not look at
+NULLs. The STRING / BINARY form places NULLs first ascending and last
+descending, as `sort_indices_string` does. No sort sink calls the parallel
+entries yet; they are covered by this package's tests, including a pooled run
+of each entry family on a started runtime.
 
 Every sort is stable: rows with equal keys keep their input order, in both
 directions. Float keys are totally ordered the way DuckDB orders them: NaN
@@ -72,6 +140,30 @@ assert_equal(Int(perm.get(3)), 2)
 var top = topn_indices_int64(keys, 2, descending=True)
 assert_equal(top.length, 2)
 assert_equal(Int(keys.get(Int(top.get(0)))), 7)
+```
+
+The parallel sort of a FLOAT64 column, cut into three slices, gives the
+serial sort's rows, NaN last:
+
+<!-- mojo-hidden from std.testing import assert_equal, assert_true -->
+```mojo
+from komira_arrow.column import Column
+from komira_arrow.primitive_array import PrimitiveArray
+from komira_arrow.record_batch import RecordBatch
+from komira_arrow.schema import Field, Schema
+from komira_op_sort.sort_parallel import parallel_sort_single_key_serial
+
+var nan = Float64(0.0) / Float64(0.0)
+var keys = PrimitiveArray[DType.float64].from_list([2.0, nan, -1.0, 2.0, 0.5])
+var schema = Schema.from_fields_1(Field("x", DType.float64, True))
+var batch = RecordBatch.from_typed_columns_1(
+    schema^, Column.from_primitive[DType.float64](keys^)
+)
+var out = parallel_sort_single_key_serial(batch^, "x", False, num_workers=3)
+var col = out.column_at(0).as_primitive[DType.float64]()
+assert_equal(col.get(0), -1.0)
+assert_equal(col.get(3), 2.0)
+assert_true(col.get(4) != col.get(4))  # NaN sorts last
 ```
 
 A string column ascending, and the two string algorithms agreeing:

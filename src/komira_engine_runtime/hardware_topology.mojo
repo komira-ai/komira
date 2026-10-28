@@ -5,7 +5,7 @@
 # Design doc: an internal doc (v3, §1.1 + §1.2).
 #
 # Runtime probe of the system's physical CPU topology for the pthread-FFI-based
-# worker pool. Distinct from `hardware.mojo::HardwareProfile` (which sizes
+# worker pool. Distinct from `komira_host_profile.hardware.HardwareProfile` (which sizes
 # morsels for cache) -- this module only answers "how many P-cores and
 # E-cores does this box have?" so the pool can apply QoS classes per tier.
 #

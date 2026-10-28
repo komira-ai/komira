@@ -1,0 +1,540 @@
+# The release build of komira's conda packages, and the continuous prod publish of its mopm
+# packages (docs/ci.md, "release.yml").
+#
+# komira publishes its conda release set to NO channel for now, and publishing will move to mopm
+# (docs/releases.md). This workflow builds the release set, so a push to main
+# still proves the release builds, and keeps what it built as a workflow
+# artifact: the packages, `release.json` (format kci.release_set major 2: the
+# revision, the platform, the run, every member and the set hash) and
+# `set_hash.txt`. The job `release` publishes nothing, and holds no publishing
+# credential and no channel.
+#
+# THE MOPM JOBS. The libraries moved to mopm (every src/<name> that has a
+# mopm.toml; //release:mopm_artifacts builds them) are published to the mopm
+# registry as one group, apart from the release set. The publish is CONTINUOUS:
+# EVERY push to main runs it, to the registry `prod`, in six jobs: build and
+# stage, stage in prod, test the staged bytes, commit, smoke, and (when one of
+# them failed or the run was cancelled) abort. This workflow publishes to no other
+# registry (no beta stage), and no repository variable switches it.
+#   `mopm-stage`    on every push to main (and on a manual run, which only
+#                   stages): builds the packages and the pinned mopm on the
+#                   farm; gives every member the version 0.1.<run number> on
+#                   its checkout (a version can be created once on a registry,
+#                   so every release carries new ones; nothing is pushed back);
+#                   `mopm stage` writes the staged set S on the runner (it
+#                   asks the registry which versions exist, so it cannot be a
+#                   build action); the README e2e of every package runs on the
+#                   farm against S (//release/readme_e2e/verify:all, with
+#                   `-c komira_release.staged=stage` at that version); then
+#                   `mopm publish --staged S --registry prod --dry-run`. It
+#                   sends nothing and holds no token.
+#   `prod-stage`, `prod-test`, `prod-commit`, `prod-abort`, `prod-smoke`  the
+#                   prod publish, in five jobs, ONLY on a push to main (never on a
+#                   manual run). It stages the set the e2e of `mopm-stage`
+#                   passed on, tests the files the registry now holds in
+#                   quarantine, and only then commits:
+#     prod-stage    (needs release and mopm-stage; environment `prod`, `id-token:
+#                   write`, no secret) `mopm publish --staged S --registry prod
+#                   --oidc --no-commit`: the registry opens a group, holds every
+#                   file, and nothing is visible. The directory, with the
+#                   `state.json` that names the group, is kept as an artifact.
+#     prod-test     (needs prod-stage; environment `build`, the farm's; NO
+#                   registry identity and no secret) checks every file of that
+#                   directory against `plan.json` (sha256 and size) and runs the
+#                   README e2e on exactly the files that matched, at the version of
+#                   this run.
+#     prod-commit   (needs prod-test; environment `prod`) the same command
+#                   without `--no-commit`, with a fresh OIDC exchange, in the
+#                   directory with its `state.json`: the same group is committed
+#                   and the job waits until it is visible.
+#     prod-abort    (needs the three above; runs only when one failed or the run
+#                   was cancelled) `mopm publish --staged S --abort`: the open
+#                   group is ended and its place given back.
+#     prod-smoke    (needs prod-commit; no environment, no identity) downloads the
+#                   published files from the prod channel and compares each with
+#                   the plan; on a difference it prints the command a human runs
+#                   to yank the group. It yanks nothing.
+#                   These jobs need a mopm that has `--no-commit` and `--abort`
+#                   (0.0.66 and later) and a registry whose prod CI identity may
+#                   act for the package owner; docs/ci.md, "The prod publish".
+#
+# It runs named Buck2 targets on the farm, through the buck2-farm action
+# (.github/actions/buck2-farm), which fails a step unless buck2 succeeded and
+# no action ran on the runner, and then runs the programs those builds made, as
+# binaries. No step runs buck2 around buck2.
+#   1. //release/ci:check_release_ref, the guard (release/ci/release_lib/
+#      ref_guard.zig has the rules): the run is a push to main, of a commit on
+#      main's history, or a manual run with a reason; the checkout is that
+#      commit; a push of a commit without release/artifacts.textproto has
+#      nothing to release and is skipped, a manual run of one is refused. A
+#      `schedule` run is refused (this workflow has no schedule).
+#   2. //release/ci:release_json `stamp`: the build number, source commit and
+#      commit time the packages are stamped with, from git (full history).
+#   3. //release:release_set, built with that stamp: every package
+#      release/artifacts.textproto declares, the metapackage over them, and
+#      release.json and the set hash, all as actions of the farm
+#      (release/release_set.bzl). A build action holds the set to the artifacts
+#      file, and release_json `write` checks every package before it writes
+#      release.json: a package whose bytes, name, platform or metadata are not
+#      what its manifest says, or that is not stamped, is a red build.
+#
+# Triggers: a push to main (not one that touches only documentation:
+# `paths-ignore`, the same documentation the stamp does not count, so a
+# documentation-only push publishes nothing) and a manual run, and nothing else
+# (no schedule). A pull request never starts this workflow (pr.yml
+# answers it), so no environment or release job is reached from a pull
+# request's code.
+#
+# ONE RELEASE AT A TIME (concurrency). A PUSH to main is in the group
+# `release-main`: a running release is NEVER cancelled, so two pushes never
+# publish to prod at once; GitHub keeps at most
+# one PENDING run per group, and a newer one cancels the pending one and takes
+# its place, so the newest pushed revision wins and queued pushes coalesce
+# (main moves forward only, so the newer push carries the older one's
+# changes). A cancelled pending run shows as cancelled with no summary: it
+# never started, so it published nothing, and its run number is never published: the
+# versions skip it (a run that waited and was replaced skips an intermediate version;
+# the next run publishes current main, at its own number). A manual run is never in
+# that group: it is in `release-ref-<ref name>`. GitHub compares the group's
+# `github.ref` ignoring case, so a push of a branch `MAIN` would join main's group: the
+# guard refuses a ref that is main in another case, and the repository ruleset that
+# refuses such branches (docs/ci.md) keeps them out.
+#
+# A manual run (of a branch, or of main) is break-glass: the input `reason` is
+# required, at most 200 bytes on one line, and is recorded as the first line of
+# the job's summary (`BREAK-GLASS: <ref> <commit> by <actor>: <reason>`). A
+# manual run builds the commit it was started on: there is no revision input
+# (the guard and the tools are built from the checkout, so the checkout is the
+# commit they guard). The reason reaches the guard only through a job's `env:`,
+# never inside a `run:`, and no `name:` holds any expression.
+#
+# The job holds `contents: read` and the `id-token: write` that the farm
+# connection exchanges for the tailnet, nothing else, in the environment
+# `build` (the claim the tailnet's trust for this workflow was set for). Every
+# action is pinned.
+name: release
+
+on:
+  push:
+    branches: [main]
+    # documentation only: no release (the stamp does not count these either)
+    paths-ignore:
+      - 'docs/**'
+      - '**.md'
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: "why this manual run (recorded in the job summary); a manual run is break-glass: it builds the commit it starts on and publishes nothing"
+        type: string
+        required: true
+
+permissions: {}
+
+concurrency:
+  group: release-${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && 'main' || format('ref-{0}', github.ref_name) }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    environment: build
+    timeout-minutes: 120
+    permissions:
+      contents: read
+      # for farm-connect only: the token Tailscale trusts
+      id-token: write
+    env:
+      # a manual run's reason, read by the guard (never inside a `run:`)
+      REASON: ${{ inputs.reason }}
+    steps:
+      # The commit the run started on, with the full history: the stamp is
+      # derived from git and refuses a shallow clone.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      # The farm connection: tailnet join, refusal unless the farm answers, and
+      # the machine buckconfig, from repository variables (docs/ci.md).
+      - uses: ./.github/actions/farm-connect
+        with:
+          ts-client-id: ${{ vars.TS_CLIENT_ID }}
+          ts-audience: ${{ vars.TS_AUDIENCE }}
+          farm-address: ${{ vars.FARM_ADDRESS }}
+          farm-instance: ${{ vars.FARM_INSTANCE }}
+          farm-properties: ${{ vars.FARM_LINUX_X86_64_PROPERTIES }}
+          tls: ${{ vars.FARM_TLS || 'false' }}
+          # main's release work queues behind the pull-request checks when the farm is full
+          farm-qos: batch
+      # A guard on the file farm-connect wrote: without the linux property set
+      # a build would run on this runner.
+      - name: the buckconfig names the farm
+        run: |
+          ./buck2 audit config komira_re.linux_x86_64_properties --style json | grep -q '": *"[^"]'
+      # The tool the buck2-farm action runs over each step's output; its path
+      # is the step's output.
+      - name: build the farm assertion
+        id: assert
+        run: echo "path=$(./buck2 build komira//tools/build/ci:assert_remote --show-full-simple-output)" >> "$GITHUB_OUTPUT"
+      - name: build the guard
+        uses: ./.github/actions/buck2-farm
+        with:
+          args: build //release/ci:check_release_ref --out ${{ runner.temp }}/check_release_ref
+          assert-remote: ${{ steps.assert.outputs.path }}
+      # Refuses (the step fails, nothing is built) or says `release=false` for a
+      # push of a commit with nothing to release: the steps below are skipped.
+      - name: the guard
+        id: guard
+        run: '"$RUNNER_TEMP/check_release_ref" --event "$GITHUB_EVENT_NAME" --ref "$GITHUB_REF" --sha "$GITHUB_SHA" --artifacts release/artifacts.textproto --reason "$REASON" --actor "$GITHUB_ACTOR" --github-output "$GITHUB_OUTPUT" --summary-file "$GITHUB_STEP_SUMMARY"'
+      - name: build the release tool
+        if: steps.guard.outputs.release == 'true'
+        uses: ./.github/actions/buck2-farm
+        with:
+          args: build //release/ci:release_json --out ${{ runner.temp }}/release_json
+          assert-remote: ${{ steps.assert.outputs.path }}
+      # The stamp the packages carry: the build number, the commit it counts
+      # and its commit time, from git.
+      - name: the stamp
+        id: stamp
+        if: steps.guard.outputs.release == 'true'
+        run: '"$RUNNER_TEMP/release_json" stamp --revision "$GITHUB_SHA" --github-output "$GITHUB_OUTPUT"'
+      # The whole release set, stamped, into the platform's release directory.
+      - name: build the release set
+        if: steps.guard.outputs.release == 'true'
+        uses: ./.github/actions/buck2-farm
+        with:
+          args: build -c komira.package_stamp=${{ steps.stamp.outputs.build_number }} -c komira.package_commit=${{ steps.stamp.outputs.source_commit }} -c komira.package_timestamp_ms=${{ steps.stamp.outputs.timestamp_ms }} -c komira.release_revision=${{ github.sha }} -c komira.release_run_id=gh-${{ github.run_id }} -c komira.release_attempt=${{ github.run_attempt }} //release:release_set --out ${{ runner.temp }}/release/linux-x86_64
+          assert-remote: ${{ steps.assert.outputs.path }}
+      - name: the set hash
+        if: steps.guard.outputs.release == 'true'
+        run: echo "release set $(cat "$RUNNER_TEMP/release/linux-x86_64/set_hash.txt") built from $GITHUB_SHA (nothing published)" >> "$GITHUB_STEP_SUMMARY"
+      # The packages, release.json and set_hash.txt, as one artifact.
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: steps.guard.outputs.release == 'true'
+        with:
+          name: release-${{ github.sha }}
+          path: ${{ runner.temp }}/release
+          if-no-files-found: error
+          retention-days: 14
+      - name: Stop buck2
+        if: always()
+        run: ./buck2 kill || true
+
+  # Build, stage and try the mopm packages (see the header). It runs on every
+  # push to main and on a manual run, which sends nothing either: this job
+  # reads no token.
+  mopm-stage:
+    runs-on: ubuntu-24.04
+    environment: build
+    timeout-minutes: 120
+    permissions:
+      contents: read
+      # for farm-connect only: the token Tailscale trusts
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: ./.github/actions/farm-connect
+        with:
+          ts-client-id: ${{ vars.TS_CLIENT_ID }}
+          ts-audience: ${{ vars.TS_AUDIENCE }}
+          farm-address: ${{ vars.FARM_ADDRESS }}
+          farm-instance: ${{ vars.FARM_INSTANCE }}
+          farm-properties: ${{ vars.FARM_LINUX_X86_64_PROPERTIES }}
+          tls: ${{ vars.FARM_TLS || 'false' }}
+          # main's release work queues behind the pull-request checks when the farm is full
+          farm-qos: batch
+      - name: the buckconfig names the farm
+        run: |
+          ./buck2 audit config komira_re.linux_x86_64_properties --style json | grep -q '": *"[^"]'
+      - name: build the farm assertion
+        id: assert
+        run: echo "path=$(./buck2 build komira//tools/build/ci:assert_remote --show-full-simple-output)" >> "$GITHUB_OUTPUT"
+      # The mopm that stages and publishes: the pin the README e2e installs with
+      # (MOPM in release/readme_e2e/packages.bzl; it must be a release that has
+      # `stage` and `publish --staged`), and the packages: each `.mojoc` exists
+      # only once its library's tests passed.
+      - name: build the pinned mopm
+        uses: ./.github/actions/buck2-farm
+        with:
+          args: build toolchains//:mopm_0_0_81 --out ${{ runner.temp }}/mopm-publish/mopm
+          assert-remote: ${{ steps.assert.outputs.path }}
+      - name: build the packages
+        uses: ./.github/actions/buck2-farm
+        with:
+          args: build //release:mopm_artifacts --out ${{ runner.temp }}/mopm-publish/artifacts
+          assert-remote: ${{ steps.assert.outputs.path }}
+      # Built here and run here, once (the version of this run, below).
+      - name: build the version tool
+        uses: ./.github/actions/buck2-farm
+        with:
+          args: build //tools/build/ci:release_beta_version --out ${{ runner.temp }}/mopm-publish/release_beta_version
+          assert-remote: ${{ steps.assert.outputs.path }}
+      # Built here, run by `prod-test` and `prod-smoke` (the smoke job has no farm and no
+      # buck2, so it takes the tool from this job's artifact).
+      - name: build the staged-set verify tool
+        uses: ./.github/actions/buck2-farm
+        with:
+          args: build //tools/build/ci:release_staged_verify --out ${{ runner.temp }}/mopm-publish/release_staged_verify
+          assert-remote: ${{ steps.assert.outputs.path }}
+      # THE VERSION OF THIS RUN. A (name, version) pair can be created once on a registry, and a
+      # mopm version is exactly MAJOR.MINOR.PATCH, so every release carries new versions: every
+      # member's version is set to 0.1.<run number> on this job's checkout (inside >=0.1,<0.2,
+      # above 0.1.0, and the newest push is the newest version), with the exact pins between
+      # members. The README e2e of this job and of `prod-test` is given the same number. Nothing
+      # is committed or pushed back. `mopm stage` reads each version from mopm.toml when it runs,
+      # and the built packages carry none, so this is all they need.
+      - name: every member gets the version of this run
+        env:
+          RUN_NUMBER: ${{ github.run_number }}
+        run: '"$RUNNER_TEMP/mopm-publish/release_beta_version" --workspace-root src --version "0.1.$RUN_NUMBER"'
+      # STAGE. Packs each member of src/ from its built `.mojoc` (compiler: MOJO
+      # of packages.bzl), asks the registry, without a token, which versions it
+      # holds, and writes the staged set: plan.json, each `.conda`, each README.
+      # It stays out of the build because it makes requests; the directory is a
+      # gitignored input of //release/staged_set. A version the registry holds
+      # with other bytes, or has yanked, makes the step fail.
+      - name: mopm stage
+        run: '"$RUNNER_TEMP/mopm-publish/mopm" stage --workspace-root src --artifacts "$RUNNER_TEMP/mopm-publish/artifacts" --compiler 1.0.0 --out release/staged_set --registry prod'
+      # TRY. Every package's README examples, compiled and run on the farm as a
+      # user would, against the `.conda` files of the set that was just staged
+      # (the e2e installs offline from it, so the closure must be in it).
+      - name: the README e2e against the staged set
+        uses: ./.github/actions/buck2-farm
+        with:
+          args: build -c komira_release.staged=stage -c komira_release.beta_version=0.1.${{ github.run_number }} //release/readme_e2e/verify:all
+          assert-remote: ${{ steps.assert.outputs.path }}
+      # Reads plan.json and hashes every file; sends nothing and reads no token.
+      - name: mopm publish --staged --dry-run
+        run: '"$RUNNER_TEMP/mopm-publish/mopm" publish --staged release/staged_set --registry prod --dry-run'
+      # What `prod-stage` uploads: the set the e2e just passed on, byte for
+      # byte, the mopm that stages and commits it, and the verify tool the
+      # smoke runs (it needs no farm).
+      - name: keep the staged set
+        run: cp -r release/staged_set "$RUNNER_TEMP/mopm-publish/staged"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: mopm-staged-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/mopm-publish/mopm
+            ${{ runner.temp }}/mopm-publish/release_staged_verify
+            ${{ runner.temp }}/mopm-publish/staged
+          if-no-files-found: error
+          retention-days: 1
+      - name: Stop buck2
+        if: always()
+        run: ./buck2 kill || true
+
+  # THE PROD PUBLISH, in five jobs (see the header). Every one runs only on a
+  # push to main (a manual run never reaches the environment `prod`), and
+  # `prod-stage` needs the set `mopm-stage` tried and passed the README e2e on, so a set
+  # that did not pass is never staged in prod (docs/ci.md, "The prod publish", says
+  # what must exist first). No job
+  # holds a registry token: the registry trusts the identity
+  # of `prod-stage`, `prod-commit` and `prod-abort` (this repository's
+  # release.yml, run on main from a push, in the environment `prod`) to act for
+  # the owner of the packages. A job holds one environment: the three that
+  # talk to the registry are in `prod`, the one that needs the farm is in
+  # `build`, whose identity the registry does not trust.
+
+  # STAGE. Uploads the set `mopm-stage` tried to the prod registry and stops
+  # with the group open (`--no-commit`): the registry holds every file in
+  # quarantine, where nothing reads it, and no package is visible. The
+  # directory, now with `state.json` (the group) and `report.json`, is kept
+  # even when this step fails, so `prod-abort` can end a group a failed run
+  # opened. It joins no farm and runs no buck2.
+  prod-stage:
+    needs: [release, mopm-stage]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    environment: prod
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: mopm-staged-${{ github.sha }}
+          path: ${{ runner.temp }}/mopm-publish
+      - name: mopm is executable
+        run: chmod +x "$RUNNER_TEMP/mopm-publish/mopm"
+      - name: mopm publish --staged --oidc --no-commit
+        run: '"$RUNNER_TEMP/mopm-publish/mopm" publish --staged "$RUNNER_TEMP/mopm-publish/staged" --registry prod --oidc --no-commit'
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: mopm-prod-staged-${{ github.sha }}
+          path: ${{ runner.temp }}/mopm-publish/staged
+          if-no-files-found: error
+          retention-days: 1
+          overwrite: true
+
+  # TEST. The files the registry holds are the bytes of this directory (it pinned each
+  # file's sha256 when it opened the group), and it will copy them when the group is
+  # committed. This job reads the directory `prod-stage` kept, checks every file against
+  # `plan.json` (`release_staged_verify verify`: sha256 and size, every difference
+  # reported) and writes `release/staged_set` from the files that matched and from nothing
+  # else, then runs the README e2e of every package on it, on the farm. It holds NO
+  # registry identity and no secret: its environment is `build` (the farm's), which the
+  # registry does not trust, and nothing it runs reads a token. `id-token: write` is for
+  # farm-connect only (the token Tailscale trusts), as in `mopm-stage`.
+  prod-test:
+    needs: prod-stage
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    environment: build
+    timeout-minutes: 120
+    permissions:
+      contents: read
+      # for farm-connect only: the token Tailscale trusts
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: mopm-prod-staged-${{ github.sha }}
+          path: ${{ runner.temp }}/prod-test/staged
+      - uses: ./.github/actions/farm-connect
+        with:
+          ts-client-id: ${{ vars.TS_CLIENT_ID }}
+          ts-audience: ${{ vars.TS_AUDIENCE }}
+          farm-address: ${{ vars.FARM_ADDRESS }}
+          farm-instance: ${{ vars.FARM_INSTANCE }}
+          farm-properties: ${{ vars.FARM_LINUX_X86_64_PROPERTIES }}
+          tls: ${{ vars.FARM_TLS || 'false' }}
+          # main's release work queues behind the pull-request checks when the farm is full
+          farm-qos: batch
+      - name: the buckconfig names the farm
+        run: |
+          ./buck2 audit config komira_re.linux_x86_64_properties --style json | grep -q '": *"[^"]'
+      - name: build the farm assertion
+        id: assert
+        run: echo "path=$(./buck2 build komira//tools/build/ci:assert_remote --show-full-simple-output)" >> "$GITHUB_OUTPUT"
+      - name: build the staged-set verify tool
+        uses: ./.github/actions/buck2-farm
+        with:
+          args: build //tools/build/ci:release_staged_verify --out ${{ runner.temp }}/prod-test/release_staged_verify
+          assert-remote: ${{ steps.assert.outputs.path }}
+      - name: check the staged files against the plan
+        run: '"$RUNNER_TEMP/prod-test/release_staged_verify" verify --staged "$RUNNER_TEMP/prod-test/staged" --out release/staged_set'
+      - name: the README e2e against the staged files
+        uses: ./.github/actions/buck2-farm
+        with:
+          args: build -c komira_release.staged=stage -c komira_release.beta_version=0.1.${{ github.run_number }} //release/readme_e2e/verify:all
+          assert-remote: ${{ steps.assert.outputs.path }}
+      - name: Stop buck2
+        if: always()
+        run: ./buck2 kill || true
+
+  # COMMIT. The same command as `prod-stage` without `--no-commit`, in the directory with its
+  # `state.json`: the run asks for the same group (`plan_sha256` in the state refuses a
+  # directory whose plan changed), finds every file held, commits it and waits until it is
+  # visible. The identity token of `prod-stage` was used once, so this job makes its own
+  # exchange (`id-token: write`). The directory is the artifact `prod-stage` kept; `prod-test`
+  # verified the same files.
+  prod-commit:
+    needs: prod-test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    environment: prod
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: mopm-staged-${{ github.sha }}
+          path: ${{ runner.temp }}/mopm-publish
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: mopm-prod-staged-${{ github.sha }}
+          path: ${{ runner.temp }}/mopm-prod/staged
+      - name: mopm is executable
+        run: chmod +x "$RUNNER_TEMP/mopm-publish/mopm"
+      - name: mopm publish --staged --oidc
+        run: '"$RUNNER_TEMP/mopm-publish/mopm" publish --staged "$RUNNER_TEMP/mopm-prod/staged" --registry prod --oidc'
+      # The group, its status and the plan digest, kept for `prod-smoke` and for whoever
+      # has to yank (no package file).
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: mopm-prod-committed-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/mopm-prod/staged/plan.json
+            ${{ runner.temp }}/mopm-prod/staged/state.json
+            ${{ runner.temp }}/mopm-prod/staged/report.json
+          if-no-files-found: error
+          retention-days: 14
+          overwrite: true
+
+  # ABORT. When the stage, the test or the commit failed, or the run was cancelled, ends the
+  # open group (`--abort`: it reads `plan.json` and `state.json` and none of the files), which
+  # gives the actor's place back at once (otherwise the registry expires the group after
+  # twelve hours). It `needs` all three: `failure()` looks only at the jobs a job depends on,
+  # so a test that failed would not reach an abort that needed `prod-stage` alone. It does
+  # not run when `prod-stage` was skipped (an earlier job failed before
+  # the registry was asked: there is no group). A directory without `state.json` means the
+  # stage failed before it asked for a group: there is nothing to end, and the step says so. A group
+  # that was already committed is not ended: mopm refuses and says to yank it, and this job
+  # fails with that message.
+  prod-abort:
+    needs: [prod-stage, prod-test, prod-commit]
+    if: (failure() || cancelled()) && github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.prod-stage.result != 'skipped'
+    runs-on: ubuntu-24.04
+    environment: prod
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: mopm-staged-${{ github.sha }}
+          path: ${{ runner.temp }}/mopm-publish
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: mopm-prod-staged-${{ github.sha }}
+          path: ${{ runner.temp }}/mopm-prod/staged
+      - name: mopm is executable
+        run: chmod +x "$RUNNER_TEMP/mopm-publish/mopm"
+      - name: mopm publish --staged --oidc --abort
+        run: |
+          if [ -f "$RUNNER_TEMP/mopm-prod/staged/state.json" ]; then
+            "$RUNNER_TEMP/mopm-publish/mopm" publish --staged "$RUNNER_TEMP/mopm-prod/staged" --registry prod --oidc --abort
+          else
+            echo "no state.json: the stage failed before it asked the registry for a group; nothing to end"
+          fi
+
+  # SMOKE. The group is visible. `release_staged_verify smoke` reads the prod index and
+  # downloads every file of the plan from the channel it names, the way an install fetches
+  # them, and compares each with the plan (sha256 and size), trying again for a few
+  # minutes if the channel's cache lags. This is the check of what the tests before the
+  # commit could not see: the files as the channel serves them. When it fails it prints
+  # the exact `mopm yank --group ...` command for a human; this job never yanks, and it
+  # holds no identity, no secret and no farm (GETs only).
+  prod-smoke:
+    needs: prod-commit
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: mopm-staged-${{ github.sha }}
+          path: ${{ runner.temp }}/mopm-publish
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: mopm-prod-committed-${{ github.sha }}
+          path: ${{ runner.temp }}/prod-smoke/committed
+      - name: the verify tool is executable
+        run: chmod +x "$RUNNER_TEMP/mopm-publish/release_staged_verify"
+      - name: the prod channel serves the published files
+        run: '"$RUNNER_TEMP/mopm-publish/release_staged_verify" smoke --staged "$RUNNER_TEMP/prod-smoke/committed" --config-url https://api.mopm.dev/index/config.json --attempts 5 --delay 30'

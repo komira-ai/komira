@@ -124,9 +124,9 @@ fn readMember(alloc: Alloc, path: []const u8) !Member {
 pub fn readMembers(alloc: Alloc, a: Args) ![]Member {
     const paths = try all(alloc, a, "--member-manifest");
     if (paths.len == 0) fail("a metapackage needs at least one --member-manifest", .{});
-    var list = std.ArrayList(Member).init(alloc);
-    for (paths) |p| try list.append(try readMember(alloc, p));
-    const members = try list.toOwnedSlice();
+    var list = std.ArrayList(Member).empty;
+    for (paths) |p| try list.append(alloc, try readMember(alloc, p));
+    const members = try list.toOwnedSlice(alloc);
     std.mem.sort(Member, members, {}, lessMember);
     for (members[1..], 0..) |m, i| {
         const prev = members[i];
@@ -182,9 +182,9 @@ pub fn cmdCondaMeta(alloc: Alloc, a: Args) !void {
     try paths.object.put("paths", newArray(alloc));
     try paths.object.put("paths_version", .{ .integer = 1 });
 
-    var info_entries = std.ArrayList(Entry).init(alloc);
-    try info_entries.append(.{ .path = "info/index.json", .mode = 0o644, .data = try jsonLine(alloc, index) });
-    try info_entries.append(.{ .path = "info/paths.json", .mode = 0o644, .data = try jsonLine(alloc, paths) });
+    var info_entries = std.ArrayList(Entry).empty;
+    try info_entries.append(alloc, .{ .path = "info/index.json", .mode = 0o644, .data = try jsonLine(alloc, index) });
+    try info_entries.append(alloc, .{ .path = "info/paths.json", .mode = 0o644, .data = try jsonLine(alloc, paths) });
     try aboutAndLicense(alloc, a, &info_entries);
     const stem = try std.fmt.allocPrint(alloc, "{s}-{s}-{s}", .{ name, version, build });
     var no_files = [_]Entry{};

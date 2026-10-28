@@ -199,8 +199,8 @@ the greeting ([formats.sh](../tests/functional/formats.sh)).
 kcov ([`toolchains/kcov`](../toolchains/kcov/README.md)) is GPL-2.0 and a
 build-only tool (the licence decision is recorded in [kcov's
 README](../toolchains/kcov/README.md#licences)), so no published artifact may
-hold it. Every package format runs [`kcov_guard.sh`](kcov_guard.sh) over what
-it packs, as a build action whose output its published files depend on
+hold it. Every package format runs `pkg_act kcov-guard`
+([`act/kcov_guard.zig`](act/kcov_guard.zig)) over what it packs, as a build action whose output its published files depend on
 ([`kcov_guard.bzl`](kcov_guard.bzl)). The guard refuses a file whose sha256 is
 `KCOV_BIN_SHA256` or whose bytes contain `KCOV_USAGE_LINE`, `Usage: kcov
 [OPTIONS] out-dir in-file [args...]`, the two constants of
@@ -242,10 +242,10 @@ The sha256 is that of the one kcov komira builds (its pin, for
 linux-x86_64); a kcov built otherwise (another version or CPU, patched or
 stripped) is refused by the usage line alone.
 
-`:kcov_guard` (the script) is gated by the validation `:kcov_guard_cases`, so
+`:kcov_guard` (`pkg_act`) is gated by the validation `:kcov_guard_cases`, so
 any build that packs anything also runs the guard on known inputs (15 cases),
 and fails if one gets the wrong answer. The cases need no kcov: a fixture
-file stands for `bin/kcov`, and its sha256, written into the script, is the
+file stands for `bin/kcov`, and its sha256, written into the tool, is the
 one they pass. Refused: a sha256 one digit short or in upper case, and an
 empty line, before any file is read; the fixture renamed (by its sha256, as a
 directory's file, as a file and under a destination path; the fixture holds
