@@ -104,7 +104,7 @@ Decisions this document makes that go beyond the language rulings it implements:
 
 **The logical plan names a function, and the receiving process resolves the name.**
 - `WireUdfCall` carries `name=1`, `in_arrow_type_id=2`, `out_arrow_type_id=3` and a single `child=4`. That child "MAY NOT BECOME `repeated`" (`src/komira_plan_proto/plan.proto:791-824`).
-- The node form, `WireUdf` (`plan.proto:1186`), mirrors `UdfData` (`src/komira_plan_expr/udf_data.mojo:216-293`). The `UdfData` field `operator_factory_id` only means something for a Mojo function known at compile time.
+- The node form, `WireUdf` (`plan.proto:1186`), mirrors `UdfData` (`src/komira_plan_expr/src/komira_plan_expr/udf_data.mojo:216-293`). The `UdfData` field `operator_factory_id` only means something for a Mojo function known at compile time.
 - A UDF whose name cannot be resolved is refused (`plan.proto:88-94`).
 - No field names a language.
 

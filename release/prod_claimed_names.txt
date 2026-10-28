@@ -37,6 +37,7 @@ komira_mcp_server
 komira_metrics
 komira_name_registry
 komira_parquet_api
+komira_plan_expr
 komira_plan_proto
 komira_proto_codec
 komira_protobuf

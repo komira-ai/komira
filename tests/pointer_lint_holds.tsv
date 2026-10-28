@@ -165,7 +165,7 @@ wildcard_origin	src/komira_op_agg_state/tests/test_accumulator_trait.mojo	9	pred
 wildcard_origin	src/komira_orc/orc_reader.mojo	7	predates the lint
 wildcard_origin	src/komira_orc/orc_writer.mojo	2	predates the lint
 wildcard_origin	src/komira_parquet_codec/brotli/brotli_ffi.mojo	6	predates the lint
-wildcard_origin	src/komira_plan_expr/erased_box.mojo	3	predates the lint
+wildcard_origin	src/komira_plan_expr/src/komira_plan_expr/erased_box.mojo	3	predates the lint
 wildcard_origin	src/komira_scan_resolver/scan_source_resolver.mojo	27	predates the lint
 wildcard_origin	src/komira_scan_resolver/scan_split.mojo	6	predates the lint
 wildcard_origin	src/komira_scan_source/arrow_c_stream_sink.mojo	1	predates the lint

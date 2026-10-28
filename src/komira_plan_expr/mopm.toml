@@ -1,0 +1,17 @@
+[package]
+name = "komira_plan_expr"
+version = "0.1.0"
+description = "The expression language of a plan (Expr, AggExpr, ScalarValue, ColExpr builder, UDF payloads, ExprId/ExprPool) and the comptime schema descriptor."
+license = "Apache-2.0"
+repository = "https://github.com/komira-ai/komira"
+readme = "README.md"
+mojo = ["1.0.0"]
+
+[dependencies]
+komira_arrow = { path = "../komira_arrow", version = "0.1" }
+komira_collections = { path = "../komira_collections", version = "0.1" }
+komira_scalar_arithmetic = { path = "../komira_scalar_arithmetic", version = "0.1" }
+
+[targets]
+lib = { path = "src/komira_plan_expr" }
+tests = ["tests"]

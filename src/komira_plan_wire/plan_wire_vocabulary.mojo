@@ -241,7 +241,7 @@ def plan_tag_wire_name(wire: Int32) -> String:
 # ExprTag — engine prefix `EXPR_`
 # Expr node kind. EXPR_CORRELATED_SUBQUERY is the only cross-edge from the
 # expression tree back into the plan tree.
-# Declared in: src/komira_plan_expr/expr.mojo
+# Declared in: src/komira_plan_expr/src/komira_plan_expr/expr.mojo
 #
 # EXEMPT — declared by the engine and named here, but its wire number
 # is RESERVED in plan_vocabulary.proto, so `expr_tag_to_wire` and
@@ -442,7 +442,7 @@ def expr_tag_wire_name(wire: Int32) -> String:
 # Aggregate function. THE ENGINE HAS NO COUNT CONSTANT FOR THIS SPACE —
 # a drift hazard, and it is why count_const is empty here rather than
 # guessed.
-# Declared in: src/komira_plan_expr/agg_expr.mojo
+# Declared in: src/komira_plan_expr/src/komira_plan_expr/agg_expr.mojo
 # ==========================================================================
 
 comptime AGG_FN_WIRE_MEMBERS: Int = 38
@@ -645,7 +645,7 @@ def agg_fn_wire_name(wire: Int32) -> String:
 # Window / partition function. The engine numbering is SPARSE (ranking
 # 0-5, offset 10-14, aggregate 20-24); the gaps are unallocated, not
 # retired, and stay allocatable.
-# Declared in: src/komira_plan_expr/partition_expr.mojo
+# Declared in: src/komira_plan_expr/src/komira_plan_expr/partition_expr.mojo
 # ==========================================================================
 
 comptime WINDOW_FN_WIRE_MEMBERS: Int = 16
@@ -780,7 +780,7 @@ def window_fn_wire_name(wire: Int32) -> String:
 # ==========================================================================
 # FrameUnits — engine prefix `FRAME_UNITS_`
 # Window frame units — ROWS vs RANGE.
-# Declared in: src/komira_plan_expr/partition_frame.mojo
+# Declared in: src/komira_plan_expr/src/komira_plan_expr/partition_frame.mojo
 # ==========================================================================
 
 comptime FRAME_UNITS_WIRE_MEMBERS: Int = 2
@@ -873,7 +873,7 @@ def frame_units_wire_name(wire: Int32) -> String:
 # ==========================================================================
 # FrameBound — engine prefix `FRAME_BOUND_`
 # Window frame boundary kind.
-# Declared in: src/komira_plan_expr/partition_frame.mojo
+# Declared in: src/komira_plan_expr/src/komira_plan_expr/partition_frame.mojo
 # ==========================================================================
 
 comptime FRAME_BOUND_WIRE_MEMBERS: Int = 5
@@ -1373,7 +1373,7 @@ def asof_tolerance_kind_wire_name(wire: Int32) -> String:
 # ==========================================================================
 # CorrelatedKind — engine prefix `CORR_KIND_`
 # Correlated-subquery flavour (EXISTS / NOT EXISTS / scalar / IN).
-# Declared in: src/komira_plan_expr/corr_subquery_data.mojo
+# Declared in: src/komira_plan_expr/src/komira_plan_expr/corr_subquery_data.mojo
 # ==========================================================================
 
 comptime CORRELATED_KIND_WIRE_MEMBERS: Int = 4
@@ -1840,7 +1840,7 @@ def source_variant_tag_wire_name(wire: Int32) -> String:
 # Binary operator. Sparse by design (arithmetic 0-4, comparison 10-15,
 # logical 20-21) — PushdownGate.allowed_binary_ops is a bitmask over these
 # values.
-# Declared in: src/komira_plan_expr/expr.mojo
+# Declared in: src/komira_plan_expr/src/komira_plan_expr/expr.mojo
 # ==========================================================================
 
 comptime BINARY_OP_WIRE_MEMBERS: Int = 13
@@ -1966,7 +1966,7 @@ def binary_op_wire_name(wire: Int32) -> String:
 # ==========================================================================
 # UnaryOp — engine prefix `UN_`
 # Unary operator.
-# Declared in: src/komira_plan_expr/expr.mojo
+# Declared in: src/komira_plan_expr/src/komira_plan_expr/expr.mojo
 # ==========================================================================
 
 comptime UNARY_OP_WIRE_MEMBERS: Int = 9
@@ -2080,7 +2080,7 @@ def unary_op_wire_name(wire: Int32) -> String:
 # ==========================================================================
 # StringOp — engine prefix `STR_`
 # String predicate operator.
-# Declared in: src/komira_plan_expr/expr.mojo
+# Declared in: src/komira_plan_expr/src/komira_plan_expr/expr.mojo
 # ==========================================================================
 
 comptime STRING_OP_WIRE_MEMBERS: Int = 4
@@ -2179,7 +2179,7 @@ def string_op_wire_name(wire: Int32) -> String:
 # ==========================================================================
 # StringFn — engine prefix `STRFN_`
 # Unary scalar string function (EXPR_STRING_FN).
-# Declared in: src/komira_plan_expr/expr.mojo
+# Declared in: src/komira_plan_expr/src/komira_plan_expr/expr.mojo
 # ==========================================================================
 
 comptime STRING_FN_WIRE_MEMBERS: Int = 19
@@ -2323,7 +2323,7 @@ def string_fn_wire_name(wire: Int32) -> String:
 # ==========================================================================
 # StringFnN — engine prefix `STRFNN_`
 # Multi-argument scalar string function (EXPR_STRING_FN_N).
-# Declared in: src/komira_plan_expr/expr.mojo
+# Declared in: src/komira_plan_expr/src/komira_plan_expr/expr.mojo
 # ==========================================================================
 
 comptime STRING_FN_N_WIRE_MEMBERS: Int = 14
@@ -2452,7 +2452,7 @@ def string_fn_n_wire_name(wire: Int32) -> String:
 # ==========================================================================
 # ColSide — engine prefix `COL_SIDE_`
 # Which join input a column reference is qualified to.
-# Declared in: src/komira_plan_expr/expr.mojo
+# Declared in: src/komira_plan_expr/src/komira_plan_expr/expr.mojo
 # ==========================================================================
 
 comptime COL_SIDE_WIRE_MEMBERS: Int = 3
@@ -2548,7 +2548,7 @@ def col_side_wire_name(wire: Int32) -> String:
 # ==========================================================================
 # MathFn1 — engine prefix `MATH_`
 # Unary math function (EXPR_MATH_FN).
-# Declared in: src/komira_plan_expr/expr.mojo
+# Declared in: src/komira_plan_expr/src/komira_plan_expr/expr.mojo
 # ==========================================================================
 
 comptime MATH_FN1_WIRE_MEMBERS: Int = 24
@@ -2707,7 +2707,7 @@ def math_fn1_wire_name(wire: Int32) -> String:
 # ==========================================================================
 # MathFn2 — engine prefix `MATH2_`
 # Binary math function (EXPR_MATH_FN2).
-# Declared in: src/komira_plan_expr/expr.mojo
+# Declared in: src/komira_plan_expr/src/komira_plan_expr/expr.mojo
 # ==========================================================================
 
 comptime MATH_FN2_WIRE_MEMBERS: Int = 2
@@ -2803,7 +2803,7 @@ def math_fn2_wire_name(wire: Int32) -> String:
 # truncation 16-25 — 10..15 is a RESERVED HOLE, and the membership test
 # consults this vocabulary rather than range-checking so a unit landing in
 # it is REFUSED at encode.
-# Declared in: src/komira_plan_expr/expr.mojo
+# Declared in: src/komira_plan_expr/src/komira_plan_expr/expr.mojo
 # ==========================================================================
 
 comptime EXTRACT_FIELD_WIRE_MEMBERS: Int = 25
@@ -2965,7 +2965,7 @@ def extract_field_wire_name(wire: Int32) -> String:
 # ==========================================================================
 # RegexpOp — engine prefix `REGEXP_`
 # Regular-expression operation.
-# Declared in: src/komira_plan_expr/expr.mojo
+# Declared in: src/komira_plan_expr/src/komira_plan_expr/expr.mojo
 # ==========================================================================
 
 comptime REGEXP_OP_WIRE_MEMBERS: Int = 10
@@ -3545,7 +3545,7 @@ def write_compression_wire_name(wire: Int32) -> String:
 # payload. ⚠ NOT A TOTAL UNION ON ITS OWN: kind 0 (`SCALAR_KIND_DTYPE`)
 # means `use the dtype field`, so the live arm is the PAIR (kind, dtype)
 # and no proto `oneof` over kind alone can express it.
-# Declared in: src/komira_plan_expr/scalar_value.mojo
+# Declared in: src/komira_plan_expr/src/komira_plan_expr/scalar_value.mojo
 # ==========================================================================
 
 comptime SCALAR_KIND_WIRE_MEMBERS: Int = 10
@@ -3664,7 +3664,7 @@ def scalar_kind_wire_name(wire: Int32) -> String:
 # Arrow time unit for a TIME / DURATION scalar. Read together with
 # `int_val`, so a wrong unit is a silently wrong VALUE (a nanosecond
 # duration read as seconds) rather than a decode failure.
-# Declared in: src/komira_plan_expr/scalar_value.mojo
+# Declared in: src/komira_plan_expr/src/komira_plan_expr/scalar_value.mojo
 # ==========================================================================
 
 comptime SCALAR_TIME_UNIT_WIRE_MEMBERS: Int = 4

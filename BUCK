@@ -340,9 +340,9 @@ _TESTS_LINTS = [
     floor = 0,
     grounding = {
         "src/komira_arrow/src/komira_arrow/write_target.mojo": ["WFMT_"],
-        "src/komira_plan_expr/expr.mojo": ["EXPR_"],
-        "src/komira_plan_expr/fs_descriptor_pod.mojo": ["FS_SCHEME_"],
-        "src/komira_plan_expr/udf_data.mojo": ["UDF_KIND_"],
+        "src/komira_plan_expr/src/komira_plan_expr/expr.mojo": ["EXPR_"],
+        "src/komira_plan_expr/src/komira_plan_expr/fs_descriptor_pod.mojo": ["FS_SCHEME_"],
+        "src/komira_plan_expr/src/komira_plan_expr/udf_data.mojo": ["UDF_KIND_"],
         "src/komira_plan_ir/logical_plan.mojo": ["PLAN_", "SOURCE_", "JOIN_"],
     },
     not_capabilities = NOT_CAPABILITIES,

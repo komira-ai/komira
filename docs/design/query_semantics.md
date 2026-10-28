@@ -76,7 +76,7 @@ The rulings that settled each item once open or departing, the table of parity g
 
 - **Rule.** Both are total: never NULL, so their result type is a non-nullable BOOLEAN (§8.21). `x IS NULL` is TRUE exactly when `x` is NULL. A NaN is not NULL (§4.3).
 - **DuckDB.** As stated (DuckDB documentation, "NULL values").
-- **Current behaviour.** `src/komira_expr/runtime_expr_bool.mojo:766-800` returns an always-valid result from the validity bit, and the plan declares both non-nullable (`src/komira_plan_expr/expr_walk.mojo:1045-1052`).
+- **Current behaviour.** `src/komira_expr/runtime_expr_bool.mojo:766-800` returns an always-valid result from the validity bit, and the plan declares both non-nullable (`src/komira_plan_expr/src/komira_plan_expr/expr_walk.mojo:1045-1052`).
 - **Mark.** MATCHES.
 
 ### 1.4 IN with a NULL in the list, or a NULL on the left
@@ -102,14 +102,14 @@ The rulings that settled each item once open or departing, the table of parity g
 
 - **Rule.** `a IS DISTINCT FROM b` is FALSE when both are NULL, TRUE when exactly one is NULL, and `a <> b` otherwise; it is never NULL. `IS NOT DISTINCT FROM` is its negation. The same null-safe equality is what an `IS NOT DISTINCT FROM` join key (§3.17) needs.
 - **DuckDB.** As stated (DuckDB documentation, "comparison operators").
-- **Current behaviour.** The plan has no operator for it: the binary operators are ADD SUB MUL DIV MOD, EQ NE LT LE GT GE, AND OR (`src/komira_plan_expr/expr.mojo:665-686`). The SQL parser refuses the spelling by name (`src/komira_sql/sql_parser.mojo:1863-1868`). As a value it can be desugared to `(a IS NULL AND b IS NULL) OR (a IS NOT NULL AND b IS NOT NULL AND a = b)`; a null-safe hash-join key cannot use that form and needs a plan operator.
+- **Current behaviour.** The plan has no operator for it: the binary operators are ADD SUB MUL DIV MOD, EQ NE LT LE GT GE, AND OR (`src/komira_plan_expr/src/komira_plan_expr/expr.mojo:665-686`). The SQL parser refuses the spelling by name (`src/komira_sql/sql_parser.mojo:1863-1868`). As a value it can be desugared to `(a IS NULL AND b IS NULL) OR (a IS NOT NULL AND b IS NOT NULL AND a = b)`; a null-safe hash-join key cannot use that form and needs a plan operator.
 - **Mark.** PARITY GAP ([komira#1218](https://github.com/komira-ai/komira/issues/1218)).
 
 ### 1.7 CASE with a NULL condition
 
 - **Rule.** A `WHEN` whose condition is NULL is not taken; evaluation moves to the next `WHEN`, then to `ELSE`, and a missing `ELSE` answers NULL.
 - **DuckDB.** Standard SQL `CASE`; the oracle confirms.
-- **Current behaviour.** No CASE evaluator here. COALESCE is built as a CASE over `IS NOT NULL` conditions (`src/komira_plan_expr/scalar_desugar.mojo:84-111`).
+- **Current behaviour.** No CASE evaluator here. COALESCE is built as a CASE over `IS NOT NULL` conditions (`src/komira_plan_expr/src/komira_plan_expr/scalar_desugar.mojo:84-111`).
 - **Mark.** MATCHES.
 
 ### 1.8 NULLIF
@@ -181,7 +181,7 @@ The rulings that settled each item once open or departing, the table of parity g
 
 - **Rule.** FIRST and LAST return the value of the first and last row of the group in input order, NULL included. ANY_VALUE returns the first non-NULL value. Without an order imposed below the aggregate, which row is first is not defined, so a test may assert these only over an input whose order the plan fixes.
 - **DuckDB.** "first(arg): Returns the first value (null or non-null) from arg" (DuckDB documentation, "aggregate functions").
-- **Current behaviour.** No evaluator for these is in this repository; the IR states the distinction between ANY_VALUE (first non-NULL) and FIRST (first row) at `src/komira_plan_expr/typed_schema.mojo:1272-1276`.
+- **Current behaviour.** No evaluator for these is in this repository; the IR states the distinction between ANY_VALUE (first non-NULL) and FIRST (first row) at `src/komira_plan_expr/src/komira_plan_expr/typed_schema.mojo:1272-1276`.
 - **Mark.** MATCHES.
 
 ### 2.10 Floating-point SUM and AVG
@@ -209,14 +209,14 @@ The rulings that settled each item once open or departing, the table of parity g
 
 - **Rule.** MIN and MAX of BOOLEAN order FALSE before TRUE and return BOOLEAN. SUM of BOOLEAN counts the TRUE values (its type is §8.1's). BOOL_AND and BOOL_OR skip NULLs and are NULL over a group with no non-NULL value.
 - **DuckDB.** `sum(BOOLEAN)` exists (`extension/core_functions/aggregate/distributive/sum.cpp:163-164` at v1.5.6); `bool_and`/`bool_or` follow §2.1.
-- **Current behaviour.** `sum(<BOOL>)` is typed INT64 and answers the count of non-NULL TRUEs (`src/komira_plan_ir/logical_plan.mojo:2431-2460`); BOOL_AND/BOOL_OR are BOOLEAN (`src/komira_plan_expr/agg_expr.mojo:245-253`).
+- **Current behaviour.** `sum(<BOOL>)` is typed INT64 and answers the count of non-NULL TRUEs (`src/komira_plan_ir/logical_plan.mojo:2431-2460`); BOOL_AND/BOOL_OR are BOOLEAN (`src/komira_plan_expr/src/komira_plan_expr/agg_expr.mojo:245-253`).
 - **Mark.** MATCHES.
 
 ### 2.14 MEDIAN at an even count
 
 - **Rule.** MEDIAN is `quantile_cont(x, 0.5)` over the non-NULL values: with an odd count it is the middle value; with an even count it is the mean of the two middle values, even for an integer input, whose MEDIAN is FLOAT64 (§8.16), so `MEDIAN(1, 2)` is 1.5 and `MEDIAN(1, 2, 3, 4)` is 2.5. NaN takes part per §2.8. Between the two values `lo` and `hi` around the index, at fraction `d`, the answer is DuckDB's interpolation `lo + d * (hi - lo)`, computed in that order, so the extremes are DuckDB's too: a middle pair (+inf, +inf) gives NaN (`inf - inf`), and (-DBL_MAX, DBL_MAX) gives +inf (`hi - lo` overflows). A float answer is compared with §2.10's tolerance.
 - **DuckDB.** "For even value counts, quantitative values are averaged and ordinal values return the lower value"; `quantile_cont` interpolates "between the adjacent values if the index is not an integer" (DuckDB documentation, "aggregate functions").
-- **Current behaviour.** The IR defines MEDIAN as DuckDB's `quantile_cont(x, 0.5)` (`src/komira_plan_expr/agg_expr.mojo:38-40`); the accumulator interpolates `lower * (1 - frac) + upper * frac` at index `q * (n - 1)` (`src/komira_op_agg_state/columnar_acc_agg.mojo:63-71`, `:255`), not DuckDB's formula, so the extremes above answer inf and 0 ("Code that does not follow", item 26).
+- **Current behaviour.** The IR defines MEDIAN as DuckDB's `quantile_cont(x, 0.5)` (`src/komira_plan_expr/src/komira_plan_expr/agg_expr.mojo:38-40`); the accumulator interpolates `lower * (1 - frac) + upper * frac` at index `q * (n - 1)` (`src/komira_op_agg_state/columnar_acc_agg.mojo:63-71`, `:255`), not DuckDB's formula, so the extremes above answer inf and 0 ("Code that does not follow", item 26).
 - **Mark.** MATCHES.
 
 ## 3. NULLs in joins
@@ -232,7 +232,7 @@ The rulings that settled each item once open or departing, the table of parity g
 
 - **Rule.** An ANTI join returns each left row that has no matching right row. A left row whose key is NULL matches nothing and is therefore returned; NULL keys on the right side match nothing and have no effect.
 - **DuckDB.** "Anti joins provide the same logic as the NOT IN operator, except anti joins ignore NULL values from the right table" (DuckDB documentation, "FROM and JOIN").
-- **Current behaviour.** A correlated `NOT EXISTS` lowers to `JOIN_ANTI` (`src/komira_plan_expr/corr_subquery_data.mojo:66-69`).
+- **Current behaviour.** A correlated `NOT EXISTS` lowers to `JOIN_ANTI` (`src/komira_plan_expr/src/komira_plan_expr/corr_subquery_data.mojo:66-69`).
 - **Mark.** MATCHES.
 
 ### 3.3 NOT IN over a subquery
@@ -327,14 +327,14 @@ The rulings that settled each item once open or departing, the table of parity g
 
 - **Rule.** Where a correlated `EXISTS` or `NOT EXISTS` is a top-level AND conjunct of a filter, it is a SEMI join (§3.11) or ANTI join (§3.12). Equality correlation predicates become the join keys; any other correlation predicate becomes the join's residual (§3.5), not a key. A left row with a NULL correlation key has no match, so EXISTS is FALSE and NOT EXISTS TRUE for it. In this position neither produces an output column. Every other position is §3.16.
 - **DuckDB.** Anti joins have the logic of NOT EXISTS, not of NOT IN (§3.2, DuckDB documentation, "FROM and JOIN").
-- **Current behaviour.** `src/komira_plan_expr/corr_subquery_data.mojo:66-69`.
+- **Current behaviour.** `src/komira_plan_expr/src/komira_plan_expr/corr_subquery_data.mojo:66-69`.
 - **Mark.** MATCHES.
 
 ### 3.16 EXISTS outside a filter conjunct
 
 - **Rule.** `EXISTS` and `NOT EXISTS` in any other position (a SELECT-list value, under OR or NOT, inside CASE, compared with a value) answer as DuckDB does: a non-nullable BOOLEAN per row. The plan has no MARK join, the join that yields that BOOLEAN, so until it has one a frontend refuses these positions by name. When a MARK join is added, EXISTS as a value gets a row in §8.
 - **DuckDB.** Evaluates these positions with a MARK join, giving a non-nullable BOOLEAN.
-- **Current behaviour.** The plan's correlated-subquery kinds lower to SEMI and ANTI joins only (`src/komira_plan_expr/corr_subquery_data.mojo:66-69`).
+- **Current behaviour.** The plan's correlated-subquery kinds lower to SEMI and ANTI joins only (`src/komira_plan_expr/src/komira_plan_expr/corr_subquery_data.mojo:66-69`).
 - **Mark.** PARITY GAP ([komira#1220](https://github.com/komira-ai/komira/issues/1220)).
 
 ### 3.17 ASOF equality keys and NULL
@@ -364,14 +364,14 @@ The rulings that settled each item once open or departing, the table of parity g
 
 - **Rule.** Where a sort key does not state a placement, NULLs sort **last in both directions**. This applies to SORT, TOPN, PARTITION_TOPN and the ORDER BY of a window.
 - **DuckDB.** "DuckDB keeps NULLS LAST even for DESC ordering, whereas PostgreSQL places NULLs first on DESC" (DuckDB documentation, "ORDER BY"); `default_null_order` defaults to `NULLS_LAST` (DuckDB documentation, "configuration"). **pyarrow.** `sort_indices` puts nulls at the end by default ([compute functions](https://arrow.apache.org/docs/cpp/compute.html)).
-- **Current behaviour.** `src/komira_plan_expr/null_order_policy.mojo:41-48` records the measurement against DuckDB 1.5.3 and pyarrow 24.0.0, and `derived_nulls_first` (`:80-93`) returns False for both directions.
+- **Current behaviour.** `src/komira_plan_expr/src/komira_plan_expr/null_order_policy.mojo:41-48` records the measurement against DuckDB 1.5.3 and pyarrow 24.0.0, and `derived_nulls_first` (`:80-93`) returns False for both directions.
 - **Mark.** MATCHES.
 
 ### 4.2 Explicit NULL placement
 
 - **Rule.** A sort key that states NULLS FIRST or NULLS LAST is sorted that way, whatever its direction. The plan carries the request per key (`SortData.nulls_first`, `TopNData.nulls_first`).
 - **DuckDB.** `ORDER BY ... NULLS FIRST | NULLS LAST` (DuckDB documentation, "ORDER BY").
-- **Current behaviour.** `src/komira_plan_expr/null_order_policy.mojo:63-69`: the default is consulted only where nobody asked.
+- **Current behaviour.** `src/komira_plan_expr/src/komira_plan_expr/null_order_policy.mojo:63-69`: the default is consulted only where nobody asked.
 - **Mark.** MATCHES.
 
 ### 4.3 NaN in a sort
@@ -435,15 +435,15 @@ The rulings that settled each item once open or departing, the table of parity g
 ### 5.1 The plan's division operator on integers
 
 - **Rule.** `BIN_DIV` over two integer operands is integer division that truncates toward zero, and its result is an integer (§8.9): `7 / 2` is 3 and `-7 / 2` is -3. This is DuckDB's `//`. A frontend whose `/` means true division (SQL, DuckDB, polars) casts the left operand to DOUBLE before building `BIN_DIV`. A frontend whose `//` floors (polars, pandas, Python: `-7 // 2` is -4) builds that from `BIN_DIV` and a correction, not from `BIN_DIV` alone. Over float operands `BIN_DIV` is IEEE division.
-- **DuckDB.** `/` is floating-point division (`5 / 2 = 2.5`) and `//` is integer division (DuckDB documentation, "numeric functions"). The sign of `//` for negative operands is not documented; measured on 1.5.3, `-7 // 2` is -3 (`src/komira_plan_expr/col_expr_division.mojo:5-17`).
-- **Current behaviour.** The column kernel divides with Mojo's integer `/`, which truncates (`src/komira_column_kernels/arithmetic.mojo:675`); its header records the result-type divergence from DuckDB's `/` as deliberate (`:83-88`). The Mojo dataframe surface decides `/` against `//` in one place (`src/komira_plan_expr/col_expr_division.mojo:28-35`). The expression executor (`src/komira_eval/expression_executor.mojo`) also truncates: its integer walkers through `_ee_div_trunc`, and its Float64 walker's `EXPR_DIV_I64` arm by truncating the widened quotient (exact below 2^53). Expression template 8 floors ("Code that does not follow", item 1).
+- **DuckDB.** `/` is floating-point division (`5 / 2 = 2.5`) and `//` is integer division (DuckDB documentation, "numeric functions"). The sign of `//` for negative operands is not documented; measured on 1.5.3, `-7 // 2` is -3 (`src/komira_plan_expr/src/komira_plan_expr/col_expr_division.mojo:5-17`).
+- **Current behaviour.** The column kernel divides with Mojo's integer `/`, which truncates (`src/komira_column_kernels/arithmetic.mojo:675`); its header records the result-type divergence from DuckDB's `/` as deliberate (`:83-88`). The Mojo dataframe surface decides `/` against `//` in one place (`src/komira_plan_expr/src/komira_plan_expr/col_expr_division.mojo:28-35`). The expression executor (`src/komira_eval/expression_executor.mojo`) also truncates: its integer walkers through `_ee_div_trunc`, and its Float64 walker's `EXPR_DIV_I64` arm by truncating the widened quotient (exact below 2^53). Expression template 8 floors ("Code that does not follow", item 1).
 - **Mark.** MATCHES: at the SQL surface. The plan has one division operator, DuckDB's `//`; a SQL frontend lowers `/` to a DOUBLE division and `//` to `BIN_DIV`, so a SQL query's result is DuckDB's for both spellings.
 
 ### 5.2 Modulo sign
 
 - **Rule.** `BIN_MOD` is the truncated remainder: its sign is the dividend's. `-7 % 2` is -1 and `7 % -2` is 1. `a = (a / b) * b + (a % b)` holds with §5.1's division.
-- **DuckDB.** Not documented; measured on 1.5.3, `-7 % 2` is -1 (`src/komira_plan_expr/col_expr.mojo:852-856`). polars and Python floor instead (`-7 % 2` is 1).
-- **Current behaviour.** No `BIN_MOD` column kernel is in this repository; the IR states the rule (`src/komira_plan_expr/col_expr.mojo:852-856`).
+- **DuckDB.** Not documented; measured on 1.5.3, `-7 % 2` is -1 (`src/komira_plan_expr/src/komira_plan_expr/col_expr.mojo:852-856`). polars and Python floor instead (`-7 % 2` is 1).
+- **Current behaviour.** No `BIN_MOD` column kernel is in this repository; the IR states the rule (`src/komira_plan_expr/src/komira_plan_expr/col_expr.mojo:852-856`).
 - **Mark.** MATCHES.
 
 ### 5.3 Integer division or modulo by zero
@@ -499,7 +499,7 @@ The rulings that settled each item once open or departing, the table of parity g
 
 - **Rule.** `BIN_MOD` of DECIMAL(p1, s1) and DECIMAL(p2, s2) is DECIMAL(max(p1 - s1, p2 - s2) + max(s1, s2), max(s1, s2)); if that precision exceeds 38, both operands are cast to DOUBLE and the result is DOUBLE (§5.9). A zero divisor answers NULL for that row, as §5.3 does for integers. DECIMAL `/` is FLOAT64 (§8.13), so its zero divisor follows §5.6.
 - **DuckDB.** `BindDecimalModulo` computes that type through `BindDecimalArithmetic` with no `+ 1`, falls back to DOUBLE when it does not fit, and executes through `GetBinaryFunctionIgnoreZero`, which answers NULL for a zero divisor (`src/function/scalar/operator/arithmetic.cpp:193-245` and `:1118-1132` at v1.5.6).
-- **Current behaviour.** The plan types DECIMAL `%` with the **left** operand's precision and scale (`src/komira_plan_expr/expr_walk.mojo:896-901`), which cannot hold `5.0 % 0.33` = `0.05` (5.0 − 15 × 0.33) at scale 1; no DECIMAL `%` kernel is here ("Code that does not follow", item 9).
+- **Current behaviour.** The plan types DECIMAL `%` with the **left** operand's precision and scale (`src/komira_plan_expr/src/komira_plan_expr/expr_walk.mojo:896-901`), which cannot hold `5.0 % 0.33` = `0.05` (5.0 − 15 × 0.33) at scale 1; no DECIMAL `%` kernel is here ("Code that does not follow", item 9).
 - **Mark.** MATCHES.
 
 ## 6. Casts
@@ -508,7 +508,7 @@ The rulings that settled each item once open or departing, the table of parity g
 
 - **Rule.** A CAST whose input cannot be represented in the target type, or cannot be parsed, raises an error. TRY_CAST answers NULL for that row instead, and is therefore always nullable. A NULL input casts to NULL under both.
 - **DuckDB.** A failed cast "throws an error by default"; `TRY_CAST` converts failures to NULL (DuckDB documentation, "typecasting").
-- **Current behaviour.** `CastData.try_cast` selects the mode (`src/komira_plan_expr/expr.mojo:1638-1651`); a TRY_CAST result is typed nullable (`src/komira_plan_expr/expr_walk.mojo:1096-1114`).
+- **Current behaviour.** `CastData.try_cast` selects the mode (`src/komira_plan_expr/src/komira_plan_expr/expr.mojo:1638-1651`); a TRY_CAST result is typed nullable (`src/komira_plan_expr/src/komira_plan_expr/expr_walk.mojo:1096-1114`).
 - **Mark.** MATCHES.
 
 ### 6.2 Integer to narrower integer
@@ -571,7 +571,7 @@ The rulings that settled each item once open or departing, the table of parity g
 
 - **Rule.** DuckDB's, with `TimeZone = 'UTC'`. A timestamp with a time zone is an instant (UTC ticks), and the zone is metadata on the column type. A timestamp without one is a wall-clock reading with no zone. There is one session time zone and it is UTC: field extraction (`year`, `hour`, ...) and `date_trunc` over a zoned timestamp operate on the UTC wall clock. Comparison and join of two zoned timestamps compare instants, whatever their zones. Mixing zoned and unzoned is §6.11.
 - **DuckDB.** `TIMESTAMPTZ` stores "the INT64 number of non-leap microseconds since the Unix epoch"; extraction and rendering use the session `TimeZone` setting, which defaults to the system zone (DuckDB documentation, "timestamp types", "configuration"). With `TimeZone = 'UTC'`, DuckDB answers as stated.
-- **Current behaviour.** The zone travels on the field (`src/komira_kernels/join_key_envelope.mojo:319-330`; aliases keep it, `src/komira_plan_expr/expr_walk.mojo:740-750`). The extract kernels take no zone (`src/komira_kernels/temporal_extract.mojo:1152`), so they already answer in UTC.
+- **Current behaviour.** The zone travels on the field (`src/komira_kernels/join_key_envelope.mojo:319-330`; aliases keep it, `src/komira_plan_expr/src/komira_plan_expr/expr_walk.mojo:740-750`). The extract kernels take no zone (`src/komira_kernels/temporal_extract.mojo:1152`), so they already answer in UTC.
 - **Mark.** MATCHES.
 
 ### 6.10 CAST_TO_VARCHAR rendering
@@ -609,35 +609,35 @@ The rulings that settled each item once open or departing, the table of parity g
 
 - **Rule.** `length(s)` counts Unicode code points; `strlen(s)` counts bytes; `bit_length(s)` is 8 times `strlen(s)`. All three are INT64, and NULL for a NULL input. Grapheme-cluster counts are not offered.
 - **DuckDB.** `length`: "Number of characters"; `strlen`: "Number of bytes" (DuckDB documentation, "text functions"). DuckDB's `length_grapheme` has no plan counterpart. **pyarrow.** `utf8_length` counts code points and `binary_length` bytes.
-- **Current behaviour.** `src/komira_plan_expr/expr.mojo:872-889` (`STRFN_LENGTH`) and `:902-910`; the grapheme functions are refused by name (`src/komira_sql/sql_fn_table.mojo:1029-1040`).
+- **Current behaviour.** `src/komira_plan_expr/src/komira_plan_expr/expr.mojo:872-889` (`STRFN_LENGTH`) and `:902-910`; the grapheme functions are refused by name (`src/komira_sql/sql_fn_table.mojo:1029-1040`).
 - **Mark.** MATCHES.
 
 ### 7.2 CONCAT
 
 - **Rule.** `concat(a, b, ...)` skips NULL arguments and is never NULL: `concat('a', NULL, 'c')` is `'ac'` and `concat(NULL, NULL)` is `''`.
-- **DuckDB.** "NULL inputs are skipped" (DuckDB documentation, "text functions"); `concat(NULL, NULL)` measured as `''` (`src/komira_plan_expr/expr.mojo:1103-1110`).
-- **Current behaviour.** `STRFNN_CONCAT` (`src/komira_plan_expr/expr.mojo:1103-1121`).
+- **DuckDB.** "NULL inputs are skipped" (DuckDB documentation, "text functions"); `concat(NULL, NULL)` measured as `''` (`src/komira_plan_expr/src/komira_plan_expr/expr.mojo:1103-1110`).
+- **Current behaviour.** `STRFNN_CONCAT` (`src/komira_plan_expr/src/komira_plan_expr/expr.mojo:1103-1121`).
 - **Mark.** MATCHES.
 
 ### 7.3 The `||` operator
 
 - **Rule.** `a || b` is NULL if either operand is NULL. The plan has no `||` operator, and a frontend must not lower `||` to CONCAT (§7.2), whose NULL rule is the opposite. It lowers `a || b` to `CASE WHEN a IS NULL OR b IS NULL THEN NULL ELSE concat(a, b) END`.
 - **DuckDB.** "Any NULL input results in NULL" (DuckDB documentation, "text functions").
-- **Current behaviour.** No `||` in the plan or the SQL parser (`src/komira_plan_expr/expr.mojo:1110-1114`).
+- **Current behaviour.** No `||` in the plan or the SQL parser (`src/komira_plan_expr/src/komira_plan_expr/expr.mojo:1110-1114`).
 - **Mark.** MATCHES.
 
 ### 7.4 CONCAT_WS
 
 - **Rule.** `concat_ws(sep, a, b, ...)`: a NULL separator makes the result NULL; a NULL argument is skipped together with its separator, so `concat_ws('-', 'a', NULL, 'c')` is `'a-c'` and `concat_ws('-', NULL, 'a')` is `'a'`. With every value argument NULL and a non-NULL separator, the result is `''`, not NULL.
-- **DuckDB.** "NULL inputs are skipped" (DuckDB documentation, "text functions"); the NULL-separator rule is measured on 1.5.3 (`src/komira_plan_expr/expr.mojo:1123-1137`).
-- **Current behaviour.** `STRFNN_CONCAT_WS` (`src/komira_plan_expr/expr.mojo:1123-1137`).
+- **DuckDB.** "NULL inputs are skipped" (DuckDB documentation, "text functions"); the NULL-separator rule is measured on 1.5.3 (`src/komira_plan_expr/src/komira_plan_expr/expr.mojo:1123-1137`).
+- **Current behaviour.** `STRFNN_CONCAT_WS` (`src/komira_plan_expr/src/komira_plan_expr/expr.mojo:1123-1137`).
 - **Mark.** MATCHES.
 
 ### 7.5 CONCAT argument types
 
 - **Rule.** As DuckDB: an argument of CONCAT and CONCAT_WS may be of any type and renders as `CAST(x AS VARCHAR)` does (§6.10). The plan accepts only string arguments today, so a non-string argument is refused by name until it accepts others; a frontend may cast each argument to VARCHAR first.
-- **DuckDB.** `concat` accepts any type and renders it (`concat(1, 'a', 2.5)` is `'1a2.5'`, measured, `src/komira_plan_expr/expr.mojo:1116-1121`).
-- **Current behaviour.** As the rule (`src/komira_plan_expr/expr.mojo:1116-1121`).
+- **DuckDB.** `concat` accepts any type and renders it (`concat(1, 'a', 2.5)` is `'1a2.5'`, measured, `src/komira_plan_expr/src/komira_plan_expr/expr.mojo:1116-1121`).
+- **Current behaviour.** As the rule (`src/komira_plan_expr/src/komira_plan_expr/expr.mojo:1116-1121`).
 - **Mark.** PARITY GAP ([komira#1223](https://github.com/komira-ai/komira/issues/1223)).
 
 ### 7.6 LIKE
@@ -649,7 +649,7 @@ The rulings that settled each item once open or departing, the table of parity g
 
 ### 7.7 LIKE ESCAPE and ILIKE
 
-- **Rule.** `LIKE ... ESCAPE c` and ILIKE answer as DuckDB does. The plan's `STR_LIKE` (`src/komira_plan_expr/expr.mojo:807`) carries no escape character and no case-insensitive flag, so until it does a frontend refuses `ESCAPE` and ILIKE by name.
+- **Rule.** `LIKE ... ESCAPE c` and ILIKE answer as DuckDB does. The plan's `STR_LIKE` (`src/komira_plan_expr/src/komira_plan_expr/expr.mojo:807`) carries no escape character and no case-insensitive flag, so until it does a frontend refuses `ESCAPE` and ILIKE by name.
 - **DuckDB.** Both exist (DuckDB documentation, "pattern matching").
 - **Current behaviour.** The SQL parser refuses `ESCAPE` by name (`src/komira_sql/sql_parser.mojo:1520`); ILIKE is parsed into the SQL tree, and there is no plan operator for it.
 - **Mark.** PARITY GAP ([komira#1224](https://github.com/komira-ai/komira/issues/1224)).
@@ -699,7 +699,7 @@ The rulings that settled each item once open or departing, the table of parity g
 
 - **Rule.** `''` is a value, distinct from NULL: `'' IS NULL` is FALSE, `length('')` is 0, and `''` and NULL are different grouping keys.
 - **DuckDB.** The same.
-- **Current behaviour.** A plan literal keeps `''` distinct from NULL (`src/komira_plan_expr/scalar_value.mojo:33-38`). The CSV writer renders NULL as an empty field (`src/komira_csv/csv_sink.mojo:32`), so a written CSV does not distinguish them.
+- **Current behaviour.** A plan literal keeps `''` distinct from NULL (`src/komira_plan_expr/src/komira_plan_expr/scalar_value.mojo:33-38`). The CSV writer renders NULL as an empty field (`src/komira_csv/csv_sink.mojo:32`), so a written CSV does not distinguish them.
 - **Mark.** MATCHES.
 
 ### 7.13 Where the CSV reader turns an empty field into NULL
@@ -735,14 +735,14 @@ The type of every result column is in [the result-type table](query_semantics_ty
 - with an ORDER BY in the window, `RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW`, where CURRENT ROW includes all peers of the current row, so rows tying on the order key get the same value;
 - with no ORDER BY, the whole partition.
 - **DuckDB.** As stated (DuckDB documentation, "window functions").
-- **Current behaviour.** `PartitionFrame.running_range()` is the SQL default, and its docstring says why ROWS is wrong for it (`src/komira_plan_expr/partition_frame.mojo:114-130`). FIRST_VALUE, LAST_VALUE and NTH_VALUE default to it (`src/komira_plan_expr/partition_expr.mojo:226-255`); the `running_*` builders do not ("Code that does not follow", item 6).
+- **Current behaviour.** `PartitionFrame.running_range()` is the SQL default, and its docstring says why ROWS is wrong for it (`src/komira_plan_expr/src/komira_plan_expr/partition_frame.mojo:114-130`). FIRST_VALUE, LAST_VALUE and NTH_VALUE default to it (`src/komira_plan_expr/src/komira_plan_expr/partition_expr.mojo:226-255`); the `running_*` builders do not ("Code that does not follow", item 6).
 - **Mark.** MATCHES.
 
 ### 9.2 Ranking and ties
 
 - **Rule.** ROW_NUMBER numbers the rows of a partition 1 to n. Peers are rows whose order keys compare equal on every key, with NULL equal to NULL (§9.7) and floats under §2.6. RANK gives peers the row number of the first peer, leaving gaps. DENSE_RANK numbers peer groups 1, 2, 3 without gaps; PERCENT_RANK and CUME_DIST are computed over the same peer groups. Ranking functions ignore the frame, so this peer definition applies to them whatever the frame says.
 - **DuckDB.** rank is "same as row_number of its first peer"; dense_rank "counts peer groups" (DuckDB documentation, "window functions").
-- **Current behaviour.** Declared at `src/komira_plan_expr/partition_expr.mojo:44-46`; the window operator is not here.
+- **Current behaviour.** Declared at `src/komira_plan_expr/src/komira_plan_expr/partition_expr.mojo:44-46`; the window operator is not here.
 - **Mark.** MATCHES.
 
 ### 9.3 ROW_NUMBER among peers
@@ -756,21 +756,21 @@ The type of every result column is in [the result-type table](query_semantics_ty
 
 - **Rule.** The offset defaults to 1. Where the offset row does not exist, the result is the default value, and the default value defaults to NULL. An explicit NULL default is the same as no default. LAG and LEAD ignore the frame.
 - **DuckDB.** The offset "defaults to 1"; the default "default to NULL" (DuckDB documentation, "window functions").
-- **Current behaviour.** `src/komira_plan_expr/partition_expr.mojo:199-224` and `:371-384`.
+- **Current behaviour.** `src/komira_plan_expr/src/komira_plan_expr/partition_expr.mojo:199-224` and `:371-384`.
 - **Mark.** MATCHES.
 
 ### 9.5 IGNORE NULLS
 
 - **Rule.** Without `IGNORE NULLS`, LAG, LEAD, FIRST_VALUE, LAST_VALUE and NTH_VALUE count every row, NULL or not (§9.10). With it they answer as DuckDB does; it is not in the plan vocabulary yet, so a frontend refuses it by name.
 - **DuckDB.** Its signatures accept `[IGNORE NULLS]` on `first_value`, `last_value`, `nth_value`, `lag` and `lead` (DuckDB documentation, "window functions").
-- **Current behaviour.** No such field on `PartitionExpr` (`src/komira_plan_expr/partition_expr.mojo:110-150`).
+- **Current behaviour.** No such field on `PartitionExpr` (`src/komira_plan_expr/src/komira_plan_expr/partition_expr.mojo:110-150`).
 - **Mark.** PARITY GAP ([komira#1226](https://github.com/komira-ai/komira/issues/1226)).
 
 ### 9.6 NULL placement in a window's ORDER BY
 
 - **Rule.** A window ORDER BY key with no stated placement uses §4.1's default; an explicit `NULLS FIRST` or `NULLS LAST` inside `OVER (...)` answers as DuckDB does. The plan cannot express a placement yet, so a frontend refuses `NULLS FIRST` inside `OVER` by name (`NULLS LAST` is the default, so it may be accepted).
 - **DuckDB.** Accepts an explicit placement in `OVER`.
-- **Current behaviour.** The PARTITION_BY node carries no per-key placement (its wire arm has no such field), so the window key takes `derived_nulls_first` (`src/komira_plan_expr/null_order_policy.mojo:80-93`).
+- **Current behaviour.** The PARTITION_BY node carries no per-key placement (its wire arm has no such field), so the window key takes `derived_nulls_first` (`src/komira_plan_expr/src/komira_plan_expr/null_order_policy.mojo:80-93`).
 - **Mark.** PARITY GAP ([komira#1227](https://github.com/komira-ai/komira/issues/1227)).
 
 ### 9.7 NULL order keys are peers
@@ -782,7 +782,7 @@ The type of every result column is in [the result-type table](query_semantics_ty
 
 ### 9.8 RANGE frames with offsets
 
-- **Rule.** As DuckDB. `RANGE BETWEEN n PRECEDING AND m FOLLOWING` needs exactly one numeric or temporal order key. The frames of NULL and NaN order keys are DuckDB's, measured by the oracle before a case relies on them; the expected answer is that a NULL-keyed row's frame is the NULL peer group and NaN keys are peers of each other, sorting per §4.3. The plan's offsets are INT64 (`src/komira_plan_expr/partition_frame.mojo:51-58`); a fractional offset over a float key and an interval offset over a temporal key are refused by name until the plan carries them ([komira#1228](https://github.com/komira-ai/komira/issues/1228)).
+- **Rule.** As DuckDB. `RANGE BETWEEN n PRECEDING AND m FOLLOWING` needs exactly one numeric or temporal order key. The frames of NULL and NaN order keys are DuckDB's, measured by the oracle before a case relies on them; the expected answer is that a NULL-keyed row's frame is the NULL peer group and NaN keys are peers of each other, sorting per §4.3. The plan's offsets are INT64 (`src/komira_plan_expr/src/komira_plan_expr/partition_frame.mojo:51-58`); a fractional offset over a float key and an interval offset over a temporal key are refused by name until the plan carries them ([komira#1228](https://github.com/komira-ai/komira/issues/1228)).
 - **DuckDB.** Accepts fractional offsets over float keys; its frame for a NULL or NaN key is not documented and the oracle measures it.
 - **Current behaviour.** No window operator here.
 - **Mark.** MATCHES (its non-integer offsets are a parity gap).
@@ -798,7 +798,7 @@ The type of every result column is in [the result-type table](query_semantics_ty
 
 - **Rule.** These functions respect NULLs: FIRST_VALUE is the value of the frame's first row and LAST_VALUE of its last row, NULL if that row's value is NULL. NTH_VALUE(x, n) is the value of the n-th row of the frame, counting from 1 and counting rows whose value is NULL; it is NULL when the frame has fewer than n rows. All three are NULL over an empty frame. Skipping NULLs (`IGNORE NULLS`) is §9.5.
 - **DuckDB.** RESPECT NULLS is the default, with IGNORE NULLS as an option; `nth_value` evaluates "at the nth row (counting from 1) of the window frame" (DuckDB documentation, "window functions").
-- **Current behaviour.** `PartitionExpr` carries no IGNORE NULLS field, and the value functions read their frame (`src/komira_plan_expr/partition_expr.mojo:51-54`, `:226-255`); no window operator is in this repository.
+- **Current behaviour.** `PartitionExpr` carries no IGNORE NULLS field, and the value functions read their frame (`src/komira_plan_expr/src/komira_plan_expr/partition_expr.mojo:51-54`, `:226-255`); no window operator is in this repository.
 - **Mark.** MATCHES.
 
 ## 10. Reserved

@@ -69,7 +69,7 @@ enum PlanTag {
 // ----------------------------------------------------------------------
 // Expr node kind. EXPR_CORRELATED_SUBQUERY is the only cross-edge from
 // the expression tree back into the plan tree.
-// Derived from: src/komira_plan_expr/expr.mojo
+// Derived from: src/komira_plan_expr/src/komira_plan_expr/expr.mojo
 // Engine prefix: EXPR_
 //
 // EXEMPT — declared by the engine, deliberately NOT on the wire.
@@ -117,7 +117,7 @@ enum ExprTag {
 // Aggregate function. THE ENGINE HAS NO COUNT CONSTANT FOR THIS SPACE —
 // a drift hazard, and it is why count_const is empty here rather than
 // guessed.
-// Derived from: src/komira_plan_expr/agg_expr.mojo
+// Derived from: src/komira_plan_expr/src/komira_plan_expr/agg_expr.mojo
 // Engine prefix: AGG_
 // ----------------------------------------------------------------------
 enum AggFn {
@@ -166,7 +166,7 @@ enum AggFn {
 // Window / partition function. The engine numbering is SPARSE (ranking
 // 0-5, offset 10-14, aggregate 20-24); the gaps are unallocated, not
 // retired, and stay allocatable.
-// Derived from: src/komira_plan_expr/partition_expr.mojo
+// Derived from: src/komira_plan_expr/src/komira_plan_expr/partition_expr.mojo
 // Engine prefix: PF_
 // ----------------------------------------------------------------------
 enum WindowFn {
@@ -191,7 +191,7 @@ enum WindowFn {
 
 // ----------------------------------------------------------------------
 // Window frame units — ROWS vs RANGE.
-// Derived from: src/komira_plan_expr/partition_frame.mojo
+// Derived from: src/komira_plan_expr/src/komira_plan_expr/partition_frame.mojo
 // Engine prefix: FRAME_UNITS_
 // ----------------------------------------------------------------------
 enum FrameUnits {
@@ -202,7 +202,7 @@ enum FrameUnits {
 
 // ----------------------------------------------------------------------
 // Window frame boundary kind.
-// Derived from: src/komira_plan_expr/partition_frame.mojo
+// Derived from: src/komira_plan_expr/src/komira_plan_expr/partition_frame.mojo
 // Engine prefix: FRAME_BOUND_
 // ----------------------------------------------------------------------
 enum FrameBound {
@@ -270,7 +270,7 @@ enum AsofToleranceKind {
 
 // ----------------------------------------------------------------------
 // Correlated-subquery flavour (EXISTS / NOT EXISTS / scalar / IN).
-// Derived from: src/komira_plan_expr/corr_subquery_data.mojo
+// Derived from: src/komira_plan_expr/src/komira_plan_expr/corr_subquery_data.mojo
 // Engine prefix: CORR_KIND_
 // ----------------------------------------------------------------------
 enum CorrelatedKind {
@@ -351,7 +351,7 @@ enum SourceVariantTag {
 // Binary operator. Sparse by design (arithmetic 0-4, comparison 10-15,
 // logical 20-21) — PushdownGate.allowed_binary_ops is a bitmask over
 // these values.
-// Derived from: src/komira_plan_expr/expr.mojo
+// Derived from: src/komira_plan_expr/src/komira_plan_expr/expr.mojo
 // Engine prefix: BIN_
 // ----------------------------------------------------------------------
 enum BinaryOp {
@@ -373,7 +373,7 @@ enum BinaryOp {
 
 // ----------------------------------------------------------------------
 // Unary operator.
-// Derived from: src/komira_plan_expr/expr.mojo
+// Derived from: src/komira_plan_expr/src/komira_plan_expr/expr.mojo
 // Engine prefix: UN_
 // ----------------------------------------------------------------------
 enum UnaryOp {
@@ -391,7 +391,7 @@ enum UnaryOp {
 
 // ----------------------------------------------------------------------
 // String predicate operator.
-// Derived from: src/komira_plan_expr/expr.mojo
+// Derived from: src/komira_plan_expr/src/komira_plan_expr/expr.mojo
 // Engine prefix: STR_
 // ----------------------------------------------------------------------
 enum StringOp {
@@ -404,7 +404,7 @@ enum StringOp {
 
 // ----------------------------------------------------------------------
 // Unary scalar string function (EXPR_STRING_FN).
-// Derived from: src/komira_plan_expr/expr.mojo
+// Derived from: src/komira_plan_expr/src/komira_plan_expr/expr.mojo
 // Engine prefix: STRFN_
 // ----------------------------------------------------------------------
 enum StringFn {
@@ -432,7 +432,7 @@ enum StringFn {
 
 // ----------------------------------------------------------------------
 // Multi-argument scalar string function (EXPR_STRING_FN_N).
-// Derived from: src/komira_plan_expr/expr.mojo
+// Derived from: src/komira_plan_expr/src/komira_plan_expr/expr.mojo
 // Engine prefix: STRFNN_
 // ----------------------------------------------------------------------
 enum StringFnN {
@@ -455,7 +455,7 @@ enum StringFnN {
 
 // ----------------------------------------------------------------------
 // Which join input a column reference is qualified to.
-// Derived from: src/komira_plan_expr/expr.mojo
+// Derived from: src/komira_plan_expr/src/komira_plan_expr/expr.mojo
 // Engine prefix: COL_SIDE_
 // ----------------------------------------------------------------------
 enum ColSide {
@@ -467,7 +467,7 @@ enum ColSide {
 
 // ----------------------------------------------------------------------
 // Unary math function (EXPR_MATH_FN).
-// Derived from: src/komira_plan_expr/expr.mojo
+// Derived from: src/komira_plan_expr/src/komira_plan_expr/expr.mojo
 // Engine prefix: MATH_
 // ----------------------------------------------------------------------
 enum MathFn1 {
@@ -500,7 +500,7 @@ enum MathFn1 {
 
 // ----------------------------------------------------------------------
 // Binary math function (EXPR_MATH_FN2).
-// Derived from: src/komira_plan_expr/expr.mojo
+// Derived from: src/komira_plan_expr/src/komira_plan_expr/expr.mojo
 // Engine prefix: MATH2_
 // ----------------------------------------------------------------------
 enum MathFn2 {
@@ -514,7 +514,7 @@ enum MathFn2 {
 // truncation 16-25 — 10..15 is a RESERVED HOLE, and the membership test
 // consults this vocabulary rather than range-checking so a unit landing
 // in it is REFUSED at encode.
-// Derived from: src/komira_plan_expr/expr.mojo
+// Derived from: src/komira_plan_expr/src/komira_plan_expr/expr.mojo
 // Engine prefix: EXTRACT_
 // ----------------------------------------------------------------------
 enum ExtractField {
@@ -548,7 +548,7 @@ enum ExtractField {
 
 // ----------------------------------------------------------------------
 // Regular-expression operation.
-// Derived from: src/komira_plan_expr/expr.mojo
+// Derived from: src/komira_plan_expr/src/komira_plan_expr/expr.mojo
 // Engine prefix: REGEXP_
 // ----------------------------------------------------------------------
 enum RegexpOp {
@@ -683,7 +683,7 @@ enum WriteCompression {
 // (`SCALAR_KIND_DTYPE`) means `use the dtype field`, so the live arm is
 // the PAIR (kind, dtype) and no proto `oneof` over kind alone can
 // express it.
-// Derived from: src/komira_plan_expr/scalar_value.mojo
+// Derived from: src/komira_plan_expr/src/komira_plan_expr/scalar_value.mojo
 // Engine prefix: SCALAR_KIND_
 // ----------------------------------------------------------------------
 enum ScalarKind {
@@ -706,7 +706,7 @@ enum ScalarKind {
 // Arrow time unit for a TIME / DURATION scalar. Read together with
 // `int_val`, so a wrong unit is a silently wrong VALUE (a nanosecond
 // duration read as seconds) rather than a decode failure.
-// Derived from: src/komira_plan_expr/scalar_value.mojo
+// Derived from: src/komira_plan_expr/src/komira_plan_expr/scalar_value.mojo
 // Engine prefix: SCALAR_TIME_UNIT_
 // ----------------------------------------------------------------------
 enum ScalarTimeUnit {

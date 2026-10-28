@@ -378,7 +378,7 @@ message WireStepNode {
   repeated WireScalar args      = 2;  // literals only; a non-literal argument is captured with the code
 }
 
-// AggFn, new value AGG_UDF = 38; engine tag AGG_UDF = 37 (src/komira_plan_expr/agg_expr.mojo:403 has 36,
+// AggFn, new value AGG_UDF = 38; engine tag AGG_UDF = 37 (src/komira_plan_expr/src/komira_plan_expr/agg_expr.mojo:403 has 36,
 // AGG_KURTOSIS_POP, as the highest; the wire value is the engine tag + 1). No new message: a WireAggExpr with
 // func = AGG_UDF carries one argument, child0, which is a WireUdfApply naming an AGGREGATE UdfRef.
 ```
@@ -623,7 +623,7 @@ type and size before its first upload, and marks tabular values.
 
 ### 10.7 Stability and nulls
 
-These fields reuse the engine's vocabularies as wire enums: `UDF_STABILITY_*` (`src/komira_plan_expr/udf_data.mojo:165-167`)
+These fields reuse the engine's vocabularies as wire enums: `UDF_STABILITY_*` (`src/komira_plan_expr/src/komira_plan_expr/udf_data.mojo:165-167`)
 and `UDF_NULL_*` (`:154-156`). Each enum has `*_WIRE_UNSPECIFIED = 0`, which is refused, and both fields are required
 in a `UdfRef`. `stability` is the UDF's determinism declaration; there is no separate field. The SDK's defaults are
 part of its API, not of the format:

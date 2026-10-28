@@ -52,6 +52,7 @@ PACKAGES = {
     "komira_metrics": "0.1.0",
     "komira_name_registry": "0.1.0",
     "komira_parquet_api": "0.1.0",
+    "komira_plan_expr": "0.1.0",
     "komira_plan_proto": "0.1.0",
     "komira_proto_codec": "0.1.0",
     "komira_protobuf": "0.1.0",
