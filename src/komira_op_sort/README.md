@@ -30,7 +30,9 @@ batch by it.
   `_execute_topn_sink` over `SortSinkData` / `TopNSinkData` of
   `komira_physical_plan`), and `append_deterministic_tiebreak[_schema]`,
   the one rule that makes a tied top-N cut deterministic across runs whose
-  input order differs.
+  input order differs. `_execute_sort_sink` does not resolve dictionary
+  keys: a dictionary-encoded sort key raises "unsupported sort key type".
+  `_execute_topn_sink` resolves a numeric dictionary key to its values first.
 - `sort_topn_heap`: `topn_heap_select`, multi-key top-K over a
   `RecordBatch` by a bounded heap, O(N log K), for INT64 / INT32 / FLOAT64 /
   STRING keys. Rows that tie on every key compare by row index, so the heap
