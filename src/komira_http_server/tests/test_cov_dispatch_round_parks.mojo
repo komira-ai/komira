@@ -10,7 +10,8 @@
 # the round's next write parks for certain.
 #
 # Groups (and the defect each would catch):
-#   P  a 400 for a malformed head, a 417 for a refused expectation, a 400
+#   P  a 400 for a malformed head, a 431 for a head that fills the receive
+#      buffer without ending, a 417 for a refused expectation, a 400
 #      for bad chunk framing and an interim 100 Continue that cannot be
 #      written now: not parked (lost, or the connection dropped), parked
 #      with the wrong bytes, the round not reporting the connection alive,
@@ -168,6 +169,19 @@ def test_refused_expectation_parks_its_417() raises:
         False,
     )
     assert_equal(r[0], _error(417))
+    assert_equal(r[1], 0)
+
+
+def test_head_filling_the_buffer_parks_its_431() raises:
+    """A head that fills the receive buffer without ending cannot complete:
+    it is answered 431 and the answer parks."""
+    var pad = String()
+    for _ in range(REQ_BUF_BYTES):
+        pad += "p"
+    var r = _parked_after(
+        "GET / HTTP/1.1\r\nHost: example.com\r\nX-Pad: " + pad, True
+    )
+    assert_equal(r[0], _error(431))
     assert_equal(r[1], 0)
 
 

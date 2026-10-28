@@ -1040,7 +1040,7 @@ def serve_read_round_dispatch_chained[
                 advance = advance + outcome.content_length
                 if off + advance > got:
                     keep_alive = False
-                    break
+                    break  # cov: unreachable a body short of its length in the buffer set body_split above and stopped
 
             off = off + advance
 

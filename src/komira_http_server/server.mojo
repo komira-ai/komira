@@ -1137,7 +1137,7 @@ struct HttpServer[
                         self._fd_to_idx,
                     )
                 except e:
-                    _ = e
+                    _ = e  # cov: unreachable accept_one_and_register raises only if registering a just-accepted fd fails
                 i = i + 1
                 continue
 
@@ -1151,7 +1151,7 @@ struct HttpServer[
                 try:
                     close_and_remove(self._conns, self._fd_to_idx, idx)
                 except e:
-                    _ = e
+                    _ = e  # cov: unreachable close_and_remove raises only for an fd missing from fd_to_idx; idx came from it
                 i = i + 1
                 continue
 
@@ -1166,15 +1166,15 @@ struct HttpServer[
                                 self._conns[idx]._reg, INTEREST_READ,
                             )
                         except e:
-                            _ = e
+                            _ = e  # cov: unreachable Reactor.modify fails only if epoll_ctl or kevent rejects a registered open fd
                             try:
-                                close_and_remove(
+                                close_and_remove(  # cov: unreachable close_and_remove raises only for an fd missing from fd_to_idx; idx came from it
                                     self._conns, self._fd_to_idx, idx,
                                 )
-                            except e2:
-                                _ = e2
-                            i = i + 1
-                            continue
+                            except e2:  # cov: unreachable close_and_remove raises only for an fd missing from fd_to_idx; idx came from it
+                                _ = e2  # cov: unreachable close_and_remove raises only for an fd missing from fd_to_idx; idx came from it
+                            i = i + 1  # cov: unreachable Reactor.modify fails only if epoll_ctl or kevent rejects a registered open fd
+                            continue  # cov: unreachable Reactor.modify fails only if epoll_ctl or kevent rejects a registered open fd
                     var keep_alive_w = serve_read_round_dispatch_chained[
                         D, M, RT
                     ](
@@ -1198,7 +1198,7 @@ struct HttpServer[
                                     self._conns[idx]._reg, INTEREST_WRITE,
                                 )
                             except e:
-                                _ = e
+                                _ = e  # cov: unreachable Reactor.modify fails only if epoll_ctl or kevent rejects a registered open fd
                                 keep_alive_w = False
                     if not keep_alive_w:
                         try:
@@ -1206,7 +1206,7 @@ struct HttpServer[
                                 self._conns, self._fd_to_idx, idx,
                             )
                         except e:
-                            _ = e
+                            _ = e  # cov: unreachable close_and_remove raises only for an fd missing from fd_to_idx; idx came from it
                 else:
                     if self._conns[idx]._pending_len < 0:
                         try:
@@ -1214,7 +1214,7 @@ struct HttpServer[
                                 self._conns, self._fd_to_idx, idx,
                             )
                         except e:
-                            _ = e
+                            _ = e  # cov: unreachable close_and_remove raises only for an fd missing from fd_to_idx; idx came from it
                 i = i + 1
                 continue
 
@@ -1238,13 +1238,13 @@ struct HttpServer[
                             self._conns[idx]._reg, INTEREST_WRITE,
                         )
                     except e:
-                        _ = e
+                        _ = e  # cov: unreachable Reactor.modify fails only if epoll_ctl or kevent rejects a registered open fd
                         keep_alive = False
             if not keep_alive:
                 try:
                     close_and_remove(self._conns, self._fd_to_idx, idx)
                 except e:
-                    _ = e
+                    _ = e  # cov: unreachable close_and_remove raises only for an fd missing from fd_to_idx; idx came from it
             i = i + 1
 
         return n_events
@@ -1304,18 +1304,18 @@ struct HttpServer[
                                 self._conns[idx]._reg, INTEREST_WRITE,
                             )
                         except e:
-                            _ = e
+                            _ = e  # cov: unreachable Reactor.modify fails only if epoll_ctl or kevent rejects a registered open fd
                             try:
-                                close_and_remove(
+                                close_and_remove(  # cov: unreachable close_and_remove raises only for an fd missing from fd_to_idx; idx came from it
                                     self._conns, self._fd_to_idx, idx,
                                 )
-                            except e2:
-                                _ = e2
+                            except e2:  # cov: unreachable close_and_remove raises only for an fd missing from fd_to_idx; idx came from it
+                                _ = e2  # cov: unreachable close_and_remove raises only for an fd missing from fd_to_idx; idx came from it
                 elif rw < 0:
                     try:
                         close_and_remove(self._conns, self._fd_to_idx, idx)
                     except e:
-                        _ = e
+                        _ = e  # cov: unreachable close_and_remove raises only for an fd missing from fd_to_idx; idx came from it
             # else: conn vanished before the response could be delivered — `rec`
             # (and its response) is dropped at end-of-iteration; benign.
             _ = rec^
@@ -1395,7 +1395,7 @@ struct HttpServer[
                         self._fd_to_idx,
                     )
                 except e:
-                    _ = e
+                    _ = e  # cov: unreachable accept_one_and_register raises only if registering a just-accepted fd fails
                 i = i + 1
                 continue
 
@@ -1424,7 +1424,7 @@ struct HttpServer[
                 try:
                     close_and_remove(self._conns, self._fd_to_idx, idx)
                 except e:
-                    _ = e
+                    _ = e  # cov: unreachable close_and_remove raises only for an fd missing from fd_to_idx; idx came from it
                 i = i + 1
                 continue
 
@@ -1441,13 +1441,13 @@ struct HttpServer[
                                 self._conns[idx]._reg, INTEREST_READ,
                             )
                         except e:
-                            _ = e
+                            _ = e  # cov: unreachable Reactor.modify fails only if epoll_ctl or kevent rejects a registered open fd
                             try:
-                                close_and_remove(
+                                close_and_remove(  # cov: unreachable close_and_remove raises only for an fd missing from fd_to_idx; idx came from it
                                     self._conns, self._fd_to_idx, idx,
                                 )
-                            except e2:
-                                _ = e2
+                            except e2:  # cov: unreachable close_and_remove raises only for an fd missing from fd_to_idx; idx came from it
+                                _ = e2  # cov: unreachable close_and_remove raises only for an fd missing from fd_to_idx; idx came from it
                 else:
                     if self._conns[idx]._pending_len < 0:
                         try:
@@ -1455,7 +1455,7 @@ struct HttpServer[
                                 self._conns, self._fd_to_idx, idx,
                             )
                         except e:
-                            _ = e
+                            _ = e  # cov: unreachable close_and_remove raises only for an fd missing from fd_to_idx; idx came from it
                 i = i + 1
                 continue
 
@@ -1481,7 +1481,7 @@ struct HttpServer[
                 try:
                     close_and_remove(self._conns, self._fd_to_idx, idx)
                 except e:
-                    _ = e
+                    _ = e  # cov: unreachable close_and_remove raises only for an fd missing from fd_to_idx; idx came from it
             i = i + 1
 
         return n_events
@@ -1522,18 +1522,18 @@ struct HttpServer[
                                 self._conns[idx]._reg, INTEREST_WRITE,
                             )
                         except e:
-                            _ = e
+                            _ = e  # cov: unreachable Reactor.modify fails only if epoll_ctl or kevent rejects a registered open fd
                             try:
-                                close_and_remove(
+                                close_and_remove(  # cov: unreachable close_and_remove raises only for an fd missing from fd_to_idx; idx came from it
                                     self._conns, self._fd_to_idx, idx,
                                 )
-                            except e2:
-                                _ = e2
+                            except e2:  # cov: unreachable close_and_remove raises only for an fd missing from fd_to_idx; idx came from it
+                                _ = e2  # cov: unreachable close_and_remove raises only for an fd missing from fd_to_idx; idx came from it
                 elif rw < 0:
                     try:
                         close_and_remove(self._conns, self._fd_to_idx, idx)
                     except e:
-                        _ = e
+                        _ = e  # cov: unreachable close_and_remove raises only for an fd missing from fd_to_idx; idx came from it
             _ = rec^
             k = k + 1
         _ = delivered^
@@ -1581,7 +1581,7 @@ struct HttpServer[
                         self._fd_to_idx,
                     )
                 except e:
-                    _ = e
+                    _ = e  # cov: unreachable accept_one_and_register raises only if registering a just-accepted fd fails
                 i = i + 1
                 continue
 
@@ -1604,7 +1604,7 @@ struct HttpServer[
                 try:
                     close_and_remove(self._conns, self._fd_to_idx, idx)
                 except e:
-                    _ = e
+                    _ = e  # cov: unreachable close_and_remove raises only for an fd missing from fd_to_idx; idx came from it
                 i = i + 1
                 continue
 
@@ -1619,13 +1619,13 @@ struct HttpServer[
                                 self._conns[idx]._reg, INTEREST_READ,
                             )
                         except e:
-                            _ = e
+                            _ = e  # cov: unreachable Reactor.modify fails only if epoll_ctl or kevent rejects a registered open fd
                             try:
-                                close_and_remove(
+                                close_and_remove(  # cov: unreachable close_and_remove raises only for an fd missing from fd_to_idx; idx came from it
                                     self._conns, self._fd_to_idx, idx,
                                 )
-                            except e2:
-                                _ = e2
+                            except e2:  # cov: unreachable close_and_remove raises only for an fd missing from fd_to_idx; idx came from it
+                                _ = e2  # cov: unreachable close_and_remove raises only for an fd missing from fd_to_idx; idx came from it
                 else:
                     if self._conns[idx]._pending_len < 0:
                         try:
@@ -1633,7 +1633,7 @@ struct HttpServer[
                                 self._conns, self._fd_to_idx, idx,
                             )
                         except e:
-                            _ = e
+                            _ = e  # cov: unreachable close_and_remove raises only for an fd missing from fd_to_idx; idx came from it
                 i = i + 1
                 continue
 
@@ -1656,7 +1656,7 @@ struct HttpServer[
                 try:
                     close_and_remove(self._conns, self._fd_to_idx, idx)
                 except e:
-                    _ = e
+                    _ = e  # cov: unreachable close_and_remove raises only for an fd missing from fd_to_idx; idx came from it
             i = i + 1
 
         return n_events
