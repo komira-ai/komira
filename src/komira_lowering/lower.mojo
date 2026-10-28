@@ -39,7 +39,11 @@ def lower(
     """
     var cut = cut_plan(plan, inputs)
     for i in range(len(cut.segments)):
-        record_segment_morsel_rows(host_profile, cut.segments[i], cut.flow_schemas[i])
+        record_segment_morsel_rows(
+            host_profile, cut.segments[i], cut.flow_schemas[i]
+        )
+    # The gate raises when a segment carries a logical plan; the value it
+    # returns on success is not needed here.
     _ = assert_physical_plan_carries_no_logical_plan(cut.segments)
     assert_physical_plan_ir_version_compatible(cut.segments)
     admit_plan(cut.segments)

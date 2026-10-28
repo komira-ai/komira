@@ -32,16 +32,22 @@ Lowering refuses by name and never replaces what it cannot lower with another
 shape:
 
 - `LOWERING_UNCUTTABLE_NODE`, naming the node: a join, union, distinct, top-n,
-  window, view or shared-subplan reference, cast to string, exchange or UDF
-  node; a limit with an offset; a partial or final aggregation; a source other
-  than Parquet or in memory.
+  window, view or shared-subplan reference, cast to string or exchange node
+  (the cutter has no arm for any of them, so an exchange is refused rather
+  than elided on one host); a filter, projection or aggregation that carries a
+  UDF, an aggregate function that is a UDF; a limit with an offset or a
+  negative count; a limit above a sort (see Order); a partial or final
+  aggregation; an aggregation with a group top-k; a source other than Parquet
+  or in memory.
 - `LOWERING_SINK_UNSERVED`, naming the triple or the key: a group key of a
   type with no row (date, decimal, bool, ...), a key of several columns that
   are not all dictionary encoded strings, or a segment whose triple has no row.
 - `LOWERING_SCAN_NOT_TOTAL`: a Parquet scan of several files, a Hive
-  partitioned scan, or a scan on a file system other than the local one. The
-  segment's Parquet arm names one file and carries no partition columns or
-  file system descriptor.
+  partitioned scan (partition columns or values, a directory scan or a
+  partition predicate), a scan on a file system other than the local one, or a
+  scan marked unbounded. The segment's Parquet arm names one file and carries
+  no partition columns, predicate or file system descriptor, and its sources
+  read a bounded input. The scan's display name is not part of the segment.
 - `LOWERING_INPUTS_SCAN_COUNT`: the inputs do not hold one entry per scan.
 
 ## What a segment records
@@ -51,10 +57,21 @@ sink. `card_estimate_rows` is the row count of the scan's footers when the host
 supplied statistics, an upper bound on the rows that reach the sink, and 0
 otherwise. `mem_estimate_bytes` is 0, and `AggSinkData.estimated_groups` is 0:
 no memory decision is recorded, and no statistic a producer recorded in the
-plan is read. Every segment is `ORDER_NONE` with one partition. Whether an
-integer key's aggregation is dense or partitioned is not a field of the IR and
-is not recorded here. The payload narrowing rule of `komira_lowering_rules` has
-no consumer without a join and is not called.
+plan is read. Every segment is `ORDER_NONE` with one partition. Whether an integer key's
+aggregation is dense or partitioned is not a field of the IR and is not
+recorded here. The payload narrowing rule of `komira_lowering_rules` has no
+consumer without a join and is not called.
+
+## Order
+
+No segment records an order. A float `SUM` or `AVG` is cut with `ORDER_NONE`,
+so its result is not bit-reproducible across worker counts until a segment can
+carry `ORDER_ROW_RANGE`. A sort's output keeps the sort's order through filters,
+projections and the final collect only as far as the engine's sink-output
+source keeps it; lowering does not state more. A limit above a sort is
+refused, because the rows it keeps would depend on that order, and a limit
+above an aggregation that reads a sort is cut: the aggregation ends the sorted
+stream.
 
 ## Dependencies
 

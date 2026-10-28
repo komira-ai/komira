@@ -19,9 +19,14 @@
 # cutter never replaces a node it cannot cut by a resident batch or a generic
 # collect.
 #
+# A limit above a sort (with only filters and projections between) is refused:
+# a segment records no order, so the rows a limit would keep are not defined.
+#
 # Segment ids are dense and follow the cut order, which is dependency order:
 # a producer is cut before its consumer. Every segment is ORDER_NONE with one
-# partition. `card_estimate_rows` is the row count of the scan's footers when
+# partition. A float SUM or AVG is therefore cut with ORDER_NONE: its result
+# is not bit-reproducible across worker counts until a segment can carry
+# ORDER_ROW_RANGE. `card_estimate_rows` is the row count of the scan's footers when
 # the host supplied one, an upper bound on the rows that reach the sink, and 0
 # otherwise; `mem_estimate_bytes` is 0 (no memory decision is recorded).
 # =============================================================================
@@ -53,7 +58,11 @@ from komira_plan_ir.logical_plan import (
     PLAN_LIMIT,
 )
 from komira_plan_ir.logical_plan_variants import AggregateData
-from komira_plan_ir.plan_decisions import AGG_MODE_UNSET, AGG_MODE_SINGLE
+from komira_plan_ir.plan_decisions import (
+    AGG_MODE_UNSET,
+    AGG_MODE_SINGLE,
+    SCAN_BOUNDED,
+)
 from komira_physical_plan.physical_plan import (
     SegmentDescPod,
     SourceSpecPod,
@@ -122,6 +131,10 @@ struct _Pipe(Movable):
     """Pre-order index of the scan that is this pipeline's source; -1 when the
     source is a breaker's output."""
     var has_project: Bool
+    var sorted_input: Bool
+    """True while the rows the pipeline delivers are a sort's output in that
+    sort's order: set when the pipeline opens on a sort, kept by every
+    operator fused onto it, and false when it opens on an aggregation."""
     var broken_by: Int
     """The segment whose output this pipeline is, while no operator has been
     appended to it; -1 otherwise."""
@@ -141,6 +154,7 @@ struct _Pipe(Movable):
         self.schema = schema^
         self.scan_index = scan_index
         self.has_project = False
+        self.sorted_input = False
         self.broken_by = -1
 
     def append_op(mut self, var op: MorselOp):
@@ -329,6 +343,12 @@ struct _Cutter(Movable):
             if ld.n < 0:
                 raise _uncuttable(node, "a limit with a negative count")
             var pipe = self.walk(ld.child[], inputs)
+            if pipe.sorted_input:
+                raise _uncuttable(
+                    node,
+                    "a limit over a sorted stream; no order is recorded on"
+                    " a segment",
+                )
             pipe.append_op(MorselOp.limit(ld.n))
             return pipe^
         if tag == PLAN_AGGREGATE:
@@ -348,7 +368,9 @@ struct _Cutter(Movable):
             var seg = self._close(
                 pipe^, SINK_SORT, KEY_DTYPE_NONE, SINK_ORIENT_COLUMNAR, pid, inputs
             )
-            return self._reopen(seg, node.output_schema)
+            var reopened = self._reopen(seg, node.output_schema)
+            reopened.sorted_input = True
+            return reopened^
         raise _uncuttable(node, "no cutter arm for this node")
 
     def _aggregate(
@@ -398,6 +420,12 @@ struct _Cutter(Movable):
         var pushed: Optional[Expr] = None
         if sd.filter:
             pushed = Optional(sd.filter.value().copy())
+        if sd.boundedness != SCAN_BOUNDED:
+            raise Error(
+                String(LOWERING_SCAN_NOT_TOTAL)
+                + ": an unbounded scan; the segment's source arms read a"
+                " bounded input"
+            )
         if sd.source.tag == SOURCE_VARIANT_PARQUET:
             ref ps = sd.source._parquet.value()
             if len(ps.paths) != 1:
@@ -407,7 +435,12 @@ struct _Cutter(Movable):
                     + String(len(ps.paths))
                     + " files; the segment's Parquet arm names one"
                 )
-            if len(ps.partition_cols) > 0 or ps.hive_dir_scan:
+            if (
+                len(ps.partition_cols) > 0
+                or len(ps.partition_values) > 0
+                or ps.hive_dir_scan
+                or Bool(ps.hive_predicate)
+            ):
                 raise Error(
                     String(LOWERING_SCAN_NOT_TOTAL)
                     + ": a Hive-partitioned Parquet scan; the segment's"

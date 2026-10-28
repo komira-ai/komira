@@ -22,7 +22,16 @@ from komira_lowering.lowered_plan import (
     LOWERING_SCAN_NOT_TOTAL,
     LOWERING_INPUTS_SCAN_COUNT,
 )
-from komira_plan_expr.agg_expr import AggExpr, AGG_COUNT
+from komira_plan_expr.agg_expr import AggExpr, AGG_COUNT, AGG_UDF
+from komira_plan_expr.partition_expr import PartitionExpr
+from komira_plan_expr.partition_pred_pod import PartitionPredicatePod
+from komira_plan_expr.udf_data import (
+    UdfData,
+    UDF_KIND_MAP,
+    UDF_KIND_FILTER,
+    UDF_KIND_AGG,
+    DTAG_I64,
+)
 from komira_plan_expr.expr import Expr, BIN_GT
 from komira_plan_expr.fs_descriptor_pod import FsDescriptorPod, FS_SCHEME_S3
 from komira_plan_expr.scalar_value import ScalarValue
@@ -32,6 +41,7 @@ from komira_plan_ir.logical_plan import (
     AggExprArray,
     SOURCE_PARQUET,
     SOURCE_CSV,
+    SOURCE_KIND_UNSET,
     JOIN_INNER,
     PLAN_JOIN,
     PLAN_UNION,
@@ -42,7 +52,15 @@ from komira_plan_ir.logical_plan import (
     PLAN_CAST_TO_VARCHAR,
     PLAN_LIMIT,
     PLAN_AGGREGATE,
+    PLAN_PARTITION_BY,
+    PLAN_EXCHANGE,
     plan_tag_name,
+)
+from komira_plan_ir.logical_plan_variants import AggGroupTopK
+from komira_plan_ir.plan_decisions import (
+    AGG_MODE_FINAL,
+    EXCHANGE_KIND_GATHER,
+    SCAN_UNBOUNDED,
 )
 from komira_plan_ir.plan_decisions import AGG_MODE_PARTIAL, AGG_MODE_SINGLE, AGG_MODE_UNSET
 from komira_scan_source.parquet_source import ParquetSource
@@ -209,6 +227,122 @@ def test_a_group_key_no_sink_row_serves_is_refused() raises:
     _refused_with(_message(_count_by(_scan(), _names("s", "k")), _inputs()), LOWERING_SINK_UNSERVED, "2 columns")
     # An integer key lowers.
     assert_equal(_message(_count_by(_scan(), _names("k")), _inputs()), "")
+
+
+def _udf(kind: UInt8) -> OwnedPointer[UdfData]:
+    var in_cols = List[Tuple[String, UInt8]]()
+    in_cols.append((String("v"), DTAG_I64))
+    var out_cols = List[Tuple[String, UInt8]]()
+    out_cols.append((String("v"), DTAG_I64))
+    return OwnedPointer(UdfData(kind, String("u"), in_cols^, out_cols^, 1, 1))
+
+
+def _v_greater_than_zero() -> Expr:
+    return Expr.binary(BIN_GT, Expr.col_ref("v"), Expr.literal(ScalarValue.from_int64(0)))
+
+
+def _v_only() -> ExprArray:
+    var out = ExprArray()
+    out.append(Expr.col_ref("v"))
+    return out^
+
+
+def test_a_node_that_carries_a_udf_is_refused_and_its_plain_form_is_cut() raises:
+    var udf_filter = LogicalPlan.filter_with_udf(
+        _v_greater_than_zero(), _scan(), _udf(UDF_KIND_FILTER)
+    )
+    _refused_with(_message(udf_filter, _inputs()), LOWERING_UNCUTTABLE_NODE, "a filter with a UDF")
+    assert_equal(_message(LogicalPlan.filter(_v_greater_than_zero(), _scan()), _inputs()), "")
+
+    var udf_project = LogicalPlan.project_with_udf(_v_only(), _scan(), _udf(UDF_KIND_MAP))
+    _refused_with(_message(udf_project, _inputs()), LOWERING_UNCUTTABLE_NODE, "a projection with a UDF")
+    assert_equal(_message(LogicalPlan.project(_v_only(), _scan()), _inputs()), "")
+
+    var aggs = AggExprArray()
+    aggs.append(AggExpr(AGG_COUNT, Optional[Expr](), Optional[String]("n")))
+    var udf_agg = LogicalPlan.aggregate_with_udf(
+        ExprArray(), aggs^, _scan(), _udf(UDF_KIND_AGG)
+    )
+    _refused_with(_message(udf_agg, _inputs()), LOWERING_UNCUTTABLE_NODE, "an aggregation with a UDF")
+    assert_equal(_message(_count_by(_scan(), List[String]()), _inputs()), "")
+
+
+def test_a_udf_aggregate_function_is_refused_and_a_builtin_one_is_cut() raises:
+    var aggs = AggExprArray()
+    aggs.append(AggExpr(AGG_UDF, Optional[Expr](Expr.col_ref("v")), Optional[String]("u")))
+    var plan = LogicalPlan.aggregate(ExprArray(), aggs^, _scan())
+    _refused_with(_message(plan, _inputs()), LOWERING_UNCUTTABLE_NODE, "a UDF aggregate function")
+    assert_equal(_message(_count_by(_scan(), List[String]()), _inputs()), "")
+
+
+def test_a_group_top_k_aggregate_is_refused_and_the_same_aggregate_without_it_is_cut() raises:
+    var plain = _count_by(_scan(), _names("k"))
+    assert_equal(_message(plain, _inputs()), "")
+    var annotated = _count_by(_scan(), _names("k"))
+    annotated._aggregate.value()[].group_topk = Optional(
+        AggGroupTopK(_names("n"), _bools(True), 3)
+    )
+    _refused_with(_message(annotated, _inputs()), LOWERING_UNCUTTABLE_NODE, "a group top-k")
+
+
+def test_a_final_aggregate_is_refused_and_a_single_one_is_cut() raises:
+    _refused_with(_message(_count_by(_scan(), List[String](), AGG_MODE_FINAL), _inputs()), LOWERING_UNCUTTABLE_NODE, "a partial or final aggregation")
+    assert_equal(_message(_count_by(_scan(), List[String](), AGG_MODE_UNSET), _inputs()), "")
+
+
+def test_a_window_and_an_exchange_are_refused() raises:
+    var exprs = List[PartitionExpr]()
+    exprs.append(PartitionExpr.row_number())
+    var window = LogicalPlan.partition_by(
+        _names("k"), _names("v"), _bools(False), exprs^, _scan()
+    )
+    _refused_with(_message(window, _inputs()), LOWERING_UNCUTTABLE_NODE, plan_tag_name(PLAN_PARTITION_BY))
+
+    var exchange = LogicalPlan.exchange(_scan(), EXCHANGE_KIND_GATHER)
+    _refused_with(_message(exchange, _inputs()), LOWERING_UNCUTTABLE_NODE, plan_tag_name(PLAN_EXCHANGE))
+    assert_equal(_message(_scan(), _inputs()), "")
+
+
+def _sorted_scan() -> LogicalPlan:
+    return LogicalPlan.sort(_names("k"), _bools(False), _scan())
+
+
+def test_a_limit_over_a_sorted_stream_is_refused_and_other_shapes_over_a_sort_are_cut() raises:
+    _refused_with(_message(LogicalPlan.limit(5, _sorted_scan()), _inputs()), LOWERING_UNCUTTABLE_NODE, "a limit over a sorted stream")
+    # Operators between the sort and the limit keep the stream sorted.
+    var filtered = LogicalPlan.filter(_v_greater_than_zero(), _sorted_scan())
+    _refused_with(_message(LogicalPlan.limit(5, filtered^), _inputs()), LOWERING_UNCUTTABLE_NODE, "a limit over a sorted stream")
+    var projected = LogicalPlan.project(_v_only(), _sorted_scan())
+    _refused_with(_message(LogicalPlan.limit(5, projected^), _inputs()), LOWERING_UNCUTTABLE_NODE, "a limit over a sorted stream")
+    # A filter over a sort, a sort alone, and a limit below a sort are cut.
+    assert_equal(_message(LogicalPlan.filter(_v_greater_than_zero(), _sorted_scan()), _inputs()), "")
+    assert_equal(_message(_sorted_scan(), _inputs()), "")
+    assert_equal(_message(LogicalPlan.sort(_names("k"), _bools(False), LogicalPlan.limit(5, _scan())), _inputs()), "")
+    # An aggregation over a sort ends the sorted stream: a limit above it is cut.
+    var counted = _count_by(_sorted_scan(), List[String]())
+    assert_equal(_message(LogicalPlan.limit(5, counted^), _inputs()), "")
+
+
+def test_an_unbounded_scan_is_refused_and_a_bounded_one_is_cut() raises:
+    var unbounded = LogicalPlan.scan_from_source(
+        SourceVariant(ParquetSource(String("a.parquet"), _schema())),
+        _schema(),
+        None,
+        None,
+        None,
+        None,
+        SOURCE_KIND_UNSET,
+        SCAN_UNBOUNDED,
+    )
+    _refused_with(_message(unbounded, _inputs()), LOWERING_SCAN_NOT_TOTAL, "unbounded")
+    assert_equal(_message(_parquet_scan(ParquetSource(String("a.parquet"), _schema())), _inputs()), "")
+
+
+def test_a_parquet_scan_with_a_partition_predicate_is_refused() raises:
+    var source = ParquetSource(String("a.parquet"), _schema())
+    source.hive_predicate = Optional(PartitionPredicatePod.empty())
+    _refused_with(_message(_parquet_scan(source^), _inputs()), LOWERING_SCAN_NOT_TOTAL, "Hive")
+    assert_equal(_message(_parquet_scan(ParquetSource(String("a.parquet"), _schema())), _inputs()), "")
 
 
 def test_inputs_must_hold_one_entry_per_scan() raises:

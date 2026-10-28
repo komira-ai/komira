@@ -64,7 +64,9 @@ def sink_capability() -> List[SinkRow]:
     return rows^
 
 
-def is_sink_served(sink_kind: UInt8, key_dtype: UInt8, orientation: UInt8) -> Bool:
+def is_sink_served(
+    sink_kind: UInt8, key_dtype: UInt8, orientation: UInt8
+) -> Bool:
     """True when the table has a row for the triple."""
     var rows = sink_capability()
     for i in range(len(rows)):
