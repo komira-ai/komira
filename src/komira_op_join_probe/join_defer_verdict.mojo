@@ -13,9 +13,10 @@
 # add per morsel), so an all-zero reading means the site was never reached.
 # =============================================================================
 
-from std.atomic import Atomic
 from std.ffi import _Global
-from std.memory import alloc, OwnedPointer, UnsafePointer
+from std.memory import alloc, OwnedPointer
+
+from komira_atomic_alias import AtomicI64
 
 
 comptime DEFER_ADMIT: Int = 0
@@ -50,10 +51,13 @@ reasons sum to the morsel population."""
 comptime DEFER_VERDICT_COUNT: Int = 8
 
 
-def _init_jdv_i64() -> OwnedPointer[Atomic[DType.int64]]:
-    var raw = alloc[Atomic[DType.int64]](1)
-    UnsafePointer(to=raw[].value).unsafe_write(Scalar[DType.int64](0))
-    return OwnedPointer[Atomic[DType.int64]](unsafe_from_raw_pointer=raw)
+def _init_jdv_i64() -> OwnedPointer[AtomicI64]:
+    var raw = alloc[AtomicI64](1)
+    # SAFETY: `raw` is a fresh one-element allocation; zeroing it as the
+    # counter's int64 initialises it, and the `OwnedPointer` then owns and
+    # frees it.
+    raw.unsafe_bitcast[Scalar[DType.int64]]().unsafe_write(Scalar[DType.int64](0))
+    return OwnedPointer[AtomicI64](unsafe_from_raw_pointer=raw)
 
 
 comptime _JDV_ADMIT = _Global["komira_jdv_admit", _init_jdv_i64]

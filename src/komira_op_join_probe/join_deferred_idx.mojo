@@ -11,17 +11,21 @@
 # gather; `nt_store=False` takes ordinary stores and the same lists.
 # =============================================================================
 
-from std.atomic import Atomic
 from std.ffi import _Global
-from std.memory import alloc, OwnedPointer, UnsafePointer
+from std.memory import alloc, OwnedPointer
+
+from komira_atomic_alias import AtomicI64
 
 from komira_simd.fast_copy import nt_release_fence
 
 
-def _init_ctr() -> OwnedPointer[Atomic[DType.int64]]:
-    var raw = alloc[Atomic[DType.int64]](1)
-    UnsafePointer(to=raw[].value).unsafe_write(Scalar[DType.int64](0))
-    return OwnedPointer[Atomic[DType.int64]](unsafe_from_raw_pointer=raw)
+def _init_ctr() -> OwnedPointer[AtomicI64]:
+    var raw = alloc[AtomicI64](1)
+    # SAFETY: `raw` is a fresh one-element allocation; zeroing it as the
+    # counter's int64 initialises it, and the `OwnedPointer` then owns and
+    # frees it.
+    raw.unsafe_bitcast[Scalar[DType.int64]]().unsafe_write(Scalar[DType.int64](0))
+    return OwnedPointer[AtomicI64](unsafe_from_raw_pointer=raw)
 
 
 comptime _NT_BYTES = _Global["komira_join_nt_index_bytes", _init_ctr]
