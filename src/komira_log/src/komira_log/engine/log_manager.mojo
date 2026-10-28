@@ -12,7 +12,7 @@
 # # THE MECHANISM
 #
 # The process-global pointer cell is a first-party C linker-global (a single
-# `static void*` in `_log_holder_shim.c`, reached via `external_call`). Mojo
+# `static void*` in `komira_log_holder.c`, reached via `external_call`). Mojo
 # has NO module-level `var` (`global variables are not supported`) and no
 # fn-local statics, so the cell lives in C — but the C holds ONE pointer and has
 # ZERO logging logic. The `SharedEngine` + per-core rings + drain + binary encode
@@ -50,7 +50,7 @@ from komira_log.engine.shared_engine import SharedEngine
 
 
 # -----------------------------------------------------------------------------
-# The C-static pointer holder (the entire non-Mojo surface — _log_holder_shim.c).
+# The C-static pointer holder (the entire non-Mojo surface — komira_log_holder.c).
 # Two `external_call`s: park an address, read it back. No logging logic in C.
 # -----------------------------------------------------------------------------
 

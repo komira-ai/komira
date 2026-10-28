@@ -4,6 +4,10 @@
 
 TARGETS = [
     "komira//src/kci_cli:kci_cli_conda",
+    "komira//src/komira_async_api:ci",
+    "komira//src/komira_async_api:conda_holds",
+    "komira//src/komira_async_api:coverage_floor",
+    "komira//src/komira_async_api:table",
     "komira//src/komira_avro:komira_avro_conda",
     "komira//src/komira_aws_route53:komira_aws_route53_conda",
     "komira//src/komira_aws_sns:komira_aws_sns_conda",

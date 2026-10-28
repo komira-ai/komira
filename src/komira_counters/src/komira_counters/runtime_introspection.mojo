@@ -27,38 +27,23 @@
 # has no global vars (a counter would need a pthread-mutex-protected heap
 # singleton), so the hooks emit one line per event.
 #
-# IMPORTANT: this module is a PURE-STDLIB LEAF (sys.defines + std.reflection
+# IMPORTANT: this module is a LEAF (std.reflection and trace_gates, which holds sys.defines
 # only). It sits at the bottom of the dep DAG inside the core packages so
 # hot-path callers (the worker pool, the aggregation hash table, the arrow
 # IPC dispatch, etc.) can import it without a layering violation.
 # =============================================================================
 
-from std.sys.defines import is_defined
 from std.reflection import call_location
 
 
-# -----------------------------------------------------------------------------
-# Comptime gate aliases.
-# -----------------------------------------------------------------------------
-#
-# `is_defined["X"]()` returns `True` when the build was invoked with
-# `-D X=true` (or `-D X=1`). Otherwise returns `False`. Resolution is at
-# parse-time, so `@parameter if TRACE_TCMALLOC: ...` produces zero code
-# in the disabled branch.
-#
-# Zero-overhead OFF mode is a requirement: do NOT add any runtime check
-# (no env read) at the hook call sites. These hooks fire on the per-batch /
-# per-dispatch hot path; only comptime gating is acceptable.
-# -----------------------------------------------------------------------------
-
-comptime TRACE_TCMALLOC: Bool = is_defined["KOMIRA_TRACE_TCMALLOC"]()
-"""True when `-D KOMIRA_TRACE_TCMALLOC=true` was passed at build time."""
-
-comptime TRACE_TRAMPOLINE: Bool = is_defined["KOMIRA_TRACE_TRAMPOLINE"]()
-"""True when `-D KOMIRA_TRACE_TRAMPOLINE=true` was passed at build time."""
-
-comptime TRACE_ARC: Bool = is_defined["KOMIRA_TRACE_ARC"]()
-"""True when `-D KOMIRA_TRACE_ARC=true` was passed at build time."""
+# The comptime gate aliases (`TRACE_TCMALLOC`, `TRACE_TRAMPOLINE`, `TRACE_ARC`) live in
+# trace_gates.mojo and are imported here, so this module stays what kcov records no line of
+# (every function below is `@always_inline("nodebug")`; coverage_unmeasured.txt).
+from komira_counters.trace_gates import (
+    TRACE_ARC,
+    TRACE_TCMALLOC,
+    TRACE_TRAMPOLINE,
+)
 
 
 # -----------------------------------------------------------------------------
