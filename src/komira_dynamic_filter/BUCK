@@ -55,7 +55,7 @@ mojo_conda(
         "../komira_simd": "//src/komira_simd:mopm.toml",
     },
     mojo = "1.0.0",
-    mopm = "toolchains//:mopm_0_0_73",
+    mopm = "toolchains//:mopm_0_0_86",
     package = "komira_dynamic_filter",
     version = "0.1.0",
     visibility = ["PUBLIC"],

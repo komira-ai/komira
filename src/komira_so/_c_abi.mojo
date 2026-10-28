@@ -85,20 +85,28 @@ from komira_so.status import (
     input_length_status,
 )
 
+# `Handle`, `CStr` and `ConstBytes` are the names the ABI golden
+# (abi/komira.tsv) knows: the header spells them `komira_handle`,
+# `const char *` and `const uint8_t *`, and the golden check refuses a
+# declaration of `CStr` or `ConstBytes` that is not a pointer to `UInt8`. The
+# exported signatures spell every other pointer in full, for the same reason.
 # SAFETY: `void *`, the context handle: an address returned by
 # `komira_ctx_new`, valid until `komira_ctx_free`.
-comptime _Handle = UnsafePointer[NoneType, MutUntrackedOrigin]
+comptime Handle = UnsafePointer[NoneType, MutUntrackedOrigin]
 # SAFETY: `uint8_t *`, a caller-owned output buffer with its capacity beside it.
 comptime _Bytes = UnsafePointer[UInt8, MutUntrackedOrigin]
 # SAFETY: `uint64_t *`, one caller-owned output slot.
 comptime _Len = UnsafePointer[UInt64, MutUntrackedOrigin]
 # SAFETY: `const char *`, a NUL-terminated string the caller keeps alive for
 # the call; it is copied into a `String` before any use.
-comptime _CStr = UnsafePointer[UInt8, MutUntrackedOrigin]
+comptime CStr = UnsafePointer[UInt8, MutUntrackedOrigin]
+# SAFETY: `const uint8_t *`, the plan bytes of `komira_plan_render`: read for
+# `plan_len` bytes, copied in full, never written.
+comptime ConstBytes = UnsafePointer[UInt8, MutUntrackedOrigin]
 
 
 @always_inline
-def _session(ctx: _Handle) -> UnsafePointer[Session, MutUntrackedOrigin]:
+def _session(ctx: Handle) -> UnsafePointer[Session, MutUntrackedOrigin]:
     """The session behind a non-NULL handle."""
     # SAFETY: `ctx` was returned by `komira_ctx_new` and has not been passed
     # to `komira_ctx_free` (the documented contract of the handle); every
@@ -113,7 +121,7 @@ def komira_abi_version() abi("C") -> Int32:
 
 
 @export
-def komira_ctx_new() abi("C") -> _Handle:
+def komira_ctx_new() abi("C") -> Handle:
     """Create a session and return its handle. The caller frees it with
     `komira_ctx_free`."""
     var owned = OwnedPointer[Session](Session())
@@ -126,7 +134,7 @@ def komira_ctx_new() abi("C") -> _Handle:
 
 
 @export
-def komira_ctx_free(ctx: _Handle) abi("C"):
+def komira_ctx_free(ctx: Handle) abi("C"):
     """Destroy a session created by `komira_ctx_new`. NULL does nothing."""
     if Int(ctx) == 0:
         return
@@ -140,7 +148,10 @@ def komira_ctx_free(ctx: _Handle) abi("C"):
 
 @export
 def komira_last_error(
-    ctx: _Handle, out_buf: _Bytes, out_cap: UInt64, out_len: _Len
+    ctx: Handle,
+    out_buf: UnsafePointer[UInt8, MutUntrackedOrigin],
+    out_cap: UInt64,
+    out_len: UnsafePointer[UInt64, MutUntrackedOrigin],
 ) abi("C") -> Int32:
     """Copy the session's last error text into `out_buf` (two-call protocol).
 
@@ -175,7 +186,7 @@ def komira_last_error(
     return KOMIRA_OK
 
 
-def _c_string(text: _CStr) raises -> String:
+def _c_string(text: CStr) raises -> String:
     """A copy of the NUL-terminated string at `text`; raises if the bytes are
     not valid UTF-8."""
     var bytes = List[UInt8]()
@@ -242,7 +253,7 @@ def _emit(
 
 @export
 def komira_register_parquet(
-    ctx: _Handle, name: _CStr, path: _CStr
+    ctx: Handle, name: CStr, path: CStr
 ) abi("C") -> Int32:
     """Register the Parquet file at `path` in the session under `name`.
 
@@ -270,7 +281,11 @@ def komira_register_parquet(
 
 @export
 def komira_parquet_schema(
-    ctx: _Handle, path: _CStr, out_buf: _Bytes, out_cap: UInt64, out_len: _Len
+    ctx: Handle,
+    path: CStr,
+    out_buf: UnsafePointer[UInt8, MutUntrackedOrigin],
+    out_cap: UInt64,
+    out_len: UnsafePointer[UInt64, MutUntrackedOrigin],
 ) abi("C") -> Int32:
     """Write the Arrow schema of the Parquet file at `path` as `WireSchema`
     bytes (two-call protocol).
@@ -300,14 +315,14 @@ def komira_parquet_schema(
 
 @export
 def komira_csv_binding(
-    ctx: _Handle,
-    path: _CStr,
+    ctx: Handle,
+    path: CStr,
     delimiter: UInt8,
     has_header: Int32,
     all_varchar: Int32,
-    out_buf: _Bytes,
+    out_buf: UnsafePointer[UInt8, MutUntrackedOrigin],
     out_cap: UInt64,
-    out_len: _Len,
+    out_len: UnsafePointer[UInt64, MutUntrackedOrigin],
 ) abi("C") -> Int32:
     """Write the `WireScanBinding` of the CSV file at `path` (two-call
     protocol).
@@ -338,7 +353,11 @@ def komira_csv_binding(
 
 @export
 def komira_json_binding(
-    ctx: _Handle, path: _CStr, out_buf: _Bytes, out_cap: UInt64, out_len: _Len
+    ctx: Handle,
+    path: CStr,
+    out_buf: UnsafePointer[UInt8, MutUntrackedOrigin],
+    out_cap: UInt64,
+    out_len: UnsafePointer[UInt64, MutUntrackedOrigin],
 ) abi("C") -> Int32:
     """Write the `WireScanBinding` of the newline-delimited JSON file at
     `path` (two-call protocol). Errors are those of `komira_parquet_schema`.
@@ -362,12 +381,12 @@ def komira_json_binding(
 
 @export
 def komira_plan_render(
-    ctx: _Handle,
-    plan: _Bytes,
+    ctx: Handle,
+    plan: ConstBytes,
     plan_len: UInt64,
-    out_buf: _Bytes,
+    out_buf: UnsafePointer[UInt8, MutUntrackedOrigin],
     out_cap: UInt64,
-    out_len: _Len,
+    out_len: UnsafePointer[UInt64, MutUntrackedOrigin],
 ) abi("C") -> Int32:
     """Decode the serialized plan `plan[0..plan_len]` and write its text
     (two-call protocol). The plan is not run.
