@@ -231,7 +231,7 @@ def test_mean_into_an_integer_field_raises() raises:
     var names: List[String] = ["k", "m"]
     var types: List[ArrowType] = [ArrowType.INT64, ArrowType.INT64]
     var kt: List[UInt8] = [ArrowType.INT64.type_id]
-    _raises_with(agg, funcs, names, types, 1, kt, "MEAN")
+    _raises_with(agg, funcs, names, types, 1, kt, "MEAN needs a FLOAT64 field")
 
 
 def test_sum_into_a_float32_field_raises() raises:
@@ -240,7 +240,8 @@ def test_sum_into_a_float32_field_raises() raises:
     var names: List[String] = ["k", "s"]
     var types: List[ArrowType] = [ArrowType.INT64, ArrowType.FLOAT32]
     var kt: List[UInt8] = [ArrowType.INT64.type_id]
-    _raises_with(agg, funcs, names, types, 1, kt, "FLOAT64")
+    _raises_with(agg, funcs, names, types, 1, kt,
+        "SUM, MIN and MAX need an INT32, INT64 or FLOAT64 field")
 
 
 def test_count_into_a_float_field_raises() raises:
@@ -249,7 +250,7 @@ def test_count_into_a_float_field_raises() raises:
     var names: List[String] = ["k", "n"]
     var types: List[ArrowType] = [ArrowType.INT64, ArrowType.FLOAT64]
     var kt: List[UInt8] = [ArrowType.INT64.type_id]
-    _raises_with(agg, funcs, names, types, 1, kt, "COUNT")
+    _raises_with(agg, funcs, names, types, 1, kt, "COUNT needs an INT32 or INT64 field")
 
 
 def test_key_of_another_type_raises() raises:
@@ -267,7 +268,7 @@ def test_key_field_of_a_different_type_raises() raises:
     var names: List[String] = ["k", "s"]
     var types: List[ArrowType] = [ArrowType.INT32, ArrowType.FLOAT64]
     var kt: List[UInt8] = [ArrowType.INT64.type_id]
-    _raises_with(agg, funcs, names, types, 1, kt, "different type")
+    _raises_with(agg, funcs, names, types, 1, kt, "has a different type than the key")
 
 
 def test_schema_narrower_than_the_output_raises() raises:
@@ -286,11 +287,13 @@ def test_integer_output_that_does_not_fit_raises() raises:
     # 3e9 does not fit an INT32 field.
     var big = _one_group(3.0e9)
     var i32: List[ArrowType] = [ArrowType.INT64, ArrowType.INT32]
-    _raises_with(big, funcs, names, i32, 1, kt, "INT32")
+    _raises_with(big, funcs, names, i32, 1, kt,
+        "has a value that does not fit INT32")
     # 1e19 does not fit an INT64 field.
     var huge = _one_group(1.0e19)
     var i64: List[ArrowType] = [ArrowType.INT64, ArrowType.INT64]
-    _raises_with(huge, funcs, names, i64, 1, kt, "INT64")
+    _raises_with(huge, funcs, names, i64, 1, kt,
+        "has a value that does not fit INT64")
 
 
 def test_min_of_a_group_with_no_value_raises_for_integers() raises:
@@ -302,12 +305,51 @@ def test_min_of_a_group_with_no_value_raises_for_integers() raises:
     var funcs: List[UInt8] = [AGG_MIN]
     var names: List[String] = ["k", "m"]
     var ints: List[ArrowType] = [ArrowType.INT64, ArrowType.INT64]
-    _raises_with(agg, funcs, names, ints, 1, kt, "INT64")
+    _raises_with(agg, funcs, names, ints, 1, kt,
+        "has a value that does not fit INT64")
     var floats: List[ArrowType] = [ArrowType.INT64, ArrowType.FLOAT64]
     var got = build_flat_agg_output(
         agg, _aggs(funcs), _schema(names, floats), 1, kt
     )
     assert_equal(got.num_rows(), 1)
+
+
+def _group_with_count(n: Int) -> FlatHashAggregator:
+    var agg = FlatHashAggregator(num_keys=1, num_aggs=1, initial_capacity=16)
+    var e = agg.find_or_create_1(Int64(1))
+    agg._add_count_bulk(e, 0, n)
+    return agg^
+
+
+def test_count_beyond_int32_raises_for_an_int32_field() raises:
+    """A count of 2^31 - 1 fits an INT32 field, 2^31 does not, and either fits
+    an INT64 field."""
+    var kt: List[UInt8] = [ArrowType.INT64.type_id]
+    var funcs: List[UInt8] = [AGG_COUNT]
+    var names: List[String] = ["k", "n"]
+    var i32: List[ArrowType] = [ArrowType.INT64, ArrowType.INT32]
+    var i64: List[ArrowType] = [ArrowType.INT64, ArrowType.INT64]
+    var fits = build_flat_agg_output(
+        _group_with_count(2147483647), _aggs(funcs), _schema(names, i32), 1, kt
+    )
+    assert_equal(_i32(fits, 1, 0), 2147483647)
+    _raises_with(
+        _group_with_count(2147483648), funcs, names, i32, 1, kt,
+        "a count does not fit INT32",
+    )
+    var wide = build_flat_agg_output(
+        _group_with_count(3_000_000_000), _aggs(funcs), _schema(names, i64), 1, kt
+    )
+    assert_equal(_i64(wide, 1, 0), 3_000_000_000)
+
+
+def test_fewer_key_types_than_key_columns_raises() raises:
+    var agg = _one_group(2.0)
+    var funcs: List[UInt8] = [AGG_SUM]
+    var names: List[String] = ["k", "s"]
+    var types: List[ArrowType] = [ArrowType.INT64, ArrowType.FLOAT64]
+    var kt = List[UInt8]()
+    _raises_with(agg, funcs, names, types, 1, kt, "fewer key types than key columns")
 
 
 def main() raises:
