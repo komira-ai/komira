@@ -10,7 +10,9 @@
 #   2. the BXL selector (tools/build/ci/affected.bxl) turns them into the
 #      targets to build: the owners of the files and everything that depends
 #      on them, or the aggregate //ci:pr (the whole check set) when a file
-#      cannot be mapped or touches the build system;
+#      cannot be mapped or touches the build system; the heavy checks
+#      (rules.bzl HEAVY: the kci binary) only when the change owns paths of
+#      theirs, so the aggregate is //ci:pr_default (without them) otherwise;
 #   3. `build` of that list (a library's welded tests run inside its build);
 #   4. the checks only a BXL script can make, over the whole graph: the
 #      test_weld and graph_check lints, the completeness guard of //ci:pr, the
@@ -105,7 +107,14 @@ jobs:
       # lines of the action's log that start with a cell name.
       - name: the targets to build
         run: grep -E '^[a-z_]+//[^ ]+$' "$RUNNER_TEMP/buck2-farm.log" > "$RUNNER_TEMP/targets.txt"
+      # Bounded well under the job's 330 minutes: the longest check of the
+      # recorded runs took 91 minutes end to end, so a build that waits longer
+      # is a stall (a saturated farm, a hung compile), and it ends red at 150
+      # minutes instead of holding its slot to the job's limit. While it runs,
+      # the buck2-farm action's console prints, every few seconds, one action
+      # it waits on and how many others are left.
       - name: build
+        timeout-minutes: 150
         uses: ./.github/actions/buck2-farm
         with:
           args: build --keep-going @${{ runner.temp }}/targets.txt
@@ -159,6 +168,13 @@ jobs:
         with:
           args: bxl komira//tools/build/ci/lock_graphs.bxl:check
           assert-remote: ${{ steps.assert.outputs.path }}
+      # `//ci:pr_default`, which a change that owns none of the heavy checks builds in
+      # place of `//ci:pr`, is `//ci:pr` without the roots of rules.bzl HEAVY.
+      - name: the default aggregate leaves out the heavy checks and nothing else
+        uses: ./.github/actions/buck2-farm
+        with:
+          args: bxl komira//tools/build/ci/default_guard.bxl:check
+          assert-remote: ${{ steps.assert.outputs.path }}
       - name: the selector and guard cases
         uses: ./.github/actions/buck2-farm
         with:
@@ -179,6 +195,9 @@ jobs:
         run: grep -v '^tests//' "$RUNNER_TEMP/targets.txt" > "$RUNNER_TEMP/test_targets.txt" && echo "any=true" >> "$GITHUB_OUTPUT" || true
       - name: test
         if: steps.tests.outputs.any == 'true'
+        # The list's tests were welded into its build, so this runs what the
+        # build already ran: it is bounded by the same reasoning, at 90.
+        timeout-minutes: 90
         uses: ./.github/actions/buck2-farm
         with:
           args: test @${{ runner.temp }}/test_targets.txt
