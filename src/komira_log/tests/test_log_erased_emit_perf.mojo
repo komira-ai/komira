@@ -74,6 +74,19 @@ def _filter_at(level: UInt8) -> EnvFilter:
     return f^
 
 
+# Drain one worker's ring and return how many records came out. This is the
+# engine's inspectable drain, NOT `drain_worker`: `drain_worker` writes every
+# record to the engine's log sink, and this test drains about 2.9 million
+# records, which as sink output was ~500 MB of test log and made the CI log
+# unreadable. Log records are decoded the same way and each yields one line, so
+# for this test (log records only, no unknown kinds asserted) the count equals
+# `drain_worker`'s. In general `drain_worker` returns every popped record (span,
+# metric and unknown kinds too) while `drain_worker_to_lines` counts log records
+# only. Only the delivery differs: the lines are dropped here, not printed.
+def _drain(mut eng: SharedEngine) -> Int:
+    return len(eng.drain_worker_to_lines(0, 1 << 16))
+
+
 # -----------------------------------------------------------------------------
 # The four timed inner loops. Each takes `mut eng` and constructs whatever handle
 # it needs INSIDE, so the borrow ends at return and the caller can drain — a
@@ -186,13 +199,13 @@ def main() raises:
     var warm_drained = 0
     for _ in range(WARMUP_CHUNKS):
         _ = _chunk_spec(eng, CHUNK)
-        warm_drained += eng.drain_worker(0, 1 << 16)
+        warm_drained += _drain(eng)
         _ = _chunk_erased(eng, CHUNK)
-        warm_drained += eng.drain_worker(0, 1 << 16)
+        warm_drained += _drain(eng)
         _ = _chunk_spec_zero(eng, CHUNK)
-        warm_drained += eng.drain_worker(0, 1 << 16)
+        warm_drained += _drain(eng)
         _ = _chunk_erased_zero(eng, CHUNK)
-        warm_drained += eng.drain_worker(0, 1 << 16)
+        warm_drained += _drain(eng)
     assert_equal(
         warm_drained,
         4 * WARMUP_CHUNKS * CHUNK,
@@ -228,13 +241,13 @@ def main() raises:
         var n = 0
         while n < PER_ROUND:
             a += _chunk_spec(eng, CHUNK)
-            spec_drained += eng.drain_worker(0, 1 << 16)
+            spec_drained += _drain(eng)
             b += _chunk_erased(eng, CHUNK)
-            erased_drained += eng.drain_worker(0, 1 << 16)
+            erased_drained += _drain(eng)
             c += _chunk_spec_zero(eng, CHUNK)
-            spec0_drained += eng.drain_worker(0, 1 << 16)
+            spec0_drained += _drain(eng)
             d += _chunk_erased_zero(eng, CHUNK)
-            erased0_drained += eng.drain_worker(0, 1 << 16)
+            erased0_drained += _drain(eng)
             n += CHUNK
             emitted += CHUNK
         spec.append(Float64(Int(a)) / Float64(n))
