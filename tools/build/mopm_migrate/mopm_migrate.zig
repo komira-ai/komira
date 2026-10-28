@@ -1,7 +1,7 @@
 //! mopm_migrate: moves one komira Mojo library from `mojo_library` to buildrules' `mojo_package`
 //! and a mopm package, as the hand migrations do (`plan.zig` says what it derives and refuses).
 //!
-//!   mopm_migrate --package <name> --description <text> [--repo <komira root>] [--mopm 0.0.73]
+//!   mopm_migrate --package <name> --description <text> [--repo <komira root>] --mopm <version>
 //!                [--test-layout installed|default] [--dev-dependencies] [--dry-run]
 //!
 //! `--dry-run` prints the whole plan (the `git mv` list, every file it would write, the rows it would
@@ -178,27 +178,21 @@ pub fn run(a: Allocator, c: *plan_mod.Ctx, repo: std.fs.Dir, ro: RunOptions, out
 }
 
 fn usage(err: *std.Io.Writer) !u8 {
-    try err.writeAll("usage: mopm_migrate --package <name> --description <text> [--repo <dir>] [--mopm <version>] [--test-layout installed|default] [--dev-dependencies] [--dry-run]\n");
+    try err.writeAll("usage: mopm_migrate --package <name> --description <text> [--repo <dir>] --mopm <version> [--test-layout installed|default] [--dev-dependencies] [--dry-run]\n");
     try err.flush();
     return 2;
 }
 
-pub fn main() !u8 {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    var arena_state = std.heap.ArenaAllocator.init(gpa.allocator());
-    defer arena_state.deinit();
-    const a = arena_state.allocator();
-    var ebuf: [1024]u8 = undefined;
-    var err = std.fs.File.stderr().writer(&ebuf);
-    var obuf: [4096]u8 = undefined;
-    var out = std.fs.File.stdout().writer(&obuf);
-    const args = try std.process.argsAlloc(a);
+pub const Parsed = struct { plan: plan_mod.Options, repo_path: []const u8, dry_run: bool };
 
+/// The command line as options. Null when it is not usable; `why` then holds the message (empty when the
+/// usage line says it all). `--mopm` has no default: the version is the repository's (`MOPM` in
+/// release/readme_e2e/packages.bzl), and a second number kept here would drift from it.
+pub fn parseArgs(args: []const []const u8, a: Allocator, why: *std.ArrayList(u8)) error{OutOfMemory}!?Parsed {
     var repo_path: []const u8 = ".";
     var package: ?[]const u8 = null;
     var description: ?[]const u8 = null;
-    var mopm: []const u8 = "0.0.73";
+    var mopm: ?[]const u8 = null;
     var layout: ?[]const u8 = null;
     var dev = false;
     var dry = false;
@@ -213,13 +207,13 @@ pub fn main() !u8 {
             var known = false;
             for ([_][]const u8{ "--package", "--description", "--test-layout", "--repo", "--mopm" }) |k| known = known or std.mem.eql(u8, k, flag);
             if (!known) {
-                try err.interface.print("mopm_migrate: unknown argument {s}\n", .{flag});
-                return usage(&err.interface);
+                try why.writer(a).print("unknown argument {s}", .{flag});
+                return null;
             }
             i += 1;
             if (i >= args.len) {
-                try err.interface.print("mopm_migrate: {s} needs a value\n", .{flag});
-                return usage(&err.interface);
+                try why.writer(a).print("{s} needs a value", .{flag});
+                return null;
             }
             const v = args[i];
             if (std.mem.eql(u8, flag, "--package")) {
@@ -233,7 +227,36 @@ pub fn main() !u8 {
             } else mopm = v;
         }
     }
-    if (package == null or description == null) return usage(&err.interface);
+    if (package == null or description == null) return null;
+    if (mopm == null) {
+        try why.appendSlice(a, "--mopm is required (the version the repository builds with: MOPM in release/readme_e2e/packages.bzl)");
+        return null;
+    }
+    return .{
+        .plan = .{ .package = package.?, .description = description.?, .mopm = mopm.?, .test_layout = layout, .dev_dependencies = dev },
+        .repo_path = repo_path,
+        .dry_run = dry,
+    };
+}
+
+pub fn main() !u8 {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    var arena_state = std.heap.ArenaAllocator.init(gpa.allocator());
+    defer arena_state.deinit();
+    const a = arena_state.allocator();
+    var ebuf: [1024]u8 = undefined;
+    var err = std.fs.File.stderr().writer(&ebuf);
+    var obuf: [4096]u8 = undefined;
+    var out = std.fs.File.stdout().writer(&obuf);
+    const args = try std.process.argsAlloc(a);
+    var why: std.ArrayList(u8) = .empty;
+    const parsed = try parseArgs(args, a, &why) orelse {
+        if (why.items.len != 0) try err.interface.print("mopm_migrate: {s}\n", .{why.items});
+        return usage(&err.interface);
+    };
+    const repo_path = parsed.repo_path;
+    const dry = parsed.dry_run;
 
     var repo = std.fs.cwd().openDir(repo_path, .{}) catch |e| {
         try err.interface.print("mopm_migrate: cannot open {s}: {s}\n", .{ repo_path, @errorName(e) });
@@ -243,7 +266,7 @@ pub fn main() !u8 {
     defer repo.close();
     var c = plan_mod.Ctx{ .a = a };
     run(a, &c, repo, .{
-        .plan = .{ .package = package.?, .description = description.?, .mopm = mopm, .test_layout = layout, .dev_dependencies = dev },
+        .plan = parsed.plan,
         .dry_run = dry,
         .use_git = true,
     }, &out.interface) catch |e| {
