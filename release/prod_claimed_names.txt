@@ -15,6 +15,7 @@ komira_buffer
 komira_bump_arena
 komira_clock
 komira_collections
+komira_compression
 komira_content_line
 komira_counters
 komira_datetime
