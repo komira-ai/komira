@@ -107,7 +107,7 @@ GRAPH_JSON = r'''{
         {"path": "src/komira_log/src/komira_log/engine/drain.mojo", "sha256": "c9b01ab25a0c618b9755618319e3f2b715db53b823ab91ab47cb7a66416ebb6c"},
         {"path": "src/komira_log/src/komira_log/engine/emit.mojo", "sha256": "456ee0c734c82dd31925a22a1889a0fd27da5f22b88289973059374405466da0"},
         {"path": "src/komira_log/src/komira_log/engine/fs_ops.mojo", "sha256": "729b5d963d7dd902ed15a96fcb120c62f16c36cb2c2ab5a448a10b6d4416de66"},
-        {"path": "src/komira_log/src/komira_log/engine/log_event_record.mojo", "sha256": "f8673aff0ef39cc2cb9adc2a48f8dd9b91e32df01034c7353e3d8acc274fc12f"},
+        {"path": "src/komira_log/src/komira_log/engine/log_event_record.mojo", "sha256": "2c6652567bc63b6f9b1f7d284f07d96cf5aa7339c3c3329fb492b224c3be82b6"},
         {"path": "src/komira_log/src/komira_log/engine/log_manager.mojo", "sha256": "80cd3cd2c458f3fb1b57580821d7991ba46beb249829c844aa0f3801dc872e4f"},
         {"path": "src/komira_log/src/komira_log/engine/log_record_view.mojo", "sha256": "564b1cf557beb42f7eb795a2b3a6b13dd0cca3369f392c3c6d65fbf6d68eafc0"},
         {"path": "src/komira_log/src/komira_log/engine/merge.mojo", "sha256": "7f5fc0a64e228808687fb41ce6089659a88cddc6dc1d2af4a134fa7d58253e04"},
@@ -177,6 +177,23 @@ GRAPH_JSON = r'''{
       ],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_log_anchor_refresh_and_uncalled_helpers.pass"]
+    },
+    {
+      "id": "komira_log@0.1.0#mojo1.0.0/test:src/komira_log/tests/test_log_arg_blob_writer_overflow.mojo",
+      "package": "komira_log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/komira_log/tests/test_log_arg_blob_writer_overflow.mojo", "sha256": "1fd4eed780dd66a82edfb4e0648681fb630d6b01383f063fc93742794815de61"}
+      ],
+      "deps": ["komira_log@0.1.0#mojo1.0.0/lib", "komira_runtime_paths@0.1.0#mojo1.0.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira_libc", "kind": "static", "built": "native:komira_libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira_log", "kind": "static", "built": "native:komira_log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira_metrics", "kind": "static", "built": "native:komira_metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_log_arg_blob_writer_overflow.pass"]
     },
     {
       "id": "komira_log@0.1.0#mojo1.0.0/test:src/komira_log/tests/test_log_bytes_non_ascii.mojo",
@@ -1049,7 +1066,7 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
         {"path": "src/komira_log/src/komira_log/engine/drain.mojo", "sha256": "c9b01ab25a0c618b9755618319e3f2b715db53b823ab91ab47cb7a66416ebb6c"},
         {"path": "src/komira_log/src/komira_log/engine/emit.mojo", "sha256": "456ee0c734c82dd31925a22a1889a0fd27da5f22b88289973059374405466da0"},
         {"path": "src/komira_log/src/komira_log/engine/fs_ops.mojo", "sha256": "729b5d963d7dd902ed15a96fcb120c62f16c36cb2c2ab5a448a10b6d4416de66"},
-        {"path": "src/komira_log/src/komira_log/engine/log_event_record.mojo", "sha256": "f8673aff0ef39cc2cb9adc2a48f8dd9b91e32df01034c7353e3d8acc274fc12f"},
+        {"path": "src/komira_log/src/komira_log/engine/log_event_record.mojo", "sha256": "2c6652567bc63b6f9b1f7d284f07d96cf5aa7339c3c3329fb492b224c3be82b6"},
         {"path": "src/komira_log/src/komira_log/engine/log_manager.mojo", "sha256": "80cd3cd2c458f3fb1b57580821d7991ba46beb249829c844aa0f3801dc872e4f"},
         {"path": "src/komira_log/src/komira_log/engine/log_record_view.mojo", "sha256": "564b1cf557beb42f7eb795a2b3a6b13dd0cca3369f392c3c6d65fbf6d68eafc0"},
         {"path": "src/komira_log/src/komira_log/engine/merge.mojo", "sha256": "7f5fc0a64e228808687fb41ce6089659a88cddc6dc1d2af4a134fa7d58253e04"},
@@ -1119,6 +1136,23 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       ],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_log_anchor_refresh_and_uncalled_helpers.pass"]
+    },
+    {
+      "id": "komira_log@0.1.0#mojo1.0.0/test:src/komira_log/tests/test_log_arg_blob_writer_overflow.mojo",
+      "package": "komira_log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/komira_log/tests/test_log_arg_blob_writer_overflow.mojo", "sha256": "1fd4eed780dd66a82edfb4e0648681fb630d6b01383f063fc93742794815de61"}
+      ],
+      "deps": ["komira_log@0.1.0#mojo1.0.0/lib", "komira_runtime_paths@0.1.0#mojo1.0.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira_libc", "kind": "static", "built": "native:komira_libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira_log", "kind": "static", "built": "native:komira_log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira_metrics", "kind": "static", "built": "native:komira_metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_log_arg_blob_writer_overflow.pass"]
     },
     {
       "id": "komira_log@0.1.0#mojo1.0.0/test:src/komira_log/tests/test_log_bytes_non_ascii.mojo",
@@ -1988,7 +2022,7 @@ GRAPH_JSON_OSX_ARM64 = r'''{
         {"path": "src/komira_log/src/komira_log/engine/drain.mojo", "sha256": "c9b01ab25a0c618b9755618319e3f2b715db53b823ab91ab47cb7a66416ebb6c"},
         {"path": "src/komira_log/src/komira_log/engine/emit.mojo", "sha256": "456ee0c734c82dd31925a22a1889a0fd27da5f22b88289973059374405466da0"},
         {"path": "src/komira_log/src/komira_log/engine/fs_ops.mojo", "sha256": "729b5d963d7dd902ed15a96fcb120c62f16c36cb2c2ab5a448a10b6d4416de66"},
-        {"path": "src/komira_log/src/komira_log/engine/log_event_record.mojo", "sha256": "f8673aff0ef39cc2cb9adc2a48f8dd9b91e32df01034c7353e3d8acc274fc12f"},
+        {"path": "src/komira_log/src/komira_log/engine/log_event_record.mojo", "sha256": "2c6652567bc63b6f9b1f7d284f07d96cf5aa7339c3c3329fb492b224c3be82b6"},
         {"path": "src/komira_log/src/komira_log/engine/log_manager.mojo", "sha256": "80cd3cd2c458f3fb1b57580821d7991ba46beb249829c844aa0f3801dc872e4f"},
         {"path": "src/komira_log/src/komira_log/engine/log_record_view.mojo", "sha256": "564b1cf557beb42f7eb795a2b3a6b13dd0cca3369f392c3c6d65fbf6d68eafc0"},
         {"path": "src/komira_log/src/komira_log/engine/merge.mojo", "sha256": "7f5fc0a64e228808687fb41ce6089659a88cddc6dc1d2af4a134fa7d58253e04"},
@@ -2058,6 +2092,23 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       ],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_log_anchor_refresh_and_uncalled_helpers.pass"]
+    },
+    {
+      "id": "komira_log@0.1.0#mojo1.0.0/test:src/komira_log/tests/test_log_arg_blob_writer_overflow.mojo",
+      "package": "komira_log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/komira_log/tests/test_log_arg_blob_writer_overflow.mojo", "sha256": "1fd4eed780dd66a82edfb4e0648681fb630d6b01383f063fc93742794815de61"}
+      ],
+      "deps": ["komira_log@0.1.0#mojo1.0.0/lib", "komira_runtime_paths@0.1.0#mojo1.0.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira_libc", "kind": "static", "built": "native:komira_libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira_log", "kind": "static", "built": "native:komira_log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira_metrics", "kind": "static", "built": "native:komira_metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_log_arg_blob_writer_overflow.pass"]
     },
     {
       "id": "komira_log@0.1.0#mojo1.0.0/test:src/komira_log/tests/test_log_bytes_non_ascii.mojo",
