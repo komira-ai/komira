@@ -42,6 +42,19 @@ test "parse: the thirteen positional arguments, then --solib, --gen and the gate
     try t.expectEqual(@as(usize, 1), s.gen.len);
 }
 
+test "parse: the gate's --lib-dir arguments are left for the gate, in order, beside the --env ones" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var diag: []const u8 = "";
+    const p = try parseOf(a, &.{ "--gen", "g/x.mojo", "--env", "A=1", "--lib-dir", "pinned/one", "--lib-dir", "pinned/two" }, &diag);
+    try t.expectEqual(@as(usize, 1), p.gen.len);
+    try t.expectEqual(@as(usize, 6), p.rest.len);
+    try t.expectEqualStrings("--lib-dir", p.rest[2]);
+    try t.expectEqualStrings("pinned/one", p.rest[3]);
+    try t.expectEqualStrings("pinned/two", p.rest[5]);
+}
+
 test "parse: refusals" {
     var arena = std.heap.ArenaAllocator.init(t.allocator);
     defer arena.deinit();
