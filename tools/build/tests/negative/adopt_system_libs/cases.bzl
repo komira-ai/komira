@@ -72,6 +72,17 @@ def adopt_system_libs_case():
     )
     _dependents("", ":adopted")
 
+    # Two levels below the adopted label: the directories travel through `deps` of `deps`.
+    mojo_library(
+        name = "consumer2",
+        srcs = ["syslib_consumer2/__init__.mojo"],
+        test_srcs = ["tests/test_consumer2.mojo"],
+        deps = [":consumer"],
+        import_name = "syslib_consumer2",
+        conda = False,
+        readme = False,
+    )
+
     # A shared library over the adopted label: its driver loads it, and its export opens SQLite.
     mojo_shared_lib(
         name = "probe",
@@ -101,4 +112,26 @@ def adopt_system_libs_case():
             out_name = "syslib_probe",
             gate_srcs = ["shared_driver.mojo"],
             deps = [":adopted_unpinned"],
+        )
+
+    # `test_deps` reach the library's own welded tests (`:via_test_deps` is green) and nothing that depends on it: `:leak_check` depends on it and on the plain codec, and
+    # its test calls the codec, so it must FAIL (a build of it that passes means the test_deps' directories leaked through MojoInfo).
+    if read_config("adopt_system_libs", "case", "") == "unpinned":
+        mojo_library(
+            name = "via_test_deps",
+            srcs = ["syslib_viatd/__init__.mojo"],
+            test_srcs = ["tests/test_viatd.mojo"],
+            test_deps = [":adopted"],
+            import_name = "syslib_viatd",
+            conda = False,
+            readme = False,
+        )
+        mojo_library(
+            name = "leak_check",
+            srcs = ["syslib_leak/__init__.mojo"],
+            test_srcs = ["tests/test_leak.mojo"],
+            deps = [":via_test_deps", ":codec"],
+            import_name = "syslib_leak",
+            conda = False,
+            readme = False,
         )

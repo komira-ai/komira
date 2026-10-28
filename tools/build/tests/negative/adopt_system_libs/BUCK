@@ -5,10 +5,13 @@ load(":cases.bzl", "adopt_system_libs_case")
 # bare name, which a farm worker does not have. Every target below must BUILD (they are ordinary targets, built by a plain `buck2 build`):
 #   :consumer                       an old-rule library whose welded test calls the codec
 #   :consumer[coverage]             its kcov run, and :consumer[coverage][branch] its branch run (`coverage_debug` gives it both whatever the switch says)
+#   :consumer2                      a library two levels below the adopted label (it depends on :consumer): its welded test calls the codec
 #   :program_test                   a `mojo_test`: `buck2 test` runs it through the gate
 #   :probe                          a `mojo_shared_lib` whose driver loads it and calls an export that opens SQLite
 #
 # `-c adopt_system_libs.case=unpinned` adds the same targets with the suffix `_unpinned` over a `:lib` that forgot its pins. `:consumer_unpinned` and
-# `:program_test_unpinned` must FAIL, in the action of the welded test, because the loader cannot open libsqlite3.so.0. The scenario is
+# `:program_test_unpinned` must FAIL, in the action of the welded test, because the loader cannot open libsqlite3.so.0. The case also adds `:via_test_deps` (lists the
+# adopted label in `test_deps` only: green, its own test is given the libraries) and `:leak_check` (depends on it and on the plain codec: must FAIL the same way, because
+# the `test_deps` directories do not reach a dependent). The scenario is
 # tools/build/selftest:planted_red_builds_adopt_system_libs.
 adopt_system_libs_case()

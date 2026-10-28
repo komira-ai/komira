@@ -8,6 +8,7 @@ const kit = @import("testkit.zig");
 const supervise = @import("supervise.zig");
 const sys = @import("sys.zig");
 const util = @import("util.zig");
+const gate_mojo = @import("mojo.zig");
 
 const label = "//x:y";
 
@@ -259,6 +260,16 @@ test "G7b system libraries: --lib-dir directories follow the compiler's lib in o
     // The same with no inherited fallback: dyld's own defaults follow the directories.
     const r2 = try e.run(try e.args("env", &.{ "--lib-dir", "/pinned/one" }), .{});
     if (sys.is_darwin) try std.testing.expect(hasLine(output(r2.err), "DYLD_FALLBACK_LIBRARY_PATH=/pinned/one:/usr/local/lib:/usr/lib"));
+}
+
+// G7c. Mutant: count a set-but-empty variable as set (a path then ends in an empty entry, which means the current directory), or match a longer name.
+test "G7c inheritedValue: a set, non-empty value is returned; empty, unset and a longer name are not" {
+    const env = [_][]const u8{ "A=1", "DYLD_FALLBACK_LIBRARY_PATH=", "B_LONG=2", "C=x:y" };
+    try std.testing.expectEqualStrings("1", gate_mojo.inheritedValue(&env, "A").?);
+    try std.testing.expectEqualStrings("x:y", gate_mojo.inheritedValue(&env, "C").?);
+    try std.testing.expect(gate_mojo.inheritedValue(&env, "DYLD_FALLBACK_LIBRARY_PATH") == null);
+    try std.testing.expect(gate_mojo.inheritedValue(&env, "B") == null);
+    try std.testing.expect(gate_mojo.inheritedValue(&env, "NOPE") == null);
 }
 
 // G8. Mutant: run the test in the action's directory.

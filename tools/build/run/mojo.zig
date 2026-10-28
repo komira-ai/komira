@@ -168,10 +168,10 @@ fn envName(kv: []const u8) []const u8 {
     return kv[0..eq];
 }
 
-/// The value of `name` in `inherited`, if it is set and not empty.
-fn inheritedValue(inherited: []const []const u8, name: []const u8) ?[]const u8 {
+/// The value of `name` in `inherited`, if it is set and not empty (an empty one counts as unset, so no empty entry is appended to a path).
+pub fn inheritedValue(inherited: []const []const u8, name: []const u8) ?[]const u8 {
     for (inherited) |kv| {
-        if (kv.len > name.len and kv[name.len] == '=' and std.mem.eql(u8, kv[0..name.len], name)) return kv[name.len + 1 ..];
+        if (kv.len > name.len + 1 and kv[name.len] == '=' and std.mem.eql(u8, kv[0..name.len], name)) return kv[name.len + 1 ..];
     }
     return null;
 }

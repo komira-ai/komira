@@ -2,11 +2,13 @@
 //! (tools/build/mojo/system_libs.bzl), over tests//negative/adopt_system_libs. `codec` opens SQLite by its bare name (a farm worker has no libsqlite3); `:adopted`
 //! adopts a `:lib` that exports the pinned libsqlite and libzlib, and `-c adopt_system_libs.case=unpinned` adds the `_unpinned` twins over a `:lib` that forgot its
 //! pins. The positives are ordinary targets of the package (its BUCK file lists them: the welded test, the kcov and branch runs, a `mojo_test`, a shared library's
-//! driver) and need no scenario. Two checks here, the cheapest that hold the wiring on a red build:
+//! driver) and need no scenario. Three checks here, the cheapest that hold the wiring on a red build:
 //!
 //!   - the welded test of `consumer_unpinned` fails in its action on the farm with the loader's refusal, `dlopen failed: libsqlite3.so.0: cannot open shared object
 //!     file`. Catches a host that supplies the library (the pinned twin would pass for the wrong reason), and a control that never ran the test;
-//!   - the `mojo_test` `program_test_unpinned` fails under `buck2 test` with the same refusal.
+//!   - the `mojo_test` `program_test_unpinned` fails under `buck2 test` with the same refusal;
+//!   - `leak_check`, a library that depends on `via_test_deps` (which names the adopted label in `test_deps` only) and on the plain codec, fails its welded test with the
+//!     same refusal: the directories of `test_deps` reach the library's own tests and nothing that depends on it. Catches them leaking through `MojoInfo`.
 //!
 //! The coverage runs and the shared library are not asserted red here (that needs a coverage build in a cold daemon): their wiring is held by the positive targets
 //! building, which they can only do with the libraries.
@@ -19,6 +21,7 @@ const UNPINNED = &.{"adopt_system_libs.case=unpinned"};
 
 const REDS = [_]lib.Row{
     .{ .name = "welded_test_without_the_pins", .target = T ++ "consumer_unpinned", .text = WHY, .cfg = UNPINNED },
+    .{ .name = "test_deps_do_not_reach_a_dependent", .target = T ++ "leak_check", .text = WHY, .cfg = UNPINNED },
 };
 
 fn testRun(c: *lib.Ctx) !void {
@@ -35,6 +38,8 @@ fn testRun(c: *lib.Ctx) !void {
 }
 
 fn body(c: *lib.Ctx) !void {
+    // The control of the leak check is its own dependency: `leak_check` is built only after `via_test_deps` (whose welded test is given the libraries through its
+    // `test_deps`) has passed, so a red `leak_check` is the dependent's test and not the library's.
     try c.reds(&REDS);
     try testRun(c);
 }
