@@ -34,9 +34,12 @@
 #
 # The storage is ONE `LocalDiskSpillStorage` per aggregate, created on the
 # first spill (so an aggregate that never spills never touches the
-# filesystem), rooted at the directory the caller passes. The caller owns the
-# budget and the directory (they come from its flags) and gives each aggregate
-# its own directory. Single-threaded: the finalize runs on one thread.
+# filesystem). Its root is a new sub-directory of the directory the caller
+# passes, named `thsplc_agg_<pid>_<counter>` and created exclusively, so two
+# aggregates (or processes) may share the directory. The caller owns the
+# budget and the directory (they come from its flags). The spill files are
+# deleted when the finalize returns or raises, and when the state is dropped.
+# Single-threaded: the finalize runs on one thread.
 # =============================================================================
 
 from komira_arrow.concat import concat_record_batches_nway
@@ -49,6 +52,7 @@ from komira_row_format.row_block import RowHashAggTable, RowLayout
 from komira_engine_runtime.spill.local_disk import LocalDiskSpillStorage
 from komira_engine_runtime.spill.spill_storage import ChunkId
 
+from .spill_root import create_spill_root
 from .agg_spill_codec import (
     AggRegistration,
     agg_layout_fingerprint,
@@ -97,6 +101,15 @@ struct RowHashAggSpillState(Movable, Deinitable):
         self._run_n_groups = List[Int]()
         self._last_finalize_subparts = 0
 
+    def __del__(deinit self):
+        """Release the spill files of a state dropped before finalize (a
+        cancelled or failed query). Best-effort: a destructor cannot raise."""
+        if self._storage:
+            try:
+                self._storage.value().cleanup()
+            except:
+                pass
+
     def budget_bytes(self) -> Int:
         return self._budget_bytes
 
@@ -131,7 +144,9 @@ struct RowHashAggSpillState(Movable, Deinitable):
         var fingerprint = agg_layout_fingerprint(table)
         if not self._storage:
             self._storage = Optional[LocalDiskSpillStorage](
-                LocalDiskSpillStorage.with_unlimited(self._spill_dir)
+                LocalDiskSpillStorage.with_unlimited(
+                    create_spill_root(self._spill_dir, "agg")
+                )
             )
         var cid = encode_group_rows_to_storage(
             self._storage.value(), image^, n_groups, fingerprint
@@ -199,19 +214,28 @@ struct RowHashAggSpillState(Movable, Deinitable):
         var storage = self._storage.take()
         # The fold mutates `table`; a repartition must start from the table as
         # it was, or the runs folded before the overflow would count twice.
-        var snapshot = table.partition_group_rows_to_sab(1, 0, 0)
-        var overflowed = self._fold_runs(storage, table, reg, prefetcher)
-        if not overflowed:
-            self._last_finalize_subparts = 1
-            var rb = table.emit_to_record_batch(layout, key_names, agg_names)
-            if rb:
-                out.append(rb.take())
-        else:
-            self._last_finalize_subparts = AGG_RECURSE_FANOUT
-            var surviving = shell_from_image(snapshot^, reg)
-            self._repartition_collect(
-                storage, surviving, reg, layout, key_names, agg_names, out
-            )
+        try:
+            var snapshot = table.partition_group_rows_to_sab(1, 0, 0)
+            var overflowed = self._fold_runs(storage, table, reg, prefetcher)
+            if not overflowed:
+                self._last_finalize_subparts = 1
+                var rb = table.emit_to_record_batch(
+                    layout, key_names, agg_names
+                )
+                if rb:
+                    out.append(rb.take())
+            else:
+                self._last_finalize_subparts = AGG_RECURSE_FANOUT
+                var surviving = shell_from_image(snapshot^, reg)
+                self._repartition_collect(
+                    storage, surviving, reg, layout, key_names, agg_names, out
+                )
+        except e:
+            try:
+                storage.cleanup()
+            except:
+                pass
+            raise e^
         storage.cleanup()
         return out^
 

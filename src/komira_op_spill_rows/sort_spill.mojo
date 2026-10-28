@@ -25,9 +25,11 @@
 #
 # The storage is ONE `LocalDiskSpillStorage` per sort, created on the first
 # spill (so a sort that never spills never touches the filesystem), rooted at
-# the directory the caller passes. The caller owns the budget and the
-# directory (they come from its flags) and gives each sort its own directory.
-# Single-threaded.
+# a new sub-directory of the directory the caller passes, named
+# `thsplc_sortrows_<pid>_<counter>` and created exclusively, so two sorts (or
+# processes) may share the directory. The caller owns the budget and the
+# directory (they come from its flags). The spill files are deleted when the
+# finalize returns or raises, and when the state is dropped. Single-threaded.
 # =============================================================================
 
 from komira_arrow.arrow_types import ArrowType
@@ -46,6 +48,7 @@ from komira_engine_runtime.spill.native_spill import (
 )
 from komira_engine_runtime.spill.spill_storage import ChunkId
 
+from .spill_root import create_spill_root
 from komira_op_sort.sort_external_merge import RunCursor, k_way_merge_cursors
 
 
@@ -76,6 +79,15 @@ struct RowSortSpillState(Movable, Deinitable):
         self._storage = Optional[LocalDiskSpillStorage](None)
         self._run_chunk_ids = List[ChunkId]()
         self._schema = Optional[Schema](None)
+
+    def __del__(deinit self):
+        """Release the spill files of a state dropped before finalize (a
+        cancelled or failed query). Best-effort: a destructor cannot raise."""
+        if self._storage:
+            try:
+                self._storage.value().cleanup()
+            except:
+                pass
 
     def budget_bytes(self) -> Int:
         return self._budget_bytes
@@ -115,7 +127,9 @@ struct RowSortSpillState(Movable, Deinitable):
             self._schema = Optional[Schema](batch.schema.copy())
         if not self._storage:
             self._storage = Optional[LocalDiskSpillStorage](
-                LocalDiskSpillStorage.with_unlimited(self._spill_dir)
+                LocalDiskSpillStorage.with_unlimited(
+                    create_spill_root(self._spill_dir, "sortrows")
+                )
             )
         ref storage = self._storage.value()
         var cid = native_column_write_chunk(storage, batch^)
@@ -178,13 +192,22 @@ struct RowSortSpillState(Movable, Deinitable):
         # run, which is what keeps equal keys in input order.
         var cursors = Slab[RunCursor]()
         var storage = self._storage.take()
-        for i in range(len(self._run_chunk_ids)):
-            var rb = native_column_read_chunk(
-                storage, self._run_chunk_ids[i], self._schema.value().copy()
-            )
-            var one = Slab[RecordBatch]()
-            one.append(rb^)
-            cursors.append(RunCursor(one^))
+        try:
+            for i in range(len(self._run_chunk_ids)):
+                var rb = native_column_read_chunk(
+                    storage,
+                    self._run_chunk_ids[i],
+                    self._schema.value().copy(),
+                )
+                var one = Slab[RecordBatch]()
+                one.append(rb^)
+                cursors.append(RunCursor(one^))
+        except e:
+            try:
+                storage.cleanup()
+            except:
+                pass
+            raise e^
         storage.cleanup()
         if final_run:
             var one = Slab[RecordBatch]()

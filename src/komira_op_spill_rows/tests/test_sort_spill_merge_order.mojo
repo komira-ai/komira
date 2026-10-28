@@ -255,10 +255,10 @@ def _batch_with_null_k0() raises -> RecordBatch:
     return rbb.build(sb.build())
 
 
-def test_sort_spill_null_key_after_a_spill_is_refused_or_kept() raises:
-    """A NULL k0 arriving after runs have spilled: refused by name, or kept
-    as NULL and placed last (DuckDB's default for ASC). Catches the NULL coming
-    back as the Int64.MIN under it, first in the output."""
+def test_sort_spill_null_key_after_a_spill_is_refused() raises:
+    """A NULL k0 arriving after runs have spilled is refused by name (the
+    buffer stores one INT64 cell per key and cannot order a NULL), and the
+    runs already spilled still merge to the sort of the rows fed before it."""
     var state = RowSortSpillState(1000, _scratch_dir("sort_null"))
     var buf = _buffer()
     var layout = _layout()
@@ -276,20 +276,17 @@ def test_sort_spill_null_key_after_a_spill_is_refused_or_kept() raises:
     except e:
         refused = True
         msg = String(e)
-    if refused:
-        assert_true("NULL" in msg, "refused by name: " + msg)
-        return
+    assert_true(refused, "a NULL key is refused")
+    assert_true("NULL" in msg, "refused by name: " + msg)
     var out = state^.finalize_with_spill(
         buf, layout, _key_names(), _payload_names(), _directions()
     )
-    var got = out.take()
-    var last = got.num_rows() - 1
-    assert_true(BatchView(got).col_is_null(0, last), "the NULL kept, last")
-    assert_equal(_i64(got, 2, last), 1001, "the NULL row is row 1001")
+    assert_true(out, "a result")
+    assert_equal(out.take().num_rows(), 2 * _R, "only the rows fed before")
 
 
 def main() raises:
     var s = TestSuite()
     s.test[test_sort_spill_merges_runs_in_the_run_sort_order]()
-    s.test[test_sort_spill_null_key_after_a_spill_is_refused_or_kept]()
+    s.test[test_sort_spill_null_key_after_a_spill_is_refused]()
     s^.run()
