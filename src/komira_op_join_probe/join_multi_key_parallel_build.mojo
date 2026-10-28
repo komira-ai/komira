@@ -19,12 +19,13 @@
 # any size with one-row chunks.
 # =============================================================================
 
-from std.atomic import Atomic
+from std.atomic import Ordering
 from std.io import FileDescriptor
 from std.memory import alloc, memset, OwnedPointer, UnsafePointer
 from std.sys import num_physical_cores, size_of
 
 from komira_arrow.primitive_array import PrimitiveArray
+from komira_atomic_alias import AtomicI64
 from komira_async_api.token import CancellationToken
 from komira_collections.slab import Slab
 from komira_dynamic_filter.bloom_filter import BloomFilter
@@ -97,28 +98,32 @@ def mk_chain_build_parallel_eligible(
     return num_rows >= _MK_BUILD_PARALLEL_THRESHOLD
 
 
-def mk_build_chunk_bounds(n: Int) raises -> List[Int]:
+def mk_build_chunk_bounds(n: Int, chunk_rows: Int = 0) raises -> List[Int]:
     """The chunk tiling for a composite build over `n` rows: `n_chunks + 1`
-    monotone bounds starting at 0 and ending at `n`.
+    monotone bounds starting at 0 and ending at `n`. A positive `chunk_rows`
+    sets the rows per chunk; 0 takes the default (one row under FORCE,
+    otherwise sized to the cores with a floor of `_MK_MIN_CHUNK_ROWS`).
     """
     var bounds = List[Int]()
     bounds.append(0)
     if n <= 0:
         return bounds^
-    var chunk_rows: Int
-    if join_parallel_build_mode() == JOIN_PARALLEL_BUILD_FORCE:
-        chunk_rows = 1
+    var rows_per = chunk_rows
+    if rows_per > 0:
+        pass
+    elif join_parallel_build_mode() == JOIN_PARALLEL_BUILD_FORCE:
+        rows_per = 1
     else:
         var nw = num_physical_cores()
         if nw < 1:
             nw = 1
         var target = nw * _MK_CHUNKS_PER_CORE
-        chunk_rows = (n + target - 1) // target
-        if chunk_rows < _MK_MIN_CHUNK_ROWS:
-            chunk_rows = _MK_MIN_CHUNK_ROWS
+        rows_per = (n + target - 1) // target
+        if rows_per < _MK_MIN_CHUNK_ROWS:
+            rows_per = _MK_MIN_CHUNK_ROWS
     var lo = 0
     while lo < n:
-        var hi = lo + chunk_rows
+        var hi = lo + rows_per
         if hi > n:
             hi = n
         bounds.append(hi)
@@ -195,7 +200,7 @@ struct _MkBuildSlots(Movable, Deinitable):
     var next_chain: Optional[List[Int]]
     var hash_table: Optional[List[Int]]
     var bloom: Optional[BloomFilter]
-    var num_inserted: OwnedPointer[Atomic[DType.int64]]
+    var num_inserted: OwnedPointer[AtomicI64]
 
     def __init__(
         out self,
@@ -206,9 +211,12 @@ struct _MkBuildSlots(Movable, Deinitable):
         self.next_chain = Optional[List[Int]](next_chain^)
         self.hash_table = Optional[List[Int]](hash_table^)
         self.bloom = Optional[BloomFilter](bloom^)
-        var raw = alloc[Atomic[DType.int64]](1)
-        UnsafePointer(to=raw[].value).unsafe_write(Scalar[DType.int64](0))
-        self.num_inserted = OwnedPointer[Atomic[DType.int64]](
+        var raw = alloc[AtomicI64](1)
+        # SAFETY: `raw` is a fresh one-element allocation this frame owns; the
+        # assignment initialises it and ownership moves to the `OwnedPointer`,
+        # which frees it. The chunks only `fetch_add` through the payload.
+        raw[] = AtomicI64(Int64(0))
+        self.num_inserted = OwnedPointer[AtomicI64](
             unsafe_from_raw_pointer=raw
         )
 
@@ -259,6 +267,8 @@ struct _MkBuildWork(SharedChunkWork):
             var kview = kcol.view_ro()
             var kptr = kview._unsafe_ptr().bitcast[Scalar[DType.int64]]()
             for j in range(rows):
+                # SAFETY: `lo + j < hi <= n`, and every key column has `n`
+                # rows (the driver refuses ragged columns before dispatch).
                 var v = Int64((kptr + lo + j)[])
                 if v == _NAN_SENTINEL_BITS:
                     skip[j] = True
@@ -282,21 +292,25 @@ struct _MkBuildWork(SharedChunkWork):
         for j in range(rows):
             var r = lo + j
             if skip[j]:
+                # SAFETY: `r` is in this chunk's own `[lo, hi)` of `next_chain`.
                 (nc_ptr + r)[] = _CHAIN_END
                 continue
             var h = hbuf[j]
             var slot = Int(h & mask)
-            # Lock-free Treiber push. SAFETY: `ht_ptr + slot` is a payload slot
-            # owned across the barrier; an aligned 64-bit read is atomic on the
-            # hardware and the compare-exchange validates staleness (a stale
-            # `old` simply retries). `next_chain[r]` is a slot this chunk owns
-            # exclusively, and no reader walks a chain during the build.
+            # Lock-free Treiber push. SAFETY: `ht_ptr + slot` is a slot of the
+            # payload's pre-sized table (`slot <= mask < cap`), aligned for a
+            # 64-bit atomic and owned across the barrier. The head is read with
+            # a relaxed atomic load because it races with the other chunks'
+            # compare-exchange; the compare-exchange validates staleness (a
+            # stale `old` simply retries). `nc_ptr + r` is a slot of the
+            # `n`-entry `next_chain` that only this chunk writes (`r` is in its
+            # `[lo, hi)`), and no reader walks a chain during the build.
             while True:
-                var old = Int64((ht_ptr + slot)[])
+                var old = AtomicI64.load[ordering=Ordering.RELAXED](
+                    ht_ptr + slot
+                )
                 (nc_ptr + r)[] = Int(old)
-                if Atomic[DType.int64].compare_exchange(
-                    ht_ptr + slot, old, Int64(r)
-                ):
+                if AtomicI64.compare_exchange(ht_ptr + slot, old, Int64(r)):
                     break
             bp[].bloom.value().insert_hash_atomic(h)
             inserted += 1
@@ -317,6 +331,7 @@ def _run_mk_build_wave[
     var slots: _MkBuildSlots,
     n_chunks: Int,
     dispatcher_ptr: Optional[Pointer[D, disp_o]],
+    var cancel_token: CancellationToken,
 ) raises -> _MkBuildSlots:
     """Thin `fork_join_shared` binding whose only job is to let `in_o` be
     INFERRED from the borrowed key Slab (the caller holds it inside an
@@ -339,7 +354,7 @@ def _run_mk_build_wave[
         2,
         0,
         dispatcher_ptr,
-        CancellationToken.never(),
+        cancel_token^,
         SITE_MK_JOIN_BUILD,
     )
 
@@ -355,6 +370,7 @@ def _run_mk_fill_wave[
     var slots: _MkFillSlots,
     n_chunks: Int,
     dispatcher_ptr: Optional[Pointer[D, disp_o]],
+    var cancel_token: CancellationToken,
 ) raises -> _MkFillSlots:
     """Thin `fork_join_shared` binding for the FILL wave. Same idiom (and same
     reason) as `_run_mk_build_wave` below: `in_o` must be INFERRED from the
@@ -376,7 +392,7 @@ def _run_mk_fill_wave[
         2,
         0,
         dispatcher_ptr,
-        CancellationToken.never(),
+        cancel_token^,
         SITE_JOIN_HT_FILL,
     )
 
@@ -388,7 +404,9 @@ def multi_key_hash_join_build_parallel[
 ](
     var keys: MultiKeyColumns,
     dispatcher_ptr: Optional[Pointer[D, disp_o]],
+    var cancel_token: CancellationToken,
     force_serial: Bool = False,
+    chunk_rows: Int = 0,
 ) raises -> MultiKeyHashJoinBuilder:
     """Composite-key hash-join build, parallel above the gate and serial below
     it — so this entry is ALWAYS safe to call in place of
@@ -397,11 +415,17 @@ def multi_key_hash_join_build_parallel[
     Args:
         keys: The N build-side key columns; moved into the returned builder.
         dispatcher_ptr: The caller's pool, borrowed for the fork-join window.
+        cancel_token: Consumed. A token cancelled before or during a pooled
+            wave makes the build raise and return no table (the half-built
+            index is dropped with the wave's payload).
         force_serial: Take the serial build unconditionally: the differential
             tests' reference arm (the process-wide OFF mode is the rollback).
+        chunk_rows: Rows per chunk; 0 takes the default tiling
+            (`mk_build_chunk_bounds`).
     """
     var n_keys = keys.num_keys
     if n_keys < 1 or n_keys > MAX_JOIN_KEYS:
+        _ = cancel_token^
         return MultiKeyHashJoinBuilder.build(keys^)
 
     var n = keys.int_keys.value()[0].length
@@ -411,14 +435,17 @@ def multi_key_hash_join_build_parallel[
             ragged = True
             break
     if ragged:
+        _ = cancel_token^
         return MultiKeyHashJoinBuilder.build(keys^)
 
     if not mk_chain_build_parallel_eligible(n, force_serial):
+        _ = cancel_token^
         return MultiKeyHashJoinBuilder.build(keys^)
 
-    var bounds = mk_build_chunk_bounds(n)
+    var bounds = mk_build_chunk_bounds(n, chunk_rows)
     var n_chunks = len(bounds) - 1
     if n_chunks < 1:
+        _ = cancel_token^
         return MultiKeyHashJoinBuilder.build(keys^)
 
     var min_cap = max(Int(Float64(n) * 1.4) + 1, 16)
@@ -482,7 +509,7 @@ def multi_key_hash_join_build_parallel[
             has_pool=has_pool, D=D, disp_o=disp_o
         ](
             keys.int_keys.value(), fill_work^, fill_slots^, n_fill_chunks,
-            dispatcher_ptr,
+            dispatcher_ptr, cancel_token.clone(),
         )
         ht = filled.hash_table.take()
         _ = filled^
@@ -500,7 +527,10 @@ def multi_key_hash_join_build_parallel[
         )
     var done = _run_mk_build_wave[
         has_pool=has_pool, D=D, disp_o=disp_o
-    ](keys.int_keys.value(), work^, slots^, n_chunks, dispatcher_ptr)
+    ](
+        keys.int_keys.value(), work^, slots^, n_chunks, dispatcher_ptr,
+        cancel_token^,
+    )
 
     var out_nc = done.next_chain.take()
     var out_ht = done.hash_table.take()

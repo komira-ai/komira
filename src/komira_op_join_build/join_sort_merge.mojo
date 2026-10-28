@@ -40,8 +40,7 @@ def _smj_key_load[
     SAFETY: Raw pointer for zero-overhead key access in the sort-merge join
     inner loop. The PrimitiveArray that produced this pointer must outlive
     the entire sort_merge_join call. Origin/mutability-polymorphic params
-    `_mut` + `o` so the caller's concrete PrimitiveArray origin flows
-    through — identical codegen vs the previous MutExternalOrigin wildcard.
+    `_mut` + `o` so the pointer's origin is tied to the caller's array.
     """
     return Int64(ptr[idx])
 

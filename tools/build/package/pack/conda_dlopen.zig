@@ -109,7 +109,7 @@ pub fn requirementProblem(r: []const u8) ?[]const u8 {
 /// that is not that shape, a soname that is not one, a requirement that is
 /// not one, or a soname given twice is a usage error (the build writes these).
 pub fn parseDlopens(alloc: Alloc, values: []const []const u8) ![]Dlopen {
-    var list = std.ArrayList(Dlopen).init(alloc);
+    var list = std.ArrayList(Dlopen).empty;
     for (values) |v| {
         const eq = std.mem.indexOfScalar(u8, v, '=') orelse fail("--dlopen `{s}` is not <soname>=<requirement>", .{v});
         const so = v[0..eq];
@@ -117,9 +117,9 @@ pub fn parseDlopens(alloc: Alloc, values: []const []const u8) ![]Dlopen {
         if (!isSoname(so)) fail("--dlopen `{s}`: `{s}` is not a soname (lib<name>.so[.<digits>]...)", .{ v, so });
         if (requirementProblem(req)) |why| fail("--dlopen `{s}`: requirement `{s}`: {s}", .{ v, req, why });
         for (list.items) |d| if (std.mem.eql(u8, d.soname, so)) fail("--dlopen {s} given twice", .{so});
-        try list.append(.{ .soname = so, .requirement = req });
+        try list.append(alloc, .{ .soname = so, .requirement = req });
     }
-    const out = try list.toOwnedSlice();
+    const out = try list.toOwnedSlice(alloc);
     std.mem.sort(Dlopen, out, {}, lessDlopen);
     return out;
 }
@@ -144,15 +144,15 @@ pub fn literalSoname(lit: []const u8) ?[]const u8 {
 }
 
 /// Appends the soname `lit` names to `list` if it names one not held yet.
-fn holdOnce(list: *std.ArrayList([]const u8), lit: []const u8) !void {
+fn holdOnce(alloc: Alloc, list: *std.ArrayList([]const u8), lit: []const u8) !void {
     const so = literalSoname(lit) orelse return;
     for (list.items) |f| if (std.mem.eql(u8, f, so)) return;
-    try list.append(so);
+    try list.append(alloc, so);
 }
 
 pub fn scanSource(alloc: Alloc, text: []const u8) !Scan {
     var opens = false;
-    var found = std.ArrayList([]const u8).init(alloc);
+    var found = std.ArrayList([]const u8).empty;
     var i: usize = 0;
     while (i < text.len) {
         const c = text[i];
@@ -169,7 +169,7 @@ pub fn scanSource(alloc: Alloc, text: []const u8) !Scan {
             while (j < text.len and !(j + 2 < text.len and text[j] == c and text[j + 1] == c and text[j + 2] == c)) : (j += 1) {
                 if (text[j] == '\\') j += 1;
             }
-            try holdOnce(&found, text[i + 3 .. @min(j, text.len)]);
+            try holdOnce(alloc, &found, text[i + 3 .. @min(j, text.len)]);
             i = @min(j + 3, text.len);
         } else if (c == '"' or c == '\'') {
             var j = i + 1;
@@ -177,7 +177,7 @@ pub fn scanSource(alloc: Alloc, text: []const u8) !Scan {
                 if (text[j] == '\\') j += 1;
             }
             const end = @min(j, text.len);
-            try holdOnce(&found, text[i + 1 .. end]);
+            try holdOnce(alloc, &found, text[i + 1 .. end]);
             i = end + 1;
         } else if (identChar(c)) {
             var j = i;
@@ -186,7 +186,7 @@ pub fn scanSource(alloc: Alloc, text: []const u8) !Scan {
             i = j;
         } else i += 1;
     }
-    return .{ .opens = opens, .sonames = try found.toOwnedSlice() };
+    return .{ .opens = opens, .sonames = try found.toOwnedSlice(alloc) };
 }
 
 /// A soname found and the sources holding it, in source order.
@@ -203,7 +203,7 @@ fn lessHeld(_: void, x: Held, y: Held) bool {
 /// literals of every source count, not only the opening ones'.
 pub fn dlopenReason(alloc: Alloc, sources: []const Source, declared: []const Dlopen) !?[]const u8 {
     var opener: ?[]const u8 = null;
-    var held = std.ArrayList(Held).init(alloc);
+    var held = std.ArrayList(Held).empty;
     for (sources) |s| {
         const scan = try scanSource(alloc, s.text);
         if (scan.opens and opener == null) opener = s.path;
@@ -213,16 +213,16 @@ pub fn dlopenReason(alloc: Alloc, sources: []const Source, declared: []const Dlo
                 if (std.mem.eql(u8, h.soname, so)) at = k;
             }
             if (at == null) {
-                try held.append(.{ .soname = so, .paths = std.ArrayList([]const u8).init(alloc) });
+                try held.append(alloc, .{ .soname = so, .paths = std.ArrayList([]const u8).empty });
                 at = held.items.len - 1;
             }
-            try held.items[at.?].paths.append(s.path);
+            try held.items[at.?].paths.append(alloc, s.path);
         }
     }
-    var decl = std.ArrayList(u8).init(alloc);
+    var decl = std.ArrayList(u8).empty;
     for (declared, 0..) |d, i| {
-        if (i != 0) try decl.appendSlice(", ");
-        try decl.appendSlice(d.soname);
+        if (i != 0) try decl.appendSlice(alloc, ", ");
+        try decl.appendSlice(alloc, d.soname);
     }
     if (opener == null) {
         if (declared.len == 0) return null;
@@ -234,22 +234,22 @@ pub fn dlopenReason(alloc: Alloc, sources: []const Source, declared: []const Dlo
         for (held.items, declared) |h, d| same = same and std.mem.eql(u8, h.soname, d.soname);
     }
     if (same) return null;
-    var names = std.ArrayList(u8).init(alloc);
-    var where = std.ArrayList(u8).init(alloc);
+    var names = std.ArrayList(u8).empty;
+    var where = std.ArrayList(u8).empty;
     for (held.items, 0..) |h, i| {
         if (i != 0) {
-            try names.appendSlice(", ");
-            try where.appendSlice("; ");
+            try names.appendSlice(alloc, ", ");
+            try where.appendSlice(alloc, "; ");
         }
-        try names.appendSlice(h.soname);
-        try where.appendSlice(h.soname);
-        try where.appendSlice(" in ");
+        try names.appendSlice(alloc, h.soname);
+        try where.appendSlice(alloc, h.soname);
+        try where.appendSlice(alloc, " in ");
         for (h.paths.items, 0..) |p, k| {
-            if (k != 0) try where.appendSlice(", ");
-            try where.appendSlice(p);
+            if (k != 0) try where.appendSlice(alloc, ", ");
+            try where.appendSlice(alloc, p);
         }
     }
-    if (held.items.len == 0) try where.appendSlice("none");
+    if (held.items.len == 0) try where.appendSlice(alloc, "none");
     return try std.fmt.allocPrint(alloc, "{s}: opens a shared library at run time (OwnedDLHandle); its sources name [{s}] and the library declares `dlopen` [{s}]: once a library opens one, each soname-shaped string literal in its sources must be declared, and only those (tools/build/package/system_libs.bzl names the conda package its package then requires); the literals are held in: {s}", .{ opener.?, names.items, decl.items, where.items });
 }
 
@@ -261,10 +261,10 @@ pub fn dlopenReasonDir(alloc: Alloc, dir_path: []const u8, declared: []const Dlo
     defer dir.close();
     var walker = try dir.walk(alloc);
     defer walker.deinit();
-    var list = std.ArrayList(Source).init(alloc);
+    var list = std.ArrayList(Source).empty;
     while (try walker.next()) |w| {
         if (w.kind != .file or !std.mem.endsWith(u8, w.path, ".mojo")) continue;
-        try list.append(.{ .path = try alloc.dupe(u8, w.path), .text = try dir.readFileAlloc(alloc, w.path, 1 << 28) });
+        try list.append(alloc, .{ .path = try alloc.dupe(u8, w.path), .text = try dir.readFileAlloc(alloc, w.path, 1 << 28) });
     }
     if (list.items.len == 0) fail("sources {s} hold no .mojo file", .{dir_path});
     std.mem.sort(Source, list.items, {}, struct {
@@ -279,14 +279,14 @@ pub fn dlopenReasonDir(alloc: Alloc, dir_path: []const u8, declared: []const Dlo
 /// followed by the requirement of each declared shared library, in soname
 /// order, each requirement once: a library's run requirements.
 pub fn withSystemRequirements(alloc: Alloc, base: []const []const u8, dl: []const Dlopen) ![][]const u8 {
-    var list = std.ArrayList([]const u8).init(alloc);
-    try list.appendSlice(base);
+    var list = std.ArrayList([]const u8).empty;
+    try list.appendSlice(alloc, base);
     for (dl, 0..) |d, i| {
         var dup = false;
         for (dl[0..i]) |e| dup = dup or std.mem.eql(u8, e.requirement, d.requirement);
-        if (!dup) try list.append(d.requirement);
+        if (!dup) try list.append(alloc, d.requirement);
     }
-    return list.toOwnedSlice();
+    return list.toOwnedSlice(alloc);
 }
 
 /// metadata.json's `dlopen`: one `{requirement, soname}` per declared shared
@@ -508,9 +508,9 @@ test "scanSource: OwnedDLHandle named only qualified opens" {
 fn reasonForSubdirOpener(a: Alloc, declared: []const Dlopen) !?[]const u8 {
     var tmp = testing.tmpDir(.{});
     defer tmp.cleanup();
-    try tmp.dir.writeFile("top.mojo", "def f() -> Int:\n    return 1\n");
+    try tmp.dir.writeFile(.{ .sub_path = "top.mojo", .data = "def f() -> Int:\n    return 1\n" });
     try tmp.dir.makeDir("sub");
-    try tmp.dir.writeFile("sub/opener.mojo", "h = OwnedDLHandle(\"libz.so.1\")\n");
+    try tmp.dir.writeFile(.{ .sub_path = "sub/opener.mojo", .data = "h = OwnedDLHandle(\"libz.so.1\")\n" });
     const root = try tmp.dir.realpathAlloc(a, ".");
     return dlopenReasonDir(a, root, declared);
 }

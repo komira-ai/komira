@@ -253,6 +253,14 @@ def test_def_levels_all_valid_frame() raises:
     _same(encode_def_levels_all_valid(10), [3, 0, 0, 0, 5, 0xFF, 0x03], "10 levels")
 
 
+def test_def_levels_refuse_a_negative_count() raises:
+    with assert_raises(contains="negative level count -1"):
+        _ = encode_def_levels_all_valid(-1)
+    var a = _nullable_i64(8, 3)
+    with assert_raises(contains="negative level count -1"):
+        _ = encode_def_levels_from_bitmap(a.validity.value(), 0, -1)
+
+
 def test_def_levels_follow_the_offset() raises:
     var a = _nullable_i64(40, 3)
     for start in range(0, 12):

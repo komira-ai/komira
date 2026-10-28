@@ -15,6 +15,7 @@ from komira_collections.slab import Slab
 from komira_dynamic_filter.bloom_filter import BloomFilter
 from komira_buffer.heap_region import HeapRegion
 from komira_async_api.parallel_dispatch import NoDispatch
+from komira_async_api.token import CancellationToken
 
 from komira_async.ops.waker_sink import NoopSink
 from komira_async.reactor.reactor import BACKEND_MOCK
@@ -58,7 +59,6 @@ comptime I64 = DType.int64
 comptime _POOL_WORKERS = 4
 
 
-comptime _F_FORK_NS: Int32 = 0
 comptime _F_COUNT: Int32 = 2
 comptime _F_TASK_MIN: Int32 = 4
 comptime _F_TASK_MAX: Int32 = 5
@@ -88,6 +88,16 @@ def _mk_columns(imm cols: List[List[Int64]]) raises -> MultiKeyColumns:
     return MultiKeyColumns(ik^, sk^, dk^, fps^, n_keys)
 
 
+def _begin(force: Bool) raises:
+    """Every test starts from the default settings (AUTO, no scheduler
+    trace), so what an earlier test configured cannot leak into this one.
+    """
+    reset_hash_chain_build_settings()
+    sched_trace_configure(False)
+    if force:
+        join_parallel_build_configure(JOIN_PARALLEL_BUILD_FORCE)
+
+
 def _noop_sink_factory() -> NoopSink:
     return NoopSink(_placeholder=UInt8(0))
 
@@ -97,13 +107,16 @@ def _build_serial(imm cols: List[List[Int64]]) raises -> MultiKeyHashJoinBuilder
 
 
 def _build_parallel(
-    imm cols: List[List[Int64]], force_serial: Bool = False
+    imm cols: List[List[Int64]],
+    force_serial: Bool = False,
+    workers: Int = _POOL_WORKERS,
+    chunk_rows: Int = 0,
 ) raises -> MultiKeyHashJoinBuilder:
     """Drive the PRODUCTION `PerCoreAsyncRuntime` dispatcher through the
     PRODUCTION entry point.
     """
     var runtime = PerCoreAsyncRuntime[NoopSink](
-        num_workers=_POOL_WORKERS,
+        num_workers=workers,
         sink_factory=_noop_sink_factory,
         backend=BACKEND_MOCK,
         placement=PLACEMENT_FIXED,
@@ -115,7 +128,9 @@ def _build_parallel(
     ](
         _mk_columns(cols),
         Optional[Pointer[LocalDispatcher[NoopSink], do]](Pointer(to=disp)),
+        CancellationToken.never(),
         force_serial,
+        chunk_rows,
     )
 
 
@@ -130,7 +145,9 @@ def _build_wave_inline(
     var _nd = NoDispatch()
     comptime nd_o = origin_of(_nd)
     return multi_key_hash_join_build_parallel[False, NoDispatch, nd_o](
-        _mk_columns(cols), Optional[Pointer[NoDispatch, nd_o]](None)
+        _mk_columns(cols),
+        Optional[Pointer[NoDispatch, nd_o]](None),
+        CancellationToken.never(),
     )
 
 
@@ -174,9 +191,10 @@ def _chain_membership(
             out.append(slot * 1_000_000 + cur)
             cur = builder._next_chain[cur]
             guard += 1
-            if guard > builder.num_rows() + 1:
+            if guard > builder.num_rows():
                 raise Error(
-                    "_chain_membership: cycle in bucket " + String(slot)
+                    "_chain_membership: a chain cycles (more links than"
+                    " build rows) at bucket " + String(slot)
                 )
     return _sorted(out^)
 
@@ -212,11 +230,13 @@ def _assert_builds_agree(
     var ser = _build_serial(cols)
     var par = _build_parallel(cols)
 
-    _assert_lists_equal(
-        _probe_pairs(ser, probe), _probe_pairs(par, probe), msg + " pairs"
-    )
+    # The bounded chain walk goes first: a cyclic chain fails here by name
+    # instead of hanging the probe below.
     _assert_lists_equal(
         _chain_membership(ser), _chain_membership(par), msg + " chains"
+    )
+    _assert_lists_equal(
+        _probe_pairs(ser, probe), _probe_pairs(par, probe), msg + " pairs"
     )
     assert_equal(ser._capacity, par._capacity, msg + " capacity")
     assert_equal(ser.num_rows(), par.num_rows(), msg + " entry-space extent")
@@ -239,6 +259,7 @@ def _assert_builds_agree(
 
 def test_bloom_insert_atomic_is_byte_identical_and_order_free() raises:
     """`insert_hash_atomic` must set exactly the bits `insert_hash` sets."""
+    _begin(False)
     var hashes = List[UInt64]()
     var x = UInt64(0x243F6A8885A308D3)
     for _ in range(4096):
@@ -267,13 +288,14 @@ def test_bloom_insert_atomic_is_byte_identical_and_order_free() raises:
     _ = reversed^
 
 
-def test_dispatch_witness_and_byte_identical_mutant() raises:
-    """Under FORCE the build dispatches a wave as wide as the pool (read from
-    the scheduler trace), and `force_serial` dispatches none yet gives the same
-    pairs, chains and bloom bytes, so a build that silently fell back to serial
-    would be caught by the dispatch counters and not by the values."""
+def test_dispatch_geometry_and_force_serial_gives_the_same_table() raises:
+    """Under FORCE the build dispatches one wave whose recorded split is the
+    pool's width (the geometry is `min(pool workers, chunks)`, not a timing),
+    and `force_serial` dispatches none yet gives the same pairs, chains and
+    bloom bytes, so a build that silently fell back to serial is caught by the
+    dispatch row and not by the values."""
+    _begin(True)
     sched_trace_configure(True)
-    join_parallel_build_configure(JOIN_PARALLEL_BUILD_FORCE)
     assert_true(
         sched_trace_enabled(),
         "the scheduler trace is not enabled, so every dispatch assertion below"
@@ -298,65 +320,48 @@ def test_dispatch_witness_and_byte_identical_mutant() raises:
     probe.append(p0^)
     probe.append(p1^)
 
+    # FORCE tiles one row per chunk: 400 chunks, more than the pool is wide.
+    assert_equal(len(mk_build_chunk_bounds(400)) - 1, 400, "FORCE tiling")
+
     sched_trace_reset()
     var par = _build_parallel(cols)
     var real_count = sched_trace_site(SITE_MK_JOIN_BUILD, _F_COUNT)
-    var real_fork = sched_trace_site(SITE_MK_JOIN_BUILD, _F_FORK_NS)
     var real_tmin = sched_trace_site(SITE_MK_JOIN_BUILD, _F_TASK_MIN)
     var real_tmax = sched_trace_site(SITE_MK_JOIN_BUILD, _F_TASK_MAX)
-    print(
-        "MK_BUILD_DISPATCH real: site=", SITE_MK_JOIN_BUILD,
-        " count=", real_count,
-        " fork_ns=", real_fork,
-        " task_min=", real_tmin,
-        " task_max=", real_tmax,
-    )
-    assert_true(real_count >= UInt64(1), "parallel arm did not dispatch")
-    assert_true(real_fork > UInt64(0), "dispatched fork span is zero")
-    assert_equal(
-        Int(real_tmin), _POOL_WORKERS, "task_min != pool width"
-    )
-    assert_equal(
-        Int(real_tmax), _POOL_WORKERS, "task_max != pool width"
-    )
+    assert_equal(Int(real_count), 1, "the parallel arm dispatched one wave")
+    assert_equal(Int(real_tmin), _POOL_WORKERS, "recorded split: task_min")
+    assert_equal(Int(real_tmax), _POOL_WORKERS, "recorded split: task_max")
 
     sched_trace_reset()
-    var mut_build = _build_parallel(cols, force_serial=True)
-    var mut_count = sched_trace_site(SITE_MK_JOIN_BUILD, _F_COUNT)
-    var mut_fork = sched_trace_site(SITE_MK_JOIN_BUILD, _F_FORK_NS)
-    print(
-        "MK_BUILD_DISPATCH mutant(force_serial): site=", SITE_MK_JOIN_BUILD,
-        " count=", mut_count,
-        " fork_ns=", mut_fork,
-    )
+    var serial_arm = _build_parallel(cols, force_serial=True)
+    var serial_count = sched_trace_site(SITE_MK_JOIN_BUILD, _F_COUNT)
+    assert_equal(Int(serial_count), 0, "force_serial still dispatched")
 
-    _assert_lists_equal(
-        _probe_pairs(par, probe),
-        _probe_pairs(mut_build, probe),
-        "mutant pairs differ (it was supposed to be byte-identical)",
-    )
     _assert_lists_equal(
         _chain_membership(par),
-        _chain_membership(mut_build),
-        "mutant chains differ",
+        _chain_membership(serial_arm),
+        "force_serial chains differ",
+    )
+    _assert_lists_equal(
+        _probe_pairs(par, probe),
+        _probe_pairs(serial_arm, probe),
+        "force_serial pairs differ",
     )
     assert_true(
-        _bloom_bytes_equal(par._bloom, mut_build._bloom),
-        "mutant bloom differs",
+        _bloom_bytes_equal(par._bloom, serial_arm._bloom),
+        "force_serial bloom differs",
     )
-    assert_equal(Int(mut_count), 0, "force_serial still dispatched")
-    assert_equal(Int(mut_fork), 0, "force_serial still forked")
 
     _ = par^
-    _ = mut_build^
-    reset_hash_chain_build_settings()
+    _ = serial_arm^
+    _begin(False)
 
 
 def test_varied_two_key_fixture() raises:
     """Duplicate composite keys, partial-key collisions (same k0 different k1),
     and probe rows that miss entirely.
     """
-    join_parallel_build_configure(JOIN_PARALLEL_BUILD_FORCE)
+    _begin(True)
     var cols = List[List[Int64]]()
     var k0 = List[Int64]()
     var k1 = List[Int64]()
@@ -382,7 +387,7 @@ def test_varied_two_key_fixture() raises:
 def test_negative_and_extreme_keys() raises:
     """Negative keys (a build that mishandles the sign of a key hash returns
     no rows for them), INT64 min and max, and 0 / -0."""
-    join_parallel_build_configure(JOIN_PARALLEL_BUILD_FORCE)
+    _begin(True)
     var k0 = List[Int64]()
     var k1 = List[Int64]()
     for i in range(-150, 150):
@@ -411,13 +416,13 @@ def test_negative_and_extreme_keys() raises:
 
     var ser = _build_serial(cols)
     var par = _build_parallel(cols)
+    _assert_lists_equal(
+        _chain_membership(ser), _chain_membership(par), "negative keys chains"
+    )
     var ser_pairs = _probe_pairs(ser, probe)
     var par_pairs = _probe_pairs(par, probe)
     assert_true(len(ser_pairs) > 0, "serial found no negative-key matches")
     _assert_lists_equal(ser_pairs, par_pairs, "negative keys pairs")
-    _assert_lists_equal(
-        _chain_membership(ser), _chain_membership(par), "negative keys chains"
-    )
     _ = ser^
     _ = par^
     reset_hash_chain_build_settings()
@@ -428,7 +433,7 @@ def test_skew_all_keys_equal() raises:
     single chain head. Guards against a lost or duplicated Treiber push, which a
     spread fixture would almost never expose.
     """
-    join_parallel_build_configure(JOIN_PARALLEL_BUILD_FORCE)
+    _begin(True)
     var k0 = List[Int64]()
     var k1 = List[Int64]()
     for _ in range(600):
@@ -471,7 +476,7 @@ def test_sentinel_rows_are_recorded_but_unreachable() raises:
     """`_NAN_SENTINEL_BITS` (FLOAT64 NaN / STRING-DICT NULL) in ANY key: the row
     matches nothing but STILL consumes an entry.
     """
-    join_parallel_build_configure(JOIN_PARALLEL_BUILD_FORCE)
+    _begin(True)
     var k0 = List[Int64]()
     var k1 = List[Int64]()
     for i in range(300):
@@ -531,7 +536,7 @@ def test_all_sentinel_build_side() raises:
     """Every build row is sentinel-keyed: nothing is inserted, every probe misses,
     and the entry space is still full width.
     """
-    join_parallel_build_configure(JOIN_PARALLEL_BUILD_FORCE)
+    _begin(True)
     var k0 = List[Int64]()
     var k1 = List[Int64]()
     for i in range(64):
@@ -561,9 +566,9 @@ def test_all_sentinel_build_side() raises:
 
 def test_edge_shapes_empty_single_and_zero_match() raises:
     """Empty build side, single-row build side, and a probe with no matches at
-    all. An empty INNER JOIN was found RAISING this week.
+    all. An empty INNER JOIN must not raise.
     """
-    join_parallel_build_configure(JOIN_PARALLEL_BUILD_FORCE)
+    _begin(True)
 
     var empty_cols = List[List[Int64]]()
     empty_cols.append(List[Int64]())
@@ -634,7 +639,7 @@ def test_key_arity_one_three_and_ragged_delegation() raises:
     """Arity 1 and 3 (the fold is arity-generic), and the two shapes that MUST
     delegate to the serial build so the canonical errors are raised.
     """
-    join_parallel_build_configure(JOIN_PARALLEL_BUILD_FORCE)
+    _begin(True)
 
     var one = List[List[Int64]]()
     var a0 = List[Int64]()
@@ -703,7 +708,7 @@ def test_wave_inline_arm_matches_serial_build() raises:
     reproduces the serial builder's chain order EXACTLY: the tables must be
     identical link for link, not merely equivalent as sets.
     """
-    join_parallel_build_configure(JOIN_PARALLEL_BUILD_FORCE)
+    _begin(True)
     var cols = List[List[Int64]]()
     var k0 = List[Int64]()
     var k1 = List[Int64]()
@@ -741,7 +746,7 @@ def test_wave_inline_arm_matches_serial_build() raises:
 def test_gate_and_tiling() raises:
     """The gate + the tiling, so a future edit cannot silently move either: AUTO
     at the threshold, OFF never, FORCE at any size with one-row chunks."""
-    reset_hash_chain_build_settings()
+    _begin(False)
     assert_false(mk_chain_build_parallel_eligible(0), "0 rows eligible")
     assert_false(mk_chain_build_parallel_eligible(1000), "1000 rows eligible")
     assert_true(
@@ -761,6 +766,11 @@ def test_gate_and_tiling() raises:
     )
     join_parallel_build_configure(JOIN_PARALLEL_BUILD_FORCE)
     assert_true(mk_chain_build_parallel_eligible(4), "FORCE ignored")
+    var explicit = mk_build_chunk_bounds(10, 3)
+    assert_equal(len(explicit), 5, "an explicit chunk size sets the tiling")
+    assert_equal(explicit[1], 3, "explicit chunk: first bound")
+    assert_equal(explicit[3], 9, "explicit chunk: third bound")
+    assert_equal(explicit[4], 10, "explicit chunk: last bound is n")
     var bounds = mk_build_chunk_bounds(7)
     assert_equal(len(bounds), 8, "FORCE tiling is not one row per chunk")
     assert_equal(bounds[0], 0, "tiling does not start at 0")
@@ -794,7 +804,7 @@ def test_gate_and_tiling() raises:
 def main() raises:
     var suite = TestSuite()
     suite.test[test_bloom_insert_atomic_is_byte_identical_and_order_free]()
-    suite.test[test_dispatch_witness_and_byte_identical_mutant]()
+    suite.test[test_dispatch_geometry_and_force_serial_gives_the_same_table]()
     suite.test[test_varied_two_key_fixture]()
     suite.test[test_negative_and_extreme_keys]()
     suite.test[test_skew_all_keys_equal]()

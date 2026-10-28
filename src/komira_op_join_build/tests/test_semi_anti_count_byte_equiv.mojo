@@ -17,6 +17,8 @@
 # probe key matches nothing: excluded by SEMI, KEPT by ANTI).
 # =============================================================================
 
+from std.testing import TestSuite
+
 from komira_arrow.primitive_array import PrimitiveArray
 from komira_op_join_build.join import HashJoinBuilder
 
@@ -162,7 +164,7 @@ def test_semi_anti_count_mixed() raises:
 
 
 def test_semi_anti_count_duplicate_build_keys() raises:
-    # 1:N build side — SEMI/ANTI count each probe row AT MOST once regardless of
+    # 1:N build side -- SEMI/ANTI count each probe row AT MOST once regardless of
     # how many build rows share its key.
     var build: List[Int64] = [1, 1, 2, 2, 2, 3]
     var probe: List[Int64] = [1, 2, 3, 4]
@@ -205,12 +207,4 @@ def test_semi_anti_count_large_build_bloom_arm() raises:
 
 
 def main() raises:
-    test_semi_anti_count_empty_build()
-    test_semi_anti_count_all_match()
-    test_semi_anti_count_all_miss()
-    test_semi_anti_count_mixed()
-    test_semi_anti_count_duplicate_build_keys()
-    test_semi_anti_count_empty_probe()
-    test_semi_anti_count_nullable_probe()
-    test_semi_anti_count_large_build_bloom_arm()
-    print("test_semi_anti_count_byte_equiv OK (8 cases)")
+    TestSuite.discover_tests[__functions_in_module()]().run()

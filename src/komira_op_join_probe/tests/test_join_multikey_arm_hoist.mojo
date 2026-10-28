@@ -149,7 +149,7 @@ def _cols_dict(
     would leave the uniform-DICT body unreached). `dict_keys` carries the
     indices the same-dict arm must compare; `string_keys` carries the cross-dict
     fallback's decoded bytes, which this fixture makes deliberately UNIFORM so
-    that a mutant falling to the STRING arm is loud rather than silent.
+    that a dispatch that falls to the STRING arm is loud rather than silent.
     """
     var ik = Slab[PrimitiveArray[I64]].create(2)
     var sk = Slab[Optional[StringArray[HeapRegion]]].create(2)
@@ -196,6 +196,7 @@ def test_uniform_arm_truth_table() raises:
     only a consequence of it — a wrong classification that happens to agree on a
     given fixture is the failure this whole file is built around.
     """
+    reset_join_probe_settings()
     assert_equal(
         mk_uniform_arm(_bools([0]), _bools([0]), 1), MK_ARM_MIXED, "1 int"
     )
@@ -295,6 +296,7 @@ def test_string_arm_compares_bytes_not_the_hash_column() raises:
     that actually calls `_string_bytes_equal` produces the nested-loop answer;
     the INT64 body produces the full 4x3 cross product.
     """
+    reset_join_probe_settings()
     var fx = _string_fixture()
     ref build = fx[0]
     ref probe = fx[1]
@@ -383,9 +385,10 @@ def test_string_arm_compares_bytes_not_the_hash_column() raises:
 def test_dict_arm_compares_indices_not_hash_and_not_bytes() raises:
     """The same-dict arm's contract is `Int32 ==` on dictionary INDICES. This
     fixture makes both other arms wrong and loud: the hash column is all zeros
-    (INT64 mutant matches everything) and the decoded side channel is one
-    repeated string (STRING mutant also matches everything).
+    (the INT64 arm would match everything) and the decoded side channel is one
+    repeated string (the STRING arm would also match everything).
     """
+    reset_join_probe_settings()
     var dictionary = List[String]()
     dictionary.append(String("A"))
     dictionary.append(String("B"))
@@ -456,6 +459,7 @@ def test_mixed_vector_still_compares_every_key() raises:
     body. The INT64 half carries real, distinct values and the STRING half a
     lying hash, so dropping EITHER key from the compare over-matches.
     """
+    reset_join_probe_settings()
     var b_int = List[Int64]()
     b_int.append(Int64(7))
     b_int.append(Int64(7))

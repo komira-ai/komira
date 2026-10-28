@@ -1,0 +1,85 @@
+load("@buildrules//rules/mojo:pack.bzl", "mojo_conda", "mojo_conda_holds")
+load("@komira//tools/build/mojo:adopt.bzl", "mojo_adopted_library")
+load("@komira//tools/build/package:conda.bzl", "conda_package")
+load(":buildrules.mojo.bzl", "mojo_package")
+
+# The knowledge graph's build configuration (docs/design/knowledge_graph_port.md):
+# the spec value (sources, extract config, synthesis binding, trigger), the scope
+# reference it compares (a scope id and an optional owner id, plain strings), its
+# validation, and the fail-safe resolution of its extract mode. Which inference
+# endpoints a graph may bind is an EndpointPolicy, and which sources it may be
+# built from is a SourcePolicy; the host injects both and the defaults allow
+# everything. It decides nothing about authorization. It depends on
+# komira_kg_mode only, and reads no clock and no environment.
+#
+# Built with buildrules' `mojo_package` from mopm.toml (README.md, "Build files"): `:lib` is the
+# library file and exists only once the tests of tests/ have passed. The package depends on
+# komira_kg_mode, a sibling package (`[dependencies]` of mopm.toml): its `:lib` is built from
+# that package's `:lib`.
+#
+# The welded tests: test_graph_spec_validation checks that each defect is refused
+# with a message of its own and that valid specs are accepted and keep their
+# fields; test_graph_spec_resolve checks that a spec that fails validation in any
+# one way resolves to rules and never to model.
+mojo_package(path = ".")
+
+# `:komira_kg_spec`, the target the packages that depend on this library name, is `:lib` as
+# komira's Mojo rules take it (tools/build/mojo/adopt.bzl): the same file, so a dependent builds
+# only once the tests have passed. `deps` is `[dependencies]` of mopm.toml, as the adopted targets
+# of those packages: the rule refuses a list that is not the closure `:lib` was built from. It
+# carries the README gate too (`[tests][readme]`): the examples run against `:lib`; the tests are
+# not run again.
+mojo_adopted_library(
+    name = "komira_kg_spec",
+    deps = ["//src/komira_kg_mode:komira_kg_mode"],
+    lib = ":lib",
+    readme = "README.md",
+    srcs = glob(["src/komira_kg_spec/**/*.mojo"]),
+    test_srcs = glob(["tests/test_*.mojo"]),
+    test_runs = ":test",
+    visibility = ["PUBLIC"],
+)
+
+# The mopm package: `mopm pack` over `:lib`, the `.conda` a mopm registry serves
+# (`mojo-komira_kg_spec-0.1.0-mojo1.0.0_0.conda`), which records komira_kg_mode as a
+# dependency (`mojo-komira_kg_mode >=0.1,<0.2`) and holds that package's files nowhere.
+# `members` is the manifests of the path dependencies, staged at their repository paths, because
+# `mopm pack` reads the manifest of each beside the one it is given. `:lib` exists only once the
+# tests passed, so this file exists only then. Publishing it (`mopm publish`) uploads, which is not
+# a build action: it is a step of a CI job that takes this target's output. `mopm` is the one
+# `mojo_package` pins (mopm-toolchain.toml).
+mojo_conda(
+    name = "conda",
+    dir = "src/komira_kg_spec",
+    lib = ":lib",
+    manifest = "mopm.toml",
+    members = {"../komira_kg_mode": "//src/komira_kg_mode:mopm.toml"},
+    mojo = "1.0.0",
+    mopm = "toolchains//:mopm_0_0_86",
+    package = "komira_kg_spec",
+    version = "0.1.0",
+    visibility = ["PUBLIC"],
+)
+
+# What `:conda` holds, read back from the built file (buildrules' `prebuilt_unpack`): this package's
+# own `.mojoc` and nothing else under `lib/mojo/`, and exactly one dependency,
+# `mojo-komira_kg_mode >=0.1,<0.2`. Red when the manifest drops the dependency, names another
+# range, or the file carries the sibling.
+mojo_conda_holds(
+    name = "conda_holds",
+    conda = ":conda",
+    depends = ["mojo-komira_kg_mode >=0.1,<0.2"],
+    package = "komira_kg_spec",
+    sole = True,
+    visibility = ["PUBLIC"],
+)
+
+# Kept for the release machine, which still builds it (release/BUCK, release/artifacts.textproto):
+# komira's conda packer over `:komira_kg_spec`. It goes when the release machine takes the mopm
+# package. This library's mopm package is `:conda` above.
+conda_package(
+    name = "komira_kg_spec_conda",
+    lib = ":komira_kg_spec",
+    summary = "The `komira_kg_spec` Mojo library of komira, as a conda package.",
+    visibility = ["PUBLIC"],
+)

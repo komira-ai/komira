@@ -172,9 +172,9 @@ struct ChainBuildState(KeepAlive):
     # `hash_table` is the builders' OWN `List[Int]`, CAS'd through a
     # `bitcast[Scalar[DType.int64]]` of its data pointer (`Int` and `Int64` are
     # layout-identical on every supported target). An earlier revision kept a
-    # separate `List[Int64]` and converted in `take_buffers`: on an 18M-row
-    # build that was a 256 MB read + 256 MB write DRIVER-SERIAL pass, ~40% of
-    # the "parallel" build's remaining wall. Building in place deletes it.
+    # separate `List[Int64]` and converted in `take_buffers`, a driver-serial
+    # read and write of the whole table after the parallel wave. Building in
+    # place deletes that pass.
     var hash_table: List[Int]
     var next_chain: List[Int]
     # CHAIN-ENTRY LAYOUT: the FUSED alternative to the
@@ -232,11 +232,14 @@ struct ChainBuildState(KeepAlive):
         self.elide_bi = elide_bi
         self.fused_layout = fused_layout
         self.pay_values = pay_values^
+        # SAFETY: one `AtomicI64` cell, zero-initialised on the next line, then
+        # handed to the `OwnedPointer` that owns and frees it.
         var raw = alloc[AtomicI64](1)
         raw.unsafe_bitcast[Scalar[DType.int64]]().unsafe_write(Scalar[DType.int64](0))
         self.morsel_counter = OwnedPointer[AtomicI64](
             unsafe_from_raw_pointer=raw
         )
+        # SAFETY: as `raw`: one zero-initialised cell owned by `workers_active`.
         var raw2 = alloc[AtomicI64](1)
         raw2.unsafe_bitcast[Scalar[DType.int64]]().unsafe_write(Scalar[DType.int64](0))
         self.workers_active = OwnedPointer[AtomicI64](

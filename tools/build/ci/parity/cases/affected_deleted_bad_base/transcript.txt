@@ -1,2 +1,0 @@
-call git "rev-parse" "--verify" "--quiet" "parity-base^{commit}"
-exit 1

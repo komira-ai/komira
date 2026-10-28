@@ -11,6 +11,7 @@ from komira_arrow.string_array import StringArray
 from komira_collections.slab import Slab
 from komira_buffer.heap_region import HeapRegion
 from komira_async_api.parallel_dispatch import NoDispatch
+from komira_async_api.token import CancellationToken
 
 from komira_op_join_build.hash_chain_build_settings import (
     JOIN_PARALLEL_BUILD_FORCE,
@@ -19,6 +20,7 @@ from komira_op_join_build.hash_chain_build_settings import (
 )
 from komira_op_join_probe.join_multi_key import (
     MultiKeyColumns,
+    _CHAIN_END,
     _NAN_SENTINEL_BITS,
 )
 from komira_op_join_probe.join_multi_key_builder import (
@@ -473,8 +475,27 @@ def test_every_build_row_is_emitted_by_right_and_full() raises:
     print("test_every_build_row_is_emitted_by_right_and_full OK")
 
 
+def _assert_chains_terminate(
+    imm builder: MultiKeyHashJoinBuilder, msg: String
+) raises:
+    """Walk every chain with a bound of the build's row count, so a cyclic
+    chain fails by name here instead of hanging the probes after it."""
+    for slot in range(builder._capacity):
+        var cur = builder._hash_table[slot]
+        var steps = 0
+        while cur != _CHAIN_END:
+            cur = builder._next_chain[cur]
+            steps += 1
+            if steps > builder.num_rows():
+                raise Error(
+                    msg + ": a chain cycles (more links than build rows) at"
+                    " bucket " + String(slot)
+                )
+
+
 def test_parallel_build_matches_brute_force() raises:
     """The parallel build (under FORCE) answers brute force."""
+    reset_hash_chain_build_settings()
     join_parallel_build_configure(JOIN_PARALLEL_BUILD_FORCE)
     var names = _fixture_names()
     for i in range(len(names)):
@@ -486,13 +507,18 @@ def test_parallel_build_matches_brute_force() raises:
         comptime nd_o = origin_of(_nd)
         var builder = multi_key_hash_join_build_parallel[
             False, NoDispatch, nd_o
-        ](_mk_columns(build), Optional[Pointer[NoDispatch, nd_o]](None))
+        ](
+            _mk_columns(build),
+            Optional[Pointer[NoDispatch, nd_o]](None),
+            CancellationToken.never(),
+        )
 
         assert_equal(
             builder.num_rows(),
             len(build[0]),
             name + " parallel num_rows is full build extent",
         )
+        _assert_chains_terminate(builder, name)
 
         var bm = List[Int]()
         var pm = List[Int]()

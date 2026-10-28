@@ -320,9 +320,9 @@ struct MultiKeyParallelProbeTask[
         var batch_w = sp[].batch_width
 
         if batch_w > 0:
-            # PER-WORKER BATCH SCRATCH: five dense arrays of `batch_w` slots,
+            # PER-WORKER BATCH SCRATCH: four dense arrays of `batch_w` slots,
             # allocated once per task and never cleared (the active count is
-            # the length), 26 bytes a slot (13 KB at the default width).
+            # the length), 25 bytes a slot (12.5 KB at the default width).
             #
             # SAFETY: function locals of `execute`, like `probe_buf` and the
             # output cursor: one per task, concrete origins, never stored,
@@ -330,18 +330,15 @@ struct MultiKeyParallelProbeTask[
             var act_probe = List[Int](capacity=batch_w)
             var act_chain = List[Int](capacity=batch_w)
             var cand_brow = List[Int](capacity=batch_w)
-            var hit_flag = List[UInt8](capacity=batch_w)
             var match_flag = List[UInt8](capacity=batch_w)
             for _ in range(batch_w):
                 act_probe.append(0)
                 act_chain.append(0)
                 cand_brow.append(0)
-                hit_flag.append(UInt8(0))
                 match_flag.append(UInt8(0))
             var ap_ptr = act_probe.unsafe_ptr()
             var ac_ptr = act_chain.unsafe_ptr()
             var cb_ptr = cand_brow.unsafe_ptr()
-            var hf_ptr = hit_flag.unsafe_ptr()
             var mf_ptr = match_flag.unsafe_ptr()
 
             while True:
@@ -378,7 +375,9 @@ struct MultiKeyParallelProbeTask[
                                     bl_passed += 1
                                 if bl_seen >= bl_window:
                                     bl_sampling = False
-                                    if bloomsel_should_disarm(bl_passed, bl_seen, bl_pct):
+                                    if bloomsel_should_disarm(
+                                        bl_passed, bl_seen, bl_pct
+                                    ):
                                         bl_active = False
                                         bloomsel_note_disarmed()
                                     else:
@@ -393,7 +392,6 @@ struct MultiKeyParallelProbeTask[
                             continue
                         (ap_ptr + n_act)[] = probe_idx
                         (ac_ptr + n_act)[] = head
-                        (hf_ptr + n_act)[] = UInt8(0)
                         n_act += 1
 
                     while n_act > 0:
@@ -465,7 +463,6 @@ struct MultiKeyParallelProbeTask[
                             if (ac_ptr + j)[] != _CHAIN_END:
                                 (ap_ptr + w)[] = (ap_ptr + j)[]
                                 (ac_ptr + w)[] = (ac_ptr + j)[]
-                                (hf_ptr + w)[] = (hf_ptr + j)[]
                                 w += 1
                         n_act = w
 
@@ -474,7 +471,6 @@ struct MultiKeyParallelProbeTask[
             _ = act_probe
             _ = act_chain
             _ = cand_brow
-            _ = hit_flag
             _ = match_flag
         else:
             while True:
@@ -506,7 +502,9 @@ struct MultiKeyParallelProbeTask[
                                 bl_passed += 1
                             if bl_seen >= bl_window:
                                 bl_sampling = False
-                                if bloomsel_should_disarm(bl_passed, bl_seen, bl_pct):
+                                if bloomsel_should_disarm(
+                                    bl_passed, bl_seen, bl_pct
+                                ):
                                     bl_active = False
                                     bloomsel_note_disarmed()
                                 else:

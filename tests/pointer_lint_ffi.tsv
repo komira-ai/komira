@@ -11,10 +11,16 @@ src/komira_arrow_ipc/c_data_stream.mojo	the Arrow C Stream Interface (ArrowArray
 src/komira_arrow_ipc/tests/c_abi/arrow_c_abi_driver.mojo	the Arrow C structs it reads and writes as pointer slots across a dlopen of arrow_c_abi_probe
 src/komira_arrow_ipc/tests/c_abi/arrow_c_abi_error_driver.mojo	the Arrow C structs it reads and writes as pointer slots across a dlopen of arrow_c_abi_probe, on the error paths
 src/komira_arrow_ipc/tests/c_abi/arrow_c_abi_probe.mojo	the C ABI (ArrowArrayStream pointers) of the arrow_c_abi_probe shared library
+src/komira_arrow_ipc/tests/test_arrow_c_data_dictionary_indices.mojo	the Arrow C Data Interface dictionary structs it builds by hand as a stand-in foreign producer, and the streams it consumes from the library's exports
+src/komira_arrow_ipc/tests/test_arrow_c_data_export_unwind.mojo	the Arrow C Stream Interface structs it allocates as the consumer of the library's exports
+src/komira_arrow_ipc/tests/test_arrow_c_data_format_params.mojo	the Arrow C Data Interface structs it builds by hand as a stand-in foreign producer, and the streams it consumes from the library's exports
+src/komira_arrow_ipc/tests/test_arrow_c_stream_c_abi_drain.mojo	the Arrow C Stream Interface as a stand-in foreign producer: the abi("C") callbacks and the CArrowArrayStream struct it allocates and frees
 src/komira_arrow_ipc/tests/test_arrow_c_stream_export_arms.mojo	the Arrow C Stream Interface structs it allocates and releases as the consumer (and a stand-in producer) of the library's exports
 src/komira_arrow_ipc/tests/test_arrow_c_stream_import_refusals.mojo	the Arrow C Data Interface structs it builds by hand as a stand-in foreign producer
 src/komira_arrow_ipc/tests/test_arrow_c_stream_nested_round_trip.mojo	the Arrow C Stream Interface structs it allocates as the consumer of the library's exports
-src/komira_buffer/mmap_region.mojo	mmap and the komira_open_ro C shim
+src/komira_arrow_ipc/tests/test_c_data_interface_release_nested.mojo	the Arrow C Data Interface structs, children arrays and metadata buffers it builds by hand as a stand-in foreign producer, and frees
+src/komira_arrow_ipc/tests/test_ipc_body_compression_edges.mojo	the codec trait's opaque decompression-context ABI, as a stand-in conformer forwarding LZ4's context to Lz4Frame
+src/komira_buffer/src/komira_buffer/mmap_region.mojo	mmap and the komira_open_ro C shim
 src/komira_compression/bzip2_buffer.mojo	libbz2's buffer-to-buffer calls
 src/komira_compression/codec_libraries.mojo	the process-lifetime handles of libzstd, libbz2 and liblzma
 src/komira_compression/compression_codecs.mojo	the C codec libraries, and memcpy into caller-owned buffers
@@ -24,20 +30,38 @@ src/komira_compression/zstd_frame.mojo	libzstd's one-shot frame calls
 src/komira_csv/csv_sink.mojo	pwrite into disjoint ranges of the output file
 src/komira_http_client/tests/test_L2_tls_starttls_upgrade.mojo	the socketpair and pthread FFI of the STARTTLS upgrade test: the server thread argument and the PEM buffers it carries
 src/komira_job_supervisor/tests/test_s3_transport_first_byte.mojo	the socket and pthread FFI of its one-shot 127.0.0.1 listener: the listener thread's heap argument and the C NULLs it passes
-src/komira_lz4/frame.mojo	liblz4, loaded once per process
+src/komira_lz4/src/komira_lz4/frame.mojo	liblz4, loaded once per process
 src/komira_morsel/tests/test_vtable_source_failure_paths.mojo	the scan vtable C ABI of a stand-in connector: the connector state and scratch buffers it hands the engine through abi("C") thunks
 src/komira_objectstore/local_fs_conditional_store.mojo	the filesystem C shim (komira_fs_enoent, komira_fs_errno_name)
 src/komira_objectstore/tests/test_cov_in_memory_stores.mojo	the pthread_create and pthread_join FFI of its lock-wait case: the reader thread's heap argument and the C NULLs it passes
 src/komira_simd/tests/test_fast_copy_edges.mojo	_copy_small's raw-pointer signature (a MutUntrackedOrigin destination), as a direct caller of its zero-length guard: a pointer into a List the test owns, borrowed for one call
+src/komira_so/_c_abi.mojo	the C ABI of libkomira: the context handle (void *) it hands to a host and takes back, the caller-owned output buffer and length slot of the two-call calls, the NUL-terminated const char * inputs (copied, validated as UTF-8) and the plan bytes of komira_plan_render (length-bounded by KOMIRA_MAX_INPUT_BYTES, copied before decoding)
 src/tests/helpers/komira_plan_harness/door.mojo	the C ABI of a plan-door shared library it dlopens (the handle slot, the context, last_error, the ArrowArrayStream box, Door B's NULL probe buffer)
 src/tests/helpers/komira_plan_harness/tests/door_stub/plan_door_stub.mojo	the C ABI (session, ArrowArrayStream, Door B buffers) of the plan_door_stub shared library
 src/tests/helpers/komira_plan_harness/tests/door_stub/plan_door_tiny.mojo	the C ABI (NULL session, unread plan and out pointers) of the plan_door_null_ctx and plan_door_no_bytes shared libraries
 src/tests/helpers/komira_udf_spike_abi/_cabi.mojo	the Mojo mirror of the UDF runtime C ABI structs (komira_udf_runtime.h) and the layout probe
 src/tests/helpers/komira_udf_spike_abi/_host.mojo	the host side of the UDF runtime C ABI: the Arrow arrays, schemas and streams it exports to a runtime and the arrays it imports back
+src/tests/helpers/komira_udf_spike_abi/_nested.mojo	the nested-call context the C producer streams of native/producer.c hand back to the harness's scalar callback
 src/tests/helpers/komira_udf_spike_abi/_table.mojo	the dlopened UDF runtime library, its komira_udf_runtime table, and the cancel flag of a call
 src/tests/helpers/komira_udf_spike_abi/refrt/echo_broken_so.mojo	the init export of the echo_broken UDF runtime library, forwarded to its C init
-src/tests/helpers/komira_udf_spike_abi/refrt/echo_global_lock_so.mojo	the init export of the echo_global_lock UDF runtime library, forwarded to its second C init
 src/tests/helpers/komira_udf_spike_abi/refrt/echo_so.mojo	the init export of the echo UDF runtime library, forwarded to its C init
 src/tests/helpers/komira_udf_spike_abi/refrt/echo_variant_so.mojo	the init export of the echo_variant UDF runtime library, forwarded to its variant C init
+src/tests/helpers/komira_udf_spike_native/refrt/both_symbols_so.mojo	the two init exports of the both_symbols native UDF library, forwarded to the C native library's init
+src/tests/helpers/komira_udf_spike_native/refrt/echo_as_library_so.mojo	the native library export of the echo_as_library shared library, forwarded to the echo runtime's C init
+src/tests/helpers/komira_udf_spike_native/refrt/native_c_so.mojo	the init export of the native_c UDF library, forwarded to its C init
+src/tests/helpers/komira_udf_spike_native/refrt/native_so.mojo	the init export of the native UDF runtime library, forwarded to its C init
+src/tests/helpers/komira_udf_spike_native/refrt/variant_abi2_so.mojo	the init export of the variant_abi2 native UDF library, forwarded to its C init
+src/tests/helpers/komira_udf_spike_native/refrt/variant_counted_so.mojo	the init export of the variant_counted native UDF library, forwarded to its C init
+src/tests/helpers/komira_udf_spike_native/refrt/variant_deferred_so.mojo	the init export of the variant_deferred native UDF library, forwarded to its C init
+src/tests/helpers/komira_udf_spike_native/refrt/variant_error_on_ok_so.mojo	the init export of the variant_error_on_ok native UDF library, forwarded to its C init
+src/tests/helpers/komira_udf_spike_native/refrt/variant_exact_table_so.mojo	the init export of the variant_exact_table native UDF library, forwarded to its C init
+src/tests/helpers/komira_udf_spike_native/refrt/variant_init_fails_so.mojo	the init export of the variant_init_fails native UDF library, forwarded to its C init
+src/tests/helpers/komira_udf_spike_native/refrt/variant_managed_so.mojo	the init export of the variant_managed native UDF library, forwarded to its C init
+src/tests/helpers/komira_udf_spike_native/refrt/variant_no_scalar_so.mojo	the init export of the variant_no_scalar native UDF library, forwarded to its C init
+src/tests/helpers/komira_udf_spike_native/refrt/variant_one_short_so.mojo	the init export of the variant_one_short native UDF library, forwarded to its C init
+src/tests/helpers/komira_udf_spike_native/refrt/variant_short_table_so.mojo	the init export of the variant_short_table native UDF library, forwarded to its C init
+src/tests/helpers/komira_udf_spike_native_mojo/_arrow.mojo	the Arrow C Data arrays a native UDF library reads and builds, and the error strings it hands the host
+src/tests/helpers/komira_udf_spike_native_mojo/_handles.mojo	the handles of the Mojo native UDF library, heap blocks reserved from the UDF host it was loaded into
 src/tests/helpers/komira_udf_spike_node_worker/refrt/node_worker_corrupt_so.mojo	the init export of the node_worker_corrupt UDF runtime library, forwarded to its C init
 src/tests/helpers/komira_udf_spike_node_worker/refrt/node_worker_so.mojo	the init export of the node_worker UDF runtime library, forwarded to its C init
+tools/build/examples/abi_golden/abi.mojo	the C ABI of the example shared library: pointers borrowed from the C caller for one call, never freed or kept

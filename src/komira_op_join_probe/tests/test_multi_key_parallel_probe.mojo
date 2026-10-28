@@ -31,15 +31,15 @@ from komira_op_join_probe.join_multi_key_parallel import (
 )
 
 
-def _q20_test_sink() -> NoopSink:
+def _test_sink() -> NoopSink:
     return NoopSink(_placeholder=UInt8(0))
 
 
-def _q20_test_runtime() raises -> PerCoreAsyncRuntime[NoopSink]:
+def _test_runtime() raises -> PerCoreAsyncRuntime[NoopSink]:
     """Construct a small mock runtime for parallel-probe dispatch."""
     return PerCoreAsyncRuntime[NoopSink](
         num_workers=4,
-        sink_factory=_q20_test_sink,
+        sink_factory=_test_sink,
         backend=BACKEND_MOCK,
         placement=PLACEMENT_FIXED,
     )
@@ -96,26 +96,13 @@ def _build_synthetic_probe(
     return _make_2col_int64("p_a", "p_b", p_a, p_b)
 
 
-def _sorted_pairs(
-    build_matches: List[Int],
-    probe_matches: List[Int],
-) -> List[Tuple[Int, Int]]:
-    """Pack (build, probe) pairs and sort lexicographically."""
-    var n = len(build_matches)
-    var pairs = List[Tuple[Int, Int]](capacity=n)
-    for i in range(n):
-        pairs.append((build_matches[i], probe_matches[i]))
-    for i in range(1, n):
-        var key = pairs[i]
-        var j = i - 1
-        while j >= 0:
-            var cur = pairs[j]
-            if cur[0] < key[0] or (cur[0] == key[0] and cur[1] <= key[1]):
-                break
-            pairs[j + 1] = cur
-            j -= 1
-        pairs[j + 1] = key
-    return pairs^
+def _sorted_pairs(b: List[Int], p: List[Int]) -> List[Int]:
+    """Each pair as `build << 32 | probe`, sorted."""
+    var out = List[Int](capacity=len(b))
+    for i in range(len(b)):
+        out.append((b[i] << 32) | p[i])
+    sort(out)
+    return out^
 
 
 def _assert_pairs_equal(
@@ -128,11 +115,10 @@ def _assert_pairs_equal(
     var sa = _sorted_pairs(a_b, a_p)
     var sb = _sorted_pairs(b_b, b_p)
     for i in range(len(sa)):
-        assert_equal(sa[i][0], sb[i][0])
-        assert_equal(sa[i][1], sb[i][1])
+        assert_equal(sa[i], sb[i], "a pair differs")
 
 
-def test_parallel_2key_bit_identical_vs_sequential_100k() raises:
+def test_parallel_2key_same_pairs_as_sequential_100k() raises:
     """Parallel multi-key inner probe must produce same matches as sequential."""
     var n = 100_000
 
@@ -160,7 +146,7 @@ def test_parallel_2key_bit_identical_vs_sequential_100k() raises:
         probe_batch_par, ["p_a", "p_b"]
     )
     var builder_par = MultiKeyHashJoinBuilder.build(build_keys_par^)
-    var rt = _q20_test_runtime()
+    var rt = _test_runtime()
     ref dispatcher = rt.dispatcher()
     var par_b = List[Int]()
     var par_p = List[Int]()
@@ -175,11 +161,11 @@ def test_parallel_2key_bit_identical_vs_sequential_100k() raises:
     _assert_pairs_equal(seq_b, seq_p, par_b, par_p)
 
 
-def test_parallel_2key_determinism_3runs() raises:
-    """Parallel multi-key inner probe must be deterministic across runs."""
+def test_parallel_2key_repeated_runs_return_the_same_pair_multiset() raises:
+    """Three runs on fresh builds return the same pair multiset (the pair order is not asserted: workers claim morsels dynamically)."""
     var n = 100_000
 
-    var rt = _q20_test_runtime()
+    var rt = _test_runtime()
     ref dispatcher = rt.dispatcher()
 
     var bb0 = _build_synthetic_build(n)
@@ -242,7 +228,7 @@ def test_parallel_empty_probe() raises:
     var pk = extract_join_key_columns_serial(probe_batch, ["p_a", "p_b"])
     var builder = MultiKeyHashJoinBuilder.build(bk^)
 
-    var rt = _q20_test_runtime()
+    var rt = _test_runtime()
     ref dispatcher = rt.dispatcher()
     var bm = List[Int]()
     var pm = List[Int]()
@@ -306,7 +292,7 @@ def test_parallel_skew_overflows_presize_values_stay_paired() raises:
     var pk = extract_join_key_columns_serial(probe_batch, ["p_a", "p_b"])
     var builder = MultiKeyHashJoinBuilder.build(bk^)
 
-    var rt = _q20_test_runtime()
+    var rt = _test_runtime()
     ref dispatcher = rt.dispatcher()
     var bm = List[Int]()
     var pm = List[Int]()
@@ -395,7 +381,7 @@ def test_parallel_skew_growth_matches_sequential_kernel() raises:
     var bk_par = extract_join_key_columns_serial(build_par, ["b_a", "b_b"])
     var pk_par = extract_join_key_columns_serial(probe_par, ["p_a", "p_b"])
     var builder_par = MultiKeyHashJoinBuilder.build(bk_par^)
-    var rt = _q20_test_runtime()
+    var rt = _test_runtime()
     ref dispatcher = rt.dispatcher()
     parallel_multi_key_inner_probe_into(
         dispatcher, CancellationToken.never(),
@@ -437,8 +423,8 @@ def test_parallel_skew_growth_matches_sequential_kernel() raises:
 
 def main() raises:
     var suite = TestSuite()
-    suite.test[test_parallel_2key_bit_identical_vs_sequential_100k]()
-    suite.test[test_parallel_2key_determinism_3runs]()
+    suite.test[test_parallel_2key_same_pairs_as_sequential_100k]()
+    suite.test[test_parallel_2key_repeated_runs_return_the_same_pair_multiset]()
     suite.test[test_parallel_empty_probe]()
     suite.test[test_parallel_skew_overflows_presize_values_stay_paired]()
     suite.test[test_parallel_skew_growth_matches_sequential_kernel]()

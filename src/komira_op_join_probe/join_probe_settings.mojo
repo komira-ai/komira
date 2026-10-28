@@ -13,9 +13,11 @@
 #                    row-at-a-time walk, the reference both must agree with.
 #       morsel_rows  the probe morsel in rows; 0 (the default) takes the
 #                    engine's fork grain (`parallel_fork_grain`).
-#       retile       when every core is busy and there are fewer than four
-#                    morsels per worker, cut morsels down to give four (but
-#                    never below 4,096 rows). Off by default.
+#       retile       when every worker of the dispatcher's pool has a morsel
+#                    and there are fewer than four morsels per worker, cut
+#                    morsels down to give four (but never below 4,096 rows).
+#                    Off by default. A morsel given in `morsel_rows` is never
+#                    cut.
 #
 # The composite parallel BUILD has no setting of its own: it follows the hash
 # join's build mode and fill settings in `komira_op_join_build`'s
@@ -36,7 +38,9 @@ comptime MK_PROBE_RETILE_MIN_ROWS: Int = 4_096
 
 def _init_jps_i64() -> OwnedPointer[AtomicI64]:
     var raw = alloc[AtomicI64](1)
-    raw.unsafe_bitcast[Scalar[DType.int64]]().unsafe_write(Scalar[DType.int64](0))
+    raw.unsafe_bitcast[Scalar[DType.int64]]().unsafe_write(
+        Scalar[DType.int64](0)
+    )
     return OwnedPointer[AtomicI64](unsafe_from_raw_pointer=raw)
 
 
@@ -64,9 +68,13 @@ def mk_probe_configure(
     # SAFETY: FFI carve-out -- `_Global.get_or_create_ptr` targets KGEN-runtime
     # static storage (process lifetime); the wildcard origin is the stdlib API's
     # own return type and is confined to this function.
-    _JPS_BATCH.get_or_create_ptr()[][].store(Scalar[DType.int64](batch_width + 1))
+    _JPS_BATCH.get_or_create_ptr()[][].store(
+        Scalar[DType.int64](batch_width + 1)
+    )
     _JPS_MORSEL.get_or_create_ptr()[][].store(Scalar[DType.int64](morsel_rows))
-    _JPS_RETILE.get_or_create_ptr()[][].store(Scalar[DType.int64](1 if retile else 0))
+    _JPS_RETILE.get_or_create_ptr()[][].store(
+        Scalar[DType.int64](1 if retile else 0)
+    )
 
 
 def mk_probe_batch_width() raises -> Int:

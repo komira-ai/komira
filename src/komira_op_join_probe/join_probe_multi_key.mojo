@@ -16,7 +16,7 @@ from komira_arrow.schema import Schema, SchemaBuilder, Field
 from komira_arrow.primitive_array import PrimitiveArray
 
 from komira_plan_ir.logical_plan import (
-    JOIN_INNER, JOIN_LEFT, JOIN_SEMI, JOIN_ANTI,
+    JOIN_INNER, JOIN_LEFT, JOIN_SEMI, JOIN_ANTI, JOIN_ALGO_HASH,
 )
 from komira_column_kernels.compiler_helpers import (
     copy_batch, gather_batch, project_batch_by_names,
@@ -39,11 +39,13 @@ from .join_multi_key import (
 from .join_key_extract import extract_join_key_columns_typed
 from .join_multi_key_builder import MultiKeyHashJoinBuilder
 from .join_multi_key_filter import multi_key_probe_semi, multi_key_probe_anti
-from .join_multi_key_parallel import (
-    parallel_multi_key_inner_probe_into,
-    _ENABLE_MULTI_KEY_PARALLEL_PROBE,
-    _MK_PARALLEL_THRESHOLD,
-)
+from .join_multi_key_parallel import parallel_multi_key_inner_probe_into
+
+
+comptime _MK_PARALLEL_THRESHOLD: Int = 100_000
+"""Below this many probe rows an INNER probe runs serially."""
+
+comptime _ENABLE_MULTI_KEY_PARALLEL_PROBE: Bool = True
 
 
 def should_flip_multi_key_inner_join(
@@ -100,6 +102,47 @@ def _mk_project_semi_anti(
     return project_batch_by_names(batch, names)
 
 
+def _empty_result(
+    mut dispatcher: LocalDispatcher[NoopSink],
+    probe_batch: RecordBatch,
+    build_batch: RecordBatch,
+    op: MorselOp,
+) raises -> RecordBatch:
+    """The no-row result of INNER / LEFT / SEMI / ANTI, with the output schema:
+    the same assembly as a join that matched nothing."""
+    var join_type = op.probe_join_type
+    var none = List[Int]()
+    if join_type == JOIN_SEMI or join_type == JOIN_ANTI:
+        var kept = gather_batch(probe_batch, none)
+        if op.probe_output_cols:
+            return _mk_project_semi_anti(kept^, op.probe_output_cols.value())
+        return kept^
+    var nullable = join_type == JOIN_LEFT
+    if op.probe_output_cols:
+        return assemble_join_result_projected_dispatch[
+            True, LocalDispatcher[NoopSink], origin_of(dispatcher)
+        ](
+            probe_batch, build_batch, none, none,
+            op.probe_output_cols.value(),
+            Optional[
+                Pointer[LocalDispatcher[NoopSink], origin_of(dispatcher)]
+            ](Pointer(to=dispatcher)),
+            right_nullable=nullable,
+        )
+    var out_schema = _mk_build_join_output_schema(
+        probe_batch.schema, build_batch.schema
+    )
+    return assemble_join_result_dispatch[
+        True, LocalDispatcher[NoopSink], origin_of(dispatcher)
+    ](
+        probe_batch, build_batch, none, none, out_schema,
+        Optional[
+            Pointer[LocalDispatcher[NoopSink], origin_of(dispatcher)]
+        ](Pointer(to=dispatcher)),
+        right_nullable=nullable,
+    )
+
+
 def execute_multi_key_join_probe(
     mut dispatcher: LocalDispatcher[NoopSink],
     var cancel_token: CancellationToken,
@@ -120,6 +163,21 @@ def execute_multi_key_join_probe(
     is the same rows. INNER probes in parallel at or above
     `_MK_PARALLEL_THRESHOLD` probe rows.
 
+    It runs only what the operator says: a residual predicate
+    (`op.probe_residual`) or a probe algorithm other than `JOIN_ALGO_HASH`
+    raises, as does any other join type, before any input is read.
+
+    The result of an input with no rows (an empty probe side; an empty build
+    side of an INNER or SEMI join) is a batch with no rows and the schema the
+    operator's output would have: the probe columns then the build columns
+    for INNER and LEFT (colliding build names get `_right`), the probe columns
+    for SEMI and ANTI, each cut to `op.probe_output_cols` when set.
+
+    Cancellation: only the parallel INNER probe consults `cancel_token`, and
+    it raises `Cancelled` before it writes anything. A join below the
+    parallel threshold, a LEFT, SEMI or ANTI join, and an input with no rows
+    run to completion (or return at once) without looking at the token.
+
     Args:
         dispatcher: Caller-owned LocalDispatcher reference. Forwarded
             to `probe_inner_into` for the parallel inner-probe path.
@@ -127,7 +185,7 @@ def execute_multi_key_join_probe(
             the inner-probe call site).
         probe_batch: the probe-side batch (borrowed).
         op: join operator carrying probe_left_keys / probe_right_keys
-            (len >= 2) and probe_join_type.
+            (equal length; the builder takes 1 to 8) and probe_join_type.
         build_batch: the completed build side (borrowed).
 
     Returns:
@@ -137,10 +195,33 @@ def execute_multi_key_join_probe(
     var num_build_rows = build_batch.num_rows()
     var join_type = op.probe_join_type
 
-    if num_build_rows == 0 and join_type != JOIN_LEFT and join_type != JOIN_ANTI:
-        return RecordBatch()
-    if num_probe_rows == 0:
-        return RecordBatch()
+    if op.probe_residual:
+        raise Error(
+            "execute_multi_key_join_probe: the operator carries a residual"
+            " predicate, which this probe does not apply"
+        )
+    if op.probe_algo != JOIN_ALGO_HASH:
+        raise Error(
+            "execute_multi_key_join_probe: probe_algo="
+            + String(Int(op.probe_algo))
+            + " is not JOIN_ALGO_HASH, the only algorithm this probe runs"
+        )
+    if (
+        join_type != JOIN_INNER
+        and join_type != JOIN_LEFT
+        and join_type != JOIN_SEMI
+        and join_type != JOIN_ANTI
+    ):
+        raise Error(
+            "execute_multi_key_join_probe: unsupported join_type="
+            + String(Int(join_type))
+            + " for multi-key path. INNER / SEMI / ANTI / LEFT supported."
+        )
+
+    if num_probe_rows == 0 or (
+        num_build_rows == 0 and (join_type == JOIN_INNER or join_type == JOIN_SEMI)
+    ):
+        return _empty_result(dispatcher, probe_batch, build_batch, op)
 
     var build_keys = extract_join_key_columns_typed[
         True, LocalDispatcher[NoopSink], origin_of(dispatcher)
@@ -160,13 +241,9 @@ def execute_multi_key_join_probe(
     )
 
     if join_type == JOIN_SEMI:
-        var semi_result: RecordBatch
-        if num_build_rows == 0:
-            semi_result = RecordBatch()
-        else:
-            var builder = MultiKeyHashJoinBuilder.build(build_keys^)
-            var probe_indices = multi_key_probe_semi(builder, probe_keys)
-            semi_result = gather_batch(probe_batch, probe_indices)
+        var builder = MultiKeyHashJoinBuilder.build(build_keys^)
+        var probe_indices = multi_key_probe_semi(builder, probe_keys)
+        var semi_result = gather_batch(probe_batch, probe_indices)
         if op.probe_output_cols:
             return _mk_project_semi_anti(semi_result^, op.probe_output_cols.value())
         return semi_result^
