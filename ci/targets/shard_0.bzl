@@ -41,6 +41,7 @@ TARGETS = [
     "komira//src/komira_host:coverage_floor",
     "komira//src/komira_host:table",
     "komira//src/komira_kernels:komira_kernels_conda",
+    "komira//src/komira_lowering:komira_lowering_conda",
     "komira//src/komira_mail_address:ci",
     "komira//src/komira_mail_address:coverage_floor",
     "komira//src/komira_mail_address:table",
