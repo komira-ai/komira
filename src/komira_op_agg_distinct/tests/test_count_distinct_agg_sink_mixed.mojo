@@ -5,18 +5,20 @@
 # `SELECT k, count(DISTINCT v), sum(v), count(*), min(f), max(f), avg(v)
 #  GROUP BY k` over four workers, driven through `consume`, `combine` and
 # `finalize`. Every output column is compared, row by row, with an oracle
-# computed in this test from the raw arrays. What it proves:
-#   * the fixed cells merged across workers onto the wrong global group (each
-#     worker sees the groups in a different first-seen order here);
-#   * an output column emitted out of the plan's order (the plan interleaves
-#     the COUNT(DISTINCT) with the fixed aggregates);
-#   * MIN / MAX that do not follow DuckDB's order, in which NaN is the
-#     largest value: a group holding a NaN answers MAX = NaN and its MIN is
-#     the smallest number, including when the NaN reaches the merge from one
-#     worker and the numbers from another;
-#   * a NULL key that is grouped with a real key (NULL rows form ONE group
-#     whose key reads back as NULL);
-#   * a NULL value counted by COUNT(DISTINCT) or folded into SUM / MIN / MAX.
+# computed in this test from the raw arrays.
+#
+# What it asserts:
+#   * the fixed cells of the workers land on the right global group, although
+#     each worker sees the groups in a different first-seen order here;
+#   * the output columns are in the plan's order, which interleaves the
+#     COUNT(DISTINCT) with the fixed aggregates;
+#   * MIN / MAX follow DuckDB's order, in which NaN is the largest value: a
+#     group holding a NaN answers MAX = NaN and its MIN is the smallest
+#     number, including when the NaN reaches the merge from one worker and the
+#     numbers from another;
+#   * NULL rows of the key form ONE group whose key reads back as NULL;
+#   * a NULL value is not counted by COUNT(DISTINCT) and not folded into
+#     SUM / MIN / MAX.
 # =============================================================================
 
 from std.collections import Dict, List, Optional, Set

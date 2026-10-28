@@ -225,7 +225,7 @@ struct WorkerCDState(Copyable, Movable):
     """
     var group_map: Dict[Int, Int]
     var group_keys: List[Int]
-    # CD-KEY-NULL (2026-09-13) — THE GROUP KEY'S VALIDITY, which this state
+    # ★ CD-KEY-NULL (2026-09-13) — THE GROUP KEY'S VALIDITY, which this state
     # had no seat for. `group_map` is keyed on the key's Int BITS, and the key
     # was read straight out of the Arrow data buffer with no validity consulted
     # — so a NULL key row was grouped by whatever word the writer left in its
@@ -239,7 +239,7 @@ struct WorkerCDState(Copyable, Movable):
     # inventing a sentinel would collide with the real key equal to it.
     var group_key_null: List[Bool]
     var null_gid: Int
-    # CD-DENSE-GID (2026-09-17) — THE DENSE DIRECT INDEX. See the
+    # ★ CD-DENSE-GID (2026-09-17) — THE DENSE DIRECT INDEX. See the
     # CD-DENSE-GID block above for what it replaces and why it is adaptive.
     # `dense_idx[key - dense_lo]` holds `gid + 1`; 0 means "this key has not
     # been seen". An EMPTY `dense_idx` means no key has been seen at all (the
@@ -296,7 +296,7 @@ struct WorkerCDState(Copyable, Movable):
     # here.
     var stat_appends: Int
     var stat_set_inserts: Int
-    # CD-DENSE-GID structural counters. Same contract as the pair above:
+    # ★ CD-DENSE-GID structural counters. Same contract as the pair above:
     # they PARTITION the NON-NULL key rows — `stat_gid_dense + stat_gid_dict`
     # is the count of rows whose key was not NULL — so they are a conservation
     # check rather than two independent readings, and `stat_gid_dense` reading
@@ -306,31 +306,31 @@ struct WorkerCDState(Copyable, Movable):
     # result proves only that the two arms agree, not that the fast one ran.
     var stat_gid_dense: Int
     var stat_gid_dict: Int
-    # CD-ADJDEDUP — the gate (read once, at construction) and its exact
+    # ⭐ CD-ADJDEDUP — the gate (read once, at construction) and its exact
     # structural counter: values NOT appended because they equalled their
     # cell's tail. See the CD-ADJDEDUP block above `FixedAggCell`.
     var adj_dedup_on: Bool
     var stat_adj_skipped: Int
-    # CD-LASTKEY — the gate (read once, at construction) and its witness:
+    # ⭐ CD-LASTKEY — the gate (read once, at construction) and its witness:
     # out-of-window rows whose gid came from the one-entry memo instead of a
     # `group_map` probe. Also counted in `stat_gid_dict` (see the row loop).
     var lastkey_on: Bool
     var stat_gid_lastkey: Int
-    # MIXEDFUSE (2026-09-21) — THE FIXED-CELL PASSENGER LANE. See the
+    # ⭐⭐ MIXEDFUSE (2026-09-21) — THE FIXED-CELL PASSENGER LANE. See the
     # MIXEDFUSE block above this struct. `fx_func[f]` is the plan's `AGG_*`
     # tag, `fx_is_int[f]` selects the Int64 accumulator over the Float64 one,
     # and `fx_cells[f][gid]` is the (fixed agg, group) accumulator — indexed by
     # the SAME gid the CD lane resolved, which is the whole point.
     #
-    # EMPTY ON EVERY ALL-COUNT(DISTINCT) QUERY — and that alone did NOT make
-    # the lane free (see the MIXEDFUSE header). What makes it free
+    # ⚠ EMPTY ON EVERY ALL-COUNT(DISTINCT) QUERY — and that alone did NOT make
+    # the lane free (see the MIXEDFUSE header: +4.32% on an all-COUNT(DISTINCT) query). What makes it free
     # is that the all-CD route runs the `has_fixed=False` instantiation, which
     # never names these fields at all.
     var fx_func: List[UInt8]
     var fx_is_int: List[Bool]
     var fx_cells: List[List[FixedAggCell]]
     var num_fixed: Int
-    # MIXEDFUSE-ALLCD route counters, one add per BATCH (never per row).
+    # ★ MIXEDFUSE-ALLCD route counters, one add per BATCH (never per row).
     # `stat_batches` counts every non-empty grouped `consume_batch`;
     # `stat_fx_batches` counts the ones that ran the passenger-lane setup. On
     # an all-COUNT(DISTINCT) query the second MUST read 0 — the finalize folds
@@ -405,7 +405,7 @@ struct WorkerCDState(Copyable, Movable):
     ](mut self, key: Int, is_null: Bool) raises -> Int:
         """Register a brand-new group and return its id.
 
-        FOUR ARRAYS ARE INDEXED BY `gid` AND MUST GROW IN LOCKSTEP:
+        ★ FOUR ARRAYS ARE INDEXED BY `gid` AND MUST GROW IN LOCKSTEP:
         `group_keys`, `group_key_null`, and `cd_bufs[a]` / `cd_gsets[a]` /
         `cd_gmode[a]` for every agg slot. A new group that extends only some of
         them desynchronises the cell index space and mis-attributes values to
@@ -426,7 +426,7 @@ struct WorkerCDState(Copyable, Movable):
             self.cd_bufs[a].append(List[Int64]())
             self.cd_gsets[a].append(List[GrowableHashSetI64]())
             self.cd_gmode[a].append(_CD_CELL_BUFFERING)
-        # MIXEDFUSE — the FIFTH array in the lockstep. `fx_cells[f]` is
+        # ⭐ MIXEDFUSE — the FIFTH array in the lockstep. `fx_cells[f]` is
         # indexed by the SAME gid as `cd_bufs[a]`, so it has to grow at the SAME
         # call, in the same method, for the same reason the four above do: a new
         # group that extends only some of them mis-attributes values to the
@@ -441,7 +441,7 @@ struct WorkerCDState(Copyable, Movable):
     def configure_fixed(
         mut self, imm funcs: List[UInt8], imm is_int: List[Bool]
     ) raises:
-        """MIXEDFUSE — arm the fixed-cell passenger lane.
+        """⭐ MIXEDFUSE — arm the fixed-cell passenger lane.
 
         Called ONCE, at Local construction, BEFORE any row is consumed. Arming
         it after rows have been consumed would leave `fx_cells[f]` shorter than
@@ -474,12 +474,12 @@ struct WorkerCDState(Copyable, Movable):
         `_CD_DENSE_GID_DOMAIN_CAP`; otherwise FREEZES the window and resolves
         through `group_map`.
 
-        THE FREEZE IS NOT AN OPTIMISATION, IT IS THE ONE-KEY-ONE-HOME
+        ⚠ THE FREEZE IS NOT AN OPTIMISATION, IT IS THE ONE-KEY-ONE-HOME
         INVARIANT. A window that grew after a key had already been routed to
         `group_map` could later cover that key, giving it a second home and
         splitting its values across two output rows. See the CD-DENSE-GID block.
 
-        `dense_gid_off` IS CHECKED HERE AND NOWHERE ELSE, AND THIS IS THE
+        ⚠⚠ `dense_gid_off` IS CHECKED HERE AND NOWHERE ELSE, AND THIS IS THE
         SITE THAT MAKES THE DICT-ONLY ARM REAL. With `dense_gid_off` every
         row arrives through this method; refusing to seed the window here is
         what keeps `dense_idx` EMPTY, which is in turn what makes the hot loop's
@@ -488,7 +488,7 @@ struct WorkerCDState(Copyable, Movable):
         being the byte-for-byte pre-change route the regression test uses as its
         oracle.
 
-        `@no_inline`. The row loop reaches this
+        ⭐ `@no_inline`. The row loop reaches this
         method only on a cache MISS of the one-entry last-key memo (see the
         CD-LASTKEY block above `FixedAggCell`), so it is off the per-row path on
         clustered keys. Pinning it out of line is deliberate: on trunk LLVM
@@ -534,7 +534,7 @@ struct WorkerCDState(Copyable, Movable):
         with slack on both sides. `False` means the range is out of reach and
         the caller must freeze; the window is then left untouched.
 
-        THE SIZE IS TAKEN FROM THE OCCUPIED RANGE, NOT FROM THE WINDOW'S OWN
+        ★★ THE SIZE IS TAKEN FROM THE OCCUPIED RANGE, NOT FROM THE WINDOW'S OWN
         LENGTH, AND THAT IS THE WHOLE DESIGN. Doubling the WINDOW is the obvious
         policy and it is wrong: growing downward by one key would double a
         length whose slack all sits ABOVE, so a strictly descending stream of 50
@@ -545,12 +545,12 @@ struct WorkerCDState(Copyable, Movable):
         Sizing off the occupied span keeps `len(dense_idx) <= 2 * span`, so the
         window freezes when — and only when — the real domain exceeds the cap.
 
-        UNASSIGNED SLOTS ARE DROPPED, NOT COPIED. A slot holding 0 carries no
+        ★ UNASSIGNED SLOTS ARE DROPPED, NOT COPIED. A slot holding 0 carries no
         information, so the rebuild re-homes each ASSIGNED slot BY ITS KEY and
         lets the window move in either direction. That is what lets the slack be
         re-centred on every growth instead of accumulating on one side.
 
-        NO SUBTRACTION OF TWO ARBITRARY KEYS ANYWHERE IN THE REACH TEST — see
+        ⚠ NO SUBTRACTION OF TWO ARBITRARY KEYS ANYWHERE IN THE REACH TEST — see
         `_CD_DENSE_GID_KEY_CEIL`.
         """
         if Int64(t_lo) > _CD_DENSE_GID_KEY_CEIL:
@@ -603,16 +603,17 @@ struct WorkerCDState(Copyable, Movable):
         The `_CD_DENSE_GID_MAX_GID` guard can only fire if the freeze invariant
         above is ever broken — before the freeze the only groups that exist come
         from this method (at most `_CD_DENSE_GID_DOMAIN_CAP` of them) and from
-        the single NULL group. It is here so that argument is enforced rather
-        than merely written down: rather than truncate a gid into `Int32`, fall
-        back to the Dict.
+        the single NULL group, so it is unreachable today. It is here so that
+        argument is enforced rather than merely written down: rather than
+        truncate a gid into `Int32`, or hand the same in-window key a second
+        gid, it raises.
         """
         var gid = self._append_group[has_fixed](key, False)
         if gid >= _CD_DENSE_GID_MAX_GID:
-            self.dense_frozen = True
-            self.group_map[key] = gid
-            self.stat_gid_dict += 1
-            return gid
+            raise Error(
+                "WorkerCDState: the dense group id space is exhausted; the"
+                " freeze invariant was broken."
+            )
         self.dense_idx[slot] = Int32(gid + 1)
         # Widen the OCCUPIED range. A key first seen through the HOT path is
         # inside the window but can still be outside `[key_lo, key_hi]`, and the
@@ -633,9 +634,9 @@ struct WorkerCDState(Copyable, Movable):
         """Consume a morsel batch into the worker's cd state — the ALL-CD
         arity, i.e. no MIXEDFUSE passenger lane.
 
-        Instantiates `has_fixed=False`: the passenger lane is compiled OUT,
+        ⭐ Instantiates `has_fixed=False`: the passenger lane is compiled OUT,
         not skipped. The first MIXEDFUSE landing forwarded an EMPTY fixed list
-        into the fused body instead and slowed that query (see the MIXEDFUSE
+        into the fused body instead and cost +4.32% on an all-COUNT(DISTINCT) query (see the MIXEDFUSE
         header). An ARMED state (`num_fixed > 0`) is REFUSED rather than fed
         through an instantiation that cannot fold its fixed cells."""
         var no_fixed = List[Int]()
@@ -658,13 +659,13 @@ struct WorkerCDState(Copyable, Movable):
         directly as the Dict key. Each COUNT_DISTINCT agg slot appends
         its value to the group's buffer.
 
-        MIXEDFUSE — `fx_col_indices[f]` is the batch column index feeding
+        ⭐ MIXEDFUSE — `fx_col_indices[f]` is the batch column index feeding
         fixed slot `f` (`-1` for a bare COUNT(*)). The fixed cells fold against
         the SAME `gid` the CD lane just resolved, in the SAME row iteration:
         that is the entire mechanism, and it is why the group key is decoded and
         hashed ONCE for a mixed aggregate instead of twice.
 
-        `has_fixed` SELECTS THE INSTANTIATION, and the caller picks it from
+        ⭐ `has_fixed` SELECTS THE INSTANTIATION, and the caller picks it from
         whether any fixed slot exists (`CountDistinctAggSink.consume`). With
         `has_fixed=False` the per-batch passenger setup, the per-row passenger
         fold and `_append_group`'s fixed-cell growth are all compiled OUT, and
@@ -784,7 +785,7 @@ struct WorkerCDState(Copyable, Movable):
             )
             val_offs.append(vp._offset)
 
-        # THE VALIDITY CHANNEL.
+        # ★ THE VALIDITY CHANNEL.
         # THIS is the arm a plain `SELECT count(DISTINCT c) FROM t` reaches
         # (`CountDistinctAggSink.consume` delegates here at `num_keys == 0`),
         # so this is where the shipped wrong answer came from: 4 where DuckDB
@@ -794,7 +795,7 @@ struct WorkerCDState(Copyable, Movable):
             batch, val_col_indices
         )
 
-        # CD-TYPE-WIDTH (2026-09-11) — THE NARROW-WIDTH CHANNEL.
+        # ★ CD-TYPE-WIDTH (2026-09-11) — THE NARROW-WIDTH CHANNEL.
         #
         # The `val_ptrs` block above bitcasts EVERY value column to
         # `Scalar[DType.int64]` and indexes it at the row number. That is an
@@ -808,8 +809,8 @@ struct WorkerCDState(Copyable, Movable):
         # So each lane is classified ONCE per batch and a lane that is not
         # int64-storage gets its per-row Int64 DISTINCT KEY materialised at its
         # OWN width (`cd_distinct_keys_for_column`, offset-aware). The
-        # `CDK_RAW_I64` lane keeps the pointer read byte for byte: int64 aggregands
-        # take this path and must not pay for the offset-aware read.
+        # `CDK_RAW_I64` lane keeps the pointer read byte for byte — all-int64
+        # aggregands must not pay for this.
         #
         # An UNSUPPORTED type never reaches here: `cd_value_type_supported`
         # gates both detectors that build this sink's `AggSinkData`. If one ever
