@@ -93,7 +93,7 @@ GRAPH_JSON = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/komira_buffer/tests/test_constants.mojo", "sha256": "8092bb18dc50f2ba58ea5ce5cd7ba8d14b8f7edd031e55e1d1f8471e89bb7928"}
+        {"path": "src/komira_buffer/tests/test_constants.mojo", "sha256": "d961ced0499f69398053f3e8cb6658da83c276e4954d63c46fb6afc281afa420"}
       ],
       "deps": ["komira_buffer@0.1.0#mojo1.0.0/lib"],
       "natives": [
@@ -461,7 +461,7 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/komira_buffer/tests/test_constants.mojo", "sha256": "8092bb18dc50f2ba58ea5ce5cd7ba8d14b8f7edd031e55e1d1f8471e89bb7928"}
+        {"path": "src/komira_buffer/tests/test_constants.mojo", "sha256": "d961ced0499f69398053f3e8cb6658da83c276e4954d63c46fb6afc281afa420"}
       ],
       "deps": ["komira_buffer@0.1.0#mojo1.0.0/lib"],
       "natives": [
@@ -826,7 +826,7 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/komira_buffer/tests/test_constants.mojo", "sha256": "8092bb18dc50f2ba58ea5ce5cd7ba8d14b8f7edd031e55e1d1f8471e89bb7928"}
+        {"path": "src/komira_buffer/tests/test_constants.mojo", "sha256": "d961ced0499f69398053f3e8cb6658da83c276e4954d63c46fb6afc281afa420"}
       ],
       "deps": ["komira_buffer@0.1.0#mojo1.0.0/lib"],
       "natives": [
