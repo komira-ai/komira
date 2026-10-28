@@ -154,7 +154,7 @@ mojo_shared_lib(
     ],
     deps = [":komira_so"],
     native_owners = NATIVE_OWNERS,
-    visibility = ["komira//ci:", "//node:"],
+    visibility = ["komira//ci:", "komira//tools/build/package/libkomira:", "//node:"],
 )
 
 # The Parquet file the C-ABI gates and the Node binding's tests read.
