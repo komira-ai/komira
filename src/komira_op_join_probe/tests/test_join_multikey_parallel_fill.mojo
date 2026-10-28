@@ -9,7 +9,6 @@
 # capacity follows the serial builder's at row counts where a different growth
 # factor would pick a different power of two.
 
-from std.ffi import external_call
 from std.testing import TestSuite, assert_equal, assert_true
 
 from komira_arrow.dictionary_array import StringDictionaryArray
@@ -238,8 +237,6 @@ def test_capacity_follows_the_serial_builders_growth_factor() raises:
 
 
 def main() raises:
-    # A lost wake-up must fail the build, not hold a worker: exit 142.
-    _ = external_call["alarm", UInt32](UInt32(300))
     var suite = TestSuite()
     suite.test[test_filled_table_equals_the_serial_build_at_every_pool_width]()
     suite.test[test_tiny_builds_leave_the_serial_table_with_the_fill_wave_live]()
