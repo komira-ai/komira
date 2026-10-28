@@ -408,6 +408,18 @@ the README e2e of `mopm-stage` passed on, at the version of this run (below), so
 that failed stops the run before anything is staged in prod. There is no beta stage in front of prod. `//:release_workflow_cases` holds the job graph, the gates, the
 environments, the permissions, the commands and the order of the test's steps, and that no beta job and no schedule exists.
 
+**A member must be claimed on prod first.** The registry creates a package name only for its claimed owner, so a
+release member whose name is not claimed on the prod registry makes `prod-stage` refuse and turns `main` red. The
+pull request check cannot write to the live registry (and does not read it), so the names claimed there are
+committed in `release/prod_claimed_names.txt` (one per line, sorted), and `//release:prod_claimed_names_cases`
+refuses a pull request in which a member (every `src/<name>` with a `mopm.toml`, `PACKAGES` of
+`release/readme_e2e/packages.bzl`) is missing from it: "<name> is a member of the release and is not in
+release/prod_claimed_names.txt: claim it on the prod registry first, then add it to release/prod_claimed_names.txt".
+A maintainer adds a name to the file only after claiming it on the prod registry, in the pull request that adds the
+member. The file also refuses a line no member has, an unsorted or repeated line, and an empty file. It is a
+committed claim, not a live read: it does not notice a claim the registry lost, and `prod-stage` stays the
+last word.
+
 1. **`prod-stage`** runs `mopm publish --staged S --registry prod --oidc --no-commit`. The registry creates a
    group, mopm uploads every file, and the run ends 0 with the outcome `staged`: the group is `open`, the
    registry holds the bytes in quarantine, where nothing reads them, and no package is in the API, the
