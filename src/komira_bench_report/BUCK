@@ -56,7 +56,7 @@ mojo_conda(
     manifest = "mopm.toml",
     members = {"../komira_json": "//src/komira_json:mopm.toml"},
     mojo = "1.0.0",
-    mopm = "toolchains//:mopm_0_0_73",
+    mopm = "toolchains//:mopm_0_0_86",
     package = "komira_bench_report",
     version = "0.1.0",
     visibility = ["PUBLIC"],
