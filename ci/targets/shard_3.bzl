@@ -104,6 +104,8 @@ TARGETS = [
     "komira//tools/vendor/googleapis:proto_check_refuses_vendored_wkt",
     "tests//functional/abi_golden:doc_tree",
     "tests//functional/abi_golden:ok",
+    "tests//functional/abi_golden:ok_constants",
+    "tests//functional/abi_golden:ok_named",
     "tests//functional/c_deps:c_linked",
     "tests//functional/c_deps:doc_tree",
     "tests//functional/coverage:aggregates",
