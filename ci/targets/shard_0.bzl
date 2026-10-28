@@ -16,6 +16,7 @@ TARGETS = [
     "komira//:python_closure",
     "komira//:readme_api_coverage",
     "komira//:readme_e2e_complete",
+    "komira//:release_macos_cases",
     "komira//:release_workflow_cases",
     "komira//:retired_names",
     "komira//:shell_lint",
