@@ -120,7 +120,7 @@ Decisions this document makes that go beyond the language rulings it implements:
 - The C Stream interface, `CArrowArrayStream` (`src/komira_arrow_ipc/c_data_stream.mojo:232`).
   - Export makes no copy, and each exported column holds a shared reference on its buffer (`c_data_stream.mojo:385-395`). This is the model the UDF exporter reuses (§4.4).
   - Import copies: "buffers are COPIED" (`drain_record_batch_stream`, `:3083-3087`; `drain_c_abi_record_batch_stream`, `:3264-3278`).
-- Arrow IPC can decode from mapped memory without copying: `decode_record_batch_message_mmap` (`src/komira_arrow_ipc/ipc_decoder_dispatch.mojo:4088`) and `borrow_from_mmap` (`src/komira_buffer/shared_aligned_buffer.mojo:467`).
+- Arrow IPC can decode from mapped memory without copying: `decode_record_batch_message_mmap` (`src/komira_arrow_ipc/ipc_decoder_dispatch.mojo:4088`) and `borrow_from_mmap` (`src/komira_buffer/src/komira_buffer/shared_aligned_buffer.mojo:467`).
 - Missing:
   - import of a foreign array without a copy, with validation of its layout;
   - the Arrow C Device structs;

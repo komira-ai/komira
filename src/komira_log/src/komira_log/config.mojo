@@ -12,7 +12,7 @@
 # The facade's bare `log.info[fmt, module](*args)` must reach this config from
 # ANY call site with no `ctx`/handle threaded through. Mojo has NO first-class
 # mutable module-globals, so the config is a HEAP singleton whose address is
-# parked in a one-word C linker-global (`engine/_log_holder_shim.c`, the same
+# parked in a one-word C linker-global (`native/komira_log_holder.c`, the same
 # file that parks the P2 engine's address), reached via `external_call`.
 #
 # In P2 the engine holder points at the service-owned engine instead of the P1
@@ -159,7 +159,7 @@ struct LogConfig(Movable):
 
 # -----------------------------------------------------------------------------
 # The process-static holder: park / resolve the LogConfig heap-slot address.
-# The cell is `komira_log_config_holder_*` in `engine/_log_holder_shim.c`.
+# The cell is `komira_log_config_holder_*` in `native/komira_log_holder.c`.
 # -----------------------------------------------------------------------------
 
 

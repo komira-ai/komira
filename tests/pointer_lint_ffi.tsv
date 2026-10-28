@@ -20,7 +20,7 @@ src/komira_arrow_ipc/tests/test_arrow_c_stream_import_refusals.mojo	the Arrow C 
 src/komira_arrow_ipc/tests/test_arrow_c_stream_nested_round_trip.mojo	the Arrow C Stream Interface structs it allocates as the consumer of the library's exports
 src/komira_arrow_ipc/tests/test_c_data_interface_release_nested.mojo	the Arrow C Data Interface structs, children arrays and metadata buffers it builds by hand as a stand-in foreign producer, and frees
 src/komira_arrow_ipc/tests/test_ipc_body_compression_edges.mojo	the codec trait's opaque decompression-context ABI, as a stand-in conformer forwarding LZ4's context to Lz4Frame
-src/komira_buffer/mmap_region.mojo	mmap and the komira_open_ro C shim
+src/komira_buffer/src/komira_buffer/mmap_region.mojo	mmap and the komira_open_ro C shim
 src/komira_compression/bzip2_buffer.mojo	libbz2's buffer-to-buffer calls
 src/komira_compression/codec_libraries.mojo	the process-lifetime handles of libzstd, libbz2 and liblzma
 src/komira_compression/compression_codecs.mojo	the C codec libraries, and memcpy into caller-owned buffers

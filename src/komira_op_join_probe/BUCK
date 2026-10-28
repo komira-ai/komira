@@ -32,6 +32,8 @@ mojo_library(
         "tests/test_join_multi_key_memcmp_equiv.mojo",
         "tests/test_join_multi_key_null_key.mojo",
         "tests/test_join_multi_key_null_later_key.mojo",
+        "tests/test_join_multi_key_outer_filter_cases.mojo",
+        "tests/test_join_multi_key_probe_oracle.mojo",
         "tests/test_join_multikey_arm_hoist.mojo",
         "tests/test_join_multikey_batched_probe_equiv.mojo",
         "tests/test_multi_key_merge_parallel.mojo",
