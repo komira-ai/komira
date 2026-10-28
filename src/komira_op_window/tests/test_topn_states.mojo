@@ -27,7 +27,7 @@ from komira_libc.posix import _read_env
 from komira_operator_api.breaker_state_trait import BreakerState
 from komira_udf.column_resolver import ColumnResolver
 
-from komira_op_window.bounded_heap import BoundedHeapStringPayload
+from komira_op_window.bounded_heap import BoundedHeapInt64PayloadDynamic, BoundedHeapStringPayload
 from komira_op_window.partition_topn_state import (
     PTOPN_DIR_ASC,
     PTOPN_DIR_DESC,
@@ -504,6 +504,259 @@ def test_stage_topn_ties_across_batches_follow_row_order() raises:
     var b1 = _batch(names, c1^)
     var st = Stage_TopN_1_I64[ColXI64["k"], 3](
         scaffold=TopNStageScaffoldI64[3].new(SORT_DIR_ASC), output_schema=_schema_kp()
+    )
+    st.bind(_resolver_k())
+    _ = st.process_batch(batch_view_over(b0))
+    _ = st.process_batch(batch_view_over(b1))
+    var out_opt = st^.finalize()
+    var out = out_opt.take()
+    var want: List[Int64] = [2, 4, 0]
+    _check_payloads(out, 1, want)
+
+# =============================================================================
+# NULL-key rows: the kept rows do not depend on feed or merge order
+# =============================================================================
+
+
+def _worker[N: Int, D: Int](bv: BatchView, n_rows: Int, w: Int, nw: Int) raises -> TopNState[N, 0, 1, D]:
+    """The state of worker `w` of `nw`, fed rows r with r % nw == w."""
+    var st = TopNState[N, 0, 1, D]()
+    for r in range(n_rows):
+        if r % nw == w:
+            st.feed_row(bv, r)
+    return st^
+
+
+def _merged[N: Int, D: Int](
+    batch: RecordBatch, nw: Int, reverse_merge: Bool
+) raises -> RecordBatch:
+    """`nw` workers, worker w fed rows r with r % nw == w, merged by a chain
+    of `combine`s that starts at worker 0 (at worker nw - 1 when
+    `reverse_merge`) and folds in the rest in that direction."""
+    var bv = batch_view_over(batch)
+    var n_rows = batch.num_rows()
+    var order = List[Int]()
+    for w in range(nw):
+        order.append(nw - 1 - w if reverse_merge else w)
+    var acc = _worker[N, D](bv, n_rows, order[0], nw)
+    for i in range(1, nw):
+        acc.combine(_worker[N, D](bv, n_rows, order[i], nw))
+    return _drain(acc)
+
+
+def _check_all_merges[N: Int, D: Int](batch: RecordBatch, want_pay: List[Int64]) raises:
+    """One worker fed forward and backward, and 2 and 4 workers merged in both
+    orders, all give `want_pay` (hand-computed) as the payload column."""
+    var one = TopNState[N, 0, 1, D]()
+    _feed(one, batch)
+    _check_payloads(_drain(one), 1, want_pay)
+    var bv = batch_view_over(batch)
+    var back = TopNState[N, 0, 1, D]()
+    for r in range(batch.num_rows() - 1, -1, -1):
+        back.feed_row(bv, r)
+    _check_payloads(_drain(back), 1, want_pay)
+    for nw in [2, 4]:
+        _check_payloads(_merged[N, D](batch, nw, False), 1, want_pay)
+        _check_payloads(_merged[N, D](batch, nw, True), 1, want_pay)
+
+
+def test_topn_state_all_null_keys_keep_smallest_payloads() raises:
+    # Six rows, every key NULL: N = 2 keeps rows 0 and 1, however fed/merged.
+    var keys: List[Int64] = [0, 0, 0, 0, 0, 0]
+    var valid: List[Bool] = [False, False, False, False, False, False]
+    var batch = _kp_batch(keys, valid)
+    var want: List[Int64] = [0, 1]
+    _check_all_merges[2, TOPN_DIR_ASC](batch, want)
+    _check_all_merges[2, TOPN_DIR_DESC](batch, want)
+    var out = _drain_one[2, TOPN_DIR_ASC](batch)
+    assert_true(_null(out, 0, 0) and _null(out, 0, 1))
+
+
+def _drain_one[N: Int, D: Int](batch: RecordBatch) raises -> RecordBatch:
+    var st = TopNState[N, 0, 1, D]()
+    _feed(st, batch)
+    return _drain(st)
+
+
+def test_topn_state_mixed_null_keys_keep_smallest_payloads() raises:
+    # Rows 0..7: NULL 4 NULL NULL 2 NULL 9 NULL. N = 5: the three values then
+    # the NULL rows with the smallest payloads, 0 and 2.
+    var keys: List[Int64] = [0, 4, 0, 0, 2, 0, 9, 0]
+    var valid: List[Bool] = [False, True, False, False, True, False, True, False]
+    var batch = _kp_batch(keys, valid)
+    var asc_want: List[Int64] = [4, 1, 6, 0, 2]
+    _check_all_merges[5, TOPN_DIR_ASC](batch, asc_want)
+    var desc_want: List[Int64] = [6, 1, 4, 0, 2]
+    _check_all_merges[5, TOPN_DIR_DESC](batch, desc_want)
+    # N = 4 leaves room for one NULL row: payload 0.
+    var asc4: List[Int64] = [4, 1, 6, 0]
+    _check_all_merges[4, TOPN_DIR_ASC](batch, asc4)
+
+
+def test_topn_state_spill_with_many_null_rows_round_trips() raises:
+    # Eight rows: values at rows 2 and 5, NULL keys elsewhere. N = 4. Rows are
+    # fed in two halves around a spill, the second half last-row-first, so the
+    # later-fed NULL rows have the smaller payloads. Kept: the values then the
+    # NULL rows 0 and 1 (rows 2 and 5 hold values).
+    var keys: List[Int64] = [0, 0, 7, 0, 0, 3, 0, 0]
+    var valid: List[Bool] = [False, False, True, False, False, True, False, False]
+    var batch = _kp_batch(keys, valid)
+    var bv = batch_view_over(batch)
+    var st = TopNState[4, 0, 1, TOPN_DIR_ASC]()
+    var storage = LocalDiskSpillStorage.with_unlimited(_scratch_dir() + "/topn_spill_nulls")
+    for r in range(4, 8):
+        st.feed_row(bv, r)
+    _ = st.spill_to_storage(storage)
+    for r in range(3, -1, -1):
+        st.feed_row(bv, r)
+    st.restore_from_storage(storage)
+    var out = _drain(st)
+    var want: List[Int64] = [5, 2, 0, 1]
+    _check_payloads(out, 1, want)
+    assert_false(_null(out, 0, 1))
+    assert_true(_null(out, 0, 2) and _null(out, 0, 3))
+    # Only NULL keys held at the spill: a restore of the image alone.
+    var nk: List[Int64] = [0, 0, 0, 0, 0]
+    var nv: List[Bool] = [False, False, False, False, False]
+    var nbatch = _kp_batch(nk, nv)
+    var nbv = batch_view_over(nbatch)
+    var only = TopNState[3, 0, 1, TOPN_DIR_DESC]()
+    for r in range(4, -1, -1):
+        only.feed_row(nbv, r)
+    _ = only.spill_to_storage(storage)
+    only.restore_from_storage(storage)
+    var want_n: List[Int64] = [0, 1, 2]
+    _check_payloads(_drain(only), 1, want_n)
+
+
+def _part_payloads(rb: RecordBatch, part: Int64) raises -> List[Int64]:
+    """The payloads of the rows of partition `part`, in output order."""
+    var out = List[Int64]()
+    for r in range(rb.num_rows()):
+        if not _null(rb, 0, r) and _get(rb, 0, r) == part:
+            out.append(_get(rb, 2, r))
+    return out^
+
+
+def test_partition_topn_state_null_order_rows_merge_in_any_order() raises:
+    # Rows 0..7: partition g = 1 1 1 1 1 1 2 2, order key k = NULL 5 NULL NULL
+    # NULL NULL NULL NULL. N = 2 ASC: partition 1 keeps (5, row 1) then the
+    # NULL row with the smallest payload (0); partition 2 keeps rows 6 and 7.
+    var g: List[Int64] = [1, 1, 1, 1, 1, 1, 2, 2]
+    var k: List[Int64] = [0, 5, 0, 0, 0, 0, 0, 0]
+    var kvalid: List[Bool] = [False, True, False, False, False, False, False, False]
+    var p: List[Int64] = [0, 1, 2, 3, 4, 5, 6, 7]
+    var cols = List[Column[HeapRegion]]()
+    cols.append(_i64(g, _all(8)))
+    cols.append(_i64(k, kvalid))
+    cols.append(_i64(p, _all(8)))
+    var names: List[String] = ["g", "k", "p"]
+    var batch = _batch(names, cols^)
+    var bv = batch_view_over(batch)
+    var want1: List[Int64] = [1, 0]
+    var want2: List[Int64] = [6, 7]
+    var one = PartitionTopNState[0, 1, 2, 2, PTOPN_DIR_ASC]()
+    for r in range(7, -1, -1):
+        one.feed_row(bv, r)
+    var one_out = _drain(one)
+    _check_payloads_list(_part_payloads(one_out, 1), want1)
+    _check_payloads_list(_part_payloads(one_out, 2), want2)
+    for nw in [2, 4]:
+        for rev in [False, True]:
+            var order = List[Int]()
+            for w in range(nw):
+                order.append(nw - 1 - w if rev else w)
+            var acc = PartitionTopNState[0, 1, 2, 2, PTOPN_DIR_ASC]()
+            for i in range(nw):
+                var wk = PartitionTopNState[0, 1, 2, 2, PTOPN_DIR_ASC]()
+                for r in range(8):
+                    if r % nw == order[i]:
+                        wk.feed_row(bv, r)
+                if i == 0:
+                    acc = wk^
+                else:
+                    acc.combine(wk^)
+            var out = _drain(acc)
+            _check_payloads_list(_part_payloads(out, 1), want1)
+            _check_payloads_list(_part_payloads(out, 2), want2)
+
+
+def _check_payloads_list(got: List[Int64], want: List[Int64]) raises:
+    assert_equal(len(got), len(want))
+    for i in range(len(want)):
+        assert_equal(got[i], want[i])
+
+
+# =============================================================================
+# LIMIT 0 and the dynamic heap's ties
+# =============================================================================
+
+
+def test_limit_zero_keeps_nothing() raises:
+    var sh = BoundedHeapStringPayload[0, 0]()
+    _push_str(sh, "b", 0)
+    _push_str(sh, "a", 1)
+    assert_equal(sh.size(), 0)
+    assert_equal(sh.push_returning_evicted("a".as_bytes(), 9), 9)
+    assert_false(sh.candidate_beats_root("a".as_bytes(), 9))
+    assert_equal(len(_string_heap_payloads(sh)), 0)
+
+    var dh = BoundedHeapInt64PayloadDynamic(0)
+    dh.push(5, 0)
+    dh.push(1, 1)
+    assert_equal(dh.size(), 0)
+    assert_equal(len(dh.extract_sorted()), 0)
+
+    var dy = Stage_TopN_Dynamic_1_I64[ColXI64["k"]](
+        scaffold=TopNStageScaffoldI64Dynamic.new(0, SORT_DIR_ASC), output_schema=_schema_kp()
+    )
+    dy.bind(_resolver_k())
+    var keys: List[Int64] = [3, 1, 2]
+    var cols = List[Column[HeapRegion]]()
+    cols.append(_i64(keys, _all(3)))
+    var names: List[String] = ["k"]
+    var batch = _batch(names, cols^)
+    _ = dy.process_batch(batch_view_over(batch))
+    var out_opt = dy^.finalize()
+    assert_equal(out_opt.take().num_rows(), 0)
+
+
+def test_dynamic_heap_ties_ignore_arrival_order() raises:
+    # Capacity 2, key 7 for payloads 9, 3, 6 and then 1: the smaller payloads
+    # win however they arrive.
+    var h = BoundedHeapInt64PayloadDynamic(2)
+    h.push(7, 9)
+    h.push(7, 3)
+    h.push(7, 6)
+    h.push(7, 1)
+    var slots = h.extract_sorted()
+    assert_equal(len(slots), 2)
+    assert_equal(slots[0].payload_row_id, 1)
+    assert_equal(slots[1].payload_row_id, 3)
+    # The scaffold, a single slot: the second push has the smaller payload.
+    var sc = TopNStageScaffoldI64Dynamic.new(1, SORT_DIR_ASC)
+    sc.push_row(4, 5)
+    sc.push_row(4, 1)
+    var e = sc.finalize_emit()
+    assert_equal(len(e), 1)
+    assert_equal(e[0].payload_row_id, 1)
+
+
+def test_dynamic_stage_ties_across_batches_follow_row_order() raises:
+    # As the static stage's test: batches [4, 4, 1] and [4, 1, 4], ASC top 3 is
+    # rows 2, 4, then the first 4 (row 0), which needs the row index to run on
+    # across batches.
+    var k0: List[Int64] = [4, 4, 1]
+    var k1: List[Int64] = [4, 1, 4]
+    var c0 = List[Column[HeapRegion]]()
+    c0.append(_i64(k0, _all(3)))
+    var c1 = List[Column[HeapRegion]]()
+    c1.append(_i64(k1, _all(3)))
+    var names: List[String] = ["k"]
+    var b0 = _batch(names, c0^)
+    var b1 = _batch(names, c1^)
+    var st = Stage_TopN_Dynamic_1_I64[ColXI64["k"]](
+        scaffold=TopNStageScaffoldI64Dynamic.new(3, SORT_DIR_ASC), output_schema=_schema_kp()
     )
     st.bind(_resolver_k())
     _ = st.process_batch(batch_view_over(b0))

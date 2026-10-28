@@ -57,18 +57,26 @@ Modules:
 - `topn_sink`: `TopNSink`, the global top-N of a pipeline as a `MorselSink`;
   `finalize` runs `komira_op_sort.sort_topn_sink._execute_topn_sink` over the
   folded batch, so its rows (and its NULL placement) are that kernel's.
+  That kernel does not read `nulls_first` and orders a numeric NULL slot by
+  its stored value, so the sink's NULL placement is not the NULLS LAST of
+  `TopNState` and `PartitionTopNState`.
 - `bounded_heap`: bounded heaps over INT64 keys (capacity at compile time or
   at run time) and over STRING keys compared byte-wise. Slots order by
   (key, payload id), so equal keys keep the smaller payload (row) first and
   the kept rows do not depend on feed or merge order.
 - `topn_stage`, `stage_topn`: the top-N of one INT64 key, and
   `Stage_TopN_1_I64` / `Stage_TopN_Dynamic_1_I64`, its `FusedMorselOp`s over
-  an `ExprXI64` key (payload: the row's index across all batches fed). DESC stores the bitwise NOT of the key, which reverses
-  every INT64 (negation overflows on `Int64.MIN`).
+  an `ExprXI64` key (payload: the row's index across all batches fed).
+  DESC stores the bitwise NOT of the key, which reverses every INT64
+  (negation overflows on `Int64.MIN`).
 - `topn_state`: `TopNState`, the typed stage's TOPN breaker state: the top N
-  of an INT64 key column, NULL keys last, mergeable (`combine`) and spillable.
+  of an INT64 key column, mergeable (`combine`) and spillable. NULL keys
+  come last in both directions (there is no NULLS FIRST setting); the NULL-key
+  rows kept are the smallest payload ids, so the result does not depend on
+  feed or merge order.
 - `partition_topn_state`: `PartitionTopNState`, top N per partition over
-  INT64 columns (NULL partition keys one partition, NULL order keys last).
+  INT64 columns (NULL partition keys one partition, NULL order keys last in
+  both directions, as in `TopNState`).
 - `partition_state`: the per-partition state holders of a typed window stage.
 - `partition_null_policy`: the NULL policy every aggregate kernel shares,
   and the output allocators that size a validity bitmap only when a NULL can

@@ -310,6 +310,9 @@ struct BoundedHeapStringPayload[N: Int, sort_dir: Int](Copyable, Movable):
             self.n_used = self.n_used + 1
             self._percolate_up(self.n_used - 1)
             return Int64(-1)
+        if self.n_used == 0:
+            # Capacity 0 keeps nothing (there is no root to compare with).
+            return payload_row_id
         if self._span_worse_than_root[bo](key, payload_row_id):
             return payload_row_id
         var displaced = self.slots[0].payload_row_id
@@ -326,7 +329,10 @@ struct BoundedHeapStringPayload[N: Int, sort_dir: Int](Copyable, Movable):
     def candidate_beats_root[bo: Origin[mut=False]](
         self, key: Span[UInt8, bo], payload_row_id: Int64
     ) -> Bool:
-        """True if a full heap would keep the candidate (no store)."""
+        """True if a full heap would keep the candidate (no store). A heap
+        of capacity 0 keeps nothing."""
+        if Self.N == 0:
+            return False
         return not self._span_worse_than_root[bo](key, payload_row_id)
 
     def extract_sorted(mut self) -> List[HeapSlotStr]:

@@ -10,8 +10,14 @@
 #
 #   * A NULL partition key is one partition (§9.9), distinct from every value.
 #   * A NULL order key sorts last in both directions (§4.1): per partition the
-#     first N NULL-order rows are kept apart and fill the partition's result
-#     after the rows with a value.
+#     NULL-order rows are kept apart, in a second bounded heap under one
+#     constant key (the N smallest payload ids survive), and fill the
+#     partition's result after the rows with a value. The kept rows do not
+#     depend on feed or merge order.
+#   * NULLs are placed LAST in both directions: this state has no
+#     NULLS FIRST setting (the stage planner emits only the default
+#     placement). `TopNSink` is the kernel's: it does not read `nulls_first`
+#     and orders a numeric NULL slot by its stored value.
 #   * DESC stores `~key` (negation overflows on `Int64.MIN`).
 #
 # The partition directory is a linear scan (small partition counts);
@@ -73,13 +79,13 @@ struct PartitionTopNState[
     var part_keys: List[Int64]
     var part_is_null: List[Bool]
     var heaps: List[BoundedHeapInt64Payload[Self.N]]
-    var null_order_payloads: List[List[Int64]]
+    var null_order_heaps: List[BoundedHeapInt64Payload[Self.N]]
 
     def __init__(out self):
         self.part_keys = List[Int64]()
         self.part_is_null = List[Bool]()
         self.heaps = List[BoundedHeapInt64Payload[Self.N]]()
-        self.null_order_payloads = List[List[Int64]]()
+        self.null_order_heaps = List[BoundedHeapInt64Payload[Self.N]]()
 
     @staticmethod
     def state_tag() -> Int:
@@ -103,13 +109,12 @@ struct PartitionTopNState[
         self.part_keys.append(Int64(0) if is_null else pk)
         self.part_is_null.append(is_null)
         self.heaps.append(BoundedHeapInt64Payload[Self.N]())
-        self.null_order_payloads.append(List[Int64]())
+        self.null_order_heaps.append(BoundedHeapInt64Payload[Self.N]())
         return len(self.part_keys) - 1
 
     @always_inline
     def _push_null_order(mut self, p: Int, pay: Int64):
-        if len(self.null_order_payloads[p]) < Self.N:
-            self.null_order_payloads[p].append(pay)
+        self.null_order_heaps[p].push(Int64(0), pay)
 
     def feed_row[bo: Origin[mut=False]](mut self, batch: BatchView[bo], row: Int) raises:
         """Take one row into its partition's heap, or its NULL-order rows."""
@@ -156,13 +161,15 @@ struct PartitionTopNState[
                 out_keys.append(k)
                 key_valid.append(True)
                 out_pay.append(slots[i].payload_row_id)
-            var room = min(Self.N - len(slots), len(self.null_order_payloads[p]))
+            var null_local = self.null_order_heaps[p].copy()
+            var nulls = null_local.extract_sorted()
+            var room = min(Self.N - len(slots), len(nulls))
             for i in range(room):
                 out_part.append(self.part_keys[p])
                 part_valid.append(not self.part_is_null[p])
                 out_keys.append(Int64(0))
                 key_valid.append(False)
-                out_pay.append(self.null_order_payloads[p][i])
+                out_pay.append(nulls[i].payload_row_id)
         var all_valid = List[Bool](capacity=len(out_pay))
         for _ in range(len(out_pay)):
             all_valid.append(True)
@@ -181,12 +188,14 @@ struct PartitionTopNState[
 
     def combine(mut self, var other: Self) raises:
         """Merge another worker's state partition by partition: its heap rows
-        under their stored keys, its NULL-order rows up to N."""
+        under their stored keys, its NULL-order rows under the same payload order."""
         for op in range(len(other.part_keys)):
             var p = self._find_or_create_partition(other.part_keys[op], other.part_is_null[op])
             var oh = other.heaps[op].copy()
             var entries = oh.extract_sorted()
             for i in range(len(entries)):
                 self.heaps[p].push(entries[i].key, entries[i].payload_row_id)
-            for i in range(len(other.null_order_payloads[op])):
-                self._push_null_order(p, other.null_order_payloads[op][i])
+            var onh = other.null_order_heaps[op].copy()
+            var other_nulls = onh.extract_sorted()
+            for i in range(len(other_nulls)):
+                self._push_null_order(p, other_nulls[i].payload_row_id)
