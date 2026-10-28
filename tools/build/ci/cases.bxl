@@ -20,6 +20,7 @@
 
 load("@prelude//cxx:cxx_toolchain_types.bzl", "CxxToolchainInfo")
 load(":affected.bzl", "AFFECTED", "EMPTY", "VACUOUS", "WIDENED", "held_refusals", "is_held_file", "is_inert", "parse_held_lines", "pattern_matches", "select", "widen_reason")
+load(":heavy_cases.bzl", "heavy_cases")
 load(":rules.bzl", "EXCLUDED", "INERT", "WIDEN")
 load(":ci_graph.bzl", "check_nodes", "closure", "findings", "make_graph", "python_findings", "python_nodes", "render", "roots", "sdk_own_deps", "without_left_out")
 
@@ -553,7 +554,7 @@ def _adopted_darwin_cases(ctx):
     return out
 
 def _run(ctx):
-    table = _table_cases() + _held_cases() + _python_cases(ctx) + _roots_cases() + _shipped_rules_cases() + _registration_cases(ctx) + _cxx_toolchain_cases(ctx) + _adopted_darwin_cases(ctx)
+    table = _table_cases() + _held_cases() + _python_cases(ctx) + _roots_cases() + _shipped_rules_cases() + heavy_cases() + _registration_cases(ctx) + _cxx_toolchain_cases(ctx) + _adopted_darwin_cases(ctx)
     real = _real_cases(ctx)
     failures = table + real
     if failures:

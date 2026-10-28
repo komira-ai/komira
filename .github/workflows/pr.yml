@@ -10,7 +10,9 @@
 #   2. the BXL selector (tools/build/ci/affected.bxl) turns them into the
 #      targets to build: the owners of the files and everything that depends
 #      on them, or the aggregate //ci:pr (the whole check set) when a file
-#      cannot be mapped or touches the build system;
+#      cannot be mapped or touches the build system; the heavy checks
+#      (rules.bzl HEAVY: the kci binary) only when the change owns paths of
+#      theirs, so the aggregate is //ci:pr_default (without them) otherwise;
 #   3. `build` of that list (a library's welded tests run inside its build);
 #   4. the checks only a BXL script can make, over the whole graph: the
 #      test_weld and graph_check lints, the completeness guard of //ci:pr, the
@@ -158,6 +160,13 @@ jobs:
         uses: ./.github/actions/buck2-farm
         with:
           args: bxl komira//tools/build/ci/lock_graphs.bxl:check
+          assert-remote: ${{ steps.assert.outputs.path }}
+      # `//ci:pr_default`, which a change that owns none of the heavy checks builds in
+      # place of `//ci:pr`, is `//ci:pr` without the roots of rules.bzl HEAVY.
+      - name: the default aggregate leaves out the heavy checks and nothing else
+        uses: ./.github/actions/buck2-farm
+        with:
+          args: bxl komira//tools/build/ci/default_guard.bxl:check
           assert-remote: ${{ steps.assert.outputs.path }}
       - name: the selector and guard cases
         uses: ./.github/actions/buck2-farm

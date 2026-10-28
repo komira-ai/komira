@@ -119,6 +119,28 @@ def findings(required, reached, aggregate):
         REGENERATE,
     )
 
+def default_findings(rows, full, default, reaches, aggregate, default_aggregate):
+    """The failure texts of the default aggregate against the rows of HEAVY (rules.bzl), or [].
+
+    `full` and `default` are the closures (label -> True) of the full and the default
+    aggregate, `reaches(root, target)` says whether a root reaches a target. A row is
+    (target, own, roots, reason). A finding for a row whose target the full aggregate does
+    not reach (the row is stale: delete it), for a target the default aggregate reaches (a
+    root that reaches it is not in the row's roots), and for a root that reaches nothing
+    heavy (it is left out for nothing: delete it from the row)."""
+    out = []
+    for row in rows:
+        target, roots_of_row = row[0], row[2]
+        if target not in full:
+            out.append("{} is not reached from {}: its row of HEAVY (tools/build/ci/rules.bzl) is stale".format(target, aggregate))
+            continue
+        if target in default:
+            out.append("{} still reaches {}: a root that reaches it is missing from the roots of its row of HEAVY (tools/build/ci/rules.bzl)".format(default_aggregate, target))
+        for r in roots_of_row:
+            if not reaches(r, target):
+                out.append("{} is left out of {} for {}, which it does not reach: delete it from the roots of the row".format(r, default_aggregate, target))
+    return out
+
 def render(root_labels, test_labels):
     """The lines of ci/targets.bzl."""
     lines = [
