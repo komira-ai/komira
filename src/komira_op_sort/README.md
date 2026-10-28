@@ -30,7 +30,10 @@ batch by it.
   `_execute_topn_sink` over `SortSinkData` / `TopNSinkData` of
   `komira_physical_plan`), and `append_deterministic_tiebreak[_schema]`,
   the one rule that makes a tied top-N cut deterministic across runs whose
-  input order differs.
+  input order differs. `_execute_sort_sink` does not resolve dictionary
+  keys: a numeric dictionary-encoded sort key raises an error (the message
+  differs between the single-key and multi-key paths).
+  `_execute_topn_sink` resolves a numeric dictionary key to its values first.
 - `sort_topn_heap`: `topn_heap_select`, multi-key top-K over a
   `RecordBatch` by a bounded heap, O(N log K), for INT64 / INT32 / FLOAT64 /
   STRING keys. Rows that tie on every key compare by row index, so the heap
@@ -41,8 +44,10 @@ batch by it.
   whose column types are known only at run time (a `ColDescriptor` layout
   over `komira_column_format` storage), fed from `BatchView`s and read back
   per DType; its cell codec is `sort_buffer_cells`. It does not track
-  validity: a NULL cell is compared as its stored value bytes, so a caller
-  keeps nullable keys out of it or places the nulls itself.
+  validity: a NULL cell sorts as its value bytes, so callers keep nullable
+  keys out or place nulls themselves. TIMESTAMP, DECIMAL128 and BINARY
+  columns can be fed and ordered but have no typed reader; the order is in
+  `sorted_indices`.
 - `sort_loser_tree`: `LoserTree`, a tournament tree for the k-way merge of
   sorted runs, driven by a caller's `LoserTreeComparator`.
 

@@ -28,13 +28,13 @@
 # ("apple" < "apple pie"); a non-ASCII lead byte outranks all of ASCII
 # ("Ünicode" starts 0xC3, so it sorts LAST ascending).
 #
-# The tie section (case 3) is deliberately weaker than its neighbours: its K-cut
-# lands inside a 3-row `Apple` tie, and DuckDB does not fix intra-tie row
-# order under LIMIT, so it pins the key sequence and the SET of payloads. case 4
-# and case 6 add the unique `v` as a secondary key, which makes the order total,
-# and pin full rows.
-# The order the engine itself gives tied rows is pinned in
-# `test_topn_heap_ties_and_key_layouts.mojo`.
+# The tie section (case 3) asserts only what DuckDB fixes: its K-cut lands
+# inside a 3-row `Apple` tie, and DuckDB does not fix intra-tie row order under
+# LIMIT, so the oracle is the key sequence and the SET of payloads. The engine
+# does fix that order (tied rows come out in input order, as the stable full
+# sort gives them), and `test_topn_heap_ties_and_key_layouts.mojo` pins it.
+# case 4 and case 6 add the unique `v` as a secondary key, which makes the
+# order total, and pin full rows.
 #
 # A byte comparison that treated bytes as signed would order "Ünicode" first
 # instead of last; the "Ünicode" cases fail on that.

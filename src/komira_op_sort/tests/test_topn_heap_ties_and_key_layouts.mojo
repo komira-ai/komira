@@ -507,5 +507,192 @@ def test_string_dictionary_key_is_not_heap_safe() raises:
     )
 
 
+# -----------------------------------------------------------------------------
+# Sliced FLOAT64 and INT32 keys
+# -----------------------------------------------------------------------------
+
+
+def _sliced_key_rank(u: Int) -> Int:
+    """The key value of underlying row `u`. The rows before `_SLICE_START` sit
+    far outside the range of the rest, alternating low and high, so a key read
+    from the start of the buffer instead of the column offset puts them in
+    the cut in both directions."""
+    if u < _SLICE_START:
+        return -1000 - u if u % 2 == 0 else 1000 + u
+    return (u * 37) % 101
+
+
+def _sliced_float_int_batch() raises -> RecordBatch:
+    """`[f FLOAT64, q INT32, v INT64]` over rows `_SLICE_START ..` of a
+    buffer of `_N_ROWS` rows. f and q hold `_sliced_key_rank` (f as rank +
+    0.5), v = row + 1. Each column starts at the nonzero offset."""
+    var f = PrimitiveArray[DType.float64].allocate(_N_ROWS)
+    var q = PrimitiveArray[DType.int32].allocate(_N_ROWS)
+    var v = PrimitiveArray[DType.int64].allocate(_N_ROWS)
+    for i in range(_N_ROWS):
+        var rank = _sliced_key_rank(i)
+        f.set_typed[Scalar[DType.float64]](i, Float64(rank) + 0.5)
+        q.set_typed[Scalar[DType.int32]](i, Int32(rank))
+        v.set_typed[Scalar[DType.int64]](i, Int64(i + 1))
+    var n = _N_ROWS - _SLICE_START
+    var builder = RecordBatchBuilder.with_capacity(3)
+    builder.add_column(
+        Column.from_primitive[DType.float64](f^).slice(_SLICE_START, n)
+    )
+    builder.add_column(
+        Column.from_primitive[DType.int32](q^).slice(_SLICE_START, n)
+    )
+    builder.add_column(
+        Column.from_primitive[DType.int64](v^).slice(_SLICE_START, n)
+    )
+    var sb = SchemaBuilder()
+    sb.add_field(Field("f", ArrowType.FLOAT64, False))
+    sb.add_field(Field("q", ArrowType.INT32, False))
+    sb.add_field(Field("v", ArrowType.INT64, False))
+    return builder.build(sb.build())
+
+
+def _sliced_key_rows(k: Int, desc: Bool) -> List[Int]:
+    """The v ids of the first `k` rows from `_SLICE_START` on, ordered by
+    `_sliced_key_rank` (the ranks of those rows are distinct)."""
+    var picked = List[Int]()
+    var used = List[Bool]()
+    for _ in range(_N_ROWS):
+        used.append(False)
+    for _ in range(k):
+        var best = -1
+        var best_rank = 0
+        for i in range(_SLICE_START, _N_ROWS):
+            if used[i]:
+                continue
+            var rank = _sliced_key_rank(i)
+            if best < 0 or (rank > best_rank if desc else rank < best_rank):
+                best = i
+                best_rank = rank
+        used[best] = True
+        picked.append(best + 1)
+    return picked^
+
+
+def test_sliced_float_and_int32_batch_is_in_the_heap_regime() raises:
+    var rb = _sliced_float_int_batch()
+    assert_true(
+        rb.num_rows() > 5 * TOPN_HEAP_RATIO, "the sliced batch is too short"
+    )
+    assert_true(
+        rb.column_at(0)._offset == _SLICE_START
+        and rb.column_at(1)._offset == _SLICE_START,
+        "the fixture columns do not start at the slice offset",
+    )
+    assert_true(
+        _heap_can_order_all_keys(rb, _keys2(String("f"), String("q"))),
+        "a sliced FLOAT64 and INT32 key were refused by the router",
+    )
+
+
+def test_float64_key_is_read_from_the_column_offset_asc() raises:
+    var rb = _execute_topn_sink(
+        _sliced_float_int_batch(), _spec(_keys1(String("f")), _desc1(False), 5)
+    )
+    _assert_v_column(
+        rb, 2, _sliced_key_rows(5, False), String("sliced f ASC LIMIT 5")
+    )
+
+
+def test_float64_key_is_read_from_the_column_offset_desc() raises:
+    var rb = _execute_topn_sink(
+        _sliced_float_int_batch(), _spec(_keys1(String("f")), _desc1(True), 5)
+    )
+    _assert_v_column(
+        rb, 2, _sliced_key_rows(5, True), String("sliced f DESC LIMIT 5")
+    )
+
+
+def test_int32_key_is_read_from_the_column_offset_asc() raises:
+    var rb = _execute_topn_sink(
+        _sliced_float_int_batch(), _spec(_keys1(String("q")), _desc1(False), 5)
+    )
+    _assert_v_column(
+        rb, 2, _sliced_key_rows(5, False), String("sliced q ASC LIMIT 5")
+    )
+
+
+def test_int32_key_is_read_from_the_column_offset_desc() raises:
+    var rb = _execute_topn_sink(
+        _sliced_float_int_batch(), _spec(_keys1(String("q")), _desc1(True), 5)
+    )
+    _assert_v_column(
+        rb, 2, _sliced_key_rows(5, True), String("sliced q DESC LIMIT 5")
+    )
+
+
+# -----------------------------------------------------------------------------
+# Mixed directions with partial ties
+# -----------------------------------------------------------------------------
+
+
+def _mixed_batch() raises -> RecordBatch:
+    """`[a INT64, b INT64, v INT64]`: a = row % 5 (twenty rows per value),
+    b = (row * 7) % 13 (equal for rows 13 apart, so some rows tie on both
+    keys too), v = row + 1."""
+    var a = PrimitiveArray[DType.int64].allocate(_N_ROWS)
+    var b = PrimitiveArray[DType.int64].allocate(_N_ROWS)
+    var v = PrimitiveArray[DType.int64].allocate(_N_ROWS)
+    for i in range(_N_ROWS):
+        a.set_typed[Scalar[DType.int64]](i, Int64(i % 5))
+        b.set_typed[Scalar[DType.int64]](i, Int64((i * 7) % 13))
+        v.set_typed[Scalar[DType.int64]](i, Int64(i + 1))
+    var builder = RecordBatchBuilder.with_capacity(3)
+    builder.add_column(Column.from_primitive[DType.int64](a^))
+    builder.add_column(Column.from_primitive[DType.int64](b^))
+    builder.add_column(Column.from_primitive[DType.int64](v^))
+    var sb = SchemaBuilder()
+    sb.add_field(Field("a", ArrowType.INT64, False))
+    sb.add_field(Field("b", ArrowType.INT64, False))
+    sb.add_field(Field("v", ArrowType.INT64, False))
+    return builder.build(sb.build())
+
+
+def _heap_equals_full_sort_on_mixed_directions(
+    desc_a: Bool, desc_b: Bool
+) raises:
+    """LIMIT 7 on the heap cuts inside the twenty rows that tie on `a`, which
+    differ on `b` in the opposite direction; LIMIT 20 (20 * 8 > 100) takes the
+    full sort. The first seven rows must agree."""
+    var heap = _execute_topn_sink(
+        _mixed_batch(),
+        _spec(_keys2(String("a"), String("b")), _desc2(desc_a, desc_b), 7),
+    )
+    var full = _execute_topn_sink(
+        _mixed_batch(),
+        _spec(_keys2(String("a"), String("b")), _desc2(desc_a, desc_b), 20),
+    )
+    assert_equal(full.num_rows(), 20, "full sort row count")
+    var expect = List[Int]()
+    for r in range(7):
+        expect.append(_i64_at(full, 2, r))
+    _assert_v_column(
+        heap,
+        2,
+        expect,
+        String("heap vs full sort, desc=")
+        + String(desc_a)
+        + String(",")
+        + String(desc_b),
+    )
+    # The cut sits inside one `a` value, so the test reaches the partial tie.
+    var a0 = _i64_at(heap, 0, 0)
+    for r in range(7):
+        assert_equal(_i64_at(heap, 0, r), a0, "the cut left the tied a value")
+
+
+def test_heap_matches_full_sort_on_asc_desc_with_partial_ties() raises:
+    _heap_equals_full_sort_on_mixed_directions(False, True)
+
+
+def test_heap_matches_full_sort_on_desc_asc_with_partial_ties() raises:
+    _heap_equals_full_sort_on_mixed_directions(True, False)
+
+
 def main() raises:
     TestSuite.discover_tests[__functions_in_module()]().run()
