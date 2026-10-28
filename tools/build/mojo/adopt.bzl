@@ -87,6 +87,21 @@ and `native` names the shared library: they give `MojoInfo.native` the facts `mo
 shared library's `callers` take the adopted label. `c_deps` are not linked (the archives of
 `MojoNativeArchiveInfo` are the link): they are the labels the shared library is built from, so each
 C symbol is still defined once in any link.
+
+A library whose C is per-library state (one copy per image, which a shared library would merge across images)
+ships it as a static archive in its conda package instead, with no shared library: it lists the C in `c_deps`
+and sets `native_static = True`. Its closure facts then carry the static archive (`MojoInfo.native.shipped`
+and `statics`, the same as `mojo_library`'s `native_static`), so a dependent's check that every C library its
+closure links is shipped by a library of the closure (`native_refusal`, native_facts.bzl; the release set's
+checks read the same facts) finds the owner. Without it the adopted label links the C and ships none, and
+every package that depends on it has no conda package. `native` and `native_static` are exclusive.
+
+    mojo_adopted_library(
+        name = "komira_log",
+        c_deps = [":komira_log_holder"],   # the cxx_library the archive is built from
+        native_static = True,
+        ...
+    )
 """
 
 load("@buildrules//rules/mojo:providers.bzl", "MojoLibInfo", "MojoNativeArchiveInfo")
@@ -292,6 +307,7 @@ _adopted = rule(
         "import_name": attrs.option(attrs.string(), default = None),
         "lib": attrs.dep(),
         "native": attrs.option(attrs.label(), default = None),
+        "native_static": attrs.bool(default = False),
         "readme": attrs.option(attrs.source(), default = None),
         "readme_tool": attrs.option(attrs.exec_dep(providers = [RunInfo]), default = None),
         "srcs": attrs.list(attrs.source()),

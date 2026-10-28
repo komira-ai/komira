@@ -6,6 +6,12 @@ load(":cases.bzl", "adopt_deps_case")
 #   missing  deps = []                              Must FAIL: `lib` is built from komira_runtime_paths, `deps` does not bring it
 #   extra    deps = [runtime_paths, komira_json]    Must FAIL: `deps` brings komira_json, `lib` is not built from it
 #   agree    deps = [runtime_paths]                 Must BUILD: the control, so the two refusals are about the lists
+#   native_unshipped         adopted library with `c_deps`, no `native_static`; a dependent's closure check states no unshipped C
+#                                                 Must FAIL: the closure links the C and no library of it ships it
+#   native_unshipped_stated  the same, the check stating the C as unshipped
+#                                                 Must BUILD: the control, so the refusal above is about the state of the closure
+#   native_static            the same library with `native_static = True`, the check stating none
+#                                                 Must BUILD: the library ships the C as a static archive, the dependent's closure finds its owner
 # With no case set the package declares only its doc_tree, so loading it never fails by accident. The
 # scenario is tools/build/selftest:analysis_refusals_adopt_deps.
 adopt_deps_case()
