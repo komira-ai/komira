@@ -31,6 +31,11 @@ runs:
       env:
         BUCK2_ARGS: ${{ inputs.args }}
         BUCK2_LOG: ${{ runner.temp }}/buck2-farm.log
+        # The simple console: plain lines, and every few seconds
+        # `Waiting on <target> -- <action>, and N other actions`, so the live
+        # step log names what a stalled build waits on. It is what buck2 picks
+        # without a terminal; set here so a runner's terminal never changes it.
+        BUCK_CONSOLE: simple
       run: ./buck2 $BUCK2_ARGS 2>&1 | tee "$BUCK2_LOG"
     - name: assert the run was remote
       shell: bash

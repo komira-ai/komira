@@ -1,10 +1,12 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
 # The build side of the engine's joins, and the kernels that need no join
-# operator: the untyped hash-join table (`JoinBuildTable_Untyped`) with its
-# packed `HashDirectory` and per-column cell kernels, the CROSS-join kernel,
-# the blocking functions of non-equi joins, the probe NULL mask, and the
-# settings, predicates and witnesses of the build's levers.
+# operator: the single-INT64-key hash join (`HashJoinBuilder`, its serial
+# builds and its INNER probes), the sort-merge join and the perfect-hash join;
+# the untyped hash-join table (`JoinBuildTable_Untyped`) with its packed
+# `HashDirectory` and per-column cell kernels; the CROSS-join kernel, the
+# blocking functions of non-equi joins, the probe NULL mask, and the settings,
+# predicates and witnesses of the build's levers.
 mojo_library(
     name = "komira_op_join_build",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
@@ -15,6 +17,7 @@ mojo_library(
         "//src/komira_buffer:komira_buffer",
         "//src/komira_column_format:komira_column_format",
         "//src/komira_counters:komira_counters",
+        "//src/komira_dynamic_filter:komira_dynamic_filter",
         "//src/komira_join_assembly:komira_join_assembly",
         "//src/komira_udf:komira_udf",
     ],
@@ -24,8 +27,11 @@ mojo_library(
         "tests/test_join_blocking.mojo",
         "tests/test_join_build_table_untyped.mojo",
         "tests/test_join_composite_f64_key_kerneldirect.mojo",
+        "tests/test_join_fanout.mojo",
         "tests/test_join_gates.mojo",
         "tests/test_join_hash_store_grow.mojo",
+        "tests/test_join_probe_chunk_spans.mojo",
+        "tests/test_join_sort_merge_perfect_hash.mojo",
         "tests/test_join_untyped_float_key_model.mojo",
         "tests/test_strkey_bulk_join_byte_equiv.mojo",
     ],
