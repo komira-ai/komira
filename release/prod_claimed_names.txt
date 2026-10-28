@@ -42,6 +42,7 @@ komira_sync
 komira_test_run_id
 komira_test_verdict
 komira_textproto
+komira_trace
 komira_validation_run
 komira_vcard
 komira_wkt
