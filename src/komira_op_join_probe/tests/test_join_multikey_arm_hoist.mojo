@@ -149,7 +149,7 @@ def _cols_dict(
     would leave the uniform-DICT body unreached). `dict_keys` carries the
     indices the same-dict arm must compare; `string_keys` carries the cross-dict
     fallback's decoded bytes, which this fixture makes deliberately UNIFORM so
-    that a mutant falling to the STRING arm is loud rather than silent.
+    that a dispatch that falls to the STRING arm is loud rather than silent.
     """
     var ik = Slab[PrimitiveArray[I64]].create(2)
     var sk = Slab[Optional[StringArray[HeapRegion]]].create(2)
@@ -383,8 +383,8 @@ def test_string_arm_compares_bytes_not_the_hash_column() raises:
 def test_dict_arm_compares_indices_not_hash_and_not_bytes() raises:
     """The same-dict arm's contract is `Int32 ==` on dictionary INDICES. This
     fixture makes both other arms wrong and loud: the hash column is all zeros
-    (INT64 mutant matches everything) and the decoded side channel is one
-    repeated string (STRING mutant also matches everything).
+    (the INT64 arm would match everything) and the decoded side channel is one
+    repeated string (the STRING arm would also match everything).
     """
     var dictionary = List[String]()
     dictionary.append(String("A"))
