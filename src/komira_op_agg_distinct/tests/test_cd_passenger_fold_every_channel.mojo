@@ -25,15 +25,14 @@
 # that first appears in the LAST batch (so its cells come from the per-batch
 # `fx_cells` top-up plus `_append_group`'s lockstep growth, not from batch 1).
 #
-# MUTATIONS THIS FILE IS BUILT TO CATCH:
-#   * read an INT32 input at the 8-byte stride            -> SUM/MAX(c32)
-#     (RUN 2026-09-25 against the column-major fold: RED at the i_acc
-#     assertion; the same file is GREEN on the pre-FXCOL per-row fold, which
-#     is what makes it a characterisation of the old answer, not of the new)
-#   * seed MIN/MAX from 0 instead of the first value      -> MIN(c64)/MAX(c64),
+# WHAT THE ASSERTIONS PIN:
+#   * an INT32 input is read at its own 4-byte width        -> SUM/MAX(c32)
+#     (the same file also passes on the pre-FXCOL per-row fold, so it
+#     characterises the answer and not the implementation)
+#   * MIN/MAX are seeded from the first value, not from 0   -> MIN(c64)/MAX(c64),
 #     whose values are all far from 0 in both directions
-#   * skip the NULL check on a nullable FLOAT32 input     -> MIN/SUM(f32), n
-#   * fold a FLOAT64 SUM in any order but ascending rows  -> AVG(f64) f_acc
+#   * the NULL check runs on a nullable FLOAT32 input       -> MIN/SUM(f32), n
+#   * a FLOAT64 SUM folds in ascending row order            -> AVG(f64) f_acc
 #
 # =============================================================================
 

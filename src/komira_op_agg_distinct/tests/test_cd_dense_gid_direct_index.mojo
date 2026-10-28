@@ -4,12 +4,12 @@
 #
 # ★ WHAT THIS FILE IS FOR. `WorkerCDState.consume_batch` resolved every row's
 #   group key through a generic `Dict[Int, Int]`, probed TWICE per row
-#   (`if key in self.group_map` then `self.group_map[key]`). Measured over
+#   (`if key in self.group_map` then `self.group_map[key]`). On a query like
 #   `SELECT os, count(DISTINCT user_id)
-#   ... GROUP BY os`, 99,997,497 rows onto 91 groups — those two probes are
-#   49.05% of `consume_batch`'s cycles and 17.73% of the whole query's: 35.9
-#   cycles per row to turn an integer whose entire domain is [0,159] into a
-#   number in [0,91). CD-DENSE-GID replaces them with a flat `List[Int32]`
+#   ... GROUP BY os` (many rows onto few groups) those two probes are the
+#   largest share of `consume_batch`'s cycles: a per-row cost to
+#   turn an integer whose entire domain is small (here [0,159]) into a number
+#   in [0,91). CD-DENSE-GID replaces them with a flat `List[Int32]`
 #   indexed at `key - dense_lo`.
 #
 # ★★ THE OBLIGATION THIS FILE DISCHARGES IS BYTE-EQUIVALENCE, NOT SPEED. The
@@ -28,28 +28,23 @@
 #   independent readings. `_assert_conservation` pins the partition itself.
 #   Delete the route assertions and this file stops testing the change.
 #
-# ============================ REVERT-AND-RED =================================
+# ====================== WHAT EACH ASSERTION PINS =============================
 #
-# Set `dense_gid_off = True` on the arm this file calls DENSE and §1-§3 go RED
-# on the counter assertions while every equality assertion stays green — which
-# is the point: equality is necessary and not sufficient. Remove the
-# `dense_frozen` assignment from `_gid_for_key_slow` and FOUR cases go RED —
-# MEASURED, not predicted: `test_over_cap_domain_falls_back_to_the_dict_and_
+# With `dense_gid_off = True` on the arm this file calls DENSE, §1-§3 fail on
+# the counter assertions while every equality assertion still passes: equality
+# is necessary and not sufficient. The `dense_frozen` assignment in
+# `_gid_for_key_slow` is pinned by four cases:
+# `test_over_cap_domain_falls_back_to_the_dict_and_
 # still_agrees`, `test_a_key_beyond_the_cap_freezes_rather_than_allocating`,
 # `test_one_key_one_home_after_the_freeze` and
-# `test_the_window_does_not_grow_after_the_freeze`, 8 passed / 4 failed.
-#
-# ⚠ AND THE HONEST READING OF THAT RESULT, WHICH IS NOT THE ONE THIS HEADER
-#   FIRST CLAIMED. All four red on the "is it frozen" assertion; NOT ONE reds on
-#   a group count. Removing the freeze does not, today, hand any key a second
-#   home — `_dense_reshape` sizes itself off an occupied range that only widens,
-#   so a key it has refused once it refuses forever, and that alone is enough.
-#   The freeze is what makes one-key-one-home hold INDEPENDENTLY of the sizing
-#   policy, and the sizing policy is the part of this design that has already
-#   been rewritten once (see `test_all_negative_keys`). So the group-count
-#   assertions below are a guard against the NEXT sizing change, not a
-#   falsifier of this one — and saying otherwise would be claiming coverage this
-#   file does not have.
+# `test_the_window_does_not_grow_after_the_freeze`. Those four assert that the
+# window is frozen; none asserts a group count. Without the freeze today no key
+# gets a second home, because `_dense_reshape` sizes itself off an occupied
+# range that only widens, so a key it has refused once it refuses forever. The
+# freeze is what makes one-key-one-home hold independently of the sizing
+# policy, and the sizing policy has already been rewritten once (see
+# `test_all_negative_keys`). The group-count assertions below therefore guard
+# against a future sizing change; they do not exercise the freeze itself.
 #
 # ============================ THE ORACLE =====================================
 #
@@ -555,7 +550,7 @@ def test_a_key_at_the_cap_boundary_still_fits() raises:
 
 
 def test_one_key_one_home_after_the_freeze() raises:
-    """★ THE SHARPEST CASE IN THIS FILE.
+    """★ THE CORE CASE OF THE ONE-KEY-ONE-HOME INVARIANT.
 
     Sequence: `0` seeds a `_CD_DENSE_GID_SEED_SLOTS`-slot window; `200_000`
     cannot be covered and FREEZES it, taking the Dict; `100` is then outside
@@ -568,9 +563,9 @@ def test_one_key_one_home_after_the_freeze() raises:
     rows behind a correct-looking row count. The repeated `100` and `200_000`
     rows are what would catch it: each key must land in exactly one group.
 
-    ⚠ MEASURED CAVEAT, so this docstring does not overclaim: with the freeze
-    deleted this case still reds — but on the `dense_frozen` assertion, not on
-    the group count, because `_dense_reshape`'s occupied range only widens and
+    ⚠ CAVEAT, so this docstring does not overclaim: without the freeze this
+    case would still fail — but on the `dense_frozen` assertion, not on the
+    group count, because `_dense_reshape`'s occupied range only widens and
     therefore refuses `200_000` every time. The group-count assertions are a
     guard against a FUTURE sizing policy that could shrink or re-centre in a way
     that makes a refused key reachable again; they are not evidence that today's

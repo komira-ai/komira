@@ -5,11 +5,11 @@
 # =============================================================================
 #
 # WHAT CHANGED AND WHY THIS FILE EXISTS. `count(DISTINCT user_id) GROUP BY
-# search_phrase` over the ClickBench wide fixture (cbq13) encodes 13,172,392
-# rows into **6,019,102 distinct string keys**. The reverse map used to be a
-# `List[String]` — one OWNING `String` per distinct value, i.e. 6.02M `malloc`s
-# in the encode, 6.02M `String` copy-constructions at emit and 12M `free`s at
-# teardown, for a value whose (offset, length) the encode loop already had in
+# search_phrase` over a wide table encodes millions of rows into millions of
+# distinct string keys. The reverse map used to be a
+# `List[String]` — one OWNING `String` per distinct value, i.e. one `malloc`
+# in the encode, one `String` copy-construction at emit and two `free`s at
+# teardown per distinct value, for a value whose (offset, length) the encode loop already had in
 # hand. Mojo 1.0.0 `String` has NO small-string optimization
 # (`size_of[String]() == 24`), so each one really is a heap round trip.
 #
@@ -179,9 +179,9 @@ def test_reverse_map_is_a_packed_byte_arena() raises:
     """`rev_bytes` holds EXACTLY the concatenated distinct values: no per-value
     header, no NUL terminator, no padding.
 
-    Killed by: re-introducing a per-value `String` (the signature no longer
-    admits one, so that mutation does not compile — which is the point); or by
-    a NUL-terminated arena copy, which this file's byte arithmetic catches.
+    A per-value `String` cannot come back (the signature no longer admits
+    one), and a NUL-terminated arena copy would break this file's byte
+    arithmetic.
     """
     var vals: List[String] = [
         String("alpha"), String("beta"), String("alpha"), String(""),
@@ -214,7 +214,7 @@ def test_reverse_map_is_a_packed_byte_arena() raises:
 def test_ids_are_minted_in_first_occurrence_order() raises:
     """The dict-id numbering contract the encoded column depends on.
 
-    Killed by: minting ids in any other order (e.g. slot order).
+    Minting ids in any other order (e.g. slot order) fails it.
     """
     var vals: List[String] = [
         String("zeta"), String("alpha"), String("zeta"), String("mu"),
@@ -256,16 +256,16 @@ def test_zero_length_value_round_trips() raises:
 
 
 def test_all_rows_share_one_hash_still_separates_every_value() raises:
-    """⭐ THE FALSIFIER FOR THE OPEN-ADDRESSING REWRITE.
+    """⭐ THE CENTRAL CHECK OF THE OPEN-ADDRESSING TABLE.
 
     Every row is handed hash 0, so every distinct value collides on the same
     home slot and the ONLY thing that can tell two values apart is the
     verify-on-hit byte compare followed by CONTINUED probing.
 
-    Killed by: replacing the probe-continue on a verify FAILURE with a `break`
-    (the value is then merged into whichever value happens to hold the slot —
-    two different group keys become one group, silently); by breaking on the
-    first hash match without comparing bytes; or by minting a fresh id for a
+    It fails if the probe stops on a verify FAILURE instead of continuing (the
+    value is then merged into whichever value happens to hold the slot — two
+    different group keys become one group, silently), if the probe accepts the
+    first hash match without comparing bytes, or if a fresh id is minted for a
     value already present (the distinct count then inflates).
 
     ⚠ The incumbent `Dict[Int64, Int64]` + `Dict[String, Int64]` pair had a
@@ -295,7 +295,7 @@ def test_all_rows_share_one_hash_still_separates_every_value() raises:
 def test_two_values_one_hash_do_not_merge() raises:
     """The minimal shape of the same defect: exactly two values, one hash.
 
-    Killed by: the same mutations as above. Kept separate because a 64-value
+    The same failure modes as above apply. Kept separate because a 64-value
     chain can mask a bug that only shows at the head of the chain.
     """
     var vals: List[String] = [
@@ -347,10 +347,10 @@ def test_table_rehash_preserves_every_mapping() raises:
     The last 200 rows repeat values already minted, so they probe the table
     AFTER it has been rebuilt: an id that moved in the rehash is caught here.
 
-    Killed by: dropping live slots in the rehash loop; rebuilding with the OLD
-    mask; skipping the rehash entirely (the table then fills and the probe loop
-    never terminates, which this test turns into a hang rather than a red —
-    stated here so a future reader knows which failure mode is which).
+    It fails if the rehash loop drops live slots or rebuilds with the OLD mask.
+    If the rehash is skipped entirely the table fills and the probe loop never
+    terminates, which shows up as a hang rather than an assertion failure —
+    stated here so a future reader knows which failure mode is which.
     """
     comptime N_DISTINCT = 1_600
     comptime N_REPEAT = 200
@@ -390,8 +390,8 @@ def test_rehash_under_a_shared_hash_chain() raises:
 
     2,000 distinct values in 2,000 rows: cap = 2048, ceiling = 1536, so the
     table doubles while carrying ONE probe chain 1,536 entries long, and the
-    rehash has to rebuild that chain. Killed by the union of the §2 and §3
-    mutations.
+    rehash has to rebuild that chain. The failure modes of §2 and §3
+    both apply.
     """
     comptime N = 2_000
     assert_true(
