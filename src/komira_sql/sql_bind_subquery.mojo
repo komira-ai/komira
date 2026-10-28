@@ -441,10 +441,10 @@ def _not_in_inner_plan(
 comptime _NOT_IN_NON_EQUI_REFUSAL = (
     "SQL not supported: `x NOT IN (SELECT y ...)` whose subquery is correlated"
     " only by a NON-EQUALITY predicate (e.g. `R.rv > L.lv`). NOT IN is"
-    " NULL-aware — a NULL y, or a NULL x, changes the answer for that outer row"
-    " — and this engine checks both per row with anti joins keyed on an"
+    " NULL-aware - a NULL y, or a NULL x, changes the answer for that outer row"
+    " - and this engine checks both per row with anti joins keyed on an"
     " EQUALITY correlation (`R.a = L.b`), which this subquery does not have."
-    " Add one, or — if neither column can hold a NULL — write"
+    " Add one, or - if neither column can hold a NULL - write"
     " `NOT EXISTS (SELECT 1 FROM ... WHERE ... AND y = x)`, which is the same"
     " query exactly when there are no NULLs (NOT EXISTS is not NULL-aware)."
 )

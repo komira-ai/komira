@@ -255,7 +255,7 @@ def _union_branch_schema_check(lhs: Schema, rhs: Schema, branch: Int) raises:
         if lhs.field_arrow_type(i) != rhs.field_arrow_type(i):
             raise Error(
                 "SQL not supported: UNION ALL over branches whose column "
-                + String(i + 1) + " differs in TYPE — the first branch has "
+                + String(i + 1) + " differs in TYPE - the first branch has "
                 + String(lhs.field_arrow_type(i)) + " and branch "
                 + String(branch) + " has " + String(rhs.field_arrow_type(i))
                 + ". DuckDB v1.5.3 COERCES the branches to a common type"
@@ -378,7 +378,7 @@ def _bind_select(stmt: SelectStmt, catalog: SqlCatalog, cte_scope: CteScope, pre
             # `NATURAL RIGHT JOIN` (it may not have one).
             raise Error(
                 "SQL not supported: NATURAL / USING at a "
-                + _outer_join_kw(jc.kind) + " OUTER JOIN — the shared key must be"
+                + _outer_join_kw(jc.kind) + " OUTER JOIN - the shared key must be"
                 + " emitted as COALESCE(left.k, right.k) and this binder projects"
                 + " the left key column verbatim, which is NULL on every row only"
                 + " the right side contributed. Spell the same join as `"
@@ -421,7 +421,7 @@ def _bind_select(stmt: SelectStmt, catalog: SqlCatalog, cte_scope: CteScope, pre
             # a cross join.
             raise Error(
                 "SQL not supported: join kind " + String(Int(jc.kind))
-                + " has no lowering in _bind_select — this is a binder gap, not a"
+                + " has no lowering in _bind_select - this is a binder gap, not a"
                 + " query error. Every JK_* kind must name its arm."
             )
         # Accumulate the just-joined relation's qualifiers into the LEFT alias set

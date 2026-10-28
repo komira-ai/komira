@@ -259,7 +259,7 @@ def _bind_outer_join(
     if residual and (jkind == JK_RIGHT or jkind == JK_FULL):
         raise Error(
             "SQL not supported: a " + _outer_join_kw(jkind) + " OUTER JOIN whose"
-            + " ON carries a non-equi residual — the equi-keys are served but the"
+            + " ON carries a non-equi residual - the equi-keys are served but the"
             + " residual is not (this binder carries a non-equi ON residual on a"
             + " LEFT join only). The equi-only form of this join"
             + " (`ON <equi conjuncts>` with the residual moved to a WHERE) is"
@@ -343,7 +343,7 @@ def _keyed_join_keys(
             # match is the exact failure this whole function exists to remove.
             raise Error(
                 "SQL bind error: NATURAL JOIN has no column name in common"
-                + " between the two relations — there is nothing to join on."
+                + " between the two relations - there is nothing to join on."
                 + " Use CROSS JOIN if a cross-product is what was intended."
             )
     else:
@@ -396,7 +396,7 @@ def _bind_keyed_join(
         right_on.append(String(right_keys[c]))
     var joined = LogicalPlan.join(left_plan^, right_plan^, left_on^, right_on^, jt)
 
-    # The coalescing projection — see the /block above.
+    # The coalescing projection — see the comment above.
     var exprs = ExprArray()
     for i in range(left_schema.num_columns()):
         exprs.append(Expr.col_ref(String(left_schema.field_name(i))))
@@ -596,7 +596,7 @@ def _bind_one_sided_conjunct(
         if len(names) > 0:
             raise Error(
                 "SQL not supported: " + _a_join_kw(kw) + " JOIN ON conjunct is ambiguous"
-                + " — a column it reads, unqualified or qualified by a name both"
+                + " - a column it reads, unqualified or qualified by a name both"
                 + " sides answer to, exists on BOTH sides. Qualify it with the"
                 + " table name or a distinct alias of the side it belongs to."
             )
@@ -689,7 +689,7 @@ def _semi_anti_on_keys(
                 raise Error(
                     "SQL bind error: column '" + shown + "' in the " + kw
                     + " JOIN's ON condition is ambiguous or names neither side"
-                    + " of the join — qualify it with the table name or alias"
+                    + " of the join - qualify it with the table name or alias"
                     + " of the side it belongs to"
                 )
             if ls != rs:

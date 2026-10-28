@@ -1,6 +1,6 @@
 # komira_sql
 
-The analytical SQL front end's first layers. `komira_sql.sql_token` lexes a
+The analytical SQL front end: a tokenizer, a parser and a binder. `komira_sql.sql_token` lexes a
 SQL string into a flat `List[Token]` that ends in `TK_EOF`: unquoted
 identifiers are lower-folded (keywords and function names are ordinary
 identifiers that the parser classifies by text), a single-quoted literal keeps

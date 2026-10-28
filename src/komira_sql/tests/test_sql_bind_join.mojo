@@ -19,6 +19,9 @@
 #      ANTI); cross-side non-equi conjuncts, ORs and an unqualified column
 #      both sides have are refused; the right relation's names are not
 #      visible afterwards.
+#   4. A qualifier both sides of a join answer to is refused by name when both
+#      carry the column; when only one side carries it, the conjunct keys on
+#      that side.
 
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
@@ -256,11 +259,11 @@ def test_outer_join_refusals() raises:
     )
     _check(
         "SELECT * FROM kk RIGHT JOIN mm ON kk.k = mm.k AND mm.b > 3",
-        "ERR: SQL not supported: a RIGHT OUTER JOIN whose ON carries a non-equi residual — the equi-keys are served but the residual is not (this binder carries a non-equi ON residual on a LEFT join only). The equi-only form of this join (`ON <equi conjuncts>` with the residual moved to a WHERE) is served, but note that a WHERE does NOT preserve the outer rows a residual ON would."
+        "ERR: SQL not supported: a RIGHT OUTER JOIN whose ON carries a non-equi residual - the equi-keys are served but the residual is not (this binder carries a non-equi ON residual on a LEFT join only). The equi-only form of this join (`ON <equi conjuncts>` with the residual moved to a WHERE) is served, but note that a WHERE does NOT preserve the outer rows a residual ON would."
     )
     _check(
         "SELECT * FROM kk FULL JOIN mm ON kk.k = mm.k AND kk.a > 1",
-        "ERR: SQL not supported: a FULL OUTER JOIN whose ON carries a non-equi residual — the equi-keys are served but the residual is not (this binder carries a non-equi ON residual on a LEFT join only). The equi-only form of this join (`ON <equi conjuncts>` with the residual moved to a WHERE) is served, but note that a WHERE does NOT preserve the outer rows a residual ON would."
+        "ERR: SQL not supported: a FULL OUTER JOIN whose ON carries a non-equi residual - the equi-keys are served but the residual is not (this binder carries a non-equi ON residual on a LEFT join only). The equi-only form of this join (`ON <equi conjuncts>` with the residual moved to a WHERE) is served, but note that a WHERE does NOT preserve the outer rows a residual ON would."
     )
     _check(
         "SELECT * FROM kk RIGHT JOIN mm ON kk.a > mm.b",
@@ -381,15 +384,15 @@ def test_keyed_join_refusals() raises:
     )
     _check(
         "SELECT * FROM kk NATURAL RIGHT JOIN mm",
-        "ERR: SQL not supported: NATURAL / USING at a RIGHT OUTER JOIN — the shared key must be emitted as COALESCE(left.k, right.k) and this binder projects the left key column verbatim, which is NULL on every row only the right side contributed. Spell the same join as `RIGHT JOIN ... ON l.k = r.k`, which is served and emits both key columns."
+        "ERR: SQL not supported: NATURAL / USING at a RIGHT OUTER JOIN - the shared key must be emitted as COALESCE(left.k, right.k) and this binder projects the left key column verbatim, which is NULL on every row only the right side contributed. Spell the same join as `RIGHT JOIN ... ON l.k = r.k`, which is served and emits both key columns."
     )
     _check(
         "SELECT * FROM kk RIGHT JOIN mm USING (k)",
-        "ERR: SQL not supported: NATURAL / USING at a RIGHT OUTER JOIN — the shared key must be emitted as COALESCE(left.k, right.k) and this binder projects the left key column verbatim, which is NULL on every row only the right side contributed. Spell the same join as `RIGHT JOIN ... ON l.k = r.k`, which is served and emits both key columns."
+        "ERR: SQL not supported: NATURAL / USING at a RIGHT OUTER JOIN - the shared key must be emitted as COALESCE(left.k, right.k) and this binder projects the left key column verbatim, which is NULL on every row only the right side contributed. Spell the same join as `RIGHT JOIN ... ON l.k = r.k`, which is served and emits both key columns."
     )
     _check(
         "SELECT * FROM kk FULL JOIN mm USING (k)",
-        "ERR: SQL not supported: NATURAL / USING at a FULL OUTER JOIN — the shared key must be emitted as COALESCE(left.k, right.k) and this binder projects the left key column verbatim, which is NULL on every row only the right side contributed. Spell the same join as `FULL JOIN ... ON l.k = r.k`, which is served and emits both key columns."
+        "ERR: SQL not supported: NATURAL / USING at a FULL OUTER JOIN - the shared key must be emitted as COALESCE(left.k, right.k) and this binder projects the left key column verbatim, which is NULL on every row only the right side contributed. Spell the same join as `FULL JOIN ... ON l.k = r.k`, which is served and emits both key columns."
     )
 
 
@@ -526,11 +529,11 @@ def test_semi_and_anti_join_refusals() raises:
     )
     _check(
         "SELECT * FROM kk SEMI JOIN mm ON k = k",
-        "ERR: SQL bind error: column 'k' in the SEMI JOIN's ON condition is ambiguous or names neither side of the join — qualify it with the table name or alias of the side it belongs to"
+        "ERR: SQL bind error: column 'k' in the SEMI JOIN's ON condition is ambiguous or names neither side of the join - qualify it with the table name or alias of the side it belongs to"
     )
     _check(
         "SELECT * FROM kk SEMI JOIN mm ON kk.k = mm.k AND k > 1",
-        "ERR: SQL not supported: a SEMI JOIN ON conjunct is ambiguous — a column it reads, unqualified or qualified by a name both sides answer to, exists on BOTH sides. Qualify it with the table name or a distinct alias of the side it belongs to."
+        "ERR: SQL not supported: a SEMI JOIN ON conjunct is ambiguous - a column it reads, unqualified or qualified by a name both sides answer to, exists on BOTH sides. Qualify it with the table name or a distinct alias of the side it belongs to."
     )
     _check(
         "SELECT * FROM kk SEMI JOIN mm ON a = b",
@@ -570,7 +573,7 @@ def test_more_join_shapes() raises:
     )
     _check(
         "SELECT * FROM kk NATURAL JOIN (SELECT w FROM u) d",
-        "ERR: SQL bind error: NATURAL JOIN has no column name in common between the two relations — there is nothing to join on. Use CROSS JOIN if a cross-product is what was intended."
+        "ERR: SQL bind error: NATURAL JOIN has no column name in common between the two relations - there is nothing to join on. Use CROSS JOIN if a cross-product is what was intended."
     )
     _check(
         "SELECT * FROM kk JOIN u USING (a)",
@@ -582,7 +585,7 @@ def test_more_join_shapes() raises:
     )
     _check(
         "SELECT * FROM kk SEMI JOIN mm ON kk.k = zz.b",
-        "ERR: SQL bind error: column 'zz.b' in the SEMI JOIN's ON condition is ambiguous or names neither side of the join — qualify it with the table name or alias of the side it belongs to"
+        "ERR: SQL bind error: column 'zz.b' in the SEMI JOIN's ON condition is ambiguous or names neither side of the join - qualify it with the table name or alias of the side it belongs to"
     )
     _check(
         "SELECT * FROM kk ANTI JOIN mm ON kk.a > mm.b",
@@ -628,6 +631,19 @@ def test_more_join_shapes() raises:
         "        Scan(path=\"kk.parquet\", type=PARQUET, source_kind=COLUMNAR)\n"
         "        Scan(path=\"mm.parquet\", type=PARQUET, source_kind=COLUMNAR)\n"
     )
+
+
+def test_join_qualifier_both_sides_answer_to_is_refused() raises:
+    var both = _got("SELECT * FROM t LEFT JOIN t ON t.k = t.k")
+    assert_true(both.startswith("ERR: SQL bind error: "), both)
+    assert_true("more than one relation answers to `t`" in both, both)
+
+
+def test_shared_qualifier_with_the_column_on_one_side() raises:
+    var keyed = _got("SELECT * FROM kk AS z LEFT JOIN mm AS z ON z.a = z.b")
+    assert_true("Join(type=LEFT, on=[a=b])" in keyed, keyed)
+    var reversed = _got("SELECT * FROM kk AS z LEFT JOIN mm AS z ON z.b = z.a")
+    assert_true("Join(type=LEFT, on=[a=b])" in reversed, reversed)
 
 
 def main() raises:
