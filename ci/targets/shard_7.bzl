@@ -3,6 +3,8 @@
 # `guard.bxl:check` fails the pull request check when this file is out of date.
 
 TARGETS = [
+    "komira//node:load_test",
+    "komira//node:session_test",
     "komira//release/readme_e2e/verify:all",
     "komira//src/kci_publish:kci_publish_lib_conda",
     "komira//src/komira_arrow_ipc:arrow_c_abi_probe",
