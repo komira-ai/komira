@@ -9,7 +9,7 @@
 //! usage: <run_dir>/cov_run <busybox> <gate> <compiler_dir> <label>
 //!            <test_binary> <share> <src_dir> <xml_out> <marker_out>
 //!            <src_repo> <test> <test_repo> <import> [--solib <file> [--solib-src <path>]...]
-//!            [--gen <file>]... [--env NAME=VALUE]...
+//!            [--gen <file>]... [--env NAME=VALUE | --lib-dir <dir>]...
 //!
 //!   <run_dir>      the cov_run_dir: this program, kcov/ (bin/kcov, lib/),
 //!                  cov_normalize and limit (the seconds the run may take: 450,
@@ -39,6 +39,9 @@
 //!   --gen <file>   a generated source in <src_dir> (its path there): not measured
 //!   <gate>         the gate (tools/build/run), which runs kcov as `gate mojo`
 //!   --env          passed to the gate as given
+//!   --lib-dir      a directory of pinned shared libraries the test opens by their
+//!                  bare names (tools/build/mojo/system_libs.bzl): passed to the gate
+//!                  as given, which puts it on the library path of the run
 //!
 //! Steps (the numbers are the old script's, and README.md's):
 //!   0. The binary must name the library's sources by <import>/, where the run

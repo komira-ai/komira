@@ -5,11 +5,12 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # one issuer against that issuer's JWK Set (fetched over HTTPS, cached) with
 # komira_jose's JwsVerifier pinned to RS256. Configured by flags (flags.mojo).
 #
-# The tests that sign tokens read komira_http_core's RSA test key (exported
-# there); the vocabulary test reads the library's own sources.
+# The tests that sign tokens read komira_jose's RSA test key
+# (tests/fixtures/rsa_test_key.pem there); the vocabulary test reads the
+# library's own sources.
 
 _KEY = {
-    "src/komira_http_core/tests/fixtures/tls/leaf_key.pem": "//src/komira_http_core:tests/fixtures/tls/leaf_key.pem",
+    "src/komira_jose/tests/fixtures/rsa_test_key.pem": "//src/komira_jose:tests/fixtures/rsa_test_key.pem",
 }
 
 mojo_library(

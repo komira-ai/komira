@@ -1,0 +1,8 @@
+artifacts {
+  name: "komira_collections"
+  build_system: "buck2"
+  args: "//src/komira_collections:komira_collections_conda[release]"
+  args: "--out"
+  args: "{out_dir}"
+  targets: "//src/komira_collections:komira_collections_conda"
+}
