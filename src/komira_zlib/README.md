@@ -105,3 +105,33 @@ var head = zlib_crc32("1234".as_bytes())
 assert_equal(zlib_crc32("56789".as_bytes(), head), 0xCBF43926)
 assert_equal(zlib_crc32("".as_bytes()), 0)
 ```
+
+## Files
+
+| file | what it holds |
+|---|---|
+| `zlib_ffi.mojo` | the libz FFI: the handle opened once per process, `zlib_deflate_into`, `zlib_inflate_into`, `zlib_inflate_once`, `zlib_skip_stream`, `zlib_crc32` and the framing constants |
+
+## Build files
+
+This package is built with buildrules' `mojo_package` and packaged for mopm as `komira_zlib`, version 0.1.0
+(`mopm.toml`). The library is `src/komira_zlib/`, its test is `tests/`. The package links no native code: it opens
+the system libz when a program first calls it, so `mopm.toml` declares it under `[native-dependencies]` with
+`mode = "load"`, and `mopm pack` writes the conda package that ships libz (`libzlib`) as a dependency of the package, so
+installing `komira_zlib` installs libz. The files that are not sources:
+
+| file | what |
+|---|---|
+| `mopm.toml` | the mopm manifest: name, version, the Mojo version, the libz dependency, where the library and its tests are |
+| `mopm.lock` | what `mopm lock` writes (with no registry reachable); the package has no Mojo dependencies, so it pins the toolchain and, under `system_libs`, the conda package of the library it opens at run time (`libzlib`, for each platform; mopm 0.0.83 or later writes it, and a lock without it fails `lock_graphs.bxl:check`) |
+| `mopm-toolchain.toml` | the exact mopm and Mojo versions the build uses (written by hand) |
+| `buildrules.mojo.lock.bzl`, `buildrules.mojo.bzl` | written by `buildrules mojo sync` from the files above; `buildrules mojo check` fails when they are stale |
+
+`:lib` is the library file and exists only once every test of `tests/` has passed. After any change to a
+source, a test, `mopm.toml`, `mopm.lock` or `mopm-toolchain.toml`, run `buildrules mojo sync`, commit what it
+writes, and build `komira//src/komira_zlib:lib` on the farm.
+
+`:conda` is the `.conda` of the mopm package (`mojo-komira_zlib-0.1.0-mojo1.0.0_0.conda`): the `.mojoc`, requiring
+`libzlib`. `:komira_zlib` is `:lib` as komira's Mojo rules take it (`mojo_adopted_library`); it declares
+`dlopen = ["libz.so.1"]`, which `:komira_zlib_conda` (the release set's packaging) turns into the same requirement.
+It also compiles and runs the README's examples above (`[tests][readme]`) against `:lib`.

@@ -30,10 +30,9 @@ date	src/komira_crypto/tests/test_x509_letsencrypt_r3.mojo	2	the published certi
 date	src/komira_csv/tests/test_csv_cell_parsers_wire_to_builders.mojo	1	a timestamp cell (test data)
 date	src/komira_eval/tests/test_row_projection_math_extract_kerneldirect.mojo	5	a calendar day the ISO-week extraction test pins (test data)
 date	src/komira_http_client/tests/test_objectstore_http.mojo	2	a Last-Modified header value (test data)
-date	src/komira_mcp_server/protocol.mojo	2	the MCP protocol revision identifiers this server speaks, not history dates
+date	src/komira_mcp_server/src/komira_mcp_server/protocol.mojo	2	the MCP protocol revision identifiers this server speaks, not history dates
 date	src/komira_mcp_server/tests/test_mcp_spec_examples.mojo	3	the MCP specification examples: a revision identifier and an example tool error text (test data)
 date	src/komira_plan_ir/tests/test_scan_binding_substrate.mojo	1	a partition key literal (test data)
-date	tools/build/tests/functional/darwin/check.sh	1	the build line a stubbed linker prints (test data)
 email	src/komira_jose/tests/test_rs256_third_party.mojo	1	a made-up service account or address (test data)
 email	src/komira_gcp_apigateway/tests/test_apigateway_requests.mojo	2	a made-up service account or address (test data)
 email	src/komira_gcp_cloudresourcemanager/tests/test_crm_projects.mojo	1	a made-up service account or address (test data)
@@ -51,7 +50,7 @@ email	src/komira_gcp_wif/tests/test_wif_mint.mojo	1	a made-up service account or
 email	src/komira_git/sha1dc.mojo	2	the authors' addresses in sha1collisiondetection's MIT copyright notice, which the licence requires in every copy
 email	src/komira_git/sha1dc_ubc.mojo	2	the authors' addresses in sha1collisiondetection's MIT copyright notice, which the licence requires in every copy
 email	src/komira_http_client/tests/test_url.mojo	1	userinfo of a URL (test input)
-email	src/komira_log/structured_log.mojo	1	the example address of the redaction rule's docstring
+email	src/komira_log/src/komira_log/structured_log.mojo	1	the example address of the redaction rule's docstring
 email	src/komira_source_url/tests/test_source_url.mojo	1	a URL's user information as test input: the refusal must not repeat it
 email	tools/build/tests/functional/public_boundary/data_arrow.txt	1	a planted finding of test 44 (the public boundary lint)
 email	tools/build/tests/functional/public_boundary/held_mojo.txt	3	a planted finding of test 44 (the public boundary lint)
@@ -66,11 +65,12 @@ host	src/kci_validator_report/tests/test_validator_report.mojo	7	made-up Cloud R
 host	src/komira_aws_core/tests/test_aws_codec.mojo	1	single-label or made-up hosts as test input
 host	src/komira_aws_core/tests/test_aws_query.mojo	2	single-label or made-up hosts as test input
 host	src/komira_aws_core/tests/test_aws_response.mojo	1	single-label or made-up hosts as test input
+host	src/komira_aws_core/tests/test_credential_provider_refusals.mojo	3	malformed loopback addresses and an unterminated IPv6 literal the container credential endpoint must refuse (test input)
 host	src/komira_aws_core/tests/test_endpoint_resolution.mojo	3	malformed, IPv6 and single-label hosts the endpoint parser must handle (test input)
 host	src/komira_aws_core/tests/test_endpoint_rules_library.mojo	8	malformed, IPv6 and single-label hosts the endpoint rules must handle (test input)
 host	src/komira_aws_lambda/tests/test_lambda_responses.mojo	3	a made-up Lambda function URL (test data)
 host	src/komira_column_kernels/tests/test_regexp_bitstate_differential.mojo	5	URLs as regular-expression test input
-host	src/komira_column_kernels/tests/test_regexp_dotstar_eos_tail.mojo	14	URLs as regular-expression test input
+host	src/komira_column_kernels/tests/test_regexp_dotstar_eos_tail.mojo	13	URLs as regular-expression test input
 host	src/komira_column_kernels/tests/test_regexp_replace_memo_duplicates.mojo	16	URLs as regular-expression test input
 host	src/komira_column_kernels/tests/test_regexp_scratch_reuse_and_span_subject.mojo	6	URLs as regular-expression test input
 host	src/komira_jose/tests/test_rs256_third_party.mojo	1	a made-up registry host (test data)
@@ -103,6 +103,7 @@ ip	src/kci_resource_proto/networks.proto	2	the private ranges the network commen
 ip	src/kci_resource_proto/tests/fixtures/graph/network_graph.txtpb	2	a private range as data: a network's range must be private, so documentation ranges are refused
 ip	src/kci_resource_proto/tests/test_resource_graph_golden_bytes.mojo	2	a private range as data: a network's range must be private, so documentation ranges are refused
 ip	src/kci_resource_proto/tests/test_resource_network_numbers.mojo	6	a private range as data: a network's range must be private, so documentation ranges are refused
+ip	src/komira_aws_core/tests/test_credential_provider_refusals.mojo	1	an address just outside loopback that the container credential endpoint must refuse (test input)
 ip	src/komira_aws_core/tests/test_credential_wire.mojo	1	an address just outside loopback that the container credential endpoint must refuse (test input)
 ip	src/komira_aws_core/tests/test_endpoint_rules_library.mojo	3	a private address as test input
 ip	src/komira_aws_ec2/tests/test_ec2_responses.mojo	5	VPC and subnet ranges in recorded API responses (test data)
@@ -112,8 +113,6 @@ ip	src/komira_db/tests/test_h1_keepalive_pooled_conn.mojo	7	a private address as
 ip	src/komira_db_postgres/wire/tests/test_dns_resolve_pg_host.mojo	1	a private address as test input
 ip	src/komira_gcp_compute/tests/test_compute_instances.mojo	2	an instance's internal address in a recorded API response (test data)
 ip	src/komira_gcp_compute/tests/test_compute_network.mojo	5	VPC subnet ranges in recorded API responses (test data)
-ip	src/komira_http_client/tests/test_http_client_h1_keepalive_reuse.mojo	1	a private address as test input
-ip	src/komira_http_client/tests/test_request_writer.mojo	2	a private address as test input
 ip	src/komira_log/tests/test_log_ring_bounded_drain_arena.mojo	1	a private address as test input
 ip	src/komira_net/tests/test_dns_addrinfo_offsets.mojo	1	a private address as test input
 ip	src/komira_net/tests/test_dns_literal.mojo	2	a private address as test input

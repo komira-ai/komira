@@ -50,11 +50,11 @@ const TREE = [_]File{
 };
 
 const HOLDS =
-    \\# The planted findings.
-    \\date	src/komira_a/held.mojo	2	planted
-    \\home_path	src/komira_a/held.mojo	1	planted
-    \\commit_sha	src/komira_a/held.mojo	1	planted
-    \\
+    "# The planted findings.\n" ++
+    "date\tsrc/komira_a/held.mojo\t2\tplanted\n" ++
+    "home_path\tsrc/komira_a/held.mojo\t1\tplanted\n" ++
+    "commit_sha\tsrc/komira_a/held.mojo\t1\tplanted\n" ++
+    ""
 ;
 
 const HOSTS = "# The domains.\ngithub.com\tused by third_party/up/BUCK\n";
@@ -119,21 +119,21 @@ const CASES = [_]Case{
 };
 
 fn unmask(alloc: std.mem.Allocator, s: []const u8) ![]const u8 {
-    var out = std.ArrayList(u8).init(alloc);
-    for (s) |c| if (c != '~') try out.append(c);
+    var out = std.ArrayList(u8).empty;
+    for (s) |c| if (c != '~') try out.append(alloc, c);
     return out.items;
 }
 
 /// TREE with `plant` laid over it, unmasked, sorted by path.
 fn tree(alloc: std.mem.Allocator, c: Case) ![]const File {
-    var out = std.ArrayList(File).init(alloc);
+    var out = std.ArrayList(File).empty;
     const base: []const File = c.only orelse &TREE;
     for (base) |f| {
         var replaced = false;
         for (c.plant) |p| replaced = replaced or std.mem.eql(u8, p.path, f.path);
-        if (!replaced) try out.append(.{ .path = f.path, .text = try unmask(alloc, f.text) });
+        if (!replaced) try out.append(alloc, .{ .path = f.path, .text = try unmask(alloc, f.text) });
     }
-    if (c.only == null) for (c.plant) |p| try out.append(.{ .path = p.path, .text = try unmask(alloc, p.text) });
+    if (c.only == null) for (c.plant) |p| try out.append(alloc, .{ .path = p.path, .text = try unmask(alloc, p.text) });
     std.mem.sort(File, out.items, {}, struct {
         fn lt(_: void, a: File, b: File) bool {
             return std.mem.lessThan(u8, a.path, b.path);
@@ -144,8 +144,8 @@ fn tree(alloc: std.mem.Allocator, c: Case) ![]const File {
 
 fn runCase(alloc: std.mem.Allocator, c: Case) !check.Report {
     const files = try tree(alloc, c);
-    var paths = std.ArrayList([]const u8).init(alloc);
-    for (files) |f| try paths.append(f.path);
+    var paths = std.ArrayList([]const u8).empty;
+    for (files) |f| try paths.append(alloc, f.path);
     var cfg = CFG;
     cfg.public = c.public;
     return check.run(alloc, cfg, .{ .holds = c.holds, .hosts = c.hosts, .deny = c.deny }, paths.items, Mem{ .files = files });
@@ -193,8 +193,8 @@ test "a failing report is a failure result of at most 200 lines" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const alloc = arena.allocator();
-    var lines = std.ArrayList([]const u8).init(alloc);
-    for (0..250) |i| try lines.append(try std.fmt.allocPrint(alloc, "line \"{d}\"", .{i}));
+    var lines = std.ArrayList([]const u8).empty;
+    for (0..250) |i| try lines.append(alloc, try std.fmt.allocPrint(alloc, "line \"{d}\"", .{i}));
     const json = try check.result(alloc, .{ .lines = lines.items, .checked = 1 });
     const parsed = try std.json.parseFromSlice(struct { version: u32, data: struct { status: []const u8, message: []const u8 } }, alloc, json, .{});
     try std.testing.expectEqualStrings("failure", parsed.value.data.status);
@@ -214,9 +214,9 @@ test "a directory's files are listed by path, sorted, directories left out" {
     var tmp = std.testing.tmpDir(.{ .iterate = true });
     defer tmp.cleanup();
     try tmp.dir.makePath("b/c");
-    try tmp.dir.writeFile("b/c/z.md", "z");
-    try tmp.dir.writeFile("a.md", "a");
-    try tmp.dir.writeFile("b/y.txt", "y");
+    try tmp.dir.writeFile(.{ .sub_path = "b/c/z.md", .data = "z" });
+    try tmp.dir.writeFile(.{ .sub_path = "a.md", .data = "a" });
+    try tmp.dir.writeFile(.{ .sub_path = "b/y.txt", .data = "y" });
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const got = try check.list(arena.allocator(), tmp.dir);

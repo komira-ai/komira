@@ -6,6 +6,7 @@ and through its own install_gate call.
 """
 
 load("@komira//tools/build/mojo:providers.bzl", "MojoToolchainInfo")
+load("@komira//tools/build/rerun:rerun.bzl", "RERUN_ATTRS", "rerun_env", "rerun_info")
 
 def _impl(ctx):
     tc = ctx.attrs._toolchain[MojoToolchainInfo]
@@ -21,13 +22,14 @@ def _impl(ctx):
             ctx.attrs.conda_set,
             report.as_output(),
         ),
+        env = rerun_env(ctx),
         category = "install_gate_cases",
     )
-    return [DefaultInfo(default_output = report)]
+    return [DefaultInfo(default_output = report), rerun_info(ctx)]
 
 install_gate_cases = rule(
     impl = _impl,
-    attrs = {
+    attrs = RERUN_ATTRS | {
         "conda": attrs.source(),
         "conda_set": attrs.source(),
         "gate": attrs.source(),

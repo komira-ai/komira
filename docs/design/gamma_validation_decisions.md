@@ -6,6 +6,10 @@ what kci must add before gamma can run a service validation, and the
 questions left to the project owner. Section names and item numbers are
 referred to from that document.
 
+**Status.** komira publishes to no channel for now: the stage `beta` and its
+jobs were removed from `kci.yml`, and publishing will move to mopm. Read this
+note as design history.
+
 **Vocabulary.** This note predates the staged pipeline's [glossary](staged_pipeline.md#glossary). Here
 "gamma" means the stage that publishes to a test conda channel and installs
 from it, which since the rename (M2, [staged_pipeline.md](staged_pipeline.md)

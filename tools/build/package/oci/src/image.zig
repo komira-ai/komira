@@ -47,7 +47,7 @@ pub fn normalize(p: []const u8) []const u8 {
     while (it.next()) |c| {
         if (c.len == 0 or C.eql(c, ".")) continue;
         if (C.eql(c, "..")) {
-            _ = parts.popOrNull();
+            _ = parts.pop();
             continue;
         }
         C.push([]const u8, &parts, c);
@@ -153,7 +153,7 @@ pub const Fs = struct {
         pushReversed(&todo, p);
         var cur: []const u8 = "";
         var links: usize = 0;
-        while (todo.popOrNull()) |c| {
+        while (todo.pop()) |c| {
             if (c.len == 0 or C.eql(c, ".")) continue;
             if (C.eql(c, "..")) {
                 cur = split(cur).dir;

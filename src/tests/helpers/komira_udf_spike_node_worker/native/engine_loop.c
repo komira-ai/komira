@@ -560,7 +560,7 @@ __attribute__((visibility("default"))) char* kudfw_engine_run(const char* lib_pa
   jstr(&j, caps.runtime_id ? caps.runtime_id : "");
   jput(&j, ",\"runtime_abi\":");
   jstr(&j, caps.runtime_abi ? caps.runtime_abi : "");
-  jput(&j, ",\"threading\":%u,\"transports\":%u,\"entry\":", caps.threading, caps.transports);
+  jput(&j, ",\"udf_class\":%u,\"entry\":", caps.udf_class);
   jstr(&j, entry);
   jput(&j, ",\"shape\":%u,\"fmt\":", shape);
   jstr(&j, fmt);

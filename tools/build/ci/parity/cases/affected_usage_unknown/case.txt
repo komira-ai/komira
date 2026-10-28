@@ -1,6 +1,0 @@
-# An unknown flag: usage, exit 2.
-arg "--frobnicate"
-arg "x"
-file ".buckconfig" %buckconfig
-file "tools/build/ci/rules.txt" %rules.txt
-exit 2

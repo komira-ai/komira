@@ -55,4 +55,4 @@ remote-execution service, and what to do when something goes wrong.
 
 ## License
 
-[Apache License 2.0](LICENSE).
+[Apache License 2.0](LICENSE). Third-party material that committed text is derived from is listed in [NOTICE](NOTICE).

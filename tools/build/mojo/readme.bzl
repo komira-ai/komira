@@ -16,8 +16,11 @@ that library's `[tests][readme]` compile, and a README attached to several
 ships in each of their packages, so a package of several libraries gives
 `readme = False` to every library its README is not about.
 
-This module loads nothing, so defs.bzl can load it.
+This module loads only providers.bzl, so defs.bzl can load it.
 """
+
+load(":providers.bzl", "ZigExeInfo")
+load(":test_limit.bzl", "hang_limit_flags")
 
 # The README examples tool, a Zig executable: no Mojo library, so any
 # package, its own included, may hold a README.
@@ -59,14 +62,35 @@ def readme_kwargs(kwargs):
 # Whether a README holds an example is in its bytes, which analysis cannot
 # read, so a dynamic action reads `examples`: for each example it compiles
 # that example's program alone against the UNGATED package and runs it
-# through gate_runner.sh exactly as a `test_srcs` entry, labelled
+# through the gate (gate_mojo) exactly as a `test_srcs` entry, labelled
 # `<target>:README.md:<line>`, and the marker joins their markers; with none
 # it compiles and runs nothing, and the marker records that no example
 # exists (never a PASS line). A refused README (an info string such as
 # `mojo skip`, a stray hidden-lines comment) fails `generate`, naming
 # README.md:<line>.
 
-def readme_gate(ctx, tc, import_name, ungated_tset, link_tail, env_args, ships, readme_test, owner = False):
+# zig's os of each toolchain os (MojoToolchainInfo.os): a triple names it as
+# its second dash-separated part (`x86_64-linux-musl`, `aarch64-macos.11.0`).
+_ZIG_OS = {"darwin": "macos", "linux": "linux"}
+
+def _tool_os_refusal(tool, os):
+    """Why the exec_dep `tool` cannot run in an action of a toolchain whose
+    os is `os`, or None. A zig_exe states its triple (ZigExeInfo); the
+    `generate` action runs on the execution platform of the library, so a
+    tool built for another operating system fails there (`exec format error`)
+    after its inputs were sent. This refuses it at analysis instead. Only the
+    os is compared: MojoToolchainInfo names no cpu as zig does."""
+    info = tool.get(ZigExeInfo)
+    if info == None:
+        return None
+    parts = info.target.split("-")
+    want = _ZIG_OS.get(os)
+    if len(parts) < 2 or want == None or parts[1].split(".")[0] != want:
+        return ("the README tool {} is built for {} but runs on the {} execution platform; " +
+                "an exec_dep must be built for the platform its action runs on").format(tool.label.raw_target(), info.target, os)
+    return None
+
+def readme_gate(ctx, tc, import_name, ungated_tset, link_tail, env_args, ships, readme_test, owner = False, rerun = {}):
     """(marker, generated directory, examples file, objects directory) of
     the README's examples, or None without a README. With `owner` (the library
     lists a C library among its `deps`: native_facts.bzl `c_direct`), the
@@ -79,7 +103,8 @@ def readme_gate(ctx, tc, import_name, ungated_tset, link_tail, env_args, ships, 
     relative link in it is refused.
     `link_tail`: the link arguments of the library's C closure (defs.bzl's
     _link_tail); `readme_test`: defs.bzl's dynamic action that builds and
-    runs each example (it needs defs.bzl's _build_executable)."""
+    runs each example (it needs defs.bzl's _build_executable); `rerun`: the
+    environment each example's run adds (rerun.bzl's rerun_env)."""
     readme = ctx.attrs.readme
     if readme == None:
         if ctx.attrs.readme_tool != None:
@@ -87,6 +112,9 @@ def readme_gate(ctx, tc, import_name, ungated_tset, link_tail, env_args, ships, 
         return None
     if ctx.attrs.readme_tool == None:
         fail("{}: readme is set and readme_tool is not; the mojo_library macro sets both".format(ctx.label))
+    refusal = _tool_os_refusal(ctx.attrs.readme_tool, tc.os)
+    if refusal:
+        fail("{}: {}".format(ctx.label, refusal))
     src = ctx.actions.declare_output("tests/readme/src", dir = True)
     examples = ctx.actions.declare_output("tests/readme/examples")
     ctx.actions.run(
@@ -124,5 +152,7 @@ def readme_gate(ctx, tc, import_name, ungated_tset, link_tail, env_args, ships, 
         opt_level = ctx.attrs.test_optimization_level,
         link_tail = link_tail,
         env_args = env_args,
+        rerun = rerun,
+        hang_flags = hang_limit_flags(str(ctx.label.raw_target()), ctx.attrs.test_hang_limit_s),
     ))
     return marker, src, examples, objects

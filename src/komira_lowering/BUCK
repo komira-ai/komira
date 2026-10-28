@@ -1,0 +1,55 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# Lowering: a bound LogicalPlan, a HostProfile and the resolved inputs to the
+# PhysicalPlan IR (version 14) and the ParamTable its segments index. Pure: the
+# entry opens no file, reads no clock and no environment variable and touches
+# no global (README.md).
+#
+# test_lower_plans       the rendered physical plan of small plans: one segment
+#                        for a filtered aggregate, two for an aggregate and a
+#                        sort, the fused operators, the sink row each group key
+#                        picks, in-memory scans, the estimates, dense
+#                        parameter indices, equal arguments rendering equal
+#                        and a different host changing only the morsel size.
+# test_lower_refusals    every refusal token, raised by the plan that should
+#                        raise it with the text that names why, and a plan
+#                        beside each that lowers.
+# test_sink_capability   the capability table's rows, which triples are not
+#                        served, and admission of hand-built segments.
+#
+# NO IMPURE PACKAGE IN THE CLOSURE. A lowering step must not reach a package
+# that opens files, talks to an object store, runs a worker pool, measures the
+# host or produces a plan. `closure_excludes` is checked at analysis against
+# the whole closure of `deps`, direct and transitive, by exact import name
+# (`komira_async_api`, a trait surface the closure needs, is not refused).
+# tests//negative/closure_excludes plants each of the seven and
+# //tools/build/selftest:analysis_refusals_mojo requires the refusal.
+mojo_library(
+    name = "komira_lowering",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/komira_arrow:komira_arrow",
+        "//src/komira_collections:komira_collections",
+        "//src/komira_host_profile:komira_host_profile",
+        "//src/komira_physical_plan:komira_physical_plan",
+        "//src/komira_plan_expr:komira_plan_expr",
+        "//src/komira_plan_ir:komira_plan_ir",
+        "//src/komira_plan_stats:komira_plan_stats",
+        "//src/komira_scan_source:komira_scan_source",
+    ],
+    closure_excludes = [
+        "komira_async",
+        "komira_engine_runtime",
+        "komira_fs",
+        "komira_objectstore",
+        "komira_optimizer",
+        "komira_shuffle",
+        "komira_sql",
+    ],
+    test_srcs = [
+        "tests/test_lower_plans.mojo",
+        "tests/test_lower_refusals.mojo",
+        "tests/test_sink_capability.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)

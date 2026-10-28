@@ -1,0 +1,2 @@
+def _f(ctx):
+    ctx.actions.run(busybox_sh(bb, s), category = "x")

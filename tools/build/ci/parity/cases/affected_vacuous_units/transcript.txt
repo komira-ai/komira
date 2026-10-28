@@ -1,3 +1,0 @@
-call buck2 "uquery" "--output-format" "json" "owner(%s)" "README.md"
-exit 0
-stdout "{\"README.md\": []}\n"

@@ -252,6 +252,34 @@ def test_combine_partial_sum_a_times_one_minus_b() raises:
     assert_true(_close(combined_out, ref_out), "combine != single-pass")
 
 
+# =============================================================================
+# Test 8 - a NULL operand is not probed: this aggregand folds the data word.
+# =============================================================================
+def test_null_operand_is_folded_as_its_data_word() raises:
+    comptime E = ColAtXF64[0]
+    var arr = PrimitiveArray[DType.float64].allocate_nullable(3)
+    arr.set(0, Scalar[DType.float64](1.0))
+    arr.set(1, Scalar[DType.float64](100.0))
+    arr.set(2, Scalar[DType.float64](2.0))
+    arr._set_null(1)
+    var schema = Schema.from_fields_1(Field("a", DType.float64, True))
+    var batch = RecordBatch.from_typed_columns_1(
+        schema^, Column.from_primitive[DType.float64](arr^)
+    )
+    var bview = batch_view_over(batch)
+
+    var agg = SumOfExprF64Agg[E].make()
+    var state = SumOfExprF64Agg[E].init()
+    assert_true(not agg.input_is_null(bview, 1), "the NULL row is not probed")
+    for i in range(3):
+        agg.update_scalar(state, bview, i)
+    assert_equal(
+        SumOfExprF64Agg[E].finalize(state),
+        Scalar[DType.float64](103.0),
+        "the NULL row's data word is summed",
+    )
+
+
 def main() raises:
     test_sum_a_times_b()
     print("test_sum_a_times_b PASSED")
@@ -267,4 +295,6 @@ def main() raises:
     print("test_sum_scalar_times_a PASSED")
     test_combine_partial_sum_a_times_one_minus_b()
     print("test_combine_partial_sum_a_times_one_minus_b PASSED")
-    print("ALL 7 TESTS PASSED — computed-aggregand substrate")
+    test_null_operand_is_folded_as_its_data_word()
+    print("test_null_operand_is_folded_as_its_data_word PASSED")
+    print("ALL 8 TESTS PASSED — computed-aggregand substrate")

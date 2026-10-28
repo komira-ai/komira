@@ -148,13 +148,13 @@ var failed_check = false;
 
 fn check(ok: bool, comptime fmt: []const u8, args: anytype) void {
     if (!ok) {
-        std.io.getStdErr().writer().print("CHECK FAILED: " ++ fmt ++ "\n", args) catch {};
+        std.fs.File.stderr().deprecatedWriter().print("CHECK FAILED: " ++ fmt ++ "\n", args) catch {};
         failed_check = true;
     }
 }
 
 fn die(comptime fmt: []const u8, args: anytype) noreturn {
-    std.io.getStdErr().writer().print("scenario: " ++ fmt ++ "\n", args) catch {};
+    std.fs.File.stderr().deprecatedWriter().print("scenario: " ++ fmt ++ "\n", args) catch {};
     std.process.exit(1);
 }
 
@@ -164,15 +164,15 @@ const Ctx = struct {
     repo: []const u8,
     env: *std.process.EnvMap,
 
-    fn run(self: Ctx, cwd: []const u8, argv: []const []const u8) !std.ChildProcess.RunResult {
-        return std.ChildProcess.run(.{ .allocator = self.a, .argv = argv, .cwd = cwd, .env_map = self.env, .max_output_bytes = 1 << 26 });
+    fn run(self: Ctx, cwd: []const u8, argv: []const []const u8) !std.process.Child.RunResult {
+        return std.process.Child.run(.{ .allocator = self.a, .argv = argv, .cwd = cwd, .env_map = self.env, .max_output_bytes = 1 << 26 });
     }
 
     /// `git <args>` in the repository; its stdout, or the scenario dies.
     fn git_(self: Ctx, args: []const []const u8) []const u8 {
-        var argv = std.ArrayList([]const u8).init(self.a);
-        argv.append(self.git) catch die("out of memory", .{});
-        argv.appendSlice(args) catch die("out of memory", .{});
+        var argv = std.ArrayList([]const u8).empty;
+        argv.append(self.a, self.git) catch die("out of memory", .{});
+        argv.appendSlice(self.a, args) catch die("out of memory", .{});
         const r = self.run(self.repo, argv.items) catch |e| die("cannot run git: {s}", .{@errorName(e)});
         if (r.term != .Exited or r.term.Exited != 0) die("git {s} failed: {s}", .{ args[0], r.stderr });
         return std.mem.trim(u8, r.stdout, " \r\n");
@@ -181,7 +181,7 @@ const Ctx = struct {
     fn write(self: Ctx, rel: []const u8, bytes: []const u8) void {
         var d = std.fs.openDirAbsolute(self.repo, .{}) catch |e| die("open repo: {s}", .{@errorName(e)});
         defer d.close();
-        d.writeFile(rel, bytes) catch |e| die("write {s}: {s}", .{ rel, @errorName(e) });
+        d.writeFile(.{ .sub_path = rel, .data = bytes }) catch |e| die("write {s}: {s}", .{ rel, @errorName(e) });
     }
 };
 
@@ -198,20 +198,20 @@ fn snapshot(c: Ctx) Snapshot {
 /// Runs argv in `cwd` with its stdout a file opened read-only (this
 /// process's fd 1, which the child inherits), so every write to it fails;
 /// the file's bytes afterwards are the result's stdout.
-fn runUnwritable(a: std.mem.Allocator, cwd: []const u8, env: *const std.process.EnvMap, argv: []const []const u8) !std.ChildProcess.RunResult {
+fn runUnwritable(a: std.mem.Allocator, cwd: []const u8, env: *const std.process.EnvMap, argv: []const []const u8) !std.process.Child.RunResult {
     const path = try std.fs.path.join(a, &.{ cwd, "bisect_stdout" });
     (try std.fs.createFileAbsolute(path, .{})).close();
     const ro = try std.fs.openFileAbsolute(path, .{});
     try std.posix.dup2(ro.handle, std.posix.STDOUT_FILENO);
     ro.close();
-    var child = std.ChildProcess.init(argv, a);
+    var child = std.process.Child.init(argv, a);
     child.cwd = cwd;
     child.env_map = env;
     child.stdin_behavior = .Ignore;
     child.stdout_behavior = .Inherit;
     child.stderr_behavior = .Pipe;
     try child.spawn();
-    const err = try child.stderr.?.reader().readAllAlloc(a, 1 << 26);
+    const err = try child.stderr.?.readToEndAlloc(a, 1 << 26);
     const term = try child.wait();
     const out = try std.fs.cwd().readFileAlloc(a, path, 1 << 26);
     return .{ .term = term, .stdout = out, .stderr = err };
@@ -231,7 +231,7 @@ fn jstr(v: ?std.json.Value) ?[]const u8 {
 const RerunBuild = struct { label: []const u8, n: u64, value: []const u8, targets: []const u8 };
 
 fn rerunBuilds(a: std.mem.Allocator, log: []const u8) ![]const RerunBuild {
-    var out = std.ArrayList(RerunBuild).init(a);
+    var out = std.ArrayList(RerunBuild).empty;
     var lines = std.mem.tokenizeScalar(u8, log, '\n');
     while (lines.next()) |line| {
         var w = std.mem.tokenizeScalar(u8, line, ' ');
@@ -249,7 +249,7 @@ fn rerunBuilds(a: std.mem.Allocator, log: []const u8) ![]const RerunBuild {
             check(false, "a rerun value whose n is not a number: {s}", .{rerun});
             continue;
         };
-        try out.append(.{ .label = rerun[0..hash], .n = n, .value = rerun, .targets = targets });
+        try out.append(a, .{ .label = rerun[0..hash], .n = n, .value = rerun, .targets = targets });
     }
     return out.items;
 }
@@ -470,28 +470,28 @@ pub fn main() !void {
     // dir of its own; the checks below read the last, and the log segment
     // and verdict of each).
     const log_path = try std.fs.path.join(a, &.{ repo, ".git", "fake_buck2.log" });
-    const stderr = std.io.getStdErr().writer();
-    var marks = std.ArrayList(usize).init(a);
-    var outs = std.ArrayList([]const u8).init(a);
-    var r: std.ChildProcess.RunResult = undefined;
+    const stderr = std.fs.File.stderr().deprecatedWriter();
+    var marks = std.ArrayList(usize).empty;
+    var outs = std.ArrayList([]const u8).empty;
+    var r: std.process.Child.RunResult = undefined;
     var inv: u32 = 0;
     while (inv < s.invocations) : (inv += 1) {
         const wd = if (inv == 0) work else try std.fmt.allocPrint(a, "{s}{d}", .{ work, inv });
-        var cmd = std.ArrayList([]const u8).init(a);
-        try cmd.append(bisect_abs);
+        var cmd = std.ArrayList([]const u8).empty;
+        try cmd.append(a, bisect_abs);
         switch (s.mode) {
-            .bisect => try cmd.appendSlice(&.{ "--good", good, "--bad", bad }),
-            .flake => try cmd.appendSlice(&.{ "flake", "--rev", bad, "--runs", try std.fmt.allocPrint(a, "{d}", .{s.runs}) }),
+            .bisect => try cmd.appendSlice(a, &.{ "--good", good, "--bad", bad }),
+            .flake => try cmd.appendSlice(a, &.{ "flake", "--rev", bad, "--runs", try std.fmt.allocPrint(a, "{d}", .{s.runs}) }),
         }
-        try cmd.appendSlice(&.{ "--work-dir", wd, "--repo", repo, "--buck2", fake_abs, "--git", git, "--timeout-s", "120" });
-        if (s.flake_runs) |k| try cmd.appendSlice(&.{ "--flake-runs", try std.fmt.allocPrint(a, "{d}", .{k}) });
-        if (s.rerun_base) |b| try cmd.appendSlice(&.{ "--rerun-base", try std.fmt.allocPrint(a, "{d}", .{b}) });
-        try cmd.append("--");
-        try cmd.appendSlice(s.targets);
-        try marks.append((std.fs.cwd().readFileAlloc(a, log_path, 1 << 24) catch "").len);
+        try cmd.appendSlice(a, &.{ "--work-dir", wd, "--repo", repo, "--buck2", fake_abs, "--git", git, "--timeout-s", "120" });
+        if (s.flake_runs) |k| try cmd.appendSlice(a, &.{ "--flake-runs", try std.fmt.allocPrint(a, "{d}", .{k}) });
+        if (s.rerun_base) |b| try cmd.appendSlice(a, &.{ "--rerun-base", try std.fmt.allocPrint(a, "{d}", .{b}) });
+        try cmd.append(a, "--");
+        try cmd.appendSlice(a, s.targets);
+        try marks.append(a, (std.fs.cwd().readFileAlloc(a, log_path, 1 << 24) catch "").len);
         r = if (s.expect.tool_error) try runUnwritable(a, root, &env, cmd.items) else try c.run(root, cmd.items);
         try stderr.print("---- bisect stdout\n{s}---- bisect stderr\n{s}----\n", .{ r.stdout, r.stderr });
-        try outs.append(r.stdout);
+        try outs.append(a, r.stdout);
         const code_i: ?u8 = if (r.term == .Exited) r.term.Exited else null;
         check(code_i != null and code_i.? == s.expect.exit, "invocation {d}: exit {?d}, expected {d}", .{ inv, code_i, s.expect.exit });
     }
@@ -524,8 +524,8 @@ pub fn main() !void {
     var plain_builds: usize = 0;
     var kills: usize = 0;
     var lines = std.mem.tokenizeScalar(u8, log, '\n');
-    var build_cwds = std.ArrayList([]const u8).init(a);
-    var kill_cwds = std.ArrayList([]const u8).init(a);
+    var build_cwds = std.ArrayList([]const u8).empty;
+    var kill_cwds = std.ArrayList([]const u8).empty;
     while (lines.next()) |line| {
         var w = std.mem.tokenizeScalar(u8, line, ' ');
         const verb = w.next() orelse continue;
@@ -535,7 +535,7 @@ pub fn main() !void {
         if (std.mem.eql(u8, verb, "build")) {
             builds += 1;
             if (std.mem.eql(u8, rerun, "-")) plain_builds += 1;
-            try build_cwds.append(where);
+            try build_cwds.append(a, where);
             var merge = false;
             for (merges) |m| {
                 if (std.mem.eql(u8, m, commit)) merge = true;
@@ -544,10 +544,10 @@ pub fn main() !void {
             for (sides) |sd| check(!std.mem.eql(u8, sd, commit), "probed the side-branch commit {s}", .{commit});
         } else if (std.mem.eql(u8, verb, "bxl")) {
             bxls += 1;
-            try build_cwds.append(where);
+            try build_cwds.append(a, where);
         } else if (std.mem.eql(u8, verb, "kill")) {
             kills += 1;
-            try kill_cwds.append(where);
+            try kill_cwds.append(a, where);
         }
     }
     check(builds + bxls == kills, "{d} builds and {d} check.bxl runs but {d} kills", .{ builds, bxls, kills });
@@ -657,5 +657,5 @@ pub fn main() !void {
 
     if (failed_check) std.process.exit(1);
     std.fs.deleteTreeAbsolute(root) catch {};
-    try std.fs.cwd().writeFile(out, "passed\n");
+    try std.fs.cwd().writeFile(.{ .sub_path = out, .data = "passed\n" });
 }

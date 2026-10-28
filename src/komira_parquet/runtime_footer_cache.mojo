@@ -492,14 +492,6 @@ struct ParquetMetadataCache(MetadataCache, Movable, Deinitable):
         """Entries the revalidation re-parsed."""
         return self._revalidate_drop_count
 
-    def footer_window_for(self, path: String) -> Int:
-        """The speculative footer window a read of `path` would use now."""
-        return self._window_hints.suggest(path)
-
-    def footer_window_adaptations(self) -> Int:
-        """How often a dataset's learned window was raised."""
-        return self._window_hints.adaptation_count()
-
     def row_window_rg_counts_cache_hits(self) -> Int:
         return self._rg_counts_cache_hits
 
