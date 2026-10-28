@@ -367,12 +367,14 @@ def _expected_pairs(np: Int, nb: Int, m0: Int, m1: Int) -> Int:
 
 def _parallel_case(np: Int, nb: Int) raises:
     """Row by row: every output pair has equal keys on both sides, no pair
-    repeats, and the count is the brute-force count."""
-    var probe = _wide(np, 97, 89, "a", "b", "pv")
-    var build = _wide(nb, 97, 89, "x", "y", "bv")
+    repeats, and the count is the brute-force count. The key pairs
+    (row % 997, row % 991) are unique among fewer than 988,000 rows, so each
+    probe row has at most one build row, the one with its own number."""
+    var probe = _wide(np, 997, 991, "a", "b", "pv")
+    var build = _wide(nb, 997, 991, "x", "y", "bv")
     var rt = _runtime()
     var out = _run(rt, probe, _op(JOIN_INNER), build)
-    var want = _expected_pairs(np, nb, 97, 89)
+    var want = _expected_pairs(np, nb, 997, 991)
     assert_equal(out.num_rows(), want, "pair count")
     var pv = _col(out, "pv")
     var bv = _col(out, "bv")
@@ -381,7 +383,7 @@ def _parallel_case(np: Int, nb: Int) raises:
         var i = Int(pv[r])
         var j = Int(bv[r])
         assert_true(i >= 0 and i < np and j >= 0 and j < nb, "row index out of range")
-        assert_true(i % 97 == j % 97 and i % 89 == j % 89, "a pair with different keys")
+        assert_true(i % 997 == j % 997 and i % 991 == j % 991, "a pair with different keys")
         seen.add(i * 1_000_000 + j)
     assert_equal(len(seen), want, "a pair repeats")
 
