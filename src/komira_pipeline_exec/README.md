@@ -33,11 +33,52 @@ Import each module by name; the package root exports nothing.
   ORDER_NONE and ORDER_PARTITION_ID are served and ORDER_ROW_RANGE is refused.
 - `published_outputs`: `PublishedOutputs`, the batch each finished segment left.
 - `segment_builder`: the `SegmentBuilder` trait through which a plan's members
-  are constructed from a descriptor.
+  are constructed from a descriptor. `build_source` is given the worker count
+  (a source that sizes per-worker state at construction needs it) and
+  `build_sink` the schema of the source's morsels (a sink that must name its
+  output when no morsel reaches it needs it).
 - `source_variant`, `op_variant`, `pipeline_sink`: the closed variants. Each
   holds one of three member types, fixed where the variant is named, and a tag;
   its trait methods test the tag and call the member. `unused_members` fills
   the slots a list leaves empty with members that refuse to run.
+- `source_parquet`, `source_batch`, `source_sink_output`: the sources of a
+  plan. `build_parquet_source` makes a `komira_parquet_scan` `ParquetSource` on
+  the local file system from the Parquet arm of a `SourceSpecPod`: it refuses a
+  spec that is not total, resolves the projection names through the footer of
+  the first file the path lists (a path may be a file, a directory or a glob),
+  and installs the filter as the decode filter (every conjunct is applied; a row
+  whose predicate is UNKNOWN is dropped) and as the pushed predicate that
+  row-group statistics are checked against. The source borrows the caller's
+  footer cache and expression pool. `BatchSource` serves a copy of a resident
+  batch and `SinkOutputSource` the batch a finished segment published, each as
+  morsels claimed from one shared cursor.
+- `op_filter`, `op_project`, `op_limit`: the operators. A filter evaluates its
+  predicate and records the rows it keeps as the batch's selection mask instead
+  of gathering them; all rows kept leaves no mask, none kept is FILTERED_EMPTY,
+  a batch that arrives with a mask is gathered first, and a predicate whose NULL
+  scope the evaluator cannot derive is refused by name. A projection is
+  `komira_operator_api.MapOp` over expressions registered once and shared by the
+  workers; it honours the mask as that package states. A limit counts the
+  selected rows of every worker against one atomic budget, cuts the morsel that
+  crosses it, and reports FINISHED once it is spent. With several workers which
+  rows survive depends on the claim order; how many does not.
+- `sink_collect`: `CollectSink` keeps each worker's morsels (gathered if masked)
+  in the worker's own slot, orders them at `combine` by (partition id, origin
+  hint) so a scan collects in file order whatever the schedule, and concatenates
+  them. With no row it returns no rows under the schema the segment would have
+  had.
+- `real_builder`: `RealBuilder`, the `SegmentBuilder` over these members. It
+  serves SOURCE_PARQUET, SOURCE_BATCH, SOURCE_SINK_OUTPUT, OP_FILTER,
+  OP_PROJECT, OP_LIMIT and the sink `(SINK_COLLECT, KEY_DTYPE_NONE,
+  SINK_ORIENT_COLUMNAR)`, and refuses every other kind by name. It keeps the
+  resident batches (`add_resident`), shares one set of operator parts among the
+  workers of a segment run, and derives the empty-output schema by running the
+  chain's projections over a batch of no rows. Three origins name the borrows of
+  the Parquet source (the footer cache, the expression pool, an absent dynamic
+  filter).
+- `plan_harness`: segment descriptors for the three sources with an operator
+  chain and a collect sink, `project_columns`, and a sample table with readers,
+  for plans written by hand.
 - `fake_support`, `fake_members`, `fake_builder`, `fake_dispatch`: sources,
   an operator, sinks, a builder and dispatchers that record what the driver does
   in shared counters, and run the workers one after another in an order a test
