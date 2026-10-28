@@ -7,10 +7,10 @@
 # its own chunk (`sort_parallel_string_kernels`), then the P runs are merged by
 # the parallel pairwise tree (`sort_parallel_string_merge`), and the batch is
 # gathered once. `merge_sorted_partitions_single_key_string_parallel` merges
-# partitions that are already sorted (the sort sink's `combine_partition`
-# output) the same way; `merge_sorted_partitions_single_key_string` is its
-# serial form, a comparator heap merge, kept as the oracle the parallel merge
-# is tested against.
+# partitions that are already sorted the same way;
+# `merge_sorted_partitions_single_key_string` is its serial form, a comparator
+# heap merge, kept as the oracle the parallel merge is tested against. Nothing
+# in the sort sink calls these entries yet.
 #
 # Every entry gives the permutation of one serial `sort_indices_string` over
 # the rows (the partitions concatenated in slab order): byte-wise order, the
@@ -112,6 +112,9 @@ struct _StringSliceSortWork[
     ](
         self, chunk_id: Int, n_chunks: Int, ref input: In, mut payload: P,
     ) raises:
+        # SAFETY: the driver passes a `List[Bool]` as `input` and a
+        # `_StringPermPayload` as `payload` to the `pool.run` that dispatches
+        # this work, so each cast is to the exact type of the referent.
         var vp = UnsafePointer(to=input).bitcast[List[Bool]]()
         var sp = UnsafePointer(to=payload).bitcast[_StringPermPayload]()
         var lo = self.slice_lo[chunk_id]
@@ -178,9 +181,9 @@ def _parallel_string_perm[
     # Precomputed chunk-0 DIRECTION-ENCODED u64 prefix key per ORIGINAL row,
     # filled in parallel by each worker for ITS slice's original rows (perm is
     # iota at worker entry, so slice [lo,hi) covers original rows lo..hi). The
-    # SERIAL merge then compares these integers (one compare per heap step) and
-    # only touches the full string buffers on a prefix TIE — this is what makes
-    # the O(n log P) merge cheap (the byte-compare merge was the bottleneck).
+    # merge then compares these integers (one compare per step) and only
+    # touches the full string buffers on a prefix TIE, which keeps each
+    # comparison cheap.
     var pk = List[UInt64](capacity=n)
     for _ in range(n):
         pk.append(0)
@@ -336,10 +339,9 @@ def merge_sorted_partitions_single_key_string(
     """Merge N already-sorted single-STRING-key partition batches into ONE
     globally-sorted batch by a serial comparator heap k-way merge.
 
-    No engine caller: the sort sink's partitioned STRING path uses
-    `merge_sorted_partitions_single_key_string_parallel`. This entry is the
-    fully serial oracle the parallel merge is tested against, so its gather is
-    serial too (an oracle that forks is a weaker oracle).
+    Nothing in the sort sink calls this entry. It is the fully serial oracle
+    the parallel merge is tested against, so its gather is serial too (an
+    oracle that forks is a weaker oracle).
 
     Each partition MUST already be sorted by `key_name` (STRING/BINARY) in the
     same direction. Concatenates them into one contiguous batch (preserving
@@ -360,7 +362,7 @@ def merge_sorted_partitions_single_key_string(
     # and record each partition's [base[p], base[p+1])
     # row range in the result.
     #
-    # ⚠ THIS LOOP'S ORDER IS A CORRECTNESS CONTRACT, NOT A STYLE. `base` is the
+    # THIS LOOP'S ORDER IS A CORRECTNESS CONTRACT, NOT A STYLE. `base` is the
     # k-way merge's index space, and the merge ASSUMES each [base[p],
     # base[p+1]) range is one of the internally-sorted runs. The fold visits
     # the slab in slot order, so partition `p` lands at [base[p], base[p+1]).
@@ -469,6 +471,9 @@ struct _PkFillWork[
     ](
         self, chunk_id: Int, n_chunks: Int, ref input: In, mut payload: P,
     ) raises:
+        # SAFETY: the driver passes a `_StringPermPayload` as `payload` to the
+        # `pool.run` that dispatches this work, so the cast is to the exact type
+        # of the referent.
         var pp = UnsafePointer(to=payload).bitcast[_StringPermPayload]()
         var lo = self.pk_lo[chunk_id]
         var hi = self.pk_lo[chunk_id + 1]
@@ -495,9 +500,9 @@ def merge_sorted_partitions_single_key_string_parallel[
     globally-sorted batch on the pool: the parallel form of
     `merge_sorted_partitions_single_key_string`.
 
-    The sort sink calls this from `finalize`, after its `combine_partition`
-    dispatch has returned, so the pool is idle and the merge and the gather
-    get every worker (no fork-join nests under a live one).
+    Call it when no other dispatch is live on the pool, so the merge and the
+    gather get every worker (no fork-join nests under a live one). Nothing in
+    the sort sink calls it yet.
 
     The same permutation as `merge_sorted_partitions_single_key_string`: the
     N partitions are the sorted runs, and the pairwise-tree co-rank merge gives
@@ -520,7 +525,7 @@ def merge_sorted_partitions_single_key_string_parallel[
     # and record each partition's [base[p], base[p+1])
     # row range in the result.
     #
-    # ⚠ THIS LOOP'S ORDER IS A CORRECTNESS CONTRACT, NOT A STYLE. `base` is the
+    # THIS LOOP'S ORDER IS A CORRECTNESS CONTRACT, NOT A STYLE. `base` is the
     # k-way merge's index space, and the merge ASSUMES each [base[p],
     # base[p+1]) range is one of the internally-sorted runs. The fold visits
     # the slab in slot order, so partition `p` lands at [base[p], base[p+1]).
@@ -562,7 +567,7 @@ def merge_sorted_partitions_single_key_string_parallel[
     var nw = resolve_sort_workers(num_workers)
 
     # perm == iota over the concatenated rows; each partition's sub-range
-    # [base[p], base[p+1]) is ALREADY sorted (combine_partition sorted it).
+    # [base[p], base[p+1]) is ALREADY sorted (the caller sorted it).
     var perm = List[Int](capacity=total)
     for i in range(total):
         perm.append(i)

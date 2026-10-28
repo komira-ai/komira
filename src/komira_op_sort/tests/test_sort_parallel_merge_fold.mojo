@@ -12,23 +12,18 @@
 #
 #   * COST. The fold copies each row once, so the same rows merged from 4 and
 #     from 16 partitions copy the same bytes in the same number of allocations
-#     (the fold census of `komira_operator_api.join_build_fold_census`). A
-#     pairwise fold (re-copying the accumulator per partition) makes the two
-#     differ: such a fold gives 6 allocations at 4 partitions and 30 at 16 for
-#     the INT merge, against 2 and 2. Agreement across two shardings is the
-#     assertion, not a bound at one partition count, which a quadratic fold can
-#     satisfy.
+#     (the fold census of `komira_operator_api.join_build_fold_census`).
+#     Agreement across two shardings is the assertion, not a bound at one
+#     partition count.
 #   * ORDER. The merge reads [base[p], base[p+1]) as partition p's sorted run,
-#     so the fold must visit the slab in slot order. A fold that
-#     reverses the slab would break this. The fixture's partitions are UNEVEN (100 / 300 / 200 /
-#     400 rows): with equal sizes a permuted fold maps each range onto another
-#     sorted run and the merge still emits a sorted result, so an even fixture
-#     cannot see the defect.
+#     so the fold visits the slab in slot order. The fixture's partitions are
+#     UNEVEN (100 / 300 / 200 / 400 rows): with equal sizes any permutation of
+#     the slots maps each range onto another sorted run and the merge still
+#     emits a sorted result, so only uneven sizes tie each range to its run.
 #   * NULLS. The STRING merges read the key's validity bitmap to put NULLs
-#     first; the fold has to carry it. A NULL key's bytes are always "" (the
-#     byte minimum), so a lost bitmap still leaves those rows in place: what
-#     goes wrong is that row 0 reads a valid '' instead of NULL. The assertion
-#     is on validity. The INT merge reads values only and has no such guard.
+#     first, so the fold carries it. A NULL key's bytes are always "" (the
+#     byte minimum), so the check is on validity: row 0 reads as NULL, not as
+#     a valid ''. The INT merge reads values only and has no such check.
 # =============================================================================
 
 from std.testing import assert_equal, assert_true
@@ -389,8 +384,8 @@ def test_int_merge_is_sorted_under_uneven_partitions() raises:
             + ": the merge emitted an UNSORTED result (the fold no longer"
             + " visits the slab in slot order)",
         )
-        # "v" travels with "k"; a fold that folded the columns out of step
-        # would still emit a sorted "k".
+        # "v" travels with "k": the key column is sorted whatever the payload
+        # does, so the payload is what shows the columns stayed in step.
         assert_true(
             Int(v[i]) == i,
             "merge_sorted_partitions_single_key: payload column drifted out of"

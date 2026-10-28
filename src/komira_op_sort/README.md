@@ -63,6 +63,14 @@ entries do that) and gives exactly the rows of the serial kernel, ties in
 input order. `num_workers` sets the slice count; 0 means one per physical
 core.
 
+The numeric parallel sort (`sort_parallel`) does not read the key's validity:
+a NULL cell sorts by its stored value, as the serial sort of a numeric key in
+`sort_topn_sink` does, and `can_parallel_sort_single_key` does not look at
+NULLs. The STRING / BINARY form places NULLs first ascending and last
+descending, as `sort_indices_string` does. No sort sink calls the parallel
+entries yet; they are covered by this package's tests, including a pooled run
+of each entry family on a started runtime.
+
 Every sort is stable: rows with equal keys keep their input order, in both
 directions. Float keys are totally ordered the way DuckDB orders them: NaN
 sorts above +inf (last ascending, first descending), every NaN equals every
