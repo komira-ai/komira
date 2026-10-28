@@ -73,7 +73,11 @@ from komira_op_agg_distinct.agg_count_distinct_parallel import (
 from komira_op_sort.sort_topn_sink import _execute_topn_sink
 
 comptime _ROWS: Int = _PHASEB_MIN_ROWS
-comptime _KEYS: Int = 40_000
+# Odd on purpose: row r carries key r % _KEYS, and _KEYS shares no factor with
+# _WORKERS, so "r % P" and "hash(key) % P" disagree for most keys. A round
+# count such as 40_000 would make r % P constant per key and hide a route that
+# shards by row position.
+comptime _KEYS: Int = 39_999
 comptime _WORKERS: Int = 4
 
 

@@ -117,6 +117,8 @@ comptime _FUSED_MODE_MERGE: Int32 = 1
 comptime CD_FUSED_MAX_SHARDS: Int = 32
 """P is the worker count, capped here. The merge is parallel, so a smaller P
 would only idle workers."""
+
+
 def cd_fused_shard_count(worker_count: Int) -> Int:
     """Shards for the fused pass: one per worker, capped."""
     var p = worker_count
@@ -573,12 +575,6 @@ struct _FusedTask[OffsetType: DType, bo: ImmOrigin, hash_origin: ImmOrigin](
             if sp[].err_flag[].compare_exchange(expected, Int8(1)):
                 sp[].err_msg[] = String(e)
             return
-
-
-# =============================================================================
-# Driver
-# =============================================================================
-
 
 
 # =============================================================================
