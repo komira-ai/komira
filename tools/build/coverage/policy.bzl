@@ -107,11 +107,11 @@ COVERAGE_NO_GATE = {
 # all classify and its records hold an arm; the sweep of every library
 # grows it. A library of the ledger COVERAGE_NO_GATE is read by its
 # `<name>_cov_gate`. Joining also
-# means covcheck's refusal of two tests' records that give one location a
-# different number of decisions (branch_lcov.mojo, DecisionShapes) fails
-# the gate in every mode: a new test instantiating one of the library's
-# generic functions with another specialisation can turn its coverage gate
-# red in census mode. A fixture of the tests cell reads its branch records
+# means covcheck's refusal of two tests' records that give one decision a
+# different number of arms (branch_lcov.mojo, DecisionShapes) fails
+# the gate in every mode. (Records that give one location a different
+# number of decisions are not refused: the tests with the most decisions
+# are summed and the others' records at it dropped.) A fixture of the tests cell reads its branch records
 # unless it passes `coverage_branch_gate = False` (coverage.bzl). A library
 # not on the list keeps BranchNotMeasured. mojo_library looks itself up by
 # its label's exact string, so a row whose library moved, or a row spelled

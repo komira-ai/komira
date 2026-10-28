@@ -7,3 +7,18 @@ komira_abi_golden(
     src = "good.mojo",
     golden = "good.tsv",
 )
+
+# The same, with constants held to a constants file: the header defines them.
+komira_abi_golden(
+    name = "ok_constants",
+    src = "good.mojo",
+    constants_src = "consts.mojo",
+    golden = "good_consts.tsv",
+)
+
+# CStr and ConstBytes declared as the pointers to UInt8 the tool expects.
+komira_abi_golden(
+    name = "ok_named",
+    src = "named.mojo",
+    golden = "named.tsv",
+)

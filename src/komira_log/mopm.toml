@@ -1,0 +1,29 @@
+[package]
+name = "komira_log"
+version = "0.1.0"
+description = "Structured logging: the five-level facade, typed arguments, the per-module level filter, the synchronous stderr path, and the engine behind the same call sites (per-core binary record rings, decode-at-flush drain, file, stderr and metric sinks, spans)."
+license = "Apache-2.0"
+repository = "https://github.com/komira-ai/komira"
+readme = "README.md"
+mojo = ["1.0.0"]
+
+[dependencies]
+komira_atomic_alias = { path = "../komira_atomic_alias", version = "0.1" }
+komira_clock = { path = "../komira_clock", version = "0.1" }
+komira_collections = { path = "../komira_collections", version = "0.1" }
+komira_hash = { path = "../komira_hash", version = "0.1" }
+komira_libc = { path = "../komira_libc", version = "0.1" }
+komira_metrics = { path = "../komira_metrics", version = "0.1" }
+komira_spsc_ring = { path = "../komira_spsc_ring", version = "0.1" }
+komira_trace = { path = "../komira_trace", version = "0.1" }
+
+[dev-dependencies]
+komira_runtime_paths = { path = "../komira_runtime_paths", version = "0.1" }
+
+[native.komira_log_holder]
+kind = "static"
+srcs = ["native/komira_log_holder.c"]
+
+[targets]
+lib = { path = "src/komira_log" }
+tests = ["tests"]

@@ -8,6 +8,7 @@ the last-error call) and the source and render calls: registering a Parquet
 file, the schema and scan bindings of Parquet, CSV and JSON files, and a plan
 rendered as text. No call runs a query yet.
 
+- `abi/komira.tsv`: the golden of the C ABI; `komira.h` is made from it.
 - `status.mojo`: the six status codes, `KOMIRA_MAX_INPUT_BYTES`, `abi_version`, `buffer_status`, `input_length_status`.
 - `session.mojo`: `Session`, the state a context handle stands for: the last
   error and the catalog of registered tables.
@@ -174,11 +175,11 @@ NULL context (-1), a NULL input (-2 with a last error), a bad file or plan (-3
 with the message as the last error) and, for the four calls with an output, the
 two-call protocol; a good call after a refusal leaves no error.
 `exports_exact` makes the nine names above the whole dynamic symbol table.
-The seven C owners in the library's closure (async, async_api, compression, fs,
-libc, metrics, scan_source) are linked as their own shared libraries
+The eight C owners in the library's closure (async, async_api, compression, fs,
+libc, metrics, parquet_codec, scan_source) are linked as their own shared libraries
 (`native_owners`), not embedded. The thirteenth driver, `gate_native_owners`,
 reads the `DT_NEEDED` entries of the library's ELF dynamic section and requires
-the SONAME of each of the seven (`libkomira_<owner>_native.so.1`); an owner
+the SONAME of each of the eight (`libkomira_<owner>_native.so.1`); an owner
 dropped from `native_owners` leaves its C embedded, and that driver fails.
 The plan driver also refuses a `plan_len` of 64 MiB plus one and of
 `UINT64_MAX` (-5, nothing written), and accepts exactly 64 MiB as a length;
@@ -188,7 +189,42 @@ Like every Mojo library, `libkomira` has `DT_NEEDED libKGENCompilerRTShared.so`
 and finds the Mojo runtime in `lib/` beside it
 (see "C-ABI shared libraries" in `tools/build/mojo/README.md`).
 
+## The header and the golden
+
+`abi/komira.tsv` is the golden of the ABI: the version (1.1), one row per export
+with its return type, argument types and the version that added it, and one row
+per status code and per limit (`constant`). `komira_abi_golden` checks it on every
+build against the `@export abi("C")` functions of `_c_abi.mojo` (names, return and
+argument types) and against `status.mojo` (the constants and their values), and
+writes `komira.h` from it:
+
+```sh
+./buck2 build komira//src/komira_so:komira_abi      # komira.h, only if the golden is exact
+```
+
+An export added to `_c_abi.mojo` without a row, a row without an export, a changed
+type and a changed or added constant all fail that target, naming the finding. The
+header spells the opaque context `komira_handle`, strings `const char *` and the
+plan bytes `const uint8_t *`; `_c_abi.mojo` declares `Handle`, `CStr` and
+`ConstBytes` for them. The golden does not check that its version was raised when
+a row changed: that compares with the previous release.
+
+`tests/c/abi_driver.c` is a C program that includes `komira.h` and nothing of
+ours. It opens `./libkomira.so`, binds each of the nine functions to a pointer
+declared with the header's own prototype, and checks the version in the header
+against `komira_abi_version()`, the status codes, the input bound
+(`KOMIRA_MAX_INPUT_BYTES` plus one is -5), and the last-error round trip (NULL
+context, NULL `out_len`, an engine refusal, a buffer one byte short, an exact
+buffer). It is built by zig cc and run against the published library:
+
+```sh
+./buck2 build komira//src/komira_so:c_abi_check     # exit 0 of the driver, or red
+```
+
+The header is not part of the library's conda package yet; that waits on the
+packaging change that lists it.
+
 ## Not done
 
-No golden file, generated header or version check yet; no plan execution, query
+No release-over-release version check and no packaged header yet; no plan execution, query
 or UDF call; no engine in the session; no language binding.

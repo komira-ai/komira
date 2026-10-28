@@ -1,6 +1,6 @@
 # =============================================================================
 # ⭐ CDP-ROWDICT — THE STRING-KEY ENCODE ON ROW RANGES: ONE SMALL DICTIONARY
-#   PER RANGE, MERGED IN ROW ORDER (2026-09-25, cbq10 / cbq11)
+#   PER RANGE, MERGED IN ROW ORDER
 # =============================================================================
 #
 # Companion to `agg_count_distinct_strenc.mojo` (the entry point, Phase A and
@@ -10,20 +10,19 @@
 # hash-sharded arm then runs exactly as before.
 #
 # ★ THE DEFECT. CDPPARB shards Phase B by the key HASH, so every row of one
-# value is one shard's work. On cbq10 ONE value (`iPad`) holds 91.8% of the
-# 5,563,212 rows and cbq11's key is the same column, so ONE of the P = 16
-# shards probed ~5.1M rows while the other 15 finished their ~30K each and
-# idled: PARB `shard_ms` 55.2-55.9 of an `encode` of 66.5-67.9 ms (20
-# workers). It is exactly the skew CDP-HEAVYSPLIT removed from
+# value is one shard's work. When ONE value holds nearly all of the rows (a
+# heavily skewed low-cardinality key), ONE of the P shards probes almost every
+# row while the others finish their few rows and idle, and the shard pass
+# dominates the encode. It is exactly the skew CDP-HEAVYSPLIT removed from
 # the driver's AGG pass (`agg_cd_heavy_split.mojo`), one phase earlier.
 #
 # ★ WHY NOT A HEAVY-VALUE SPLIT OF THE HASH SHARDS. It would work — a heavy
 # value's rows spread by row range, its first row taken as the minimum — but it
 # keeps the K x N floor this driver already paid once (every shard reads every
-# row's hash to find its own), needs the Phase-A hash vector (a 44 MB serial
-# zero-fill and a 44 MB parallel write on cbq10), and a sample to find the heavy
+# row's hash to find its own), needs the Phase-A hash vector (a serial
+# zero-fill and a parallel write of one hash per row), and a sample to find the heavy
 # values. For a key with FEW distinct values none of that is needed: a table of
-# 165 values is L1-resident, so each worker can simply build its OWN dictionary
+# a few hundred values is L1-resident, so each worker can simply build its OWN dictionary
 # over its OWN rows. Skew cannot pin anything, because no value has an owner.
 #
 # HOW, in one paragraph. Task t owns the contiguous row range
@@ -50,8 +49,8 @@
 # shared flag; every task polls it every `_ROWDICT_POLL_ROWS` rows and stops, and
 # the entry point returns False with its outputs untouched. The bound exists for
 # the SERIAL merge, whose work is the SUM of the task dictionaries (at most
-# T x max_local probes). A high-cardinality key (cbq13's `search_phrase`, 6.0M
-# values) trips it within its first ~`max_local` rows per task, so declining
+# T x max_local probes). A high-cardinality key (millions of
+# distinct values) trips it within its first ~`max_local` rows per task, so declining
 # wastes well under a millisecond there; the worst case is a key just above the
 # bound, which wastes at most one pass of this arm.
 #
@@ -88,8 +87,8 @@ from komira_op_agg_distinct.agg_cd_strenc_parb import (
 
 
 # Most values one task may mint before the arm declines. The serial merge
-# probes at most T x this many entries (~164K at T = 20, a few ms); cbq10 /
-# cbq11 mint 165 per task.
+# probes at most T x this many entries (~164K at T = 20); a few-hundred-value
+# key mints that many per task.
 comptime _ROWDICT_MAX_LOCAL: Int = 8_192
 
 # A task's first table size (slots). Grown by doubling at half load, so a

@@ -192,6 +192,65 @@ def test_sink_at_threshold_puts_the_extreme_keys_first() raises:
     assert_equal(_key_at(_sort_tied(n, True), 0), 499)
 
 
+def _extremes_fixture(n: Int) raises -> RecordBatch:
+    """`[k INT64, id INT64]` like `_tied_fixture`, but rows 3 and 20 hold
+    INT64_MAX and rows 10 and 30 hold INT64_MIN."""
+    var ks = PrimitiveArray[DType.int64].allocate(n)
+    var ids = PrimitiveArray[DType.int64].allocate(n)
+    for i in range(n):
+        ks.set_typed[Scalar[DType.int64]](i, Int64((i * 7919) % 1000) - 500)
+        ids.set_typed[Scalar[DType.int64]](i, Int64(i))
+    ks.set_typed[Scalar[DType.int64]](3, Int64.MAX)
+    ks.set_typed[Scalar[DType.int64]](20, Int64.MAX)
+    ks.set_typed[Scalar[DType.int64]](10, Int64.MIN)
+    ks.set_typed[Scalar[DType.int64]](30, Int64.MIN)
+    var builder = RecordBatchBuilder.with_capacity(2)
+    builder.add_column(Column.from_primitive[DType.int64](ks^))
+    builder.add_column(Column.from_primitive[DType.int64](ids^))
+    var sb = SchemaBuilder()
+    sb.add_field(Field("k", ArrowType.INT64, False))
+    sb.add_field(Field("id", ArrowType.INT64, False))
+    return builder.build(sb.build())
+
+
+def _sort_extremes(n: Int, descending: Bool) raises -> RecordBatch:
+    var keys = List[String]()
+    keys.append(String("k"))
+    var desc = List[Bool]()
+    desc.append(descending)
+    return _execute_sort_sink(_extremes_fixture(n), SortSinkData(keys^, desc^))
+
+
+def test_sink_descending_radix_orders_int64_min_and_max() raises:
+    """At the radix threshold, descending puts both INT64_MAX rows first and
+    both INT64_MIN rows last, each pair in input order."""
+    var n = RADIX_SORT_ROW_THRESHOLD
+    var rb = _sort_extremes(n, True)
+    assert_equal(_key_at(rb, 0), Int(Int64.MAX))
+    assert_equal(_id_at(rb, 0), 3)
+    assert_equal(_key_at(rb, 1), Int(Int64.MAX))
+    assert_equal(_id_at(rb, 1), 20)
+    assert_equal(_key_at(rb, n - 2), Int(Int64.MIN))
+    assert_equal(_id_at(rb, n - 2), 10)
+    assert_equal(_key_at(rb, n - 1), Int(Int64.MIN))
+    assert_equal(_id_at(rb, n - 1), 30)
+    _assert_sorted_and_stable(rb, n, True)
+
+
+def test_sink_ascending_radix_orders_int64_min_and_max() raises:
+    var n = RADIX_SORT_ROW_THRESHOLD
+    var rb = _sort_extremes(n, False)
+    assert_equal(_key_at(rb, 0), Int(Int64.MIN))
+    assert_equal(_id_at(rb, 0), 10)
+    assert_equal(_key_at(rb, 1), Int(Int64.MIN))
+    assert_equal(_id_at(rb, 1), 30)
+    assert_equal(_key_at(rb, n - 2), Int(Int64.MAX))
+    assert_equal(_id_at(rb, n - 2), 3)
+    assert_equal(_key_at(rb, n - 1), Int(Int64.MAX))
+    assert_equal(_id_at(rb, n - 1), 20)
+    _assert_sorted_and_stable(rb, n, False)
+
+
 def main() raises:
     var suite = TestSuite()
     suite.test[test_radix_threshold_is_500000]()
@@ -203,4 +262,6 @@ def main() raises:
     suite.test[test_sink_descending_at_threshold_is_sorted_and_stable]()
     suite.test[test_sink_descending_below_threshold_is_sorted_and_stable]()
     suite.test[test_sink_at_threshold_puts_the_extreme_keys_first]()
+    suite.test[test_sink_descending_radix_orders_int64_min_and_max]()
+    suite.test[test_sink_ascending_radix_orders_int64_min_and_max]()
     suite^.run()

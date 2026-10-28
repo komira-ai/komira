@@ -282,7 +282,7 @@ other).
 
 ## Per-library state: komira_log's holder
 
-`src/komira_log/engine/_log_holder_shim.c` (**EXISTS**) has twelve `KOMIRA_SHIM_LOCAL` (hidden)
+`src/komira_log/native/komira_log_holder.c` (**EXISTS**) has twelve `KOMIRA_SHIM_LOCAL` (hidden)
 accessors: the engine holder (`komira_log_holder_set`, `_get`, `_get_engine`, `_clear`), the
 configuration (`komira_log_config_holder_set`, `_get`, `komira_log_holder_get_config`), the layout
 (`komira_log_layout_set`, `_get`) and the worker-id thread-local (`komira_log_tls_key_create`, `_set`,
@@ -621,3 +621,22 @@ must require that it hide its C (`exports_exact`, or a version script plus `-Bsy
 holds for any Mojo shared library a user loads beside komira's packages (the UDF runtime spike, #1167,
 loads native libraries `RTLD_LOCAL`, which keeps their symbols out of the global scope but does not
 stop their own references binding to an earlier global definition without `-Bsymbolic`).
+
+**The engine library's package (EXISTS).** `libkomira` is shipped in the package of its Mojo library,
+`komira_so` (`tools/build/package/libkomira`, target `komira_so_libkomira_conda`): the library's `.mojoc` and
+`lib/libkomira.so`, with one `lib_files` row of kind `shared` (its SONAME is the file name, so there is
+no link name; the packer writes one only for a versioned SONAME). `conda_package` takes the shared
+library as `shared_lib`, and the plain `komira_so_conda` is the same package without it: a release
+declares one of the two. The package's requirements are the usual ones: the platform guard, `__glibc`
+at the table's floor, `mojo-compiler` at the pin, and the Mojo dependencies of the library. The Mojo
+runtime the library is `NEEDED` on (`libKGENCompilerRTShared.so`, and what it loads) is not bundled: it
+comes from the `mojo-compiler` requirement, which installs it in `lib/` beside the library, and
+whether a wheel or an npm tarball may carry it instead is the licence question of the redistribution
+ruling. For that layout the library's run path is `$ORIGIN/lib:$ORIGIN` (the gate stages the runtime
+in a `lib/` beside it, an install has it beside the library). `conda_install_check`
+(`tools/build/package/install_check`) installs the built package into an empty prefix with the
+runtime libraries of the toolchain's `runtime_libs` beside it, loads the library from there with
+`RTLD_NOW` and refuses any runtime library that did not come from the prefix; it runs as a build
+action on the farm. The library still ships its C through the owners' shared libraries only once
+`native_owners` is set on it; a `NEEDED` on a `libkomira_*_native` owner is then held to the
+library's Mojo closure by the packer, as for any package.
