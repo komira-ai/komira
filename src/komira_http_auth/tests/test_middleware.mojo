@@ -73,10 +73,10 @@ comptime Verifier = Rs256JwksVerifier[ScriptedJwksFetcher, FixedAuthClock]
 
 
 def _key() raises -> List[UInt8]:
-    """The repository's RSA-2048 PKCS#8 test key (komira_http_core's TLS
+    """The repository's RSA-2048 PKCS#8 test key (komira_jose's
     fixture), declared as this test's data in the BUCK file."""
     return rsa_pkcs8_der_from_pem(
-        Path("src/komira_http_core/tests/fixtures/tls/leaf_key.pem").read_text()
+        Path("src/komira_jose/tests/fixtures/rsa_test_key.pem").read_text()
     )
 
 
