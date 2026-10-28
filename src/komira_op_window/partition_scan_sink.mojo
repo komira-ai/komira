@@ -284,6 +284,23 @@ def _eval_partition_expr(
 # =============================================================================
 
 
+def _copy_sink_data(sink_data: PartitionBySinkData) raises -> PartitionBySinkData:
+    """A deep copy of a PartitionBySinkData (its fields are Movable only)."""
+    var exprs_copy = List[PartitionExpr]()
+    for i in range(len(sink_data.partition_exprs)):
+        exprs_copy.append(sink_data.partition_exprs[i].copy())
+    var sb = SchemaBuilder()
+    for i in range(sink_data.output_schema.num_columns()):
+        sb.add_field(sink_data.output_schema.field_at(i))
+    return PartitionBySinkData(
+        sink_data.partition_keys.copy(),
+        sink_data.order_keys.copy(),
+        sink_data.descending.copy(),
+        exprs_copy^,
+        sb.build(),
+    )
+
+
 def _empty_output(sink_data: PartitionBySinkData) raises -> RecordBatch:
     """A zero-row batch of the sink's output schema."""
     var sb = SchemaBuilder()
