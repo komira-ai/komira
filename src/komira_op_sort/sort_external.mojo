@@ -103,12 +103,21 @@ struct ExternalSorter(Movable, Deinitable):
     """In-memory sorted runs accumulated from final-buffer sort. Each entry
     is one sorted run (possibly multi-batch after split)."""
 
+    def __del__(deinit self):
+        """Release the spill files of a sorter dropped before `finish` (a
+        cancelled or failed query). Best-effort: a destructor cannot raise."""
+        if self._spill_storage:
+            try:
+                self._spill_storage.value().cleanup()
+            except:
+                pass
+
     @staticmethod
     def create(
         memory_budget: Int,
         var key_names: List[String],
         var descending: List[Bool],
-        var spill_dir: String = String("/tmp"),
+        var spill_dir: String,
         output_batch_size: Int = DEFAULT_OUTPUT_BATCH_SIZE,
     ) raises -> ExternalSorter:
         """Construct a new sorter.
@@ -118,7 +127,10 @@ struct ExternalSorter(Movable, Deinitable):
                 in-memory buffer estimate exceeds this, spill is triggered.
             key_names: Sort key column names, primary key first.
             descending: Per-key direction. Must match len(key_names).
-            spill_dir: Directory for spill files (created on demand).
+            spill_dir: Directory for spill files, chosen by the caller (the
+                sorter reads no environment); a sub-directory is created
+                under it on the first spill and removed when the sorter
+                finishes, fails or is dropped.
             output_batch_size: Rows per merged output batch.
         """
         if len(key_names) != len(descending):
@@ -324,10 +336,20 @@ struct ExternalSorter(Movable, Deinitable):
         # primitive), then set_len_unchecked(0) so the slab drop does not
         # double-destroy the moved-out slots.
         var n_run = len(sorted_run)
-        for i in range(n_run):
-            var b = sorted_run.take_slot_unchecked(i)
-            _ = native_column_write_chunk(storage, b^)
-            self._spill_next_chunk += 1
+        var taken = 0
+        try:
+            for i in range(n_run):
+                var b = sorted_run.take_slot_unchecked(i)
+                taken = i + 1
+                _ = native_column_write_chunk(storage, b^)
+                self._spill_next_chunk += 1
+        except e:
+            # Drop the batches not yet written, then forget every slot: the
+            # slab must not destroy a moved-out slot again.
+            for k in range(taken, n_run):
+                _ = sorted_run.take_slot_unchecked(k)
+            sorted_run.set_len_unchecked(0)
+            raise e^
         sorted_run.set_len_unchecked(0)
 
         # The sync the spill contract asks for before the in-memory state is
@@ -375,24 +397,32 @@ struct ExternalSorter(Movable, Deinitable):
             # mutable borrow of `storage` (now a local var, not a borrow of
             # self) does not conflict with the `self._rebuild_schema()` borrow.
             var storage = self._spill_storage.take()
-            for i in range(len(self._spill_run_first_chunk)):
-                var first = self._spill_run_first_chunk[i]
-                var n = self._spill_run_nbatches[i]
-                var rb = Slab[RecordBatch]()
-                for j in range(n):
-                    # THSPLC decode reattaches the captured schema directly
-                    # (the codec restores into the caller's expected Schema —
-                    # field names are preserved, no "col_0" patch needed).
-                    # Chunk ids are monotonic from 1: run i's j-th batch is at
-                    # ChunkId(first + j) in the shared storage.
-                    var raw = native_column_read_chunk(
-                        storage,
-                        ChunkId(UInt64(first + j)),
-                        self._rebuild_schema(),
-                    )
-                    rb.append(raw^)
-                if len(rb) > 0:
-                    cursors.append(RunCursor(rb^))
+            try:
+                for i in range(len(self._spill_run_first_chunk)):
+                    var first = self._spill_run_first_chunk[i]
+                    var n = self._spill_run_nbatches[i]
+                    var rb = Slab[RecordBatch]()
+                    for j in range(n):
+                        # THSPLC decode reattaches the captured schema directly
+                        # (the codec restores into the caller's expected Schema —
+                        # field names are preserved, no "col_0" patch needed).
+                        # Chunk ids are monotonic from 1: run i's j-th batch is at
+                        # ChunkId(first + j) in the shared storage.
+                        var raw = native_column_read_chunk(
+                            storage,
+                            ChunkId(UInt64(first + j)),
+                            self._rebuild_schema(),
+                        )
+                        rb.append(raw^)
+                    if len(rb) > 0:
+                        cursors.append(RunCursor(rb^))
+            except e:
+                # A failed read must not leave the run files behind.
+                try:
+                    storage.cleanup()
+                except:
+                    pass
+                raise e^
             # All runs restored into memory (decode_copy made them storage-
             # independent). Release every chunk file + rmdir the shared root.
             storage.cleanup()

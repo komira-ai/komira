@@ -485,6 +485,50 @@ def test_string_with_nulls() raises:
     assert_equal(arr.get(2), String("zzz"))
 
 
+def test_sliced_source_with_validity() raises:
+    """A zero-copy slice (`_offset > 0`) of a nullable source is read from its
+    window, values and validity both, across a batch boundary."""
+    var vals: List[Int64] = [10, 11, 12, 13]
+    var full = Column.from_primitive(PrimitiveArray[DType.int64].from_list(vals))
+    var vbm = Bitmap.create(4)
+    vbm.set(0)
+    vbm.set(1)
+    vbm.set(3)
+    full._validity = vbm^
+    full._null_count = 1
+    var sliced = full.slice(1, 3)  # logical rows: 11, null, 13
+    var sb = SchemaBuilder()
+    sb.add_field(Field("k", ArrowType.INT64, True))
+    var rb0 = RecordBatchBuilder()
+    rb0.add_column(sliced^)
+    var b0 = rb0.build(sb.build())
+    var b1 = _batch_i64([Int64(20), Int64(21)], "k")
+
+    var srcs = Slab[RecordBatch]()
+    srcs.append(b0^)
+    srcs.append(b1^)
+    var idx = List[Tuple[Int, Int]]()
+    idx.append((0, 0))
+    idx.append((1, 1))
+    idx.append((0, 2))
+    idx.append((0, 1))
+    idx.append((1, 0))
+    var out = cross_batch_gather(srcs, idx)
+    assert_equal(out.num_rows(), 5)
+    var arr = out.column_at(0).as_primitive[DType.int64]()
+    assert_equal(arr.get(0), Int64(11))
+    assert_equal(arr.get(1), Int64(21))
+    assert_equal(arr.get(2), Int64(13))
+    assert_equal(arr.get(4), Int64(20))
+    ref v = out.column_at(0)._validity.value()
+    assert_equal(v.test(0), True)
+    assert_equal(v.test(1), True)
+    assert_equal(v.test(2), True)
+    assert_equal(v.test(3), False)
+    assert_equal(v.test(4), True)
+    assert_equal(out.column_at(0)._null_count, 1)
+
+
 # =============================================================================
 # Main
 # =============================================================================
@@ -505,4 +549,5 @@ def main() raises:
     test_smoke_string()
     test_smoke_bool()
     test_string_with_nulls()
-    print("PASS: all 14 cross_batch_gather tests")
+    test_sliced_source_with_validity()
+    print("PASS: all 15 cross_batch_gather tests")
