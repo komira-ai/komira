@@ -1,5 +1,5 @@
 """Hermetic Node.js for tests: `node_dist`, `npm_package`, `node_test`,
-`esbuild_bundle` and `c_shared_lib` (README.md).
+`esbuild_bundle`, `c_shared_lib`, `node_binding_test` and `node_addon` (README.md).
 
 `node_dist` unpacks a sha256-pinned Node.js release archive (linux-x64) into
 a directory holding `bin/node`, `include/node` (the Node-API headers) and the
@@ -199,17 +199,10 @@ _npm_package = rule(
 
 # ---- node_test ---------------------------------------------------------------
 
-# `node_act node-test` runs node on the staged script. With `expect` "pass"
-# the script must exit 0; with "fail" it must exit non-zero with the expected
-# text on stderr.
-
-def _node_test_impl(ctx):
-    dist = ctx.attrs.node[NodeDistInfo]
-    where = str(ctx.label.raw_target())
-    if ctx.attrs.expect_error == "":
-        fail("{}: expect_error is empty: name the text the script must print on stderr, or leave expect_error out".format(where))
-    staged = {ctx.attrs.src.short_path: ctx.attrs.src}
-    for s in ctx.attrs.srcs:
+def _stage(ctx, where, sources):
+    """The directory a node test runs from: `sources` at their package paths, `data` at its destinations, the npm closure of `deps` under node_modules."""
+    staged = {}
+    for s in sources:
         if s.short_path in staged:
             fail("{}: {} is listed twice".format(where, s.short_path))
         staged[s.short_path] = s
@@ -221,7 +214,18 @@ def _node_test_impl(ctx):
         if "node_modules/" + k in staged:
             fail("{}: data destination node_modules/{} is also a package of deps".format(where, k))
         staged["node_modules/" + k] = v[1]
-    root = ctx.actions.copied_dir(ctx.label.name + ".srcs", staged)
+    return ctx.actions.copied_dir(ctx.label.name + ".srcs", staged)
+
+# `node_act node-test` runs node on the staged script. With `expect` "pass"
+# the script must exit 0; with "fail" it must exit non-zero with the expected
+# text on stderr.
+
+def _node_test_impl(ctx):
+    dist = ctx.attrs.node[NodeDistInfo]
+    where = str(ctx.label.raw_target())
+    if ctx.attrs.expect_error == "":
+        fail("{}: expect_error is empty: name the text the script must print on stderr, or leave expect_error out".format(where))
+    root = _stage(ctx, where, [ctx.attrs.src] + ctx.attrs.srcs)
     out = ctx.actions.declare_output(ctx.label.name + ".pass")
     ctx.actions.run(
         cmd_args(
@@ -262,6 +266,50 @@ _node_test = rule(
         "node": attrs.exec_dep(providers = [NodeDistInfo], default = "komira//third_party/node:node"),
         "src": attrs.source(),
         "srcs": attrs.list(attrs.source(), default = []),
+        "_node_act": attrs.exec_dep(default = "komira//tools/build/node_tools:node_act", providers = [RunInfo]),
+    } | RERUN_ATTRS,
+)
+
+# ---- node_binding_test -------------------------------------------------------
+
+# `node_act binding-test` runs `node --test` over the staged test files and
+# requires a TAP summary of tests that ran, all passed, none skipped.
+
+def _node_binding_test_impl(ctx):
+    dist = ctx.attrs.node[NodeDistInfo]
+    where = str(ctx.label.raw_target())
+    if len(ctx.attrs.srcs) == 0:
+        fail("{}: srcs is empty: name the test files node --test runs".format(where))
+    root = _stage(ctx, where, ctx.attrs.srcs)
+    out = ctx.actions.declare_output(ctx.label.name + ".pass")
+    ctx.actions.run(
+        cmd_args(
+            ctx.attrs._node_act[RunInfo],
+            "binding-test",
+            "--node",
+            dist.root,
+            "--libs",
+            dist.native_libs,
+            "--out",
+            out.as_output(),
+            "--dir",
+            root,
+            "--",
+            [s.short_path for s in ctx.attrs.srcs],
+        ),
+        env = rerun_env(ctx),
+        category = "node_binding_test",
+    )
+    return [DefaultInfo(default_output = out), rerun_info(ctx)]
+
+_node_binding_test = rule(
+    impl = _node_binding_test_impl,
+    doc = "Runs the test files `srcs` (plain `.mjs`/`.js` using `node:test`) with the pinned `node --test` as a build action; the output (`<name>.pass`) exists only if node exited 0 and its TAP summary reports tests that all passed with none skipped or todo. `data` ({dest: source}, a build output allowed, a built `.node` addon for one) is staged at `dest` and the closure of the npm packages in `deps` under `node_modules/<package>`.",
+    attrs = {
+        "data": attrs.dict(attrs.string(), attrs.source(), default = {}),
+        "deps": attrs.list(attrs.dep(providers = [NpmPackageInfo]), default = []),
+        "node": attrs.exec_dep(providers = [NodeDistInfo], default = "komira//third_party/node:node"),
+        "srcs": attrs.list(attrs.source()),
         "_node_act": attrs.exec_dep(default = "komira//tools/build/node_tools:node_act", providers = [RunInfo]),
     } | RERUN_ATTRS,
 )
@@ -384,6 +432,9 @@ def _dist_macro(**kwargs):
 def _npm_macro(**kwargs):
     _npm_package(**_linux(kwargs))
 
+def _binding_macro(**kwargs):
+    _node_binding_test(**_linux(kwargs))
+
 def _test_macro(**kwargs):
     _node_test(**_linux(kwargs))
 
@@ -397,10 +448,25 @@ def _shared_macro(**kwargs):
         kwargs["zig_triple"] = row("linux-x86_64")["zig_triple"]
     _c_shared_lib(**_linux(kwargs))
 
+def _addon_macro(**kwargs):
+    # A Node-API addon: a c_shared_lib named `<name>.node` that compiles
+    # against the pinned node's headers. `node_include` is the directory
+    # target of those headers (a repository using komira as a cell passes its
+    # own dist's `[include]`).
+    include = kwargs.pop("node_include", "komira//third_party/node:node[include]")
+    if "include_dirs" in kwargs:
+        fail("{}: node_addon takes node_include, not include_dirs".format(kwargs["name"]))
+    kwargs["include_dirs"] = [include]
+    if "out" not in kwargs:
+        kwargs["out"] = kwargs["name"] + ".node"
+    _shared_macro(**kwargs)
+
 # Each rule and macro a BUCK file calls declares its package's doc_tree
 # (tools/build/lint/doc_tree.bzl), so no BUCK file names one.
 node_dist = declares_docs(_dist_macro)
 npm_package = declares_docs(_npm_macro)
 node_test = declares_docs(_test_macro)
+node_binding_test = declares_docs(_binding_macro)
 esbuild_bundle = declares_docs(_bundle_macro)
 c_shared_lib = declares_docs(_shared_macro)
+node_addon = declares_docs(_addon_macro)

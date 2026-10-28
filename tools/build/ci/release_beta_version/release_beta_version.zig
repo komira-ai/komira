@@ -1,12 +1,12 @@
-//! release_beta_version: gives every member of a mopm workspace one beta version.
+//! release_beta_version: gives every member of a mopm workspace one version (the version of a release run).
 //!
 //!   release_beta_version --workspace-root <dir> --version 0.1.<n>
 //!
-//! The beta registry accepts a (name, version) pair once, and mopm versions are exactly
-//! MAJOR.MINOR.PATCH, so each push to main needs a fresh number. release.yml's `mopm-stage-beta`
-//! job runs this on its own checkout, before `mopm stage`, with `0.1.<github.run_number>`: the
+//! A registry accepts a (name, version) pair once, and mopm versions are exactly
+//! MAJOR.MINOR.PATCH, so each push to main needs a fresh number. release.yml's `mopm-stage`
+//! job runs this on its checkout, before `mopm stage`, with `0.1.<github.run_number>`: the
 //! number stays inside the `>=0.1,<0.2` every package asks of its siblings, sorts above 0.1.0,
-//! and the newest push is the newest version. Nothing is committed back; prod never runs this.
+//! and the newest push is the newest version. Nothing is committed back.
 //!
 //! `mopm stage` reads each version from `mopm.toml` when it runs (src/cli/stage_cmd.zig walks
 //! the workspace and packs `.mojoc` bytes that carry no version), so rewriting the manifests
