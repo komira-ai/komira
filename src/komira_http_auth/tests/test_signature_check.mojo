@@ -7,7 +7,7 @@
 #
 # THE CACHE ALONE (`JwksCache.verify_signature`), with no header gate in
 # front of it: every token here is signed with RS256 over its own header by
-# komira_http_core's RSA test key, published under KID, so the signature is
+# komira_jose's RSA test key, published under KID, so the signature is
 # valid and only the pinned algorithm, the kid selection, the pinned typ or
 # the signature bytes can refuse it. Each case asserts komira_jose's exact
 # text. These catch a defect in the call into komira_jose that the header gate
@@ -61,10 +61,10 @@ comptime _EC_XY = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
 
 
 def _key() raises -> List[UInt8]:
-    """The repository's RSA-2048 PKCS#8 test key (komira_http_core's TLS
+    """The repository's RSA-2048 PKCS#8 test key (komira_jose's
     fixture), declared as this test's data in the BUCK file."""
     return rsa_pkcs8_der_from_pem(
-        Path("src/komira_http_core/tests/fixtures/tls/leaf_key.pem").read_text()
+        Path("src/komira_jose/tests/fixtures/rsa_test_key.pem").read_text()
     )
 
 
