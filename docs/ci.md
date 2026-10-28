@@ -141,7 +141,7 @@ repository variables (Settings > Secrets and variables > Actions > Variables):
 | `FARM_ADDRESS` | the remote-execution service as a URL with its port |
 | `FARM_INSTANCE` | its instance name |
 | `FARM_LINUX_X86_64_PROPERTIES` | the worker property set of the linux x86_64 actions |
-| `FARM_DARWIN_ARM64_PROPERTIES`, `FARM_DARWIN_MACOS_HOSTS`, `FARM_MACOS_LIBRARY_DIRS` | the macOS arm64 worker property set, the host identities of those workers, and the directories a macOS test run searches for a library (the last is optional): the `darwin-properties`, `darwin-macos-hosts` and `macos-library-dirs` inputs, passed by the job `release-macos` of `release.yml` only |
+| `FARM_DARWIN_ARM64_PROPERTIES`, `FARM_DARWIN_MACOS_HOSTS`, `FARM_MACOS_LIBRARY_DIRS` | the macOS arm64 worker property set, the host identities of those workers, and the directories a macOS test run searches for a library (the last is optional): the `darwin-properties`, `darwin-macos-hosts` and `macos-library-dirs` inputs, passed by the job `release-macos` of `release-macos.yml` only |
 | `FARM_TLS` | `true` when the service serves REAPI over TLS; unset or empty means `false`. Each workflow passes it as farm-connect's `tls`, so the address and its transport change together |
 
 Variables are not masked, and a job's logs are public. The action masks the
@@ -320,8 +320,9 @@ unconfigured query through the prelude's select moved there.
 
 ## The macOS build of the release
 
-The macOS (darwin-arm64) build is a job of `release.yml`, `release-macos`, and
-no pull request builds it. The farm has far more Linux cores than
+The macOS (darwin-arm64) build is its own workflow,
+[`release-macos.yml`](../.github/workflows/release-macos.yml) (one job, `release-macos`),
+and no pull request builds it. `release.yml` holds no macOS job. The farm has far more Linux cores than
 Mac ones, so a macOS leg in the pull request check would queue every change
 behind the scarcest machines; the macOS platform is built once per release run
 instead.
@@ -349,16 +350,26 @@ instead.
   macOS build with no second edit. The target is left out of `//ci:pr` on purpose
   (`EXCLUDED` of `tools/build/ci/rules.bzl`).
 - **Priority, timing, bound.** `farm-qos: batch` like every job of the file; once per
-  run (a push to `main` or a manual run), in parallel with the Linux jobs; it `needs`
-  nothing and nothing `needs` it. `timeout-minutes: 90`: the release runs in one
-  concurrency group, so the next push waits for the whole run, and the bound keeps a
-  stalled macOS build from holding the next release for long.
+  release (a push to `main` that is not documentation-only, or a manual run: the same
+  triggers as `release.yml`, so it builds the same commit), never per pull request, in
+  parallel with the Linux jobs; nothing in `release.yml` `needs` it or reads its result.
+  It is a separate workflow with its own concurrency group, `release-macos-<ref>`, and
+  `cancel-in-progress: true`: `release.yml` is one group in which a running release is
+  never cancelled, so a macOS job inside it that stalled would hold the next push's
+  release, the Linux prod publish included. Here a newer push cancels the running macOS
+  build and starts its own, and a macOS build never queues a release. The trigger is
+  `push` plus `workflow_dispatch` rather than `workflow_run` after `release.yml`: it
+  needs no ordering with the release (nothing waits on it), and `workflow_run` would
+  start it only after the whole release finished, build the default branch's head
+  instead of the pushed commit, and run for a pull request's `release.yml` run too if
+  that ever changed. `timeout-minutes: 90` still bounds a stalled build.
 - **Reported, not blocking (for now).** The job is `continue-on-error: true`: a red macOS
-  build is a failed job in the run, with a line in its summary, and the run, the
-  prod publish and `main_red.yml` do not see it. The set has not yet been measured on
+  build is a failed run of `release-macos.yml`, with a line in its summary, and the
+  release run, the prod publish and `main_red.yml` do not see it. The set has not yet been measured on
   the macOS workers, and the publish must not wait on a platform the release does not
-  ship. When the set is green over several runs, remove the line and add the job to
-  the `needs` of `prod-commit`.
+  ship. When the set is green over several runs, remove the line and move the job back
+  into `release.yml` as a `needs` of `prod-commit` (or keep the workflow and have the
+  publish wait on it).
 
 ## release.yml: the release
 

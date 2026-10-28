@@ -211,8 +211,8 @@ zig_test(
 )
 
 # The macOS arm64 build set (darwin_libs.bzl): the library of every mopm package that builds for
-# macOS, built with `--target-platforms komira//tools/build/platforms:darwin-arm64` by release.yml's
-# `release-macos` job on the farm's macOS workers, once per release run. It is in no pull request's
+# macOS, built with `--target-platforms komira//tools/build/platforms:darwin-arm64` by release-macos.yml's
+# `release-macos` job on the farm's macOS workers, once per release. It is in no pull request's
 # check: //ci:pr builds for the client's platform only, and the zig case
 # //:release_workflow_cases holds that no workflow that runs on a pull request names it or a
 # macOS platform.

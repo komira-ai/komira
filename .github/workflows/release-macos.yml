@@ -1,0 +1,100 @@
+# The macOS arm64 build of komira's mopm packages, on the farm's macOS workers (docs/ci.md, "The macOS
+# build of the release"). It builds //release:mopm_darwin_libs (release/darwin_libs.bzl: the library of
+# every mopm package that builds for macOS, each with its welded tests) for `--target-platforms
+# komira//tools/build/platforms:darwin-arm64`: the compiles and the tests run on the farm's macOS
+# workers through the farm connection, never on a GitHub-hosted macOS runner (the job runs on an ubuntu
+# runner and only asks the farm). The macOS workers are few and the Linux ones many, so this build is in
+# the release and never in a pull request's check: this workflow has no pull_request,
+# pull_request_target or merge_group trigger, and pr.yml and every workflow that runs on a pull request
+# hold no macOS platform and no macOS worker set (//:release_macos_cases says so).
+#
+# ITS OWN WORKFLOW, so it cannot slow a release. release.yml is one concurrency group in which a running
+# release is never cancelled; a macOS job inside it that stalled for 90 minutes would hold the next
+# push's release, Linux prod publish included. This workflow is in the group `release-macos-<ref>` with
+# `cancel-in-progress: true`: a newer push replaces a running macOS build instead of queueing behind it,
+# and nothing in release.yml waits on it or reads its result.
+#
+# Triggers: the same as release.yml's, so it builds the same commit once per release (never per pull
+# request): a push to main (not a documentation-only one) and a manual run, and nothing else.
+#
+# NOT BLOCKING, for now: `continue-on-error: true` on the job. A red macOS build shows as a failed run
+# of this workflow (and a line in its summary), and the release, the prod publish and main-red stay
+# green. Why: the set has never been measured on the macOS workers, and the publish must not wait on a
+# platform the release does not ship yet. Bounded: 90 minutes.
+#
+# It needs the repository variables FARM_DARWIN_ARM64_PROPERTIES and FARM_DARWIN_MACOS_HOSTS (and may
+# take FARM_MACOS_LIBRARY_DIRS), docs/ci.md; without them the step after the connection fails the job
+# and says so, instead of building on the runner.
+#
+# The job holds `contents: read` and the `id-token: write` that the farm connection exchanges for the
+# tailnet, nothing else, in the environment `build`. Every action is pinned.
+name: release-macos
+
+on:
+  push:
+    branches: [main]
+    # documentation only: no release, so no macOS build (the same paths as release.yml)
+    paths-ignore:
+      - 'docs/**'
+      - '**.md'
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: release-macos-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  release-macos:
+    runs-on: ubuntu-24.04
+    environment: build
+    timeout-minutes: 90
+    continue-on-error: true
+    permissions:
+      contents: read
+      # for farm-connect only: the token Tailscale trusts
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: ./.github/actions/farm-connect
+        with:
+          ts-client-id: ${{ vars.TS_CLIENT_ID }}
+          ts-audience: ${{ vars.TS_AUDIENCE }}
+          farm-address: ${{ vars.FARM_ADDRESS }}
+          farm-instance: ${{ vars.FARM_INSTANCE }}
+          farm-properties: ${{ vars.FARM_LINUX_X86_64_PROPERTIES }}
+          darwin-properties: ${{ vars.FARM_DARWIN_ARM64_PROPERTIES }}
+          darwin-macos-hosts: ${{ vars.FARM_DARWIN_MACOS_HOSTS }}
+          macos-library-dirs: ${{ vars.FARM_MACOS_LIBRARY_DIRS }}
+          tls: ${{ vars.FARM_TLS || 'false' }}
+          # main's release work queues behind the pull-request checks when the farm is full
+          farm-qos: batch
+      # Without the macOS worker set the build would fail analysis, and without the linux set
+      # (the toolchain unpack runs on a linux worker of the farm) it would run on this runner.
+      - name: the buckconfig names the farm and its macOS workers
+        run: |
+          for key in linux_x86_64_properties darwin_arm64_properties darwin_macos_hosts; do
+            ./buck2 audit config "komira_re.$key" --style json | grep -q '": *"[^"]' ||
+              { echo "::error::the machine buckconfig sets no [komira_re] $key: the macOS build has no farm worker to run on (docs/ci.md, repository variables)"; exit 1; }
+          done
+      - name: build the farm assertion
+        id: assert
+        run: echo "path=$(./buck2 build komira//tools/build/ci:assert_remote --show-full-simple-output)" >> "$GITHUB_OUTPUT"
+      # The library of every package that builds for macOS, its welded tests run on the macOS
+      # workers. `--keep-going`: one package's failure does not hide the others'.
+      - name: build the macOS set
+        uses: ./.github/actions/buck2-farm
+        with:
+          args: build --target-platforms komira//tools/build/platforms:darwin-arm64 --keep-going //release:mopm_darwin_libs
+          assert-remote: ${{ steps.assert.outputs.path }}
+      - name: the macOS build failed
+        if: failure()
+        run: |
+          echo "release-macos FAILED on ${GITHUB_SHA}. The macOS arm64 build of //release:mopm_darwin_libs on the farm macOS workers did not pass. It does not block the release or the publish." >> "$GITHUB_STEP_SUMMARY"
+      - name: Stop buck2
+        if: always()
+        run: ./buck2 kill || true

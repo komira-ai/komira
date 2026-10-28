@@ -111,7 +111,7 @@ HEAVY = [
 EXCLUDED = [
     ("komira//third_party/python/...", "the pinned CPython and wheels: inputs of Python tests only"),
     ("komira//release/ci/tests:", "py_test of the CI scripts, not of the Python SDK"),
-    ("komira//release:mopm_darwin_libs", "the macOS arm64 build of the release: it is built for the darwin-arm64 platform on the farm's macOS workers by release.yml's job release-macos, and never by a pull request (a Linux build of its libraries is the aggregate's own)"),
+    ("komira//release:mopm_darwin_libs", "the macOS arm64 build of the release: it is built for the darwin-arm64 platform on the farm's macOS workers by release-macos.yml (job release-macos), and never by a pull request (a Linux build of its libraries is the aggregate's own)"),
     ("komira//src/tests/e2e/komira_tls_interop_e2e:test_komira_client_vs_cpython_server", "runs a CPython peer, not a test of the Python SDK"),
     ("komira//src/tests/e2e/komira_tls_interop_e2e:test_cpython_client_vs_komira_server", "runs a CPython peer, not a test of the Python SDK"),
     ("komira//src/tests/e2e/komira_tls_interop_e2e:test_komira_client_refuses_cpython_server", "runs a CPython peer, not a test of the Python SDK"),

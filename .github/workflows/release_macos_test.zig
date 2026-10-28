@@ -4,18 +4,24 @@
 //! (ci_targets/shard_<n>.bzl) and the macOS set's own definition (darwin_libs.bzl).
 //!
 //! The decision these hold: the macOS platform is not in the pull request check (the farm has far more
-//! Linux cores than Mac ones), and the macOS build is a job of the release.
+//! Linux cores than Mac ones), and the macOS build is a workflow of its own, release-macos.yml, run once
+//! per release (a push to main, a manual run), in a concurrency group of its own so that a stalled Mac
+//! build never holds the next release.
 //! What the cases catch:
-//!  - the job `release-macos` of release.yml exists once and builds the macOS set on the farm: it runs on
+//!  - the workflow release-macos.yml exists, runs on push to main and workflow_dispatch only (never
+//!    pull_request, pull_request_target or merge_group, never a schedule), its concurrency group is not
+//!    release.yml's and it cancels a running build in favour of a newer push;
+//!  - release.yml holds no macOS job: no job `release-macos`, no job `needs` it or reads its result,
+//!    and no non-comment line naming a macOS platform, worker set or runner;
+//!  - the job `release-macos` of release-macos.yml exists once and builds the macOS set on the farm: it runs on
 //!    the ubuntu runner (a macOS runner is refused), joins the farm with the macOS worker set and
 //!    hosts and `farm-qos: batch`, passes `--target-platforms komira//tools/build/platforms:darwin-arm64`
 //!    to `//release:mopm_darwin_libs` through the buck2-farm action (which fails a step that ran
 //!    anything locally), and says in its buckconfig step that the macOS worker keys must be set;
-//!  - it does not hold up the Linux path: it `needs` nothing, no other job `needs` it (so the prod
+//!  - it does not hold up the Linux path: it `needs` nothing (nothing in release.yml `needs` it, so the prod
 //!    publish never waits on it), it is `continue-on-error: true` (the stated choice: reported, not
 //!    blocking), and it is bounded (`timeout-minutes` at most 120, the longest of the other jobs);
-//!  - no other job of release.yml names the macOS platform, a macOS worker set or a macOS runner;
-//!  - it is not triggered on a pull request: release.yml's `on:` names no pull_request, and no
+//!  - it is not triggered on a pull request: neither macOS-naming workflow's `on:` names one, and no
 //!    workflow that runs on a pull request (pr.yml, coverage.yml) has a line, comment or not,
 //!    naming darwin, macOS, osx or `--target-platforms`, and none passes the macOS worker set to farm-connect;
 //!  - the pull request's check set (ci/targets shards) names neither the macOS set nor a macOS runner;
@@ -104,6 +110,10 @@ fn lineAt(lines: []const []const u8, exact: []const u8) ?usize {
     return null;
 }
 
+fn mentionsLine(text: []const u8, needle: []const u8) bool {
+    return std.mem.indexOf(u8, text, needle) != null;
+}
+
 fn mentions(lines: []const []const u8, needle: []const u8) bool {
     for (lines) |l| if (std.mem.indexOf(u8, l, needle) != null) return true;
     return false;
@@ -121,10 +131,62 @@ fn namesMacos(line: []const u8) bool {
     return false;
 }
 
-/// Null if release.yml's macOS job holds its contract, else the refusal.
-fn checkMacos(ar: std.mem.Allocator, text: []const u8) !?[]const u8 {
+/// The value of `key` (`group` or `cancel-in-progress`) under the top-level `concurrency:`, or null.
+fn concurrencyValue(text: []const u8, key: []const u8) ?[]const u8 {
+    var in_c = false;
+    var it = std.mem.splitScalar(u8, text, '\n');
+    while (it.next()) |line| {
+        if (line.len > 0 and line[0] != ' ' and line[0] != '#') in_c = std.mem.eql(u8, line, "concurrency:");
+        if (!in_c or !std.mem.startsWith(u8, line, "  ")) continue;
+        const rest = line[2..];
+        if (std.mem.startsWith(u8, rest, key) and rest.len > key.len and rest[key.len] == ':') return std.mem.trim(u8, rest[key.len + 1 ..], " ");
+    }
+    return null;
+}
+
+/// Null if the concurrency group of the macOS workflow is its own, else the refusal.
+fn checkGroups(mac: []const u8, rel: []const u8) ?[]const u8 {
+    const g = concurrencyValue(mac, "group") orelse return "release-macos.yml has no concurrency group (it would share none, or the default)";
+    const r = concurrencyValue(rel, "group") orelse return "release.yml has no concurrency group";
+    if (std.mem.eql(u8, g, r)) return "release-macos.yml is in release.yml's concurrency group: a stalled macOS build would hold the next release";
+    if (std.mem.indexOf(u8, g, "release-main") != null) return "release-macos.yml names release.yml's group release-main";
+    return null;
+}
+
+/// Null if release.yml holds no macOS job, else the refusal.
+fn checkRelease(ar: std.mem.Allocator, text: []const u8) !?[]const u8 {
     var n: usize = 0;
-    const job = (try jobLines(ar, text, JOB, &n)) orelse return "release.yml has no job release-macos";
+    if ((try jobLines(ar, text, JOB, &n)) != null) return "release.yml has a job release-macos: the macOS build is the workflow release-macos.yml";
+    const names = try jobNames(ar, text);
+    for (names) |other| {
+        var m: usize = 0;
+        const lines = (try jobLines(ar, text, other, &m)).?;
+        for (lines) |l| {
+            if (std.mem.startsWith(u8, l, "    needs:") and std.mem.indexOf(u8, l, JOB) != null)
+                return try std.fmt.allocPrint(ar, "{s} needs release-macos: the Linux path would wait on the macOS build", .{other});
+            if (std.mem.indexOf(u8, l, "needs." ++ JOB) != null)
+                return try std.fmt.allocPrint(ar, "{s} reads the result of release-macos: the Linux path would depend on the macOS build", .{other});
+        }
+    }
+    var it = std.mem.splitScalar(u8, text, '\n');
+    while (it.next()) |line| {
+        if (isComment(line)) continue;
+        if (namesMacos(line)) return "release.yml names a macOS platform, worker set or runner: only release-macos.yml does";
+    }
+    return null;
+}
+
+/// Null if release-macos.yml holds its contract (the job and the workflow around it), else the refusal.
+fn checkMacos(ar: std.mem.Allocator, text: []const u8) !?[]const u8 {
+    // the workflow: push to main and a manual run, never a pull request, a merge group or a schedule
+    if (runsOnPullRequest(text)) return "release-macos.yml runs on a pull request (pull_request, pull_request_target or merge_group)";
+    if (!mentionsLine(text, "\n    branches: [main]\n")) return "release-macos.yml does not run on push to main";
+    if (!mentionsLine(text, "\n  push:\n") or !mentionsLine(text, "\n  workflow_dispatch:\n")) return "release-macos.yml is not triggered by push and workflow_dispatch";
+    if (mentionsLine(text, "\n  schedule:") or mentionsLine(text, "\n  workflow_run:")) return "release-macos.yml has a trigger beyond push and workflow_dispatch";
+    const cancel = concurrencyValue(text, "cancel-in-progress") orelse return "release-macos.yml has no cancel-in-progress";
+    if (!std.mem.eql(u8, cancel, "true")) return "release-macos.yml does not cancel a running build for a newer push (cancel-in-progress: true)";
+    var n: usize = 0;
+    const job = (try jobLines(ar, text, JOB, &n)) orelse return "release-macos.yml has no job release-macos";
     if (n != 1) return "release-macos is defined more than once";
 
     // on the farm's macOS workers, never a hosted macOS runner: the job itself runs on ubuntu
@@ -141,23 +203,6 @@ fn checkMacos(ar: std.mem.Allocator, text: []const u8) !?[]const u8 {
     } else return "release-macos has no timeout-minutes (a stalled macOS build would hold the next release)");
     if (bound == 0 or bound > MAX_MINUTES) return "release-macos: timeout-minutes is not bounded at 120 or less";
     if (!has(job, BOUND)) return "release-macos: timeout-minutes is not the 90 the comment and docs/ci.md state";
-    const names = try jobNames(ar, text);
-    for (names) |other| {
-        if (std.mem.eql(u8, other, JOB)) continue;
-        var m: usize = 0;
-        const lines = (try jobLines(ar, text, other, &m)).?;
-        for (lines) |l| {
-            if (std.mem.startsWith(u8, l, "    needs:") and std.mem.indexOf(u8, l, JOB) != null)
-                return try std.fmt.allocPrint(ar, "{s} needs release-macos: the Linux path would wait on the macOS build", .{other});
-            if (std.mem.indexOf(u8, l, "needs." ++ JOB) != null)
-                return try std.fmt.allocPrint(ar, "{s} reads the result of release-macos: the Linux path would depend on the macOS build", .{other});
-        }
-        // the macOS platform, worker set and runner are named by this job only
-        for (lines) |l| {
-            if (namesMacos(l)) return try std.fmt.allocPrint(ar, "{s} names a macOS platform, worker set or runner: only release-macos does", .{other});
-        }
-    }
-
     // the farm connection: batch priority, with the macOS set, tls as every caller passes it
     const connect_at = lineAt(job, FARM_CONNECT) orelse return "release-macos does not join the farm";
     if (!has(job, QOS)) return "release-macos does not pass farm-qos: batch";
@@ -196,7 +241,7 @@ fn checkPullRequestWorkflow(text: []const u8) ?[]const u8 {
     var it = std.mem.splitScalar(u8, text, '\n');
     while (it.next()) |line| {
         if (isComment(line)) continue;
-        if (namesMacos(line)) return "a workflow that runs on a pull request names a macOS platform, worker set or runner (the macOS build is a job of release.yml)";
+        if (namesMacos(line)) return "a workflow that runs on a pull request names a macOS platform, worker set or runner (the macOS build is the workflow release-macos.yml)";
     }
     return null;
 }
@@ -261,7 +306,7 @@ fn listDir(ar: std.mem.Allocator, sub: []const u8) !Names {
 
 fn expectRefused(ar: std.mem.Allocator, text: []const u8, want: []const u8) !void {
     const got = (try checkMacos(ar, text)) orelse {
-        std.debug.print("accepted a release.yml that must be refused with: {s}\n", .{want});
+        std.debug.print("accepted a workflow that must be refused with: {s}\n", .{want});
         return error.Accepted;
     };
     if (std.mem.indexOf(u8, got, want) == null) {
@@ -283,29 +328,96 @@ fn intoJob(ar: std.mem.Allocator, text: []const u8, line: []const u8) ![]const u
     return replaced(ar, text, "  release-macos:\n", try std.fmt.allocPrint(ar, "  release-macos:\n{s}\n", .{line}));
 }
 
-test "release.yml holds the contract of the macOS build" {
+fn expectRefusedRelease(ar: std.mem.Allocator, text: []const u8, want: []const u8) !void {
+    const got = (try checkRelease(ar, text)) orelse {
+        std.debug.print("accepted a release.yml that must be refused with: {s}\n", .{want});
+        return error.Accepted;
+    };
+    if (std.mem.indexOf(u8, got, want) == null) {
+        std.debug.print("refused with \"{s}\", wanted \"{s}\"\n", .{ got, want });
+        return error.WrongRefusal;
+    }
+}
+
+fn expectRefusedGroups(mac: []const u8, rel: []const u8, want: []const u8) !void {
+    const got = checkGroups(mac, rel) orelse {
+        std.debug.print("accepted concurrency groups that must be refused with: {s}\n", .{want});
+        return error.Accepted;
+    };
+    if (std.mem.indexOf(u8, got, want) == null) {
+        std.debug.print("refused with \"{s}\", wanted \"{s}\"\n", .{ got, want });
+        return error.WrongRefusal;
+    }
+}
+
+test "release-macos.yml holds the contract of the macOS build, in a group of its own" {
     var arena = std.heap.ArenaAllocator.init(t.allocator);
     defer arena.deinit();
     const ar = arena.allocator();
-    const text = try readData(ar, &.{ "workflows", "release.yml" });
+    const text = try readData(ar, &.{ "workflows", "release-macos.yml" });
     if (try checkMacos(ar, text)) |why| {
+        std.debug.print("release-macos.yml: {s}\n", .{why});
+        return error.Refused;
+    }
+    // never a pull request, a merge group or a pull_request_target
+    try t.expect(!runsOnPullRequest(text));
+    const rel = try readData(ar, &.{ "workflows", "release.yml" });
+    if (checkGroups(text, rel)) |why| {
+        std.debug.print("{s}\n", .{why});
+        return error.Refused;
+    }
+    // and release.yml holds no macOS job
+    if (try checkRelease(ar, rel)) |why| {
         std.debug.print("release.yml: {s}\n", .{why});
         return error.Refused;
     }
-    // the job is the macOS build, and the workflow still has no pull_request trigger
-    try t.expect(!runsOnPullRequest(text));
 }
 
-test "each edit of the real release.yml that breaks the macOS build's contract is refused with its message" {
+test "each edit of the real workflows that breaks the macOS build's separation is refused with its message" {
     var arena = std.heap.ArenaAllocator.init(t.allocator);
     defer arena.deinit();
     const ar = arena.allocator();
-    const text = try readData(ar, &.{ "workflows", "release.yml" });
+    const text = try readData(ar, &.{ "workflows", "release-macos.yml" });
+    const rel = try readData(ar, &.{ "workflows", "release.yml" });
+
+    // the trigger: a pull request in any of its three spellings, a schedule, a run after another workflow
+    try expectRefused(ar, try replaced(ar, text, "  workflow_dispatch:\n", "  workflow_dispatch:\n  pull_request:\n"), "runs on a pull request");
+    try expectRefused(ar, try replaced(ar, text, "  workflow_dispatch:\n", "  workflow_dispatch:\n  pull_request_target:\n"), "runs on a pull request");
+    try expectRefused(ar, try replaced(ar, text, "  workflow_dispatch:\n", "  workflow_dispatch:\n  merge_group:\n"), "runs on a pull request");
+    try expectRefused(ar, try replaced(ar, text, "  workflow_dispatch:\n", "  workflow_dispatch:\n  schedule:\n    - cron: '0 3 * * *'\n"), "trigger beyond push");
+    try expectRefused(ar, try replaced(ar, text, "  workflow_dispatch:\n", "  workflow_dispatch:\n  workflow_run:\n    workflows: [release]\n"), "trigger beyond push");
+    try expectRefused(ar, try replaced(ar, text, "  workflow_dispatch:\n", ""), "not triggered by push and workflow_dispatch");
+    try expectRefused(ar, try replaced(ar, text, "    branches: [main]\n", "    branches: [main, 'release/**']\n"), "does not run on push to main");
+
+    // the group: release.yml's own would queue the macOS build behind a release and a release behind it
+    try expectRefused(ar, try replaced(ar, text, "  cancel-in-progress: true\n", "  cancel-in-progress: false\n"), "cancel-in-progress: true");
+    try expectRefused(ar, try replaced(ar, text, "  cancel-in-progress: true\n", ""), "no cancel-in-progress");
+    const rel_group = concurrencyValue(rel, "group").?;
+    try expectRefusedGroups(try replaced(ar, text, "  group: release-macos-${{ github.ref }}\n", try std.fmt.allocPrint(ar, "  group: {s}\n", .{rel_group})), rel, "release.yml's concurrency group");
+    try expectRefusedGroups(try replaced(ar, text, "  group: release-macos-${{ github.ref }}\n", "  group: release-main\n"), rel, "release-main");
+    try expectRefusedGroups(try replaced(ar, text, "concurrency:\n  group: release-macos-${{ github.ref }}\n  cancel-in-progress: true\n", ""), rel, "no concurrency group");
+
+    // release.yml holds no macOS job
+    try expectRefusedRelease(ar, try replaced(ar, rel, "  mopm-stage:\n", "  release-macos:\n    runs-on: ubuntu-24.04\n\n  mopm-stage:\n"), "has a job release-macos");
+    try expectRefusedRelease(ar, try replaced(ar, rel, "    needs: [release, mopm-stage]\n", "    needs: [release, mopm-stage, release-macos]\n"), "needs release-macos");
+    try expectRefusedRelease(ar, try replaced(ar, rel, "    needs: prod-commit\n", "    needs: [prod-commit, release-macos]\n"), "needs release-macos");
+    try expectRefusedRelease(ar, try replaced(ar, rel, "    needs: prod-stage\n", "    needs: prod-stage\n    if: needs.release-macos.result == 'success'\n"), "reads the result of release-macos");
+    try expectRefusedRelease(ar, try replaced(ar, rel, "          args: build //release/ci:check_release_ref --out", "          args: build --target-platforms komira//tools/build/platforms:darwin-arm64 //release/ci:check_release_ref --out"), "only release-macos.yml does");
+    try expectRefusedRelease(ar, try replaced(ar, rel, "  mopm-stage:\n    runs-on: ubuntu-24.04\n", "  mopm-stage:\n    runs-on: macos-15\n"), "only release-macos.yml does");
+    // a comment in release.yml may speak of the macOS build
+    try t.expect((try checkRelease(ar, try std.fmt.allocPrint(ar, "{s}\n# the macOS build is release-macos.yml\n", .{rel}))) == null);
+}
+
+test "each edit of the real release-macos.yml that breaks the macOS build's contract is refused with its message" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const ar = arena.allocator();
+    const text = try readData(ar, &.{ "workflows", "release-macos.yml" });
     const head = "  release-macos:\n    runs-on: ubuntu-24.04\n";
 
     // the job exists, once
     try expectRefused(ar, try replaced(ar, text, "  release-macos:\n", "  release-macos-gone:\n"), "has no job release-macos");
-    try expectRefused(ar, try replaced(ar, text, "  mopm-stage:\n", "  release-macos:\n    runs-on: ubuntu-24.04\n\n  mopm-stage:\n"), "more than once");
+    try expectRefused(ar, try std.fmt.allocPrint(ar, "{s}\n  release-macos:\n    runs-on: ubuntu-24.04\n", .{text}), "more than once");
 
     // on the farm's workers, not a hosted macOS runner
     try expectRefused(ar, try replaced(ar, text, head, "  release-macos:\n    runs-on: macos-15\n"), "does not run on ubuntu-24.04");
@@ -321,10 +433,6 @@ test "each edit of the real release.yml that breaks the macOS build's contract i
     try expectRefused(ar, try replaced(ar, text, BOUND ++ "\n", "    timeout-minutes: 360\n"), "not bounded at 120");
     try expectRefused(ar, try replaced(ar, text, BOUND ++ "\n", "    timeout-minutes: 0\n"), "not bounded at 120");
     try expectRefused(ar, try replaced(ar, text, BOUND ++ "\n", "    timeout-minutes: 100\n"), "not the 90");
-    // nothing waits on it: not the prod publish, not any other job
-    try expectRefused(ar, try replaced(ar, text, "    needs: [release, mopm-stage]\n", "    needs: [release, mopm-stage, release-macos]\n"), "needs release-macos");
-    try expectRefused(ar, try replaced(ar, text, "    needs: prod-commit\n", "    needs: [prod-commit, release-macos]\n"), "needs release-macos");
-    try expectRefused(ar, try replaced(ar, text, "    needs: prod-stage\n", "    needs: prod-stage\n    if: needs.release-macos.result == 'success'\n"), "reads the result of release-macos");
 
     // the farm connection and its priority
     try expectRefused(ar, try replaced(ar, text, DARWIN_PROPS ++ "\n", ""), "darwin-properties");
@@ -342,10 +450,6 @@ test "each edit of the real release.yml that breaks the macOS build's contract i
     try expectRefused(ar, try replaced(ar, text, BUILD_ARGS, BUILD_ARGS ++ " --no-remote-cache"), "does not build //release:mopm_darwin_libs for");
     try expectRefused(ar, try replaced(ar, text, BUILD_ARGS ++ "\n" ++ ASSERT ++ "\n      - name: the macOS build failed", BUILD_ARGS ++ "\n      - name: the macOS build failed"), "does not assert the build remote");
     try expectRefused(ar, try replaced(ar, text, "      - name: build the macOS set\n        uses: ./.github/actions/buck2-farm\n", "      - name: build the macOS set\n        uses: ./.github/actions/other\n"), "outside the buck2-farm action");
-
-    // no other job names the macOS platform
-    try expectRefused(ar, try replaced(ar, text, "          args: build //release/ci:check_release_ref --out", "          args: build --target-platforms komira//tools/build/platforms:darwin-arm64 //release/ci:check_release_ref --out"), "only release-macos does");
-    try expectRefused(ar, try replaced(ar, text, "  mopm-stage:\n    runs-on: ubuntu-24.04\n", "  mopm-stage:\n    runs-on: macos-15\n"), "only release-macos does");
 
     // nothing publishes from it
     try expectRefused(ar, try replaced(ar, text, "      - name: the macOS build failed\n", "      - run: mopm publish --staged x --registry prod --oidc\n      - name: the macOS build failed\n"), "publishes");
@@ -365,8 +469,8 @@ test "a workflow that runs on a pull request holds no macOS build, and the real 
             return error.MacosInPullRequest;
         }
         if (runsOnPullRequest(text)) on_pr += 1;
-        // release.yml is the one with the macOS build, and it runs on no pull request
-        if (std.mem.eql(u8, name, "release.yml")) try t.expect(!runsOnPullRequest(text));
+        // release-macos.yml is the one with the macOS build, and it runs on no pull request
+        if (std.mem.eql(u8, name, "release-macos.yml")) try t.expect(!runsOnPullRequest(text));
     }
     // the check reads pr.yml and coverage.yml: were the trigger reader broken, nothing would be read
     try t.expect(on_pr >= 2);
@@ -396,7 +500,7 @@ test "the reader of pull request workflows sees each macOS defect planted in the
         }
     }
     // a comment may speak of it, and a workflow that is not run by a pull request may name it
-    try t.expect(checkPullRequestWorkflow(try std.fmt.allocPrint(ar, "{s}\n# the macOS build is a job of release.yml\n", .{pr})) == null);
+    try t.expect(checkPullRequestWorkflow(try std.fmt.allocPrint(ar, "{s}\n# the macOS build is the workflow release-macos.yml\n", .{pr})) == null);
     const release = try readData(ar, &.{ "workflows", "release.yml" });
     try t.expect(checkPullRequestWorkflow(release) == null);
     // every spelling of the trigger is seen

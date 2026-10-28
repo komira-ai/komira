@@ -95,7 +95,8 @@ zig_test(
 )
 
 # The cases of the macOS build of the release (.github/workflows/release_macos_test.zig says
-# what each catches): release.yml's job `release-macos` builds the macOS set on the farm and
+# what each catches): the workflow release-macos.yml builds the macOS set on the farm, in a
+# concurrency group of its own, and release.yml holds no macOS job; the build
 # holds up nothing, no workflow that runs on a pull request names a macOS platform, the check
 # set holds no macOS build, and the set's definition is one list. A build action.
 zig_test(
