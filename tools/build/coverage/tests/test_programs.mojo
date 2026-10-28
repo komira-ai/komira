@@ -220,9 +220,9 @@ def test_entries_must_name_and_path() raises:
     _refused(String("[[targets.bins]]\nname = \"a\"\npath = \"x.mojo\"\npath = \"y.mojo\"\n"), String("given twice"))
     _refused(String("[targets]\nbins = [{ name = \"a\", path = 5 }]\n"), String("plain quoted string"))
     _refused(String("[targets]\nbins = [{ name = \"a\", path = \"bins/\\a.mojo\" }]\n"), String("plain quoted string"))
-    _refused(String("[targets]\nbins = [{ name = \"a\", path = \"bins/a.mojo }]\n"), String("plain quoted string"))
+    _refused(String("[targets]\nbins = [{ name = \"a\", path = \"bins/a.mojo }]\n"), String("never closed"))
     _refused(String("[targets]\nbins = [{ name = \"a\", path }]\n"), String("key = value"))
-    _refused(String("[targets]\nbins = [{ name = \"a\", path = \"bins/a.mojo\", }, { }]\n"), String("no `path`"))
+    _refused(String("[targets]\nbins = [{ name = \"a\", path = \"bins/a.mojo\", }, { }]\n"), String("empty field"))
 
 
 def test_paths_must_be_relative_mojo_files() raises:
