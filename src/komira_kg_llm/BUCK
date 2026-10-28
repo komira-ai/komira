@@ -78,7 +78,6 @@ mojo_library(
         "//third_party/aws-lc:crypto",
         "//third_party/brotli:brotlidec",
         "//third_party/s2n-tls:s2n",
-        "//third_party/snappy:snappy",
         "//tools/build/mojo/runtime_paths:komira_runtime_paths",
     ],
     test_srcs = [

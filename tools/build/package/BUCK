@@ -296,7 +296,6 @@ conda_release_set_check(
     native = {
         "//src/komira_libc:komira_libc": "//src/komira_libc:komira_libc_native",
         "//src/komira_async_api:komira_async_api": "//src/komira_async_api:komira_async_api_native",
-        "//src/komira_compression:komira_compression": "//src/komira_compression:komira_compression_native",
         "//src/komira_crypto:komira_crypto": "//src/komira_crypto:komira_crypto_native",
         "//src/komira_metrics:komira_metrics": "//src/komira_metrics:komira_metrics_native",
         "//src/komira_scan_source:komira_scan_source": "//src/komira_scan_source:komira_scan_source_native",

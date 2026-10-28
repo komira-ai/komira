@@ -43,8 +43,9 @@ continuous_publish.md both use that name; `kci.yml` runs it since the staged pip
   sources ("opens a shared library at run time (OwnedDLHandle); its conda package must depend on the
   package shipping that library, which this tool does not derive yet"); slice 3 declares their sonames,
   and their packages now build, requiring `lz4-c` and `libzlib`, but neither is released.
-  `komira_compression` opens zstd, bz2 and lzma the same way
-  (`src/komira_compression/codec_libraries.mojo`) and also links snappy, so it is in both lists.
+  `komira_compression` opens zstd, bz2, lzma and snappy the same way
+  (`src/komira_compression/src/komira_compression/codec_libraries.mojo`; snappy is the system
+  `libsnappy.so.1`, no longer linked), so it links no C and is only in this list.
 - The released set today is its member libraries plus the metapackage `komira_all`
   (`release/artifacts.textproto`, held equal to `tools/build/package/release_set.txt`), none with
   native code (no member's directory holds a C or C++ source or opens a library at run time).
@@ -93,7 +94,7 @@ thread-local storage (async, http_core); async_api, metrics and scan_source had 
 |---|---|---|---|
 | komira_crypto | aws-lc, prefixed `komira_awslc_`; `komira_crypto_sha256_hw` (the SHA-NI wrapper) | `libkomira_crypto_native.so.1` | glibc |
 | komira_http_core | s2n-tls, prefixed `komira_s2n_`, built against the prefixed aws-lc | `libkomira_http_core_native.so.1` | `libkomira_crypto_native.so.1` |
-| komira_compression | snappy (C API prefixed `komira_snappy_`; its C++ runtime static and local) | `libkomira_compression_native.so.1` | glibc; opens system codecs (below) |
+| komira_compression | none: it opens the system `libsnappy.so.1` and the other codec libraries (below); `//third_party/snappy` (C API prefixed `komira_snappy_`) stays for its other users | none | glibc; opens system codecs (below) |
 | komira_libc / async / async_api / fs | `komira_libc_posix` / `komira_async_posix` / `komira_concurrency_pool_depth` / `komira_fs_posix` | `libkomira_<lib>_native.so.1` | glibc |
 | komira_objectstore / metrics / scan_source / supervisor | `komira_objectstore_posix` / `komira_metrics_ea_flag` / `komira_scan_source_inmem_id` / `komira_supervisor_proc` | `libkomira_<lib>_native.so.1` | glibc |
 | komira_log | `komira_log_holder` (per-library state) | `libkomira_log_holder.a`; with question 2 (A) also `libkomira_log_holder_jit.so.1` and its link name `libkomira_log_holder_jit.so` | none |
@@ -108,8 +109,7 @@ closure and ship only a `.mojoc`, with a run requirement on each owner.
 **One owner per C archive (PROPOSED).** A caller of another library's C goes through that owner's
 `.so`, never a second copy. Callers on `main`, by `external_call` name (library sources, not tests):
 `komira_awslc_*` from komira_crypto and komira_uuid (komira_http_core reaches aws-lc only through
-s2n-tls's archive); `komira_s2n_*` from komira_http_core and komira_http_client; `komira_snappy_*`
-from komira_compression; `komira_on_pool_depth` (komira_async_api's) from komira_async and
+s2n-tls's archive); `komira_s2n_*` from komira_http_core and komira_http_client; `komira_on_pool_depth` (komira_async_api's) from komira_async and
 komira_column_kernels; komira_libc's shims from several; komira_fs's shims (`komira_free`,
 `komira_fs_enoent`, `komira_fs_errno_name`) from komira_objectstore. `callers` and the completeness
 lint count library sources only, never `test_srcs` (welded tests link the archives).
