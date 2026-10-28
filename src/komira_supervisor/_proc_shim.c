@@ -37,10 +37,11 @@
 //     pods are the primary target.
 // =============================================================================
 
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE  // pipe2
+#endif
 #include <errno.h>
 #include <fcntl.h>
-#include <poll.h>
-#include <pthread.h>
 #include <signal.h>
 #include <spawn.h>
 #include <stdint.h>
@@ -174,11 +175,31 @@ fail:
     return rc;
 }
 
+// pipe() with both ends close-on-exec from the moment they exist, so a spawn
+// on another thread cannot inherit them. The child's dup2 onto fd 0/1/2 clears
+// the flag on its copy. Where pipe2 is missing the flag is set afterwards and
+// that window remains.
+static int _pipe_cloexec(int fds[2]) {
+#ifdef __linux__
+    return pipe2(fds, O_CLOEXEC);
+#else
+    if (pipe(fds) != 0) return -1;
+    if (fcntl(fds[0], F_SETFD, FD_CLOEXEC) != 0 ||
+        fcntl(fds[1], F_SETFD, FD_CLOEXEC) != 0) {
+        int e = errno;
+        close(fds[0]); close(fds[1]);
+        errno = e;
+        return -1;
+    }
+    return 0;
+#endif
+}
+
 // Move *fd to a descriptor number above 2 when the parent has a standard
 // descriptor closed and pipe() handed one out (fd 1 closed: the stdout pipe's
-// read end is 1): the child's fd 0/1/2 wiring and
-// the closes after it would otherwise act on the wrong descriptor. Returns 0,
-// or an errno value (the old descriptor is left open).
+// read end is 1): the child's fd 0/1/2 wiring and the closes after it would
+// otherwise act on the wrong descriptor. Returns 0, or an errno value (the old
+// descriptor is left open).
 static int _lift_above_stdio(int *fd) {
     if (*fd > 2) return 0;
     int moved = fcntl(*fd, F_DUPFD_CLOEXEC, 3);
@@ -212,12 +233,12 @@ static int _spawn_pipes(const char *path,
     }
     int out_pipe[2];
     int err_pipe[2];
-    if (pipe(out_pipe) != 0) {
+    if (_pipe_cloexec(out_pipe) != 0) {
         int e = errno;
         free(argv); free(envp);
         return -e;
     }
-    if (pipe(err_pipe) != 0) {
+    if (_pipe_cloexec(err_pipe) != 0) {
         int e = errno;
         close(out_pipe[0]);
         close(out_pipe[1]);
@@ -317,18 +338,16 @@ static int _spawn_pipes(const char *path,
     int in_pipe[2] = {-1, -1};
     if (out_stdin_fd != NULL) {
         int e = 0;
-        if (pipe(in_pipe) != 0) {
+        if (_pipe_cloexec(in_pipe) != 0) {
             e = errno;
         } else if ((e = _lift_above_stdio(&in_pipe[0])) != 0 ||
                    (e = _lift_above_stdio(&in_pipe[1])) != 0) {
             close(in_pipe[0]); close(in_pipe[1]);
-        } else if (fcntl(in_pipe[1], F_SETFD, FD_CLOEXEC) != 0) {
-            e = errno;
-            close(in_pipe[0]); close(in_pipe[1]);
         } else {
-            posix_spawn_file_actions_adddup2(&fa, in_pipe[0], 0);
-            posix_spawn_file_actions_addclose(&fa, in_pipe[0]);
-            posix_spawn_file_actions_addclose(&fa, in_pipe[1]);
+            e = posix_spawn_file_actions_adddup2(&fa, in_pipe[0], 0);
+            if (e == 0) e = posix_spawn_file_actions_addclose(&fa, in_pipe[0]);
+            if (e == 0) e = posix_spawn_file_actions_addclose(&fa, in_pipe[1]);
+            if (e != 0) { close(in_pipe[0]); close(in_pipe[1]); }
         }
         if (e != 0) {
             posix_spawn_file_actions_destroy(&fa);
@@ -390,8 +409,8 @@ int komira_proc_spawn(const char *path,
 // komira_proc_spawn_stdin
 //   komira_proc_spawn, and the child's stdin (fd 0) is a pipe too: the write
 //   end comes back in *out_stdin_fd. The parent closes it to give the child
-//   end of file. The write end is close-on-exec, so no other child spawned
-//   later holds it open.
+//   end of file. All three pipes are created close-on-exec, so no other child
+//   spawned later, on any thread, holds an end open.
 // -----------------------------------------------------------------------------
 int komira_proc_spawn_stdin(const char *path,
                             const char *argv_blob, int argc,
@@ -405,64 +424,6 @@ int komira_proc_spawn_stdin(const char *path,
     return _spawn_pipes(path, argv_blob, argc, env_blob, envc, cwd, has_cwd,
                         flags, out_stdout_fd, out_stderr_fd, out_stdin_fd,
                         out_pid);
-}
-
-// -----------------------------------------------------------------------------
-// komira_proc_write  --  write() all of `len` bytes (EINTR retried, a short
-//   write continued). Returns `len`, or -errno. A write to a pipe whose reader
-//   has gone returns -EPIPE and never raises SIGPIPE in the process: the
-//   signal is blocked for the calling thread during the call, and a SIGPIPE
-//   this call raised is consumed before the mask is restored (one that was
-//   already pending is left alone).
-// -----------------------------------------------------------------------------
-long komira_proc_write(int fd, const uint8_t *buf, long len) {
-    sigset_t pipe_set, old_set, pending;
-    sigemptyset(&pipe_set);
-    sigaddset(&pipe_set, SIGPIPE);
-    int masked = (pthread_sigmask(SIG_BLOCK, &pipe_set, &old_set) == 0);
-    int was_pending = 0;
-    if (masked && sigpending(&pending) == 0) was_pending = sigismember(&pending, SIGPIPE);
-    long done = 0;
-    long result = 0;
-    while (done < len) {
-        ssize_t n = write(fd, buf + done, (size_t)(len - done));
-        if (n < 0) {
-            if (errno == EINTR) continue;
-            result = -errno;
-            break;
-        }
-        done += (long)n;
-    }
-    if (result == 0) result = done;
-    if (masked) {
-        if (result == -EPIPE && !was_pending && sigpending(&pending) == 0 &&
-            sigismember(&pending, SIGPIPE)) {
-            int sig = 0;
-            sigwait(&pipe_set, &sig);
-        }
-        pthread_sigmask(SIG_SETMASK, &old_set, NULL);
-    }
-    return result;
-}
-
-// -----------------------------------------------------------------------------
-// komira_proc_wait_readable  --  wait up to `timeout_ms` (negative: without
-//   limit) until `fd` has data to read, a hang-up (end of file) or an error.
-//   Returns 1 when a read would not block, 0 on timeout, -errno on failure.
-// -----------------------------------------------------------------------------
-int komira_proc_wait_readable(int fd, int timeout_ms) {
-    struct pollfd p;
-    p.fd = fd;
-    p.events = POLLIN;
-    p.revents = 0;
-    for (;;) {
-        int r = poll(&p, 1, timeout_ms);
-        if (r < 0) {
-            if (errno == EINTR) continue;
-            return -errno;
-        }
-        return r > 0 ? 1 : 0;
-    }
 }
 
 // -----------------------------------------------------------------------------

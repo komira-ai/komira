@@ -230,7 +230,7 @@ def proc_spawn_stdin(
 # pointer; the descriptor stays owned by the caller. The call blocks while the
 # pipe is full and the reader is not reading.
 def proc_write(fd: Int32, data: Span[UInt8, _]) -> Int:
-    """Write every byte of `data` to `fd`. Returns the byte count, or -errno. Blocks while the pipe is full."""
+    """Write every byte of `data` to `fd`. Returns the byte count, or -errno (the count already written is not reported on an error). Blocks while the pipe is full."""
     # SAFETY: the shim reads `len(data)` bytes from the span's storage during
     # the call and keeps no pointer; `data` outlives the call.
     return Int(

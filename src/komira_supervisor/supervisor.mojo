@@ -614,8 +614,13 @@ struct Supervisor(Movable):
     def write_stdin(mut self, text: String) -> Int:
         """Write every byte of `text` to the child's stdin. Returns the byte
         count, or a negative errno (-EBADF with no stdin pipe, -EPIPE when the
-        child has closed its stdin and SIGPIPE does not kill this process).
-        It blocks while the pipe is full and the child is not reading."""
+        child has closed its stdin or exited, even part-way through: the count
+        already written is not reported; SIGPIPE does not kill this process).
+        It blocks while the pipe is full (about 64 KiB on Linux). A single
+        thread that writes more than that to a child that answers on stdout
+        deadlocks, the child blocked writing stdout and this call blocked
+        writing stdin: drain stdout from another thread, or keep each write
+        small. A child that never reads blocks the call for good."""
         if self._stdin_fd < Int32(0):
             return -9  # EBADF
         return proc_write(self._stdin_fd, text.as_bytes())
@@ -634,23 +639,15 @@ struct Supervisor(Movable):
         return proc_wait_readable(fd, timeout_ms)
 
     def read_blocking(mut self, fd: Int32) -> ReadChunk:
-        """ONE blocking read of a capture pipe: wait for at least one byte and
-        return what the read gives. eof=True when every writer has closed the
-        pipe, error=True on a read error. Like `read_available`, it decodes
-        nothing: the bytes come back as they were."""
-        comptime CHUNK = 65536
-        if fd < Int32(0):
-            return ReadChunk(String(""), eof=True, would_block=False, error=False)
-        var buf = List[UInt8]()
-        for _ in range(CHUNK):
-            buf.append(UInt8(0))
-        var n = proc_read(fd, buf, CHUNK)
-        if n > 0:
-            return ReadChunk(
-                String(unsafe_from_utf8=Span[UInt8](buf)[0 : n]),
-                eof=False, would_block=False, error=False,
-            )
-        return ReadChunk(String(""), eof=(n == 0), would_block=False, error=(n < 0))
+        """ONE read of a capture pipe that waits for at least one byte (the
+        descriptor is blocking, as `spawn` leaves it) and returns what the read
+        gives: the same ReadChunk contract as `read_available`. eof=True when
+        every writer has closed the pipe, error=True on a read error, and
+        would_block=True only on a descriptor made non-blocking with
+        `set_nonblocking`. Like `read_available` it decodes nothing: the bytes
+        are not validated as UTF-8, and a multi-byte character split across two
+        chunks rejoins exactly under `+=`."""
+        return self.read_available(fd)
 
     # --- capture -------------------------------------------------------------
 
