@@ -49,11 +49,21 @@ the fixture package (`fixture/`).
 `ci/BUCK` declares one target that builds every check:
 `./buck2 build //ci:pr`, and `./buck2 test //ci:pr` for the standalone tests.
 A target's `deps` are literal labels and no rule can query the graph, so the
-lists are generated and checked in (`ci/targets.bzl`):
+lists are generated and checked in: `ci/targets.bzl` loads eight shards,
+`ci/targets/shard_<n>.bzl`, and exposes `TARGETS` and `TESTS` (the sorted union
+of theirs). One command regenerates the loader and every shard:
 
 ```sh
-./buck2 bxl komira//tools/build/ci/targets.bxl:generate > ci/targets.bzl
+cp -rL --no-preserve=mode "$(./buck2 bxl komira//tools/build/ci/targets.bxl:generate)"/. ci/
 ```
+
+The script builds the files into a directory of `buck-out` and prints it, so
+the generation is a scratch copy first: if it fails, the checked-in files are
+untouched. Never redirect the script's output onto `ci/targets.bzl`: the shell
+empties the file before the script, which loads it through the guard, runs.
+A package's rows share one shard, chosen by a hash of the package path
+(`ci_graph.bzl` `shard_of`), so adding a package changes one shard and no
+prefix or top-level directory (`src/` holds most of the rows) can fill one.
 
 `TARGETS` is every check of the scope (`UNIVERSE` in `rules.bzl`: this
 repository's targets but the toolchains cell's directory, and the tests
@@ -70,7 +80,14 @@ the others as dependencies. A check is a target of any kind but a source
 It fails when a check target of the scope is not in the closure of `//ci:pr`,
 naming the targets and the command that regenerates the list, so a new package
 that nobody added to the aggregate cannot go untested. Configuring `//ci:pr`
-also fails on a label in the list that no longer exists.
+also fails on a label in the list that no longer exists. It holds the shards to
+the graph both ways: a row of `TARGETS` that is no longer a root of the check
+set, a root with no row, or a `TESTS` row outside `TARGETS` fails, and so does
+a shard that would reach 1000 lines (`LINE_LIMIT`; the failure says to raise
+`SHARDS` in `ci_graph.bzl` and regenerate). A BXL script reads no file's text,
+so the line count is that of the file the generator makes from the rows the
+loader exposes; the cases (`cases.bxl`) hold the placement, the union and each
+refusal.
 
 ## The lock-graphs check: `lock_graphs.bxl`
 
