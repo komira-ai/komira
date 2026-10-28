@@ -3,7 +3,7 @@
 # =============================================================================
 #
 # Falsifies BOTH halves of the decision in
-# `komira_engine_runtime/morsel_sizing_policy.mojo`, which are two separate
+# `komira_host_profile/morsel_sizing_policy.mojo`, which are two separate
 # questions and were conflated:
 #
 #   (b) WHETHER  admit  = fold_passes >= MIN_FOLD_PASSES  AND  budget > 0
@@ -44,8 +44,8 @@
 
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
-from komira_engine_runtime.hardware import HardwareProfile
-from komira_engine_runtime.l1_chunk_sizing import (
+from komira_host_profile.hardware import HardwareProfile
+from komira_host_profile.l1_chunk_sizing import (
     L1_CHUNK_BUDGET_DEN,
     L1_CHUNK_BUDGET_NUM,
     L1_CHUNK_DECLINE,
@@ -59,7 +59,7 @@ from komira_engine_runtime.l1_chunk_sizing import (
     l1_chunk_admit,
     l1_chunk_grain_round,
 )
-from komira_engine_runtime.morsel_sizing_policy import (
+from komira_host_profile.morsel_sizing_policy import (
     MorselSizingPolicy,
 )
 

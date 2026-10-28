@@ -9,13 +9,13 @@
 #     what the host offers (a breaker spilling to a tier the host lacks);
 #   * the reference profile is made of constants (a lowered-plan comparison
 #     that differs by machine);
-#   * detection honours the thread and memory flags and derives them when 0;
 #   * the tier rule maps each segment shape to its tier, first match wins
 #     (a probe segment sized as an aggregate);
-#   * a `RunContext` conformer hands a driver its host profile and worker
-#     count through the trait (the trait compiles with a conformer);
 #   * `record_segment_morsel_rows` writes the policy's value into the segment,
 #     and lowering twice under one profile records the same value.
+#
+# Detection (`detect_host_profile`) and the `RunContext` trait are tested in
+# `komira_engine_runtime` (`test_host_detect`, `test_run_context`).
 # =============================================================================
 
 from std.testing import (
@@ -28,18 +28,15 @@ from std.testing import (
 from komira_arrow.arrow_types import ArrowType
 from komira_arrow.schema import Field, Schema, SchemaBuilder
 from komira_collections.slab import Slab
-from komira_engine_runtime.hardware import HardwareProfile
-from komira_engine_runtime.host_profile import (
+from komira_host_profile.host_profile import (
     HostProfile,
     SPILL_TIER_ALL,
     SPILL_TIER_LOCAL_DISK,
     SPILL_TIER_NONE,
     SPILL_TIER_OBJECT_STORE,
-    detect_host_profile,
     reference_host_profile,
 )
-from komira_engine_runtime.run_context import RunContext
-from komira_engine_runtime.morsel_sizing_policy import (
+from komira_host_profile.morsel_sizing_policy import (
     MORSEL_TIER_AGG,
     MORSEL_TIER_BULK_SCAN,
     MORSEL_TIER_DEFAULT,
@@ -96,7 +93,7 @@ def _seg(source_kind: UInt8, var op_tags: List[UInt8], sink_kind: UInt8) -> Segm
 def _raises_invalid(threads: Int, budget: Int, tiers: UInt8) -> Bool:
     try:
         _ = HostProfile(
-            "b", HardwareProfile.defaults(), threads, budget, tiers
+            "b", reference_host_profile("b").hardware.copy(), threads, budget, tiers
         )
     except e:
         return String("HOST_PROFILE_INVALID") in String(e)
@@ -112,7 +109,7 @@ def test_constructor_refuses_invalid_values() raises:
 
 def test_spill_tiers_are_the_intersection() raises:
     var host = HostProfile(
-        "b", HardwareProfile.defaults(), 4, 1 << 20, SPILL_TIER_LOCAL_DISK
+        "b", reference_host_profile("b").hardware.copy(), 4, 1 << 20, SPILL_TIER_LOCAL_DISK
     )
     assert_equal(host.spill_tiers_for(SPILL_TIER_ALL), SPILL_TIER_LOCAL_DISK)
     assert_equal(host.spill_tiers_for(SPILL_TIER_OBJECT_STORE), SPILL_TIER_NONE)
@@ -130,17 +127,6 @@ def test_reference_profile_is_constant() raises:
     assert_equal(a.hardware.effective_e_core_l2_per_worker(), 1024 * 1024)
     assert_equal(a.spill_tiers, SPILL_TIER_LOCAL_DISK)
     assert_equal(a.memory_budget_bytes, a.hardware.default_memory_budget())
-
-
-def test_detect_honours_flags_and_derives_zero() raises:
-    var fixed = detect_host_profile("b", 3, 12345, SPILL_TIER_ALL)
-    assert_equal(fixed.thread_count, 3)
-    assert_equal(fixed.memory_budget_bytes, 12345)
-    assert_equal(fixed.spill_tiers, SPILL_TIER_ALL)
-    var derived = detect_host_profile("b")
-    assert_equal(derived.thread_count, derived.hardware.compute_threads())
-    assert_true(derived.thread_count >= 1)
-    assert_true(derived.memory_budget_bytes >= 1)
 
 
 def test_segment_tier_rule() raises:
@@ -203,31 +189,6 @@ def test_lowering_is_deterministic_under_one_profile() raises:
     var b = lower_segment_morsel_rows(reference_host_profile("b"), seg, schema)
     assert_equal(a, b)
     assert_true(a > 0)
-
-
-struct _FixedRun(RunContext):
-    var host: HostProfile
-
-    def __init__(out self, var host: HostProfile):
-        self.host = host^
-
-    def host_profile(self) -> HostProfile:
-        return self.host.copy()
-
-    def num_workers(self) -> Int:
-        return self.host.thread_count
-
-
-def _lowered_rows[C: RunContext](ctx: C, segment: SegmentDescPod, schema: Schema) -> Int:
-    return lower_segment_morsel_rows(ctx.host_profile(), segment, schema)
-
-
-def test_run_context_hands_out_its_host_profile() raises:
-    var ctx = _FixedRun(reference_host_profile("b"))
-    assert_equal(ctx.num_workers(), 8)
-    var schema = _i64_schema(8)
-    var seg = _seg(SOURCE_PARQUET, List[UInt8](), SINK_AGG)
-    assert_equal(_lowered_rows(ctx, seg, schema), 8192)
 
 
 def main() raises:

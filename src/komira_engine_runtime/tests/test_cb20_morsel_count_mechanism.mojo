@@ -72,8 +72,8 @@ from komira_arrow.arrow_types import ArrowType
 from komira_arrow.schema import Field, Schema, SchemaBuilder
 
 from komira_engine_runtime.hardware_detect import detect_hardware_profile
-from komira_engine_runtime.hardware import HardwareProfile
-from komira_engine_runtime.morsel_sizing_policy import (
+from komira_host_profile.hardware import HardwareProfile
+from komira_host_profile.morsel_sizing_policy import (
     MAX_MORSEL_ROWS_DEFAULT,
     MIN_MORSEL_ROWS_DEFAULT,
     MorselSizingPolicy,
