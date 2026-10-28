@@ -24,10 +24,13 @@ running out of memory, with the same answer it gives without a spill.
   rebuilds.
 
 Both take the budget in bytes (0 never spills) and the spill directory as
-constructor arguments: the caller reads them from its flags and gives every
-operator its own directory. A spill directory is created on the first spill
-and its files are deleted by the finalize. The package root re-exports nothing;
-import from the modules.
+constructor arguments: the caller reads them from its flags. On the first spill
+an operator creates its own sub-directory of that directory, named
+`thsplc_agg_<pid>_<counter>` or `thsplc_sortrows_<pid>_<counter>` and created
+exclusively (a name that exists is skipped, up to 64 tries), so operators and
+processes can share one directory. The files are deleted when the finalize
+returns or raises and when the state is dropped. `spill_root` makes the name.
+The package root re-exports nothing; import from the modules.
 
 ## Examples
 
