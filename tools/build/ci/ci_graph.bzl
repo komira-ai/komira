@@ -115,7 +115,7 @@ SHARDS = 8
 # lines"); `shard_findings` fails the guard before a shard reaches it.
 LINE_LIMIT = 1000
 
-REGENERATE = 'cp -rL --no-preserve=mode "$(./buck2 bxl komira//tools/build/ci/targets.bxl:generate)"/. ci/'
+REGENERATE = 'out=$(./buck2 bxl komira//tools/build/ci/targets.bxl:generate) && [ -d "$out" ] && [ "$out" != / ] && cp -rL --no-preserve=mode "$out"/. ci/'
 
 def shard_of(label):
     """The shard (0 .. SHARDS - 1) of the package of `label`: a polynomial hash

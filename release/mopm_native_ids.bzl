@@ -50,6 +50,7 @@ load("//src/komira_sync:buildrules.mojo.lock.bzl", komira_sync = "GRAPH")
 load("//src/komira_test_run_id:buildrules.mojo.lock.bzl", komira_test_run_id = "GRAPH")
 load("//src/komira_test_verdict:buildrules.mojo.lock.bzl", komira_test_verdict = "GRAPH")
 load("//src/komira_textproto:buildrules.mojo.lock.bzl", komira_textproto = "GRAPH")
+load("//src/komira_trace:buildrules.mojo.lock.bzl", komira_trace = "GRAPH")
 load("//src/komira_validation_run:buildrules.mojo.lock.bzl", komira_validation_run = "GRAPH")
 load("//src/komira_vcard:buildrules.mojo.lock.bzl", komira_vcard = "GRAPH")
 load("//src/komira_wkt:buildrules.mojo.lock.bzl", komira_wkt = "GRAPH")
@@ -107,6 +108,7 @@ _GRAPHS = {
     "komira_test_run_id": komira_test_run_id,
     "komira_test_verdict": komira_test_verdict,
     "komira_textproto": komira_textproto,
+    "komira_trace": komira_trace,
     "komira_validation_run": komira_validation_run,
     "komira_vcard": komira_vcard,
     "komira_wkt": komira_wkt,

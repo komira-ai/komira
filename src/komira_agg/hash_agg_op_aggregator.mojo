@@ -124,6 +124,13 @@ struct HashAggOpF64Agg[Op: HashAggOpF64, col: Int](Aggregator):
         )
 
     @always_inline
+    def input_is_null[V: MorselView](self, view: V, i: Int) -> Bool:
+        """A NULL in input column `col` is skipped."""
+        return view.col_is_null(Self.col, i)
+
+    comptime EMPTY_IS_NULL: Bool = Self.Op.EMPTY_IS_NULL
+
+    @always_inline
     def combine(
         mut self, mut into: Self.StateTy, var partial: Self.StateTy
     ):
@@ -177,6 +184,13 @@ struct HashAggOpI64Agg[Op: HashAggOpI64, col: Int](Aggregator):
         Self.Op.update_scalar(
             state, view.col_scalar_nonraising[DType.int64](Self.col, i)
         )
+
+    @always_inline
+    def input_is_null[V: MorselView](self, view: V, i: Int) -> Bool:
+        """A NULL in input column `col` is skipped."""
+        return view.col_is_null(Self.col, i)
+
+    comptime EMPTY_IS_NULL: Bool = Self.Op.EMPTY_IS_NULL
 
     @always_inline
     def combine(
@@ -234,6 +248,13 @@ struct HashAggOpI32Agg[Op: HashAggOpI32, col: Int](Aggregator):
         )
 
     @always_inline
+    def input_is_null[V: MorselView](self, view: V, i: Int) -> Bool:
+        """A NULL in input column `col` is skipped."""
+        return view.col_is_null(Self.col, i)
+
+    comptime EMPTY_IS_NULL: Bool = Self.Op.EMPTY_IS_NULL
+
+    @always_inline
     def combine(
         mut self, mut into: Self.StateTy, var partial: Self.StateTy
     ):
@@ -287,6 +308,13 @@ struct HashAggOpF32Agg[Op: HashAggOpF32, col: Int](Aggregator):
         Self.Op.update_scalar(
             state, view.col_scalar_nonraising[DType.float32](Self.col, i)
         )
+
+    @always_inline
+    def input_is_null[V: MorselView](self, view: V, i: Int) -> Bool:
+        """A NULL in input column `col` is skipped."""
+        return view.col_is_null(Self.col, i)
+
+    comptime EMPTY_IS_NULL: Bool = Self.Op.EMPTY_IS_NULL
 
     @always_inline
     def combine(

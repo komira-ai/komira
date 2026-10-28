@@ -132,7 +132,7 @@ def test_many_pairs_survive_collisions_and_growth() raises:
     """At 200K pairs the table has grown many times and linear-probe collisions
     are dense. A slot hit that compared only the hash, or only the tag, would
     merge two distinct values and UNDER-count — silently, with no exception and
-    no schema violation. The exact expected count is the falsifier."""
+    no schema violation. The exact expected count is what catches it."""
     var s = CdDistinctSet()
     var groups = 400
     var per_group = 500
