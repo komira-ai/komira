@@ -1,0 +1,1 @@
+"""The host profile as a value: hardware shape, worker count, memory budget and spill tiers, and the morsel sizing that is a pure function of them. Nothing here probes the machine; detection is in `komira_engine_runtime`. The root exports nothing; import each module by name."""

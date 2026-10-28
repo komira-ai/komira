@@ -29,10 +29,9 @@
 #     >= 0x80 into two; `test_fixture_is_actually_non_ascii` keeps that test
 #     from passing on an all-ASCII fixture.
 #
-# Mutants run while writing it: the float key equality replaced by IEEE `==`
-# and the float hash by the raw bits (the arms this state had before the float model) turned both float tests
-# red; dropping the NULL-hash / validity compare in `_hash_row` and
-# `_keys_match` turned the NULL-key tests red.
+# Float keys must follow the float model (IEEE `==` or raw-bit hashing would
+# split NaNs and merge or split the zeros), which the float tests pin; NULL
+# keys must hash and compare by validity, which the NULL-key tests pin.
 # =============================================================================
 
 from std.memory import bitcast

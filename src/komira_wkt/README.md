@@ -155,7 +155,7 @@ dependencies and holds none of their files. The files that are not sources:
 | `coverage_held` | the metrics this package holds at the coverage target |
 | `buildrules.mojo.lock.bzl`, `buildrules.mojo.bzl` | written by `buildrules mojo sync` from the files above and from the manifests of the siblings; `buildrules mojo check` fails when they are stale |
 
-`tests/test_*.mojo` are the package's tests and weld to `:lib`. `fixture_tests/test_wkt_value_null_field.mojo` reads a
+`tests/test_*.mojo` are the package's tests and weld to `:lib`. `tests/standalone/wkt_value_null_field.mojo` reads a
 message type generated from `tests/value_null.proto`, so it cannot be one of them: it is the test of the
 `value_null_proto` target in `BUCK`. `generated/` holds that target's committed generator output
 (`tools/build/gen/README.md`); it is not the library, which is hand-written under `src/`. `value_null_proto_fresh`
