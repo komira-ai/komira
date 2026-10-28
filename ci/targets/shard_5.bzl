@@ -29,6 +29,7 @@ TARGETS = [
     "komira//src/komira_objectstore_gcs:komira_objectstore_gcs_conda",
     "komira//src/komira_objectstore_s3:komira_objectstore_s3_conda",
     "komira//src/komira_op_join_build:komira_op_join_build_conda",
+    "komira//src/komira_op_window:komira_op_window_conda",
     "komira//src/komira_parquet_api:ci",
     "komira//src/komira_parquet_api:coverage_floor",
     "komira//src/komira_parquet_api:table",
