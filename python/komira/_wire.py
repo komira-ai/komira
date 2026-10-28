@@ -55,13 +55,21 @@ def _fields(buf: bytes):
             if i + n > len(buf):
                 raise KomiraError("the schema bytes end inside a field")
             value, i = buf[i : i + n], i + n
-        elif wire == 1:
-            value, i = buf[i : i + 8], i + 8
-        elif wire == 5:
-            value, i = buf[i : i + 4], i + 4
+        elif wire in (1, 5):
+            n = 8 if wire == 1 else 4
+            if i + n > len(buf):
+                raise KomiraError("the schema bytes end inside a fixed-width field")
+            value, i = buf[i : i + n], i + n
         else:
             raise KomiraError("the schema bytes hold wire type %d" % wire)
         yield number, wire, value
+
+
+def _text(value: bytes, what: str) -> str:
+    try:
+        return value.decode("utf-8")
+    except UnicodeDecodeError:
+        raise KomiraError("the schema bytes hold a %s that is not UTF-8" % what) from None
 
 
 def _signed(v: int) -> int:
@@ -72,7 +80,7 @@ def _field(buf: bytes) -> pa.Field:
     name, type_id, nullable, precision, scale, tz, children = "", 0, False, 0, 0, "", False
     for number, wire, value in _fields(buf):
         if number == 1 and wire == 2:
-            name = value.decode("utf-8")
+            name = _text(value, "column name")
         elif number == 2 and wire == 0:
             type_id = value
         elif number == 4 and wire == 0:
@@ -82,7 +90,7 @@ def _field(buf: bytes) -> pa.Field:
         elif number == 6 and wire == 0:
             scale = _signed(value)
         elif number == 7 and wire == 2:
-            tz = value.decode("utf-8")
+            tz = _text(value, "timezone")
         elif number in (13, 14, 15, 16):
             children = True
     if children:
@@ -108,6 +116,8 @@ def schema_from_wire(data: bytes) -> pa.Schema:
             keys.append(value)
         elif number == 3 and wire == 2:
             values.append(value)
+    if len(set(keys)) != len(keys):
+        raise KomiraError("the schema metadata repeats a key")
     if len(keys) != len(values):
         raise KomiraError("the schema metadata has %d keys and %d values" % (len(keys), len(values)))
     return pa.schema(fields, metadata=dict(zip(keys, values)) or None)

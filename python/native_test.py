@@ -91,23 +91,26 @@ def test_load_failure():
 
 
 def test_argtypes_of_all_nine():
-    native = _native.load(lib_path())
-    lib = native.lib
-    assert lib.komira_ctx_new.argtypes == [] and lib.komira_ctx_new.restype is ctypes.c_void_p
-    assert lib.komira_ctx_free.restype is None and len(lib.komira_ctx_free.argtypes) == 1
-    counts = {
-        "komira_last_error": 4,
-        "komira_register_parquet": 3,
-        "komira_parquet_schema": 5,
-        "komira_csv_binding": 8,
-        "komira_json_binding": 5,
-        "komira_plan_render": 6,
+    # Every export's full signature, written out from src/komira_so/_c_abi.mojo:
+    # a context is a void *, a const char * is c_char_p, a byte output is a
+    # uint8_t * (void * here), its capacity a uint64_t and its length a uint64_t *.
+    vp, cp, i32, u64, u8 = ctypes.c_void_p, ctypes.c_char_p, ctypes.c_int32, ctypes.c_uint64, ctypes.c_uint8
+    pu64 = ctypes.POINTER(ctypes.c_uint64)
+    want = {
+        "komira_ctx_new": (vp, []),
+        "komira_ctx_free": (None, [vp]),
+        "komira_last_error": (i32, [vp, vp, u64, pu64]),
+        "komira_register_parquet": (i32, [vp, cp, cp]),
+        "komira_parquet_schema": (i32, [vp, cp, vp, u64, pu64]),
+        "komira_csv_binding": (i32, [vp, cp, u8, i32, i32, vp, u64, pu64]),
+        "komira_json_binding": (i32, [vp, cp, vp, u64, pu64]),
+        "komira_plan_render": (i32, [vp, cp, u64, vp, u64, pu64]),
     }
-    for name, n in counts.items():
+    lib = _native.load(lib_path()).lib
+    for name, (restype, argtypes) in want.items():
         fn = getattr(lib, name)
-        assert len(fn.argtypes) == n and fn.restype is ctypes.c_int32, (name, fn.argtypes, fn.restype)
-    assert lib.komira_csv_binding.argtypes[2] is ctypes.c_uint8
-    assert lib.komira_plan_render.argtypes[2] is ctypes.c_uint64
+        assert fn.restype is restype, (name, "restype", fn.restype, restype)
+        assert list(fn.argtypes) == argtypes, (name, "argtypes", list(fn.argtypes), argtypes)
 
 
 def test_engine_error_carries_status_and_last_error():
@@ -188,6 +191,25 @@ def test_wire_decoder_types():
     raises(None, _wire.schema_from_wire, field("x", 19))  # DICTIONARY: not decoded
     raises(None, _wire.schema_from_wire, field("x", 20))  # LIST: not decoded
     raises(None, _wire.schema_from_wire, field("x", 4)[:-1])  # truncated
+
+
+def test_wire_truncated_and_hostile_input():
+    # A fixed64 (wire type 1) and a fixed32 (wire type 5) cut short are refused.
+    raises(None, _wire.schema_from_wire, b"\x19" + b"\x00" * 7)  # field 3, fixed64, 7 of 8 bytes
+    raises(None, _wire.schema_from_wire, b"\x1d" + b"\x00" * 3)  # field 3, fixed32, 3 of 4 bytes
+    raises(None, _wire.schema_from_wire, b"\x19")  # fixed64 with no bytes at all
+    # Complete ones are skipped as unknown fields.
+    assert len(_wire.schema_from_wire(b"\x19" + b"\x00" * 8 + b"\x1d" + b"\x00" * 4)) == 0
+    # A column name or timezone that is not UTF-8 is a KomiraError.
+    bad_name = b"\x0a\x01\xff" + b"\x10\x04"
+    raises(None, _wire.schema_from_wire, b"\x0a" + bytes([len(bad_name)]) + bad_name)
+    bad_tz = b"\x0a\x01a" + b"\x10\x18" + b"\x3a\x01\xff"
+    raises(None, _wire.schema_from_wire, b"\x0a" + bytes([len(bad_tz)]) + bad_tz)
+    # Metadata keys must be unique.
+    meta = b"\x12\x01k\x1a\x01a" + b"\x12\x01k\x1a\x01b"
+    e = raises(None, _wire.schema_from_wire, meta)
+    assert "repeats" in str(e), str(e)
+    assert _wire.schema_from_wire(b"\x12\x01k\x1a\x01a").metadata == {b"k": b"a"}
 
 
 def test_two_call_growth():
