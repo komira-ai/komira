@@ -421,7 +421,7 @@ def test_stable_on_equal_keys() raises:
 # =============================================================================
 # Varlen STRING sort coverage.
 #
-# Validates the byte-lexicographic comparator of the STRING key path.
+# Validates the byte-lex comparator on STRING keys.
 # =============================================================================
 
 
@@ -456,7 +456,7 @@ def _build_recordbatch_string(
 
 
 def test_single_string_sort_asc() raises:
-    """Byte-lexicographic sort, ASC.
+    """STRINGCOLUMNVIEW-SUBSTRATE-V04: byte-lex sort ASC.
 
     Input:  s = ["carol", "alice", "bob", "alice"]
     Expect: ["alice", "alice", "bob", "carol"] (stable on equal).
@@ -489,7 +489,7 @@ def test_single_string_sort_asc() raises:
 
 
 def test_single_string_sort_desc() raises:
-    """Byte-lexicographic sort, DESC."""
+    """STRINGCOLUMNVIEW-SUBSTRATE-V04: byte-lex sort DESC."""
     var keys = _single_string_sort_key()
     var dirs = List[UInt8]()
     dirs.append(SORT_DESC)
@@ -512,7 +512,8 @@ def test_single_string_sort_desc() raises:
 
 
 def test_single_string_sort_prefix_equal() raises:
-    """A prefix sorts before its extension: 'ab' < 'abc' under ASC.
+    """STRINGCOLUMNVIEW-SUBSTRATE-V04: prefix-equal-shorter-first
+    semantics. 'ab' < 'abc' under ASC.
     """
     var keys = _single_string_sort_key()
     var dirs = List[UInt8]()

@@ -4,22 +4,28 @@
 #
 # The buffer stores narrow signed keys in an UNSIGNED cell (`write_slot_u16`)
 # and sign-extends them back with integer arithmetic (`_sext_cell_u16`). The
-# comparison must run on the sign-extended value: read as the unsigned word,
-# -1001 would compare as 64535, ordering would stay monotone within each sign
-# class and only the classes would swap, putting every negative key after every
-# non-negative one. A test that sorts only negatives, or only non-negatives,
-# cannot tell the two apart.
+# obvious spelling, `Int(Int16(Int(a)))` on the u16 cell, is miscompiled: the
+# compiler folds sext(trunc(zext(x))) to zext(x), at every optimization
+# level, on runtime values only (comptime constants fold correctly, which is
+# why a constant-driven test cannot see it). The key -1001 then compared as
+# 64535: ordering stayed monotone within each sign class and only the classes
+# swapped, so EVERY NEGATIVE KEY SORTED AFTER EVERY NON-NEGATIVE ONE. A test
+# that sorts only negatives, or only non-negatives, passes.
 #
-# The fixtures therefore MIX signs, and the assertions are on VALUES (the
-# exact emitted key sequence), not on a row count or an "is_sorted" check that
-# reuses the comparator under test.
+# WHAT MAKES THIS TEST ABLE TO GO RED: the fixtures MIX signs. Assertions are on
+# VALUES (the exact emitted key sequence), not on a row count or on
+# "is_sorted"-style self-comparison — a count is blind to a permutation, and a
+# self-comparison that reuses the buggy comparator agrees with itself.
 #
-# The read-back oracle is `read_sorted_i16()` / `read_sorted_i8()`, which
-# return a `List[Int16]` / `List[Int8]` directly, so the narrow value is read
-# back without any widening conversion.
+# The read-back oracle is `read_sorted_i16()` / `read_sorted_i8()`, which are
+# SAFE by construction: they spell `out.append(Int16(Int(u)))` with a
+# `List[Int16]` consumer and NO widening, so the narrow value is correct. An
+# oracle must not depend on the conversion it is auditing.
 #
-# Single-sign-class fixtures (`test_sort_i16_all_non_negative_unaffected` and
-# `test_sort_i16_all_negative_unaffected`) check the harness and the monotone case.
+# POSITIVE CONTROLS (pass before AND after the fix, so a red is the sign
+# divergence and not the harness):
+#   * `test_sort_i16_all_non_negative_unaffected`
+#   * `test_sort_i16_all_negative_unaffected` — monotone within one sign class
 #
 # Encapsulation: public surface only — no UnsafePointer, no wildcard origin.
 # =============================================================================
@@ -159,13 +165,18 @@ def _fmt_i8(imm v: List[Int8]) -> String:
 
 
 # -----------------------------------------------------------------------------
-# Mixed-sign keys
+# THE RED TESTS — mixed-sign keys
 # -----------------------------------------------------------------------------
 
 
 def test_sort_i16_mixed_sign_ascending() raises:
-    """ASC over MIXED-SIGN Int16 keys: every negative key sorts before
-    every non-negative one."""
+    """ASC over MIXED-SIGN Int16 keys.
+
+    Pre-fix this emitted [5, 12, 32767, -32768, -1001, -7] — every negative
+    banished to the tail because the comparator ran in the u16 domain
+    (-1001 -> 64535 > 12). Monotone within each sign class, which is exactly
+    what makes it survive a weaker assertion.
+    """
     var vals = List[Int16]()
     vals.append(Int16(-1001))
     vals.append(Int16(5))
@@ -229,7 +240,10 @@ def test_sort_i16_mixed_sign_descending() raises:
 
 
 def test_sort_i16_negative_sorts_before_zero() raises:
-    """The smallest case: -1 sorts before 0."""
+    """The single smallest fact the miscompilation broke: -1 < 0.
+
+    Pre-fix, -1 read back as 65535 and sorted LAST.
+    """
     var vals = List[Int16]()
     vals.append(Int16(0))
     vals.append(Int16(-1))
@@ -240,7 +254,10 @@ def test_sort_i16_negative_sorts_before_zero() raises:
 
 
 def test_sort_i8_mixed_sign_ascending() raises:
-    """ASC over MIXED-SIGN Int8 keys, the DT_I8 twin of the DT_I16 arm."""
+    """ASC over MIXED-SIGN Int8 keys — the DT_I8 twin of the DT_I16 arm.
+
+    Pre-fix this emitted [3, 127, -128, -25, -1].
+    """
     var vals = List[Int8]()
     vals.append(Int8(-25))
     vals.append(Int8(3))
@@ -282,13 +299,13 @@ def test_sort_i8_negative_sorts_before_zero() raises:
 
 
 # -----------------------------------------------------------------------------
-# Single-sign-class controls
+# POSITIVE CONTROLS — these pass BEFORE and AFTER the fix.
 # -----------------------------------------------------------------------------
 
 
 def test_sort_i16_all_non_negative_unaffected() raises:
-    """All keys >= 0: the u16 word equals the signed value, so the order is
-    the same under either reading."""
+    """All keys >= 0: the u16 word EQUALS the signed value, so the
+    miscompilation is invisible. Proves the fixture/harness is sound."""
     var vals = List[Int16]()
     vals.append(Int16(300))
     vals.append(Int16(1))
@@ -303,9 +320,9 @@ def test_sort_i16_all_non_negative_unaffected() raises:
 
 
 def test_sort_i16_all_negative_unaffected() raises:
-    """All keys < 0: the u16 words are order-isomorphic to the signed values
-    within this class, so a single-sign-class test cannot tell the readings
-    apart."""
+    """All keys < 0: the u16 words are order-ISOMORPHIC to the signed values
+    within this class, so a test of one sign class cannot tell a sign-extending
+    comparison from a zero-extending one."""
     var vals = List[Int16]()
     vals.append(Int16(-7))
     vals.append(Int16(-32768))

@@ -17,7 +17,8 @@
 # Key and payload types: I64, F64, I32, F32, I16, I8, U8, U16, U32, U64,
 # DATE32, DATE64, BOOL, the TIMESTAMP units, DECIMAL128 (both 64-bit words,
 # signed), STRING and BINARY (byte-wise). Floats order by `sort_key_lt`:
-# NaN above +inf.
+# NaN above +inf. Typed readers exist for every type above except TIMESTAMP,
+# DECIMAL128 and BINARY; for those the order is in `sorted_indices`.
 #
 # Validity is not tracked: a NULL cell is stored and compared as its value
 # bytes. The caller keeps nullable keys out (or places nulls itself).
@@ -234,8 +235,7 @@ struct SortBuffer_Untyped(Movable, Deinitable):
     def _feed_one_row[
         bo: Origin[mut=False]
     ](mut self, batch: BatchView[bo], row: Int) raises:
-        """Feed hot path for ONE row. Factored out so `feed_batch` +
-        future parallel feed paths can share the same logic."""
+        """Feed hot path for ONE row. Called by `feed_batch` once per row."""
         # Grow before write — ensures the new slot fits.
         self._grow_if_needed()
 
@@ -266,9 +266,8 @@ struct SortBuffer_Untyped(Movable, Deinitable):
     # ─────────────────────────────────────────────────────────────────────
     # finalize_sort — stable bottom-up MERGE sort over `sorted_indices`.
     #
-    # PERF-CRITICAL: O(n log n) compares, O(n) scratch. (An insertion sort
-    # here took 12 seconds at 60K rows.) Stable: equal keys keep buffer
-    # order.
+    # PERF-CRITICAL: O(n log n) compares, O(n) scratch (an insertion sort
+    # is quadratic here). Stable: equal keys keep buffer order.
     # ─────────────────────────────────────────────────────────────────────
 
     def finalize_sort(mut self) raises:
@@ -342,11 +341,11 @@ struct SortBuffer_Untyped(Movable, Deinitable):
         self.sorted_indices = order^
 
     # ─────────────────────────────────────────────────────────────────────
-    # read_sorted_* — read one column back in sorted order, as a
-    # `List[T]` of the column's DType.
+    # emit_to_record_batch_columnar — drain sorted slots into a per-DType
+    # `List[T]` per output payload col.
     #
-    # The readers return plain lists, not a `RecordBatch`; the caller builds
-    # the Arrow columns.
+    # The readers return parallel lists, not a `RecordBatch`; the caller
+    # builds the Arrow columns.
     # ─────────────────────────────────────────────────────────────────────
 
     def read_sorted_i64(self, col_idx_in_storage: Int) raises -> List[Int64]:
