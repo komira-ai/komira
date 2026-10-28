@@ -21,3 +21,6 @@ readme_e2e_staged(
     mojo = MOJO,
     visibility = ["//ci:", "//release/readme_e2e/verify:"],
 )
+
+# The pins, for //:release_workflow_cases: the mopm release.yml builds is this MOPM.
+export_file(name = "packages.bzl", visibility = ["//:"])

@@ -47,9 +47,9 @@ struct MultiKeyHashJoinBuilder(Movable):
     (`_CHAIN_END` ends a chain). The entry space is ROW-INDEXED: entry i IS
     build row i, for every row, so a chain walk reads the build keys at the
     entry index directly and `num_rows()` (`len(_next_chain)`) is the full
-    build extent an unmatched-build sweep (a later slice) must cover. A row with a
-    NULL key still takes its entry but is linked from no bucket, so it matches
-    nothing. `_bloom` holds the composite hash of every inserted row;
+    build extent an unmatched-build sweep (a later slice) must cover. A row
+    with a NULL key still takes its entry but is linked from no bucket, so it
+    matches nothing. `_bloom` holds the composite hash of every inserted row;
     `_num_inserted` counts them (the chain-reachable rows), for output sizing.
     """
 
@@ -106,7 +106,10 @@ struct MultiKeyHashJoinBuilder(Movable):
         var n_keys = keys.num_keys
         if n_keys < 1:
             raise Error(
-                "MultiKeyHashJoinBuilder.build: at least one key column required"
+                (
+                    "MultiKeyHashJoinBuilder.build: at least one key column"
+                    " required"
+                )
             )
         if n_keys > MAX_JOIN_KEYS:
             raise Error(
@@ -218,7 +221,8 @@ struct MultiKeyHashJoinBuilder(Movable):
 
     @always_inline
     def num_rows(self) -> Int:
-        """Total build-side rows, INCLUDING sentinel-keyed (never-inserted) ones."""
+        """Total build-side rows, INCLUDING sentinel-keyed (never-inserted)
+        ones."""
         return len(self._next_chain)
 
 
@@ -443,13 +447,17 @@ struct MultiKeyHashJoinBuilder(Movable):
                             break
                 elif _arm_u == MK_ARM_DICT:
                     for k in range(n_keys):
-                        if (p_dict_idx[k] + probe_idx)[] != (b_dict_idx[k] + brow)[]:
+                        if (p_dict_idx[k] + probe_idx)[] != (
+                            b_dict_idx[k] + brow
+                        )[]:
                             matched = False
                             break
                 else:
                     for k in range(n_keys):
                         if is_same_dict[k]:
-                            if (p_dict_idx[k] + probe_idx)[] != (b_dict_idx[k] + brow)[]:
+                            if (p_dict_idx[k] + probe_idx)[] != (
+                                b_dict_idx[k] + brow
+                            )[]:
                                 matched = False
                                 break
                         elif is_string[k]:
@@ -489,7 +497,8 @@ struct MultiKeyHashJoinBuilder(Movable):
         mut probe_matches: List[Int],
     ) raises:
         """Left outer join probe: emit `(build_idx, probe_idx)` per match and
-        `(-1, probe_idx)` for a probe row with no match (a NULL key included)."""
+        `(-1, probe_idx)` for a probe row with no match (a NULL key
+        included)."""
         var n_keys = self._num_keys
         if probe_keys.num_keys != n_keys:
             raise Error(
@@ -585,7 +594,10 @@ struct MultiKeyHashJoinBuilder(Movable):
             ref bdict_slot = self._build_dict_keys[k]
             var same_dict = False
             if pdict_slot.__bool__() and bdict_slot.__bool__():
-                if probe_keys.dict_fingerprints.value()[k] == self._build_dict_fingerprints[k]:
+                if (
+                    probe_keys.dict_fingerprints.value()[k]
+                    == self._build_dict_fingerprints[k]
+                ):
                     same_dict = True
             is_same_dict.append(same_dict)
             if same_dict:
@@ -657,13 +669,17 @@ struct MultiKeyHashJoinBuilder(Movable):
                             break
                 elif _arm_u == MK_ARM_DICT:
                     for k in range(n_keys):
-                        if (p_dict_idx[k] + probe_idx)[] != (b_dict_idx[k] + brow)[]:
+                        if (p_dict_idx[k] + probe_idx)[] != (
+                            b_dict_idx[k] + brow
+                        )[]:
                             matched = False
                             break
                 else:
                     for k in range(n_keys):
                         if is_same_dict[k]:
-                            if (p_dict_idx[k] + probe_idx)[] != (b_dict_idx[k] + brow)[]:
+                            if (p_dict_idx[k] + probe_idx)[] != (
+                                b_dict_idx[k] + brow
+                            )[]:
                                 matched = False
                                 break
                         elif is_string[k]:

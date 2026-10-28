@@ -70,3 +70,42 @@ test "environments: the tests' fixed five, and the library path alone" {
     try t.expectEqual(@as(u32, 1), e2.count());
     try t.expectEqualStrings("/libs/lib", e2.get("LD_LIBRARY_PATH").?);
 }
+
+const tap_ok = "TAP version 13\n1..1\n# tests 3\n# suites 0\n# pass 3\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 41.2\n";
+
+test "tapCount reads a summary line by its whole key, last one winning" {
+    try t.expectEqual(@as(?u64, 3), A.tapCount(tap_ok, "tests"));
+    try t.expectEqual(@as(?u64, 3), A.tapCount(tap_ok, "pass"));
+    try t.expectEqual(@as(?u64, 0), A.tapCount(tap_ok, "fail"));
+    // "test" is not "tests", and a line that is not a summary line is not read.
+    try t.expectEqual(@as(?u64, null), A.tapCount(tap_ok, "test"));
+    try t.expectEqual(@as(?u64, null), A.tapCount("ok 1 - # tests 9\n", "tests"));
+    try t.expectEqual(@as(?u64, 2), A.tapCount("# tests 1\n# tests 2\n", "tests"));
+    try t.expectEqual(@as(?u64, null), A.tapCount("# tests many\n", "tests"));
+    try t.expectEqual(@as(?u64, null), A.tapCount("# tests\n", "tests"));
+}
+
+test "tapRefusal: a run counts only if tests ran, all passed and none was skipped" {
+    try t.expect(A.tapRefusal(tap_ok) == null);
+    try t.expectEqualStrings("it ran no test", A.tapRefusal("# tests 0\n# pass 0\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n").?);
+    try t.expect(A.tapRefusal("1..0\n") != null);
+    try t.expect(A.tapRefusal("") != null);
+    try t.expectEqualStrings("a test failed or was cancelled", A.tapRefusal("# tests 3\n# pass 3\n# fail 1\n# cancelled 0\n# skipped 0\n# todo 0\n").?);
+    try t.expectEqualStrings("a test failed or was cancelled", A.tapRefusal("# tests 3\n# pass 3\n# fail 0\n# cancelled 1\n# skipped 0\n# todo 0\n").?);
+    try t.expectEqualStrings("a test was skipped or left todo", A.tapRefusal("# tests 3\n# pass 3\n# fail 0\n# cancelled 0\n# skipped 1\n# todo 0\n").?);
+    try t.expectEqualStrings("a test was skipped or left todo", A.tapRefusal("# tests 3\n# pass 3\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 2\n").?);
+    try t.expectEqualStrings("not every test passed", A.tapRefusal("# tests 3\n# pass 2\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n").?);
+    // A summary missing a line is refused, not read as zero.
+    try t.expect(A.tapRefusal("# tests 3\n# pass 3\n# fail 0\n# cancelled 0\n# todo 0\n") != null);
+}
+
+test "fileIsTheTest: a file that registered no test is named as the one test" {
+    const bare = "TAP version 13\n# Subtest: /w/a.test.mjs\nok 1 - /w/a.test.mjs\n1..1\n# tests 1\n# pass 1\n";
+    try t.expect(A.fileIsTheTest(bare, "/w/a.test.mjs"));
+    try t.expect(!A.fileIsTheTest(bare, "/w/b.test.mjs"));
+    try t.expect(!A.fileIsTheTest(bare, "/w/a.test.mj"));
+    try t.expect(!A.fileIsTheTest("# Subtest: /w/a.test.mjs.\n", "/w/a.test.mjs"));
+    // A test whose name merely holds the path, or a file with tests of its own.
+    try t.expect(!A.fileIsTheTest("# Subtest: reads /w/a.test.mjs\nok 1 - reads /w/a.test.mjs\n", "/w/a.test.mjs"));
+    try t.expect(!A.fileIsTheTest(tap_ok, "/w/a.test.mjs"));
+}

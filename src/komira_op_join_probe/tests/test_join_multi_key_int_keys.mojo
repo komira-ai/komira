@@ -144,7 +144,7 @@ def test_three_int64_keys_inner_every_key_must_match() raises:
     )
 
 
-def test_three_int64_keys_inner_ignores_slot_mates_that_differ_on_later_keys() raises:
+def test_three_int64_keys_inner_slot_mates_differing_on_later_keys() raises:
     """All rows share the first key, and far more probe rows than build rows
     are looked up, so many probe rows hash into a slot already holding a build
     row. Only the 64 probe rows equal to a build row on all three keys join;
@@ -177,7 +177,7 @@ def test_three_int64_keys_inner_ignores_slot_mates_that_differ_on_later_keys() r
         assert_equal(got[2 * i + 1], i, String("probe index ") + String(i))
 
 
-def test_three_int64_keys_left_keeps_rows_that_differ_on_a_later_key() raises:
+def test_three_int64_keys_left_keeps_rows_differing_on_later_key() raises:
     """The same inputs under LEFT: probe rows whose first key matches but whose
     later keys do not stay unmatched (build index -1); the full match joins.
     """
@@ -223,7 +223,9 @@ def test_two_int64_keys_swapped_columns_do_not_match() raises:
     types.append(ArrowType.INT64)
     types.append(ArrowType.INT64)
     var got = _pairs(_batch(bcols^, types), _batch(pcols^, types), 2, False)
-    assert_equal(len(got), 0, String("(1, 1) matches neither (1, 2) nor (2, 1)"))
+    assert_equal(
+        len(got), 0, String("(1, 1) matches neither (1, 2) nor (2, 1)")
+    )
 
 
 def _i32s(a: Int32, b: Int32, c: Int32) -> List[Int32]:
@@ -313,8 +315,8 @@ def test_negative_int64_build_joins_negative_int32_probe() raises:
 def main() raises:
     var suite = TestSuite()
     suite.test[test_three_int64_keys_inner_every_key_must_match]()
-    suite.test[test_three_int64_keys_inner_ignores_slot_mates_that_differ_on_later_keys]()
-    suite.test[test_three_int64_keys_left_keeps_rows_that_differ_on_a_later_key]()
+    suite.test[test_three_int64_keys_inner_slot_mates_differing_on_later_keys]()
+    suite.test[test_three_int64_keys_left_keeps_rows_differing_on_later_key]()
     suite.test[test_two_int64_keys_swapped_columns_do_not_match]()
     suite.test[test_negative_int32_keys_join_by_sign_extended_value]()
     suite.test[test_negative_int32_build_joins_negative_int64_probe]()
