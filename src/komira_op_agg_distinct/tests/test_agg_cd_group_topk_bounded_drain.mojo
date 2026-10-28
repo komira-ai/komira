@@ -17,6 +17,8 @@
 #   * `test_bounded_arm_actually_fires`: an arm that silently declines would
 #     pass every equivalence; the row count (k, not every group) tells them
 #     apart;
+#   * `test_only_a_string_key_admits_the_bounded_arm`: an arm that serves an
+#     aggregate with no string key to build;
 #   * the declines (an ORDER BY on a group key, an unknown column, k <= 0, a
 #     malformed comparator, the ratio boundary, no hint): a hint the arm does
 #     not serve must emit every group, never raise and never answer wrongly.
@@ -51,6 +53,7 @@ from komira_async.runtime.runtime import PLACEMENT_FIXED, PerCoreAsyncRuntime
 from komira_op_agg_distinct.agg_cd_group_topk import (
     CDP_TOPK_MIN_RATIO,
     CdGroupTopKHint,
+    cd_group_topk_admits,
 )
 from komira_op_agg_distinct.agg_count_distinct_parallel import (
     _execute_count_distinct_agg_parallel,
@@ -373,6 +376,26 @@ def test_declines_when_nulls_first_disagrees_in_length() raises:
     nf.append(False)
     var got = _run_cd(counts, Optional(CdGroupTopKHint(cols^, d^, _K, nf^)))
     assert_equal(got.num_rows(), _GROUPS, "a malformed NULL placement declines")
+
+
+def test_only_a_string_key_admits_the_bounded_arm() raises:
+    """The arm builds the string key for the survivors only, so it serves an
+    aggregate with a string group key and declines one without: the same
+    schema, hint and group count are admitted with `has_string_key` and
+    declined without it."""
+    var osb = SchemaBuilder()
+    osb.add_field(Field("k", ArrowType.STRING, False))
+    osb.add_field(Field("n", ArrowType.INT64, False))
+    var sch = osb.build()
+    var hint = Optional(_hint("n", True, _K))
+    assert_true(
+        cd_group_topk_admits(sch, 1, _GROUPS, True, hint),
+        "a string key is served",
+    )
+    assert_true(
+        not cd_group_topk_admits(sch, 1, _GROUPS, False, hint),
+        "an aggregate without a string key declines",
+    )
 
 
 def main() raises:
