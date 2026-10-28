@@ -17,11 +17,10 @@
 #   * two keys (INT32, then FLOAT64 DESC);
 #   * a single in-memory run, whose output keeps the input's column names.
 #
-# Behaviour change, and its planted mutant: the merge comparator compared
-# floats with IEEE `<` / `>` (a NaN tied with every value, so a NaN run head
-# stalled mid-merge) and put every NULL last whatever the run sort had done.
-# Restoring the IEEE compare turns `test_float_nan_zero_inf_*` red; restoring
-# NULLs-last turns `test_nullable_int64_key_*` red.
+# The merge comparator orders floats by `sort_key_lt` (an IEEE `<` / `>` ties
+# a NaN with every value, so a NaN run head would stall mid-merge) and orders
+# NULLs as the run sort did, not always last. `test_float_nan_zero_inf_*` covers
+# the first, `test_nullable_int64_key_*` the second.
 # =============================================================================
 
 from std.memory import bitcast

@@ -61,6 +61,7 @@ mojo_library(
         "tests/test_sort_stage_buffer_payloads.mojo",
         "tests/test_sort_stage_buffer_spill.mojo",
         "tests/test_sort_stage_string_key_duckdb.mojo",
+        "tests/test_sort_stage_ties_and_edges.mojo",
         "tests/test_sort_string_prefix_key.mojo",
         "tests/test_sort_topn_sink_radix.mojo",
         "tests/test_topn_heap_regime_string_key_route.mojo",
