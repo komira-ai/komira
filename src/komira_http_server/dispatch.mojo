@@ -86,6 +86,9 @@ from komira_http_server.middleware.fault_report import (
 from komira_http_server.middleware.middleware import Middleware, RequestContext
 from komira_http_server.round_write import (
     HEAD_KEPT,
+    _park_behind,
+    _park_rest,
+    _take_carry,
     _write_all_or_buffer,
     _write_last,
     carry_or_refuse_head,
@@ -454,6 +457,17 @@ def consumable_request_for(mut req: HttpRequest) -> HttpRequest:
     return owned^
 
 
+def _write_after(
+    mut entry: ConnEntry, src: List[UInt8], parked: Bool, mut bytes_sent: Int64
+) -> Int:
+    """`_write_all_or_buffer`, unless an earlier write for this request (its
+    100 Continue) parked: then `src` queues behind it, 1 as for a park."""
+    if parked:
+        _park_behind(entry, src)
+        return 1
+    return _write_all_or_buffer(entry, src, bytes_sent)
+
+
 # =============================================================================
 # §2 — serve_read_round_dispatch[D] — parse → dispatch → serialize → write.
 # =============================================================================
@@ -494,20 +508,30 @@ def serve_read_round_dispatch[
     lines (`HttpServerConfig.trace_project`); empty omits the canonical trace
     field.
 
+    A parked write ends the round: the requests read behind the parked one
+    wait in `entry._carry` and are served first by the round after the
+    resume; a parked last response (`Connection: close`, an error) has the
+    resume close the conn (as `serve_read_round`).
+
     Returns:
       * True  — conn remains alive in the table.
       * False — caller should drop the conn.
     """
     var fd = entry._fd
     var keep_alive = True
+    # Requests read before a parked write drained (komira-ai/komira#1285).
+    var carried = _take_carry(entry, io_buf)
 
     while keep_alive:
-        var got = read_after_head_carry(entry, io_buf)
-        if got == HEAD_READ_BLOCKED:
-            break
-        if got <= 0:
-            keep_alive = False
-            break
+        var got = carried
+        carried = 0
+        if got == 0:
+            got = read_after_head_carry(entry, io_buf)
+            if got == HEAD_READ_BLOCKED:
+                break
+            if got <= 0:
+                keep_alive = False
+                break
 
         var off = 0
         while off < got and keep_alive:
@@ -533,6 +557,9 @@ def serve_read_round_dispatch[
                 keep_alive = False
                 break
 
+            # A parked interim keeps its request: the request's response
+            # queues behind it (komira-ai/komira#1285).
+            var parked = False
             if outcome.expects_continue:
                 if not enable_expect_continue:
                     var err_buf = List[UInt8]()
@@ -545,11 +572,10 @@ def serve_read_round_dispatch[
                 var interim_buf = List[UInt8]()
                 build_100_continue_bytes(interim_buf)
                 var iw = _write_all_or_buffer(entry, interim_buf, bytes_sent)
-                if iw == 1:
-                    return True
                 if iw < 0:
                     keep_alive = False
                     break
+                parked = iw == 1
 
             # Build the HttpRequest from the parsed outcome (move the
             # heap-owning fields out via swap — `outcome` is a local that
@@ -639,7 +665,8 @@ def serve_read_round_dispatch[
                     # have forced.
                     var cerr_buf = List[UInt8]()
                     build_error_response_bytes(UInt16(400), cerr_buf)
-                    var cw = _write_last(entry, cerr_buf, bytes_sent)
+                    entry._keep_alive = False
+                    var cw = _write_after(entry, cerr_buf, parked, bytes_sent)
                     if cw == 1:
                         return True
                     keep_alive = False
@@ -707,14 +734,25 @@ def serve_read_round_dispatch[
                 ),
                 resp_list,
             )
-            var rw = _write_all_or_buffer(entry, resp_list, bytes_sent)
-            if rw == 1:
-                reqs_handled = reqs_handled + Int64(1)
-                return True
+            var rw = _write_after(entry, resp_list, parked, bytes_sent)
             if rw < 0:
                 keep_alive = False
                 break
             reqs_handled = reqs_handled + Int64(1)
+            if rw == 1:
+                # Parked: the requests read behind this one wait for the
+                # round after the resume; `Connection: close` has the resume
+                # close the conn instead (komira-ai/komira#1285). A body read
+                # from the socket (`body_split`) left nothing behind it here.
+                var rest = got
+                if not body_split:
+                    rest = off + outcome.headers_end_off + max(
+                        outcome.content_length, 0
+                    )
+                _park_rest(
+                    entry, io_buf, rest, got, outcome.connection_close
+                )
+                return True
 
             if outcome.connection_close:
                 keep_alive = False
@@ -882,6 +920,7 @@ def serve_read_round_dispatch_chained[
     Structurally identical to `serve_read_round_dispatch` (recv → parse-loop for
     pipelining → per-request response → EWOULDBLOCK-buffer the tail), with the
     bare-dispatch leaf swapped for `_drive_chain_dispatch[D, M, RT]`.
+    A parked write carries the requests behind it the same way.
 
     `reactor` is the SERVER'S reactor, threaded in
     so the dispatcher's handler async I/O parks on it. `RT.Sink` must equal the
@@ -893,14 +932,19 @@ def serve_read_round_dispatch_chained[
     """
     var fd = entry._fd
     var keep_alive = True
+    # Requests read before a parked write drained (komira-ai/komira#1285).
+    var carried = _take_carry(entry, io_buf)
 
     while keep_alive:
-        var got = read_after_head_carry(entry, io_buf)
-        if got == HEAD_READ_BLOCKED:
-            break
-        if got <= 0:
-            keep_alive = False
-            break
+        var got = carried
+        carried = 0
+        if got == 0:
+            got = read_after_head_carry(entry, io_buf)
+            if got == HEAD_READ_BLOCKED:
+                break
+            if got <= 0:
+                keep_alive = False
+                break
 
         var off = 0
         while off < got and keep_alive:
@@ -925,6 +969,9 @@ def serve_read_round_dispatch_chained[
                 keep_alive = False
                 break
 
+            # A parked interim keeps its request: the request's response
+            # queues behind it (komira-ai/komira#1285).
+            var parked = False
             if outcome.expects_continue:
                 if not enable_expect_continue:
                     var err_buf = List[UInt8]()
@@ -937,11 +984,10 @@ def serve_read_round_dispatch_chained[
                 var interim_buf = List[UInt8]()
                 build_100_continue_bytes(interim_buf)
                 var iw = _write_all_or_buffer(entry, interim_buf, bytes_sent)
-                if iw == 1:
-                    return True
                 if iw < 0:
                     keep_alive = False
                     break
+                parked = iw == 1
 
             var req = HttpRequest()
             swap(req.method, outcome.request.method)
@@ -993,7 +1039,8 @@ def serve_read_round_dispatch_chained[
                 if chunk_rc == CHUNKED_BODY_MALFORMED:
                     var cerr_buf = List[UInt8]()
                     build_error_response_bytes(UInt16(400), cerr_buf)
-                    var cw = _write_last(entry, cerr_buf, bytes_sent)
+                    entry._keep_alive = False
+                    var cw = _write_after(entry, cerr_buf, parked, bytes_sent)
                     if cw == 1:
                         return True
                     keep_alive = False
@@ -1019,14 +1066,25 @@ def serve_read_round_dispatch_chained[
                 ),
                 resp_list,
             )
-            var rw = _write_all_or_buffer(entry, resp_list, bytes_sent)
-            if rw == 1:
-                reqs_handled = reqs_handled + Int64(1)
-                return True
+            var rw = _write_after(entry, resp_list, parked, bytes_sent)
             if rw < 0:
                 keep_alive = False
                 break
             reqs_handled = reqs_handled + Int64(1)
+            if rw == 1:
+                # Parked: the requests read behind this one wait for the
+                # round after the resume; `Connection: close` has the resume
+                # close the conn instead (komira-ai/komira#1285). A body read
+                # from the socket (`body_split`) left nothing behind it here.
+                var rest = got
+                if not body_split:
+                    rest = off + outcome.headers_end_off + max(
+                        outcome.content_length, 0
+                    )
+                _park_rest(
+                    entry, io_buf, rest, got, outcome.connection_close
+                )
+                return True
 
             if outcome.connection_close:
                 keep_alive = False
@@ -1040,7 +1098,7 @@ def serve_read_round_dispatch_chained[
                 advance = advance + outcome.content_length
                 if off + advance > got:
                     keep_alive = False
-                    break
+                    break  # cov: unreachable a body short of its length in the buffer set body_split above and stopped
 
             off = off + advance
 

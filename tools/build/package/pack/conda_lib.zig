@@ -12,6 +12,10 @@
 //! the floor given by `--glibc-floor`, which conda.bzl reads from the platform
 //! table's `os_floor` and never types.
 //!
+//! A C ABI library (not a Mojo library's own C) has an unversioned SONAME,
+//! `lib<name>.so`: it ships as that one file, with no link name
+//! (`shared_lib` of conda.bzl).
+//!
 //! A shared library's NEEDED may name another komira library's shared library
 //! only when that library is in the packed library's Mojo deps closure
 //! (`--closure-owner SONAME`, one per shared library the closure ships): the
@@ -81,6 +85,12 @@ pub fn linkName(soname: []const u8) ?[]const u8 {
     return soname[0 .. at + ".so".len];
 }
 
+/// A shared library whose SONAME carries no version: `lib<lowercase, digits, _>.so`.
+fn plainSharedName(n: []const u8) bool {
+    return n.len > "lib.so".len and std.mem.startsWith(u8, n, "lib") and std.mem.endsWith(u8, n, ".so") and
+        plainName(n["lib".len .. n.len - ".so".len]);
+}
+
 fn plainName(n: []const u8) bool {
     if (n.len == 0) return false;
     for (n) |c| if (!(std.ascii.isLower(c) or std.ascii.isDigit(c) or c == '_')) return false;
@@ -101,10 +111,14 @@ pub fn libFilesOf(alloc: Alloc, shared: []const Given, statics: []const Given) E
     var list = std.ArrayList(LibFile).empty;
     if (shared.len > 1) return refuse(alloc, "{d} shared libraries given; a library ships one, lib<library>_native.so.1", .{shared.len});
     for (shared) |s| {
-        const link = linkName(s.name) orelse return refuse(alloc, "shared library name `{s}` is not lib<name>.so.<number>", .{s.name});
+        // A versioned SONAME (an owner's) has its unversioned link name; an
+        // unversioned one (`lib<name>.so`, a C ABI library) is its own name
+        // and has no link.
+        const link = linkName(s.name);
+        if (link == null and !plainSharedName(s.name)) return refuse(alloc, "shared library name `{s}` is not lib<name>.so.<number> or lib<name>.so", .{s.name});
         if (s.data.len == 0) return refuse(alloc, "{s} is empty", .{s.name});
         try list.append(alloc, .{ .path = try std.fmt.allocPrint(alloc, lib_dir ++ "{s}", .{s.name}), .kind = .shared, .data = s.data });
-        try list.append(alloc, .{ .path = try std.fmt.allocPrint(alloc, lib_dir ++ "{s}", .{link}), .kind = .link, .data = s.data, .target = s.name });
+        if (link) |l| try list.append(alloc, .{ .path = try std.fmt.allocPrint(alloc, lib_dir ++ "{s}", .{l}), .kind = .link, .data = s.data, .target = s.name });
     }
     for (statics) |s| {
         if (!staticName(s.name)) return refuse(alloc, "static archive name `{s}` is not lib<name>.a", .{s.name});
@@ -389,7 +403,26 @@ test "a shared library ships with its link name, and a static archive beside it"
     try testing.expectEqualStrings("lib/libkomira_x_native.so.1", files[2].path);
     try testing.expectEqual(Kind.shared, files[2].kind);
     try testing.expectEqual(@as(?[]const u8, null), linkName("libkomira_x_native.so"));
-    try testing.expectError(error.Refused, libFilesOf(arena.allocator(), &.{.{ .name = "libx.so", .data = "x" }}, &.{}));
+    try testing.expectError(error.Refused, libFilesOf(arena.allocator(), &.{.{ .name = "libx.so.one", .data = "x" }}, &.{}));
+    try testing.expectError(error.Refused, libFilesOf(arena.allocator(), &.{.{ .name = "x.so", .data = "x" }}, &.{}));
+    try testing.expectError(error.Refused, libFilesOf(arena.allocator(), &.{.{ .name = "libX.so", .data = "x" }}, &.{}));
+}
+
+test "a C ABI library with an unversioned SONAME ships alone, with no link" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const alloc = arena.allocator();
+    const files = try libFilesOf(alloc, &.{.{ .name = "libkomira.so", .data = "\x7fELF shared" }}, &.{});
+    try testing.expectEqual(@as(usize, 1), files.len);
+    try testing.expectEqualStrings("lib/libkomira.so", files[0].path);
+    try testing.expectEqual(Kind.shared, files[0].kind);
+    try testing.expectEqualStrings("", files[0].target);
+    try testing.expectEqual(@as(u32, 0o755), files[0].mode());
+    // Its rows are accepted, and an empty file is refused.
+    try checkRows(alloc, try metadataRows(alloc, files), files);
+    try testing.expectError(error.Refused, libFilesOf(alloc, &.{.{ .name = "libkomira.so", .data = "" }}, &.{}));
+    // Two shared libraries are still refused.
+    try testing.expectError(error.Refused, libFilesOf(alloc, &.{ .{ .name = "libkomira.so", .data = "x" }, .{ .name = "libkomira_x_native.so.1", .data = "x" } }, &.{}));
 }
 
 test "lib_files rows: the rows written are accepted" {

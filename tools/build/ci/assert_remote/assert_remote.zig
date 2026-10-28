@@ -117,6 +117,26 @@ pub fn describe(v: Verdict, w: *std.Io.Writer) std.Io.Writer.Error!void {
     }
 }
 
+/// The largest log the tool reads. A step that runs every test of a large affected set prints each test's output: the log of one such
+/// pull request was 530 MB, almost all of it the lines of one package's timing test, and a cap of 256 MiB made the assertion fail on a
+/// green run (`FileTooBig`). A log over the cap is still refused, so a run is never passed unread.
+pub const max_log_bytes: usize = 2048 * 1024 * 1024;
+
+/// The log at `path` under `dir`, read whole, or null after the reason is on `w` (the caller exits 2). A log over `cap` bytes is
+/// refused unread, never truncated: a verdict on part of a log would pass a run it had not seen.
+pub fn readLog(a: std.mem.Allocator, dir: std.fs.Dir, path: []const u8, cap: usize, w: *std.Io.Writer) !?[]u8 {
+    return dir.readFileAlloc(a, path, cap) catch |e| {
+        try w.print("assert_remote: cannot read {s}: {s}\n", .{ path, @errorName(e) });
+        try w.flush();
+        return null;
+    };
+}
+
+/// What `main` reads the step's log with: the log named by the command line, under the working directory, capped at `max_log_bytes`.
+pub fn readStepLog(a: std.mem.Allocator, path: []const u8, w: *std.Io.Writer) !?[]u8 {
+    return readLog(a, std.fs.cwd(), path, max_log_bytes, w);
+}
+
 pub fn main() !u8 {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
@@ -130,11 +150,7 @@ pub fn main() !u8 {
         try err.interface.flush();
         return 2;
     }
-    const log = std.fs.cwd().readFileAlloc(a, args[1], 256 * 1024 * 1024) catch |e| {
-        try err.interface.print("assert_remote: cannot read {s}: {s}\n", .{ args[1], @errorName(e) });
-        try err.interface.flush();
-        return 2;
-    };
+    const log = try readStepLog(a, args[1], &err.interface) orelse return 2;
     defer a.free(log);
     const v = verdict(log);
     try describe(v, &err.interface);

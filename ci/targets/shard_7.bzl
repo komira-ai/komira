@@ -3,6 +3,8 @@
 # `guard.bxl:check` fails the pull request check when this file is out of date.
 
 TARGETS = [
+    "komira//node:load_test",
+    "komira//node:session_test",
     "komira//release/readme_e2e/verify:all",
     "komira//src/kci_publish:kci_publish_lib_conda",
     "komira//src/komira_arrow_ipc:arrow_c_abi_probe",
@@ -111,6 +113,14 @@ TARGETS = [
     "tests//functional/mojo_doc_json:doc_tree",
     "tests//functional/mojo_doc_json:docpkg_doc",
     "tests//functional/native_reach:doc_tree",
+    "tests//functional/one_mopm:empty_set",
+    "tests//functional/one_mopm:excepted_fixture_on_another_version",
+    "tests//functional/one_mopm:fixture_without_a_row",
+    "tests//functional/one_mopm:one_package_on_another_version",
+    "tests//functional/one_mopm:one_version",
+    "tests//functional/one_mopm:only_an_excepted_fixture",
+    "tests//functional/one_mopm:release_flow_on_another_version",
+    "tests//functional/one_mopm:row_for_a_missing_file",
     "tests//functional/rustc_launch:doc_tree",
     "tests//functional/rustc_launch:driver",
     "tests//functional/src_layout:doc_tree",

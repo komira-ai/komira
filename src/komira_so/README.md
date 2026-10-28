@@ -175,11 +175,11 @@ NULL context (-1), a NULL input (-2 with a last error), a bad file or plan (-3
 with the message as the last error) and, for the four calls with an output, the
 two-call protocol; a good call after a refusal leaves no error.
 `exports_exact` makes the nine names above the whole dynamic symbol table.
-The seven C owners in the library's closure (async, async_api, compression, fs,
-libc, metrics, scan_source) are linked as their own shared libraries
+The eight C owners in the library's closure (async, async_api, compression, fs,
+libc, metrics, parquet_codec, scan_source) are linked as their own shared libraries
 (`native_owners`), not embedded. The thirteenth driver, `gate_native_owners`,
 reads the `DT_NEEDED` entries of the library's ELF dynamic section and requires
-the SONAME of each of the seven (`libkomira_<owner>_native.so.1`); an owner
+the SONAME of each of the eight (`libkomira_<owner>_native.so.1`); an owner
 dropped from `native_owners` leaves its C embedded, and that driver fails.
 The plan driver also refuses a `plan_len` of 64 MiB plus one and of
 `UINT64_MAX` (-5, nothing written), and accepts exactly 64 MiB as a length;
@@ -227,4 +227,4 @@ packaging change that lists it.
 ## Not done
 
 No release-over-release version check and no packaged header yet; no plan execution, query
-or UDF call; no engine in the session; no language binding.
+or UDF call; no engine in the session; the one language binding is the Node addon ([`node/`](https://github.com/komira-ai/komira/blob/main/node/README.md)).

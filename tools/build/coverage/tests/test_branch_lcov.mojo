@@ -9,7 +9,8 @@ from covcheck.held import Held, add_hold
 
 # Branch record files (`--branch-lcov`, cov_branch_classify's records): the
 # strict reader, the sum of one arm across tests ('-' is counted and not
-# taken), the refusal of two tests disagreeing on a location's decisions,
+# taken), the sum of tests whose copies of a location hold different numbers of
+# decisions (the most decisions win), the refusal of a different number of arms,
 # one source of branch data per file, the numbers and findings they give a
 # package next to a Cobertura line report, and their annotations.
 
@@ -269,13 +270,15 @@ def test_branch_numbers_replace_branch_not_measured() raises:
 
 def test_decision_count_conflict_refused() raises:
     # Two tests give one location (line 2, column 9, br) a different number
-    # of decisions: their copies of the code hold different ones, and
-    # summing `<n>/<N>` by id would add unrelated arms.
+    # of decisions: the test whose copy has the most decisions is the
+    # location's set and the other's records there are dropped (this
+    # asserted a refusal before; the new tests below cover the rule).
     var b = List[String]()
     b.append(_rec(String("BRDA:2,9:br:0/1,0,1\nBRDA:2,9:br:0/1,1,0\n")))
     b.append(_rec(String("BRDA:2,9:br:0/2,0,1\nBRDA:2,9:br:0/2,1,0\nBRDA:2,9:br:1/2,0,0\nBRDA:2,9:br:1/2,1,1\n")))
-    _raises(_inputs(String(COB_FULL), b),
-        String("src/alpha/a.mojo:2: b0.info gives 1 decision(s) at 9:br and b1.info gives 2: the tests' copies of this code hold different decisions at one location, so their branch records cannot be summed by id"))
+    var m = _gate(_inputs(String(COB_FULL), b), String("line\n"))
+    assert_equal(m.packages[0].branch_found, 4)
+    assert_equal(m.packages[0].branch_hit, 2)
     # The same N on another kind at that column is another location.
     var k = List[String]()
     k.append(_rec(String("BRDA:2,9:br:0/1,0,1\nBRDA:2,9:br:0/1,1,0\n")))
@@ -294,6 +297,106 @@ def test_decision_count_conflict_refused() raises:
     var ta = _gate(_inputs(String(COB_FULL), t), String("line\n"))
     assert_equal(ta.excluded_test_files, 1)
     assert_equal(ta.packages[0].branch_found, 0)
+
+
+def _copy(line: Int, total: Int, arm0: List[Int]) -> String:
+    """`total` decisions of kind br at `line`,9, as one test's copy holds
+    them: decision i takes `arm0[i]` on arm 0 and 0 on arm 1."""
+    var t = String("")
+    for i in range(total):
+        var d = String("BRDA:") + String(line) + String(",9:br:") + String(i) + String("/") + String(total) + String(",")
+        t += d + String("0,") + String(arm0[i]) + String("\n")
+        t += d + String("1,0\n")
+    return t^
+
+
+def _list(*v: Int) -> List[Int]:
+    var l = List[Int]()
+    for x in v:
+        l.append(x)
+    return l^
+
+
+def _merged(b: List[String]) raises -> Analysis:
+    return _gate(_inputs(String(COB_FULL), b), String("line\n"))
+
+
+def test_unequal_copies_merge_in_either_order() raises:
+    # The komira_log shape: one test's copy holds 1 decision at the
+    # location, another's 4. Neither order is refused; the 4 are counted.
+    var small = _rec(_copy(2, 1, _list(0)))
+    var large = _rec(_copy(2, 4, _list(0, 0, 0, 0)))
+    for order in range(2):
+        var b = List[String]()
+        b.append(small.copy() if order == 0 else large.copy())
+        b.append(large.copy() if order == 0 else small.copy())
+        var a = _merged(b)
+        assert_equal(a.packages[0].branch_found, 8)
+        assert_equal(a.packages[0].branch_hit, 0)
+
+
+def test_unequal_copies_hit_in_the_smaller_copy_covers_nothing() raises:
+    var b = List[String]()
+    b.append(_rec(_copy(2, 1, _list(5))))
+    b.append(_rec(_copy(2, 4, _list(0, 0, 0, 0))))
+    var a = _merged(b)
+    assert_equal(a.packages[0].branch_found, 8)
+    assert_equal(a.packages[0].branch_hit, 0)
+    ref f = a.files[a.file_index(String("src/alpha/a.mojo"))]
+    assert_true(String("2,9:br:0/1,0") not in f.branches)
+    for e in f.branches.items():
+        assert_equal(e.value, 0)
+
+
+def test_unequal_copies_keep_the_larger_copys_hits() raises:
+    var b = List[String]()
+    b.append(_rec(_copy(2, 4, _list(0, 3, 0, 0))))
+    b.append(_rec(_copy(2, 1, _list(7))))
+    var a = _merged(b)
+    assert_equal(a.packages[0].branch_found, 8)
+    assert_equal(a.packages[0].branch_hit, 1)
+    ref f = a.files[a.file_index(String("src/alpha/a.mojo"))]
+    assert_equal(f.branches[String("2,9:br:1/4,0")], 3)
+    assert_equal(f.branches[String("2,9:br:0/4,0")], 0)
+
+
+def test_equal_counts_are_still_summed() raises:
+    var b = List[String]()
+    b.append(_rec(_copy(2, 2, _list(1, 0))))
+    b.append(_rec(_copy(2, 2, _list(2, 4))))
+    var a = _merged(b)
+    assert_equal(a.packages[0].branch_found, 4)
+    ref f = a.files[a.file_index(String("src/alpha/a.mojo"))]
+    assert_equal(f.branches[String("2,9:br:0/2,0")], 3)
+    assert_equal(f.branches[String("2,9:br:1/2,0")], 4)
+
+
+def test_several_tests_at_the_maximum_are_summed() raises:
+    var b = List[String]()
+    b.append(_rec(_copy(2, 1, _list(9))))
+    b.append(_rec(_copy(2, 2, _list(1, 0))))
+    b.append(_rec(_copy(2, 2, _list(2, 4))))
+    b.append(_rec(_copy(2, 1, _list(9))))
+    var a = _merged(b)
+    assert_equal(a.packages[0].branch_found, 4)
+    assert_equal(a.packages[0].branch_hit, 2)
+    ref f = a.files[a.file_index(String("src/alpha/a.mojo"))]
+    assert_equal(f.branches[String("2,9:br:0/2,0")], 3)
+    assert_equal(f.branches[String("2,9:br:1/2,0")], 4)
+
+
+def test_unequal_copies_leave_another_location_alone() raises:
+    # Line 2 is unequal; line 3 holds the same count in both tests and is
+    # summed.
+    var b = List[String]()
+    b.append(_rec(_copy(2, 1, _list(5)) + _copy(3, 1, _list(1))))
+    b.append(_rec(_copy(2, 4, _list(0, 0, 0, 0)) + _copy(3, 1, _list(2))))
+    var a = _merged(b)
+    assert_equal(a.packages[0].branch_found, 10)
+    assert_equal(a.packages[0].branch_hit, 1)
+    ref f = a.files[a.file_index(String("src/alpha/a.mojo"))]
+    assert_equal(f.branches[String("3,9:br:0/1,0")], 3)
+    assert_true(String("2,9:br:0/1,0") not in f.branches)
 
 
 def test_one_report_names_a_file_once() raises:
@@ -424,6 +527,12 @@ def main() raises:
     test_records_sum_by_id_across_tests()
     test_branch_numbers_replace_branch_not_measured()
     test_decision_count_conflict_refused()
+    test_unequal_copies_merge_in_either_order()
+    test_unequal_copies_hit_in_the_smaller_copy_covers_nothing()
+    test_unequal_copies_keep_the_larger_copys_hits()
+    test_equal_counts_are_still_summed()
+    test_several_tests_at_the_maximum_are_summed()
+    test_unequal_copies_leave_another_location_alone()
     test_one_report_names_a_file_once()
     test_one_source_of_branch_data_per_file()
     test_branches_of_a_file_no_line_report_names()

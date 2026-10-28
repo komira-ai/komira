@@ -2,7 +2,7 @@
 
 ## Responsibility
 
-The network half of the model seams of `komira_kg`, from
+The network half of the model seams of [`komira_kg`](https://github.com/komira-ai/komira/blob/main/src/komira_kg/README.md), from
 [the knowledge graph port](https://github.com/komira-ai/komira/blob/main/docs/design/knowledge_graph_port.md):
 an `Embedder` and an `LlmClient` that talk to a server over HTTP, and the choice between extracting by rules and
 extracting by a model.

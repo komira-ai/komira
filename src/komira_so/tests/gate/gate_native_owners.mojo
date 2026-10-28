@@ -4,7 +4,7 @@
 # the archives stay on the link line, so an owner dropped from the list is
 # embedded silently and every other gate stays green. This driver reads the
 # library's own ELF64 dynamic section (little endian), collects its DT_NEEDED
-# names and requires the SONAME of each of the seven owners the BUCK file lists.
+# names and requires the SONAME of each of the eight owners the BUCK file lists.
 #
 # A gate driver of //src/komira_so:libkomira. It has no dependency and does not
 # load the library: it only reads the file "./libkomira.so" as bytes.
@@ -17,6 +17,7 @@ comptime OWNERS = (
     "libkomira_fs_native.so.1",
     "libkomira_libc_native.so.1",
     "libkomira_metrics_native.so.1",
+    "libkomira_parquet_codec_native.so.1",
     "libkomira_scan_source_native.so.1",
 )
 comptime SHT_DYNAMIC = 6

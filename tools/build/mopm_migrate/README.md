@@ -8,8 +8,8 @@ to guess.
 
 ```sh
 ./buck2 build komira//tools/build/mopm_migrate:mopm_migrate --show-output
-mopm_migrate --package komira_example --description "One sentence for mopm." --dry-run
-mopm_migrate --package komira_example --description "One sentence for mopm."
+mopm_migrate --package komira_example --description "One sentence for mopm." --mopm 0.0.86 --dry-run
+mopm_migrate --package komira_example --description "One sentence for mopm." --mopm 0.0.86
 ```
 
 Run it from the repository root (or pass `--repo <dir>`). The flags:
@@ -19,7 +19,7 @@ Run it from the repository root (or pass `--repo <dir>`). The flags:
 | `--package <name>` | the directory name under `src/` (also the import name and the target name) |
 | `--description <text>` | the sentence in `mopm.toml`; required, because no old file states it |
 | `--dry-run` | print the whole plan and write nothing |
-| `--mopm <version>` | the mopm of `mopm-toolchain.toml` and of `mojo_conda` (default `0.0.73`, the one the other packages use) |
+| `--mopm <version>` | required, no default: the mopm of `mopm-toolchain.toml` and of `mojo_conda`. Pass the version the repository builds with, the `MOPM` of `release/readme_e2e/packages.bzl` without its `toolchains//:mopm_` prefix and with dots (`//tools/build/lint:one_mopm` refuses a package that names another) |
 | `--test-layout installed\|default` | required when the old file has `test_data` or `test_env`: the layout the test runs in is not in the old file (`installed` when the test reads `share/`) |
 | `--dev-dependencies` | write the dependencies only the tests import as `[dev-dependencies]` (see below) |
 

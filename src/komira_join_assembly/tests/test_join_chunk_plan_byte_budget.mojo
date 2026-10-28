@@ -430,9 +430,9 @@ def test_null_sentinel_costs_nothing() raises:
 def test_offset_bearing_string_column_prices_the_right_rows() raises:
     """Mutant M4 — the offset-blind-read defect class.
 
-    `Column.as_string()` reads `_offsets[0 .. _length]` and IGNORES `_offset`,
-    so a planner built on it prices an offset-bearing
-    column from the WRONG rows. `string_byte_length_at` adds `_offset`; this
+    `Column.as_string()` reads `_offsets[0 .. _length]` from row 0 and refuses a
+    sliced column, so a planner built on it cannot price an offset-bearing
+    column at all. `string_byte_length_at` adds `_offset`; this
     pins that contract.
 
     ⚠ WHY THE STATE IS CONSTRUCTED BY HAND rather than via `Column.slice`:

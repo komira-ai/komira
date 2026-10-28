@@ -6,7 +6,7 @@ MOJO = "1.0.0"
 CLOSURE_SHA256 = "fd654c4192487587d8f8d9402d060e45e218b79da7b8964503a703710e49b15d"
 MANIFEST_SHA256 = {
     "mopm-toolchain.toml": "7e43881be78fc3f59fa9aa39252cc7a63d66cd79a9d7c99d948c214a3967ee3f",
-    "mopm.lock": "ab4a0dd368f5856e0c546351d542ec31834c1813b8823db84a07414adecb6b1b",
+    "mopm.lock": "7f4f35c22bf38597c0688630cbc857ef8b71b9ebcced62dab4dea0c31274af98",
     "mopm.toml": "bd478ec249c0beb91960299e0db76dc4072c2209cc6ad6cfa9bb4c02581288a9",
 }
 GRAPH_JSON = r'''{
@@ -78,3 +78,142 @@ GRAPH_JSON = r'''{
 }
 '''
 GRAPH = json.decode(GRAPH_JSON)
+GRAPH_JSON_LINUX_AARCH64 = r'''{
+  "unit_graph": 2,
+  "package": "komira_content_line@0.1.0",
+  "mojo": "1.0.0",
+  "toolchain": {
+    "mojo": "1.0.0",
+    "subdir": "linux-aarch64",
+    "cc_target": "aarch64-linux-gnu.2.34",
+    "closure_sha256": "3e7db5a0f9255c9086d9d29f385e7fd90e8536fa16ffe55414f6bba4e0ef3d3e",
+    "zig": {"version": "0.12.0", "url": "https://ziglang.org/download/0.12.0/zig-linux-aarch64-0.12.0.tar.xz", "sha256": "754f1029484079b7e0ca3b913a0a2f2a6afd5a28990cb224fe8845e72f09de63", "size": 41849060},
+    "components": [
+      {"name": "libgcc", "version": "16.2.0", "url": "https://conda.anaconda.org/conda-forge/linux-aarch64/libgcc-16.2.0-h205dda4_7.conda", "sha256": "eae7a3449d5a3b5351c5427137c076cc3fc826645c7bfc42dc10772b783826f1", "size": 627793},
+      {"name": "libstdcxx", "version": "16.2.0", "url": "https://conda.anaconda.org/conda-forge/linux-aarch64/libstdcxx-16.2.0-hef695bb_7.conda", "sha256": "b241a3acfa9cdb1359112864a1241225533c92642de3000d52ae65ef5d3a9786", "size": 6236630},
+      {"name": "mojo-compiler", "version": "1.0.0", "url": "https://conda.modular.com/max/linux-aarch64/mojo-compiler-1.0.0-release.conda", "sha256": "da1772742c54f1f8f7b883e6338b1fe5de4592f2c882220dcceae623cc661e57", "size": 66479788}
+    ]
+  },
+  "units": [
+    {
+      "id": "komira_content_line@0.1.0#mojo1.0.0/lib",
+      "package": "komira_content_line",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/komira_content_line/src/komira_content_line",
+      "srcs": [
+        {"path": "src/komira_content_line/src/komira_content_line/__init__.mojo", "sha256": "b6a17fa7c0b07fcf9f19bdb5ee27d1401e541c0e8a44459180da7d5b16a7c978"},
+        {"path": "src/komira_content_line/src/komira_content_line/fold.mojo", "sha256": "7395f4f2d0d8c1dbd9cda86c1f5383019d1d96a545f61872b5a123d5a37d3e7b"},
+        {"path": "src/komira_content_line/src/komira_content_line/lexer.mojo", "sha256": "e104ef4b478d183116b3301f6faffb40edf295d25096463614f5ef9b53000a80"},
+        {"path": "src/komira_content_line/src/komira_content_line/text.mojo", "sha256": "d2e2d3c66dab59ddad90e386337891342717c961c9cf89c04c79cf2b3163169b"},
+        {"path": "src/komira_content_line/src/komira_content_line/unfold.mojo", "sha256": "6e6d9ac54720ff4d7d26016f39ce93bb4e24a88eb5fbba102f931fd3b943124b"},
+        {"path": "src/komira_content_line/src/komira_content_line/utf8.mojo", "sha256": "13d29b60fe79adfb38b2c08ac4b716335754ff29ec806875e39d5ab3583029ce"}
+      ],
+      "deps": [],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["komira_content_line.mojoc"],
+      "key": "b6f838ff7085c2afa829519b29bf5c3af8379c4da551df40cfd63e5f4935b00e"
+    },
+    {
+      "id": "komira_content_line@0.1.0#mojo1.0.0/test:src/komira_content_line/tests/test_fold_escape.mojo",
+      "package": "komira_content_line",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/komira_content_line/tests/test_fold_escape.mojo", "sha256": "d2e7e2edd1040bcc1e46bd7405bff96374240b5c7a43f21e50fb820d38ce365f"}
+      ],
+      "deps": ["komira_content_line@0.1.0#mojo1.0.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_fold_escape.pass"],
+      "key": "e231ad06c176e69397b4f907d49142bb7ffc4573702b7be7170c45b7267507c3"
+    },
+    {
+      "id": "komira_content_line@0.1.0#mojo1.0.0/test:src/komira_content_line/tests/test_unfold_lexer.mojo",
+      "package": "komira_content_line",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/komira_content_line/tests/test_unfold_lexer.mojo", "sha256": "9c44ff03cc9791cc00561d84d5dd6f4b3cc86921f4017f6266034d8cee0f4585"}
+      ],
+      "deps": ["komira_content_line@0.1.0#mojo1.0.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_unfold_lexer.pass"],
+      "key": "6b071b1bfc8b98c2f1297a7140505c5e49a99f43fea3ad8f8fdd494507f93f85"
+    }
+  ]
+}
+'''
+GRAPH_JSON_OSX_ARM64 = r'''{
+  "unit_graph": 2,
+  "package": "komira_content_line@0.1.0",
+  "mojo": "1.0.0",
+  "toolchain": {
+    "mojo": "1.0.0",
+    "subdir": "osx-arm64",
+    "cc_target": "aarch64-macos.11.0",
+    "closure_sha256": "dfb1ddbe32564e406967054fbccd4ad643bf01e72532a3eb3add28253908ac5f",
+    "zig": {"version": "0.12.0", "url": "https://ziglang.org/download/0.12.0/zig-macos-aarch64-0.12.0.tar.xz", "sha256": "294e224c14fd0822cfb15a35cf39aa14bd9967867999bf8bdfe3db7ddec2a27f", "size": 43447724},
+    "components": [
+      {"name": "mojo-compiler", "version": "1.0.0", "url": "https://conda.modular.com/max/osx-arm64/mojo-compiler-1.0.0-release.conda", "sha256": "c52054bc444d851e5c38cc33e790fb011a1080470244aaa59351ac5056d08c59", "size": 61221085}
+    ]
+  },
+  "units": [
+    {
+      "id": "komira_content_line@0.1.0#mojo1.0.0/lib",
+      "package": "komira_content_line",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/komira_content_line/src/komira_content_line",
+      "srcs": [
+        {"path": "src/komira_content_line/src/komira_content_line/__init__.mojo", "sha256": "b6a17fa7c0b07fcf9f19bdb5ee27d1401e541c0e8a44459180da7d5b16a7c978"},
+        {"path": "src/komira_content_line/src/komira_content_line/fold.mojo", "sha256": "7395f4f2d0d8c1dbd9cda86c1f5383019d1d96a545f61872b5a123d5a37d3e7b"},
+        {"path": "src/komira_content_line/src/komira_content_line/lexer.mojo", "sha256": "e104ef4b478d183116b3301f6faffb40edf295d25096463614f5ef9b53000a80"},
+        {"path": "src/komira_content_line/src/komira_content_line/text.mojo", "sha256": "d2e2d3c66dab59ddad90e386337891342717c961c9cf89c04c79cf2b3163169b"},
+        {"path": "src/komira_content_line/src/komira_content_line/unfold.mojo", "sha256": "6e6d9ac54720ff4d7d26016f39ce93bb4e24a88eb5fbba102f931fd3b943124b"},
+        {"path": "src/komira_content_line/src/komira_content_line/utf8.mojo", "sha256": "13d29b60fe79adfb38b2c08ac4b716335754ff29ec806875e39d5ab3583029ce"}
+      ],
+      "deps": [],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["komira_content_line.mojoc"],
+      "key": "ce524d47e367f32ceb55938abd2809a437dd4a717ed798f0ba5880042486b01f"
+    },
+    {
+      "id": "komira_content_line@0.1.0#mojo1.0.0/test:src/komira_content_line/tests/test_fold_escape.mojo",
+      "package": "komira_content_line",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/komira_content_line/tests/test_fold_escape.mojo", "sha256": "d2e7e2edd1040bcc1e46bd7405bff96374240b5c7a43f21e50fb820d38ce365f"}
+      ],
+      "deps": ["komira_content_line@0.1.0#mojo1.0.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_fold_escape.pass"],
+      "key": "032f434af8def51cc5cd48cfea9e41fed11c69711af3ca946562fed818babeae"
+    },
+    {
+      "id": "komira_content_line@0.1.0#mojo1.0.0/test:src/komira_content_line/tests/test_unfold_lexer.mojo",
+      "package": "komira_content_line",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/komira_content_line/tests/test_unfold_lexer.mojo", "sha256": "9c44ff03cc9791cc00561d84d5dd6f4b3cc86921f4017f6266034d8cee0f4585"}
+      ],
+      "deps": ["komira_content_line@0.1.0#mojo1.0.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_unfold_lexer.pass"],
+      "key": "aaba7540b719afa8816de6d4ded2ee1e20ab75f310586c7953b06d11f6edf8af"
+    }
+  ]
+}
+'''
+GRAPHS = {
+    "linux-64": GRAPH,
+    "linux-aarch64": json.decode(GRAPH_JSON_LINUX_AARCH64),
+    "osx-arm64": json.decode(GRAPH_JSON_OSX_ARM64),
+}

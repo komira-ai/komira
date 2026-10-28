@@ -213,9 +213,15 @@ fn resourcesTree() []const plan.File {
     };
 }
 
+/// The mopm of the two hand-migrated fixtures (their `mopm-toolchain.toml` files name it).
+const fixture_mopm = "0.0.73";
+/// A mopm other than the fixtures' one, as a caller passes it with `--mopm`.
+const repo_mopm = "0.0.86";
+
 const resources_options = plan.Options{
     .package = "komira_resources",
     .description = resources_description,
+    .mopm = fixture_mopm,
     .test_layout = "installed",
 };
 
@@ -348,7 +354,7 @@ fn collectionsTree() []const plan.File {
     };
 }
 
-const collections_options = plan.Options{ .package = "komira_collections", .description = collections_description };
+const collections_options = plan.Options{ .package = "komira_collections", .description = collections_description, .mopm = fixture_mopm };
 
 test "golden collections: the manifest with [dependencies], the toolchain file and the lock are the hand migration's, byte for byte" {
     var ar = arena();
@@ -482,7 +488,7 @@ fn mini(a: std.mem.Allocator, m: Mini) ![]const plan.File {
     return files.toOwnedSlice(a);
 }
 
-const mini_options = plan.Options{ .package = "alpha", .description = "A library." };
+const mini_options = plan.Options{ .package = "alpha", .description = "A library.", .mopm = repo_mopm };
 
 fn buckWith(a: std.mem.Allocator, from: []const u8, to: []const u8) ![]const u8 {
     try t.expect(std.mem.indexOf(u8, mini_buck, from) != null);
@@ -606,7 +612,7 @@ test "refuses test_data with no stated layout, and a test-only dependency withou
     const a = ar.allocator();
     const with_data = try buckWith(a, "    visibility", "    test_data = {\"tests/test_alpha.mojo\": {\"a.txt\": \"a.txt\"}},\n    visibility");
     try expectRefusal(a, try mini(a, .{ .buck = with_data }), mini_options, "Pass --test-layout=installed");
-    const p = try planOf(a, try mini(a, .{ .buck = with_data }), .{ .package = "alpha", .description = "A library.", .test_layout = "installed" });
+    const p = try planOf(a, try mini(a, .{ .buck = with_data }), .{ .package = "alpha", .description = "A library.", .mopm = repo_mopm, .test_layout = "installed" });
     try t.expect(std.mem.indexOf(u8, try writeOf(p, "src/alpha/BUCK"), "    test_data = {\"tests/test_alpha.mojo\": {\"a.txt\": \"a.txt\"}},\n    test_layout = \"installed\",\n") != null);
 
     const extra = [_]plan.File{
@@ -616,7 +622,7 @@ test "refuses test_data with no stated layout, and a test-only dependency withou
     const dev_buck = try buckWith(a, "    visibility", "    test_deps = [\"//src/gamma:gamma\"],\n    visibility");
     const dev_test = "from alpha import x\nfrom gamma import y\n";
     try expectRefusal(a, try mini(a, .{ .buck = dev_buck, .test_src = dev_test, .extra = &extra }), mini_options, "[dev-dependencies] entry");
-    const q = try planOf(a, try mini(a, .{ .buck = dev_buck, .test_src = dev_test, .extra = &extra }), .{ .package = "alpha", .description = "A library.", .dev_dependencies = true });
+    const q = try planOf(a, try mini(a, .{ .buck = dev_buck, .test_src = dev_test, .extra = &extra }), .{ .package = "alpha", .description = "A library.", .mopm = repo_mopm, .dev_dependencies = true });
     try t.expect(std.mem.indexOf(u8, try writeOf(q, "src/alpha/mopm.toml"), "[dev-dependencies]\ngamma = { path = \"../gamma\", version = \"0.1\" }\n") != null);
 }
 
@@ -629,9 +635,9 @@ test "refuses what is already done or in the way: migrated, src/ present, genera
     try expectRefusal(a, try mini(a, .{ .extra = &.{.{ .path = "src/alpha/generated/alpha/x.mojo", .text = "" }} }), mini_options, "generated sources are not a plain migration");
     try expectRefusal(a, try mini(a, .{ .readme = null }), mini_options, "README.md not found");
     try expectRefusal(a, try mini(a, .{ .readme = "# a\n\n## Build files\n" }), mini_options, "has a 'Build files' section already");
-    try expectRefusal(a, try mini(a, .{}), .{ .package = "alpha", .description = "" }, "--description is required");
-    try expectRefusal(a, try mini(a, .{}), .{ .package = "Alpha!", .description = "d" }, "is not a package name");
-    try expectRefusal(a, try mini(a, .{}), .{ .package = "missing", .description = "d" }, "not found: src/missing is not a package");
+    try expectRefusal(a, try mini(a, .{}), .{ .package = "alpha", .description = "", .mopm = repo_mopm }, "--description is required");
+    try expectRefusal(a, try mini(a, .{}), .{ .package = "Alpha!", .description = "d", .mopm = repo_mopm }, "is not a package name");
+    try expectRefusal(a, try mini(a, .{}), .{ .package = "missing", .description = "d", .mopm = repo_mopm }, "not found: src/missing is not a package");
 }
 
 test "an import list counts every module: a dependency named second is found, and a from list names one module" {
@@ -918,4 +924,31 @@ test "a file git does not track refuses the run before anything moves" {
     var c3 = plan.Ctx{ .a = a };
     try mm.run(a, &c3, tmp.dir, .{ .plan = mini_options, .dry_run = false, .use_git = false, .tracked = &all }, &out.writer);
     try tmp.dir.access("src/alpha/src/alpha/helper.mojo", .{});
+}
+
+fn parsed(args: []const []const u8, why: *std.ArrayList(u8), a: std.mem.Allocator) !?mm.Parsed {
+    return mm.parseArgs(args, a, why);
+}
+
+test "the command line: --mopm is required, the tool has no default version" {
+    var ar = arena();
+    defer ar.deinit();
+    const a = ar.allocator();
+    var why: std.ArrayList(u8) = .empty;
+    const r = try parsed(&.{ "mopm_migrate", "--package", "alpha", "--description", "A library." }, &why, a);
+    try t.expect(r == null);
+    try t.expect(std.mem.indexOf(u8, why.items, "--mopm is required") != null);
+}
+
+test "the command line: the migrated output names the version --mopm gives" {
+    var ar = arena();
+    defer ar.deinit();
+    const a = ar.allocator();
+    var why: std.ArrayList(u8) = .empty;
+    const r = (try parsed(&.{ "mopm_migrate", "--package", "alpha", "--description", "A library.", "--mopm", repo_mopm }, &why, a)).?;
+    try t.expectEqualStrings(repo_mopm, r.plan.mopm);
+    const p = try planOf(a, try mini(a, .{}), r.plan);
+    try t.expect(std.mem.indexOf(u8, try writeOf(p, "src/alpha/mopm-toolchain.toml"), "mopm = \"0.0.86\"") != null);
+    try t.expect(std.mem.indexOf(u8, try writeOf(p, "src/alpha/BUCK"), "toolchains//:mopm_0_0_86") != null);
+    try t.expect(std.mem.indexOf(u8, try writeOf(p, "src/alpha/mopm-toolchain.toml"), "0.0.73") == null);
 }
