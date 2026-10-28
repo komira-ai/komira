@@ -3,19 +3,19 @@
 # drain
 # =============================================================================
 #
-# The typed-stage grouped MEDIAN (`MedianOp`, hash_agg_op_dt.mojo) buffers every
+# The typed-stage grouped MEDIAN (`MedianOp`, `komira_agg/hash_agg_op_dt.mojo`) buffers every
 # fed value per group and finalizes each group via an EXACT variable-size buffer
 # `sort()` + interpolated 50th-percentile select. That per-group finalize is
 # INDEPENDENT across groups (a group's median depends only on its own buffer), so
 # the serial drain loop (`AggSlot.emit_column`) that sorts + interpolates every
 # group ONE AT A TIME is the ~84% post-collect wall of an exact grouped-median
-# query (h6: 10K groups × ~600 values). This primitive parallelizes that loop by
+# query with many groups (for example 10K groups of ~600 values each). This primitive parallelizes that loop by
 # PARTITIONING GROUPS across workers: each worker finalizes a disjoint contiguous
 # slice of the occupied slots, writing into disjoint output positions. The result
 # is BYTE-IDENTICAL to the serial `emit_column` — the SAME per-group buffers, the
 # SAME sort, the SAME interpolation, the SAME slot order; only the loop is fanned.
 #
-# ORTHOGONAL to the radix COUNT_DISTINCT drain (`cd_radix_parallel.mojo`): that
+# ORTHOGONAL to a radix COUNT_DISTINCT drain, which
 # parallelizes WITHIN a group (value-hash partition of one group's buffer, summed
 # — correct only for the order-independent distinct COUNT). THIS parallelizes
 # ACROSS groups (each group's global-order percentile select stays whole + exact).
@@ -48,8 +48,8 @@ from komira_agg.aggregator import Aggregator
 
 
 # Below this occupied-group count the fork-join barrier is not worth it — the
-# per-group finalizes run serially (matching the pre-fix `emit_column`). h6 has
-# 10K groups; low-cardinality median drains (few groups) stay serial.
+# per-group finalizes run serially (matching the pre-fix `emit_column`). A drain
+# with 10K groups clears it; low-cardinality median drains (few groups) stay serial.
 comptime _MEDIAN_PARALLEL_MIN_GROUPS: Int = 256
 
 
@@ -133,8 +133,8 @@ struct _GroupFinalizeTask[
             hi = n
         for si in range(lo, hi):
             # SAFETY: disjoint per-slot output index; the finalize reads the
-            # group's IMMUTABLE state buffer (copies before sorting — no mutation
-            # of the shared `states`), so cross-worker reads never race.
+            # group's IMMUTABLE state buffer (it copies before sorting and never
+            # writes the shared `states`), so cross-worker reads never race.
             var slot = sp[].slots[][si]
             sp[].out[][si] = Self.A.finalize(sp[].states[][slot])
 

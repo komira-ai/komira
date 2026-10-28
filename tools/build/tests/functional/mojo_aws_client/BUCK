@@ -119,11 +119,12 @@ gen_check(
         "komira_http",
     ],
     files = [
+        "_parts",
         "__init__.mojo",
         "_layout_probe.mojo",
         "komira_aws_logs.mojo",
     ],
-    gen = ":komira_aws_logs[gen]",
+    gen = ":komira_aws_logs_gen",
     present = [
         "mode         : pure (no transport)",
         "operations   : GetLogEvents",
@@ -175,12 +176,13 @@ gen_check(
     name = "komira_aws_logs_hand_scoped",
     absent = ["HAND-OVERRIDE SEAM: no overrides are declared"],
     files = [
+        "_parts",
         "__init__.mojo",
         "_layout_probe.mojo",
         "komira_aws_logs_hand.mojo",
         "logs_overrides.mojo",
     ],
-    gen = ":komira_aws_logs_hand[gen]",
+    gen = ":komira_aws_logs_hand_gen",
     present = [
         "owner  : komira_aws_logs_hand.logs_overrides.get_log_events",
         "def get_log_events(input: CloudWatchLogsGetLogEventsRequest)",

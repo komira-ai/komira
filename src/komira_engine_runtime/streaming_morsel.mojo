@@ -7,8 +7,6 @@
 # SV and downstream sinks only consume active rows.
 #
 # When selection is None, ALL rows are active (fast path — no indirection).
-#
-# Reference: v0.3 Rust morsel.rs + pipeline_streaming_plan.md Phase 1
 # =============================================================================
 
 from komira_arrow.schema import RecordBatch
@@ -72,12 +70,18 @@ struct StreamingMorsel(Movable):
         self.num_active = sv.length()
         self.selection = sv^
 
-    def take_selection(mut self) -> SelectionVector:
-        """Move the current selection out. Caller must set a new one or leave None.
+    def take_selection(mut self) raises -> SelectionVector:
+        """Move the current selection out, leaving the morsel with none.
 
-        Precondition: self.selection is not None.
+        `num_active` is set to 0 until the caller calls `set_selection` or
+        `clear_selection`.
+
+        Raises:
+            Error if there is no selection to take.
         """
-        var sv = self.selection.unsafe_take()
+        if not self.selection:
+            raise Error("StreamingMorsel.take_selection: no selection")
+        var sv = self.selection.take()
         self.num_active = 0
         return sv^
 

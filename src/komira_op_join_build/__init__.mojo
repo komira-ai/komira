@@ -1,9 +1,7 @@
 """`komira_op_join_build` -- the build side of the engine's joins.
 
 The single-INT64-key hash join `HashJoinBuilder` (`join`), its serial builds
-(`join_build_serial`), its parallel build over the engine's dispatcher
-(`hash_chain_parallel_build`, `hash_chain_build_state`,
-`hash_chain_build_settings`) and its probes (`join_probe_inner`, `join_probe_inner_ps`,
+(`join_build_serial`) and its probes (`join_probe_inner`, `join_probe_inner_ps`,
 `join_probe_semi_anti`, `join_probe_outer`); the sort-merge join
 (`join_sort_merge`) and the perfect-hash join (`join_perfect_hash`); the
 untyped hash-join table `JoinBuildTable_Untyped` (`join_build_untyped`), its

@@ -299,7 +299,8 @@ def test_a_tie_at_the_cut_agrees_with_the_full_drain() raises:
 def test_declines_when_an_order_key_is_a_group_key() raises:
     """The selection runs over a pre-pass that deliberately does NOT carry the
     group keys — that omission IS the mechanism — so a comparator naming one
-    cannot be served. This is the arm ClickBench Q17 takes."""
+    cannot be served. A TOPN over a grouped count of a string key takes this
+    arm."""
     var counts = _total_order_counts()
     var got = _run_cd(counts, Optional(_hint("k", True, _K)))
     assert_equal(got.num_rows(), _GROUPS, "a key comparator must decline")

@@ -1,5 +1,5 @@
 # =============================================================================
-# CDP-ROWDICT (2026-09-25, cbq10 / cbq11) — the string-key encode on ROW
+# CDP-ROWDICT — the string-key encode on ROW
 # RANGES: one small dictionary per range, merged in row order
 # =============================================================================
 #
@@ -7,10 +7,10 @@
 # task hashes and dictionary-encodes its OWN contiguous rows, the driver numbers
 # the values in (task, mint) order, a parallel remap rewrites local ids to
 # global ones. It replaces, for a key with few distinct values, the hash-SHARDED
-# Phase B whose one shard owned cbq10's 91.8% value. See
+# Phase B whose one shard owned a value holding nearly every row. See
 # `agg_cd_strenc_rowdict.mojo`.
 #
-# WHAT THIS FILE KILLS:
+# WHAT THIS FILE PINS:
 #   §1  a numbering that differs from the SERIAL Phase B at ANY task count —
 #       the numbering is the output group ORDER, so the same SET is not
 #       enough. The fixture's first appearances are scattered over every task
@@ -83,7 +83,7 @@ comptime _N_SKEW: Int = 70_000
 
 
 def _skew_value(r: Int) -> String:
-    """cbq10's shape: nine rows in ten are ONE value; the rest scatter over
+    """The skewed shape: nine rows in ten are ONE value; the rest scatter over
     211 values in a multiplicative order (so first appearances land in every
     task), an EMPTY value, multi-byte UTF-8, a shared prefix; and 70 values
     that first appear only in the last seventh of the rows."""
@@ -347,8 +347,8 @@ def _assert_same_numbering(
 
 
 def test_rowdict_numbering_matches_serial_at_every_task_count() raises:
-    """⭐ THE FALSIFIER. T = 1, 2, 3, 7 and 16 row ranges (16 > the 4 runtime
-    workers: tasks outnumber workers), on the cbq10-shaped skewed key."""
+    """⭐ THE CENTRAL CHECK. T = 1, 2, 3, 7 and 16 row ranges (16 > the 4 runtime
+    workers: tasks outnumber workers), on the skewed key."""
     var vals = _skew_rows(_N_SKEW)
     var batch = _string_batch(vals, False)
     var want = _serial[DType.int32](batch, vals)

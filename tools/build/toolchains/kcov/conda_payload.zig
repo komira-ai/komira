@@ -4,7 +4,7 @@
 //!
 //! A `.conda` file is a zip (stored entries, zip64 size fields) holding
 //! `pkg-*.tar.zst`, the payload, and `info-*.tar.zst`. The pinned busybox
-//! reads neither zip64 nor zstd, so kcov_build.sh runs this and untars the
+//! reads neither zip64 nor zstd, so kcov_build runs this and untars the
 //! result with busybox. The zip walk is the one of
 //! tools/build/mojo/tools/conda_unpack.zig, which this does not change: an
 //! edit there would re-key every Mojo action.
@@ -81,21 +81,23 @@ pub fn main() !void {
     const args = try std.process.argsAlloc(a);
     if (args.len != 3) fail("usage: conda_payload <package.conda> <out.tar>", .{});
     const data = try std.fs.cwd().readFileAlloc(a, args[1], 1 << 31);
-    var fbs = std.io.fixedBufferStream(payload(data, args[1]));
+    var in: std.Io.Reader = .fixed(payload(data, args[1]));
     // The decoder refuses a frame whose window does not fit; conda-forge
     // packages use far smaller windows.
-    const window = try a.alloc(u8, 1 << 27);
-    var dz = std.compress.zstd.decompressor(fbs.reader(), .{ .window_buffer = window });
+    const window_len: u32 = 1 << 27;
+    const window = try a.alloc(u8, window_len + std.compress.zstd.block_size_max);
+    var dz = std.compress.zstd.Decompress.init(&in, window, .{ .window_len = window_len });
     try writeAll(&dz, args[2]);
 }
 
-fn writeAll(dz: anytype, path: []const u8) !void {
+fn writeAll(dz: *std.compress.zstd.Decompress, path: []const u8) !void {
     var out = try std.fs.cwd().createFile(path, .{});
     defer out.close();
     var buf: [65536]u8 = undefined;
-    while (true) {
-        const n = try dz.reader().read(&buf);
-        if (n == 0) break;
-        try out.writeAll(buf[0..n]);
-    }
+    var fw = out.writer(&buf);
+    _ = dz.reader.streamRemaining(&fw.interface) catch |e| return switch (e) {
+        error.ReadFailed => dz.err orelse e,
+        error.WriteFailed => fw.err orelse e,
+    };
+    try fw.interface.flush();
 }

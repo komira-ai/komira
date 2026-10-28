@@ -24,15 +24,20 @@
 #     or compared on its low word only (5 and (1<<64)+5 share it);
 #   * the BOOL pair: a BOOL key read from the validity bitmap instead of the
 #     value bits (all rows then read TRUE, or "is not NULL");
+#   * `test_pre_epoch_and_null_date_timestamp_keys_dedup` and
+#     `test_high_bit_and_null_uint64_keys_dedup`: a date, timestamp or UINT64
+#     key hashed or compared at the wrong width or sign (a negative tick or a
+#     value at 2^63 merging with another), or a NULL merged into the real 0;
+#   * `test_untracked_key_column_with_a_null_is_refused`: a NULL under a key
+#     descriptor without validity silently merged into the 0 group;
 #   * `test_distinct_read_unique_string_round_trips_the_stored_bytes`: a STRING
 #     reader that decodes byte by byte through `chr`, which turns every byte
 #     >= 0x80 into two; `test_fixture_is_actually_non_ascii` keeps that test
 #     from passing on an all-ASCII fixture.
 #
-# Mutants run while writing it: the float key equality replaced by IEEE `==`
-# and the float hash by the raw bits (the arms this state had before the float model) turned both float tests
-# red; dropping the NULL-hash / validity compare in `_hash_row` and
-# `_keys_match` turned the NULL-key tests red.
+# Float keys must follow the float model (IEEE `==` or raw-bit hashing would
+# split NaNs and merge or split the zeros), which the float tests pin; NULL
+# keys must hash and compare by validity, which the NULL-key tests pin.
 # =============================================================================
 
 from std.memory import bitcast
@@ -62,6 +67,9 @@ from komira_column_format.column_format_storage import (
     DT_U16,
     DT_U32,
     DT_U64,
+    DT_DATE32,
+    DT_DATE64,
+    DT_TIMESTAMP_US,
     DT_F32,
     DT_F64,
     DT_I64,
@@ -504,6 +512,88 @@ def test_typed_payload_readers_round_trip() raises:
         _ = ds.read_payload_i64(9)
     with assert_raises(contains="is not Int32"):
         _ = ds.read_payload_i32(0)
+
+
+def _nullable_prim[
+    dt: DType
+](vals: List[Scalar[dt]], nulls: List[Bool], at: ArrowType) raises -> Column[HeapRegion]:
+    var a = PrimitiveArray[dt].allocate_nullable(len(vals))
+    for i in range(len(vals)):
+        a.set(i, vals[i])
+        if nulls[i]:
+            a._set_null(i)
+    return Column.from_primitive_with_arrow_type[dt](a^, at)
+
+
+def _check_four_uniques(
+    var col: Column[HeapRegion], at: ArrowType, tag: UInt8, what: String
+) raises:
+    """Rows [x, NULL, x, 0, NULL, y, 0] (the data word under each NULL is 0):
+    DISTINCT is x, NULL, 0, y in first-seen order, also when the same batch is
+    fed again."""
+    var ds = DistinctState_Untyped(_one_key(COL_FIXED, tag, True), 2)
+    var rb = _batch1(col^, at, True)
+    ds.feed_batch(batch_view_over(rb))
+    ds.feed_batch(batch_view_over(rb))
+    assert_equal(ds.n_unique, 4, what + ": x, NULL, 0, y")
+    var valid = ds.read_unique_validity(0)
+    assert_true(valid[0], what + ": first unique is x")
+    assert_false(valid[1], what + ": second unique is the NULL")
+    assert_true(valid[2], what + ": third unique is the real 0")
+    assert_true(valid[3], what + ": fourth unique is y")
+
+
+def test_pre_epoch_and_null_date_timestamp_keys_dedup() raises:
+    """DATE32, DATE64 and TIMESTAMP_US keys with negative (pre-epoch) values
+    and NULLs dedup to DuckDB's four rows."""
+    var nulls: List[Bool] = [False, True, False, False, True, False, False]
+    var d32: List[Int32] = [-3, 0, -3, 0, 0, 9, 0]
+    _check_four_uniques(
+        _nullable_prim[DType.int32](d32, nulls, ArrowType.DATE32),
+        ArrowType.DATE32,
+        DT_DATE32,
+        "date32",
+    )
+    var d64: List[Int64] = [-86400000, 0, -86400000, 0, 0, 5, 0]
+    _check_four_uniques(
+        _nullable_prim[DType.int64](d64, nulls, ArrowType.DATE64),
+        ArrowType.DATE64,
+        DT_DATE64,
+        "date64",
+    )
+    var ts: List[Int64] = [-1500000, 0, -1500000, 0, 0, 7, 0]
+    _check_four_uniques(
+        _nullable_prim[DType.int64](ts, nulls, ArrowType.TIMESTAMP_US),
+        ArrowType.TIMESTAMP_US,
+        DT_TIMESTAMP_US,
+        "timestamp_us",
+    )
+
+
+def test_high_bit_and_null_uint64_keys_dedup() raises:
+    """UINT64 keys at and above 2^63 stay apart from small values and from
+    NULL."""
+    var nulls: List[Bool] = [False, True, False, False, True, False, False]
+    var u: List[UInt64] = [
+        UInt64(1) << 63, 0, UInt64(1) << 63, 0, 0, 5, 0
+    ]
+    _check_four_uniques(
+        _nullable_prim[DType.uint64](u, nulls, ArrowType.UINT64),
+        ArrowType.UINT64,
+        DT_U64,
+        "uint64",
+    )
+
+
+def test_untracked_key_column_with_a_null_is_refused() raises:
+    """A key descriptor that does not track validity over a column holding a
+    NULL raises instead of merging the NULL with 0."""
+    var ds = DistinctState_Untyped(_one_key(COL_FIXED, DT_I64, False), 4)
+    var vals: List[Int64] = [0, 0, 7]
+    var nulls: List[Bool] = [False, True, False]
+    var rb = _batch1(_i64_nullable(vals, nulls), ArrowType.INT64, True)
+    with assert_raises(contains="not validity_tracked"):
+        ds.feed_batch(batch_view_over(rb))
 
 
 def main() raises:

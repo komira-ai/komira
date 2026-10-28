@@ -82,13 +82,10 @@ from komira_op_agg_distinct.distinct_key_column import (
 # §2b — _DistinctDirectory — the O(1)-probe open-addressing dedup directory
 # =============================================================================
 #
-# DISTINCTSTATE-HASH-OPTIMIZATION. Replaces the old
-# `hashes: List[UInt64]` linear-scan filter on `DistinctState` (which made
-# `feed_row` O(rows × distinct_cardinality)) with a salt-packed open-addressing
-# directory, O(1)-amortized per-row probe — the SAME mechanism the untyped
-# column-format hash path (which wins on DISTINCT) uses, and the SAME mechanism
-# `dense_hash_agg_table._DenseAggDirectory` ships for the agg primitive (which
-# wins ~7×).
+# A salt-packed open-addressing directory with an O(1)-amortized per-row
+# probe — the same mechanism the untyped column-format hash path uses, and the
+# same mechanism `dense_hash_agg_table._DenseAggDirectory` ships for the agg
+# primitive.
 #
 # # Why a thin in-module directory, NOT a verbatim `_DenseAggDirectory` reuse
 #
@@ -237,16 +234,18 @@ struct DistinctState[*Keys: DistinctKeyColumn](
 
     SoA storage: `key_cols: Tuple[*Self.Keys]` (one `DistinctKeyColumn` per key,
     each owning its `List[Scalar[dt]]` of distinct values) + an open-addressing
-    `_dir: _DistinctDirectory` dedup directory + `n_used: Int`. Per-row dedup
-   : compute the combined FNV-1a
+    `_dir: _DistinctDirectory` dedup directory + `n_used: Int`. Per-row dedup: compute the combined FNV-1a
     hash, probe the salt-packed directory (O(1) amortized, salt-stride open
     addressing — the SAME mechanism `_DenseAggDirectory` ships for the agg
     primitive and the untyped column-format hash uses for distinct); on a
     salt-match candidate compare ALL key positions for equality (a hash collision
     is NOT a match — full-key equality is required), on an empty-slot miss append
-    the row's keys to every column + insert into the directory. This replaced the
-    original `hashes: List[UInt64]` linear-scan filter (which was
-    O(distinct_cardinality) per row and ran 2.8× slower than the untyped path).
+    the row's keys to every column + insert into the directory.
+
+    Key domain: fixed-width numeric and STRING keys with no NULLs. The state
+    stores values only, no validity, so `feed_row` raises on a NULL key rather
+    than merge it with the raw value in the null slot. A NULL-aware DISTINCT
+    must be routed to another implementation.
 
     `Movable`-only, NOT `Copyable` — the `Tuple[*Self.Keys]` field is not
     `Copyable` (Mojo 1.0.0b1 does not synthesize `Copyable` for a `Tuple` over a
@@ -257,7 +256,7 @@ struct DistinctState[*Keys: DistinctKeyColumn](
     composite = `DistinctState[DistinctKeyColumn_Typed[int64, 0],
     DistinctKeyColumn_Typed[int64, 1]]`.
 
-    v0.4 DISTINCT semantics permit UNORDERED output; this emits in INSERTION
+    DISTINCT semantics permit UNORDERED output; this emits in INSERTION
     order (the SoA Lists are sequential — mirrors the LIVE
     `runtime_breaker_state.finalize_distinct_composite_i64i64`). Downstream sinks
     that need ordering compose Sort over DISTINCT.
@@ -268,15 +267,13 @@ struct DistinctState[*Keys: DistinctKeyColumn](
     """
 
     var key_cols: Tuple[*Self.Keys]
-    # DISTINCTSTATE-HASH-OPTIMIZATION: the open-addressing dedup
-    # directory replaces the old `hashes: List[UInt64]` linear-scan filter. The
-    # directory maps a combined key hash -> dense insertion-order row index, so
-    # per-row dedup is O(1) amortized (was O(distinct_cardinality)).
+    # The open-addressing dedup directory maps a combined key hash -> dense
+    # insertion-order row index, so per-row dedup is O(1) amortized.
     var _dir: _DistinctDirectory
     var n_used: Int
-    # --- SPILL metadata (SPILL-U-4a2; SpillableOp conformance) ---
+    # --- SPILL metadata (SpillableOp conformance) ---
     # ChunkId is POD (single UInt64), so `List[ChunkId]` is a
-    # POD-element list (same shape as `hashes: List[UInt64]`); `_age_ticks`
+    # POD-element list; `_age_ticks`
     # and `_restoring` are POD scalars. No heap-owning Movable struct element,
     # no wildcard-origin pointer field.
     var _spill_chunks: List[ChunkId]
@@ -293,13 +290,11 @@ struct DistinctState[*Keys: DistinctKeyColumn](
         self._restoring = False
 
     def __init__(out self):
-        """Nullary (`Defaultable`) ctor (TYPED-DISTINCT-FAST-PATH)
-        . Builds the per-key column pack via the pack-aware
+        """Nullary (`Defaultable`) ctor. Builds the per-key column pack via the pack-aware
         `Tuple[*Self.Keys]()` default ctor — each slot's `DistinctKeyColumn`
         `Defaultable` no-arg ctor produces an empty column. This is the seam the
         field-less `VariadicDistinctFactory[*Keys].make_state` drives (mirrors
-        `HashAggTable[KB, *Aggs]`'s nullary ctor + the PART-1 recipe that
-        `VariadicAggFactory` established for the grouped typed fast path).
+        `HashAggTable[KB, *Aggs]`'s nullary ctor).
 
         Byte-identical to `DistinctState(Tuple(K0.new(16), ...))` modulo the
         initial List reserve: an empty dedup set with no accumulated rows."""
@@ -319,8 +314,7 @@ struct DistinctState[*Keys: DistinctKeyColumn](
     @staticmethod
     def state_tag() -> Int:
         """`BreakerState` discriminator — DistinctState backs the DISTINCT arm.
-        Lets `Stage.__init__` comptime-assert `(Breaker, BState)` consistency
-        (U-D.1)."""
+        Lets `Stage.__init__` comptime-assert `(Breaker, BState)` consistency."""
         return BREAKER_DISTINCT
 
     @always_inline
@@ -357,18 +351,27 @@ struct DistinctState[*Keys: DistinctKeyColumn](
     def feed_row[bo: Origin[mut=False]](
         mut self, batch: BatchView[bo], row: Int
     ) raises:
-        """`BreakerState` executable surface (U-D.5). Dedup one input row: hash
+        """`BreakerState` executable surface. Dedup one input row: hash
         the full key tuple, probe the open-addressing directory (O(1) amortized,
         salt-stride); on a salt-match candidate confirm full-key equality; if the
         row is NEW (probe lands on an empty slot) append its keys to every column
         and insert into the directory. Duplicates are skipped (no per-row emit —
         DISTINCT is a pipeline breaker).
 
-        DISTINCTSTATE-HASH-OPTIMIZATION: was a linear scan over a
-        parallel `hashes: List[UInt64]` filter — O(distinct_cardinality) per row.
         The directory probe is the salt-packed open-addressing mechanism that
         `_DenseAggDirectory` (agg) + the untyped column-format hash (distinct)
-        use; the per-key equality check delegates to the SoA key columns."""
+        use; the per-key equality check delegates to the SoA key columns.
+
+        Raises on a NULL key (see the key domain in the class docstring)."""
+        comptime for k in range(Self.Keys.__len__()):
+            if self.key_cols[k].row_is_null[bo](batch, row):
+                raise Error(
+                    "DistinctState.feed_row: key column "
+                    + String(k)
+                    + " is NULL at row "
+                    + String(row)
+                    + "; NULL keys are not supported"
+                )
         var h = self._hash_row[bo](batch, row)
         # Grow before insert if at the load threshold (so a new row lands in the
         # larger directory). Harmless when the probe finds an existing row.
@@ -386,7 +389,7 @@ struct DistinctState[*Keys: DistinctKeyColumn](
                     self.key_cols[k].append_row[bo](batch, row)
                 self._dir.commit_insert(slot, salt, h)
                 self.n_used = self.n_used + 1
-                # SPILL-U-4a2: bump the age counter once per accumulated distinct
+                # Bump the age counter once per accumulated distinct
                 # row, so OLDEST_FIRST prefers a long-idle set for spill.
                 self._age_ticks += UInt64(1)
                 return
@@ -401,24 +404,29 @@ struct DistinctState[*Keys: DistinctKeyColumn](
         mut self, batch: BatchView[bo]
     ) raises -> Optional[RecordBatch]:
         """Raise-stub — DISTINCT is an accumulate arm, never the JOIN_PROBE state
-        (the `comptime if` JOIN_PROBE arm is the only caller). U-D.4a."""
+        (the `comptime if` JOIN_PROBE arm is the only caller)."""
         raise Error("DistinctState.probe_batch: not a JOIN_PROBE state")
 
     def probe_asof_batch[bo: Origin[mut=False]](
         mut self, batch: BatchView[bo]
     ) raises -> Optional[RecordBatch]:
         """Raise-stub — DISTINCT is an accumulate arm, never the ASOF_JOIN state
-        (the `comptime if` ASOF_JOIN arm is the only caller). U-D.5."""
+        (the `comptime if` ASOF_JOIN arm is the only caller)."""
         raise Error("DistinctState.probe_asof_batch: not an ASOF_JOIN state")
 
     def drain_to_record_batch(self) raises -> Optional[RecordBatch]:
-        """`BreakerState` executable surface (U-D.5). Emit one (k0..kN-1) row per
-        distinct key combination, in insertion order. BORROWS `self` (U-D.2
-        finding: consume-via-`self.state^` out of `var self` is rejected) — the
+        """`BreakerState` executable surface. Emit one (k0..kN-1) row per
+        distinct key combination, in insertion order. BORROWS `self` (consuming
+        `self.state^` out of `var self` is rejected) — the
         owning `Stage.finalize(var self)` drops the state afterward. Each key
         column's native-DType emit is delegated to
         `DistinctKeyColumn.emit_distinct_column` (the trait-erasure wall — drain
         over `*Keys` cannot name `DistinctKeyColumn_Typed`)."""
+        if len(self._spill_chunks) > 0:
+            raise Error(
+                "DistinctState.drain_to_record_batch: spilled rows are not"
+                " restored; call restore_from_storage first"
+            )
         # Output schema: k0..kN-1 (native DType).
         var sb = SchemaBuilder()
 
@@ -432,22 +440,20 @@ struct DistinctState[*Keys: DistinctKeyColumn](
             self.key_cols[k].emit_distinct_column(rb)
         var built = rb.build(schema^)
 
-        # P-2.B.2a column-native breaker migration: the byte-exact distinct
+        # The byte-exact distinct
         # result is assembled by the RecordBatchBuilder above (the single
-        # byte-correct column-emit kernel — P-2 must not duplicate it), then
+        # byte-correct column-emit kernel), then
         # lifted into a ColumnNativeBatch (the breaker's native column-batch
         # product) and bridged back to RecordBatch at the breaker output
         # boundary. The body of the ColumnNativeBatch IS a THSPLC chunk, so the
         # lift+lower is byte-identical to a spill/restore round-trip (foundation
-        # round-trip test). The driver still carries the concrete RecordBatch in
-        # v0.4; the Morsel[ColumnNativeBatch] cutover is P-2.C.
+        # round-trip test). The driver still carries the concrete RecordBatch.
         var native: ColumnNativeBatch = column_native_from_record_batch(built^)
         return Optional[RecordBatch](record_batch_from_column_native(native^))
 
     def combine(mut self, var other: Self) raises:
         """Cross-instance merge (S1 `BreakerStateCombinable`) — re-dedup every
-        distinct row of `other` into `self`'s set (TYPED-DISTINCT-FAST-PATH)
-        . The multi-worker `StageMorselSinkAdapter`
+        distinct row of `other` into `self`'s set. The multi-worker `StageMorselSinkAdapter`
         folds every worker's per-worker `DistinctState` into ONE global state
         via `global.combine(worker_local^)` before the final `drain`.
 
@@ -462,12 +468,20 @@ struct DistinctState[*Keys: DistinctKeyColumn](
         EXACT same multiset of distinct rows: every `self` row already present,
         every `other` row appended iff not already in `self` — full-key equality,
         not hash-collision. Output order is self-rows first, then `other`'s
-        novel rows in `other`'s insertion order (v0.4 DISTINCT permits unordered
+        novel rows in `other`'s insertion order (DISTINCT permits unordered
         output; downstream sinks needing order compose Sort over DISTINCT).
 
         Reuses the tested spill-restore re-feed exactly (DISTINCT carries no
         payload — the drain image IS the resident state), so this combine is the
-        same logical operation the SPILL-U-4a2 restore path already validates."""
+        same logical operation the spill-restore path already validates.
+
+        Raises if `other` still holds spilled rows (its resident image would
+        miss them); restore it first."""
+        if len(other._spill_chunks) > 0:
+            raise Error(
+                "DistinctState.combine: the other state has spilled rows;"
+                " restore it before combining"
+            )
         var n_other = other.n_used
         if n_other == 0:
             return
@@ -475,7 +489,7 @@ struct DistinctState[*Keys: DistinctKeyColumn](
         self._append_from_record_batch(other_rb^)
 
     # =========================================================================
-    # SpillableOp conformance (SPILL-U-4a2 — DISTINCT set spills via THSPLC)
+    # SpillableOp conformance (the DISTINCT set spills via THSPLC)
     # =========================================================================
     #
     # The DistinctState is a dedup SET: it stores keys SoA as native-DType
@@ -487,7 +501,7 @@ struct DistinctState[*Keys: DistinctKeyColumn](
     # output (DISTINCT has no payload; the drain IS the resident image).
     #
     # Restore re-feeds those rows through the SAME dedup `feed_row` path (off
-    # the spill-image column layout), so the `hashes` filter + `n_used` are
+    # the spill-image column layout), so the dedup directory + `n_used` are
     # rebuilt exactly. Re-feeding an already-distinct image is a no-op-dedup
     # (every row is new — no two stored rows are equal), so the restored set is
     # the SAME multiset of distinct rows in the SAME insertion order, and a
@@ -495,7 +509,7 @@ struct DistinctState[*Keys: DistinctKeyColumn](
     #
     # WHAT IS / IS NOT IN THE SPILL IMAGE:
     #   * IN:  the distinct key columns (the resident bytes).
-    #   * NOT: the `hashes` filter (DERIVED — rebuilt on restore from the keys)
+    #   * NOT: the dedup directory (DERIVED — rebuilt on restore from the keys)
     #     nor any op-config (DISTINCT carries none beyond the comptime key
     #     shape). Spill serializes the distinct ROWS, not the derived filter.
 
@@ -560,7 +574,7 @@ struct DistinctState[*Keys: DistinctKeyColumn](
         Gathers the insertion-order `[k0..kN-1]` RecordBatch ->
         `THSPLCEncoder.encode` -> `storage.write_chunk`, stashes the minted
         `ChunkId` on `self._spill_chunks`, then clears the key columns + the
-        hash filter + resets `n_used` so `memory_usage_bytes()` drops to ~0. The
+        directory + resets `n_used` so `memory_usage_bytes()` drops to ~0. The
         stashed ChunkId(s) + the op's comptime key shape are all
         `restore_from_storage` needs to rebuild the state."""
         var freed = self.memory_usage_bytes()
@@ -584,7 +598,7 @@ struct DistinctState[*Keys: DistinctKeyColumn](
         each ChunkId -> `THSPLCDecoder.decode_copy` (expected schema =
         `_spill_schema`) -> re-feeds every row through the dedup path (off the
         spill-image column layout) via `_restore_feed_row`, rebuilding the
-        `hashes` filter + `n_used`. After restore, the set holds the same
+        dedup directory + `n_used`. After restore, the set holds the same
         multiset of distinct rows in the same insertion order, so a subsequent
         drain is logically identical to the un-spilled reference.
 
@@ -593,14 +607,20 @@ struct DistinctState[*Keys: DistinctKeyColumn](
         order. Each chunk is released after a successful decode so a re-spill
         does not double-count storage."""
         self._restoring = True
-        var schema = self._spill_schema()
-        for ci in range(len(self._spill_chunks)):
-            var chunk = self._spill_chunks[ci]
-            var bytes = storage.read_chunk(chunk)
-            var restored = THSPLCDecoder.decode_copy(bytes^, schema.copy())
-            self._append_from_record_batch(restored^)
-            storage.release_chunk(chunk)
-        self._spill_chunks.clear()
+        try:
+            var schema = self._spill_schema()
+            while len(self._spill_chunks) > 0:
+                var chunk = self._spill_chunks[0]
+                var bytes = storage.read_chunk(chunk)
+                var restored = THSPLCDecoder.decode_copy(bytes^, schema.copy())
+                self._append_from_record_batch(restored^)
+                storage.release_chunk(chunk)
+                _ = self._spill_chunks.pop(0)
+        except e:
+            # Chunks not yet restored stay stashed; the state is spillable
+            # and restorable again.
+            self._restoring = False
+            raise e^
         self._restoring = False
 
     def _restore_feed_row[bo: Origin[mut=False]](
@@ -611,7 +631,7 @@ struct DistinctState[*Keys: DistinctKeyColumn](
         layout — NOT the original input-bound column). Mirror of `feed_row`'s
         dedup loop but on the spill-image column index. Since the image is
         already distinct, every row is new (no two stored rows are equal) — this
-        rebuilds the `hashes` filter while preserving insertion order."""
+        rebuilds the dedup directory while preserving insertion order."""
         # Combined FNV-1a hash off the spill-image slots (slot k == key k).
         var h = DISTINCT_FNV_OFFSET
 

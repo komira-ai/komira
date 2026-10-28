@@ -47,19 +47,6 @@
 #     aggregate without GROUP BY over no rows (DuckDB: one row, count 0);
 #   * `test_unsupported_key_type_is_refused`: a FLOAT64 key silently read as
 #     an integer.
-#
-# Mutants run while writing it (each turned the named tests red):
-#   * no NULL-mask key component (the key read raw, as the driver did before):
-#     both NULL-key tests;
-#   * the fixed-aggregate fold without its NULL skip and with MIN / MAX by bare
-#     `<` / `>` (the fold before): the fixed-aggregate test;
-#   * the COUNT(DISTINCT) column read through worker 0 for every output row:
-#     every multi-worker test in this file;
-#   * the integer fold as a wrapping 64-bit add: the two 2^62 tests;
-#   * the INT64 range check at emit removed: the SUM refusal test;
-#   * a running total past INT64 poisoned (a per-row check): the order test
-#     and the AVG test;
-#   * `_cd_key_at` reading the data word of a NULL key: the NULL int-key test.
 # =============================================================================
 
 from std.collections import Dict, List, Optional, Set

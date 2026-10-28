@@ -382,7 +382,7 @@ def test_a_successful_plan_appends_its_summary() raises:
         Path(root + String("/summary.md")).read_text(),
         earlier
         + String("## kci run --stage build: SUCCEEDED (exit 0)\n\n")
-        + String("FULL run. Dry run (--plan): nothing built, nothing written to a channel.\n\n")
+        + String("FULL run. Dry run (--plan): nothing built, nothing written to a channel or a cell.\n\n")
         + String("- revision: `") + rev + String("`\n")
         + String("- workflow: not checked (not under GitHub Actions)\n")
         + String("\n| step | kind | outcome |\n|---|---|---|\n| build | BUILD | SUCCEEDED |\n\n"),

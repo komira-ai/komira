@@ -33,6 +33,7 @@
 # =============================================================================
 
 from komira_arrow.batch_view import BatchView
+from komira_arrow.morsel_view import MorselView
 from komira_agg.aggregator import Aggregator
 
 
@@ -94,6 +95,13 @@ struct SumProductF64Agg[col_a: Int, col_b: Int](Aggregator):
     # identical. Vectorizing the SUM itself requires the untyped arm to
     # reassociate identically (a deeper, separate change) — surfaced as the
     # remaining perf headroom.
+
+    @always_inline
+    def input_is_null[V: MorselView](self, view: V, i: Int) -> Bool:
+        """A row is skipped when either factor is NULL (the product is NULL)."""
+        return view.col_is_null(Self.col_a, i) or view.col_is_null(
+            Self.col_b, i
+        )
 
     @always_inline
     def combine(mut self, mut into: Float64, var partial: Float64):

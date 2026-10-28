@@ -1,0 +1,59 @@
+load("@komira//tools/build/mojo:archive.bzl", "archive_files")
+load("@komira//tools/build/mojo:download.bzl", "pinned_file")
+load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
+
+# uv (github.com/astral-sh/uv), dual licensed MIT or Apache-2.0 (both
+# LICENSE files below), at its release 0.12.21: the linux x86_64 musl
+# archive the release publishes. The sha256 is the one the release's own
+# `.sha256` file states, and the archive was downloaded and checked against
+# it. It is test tooling only: kci_pkg_upload's `uv_fidelity_capture` and
+# `uv_fidelity_check` (src/kci_pkg_upload/tests/fidelity/README.md) run it as
+# a build action against a loopback recorder. Nothing ships it and no library
+# depends on it. README.md says how to bump it.
+#
+# The binary is static-pie (musl, no loader, no shared library), so it runs
+# on any Linux x86_64 worker.
+_VERSION = "0.12.21"
+_COMMIT = "7af826859382eb191e47467540850caa8f493e5b"
+_SHA256 = "d69d543a55ec9cdf9d3d9f2648b0a161847e3dbddc477e3be6b5813a6d46f639"
+_SIZE = 22761587
+_LICENSE_MIT_SHA256 = "860e3d7a86b84e6a7012c7a635fc64df475cebc6cce34dfeb73a5982ec58176c"
+_LICENSE_MIT_SIZE = 1077
+_LICENSE_APACHE_SHA256 = "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
+_LICENSE_APACHE_SIZE = 11357
+
+pinned_file(
+    name = "uv-x86_64-unknown-linux-musl.tar.gz",
+    url = "https://github.com/astral-sh/uv/releases/download/{}/uv-x86_64-unknown-linux-musl.tar.gz".format(_VERSION),
+    sha256 = _SHA256,
+    size_bytes = _SIZE,
+)
+
+# The archive's `uv` (mode 0755); `:uv_dist[uv]` is the executable.
+archive_files(
+    name = "uv_dist",
+    exec_compatible_with = LINUX_X86_64,
+    archive = ":uv-x86_64-unknown-linux-musl.tar.gz",
+    strip_prefix = "uv-x86_64-unknown-linux-musl",
+    files = ["uv"],
+    visibility = ["komira//src/kci_pkg_upload:", "komira//ci:"],
+)
+
+# The release archive carries no license text; these are the LICENSE files
+# of the repository at the tag's commit, pinned by commit, so a moved tag
+# cannot change them.
+pinned_file(
+    name = "LICENSE-MIT",
+    url = "https://raw.githubusercontent.com/astral-sh/uv/{}/LICENSE-MIT".format(_COMMIT),
+    sha256 = _LICENSE_MIT_SHA256,
+    size_bytes = _LICENSE_MIT_SIZE,
+    visibility = ["PUBLIC"],
+)
+
+pinned_file(
+    name = "LICENSE-APACHE",
+    url = "https://raw.githubusercontent.com/astral-sh/uv/{}/LICENSE-APACHE".format(_COMMIT),
+    sha256 = _LICENSE_APACHE_SHA256,
+    size_bytes = _LICENSE_APACHE_SIZE,
+    visibility = ["PUBLIC"],
+)

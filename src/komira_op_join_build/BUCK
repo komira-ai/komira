@@ -1,8 +1,8 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
 # The build side of the engine's joins, and the kernels that need no join
-# operator: the single-INT64-key hash join (`HashJoinBuilder`, its serial and
-# parallel builds and its INNER / SEMI / ANTI / outer probes), the sort-merge join and
+# operator: the single-INT64-key hash join (`HashJoinBuilder`, its serial
+# builds and its INNER / SEMI / ANTI / outer probes), the sort-merge join and
 # the perfect-hash join; the untyped hash-join table (`JoinBuildTable_Untyped`)
 # with its packed `HashDirectory` and per-column cell kernels; the CROSS-join
 # kernel, the blocking functions of non-equi joins, the probe NULL mask, and
@@ -13,31 +13,27 @@ mojo_library(
     deps = [
         "//src/komira_arrow:komira_arrow",
         "//src/komira_async:komira_async",
-        "//src/komira_async_api:komira_async_api",
         "//src/komira_atomic_alias:komira_atomic_alias",
         "//src/komira_buffer:komira_buffer",
         "//src/komira_column_format:komira_column_format",
         "//src/komira_counters:komira_counters",
         "//src/komira_dynamic_filter:komira_dynamic_filter",
-        "//src/komira_engine_runtime:komira_engine_runtime",
         "//src/komira_join_assembly:komira_join_assembly",
         "//src/komira_udf:komira_udf",
     ],
     test_srcs = [
         "tests/test_column_nullkey_rightfull_build_preservation.mojo",
         "tests/test_cross_join_kernel_poc.mojo",
-        "tests/test_hash_chain_fill_poison.mojo",
-        "tests/test_hash_chain_parallel_build_settings.mojo",
         "tests/test_hash_directory.mojo",
         "tests/test_join_blocking.mojo",
         "tests/test_join_bloom_l1_resident.mojo",
         "tests/test_join_build_table_untyped.mojo",
-        "tests/test_join_chain_layout_byte_equiv.mojo",
         "tests/test_join_composite_f64_key_kerneldirect.mojo",
         "tests/test_join_fanout.mojo",
         "tests/test_join_gates.mojo",
         "tests/test_join_hash_store_grow.mojo",
         "tests/test_join_probe_chunk_spans.mojo",
+        "tests/test_join_probe_outer_semi_anti_layouts.mojo",
         "tests/test_join_probe_phase_split_equiv.mojo",
         "tests/test_join_sort_merge_perfect_hash.mojo",
         "tests/test_join_untyped_float_key_model.mojo",

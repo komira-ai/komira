@@ -23,9 +23,9 @@
 # storage-side hashes agree, so they pass under either rehash; a red on the
 # negative cases alone is the sign divergence, not the harness.
 #
-# Mutant run while porting: the doubling re-inserting each slot at a hash
-# re-derived from storage (`_hash_storage_single_col` composed over the keys)
-# instead of `_slot_hashes[s]` turned both negative-key tests red.
+# A directory doubling re-places every slot at the hash that placed it
+# (`_slot_hashes[s]`); the negative-key cases hold that a hash re-derived from
+# storage would diverge from the batch-side hash.
 # =============================================================================
 
 from komira_column_format.column_format_storage import (

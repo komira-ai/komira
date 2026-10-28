@@ -210,6 +210,34 @@ message WireField {
   // Same UInt8 space, same refusal rule, once PER ELEMENT.
   repeated uint32 child_type_ids = 14;
   repeated bool child_nullables = 15;
+  // The children, recursively: a child is a whole `WireField`, with children
+  // of its own, so `list<fixed_size_list<float32>>` and a struct inside a list
+  // are expressible (optimized_plan_udfs.md §10.3). A field that sets
+  // `children` leaves 13-15 empty; one that sets both is refused
+  // (`PLAN_WIRE_FIELD_CHILDREN_BOTH`). Admitted in both contexts. A UDF type
+  // (`UdfRef.arg_types`, `return_type`, `state_type`) nests to any depth; a
+  // node's `output_schema` column holds what the engine's `Schema` stores, one
+  // level, so a column whose children have children of their own is refused
+  // there (`PLAN_WIRE_FIELD_TOO_DEEP`).
+  repeated WireField children = 16;
+  // An earlier draft's deferred-type mark, never released: types are always
+  // explicit (optimized_plan_udfs.md §10.5).
+  reserved 17;
+  reserved "type_deferred";
+}
+
+// The fields a UDF's code was built or captured against, as a runtime's
+// descriptor records them (optimized_plan_udfs.md §10.3, *Recorded fields*;
+// udf_runtime_interface.md §3.1). It lives inside a runtime's opaque
+// `UdfCode.descriptor`, never in the plan; it is declared here, beside
+// `WireField`, so that every descriptor schema imports one definition.
+// Canonical form: both lists ascend by the UTF-8 bytes of the name, names
+// are unique across both, `key_fields` holds only `group_by` columns absent
+// from `fields`, and a set `RecordedFields` is emitted even when empty
+// (absent means nothing was recorded).
+message RecordedFields {
+  repeated WireField fields = 1;
+  repeated WireField key_fields = 2;
 }
 
 // ⚠ ONE FLAT LEVEL OF NESTING, BECAUSE THAT IS WHAT THE ENGINE STORES.
@@ -825,6 +853,25 @@ message WireUdfCall {
   WireExpr child = 4;
 }
 
+// `UdfApplyData` — `EXPR_UDF_APPLY` (engine tag 27): a call of the `UdfRef` at
+// `udf_index` (optimized_plan_udfs.md §10.4). A new arm, not a change to
+// `WireUdfCall`, which stays as it is: unary, keyed by a name, RAW only. In
+// OPTIMIZED, `WireUdfCall` and the node-level `WireUdf` are refused by name
+// (`OPTIMIZED_UDF_LEGACY_FORM`).
+//
+// The call has no type field of its own: its type is the `return_type` of
+// the `UdfRef` it names, and the enclosing node's `output_schema` shows it.
+// The `UdfRef` has kind SCALAR, ROW or MAP_BATCHES_COLUMN, or AGGREGATE when
+// the call is `child0` of a `WireAggExpr` with `func = AGG_UDF`.
+message WireUdfApply {
+  // An index into `DeclaredNeeds.udfs` (OPTIMIZED) or `WirePlanEnvelope.udfs`
+  // (RAW). Out of range is refused (`OPTIMIZED_UDF_UNDECLARED`).
+  uint32 udf_index = 1;
+  // N-ary, in call order. Each argument is any expression, including another
+  // `WireUdfApply`, and its type equals `arg_types[i]` exactly.
+  repeated WireExpr args = 2;
+}
+
 // `SubstringData` — `EXPR_SUBSTRING`, SQL `substring(s, start, length)` over a
 // string column.
 message WireSubstring {
@@ -1105,6 +1152,9 @@ message WireExpr {
     // (engine tag 25) is what a Python dataframe UDF expression such as
     // `df["y"] = affine(df["x"])` builds, and this message is what carries it.
     WireUdfCall udf_call = 26;
+    // Field 27, ARM 26. The design's arm for a UDF call by `UdfRef` index
+    // (optimized_plan_udfs.md §10.4).
+    WireUdfApply udf_apply = 27;
   }
 }
 
@@ -1518,6 +1568,30 @@ message WireCastToVarcharNode {
   WirePlan child = 1;
 }
 
+// `MapBatchesData` — `PLAN_MAP_BATCHES` (engine tag 19): a MAP_BATCHES_FRAME
+// UDF over its child (optimized_plan_udfs.md §10.2, §10.4). The function is
+// called once per batch, or once per group when `group_by` is set, and may
+// return any number of rows. The node's output columns are the children of
+// the `UdfRef`'s `return_type` (a struct).
+message WireMapBatchesNode {
+  WirePlan child = 1;
+  // The `UdfRef` has kind MAP_BATCHES_FRAME.
+  uint32 udf_index = 2;
+  // Empty: one call per batch. Set: one call per group.
+  repeated WireExpr group_by = 3;
+}
+
+// `StepData` — `PLAN_STEP` (engine tag 20): a STEP UDF, a source node with
+// no child that runs exactly once per run (optimized_plan_udfs.md §10.2,
+// §10.4). Its output columns are the children of the `UdfRef`'s
+// `return_type`; a step that returns nothing has a struct with no children.
+message WireStepNode {
+  // The `UdfRef` has kind STEP.
+  uint32 udf_index = 1;
+  // Literals only; a non-literal argument is captured with the code.
+  repeated WireScalar args = 2;
+}
+
 // ⚠ THE NODE KIND IS STATED ONCE: field 1 (`PlanTag tag`) is RESERVED. Read
 // the block above `WireExpr` for the full argument; it applies verbatim. The
 // plan-side armless tags are CONVERT_COLUMN_TO_ROW and CONVERT_ROW_TO_COLUMN,
@@ -1579,7 +1653,171 @@ message WirePlan {
     WireViewRefNode view_ref = 17;
     WireCseRefNode cse_ref = 18;
     WireCastToVarcharNode cast_to_varchar = 19;
+    // held: exchange = 20 (optimized_plan.md §5.2, stage 3). Declare it
+    // after `step`: the generated arm ordinal follows declaration order, and
+    // the codec's arm table reads these two as ARMS 17..18.
+    // The UDF arms: fields 21..22 (optimized_plan_udfs.md §10.4).
+    WireMapBatchesNode map_batches = 21;
+    WireStepNode step = 22;
   }
+}
+
+// ===========================================================================
+// User code: `UdfRef` (optimized_plan_udfs.md §10.3)
+// ===========================================================================
+
+// One user function the plan calls. The plan body names it by its index in
+// `DeclaredNeeds.udfs` (OPTIMIZED) or `WirePlanEnvelope.udfs` (RAW), as
+// `WireUdfApply.udf_index`, `WireMapBatchesNode.udf_index` and
+// `WireStepNode.udf_index` do. Identity is the canonical bytes of the
+// message: the runtime id and descriptor are inside them, so a runtime id is
+// never renamed. The code bytes travel in an environment image beside the
+// plan, never in it (§10.11).
+message UdfRef {
+  // A call shape, never a language (§10.2). UNSPECIFIED is refused.
+  UdfKind kind = 2;
+  // Which runtime, which entry, which code objects.
+  UdfCode code = 16;
+  // Declared argument types, in call order (§10.4). For ROW and
+  // MAP_BATCHES_FRAME, the columns received: `read_set`'s if set, else every
+  // input column, in input order.
+  repeated WireField arg_types = 17;
+  // sha256 of each captured value stored apart from the code (§10.6).
+  repeated bytes data_blobs = 6;
+  // Required: the full Arrow type, nested to any depth (§10.5). A table (a
+  // MAP_BATCHES_FRAME or STEP output) is a struct whose children are its
+  // columns. Absent is refused (`OPTIMIZED_UDF_RETURN_TYPE_MISSING`).
+  WireField return_type = 8;
+  // The determinism declaration (§10.7). UNSPECIFIED is refused.
+  UdfStability stability = 10;
+  // MANUAL or PROPAGATE (§10.7). UNSPECIFIED is refused, and so is
+  // SKIP_NULL_FAST_PATH, a Mojo-registry optimization with no meaning here.
+  UdfNullMode null_mode = 11;
+  // Per-worker resources (§10.8).
+  UdfResources resources = 12;
+  // AGGREGATE only: set iff the mergeable form (§10.2); an explicit Arrow
+  // type.
+  WireField state_type = 15;
+  // MAP_BATCHES_FRAME only: event time passes through (§10.3); false on
+  // every other kind.
+  bool preserves_event_time = 18;
+  // ROW and MAP_BATCHES_FRAME only. Unset reads every input column; set
+  // reads exactly its columns, and may be empty (§10.2). Unset and empty
+  // have different canonical bytes: a set message field is emitted even
+  // when it has no records.
+  UdfReadSet read_set = 19;
+  // A draft's type-resolution mark; types are always explicit (§10.5).
+  reserved 9;
+  reserved "resolution";
+  // An earlier draft's runtime enum, per-language code arms and batch
+  // format, never released (§9.2).
+  reserved 1, 3, 4, 5, 7, 13, 14;
+  reserved "runtime", "installed", "source", "value", "batch_format", "js_module", "js_value";
+}
+
+// The input columns a ROW or MAP_BATCHES_FRAME UDF reads (§10.2). A message,
+// not a bare repeated field, so that unset (reads every input column) and set
+// with no names (reads none) are different values (optimized_plan.md §7.1).
+message UdfReadSet {
+  // Each non-empty, no repeats, ascending by UTF-8 bytes; may be empty.
+  repeated string columns = 1;
+}
+
+// The call shape of a `UdfRef` (§10.2). Values are named as the design names
+// them; wire 0 is refused.
+enum UdfKind {
+  UDF_KIND_UNSPECIFIED = 0;
+  // A `WireUdfApply` target: one value per argument per row.
+  SCALAR = 1;
+  // A `WireUdfApply` target: one batch per argument; output length = input
+  // length.
+  MAP_BATCHES_COLUMN = 2;
+  // The argument of an `AGG_UDF` measure; plain or mergeable, decided by
+  // `state_type`.
+  AGGREGATE = 3;
+  // A `WireStepNode` target: a source node, run once per run.
+  STEP = 4;
+  // A `WireMapBatchesNode` target: any number of output rows.
+  MAP_BATCHES_FRAME = 5;
+  // A `WireUdfApply` target: one row object per input row, from the columns
+  // passed.
+  ROW = 6;
+}
+
+// Which code a `UdfRef` runs (§10.3). The runtime is an open string the format
+// never enumerates.
+message UdfCode {
+  // Open, namespaced: "komira/python", "komira/node", "example.org/go".
+  // Plan validation checks its grammar (`OPTIMIZED_UDF_RUNTIME_MALFORMED`).
+  string runtime = 1;
+  // PACKAGE, BUNDLE or VALUE; the only code fact the format reads.
+  // UNSPECIFIED is refused.
+  CodeForm form = 2;
+  // The runtime's entry reference, e.g. "pkg.mod:qualname". Non-empty for a
+  // PACKAGE.
+  string entry = 3;
+  // Every code object the entry needs, by role and sha256.
+  repeated CodeDigest code = 4;
+  // The version of the runtime's descriptor schema; 0 means "no descriptor".
+  uint32 descriptor_version = 5;
+  // Runtime-owned canonical bytes, checked by the runtime's `validate` at
+  // host admission (`OPTIMIZED_UDF_DESCRIPTOR_INVALID`), never by the format.
+  bytes descriptor = 6;
+}
+
+// One code object of a `UdfCode`.
+message CodeDigest {
+  // A runtime-defined label: "bundle", "payload", "source", "captures".
+  string role = 1;
+  // Exactly 32 bytes.
+  bytes sha256 = 2;
+}
+
+// How a `UdfCode` reaches its code (§10.3, §10.6). Wire 0 is refused.
+enum CodeForm {
+  CODE_FORM_UNSPECIFIED = 0;
+  // By reference to an installed package in the dependency layer.
+  PACKAGE = 1;
+  // By reference into a code-layer bundle.
+  BUNDLE = 2;
+  // By value: a serialized function object in the code layer.
+  VALUE = 3;
+}
+
+// The engine's `UDF_STABILITY_*` (`komira_plan_expr/udf_data.mojo`), wire =
+// engine + 1 (§10.7). Wire 0 is refused.
+enum UdfStability {
+  UDF_STABILITY_WIRE_UNSPECIFIED = 0;
+  UDF_STABILITY_IMMUTABLE = 1;
+  UDF_STABILITY_STABLE = 2;
+  UDF_STABILITY_VOLATILE = 3;
+}
+
+// The engine's `UDF_NULL_*` (`komira_plan_expr/udf_data.mojo`), wire = engine
+// + 1 (§10.7). Wire 0 is refused, and so is SKIP_NULL_FAST_PATH in a
+// `UdfRef`.
+enum UdfNullMode {
+  UDF_NULL_WIRE_UNSPECIFIED = 0;
+  UDF_NULL_MANUAL = 1;
+  UDF_NULL_PROPAGATE = 2;
+  UDF_NULL_SKIP_NULL_FAST_PATH = 3;
+}
+
+// Per-worker resources of one UDF (§10.8). 0 means "the host chooses" for
+// each field.
+message UdfResources {
+  // held: AcceleratorKind accelerator = 1 and uint32 accelerators_per_worker
+  // = 2: GPU UDFs come under a later format_version (§10.2).
+  uint64 worker_mem_bytes = 3;
+  uint32 max_workers = 4;
+  // A ceiling on rows per call.
+  uint32 max_batch_rows = 5;
+  // STEP only.
+  uint64 max_runtime_ms = 6;
+  // Async functions only.
+  uint32 max_concurrent_calls = 7;
+  // held: uint64 max_state_bytes = 8: the per-group state cap is fixed at
+  // 64 MiB at the first release; tuning it is komira-ai/komira#1148.
 }
 
 // ===========================================================================
@@ -1653,4 +1891,9 @@ message WirePlanEnvelope {
   // ABSENT = return the rows (today's behaviour, unchanged).
   // PRESENT = write them THERE, and also return them.
   WireWriteTarget write_target = 3;
+  // The `UdfRef`s a RAW plan calls, by index (optimized_plan_udfs.md §10.4).
+  // An OPTIMIZED plan carries them in `DeclaredNeeds.udfs` instead. Adding
+  // the field does not bump `format_version`: a reader that does not know it
+  // also does not know the arms that index into it, and refuses those arms.
+  repeated UdfRef udfs = 4;
 }

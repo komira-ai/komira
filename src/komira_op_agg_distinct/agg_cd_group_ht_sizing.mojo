@@ -2,7 +2,7 @@
 # CDHTSIZE — size the grouped COUNT(DISTINCT) GROUP table from GROUPS, not ROWS
 # =============================================================================
 #
-# ★ THE DEFECT THIS FILE EXISTS TO REMOVE, derived from the source rather than
+# ★ THE PROBLEM THIS FILE EXISTS TO REMOVE, derived from the source rather than
 #   from any timer:
 #
 #     per_worker_rows = ceil(5,563,212 / 20)          = 278,161
@@ -11,50 +11,34 @@
 #
 #   `_execute_count_distinct_agg_parallel` sized every worker's open-addressed
 #   group table from the ROW count and filled all K of them on the DRIVER
-#   THREAD before the dispatch (`htinit`), so cbq10 allocated, zeroed, merge-
-#   scanned and freed 251.7 MB of hash table to hold **165 groups**. Measured
-#   at K=20: `htinit` 80.8-92.9 ms on
-#   every warm rep and 202-206 ms on rep 0 of every process, plus a 16.3 ms
-#   serial `merge` that is almost entirely the walk over 19 x 1,048,576 EMPTY
-#   slots.
+#   THREAD before the dispatch (`htinit`), so a 165-group key allocated,
+#   zeroed, merge-scanned and freed 251.7 MB of hash table to hold **165
+#   groups**, and the serial `merge` was almost entirely the walk over 19 x
+#   1,048,576 EMPTY slots.
 #
-# ⭐ WHAT DuckDB DOES (v1.5.5 sources):
-#   * `aggregate_hashtable.cpp:196-198` — `InitialCapacity()` is
-#     `STANDARD_VECTOR_SIZE * 2` = 4,096 entries; `:200-203`
-#     `GetCapacityForCount(n)` = next_pow2(max(4096, n) * LOAD_FACTOR), and
-#     `aggregate_hashtable.hpp:57` `LOAD_FACTOR = 1.5`.
-#   * `:652-654` — the table DOUBLES (`Resize(capacity * 2)`) when
-#     `Count() + chunk_size > capacity / LOAD_FACTOR`; `:281-305` `Resize`
-#     re-inserts every stored row into the new pointer table.
-#   * `radix_partitioned_hashtable.cpp:548-556` — the per-thread sink table is
-#     created LAZILY, by the worker, on its first `Sink` call, at
-#     `SinkCapacity()` (`:361-368`): 32,768 entries above 2 threads, 262,144
-#     at <= 2. It is never sized from the input row count.
-#   * `:858-873` — only the FINALIZE table, whose input is already deduplicated,
-#     is sized from a count: `GetCapacityForCount(partition.data->Count())`,
-#     capped by a per-thread memory share.
-#   So their rule is: start at a small constant, size from a count ONLY when the
-#   count is of GROUPS, and allocate inside the thread that fills it.
+# ⭐ THE RULE TO FOLLOW (the one DuckDB's grouped hash table uses): start at a
+#   small constant capacity, double when the load passes a threshold, and
+#   create each per-thread table lazily inside the thread that fills it, never
+#   sized from the input row count. A capacity is derived from a count only
+#   when the count is of GROUPS.
 #
 # ⭐ WHAT WE DO NOW — the same rule, plus the one exact count this driver has:
 #   * For a key set whose every column went through the string DICTIONARY
-#     encode (STRING / LARGE_STRING / DICTIONARY — cbq10, cbq13), the dict
+#     encode (STRING / LARGE_STRING / DICTIONARY), the dict
 #     sizes are an exact per-column distinct count, so their product (capped at
 #     the row count; +1 per key for a NULL group) is an UPPER BOUND on groups.
 #     `cd_groups_upper_bound`. That is a runtime fact, not a plan-time
 #     estimate — see `komira_compiler/plan_group_estimate.mojo` for why no
 #     plan-time estimator reaches this door.
-#   * Otherwise (any INT key — cbq11's `mobile_phone`, q16's `p_size`) there is
+#   * Otherwise (any INT key) there is
 #     NO bound, and the table starts at `CD_GROUP_HT_MIN_CAP` and DOUBLES at load
-#     0.5 inside the worker, DuckDB's grow strategy.
+#     0.5 inside the worker.
 #   * The table is allocated by the WORKER, not the driver: `htinit` stops
 #     being a serial phase at all.
 #
 # ⛔ CORRECTNESS DOES NOT DEPEND ON THE BOUND. The bound picks only the FIRST
 #   capacity; the worker's load-0.5 doubling (`_PerWorkerCDState.grow_ht`) is
 #   what guarantees the table never fills, for any bound, including a wrong one.
-#   `tests/test_cd_group_ht_sized_from_groups.mojo` forces several doublings
-#   per worker and value-compares every group.
 #
 # ⛔ AND IT DOES NOT TOUCH THE PARTITION. Growth is a per-worker rehash on
 #   `hash & new_mask`; which worker owns a row is `_cd_partition_bucket(hash,
@@ -69,7 +53,7 @@
 #
 # Route witness (for tests): the two process-wide
 # counters below. Same blessed `_Global` + `Atomic` idiom as
-# `unified/agg/cd_passenger_lane_counter.mojo`; folded ONCE PER QUERY by the
+# `cd_passenger_lane_counter.mojo`; folded ONCE PER QUERY by the
 # driver after the dispatch, never on the row path. No env var.
 # =============================================================================
 
@@ -78,9 +62,9 @@ from std.ffi import _Global
 from std.memory import OwnedPointer, alloc
 
 
-# DuckDB's `GroupedAggregateHashTable::InitialCapacity()` (4,096 entries). At
-# our 12 B/slot (Int64 hash + Int32 gid) that is 48 KB per worker — 20 workers
-# are ~1 MB, against the 251.7 MB the row-sized tables cost cbq10.
+# The starting capacity of a group table (4,096 entries). At 12 B/slot (Int64
+# hash + Int32 gid) that is 48 KB per worker — 20 workers are ~1 MB, against
+# the 251.7 MB the row-sized tables cost a 165-group key.
 comptime CD_GROUP_HT_MIN_CAP: Int = 4096
 
 # The old row-based sizing's clamp, kept as the ceiling of the FIRST capacity

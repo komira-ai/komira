@@ -12,13 +12,6 @@ operator. The package root re-exports nothing; import from the modules.
   build (`join_build_serial`) and the probe kernels (`join_probe_inner`,
   `join_probe_inner_ps`, `join_probe_semi_anti`, `join_probe_outer`) are
   modules of their own.
-- `komira_op_join_build.hash_chain_parallel_build`: `hash_join_build_parallel`,
-  the parallel build of a `HashJoinBuilder` over the engine's dispatcher (each
-  worker pushes its rows onto their chains with an atomic compare-exchange),
-  serial below `JOIN_BUILD_PARALLEL_THRESHOLD` rows; the same matches as the
-  serial build, chain order aside. Its settings (`hash_chain_build_settings`):
-  the build mode (AUTO, OFF, or the FORCE test hook) and who fills the
-  chain-head table.
 - `komira_op_join_build.join_sort_merge`: the merge phase of a sort-merge
   INNER join over pre-sorted keys, and `cross_join_indices`.
 - `komira_op_join_build.join_perfect_hash`: `PerfectHashJoin`, a direct-indexed

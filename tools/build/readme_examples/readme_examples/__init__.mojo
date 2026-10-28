@@ -1,8 +1,8 @@
-"""The ```mojo examples of a README, as a program that runs them.
-
-`markdown`: the CommonMark fence reader (what is code) and the link reader,
-shared with `buildtools.doc_links`; `examples`: a README's examples, its
-hidden lines and every refusal; `program`: the generated program and its
-line map. Pure: text in, text out. `//tools/build/readme_examples:tool`
-reads and writes the files.
+"""The Mojo Markdown reader `buildtools.doc_links` (tools/build/inspect)
+still imports: `markdown` (what is code: CommonMark fences; and the links)
+and `text` (its byte helpers). Nothing else is left of the Mojo README
+examples generator: the README examples are the Zig tool's
+(`//tools/build/readme_examples:tool`, on the shared Zig Markdown module
+`//tools/build/markdown`). This library is deleted by the doc_links port of
+komira-ai/komira#1281, which moves doc_links onto that Zig module.
 """

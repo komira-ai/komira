@@ -19,14 +19,20 @@ incompatibility under the key fails instead of driving buck2.
 
 `graph_check` declares a BXL graph check (graph/checks.bxl): the check's name
 and the targets it queries, as strings, never as dependencies, and its Zig
-checker. release/ci/build_targets.sh runs the BXL for each graph_check of a
-batch; the checker runs over the facts the BXL collected as a build action.
+checker. .github/workflows/pr.yml runs the BXL for each graph_check; the checker runs over the facts the BXL collected as a build action.
+python_closure also reads files (`trees`, doc_tree targets as strings, and
+`srcs`) and takes its allowlist (`surface`, `ceiling`).
 """
 
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
 load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load("@komira//tools/build/selftest/graph:graph_check_info.bzl", "GraphCheckInfo")
+
+# Built with zig 0.15.2 (`:zig_next`); the executables are built behind the check
+# that the pin is that release.
+_ZIG = "komira//tools/build/toolchains:zig_next"
+_ZIG_VERSION = "komira//tools/build/toolchains:zig_next_version"
 
 _SELFTEST = "komira//tools/build/selftest"
 
@@ -39,6 +45,7 @@ LIB_SRCS = [
     "lib/lib.zig",
     "lib/lib_test.zig",
     "lib/parse.zig",
+    "lib/reds.zig",
     "lib/refusals.zig",
     "lib/runner.zig",
     "lib/scratch.zig",
@@ -118,9 +125,9 @@ def selftest_scenario(name, src = None, expect = "remote", labels = [], visibili
         exec_compatible_with = LINUX_X86_64,
         src = src or name + ".zig",
         imports = LIB_SRCS,
-        unit_tests = [_SELFTEST + ":lib"],
+        unit_tests = [_SELFTEST + ":lib", _ZIG_VERSION],
         busybox = "komira//tools/build/toolchains:busybox",
-        zig = "komira//tools/build/toolchains:zig",
+        zig = _ZIG,
     )
     _scenario_rule(
         name = name,
@@ -148,6 +155,10 @@ def _graph_check_impl(ctx):
             exec_compatible_with = LINUX_X86_64,
             label = str(ctx.label.raw_target()),
             targets = ctx.attrs.targets,
+            trees = ctx.attrs.trees,
+            files = {(ctx.label.package + "/" if ctx.label.package else "") + f.short_path: f for f in ctx.attrs.srcs},
+            surface = ctx.attrs.surface,
+            ceiling = ctx.attrs.ceiling,
         ),
     ]
 
@@ -157,6 +168,15 @@ graph_check_rule = rule(
         "check": attrs.string(),
         "checker": attrs.exec_dep(providers = [RunInfo]),
         "targets": attrs.list(attrs.string()),
+        # python_closure: the doc_tree targets it reads the files of, as
+        # strings keyed by their cell's path in the repository, and the
+        # files of this package a doc_tree skips.
+        "trees": attrs.dict(attrs.string(), attrs.string(), default = {}),
+        "srcs": attrs.list(attrs.source(), default = []),
+        # python_closure's allowlist (graph_checks.zig): package paths of
+        # the Python surface, and the exact findings allowed today.
+        "surface": attrs.list(attrs.string(), default = []),
+        "ceiling": attrs.list(attrs.string(), default = []),
     },
 )
 
