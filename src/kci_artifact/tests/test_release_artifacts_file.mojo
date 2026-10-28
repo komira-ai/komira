@@ -5,10 +5,8 @@
 #   build stamped, the metapackage is last with every library a member,
 #   each artifact's targets are the labels its args build, a declared check
 #   (there may be none) names buck2 target patterns only and no package is
-#   in two checks, and the per-change check is ready to run (both commands
-#   on every build system, and the buck2 build system derives the rest of
-#   the checks from the graph, //tools/build/ci:derive_checks, so every target
-#   of the graph is in some unit by construction), and the release set that
+#   in two checks, no build system declares a per-change command (the pull
+#   request's check selects with a BXL script and runs no kci), and the release set that
 #   //tools/build/package:release_set_check builds with the test stamp
 #   (tools/build/package/release_set.txt) is this file's metapackage.
 # =============================================================================
@@ -25,11 +23,8 @@ from std.testing import TestSuite, assert_equal, assert_true
 from kci_artifact import (
     ReleaseStamp,
     find_build_system,
-    parse_affected_answer,
     read_artifacts,
     render_build_argv,
-    unit_names_of,
-    require_affected_ready,
 )
 
 comptime _FILE = "artifacts.textproto"
@@ -122,7 +117,6 @@ def test_the_declared_names_in_release_order() raises:
     want.append(String("komira_managed_mail_proto"))
     want.append(String("komira_calendar_proto"))
     want.append(String("komira_snapshotter"))
-    want.append(String("komira_mail_message"))
     want.append(String("komira_vcard"))
     want.append(String("komira_trace"))
     want.append(String("komira_calendar"))
@@ -131,6 +125,53 @@ def test_the_declared_names_in_release_order() raises:
     want.append(String("kci_deploy_model_proto"))
     want.append(String("kci_manifest_proto"))
     want.append(String("kci_artifact"))
+    want.append(String("komira_libc"))
+    want.append(String("komira_lz4"))
+    want.append(String("komira_zlib"))
+    want.append(String("komira_async_api"))
+    want.append(String("komira_buffer"))
+    want.append(String("komira_mail_message"))
+    want.append(String("komira_compression"))
+    want.append(String("komira_crypto"))
+    want.append(String("komira_arrow"))
+    want.append(String("komira_dynamic_filter"))
+    want.append(String("komira_metrics"))
+    want.append(String("komira_secret_store"))
+    want.append(String("kci_secret_writer"))
+    want.append(String("komira_arrow_ipc"))
+    want.append(String("komira_plan_expr"))
+    want.append(String("komira_secret_env"))
+    want.append(String("komira_column_kernels"))
+    want.append(String("komira_log"))
+    want.append(String("komira_plan_stats"))
+    want.append(String("kci_reconciler"))
+    want.append(String("komira_scan_source"))
+    want.append(String("kci_cloud"))
+    want.append(String("komira_plan_ir"))
+    want.append(String("kci_composites"))
+    want.append(String("komira_join_assembly"))
+    want.append(String("kci_cloud_fake"))
+    want.append(String("komira_async"))
+    want.append(String("komira_fs"))
+    want.append(String("komira_http_core"))
+    want.append(String("komira_net"))
+    want.append(String("komira_supervisor"))
+    want.append(String("komira_http_client"))
+    want.append(String("komira_objectstore"))
+    want.append(String("kci_pkg_upload"))
+    want.append(String("komira_aws_core"))
+    want.append(String("komira_gcp_core"))
+    want.append(String("komira_oci"))
+    want.append(String("kci_publish_oci"))
+    want.append(String("kci_release_set"))
+    want.append(String("komira_gcp_cloudresourcemanager"))
+    want.append(String("komira_gcp_iam"))
+    want.append(String("komira_gcp_run"))
+    want.append(String("komira_gcp_wif"))
+    want.append(String("kci_cloud_gcp"))
+    want.append(String("komira_kafka_broker"))
+    want.append(String("komira_bench_duckdb"))
+    want.append(String("komira_bench_report"))
     want.append(String("komira_all"))
     assert_equal(len(d.artifacts), len(want))
     for i in range(len(want)):
@@ -329,87 +370,30 @@ def test_the_pattern_reader() raises:
     assert_true(not _overlap(String("//src/a/..."), String("tests//src/a/...")))
 
 
-def test_the_per_change_check_is_ready() raises:
+def test_no_build_system_declares_a_per_change_command() raises:
+    """The pull request's check runs no kci (pr.yml selects with
+    tools/build/ci/affected.bxl): no build system declares an `affected`,
+    `build_targets` or `derive_checks` command, and the file declares no check
+    (a check is selected by those commands)."""
     var d = read_artifacts(String(_FILE))
-    require_affected_ready(d)
+    assert_true(len(d.build_systems) >= 1)
     for i in range(len(d.build_systems)):
         ref b = d.build_systems[i]
-        assert_true(Bool(b.affected), b.name)
-        assert_true(Bool(b.build_targets), b.name)
-        assert_equal(b.build_targets.value().args[0], String("release/ci/build_targets.sh"), b.name)
+        assert_true(not Bool(b.affected), b.name)
+        assert_true(not Bool(b.build_targets), b.name)
+        assert_true(not Bool(b.derive_checks), b.name)
+    assert_equal(len(d.checks), 0)
 
 
-def test_the_affected_command_is_the_real_tool_not_the_widening_script() raises:
-    """Every build system's `affected` runs //tools/build/ci:affected through
-    buck2, over the change's files, the base commit (for the files the change
-    deleted) and the units file; none names the retired widening script (which
-    answered WIDENED for every change)."""
-    var d = read_artifacts(String(_FILE))
-    var want = List[String]()
-    want.append(String("run"))
-    want.append(String("//tools/build/ci:affected"))
-    want.append(String("--"))
-    want.append(String("--files"))
-    want.append(String("{changed_files}"))
-    want.append(String("--base"))
-    want.append(String("{base_commit}"))
-    want.append(String("--units-file"))
-    want.append(String("{units_file}"))
-    for i in range(len(d.build_systems)):
-        ref b = d.build_systems[i]
-        ref c = b.affected.value()
-        assert_equal(c.executable, String("buck2"), b.name)
-        assert_equal(len(c.args), len(want), b.name)
-        for k in range(len(want)):
-            assert_equal(c.args[k], want[k], b.name)
-        for k in range(len(c.args)):
-            assert_true(c.args[k].find(String("widened")) < 0, b.name)
-            assert_true(c.args[k].find(String(".sh")) < 0, b.name)
-
-
-def test_the_text_of_the_file_no_longer_names_the_widening_script() raises:
-    """The retired script is named nowhere in the file, in a comment either:
-    a reader of the file would go looking for it."""
+def test_the_text_of_the_file_names_no_retired_command() raises:
+    """The retired pieces are named nowhere in the file, in a comment either:
+    a reader of the file would go looking for them."""
     var text = Path(String(_FILE)).read_text()
     assert_true(text.find(String("affected_widened")) < 0)
-    assert_true(text.find(String("WIDENED every unit")) < 0)
-
-
-def test_what_the_tool_prints_is_what_kci_reads() raises:
-    """The goldens of //tools/build/ci:affected's `--units-file` answers (the
-    same strings its own test_the_protocol_answer pins), through kci's parser
-    over the units of this file's buck2 build system."""
-    var d = read_artifacts(String(_FILE))
-    var owned = unit_names_of(d, String("buck2"))
-    assert_true(len(owned) >= 1)
-    var a = parse_affected_answer(String("UNIT ") + owned[0] + String("\nAFFECTED 1\n"), owned)
-    assert_equal(len(a.units), 1)
-    assert_true(not a.widened)
-    var w = parse_affected_answer(String("WIDENED the project configuration changed\n"), owned)
-    assert_true(w.widened)
-    assert_equal(len(w.units), 0)
-    # a change that reaches no unit is AFFECTED 0: parsed, and kci's
-    # decision over every build system's answer refuses it (KCI-E-AFFECTED-VACUOUS)
-    var z = parse_affected_answer(String("AFFECTED 0\n"), owned)
-    assert_equal(len(z.units), 0)
-    assert_true(not z.widened)
-
-
-def test_the_buck2_build_system_derives_the_checks_from_the_graph() raises:
-    """The checks are not listed here: the buck2 build system's
-    derive_checks command answers them from the live graph when the check
-    runs, so a package added or deleted needs no edit to this file."""
-    var d = read_artifacts(String(_FILE))
-    var j = find_build_system(d, String("buck2"))
-    assert_true(j >= 0)
-    assert_true(Bool(d.build_systems[j].derive_checks))
-    ref c = d.build_systems[j].derive_checks.value()
-    assert_equal(c.executable, String("buck2"))
-    assert_equal(len(c.args), 4)
-    assert_equal(c.args[0], String("run"))
-    assert_equal(c.args[1], String("//tools/build/ci:derive_checks"))
-    assert_equal(c.args[2], String("--"))
-    assert_equal(c.args[3], String("{units_file}"))
+    assert_true(text.find(String("derive_checks")) < 0)
+    assert_true(text.find(String("build_targets")) < 0)
+    assert_true(text.find(String("ci:affected")) < 0)
+    assert_true(text.find(String("rules.txt")) < 0)
 
 
 def _release_set_values(key: String) raises -> List[String]:

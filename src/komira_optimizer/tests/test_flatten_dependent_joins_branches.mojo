@@ -29,6 +29,8 @@ from komira_plan_expr.expr import (
     COL_SIDE_NONE,
     COL_SIDE_LEFT,
     COL_SIDE_RIGHT,
+    MATH_SQRT,
+    WhenCaseData,
 )
 from komira_plan_expr.agg_expr import AggExpr, AGG_SUM, AGG_MAX
 from komira_plan_expr.partition_expr import PartitionExpr
@@ -57,11 +59,16 @@ from komira_optimizer.flatten_dependent_joins import (
     _expr_contains_correlated_subquery,
     _expr_collect_column_names,
     _plan_contains_correlated_subquery,
+    _lower_correlated_into_join,
+)
+from komira_optimizer.flatten_hoist import (
     _expr_has_side_qualifier,
     _expr_references_outer_side,
     _rewrite_inner_none_to_right,
     _try_lift_side_equi,
-    _lower_correlated_into_join,
+    _try_lift_name_equi,
+    _expr_hoist_visible,
+    _rewrite_sides,
 )
 from komira_optimizer.join_predicate_decompose import join_predicate_decompose
 
@@ -671,6 +678,155 @@ def test_rewrite_inner_none_to_right() raises:
     assert_equal(l.literal_value().int_val, Int64(4))
 
 
+# =============================================================================
+# The hoist's expression-kind coverage and the name-based equality lift
+# =============================================================================
+
+
+def _when1(var cond: Expr, var result: Expr, var default: Expr) -> Expr:
+    var cases = List[WhenCaseData]()
+    cases.append(WhenCaseData(cond^, result^))
+    return Expr.when(cases^, default^)
+
+
+def test_hoist_visible_per_expression_kind() raises:
+    """`_expr_hoist_visible` answers True for a col-ref, a literal, a binary,
+    each of the six wrappers and a CASE built from them, and False for a math
+    function anywhere: alone, as either binary operand, under a wrapper, and
+    in a CASE condition, result or default.
+
+    Catches: an arm removed (a correlation under that kind refused); a
+    descent that checks one operand or one CASE slot only (an outer ref under
+    the unchecked one hidden from the side walk, kept on the inner side)."""
+    var op = Expr.math_fn(MATH_SQRT, Expr.col_ref("a"))
+    var a = Expr.col_ref("a")
+    var lit = Expr.literal(ScalarValue.from_int(1))
+    assert_true(_expr_hoist_visible(a))
+    assert_true(_expr_hoist_visible(lit))
+    assert_true(_expr_hoist_visible(Expr.binary(BIN_LT, a.copy(), lit.copy())))
+    for kind in range(6):
+        assert_true(_expr_hoist_visible(_wrap_expr(kind, a.copy())))
+        assert_false(_expr_hoist_visible(_wrap_expr(kind, op.copy())))
+    assert_true(_expr_hoist_visible(_when1(a.copy(), a.copy(), lit.copy())))
+    assert_false(_expr_hoist_visible(op))
+    assert_false(_expr_hoist_visible(Expr.binary(BIN_LT, op.copy(), a.copy())))
+    assert_false(_expr_hoist_visible(Expr.binary(BIN_LT, a.copy(), op.copy())))
+    assert_false(_expr_hoist_visible(_when1(op.copy(), a.copy(), lit.copy())))
+    assert_false(_expr_hoist_visible(_when1(a.copy(), op.copy(), lit.copy())))
+    assert_false(_expr_hoist_visible(_when1(a.copy(), a.copy(), op.copy())))
+
+
+def test_side_walkers_descend_every_case_slot() raises:
+    """`_expr_has_side_qualifier` and `_expr_references_outer_side` find a
+    LEFT ref in a CASE condition, result or default, and answer False for a
+    CASE of plain refs.
+
+    Catches: the CASE arm removed or one slot skipped (an outer ref there
+    counts as inner-only and stays in the inner Filter)."""
+    var p = Expr.col_ref("p")
+    var slots = List[Expr]()
+    slots.append(_when1(Expr.left("a"), p.copy(), p.copy()))
+    slots.append(_when1(p.copy(), Expr.left("a"), p.copy()))
+    slots.append(_when1(p.copy(), p.copy(), Expr.left("a")))
+    for i in range(len(slots)):
+        assert_true(_expr_has_side_qualifier(slots[i]))
+        assert_true(_expr_references_outer_side(slots[i]))
+    var plain = _when1(p.copy(), p.copy(), p.copy())
+    assert_false(_expr_has_side_qualifier(plain))
+    assert_false(_expr_references_outer_side(plain))
+
+
+def test_rewrite_sides_marks_outer_names_left() raises:
+    """`_rewrite_sides(e, ["a"])` marks a plain `a` LEFT and a plain `b`
+    RIGHT, keeps a LEFT ref LEFT and a RIGHT `a` RIGHT.
+
+    Catches: the outer-name test dropped (the residual compares two inner
+    refs); a RIGHT-qualified ref re-marked by name."""
+    var outer: List[String] = ["a"]
+    var r = _rewrite_sides(Expr.binary(BIN_LT, Expr.col_ref("a"), Expr.col_ref("b")), outer)
+    assert_equal(r.binary_left_ref().col_ref_side(), COL_SIDE_LEFT)
+    assert_equal(r.binary_left_ref().col_ref_name(), String("a"))
+    assert_equal(r.binary_right_ref().col_ref_side(), COL_SIDE_RIGHT)
+    assert_equal(_rewrite_sides(Expr.right("a"), outer).col_ref_side(), COL_SIDE_RIGHT)
+    assert_equal(_rewrite_sides(Expr.left("z"), outer).col_ref_side(), COL_SIDE_LEFT)
+
+
+def _wrapped_child(kind: Int, e: Expr) -> Expr:
+    """The child `_wrap_expr(kind, ..)` put under `e`."""
+    if kind == 0:
+        return e.unary_child_ref().copy()
+    if kind == 1:
+        return e.cast_child_ref().copy()
+    if kind == 2:
+        return e.alias_child_ref().copy()
+    if kind == 3:
+        return e.string_op_child_ref().copy()
+    if kind == 4:
+        return e._in_list.value().child[].copy()
+    return e.agg_fn_child_ref().copy()
+
+
+def test_rewrite_sides_passes_outer_names_through_every_kind() raises:
+    """`_rewrite_sides(e, ["a"])` marks a plain `a` LEFT under each of unary,
+    cast, alias, string op, IN list and aggregate, and in a CASE condition,
+    result and default; a plain `b` in the same CASE comes out RIGHT.
+
+    Catches: any one recursion arm calling itself with an empty name list
+    instead of `outer_names` (the plain-name residual then marks the outer
+    column RIGHT and compares a column the inner side does not produce,
+    komira-ai/komira#1354). `_rewrite_inner_none_to_right` passes no names,
+    so its per-kind tests cannot see this."""
+    var outer: List[String] = ["a"]
+    for kind in range(6):
+        var r = _rewrite_sides(_wrap_expr(kind, Expr.col_ref("a")), outer)
+        var child = _wrapped_child(kind, r)
+        assert_equal(child.col_ref_name(), String("a"))
+        assert_equal(child.col_ref_side(), COL_SIDE_LEFT)
+    var cases = List[WhenCaseData]()
+    cases.append(WhenCaseData(
+        Expr.binary(BIN_GT, Expr.col_ref("a"), Expr.col_ref("b")), Expr.col_ref("a")
+    ))
+    var w = _rewrite_sides(Expr.when(cases^, Expr.col_ref("a")), outer)
+    ref wd = w._when.value()
+    ref cond = wd.cases[0].condition[]
+    assert_equal(cond.binary_left_ref().col_ref_side(), COL_SIDE_LEFT)
+    assert_equal(cond.binary_right_ref().col_ref_side(), COL_SIDE_RIGHT)
+    assert_equal(wd.cases[0].result[].col_ref_side(), COL_SIDE_LEFT)
+    assert_equal(wd.default[].col_ref_side(), COL_SIDE_LEFT)
+
+
+def test_try_lift_name_equi_shapes() raises:
+    """`_try_lift_name_equi` with outer refs [c, d] where `d` is outer-only:
+    lifts `c = x` and `x = d` (outer name first); refuses `d = d2` (two
+    outer-only names), a non-binary, a non-EQ and an EQ with a literal.
+
+    Catches: an equality of two outer columns lifted as a key (a join on a
+    column the inner side does not produce); the mirror arm keyed in operand
+    order; a non-equality or a literal equality lifted."""
+    var refs: List[String] = ["c", "d", "d2"]
+    var outer_only: List[String] = ["d", "d2"]
+    var lo = List[String]()
+    var ro = List[String]()
+    assert_true(_try_lift_name_equi(
+        Expr.binary(BIN_EQ, Expr.col_ref("c"), Expr.col_ref("x")), refs, outer_only, lo, ro))
+    assert_true(_try_lift_name_equi(
+        Expr.binary(BIN_EQ, Expr.col_ref("x"), Expr.col_ref("d")), refs, outer_only, lo, ro))
+    assert_equal(len(lo), 2)
+    assert_equal(lo[0], String("c"))
+    assert_equal(ro[0], String("x"))
+    assert_equal(lo[1], String("d"))
+    assert_equal(ro[1], String("x"))
+    assert_false(_try_lift_name_equi(
+        Expr.binary(BIN_EQ, Expr.col_ref("d"), Expr.col_ref("d2")), refs, outer_only, lo, ro))
+    assert_false(_try_lift_name_equi(Expr.col_ref("c"), refs, outer_only, lo, ro))
+    assert_false(_try_lift_name_equi(
+        Expr.binary(BIN_LT, Expr.col_ref("c"), Expr.col_ref("x")), refs, outer_only, lo, ro))
+    assert_false(_try_lift_name_equi(
+        Expr.binary(BIN_EQ, Expr.col_ref("c"), Expr.literal(ScalarValue.from_int(1))),
+        refs, outer_only, lo, ro))
+    assert_equal(len(lo), 2)
+
+
 def main() raises:
     test_walk_lowers_under_every_node_kind()
     test_project_with_a_subquery_expression_raises()
@@ -688,4 +844,9 @@ def main() raises:
     test_try_lift_side_equi_shapes()
     test_expression_walkers_see_through_every_wrapper()
     test_rewrite_inner_none_to_right()
+    test_hoist_visible_per_expression_kind()
+    test_side_walkers_descend_every_case_slot()
+    test_rewrite_sides_marks_outer_names_left()
+    test_rewrite_sides_passes_outer_names_through_every_kind()
+    test_try_lift_name_equi_shapes()
     print("All flatten_dependent_joins branch tests passed.")

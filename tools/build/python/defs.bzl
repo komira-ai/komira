@@ -1,5 +1,5 @@
 """Hermetic Python for tests: `python_dist`, `python_wheel`, `py_test`,
-`python_oracle` and `python_proto`.
+`python_binding_test`, `python_oracle` and `python_proto`.
 
 `python_dist` unpacks a sha256-pinned CPython archive (an `install_only`
 archive of python-build-standalone) into a directory and fails unless the
@@ -30,7 +30,8 @@ is `LC_ALL=C` and `TZ=UTC0` (a POSIX rule: local time is UTC and the C
 library reads no zone file for it); a `py_test`'s and a `python_oracle`'s
 also has `TZDIR`, the `zoneinfo` directory of its `tzdata` wheel, which
 `pyrun.py` and `oracle_run.py` make Python's only zone path, so no zone is
-read from the worker. An oracle's script runs in a child interpreter
+read from the worker. A `py_test` that `-c komira.rerun` names also has
+`KOMIRA_RERUN` (tools/build/rerun/README.md). An oracle's script runs in a child interpreter
 `oracle_run.py` starts with `-s -S -P` instead (no user site directory, no
 `site`, no script directory put first by the interpreter) and the
 environment `LC_ALL=C PYTHONHASHSEED=0 TZ=UTC0 TZDIR=<absolute>` and nothing
@@ -43,8 +44,8 @@ the linux x86_64 execution platform.
 
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
 load("@komira//tools/build/mojo:test_runtime.bzl", "data_map")
-load("@komira//tools/build/mojo:toolchain.bzl", "busybox_sh")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
+load("@komira//tools/build/rerun:rerun.bzl", "RERUN_ATTRS", "rerun_env", "rerun_info")
 
 PythonDistInfo = provider(
     doc = "An unpacked CPython: its root directory and the interpreter's path in it.",
@@ -88,44 +89,13 @@ def _exe_name(version, freethreaded):
         fail("python_dist: version must be <major>.<minor>.<micro>, got '{}'".format(version))
     return "bin/python{}.{}{}".format(parts[0], parts[1], "t" if freethreaded else "")
 
-# Unpacks the archive (its single top directory is `python/`), moves that
-# directory to the output, and runs the interpreter in it, which must print
-# the pinned version, followed by `t` if and only if it is a free-threaded
-# build (`Py_GIL_DISABLED`).
-_DIST_SCRIPT = """
-BB="$1"; shift
-case "$BB" in /*) ;; *) BB="$PWD/$BB" ;; esac
-case "${BUCK_SCRATCH_PATH:-}" in
-    "") T="$PWD/.komira_action" ;;
-    /*) T="$BUCK_SCRATCH_PATH/komira" ;;
-    *) T="$PWD/$BUCK_SCRATCH_PATH/komira" ;;
-esac
-"$BB" mkdir -p "$T/bin" "$T/x"
-"$BB" --install -s "$T/bin"
-PATH="$T/bin"; export PATH
-ARCHIVE="$1"; OUT="$2"; EXE="$3"; WANT="$4"
-tar -xzf "$ARCHIVE" -C "$T/x"
-if [ ! -x "$T/x/python/$EXE" ]; then
-    echo "python_dist: $ARCHIVE holds no python/$EXE" >&2
-    exit 2
-fi
-mv "$T/x/python" "$OUT"
-# Removes what the archive installed into site-packages (pip): no action
-# installs with it, and -S keeps the directory off sys.path.
-rm -rf "$OUT"/lib/python3.*/site-packages/*
-GOT=$("$OUT/$EXE" -I -S -c 'import sys, sysconfig; print("%d.%d.%d" % sys.version_info[:3] + ("t" if sysconfig.get_config_var("Py_GIL_DISABLED") else ""))') || {
-    echo "python_dist: $OUT/$EXE does not run" >&2
-    exit 2
-}
-if [ "$GOT" != "$WANT" ]; then
-    echo "python_dist: the interpreter in $ARCHIVE is $GOT, the pin says $WANT" >&2
-    exit 2
-fi
-rm -rf "$T"
-"""
+# `python_act dist` unpacks the archive (its single top directory is `python/`)
+# into the output, removes what the archive installed into site-packages (pip:
+# no action installs with it, and -S keeps the directory off sys.path), and
+# runs the interpreter in it, which must print the pinned version, followed by
+# `t` if and only if it is a free-threaded build (`Py_GIL_DISABLED`).
 
 def _python_dist_impl(ctx):
-    bb = ctx.attrs._busybox[DefaultInfo].default_outputs[0]
     archive = ctx.attrs.archive[DefaultInfo].default_outputs[0]
     exe = _exe_name(ctx.attrs.version, ctx.attrs.freethreaded)
     want = ctx.attrs.version + ("t" if ctx.attrs.freethreaded else "")
@@ -133,7 +103,18 @@ def _python_dist_impl(ctx):
     if ctx.attrs.preload and not ctx.attrs.native_libs:
         fail("{}: preload names libraries but native_libs is not set".format(ctx.label))
     ctx.actions.run(
-        busybox_sh(bb, _DIST_SCRIPT, archive, out.as_output(), exe, want),
+        cmd_args(
+            ctx.attrs._python_act[RunInfo],
+            "dist",
+            "--archive",
+            archive,
+            "--out",
+            out.as_output(),
+            "--exe",
+            exe,
+            "--version",
+            want,
+        ),
         category = "python_dist",
     )
     return [
@@ -161,7 +142,7 @@ _python_dist = rule(
         "native_libs": attrs.option(attrs.dep(), default = None),
         "preload": attrs.list(attrs.string(), default = []),
         "version": attrs.string(),
-        "_busybox": attrs.exec_dep(default = "komira//tools/build/toolchains:busybox"),
+        "_python_act": attrs.exec_dep(default = "komira//tools/build/python_act:python_act", providers = [RunInfo]),
     },
 )
 
@@ -223,7 +204,10 @@ _python_wheel = rule(
     },
 )
 
-def _py_test_impl(ctx):
+def _run_py_test(ctx, lib_args = [], env_extra = {}):
+    """The action every `py_test` and `python_binding_test` runs; `lib_args`
+    go between `--` and the script's own arguments, `env_extra` is added to
+    the action's environment."""
     dist = ctx.attrs.python[PythonDistInfo]
     srcs = {ctx.attrs.src.short_path: ctx.attrs.src}
     for s in ctx.attrs.srcs:
@@ -246,27 +230,74 @@ def _py_test_impl(ctx):
         cmd.add("--site", closure[k][1])
     if ctx.attrs.expect_error != None:
         cmd.add("--expect-error", ctx.attrs.expect_error)
-    cmd.add("--", cmd_args(staged, format = "{}/" + ctx.attrs.src.short_path), ctx.attrs.args)
+    cmd.add("--", cmd_args(staged, format = "{}/" + ctx.attrs.src.short_path), lib_args, ctx.attrs.args)
     # The zone database every reader takes: the C library and ORC read TZDIR,
     # and pyrun.py makes it Python's only zoneinfo path.
     tzdata = ctx.attrs.tzdata[PythonWheelInfo].closure[ctx.attrs.tzdata[PythonWheelInfo].name][1]
     env = dict(_ENV)
     env["TZDIR"] = cmd_args(tzdata, format = "{}/tzdata/zoneinfo")
-    ctx.actions.run(cmd, env = env, category = "py_test")
-    return [DefaultInfo(default_output = out, other_outputs = [tmp])]
+    env.update(env_extra)
+    env.update(rerun_env(ctx))
+    ctx.actions.run(cmd, env = env, category = ctx.attrs._category)
+    return [DefaultInfo(default_output = out, other_outputs = [tmp]), rerun_info(ctx)]
+
+def _py_test_impl(ctx):
+    return _run_py_test(ctx)
+
+_PY_TEST_ATTRS = {
+    "args": attrs.list(attrs.arg(), default = []),
+    "deps": attrs.list(attrs.exec_dep(providers = [PythonWheelInfo]), default = []),
+    "expect_error": attrs.option(attrs.string(), default = None),
+    "python": attrs.exec_dep(providers = [PythonDistInfo], default = "komira//third_party/python:cpython"),
+    "src": attrs.source(),
+    "srcs": attrs.list(attrs.source(), default = []),
+    "tzdata": attrs.exec_dep(providers = [PythonWheelInfo], default = "komira//third_party/python:tzdata"),
+    "_runner": attrs.source(default = "komira//tools/build/python:pyrun.py"),
+} | RERUN_ATTRS
 
 _py_test = rule(
     impl = _py_test_impl,
     doc = "Runs `src` with the hermetic interpreter (`python`) as a build action; the output exists only if it passed (exit 0, or, with `expect_error`, an exception whose last traceback line is exactly that string). `srcs` are staged next to `src` and importable from it; `deps` are wheels (`python_wheel`), each with its own deps; `args` are the script's arguments. `tzdata` is the wheel whose `tzdata/zoneinfo` directory is the action's `TZDIR` and Python's only zone path.",
-    attrs = {
-        "args": attrs.list(attrs.arg(), default = []),
-        "deps": attrs.list(attrs.exec_dep(providers = [PythonWheelInfo]), default = []),
-        "expect_error": attrs.option(attrs.string(), default = None),
-        "python": attrs.exec_dep(providers = [PythonDistInfo], default = "komira//third_party/python:cpython"),
-        "src": attrs.source(),
-        "srcs": attrs.list(attrs.source(), default = []),
-        "tzdata": attrs.exec_dep(providers = [PythonWheelInfo], default = "komira//third_party/python:tzdata"),
-        "_runner": attrs.source(default = "komira//tools/build/python:pyrun.py"),
+    attrs = _PY_TEST_ATTRS | {"_category": attrs.string(default = "py_test")},
+)
+
+# ---- python_binding_test -----------------------------------------------------
+#
+# A `py_test` that also loads shared libraries: the `mojo_shared_lib` targets
+# of `libs` are copied, by file name, into one directory of the action, and the
+# Mojo runtime libraries they link (the toolchain's `mojo_runtime`) are a
+# second. The action's LD_LIBRARY_PATH is those two directories and nothing
+# else, so the loader finds the library and the runtime in the action's inputs
+# and never on the worker. The script learns the first directory from
+# `--lib-dir <dir>`, its first two arguments (a flag, not an environment
+# variable); `ctypes.CDLL(os.path.join(libdir, "<out_name>.so"))` loads a
+# library by path.
+
+def _python_binding_test_impl(ctx):
+    libs = {}
+    for l in ctx.attrs.libs:
+        out = l[DefaultInfo].default_outputs
+        if len(out) != 1:
+            fail("{}: lib {} has {} outputs, a shared library has one".format(ctx.label, l.label, len(out)))
+        name = out[0].basename
+        if name in libs:
+            fail("{}: two libs are named {}".format(ctx.label, name))
+        libs[name] = out[0]
+    libdir = ctx.actions.copied_dir("libs", libs)
+    runtime = ctx.attrs.runtime[DefaultInfo].default_outputs[0]
+    return _run_py_test(
+        ctx,
+        lib_args = ["--lib-dir", libdir],
+        env_extra = {"LD_LIBRARY_PATH": cmd_args(libdir, runtime, delimiter = ":")},
+    )
+
+_python_binding_test = rule(
+    impl = _python_binding_test_impl,
+    doc = "A `py_test` that loads shared libraries: `libs` (`mojo_shared_lib` targets) are staged by file name in one directory, passed to the script as `--lib-dir <dir>`; the action's LD_LIBRARY_PATH is that directory and the Mojo runtime libraries (`runtime`), and nothing else.",
+    attrs = _PY_TEST_ATTRS | {
+        "libs": attrs.list(attrs.dep()),
+        "runtime": attrs.exec_dep(default = "komira//tools/build/toolchains:mojo_runtime"),
+        "_category": attrs.string(default = "python_binding_test"),
     },
 )
 
@@ -415,6 +446,9 @@ def _wheel_macro(**kwargs):
 def _py_test_macro(**kwargs):
     _py_test(**_linux(kwargs))
 
+def _binding_test_macro(**kwargs):
+    _python_binding_test(**_linux(kwargs))
+
 def _oracle_macro(**kwargs):
     _python_oracle(**_linux(kwargs))
 
@@ -426,5 +460,6 @@ def _proto_macro(**kwargs):
 python_dist = declares_docs(_dist_macro)
 python_wheel = declares_docs(_wheel_macro)
 py_test = declares_docs(_py_test_macro)
+python_binding_test = declares_docs(_binding_test_macro)
 python_oracle = declares_docs(_oracle_macro)
 python_proto = declares_docs(_proto_macro)

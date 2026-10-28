@@ -62,14 +62,14 @@ fn namesMarker(info: []const u8) bool {
 pub const Words = union(enum) { words: []const []const u8, refused: []const u8 };
 
 pub fn words(alloc: Allocator, line: []const u8) Allocator.Error!Words {
-    var out = std.ArrayList([]const u8).init(alloc);
-    var cur = std.ArrayList(u8).init(alloc);
+    var out = std.ArrayList([]const u8).empty;
+    var cur = std.ArrayList(u8).empty;
     var in_word = false;
     var i: usize = 0;
     while (i < line.len) {
         const c = line[i];
         if (c == ' ' or c == '\t') {
-            if (in_word) try out.append(try cur.toOwnedSlice());
+            if (in_word) try out.append(alloc, try cur.toOwnedSlice(alloc));
             in_word = false;
             i += 1;
             continue;
@@ -79,7 +79,7 @@ pub fn words(alloc: Allocator, line: []const u8) Allocator.Error!Words {
             const end = std.mem.indexOfScalarPos(u8, line, i + 1, '\'') orelse return .{ .refused = "an unclosed single quote" };
             const quoted = line[i + 1 .. end];
             if (std.mem.indexOf(u8, quoted, ENV) != null) return .{ .refused = "`$CONDA_PREFIX` inside single quotes: a shell would not expand it" };
-            try cur.appendSlice(quoted);
+            try cur.appendSlice(alloc, quoted);
             i = end + 1;
             continue;
         }
@@ -90,15 +90,15 @@ pub fn words(alloc: Allocator, line: []const u8) Allocator.Error!Words {
             const rest = line[i..];
             const ok = std.mem.startsWith(u8, rest, ENV) and (rest.len == ENV.len or !(std.ascii.isAlphanumeric(rest[ENV.len]) or rest[ENV.len] == '_'));
             if (!ok) return .{ .refused = "`$` outside quotes begins only `$CONDA_PREFIX`" };
-            try cur.appendSlice(ENV);
+            try cur.appendSlice(alloc, ENV);
             i += ENV.len;
             continue;
         }
-        try cur.append(c);
+        try cur.append(alloc, c);
         i += 1;
     }
-    if (in_word) try out.append(try cur.toOwnedSlice());
-    return .{ .words = try out.toOwnedSlice() };
+    if (in_word) try out.append(alloc, try cur.toOwnedSlice(alloc));
+    return .{ .words = try out.toOwnedSlice(alloc) };
 }
 
 fn isProgram(w: []const u8) bool {
@@ -157,8 +157,8 @@ pub fn parse(alloc: Allocator, text: []const u8, display: []const u8) Allocator.
 /// The `run\t<word>` and `build\t<word>` lines of `c`, one per argument:
 /// what `link` writes and `link-check` compares.
 pub fn argsText(alloc: Allocator, c: Commands) Allocator.Error![]const u8 {
-    var out = std.ArrayList(u8).init(alloc);
-    for (c.run) |a| try out.writer().print("run\t{s}\n", .{a});
-    for (c.build) |a| try out.writer().print("build\t{s}\n", .{a});
-    return out.toOwnedSlice();
+    var out = std.ArrayList(u8).empty;
+    for (c.run) |a| try out.writer(alloc).print("run\t{s}\n", .{a});
+    for (c.build) |a| try out.writer(alloc).print("build\t{s}\n", .{a});
+    return out.toOwnedSlice(alloc);
 }

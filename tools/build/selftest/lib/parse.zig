@@ -7,7 +7,7 @@ const text = @import("text.zig");
 /// output holds, per target, a header `<label> (<configuration>):` and
 /// then `  Execution platform: <label>` or `  Failed to configure ...`.
 pub fn resolution(a: std.mem.Allocator, out: []const u8) ![][]const u8 {
-    var res = std.ArrayList([]const u8).init(a);
+    var res = std.ArrayList([]const u8).empty;
     var target: ?[]const u8 = null;
     var it = std.mem.splitScalar(u8, out, '\n');
     while (it.next()) |line| {
@@ -19,14 +19,14 @@ pub fn resolution(a: std.mem.Allocator, out: []const u8) ![][]const u8 {
         const ep = "  Execution platform: ";
         if (std.mem.startsWith(u8, line, ep)) {
             var rest = std.mem.tokenizeScalar(u8, line[ep.len..], ' ');
-            try res.append(try std.fmt.allocPrint(a, "{s} {s}", .{ t, rest.next() orelse "" }));
+            try res.append(a, try std.fmt.allocPrint(a, "{s} {s}", .{ t, rest.next() orelse "" }));
             target = null;
         } else if (std.mem.startsWith(u8, line, "  Failed to configure")) {
-            try res.append(try std.fmt.allocPrint(a, "{s} FAILED", .{t}));
+            try res.append(a, try std.fmt.allocPrint(a, "{s} FAILED", .{t}));
             target = null;
         }
     }
-    return res.toOwnedSlice();
+    return res.toOwnedSlice(a);
 }
 
 /// The value of `key` in `buck2 audit config --json <key>` output
@@ -45,15 +45,15 @@ pub fn configValue(json: []const u8, key: []const u8) ?[]const u8 {
 /// The names of the targets `buck2 targets <pkg>:` printed (the part after
 /// the last `:` of each line), sorted.
 pub fn targetNames(a: std.mem.Allocator, out: []const u8) ![][]const u8 {
-    var res = std.ArrayList([]const u8).init(a);
+    var res = std.ArrayList([]const u8).empty;
     var it = std.mem.splitScalar(u8, out, '\n');
     while (it.next()) |line| {
         const l = std.mem.trim(u8, line, " \r");
         if (l.len == 0) continue;
         const c = std.mem.lastIndexOfScalar(u8, l, ':') orelse continue;
-        try res.append(l[c + 1 ..]);
+        try res.append(a, l[c + 1 ..]);
     }
-    const s = try res.toOwnedSlice();
+    const s = try res.toOwnedSlice(a);
     text.sort(s);
     return s;
 }

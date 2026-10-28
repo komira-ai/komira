@@ -1,0 +1,175 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The Parquet scan's engine side: the per-file reader the scan's
+# morsel source drives (parquet_reader, its page-index-pruned decodes in
+# parquet_reader_prune, the footer offset-width refinement in
+# arrow_hint_refine, the read-ahead hint in prefetch), its factory
+# (parquet_reader_factory), the row-selective decode (payload_sel_decode),
+# the codes feed of a grouped aggregate (parquet_codes_feed), the
+# conjunct-by-conjunct filter decode (staged_filter), the dictionary-select
+# arms of the sub-row-group aggregate (subrg_filter_gather), the top-N
+# row-group bounds and claim order (topn_rg_bounds), the parked sub-morsel
+# pool (parked_morsel_share) and the row-group prune counters
+# (rg_prune_counter); flat_schema is the footer-shape test the leaf-to-schema
+# mapping of all of them rests on.
+#
+# Sub-row-group layer: column cursors over a chunk (subrg_cursor_feed), the
+# flat columns built from their buffers (subrg_columns), a predicate over a
+# decoded batch (batch_filter), the collect sink (scan_chunk_sink), the
+# sub-row-group scan (subrg_scan_executor), row-range decodes
+# (subrg_split_decode), the aggregate read plan (subrg_agg_plan), the
+# sub-row-group aggregate (subrg_agg_executor, its per-row-group fold in
+# subrg_agg_fold, the chunk type rule in subrg_agg_chunk_schema), the band
+# producer (band_producer) and the cursor-grain route (cursor_grain_feed,
+# with its split in cursor_grain_split_emit and its move arm in
+# grain_decode_move).
+#
+# Chunk arms: a PLAIN column read a grain at a time in its decoded page
+# (flat_view_chunk), a dictionary column's codes a grain at a time
+# (code_view_chunk), several PLAIN columns as a row-aligned MorselView grain
+# (flat_morsel_chunk).
+#
+# Morsel source: ParquetSource (parquet_source) with its options and pure
+# decisions (parquet_source_options), its emit (parquet_source_emit), the
+# filtered decode of a claim (parquet_source_claim, parquet_source_arms,
+# parquet_source_late_mat), the cursor-grain route (parquet_source_grain) and
+# the row-range split (parquet_source_subrg); the row-group stamp and winners
+# of a two-phase top-N (topn_late_mat).
+#
+# Welded tests (each against files written by komira_test_parquet_file, or
+# hand-built values):
+# - test_staged_filter_direct: conjunct split order, the lead / deferred
+#   plan, definite-TRUE masks (an UNKNOWN row with a set data bit is
+#   dropped), survivor composition, and the staged decode against the
+#   one-shot predicate on a file (selective lead, declined lead handed off,
+#   NULLs), with the emitted projection's rows and column order; a declined
+#   selective decode keeping `cols` order; a lead keeping exactly half; a
+#   second row group.
+# - test_subrg_filter_gather_direct: the dict-select shapes, the dictionary
+#   keep-table, the codes compaction (uniform and mixed 16-code blocks, a
+#   tail, an out-of-range code, an empty dictionary, short buffers), the
+#   survivor gather.
+# - test_parquet_reader_direct: the footer-only facts (selection class per
+#   shape, byte range, statistics and all-match prunes), every decode against
+#   the rows written (subset, by name, selected rows, fused dictionary count
+#   and survivors, the codes feed, the hash-aggregate decode, the page-pruned
+#   decodes and their row alignment), the offset-width refinement and the
+#   read-ahead hint's advised bytes per mode and its range (a dictionary
+#   offset of 0 is no page); UINT_32 / UINT_64 dictionary chunks and a key
+#   with a null kept off the fused and codes paths; a nested footer declined.
+# - test_parquet_reader_factory_direct: the footer shared by every worker's
+#   reader, the mapping shared by clones, the footer-only reader.
+# - test_topn_rg_bounds_direct: the claim order both ways with ties, each
+#   decline, and UINT_32 bounds zero-extended.
+# - test_parked_morsel_share_direct: the admission table, and publish / take
+#   / wait exactly once, with the foreign witness.
+# - test_parked_morsel_share_concurrent: four workers publishing and draining
+#   at once; every morsel id taken exactly once.
+# - test_rg_prune_counter_direct: each of the four counters moves alone, and
+#   the reset.
+# - test_scan_chunk_sink_direct: drain order across flushes and merged
+#   workers, retraction of one row group, dictionary string chunks built on
+#   the drain, a refused codes column (the drain stays sound after it).
+# - test_subrg_columns_direct: scan builders keep INT32 / FLOAT32, aggregate
+#   builders widen, out-of-range codes and the tail on both resolve arms, the
+#   batch filter's three-valued result.
+# - test_subrg_scan_executor_direct: file order and types, a predicate with
+#   the statistics prune, a dictionary string column (and the abort with a
+#   predicate), a null past the first chunk retracted and decoded whole, two
+#   units in one fork, columns in the requested order after a declined
+#   selective decode, a UINT_32 dictionary chunk.
+# - test_subrg_split_decode_direct: the plan probe, page boundaries, row
+#   ranges alone and over shared dictionaries, refusals.
+# - test_band_producer_direct: SUM / COUNT per string key on every value arm
+#   (PLAIN, dictionary, zero copy), the band-carried filter, the abort on a
+#   null, the refusal of a non-string key, the band width.
+# - test_parquet_source_options_direct: the claim stride, the deferral, the
+#   partition ids, the dictionary count shape, hooks to capabilities, the
+#   sub-morsel cut and the emit of a count.
+# - test_parquet_source_direct: the source drained by 3 workers: file order
+#   (whole and cut morsels), the setup prune, a decode filter on each payload
+#   route with NULLs dropped, a file lacking the filter column read as NULL,
+#   claim units and order, the worker count refused.
+# - test_parquet_source_arms_direct: footer counts and all-match row groups
+#   (option on and off), dictionary-code counts and survivors with no whole
+#   decode, the staged filter, a dynamic join filter, a top-N boundary,
+#   parked sub-morsels, the cursor-grain route, the row-range split (fine and
+#   coarse) and the hash-aggregate payload.
+# - test_parquet_source_whole_decode_direct: every row, name, type and cell
+#   of the plain, cursor-grain and row-range routes equal to the whole
+#   decode (NULL-bearing, unsigned, TIMESTAMP-annotated and zero-dictionary-
+#   offset columns), coarse row-range morsels with no row lost or repeated,
+#   unsigned dictionary columns under a pushed count and filter, and a
+#   selective filter over a reordered projection under every gate.
+# - test_cursor_grain_feed_direct: the grain formula, every row once grain by
+#   grain on the copy and the move arm with their byte counters crossing, the
+#   refusal of strings and of a column that may hold a null, the gates.
+# - test_subrg_agg_executor_direct: the sub-row-group aggregate into a test
+#   sink with DuckDB's rules (NULL group, NaN largest): every value arm under
+#   INT64, INT32, composite and STRING keys with the chunk types checked, the
+#   whole-row-group decode (PLAIN key, early NULL), the abandoned run (late
+#   NULL, STRING-key refusal), every filter arm, the statistics prune, the
+#   chunk type rule with the footer's nullability, OPTIONAL columns without a
+#   NULL, columns the cursors refuse (a timestamp-only annotation, an unsigned
+#   key, a footer count the chunks disagree with), refused plans.
+# - test_chunk_arms_direct: the in-place PLAIN grain, the dictionary codes
+#   grain with a lockstep key, the multi-column grain ending at every page
+#   boundary and read through MorselView, the refusals.
+# - test_topn_late_mat_direct: the row-group stamp, the winners' row groups
+#   and their refusals, the route counters, the two phases against a full
+#   sort, and the stamp under a coarse row-range emit.
+mojo_library(
+    name = "komira_parquet_scan",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/komira_arrow:komira_arrow",
+        "//src/komira_async:komira_async",
+        "//src/komira_async_api:komira_async_api",
+        "//src/komira_atomic_alias:komira_atomic_alias",
+        "//src/komira_batch_eval:komira_batch_eval",
+        "//src/komira_buffer:komira_buffer",
+        "//src/komira_collections:komira_collections",
+        "//src/komira_column_kernels:komira_column_kernels",
+        "//src/komira_counters:komira_counters",
+        "//src/komira_dynamic_filter:komira_dynamic_filter",
+        "//src/komira_engine_runtime:komira_engine_runtime",
+        "//src/komira_exec_types:komira_exec_types",
+        "//src/komira_fs:komira_fs",
+        "//src/komira_host_profile:komira_host_profile",
+        "//src/komira_morsel:komira_morsel",
+        "//src/komira_parquet:komira_parquet",
+        "//src/komira_parquet_api:komira_parquet_api",
+        "//src/komira_plan_expr:komira_plan_expr",
+        "//src/komira_plan_stats:komira_plan_stats",
+        "//src/komira_scan_planning:komira_scan_planning",
+        "//src/komira_scan_source:komira_scan_source",
+        "//tools/build/mojo/runtime_paths:komira_runtime_paths",
+    ],
+    test_srcs = [
+        "tests/test_band_producer_direct.mojo",
+        "tests/test_chunk_arms_direct.mojo",
+        "tests/test_cursor_grain_feed_direct.mojo",
+        "tests/test_parked_morsel_share_concurrent.mojo",
+        "tests/test_parked_morsel_share_direct.mojo",
+        "tests/test_parquet_reader_direct.mojo",
+        "tests/test_parquet_reader_factory_direct.mojo",
+        "tests/test_parquet_source_arms_direct.mojo",
+        "tests/test_parquet_source_direct.mojo",
+        "tests/test_parquet_source_options_direct.mojo",
+        "tests/test_parquet_source_whole_decode_direct.mojo",
+        "tests/test_rg_prune_counter_direct.mojo",
+        "tests/test_scan_chunk_sink_direct.mojo",
+        "tests/test_staged_filter_direct.mojo",
+        "tests/test_subrg_agg_executor_direct.mojo",
+        "tests/test_subrg_columns_direct.mojo",
+        "tests/test_subrg_filter_gather_direct.mojo",
+        "tests/test_subrg_scan_executor_direct.mojo",
+        "tests/test_subrg_split_decode_direct.mojo",
+        "tests/test_topn_late_mat_direct.mojo",
+        "tests/test_topn_rg_bounds_direct.mojo",
+    ],
+    test_deps = [
+        "//src/tests/helpers/komira_test_parquet_file:komira_test_parquet_file",
+    ],
+    visibility = ["PUBLIC"],
+)

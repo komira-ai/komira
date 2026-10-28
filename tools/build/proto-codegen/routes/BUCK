@@ -28,7 +28,7 @@ mojo_routes_proto_library(
     messages = ":komira_routes_fixture_messages",
     outs = ["library_service_routes.mojo"],
     proto_deps = [
-        ":komira_routes_fixture_messages",
+        ":komira_routes_fixture_messages_gen",
         "//tools/vendor/googleapis:api_http",
     ],
     deps = [

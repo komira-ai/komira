@@ -37,22 +37,22 @@ fn put(comptime T: type, b: []u8, at: usize, v: T) void {
 /// PT_LOAD covering the file, PT_INTERP when `interp` is set, PT_DYNAMIC;
 /// then the interpreter path, the string table and the dynamic section.
 pub fn elf(a: std.mem.Allocator, s: Spec) ![]u8 {
-    var strtab = std.ArrayList(u8).init(a);
-    try strtab.append(0);
-    var dyn = std.ArrayList([2]u64).init(a);
+    var strtab = std.ArrayList(u8).empty;
+    try strtab.append(a, 0);
+    var dyn = std.ArrayList([2]u64).empty;
     const str = struct {
-        fn add(t: *std.ArrayList(u8), v: []const u8) !u64 {
+        fn add(al: std.mem.Allocator, t: *std.ArrayList(u8), v: []const u8) !u64 {
             const pos = t.items.len;
-            try t.appendSlice(v);
-            try t.append(0);
+            try t.appendSlice(al, v);
+            try t.append(al, 0);
             return pos;
         }
     };
-    for (s.needed) |n| try dyn.append(.{ 1, try str.add(&strtab, n) });
-    if (s.soname) |v| try dyn.append(.{ 14, try str.add(&strtab, v) });
-    if (s.rpath) |v| try dyn.append(.{ 15, try str.add(&strtab, v) });
-    if (s.runpath) |v| try dyn.append(.{ 29, try str.add(&strtab, v) });
-    if (s.extra.len != 0) _ = try str.add(&strtab, s.extra);
+    for (s.needed) |n| try dyn.append(a, .{ 1, try str.add(a, &strtab, n) });
+    if (s.soname) |v| try dyn.append(a, .{ 14, try str.add(a, &strtab, v) });
+    if (s.rpath) |v| try dyn.append(a, .{ 15, try str.add(a, &strtab, v) });
+    if (s.runpath) |v| try dyn.append(a, .{ 29, try str.add(a, &strtab, v) });
+    if (s.extra.len != 0) _ = try str.add(a, &strtab, s.extra);
 
     const nph: usize = if (s.interp != null) 3 else 2;
     const interp_at: usize = 64 + nph * 56;
@@ -99,8 +99,8 @@ pub fn elf(a: std.mem.Allocator, s: Spec) ![]u8 {
     phdr.w(b, ph, 2, dyn_at, dyn_len); // PT_DYNAMIC
     @memcpy(b[str_at..][0..strtab.items.len], strtab.items);
     var at = dyn_at;
-    try dyn.append(.{ 5, BASE + str_at }); // DT_STRTAB
-    try dyn.append(.{ 10, strtab.items.len }); // DT_STRSZ
+    try dyn.append(a, .{ 5, BASE + str_at }); // DT_STRTAB
+    try dyn.append(a, .{ 10, strtab.items.len }); // DT_STRSZ
     for (dyn.items) |e| {
         put(u64, b, at, e[0]);
         put(u64, b, at + 8, e[1]);
@@ -125,7 +125,7 @@ pub const Tree = struct {
     pub fn file(t: Tree, rel: []const u8, data: []const u8) !void {
         const p = try std.fs.path.join(t.a, &.{ t.dir, rel });
         try std.fs.cwd().makePath(std.fs.path.dirname(p).?);
-        try std.fs.cwd().writeFile(p, data);
+        try std.fs.cwd().writeFile(.{ .sub_path = p, .data = data });
     }
 
     /// A planted ELF file at `rel`.

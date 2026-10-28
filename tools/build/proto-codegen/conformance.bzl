@@ -6,11 +6,18 @@ argument.
 protocols and writes one Mojo file: every suite of those protocols as a
 generated module, and a `main` that prints the actuals file.
 
+`aws_conformance_drivers`: a macro. For each protocol, an
+`aws_conformance_driver_src` named `aws_conformance_driver_<protocol>_src`
+and a `mojo_binary` named `aws_conformance_driver_<protocol>` (`-` becomes
+`_`), so the drivers compile in parallel. It returns the labels of their
+`[run_check]` sub-targets, whose stdout is each protocol's actuals file.
+
 `xml_equiv_verdicts`: runs :xml-equiv-verdicts for the named protocols and
 writes its verdicts file (`<name>.tsv`).
 """
 
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
+load("@komira//tools/build/mojo:defs.bzl", "mojo_binary")
 
 def _impl(ctx):
     if not ctx.attrs.protocols:
@@ -45,6 +52,33 @@ _aws_conformance_driver_src = rule(
 )
 
 aws_conformance_driver_src = declares_docs(_aws_conformance_driver_src)
+
+def aws_conformance_drivers(protocols, corpus, ignore_list, deps):
+    """One driver source and one `mojo_binary` per protocol.
+
+    Returns the `[run_check]` label of each driver, in `protocols` order.
+    """
+    checks = []
+    names = []
+    for p in protocols:
+        name = "aws_conformance_driver_" + p.replace("-", "_")
+        if name in names:
+            fail("aws_conformance_drivers: `{}` names two protocols".format(name))
+        names.append(name)
+        aws_conformance_driver_src(
+            name = name + "_src",
+            corpus = corpus,
+            ignore_list = ignore_list,
+            protocols = [p],
+        )
+        mojo_binary(
+            name = name,
+            srcs = [":" + name + "_src"],
+            deps = deps,
+            optimization_level = "1",
+        )
+        checks.append(":" + name + "[run_check]")
+    return checks
 
 def _verdicts_impl(ctx):
     if not ctx.attrs.protocols:

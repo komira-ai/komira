@@ -101,8 +101,19 @@ def komira_cxx_toolchains(**overrides):
     attrs.update(overrides)
     zig_cxx_toolchain(
         name = "cxx",
-        # It builds for linux x86_64 only (see _LINUX_X86_64).
-        target_compatible_with = _LINUX_X86_64,  # komira-limit:cxx-toolchain-x86-64
+        # macOS arm64 is the platform that has both constraints (`is_macos_arm64`): the pinned
+        # zig, running on the linux execution platform, compiles and archives C for it
+        # (`macos`), and links nothing. A platform that is macOS on another CPU, or arm64 on
+        # another OS, matches neither key and stays incompatible. Every other platform
+        # builds for linux x86_64 only (see _LINUX_X86_64).
+        macos = select({
+            _TOOLCHAINS + "is_macos_arm64": True,
+            "DEFAULT": False,
+        }),
+        target_compatible_with = select({  # komira-limit:cxx-toolchain-x86-64
+            _TOOLCHAINS + "is_macos_arm64": [],
+            "DEFAULT": _LINUX_X86_64,
+        }),
         exec_compatible_with = _LINUX_X86_64,
         visibility = ["PUBLIC"],
         **attrs
@@ -139,7 +150,7 @@ RUST_TOOLCHAIN_ATTRS = dict(
 def komira_rust_toolchains(**overrides):
     """Declare `:rust`, the toolchain of rust_library and rust_binary, in the calling package.
 
-    rustc 1.85.0 from `komira//tools/build/toolchains/rust:sysroot`. Compiles
+    rustc 1.99.0 from `komira//tools/build/toolchains/rust:sysroot`. Compiles
     run on the linux execution platform, like Mojo compiles. rustc loads only glibc from the worker (everything
     else it needs is in the sysroot); links target glibc 2.34 through zig, so
     the binaries run on any worker with glibc 2.34 or newer. Each keyword in
