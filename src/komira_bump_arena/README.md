@@ -10,6 +10,30 @@ An O(1)-reset bump allocator over a fixed-capacity byte region, built on
 
 There are no root re-exports; import each name from its module.
 
+Hand out two blocks, see a request past the capacity declined, and rewind:
+
+<!-- mojo-hidden from std.testing import assert_equal, assert_true, assert_false -->
+```mojo
+from komira_bump_arena.bump_arena import ARENA_ALIGN, ARENA_DECLINE, BumpArena
+
+var arena = BumpArena(256)
+assert_equal(arena.capacity(), 256)
+
+var first = arena.alloc(10)
+var second = arena.alloc(100)
+assert_equal(first, 0)
+assert_equal(second, ARENA_ALIGN)  # each request is rounded up to 64 bytes
+assert_equal(arena.used(), 3 * ARENA_ALIGN)
+
+assert_false(arena.would_fit(100))
+assert_equal(arena.alloc(100), ARENA_DECLINE)  # never grows
+assert_equal(arena.used(), 3 * ARENA_ALIGN)
+
+arena.reset()
+assert_equal(arena.used(), 0)
+assert_true(arena.would_fit(256))
+```
+
 ## Build files
 
 This package is built with buildrules' `mojo_package` and packaged for mopm as `komira_bump_arena`, version 0.1.0
