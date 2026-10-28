@@ -55,11 +55,23 @@ from .semi_join_tasks import (
 )
 
 
+def _initial_capacity(n: Int) -> Int:
+    """Total slots for `n` build keys: a power of two holding them at a load
+    of at most 1/1.5 (at least 16 slots a partition)."""
+    var min_total_cap = max(Int(Float64(n) * 1.5) + 1, 16 * _NUM_PARTITIONS)
+    var total_cap = 1
+    while total_cap < min_total_cap:
+        total_cap *= 2
+    return total_cap
+
+
 struct SemiJoinHashSet(Movable):
     """Partitioned open-addressing hash set for semi/anti join key lookups:
     the distinct non-NULL INT64 keys of the build side (8 bytes a slot, no
-    row indices), load at most 1/1.5. The key INT64_MIN, which marks an empty
-    slot, is kept in `_has_min_key` instead of the table."""
+    row indices), at most 1/1.5 loaded when the keys spread evenly and never
+    more than 3/4 loaded in any partition (the table doubles when keys crowd
+    into one). The key INT64_MIN, which marks an empty slot, is kept in
+    `_has_min_key` instead of the table."""
 
     var _keys: List[Int64]
     var _part_cap: Int
@@ -77,31 +89,15 @@ struct SemiJoinHashSet(Movable):
         Args:
             keys: The build-side join key column (may contain duplicates).
         """
-        var n = keys.length
-        var min_total_cap = max(Int(Float64(n) * 1.5) + 1, 16 * _NUM_PARTITIONS)
-        var total_cap = 1
-        while total_cap < min_total_cap:
-            total_cap *= 2
-        var part_cap = total_cap // _NUM_PARTITIONS
-        var part_shift = 0
-        var tmp = part_cap
-        while tmp > 1:
-            tmp = tmp >> 1
-            part_shift += 1
-
-        self._part_cap = part_cap
-        self._part_shift = part_shift
-        self._part_mask = UInt64(part_cap - 1)
-        self._capacity = total_cap
-        self._mask = UInt64(part_cap - 1)
+        self._part_cap = 0
+        self._part_shift = 0
+        self._part_mask = 0
+        self._capacity = 0
+        self._mask = 0
         self._count = 0
         self._has_min_key = False
-        self._keys = List[Int64](capacity=total_cap)
-        self._keys.resize(unsafe_uninit_length=total_cap)
-
-        var keys_ptr = self._keys.unsafe_ptr()
-        for i in range(self._capacity):
-            (keys_ptr + i)[] = _EMPTY_KEY
+        self._keys = List[Int64]()
+        self._reset_table(_initial_capacity(keys.length), True)
         self._build_serial(keys)
 
         _ = keys  # keepalive
@@ -114,24 +110,47 @@ struct SemiJoinHashSet(Movable):
     ) raises:
         """Build a deduplicating hash set, PARALLEL for large build sides.
 
+        A build whose keys crowd into one partition (more than three quarters
+        of its slots) is built serially instead, into a table grown until no
+        partition is more than three quarters full; the token is then not
+        consulted.
+
         Args:
             keys: The build-side join key column (may contain duplicates).
             dispatcher: Caller-owned LocalDispatcher reference.
             cancel_token: Caller-supplied CancellationToken (consumed
                 by the parallel-build dispatch; drops on serial path).
         """
+        self._part_cap = 0
+        self._part_shift = 0
+        self._part_mask = 0
+        self._capacity = 0
+        self._mask = 0
+        self._count = 0
+        self._has_min_key = False
+        self._keys = List[Int64]()
         var n = keys.length
-        var min_total_cap = max(Int(Float64(n) * 1.5) + 1, 16 * _NUM_PARTITIONS)
-        var total_cap = 1
-        while total_cap < min_total_cap:
-            total_cap *= 2
+        if n >= _PARALLEL_BUILD_THRESHOLD:
+            # The parallel build's tasks initialise their own slots.
+            self._reset_table(_initial_capacity(n), False)
+            self._build_parallel_pooled(keys, dispatcher, cancel_token^)
+        else:
+            self._reset_table(_initial_capacity(n), True)
+            self._build_serial(keys)
+
+        _ = keys  # keepalive
+
+    def _reset_table(mut self, total_cap: Int, fill: Bool):
+        """Size the table to `total_cap` slots (a power of two) in
+        `_NUM_PARTITIONS` equal partitions, forgetting every key; with `fill`
+        every slot is marked empty (the parallel build's tasks do that
+        themselves)."""
         var part_cap = total_cap // _NUM_PARTITIONS
         var part_shift = 0
         var tmp = part_cap
         while tmp > 1:
             tmp = tmp >> 1
             part_shift += 1
-
         self._part_cap = part_cap
         self._part_shift = part_shift
         self._part_mask = UInt64(part_cap - 1)
@@ -141,17 +160,10 @@ struct SemiJoinHashSet(Movable):
         self._has_min_key = False
         self._keys = List[Int64](capacity=total_cap)
         self._keys.resize(unsafe_uninit_length=total_cap)
-
-        if n >= _PARALLEL_BUILD_THRESHOLD:
-            self._build_parallel_pooled(keys, dispatcher, cancel_token^)
-        else:
+        if fill:
             var keys_ptr = self._keys.unsafe_ptr()
-            for i in range(self._capacity):
+            for i in range(total_cap):
                 (keys_ptr + i)[] = _EMPTY_KEY
-            self._build_serial(keys)
-
-        _ = keys  # keepalive
-
 
     @always_inline
     def _keys_mut_ptr(mut self) -> UnsafePointer[Int64, origin_of(self)]:
@@ -161,13 +173,16 @@ struct SemiJoinHashSet(Movable):
         ]()
 
     @always_inline
-    def _insert_serial(mut self, key: Int64):
-        """Insert a key into the partitioned HT (single-threaded path)."""
+    def _insert_serial(mut self, key: Int64, mut part_keys: List[Int]) -> Bool:
+        """Insert a key into the partitioned table (single-threaded path).
+        False when the key is new and its partition already holds three
+        quarters of its slots: the caller grows the table and starts over, so
+        every partition keeps empty slots and every probe loop ends."""
         if key == _EMPTY_KEY:
             if not self._has_min_key:
                 self._has_min_key = True
                 self._count += 1
-            return
+            return True
         var h = _hash_key(key)
         var pid = _partition_of(h)
         var base = pid << self._part_shift
@@ -177,23 +192,36 @@ struct SemiJoinHashSet(Movable):
         while True:
             var existing = (keys_ptr + base + slot_in_part)[]
             if existing == _EMPTY_KEY:
+                if part_keys[pid] >= self._part_cap - (self._part_cap >> 2):
+                    return False
                 (keys_ptr + base + slot_in_part)[] = key
+                part_keys[pid] += 1
                 self._count += 1
-                return
+                return True
             if existing == key:
-                return
+                return True
             slot_in_part = (slot_in_part + 1) & Int(self._part_mask)
 
     def _build_serial(mut self, keys: PrimitiveArray[DType.int64]):
-        """Serial build: single-threaded scatter into the partitioned HT."""
+        """Serial build: single-threaded scatter into the partitioned table,
+        doubling the table and starting over while a partition fills up (keys
+        that crowd into one partition)."""
         var n = keys.length
         var has_nulls = keys.null_count != 0
         var key_ptr = keys._typed_ptr_ro()
-        for i in range(n):
-            if has_nulls and _arr_is_null(keys, i):
-                continue
-            var key = Int64((key_ptr + i)[])
-            self._insert_serial(key)
+        while True:
+            var part_keys = List[Int]()
+            part_keys.resize(_NUM_PARTITIONS, 0)
+            var fits = True
+            for i in range(n):
+                if has_nulls and _arr_is_null(keys, i):
+                    continue
+                if not self._insert_serial(Int64((key_ptr + i)[]), part_keys):
+                    fits = False
+                    break
+            if fits:
+                return
+            self._reset_table(self._capacity * 2, True)
 
     def _build_parallel_pooled(
         mut self,
@@ -243,6 +271,17 @@ struct SemiJoinHashSet(Movable):
             part_slab[p * cap_per_part + wi] = k
             part_counts[p] = wi + 1
             i += 1
+
+        # Staged counts include duplicates, so a partition staging more than
+        # three quarters of its slots may still hold fewer distinct keys; the
+        # serial build sizes the table by the distinct keys it meets.
+        var max_staged = 0
+        for q in range(_NUM_PARTITIONS):
+            max_staged = max(max_staged, part_counts[q])
+        if max_staged * 4 > self._part_cap * 3:
+            self._reset_table(self._capacity, True)
+            self._build_serial(keys)
+            return
 
         var part_dedup_counts = List[Int]()
         part_dedup_counts.resize(_NUM_PARTITIONS, 0)
@@ -513,7 +552,7 @@ struct SemiJoinHashSet(Movable):
                 var k = 0
                 while k < len(pm.morsels):
                     var mi = pm.morsels[k]
-                    ordered[mi] = pm.lists[k].copy()
+                    swap(ordered[mi], pm.lists[k])
                     k = k + 1
             w = w + 1
         _ = per_worker^

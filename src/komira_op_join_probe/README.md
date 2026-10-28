@@ -57,7 +57,9 @@ import from the modules.
 - `komira_op_join_probe.semi_join`: `SemiJoinHashSet`, the deduplicated set of
   build keys a single-INT64-key SEMI or ANTI join probes (serial or
   partitioned parallel build; serial, parallel and count-only probes). Every
-  INT64 value is a key, INT64_MIN included.
+  INT64 value is a key, INT64_MIN included. Keys that crowd into one of its
+  eight partitions grow the table (a partition stays at most 3/4 full); a
+  parallel build of such keys runs serially.
 - `komira_op_join_probe.join_key_extract`: `extract_join_key_columns_typed`
   (and `extract_join_key_columns_serial`, without a dispatcher) renders a
   batch's key columns into one Int64 key slot per row and key
