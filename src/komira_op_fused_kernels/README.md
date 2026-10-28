@@ -1,6 +1,6 @@
 # komira_op_fused_kernels
 
-INNER join kernels that fuse a probe with its output. The
+INNER join and aggregation kernels that fuse a probe with its output. The
 package root re-exports nothing; import from the modules.
 
 - `komira_op_fused_kernels.parallel_inner_probe`:
@@ -34,6 +34,12 @@ package root re-exports nothing; import from the modules.
   `fused_join_cannot_carry_output` (for a projection) and
   `fused_join_cannot_carry_batches` (for every column) say so, and each kernel
   raises on a NULL it is handed (`require_null_free_column`).
+- `komira_op_fused_kernels.flat_agg_output`: `build_flat_agg_output`, the
+  groups of a `FlatHashAggregator` (`komira_op_agg_hash`) as a RecordBatch:
+  the keys, then SUM, COUNT, MIN, MAX or MEAN per aggregate, each column of
+  its output field's type. A key or field type it does not produce for that
+  column raises; SUM, MIN and MAX into an integer field are exact up to 2^53
+  and raise on a value that is NaN, infinite or out of the field's range.
 
 ## Examples
 
@@ -43,8 +49,12 @@ from komira_arrow.arrow_types import ArrowType
 from komira_arrow.column import Column
 from komira_arrow.primitive_array import PrimitiveArray
 from komira_arrow.schema import Field, RecordBatchBuilder, SchemaBuilder
+from komira_collections.slab import Slab
+from komira_op_agg_hash.flat_hash_agg import FlatHashAggregator
 from komira_op_join_build.join import HashJoinBuilder
 from komira_op_join_build.join_probe_null_mask import ProbeNullMask
+from komira_plan_expr.agg_expr import AggExpr, AGG_COUNT, AGG_SUM
+from komira_op_fused_kernels.flat_agg_output import build_flat_agg_output
 from komira_op_fused_kernels.join_fused_gather import assemble_inner_join_fused_projected
 from komira_op_fused_kernels.join_fused_route import fused_join_cannot_carry_output
 from komira_op_fused_kernels.parallel_gate import should_parallelize
@@ -83,4 +93,28 @@ assert_equal(Int(joined.column_value(0, 0)), 20)
 assert_equal(Int(joined.column_value(1, 0)), 500)
 assert_equal(Int(joined.column_value(1, 2)), 700)
 assert_false(should_parallelize(joined.num_rows(), 4))
+
+# SUM(qty) and COUNT(*) per item id, from a hand-fed aggregator.
+var agg = FlatHashAggregator(num_keys=1, num_aggs=2, initial_capacity=16)
+for r in range(joined.num_rows()):
+    var e = agg.find_or_create_1(Int64(joined.column_value(1, r)))
+    agg._update_agg(e, 0, Float64(joined.column_value(0, r)))
+    agg._update_count_only(e, 1)
+var aggs = Slab[AggExpr]()
+aggs.append(AggExpr(AGG_SUM, None, None))
+aggs.append(AggExpr(AGG_COUNT, None, None))
+var out_schema = SchemaBuilder()
+out_schema.add_field(Field("price", ArrowType.INT64, False))
+out_schema.add_field(Field("sum_qty", ArrowType.INT64, False))
+out_schema.add_field(Field("n", ArrowType.INT64, False))
+var key_types: List[UInt8] = [ArrowType.INT64.type_id]
+var groups = build_flat_agg_output(agg, aggs, out_schema.build(), 1, key_types)
+assert_equal(groups.num_rows(), 2)
+for r in range(2):
+    if groups.column_value(0, r) == 500:
+        assert_equal(Int(groups.column_value(1, r)), 50)
+        assert_equal(Int(groups.column_value(2, r)), 2)
+    else:
+        assert_equal(Int(groups.column_value(1, r)), 40)
+        assert_equal(Int(groups.column_value(2, r)), 1)
 ```
