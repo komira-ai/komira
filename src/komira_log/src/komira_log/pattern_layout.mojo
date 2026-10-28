@@ -45,7 +45,7 @@ from komira_log.structured_log import (
 # binary was given: its `--log-format` value (`json` / `text`, empty when not
 # supplied) and whether it runs on a deployed platform (a flag the deployer
 # sets). `komira_log.structured_log.log_format_is_json` combines them; the
-# answer is parked in a one-word C cell (`engine/_log_holder_shim.c`) so every
+# answer is parked in a one-word C cell (`native/komira_log_holder.c`) so every
 # render site — the P1 `render_line` and the drain's runtime-module twin —
 # reads the SAME decision and neither threads it as a parameter two call sites
 # could disagree about. Until a binary selects, the layout is TEXT, which is

@@ -50,6 +50,7 @@ mopm_artifacts(
     name = "mopm_artifacts",
     natives = {
         "komira_libc": {"komira_libc_posix": "//src/komira_libc:native_komira_libc_posix"},
+        "komira_log": {"komira_log_holder": "//src/komira_log:native_komira_log_holder"},
         "komira_metrics": {"komira_metrics_ea_flag": "//src/komira_metrics:native_komira_metrics_ea_flag"},
     },
     packages = sorted(README_E2E_PACKAGES.keys()),
