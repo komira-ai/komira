@@ -314,12 +314,12 @@ def test_reset_clears_every_verdict_counter() raises:
         assert_equal(defer_verdict_count(c), 0, "reset code " + String(c))
 
 
-def test_chunk_refuses_lists_of_different_lengths() raises:
+def _refusal_reasons(build_lens: List[Int]) raises -> List[String]:
     var reasons = List[String]()
-    for build_len in [0, 1, 2, 4]:
+    for k in range(len(build_lens)):
         var p: List[Int] = [3, 1, 2]
         var b = List[Int]()
-        for i in range(build_len):
+        for i in range(build_lens[k]):
             b.append(i)
         try:
             var c = DeferredJoinChunk.deferred_chunk(
@@ -328,13 +328,29 @@ def test_chunk_refuses_lists_of_different_lengths() raises:
             _ = c^
         except e:
             reasons.append(_message_of(e))
-    assert_equal(len(reasons), 4, "every length mismatch is refused")
+    return reasons^
+
+
+def _assert_named_reasons(reasons: List[String], expected: Int) raises:
+    assert_equal(len(reasons), expected, "every length mismatch is refused")
     for i in range(len(reasons)):
         assert_true(
             reasons[i].find("build_idx holds") >= 0
             and reasons[i].find("probe_idx holds 3") >= 0,
             "named reason: " + reasons[i],
         )
+
+
+def test_chunk_refuses_longer_build_list() raises:
+    # A longer build list would narrow without reading out of bounds, so only
+    # the length check can refuse it.
+    var lens: List[Int] = [4]
+    _assert_named_reasons(_refusal_reasons(lens), 1)
+
+
+def test_chunk_refuses_shorter_build_lists() raises:
+    var lens: List[Int] = [0, 1, 2]
+    _assert_named_reasons(_refusal_reasons(lens), 3)
     # Equal lengths, including empty ones, are accepted.
     var e0 = DeferredJoinChunk.deferred_chunk(
         _batch(4), List[Int](), List[Int](), 0, 0, 0, True
@@ -349,7 +365,8 @@ def main() raises:
     suite.test[test_single_counters]()
     suite.test[test_chunk_pair_narrowed]()
     suite.test[test_chunk_pair_wide_keeps_8byte]()
-    suite.test[test_chunk_refuses_lists_of_different_lengths]()
+    suite.test[test_chunk_refuses_longer_build_list]()
+    suite.test[test_chunk_refuses_shorter_build_lists]()
     suite.test[test_narrowing_at_and_around_the_bound]()
     suite.test[test_narrowing_counts_only_what_it_wrote]()
     suite.test[test_reset_clears_all_four_nt_counters]()
