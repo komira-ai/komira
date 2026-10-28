@@ -11,6 +11,9 @@
 #     either order of workers: the claim counter stops at the morsel that failed.
 #     The sink is neither combined nor finalized nor read, and it is destroyed.
 #   * A source that raises (a decode error) fails the segment the same way.
+#   * When two failures are recorded, the first is the one the run keeps.
+#   * A cancel stops an operator that is still emitting chunks before it asks
+#     for the next.
 #   * A sink whose memory grow is denied fails the segment with the denial named;
 #     the rows already held stay charged, the rows of the denied morsel do not,
 #     and nothing is combined or read.
@@ -23,6 +26,7 @@ from std.testing import TestSuite, assert_equal, assert_true
 
 from komira_async_api.parallel_dispatch import ParallelDispatch
 from komira_async_api.token import CancellationToken
+from komira_collections.slab import Slab
 from komira_pipeline_exec.fake_builder import (
     FROM_CURSOR,
     FakeBuilder,
@@ -33,12 +37,19 @@ from komira_pipeline_exec.fake_builder import (
 from komira_pipeline_exec.fake_dispatch import InlineDispatch, ReverseDispatch
 from komira_pipeline_exec.fake_members import (
     OP_CANCEL_AT,
+    OP_REPEAT,
+    FakeOp,
+    FakeSink,
+    FakeSource,
+    SOURCE_CURSOR,
     OP_FAIL_AT,
 )
 from komira_pipeline_exec.fake_support import (
     SLOT_COMBINES,
     SLOT_CONSUMED_MORSELS,
     SLOT_CURSOR,
+    SLOT_EXECUTES,
+    Tally,
     SLOT_EOF_SEEN,
     SLOT_FINALIZES,
     SLOT_GROW_DENIED,
@@ -48,6 +59,7 @@ from komira_pipeline_exec.fake_support import (
 )
 from komira_pipeline_exec.published_outputs import PublishedOutputs
 from komira_pipeline_exec.run_segment import run_segment
+from komira_pipeline_exec.segment_task import SegmentRun
 
 
 def _expect_failure[
@@ -100,7 +112,7 @@ def test_a_raising_operator_fails_the_segment_and_stops_the_others() raises:
     _nothing_after_the_failure(b)
 
 
-def test_the_first_error_wins_whichever_worker_ran_first() raises:
+def test_the_same_error_comes_back_whichever_worker_ran_first() raises:
     var b = FakeBuilder()
     _ = b.add(_failing_operator_script())
     var d = ReverseDispatch()
@@ -163,6 +175,45 @@ def test_the_callers_cancel_stops_the_other_workers() raises:
     _nothing_after_the_failure(b)
 
 
+def test_a_second_error_is_dropped() raises:
+    var run = SegmentRun[FakeSource, FakeOp, FakeSink](
+        FakeSource(SOURCE_CURSOR, 1, 1, Tally()),
+        Slab[FakeOp](),
+        FakeSink(Tally()),
+        2,
+        0,
+        CancellationToken.new(),
+    )
+    assert_true(not run.should_stop())
+    run.fail(Error("first failure"))
+    run.fail(Error("second failure"))
+    assert_true(run.should_stop())
+    var kept = run.pipeline.take_error()
+    assert_true(Bool(kept))
+    var text = String(kept.take().to_error())
+    assert_true("first failure" in text, text)
+    assert_true("second failure" not in text, text)
+
+
+def test_a_cancel_stops_an_operator_that_is_still_emitting() raises:
+    var ops = List[FakeOpSpec]()
+    ops.append(FakeOpSpec(OP_REPEAT, 5))
+    ops.append(FakeOpSpec(OP_CANCEL_AT, 2))
+    var b = FakeBuilder()
+    _ = b.add(FakeScript(FROM_CURSOR, n_morsels=3, rows=2, ops=ops^))
+    var token = CancellationToken.new()
+    b.cancel_token = Optional[CancellationToken](token.clone())
+    var d = InlineDispatch()
+    _expect_failure(
+        d, b, 1, token, "the query was cancelled: fake operator cancelled"
+    )
+    # The repeating operator ran once and its cancelling successor once; the
+    # four chunks still to come were never asked for.
+    assert_equal(b.tally(0).get(SLOT_EXECUTES), 2)
+    assert_equal(b.tally(0).get(SLOT_CURSOR), 1)
+    _nothing_after_the_failure(b)
+
+
 def test_a_token_cancelled_before_the_run_builds_nothing() raises:
     var b = FakeBuilder()
     _ = b.add(FakeScript(FROM_CURSOR, n_morsels=10, rows=2))
@@ -177,9 +228,11 @@ def test_a_token_cancelled_before_the_run_builds_nothing() raises:
 def main() raises:
     var suite = TestSuite()
     suite.test[test_a_raising_operator_fails_the_segment_and_stops_the_others]()
-    suite.test[test_the_first_error_wins_whichever_worker_ran_first]()
+    suite.test[test_the_same_error_comes_back_whichever_worker_ran_first]()
     suite.test[test_a_raising_source_fails_the_segment]()
     suite.test[test_a_denied_memory_grow_fails_the_segment]()
     suite.test[test_the_callers_cancel_stops_the_other_workers]()
+    suite.test[test_a_second_error_is_dropped]()
+    suite.test[test_a_cancel_stops_an_operator_that_is_still_emitting]()
     suite.test[test_a_token_cancelled_before_the_run_builds_nothing]()
     suite^.run()

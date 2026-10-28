@@ -80,8 +80,10 @@ def _push[
     An operator that returns HAVE_MORE_OUTPUT is executed again on the same
     morsel until it does not; each chunk it leaves is pushed on through the
     rest of the chain before the next is asked for. A morsel with no rows is
-    dropped. Returns True when an operator reported FINISHED: the rows it held
-    still go on, and the worker stops claiming.
+    dropped. A cancel is checked before each further chunk is asked for, so a
+    cancel does not wait for an operator to finish emitting. Returns True when
+    the worker must stop claiming: an operator reported FINISHED (the rows it
+    held still go on) or the run was cancelled.
     """
     var finished = False
     var i = first_op
@@ -97,6 +99,8 @@ def _push[
                 )
                 if _push(run, wid, i + 1, chunk_morsel^):
                     return True
+            if run.should_stop():
+                return True
             rc = op.execute(m)
         if rc.is_finished():
             finished = True

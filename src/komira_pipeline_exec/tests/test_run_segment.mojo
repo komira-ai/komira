@@ -19,6 +19,9 @@
 #     is asked again, so each row arrives as many times as the operator emits it;
 #     an operator that reports FINISHED stops its worker's claims after passing
 #     the rows it held on.
+#   * An operator that takes every row out of a morsel ends that morsel's trip:
+#     the operators after it are not run on the empty morsel.
+#   * A per-worker fake source refuses a worker id it has no cursor for.
 #   * An empty source gives an empty output, and a segment needs a worker.
 
 from std.testing import TestSuite, assert_equal, assert_true
@@ -37,6 +40,7 @@ from komira_pipeline_exec.fake_dispatch import InlineDispatch, ReverseDispatch
 from komira_pipeline_exec.fake_members import (
     OP_ADD,
     OP_DROP_ODD,
+    OP_EMPTY,
     OP_FINISH_AT,
     OP_MUL,
     OP_REPEAT,
@@ -48,6 +52,7 @@ from komira_pipeline_exec.fake_support import (
     SLOT_CURSOR,
     SLOT_EOF_AT_COMBINE,
     SLOT_EOF_SEEN,
+    SLOT_EXECUTES,
     SLOT_FINALIZES,
     SLOT_PULLED_AFTER_EOF,
     SLOT_SINK_DROPS,
@@ -217,6 +222,22 @@ def test_have_more_output_pushes_each_chunk_on() raises:
     assert_equal(b.tally(0).get(SLOT_CONSUMED_MORSELS), 12)
 
 
+def test_an_operator_that_empties_a_morsel_ends_its_trip_down_the_chain() raises:
+    var ops = List[FakeOpSpec]()
+    ops.append(FakeOpSpec(OP_EMPTY))
+    ops.append(FakeOpSpec(OP_ADD, 1))
+    var b = FakeBuilder()
+    _ = b.add(FakeScript(FROM_CURSOR, n_morsels=5, rows=2, ops=ops^))
+    var d = InlineDispatch()
+    var got = _run(d, b, 2)
+    assert_equal(len(got), 0)
+    var t = b.tally(0)
+    # Only the first operator ran, once per morsel; the second never saw an
+    # empty morsel.
+    assert_equal(t.get(SLOT_EXECUTES), 5)
+    assert_equal(t.get(SLOT_CONSUMED_MORSELS), 0)
+
+
 def test_finished_operator_stops_the_claims_after_passing_its_rows() raises:
     var ops = List[FakeOpSpec]()
     ops.append(FakeOpSpec(OP_FINISH_AT, 4))
@@ -242,6 +263,17 @@ def test_an_empty_source_gives_an_empty_output() raises:
     assert_equal(t.get(SLOT_COMBINES), 1)
 
 
+def test_a_per_worker_source_refuses_more_workers_than_it_holds() raises:
+    var b = FakeBuilder()
+    _ = b.add(FakeScript(FROM_PER_WORKER, n_morsels=1, rows=1))
+    var d = InlineDispatch()
+    try:
+        _ = _run(d, b, 17)
+        assert_true(False, "worker 16 must be refused")
+    except e:
+        assert_true("got worker 16" in String(e), String(e))
+
+
 def test_a_segment_needs_a_worker() raises:
     var b = FakeBuilder()
     _ = b.add(FakeScript(FROM_CURSOR, n_morsels=1, rows=1))
@@ -262,7 +294,9 @@ def main() raises:
     suite.test[test_operator_chain_runs_in_order_for_each_morsel]()
     suite.test[test_filtered_empty_morsels_are_dropped]()
     suite.test[test_have_more_output_pushes_each_chunk_on]()
+    suite.test[test_an_operator_that_empties_a_morsel_ends_its_trip_down_the_chain]()
     suite.test[test_finished_operator_stops_the_claims_after_passing_its_rows]()
     suite.test[test_an_empty_source_gives_an_empty_output]()
+    suite.test[test_a_per_worker_source_refuses_more_workers_than_it_holds]()
     suite.test[test_a_segment_needs_a_worker]()
     suite^.run()

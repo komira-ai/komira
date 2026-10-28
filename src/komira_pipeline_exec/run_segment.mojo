@@ -74,6 +74,8 @@ def run_segment[
     var err = run.pipeline.take_error()
     if err:
         raise err.take().to_error()
+    # A cancel that lands after every worker finished normally still fails the
+    # run: the caller asked to stop, so a finished result is not returned.
     if run.token.is_cancelled():
         raise cancelled_error(run.token)
     if run.pipeline.is_cancelled():

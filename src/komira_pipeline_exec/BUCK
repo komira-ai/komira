@@ -15,9 +15,10 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #                                 worker, the operator chain, combine once
 #                                 after every worker, a worker count of one to
 #                                 seven.
-# test_run_segment_failures       the first error wins, cancel stops the other
+# test_run_segment_failures       a second error is dropped, cancel stops the other
 #                                 workers, a denied memory grow fails the query,
 #                                 a caller's cancel, no output after a failure.
+# test_run_segment_concurrent     one segment on the runtime's threaded dispatcher.
 # test_run_plan                   segments in dependency order, independent
 #                                 segments, a published output reaching its
 #                                 dependent, a failed segment stopping the rest.
@@ -37,9 +38,11 @@ mojo_library(
         "//src/komira_plan_stats:komira_plan_stats",
         "//src/komira_scan_source:komira_scan_source",
     ],
+    test_deps = ["//src/komira_async:komira_async"],
     test_srcs = [
         "tests/test_edge_policy_and_ready_set.mojo",
         "tests/test_run_plan.mojo",
+        "tests/test_run_segment_concurrent.mojo",
         "tests/test_run_segment.mojo",
         "tests/test_run_segment_failures.mojo",
         "tests/test_variants.mojo",

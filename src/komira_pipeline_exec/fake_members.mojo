@@ -36,6 +36,7 @@ from .fake_support import (
     SLOT_FINALIZES,
     SLOT_GROW_DENIED,
     SLOT_GROW_HELD,
+    SLOT_HOOKS_SEEN,
     SLOT_PER_WORKER_CURSOR,
     SLOT_PER_WORKER_EOF,
     SLOT_PULLED_AFTER_EOF,
@@ -93,6 +94,13 @@ struct FakeSource(MorselSourceImpl):
     def next_morsel(self, worker_id: Int) raises -> Optional[Morsel]:
         var key: Int
         if self.mode == SOURCE_PER_WORKER:
+            if worker_id < 0 or worker_id >= MAX_FAKE_WORKERS:
+                raise Error(
+                    "FakeSource: a per-worker source holds "
+                    + String(MAX_FAKE_WORKERS)
+                    + " workers, got worker "
+                    + String(worker_id)
+                )
             var j = self.tally.add(SLOT_PER_WORKER_CURSOR + worker_id, 1)
             if j >= self.n_morsels:
                 _note_eof(self.tally, worker_id)
@@ -123,6 +131,18 @@ struct FakeSource(MorselSourceImpl):
 
     def capabilities(self) -> SourceCapabilities:
         return SourceCapabilities()
+
+    def set_bypass_columns(mut self, cols: List[Int]) -> None:
+        _ = self.tally.add(SLOT_HOOKS_SEEN, 1)
+
+    def set_dict_preservation(mut self, on: Bool) -> None:
+        _ = self.tally.add(SLOT_HOOKS_SEEN, 2)
+
+    def set_prefetch_enabled(mut self, on: Bool) -> None:
+        _ = self.tally.add(SLOT_HOOKS_SEEN, 4)
+
+    def set_count_only(mut self, on: Bool) -> None:
+        _ = self.tally.add(SLOT_HOOKS_SEEN, 8)
 
 
 struct FakeBatchSource(MorselSourceImpl):
@@ -185,6 +205,10 @@ comptime OP_FAIL_AT = 6
 """Raises on the `arg`-th execute of the tally."""
 comptime OP_CANCEL_AT = 7
 """Cancels its token on the `arg`-th execute of the tally."""
+comptime OP_EMPTY = 8
+"""Takes every row out of the morsel and still reports NEED_MORE_INPUT."""
+comptime OP_FAIL_FROM = 9
+"""Raises on the `arg`-th execute of the tally and on every one after it."""
 
 
 struct FakeOp(MorselOperatorImpl):
@@ -242,6 +266,13 @@ struct FakeOp(MorselOperatorImpl):
         if self.kind == OP_FINISH_AT:
             if n == self.arg:
                 return ExecResult(FINISHED)
+            return ExecResult(NEED_MORE_INPUT)
+        if self.kind == OP_EMPTY:
+            morsel.replace_batch(RecordBatch())
+            return ExecResult(NEED_MORE_INPUT)
+        if self.kind == OP_FAIL_FROM:
+            if n >= self.arg:
+                raise Error("fake operator failed at execute " + String(n))
             return ExecResult(NEED_MORE_INPUT)
         if self.kind == OP_FAIL_AT:
             if n == self.arg:

@@ -13,6 +13,9 @@
 #     an adding member and a multiplying member gives different values.
 #   * A sink variant forwards the whole life of a sink to its member: sized,
 #     consumed by two workers, combined in worker id order, finalized and taken.
+#   * Each hook of the source trait that takes no pointer reaches the member of
+#     the slot: bypass columns, dictionary preservation, prefetch and count only
+#     each change what the member recorded.
 #   * The hook that sets rows per morsel and the decode-filter query reach the
 #     member's defaults without error.
 
@@ -31,6 +34,7 @@ from komira_pipeline_exec.fake_members import (
 )
 from komira_pipeline_exec.fake_support import (
     SLOT_CONSUMED_ROWS,
+    SLOT_HOOKS_SEEN,
     Tally,
     batch_values,
     fake_values,
@@ -94,6 +98,19 @@ def test_source_variant_calls_the_member_of_its_slot() raises:
 
     second.set_morsel_rows(16)
     assert_false(second.has_decode_filter())
+
+
+def test_source_variant_forwards_every_hook_that_takes_no_pointer() raises:
+    var tally = Tally()
+    var src = Sources.first(FakeSource(SOURCE_CURSOR, 1, 1, tally.share()))
+    src.set_bypass_columns(List[Int]())
+    assert_equal(tally.get(SLOT_HOOKS_SEEN), 1)
+    src.set_dict_preservation(True)
+    assert_equal(tally.get(SLOT_HOOKS_SEEN), 3)
+    src.set_prefetch_enabled(True)
+    assert_equal(tally.get(SLOT_HOOKS_SEEN), 7)
+    src.set_count_only(True)
+    assert_equal(tally.get(SLOT_HOOKS_SEEN), 15)
 
 
 def test_unused_source_slot_raises() raises:
@@ -190,6 +207,7 @@ def test_unused_sink_slot_raises() raises:
 def main() raises:
     var suite = TestSuite()
     suite.test[test_source_variant_calls_the_member_of_its_slot]()
+    suite.test[test_source_variant_forwards_every_hook_that_takes_no_pointer]()
     suite.test[test_unused_source_slot_raises]()
     suite.test[test_operator_variant_runs_the_member_of_its_slot]()
     suite.test[test_unused_operator_slot_raises]()

@@ -8,10 +8,13 @@
 # tests the tag and calls the member. There is no function pointer, no erased
 # box and no pointer in a signature.
 #
-# The hooks that take a pointer in the trait (`set_cancel_flag`,
-# `set_expr_pool`, `set_dynamic_filter`) keep the trait's no-op defaults here;
-# the members that need them are driven through the safe hooks below and the
-# builder that constructs them.
+# Every hook of the trait that takes no pointer is forwarded to the member
+# (`set_projection`, `set_decode_filter`, `set_pushed_predicate`,
+# `set_bypass_columns`, `set_dict_preservation`, `set_morsel_rows`,
+# `set_prefetch_enabled`, `set_count_only`). The three that take a pointer
+# (`set_cancel_flag`, `set_expr_pool`, `set_dynamic_filter`) keep the trait's
+# no-op defaults here; a member that needs them is given them by the builder
+# that constructs it, before it is wrapped in the variant.
 
 from komira_arrow.schema import Schema
 from komira_morsel.morsel import Morsel
@@ -146,3 +149,35 @@ struct SourceVariant[
             self._b.value().set_morsel_rows(rows)
         else:
             self._c.value().set_morsel_rows(rows)
+
+    def set_bypass_columns(mut self, cols: List[Int]) -> None:
+        if self._tag == SOURCE_TAG_FIRST:
+            self._a.value().set_bypass_columns(cols)
+        elif self._tag == SOURCE_TAG_SECOND:
+            self._b.value().set_bypass_columns(cols)
+        else:
+            self._c.value().set_bypass_columns(cols)
+
+    def set_dict_preservation(mut self, on: Bool) -> None:
+        if self._tag == SOURCE_TAG_FIRST:
+            self._a.value().set_dict_preservation(on)
+        elif self._tag == SOURCE_TAG_SECOND:
+            self._b.value().set_dict_preservation(on)
+        else:
+            self._c.value().set_dict_preservation(on)
+
+    def set_prefetch_enabled(mut self, on: Bool) -> None:
+        if self._tag == SOURCE_TAG_FIRST:
+            self._a.value().set_prefetch_enabled(on)
+        elif self._tag == SOURCE_TAG_SECOND:
+            self._b.value().set_prefetch_enabled(on)
+        else:
+            self._c.value().set_prefetch_enabled(on)
+
+    def set_count_only(mut self, on: Bool) -> None:
+        if self._tag == SOURCE_TAG_FIRST:
+            self._a.value().set_count_only(on)
+        elif self._tag == SOURCE_TAG_SECOND:
+            self._b.value().set_count_only(on)
+        else:
+            self._c.value().set_count_only(on)

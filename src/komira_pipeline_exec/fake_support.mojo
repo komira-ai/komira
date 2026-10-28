@@ -51,6 +51,9 @@ comptime SLOT_GROW_DENIED = 12
 """How many grows a sink's budget denied."""
 comptime SLOT_BATCH_CURSOR = 13
 """The shared claim cursor of a published-batch source."""
+comptime SLOT_HOOKS_SEEN = 14
+"""Sum of the hooks a source was told of: 1 bypass columns, 2 dictionary
+preservation, 4 prefetch, 8 count only."""
 comptime SLOT_PER_WORKER_EOF = 16
 """First of 16 cells: cell `SLOT_PER_WORKER_EOF + w` is 1 once worker w saw None."""
 comptime SLOT_PER_WORKER_CURSOR = 32

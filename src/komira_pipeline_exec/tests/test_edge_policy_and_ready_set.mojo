@@ -193,6 +193,10 @@ def test_check_plan_refuses_a_plan_it_cannot_run() raises:
     outside.append(_seg(0, 4))
     _expect_refusal(outside, "segment 0 depends on segment 4")
 
+    var one_past = List[SegmentDescPod]()
+    one_past.append(_seg(0, 1))
+    _expect_refusal(one_past, "segment 0 depends on segment 1, which is not")
+
     var itself = List[SegmentDescPod]()
     itself.append(_seg(0, 0))
     _expect_refusal(itself, "segment 0 depends on itself")
