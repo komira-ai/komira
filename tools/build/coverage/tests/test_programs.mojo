@@ -627,6 +627,8 @@ def main() raises:
     test_shapes_that_are_refused()
     test_entries_must_name_and_path()
     test_paths_must_be_relative_mojo_files()
+    test_quoting_and_nesting_in_the_manifest()
+    test_a_package_without_a_manifest_has_no_programs()
     test_the_error_names_the_line()
     test_program_nothing_runs_is_a_finding()
     test_program_a_test_runs_is_excluded_without_a_finding()
