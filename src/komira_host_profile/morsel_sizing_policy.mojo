@@ -26,18 +26,19 @@
 #   * BULK_SCAN  -- 8.0x -- a scan that only collects
 #
 # The fork grain and the fan-out cap are decided at dispatch time from exact
-# facts (the input's size and the pool), not recorded (`fan_out_grain.mojo`).
+# facts (the input's size and the pool), not recorded
+# (`komira_engine_runtime.fan_out_grain`).
 # The L1-chunk predicate is in `l1_chunk_sizing.mojo`.
 # =============================================================================
 
 from komira_arrow.schema import Schema
-from komira_engine_runtime.hardware import (
+from komira_host_profile.hardware import (
     HardwareProfile,
     E_CORE_L2_BUDGET_NUM,
     E_CORE_L2_BUDGET_DEN,
 )
-from komira_engine_runtime.host_profile import HostProfile
-from komira_engine_runtime.l1_chunk_sizing import (
+from komira_host_profile.host_profile import HostProfile
+from komira_host_profile.l1_chunk_sizing import (
     L1_CHUNK_MIN_ROWS,
     L1_CHUNK_BUDGET_NUM,
     L1_CHUNK_BUDGET_DEN,
@@ -231,17 +232,6 @@ struct MorselSizingPolicy(Copyable, Movable, Deinitable):
         """The policy of a host: its recorded hardware profile and the shipped
         fold arms. Reads only `host`; it never probes the machine."""
         return MorselSizingPolicy(host.hardware.copy(), AggFoldConfig())
-
-    @staticmethod
-    def from_defaults() -> MorselSizingPolicy:
-        """Construct from the Apple-Silicon-shaped fallback profile.
-
-        For tests that want a policy without a host profile. A host lowers
-        with `for_host`.
-        """
-        return MorselSizingPolicy(
-            HardwareProfile.defaults(), AggFoldConfig()
-        )
 
     # --- Formula ----------------------------------------------------------
 
