@@ -103,6 +103,7 @@ zig_test(
     src = ".github/actions/buck2-farm/action_test.zig",
     data = {
         "action.yml": ".github/actions/buck2-farm/action.yml",
+        "pr.yml": ".github/workflows/pr.yml",
         "fixtures": "//tools/build/ci:assert_remote_fixtures",
     },
     exec_tools = {
