@@ -1,0 +1,12 @@
+[package]
+name = "komira_kg_mode"
+version = "0.1.0"
+description = "The extraction-mode vocabulary the graph spec and the extractor selection share: two modes, rules (the default) and model, a parse of a name that falls back to rules, and a normalisation of a stored integer that never yields model unless it is model."
+license = "Apache-2.0"
+repository = "https://github.com/komira-ai/komira"
+readme = "README.md"
+mojo = ["1.0.0"]
+
+[targets]
+lib = { path = "src/komira_kg_mode" }
+tests = ["tests"]
