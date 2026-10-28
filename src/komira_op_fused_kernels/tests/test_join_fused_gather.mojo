@@ -510,5 +510,107 @@ def test_projected_unknown_name_raises() raises:
     assert_true(raised)
 
 
+def _sliced_probe_keys(keys: List[Int]) raises -> PrimitiveArray[DType.int64]:
+    """`keys` as a slice with a non-zero offset: five leading keys that match
+    nothing, then `keys`."""
+    var all = List[Int]()
+    for i in range(5):
+        all.append(1000 + i)
+    for i in range(len(keys)):
+        all.append(keys[i])
+    return _key_array(all).slice(5, len(keys))
+
+
+def _assert_sliced_key_rows(got: RecordBatch, lk: List[Int]) raises:
+    """Build keys are 0..9, one row each; the rows that match are those whose
+    key is below 10, in probe-row order: left columns at the probe row, right
+    columns at the build row (`c` = 7*row + 1)."""
+    var r = 0
+    for p in range(len(lk)):
+        if lk[p] >= 10:
+            continue
+        assert_equal(_cell(got, 0, r), lk[p], "probe key of row " + String(r))
+        assert_equal(_cell(got, 1, r), 10 * p, "left cell of row " + String(r))
+        assert_equal(_cell(got, 5, r), 7 * lk[p] + 1, "right cell of row " + String(r))
+        r += 1
+    assert_equal(got.num_rows(), r)
+
+
+def _narrow_out_schema() -> Schema:
+    """`_out_schema` with the INT64 column `c` declared INT32."""
+    var sb = SchemaBuilder()
+    sb.add_field(Field("id", ArrowType.INT64, False))
+    sb.add_field(Field("a", ArrowType.INT32, False))
+    sb.add_field(Field("b", ArrowType.INT16, False))
+    sb.add_field(Field("x", ArrowType.FLOAT64, False))
+    sb.add_field(Field("id_right", ArrowType.INT64, False))
+    sb.add_field(Field("c", ArrowType.INT32, False))
+    sb.add_field(Field("d", ArrowType.INT32, False))
+    return sb.build()
+
+
+def test_full_probes_a_sliced_key_array_at_its_offset() raises:
+    var lk = _dup_keys(40, 12)
+    var rk = _dup_keys(10, 10)
+    var left = _left(lk)
+    var right = _right(rk)
+    var jb = HashJoinBuilder.build(_key_array(rk))
+    var probe = _sliced_probe_keys(lk)
+    assert_true(probe.offset != 0)
+    var got = assemble_inner_join_fused(
+        left, right, jb, probe, _out_schema(), ProbeNullMask(probe, probe.length)
+    )
+    _assert_sliced_key_rows(got, lk)
+
+
+def test_projected_probes_a_sliced_key_array_at_its_offset() raises:
+    var lk = _dup_keys(40, 12)
+    var rk = _dup_keys(10, 10)
+    var left = _left(lk)
+    var right = _right(rk)
+    var jb = HashJoinBuilder.build(_key_array(rk))
+    var probe = _sliced_probe_keys(lk)
+    var names: List[String] = ["id", "a", "c"]
+    var got = assemble_inner_join_fused_projected(
+        left, right, jb, probe, names, left, right, True,
+        ProbeNullMask(probe, probe.length),
+    )
+    var r = 0
+    for p in range(len(lk)):
+        if lk[p] >= 10:
+            continue
+        assert_equal(_cell(got, 0, r), lk[p])
+        assert_equal(_cell(got, 1, r), 10 * p)
+        assert_equal(_cell(got, 2, r), 7 * lk[p] + 1)
+        r += 1
+    assert_equal(got.num_rows(), r)
+    # The match count alone reads the same keys.
+    var none = List[String]()
+    var counted = assemble_inner_join_fused_projected(
+        left, right, jb, probe, none, left, right, True,
+        ProbeNullMask(probe, probe.length),
+    )
+    assert_equal(counted.num_rows(), r)
+
+
+def test_full_raises_when_an_output_type_changes_the_cell_width() raises:
+    var lk = _dup_keys(20, 5)
+    var rk = _dup_keys(10, 5)
+    var left = _left(lk)
+    var right = _right(rk)
+    var probe = _key_array(lk)
+    var jb = HashJoinBuilder.build(_key_array(rk))
+    var raised = False
+    try:
+        _ = assemble_inner_join_fused(
+            left, right, jb, probe, _narrow_out_schema(),
+            ProbeNullMask(probe, probe.length),
+        )
+    except e:
+        raised = True
+        assert_true("cell width" in String(e), String(e))
+    assert_true(raised)
+
+
 def main() raises:
     TestSuite.discover_tests[__functions_in_module()]().run()

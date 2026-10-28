@@ -35,7 +35,6 @@ from komira_arrow.schema import (
     Schema,
     SchemaBuilder,
 )
-from komira_column_kernels.compiler_helpers import element_size
 from komira_op_join_build.join import HashJoinBuilder, _hash_join_key, _PREFETCH_DISTANCE
 from komira_op_join_build.join_layout_counter import join_layout_record_probe
 from komira_op_join_build.join_probe_null_mask import ProbeNullMask
@@ -46,6 +45,7 @@ from .join_fused_gather import (
     _column_values,
     _finish_column,
     _fixed_width_buffers,
+    _require_same_width,
     _grow_fixed_width_buffers,
 )
 from .join_fused_route import require_null_free_column
@@ -154,13 +154,23 @@ def assemble_inner_join_chunked(
     for c in range(total_out):
         if c < left_ncols:
             require_null_free_column(left, c, "assemble_inner_join_chunked")
-            var es = element_size(left.schema.field_arrow_type(c))
+            var es = _require_same_width(
+                left.schema.field_arrow_type(c),
+                output_schema.field_arrow_type(c),
+                c,
+                "assemble_inner_join_chunked",
+            )
             elem_sizes.append(es)
             left_src.append(_column_values(left, c, es))
         else:
             var rc = c - left_ncols
             require_null_free_column(right, rc, "assemble_inner_join_chunked")
-            var es = element_size(right.schema.field_arrow_type(rc))
+            var es = _require_same_width(
+                right.schema.field_arrow_type(rc),
+                output_schema.field_arrow_type(c),
+                c,
+                "assemble_inner_join_chunked",
+            )
             elem_sizes.append(es)
             right_src.append(_column_values(right, rc, es))
 

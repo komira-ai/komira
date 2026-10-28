@@ -69,6 +69,20 @@ def _pool_width(mut dispatcher: LocalDispatcher[NoopSink]) -> Int:
     return n
 
 
+def _check_probe_rows(
+    keys: PrimitiveArray[DType.int64], num_probe_rows: Int
+) raises:
+    """Raise unless `num_probe_rows` lies in `[0, keys.length]`."""
+    if num_probe_rows < 0 or num_probe_rows > keys.length:
+        raise Error(
+            "parallel inner probe: num_probe_rows "
+            + String(num_probe_rows)
+            + " is outside the key array of "
+            + String(keys.length)
+            + " rows"
+        )
+
+
 def _move_worker_pairs(
     mut worker_build: Slab[List[Int]],
     mut worker_probe: Slab[List[Int]],
@@ -328,6 +342,7 @@ def parallel_inner_join_probe_into(
         probe_nulls: Which probe rows hold a NULL key, built once by the caller
             from `left_key_arr`.
     """
+    _check_probe_rows(left_key_arr, num_probe_rows)
     var pool_n = _pool_width(dispatcher)
     var morsel_size = parallel_fork_grain(num_probe_rows, pool_n)
     var num_morsels = (num_probe_rows + morsel_size - 1) // morsel_size
@@ -337,7 +352,9 @@ def parallel_inner_join_probe_into(
     )
 
     if num_morsels <= 1:
-        join_builder.probe_inner_into(left_key_arr, build_matches, probe_matches)
+        join_builder.probe_inner_into(
+            left_key_arr.slice(0, num_probe_rows), build_matches, probe_matches
+        )
         return
 
     var per_worker = _estimated_pairs_per_worker(
@@ -549,6 +566,7 @@ def parallel_perfect_inner_probe_into(
 
     With one morsel this is the serial `PerfectHashJoin.probe_inner_into`,
     which reads the key column's own validity."""
+    _check_probe_rows(left_key_arr, num_probe_rows)
     var pool_n = _pool_width(dispatcher)
     var morsel_size = parallel_fork_grain(num_probe_rows, pool_n)
     var num_morsels = (num_probe_rows + morsel_size - 1) // morsel_size
@@ -558,7 +576,9 @@ def parallel_perfect_inner_probe_into(
     )
 
     if num_morsels <= 1:
-        perfect.probe_inner_into(left_key_arr, build_matches, probe_matches)
+        perfect.probe_inner_into(
+            left_key_arr.slice(0, num_probe_rows), build_matches, probe_matches
+        )
         return
 
     var per_worker = max((num_probe_rows + num_workers - 1) // num_workers, 1024)

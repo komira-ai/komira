@@ -199,5 +199,116 @@ def test_unsupported_aggregate_raises() raises:
     assert_true(raised)
 
 
+def _raises_with(
+    agg: FlatHashAggregator,
+    funcs: List[UInt8],
+    names: List[String],
+    types: List[ArrowType],
+    num_keys: Int,
+    key_types: List[UInt8],
+    needle: String,
+) raises:
+    var raised = False
+    try:
+        _ = build_flat_agg_output(
+            agg, _aggs(funcs), _schema(names, types), num_keys, key_types
+        )
+    except e:
+        raised = True
+        assert_true(needle in String(e), String(e))
+    assert_true(raised, "expected a raise containing: " + needle)
+
+
+def _one_group(value: Float64) -> FlatHashAggregator:
+    var agg = FlatHashAggregator(num_keys=1, num_aggs=1, initial_capacity=16)
+    _feed(agg, 1, value, 1)
+    return agg^
+
+
+def test_mean_into_an_integer_field_raises() raises:
+    var agg = _one_group(2.0)
+    var funcs: List[UInt8] = [AGG_MEAN]
+    var names: List[String] = ["k", "m"]
+    var types: List[ArrowType] = [ArrowType.INT64, ArrowType.INT64]
+    var kt: List[UInt8] = [ArrowType.INT64.type_id]
+    _raises_with(agg, funcs, names, types, 1, kt, "MEAN")
+
+
+def test_sum_into_a_float32_field_raises() raises:
+    var agg = _one_group(2.0)
+    var funcs: List[UInt8] = [AGG_SUM]
+    var names: List[String] = ["k", "s"]
+    var types: List[ArrowType] = [ArrowType.INT64, ArrowType.FLOAT32]
+    var kt: List[UInt8] = [ArrowType.INT64.type_id]
+    _raises_with(agg, funcs, names, types, 1, kt, "FLOAT64")
+
+
+def test_count_into_a_float_field_raises() raises:
+    var agg = _one_group(2.0)
+    var funcs: List[UInt8] = [AGG_COUNT]
+    var names: List[String] = ["k", "n"]
+    var types: List[ArrowType] = [ArrowType.INT64, ArrowType.FLOAT64]
+    var kt: List[UInt8] = [ArrowType.INT64.type_id]
+    _raises_with(agg, funcs, names, types, 1, kt, "COUNT")
+
+
+def test_key_of_another_type_raises() raises:
+    var agg = _one_group(2.0)
+    var funcs: List[UInt8] = [AGG_SUM]
+    var names: List[String] = ["k", "s"]
+    var types: List[ArrowType] = [ArrowType.INT16, ArrowType.FLOAT64]
+    var kt: List[UInt8] = [ArrowType.INT16.type_id]
+    _raises_with(agg, funcs, names, types, 1, kt, "neither INT32 nor INT64")
+
+
+def test_key_field_of_a_different_type_raises() raises:
+    var agg = _one_group(2.0)
+    var funcs: List[UInt8] = [AGG_SUM]
+    var names: List[String] = ["k", "s"]
+    var types: List[ArrowType] = [ArrowType.INT32, ArrowType.FLOAT64]
+    var kt: List[UInt8] = [ArrowType.INT64.type_id]
+    _raises_with(agg, funcs, names, types, 1, kt, "different type")
+
+
+def test_schema_narrower_than_the_output_raises() raises:
+    var agg = _one_group(2.0)
+    var funcs: List[UInt8] = [AGG_SUM, AGG_COUNT]
+    var names: List[String] = ["k", "s"]
+    var types: List[ArrowType] = [ArrowType.INT64, ArrowType.FLOAT64]
+    var kt: List[UInt8] = [ArrowType.INT64.type_id]
+    _raises_with(agg, funcs, names, types, 1, kt, "fewer than")
+
+
+def test_integer_output_that_does_not_fit_raises() raises:
+    var kt: List[UInt8] = [ArrowType.INT64.type_id]
+    var funcs: List[UInt8] = [AGG_SUM]
+    var names: List[String] = ["k", "s"]
+    # 3e9 does not fit an INT32 field.
+    var big = _one_group(3.0e9)
+    var i32: List[ArrowType] = [ArrowType.INT64, ArrowType.INT32]
+    _raises_with(big, funcs, names, i32, 1, kt, "INT32")
+    # 1e19 does not fit an INT64 field.
+    var huge = _one_group(1.0e19)
+    var i64: List[ArrowType] = [ArrowType.INT64, ArrowType.INT64]
+    _raises_with(huge, funcs, names, i64, 1, kt, "INT64")
+
+
+def test_min_of_a_group_with_no_value_raises_for_integers() raises:
+    """A group created but never updated has no minimum: an integer field has
+    no value to hold, a FLOAT64 field carries the accumulator's own value."""
+    var agg = FlatHashAggregator(num_keys=1, num_aggs=1, initial_capacity=16)
+    _ = agg.find_or_create_1(Int64(1))
+    var kt: List[UInt8] = [ArrowType.INT64.type_id]
+    var funcs: List[UInt8] = [AGG_MIN]
+    var names: List[String] = ["k", "m"]
+    var ints: List[ArrowType] = [ArrowType.INT64, ArrowType.INT64]
+    _raises_with(agg, funcs, names, ints, 1, kt, "INT64")
+    var floats: List[ArrowType] = [ArrowType.INT64, ArrowType.FLOAT64]
+    var got = build_flat_agg_output(
+        agg, _aggs(funcs), _schema(names, floats), 1, kt
+    )
+    assert_equal(got.num_rows(), 1)
+
+
 def main() raises:
     TestSuite.discover_tests[__functions_in_module()]().run()

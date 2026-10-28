@@ -132,6 +132,63 @@ def _column_values[
     return p + c._offset * es
 
 
+def _require_same_width(
+    source: ArrowType, output: ArrowType, col: Int, who: String
+) raises -> Int:
+    """The byte width of an output column's cells, which is its source
+    column's. Raise when the output type's width differs: the cells are
+    copied as they are, so a different width would put cells of one width
+    under a type of another."""
+    var es = element_size(source)
+    if element_size(output) != es:
+        raise Error(
+            who
+            + ": output column "
+            + String(col)
+            + " has a cell width of "
+            + String(element_size(output))
+            + " bytes, but its source column's is "
+            + String(es)
+        )
+    return es
+
+
+@always_inline
+def _prefetch_probe_ahead[
+    _mut: Bool, o: Origin[mut=_mut], //
+](
+    join_builder: HashJoinBuilder,
+    probe_key_ptr: UnsafePointer[Scalar[DType.int64], o],
+    probe_idx: Int,
+    num_probe: Int,
+    mask: UInt64,
+):
+    """The two-stage prefetch of the chain walk: the bucket of the row
+    `_PREFETCH_DISTANCE` ahead, then the chain head's key of the row half that
+    distance ahead."""
+    # SAFETY: the builder's lists, read-only for the call.
+    var ht_ptr = join_builder.hash_table.unsafe_ptr()
+    var bk_ptr = join_builder.build_keys.unsafe_ptr()
+    var kn_ptr = join_builder.key_next.unsafe_ptr()
+    if probe_idx + _PREFETCH_DISTANCE < num_probe:
+        var fk = Int64((probe_key_ptr + probe_idx + _PREFETCH_DISTANCE)[])
+        prefetch[params = PrefetchOptions().for_read().high_locality()](
+            (ht_ptr + Int(_hash_join_key(fk) & mask)).bitcast[Scalar[DType.int64]]()
+        )
+    if probe_idx + _PREFETCH_DISTANCE // 2 < num_probe:
+        var mk = Int64((probe_key_ptr + probe_idx + _PREFETCH_DISTANCE // 2)[])
+        var mc = (ht_ptr + Int(_hash_join_key(mk) & mask))[]
+        if mc != _CHAIN_END:
+            if join_builder._fused:
+                prefetch[params = PrefetchOptions().for_read().high_locality()](
+                    (kn_ptr + 2 * mc).bitcast[Scalar[DType.int64]]()
+                )
+            else:
+                prefetch[params = PrefetchOptions().for_read().high_locality()](
+                    (bk_ptr + mc).bitcast[Scalar[DType.int64]]()
+                )
+
+
 def _finish_column(
     mut bufs: Slab[OwnedAlignedBuffer],
     c: Int,
@@ -185,7 +242,8 @@ def assemble_inner_join_fused(
             caller from `probe_keys`.
 
     Raises:
-        If an output column holds a NULL or has no fixed byte width.
+        If an output column holds a NULL, has no fixed byte width, or its
+        output type has a different byte width than its source column's.
     """
     var left_ncols = left.num_columns()
     var right_ncols = right.num_columns()
@@ -200,13 +258,23 @@ def assemble_inner_join_fused(
     for c in range(total_out):
         if c < left_ncols:
             require_null_free_column(left, c, "assemble_inner_join_fused")
-            var es = element_size(left.schema.field_arrow_type(c))
+            var es = _require_same_width(
+                left.schema.field_arrow_type(c),
+                output_schema.field_arrow_type(c),
+                c,
+                "assemble_inner_join_fused",
+            )
             elem_sizes.append(es)
             left_src.append(_column_values(left, c, es))
         else:
             var rc = c - left_ncols
             require_null_free_column(right, rc, "assemble_inner_join_fused")
-            var es = element_size(right.schema.field_arrow_type(rc))
+            var es = _require_same_width(
+                right.schema.field_arrow_type(rc),
+                output_schema.field_arrow_type(c),
+                c,
+                "assemble_inner_join_fused",
+            )
             elem_sizes.append(es)
             right_src.append(_column_values(right, rc, es))
 
@@ -215,6 +283,8 @@ def assemble_inner_join_fused(
     var bufs = _fixed_width_buffers(elem_sizes, buf_rows)
 
     var mask = UInt64(join_builder.capacity - 1)
+    # `view_ro` starts at the array's own offset, so a sliced key array is
+    # read from its first logical key.
     var probe_key_view = probe_keys.view_ro()
     var probe_key_ptr = probe_key_view._unsafe_ptr().bitcast[Scalar[DType.int64]]()
     # SAFETY: the builder's lists, read-only for the call; the borrow of
@@ -233,25 +303,7 @@ def assemble_inner_join_fused(
 
     var write_pos = 0
     for probe_idx in range(num_probe):
-        # Two-stage prefetch: the bucket of the row `_PREFETCH_DISTANCE`
-        # ahead, then the chain head's key of the row half that distance ahead.
-        if probe_idx + _PREFETCH_DISTANCE < num_probe:
-            var fk = Int64((probe_key_ptr + probe_idx + _PREFETCH_DISTANCE)[])
-            prefetch[params = PrefetchOptions().for_read().high_locality()](
-                (ht_ptr + Int(_hash_join_key(fk) & mask)).bitcast[Scalar[DType.int64]]()
-            )
-        if probe_idx + _PREFETCH_DISTANCE // 2 < num_probe:
-            var mk = Int64((probe_key_ptr + probe_idx + _PREFETCH_DISTANCE // 2)[])
-            var mc = (ht_ptr + Int(_hash_join_key(mk) & mask))[]
-            if mc != _CHAIN_END:
-                if fused_layout:
-                    prefetch[params = PrefetchOptions().for_read().high_locality()](
-                        (kn_ptr + 2 * mc).bitcast[Scalar[DType.int64]]()
-                    )
-                else:
-                    prefetch[params = PrefetchOptions().for_read().high_locality()](
-                        (bk_ptr + mc).bitcast[Scalar[DType.int64]]()
-                    )
+        _prefetch_probe_ahead(join_builder, probe_key_ptr, probe_idx, num_probe, mask)
 
         var probe_key = Int64((probe_key_ptr + probe_idx)[])
         if probe_nulls.excludes(probe_idx):
@@ -449,23 +501,7 @@ def assemble_inner_join_fused_projected(
 
     var write_pos = 0
     for probe_idx in range(num_probe):
-        if probe_idx + _PREFETCH_DISTANCE < num_probe:
-            var fk = Int64((probe_key_ptr + probe_idx + _PREFETCH_DISTANCE)[])
-            prefetch[params = PrefetchOptions().for_read().high_locality()](
-                (ht_ptr + Int(_hash_join_key(fk) & mask)).bitcast[Scalar[DType.int64]]()
-            )
-        if probe_idx + _PREFETCH_DISTANCE // 2 < num_probe:
-            var mk = Int64((probe_key_ptr + probe_idx + _PREFETCH_DISTANCE // 2)[])
-            var mc = (ht_ptr + Int(_hash_join_key(mk) & mask))[]
-            if mc != _CHAIN_END:
-                if fused_layout:
-                    prefetch[params = PrefetchOptions().for_read().high_locality()](
-                        (kn_ptr + 2 * mc).bitcast[Scalar[DType.int64]]()
-                    )
-                else:
-                    prefetch[params = PrefetchOptions().for_read().high_locality()](
-                        (bk_ptr + mc).bitcast[Scalar[DType.int64]]()
-                    )
+        _prefetch_probe_ahead(join_builder, probe_key_ptr, probe_idx, num_probe, mask)
 
         var probe_key = Int64((probe_key_ptr + probe_idx)[])
         if probe_nulls.excludes(probe_idx):

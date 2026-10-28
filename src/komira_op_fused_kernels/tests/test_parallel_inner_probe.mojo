@@ -299,13 +299,129 @@ def test_one_morsel_takes_the_serial_probe() raises:
 
 
 def test_should_parallelize_threshold() raises:
-    from std.sys import num_physical_cores
+    assert_false(should_parallelize(0, _POOL_WORKERS))
+    assert_false(should_parallelize(PARALLEL_THRESHOLD_ROWS - 1, _POOL_WORKERS))
+    assert_true(should_parallelize(PARALLEL_THRESHOLD_ROWS, _POOL_WORKERS))
+    assert_true(should_parallelize(10 * PARALLEL_THRESHOLD_ROWS, _POOL_WORKERS))
+    # A one-worker pool has nothing to fork over, whatever the row count.
+    assert_false(should_parallelize(10 * PARALLEL_THRESHOLD_ROWS, 1))
 
-    assert_false(should_parallelize(0))
-    assert_false(should_parallelize(PARALLEL_THRESHOLD_ROWS - 1))
-    var multi = num_physical_cores() > 1
-    assert_equal(should_parallelize(PARALLEL_THRESHOLD_ROWS), multi)
-    assert_equal(should_parallelize(10 * PARALLEL_THRESHOLD_ROWS), multi)
+
+def _keys_from(lo: Int, span: Int, n: Int) -> PrimitiveArray[DType.int64]:
+    """Keys `lo + i % span` for `i` in `[0, n)`."""
+    var arr = PrimitiveArray[DType.int64].allocate(n)
+    for i in range(n):
+        arr.store[1](i, SIMD[DType.int64, 1](Int64(lo + i % span)))
+    return arr^
+
+
+def test_perfect_probe_with_negative_keys() raises:
+    """Build keys -5..4 put the table's minimum below zero; probe keys -8..7
+    reach below and above its range."""
+    var build = _keys_from(-5, 10, 10)
+    var probe = _keys_from(-8, 16, 60_000)
+    var opt = PerfectHashJoin.try_build(build)
+    assert_true(Bool(opt))
+    var perfect = opt.take()
+    var calls = grain_geometry_calls(SITE_JOIN_PROBE)
+    var rt = _runtime()
+    ref disp = rt.dispatcher()
+    var bm = List[Int]()
+    var pm = List[Int]()
+    parallel_perfect_inner_probe_into(
+        disp, CancellationToken.new(), perfect, probe, probe.length, bm, pm,
+        ProbeNullMask(probe, probe.length),
+    )
+    _assert_forked(calls)
+    _assert_pairs(build, probe, bm, pm)
+    assert_true(len(bm) > 0)
+
+
+def _probe_first_rows_chained(total: Int, limit: Int, forks: Bool) raises:
+    var build = _keys_mod(40, 8)
+    var probe = _keys_mod(total, 10)
+    var jb = HashJoinBuilder.build(build)
+    var calls = grain_geometry_calls(SITE_JOIN_PROBE)
+    var rt = _runtime()
+    ref disp = rt.dispatcher()
+    var bm = List[Int]()
+    var pm = List[Int]()
+    parallel_inner_join_probe_into(
+        disp, CancellationToken.new(), jb, probe, limit, bm, pm,
+        ProbeNullMask(probe, limit),
+    )
+    assert_equal(grain_geometry_calls(SITE_JOIN_PROBE), calls + 1)
+    var morsels = grain_geometry_field(SITE_JOIN_PROBE, GRAIN_F_MORSELS)
+    assert_equal(morsels > 1, forks)
+    # Only the first `limit` probe rows are read.
+    _assert_pairs(build, probe.slice(0, limit), bm, pm)
+
+
+def _probe_first_rows_perfect(total: Int, limit: Int, forks: Bool) raises:
+    var build = _keys_mod(1000, 1000)
+    var probe = _keys_mod(total, 1200)
+    var opt = PerfectHashJoin.try_build(build)
+    var perfect = opt.take()
+    var calls = grain_geometry_calls(SITE_JOIN_PROBE)
+    var rt = _runtime()
+    ref disp = rt.dispatcher()
+    var bm = List[Int]()
+    var pm = List[Int]()
+    parallel_perfect_inner_probe_into(
+        disp, CancellationToken.new(), perfect, probe, limit, bm, pm,
+        ProbeNullMask(probe, limit),
+    )
+    assert_equal(grain_geometry_calls(SITE_JOIN_PROBE), calls + 1)
+    var morsels = grain_geometry_field(SITE_JOIN_PROBE, GRAIN_F_MORSELS)
+    assert_equal(morsels > 1, forks)
+    _assert_pairs(build, probe.slice(0, limit), bm, pm)
+
+
+def test_chained_probe_reads_only_the_first_rows_on_one_morsel() raises:
+    _probe_first_rows_chained(5_000, 1_000, False)
+
+
+def test_chained_probe_reads_only_the_first_rows_when_forked() raises:
+    _probe_first_rows_chained(80_000, 50_000, True)
+
+
+def test_perfect_probe_reads_only_the_first_rows_on_one_morsel() raises:
+    _probe_first_rows_perfect(5_000, 1_000, False)
+
+
+def test_perfect_probe_reads_only_the_first_rows_when_forked() raises:
+    _probe_first_rows_perfect(80_000, 50_000, True)
+
+
+def test_probe_row_count_beyond_the_key_array_raises() raises:
+    var build = _keys_mod(8, 8)
+    var probe = _keys_mod(100, 8)
+    var jb = HashJoinBuilder.build(build)
+    var opt = PerfectHashJoin.try_build(build)
+    var perfect = opt.take()
+    var rt = _runtime()
+    ref disp = rt.dispatcher()
+    var bm = List[Int]()
+    var pm = List[Int]()
+    var raised = False
+    try:
+        parallel_inner_join_probe_into(
+            disp, CancellationToken.new(), jb, probe, 101, bm, pm,
+            ProbeNullMask(probe, 100),
+        )
+    except:
+        raised = True
+    assert_true(raised, "the chained probe accepted too many rows")
+    raised = False
+    try:
+        parallel_perfect_inner_probe_into(
+            disp, CancellationToken.new(), perfect, probe, 101, bm, pm,
+            ProbeNullMask(probe, 100),
+        )
+    except:
+        raised = True
+    assert_true(raised, "the perfect probe accepted too many rows")
+    assert_equal(len(bm), 0)
 
 
 def main() raises:

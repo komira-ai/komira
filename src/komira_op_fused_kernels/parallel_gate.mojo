@@ -9,23 +9,21 @@
 # answer is the same on both routes; only the row order of the output differs.
 # =============================================================================
 
-from std.sys import num_physical_cores
-
-
 comptime PARALLEL_THRESHOLD_ROWS: Int = 100_000
 """The smallest input, in rows, that `should_parallelize` sends to a parallel
 kernel."""
 
 
 @always_inline
-def should_parallelize(num_rows: Int) -> Bool:
-    """True iff `num_rows` reaches `PARALLEL_THRESHOLD_ROWS` and the host has
-    more than one physical core.
+def should_parallelize(num_rows: Int, pool_width: Int) -> Bool:
+    """True iff `num_rows` reaches `PARALLEL_THRESHOLD_ROWS` and the pool the
+    kernel would fork over has more than one worker.
 
     Args:
         num_rows: Rows the kernel would process.
+        pool_width: The dispatcher's worker count.
 
     Returns:
         True if the caller should take the parallel kernel.
     """
-    return num_rows >= PARALLEL_THRESHOLD_ROWS and num_physical_cores() > 1
+    return num_rows >= PARALLEL_THRESHOLD_ROWS and pool_width > 1

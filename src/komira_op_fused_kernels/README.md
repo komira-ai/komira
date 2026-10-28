@@ -10,15 +10,17 @@ package root re-exports nothing; import from the modules.
   engine's dispatcher. The probe rows are split into morsels sized from the
   pool's worker count; each worker appends (build row, probe row) pairs to its
   own lists, which are then appended to the caller's. The pairs are the serial
-  probe's, in a different order; a NULL probe key matches nothing. With one
-  morsel they call the serial probe.
+  probe's, in a different order; a NULL probe key matches nothing. They read the first `num_probe_rows` keys (more than the array holds
+  raises); with one morsel they call the serial probe on those keys.
 - `komira_op_fused_kernels.parallel_gate`: `should_parallelize`, true from
-  `PARALLEL_THRESHOLD_ROWS` (100,000) rows on a host with more than one core.
+  `PARALLEL_THRESHOLD_ROWS` (100,000) rows when the pool it would fork over has
+  more than one worker.
 - `komira_op_fused_kernels.join_fused_gather`: `assemble_inner_join_fused`
   (every column of both sides) and `assemble_inner_join_fused_projected` (the
   named columns, either side as the build side), which walk the chains and
   write each output row as it is found, with no index lists and no second
-  pass. With no names the projected kernel returns the match count alone
+  pass. A kernel raises when an output type's byte width differs from its
+  source column's,. With no names the projected kernel returns the match count alone
   (`RecordBatch.count_only`).
 - `komira_op_fused_kernels.join_chunked_gather`:
   `assemble_inner_join_chunked`, the same output as
@@ -35,7 +37,9 @@ package root re-exports nothing; import from the modules.
 - `komira_op_fused_kernels.flat_agg_output`: `build_flat_agg_output`, the
   groups of a `FlatHashAggregator` (`komira_op_agg_hash`) as a RecordBatch:
   the keys, then SUM, COUNT, MIN, MAX or MEAN per aggregate, each column of
-  its output field's type.
+  its output field's type. A key or field type it does not produce for that
+  column raises; SUM, MIN and MAX into an integer field are exact up to 2^53
+  and raise on a value that is NaN, infinite or out of the field's range.
 
 ## Examples
 
@@ -88,7 +92,7 @@ assert_equal(joined.num_rows(), 3)  # order 1 has no item
 assert_equal(Int(joined.column_value(0, 0)), 20)
 assert_equal(Int(joined.column_value(1, 0)), 500)
 assert_equal(Int(joined.column_value(1, 2)), 700)
-assert_false(should_parallelize(joined.num_rows()))
+assert_false(should_parallelize(joined.num_rows(), 4))
 
 # SUM(qty) and COUNT(*) per item id, from a hand-fed aggregator.
 var agg = FlatHashAggregator(num_keys=1, num_aggs=2, initial_capacity=16)
