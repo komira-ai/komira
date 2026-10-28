@@ -58,6 +58,8 @@ TARGETS = [
     "komira//src/komira_vcard:table",
     "komira//src/komira_zlib:ci",
     "komira//src/komira_zlib:coverage_floor",
+    "komira//src/komira_zlib:syslib_libzlib.conda_linux_aarch64",
+    "komira//src/komira_zlib:syslib_libzlib.conda_osx_arm64",
     "komira//src/komira_zlib:table",
     "komira//src/tests/conformance/komira_connect_conformance:komira_connect_conformance_conda",
     "komira//src/tests/conformance/komira_datetime_conformance:komira_datetime_conformance",

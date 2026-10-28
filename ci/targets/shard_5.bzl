@@ -25,6 +25,8 @@ TARGETS = [
     "komira//src/komira_log_query:komira_log_query_conda",
     "komira//src/komira_lz4:ci",
     "komira//src/komira_lz4:coverage_floor",
+    "komira//src/komira_lz4:syslib_lz4-c.conda_linux_aarch64",
+    "komira//src/komira_lz4:syslib_lz4-c.conda_osx_arm64",
     "komira//src/komira_lz4:table",
     "komira//src/komira_mcp_server:ci",
     "komira//src/komira_mcp_server:conda_holds",

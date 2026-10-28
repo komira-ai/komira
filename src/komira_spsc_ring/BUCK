@@ -52,7 +52,7 @@ mojo_conda(
         "../komira_collections": "//src/komira_collections:mopm.toml",
     },
     mojo = "1.0.0",
-    mopm = "toolchains//:mopm_0_0_73",
+    mopm = "toolchains//:mopm_0_0_86",
     package = "komira_spsc_ring",
     version = "0.1.0",
     visibility = ["PUBLIC"],
