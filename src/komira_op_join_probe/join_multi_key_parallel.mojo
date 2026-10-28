@@ -13,7 +13,6 @@
 # =============================================================================
 
 from std.memory import memcpy, UnsafePointer
-from std.sys import num_physical_cores
 
 from komira_async.ops.waker_sink import NoopSink
 from komira_async.runtime.local_dispatcher import LocalDispatcher
@@ -42,12 +41,6 @@ from .join_probe_settings import (
     mk_probe_morsel_rows,
     mk_probe_retile_on,
 )
-
-
-comptime _MK_PARALLEL_THRESHOLD: Int = 100_000
-"""Below this many probe rows `execute_multi_key_join_probe` probes serially."""
-
-comptime _ENABLE_MULTI_KEY_PARALLEL_PROBE: Bool = True
 
 
 struct _MKMergeSrc(Movable, Deinitable):
@@ -209,16 +202,16 @@ def parallel_multi_key_inner_probe_into(
     if _ms_override > 0:
         morsel_size = _ms_override
     var num_morsels = (num_probe_rows + morsel_size - 1) // morsel_size
-    var _cores = num_physical_cores()
     var num_workers = min(num_morsels, pool_n)
-    grain_geometry_record(
-        SITE_JOIN_MULTIKEY, num_probe_rows, morsel_size, num_morsels, num_workers
-    )
 
+    # The retile: when every worker of the pool has a morsel but there are
+    # fewer than four morsels per worker, cut the morsels down so each worker
+    # claims about four (never below `MK_PROBE_RETILE_MIN_ROWS` rows). It
+    # follows the pool the dispatcher runs, not the host's core count.
     if (
         _ms_override == 0
         and mk_probe_retile_on()
-        and num_workers == _cores
+        and num_workers == pool_n
         and num_morsels < 4 * num_workers
     ):
         var target = (num_probe_rows + 4 * num_workers - 1) // (4 * num_workers)
@@ -227,6 +220,9 @@ def parallel_multi_key_inner_probe_into(
         if target < morsel_size:
             morsel_size = target
             num_morsels = (num_probe_rows + morsel_size - 1) // morsel_size
+    grain_geometry_record(
+        SITE_JOIN_MULTIKEY, num_probe_rows, morsel_size, num_morsels, num_workers
+    )
 
     var num_build_rows = builder._num_inserted
     var non_empty_buckets = 0

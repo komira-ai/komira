@@ -13,9 +13,11 @@
 #                    row-at-a-time walk, the reference both must agree with.
 #       morsel_rows  the probe morsel in rows; 0 (the default) takes the
 #                    engine's fork grain (`parallel_fork_grain`).
-#       retile       when every core is busy and there are fewer than four
-#                    morsels per worker, cut morsels down to give four (but
-#                    never below 4,096 rows). Off by default.
+#       retile       when every worker of the dispatcher's pool has a morsel
+#                    and there are fewer than four morsels per worker, cut
+#                    morsels down to give four (but never below 4,096 rows).
+#                    Off by default. A morsel given in `morsel_rows` is never
+#                    cut.
 #
 # The composite parallel BUILD has no setting of its own: it follows the hash
 # join's build mode and fill settings in `komira_op_join_build`'s

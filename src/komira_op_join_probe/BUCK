@@ -3,8 +3,7 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # The probe side of the engine's joins: the composite-key hash join
 # (`MultiKeyHashJoinBuilder`, its INNER / LEFT / SEMI / ANTI / RIGHT / FULL
 # probes, the parallel INNER probe over the engine's dispatcher), the
-# extraction of join-key columns into its key slots, and the composite join
-# probe operator.
+# extraction of join-key columns into its key slots.
 mojo_library(
     name = "komira_op_join_probe",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
@@ -15,14 +14,10 @@ mojo_library(
         "//src/komira_atomic_alias:komira_atomic_alias",
         "//src/komira_buffer:komira_buffer",
         "//src/komira_collections:komira_collections",
-        "//src/komira_column_kernels:komira_column_kernels",
         "//src/komira_counters:komira_counters",
         "//src/komira_dynamic_filter:komira_dynamic_filter",
         "//src/komira_engine_runtime:komira_engine_runtime",
-        "//src/komira_join_assembly:komira_join_assembly",
         "//src/komira_op_join_build:komira_op_join_build",
-        "//src/komira_physical_plan:komira_physical_plan",
-        "//src/komira_plan_ir:komira_plan_ir",
         "//src/komira_simd:komira_simd",
         "//src/komira_udf:komira_udf",
     ],
@@ -39,7 +34,6 @@ mojo_library(
         "tests/test_join_multi_key_null_later_key.mojo",
         "tests/test_join_multikey_arm_hoist.mojo",
         "tests/test_join_multikey_batched_probe_equiv.mojo",
-        "tests/test_join_probe_multi_key_op.mojo",
         "tests/test_multi_key_merge_parallel.mojo",
         "tests/test_multi_key_parallel_probe.mojo",
         "tests/test_multi_key_parallel_probe_geometry.mojo",

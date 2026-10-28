@@ -2,7 +2,6 @@
 # one fanned wave, keeps every (build, probe) pair together, appends after the
 # caller's existing content, and handles an empty probe.
 
-from std.sys import num_physical_cores
 from std.testing import TestSuite, assert_equal, assert_true
 
 from komira_arrow.column import Column
@@ -31,7 +30,10 @@ from komira_op_join_probe.join_multi_key_builder import (
 from komira_op_join_probe.join_multi_key_parallel import (
     parallel_multi_key_inner_probe_into,
 )
-from komira_op_join_probe.join_probe_settings import mk_probe_configure
+from komira_op_join_probe.join_probe_settings import (
+    mk_probe_configure,
+    reset_join_probe_settings,
+)
 
 
 comptime _MORSEL: Int = 4096
@@ -58,10 +60,17 @@ def _mk_runtime() raises -> PerCoreAsyncRuntime[NoopSink]:
 
 
 def _expected_merge_tasks() -> Int:
-    """`task_min` / `task_max` the merge wave must record on THIS box."""
+    """`task_min` / `task_max` the merge wave must record: one chunk per probe
+    worker, and the probe runs `min(morsels, pool)` workers.
+    """
     var num_morsels = (_PROBE_ROWS + _MORSEL - 1) // _MORSEL
-    var num_workers = min(num_morsels, num_physical_cores())
-    return min(_POOL_WORKERS, num_workers)
+    return min(num_morsels, _POOL_WORKERS)
+
+
+def _begin() raises:
+    """Every test starts from the default settings plus the test's morsel."""
+    reset_join_probe_settings()
+    mk_probe_configure(morsel_rows=_MORSEL)
 
 
 def _multiplicity(p: Int) -> Int:
@@ -202,6 +211,7 @@ def _run_probe(
 def test_merge_wave_dispatches_one_full_width_fork() raises:
     """One merge wave per probe, as wide as the workers, read from the
     scheduler trace's counters."""
+    _begin()
     sched_trace_reset()
 
     var pk = _probe_keys(_PROBE_ROWS)
@@ -215,15 +225,6 @@ def test_merge_wave_dispatches_one_full_width_fork() raises:
     var tmin = Int(sched_trace_site(SITE_JOIN_MK_MERGE, Int32(4)))
     var tmax = Int(sched_trace_site(SITE_JOIN_MK_MERGE, Int32(5)))
     var want = _expected_merge_tasks()
-    print(
-        "[fire] join_mk_merge count=", count,
-        " task_min=", tmin,
-        " task_max=", tmax,
-        " expected_tasks=", want,
-        " out_rows=", len(bm),
-        " bytes_moved=", len(bm) * 16,
-        sep="",
-    )
     assert_equal(
         count,
         1,
@@ -243,6 +244,7 @@ def test_merge_wave_dispatches_one_full_width_fork() raises:
 def test_merge_keeps_every_row_paired_under_skewed_worker_counts() raises:
     """Every merged pair has equal keys, when the workers' segment lengths
     differ."""
+    _begin()
     var pk = _probe_keys(_PROBE_ROWS)
     var bk = _build_keys(_PROBE_ROWS)
     var rt = _mk_runtime()
@@ -260,6 +262,7 @@ def test_merge_appends_after_existing_content() raises:
     are not required to match: the merge writes each list after its own
     length, so the forked merge must too.
     """
+    _begin()
     var pk = _probe_keys(_PROBE_ROWS)
     var bk = _build_keys(_PROBE_ROWS)
     var rt = _mk_runtime()
@@ -294,6 +297,7 @@ def test_merge_handles_empty_probe() raises:
     """`num_workers == 0` — the wave is handed `n_chunks == 0`, the prefix scan
     is the single element `[0]`, and nothing may be published or dispatched.
     """
+    _begin()
     var probe_a = List[Int64]()
     var probe_b = List[Int64]()
     var build_a = List[Int64]()
@@ -312,7 +316,6 @@ def test_merge_handles_empty_probe() raises:
 
 def main() raises:
     sched_trace_configure(True)
-    mk_probe_configure(morsel_rows=_MORSEL)
 
     var suite = TestSuite()
     suite.test[test_merge_wave_dispatches_one_full_width_fork]()

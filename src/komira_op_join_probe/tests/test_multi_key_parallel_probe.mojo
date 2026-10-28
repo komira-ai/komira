@@ -175,8 +175,8 @@ def test_parallel_2key_same_pairs_as_sequential_100k() raises:
     _assert_pairs_equal(seq_b, seq_p, par_b, par_p)
 
 
-def test_parallel_2key_determinism_3runs() raises:
-    """Parallel multi-key inner probe must be deterministic across runs."""
+def test_parallel_2key_repeated_runs_return_the_same_pair_multiset() raises:
+    """Three runs on fresh builds return the same pair multiset (the pair order is not asserted: workers claim morsels dynamically)."""
     var n = 100_000
 
     var rt = _test_runtime()
@@ -438,7 +438,7 @@ def test_parallel_skew_growth_matches_sequential_kernel() raises:
 def main() raises:
     var suite = TestSuite()
     suite.test[test_parallel_2key_same_pairs_as_sequential_100k]()
-    suite.test[test_parallel_2key_determinism_3runs]()
+    suite.test[test_parallel_2key_repeated_runs_return_the_same_pair_multiset]()
     suite.test[test_parallel_empty_probe]()
     suite.test[test_parallel_skew_overflows_presize_values_stay_paired]()
     suite.test[test_parallel_skew_growth_matches_sequential_kernel]()

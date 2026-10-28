@@ -218,11 +218,15 @@ def test_int_keys_every_walk_matches_serial() raises:
     every walk width, the row walk and the retile return the serial pairs; a
     later-key mismatch inside one chain is not a match.
     """
+    reset_join_probe_settings()
+    bloomsel_reset_config()
     _check_every_mode(_int_build(), _int_probe())
 
 
 def test_string_keys_every_walk_matches_serial() raises:
     """Two STRING keys: the byte-equality arm in every walk."""
+    reset_join_probe_settings()
+    bloomsel_reset_config()
     var build = _batch(
         "k0", ArrowType.STRING, _str_col(_N_BUILD, "a", 1, 7),
         "k1", ArrowType.STRING, _str_col(_N_BUILD, "b", 1, 250),
@@ -236,6 +240,8 @@ def test_string_keys_every_walk_matches_serial() raises:
 
 def test_int_and_string_keys_every_walk_matches_serial() raises:
     """An INT64 key with a STRING key: the mixed arm in every walk."""
+    reset_join_probe_settings()
+    bloomsel_reset_config()
     var build = _batch(
         "k0", ArrowType.INT64, _int_col(_N_BUILD, 7, 1, 250, 31, 0),
         "k1", ArrowType.STRING, _str_col(_N_BUILD, "b", 1, 250),
@@ -251,6 +257,8 @@ def test_same_dictionary_keys_every_walk_matches_serial() raises:
     """Two keys that share one dictionary each across the sides: the dictionary
     index arm in every walk.
     """
+    reset_join_probe_settings()
+    bloomsel_reset_config()
     var n_build = 700
     var build = _batch(
         "k0", ArrowType.DICTIONARY, _dict_col(n_build, "x", 1, 7, 7),
@@ -258,6 +266,27 @@ def test_same_dictionary_keys_every_walk_matches_serial() raises:
     )
     var probe = _batch(
         "k0", ArrowType.DICTIONARY, _dict_col(_N_PROBE, "x", 1, 7, 7),
+        "k1", ArrowType.DICTIONARY, _dict_col(_N_PROBE, "y", 3, 70, 70),
+    )
+    _check_every_mode(build, probe)
+
+
+def test_int_and_same_dictionary_keys_every_walk_matches_serial() raises:
+    """An INT64 key beside a DICTIONARY key whose dictionary is the same on both
+    sides: the mixed arm compares the dictionary key's indices, in the batched
+    walk (widths 512, 1, 2, 3) and in the row-at-a-time walk (width 0). Probe
+    rows share the first key and differ in the dictionary index, so a compare
+    that took unequal indices for equal ones would show.
+    """
+    reset_join_probe_settings()
+    bloomsel_reset_config()
+    var n_build = 700
+    var build = _batch(
+        "k0", ArrowType.INT64, _int_col(n_build, 7, 1, 250, 31, 0),
+        "k1", ArrowType.DICTIONARY, _dict_col(n_build, "y", 1, 50, 70),
+    )
+    var probe = _batch(
+        "k0", ArrowType.INT64, _int_col(_N_PROBE, 7, 1, 500, 17, 0),
         "k1", ArrowType.DICTIONARY, _dict_col(_N_PROBE, "y", 3, 70, 70),
     )
     _check_every_mode(build, probe)
@@ -297,11 +326,15 @@ def _bloom_case(pass_pct: Int) raises:
 
 def test_bloom_latch_disarmed_keeps_every_pair() raises:
     """The latch disarms after its window: pairs equal the serial probe."""
+    reset_join_probe_settings()
+    bloomsel_reset_config()
     _bloom_case(1)
 
 
 def test_bloom_latch_kept_keeps_every_pair() raises:
     """The latch samples and keeps the bloom: pairs equal the serial probe."""
+    reset_join_probe_settings()
+    bloomsel_reset_config()
     _bloom_case(100)
 
 
@@ -311,6 +344,7 @@ def main() raises:
     suite.test[test_string_keys_every_walk_matches_serial]()
     suite.test[test_int_and_string_keys_every_walk_matches_serial]()
     suite.test[test_same_dictionary_keys_every_walk_matches_serial]()
+    suite.test[test_int_and_same_dictionary_keys_every_walk_matches_serial]()
     suite.test[test_bloom_latch_disarmed_keeps_every_pair]()
     suite.test[test_bloom_latch_kept_keeps_every_pair]()
     suite^.run()

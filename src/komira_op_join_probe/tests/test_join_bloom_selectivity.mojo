@@ -158,6 +158,8 @@ def test_disarm_is_value_invariant_and_actually_arms() raises:
     """With the latch on (16 rows, 25%), a probe the bloom admits entirely
     disarms it and skips checks, with the same answer as the latch off; a probe
     the bloom rejects entirely keeps it. Both walks."""
+    reset_join_probe_settings()
+    bloomsel_reset_config()
     var fx = _fixture()
     ref build = fx[0]
     ref probe = fx[1]
