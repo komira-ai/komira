@@ -13,8 +13,8 @@ load(":buildrules.mojo.bzl", "mojo_package")
 # `komira_datetime`.
 #
 # Built with buildrules' `mojo_package` from mopm.toml (README.md, "Build files"): `:lib` is the
-# library file and exists only once the tests of tests/ have passed. The test of fixture_tests/
-# needs a generated message type, so it is welded to `value_null_proto` below.
+# library file and exists only once the tests of tests/ have passed. The test of tests/standalone/
+# (not a `tests/test_*.mojo`, so not welded to `:lib`) needs a generated message type, so it is welded to `value_null_proto` below.
 mojo_package(path = ".")
 
 # `:komira_wkt`, the target the packages that depend on this library name, is `:lib` as komira's
@@ -99,5 +99,5 @@ mojo_proto_library(
         "//src/komira_proto_codec:komira_proto_codec",
         ":komira_wkt",
     ],
-    test_srcs = ["fixture_tests/test_wkt_value_null_field.mojo"],
+    test_srcs = ["tests/standalone/test_wkt_value_null_field.mojo"],
 )

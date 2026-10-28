@@ -13,7 +13,8 @@ load(":buildrules.mojo.bzl", "mojo_package")
 #
 # Built with buildrules' `mojo_package` from mopm.toml (README.md, "Build files"): `:lib` is the
 # library file and exists only once the tests of tests/ have passed. The three programs of
-# fixture_tests/ are not part of that set: two need a generated message type and one needs
+# tests/standalone/ (under tests/, which the coverage census counts as test code, but not a
+# `tests/test_*.mojo`) are not part of that set: two need a generated message type and one needs
 # defines, so they are targets of their own below.
 mojo_package(path = ".")
 
@@ -106,12 +107,12 @@ mojo_proto_library(
     srcs = ["tests/implicit_presence.proto"],
     import_prefix = "example",
     deps = [":komira_proto_codec"],
-    test_srcs = ["fixture_tests/test_implicit_presence_json.mojo"],
+    test_srcs = ["tests/standalone/test_implicit_presence_json.mojo"],
 )
 
 mojo_test(
     name = "test_copy_hazard",
-    srcs = ["fixture_tests/test_copy_hazard.mojo"],
+    srcs = ["tests/standalone/test_copy_hazard.mojo"],
     deps = [
         ":komira_proto_codec",
         ":copy_hazard_proto",
@@ -127,7 +128,7 @@ _BINADE_PARTS = 4
 [
     mojo_test(
         name = "test_float32_json_binades_{}_{}".format(binade, part),
-        srcs = ["fixture_tests/test_float32_json_binades.mojo"],
+        srcs = ["tests/standalone/test_float32_json_binades.mojo"],
         deps = [":komira_proto_codec"],
         optimization_level = "3",
         defines = ["BINADE={}".format(binade), "PART={}".format(part), "PARTS={}".format(_BINADE_PARTS)],
