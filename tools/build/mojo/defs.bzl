@@ -29,6 +29,7 @@ load("@komira//tools/build/package:conda.bzl", "conda_package")
 load(":coverage.bzl", "COVERAGE_ATTRS", "COVERAGE_SHARED_LIB_ATTRS", "COVERAGE_TEST_ATTRS", "coverage_gate", "coverage_kwargs", "coverage_link_dir", "coverage_readme", "coverage_run", "coverage_branch_of", "coverage_shared_lib", "coverage_shared_lib_macro", "coverage_sub_targets", "coverage_test", "coverage_test_kwargs")
 load(":test_deps.bzl", "check_test_deps", "test_c_link", "test_closure")
 load(":mutation.bzl", "MUTATION_ATTRS", "mutation_kwargs", "mutation_sub_targets")
+load(":system_libs.bzl", "dep_system_libs", "merge_system_libs", "run_args")
 load(":test_runtime.bzl", _arg_args = "arg_args", _data_map = "data_map", _env_args = "env_args", _test_root = "test_root", gate_mojo = "gate_mojo")
 load(":defines.bzl", "BINARY_DEFINE_ATTRS", "LIBRARY_DEFINE_ATTRS", "TEST_DEFINE_ATTRS", "cap_flags", "define_args", "memory_cap")
 load("@komira//tools/build/native:shared.bzl", "NativeSharedInfo")
@@ -173,7 +174,10 @@ def _library_impl(ctx):
     tests_c_link = test_c_link(ctx, c_link)
 
     test_data = _admit_test_data(ctx)
-    env_args = _env_args("{}: test_env".format(ctx.label.raw_target()), ctx.attrs.test_env)
+    # The pinned system libraries the packages in `deps` (and `test_deps`) load at run time: given to every run of a test, the README examples and the coverage
+    # and mutation runs as `--lib-dir` arguments beside the `--env` ones (system_libs.bzl). The library's own MojoInfo carries those of `deps` only.
+    system_libs = dep_system_libs(ctx.attrs.deps)
+    env_args = run_args(_env_args("{}: test_env".format(ctx.label.raw_target()), ctx.attrs.test_env), merge_system_libs([system_libs, dep_system_libs(ctx.attrs.test_deps)]))
     where = str(ctx.label.raw_target())
     test_defines = define_args(where, "test_assert_level", ctx.attrs.test_assert_level, "test_defines", ctx.attrs.test_defines)
     cap = memory_cap(where, "test_memory_cap_mib", ctx.attrs.test_memory_cap_mib, ctx.attrs.test_assert_level)
@@ -295,6 +299,7 @@ def _library_impl(ctx):
             pkgs = ctx.actions.tset(MojoPkgTSet, value = public, children = deps),
             pkgs_def = MojoPkgTSet,
             readme = ctx.attrs.readme,
+            system_libs = system_libs,
         ),
         welded_tests_info(ctx.attrs.test_srcs),
         MojoOptLevelInfo(levels = levels),
@@ -345,7 +350,7 @@ _readme_test = dynamic_actions(
     impl = _readme_test_impl,
     attrs = {
         "closure": dynattrs.value(typing.Any),
-        "env_args": dynattrs.value(list[str]),
+        "env_args": dynattrs.value(typing.Any),
         "examples": dynattrs.artifact_value(),
         "gate_label": dynattrs.value(str),
         "hang_flags": dynattrs.value(list[str]),
@@ -500,7 +505,7 @@ def _test_impl(ctx):
     tc, exe = _executable(ctx, "mojo_build_test", levels)
     where = str(ctx.label.raw_target())
     data = _data_map(ctx, where + ": data", ctx.attrs.data)
-    env_args = _env_args(where + ": env", ctx.attrs.env)
+    env_args = run_args(_env_args(where + ": env", ctx.attrs.env), dep_system_libs(ctx.attrs.deps))
     root, staged = _test_root(ctx, ctx.label.name + ".testroot", exe, data)
     cap = memory_cap(where, "memory_cap_mib", ctx.attrs.memory_cap_mib, ctx.attrs.assert_level)
     command = cmd_args(

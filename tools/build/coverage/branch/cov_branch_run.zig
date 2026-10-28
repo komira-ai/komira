@@ -7,7 +7,7 @@
 //! usage: cov_branch run --busybox <busybox> --gate <gate>
 //!            --compiler <compiler_dir> --label <label> --profdata <llvm-profdata>
 //!            --raw-version <N> --binary <test_binary> --out <profdata_out>
-//!            [--env NAME=VALUE]...
+//!            [--env NAME=VALUE | --lib-dir DIR]...
 //!
 //!   --gate         the gate (tools/build/run), run as the release gate runs
 //!                  it: `<gate> mojo --busybox <busybox> --runtime-lib
@@ -19,6 +19,10 @@
 //!   --binary       <root>/bin/<test> of the test's staged tree (the release
 //!                  gate's: <root>/share holds its declared data)
 //!   --env          the test's environment, passed to the gate as given
+//!   --lib-dir      a directory of pinned shared libraries the test opens by their
+//!                  bare names, passed to the gate (made absolute) after the --env
+//!                  arguments, in the order given: the gate puts it on the
+//!                  library path of the test (tools/build/run/mojo.zig)
 //!
 //! Steps:
 //!   1. `gate mojo` runs the test in the gate's environment (this tool's own
@@ -74,15 +78,18 @@ pub const Args = struct {
     out: []const u8,
     /// "NAME=VALUE" of each --env, in order.
     env: []const []const u8,
+    /// Each --lib-dir, in order.
+    lib_dirs: []const []const u8 = &.{},
 };
 
-pub const USAGE = "usage: cov_branch run --busybox B --gate G --compiler DIR --label L --profdata P --raw-version N --binary F --out F [--env NAME=VALUE]...";
+pub const USAGE = "usage: cov_branch run --busybox B --gate G --compiler DIR --label L --profdata P --raw-version N --binary F --out F [--env NAME=VALUE | --lib-dir DIR]...";
 
 /// The arguments after `run`, or the reason they are refused (a usage error).
 pub fn parseArgs(alloc: std.mem.Allocator, argv: []const []const u8, why: *[]const u8) !?Args {
     const names = [_][]const u8{ "--busybox", "--gate", "--compiler", "--label", "--profdata", "--raw-version", "--binary", "--out" };
     var vals = [_]?[]const u8{null} ** names.len;
     var env = std.ArrayList([]const u8).empty;
+    var lib_dirs = std.ArrayList([]const u8).empty;
     var i: usize = 0;
     while (i < argv.len) : (i += 2) {
         const flag = argv[i];
@@ -93,6 +100,14 @@ pub fn parseArgs(alloc: std.mem.Allocator, argv: []const []const u8, why: *[]con
         const v = argv[i + 1];
         if (std.mem.eql(u8, flag, "--env")) {
             try env.append(alloc, v);
+            continue;
+        }
+        if (std.mem.eql(u8, flag, "--lib-dir")) {
+            if (v.len == 0) {
+                why.* = "--lib-dir is empty";
+                return null;
+            }
+            try lib_dirs.append(alloc, v);
             continue;
         }
         const k = for (names, 0..) |n, j| {
@@ -132,6 +147,7 @@ pub fn parseArgs(alloc: std.mem.Allocator, argv: []const []const u8, why: *[]con
         .binary = vals[6].?,
         .out = vals[7].?,
         .env = try env.toOwnedSlice(alloc),
+        .lib_dirs = try lib_dirs.toOwnedSlice(alloc),
     };
 }
 
@@ -167,6 +183,7 @@ pub fn gateArgv(alloc: std.mem.Allocator, a: Args, cwd: []const u8, k: []const u
     try v.appendSlice(alloc, &.{ "--label", a.label, "--test", try abs(alloc, cwd, a.binary) });
     try v.appendSlice(alloc, &.{ "--marker", try std.fmt.allocPrint(alloc, "{s}/gate.passed", .{k}) });
     for (a.env) |e| try v.appendSlice(alloc, &.{ "--env", e });
+    for (a.lib_dirs) |d| try v.appendSlice(alloc, &.{ "--lib-dir", try abs(alloc, cwd, d) });
     try v.appendSlice(alloc, &.{ "--env", try std.fmt.allocPrint(alloc, "LLVM_PROFILE_FILE={s}/prof/%p.profraw", .{k}) });
     return v.toOwnedSlice(alloc);
 }
