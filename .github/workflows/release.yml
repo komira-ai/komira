@@ -164,6 +164,8 @@ jobs:
           farm-instance: ${{ vars.FARM_INSTANCE }}
           farm-properties: ${{ vars.FARM_LINUX_X86_64_PROPERTIES }}
           tls: ${{ vars.FARM_TLS || 'false' }}
+          # main's release work queues behind the pull-request checks when the farm is full
+          farm-qos: batch
       # A guard on the file farm-connect wrote: without the linux property set
       # a build would run on this runner.
       - name: the buckconfig names the farm
@@ -242,6 +244,8 @@ jobs:
           farm-instance: ${{ vars.FARM_INSTANCE }}
           farm-properties: ${{ vars.FARM_LINUX_X86_64_PROPERTIES }}
           tls: ${{ vars.FARM_TLS || 'false' }}
+          # main's release work queues behind the pull-request checks when the farm is full
+          farm-qos: batch
       - name: the buckconfig names the farm
         run: |
           ./buck2 audit config komira_re.linux_x86_64_properties --style json | grep -q '": *"[^"]'
@@ -404,6 +408,8 @@ jobs:
           farm-instance: ${{ vars.FARM_INSTANCE }}
           farm-properties: ${{ vars.FARM_LINUX_X86_64_PROPERTIES }}
           tls: ${{ vars.FARM_TLS || 'false' }}
+          # main's release work queues behind the pull-request checks when the farm is full
+          farm-qos: batch
       - name: the buckconfig names the farm
         run: |
           ./buck2 audit config komira_re.linux_x86_64_properties --style json | grep -q '": *"[^"]'

@@ -458,6 +458,22 @@ test "parseArgs keeps every --env in order" {
     try testing.expectEqualStrings("A=2", a.env[1]);
 }
 
+test "parseArgs keeps every --lib-dir in order, refuses an empty one, and the gate is given each after the --env arguments" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    var why: []const u8 = "";
+    const a = (try r.parseArgs(arena.allocator(), &(full ++ [_][]const u8{ "--lib-dir", "p/one", "--env", "A=1", "--lib-dir", "/abs/two" }), &why)).?;
+    try testing.expectEqual(@as(usize, 2), a.lib_dirs.len);
+    try testing.expectEqualStrings("p/one", a.lib_dirs[0]);
+    try testing.expectEqualStrings("/abs/two", a.lib_dirs[1]);
+    try testing.expectEqual(@as(usize, 1), a.env.len);
+    const argv = try r.gateArgv(arena.allocator(), a, "/w", "/w/k");
+    const tail = [_][]const u8{ "--env", "A=1", "--lib-dir", "/w/p/one", "--lib-dir", "/abs/two", "--env", "LLVM_PROFILE_FILE=/w/k/prof/%p.profraw" };
+    for (tail, argv[argv.len - tail.len ..]) |w, g| try testing.expectEqualStrings(w, g);
+    try testing.expect((try r.parseArgs(arena.allocator(), &(full ++ [_][]const u8{ "--lib-dir", "" }), &why)) == null);
+    try testing.expectEqualStrings("--lib-dir is empty", why);
+}
+
 test "the scratch directory follows BUCK_SCRATCH_PATH" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
