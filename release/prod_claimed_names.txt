@@ -9,6 +9,7 @@
 # on the prod registry, in the pull request that adds the member.
 komira_anomaly
 komira_atomic_alias
+komira_bench_report
 komira_clock
 komira_collections
 komira_content_line
