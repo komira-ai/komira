@@ -102,11 +102,50 @@ fn libFindings(a: std.mem.Allocator, lock: []const u8, declared: bool, opens: bo
 test "declaresLoad reads only the native-dependencies table and only mode load" {
     try t.expect(L.declaresLoad("[package]\nname = \"x\"\n\n[native-dependencies]\nlz4 = { version = \">=1.9.3,<2\", kind = \"shared\", mode = \"load\" }\n"));
     try t.expect(L.declaresLoad("[native-dependencies]\nlz4={version=\"1\",mode=\"load\"}\n"));
-    // a link-mode dependency, a comment, a load word in another table and a package with none are not loads
+    // a link-mode dependency, a comment and a package with none are not loads
     try t.expect(!L.declaresLoad("[native-dependencies]\nlz4 = { version = \"1\", kind = \"static\", mode = \"link\" }\n"));
     try t.expect(!L.declaresLoad("[native-dependencies]\n# lz4 = { mode = \"load\" }\n"));
-    try t.expect(!L.declaresLoad("[package]\ndescription = \"mode = \\\"load\\\"\"\n[native-dependencies]\n"));
     try t.expect(!L.declaresLoad("[package]\nname = \"x\"\n"));
+}
+
+test "declaresLoad ignores a load-shaped line of another table" {
+    try t.expect(!L.declaresLoad("[dependencies]\nmode = \"load\"\n[native-dependencies]\nlz4 = \"1\"\n"));
+    try t.expect(!L.declaresLoad("[package]\nname = \"x\"\nmode = \"load\"\n[native-dependencies]\n"));
+    try t.expect(!L.declaresLoad("mode = \"load\"\n[native-dependencies]\n"));
+    try t.expect(!L.declaresLoad("[native.lz4]\nmode = \"load\"\n"));
+    try t.expect(!L.declaresLoad("[dependencies]\nlz4 = { mode = \"load\" }\n"));
+    try t.expect(!L.declaresLoad("[native-dependencies.lz4]\nversion = \"1\"\n[package]\nmode = \"load\"\n"));
+    try t.expect(!L.declaresLoad("[native-dependencies]\nlz4 = { version = \"mode = 'load'\" }\n"));
+}
+
+test "declaresLoad reads the dependency as its own table" {
+    try t.expect(L.declaresLoad("[native-dependencies.lz4]\nversion = \"1\"\nmode = \"load\"\n"));
+    try t.expect(L.declaresLoad("[ native-dependencies . lz4 ]  # c\nmode   =   \"load\"  # c\n"));
+    try t.expect(L.declaresLoad("[\"native-dependencies\".\"lz4\"]\n\"mode\" = \"load\"\n"));
+    try t.expect(!L.declaresLoad("[native-dependencies.lz4]\nmode = \"link\"\n"));
+    try t.expect(!L.declaresLoad("[native-dependencies.lz4]\nmode = \"link\"\n[native-dependencies.zlib]\nversion = \"1\"\n"));
+}
+
+test "declaresLoad reads a literal string and escapes" {
+    try t.expect(L.declaresLoad("[native-dependencies]\nlz4 = { mode = 'load' }\n"));
+    try t.expect(L.declaresLoad("[native-dependencies.lz4]\nmode = 'load'\n"));
+    try t.expect(L.declaresLoad("[native-dependencies.lz4]\nmode = \"\\u006coad\"\n"));
+    try t.expect(!L.declaresLoad("[native-dependencies.lz4]\nmode = 'link'\n"));
+}
+
+test "declaresLoad reads dotted keys and inline-table spellings" {
+    try t.expect(L.declaresLoad("[native-dependencies]\nlz4.mode = \"load\"\n"));
+    try t.expect(L.declaresLoad("[native-dependencies]\nlz4 . mode = 'load'\n"));
+    try t.expect(L.declaresLoad("native-dependencies.lz4.mode = \"load\"\n[package]\nname = \"x\"\n"));
+    try t.expect(L.declaresLoad("native-dependencies.lz4 = { mode = \"load\" }\n"));
+    try t.expect(L.declaresLoad("[native-dependencies]\nlz4 = {mode=\"load\"}\n"));
+    try t.expect(L.declaresLoad("[native-dependencies]\n\"lz4-c\" = { kind = \"shared\" , 'mode' = \"load\" , version = \"1\" }\n"));
+    try t.expect(L.declaresLoad("[native-dependencies]\nzlib = \"1\"\nlz4 = { version = \"1\", mode = \"load\" } # c\n"));
+    try t.expect(!L.declaresLoad("[native-dependencies]\nlz4.mode = \"link\"\n"));
+    try t.expect(!L.declaresLoad("package.mode = \"load\"\n"));
+    try t.expect(!L.declaresLoad("dependencies.lz4.mode = \"load\"\n"));
+    try t.expect(!L.declaresLoad("dependencies.lz4 = { mode = \"load\" }\n"));
+    try t.expect(!L.declaresLoad("native-dependencies.lz4.version = \"load\"\n"));
 }
 
 test "opensLibrary sees a call and ignores a comment that names one" {
@@ -115,6 +154,18 @@ test "opensLibrary sees a call and ignores a comment that names one" {
     try t.expect(L.opensLibrary("x = dlopen(name, 2)\n"));
     try t.expect(!L.opensLibrary("# opened at run time with OwnedDLHandle(...)\n"));
     try t.expect(!L.opensLibrary("from std.ffi import OwnedDLHandle\n"));
+}
+
+test "opensLibrary ignores a docstring and a string that name a call" {
+    try t.expect(!L.opensLibrary("fn f():\n    \"\"\"Opens the library with dlopen(name).\n\n    Never DLHandle(path) here.\n    \"\"\"\n    pass\n"));
+    try t.expect(!L.opensLibrary("var s = \"dlopen(x)\"\n"));
+    try t.expect(!L.opensLibrary("var s = 'OwnedDLHandle(x)'\n"));
+    try t.expect(!L.opensLibrary("'''\nDLHandle(\n'''\n"));
+    // a call after a docstring, a string or a comment still counts
+    try t.expect(L.opensLibrary("\"\"\"doc\"\"\"\nvar h = DLHandle(p)\n"));
+    try t.expect(L.opensLibrary("var s = \"a\"\nvar h = dlopen(p, 1)\n"));
+    try t.expect(L.opensLibrary("# c\nvar h = OwnedDLHandle(\"x\")\n"));
+    try t.expect(L.opensLibrary("var s = \"unterminated\nvar h = dlopen(p, 1)\n"));
 }
 
 test "a package that loads no library and opens none is clean whatever its lock holds" {

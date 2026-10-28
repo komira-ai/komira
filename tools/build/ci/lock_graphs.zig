@@ -44,38 +44,244 @@ pub const Pkg = struct {
     dir: []const u8 = "",
 };
 
-/// True when a mopm.toml text declares a native dependency with `mode = "load"` in its `[native-dependencies]` table.
+/// A cursor over one line of a mopm.toml, reading the subset of TOML mopm accepts (mopm src/core/toml.zig): bare and quoted keys, dotted keys,
+/// basic and literal strings, inline tables.
+const Cur = struct {
+    s: []const u8,
+    i: usize = 0,
+
+    fn ws(c: *Cur) void {
+        while (c.i < c.s.len and (c.s[c.i] == ' ' or c.s[c.i] == '\t')) c.i += 1;
+    }
+
+    fn peek(c: *Cur) ?u8 {
+        return if (c.i < c.s.len) c.s[c.i] else null;
+    }
+
+    /// Reads the quoted string at the cursor, decoding escapes of a basic string, into `buf`; text longer than `buf` reads as "". Null when it is
+    /// not terminated or has an escape TOML does not define.
+    fn quoted(c: *Cur, buf: []u8) ?[]const u8 {
+        const q = c.s[c.i];
+        c.i += 1;
+        var n: usize = 0;
+        var over = false;
+        while (c.i < c.s.len) {
+            var out = c.s[c.i];
+            c.i += 1;
+            if (out == q) return if (over) "" else buf[0..n];
+            if (q == '"' and out == '\\') {
+                if (c.i >= c.s.len) return null;
+                const e = c.s[c.i];
+                c.i += 1;
+                out = switch (e) {
+                    'b' => 8,
+                    't' => '\t',
+                    'n' => '\n',
+                    'f' => 12,
+                    'r' => '\r',
+                    '"' => '"',
+                    '\\' => '\\',
+                    'u', 'U' => blk: {
+                        const digits: usize = if (e == 'u') 4 else 8;
+                        if (c.i + digits > c.s.len) return null;
+                        const cp = std.fmt.parseInt(u32, c.s[c.i .. c.i + digits], 16) catch return null;
+                        c.i += digits;
+                        break :blk if (cp < 128) @intCast(cp) else 0xff;
+                    },
+                    else => return null,
+                };
+            }
+            if (n == buf.len) over = true else {
+                buf[n] = out;
+                n += 1;
+            }
+        }
+        return null;
+    }
+
+    /// Skips a value that is not a string or an inline table, up to the `,` or `}` that ends it (or the end of the line).
+    fn skipValue(c: *Cur) ?void {
+        var depth: usize = 0;
+        while (c.i < c.s.len) {
+            switch (c.s[c.i]) {
+                '"', '\'' => {
+                    var b: [1]u8 = undefined;
+                    _ = c.quoted(&b) orelse return null;
+                    continue;
+                },
+                '[', '{' => depth += 1,
+                ']' => if (depth > 0) {
+                    depth -= 1;
+                },
+                '}' => {
+                    if (depth == 0) return;
+                    depth -= 1;
+                },
+                ',' => if (depth == 0) return,
+                '#' => {
+                    c.i = c.s.len;
+                    return;
+                },
+                else => {},
+            }
+            c.i += 1;
+        }
+    }
+};
+
+/// A dotted key: how many parts, and whether the first is `native-dependencies` and the last is `mode`.
+const KeyPath = struct { n: i32 = 0, first_native: bool = false, last_mode: bool = false };
+
+fn isBare(ch: u8) bool {
+    return std.ascii.isAlphanumeric(ch) or ch == '_' or ch == '-';
+}
+
+fn keyPath(c: *Cur) ?KeyPath {
+    var kp = KeyPath{};
+    while (true) {
+        c.ws();
+        var buf: [24]u8 = undefined;
+        const part: []const u8 = switch (c.peek() orelse return null) {
+            '"', '\'' => c.quoted(&buf) orelse return null,
+            else => blk: {
+                const start = c.i;
+                while (c.i < c.s.len and isBare(c.s[c.i])) c.i += 1;
+                if (c.i == start) return null;
+                break :blk if (c.i - start > buf.len) "" else c.s[start..c.i];
+            },
+        };
+        if (kp.n == 0) kp.first_native = std.mem.eql(u8, part, "native-dependencies");
+        kp.last_mode = std.mem.eql(u8, part, "mode");
+        kp.n += 1;
+        c.ws();
+        if (c.peek() == '.') {
+            c.i += 1;
+            continue;
+        }
+        return kp;
+    }
+}
+
+/// Reads `key = value` at the cursor. `level` is the depth of the table the key is written in: -1 for the document root, 0 for the
+/// `native-dependencies` table, 1 for one dependency's table. True when the entry, or an inline table in its value, is `mode = "load"` in a
+/// dependency's table. Null when the text is not in the subset (the rest of the line is not read).
+fn entry(c: *Cur, level: i32, root: bool) ?bool {
+    const kp = keyPath(c) orelse return null;
+    c.ws();
+    if (c.peek() != '=') return null;
+    c.i += 1;
+    c.ws();
+    if (root and !kp.first_native) return false;
+    switch (c.peek() orelse return null) {
+        '{' => {
+            c.i += 1;
+            return inlineTable(c, level + kp.n);
+        },
+        '"', '\'' => {
+            var buf: [16]u8 = undefined;
+            const v = c.quoted(&buf) orelse return null;
+            return level + kp.n - 1 == 1 and kp.last_mode and std.mem.eql(u8, v, "load");
+        },
+        else => {
+            c.skipValue() orelse return null;
+            return false;
+        },
+    }
+}
+
+/// Reads the entries of an inline table whose `{` is consumed; `level` is the depth of the table it makes.
+fn inlineTable(c: *Cur, level: i32) ?bool {
+    while (true) {
+        c.ws();
+        if (c.peek() == '}') {
+            c.i += 1;
+            return false;
+        }
+        if (entry(c, level, false) orelse return null) return true;
+        c.ws();
+        switch (c.peek() orelse return null) {
+            ',' => c.i += 1,
+            '}' => {
+                c.i += 1;
+                return false;
+            },
+            else => return null,
+        }
+    }
+}
+
+/// True when a mopm.toml text declares a native dependency with `mode = "load"` in its `[native-dependencies]` table. Every spelling mopm's
+/// manifest reader accepts for that key counts: an inline table (`lz4 = { mode = "load" }`), the dependency's own table
+/// (`[native-dependencies.lz4]`), a dotted key (`lz4.mode = "load"`, or `native-dependencies.lz4.mode = ...` before the first header), a quoted
+/// key or header part, a literal string (`'load'`) and escapes in the string. The word in any other table, a comment or a value does not count.
 pub fn declaresLoad(text: []const u8) bool {
-    var in_native = false;
+    var table: ?i32 = null; // the depth of the current table when it is one of ours; null in any other
+    var root = true;
     var lines = std.mem.splitScalar(u8, text, '\n');
     while (lines.next()) |raw| {
         const line = std.mem.trim(u8, raw, " \t\r");
         if (line.len == 0 or line[0] == '#') continue;
+        var c = Cur{ .s = line };
         if (line[0] == '[') {
-            in_native = std.mem.eql(u8, line, "[native-dependencies]");
+            root = false;
+            table = null;
+            if (line.len > 1 and line[1] == '[') continue;
+            c.i = 1;
+            const kp = keyPath(&c) orelse continue;
+            c.ws();
+            if (c.peek() != ']') continue;
+            if (kp.first_native and kp.n <= 2) table = kp.n - 1;
             continue;
         }
-        if (!in_native) continue;
-        var squeezed: [512]u8 = undefined;
-        var n: usize = 0;
-        for (line) |c| {
-            if (c == ' ' or c == '\t') continue;
-            if (n == squeezed.len) break;
-            squeezed[n] = c;
-            n += 1;
-        }
-        if (std.mem.indexOf(u8, squeezed[0..n], "mode=\"load\"") != null) return true;
+        const level: i32 = if (root) -1 else (table orelse continue);
+        if (entry(&c, level, root) orelse false) return true;
     }
     return false;
 }
 
-/// True when a Mojo source text opens a shared library at run time: a non-comment line that calls `OwnedDLHandle(`, `DLHandle(` or `dlopen(`.
+/// True when a Mojo source text opens a shared library at run time: a call of `OwnedDLHandle(`, `DLHandle(` or `dlopen(` in code. A comment, a
+/// string literal and a docstring (a `"""` or `'''` string, which may span lines) that name one are not calls. The reading is lexical and tracks
+/// only those; a call hidden in a macro-like string template is not seen, which the lock check's other findings do not cover.
 pub fn opensLibrary(text: []const u8) bool {
-    var lines = std.mem.splitScalar(u8, text, '\n');
-    while (lines.next()) |raw| {
-        const line = std.mem.trim(u8, raw, " \t\r");
-        if (line.len == 0 or line[0] == '#') continue;
-        if (std.mem.indexOf(u8, line, "OwnedDLHandle(") != null or std.mem.indexOf(u8, line, "DLHandle(") != null or std.mem.indexOf(u8, line, "dlopen(") != null) return true;
+    var i: usize = 0;
+    var triple: u8 = 0; // the quote of the docstring being read, 0 in code
+    var single: u8 = 0; // the quote of the one-line string being read, 0 in code
+    while (i < text.len) {
+        const ch = text[i];
+        if (triple != 0) {
+            if (ch == '\\') {
+                i += 2;
+            } else if (ch == triple and std.mem.startsWith(u8, text[i..], &[_]u8{ ch, ch, ch })) {
+                triple = 0;
+                i += 3;
+            } else i += 1;
+            continue;
+        }
+        if (single != 0) {
+            if (ch == '\\') {
+                i += 2;
+            } else {
+                if (ch == single or ch == '\n') single = 0;
+                i += 1;
+            }
+            continue;
+        }
+        if (ch == '#') {
+            while (i < text.len and text[i] != '\n') i += 1;
+            continue;
+        }
+        if (ch == '"' or ch == '\'') {
+            if (std.mem.startsWith(u8, text[i..], &[_]u8{ ch, ch, ch })) {
+                triple = ch;
+                i += 3;
+            } else {
+                single = ch;
+                i += 1;
+            }
+            continue;
+        }
+        if (std.mem.startsWith(u8, text[i..], "DLHandle(") or std.mem.startsWith(u8, text[i..], "dlopen(")) return true;
+        i += 1;
     }
     return false;
 }

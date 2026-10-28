@@ -122,8 +122,12 @@ file the lock pins: `system_libs` of `mopm.lock`, written by `mopm lock` of mopm
 fails, naming the package, for a declared load whose lock has no `system_libs`
 (a lock an older mopm wrote), for a platform subdir the lock records a toolchain for
 and `system_libs` has no library for, and for a package whose sources call
-`OwnedDLHandle(`, `DLHandle(` or `dlopen(` on a non-comment line while no manifest
-declares a load (the pins would be missing without the declaration saying so). The
+`OwnedDLHandle(`, `DLHandle(` or `dlopen(` in code while no manifest
+declares a load (the pins would be missing without the declaration saying so). A
+comment, a string literal and a docstring that name a call are skipped; the source
+reading is lexical and tracks only those. The manifest reading accepts every
+spelling mopm's reader accepts for `mode = "load"` of a native dependency (inline
+table, `[native-dependencies.<name>]` table, dotted key, quoted key, literal string). The
 reading is in `lock_graphs.zig` (`declaresLoad`, `opensLibrary`, `checkSystemLibs`),
 behind unit tests that call each with a clean and a defective input.
 
