@@ -1,0 +1,12 @@
+[package]
+name = "komira_runtime_paths"
+version = "0.1.0"
+description = "Where a running Mojo program finds its files, from its own executable path: the install root, the share directory, declared data files and the private test directory, with no dependencies."
+license = "Apache-2.0"
+repository = "https://github.com/komira-ai/komira"
+readme = "README.md"
+mojo = ["1.0.0"]
+
+[targets]
+lib = { path = "src/komira_runtime_paths" }
+tests = ["tests"]
