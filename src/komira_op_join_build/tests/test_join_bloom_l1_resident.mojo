@@ -118,7 +118,7 @@ def test_index_bytes_arithmetic() raises:
     # THE SHIPPED LAYOUT (fused + nobi), at j1's exact geometry. 2,048 B of
     # hash table + 1,600 B of chain entries. `build_keys`, `next_chain` and
     # `build_indices` are NOT ALLOCATED under this layout and must not be
-    # counted; M3 and M4 are the two ways of getting that wrong.
+    # counted, or the predicate overstates the footprint.
     assert_equal(
         bloom_l1_index_bytes(
             _J1_BUILD_ROWS, _J1_CAP, JOIN_KN_WORDS, True, True
@@ -184,7 +184,7 @@ def test_should_decline_predicate() raises:
     )
 
     # THE EXACT BOUNDARY. `<=`, not `<` -- an index that exactly fills the
-    # budget is resident, so it declines. M1 is the off-by-one.
+    # budget is resident, so it declines.
     assert_true(
         bloom_l1_should_decline(16_384, 16_384), "exactly at budget declines"
     )
@@ -212,7 +212,7 @@ def test_should_decline_predicate() raises:
 
     # THE OFF ARM. A zero or negative budget is the lever being off, and it
     # must fail towards the incumbent -- never "decline everything", which is
-    # what an operator would spell by typo. M2 is this direction inverted.
+    # what an operator would spell by typo.
     assert_false(bloom_l1_should_decline(8, 0), "budget 0 is OFF")
     assert_false(bloom_l1_should_decline(8, -1), "negative budget is OFF")
     assert_false(
@@ -258,7 +258,7 @@ def test_decline_arms_on_small_and_not_on_large() raises:
     _clear_env()
 
     # --- the OFF arm: unset gate, j1-shaped build, bloom must be BUILT -------
-    # M2 and a predicate stuck at True both die here.
+    # A predicate stuck at True, or a zero budget that declines, fails here.
     reset_bloom_l1_counters()
     var off = HashJoinBuilder.build(_dense_keys(_J1_BUILD_ROWS))
     assert_true(
@@ -296,7 +296,7 @@ def test_decline_arms_on_small_and_not_on_large() raises:
 
     # --- the ON arm, LARGE: the counter-vacuity leg -------------------------
     # 4,096 rows -> cap 8,192 -> 8,192*8 + 2*4,096*8 = 131,072 B, eight times
-    # the budget. M6 (decline everything) dies here and nowhere else.
+    # the budget. Declining every build is caught by the OFF arm above.
     reset_bloom_l1_counters()
     var large = HashJoinBuilder.build(_dense_keys(4_096))
     assert_equal(
@@ -313,7 +313,7 @@ def test_decline_arms_on_small_and_not_on_large() raises:
     _ = large^
 
     # --- a caller that already declined must not reach the predicate --------
-    # M7: `build_bloom=False` is the driver saying the bloom is unwired
+    # `build_bloom=False` is the driver saying the bloom is unwired
     # downstream. That is not this lever's decision to re-take, and counting it
     # would inflate `declined` with builds the lever had nothing to do with.
     reset_bloom_l1_counters()
