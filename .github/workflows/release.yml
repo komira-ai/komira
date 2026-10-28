@@ -255,7 +255,7 @@ jobs:
       - name: build the pinned mopm
         uses: ./.github/actions/buck2-farm
         with:
-          args: build toolchains//:mopm_0_0_83 --out ${{ runner.temp }}/mopm-publish/mopm
+          args: build toolchains//:mopm_0_0_86 --out ${{ runner.temp }}/mopm-publish/mopm
           assert-remote: ${{ steps.assert.outputs.path }}
       - name: build the packages
         uses: ./.github/actions/buck2-farm

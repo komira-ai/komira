@@ -52,7 +52,7 @@ mojo_conda(
         "../komira_protobuf": "//src/komira_protobuf:mopm.toml",
     },
     mojo = "1.0.0",
-    mopm = "toolchains//:mopm_0_0_83",
+    mopm = "toolchains//:mopm_0_0_86",
     package = "komira_proto_codec",
     version = "0.1.0",
     visibility = ["PUBLIC"],
