@@ -12,11 +12,13 @@ komira_async_api
 komira_atomic_alias
 komira_bench_report
 komira_buffer
+komira_bump_arena
 komira_clock
 komira_collections
 komira_content_line
 komira_counters
 komira_datetime
+komira_dynamic_filter
 komira_encoding
 komira_fork_join
 komira_hash
@@ -28,6 +30,7 @@ komira_kg_spec
 komira_libc
 komira_lz4
 komira_mail_address
+komira_mail_message
 komira_mcp_server
 komira_metrics
 komira_name_registry
