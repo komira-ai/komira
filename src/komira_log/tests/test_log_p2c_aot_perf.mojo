@@ -57,7 +57,7 @@ def _all_filter() -> EnvFilter:
 
 # Drain one worker's ring and return how many records came out. This is the
 # engine's inspectable drain, NOT `drain_worker`: `drain_worker` writes every
-# record to the engine's log sink, and this test drains about 1.6 million records, which
+# record to the engine's log sink, and this test drains about 800 thousand records, which
 # as sink output was about 53 MB of test log. Log records are decoded the same
 # way and each yields one line, so for this test (log records only) the count
 # equals `drain_worker`'s. In general `drain_worker` returns every popped record
