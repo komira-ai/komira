@@ -78,8 +78,11 @@ def _filter_at(level: UInt8) -> EnvFilter:
 # engine's inspectable drain, NOT `drain_worker`: `drain_worker` writes every
 # record to the engine's log sink, and this test drains about 2.9 million
 # records, which as sink output was ~500 MB of test log and made the CI log
-# unreadable. The records are decoded the same way and counted the same way;
-# only the delivery differs, and the lines are dropped here instead of printed.
+# unreadable. Log records are decoded the same way and each yields one line, so
+# for this test (log records only, no unknown kinds asserted) the count equals
+# `drain_worker`'s. In general `drain_worker` returns every popped record (span,
+# metric and unknown kinds too) while `drain_worker_to_lines` counts log records
+# only. Only the delivery differs: the lines are dropped here, not printed.
 def _drain(mut eng: SharedEngine) -> Int:
     return len(eng.drain_worker_to_lines(0, 1 << 16))
 
