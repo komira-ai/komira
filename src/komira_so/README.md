@@ -227,4 +227,4 @@ packaging change that lists it.
 ## Not done
 
 No release-over-release version check and no packaged header yet; no plan execution, query
-or UDF call; no engine in the session; the one language binding is the Node addon ([`node/`](https://github.com/komira-ai/komira/blob/main/node/README.md)).
+or UDF call; no engine in the session. The language bindings are the Node addon ([`node/`](https://github.com/komira-ai/komira/blob/main/node/README.md)) and the Python binding (loader, ABI check, `Session`; `python/komira` in the repository, tested by `komira//python:native_test`).

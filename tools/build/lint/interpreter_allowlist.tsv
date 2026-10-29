@@ -9,6 +9,11 @@
 .github/ci/coverage_measure.sh	coverage and mutation tooling: to port to Zig
 .github/ci/tests/coverage_ci_cases.sh	coverage and mutation tooling: to port to Zig
 buck2	a thin wrapper: runs the pinned buck2 release
+python/komira/__init__.py	Python binding of the shared library: the package of libkomira's ctypes binding
+python/komira/_native.py	Python binding of the shared library: the ctypes loader, ABI check and typed exports
+python/komira/_session.py	Python binding of the shared library: the Session of the binding
+python/komira/_wire.py	Python binding of the shared library: decodes WireSchema bytes to a pyarrow.Schema
+python/native_test.py	Python binding of the shared library: binding test: the binding is tested in Python against the real library
 src/komira_arrow_ipc/tests/fixtures/arrow_ipc/gen_fixtures.py	fixture provenance: the pyarrow program that wrote the Arrow IPC fixtures beside it (a third-party writer is the point)
 src/komira_arrow_ipc/tests/fixtures/arrow_ipc/gen_pyarrow_interop_fixtures.py	fixture provenance: the pyarrow program that wrote the Arrow IPC fixtures beside it (a third-party writer is the point)
 src/komira_parquet_codec/tests/fixtures/parquet/gen_pyarrow_fixtures.py	fixture provenance: the pyarrow program that wrote the Parquet fixtures beside it (a third-party writer is the point)

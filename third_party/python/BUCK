@@ -18,6 +18,8 @@ _TEST_ONLY = [
     "komira//release/ci/tests:",
     # The binding tests of the shared library (python_binding_test).
     "komira//tools/build/examples/python_binding:",
+    # The binding tests of the Python package of the shared library.
+    "komira//python:",
 ]
 
 pinned_file(

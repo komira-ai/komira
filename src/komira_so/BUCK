@@ -155,14 +155,16 @@ mojo_shared_lib(
     ],
     deps = [":komira_so"],
     native_owners = NATIVE_OWNERS,
-    visibility = ["komira//ci:", "komira//tools/build/package/libkomira:", "//node:"],
+    visibility = ["komira//ci:", "komira//tools/build/package/libkomira:", "//node:", "//python:"],
 )
 
-# The Parquet file the C-ABI gates and the Node binding's tests read.
+# The Parquet file the C-ABI gates and the Node and Python bindings' tests read
+# (//python:native_test compares the schema libkomira returns with pyarrow's
+# own reading of the same file).
 export_file(
     name = "tests/fixtures/two_columns.parquet",
     src = "tests/fixtures/two_columns.parquet",
-    visibility = ["komira//ci:", "//node:"],
+    visibility = ["komira//ci:", "//node:", "//python:"],
 )
 
 # The C header of libkomira, komira.h, made from abi/komira.tsv (the golden:
