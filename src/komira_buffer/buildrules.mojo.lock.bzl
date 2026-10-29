@@ -40,14 +40,14 @@ GRAPH_JSON = r'''{
         {"path": "src/komira_buffer/src/komira_buffer/aligned_buffer_trait.mojo", "sha256": "4751bd0b060eee3f9dd0c992a522e46c48edbb0565ce900257605f5d72721dcf"},
         {"path": "src/komira_buffer/src/komira_buffer/byte_buffer.mojo", "sha256": "2d8466f34a5e990ca642f61adeaa28ebb98bf4b86dc8951cdacb1d59598abac3"},
         {"path": "src/komira_buffer/src/komira_buffer/byte_view.mojo", "sha256": "7344f7bef598368d8c5c45bde27b2e3ac65adad01d6900297d70da7d2f712867"},
-        {"path": "src/komira_buffer/src/komira_buffer/constants.mojo", "sha256": "7fe873cb8a7dda0855d634adcb6396feb6dceccd036e7d9cb0dd6110383b283d"},
+        {"path": "src/komira_buffer/src/komira_buffer/constants.mojo", "sha256": "a4b8a5f50e7b2269599c73b82215a295777bc65730677b8279efd32f0b54e56e"},
         {"path": "src/komira_buffer/src/komira_buffer/copyable_shared_aligned_buffer.mojo", "sha256": "6d293778fed4e83cf309283863249927d59ef632c5a37357285e0f28b8cafc1a"},
         {"path": "src/komira_buffer/src/komira_buffer/file_identity.mojo", "sha256": "755b24a5090d98086eca88c66ef17341cc98938f4dbcba5c9e5598794e86a1fc"},
         {"path": "src/komira_buffer/src/komira_buffer/heap_region.mojo", "sha256": "acaf11d2f34c81f7eb30580bc67b1ed746e040ffc9beb8601200e4fe8104c708"},
         {"path": "src/komira_buffer/src/komira_buffer/hugepage_span.mojo", "sha256": "39fa480f0b5e1a96237a8399b998864df236967b7aba22288771671a2cab112a"},
         {"path": "src/komira_buffer/src/komira_buffer/memory_region.mojo", "sha256": "0306cf14e1617e32d4bc3cb3830d0f7d2c3247e6119f96e6373352d16cfbba06"},
         {"path": "src/komira_buffer/src/komira_buffer/mmap_region.mojo", "sha256": "6ef80d6510051eda578e9fef02655bc93fdd9b0c28028a517bccd743c3077c6b"},
-        {"path": "src/komira_buffer/src/komira_buffer/owned_aligned_buffer.mojo", "sha256": "e043ce4834ce0820d73c5fe454d4b999c7d3cd2a64d13e93ac594546da9271d0"},
+        {"path": "src/komira_buffer/src/komira_buffer/owned_aligned_buffer.mojo", "sha256": "f3df575bd715ebfa2731290a207ed5afd496f0c8378efa79201f59e66d956bd0"},
         {"path": "src/komira_buffer/src/komira_buffer/shared_aligned_buffer.mojo", "sha256": "0803fb95a812bff935bbf20b928531a12ef2a06233ead92361047ef9dc53a7c4"}
       ],
       "deps": ["komira_host@0.1.0#mojo1.0.0/lib", "komira_libc@0.1.0#mojo1.0.0/lib", "komira_simd@0.1.0#mojo1.0.0/lib"],
@@ -56,6 +56,21 @@ GRAPH_JSON = r'''{
       ],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["komira_buffer.mojoc"]
+    },
+    {
+      "id": "komira_buffer@0.1.0#mojo1.0.0/test:src/komira_buffer/tests/test_byte_buffer.mojo",
+      "package": "komira_buffer",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/komira_buffer/tests/test_byte_buffer.mojo", "sha256": "359d0f478b919c22c16a41b202e0710a8edfd48313f6d0571486bce34469d77d"}
+      ],
+      "deps": ["komira_buffer@0.1.0#mojo1.0.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira_libc", "kind": "static", "built": "native:komira_libc/komira_libc_posix"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_byte_buffer.pass"]
     },
     {
       "id": "komira_buffer@0.1.0#mojo1.0.0/test:src/komira_buffer/tests/test_byte_view.mojo",
@@ -71,6 +86,21 @@ GRAPH_JSON = r'''{
       ],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_byte_view.pass"]
+    },
+    {
+      "id": "komira_buffer@0.1.0#mojo1.0.0/test:src/komira_buffer/tests/test_constants.mojo",
+      "package": "komira_buffer",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/komira_buffer/tests/test_constants.mojo", "sha256": "d961ced0499f69398053f3e8cb6658da83c276e4954d63c46fb6afc281afa420"}
+      ],
+      "deps": ["komira_buffer@0.1.0#mojo1.0.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira_libc", "kind": "static", "built": "native:komira_libc/komira_libc_posix"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_constants.pass"]
     },
     {
       "id": "komira_buffer@0.1.0#mojo1.0.0/test:src/komira_buffer/tests/test_copyable_sab_mmap_keepalive_copy.mojo",
@@ -108,7 +138,7 @@ GRAPH_JSON = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/komira_buffer/tests/test_file_identity.mojo", "sha256": "35f504164024f11a3e35f080c0ccf9e8672db38f73bd4f49cecd53979e4484a7"}
+        {"path": "src/komira_buffer/tests/test_file_identity.mojo", "sha256": "a9e5788f87c5343a79b0bcc0c4b8defbcf2a2ad8c768c4a77cb1ee0ef46f22b4"}
       ],
       "deps": ["komira_buffer@0.1.0#mojo1.0.0/lib"],
       "natives": [
@@ -148,6 +178,21 @@ GRAPH_JSON = r'''{
       "outputs": ["test_hugepage_hint.pass"]
     },
     {
+      "id": "komira_buffer@0.1.0#mojo1.0.0/test:src/komira_buffer/tests/test_mmap_region_open_errors.mojo",
+      "package": "komira_buffer",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/komira_buffer/tests/test_mmap_region_open_errors.mojo", "sha256": "da274450775acaba5efdb55e1864a4f4e4ae78c7fd602097c8bf7c1f1b7177e5"}
+      ],
+      "deps": ["komira_buffer@0.1.0#mojo1.0.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira_libc", "kind": "static", "built": "native:komira_libc/komira_libc_posix"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_mmap_region_open_errors.pass"]
+    },
+    {
       "id": "komira_buffer@0.1.0#mojo1.0.0/test:src/komira_buffer/tests/test_mmap_region_open_readonly.mojo",
       "package": "komira_buffer",
       "version": "0.1.0",
@@ -178,6 +223,21 @@ GRAPH_JSON = r'''{
       "outputs": ["test_mmap_region_willneed.pass"]
     },
     {
+      "id": "komira_buffer@0.1.0#mojo1.0.0/test:src/komira_buffer/tests/test_owned_aligned_buffer_edges.mojo",
+      "package": "komira_buffer",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/komira_buffer/tests/test_owned_aligned_buffer_edges.mojo", "sha256": "bef9c743e564cce49a642d9a0f57441f4938fa95e8c0e17953185edf89418174"}
+      ],
+      "deps": ["komira_buffer@0.1.0#mojo1.0.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira_libc", "kind": "static", "built": "native:komira_libc/komira_libc_posix"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_owned_aligned_buffer_edges.pass"]
+    },
+    {
       "id": "komira_buffer@0.1.0#mojo1.0.0/test:src/komira_buffer/tests/test_owned_aligned_buffer_reserve_regrow.mojo",
       "package": "komira_buffer",
       "version": "0.1.0",
@@ -191,6 +251,21 @@ GRAPH_JSON = r'''{
       ],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_owned_aligned_buffer_reserve_regrow.pass"]
+    },
+    {
+      "id": "komira_buffer@0.1.0#mojo1.0.0/test:src/komira_buffer/tests/test_sab_api.mojo",
+      "package": "komira_buffer",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/komira_buffer/tests/test_sab_api.mojo", "sha256": "602439f4cd77c563f4411ad9c0706fb9a82418f48076f87c291cd4fe905c96e2"}
+      ],
+      "deps": ["komira_buffer@0.1.0#mojo1.0.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira_libc", "kind": "static", "built": "native:komira_libc/komira_libc_posix"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_sab_api.pass"]
     },
     {
       "id": "komira_buffer@0.1.0#mojo1.0.0/test:src/komira_buffer/tests/test_sab_borrow_mmap_range_check.mojo",
@@ -333,14 +408,14 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
         {"path": "src/komira_buffer/src/komira_buffer/aligned_buffer_trait.mojo", "sha256": "4751bd0b060eee3f9dd0c992a522e46c48edbb0565ce900257605f5d72721dcf"},
         {"path": "src/komira_buffer/src/komira_buffer/byte_buffer.mojo", "sha256": "2d8466f34a5e990ca642f61adeaa28ebb98bf4b86dc8951cdacb1d59598abac3"},
         {"path": "src/komira_buffer/src/komira_buffer/byte_view.mojo", "sha256": "7344f7bef598368d8c5c45bde27b2e3ac65adad01d6900297d70da7d2f712867"},
-        {"path": "src/komira_buffer/src/komira_buffer/constants.mojo", "sha256": "7fe873cb8a7dda0855d634adcb6396feb6dceccd036e7d9cb0dd6110383b283d"},
+        {"path": "src/komira_buffer/src/komira_buffer/constants.mojo", "sha256": "a4b8a5f50e7b2269599c73b82215a295777bc65730677b8279efd32f0b54e56e"},
         {"path": "src/komira_buffer/src/komira_buffer/copyable_shared_aligned_buffer.mojo", "sha256": "6d293778fed4e83cf309283863249927d59ef632c5a37357285e0f28b8cafc1a"},
         {"path": "src/komira_buffer/src/komira_buffer/file_identity.mojo", "sha256": "755b24a5090d98086eca88c66ef17341cc98938f4dbcba5c9e5598794e86a1fc"},
         {"path": "src/komira_buffer/src/komira_buffer/heap_region.mojo", "sha256": "acaf11d2f34c81f7eb30580bc67b1ed746e040ffc9beb8601200e4fe8104c708"},
         {"path": "src/komira_buffer/src/komira_buffer/hugepage_span.mojo", "sha256": "39fa480f0b5e1a96237a8399b998864df236967b7aba22288771671a2cab112a"},
         {"path": "src/komira_buffer/src/komira_buffer/memory_region.mojo", "sha256": "0306cf14e1617e32d4bc3cb3830d0f7d2c3247e6119f96e6373352d16cfbba06"},
         {"path": "src/komira_buffer/src/komira_buffer/mmap_region.mojo", "sha256": "6ef80d6510051eda578e9fef02655bc93fdd9b0c28028a517bccd743c3077c6b"},
-        {"path": "src/komira_buffer/src/komira_buffer/owned_aligned_buffer.mojo", "sha256": "e043ce4834ce0820d73c5fe454d4b999c7d3cd2a64d13e93ac594546da9271d0"},
+        {"path": "src/komira_buffer/src/komira_buffer/owned_aligned_buffer.mojo", "sha256": "f3df575bd715ebfa2731290a207ed5afd496f0c8378efa79201f59e66d956bd0"},
         {"path": "src/komira_buffer/src/komira_buffer/shared_aligned_buffer.mojo", "sha256": "0803fb95a812bff935bbf20b928531a12ef2a06233ead92361047ef9dc53a7c4"}
       ],
       "deps": ["komira_host@0.1.0#mojo1.0.0/lib", "komira_libc@0.1.0#mojo1.0.0/lib", "komira_simd@0.1.0#mojo1.0.0/lib"],
@@ -349,6 +424,21 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       ],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["komira_buffer.mojoc"]
+    },
+    {
+      "id": "komira_buffer@0.1.0#mojo1.0.0/test:src/komira_buffer/tests/test_byte_buffer.mojo",
+      "package": "komira_buffer",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/komira_buffer/tests/test_byte_buffer.mojo", "sha256": "359d0f478b919c22c16a41b202e0710a8edfd48313f6d0571486bce34469d77d"}
+      ],
+      "deps": ["komira_buffer@0.1.0#mojo1.0.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira_libc", "kind": "static", "built": "native:komira_libc/komira_libc_posix"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_byte_buffer.pass"]
     },
     {
       "id": "komira_buffer@0.1.0#mojo1.0.0/test:src/komira_buffer/tests/test_byte_view.mojo",
@@ -364,6 +454,21 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       ],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_byte_view.pass"]
+    },
+    {
+      "id": "komira_buffer@0.1.0#mojo1.0.0/test:src/komira_buffer/tests/test_constants.mojo",
+      "package": "komira_buffer",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/komira_buffer/tests/test_constants.mojo", "sha256": "d961ced0499f69398053f3e8cb6658da83c276e4954d63c46fb6afc281afa420"}
+      ],
+      "deps": ["komira_buffer@0.1.0#mojo1.0.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira_libc", "kind": "static", "built": "native:komira_libc/komira_libc_posix"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_constants.pass"]
     },
     {
       "id": "komira_buffer@0.1.0#mojo1.0.0/test:src/komira_buffer/tests/test_copyable_sab_mmap_keepalive_copy.mojo",
@@ -401,7 +506,7 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/komira_buffer/tests/test_file_identity.mojo", "sha256": "35f504164024f11a3e35f080c0ccf9e8672db38f73bd4f49cecd53979e4484a7"}
+        {"path": "src/komira_buffer/tests/test_file_identity.mojo", "sha256": "a9e5788f87c5343a79b0bcc0c4b8defbcf2a2ad8c768c4a77cb1ee0ef46f22b4"}
       ],
       "deps": ["komira_buffer@0.1.0#mojo1.0.0/lib"],
       "natives": [
@@ -441,6 +546,21 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "outputs": ["test_hugepage_hint.pass"]
     },
     {
+      "id": "komira_buffer@0.1.0#mojo1.0.0/test:src/komira_buffer/tests/test_mmap_region_open_errors.mojo",
+      "package": "komira_buffer",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/komira_buffer/tests/test_mmap_region_open_errors.mojo", "sha256": "da274450775acaba5efdb55e1864a4f4e4ae78c7fd602097c8bf7c1f1b7177e5"}
+      ],
+      "deps": ["komira_buffer@0.1.0#mojo1.0.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira_libc", "kind": "static", "built": "native:komira_libc/komira_libc_posix"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_mmap_region_open_errors.pass"]
+    },
+    {
       "id": "komira_buffer@0.1.0#mojo1.0.0/test:src/komira_buffer/tests/test_mmap_region_open_readonly.mojo",
       "package": "komira_buffer",
       "version": "0.1.0",
@@ -471,6 +591,21 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "outputs": ["test_mmap_region_willneed.pass"]
     },
     {
+      "id": "komira_buffer@0.1.0#mojo1.0.0/test:src/komira_buffer/tests/test_owned_aligned_buffer_edges.mojo",
+      "package": "komira_buffer",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/komira_buffer/tests/test_owned_aligned_buffer_edges.mojo", "sha256": "bef9c743e564cce49a642d9a0f57441f4938fa95e8c0e17953185edf89418174"}
+      ],
+      "deps": ["komira_buffer@0.1.0#mojo1.0.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira_libc", "kind": "static", "built": "native:komira_libc/komira_libc_posix"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_owned_aligned_buffer_edges.pass"]
+    },
+    {
       "id": "komira_buffer@0.1.0#mojo1.0.0/test:src/komira_buffer/tests/test_owned_aligned_buffer_reserve_regrow.mojo",
       "package": "komira_buffer",
       "version": "0.1.0",
@@ -484,6 +619,21 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       ],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_owned_aligned_buffer_reserve_regrow.pass"]
+    },
+    {
+      "id": "komira_buffer@0.1.0#mojo1.0.0/test:src/komira_buffer/tests/test_sab_api.mojo",
+      "package": "komira_buffer",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/komira_buffer/tests/test_sab_api.mojo", "sha256": "602439f4cd77c563f4411ad9c0706fb9a82418f48076f87c291cd4fe905c96e2"}
+      ],
+      "deps": ["komira_buffer@0.1.0#mojo1.0.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira_libc", "kind": "static", "built": "native:komira_libc/komira_libc_posix"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_sab_api.pass"]
     },
     {
       "id": "komira_buffer@0.1.0#mojo1.0.0/test:src/komira_buffer/tests/test_sab_borrow_mmap_range_check.mojo",
@@ -623,14 +773,14 @@ GRAPH_JSON_OSX_ARM64 = r'''{
         {"path": "src/komira_buffer/src/komira_buffer/aligned_buffer_trait.mojo", "sha256": "4751bd0b060eee3f9dd0c992a522e46c48edbb0565ce900257605f5d72721dcf"},
         {"path": "src/komira_buffer/src/komira_buffer/byte_buffer.mojo", "sha256": "2d8466f34a5e990ca642f61adeaa28ebb98bf4b86dc8951cdacb1d59598abac3"},
         {"path": "src/komira_buffer/src/komira_buffer/byte_view.mojo", "sha256": "7344f7bef598368d8c5c45bde27b2e3ac65adad01d6900297d70da7d2f712867"},
-        {"path": "src/komira_buffer/src/komira_buffer/constants.mojo", "sha256": "7fe873cb8a7dda0855d634adcb6396feb6dceccd036e7d9cb0dd6110383b283d"},
+        {"path": "src/komira_buffer/src/komira_buffer/constants.mojo", "sha256": "a4b8a5f50e7b2269599c73b82215a295777bc65730677b8279efd32f0b54e56e"},
         {"path": "src/komira_buffer/src/komira_buffer/copyable_shared_aligned_buffer.mojo", "sha256": "6d293778fed4e83cf309283863249927d59ef632c5a37357285e0f28b8cafc1a"},
         {"path": "src/komira_buffer/src/komira_buffer/file_identity.mojo", "sha256": "755b24a5090d98086eca88c66ef17341cc98938f4dbcba5c9e5598794e86a1fc"},
         {"path": "src/komira_buffer/src/komira_buffer/heap_region.mojo", "sha256": "acaf11d2f34c81f7eb30580bc67b1ed746e040ffc9beb8601200e4fe8104c708"},
         {"path": "src/komira_buffer/src/komira_buffer/hugepage_span.mojo", "sha256": "39fa480f0b5e1a96237a8399b998864df236967b7aba22288771671a2cab112a"},
         {"path": "src/komira_buffer/src/komira_buffer/memory_region.mojo", "sha256": "0306cf14e1617e32d4bc3cb3830d0f7d2c3247e6119f96e6373352d16cfbba06"},
         {"path": "src/komira_buffer/src/komira_buffer/mmap_region.mojo", "sha256": "6ef80d6510051eda578e9fef02655bc93fdd9b0c28028a517bccd743c3077c6b"},
-        {"path": "src/komira_buffer/src/komira_buffer/owned_aligned_buffer.mojo", "sha256": "e043ce4834ce0820d73c5fe454d4b999c7d3cd2a64d13e93ac594546da9271d0"},
+        {"path": "src/komira_buffer/src/komira_buffer/owned_aligned_buffer.mojo", "sha256": "f3df575bd715ebfa2731290a207ed5afd496f0c8378efa79201f59e66d956bd0"},
         {"path": "src/komira_buffer/src/komira_buffer/shared_aligned_buffer.mojo", "sha256": "0803fb95a812bff935bbf20b928531a12ef2a06233ead92361047ef9dc53a7c4"}
       ],
       "deps": ["komira_host@0.1.0#mojo1.0.0/lib", "komira_libc@0.1.0#mojo1.0.0/lib", "komira_simd@0.1.0#mojo1.0.0/lib"],
@@ -639,6 +789,21 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       ],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["komira_buffer.mojoc"]
+    },
+    {
+      "id": "komira_buffer@0.1.0#mojo1.0.0/test:src/komira_buffer/tests/test_byte_buffer.mojo",
+      "package": "komira_buffer",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/komira_buffer/tests/test_byte_buffer.mojo", "sha256": "359d0f478b919c22c16a41b202e0710a8edfd48313f6d0571486bce34469d77d"}
+      ],
+      "deps": ["komira_buffer@0.1.0#mojo1.0.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira_libc", "kind": "static", "built": "native:komira_libc/komira_libc_posix"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_byte_buffer.pass"]
     },
     {
       "id": "komira_buffer@0.1.0#mojo1.0.0/test:src/komira_buffer/tests/test_byte_view.mojo",
@@ -654,6 +819,21 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       ],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_byte_view.pass"]
+    },
+    {
+      "id": "komira_buffer@0.1.0#mojo1.0.0/test:src/komira_buffer/tests/test_constants.mojo",
+      "package": "komira_buffer",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/komira_buffer/tests/test_constants.mojo", "sha256": "d961ced0499f69398053f3e8cb6658da83c276e4954d63c46fb6afc281afa420"}
+      ],
+      "deps": ["komira_buffer@0.1.0#mojo1.0.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira_libc", "kind": "static", "built": "native:komira_libc/komira_libc_posix"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_constants.pass"]
     },
     {
       "id": "komira_buffer@0.1.0#mojo1.0.0/test:src/komira_buffer/tests/test_copyable_sab_mmap_keepalive_copy.mojo",
@@ -691,7 +871,7 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/komira_buffer/tests/test_file_identity.mojo", "sha256": "35f504164024f11a3e35f080c0ccf9e8672db38f73bd4f49cecd53979e4484a7"}
+        {"path": "src/komira_buffer/tests/test_file_identity.mojo", "sha256": "a9e5788f87c5343a79b0bcc0c4b8defbcf2a2ad8c768c4a77cb1ee0ef46f22b4"}
       ],
       "deps": ["komira_buffer@0.1.0#mojo1.0.0/lib"],
       "natives": [
@@ -731,6 +911,21 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "outputs": ["test_hugepage_hint.pass"]
     },
     {
+      "id": "komira_buffer@0.1.0#mojo1.0.0/test:src/komira_buffer/tests/test_mmap_region_open_errors.mojo",
+      "package": "komira_buffer",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/komira_buffer/tests/test_mmap_region_open_errors.mojo", "sha256": "da274450775acaba5efdb55e1864a4f4e4ae78c7fd602097c8bf7c1f1b7177e5"}
+      ],
+      "deps": ["komira_buffer@0.1.0#mojo1.0.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira_libc", "kind": "static", "built": "native:komira_libc/komira_libc_posix"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_mmap_region_open_errors.pass"]
+    },
+    {
       "id": "komira_buffer@0.1.0#mojo1.0.0/test:src/komira_buffer/tests/test_mmap_region_open_readonly.mojo",
       "package": "komira_buffer",
       "version": "0.1.0",
@@ -761,6 +956,21 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "outputs": ["test_mmap_region_willneed.pass"]
     },
     {
+      "id": "komira_buffer@0.1.0#mojo1.0.0/test:src/komira_buffer/tests/test_owned_aligned_buffer_edges.mojo",
+      "package": "komira_buffer",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/komira_buffer/tests/test_owned_aligned_buffer_edges.mojo", "sha256": "bef9c743e564cce49a642d9a0f57441f4938fa95e8c0e17953185edf89418174"}
+      ],
+      "deps": ["komira_buffer@0.1.0#mojo1.0.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira_libc", "kind": "static", "built": "native:komira_libc/komira_libc_posix"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_owned_aligned_buffer_edges.pass"]
+    },
+    {
       "id": "komira_buffer@0.1.0#mojo1.0.0/test:src/komira_buffer/tests/test_owned_aligned_buffer_reserve_regrow.mojo",
       "package": "komira_buffer",
       "version": "0.1.0",
@@ -774,6 +984,21 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       ],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_owned_aligned_buffer_reserve_regrow.pass"]
+    },
+    {
+      "id": "komira_buffer@0.1.0#mojo1.0.0/test:src/komira_buffer/tests/test_sab_api.mojo",
+      "package": "komira_buffer",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/komira_buffer/tests/test_sab_api.mojo", "sha256": "602439f4cd77c563f4411ad9c0706fb9a82418f48076f87c291cd4fe905c96e2"}
+      ],
+      "deps": ["komira_buffer@0.1.0#mojo1.0.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira_libc", "kind": "static", "built": "native:komira_libc/komira_libc_posix"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_sab_api.pass"]
     },
     {
       "id": "komira_buffer@0.1.0#mojo1.0.0/test:src/komira_buffer/tests/test_sab_borrow_mmap_range_check.mojo",
