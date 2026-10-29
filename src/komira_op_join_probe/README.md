@@ -21,6 +21,13 @@ import from the modules.
   chains together (`join_multi_key_parallel_task`), then one more fanned wave
   concatenates their matches. The same pairs as the serial probe, grouped by
   worker.
+- `komira_op_join_probe.join_multi_key_parallel_build`:
+  `multi_key_hash_join_build_parallel`, the build fanned over the engine's
+  dispatcher (each row pushed onto its bucket's chain with an atomic
+  compare-exchange), serial below 250,000 rows. The same rows in the same
+  buckets as `MultiKeyHashJoinBuilder.build`, chain order aside. It follows the
+  hash join's build mode (`komira_op_join_build`'s
+  `join_parallel_build_configure`: AUTO, OFF, or the FORCE test hook).
 - `komira_op_join_probe.join_probe_multi_key`: `execute_multi_key_join_probe`,
   the composite join probe operator: one probe batch against the completed
   build batch, as a physical plan's `MorselOp` says (keys, INNER / LEFT / SEMI

@@ -429,9 +429,12 @@ def test_negative_and_extreme_keys() raises:
 
 
 def test_skew_all_keys_equal() raises:
-    """Every build row in ONE bucket: maximal compare-exchange contention on a
-    single chain head. Guards against a lost or duplicated Treiber push, which a
-    spread fixture would almost never expose.
+    """Every build row in ONE bucket: the whole build is one chain, so every
+    row must be reachable from the one head exactly once and the one-bucket
+    probe must return every row. Whether pushes actually collide depends on how
+    the workers overlap, so this test cannot be relied on to catch a lost
+    compare-exchange; the one-row-chunk hot-bucket test in
+    `test_join_multikey_parallel_build_kinds` is the one aimed at that.
     """
     _begin(True)
     var k0 = List[Int64]()
