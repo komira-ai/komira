@@ -9,7 +9,10 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # radix-partitioned single-key hash join, the SEMI / ANTI key set, and the
 # joins whose condition carries a residual predicate (serial, and the parallel
 # SEMI / ANTI mark join), and the join probe over whole batches: every join
-# type and single-key strategy, the sort-merge joins, the join output schema.
+# type and single-key strategy, the sort-merge joins, the join output schema;
+# and the streaming join probe operators over a morsel: the single-key
+# `JoinProbeOp` (resumable INNER, deferred INNER output, LEFT / SEMI / ANTI)
+# and the composite-key `MultiKeyJoinProbeOp` (INNER).
 mojo_library(
     name = "komira_op_join_probe",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
@@ -25,10 +28,14 @@ mojo_library(
         "//src/komira_counters:komira_counters",
         "//src/komira_dynamic_filter:komira_dynamic_filter",
         "//src/komira_engine_runtime:komira_engine_runtime",
+        "//src/komira_exec_types:komira_exec_types",
         "//src/komira_join_assembly:komira_join_assembly",
+        "//src/komira_metrics:komira_metrics",
+        "//src/komira_morsel:komira_morsel",
         "//src/komira_op_fused_kernels:komira_op_fused_kernels",
         "//src/komira_op_join_build:komira_op_join_build",
         "//src/komira_op_sort:komira_op_sort",
+        "//src/komira_operator_api:komira_operator_api",
         "//src/komira_physical_plan:komira_physical_plan",
         "//src/komira_plan_expr:komira_plan_expr",
         "//src/komira_plan_ir:komira_plan_ir",
@@ -61,6 +68,12 @@ mojo_library(
         "tests/test_join_probe_driver.mojo",
         "tests/test_join_probe_levers_counters.mojo",
         "tests/test_join_probe_multi_key_op.mojo",
+        "tests/test_join_probe_narrow.mojo",
+        "tests/test_join_probe_op.mojo",
+        "tests/test_join_probe_op_deferred.mojo",
+        "tests/test_join_probe_op_key_cse.mojo",
+        "tests/test_join_probe_op_levers.mojo",
+        "tests/test_join_probe_op_sel_mask.mojo",
         "tests/test_join_residual_eval.mojo",
         "tests/test_join_residual_latemat.mojo",
         "tests/test_multi_key_join_runtime_flip.mojo",
@@ -68,7 +81,10 @@ mojo_library(
         "tests/test_multi_key_parallel_probe.mojo",
         "tests/test_multi_key_parallel_probe_geometry.mojo",
         "tests/test_multi_key_parallel_probe_modes.mojo",
+        "tests/test_multi_key_probe_op_key_cse.mojo",
+        "tests/test_multi_key_probe_op_mixed_types.mojo",
         "tests/test_multi_key_skipindex_compaction.mojo",
+        "tests/test_multi_key_streaming_probe_op.mojo",
         "tests/test_radix_join.mojo",
         "tests/test_radix_join_oracle.mojo",
         "tests/test_residual_mark_cap_nearest.mojo",
