@@ -36,6 +36,8 @@ comptime _FILES: List[String] = [
     "h2o_join.mojo",
     "lock.mojo",
     "manifest.mojo",
+    "stage.mojo",
+    "stage_cli.mojo",
     "verify.mojo",
 ]
 
@@ -165,6 +167,7 @@ def test_imports_only_its_deps() raises:
     var allowed: List[String] = [
         "komira_arrow",
         "komira_bench_data",
+        "komira_bench_duckdb",
         "komira_collections",
         "komira_crypto",
         "komira_parquet_api",
@@ -209,6 +212,8 @@ def test_the_scan_saw_the_package() raises:
     assert_equal(_count(_read("h2o_join.mojo"), "\ndef h2o_join_batch("), 1)
     assert_equal(_count(_read("draw.mojo"), "\ndef mix64("), 1)
     assert_equal(_count(_read("h2o_files.mojo"), "\ndef write_new_file("), 1)
+    assert_equal(_count(_read("stage.mojo"), "\ndef generate_tpch["), 1)
+    assert_equal(_count(_read("stage_cli.mojo"), "\ndef run_stage("), 1)
 
 
 def main() raises:
