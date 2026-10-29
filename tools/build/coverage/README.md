@@ -176,10 +176,14 @@ A branch is identified by `<line>,<col>:<kind>:<n>/<N>,<arm>` (numbers
 without leading zeros), and an arm's counts are summed across files by that
 id; `-` (the decision's code never ran) is counted and not taken, so it
 adds nothing: `-` and `n` give `n`, two `-` an arm not taken. One test's
-classifier cannot see another's copies of the code, so two files that give
-one location (line, column, kind) a different `N`, or one decision a
-different number of arms, are refused, naming the file, the line and both
-files: their records cannot be summed by id. (Two copies holding the same
+classifier cannot see another's copies of the code, so where two files give
+one location (line, column, kind) a different `N`, the files whose copy
+holds the most decisions are the location's set and are summed as above, and
+the records of the other files at that location are dropped, never added: the
+figure under-reports rather than guess which arm of the larger copy a smaller
+copy's arm is. One decision given a different number of arms is refused,
+naming the file, the line and both files: its records cannot be summed by
+id. (Two copies holding the same
 number of decisions but different ones cannot be told apart here; see
 `branch/README.md`, "Known shapes".) The branches join the file of the same
 repository path from the line reports; a file whose line report gives

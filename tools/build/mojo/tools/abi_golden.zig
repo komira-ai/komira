@@ -2,7 +2,7 @@
 // generator of `komira_abi_golden` run as one build action with no shell.
 //! abi_golden: the checks and the C header of `komira_abi_golden` (abi_golden.bzl).
 //!
-//! usage: abi_golden <source.mojo> <golden.tsv> <out header> <label> <header name>
+//! usage: abi_golden <source.mojo> <golden.tsv> <out header> <label> <header name> [<constants.mojo>]
 //!
 //! The source is read for its `@export` functions that are `abi("C")`: each
 //! one's symbol, return type and argument types. The golden is a tab-separated
@@ -24,6 +24,19 @@
 //! `UnsafePointer[T, <origin>...]` reduced to `UnsafePointer[T]` and an
 //! `OpaquePointer[...]` or `UnsafePointer[NoneType]` to `OpaquePointer`: the
 //! origin is a lifetime of the Mojo side and has no C spelling.
+//!
+//! A golden may also list constants, rows `constant<TAB>NAME<TAB>VALUE<TAB>since`
+//! (NAME starts with `KOMIRA_`, VALUE is a decimal integer). They become
+//! `#define`s in the header. With a constants file, its top-level
+//! `comptime KOMIRA_NAME: <integer type> = <product of integers>` lines are the
+//! source of the constants: a golden constant it lacks, one whose value differs
+//! and a `KOMIRA_` constant the golden does not list are findings. Constants in
+//! the golden with no constants file are a finding too: nothing would hold them.
+//!
+//! `CStr` (`const char *`) and `ConstBytes` (`const uint8_t *`) are named types
+//! like `Handle`: a source that uses one must declare it as
+//! `comptime CStr = UnsafePointer[UInt8, ...]` at the top level, and a
+//! declaration that is any other type is a finding.
 //!
 //! Exit status: 0; 1 for findings; 2 for a usage error or a failure of the
 //! tool's own.
@@ -70,10 +83,27 @@ pub const Row = struct {
     line: usize,
 };
 
+/// A constant of the golden: `constant<TAB>NAME<TAB>VALUE<TAB>since`.
+pub const Const = struct {
+    name: []const u8,
+    value: i128,
+    since: Ver,
+    line: usize,
+};
+
 pub const Golden = struct {
     version: Ver,
     rows: []const Row,
+    consts: []const Const = &.{},
 };
+
+/// The range of a header constant: an `int` spells itself, a larger value
+/// takes `ULL` and is at most a `uint64_t`.
+pub const const_min: i128 = -2147483648;
+pub const const_max: i128 = 18446744073709551615;
+
+pub const const_prefix = "KOMIRA_";
+const reserved_consts = [_][]const u8{ "KOMIRA_ABI_VERSION_MAJOR", "KOMIRA_ABI_VERSION_MINOR" };
 
 fn trim(s: []const u8) []const u8 {
     return std.mem.trim(u8, s, " \t\r");
@@ -185,6 +215,10 @@ const scalar_map = [_][2][]const u8{
     // A source alias of the opaque handle the library returns and takes back.
     // The tool trusts the name; it does not read the alias.
     .{ "Handle", "komira_handle" },
+    // Pointers the C caller keeps const. In Mojo the pointee is UInt8 either way;
+    // `named_aliases` holds the source to that.
+    .{ "CStr", "const char *" },
+    .{ "ConstBytes", "const uint8_t *" },
 };
 
 /// The C type of a canonical Mojo type that can be an argument or the pointee of
@@ -279,7 +313,51 @@ pub fn parseSource(a: Alloc, text: []const u8, f: *Findings) ![]const Sig {
         i = k;
         if (try parseSignature(a, trim(sig.items), symbol, j + 1, f)) |s| try out.append(a, s);
     }
+    try checkNamedTypes(a, text, out.items, f);
     return out.toOwnedSlice(a);
+}
+
+/// The named C types whose Mojo alias the source must declare, with the
+/// canonical type the alias must be.
+const named_aliases = [_][2][]const u8{
+    .{ "CStr", "UnsafePointer[UInt8]" },
+    .{ "ConstBytes", "UnsafePointer[UInt8]" },
+};
+
+fn usesType(s: Sig, name: []const u8) bool {
+    if (std.mem.eql(u8, s.ret, name)) return true;
+    for (s.args) |t| {
+        if (std.mem.eql(u8, t, name)) return true;
+    }
+    return false;
+}
+
+/// A named type a signature uses must be declared at the top level of the
+/// source as `comptime <Name> = <type>` with the type `named_aliases` expects,
+/// so a mapping to `const char *` cannot hide a pointer to anything else.
+fn checkNamedTypes(a: Alloc, text: []const u8, sigs: []const Sig, f: *Findings) !void {
+    for (named_aliases) |na| {
+        var used: ?Sig = null;
+        for (sigs) |s| {
+            if (usesType(s, na[0])) used = s;
+        }
+        var declared = false;
+        var it = std.mem.splitScalar(u8, text, '\n');
+        var n: usize = 0;
+        const head = try std.fmt.allocPrint(a, "comptime {s} =", .{na[0]});
+        while (it.next()) |raw| {
+            n += 1;
+            if (!std.mem.startsWith(u8, raw, head)) continue;
+            declared = true;
+            const got = try canonType(a, trim(stripComment(raw[head.len..])));
+            if (!std.mem.eql(u8, got, na[1])) {
+                try f.add("source line {d}: `{s}` is declared as `{s}` and must be `{s}` (the header makes it a pointer to const)", .{ n, na[0], got, na[1] });
+            }
+        }
+        if (used) |s| {
+            if (!declared) try f.add("source line {d}: `{s}` uses the type `{s}` and the source declares no `comptime {s} = ...`", .{ s.line, s.symbol, na[0], na[0] });
+        }
+    }
 }
 
 fn parseSignature(a: Alloc, s: []const u8, symbol: ?[]const u8, line: usize, f: *Findings) !?Sig {
@@ -377,6 +455,7 @@ pub fn parseGolden(a: Alloc, text: []const u8, f: *Findings) !?Golden {
         return null;
     }
     var rows = std.ArrayList(Row).empty;
+    var consts = std.ArrayList(Const).empty;
     var n: usize = 1;
     while (it.next()) |raw| {
         n += 1;
@@ -387,6 +466,15 @@ pub fn parseGolden(a: Alloc, text: []const u8, f: *Findings) !?Golden {
         while (fit.next()) |x| try fields.append(a, trim(x));
         if (fields.items.len != 4) {
             try f.add("golden line {d}: {d} tab-separated fields, want 4 (symbol, return, arguments, since)", .{ n, fields.items.len });
+            continue;
+        }
+        if (std.mem.eql(u8, fields.items[0], "constant")) {
+            if (try parseConstRow(fields.items, n, f)) |c| {
+                for (consts.items) |p| {
+                    if (std.mem.eql(u8, p.name, c.name)) try f.add("golden line {d}: constant `{s}` is listed twice (first at line {d})", .{ n, c.name, p.line });
+                }
+                try consts.append(a, c);
+            }
             continue;
         }
         const symbol = fields.items[0];
@@ -410,7 +498,119 @@ pub fn parseGolden(a: Alloc, text: []const u8, f: *Findings) !?Golden {
             .line = n,
         });
     }
-    return Golden{ .version = ver, .rows = try rows.toOwnedSlice(a) };
+    return Golden{ .version = ver, .rows = try rows.toOwnedSlice(a), .consts = try consts.toOwnedSlice(a) };
+}
+
+/// One `constant<TAB>NAME<TAB>VALUE<TAB>since` row (`fields` has four entries).
+fn parseConstRow(fields: []const []const u8, n: usize, f: *Findings) !?Const {
+    const name = fields[1];
+    if (!isIdent(name) or !std.mem.startsWith(u8, name, const_prefix)) {
+        try f.add("golden line {d}: constant `{s}` is not a C identifier starting with {s}", .{ n, name, const_prefix });
+        return null;
+    }
+    for (reserved_consts) |r| {
+        if (std.mem.eql(u8, name, r)) {
+            try f.add("golden line {d}: constant `{s}` is defined by the header itself from the golden version", .{ n, name });
+            return null;
+        }
+    }
+    const value = std.fmt.parseInt(i128, fields[2], 10) catch {
+        try f.add("golden line {d}: {s}: value `{s}` is not a decimal integer", .{ n, name, fields[2] });
+        return null;
+    };
+    if (value < const_min or value > const_max) {
+        try f.add("golden line {d}: {s}: value {d} is outside the header's range ({d} to {d})", .{ n, name, value, const_min, const_max });
+        return null;
+    }
+    const since = parseVer(fields[3]) orelse {
+        try f.add("golden line {d}: {s}: since `{s}` is not `<major>.<minor>`", .{ n, name, fields[3] });
+        return null;
+    };
+    return Const{ .name = name, .value = value, .since = since, .line = n };
+}
+
+/// A constant read from the constants file.
+pub const SrcConst = struct {
+    name: []const u8,
+    value: i128,
+    line: usize,
+};
+
+const const_types = [_][]const u8{ "Int8", "Int16", "Int32", "Int64", "UInt8", "UInt16", "UInt32", "UInt64", "Int", "UInt" };
+
+/// The product of decimal integers (`64 * 1024 * 1024`, `-5`), or null.
+fn evalProduct(s: []const u8) ?i128 {
+    var acc: i128 = 1;
+    var it = std.mem.splitScalar(u8, s, '*');
+    while (it.next()) |raw| {
+        const v = std.fmt.parseInt(i128, trim(raw), 10) catch return null;
+        acc = std.math.mul(i128, acc, v) catch return null;
+    }
+    return acc;
+}
+
+/// The top-level `comptime KOMIRA_NAME: <integer type> = <product>` lines of
+/// `text`. One whose value is not a product of integers is a finding: the tool
+/// does not evaluate Mojo.
+pub fn parseConstants(a: Alloc, text: []const u8, f: *Findings) ![]const SrcConst {
+    var out = std.ArrayList(SrcConst).empty;
+    var it = std.mem.splitScalar(u8, text, '\n');
+    var n: usize = 0;
+    while (it.next()) |raw| {
+        n += 1;
+        if (!std.mem.startsWith(u8, raw, "comptime " ++ const_prefix)) continue;
+        const rest = raw["comptime ".len..];
+        const colon = std.mem.indexOfScalar(u8, rest, ':') orelse continue;
+        const name = trim(rest[0..colon]);
+        const eq = std.mem.indexOfScalar(u8, rest, '=') orelse continue;
+        if (eq < colon) continue;
+        const ty = trim(rest[colon + 1 .. eq]);
+        var integer = false;
+        for (const_types) |c| {
+            if (std.mem.eql(u8, ty, c)) integer = true;
+        }
+        if (!integer) continue; // not an ABI constant
+        const value = evalProduct(trim(stripComment(rest[eq + 1 ..]))) orelse {
+            try f.add("constants line {d}: `{s}` is not a product of integers", .{ n, name });
+            continue;
+        };
+        try out.append(a, .{ .name = name, .value = value, .line = n });
+    }
+    return out.toOwnedSlice(a);
+}
+
+/// Compare the golden's constants with the constants file's.
+pub fn checkConstants(g: Golden, src: ?[]const SrcConst, f: *Findings) !void {
+    for (g.consts) |c| {
+        if (c.since.above(g.version)) {
+            try f.add("golden line {d}: `{s}`: since {d}.{d} is above the golden version {d}.{d}", .{ c.line, c.name, c.since.major, c.since.minor, g.version.major, g.version.minor });
+        }
+    }
+    const have = src orelse {
+        if (g.consts.len > 0) try f.add("the golden lists {d} constants and the target has no constants_src to check them against", .{g.consts.len});
+        return;
+    };
+    for (g.consts) |c| {
+        var found: ?SrcConst = null;
+        for (have) |s| {
+            if (std.mem.eql(u8, s.name, c.name)) found = s;
+        }
+        const s = found orelse {
+            try f.add("missing constant `{s}`: the golden lists it (line {d}) and the constants file has no such comptime", .{ c.name, c.line });
+            continue;
+        };
+        if (s.value != c.value) try f.add("`{s}`: the value changed: golden {d}, source {d} (constants line {d})", .{ c.name, c.value, s.value, s.line });
+    }
+    for (have, 0..) |s, i| {
+        for (have[0..i]) |p| {
+            if (std.mem.eql(u8, p.name, s.name)) try f.add("constants line {d}: `{s}` is declared twice (first at line {d})", .{ s.line, s.name, p.line });
+        }
+        var listed = false;
+        for (g.consts) |c| {
+            if (std.mem.eql(u8, s.name, c.name)) listed = true;
+        }
+        if (!listed) try f.add("extra constant `{s}`: the constants file declares it (line {d}) and the golden has no row for it", .{ s.name, s.line });
+    }
 }
 
 fn joinTypes(a: Alloc, ts: []const []const u8) ![]const u8 {
@@ -500,6 +700,10 @@ pub fn header(a: Alloc, g: Golden, header_name: []const u8, golden_name: []const
     try w.writeAll("#include <stddef.h>\n#include <stdint.h>\n\n");
     try w.writeAll("#ifdef __cplusplus\nextern \"C\" {\n#endif\n\n");
     try w.print("#define KOMIRA_ABI_VERSION_MAJOR {d}\n#define KOMIRA_ABI_VERSION_MINOR {d}\n\n", .{ g.version.major, g.version.minor });
+    for (g.consts) |c| {
+        try w.print("/* since {d}.{d} */\n#define {s} ({d}{s})\n", .{ c.since.major, c.since.minor, c.name, c.value, if (c.value > 2147483647) "ULL" else "" });
+    }
+    if (g.consts.len > 0) try w.writeAll("\n");
     try w.writeAll("/* An opaque handle: never dereferenced by a caller. */\n");
     try w.writeAll("typedef struct komira_handle_s *komira_handle;\n\n");
     for (g.rows) |r| {
@@ -522,7 +726,7 @@ pub fn main() !void {
     var arena_state = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     const a = arena_state.allocator();
     const argv = try std.process.argsAlloc(a);
-    if (argv.len != 6) die("usage: abi_golden <source.mojo> <golden.tsv> <out header> <label> <header name>", .{});
+    if (argv.len != 6 and argv.len != 7) die("usage: abi_golden <source.mojo> <golden.tsv> <out header> <label> <header name> [<constants.mojo>]", .{});
     const src_path = argv[1];
     const golden_path = argv[2];
     const out_path = argv[3];
@@ -534,7 +738,15 @@ pub fn main() !void {
     var f = Findings{ .a = a };
     const sigs = try parseSource(a, src, &f);
     const golden = try parseGolden(a, gtext, &f);
-    if (golden) |g| try check(a, sigs, g, &f);
+    var consts: ?[]const SrcConst = null;
+    if (argv.len == 7) {
+        const ctext = std.fs.cwd().readFileAlloc(a, argv[6], 1 << 26) catch |e| die("cannot read {s}: {s}", .{ argv[6], @errorName(e) });
+        consts = try parseConstants(a, ctext, &f);
+    }
+    if (golden) |g| {
+        try check(a, sigs, g, &f);
+        try checkConstants(g, consts, &f);
+    }
     if (golden == null or f.list.items.len > 0) {
         for (f.list.items) |m| std.debug.print("komira_abi_golden: {s}: {s}\n", .{ label, m });
         std.process.exit(1);

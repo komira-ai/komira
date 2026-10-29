@@ -33,7 +33,7 @@ deleted, made when each scan's plan statistics equalled its footers;
 fixture set and holds the expected results as a golden file.
 
 The package may not depend on `komira_optimizer`, `komira_sql` or a plan
-producer: its `BUCK` refuses such a dep when it loads.
+producer: its `BUCK` lists them in `closure_excludes`, so analysis fails if one is in its closure.
 
 ## Example
 

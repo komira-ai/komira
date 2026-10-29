@@ -6,8 +6,9 @@ sha256 and size in [`pins.bzl`](pins.bzl) and fetched like every other
 pinned download (`pinned_file`): on a remote-cache hit, nothing is fetched.
 No source distribution is built and pip never runs.
 
-komira has no Python surface, so these pins and the rules that use them
-are being removed. The package that tested them (the pinned versions, the
+The Python surface is the shared library's bindings and their tests
+(`python_binding_test`, [tools/build/python](../../tools/build/python/README.md#binding-tests)).
+The package that tested the pins (the pinned versions, the
 licences, the protobuf gencode, the 3.14 interpreters) is already gone:
 no test holds what this page says about the pins.
 

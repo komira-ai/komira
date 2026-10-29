@@ -1,0 +1,101 @@
+load("@komira//tools/build/lint:one_mopm.bzl", "one_mopm")
+
+# The one-mopm lint's rule (tools/build/lint/one_mopm.bzl), used from a cell
+# other than komira, as a repository using komira as a cell uses it: each case
+# checks this package's own doc_tree (`:doc_tree`, declared by the rule's
+# macro) plus `mopm-toolchain.toml` files staged at the paths `files` names
+# (from v86.toml and v73.toml). A case with `expect` builds green only while
+# the check refuses its planted defect with that text; one without passes only
+# with no finding. tests//functional/... (the pull request check's
+# functional_tests unit) builds them. Each kind of finding is also a case of
+# the tool's unit tests (//tools/build/lint/one_mopm).
+
+_RELEASE = "toolchains//:mopm_0_0_86"
+
+# No exceptions (comments only).
+_NONE = "functional/one_mopm/none.tsv"
+
+# One exception: the fixture at tools/fx.
+_FIXTURE = "functional/one_mopm/fixture.tsv"
+
+_A = {"src/a/mopm-toolchain.toml": "v86.toml", "src/b/mopm-toolchain.toml": "v86.toml"}
+
+# Every package on one version, the release flow's: nothing to report.
+one_mopm(
+    name = "one_version",
+    files = _A,
+    list = _NONE,
+    release = _RELEASE,
+    tree = ":doc_tree",
+)
+
+# A fixture on another version, listed by path: not compared.
+one_mopm(
+    name = "excepted_fixture_on_another_version",
+    files = _A | {"tools/fx/mopm-toolchain.toml": "v73.toml"},
+    list = _FIXTURE,
+    release = _RELEASE,
+    tree = ":doc_tree",
+)
+
+_CASES = {
+    # One package on another version: named, with both versions.
+    "one_package_on_another_version": (
+        _A | {"src/c/mopm-toolchain.toml": "v73.toml"},
+        _NONE,
+        _RELEASE,
+        ["src/c/mopm-toolchain.toml: names mopm 0.0.73, the other packages name 0.0.86"],
+    ),
+
+    # The same fixture with no row is a package like the others.
+    "fixture_without_a_row": (
+        _A | {"tools/fx/mopm-toolchain.toml": "v73.toml"},
+        _NONE,
+        _RELEASE,
+        ["tools/fx/mopm-toolchain.toml: names mopm 0.0.73, the other packages name 0.0.86"],
+    ),
+
+    # No package at all is not a pass.
+    "empty_set": (
+        {},
+        _NONE,
+        _RELEASE,
+        ["an empty set of packages checks nothing"],
+    ),
+
+    # Only an excepted fixture: still an empty set.
+    "only_an_excepted_fixture": (
+        {"tools/fx/mopm-toolchain.toml": "v73.toml"},
+        _FIXTURE,
+        _RELEASE,
+        ["an empty set of packages checks nothing"],
+    ),
+
+    # The packages agree and the release flow builds with another mopm.
+    "release_flow_on_another_version": (
+        _A,
+        _NONE,
+        "toolchains//:mopm_0_0_73",
+        ["the release flow builds with mopm 0.0.73 (release/readme_e2e/packages.bzl MOPM), the packages name 0.0.86"],
+    ),
+
+    # A row for a fixture that is gone.
+    "row_for_a_missing_file": (
+        _A,
+        _FIXTURE,
+        _RELEASE,
+        [_FIXTURE + ":2: tools/fx/mopm-toolchain.toml: no such mopm-toolchain.toml in the tree: remove the row"],
+    ),
+}
+
+[
+    one_mopm(
+        name = name,
+        expect = expect,
+        files = files,
+        list = list,
+        release = release,
+        tree = ":doc_tree",
+    )
+    for name, (files, list, release, expect) in _CASES.items()
+]

@@ -4,8 +4,8 @@
 # =============================================================================
 #
 # Phase B of the STRING-key encode assigns a dict id per row. It is the single
-# largest serial item in the grouped count-distinct driver (measured 1,671 ms
-# of a 3,936 ms node on cbq13), and `_assign_dict_ids_parallel` now shards it.
+# largest serial item in the grouped count-distinct driver (the dominant cost of
+# a large string-key encode), and `_assign_dict_ids_parallel` now shards it.
 #
 # ⛔ WHAT THIS FILE IS ACTUALLY GUARDING IS NOT "the same set of values". It is
 # **THE NUMBERING**. The ids feed a hash table whose ITERATION ORDER becomes the
@@ -14,10 +14,10 @@
 # commit can justify and one that a "did we get the right distinct values" test
 # would sail straight past. Sharding by hash and offsetting each shard's ids by
 # a prefix sum is the four-line parallelisation that does exactly that, and it
-# is the mutation these tests are written to kill:
+# is the numbering these tests reject:
 #
-#     test_parallel_matches_serial_encoded_exactly     <- dies on prefix-sum ids
-#     test_parallel_matches_serial_reverse_map_exactly <- dies on prefix-sum ids
+#     test_parallel_matches_serial_encoded_exactly     <- fails on prefix-sum ids
+#     test_parallel_matches_serial_reverse_map_exactly <- fails on prefix-sum ids
 #
 # ⚠ NON-VACUITY IS A REAL RISK HERE AND IS ASSERTED, NOT ASSUMED. If every row
 # landed in one shard, or if the parallel driver silently ran one shard, the
@@ -237,10 +237,10 @@ def _encode_parallel(
 
 
 def test_parallel_matches_serial_encoded_exactly() raises:
-    """⭐ THE FALSIFIER. Row for row, the two arms must assign the SAME id.
+    """⭐ THE CENTRAL CHECK. Row for row, the two arms must assign the SAME id.
 
-    Killed by: numbering each shard from a prefix-sum offset instead of
-    merging the shards' first-appearance rows (the obvious parallelisation).
+    Rejects numbering each shard from a prefix-sum offset instead of merging
+    the shards' first-appearance rows (the obvious parallelisation).
     """
     var vals = _rows()
     var batch = _string_batch(vals)
@@ -268,8 +268,8 @@ def test_parallel_matches_serial_reverse_map_exactly() raises:
     """The reverse map must decode id-for-id to the same bytes, so the emitted
     group-key column is byte-identical.
 
-    Killed by: the same prefix-sum mutation, and by an arena concatenation that
-    gets a shard's base offset wrong.
+    Rejects the same prefix-sum numbering, and an arena concatenation that gets
+    a shard's base offset wrong.
     """
     var vals = _rows()
     var batch = _string_batch(vals)
@@ -393,7 +393,7 @@ def test_first_appearance_order_is_scattered_across_shards() raises:
 
 def test_the_routing_thresholds_still_select_the_two_arms() raises:
     """`_assign_dict_ids_parallel` is driven directly above, so the ROUTING is
-    covered here instead. Killed by a threshold move that makes one arm
+    covered here instead. Fails if a threshold change makes one arm
     unreachable."""
     assert_equal(
         _phaseb_shard_count(_PHASEB_MIN_ROWS, 1),
