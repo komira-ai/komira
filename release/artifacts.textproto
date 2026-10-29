@@ -1292,6 +1292,7 @@ artifacts {
   args: "{release_dir}/komira_bench_data/manifest.json"
   args: "--member-manifest"
   args: "{release_dir}/komira_bench_report/manifest.json"
+  args: "--member-manifest"
   args: "{release_dir}/komira_bench_corpus/manifest.json"
   args: "--license"
   args: "Apache-2.0"
