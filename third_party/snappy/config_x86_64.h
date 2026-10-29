@@ -1,5 +1,7 @@
-/* snappy configuration for the one target this build compiles for:
- * x86_64 Linux, glibc, x86-64-v3 (SSSE3, SSE4.2 CRC32 and BMI2 present). */
+/* snappy configuration for the x86_64 platforms (BUCK selects it by cpu):
+ * what CMake writes for a compile at x86-64-v3, the target_cpu of the
+ * linux-x86_64 row of tools/build/platforms/table.bzl (SSSE3, SSE4.2 CRC32
+ * and BMI2 present, no NEON). */
 #ifndef THIRD_PARTY_SNAPPY_CONFIG_H_
 #define THIRD_PARTY_SNAPPY_CONFIG_H_
 
