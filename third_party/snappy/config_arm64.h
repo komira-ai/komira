@@ -1,9 +1,14 @@
 /* snappy configuration for the arm64 platforms (BUCK selects it by cpu): what
  * CMake writes for aarch64 with clang on Linux or macOS. NEON is baseline on
- * aarch64. The compile targets zig's generic arm64 CPU (the target_cpu of the
- * linux-arm64 row and the macOS arm64 compile of tools/build/mojo/cxx.bzl), which
- * has no CRC32 extension, so <arm_acle.h> offers no __crc32cw and
- * SNAPPY_HAVE_NEON_CRC32 is 0. No x86 intrinsic header is available here. */
+ * aarch64. The compile targets zig's generic arm64 CPU, which has no CRC32
+ * extension, so <arm_acle.h> offers no __crc32cw and SNAPPY_HAVE_NEON_CRC32
+ * is 0. The linux-arm64 row of the platform table names target_cpu generic; the
+ * darwin-arm64 row names apple-m1, and the claim holds there only because
+ * tools/build/mojo/cxx.bzl passes -mcpu=generic for macOS whatever the row says.
+ * No x86 intrinsic header is available here.
+ * Compressed bytes differ between x86_64 (CRC32C hash) and arm64 (multiplicative
+ * hash): both are valid snappy streams that decode identically, so no golden of
+ * compressed bytes may be shared across cpus. */
 #ifndef THIRD_PARTY_SNAPPY_CONFIG_H_
 #define THIRD_PARTY_SNAPPY_CONFIG_H_
 

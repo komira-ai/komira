@@ -81,8 +81,13 @@ archive_files(
 #   config_x86_64.h  x86-64-v3 (SSSE3, SSE4.2 CRC32, BMI2; no NEON): the
 #                    target_cpu of the linux-x86_64 row of the platform table;
 #   config_arm64.h   zig's generic arm64 CPU (NEON; no CRC32 extension; no x86
-#                    intrinsic header): macOS arm64, and the linux-arm64 row
-#                    once it is registered.
+#                    intrinsic header): the linux-arm64 row (target_cpu
+#                    generic) and macOS arm64. The darwin-arm64 row names
+#                    target_cpu apple-m1; it compiles generic only because
+#                    tools/build/mojo/cxx.bzl passes -mcpu=generic for macOS.
+# Compressed bytes differ between x86_64 (CRC32C hash) and arm64
+# (multiplicative hash): both are valid snappy streams that decode
+# identically, so no golden of compressed bytes may be shared across cpus.
 # Linux and macOS write the same macros for one cpu (the sys/ header checks
 # and the compiler builtins answer alike), so the select is by cpu alone. A
 # platform of another cpu fails to configure: none gets x86 intrinsics by

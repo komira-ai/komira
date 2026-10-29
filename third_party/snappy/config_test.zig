@@ -11,11 +11,14 @@
 //!    feature macro silently turns the feature off), or a macro in a config that config.h.in does not have
 //!    (stale after a pin moved), or a value other than 0 or 1;
 //!  - config_arm64.h with an x86 feature on (SSSE3, X86_CRC32, BMI2), or without NEON; the arm64 compile
-//!    is zig's generic CPU, which has no CRC32 extension, so NEON_CRC32 must be 0;
+//!    is zig's generic CPU (cxx.bzl forces -mcpu=generic for macOS, whose platform row names apple-m1),
+//!    which has no CRC32 extension, so NEON_CRC32 must be 0;
 //!  - config_x86_64.h with a NEON feature on, or an x86 feature off (it is the x86-64-v3 compile);
 //!  - the two configs differing in a macro that does not depend on the cpu (the sys/ headers, builtins,
 //!    endianness), which the select by cpu alone assumes;
-//!  - the BUCK file selecting a config for the wrong cpu, or no longer selecting by cpu.
+//!  - the BUCK file selecting a config for the wrong cpu, or no longer selecting by cpu;
+//!  - the select holding an arm other than arm64 and x86_64 (a DEFAULT arm would give a cpu nobody
+//!    wrote a config for one of the two).
 
 const std = @import("std");
 const t = std.testing;
@@ -134,8 +137,8 @@ test "config_arm64.h: NEON on, no x86 feature, no CRC32 extension" {
     const s = try subjects(arena.allocator());
     for (x86_features) |name| try expectValue(s.arm, "config_arm64.h", name, "0");
     try expectValue(s.arm, "config_arm64.h", "SNAPPY_HAVE_NEON", "1");
-    // zig's generic arm64 CPU (the macOS arm64 compile and the linux-arm64 row) has no CRC32
-    // extension: <arm_acle.h> declares no __crc32cw, and 1 here would not compile.
+    // zig's generic arm64 CPU has no CRC32 extension (the macOS platform row names apple-m1, but
+    // tools/build/mojo/cxx.bzl compiles macOS with -mcpu=generic, which is what makes this hold): <arm_acle.h> declares no __crc32cw, and 1 here would not compile.
     try expectValue(s.arm, "config_arm64.h", "SNAPPY_HAVE_NEON_CRC32", "0");
     try expectValue(s.arm, "config_arm64.h", "SNAPPY_IS_BIG_ENDIAN", "0");
 }
@@ -179,4 +182,30 @@ test "BUCK selects config_arm64 for arm64 and config_x86_64 for x86_64, by cpu" 
     try t.expect(std.mem.indexOf(u8, arm, "x86") == null);
     try t.expect(std.mem.indexOf(u8, x86, ":config_x86_64[config_x86_64.h]") != null);
     try t.expect(std.mem.indexOf(u8, x86, "arm64") == null);
+}
+
+/// The text of the first `select({` ... `})` of the BUCK file.
+fn selectBlock(text: []const u8) ?[]const u8 {
+    const open = "select({";
+    const start = std.mem.indexOf(u8, text, open) orelse return null;
+    // The select closes on a line of its own (an arm's own `})` is not at the start of a line).
+    const end = std.mem.indexOfPos(u8, text, start, "\n    })") orelse return null;
+    return text[start..end];
+}
+
+test "the BUCK select has exactly the arm64 and x86_64 arms and no DEFAULT" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const buck = try readData(arena.allocator(), "BUCK");
+    const block = selectBlock(buck) orelse return error.NoSelect;
+    try t.expect(std.mem.indexOf(u8, block, "DEFAULT") == null);
+    var arms: usize = 0;
+    var it = std.mem.splitScalar(u8, block, '\n');
+    while (it.next()) |line| {
+        if (std.mem.indexOf(u8, line, "\": ") == null) continue;
+        arms += 1;
+        try t.expect(std.mem.indexOf(u8, line, "\"prelude//cpu/constraints:arm64\":") != null or
+            std.mem.indexOf(u8, line, "\"prelude//cpu/constraints:x86_64\":") != null);
+    }
+    try t.expectEqual(@as(usize, 2), arms);
 }
