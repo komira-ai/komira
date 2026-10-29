@@ -766,7 +766,7 @@ first rejects.
 
 `read_parquet('path')` binds off the file's own footer, as `sql_tvf_bind` documents. The binder takes that footer
 through the `SqlParquetFooters` trait, which a caller implements (`footer_schema(path)`, `column_null_count(path,
-column)`). The engine supplies one, `ParquetFooters`, in `komira_sdk_exec`:
+column)`). The engine supplies one, `ParquetFooters`. It lives in `komira_parquet_footers`, a package of its own, because `EngineContext` (which would hold it in `komira_sdk_exec`) is not written yet; the context will hold the package's `FooterCache`:
 
 - `footer_schema` reads the footer of a file, or the footers of a glob's files unioned by name, through
   `komira_sdk.parquet_footer` (`read_parquet_footer_with_cache`), so the cache of §5.1 serves it;
