@@ -1,6 +1,6 @@
 """Load-time cases of `darwin_properties_refusal` (run by tools/build/tests/functional/darwin/BUCK)."""
 
-load("@komira//tools/build/platforms:defs.bzl", "darwin_properties_refusal")
+load("@komira//tools/build/platforms:defs.bzl", "DARWIN_LOCAL_HOST", "darwin_properties_refusal", "darwin_toolchain_hosts")
 
 # Load-time cases of `darwin_properties_refusal`: a macOS property set is
 # registered only with a non-empty property dict and at least one well-formed
@@ -15,6 +15,22 @@ _CASES = [
     ({}, ["26.5-0123456789abcdef"], True),
     ({"pool": "macos"}, ["0123456789abcdef"], True),
     ({"pool": "macos"}, ["26.5-"], True),
+    # The local sentinel is no identity: a worker set cannot list it.
+    ({"pool": "macos"}, [DARWIN_LOCAL_HOST], True),
+]
+
+# (hosts named, execution mode, host row) -> (toolchain hosts, local?).
+_TOOLCHAIN_CASES = [
+    # The farm: hosts named, whatever the mode; nothing changes.
+    (["26.5-0123456789abcdef"], "remote", "linux-x86_64", (["26.5-0123456789abcdef"], False)),
+    (["26.5-0123456789abcdef"], "local", "darwin-arm64", (["26.5-0123456789abcdef"], False)),
+    # A native Mac build: no hosts, local, a Mac.
+    ([], "local", "darwin-arm64", ([DARWIN_LOCAL_HOST], True)),
+    # Never the sentinel: remote mode, or a host that is not a Mac.
+    ([], "remote", "darwin-arm64", ([], False)),
+    ([], "remote", "linux-x86_64", ([], False)),
+    ([], "local", "linux-x86_64", ([], False)),
+    ([], "local", None, ([], False)),
 ]
 
 def darwin_properties_cases():
@@ -27,3 +43,8 @@ def darwin_properties_cases():
                 repr(got),
                 "a refusal" if refused else "None",
             ))
+
+    for hosts, mode, host_name, want in _TOOLCHAIN_CASES:
+        got = darwin_toolchain_hosts(hosts, mode, host_name)
+        if got != want:
+            fail("darwin_toolchain_hosts({}, {}, {}) = {}, expected {}".format(repr(hosts), repr(mode), repr(host_name), repr(got), repr(want)))

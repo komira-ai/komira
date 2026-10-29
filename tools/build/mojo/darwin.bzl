@@ -36,19 +36,39 @@ digest of them (`mojo_compile host-identity`) identifies a host. The hosts the
 root cell names (`[komira_re] darwin_macos_hosts`) are on every compile's
 command line, so they are part of every action key, and the wrapper refuses a
 host whose identity is not among them.
+
+With no host named and the execution mode local on a Mac, the one host is the
+sentinel `local` (DARWIN_LOCAL_HOST): the wrapper then skips the identity
+comparison, because the compile runs on the machine that runs Buck2. The
+sentinel never reaches a farm action: it appears only when no host is named
+and the mode is local, only alone, and the rule refuses it otherwise; the
+wrapper refuses it beside a real identity. Its action key does not name the
+host (a local result is not shareable across Macs).
 """
 
 load(":providers.bzl", "MojoToolchainInfo")
+load("@komira//tools/build/platforms:defs.bzl", "DARWIN_LOCAL_HOST")
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
 
 def _mojo_darwin_toolchain_impl(ctx):
     def one(dep):
         return dep[DefaultInfo].default_outputs[0]
     hosts = sorted([h.strip() for h in ctx.attrs.macos_hosts if h.strip()])
+    if hosts and (hosts == [DARWIN_LOCAL_HOST]) != ctx.attrs.local_execution:
+        # The sentinel is for a build on this machine only: alone, and only
+        # where the BUCK file found the execution mode local on a Mac.
+        fail(("{}: the local host sentinel `{}` {} (local_execution = {}); a farm's hosts " +
+              "are real identities and never mix with it.").format(
+            ctx.label,
+            DARWIN_LOCAL_HOST,
+            "is missing" if ctx.attrs.local_execution else "is not allowed here",
+            ctx.attrs.local_execution,
+        ))
     if not hosts:
         fail(("{}: no macOS host identity. Set `[komira_re] darwin_macos_hosts` of the root cell " +
               "to what `mojo_compile host-identity` (komira//tools/build/mojo:mojo_compile_darwin) " +
-              "prints on each worker to build for darwin-arm64.").format(ctx.label))
+              "prints on each worker to build for darwin-arm64, or build on a Mac with " +
+              "`-c komira.execution=local` and no worker property set.").format(ctx.label))
     return [
         DefaultInfo(),
         MojoToolchainInfo(
@@ -80,6 +100,9 @@ mojo_darwin_toolchain_rule = rule(
         # The host identities (what `mojo_compile host-identity` prints) a
         # compile may run on; the wrapper refuses any other host.
         "macos_hosts": attrs.list(attrs.string()),
+        # True when macos_hosts is the local sentinel (a build on this Mac;
+        # darwin_toolchain_hosts_here in platforms/defs.bzl decides).
+        "local_execution": attrs.bool(default = False),
         "runtime": attrs.exec_dep(),
         "target_cpu": attrs.string(),
         # The compile watchdog of the wrapper, as mojo_toolchain's.

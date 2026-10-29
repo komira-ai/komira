@@ -221,6 +221,37 @@ def darwin_macos_hosts():
     """
     return sorted([h for h in read_root_config("komira_re", DARWIN_HOSTS_KEY, "").split(" ") if h])
 
+# The host identity of a compile that runs on the machine running Buck2
+# instead of on a named worker. The wrapper (mojo_compile_macos) skips its
+# identity comparison for it. It holds no "-", so it is never a well-formed
+# identity (darwin_properties_refusal refuses it in `darwin_macos_hosts`), and
+# a toolchain carries it only alone, only when `execution_mode()` is `local`
+# on a macOS arm64 host and no host is named (`darwin_toolchain_hosts`).
+DARWIN_LOCAL_HOST = "local"
+
+def darwin_toolchain_hosts(hosts, mode, host_name):
+    """The `--macos-host` values of the macOS toolchain, as `(hosts, local)`.
+
+    `hosts` is `darwin_macos_hosts()`, `mode` is `execution_mode()` and
+    `host_name` the platform-table row this machine is (None for none). With
+    hosts named the answer is those hosts, unchanged, whatever the mode (the
+    farm's action keys do not move). With none, a local build on the
+    darwin-arm64 host gets the local sentinel; anything else gets `([], False)`,
+    which the toolchain rule refuses at analysis.
+    """
+    if hosts:
+        return hosts, False
+    if mode == "local" and host_name == "darwin-arm64":
+        return [DARWIN_LOCAL_HOST], True
+    return [], False
+
+def darwin_toolchain_hosts_here():
+    """`darwin_toolchain_hosts` for this checkout; reads the execution mode only when no host is named."""
+    hosts = darwin_macos_hosts()
+    if hosts:
+        return darwin_toolchain_hosts(hosts, None, None)
+    return darwin_toolchain_hosts(hosts, execution_mode(), host_row(host_info()))
+
 def darwin_properties_refusal(props, hosts):
     """Why a macOS property set cannot be registered, or None.
 
