@@ -104,6 +104,36 @@ binder's code is split over the `sql_bind_*` modules (the FROM scope,
 operators, functions, casts and timestamps, subqueries, aggregates and
 GROUP BY, output names, windows and ORDER BY, joins, parquet facts).
 
+## INTERVAL literals
+
+`INTERVAL '<n>' <unit>` (also `INTERVAL <n> <unit>`) parses to an `SX_INTERVAL`
+node holding a signed count (magnitude at most 10^9) and a unit. The units
+accepted are YEAR, MONTH, WEEK and DAY, singular or plural. The binder folds
+`<constant DATE> + INTERVAL`, `<constant DATE> - INTERVAL` and
+`INTERVAL + <constant DATE>` into a `date32` literal while binding
+(`sql_bind_interval`), in the WHERE, correlated-subquery, aggregate and
+select-list binders alike, so `date '1998-12-01' - interval '90' day` and
+every other interval in the 22 TPC-H queries bind. The plan has no INTERVAL
+type and no INTERVAL value ever reaches it. Chains fold left to right
+(`date '1994-01-01' + interval '1' year - interval '1' day`).
+
+Month and year arithmetic clamps the day to the end of the target month, as
+PostgreSQL and DuckDB do: 31 Jan + 1 month is 28 Feb (29 in a leap year),
+29 Feb + 1 year is 28 Feb, 31 Mar - 1 month is 29 Feb in a leap year. A year
+is 12 months, a week 7 days. A clamped day is not restored by the next step
+of a chain (31 Jan + 1 month + 1 month is 29 Mar in 2024). A result outside
+years 1 to 9999 is refused.
+
+Refused by name: a unit outside the accepted four (QUARTER, HOUR, MINUTE,
+SECOND, MILLISECOND, and the rest), a unit written inside the string
+(`'3 month'`), a non-integer or oversize count, a missing unit, a non-constant
+DATE operand (`col + interval '1' day`; the interval is folded at bind time,
+so a column cannot take it), a TIMESTAMP or string operand, and an INTERVAL
+anywhere else (a projection, a comparison, `INTERVAL - DATE`, `INTERVAL * n`,
+`INTERVAL + INTERVAL`). One difference from DuckDB: its `DATE + INTERVAL` is
+a TIMESTAMP, here the result stays a DATE; a comparison against a DATE column
+gives the same rows.
+
 ## Examples
 
 Lexing a statement:
