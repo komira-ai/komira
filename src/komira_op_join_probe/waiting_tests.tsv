@@ -1,9 +1,7 @@
 # test	gate: a test that imports this package and a package not on main yet; it moves with that package.
 tests/test_join_marshal_fuse.mojo	komira_op_join_probe part 2 (join_probe_op, join_probe_narrow)
-tests/test_join_null_key_all_strategies_differential.mojo	komira_op_join_probe part 2 (join_probe) and komira_op_join_sinks
-tests/test_join_probe_dispatch_null_key_differential.mojo	komira_op_join_probe part 2 (join_probe) and the compiler's parallel join dispatch
+tests/test_join_null_key_all_strategies_differential.mojo	komira_op_join_sinks (the unified join sinks) and komira_op_stage_exec (execute_sink)
 tests/test_join_probe_levers.mojo	komira_op_join_probe part 2 (join_probe_op)
-tests/test_multi_key_join_runtime_flip.mojo	komira_op_join_probe part 2 (join_probe)
 tests/test_multi_key_probe_op_key_cse.mojo	komira_op_join_probe part 2 (multi_key_probe_op)
 tests/test_multi_key_streaming_probe_op.mojo	komira_op_join_probe part 2 (multi_key_probe_op)
 tests/test_per_morsel_fast_paths.mojo	komira_op_join_probe part 2 (join_probe_op)
