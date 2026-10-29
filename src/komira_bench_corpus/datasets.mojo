@@ -6,9 +6,6 @@ from .schema import Dataset, Table, columns_of
 comptime DATASET_TPCH = "tpch"
 """The eight TPC-H tables with the types of the TPC-H specification."""
 
-comptime DATASET_CLICKBENCH = "clickbench"
-"""The ClickBench `hits` table: 105 columns."""
-
 comptime DATASET_H2O_GROUPBY = "h2o_groupby"
 """The h2o groupby table `x`."""
 
@@ -54,46 +51,6 @@ comptime _LINEITEM = (
     "l_shipinstruct CHAR(25); l_shipmode CHAR(10); l_comment VARCHAR(44)"
 )
 
-comptime _HITS = (
-    "WatchID BIGINT; JavaEnable SMALLINT; Title VARCHAR; GoodEvent SMALLINT; "
-    "EventTime TIMESTAMP; EventDate DATE; CounterID INTEGER; ClientIP INTEGER; "
-    "RegionID INTEGER; UserID BIGINT; CounterClass SMALLINT; OS SMALLINT; "
-    "UserAgent SMALLINT; URL VARCHAR; Referer VARCHAR; IsRefresh SMALLINT; "
-    "RefererCategoryID SMALLINT; RefererRegionID INTEGER; "
-    "URLCategoryID SMALLINT; URLRegionID INTEGER; ResolutionWidth SMALLINT; "
-    "ResolutionHeight SMALLINT; ResolutionDepth SMALLINT; FlashMajor SMALLINT; "
-    "FlashMinor SMALLINT; FlashMinor2 VARCHAR; NetMajor SMALLINT; "
-    "NetMinor SMALLINT; UserAgentMajor SMALLINT; UserAgentMinor VARCHAR(255); "
-    "CookieEnable SMALLINT; JavascriptEnable SMALLINT; IsMobile SMALLINT; "
-    "MobilePhone SMALLINT; MobilePhoneModel VARCHAR; Params VARCHAR; "
-    "IPNetworkID INTEGER; TraficSourceID SMALLINT; SearchEngineID SMALLINT; "
-    "SearchPhrase VARCHAR; AdvEngineID SMALLINT; IsArtifical SMALLINT; "
-    "WindowClientWidth SMALLINT; WindowClientHeight SMALLINT; "
-    "ClientTimeZone SMALLINT; ClientEventTime TIMESTAMP; "
-    "SilverlightVersion1 SMALLINT; SilverlightVersion2 SMALLINT; "
-    "SilverlightVersion3 INTEGER; SilverlightVersion4 SMALLINT; "
-    "PageCharset VARCHAR; CodeVersion INTEGER; IsLink SMALLINT; "
-    "IsDownload SMALLINT; IsNotBounce SMALLINT; FUniqID BIGINT; "
-    "OriginalURL VARCHAR; HID INTEGER; IsOldCounter SMALLINT; "
-    "IsEvent SMALLINT; IsParameter SMALLINT; DontCountHits SMALLINT; "
-    "WithHash SMALLINT; HitColor CHAR; LocalEventTime TIMESTAMP; "
-    "Age SMALLINT; Sex SMALLINT; Income SMALLINT; Interests SMALLINT; "
-    "Robotness SMALLINT; RemoteIP INTEGER; WindowName INTEGER; "
-    "OpenerName INTEGER; HistoryLength SMALLINT; BrowserLanguage VARCHAR; "
-    "BrowserCountry VARCHAR; SocialNetwork VARCHAR; SocialAction VARCHAR; "
-    "HTTPError SMALLINT; SendTiming INTEGER; DNSTiming INTEGER; "
-    "ConnectTiming INTEGER; ResponseStartTiming INTEGER; "
-    "ResponseEndTiming INTEGER; FetchTiming INTEGER; "
-    "SocialSourceNetworkID SMALLINT; SocialSourcePage VARCHAR; "
-    "ParamPrice BIGINT; ParamOrderID VARCHAR; ParamCurrency VARCHAR; "
-    "ParamCurrencyID SMALLINT; OpenstatServiceName VARCHAR; "
-    "OpenstatCampaignID VARCHAR; OpenstatAdID VARCHAR; "
-    "OpenstatSourceID VARCHAR; UTMSource VARCHAR; UTMMedium VARCHAR; "
-    "UTMCampaign VARCHAR; UTMContent VARCHAR; UTMTerm VARCHAR; "
-    "FromTag VARCHAR; HasGCLID SMALLINT; RefererHash BIGINT; URLHash BIGINT; "
-    "CLID INTEGER"
-)
-
 comptime _H2O_GROUPBY_X = (
     "id1 VARCHAR; id2 VARCHAR; id3 VARCHAR; id4 INTEGER; id5 INTEGER; "
     "id6 INTEGER; v1 INTEGER; v2 INTEGER; v3 DOUBLE"
@@ -127,12 +84,6 @@ def tpch_dataset() -> Dataset:
     tables.append(_table("orders", _ORDERS))
     tables.append(_table("lineitem", _LINEITEM))
     return Dataset(String(DATASET_TPCH), tables^)
-
-
-def clickbench_dataset() -> Dataset:
-    var tables = List[Table]()
-    tables.append(_table("hits", _HITS))
-    return Dataset(String(DATASET_CLICKBENCH), tables^)
 
 
 def h2o_groupby_dataset() -> Dataset:

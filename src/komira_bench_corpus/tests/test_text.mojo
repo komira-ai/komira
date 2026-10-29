@@ -1,7 +1,7 @@
 # The shape and the content of the query text.
 #
 # What each case proves:
-# - test_suites_have_the_published_queries: tpch has q1..q22, clickbench q0..q42,
+# - test_suites_have_the_published_queries: tpch has q1..q22,
 #   h2o q1..q10 then j1..j5, in that order, with no repeated key (a missing,
 #   renamed or duplicated query fails).
 # - test_text_is_one_bare_statement: no query is empty, ends in a semicolon or a
@@ -20,9 +20,6 @@
 # - test_tpch_uses_the_standard_schema: the columns of the dates are DATE
 #   literals (`date '1998-12-01'`), never epoch days, and no query reads a
 #   column the standard schema does not have (covered with the identifier case).
-# - test_clickbench_special_texts: q0 is the count over hits, q29 has 90 sums
-#   with the offsets 0 to 89, q28 carries the regular expression with single
-#   backslashes, and the date filters of q36 to q42 are in the text.
 # - test_h2o_datasets: the groupby queries read the groupby dataset and the join
 #   queries the join dataset.
 
@@ -72,7 +69,6 @@ def _numbered(prefix: String, first: Int, last: Int) -> String:
 
 def test_suites_have_the_published_queries() raises:
     assert_equal(_ids(suite("tpch")), _numbered("q", 1, 22))
-    assert_equal(_ids(suite("clickbench")), _numbered("q", 0, 42))
     assert_equal(
         _ids(suite("h2o")),
         _numbered("q", 1, 10) + " " + _numbered("j", 1, 5),
@@ -84,7 +80,7 @@ def test_suites_have_the_published_queries() raises:
             for k in seen:
                 assert_false(k == q.key(), "repeated key " + q.key())
             seen.append(q.key())
-    assert_equal(len(seen), 80)
+    assert_equal(len(seen), 37)
 
 
 def test_text_is_one_bare_statement() raises:
@@ -180,11 +176,6 @@ comptime _TPCH_WORDS = (
     " month day interval date left outer join on substring for with desc limit"
     " n1 n2 l1 l2 l3 c_count revenue0"
 )
-comptime _CLICKBENCH_WORDS = (
-    "select from where group by order having and not in is desc limit offset"
-    " as case when then else end count sum avg min max distinct length like"
-    " extract minute regexp_replace date_trunc"
-)
 comptime _H2O_WORDS = (
     "select from where group by order desc as sum avg min max count median"
     " stddev corr pow row_number over partition is not null inner left join"
@@ -200,9 +191,6 @@ def _check_words(q: Query, d: Dataset) raises:
     if q.suite == "tpch":
         keywords = _split(String(_TPCH_WORDS))
         exact = False
-    elif q.suite == "clickbench":
-        keywords = _split(String(_CLICKBENCH_WORDS))
-        exact = True
     else:
         keywords = _split(String(_H2O_WORDS))
         exact = False
@@ -232,19 +220,6 @@ def test_the_identifier_check_refuses_a_misspelt_column() raises:
     var refused = False
     try:
         _check_words(bad, dataset(bad.dataset))
-    except:
-        refused = True
-    assert_true(refused)
-    var h = find_query("clickbench/q3")
-    var lower = Query(
-        h.suite.copy(),
-        h.id.copy(),
-        h.dataset.copy(),
-        h.text.replace(String("UserID"), String("userid")),
-    )
-    refused = False
-    try:
-        _check_words(lower, dataset(lower.dataset))
     except:
         refused = True
     assert_true(refused)
@@ -316,29 +291,6 @@ def test_tpch_uses_the_standard_schema() raises:
         assert_false(_contains(q.text, "date_diff"), q.key() + " has epoch days")
 
 
-def test_clickbench_special_texts() raises:
-    assert_equal(find_query("clickbench/q0").text, "SELECT COUNT(*) FROM hits")
-    var q29 = find_query("clickbench/q29").text
-    assert_equal(_count(q29, "SUM("), 90)
-    assert_true(_contains(q29, "SUM(ResolutionWidth), SUM(ResolutionWidth + 1), "))
-    assert_true(_contains(q29, "SUM(ResolutionWidth + 89) FROM hits"))
-    var q28 = find_query("clickbench/q28").text
-    assert_true(_contains(q28, "(?:www\\.)?"))
-    assert_true(_contains(q28, ", '\\1')"))
-    assert_false(_contains(q28, "\\\\"))
-    for i in range(36, 43):
-        var t = find_query("clickbench/q" + String(i)).text
-        assert_true(_contains(t, "CounterID = 62"), "q" + String(i))
-        assert_true(_contains(t, "EventDate >= '2013-07-"), "q" + String(i))
-    assert_true(_contains(find_query("clickbench/q19").text, "= 435090932899640449"))
-    assert_true(_contains(find_query("clickbench/q40").text, "= 3594120000172545465"))
-    assert_true(_contains(find_query("clickbench/q41").text, "= 2868770270353813622"))
-    var hits = dataset("clickbench").table("hits")
-    assert_equal(len(hits.columns), 105)
-    assert_equal(hits.columns[0].name, "WatchID")
-    assert_equal(hits.columns[104].name, "CLID")
-
-
 def test_h2o_datasets() raises:
     var h = suite("h2o")
     for q in h.queries:
@@ -357,6 +309,5 @@ def main() raises:
     test_the_identifier_check_refuses_a_misspelt_column()
     test_tpch_validation_parameters()
     test_tpch_uses_the_standard_schema()
-    test_clickbench_special_texts()
     test_h2o_datasets()
     print("all text tests passed")

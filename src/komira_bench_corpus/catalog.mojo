@@ -1,12 +1,9 @@
-# Lookup over the three suites and the four datasets.
+# Lookup over the two suites and the three datasets.
 
-from .clickbench import SUITE_CLICKBENCH, clickbench_suite
 from .datasets import (
-    DATASET_CLICKBENCH,
     DATASET_H2O_GROUPBY,
     DATASET_H2O_JOIN,
     DATASET_TPCH,
-    clickbench_dataset,
     h2o_groupby_dataset,
     h2o_join_dataset,
     tpch_dataset,
@@ -19,10 +16,9 @@ from .tpch import SUITE_TPCH, tpch_suite
 
 def suite_ids() -> List[String]:
     """The ids of the suites, in the order of `suites()`: `tpch`,
-    `clickbench`, `h2o`."""
+    `h2o`."""
     var out = List[String]()
     out.append(String(SUITE_TPCH))
-    out.append(String(SUITE_CLICKBENCH))
     out.append(String(SUITE_H2O))
     return out^
 
@@ -31,7 +27,6 @@ def suites() -> List[Suite]:
     """Every suite, in the order of `suite_ids()`."""
     var out = List[Suite]()
     out.append(tpch_suite())
-    out.append(clickbench_suite())
     out.append(h2o_suite())
     return out^
 
@@ -41,14 +36,12 @@ def suite(suite_id: String) raises -> Suite:
     none."""
     if suite_id == SUITE_TPCH:
         return tpch_suite()
-    if suite_id == SUITE_CLICKBENCH:
-        return clickbench_suite()
     if suite_id == SUITE_H2O:
         return h2o_suite()
     raise Error(
         "komira_bench_corpus: no suite "
         + suite_id
-        + " (one of: tpch, clickbench, h2o)"
+        + " (one of: tpch, h2o)"
     )
 
 
@@ -65,11 +58,10 @@ def find_query(key: String) raises -> Query:
 
 
 def dataset_names() -> List[String]:
-    """The names of the datasets: `tpch`, `clickbench`, `h2o_groupby`,
+    """The names of the datasets: `tpch`, `h2o_groupby`,
     `h2o_join`."""
     var out = List[String]()
     out.append(String(DATASET_TPCH))
-    out.append(String(DATASET_CLICKBENCH))
     out.append(String(DATASET_H2O_GROUPBY))
     out.append(String(DATASET_H2O_JOIN))
     return out^
@@ -80,8 +72,6 @@ def dataset(name: String) raises -> Dataset:
     there is none."""
     if name == DATASET_TPCH:
         return tpch_dataset()
-    if name == DATASET_CLICKBENCH:
-        return clickbench_dataset()
     if name == DATASET_H2O_GROUPBY:
         return h2o_groupby_dataset()
     if name == DATASET_H2O_JOIN:
@@ -89,5 +79,5 @@ def dataset(name: String) raises -> Dataset:
     raise Error(
         "komira_bench_corpus: no dataset "
         + name
-        + " (one of: tpch, clickbench, h2o_groupby, h2o_join)"
+        + " (one of: tpch, h2o_groupby, h2o_join)"
     )

@@ -1,11 +1,11 @@
-"""The SQL of three published benchmark suites, as Mojo data, with a content
+"""The SQL of two published benchmark suites, as Mojo data, with a content
 hash of every query and every suite. See README.md.
 
 Derived from TPC-H; not a TPC result.
 
 | name | what it is |
 |---|---|
-| `suites`, `suite_ids`, `suite` | the suites (`tpch`: 22 queries, `clickbench`: 43, `h2o`: 15), their ids, and one by id |
+| `suites`, `suite_ids`, `suite` | the suites (`tpch`: 22 queries, `h2o`: 15), their ids, and one by id |
 | `Suite` | a suite: `id`, `title`, `notice` (the sentence a report of it must carry), `queries`, `query(id)` and `sha256()` |
 | `Query`, `find_query` | one query: `suite`, `id`, `dataset`, `text`, `key()` (`tpch/q1`) and `sha256()`; `find_query` looks one up by key |
 | `dataset`, `dataset_names` | the dataset a query expects: the tables and their column types |
@@ -23,12 +23,10 @@ from .catalog import (
     suites,
 )
 from .datasets import (
-    DATASET_CLICKBENCH,
     DATASET_H2O_GROUPBY,
     DATASET_H2O_JOIN,
     DATASET_TPCH,
 )
-from .clickbench import SUITE_CLICKBENCH
 from .h2o import SUITE_H2O
 from .query import Query, Suite
 from .schema import Column, Dataset, Table

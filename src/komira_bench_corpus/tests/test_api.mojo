@@ -47,11 +47,11 @@ def test_lookups() raises:
     var q = find_query("tpch/q1")
     assert_equal(q.key(), "tpch/q1")
     assert_equal(q.dataset, "tpch")
-    assert_equal(find_query("clickbench/q0").dataset, "clickbench")
     assert_equal(find_query("h2o/q3").dataset, "h2o_groupby")
     assert_equal(find_query("h2o/j3").dataset, "h2o_join")
     assert_equal(suite("h2o").query("j5").id, "j5")
     _refused("nosuch/q1", "no suite nosuch")
+    _refused("clickbench/q0", "no suite clickbench")
     _refused("tpch/q23", "no query q23")
     _refused("tpch/q0", "no query q0")
     _refused("tpch", "is not suite/id")
@@ -62,8 +62,8 @@ def test_lookups() raises:
         message = String(e)
     assert_true(message.find("no dataset hits") >= 0, message)
     var ids = suite_ids()
-    assert_equal(len(ids), 3)
-    assert_equal(len(dataset_names()), 4)
+    assert_equal(len(ids), 2)
+    assert_equal(len(dataset_names()), 3)
     for i in range(len(ids)):
         assert_equal(suite(ids[i]).id, ids[i])
 
@@ -112,7 +112,6 @@ def test_suite_hash_names_the_query_and_not_only_its_text() raises:
 def test_notice() raises:
     var tpch = suite("tpch")
     assert_true(tpch.notice.find("Derived from TPC-H; not a TPC result") == 0)
-    assert_equal(suite("clickbench").notice, "")
     assert_equal(suite("h2o").notice, "")
 
 
@@ -155,7 +154,7 @@ def test_dataset_ddl() raises:
     except:
         refused = True
     assert_true(refused)
-    assert_false(dataset("tpch").ddl() == dataset("clickbench").ddl())
+    assert_false(dataset("tpch").ddl() == dataset("h2o_groupby").ddl())
 
 
 def main() raises:
