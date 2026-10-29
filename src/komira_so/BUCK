@@ -12,6 +12,7 @@ NATIVE_OWNERS = [
     "//src/komira_fs:komira_fs_native",
     "//src/komira_libc:komira_libc_native",
     "//src/komira_metrics:komira_metrics_native",
+    "//src/komira_parquet_codec:komira_parquet_codec_native",
     "//src/komira_scan_source:komira_scan_source_native",
 ]
 
@@ -154,6 +155,14 @@ mojo_shared_lib(
     ],
     deps = [":komira_so"],
     native_owners = NATIVE_OWNERS,
+    visibility = ["komira//ci:", "komira//tools/build/package/libkomira:", "//node:"],
+)
+
+# The Parquet file the C-ABI gates and the Node binding's tests read.
+export_file(
+    name = "tests/fixtures/two_columns.parquet",
+    src = "tests/fixtures/two_columns.parquet",
+    visibility = ["komira//ci:", "//node:"],
 )
 
 # The C header of libkomira, komira.h, made from abi/komira.tsv (the golden:

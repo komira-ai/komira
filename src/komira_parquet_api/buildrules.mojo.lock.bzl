@@ -6,7 +6,7 @@ MOJO = "1.0.0"
 CLOSURE_SHA256 = "fd654c4192487587d8f8d9402d060e45e218b79da7b8964503a703710e49b15d"
 MANIFEST_SHA256 = {
     "mopm-toolchain.toml": "7e43881be78fc3f59fa9aa39252cc7a63d66cd79a9d7c99d948c214a3967ee3f",
-    "mopm.lock": "ab4a0dd368f5856e0c546351d542ec31834c1813b8823db84a07414adecb6b1b",
+    "mopm.lock": "7f4f35c22bf38597c0688630cbc857ef8b71b9ebcced62dab4dea0c31274af98",
     "mopm.toml": "6f7621bcae2fc3bd4d539750320ce9d23df835ce6de0511fd9ff5997730997cd",
 }
 GRAPH_JSON = r'''{
@@ -132,3 +132,250 @@ GRAPH_JSON = r'''{
 }
 '''
 GRAPH = json.decode(GRAPH_JSON)
+GRAPH_JSON_LINUX_AARCH64 = r'''{
+  "unit_graph": 2,
+  "package": "komira_parquet_api@0.1.0",
+  "mojo": "1.0.0",
+  "toolchain": {
+    "mojo": "1.0.0",
+    "subdir": "linux-aarch64",
+    "cc_target": "aarch64-linux-gnu.2.34",
+    "closure_sha256": "3e7db5a0f9255c9086d9d29f385e7fd90e8536fa16ffe55414f6bba4e0ef3d3e",
+    "zig": {"version": "0.12.0", "url": "https://ziglang.org/download/0.12.0/zig-linux-aarch64-0.12.0.tar.xz", "sha256": "754f1029484079b7e0ca3b913a0a2f2a6afd5a28990cb224fe8845e72f09de63", "size": 41849060},
+    "components": [
+      {"name": "libgcc", "version": "16.2.0", "url": "https://conda.anaconda.org/conda-forge/linux-aarch64/libgcc-16.2.0-h205dda4_7.conda", "sha256": "eae7a3449d5a3b5351c5427137c076cc3fc826645c7bfc42dc10772b783826f1", "size": 627793},
+      {"name": "libstdcxx", "version": "16.2.0", "url": "https://conda.anaconda.org/conda-forge/linux-aarch64/libstdcxx-16.2.0-hef695bb_7.conda", "sha256": "b241a3acfa9cdb1359112864a1241225533c92642de3000d52ae65ef5d3a9786", "size": 6236630},
+      {"name": "mojo-compiler", "version": "1.0.0", "url": "https://conda.modular.com/max/linux-aarch64/mojo-compiler-1.0.0-release.conda", "sha256": "da1772742c54f1f8f7b883e6338b1fe5de4592f2c882220dcceae623cc661e57", "size": 66479788}
+    ]
+  },
+  "units": [
+    {
+      "id": "komira_parquet_api@0.1.0#mojo1.0.0/lib",
+      "package": "komira_parquet_api",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/komira_parquet_api/src/komira_parquet_api",
+      "srcs": [
+        {"path": "src/komira_parquet_api/src/komira_parquet_api/__init__.mojo", "sha256": "b981defb295e5a383f335051176af8fe4666a1b1cdfc24ae61901c7d05beacd4"},
+        {"path": "src/komira_parquet_api/src/komira_parquet_api/hll_footer.mojo", "sha256": "fb13d11baa4747b17b4135361ed71f766d63ca0bab9f1a1990137ad30539fd97"},
+        {"path": "src/komira_parquet_api/src/komira_parquet_api/metadata.mojo", "sha256": "cb6efac7f29d12de7290ac75aeff2179c04ef61fa54572f5fa89eb31057f399a"},
+        {"path": "src/komira_parquet_api/src/komira_parquet_api/types.mojo", "sha256": "5c961b33b41c0b6328f47aa6c31e1eb5f1917d4af6fe028c561e796257a67391"}
+      ],
+      "deps": [],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["komira_parquet_api.mojoc"],
+      "key": "ad4d3f78ffdd98686cbf50ef8276644983ca7cfd9e0a35e2a87fb43ea490c75e"
+    },
+    {
+      "id": "komira_parquet_api@0.1.0#mojo1.0.0/test:src/komira_parquet_api/tests/test_enum_ne_operator.mojo",
+      "package": "komira_parquet_api",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/komira_parquet_api/tests/test_enum_ne_operator.mojo", "sha256": "b90a461e04779694503b4ff68d7a296964911aecffecb931a25297495066fc3d"}
+      ],
+      "deps": ["komira_parquet_api@0.1.0#mojo1.0.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_enum_ne_operator.pass"],
+      "key": "c52c88288bbfef29a30b7522c8dbfb88f16df9251e11276af20b26ac451ec414"
+    },
+    {
+      "id": "komira_parquet_api@0.1.0#mojo1.0.0/test:src/komira_parquet_api/tests/test_enum_unknown_values.mojo",
+      "package": "komira_parquet_api",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/komira_parquet_api/tests/test_enum_unknown_values.mojo", "sha256": "ca9fa879034748876a5ebeb6f33562075b6a42a5340128e19c6d8d7b08576a0a"}
+      ],
+      "deps": ["komira_parquet_api@0.1.0#mojo1.0.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_enum_unknown_values.pass"],
+      "key": "a3a7887d9486988f2012dafdab549cc347ab71e5ca0e4eaf8398ec26d56601e6"
+    },
+    {
+      "id": "komira_parquet_api@0.1.0#mojo1.0.0/test:src/komira_parquet_api/tests/test_hll_footer.mojo",
+      "package": "komira_parquet_api",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/komira_parquet_api/tests/test_hll_footer.mojo", "sha256": "337b16a634ac7d7cdc4800118a3138dafe42dc0438191eedfac97565725d1c41"}
+      ],
+      "deps": ["komira_parquet_api@0.1.0#mojo1.0.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_hll_footer.pass"],
+      "key": "0f1f720ae7d10b2207df87cfd980953ab26d9477e5a0a79a956bbdd5f1ca9af4"
+    },
+    {
+      "id": "komira_parquet_api@0.1.0#mojo1.0.0/test:src/komira_parquet_api/tests/test_no_env_reads.mojo",
+      "package": "komira_parquet_api",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/komira_parquet_api/tests/test_no_env_reads.mojo", "sha256": "1df365efbe389cb3fd0c771f22d83bff1824fdffe59518667baa476d5d3c7007"}
+      ],
+      "deps": ["komira_parquet_api@0.1.0#mojo1.0.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_no_env_reads.pass"],
+      "key": "8e144635a7e6cdcc1944c5bfc573e467beb34b46b0e9a67026982b908760164e"
+    },
+    {
+      "id": "komira_parquet_api@0.1.0#mojo1.0.0/test:src/komira_parquet_api/tests/test_parquet_types.mojo",
+      "package": "komira_parquet_api",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/komira_parquet_api/tests/test_parquet_types.mojo", "sha256": "fb60102e92f7ea9a02fcbdeb6a1091ece8d4d098f95d410d8e0bb6019c6142d7"}
+      ],
+      "deps": ["komira_parquet_api@0.1.0#mojo1.0.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_parquet_types.pass"],
+      "key": "78d3b7d9ac5884839ee7701df699939d2b29724e65ee1a5ec91035141e72807d"
+    },
+    {
+      "id": "komira_parquet_api@0.1.0#mojo1.0.0/test:src/komira_parquet_api/tests/test_values_match_parquet_thrift.mojo",
+      "package": "komira_parquet_api",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/komira_parquet_api/tests/test_values_match_parquet_thrift.mojo", "sha256": "8bb3b0d3580d6e8b79c234acf877a7f4f7347ea068cd4247d1c550cdc9eff7b9"}
+      ],
+      "deps": ["komira_parquet_api@0.1.0#mojo1.0.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_values_match_parquet_thrift.pass"],
+      "key": "eca9ff5fa62950eb6117507a4a5592db687b1da4450983a5c5d83db8540ee319"
+    }
+  ]
+}
+'''
+GRAPH_JSON_OSX_ARM64 = r'''{
+  "unit_graph": 2,
+  "package": "komira_parquet_api@0.1.0",
+  "mojo": "1.0.0",
+  "toolchain": {
+    "mojo": "1.0.0",
+    "subdir": "osx-arm64",
+    "cc_target": "aarch64-macos.11.0",
+    "closure_sha256": "dfb1ddbe32564e406967054fbccd4ad643bf01e72532a3eb3add28253908ac5f",
+    "zig": {"version": "0.12.0", "url": "https://ziglang.org/download/0.12.0/zig-macos-aarch64-0.12.0.tar.xz", "sha256": "294e224c14fd0822cfb15a35cf39aa14bd9967867999bf8bdfe3db7ddec2a27f", "size": 43447724},
+    "components": [
+      {"name": "mojo-compiler", "version": "1.0.0", "url": "https://conda.modular.com/max/osx-arm64/mojo-compiler-1.0.0-release.conda", "sha256": "c52054bc444d851e5c38cc33e790fb011a1080470244aaa59351ac5056d08c59", "size": 61221085}
+    ]
+  },
+  "units": [
+    {
+      "id": "komira_parquet_api@0.1.0#mojo1.0.0/lib",
+      "package": "komira_parquet_api",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/komira_parquet_api/src/komira_parquet_api",
+      "srcs": [
+        {"path": "src/komira_parquet_api/src/komira_parquet_api/__init__.mojo", "sha256": "b981defb295e5a383f335051176af8fe4666a1b1cdfc24ae61901c7d05beacd4"},
+        {"path": "src/komira_parquet_api/src/komira_parquet_api/hll_footer.mojo", "sha256": "fb13d11baa4747b17b4135361ed71f766d63ca0bab9f1a1990137ad30539fd97"},
+        {"path": "src/komira_parquet_api/src/komira_parquet_api/metadata.mojo", "sha256": "cb6efac7f29d12de7290ac75aeff2179c04ef61fa54572f5fa89eb31057f399a"},
+        {"path": "src/komira_parquet_api/src/komira_parquet_api/types.mojo", "sha256": "5c961b33b41c0b6328f47aa6c31e1eb5f1917d4af6fe028c561e796257a67391"}
+      ],
+      "deps": [],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["komira_parquet_api.mojoc"],
+      "key": "791ddde39283304107d57dab5c8b712666cb7f5c9a094e5aac07a3411892a5d1"
+    },
+    {
+      "id": "komira_parquet_api@0.1.0#mojo1.0.0/test:src/komira_parquet_api/tests/test_enum_ne_operator.mojo",
+      "package": "komira_parquet_api",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/komira_parquet_api/tests/test_enum_ne_operator.mojo", "sha256": "b90a461e04779694503b4ff68d7a296964911aecffecb931a25297495066fc3d"}
+      ],
+      "deps": ["komira_parquet_api@0.1.0#mojo1.0.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_enum_ne_operator.pass"],
+      "key": "e499f84ca42555424e78e7d5d84fc7fdbe3a0b0be2c3e8ece798cc7927f3c535"
+    },
+    {
+      "id": "komira_parquet_api@0.1.0#mojo1.0.0/test:src/komira_parquet_api/tests/test_enum_unknown_values.mojo",
+      "package": "komira_parquet_api",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/komira_parquet_api/tests/test_enum_unknown_values.mojo", "sha256": "ca9fa879034748876a5ebeb6f33562075b6a42a5340128e19c6d8d7b08576a0a"}
+      ],
+      "deps": ["komira_parquet_api@0.1.0#mojo1.0.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_enum_unknown_values.pass"],
+      "key": "ae927d786271af399660a77c63a09aaadb47d5b1cb49c9c68532f29328148ecf"
+    },
+    {
+      "id": "komira_parquet_api@0.1.0#mojo1.0.0/test:src/komira_parquet_api/tests/test_hll_footer.mojo",
+      "package": "komira_parquet_api",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/komira_parquet_api/tests/test_hll_footer.mojo", "sha256": "337b16a634ac7d7cdc4800118a3138dafe42dc0438191eedfac97565725d1c41"}
+      ],
+      "deps": ["komira_parquet_api@0.1.0#mojo1.0.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_hll_footer.pass"],
+      "key": "d80112416b947d8d8646cb3cab14677f809df7a993f4007f51c740b92905ba4c"
+    },
+    {
+      "id": "komira_parquet_api@0.1.0#mojo1.0.0/test:src/komira_parquet_api/tests/test_no_env_reads.mojo",
+      "package": "komira_parquet_api",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/komira_parquet_api/tests/test_no_env_reads.mojo", "sha256": "1df365efbe389cb3fd0c771f22d83bff1824fdffe59518667baa476d5d3c7007"}
+      ],
+      "deps": ["komira_parquet_api@0.1.0#mojo1.0.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_no_env_reads.pass"],
+      "key": "25bb9f555836a22d2f9e581a6e0f4bc1876f5414a3f1c3910d9e4674a2744f1c"
+    },
+    {
+      "id": "komira_parquet_api@0.1.0#mojo1.0.0/test:src/komira_parquet_api/tests/test_parquet_types.mojo",
+      "package": "komira_parquet_api",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/komira_parquet_api/tests/test_parquet_types.mojo", "sha256": "fb60102e92f7ea9a02fcbdeb6a1091ece8d4d098f95d410d8e0bb6019c6142d7"}
+      ],
+      "deps": ["komira_parquet_api@0.1.0#mojo1.0.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_parquet_types.pass"],
+      "key": "47ca2d0278ecdf9af1baec331bb14b5ff77f2d3f20280f7dbed3dc8d3ee03b91"
+    },
+    {
+      "id": "komira_parquet_api@0.1.0#mojo1.0.0/test:src/komira_parquet_api/tests/test_values_match_parquet_thrift.mojo",
+      "package": "komira_parquet_api",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/komira_parquet_api/tests/test_values_match_parquet_thrift.mojo", "sha256": "8bb3b0d3580d6e8b79c234acf877a7f4f7347ea068cd4247d1c550cdc9eff7b9"}
+      ],
+      "deps": ["komira_parquet_api@0.1.0#mojo1.0.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_values_match_parquet_thrift.pass"],
+      "key": "bbc8c2f8d30c06c8fc21b3598e3eedf67a9209e2cfe110bd429b2f4951fc6988"
+    }
+  ]
+}
+'''
+GRAPHS = {
+    "linux-64": GRAPH,
+    "linux-aarch64": json.decode(GRAPH_JSON_LINUX_AARCH64),
+    "osx-arm64": json.decode(GRAPH_JSON_OSX_ARM64),
+}

@@ -201,8 +201,8 @@ def test_branch_records_and_mutants_of_a_marked_file_are_left_out() raises:
         "SF:src/p/g.mojo\nBRDA:2,20:select:0/1,0,0\nBRDA:2,20:select:0/1,1,0\nend_of_record\n"
     )))
     # A second branch record file that disagrees with the first on how many
-    # decisions the marked file's location holds: refused for a measured file, read by no
-    # one for a left-out one.
+    # decisions the marked file's location holds: for a measured file the
+    # copy with the most decisions counts, for a left-out one no one reads it.
     r.append(Input(String(FORMAT_BRANCH_LCOV), String(""), String("c.info"), String(
         "SF:src/p/g.mojo\nBRDA:2,20:select:0/2,0,0\nBRDA:2,20:select:0/2,1,0\nBRDA:2,20:select:1/2,0,0\nBRDA:2,20:select:1/2,1,0\nend_of_record\n"
     )))
@@ -214,13 +214,10 @@ def test_branch_records_and_mutants_of_a_marked_file_are_left_out() raises:
     assert_equal(p.mutants, 0)
     assert_true(_kinds(a).find("MutantSurvived") < 0, _kinds(a))
     assert_equal(len(a.generated_paths), 1)
-    # The same inputs against an unmarked file: the disagreement is refused.
-    var raised = False
-    try:
-        _ = analyze(r, m, _repo(), _held(), _sources(String("def g() -> Int:\n    return 2\n")), Options())
-    except:
-        raised = True
-    assert_true(raised)
+    # The same inputs against an unmarked file: the disagreement is no
+    # refusal (this asserted one before): the two-decision copy counts, 4 arms.
+    var both = analyze(r, m, _repo(), _held(), _sources(String("def g() -> Int:\n    return 2\n")), Options())
+    assert_equal(both.packages[both.package_index(String("src/p"))].branch_found, 4)
     # And with one agreeing branch record file, its mutant and arms count.
     var one = _a_only()
     one.append(r[1].copy())

@@ -6,7 +6,7 @@ MOJO = "1.0.0"
 CLOSURE_SHA256 = "fd654c4192487587d8f8d9402d060e45e218b79da7b8964503a703710e49b15d"
 MANIFEST_SHA256 = {
     "mopm-toolchain.toml": "7e43881be78fc3f59fa9aa39252cc7a63d66cd79a9d7c99d948c214a3967ee3f",
-    "mopm.lock": "ab4a0dd368f5856e0c546351d542ec31834c1813b8823db84a07414adecb6b1b",
+    "mopm.lock": "7f4f35c22bf38597c0688630cbc857ef8b71b9ebcced62dab4dea0c31274af98",
     "mopm.toml": "cf0818935bbdee799e831fe8f4018968c22da718663ccaefb6dd4a8fd4eb450d",
 }
 GRAPH_JSON = r'''{
@@ -74,3 +74,134 @@ GRAPH_JSON = r'''{
 }
 '''
 GRAPH = json.decode(GRAPH_JSON)
+GRAPH_JSON_LINUX_AARCH64 = r'''{
+  "unit_graph": 2,
+  "package": "komira_validation_run@0.1.0",
+  "mojo": "1.0.0",
+  "toolchain": {
+    "mojo": "1.0.0",
+    "subdir": "linux-aarch64",
+    "cc_target": "aarch64-linux-gnu.2.34",
+    "closure_sha256": "3e7db5a0f9255c9086d9d29f385e7fd90e8536fa16ffe55414f6bba4e0ef3d3e",
+    "zig": {"version": "0.12.0", "url": "https://ziglang.org/download/0.12.0/zig-linux-aarch64-0.12.0.tar.xz", "sha256": "754f1029484079b7e0ca3b913a0a2f2a6afd5a28990cb224fe8845e72f09de63", "size": 41849060},
+    "components": [
+      {"name": "libgcc", "version": "16.2.0", "url": "https://conda.anaconda.org/conda-forge/linux-aarch64/libgcc-16.2.0-h205dda4_7.conda", "sha256": "eae7a3449d5a3b5351c5427137c076cc3fc826645c7bfc42dc10772b783826f1", "size": 627793},
+      {"name": "libstdcxx", "version": "16.2.0", "url": "https://conda.anaconda.org/conda-forge/linux-aarch64/libstdcxx-16.2.0-hef695bb_7.conda", "sha256": "b241a3acfa9cdb1359112864a1241225533c92642de3000d52ae65ef5d3a9786", "size": 6236630},
+      {"name": "mojo-compiler", "version": "1.0.0", "url": "https://conda.modular.com/max/linux-aarch64/mojo-compiler-1.0.0-release.conda", "sha256": "da1772742c54f1f8f7b883e6338b1fe5de4592f2c882220dcceae623cc661e57", "size": 66479788}
+    ]
+  },
+  "units": [
+    {
+      "id": "komira_validation_run@0.1.0#mojo1.0.0/lib",
+      "package": "komira_validation_run",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/komira_validation_run/src/komira_validation_run",
+      "srcs": [
+        {"path": "src/komira_validation_run/src/komira_validation_run/__init__.mojo", "sha256": "25b5c3add48342e21f18921cf9a5d8d2aef8467688464c0044c7ee861574744e"},
+        {"path": "src/komira_validation_run/src/komira_validation_run/validation_run_tag.mojo", "sha256": "4f370c0c6ef8b377da0a5702832767870a5d4c532b7dda069ab4f509623686e8"}
+      ],
+      "deps": [],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["komira_validation_run.mojoc"],
+      "key": "195874dea9968c09e7c90cf78ffc1f95a5dbca12013202fde60ef9b360beb2b6"
+    },
+    {
+      "id": "komira_validation_run@0.1.0#mojo1.0.0/test:src/komira_validation_run/tests/test_retention_tag_value.mojo",
+      "package": "komira_validation_run",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/komira_validation_run/tests/test_retention_tag_value.mojo", "sha256": "58b3d5a046cebb0d3683bdeed5e7404fca997ef93cbc33a3dc6ba643e27a3a73"}
+      ],
+      "deps": ["komira_validation_run@0.1.0#mojo1.0.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_retention_tag_value.pass"],
+      "key": "580dac1d922ef1a40355191a1e5a67ef63786f6b3b01c3019eee1775352b7ccd"
+    },
+    {
+      "id": "komira_validation_run@0.1.0#mojo1.0.0/test:src/komira_validation_run/tests/test_validation_run_tag.mojo",
+      "package": "komira_validation_run",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/komira_validation_run/tests/test_validation_run_tag.mojo", "sha256": "42f0fb594f454067c488f7fdf6b65ce0a9e4ee5cceee88bde54a495e33439eac"}
+      ],
+      "deps": ["komira_validation_run@0.1.0#mojo1.0.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_validation_run_tag.pass"],
+      "key": "6af4fbcdfaa3752430afaf09c4f93bf7b23b8dd9f836a5a0c56463b76d376714"
+    }
+  ]
+}
+'''
+GRAPH_JSON_OSX_ARM64 = r'''{
+  "unit_graph": 2,
+  "package": "komira_validation_run@0.1.0",
+  "mojo": "1.0.0",
+  "toolchain": {
+    "mojo": "1.0.0",
+    "subdir": "osx-arm64",
+    "cc_target": "aarch64-macos.11.0",
+    "closure_sha256": "dfb1ddbe32564e406967054fbccd4ad643bf01e72532a3eb3add28253908ac5f",
+    "zig": {"version": "0.12.0", "url": "https://ziglang.org/download/0.12.0/zig-macos-aarch64-0.12.0.tar.xz", "sha256": "294e224c14fd0822cfb15a35cf39aa14bd9967867999bf8bdfe3db7ddec2a27f", "size": 43447724},
+    "components": [
+      {"name": "mojo-compiler", "version": "1.0.0", "url": "https://conda.modular.com/max/osx-arm64/mojo-compiler-1.0.0-release.conda", "sha256": "c52054bc444d851e5c38cc33e790fb011a1080470244aaa59351ac5056d08c59", "size": 61221085}
+    ]
+  },
+  "units": [
+    {
+      "id": "komira_validation_run@0.1.0#mojo1.0.0/lib",
+      "package": "komira_validation_run",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/komira_validation_run/src/komira_validation_run",
+      "srcs": [
+        {"path": "src/komira_validation_run/src/komira_validation_run/__init__.mojo", "sha256": "25b5c3add48342e21f18921cf9a5d8d2aef8467688464c0044c7ee861574744e"},
+        {"path": "src/komira_validation_run/src/komira_validation_run/validation_run_tag.mojo", "sha256": "4f370c0c6ef8b377da0a5702832767870a5d4c532b7dda069ab4f509623686e8"}
+      ],
+      "deps": [],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["komira_validation_run.mojoc"],
+      "key": "df1413b36f2980497c517e6be4a0f44a8d34abedd7429294a243809eafd8907e"
+    },
+    {
+      "id": "komira_validation_run@0.1.0#mojo1.0.0/test:src/komira_validation_run/tests/test_retention_tag_value.mojo",
+      "package": "komira_validation_run",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/komira_validation_run/tests/test_retention_tag_value.mojo", "sha256": "58b3d5a046cebb0d3683bdeed5e7404fca997ef93cbc33a3dc6ba643e27a3a73"}
+      ],
+      "deps": ["komira_validation_run@0.1.0#mojo1.0.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_retention_tag_value.pass"],
+      "key": "6ef0bfafbca4b907574c03b05c21efde957d2ef718f8e13c4250832ed04cd292"
+    },
+    {
+      "id": "komira_validation_run@0.1.0#mojo1.0.0/test:src/komira_validation_run/tests/test_validation_run_tag.mojo",
+      "package": "komira_validation_run",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/komira_validation_run/tests/test_validation_run_tag.mojo", "sha256": "42f0fb594f454067c488f7fdf6b65ce0a9e4ee5cceee88bde54a495e33439eac"}
+      ],
+      "deps": ["komira_validation_run@0.1.0#mojo1.0.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_validation_run_tag.pass"],
+      "key": "d202a72f87b5509a6d37025397289476039c240ace0f2434b46c05eac89e48bb"
+    }
+  ]
+}
+'''
+GRAPHS = {
+    "linux-64": GRAPH,
+    "linux-aarch64": json.decode(GRAPH_JSON_LINUX_AARCH64),
+    "osx-arm64": json.decode(GRAPH_JSON_OSX_ARM64),
+}

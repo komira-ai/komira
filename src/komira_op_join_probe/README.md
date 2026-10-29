@@ -21,13 +21,6 @@ import from the modules.
   chains together (`join_multi_key_parallel_task`), then one more fanned wave
   concatenates their matches. The same pairs as the serial probe, grouped by
   worker.
-- `komira_op_join_probe.join_multi_key_parallel_build`:
-  `multi_key_hash_join_build_parallel`, the build fanned over the engine's
-  dispatcher (each row pushed onto its bucket's chain with an atomic
-  compare-exchange), serial below 250,000 rows. The same rows in the same
-  buckets as `MultiKeyHashJoinBuilder.build`, chain order aside. It follows the
-  hash join's build mode (`komira_op_join_build`'s
-  `join_parallel_build_configure`: AUTO, OFF, or the FORCE test hook).
 - `komira_op_join_probe.join_probe_multi_key`: `execute_multi_key_join_probe`,
   the composite join probe operator: one probe batch against the completed
   build batch, as a physical plan's `MorselOp` says (keys, INNER / LEFT / SEMI
@@ -46,20 +39,6 @@ import from the modules.
   (`DeferredJoinChunk`, the indices narrowed to 4 bytes when they fit) for one
   gather at the end; `deferral_verdict` decides which, by a DRAM-traffic rule
   (or the older memory rule), and names the line that decided.
-- `komira_op_join_probe.join_probe_levers`: the streaming probe's chunk
-  buffer reuse setting (off unless configured) and the counters of its
-  probe-key share and buffers, printed as one witness line under the
-  scheduler trace.
-- `komira_op_join_probe.radix_join`: `RadixPartitionedHashJoin`, a hash join
-  over one INT64 key split into 256 partitions by hash, each probed with its
-  own scattered probe rows so one small table is cache-resident at a time;
-  INNER, SEMI, ANTI and LEFT.
-- `komira_op_join_probe.semi_join`: `SemiJoinHashSet`, the deduplicated set of
-  build keys a single-INT64-key SEMI or ANTI join probes (serial or
-  partitioned parallel build; serial, parallel and count-only probes). Every
-  INT64 value is a key, INT64_MIN included. Keys that crowd into one of its
-  eight partitions grow the table (a partition stays at most 3/4 full); a
-  parallel build of such keys runs serially.
 - `komira_op_join_probe.join_key_extract`: `extract_join_key_columns_typed`
   (and `extract_join_key_columns_serial`, without a dispatcher) renders a
   batch's key columns into one Int64 key slot per row and key

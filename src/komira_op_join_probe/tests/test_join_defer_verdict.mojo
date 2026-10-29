@@ -5,6 +5,8 @@
 # declined, while a selective join stays staged; the correctness refusals hold
 # under `force`; the join state's rule arguments; and the verdict ledger.
 
+from std.testing import assert_equal, assert_true
+
 from komira_op_join_probe.join_defer_verdict import (
     DEFER_ADMIT,
     DEFER_FOOTPRINT_CAP,
@@ -121,14 +123,34 @@ def test_the_wrapper_cannot_drift_from_the_verdict() raises:
     print("  ok: wrapper == verdict over", checked, "points, both dispositions")
 
 
+def _min_matches_past_the_cap(probe_bytes: Int, row_width: Int, cols: Int) -> Int:
+    """The fewest matches for which `deferral_verdict` does not answer
+    `DEFER_FOOTPRINT_CAP` (the cap only loosens as matches grow, so bisect)."""
+    var lo = 1
+    var hi = 8 * _SHAPE_N
+    while lo < hi:
+        var mid = (lo + hi) // 2
+        if (
+            deferral_verdict(
+                probe_bytes, mid, row_width, False, cols, True, 16, _IDXW_TRUE
+            )
+            == DEFER_FOOTPRINT_CAP
+        ):
+            lo = mid + 1
+        else:
+            hi = mid
+    return lo
+
+
 def test_the_footprint_cap_is_not_what_narrowing_defeats() raises:
     """The cap declines nothing across the payload-width ladder (8, 4, 2, 1
-    bytes) of a 15,360-row, 4-output-column shape."""
+    bytes) of a 15,360-row, 4-output-column shape, and the matches it needs do
+    not grow as the payload narrows."""
     var prev_required = -1
     for payload_w in [8, 4, 2, 1]:
         var pb = _shape_probe_bytes(payload_w, _SHAPE_N)
         var w = _shape_out_row_width(payload_w)
-        var required = (pb + w - 1) // w
+        var required = _min_matches_past_the_cap(pb, w, _SHAPE_OUT_COLS)
         if prev_required >= 0 and required > prev_required:
             raise Error(
                 "the footprint cap TIGHTENED as the payload narrowed to "
@@ -151,24 +173,27 @@ def test_the_footprint_cap_is_not_what_narrowing_defeats() raises:
 
 
 def test_narrowing_a_build_only_column_DOES_tighten_the_cap() raises:
-    """The asymmetry is real, intended, and pinned so nobody "fixes" it."""
+    """The asymmetry is real, intended, and pinned so nobody "fixes" it: with
+    the probe side fixed, a narrower build-side column shrinks the staged row,
+    so the verdict needs MORE matches before the cap stops refusing."""
     var probe_side = 16  # two INT64 probe columns, never narrowed
     var pb = probe_side * _SHAPE_N
     var prev_required = -1
-    var saw_tighten = False
+    var tightened = 0
     for build_side in [16, 8, 4, 2]:
-        var w = probe_side + build_side
-        var required = (pb + w - 1) // w
-        if prev_required >= 0 and required > prev_required:
-            saw_tighten = True
-        prev_required = required
-    if not saw_tighten:
-        raise Error(
-            "narrowing a BUILD-ONLY output column did not tighten the footprint"
-            " cap. The cap is a NON-REGRESSION bound against the staged arm's"
-            " own peak; if it no longer tracks that peak it is no longer that"
-            " bound."
+        var required = _min_matches_past_the_cap(
+            pb, probe_side + build_side, _SHAPE_OUT_COLS
         )
+        # The cap refuses exactly while the probe exceeds the staged output.
+        assert_true(
+            required * (probe_side + build_side) >= pb
+            and (required - 1) * (probe_side + build_side) < pb,
+            "the cap's edge is at ceil(probe_bytes / row width)",
+        )
+        if prev_required >= 0 and required > prev_required:
+            tightened += 1
+        prev_required = required
+    assert_equal(tightened, 3, "every narrowing step needs more matches")
     print("  ok: build-side narrowing tightens the cap, as the bound requires")
 
 

@@ -6,7 +6,7 @@ MOJO = "1.0.0"
 CLOSURE_SHA256 = "fd654c4192487587d8f8d9402d060e45e218b79da7b8964503a703710e49b15d"
 MANIFEST_SHA256 = {
     "mopm-toolchain.toml": "7e43881be78fc3f59fa9aa39252cc7a63d66cd79a9d7c99d948c214a3967ee3f",
-    "mopm.lock": "ab4a0dd368f5856e0c546351d542ec31834c1813b8823db84a07414adecb6b1b",
+    "mopm.lock": "7f4f35c22bf38597c0688630cbc857ef8b71b9ebcced62dab4dea0c31274af98",
     "mopm.toml": "cb774831e8c653511bb8cbfd4004c6339e92ba9ac650eb4e054033e3d24be848",
 }
 GRAPH_JSON = r'''{
@@ -60,3 +60,106 @@ GRAPH_JSON = r'''{
 }
 '''
 GRAPH = json.decode(GRAPH_JSON)
+GRAPH_JSON_LINUX_AARCH64 = r'''{
+  "unit_graph": 2,
+  "package": "komira_rowcell@0.1.0",
+  "mojo": "1.0.0",
+  "toolchain": {
+    "mojo": "1.0.0",
+    "subdir": "linux-aarch64",
+    "cc_target": "aarch64-linux-gnu.2.34",
+    "closure_sha256": "3e7db5a0f9255c9086d9d29f385e7fd90e8536fa16ffe55414f6bba4e0ef3d3e",
+    "zig": {"version": "0.12.0", "url": "https://ziglang.org/download/0.12.0/zig-linux-aarch64-0.12.0.tar.xz", "sha256": "754f1029484079b7e0ca3b913a0a2f2a6afd5a28990cb224fe8845e72f09de63", "size": 41849060},
+    "components": [
+      {"name": "libgcc", "version": "16.2.0", "url": "https://conda.anaconda.org/conda-forge/linux-aarch64/libgcc-16.2.0-h205dda4_7.conda", "sha256": "eae7a3449d5a3b5351c5427137c076cc3fc826645c7bfc42dc10772b783826f1", "size": 627793},
+      {"name": "libstdcxx", "version": "16.2.0", "url": "https://conda.anaconda.org/conda-forge/linux-aarch64/libstdcxx-16.2.0-hef695bb_7.conda", "sha256": "b241a3acfa9cdb1359112864a1241225533c92642de3000d52ae65ef5d3a9786", "size": 6236630},
+      {"name": "mojo-compiler", "version": "1.0.0", "url": "https://conda.modular.com/max/linux-aarch64/mojo-compiler-1.0.0-release.conda", "sha256": "da1772742c54f1f8f7b883e6338b1fe5de4592f2c882220dcceae623cc661e57", "size": 66479788}
+    ]
+  },
+  "units": [
+    {
+      "id": "komira_rowcell@0.1.0#mojo1.0.0/lib",
+      "package": "komira_rowcell",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/komira_rowcell/src/komira_rowcell",
+      "srcs": [
+        {"path": "src/komira_rowcell/src/komira_rowcell/__init__.mojo", "sha256": "2f8f7493f468c329a3e21c0b73323c1fee0b4680f07a4e238f9c68bd3bffa4e3"},
+        {"path": "src/komira_rowcell/src/komira_rowcell/row_cell.mojo", "sha256": "23dca62c693eb2587e033ca8c56e621595041a52c70f1fc0ee265a82aca0f9a9"}
+      ],
+      "deps": [],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["komira_rowcell.mojoc"],
+      "key": "c98fcd6d54b2675f819e64c9a850163008664fd555393198bbd37435f16be3e8"
+    },
+    {
+      "id": "komira_rowcell@0.1.0#mojo1.0.0/test:src/komira_rowcell/tests/test_row_cell.mojo",
+      "package": "komira_rowcell",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/komira_rowcell/tests/test_row_cell.mojo", "sha256": "5e3a17b597a5cfe1702d6adc83302bed25fd8a3defe5c92db017f5cfcf19ebbd"}
+      ],
+      "deps": ["komira_rowcell@0.1.0#mojo1.0.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_row_cell.pass"],
+      "key": "a2d528ed2b19d168279ffc3bb2cfad127f3edb694787f150fe5aedb3d719f9fd"
+    }
+  ]
+}
+'''
+GRAPH_JSON_OSX_ARM64 = r'''{
+  "unit_graph": 2,
+  "package": "komira_rowcell@0.1.0",
+  "mojo": "1.0.0",
+  "toolchain": {
+    "mojo": "1.0.0",
+    "subdir": "osx-arm64",
+    "cc_target": "aarch64-macos.11.0",
+    "closure_sha256": "dfb1ddbe32564e406967054fbccd4ad643bf01e72532a3eb3add28253908ac5f",
+    "zig": {"version": "0.12.0", "url": "https://ziglang.org/download/0.12.0/zig-macos-aarch64-0.12.0.tar.xz", "sha256": "294e224c14fd0822cfb15a35cf39aa14bd9967867999bf8bdfe3db7ddec2a27f", "size": 43447724},
+    "components": [
+      {"name": "mojo-compiler", "version": "1.0.0", "url": "https://conda.modular.com/max/osx-arm64/mojo-compiler-1.0.0-release.conda", "sha256": "c52054bc444d851e5c38cc33e790fb011a1080470244aaa59351ac5056d08c59", "size": 61221085}
+    ]
+  },
+  "units": [
+    {
+      "id": "komira_rowcell@0.1.0#mojo1.0.0/lib",
+      "package": "komira_rowcell",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/komira_rowcell/src/komira_rowcell",
+      "srcs": [
+        {"path": "src/komira_rowcell/src/komira_rowcell/__init__.mojo", "sha256": "2f8f7493f468c329a3e21c0b73323c1fee0b4680f07a4e238f9c68bd3bffa4e3"},
+        {"path": "src/komira_rowcell/src/komira_rowcell/row_cell.mojo", "sha256": "23dca62c693eb2587e033ca8c56e621595041a52c70f1fc0ee265a82aca0f9a9"}
+      ],
+      "deps": [],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["komira_rowcell.mojoc"],
+      "key": "7a2d3149473b3442106e04fdd7574a88f423a4b5728f9bd432aa819fce3a19b4"
+    },
+    {
+      "id": "komira_rowcell@0.1.0#mojo1.0.0/test:src/komira_rowcell/tests/test_row_cell.mojo",
+      "package": "komira_rowcell",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/komira_rowcell/tests/test_row_cell.mojo", "sha256": "5e3a17b597a5cfe1702d6adc83302bed25fd8a3defe5c92db017f5cfcf19ebbd"}
+      ],
+      "deps": ["komira_rowcell@0.1.0#mojo1.0.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_row_cell.pass"],
+      "key": "58c9410419b97b475ab4ec573dca26306b8f8b47243c39bee31e5be1610704c5"
+    }
+  ]
+}
+'''
+GRAPHS = {
+    "linux-64": GRAPH,
+    "linux-aarch64": json.decode(GRAPH_JSON_LINUX_AARCH64),
+    "osx-arm64": json.decode(GRAPH_JSON_OSX_ARM64),
+}

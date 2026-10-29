@@ -326,6 +326,24 @@ struct BoundedHeapStringPayload[N: Int, sort_dir: Int](Copyable, Movable):
         return self.slots[0].payload_row_id
 
     @always_inline
+    def compare_to_root[bo: Origin[mut=False]](self, cand: Span[UInt8, bo]) -> Int:
+        """-1 if the candidate key is better to keep than the root (the worst
+        key kept), 0 if it ties with it, 1 if it is worse; payload ids are not
+        compared. Requires `size() > 0`."""
+        var c = self._cmp_span_slot[bo](cand, 0)
+        comptime if Self.sort_dir == 1:
+            return -c
+        else:
+            return c
+
+    def root_key_bytes(self) -> List[UInt8]:
+        """The root's key bytes, copied. Requires `size() > 0`."""
+        var out = List[UInt8](capacity=self.slots[0].key_len)
+        for i in range(self.slots[0].key_len):
+            out.append(self.arena[self.slots[0].key_off + i])
+        return out^
+
+    @always_inline
     def candidate_beats_root[bo: Origin[mut=False]](
         self, key: Span[UInt8, bo], payload_row_id: Int64
     ) -> Bool:

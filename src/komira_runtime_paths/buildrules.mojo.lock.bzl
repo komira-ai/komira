@@ -6,7 +6,7 @@ MOJO = "1.0.0"
 CLOSURE_SHA256 = "fd654c4192487587d8f8d9402d060e45e218b79da7b8964503a703710e49b15d"
 MANIFEST_SHA256 = {
     "mopm-toolchain.toml": "7e43881be78fc3f59fa9aa39252cc7a63d66cd79a9d7c99d948c214a3967ee3f",
-    "mopm.lock": "ab4a0dd368f5856e0c546351d542ec31834c1813b8823db84a07414adecb6b1b",
+    "mopm.lock": "7f4f35c22bf38597c0688630cbc857ef8b71b9ebcced62dab4dea0c31274af98",
     "mopm.toml": "af4c47e9c9f9b616174084fcd04c42e20b7850ab6f433f6e20cf8570e8bc2201",
 }
 GRAPH_JSON = r'''{
@@ -60,3 +60,106 @@ GRAPH_JSON = r'''{
 }
 '''
 GRAPH = json.decode(GRAPH_JSON)
+GRAPH_JSON_LINUX_AARCH64 = r'''{
+  "unit_graph": 2,
+  "package": "komira_runtime_paths@0.1.0",
+  "mojo": "1.0.0",
+  "toolchain": {
+    "mojo": "1.0.0",
+    "subdir": "linux-aarch64",
+    "cc_target": "aarch64-linux-gnu.2.34",
+    "closure_sha256": "3e7db5a0f9255c9086d9d29f385e7fd90e8536fa16ffe55414f6bba4e0ef3d3e",
+    "zig": {"version": "0.12.0", "url": "https://ziglang.org/download/0.12.0/zig-linux-aarch64-0.12.0.tar.xz", "sha256": "754f1029484079b7e0ca3b913a0a2f2a6afd5a28990cb224fe8845e72f09de63", "size": 41849060},
+    "components": [
+      {"name": "libgcc", "version": "16.2.0", "url": "https://conda.anaconda.org/conda-forge/linux-aarch64/libgcc-16.2.0-h205dda4_7.conda", "sha256": "eae7a3449d5a3b5351c5427137c076cc3fc826645c7bfc42dc10772b783826f1", "size": 627793},
+      {"name": "libstdcxx", "version": "16.2.0", "url": "https://conda.anaconda.org/conda-forge/linux-aarch64/libstdcxx-16.2.0-hef695bb_7.conda", "sha256": "b241a3acfa9cdb1359112864a1241225533c92642de3000d52ae65ef5d3a9786", "size": 6236630},
+      {"name": "mojo-compiler", "version": "1.0.0", "url": "https://conda.modular.com/max/linux-aarch64/mojo-compiler-1.0.0-release.conda", "sha256": "da1772742c54f1f8f7b883e6338b1fe5de4592f2c882220dcceae623cc661e57", "size": 66479788}
+    ]
+  },
+  "units": [
+    {
+      "id": "komira_runtime_paths@0.1.0#mojo1.0.0/lib",
+      "package": "komira_runtime_paths",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/komira_runtime_paths/src/komira_runtime_paths",
+      "srcs": [
+        {"path": "src/komira_runtime_paths/src/komira_runtime_paths/__init__.mojo", "sha256": "1ee1d276d773be6b1dcd0f75d0155ef3536b218c763e3111c178368b2f899b7c"},
+        {"path": "src/komira_runtime_paths/src/komira_runtime_paths/paths.mojo", "sha256": "86503de89f60352217bee701fc24ad7e1d4fb9ffc18000c1ddad812b7955781b"}
+      ],
+      "deps": [],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["komira_runtime_paths.mojoc"],
+      "key": "202f256e7a5c49df0b62d2578edba0383caf877901d4fdf15f5d7de816883282"
+    },
+    {
+      "id": "komira_runtime_paths@0.1.0#mojo1.0.0/test:src/komira_runtime_paths/tests/test_runtime_paths.mojo",
+      "package": "komira_runtime_paths",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/komira_runtime_paths/tests/test_runtime_paths.mojo", "sha256": "a24090de5960db44db783e8c703aa1a9606b910477bebcc28b4ee34d64ab9cab"}
+      ],
+      "deps": ["komira_runtime_paths@0.1.0#mojo1.0.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_runtime_paths.pass"],
+      "key": "44a82ed94d770ba2b5a708ab936975f6ee50d7b0faaa8c8980ffeaaad132c37e"
+    }
+  ]
+}
+'''
+GRAPH_JSON_OSX_ARM64 = r'''{
+  "unit_graph": 2,
+  "package": "komira_runtime_paths@0.1.0",
+  "mojo": "1.0.0",
+  "toolchain": {
+    "mojo": "1.0.0",
+    "subdir": "osx-arm64",
+    "cc_target": "aarch64-macos.11.0",
+    "closure_sha256": "dfb1ddbe32564e406967054fbccd4ad643bf01e72532a3eb3add28253908ac5f",
+    "zig": {"version": "0.12.0", "url": "https://ziglang.org/download/0.12.0/zig-macos-aarch64-0.12.0.tar.xz", "sha256": "294e224c14fd0822cfb15a35cf39aa14bd9967867999bf8bdfe3db7ddec2a27f", "size": 43447724},
+    "components": [
+      {"name": "mojo-compiler", "version": "1.0.0", "url": "https://conda.modular.com/max/osx-arm64/mojo-compiler-1.0.0-release.conda", "sha256": "c52054bc444d851e5c38cc33e790fb011a1080470244aaa59351ac5056d08c59", "size": 61221085}
+    ]
+  },
+  "units": [
+    {
+      "id": "komira_runtime_paths@0.1.0#mojo1.0.0/lib",
+      "package": "komira_runtime_paths",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/komira_runtime_paths/src/komira_runtime_paths",
+      "srcs": [
+        {"path": "src/komira_runtime_paths/src/komira_runtime_paths/__init__.mojo", "sha256": "1ee1d276d773be6b1dcd0f75d0155ef3536b218c763e3111c178368b2f899b7c"},
+        {"path": "src/komira_runtime_paths/src/komira_runtime_paths/paths.mojo", "sha256": "86503de89f60352217bee701fc24ad7e1d4fb9ffc18000c1ddad812b7955781b"}
+      ],
+      "deps": [],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["komira_runtime_paths.mojoc"],
+      "key": "5d78e3814f260b198f6b1bc8f5156a140ddd159a0d8ff441fe48a54d42a3eecf"
+    },
+    {
+      "id": "komira_runtime_paths@0.1.0#mojo1.0.0/test:src/komira_runtime_paths/tests/test_runtime_paths.mojo",
+      "package": "komira_runtime_paths",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/komira_runtime_paths/tests/test_runtime_paths.mojo", "sha256": "a24090de5960db44db783e8c703aa1a9606b910477bebcc28b4ee34d64ab9cab"}
+      ],
+      "deps": ["komira_runtime_paths@0.1.0#mojo1.0.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_runtime_paths.pass"],
+      "key": "a56a125d5f5c7c3fb710291048d3bd6c00c7c614a25e504598a2b417eb8fcf75"
+    }
+  ]
+}
+'''
+GRAPHS = {
+    "linux-64": GRAPH,
+    "linux-aarch64": json.decode(GRAPH_JSON_LINUX_AARCH64),
+    "osx-arm64": json.decode(GRAPH_JSON_OSX_ARM64),
+}

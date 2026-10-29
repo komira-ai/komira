@@ -6,6 +6,7 @@ declares the `mojo_shared_lib` macro over it.
 
 load("@prelude//linking:link_info.bzl", "MergedLinkInfo", "create_merged_link_info_for_propagation")
 load("@komira//tools/build/native:shared.bzl", "NativeSharedInfo")
+load("@komira//tools/build/platforms:table.bzl", "row")
 load("@komira//tools/build/rerun:rerun.bzl", "RERUN_ATTRS", "rerun_env", "rerun_info")
 load(":compile.bzl", _TOOLCHAIN_ATTR = "toolchain_attr", _build_executable = "build_executable", _c_link = "c_link", _check_deps = "check_deps", _dep_closure = "dep_closure", _link_tail = "link_tail", _main_src = "main_src", _stem = "stem", _toolchain = "toolchain")
 load(":coverage.bzl", "COVERAGE_SHARED_LIB_ATTRS", "coverage_shared_lib")
@@ -119,6 +120,14 @@ def _shared_lib_impl(ctx):
             limit = cmd_args(script, format = "-Wl,--version-script={}")
         link_extra = cmd_args(link_extra, limit) if link_extra else cmd_args(limit)
 
+    if not darwin:
+        # The run path also names the library's own directory: an installed
+        # package puts the library in `<prefix>/lib`, where the Mojo
+        # runtime it is NEEDED on is installed beside it, so `$ORIGIN/lib`
+        # (the `lib/` the gate stages) alone finds nothing there. lld joins
+        # the two `-rpath` into one DT_RUNPATH.
+        link_extra = cmd_args(link_extra, "-Wl,-rpath,$ORIGIN") if link_extra else cmd_args("-Wl,-rpath,$ORIGIN")
+
     # The owners' shared libraries (`native_owners`): linked ahead of the C
     # archives, so the library is NEEDED on each owner's SONAME and the
     # symbols the owner defines are bound to it. The gate stages each owner
@@ -205,13 +214,34 @@ def _shared_lib_impl(ctx):
         cmd_args(tc.act, "copy", ungated, public.as_output(), hidden = markers),
         category = "mojo_shared_lib_join",
     )
+    sub_targets = {
+        "gate": [DefaultInfo(default_outputs = markers, sub_targets = gate_subtargets)],
+        # Files only: the library before its gate ran.
+        "ungated": [DefaultInfo(default_output = ungated)],
+    }
+    if not darwin:
+        # The library where a host can load it: the gated file with lib/ beside
+        # it, holding the Mojo runtime libraries and each native owner's
+        # closure, which is where the run path (`$ORIGIN/lib`) looks. A copy,
+        # not links: the loader expands `$ORIGIN` from the resolved path.
+        files = {so_file: public}
+
+        # The toolchain does not name its platform row, so the list is read
+        # from one: the linux rows state the same runtime libraries (the
+        # compiler's three and its NEEDED libstdc++ and libgcc_s), and this
+        # fails the day they differ instead of shipping the wrong set.
+        if row("linux-x86_64")["runtime_libs"] != row("linux-arm64")["runtime_libs"]:
+            fail("{}: the linux platform rows list different runtime_libs; select the row by the target platform".format(ctx.label))
+        for name in row("linux-x86_64")["runtime_libs"]:
+            files["lib/" + name] = tc.runtime.project(name)
+        for dest, so in owner_files.items():
+            if dest in files:
+                fail("{}: native owner library {} is also a Mojo runtime library".format(ctx.label, dest))
+            files[dest] = so
+        sub_targets["runnable"] = [DefaultInfo(default_output = ctx.actions.copied_dir(out_name + ".runnable", files))]
     return [DefaultInfo(
         default_output = public,
-        sub_targets = {
-            "gate": [DefaultInfo(default_outputs = markers, sub_targets = gate_subtargets)],
-            # Files only: the library before its gate ran.
-            "ungated": [DefaultInfo(default_output = ungated)],
-        } | coverage_shared_lib(ctx, tc, _build_executable, srcs, main, _dep_closure(ctx), _c_link(ctx), link_extra, so_file),
+        sub_targets = sub_targets | coverage_shared_lib(ctx, tc, _build_executable, srcs, main, _dep_closure(ctx), _c_link(ctx), link_extra, so_file),
     ), rerun_info(ctx)]
 
 mojo_shared_lib_rule = rule(

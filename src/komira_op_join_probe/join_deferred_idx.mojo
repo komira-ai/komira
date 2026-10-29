@@ -94,7 +94,8 @@ def join_nt_declined_records() raises -> Int:
 
 
 def reset_join_nt_counters() raises:
-    """Reset both counters (test setup)."""
+    """Reset the four counters (index bytes, declined records, output bytes,
+    output declined items; test setup)."""
     # SAFETY: FFI carve-out (see `note_nt_index_write`).
     var a = _NT_BYTES.get_or_create_ptr()
     a[][].store(Scalar[DType.int64](0))
@@ -171,8 +172,10 @@ def try_narrow_index_pair(
     # SAFETY: module-internal pointer arithmetic, and the two preconditions a
     # raw write into a `List` needs are both established above rather than
     # hoped for: the capacity is EXACTLY `n` (so no append can reallocate and
-    # move the storage out from under these pointers) and every index written
-    # is `< n`. The pointers are read out of the Lists we just created, never
+    # move the storage out from under these pointers) and the loop index is
+    # `< n`, so every write lands inside that capacity; the VALUES written are
+    # the ones the check in the loop keeps within `0..IDX32_MAX`, so each
+    # converts to `Int32` exactly. The pointers are read out of the Lists we just created, never
     # escape this frame, and the length is set through the List's own API
     # afterwards so the object is never observed in a half-initialised state.
     var pp = p32.unsafe_ptr()
@@ -229,7 +232,9 @@ def try_narrow_index_single(
         return out^
 
     # SAFETY: module-internal pointer arithmetic; the capacity is EXACTLY `n`
-    # (so no append can reallocate) and every written index is `< n`. The
+    # (so no append can reallocate) and the loop index is `< n`, so every
+    # write lands inside that capacity; the values written are the ones the
+    # check in the loop keeps within `0..IDX32_MAX`. The
     # pointer is read out of the List we just created and never escapes.
     var pp = p32.unsafe_ptr()
     for i in range(n):

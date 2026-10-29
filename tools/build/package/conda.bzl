@@ -48,6 +48,10 @@ library:
     name, or its static archives, each with a `lib_files` row of
     metadata.json; a shared library whose NEEDED names a komira owner
     outside the Mojo deps closure is refused by the packer;
+  * a C ABI shared library of the library (`shared_lib`, a `mojo_shared_lib`)
+    is packed at lib/<its file name> (`lib<name>.so`, its SONAME) with one
+    `lib_files` row and no link name; the Mojo runtime it is NEEDED on comes
+    from the `mojo-compiler` requirement above, and the glibc floor applies;
   * the library's README.md, when its package holds one, is installed at
     `share/doc/<name>/README.md` (a file of the package, listed in
     info/paths.json): what a user reads is inside what they installed, and
@@ -285,6 +289,25 @@ def _packaged_readme(ctx, lib, info):
     # The packer reads the README only once the tool parsed it back.
     return readme, parsed
 
+def _shared_lib_args(ctx, info):
+    """(packer arguments, check arguments, [path, file] packed) of a library
+    whose package also ships a C ABI shared library (`shared_lib`, a
+    `mojo_shared_lib`): the one file at `lib/<its name>`, whose SONAME is that
+    name. The library has no C of its own to ship (`native`, `native_static`).
+    The glibc floor is the platform table's, as for a library's own shared
+    library. The Mojo runtime the file is NEEDED on comes from the
+    `mojo-compiler` requirement every package has; the packer holds a komira
+    owner it is NEEDED on to the Mojo closure."""
+    if ctx.attrs.native != None or (info.native != None and (info.native.soname != None or info.native.static)):
+        fail("{}: `shared_lib` is for a library with no native files of its own, but {} has some".format(ctx.label, ctx.attrs.lib.label))
+    so = ctx.attrs.shared_lib[DefaultInfo].default_outputs[0]
+    name = so.basename
+    if not name.startswith("lib") or not name.endswith(".so"):
+        fail("{}: shared_lib {} is `{}`, not lib<name>.so (a package ships a C ABI library as lib/lib<name>.so)".format(ctx.label, ctx.attrs.shared_lib.label, name))
+    files = [cmd_args("--lib-shared", cmd_args(so, format = name + "={}")), "--glibc-floor", linux_glibc_floor()]
+    owners = [cmd_args("--closure-owner", o) for o in sorted(info.native.sonames)] if info.native != None else []
+    return files + owners, files, [["lib/" + name, so]]
+
 def _native_args(ctx, info):
     """(packer arguments, check arguments, [path, file] packed) of the
     library's native files: its shared library (`native`, whose archives must
@@ -294,6 +317,8 @@ def _native_args(ctx, info):
     (the komira owners a packed `.so` may name in NEEDED)."""
     facts = info.native
     native = ctx.attrs.native
+    if ctx.attrs.shared_lib != None:
+        return _shared_lib_args(ctx, info)
     soname = facts.soname if facts != None else None
     if soname == None:
         if native != None:
@@ -491,6 +516,9 @@ _conda_package = rule(
         # The library's own shared library (`native` of the mojo_library),
         # packed at lib/<soname> with its link name; set by the macro.
         "native": attrs.option(attrs.dep(providers = [NativeSharedInfo]), default = None),
+        # A `mojo_shared_lib` packed at lib/<its file name> beside the
+        # library's `.mojoc` (`_shared_lib_args`); excludes `native`.
+        "shared_lib": attrs.option(attrs.dep(), default = None),
         "stamp": attrs.string(),
         "subdir": attrs.string(),
         "summary": attrs.string(),

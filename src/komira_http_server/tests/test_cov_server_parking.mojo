@@ -455,12 +455,12 @@ def test_erased_dispatch_reads_a_request_sent_after_the_drain() raises:
     _reads_a_request_sent_after_the_drain(_ERASED)
 
 
-def test_dispatch_drops_a_reset_peer_with_a_parked_response() raises:
-    var l = _DLink()
+def _drops_a_reset_peer_with_a_parked_response(loop: Int) raises:
+    var l = _DLink(loop)
     _send_all_now(l.fd, "GET /big HTTP/1.1\r\nHost: example.com\r\n\r\n")
     l.step()
     l.step()
-    assert_equal(l.d.calls, 1)
+    assert_equal(l.calls(), 1)
     _assert_parked(l.server)
     _reset_close(l.fd)
     l.fd = Int32(-1)
@@ -471,12 +471,28 @@ def test_dispatch_drops_a_reset_peer_with_a_parked_response() raises:
     assert_equal(l.server.live_conn_count(), 0)
 
 
-def test_dispatch_request_read_after_a_drain_parks_again_then_closes() raises:
+def test_dispatch_drops_a_reset_peer_with_a_parked_response() raises:
+    _drops_a_reset_peer_with_a_parked_response(_PLAIN)
+
+
+def test_chained_dispatch_drops_a_reset_peer_with_a_parked_response() raises:
+    _drops_a_reset_peer_with_a_parked_response(_CHAINED)
+
+
+def test_suspendable_dispatch_drops_a_reset_peer_with_a_parked_response() raises:
+    _drops_a_reset_peer_with_a_parked_response(_SUSPENDABLE)
+
+
+def test_erased_dispatch_drops_a_reset_peer_with_a_parked_response() raises:
+    _drops_a_reset_peer_with_a_parked_response(_ERASED)
+
+
+def _request_read_after_a_drain_parks_again_then_closes(loop: Int) raises:
     """A second request and the client's end of stream arrive while the
     first response is parked. The round after the drain reads the second
     request and parks its response too; the round after that drain reads
     the end of stream and closes. Both responses arrive whole."""
-    var l = _DLink()
+    var l = _DLink(loop)
     _send_all_now(l.fd, "GET /1 HTTP/1.1\r\nHost: example.com\r\n\r\n")
     l.step()
     l.step()
@@ -491,7 +507,7 @@ def test_dispatch_request_read_after_a_drain_parks_again_then_closes() raises:
             break
         l.step()
     assert_false(alive, "the server did not close after the end of stream")
-    assert_equal(l.d.calls, 2)
+    assert_equal(l.calls(), 2)
     assert_equal(l.server.live_conn_count(), 0)
     var head_end = _find(got, "\r\n\r\n", 0)
     assert_true(head_end > 0)
@@ -504,6 +520,22 @@ def test_dispatch_request_read_after_a_drain_parks_again_then_closes() raises:
                 raise Error(
                     "response " + String(r) + " body byte " + String(i) + " differs"
                 )
+
+
+def test_dispatch_request_read_after_a_drain_parks_again_then_closes() raises:
+    _request_read_after_a_drain_parks_again_then_closes(_PLAIN)
+
+
+def test_chained_dispatch_request_read_after_a_drain_parks_again_then_closes() raises:
+    _request_read_after_a_drain_parks_again_then_closes(_CHAINED)
+
+
+def test_suspendable_dispatch_request_read_after_a_drain_parks_again_then_closes() raises:
+    _request_read_after_a_drain_parks_again_then_closes(_SUSPENDABLE)
+
+
+def test_erased_dispatch_request_read_after_a_drain_parks_again_then_closes() raises:
+    _request_read_after_a_drain_parks_again_then_closes(_ERASED)
 
 
 def _send_all_now(fd: Int32, s: String) raises:

@@ -136,6 +136,14 @@ struct DeferredJoinChunk(Movable):
                         + String(c)
                         + " has no probe-side alias and no inlined payload"
                     )
+        if not build_idx_elided and len(build_idx) != len(probe_idx):
+            raise Error(
+                "DeferredJoinChunk.deferred_chunk: build_idx holds "
+                + String(len(build_idx))
+                + " entries but probe_idx holds "
+                + String(len(probe_idx))
+                + " -- one build row per probe row is required"
+            )
         out.probe_batch = probe_batch^
         out.probe_idx = probe_idx^
         out.build_idx = build_idx^

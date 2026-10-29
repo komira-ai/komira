@@ -6,7 +6,7 @@ MOJO = "1.0.0"
 CLOSURE_SHA256 = "fd654c4192487587d8f8d9402d060e45e218b79da7b8964503a703710e49b15d"
 MANIFEST_SHA256 = {
     "mopm-toolchain.toml": "7e43881be78fc3f59fa9aa39252cc7a63d66cd79a9d7c99d948c214a3967ee3f",
-    "mopm.lock": "ab4a0dd368f5856e0c546351d542ec31834c1813b8823db84a07414adecb6b1b",
+    "mopm.lock": "7f4f35c22bf38597c0688630cbc857ef8b71b9ebcced62dab4dea0c31274af98",
     "mopm.toml": "a07fd242ac084e9934a5bac75ca7546f316a10173879e435a637ccc6e77c8bfa",
 }
 GRAPH_JSON = r'''{
@@ -60,3 +60,106 @@ GRAPH_JSON = r'''{
 }
 '''
 GRAPH = json.decode(GRAPH_JSON)
+GRAPH_JSON_LINUX_AARCH64 = r'''{
+  "unit_graph": 2,
+  "package": "komira_atomic_alias@0.1.0",
+  "mojo": "1.0.0",
+  "toolchain": {
+    "mojo": "1.0.0",
+    "subdir": "linux-aarch64",
+    "cc_target": "aarch64-linux-gnu.2.34",
+    "closure_sha256": "3e7db5a0f9255c9086d9d29f385e7fd90e8536fa16ffe55414f6bba4e0ef3d3e",
+    "zig": {"version": "0.12.0", "url": "https://ziglang.org/download/0.12.0/zig-linux-aarch64-0.12.0.tar.xz", "sha256": "754f1029484079b7e0ca3b913a0a2f2a6afd5a28990cb224fe8845e72f09de63", "size": 41849060},
+    "components": [
+      {"name": "libgcc", "version": "16.2.0", "url": "https://conda.anaconda.org/conda-forge/linux-aarch64/libgcc-16.2.0-h205dda4_7.conda", "sha256": "eae7a3449d5a3b5351c5427137c076cc3fc826645c7bfc42dc10772b783826f1", "size": 627793},
+      {"name": "libstdcxx", "version": "16.2.0", "url": "https://conda.anaconda.org/conda-forge/linux-aarch64/libstdcxx-16.2.0-hef695bb_7.conda", "sha256": "b241a3acfa9cdb1359112864a1241225533c92642de3000d52ae65ef5d3a9786", "size": 6236630},
+      {"name": "mojo-compiler", "version": "1.0.0", "url": "https://conda.modular.com/max/linux-aarch64/mojo-compiler-1.0.0-release.conda", "sha256": "da1772742c54f1f8f7b883e6338b1fe5de4592f2c882220dcceae623cc661e57", "size": 66479788}
+    ]
+  },
+  "units": [
+    {
+      "id": "komira_atomic_alias@0.1.0#mojo1.0.0/lib",
+      "package": "komira_atomic_alias",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/komira_atomic_alias/src/komira_atomic_alias",
+      "srcs": [
+        {"path": "src/komira_atomic_alias/src/komira_atomic_alias/__init__.mojo", "sha256": "cd50e3108b0e6e7873c21ffeb07ef592eb41ba3c43177c22ea90a7a64f31b6e7"},
+        {"path": "src/komira_atomic_alias/src/komira_atomic_alias/atypes.mojo", "sha256": "0d23f794a12e0f55bbd24761cc999c5e3f55354044494215bca3e55d2f90bdbb"}
+      ],
+      "deps": [],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["komira_atomic_alias.mojoc"],
+      "key": "f6087fb85cbbed9a6cab6ed033705acc3b22a4e41adda4ce7c34f3d65c204358"
+    },
+    {
+      "id": "komira_atomic_alias@0.1.0#mojo1.0.0/test:src/komira_atomic_alias/tests/test_atomic_alias_widths.mojo",
+      "package": "komira_atomic_alias",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/komira_atomic_alias/tests/test_atomic_alias_widths.mojo", "sha256": "cd352631dcc7fc2b3366bb0397fed63c45c84231e1a047880af807b92de0d568"}
+      ],
+      "deps": ["komira_atomic_alias@0.1.0#mojo1.0.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_atomic_alias_widths.pass"],
+      "key": "7db814e85069526a25291872cd9c83986e37156a3194f58f4e6df8d2fdf6ca9d"
+    }
+  ]
+}
+'''
+GRAPH_JSON_OSX_ARM64 = r'''{
+  "unit_graph": 2,
+  "package": "komira_atomic_alias@0.1.0",
+  "mojo": "1.0.0",
+  "toolchain": {
+    "mojo": "1.0.0",
+    "subdir": "osx-arm64",
+    "cc_target": "aarch64-macos.11.0",
+    "closure_sha256": "dfb1ddbe32564e406967054fbccd4ad643bf01e72532a3eb3add28253908ac5f",
+    "zig": {"version": "0.12.0", "url": "https://ziglang.org/download/0.12.0/zig-macos-aarch64-0.12.0.tar.xz", "sha256": "294e224c14fd0822cfb15a35cf39aa14bd9967867999bf8bdfe3db7ddec2a27f", "size": 43447724},
+    "components": [
+      {"name": "mojo-compiler", "version": "1.0.0", "url": "https://conda.modular.com/max/osx-arm64/mojo-compiler-1.0.0-release.conda", "sha256": "c52054bc444d851e5c38cc33e790fb011a1080470244aaa59351ac5056d08c59", "size": 61221085}
+    ]
+  },
+  "units": [
+    {
+      "id": "komira_atomic_alias@0.1.0#mojo1.0.0/lib",
+      "package": "komira_atomic_alias",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/komira_atomic_alias/src/komira_atomic_alias",
+      "srcs": [
+        {"path": "src/komira_atomic_alias/src/komira_atomic_alias/__init__.mojo", "sha256": "cd50e3108b0e6e7873c21ffeb07ef592eb41ba3c43177c22ea90a7a64f31b6e7"},
+        {"path": "src/komira_atomic_alias/src/komira_atomic_alias/atypes.mojo", "sha256": "0d23f794a12e0f55bbd24761cc999c5e3f55354044494215bca3e55d2f90bdbb"}
+      ],
+      "deps": [],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["komira_atomic_alias.mojoc"],
+      "key": "23321047958798741697f8b3c5f636953394efd56fc30340b8c9d0492f2ee60b"
+    },
+    {
+      "id": "komira_atomic_alias@0.1.0#mojo1.0.0/test:src/komira_atomic_alias/tests/test_atomic_alias_widths.mojo",
+      "package": "komira_atomic_alias",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/komira_atomic_alias/tests/test_atomic_alias_widths.mojo", "sha256": "cd352631dcc7fc2b3366bb0397fed63c45c84231e1a047880af807b92de0d568"}
+      ],
+      "deps": ["komira_atomic_alias@0.1.0#mojo1.0.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_atomic_alias_widths.pass"],
+      "key": "854e8f6cf8e95b710eda22185ebd05fe2e483c5409a853b5633dac7212149329"
+    }
+  ]
+}
+'''
+GRAPHS = {
+    "linux-64": GRAPH,
+    "linux-aarch64": json.decode(GRAPH_JSON_LINUX_AARCH64),
+    "osx-arm64": json.decode(GRAPH_JSON_OSX_ARM64),
+}
