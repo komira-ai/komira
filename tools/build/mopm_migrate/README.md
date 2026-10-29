@@ -65,13 +65,27 @@ for the sharded layout (`ci/targets/shard_<n>.bzl`; the form refuses an empty or
 |---|---|
 | an import that maps to no package | the file and the module (`there is no src/<module>/BUCK`) |
 | a dependency still on `mojo_library` | the module: migrate it first |
-| native code | a C or archive file in the package, a `native*`/`dlopen`/`c_deps` attribute, a `native*` rule, a dependency whose manifest declares natives, a `DLHandle` or `OwnedDLHandle` in code of any `.mojo` file of the package (a library loaded at run time; comments and docstrings do not count) |
+| native code | a C or archive file in the package, a `native*`/`dlopen`/`c_deps` attribute, a `native*` rule, a `DLHandle` or `OwnedDLHandle` in code of any `.mojo` file of the package (a library loaded at run time; comments and docstrings do not count) |
 | a BUCK file it cannot read as data | the line: a variable, a comprehension, an operator between values, `def`, a triple-quoted string, an escape it does not decode |
 | what the recipe does not cover | another rule or load, another `mojo_library` attribute (`test_defines`, `import_name`, ...), a `srcs` that is not the standard glob, a `visibility` that is not `["PUBLIC"]` |
 | files and BUCK that disagree | `deps` or `test_deps` that differ from the imports, a `test_srcs` that is not the `tests/test_*.mojo` files |
 | an unstated choice | `test_data`/`test_env` with no `--test-layout`; a test-only dependency with no `--dev-dependencies`; no `--description` |
+| a dependency that loads a system library | a package of the dependency closure whose `mopm.toml` has `[native-dependencies]`, or a `[native.<id>]` that is not `kind = "static"` (no hand migration of a dependent of one exists; a dependency with a static native is accepted, see below) |
 | a file `git mv` cannot move | a library `.mojo` file that git does not track (checked with `git ls-files` before the first move, in the dry run too: nothing has moved when it refuses) |
 | a tree that is not a plain migration | already migrated, a `src/` or `generated/` directory in the package, a `README.md` that is missing or has a `Build files` section |
+
+## Dependencies that link C
+
+A package whose own sources have no native code but whose dependency closure holds a package with a
+static `[native.<id>]` (`komira_libc`, `komira_log`, `komira_metrics`, `komira_async_api`) is migrated as the hand
+migrations did it (`komira_buffer`, `komira_bump_arena`, `komira_dynamic_filter`, `komira_mail_message`): the manifest,
+lock and `conda` are those of any package with dependencies (the native belongs to the dependency, and
+`mopm pack` records the dependency, not its archive), and `mojo_adopted_library` gets
+`cxx_toolchain = "komira//tools/build/mojo:adopt_cxx_link_facts"`, with a comment naming the packages that declare the C,
+so `lib`'s closure archives reach a dependent's link. It gets no `c_deps` and no `native_static`: those say that
+the package owns the C. A package that does own C (a C file, a `native*`, `dlopen` or `c_deps` attribute, `DLHandle`)
+is still refused. Only the packages the library sources import count: one that only the tests import is linked into
+the tests, and does not add the attribute.
 
 `[dev-dependencies]` is behind a flag because no migrated package has one: its lock rows and the
 sync's workspaces are unverified by a hand migration.
@@ -103,6 +117,11 @@ tool keeps the comment as written, so the author edits it.
   `release/artifacts.textproto` are the lines that name the label, not the whole files.
 - each class of refusal above, and that a refused run writes nothing (a file git does not track
   refuses before the first move: the test passes the tracked list in, the workers have no git).
+- a dependency with a static native: the golden of `komira_bump_arena` (`fixtures/komira_bump_arena`: the tree before
+  its hand migration, with the manifests of its closure, `komira_libc` among them) requires the hand migration's manifest,
+  toolchain file and lock byte for byte, its rows, and its BUCK file, where the one difference is the wording of the comment
+  above `cxx_toolchain`; a native deep in the closure adds the attribute; none in the closure adds nothing; a package that
+  owns C, and a dependency with `[native-dependencies]` or a shared `[native.<id>]`, are refused.
 - the plan writes no `ci/targets` row and names the generator for each layout.
 - the dry run prints the plan and the tree is byte for byte what it was.
 - a real run on a scratch tree, and a second run that refuses.

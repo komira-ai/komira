@@ -73,10 +73,13 @@ fn planOf(a: std.mem.Allocator, files: []const plan.File, o: plan.Options) !plan
 fn normalize(a: std.mem.Allocator, text: []const u8) ![]u8 {
     var out = std.ArrayList(u8).empty;
     var para = std.ArrayList(u8).empty;
+    var indent: []const u8 = "";
     var lines = std.mem.splitScalar(u8, text, '\n');
     while (lines.next()) |line| {
-        if (std.mem.startsWith(u8, line, "#")) {
-            var words = std.mem.tokenizeAny(u8, line[1..], " \t");
+        const bare = std.mem.trimLeft(u8, line, " ");
+        if (std.mem.startsWith(u8, bare, "#")) {
+            if (para.items.len == 0) indent = line[0 .. line.len - bare.len];
+            var words = std.mem.tokenizeAny(u8, bare[1..], " \t");
             var any = false;
             while (words.next()) |w| {
                 any = true;
@@ -86,12 +89,14 @@ fn normalize(a: std.mem.Allocator, text: []const u8) ![]u8 {
             if (any) continue;
         }
         if (para.items.len > 0) {
+            try out.appendSlice(a, indent);
             try out.append(a, '#');
             try out.appendSlice(a, para.items);
             try out.append(a, '\n');
             para.clearRetainingCapacity();
         }
-        if (std.mem.startsWith(u8, line, "#")) {
+        if (std.mem.startsWith(u8, bare, "#")) {
+            try out.appendSlice(a, indent);
             try out.appendSlice(a, "#\n");
         } else {
             try out.appendSlice(a, line);
@@ -496,17 +501,36 @@ test "golden bump_arena: the BUCK file is the hand migration's, with the C link 
     // the attribute is code: the same line, between deps and lib, as the hand file has it
     try t.expect(std.mem.indexOf(u8, raw, "    cxx_toolchain = \"komira//tools/build/mojo:adopt_cxx_link_facts\",\n    lib = \":lib\",\n") != null);
     // no c_deps and no native_static: this package owns no C
-    try t.expect(std.mem.indexOf(u8, raw, "c_deps") == null);
-    try t.expect(std.mem.indexOf(u8, raw, "native_static") == null);
+    try t.expect(std.mem.indexOf(u8, raw, "c_deps = ") == null);
+    try t.expect(std.mem.indexOf(u8, raw, "native_static = ") == null);
     const got = try normalize(a, raw);
     var want = try normalize(a, bx.hand_buck);
     // the hand comment names the one package that links C and says it is in the closure through
     // komira_buffer; the tool's names every package of the closure that declares a static native.
-    const hand_words = "# komira_libc, in the closure through komira_buffer, links C (its posix shim), so a dependent's link takes that archive from here. This package owns no C, so it names no `c_deps`: it takes the C toolchain's link facts directly.\n";
-    const tool_words = "# komira_libc, in the closure, declares C of its own (a static native), so `lib`'s closure carries that archive and a dependent's link takes it from here. This package owns no C, so it names no `c_deps`: it takes the C toolchain's link facts directly.\n";
+    const hand_words = "    # komira_libc, in the closure through komira_buffer, links C (its posix shim), so a dependent's link takes that archive from here. This package owns no C, so it names no `c_deps`: it takes the C toolchain's link facts directly.\n";
+    const tool_words = "    # komira_libc, in the closure, declares C of its own (a static native), so `lib`'s closure carries that archive and a dependent's link takes it from here. This package owns no C, so it names no `c_deps`: it takes the C toolchain's link facts directly.\n";
     try t.expect(std.mem.indexOf(u8, want, hand_words) != null);
     try t.expect(std.mem.indexOf(u8, got, tool_words) != null);
     want = try std.mem.replaceOwned(u8, a, want, hand_words, tool_words);
+    // The package has one test and one dependency: the hand file words the general case ("every test",
+    // "the tests have", "the adopted target of that package"), the tool the case at hand. The same facts.
+    const wording = [_][2][]const u8{
+        .{ "once every test of tests/ has passed", "once the test of tests/ has passed" },
+        .{ "once the tests have passed", "once the test has passed" },
+        .{ "the tests are not run again", "the test is not run again" },
+        .{ "the adopted target of that package", "the adopted targets of those packages" },
+        .{ "and holds none of its files. `members` is the manifests of the path dependencies of the closure,", "and holds that package's files nowhere. `members` is the manifests of the path dependencies," },
+        .{ "once the tests passed", "once the test passed" },
+        // the package is in no file of release/ in the fixture, as in the tree before the hand migration: the
+        // tool says only that the label stays valid
+        .{ "Kept for the release machine, which still builds it (release/BUCK, release/artifacts.textproto): komira's", "Kept so the label `:komira_bump_arena_conda` stays valid: komira's" },
+        .{ "    depends = [\n        \"mojo-komira_buffer >=0.1,<0.2\",\n    ],\n", "    depends = [\"mojo-komira_buffer >=0.1,<0.2\"],\n" },
+        .{ "nothing else under `lib/mojo/`, and exactly one dependency, which is what installing the package pulls in. Red when the manifest drops the dependency, names another range, or the file carries a sibling.", "nothing else under `lib/mojo/` (komira_buffer is not in it), and exactly one dependency, `mojo-komira_buffer >=0.1,<0.2`, which is what installing the package pulls in. Red when the manifest drops the dependency, names another range, or the file carries the sibling." },
+        // a one-item list: the hand file kept the old file's three lines, the tool writes one line (as the hand
+        // file of komira_counters does)
+        .{ "    deps = [\n        \"//src/komira_buffer:komira_buffer\",\n    ],\n", "    deps = [\"//src/komira_buffer:komira_buffer\"],\n" },
+    };
+    for (wording) |w| want = try std.mem.replaceOwned(u8, a, want, w[0], w[1]);
     try expectSameBytes("BUCK (comments normalized)", want, got);
 }
 
@@ -562,7 +586,7 @@ test "a static native deep in the closure reaches the BUCK file of a package tha
     const p = try planOf(a, try mini(a, .{ .beta_toml = beta_toml, .extra = &extra }), mini_options);
     const buck = try writeOf(p, "src/alpha/BUCK");
     try t.expect(std.mem.indexOf(u8, buck, "    cxx_toolchain = \"komira//tools/build/mojo:adopt_cxx_link_facts\",\n") != null);
-    try t.expect(std.mem.indexOf(u8, buck, "# gamma, in the closure, declares C of its own") != null);
+    try t.expect(std.mem.indexOf(u8, buck, "    # gamma, in the closure, declares C of its own") != null);
     // the manifest and lock carry no native section: the package owns none
     try t.expect(std.mem.indexOf(u8, try writeOf(p, "src/alpha/mopm.toml"), "native") == null);
 }

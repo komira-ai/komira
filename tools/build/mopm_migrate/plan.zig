@@ -153,14 +153,24 @@ fn oneString(v: sl.Value, want: []const u8) bool {
     }
 }
 
-const Manifest = struct { version: []const u8, deps: []const []const u8, native: bool };
+const Manifest = struct {
+    version: []const u8,
+    deps: []const []const u8,
+    /// Declares a `[native.<id>]` static library of its own: its archive is linked by every dependent.
+    static_native: bool,
+    /// The first native section that is not a static library (`[native-dependencies]`, a shared `[native.<id>]`),
+    /// with its `kind` when it has one.
+    other_native: ?OtherNative,
+};
+const OtherNative = struct { section: []const u8, kind: []const u8 };
 
 /// What the migration needs from another package's `mopm.toml`: its version, the names under
-/// `[dependencies]` and whether it declares natives.
+/// `[dependencies]` and the natives it declares.
 fn readManifest(c: *Ctx, who: []const u8, toml: []const u8) Error!Manifest {
     var version: ?[]const u8 = null;
     var deps = std.ArrayList([]const u8).empty;
-    var native = false;
+    var static_native = false;
+    var other_native: ?OtherNative = null;
     var section: []const u8 = "";
     var lines = std.mem.splitScalar(u8, toml, '\n');
     while (lines.next()) |raw| {
@@ -168,12 +178,20 @@ fn readManifest(c: *Ctx, who: []const u8, toml: []const u8) Error!Manifest {
         if (line.len == 0 or line[0] == '#') continue;
         if (line[0] == '[') {
             section = std.mem.trim(u8, line, "[] \t");
-            if (std.mem.startsWith(u8, section, "native")) native = true;
+            if (std.mem.startsWith(u8, section, "native.")) {
+                static_native = true;
+            } else if (std.mem.startsWith(u8, section, "native")) {
+                if (other_native == null) other_native = .{ .section = section, .kind = "" };
+            }
             if (std.mem.startsWith(u8, section, "dependencies.")) try deps.append(c.a, section["dependencies.".len..]);
             continue;
         }
         const eq = std.mem.indexOfScalar(u8, line, '=') orelse continue;
         const key = std.mem.trim(u8, line[0..eq], " \t");
+        if (std.mem.startsWith(u8, section, "native.") and std.mem.eql(u8, key, "kind")) {
+            const kind = std.mem.trim(u8, line[eq + 1 ..], " \t\"");
+            if (!std.mem.eql(u8, kind, "static") and other_native == null) other_native = .{ .section = section, .kind = kind };
+        }
         if (std.mem.eql(u8, section, "package") and std.mem.eql(u8, key, "version")) {
             const val = std.mem.trim(u8, line[eq + 1 ..], " \t\"");
             version = val;
@@ -182,7 +200,7 @@ fn readManifest(c: *Ctx, who: []const u8, toml: []const u8) Error!Manifest {
         }
     }
     const sorted = try uniqueSorted(c.a, deps.items);
-    return .{ .version = version orelse return c.refuse("{s}/mopm.toml has no [package] version", .{who}), .deps = sorted, .native = native };
+    return .{ .version = version orelse return c.refuse("{s}/mopm.toml has no [package] version", .{who}), .deps = sorted, .static_native = static_native, .other_native = other_native };
 }
 
 fn makeDep(c: *Ctx, name: []const u8, version: []const u8) Error!emit.Dep {
@@ -498,6 +516,7 @@ pub fn plan(c: *Ctx, files: []const File, o: Options) Error!Plan {
 
     // ---- the closure
     var closure = std.ArrayList(emit.Member).empty;
+    var natives_in = std.ArrayList([]const u8).empty;
     var queue = std.ArrayList([]const u8).empty;
     try queue.appendSlice(c.a, deps_sorted);
     try queue.appendSlice(c.a, dev_sorted);
@@ -512,8 +531,12 @@ pub fn plan(c: *Ctx, files: []const File, o: Options) Error!Plan {
         const toml_path = try fmt(c, "src/{s}/mopm.toml", .{name});
         const toml = repo.text(toml_path) orelse return c.refuse("{s} was not read or is missing: '{s}' is in the dependency closure", .{ toml_path, name });
         const man = try readManifest(c, try fmt(c, "src/{s}", .{name}), toml);
-        if (man.native) return c.refuse("{s} declares natives; '{s}' is in the dependency closure, and a native dependency is not a plain migration (recipe step 0)", .{ toml_path, name });
+        if (man.other_native) |o_n| {
+            if (std.mem.eql(u8, o_n.kind, "")) return c.refuse("{s} declares [{s}]: '{s}' is in the dependency closure and loads a system library at run time; no migration of a dependent of such a package has been done by hand, so this is not a plain migration (recipe step 0)", .{ toml_path, o_n.section, name });
+            return c.refuse("{s} declares [{s}] with kind \"{s}\": '{s}' is in the dependency closure, and only a static native library (kind = \"static\") is carried to a dependent's link by a hand migration (recipe step 0)", .{ toml_path, o_n.section, o_n.kind, name });
+        }
         try closure.append(c.a, .{ .name = name, .version = man.version, .deps = man.deps });
+        if (man.static_native) try natives_in.append(c.a, name);
         try queue.appendSlice(c.a, man.deps);
     }
     std.mem.sort(emit.Member, closure.items, {}, struct {
@@ -521,6 +544,19 @@ pub fn plan(c: *Ctx, files: []const File, o: Options) Error!Plan {
             return std.mem.lessThan(u8, x.name, y.name);
         }
     }.less);
+    // the static natives `lib` links: those of the packages the library reaches (a package only the tests
+    // import is linked into the tests alone)
+    var lib_closure = std.ArrayList([]const u8).empty;
+    try lib_closure.appendSlice(c.a, deps_sorted);
+    var li: usize = 0;
+    while (li < lib_closure.items.len) : (li += 1) {
+        for (closure.items) |m| if (std.mem.eql(u8, m.name, lib_closure.items[li])) {
+            for (m.deps) |d| if (!contains(lib_closure.items, d)) try lib_closure.append(c.a, d);
+        };
+    }
+    var link_natives = std.ArrayList([]const u8).empty;
+    for (natives_in.items) |nm| if (contains(lib_closure.items, nm)) try link_natives.append(c.a, nm);
+    const link_sorted = try uniqueSorted(c.a, link_natives.items);
     for (deps_sorted) |d| for (closure.items) |m| if (std.mem.eql(u8, m.name, d)) try direct.append(c.a, try makeDep(c, d, m.version));
     for (dev_sorted) |d| for (closure.items) |m| if (std.mem.eql(u8, m.name, d)) try direct_dev.append(c.a, try makeDep(c, d, m.version));
 
@@ -541,6 +577,7 @@ pub fn plan(c: *Ctx, files: []const File, o: Options) Error!Plan {
         .deps = direct.items,
         .dev_deps = direct_dev.items,
         .closure = closure.items,
+        .link_natives = link_sorted,
         .n_tests = tests_found.items.len,
         .extras = extras.items,
         .header = ml.comment,
