@@ -4,5 +4,6 @@ test {
     _ = @import("deflate_test.zig");
     _ = @import("conda_dlopen.zig");
     _ = @import("conda_lib.zig");
+    _ = @import("conda_install.zig");
     _ = @import("readme_link.zig");
 }

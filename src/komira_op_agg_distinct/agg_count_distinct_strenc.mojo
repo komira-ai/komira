@@ -283,15 +283,15 @@ def _assign_dict_ids_from_hashes[
     # ------------------------------------------------------------------
     # Phase B (serial): build dict-id assignment from precomputed hashes.
     #
-    # ⭐ CDPHT (2026-09-20, cbq13): an OPEN-ADDRESSED (hash -> dict_idx) table
+    # ⭐ CDPHT: an OPEN-ADDRESSED (hash -> dict_idx) table
     # with linear probing, replacing the `Dict[Int64, Int64]` +
     # `Dict[String, Int64]` collision pair. Three reasons it is the right
     # container here and the `Dict` never was:
     #
     #   * The incumbent did TWO lookups on every hit (`h in hash_dict` then
-    #     `hash_dict[h]`) and THREE on every miss. cbq13 is 13,172,392 rows
-    #     into 6,019,102 distinct values, i.e. a ~46% miss rate — nearly every
-    #     row paid the expensive arm.
+    #     `hash_dict[h]`) and THREE on every miss. A high-cardinality key
+    #     (millions of rows, a large fraction of them first sightings) misses
+    #     often, so nearly every row paid the expensive arm.
     #   * The `Dict[String, Int64]` collision fallback needed a materialized
     #     `String` to key on. Linear probing subsumes it for free: a slot whose
     #     hash matches but whose BYTES do not is simply not this value's slot,
@@ -451,7 +451,7 @@ def _hash_string_rows_parallel[
 
     # Pre-size hashes list to num_rows in ONE allocation + fill. (This used
     # to be a `capacity=` construction followed by `num_rows` `append`s —
-    # 13.17M of them on cbq13, each re-checking capacity.)
+    # one per row, each re-checking capacity.)
     var hashes = List[Int64](length=num_rows, fill=Int64(0))
 
     # Row-range partition.
@@ -520,11 +520,11 @@ def _encode_string_key_parallel[
       * **False** — the SERIAL Phase B ran: `out_rev_bytes` is ONE byte arena
         holding every distinct value back to back and the spans index it.
 
-    ⭐ CDPSPAN (2026-09-20, cbq13). The reverse map used to be a
-    `List[String]`, one OWNING `String` per distinct value — on
-    `count(DISTINCT user_id) GROUP BY search_phrase` 6,019,102 of them, i.e.
-    6.02M `malloc`s here, 6.02M copy-constructions at emit and 12M `free`s at
-    teardown, for a value whose (offset, length) this very loop computes.
+    ⭐ CDPSPAN. The reverse map used to be a
+    `List[String]`, one OWNING `String` per distinct value — for a
+    high-cardinality string key that is one `malloc` here, one
+    copy-construction at emit and two `free`s at teardown per distinct value,
+    for a value whose (offset, length) this very loop computes.
     (Mojo 1.0.0 `String` has NO small-string optimization.)
 
     The dict-id NUMBERING is the same in both arms: an id is minted exactly
@@ -547,10 +547,10 @@ def _encode_string_key_parallel[
     # remap width was before. Since CDP-ROWDICT also its row-range count.
     var k = _strenc_task_count(num_rows, max_workers)
 
-    # ⭐ CDP-ROWDICT (2026-09-25, cbq10/cbq11): one small dictionary per ROW
+    # ⭐ CDP-ROWDICT: one small dictionary per ROW
     # RANGE, merged in row order — TRIED FIRST. It hashes as it goes (no
     # Phase-A vector), and no value has an owner, so a heavy value cannot pin a
-    # shard: on cbq10 one of CDPPARB's 16 shards probed ~5.1M of 5.56M rows.
+    # shard: with one value holding most rows, one of CDPPARB's shards probes almost all of them.
     # It DECLINES (False, outputs untouched) once any range meets more than
     # `_ROWDICT_MAX_LOCAL` values, and the two arms below then run unchanged.
     # Same numbering as both (see `agg_cd_strenc_rowdict.mojo`); its reverse

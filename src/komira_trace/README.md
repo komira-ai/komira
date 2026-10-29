@@ -74,3 +74,34 @@ assert_equal(
     + '"worker_id":2,"flags":1}',
 )
 ```
+
+## Build files
+
+This package is built with buildrules' `mojo_package` and packaged for mopm as `komira_trace`, version 0.1.0
+(`mopm.toml`). The library is `src/komira_trace/`, its tests are `tests/`, and they run in the installed layout
+(`test_layout = "installed"` in `BUCK`) because `tests/test_jsonl_exporter.mojo` writes under `$TEST_TMPDIR`. It depends
+on five sibling packages (`[dependencies]` of `mopm.toml`, each `{ path = "../<name>", version = "0.1" }`):
+`komira_atomic_alias`, `komira_clock`, `komira_collections`, `komira_name_registry` and `komira_spsc_ring`. Several have
+dependencies of their own (`komira_name_registry` on `komira_hash`, `komira_spsc_ring` on `komira_atomic_alias` and
+`komira_collections`), so `mopm.lock` lists the whole closure, direct and transitive, while the `.conda` of this package
+records only the five direct ones (`mojo-<name> >=0.1,<0.2`) and holds none of their files. `komira_fork_join`, which
+the tests use to fork real threads, and `komira_runtime_paths`, which gives `test_jsonl_exporter.mojo` its scratch
+directory, are under `[dev-dependencies]`: they reach the tests, never `:lib` or a consumer. The files that are not
+sources:
+
+| file | what |
+|---|---|
+| `mopm.toml` | the mopm manifest: name, version, the Mojo version, the dependencies, where the library and its tests are |
+| `mopm.lock` | the toolchain pins and every path dependency of the closure (no registry is reached: all are siblings) |
+| `mopm-toolchain.toml` | the exact mopm and Mojo versions the build uses (written by hand) |
+| `coverage_floor.txt` | `lines NN.NN` and `branches NN.NN`: the least line and branch coverage `:coverage` may measure; `:coverage_floor` fails when either falls below |
+| `buildrules.mojo.lock.bzl`, `buildrules.mojo.bzl` | written by `buildrules mojo sync` from the files above and from the manifests of the siblings; `buildrules mojo check` fails when they are stale |
+
+`:lib` is the library file and exists only once every test of `tests/` has passed. After any change to a source, a
+test, a manifest of this package or of a sibling, or `mopm.lock`, run `buildrules mojo sync` with the workspaces of the
+direct and dev dependencies staged, commit what it writes, and build `komira//src/komira_trace:lib` on the farm.
+
+`:conda` is the `.conda` of the mopm package (`mojo-komira_trace-0.1.0-mojo1.0.0_0.conda`). `:komira_trace` is `:lib` as
+komira's Mojo rules take it (`mojo_adopted_library`): its `deps` are the adopted target of each package in
+`[dependencies]`, and the rule refuses a list that is not the closure `:lib` was built from. It also compiles and runs
+the README's examples above (`[tests][readme]`) against `:lib`.

@@ -413,8 +413,8 @@ def _eval_bool_col_vs_literal(
 
     ⛔ IT READS THE BITS ITSELF RATHER THAN CALLING `Column.as_boolean`, AND
     THAT IS DELIBERATE: `as_boolean` copies both bitmaps FROM BIT 0 and sets
-    `length = _length`, i.e. it is OFFSET-BLIND, so a sliced BOOL column (post
-    join, post concat) would come back shifted. `read_bit_aligned_buffer` is the
+    `length = _length`, so it refuses a sliced column, and a sliced BOOL column
+    (post join, post concat) would raise. `read_bit_aligned_buffer` is the
     shared scalar bit read with the index `_offset + row` in BIT space — never
     scaled by an element width — which is exactly the primitive a sliced BOOL
     column needs, and the validity bitmap is indexed the same way. Same shape as

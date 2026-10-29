@@ -13,10 +13,13 @@
 #
 # Ties: every full-sort route is stable, descending included (a single INT64
 # key at or above `RADIX_SORT_ROW_THRESHOLD` rows keeps input order among
-# equal keys in both directions). The heap route does not fix which of
-# several rows with equal keys survive the cut, so a top-N whose keys tie
-# across the cut selects the same key sequence on both arms but possibly
-# different rows; `append_deterministic_tiebreak` makes the order total.
+# equal keys in both directions). The heap route breaks a full tie on the row
+# index, so a top-N whose keys tie across the cut keeps the same rows, in the
+# same order, on both arms. `append_deterministic_tiebreak` makes the order
+# total when the input row order itself differs between runs.
+#
+# A sort key stored as a numeric dictionary (codes plus values) is ordered by
+# its values: `_execute_topn_sink` resolves such a key before routing.
 #
 # Null placement: these kernels do not read `nulls_first`. A STRING key is
 # the one key type the sort routes and the heap treat differently: the full
@@ -30,8 +33,8 @@
 
 from komira_arrow.arrow_types import ArrowType
 from komira_arrow.primitive_array import PrimitiveArray
-from komira_arrow.record_batch import RecordBatch
-from komira_arrow.schema import Schema
+from komira_arrow.record_batch import RecordBatch, RecordBatchBuilder
+from komira_arrow.schema import Schema, SchemaBuilder
 from komira_column_kernels.batch_slice import _slice_batch_first_n
 from komira_column_kernels.compiler_helpers import (
     gather_batch,
@@ -209,12 +212,16 @@ def _heap_can_order_all_keys(
 ) raises -> Bool:
     """True iff EVERY sort key is one the heap can compare (the comparator is
     lexicographic over all keys, so one unsupported key anywhere
-    disqualifies), and every STRING key is heap-safe
+    disqualifies), every key column is STORED as the type the schema reports
+    (a numeric-dictionary column is stored as codes under its value type, and
+    the heap reads values), and every STRING key is heap-safe
     (`_string_key_is_heap_safe`)."""
     for i in range(len(sort_keys)):
         var col_idx = batch.schema.column_index(sort_keys[i])
         var kt = batch.schema.field_arrow_type(col_idx)
         if not _heap_can_order_key_type(kt):
+            return False
+        if batch.column_at(col_idx).arrow_type != kt:
             return False
         if kt == ArrowType.STRING and not _string_key_is_heap_safe(
             batch, col_idx
@@ -306,6 +313,37 @@ def append_deterministic_tiebreak(
     append_deterministic_tiebreak_schema(batch.schema, keys, descending)
 
 
+def _resolve_numeric_dict_keys(
+    var batch: RecordBatch, sort_keys: List[String]
+) raises -> RecordBatch:
+    """`batch` with every sort-key column that is a numeric dictionary
+    (codes plus values) resolved to its flat values, so the key is ordered by
+    the values the codes name. The other columns are shared as they are.
+    `batch` itself when no key is one."""
+    var n_cols = batch.num_columns()
+    var is_key = List[Bool](capacity=n_cols)
+    for _ in range(n_cols):
+        is_key.append(False)
+    var any_dict = False
+    for i in range(len(sort_keys)):
+        var ci = batch.schema.column_index(sort_keys[i])
+        is_key[ci] = True
+        if batch.column_at(ci).is_numeric_dict():
+            any_dict = True
+    if not any_dict:
+        return batch^
+    var builder = RecordBatchBuilder.with_capacity(n_cols)
+    var sb = SchemaBuilder()
+    for c in range(n_cols):
+        sb.add_field(batch.schema.field_at(c))
+        ref col = batch.column_at(c)
+        if is_key[c] and col.is_numeric_dict():
+            builder.add_column(col.resolve_numeric_dict_to_flat())
+        else:
+            builder.add_column(col.share())
+    return builder.build(sb.build())
+
+
 def _execute_topn_sink(
     var batch: RecordBatch,
     topn_data: TopNSinkData,
@@ -319,11 +357,9 @@ def _execute_topn_sink(
     bounded heap runs when `n` is much smaller than the batch and every key
     is heap-comparable; otherwise the batch is fully sorted and sliced.
 
-    When keys tie across the cut, the heap arm keeps the rows its eviction
-    order leaves, while the full-sort arm keeps the first in input order, so
-    the two arms can return different rows with the same key sequence. A
-    caller that needs the same rows from both appends
-    `append_deterministic_tiebreak` keys, which make the order total."""
+    When keys tie across the cut, both arms keep the first tied rows in input
+    order. A sort key stored as a numeric dictionary is ordered by its
+    values."""
     _refuse_zero_sort_keys(len(topn_data.sort_keys), String("TOP N"))
 
     var num_rows = batch.num_rows()
@@ -332,6 +368,8 @@ def _execute_topn_sink(
         return _slice_batch_first_n(batch, 0)
     if num_rows <= 1:
         return batch^
+
+    batch = _resolve_numeric_dict_keys(batch^, topn_data.sort_keys)
 
     if k >= num_rows:
         if len(topn_data.sort_keys) > 1:

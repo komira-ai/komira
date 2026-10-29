@@ -66,7 +66,8 @@ mojo_library(
         # branch record files (--branch-lcov, cov_branch_classify's): the
         # strict reader and every refusal, the sum of an arm across tests
         # ('-' counted, not taken), a location's decisions disagreeing
-        # between tests refused, one source of branch data per file, the
+        # between tests summed by the copy with the most decisions (the others
+        # dropped), one source of branch data per file, the
         # branch numbers next to Cobertura lines (BelowTarget, the hold, no
         # BranchNotMeasured, a file named with no arm measured), the checks
         # over kept files only, one report naming a path twice refused, an
