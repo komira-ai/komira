@@ -200,7 +200,7 @@ def _pin_chained(imm build: List[Int64], scan_rows: Int, fanout4: Bool, par: Boo
     assert_false(should_use_radix_join(len(build)), who + ": radix")
     var fan = HashJoinBuilder.build(keys).avg_chain_length()
     assert_equal(fan >= 4, fanout4, who + ": fan-out " + String(fan))
-    assert_equal(should_parallelize(scan_rows), par, who + ": parallel gate")
+    assert_equal(should_parallelize(scan_rows, _POOL), par, who + ": parallel gate")
 
 
 def test_serial_gather_arm() raises:

@@ -531,7 +531,7 @@ def _execute_inner(
         if perfect:
             var build_indices = List[Int](capacity=num_probe_rows)
             var probe_indices = List[Int](capacity=num_probe_rows)
-            if should_parallelize(num_probe_rows):
+            if should_parallelize(num_probe_rows, dispatcher.worker_count()):
                 parallel_perfect_inner_probe_into(
                     dispatcher, cancel_token.clone(), perfect.value(),
                     left_key_arr, num_probe_rows, build_indices,
@@ -574,7 +574,7 @@ def _execute_inner(
         var join_builder = HashJoinBuilder.build(left_key_arr)
         var left_indices = List[Int](capacity=scan_rows)
         var right_indices = List[Int](capacity=scan_rows)
-        if should_parallelize(scan_rows):
+        if should_parallelize(scan_rows, dispatcher.worker_count()):
             parallel_inner_join_probe_into(
                 dispatcher, cancel_token.clone(), join_builder, right_key_arr,
                 scan_rows, left_indices, right_indices, scan_key_nulls^,
@@ -599,7 +599,10 @@ def _execute_inner(
             probe_batch, build_batch, join_builder, left_key_arr, out_schema,
             scan_key_nulls,
         )
-    elif should_parallelize(scan_rows) and not high_fanout:
+    elif (
+        should_parallelize(scan_rows, dispatcher.worker_count())
+        and not high_fanout
+    ):
         var build_indices = List[Int](capacity=scan_rows)
         var probe_indices = List[Int](capacity=scan_rows)
         parallel_inner_join_probe_into(
@@ -651,9 +654,9 @@ def _execute_inner_late_mat(
     then gather the projected columns."""
     var cols = op.probe_output_cols.value().copy()
     var scan_rows = build_batch.num_rows() if flipped else probe_batch.num_rows()
-    if not should_parallelize(scan_rows) and not fused_join_cannot_carry_output(
-        probe_batch, build_batch, cols
-    ):
+    if not should_parallelize(
+        scan_rows, dispatcher.worker_count()
+    ) and not fused_join_cannot_carry_output(probe_batch, build_batch, cols):
         if flipped:
             var jb = HashJoinBuilder.build(left_key_arr)
             return assemble_inner_join_fused_projected(
@@ -670,7 +673,7 @@ def _execute_inner_late_mat(
     var scan_side = List[Int](capacity=scan_rows)
     if flipped:
         var jb = HashJoinBuilder.build(left_key_arr)
-        if should_parallelize(scan_rows):
+        if should_parallelize(scan_rows, dispatcher.worker_count()):
             parallel_inner_join_probe_into(
                 dispatcher, cancel_token^, jb, right_key_arr, scan_rows,
                 ht_side, scan_side, scan_key_nulls^,
@@ -681,7 +684,7 @@ def _execute_inner_late_mat(
             dispatcher, probe_batch, build_batch, ht_side^, scan_side^, cols,
         )
     var jb = HashJoinBuilder.build(right_key_arr)
-    if should_parallelize(scan_rows):
+    if should_parallelize(scan_rows, dispatcher.worker_count()):
         parallel_inner_join_probe_into(
             dispatcher, cancel_token^, jb, left_key_arr, scan_rows,
             ht_side, scan_side, scan_key_nulls^,
