@@ -1,28 +1,104 @@
+load("@komira//tools/build/mojo:abi_golden.bzl", "komira_abi_golden")
+load("@komira//tools/build/mojo:c_abi_check.bzl", "komira_c_abi_check")
+load("@komira//tools/build/mojo:cxx.bzl", "staged_files")
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library", "mojo_shared_lib")
 
+# The shared libraries of the C code the library owns; libkomira links each as
+# NEEDED, and the C driver below stages the same ones beside it.
+NATIVE_OWNERS = [
+    "//src/komira_async:komira_async_native",
+    "//src/komira_async_api:komira_async_api_native",
+    "//src/komira_compression:komira_compression_native",
+    "//src/komira_fs:komira_fs_native",
+    "//src/komira_libc:komira_libc_native",
+    "//src/komira_metrics:komira_metrics_native",
+    "//src/komira_parquet_codec:komira_parquet_codec_native",
+    "//src/komira_scan_source:komira_scan_source_native",
+]
+
 # The C ABI of komira's one shared library, libkomira: the status codes, the
-# ABI version, and the session behind a context handle. The library is plain
+# ABI version, the session behind a context handle, and the source and render
+# operations (`sources.mojo`) the C calls are made of. The library is plain
 # Mojo with no pointer in it; `_c_abi.mojo`, the one file that holds pointers,
 # is not part of it but the source of the `libkomira` target below.
 #
-# test_status holds the five codes, the version scheme (major * 1000 + minor)
+# test_status holds the six codes, the input-length bound, the version scheme (major * 1000 + minor)
 # and buffer_status, the two-call protocol's capacity test; test_session holds
-# the last-error text of a Session (fresh, set, replaced, cleared, moved).
+# the last-error text of a Session (fresh, set, replaced, cleared, moved);
+# test_sources holds the operations on values: a Parquet file registered and
+# its schema bytes, the CSV and JSON bindings, and a plan rendered.
 mojo_library(
     name = "komira_so",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo", "_c_abi.mojo"]),
+    deps = [
+        "//src/komira_agg:komira_agg",
+        "//src/komira_arrow:komira_arrow",
+        "//src/komira_arrow_ipc:komira_arrow_ipc",
+        "//src/komira_async:komira_async",
+        "//src/komira_async_api:komira_async_api",
+        "//src/komira_atomic_alias:komira_atomic_alias",
+        "//src/komira_avro:komira_avro",
+        "//src/komira_buffer:komira_buffer",
+        "//src/komira_clock:komira_clock",
+        "//src/komira_collections:komira_collections",
+        "//src/komira_column_kernels:komira_column_kernels",
+        "//src/komira_compression:komira_compression",
+        "//src/komira_counters:komira_counters",
+        "//src/komira_csv:komira_csv",
+        "//src/komira_dynamic_filter:komira_dynamic_filter",
+        "//src/komira_expr:komira_expr",
+        "//src/komira_fork_join:komira_fork_join",
+        "//src/komira_fs:komira_fs",
+        "//src/komira_hash:komira_hash",
+        "//src/komira_host:komira_host",
+        "//src/komira_join_assembly:komira_join_assembly",
+        "//src/komira_json_index:komira_json_index",
+        "//src/komira_jsonl:komira_jsonl",
+        "//src/komira_kernels:komira_kernels",
+        "//src/komira_libc:komira_libc",
+        "//src/komira_log:komira_log",
+        "//src/komira_lz4:komira_lz4",
+        "//src/komira_metrics:komira_metrics",
+        "//src/komira_name_registry:komira_name_registry",
+        "//src/komira_op_agg_state:komira_op_agg_state",
+        "//src/komira_parquet:komira_parquet",
+        "//src/komira_parquet_api:komira_parquet_api",
+        "//src/komira_parquet_codec:komira_parquet_codec",
+        "//src/komira_plan_expr:komira_plan_expr",
+        "//src/komira_plan_ir:komira_plan_ir",
+        "//src/komira_plan_proto:komira_plan_proto",
+        "//src/komira_plan_stats:komira_plan_stats",
+        "//src/komira_plan_wire:komira_plan_wire",
+        "//src/komira_proto_codec:komira_proto_codec",
+        "//src/komira_row_format:komira_row_format",
+        "//src/komira_scalar_arithmetic:komira_scalar_arithmetic",
+        "//src/komira_scan_source:komira_scan_source",
+        "//src/komira_sdk:komira_sdk",
+        "//src/komira_simd:komira_simd",
+        "//src/komira_spsc_ring:komira_spsc_ring",
+        "//src/komira_sql:komira_sql",
+        "//src/komira_sync:komira_sync",
+        "//src/komira_trace:komira_trace",
+        "//src/komira_udf:komira_udf",
+        "//src/komira_zlib:komira_zlib",
+        "//tools/build/mojo/runtime_paths:komira_runtime_paths",
+    ],
     test_srcs = [
         "tests/test_session.mojo",
+        "tests/test_sources.mojo",
         "tests/test_status.mojo",
     ],
+    test_data = {
+        "tests/test_sources.mojo": ["tests/fixtures/two_columns.parquet"],
+    },
     visibility = ["PUBLIC"],
 )
 
-# libkomira.so (libkomira.dylib on macOS arm64): four exports, and nothing else
+# libkomira.so (libkomira.dylib on macOS arm64): nine exports, and nothing else
 # in the dynamic symbol table (`exports_exact`). It is published only if every
 # gate driver passes, each of which dlopens it with RTLD_NOW and calls it as a
 # foreign host would:
-#   gate_version       the version is 1000 (1.0);
+#   gate_version       the version is 1001 (1.1);
 #   gate_new_free      handles are non-NULL, distinct and hold separate sessions,
 #                      freeing NULL is a no-op;
 #   gate_no_extra_exports  the linker's section markers and the Mojo helpers
@@ -31,7 +107,21 @@ mojo_library(
 #   gate_two_call      capacity 0 and one byte short give -4 and the length, an
 #                      exact and a larger buffer give the text, nothing past it;
 #   gate_null_ctx      a NULL context is -1 and writes nothing;
-#   gate_null_out_len  a NULL out_len is -2 and writes nothing.
+#   gate_null_out_len  a NULL out_len is -2 and writes nothing;
+#   gate_register_parquet  a Parquet file is registered by name; NULL ctx -1,
+#                      NULL name or path -2, a missing or non-Parquet file -3
+#                      with the reader's message as the last error;
+#   gate_native_owners the library's DT_NEEDED entries (ELF dynamic section)
+#                      name each native_owners SONAME; an owner dropped from
+#                      the list is embedded silently and fails here;
+#   gate_parquet_schema, gate_csv_binding, gate_json_binding, gate_plan_render
+#                      a good input through the two-call protocol, NULL ctx -1,
+#                      NULL input or out_len -2, a bad file or plan -3 with a
+#                      last error, and a good call afterwards leaves no error.
+#   gate_plan_render also: plan_len 64 MiB plus one and UINT64_MAX are -5 with
+#                      nothing written and no read of the plan; exactly 64 MiB
+#                      is read (garbage, so -3). gate_parquet_schema also: a
+#                      path that is not UTF-8 is -3 with a last error.
 mojo_shared_lib(
     name = "libkomira",
     srcs = ["_c_abi.mojo"],
@@ -41,16 +131,75 @@ mojo_shared_lib(
         "komira_ctx_new",
         "komira_ctx_free",
         "komira_last_error",
+        "komira_register_parquet",
+        "komira_parquet_schema",
+        "komira_csv_binding",
+        "komira_json_binding",
+        "komira_plan_render",
     ],
     exports_exact = True,
     gate_srcs = [
         "tests/gate/gate_fresh_error.mojo",
         "tests/gate/gate_new_free.mojo",
         "tests/gate/gate_no_extra_exports.mojo",
+        "tests/gate/gate_native_owners.mojo",
         "tests/gate/gate_null_ctx.mojo",
         "tests/gate/gate_null_out_len.mojo",
+        "tests/gate/gate_csv_binding.mojo",
+        "tests/gate/gate_json_binding.mojo",
+        "tests/gate/gate_parquet_schema.mojo",
+        "tests/gate/gate_plan_render.mojo",
+        "tests/gate/gate_register_parquet.mojo",
         "tests/gate/gate_two_call.mojo",
         "tests/gate/gate_version.mojo",
     ],
     deps = [":komira_so"],
+    native_owners = NATIVE_OWNERS,
+    visibility = ["komira//ci:", "komira//tools/build/package/libkomira:", "//node:"],
+)
+
+# The Parquet file the C-ABI gates and the Node binding's tests read.
+export_file(
+    name = "tests/fixtures/two_columns.parquet",
+    src = "tests/fixtures/two_columns.parquet",
+    visibility = ["komira//ci:", "//node:"],
+)
+
+# The C header of libkomira, komira.h, made from abi/komira.tsv (the golden:
+# every export with its return and argument types and the version that added
+# it, and every status code and limit). It builds only while the golden is
+# exactly the `@export abi("C")` functions of _c_abi.mojo with the same types,
+# and the constants of status.mojo with the same values. Adding an export, or
+# changing a type or a constant, without the golden is a red build here.
+komira_abi_golden(
+    name = "komira_abi",
+    src = "_c_abi.mojo",
+    constants_src = "status.mojo",
+    golden = "abi/komira.tsv",
+    header_name = "komira.h",
+    visibility = ["PUBLIC"],
+)
+
+staged_files(
+    name = "c_driver_files",
+    srcs = ["tests/c/abi_driver.c"],
+)
+
+# A C host of libkomira that includes komira.h and nothing else of ours.
+cxx_binary(
+    name = "abi_driver",
+    srcs = [":c_driver_files[tests/c/abi_driver.c]"],
+    headers = {"komira.h": ":komira_abi"},
+    header_namespace = "",
+)
+
+# Runs abi_driver against libkomira: it dlopens the library, binds each function
+# the header declares with the header's type, and checks the version, the
+# status codes and the input bound the header names, and the two-call error
+# round trip. A header that disagrees with the binary fails here.
+komira_c_abi_check(
+    name = "c_abi_check",
+    driver = ":abi_driver",
+    lib = ":libkomira",
+    native_owners = NATIVE_OWNERS,
 )

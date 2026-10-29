@@ -66,8 +66,10 @@ The hermetic Node.js is for tests. What keeps it out of every published
 package:
 
 - **Visibility.** `:node` and every npm package are visible only to the
-  packages `_TEST_ONLY` in [`BUCK`](BUCK) lists, all test-only packages under
-  `src/tests` (`//:src_layout` holds that directory to test-only packages). A
+  packages `_TEST_ONLY` in [`BUCK`](BUCK) lists: the test-only packages under
+  `src/tests` (`//:src_layout` holds that directory to test-only packages) and
+  [`node`](../../node/README.md), the addon over libkomira, which is built and
+  tested here and not yet shipped. A
   `mojo_bundle`, `conda_package` or any other target elsewhere that names one
   fails analysis with a visibility error, and so does a `node_test` or
   `esbuild_bundle` elsewhere that takes the default runtime or bundler, and a

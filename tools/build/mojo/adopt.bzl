@@ -66,6 +66,13 @@ requires the dependencies' conda packages), and the native facts of the closure.
 `lib`'s own `MojoNativeArchiveInfo`, which already lists the archives of the dependencies in the graph's link order,
 so the dependencies' `c_link` are not merged in a second time.
 
+A package that pins system libraries for its tests (its unit graph's `system_libs`: a library it opens by its bare name, `mode = "load"` in
+`[native-dependencies]`) hands the directories of the pinned files on through its `lib`, which carries buildrules' `MojoSystemLibsInfo`. This rule makes
+them `MojoInfo.system_libs`, with those of `deps`, and every `mojo_library`, `mojo_test` and adopted package that depends on it carries them on
+(`system_libs.bzl`): the welded tests of such a library, its README examples, its kcov and branch coverage runs and its mutation runs, and a `mojo_test`, are
+given them as `--lib-dir` arguments of the gate, which puts them on the library path. The files are the pinned ones, unpacked from the sha256-pinned
+packages of the graph; a run takes nothing from the worker. A package that pins none changes no command.
+
 A package that builds C of its own (`[native.<id>]` in its `mopm.toml`, a static library
 `lib<id>.a`) hands it to its dependents here. buildrules gives its `:lib` `MojoNativeArchiveInfo`: the
 archives the library links, in the graph's link order. This rule makes them `MojoInfo.c_link` (a
@@ -80,6 +87,21 @@ and `native` names the shared library: they give `MojoInfo.native` the facts `mo
 shared library's `callers` take the adopted label. `c_deps` are not linked (the archives of
 `MojoNativeArchiveInfo` are the link): they are the labels the shared library is built from, so each
 C symbol is still defined once in any link.
+
+A library whose C is per-library state (one copy per image, which a shared library would merge across images)
+ships it as a static archive in its conda package instead, with no shared library: it lists the C in `c_deps`
+and sets `native_static = True`. Its closure facts then carry the static archive (`MojoInfo.native.shipped`
+and `statics`, the same as `mojo_library`'s `native_static`), so a dependent's check that every C library its
+closure links is shipped by a library of the closure (`native_refusal`, native_facts.bzl; the release set's
+checks read the same facts) finds the owner. Without it the adopted label links the C and ships none, and
+every package that depends on it has no conda package. `native` and `native_static` are exclusive.
+
+    mojo_adopted_library(
+        name = "komira_log",
+        c_deps = [":komira_log_holder"],   # the cxx_library the archive is built from
+        native_static = True,
+        ...
+    )
 """
 
 load("@buildrules//rules/mojo:providers.bzl", "MojoLibInfo", "MojoNativeArchiveInfo")
@@ -94,6 +116,7 @@ load(":native_facts.bzl", "native_facts")
 load(":opt_level.bzl", "TEST_OPT_LEVEL")
 load(":providers.bzl", "MojoInfo", "MojoPkgTSet", "MojoToolchainInfo", "mojo_pkg_children", "welded_tests_info")
 load(":readme.bzl", "readme_gate")
+load(":system_libs.bzl", "dep_system_libs", "merge_system_libs", "own_system_libs", "run_args")
 load(":test_limit.bzl", "HANG_LIMIT_ATTRS")
 
 # The README examples tool of mojo_library (readme.bzl): Zig, so it depends on no Mojo library.
@@ -234,7 +257,9 @@ def _impl(ctx):
     # closure; the README ships in the conda package, so a relative link in it is refused.
     c_link = _native_link(ctx)
     native = native_facts(ctx, import_name, ctx.attrs.c_deps + deps) if ctx.attrs.c_deps or ctx.attrs.native or deps else _NO_NATIVE
-    gate = readme_gate(ctx, ctx.attrs.toolchain[MojoToolchainInfo], import_name, pkgs, adopt_link_tail(c_link), [], True, adopt_readme_test, owner = bool(native.c_direct), rerun = rerun_env(ctx))
+    # The pinned system libraries `lib` loads and those of the dependencies (system_libs.bzl): the README's runs are given them, and so is every dependent's.
+    system_libs = merge_system_libs([own_system_libs(ctx.attrs.lib), dep_system_libs(deps)])
+    gate = readme_gate(ctx, ctx.attrs.toolchain[MojoToolchainInfo], import_name, pkgs, adopt_link_tail(c_link), run_args([], system_libs), True, adopt_readme_test, owner = bool(native.c_direct), rerun = rerun_env(ctx))
     test_subtargets = {}
     if gate != None:
         markers = markers + [gate[0]]
@@ -267,6 +292,7 @@ def _impl(ctx):
             pkgs = pkgs,
             pkgs_def = MojoPkgTSet,
             readme = ctx.attrs.readme,
+            system_libs = system_libs,
         ),
         welded_tests_info(ctx.attrs.test_srcs),
     ]
@@ -281,6 +307,7 @@ _adopted = rule(
         "import_name": attrs.option(attrs.string(), default = None),
         "lib": attrs.dep(),
         "native": attrs.option(attrs.label(), default = None),
+        "native_static": attrs.bool(default = False),
         "readme": attrs.option(attrs.source(), default = None),
         "readme_tool": attrs.option(attrs.exec_dep(providers = [RunInfo]), default = None),
         "srcs": attrs.list(attrs.source()),

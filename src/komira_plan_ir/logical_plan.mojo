@@ -126,19 +126,14 @@ comptime PLAN_UNION: UInt8 = 12
 # has no handler for it) — the resolution pass is an assertable invariant
 # of the optimizer pipeline.
 comptime PLAN_VIEW_REF: UInt8 = 13
-# A leaf reference to the
-# CANONICAL occurrence of a duplicated PURE subtree, keyed on that
-# subtree's `structural_hash`. Produced ONLY by `plan_cse.plan_cse_eliminate`
-# (the plan-level CSE rewrite) and ONLY when the rewrite gate
-# (`plan_cse._ENABLE_CSE_REWRITE`) is on. The IR stays a TREE (not a DAG):
-# the canonical occurrence keeps the full subtree; the 2nd..Nth occurrences
-# become `PLAN_CSE_REF` leaves carrying `canonical_hash`. `plan_compiler`'s
-# `_compile_node` arm for this tag resolves it to a fragment sourced from
-# the segment that computed the canonical subtree's result. NB: the engine
-# currently enforces a HARD single-consumer invariant on segment outputs —
-# until that grows a per-seg consumer counter, the CSE rewrite gate stays
-# OFF and a `PLAN_CSE_REF` never reaches plan-compile in production (the
-# `_compile_node` arm raises a clear deferral error if it ever does).
+# A leaf reference to the CANONICAL occurrence of a duplicated PURE subtree,
+# keyed on that subtree's `structural_hash`. Produced only by
+# `komira_optimizer.plan_cse.plan_cse_eliminate` (the plan-level CSE rewrite),
+# which `optimizer_driver` does not call. The IR stays a TREE (not a DAG): the
+# canonical occurrence keeps the full subtree; the 2nd..Nth occurrences become
+# `PLAN_CSE_REF` leaves carrying `canonical_hash`. No consumer exists in this
+# tree yet: nothing resolves a `PLAN_CSE_REF` to the canonical result, so a
+# plan that holds one cannot be lowered until a resolver is added.
 comptime PLAN_CSE_REF: UInt8 = 14
 # cast_to_varchar: a single-child node that wraps its input with
 # `CastToVarcharOp` (`komira_engine_operators/cast_to_varchar.mojo`). The
@@ -1195,9 +1190,9 @@ struct LogicalPlan(Movable, Writable, BoxablePlan):
 
         Returns a single-node plan: a `PLAN_CSE_REF` leaf carrying the
         canonical subtree's `structural_hash` + a snapshot of its output
-        schema. The ONLY producer is `plan_cse.plan_cse_eliminate` (the
-        plan-level CSE rewrite); the ONLY consumer is `plan_compiler`'s
-        `_compile_node` arm. `structural_hash()` on the returned plan
+        schema. The only producer is `plan_cse.plan_cse_eliminate` (the
+        plan-level CSE rewrite); there is no consumer in this tree yet.
+        `structural_hash()` on the returned plan
         returns `canonical_hash` (so re-CSE is idempotent — see
         `CseRefData` docstring).
 

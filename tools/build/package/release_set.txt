@@ -117,6 +117,9 @@ member komira_gcp_run
 member komira_gcp_wif
 member kci_cloud_gcp
 member komira_kafka_broker
+member komira_bench_duckdb
+member komira_bench_data
+member komira_bench_report
 member komira_bench_corpus
 license Apache-2.0
 summary Every komira library of one release.

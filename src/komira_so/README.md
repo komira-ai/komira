@@ -3,11 +3,17 @@
 The C ABI of komira's one shared library, `libkomira` (`libkomira.so` on Linux,
 `libkomira.dylib` on macOS arm64). Every language binding links against that
 one library and its flat C surface: no Mojo type crosses it. This package holds
-the surface's skeleton: the status codes, the version, the context handle and
-the last-error call. No source, plan or query call is exported yet.
+the surface's skeleton (the status codes, the version, the context handle and
+the last-error call) and the source and render calls: registering a Parquet
+file, the schema and scan bindings of Parquet, CSV and JSON files, and a plan
+rendered as text. No call runs a query yet.
 
-- `status.mojo`: the five status codes, `abi_version`, `buffer_status`.
-- `session.mojo`: `Session`, the state a context handle stands for.
+- `abi/komira.tsv`: the golden of the C ABI; `komira.h` is made from it.
+- `status.mojo`: the six status codes, `KOMIRA_MAX_INPUT_BYTES`, `abi_version`, `buffer_status`, `input_length_status`.
+- `session.mojo`: `Session`, the state a context handle stands for: the last
+  error and the catalog of registered tables.
+- `sources.mojo`: what the source and render calls do on values (a path or the
+  bytes of a plan in; bytes or text out, or a raise with the engine's message).
 - `_c_abi.mojo`: the exports. It is the only file here that holds pointers, it
   is not part of the Mojo package (it is the source of the `libkomira`
   target), and its header says who owns and frees each pointer.
@@ -20,13 +26,27 @@ void    *komira_ctx_new(void);
 void     komira_ctx_free(void *ctx);
 int32_t  komira_last_error(void *ctx, uint8_t *out_buf, uint64_t out_cap,
                            uint64_t *out_len);
+int32_t  komira_register_parquet(void *ctx, const char *name,
+                                 const char *path);
+int32_t  komira_parquet_schema(void *ctx, const char *path, uint8_t *out_buf,
+                               uint64_t out_cap, uint64_t *out_len);
+int32_t  komira_csv_binding(void *ctx, const char *path, uint8_t delimiter,
+                            int32_t has_header, int32_t all_varchar,
+                            uint8_t *out_buf, uint64_t out_cap,
+                            uint64_t *out_len);
+int32_t  komira_json_binding(void *ctx, const char *path, uint8_t *out_buf,
+                             uint64_t out_cap, uint64_t *out_len);
+int32_t  komira_plan_render(void *ctx, const uint8_t *plan, uint64_t plan_len,
+                            uint8_t *out_buf, uint64_t out_cap,
+                            uint64_t *out_len);
 ```
 
 **Status codes.** Every fallible call returns one: `KOMIRA_OK` (0),
 `KOMIRA_ERR_NULL_CTX` (-1, the context is NULL), `KOMIRA_ERR_NULL_ARG` (-2, a
 required pointer other than the context is NULL), `KOMIRA_ERR_ENGINE` (-3, the
-engine refused; the context's last error says why) and
-`KOMIRA_ERR_BUFFER_TOO_SMALL` (-4, below).
+engine refused; the context's last error says why),
+`KOMIRA_ERR_BUFFER_TOO_SMALL` (-4, below) and `KOMIRA_ERR_TOO_LARGE` (-5, a byte
+input is longer than `KOMIRA_MAX_INPUT_BYTES`, 64 MiB; see `komira_plan_render`).
 
 A caller tells the codes apart by value alone: success is zero, every failure
 is negative.
@@ -37,7 +57,10 @@ from komira_so import (
     KOMIRA_ERR_ENGINE,
     KOMIRA_ERR_NULL_ARG,
     KOMIRA_ERR_NULL_CTX,
+    KOMIRA_ERR_TOO_LARGE,
+    KOMIRA_MAX_INPUT_BYTES,
     KOMIRA_OK,
+    input_length_status,
 )
 from std.testing import assert_equal, assert_true
 
@@ -46,6 +69,13 @@ assert_equal(KOMIRA_ERR_NULL_CTX, Int32(-1))
 assert_equal(KOMIRA_ERR_NULL_ARG, Int32(-2))
 assert_equal(KOMIRA_ERR_ENGINE, Int32(-3))
 assert_equal(KOMIRA_ERR_BUFFER_TOO_SMALL, Int32(-4))
+assert_equal(KOMIRA_ERR_TOO_LARGE, Int32(-5))
+assert_equal(KOMIRA_MAX_INPUT_BYTES, UInt64(64 * 1024 * 1024))
+assert_equal(input_length_status(KOMIRA_MAX_INPUT_BYTES), KOMIRA_OK)
+assert_equal(
+    input_length_status(KOMIRA_MAX_INPUT_BYTES + UInt64(1)),
+    KOMIRA_ERR_TOO_LARGE,
+)
 assert_true(KOMIRA_ERR_ENGINE < KOMIRA_OK)
 ```
 
@@ -58,14 +88,15 @@ from komira_so import ABI_MAJOR, ABI_MINOR, abi_version
 from std.testing import assert_equal
 
 assert_equal(abi_version(), ABI_MAJOR * 1000 + ABI_MINOR)
-assert_equal(abi_version(), Int32(1000))
+assert_equal(abi_version(), Int32(1001))
 ```
 
 **The handle.** `komira_ctx_new` returns a context the caller owns until it
 passes it to `komira_ctx_free`. A handle is not safe to use from two threads at
 once, freeing one twice or using it after the free is undefined (as for
 `free(3)`), and `komira_ctx_free(NULL)` does nothing. A context holds a
-`Session`: today, the text of the last error, empty on a fresh one.
+`Session`: the text of the last error, empty on a fresh one, and the tables
+registered by name.
 
 ```mojo
 from komira_so import Session
@@ -106,6 +137,26 @@ a NULL argument on a live context stores its refusal as that context's last
 error; a too-small buffer stores nothing, so the text a probe measured is the
 text the next call returns.
 
+**Sources and render.** Each call below takes the context first and returns a
+status code; on `KOMIRA_ERR_ENGINE` the context's last error holds the engine's
+message. Every one of them clears the previous last error when it starts, so
+after a success the error is empty. A `const char *` is a NUL-terminated UTF-8
+string the caller keeps alive for the call; one that is not valid UTF-8 is
+refused (-3, with a last error) before it is used.
+
+| call | what it does | refusals |
+|---|---|---|
+| `komira_register_parquet(ctx, name, path)` | reads the footer of the Parquet file at `path` and binds it into the session under `name` (found without regard to case) | NULL `name` or `path`: -2. A missing, unreadable or nested file: -3 |
+| `komira_parquet_schema(ctx, path, out_buf, out_cap, out_len)` | the file's Arrow schema as `komira.plan.v1` `WireSchema` bytes, for a plan author to splice into a Parquet scan | NULL `path` or `out_len`: -2. A file that cannot be read: -3 |
+| `komira_csv_binding(ctx, path, delimiter, has_header, all_varchar, out_buf, out_cap, out_len)` | the whole `WireScanBinding` of a CSV file, schema inferred from a bounded prefix of an uncompressed file (a compressed file is read whole). `has_header` and `all_varchar` are `int32_t`; any non-zero value is true | as `komira_parquet_schema` |
+| `komira_json_binding(ctx, path, out_buf, out_cap, out_len)` | the same for a newline-delimited JSON file; the schema comes from the leading records | as `komira_parquet_schema` |
+| `komira_plan_render(ctx, plan, plan_len, out_buf, out_cap, out_len)` | decodes the serialized plan `plan[0..plan_len]` (a `WirePlanEnvelope`) and writes its text as authored, before any optimizer rule; the plan is not run | NULL `plan` or `out_len`: -2. `plan_len` above 64 MiB (`KOMIRA_MAX_INPUT_BYTES`): -5, checked before the plan is read or anything is allocated; exactly 64 MiB is accepted. Bytes that are not an admissible plan: -3 |
+
+The four calls with an `out_buf` follow the two-call protocol above. The
+binding and schema bytes are what a plan author splices into a scan leaf: the
+fingerprint, kind id and snapshot fields come from the engine and are not
+computed by the caller. A NULL `ctx` is -1 for all five.
+
 ## Building and testing
 
 ```sh
@@ -113,19 +164,67 @@ text the next call returns.
 ./buck2 build komira//src/komira_so:libkomira       # the shared library, behind its gate
 ```
 
-The library is published only if the gate passes: the exports check, then seven
-drivers (`tests/gate/`) that open it with `RTLD_NOW` and call it as a foreign
-host would: the version, create and free (distinct handles, separate sessions), no
-symbol beyond the four, a fresh session's empty error, the
-two-call protocol (zero capacity, one byte short, exact, larger), a NULL
-context, and a NULL `out_len`. `exports_exact` makes the four names above the
-whole dynamic symbol table.
+The library is published only if the gate passes: the exports check, then
+thirteen drivers (`tests/gate/`) that open it with `RTLD_NOW` and call it as a
+foreign host would. Seven cover the skeleton: the version (1001, which is 1.1),
+create and free (distinct handles, separate sessions), no symbol beyond the
+nine, a fresh session's empty error, the two-call protocol (zero capacity, one
+byte short, exact, larger), a NULL context, and a NULL `out_len`. One driver per
+new call writes its input file under `$TEST_TMPDIR` and checks a good input,
+NULL context (-1), a NULL input (-2 with a last error), a bad file or plan (-3
+with the message as the last error) and, for the four calls with an output, the
+two-call protocol; a good call after a refusal leaves no error.
+`exports_exact` makes the nine names above the whole dynamic symbol table.
+The eight C owners in the library's closure (async, async_api, compression, fs,
+libc, metrics, parquet_codec, scan_source) are linked as their own shared libraries
+(`native_owners`), not embedded. The thirteenth driver, `gate_native_owners`,
+reads the `DT_NEEDED` entries of the library's ELF dynamic section and requires
+the SONAME of each of the eight (`libkomira_<owner>_native.so.1`); an owner
+dropped from `native_owners` leaves its C embedded, and that driver fails.
+The plan driver also refuses a `plan_len` of 64 MiB plus one and of
+`UINT64_MAX` (-5, nothing written), and accepts exactly 64 MiB as a length;
+`gate_parquet_schema` passes a path that is not valid UTF-8 and requires -3.
 
 Like every Mojo library, `libkomira` has `DT_NEEDED libKGENCompilerRTShared.so`
 and finds the Mojo runtime in `lib/` beside it
 (see "C-ABI shared libraries" in `tools/build/mojo/README.md`).
 
+## The header and the golden
+
+`abi/komira.tsv` is the golden of the ABI: the version (1.1), one row per export
+with its return type, argument types and the version that added it, and one row
+per status code and per limit (`constant`). `komira_abi_golden` checks it on every
+build against the `@export abi("C")` functions of `_c_abi.mojo` (names, return and
+argument types) and against `status.mojo` (the constants and their values), and
+writes `komira.h` from it:
+
+```sh
+./buck2 build komira//src/komira_so:komira_abi      # komira.h, only if the golden is exact
+```
+
+An export added to `_c_abi.mojo` without a row, a row without an export, a changed
+type and a changed or added constant all fail that target, naming the finding. The
+header spells the opaque context `komira_handle`, strings `const char *` and the
+plan bytes `const uint8_t *`; `_c_abi.mojo` declares `Handle`, `CStr` and
+`ConstBytes` for them. The golden does not check that its version was raised when
+a row changed: that compares with the previous release.
+
+`tests/c/abi_driver.c` is a C program that includes `komira.h` and nothing of
+ours. It opens `./libkomira.so`, binds each of the nine functions to a pointer
+declared with the header's own prototype, and checks the version in the header
+against `komira_abi_version()`, the status codes, the input bound
+(`KOMIRA_MAX_INPUT_BYTES` plus one is -5), and the last-error round trip (NULL
+context, NULL `out_len`, an engine refusal, a buffer one byte short, an exact
+buffer). It is built by zig cc and run against the published library:
+
+```sh
+./buck2 build komira//src/komira_so:c_abi_check     # exit 0 of the driver, or red
+```
+
+The header is not part of the library's conda package yet; that waits on the
+packaging change that lists it.
+
 ## Not done
 
-No golden file, generated header or version check yet; no source, plan or query
-call; no engine in the session; no language binding.
+No release-over-release version check and no packaged header yet; no plan execution, query
+or UDF call; no engine in the session; the one language binding is the Node addon ([`node/`](https://github.com/komira-ai/komira/blob/main/node/README.md)).

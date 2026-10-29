@@ -11,6 +11,8 @@ configuration).
   INERT   a changed file matching the pattern that no target owns is not a
           reason to widen: it builds nothing. A change made only of such
           files reaches no target, and the selector refuses it (VACUOUS).
+  HEAVY   checks that are costly and of a frozen or rarely edited program: a pull
+          request that does not touch what a row owns leaves them out (below).
   UNIVERSE the target patterns of the check set: the graph the selector
           answers over, and the targets the aggregate `//ci:pr` holds
           (ci/targets.bzl). The tests cell is its `functional` tree only:
@@ -64,6 +66,42 @@ SOURCE_KINDS = [
 # The aggregate every pull request check builds, and its package.
 AGGREGATE = "komira//ci:pr"
 
+# The aggregate of the same check set without the roots of HEAVY (ci/BUCK declares it from
+# the generated lists), which a change that owns none of them builds instead of AGGREGATE.
+DEFAULT = "komira//ci:pr_default"
+
+# Checks left off the default set. Each row is (target, own, roots, reason):
+#   target  the heavy target: one compile action that needs several GB and minutes.
+#   own     the paths whose change keeps it: a change with a file matching one of these
+#           (patterns as in WIDEN) builds it and everything above it; a change with none
+#           leaves out the target and every check that depends on it, WIDENED or not.
+#   roots   the roots of the check set (ci/targets.bzl) that reach the target: DEFAULT is
+#           the check set without them, and `default_guard.bxl:check` fails when DEFAULT
+#           still reaches the target or a root here reaches nothing heavy.
+#   reason  why it is left off.
+# What a row costs: a change outside `own` that breaks the target is not found by the pull
+# request check. The release builds neither of these roots, so it is not found there either.
+HEAVY = [
+    (
+        "komira//bin/kci:kci",
+        [
+            "bin/kci/**",
+            "src/kci_*",
+            "packaging/images/base/**",
+            # the selector, the aggregates and their lists: a change to how the check set is
+            # chosen runs the whole of it
+            "ci/**",
+            "tools/build/ci/**",
+        ],
+        [
+            "komira//bin/kci:runnable_readme_examples",
+            "komira//bin/kci:test_kci_process",
+            "komira//packaging/images/base:komira_base",
+        ],
+        "kci is frozen and its binary is one Mojo compile of several GB; no job of the release builds it",
+    ),
+]
+
 # The checks `//ci:pr` leaves out on purpose, each a (pattern, reason). Most are Python, and
 # Python serves only the Python SDK and its py_tests (tests/python_closure_allowlist.bzl,
 # PYTHON_SURFACE). The aggregate holds no Python rule; `python_guard.bxl:check` fails when it
@@ -73,6 +111,7 @@ AGGREGATE = "komira//ci:pr"
 EXCLUDED = [
     ("komira//third_party/python/...", "the pinned CPython and wheels: inputs of Python tests only"),
     ("komira//release/ci/tests:", "py_test of the CI scripts, not of the Python SDK"),
+    ("komira//release:mopm_darwin_libs", "the macOS arm64 build of the release: it is built for the darwin-arm64 platform on the farm's macOS workers by release-macos.yml (job release-macos), and never by a pull request (a Linux build of its libraries is the aggregate's own)"),
     ("komira//src/tests/e2e/komira_tls_interop_e2e:test_komira_client_vs_cpython_server", "runs a CPython peer, not a test of the Python SDK"),
     ("komira//src/tests/e2e/komira_tls_interop_e2e:test_cpython_client_vs_komira_server", "runs a CPython peer, not a test of the Python SDK"),
     ("komira//src/tests/e2e/komira_tls_interop_e2e:test_komira_client_refuses_cpython_server", "runs a CPython peer, not a test of the Python SDK"),

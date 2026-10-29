@@ -175,3 +175,65 @@ test "a network line with traffic is not the zero line" {
     try t.expectEqual(ar.Verdict.missing_summary, ar.verdict("Network: up 0B  down 12KiB\nBUILD SUCCEEDED\n"));
     try t.expectEqual(ar.Verdict.ok, ar.verdict("Network: up 0B  down 0B  session X\nBUILD SUCCEEDED\n"));
 }
+
+/// A scratch directory holding `name` with `size` bytes of `x`.
+fn logOfSize(dir: std.fs.Dir, name: []const u8, size: usize) !void {
+    const f = try dir.createFile(name, .{});
+    defer f.close();
+    var chunk = [_]u8{'x'} ** 256;
+    var left = size;
+    while (left > 0) {
+        const n = @min(left, chunk.len);
+        try f.writeAll(chunk[0..n]);
+        left -= n;
+    }
+}
+
+test "a log under the cap is read whole" {
+    var tmp = t.tmpDir(.{});
+    defer tmp.cleanup();
+    try logOfSize(tmp.dir, "log", 1000);
+    var w = std.Io.Writer.Allocating.init(t.allocator);
+    defer w.deinit();
+    const log = (try ar.readLog(t.allocator, tmp.dir, "log", 1024, &w.writer)).?;
+    defer t.allocator.free(log);
+    try t.expectEqual(@as(usize, 1000), log.len);
+    try t.expectEqualStrings("", w.written());
+}
+
+test "a log of exactly the cap is read; one byte more is refused unread, with the reason on the writer" {
+    var tmp = t.tmpDir(.{});
+    defer tmp.cleanup();
+    try logOfSize(tmp.dir, "at_cap", 1024);
+    try logOfSize(tmp.dir, "over_cap", 1025);
+    var w = std.Io.Writer.Allocating.init(t.allocator);
+    defer w.deinit();
+    const log = (try ar.readLog(t.allocator, tmp.dir, "at_cap", 1024, &w.writer)).?;
+    defer t.allocator.free(log);
+    try t.expectEqual(@as(usize, 1024), log.len);
+    try t.expect(try ar.readLog(t.allocator, tmp.dir, "over_cap", 1024, &w.writer) == null);
+    try t.expectEqualStrings("assert_remote: cannot read over_cap: FileTooBig\n", w.written());
+}
+
+test "a log that does not exist is refused with the reason on the writer" {
+    var tmp = t.tmpDir(.{});
+    defer tmp.cleanup();
+    var w = std.Io.Writer.Allocating.init(t.allocator);
+    defer w.deinit();
+    try t.expect(try ar.readLog(t.allocator, tmp.dir, "nope", 1024, &w.writer) == null);
+    try t.expectEqualStrings("assert_remote: cannot read nope: FileNotFound\n", w.written());
+}
+
+test "the step's log is read under max_log_bytes: a 530 MB log fits, so a few KiB must" {
+    try t.expect(ar.max_log_bytes >= 600 * 1000 * 1000);
+    var tmp = t.tmpDir(.{});
+    defer tmp.cleanup();
+    try logOfSize(tmp.dir, "log", 64 * 1024);
+    const path = try tmp.dir.realpathAlloc(t.allocator, "log");
+    defer t.allocator.free(path);
+    var w = std.Io.Writer.Allocating.init(t.allocator);
+    defer w.deinit();
+    const log = (try ar.readStepLog(t.allocator, path, &w.writer)).?;
+    defer t.allocator.free(log);
+    try t.expectEqual(@as(usize, 64 * 1024), log.len);
+}

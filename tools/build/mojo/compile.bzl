@@ -172,7 +172,8 @@ def _build_executable(ctx, tc, out_path, srcs, main, closure_tsets, opt_level, c
     With `abi_lib`, emits a shared library straight from `main`, a file of
     `@export` C-ABI functions: no generated entry and no `komira_main`.
     DT_SONAME is the output's file name (the caller names it, with no `lib`
-    prefix forced) and the run path is the default `$ORIGIN/lib`.
+    prefix forced) and the run path is the default `$ORIGIN/lib`
+    (`mojo_shared_lib` adds `$ORIGIN` on Linux through `link_extra`).
     `link_extra` is appended to the link tail after the C libraries (the
     force-loaded archives of mojo_shared_lib). `link_head` is put before
     them (the owners' shared libraries of mojo_shared_lib: a symbol one of

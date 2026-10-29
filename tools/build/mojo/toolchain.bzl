@@ -197,6 +197,9 @@ def _zig_exe_impl(ctx):
         "-target",
         ctx.attrs.target,
         "-fstrip" if ctx.attrs.strip else "-fno-strip",
+        # `-lc`: link the C library the target names (a glibc triple), for an
+        # executable that calls dlopen; zig links none for a musl static one.
+        ["-lc"] if ctx.attrs.link_libc else [],
         _zig_root(ctx),
         cmd_args(out.as_output(), format = "-femit-bin={}"),
     )
@@ -221,6 +224,8 @@ zig_exe_rule = rule(
         # `zig_module` targets `src` imports by name.
         "deps": attrs.list(attrs.dep(providers = [ZigModuleInfo]), default = []),
         "imports": attrs.list(attrs.source(), default = []),
+        # Link libc (`-lc`); the target is then a glibc triple.
+        "link_libc": attrs.bool(default = False),
         # zig's -O: the optimization mode.
         "optimize": attrs.string(default = "ReleaseSafe"),
         "src": attrs.source(),

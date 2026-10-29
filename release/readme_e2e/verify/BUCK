@@ -8,8 +8,8 @@ load("//release/readme_e2e:packages.bzl", "MOJO", "MOPM", "PACKAGES")
 load("//release/readme_e2e:staged_choice.bzl", "staged_label", "staged_version")
 
 # The staged set the targets install from is `-c komira_release.staged=<which>`
-# (staged_choice.bzl): the assembled one by default, the one `mopm stage` wrote with `stage`, the one
-# downloaded from the beta channel with `beta` (then at `-c komira_release.beta_version=0.1.<n>`).
+# (staged_choice.bzl): the assembled one by default, or the one `mopm stage` wrote (and `prod-test`
+# verified) with `stage` (then at `-c komira_release.beta_version=0.1.<n>`, the version of the run).
 [
     readme_e2e(
         name = name,

@@ -10,11 +10,13 @@
 # the round's next write parks for certain.
 #
 # Groups (and the defect each would catch):
-#   P  a 400 for a malformed head, a 417 for a refused expectation, a 400
+#   P  a 400 for a malformed head, a 431 for a head that fills the receive
+#      buffer without ending, a 417 for a refused expectation, a 400
 #      for bad chunk framing and an interim 100 Continue that cannot be
 #      written now: not parked (lost, or the connection dropped), parked
 #      with the wrong bytes, the round not reporting the connection alive,
-#      or a refused request dispatched.
+#      a refused request dispatched, or the request behind a parked interim
+#      not dispatched and its response not queued behind the interim.
 # =============================================================================
 
 from std.ffi import external_call
@@ -32,6 +34,7 @@ from komira_async.runtime.runtime_trait import Runtime
 from komira_async.runtime.tcp_stream import TcpStream
 from komira_http_core.codec import HttpRequest, HttpResponse
 from komira_http_core.codec.h1.limits import ParseLimits
+from komira_http_core.codec.types import serialize_response
 from komira_http_core.codec.h1.parser import (
     build_100_continue_bytes,
     build_error_response_bytes,
@@ -171,6 +174,19 @@ def test_refused_expectation_parks_its_417() raises:
     assert_equal(r[1], 0)
 
 
+def test_head_filling_the_buffer_parks_its_431() raises:
+    """A head that fills the receive buffer without ending cannot complete:
+    it is answered 431 and the answer parks."""
+    var pad = String()
+    for _ in range(REQ_BUF_BYTES):
+        pad += "p"
+    var r = _parked_after(
+        "GET / HTTP/1.1\r\nHost: example.com\r\nX-Pad: " + pad, True
+    )
+    assert_equal(r[0], _error(431))
+    assert_equal(r[1], 0)
+
+
 def test_bad_chunk_framing_parks_its_400() raises:
     var r = _parked_after(
         "POST / HTTP/1.1\r\nHost: example.com\r\nTransfer-Encoding: chunked"
@@ -182,8 +198,10 @@ def test_bad_chunk_framing_parks_its_400() raises:
 
 
 def test_interim_continue_parks() raises:
-    """Only the interim's own parking is asserted: what becomes of the
-    request behind it is the dispatch half of komira-ai/komira#947."""
+    """The parked interim keeps its request: the request is dispatched and
+    its response queued behind the interim (the dispatch half of
+    komira-ai/komira#947; before, the round returned at the parked interim
+    and the request was never answered)."""
     var r = _parked_after(
         "POST / HTTP/1.1\r\nHost: example.com\r\nExpect: 100-continue\r\n"
         "Content-Length: 5\r\n\r\nhello",
@@ -191,7 +209,9 @@ def test_interim_continue_parks() raises:
     )
     var want = List[UInt8]()
     build_100_continue_bytes(want)
+    serialize_response(HttpResponse.ok(String("ok")), want)
     assert_equal(r[0], _text(want))
+    assert_equal(r[1], 1)
 
 
 def main() raises:

@@ -28,6 +28,7 @@ mojo_library(
         "//src/komira_csv:komira_csv",
         "//src/komira_engine_runtime:komira_engine_runtime",
         "//src/komira_fs:komira_fs",
+        "//src/komira_host_profile:komira_host_profile",
         "//src/komira_jsonl:komira_jsonl",
         "//src/komira_morsel:komira_morsel",
         "//src/komira_op_agg_row_api:komira_op_agg_row_api",
