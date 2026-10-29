@@ -72,6 +72,8 @@ TARGETS = [
     "komira//src/tests/helpers/kci_gcp_emulator:kci_gcp_emulator_conda",
     "komira//src/tests/helpers/komira_test_minio:farm_capability_probe",
     "komira//src/tests/helpers/komira_test_minio:komira_test_minio_conda",
+    "komira//third_party/snappy:config_arm64",
+    "komira//third_party/snappy:config_cases",
     "komira//third_party/wycheproof:LICENSE",
     "komira//tools/build/examples/abi_golden:abi_lib",
     "komira//tools/build/examples/abi_golden:header_driver",
