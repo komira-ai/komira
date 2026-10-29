@@ -146,11 +146,29 @@ def _check_all_probes(
     imm probe: List[Int64],
     imm probe_nulls: List[Bool],
     imm what: String,
+    probe_offset: Int = 0,
 ) raises:
+    """Every probe arm against the oracle. With `probe_offset` > 0 the probe
+    column is `probe_offset` leading valid rows longer and sliced past them, so
+    its validity bitmap starts at a non-zero bit offset."""
     var keys = _members(build, build_nulls)
     var want_semi = _expected(keys, probe, probe_nulls, False)
     var want_anti = _expected(keys, probe, probe_nulls, True)
-    var col = _column(probe, probe_nulls)
+    var col: PrimitiveArray[I64]
+    if probe_offset > 0:
+        var padded = List[Int64]()
+        var padded_nulls = List[Bool]()
+        for i in range(probe_offset):
+            padded.append(probe[i % len(probe)])
+            if len(probe_nulls) > 0:
+                padded_nulls.append(False)
+        for i in range(len(probe)):
+            padded.append(probe[i])
+            if len(probe_nulls) > 0:
+                padded_nulls.append(probe_nulls[i])
+        col = _column(padded, padded_nulls).slice(probe_offset, len(probe))
+    else:
+        col = _column(probe, probe_nulls)
 
     _assert_rows(hs.probe_semi(col), want_semi, what + " SEMI")
     _assert_rows(hs.probe_anti(col), want_anti, what + " ANTI")
@@ -377,6 +395,84 @@ def test_a_cancelled_token_raises_and_leaves_the_pool_usable() raises:
     var after = List[Int]()
     hs.probe_semi_parallel(d, CancellationToken.never(), col, after)
     _assert_rows(after, want, "after the cancel")
+
+
+def test_null_probe_keys_in_a_sliced_column_through_the_work_stealing_arms() raises:
+    """The probe column starts at a non-zero offset into its buffers and holds
+    NULL rows: the stealing index probe reads validity at that offset."""
+    assert_true(
+        SEMI_PROBE_PARALLEL_MIN_ROWS < 300_000, "fixture below the probe threshold"
+    )
+    var rt = _runtime()
+    ref d = rt.dispatcher()
+    var build = List[Int64]()
+    for i in range(0, 5000, 2):
+        build.append(Int64(i))
+    var probe = List[Int64]()
+    var nulls = List[Bool]()
+    for i in range(300_000):
+        probe.append(Int64((i * 31) % 5000))
+        nulls.append(i % 5 == 2)
+    var hs = SemiJoinHashSet(_column(build, List[Bool]()))
+    _check_all_probes(
+        hs, d, build, List[Bool](), probe, nulls, "sliced null probe", 13
+    )
+
+
+def test_staging_restart_keeps_every_key_of_a_crowded_partition() raises:
+    """One partition holds more keys than its staging slice but at most three
+    quarters of its slots: staging restarts with larger slices and the build
+    stays parallel. Every key, and the gaps between them, is probed."""
+    assert_true(
+        _PARALLEL_BUILD_THRESHOLD <= 140_000, "fixture below the build threshold"
+    )
+    var rt = _runtime()
+    ref d = rt.dispatcher()
+    var members = _partition_keys(2, 0, 23_000)
+    var top = members[len(members) - 1]
+    var k = Int64(1)
+    while len(members) < 140_000:
+        if _partition_of_key(k) != 2:
+            members.append(k)
+        k += 1
+    if k > top:
+        top = k
+    var probe = List[Int64]()
+    var q = Int64(-50)
+    while q < top + 200:
+        probe.append(q)
+        q += 1
+    var hs = SemiJoinHashSet(
+        _column(members, List[Bool]()), d, CancellationToken.never()
+    )
+    _check_all_probes(
+        hs, d, members, List[Bool](), probe, List[Bool](), "staging restart"
+    )
+
+
+def test_a_cancelled_token_raises_for_a_build_that_falls_back_to_serial() raises:
+    var rt = _runtime()
+    ref d = rt.dispatcher()
+    var hot = List[Int64]()
+    for _ in range(150_000):
+        hot.append(Int64(5))
+    var token = CancellationToken.new()
+    token.cancel(String("stop"))
+    var raised = False
+    var message = String("")
+    try:
+        var built = SemiJoinHashSet(_column(hot, List[Bool]()), d, token.clone())
+        _ = built^
+    except e:
+        raised = True
+        message = String(e)
+    _raises_naming_cancel("serial-fallback build", raised, message)
+
+    var hs = SemiJoinHashSet(
+        _column(hot, List[Bool]()), d, CancellationToken.never()
+    )
+    assert_true(hs.contains(Int64(5)), "an uncancelled hot-key build lost its key")
+    assert_true(not hs.contains(Int64(6)), "an absent key was found")
 
 
 def main() raises:

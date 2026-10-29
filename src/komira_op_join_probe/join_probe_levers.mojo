@@ -51,6 +51,10 @@ def join_probe_buf_reuse_configure(on: Bool) raises:
     """Set the chunk-buffer reuse setting for this process (off by default):
     a probe takes its chunk buffers from a per-worker slot instead of a fresh
     allocation per chunk. Set once, from a flag, before any probe runs."""
+    # FFI-BOUNDARY: `_Global.get_or_create_ptr` returns a pointer into the
+    # runtime's static storage. The runtime owns and frees it at process exit;
+    # this module only loads, stores and fetch-adds through it and never frees
+    # or retains it past a call.
     # SAFETY: FFI carve-out -- `_Global.get_or_create_ptr` targets KGEN-runtime
     # static storage (process lifetime); the wildcard origin is the stdlib API's
     # own return type and is confined to this function.

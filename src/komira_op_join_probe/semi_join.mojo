@@ -112,8 +112,9 @@ struct SemiJoinHashSet(Movable):
 
         A build whose keys crowd into one partition (more than three quarters
         of its slots) is built serially instead, into a table grown until no
-        partition is more than three quarters full; the token is then not
-        consulted.
+        partition is more than three quarters full; the token is checked once
+        before that serial build starts, not during it. A cancelled build
+        raises and yields no table.
 
         Args:
             keys: The build-side join key column (may contain duplicates).
@@ -279,6 +280,10 @@ struct SemiJoinHashSet(Movable):
         for q in range(_NUM_PARTITIONS):
             max_staged = max(max_staged, part_counts[q])
         if max_staged * 4 > self._part_cap * 3:
+            # The pooled path observes the token at dispatch; the serial
+            # fallback is checked here so a cancelled build raises alike.
+            if cancel_token.is_cancelled():
+                raise Error("cancelled: " + cancel_token.reason())
             self._reset_table(self._capacity, True)
             self._build_serial(keys)
             return

@@ -397,6 +397,10 @@ struct RadixPartitionedHashJoin(Movable):
         var probe_has_nulls = probe_keys.null_count != 0
         var probe_key_ptr = probe_keys._typed_ptr_ro()
 
+        # SAFETY: the seven scratch buffers below (hashes, partition ids,
+        # histogram, offsets, flat index, flat hash, cursors) are sized from n
+        # or _NUM_PARTITIONS, written before they are read, and freed once at
+        # the end of this method; none escapes it.
         # PERF-CRITICAL: SIMD hash pre-pass for probe side.
         var hashes_buf = alloc[UInt64](n)
         var part_ids_buf = alloc[Int](n)
@@ -479,6 +483,10 @@ struct RadixPartitionedHashJoin(Movable):
         var probe_has_nulls = probe_keys.null_count != 0
         var probe_key_ptr = probe_keys._typed_ptr_ro()
 
+        # SAFETY: the seven scratch buffers below (hashes, partition ids,
+        # histogram, offsets, flat index, flat hash, cursors) are sized from n
+        # or _NUM_PARTITIONS, written before they are read, and freed once at
+        # the end of this method; none escapes it.
         # PERF-CRITICAL: SIMD hash pre-pass for probe side.
         var hashes_buf = alloc[UInt64](n)
         var part_ids_buf = alloc[Int](n)
@@ -572,6 +580,10 @@ struct RadixPartitionedHashJoin(Movable):
         var probe_has_nulls = probe_keys.null_count != 0
         var probe_key_ptr = probe_keys._typed_ptr_ro()
 
+        # SAFETY: the seven scratch buffers below (hashes, partition ids,
+        # histogram, offsets, flat index, flat hash, cursors) are sized from n
+        # or _NUM_PARTITIONS, written before they are read, and freed once at
+        # the end of this method; none escapes it.
         var hashes_buf = alloc[UInt64](n)
         var part_ids_buf = alloc[Int](n)
 
