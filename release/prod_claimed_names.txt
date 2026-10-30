@@ -7,6 +7,14 @@
 # write to the live registry, so it holds the members to this file instead
 # (//release:prod_claimed_names_cases): a maintainer adds a name here only AFTER claiming it
 # on the prod registry, in the pull request that adds the member.
+kci_api
+kci_cell
+kci_logs
+kci_params
+kci_release_channel
+kci_release_machine
+kci_validator_report
+kci_validator_rows
 komira_anomaly
 komira_async_api
 komira_atomic_alias
@@ -14,6 +22,7 @@ komira_bench_report
 komira_buffer
 komira_bump_arena
 komira_clock
+komira_codeworks_api
 komira_collections
 komira_content_line
 komira_counters
