@@ -44,7 +44,7 @@ continuous_publish.md both use that name; `kci.yml` runs it since the staged pip
   package shipping that library, which this tool does not derive yet"); slice 3 declares their sonames,
   and their packages now build, requiring `lz4-c` and `libzlib`, but neither is released.
   `komira_compression` opens zstd, bz2 and lzma the same way
-  (`src/komira_compression/codec_libraries.mojo`) and also links snappy, so it is in both lists.
+  (`src/komira_compression/src/komira_compression/codec_libraries.mojo`) and also links snappy, so it is in both lists.
 - The released set today is its member libraries plus the metapackage `komira_all`
   (`release/artifacts.textproto`, held equal to `tools/build/package/release_set.txt`), none with
   native code (no member's directory holds a C or C++ source or opens a library at run time).

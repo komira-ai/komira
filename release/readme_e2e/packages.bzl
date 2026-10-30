@@ -52,6 +52,7 @@ PACKAGES = {
     "komira_clock": "0.1.0",
     "komira_codeworks_api": "0.1.0",
     "komira_collections": "0.1.0",
+    "komira_compression": "0.1.0",
     "komira_contacts_proto": "0.1.0",
     "komira_content_line": "0.1.0",
     "komira_counters": "0.1.0",

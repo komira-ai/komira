@@ -80,6 +80,10 @@ archives the library links, in the graph's link order. This rule makes them `Moj
 `mojo_test` that lists the adopted label in `deps` links them with no edit to its own BUCK file, and
 the README examples are linked with them. A package with none has `c_link = None`, as before.
 
+An archive built from C++ calls into the C++ runtime, which the link must hold once and after every archive; `link_runtime` names that runtime
+(`komira//tools/build/toolchains:libcxx`, the library the prelude's C++ targets take as `exported_deps`) and it is appended to the link `c_link` is.
+It is not a C dependency of the package (no `c_deps`, no shipped file): a `native_library` C++ archive has its runtime linked by the final program.
+
 The older packaging of such a library (`native = ":<name>_native"`, its own shared library in the
 release set, tools/build/native/README.md) still names C libraries by label. `c_deps` lists them,
 and `native` names the shared library: they give `MojoInfo.native` the facts `mojo_library` gives
@@ -108,7 +112,7 @@ load("@buildrules//rules/mojo:providers.bzl", "MojoLibInfo", "MojoNativeArchiveI
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
 load("@komira//tools/build/rerun:rerun.bzl", "RERUN_ATTRS", "rerun_env")
 load("@prelude//cxx:cxx_toolchain_types.bzl", "CxxToolchainInfo")
-load("@prelude//linking:link_info.bzl", "Archive", "ArchiveLinkable", "LibOutputStyle", "LinkInfo", "LinkInfos", "MergedLinkInfo", "create_merged_link_info")
+load("@prelude//linking:link_info.bzl", "Archive", "ArchiveLinkable", "LibOutputStyle", "LinkInfo", "LinkInfos", "MergedLinkInfo", "create_merged_link_info", "create_merged_link_info_for_propagation")
 load("@prelude//linking:types.bzl", "Linkage")
 load(":defs.bzl", "adopt_link_tail", "adopt_readme_test")
 load(":dlopen.bzl", "DLOPEN_ATTRS", "dlopen_refusal", "dlopen_rows")
@@ -178,12 +182,17 @@ def _native_link(ctx):
             fail("{}: native library {} is not a static archive; only `lib<id>.a` can be taken into a dependent's link".format(ctx.label, soname))
         linkables.append(ArchiveLinkable(archive = Archive(artifact = natives.archives[soname]), linker_type = facts.linker_type))
     infos = LinkInfos(default = LinkInfo(name = str(ctx.label.raw_target()), linkables = linkables))
-    return create_merged_link_info(
+    merged = create_merged_link_info(
         ctx,
         facts.pic_behavior,
         {LibOutputStyle("archive"): infos, LibOutputStyle("pic_archive"): infos},
         preferred_linkage = Linkage("static"),
     )
+    if ctx.attrs.link_runtime == None:
+        return merged
+
+    # The runtime the archives call into, after them (a C++ archive's libc++).
+    return create_merged_link_info_for_propagation(ctx, [merged, ctx.attrs.link_runtime[MergedLinkInfo]])
 
 def _check_deps_are_closure(ctx, import_name, deps):
     """Refuses `deps` unless they are, with their own closures, exactly the packages `lib` was built from.
@@ -306,6 +315,7 @@ _adopted = rule(
         "deps": attrs.list(attrs.dep(), default = []),
         "import_name": attrs.option(attrs.string(), default = None),
         "lib": attrs.dep(),
+        "link_runtime": attrs.option(attrs.dep(providers = [MergedLinkInfo]), default = None),
         "native": attrs.option(attrs.label(), default = None),
         "native_static": attrs.bool(default = False),
         "readme": attrs.option(attrs.source(), default = None),

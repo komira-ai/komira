@@ -1,5 +1,7 @@
 load("@komira//tools/build/one_definition:libraries.bzl", "THIRD_PARTY_OWNERS")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
+load("@buildrules//rules/core:platform.bzl", "by_os_cpu")
+load("@buildrules//rules/native:defs.bzl", "native_library")
 load("@komira//tools/build/mojo:archive.bzl", "archive_files")
 load("@komira//tools/build/mojo:cxx.bzl", "staged_files")
 load("@komira//tools/build/mojo:download.bzl", "pinned_file")
@@ -211,4 +213,91 @@ checked_cxx_library(
     checks = [":snappy_symbols"],
     lib = ":snappy_prefixed",
     visibility = ["PUBLIC"],
+)
+
+# The template of snappy-stubs-public.h, out of the pinned archive: what :stubs_cases holds the committed
+# header to.
+archive_files(
+    name = "stubs_template",
+    exec_compatible_with = LINUX_X86_64,
+    archive = ":snappy-1.2.2.tar.gz",
+    files = ["snappy-stubs-public.h.in"],
+    strip_prefix = "snappy-1.2.2",
+)
+
+# snappy-stubs-public.h is committed (what CMake writes from the template, the substitutions of :src), because
+# native_library takes the headers of the package as files of the package. This holds it to the template.
+zig_test(
+    name = "stubs_cases",
+    exec_compatible_with = LINUX_X86_64,
+    src = "stubs_test.zig",
+    busybox = "komira//tools/build/toolchains:busybox",
+    data = {
+        "BUCK": "BUCK",
+        "snappy-stubs-public.h": "snappy-stubs-public.h",
+        "snappy-stubs-public.h.in": ":stubs_template[snappy-stubs-public.h.in]",
+    },
+    zig = "komira//tools/build/toolchains:zig_next",
+)
+
+# The files of the pinned archive the library below stages; nothing else of the archive is an input.
+_NATIVE_FILES = [
+    "COPYING",
+    "snappy-c.cc",
+    "snappy-c.h",
+    "snappy-internal.h",
+    "snappy-sinksource.cc",
+    "snappy-sinksource.h",
+    "snappy-stubs-internal.cc",
+    "snappy-stubs-internal.h",
+    "snappy.cc",
+    "snappy.h",
+]
+
+# snappy as buildrules' native_library builds it, for the mopm package komira_compression
+# (`natives = {"libsnappy.a": ...}`): `libsnappy.a`, C++17, the flags of the compile above, the same two config.h
+# (by cpu, and macOS and Linux write the same macros for one cpu) and the same renaming: the C API (snappy-c.h)
+# is komira_snappy_*, the C++ names (_Z...) stay, so `allow` names them. It carries zig's libc++ into the link
+# of a program that includes it (`cxx_runtime`, derived from the .cc files). :snappy above is unchanged: it is what
+# the packages still on the older rules link.
+native_library(
+    name = "snappy_native",
+    upstream = {
+        "url": "https://github.com/google/snappy/archive/refs/tags/1.2.2.tar.gz",
+        "sha256": "90f74bc1fbf78a6c56b3c4a082a05103b3a56bb17bca1a27e052ea11723292dc",
+        "size": 1108618,
+        "strip": "snappy-1.2.2",
+        "files": _NATIVE_FILES,
+    },
+    srcs = [
+        "snappy-c.cc",
+        "snappy-sinksource.cc",
+        "snappy-stubs-internal.cc",
+        "snappy.cc",
+    ],
+    hdrs = by_os_cpu({
+        "linux_aarch64": {"config.h": "config_arm64.h"},
+        "linux_x86_64": {"config.h": "config_x86_64.h"},
+        "macos_aarch64": {"config.h": "config_arm64.h"},
+    }),
+    exported_headers = {"snappy-stubs-public.h": "snappy-stubs-public.h"},
+    includes = ["."],
+    exported_includes = ["."],
+    cxxflags = [
+        "-DHAVE_CONFIG_H",
+        "-DNDEBUG",
+        "-fno-exceptions",
+        "-fno-rtti",
+        "-Wno-sign-compare",
+    ] + by_os_cpu({
+        "linux_aarch64": [],
+        # config_x86_64.h is what CMake writes at x86-64-v3, the target_cpu of the linux-x86_64 row of the
+        # platform table (the zig spelling of ISA_LEVELS["x86-64-v3"]).
+        "linux_x86_64": ["-mcpu=x86_64_v3"],
+        "macos_aarch64": [],
+    }),
+    allow = ["_Z*"],
+    cxx_runtime = True,
+    prefix = {"name": "komira_snappy_", "strip": "snappy_", "min": 5},
+    soname = "libsnappy.a",
 )
