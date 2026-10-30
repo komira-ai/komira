@@ -187,7 +187,7 @@ def _short_batch(precision: Int, scale: Int, claimed: Int) raises -> RecordBatch
 
 
 def _raises(batch: RecordBatch, literal: ScalarValue) -> Bool:
-    var e = Expr.binary(BIN_LT, Expr.col_ref("d"), Expr.literal(literal))
+    var e = Expr.binary(BIN_LT, Expr.col_ref("d"), Expr.literal(literal.copy()))
     try:
         _ = _eval_predicate(e, batch)
     except:
