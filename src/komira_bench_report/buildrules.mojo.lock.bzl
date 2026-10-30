@@ -50,6 +50,19 @@ GRAPH_JSON = r'''{
       "outputs": ["komira_bench_report.mojoc"]
     },
     {
+      "id": "komira_bench_report@0.1.0#mojo1.0.0/test:src/komira_bench_report/tests/test_departure.mojo",
+      "package": "komira_bench_report",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/komira_bench_report/tests/test_departure.mojo", "sha256": "60734361976cd37fe5f0cb275367a7f6bedbeb8b5ae87a9255e75f6b33e1e491"}
+      ],
+      "deps": ["komira_bench_report@0.1.0#mojo1.0.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_departure.pass"]
+    },
+    {
       "id": "komira_bench_report@0.1.0#mojo1.0.0/test:src/komira_bench_report/tests/test_json_schema.mojo",
       "package": "komira_bench_report",
       "version": "0.1.0",
@@ -156,6 +169,19 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "outputs": ["komira_bench_report.mojoc"]
     },
     {
+      "id": "komira_bench_report@0.1.0#mojo1.0.0/test:src/komira_bench_report/tests/test_departure.mojo",
+      "package": "komira_bench_report",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/komira_bench_report/tests/test_departure.mojo", "sha256": "60734361976cd37fe5f0cb275367a7f6bedbeb8b5ae87a9255e75f6b33e1e491"}
+      ],
+      "deps": ["komira_bench_report@0.1.0#mojo1.0.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_departure.pass"]
+    },
+    {
       "id": "komira_bench_report@0.1.0#mojo1.0.0/test:src/komira_bench_report/tests/test_json_schema.mojo",
       "package": "komira_bench_report",
       "version": "0.1.0",
@@ -257,6 +283,19 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["komira_bench_report.mojoc"]
+    },
+    {
+      "id": "komira_bench_report@0.1.0#mojo1.0.0/test:src/komira_bench_report/tests/test_departure.mojo",
+      "package": "komira_bench_report",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/komira_bench_report/tests/test_departure.mojo", "sha256": "60734361976cd37fe5f0cb275367a7f6bedbeb8b5ae87a9255e75f6b33e1e491"}
+      ],
+      "deps": ["komira_bench_report@0.1.0#mojo1.0.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_departure.pass"]
     },
     {
       "id": "komira_bench_report@0.1.0#mojo1.0.0/test:src/komira_bench_report/tests/test_json_schema.mojo",

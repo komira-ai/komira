@@ -28,7 +28,7 @@
 #   identical, writing it again gives the same text, and a sum or bound that is
 #   not canonical is refused.
 # - test_json_columns_are_read_by_their_types: the same quoted value is a
-#   decimal in a DECIMAL column, an integer or a decimal in a HUGEINT column, a
+#   decimal in a DECIMAL column and in a HUGEINT column, a
 #   text in a VARCHAR column and in an untyped read; a wrong number of types is
 #   refused.
 
@@ -356,7 +356,8 @@ def test_json_columns_are_read_by_their_types() raises:
     var typed = parse_json_rows(json, types)
     assert_equal(typed.rows[0][0].kind, KIND_DECIMAL)
     assert_equal(typed.rows[0][0].s, String("123.4"))
-    assert_equal(typed.rows[0][1].kind, KIND_INT)
+    assert_equal(typed.rows[0][1].kind, KIND_DECIMAL)
+    assert_equal(typed.rows[0][1].s, String("9223372036854775807"))
     assert_equal(typed.rows[0][2].kind, KIND_DECIMAL)
     assert_equal(typed.rows[0][2].s, String("18446744073709551615"))
     assert_equal(typed.rows[0][3].kind, KIND_TEXT)
