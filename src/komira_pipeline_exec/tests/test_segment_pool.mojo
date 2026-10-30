@@ -92,10 +92,14 @@ def test_a_reservation_draws_blocks_and_falls_back_to_the_missing_bytes() raises
     assert_equal(pool.granted(), 120)
     assert_true(r.try_grow(30))
     assert_equal(pool.granted(), 150)
+    # `r` is kept alive to here: a value is dropped after its last use.
+    assert_equal(r.used(), 150)
     # A grow served from a block already held draws nothing.
     r.release(30)
     assert_true(r.try_grow(30))
     assert_equal(pool.granted(), 150)
+    # `r` is kept alive to here: a value is dropped after its last use.
+    assert_equal(r.used(), 150)
 
 
 def _hold_and_drop(ref pool: SegmentPool) raises:
@@ -104,6 +108,7 @@ def _hold_and_drop(ref pool: SegmentPool) raises:
     var c = WorkerReservation(pool.share(), 100)
     assert_true(c.try_grow(150))
     assert_equal(pool.granted(), 300)
+    assert_equal(b.used() + c.used(), 160)
 
 
 def test_a_reservation_returns_its_blocks_when_given_back_or_dropped() raises:
