@@ -132,7 +132,7 @@ Import each module by name; the package root exports nothing.
   concatenation, then the sorted copy plus an estimate of the key batch and the
   kernel's temporaries (`sort_scratch_bytes`), from the segment pool and from a
   pool sized by `SortSinkData.memory_budget` (when positive). The budget bounds
-  the peak, and the consume that takes the input past it fails. There is no
+  the estimated peak, and the consume that takes the input past it fails. There is no
   spill. `sort_harness` is the table and the oracle of its tests.
 - `spike/intern_spike.mojo` (target `intern_spike`, not part of the library): the
   dictionary-interning spike of the string group-by. A standalone program that times
