@@ -369,7 +369,7 @@ def test_environment_accepts_the_spaced_at_of_cpuinfo() raises:
 
 def test_environment_refuses_addresses_paths_and_controls() raises:
     var bad = List[String]()
-    bad.append(String("adi@node-05"))
+    bad.append(String("user@node"))
     bad.append(String("user@example.com"))
     bad.append(String("@host"))
     bad.append(String("@ host"))
@@ -389,7 +389,7 @@ def test_environment_refuses_addresses_paths_and_controls() raises:
         assert_true(not _cpu_written(bad[i]))
         assert_true(not _os_written(bad[i]))
     # The reader, through the text of a document: JSON-safe cases only.
-    assert_true(not _cpu_read(String("adi@node-05")))
+    assert_true(not _cpu_read(String("user@node")))
     assert_true(not _cpu_read(String("a @b")))
     assert_true(not _cpu_read(String("cpu @")))
     assert_true(not _cpu_read(String("a @ /proc/cpuinfo")))
