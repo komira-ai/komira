@@ -1,0 +1,33 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# Per-thread phase timers for the engine's hot path, compiled in only by the
+# define KOMIRA_PHASE_TIMERS (README.md). Off, every entry point is empty.
+#
+# The welded tests (each file's header says what it proves):
+# - test_phase_timers_off: with the define absent the timers read no clock,
+#   register no thread and record nothing.
+mojo_library(
+    name = "komira_phase_timers",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = ["//src/komira_atomic_alias:komira_atomic_alias"],
+    test_srcs = ["tests/test_phase_timers_off.mojo"],
+    visibility = ["PUBLIC"],
+)
+
+# The same sources built with the define, to test the timers when they are on.
+# A define reaches the test file and the library's package compiled into it
+# (tools/build/mojo/README.md, "Defines"). Not published.
+#
+# - test_phase_timers_on: sums, the longest interval and the call count of a
+#   phase, a stamp, the wake latency, the join tails, and a reset that keeps
+#   the thread's lane.
+mojo_library(
+    name = "komira_phase_timers_on",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    conda = False,
+    import_name = "komira_phase_timers",
+    deps = ["//src/komira_atomic_alias:komira_atomic_alias"],
+    test_defines = ["KOMIRA_PHASE_TIMERS=1"],
+    test_srcs = ["tests/test_phase_timers_on.mojo"],
+    visibility = ["PUBLIC"],
+)

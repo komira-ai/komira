@@ -30,6 +30,8 @@ TARGETS = [
     "komira//src/komira_op_agg_distinct:komira_op_agg_distinct_conda",
     "komira//src/komira_op_agg_slab:komira_op_agg_slab_conda",
     "komira//src/komira_op_join_probe:komira_op_join_probe_conda",
+    "komira//src/komira_phase_timers:komira_phase_timers_conda",
+    "komira//src/komira_phase_timers:komira_phase_timers_on",
     "komira//src/komira_pipeline_exec:intern_spike",
     "komira//src/komira_pipeline_exec:komira_pipeline_exec_conda",
     "komira//src/komira_plan_proto:ci",
