@@ -1,0 +1,101 @@
+load("@buildrules//rules/mojo:pack.bzl", "mojo_conda_holds")
+load("@buildrules//rules/core:platform.bzl", "by_os_cpu")
+load("@buildrules//rules/native:defs.bzl", "native_library")
+load("@komira//tools/build/mojo:adopt.bzl", "mojo_adopted_library")
+load("@komira//tools/build/package:conda.bzl", "conda_package")
+load("//third_party/aws-lc:files.bzl", "ARCHIVE_SIZE", "ASM_AARCH64_APPLE", "ASM_X86_64", "BIGNUM_ASM_AARCH64", "BIGNUM_ASM_X86_64", "COMMON_SRCS", "EXPORTED_INCLUDES", "FILES", "INCLUDES")
+load(":buildrules.mojo.bzl", "mojo_package")
+
+# aws-lc 1.39.0 (Apache-2.0 OR ISC; LICENSE is in the archive), libcrypto as a static archive for linux x86_64 and macOS arm64, built the way aws-lc's CMake build
+# builds it with DISABLE_PERL=ON DISABLE_GO=ON CMAKE_BUILD_TYPE=Release and FIPS off, without CMake. The archive is the one //third_party/aws-lc pins; `FILES` and the
+# source lists are //third_party/aws-lc:files.bzl, which that package's `:srcs_files_gen` writes from the archive's CMakeLists.txt and `:srcs_files_drift` holds to it.
+# Without Perl and Go the build uses the assembly and err_data.c the archive ships under generated-src/: the ELF set (generated-src/linux-x86_64) on linux, the
+# Mach-O set (generated-src/ios-aarch64, aws-lc's Apple arm64 set) on macOS arm64, with the s2n-bignum assembly of the CPU. Every global symbol the library defines is
+# renamed komira_awslc_X (`prefix`: C and assembly alike, ELF and Mach-O), so this copy can share a process with any other libcrypto; `__umodti3`, the compiler builtin
+# native/umodti3.c adds so that zig's compiler_rt stays out of the link, is not renamed.
+native_library(
+    name = "awslc",
+    upstream = {
+        "url": "https://github.com/aws/aws-lc/archive/refs/tags/v1.39.0.tar.gz",
+        "sha256": "37f5a379081b97adba3e1316017e09484d6c4ed6dc336d57fae6f0b7b27472fc",
+        "size": ARCHIVE_SIZE,
+        "strip": "aws-lc-1.39.0",
+        "files": FILES,
+    },
+    srcs = by_os_cpu({
+        "linux_x86_64": COMMON_SRCS + ASM_X86_64 + BIGNUM_ASM_X86_64 + ["native/umodti3.c"],
+        "macos_aarch64": COMMON_SRCS + ASM_AARCH64_APPLE + BIGNUM_ASM_AARCH64 + ["native/umodti3.c"],
+    }),
+    # zig's libc headers lack the macOS SDK's CommonCrypto/CommonRandom.h, which rand/urandom.c includes; its one function is libSystem's.
+    hdrs = by_os_cpu({
+        "linux_x86_64": {},
+        "macos_aarch64": {"CommonCrypto/CommonRandom.h": "native/CommonCrypto/CommonRandom.h"},
+    }),
+    includes = INCLUDES,
+    exported_includes = EXPORTED_INCLUDES,
+    # What the CMake build adds to every C compile: its Release flags, C11, hidden visibility (nothing is exported from a binary linking this), the positive results of
+    # its two compiler probes on clang (stdalign_check.c, builtin_swap_check.c), BORINGSSL_IMPLEMENTATION on the library's own objects, and _XOPEN_SOURCE on Linux
+    # only (on macOS it hides `u_int` in zig's sys/ucred.h). cpu_aarch64_apple.c needs the NEON and crypto extensions statically: the Apple M1 CPU.
+    cflags = [
+        "-std=c11",
+        "-O3",
+        "-fvisibility=hidden",
+        "-fno-common",
+        "-w",
+        "-DNDEBUG",
+        "-DBORINGSSL_IMPLEMENTATION",
+        "-DBORINGSSL_RELEASE_BUILD",
+        "-DAWS_LC_STDALIGN_AVAILABLE",
+        "-DAWS_LC_BUILTIN_SWAP_SUPPORTED",
+    ] + by_os_cpu({
+        "linux_x86_64": ["-D_XOPEN_SOURCE=700"],
+        "macos_aarch64": ["-mcpu=apple_m1", "-U_XOPEN_SOURCE"],
+    }),
+    # s2n-bignum's assembly is built hidden, as CMake's s2n_asm_cpreprocess passes it.
+    asm_flags = ["-DS2N_BN_HIDE_SYMBOLS"] + by_os_cpu({
+        "linux_x86_64": [],
+        "macos_aarch64": ["-mcpu=apple_m1"],
+    }),
+    prefix = {"name": "komira_awslc", "min": 1000},
+    # Undefined in the archive and provided by the system: glibc names the floor list lacks, jemalloc's sized free (a weak reference aws-lc calls only on memory it got
+    # from malloc), the macOS SDK function native/CommonCrypto stands in for, and the compiler builtin the archive defines itself.
+    allow = ["__umodti3", "sdallocx", "fopen64", "__isoc99_sscanf", "getauxval", "CCRandomGenerateBytes"],
+)
+
+# The library has no Mojo code: `mojo_package` links the archive into the tests of this package and of every package that depends on it, and packs it into `:conda`.
+mojo_package(
+    path = ".",
+    natives = {"libawslc.a": ":awslc"},
+)
+
+# What `:conda` holds, read back from the built file: this package's own `.mojoc` and the archive that was built and tested (`lib/libawslc.a` is exactly the bytes of `:awslc`).
+mojo_conda_holds(
+    name = "conda_holds",
+    conda = ":conda",
+    natives = {"libawslc.a": ":awslc"},
+    package = "komira_awslc",
+    visibility = ["PUBLIC"],
+)
+
+# `:komira_awslc`, the target the packages that depend on this library name, is `:lib` as komira's Mojo rules take it (tools/build/mojo/adopt.bzl): the same file, so a
+# dependent builds only once the self test has passed, and it hands the archive to a dependent's link (`MojoInfo.c_link`). The archive is a static one and ships in the
+# conda package of this library (`native_static`).
+mojo_adopted_library(
+    name = "komira_awslc",
+    c_deps = [":awslc_cxx"],
+    native_static = True,
+    lib = ":lib",
+    readme = "README.md",
+    srcs = glob(["src/komira_awslc/**/*.mojo"]),
+    test_srcs = glob(["tests/test_*.mojo"]),
+    test_runs = ":test",
+    visibility = ["PUBLIC"],
+)
+
+# The release machine builds `komira_awslc_conda` (release/artifacts.textproto): komira's conda packer over `:komira_awslc`.
+conda_package(
+    name = "komira_awslc_conda",
+    lib = ":komira_awslc",
+    summary = "aws-lc's libcrypto of komira, as a static archive in a conda package.",
+    visibility = ["PUBLIC"],
+)
