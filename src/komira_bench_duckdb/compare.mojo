@@ -25,14 +25,19 @@
 #   values, and a difference is a failure of its own (`type_reasons`, also in
 #   `reasons`): DECIMAL(38,2) against DECIMAL(38,4), or BIGINT against
 #   DECIMAL(18,0), fails even when the values agree. A type outside the
-#   vocabulary fails, even against itself. Types recorded on one side only fail,
+#   vocabulary fails, even against itself. The one exception is a pair of the
+#   table of allowed departures (declared_types.mojo; HUGEINT against
+#   DECIMAL(38,0)): with exactly equal values it is not a failure, it is listed
+#   in `departures`, and `label()` says DEPARTURE with the reason instead of
+#   IDENTICAL; with any other difference it is a failure like every other
+#   pair. Types recorded on one side only fail,
 #   and when neither side has any (a result built by hand) there is nothing to
 #   compare. With no rows on both sides the types are compared only when both
 #   sides have them.
 # Column names are not compared: engines name computed columns differently.
 
 from .cells import KIND_DECIMAL, KIND_FLOAT, KIND_INT, KIND_NULL, KIND_TEXT
-from .declared_types import is_unmapped
+from .declared_types import departure_reason, is_unmapped
 from .signature import ColumnSignature, ResultSignature
 
 comptime REL_TOL: Float64 = 1e-9
@@ -75,6 +80,7 @@ struct ValueVerdict(Copyable, Movable):
     var identical: Bool
     var reasons: List[String]
     var type_reasons: List[String]
+    var departures: List[String]
     var modes: List[String]
     var max_rel: Float64
 
@@ -82,6 +88,7 @@ struct ValueVerdict(Copyable, Movable):
         self.identical = True
         self.reasons = List[String]()
         self.type_reasons = List[String]()
+        self.departures = List[String]()
         self.modes = List[String]()
         self.max_rel = Float64(0)
 
@@ -94,8 +101,23 @@ struct ValueVerdict(Copyable, Movable):
         self.fail(reason)
         self.type_reasons.append(reason)
 
+    def departed(self) -> Bool:
+        """Whether the answers agree except for an allowed departure of the
+        declared types (`identical` is True then, and `departures` is not
+        empty)."""
+        return self.identical and len(self.departures) > 0
+
     def label(self) -> String:
-        """`IDENTICAL`, or `DIVERGENT` with the first reason."""
+        """`IDENTICAL`, `DEPARTURE` with the reason of the allowed departure
+        (reasons joined by `; ` when there are several), or `DIVERGENT` with
+        the first reason."""
+        if self.departed():
+            var text = String("DEPARTURE: ")
+            for i in range(len(self.departures)):
+                if i > 0:
+                    text += String("; ")
+                text += self.departures[i]
+            return text^
         if self.identical:
             return String("IDENTICAL")
         return String("DIVERGENT: ") + self.reasons[0]
@@ -207,6 +229,13 @@ def _compare_column(
     v.modes.append(col + String(".sum=tolerance"))
 
 
+def _note_departure(mut v: ValueVerdict, reason: String):
+    for i in range(len(v.departures)):
+        if v.departures[i] == reason:
+            return
+    v.departures.append(reason.copy())
+
+
 def _compare_types(mut v: ValueVerdict, actual: ResultSignature, expected: ResultSignature):
     var have = len(actual.types) > 0
     if not have and len(expected.types) == 0:
@@ -230,7 +259,11 @@ def _compare_types(mut v: ValueVerdict, actual: ResultSignature, expected: Resul
         if is_unmapped(e):
             v.fail_type(col + String(" declared type ") + e + String(" is not in the mapping (see README.md)"))
         if not is_unmapped(a) and not is_unmapped(e) and a != e:
-            v.fail_type(col + String(" declared type differs: ") + a + String(" against ") + e)
+            var reason = departure_reason(a, e)
+            if reason:
+                _note_departure(v, reason.value())
+            else:
+                v.fail_type(col + String(" declared type differs: ") + a + String(" against ") + e)
 
 
 def compare_signatures(
@@ -253,4 +286,6 @@ def compare_signatures(
     _compare_types(v, actual, expected)
     for c in range(len(actual.columns)):
         _compare_column(v, c, actual.columns[c], expected.columns[c], rel_tol, abs_floor)
+    if not v.identical:
+        v.departures = List[String]()  # a departure is only for equal values
     return v^

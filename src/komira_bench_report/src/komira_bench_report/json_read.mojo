@@ -8,7 +8,9 @@
 # It also reads schema `komira-bench-result/1`, which held no runs, no page
 # faults and no first-run ratio: a side read from it has empty `runs_ms` and a
 # cell has no `first_ratio`, and its summary is compared with the legacy
-# summary (`summary_json(result, legacy=True)`). A document of either schema
+# summary of its version (`summary_json(result, version)`). Schema 2 (from the
+# change that added `n_departure` and the DEPARTURE verdict) is read the same way;
+# schema 1 has neither, and a DEPARTURE in it is refused. A document of any schema
 # is held to that schema's members and no others.
 
 from komira_json import JsonValue, parse_json_value, refuse_duplicate_keys
@@ -21,6 +23,7 @@ from .model import (
     Environment,
     RESULT_SCHEMA,
     RESULT_SCHEMA_V1,
+    RESULT_SCHEMA_V2,
     RunInfo,
     Side,
     validate_result,
@@ -125,13 +128,13 @@ def _without_geomean_figure(headline: String, at: String) -> String:
     return headline.replace(at + fig, at)
 
 
-def _check_summary(stored: JsonValue, result: BenchResult, legacy: Bool) raises:
+def _check_summary(stored: JsonValue, result: BenchResult, version: Int) raises:
     """The stored summary must be the cells' summary: counts exactly, floats
     to 1e-9, and a headline equal to the recomputed one except that its
     geomean figure may be the rounding of either the recomputed geomean or
-    the stored one. A schema 1 document's summary is the legacy one."""
-    var at = String(_GEOMEAN_AT_V1) if legacy else String(_GEOMEAN_AT)
-    var want = summary_json(result, legacy)
+    the stored one. An older document's summary is the one its schema wrote."""
+    var at = String(_GEOMEAN_AT) if version >= 3 else String(_GEOMEAN_AT_V1)
+    var want = summary_json(result, version)
     if not _same(stored, want, String("headline")):
         _fail(String("summary"), String("does not match the summary of the cells"))
     var got_line = _text(stored.get(String("headline")), String("summary.headline"))
@@ -324,12 +327,18 @@ def parse_result_json(text: String) raises -> BenchResult:
     refuse_duplicate_keys(doc)
     var top = _object(doc, String("result"), String("schema run env cells summary"))
     var schema = _text(top.get(String("schema")), String("schema"))
-    var legacy = schema == String(RESULT_SCHEMA_V1)
-    if schema != String(RESULT_SCHEMA) and not legacy:
+    var version = 3
+    if schema == String(RESULT_SCHEMA_V1):
+        version = 1
+    elif schema == String(RESULT_SCHEMA_V2):
+        version = 2
+    elif schema != String(RESULT_SCHEMA):
         _fail(
             String("schema"),
-            "expected '" + String(RESULT_SCHEMA) + "' (or '" + String(RESULT_SCHEMA_V1) + "'), got '" + schema + "'",
+            "expected '" + String(RESULT_SCHEMA) + "' (or the older '" + String(RESULT_SCHEMA_V2) + "' or '"
+            + String(RESULT_SCHEMA_V1) + "'), got '" + schema + "'",
         )
+    var legacy = version < 3
     var run = _read_run(top.get(String("run")))
     var env = _read_env(top.get(String("env")))
     var arr = top.get(String("cells"))
@@ -340,5 +349,9 @@ def parse_result_json(text: String) raises -> BenchResult:
         cells.append(_read_cell(arr.element_at(i), "cells[" + String(i) + "]", legacy))
     var result = BenchResult(run^, env^, cells^)
     validate_result(result)
-    _check_summary(top.get(String("summary")), result, legacy)
+    if version == 1:
+        for i in range(len(result.cells)):
+            if result.cells[i].value.is_departure():
+                _fail("cells[" + String(i) + "].value", String("DEPARTURE is not in schema 1"))
+    _check_summary(top.get(String("summary")), result, version)
     return result^

@@ -219,9 +219,14 @@ def _checked(query: QuerySpec, answer: ArmAnswer, reference: ResultSignature) ra
                 False,
                 order.label(),
             )
+    var matched = ReportVerdict.identical()
+    if verdict.departed():
+        # equal values and an allowed departure of the declared types: timed
+        # like any verified answer, and recorded as DEPARTURE, never IDENTICAL
+        matched = ReportVerdict.departure(verdict.departures[0].copy())
     return _Checked(
         StageOutcome.exec_ok(),
-        ReportVerdict.identical(),
+        matched^,
         Int64(answer.rows.row_count()),
         True,
         String(""),
@@ -270,7 +275,7 @@ def _untimed_cell(query: QuerySpec, checked: _Checked, reps: Int, pass_max: Floa
 
 
 def _timed_cell(
-    query: QuerySpec, rows: Int64, sweeps: Sweeps, reps: Int, pass_max: Float64
+    query: QuerySpec, checked: _Checked, sweeps: Sweeps, reps: Int, pass_max: Float64
 ) raises -> ReportCell:
     return ReportCell.build(
         query.key(),
@@ -278,12 +283,12 @@ def _timed_cell(
         reps,
         StageOutcome.exec_ok(),
         Optional[Side](
-            Side.from_sweeps(rows, sweeps.komira.ms.copy(), sweeps.komira.minor.copy(), sweeps.komira.major.copy())
+            Side.from_sweeps(checked.rows, sweeps.komira.ms.copy(), sweeps.komira.minor.copy(), sweeps.komira.major.copy())
         ),
         Optional[Side](
-            Side.from_sweeps(rows, sweeps.duckdb.ms.copy(), sweeps.duckdb.minor.copy(), sweeps.duckdb.major.copy())
+            Side.from_sweeps(checked.rows, sweeps.duckdb.ms.copy(), sweeps.duckdb.minor.copy(), sweeps.duckdb.major.copy())
         ),
-        ReportVerdict.identical(),
+        checked.verdict.copy(),
         pass_max,
     )
 
@@ -351,14 +356,14 @@ def run_queries[
                 tables, settings.threads, settings.memory_limit_bytes, checked.rows,
                 settings.warm_sweeps, settings.warm_reps, False,
             )
-            warm_cells.append(_timed_cell(q, checked.rows, w, settings.warm_reps, settings.pass_max))
+            warm_cells.append(_timed_cell(q, checked, w, settings.warm_reps, settings.pass_max))
             if cold_on:
                 var c = measure(
                     session, arm, dropper, clock, q, files,
                     tables, settings.threads, settings.memory_limit_bytes, checked.rows,
                     settings.cold_sweeps, settings.cold_reps, True,
                 )
-                cold_cells.append(_timed_cell(q, checked.rows, c, settings.cold_reps, settings.pass_max))
+                cold_cells.append(_timed_cell(q, checked, c, settings.cold_reps, settings.pass_max))
         else:
             warm_cells.append(_untimed_cell(q, checked, settings.warm_reps, settings.pass_max))
             if cold_on:

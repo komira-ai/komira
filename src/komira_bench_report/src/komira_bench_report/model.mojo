@@ -18,8 +18,12 @@ from .verdict import (
     cell_verdict,
 )
 
-comptime RESULT_SCHEMA = "komira-bench-result/2"
+comptime RESULT_SCHEMA = "komira-bench-result/3"
+# The schemas the reader still reads. Schema 1 predates `n_departure` and the
+# DEPARTURE verdict; schema 2 has those and holds no runs, no page faults and no
+# first-run ratio (it is read with empty `runs_ms` and no `first_ratio`).
 comptime RESULT_SCHEMA_V1 = "komira-bench-result/1"
+comptime RESULT_SCHEMA_V2 = "komira-bench-result/2"
 comptime STATISTIC_MIN_OF_SWEEP_MEDIAN = "min_of_sweep_median"
 comptime PIN_PINNED = "PINNED"
 comptime PIN_UNPINNED_PREFIX = "UNPINNED:"
@@ -167,10 +171,10 @@ struct Side(Copyable, Movable):
 struct Cell(Copyable, Movable):
     """One query of one suite. `komira` is present exactly when the run ended
     in EXEC_OK. `ratio` is `komira.ms / duckdb.ms`, the steady-state ratio, and
-    exists only for a cell whose values are IDENTICAL; `verdict` is PASS, FAIL
-    or NO_RATIO and follows `ratio`. `first_ratio` is komira's first run over
-    DuckDB's, under the same conditions and only when both sides carry their
-    runs."""
+    exists only for a cell whose values are IDENTICAL or a DEPARTURE; `verdict`
+    is PASS, FAIL, DEPARTURE or NO_RATIO and follows `ratio`. `first_ratio` is
+    komira's first run over DuckDB's, under the same conditions and only when
+    both sides carry their runs."""
 
     var id: String
     var suite: String
@@ -219,12 +223,12 @@ struct Cell(Copyable, Movable):
         pass_max: Float64,
     ) raises -> Cell:
         """A cell with its ratios and verdict derived: the ratio only when the
-        run ended in EXEC_OK, the values are IDENTICAL and both sides are
-        measured; the first-run ratio under the same conditions, when both
-        sides also carry their runs."""
+        run ended in EXEC_OK, the values are IDENTICAL or a DEPARTURE and both
+        sides are measured; the first-run ratio under the same conditions, when
+        both sides also carry their runs."""
         var ratio = derive_ratio(stage, komira, duckdb, value)
         var first_ratio = derive_first_ratio(stage, komira, duckdb, value)
-        var verdict = cell_verdict(ratio, pass_max)
+        var verdict = cell_verdict(ratio, pass_max, value.is_departure())
         return Cell(
             id^,
             suite^,
@@ -246,7 +250,7 @@ def derive_ratio(
     value: ValueVerdict,
 ) raises -> Optional[Float64]:
     """The ratio of a cell, or none when it must not be shown."""
-    if not stage.is_ok() or not value.is_identical():
+    if not stage.is_ok() or not value.is_matched():
         return Optional[Float64]()
     if not komira or not duckdb:
         return Optional[Float64]()
@@ -495,16 +499,17 @@ def validate_cell(cell: Cell, run: RunInfo) raises:
     var compared = (
         cell.value.kind == String("IDENTICAL")
         or cell.value.kind == String("DIVERGENT")
+        or cell.value.kind == String("DEPARTURE")
     )
     if compared and run.mode != String("both"):
         raise Error("cell " + cell.id + ": values are compared only in a run of mode both")
     if compared and not cell.duckdb:
         raise Error("cell " + cell.id + ": values cannot be compared without a duckdb side")
     if (
-        cell.value.kind == String("IDENTICAL")
+        cell.value.is_matched()
         and cell.komira.value().rows != cell.duckdb.value().rows
     ):
-        raise Error("cell " + cell.id + ": IDENTICAL values need equal row counts")
+        raise Error("cell " + cell.id + ": " + cell.value.kind + " values need equal row counts")
     if run.mode == String("komira") and cell.duckdb:
         raise Error("cell " + cell.id + ": a run of mode komira has no duckdb side")
     if run.mode == String("both") and cell.stage.is_ok() and not cell.duckdb:
@@ -523,7 +528,7 @@ def validate_cell(cell: Cell, run: RunInfo) raises:
         raise Error("cell " + cell.id + ": a first-run ratio exists exactly for a cell with a ratio whose sides carry their runs")
     if want_first and not _close(want_first.value(), cell.first_ratio.value()):
         raise Error("cell " + cell.id + ": the first-run ratio is not komira's first run / duckdb's first run")
-    if cell.verdict != cell_verdict(want, run.pass_max):
+    if cell.verdict != cell_verdict(want, run.pass_max, cell.value.is_departure()):
         raise Error("cell " + cell.id + ": the verdict does not follow from the ratio and run.pass_max")
 
 

@@ -120,7 +120,7 @@ def _env_json(env: Environment) raises -> JsonValue:
     return o^
 
 
-def _suite_summary_json(s: SuiteSummary, legacy: Bool) raises -> JsonValue:
+def _suite_summary_json(s: SuiteSummary, version: Int) raises -> JsonValue:
     var o = JsonValue.empty_object()
     o.set_member(String("suite"), _s(s.suite))
     o.set_member(String("n_cells"), _i(Int64(s.n_cells)))
@@ -129,30 +129,33 @@ def _suite_summary_json(s: SuiteSummary, legacy: Bool) raises -> JsonValue:
     o.set_member(String("n_ratio"), _i(Int64(s.n_ratio)))
     o.set_member(String("n_pass"), _i(Int64(s.n_pass)))
     o.set_member(String("n_fail"), _i(Int64(s.n_fail)))
+    if version >= 2:
+        o.set_member(String("n_departure"), _i(Int64(s.n_departure)))
     o.set_member(String("geomean_ratio_verified"), _opt_f64(s.geomean))
     o.set_member(String("median_ratio"), _opt_f64(s.median_ratio))
-    if not legacy:
+    if version >= 3:
         o.set_member(String("n_first_ratio"), _i(Int64(s.n_first_ratio)))
         o.set_member(String("geomean_first_run"), _opt_f64(s.geomean_first))
         o.set_member(String("median_first_run"), _opt_f64(s.median_first))
     return o^
 
 
-def summary_json(result: BenchResult, legacy: Bool = False) raises -> JsonValue:
+def summary_json(result: BenchResult, version: Int = 3) raises -> JsonValue:
     """The `summary` member of `result`, recomputed from its cells: the
-    overall counts, a line for each suite, and the headline. With `legacy` it
-    is the summary schema 1 wrote (no first-run figures, a headline whose
-    geomean and median are not called steady-state), which the reader compares
-    with the summary of a schema 1 document."""
+    overall counts, a line for each suite, and the headline. With `version` 1
+    or 2 it is the summary that schema wrote: no first-run figures and a
+    headline whose geomean and median are not called steady-state, and for
+    version 1 no `n_departure`. The reader compares it with the summary of an
+    older document."""
     var summary = summarize(result)
-    var o = _suite_summary_json(summary.overall, legacy)
+    var o = _suite_summary_json(summary.overall, version)
     var per_suite = JsonValue.empty_array()
     for i in range(len(summary.suites)):
-        per_suite.push(_suite_summary_json(summary.suites[i], legacy))
+        per_suite.push(_suite_summary_json(summary.suites[i], version))
     o.set_member(String("per_suite"), per_suite^)
     o.set_member(
         String("headline"),
-        _s(summary_line(summary.overall, result.run.pass_max, result.env.duckdb, not legacy)),
+        _s(summary_line(summary.overall, result.run.pass_max, result.env.duckdb, version >= 3)),
     )
     return o^
 

@@ -71,6 +71,16 @@
 #   against the arm's BIGINT with the same value is recorded wrong, not timed,
 #   and the note names "declared type" and both types; the same value with the
 #   same declared type is timed.
+# - test_hugeint_against_decimal_38_0_is_a_departure_that_is_timed_and_never_a_pass:
+#   DuckDB's HUGEINT (a small and a 38-digit value) against the arm's
+#   DECIMAL(38,0) with equal values is recorded EXEC_OK with the value
+#   DEPARTURE:<reason>, is timed, keeps its ratio (1 ms against 2 ms, under the
+#   threshold) and has the verdict DEPARTURE; next to two wrong answers (a value
+#   a unit apart, and HUGEINT against the arm's BIGINT, which are not timed and
+#   name the types) the console says PASS 0/3 and DEPARTURE 1/3 with the
+#   reason, comparison.txt lists the allowed departure, the run exits 1 for the
+#   wrong answers, and the departure cell alone exits 0 and round-trips through
+#   result.json.
 # - test_only_the_fetch_of_a_query_is_described: each query is described once,
 #   by its fetch, and none of its timed runs is.
 # - test_faults_end_the_run: a DuckDB error on the reference query, a time the
@@ -102,7 +112,9 @@ from komira_bench_report import (
     Cell as ReportCell,
     DuckDbPin,
     STEADY_STATE_DEFINITION,
+    exit_code,
     parse_result_json,
+    summarize,
     write_result_json,
 )
 from komira_runtime_paths import test_tmpdir
@@ -1238,6 +1250,73 @@ def test_a_different_declared_type_is_a_wrong_answer_by_name() raises:
     # the same value with the same declared type is timed
     assert_equal(out.warm.cells[1].value.text(), String("IDENTICAL"))
     assert_true(out.outcomes[1].timed)
+
+
+comptime _REASON: String = "Arrow has no 128-bit integer: HUGEINT as DECIMAL(38,0)"
+comptime _NINES: String = "99999999999999999999999999999999999999"
+
+
+def _wide_rows(declared: String, last: String) raises -> ResultSet:
+    var rs = ResultSet()
+    rs.names.append(String("k"))
+    rs.types.append(declared)
+    var a = List[Cell]()
+    a.append(Cell.decimal(String("5")))
+    rs.add_row(a^)
+    var b = List[Cell]()
+    b.append(Cell.decimal(last))
+    rs.add_row(b^)
+    return rs^
+
+
+def test_hugeint_against_decimal_38_0_is_a_departure_that_is_timed_and_never_a_pass() raises:
+    var rig = Rig()
+    var rules = List[Rule]()
+    var as_hugeint = String('[{"column_name":"k","column_type":"HUGEINT","null":"YES","key":null,"default":null,"extra":null}]')
+    var json = String('[{"k":"5"},{"k":"') + String(_NINES) + String('"}]')
+    rules.append(Rule(String("h_same"), json, String(""), 2 * _MS, as_hugeint))
+    rules.append(Rule(String("h_other"), json, String(""), 2 * _MS, as_hugeint))
+    rules.append(Rule(String("h_big"), String('[{"k":"5"},{"k":"7"}]'), String(""), 2 * _MS, as_hugeint))
+    var session = rig.duckdb(rules^)
+    var scripts = List[Script]()
+    scripts.append(Script(String("tpch/a"), ARM_ROWS, String(""), _wide_rows(String("DECIMAL(38,0)"), String(_NINES)), 1 * _MS))
+    scripts.append(Script(String("tpch/b"), ARM_ROWS, String(""), _wide_rows(String("DECIMAL(38,0)"), String("99999999999999999999999999999999999998")), 1 * _MS))
+    scripts.append(Script(String("tpch/c"), ARM_ROWS, String(""), _wide_rows(String("BIGINT"), String("7")), 1 * _MS))
+    var arm = FakeArm(rig.cell, rig.shared, scripts^)
+    var none = NoCacheDropper()
+    var queries = List[QuerySpec]()
+    queries.append(_q(String("a"), String("SELECT h_same")))
+    queries.append(_q(String("b"), String("SELECT h_other")))
+    queries.append(_q(String("c"), String("SELECT h_big")))
+
+    var out = run_queries(session, arm, none, BenchClock.manual(rig.cell), queries, _inputs(), _settings())
+
+    ref a = out.warm.cells[0]
+    assert_equal(a.stage.text(), String("EXEC_OK"))
+    assert_equal(a.value.text(), String("DEPARTURE:") + String(_REASON))
+    assert_true(out.outcomes[0].timed)
+    assert_equal(a.ratio.value(), 0.5)
+    assert_equal(a.verdict, String("DEPARTURE"))
+    assert_equal(out.outcomes[0].value, String("DEPARTURE:") + String(_REASON))
+    # a value a unit apart, and HUGEINT against BIGINT, are wrong answers
+    assert_equal(out.warm.cells[1].value.text(), String("UNVERIFIED:answer differs from duckdb"))
+    assert_false(out.outcomes[1].timed)
+    assert_equal(out.warm.cells[2].value.text(), String("UNVERIFIED:answer differs from duckdb"))
+    assert_true(out.outcomes[2].note.find(String("HUGEINT")) >= 0, out.outcomes[2].note)
+    assert_true(out.outcomes[2].note.find(String("BIGINT")) >= 0, out.outcomes[2].note)
+    var text = format_run(out)
+    assert_true(text.find(String("PASS 0/3")) >= 0, text)
+    assert_true(text.find(String("DEPARTURE 1/3")) >= 0, text)
+    assert_true(text.find(String("DEPARTURE(") + String(_REASON) + String(")")) >= 0, text)
+    assert_equal(run_status(out), 1)
+    assert_true(comparison_text().find(String("allowed departure ") + String(_REASON) + String("\n")) >= 0)
+    var only = List[ReportCell]()
+    only.append(out.warm.cells[0].copy())
+    var alone = out.warm.copy()
+    alone.cells = only^
+    assert_equal(exit_code(summarize(alone)), 0)
+    var back = parse_result_json(write_result_json(alone))
+    assert_equal(back.cells[0].value.text(), String("DEPARTURE:") + String(_REASON))
 
 
 def test_only_the_fetch_of_a_query_is_described() raises:

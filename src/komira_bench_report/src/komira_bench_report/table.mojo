@@ -2,13 +2,15 @@
 # one, so a cell whose values were not verified, or that komira did not run,
 # shows a dash; its row still stands and the footer counts it in the
 # denominator. Every footer line carries the PASS count with the threshold and
-# the DuckDB pin.
+# the DuckDB pin. A departure cell (equal values, an allowed difference of the
+# declared types) shows its ratio, DEPART in the values column and
+# DEPARTURE(<reason>) as its verdict; it is never a PASS.
 #
 # Each cell shows, in separate columns, its first run (komira, DuckDB and their
 # ratio), its steady-state time (the same three) and the spread of each
 # engine's sweep medians. What "first" and "steady" mean is
 # `STEADY_STATE_DEFINITION`, printed once under the rows. A side read from a
-# result of schema 1 has no runs, so its first-run columns are dashes.
+# result of an older schema has no runs, so its first-run columns are dashes.
 
 from .format import format_fixed, pad_left, pad_right
 from .model import BenchResult, Cell, Side
@@ -17,7 +19,9 @@ from .summary import summarize, summary_line
 from .verdict import (
     CELL_FAIL,
     CELL_NO_RATIO,
+    CELL_DEPARTURE,
     CELL_PASS,
+    VALUE_DEPARTURE,
     VALUE_DIVERGENT,
     VALUE_IDENTICAL,
 )
@@ -57,6 +61,8 @@ def _values(c: Cell) -> String:
         return String("IDENT")
     if c.value.kind == String(VALUE_DIVERGENT):
         return String("DIVERG")
+    if c.value.kind == String(VALUE_DEPARTURE):
+        return String("DEPART")
     return String("UNVER")
 
 
@@ -65,6 +71,8 @@ def _verdict(c: Cell, pass_max: Float64) -> String:
         return String("PASS")
     if c.verdict == String(CELL_FAIL):
         return String("FAIL(") + String(pass_max) + String(")")
+    if c.verdict == String(CELL_DEPARTURE):
+        return String(CELL_DEPARTURE) + String("(") + c.value.detail + String(")")
     var why = String("")
     if not c.stage.is_ok():
         why = c.stage.text()

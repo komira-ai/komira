@@ -11,14 +11,22 @@
 #   with rep 0 first (`runs_ms`), the minor and major page faults of each run
 #   are beside them where they were measured and null where they were not, a
 #   cell carries its first-run ratio, and all of it reads back unchanged.
-# - test_reader_reads_schema_1: a document of schema `komira-bench-result/1`
-#   (no runs, no faults, no first-run ratio, a summary without first-run
-#   figures and with "geomean"/"median" in the headline) is read: its
-#   steady-state times and ratios are as written, its sides have no runs and
-#   its cells no first-run ratio. The writer does not rewrite it: a side
-#   without its runs is refused, so a result read from schema 1 is never
-#   written as schema 2. A schema 2 document that lacks `runs_ms`, and a
-#   schema 1 document that has it, are refused.
+# - test_reader_reads_older_schemas_derived_from_a_current_document: the
+#   current document with the members of schema 2 (no runs, no faults, no
+#   first-run ratio; a summary without first-run figures and with
+#   "geomean"/"median" in the headline) or of schema 1 (also without
+#   `n_departure`) is read: its steady-state times and ratios are as written,
+#   its sides have no runs and its cells no first-run ratio. The writer does
+#   not rewrite it: a side without its runs is refused, so a result read from
+#   an older schema is never written as the current one. A current document
+#   that lacks `runs_ms`, and an older one that has it, are refused.
+# - test_reader_reads_a_schema_1_document_as_the_old_writer_wrote_it and
+#   test_reader_reads_a_schema_2_document_as_the_previous_writer_wrote_it: a
+#   document committed in this file, in the member order of the writer of that
+#   schema (schema 1 without `n_departure`, schema 2 with it and without runs),
+#   is read, and says what it said; each schema holds only its own members
+#   (a `runs_ms` or `first_ratio` in either is refused, a schema 1 document
+#   with a DEPARTURE is refused).
 # - test_reader_refuses_runs_and_faults_that_do_not_fit: runs that are not
 #   the run's sweeps by reps, runs whose medians are not `ms_per_sweep`, a
 #   negative fault count, faults of the wrong shape, minor faults without major
@@ -33,6 +41,8 @@
 #   summary, an id outside its suite, a float where an integer is required,
 #   text that is not JSON and text after the document; each altered text is
 #   checked to differ from the original, so an edit that matches nothing fails.
+# - test_schema_3_round_trip: the writer writes komira-bench-result/3 and the
+#   reader reads it back to the same text.
 # - test_writer_refuses: a result the schema forbids is not written: a path
 #   or a host-like name in the fingerprint, a PINNED duckdb without a digest, an
 #   UNPINNED one without a reason, a repeated cell id, a komira side on a cell
@@ -251,7 +261,7 @@ def test_round_trip() raises:
 def test_text_shape() raises:
     var text = write_result_json(_sample())
     assert_true(text.find(String("\n")) < 0)
-    assert_true(text.startswith(String('{"schema":"komira-bench-result/2","run":')))
+    assert_true(text.startswith(String('{"schema":"komira-bench-result/3","run":')))
     assert_true(text.find(String('"scale":{"sf":10}')) >= 0)
     assert_true(text.find(String('"summary":{')) >= 0)
 
@@ -348,11 +358,14 @@ def _cut_all(text: String, key: String) raises -> String:
     return out^
 
 
-def _as_schema_1(text: String) raises -> String:
-    """The document schema 1 would have written for the same result: no runs,
-    no faults, no first-run ratio or figures, and the headline's geomean and
-    median not called steady-state."""
-    var t = _altered(text, String("komira-bench-result/2"), String("komira-bench-result/1"))
+def _as_older(text: String, version: Int) raises -> String:
+    """The document schema `version` (1 or 2) would have written for the same
+    result: no runs, no faults, no first-run ratio or figures, the headline's
+    geomean and median not called steady-state, and for schema 1 no
+    `n_departure`."""
+    var t = _altered(text, String("komira-bench-result/3"), String("komira-bench-result/") + String(version))
+    if version == 1:
+        t = _cut_all(t, String("n_departure"))
     t = _cut_all(t, String("runs_ms"))
     t = _cut_all(t, String("minor_faults"))
     t = _cut_all(t, String("major_faults"))
@@ -371,9 +384,7 @@ def _as_schema_1(text: String) raises -> String:
     return t^
 
 
-def test_reader_reads_schema_1() raises:
-    var good = write_result_json(_sample())
-    var old = _as_schema_1(good)
+def _check_older(old: String, good: String, version: Int) raises:
     assert_true(old.find(String("runs_ms")) < 0)
     assert_true(old.find(String("first")) < 0)
     var back = parse_result_json(old)
@@ -390,12 +401,24 @@ def test_reader_reads_schema_1() raises:
     assert_true(not Bool(back.cells[1].first_ratio))
     assert_true(not Bool(summarize(back).overall.geomean_first))
     assert_equal(back.run.pass_max, 1.05)
-    # it is not rewritten as schema 2: its sides have no runs to write
+    # it is not rewritten as the current schema: its sides have no runs to write
     assert_true(_write_refused(back))
-    # a schema 2 document without the runs, and a schema 1 document with them
+    # a current document without the runs, and an older one with them
     assert_true(_refused(_cut_all(good, String("runs_ms"))))
-    assert_true(_refused(_altered(good, String("komira-bench-result/2"), String("komira-bench-result/1"))))
-    assert_true(_refused(_altered(old, String("komira-bench-result/1"), String("komira-bench-result/0"))))
+    var label = String("komira-bench-result/") + String(version)
+    assert_true(_refused(_altered(good, String("komira-bench-result/3"), label)))
+    assert_true(_refused(_altered(old, label, String("komira-bench-result/0"))))
+
+
+def test_reader_reads_older_schemas_derived_from_a_current_document() raises:
+    var good = write_result_json(_sample())
+    _check_older(_as_older(good, 1), good, 1)
+    _check_older(_as_older(good, 2), good, 2)
+    # schema 2 has n_departure, schema 1 does not
+    assert_true(_as_older(good, 2).find(String("n_departure")) >= 0)
+    assert_true(_as_older(good, 1).find(String("n_departure")) < 0)
+    # and each holds only its own members
+    assert_true(_refused(_altered(_as_older(good, 1), String(',"n_fail":'), String(',"n_departure":0,"n_fail":'))))
 
 
 def test_reader_refuses_runs_and_faults_that_do_not_fit() raises:
@@ -457,7 +480,7 @@ def test_writer_refuses_runs_that_do_not_fit() raises:
 def test_reader_refuses() raises:
     var good = write_result_json(_sample())
     assert_true(not _refused(good))
-    assert_true(_refused(_altered(good, String("komira-bench-result/2"), String("komira-bench-result/3"))))
+    assert_true(_refused(_altered(good, String("komira-bench-result/3"), String("komira-bench-result/4"))))
     assert_true(_refused(_altered(good, String('"threads":20'), String('"threads":20,"extra":1'))))
     assert_true(_refused(_altered(good, String('"threads":20,'), String(""))))
     assert_true(_refused(_altered(good, String('"reps":4,"statistic"'), String('"reps":4,"reps":4,"statistic"'))))
@@ -468,6 +491,86 @@ def test_reader_refuses() raises:
     assert_true(_refused(_altered(good, String("bench-class-a"), String("node/7"))))
     assert_true(_refused(String("{")))
     assert_true(_refused(good + String("x")))
+
+
+def _refusal(text: String) -> String:
+    try:
+        _ = parse_result_json(text)
+    except e:
+        return String(e)
+    return String("")
+
+
+def test_schema_3_round_trip() raises:
+    var text = write_result_json(_sample())
+    assert_true(text.find(String('"schema":"komira-bench-result/3"')) >= 0)
+    assert_true(_refusal(text) == String(""))
+    assert_equal(write_result_json(parse_result_json(text)), text)
+
+
+# A document as the writer of schema 1 wrote it, member for member in its
+# order, for one tpch cell: komira 3 ms against DuckDB's 2 (ratio 1.5, FAIL at
+# 1.05). The times are written as whole numbers on purpose.
+def _schema_1_document() -> String:
+    var side_k = String('{"rows":1,"ms":3,"ms_per_sweep":[3,3],"spread_pct":0}')
+    var side_d = String('{"rows":1,"ms":2,"ms_per_sweep":[2,2],"spread_pct":0}')
+    var suite = (
+        String('"n_cells":1,"n_ran":1,"n_value_identical":1,"n_ratio":1,"n_pass":0,"n_fail":1')
+    )
+    return (
+        String('{"schema":"komira-bench-result/1","run":{"mode":"both","scale":{"sf":10},"sweeps":2,"reps":3,')
+        + String('"statistic":"min_of_sweep_median","threads":20,"pass_max":1.05},')
+        + String('"env":{"hostclass":"bench-class-a","cpu_model":"Example CPU 2.4GHz","cores":44,')
+        + String('"mem_total_bytes":137438953472,"os":"Linux 6.1","komira_version":"1.2.3",')
+        + String('"duckdb":{"version":"v1.5.6","sha256":"') + _hex(String("ab")) + String('","pin":"PINNED"},')
+        + String('"dataset_lock_sha256":"') + _hex(String("a1b2c3d4")) + String('"},')
+        + String('"cells":[{"id":"tpch/q01","suite":"tpch","reps":3,"stage":"EXEC_OK","komira":') + side_k
+        + String(',"duckdb":') + side_d + String(',"value":"IDENTICAL","ratio":1.5,"verdict":"FAIL"}],')
+        + String('"summary":{"suite":"all",') + suite
+        + String(',"geomean_ratio_verified":1.5,"median_ratio":1.5,"per_suite":[{"suite":"tpch",') + suite
+        + String(',"geomean_ratio_verified":1.5,"median_ratio":1.5}],')
+        + String('"headline":"PASS 0/1 at <= 1.05x vs duckdb v1.5.6 (PINNED) | geomean 1.50x over 1/1 value-verified | median 1.50x"}}')
+    )
+
+
+# The same cell as the writer of schema 2 wrote it: `n_departure` after
+# `n_fail` in each summary, and the same sides (no runs, no faults).
+def _schema_2_document() -> String:
+    var t = _schema_1_document().replace(String("komira-bench-result/1"), String("komira-bench-result/2"))
+    return t.replace(String('"n_fail":1'), String('"n_fail":1,"n_departure":0'))
+
+
+def _check_committed(text: String) raises:
+    var back = parse_result_json(text)
+    assert_equal(back.run.sweeps, 2)
+    assert_equal(back.run.reps, 3)
+    assert_equal(back.run.threads, 20)
+    assert_equal(back.env.hostclass, String("bench-class-a"))
+    assert_equal(back.cells[0].ratio.value(), 1.5)
+    assert_equal(back.cells[0].verdict, String("FAIL"))
+    assert_equal(back.cells[0].komira.value().ms, 3.0)
+    assert_equal(len(back.cells[0].komira.value().runs_ms), 0)
+    assert_true(not Bool(back.cells[0].first_ratio))
+    assert_true(_write_refused(back))
+    # only the members of its own schema
+    assert_true(_refused(_altered(text, String('"spread_pct":0}'), String('"spread_pct":0,"runs_ms":[[1,1,1],[1,1,1]],"minor_faults":null,"major_faults":null}'))))
+    assert_true(_refused(_altered(text, String('"verdict":"FAIL"}'), String('"verdict":"FAIL","first_ratio":null}'))))
+
+
+def test_reader_reads_a_schema_1_document_as_the_old_writer_wrote_it() raises:
+    var text = _schema_1_document()
+    _check_committed(text)
+    # schema 1 has no n_departure, and no DEPARTURE
+    assert_true(_refused(_altered(text, String('"n_fail":1'), String('"n_fail":1,"n_departure":0'))))
+    assert_true(_refused(_altered(text, String('"value":"IDENTICAL"'), String('"value":"DEPARTURE:Arrow has no 128-bit integer"'))))
+
+
+def test_reader_reads_a_schema_2_document_as_the_previous_writer_wrote_it() raises:
+    var text = _schema_2_document()
+    assert_true(text.find(String('"n_departure":0')) >= 0)
+    _check_committed(text)
+    # schema 2 has n_departure: without it the summary is not the cells'
+    assert_true(_refused(_altered(text, String(',"n_departure":0'), String(""))))
 
 
 def test_reader_refuses_a_ratio_on_an_unverified_cell() raises:
@@ -771,9 +874,17 @@ def main() raises:
     except e:
         failed += "\n  test_runs_and_faults_round_trip: " + String(e)
     try:
-        test_reader_reads_schema_1()
+        test_reader_reads_older_schemas_derived_from_a_current_document()
     except e:
-        failed += "\n  test_reader_reads_schema_1: " + String(e)
+        failed += "\n  test_reader_reads_older_schemas_derived_from_a_current_document: " + String(e)
+    try:
+        test_reader_reads_a_schema_1_document_as_the_old_writer_wrote_it()
+    except e:
+        failed += "\n  test_reader_reads_a_schema_1_document_as_the_old_writer_wrote_it: " + String(e)
+    try:
+        test_reader_reads_a_schema_2_document_as_the_previous_writer_wrote_it()
+    except e:
+        failed += "\n  test_reader_reads_a_schema_2_document_as_the_previous_writer_wrote_it: " + String(e)
     try:
         test_reader_refuses_runs_and_faults_that_do_not_fit()
     except e:
@@ -786,6 +897,10 @@ def main() raises:
         test_reader_refuses()
     except e:
         failed += "\n  test_reader_refuses: " + String(e)
+    try:
+        test_schema_3_round_trip()
+    except e:
+        failed += "\n  test_schema_3_round_trip: " + String(e)
     try:
         test_reader_refuses_a_ratio_on_an_unverified_cell()
     except e:
