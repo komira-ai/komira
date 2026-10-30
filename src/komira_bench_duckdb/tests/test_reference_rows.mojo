@@ -95,7 +95,7 @@ def test_a_recorded_answer_round_trips_and_checks_values_without_an_engine() rai
 
 def _record(id: String) -> String:
     return (
-        String("query ") + id + String("\nrows 0\ncolumn 0 0 0 0 3 0 0 0 0 0 0 0 0 0 x x\nend\n")
+        String("format 2\nquery ") + id + String("\nrows 0\ncolumn 0 0 0 0 3 0 0 0 0 0 0 0 0 0 x x 0 0 0 0 0\nend\n")
     )
 
 
@@ -115,11 +115,11 @@ def test_a_reference_set_finds_answers_by_id_and_refuses_bad_records() raises:
     assert_equal(set.find(String("a")), 0)
     assert_equal(set.find(String("c")), -1)
     assert_true(_refuses(_record(String("a")) + _record(String("a"))))
-    assert_true(_refuses(String("query a\nrows 0\n")))
-    assert_true(_refuses(String("query a\nrows 0\nbogus 1\nend\n")))
-    assert_true(_refuses(String("query a\nrows 0\ncolumn 1 2 3\nend\n")))
-    assert_true(_refuses(String("rows 0\nend\n")))
-    assert_true(_refuses(String("query a\nend\n")))
+    assert_true(_refuses(String("format 2\nquery a\nrows 0\n")))
+    assert_true(_refuses(String("format 2\nquery a\nrows 0\nbogus 1\nend\n")))
+    assert_true(_refuses(String("format 2\nquery a\nrows 0\ncolumn 1 2 3\nend\n")))
+    assert_true(_refuses(String("format 2\nrows 0\nend\n")))
+    assert_true(_refuses(String("format 2\nquery a\nend\n")))
 
 
 def test_json_rows_become_typed_cells() raises:

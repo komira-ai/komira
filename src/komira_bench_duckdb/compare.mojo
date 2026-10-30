@@ -14,11 +14,16 @@
 #   when they are the same value (infinities included) or differ by at most
 #   the larger of the absolute floor and the relative tolerance times the
 #   larger magnitude;
+# - an exact decimal column (a DECIMAL, or integers past 64 bits) compares its
+#   count of decimals, their exact sum, their smallest and largest value and the
+#   hash sum of their canonical texts exactly, and the integers among them as
+#   an integer column does; a decimal column against a column of any other kind,
+#   a double column included, is a difference of kinds, never a tolerance;
 # - text columns compare the byte length of all cells, the smallest and the
 #   largest cell, and the sum of a hash of each cell, exactly.
 # Column names are not compared: engines name computed columns differently.
 
-from .cells import KIND_FLOAT, KIND_INT, KIND_NULL, KIND_TEXT
+from .cells import KIND_DECIMAL, KIND_FLOAT, KIND_INT, KIND_NULL, KIND_TEXT
 from .signature import ColumnSignature, ResultSignature
 
 comptime REL_TOL: Float64 = 1e-9
@@ -95,6 +100,20 @@ def _check_number(
         v.fail(where + String(" differs: ") + String(a) + String(" against ") + String(b))
 
 
+def kind_name(kind: Int) -> String:
+    """A column kind as its number and its name."""
+    var name = String("no value")
+    if kind == KIND_INT:
+        name = String("integer")
+    elif kind == KIND_FLOAT:
+        name = String("double")
+    elif kind == KIND_TEXT:
+        name = String("text")
+    elif kind == KIND_DECIMAL:
+        name = String("exact decimal")
+    return String(kind) + String(" (") + name + String(")")
+
+
 def _check_exact_int(mut v: ValueVerdict, where: String, a: Int64, b: Int64):
     if a != b:
         v.fail(where + String(" differs: ") + String(a) + String(" against ") + String(b))
@@ -110,14 +129,14 @@ def _compare_column(
 ):
     var col = String("column ") + String(c)
     if a.mixed() or b.mixed():
-        v.fail(col + String(" mixes numbers and texts"))
+        v.fail(col + String(" mixes values that cannot be compared (numbers and texts, or exact decimals and doubles)"))
         return
     var numeric_mix = (
         (a.kind() == KIND_INT and b.kind() == KIND_FLOAT)
         or (a.kind() == KIND_FLOAT and b.kind() == KIND_INT)
     )
     if a.kind() != b.kind() and not numeric_mix:
-        v.fail(col + String(" has kind ") + String(a.kind()) + String(" against ") + String(b.kind()))
+        v.fail(col + String(" has kind ") + kind_name(a.kind()) + String(" against ") + kind_name(b.kind()))
         return
     if a.count != b.count:
         v.fail(col + String(" count differs: ") + String(a.count) + String(" against ") + String(b.count))
@@ -138,6 +157,25 @@ def _compare_column(
         if a.text_hash != b.text_hash:
             v.fail(col + String(" texts differ (the hash sum of the cells)"))
         v.modes.append(col + String(".text=exact"))
+        return
+    if kind == KIND_DECIMAL:
+        if a.dcount != b.dcount:
+            v.fail(col + String(" decimal count differs: ") + String(a.dcount) + String(" against ") + String(b.dcount))
+        var sa = a.dsum.text()
+        var sb = b.dsum.text()
+        if sa != sb:
+            v.fail(col + String(" sum differs: ") + sa + String(" against ") + sb)
+        if a.dmin != b.dmin:
+            v.fail(col + String(" minimum differs: ") + a.dmin + String(" against ") + b.dmin)
+        if a.dmax != b.dmax:
+            v.fail(col + String(" maximum differs: ") + a.dmax + String(" against ") + b.dmax)
+        if a.dhash != b.dhash:
+            v.fail(col + String(" decimals differ (the hash sum of the cells)"))
+        _check_exact_int(v, col + String(" integer sum"), a.isum, b.isum)
+        _check_exact_int(v, col + String(" integer sum of squares"), a.isumsq, b.isumsq)
+        _check_exact_int(v, col + String(" integer minimum"), a.imin, b.imin)
+        _check_exact_int(v, col + String(" integer maximum"), a.imax, b.imax)
+        v.modes.append(col + String(".sum=exact"))
         return
     if kind == KIND_INT and not numeric_mix:
         _check_exact_int(v, col + String(" sum"), a.isum, b.isum)

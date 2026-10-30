@@ -10,7 +10,11 @@
 # on the stdout pipe. A timed query's duration is the stamp of its end marker
 # minus the stamp of its start marker; DuckDB's own timer is not used. A timed
 # query runs with `.mode trash`, so no result is rendered. A fetched query runs
-# with `.mode json` and its rows come back as a `ResultSet`.
+# with `.mode json` and its rows come back as a `ResultSet`. DuckDB's JSON
+# quotes DECIMAL, HUGEINT, UHUGEINT and UBIGINT values, like a text; when a
+# fetched answer holds a text written like a number, the session also sends
+# `DESCRIBE <the same query>` (nothing is rewritten, and a timed query never
+# gets one) and reads those values by the column types it answers with.
 #
 # Both arms of a comparison run with the same thread count and the same memory
 # limit (`start` sets and reads back both on the DuckDB side; the other arm is
@@ -27,7 +31,7 @@ from .cells import Cell, KIND_FLOAT, KIND_INT, KIND_TEXT, ResultSet
 from .clock import BenchClock
 from .memory import lower_ascii, parse_size, size_matches
 from .pins import DEFAULT_DUCKDB_VERSION, find_pin, duckdb_pins
-from .rows_json import parse_json_rows
+from .rows_json import has_number_like_text, parse_json_rows
 from .text import slice_bytes
 from .transport import DuckDbTransport, StdoutChunk
 
@@ -268,13 +272,37 @@ struct DuckDbSession[T: DuckDbTransport](Movable):
 
     def fetch(mut self, sql: String) raises -> FetchResult:
         """Run `sql` in JSON mode and parse its rows. A query with no rows
-        comes back with no column names."""
+        comes back with no column names. A quoted value in a DECIMAL, HUGEINT,
+        UHUGEINT or UBIGINT column is the number it is (see rows_json.mojo);
+        the column types come from `DESCRIBE` of the same query, sent only when
+        the answer holds a text written like a number."""
+        return self._fetch(sql, True)
+
+    def _fetch(mut self, sql: String, typed: Bool) raises -> FetchResult:
         var r = self._run(String("json"), sql)
         var out = FetchResult()
         if r[2].byte_length() > 0:
             out.error = r[2].copy()
             return out^
         out.rows = parse_json_rows(r[1])
+        if not typed or not has_number_like_text(out.rows):
+            return out^
+        var d = self._run(String("json"), String("DESCRIBE ") + sql)
+        if d[2].byte_length() > 0:
+            out.error = String("duckdb cannot describe the columns of the query: ") + d[2]
+            return out^
+        var described = parse_json_rows(d[1])
+        var at = -1
+        for i in range(len(described.names)):
+            if described.names[i] == "column_type":
+                at = i
+        if at < 0 or described.row_count() != out.rows.column_count():
+            raise Error("duckdb's DESCRIBE did not give one column_type per column of the answer")
+        var types = List[String]()
+        for i in range(described.row_count()):
+            types.append(_as_text(described.rows[i][at]))
+        # the same rows again, now read by their column types
+        out.rows = parse_json_rows(r[1], types)
         return out^
 
     def kill(mut self) raises:
@@ -335,7 +363,7 @@ struct DuckDbSession[T: DuckDbTransport](Movable):
         )
         for i in range(len(extra_settings)):
             query += String(", current_setting('") + extra_settings[i][0] + String("')::VARCHAR AS extra_") + String(i)
-        var got = self.fetch(query)
+        var got = self._fetch(query, False)
         if not got.ok():
             raise Error(String("duckdb cannot read its settings back: ") + got.error)
         if got.rows.row_count() != 1 or got.rows.column_count() != 4 + len(extra_settings):

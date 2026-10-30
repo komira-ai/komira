@@ -43,20 +43,19 @@ The query is passed whole (`QuerySpec`: suite, id, dataset, text, `ORDER BY` key
   The engine's message of a `BIND_FAIL` or `EXEC_FAIL` is on the console (the failed list), never in the result.
 - `close` drops the context. A cold rep closes and prepares again.
 
-The rows are the cells `komira_bench_duckdb` makes from DuckDB's JSON output, so the two signatures are built from the same kinds of cell (`convert.mojo`):
+The rows are the cells `komira_bench_duckdb` makes from DuckDB's JSON output, so the two signatures are built from the same kinds of cell (`convert.mojo`). DuckDB's shell quotes DECIMAL, HUGEINT, UHUGEINT and UBIGINT values; the session reads them by the column types of `DESCRIBE <query>` (the query itself is never rewritten or cast):
 
 | engine column | DuckDB JSON | cell |
 |---|---|---|
-| DECIMAL(p, s>0) | `123.4567` | real: the double `atof` reads from the exact decimal text (never a float division) |
-| DECIMAL(p, 0) | `123` | integer when it fits 64 bits, else real |
+| DECIMAL(p, s) | `"123.4567"` (quoted) | exact decimal: the canonical text of the exact value, at any scale, scale 0 included (never a float division, never a double) |
 | DOUBLE / FLOAT | `1.5` | real (a FLOAT from its shortest text) |
 | TINYINT to BIGINT, UTINYINT to UINTEGER | `7` | integer |
-| UBIGINT | `7` | integer inside 63 bits, else real |
+| UBIGINT | `"7"` (quoted) | integer inside 63 bits, else exact decimal (scale 0) |
 | VARCHAR | `"abc"` | text |
 | DATE | `"1994-01-01"` | text `YYYY-MM-DD` (years 0001 to 9999) |
 | NULL | `null` | null |
 
-What DuckDB's JSON prints for NaN and for DECIMAL(38, s) is inferred from its documented output and from the JSON reader here, not checked against a fixture of the real binary; the first real run checks it (a mismatch shows as a wrong answer, not a silent pass).
+A decimal column is compared exactly (count, sum, minimum, maximum and a hash of every value), and against a double column it is a difference of kinds. Which types DuckDB's JSON quotes is taken from the quoting rule of the shell's JSON renderer in DuckDB's source, and what it prints for NaN from its documented output; neither is checked against a fixture of the real binary here; the first real run checks it (a mismatch shows as a wrong answer, not a silent pass).
 
 Not mapped yet, and so refused: dictionary-encoded strings, booleans, timestamps, times, intervals and nested types.
 

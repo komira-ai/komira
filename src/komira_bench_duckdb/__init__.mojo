@@ -8,7 +8,8 @@
 | `parse_size`, `size_matches` | DuckDB's printed sizes (`953.6 MiB`) and the check of a read-back against the request |
 | `QueryTiming`, `FetchResult`, `FairnessSettings` | what a timed query, a fetched query and the setup return |
 | `BenchClock` | the clock the markers are stamped with (system, or a manual counter for tests) |
-| `Cell`, `ResultSet`, `parse_json_rows` | typed query results; DuckDB's JSON output as a result set |
+| `Cell`, `ResultSet`, `parse_json_rows` | typed query results (an exact decimal is `KIND_DECIMAL`); DuckDB's JSON output as a result set, read by column types where DuckDB quotes numbers |
+| `canonical_decimal`, `compare_decimals`, `ExactSum` | exact decimal text: one form per value, its order, and a sum with no rounding and no width limit |
 | `signature_of`, `ResultSignature`, `ColumnSignature`, `compare_signatures`, `ValueVerdict` | the order-independent value signature and its tolerance rules |
 | `check_order`, `OrderKey`, `OrderVerdict` | the row-order check of a query with ORDER BY |
 | `ReferenceAnswer`, `ReferenceSet`, `format_reference`, `parse_references` | recorded answers as text a package can compile in |
@@ -16,6 +17,7 @@
 
 from .cells import (
     Cell,
+    KIND_DECIMAL,
     KIND_FLOAT,
     KIND_INT,
     KIND_NULL,
@@ -30,6 +32,7 @@ from .compare import (
     compare_signatures,
     numbers_close,
 )
+from .decimal_text import ExactSum, canonical_decimal, compare_decimals
 from .launch import open_pinned
 from .memory import ParsedSize, parse_size, size_matches
 from .order import OrderKey, OrderVerdict, check_order
@@ -48,12 +51,13 @@ from .pins import (
     find_pin,
 )
 from .reference import (
+    REFERENCE_FORMAT,
     ReferenceAnswer,
     ReferenceSet,
     format_reference,
     parse_references,
 )
-from .rows_json import parse_json_rows
+from .rows_json import exactness_of_type, parse_json_rows
 from .session import (
     DuckDbSession,
     FairnessSettings,

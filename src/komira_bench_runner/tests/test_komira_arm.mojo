@@ -52,14 +52,15 @@
 #   and a join is a refusal; outcome_of_refusal maps the messages of the other
 #   steps. Catches an engine fault read as a missing feature.
 # - test_conversion_of_unsigned_float_and_dictionary_columns: UINT64 at 2^63-1
-#   is an integer and at 2^63 a real, UINT8/16/32 are integers, a FLOAT 0.1 is
+#   is an integer and at 2^63 an exact decimal, UINT8/16/32 are integers, a FLOAT 0.1 is
 #   the double 0.1 and not the widened float, a dictionary string column raises
 #   RESULT_TYPE_UNSUPPORTED.
 # - test_the_refusal_token_is_the_step_and_the_code: refusal_token on the
 #   shapes the engine's messages have, none with a slash.
-# - test_conversion_of_decimals_is_exact: DECIMAL(38,4) cells equal the
-#   literal doubles of their exact text; DECIMAL scale 0 is an integer inside
-#   64 bits and a real outside; NULL stays NULL.
+# - test_conversion_of_decimals_is_exact: DECIMAL(38,4) cells hold the
+#   canonical text of their exact value (a 36-digit value and its neighbour
+#   differ, as no double could tell them apart); DECIMAL scale 0 is an exact
+#   decimal at any size; one value at two scales is one cell; NULL stays NULL.
 # - test_conversion_of_dates: epoch, a leap day, the day before the epoch, the
 #   first day of Q6's range, year 1 and the last day of year 9999 render as
 #   YYYY-MM-DD; the day after year 9999 and the day before year 1 raise.
@@ -87,6 +88,7 @@ from komira_bench_duckdb import (
     Cell,
     DuckDbSession,
     DuckDbTransport,
+    KIND_DECIMAL,
     KIND_FLOAT,
     KIND_INT,
     KIND_NULL,
@@ -591,8 +593,8 @@ def test_results_cover_decimal_bigint_date_varchar_and_null() raises:
         if t.price_null[k]:
             assert_equal(row[1].kind, KIND_NULL)
         else:
-            assert_equal(row[1].kind, KIND_FLOAT)
-            assert_true(row[1].f == atof(_fixed(t.price[k], 2)))
+            assert_equal(row[1].kind, KIND_DECIMAL)
+            assert_equal(row[1].s, Cell.decimal(_fixed(t.price[k], 2)).s)
         assert_equal(row[2].kind, KIND_TEXT)
         assert_equal(row[2].s, date32_text(t.shipdate[k]))
         seen += 1
@@ -710,23 +712,30 @@ def test_conversion_of_decimals_is_exact() raises:
     var rs = result_set_of(_batches_of(builder.build(sb.build())))
     assert_equal(rs.names[0], String("d"))
     assert_equal(rs.row_count(), 5)
-    assert_equal(rs.rows[0][0].kind, KIND_FLOAT)
-    assert_true(rs.rows[0][0].f == 12345678901234.5678)
-    assert_true(rs.rows[1][0].f == -0.0005)
-    assert_equal(rs.rows[2][0].kind, KIND_FLOAT)
-    assert_true(rs.rows[2][0].f == 0.0)
+    assert_equal(rs.rows[0][0].kind, KIND_DECIMAL)
+    assert_equal(rs.rows[0][0].s, String("12345678901234.5678"))
+    assert_equal(rs.rows[1][0].kind, KIND_DECIMAL)
+    assert_equal(rs.rows[1][0].s, String("-0.0005"))
+    assert_equal(rs.rows[2][0].kind, KIND_DECIMAL)
+    assert_equal(rs.rows[2][0].s, String("0"))
     assert_equal(rs.rows[3][0].kind, KIND_NULL)
-    assert_true(rs.rows[4][0].f == 0.0007)
-    # scale 0 is an integer while it fits 64 bits and a real beyond
+    assert_equal(rs.rows[4][0].s, String("0.0007"))
+    # scale 0 is an exact decimal at any size: DuckDB quotes every DECIMAL
     var small = decimal_cell(_i128(-42), 0)
-    assert_equal(small.kind, KIND_INT)
-    assert_equal(small.i, Int64(-42))
+    assert_equal(small.kind, KIND_DECIMAL)
+    assert_equal(small.s, String("-42"))
     var edge = decimal_cell(I128(9223372036854775807), 0)
-    assert_equal(edge.kind, KIND_INT)
-    assert_equal(edge.i, Int64(9223372036854775807))
+    assert_equal(edge.kind, KIND_DECIMAL)
+    assert_equal(edge.s, String("9223372036854775807"))
     var big = decimal_cell(I128(1000000000) * I128(1000000000) * I128(10), 0)
-    assert_equal(big.kind, KIND_FLOAT)
-    assert_true(big.f == 1e19)
+    assert_equal(big.kind, KIND_DECIMAL)
+    assert_equal(big.s, String("10000000000000000000"))
+    # 36 digits: far past what a double holds, and still exact
+    var wide = I128(123456789012345678) * I128(1000000000) * I128(1000000000) + I128(901234567890123456)
+    assert_equal(decimal_cell(wide, 4).s, String("12345678901234567890123456789012.3456"))
+    assert_equal(decimal_cell(wide + I128(1), 4).s, String("12345678901234567890123456789012.3457"))
+    # the same value at another scale is the same cell
+    assert_equal(decimal_cell(I128(1230), 2).s, decimal_cell(I128(123), 1).s)
 
 
 def test_conversion_of_dates() raises:
@@ -878,8 +887,8 @@ def test_conversion_of_unsigned_float_and_dictionary_columns() raises:
     )
     assert_equal(rs.rows[0][0].kind, KIND_INT)
     assert_equal(rs.rows[0][0].i, Int64(9223372036854775807))
-    assert_equal(rs.rows[1][0].kind, KIND_FLOAT)
-    assert_true(rs.rows[1][0].f == 9223372036854775808.0)
+    assert_equal(rs.rows[1][0].kind, KIND_DECIMAL)
+    assert_equal(rs.rows[1][0].s, String("9223372036854775808"))
 
     var u32 = PrimitiveArray[DType.uint32].allocate(1)
     u32.set(0, UInt32(4294967295))

@@ -2,18 +2,26 @@
 # its ORDER BY keys), in a line-oriented text a package can compile in as a
 # constant. With them a run is value-checked without any other engine.
 #
-# One record, one query:
+# One record, one query, after a `format 2` line (every record written by
+# `format_reference` starts with one, and a text of several records may repeat
+# it between records). A text that has records and no format line was written by
+# an older layout, and one that names another format is of another layout:
+# both are refused with that said, never read as the current layout.
 #
+#     format 2
 #     query <id>
 #     rows <n>
 #     order <column>:<a|d>:<f|l>[,...]          optional: the ORDER BY keys
-#     column <kind> <count> <nulls> <nans> <isum> <isumsq> <imin> <imax> <sum> <sumsq> <min> <max> <text-bytes> <text-hash> <x-hex-min> <x-hex-max>
+#     column <kind> <count> <nulls> <nans> <isum> <isumsq> <imin> <imax> <sum> <sumsq> <min> <max> <text-bytes> <text-hash> <x-hex-min> <x-hex-max> <dcount> <dsum> <dmin> <dmax> <dhash>
 #     ...                                        one line per column
 #     end
 #
-# `kind` is 0 (no value), 1 (integers), 2 (doubles) or 3 (texts); `isum` and
-# `isumsq` are the integer sum and sum of squares modulo 2^64 (as a signed
-# 64-bit number) and `text-hash` is the sum of the cell hashes, likewise. A
+# `kind` is 0 (no value), 1 (integers), 2 (doubles), 3 (texts) or 4 (exact
+# decimals); `isum` and `isumsq` are the integer sum and sum of squares modulo
+# 2^64 (as a signed 64-bit number) and `text-hash` and `dhash` are the sums of
+# the cell hashes, likewise. `dcount` is the number of exact decimals, `dsum`
+# their exact sum and `dmin` and `dmax` the smallest and largest, as canonical
+# decimal text (decimal_text.mojo); they are `0 0 0 0` for a column with none. A
 # double that is not finite is written as `inf`, `-inf` or `nan`. Blank lines
 # and lines starting with `#` between records are ignored. A column that mixes numbers and texts has no
 # recorded form.
@@ -22,10 +30,16 @@ from std.math import inf, nan
 
 from komira_crypto import hex_lower
 
-from .cells import KIND_FLOAT, KIND_INT, KIND_NULL, KIND_TEXT
+from .cells import KIND_DECIMAL, KIND_FLOAT, KIND_INT, KIND_NULL, KIND_TEXT
+from .decimal_text import ExactSum, canonical_decimal
 from .order import OrderKey
 from .text import slice_bytes
 from .signature import ColumnSignature, ResultSignature
+
+
+comptime REFERENCE_FORMAT: Int = 2
+"""The layout this file writes and reads. 2 added the exact decimal kind and its
+five fields to the column line; 1 had no format line."""
 
 
 struct ReferenceAnswer(Copyable, Movable):
@@ -102,7 +116,7 @@ def _parse_float(token: String) raises -> Float64:
 
 def format_reference(ans: ReferenceAnswer) raises -> String:
     """The record of `ans`."""
-    var out = String("query ") + ans.id + String("\nrows ") + String(ans.signature.rows) + String("\n")
+    var out = String("format ") + String(REFERENCE_FORMAT) + String("\nquery ") + ans.id + String("\nrows ") + String(ans.signature.rows) + String("\n")
     if len(ans.order) > 0:
         var parts = String("")
         for i in range(len(ans.order)):
@@ -115,7 +129,7 @@ def format_reference(ans: ReferenceAnswer) raises -> String:
     for c in range(len(ans.signature.columns)):
         var col = ans.signature.columns[c].copy()
         if col.mixed():
-            raise Error(String("column ") + String(c) + String(" mixes numbers and texts"))
+            raise Error(String("column ") + String(c) + String(" mixes values that cannot be recorded (numbers and texts, or exact decimals and doubles)"))
         out += String("column ") + String(col.kind()) + String(" ") + String(col.count)
         out += String(" ") + String(col.nulls) + String(" ") + String(col.nans)
         out += String(" ") + String(col.isum) + String(" ") + String(col.isumsq)
@@ -124,6 +138,8 @@ def format_reference(ans: ReferenceAnswer) raises -> String:
         out += String(" ") + _float_text(col.min_v) + String(" ") + _float_text(col.max_v)
         out += String(" ") + String(col.text_bytes) + String(" ") + String(col.text_hash)
         out += String(" ") + _hex_of(col.text_min) + String(" ") + _hex_of(col.text_max)
+        out += String(" ") + String(col.dcount) + String(" ") + col.dsum.text()
+        out += String(" ") + col.dmin + String(" ") + col.dmax + String(" ") + String(col.dhash)
         out += String("\n")
     out += String("end\n")
     return out^
@@ -170,14 +186,15 @@ def _parse_order(spec: String) raises -> List[OrderKey]:
 
 
 def _parse_column(tokens: List[String]) raises -> ColumnSignature:
-    if len(tokens) != 17:
-        raise Error(String("a column line has 17 fields, got ") + String(len(tokens)))
+    if len(tokens) != 22:
+        raise Error(String("a column line has 22 fields, got ") + String(len(tokens)))
     var col = ColumnSignature()
     var kind = atol(tokens[1])
-    if kind < KIND_NULL or kind > KIND_TEXT:
+    if kind < KIND_NULL or kind > KIND_DECIMAL:
         raise Error(String("unknown column kind ") + tokens[1])
     col.has_numeric = kind == KIND_INT or kind == KIND_FLOAT
     col.has_text = kind == KIND_TEXT
+    col.has_decimal = kind == KIND_DECIMAL
     col.all_int = kind != KIND_FLOAT
     col.count = atol(tokens[2])
     col.nulls = atol(tokens[3])
@@ -194,6 +211,18 @@ def _parse_column(tokens: List[String]) raises -> ColumnSignature:
     col.text_hash = Int64(atol(tokens[14]))
     col.text_min = _unhex(tokens[15])
     col.text_max = _unhex(tokens[16])
+    col.dcount = atol(tokens[17])
+    if col.dcount < 0 or col.dcount > col.count or (col.dcount > 0) != (kind == KIND_DECIMAL):
+        raise Error(String("a column of kind ") + tokens[1] + String(" cannot hold ") + tokens[17] + String(" decimals of ") + tokens[2])
+    col.dsum = ExactSum()
+    col.dsum.add(tokens[18])
+    col.dmin = canonical_decimal(tokens[19])
+    col.dmax = canonical_decimal(tokens[20])
+    col.dhash = Int64(atol(tokens[21]))
+    if col.dsum.text() != tokens[18]:
+        raise Error(String("a decimal sum is not written canonically: ") + tokens[18])
+    if col.dmin != tokens[19] or col.dmax != tokens[20]:
+        raise Error(String("a decimal bound is not written canonically: ") + tokens[19] + String(" ") + tokens[20])
     return col^
 
 
@@ -203,6 +232,7 @@ def parse_references(text: String) raises -> ReferenceSet:
     var rest = text
     var current = Optional[ReferenceAnswer](None)
     var have_rows = False
+    var have_format = False
     while rest.byte_length() > 0:
         var nl = rest.find(String("\n"))
         var line = rest
@@ -215,7 +245,23 @@ def parse_references(text: String) raises -> ReferenceSet:
         if len(t) == 0 or t[0].startswith(String("#")):
             continue
         var head = t[0]
-        if head == "query":
+        if head == "format":
+            if current or len(t) != 2:
+                raise Error(String("bad format line: ") + line)
+            if t[1] != String(REFERENCE_FORMAT):
+                raise Error(
+                    String("the reference answers are in format ") + t[1]
+                    + String(", this reader reads format ") + String(REFERENCE_FORMAT)
+                    + String(" only: record them again")
+                )
+            have_format = True
+        elif head == "query":
+            if not have_format:
+                raise Error(
+                    String("the reference answers have no format line: they were recorded in an older layout (format 1),")
+                    + String(" this reader reads format ") + String(REFERENCE_FORMAT)
+                    + String(" only: record them again")
+                )
             if current:
                 raise Error("a query record starts before the last one ends")
             if len(t) != 2:
