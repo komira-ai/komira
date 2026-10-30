@@ -11,6 +11,7 @@ See README.md.
 | `DatasetLock`, `lock_from_report`, `encode_lock`, `decode_lock`, `write_lock_file`, `read_lock_file`, `lock_file_path`, `verify_against_lock` | the lock file: one fingerprint per dataset a run used, one file per dataset and scale, and a check of a cache directory against it |
 | `h2o_groupby_parquet`, `h2o_join_parquet`, `generate_h2o_groupby_files`, `generate_h2o_join_files`, `write_new_file` | the seeded h2o-style generator, as Parquet bytes and as files |
 | `h2o_groupby_batch`, `h2o_join_batch` | the same tables as Arrow batches, any row range |
+| `generate_tpch`, `render_stage`, `prepare_extension`, `tpch_extension_pins`, `run_stage`, `recorded_files`, `recorded_line` | staging: TPC-H generated through the pinned DuckDB's tpch extension, the report with the lines to record, and the `komira-bench-stage` command line |
 """
 
 from .draw import Bijection, draw, draw_range, draw_score, mix64
@@ -45,18 +46,58 @@ from .manifest import (
     H2O_DEFAULT_ROWS,
     H2O_DEFAULT_SEED,
     H2O_GENERATOR_VERSION,
+    RecordedFile,
     UNRECORDED_BYTES,
     UNRECORDED_ROWS,
+    apply_recorded,
     clickbench_manifest,
     find_manifest,
     h2o_groupby_manifest,
     h2o_join_manifest,
     is_sha256_hex,
     is_token,
+    recorded_files,
+    recorded_line,
     supported_manifests,
     tpch_manifest,
     validate_relative_path,
 )
+from .stage import (
+    Generated,
+    STAGE_COMPRESSION,
+    STAGE_ROW_GROUP_ROWS,
+    STAGE_THREADS,
+    STAGE_VERSION,
+    TPCH_ABSENT,
+    TPCH_PARTIAL,
+    TPCH_PRESENT,
+    copy_statement,
+    count_statement,
+    dbgen_statement,
+    describe_generation,
+    generate_tpch,
+    load_statement,
+    render_stage,
+    sql_literal,
+    tpch_state,
+    tpch_table_names,
+)
+from .stage_extension import (
+    DEFAULT_EXTENSION_PLATFORM,
+    EXT_MISMATCH,
+    EXT_PINNED,
+    EXT_UNRECORDED,
+    EXTENSION_FILE_NAME,
+    ExtensionCheck,
+    ExtensionPin,
+    PreparedExtension,
+    check_extension_bytes,
+    extension_pin_line,
+    prepare_extension,
+    remove_tree,
+    tpch_extension_pins,
+)
+from .stage_cli import Flags, parse_flags, parse_positive, run_stage
 from .verify import (
     FILE_MISSING,
     FILE_SHA_MISMATCH,
