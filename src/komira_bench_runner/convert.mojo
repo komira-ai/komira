@@ -19,6 +19,17 @@
 #   DATE                   "1994-01-01"           text, `YYYY-MM-DD`
 #   NULL (any type)        null                   null
 #
+# The same columns carry a declared type, in the vocabulary of
+# `komira_bench_duckdb.declared_types` (the mapping from Arrow types is the
+# table in the README of komira_bench_duckdb): DECIMAL128(p, s) is
+# DECIMAL(p,s), INT8 .. INT64 are TINYINT, SMALLINT, INTEGER and BIGINT, UINT8
+# .. UINT64 are UTINYINT, USMALLINT, UINTEGER and UBIGINT, FLOAT32 is FLOAT,
+# FLOAT64 is DOUBLE, BOOL is BOOLEAN, STRING and LARGE_STRING are VARCHAR and
+# DATE32 is DATE. An Arrow type outside that list is `UNMAPPED(arrow type N)`.
+# The declared type is not the cell kind: an INT32 and an INT64 column both
+# give integer cells and still differ as INTEGER and BIGINT. All batches of a
+# result must declare the same types.
+#
 # A DECIMAL is never divided as a float and never rounded to a double: the
 # unscaled integer is written as exact decimal text (`decimal_to_string`) and
 # kept as that text, so a sum that differs in its last digit is a different
@@ -30,7 +41,7 @@
 from komira_arrow.arrow_types import ArrowType
 from komira_arrow.column import Column
 from komira_arrow.schema import RecordBatch
-from komira_bench_duckdb import Cell, ResultSet
+from komira_bench_duckdb import Cell, ResultSet, decimal_type, duckdb_declared_type, unmapped_type
 from komira_buffer.heap_region import HeapRegion
 from komira_scalar_arithmetic.decimal_arith import I128
 from komira_scalar_arithmetic.decimal_cast import decimal_to_string
@@ -156,6 +167,44 @@ def _append_text(ref col: Column[HeapRegion], mut rows: List[List[Cell]], base: 
             rows[base + r].append(Cell.text(col.utf8_value_at(r)))
 
 
+def arrow_declared_type(ref col: Column[HeapRegion]) -> String:
+    """The declared type of an Arrow column in the shared vocabulary, or the
+    unmapped entry for an Arrow type with no name there."""
+    var t = col.arrow_type
+    if t == ArrowType.DECIMAL128:
+        return decimal_type(col.decimal_precision(), col.decimal_scale())
+    var name = String("")
+    if t == ArrowType.BOOL:
+        name = String("BOOLEAN")
+    elif t == ArrowType.INT8:
+        name = String("TINYINT")
+    elif t == ArrowType.INT16:
+        name = String("SMALLINT")
+    elif t == ArrowType.INT32:
+        name = String("INTEGER")
+    elif t == ArrowType.INT64:
+        name = String("BIGINT")
+    elif t == ArrowType.UINT8:
+        name = String("UTINYINT")
+    elif t == ArrowType.UINT16:
+        name = String("USMALLINT")
+    elif t == ArrowType.UINT32:
+        name = String("UINTEGER")
+    elif t == ArrowType.UINT64:
+        name = String("UBIGINT")
+    elif t == ArrowType.FLOAT32:
+        name = String("FLOAT")
+    elif t == ArrowType.FLOAT64:
+        name = String("DOUBLE")
+    elif t == ArrowType.STRING or t == ArrowType.LARGE_STRING:
+        name = String("VARCHAR")
+    elif t == ArrowType.DATE32:
+        name = String("DATE")
+    else:
+        return unmapped_type(String("arrow type ") + String(t))
+    return duckdb_declared_type(name)
+
+
 def _append_column(ref col: Column[HeapRegion], mut rows: List[List[Cell]], base: Int) raises:
     var t = col.arrow_type
     if t == ArrowType.DECIMAL128:
@@ -199,10 +248,18 @@ def result_set_of(batches: List[RecordBatch]) raises -> ResultSet:
     var width = batches[0].num_columns()
     for c in range(width):
         out.names.append(batches[0].schema.field_name(c))
+        out.types.append(arrow_declared_type(batches[0].column_at(c)))
     for b in range(len(batches)):
         ref batch = batches[b]
         if batch.num_columns() != width:
             raise Error("result batch " + String(b) + " has " + String(batch.num_columns()) + " columns, the first has " + String(width))
+        for c in range(width):
+            var declared = arrow_declared_type(batch.column_at(c))
+            if declared != out.types[c]:
+                raise Error(
+                    "result batch " + String(b) + " declares column " + String(c) + " as " + declared
+                    + ", the first batch as " + out.types[c]
+                )
         var base = len(out.rows)
         var n = batch.num_rows()
         for _ in range(n):

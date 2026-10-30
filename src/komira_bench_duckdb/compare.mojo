@@ -21,9 +21,18 @@
 #   a double column included, is a difference of kinds, never a tolerance;
 # - text columns compare the byte length of all cells, the smallest and the
 #   largest cell, and the sum of a hash of each cell, exactly.
+# - the declared type of each column (declared_types.mojo) is compared before the
+#   values, and a difference is a failure of its own (`type_reasons`, also in
+#   `reasons`): DECIMAL(38,2) against DECIMAL(38,4), or BIGINT against
+#   DECIMAL(18,0), fails even when the values agree. A type outside the
+#   vocabulary fails, even against itself. Types recorded on one side only fail,
+#   and when neither side has any (a result built by hand) there is nothing to
+#   compare. With no rows on both sides the types are compared only when both
+#   sides have them.
 # Column names are not compared: engines name computed columns differently.
 
 from .cells import KIND_DECIMAL, KIND_FLOAT, KIND_INT, KIND_NULL, KIND_TEXT
+from .declared_types import is_unmapped
 from .signature import ColumnSignature, ResultSignature
 
 comptime REL_TOL: Float64 = 1e-9
@@ -65,18 +74,25 @@ struct ValueVerdict(Copyable, Movable):
 
     var identical: Bool
     var reasons: List[String]
+    var type_reasons: List[String]
     var modes: List[String]
     var max_rel: Float64
 
     def __init__(out self):
         self.identical = True
         self.reasons = List[String]()
+        self.type_reasons = List[String]()
         self.modes = List[String]()
         self.max_rel = Float64(0)
 
     def fail(mut self, reason: String):
         self.identical = False
         self.reasons.append(reason)
+
+    def fail_type(mut self, reason: String):
+        """A failure of the declared types, kept apart from value failures."""
+        self.fail(reason)
+        self.type_reasons.append(reason)
 
     def label(self) -> String:
         """`IDENTICAL`, or `DIVERGENT` with the first reason."""
@@ -191,6 +207,32 @@ def _compare_column(
     v.modes.append(col + String(".sum=tolerance"))
 
 
+def _compare_types(mut v: ValueVerdict, actual: ResultSignature, expected: ResultSignature):
+    var have = len(actual.types) > 0
+    if not have and len(expected.types) == 0:
+        return
+    if have != (len(expected.types) > 0):
+        var side = String("the actual side") if have else String("the expected side")
+        v.fail_type(String("declared types are recorded on one side only (") + side + String(" has them)"))
+        return
+    if len(actual.types) != len(expected.types):
+        v.fail_type(
+            String("declared type count differs: ") + String(len(actual.types))
+            + String(" against ") + String(len(expected.types))
+        )
+        return
+    for c in range(len(actual.types)):
+        var a = actual.types[c]
+        var e = expected.types[c]
+        var col = String("column ") + String(c)
+        if is_unmapped(a):
+            v.fail_type(col + String(" declared type ") + a + String(" is not in the mapping (see README.md)"))
+        if is_unmapped(e):
+            v.fail_type(col + String(" declared type ") + e + String(" is not in the mapping (see README.md)"))
+        if not is_unmapped(a) and not is_unmapped(e) and a != e:
+            v.fail_type(col + String(" declared type differs: ") + a + String(" against ") + e)
+
+
 def compare_signatures(
     actual: ResultSignature,
     expected: ResultSignature,
@@ -202,10 +244,13 @@ def compare_signatures(
     if actual.rows != expected.rows:
         v.fail(String("row count differs: ") + String(actual.rows) + String(" against ") + String(expected.rows))
     if actual.rows == 0 and expected.rows == 0:
+        if len(actual.types) > 0 and len(expected.types) > 0:
+            _compare_types(v, actual, expected)
         return v^
     if len(actual.columns) != len(expected.columns):
         v.fail(String("column count differs: ") + String(len(actual.columns)) + String(" against ") + String(len(expected.columns)))
         return v^
+    _compare_types(v, actual, expected)
     for c in range(len(actual.columns)):
         _compare_column(v, c, actual.columns[c], expected.columns[c], rel_tol, abs_floor)
     return v^

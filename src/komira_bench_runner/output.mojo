@@ -28,12 +28,13 @@ comptime COMPARISON_FILE: String = "comparison.txt"
 
 def comparison_text() -> String:
     """The tolerance the answers were compared under: integers, text and
-    integer sums exactly, floats within the larger of the relative tolerance
+    integer sums and the declared column types exactly, floats within the larger of the relative tolerance
     times the larger magnitude and the absolute floor."""
     return (
         String("float_rel_tol ") + String(REL_TOL) + String("\n")
         + String("float_abs_floor ") + String(ABS_FLOOR) + String("\n")
         + String("exact integers, text and integer sums\n")
+        + String("exact declared column types\n")
     )
 
 

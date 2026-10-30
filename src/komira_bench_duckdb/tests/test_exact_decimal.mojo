@@ -310,6 +310,7 @@ def test_the_row_order_check_orders_decimals_by_value() raises:
 
 def test_a_decimal_column_is_recorded_and_read_back() raises:
     var rs = _wide_and_small(Int64(-3), String("18446744073709551615"))
+    rs.types.append(String("DECIMAL(38,0)"))
     var row = List[Cell]()
     row.append(Cell.decimal(String("0.00000000000000000000000000000000000001")))
     rs.add_row(row^)
@@ -324,6 +325,7 @@ def test_a_decimal_column_is_recorded_and_read_back() raises:
     assert_equal(format_reference(back), text)
     # another last digit of a recorded value is no longer the same answer
     var other = _wide_and_small(Int64(-3), String("18446744073709551614"))
+    other.types.append(String("DECIMAL(38,0)"))
     var row2 = List[Cell]()
     row2.append(Cell.decimal(String("0.00000000000000000000000000000000000001")))
     other.add_row(row2^)
