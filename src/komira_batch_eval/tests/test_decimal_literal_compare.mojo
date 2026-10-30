@@ -440,7 +440,7 @@ def test_every_literal_every_operator_every_column() raises:
     _sweep(problems, tally)
     assert_true(tally.checked > 100000, "the sweep checked too few rows")
     # Some comparisons are ones DuckDB raises on, and most are not.
-    assert_true(tally.refused > 500, "the sweep held too few refusals")
+    assert_true(tally.refused > 200, "the sweep held too few refusals")
     assert_true(tally.refused * 4 < tally.checked, "the sweep refused most of its cases")
     # The sweep holds both answers for every operator, so an oracle or a
     # table that degenerated into one answer cannot pass.

@@ -50,8 +50,9 @@
 #     kernel used on a column that does not fit it.
 #   * test_int64_kernel_is_exact_for_stored_values_past_the_declared_precision:
 #     a DECIMAL(15, 2) buffer holding 2^64 + 5 (low word 5), 2^63 (low word
-#     negative), -2^63 - 1, 10^30 and their neighbours, in the first block, a
-#     later block and the tail, against thresholds on and beyond them. A
+#     negative), -2^63 - 1, 10^30, Int64.MAX and Int64.MIN, in the first block,
+#     a later block and the tail, against thresholds on and beyond them (a value
+#     of Int64.MAX against the threshold 2^63 is `<`). A
 #     Parquet FIXED_LEN_BYTE_ARRAY or an Arrow IPC writer can store such a
 #     value under a narrow precision; the kernel must give the answer of the
 #     whole 128-bit value, not of its low word. Catches a kernel that trusts
@@ -190,7 +191,7 @@ def _refusal(value: I128, t: Int, s: Int, op: UInt8) -> String:
     return String("")
 
 
-def _e38() -> I128:
+def _e38() raises -> I128:
     return pow10_i256(38).cast[DType.int128]()
 
 
@@ -452,6 +453,11 @@ def test_int64_kernel_is_exact_for_stored_values_past_the_declared_precision() r
     values[1] = pow10_i256(30).cast[DType.int128]()
     values[9] = -two64 + I128(5)
     values[18] = -pow10_i256(30).cast[DType.int128]()
+    # Values that do fit an int64 and sit on its edge, against thresholds just
+    # beyond it: Int64.MAX < 2^63 is true although the threshold clamps to
+    # Int64.MAX.
+    values[5] = I128(Int(Int64.MAX))
+    values[13] = -I128(Int(Int64.MAX)) - I128(1)
     var thresholds = List[I128]()
     for t in [5, 0, -1, -2]:
         thresholds.append(I128(t))

@@ -333,6 +333,9 @@ def test_decimal_columns_never_prune_on_a_decimal_literal() raises:
     var over_scale = ScalarValue.decimal128(Int64(0), Int64(65), 4, 3)
     assert_false(_prunes(md, _cmp(BIN_LT, "dec", over_scale.copy())))
     assert_false(_all(md, _cmp(BIN_GT, "dec", over_scale.copy())))
+    # The whole-file COUNT shortcut declines too.
+    assert_true(not all_match_row_count(md, _cmp(BIN_GT, "dec", one_and_a_half.copy())))
+    assert_true(not all_match_row_count(md, _cmp(BIN_LT, "dec", over_scale.copy())))
     # And under an AND / OR of two such comparisons.
     assert_false(
         _prunes(

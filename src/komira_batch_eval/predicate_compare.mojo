@@ -39,7 +39,7 @@ from komira_plan_expr.expr import (
 )
 from komira_plan_expr.literal_domain import int_literal_fits
 from komira_plan_expr.scalar_value import ScalarValue
-from komira_scalar_arithmetic.decimal_cast import float_to_decimal_i128
+from komira_scalar_arithmetic.decimal_arith import pow10_i256
 from komira_scalar_arithmetic.decimal_compare import (
     DEC_CMP_EQ,
     DEC_CMP_GE,
@@ -51,7 +51,11 @@ from komira_scalar_arithmetic.decimal_compare import (
 )
 
 from .column_compare import _col_cmp_nullable
-from .decimal_literal_compare import decimal_threshold, eval_decimal_threshold
+from .decimal_literal_compare import (
+    check_decimal_column_widens,
+    decimal_threshold,
+    eval_decimal_threshold,
+)
 from .integer_literal_value import integer_literal_value
 from .literal_arm_domain import refuse_incomparable_literal
 from .temporal_literal_value import _temporal_literal_i64
@@ -86,6 +90,20 @@ def _col_decimal_ps(batch: RecordBatch, col_idx: Int) -> Tuple[Int, Int]:
     return (batch.schema.field_decimal_precision(col_idx), batch.schema.field_decimal_scale(col_idx))
 
 
+def _holds_f64(op: UInt8, v: Float64, t: Float64) -> Bool:
+    if op == DEC_CMP_LT:
+        return v < t
+    if op == DEC_CMP_LE:
+        return v <= t
+    if op == DEC_CMP_GT:
+        return v > t
+    if op == DEC_CMP_GE:
+        return v >= t
+    if op == DEC_CMP_EQ:
+        return v == t
+    return v != t
+
+
 def _eval_decimal_col_vs_literal(batch: RecordBatch, col_idx: Int, lit: ScalarValue, op: UInt8) raises -> BooleanArray:
     """DECIMAL128 column compared to a literal (decimal / int / float).
 
@@ -94,8 +112,11 @@ def _eval_decimal_col_vs_literal(batch: RecordBatch, col_idx: Int, lit: ScalarVa
     threshold at the column's scale (a literal with more scale than the column
     is floored or ceiled by operator, never rounded), and
     `eval_decimal_threshold` compares every row to it (int64 SIMD for a column
-    of precision <= 18). A float literal keeps the rescale-to-the-column's-scale
-    compare below."""
+    of precision <= 18). Where DuckDB cannot compare (the literal, or a stored
+    value widened to the literal's scale, has 39 digits or more) this raises
+    too: `decimal_threshold` and `check_decimal_column_widens` say when. A float
+    literal is compared the way DuckDB compares a DECIMAL with a DOUBLE: in
+    doubles, the column's value being `double(c) / 10^scale`."""
     var ps = _col_decimal_ps(batch, col_idx)
     var cp = ps[0]
     var cs = ps[1]
@@ -126,29 +147,36 @@ def _eval_decimal_col_vs_literal(batch: RecordBatch, col_idx: Int, lit: ScalarVa
             # refused six of the eight integer tags and turned a uint64 above
             # Int64.MAX negative). It is an integer, so its scale is 0, and a
             # literal wider than the column's precision is not an overflow: no
-            # row equals it, and the threshold orders every row against it.
+            # row equals it, and the threshold orders every row against it
+            # (DuckDB casts it to DECIMAL(38, scale) and raises only past 38
+            # digits, which `decimal_threshold` refuses too).
             lit_v = integer_literal_value(lit)
             lit_s = 0
         var threshold = decimal_threshold(lit_v, lit_s, cs, dec_op)
+        check_decimal_column_widens(arr, cp, cs, lit_s)
         var raw = eval_decimal_threshold(arr, cp, threshold)
         return kleene_cmp_finalize_scalar(
             raw^, arr.validity, NullPolicy.three_valued()
         )
     if not lit.is_float():
         raise Error("Decimal128 predicate: unsupported literal type")
-    # Promote: build the decimal at the column's scale.  (NaN/Inf -> the
-    # comparison is always false; mimic SQL by raising for now — rare.)
-    var ov = float_to_decimal_i128(lit.float_val, cp, cs)
-    if not ov:
+    # A FLOAT64 literal: DuckDB compares a DECIMAL column with a DOUBLE in
+    # DOUBLE, `double(c) / 10^scale` against the literal as it is. (Rounding the
+    # literal to the column's scale instead would make `x = 0.015` true of the
+    # row holding 0.02.) NaN and infinity have no place among the steps and are
+    # refused.
+    var x = lit.float_val
+    if x != x or x > Float64(1.7976931348623157e308) or x < -Float64(1.7976931348623157e308):
         raise Error("Decimal128 predicate: float literal is NaN/Inf or out of range")
-    var rhs_v = ov.value()
+    var divisor = pow10_i256(cs).cast[DType.int128]().cast[DType.float64]()
     # Compute the compare data on every lane, then delegate the 3VL
     # null policy to the ONE mechanism in comparison_kleene: it merges the
     # column's validity in (RHS literal is non-null here), masks null lanes
     # to data=0 (filter-safe), and sets null_count. Byte-identical output.
     var out = BooleanArray.allocate_nullable(n)
     for i in range(n):
-        out.set(i, decimal_cmp_i128(arr.get_i128(i), cs, rhs_v, cs, dec_op))
+        var v = arr.get_i128(i).cast[DType.float64]() / divisor
+        out.set(i, _holds_f64(dec_op, v, x))
     return kleene_cmp_finalize_scalar(
         out^, arr.validity, NullPolicy.three_valued()
     )

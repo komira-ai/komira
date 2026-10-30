@@ -22,9 +22,11 @@
 # EVERYTHING ELSE IS UNCHANGED, on purpose. A number literal faces a FLOAT64 or
 # integer column, sits in a select list, or is an operand of arithmetic keeps
 # its FLOAT64 type: the evaluators have no DECIMAL-literal arm for those, and a
-# DECIMAL literal there would be read as a different value. A constant whose
-# DECIMAL result needs more than 38 digits, or that holds a division (DOUBLE in
-# DuckDB), is not a DECIMAL constant here either.
+# DECIMAL literal there would be read as a different value. A literal of more
+# than 38 digits, a literal with an exponent (`1e-2`), and a constant that
+# holds a division are DOUBLE in DuckDB and stay FLOAT64 here too. A sum or
+# product DuckDB raises on (it overflows the 18 or 38 digits its result is cut
+# to, or its scale is past 38) is refused, with DuckDB's words.
 # =============================================================================
 
 from komira_arrow.arrow_types import ArrowType
@@ -37,6 +39,7 @@ from komira_decimal_literal.decimal_literal import (
 from komira_plan_expr.expr import BIN_ADD, BIN_MUL, BIN_SUB, Expr
 from komira_plan_expr.expr_walk import PlanColRefFields, walk_expr_field
 from komira_plan_expr.scalar_value import ScalarValue
+from komira_scalar_arithmetic.decimal_arith import I256
 from komira_sql.sql_ast import (
     SX_BINARY,
     SX_COLUMN,
@@ -59,29 +62,61 @@ from komira_sql.sql_bind_ops import _bind_sql_operator
 from komira_sql.sql_bind_scope import BindScope, _resolve_col
 
 
-def _has_point(sx: SqlExpr) -> Bool:
-    """True iff a number literal with a point is among the leaves of `sx`."""
+def _hugeint_max() -> I256:
+    """HUGEINT's maximum, 2^127 - 1, as the 256-bit integer the digits of an
+    integer literal are read into."""
+    return (I256(1) << I256(127)) - I256(1)
+
+
+def _has_decimal_leaf(sx: SqlExpr) -> Bool:
+    """True iff a number literal with a point (`0.5`, `5.`) or an integer past
+    BIGINT is among the leaves of `sx`: the leaves this rule types as DECIMAL.
+    An integer that fits BIGINT keeps its integer type."""
     if sx.tag == SX_FLOAT:
         return True
+    if sx.tag == SX_INT:
+        return sx.text.byte_length() > 0
     if sx.tag == SX_BINARY:
-        return _has_point(sx._binary.value().left[]) or _has_point(
+        return _has_decimal_leaf(sx._binary.value().left[]) or _has_decimal_leaf(
             sx._binary.value().right[]
         )
     if sx.tag == SX_UNARY:
-        return _has_point(sx._agg.value().arg[])
+        return _has_decimal_leaf(sx._agg.value().arg[])
     return False
 
 
-def _constant(sx: SqlExpr) -> Optional[ScalarValue]:
+def _big_integer(digits: String) -> Optional[ScalarValue]:
+    """An integer past BIGINT as DuckDB types it, HUGEINT (DECIMAL(38, 0) in
+    arithmetic and against a DECIMAL column); None when it is past HUGEINT's
+    maximum 2^127 - 1 (DuckDB reads it as a DOUBLE)."""
+    var n = I256(0)
+    var ten = I256(10)
+    var limit = _hugeint_max()
+    for b in digits.as_bytes():
+        n = n * ten + I256(Int(b - UInt8(ord("0"))))
+        if n > limit:
+            return None
+    return Optional[ScalarValue](
+        ScalarValue.decimal128_i128(n.cast[DType.int128](), 38, 0)
+    )
+
+
+def _constant(sx: SqlExpr) raises -> Optional[ScalarValue]:
     """The folded value of `sx` when it is a constant of number literals,
-    unary minus and `+ - *` whose every step has a DECIMAL type; else None."""
+    unary minus and `+ - *` whose every step has a DECIMAL type; else None.
+
+    Raises:
+        What DuckDB raises folding the constant: a sum or product that does
+        not fit the width it is cut to (18 or 38 digits), or a product with a
+        scale past 38.
+    """
     if sx.tag == SX_FLOAT:
         return decimal_from_literal_text(sx.text)
     if sx.tag == SX_INT:
-        # An integer past BIGINT carries its digits in `text`: not a number
-        # this rule folds.
+        # An integer past BIGINT carries its digits in `text`: DuckDB types it
+        # HUGEINT, which is DECIMAL(38, 0) beside a DECIMAL column.
         if sx.text.byte_length() > 0:
-            return None
+            return _big_integer(sx.text)
         return Optional[ScalarValue](ScalarValue.from_int(Int(sx.int_val)))
     if sx.tag == SX_UNARY and sx.op == SXUN_NEGATE:
         var inner = _constant(sx._agg.value().arg[])
@@ -196,7 +231,7 @@ def bind_decimal_comparison(
         return None
     ref left = sx._binary.value().left[]
     ref right = sx._binary.value().right[]
-    if left.tag != SX_COLUMN or right.tag == SX_COLUMN or not _has_point(right):
+    if left.tag != SX_COLUMN or right.tag == SX_COLUMN or not _has_decimal_leaf(right):
         return None
     var column = _decimal_column(left, schema, scope)
     if not column:

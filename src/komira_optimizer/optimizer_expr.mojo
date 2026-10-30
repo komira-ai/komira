@@ -265,15 +265,23 @@ def _fold_expr(var expr: Expr) -> Expr:
             # DECIMAL arithmetic: `+ - *` between decimal literals, and
             # between a decimal and an integer literal, folds as a DECIMAL
             # with DuckDB's result type (`0.06 - 0.01` is the DECIMAL(4, 2)
-            # 0.05). It must not fall through to a float: a bound folded in
-            # floating point is 0.049999999999999996, and a DECIMAL column
-            # is then compared with a float. A result of more than 38 digits
-            # is left for the runtime. The pair rule is owned by
-            # `komira_decimal_literal`, which the SQL binder types its
-            # literals with.
+            # 0.05; a result wider than 18 digits from narrow operands is cut
+            # to 18, one wider than 38 to 38). It must not fall through to a
+            # float: a bound folded in floating point is 0.049999999999999996,
+            # and a DECIMAL column is then compared with a float. A constant
+            # DuckDB raises on (the value does not fit the cut width, or a
+            # scale past 38) stays an expression here: this fold cannot
+            # refuse, and the SQL binder, which owns the refusal, has raised
+            # on the same constant before a plan reaches the optimizer. The
+            # pair rule is owned by `komira_decimal_literal`, which the SQL
+            # binder types its literals with.
             if lv.is_decimal128() or rv.is_decimal128():
                 if op == BIN_ADD or op == BIN_SUB or op == BIN_MUL:
-                    var decimal_folded = decimal_fold_binary(op, lv, rv)
+                    var decimal_folded = Optional[ScalarValue]()
+                    try:
+                        decimal_folded = decimal_fold_binary(op, lv, rv)
+                    except:
+                        decimal_folded = None
                     if decimal_folded:
                         return Expr.literal(decimal_folded.take())
 

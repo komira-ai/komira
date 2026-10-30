@@ -118,6 +118,122 @@ def _is_ident(c: UInt8) -> Bool:
     return _is_alpha(c) or _is_digit(c)
 
 
+def _exponent_at(sql: String, i: Int) -> Bool:
+    """True iff an exponent (`e` or `E`, an optional sign, at least one digit)
+    starts at byte `i`."""
+    var src = sql.as_bytes()
+    var n = len(src)
+    if i >= n or (src[i] != UInt8(ord("e")) and src[i] != UInt8(ord("E"))):
+        return False
+    if i + 1 < n and _is_digit(src[i + 1]):
+        return True
+    return (
+        i + 2 < n
+        and (src[i + 1] == UInt8(ord("+")) or src[i + 1] == UInt8(ord("-")))
+        and _is_digit(src[i + 2])
+    )
+
+
+def _point_starts_number(sql: String, i: Int) -> Bool:
+    """True iff the '.' at byte `i` opens a number (`.5`): a digit follows it
+    and it does not follow a name or `)` (`t1.5`, `f(x).5` keep their dot)."""
+    var src = sql.as_bytes()
+    var n = len(src)
+    if src[i] != UInt8(ord(".")) or i + 1 >= n or not _is_digit(src[i + 1]):
+        return False
+    if i == 0:
+        return True
+    var prev = src[i - 1]
+    return not (_is_ident(prev) or prev == UInt8(ord(")")))
+
+
+def _point_ends_number(sql: String, i: Int, has_integer_digits: Bool) -> Bool:
+    """True iff the '.' at byte `i`, no digit after it, ends a number that has
+    integer digits (`5.`, `5.,`, `5.)`, `1.e2`). A '.' before a second '.' or
+    before a name is a qualifier's dot (`1..2`, `1.x`)."""
+    if not has_integer_digits:
+        return False
+    var src = sql.as_bytes()
+    if i + 1 >= len(src):
+        return True
+    var next = src[i + 1]
+    if next == UInt8(ord(".")):
+        return False
+    if _is_alpha(next):
+        return _exponent_at(sql, i + 1)
+    return True
+
+
+def _pow10_f64(k: Int) -> Float64:
+    var p = Float64(1.0)
+    for _ in range(k):
+        p = p * 10.0
+    return p
+
+
+def _exponent_value(
+    sql: String,
+    int_start: Int,
+    int_end: Int,
+    frac_start: Int,
+    frac_end: Int,
+    negative: Bool,
+    magnitude: Int,
+) raises -> Float64:
+    """The value of the mantissa digits `[int_start, int_end)` and
+    `[frac_start, frac_end)` times 10 to the exponent.
+
+    Exact where one rounding suffices: a mantissa of at most 2^53 times or over
+    a power of ten up to 10^22 is one correctly rounded multiplication or
+    division of two exactly represented numbers, so `1e-2` is the double
+    nearest 0.01. Past that range the value is scaled in Float64 and may differ
+    from the nearest double in its last bits.
+
+    Raises:
+        If the value is infinite, or zero for a mantissa that is not.
+    """
+    var src = sql.as_bytes()
+    var mantissa = UInt64(0)
+    var approx = Float64(0.0)
+    var exact = True
+    var nonzero = False
+    for pass_no in range(2):
+        var lo = int_start if pass_no == 0 else frac_start
+        var hi = int_end if pass_no == 0 else frac_end
+        for j in range(lo, hi):
+            var digit = Int(src[j]) - Int(ord("0"))
+            if digit != 0:
+                nonzero = True
+            approx = approx * 10.0 + Float64(digit)
+            if mantissa >= UInt64(1000000000000000000):
+                exact = False
+            else:
+                mantissa = mantissa * UInt64(10) + UInt64(digit)
+    if not nonzero:
+        return Float64(0.0)
+    var e10 = (-magnitude if negative else magnitude) - (frac_end - frac_start)
+    var value: Float64
+    if exact and mantissa <= UInt64(9007199254740992) and e10 >= -22 and e10 <= 22:
+        if e10 >= 0:
+            value = Float64(mantissa) * _pow10_f64(e10)
+        else:
+            value = Float64(mantissa) / _pow10_f64(-e10)
+    else:
+        if e10 > 400 or e10 < -400:
+            raise Error("SQL syntax error: numeric literal out of range")
+        value = approx
+        var k = e10
+        while k > 0:
+            value = value * 10.0
+            k -= 1
+        while k < 0:
+            value = value / 10.0
+            k += 1
+    if value > Float64(1.7976931348623157e308) or value == Float64(0.0):
+        raise Error("SQL syntax error: numeric literal out of range")
+    return value
+
+
 def tokenize(sql: String) raises -> List[Token]:
     """Tokenize `sql` into a `List[Token]` ending with a TK_EOF sentinel.
 
@@ -140,11 +256,15 @@ def tokenize(sql: String) raises -> List[Token]:
             while i < n and src[i] != UInt8(ord("\n")):
                 i += 1
             continue
-        # numeric literal: INT or FLOAT (`digits [ . digits ]`). A leading '-'
-        # is NOT fused here — the parser handles unary minus, so `1-1` and
-        # `-x` both tokenize cleanly. Digits are accumulated manually (no
-        # atol/atof dependency) so the tokenizer is self-contained.
-        if _is_digit(c):
+        # numeric literal: INT or FLOAT. A FLOAT is `digits '.' digits`,
+        # `digits '.'` (`5.`), `'.' digits` (`.5`), or one of those followed by
+        # an exponent (`1e-2`, `2.5E1`, `1.e2`); DuckDB reads the first three as
+        # DECIMAL and the last as DOUBLE, from the literal's own digits, which
+        # ride in the token's `text`. A leading '-' is NOT fused here — the
+        # parser handles unary minus, so `1-1` and `-x` both tokenize cleanly.
+        # Digits are accumulated manually (no atol/atof dependency) so the
+        # tokenizer is self-contained.
+        if _is_digit(c) or _point_starts_number(sql, i):
             var int_part: Int64 = 0
             # ⛔ AN INTEGER PAST BIGINT MAY NOT WRAP.
             # `int_part * 10 + d` in Int64 wrapped silently, so
@@ -168,26 +288,62 @@ def tokenize(sql: String) raises -> List[Token]:
                     past_i64 = True
                 int_part = int_part * 10 + dig
                 i += 1
-            if i < n and src[i] == UInt8(ord(".")) and i + 1 < n and _is_digit(src[i + 1]):
-                # The integer part of a DOUBLE literal is read in Float64 when
-                # it is past Int64 -- `int_part` holds wrapped bits there.
-                var ipf = Float64(int_part)
-                if past_i64:
-                    ipf = Float64(0.0)
-                    for j in range(digits_start, i):
-                        ipf = ipf * 10.0 + Float64(Int(src[j]) - Int(ord("0")))
+            var int_end = i
+            var has_point = False
+            var frac_start = i
+            if i < n and src[i] == UInt8(ord(".")) and (
+                (i + 1 < n and _is_digit(src[i + 1]))
+                or _point_ends_number(sql, i, int_end > digits_start)
+            ):
+                has_point = True
                 i += 1  # consume '.'
-                var frac: Float64 = 0.0
-                var scale: Float64 = 1.0
+                frac_start = i
                 while i < n and _is_digit(src[i]):
-                    frac = frac * 10.0 + Float64(Int(src[i]) - Int(ord("0")))
-                    scale = scale * 10.0
                     i += 1
-                var fval = ipf + frac / scale
-                # The literal's own digits ride in `text` (ASCII digits and
-                # the point, so each byte IS its codepoint): DuckDB reads
-                # `0.06` as DECIMAL(3, 2), and the binder needs the digits, not
-                # the nearest double.
+            var frac_end = i
+            var has_exponent = _exponent_at(sql, i)
+            if has_point or has_exponent:
+                var fval: Float64
+                if has_exponent:
+                    var j = i + 1
+                    var negative_exponent = False
+                    if src[j] == UInt8(ord("-")) or src[j] == UInt8(ord("+")):
+                        negative_exponent = src[j] == UInt8(ord("-"))
+                        j += 1
+                    var magnitude = 0
+                    while j < n and _is_digit(src[j]):
+                        if magnitude < 100000:
+                            magnitude = magnitude * 10 + (Int(src[j]) - Int(ord("0")))
+                        j += 1
+                    i = j
+                    fval = _exponent_value(
+                        sql,
+                        digits_start,
+                        int_end,
+                        frac_start,
+                        frac_end,
+                        negative_exponent,
+                        magnitude,
+                    )
+                else:
+                    # The integer part of a DOUBLE literal is read in Float64
+                    # when it is past Int64 -- `int_part` holds wrapped bits
+                    # there.
+                    var ipf = Float64(int_part)
+                    if past_i64:
+                        ipf = Float64(0.0)
+                        for j in range(digits_start, int_end):
+                            ipf = ipf * 10.0 + Float64(Int(src[j]) - Int(ord("0")))
+                    var frac: Float64 = 0.0
+                    var scale: Float64 = 1.0
+                    for j in range(frac_start, frac_end):
+                        frac = frac * 10.0 + Float64(Int(src[j]) - Int(ord("0")))
+                        scale = scale * 10.0
+                    fval = ipf + frac / scale
+                # The literal's own text (ASCII digits, the point and the
+                # exponent, so each byte IS its codepoint): DuckDB reads `0.06`
+                # as DECIMAL(3, 2), and the binder needs the digits, not the
+                # nearest double.
                 var literal_text = String("")
                 for j in range(digits_start, i):
                     literal_text += chr(Int(src[j]))

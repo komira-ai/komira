@@ -107,6 +107,14 @@ def _digits_value(digits: String, precision: Int, scale: Int) -> ScalarValue:
     return ScalarValue.decimal128_i128(n, precision, scale)
 
 
+def _expect_big(
+    op: UInt8, a: ScalarValue, b: ScalarValue, digits: String, precision: Int, scale: Int
+) raises:
+    var got = decimal_fold_binary(op, a, b)
+    assert_true(Bool(got), "no fold: " + String(a) + " and " + String(b))
+    assert_equal(String(got.value()), String(_digits_value(digits, precision, scale)))
+
+
 def test_add_and_subtract() raises:
     _expect(BIN_SUB, _d(6, 3, 2), _d(1, 3, 2), 5, 4, 2)
     _expect(BIN_ADD, _d(6, 3, 2), _d(1, 3, 2), 7, 4, 2)
@@ -187,6 +195,12 @@ def test_limits() raises:
         _refusal(BIN_SUB, _d(-1, 1, 0), nines38).find("Overflow in subtraction of DECIMAL(38)") >= 0,
         "-1 - 38 nines",
     )
+    # An operand that does not fit the cut type is a cast error before any sum:
+    # 38 nines plus 0.5 is cut to DECIMAL(38, 1), and the 38 nines at scale 1
+    # are 39 digits. DuckDB: "Could not cast value ... to DECIMAL(38,1)".
+    var cast_message = _refusal(BIN_ADD, nines38, _d(5, 2, 1))
+    assert_true(cast_message.find("Could not cast value") >= 0, cast_message)
+    assert_true(cast_message.find("DECIMAL(38,1)") >= 0, cast_message)
     # A scale pushes the result past the limit the same way: 19 + 19.
     assert_true(
         Bool(decimal_fold_binary(BIN_ADD, _d(1, 19, 18), _d(1, 19, 18))),
@@ -252,8 +266,20 @@ def test_a_result_wider_than_18_digits_from_narrow_operands_is_cut_to_18() raise
         assert_true(Bool(next), "a power of 0.1")
         p = next.take()
     assert_equal(String(p), String(_d(1, 18, 13)))
+    # A product of scale 38: 0.0000000000000000001 squared is DECIMAL(38, 38).
+    _expect(BIN_MUL, _d(1, 20, 19), _d(1, 20, 19), 1, 38, 38)
+    # A sum of scale 18 from operands of 18 digits is cut to 18: .123456789012345678 + .5
+    _expect(BIN_ADD, _d(123456789012345678, 18, 18), _d(5, 1, 1), 623456789012345678, 18, 18)
     # A scale of 32 from two operands of 16 digits is not cut: DECIMAL(34, 32).
     _expect(BIN_MUL, _d(1, 17, 16), _d(1, 17, 16), 1, 34, 32)
+
+
+def test_a_hugeint_sized_integer_takes_part_as_decimal_38() raises:
+    # 9223372036854775808 + 0.5 and * 2.5: DuckDB gives DECIMAL(38, 1) (the
+    # integer is a HUGEINT, DECIMAL(38, 0), and the result is cut to 38).
+    var int_ = ScalarValue.decimal128_i128(I128(Int(Int64.MAX)) + I128(1), 38, 0)
+    _expect_big(BIN_ADD, int_.copy(), _d(5, 2, 1), "92233720368547758085", 38, 1)
+    _expect_big(BIN_MUL, int_.copy(), _d(25, 2, 1), "230584300921369395200", 38, 1)
 
 
 def test_a_result_that_does_not_fit_its_cut_width_is_refused() raises:
@@ -327,6 +353,7 @@ def main() raises:
     suite.test[test_integers_take_part_as_decimal_with_duckdbs_widths]()
     suite.test[test_limits]()
     suite.test[test_a_result_wider_than_18_digits_from_narrow_operands_is_cut_to_18]()
+    suite.test[test_a_hugeint_sized_integer_takes_part_as_decimal_38]()
     suite.test[test_a_result_that_does_not_fit_its_cut_width_is_refused]()
     suite.test[test_pairs_the_fold_does_not_cover]()
     suite.test[test_negate]()
