@@ -26,6 +26,8 @@ unit graph, the toolchain and the execution platform from those too, so a packag
 selects the macOS graph and this platform.)
 """
 
+load("@komira//tools/build/platforms:defs.bzl", "execution_mode")
+
 def first_platform_refusal(labels, first_remote):
     """Why komira's registration cannot take buildrules' platforms, or None.
 
@@ -47,7 +49,7 @@ def first_platform_refusal(labels, first_remote):
 def _impl(ctx):
     base = ctx.attrs.base[ExecutionPlatformRegistrationInfo].platforms
     labels = [str(p.label) for p in base]
-    refusal = first_platform_refusal(labels, len(base) > 0 and base[0].executor_config.remote_enabled)
+    refusal = first_platform_refusal(labels, execution_mode() != "local")
     if refusal:
         fail("{}: {} (of {}), got {}".format(ctx.label, refusal, ctx.attrs.base.label, labels))
     linux = base[0]
