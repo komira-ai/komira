@@ -9,10 +9,18 @@
 A package of the list needs its `load` below and its row; `mopm_artifacts` refuses a package without a row.
 """
 
+load("//src/kci_api:buildrules.mojo.lock.bzl", kci_api = "GRAPH")
 load("//src/kci_artifact_proto:buildrules.mojo.lock.bzl", kci_artifact_proto = "GRAPH")
+load("//src/kci_cell:buildrules.mojo.lock.bzl", kci_cell = "GRAPH")
 load("//src/kci_deploy_model_proto:buildrules.mojo.lock.bzl", kci_deploy_model_proto = "GRAPH")
+load("//src/kci_logs:buildrules.mojo.lock.bzl", kci_logs = "GRAPH")
 load("//src/kci_manifest_proto:buildrules.mojo.lock.bzl", kci_manifest_proto = "GRAPH")
+load("//src/kci_params:buildrules.mojo.lock.bzl", kci_params = "GRAPH")
+load("//src/kci_release_channel:buildrules.mojo.lock.bzl", kci_release_channel = "GRAPH")
+load("//src/kci_release_machine:buildrules.mojo.lock.bzl", kci_release_machine = "GRAPH")
 load("//src/kci_resource_proto:buildrules.mojo.lock.bzl", kci_resource_proto = "GRAPH")
+load("//src/kci_validator_report:buildrules.mojo.lock.bzl", kci_validator_report = "GRAPH")
+load("//src/kci_validator_rows:buildrules.mojo.lock.bzl", kci_validator_rows = "GRAPH")
 load("//src/komira_anomaly:buildrules.mojo.lock.bzl", komira_anomaly = "GRAPH")
 load("//src/komira_async_api:buildrules.mojo.lock.bzl", komira_async_api = "GRAPH")
 load("//src/komira_atomic_alias:buildrules.mojo.lock.bzl", komira_atomic_alias = "GRAPH")
@@ -23,6 +31,7 @@ load("//src/komira_bump_arena:buildrules.mojo.lock.bzl", komira_bump_arena = "GR
 load("//src/komira_calendar_proto:buildrules.mojo.lock.bzl", komira_calendar_proto = "GRAPH")
 load("//src/komira_chat_proto:buildrules.mojo.lock.bzl", komira_chat_proto = "GRAPH")
 load("//src/komira_clock:buildrules.mojo.lock.bzl", komira_clock = "GRAPH")
+load("//src/komira_codeworks_api:buildrules.mojo.lock.bzl", komira_codeworks_api = "GRAPH")
 load("//src/komira_collections:buildrules.mojo.lock.bzl", komira_collections = "GRAPH")
 load("//src/komira_contacts_proto:buildrules.mojo.lock.bzl", komira_contacts_proto = "GRAPH")
 load("//src/komira_content_line:buildrules.mojo.lock.bzl", komira_content_line = "GRAPH")
@@ -82,10 +91,18 @@ def declared_natives(graph):
     return sorted(ids)
 
 _GRAPHS = {
+    "kci_api": kci_api,
     "kci_artifact_proto": kci_artifact_proto,
+    "kci_cell": kci_cell,
     "kci_deploy_model_proto": kci_deploy_model_proto,
+    "kci_logs": kci_logs,
     "kci_manifest_proto": kci_manifest_proto,
+    "kci_params": kci_params,
+    "kci_release_channel": kci_release_channel,
+    "kci_release_machine": kci_release_machine,
     "kci_resource_proto": kci_resource_proto,
+    "kci_validator_report": kci_validator_report,
+    "kci_validator_rows": kci_validator_rows,
     "komira_anomaly": komira_anomaly,
     "komira_async_api": komira_async_api,
     "komira_atomic_alias": komira_atomic_alias,
@@ -96,6 +113,7 @@ _GRAPHS = {
     "komira_calendar_proto": komira_calendar_proto,
     "komira_chat_proto": komira_chat_proto,
     "komira_clock": komira_clock,
+    "komira_codeworks_api": komira_codeworks_api,
     "komira_collections": komira_collections,
     "komira_contacts_proto": komira_contacts_proto,
     "komira_content_line": komira_content_line,

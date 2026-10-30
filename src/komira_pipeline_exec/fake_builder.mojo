@@ -7,6 +7,7 @@
 # `tally(seg_id)`) and the order in which segments were built (`built_order`),
 # which is the order the scheduler started them in.
 
+from komira_arrow.schema import Schema
 from komira_async_api.token import CancellationToken
 from komira_collections.slab import Slab
 from komira_physical_plan.physical_plan import (
@@ -149,7 +150,10 @@ struct FakeBuilder(SegmentBuilder):
         return len(self.scripts[desc.seg_id].ops)
 
     def build_source(
-        mut self, ref desc: SegmentDescPod, mut published: PublishedOutputs
+        mut self,
+        ref desc: SegmentDescPod,
+        mut published: PublishedOutputs,
+        num_workers: Int,
     ) raises -> Self.Source:
         self.built_order.append(desc.seg_id)
         ref script = self.scripts[desc.seg_id]
@@ -183,7 +187,9 @@ struct FakeBuilder(SegmentBuilder):
             FakeOp(spec.kind, spec.arg, self.tally(desc.seg_id), token^)
         )
 
-    def build_sink(mut self, ref desc: SegmentDescPod) raises -> Self.Sink:
+    def build_sink(
+        mut self, ref desc: SegmentDescPod, ref source_schema: Schema
+    ) raises -> Self.Sink:
         ref script = self.scripts[desc.seg_id]
         if script.to_kind == TO_COUNT:
             return Self.Sink.second(FakeCountSink(self.tally(desc.seg_id)))

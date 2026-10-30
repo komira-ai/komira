@@ -22,10 +22,18 @@ MOPM = "toolchains//:mopm_0_0_86"
 FIRST_MOPM_WITH_OVERLAY = "toolchains//:mopm_0_0_40"
 
 PACKAGES = {
+    "kci_api": "0.1.0",
     "kci_artifact_proto": "0.1.0",
+    "kci_cell": "0.1.0",
     "kci_deploy_model_proto": "0.1.0",
+    "kci_logs": "0.1.0",
     "kci_manifest_proto": "0.1.0",
+    "kci_params": "0.1.0",
+    "kci_release_channel": "0.1.0",
+    "kci_release_machine": "0.1.0",
     "kci_resource_proto": "0.1.0",
+    "kci_validator_report": "0.1.0",
+    "kci_validator_rows": "0.1.0",
     "komira_anomaly": "0.1.0",
     "komira_async_api": "0.1.0",
     "komira_atomic_alias": "0.1.0",
@@ -36,6 +44,7 @@ PACKAGES = {
     "komira_calendar_proto": "0.1.0",
     "komira_chat_proto": "0.1.0",
     "komira_clock": "0.1.0",
+    "komira_codeworks_api": "0.1.0",
     "komira_collections": "0.1.0",
     "komira_contacts_proto": "0.1.0",
     "komira_content_line": "0.1.0",

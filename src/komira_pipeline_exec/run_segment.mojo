@@ -55,7 +55,7 @@ def run_segment[
         raise cancelled_error(token)
 
     var n_ops = builder.op_count(desc)
-    var source = builder.build_source(desc, published)
+    var source = builder.build_source(desc, published, num_workers)
     if n_ops > 0 and num_workers > MAX_INT // n_ops:
         raise Error(
             "komira_pipeline_exec: "
@@ -68,7 +68,7 @@ def run_segment[
     for w in range(num_workers):
         for i in range(n_ops):
             ops.append(builder.build_op(desc, i, w))
-    var sink = builder.build_sink(desc)
+    var sink = builder.build_sink(desc, source.output_schema())
 
     var run = SegmentRun[B.Source, B.Op, B.Sink](
         source^, ops^, sink^, num_workers, n_ops, token.clone()
