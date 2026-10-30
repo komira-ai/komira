@@ -1,4 +1,4 @@
-load("@komira//tools/build/platforms:defs.bzl", "DARWIN_ARM64", "LINUX_X86_64", "darwin_macos_hosts")
+load("@komira//tools/build/platforms:defs.bzl", "DARWIN_ARM64", "LINUX_X86_64", "darwin_toolchain_hosts_here")
 load("@komira//tools/build/platforms:table.bzl", "os_floor_version", "pinned_kwargs", "row")
 load("@komira//tools/build/mojo:darwin.bzl", "mojo_darwin_toolchain")
 load("@komira//tools/build/mojo:download.bzl", "pinned_file")
@@ -61,6 +61,9 @@ mojo_runtime(
     visibility = ["PUBLIC"],
 )
 
+# The named hosts, or the local sentinel on a native Mac build (platforms/defs.bzl).
+_MACOS_HOSTS = darwin_toolchain_hosts_here()
+
 # The toolchain of darwin-arm64 targets (selected by toolchains//:mojo).
 mojo_darwin_toolchain(
     name = "mojo",
@@ -74,8 +77,12 @@ mojo_darwin_toolchain(
     # The host identities a compile may run on (`[komira_re] darwin_macos_hosts`
     # of the root cell; see DARWIN_HOSTS_KEY in platforms/defs.bzl). Unset,
     # analysing this toolchain for darwin-arm64 fails naming that key; nothing
-    # needs it then, since no macOS execution platform is registered either.
-    macos_hosts = darwin_macos_hosts(),
+    # needs it then, since no macOS execution platform is registered either. With
+    # none named and `-c komira.execution=local` on a Mac, the one host is the
+    # sentinel `local`.
+    macos_hosts = _MACOS_HOSTS[0],
+    local_execution = _MACOS_HOSTS[1],
+    config_refusal = _MACOS_HOSTS[2],
     runtime = ":mojo_runtime",
     # Every compile targets this CPU, whatever worker runs it: the first Apple
     # silicon generation, so a built binary runs on every Apple silicon Mac.
