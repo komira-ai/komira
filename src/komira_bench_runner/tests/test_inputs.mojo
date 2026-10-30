@@ -22,11 +22,10 @@
 #   sweeps with no cache-drop file are each refused.
 # - test_the_refusal_arm_refuses_every_query_by_name: any query, materialized
 #   or not, ends in a refusal of the named construct and prepare is recorded.
-# - test_warmup_runs_follow_the_thread_count: 1 and 8 threads (and 31) choose
-#   no warm-up runs, 32 and 88 choose 5; a given count wins, 0 included; the
-#   flag defaults to "choose by thread count" and refuses a negative or
-#   non-numeric value.
 # - test_settings_are_checked: each unusable setting is refused.
+# - test_there_is_no_warmup_flag: every run of a sweep is measured and
+#   recorded, so `--warmup-runs` is an unknown flag, and the usage text does
+#   not offer it.
 
 from std.testing import TestSuite, assert_equal, assert_false, assert_raises, assert_true
 
@@ -37,9 +36,6 @@ from komira_bench_runner import (
     EngineArm,
     QuerySpec,
     RunSettings,
-    WARMUP_AUTO,
-    WIDE_WARMUP_THREADS,
-    warmup_runs_for,
     parse_flags,
     parse_order_key,
     queries_file_text,
@@ -48,6 +44,7 @@ from komira_bench_runner import (
     scale_of,
     table_name_of,
     tables_of,
+    usage,
 )
 from komira_bench_data import DatasetFile, DatasetManifest
 
@@ -223,29 +220,14 @@ def test_settings_are_checked() raises:
     RunSettings(4, 4096, 3, 6, 2, 3).validate()
 
 
-def test_warmup_runs_follow_the_thread_count() raises:
-    assert_equal(warmup_runs_for(1), 0)
-    assert_equal(warmup_runs_for(8), 0)
-    assert_equal(warmup_runs_for(WIDE_WARMUP_THREADS - 1), 0)
-    assert_equal(warmup_runs_for(32), 5)
-    assert_equal(warmup_runs_for(88), 5)
-    assert_true(warmup_runs_for(32) >= 5)
-    # a given count wins, including 0
-    assert_equal(warmup_runs_for(88, 0), 0)
-    assert_equal(warmup_runs_for(1, 7), 7)
-    assert_equal(RunSettings(88, 4096).warm_warmup_runs(), 5)
-    assert_equal(RunSettings(8, 4096).warm_warmup_runs(), 0)
-    assert_equal(RunSettings(8, 4096, 3, 6, 0, 3, 1.0, 4).warm_warmup_runs(), 4)
+def test_there_is_no_warmup_flag() raises:
     with assert_raises():
-        RunSettings(8, 4096, 3, 6, 0, 3, 1.0, -2).validate()
-    var f = parse_flags(_words(_required()))
-    assert_equal(f.warmup_runs, WARMUP_AUTO)
-    assert_equal(parse_flags(_words(_required() + String(" --warmup-runs 6"))).warmup_runs, 6)
-    assert_equal(parse_flags(_words(_required() + String(" --warmup-runs 0"))).warmup_runs, 0)
-    with assert_raises():
-        _ = parse_flags(_words(_required() + String(" --warmup-runs -1")))
-    with assert_raises():
-        _ = parse_flags(_words(_required() + String(" --warmup-runs x")))
+        _ = parse_flags(_words(_required() + String(" --warmup-runs 5")))
+    assert_true(usage().find(String("warmup")) < 0)
+    # the other flags are untouched
+    var f = parse_flags(_words(_required() + String(" --warm-sweeps 4 --warm-reps 9")))
+    assert_equal(f.warm_sweeps, 4)
+    assert_equal(f.warm_reps, 9)
 
 
 def main() raises:

@@ -11,9 +11,18 @@
 #   count, so PASS 1 of 3 and not 1 of 2.
 # - test_geomean_and_median: the geomean and median over the ratios only, whole
 #   and per suite.
-# - test_summary_line: the PASS count is printed with its threshold and the
-#   DuckDB pin; an unpinned DuckDB prints its reason; a run with no ratio prints
-#   n/a, not a number.
+# - test_first_run_ratio: a cell has a first-run ratio (komira's first run over
+#   DuckDB's first run) beside its steady-state ratio, under the same rule: only
+#   for a value-verified cell measured on both sides. Here tpch/q01 is 3.0 on its
+#   first run and 1.5 in steady state. A side read from an older result, with no
+#   runs, gives no first-run ratio and still gives the steady-state one.
+# - test_first_run_geomean_and_median: the first-run geomean and median, whole
+#   and per suite, over the cells that have a first-run ratio.
+# - test_summary_line: the headline names the geomean and the median
+#   "steady-state", puts the PASS count with its threshold and the DuckDB pin
+#   first, and states the first-run geomean and median beside them; an
+#   unpinned DuckDB prints its reason; a run with no ratio prints n/a, not a
+#   number; a result without runs states no first-run figure.
 # - test_exit_code: 0 only when every cell ran and was verified; a cell over the
 #   threshold does not change it.
 
@@ -68,6 +77,13 @@ def _side(rows: Int64, m1: Float64, m2: Float64) raises -> Optional[Side]:
     )
 
 
+# The same, with the first run of the first sweep `first` instead of 99.
+def _side_first(rows: Int64, first: Float64, m1: Float64, m2: Float64) raises -> Optional[Side]:
+    return Optional[Side](
+        Side.from_sweeps(rows, _sweeps(first, m1, m1, m1, 99.0, m2, m2, m2))
+    )
+
+
 def _cell(
     id: String,
     suite: String,
@@ -83,10 +99,11 @@ def _cell(
 
 def _sample() raises -> BenchResult:
     var cells = List[Cell]()
-    # komira sweeps (99,4,6,5) and (99,3,3,3): medians 5 and 3, time 3.
+    # komira sweeps (99,4,6,5) and (99,3,3,3): medians 5 and 3, time 3; its
+    # first run is 99 against DuckDB's 33.
     var q01k = Side.from_sweeps(4, _sweeps(99.0, 4.0, 6.0, 5.0, 99.0, 3.0, 3.0, 3.0))
     cells.append(_cell(String("tpch/q01"), String("tpch"), StageOutcome.exec_ok(),
-        Optional[Side](q01k^), _side(4, 2.0, 4.0), ValueVerdict.identical()))
+        Optional[Side](q01k^), _side_first(4, 33.0, 2.0, 4.0), ValueVerdict.identical()))
     cells.append(_cell(String("tpch/q02"), String("tpch"), StageOutcome.exec_ok(),
         _side(10, 2.0, 2.0), _side(10, 2.0, 2.0), ValueVerdict.identical()))
     cells.append(_cell(String("tpch/q03"), String("tpch"), StageOutcome.exec_ok(),
@@ -118,6 +135,46 @@ def test_ratio_only_for_verified_cells() raises:
     assert_true(Bool(r.cells[4].ratio))
     assert_equal(r.cells[4].ratio.value(), 0.5)
     assert_equal(r.cells[2].verdict, String("NO_RATIO"))
+
+
+def test_first_run_ratio() raises:
+    var r = _sample()
+    assert_equal(r.cells[0].ratio.value(), 1.5)
+    assert_equal(r.cells[0].first_ratio.value(), 3.0)
+    assert_equal(r.cells[1].first_ratio.value(), 1.0)
+    # divergent, and refused by komira: no ratio of either kind
+    assert_true(not Bool(r.cells[2].first_ratio))
+    assert_true(not Bool(r.cells[3].first_ratio))
+    assert_equal(r.cells[4].first_ratio.value(), 1.0)
+    # the verdict follows the steady-state ratio, not the first-run one
+    assert_equal(r.cells[0].verdict, String("FAIL"))
+    assert_equal(r.cells[1].verdict, String("PASS"))
+    # a side read from an older result has no runs, so no first run
+    var medians = List[Float64]()
+    medians.append(3.0)
+    medians.append(3.0)
+    var legacy = Optional[Side](Side(4, 3.0, medians^, 0.0))
+    var c = Cell.build(
+        String("tpch/q01"), String("tpch"), 4, StageOutcome.exec_ok(),
+        legacy.copy(), _side(4, 2.0, 2.0), ValueVerdict.identical(), 1.05,
+    )
+    assert_equal(c.ratio.value(), 1.5)
+    assert_true(not Bool(c.first_ratio))
+
+
+def test_first_run_geomean_and_median() raises:
+    var s = summarize(_sample())
+    assert_equal(s.overall.n_first_ratio, 3)
+    assert_almost_equal(s.overall.geomean_first.value(), 1.4422495703074083, atol=1e-12)
+    assert_equal(s.overall.median_first.value(), 1.0)
+    assert_equal(s.suites[0].n_first_ratio, 2)
+    assert_almost_equal(s.suites[0].geomean_first.value(), 1.7320508075688772, atol=1e-12)
+    assert_equal(s.suites[0].median_first.value(), 2.0)
+    assert_equal(s.suites[1].n_first_ratio, 1)
+    assert_almost_equal(s.suites[1].geomean_first.value(), 1.0, atol=1e-12)
+    assert_equal(s.suites[1].median_first.value(), 1.0)
+    # the steady-state aggregates are the ones they were
+    assert_almost_equal(s.overall.geomean.value(), 0.9085602964160698, atol=1e-12)
 
 
 def test_threshold_is_a_parameter() raises:
@@ -175,8 +232,9 @@ def test_summary_line() raises:
     assert_equal(
         summary_line(s.overall, r.run.pass_max, r.env.duckdb),
         String(
-            "PASS 2/5 at <= 1.05x vs duckdb v1.5.6 (PINNED) | geomean 0.91x"
-            " over 3/5 value-verified | median 1.00x"
+            "PASS 2/5 at <= 1.05x vs duckdb v1.5.6 (PINNED) | steady-state geomean 0.91x"
+            " over 3/5 value-verified | steady-state median 1.00x"
+            " | first-run geomean 1.44x median 1.00x"
         ),
     )
     var unpinned = DuckDbPin(String("v1.5.6"), String(""), String("UNPINNED:local build"))
@@ -184,7 +242,8 @@ def test_summary_line() raises:
         summary_line(s.suites[1], 2.0, unpinned),
         String(
             "PASS 1/2 at <= 2.0x vs duckdb v1.5.6 (UNPINNED:local build) |"
-            " geomean 0.50x over 1/2 value-verified | median 0.50x"
+            " steady-state geomean 0.50x over 1/2 value-verified | steady-state median 0.50x"
+            " | first-run geomean 1.00x median 1.00x"
         ),
     )
     var only = List[Cell]()
@@ -193,8 +252,29 @@ def test_summary_line() raises:
     assert_equal(
         summary_line(summarize(none).overall, none.run.pass_max, none.env.duckdb),
         String(
-            "PASS 0/1 at <= 1.05x vs duckdb v1.5.6 (PINNED) | geomean n/a"
+            "PASS 0/1 at <= 1.05x vs duckdb v1.5.6 (PINNED) | steady-state geomean n/a"
             " (0/1 cells have a ratio)"
+        ),
+    )
+
+
+def test_summary_line_without_runs_states_no_first_run() raises:
+    var medians = List[Float64]()
+    medians.append(3.0)
+    medians.append(3.0)
+    var legacy = Optional[Side](Side(4, 3.0, medians^, 0.0))
+    var only = List[Cell]()
+    only.append(Cell.build(
+        String("tpch/q01"), String("tpch"), 4, StageOutcome.exec_ok(),
+        legacy.copy(), _side(4, 2.0, 2.0), ValueVerdict.identical(), 1.05,
+    ))
+    var r = _sample()
+    var older = BenchResult(r.run.copy(), r.env.copy(), only^)
+    assert_equal(
+        summary_line(summarize(older).overall, older.run.pass_max, older.env.duckdb),
+        String(
+            "PASS 0/1 at <= 1.05x vs duckdb v1.5.6 (PINNED) | steady-state geomean 1.50x"
+            " over 1/1 value-verified | steady-state median 1.50x"
         ),
     )
 
@@ -216,6 +296,18 @@ def main() raises:
         test_ratio_only_for_verified_cells()
     except e:
         failed += "\n  test_ratio_only_for_verified_cells: " + String(e)
+    try:
+        test_first_run_ratio()
+    except e:
+        failed += "\n  test_first_run_ratio: " + String(e)
+    try:
+        test_first_run_geomean_and_median()
+    except e:
+        failed += "\n  test_first_run_geomean_and_median: " + String(e)
+    try:
+        test_summary_line_without_runs_states_no_first_run()
+    except e:
+        failed += "\n  test_summary_line_without_runs_states_no_first_run: " + String(e)
     try:
         test_threshold_is_a_parameter()
     except e:

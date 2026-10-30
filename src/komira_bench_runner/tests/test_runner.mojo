@@ -13,15 +13,27 @@
 #   duckdb 2 ms), the ratio 1.5 and the verdict FAIL against 1.0; the arm and
 #   DuckDB were both given the same threads and memory limit; the arm ran the
 #   check with rows before any timed run.
-# - test_wide_runs_discard_warmup_runs_and_the_result_records_them: with the
-#   warm-up count left to the thread count, 1 and 8 threads discard none and
-#   32 and 88 discard 5 runs of each query on each engine before the first
-#   sweep; an explicit count (9 at 88 threads, 2 at 8, 0 at 32) is used as
-#   given; the arm and DuckDB each ran that many extra times, the measured
-#   sweeps and the cell are unchanged, and `run.warmup_runs` in the written
-#   result reads back as the count.
-# - test_a_cold_result_discards_no_warmup_runs: at 88 threads the warm result
-#   records 5 and the cold result records 0.
+# - test_every_run_is_recorded_rep_zero_of_every_sweep_included: with komira
+#   runs of (30, 3, 3) and (9, 3, 3) ms and DuckDB runs of (10, 2, 2) and
+#   (7, 2, 2) ms, the cell holds all twelve runs in order with rep 0 of both
+#   sweeps; the first run is 30 ms against 10 ms (first-run ratio 3.0); the
+#   steady-state time is 3 ms against 2 ms (ratio 1.5, from the runs after each
+#   sweep's first); the written result reads back to the same text, and the
+#   console report states the steady-state and the first-run figures.
+# - test_no_run_is_discarded_at_any_thread_count: at 1, 32 and 88 threads the
+#   arm and DuckDB each run the query exactly once to check it and then
+#   sweeps x reps times, all of which are recorded: nothing is run to be
+#   thrown away.
+# - test_page_faults_per_run_are_recorded_for_both_engines: counters that move
+#   by 12000, 900, 880, 870, 860, 850 minor faults (3 major on the first run)
+#   while the arm runs and by 54000, 1000, 900, 800, 700, 650 (5 and 1 major
+#   on the first two runs) while DuckDB runs are recorded run by run, in the
+#   shape of the runs, for each engine, and survive the written file.
+# - test_runs_without_counters_say_not_measured: engines that cannot read
+#   their counters still have every run recorded, and the faults of both
+#   sides are absent, not zero.
+# - test_a_cold_result_records_every_run: the cold result holds all its runs
+#   (here 30 ms each) with the first run in place, like the warm one.
 # - test_a_mismatching_answer_is_recorded_wrong_and_never_timed: rows that
 #   differ in one value give EXEC_FAIL with the cause "answer differs from
 #   duckdb", no time on either side, no ratio; the arm ran once and DuckDB ran
@@ -78,6 +90,7 @@ from komira_bench_duckdb import (
     Cell,
     DuckDbSession,
     DuckDbTransport,
+    FaultCount,
     OrderKey,
     ResultSet,
     StdoutChunk,
@@ -86,7 +99,9 @@ from komira_bench_duckdb import (
 from komira_bench_duckdb.cells import KIND_FLOAT, KIND_TEXT
 from komira_bench_duckdb.text import slice_bytes
 from komira_bench_report import (
+    Cell as ReportCell,
     DuckDbPin,
+    STEADY_STATE_DEFINITION,
     parse_result_json,
     write_result_json,
 )
@@ -130,13 +145,32 @@ struct Rule(Copyable, Movable):
     var types: String
     """What DuckDB answers for DESCRIBE of the query, as JSON; empty means the
     types are worked out from the first row of `json` (see `_describe_of`)."""
+    var costs: List[Int]
+    """The nanoseconds the n-th run of this rule takes (n from 0, the fetch of
+    the answer first); a run past the list takes `cost`."""
+    var minors: List[Int]
+    """The minor page faults the n-th run adds to the process's total."""
+    var majors: List[Int]
 
-    def __init__(out self, needle: String, json: String, error: String, cost: Int, types: String = String("")):
+    def __init__(
+        out self,
+        needle: String,
+        json: String,
+        error: String,
+        cost: Int,
+        types: String = String(""),
+        var costs: List[Int] = List[Int](),
+        var minors: List[Int] = List[Int](),
+        var majors: List[Int] = List[Int](),
+    ):
         self.needle = needle
         self.json = json
         self.error = error
         self.cost = cost
         self.types = types
+        self.costs = costs^
+        self.minors = minors^
+        self.majors = majors^
 
     def describe(self) -> String:
         if self.types.byte_length() > 0:
@@ -183,13 +217,27 @@ struct FakeDuckDb(DuckDbTransport):
     var statement: String
     var cost: Int
     var mode: String
+    var rule_runs: List[Int]
+    var counters: Bool
+    var minor: Int64
+    var major: Int64
 
     def __init__(
-        out self, clock: ArcPointer[Int], sent: ArcPointer[List[String]], var rules: List[Rule]
+        out self,
+        clock: ArcPointer[Int],
+        sent: ArcPointer[List[String]],
+        var rules: List[Rule],
+        counters: Bool = False,
     ):
         self.clock = clock
         self.sent = sent
         self.rules = rules^
+        self.rule_runs = List[Int]()
+        for _ in range(len(self.rules)):
+            self.rule_runs.append(0)
+        self.counters = counters
+        self.minor = 700000
+        self.major = 11
         self.chunks = List[String]()
         self.advances = List[Int]()
         self.at = 0
@@ -213,7 +261,15 @@ struct FakeDuckDb(DuckDbTransport):
                 if self.mode == "json" and self.rules[i].json.byte_length() > 0:
                     self.emit(self.rules[i].json + String("\n"), 0)
                 self.errors += self.rules[i].error
+                var n = self.rule_runs[i]
+                self.rule_runs[i] = n + 1
                 self.cost = self.rules[i].cost
+                if n < len(self.rules[i].costs):
+                    self.cost = self.rules[i].costs[n]
+                if n < len(self.rules[i].minors):
+                    self.minor += Int64(self.rules[i].minors[n])
+                if n < len(self.rules[i].majors):
+                    self.major += Int64(self.rules[i].majors[n])
                 break
         self.statement = String("")
 
@@ -261,6 +317,11 @@ struct FakeDuckDb(DuckDbTransport):
     def finish(mut self) raises -> Int:
         return 0
 
+    def child_faults(self) -> Optional[FaultCount]:
+        if not self.counters:
+            return Optional[FaultCount]()
+        return Optional[FaultCount](FaultCount(self.minor, self.major))
+
 
 def _settings_rule(threads: Int = 4) -> Rule:
     return Rule(
@@ -307,6 +368,15 @@ struct FakeArm(EngineArm):
     var cold_penalty: Int
     var stop_after_check: Bool
     var wrong_count: Bool
+    var costs: List[Int]
+    """The nanoseconds the n-th run takes (n from 0, the check run first); a
+    run past the list takes the script's cost."""
+    var minors: List[Int]
+    var majors: List[Int]
+    var counters: Bool
+    var runs_seen: Int
+    var minor: Int64
+    var major: Int64
 
     def __init__(
         out self,
@@ -316,7 +386,18 @@ struct FakeArm(EngineArm):
         cold_penalty: Int = 0,
         stop_after_check: Bool = False,
         wrong_count: Bool = False,
+        var costs: List[Int] = List[Int](),
+        counters: Bool = False,
+        var minors: List[Int] = List[Int](),
+        var majors: List[Int] = List[Int](),
     ):
+        self.costs = costs^
+        self.minors = minors^
+        self.majors = majors^
+        self.counters = counters
+        self.runs_seen = 0
+        self.minor = 3000000
+        self.major = 17
         self.wrong_count = wrong_count
         self.clock = clock
         self.shared = shared
@@ -326,6 +407,11 @@ struct FakeArm(EngineArm):
 
     def label(self) -> String:
         return String("fake")
+
+    def faults(self) -> Optional[FaultCount]:
+        if not self.counters:
+            return Optional[FaultCount]()
+        return Optional[FaultCount](FaultCount(self.minor, self.major))
 
     def prepare(mut self, tables: List[TableBinding], threads: Int, memory_limit_bytes: Int) raises:
         self.shared[].log.append(
@@ -346,6 +432,14 @@ struct FakeArm(EngineArm):
                 if not materialize and self.stop_after_check:
                     return ArmAnswer.exec_failed(String("stopped"))
                 var cost = s.cost_ns
+                var n = self.runs_seen
+                self.runs_seen = n + 1
+                if n < len(self.costs):
+                    cost = self.costs[n]
+                if n < len(self.minors):
+                    self.minor += Int64(self.minors[n])
+                if n < len(self.majors):
+                    self.major += Int64(self.majors[n])
                 if self.shared[].cold_next:
                     cost += self.cold_penalty
                     self.shared[].cold_next = False
@@ -431,9 +525,13 @@ struct Rig(Movable):
         self.sent = ArcPointer[List[String]](List[String]())
         self.shared = ArcPointer[Shared](Shared())
 
-    def duckdb(self, var rules: List[Rule], threads: Int = 4) -> DuckDbSession[FakeDuckDb]:
+    def duckdb(
+        self, var rules: List[Rule], threads: Int = 4, counters: Bool = False
+    ) -> DuckDbSession[FakeDuckDb]:
         rules.insert(0, _settings_rule(threads))
-        return DuckDbSession[FakeDuckDb](FakeDuckDb(self.cell, self.sent, rules^), BenchClock.manual(self.cell))
+        return DuckDbSession[FakeDuckDb](
+            FakeDuckDb(self.cell, self.sent, rules^, counters), BenchClock.manual(self.cell)
+        )
 
     def sent_text(self) -> String:
         var out = String("")
@@ -525,19 +623,50 @@ def test_a_matching_answer_is_timed_and_recorded() raises:
     assert_equal(_count(header, String("derived from TPC-H; not comparable to published TPC-H results")), 1)
 
 
-def _warm_run_at(threads: Int, warmup_runs: Int, mut rig: Rig) raises -> RunOutput:
+def _ints(a: Int, b: Int, c: Int, d: Int, e: Int, f: Int, g: Int) -> List[Int]:
+    var out = List[Int]()
+    out.append(a)
+    out.append(b)
+    out.append(c)
+    out.append(d)
+    out.append(e)
+    out.append(f)
+    out.append(g)
+    return out^
+
+
+def _run_at(
+    threads: Int,
+    mut rig: Rig,
+    var duck_rule: Rule,
+    var arm_costs: List[Int] = List[Int](),
+    counters: Bool = False,
+    var arm_minors: List[Int] = List[Int](),
+    var arm_majors: List[Int] = List[Int](),
+) raises -> RunOutput:
     var rules = List[Rule]()
-    rules.append(Rule(String("revenue_q6"), String('[{"revenue":123.45}]'), String(""), 2 * _MS))
-    var session = rig.duckdb(rules^, threads)
+    rules.append(duck_rule^)
+    var session = rig.duckdb(rules^, threads, counters)
     var scripts = List[Script]()
     scripts.append(Script(String("tpch/q6"), ARM_ROWS, String(""), _rows_one(123.45), 3 * _MS))
-    var arm = FakeArm(rig.cell, rig.shared, scripts^)
+    var arm = FakeArm(
+        rig.cell, rig.shared, scripts^, 0, False, False, arm_costs^, counters, arm_minors^, arm_majors^
+    )
     var dropper = NoCacheDropper()
     var queries = List[QuerySpec]()
     queries.append(_q(String("q6"), String("SELECT revenue_q6")))
     return run_queries(
         session, arm, dropper, BenchClock.manual(rig.cell), queries, _inputs(),
-        RunSettings(threads, 16384, 2, 3, 0, 3, 1.0, warmup_runs),
+        RunSettings(threads, 16384, 2, 3, 0, 3, 1.0),
+    )
+
+
+def _q6_rule(
+    var costs: List[Int] = List[Int](), var minors: List[Int] = List[Int](), var majors: List[Int] = List[Int]()
+) -> Rule:
+    return Rule(
+        String("revenue_q6"), String('[{"revenue":123.45}]'), String(""), 2 * _MS, String(""),
+        costs^, minors^, majors^,
     )
 
 
@@ -545,39 +674,132 @@ def _arm_runs(log: String) -> Int:
     return _count(log, String("run count"))
 
 
-def test_wide_runs_discard_warmup_runs_and_the_result_records_them() raises:
-    # (threads, requested, expected discarded warm-up runs)
-    var cases = List[Tuple[Int, Int, Int]]()
-    cases.append((1, -1, 0))
-    cases.append((8, -1, 0))
-    cases.append((32, -1, 5))
-    cases.append((88, -1, 5))
-    cases.append((88, 9, 9))
-    cases.append((8, 2, 2))
-    cases.append((32, 0, 0))
-    for i in range(len(cases)):
-        var threads = cases[i][0]
-        var want = cases[i][2]
+def test_every_run_is_recorded_rep_zero_of_every_sweep_included() raises:
+    var rig = Rig()
+    # the fetch of the answer first, then two sweeps of three runs
+    var duck = _q6_rule(_ints(2 * _MS, 10 * _MS, 2 * _MS, 2 * _MS, 7 * _MS, 2 * _MS, 2 * _MS))
+    var out = _run_at(4, rig, duck^, _ints(3 * _MS, 30 * _MS, 3 * _MS, 3 * _MS, 9 * _MS, 3 * _MS, 3 * _MS))
+    ref c = out.warm.cells[0]
+    ref k = c.komira.value()
+    ref d = c.duckdb.value()
+    # every run, in order, rep 0 of each sweep included
+    assert_equal(len(k.runs_ms), 2)
+    assert_equal(len(k.runs_ms[0]), 3)
+    assert_equal(len(k.runs_ms[1]), 3)
+    assert_equal(k.runs_ms[0][0], 30.0)
+    assert_equal(k.runs_ms[0][1], 3.0)
+    assert_equal(k.runs_ms[0][2], 3.0)
+    assert_equal(k.runs_ms[1][0], 9.0)
+    assert_equal(k.runs_ms[1][1], 3.0)
+    assert_equal(k.runs_ms[1][2], 3.0)
+    assert_equal(len(d.runs_ms), 2)
+    assert_equal(d.runs_ms[0][0], 10.0)
+    assert_equal(d.runs_ms[0][2], 2.0)
+    assert_equal(d.runs_ms[1][0], 7.0)
+    assert_equal(d.runs_ms[1][2], 2.0)
+    # the first run, which is what a first query pays, for both engines
+    assert_equal(k.first_ms().value(), 30.0)
+    assert_equal(d.first_ms().value(), 10.0)
+    assert_equal(c.first_ratio.value(), 3.0)
+    # the steady-state time and ratio, from the runs after each sweep's first
+    assert_equal(k.ms, 3.0)
+    assert_equal(d.ms, 2.0)
+    assert_equal(len(k.ms_per_sweep), 2)
+    assert_equal(k.ms_per_sweep[1], 3.0)
+    assert_equal(c.ratio.value(), 1.5)
+    assert_equal(k.spread_pct, 0.0)
+    # the written result keeps all of it
+    var text = write_result_json(out.warm)
+    var back = parse_result_json(text)
+    assert_equal(write_result_json(back), text)
+    assert_equal(back.cells[0].komira.value().runs_ms[1][0], 9.0)
+    assert_equal(back.cells[0].duckdb.value().runs_ms[0][0], 10.0)
+    assert_equal(back.cells[0].first_ratio.value(), 3.0)
+    # the console states both, and what steady state means
+    var report = format_run(out)
+    assert_true(report.find(String("steady-state geomean")) >= 0)
+    assert_true(report.find(String("first-run geomean 3.00x")) >= 0)
+    assert_true(report.find(String(STEADY_STATE_DEFINITION)) >= 0)
+
+
+def test_no_run_is_discarded_at_any_thread_count() raises:
+    var threads = List[Int]()
+    threads.append(1)
+    threads.append(32)
+    threads.append(88)
+    for i in range(len(threads)):
         var rig = Rig()
-        var out = _warm_run_at(threads, cases[i][1], rig)
-        # the result says how many runs were discarded before the sweeps
-        assert_equal(out.warm.run.warmup_runs, want)
-        assert_equal(out.warm.run.threads, Int64(threads))
+        var out = _run_at(threads[i], rig, _q6_rule())
+        assert_equal(out.warm.run.threads, Int64(threads[i]))
         assert_equal(out.outcomes[0].timed, True)
-        # the discarded runs were run, on both engines, in addition to the
-        # 2 sweeps x 3 reps that are measured
-        assert_equal(_arm_runs(rig.log_text()), 6 + want)
-        assert_equal(_runs(rig.sent_text(), String("SELECT revenue_q6")), 1 + 6 + want)
-        # the cell is the same measurement whatever was discarded
-        assert_equal(out.warm.cells[0].komira.value().ms, 3.0)
-        assert_equal(out.warm.cells[0].duckdb.value().ms, 2.0)
-        assert_equal(len(out.warm.cells[0].komira.value().ms_per_sweep), 2)
-        # and the count survives the file
-        var back = parse_result_json(write_result_json(out.warm))
-        assert_equal(back.run.warmup_runs, want)
+        # one checking run, then 2 sweeps x 3 reps, all of them recorded
+        assert_equal(_arm_runs(rig.log_text()), 6)
+        assert_equal(_runs(rig.sent_text(), String("SELECT revenue_q6")), 1 + 6)
+        ref k = out.warm.cells[0].komira.value()
+        ref d = out.warm.cells[0].duckdb.value()
+        assert_equal(len(k.runs_ms), 2)
+        assert_equal(len(k.runs_ms[0]) + len(k.runs_ms[1]), 6)
+        assert_equal(len(d.runs_ms[0]) + len(d.runs_ms[1]), 6)
 
 
-def test_a_cold_result_discards_no_warmup_runs() raises:
+def test_page_faults_per_run_are_recorded_for_both_engines() raises:
+    var rig = Rig()
+    var duck = _q6_rule(
+        List[Int](), _ints(0, 54000, 1000, 900, 800, 700, 650), _ints(0, 5, 1, 0, 0, 0, 0)
+    )
+    var out = _run_at(
+        4, rig, duck^, List[Int](), True,
+        _ints(0, 12000, 900, 880, 870, 860, 850), _ints(0, 3, 0, 0, 0, 0, 0),
+    )
+    _check_faults(out.warm.cells[0])
+    # and the same after the file is written and read
+    var back = parse_result_json(write_result_json(out.warm))
+    _check_faults(back.cells[0])
+
+
+def _check_faults(c: ReportCell) raises:
+    ref k = c.komira.value()
+    ref d = c.duckdb.value()
+    # one count per run, in the shape of the runs: the check run is not one
+    assert_equal(len(k.minor_faults), 2)
+    assert_equal(len(k.minor_faults[0]), 3)
+    assert_equal(k.minor_faults[0][0], Int64(12000))
+    assert_equal(k.minor_faults[0][1], Int64(900))
+    assert_equal(k.minor_faults[0][2], Int64(880))
+    assert_equal(k.minor_faults[1][0], Int64(870))
+    assert_equal(k.minor_faults[1][2], Int64(850))
+    assert_equal(k.major_faults[0][0], Int64(3))
+    assert_equal(k.major_faults[0][1], Int64(0))
+    assert_equal(k.major_faults[1][2], Int64(0))
+    assert_equal(len(d.minor_faults), 2)
+    assert_equal(d.minor_faults[0][0], Int64(54000))
+    assert_equal(d.minor_faults[0][1], Int64(1000))
+    assert_equal(d.minor_faults[0][2], Int64(900))
+    assert_equal(d.minor_faults[1][0], Int64(800))
+    assert_equal(d.minor_faults[1][2], Int64(650))
+    assert_equal(d.major_faults[0][0], Int64(5))
+    assert_equal(d.major_faults[0][1], Int64(1))
+    assert_equal(d.major_faults[1][1], Int64(0))
+
+
+def test_runs_without_counters_say_not_measured() raises:
+    var rig = Rig()
+    var out = _run_at(4, rig, _q6_rule())
+    ref k = out.warm.cells[0].komira.value()
+    ref d = out.warm.cells[0].duckdb.value()
+    assert_equal(len(k.runs_ms[0]), 3)
+    assert_equal(len(d.runs_ms[1]), 3)
+    assert_equal(len(k.minor_faults), 0)
+    assert_equal(len(k.major_faults), 0)
+    assert_equal(len(d.minor_faults), 0)
+    assert_equal(len(d.major_faults), 0)
+    var text = write_result_json(out.warm)
+    assert_true(text.find(String('"minor_faults":null,"major_faults":null')) >= 0)
+    var back = parse_result_json(text)
+    assert_equal(len(back.cells[0].komira.value().minor_faults), 0)
+
+
+def test_a_cold_result_records_every_run() raises:
     var rig = Rig()
     var rules = List[Rule]()
     rules.append(Rule(String("revenue_q6"), String('[{"revenue":123.45}]'), String(""), 2 * _MS))
@@ -592,8 +814,16 @@ def test_a_cold_result_discards_no_warmup_runs() raises:
         session, arm, dropper, BenchClock.manual(rig.cell), queries, _inputs(),
         RunSettings(88, 16384, 2, 3, 2, 3, 1.0),
     )
-    assert_equal(out.warm.run.warmup_runs, 5)
-    assert_equal(out.cold.value().run.warmup_runs, 0)
+    ref k = out.cold.value().cells[0].komira.value()
+    assert_equal(len(k.runs_ms), 2)
+    assert_equal(len(k.runs_ms[0]), 3)
+    assert_equal(len(k.runs_ms[1]), 3)
+    assert_equal(k.runs_ms[0][0], 30.0)
+    assert_equal(k.runs_ms[1][2], 30.0)
+    assert_equal(k.first_ms().value(), 30.0)
+    assert_equal(out.cold.value().cells[0].first_ratio.value(), 15.0)
+    # the warm result of the same run has its runs too
+    assert_equal(len(out.warm.cells[0].komira.value().runs_ms), 2)
 
 
 def test_a_mismatching_answer_is_recorded_wrong_and_never_timed() raises:

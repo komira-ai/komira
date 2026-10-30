@@ -8,6 +8,16 @@
 #   (which keep their row), the threshold in FAIL(...), the reason in NO_RATIO,
 #   and a footer per suite and for the run that carries the PASS count with
 #   its denominator, the threshold and the pin.
+#   Each cell shows its first run (komira, DuckDB, and their ratio), its
+#   steady-state time (the same three) and the spread of the sweep medians of
+#   each engine, in separate columns; a dash stands where a side has no first
+#   run (komira refused) or no spread, and where a ratio does not exist.
+#   Beneath the rows a legend, and the definition of "first" and "steady" as
+#   `STEADY_STATE_DEFINITION` states it, appear once. The summary lines call the
+#   geomean and median steady-state and state the first-run ones beside them.
+# - test_a_cell_read_from_an_older_result_shows_dashes_for_its_first_run: a cell
+#   whose sides have no runs prints dashes in the three first-run columns and
+#   still prints its steady-state columns and ratio.
 # - test_ratio_is_shown_to_three_places: a ratio just above the threshold is
 #   not rounded onto it: 1.504 against 1.5 reads FAIL, and shows 1.504.
 # - test_table_of_an_unpinned_scale_in_rows: a rows scale and an unpinned DuckDB
@@ -24,6 +34,7 @@ from komira_bench_report import (
     Environment,
     RunInfo,
     STATISTIC_MIN_OF_SWEEP_MEDIAN,
+    STEADY_STATE_DEFINITION,
     Side,
     StageOutcome,
     ValueVerdict,
@@ -65,6 +76,13 @@ def _side(rows: Int64, m1: Float64, m2: Float64) raises -> Optional[Side]:
     )
 
 
+# The same, with the first run of the first sweep `first` instead of 99.
+def _side_first(rows: Int64, first: Float64, m1: Float64, m2: Float64) raises -> Optional[Side]:
+    return Optional[Side](
+        Side.from_sweeps(rows, _sweeps(first, m1, m1, m1, 99.0, m2, m2, m2))
+    )
+
+
 def _cell(
     id: String,
     suite: String,
@@ -80,10 +98,11 @@ def _cell(
 
 def _sample() raises -> BenchResult:
     var cells = List[Cell]()
-    # komira sweeps (99,4,6,5) and (99,3,3,3): medians 5 and 3, time 3.
+    # komira sweeps (99,4,6,5) and (99,3,3,3): medians 5 and 3, time 3; its
+    # first run is 99 against DuckDB's 33.
     var q01k = Side.from_sweeps(4, _sweeps(99.0, 4.0, 6.0, 5.0, 99.0, 3.0, 3.0, 3.0))
     cells.append(_cell(String("tpch/q01"), String("tpch"), StageOutcome.exec_ok(),
-        Optional[Side](q01k^), _side(4, 2.0, 4.0), ValueVerdict.identical()))
+        Optional[Side](q01k^), _side_first(4, 33.0, 2.0, 4.0), ValueVerdict.identical()))
     cells.append(_cell(String("tpch/q02"), String("tpch"), StageOutcome.exec_ok(),
         _side(10, 2.0, 2.0), _side(10, 2.0, 2.0), ValueVerdict.identical()))
     cells.append(_cell(String("tpch/q03"), String("tpch"), StageOutcome.exec_ok(),
@@ -107,17 +126,38 @@ def _sample() raises -> BenchResult:
 def test_table_of_the_sample() raises:
     var want = (
         String("komira-bench  tpch,clickbench SF10  threads=20  duckdb v1.5.6 (PINNED)  komira 1.2.3  dataset a1b2c3d4\n")
-        + String(" cell            komira ms  duckdb ms   ratio       rows  values  verdict\n")
-        + String(" tpch/q01             3.00       2.00   1.500          4  IDENT   FAIL(1.05)\n")
-        + String(" tpch/q02             2.00       2.00   1.000         10  IDENT   PASS\n")
-        + String(" tpch/q03             1.00       4.00       -          7  DIVERG  NO_RATIO(DIVERGENT)\n")
-        + String(" clickbench/q01          -       8.00       -        100  UNVER   NO_RATIO(UNSUPPORTED:window frame)\n")
-        + String(" clickbench/q02       1.00       2.00   0.500         43  IDENT   PASS\n")
-        + String(" tpch: PASS 1/3 at <= 1.05x vs duckdb v1.5.6 (PINNED) | geomean 1.22x over 2/3 value-verified | median 1.25x\n")
-        + String(" clickbench: PASS 1/2 at <= 1.05x vs duckdb v1.5.6 (PINNED) | geomean 0.50x over 1/2 value-verified | median 0.50x\n")
-        + String(" all: PASS 2/5 at <= 1.05x vs duckdb v1.5.6 (PINNED) | geomean 0.91x over 3/5 value-verified | median 1.00x\n")
+        + String(" cell            first k  first d  first x steady k steady d steady x  spr k %  spr d %       rows  values  verdict\n")
+        + String(" tpch/q01          99.00    33.00    3.000     3.00     2.00    1.500     66.7    100.0          4  IDENT   FAIL(1.05)\n")
+        + String(" tpch/q02          99.00    99.00    1.000     2.00     2.00    1.000      0.0      0.0         10  IDENT   PASS\n")
+        + String(" tpch/q03          99.00    99.00        -     1.00     4.00        -      0.0      0.0          7  DIVERG  NO_RATIO(DIVERGENT)\n")
+        + String(" clickbench/q01        -    99.00        -        -     8.00        -        -      0.0        100  UNVER   NO_RATIO(UNSUPPORTED:window frame)\n")
+        + String(" clickbench/q02    99.00    99.00    1.000     1.00     2.00    0.500      0.0      0.0         43  IDENT   PASS\n")
+        + String(" k = komira, d = duckdb, x = komira over duckdb, spr = spread of the sweep medians in percent of the least\n")
+        + String(" ") + String(STEADY_STATE_DEFINITION) + String("\n")
+        + String(" tpch: PASS 1/3 at <= 1.05x vs duckdb v1.5.6 (PINNED) | steady-state geomean 1.22x over 2/3 value-verified | steady-state median 1.25x | first-run geomean 1.73x median 2.00x\n")
+        + String(" clickbench: PASS 1/2 at <= 1.05x vs duckdb v1.5.6 (PINNED) | steady-state geomean 0.50x over 1/2 value-verified | steady-state median 0.50x | first-run geomean 1.00x median 1.00x\n")
+        + String(" all: PASS 2/5 at <= 1.05x vs duckdb v1.5.6 (PINNED) | steady-state geomean 0.91x over 3/5 value-verified | steady-state median 1.00x | first-run geomean 1.44x median 1.00x\n")
     )
     assert_equal(render_table(_sample()), want)
+
+
+def test_a_cell_read_from_an_older_result_shows_dashes_for_its_first_run() raises:
+    var r = _sample()
+    var medians = List[Float64]()
+    medians.append(3.0)
+    medians.append(3.0)
+    var duck = List[Float64]()
+    duck.append(2.0)
+    duck.append(2.0)
+    var k = Optional[Side](Side(4, 3.0, medians^, 0.0))
+    var d = Optional[Side](Side(4, 2.0, duck^, 0.0))
+    var cells = List[Cell]()
+    cells.append(_cell(String("tpch/q01"), String("tpch"), StageOutcome.exec_ok(), k^, d^, ValueVerdict.identical()))
+    r.cells = cells^
+    var text = render_table(r)
+    assert_true(text.find(String(" tpch/q01        -        -        -     3.00     2.00    1.500      0.0      0.0          4  IDENT   FAIL(1.05)\n")) >= 0)
+    # no first-run figure is stated for it
+    assert_true(text.find(String("first-run geomean")) < 0)
 
 
 def test_ratio_is_shown_to_three_places() raises:
@@ -171,6 +211,10 @@ def main() raises:
         test_table_of_the_sample()
     except e:
         failed += "\n  test_table_of_the_sample: " + String(e)
+    try:
+        test_a_cell_read_from_an_older_result_shows_dashes_for_its_first_run()
+    except e:
+        failed += "\n  test_a_cell_read_from_an_older_result_shows_dashes_for_its_first_run: " + String(e)
     try:
         test_ratio_is_shown_to_three_places()
     except e:

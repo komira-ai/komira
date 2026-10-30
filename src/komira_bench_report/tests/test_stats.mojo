@@ -10,6 +10,13 @@
 # - test_min_of_sweep_medians: the least of the per-sweep medians: sweeps
 #   (50,10,12,11), (50,9,30,10), (50,20,20,20) give 10, not the least rep (9),
 #   not the mean of the medians, not the median of all reps.
+# - test_first_run_and_steady_state: the first run of a cell is rep 0 of its
+#   first sweep, whatever the later sweeps' rep 0 were (50, 40, 20 give 50);
+#   the steady-state time is the least over the sweeps of the median of the
+#   runs after that sweep's first: sweeps (50,10,12,11), (40,9,30,10),
+#   (20,20,20,20) give 10, which is not the first run, not the least run (9),
+#   and not the median of every run; a sweep of one run has no steady state and
+#   is refused, as are no sweeps.
 # - test_geomean: exact on powers of two, and zero, negative, infinite and
 #   empty inputs are refused (a log of zero must not become a ratio).
 # - test_spread_and_ratio: spread in percent of the least, the ratio komira
@@ -20,11 +27,13 @@ from std.testing import assert_almost_equal, assert_equal, assert_true
 
 from komira_bench_report import (
     drop_first_rep,
+    first_run_ms,
     geomean,
     median,
     min_of_sweep_medians,
     ratio_of,
     spread_pct,
+    steady_state_ms,
     sweep_median,
 )
 
@@ -92,6 +101,44 @@ def test_min_of_sweep_medians() raises:
     assert_equal(min_of_sweep_medians(sweeps), 10.0)
 
 
+def test_first_run_and_steady_state() raises:
+    var sweeps = List[List[Float64]]()
+    sweeps.append(_l(50.0, 10.0, 12.0, 11.0))
+    sweeps.append(_l(40.0, 9.0, 30.0, 10.0))
+    sweeps.append(_l(20.0, 20.0, 20.0, 20.0))
+    assert_equal(first_run_ms(sweeps), 50.0)
+    assert_equal(steady_state_ms(sweeps), 10.0)
+    # the later sweeps' rep 0 do not move the first run
+    var other = List[List[Float64]]()
+    other.append(_l(7.0, 10.0, 12.0, 11.0))
+    other.append(_l(900.0, 10.0, 12.0, 11.0))
+    assert_equal(first_run_ms(other), 7.0)
+    assert_equal(steady_state_ms(other), 11.0)
+    var short = List[List[Float64]]()
+    var one = List[Float64]()
+    one.append(5.0)
+    short.append(one^)
+    var raised = False
+    try:
+        _ = steady_state_ms(short)
+    except:
+        raised = True
+    assert_true(raised)
+    assert_equal(first_run_ms(short), 5.0)
+    raised = False
+    try:
+        _ = first_run_ms(List[List[Float64]]())
+    except:
+        raised = True
+    assert_true(raised)
+    raised = False
+    try:
+        _ = steady_state_ms(List[List[Float64]]())
+    except:
+        raised = True
+    assert_true(raised)
+
+
 def test_geomean() raises:
     assert_almost_equal(geomean(_l3(1.0, 4.0, 16.0)), 4.0, atol=1e-12)
     var two = List[Float64]()
@@ -144,6 +191,10 @@ def main() raises:
         test_min_of_sweep_medians()
     except e:
         failed += "\n  test_min_of_sweep_medians: " + String(e)
+    try:
+        test_first_run_and_steady_state()
+    except e:
+        failed += "\n  test_first_run_and_steady_state: " + String(e)
     try:
         test_geomean()
     except e:
