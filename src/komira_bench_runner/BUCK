@@ -1,0 +1,53 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
+
+# The benchmark runner: for a query, it registers the dataset in the pinned
+# DuckDB and in the komira arm, checks the komira answer against DuckDB's
+# before anything is timed, times warm and cold runs of both engines at the
+# same thread count and memory limit, and fills a `BenchResult`
+# (komira_bench_report) written as result.json. The komira side is a trait
+# (`EngineArm`); the arm that exists today refuses every query by name. See
+# __init__.mojo and docs/design/lowering_and_pipeline.md section 7.4, of which
+# it implements the thread count on both engines, cold and warm reported
+# separately, results checked before timing with the stated float tolerance,
+# and refusals listed. It does not mark shortcuts both engines take and does
+# not disclose grain state.
+#
+# The welded tests (each file's header says what each test proves):
+# - test_entrypoint: the query text trim, the cache dropper's control file, the
+#   dataset lock, and the exit status 2 of a bad command line.
+# - test_inputs: the query digest, the tables and scale of a manifest, the
+#   flags, the refusal arm and the settings checks.
+# - test_runner: the run over a DuckDB transport, a komira arm and a cache
+#   dropper that live in the test and a manual clock: a matching answer is
+#   timed, a wrong one is recorded and never timed, a refusal is listed, cold
+#   and warm are separate results, and the files round-trip.
+mojo_library(
+    name = "komira_bench_runner",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo", "main/**/*.mojo"]),
+    # Direct dependencies: the rule adds each one's own closure to the compiler.
+    deps = [
+        "//src/komira_bench_data:komira_bench_data",
+        "//src/komira_bench_duckdb:komira_bench_duckdb",
+        "//src/komira_bench_report:komira_bench_report",
+        "//src/komira_crypto:komira_crypto",
+    ],
+    test_deps = [
+        "//tools/build/mojo/runtime_paths:komira_runtime_paths",
+    ],
+    test_srcs = [
+        "tests/test_entrypoint.mojo",
+        "tests/test_inputs.mojo",
+        "tests/test_runner.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)
+
+# The program, run with the flags entrypoint.mojo lists; its exit status is described there.
+# (see entrypoint.mojo for the flags and the exit status).
+mojo_binary(
+    name = "komira_bench_runner_main",
+    srcs = ["main/bench_runner_main.mojo"],
+    main = "main/bench_runner_main.mojo",
+    deps = [":komira_bench_runner"],
+    visibility = ["PUBLIC"],
+)
