@@ -36,7 +36,7 @@ GRAPH_JSON = r'''{
         {"path": "src/komira_host/src/komira_host/__init__.mojo", "sha256": "68cb9c9fa114665d4a127e1701188599fd11815a18178fa3bac40831ed217698"},
         {"path": "src/komira_host/src/komira_host/cpu_topology.mojo", "sha256": "f2434228d4d42ca8eb281c4d1960b43d323693d39a656023dd0960bd20860f98"},
         {"path": "src/komira_host/src/komira_host/engine_placement.mojo", "sha256": "af427e86253bd1b7897acf01721335f380685fd8acf2d35bbb5321fa2bf9c3f9"},
-        {"path": "src/komira_host/src/komira_host/proc_probe.mojo", "sha256": "70ec160b7d522847102f6efe3d065b33bc5c22759b7726f01683111eb4797644"},
+        {"path": "src/komira_host/src/komira_host/proc_probe.mojo", "sha256": "15f48636ee93172c0f46a5f9f5dad6fc42369f91ee378055bca0b2c040ce6bb9"},
         {"path": "src/komira_host/src/komira_host/thp_policy.mojo", "sha256": "ac554b14ba02b268c1dd28a304ea7a5acf7d617601f0a2b82a7bae996f20c0f1"}
       ],
       "deps": [],
@@ -188,7 +188,7 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
         {"path": "src/komira_host/src/komira_host/__init__.mojo", "sha256": "68cb9c9fa114665d4a127e1701188599fd11815a18178fa3bac40831ed217698"},
         {"path": "src/komira_host/src/komira_host/cpu_topology.mojo", "sha256": "f2434228d4d42ca8eb281c4d1960b43d323693d39a656023dd0960bd20860f98"},
         {"path": "src/komira_host/src/komira_host/engine_placement.mojo", "sha256": "af427e86253bd1b7897acf01721335f380685fd8acf2d35bbb5321fa2bf9c3f9"},
-        {"path": "src/komira_host/src/komira_host/proc_probe.mojo", "sha256": "70ec160b7d522847102f6efe3d065b33bc5c22759b7726f01683111eb4797644"},
+        {"path": "src/komira_host/src/komira_host/proc_probe.mojo", "sha256": "15f48636ee93172c0f46a5f9f5dad6fc42369f91ee378055bca0b2c040ce6bb9"},
         {"path": "src/komira_host/src/komira_host/thp_policy.mojo", "sha256": "ac554b14ba02b268c1dd28a304ea7a5acf7d617601f0a2b82a7bae996f20c0f1"}
       ],
       "deps": [],
@@ -337,7 +337,7 @@ GRAPH_JSON_OSX_ARM64 = r'''{
         {"path": "src/komira_host/src/komira_host/__init__.mojo", "sha256": "68cb9c9fa114665d4a127e1701188599fd11815a18178fa3bac40831ed217698"},
         {"path": "src/komira_host/src/komira_host/cpu_topology.mojo", "sha256": "f2434228d4d42ca8eb281c4d1960b43d323693d39a656023dd0960bd20860f98"},
         {"path": "src/komira_host/src/komira_host/engine_placement.mojo", "sha256": "af427e86253bd1b7897acf01721335f380685fd8acf2d35bbb5321fa2bf9c3f9"},
-        {"path": "src/komira_host/src/komira_host/proc_probe.mojo", "sha256": "70ec160b7d522847102f6efe3d065b33bc5c22759b7726f01683111eb4797644"},
+        {"path": "src/komira_host/src/komira_host/proc_probe.mojo", "sha256": "15f48636ee93172c0f46a5f9f5dad6fc42369f91ee378055bca0b2c040ce6bb9"},
         {"path": "src/komira_host/src/komira_host/thp_policy.mojo", "sha256": "ac554b14ba02b268c1dd28a304ea7a5acf7d617601f0a2b82a7bae996f20c0f1"}
       ],
       "deps": [],
