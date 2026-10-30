@@ -30,6 +30,15 @@
 #   results with their own sweeps and reps; the cache is dropped before every
 #   cold rep of each engine and never before a warm rep; the same query is
 #   3 ms warm and 30 ms cold.
+# - test_a_timed_run_that_returns_other_rows_than_the_check_ends_the_run: an
+#   arm whose timed runs return a different row count than its verified run
+#   is not reported as identical; the run raises.
+# - test_every_kind_of_difference_is_a_wrong_answer: an integer, a string, a
+#   row count and a NULL that differ are each recorded wrong and not timed.
+# - test_the_exit_status_follows_the_cells: 0 for a run whose every query
+#   matched, 1 for a refusal or a wrong answer.
+# - test_the_tolerance_is_printed_and_written: the comparison tolerance is on
+#   the console and in comparison.txt.
 # - test_cold_is_not_measured_when_the_cache_cannot_be_dropped: a dropper that
 #   cannot, and one that fails, leave the warm result whole, no cold result,
 #   and the reason in the report.
@@ -48,7 +57,9 @@ from std.testing import TestSuite, assert_equal, assert_false, assert_raises, as
 
 from komira_bench_data import find_manifest
 from komira_bench_duckdb import (
+    ABS_FLOOR,
     BenchClock,
+    REL_TOL,
     Cell,
     DuckDbSession,
     DuckDbTransport,
@@ -79,7 +90,9 @@ from komira_bench_runner import (
     RunInputs,
     RunSettings,
     TableBinding,
+    comparison_text,
     format_run,
+    run_status,
     queries_file_text,
     run_queries,
     write_run,
@@ -234,6 +247,7 @@ struct FakeArm(EngineArm):
     var scripts: List[Script]
     var cold_penalty: Int
     var stop_after_check: Bool
+    var wrong_count: Bool
 
     def __init__(
         out self,
@@ -242,7 +256,9 @@ struct FakeArm(EngineArm):
         var scripts: List[Script],
         cold_penalty: Int = 0,
         stop_after_check: Bool = False,
+        wrong_count: Bool = False,
     ):
+        self.wrong_count = wrong_count
         self.clock = clock
         self.shared = shared
         self.scripts = scripts^
@@ -277,6 +293,8 @@ struct FakeArm(EngineArm):
                 self.clock[] = self.clock[] + cost
                 if materialize:
                     return ArmAnswer.with_rows(s.rows.copy())
+                if self.wrong_count:
+                    return ArmAnswer.counted(Int64(s.rows.row_count() + 1))
                 return ArmAnswer.counted(Int64(s.rows.row_count()))
         raise Error("the fake arm has no script for " + query.key())
 
@@ -436,6 +454,7 @@ def test_a_matching_answer_is_timed_and_recorded() raises:
     assert_equal(_count(sent, String("CREATE OR REPLACE VIEW")), 8)
     assert_true(sent.find(String("\"lineitem\" AS SELECT * FROM read_parquet('/cache/tpch/sf1/lineitem.parquet')")) >= 0)
     assert_true(format_run(out).find(String("PASS 0/1")) >= 0)
+    assert_equal(run_status(out), 0)
 
 
 def test_a_mismatching_answer_is_recorded_wrong_and_never_timed() raises:
@@ -465,6 +484,7 @@ def test_a_mismatching_answer_is_recorded_wrong_and_never_timed() raises:
     assert_equal(rig.log_text(), String("prepare 8 4 16384|run rows|"))
     assert_equal(_count(rig.sent_text(), String("SELECT revenue_q6")), 1)
     var report = format_run(out)
+    assert_equal(run_status(out), 1)
     assert_true(report.find(String("== failed ==\ntpch/q6  EXEC_FAIL")) >= 0)
 
 
@@ -516,6 +536,7 @@ def test_a_refusal_is_listed_by_name_and_nothing_is_timed() raises:
         assert_false(Bool(out.warm.cells[i].ratio))
         assert_false(out.outcomes[i].timed)
     var report = format_run(out)
+    assert_equal(run_status(out), 1)
     assert_true(
         report.find(String("== unserved (refused by the komira arm) ==\ntpch/q6  UNSUPPORTED:no_engine_arm\ntpch/q1  UNSUPPORTED:no_engine_arm\n"))
         >= 0
@@ -592,13 +613,93 @@ def test_cold_and_warm_runs_are_separate_results() raises:
     for _ in range(6):
         want += String("run count|")
     for _ in range(8):
-        want += String("drop 8|run count|drop 8|")
+        want += String("drop 8|close|prepare 8 4 16384|run count|drop 8|")
     assert_equal(rig.log_text(), want)
     var report = format_run(out)
     assert_true(report.find(String("== warm ==")) >= 0)
     assert_true(report.find(String("== cold ==\n")) >= 0)
     assert_equal(_count(report, String("== cold ==")), 1)
     assert_equal(_count(report, String("== warm ==")), 1)
+
+
+def test_a_timed_run_that_returns_other_rows_than_the_check_ends_the_run() raises:
+    var rig = Rig()
+    var rules = List[Rule]()
+    rules.append(Rule(String("revenue"), String('[{"revenue":1.0}]'), String(""), 2 * _MS))
+    var session = rig.duckdb(rules^)
+    var scripts = List[Script]()
+    scripts.append(Script(String("tpch/q6"), ARM_ROWS, String(""), _rows_one(1.0), 3 * _MS))
+    var arm = FakeArm(rig.cell, rig.shared, scripts^, 0, False, True)
+    var none = NoCacheDropper()
+    var queries = List[QuerySpec]()
+    queries.append(_q(String("q6"), String("SELECT revenue")))
+    with assert_raises(contains="rows for tpch/q6 in a timed run"):
+        _ = run_queries(session, arm, none, BenchClock.manual(rig.cell), queries, _inputs(), _settings())
+
+
+def _one_col(name: String, var cells: List[Cell]) -> ResultSet:
+    var rs = ResultSet()
+    rs.names.append(name)
+    for i in range(len(cells)):
+        var r = List[Cell]()
+        r.append(cells[i].copy())
+        rs.add_row(r^)
+    return rs^
+
+
+def test_every_kind_of_difference_is_a_wrong_answer() raises:
+    var rig = Rig()
+    var rules = List[Rule]()
+    rules.append(Rule(String("d_int"), String('[{"k":1}]'), String(""), 2 * _MS))
+    rules.append(Rule(String("d_str"), String('[{"k":"a"}]'), String(""), 2 * _MS))
+    rules.append(Rule(String("d_rows"), String('[{"k":1},\n{"k":2}]'), String(""), 2 * _MS))
+    rules.append(Rule(String("d_null"), String('[{"k":null}]'), String(""), 2 * _MS))
+    var session = rig.duckdb(rules^)
+    var scripts = List[Script]()
+    var a = List[Cell]()
+    a.append(Cell.integer(2))
+    scripts.append(Script(String("tpch/i"), ARM_ROWS, String(""), _one_col(String("k"), a^), 3 * _MS))
+    var b = List[Cell]()
+    b.append(Cell.text(String("b")))
+    scripts.append(Script(String("tpch/s"), ARM_ROWS, String(""), _one_col(String("k"), b^), 3 * _MS))
+    var c = List[Cell]()
+    c.append(Cell.integer(1))
+    scripts.append(Script(String("tpch/r"), ARM_ROWS, String(""), _one_col(String("k"), c^), 3 * _MS))
+    var d = List[Cell]()
+    d.append(Cell.integer(1))
+    scripts.append(Script(String("tpch/n"), ARM_ROWS, String(""), _one_col(String("k"), d^), 3 * _MS))
+    var arm = FakeArm(rig.cell, rig.shared, scripts^)
+    var none = NoCacheDropper()
+    var queries = List[QuerySpec]()
+    queries.append(_q(String("i"), String("SELECT d_int")))
+    queries.append(_q(String("s"), String("SELECT d_str")))
+    queries.append(_q(String("r"), String("SELECT d_rows")))
+    queries.append(_q(String("n"), String("SELECT d_null")))
+
+    var out = run_queries(session, arm, none, BenchClock.manual(rig.cell), queries, _inputs(), _settings())
+
+    for i in range(4):
+        assert_equal(out.warm.cells[i].value.text(), String("UNVERIFIED:answer differs from duckdb"))
+        assert_false(Bool(out.warm.cells[i].komira))
+        assert_false(out.outcomes[i].timed)
+    assert_equal(rig.log_text(), String("prepare 8 4 16384|run rows|run rows|run rows|run rows|"))
+
+
+def test_the_tolerance_is_printed_and_written() raises:
+    var rig = Rig()
+    var session = rig.duckdb(List[Rule]())
+    var arm = RefusalArm()
+    var none = NoCacheDropper()
+    var queries = List[QuerySpec]()
+    queries.append(_q(String("q6"), String("SELECT 1")))
+    var out = run_queries(session, arm, none, BenchClock.manual(rig.cell), queries, _inputs(), _settings())
+    var text = comparison_text()
+    assert_true(text.startswith(String("float_rel_tol ") + String(REL_TOL) + String("\nfloat_abs_floor ") + String(ABS_FLOOR) + String("\n")))
+    assert_true(
+        format_run(out).find(String("float tolerance: relative ") + String(REL_TOL) + String(", absolute floor ") + String(ABS_FLOOR) + String(";")) >= 0
+    )
+    assert_equal(REL_TOL, 1e-9)
+    assert_equal(ABS_FLOOR, 1e-6)
 
 
 def test_cold_is_not_measured_when_the_cache_cannot_be_dropped() raises:
@@ -661,6 +762,7 @@ def test_the_result_round_trips_and_the_files_are_written() raises:
     )
     var digests = Path(d + "/queries.sha256").read_text()
     assert_equal(digests, queries_file_text(queries))
+    assert_equal(Path(d + "/comparison.txt").read_text(), comparison_text())
     assert_true(
         digests.startswith(
             String("tpch/q6 ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad\n")

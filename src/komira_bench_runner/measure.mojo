@@ -9,6 +9,7 @@ from komira_bench_duckdb import BenchClock, DuckDbSession, DuckDbTransport
 from .arm import EngineArm
 from .cache import CacheDropper
 from .query import QuerySpec
+from .tables import TableBinding
 
 comptime _NS_PER_MS: Float64 = 1_000_000.0
 
@@ -25,21 +26,31 @@ struct Sweeps(Copyable, Movable):
         self.duckdb = List[List[Float64]]()
 
 
-def time_komira[A: EngineArm](mut arm: A, query: QuerySpec, clock: BenchClock) raises -> Float64:
+def time_komira[A: EngineArm](
+    mut arm: A, query: QuerySpec, clock: BenchClock, rows: Int64
+) raises -> Float64:
     """One timed run of `query` on `arm`, in milliseconds. Raises when the
-    run does not complete (the check run did) or takes no measurable time."""
+    run does not complete (the check run did), returns a different number of
+    rows than the verified check run (`rows`), or takes no measurable time."""
     var t0 = clock.now()
     var answer = arm.run(query, False)
     var t1 = clock.now()
     if not answer.completed():
         raise Error("the komira arm stopped completing " + query.key() + " after its check run passed")
+    if answer.row_count != rows:
+        raise Error(
+            "the komira arm returned " + String(answer.row_count) + " rows for " + query.key()
+            + " in a timed run, " + String(rows) + " in its verified run"
+        )
     if t1 <= t0:
         raise Error("the komira time of " + query.key() + " is below the clock resolution; use a larger dataset")
     return Float64(t1 - t0) / _NS_PER_MS
 
 
 def time_duckdb[T: DuckDbTransport](mut session: DuckDbSession[T], query: QuerySpec) raises -> Float64:
-    """One timed run of `query` in `session`, in milliseconds."""
+    """One timed run of `query` in `session`, in milliseconds. A timed DuckDB
+    run renders nothing, so its row count is not seen: DuckDB's answer is
+    checked only by the run that fetched it."""
     var t = session.run_timed(query.text)
     if not t.ok():
         raise Error("duckdb failed on " + query.key() + " in a timed run: " + t.error)
@@ -57,12 +68,20 @@ def measure[
     clock: BenchClock,
     query: QuerySpec,
     files: List[String],
+    tables: List[TableBinding],
+    threads: Int,
+    memory_limit_bytes: Int,
+    rows: Int64,
     sweeps: Int,
     reps: Int,
     cold: Bool,
 ) raises -> Sweeps:
-    """`sweeps` sweeps of `reps` reps of `query` on both engines. When `cold`,
-    the file cache is dropped before every rep of either engine."""
+    """`sweeps` sweeps of `reps` reps of `query` on both engines; every timed
+    komira run must return `rows` rows, the count of its verified run. When
+    `cold`, the file cache is dropped before every rep of either engine and
+    the komira arm is closed and prepared again before each of its reps, so
+    what it caches in the process is gone. DuckDB's session is not restarted:
+    what DuckDB caches in its process survives a cold rep."""
     var out = Sweeps()
     for _ in range(sweeps):
         var k = List[Float64]()
@@ -70,7 +89,9 @@ def measure[
         for _ in range(reps):
             if cold:
                 dropper.drop(files)
-            k.append(time_komira(arm, query, clock))
+                arm.close()
+                arm.prepare(tables, threads, memory_limit_bytes)
+            k.append(time_komira(arm, query, clock, rows))
             if cold:
                 dropper.drop(files)
             d.append(time_duckdb(session, query))

@@ -27,10 +27,10 @@ from .arm import (
     RefusalArm,
 )
 from .cache import CacheDropper, NoCacheDropper, ProcDropCaches
-from .entrypoint import lock_fingerprint, run_entrypoint
+from .entrypoint import lock_fingerprint, run_entrypoint, run_status, trim_query_text
 from .flags import RunFlags, parse_flags, parse_order_key, usage
 from .measure import Sweeps, measure, time_duckdb, time_komira
-from .output import QUERIES_FILE, format_run, queries_file_text, queries_listing, write_run
+from .output import COMPARISON_FILE, QUERIES_FILE, comparison_text, format_run, queries_file_text, queries_listing, write_run
 from .query import QuerySpec
 from .runner import (
     CAUSE_NOT_RUN,

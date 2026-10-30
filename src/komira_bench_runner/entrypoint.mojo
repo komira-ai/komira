@@ -38,11 +38,12 @@ from .cache import CacheDropper, NoCacheDropper, ProcDropCaches
 from .flags import RunFlags, parse_flags, usage
 from .output import format_run, write_run
 from .query import QuerySpec
-from .runner import run_queries
+from .runner import RunOutput, run_queries
 from .settings import HostFacts, RunInputs, RunSettings
 
 
-def _trimmed(text: String) -> String:
+def trim_query_text(text: String) -> String:
+    """`text` without its trailing newlines, carriage returns, spaces and tabs."""
     var b = text.as_bytes()
     var n = len(b)
     while n > 0 and (b[n - 1] == 0x0A or b[n - 1] == 0x0D or b[n - 1] == 0x20 or b[n - 1] == 0x09):
@@ -68,6 +69,11 @@ def lock_fingerprint(manifest: DatasetManifest, cache_dir: String) raises -> Str
     var lock = lock_from_report(manifest, report)
     write_lock_file(cache_dir, lock)
     return lock.fingerprint()
+
+
+def run_status(run: RunOutput) raises -> Int:
+    """0 only when every query ran and its values matched, 1 otherwise."""
+    return exit_code(summarize(run.warm))
 
 
 def _drive[
@@ -102,22 +108,30 @@ def _drive[
     )
     var queries = List[QuerySpec]()
     queries.append(query.copy())
+    var status = 0
     try:
         var out = run_queries(session, arm, dropper, BenchClock.system(), queries, inputs, settings)
         write_run(out, f.out_dir)
         print(format_run(out))
-        _ = session.close()
-        arm.close()
-        return exit_code(summarize(out.warm))
+        status = run_status(out)
     except e:
         session.kill()
+        try:
+            arm.close()
+        except ignored:
+            pass
         raise e^
+    # the run succeeded: a failing close is a fault of the run, and the
+    # session is already closed, so it is not killed
+    _ = session.close()
+    arm.close()
+    return status
 
 
 def _run(args: List[String]) raises -> Int:
     var f = parse_flags(args)
     var manifest = find_manifest(f.dataset, f.scale)
-    var text = _trimmed(Path(f.sql_file).read_text())
+    var text = trim_query_text(Path(f.sql_file).read_text())
     var query = QuerySpec(f.suite.copy(), f.query_id.copy(), manifest.name.copy(), text^, f.order_keys.copy())
     query.validate()
     var check = check_duckdb_file(f.duckdb_path, f.duckdb_version)

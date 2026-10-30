@@ -9,7 +9,8 @@
 #      for order. A mismatch is a cell that failed, with the cause named, and
 #      nothing is timed.
 #   4. Only a verified query is timed: warm (sweeps of reps, rep 0 of each
-#      dropped by the statistic) and, when the host can drop its file cache,
+#      dropped by the statistic; the cell is the least of the per-sweep
+#      medians) and, when the host can drop its file cache,
 #      cold (the cache dropped before every rep). Both engines run at the
 #      thread count and memory limit of the settings.
 #
@@ -340,12 +341,14 @@ def run_queries[
         if checked.verified:
             var w = measure(
                 session, arm, dropper, clock, q, files,
+                tables, settings.threads, settings.memory_limit_bytes, checked.rows,
                 settings.warm_sweeps, settings.warm_reps, False,
             )
             warm_cells.append(_timed_cell(q, checked.rows, w, settings.warm_reps, settings.pass_max))
             if cold_on:
                 var c = measure(
                     session, arm, dropper, clock, q, files,
+                    tables, settings.threads, settings.memory_limit_bytes, checked.rows,
                     settings.cold_sweeps, settings.cold_reps, True,
                 )
                 cold_cells.append(_timed_cell(q, checked.rows, c, settings.cold_reps, settings.pass_max))

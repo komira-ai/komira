@@ -3,6 +3,7 @@
 #   <dir>/warm/result.json   the warm result (komira-bench-result/1)
 #   <dir>/cold/result.json   the cold result, only when cold was measured
 #   <dir>/queries.sha256     the digest of every query's text
+#   <dir>/comparison.txt     the tolerance the answers were compared under
 #
 # The result schema has no field for the digest of a query, so the digests are
 # a file of their own beside the results. Its lines are the corpus's listing
@@ -13,6 +14,7 @@
 from std.os import makedirs
 from std.pathlib import Path
 
+from komira_bench_duckdb import ABS_FLOOR, REL_TOL
 from komira_bench_report import render_table, summarize, summary_line, write_result_json
 from komira_crypto import hex_lower_array_32, sha256
 
@@ -20,6 +22,18 @@ from .query import QuerySpec
 from .runner import RunOutput
 
 comptime QUERIES_FILE: String = "queries.sha256"
+comptime COMPARISON_FILE: String = "comparison.txt"
+
+
+def comparison_text() -> String:
+    """The tolerance the answers were compared under: integers, text and
+    integer sums exactly, floats within the larger of the relative tolerance
+    times the larger magnitude and the absolute floor."""
+    return (
+        String("float_rel_tol ") + String(REL_TOL) + String("\n")
+        + String("float_abs_floor ") + String(ABS_FLOOR) + String("\n")
+        + String("exact integers, text and integer sums\n")
+    )
 
 
 def queries_listing(queries: List[QuerySpec]) -> String:
@@ -46,6 +60,8 @@ def format_run(run: RunOutput) raises -> String:
         + String(" | memory limit ") + run.fairness.memory_limit_readback
         + String(" | duckdb ") + run.fairness.version + String("\n")
     )
+    text += String("float tolerance: relative ") + String(REL_TOL) + String(", absolute floor ") + String(ABS_FLOOR)
+    text += String("; integers, text and integer sums exact\n")
     text += String("== warm ==\n") + render_table(run.warm)
     text += summary_line(summarize(run.warm).overall, run.warm.run.pass_max, run.warm.env.duckdb) + String("\n")
     if run.cold:
@@ -91,3 +107,4 @@ def write_run(run: RunOutput, dir: String) raises:
         makedirs(base + String("/cold"), exist_ok=True)
         Path(base + String("/cold/result.json")).write_text(write_result_json(run.cold.value()))
     Path(base + String("/") + String(QUERIES_FILE)).write_text(queries_file_text(run.queries))
+    Path(base + String("/") + String(COMPARISON_FILE)).write_text(comparison_text())

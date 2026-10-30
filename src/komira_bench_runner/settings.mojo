@@ -10,7 +10,8 @@ from komira_bench_report import DuckDbPin as ReportDuckDbPin
 struct RunSettings(Copyable, Movable):
     """`threads` and `memory_limit_bytes` are given to both engines. A warm
     cell is `warm_sweeps` sweeps of `warm_reps` reps each (rep 0 of a sweep is
-    dropped by the statistic, so it is the discarded run before the median).
+    dropped by the statistic); a cell's time is the least over the sweeps of
+    each sweep's median, not one median after one discarded run).
     A cold cell is `cold_sweeps` sweeps of `cold_reps` reps with the file
     cache dropped before every rep of either engine; `cold_sweeps` of 0 means
     cold is not measured. `pass_max` is the ratio at or below which a cell

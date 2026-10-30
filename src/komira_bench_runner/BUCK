@@ -6,9 +6,15 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
 # same thread count and memory limit, and fills a `BenchResult`
 # (komira_bench_report) written as result.json. The komira side is a trait
 # (`EngineArm`); the arm that exists today refuses every query by name. See
-# __init__.mojo and docs/design/lowering_and_pipeline.md section 7.4.
+# __init__.mojo and docs/design/lowering_and_pipeline.md section 7.4, of which
+# it implements the thread count on both engines, cold and warm reported
+# separately, results checked before timing with the stated float tolerance,
+# and refusals listed. It does not mark shortcuts both engines take and does
+# not disclose grain state.
 #
 # The welded tests (each file's header says what each test proves):
+# - test_entrypoint: the query text trim, the cache dropper's control file, the
+#   dataset lock, and the exit status 2 of a bad command line.
 # - test_inputs: the query digest, the tables and scale of a manifest, the
 #   flags, the refusal arm and the settings checks.
 # - test_runner: the run over a DuckDB transport, a komira arm and a cache
@@ -29,6 +35,7 @@ mojo_library(
         "//tools/build/mojo/runtime_paths:komira_runtime_paths",
     ],
     test_srcs = [
+        "tests/test_entrypoint.mojo",
         "tests/test_inputs.mojo",
         "tests/test_runner.mojo",
     ],
