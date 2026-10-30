@@ -16,10 +16,11 @@
 # - test_every_run_is_recorded_rep_zero_of_every_sweep_included: with komira
 #   runs of (30, 3, 3) and (9, 3, 3) ms and DuckDB runs of (10, 2, 2) and
 #   (7, 2, 2) ms, the cell holds all twelve runs in order with rep 0 of both
-#   sweeps; the first run is 30 ms against 10 ms (first-run ratio 3.0); the
-#   steady-state time is 3 ms against 2 ms (ratio 1.5, from the runs after each
-#   sweep's first); the written result reads back to the same text, and the
-#   console report states the steady-state and the first-run figures.
+#   sweeps; the first run is the check run, 50 ms against 40 ms (first-run ratio
+#   1.25); the steady-state time is 3 ms against 2 ms (ratio 1.5, from the median
+#   of all the reps of each sweep); the written result reads back to the same
+#   text, and the console report states the steady-state and the first-run
+#   figures.
 # - test_the_check_run_is_the_first_run_with_its_time_for_both_engines: the run
 #   that checks the answer (DuckDB's fetch, the arm's run with rows) is
 #   executed before any sweep, so it is the first execution of the query: its
@@ -750,7 +751,7 @@ def test_every_run_is_recorded_rep_zero_of_every_sweep_included() raises:
     assert_equal(k.first_ms().value(), 50.0)
     assert_equal(d.first_ms().value(), 40.0)
     assert_equal(c.first_ratio.value(), 1.25)
-    # the steady-state time and ratio, from the runs after each sweep's first
+    # the steady-state time and ratio, from the median of all the reps of each sweep
     assert_equal(k.ms, 3.0)
     assert_equal(d.ms, 2.0)
     assert_equal(len(k.ms_per_sweep), 2)

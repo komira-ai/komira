@@ -234,7 +234,7 @@ def _read_side(v: JsonValue, where: String, legacy: Bool) raises -> Optional[Sid
     if not legacy:
         runs = _read_runs(o.get(String("runs_ms")), where + ".runs_ms")
         if len(runs) == 0:
-            _fail(where + ".runs_ms", String("a side of schema 2 holds its runs"))
+            _fail(where + ".runs_ms", String("a side of schema 3 holds its runs"))
         minor = _read_counts(o.get(String("minor_faults")), where + ".minor_faults")
         major = _read_counts(o.get(String("major_faults")), where + ".major_faults")
         var f = _object(o.get(String("first_run")), where + ".first_run", String("ms minor_faults major_faults"))

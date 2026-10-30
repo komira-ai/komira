@@ -97,8 +97,8 @@ def _is_class_label(s: String) -> Bool:
 
 struct Side(Copyable, Movable):
     """What one engine measured for one cell: the rows it returned, the cell's
-    steady-state time `ms` (the least of the per-sweep medians of the runs
-    after each sweep's first, in milliseconds), those per-sweep medians, and
+    steady-state time `ms` (the least of the per-sweep medians of all the
+    reps of each sweep, in milliseconds), those per-sweep medians, and
     their spread in percent; and every run: `runs_ms` holds each sweep's runs
     in order with the first run first, and `minor_faults` and `major_faults`,
     when the engine's page faults were measured, hold the faults each run took

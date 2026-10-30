@@ -13,8 +13,9 @@
 #      engines run at the thread count and memory limit of the settings. Every
 #      run is recorded with its time and its page faults, the first of each
 #      sweep included, and so is the check run of step 2 and 3 as the first run
-#      of each engine (the cold result takes its first cold rep instead); the report package says what the cell's first-run and
-#      steady-state figures are made of (`STEADY_STATE_DEFINITION`).
+#      of each engine (the cold result takes its first cold rep instead). The
+#      report package says what the cell's first-run and steady-state figures
+#      are made of (`STEADY_STATE_DEFINITION`).
 #
 # Warm and cold are two results because the result model holds one number of
 # reps per run and no temperature; each is a `BenchResult` of its own.

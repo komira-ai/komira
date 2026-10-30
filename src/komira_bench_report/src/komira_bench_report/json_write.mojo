@@ -1,11 +1,11 @@
-# The writer of result.json (schema `komira-bench-result/2`). It writes the
+# The writer of result.json (schema `komira-bench-result/3`). It writes the
 # result as one compact line of JSON with the members in a fixed order, after
 # `validate_result` has accepted it, and writes the summary the reader will
 # recompute and compare. Every run of every side is written (`runs_ms`, with
 # the page faults of each run beside it, and `first_run`: the check run executed
 # before the sweeps, with its time and faults), so a side without its runs is not
-# written: a result read from schema 1, which held no runs, is never rewritten
-# as schema 2.
+# written: a result read from schema 2, which held no runs, is never rewritten
+# as schema 3.
 
 from komira_json import JsonValue
 
@@ -201,8 +201,8 @@ def result_json(result: BenchResult) raises -> JsonValue:
         ref c = result.cells[i]
         if (c.komira and not c.komira.value().has_runs()) or (c.duckdb and not c.duckdb.value().has_runs()):
             raise Error(
-                "cell " + c.id + ": a side without its runs cannot be written; schema 2 holds every run"
-                " (a result read from schema 1 has none)"
+                "cell " + c.id + ": a side without its runs cannot be written; schema 3 holds every run"
+                " (a result read from schema 2 has none)"
             )
     var doc = JsonValue.empty_object()
     doc.set_member(String("schema"), _s(String(RESULT_SCHEMA)))
