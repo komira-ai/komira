@@ -113,7 +113,9 @@ accepted are YEAR, MONTH, WEEK and DAY, singular or plural. The binder folds
 `INTERVAL + <constant DATE>` into a `date32` literal while binding
 (`sql_bind_interval`), in the WHERE, correlated-subquery, aggregate and
 select-list binders alike, so `date '1998-12-01' - interval '90' day` and
-every other interval in the 22 TPC-H queries bind. The plan has no INTERVAL
+the nine intervals in the TPC-H queries bind: Q1 `- interval '90' day`;
+Q4, Q10 and Q15 `+ interval '3' month`; Q14 `+ interval '1' month`; Q5, Q6,
+Q12 and Q20 `+ interval '1' year`. The plan has no INTERVAL
 type and no INTERVAL value ever reaches it. Chains fold left to right
 (`date '1994-01-01' + interval '1' year - interval '1' day`).
 
@@ -130,7 +132,10 @@ SECOND, MILLISECOND, and the rest), a unit written inside the string
 DATE operand (`col + interval '1' day`; the interval is folded at bind time,
 so a column cannot take it), a TIMESTAMP or string operand, and an INTERVAL
 anywhere else (a projection, a comparison, `INTERVAL - DATE`, `INTERVAL * n`,
-`INTERVAL + INTERVAL`). One difference from DuckDB: its `DATE + INTERVAL` is
+`INTERVAL + INTERVAL`). Because the fold happens in the expression binder, ORDER BY and GROUP BY see
+a constant expression like `1 + 1`, which they already accept, and not a bare
+date literal, which ORDER BY refuses as a constant key. A count
+may be signed and unquoted (`interval -3 day`). One difference from DuckDB: its `DATE + INTERVAL` is
 a TIMESTAMP, here the result stays a DATE; a comparison against a DATE column
 gives the same rows.
 

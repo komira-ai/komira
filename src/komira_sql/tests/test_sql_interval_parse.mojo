@@ -69,6 +69,9 @@ def test_interval_spellings() raises:
     _shift("date '2000-01-01' + interval '-5' day", SXOP_ADD, "2000-01-01", -5, SXIVL_DAY)
     _shift("date '2000-01-01' + interval '+5' day", SXOP_ADD, "2000-01-01", 5, SXIVL_DAY)
     _shift("date '2000-01-01' + interval 7 day", SXOP_ADD, "2000-01-01", 7, SXIVL_DAY)
+    _shift("date '2000-01-01' + interval -3 day", SXOP_ADD, "2000-01-01", -3, SXIVL_DAY)
+    _shift("date '2000-01-01' + interval +3 months", SXOP_ADD, "2000-01-01", 3, SXIVL_MONTH)
+    _shift("date '2000-01-01' - interval -3 year", SXOP_SUB, "2000-01-01", -3, SXIVL_YEAR)
     _shift("DATE '2000-01-01' + INTERVAL '1' YEAR", SXOP_ADD, "2000-01-01", 1, SXIVL_YEAR)
     _shift("date '2000-01-01' + interval '1000000000' day", SXOP_ADD, "2000-01-01", 1000000000, SXIVL_DAY)
 
@@ -92,6 +95,18 @@ def test_interval_is_still_a_column_name() raises:
     assert_equal(Int(_e("interval + 1")._binary.value().left[].tag), Int(SX_COLUMN))
 
 
+def test_signed_bare_count_needs_a_unit_to_be_an_interval() raises:
+    # Without a unit word after the integer, `interval - 3` is a column minus 3.
+    var e = _e("interval - 3")
+    assert_equal(Int(e.tag), Int(SX_BINARY))
+    assert_equal(Int(e.op), Int(SXOP_SUB))
+    assert_equal(Int(e._binary.value().left[].tag), Int(SX_COLUMN))
+    var f = _e("interval -3 + 1")
+    assert_equal(Int(f.op), Int(SXOP_ADD))
+    assert_equal(Int(f._binary.value().left[].tag), Int(SX_BINARY))
+    assert_equal(Int(f._binary.value().left[]._binary.value().left[].tag), Int(SX_COLUMN))
+
+
 def _refuses(expr: String, needle: String) raises:
     var m = _err(expr)
     assert_true(needle in m, "`" + expr + "` raised: " + m)
@@ -109,6 +124,8 @@ def test_interval_refusals_are_named() raises:
     _refuses("interval 99999999999999999999 day", "beyond 10^9")
     _refuses("(interval '1')", "needs a unit")
     _refuses("interval '1' + 2", "needs a unit")
+    _refuses("interval -3 hour", "INTERVAL unit 'hour'")
+    _refuses("interval -1000000001 day", "beyond +/-10^9")
     _refuses("interval '1' hour", "INTERVAL unit 'hour'")
     _refuses("interval '1' minute", "INTERVAL unit 'minute'")
     _refuses("interval '1' second", "INTERVAL unit 'second'")

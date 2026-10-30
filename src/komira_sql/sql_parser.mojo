@@ -26,6 +26,7 @@ from std.builtin.swap import swap
 
 from komira_collections.slab import Slab
 
+from .sql_interval_parse import interval_literal_starts, parse_interval_literal
 from .sql_token import (
     Token,
     TK_EOF, TK_IDENT, TK_INT, TK_FLOAT, TK_STRING, TK_LPAREN, TK_RPAREN,
@@ -54,7 +55,6 @@ from .sql_ast import (
     SXWIN_LAG, SXWIN_LEAD, SXWIN_FIRST_VALUE, SXWIN_LAST_VALUE, SXWIN_NTH_VALUE,
     SXWIN_PERCENT_RANK, SXWIN_CUME_DIST, SXWIN_NTILE,
     SX_INT, SX_FLOAT, SX_STRING, SX_DATE,
-    SXIVL_YEAR, SXIVL_MONTH, SXIVL_WEEK, SXIVL_DAY,
     SXFRAME_ROWS, SXFRAME_RANGE,
     SXFRAME_UNBOUNDED_PRECEDING, SXFRAME_PRECEDING, SXFRAME_CURRENT_ROW,
     SXFRAME_FOLLOWING, SXFRAME_UNBOUNDED_FOLLOWING,
@@ -2319,70 +2319,6 @@ struct _Parser(Movable):
             ty += ")"
         return ty^
 
-    def _parse_interval_literal(mut self) raises -> SqlExpr:
-        """`INTERVAL '<n>' <unit>` (the cursor is on `interval`). The count is
-        an optionally signed decimal integer, quoted or bare, of magnitude at
-        most 10^9. Units accepted: YEAR, MONTH, WEEK, DAY (and plurals).
-        Refused by name: every other unit, a unit written inside the string
-        (`'3 month'`), a non-integer count, and a missing unit."""
-        self._advance()  # 'interval'
-        var count: Int64 = 0
-        if self._kind() == TK_STRING:
-            var raw = String(self.tokens[self.pos].text)
-            var b = raw.as_bytes()
-            var neg = False
-            var start = 0
-            if len(b) > 0 and (b[0] == UInt8(ord("-")) or b[0] == UInt8(ord("+"))):
-                neg = b[0] == UInt8(ord("-"))
-                start = 1
-            var ok = start < len(b) and len(b) - start <= 10
-            for k in range(start, len(b)):
-                if b[k] < UInt8(ord("0")) or b[k] > UInt8(ord("9")):
-                    ok = False
-            if not ok:
-                raise Error(
-                    "SQL not supported: INTERVAL '" + raw + "' is not a plain"
-                    " integer count; write INTERVAL '<n>' <unit> with the unit"
-                    " outside the quotes (units YEAR, MONTH, WEEK, DAY)"
-                )
-            for k in range(start, len(b)):
-                count = count * 10 + Int64(Int(b[k] - UInt8(ord("0"))))
-            if neg:
-                count = -count
-        else:
-            if self.tokens[self.pos].text.byte_length() > 0:
-                raise Error("SQL not supported: INTERVAL count beyond 10^9")
-            count = self.tokens[self.pos].int_val
-        if count > 1000000000 or count < -1000000000:
-            raise Error(
-                "SQL not supported: INTERVAL count " + String(count)
-                + " is beyond +/-10^9"
-            )
-        self._advance()  # the count
-        if self._kind() != TK_IDENT:
-            raise Error(
-                "SQL syntax error: INTERVAL needs a unit after the count"
-                " (YEAR, MONTH, WEEK or DAY)"
-            )
-        var u = String(self.tokens[self.pos].text)
-        var unit: UInt8
-        if u == "year" or u == "years":
-            unit = SXIVL_YEAR
-        elif u == "month" or u == "months":
-            unit = SXIVL_MONTH
-        elif u == "week" or u == "weeks":
-            unit = SXIVL_WEEK
-        elif u == "day" or u == "days":
-            unit = SXIVL_DAY
-        else:
-            raise Error(
-                "SQL not supported: INTERVAL unit '" + u + "' (only YEAR,"
-                " MONTH, WEEK and DAY are accepted; QUARTER, HOUR, MINUTE,"
-                " SECOND and the sub-second and multi-year units are refused)"
-            )
-        self._advance()  # the unit
-        return SqlExpr.interval_lit(count, unit)
-
     def _parse_primary(mut self) raises -> SqlExpr:
         var k = self._kind()
         if k == TK_INT:
@@ -2487,18 +2423,10 @@ struct _Parser(Movable):
                 var ts = String(self.tokens[self.pos].text)
                 self._advance()  # the quoted timestamp string
                 return SqlExpr.timestamp_lit(ts, aware)
-            # ★ INTERVAL literal: `interval '<n>' <unit>` or `interval <n> <unit>`.
-            # Gated on a following string or integer so a column called
+            # ★ INTERVAL literal (`sql_interval_parse`); a column called
             # `interval` still binds as a column reference. See `SX_INTERVAL`.
-            if (
-                name == "interval"
-                and self.pos + 1 < len(self.tokens)
-                and (
-                    self.tokens[self.pos + 1].kind == TK_STRING
-                    or self.tokens[self.pos + 1].kind == TK_INT
-                )
-            ):
-                return self._parse_interval_literal()
+            if interval_literal_starts(self.tokens, self.pos):
+                return parse_interval_literal(self.tokens, self.pos)
             # ★★ `EXTRACT(<field> FROM <expr>)`.
             #
             # A SEPARATE GRAMMAR ARM AND NOT A FUNCTION NAME, because `FROM`

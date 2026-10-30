@@ -28,6 +28,11 @@ from std.testing import TestSuite, assert_equal, assert_true
 
 from komira_arrow.arrow_types import ArrowType
 from komira_arrow.schema import Field, SchemaBuilder
+from komira_plan_expr.expr import (
+    EXPR_BINARY_OP, EXPR_CORRELATED_SUBQUERY, EXPR_UNARY_OP, Expr,
+)
+from komira_plan_ir.corr_subquery import corr_subq_inner_plan_ref
+from komira_plan_ir.logical_plan import LogicalPlan, PLAN_FILTER, PLAN_PROJECT
 from komira_sql.sql_bind_parquet import NoParquetFooters
 from komira_sql.sql_bind_scope import _date_to_days
 from komira_sql.sql_binder import bind_statement
@@ -229,6 +234,15 @@ def test_interval_anywhere_else_is_refused() raises:
         "SELECT x FROM t WHERE EXISTS (SELECT 1 FROM u WHERE u.k = t.x AND u.d < d + interval '1' day)"
     )
     assert_true(corr.startswith("ERR: "), corr)
+    assert_true("needs a constant DATE" in corr, corr)
+    var corr_left = _got(
+        "SELECT x FROM t WHERE EXISTS (SELECT 1 FROM u WHERE u.k = t.x AND u.d < interval '1' day + d)"
+    )
+    assert_true("needs a constant DATE" in corr_left, corr_left)
+    var corr_alone = _got(
+        "SELECT x FROM t WHERE EXISTS (SELECT 1 FROM u WHERE u.k = t.x AND u.d < interval '1' day)"
+    )
+    assert_true("only accepted as" in corr_alone, corr_alone)
 
 
 def test_out_of_range_results_are_refused() raises:
@@ -238,6 +252,79 @@ def test_out_of_range_results_are_refused() raises:
     _refuses("date '0001-01-01' - interval '1' month", "out of range")
     _refuses("date '1994-01-01' + interval '1000000000' year", "out of range")
     _refuses("date '1994-01-01' - interval '1000000000' day", "out of range")
+
+
+def _first_corr_inner(e: Expr) raises -> String:
+    """The rendered inner plan of the first correlated subquery under `e`'s
+    AND / OR / comparison and unary nodes, or ""."""
+    if e.tag == EXPR_CORRELATED_SUBQUERY:
+        return String(corr_subq_inner_plan_ref(e))
+    if e.tag == EXPR_BINARY_OP:
+        var l = _first_corr_inner(e.binary_left_ref())
+        if l != "":
+            return l^
+        return _first_corr_inner(e.binary_right_ref())
+    if e.tag == EXPR_UNARY_OP:
+        return _first_corr_inner(e.unary_child_ref())
+    return String("")
+
+
+def _plan_corr_inner(p: LogicalPlan) raises -> String:
+    if p.tag == PLAN_FILTER:
+        return _first_corr_inner(p.filter_data_ref().predicate)
+    if p.tag == PLAN_PROJECT:
+        return _plan_corr_inner(p.project_data_ref().child[])
+    return String("")
+
+
+def _corr_inner_of(sql: String) raises -> String:
+    var cat = _catalog()
+    var bound = bind_statement(parse_sql(tokenize(sql)), cat, NoParquetFooters())
+    return _plan_corr_inner(bound.take_plan())
+
+
+def test_q20_shaped_correlated_subquery_holds_the_folded_dates() raises:
+    var lo = "BinaryOp(GE, ColRef(d), " + _lit("1994-01-01") + ")"
+    var hi = "BinaryOp(LT, ColRef(d), " + _lit("1995-01-01") + ")"
+    var right_form = _corr_inner_of(
+        "SELECT x FROM t WHERE EXISTS (SELECT 1 FROM u WHERE u.k = t.x"
+        " AND u.d >= date '1994-01-01' AND u.d < date '1994-01-01' + interval '1' year)"
+    )
+    assert_true(lo in right_form, right_form)
+    assert_true(hi in right_form, right_form)
+    var left_form = _corr_inner_of(
+        "SELECT x FROM t WHERE EXISTS (SELECT 1 FROM u WHERE u.k = t.x"
+        " AND u.d >= date '1994-01-01' AND u.d < interval '1' year + date '1994-01-01')"
+    )
+    assert_true(lo in left_form, left_form)
+    assert_true(hi in left_form, left_form)
+    var minus = _corr_inner_of(
+        "SELECT x FROM t WHERE EXISTS (SELECT 1 FROM u WHERE u.k = t.x"
+        " AND u.d > date '1995-01-01' - interval '1' year)"
+    )
+    assert_true("BinaryOp(GT, ColRef(d), " + _lit("1994-01-01") + ")" in minus, minus)
+
+
+def test_left_operand_fold_in_every_expression_binder() raises:
+    var dt = _lit("1995-01-01")
+    var having = _got(
+        "SELECT x, max(d) AS m FROM t GROUP BY x"
+        " HAVING max(d) < interval '1' year + date '1994-01-01'"
+    )
+    assert_true(not having.startswith("ERR: "), having)
+    assert_true(dt in having, having)
+    var agg = _got("SELECT max(d) < interval '1' year + date '1994-01-01' AS b FROM t")
+    assert_true(not agg.startswith("ERR: "), agg)
+    assert_true(dt in agg, agg)
+    var sel = _got("SELECT interval '1' year + date '1994-01-01' AS nd FROM t")
+    assert_true(dt in sel, sel)
+
+
+def test_order_by_a_folded_date_binds_and_a_bare_date_literal_does_not() raises:
+    var ok = _got("SELECT d FROM t ORDER BY date '1994-01-01' + interval '1' year")
+    assert_true(not ok.startswith("ERR: "), ok)
+    var bare = _got("SELECT d FROM t ORDER BY date '1994-01-01'")
+    assert_true("has no effect" in bare, bare)
 
 
 def main() raises:
