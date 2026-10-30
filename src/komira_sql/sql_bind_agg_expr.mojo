@@ -4,9 +4,10 @@
 #   aggregate.
 # =============================================================================
 
+from komira_arrow.arrow_types import ArrowType
 from komira_arrow.schema import Schema
 from komira_plan_expr.agg_expr import (
-    AGG_ANY_VALUE, AGG_BOOL_AND, AGG_BOOL_OR, AGG_CORR, AGG_COUNT, AGG_COUNT_DISTINCT,
+    AGG_ANY_VALUE, AGG_BOOL_AND, AGG_BOOL_OR, AGG_CORR, AGG_SUM, AGG_COUNT, AGG_COUNT_DISTINCT,
     AGG_COUNT_IF, AGG_COVAR_POP, AGG_COVAR_SAMP, AGG_FIRST, AGG_KAHAN_AVG,
     AGG_KAHAN_SUM, AGG_KURTOSIS, AGG_KURTOSIS_POP, AGG_LAST, AGG_MEDIAN, AGG_PRODUCT,
     AGG_REGR_AVGX, AGG_REGR_AVGY, AGG_REGR_COUNT, AGG_REGR_INTERCEPT, AGG_REGR_R2,
@@ -18,7 +19,7 @@ from komira_plan_expr.expr import (
     Expr,
 )
 from komira_plan_expr.scalar_value import ScalarValue
-from komira_plan_ir.logical_plan import AggExprArray
+from komira_plan_ir.logical_plan import AggExprArray, _infer_expr_field
 from komira_plan_ir.plan_helpers import _expr_fingerprint
 from komira_sql.sql_bind_interval import (
     INTERVAL_STANDALONE_REFUSAL, interval_date_fold, interval_operand_side,
@@ -48,6 +49,12 @@ from komira_sql.sql_fn_table import (
 )
 
 
+def _sum_widens_to_hugeint(t: ArrowType) -> Bool:
+    """`sum()` over an argument of type `t` is DuckDB's HUGEINT: every integer
+    width, and BOOLEAN (`sum(true)` counts)."""
+    return t.is_integer() or t == ArrowType.BOOL
+
+
 def _bind_agg_from_sx(sx: SqlExpr, schema: Schema, scope: BindScope, out_name: String, catalog: SqlCatalog, cte_scope: CteScope, prebound: List[Expr]) raises -> AggExpr:
     """Bind a SX_AGG node -> an `AggExpr`, forcing its output column name to
     `out_name` (so the post-aggregate Project can reference it deterministically).
@@ -68,6 +75,17 @@ def _bind_agg_from_sx(sx: SqlExpr, schema: Schema, scope: BindScope, out_name: S
         if sx.op != SXAGG_COUNT:
             raise Error("SQL not supported: DISTINCT is only supported on COUNT")
         return AggExpr(AGG_COUNT_DISTINCT, Optional(arg^), out_alias^)
+    if func == AGG_SUM and _sum_widens_to_hugeint(_infer_expr_field(arg, schema).arrow_type):
+        # An integer `sum()` (and a BOOLEAN one) is DuckDB's HUGEINT; Arrow's
+        # one exact carrier for every HUGEINT total is DECIMAL(38, 0). The
+        # widening is stated here, at the SQL door, as a cast of the argument:
+        # the aggregate keeps `AGG_SUM` and the DECIMAL fold sums the cast value
+        # exactly, so no per-row INT64 accumulator can wrap. The DataFrame doors
+        # build `AGG_SUM` over the bare column themselves and keep INT64. An
+        # argument whose type is not known here (a column of an outer query, a
+        # `NULL`) or is not an integer or BOOLEAN (FLOAT, DECIMAL, ...) is left
+        # as it is.
+        arg = Expr.cast_to_decimal(arg^, 38, 0)
     return AggExpr(func, Optional(arg^), out_alias^)
 
 

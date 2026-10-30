@@ -465,6 +465,45 @@ def _ts_unit_rank(at: ArrowType) -> Int:
         return 2
 
 
+def _scaled_integer_to_decimal_i128(v: I128, p: Int, s: Int) raises -> I128:
+    """The integer `v` as the unscaled value of DECIMAL(p, s): `v * 10^s`,
+    refused when it has more than `p` digits."""
+    var scaled = v
+    for _ in range(s):
+        scaled = scaled * I128(10)
+    var limit = I128(1)
+    for _ in range(p):
+        limit = limit * I128(10)
+    if scaled >= limit or scaled <= -limit:
+        raise Error(
+            "CAST to DECIMAL(" + String(p) + "," + String(s) + "): integer "
+            + String(v) + " does not fit"
+        )
+    return scaled
+
+
+def _cast_narrow_int_to_decimal128[
+    dt: DType
+](
+    child_col: Column[HeapRegion],
+    mut out: Decimal128Array,
+    p: Int,
+    s: Int,
+) raises:
+    """Fill `out` with `child_col` (a primitive column of integer type `dt`
+    narrower than 64 bits, or UINT32) cast to DECIMAL(p, s); a NULL stays
+    NULL."""
+    var src = child_col.as_primitive[dt]()
+    for i in range(child_col.length()):
+        if src.is_null(i):
+            out.set_null(i)
+        else:
+            out.set_i128(
+                i,
+                _scaled_integer_to_decimal_i128(src.get(i).cast[DType.int128](), p, s),
+            )
+
+
 def _eval_cast_to_decimal128(child_col: Column[HeapRegion], p: Int, s: Int, batch: RecordBatch, name_hint: String) raises -> Column[HeapRegion]:
     """CAST(child AS DECIMAL(p, s)) — child is int/float/decimal/string."""
     var n = child_col.length()
@@ -484,6 +523,43 @@ def _eval_cast_to_decimal128(child_col: Column[HeapRegion], p: Int, s: Int, batc
                 out.set_null(i)
             else:
                 out.set_i128(i, int_to_decimal_i128(Int64(Int(src.get(i))), p, s))
+    elif src_at == ArrowType.BOOL:
+        # TRUE is 1 and FALSE is 0, as in DuckDB's `sum(<BOOLEAN>)`.
+        var src = child_col.as_boolean()
+        for i in range(n):
+            if src.is_null(i):
+                out.set_null(i)
+            else:
+                out.set_i128(
+                    i,
+                    _scaled_integer_to_decimal_i128(
+                        I128(1) if src.get(i) else I128(0), p, s
+                    ),
+                )
+    elif src_at == ArrowType.INT8:
+        _cast_narrow_int_to_decimal128[DType.int8](child_col, out, p, s)
+    elif src_at == ArrowType.INT16:
+        _cast_narrow_int_to_decimal128[DType.int16](child_col, out, p, s)
+    elif src_at == ArrowType.UINT8:
+        _cast_narrow_int_to_decimal128[DType.uint8](child_col, out, p, s)
+    elif src_at == ArrowType.UINT16:
+        _cast_narrow_int_to_decimal128[DType.uint16](child_col, out, p, s)
+    elif src_at == ArrowType.UINT32:
+        _cast_narrow_int_to_decimal128[DType.uint32](child_col, out, p, s)
+    elif src_at == ArrowType.UINT64:
+        # Past INT64's range: the value goes through the 128-bit lane, never
+        # through an Int64, so 2^64 - 1 stays 2^64 - 1.
+        var src = child_col.as_primitive[DType.uint64]()
+        for i in range(n):
+            if src.is_null(i):
+                out.set_null(i)
+            else:
+                out.set_i128(
+                    i,
+                    _scaled_integer_to_decimal_i128(
+                        src.get(i).cast[DType.int128](), p, s
+                    ),
+                )
     elif src_at == ArrowType.FLOAT64:
         var src = child_col.as_primitive[DType.float64]()
         for i in range(n):

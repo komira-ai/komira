@@ -188,6 +188,99 @@ def test_two_values_that_fit_alone_are_refused_by_the_merge() raises:
         _ = _combine_and_take(sink, 2)
 
 
+def _decimal_38_0_batch(values: List[I128]) raises -> RecordBatch:
+    """One non-null DECIMAL(38, 0) column `d` holding `values`."""
+    var arr = Decimal128Array.allocate_nullable(len(values), 38, 0)
+    for i in range(len(values)):
+        arr.set_i128(i, values[i])
+    var sb = SchemaBuilder()
+    var rb = RecordBatchBuilder()
+    sb.add_field(Field.decimal128("d", 38, 0, True))
+    rb.add_column(Column.from_decimal128(arr^))
+    return rb.build(sb.build())
+
+
+def _repeat(v: I128, n: Int) -> List[I128]:
+    var out = List[I128]()
+    for _ in range(n):
+        out.append(v)
+    return out^
+
+
+def _int64_max() -> I128:
+    return I128(Int(Int64.MAX))
+
+
+def _int64_min() -> I128:
+    return I128(Int(Int64.MIN))
+
+
+def _sum_of_deal(deal: List[List[I128]]) raises -> RecordBatch:
+    """SUM(d) over DECIMAL(38, 0) morsels, `deal[w]` going to worker `w`."""
+    var data = ungrouped_agg_data(
+        agg_list(_agg(AGG_SUM, "d")), _sum_d_schema()
+    )
+    var sink = AggSink(data, SegmentPool(), 0)
+    sink.resize_worker_state(len(deal))
+    for w in range(len(deal)):
+        sink.consume(w, Morsel(_decimal_38_0_batch(deal[w]), w, 0))
+    return _combine_and_take(sink, len(deal))
+
+
+def test_decimal_partials_each_past_int64_merge_exactly() raises:
+    # SQL integer sum() is DECIMAL(38, 0): each worker's partial is 4 * (2^63 -
+    # 1), past INT64, and the merge of three of them is 12 * (2^63 - 1).
+    var deal = List[List[I128]]()
+    for _ in range(3):
+        deal.append(_repeat(_int64_max(), 4))
+    var out = _sum_of_deal(deal)
+    assert_equal(out.column_at(0).decimal_precision(), 38)
+    assert_equal(out.column_at(0).decimal_scale(), 0)
+    assert_true(
+        out.column_at(0).as_decimal128().get_i128(0) == I128(12) * _int64_max()
+    )
+
+
+def test_decimal_partials_past_int64_in_both_directions_cancel() raises:
+    # {MAX, MAX} in one worker, {MIN, MIN} in the other: -2.
+    var deal = List[List[I128]]()
+    deal.append(_repeat(_int64_max(), 2))
+    deal.append(_repeat(_int64_min(), 2))
+    var out = _sum_of_deal(deal)
+    assert_true(out.column_at(0).as_decimal128().get_i128(0) == I128(-2))
+    # The other dealing gives the same answer.
+    var back = List[List[I128]]()
+    back.append(_repeat(_int64_min(), 2))
+    back.append(_repeat(_int64_max(), 2))
+    assert_true(
+        _sum_of_deal(back).column_at(0).as_decimal128().get_i128(0) == I128(-2)
+    )
+
+
+def test_decimal_partials_near_two_to_the_64_merge_exactly() raises:
+    # 2^64 - 1, the largest UINT64, three times in each of two workers.
+    var u64_max = I128(4294967296) * I128(4294967296) - I128(1)
+    var deal = List[List[I128]]()
+    deal.append(_repeat(u64_max, 3))
+    deal.append(_repeat(u64_max, 3))
+    var out = _sum_of_deal(deal)
+    assert_true(out.column_at(0).as_decimal128().get_i128(0) == I128(6) * u64_max)
+
+
+def test_a_merged_total_past_ten_to_the_38_is_refused_not_wrapped() raises:
+    # 6 * 10^37 fits DECIMAL(38, 0) and the 128-bit range; two of them,
+    # one in each worker, are 1.2 * 10^38: inside the 128-bit range, but with
+    # 39 digits.
+    var six = I128(6)
+    for _ in range(37):
+        six = six * I128(10)
+    var deal = List[List[I128]]()
+    deal.append(_repeat(six, 1))
+    deal.append(_repeat(six, 1))
+    with assert_raises(contains="more digits than the declared DECIMAL(38,0)"):
+        _ = _sum_of_deal(deal)
+
+
 def _string_batch() raises -> RecordBatch:
     var names = List[String]()
     names.append("x")

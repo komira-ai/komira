@@ -33,7 +33,7 @@ from komira_plan_expr.expr import (
     BIN_NE,
 )
 from komira_scalar_arithmetic.decimal_arith import I128
-from komira_scalar_arithmetic.decimal_cast import int_to_decimal_i128
+from komira_scalar_arithmetic.decimal_cast import decimal_to_float64, int_to_decimal_i128
 from komira_scalar_arithmetic.decimal_compare import (
     DEC_CMP_EQ,
     DEC_CMP_GE,
@@ -52,7 +52,8 @@ def _column_to_float64(
 
     The EXPR_MATH_FN(2) kernels operate on
     FLOAT64. Accepts FLOAT64 (zero-copy as_primitive), INT64, or INT32
-    inputs and widens via the existing validity-preserving cast helpers.
+    inputs and widens via the existing validity-preserving cast helpers; a
+    DECIMAL128 becomes the DOUBLE `unscaled / 10^scale`.
     Non-numeric input raises a clear plan-time-style error.
     """
     var at = col.arrow_type
@@ -64,10 +65,26 @@ def _column_to_float64(
         # INT32 -> INT64 -> FLOAT64 (both steps validity-preserving).
         var i64 = eval_cast[DType.int32, DType.int64](col.as_primitive[DType.int32]())
         return int64_to_float64(i64)
+    elif at == ArrowType.DECIMAL128 and col.decimal_precision() > 0:
+        # The DOUBLE a DuckDB math function answers over a DECIMAL (an integer
+        # `sum()` is DECIMAL(38, 0)): the unscaled value over 10^scale.
+        var arr = col.as_decimal128()
+        var s = col.decimal_scale()
+        var n = col.length()
+        var out = PrimitiveArray[DType.float64].allocate_nullable(n)
+        var nulls = 0
+        for i in range(n):
+            if arr.is_null(i):
+                out.validity.value().clear(i)
+                nulls += 1
+            else:
+                out.set(i, decimal_to_float64(arr.get_i128(i), s))
+        out.null_count = nulls
+        return out^
     else:
         raise Error(
             "PipelineCompiler: scalar math function requires a numeric"
-            " (FLOAT64 / INT64 / INT32) input, got type_id="
+            " (FLOAT64 / INT64 / INT32 / DECIMAL128) input, got type_id="
             + String(Int(at.type_id))
         )
 

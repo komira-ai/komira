@@ -6,8 +6,8 @@ The table is the authority for the type of every result column. A conformance ca
 
 | Item | Expression | Result type | DuckDB | Mark |
 |---|---|---|---|---|
-| §8.1 | `SUM(int8 / int16 / int32 / int64)`, `SUM(boolean)` | INT64; a total outside INT64 is an error | HUGEINT | REPRESENTATION DEPARTURE |
-| §8.2 | `SUM(uint8 / uint16 / uint32 / uint64)` | UINT64; overflow is an error | HUGEINT | REPRESENTATION DEPARTURE |
+| §8.1 | `SUM(int8 / int16 / int32 / int64)`, `SUM(boolean)` | SQL: DECIMAL(38, 0), exact; the dataframe doors: INT64, a total outside INT64 is an error | HUGEINT | REPRESENTATION DEPARTURE |
+| §8.2 | `SUM(uint8 / uint16 / uint32 / uint64)` | SQL: DECIMAL(38, 0), exact; the dataframe doors: UINT64, overflow is an error | HUGEINT | REPRESENTATION DEPARTURE |
 | §8.3 | `SUM(float32 / float64)` | FLOAT64 | DOUBLE | MATCHES |
 | §8.4 | `SUM(decimal(p, s))` | DECIMAL(38, s) | DECIMAL(38, s) | MATCHES |
 | §8.5 | `AVG` of any integer, float or DECIMAL; `STDDEV_*`, `VAR_*`, `CORR` | FLOAT64 | DOUBLE | MATCHES |
@@ -40,7 +40,7 @@ The table is the authority for the type of every result column. A conformance ca
 
 Notes:
 
-- **§8.1, §8.2 (REPRESENTATION DEPARTURE).** Arrow has no 128-bit integer type, and returning DECIMAL(38, 0) would change every integer total's type in every consumer. The engine refuses a total outside INT64 by name rather than wrap (`src/komira_op_agg_state/int_sum_overflow.mojo:31-41`, which also records DuckDB's `typeof(sum(<bigint>))` as HUGEINT). DuckDB's `sum(BOOLEAN)` is HUGEINT too (`extension/core_functions/aggregate/distributive/sum.cpp:163-164` at v1.5.6). An oracle query states the plan's type explicitly (`CAST(sum(x) AS BIGINT)`). The plan's rule is at `src/komira_plan_ir/logical_plan.mojo:2411-2470`.
+- **§8.1, §8.2 (REPRESENTATION DEPARTURE).** Arrow has no 128-bit integer type; DECIMAL(38, 0) is the Arrow type that holds every HUGEINT total exactly. The SQL frontend therefore casts the argument of an integer or BOOLEAN `sum()` to DECIMAL(38, 0) and keeps the SUM aggregate (`src/komira_sql/sql_bind_agg_expr.mojo`), so the declared and the answered type is DECIMAL(38, 0) and the DECIMAL fold sums in 128 bits; a total with more than 38 digits is refused by name. The dataframe doors build the SUM aggregate over the bare column and keep the plan's own rule (INT64 for a signed integer, UINT64 for an unsigned one), which refuses a total outside that range by name rather than wrap (`src/komira_op_agg_state/int_sum_overflow.mojo`, which also records DuckDB's `typeof(sum(<bigint>))` as HUGEINT). DuckDB's `sum(BOOLEAN)` is HUGEINT too (`extension/core_functions/aggregate/distributive/sum.cpp:163-164` at v1.5.6). A windowed `sum()` (§8.26) is still INT64 or UINT64 in SQL. The plan's rule is at `src/komira_plan_ir/logical_plan.mojo:2411-2470`.
 - **§8.3, §8.4.** `src/komira_plan_ir/logical_plan.mojo:2425-2470`; the DECIMAL(38, s) rule is measured against DuckDB, pyarrow and polars there.
 - **§8.5.** AVG of a DECIMAL is DOUBLE: `BindDecimalAvg` sets the return type to DOUBLE (`extension/core_functions/aggregate/algebraic/avg.cpp:268-277` at v1.5.6). The plan: `src/komira_plan_expr/typed_schema.mojo:1173-1180` and `:1185-1210`.
 - **§8.8.** `src/komira_plan_expr/expr_walk.mojo:819-835` types every comparison and AND/OR as BOOLEAN, nullable.
