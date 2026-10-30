@@ -708,7 +708,7 @@ The context owns:
 | memory | the root reservation, sized from the host profile | `MemoryReservation.for_host` |
 | catalog | table names to schemas and scans | `komira_sql.SqlCatalog` |
 | source registry | scan kinds to resolvers | `komira_scan_resolver.ScanSourceResolvers` |
-| footer cache | parsed footers, one version per path, capped with a per-query pin (planned; built today: `komira_parquet_footers.FooterCache`, unbounded) | `komira_parquet_footers` |
+| footer cache | parsed footers, one version per path, pinned to a query: `run_sql` replaces the cache with an empty one before each call (built: `komira_parquet_footers.FooterCache` is unbounded, so the context never keeps it across queries) | `komira_parquet_footers` |
 | plan cache | the two-layer compile cache | `komira_sdk_exec.plan_compile_cache` (LRU, capped) |
 | options | the flags struct (§5.2) | the caller |
 

@@ -2,9 +2,10 @@
 
 The engine-execution layer of the SDK: twelve modules, ten leaves that need
 nothing from the rest of the package except each other, and the plan gates
-(`plan_validation_gate`, `parquet_glob_options`), which build on `komira_sdk`.
-The engine context that drives a query, the sinks and the frames are not in
-this package yet; nothing here runs a query.
+(`plan_validation_gate`, `parquet_glob_options`), which build on `komira_sdk`;
+and the engine context with its SQL door (`engine_*` below), which runs a SQL
+query over Parquet files from text to record batches. Views, writes, the plan
+cache and the plan gates' call sites are not wired into the context yet.
 
 | module | does |
 |---|---|
@@ -20,6 +21,37 @@ this package yet; nothing here runs a query.
 | `materialized_view_handle` | `MaterializedViewHandle`: the same shape for a view whose result is stored |
 | `secret_capability` | `SecretCapability`: the handle a plan holds for a secret-bearing node, carrying only the node id (never the value, never the secret ref); `open_connection_for` lifts the plan's `SecretBindings` into a `SecretRegistry` over the supplied store and reveals that node's secret to a `CredentialConsumer` inside the call, so the value never escapes |
 | `session_stats` | `SessionStats`: a plain snapshot of the worker counts |
+
+### The engine context and `run_sql`
+
+Import each module by name. The context is a small state struct; what it can
+do is a free function in a module of its own.
+
+| module | does |
+|---|---|
+| `engine_options` | `EngineOptions`: `worker_count` and `memory_budget_bytes`, each `Optional` (absent means the host profile's own value). Values the caller fills from its flags; no environment variable is read |
+| `engine_context` | `EngineContext(options)`: probes the host once, applies the options over the profile, starts the worker runtime. Holds the catalog, the registered tables, `footers` (a `ParquetFooters`), `host_profile` and `runtime`. A count or budget below 1 is refused with `ENGINE_OPTIONS_INVALID`. `begin_query` drops the footer cache |
+| `engine_catalog` | `register_parquet(ctx, name, path)`: the table's schema is its file's footer |
+| `engine_lower` | `lowering_inputs` (the facts of each scan, from `ctx.footers`, in the cutter's scan order; a registered table's scan is checked against its registered schema) and `lower_for_context` |
+| `engine_execute` | `run_lowered_plan(ctx, lowered)`: a `RealBuilder` over a per-run metadata cache and expression pool, the segment pool sized from the memory budget, `run_plan` on `ctx.runtime` with the host profile's thread count; returns the result segment's batch |
+| `engine_sql` | `run_sql(ctx, text) -> SqlOutcome`: tokenize and parse, `bind_statement`, `optimize`, lower, run. Nothing raises: `SqlOutcome.refusal` holds the step (`parse`, `bind`, `optimize`, `lower`, `execute`) and that step's own message |
+
+**The footer cache is pinned to a query.** `komira_parquet_footers.FooterCache`
+has no cap, so the context does not keep it: `run_sql` starts by replacing it
+with an empty one (`begin_query`). Within a call the binder and lowering read
+one footer per file (one read from storage). The next call reads each file it
+names again, so a file replaced between queries is read as the new file, and
+is refused at step `lower` (naming the table) when its schema no longer matches
+the registered table. The scan itself reads through a metadata cache made for
+the run, so it too never serves an old footer. The price is a footer read per
+file per query.
+
+**Refused here, by name.** A statement that is not a query
+(`STATEMENT_NOT_A_QUERY`, step `bind`); a plan that needs a scalar subquery
+executed first (`OPTIMIZE_UNRESOLVED_SCALAR`); a plan that scans an in-memory
+batch (`EXECUTE_UNSUPPORTED_PARAM`); and whatever lowering, the binder, the
+parser or a member refuses (a join is `LOWERING_UNCUTTABLE_NODE` at `lower`).
+A glob path and a table of several files are refused by the footer package.
 
 ## Tests
 
@@ -39,12 +71,22 @@ The tests run when the package is built.
 - `test_plan_validation_routes_ledger`: the ledger's self check and lookups,
   and the wiring's refusal of an unregistered token and of a handle from
   another epoch.
+- `test_run_sql_q6`: TPC-H Q6's text from `komira_bench_corpus` over a lineitem-shaped
+  Parquet file gives the integer oracle's DECIMAL(38,4); a join, a syntax error,
+  an unknown table, a missing file, CREATE TABLE AS and a replaced file are named
+  refusals; the footer is read once per query; a file replaced between queries is
+  read again; options are validated; contexts are created and dropped repeatedly.
 - `test_secret_capability_reveal`: a capability reveals exactly the secret
   bound to its own node id, once and after one store resolve; two capabilities
   over one bindings table each reveal their own value; an unbound node or a
   removed ref raises before the consumer is called.
 
 ## Limits
+
+The context does not yet hold a source registry, a plan cache, spill options or
+the plan validation switch. `run_sql` serves one result segment of Parquet
+scans; Q1 waits for the grouped sinks and the sort. The post-rewrite gate and
+the plan validation gate are not called from `run_sql`.
 
 `post_rewrite_gate` is a free-standing check; its call sites belong to the
 engine context. The plan validation gate that `plan_validation_routes` is the
