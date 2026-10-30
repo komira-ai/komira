@@ -9,9 +9,9 @@ from komira_bench_report import DuckDbPin as ReportDuckDbPin
 
 struct RunSettings(Copyable, Movable):
     """`threads` and `memory_limit_bytes` are given to both engines. A warm
-    cell is `warm_sweeps` sweeps of `warm_reps` reps each (rep 0 of a sweep is
-    dropped by the statistic); a cell's time is the least over the sweeps of
-    each sweep's median, not one median after one discarded run).
+    cell is `warm_sweeps` sweeps of `warm_reps` reps each; every run is
+    recorded, and a cell's steady-state time is the least over the sweeps of
+    the median of all the reps of each sweep.
     A cold cell is `cold_sweeps` sweeps of `cold_reps` reps with the file
     cache dropped before every rep of either engine; `cold_sweeps` of 0 means
     cold is not measured. `pass_max` is the ratio at or below which a cell
@@ -48,12 +48,12 @@ struct RunSettings(Copyable, Movable):
             raise Error("threads must be at least 1")
         if self.memory_limit_bytes < 1024 or self.memory_limit_bytes % 1024 != 0:
             raise Error("the memory limit must be a whole number of KiB")
-        if self.warm_sweeps < 1 or self.warm_reps < 2:
-            raise Error("a warm cell needs at least 1 sweep of 2 reps (rep 0 is dropped)")
+        if self.warm_sweeps < 1 or self.warm_reps < 1:
+            raise Error("a warm cell needs at least 1 sweep of 1 rep")
         if self.cold_sweeps < 0:
             raise Error("cold sweeps cannot be negative")
-        if self.cold_sweeps > 0 and self.cold_reps < 2:
-            raise Error("a cold cell needs at least 2 reps per sweep (rep 0 is dropped)")
+        if self.cold_sweeps > 0 and self.cold_reps < 1:
+            raise Error("a cold cell needs at least 1 rep per sweep")
         if not (self.pass_max > 0.0):
             raise Error("the pass threshold must be positive")
 

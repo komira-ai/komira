@@ -7,16 +7,52 @@
 #   divergent cell has no ratio, the DuckDB pin and dataset lock survive).
 # - test_text_shape: one line, the schema string first, the scale as a
 #   one-member object.
+# - test_runs_and_faults_round_trip: every run of every sweep is in the file
+#   with rep 0 first (`runs_ms`), the minor and major page faults of each run
+#   are beside them where they were measured and null where they were not, the
+#   first run of a side (the check run before the sweeps) is its own member
+#   `first_run` with its time and faults, a cell carries its first-run ratio,
+#   and all of it reads back unchanged.
+# - test_reader_reads_schema_2_derived_from_a_current_document: the current
+#   document with the members of schema 2 (no runs, no faults, no first run, no
+#   check runs, no first-run ratio; a summary without first-run figures and with
+#   "geomean"/"median" in the headline) is read: its times and ratios are as
+#   written, its sides have no runs and its cells no first-run ratio. The writer
+#   does not rewrite it: a side without its runs is refused. A current document
+#   that lacks `runs_ms`, and a schema 2 one that has it, are refused.
+# - test_reader_reads_a_schema_2_document_as_the_previous_writer_wrote_it and
+#   test_reader_reads_a_schema_2_departure_document_with_its_clause: documents
+#   committed in this file, in the member order of the schema 2 writer, are
+#   read and say what they said; the second has a DEPARTURE cell, `n_departure`
+#   1 and the headline's `DEPARTURE 1/1`, and dropping or changing the clause or
+#   the count is refused, so the clause is checked on the read path. Schema 2
+#   holds only its own members (`runs_ms`, `first_run`, `first_ratio` and the
+#   first-run summary members are refused in it).
+# - test_an_unverified_cell_keeps_its_check_runs: a cell the check found wrong or
+#   the engine refused is not timed and has no sides, but the check runs that were
+#   executed (time and faults, either engine) are kept in `check_runs` and read
+#   back, the cell stays unverified and counts against the totals; a timed cell
+#   cannot also hold check runs; a non-positive time and one of two counts are
+#   refused.
+# - test_reader_refuses_schema_1_naming_both_versions: a document of schema 1
+#   (before n_departure, whose numbers mean something else) is refused, and the
+#   message names it and the versions the reader reads.
+# - test_reader_refuses_runs_and_faults_that_do_not_fit: runs that are not
+#   the run's sweeps by reps, runs whose medians are not `ms_per_sweep`, a
+#   negative fault count, faults of the wrong shape, minor faults without major
+#   ones, a missing or non-positive first run, first-run faults without sweep
+#   faults (or the reverse), one of the first run's two counts, and a first-run
+#   ratio that is not the first runs' ratio are each refused.
+# - test_writer_refuses_runs_that_do_not_fit: the same checks when the result
+#   is written: a side with fewer runs than the run's reps, faults of the
+#   wrong shape and a negative fault count are not written.
 # - test_reader_refuses: a wrong schema string, an unknown member, a missing
 #   member, a member named twice, a ratio on a cell that has none, a verdict
 #   that does not follow from the ratio, a summary that is not the cells'
 #   summary, an id outside its suite, a float where an integer is required,
 #   text that is not JSON and text after the document; each altered text is
 #   checked to differ from the original, so an edit that matches nothing fails.
-# - test_reader_refuses_schema_1_naming_both_versions: a document of the
-#   previous schema (komira-bench-result/1, before n_departure) is refused and
-#   the message names that version and the one the reader reads.
-# - test_schema_2_round_trip: the writer writes komira-bench-result/2 and the
+# - test_schema_3_round_trip: the writer writes komira-bench-result/3 and the
 #   reader reads it back to the same text.
 # - test_writer_refuses: a result the schema forbids is not written: a path
 #   or a host-like name in the fingerprint, a PINNED duckdb without a digest, an
@@ -55,7 +91,9 @@ from komira_json import JsonValue, parse_json_value
 from komira_bench_report import (
     BenchResult,
     Cell,
+    CheckRuns,
     DuckDbPin,
+    FirstRun,
     Environment,
     RunInfo,
     STATISTIC_MIN_OF_SWEEP_MEDIAN,
@@ -63,6 +101,7 @@ from komira_bench_report import (
     StageOutcome,
     ValueVerdict,
     parse_result_json,
+    summarize,
     write_result_json,
 )
 
@@ -96,8 +135,46 @@ def _sweeps(
 # A side whose two sweeps (rep 0 first) reduce to the medians `m1` and `m2`.
 def _side(rows: Int64, m1: Float64, m2: Float64) raises -> Optional[Side]:
     return Optional[Side](
-        Side.from_sweeps(rows, _sweeps(99.0, m1, m1, m1, 99.0, m2, m2, m2))
+        Side.from_sweeps(rows, _sweeps(99.0, m1, m1, m1, 99.0, m2, m2, m2), Optional[Float64](99.0))
     )
+
+
+# The same, with the first run (the check run, before the sweeps) `first` instead of 99.
+def _side_first(rows: Int64, first: Float64, m1: Float64, m2: Float64) raises -> Optional[Side]:
+    return Optional[Side](
+        Side.from_sweeps(rows, _sweeps(99.0, m1, m1, m1, 99.0, m2, m2, m2), Optional[Float64](first))
+    )
+
+
+# Two sweeps of four counts, rep 0 first.
+def _counts(
+    a0: Int64, a1: Int64, a2: Int64, a3: Int64,
+    b0: Int64, b1: Int64, b2: Int64, b3: Int64,
+) -> List[List[Int64]]:
+    var first = List[Int64]()
+    first.append(a0)
+    first.append(a1)
+    first.append(a2)
+    first.append(a3)
+    var second = List[Int64]()
+    second.append(b0)
+    second.append(b1)
+    second.append(b2)
+    second.append(b3)
+    var out = List[List[Int64]]()
+    out.append(first^)
+    out.append(second^)
+    return out^
+
+
+# The page faults of a side's eight runs: a first run that faults a great deal,
+# then a few hundred.
+def _minor() -> List[List[Int64]]:
+    return _counts(5000, 900, 900, 900, 800, 800, 800, 800)
+
+
+def _major() -> List[List[Int64]]:
+    return _counts(2, 0, 0, 0, 0, 0, 0, 0)
 
 
 def _cell(
@@ -115,12 +192,21 @@ def _cell(
 
 def _sample() raises -> BenchResult:
     var cells = List[Cell]()
-    # komira sweeps (99,4,6,5) and (99,3,3,3): medians 5 and 3, time 3.
-    var q01k = Side.from_sweeps(4, _sweeps(99.0, 4.0, 6.0, 5.0, 99.0, 3.0, 3.0, 3.0))
+    # komira sweeps (99,4,6,5) and (99,3,3,3): medians 5.5 and 3, time 3; its
+    # first run is 99 against DuckDB's 33, and it has page faults per run.
+    var q01k = Side.from_sweeps(
+        4, _sweeps(99.0, 4.0, 6.0, 5.0, 99.0, 3.0, 3.0, 3.0), Optional[Float64](99.0),
+        _minor(), _major(), Optional[Int64](7000), Optional[Int64](4),
+    )
     cells.append(_cell(String("tpch/q01"), String("tpch"), StageOutcome.exec_ok(),
-        Optional[Side](q01k^), _side(4, 2.0, 4.0), ValueVerdict.identical()))
+        Optional[Side](q01k^), _side_first(4, 33.0, 2.0, 4.0), ValueVerdict.identical()))
+    # DuckDB has page faults per run here, komira does not.
+    var q02d = Side.from_sweeps(
+        10, _sweeps(99.0, 2.0, 2.0, 2.0, 99.0, 2.0, 2.0, 2.0), Optional[Float64](99.0),
+        _minor(), _major(), Optional[Int64](6000), Optional[Int64](1),
+    )
     cells.append(_cell(String("tpch/q02"), String("tpch"), StageOutcome.exec_ok(),
-        _side(10, 2.0, 2.0), _side(10, 2.0, 2.0), ValueVerdict.identical()))
+        _side(10, 2.0, 2.0), Optional[Side](q02d^), ValueVerdict.identical()))
     cells.append(_cell(String("tpch/q03"), String("tpch"), StageOutcome.exec_ok(),
         _side(7, 1.0, 1.0), _side(7, 4.0, 4.0), ValueVerdict.divergent()))
     cells.append(_cell(String("clickbench/q01"), String("clickbench"),
@@ -169,7 +255,7 @@ def test_round_trip() raises:
     assert_equal(back.cells[0].id, String("tpch/q01"))
     assert_equal(back.cells[0].ratio.value(), 1.5)
     assert_equal(back.cells[0].komira.value().ms, 3.0)
-    assert_equal(back.cells[0].komira.value().ms_per_sweep[0], 5.0)
+    assert_equal(back.cells[0].komira.value().ms_per_sweep[0], 5.5)
     assert_equal(back.cells[0].duckdb.value().ms, 2.0)
     assert_true(not Bool(back.cells[2].ratio))
     assert_equal(back.cells[2].value.text(), String("DIVERGENT"))
@@ -177,6 +263,7 @@ def test_round_trip() raises:
     assert_true(not Bool(back.cells[3].komira))
     assert_equal(back.cells[3].value.text(), String("UNVERIFIED:not run"))
     assert_equal(back.run.pass_max, 1.05)
+    assert_true(text.find(String("warmup_runs")) < 0)
     assert_equal(back.run.scale_kind, String("sf"))
     assert_equal(back.run.scale_value, 10)
     assert_equal(back.env.hostclass, String("bench-class-a"))
@@ -189,15 +276,256 @@ def test_round_trip() raises:
 def test_text_shape() raises:
     var text = write_result_json(_sample())
     assert_true(text.find(String("\n")) < 0)
-    assert_true(text.startswith(String('{"schema":"komira-bench-result/2","run":')))
+    assert_true(text.startswith(String('{"schema":"komira-bench-result/3","run":')))
     assert_true(text.find(String('"scale":{"sf":10}')) >= 0)
     assert_true(text.find(String('"summary":{')) >= 0)
+
+
+def test_runs_and_faults_round_trip() raises:
+    var text = write_result_json(_sample())
+    var back = parse_result_json(text)
+    assert_equal(write_result_json(back), text)
+    ref k = back.cells[0].komira.value()
+    # every run of every sweep, rep 0 first, is kept
+    assert_equal(len(k.runs_ms), 2)
+    assert_equal(len(k.runs_ms[0]), 4)
+    assert_equal(len(k.runs_ms[1]), 4)
+    assert_equal(k.runs_ms[0][0], 99.0)
+    assert_equal(k.runs_ms[0][1], 4.0)
+    assert_equal(k.runs_ms[0][3], 5.0)
+    assert_equal(k.runs_ms[1][0], 99.0)
+    # the first run is the check run before the sweeps, kept apart from them,
+    # with its own faults
+    assert_equal(k.first_ms().value(), 99.0)
+    assert_equal(k.first_minor.value(), Int64(7000))
+    assert_equal(k.first_major.value(), Int64(4))
+    assert_true(text.find(String('"first_run":{"ms":')) >= 0)
+    assert_equal(back.cells[1].duckdb.value().first_minor.value(), Int64(6000))
+    assert_true(not Bool(back.cells[0].duckdb.value().first_minor))
+    # the faults of each run
+    assert_equal(len(k.minor_faults), 2)
+    assert_equal(k.minor_faults[0][0], Int64(5000))
+    assert_equal(k.minor_faults[0][1], Int64(900))
+    assert_equal(k.minor_faults[1][3], Int64(800))
+    assert_equal(k.major_faults[0][0], Int64(2))
+    assert_equal(k.major_faults[1][0], Int64(0))
+    # a side measured without counters says so
+    assert_equal(len(back.cells[0].duckdb.value().minor_faults), 0)
+    assert_equal(len(back.cells[0].duckdb.value().major_faults), 0)
+    assert_equal(len(back.cells[1].duckdb.value().minor_faults), 2)
+    assert_true(text.find(String('"minor_faults":null,"major_faults":null')) >= 0)
+    # the first-run ratio of each cell, beside its steady-state ratio
+    assert_equal(back.cells[0].ratio.value(), 1.5)
+    assert_equal(back.cells[0].first_ratio.value(), 3.0)
+    assert_equal(back.cells[1].first_ratio.value(), 1.0)
+    assert_true(not Bool(back.cells[2].first_ratio))
+    assert_true(not Bool(back.cells[3].first_ratio))
+    assert_true(text.find(String('"first_ratio":null')) >= 0)
+    assert_true(text.find(String('"geomean_first_run":')) >= 0)
+    assert_true(text.find(String("steady-state geomean")) >= 0)
+    assert_true(text.find(String("first-run geomean")) >= 0)
+
+
+def _value_end(text: String, at: Int) -> Int:
+    """The index just past the JSON value that starts at `at`: an array to its
+    matching bracket, anything else to the next comma or closing brace."""
+    var b = text.as_bytes()
+    var i = at
+    if b[i] == 0x5B or b[i] == 0x7B:
+        var depth = 0
+        while True:
+            if b[i] == 0x5B or b[i] == 0x7B:
+                depth += 1
+            elif b[i] == 0x5D or b[i] == 0x7D:
+                depth -= 1
+                if depth == 0:
+                    return i + 1
+            i += 1
+    while b[i] != 0x2C and b[i] != 0x7D:
+        i += 1
+    return i
+
+
+def _nth_member(text: String, key: String, nth: Int) raises -> Int:
+    """The index of the `nth` (from 0) `"key":` in `text`."""
+    var needle = String('"') + key + String('":')
+    var at = -1
+    for _ in range(nth + 1):
+        at = text.find(needle, at + 1)
+        assert_true(at >= 0)
+    return at
+
+
+def _set_member(text: String, key: String, nth: Int, value: String) raises -> String:
+    """`text` with the value of the `nth` member named `key` replaced."""
+    var at = _nth_member(text, key, nth) + key.byte_length() + 3
+    var out = (
+        String(text[byte=0:at]) + value
+        + String(text[byte = _value_end(text, at) : text.byte_length()])
+    )
+    assert_true(out != text)
+    return out^
+
+
+def _cut_all(text: String, key: String) raises -> String:
+    """`text` without every member named `key` (each preceded by a comma)."""
+    var needle = String(',"') + key + String('":')
+    var out = text.copy()
+    var at = out.find(needle)
+    assert_true(at >= 0)
+    while at >= 0:
+        var end = _value_end(out, at + needle.byte_length())
+        out = String(out[byte=0:at]) + String(out[byte = end : out.byte_length()])
+        at = out.find(needle)
+    return out^
+
+
+def _as_schema_2(text: String) raises -> String:
+    """The document schema 2 would have written for the same result: no runs,
+    no faults, no first run, no check runs, no first-run ratio or figures, and
+    the headline's geomean and median not called steady-state."""
+    var t = _altered(text, String("komira-bench-result/3"), String("komira-bench-result/2"))
+    t = _cut_all(t, String("check_runs"))
+    t = _cut_all(t, String("first_run"))
+    t = _cut_all(t, String("runs_ms"))
+    t = _cut_all(t, String("minor_faults"))
+    t = _cut_all(t, String("major_faults"))
+    t = _cut_all(t, String("first_ratio"))
+    t = _cut_all(t, String("n_first_ratio"))
+    t = _cut_all(t, String("geomean_first_run"))
+    t = _cut_all(t, String("median_first_run"))
+    t = t.replace(String("steady-state geomean"), String("geomean"))
+    t = t.replace(String("steady-state median"), String("median"))
+    var from_at = t.find(String(" | first-run geomean"))
+    assert_true(from_at >= 0)
+    while from_at >= 0:
+        var to_at = t.find(String('"'), from_at)
+        t = String(t[byte=0:from_at]) + String(t[byte = to_at : t.byte_length()])
+        from_at = t.find(String(" | first-run geomean"))
+    return t^
+
+
+def test_reader_reads_schema_2_derived_from_a_current_document() raises:
+    var good = write_result_json(_sample())
+    var old = _as_schema_2(good)
+    assert_true(old.find(String("runs_ms")) < 0)
+    assert_true(old.find(String("first")) < 0)
+    assert_true(old.find(String("check_runs")) < 0)
+    assert_true(old.find(String("n_departure")) >= 0)
+    var back = parse_result_json(old)
+    assert_equal(back.cells[0].id, String("tpch/q01"))
+    assert_equal(back.cells[0].komira.value().ms, 3.0)
+    assert_equal(back.cells[0].duckdb.value().ms, 2.0)
+    assert_equal(back.cells[0].ratio.value(), 1.5)
+    assert_equal(back.cells[0].verdict, String("FAIL"))
+    assert_equal(back.cells[0].komira.value().ms_per_sweep[0], 5.5)
+    assert_equal(len(back.cells[0].komira.value().runs_ms), 0)
+    assert_equal(len(back.cells[0].komira.value().minor_faults), 0)
+    assert_true(not Bool(back.cells[0].komira.value().first_ms()))
+    assert_true(not Bool(back.cells[0].first_ratio))
+    assert_true(not Bool(back.cells[1].first_ratio))
+    assert_true(not Bool(summarize(back).overall.geomean_first))
+    assert_equal(back.run.pass_max, 1.05)
+    # it is not rewritten as schema 3: its sides have no runs to write
+    assert_true(_write_refused(back))
+    # a schema 3 document without the runs, and a schema 2 one with them
+    assert_true(_refused(_cut_all(good, String("runs_ms"))))
+    assert_true(_refused(_altered(good, String("komira-bench-result/3"), String("komira-bench-result/2"))))
+    assert_true(_refused(_altered(old, String("komira-bench-result/2"), String("komira-bench-result/0"))))
+
+
+def test_reader_refuses_runs_and_faults_that_do_not_fit() raises:
+    var good = write_result_json(_sample())
+    # one sweep of runs where the run has two
+    assert_true(_refused(_set_member(good, String("runs_ms"), 0, String("[[99.0,4.0,6.0,5.0]]"))))
+    # a sweep with three runs where the run has four reps
+    assert_true(_refused(_set_member(good, String("runs_ms"), 0, String("[[99.0,4.0,6.0],[99.0,3.0,3.0,3.0]]"))))
+    # runs whose medians are not ms_per_sweep (50 and 3 against 5 and 3)
+    assert_true(_refused(_set_member(good, String("runs_ms"), 0, String("[[99.0,40.0,60.0,50.0],[99.0,3.0,3.0,3.0]]"))))
+    # a negative count, a count of the wrong shape, minor without major
+    assert_true(_refused(_set_member(good, String("minor_faults"), 0, String("[[-1,0,0,0],[0,0,0,0]]"))))
+    assert_true(_refused(_set_member(good, String("major_faults"), 0, String("[[2,0,0],[0,0,0,0]]"))))
+    assert_true(_refused(_set_member(good, String("major_faults"), 0, String("null"))))
+    assert_true(_refused(_set_member(good, String("minor_faults"), 0, String('[[1.5,0,0,0],[0,0,0,0]]'))))
+    # the first run: missing, not positive, faults for it but none for the sweeps
+    # (and the reverse), only one of its two counts
+    assert_true(_refused(_cut_all(good, String("first_run"))))
+    assert_true(_refused(_set_member(good, String("first_run"), 0, String('{"ms":0,"minor_faults":7000,"major_faults":4}'))))
+    assert_true(_refused(_set_member(good, String("first_run"), 0, String('{"ms":99.0,"minor_faults":null,"major_faults":null}'))))
+    assert_true(_refused(_set_member(good, String("first_run"), 0, String('{"ms":99.0,"minor_faults":7000,"major_faults":null}'))))
+    assert_true(_refused(_set_member(good, String("first_run"), 0, String('{"ms":99.0,"minor_faults":-1,"major_faults":4}'))))
+    assert_true(_refused(_set_member(good, String("first_run"), 1, String('{"ms":99.0,"minor_faults":5,"major_faults":1}'))))
+    # a first-run ratio that is not komira's first run over DuckDB's
+    assert_true(_refused(_set_member(good, String("first_ratio"), 0, String("7.5"))))
+    assert_true(_refused(_set_member(good, String("first_ratio"), 0, String("null"))))
+    assert_true(not _refused(good))
+
+
+def test_writer_refuses_runs_that_do_not_fit() raises:
+    assert_true(not _write_refused(_sample()))
+    # the run says five reps, the sides hold four runs per sweep
+    var r = _sample()
+    r.run.reps = 5
+    for i in range(len(r.cells)):
+        r.cells[i].reps = 5
+    assert_true(_write_refused(r))
+    # faults of the wrong shape, a negative count, minor faults without major
+    var sweeps = _sweeps(99.0, 4.0, 6.0, 5.0, 99.0, 3.0, 3.0, 3.0)
+    var short = List[List[Int64]]()
+    short.append(_minor()[0].copy())
+    r = _sample()
+    r.cells[0].komira = Optional[Side](
+        Side.from_sweeps(4, sweeps.copy(), Optional[Float64](99.0), short^, _major(), Optional[Int64](7000), Optional[Int64](4))
+    )
+    assert_true(_write_refused(r))
+    r = _sample()
+    r.cells[0].komira = Optional[Side](
+        Side.from_sweeps(
+            4, sweeps.copy(), Optional[Float64](99.0), _counts(5000, 900, 900, 900, 800, 800, -3, 800), _major(),
+            Optional[Int64](7000), Optional[Int64](4),
+        )
+    )
+    assert_true(_write_refused(r))
+    r = _sample()
+    r.cells[0].komira = Optional[Side](
+        Side.from_sweeps(4, sweeps.copy(), Optional[Float64](99.0), _minor(), List[List[Int64]](), Optional[Int64](7000))
+    )
+    assert_true(_write_refused(r))
+    # faults for the first run but none for the sweeps, and the reverse
+    r = _sample()
+    r.cells[0].komira = Optional[Side](
+        Side.from_sweeps(4, sweeps.copy(), Optional[Float64](99.0), List[List[Int64]](), List[List[Int64]](), Optional[Int64](7000), Optional[Int64](4))
+    )
+    assert_true(_write_refused(r))
+    r = _sample()
+    r.cells[0].komira = Optional[Side](
+        Side.from_sweeps(4, sweeps.copy(), Optional[Float64](99.0), _minor(), _major())
+    )
+    assert_true(_write_refused(r))
+    # a side with runs but no first run is not written
+    r = _sample()
+    r.cells[0].komira = Optional[Side](Side.from_sweeps(4, sweeps.copy()))
+    assert_true(_write_refused(r))
+    # the same side, shaped right, is written
+    r = _sample()
+    r.cells[0].komira = Optional[Side](
+        Side.from_sweeps(4, sweeps.copy(), Optional[Float64](99.0), _minor(), _major(), Optional[Int64](7000), Optional[Int64](4))
+    )
+    assert_true(not _write_refused(r))
+    # a side with no runs at all (the shape schema 1 held) is not written
+    var medians = List[Float64]()
+    medians.append(1.0)
+    medians.append(1.0)
+    r = _sample()
+    r.cells[4] = _cell(String("clickbench/q02"), String("clickbench"), StageOutcome.exec_ok(),
+        Optional[Side](Side(43, 1.0, medians^, 0.0)), _side(43, 2.0, 2.0), ValueVerdict.identical())
+    assert_true(_write_refused(r))
 
 
 def test_reader_refuses() raises:
     var good = write_result_json(_sample())
     assert_true(not _refused(good))
-    assert_true(_refused(_altered(good, String("komira-bench-result/2"), String("komira-bench-result/3"))))
+    assert_true(_refused(_altered(good, String("komira-bench-result/3"), String("komira-bench-result/4"))))
     assert_true(_refused(_altered(good, String('"threads":20'), String('"threads":20,"extra":1'))))
     assert_true(_refused(_altered(good, String('"threads":20,'), String(""))))
     assert_true(_refused(_altered(good, String('"reps":4,"statistic"'), String('"reps":4,"reps":4,"statistic"'))))
@@ -218,6 +546,155 @@ def _refusal(text: String) -> String:
     return String("")
 
 
+def test_schema_3_round_trip() raises:
+    var text = write_result_json(_sample())
+    assert_true(text.find(String('"schema":"komira-bench-result/3"')) >= 0)
+    assert_true(_refusal(text) == String(""))
+    assert_equal(write_result_json(parse_result_json(text)), text)
+
+
+# A document as the writer of schema 2 (the change that added `n_departure`
+# and the DEPARTURE verdict) wrote it, member for member in its order, for one
+# tpch cell: komira 3 ms against DuckDB's 2 (ratio 1.5, FAIL at 1.05). It has
+# no runs and no page faults. The times are whole numbers on purpose.
+def _schema_2_document() -> String:
+    var side_k = String('{"rows":1,"ms":3,"ms_per_sweep":[3,3],"spread_pct":0}')
+    var side_d = String('{"rows":1,"ms":2,"ms_per_sweep":[2,2],"spread_pct":0}')
+    var suite = (
+        String('"n_cells":1,"n_ran":1,"n_value_identical":1,"n_ratio":1,"n_pass":0,"n_fail":1,"n_departure":0')
+    )
+    return (
+        String('{"schema":"komira-bench-result/2","run":{"mode":"both","scale":{"sf":10},"sweeps":2,"reps":3,')
+        + String('"statistic":"min_of_sweep_median","threads":20,"pass_max":1.05},')
+        + String('"env":{"hostclass":"bench-class-a","cpu_model":"Example CPU 2.4GHz","cores":44,')
+        + String('"mem_total_bytes":137438953472,"os":"Linux 6.1","komira_version":"1.2.3",')
+        + String('"duckdb":{"version":"v1.5.6","sha256":"') + _hex(String("ab")) + String('","pin":"PINNED"},')
+        + String('"dataset_lock_sha256":"') + _hex(String("a1b2c3d4")) + String('"},')
+        + String('"cells":[{"id":"tpch/q01","suite":"tpch","reps":3,"stage":"EXEC_OK","komira":') + side_k
+        + String(',"duckdb":') + side_d + String(',"value":"IDENTICAL","ratio":1.5,"verdict":"FAIL"}],')
+        + String('"summary":{"suite":"all",') + suite
+        + String(',"geomean_ratio_verified":1.5,"median_ratio":1.5,"per_suite":[{"suite":"tpch",') + suite
+        + String(',"geomean_ratio_verified":1.5,"median_ratio":1.5}],')
+        + String('"headline":"PASS 0/1 at <= 1.05x vs duckdb v1.5.6 (PINNED) | geomean 1.50x over 1/1 value-verified | median 1.50x"}}')
+    )
+
+
+comptime _HUGEINT_REASON: String = "Arrow has no 128-bit integer: HUGEINT as DECIMAL(38,0)"
+
+
+# The same cell as a DEPARTURE (equal values, an allowed difference of declared
+# types), as that writer wrote it: the verdict DEPARTURE with its reason in the
+# value, `n_departure` 1, no `n_value_identical`, no PASS or FAIL, and the
+# headline's `DEPARTURE 1/1` between the PASS count and the geomean.
+def _schema_2_departure_document() -> String:
+    var t = _schema_2_document()
+    t = t.replace(String('"value":"IDENTICAL","ratio":1.5,"verdict":"FAIL"'), String('"value":"DEPARTURE:') + String(_HUGEINT_REASON) + String('","ratio":1.5,"verdict":"DEPARTURE"'))
+    t = t.replace(String('"n_value_identical":1'), String('"n_value_identical":0'))
+    t = t.replace(String('"n_fail":1,"n_departure":0'), String('"n_fail":0,"n_departure":1'))
+    t = t.replace(String("(PINNED) | geomean"), String("(PINNED) | DEPARTURE 1/1 | geomean"))
+    return t^
+
+
+def _check_committed(text: String) raises:
+    var back = parse_result_json(text)
+    assert_equal(back.run.sweeps, 2)
+    assert_equal(back.run.reps, 3)
+    assert_equal(back.run.threads, 20)
+    assert_equal(back.env.hostclass, String("bench-class-a"))
+    assert_equal(back.cells[0].ratio.value(), 1.5)
+    assert_equal(back.cells[0].komira.value().ms, 3.0)
+    assert_equal(len(back.cells[0].komira.value().runs_ms), 0)
+    assert_true(not Bool(back.cells[0].first_ratio))
+    assert_true(_write_refused(back))
+    # only the members of its own schema
+    assert_true(_refused(_altered(text, String('"spread_pct":0}'), String('"spread_pct":0,"runs_ms":[[1,1,1],[1,1,1]],"minor_faults":null,"major_faults":null,"first_run":{"ms":1,"minor_faults":null,"major_faults":null}}'))))
+    assert_true(_refused(_altered(text, String('"median_ratio":1.5}'), String('"median_ratio":1.5,"n_first_ratio":0,"geomean_first_run":null,"median_first_run":null}'))))
+
+
+def test_reader_reads_a_schema_2_document_as_the_previous_writer_wrote_it() raises:
+    var text = _schema_2_document()
+    assert_true(text.find(String('"n_departure":0')) >= 0)
+    _check_committed(text)
+    var back = parse_result_json(text)
+    assert_equal(back.cells[0].verdict, String("FAIL"))
+    # schema 2 has n_departure: without it the summary is not the cells'
+    assert_true(_refused(_altered(text, String(',"n_departure":0'), String(""))))
+    # and a first_ratio, which only schema 3 has, is refused
+    assert_true(_refused(_altered(text, String('"verdict":"FAIL"}'), String('"verdict":"FAIL","first_ratio":null}'))))
+
+
+def test_reader_reads_a_schema_2_departure_document_with_its_clause() raises:
+    var text = _schema_2_departure_document()
+    assert_true(text.find(String('"n_departure":1')) >= 0)
+    assert_true(text.find(String("| DEPARTURE 1/1 |")) >= 0)
+    var back = parse_result_json(text)
+    assert_equal(back.cells[0].value.text(), String("DEPARTURE:") + String(_HUGEINT_REASON))
+    assert_equal(back.cells[0].verdict, String("DEPARTURE"))
+    assert_equal(back.cells[0].ratio.value(), 1.5)
+    var summary = summarize(back)
+    assert_equal(summary.overall.n_departure, 1)
+    assert_equal(summary.overall.n_pass, 0)
+    assert_equal(summary.overall.n_fail, 0)
+    assert_equal(summary.overall.n_verified, 0)
+    assert_true(_write_refused(back))
+    # the clause is checked on the read path: dropping it, or a count, is refused
+    assert_true(_refused(_altered(text, String(" | DEPARTURE 1/1"), String(""))))
+    assert_true(_refused(_altered(text, String("| DEPARTURE 1/1 |"), String("| DEPARTURE 0/1 |"))))
+    assert_true(_refused(_altered(text, String('"n_departure":1'), String('"n_departure":0'))))
+
+
+def _check_runs() -> CheckRuns:
+    return CheckRuns(
+        Optional[FirstRun](FirstRun(50.0, Optional[Int64](7000), Optional[Int64](4))),
+        Optional[FirstRun](FirstRun(40.0, Optional[Int64](60000), Optional[Int64](6))),
+    )
+
+
+# A cell the check found wrong: nothing is timed, so it has no sides, but the
+# check runs were executed and are kept.
+def _unverified_cell() raises -> Cell:
+    return Cell.build(
+        String("tpch/q09"), String("tpch"), 4, StageOutcome.exec_fail(), Optional[Side](), Optional[Side](),
+        ValueVerdict.unverified(String("answer differs from duckdb")), 1.05, Optional[CheckRuns](_check_runs()),
+    )
+
+
+def test_an_unverified_cell_keeps_its_check_runs() raises:
+    var r = _sample()
+    r.cells.append(_unverified_cell())
+    var text = write_result_json(r)
+    assert_true(text.find(String('"check_runs":{"komira":{"ms":')) >= 0)
+    var back = parse_result_json(text)
+    assert_equal(write_result_json(back), text)
+    ref c = back.cells[5]
+    assert_equal(c.value.text(), String("UNVERIFIED:answer differs from duckdb"))
+    assert_equal(c.stage.text(), String("EXEC_FAIL"))
+    assert_true(not Bool(c.ratio))
+    assert_true(not Bool(c.komira))
+    assert_equal(c.check_runs.value().komira.value().ms, 50.0)
+    assert_equal(c.check_runs.value().komira.value().minor.value(), Int64(7000))
+    assert_equal(c.check_runs.value().duckdb.value().ms, 40.0)
+    assert_equal(c.check_runs.value().duckdb.value().major.value(), Int64(6))
+    # the cell is still not verified: it counts against the totals as before
+    var s = summarize(back)
+    assert_equal(s.overall.n_cells, 6)
+    assert_equal(s.overall.n_verified, 3)
+    # timed cells carry no check runs of their own (their sides hold the first runs)
+    assert_true(not Bool(back.cells[0].check_runs))
+    # a cell that was timed cannot also hold check runs
+    var bad = _sample()
+    bad.cells[0] = Cell.build(
+        String("tpch/q01"), String("tpch"), 4, StageOutcome.exec_ok(), bad.cells[0].komira.copy(),
+        bad.cells[0].duckdb.copy(), ValueVerdict.identical(), 1.05, Optional[CheckRuns](_check_runs()),
+    )
+    assert_true(_write_refused(bad))
+    # a time that is not positive, and one of the two counts, are refused
+    assert_true(_refused(_set_member(text, String("check_runs"), 5, String('{"komira":{"ms":0,"minor_faults":null,"major_faults":null},"duckdb":null}'))))
+    assert_true(_refused(_set_member(text, String("check_runs"), 5, String('{"komira":{"ms":5.0,"minor_faults":1,"major_faults":null},"duckdb":null}'))))
+    assert_true(_refused(_set_member(text, String("check_runs"), 0, String('{"komira":null,"duckdb":null}'))))
+    assert_true(not _refused(_set_member(text, String("check_runs"), 5, String('{"komira":null,"duckdb":{"ms":2.5,"minor_faults":null,"major_faults":null}}'))))
+
+
 def test_reader_refuses_schema_1_naming_both_versions() raises:
     var good = write_result_json(_sample())
     var at = good.find(String('"run":'))
@@ -227,13 +704,7 @@ def test_reader_refuses_schema_1_naming_both_versions() raises:
     assert_true(msg.find(String("BenchResultError: schema")) >= 0)
     assert_true(msg.find(String("komira-bench-result/1")) >= 0)
     assert_true(msg.find(String("komira-bench-result/2")) >= 0)
-
-
-def test_schema_2_round_trip() raises:
-    var text = write_result_json(_sample())
-    assert_true(text.find(String('"schema":"komira-bench-result/2"')) >= 0)
-    assert_true(_refusal(text) == String(""))
-    assert_equal(write_result_json(parse_result_json(text)), text)
+    assert_true(msg.find(String("komira-bench-result/3")) >= 0)
 
 
 def test_reader_refuses_a_ratio_on_an_unverified_cell() raises:
@@ -475,7 +946,7 @@ def test_reader_tolerates_the_last_digits_of_the_geomean() raises:
     assert_true(not _refused(_with_number(good, key, summary_at, g * (1.0 + 1e-12))))
     assert_true(_refused(_with_number(good, key, summary_at, g * 1.01)))
     # The headline shows the geomean to two places: 0.91 is the figure.
-    assert_true(_refused(_altered(good, String("geomean 0.91x"), String("geomean 0.92x"))))
+    assert_true(_refused(_altered(good, String("steady-state geomean 0.91x"), String("steady-state geomean 0.92x"))))
 
 
 def test_reader_compares_the_rest_of_the_headline() raises:
@@ -533,17 +1004,45 @@ def main() raises:
     except e:
         failed += "\n  test_text_shape: " + String(e)
     try:
-        test_reader_refuses()
+        test_runs_and_faults_round_trip()
     except e:
-        failed += "\n  test_reader_refuses: " + String(e)
+        failed += "\n  test_runs_and_faults_round_trip: " + String(e)
+    try:
+        test_reader_reads_schema_2_derived_from_a_current_document()
+    except e:
+        failed += "\n  test_reader_reads_schema_2_derived_from_a_current_document: " + String(e)
+    try:
+        test_reader_reads_a_schema_2_departure_document_with_its_clause()
+    except e:
+        failed += "\n  test_reader_reads_a_schema_2_departure_document_with_its_clause: " + String(e)
+    try:
+        test_an_unverified_cell_keeps_its_check_runs()
+    except e:
+        failed += "\n  test_an_unverified_cell_keeps_its_check_runs: " + String(e)
     try:
         test_reader_refuses_schema_1_naming_both_versions()
     except e:
         failed += "\n  test_reader_refuses_schema_1_naming_both_versions: " + String(e)
     try:
-        test_schema_2_round_trip()
+        test_reader_reads_a_schema_2_document_as_the_previous_writer_wrote_it()
     except e:
-        failed += "\n  test_schema_2_round_trip: " + String(e)
+        failed += "\n  test_reader_reads_a_schema_2_document_as_the_previous_writer_wrote_it: " + String(e)
+    try:
+        test_reader_refuses_runs_and_faults_that_do_not_fit()
+    except e:
+        failed += "\n  test_reader_refuses_runs_and_faults_that_do_not_fit: " + String(e)
+    try:
+        test_writer_refuses_runs_that_do_not_fit()
+    except e:
+        failed += "\n  test_writer_refuses_runs_that_do_not_fit: " + String(e)
+    try:
+        test_reader_refuses()
+    except e:
+        failed += "\n  test_reader_refuses: " + String(e)
+    try:
+        test_schema_3_round_trip()
+    except e:
+        failed += "\n  test_schema_3_round_trip: " + String(e)
     try:
         test_reader_refuses_a_ratio_on_an_unverified_cell()
     except e:

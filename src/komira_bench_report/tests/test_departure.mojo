@@ -65,7 +65,7 @@ def _side(rows: Int64, m: Float64) raises -> Optional[Side]:
         one.append(m)
         one.append(m)
         sweeps.append(one^)
-    return Optional[Side](Side.from_sweeps(rows, sweeps))
+    return Optional[Side](Side.from_sweeps(rows, sweeps.copy(), Optional[Float64](99.0)))
 
 
 def _departure() raises -> ValueVerdict:
