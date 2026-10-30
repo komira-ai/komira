@@ -40,6 +40,7 @@ load("//src/komira_chat_proto:buildrules.mojo.lock.bzl", komira_chat_proto = "GR
 load("//src/komira_clock:buildrules.mojo.lock.bzl", komira_clock = "GRAPH")
 load("//src/komira_codeworks_api:buildrules.mojo.lock.bzl", komira_codeworks_api = "GRAPH")
 load("//src/komira_collections:buildrules.mojo.lock.bzl", komira_collections = "GRAPH")
+load("//src/komira_compression:buildrules.mojo.lock.bzl", komira_compression = "GRAPH")
 load("//src/komira_contacts_proto:buildrules.mojo.lock.bzl", komira_contacts_proto = "GRAPH")
 load("//src/komira_content_line:buildrules.mojo.lock.bzl", komira_content_line = "GRAPH")
 load("//src/komira_counters:buildrules.mojo.lock.bzl", komira_counters = "GRAPH")
@@ -131,6 +132,7 @@ _GRAPHS = {
     "komira_clock": komira_clock,
     "komira_codeworks_api": komira_codeworks_api,
     "komira_collections": komira_collections,
+    "komira_compression": komira_compression,
     "komira_contacts_proto": komira_contacts_proto,
     "komira_content_line": komira_content_line,
     "komira_counters": komira_counters,
