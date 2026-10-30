@@ -48,9 +48,11 @@
 # - test_an_unregistrable_table_ends_the_run_naming_it: a table whose file is
 #   missing makes prepare raise naming the table; a run before prepare raises.
 # - test_refusals_are_recorded_by_what_they_mean: against the real engine, an
-#   unknown column is BIND_FAIL, three INT64 values of 2^62 summed are EXEC_FAIL
-#   and a join is a refusal; outcome_of_refusal maps the messages of the other
-#   steps. Catches an engine fault read as a missing feature.
+#   unknown column is BIND_FAIL, three INT64 values of 2^62 summed are answered
+#   (SQL integer sum() is DECIMAL(38, 0)), an INT64 multiplication that leaves
+#   the 64-bit range is EXEC_FAIL and a join is a refusal; outcome_of_refusal
+#   maps the messages of the other steps. Catches an engine fault read as a
+#   missing feature.
 # - test_conversion_of_unsigned_float_and_dictionary_columns: UINT64 at 2^63-1
 #   is an integer and at 2^63 an exact decimal, UINT8/16/32 are integers, a FLOAT 0.1 is
 #   the double 0.1 and not the widened float, a dictionary string column raises
@@ -867,7 +869,12 @@ def test_refusals_are_recorded_by_what_they_mean() raises:
     assert_equal(unknown.kind, ARM_BIND_FAIL, arm.last_refusal)
     assert_true(unknown.detail.startswith(String("bind: ")))
 
-    var overflow = arm.run(_q(String("o"), String("select sum(v) as s from big")), True)
+    # A sum past INT64 is a DECIMAL(38, 0) answer, not a failure.
+    var wide = arm.run(_q(String("w"), String("select sum(v) as s from big")), True)
+    assert_equal(wide.kind, ARM_ROWS, arm.last_refusal)
+
+    # An INT64 product outside the 64-bit range still fails at execute.
+    var overflow = arm.run(_q(String("o"), String("select max(v * 4) as s from big")), True)
     assert_equal(overflow.kind, ARM_EXEC_FAIL, arm.last_refusal)
     assert_true(overflow.detail.startswith(String("execute: ")))
 
