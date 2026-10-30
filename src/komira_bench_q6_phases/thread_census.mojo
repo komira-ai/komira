@@ -14,13 +14,18 @@
 #   * `task_workers`: the threads that ran a segment task in the run;
 #   * `other`: every remaining thread (workers with no task in this run,
 #     I/O and helper threads), also split by thread name.
+# A thread is matched across the two snapshots by its tid AND its start time
+# (field 22 of `/proc/self/task/<tid>/stat`), so a tid the kernel handed to a
+# new thread during the run is not subtracted from the dead thread's counts:
+# the new thread counts from zero. Where the stat file cannot be read the start
+# time is 0 and the match is by tid alone.
 # The driver's own figures include the cost of reading the snapshots (it reads
 # them), so use the other groups for the question of where the run's switches
 # are. Linux only; elsewhere the snapshot is empty and every count is 0.
 
 from std.os import listdir
 
-from komira_host.proc_probe import _read_small_file_to_string
+from komira_host.proc_probe import read_small_file_to_string as _read_small_file_to_string
 
 comptime GROUP_DRIVER: Int = 0
 comptime GROUP_WORKER: Int = 1
@@ -37,8 +42,11 @@ struct ThreadStat(Copyable, Movable):
     """Time on a CPU (`schedstat`), 0 when the file is missing."""
     var wait_ns: Int
     """Time runnable but waiting for a CPU (`schedstat`)."""
+    var start: Int
+    """Start time in clock ticks since boot (`stat` field 22), 0 if unread."""
 
     def __init__(out self):
+        self.start = 0
         self.tid = 0
         self.name = String("")
         self.vol = 0
@@ -112,6 +120,24 @@ def parse_schedstat(text: String, mut run_ns: Int, mut wait_ns: Int):
         wait_ns = _to_int(String(parts[1]))
 
 
+def parse_stat_start(text: String) -> Int:
+    """Field 22 (start time) of a `stat` file's text; 0 if it is malformed.
+    The command name (field 2) may hold spaces and parentheses, so the fields
+    are counted from after the last `)`: the next one is field 3."""
+    var b = text.as_bytes()
+    var close = -1
+    for i in range(len(b)):
+        if b[i] == UInt8(0x29):
+            close = i
+    if close < 0:
+        return 0
+    var rest = String(text[byte = close + 1 : text.byte_length()])
+    var parts = rest.strip().split(" ")
+    if len(parts) < 20:
+        return 0
+    return _to_int(String(parts[19]))
+
+
 def thread_census() -> List[ThreadStat]:
     """Every thread of this process now; empty off Linux or if `/proc` is
     unreadable."""
@@ -133,6 +159,7 @@ def thread_census() -> List[ThreadStat]:
         parse_schedstat(_read_small_file_to_string(base + "/schedstat"), run_ns, wait_ns)
         s.run_ns = run_ns
         s.wait_ns = wait_ns
+        s.start = parse_stat_start(_read_small_file_to_string(base + "/stat"))
         out.append(s^)
     return out^
 
@@ -194,7 +221,7 @@ def census_delta(
     worker_tids: List[Int],
 ) -> CensusDelta:
     """The per-group change from `before` to `after`. A thread in `after`
-    only (started during the run) counts from zero; one only in `before`
+    only (started during the run, or a tid reused by a new thread: same tid, other start time) counts from zero; one only in `before`
     (ended) is not counted. A thread in `driver_tids` is the driver, else one
     in `worker_tids` a task worker, else `other`."""
     var d = CensusDelta()
@@ -205,7 +232,7 @@ def census_delta(
         var run_ns = a.run_ns
         var wait_ns = a.wait_ns
         for j in range(len(before)):
-            if before[j].tid == a.tid:
+            if before[j].tid == a.tid and before[j].start == a.start:
                 vol -= before[j].vol
                 invol -= before[j].invol
                 run_ns -= before[j].run_ns

@@ -32,6 +32,11 @@
 #   the usage counters. Catches a bracket that reads the process instead of the
 #   thread, one that overwrites instead of adding, one that books to the wrong
 #   phase, and a reset that leaves usage behind.
+# - test_an_end_without_its_begin_records_nothing_and_is_counted: a usage end
+#   with no begin leaves every usage counter 0 and adds 1 to the overflow
+#   count; a matched pair is taken without a count; a second end is refused
+#   again. Catches an end that subtracts a stale start (the case of a failed
+#   begin sample) or one that is dropped without a trace.
 # - test_more_threads_than_lanes_are_counted_not_silent: with more thread ids
 #   than lanes, the lanes fill to PT_LANES, each dropped record adds one to
 #   `pt_overflow_count`, a thread that has a lane still records, and a calling
@@ -138,6 +143,11 @@ def test_reset_zeroes_the_counters_and_keeps_the_lane() raises:
 
 
 def test_thread_usage_counts_this_threads_switches_and_faults() raises:
+    # pt_ru_available makes one real getrusage(RUSAGE_THREAD) call. It is
+    # False only where the syscall is refused (a filter in a sandbox) or the
+    # target is not Linux; there the counters cannot be read and the probe's
+    # JSON says so (`thread_usage_available`), so this test has nothing to
+    # check and returns.
     if not pt_ru_available():
         return
     pt_reset()
@@ -185,6 +195,23 @@ def test_forgetting_threads_frees_every_lane() raises:
     pt_record_ns[PH_FILTER](4)
     assert_equal(pt_lane_count(), 1)
     assert_equal(pt_get(0, PH_FILTER, FIELD_SUM), 4)
+
+
+def test_an_end_without_its_begin_records_nothing_and_is_counted() raises:
+    if not pt_ru_available():
+        return
+    pt_reset()
+    pt_ru_end[PH_SINK]()
+    assert_equal(pt_overflow_count(), 1)
+    for field in range(FIELD_RU_VOL, FIELD_RU_END):
+        assert_equal(pt_get(0, PH_SINK, field), 0)
+    # A matched pair afterwards is taken, and a second end is refused again.
+    pt_ru_begin[PH_SINK]()
+    pt_ru_end[PH_SINK]()
+    assert_equal(pt_overflow_count(), 1)
+    pt_ru_end[PH_SINK]()
+    assert_equal(pt_overflow_count(), 2)
+    pt_reset()
 
 
 def test_more_threads_than_lanes_are_counted_not_silent() raises:
@@ -243,5 +270,6 @@ def main() raises:
     suite.test[test_a_lane_is_keyed_by_the_kernel_thread_id]()
     suite.test[test_forgetting_threads_frees_every_lane]()
     suite.test[test_thread_usage_counts_this_threads_switches_and_faults]()
+    suite.test[test_an_end_without_its_begin_records_nothing_and_is_counted]()
     suite.test[test_more_threads_than_lanes_are_counted_not_silent]()
     suite^.run()

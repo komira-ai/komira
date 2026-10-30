@@ -22,6 +22,14 @@
 #   counted from zero, a thread that ended not counted, and the other threads
 #   grouped by name. Catches a thread in the wrong group, a delta taken from
 #   the wrong snapshot, and a name group that merges or drops threads.
+# - test_parse_stat_start_counts_fields_after_the_last_paren: a `stat` text
+#   whose command name holds spaces and parentheses still gives field 22 (the
+#   start time); text with too few fields or no `)` gives 0. Catches a field
+#   count that a name with spaces shifts.
+# - test_a_reused_tid_is_not_subtracted_from_the_dead_thread: a thread whose id
+#   equals a dead thread's but whose start time differs counts from zero, while
+#   the same id with the same start time is subtracted. Catches a match by id
+#   alone.
 
 from std.sys.info import CompilationTarget
 from std.testing import TestSuite, assert_equal, assert_true
@@ -34,6 +42,7 @@ from komira_bench_q6_phases.thread_census import (
     base_name,
     census_delta,
     parse_schedstat,
+    parse_stat_start,
     parse_status,
     thread_census,
 )
@@ -98,6 +107,38 @@ def test_the_live_census_lists_this_thread() raises:
         assert_equal(len(threads), 0)
 
 
+def test_parse_stat_start_counts_fields_after_the_last_paren() raises:
+    var text = String(
+        "77 (we ird) name) S 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18"
+        " 987654 100 200"
+    )
+    assert_equal(parse_stat_start(text), 987654)
+    assert_equal(parse_stat_start(String("77 (x) S 1 2 3")), 0)
+    assert_equal(parse_stat_start(String("no paren here")), 0)
+
+
+def test_a_reused_tid_is_not_subtracted_from_the_dead_thread() raises:
+    var before = List[ThreadStat]()
+    var old = _stat(40, "w", 100, 0, 1000, 0)
+    old.start = 11
+    before.append(old^)
+    var after = List[ThreadStat]()
+    var fresh = _stat(40, "w", 7, 0, 70, 0)
+    fresh.start = 22
+    after.append(fresh^)
+    var none = List[Int]()
+    var d = census_delta(before, after, none, none)
+    assert_equal(d.groups[GROUP_OTHER].vol_sum, 7)
+    assert_equal(d.groups[GROUP_OTHER].run_ns, 70)
+    var same = List[ThreadStat]()
+    var again = _stat(40, "w", 107, 0, 1070, 0)
+    again.start = 11
+    same.append(again^)
+    var d2 = census_delta(before, same, none, none)
+    assert_equal(d2.groups[GROUP_OTHER].vol_sum, 7)
+    assert_equal(d2.groups[GROUP_OTHER].run_ns, 70)
+
+
 def test_delta_splits_threads_into_driver_workers_and_rest() raises:
     var before = List[ThreadStat]()
     before.append(_stat(10, "main", 100, 1, 1000, 10))
@@ -154,5 +195,7 @@ def main() raises:
     suite.test[test_base_name_drops_trailing_digits]()
     suite.test[test_parse_schedstat_reads_run_and_wait]()
     suite.test[test_the_live_census_lists_this_thread]()
+    suite.test[test_parse_stat_start_counts_fields_after_the_last_paren]()
+    suite.test[test_a_reused_tid_is_not_subtracted_from_the_dead_thread]()
     suite.test[test_delta_splits_threads_into_driver_workers_and_rest]()
     suite^.run()

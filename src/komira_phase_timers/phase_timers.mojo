@@ -38,8 +38,8 @@
 # into its JSON, so a run with dropped records is visible and its numbers are
 # not to be trusted. Every path that takes a lane counts the same way: the
 # interval records, and the two ends of a resource-usage interval (each end
-# that finds no lane adds 1). The probe also refuses a thread list that cannot
-# fit.
+# that finds no lane adds 1, and so does an end whose begin sample is missing).
+# The probe also refuses a thread list that cannot fit.
 #
 # One query at a time: the slab is process-global because the sites sit in
 # functions no object of the caller reaches (the same reason as
@@ -136,6 +136,9 @@ comptime FIELD_RU_MAJFLT: Int = 9
 """Major page faults of the thread inside the phase."""
 comptime FIELD_RU_END: Int = 10
 """One past the last accumulated field."""
+comptime _RU_ARMED: Int = 3
+"""Per phase: 1 while a `pt_ru_begin` sample waits for its end (hidden from
+`pt_get`)."""
 comptime _RU_START: Int = 10
 """Six words per phase holding the snapshot `pt_ru_begin` took."""
 
@@ -287,11 +290,35 @@ def _ru_sample(lane: Int) raises -> Bool:
         return False
 
 
+def _set_armed(lane: Int, phase: Int, value: Int) raises:
+    # SAFETY: lane < PT_LANES (from `_find_lane`) and phase < PH_COUNT (the
+    # callers pass a phase constant), so the word is inside the slab; the
+    # pointer does not leave this function.
+    var g = _SLAB.get_or_create_ptr()
+    var base = UnsafePointer(to=g[][])
+    (base + _lane_word(lane, phase, _RU_ARMED))[].store(Int64(value))
+
+
+def _count_drop() raises:
+    # SAFETY: one header word (_W_OVERFLOW) of the slab; the pointer does not
+    # leave this function.
+    var g = _SLAB.get_or_create_ptr()
+    _ = (UnsafePointer(to=g[][]) + _W_OVERFLOW)[].fetch_add(Int64(1))
+
+
 def _ru_fold(phase: Int, begin: Bool) raises:
     var lane = _find_lane(_my_thread())
     if lane < 0:
         return
-    if not _ru_sample(lane):
+    var sampled = _ru_sample(lane)
+    # The word `_RU_ARMED` of the phase says that the begin sample was taken
+    # and has not been used yet. An end without it (the begin sample failed,
+    # or there was no begin) would subtract from a stale start, so it records
+    # nothing and adds 1 to the overflow count instead.
+    if not sampled:
+        _set_armed(lane, phase, 0)
+        if not begin:
+            _count_drop()
         return
     # SAFETY: lane < PT_LANES (from `_find_lane`), phase < PH_COUNT (the
     # callers are `pt_ru_begin` / `pt_ru_end` with a phase constant), so the
@@ -315,6 +342,13 @@ def _ru_fold(phase: Int, begin: Bool) raises:
     vals[4] = Int((base + s + 8)[].load())
     vals[5] = Int((base + s + 9)[].load())
     var w = _lane_word(lane, phase, 0)
+    if begin:
+        (base + w + _RU_ARMED)[].store(Int64(1))
+    elif (base + w + _RU_ARMED)[].load() != 1:
+        _ = (base + _W_OVERFLOW)[].fetch_add(Int64(1))
+        return
+    else:
+        (base + w + _RU_ARMED)[].store(Int64(0))
     for k in range(6):
         if begin:
             (base + w + _RU_START + k)[].store(Int64(vals[k]))
@@ -348,9 +382,18 @@ def pt_ru_end[phase: Int]():
 
 
 def pt_ru_available() -> Bool:
-    """True when the timers are on and this target reports per-thread usage."""
+    """True when the timers are on and `getrusage(RUSAGE_THREAD)` works for the
+    calling thread: one real call, so a sandbox that refuses it (a syscall
+    filter) reads False instead of leaving the counters at 0 unexplained. It
+    takes a lane for the calling thread if it has none."""
     comptime if phase_timers_on() and CompilationTarget.is_linux():
-        return True
+        try:
+            var lane = _find_lane(_my_thread())
+            if lane < 0:
+                return False
+            return _ru_sample(lane)
+        except:
+            return False
     else:
         return False
 
