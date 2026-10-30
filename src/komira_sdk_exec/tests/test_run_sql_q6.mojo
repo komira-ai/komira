@@ -34,11 +34,25 @@
 #     by one of the same schema and different rows; the next query gives the
 #     new answer (not the old one), and a replacement whose schema differs from
 #     the registered table is refused at step `lower`, naming the table.
+#   * test_a_tiny_memory_budget_is_refused_at_execute: a budget of 1 byte denies
+#     the sink its state ("was denied"), as a refusal at step `execute`.
+#   * test_a_sum_out_of_range_is_refused_and_the_context_runs_on: SUM of three
+#     INT64 values of 2^62 is refused at `execute` ("64-bit range"), and Q6
+#     then runs on the same context.
+#   * test_a_scalar_subquery_is_refused_by_lowering: the optimizer leaves the
+#     subquery in the plan, so it is LOWERING_UNCUTTABLE_NODE at `lower`, and
+#     Q6 then runs on the same context.
+#   * test_a_select_without_from_is_refused_at_execute: the in-memory scan is
+#     EXECUTE_UNSUPPORTED_PARAM, reached through run_sql.
+#   * test_a_refusal_leaves_the_context_usable: a bind and a parse refusal, then
+#     Q6 gives the oracle.
 #   * test_options_are_validated: a worker count or memory budget below 1 is
 #     refused; the options reach the host profile.
 #   * test_contexts_can_be_created_and_dropped_repeatedly: six contexts, each
 #     running Q6 three times, then dropped (the worker runtime is destroyed and
-#     recreated each time).
+#     recreated each time). run_lowered_plan refuses a run that leaves the
+#     segment pool not whole (EXECUTE_POOL_NOT_RELEASED), so each ok answer
+#     here is also a pool returned to zero.
 
 from std.testing import TestSuite, assert_equal, assert_true, assert_false
 
@@ -71,6 +85,7 @@ from komira_sdk_exec.engine_options import EngineOptions
 from komira_sdk_exec.engine_sql import (
     STATEMENT_NOT_A_QUERY,
     STEP_BIND,
+    STEP_EXECUTE,
     STEP_LOWER,
     STEP_PARSE,
     SqlOutcome,
@@ -136,9 +151,17 @@ def _oracle(ref t: LineitemTable) -> _Oracle:
 def _keys_only(rows: Int) raises -> RecordBatch:
     """A one-column batch: l_orderkey, so a lineitem table registered with five
     columns no longer matches the file."""
+    var values = List[Int]()
+    for i in range(rows):
+        values.append(i)
+    return _keys(values)
+
+
+def _keys(values: List[Int]) raises -> RecordBatch:
+    var rows = len(values)
     var key = PrimitiveArray[DType.int64].allocate(rows)
     for i in range(rows):
-        key.set(i, Int64(i))
+        key.set(i, Int64(values[i]))
     var sb = SchemaBuilder()
     var builder = RecordBatchBuilder()
     sb.add_field(Field("l_orderkey", ArrowType.INT64, False))
@@ -324,6 +347,71 @@ def test_a_file_replaced_between_queries_is_read_again() raises:
     assert_true(out.refusal.value().reason.find("lineitem") >= 0)
 
 
+def test_a_tiny_memory_budget_is_refused_at_execute() raises:
+    var t = q6_table(100)
+    var ctx = EngineContext(
+        EngineOptions(worker_count=2, memory_budget_bytes=1)
+    )
+    register_parquet(ctx, "lineitem", _write("sql_budget", t))
+    var out = run_sql(ctx, _q6())
+    _expect_refusal(out, String(STEP_EXECUTE), "")
+    assert_true(out.refusal.value().reason.find("was denied") >= 0)
+
+
+def test_a_sum_out_of_range_is_refused_and_the_context_runs_on() raises:
+    var t = q6_table(200)
+    var o = _oracle(t)
+    var ctx = _new_context()
+    register_parquet(ctx, "lineitem", _write("sql_over_q6", t))
+    # Three INT64 values of 2^62 sum past 2^63.
+    var big = List[Int]()
+    for _ in range(3):
+        big.append(1 << 62)
+    var path = test_tmpdir() + "/sql_over_big.parquet"
+    var bytes = write_record_batch_to_parquet_bytes(_keys(big))
+    var fh = open(path, "w")
+    fh.write_bytes(Span(bytes))
+    fh.close()
+    register_parquet(ctx, "big", path)
+    var out = run_sql(ctx, "select sum(l_orderkey) from big")
+    _expect_refusal(out, String(STEP_EXECUTE), "")
+    assert_true(out.refusal.value().reason.find("64-bit range") >= 0)
+    _expect_revenue(run_sql(ctx, _q6()), o.revenue)
+
+
+def test_a_scalar_subquery_is_refused_by_lowering() raises:
+    var t = q6_table(100)
+    var o = _oracle(t)
+    var ctx = _new_context()
+    register_parquet(ctx, "lineitem", _write("sql_scalar", t))
+    var out = run_sql(
+        ctx,
+        "select count(*) from lineitem where l_quantity < (select"
+        " max(l_quantity) from lineitem)",
+    )
+    _expect_refusal(out, String(STEP_LOWER), "LOWERING_UNCUTTABLE_NODE")
+    _expect_revenue(run_sql(ctx, _q6()), o.revenue)
+
+
+def test_a_select_without_from_is_refused_at_execute() raises:
+    var ctx = _new_context()
+    _expect_refusal(
+        run_sql(ctx, "select 1 + 1"),
+        String(STEP_EXECUTE),
+        "EXECUTE_UNSUPPORTED_PARAM",
+    )
+
+
+def test_a_refusal_leaves_the_context_usable() raises:
+    var t = q6_table(120)
+    var o = _oracle(t)
+    var ctx = _new_context()
+    register_parquet(ctx, "lineitem", _write("sql_after", t))
+    assert_false(run_sql(ctx, "select * from nowhere").ok())
+    assert_false(run_sql(ctx, "selec").ok())
+    _expect_revenue(run_sql(ctx, _q6()), o.revenue)
+
+
 def test_options_are_validated() raises:
     var refused = False
     try:
@@ -365,6 +453,11 @@ def main() raises:
     suite.test[test_the_footer_is_read_once_across_bind_and_lower]()
     suite.test[test_two_queries_on_one_context]()
     suite.test[test_a_file_replaced_between_queries_is_read_again]()
+    suite.test[test_a_tiny_memory_budget_is_refused_at_execute]()
+    suite.test[test_a_sum_out_of_range_is_refused_and_the_context_runs_on]()
+    suite.test[test_a_scalar_subquery_is_refused_by_lowering]()
+    suite.test[test_a_select_without_from_is_refused_at_execute]()
+    suite.test[test_a_refusal_leaves_the_context_usable]()
     suite.test[test_options_are_validated]()
     suite.test[test_contexts_can_be_created_and_dropped_repeatedly]()
     suite^.run()

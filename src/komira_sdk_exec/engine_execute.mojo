@@ -4,8 +4,10 @@
 #
 # One `RealBuilder` per run: it borrows a metadata cache and an expression pool
 # that live as long as the run, so nothing a run read outlives it (the scan
-# reads through `komira_parquet`'s revalidating metadata cache, which
-# therefore never serves a footer of a replaced file to a later query). The
+# reads through `komira_parquet`'s metadata cache, which is new for every run,
+# so a later query never sees an earlier run's footer; within a run the scan
+# reads the footer a second time and nothing checks it against the footer
+# lowering read: komira#2024). The
 # builder's segment pool is sized from the host profile's memory budget.
 
 from komira_arrow.schema import RecordBatch
@@ -23,6 +25,11 @@ comptime EXECUTE_UNSUPPORTED_PARAM = "EXECUTE_UNSUPPORTED_PARAM"
 """Refusal: the lowered plan carries a parameter kind this door does not run."""
 
 
+comptime EXECUTE_POOL_NOT_RELEASED = "EXECUTE_POOL_NOT_RELEASED"
+"""Refusal: a run ended with the segment pool not whole (a sink kept its
+reservation)."""
+
+
 def run_lowered_plan(
     mut ctx: EngineContext, var lowered: LoweredPlan
 ) raises -> RecordBatch:
@@ -31,7 +38,8 @@ def run_lowered_plan(
 
     Raises:
         Error starting with `EXECUTE_UNSUPPORTED_PARAM` for a plan that scans
-        an in-memory batch, and the driver's or a member's error otherwise.
+        an in-memory batch, `EXECUTE_POOL_NOT_RELEASED` when a run leaves bytes granted,
+        and the driver's or a member's error otherwise.
     """
     if len(lowered.params.batches) > 0:
         raise Error(
@@ -62,4 +70,12 @@ def run_lowered_plan(
         ctx.host_profile.thread_count,
         token,
     )
-    return out.take(lowered.result_seg_id)
+    var result = out.take(lowered.result_seg_id)
+    if builder.pool_granted() != 0:
+        raise Error(
+            String(EXECUTE_POOL_NOT_RELEASED)
+            + ": the segment pool still holds "
+            + String(builder.pool_granted())
+            + " bytes after the run"
+        )
+    return result^

@@ -39,19 +39,42 @@ do is a free function in a module of its own.
 **The footer cache is pinned to a query.** `komira_parquet_footers.FooterCache`
 has no cap, so the context does not keep it: `run_sql` starts by replacing it
 with an empty one (`begin_query`). Within a call the binder and lowering read
-one footer per file (one read from storage). The next call reads each file it
-names again, so a file replaced between queries is read as the new file, and
-is refused at step `lower` (naming the table) when its schema no longer matches
-the registered table. The scan itself reads through a metadata cache made for
-the run, so it too never serves an old footer. The price is a footer read per
-file per query.
+one version of each file's footer (`ParquetFooters` and `lowering_facts` share
+the cache and refuse a file whose identity changed since it was read). The next
+call reads each file it names again, so a file replaced between queries is read
+as the new file, and is refused at step `lower` (naming the table) when its
+schema no longer matches the registered table. That a file replaced by identity
+(size, time, inode) is refused cannot be reached from `run_sql`, because the
+cache is fresh for every call; the package's own tests cover it.
+
+What this does not close: the scan opens the file afresh. `run_lowered_plan`
+builds a new `komira_parquet.ParquetMetadataCache` for the run, so the scan
+reads the footer a second time, and a file replaced between lowering and the
+scan is read with the old plan's schema and min/max (komira#2024 adds the
+check at scan time). A same-schema replacement with new min/max is correct
+across queries only because no plan is cached between them; wiring
+`plan_compile_cache` into `run_sql` would reopen that hole. The price of the
+pin is the footer reads: one by the footer cache per file per query, and one
+more by the scan.
 
 **Refused here, by name.** A statement that is not a query
-(`STATEMENT_NOT_A_QUERY`, step `bind`); a plan that needs a scalar subquery
-executed first (`OPTIMIZE_UNRESOLVED_SCALAR`); a plan that scans an in-memory
-batch (`EXECUTE_UNSUPPORTED_PARAM`); and whatever lowering, the binder, the
-parser or a member refuses (a join is `LOWERING_UNCUTTABLE_NODE` at `lower`).
-A glob path and a table of several files are refused by the footer package.
+(`STATEMENT_NOT_A_QUERY`, step `bind`); a scalar subquery (the optimizer keeps
+it in the plan and lowering refuses the node, `LOWERING_UNCUTTABLE_NODE`; the
+door also refuses with `OPTIMIZE_UNRESOLVED_SCALAR` a plan whose optimization
+asks for a scalar to be executed first, a guard no query tested here reaches); a plan that
+scans an in-memory batch, such as a SELECT with no FROM
+(`EXECUTE_UNSUPPORTED_PARAM`, step `execute`); a sink denied its memory by the
+budget, a sum outside its declared type and a pool not whole after a run (step
+`execute`); and whatever lowering, the binder or the parser refuses (a join is
+`LOWERING_UNCUTTABLE_NODE` at `lower`). A glob path and a table of several
+files are refused by the footer package. Lowering given fewer scan facts than
+the plan has scans refuses by name (`LOWERING_INPUTS_SCAN_COUNT`);
+`lowering_inputs` descends only scan, filter, project, limit, aggregate and sort
+nodes and gives a facts entry per scan it reaches, and the cutter refuses any
+other node by name before it asks for the scans below it. `worker_count` and
+`memory_budget_bytes` have a lower bound of 1 and no upper bound. A
+cancellation token is local to a call, so cancel is not reachable from
+`run_sql`. After a refusal the context is unchanged and runs the next query.
 
 ## Tests
 
@@ -74,8 +97,12 @@ The tests run when the package is built.
 - `test_run_sql_q6`: TPC-H Q6's text from `komira_bench_corpus` over a lineitem-shaped
   Parquet file gives the integer oracle's DECIMAL(38,4); a join, a syntax error,
   an unknown table, a missing file, CREATE TABLE AS and a replaced file are named
-  refusals; the footer is read once per query; a file replaced between queries is
-  read again; options are validated; contexts are created and dropped repeatedly.
+  refusals, as are a tiny memory budget, an INT64 sum out of range, a scalar
+  subquery (refused by lowering) and a SELECT with no FROM; the context runs on after a refusal; the
+  footer cache reads each file once per query and shares it between bind and
+  lower; a file replaced between queries is read again; options are validated;
+  contexts are created and dropped repeatedly, the segment pool whole after
+  each run.
 - `test_secret_capability_reveal`: a capability reveals exactly the secret
   bound to its own node id, once and after one store resolve; two capabilities
   over one bindings table each reveal their own value; an unbound node or a

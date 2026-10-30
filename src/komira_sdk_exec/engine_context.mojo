@@ -21,7 +21,10 @@
 # footer); the next query reads each file it names again, so a file replaced
 # between queries is read as the new file, or refused when its schema no longer
 # matches the table registered for it. The cache therefore holds at most the
-# files of one query. The cost is one footer read per file per query.
+# files of one query. This pins the binder's and lowering's footers only: the
+# scan reads the file's footer again through its own metadata cache
+# (`engine_execute`), so the window between lowering and the scan stays open
+# (komira#2024).
 #
 # The context holds no process-global state; two contexts share nothing.
 
@@ -56,19 +59,20 @@ struct RegisteredTable(Copyable, Movable):
 struct EngineContext(Movable):
     """The catalog, footer reader, host profile and workers of one engine."""
 
-    var options: EngineOptions
     var catalog: SqlCatalog
     var tables: List[RegisteredTable]
     var footers: ParquetFooters
     var host_profile: HostProfile
     var runtime: PerCoreAsyncRuntime[NoopSink]
 
-    def __init__(out self, var options: EngineOptions = EngineOptions()) raises:
+    def __init__(out self, options: EngineOptions = EngineOptions()) raises:
         """Probe the host once, apply `options` over it and start the workers.
 
         Raises:
             Error starting with `ENGINE_OPTIONS_INVALID` when `worker_count` or
-            `memory_budget_bytes` is present and below 1.
+            `memory_budget_bytes` is present and below 1. There is no upper
+            bound. The options are read here only: they reach the host
+            profile, and the profile is what the context keeps.
         """
         var threads = 0
         var budget = 0
@@ -91,7 +95,6 @@ struct EngineContext(Movable):
         var profile = detect_host_profile(String(ENGINE_BUILD), threads, budget)
         self.runtime = build_engine_runtime(profile.thread_count)
         self.host_profile = profile^
-        self.options = options^
         self.catalog = SqlCatalog()
         self.tables = List[RegisteredTable]()
         self.footers = ParquetFooters()
