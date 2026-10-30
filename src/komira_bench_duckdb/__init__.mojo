@@ -32,7 +32,14 @@ from .compare import (
     compare_signatures,
     numbers_close,
 )
-from .declared_types import UNMAPPED_PREFIX, duckdb_declared_type, is_unmapped, unmapped_type
+from .declared_types import (
+    UNMAPPED_PREFIX,
+    decimal_type,
+    duckdb_declared_type,
+    is_declared_type,
+    is_unmapped,
+    unmapped_type,
+)
 from .decimal_text import ExactSum, canonical_decimal, compare_decimals
 from .launch import open_pinned
 from .memory import ParsedSize, parse_size, size_matches
@@ -58,7 +65,7 @@ from .reference import (
     format_reference,
     parse_references,
 )
-from .rows_json import exactness_of_type, parse_json_rows
+from .rows_json import EXACT_NONE, exactness_of_type, parse_json_rows
 from .session import (
     DuckDbSession,
     FairnessSettings,

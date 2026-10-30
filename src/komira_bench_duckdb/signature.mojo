@@ -180,7 +180,8 @@ struct ColumnSignature(Copyable, Movable):
 
 
 struct ResultSignature(Copyable, Movable):
-    """The row count and one `ColumnSignature` per column."""
+    """The row count, one `ColumnSignature` per column and the declared type of
+    each column (empty when the types were not recorded)."""
 
     var rows: Int
     var columns: List[ColumnSignature]
@@ -193,13 +194,20 @@ struct ResultSignature(Copyable, Movable):
 
 
 def signature_of(rs: ResultSet) raises -> ResultSignature:
-    """The signature of `rs`. Raises when a row has a different number of cells
-    than the result has columns."""
+    """The signature of `rs`, with the declared types it carries. Raises when a
+    row has a different number of cells than the result has columns, or when
+    the result has rows and its declared types are not one per column."""
     var out = ResultSignature()
     out.rows = rs.row_count()
     var width = rs.column_count()
     if width == 0 and rs.row_count() > 0:
         width = len(rs.rows[0])
+    if rs.row_count() > 0 and len(rs.types) > 0 and len(rs.types) != width:
+        raise Error(
+            String("the result has ") + String(width) + String(" columns and ")
+            + String(len(rs.types)) + String(" declared types")
+        )
+    out.types = rs.types.copy()
     for _ in range(width):
         out.columns.append(ColumnSignature())
     for r in range(rs.row_count()):

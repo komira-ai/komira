@@ -747,7 +747,9 @@ def test_every_kind_of_difference_is_a_wrong_answer() raises:
 
 def test_the_tolerance_is_printed_and_written() raises:
     var rig = Rig()
-    var session = rig.duckdb(List[Rule]())
+    var rules = List[Rule]()
+    rules.append(Rule(String("SELECT 1"), String('[{"v":1}]'), String(""), 2 * _MS))
+    var session = rig.duckdb(rules^)
     var arm = RefusalArm()
     var none = NoCacheDropper()
     var queries = List[QuerySpec]()

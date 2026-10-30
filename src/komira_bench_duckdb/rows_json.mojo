@@ -22,7 +22,7 @@
 
 from std.math import inf, nan
 
-from .cells import Cell, KIND_TEXT, ResultSet
+from .cells import Cell, ResultSet
 from .decimal_text import canonical_decimal
 
 comptime EXACT_NONE: Int = 0
@@ -260,34 +260,6 @@ def _exact_cell(text: String, exactness: Int) raises -> Cell:
         if _fits_int64(canonical):
             return _integer_cell(canonical)
     return Cell.decimal(canonical)
-
-
-def _looks_like_number(s: String) -> Bool:
-    """Whether `s` is `[-]digits[.digits]`: a text a DECIMAL, HUGEINT, UHUGEINT
-    or UBIGINT value could be."""
-    var b = s.as_bytes()
-    var i = 0
-    if i < len(b) and b[i] == UInt8(45):
-        i += 1
-    if _digit_run(b, i) == 0:
-        return False
-    if i < len(b) and b[i] == UInt8(46):
-        i += 1
-        if _digit_run(b, i) == 0:
-            return False
-    return i == len(b)
-
-
-def has_number_like_text(rs: ResultSet) -> Bool:
-    """Whether some cell of `rs` is a text written like a number: only then can
-    a column be a DECIMAL or a wide integer that DuckDB quoted, and only then
-    are the column types worth asking for."""
-    for r in range(rs.row_count()):
-        ref row = rs.rows[r]
-        for c in range(len(row)):
-            if row[c].kind == KIND_TEXT and _looks_like_number(row[c].s):
-                return True
-    return False
 
 
 def _read_value(mut r: _Reader, exactness: Int) raises -> Cell:

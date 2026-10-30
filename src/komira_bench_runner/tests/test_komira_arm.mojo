@@ -517,7 +517,9 @@ def test_a_join_is_refused_and_not_timed() raises:
         )
         >= 0
     )
-    assert_equal(_runs(rig.sent_text(), String("join lineitem")), 1)
+    var join_text = String("select count(*) as n from lineitem a join lineitem b on a.l_orderkey = b.l_orderkey")
+    assert_equal(_runs(rig.sent_text(), join_text), 1)
+    assert_equal(_count(rig.sent_text(), String("DESCRIBE ") + join_text), 1)
     assert_true(arm.last_refusal.startswith(String("lower: LOWERING_UNCUTTABLE_NODE")))
     arm.close()
 

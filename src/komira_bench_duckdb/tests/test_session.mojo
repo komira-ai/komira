@@ -626,9 +626,15 @@ def _one(value: String) -> String:
 
 
 def _verdict_reason(a: ResultSet, b: ResultSet) raises -> String:
-    """The first reason the two answers differ, or an empty text when they are
-    identical."""
-    var v = compare_signatures(signature_of(a), signature_of(b))
+    """The first reason the two answers differ in their values, or an empty
+    text when they are identical. The declared types are left out: these tests
+    are about the values (123.40 at two scales is one value), and the
+    declared types are compared in test_declared_types."""
+    var x = a.copy()
+    x.types = List[String]()
+    var y = b.copy()
+    y.types = List[String]()
+    var v = compare_signatures(signature_of(x), signature_of(y))
     if v.identical:
         return String("")
     return v.reasons[0].copy()
