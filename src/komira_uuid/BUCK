@@ -1,17 +1,92 @@
-load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+load("@buildrules//rules/mojo:pack.bzl", "mojo_conda", "mojo_conda_holds")
+load("@komira//tools/build/mojo:adopt.bzl", "mojo_adopted_library")
+load("@komira//tools/build/package:conda.bzl", "conda_package")
+load(":buildrules.mojo.bzl", "mojo_package")
 
 # UUIDv7 (RFC 9562): the `Uuid` value type, a stateless generator and a
 # monotonic one, with its CSPRNG declaration; the wall clock is komira_clock's.
-# `entropy.mojo` calls AWS-LC's `RAND_bytes`, which komira_crypto ships, so
-# komira_crypto is a dep (tools/build/mojo/README.md, "Native reach").
-mojo_library(
+# `entropy.mojo` calls AWS-LC's `RAND_bytes`, which is komira_awslc's archive:
+# the package depends on komira_awslc, not on komira_crypto, so a program
+# that holds both links one copy of aws-lc.
+#
+# Built with buildrules' `mojo_package` from mopm.toml (README.md, "Build files"): `:lib` is the
+# library file and exists only once the test of tests/ has passed. The package depends on
+# komira_atomic_alias, komira_awslc and komira_clock, sibling packages (`[dependencies]` of mopm.toml):
+# its `:lib` is built from their `:lib`, and linked with komira_awslc's archive.
+mojo_package(path = ".")
+
+# `:komira_uuid`, the target the packages that depend on this library name, is `:lib` as komira's
+# Mojo rules take it (tools/build/mojo/adopt.bzl): the same file, so a dependent builds only once the
+# test has passed. `deps` is `[dependencies]` of mopm.toml, as the adopted targets of those
+# packages: the rule refuses a list that is not the closure `:lib` was built from. It carries the
+# README gate too (`[tests][readme]`): the examples run against `:lib`; the tests are not run again.
+mojo_adopted_library(
     name = "komira_uuid",
-    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
         "//src/komira_atomic_alias:komira_atomic_alias",
+        "//src/komira_awslc:komira_awslc",
         "//src/komira_clock:komira_clock",
-        "//src/komira_crypto:komira_crypto",
     ],
-    test_srcs = ["tests/test_uuid_v7.mojo"],
+    # komira_awslc links C (aws-lc's archive), so `lib`'s closure carries that archive and a dependent's link
+    # takes it from here. This package owns no C, so it names no `c_deps`: it takes the C toolchain's
+    # link facts directly.
+    cxx_toolchain = "komira//tools/build/mojo:adopt_cxx_link_facts",
+    lib = ":lib",
+    readme = "README.md",
+    srcs = glob(["src/komira_uuid/**/*.mojo"]),
+    test_srcs = glob(["tests/test_*.mojo"]),
+    test_runs = ":test",
+    visibility = ["PUBLIC"],
+)
+
+# The mopm package: `mopm pack` over `:lib`, the `.conda` a mopm registry serves
+# (`mojo-komira_uuid-0.1.0-mojo1.0.0_0.conda`), which records komira_atomic_alias, komira_awslc and
+# komira_clock as dependencies (`mojo-<name> >=0.1,<0.2`) and holds none of their files. `members` is
+# the manifests of the path dependencies, staged at their repository paths, because `mopm pack` reads
+# the manifest of each beside the one it is given. `:lib` exists only once the test passed, so this
+# file exists only then. Publishing it (`mopm publish`) uploads, which is not a build action: it is a
+# step of a CI job that takes this target's output. `mopm` is the one `mojo_package` pins
+# (mopm-toolchain.toml).
+mojo_conda(
+    name = "conda",
+    dir = "src/komira_uuid",
+    lib = ":lib",
+    manifest = "mopm.toml",
+    members = {
+        "../komira_atomic_alias": "//src/komira_atomic_alias:mopm.toml",
+        "../komira_awslc": "//src/komira_awslc:mopm.toml",
+        "../komira_clock": "//src/komira_clock:mopm.toml",
+    },
+    mojo = "1.0.0",
+    mopm = "toolchains//:mopm_0_0_86",
+    package = "komira_uuid",
+    version = "0.1.0",
+    visibility = ["PUBLIC"],
+)
+
+# What `:conda` holds, read back from the built file (buildrules' `prebuilt_unpack`): this package's own
+# `.mojoc` and nothing else under `lib/mojo/`, and exactly three dependencies, which is what installing
+# the package pulls in. Red when the manifest drops a dependency, names another range, or the file
+# carries a sibling.
+mojo_conda_holds(
+    name = "conda_holds",
+    conda = ":conda",
+    depends = [
+        "mojo-komira_atomic_alias >=0.1,<0.2",
+        "mojo-komira_awslc >=0.1,<0.2",
+        "mojo-komira_clock >=0.1,<0.2",
+    ],
+    package = "komira_uuid",
+    sole = True,
+    visibility = ["PUBLIC"],
+)
+
+# Kept for the release machine, which still builds it (release/artifacts.textproto): komira's conda
+# packer over `:komira_uuid`. It goes when the release machine takes the mopm package. This library's
+# mopm package is `:conda` above.
+conda_package(
+    name = "komira_uuid_conda",
+    lib = ":komira_uuid",
+    summary = "The `komira_uuid` Mojo library of komira, as a conda package.",
     visibility = ["PUBLIC"],
 )

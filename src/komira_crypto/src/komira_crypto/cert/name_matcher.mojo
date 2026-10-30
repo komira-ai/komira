@@ -117,13 +117,6 @@ def _ascii_lower_str(s: String) -> String:
     return out^
 
 
-def _ascii_eq_ci(a: String, b: String) -> Bool:
-    """Case-insensitive ASCII-only equality."""
-    var la = _ascii_lower_str(a)
-    var lb = _ascii_lower_str(b)
-    return la == lb
-
-
 # -----------------------------------------------------------------------------
 # Wildcard matching (RFC 6125 §6.4.3)
 # -----------------------------------------------------------------------------
@@ -148,16 +141,6 @@ def _split_first_label(s: String) -> Tuple[String, String]:
         else:
             right += chr(Int(bs[i]))
     return (left^, right^)
-
-
-def _count_dots(s: String) -> Int:
-    """Count '.' bytes in `s`."""
-    var bs = s.as_bytes()
-    var n = 0
-    for i in range(len(bs)):
-        if bs[i] == UInt8(0x2E):
-            n += 1
-    return n
 
 
 def _is_wildcard_pattern(pattern: String) -> Bool:
