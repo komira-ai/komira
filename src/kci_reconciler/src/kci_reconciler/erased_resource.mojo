@@ -69,8 +69,10 @@ from kci_reconciler.resource import (
 # =============================================================================
 # §1 — the FFI-POD thin fn-ptr TYPE aliases (the manual vtable). Each takes the
 #      type-erased home byte ptr (MutUntrackedOrigin — the type-erasure handle)
-#      + the value-POD verb args, and returns the value-POD result (`raises` — a
-#      backend fault surfaces). The drop arm cannot raise.
+#      + the value-POD verb args, and returns the value-POD result. The verbs
+#      that call a raising trait method are `raises` (a backend fault
+#      surfaces); the identity, ownership and policy verbs call non-raising trait
+#      methods and do not. The drop arm cannot raise.
 # =============================================================================
 # SAFETY: every alias below is private (underscore-named, not re-exported) and is
 # used only by the private `_ErasedVTable`'s fields and the
