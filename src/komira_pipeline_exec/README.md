@@ -68,18 +68,47 @@ Import each module by name; the package root exports nothing.
   hint) so a scan collects in file order whatever the schedule, and concatenates
   them. With no row it returns no rows under the schema the segment would have
   had.
+- `sink_agg`, `agg_fold`, `agg_output`: the ungrouped aggregation sink
+  `(SINK_AGG, KEY_DTYPE_NONE, SINK_ORIENT_COLUMNAR)`: SUM, COUNT, COUNT(*), MIN,
+  MAX and AVG. The aggregate arguments (`AggSinkData.agg_exprs`) are run by each
+  worker as a projection over the morsel, under its selection mask; the state
+  of a worker is one cell per aggregate, a count and one 128-bit integer. The
+  folds are exact integer folds over signed integers, DECIMAL128 (the
+  unscaled value; the scale rides beside it) and, for MIN and MAX, DATE32, so
+  the merge in worker order does not depend on the schedule. No float is
+  folded: a float input is refused by name. SUM over a decimal is a DECIMAL128 of
+  the input's scale in the declared precision, over an integer an INT64; a sum
+  that leaves 128 bits, has more digits than the declared precision, or leaves
+  INT64 is refused rather than wrapped. AVG is a DOUBLE: one conversion of the
+  exact sum (`decimal_to_float64` for a decimal) divided by the count. Over no
+  non-NULL row SUM, MIN, MAX and AVG are NULL and COUNT is zero, in one row of
+  the declared schema. `AggSinkData.presorted` and `estimated_groups` belong to
+  grouped sinks and are ignored.
+- `segment_pool`: `SegmentPool`, an atomic byte count with an optional budget
+  that any number of handles share, and `WorkerReservation`, a worker's plain
+  tally inside the blocks it drew (a grant is a compare-and-swap, so the count
+  never passes the budget and a request that fits is not refused). A
+  reservation returns its blocks when it is dropped. The aggregation sink's
+  state is fixed in size, so it draws once per worker; the pool is the draw
+  point for sinks that grow.
 - `real_builder`: `RealBuilder`, the `SegmentBuilder` over these members. It
   serves SOURCE_PARQUET, SOURCE_BATCH, SOURCE_SINK_OUTPUT, OP_FILTER,
-  OP_PROJECT, OP_LIMIT and the sink `(SINK_COLLECT, KEY_DTYPE_NONE,
+  OP_PROJECT, OP_LIMIT and the sinks `(SINK_COLLECT, KEY_DTYPE_NONE,
+  SINK_ORIENT_COLUMNAR)` and `(SINK_AGG, KEY_DTYPE_NONE,
   SINK_ORIENT_COLUMNAR)`, and refuses every other kind by name. It keeps the
-  resident batches (`add_resident`), shares one set of operator parts among the
+  resident batches (`add_resident`), the aggregation sink data a descriptor's
+  `sink_param_id` indexes (`add_agg_sink`) and the segment pool
+  (`set_memory_budget`, unbounded until set), shares one set of operator parts among the
   workers of a segment run, and derives the empty-output schema by running the
   chain's projections over a batch of no rows. Three origins name the borrows of
   the Parquet source (the footer cache, the expression pool, an absent dynamic
   filter).
 - `plan_harness`: segment descriptors for the three sources with an operator
-  chain and a collect sink, `project_columns`, and a sample table with readers,
-  for plans written by hand.
+  chain and a collect sink (`with_agg_sink` turns one into an aggregation),
+  `project_columns`, and a sample table with readers, for plans written by hand.
+- `tpch_q6`: TPC-H Q6 as such a plan (scan, filter, project, SUM into a
+  DECIMAL(38,4)) and a lineitem-shaped table with the types of the real files
+  (DECIMAL(15,2), DATE32) whose first rows sit on every predicate's boundary.
 - `fake_support`, `fake_members`, `fake_builder`, `fake_dispatch`: sources,
   an operator, sinks, a builder and dispatchers that record what the driver does
   in shared counters, and run the workers one after another in an order a test

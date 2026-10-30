@@ -11,8 +11,11 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # `fake_members`, `fake_builder`, `fake_dispatch`) drive the scheduler in tests.
 # The real members are the sources `source_parquet`, `source_batch` and
 # `source_sink_output`, the operators `op_filter`, `op_project` and `op_limit`,
-# the sink `sink_collect`, and `real_builder` that constructs them from a
-# segment descriptor; `plan_harness` writes descriptors and sample data by hand.
+# the sinks `sink_collect` and `sink_agg` (the ungrouped aggregation, over
+# `agg_fold` and `agg_output`, drawing memory from `segment_pool`), and
+# `real_builder` that constructs them from a segment descriptor; `plan_harness`
+# writes descriptors and sample data by hand and `tpch_q6` is Q6 as such a plan
+# with a lineitem-shaped table.
 #
 # test_edge_policy_and_ready_set  the edge tag and order key policies, the plan
 #                                 checks and the ready set.
@@ -48,6 +51,17 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #                                 output; what the builder refuses.
 # test_real_plan_concurrent       the same plans on threads, run after run, on a
 #                                 runtime stopped and started again.
+# test_segment_pool               the atomic pool and the worker reservations:
+#                                 budget, blocks, give-back, exact grants under
+#                                 contention.
+# test_sink_agg                   SUM, COUNT, COUNT(*), MIN, MAX and AVG over
+#                                 resident batches: NULL, empty input, exact
+#                                 128-bit decimal sums, refusals by name.
+# test_sink_agg_partials          non-empty partials merged: dealing, the merge's
+#                                 overflow refusal, pool return on failure.
+# test_tpch_q6                    Q6 over Parquet, end to end, against an
+#                                 oracle and a hand-computed answer.
+# test_tpch_q6_concurrent         Q6 on threads, run after run.
 mojo_library(
     name = "komira_pipeline_exec",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
@@ -71,6 +85,7 @@ mojo_library(
         "//src/komira_physical_plan:komira_physical_plan",
         "//src/komira_plan_expr:komira_plan_expr",
         "//src/komira_plan_stats:komira_plan_stats",
+        "//src/komira_scalar_arithmetic:komira_scalar_arithmetic",
         "//src/komira_scan_planning:komira_scan_planning",
         "//src/komira_scan_source:komira_scan_source",
     ],
@@ -89,8 +104,13 @@ mojo_library(
         "tests/test_run_segment_concurrent.mojo",
         "tests/test_run_segment.mojo",
         "tests/test_run_segment_failures.mojo",
+        "tests/test_segment_pool.mojo",
+        "tests/test_sink_agg.mojo",
+        "tests/test_sink_agg_partials.mojo",
         "tests/test_sink_collect.mojo",
         "tests/test_sources.mojo",
+        "tests/test_tpch_q6.mojo",
+        "tests/test_tpch_q6_concurrent.mojo",
         "tests/test_variants.mojo",
     ],
     visibility = ["PUBLIC"],
