@@ -4,7 +4,7 @@
 #
 #   SELECT SUM(l_extendedprice * l_discount) AS revenue
 #   FROM lineitem
-#   WHERE l_shipdate >= DATE '1994-01-01' AND l_shipdate < DATE '1995-01-01'
+#   WHERE l_shipdate >= DATE_FROM AND l_shipdate < DATE_TO (a one-year range)
 #     AND l_discount BETWEEN 0.05 AND 0.07 AND l_quantity < 24
 #
 # One segment: SOURCE_PARQUET over the columns the query reads, OP_FILTER with
@@ -56,7 +56,8 @@ from .plan_harness import (
     with_agg_sink,
 )
 
-# Day numbers of 1994-01-01 and 1995-01-01 (days since 1970-01-01).
+# Day numbers (days since the epoch) of the first day of the range and of the
+# first day after it.
 comptime Q6_DATE_FROM: Int = 8766
 comptime Q6_DATE_TO: Int = 9131
 
