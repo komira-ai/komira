@@ -74,14 +74,60 @@ import from the modules.
   (`MultiKeyColumns`): the value for integers, the float model's canonical
   bits for FLOAT64, a 64-bit hash for strings, whose bytes ride along for the
   exact compare. Long string columns are hashed in parallel over the given
-  dispatcher.
+  dispatcher. `join_key_pairs_as_float64` says which key pairs (an
+  INT32 or INT64 key against a FLOAT64 key) compare as FLOAT64, the integer
+  side cast as DuckDB casts it to DOUBLE, and refuses a STRING key against a
+  numeric key.
 - `komira_op_join_probe.join_multi_key`: the key slots' constants, the
   composite hash and the string hash and equality the probes share.
+- `komira_op_join_probe.join_probe`: `execute_join_probe`, the join probe
+  operator over whole batches: one probe batch against the completed build
+  batch, every join type (INNER, LEFT, RIGHT, FULL, SEMI, ANTI, CROSS), as a
+  physical plan's `MorselOp` says. A residual predicate goes to
+  `execute_residual_join_probe`; two or more key pairs, or a key that is not
+  INT64-stored on both sides (`takes_composite_key_path`), to the
+  composite-key join; `JOIN_ALGO_SORT_MERGE` to the sort-merge join (SEMI and
+  ANTI keep their meaning under it); otherwise the single-INT64-key hash
+  kernels, chosen by row counts and what the fused kernels can carry. The
+  arms return the same rows.
+- `komira_op_join_probe.join_probe_sort_merge` and `sort_merge_join_outer`:
+  the sort-merge join over one INT64 key (INNER, LEFT, RIGHT, FULL): both
+  sides radix-sorted, then merged; a NULL key matches nothing.
+- `komira_op_join_probe.join_output_schema`: a join's output schema (probe
+  columns, then build columns, a colliding build name suffixed `_right`; the
+  outer form marks the side that can come out NULL nullable) and the
+  projection of a SEMI / ANTI result.
+- `komira_op_join_probe.join_probe_op`: `JoinProbeOp`, the streaming
+  single-INT64-key join probe operator (a `MorselOperatorImpl`), one per
+  worker over a shared table. LEFT, SEMI and ANTI emit a morsel's output in
+  one batch (SEMI / ANTI optionally as a count only); INNER uses the
+  perfect-hash or radix table the driver chose, or the chained table either
+  RESUMABLY (at most one chunk of pairs per call, `HAVE_MORE_OUTPUT` until the
+  morsel is drained) or DEFERRED (the probe morsel and its match indices kept
+  in a record for one gather at the end, or the morsel staged when the
+  deferral rule declines). A selection mask on the morsel is honoured; an
+  INNER output's build key may share the probe key (the JOIN-KEY CSE).
+  Switches are constructor arguments or process flags.
+  `join_probe_op_state` holds its worker slots (`build_shared_probe_state`),
+  strategy tags and shared helpers; `join_probe_op_deferred` its deferred
+  drain loop.
+- `komira_op_join_probe.join_probe_narrow`: `NarrowMatchSink`, which writes a
+  deferred drain's match index straight at 4-byte width (on by default,
+  `join_narrow_marshal_configure`), the proof that both index domains fit
+  (`narrow_marshal_admits`) and its counters.
+- `komira_op_join_probe.multi_key_probe_op`: `MultiKeyJoinProbeOp`, the
+  composite-key streaming INNER probe: per morsel the composite join's
+  extraction, probe and assembly, so the morsels' outputs are the whole-batch
+  join's rows; the JOIN-KEY CSE per key (`key_cse`, on by default). An
+  integer probe key paired with a FLOAT64 build key is cast to FLOAT64; a
+  FLOAT64 probe key needs an index built with its integer build key as
+  FLOAT64 (`build_as_float64`), else it raises.
 
 A NULL key matches nothing: INNER and SEMI drop the row, LEFT and ANTI keep
 it unmatched, RIGHT and FULL still emit a NULL-keyed build row. FLOAT64 keys
 follow the query semantics' float model, as DuckDB does: every NaN equals
-every NaN and `-0.0` equals `+0.0`. Nothing here reads the environment.
+every NaN and `-0.0` equals `+0.0`. An INT32 or INT64 key joined to a FLOAT64 key
+compares as FLOAT64, as DuckDB casts the integer to DOUBLE (`1 = 1.0`). Nothing here reads the environment.
 
 ## Examples
 

@@ -41,6 +41,7 @@ TARGETS = [
     "komira//src/komira_objectstore_s3:komira_objectstore_s3_conda",
     "komira//src/komira_op_agg_stage:komira_op_agg_stage_conda",
     "komira//src/komira_op_join_build:komira_op_join_build_conda",
+    "komira//src/komira_op_join_sinks:komira_op_join_sinks_conda",
     "komira//src/komira_op_spill_rows:komira_op_spill_rows_conda",
     "komira//src/komira_op_window:komira_op_window_conda",
     "komira//src/komira_parquet_api:ci",
