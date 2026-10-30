@@ -18,11 +18,14 @@
 #                                 the descriptor's `sink_param_id` names
 #            SINK_AGG, key I64,   `GroupAggSink` (`sink_group_agg`), from the
 #            I32, F64 or F32      same kind of data; both behind `AnyAggSink`
+#            SINK_AGG, key STRING `StringGroupAggSink` (`sink_string_group_agg`)
+#            (DICT_ENCODED or     from that data too, behind `AnyAggSink`. A
+#            COLUMNAR)            DICT_ENCODED sink makes its Parquet source
+#                                 keep string dictionaries.
 #            SINK_SORT, key NONE  `SortSink` (`sink_sort`), from the `SortSinkData`
 #                                 the descriptor's `sink_param_id` names
 #
-# Anything else (SOURCE_CONCAT, OP_JOIN_PROBE, the string-keyed aggregation and
-# the other sinks) is refused by name, because no member serves it yet.
+# Anything else (SOURCE_CONCAT, OP_JOIN_PROBE and the other sinks) is refused by name, because no member serves it yet.
 #
 # The workers of a segment each get their own operator instances, built from
 # one set of shared parts the builder keeps per operator (the predicate, the
@@ -57,6 +60,7 @@ from komira_physical_plan.physical_plan import (
     KEY_DTYPE_I32,
     KEY_DTYPE_I64,
     KEY_DTYPE_NONE,
+    KEY_DTYPE_STRING,
     OP_FILTER,
     OP_LIMIT,
     OP_PROJECT,
@@ -67,6 +71,7 @@ from komira_physical_plan.physical_plan import (
     SINK_SORT,
     SortSinkData,
     SINK_ORIENT_COLUMNAR,
+    SINK_ORIENT_DICT_ENCODED,
     SOURCE_BATCH,
     SOURCE_PARQUET,
     SOURCE_SINK_OUTPUT,
@@ -86,6 +91,7 @@ from .sink_agg_any import AnyAggSink
 from .sink_collect import CollectSink
 from .sink_group_agg import GroupAggSink
 from .sink_sort import SortSink
+from .sink_string_group_agg import StringGroupAggSink
 from .source_batch import BatchSource
 from .source_parquet import LocalParquetSource, build_parquet_source
 from .source_sink_output import SinkOutputSource
@@ -237,7 +243,18 @@ struct RealBuilder[
             return Self.Source.first(
                 build_parquet_source[
                     Self.cache_o, Self.pool_o, Self.filter_o
-                ](spec, morsel_rows, num_workers, self._cache[], self._pool[])
+                ](
+                    spec,
+                    morsel_rows,
+                    num_workers,
+                    self._cache[],
+                    self._pool[],
+                    preserve_dict=(
+                        desc.sink_kind == SINK_AGG
+                        and desc.sink_key_dtype == KEY_DTYPE_STRING
+                        and desc.sink_orientation == SINK_ORIENT_DICT_ENCODED
+                    ),
+                )
             )
         if morsel_rows <= 0:
             morsel_rows = DEFAULT_MORSEL_ROWS
@@ -305,6 +322,34 @@ struct RealBuilder[
     def build_sink(
         mut self, ref desc: SegmentDescPod, ref source_schema: Schema
     ) raises -> Self.Sink:
+        if (
+            desc.sink_kind == SINK_AGG
+            and desc.sink_key_dtype == KEY_DTYPE_STRING
+            and (
+                desc.sink_orientation == SINK_ORIENT_COLUMNAR
+                or desc.sink_orientation == SINK_ORIENT_DICT_ENCODED
+            )
+        ):
+            var id = desc.sink_param_id
+            if id < 0 or id >= len(self._agg_sinks):
+                raise Error(
+                    "komira_pipeline_exec: segment "
+                    + String(desc.seg_id)
+                    + " names aggregation sink data "
+                    + String(id)
+                    + ", and the builder holds "
+                    + String(len(self._agg_sinks))
+                )
+            return Self.Sink.second(
+                AnyAggSink(
+                    StringGroupAggSink(
+                        self._agg_sinks[id],
+                        desc.sink_orientation == SINK_ORIENT_DICT_ENCODED,
+                        self._segment_pool.share(),
+                        desc.seg_id,
+                    )
+                )
+            )
         if desc.sink_orientation == SINK_ORIENT_COLUMNAR:
             if (
                 desc.sink_kind == SINK_COLLECT
@@ -376,8 +421,9 @@ struct RealBuilder[
             + String(desc.seg_id)
             + " is not served; only (SINK_COLLECT, KEY_DTYPE_NONE,"
             " SINK_ORIENT_COLUMNAR), (SINK_AGG, KEY_DTYPE_NONE, I64, I32,"
-            " F64 or F32, SINK_ORIENT_COLUMNAR) and (SINK_SORT,"
-            " KEY_DTYPE_NONE, SINK_ORIENT_COLUMNAR) are"
+            " F64 or F32, SINK_ORIENT_COLUMNAR), (SINK_AGG, KEY_DTYPE_STRING,"
+            " SINK_ORIENT_COLUMNAR or SINK_ORIENT_DICT_ENCODED) and"
+            " (SINK_SORT, KEY_DTYPE_NONE, SINK_ORIENT_COLUMNAR) are"
         )
 
     def _result_schema(

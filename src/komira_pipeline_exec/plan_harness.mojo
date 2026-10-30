@@ -37,12 +37,14 @@ from komira_physical_plan.physical_plan import (
     AggSinkData,
     EDGE_E3_PUBLISH_WAIT,
     KEY_DTYPE_NONE,
+    KEY_DTYPE_STRING,
     MorselOp,
     ORDER_NONE,
     SegmentDescPod,
     SINK_AGG,
     SINK_COLLECT,
     SINK_ORIENT_COLUMNAR,
+    SINK_ORIENT_DICT_ENCODED,
     SINK_SORT,
     SOURCE_BATCH,
     SOURCE_PARQUET,
@@ -177,6 +179,21 @@ def with_group_sink(
     desc.sink_kind = SINK_AGG
     desc.sink_key_dtype = key_dtype
     desc.sink_orientation = SINK_ORIENT_COLUMNAR
+    desc.sink_param_id = param_id
+    return desc^
+
+
+def with_string_group_sink(
+    var desc: SegmentDescPod, param_id: Int, dict_encoded: Bool
+) -> SegmentDescPod:
+    """`desc` with its sink changed to the aggregation keyed by strings, in the
+    DICT_ENCODED row when `dict_encoded` and the COLUMNAR row otherwise, whose
+    data the builder holds as `param_id`."""
+    desc.sink_kind = SINK_AGG
+    desc.sink_key_dtype = KEY_DTYPE_STRING
+    desc.sink_orientation = (
+        SINK_ORIENT_DICT_ENCODED if dict_encoded else SINK_ORIENT_COLUMNAR
+    )
     desc.sink_param_id = param_id
     return desc^
 
