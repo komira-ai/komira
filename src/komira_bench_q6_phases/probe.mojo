@@ -35,6 +35,7 @@ from komira_parquet_footers.footer_cache import FooterCache
 from komira_phase_timers.phase_timers import (
     PH_COUNT,
     PH_END_STAMP,
+    PH_JOIN_TAIL,
     pt_enabled,
     pt_phase_name,
     pt_reset,
@@ -73,6 +74,8 @@ struct RunRecord(Copyable, Movable):
     var vol_switches: Int
     var invol_switches: Int
     var peak_rss_bytes: Int
+    var user_ns: Int
+    var system_ns: Int
     var revenue_unscaled: Int
     var ok: Bool
 
@@ -84,6 +87,8 @@ struct RunRecord(Copyable, Movable):
         self.vol_switches = 0
         self.invol_switches = 0
         self.peak_rss_bytes = 0
+        self.user_ns = 0
+        self.system_ns = 0
         self.revenue_unscaled = -1
         self.ok = False
 
@@ -103,6 +108,8 @@ def _run_once(mut ctx: EngineContext, text: String) raises -> RunRecord:
     rec.vol_switches = d.voluntary_ctx_switches
     rec.invol_switches = d.involuntary_ctx_switches
     rec.peak_rss_bytes = c1.peak_rss_bytes
+    rec.user_ns = d.user_time_us * 1000
+    rec.system_ns = d.system_time_us * 1000
     rec.phases = snapshot_all()
     if outcome.refusal:
         raise Error(
@@ -178,6 +185,32 @@ def _series_ms(xs: List[Int]) -> String:
     return out^
 
 
+def _series_int(xs: List[Int]) -> String:
+    var out = String("[")
+    for i in range(len(xs)):
+        if i > 0:
+            out += ","
+        out += String(xs[i])
+    out += "]"
+    return out^
+
+
+def _host_json(ref ctx: EngineContext) -> String:
+    """What the engine's hardware probe saw on this host: the cores and
+    caches the thread counts are to be read against."""
+    ref hw = ctx.host_profile.hardware
+    return (
+        String('{"physical_cores":') + String(hw.physical_cores)
+        + ',"logical_cores":' + String(hw.logical_cores)
+        + ',"numa_nodes":' + String(hw.numa_nodes)
+        + ',"l2_cache_kib":' + String(hw.l2_cache_bytes // 1024)
+        + ',"l3_cache_mib":' + String(hw.l3_cache_bytes // 1048576)
+        + ',"total_ram_gib":' + String(hw.total_ram_bytes // 1073741824)
+        + ',"available_ram_gib":' + String(hw.available_ram_bytes // 1073741824)
+        + String("}")
+    )
+
+
 def _json_config(
     threads_requested: Int, threads_effective: Int, ref runs: List[RunRecord]
 ) -> String:
@@ -187,6 +220,8 @@ def _json_config(
     var vol = List[Int]()
     var invol = List[Int]()
     var rss = List[Int]()
+    var user = List[Int]()
+    var system = List[Int]()
     for r in range(len(runs)):
         totals.append(runs[r].total_ns)
         minor.append(runs[r].minor_faults)
@@ -194,17 +229,22 @@ def _json_config(
         vol.append(runs[r].vol_switches)
         invol.append(runs[r].invol_switches)
         rss.append(runs[r].peak_rss_bytes // 1048576)
+        user.append(runs[r].user_ns)
+        system.append(runs[r].system_ns)
     var total_median = median(totals)
     var out = String('{"threads_requested":') + String(threads_requested)
     out += ',"threads_effective":' + String(threads_effective)
     out += ',"runs":' + String(len(runs))
     out += ',"total_ms":' + _dist_ms(totals)
     out += ',"total_ms_per_run":' + _series_ms(totals)
-    out += ',"page_faults":{"minor":' + _dist_count(minor)
+    out += ',"page_faults":{"minor_per_run":' + _series_int(minor)
+    out += ',"minor":' + _dist_count(minor)
     out += ',"major":' + _dist_count(major) + "}"
     out += ',"context_switches":{"voluntary":' + _dist_count(vol)
     out += ',"involuntary":' + _dist_count(invol) + "}"
     out += ',"peak_rss_mib":' + _dist_count(rss)
+    out += ',"cpu_ms":{"user":' + _dist_ms(user)
+    out += ',"system":' + _dist_ms(system) + "}"
     out += ',"phases":{'
     var first = True
     for p in range(PH_COUNT):
@@ -237,7 +277,13 @@ def _json_config(
         out += ',"longest_call_ms":' + _dist_ms(longest)
         out += ',"calls":' + _dist_count(calls)
         out += ',"lanes":' + _dist_count(lanes)
-        out += ',"share_of_total_pct":' + _num(share) + "}"
+        if p == PH_JOIN_TAIL:
+            # Recorded for every task by the driver, so `critical_ms` is the
+            # sum of the idle gaps of all tasks and has no share; the
+            # longest gap is the one to read.
+            out += ',"share_of_total_pct":null}'
+        else:
+            out += ',"share_of_total_pct":' + _num(share) + "}"
     out += "}}"
     return out^
 
@@ -332,6 +378,7 @@ def run_probe(settings: ProbeSettings) raises -> ProbeResult:
         raise Error("the probe needs at least 5 timed runs, got " + String(settings.runs))
     var text = find_query(String("tpch/q6")).text
     var configs = String("")
+    var host = String("null")
     var plan_text = String("")
     var answers_match = True
     for t in range(len(settings.threads)):
@@ -344,6 +391,7 @@ def run_probe(settings: ProbeSettings) raises -> ProbeResult:
         )
         register_parquet(ctx, "lineitem", settings.lineitem_path)
         if t == 0:
+            host = _host_json(ctx)
             plan_text = render_plans(ctx, text)
         var warm = _run_once(ctx, text)
         if not _answer_ok(warm, settings):
@@ -365,6 +413,7 @@ def run_probe(settings: ProbeSettings) raises -> ProbeResult:
     json += ',"runs_per_thread_count":' + String(settings.runs)
     json += ',"expected_revenue_unscaled":' + String(settings.expected_revenue)
     json += ',"answers_match_expected":' + String("true" if answers_match else "false")
+    json += ',"host":' + host
     json += ',"footer_cost":' + _footer_json(settings.lineitem_path, settings.runs)
     json += ',"configs":[' + configs + "]}\n"
     makedirs(settings.out_dir, exist_ok=True)

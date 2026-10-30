@@ -11,8 +11,7 @@
 # staging's own verdict is printed either way); 2 for a bad flag; 1 otherwise.
 
 from std.os import makedirs
-from std.os.path import exists
-from std.pathlib import Path
+from std.os.path import exists, realpath
 from std.sys import argv, exit
 
 from komira_bench_data import run_stage
@@ -47,9 +46,9 @@ def main():
         print("stage: --duckdb, --tpch-extension and --cache-dir are required")
         exit(2)
     try:
-        if not cache.startswith("/"):
-            cache = String(Path.cwd()) + "/" + cache
         makedirs(cache, exist_ok=True)
+        if not cache.startswith("/"):
+            cache = String(realpath(cache))
         var args = List[String]()
         args.append("tpch")
         args.append("--duckdb")
