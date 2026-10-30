@@ -1,7 +1,7 @@
 """The SQL of two published benchmark suites, as Mojo data, with a content
 hash of every query and every suite. See README.md.
 
-Derived from TPC-H; not a TPC result.
+Derived from TPC-H; not comparable to published TPC-H results.
 
 | name | what it is |
 |---|---|

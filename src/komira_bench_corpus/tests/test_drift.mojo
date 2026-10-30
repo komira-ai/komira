@@ -19,7 +19,7 @@
 # - test_every_dataset_is_pinned: each dataset's digest equals the pinned one.
 # - test_suite_title_and_notice_are_pinned: each suite's title and notice equal
 #   the text written here, character for character (the suite digest does not
-#   cover them), so the "not a TPC result" wording cannot change unnoticed.
+#   cover them), so the fair-use wording cannot change unnoticed.
 # - test_every_query_reads_its_pinned_dataset: each query names the dataset
 #   written here (the query digest covers the text only): tpch queries read
 #   `tpch`, h2o groupby q1..q10
@@ -141,11 +141,7 @@ def test_suite_title_and_notice_are_pinned() raises:
     )
     assert_equal(
         all_suites[0].notice,
-        (
-            "Derived from TPC-H; not a TPC result. TPC-H is a benchmark of the"
-            " Transaction Processing Performance Council; a result of this"
-            " suite is not comparable to a published TPC-H result."
-        ),
+        "derived from TPC-H; not comparable to published TPC-H results",
     )
     assert_equal(all_suites[0].notice, TPCH_NOTICE)
     assert_equal(all_suites[1].id, "h2o")

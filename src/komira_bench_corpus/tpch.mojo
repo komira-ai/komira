@@ -10,7 +10,7 @@
 # substitution parameters of its validation run (query 1 DELTA = 90, query 2
 # SIZE = 15 and so on), against the standard TPC-H schema (datasets.mojo).
 #
-# Derived from TPC-H; not a TPC result. Two changes of form: query 15 reads a
+# Fair-use statement: "derived from TPC-H; not comparable to published TPC-H results". Two changes of form: query 15 reads a
 # `with` clause where the specification creates and drops a view, so that every
 # query is one statement; and the row limits the specification states in
 # prose (queries 2, 3, 10, 18 and 21) are `limit` clauses. Query 11 holds its
@@ -21,11 +21,7 @@ from .query import Query, Suite
 
 comptime SUITE_TPCH = "tpch"
 
-comptime TPCH_NOTICE = (
-    "Derived from TPC-H; not a TPC result. TPC-H is a benchmark of the"
-    " Transaction Processing Performance Council; a result of this suite is not"
-    " comparable to a published TPC-H result."
-)
+comptime TPCH_NOTICE = "derived from TPC-H; not comparable to published TPC-H results"
 
 comptime TPCH_Q11_FRACTION_SF1 = "0.0001000000"
 

@@ -2,7 +2,7 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
 # The SQL of two published benchmark suites as Mojo data: TPC-H q1-q22 with
 # the validation parameters on the standard schema, h2o groupby q1-q10 and join
-# j1-j5 (ClickBench is left out pending a licence decision); the dataset each
+# j1-j5 (ClickBench is not shipped; it is fetched at run time); the dataset each
 # suite expects; and a SHA-256 of every query and every suite. No
 # dependencies: the digest is in the package. See __init__.mojo.
 #

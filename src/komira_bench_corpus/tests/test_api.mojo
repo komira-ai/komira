@@ -11,7 +11,7 @@
 #   dropping one and adding one each change it.
 # - test_suite_hash_names_the_query_and_not_only_its_text: two queries with the
 #   same text under different ids hash differently from one another's suite.
-# - test_notice: the TPC-H suite carries the "not a TPC result" sentence, the
+# - test_notice: the TPC-H suite carries the fair-use sentence, the
 #   other suites carry none.
 # - test_q11_at_scale: scale factor 1 is the text of the suite; 10, 100 and 3
 #   change only the fraction literal (0.0000100000, 0.0000010000,
@@ -111,7 +111,7 @@ def test_suite_hash_names_the_query_and_not_only_its_text() raises:
 
 def test_notice() raises:
     var tpch = suite("tpch")
-    assert_true(tpch.notice.find("Derived from TPC-H; not a TPC result") == 0)
+    assert_equal(tpch.notice, "derived from TPC-H; not comparable to published TPC-H results")
     assert_equal(suite("h2o").notice, "")
 
 

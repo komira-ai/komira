@@ -2,9 +2,9 @@
 
 The SQL of two published benchmark suites, as Mojo data, with a content hash of every query and of every suite, so that two people who say "TPC-H query 5" or "h2o groupby q3" can show they ran the same text. It holds no data, no engine and no harness: a harness imports it, asks for a suite, and runs each query's text.
 
-**ClickBench is left out for now.** Its query text is published under CC BY-NC-SA 4.0, and whether and in what form komira ships it is a licence decision that has not been made. It will be added later in the form chosen.
+**ClickBench is not shipped here.** Its query text is published under CC BY-NC-SA 4.0, so komira will not carry it. It will be fetched at run time from `ClickHouse/ClickBench`, pinned by commit and sha256 and refused on a mismatch. That is separate work and is not part of this package yet.
 
-**Derived from TPC-H; not a TPC result.** The TPC-H suite follows the TPC-H specification but no run of it is a TPC-H benchmark result and none is comparable to a published one. A report of this suite carries that sentence (`Suite.notice`).
+The TPC-H suite follows the TPC-H specification. Its fair-use statement is: **"derived from TPC-H; not comparable to published TPC-H results"**. No number made with it is called a TPC-H result. A report of this suite carries that sentence (`Suite.notice`).
 
 | suite | queries | dataset | text |
 |---|---|---|---|
@@ -52,7 +52,7 @@ assert_equal(find_query("h2o/j2").dataset, DATASET_H2O_JOIN)
 var tpch = suite("tpch")
 assert_equal(tpch.sha256().byte_length(), 64)
 assert_equal(tpch.notice, TPCH_NOTICE)
-assert_true(tpch.notice.startswith("Derived from TPC-H; not a TPC result."))
+assert_equal(tpch.notice, "derived from TPC-H; not comparable to published TPC-H results")
 assert_equal(tpch.title, "TPC-H, 22 queries, validation parameters")
 
 # The dataset a suite expects: tables, columns and types, as DDL.
@@ -110,8 +110,8 @@ The TPC-H queries (`tpch.mojo`) are copied from the TPC Benchmark(TM) H Standard
 
 This package is Apache-2.0 like the rest of komira, but the query text is not komira's own work, and each suite keeps the terms it was published under. The terms below were read from the upstream sources (the TPC-H specification revision 3.0.1, and the `LICENSE` file at the root of each benchmark repository):
 
-- **TPC-H.** TPC-H is a benchmark of the Transaction Processing Performance Council, which owns the specification and the trademarks (TPC Benchmark, TPC-H, QphH). The specification's copyright statement grants permission to copy and distribute its material to any party without fee when the primary purpose is to disseminate TPC material, the TPC copyright notice, the title of the publication and its date appear, and notice is given that copying is by permission of the TPC; it asks for the TPC's written permission to incorporate TPC material in a non-TPC document. The queries here are the specification's queries (TPC Benchmark H Standard Specification, Revision 3.0.1) with the validation-run parameters. A result produced with them must not be called a TPC-H result or compared with published TPC-H results, and must say it is derived from TPC-H; the sentence above is that statement. TPC's own tools (`dbgen`, `qgen`) are not used or included.
-- **ClickBench.** Not shipped. The benchmark's `LICENSE` is CC BY-NC-SA 4.0 (non-commercial, share-alike), which does not fit an Apache-2.0 release without a decision; ClickBench is left out pending that decision and will be added later in the form chosen.
+- **TPC-H.** TPC-H is a benchmark of the Transaction Processing Performance Council, which owns the specification and the trademarks (TPC Benchmark, TPC-H, QphH). The specification's copyright statement grants permission to copy and distribute its material to any party without fee when the primary purpose is to disseminate TPC material, the TPC copyright notice, the title of the publication and its date appear, and notice is given that copying is by permission of the TPC; it asks for the TPC's written permission to incorporate TPC material in a non-TPC document. The queries here are the specification's queries (TPC Benchmark H Standard Specification, Revision 3.0.1) with the validation-run parameters. A result produced with them must not be called a TPC-H result or compared with published TPC-H results, and must say it is derived from TPC-H; the fair-use sentence above ("derived from TPC-H; not comparable to published TPC-H results") is that statement. TPC's own tools (`dbgen`, `qgen`) are not used or included.
+- **ClickBench.** Not shipped. The benchmark's `LICENSE` is CC BY-NC-SA 4.0 (non-commercial, share-alike); its text will be fetched at run time from `ClickHouse/ClickBench`, pinned by commit and sha256 and refused on a mismatch, instead of being copied here.
 - **h2o.** The h2o database-like ops benchmark is published by H2O.ai (repository `h2oai/db-benchmark`) under the Mozilla Public License 2.0 (`LICENSE` file at the repository root). The groupby and join query text is reproduced from its `duckdb/groupby-duckdb.R` and `duckdb/join-duckdb.R`, with the table names changed, and `h2o.mojo` is therefore offered under the MPL-2.0 for that text (its header carries the MPL notice). The column types come from the benchmark's data generators `_data/groupby-datagen.R` and `_data/join-datagen.R`.
 
 Datasets are not part of the package and are never downloaded by it: each suite's data comes from its owner, under the owner's terms.
