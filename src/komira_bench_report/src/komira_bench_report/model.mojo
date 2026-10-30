@@ -100,8 +100,11 @@ struct Side(Copyable, Movable):
     their spread in percent; and every run: `runs_ms` holds each sweep's runs
     in order with the first run first, and `minor_faults` and `major_faults`,
     when the engine's page faults were measured, hold the faults each run took
-    in the same shape (empty when they were not measured). A side read from a
-    result of schema 1 has no runs: `runs_ms` is empty."""
+    in the same shape (empty when they were not measured). `first` is the first
+    run of the query on that engine, the run that checks the answer, executed
+    before the sweeps, with its own page faults (`first_minor`, `first_major`:
+    present exactly when the sweeps' faults are). A side read from a result of
+    schema 1 or 2 has no runs and no first run."""
 
     var rows: Int64
     var ms: Float64
@@ -110,6 +113,9 @@ struct Side(Copyable, Movable):
     var runs_ms: List[List[Float64]]
     var minor_faults: List[List[Int64]]
     var major_faults: List[List[Int64]]
+    var first: Optional[Float64]
+    var first_minor: Optional[Int64]
+    var first_major: Optional[Int64]
 
     def __init__(
         out self,
@@ -120,6 +126,9 @@ struct Side(Copyable, Movable):
         var runs_ms: List[List[Float64]] = List[List[Float64]](),
         var minor_faults: List[List[Int64]] = List[List[Int64]](),
         var major_faults: List[List[Int64]] = List[List[Int64]](),
+        var first: Optional[Float64] = Optional[Float64](),
+        var first_minor: Optional[Int64] = Optional[Int64](),
+        var first_major: Optional[Int64] = Optional[Int64](),
     ) raises:
         self.rows = rows
         self.ms = ms
@@ -128,6 +137,9 @@ struct Side(Copyable, Movable):
         self.runs_ms = runs_ms^
         self.minor_faults = minor_faults^
         self.major_faults = major_faults^
+        self.first = first^
+        self.first_minor = first_minor^
+        self.first_major = first_major^
         if rows < 0:
             raise Error("a side cannot have a negative row count")
         if not isfinite(ms) or ms <= 0.0:
@@ -141,31 +153,37 @@ struct Side(Copyable, Movable):
     def from_sweeps(
         rows: Int64,
         var sweeps: List[List[Float64]],
+        var first_ms: Optional[Float64] = Optional[Float64](),
         var minor_faults: List[List[Int64]] = List[List[Int64]](),
         var major_faults: List[List[Int64]] = List[List[Int64]](),
+        var first_minor: Optional[Int64] = Optional[Int64](),
+        var first_major: Optional[Int64] = Optional[Int64](),
     ) raises -> Side:
         """The side measured by `sweeps`, each the timings of one sweep's
-        reps, first run first: all of them are kept as the side's runs, each
-        sweep is reduced to the median of its runs after its first, and the
-        cell's steady-state time is the least of those (see
-        `STEADY_STATE_DEFINITION`). The page faults of each run, when
-        measured, are given in the shape of `sweeps`."""
+        reps: all of them are kept as the side's runs, each sweep is reduced to
+        the median of its runs after its first, and the cell's steady-state
+        time is the least of those (see `STEADY_STATE_DEFINITION`). `first_ms`
+        is the first run of the query on that engine, executed before the
+        sweeps. The page faults of each run, when measured, are given in the
+        shape of `sweeps`, and those of the first run as `first_minor` and
+        `first_major`."""
         var medians = sweep_medians(sweeps)
         var ms = minimum(medians)
         var spread = spread_of(medians)
-        return Side(rows, ms, medians^, spread, sweeps^, minor_faults^, major_faults^)
+        return Side(
+            rows, ms, medians^, spread, sweeps^, minor_faults^, major_faults^,
+            first_ms^, first_minor^, first_major^,
+        )
 
     def has_runs(self) -> Bool:
-        """Whether the side carries its runs (a side read from schema 1 does
-        not)."""
-        return len(self.runs_ms) > 0
+        """Whether the side carries its runs and its first run (a side read
+        from schema 1 or 2 does not)."""
+        return len(self.runs_ms) > 0 and Bool(self.first)
 
     def first_ms(self) -> Optional[Float64]:
-        """The first run of the first sweep, or nothing when the side has no
-        runs."""
-        if len(self.runs_ms) == 0 or len(self.runs_ms[0]) == 0:
-            return Optional[Float64]()
-        return Optional[Float64](self.runs_ms[0][0])
+        """The first run of the query on that engine (the run that checks the
+        answer), or nothing when the side does not carry it."""
+        return self.first.copy()
 
 
 struct Cell(Copyable, Movable):
@@ -451,10 +469,16 @@ def _validate_side(side: Side, sweeps: Int, reps: Int, who: String) raises:
     if len(side.ms_per_sweep) != sweeps:
         raise Error(who + " has " + String(len(side.ms_per_sweep)) + " sweeps, the run has " + String(sweeps))
     if len(side.runs_ms) == 0:
-        # a side of schema 1: no runs, and so no faults to hold
+        # a side of schema 1 or 2: no runs, and so no faults and no first run
         if len(side.minor_faults) > 0 or len(side.major_faults) > 0:
             raise Error(who + " has page faults but no runs")
+        if side.first or side.first_minor or side.first_major:
+            raise Error(who + " has a first run but no runs")
         return
+    if not side.first:
+        raise Error(who + " has runs but no first run")
+    if not isfinite(side.first.value()) or side.first.value() <= 0.0:
+        raise Error(who + " has a first run whose time is not finite and positive")
     if len(side.runs_ms) != sweeps:
         raise Error(who + " has " + String(len(side.runs_ms)) + " sweeps of runs, the run has " + String(sweeps))
     for i in range(len(side.runs_ms)):
@@ -467,9 +491,17 @@ def _validate_side(side: Side, sweeps: Int, reps: Int, who: String) raises:
     for i in range(len(medians)):
         if not _close(medians[i], side.ms_per_sweep[i]):
             raise Error(who + ": the median of the runs after the first of sweep " + String(i) + " is not its ms_per_sweep")
-    if len(side.minor_faults) > 0 or len(side.major_faults) > 0:
+    var swept = len(side.minor_faults) > 0 or len(side.major_faults) > 0
+    var firsts = Bool(side.first_minor) or Bool(side.first_major)
+    if swept != firsts:
+        raise Error(who + ": the page faults of the first run and of the sweeps are measured together or not at all")
+    if swept:
         _check_counts(side.minor_faults, sweeps, reps, who, String("minor faults"))
         _check_counts(side.major_faults, sweeps, reps, who, String("major faults"))
+        if not side.first_minor or not side.first_major:
+            raise Error(who + " has one count of the first run's page faults, not both")
+        if side.first_minor.value() < 0 or side.first_major.value() < 0:
+            raise Error(who + " has a negative count in the first run's page faults")
 
 
 def validate_cell(cell: Cell, run: RunInfo) raises:

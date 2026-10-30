@@ -9,10 +9,19 @@
 # them). Around each timed run the page faults of the engine's process are
 # read before and after (the arm's for komira, the DuckDB child process's for
 # DuckDB) and the difference is recorded with the run.
+#
+# The run that checks the answer (DuckDB's fetch, the arm's run with rows)
+# executes before any sweep, so it is the first time the query runs on each
+# engine and where first-touch costs land. It is timed and counted like the
+# others and recorded as the side's first run (`CheckRun`). It differs from a
+# timed run in one way: it materializes its rows (the arm converts its batches,
+# DuckDB renders JSON), which a timed run does not.
 
 from komira_bench_duckdb import BenchClock, DuckDbSession, DuckDbTransport, FaultCount
 
-from .arm import EngineArm
+from komira_bench_duckdb import FetchResult
+
+from .arm import ArmAnswer, EngineArm
 from .cache import CacheDropper
 from .query import QuerySpec
 from .tables import TableBinding
@@ -30,6 +39,57 @@ struct Timed(Copyable, Movable):
     def __init__(out self, ms: Float64, var faults: Optional[FaultCount]):
         self.ms = ms
         self.faults = faults^
+
+
+struct CheckRun(Copyable, Movable):
+    """The run that checked an answer, as the first run of its engine: its
+    time in milliseconds (`resolved` is False when the clock could not tell its
+    start from its end, and `ms` is then 0) and the page faults the engine's
+    process took during it (none where they cannot be read)."""
+
+    var ms: Float64
+    var resolved: Bool
+    var faults: Optional[FaultCount]
+
+    def __init__(out self, ms: Float64, resolved: Bool, var faults: Optional[FaultCount]):
+        self.ms = ms
+        self.resolved = resolved
+        self.faults = faults^
+
+
+struct KomiraCheck(Movable):
+    """The arm's answer to the check run, and that run as a `CheckRun`."""
+
+    var answer: ArmAnswer
+    var run: CheckRun
+
+    def __init__(out self, var answer: ArmAnswer, var run: CheckRun):
+        self.answer = answer^
+        self.run = run^
+
+
+def check_komira[A: EngineArm](mut arm: A, query: QuerySpec, clock: BenchClock) raises -> KomiraCheck:
+    """Run `query` on `arm` with its rows materialized, timed on the host clock
+    with the arm's fault counters read around it exactly as `time_komira` does."""
+    var f0 = arm.faults()
+    var t0 = clock.now()
+    var answer = arm.run(query, True)
+    var t1 = clock.now()
+    var f1 = arm.faults()
+    var delta = Optional[FaultCount]()
+    if Bool(f0) and Bool(f1):
+        delta = Optional[FaultCount](f1.value().minus(f0.value()))
+    var resolved = t1 > t0
+    var ms = Float64(t1 - t0) / _NS_PER_MS if resolved else 0.0
+    return KomiraCheck(answer^, CheckRun(ms, resolved, delta^))
+
+
+def duckdb_check_run(fetched: FetchResult) -> CheckRun:
+    """The fetch that gave DuckDB's answer as a `CheckRun`: marker to marker,
+    with the faults of the DuckDB process around it."""
+    var ok = fetched.resolved and fetched.elapsed_ns > 0
+    var ms = Float64(fetched.elapsed_ns) / _NS_PER_MS if ok else 0.0
+    return CheckRun(ms, ok, fetched.faults.copy())
 
 
 struct EngineRuns(Copyable, Movable):

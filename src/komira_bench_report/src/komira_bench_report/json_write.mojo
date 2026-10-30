@@ -2,7 +2,8 @@
 # result as one compact line of JSON with the members in a fixed order, after
 # `validate_result` has accepted it, and writes the summary the reader will
 # recompute and compare. Every run of every side is written (`runs_ms`, with
-# the page faults of each run beside it), so a side without its runs is not
+# the page faults of each run beside it, and `first_run`: the check run executed
+# before the sweeps, with its time and faults), so a side without its runs is not
 # written: a result read from schema 1, which held no runs, is never rewritten
 # as schema 2.
 
@@ -71,6 +72,15 @@ def _side_json(side: Optional[Side]) raises -> JsonValue:
     o.set_member(String("runs_ms"), runs^)
     o.set_member(String("minor_faults"), _counts_json(side.value().minor_faults))
     o.set_member(String("major_faults"), _counts_json(side.value().major_faults))
+    var first = JsonValue.empty_object()
+    first.set_member(String("ms"), JsonValue.from_f64(side.value().first.value()))
+    if side.value().first_minor:
+        first.set_member(String("minor_faults"), _i(side.value().first_minor.value()))
+        first.set_member(String("major_faults"), _i(side.value().first_major.value()))
+    else:
+        first.set_member(String("minor_faults"), JsonValue.null())
+        first.set_member(String("major_faults"), JsonValue.null())
+    o.set_member(String("first_run"), first^)
     return o^
 
 

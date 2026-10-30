@@ -213,7 +213,7 @@ def _read_side(v: JsonValue, where: String, legacy: Bool) raises -> Optional[Sid
         return Optional[Side]()
     var members = String("rows ms ms_per_sweep spread_pct")
     if not legacy:
-        members += String(" runs_ms minor_faults major_faults")
+        members += String(" runs_ms minor_faults major_faults first_run")
     var o = _object(v, where, members)
     var arr = o.get(String("ms_per_sweep"))
     if not arr.is_array():
@@ -226,12 +226,24 @@ def _read_side(v: JsonValue, where: String, legacy: Bool) raises -> Optional[Sid
     var runs = List[List[Float64]]()
     var minor = List[List[Int64]]()
     var major = List[List[Int64]]()
+    var first = Optional[Float64]()
+    var first_minor = Optional[Int64]()
+    var first_major = Optional[Int64]()
     if not legacy:
         runs = _read_runs(o.get(String("runs_ms")), where + ".runs_ms")
         if len(runs) == 0:
             _fail(where + ".runs_ms", String("a side of schema 2 holds its runs"))
         minor = _read_counts(o.get(String("minor_faults")), where + ".minor_faults")
         major = _read_counts(o.get(String("major_faults")), where + ".major_faults")
+        var f = _object(o.get(String("first_run")), where + ".first_run", String("ms minor_faults major_faults"))
+        first = Optional[Float64](_float(f.get(String("ms")), where + ".first_run.ms"))
+        var fm = f.get(String("minor_faults"))
+        var fj = f.get(String("major_faults"))
+        if fm.is_null() != fj.is_null():
+            _fail(where + ".first_run", String("minor_faults and major_faults are both counts or both null"))
+        if not fm.is_null():
+            first_minor = Optional[Int64](_int(fm, where + ".first_run.minor_faults"))
+            first_major = Optional[Int64](_int(fj, where + ".first_run.major_faults"))
     return Optional[Side](
         Side(
             _int(o.get(String("rows")), where + ".rows"),
@@ -241,6 +253,9 @@ def _read_side(v: JsonValue, where: String, legacy: Bool) raises -> Optional[Sid
             runs^,
             minor^,
             major^,
+            first^,
+            first_minor^,
+            first_major^,
         )
     )
 

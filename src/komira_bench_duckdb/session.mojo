@@ -88,14 +88,23 @@ struct QueryTiming(Copyable, Movable):
 
 
 struct FetchResult(Copyable, Movable):
-    """The rows of a fetched query, or DuckDB's error text."""
+    """The rows of a fetched query, or DuckDB's error text. `elapsed_ns`,
+    `resolved` and `faults` describe the query's own run, marker to marker, as
+    a `QueryTiming` does (the `DESCRIBE` that follows is not part of it); the
+    run renders its rows in JSON, which a timed run does not."""
 
     var rows: ResultSet
     var error: String
+    var elapsed_ns: Int
+    var resolved: Bool
+    var faults: Optional[FaultCount]
 
     def __init__(out self):
         self.rows = ResultSet()
         self.error = String("")
+        self.elapsed_ns = 0
+        self.resolved = False
+        self.faults = Optional[FaultCount]()
 
     def ok(self) -> Bool:
         return self.error.byte_length() == 0
@@ -310,8 +319,11 @@ struct DuckDbSession[T: DuckDbTransport](Movable):
         return self._fetch(sql, True)
 
     def _fetch(mut self, sql: String, typed: Bool) raises -> FetchResult:
-        var r = self._run(String("json"), sql)
+        var r = self._run(String("json"), sql, typed)
         var out = FetchResult()
+        out.elapsed_ns = r[0]
+        out.resolved = r[3]
+        out.faults = self._last_faults.copy()
         if r[2].byte_length() > 0:
             out.error = r[2].copy()
             return out^
