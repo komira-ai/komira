@@ -132,6 +132,9 @@ def test_the_pool_is_charged_as_the_tables_grow_and_whole_after_take_output() ra
     var out = _combine_and_take(sink, 1)
     assert_equal(out.num_rows(), 5010)
     assert_equal(pool.granted(), 0)
+    # The sink is still alive here: its workers' memory went back at the
+    # merge, not at the drop.
+    sink.finalize()
 
 
 def test_a_budget_the_string_bytes_outgrow_is_refused_by_name() raises:
@@ -191,6 +194,7 @@ def test_growth_past_the_budget_is_refused_by_name_in_the_merge() raises:
     var ok = _two_workers(roomy, 3000)
     assert_equal(_combine_and_take(ok, 2).num_rows(), 3000)
     assert_equal(roomy.granted(), 0)
+    ok.finalize()
 
 
 def test_more_strings_than_an_intern_table_holds_are_refused_by_name() raises:
