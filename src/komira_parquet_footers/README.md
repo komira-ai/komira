@@ -77,9 +77,9 @@ passes `ctx.footers` to `bind_statement` and the same cache to
   replaced between lowering and the scan is read with the old plan's schema
   and min/max (pruning and sink choice from version 1, data from version 2).
   The stamp is to be carried into `ScanFacts` by the `komira_lowering` owner
-  and checked by the Parquet source at open. The design names no slice for
-  it; the natural one is the real `SOURCE_PARQUET` builder (slice 2b of
-  section 7.3), which would be its consumer.
+  and checked by the Parquet source at open, a follow-up to slice 2b of
+  section 7.3 (`SOURCE_PARQUET` checks the stamp at open), tracked in #2024;
+  slice 2b landed without the check.
 - The cache reads footers itself rather than through
   `ParquetMetadataCache`'s shared surface, which revalidates each hit and would
   let bind and lowering see two versions of one file. The alternative, a
