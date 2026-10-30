@@ -17,9 +17,9 @@
 #
 # ON, the cost is a clock read at a phase's start and, at its end, a clock read,
 # one `pthread_self`, a scan of the thread table and three stores into the
-# calling thread's own lane. A lane is 1152 bytes with 64 bytes of padding at
-# each end, so two threads never write one cache line whatever the alignment of
-# the slab. The sites are per row group, per morsel and per segment, never per
+# calling thread's own lane. A lane is 4,368 bytes (its phases, a 144-byte
+# `struct rusage` buffer) with 64 bytes of padding at each end, so two threads
+# never write one cache line whatever the alignment of the slab. The sites are per row group, per morsel and per segment, never per
 # row.
 #
 # THE LANE IS THE THREAD. A thread takes the next free lane the first time it
@@ -38,6 +38,7 @@ from komira_atomic_alias import AtomicI64
 from std.ffi import _Global, external_call
 from std.memory import OwnedPointer, UnsafePointer, alloc
 from std.sys.defines import get_defined_int
+from std.sys.info import CompilationTarget
 from std.time import perf_counter_ns
 
 # --- the phases ---------------------------------------------------------------
@@ -98,17 +99,45 @@ comptime PH_STAGED_DECODE_LATER: Int = 25
 """Decode of the columns a later group of the staged filter needs."""
 comptime PH_STAGED_COMPACT: Int = 26
 """The staged filter's compaction of the working batch."""
+comptime PH_DECODE_PLAIN: Int = 27
+"""Decode of the projected columns of a row group that has no decode filter
+(the plain decode of the morsel source)."""
 comptime PH_COUNT: Int = 32
 
 comptime FIELD_SUM: Int = 0
 comptime FIELD_MAX: Int = 1
 """The longest single interval."""
 comptime FIELD_CALLS: Int = 2
+comptime FIELD_RU_VOL: Int = 4
+"""Voluntary context switches of the calling thread inside the phase (the
+sum of the deltas of `pt_ru_begin` / `pt_ru_end` pairs)."""
+comptime FIELD_RU_INVOL: Int = 5
+"""Involuntary context switches of the thread inside the phase."""
+comptime FIELD_RU_UTIME_NS: Int = 6
+"""User CPU time of the thread inside the phase, in nanoseconds (the kernel
+reports microseconds)."""
+comptime FIELD_RU_STIME_NS: Int = 7
+"""System CPU time of the thread inside the phase, in nanoseconds."""
+comptime FIELD_RU_MINFLT: Int = 8
+"""Minor page faults of the thread inside the phase."""
+comptime FIELD_RU_MAJFLT: Int = 9
+"""Major page faults of the thread inside the phase."""
+comptime FIELD_RU_END: Int = 10
+"""One past the last accumulated field."""
+comptime _RU_START: Int = 10
+"""Six words per phase holding the snapshot `pt_ru_begin` took."""
+
+# `getrusage(RUSAGE_THREAD)` is Linux only, where the constant is 1 on every
+# architecture the engine runs on; other targets read no thread usage and the
+# `FIELD_RU_*` counters stay 0 (`pt_ru_available` says which).
+comptime _RUSAGE_THREAD: Int = 1
+comptime _RU_WORDS: Int = 18
+"""`struct rusage` is 144 bytes on Linux LP64: 18 words."""
 
 comptime PT_LANES: Int = 256
-comptime _FIELDS: Int = 4
+comptime _FIELDS: Int = 16
 comptime _PAD: Int = 8
-comptime _LANE_WORDS: Int = PH_COUNT * _FIELDS + 2 * _PAD
+comptime _LANE_WORDS: Int = PH_COUNT * _FIELDS + 2 * _PAD + _RU_WORDS
 comptime _HEADER_WORDS: Int = 8
 comptime _W_FORK: Int = 0
 comptime _W_LANES_USED: Int = 1
@@ -146,6 +175,11 @@ def _lane_word(lane: Int, phase: Int, field: Int) -> Int:
     return _LANES_BASE + lane * _LANE_WORDS + _PAD + phase * _FIELDS + field
 
 
+def _scratch_word(lane: Int) -> Int:
+    """The lane's own `struct rusage` buffer, after its phases."""
+    return _LANES_BASE + lane * _LANE_WORDS + _PAD + PH_COUNT * _FIELDS
+
+
 # Every function below reads the slab through `_SLAB.get_or_create_ptr()` once,
 # in its own body, and never lets the pointer out.
 
@@ -179,6 +213,116 @@ def _record_interval(phase: Int, ns: Int, stamp: Bool) raises:
     if Int64(ns) > (base + w + FIELD_MAX)[].load():
         (base + w + FIELD_MAX)[].store(Int64(ns))
     (base + w + FIELD_CALLS)[].store((base + w + FIELD_CALLS)[].load() + 1)
+
+
+# --- per-thread resource usage around a phase ---------------------------------
+#
+# `pt_ru_begin[phase]()` and `pt_ru_end[phase]()` bracket a phase on the
+# calling thread: the end adds the difference of `getrusage(RUSAGE_THREAD)`
+# (context switches, user and system time, page faults) to the phase's
+# `FIELD_RU_*` counters of that thread's lane. One system call at each end, so
+# they sit at the per-row-group sites only. The kernel fills a buffer that is
+# part of the lane (no allocation), and only the owning thread touches it.
+
+
+def _find_lane() raises -> Int:
+    # SAFETY: as `_record_interval`: indexes inside the slab, pointer kept in
+    # this body.
+    var g = _SLAB.get_or_create_ptr()
+    var base = UnsafePointer(to=g[][])
+    var tid = _my_thread()
+    var used = Int((base + _W_LANES_USED)[].load())
+    for i in range(min(used, PT_LANES)):
+        if Int((base + _TID_BASE + i)[].load()) == tid:
+            return i
+    if used >= PT_LANES:
+        return -1
+    var lane = Int((base + _W_LANES_USED)[].fetch_add(Int64(1)))
+    if lane >= PT_LANES:
+        return -1
+    (base + _TID_BASE + lane)[].store(Int64(tid))
+    return lane
+
+
+def _ru_sample(lane: Int) raises -> Bool:
+    """Fill the lane's rusage buffer for the calling thread; False when the
+    target has no thread usage or the call failed."""
+    comptime if CompilationTarget.is_linux():
+        var g = _SLAB.get_or_create_ptr()
+        var base = UnsafePointer(to=g[][])
+        # FFI-BOUNDARY: libc getrusage; the buffer is `_RU_WORDS` words of the
+        # slab (process-lifetime, owned by `_SLAB`, never freed here), written
+        # by the kernel during the call and read by this thread after it.
+        var rc = external_call["getrusage", Int32](
+            Int32(_RUSAGE_THREAD),
+            (base + _scratch_word(lane)).bitcast[UInt8](),
+        )
+        return rc == 0
+    else:
+        return False
+
+
+def _ru_fold(phase: Int, begin: Bool) raises:
+    var lane = _find_lane()
+    if lane < 0:
+        return
+    if not _ru_sample(lane):
+        return
+    var g = _SLAB.get_or_create_ptr()
+    var base = UnsafePointer(to=g[][])
+    var s = _scratch_word(lane)
+    var vals = InlineArray[Int, 6](fill=0)
+    vals[0] = Int((base + s + 16)[].load())
+    vals[1] = Int((base + s + 17)[].load())
+    vals[2] = (
+        Int((base + s + 0)[].load()) * 1000000000
+        + Int((base + s + 1)[].load()) * 1000
+    )
+    vals[3] = (
+        Int((base + s + 2)[].load()) * 1000000000
+        + Int((base + s + 3)[].load()) * 1000
+    )
+    vals[4] = Int((base + s + 8)[].load())
+    vals[5] = Int((base + s + 9)[].load())
+    var w = _lane_word(lane, phase, 0)
+    for k in range(6):
+        if begin:
+            (base + w + _RU_START + k)[].store(Int64(vals[k]))
+        else:
+            var before = Int((base + w + _RU_START + k)[].load())
+            var acc = Int((base + w + FIELD_RU_VOL + k)[].load())
+            (base + w + FIELD_RU_VOL + k)[].store(
+                Int64(acc + vals[k] - before)
+            )
+
+
+@always_inline
+def pt_ru_begin[phase: Int]():
+    """Start a resource-usage interval of `phase` on the calling thread."""
+    comptime if phase_timers_on():
+        try:
+            _ru_fold(phase, True)
+        except:
+            pass
+
+
+@always_inline
+def pt_ru_end[phase: Int]():
+    """End the interval `pt_ru_begin[phase]` started on this thread: add its
+    context switches, CPU time and page faults to the phase."""
+    comptime if phase_timers_on():
+        try:
+            _ru_fold(phase, False)
+        except:
+            pass
+
+
+def pt_ru_available() -> Bool:
+    """True when the timers are on and this target reports per-thread usage."""
+    comptime if phase_timers_on() and CompilationTarget.is_linux():
+        return True
+    else:
+        return False
 
 
 @always_inline
@@ -327,7 +471,7 @@ def pt_get(lane: Int, phase: Int, field: Int) -> Int:
     `FIELD_CALLS`; 0 outside the table."""
     if lane < 0 or lane >= PT_LANES or phase < 0 or phase >= PH_COUNT:
         return 0
-    if field < 0 or field >= FIELD_CALLS + 1:
+    if field < 0 or field >= FIELD_RU_END or field == 3:
         return 0
     try:
         var g = _SLAB.get_or_create_ptr()
@@ -392,4 +536,6 @@ def pt_phase_name(phase: Int) -> String:
         return "staged_decode_later"
     if phase == PH_STAGED_COMPACT:
         return "staged_compact"
+    if phase == PH_DECODE_PLAIN:
+        return "decode_plain"
     return "phase_" + String(phase)

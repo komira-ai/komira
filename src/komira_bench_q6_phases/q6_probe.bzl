@@ -87,7 +87,7 @@ _q6_phase_probe = rule(
         "runs": attrs.int(default = 9),
         "stage": attrs.dep(providers = [MojoRunnableInfo]),
         "stage_memory_gib": attrs.int(default = 8),
-        "threads": attrs.string(default = "1,8,32,88"),
+        "threads": attrs.string(default = "1,8,32,49,88"),
         "tpch_extension": attrs.dep(),
         "_duckdb": attrs.exec_dep(providers = [DuckdbInfo], default = "komira//third_party/duckdb:duckdb"),
     },

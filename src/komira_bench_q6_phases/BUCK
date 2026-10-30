@@ -15,12 +15,16 @@ load(":q6_probe.bzl", "q6_phase_probe")
 #
 # The welded tests are built with the timers on (each file's header says what
 # it proves):
-# - test_stats: median and quartiles of a few samples.
-# - test_cli: the defaults, the staged-file path, the expected answer, and
-#   every refusal of the command line.
+# - test_stats: median and quartiles of a few samples, and when the warm-up's
+#   page-fault counts have settled.
+# - test_cli: the defaults (five thread counts, both modes), the mode flag, the
+#   staged-file path, the expected answer, and every refusal of the command
+#   line.
 # - test_probe_phases: every stage of a Q6 run is timed on the right threads
 #   and the nested phases agree; the JSON is valid and complete; the plan text
-#   holds the three plans; a wrong expected answer is reported.
+#   holds the three plans; a wrong expected answer is reported; the decode-only
+#   query decodes without evaluating a predicate; the per-thread usage nests
+#   like the phases; each mode can be run alone.
 mojo_library(
     name = "komira_bench_q6_phases",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo", "main/**/*.mojo"]),

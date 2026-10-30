@@ -14,20 +14,32 @@
 # - test_reset_zeroes_the_counters_and_keeps_the_lane: after `pt_reset` every
 #   counter reads 0 and the thread is still lane 0. Catches a reset that forgets
 #   the thread table (the next run would register the same thread twice).
+# - test_thread_usage_counts_this_threads_switches_and_faults: a usage bracket
+#   around two sleeps and a 32 MiB fill reads at least 2 voluntary context
+#   switches and 8 minor faults on this thread's lane and phase, a second
+#   bracket adds to the first, another phase stays 0, and a reset zeroes the
+#   usage counters. Catches a bracket that reads the process instead of the
+#   thread, one that overwrites instead of adding, one that books to the wrong
+#   phase, and a reset that leaves usage behind.
 #
 # The tests share one process-global slab and run in this order in one
 # process; each one resets first.
 
 from std.testing import TestSuite, assert_equal, assert_true
+from std.time import sleep
 
 from komira_phase_timers.phase_timers import (
     FIELD_CALLS,
     FIELD_MAX,
+    FIELD_RU_END,
+    FIELD_RU_MINFLT,
+    FIELD_RU_VOL,
     FIELD_SUM,
     PH_COUNT,
     PH_END_STAMP,
     PH_FILTER,
     PH_JOIN_TAIL,
+    PH_SINK,
     PH_WAKE,
     pt_enabled,
     pt_get,
@@ -38,6 +50,9 @@ from komira_phase_timers.phase_timers import (
     pt_record_ns,
     pt_record_wake,
     pt_reset,
+    pt_ru_available,
+    pt_ru_begin,
+    pt_ru_end,
     pt_stamp,
 )
 
@@ -93,10 +108,36 @@ def test_reset_zeroes_the_counters_and_keeps_the_lane() raises:
     assert_equal(pt_get(0, PH_FILTER, FIELD_SUM), 2)
 
 
+def test_thread_usage_counts_this_threads_switches_and_faults() raises:
+    if not pt_ru_available():
+        return
+    pt_reset()
+    pt_ru_begin[PH_FILTER]()
+    sleep(0.001)
+    sleep(0.001)
+    var buf = List[UInt8](length=32 * 1024 * 1024, fill=1)
+    pt_ru_end[PH_FILTER]()
+    assert_equal(Int(buf[1000]), 1)
+    var vol = pt_get(0, PH_FILTER, FIELD_RU_VOL)
+    assert_true(vol >= 2)
+    assert_true(pt_get(0, PH_FILTER, FIELD_RU_MINFLT) >= 8)
+    pt_ru_begin[PH_FILTER]()
+    sleep(0.001)
+    pt_ru_end[PH_FILTER]()
+    assert_true(pt_get(0, PH_FILTER, FIELD_RU_VOL) >= vol + 1)
+    for field in range(FIELD_RU_VOL, FIELD_RU_END):
+        assert_equal(pt_get(0, PH_SINK, field), 0)
+    pt_reset()
+    for field in range(FIELD_RU_VOL, FIELD_RU_END):
+        for phase in range(PH_COUNT):
+            assert_equal(pt_get(0, phase, field), 0)
+
+
 def main() raises:
     var suite = TestSuite()
     suite.test[test_intervals_sum_and_keep_the_longest]()
     suite.test[test_a_stamp_is_stored_not_added]()
     suite.test[test_wake_and_join_tails_follow_the_fork]()
     suite.test[test_reset_zeroes_the_counters_and_keeps_the_lane]()
+    suite.test[test_thread_usage_counts_this_threads_switches_and_faults]()
     suite^.run()

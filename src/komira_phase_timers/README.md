@@ -12,6 +12,8 @@ var t0 = pt_now()
 pt_record[PH_FILTER](t0)
 ```
 
-When on, the calling thread owns a lane of the process-global slab (found by `pthread_self`), 1152 bytes with a cache line of padding at each end, so two threads never write one line. A lane holds, for each phase, the sum of its intervals in nanoseconds, the longest interval, and the number of intervals. Only the owner writes a lane; read after the fork-join that ended the work, with `pt_lane_count` and `pt_get`. Phases nest (decode inside claim); `pt_phase_name` gives each phase's stable name.
+When on, the calling thread owns a lane of the process-global slab (found by `pthread_self`), 4,368 bytes with a cache line of padding at each end, so two threads never write one line. A lane holds, for each phase, the sum of its intervals in nanoseconds, the longest interval, and the number of intervals. Only the owner writes a lane; read after the fork-join that ended the work, with `pt_lane_count` and `pt_get`. Phases nest (decode inside claim); `pt_phase_name` gives each phase's stable name.
 
 One query at a time: the slab is process-global.
+
+Resource usage per phase: `pt_ru_begin[phase]()` and `pt_ru_end[phase]()` bracket a phase on the calling thread and add the difference of `getrusage(RUSAGE_THREAD)` to the phase's `FIELD_RU_*` counters: voluntary and involuntary context switches, user and system CPU time (nanoseconds) and minor and major page faults. Each is one system call, so they sit at per-row-group sites only. `RUSAGE_THREAD` is Linux only (the constant is 1 on every Linux architecture); on other targets the counters stay 0 and `pt_ru_available` is False. The kernel fills a buffer that is part of the lane, so nothing is allocated.

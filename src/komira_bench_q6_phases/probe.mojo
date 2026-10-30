@@ -9,6 +9,17 @@
 # switches) and by the phase timers (komira_phase_timers), which the probe
 # resets before the run and reads after it.
 #
+# Two modes run per thread count. `q6` is the query; `decode_only` is the same
+# scan with no predicate: the four columns Q6 reads (`l_shipdate`,
+# `l_discount`, `l_quantity`, `l_extendedprice`) are decoded and folded into
+# four aggregates, so its `decode_plain` and `claim_next_morsel` phases are
+# the decode scaling on its own, with no filter evaluation.
+#
+# Before the timed runs of a mode the probe discards warm-up runs: at least 2
+# (5 at 32 or more threads) and then until two successive runs' minor-fault
+# counts agree within 20 percent (at most 30). The discarded runs' faults,
+# switches and times are in the JSON (`warmup`).
+#
 # The phase timers exist only in a build with `-D KOMIRA_PHASE_TIMERS=1`; the
 # JSON says which this was (`timers_compiled_in`), and without them it holds
 # the total and the page faults only.
@@ -21,6 +32,11 @@
 #     `longest_call_ms` (the longest single interval), `calls`, `lanes`
 #     (threads that spent time in it) and `share_of_total_pct` (the median
 #     critical time over the median total);
+#   * for the phases that bracket their thread's resource usage (`thread_usage`:
+#     task, claim, the decodes and the filter), the voluntary and involuntary
+#     context switches, user and system CPU time and the minor and major page
+#     faults of the worker threads inside the phase, as the sum over workers
+#     and the largest of one worker (`getrusage(RUSAGE_THREAD)` deltas);
 #   * page faults (minor, major), context switches and the peak resident set.
 # Phases nest (claim holds decode and filter; task holds claim and sink; run_plan
 # holds the segment phases), so shares are not meant to add to 100.
@@ -33,12 +49,20 @@ from komira_engine_runtime.counters import Counters
 from komira_parquet.runtime_footer_cache import ParquetMetadataCache
 from komira_parquet_footers.footer_cache import FooterCache
 from komira_phase_timers.phase_timers import (
+    PH_CLAIM,
     PH_COUNT,
+    PH_DECODE_FILTER_COLS,
+    PH_DECODE_PAYLOAD,
+    PH_DECODE_PLAIN,
     PH_END_STAMP,
+    PH_FILTER,
     PH_JOIN_TAIL,
+    PH_STAGED_DECODE_LATER,
+    PH_TASK,
     pt_enabled,
     pt_phase_name,
     pt_reset,
+    pt_ru_available,
 )
 from komira_scalar_arithmetic.decimal_arith import I128
 from komira_sdk_exec.engine_catalog import register_parquet
@@ -48,14 +72,30 @@ from komira_sdk_exec.engine_sql import run_sql
 
 from .phase_snapshot import PhaseAgg, snapshot_all
 from .plan_render import render_plans
-from .stats import maximum, median, minimum, quantile
+from .stats import faults_settled, maximum, median, minimum, quantile
 
-comptime SCHEMA: String = "komira-q6-phase-probe/1"
+comptime SCHEMA: String = "komira-q6-phase-probe/2"
 comptime TPCH_SF1_Q6_REVENUE_UNSCALED: Int = 1231410782283
 """Q6 of TPC-H at scale factor 1 with the validation parameters, as the
 DECIMAL(38,4) integer: 123141078.2283."""
 comptime NO_EXPECTED_REVENUE: Int = -1
 """`ProbeSettings.expected_revenue` when the data is not TPC-H sf1."""
+
+comptime DECODE_ONLY_TEXT: String = (
+    "SELECT sum(l_extendedprice) AS s_price, sum(l_discount) AS s_discount,"
+    " sum(l_quantity) AS s_quantity, min(l_shipdate) AS min_shipdate"
+    " FROM lineitem"
+)
+"""The four columns Q6 reads, with no predicate. The first aggregate is the
+answer the probe compares between runs."""
+
+comptime MODE_Q6: String = "q6"
+comptime MODE_DECODE_ONLY: String = "decode_only"
+comptime WARMUP_MIN_RUNS: Int = 2
+comptime WARMUP_MIN_RUNS_WIDE: Int = 5
+"""Warm-up runs discarded at least, at `WIDE_THREADS` or more threads."""
+comptime WIDE_THREADS: Int = 32
+comptime WARMUP_MAX_RUNS: Int = 30
 
 comptime NOTE: String = (
     "The machine this ran on is not a quiet host: other jobs share it, so"
@@ -211,8 +251,78 @@ def _host_json(ref ctx: EngineContext) -> String:
     )
 
 
+def _has_usage(p: Int) -> Bool:
+    """Phases that bracket their thread's resource usage."""
+    return (
+        p == PH_TASK
+        or p == PH_CLAIM
+        or p == PH_DECODE_FILTER_COLS
+        or p == PH_STAGED_DECODE_LATER
+        or p == PH_FILTER
+        or p == PH_DECODE_PAYLOAD
+        or p == PH_DECODE_PLAIN
+    )
+
+
+def _usage_pair(ref runs: List[RunRecord], p: Int, k: Int, as_ms: Bool) -> String:
+    """`{"sum":..,"max":..}` of resource field `k` of phase `p`: over the
+    workers of a run (sum) and the largest worker (max), each over the runs."""
+    var sums = List[Int]()
+    var maxes = List[Int]()
+    for r in range(len(runs)):
+        sums.append(runs[r].phases[p].ru_sum[k])
+        maxes.append(runs[r].phases[p].ru_max[k])
+    if as_ms:
+        return String('{"sum":') + _dist_ms(sums) + ',"max":' + _dist_ms(maxes) + "}"
+    return String('{"sum":') + _dist_count(sums) + ',"max":' + _dist_count(maxes) + "}"
+
+
+def _usage_json(ref runs: List[RunRecord], p: Int) -> String:
+    var out = String('{"voluntary_csw":') + _usage_pair(runs, p, 0, False)
+    out += ',"involuntary_csw":' + _usage_pair(runs, p, 1, False)
+    out += ',"user_ms":' + _usage_pair(runs, p, 2, True)
+    out += ',"system_ms":' + _usage_pair(runs, p, 3, True)
+    out += ',"minor_faults":' + _usage_pair(runs, p, 4, False)
+    out += ',"major_faults":' + _usage_pair(runs, p, 5, False)
+    out += "}"
+    return out^
+
+
+struct WarmupRecord(Copyable, Movable):
+    """The discarded runs of one mode at one thread count."""
+
+    var minor_faults: List[Int]
+    var vol_switches: List[Int]
+    var total_ns: List[Int]
+    var revenue_unscaled: List[Int]
+    """The first aggregate each discarded run answered."""
+    var settled: Bool
+
+    def __init__(out self):
+        self.revenue_unscaled = List[Int]()
+        self.minor_faults = List[Int]()
+        self.vol_switches = List[Int]()
+        self.total_ns = List[Int]()
+        self.settled = False
+
+
+def _warmup_json(ref w: WarmupRecord) -> String:
+    return (
+        String('{"discarded":') + String(len(w.minor_faults))
+        + ',"settled":' + String("true" if w.settled else "false")
+        + ',"minor_faults":' + _series_int(w.minor_faults)
+        + ',"voluntary_csw":' + _series_int(w.vol_switches)
+        + ',"total_ms":' + _series_ms(w.total_ns)
+        + String("}")
+    )
+
+
 def _json_config(
-    threads_requested: Int, threads_effective: Int, ref runs: List[RunRecord]
+    mode: String,
+    threads_requested: Int,
+    threads_effective: Int,
+    ref runs: List[RunRecord],
+    ref warm: WarmupRecord,
 ) -> String:
     var totals = List[Int]()
     var minor = List[Int]()
@@ -232,8 +342,10 @@ def _json_config(
         user.append(runs[r].user_ns)
         system.append(runs[r].system_ns)
     var total_median = median(totals)
-    var out = String('{"threads_requested":') + String(threads_requested)
+    var out = String('{"mode":"') + mode + '"'
+    out += ',"threads_requested":' + String(threads_requested)
     out += ',"threads_effective":' + String(threads_effective)
+    out += ',"warmup":' + _warmup_json(warm)
     out += ',"runs":' + String(len(runs))
     out += ',"total_ms":' + _dist_ms(totals)
     out += ',"total_ms_per_run":' + _series_ms(totals)
@@ -277,6 +389,8 @@ def _json_config(
         out += ',"longest_call_ms":' + _dist_ms(longest)
         out += ',"calls":' + _dist_count(calls)
         out += ',"lanes":' + _dist_count(lanes)
+        if _has_usage(p) and pt_ru_available():
+            out += ',"thread_usage":' + _usage_json(runs, p)
         if p == PH_JOIN_TAIL:
             # Recorded for every task by the driver, so `critical_ms` is the
             # sum of the idle gaps of all tasks and has no share; the
@@ -330,6 +444,12 @@ struct ProbeSettings(Copyable, Movable):
     var expected_revenue: Int
     """The DECIMAL(38,4) answer as an integer every run must give, or
     `NO_EXPECTED_REVENUE`."""
+    var run_q6: Bool
+    var run_decode_only: Bool
+    var expected_decode_sum: Int
+    """The unscaled `sum(l_extendedprice)` every decode-only run must give,
+    or `NO_EXPECTED_REVENUE` (the runs then only have to agree with each
+    other)."""
 
     def __init__(
         out self,
@@ -339,6 +459,9 @@ struct ProbeSettings(Copyable, Movable):
         runs: Int,
         memory_budget_bytes: Int,
         expected_revenue: Int = NO_EXPECTED_REVENUE,
+        run_q6: Bool = True,
+        run_decode_only: Bool = True,
+        expected_decode_sum: Int = NO_EXPECTED_REVENUE,
     ):
         self.lineitem_path = lineitem_path^
         self.out_dir = out_dir^
@@ -346,6 +469,9 @@ struct ProbeSettings(Copyable, Movable):
         self.runs = runs
         self.memory_budget_bytes = memory_budget_bytes
         self.expected_revenue = expected_revenue
+        self.run_q6 = run_q6
+        self.run_decode_only = run_decode_only
+        self.expected_decode_sum = expected_decode_sum
 
 
 def _answer_ok(rec: RunRecord, settings: ProbeSettings) -> Bool:
@@ -355,11 +481,45 @@ def _answer_ok(rec: RunRecord, settings: ProbeSettings) -> Bool:
     )
 
 
+def _decode_answer_ok(
+    rec: RunRecord, settings: ProbeSettings, mut reference: Int
+) -> Bool:
+    """A decode-only answer is right if it is the expected sum or, with none
+    expected, the same as the first one seen."""
+    if settings.expected_decode_sum != NO_EXPECTED_REVENUE:
+        return rec.revenue_unscaled == settings.expected_decode_sum
+    if reference == NO_EXPECTED_REVENUE:
+        reference = rec.revenue_unscaled
+    return rec.revenue_unscaled == reference
+
+
+def _warm_up(
+    mut ctx: EngineContext, text: String, threads: Int
+) raises -> WarmupRecord:
+    """Discard runs until the page-fault count settles (see the header); keep
+    their counters."""
+    var w = WarmupRecord()
+    var min_runs = WARMUP_MIN_RUNS
+    if threads >= WIDE_THREADS:
+        min_runs = WARMUP_MIN_RUNS_WIDE
+    while len(w.minor_faults) < WARMUP_MAX_RUNS:
+        var rec = _run_once(ctx, text)
+        w.minor_faults.append(rec.minor_faults)
+        w.vol_switches.append(rec.vol_switches)
+        w.total_ns.append(rec.total_ns)
+        w.revenue_unscaled.append(rec.revenue_unscaled)
+        if len(w.minor_faults) >= min_runs and faults_settled(w.minor_faults):
+            w.settled = True
+            break
+    return w^
+
+
 struct ProbeResult(Movable):
     var json: String
     var answers_match: Bool
-    """Every run, warm-up included, gave `expected_revenue` (True when none
-    was expected)."""
+    """Every run, warm-up included, gave the expected answer (True when none
+    was expected; a decode-only run with none expected must agree with the
+    others)."""
 
     def __init__(out self, var json: String, answers_match: Bool):
         self.json = json^
@@ -372,15 +532,20 @@ def run_probe(settings: ProbeSettings) raises -> ProbeResult:
     the expected one.
 
     Raises:
-        If a run is refused or a file cannot be written.
+        If a run is refused or a file cannot be written, or no mode is selected.
     """
     if settings.runs < 5:
         raise Error("the probe needs at least 5 timed runs, got " + String(settings.runs))
+    if not settings.run_q6 and not settings.run_decode_only:
+        raise Error("the probe has no mode to run")
     var text = find_query(String("tpch/q6")).text
+    var decode_text = String(DECODE_ONLY_TEXT)
     var configs = String("")
     var host = String("null")
     var plan_text = String("")
     var answers_match = True
+    var decode_reference = NO_EXPECTED_REVENUE
+    var first_config = True
     for t in range(len(settings.threads)):
         var requested = settings.threads[t]
         var ctx = EngineContext(
@@ -393,25 +558,54 @@ def run_probe(settings: ProbeSettings) raises -> ProbeResult:
         if t == 0:
             host = _host_json(ctx)
             plan_text = render_plans(ctx, text)
-        var warm = _run_once(ctx, text)
-        if not _answer_ok(warm, settings):
-            answers_match = False
-        var runs = List[RunRecord]()
-        for _ in range(settings.runs):
-            var rec = _run_once(ctx, text)
-            if not _answer_ok(rec, settings):
-                answers_match = False
-            runs.append(rec^)
-        if t > 0:
-            configs += ","
-        configs += _json_config(requested, ctx.host_profile.thread_count, runs)
+        for m in range(2):
+            var is_q6 = m == 0
+            if is_q6 and not settings.run_q6:
+                continue
+            if not is_q6 and not settings.run_decode_only:
+                continue
+            var query = text.copy() if is_q6 else decode_text.copy()
+            var warm = _warm_up(ctx, query, requested)
+            for w in range(len(warm.revenue_unscaled)):
+                var wrec = RunRecord()
+                wrec.revenue_unscaled = warm.revenue_unscaled[w]
+                if is_q6:
+                    if not _answer_ok(wrec, settings):
+                        answers_match = False
+                elif not _decode_answer_ok(wrec, settings, decode_reference):
+                    answers_match = False
+            var runs = List[RunRecord]()
+            for _ in range(settings.runs):
+                var rec = _run_once(ctx, query)
+                if is_q6:
+                    if not _answer_ok(rec, settings):
+                        answers_match = False
+                elif not _decode_answer_ok(rec, settings, decode_reference):
+                    answers_match = False
+                runs.append(rec^)
+            if not first_config:
+                configs += ","
+            first_config = False
+            configs += _json_config(
+                String(MODE_Q6) if is_q6 else String(MODE_DECODE_ONLY),
+                requested,
+                ctx.host_profile.thread_count,
+                runs,
+                warm,
+            )
     var json = String('{"schema":"') + SCHEMA + '"'
     json += ',"note":"' + NOTE + '"'
     json += ',"query":"tpch/q6"'
+    json += ',"decode_only_query":"' + DECODE_ONLY_TEXT + '"'
     json += ',"timers_compiled_in":' + String("true" if pt_enabled() else "false")
-    json += ',"warmup_runs_discarded":1'
+    json += ',"thread_usage_available":' + String("true" if pt_ru_available() else "false")
+    json += ',"warmup_policy":"discard at least ' + String(WARMUP_MIN_RUNS) + " runs ("
+    json += String(WARMUP_MIN_RUNS_WIDE) + " at " + String(WIDE_THREADS)
+    json += " or more threads), then until two successive runs' minor faults agree within 20 percent, at most "
+    json += String(WARMUP_MAX_RUNS) + '"'
     json += ',"runs_per_thread_count":' + String(settings.runs)
     json += ',"expected_revenue_unscaled":' + String(settings.expected_revenue)
+    json += ',"decode_only_sum_price_unscaled":' + String(decode_reference)
     json += ',"answers_match_expected":' + String("true" if answers_match else "false")
     json += ',"host":' + host
     json += ',"footer_cost":' + _footer_json(settings.lineitem_path, settings.runs)
