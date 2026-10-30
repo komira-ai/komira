@@ -1,3 +1,11 @@
+# TPC Benchmark(TM) H Standard Specification, Revision 3.0.1 (28 April 2022).
+# Copyright (c) 1993 - 2022 Transaction Processing Performance Council.
+# TPC Benchmark, TPC-H, QppH, QthH and QphH are trademarks of the Transaction
+# Processing Performance Council. The query text below is copied from that
+# publication, and the copying is by permission of the Transaction Processing
+# Performance Council (the wording follows the legal notice on page 4 of the
+# specification and its cover page; README.md, "Licence notes").
+#
 # The 22 queries of TPC-H, in the text of the specification with the
 # substitution parameters of its validation run (query 1 DELTA = 90, query 2
 # SIZE = 15 and so on), against the standard TPC-H schema (datasets.mojo).

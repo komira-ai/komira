@@ -7,6 +7,10 @@
 # and over the listing and DDL text described in the doc comments of
 # `Query.sha256`, `Suite.sha256` and `Dataset.sha256`).
 #
+# The suite pins are keyed `suite/<id>` and the dataset pins `dataset/<name>`: a
+# suite and a dataset are both called `tpch`, with different digests, so a bare
+# name would collide.
+#
 # What each case proves:
 # - test_every_query_is_pinned: each query hashes to its pinned digest; a query
 #   with no pin, and a pin with no query, are both refused (a query added or
@@ -74,16 +78,16 @@ def _query_pins() -> List[String]:
 
 def _suite_pins() -> List[String]:
     var pins = List[String]()
-    pins.append("tpch 3380c79710a9ca00af882cdc1cfe0625e0ffdfde190e8bc5d114c2b1f282ede4")
-    pins.append("h2o eebd22d757caf7e49739c0a67502b23322c492454dfe4cc8bfc9cf1c73c96616")
+    pins.append("suite/tpch 3380c79710a9ca00af882cdc1cfe0625e0ffdfde190e8bc5d114c2b1f282ede4")
+    pins.append("suite/h2o eebd22d757caf7e49739c0a67502b23322c492454dfe4cc8bfc9cf1c73c96616")
     return pins^
 
 
 def _dataset_pins() -> List[String]:
     var pins = List[String]()
-    pins.append("tpch a795a8e5598fc06fe9b6bf37eafa0e9fd2bd612f7b05dc64fb5443ee548f74ae")
-    pins.append("h2o_groupby 6bbb14483e6c002cf6c1db7b08102f56418d6fd51f25acc44714be69197b65cf")
-    pins.append("h2o_join 710f2d77ca52ba9dc32a88c2f455089f809b1a2f1b3cc18550582191844b394d")
+    pins.append("dataset/tpch a795a8e5598fc06fe9b6bf37eafa0e9fd2bd612f7b05dc64fb5443ee548f74ae")
+    pins.append("dataset/h2o_groupby 6bbb14483e6c002cf6c1db7b08102f56418d6fd51f25acc44714be69197b65cf")
+    pins.append("dataset/h2o_join 710f2d77ca52ba9dc32a88c2f455089f809b1a2f1b3cc18550582191844b394d")
     return pins^
 
 
@@ -113,7 +117,7 @@ def test_every_suite_is_pinned() raises:
     var all_suites = suites()
     assert_equal(len(all_suites), len(pins))
     for s in all_suites:
-        assert_equal(s.sha256(), _pinned(pins, s.id), "drift in suite " + s.id)
+        assert_equal(s.sha256(), _pinned(pins, "suite/" + s.id), "drift in suite " + s.id)
 
 
 def test_every_dataset_is_pinned() raises:
@@ -123,7 +127,7 @@ def test_every_dataset_is_pinned() raises:
     for i in range(len(names)):
         assert_equal(
             dataset(names[i]).sha256(),
-            _pinned(pins, names[i]),
+            _pinned(pins, "dataset/" + names[i]),
             "drift in dataset " + names[i],
         )
 

@@ -82,11 +82,13 @@ The text is the specification's, with the parameters of its validation run (quer
 - the row limits the specification states in prose (queries 2, 3, 10, 18, 21) are `limit` clauses;
 - query 11's fraction is the specification's 0.0001 divided by the scale factor; the text holds it for scale factor 1, and `tpch_q11_at_scale(sf)` gives the text for another whole scale factor (the fraction to ten decimals, truncated).
 
+Against the DuckDB copy of the specification's queries (`extension/tpch/dbgen/queries`, the text that DuckDB's `tpch` extension ships), nine queries differ in more than layout, because DuckDB folds the date arithmetic into literals: q1 (`date '1998-12-01' - interval '90' day` for `date '1998-09-02'`), q4, q5, q6, q10, q12, q14, q15 and q20 (`date 'D' + interval 'N' month|year` for the folded end date); q6 also writes `0.06 - 0.01` and `0.06 + 0.01` where DuckDB writes `0.05` and `0.07`. q15 also names its `with` clause `revenue0` (the specification's view name) and groups by `l_suppkey` where DuckDB names it `revenue` and groups by the alias. Every folded date was recomputed and agrees. The other queries (q2, q3, q7, q8, q9, q11, q13, q16 to q19, q21, q22) differ from that copy only in letter case and the placement of spaces and line breaks.
+
 Query 1 is the specification's with the interval written `interval '90' day` where the specification writes `day (3)` (the precision of the interval field is dropped).
 
 ### h2o
 
-The groupby queries read one table `x`; the join queries read `x` and one of `small`, `medium`, `big`. The benchmark names its tables per data size (`G1_1e7_1e2_0_0`, `J1_1e7_NA_0_0` and so on); this corpus names them `x`, `small`, `medium` and `big` and leaves the size to the data. Four queries differ from the DuckDB script in form only: q6 writes `median(v3)` where the script writes `quantile_cont(v3, 0.5)` (the same function), j1, j2, j4 and j5 write `inner join` where the script writes `join` (the same join), and q8 writes `as sub_query`.
+The groupby queries read one table `x`; the join queries read `x` and one of `small`, `medium`, `big`. The benchmark names its tables per data size (`G1_1e7_1e2_0_0`, `J1_1e7_NA_0_0` and so on); this corpus names them `x`, `small`, `medium` and `big` and leaves the size to the data. Against the upstream DuckDB script (which writes its keywords in capitals) seven queries differ in form only, and the hashes pin these bytes: q6 writes `median(v3)` where the script writes `quantile_cont(v3, 0.5)` (the same function); q7 writes `max(v1) - min(v2)` where the script writes `max(v1)-min(v2)` (spaces around the minus); q8 is laid out on several lines and names its subquery with `as sub_query` where the script writes `sub_query`; and j1, j2, j4 and j5 write `inner join` where the script writes `join` (the same join). Every query also writes its keywords in lower case.
 
 ### Checked against the sources
 
@@ -99,6 +101,10 @@ Every query was compared mechanically with the upstream file named above after n
 ## The digest
 
 `sha256.mojo` is a small SHA-256 inside the package, on purpose: the package has no dependencies, so a harness can take it without taking `komira_crypto`. `tests/test_sha256.mojo` checks it against the published vectors and, at every length up to 200 bytes and at 100 000 bytes, against `komira_crypto`.
+
+## TPC notice
+
+The TPC-H queries (`tpch.mojo`) are copied from the TPC Benchmark(TM) H Standard Specification, Revision 3.0.1, dated 28 April 2022. Copyright (c) 1993 - 2022 Transaction Processing Performance Council. TPC Benchmark, TPC-H, QppH, QthH and QphH are trademarks of the Transaction Processing Performance Council. This copying is by permission of the Transaction Processing Performance Council. The wording is that of the specification's cover page (the copyright line, the title, the revision) and of its legal notice on page 4 (the trademark sentence and the condition that the copyright notice, the title and the date appear and that notice is given that copying is by permission of the TPC); the revision date is from the specification's change log.
 
 ## Licence notes
 
@@ -119,4 +125,4 @@ Datasets are not part of the package and are never downloaded by it: each suite'
 
 ## Tests
 
-`tests/test_sha256.mojo` (the digest against the published vectors and, at every length up to 200 bytes, against `komira_crypto`), `tests/test_text.mojo` (the ids of each suite, the shape of the text, every word of every query against its dataset's names, the TPC-H parameters), `tests/test_api.mojo` (lookups and their refusals, the hash functions, query 11 at a scale factor, the DDL) and `tests/test_drift.mojo` (every query, suite and dataset digest pinned).
+`tests/test_sha256.mojo` (the digest against the published vectors and, at every length up to 200 bytes, against `komira_crypto`), `tests/test_text.mojo` (the ids of each suite, the shape of the text, every word of every query against its dataset's names, the TPC-H parameters), `tests/test_api.mojo` (lookups and their refusals, the hash functions, query 11 at a scale factor, the DDL) and `tests/test_drift.mojo` (every query, suite and dataset digest pinned; suite pins are keyed `suite/<id>` and dataset pins `dataset/<name>` because a suite and a dataset are both called `tpch`).
