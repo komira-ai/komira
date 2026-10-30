@@ -741,13 +741,12 @@ ANALYZE, cloud scans) arrives as its own module of functions over the same struc
 
 | Module | Holds |
 |---|---|
-| `engine_options` | `EngineOptions` (§5.2) |
+| `engine_options` | `EngineOptions` (§5.2; built: `worker_count`, `memory_budget_bytes`) |
 | `engine_context` | the struct, its constructor and accessors |
-| `engine_catalog` | register a table, a Parquet path, an in-memory batch; resolve a name |
-| `engine_footers` | `ParquetFooters` and the footer cache (§6.2) |
-| `engine_optimize` | the call into `optimizer_driver.optimize` and the plan gates |
+| `engine_catalog` | built: `register_parquet`; planned: an in-memory batch, resolve a name |
+| `engine_footers`, `engine_optimize` | planned modules. Built: the context holds `ParquetFooters` (§6.2) and `engine_sql` calls `optimize` itself; the plan gates are not called |
 | `engine_lower` | `LoweringInputs` from the footers; the call into `lower` |
-| `engine_execute` | `run_plan` over the context |
+| `engine_execute` | `run_lowered_plan`: `run_plan` over the context |
 | `engine_sql` | `run_sql` (§6) |
 
 The context owns:
@@ -759,7 +758,7 @@ The context owns:
 | memory | the root reservation, sized from the host profile | `MemoryReservation.for_host` |
 | catalog | table names to schemas and scans | `komira_sql.SqlCatalog` |
 | source registry | scan kinds to resolvers | `komira_scan_resolver.ScanSourceResolvers` |
-| footer cache | parsed footers, one version per path, capped with a per-query pin (planned; built today: `komira_parquet_footers.FooterCache`, unbounded) | `komira_parquet_footers` |
+| footer cache | parsed footers, one version per path, pinned to a query: `run_sql` replaces the cache with an empty one before each call (built: `komira_parquet_footers.FooterCache` is unbounded, so the context never keeps it across queries) | `komira_parquet_footers` |
 | plan cache | the two-layer compile cache | `komira_sdk_exec.plan_compile_cache` (LRU, capped) |
 | options | the flags struct (§5.2) | the caller |
 
@@ -793,8 +792,11 @@ review.
 ### 6.1 `run_sql`
 
 ```mojo
-def run_sql(text: String, mut ctx: EngineContext) raises -> List[RecordBatch]
+def run_sql(mut ctx: EngineContext, text: String) -> SqlOutcome
 ```
+
+`SqlOutcome` holds the result batches or a `SqlRefusal` (the step, one of `parse`, `bind`, `optimize`, `lower`,
+`execute`, and that step's own message). `run_sql` does not raise.
 
 The catalog is the context's `SqlCatalog`; a caller registers tables on the context (`register_parquet(name, path)`)
 and passes the context, which is the one place a name, a footer and a worker pool meet. It composes, in order:
