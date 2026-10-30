@@ -8,16 +8,18 @@
 #
 #   * SUM, COUNT(x), COUNT(*), MIN, MAX and AVG of an INT64 column equal a
 #     row-at-a-time evaluation (NULLs skipped), on one, two and seven workers
-#     and morsels that cut the table unevenly; the AVG is the same bit pattern
-#     on every worker count.
+#     and morsels that cut the table unevenly. (These runs use dispatchers on
+#     one thread, where the first worker drains the source, so they merge empty
+#     partials; `test_sink_agg_partials` merges non-empty ones.)
 #   * Under a filter that keeps part of a morsel, COUNT(*) counts the selected
 #     rows, with and without an aggregate that evaluates an argument.
 #   * Over no row (a filter that rejects every row) and over only NULL, COUNT
 #     is zero and SUM, MIN, MAX and AVG are NULL, in one output row of the
 #     declared schema.
 #   * A DECIMAL128 sum is exact in 128 bits: five values of 9e18 cents sum to
-#     4.5e19 (outside 64 bits) and the AVG of them is the exactly divided
-#     value; MIN and MAX keep the column's scale; a sum that leaves 128 bits,
+#     4.5e19 (outside 64 bits) and the AVG is the documented conversion and
+#     division of that sum; MIN and MAX keep the column's scale; a sum that
+#     leaves 128 bits,
 #     one with more digits than the declared precision, and an integer sum
 #     outside the INT64 output are refused by name.
 #   * MIN and MAX of a DATE32 column come back as DATE32.
@@ -28,7 +30,13 @@
 #   * A pool too small for the sink's state fails the query by name and leaves
 #     nothing granted; a large one is returned in full after a run.
 
-from std.testing import TestSuite, assert_equal, assert_false, assert_raises, assert_true
+from std.testing import (
+    TestSuite,
+    assert_equal,
+    assert_false,
+    assert_raises,
+    assert_true,
+)
 
 from komira_arrow.arrow_types import ArrowType
 from komira_arrow.column import Column
@@ -44,7 +52,11 @@ from komira_arrow.schema import (
 from komira_async_api.token import CancellationToken
 from komira_collections.slab import Slab
 from komira_parquet.runtime_footer_cache import ParquetMetadataCache
-from komira_physical_plan.physical_plan import AggSinkData, MorselOp, SegmentDescPod
+from komira_physical_plan.physical_plan import (
+    AggSinkData,
+    MorselOp,
+    SegmentDescPod,
+)
 from komira_pipeline_exec.fake_dispatch import InlineDispatch
 from komira_pipeline_exec.plan_harness import (
     agg_list,
@@ -88,7 +100,15 @@ def _count_star() -> AggExpr:
 
 
 def _cmp(op: UInt8, name: String, v: Int) -> Expr:
-    return Expr.binary(op, Expr.col_ref(name), Expr.literal(ScalarValue.from_int(v)))
+    return Expr.binary(
+        op, Expr.col_ref(name), Expr.literal(ScalarValue.from_int(v))
+    )
+
+
+def _seg(handle: Int, morsel_rows: Int, sink_id: Int) -> SegmentDescPod:
+    return with_agg_sink(
+        batch_segment(0, handle, Slab[MorselOp](), morsel_rows), sink_id
+    )
 
 
 def _go[B: SegmentBuilder](
@@ -168,7 +188,7 @@ def test_integer_aggregates_match_the_row_oracle_on_every_worker_count() raises:
     for k in range(len(worker_counts)):
         var workers = worker_counts[k]
         var batch = _go(
-            builder, with_agg_sink(batch_segment(0, handle, Slab[MorselOp](), 7), id), workers
+            builder, _seg(handle, 7, id), workers
         )
         assert_equal(batch.num_rows(), 1)
         assert_equal(batch.num_columns(), 6)
@@ -338,7 +358,7 @@ def test_a_decimal_sum_is_exact_beyond_64_bits() raises:
     var want = _w(9_000_000_000_000_000_000) * _w(5) - _w(250)
     for workers in range(1, 4):
         var batch = _go(
-            builder, with_agg_sink(batch_segment(0, handle, Slab[MorselOp](), 2), id), workers
+            builder, _seg(handle, 2, id), workers
         )
         assert_true(_dec(batch, 0) == want)
         assert_true(_dec(batch, 1) == _w(-250))
@@ -372,12 +392,13 @@ def test_a_decimal_sum_that_leaves_128_bits_is_refused() raises:
     var id = builder.add_agg_sink(
         ungrouped_agg_data(_decimal_aggs(), _decimal_schema(38, 0))
     )
-    # Two workers each fold one value, so the refusal comes from the merge;
-    # one worker folds both, so it comes from the fold.
+    # On a dispatcher that runs the workers one after another the first
+    # worker takes both rows, so the refusal comes from its fold; the refusal
+    # from the merge is tested in `test_sink_agg_partials`.
     with assert_raises(contains="left the 128-bit range"):
-        _ = _go(builder, with_agg_sink(batch_segment(0, handle, Slab[MorselOp](), 1), id), 1)
+        _ = _go(builder, _seg(handle, 1, id), 1)
     with assert_raises(contains="left the 128-bit range"):
-        _ = _go(builder, with_agg_sink(batch_segment(0, handle, Slab[MorselOp](), 1), id), 2)
+        _ = _go(builder, _seg(handle, 1, id), 2)
 
 
 def test_a_sum_with_more_digits_than_the_declared_precision_is_refused() raises:
@@ -455,7 +476,7 @@ def test_min_and_max_of_a_date_and_a_decimal_keep_their_types() raises:
     aggs.append(_agg(AGG_MAX, "l_extendedprice"))
     aggs.append(_agg(AGG_SUM, "l_quantity"))
     var id = builder.add_agg_sink(ungrouped_agg_data(aggs^, sb.build()))
-    var batch = _go(builder, with_agg_sink(batch_segment(0, handle, Slab[MorselOp](), 4), id), 2)
+    var batch = _go(builder, _seg(handle, 4, id), 2)
     var first = t.shipdate[0]
     var last = t.shipdate[0]
     var dearest = 0
@@ -622,10 +643,10 @@ def test_a_pool_too_small_fails_the_query_and_a_large_one_is_returned() raises:
     )
     builder.set_memory_budget(1)
     with assert_raises(contains="was denied"):
-        _ = _go(builder, with_agg_sink(batch_segment(0, handle, Slab[MorselOp](), 7), id), 3)
+        _ = _go(builder, _seg(handle, 7, id), 3)
     assert_equal(builder.pool_granted(), 0)
     builder.set_memory_budget(1 << 20)
-    var batch = _go(builder, with_agg_sink(batch_segment(0, handle, Slab[MorselOp](), 7), id), 3)
+    var batch = _go(builder, _seg(handle, 7, id), 3)
     assert_equal(_i64(batch, 2), 100)
     assert_equal(builder.pool_granted(), 0)
 

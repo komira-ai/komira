@@ -57,6 +57,8 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # test_sink_agg                   SUM, COUNT, COUNT(*), MIN, MAX and AVG over
 #                                 resident batches: NULL, empty input, exact
 #                                 128-bit decimal sums, refusals by name.
+# test_sink_agg_partials          non-empty partials merged: dealing, the merge's
+#                                 overflow refusal, pool return on failure.
 # test_tpch_q6                    Q6 over Parquet, end to end, against an
 #                                 oracle and a hand-computed answer.
 # test_tpch_q6_concurrent         Q6 on threads, run after run.
@@ -104,6 +106,7 @@ mojo_library(
         "tests/test_run_segment_failures.mojo",
         "tests/test_segment_pool.mojo",
         "tests/test_sink_agg.mojo",
+        "tests/test_sink_agg_partials.mojo",
         "tests/test_sink_collect.mojo",
         "tests/test_sources.mojo",
         "tests/test_tpch_q6.mojo",

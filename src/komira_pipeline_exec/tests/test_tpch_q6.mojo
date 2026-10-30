@@ -26,6 +26,7 @@
 #     do not divide the row groups, and the table has rows rejected by each
 #     conjunct on its own, so no conjunct goes unchecked.
 #   * Giving the scan the predicate as its decode filter too gives the same sum.
+#   * When every row that passes has a NULL price, the sum is NULL, not zero.
 #   * The pool the sink drew from is whole again after each run.
 
 from std.testing import TestSuite, assert_equal, assert_true
@@ -232,10 +233,26 @@ def test_q6_with_the_predicate_also_pushed_to_the_scan_gives_the_same_sum() rais
     _check_revenue(_run_q6(small_path, 2, 3, True), 9549401)
 
 
+def test_q6_is_null_when_every_row_that_passes_has_a_null_price() raises:
+    var t = LineitemTable()
+    # Three rows pass the filter and have no price; two with a price do not.
+    for i in range(3):
+        t.add(Q6_DATE_FROM + i, 1000, 0, 6, price_null=True)
+    t.add(Q6_DATE_FROM, 1000, 100000, 8)
+    t.add(Q6_DATE_TO, 1000, 100000, 6)
+    var path = _write("q6_null_revenue", t, 2)
+    for workers in range(1, 4):
+        var batch = _run_q6(path, workers, 2)
+        assert_equal(batch.num_rows(), 1)
+        assert_true(batch.column_at(0).is_null_at(0), "revenue is not NULL")
+        assert_equal(batch.schema.field_decimal_scale(0), 4)
+
+
 def main() raises:
     var suite = TestSuite()
     suite.test[test_q6_on_the_boundary_rows_is_the_hand_computed_revenue]()
     suite.test[test_the_q6_filter_keeps_the_five_boundary_rows_that_satisfy_it]()
     suite.test[test_q6_over_generated_rows_equals_the_oracle_on_every_worker_count]()
     suite.test[test_q6_with_the_predicate_also_pushed_to_the_scan_gives_the_same_sum]()
+    suite.test[test_q6_is_null_when_every_row_that_passes_has_a_null_price]()
     suite^.run()

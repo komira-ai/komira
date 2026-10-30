@@ -96,8 +96,9 @@ struct AggSink(MorselSinkImpl):
         var pool: SegmentPool,
         seg_id: Int,
     ) raises:
-        var where_ = "komira_pipeline_exec: the aggregation sink of segment " + String(
-            seg_id
+        var where_ = (
+            "komira_pipeline_exec: the aggregation sink of segment "
+            + String(seg_id)
         )
         if len(data.group_by_exprs) != 0:
             raise Error(
@@ -237,7 +238,12 @@ struct AggSink(MorselSinkImpl):
         for w in range(len(self._slots)):
             ref slot = self._slots[w][]
             for i in range(len(self._funcs)):
-                merge_cell(merged[i], slot.cells[i], self._funcs[i], self._labels[i])
+                merge_cell(
+                    merged[i],
+                    slot.cells[i],
+                    self._funcs[i],
+                    self._labels[i],
+                )
             slot.reservation.give_back_all()
         self._merged = merged^
         self._combined = True

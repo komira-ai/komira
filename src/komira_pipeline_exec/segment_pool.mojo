@@ -43,11 +43,13 @@ struct SegmentPool(Movable):
         )
         self._budget = budget if budget >= 0 else POOL_UNBOUNDED
 
+    def __init__(out self, *, shared_with: Self):
+        self._granted = ArcPointer(copy=shared_with._granted)
+        self._budget = shared_with._budget
+
     def share(self) -> SegmentPool:
         """Another handle on the same count and budget."""
-        var other = SegmentPool(self._budget)
-        other._granted = ArcPointer(copy=self._granted)
-        return other^
+        return SegmentPool(shared_with=self)
 
     def budget(self) -> Int:
         """The budget in bytes, or `POOL_UNBOUNDED`."""

@@ -18,6 +18,10 @@
 #   MIN, MAX       the input's own type: its integer type, DATE32, or a
 #                  DECIMAL128 of the input's scale
 #
+# The declared precision is the plan's (DuckDB declares DECIMAL(38,s) for a
+# decimal SUM): the sink takes it as given and checks only that the value has
+# no more digits.
+#
 # SUM, AVG, MIN and MAX over no non-NULL row are NULL, which the declared field
 # must be able to hold.
 
@@ -51,7 +55,13 @@ def _wide(v: Int64) -> I128:
     return Scalar[DType.int64](v).cast[DType.int128]()
 
 
-def _pow10(digits: Int) -> I128:
+def _pow10(digits: Int) raises -> I128:
+    if digits < 0 or digits > 38:
+        raise Error(
+            "komira_pipeline_exec: a DECIMAL128 precision of "
+            + String(digits)
+            + " is outside 0 to 38"
+        )
     var out = I128(1)
     for _ in range(digits):
         out = out * I128(10)

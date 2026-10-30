@@ -178,7 +178,8 @@ def fold_column(
         return
     var logical = batch.schema.field_arrow_type(col_idx)
     var kind = _kind_of(col, logical)
-    if kind == IN_NONE or (kind == IN_DATE and (func == AGG_SUM or func == AGG_MEAN)):
+    var sums = func == AGG_SUM or func == AGG_MEAN
+    if kind == IN_NONE or (kind == IN_DATE and sums):
         raise Error(
             "komira_pipeline_exec: "
             + label

@@ -105,7 +105,8 @@ def q6_boundary_table() -> LineitemTable:
     """Rows on each side of each predicate. Qualifying rows are marked."""
     var t = LineitemTable()
     #       shipdate        quantity  price    discount
-    t.add(Q6_DATE_FROM, 2399, 100000, 5)  # first day, lowest discount, qty < 24: in
+    # first day, lowest discount, qty < 24: in
+    t.add(Q6_DATE_FROM, 2399, 100000, 5)
     t.add(Q6_DATE_TO - 1, 100, 234567, 7)  # last day, highest discount: in
     t.add(Q6_DATE_FROM - 1, 1000, 100000, 6)  # a day too early
     t.add(Q6_DATE_TO, 1000, 100000, 6)  # the exclusive end date
@@ -115,7 +116,8 @@ def q6_boundary_table() -> LineitemTable:
     t.add(Q6_DATE_FROM + 20, 1, 5, 6)  # smallest quantity and price: in
     t.add(Q6_DATE_FROM + 200, 2300, 1234567, 6)  # an ordinary row: in
     t.add(Q6_DATE_FROM + 30, 1000, 0, 6, price_null=True)  # passes, price NULL
-    t.add(Q6_DATE_FROM + 30, 1000, 100000, 0, discount_null=True)  # discount NULL
+    # discount NULL
+    t.add(Q6_DATE_FROM + 30, 1000, 100000, 0, discount_null=True)
     return t^
 
 
@@ -145,7 +147,9 @@ def _i128(v: Int) -> I128:
     return Scalar[DType.int64](v).cast[DType.int128]()
 
 
-def lineitem_batch(ref t: LineitemTable, start: Int, rows: Int) raises -> RecordBatch:
+def lineitem_batch(
+    ref t: LineitemTable, start: Int, rows: Int
+) raises -> RecordBatch:
     """Rows `start .. start + rows - 1` of `t` as a batch."""
     var key = PrimitiveArray[DType.int64].allocate(rows)
     var qty = Decimal128Array.allocate_nullable(rows, 15, 2)
@@ -177,7 +181,9 @@ def lineitem_batch(ref t: LineitemTable, start: Int, rows: Int) raises -> Record
     builder.add_column(Column.from_decimal128(disc^))
     sb.add_field(Field("l_shipdate", ArrowType.DATE32, False))
     builder.add_column(
-        Column.from_primitive_with_arrow_type[DType.int32](day^, ArrowType.DATE32)
+        Column.from_primitive_with_arrow_type[DType.int32](
+            day^, ArrowType.DATE32
+        )
     )
     return builder.build(sb.build())
 
