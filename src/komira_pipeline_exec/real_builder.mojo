@@ -16,9 +16,11 @@
 #   sink     SINK_COLLECT         `CollectSink` (`sink_collect`)
 #            SINK_AGG, key NONE   `AggSink` (`sink_agg`), from the `AggSinkData`
 #                                 the descriptor's `sink_param_id` names
+#            SINK_AGG, key I64,   `GroupAggSink` (`sink_group_agg`), from the
+#            I32, F64 or F32      same kind of data; both behind `AnyAggSink`
 #
-# Anything else (SOURCE_CONCAT, OP_JOIN_PROBE, the grouped aggregation and the
-# sort sinks) is refused by name, because no member serves it yet.
+# Anything else (SOURCE_CONCAT, OP_JOIN_PROBE, the string-keyed aggregation and
+# the sort sinks) is refused by name, because no member serves it yet.
 #
 # The workers of a segment each get their own operator instances, built from
 # one set of shared parts the builder keeps per operator (the predicate, the
@@ -48,6 +50,10 @@ from komira_morsel.morsel import Morsel
 from komira_operator_api.map_op import MapOp
 from komira_parquet.runtime_footer_cache import ParquetMetadataCache
 from komira_physical_plan.physical_plan import (
+    KEY_DTYPE_F32,
+    KEY_DTYPE_F64,
+    KEY_DTYPE_I32,
+    KEY_DTYPE_I64,
     KEY_DTYPE_NONE,
     OP_FILTER,
     OP_LIMIT,
@@ -72,7 +78,9 @@ from .published_outputs import PublishedOutputs
 from .segment_builder import SegmentBuilder
 from .segment_pool import SegmentPool
 from .sink_agg import AggSink
+from .sink_agg_any import AnyAggSink
 from .sink_collect import CollectSink
+from .sink_group_agg import GroupAggSink
 from .source_batch import BatchSource
 from .source_parquet import LocalParquetSource, build_parquet_source
 from .source_sink_output import SinkOutputSource
@@ -111,7 +119,7 @@ struct RealBuilder[
         SinkOutputSource,
     ]
     comptime Op = OpVariant[FilterOp, MapOp, LimitOp]
-    comptime Sink = PipelineSink[CollectSink, AggSink, NoSink]
+    comptime Sink = PipelineSink[CollectSink, AnyAggSink, NoSink]
 
     # The borrowed cache and pool, kept as pointers (private) because a struct
     # field cannot hold a `ref` argument; the caller's objects outlive the
@@ -285,15 +293,22 @@ struct RealBuilder[
     def build_sink(
         mut self, ref desc: SegmentDescPod, ref source_schema: Schema
     ) raises -> Self.Sink:
-        if (
-            desc.sink_key_dtype == KEY_DTYPE_NONE
-            and desc.sink_orientation == SINK_ORIENT_COLUMNAR
-        ):
-            if desc.sink_kind == SINK_COLLECT:
+        if desc.sink_orientation == SINK_ORIENT_COLUMNAR:
+            if (
+                desc.sink_kind == SINK_COLLECT
+                and desc.sink_key_dtype == KEY_DTYPE_NONE
+            ):
                 return Self.Sink.first(
                     CollectSink(self._result_schema(desc, source_schema))
                 )
-            if desc.sink_kind == SINK_AGG:
+            var key = desc.sink_key_dtype
+            var keyed = (
+                key == KEY_DTYPE_I64
+                or key == KEY_DTYPE_I32
+                or key == KEY_DTYPE_F64
+                or key == KEY_DTYPE_F32
+            )
+            if desc.sink_kind == SINK_AGG and (key == KEY_DTYPE_NONE or keyed):
                 var id = desc.sink_param_id
                 if id < 0 or id >= len(self._agg_sinks):
                     raise Error(
@@ -304,15 +319,32 @@ struct RealBuilder[
                         + ", and the builder holds "
                         + String(len(self._agg_sinks))
                     )
+                if keyed:
+                    return Self.Sink.second(
+                        AnyAggSink(
+                            GroupAggSink(
+                                self._agg_sinks[id],
+                                key,
+                                self._segment_pool.share(),
+                                desc.seg_id,
+                            )
+                        )
+                    )
                 return Self.Sink.second(
-                    AggSink(self._agg_sinks[id], self._segment_pool.share(), desc.seg_id)
+                    AnyAggSink(
+                        AggSink(
+                            self._agg_sinks[id],
+                            self._segment_pool.share(),
+                            desc.seg_id,
+                        )
+                    )
                 )
         raise Error(
             "komira_pipeline_exec: the sink of segment "
             + String(desc.seg_id)
             + " is not served; only (SINK_COLLECT, KEY_DTYPE_NONE,"
-            " SINK_ORIENT_COLUMNAR) and (SINK_AGG, KEY_DTYPE_NONE,"
-            " SINK_ORIENT_COLUMNAR) are"
+            " SINK_ORIENT_COLUMNAR) and (SINK_AGG, KEY_DTYPE_NONE, I64, I32,"
+            " F64 or F32, SINK_ORIENT_COLUMNAR) are"
         )
 
     def _result_schema(

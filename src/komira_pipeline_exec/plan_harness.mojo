@@ -156,6 +156,27 @@ def ungrouped_agg_data(
     return AggSinkData(Slab[Expr](), aggs^, output_schema^)
 
 
+def with_group_sink(
+    var desc: SegmentDescPod, param_id: Int, key_dtype: UInt8
+) -> SegmentDescPod:
+    """`desc` with its sink changed to the grouped aggregation of key row
+    `key_dtype` (`KEY_DTYPE_I64`, `I32`, `F64` or `F32`) whose data the builder
+    holds as `param_id`."""
+    desc.sink_kind = SINK_AGG
+    desc.sink_key_dtype = key_dtype
+    desc.sink_orientation = SINK_ORIENT_COLUMNAR
+    desc.sink_param_id = param_id
+    return desc^
+
+
+def grouped_agg_data(
+    var keys: Slab[Expr], var aggs: Slab[AggExpr], var output_schema: Schema
+) -> AggSinkData:
+    """The data of a grouped aggregation: the output schema lists the key
+    columns, then the aggregates."""
+    return AggSinkData(keys^, aggs^, output_schema^)
+
+
 def agg_list(var a: AggExpr) -> Slab[AggExpr]:
     """An aggregate list of one."""
     var out = Slab[AggExpr]()

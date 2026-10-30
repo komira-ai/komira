@@ -124,12 +124,16 @@ def _fits_int64(v: I128) -> Bool:
 
 def _int_column[
     dtype: DType
-](value: I128, is_null: Bool, arrow: ArrowType) raises -> Column[HeapRegion]:
-    var arr = PrimitiveArray[dtype].allocate_nullable(1)
-    if is_null:
-        arr._set_null(0)
-    else:
-        arr.set(0, value.cast[dtype]())
+](
+    ref values: List[I128], ref nulls: List[Bool], arrow: ArrowType
+) raises -> Column[HeapRegion]:
+    var rows = len(values)
+    var arr = PrimitiveArray[dtype].allocate_nullable(rows)
+    for r in range(rows):
+        if nulls[r]:
+            arr._set_null(r)
+        else:
+            arr.set(r, values[r].cast[dtype]())
     if arrow == ArrowType.DATE32:
         return Column.from_primitive_with_arrow_type[dtype](arr^, arrow)
     return Column.from_primitive[dtype](arr^)
@@ -143,80 +147,117 @@ def agg_result_column(
     ref label: String,
 ) raises -> Column[HeapRegion]:
     """The one-row column the declared field `idx` of `schema` asks for."""
+    var cells = List[AggCell]()
+    cells.append(cell.copy())
+    return agg_result_column_rows(func, cells, 0, 1, 1, schema, idx, label)
+
+
+def agg_result_column_rows(
+    func: UInt8,
+    ref cells: List[AggCell],
+    first: Int,
+    stride: Int,
+    rows: Int,
+    ref schema: Schema,
+    idx: Int,
+    ref label: String,
+) raises -> Column[HeapRegion]:
+    """The `rows`-row column the declared field `idx` of `schema` asks for;
+    row `r` is the aggregate in `cells[first + r * stride]`. Every row is held
+    to the rules of the one-row column."""
     var t = schema.field_arrow_type(idx)
-    var is_null = cell.count == 0 and func != AGG_COUNT
-    if is_null and not schema.field_nullable(idx):
-        raise _null_or_value_error(label)
+    var nullable = schema.field_nullable(idx)
+    var nulls = List[Bool](capacity=rows)
+    for r in range(rows):
+        ref cell = cells[first + r * stride]
+        var is_null = cell.count == 0 and func != AGG_COUNT
+        if is_null and not nullable:
+            raise _null_or_value_error(label)
+        nulls.append(is_null)
 
     if func == AGG_COUNT:
-        return _int_column[DType.int64](_wide(Int64(cell.count)), False, t)
+        var values = List[I128](capacity=rows)
+        var no_nulls = List[Bool](capacity=rows)
+        for r in range(rows):
+            values.append(_wide(Int64(cells[first + r * stride].count)))
+            no_nulls.append(False)
+        return _int_column[DType.int64](values, no_nulls, t)
 
     if func == AGG_MEAN:
-        var arr = PrimitiveArray[DType.float64].allocate_nullable(1)
-        if is_null:
-            arr._set_null(0)
-        else:
-            var sum_f = cell.value.cast[DType.float64]()
-            if cell.kind == IN_DECIMAL:
-                sum_f = decimal_to_float64(cell.value, cell.scale)
-            arr.set(0, sum_f / Float64(cell.count))
+        var arr = PrimitiveArray[DType.float64].allocate_nullable(rows)
+        for r in range(rows):
+            if nulls[r]:
+                arr._set_null(r)
+            else:
+                ref cell = cells[first + r * stride]
+                var sum_f = cell.value.cast[DType.float64]()
+                if cell.kind == IN_DECIMAL:
+                    sum_f = decimal_to_float64(cell.value, cell.scale)
+                arr.set(r, sum_f / Float64(cell.count))
         return Column.from_primitive[DType.float64](arr^)
 
     # SUM, MIN and MAX: the value keeps the input's type.
-    if cell.kind != IN_NONE:
-        var same = False
-        if cell.kind == IN_DECIMAL:
-            same = (
-                t == ArrowType.DECIMAL128
-                and schema.field_decimal_scale(idx) == cell.scale
-            )
-        elif cell.kind == IN_DATE:
-            same = t == ArrowType.DATE32
-        elif func == AGG_SUM:
-            same = t == ArrowType.INT64
-        else:
-            same = t == cell.arrow
-        if not same:
-            raise Error(
-                "komira_pipeline_exec: "
-                + label
-                + " over a column of type "
-                + String(cell.arrow)
-                + " cannot fill the declared output type "
-                + String(t)
-                + " of column "
-                + String(idx)
-            )
-    if t == ArrowType.DECIMAL128:
-        var p = schema.field_decimal_precision(idx)
-        var s = schema.field_decimal_scale(idx)
-        var arr = Decimal128Array.allocate_nullable(1, p, s)
-        if is_null:
-            arr.set_null(0)
-        else:
-            var bound = _pow10(p)
-            if cell.value >= bound or cell.value <= -bound:
+    var values = List[I128](capacity=rows)
+    for r in range(rows):
+        ref cell = cells[first + r * stride]
+        if cell.kind != IN_NONE:
+            var same = False
+            if cell.kind == IN_DECIMAL:
+                same = (
+                    t == ArrowType.DECIMAL128
+                    and schema.field_decimal_scale(idx) == cell.scale
+                )
+            elif cell.kind == IN_DATE:
+                same = t == ArrowType.DATE32
+            elif func == AGG_SUM:
+                same = t == ArrowType.INT64
+            else:
+                same = t == cell.arrow
+            if not same:
                 raise Error(
                     "komira_pipeline_exec: "
                     + label
-                    + " has more digits than the declared DECIMAL("
-                    + String(p)
-                    + ","
-                    + String(s)
-                    + ") holds"
+                    + " over a column of type "
+                    + String(cell.arrow)
+                    + " cannot fill the declared output type "
+                    + String(t)
+                    + " of column "
+                    + String(idx)
                 )
-            arr.set_i128(0, cell.value)
+        values.append(cell.value)
+    if t == ArrowType.DECIMAL128:
+        var p = schema.field_decimal_precision(idx)
+        var s = schema.field_decimal_scale(idx)
+        var arr = Decimal128Array.allocate_nullable(rows, p, s)
+        var bound = _pow10(p)
+        for r in range(rows):
+            if nulls[r]:
+                arr.set_null(r)
+            else:
+                if values[r] >= bound or values[r] <= -bound:
+                    raise Error(
+                        "komira_pipeline_exec: "
+                        + label
+                        + " has more digits than the declared DECIMAL("
+                        + String(p)
+                        + ","
+                        + String(s)
+                        + ") holds"
+                    )
+                arr.set_i128(r, values[r])
         return Column.from_decimal128(arr^)
-    if not is_null and t == ArrowType.INT64 and not _fits_int64(cell.value):
-        raise Error(
-            "komira_pipeline_exec: "
-            + label
-            + " is outside the 64-bit range of its declared INT64 output"
-        )
     if t == ArrowType.INT64:
-        return _int_column[DType.int64](cell.value, is_null, t)
+        for r in range(rows):
+            if not nulls[r] and not _fits_int64(values[r]):
+                raise Error(
+                    "komira_pipeline_exec: "
+                    + label
+                    + " is outside the 64-bit range of its declared INT64"
+                    " output"
+                )
+        return _int_column[DType.int64](values, nulls, t)
     if t == ArrowType.INT8:
-        return _int_column[DType.int8](cell.value, is_null, t)
+        return _int_column[DType.int8](values, nulls, t)
     if t == ArrowType.INT16:
-        return _int_column[DType.int16](cell.value, is_null, t)
-    return _int_column[DType.int32](cell.value, is_null, t)
+        return _int_column[DType.int16](values, nulls, t)
+    return _int_column[DType.int32](values, nulls, t)
