@@ -44,14 +44,22 @@
 #   checked run's. Catches a cold rep that reuses the warm context.
 # - test_an_unregistrable_table_ends_the_run_naming_it: a table whose file is
 #   missing makes prepare raise naming the table; a run before prepare raises.
+# - test_refusals_are_recorded_by_what_they_mean: against the real engine, an
+#   unknown column is BIND_FAIL, three INT64 values of 2^62 summed are EXEC_FAIL
+#   and a join is a refusal; outcome_of_refusal maps the messages of the other
+#   steps. Catches an engine fault read as a missing feature.
+# - test_conversion_of_unsigned_float_and_dictionary_columns: UINT64 at 2^63-1
+#   is an integer and at 2^63 a real, UINT8/16/32 are integers, a FLOAT 0.1 is
+#   the double 0.1 and not the widened float, a dictionary string column raises
+#   RESULT_TYPE_UNSUPPORTED.
 # - test_the_refusal_token_is_the_step_and_the_code: refusal_token on the
 #   shapes the engine's messages have, none with a slash.
 # - test_conversion_of_decimals_is_exact: DECIMAL(38,4) cells equal the
 #   literal doubles of their exact text; DECIMAL scale 0 is an integer inside
 #   64 bits and a real outside; NULL stays NULL.
 # - test_conversion_of_dates: epoch, a leap day, the day before the epoch, the
-#   first day of Q6's range and the last day of year 9999 render as
-#   YYYY-MM-DD; the day after year 9999 raises.
+#   first day of Q6's range, year 1 and the last day of year 9999 render as
+#   YYYY-MM-DD; the day after year 9999 and the day before year 1 raise.
 # - test_conversion_of_other_columns: INT64, FLOAT64, nullable VARCHAR and a
 #   second batch are cells in order with the first batch's names; a column
 #   type with no mapping raises RESULT_TYPE_UNSUPPORTED and no batch is an
@@ -64,9 +72,11 @@ from std.testing import TestSuite, assert_equal, assert_false, assert_raises, as
 from komira_arrow.arrow_types import ArrowType
 from komira_arrow.column import Column
 from komira_arrow.decimal_array import Decimal128Array
+from komira_arrow.dictionary_array import StringDictionaryArray
 from komira_arrow.primitive_array import PrimitiveArray
 from komira_arrow.schema import Field, RecordBatch, RecordBatchBuilder, SchemaBuilder
 from komira_arrow.string_array import StringArray
+from komira_buffer.heap_region import HeapRegion
 from komira_bench_corpus.catalog import find_query
 from komira_bench_data import DatasetFile, DatasetManifest
 from komira_bench_duckdb import (
@@ -95,6 +105,9 @@ from komira_runtime_paths import test_tmpdir
 from komira_scalar_arithmetic.decimal_arith import I128
 
 from komira_bench_runner import (
+    ARM_BIND_FAIL,
+    ARM_EXEC_FAIL,
+    ARM_REFUSED,
     ARM_ROWS,
     CacheDropper,
     HostFacts,
@@ -104,7 +117,11 @@ from komira_bench_runner import (
     RESULT_TYPE_UNSUPPORTED,
     RunInputs,
     RunSettings,
+    OUTCOME_BIND_FAILURE,
+    OUTCOME_EXEC_FAILURE,
+    OUTCOME_UNSUPPORTED,
     TableBinding,
+    outcome_of_refusal,
     date32_text,
     decimal_cell,
     format_run,
@@ -661,9 +678,11 @@ def test_conversion_of_dates() raises:
     assert_equal(date32_text(Q6_DATE_TO), String("1995-01-01"))
     assert_equal(date32_text(11016), String("2000-02-29"))
     assert_equal(date32_text(2932896), String("9999-12-31"))
-    assert_equal(date32_text(-719528), String("0000-01-01"))
+    assert_equal(date32_text(-719162), String("0001-01-01"))
     with assert_raises(contains=RESULT_TYPE_UNSUPPORTED):
         _ = date32_text(2932897)
+    with assert_raises(contains=RESULT_TYPE_UNSUPPORTED):
+        _ = date32_text(-719163)
 
 
 def test_conversion_of_other_columns() raises:
@@ -734,6 +753,117 @@ def test_conversion_of_other_columns() raises:
     builder3.add_column(Column.from_primitive_with_arrow_type[DType.int64](stamps^, ArrowType.TIMESTAMP_US))
     with assert_raises(contains=RESULT_TYPE_UNSUPPORTED):
         _ = result_set_of(_batches_of(builder3.build(sb3.build())))
+
+
+def test_refusals_are_recorded_by_what_they_mean() raises:
+    var t = q6_table(50)
+    _ = _write_fixture(t)
+    makedirs(test_tmpdir() + "/tpch/sf1", exist_ok=True)
+    var big_path = test_tmpdir() + "/tpch/sf1/komira_arm_big.parquet"
+    var v = PrimitiveArray[DType.int64].allocate(3)
+    for i in range(3):
+        v.set(i, Int64(4611686018427387904))
+    var sb = SchemaBuilder()
+    var builder = RecordBatchBuilder()
+    sb.add_field(Field("v", ArrowType.INT64, False))
+    builder.add_column(Column.from_primitive[DType.int64](v^))
+    var bytes = write_record_batch_to_parquet_bytes(builder.build(sb.build()), max_rows_per_rg=100)
+    var fh = open(big_path, "w")
+    fh.write_bytes(Span(bytes))
+    fh.close()
+    var tables = _tables()
+    tables.append(TableBinding(String("big"), big_path, -1))
+    var arm = KomiraArm()
+    arm.prepare(tables, 2, _MEMORY)
+
+    var unknown = arm.run(_q(String("u"), String("select no_such_column from lineitem")), True)
+    assert_equal(unknown.kind, ARM_BIND_FAIL, arm.last_refusal)
+    assert_true(unknown.detail.startswith(String("bind: ")))
+
+    var overflow = arm.run(_q(String("o"), String("select sum(v) as s from big")), True)
+    assert_equal(overflow.kind, ARM_EXEC_FAIL, arm.last_refusal)
+    assert_true(overflow.detail.startswith(String("execute: ")))
+
+    var join = arm.run(
+        _q(String("j"), String("select count(*) from lineitem a join lineitem b on a.l_orderkey = b.l_orderkey")), True
+    )
+    assert_equal(join.kind, ARM_REFUSED)
+    assert_equal(join.detail, String("lower.LOWERING_UNCUTTABLE_NODE"))
+    arm.close()
+
+    assert_equal(outcome_of_refusal(String("parse"), String("SQL syntax error: x")), OUTCOME_UNSUPPORTED)
+    assert_equal(outcome_of_refusal(String("bind"), String("SQL not supported: NATURAL / USING")), OUTCOME_UNSUPPORTED)
+    assert_equal(outcome_of_refusal(String("bind"), String("STATEMENT_NOT_A_QUERY: only")), OUTCOME_UNSUPPORTED)
+    assert_equal(outcome_of_refusal(String("bind"), String("SQL bind error: unknown column")), OUTCOME_BIND_FAILURE)
+    assert_equal(outcome_of_refusal(String("optimize"), String("OPTIMIZE_UNRESOLVED_SCALAR: x")), OUTCOME_UNSUPPORTED)
+    assert_equal(outcome_of_refusal(String("optimize"), String("internal error")), OUTCOME_EXEC_FAILURE)
+    assert_equal(outcome_of_refusal(String("lower"), String("LOWERING_INPUTS_SCAN_COUNT: x")), OUTCOME_UNSUPPORTED)
+    assert_equal(outcome_of_refusal(String("lower"), String("table schema changed")), OUTCOME_EXEC_FAILURE)
+    assert_equal(outcome_of_refusal(String("execute"), String("EXECUTE_UNSUPPORTED_PARAM: x")), OUTCOME_UNSUPPORTED)
+    assert_equal(outcome_of_refusal(String("execute"), String("sum is outside the 64-bit range")), OUTCOME_EXEC_FAILURE)
+
+
+def _one_column_batch(var name: String, var field: Field, var col: Column[HeapRegion]) raises -> List[RecordBatch]:
+    var sb = SchemaBuilder()
+    var builder = RecordBatchBuilder()
+    sb.add_field(field^)
+    builder.add_column(col^)
+    return _batches_of(builder.build(sb.build()))
+
+
+def test_conversion_of_unsigned_float_and_dictionary_columns() raises:
+    var u64 = PrimitiveArray[DType.uint64].allocate(2)
+    u64.set(0, UInt64(9223372036854775807))
+    u64.set(1, UInt64(9223372036854775808))
+    var rs = result_set_of(
+        _one_column_batch(String("u"), Field("u", ArrowType.UINT64, False), Column.from_primitive[DType.uint64](u64^))
+    )
+    assert_equal(rs.rows[0][0].kind, KIND_INT)
+    assert_equal(rs.rows[0][0].i, Int64(9223372036854775807))
+    assert_equal(rs.rows[1][0].kind, KIND_FLOAT)
+    assert_true(rs.rows[1][0].f == 9223372036854775808.0)
+
+    var u32 = PrimitiveArray[DType.uint32].allocate(1)
+    u32.set(0, UInt32(4294967295))
+    var r32 = result_set_of(
+        _one_column_batch(String("u"), Field("u", ArrowType.UINT32, False), Column.from_primitive[DType.uint32](u32^))
+    )
+    assert_equal(r32.rows[0][0].kind, KIND_INT)
+    assert_equal(r32.rows[0][0].i, Int64(4294967295))
+    var u16 = PrimitiveArray[DType.uint16].allocate(1)
+    u16.set(0, UInt16(65535))
+    var r16 = result_set_of(
+        _one_column_batch(String("u"), Field("u", ArrowType.UINT16, False), Column.from_primitive[DType.uint16](u16^))
+    )
+    assert_equal(r16.rows[0][0].i, Int64(65535))
+    var u8 = PrimitiveArray[DType.uint8].allocate(1)
+    u8.set(0, UInt8(255))
+    var r8 = result_set_of(
+        _one_column_batch(String("u"), Field("u", ArrowType.UINT8, False), Column.from_primitive[DType.uint8](u8^))
+    )
+    assert_equal(r8.rows[0][0].kind, KIND_INT)
+    assert_equal(r8.rows[0][0].i, Int64(255))
+
+    var f32 = PrimitiveArray[DType.float32].allocate(1)
+    f32.set(0, Float32(0.1))
+    var rf = result_set_of(
+        _one_column_batch(String("f"), Field("f", ArrowType.FLOAT32, False), Column.from_primitive[DType.float32](f32^))
+    )
+    assert_equal(rf.rows[0][0].kind, KIND_FLOAT)
+    assert_true(rf.rows[0][0].f == atof(String("0.1")), "a FLOAT must be read from its shortest text")
+    assert_true(rf.rows[0][0].f != Float64(Float32(0.1)))
+
+    var idx = PrimitiveArray[DType.int32].allocate(2)
+    idx.set(0, Int32(1))
+    idx.set(1, Int32(0))
+    var dict_values = List[String]()
+    dict_values.append(String("a"))
+    dict_values.append(String("b"))
+    var dict = StringDictionaryArray.from_parts(idx^, StringArray.from_strings(dict_values))
+    with assert_raises(contains=RESULT_TYPE_UNSUPPORTED):
+        _ = result_set_of(
+            _one_column_batch(String("d"), Field("d", ArrowType.STRING, False), Column.from_dictionary(dict^))
+        )
 
 
 def main() raises:

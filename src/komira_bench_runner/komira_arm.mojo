@@ -8,7 +8,9 @@
 #            set up.
 #   run      hands `query.text` to `run_sql`. Batches become the answer: the
 #            typed rows (convert.mojo) when `materialize`, the row count alone
-#            otherwise. A refusal becomes `ArmAnswer.refused(token)`.
+#            otherwise. A refusal becomes `ArmAnswer.refused(token)` when it
+#            says the engine does not serve the query, else a bind or an
+#            execution failure (`outcome_of_refusal`).
 #   close    drops the context (its workers and its tables). A cold rep closes
 #            and prepares again, so nothing the engine cached in its process
 #            survives.
@@ -40,6 +42,38 @@ comptime REFUSAL_RESULT_TYPE: String = "result_type_unsupported"
 
 def _is_code_byte(c: UInt8) -> Bool:
     return (c >= 0x41 and c <= 0x5A) or (c >= 0x30 and c <= 0x39) or c == 0x5F
+
+
+comptime OUTCOME_UNSUPPORTED: Int = 0
+comptime OUTCOME_BIND_FAILURE: Int = 1
+comptime OUTCOME_EXEC_FAILURE: Int = 2
+
+
+def outcome_of_refusal(step: String, reason: String) -> Int:
+    """How a `run_sql` refusal is recorded. The engine reports every failure as
+    a refusal naming a step; only the ones that say "this engine does not serve
+    this query" are `UNSUPPORTED` (listed as unserved, not counted as
+    failures): any parse refusal (the corpus text is valid SQL, so the parser
+    lacks the construct), a lowering refusal (`LOWERING_*`), `EXECUTE_UNSUPPORTED_*`,
+    `OPTIMIZE_UNRESOLVED_SCALAR`, `STATEMENT_NOT_A_QUERY` and a binder message
+    that starts `SQL not supported`. Every other refusal at `bind` is a bind
+    failure (an unknown column or table, a bad type) and every other one at
+    `optimize`, `lower` or `execute` (an overflow, a denied memory budget, a
+    pool not whole) is an execution failure, so an engine fault is never read
+    as a missing feature."""
+    if step == String("parse"):
+        return OUTCOME_UNSUPPORTED
+    if (
+        reason.startswith(String("LOWERING_"))
+        or reason.startswith(String("EXECUTE_UNSUPPORTED"))
+        or reason.startswith(String("OPTIMIZE_UNRESOLVED_SCALAR"))
+        or reason.startswith(String("STATEMENT_NOT_A_QUERY"))
+        or reason.startswith(String("SQL not supported"))
+    ):
+        return OUTCOME_UNSUPPORTED
+    if step == String("bind"):
+        return OUTCOME_BIND_FAILURE
+    return OUTCOME_EXEC_FAILURE
 
 
 def refusal_token(step: String, reason: String) -> String:
@@ -100,6 +134,11 @@ struct KomiraArm(EngineArm):
         if outcome.refusal:
             ref refusal = outcome.refusal.value()
             self.last_refusal = refusal.step + String(": ") + refusal.reason
+            var kind = outcome_of_refusal(refusal.step, refusal.reason)
+            if kind == OUTCOME_BIND_FAILURE:
+                return ArmAnswer.bind_failed(self.last_refusal.copy())
+            if kind == OUTCOME_EXEC_FAILURE:
+                return ArmAnswer.exec_failed(self.last_refusal.copy())
             return ArmAnswer.refused(refusal_token(refusal.step, refusal.reason))
         if not materialize:
             var n = 0

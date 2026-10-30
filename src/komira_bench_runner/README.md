@@ -32,6 +32,15 @@ The query is passed whole (`QuerySpec`: suite, id, dataset, text, `ORDER BY` key
 
 - `prepare` builds an `EngineContext` with `EngineOptions(worker_count = threads, memory_budget_bytes = memory_limit_bytes)` and registers every table as a Parquet table. A table the engine cannot register is a raise that names it (the run ends). Preparing again first closes the context it holds.
 - `run` hands `query.text` to `run_sql`. Batches are the answer: the typed rows when `materialize`, the row count alone otherwise (the result is still executed in full). A refusal is `UNSUPPORTED:<step>.<CODE>` in the result, for example `UNSUPPORTED:lower.LOWERING_UNCUTTABLE_NODE` (a join today): the step that refused and the code that starts the engine's message; a message with no code gives the step alone (`parse`). The token never holds the engine's text because the result refuses a token with a path in it; the whole message is in the arm's `last_refusal`. A result column type the conversion does not map is a refusal `UNSUPPORTED:result_type_unsupported`, never a wrong value.
+- A refusal from `run_sql` is recorded by what it means (`outcome_of_refusal`), because the engine reports every failure as a refusal naming a step:
+
+| the engine's refusal | recorded as |
+|---|---|
+| any `parse` refusal; a lowering refusal (`LOWERING_*`, a join today); `EXECUTE_UNSUPPORTED_*`; `OPTIMIZE_UNRESOLVED_SCALAR`; `STATEMENT_NOT_A_QUERY`; a binder message starting `SQL not supported` | `UNSUPPORTED:<token>`: unserved, not a failure |
+| any other refusal at `bind` (unknown column or table, a type error) | `BIND_FAIL` |
+| any other refusal at `optimize`, `lower` or `execute` (an INT64 sum out of range, a memory budget denied, a pool not whole) | `EXEC_FAIL` |
+
+  The engine's message of a `BIND_FAIL` or `EXEC_FAIL` is on the console (the failed list), never in the result.
 - `close` drops the context. A cold rep closes and prepares again.
 
 The rows are the cells `komira_bench_duckdb` makes from DuckDB's JSON output, so the two signatures are built from the same kinds of cell (`convert.mojo`):
@@ -44,8 +53,10 @@ The rows are the cells `komira_bench_duckdb` makes from DuckDB's JSON output, so
 | TINYINT to BIGINT, UTINYINT to UINTEGER | `7` | integer |
 | UBIGINT | `7` | integer inside 63 bits, else real |
 | VARCHAR | `"abc"` | text |
-| DATE | `"1994-01-01"` | text `YYYY-MM-DD` (years 0000 to 9999) |
+| DATE | `"1994-01-01"` | text `YYYY-MM-DD` (years 0001 to 9999) |
 | NULL | `null` | null |
+
+What DuckDB's JSON prints for NaN and for DECIMAL(38, s) is inferred from its documented output and from the JSON reader here, not checked against a fixture of the real binary; the first real run checks it (a mismatch shows as a wrong answer, not a silent pass).
 
 Not mapped yet, and so refused: dictionary-encoded strings, booleans, timestamps, times, intervals and nested types.
 

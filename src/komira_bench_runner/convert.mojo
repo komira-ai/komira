@@ -52,8 +52,8 @@ def decimal_cell(v: I128, scale: Int) raises -> Cell:
 
 def date32_text(days: Int) raises -> String:
     """`days` since 1970-01-01 as `YYYY-MM-DD` (proleptic Gregorian, civil
-    from days). Raises outside the years 0000 to 9999, which DuckDB prints
-    with another shape."""
+    from days). Raises outside the years 0001 to 9999: DuckDB prints year 0
+    and earlier as BC dates and later ones with more digits."""
     var z = days + 719468
     var era = z // 146097
     var doe = z - era * 146097
@@ -65,8 +65,8 @@ def date32_text(days: Int) raises -> String:
     var m = mp + 3 if mp < 10 else mp - 9
     if m <= 2:
         y += 1
-    if y < 0 or y > 9999:
-        raise Error(String(RESULT_TYPE_UNSUPPORTED) + ": DATE " + String(days) + " is outside the years 0000 to 9999")
+    if y < 1 or y > 9999:
+        raise Error(String(RESULT_TYPE_UNSUPPORTED) + ": DATE " + String(days) + " is outside the years 0001 to 9999")
     return _pad(y, 4) + "-" + _pad(m, 2) + "-" + _pad(d, 2)
 
 
