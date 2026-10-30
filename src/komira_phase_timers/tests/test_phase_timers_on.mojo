@@ -14,6 +14,12 @@
 # - test_reset_zeroes_the_counters_and_keeps_the_lane: after `pt_reset` every
 #   counter reads 0 and the thread is still lane 0. Catches a reset that forgets
 #   the thread table (the next run would register the same thread twice).
+# - test_a_lane_is_keyed_by_the_kernel_thread_id: on Linux the first lane's
+#   thread id is the calling thread's `gettid`, and a lane that is not in use
+#   reads 0. Catches a lane keyed by a value that a later thread can inherit
+#   (a `pthread_t` is handed again after its thread ends), which would book a
+#   new thread's time to a dead thread's lane and mislabel it for any reader
+#   that matches lanes to `/proc/self/task`.
 # - test_thread_usage_counts_this_threads_switches_and_faults: a usage bracket
 #   around two sleeps and a 32 MiB fill reads at least 2 voluntary context
 #   switches and 8 minor faults on this thread's lane and phase, a second
@@ -25,6 +31,8 @@
 # The tests share one process-global slab and run in this order in one
 # process; each one resets first.
 
+from std.ffi import external_call
+from std.sys.info import CompilationTarget
 from std.testing import TestSuite, assert_equal, assert_true
 from std.time import sleep
 
@@ -44,6 +52,7 @@ from komira_phase_timers.phase_timers import (
     pt_enabled,
     pt_get,
     pt_lane_count,
+    pt_lane_tid,
     pt_mark_fork,
     pt_now,
     pt_record_join_tails,
@@ -133,11 +142,21 @@ def test_thread_usage_counts_this_threads_switches_and_faults() raises:
             assert_equal(pt_get(0, phase, field), 0)
 
 
+def test_a_lane_is_keyed_by_the_kernel_thread_id() raises:
+    pt_reset()
+    pt_record_ns[PH_FILTER](1)
+    comptime if CompilationTarget.is_linux():
+        assert_equal(pt_lane_tid(0), Int(external_call["gettid", Int32]()))
+    assert_equal(pt_lane_tid(pt_lane_count()), 0)
+    assert_equal(pt_lane_tid(-1), 0)
+
+
 def main() raises:
     var suite = TestSuite()
     suite.test[test_intervals_sum_and_keep_the_longest]()
     suite.test[test_a_stamp_is_stored_not_added]()
     suite.test[test_wake_and_join_tails_follow_the_fork]()
     suite.test[test_reset_zeroes_the_counters_and_keeps_the_lane]()
+    suite.test[test_a_lane_is_keyed_by_the_kernel_thread_id]()
     suite.test[test_thread_usage_counts_this_threads_switches_and_faults]()
     suite^.run()

@@ -17,6 +17,8 @@ load(":q6_probe.bzl", "q6_phase_probe")
 # it proves):
 # - test_stats: median and quartiles of a few samples, and when the warm-up's
 #   page-fault counts have settled.
+# - test_thread_census: the status and schedstat parsers, the live census, and
+#   how a delta is split into the driver, the task workers and the rest.
 # - test_cli: the defaults (five thread counts, both modes), the mode flag, the
 #   staged-file path, the expected answer, and every refusal of the command
 #   line.
@@ -31,6 +33,7 @@ mojo_library(
     deps = [
         "//src/komira_bench_corpus:komira_bench_corpus",
         "//src/komira_engine_runtime:komira_engine_runtime",
+        "//src/komira_host:komira_host",
         "//src/komira_lowering:komira_lowering",
         "//src/komira_optimizer:komira_optimizer",
         "//src/komira_parquet:komira_parquet",
@@ -52,6 +55,7 @@ mojo_library(
         "tests/test_cli.mojo",
         "tests/test_probe_phases.mojo",
         "tests/test_stats.mojo",
+        "tests/test_thread_census.mojo",
     ],
     visibility = ["PUBLIC"],
 )
@@ -86,5 +90,16 @@ q6_phase_probe(
     name = "q6_phase_probe",
     stage = ":komira_bench_q6_stage_main",
     probe = ":komira_bench_q6_phases_main",
+    tpch_extension = "//third_party/duckdb:tpch.duckdb_extension.gz",
+)
+
+# The same probe with 11 timed runs instead of 9. A second sample: its inputs
+# differ from `q6_phase_probe`, so the farm runs it again instead of replaying
+# the first one's output.
+q6_phase_probe(
+    name = "q6_phase_probe_repeat",
+    stage = ":komira_bench_q6_stage_main",
+    probe = ":komira_bench_q6_phases_main",
+    runs = 11,
     tpch_extension = "//third_party/duckdb:tpch.duckdb_extension.gz",
 )

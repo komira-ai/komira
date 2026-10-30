@@ -16,14 +16,15 @@
 # integer. Nothing reads a clock, touches a global or allocates.
 #
 # ON, the cost is a clock read at a phase's start and, at its end, a clock read,
-# one `pthread_self`, a scan of the thread table and three stores into the
+# one thread-id call, a scan of the thread table and three stores into the
 # calling thread's own lane. A lane is 4,368 bytes (its phases, a 144-byte
 # `struct rusage` buffer) with 64 bytes of padding at each end, so two threads
 # never write one cache line whatever the alignment of the slab. The sites are per row group, per morsel and per segment, never per
 # row.
 #
 # THE LANE IS THE THREAD. A thread takes the next free lane the first time it
-# records, found again by `pthread_self`; `pt_reset` zeroes the sums and keeps
+# records, found again by its thread id (`gettid` on Linux, else
+# `pthread_self`); `pt_reset` zeroes the sums and keeps
 # the lanes. Only the owner writes a lane's counters (plain load and store, no
 # read-modify-write), and a reader looks only after the fork-join that ended
 # the work. A phase nested in another (decode inside claim) is counted in both:
@@ -166,9 +167,18 @@ comptime _SLAB = _Global["komira_phase_timers_slab", _init_slab]
 
 
 def _my_thread() -> Int:
-    # FFI-BOUNDARY: libc pthread_self, no pointer crosses; the value is an
-    # opaque id used only for equality.
-    return Int(external_call["pthread_self", UInt]())
+    # The key of the thread-to-lane table. On Linux the kernel thread id: it
+    # is what `/proc/self/task/<tid>` names (readers match lanes to it), and
+    # unlike a `pthread_t` it is not handed again to a thread created after
+    # another ended, which would give the new thread the old one's lane.
+    comptime if CompilationTarget.is_linux():
+        # FFI-BOUNDARY: libc gettid (glibc 2.30 or later); returns an int, no
+        # pointer crosses.
+        return Int(external_call["gettid", Int32]())
+    else:
+        # FFI-BOUNDARY: libc pthread_self, no pointer crosses; the value is
+        # an opaque id used only for equality.
+        return Int(external_call["pthread_self", UInt]())
 
 
 def _lane_word(lane: Int, phase: Int, field: Int) -> Int:
@@ -476,6 +486,18 @@ def pt_get(lane: Int, phase: Int, field: Int) -> Int:
     try:
         var g = _SLAB.get_or_create_ptr()
         return Int((UnsafePointer(to=g[][]) + _lane_word(lane, phase, field))[].load())
+    except:
+        return 0
+
+
+def pt_lane_tid(lane: Int) -> Int:
+    """The id of a lane's thread: on Linux the kernel thread id (the name of
+    its `/proc/self/task` entry); 0 outside the table or with the timers off."""
+    if lane < 0 or lane >= PT_LANES:
+        return 0
+    try:
+        var g = _SLAB.get_or_create_ptr()
+        return Int((UnsafePointer(to=g[][]) + _TID_BASE + lane)[].load())
     except:
         return 0
 

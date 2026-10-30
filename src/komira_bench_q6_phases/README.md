@@ -41,3 +41,7 @@ The probe program itself takes flags (`--lineitem FILE` or `--cache-dir DIR`, `-
 ## Not measured: allocation counts
 
 The probe does not count allocations. The allocator behind Mojo's `alloc` is the platform's `malloc`, which a program cannot hook from inside without interposing the C library, and a counting wrapper at the engine's call sites would miss the allocations of the standard library's `List` and `String`. The thread usage above (switches and faults inside the decode) is what this probe can say about allocator contention; a count needs a profiler on the host.
+
+## Where the context switches of a whole run are
+
+`thread_usage` counts a worker only inside the bracketed phases. `thread_census` counts every thread of the process: `/proc/self/task/<tid>/status` (voluntary and involuntary switches) and `schedstat` (time on a CPU, time runnable and waiting for one) before and after each run, grouped by what the thread did in the run: `driver` (the thread that called `run_sql`; its figures include the cost of reading the snapshots), `task_workers` (threads that ran a segment task) and `other` (every remaining thread: workers with no task in this run, I/O and helper threads), with `other_by_name` splitting the last by thread name. Compare the process-wide switches (`context_switches`) with `task_workers` and `thread_usage.task_busy`: what is in neither is outside the tasks.

@@ -23,7 +23,9 @@
 #   are relative, a Q6 and a decode-only configuration per thread count (4 in
 #   all), 5 runs each, the warm-up record (discarded runs, their faults and
 #   whether they settled), a median and quartiles, the phase shares, the
-#   thread usage of the bracketed phases, the page faults, the footer cost,
+#   thread usage of the bracketed phases, the census of all the process's
+#   threads (the driver is one thread, with several workers at least one thread ran tasks, the
+#   largest thread of a group is at most the group's sum), the page faults, the footer cost,
 #   the expected answers matched, and phases.json and plan.txt written.
 #   Catches a malformed document, a missing section, or an answer that is not
 #   checked.
@@ -205,6 +207,20 @@ def test_the_json_is_valid_and_complete() raises:
         assert_equal(
             warm.get("total_ms").array_len(), Int(warm.get("discarded").as_int64())
         )
+        var census = c.get("thread_census")
+        if census.get("available").as_bool():
+            assert_equal(Int(census.get("driver").get("threads").get("median").as_float64()), 1)
+            if Int(c.get("threads_requested").as_int64()) > 1:
+                # With one worker the engine may run the task on the driver.
+                assert_true(census.get("task_workers").get("threads").get("median").as_float64() >= 1.0)
+            for g in ["driver", "task_workers", "other"]:
+                var grp = census.get(String(g))
+                assert_true(
+                    grp.get("voluntary_csw_max").get("median").as_float64()
+                    <= grp.get("voluntary_csw_sum").get("median").as_float64()
+                )
+                assert_true(grp.has("on_cpu_ms_sum") and grp.has("runnable_wait_ms_max"))
+            assert_true(census.has("other_by_name"))
         var is_q6 = c.get("mode").as_string() == "q6"
         assert_equal(i % 2 == 0, is_q6)
         assert_true(c.get("total_ms").get("median").as_float64() > 0.0)

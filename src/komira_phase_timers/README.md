@@ -12,7 +12,7 @@ var t0 = pt_now()
 pt_record[PH_FILTER](t0)
 ```
 
-When on, the calling thread owns a lane of the process-global slab (found by `pthread_self`), 4,368 bytes with a cache line of padding at each end, so two threads never write one line. A lane holds, for each phase, the sum of its intervals in nanoseconds, the longest interval, and the number of intervals. Only the owner writes a lane; read after the fork-join that ended the work, with `pt_lane_count` and `pt_get`. Phases nest (decode inside claim); `pt_phase_name` gives each phase's stable name.
+When on, the calling thread owns a lane of the process-global slab (found by its thread id: `gettid` on Linux, `pthread_self` elsewhere; `pt_lane_tid` returns it), 4,368 bytes with a cache line of padding at each end, so two threads never write one line. A lane holds, for each phase, the sum of its intervals in nanoseconds, the longest interval, and the number of intervals. Only the owner writes a lane; read after the fork-join that ended the work, with `pt_lane_count` and `pt_get`. Phases nest (decode inside claim); `pt_phase_name` gives each phase's stable name.
 
 One query at a time: the slab is process-global.
 

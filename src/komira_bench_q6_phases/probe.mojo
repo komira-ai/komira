@@ -49,6 +49,7 @@ from komira_engine_runtime.counters import Counters
 from komira_parquet.runtime_footer_cache import ParquetMetadataCache
 from komira_parquet_footers.footer_cache import FooterCache
 from komira_phase_timers.phase_timers import (
+    FIELD_CALLS,
     PH_CLAIM,
     PH_COUNT,
     PH_DECODE_FILTER_COLS,
@@ -57,9 +58,13 @@ from komira_phase_timers.phase_timers import (
     PH_END_STAMP,
     PH_FILTER,
     PH_JOIN_TAIL,
+    PH_PARSE,
     PH_STAGED_DECODE_LATER,
     PH_TASK,
     pt_enabled,
+    pt_get,
+    pt_lane_count,
+    pt_lane_tid,
     pt_phase_name,
     pt_reset,
     pt_ru_available,
@@ -72,6 +77,15 @@ from komira_sdk_exec.engine_sql import run_sql
 
 from .phase_snapshot import PhaseAgg, snapshot_all
 from .plan_render import render_plans
+from .thread_census import (
+    CensusDelta,
+    GROUP_COUNT,
+    GROUP_DRIVER,
+    GROUP_OTHER,
+    GROUP_WORKER,
+    census_delta,
+    thread_census,
+)
 from .stats import faults_settled, maximum, median, minimum, quantile
 
 comptime SCHEMA: String = "komira-q6-phase-probe/2"
@@ -118,8 +132,13 @@ struct RunRecord(Copyable, Movable):
     var system_ns: Int
     var revenue_unscaled: Int
     var ok: Bool
+    var census: CensusDelta
+    var census_taken: Bool
+    """The process's threads could be listed (Linux with `/proc`)."""
 
     def __init__(out self):
+        self.census = CensusDelta()
+        self.census_taken = False
         self.total_ns = 0
         self.phases = List[PhaseAgg]()
         self.minor_faults = 0
@@ -136,11 +155,13 @@ struct RunRecord(Copyable, Movable):
 def _run_once(mut ctx: EngineContext, text: String) raises -> RunRecord:
     var rec = RunRecord()
     pt_reset()
+    var census_before = thread_census()
     var c0 = Counters.now()
     var t0 = perf_counter_ns()
     var outcome = run_sql(ctx, text)
     var t1 = perf_counter_ns()
     var c1 = Counters.now()
+    var census_after = thread_census()
     rec.total_ns = Int(t1 - t0)
     var d = c1.delta_from(c0)
     rec.minor_faults = d.minor_page_faults
@@ -151,6 +172,15 @@ def _run_once(mut ctx: EngineContext, text: String) raises -> RunRecord:
     rec.user_ns = d.user_time_us * 1000
     rec.system_ns = d.system_time_us * 1000
     rec.phases = snapshot_all()
+    var driver_tids = List[Int]()
+    var worker_tids = List[Int]()
+    for lane in range(pt_lane_count()):
+        if pt_get(lane, PH_PARSE, FIELD_CALLS) > 0:
+            driver_tids.append(pt_lane_tid(lane))
+        elif pt_get(lane, PH_TASK, FIELD_CALLS) > 0:
+            worker_tids.append(pt_lane_tid(lane))
+    rec.census_taken = len(census_before) > 0 and len(census_after) > 0
+    rec.census = census_delta(census_before, census_after, driver_tids, worker_tids)
     if outcome.refusal:
         raise Error(
             "Q6 was refused at "
@@ -288,6 +318,94 @@ def _usage_json(ref runs: List[RunRecord], p: Int) -> String:
     return out^
 
 
+def _group_name(g: Int) -> String:
+    if g == GROUP_DRIVER:
+        return "driver"
+    if g == GROUP_WORKER:
+        return "task_workers"
+    return "other"
+
+
+def _group_json(ref runs: List[RunRecord], g: Int) -> String:
+    var threads = List[Int]()
+    var active = List[Int]()
+    var vol_sum = List[Int]()
+    var vol_max = List[Int]()
+    var invol = List[Int]()
+    var run_ns = List[Int]()
+    var wait_ns = List[Int]()
+    var wait_max = List[Int]()
+    for r in range(len(runs)):
+        ref a = runs[r].census.groups[g]
+        threads.append(a.threads)
+        active.append(a.active_threads)
+        vol_sum.append(a.vol_sum)
+        vol_max.append(a.vol_max)
+        invol.append(a.invol_sum)
+        run_ns.append(a.run_ns)
+        wait_ns.append(a.wait_ns)
+        wait_max.append(a.wait_ns_max)
+    return (
+        String('"') + _group_name(g) + '":{"threads":' + _dist_count(threads)
+        + ',"threads_with_voluntary_switches":' + _dist_count(active)
+        + ',"voluntary_csw_sum":' + _dist_count(vol_sum)
+        + ',"voluntary_csw_max":' + _dist_count(vol_max)
+        + ',"involuntary_csw_sum":' + _dist_count(invol)
+        + ',"on_cpu_ms_sum":' + _dist_ms(run_ns)
+        + ',"runnable_wait_ms_sum":' + _dist_ms(wait_ns)
+        + ',"runnable_wait_ms_max":' + _dist_ms(wait_max)
+        + String("}")
+    )
+
+
+def _census_json(ref runs: List[RunRecord]) -> String:
+    """The whole process's threads, grouped by what they did in each run
+    (see thread_census.mojo): where the run's switches and CPU time are."""
+    var taken = len(runs) > 0 and runs[0].census_taken
+    if not taken:
+        return String('{"available":false}')
+    var out = String('{"available":true')
+    for g in range(GROUP_COUNT):
+        out += "," + _group_json(runs, g)
+    # The `other` threads by name: the mean per run, over the runs in which
+    # the name appeared.
+    var names = List[String]()
+    var seen = List[Int]()
+    var vol = List[Int]()
+    var cpu = List[Int]()
+    var nthreads = List[Int]()
+    for r in range(len(runs)):
+        ref c = runs[r].census
+        for n in range(len(c.other_names)):
+            var k = -1
+            for j in range(len(names)):
+                if names[j] == c.other_names[n]:
+                    k = j
+                    break
+            if k < 0:
+                names.append(c.other_names[n].copy())
+                seen.append(0)
+                vol.append(0)
+                cpu.append(0)
+                nthreads.append(0)
+                k = len(names) - 1
+            seen[k] += 1
+            vol[k] += c.other_name_vol[n]
+            cpu[k] += c.other_name_run_ns[n]
+            nthreads[k] += c.other_name_threads[n]
+    out += ',"other_by_name":['
+    for k in range(len(names)):
+        if k > 0:
+            out += ","
+        var s = max(seen[k], 1)
+        out += '{"name":"' + names[k] + '","runs_seen":' + String(seen[k])
+        out += ',"threads_per_run":' + String(nthreads[k] // s)
+        out += ',"voluntary_csw_per_run":' + String(vol[k] // s)
+        out += ',"on_cpu_ms_per_run":' + ms_text(Float64(cpu[k] // s)) + "}"
+    out += "]}"
+    return out^
+
+
 struct WarmupRecord(Copyable, Movable):
     """The discarded runs of one mode at one thread count."""
 
@@ -346,6 +464,7 @@ def _json_config(
     out += ',"threads_requested":' + String(threads_requested)
     out += ',"threads_effective":' + String(threads_effective)
     out += ',"warmup":' + _warmup_json(warm)
+    out += ',"thread_census":' + _census_json(runs)
     out += ',"runs":' + String(len(runs))
     out += ',"total_ms":' + _dist_ms(totals)
     out += ',"total_ms_per_run":' + _series_ms(totals)
