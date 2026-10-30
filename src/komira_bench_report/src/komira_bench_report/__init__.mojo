@@ -1,13 +1,13 @@
 """The result model and report of a benchmark run: the cells of a run and how
 each ended, the environment fingerprint, the `result.json` writer and strict
-reader (schema `komira-bench-result/1`), the aggregates (counts, geomean) and
+reader (schema `komira-bench-result/2`), the aggregates (counts, geomean) and
 the human table. See README.md.
 
 | name | what it is |
 |---|---|
 | `median`, `minimum`, `maximum`, `drop_first_rep`, `sweep_median`, `sweep_medians`, `min_of_sweep_medians`, `spread_pct`, `geomean`, `ratio_of` | the statistics: rep 0 dropped, a median per sweep, the least of the sweeps, the geomean of the ratios |
 | `Side`, `Cell`, `derive_ratio` | what an engine measured for a cell, and the cell with its derived ratio and verdict |
-| `StageOutcome`, `ValueVerdict`, `cell_verdict` | how komira's run ended, whether the values matched, PASS / FAIL / NO_RATIO |
+| `StageOutcome`, `ValueVerdict`, `cell_verdict` | how komira's run ended, whether the values matched (`IDENTICAL`, `DIVERGENT`, `DEPARTURE:<reason>`, `UNVERIFIED:<cause>`), PASS / FAIL / DEPARTURE / NO_RATIO |
 | `RunInfo`, `Environment`, `DuckDbPin`, `BenchResult`, `validate_result` | the run, its fingerprint, the DuckDB pin and the whole result |
 | `write_result_json`, `result_json`, `summary_json`, `parse_result_json` | the writer and the strict reader of result.json |
 | `summarize`, `Summary`, `SuiteSummary`, `summary_line`, `exit_code` | the aggregates and the line that states them |
@@ -45,6 +45,7 @@ from .stats import (
 from .summary import Summary, SuiteSummary, exit_code, summarize, summary_line
 from .table import render_table
 from .verdict import (
+    CELL_DEPARTURE,
     CELL_FAIL,
     CELL_NO_RATIO,
     CELL_PASS,
