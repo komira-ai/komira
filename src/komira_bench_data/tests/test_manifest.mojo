@@ -8,9 +8,10 @@
 #     scale, the other tables scale linearly, lineitem is recorded at scale
 #     factor 1 only.
 #   * test_tpch_refuses_an_unsupported_scale_factor.
-#   * test_clickbench_records_size_and_rows_but_no_checksum.
-#   * test_a_checksum_is_recorded_only_where_certain: no supported manifest
-#     records one yet, so a first verified run is the one that records it.
+#   * test_clickbench_records_size_and_rows.
+#   * test_a_checksum_is_recorded_only_where_certain: a checksum in a supported
+#     manifest is one `recorded_files` holds (none is recorded yet, so a first
+#     verified run is the one that records it).
 #   * test_h2o_manifests_follow_the_sizes: the generated files' paths carry the
 #     size and seed, the join tables have rows, rows // 1e6 and rows // 1e3
 #     (at least 1) rows, and nonsense sizes are refused.
@@ -36,6 +37,7 @@ from komira_bench_data import (
     h2o_join_manifest,
     is_sha256_hex,
     is_token,
+    recorded_files,
     supported_manifests,
     tpch_manifest,
     validate_relative_path,
@@ -102,24 +104,32 @@ def test_tpch_refuses_an_unsupported_scale_factor() raises:
         _ = tpch_manifest(0)
 
 
-def test_clickbench_records_size_and_rows_but_no_checksum() raises:
+def test_clickbench_records_size_and_rows() raises:
     var m = clickbench_manifest()
     assert_equal(len(m.files), 1)
     assert_equal(m.files[0].path, "clickbench/hits.parquet")
     assert_equal(m.files[0].expected_bytes, 14_779_976_446)
     assert_equal(m.files[0].expected_rows, 99_997_497)
-    assert_false(m.files[0].has_sha256())
+    # its checksum is the recorded one or none (see the test below)
     assert_equal(m.generator, "")
 
 
 def test_a_checksum_is_recorded_only_where_certain() raises:
+    # A checksum in a supported manifest is one `recorded_files` holds: a human
+    # records it from a staging run, nothing else puts one there. The h2o
+    # manifests carry none (their files are generated and recorded per run).
     var all = supported_manifests()
+    var recorded = recorded_files()
     for i in range(len(all)):
         for j in range(len(all[i].files)):
-            assert_false(
-                all[i].files[j].has_sha256(),
-                all[i].name + ": " + all[i].files[j].path + " records a checksum no run has verified",
-            )
+            ref f = all[i].files[j]
+            if not f.has_sha256():
+                continue
+            var found = False
+            for r in range(len(recorded)):
+                if recorded[r].path == f.path and recorded[r].sha256 == f.expected_sha256:
+                    found = True
+            assert_true(found, all[i].name + ": " + f.path + " records a checksum that recorded_files does not hold")
 
 
 def test_h2o_manifests_follow_the_sizes() raises:
@@ -235,7 +245,7 @@ def main() raises:
     test_every_supported_manifest_is_valid_and_distinct()
     test_tpch_row_counts_follow_the_specification()
     test_tpch_refuses_an_unsupported_scale_factor()
-    test_clickbench_records_size_and_rows_but_no_checksum()
+    test_clickbench_records_size_and_rows()
     test_a_checksum_is_recorded_only_where_certain()
     test_h2o_manifests_follow_the_sizes()
     test_find_manifest_by_name_and_scale()

@@ -20,6 +20,7 @@ TARGETS = [
     "komira//src/komira_aws_iam:komira_aws_iam_conda",
     "komira//src/komira_aws_scheduler:komira_aws_scheduler_conda",
     "komira//src/komira_aws_sqs:komira_aws_sqs_conda",
+    "komira//src/komira_bench_data:komira_bench_stage",
     "komira//src/komira_cdc_ingest:komira_cdc_ingest_conda",
     "komira//src/komira_chat_proto:ci",
     "komira//src/komira_chat_proto:conda_holds",
