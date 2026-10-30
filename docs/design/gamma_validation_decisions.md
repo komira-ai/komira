@@ -41,7 +41,7 @@ whose rules `kci run` applies to the workflow it runs under (item 7).
 4. For a build-mode README run: a `smoke` word or an automatic switch when
    the install holds a per-library archive.
 5. For a real cloud project: a DEPLOY body, a cell field (both reserved:
-   `src/kci_api/verbs.mojo`, `src/kci_release_machine/graph.mojo`), a verb
+   `src/kci_api/src/kci_api/verbs.mojo`, `src/kci_release_machine/src/kci_release_machine/graph.mojo`), a verb
    that sets the validation run id, a bootstrap for the federated identity
    (described under
    [Identity and secrets](gamma_validation.md#identity-and-secrets)), an

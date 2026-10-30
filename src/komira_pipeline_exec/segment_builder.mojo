@@ -14,6 +14,7 @@
 # producers published: `build_source` receives the `PublishedOutputs` and takes
 # the batches it needs.
 
+from komira_arrow.schema import Schema
 from komira_morsel.morsel_operator import MorselOperatorImpl
 from komira_morsel.morsel_sink import MorselSinkImpl
 from komira_morsel.morsel_source import MorselSourceImpl
@@ -35,9 +36,17 @@ trait SegmentBuilder(Movable, Deinitable):
         return desc.num_ops()
 
     def build_source(
-        mut self, ref desc: SegmentDescPod, mut published: PublishedOutputs
+        mut self,
+        ref desc: SegmentDescPod,
+        mut published: PublishedOutputs,
+        num_workers: Int,
     ) raises -> Self.Source:
-        """The segment's source, with its hooks applied."""
+        """The segment's source, with its hooks applied. This call begins a
+        run of the segment: a builder keeps per-run state (a limit's shared
+        budget) from here to the next `build_source` of the same segment, and
+        drops what an earlier run left. `num_workers` is the
+        count of workers that will call `next_morsel`; a source that sizes
+        per-worker state at construction needs it."""
         ...
 
     def build_op(
@@ -48,7 +57,9 @@ trait SegmentBuilder(Movable, Deinitable):
         ...
 
     def build_sink(
-        mut self, ref desc: SegmentDescPod
+        mut self, ref desc: SegmentDescPod, ref source_schema: Schema
     ) raises -> Self.Sink:
-        """The segment's sink."""
+        """The segment's sink. `source_schema` is the schema of the built
+        source's morsels, for a sink that must name its output when no morsel
+        reaches it."""
         ...
