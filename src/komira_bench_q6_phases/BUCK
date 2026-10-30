@@ -103,3 +103,14 @@ q6_phase_probe(
     runs = 11,
     tpch_extension = "//third_party/duckdb:tpch.duckdb_extension.gz",
 )
+
+# The decode-only query alone over a finer ladder of thread counts: where the
+# per-row-group decode time starts to climb.
+q6_phase_probe(
+    name = "q6_phase_probe_decode_sweep",
+    stage = ":komira_bench_q6_stage_main",
+    probe = ":komira_bench_q6_phases_main",
+    mode = "decode-only",
+    threads = "1,2,4,8,12,16,24,32,40,49,64,88",
+    tpch_extension = "//third_party/duckdb:tpch.duckdb_extension.gz",
+)

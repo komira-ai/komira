@@ -2,7 +2,7 @@
 
 Per-thread phase timers for the engine's hot path. They answer one question: of the wall time of a query, how much is each phase, summed over threads and on the slowest thread?
 
-They are compiled in only when the program is built with `-D KOMIRA_PHASE_TIMERS=1`. Without the define, each entry point is generic over a parameter and opens with `comptime if phase_timers_on():`, so its body is empty: `pt_now` is the constant 0, and `pt_record`, `pt_record_ns`, `pt_stamp`, `pt_mark_fork`, `pt_record_wake`, `pt_record_join_tails` and `pt_reset` do nothing. No clock is read, no global is touched, nothing is allocated. A Mojo package holds no machine code, so the define is read where the program is built (see "Defines" in `tools/build/mojo/README.md`).
+They are compiled in only when the program is built with `-D KOMIRA_PHASE_TIMERS=1`. Without the define, each entry point is generic over a parameter and opens with `comptime if phase_timers_on():`, so its body is empty: `pt_now` is the constant 0, and `pt_record`, `pt_record_ns`, `pt_stamp`, `pt_mark_fork`, `pt_record_wake`, `pt_record_join_tails`, `pt_reset` and `pt_forget_threads` do nothing. No clock is read, no global is touched, nothing is allocated. A Mojo package holds no machine code, so the define is read where the program is built (see "Defines" in `tools/build/mojo/README.md`).
 
 Import by module name: `from komira_phase_timers.phase_timers import pt_now, pt_record, PH_FILTER`. The package root exports nothing.
 

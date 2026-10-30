@@ -62,6 +62,7 @@ from komira_phase_timers.phase_timers import (
     PH_STAGED_DECODE_LATER,
     PH_TASK,
     pt_enabled,
+    pt_forget_threads,
     pt_get,
     pt_lane_count,
     pt_lane_tid,
@@ -691,6 +692,10 @@ def run_probe(settings: ProbeSettings) raises -> ProbeResult:
     var first_config = True
     for t in range(len(settings.threads)):
         var requested = settings.threads[t]
+        # The previous context's threads have ended: free their lanes (a
+        # thread keeps its lane for the life of the table, and a long ladder
+        # of thread counts would otherwise run out of lanes).
+        pt_forget_threads()
         var ctx = EngineContext(
             EngineOptions(
                 worker_count=requested,

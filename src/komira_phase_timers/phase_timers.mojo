@@ -454,6 +454,33 @@ def pt_reset[_site: Int = 0]():
             pass
 
 
+def _forget_threads() raises:
+    var g = _SLAB.get_or_create_ptr()
+    var base = UnsafePointer(to=g[][])
+    var used = min(Int((base + _W_LANES_USED)[].load()), PT_LANES)
+    for lane in range(used):
+        (base + _TID_BASE + lane)[].store(Int64(0))
+        for p in range(PH_COUNT):
+            for f in range(_FIELDS):
+                (base + _lane_word(lane, p, f))[].store(Int64(0))
+    (base + _W_LANES_USED)[].store(Int64(0))
+    (base + _W_FORK)[].store(Int64(0))
+
+
+@always_inline
+def pt_forget_threads[_site: Int = 0]():
+    """Drop the thread-to-lane table and zero every counter, so the next
+    thread to record takes lane 0. Lanes are never reclaimed otherwise, and a
+    process that builds many contexts (each with new threads) would fill the
+    `PT_LANES` lanes and lose later threads. Call with no query running and
+    the earlier threads gone."""
+    comptime if phase_timers_on():
+        try:
+            _forget_threads()
+        except:
+            pass
+
+
 # --- reading (plain functions; zeros when the timers are off) ----------------
 
 

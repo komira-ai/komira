@@ -20,6 +20,11 @@
 #   (a `pthread_t` is handed again after its thread ends), which would book a
 #   new thread's time to a dead thread's lane and mislabel it for any reader
 #   that matches lanes to `/proc/self/task`.
+# - test_forgetting_threads_frees_every_lane: after a record, when the lane
+#   is dropped with `pt_forget_threads`, no lane is in use and every counter
+#   reads 0, and the next record takes lane 0 again. Catches a table that
+#   never empties (a long probe would run out of lanes and lose the threads of
+#   its later contexts) and counters that outlive their thread.
 # - test_thread_usage_counts_this_threads_switches_and_faults: a usage bracket
 #   around two sleeps and a 32 MiB fill reads at least 2 voluntary context
 #   switches and 8 minor faults on this thread's lane and phase, a second
@@ -52,6 +57,7 @@ from komira_phase_timers.phase_timers import (
     pt_enabled,
     pt_get,
     pt_lane_count,
+    pt_forget_threads,
     pt_lane_tid,
     pt_mark_fork,
     pt_now,
@@ -151,6 +157,21 @@ def test_a_lane_is_keyed_by_the_kernel_thread_id() raises:
     assert_equal(pt_lane_tid(-1), 0)
 
 
+def test_forgetting_threads_frees_every_lane() raises:
+    pt_reset()
+    pt_record_ns[PH_FILTER](9)
+    assert_equal(pt_lane_count(), 1)
+    pt_forget_threads()
+    assert_equal(pt_lane_count(), 0)
+    assert_equal(pt_lane_tid(0), 0)
+    for phase in range(PH_COUNT):
+        for field in range(FIELD_CALLS + 1):
+            assert_equal(pt_get(0, phase, field), 0)
+    pt_record_ns[PH_FILTER](4)
+    assert_equal(pt_lane_count(), 1)
+    assert_equal(pt_get(0, PH_FILTER, FIELD_SUM), 4)
+
+
 def main() raises:
     var suite = TestSuite()
     suite.test[test_intervals_sum_and_keep_the_longest]()
@@ -158,5 +179,6 @@ def main() raises:
     suite.test[test_wake_and_join_tails_follow_the_fork]()
     suite.test[test_reset_zeroes_the_counters_and_keeps_the_lane]()
     suite.test[test_a_lane_is_keyed_by_the_kernel_thread_id]()
+    suite.test[test_forgetting_threads_frees_every_lane]()
     suite.test[test_thread_usage_counts_this_threads_switches_and_faults]()
     suite^.run()

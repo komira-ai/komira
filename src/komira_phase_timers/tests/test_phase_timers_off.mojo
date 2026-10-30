@@ -34,6 +34,7 @@ from komira_phase_timers.phase_timers import (
     pt_record_join_tails,
     pt_record_ns,
     pt_record_wake,
+    pt_forget_threads,
     pt_reset,
     pt_ru_available,
     pt_ru_begin,
@@ -56,6 +57,7 @@ def test_every_entry_point_records_nothing() raises:
     pt_stamp[PH_END_STAMP]()
     pt_record_join_tails()
     pt_reset()
+    pt_forget_threads()
     assert_equal(pt_lane_count(), 0)
     for lane in range(4):
         for phase in range(PH_COUNT):
