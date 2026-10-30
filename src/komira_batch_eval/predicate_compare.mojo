@@ -39,7 +39,7 @@ from komira_plan_expr.expr import (
 )
 from komira_plan_expr.literal_domain import int_literal_fits
 from komira_plan_expr.scalar_value import ScalarValue
-from komira_scalar_arithmetic.decimal_cast import decimal_rescale_i128, float_to_decimal_i128
+from komira_scalar_arithmetic.decimal_cast import float_to_decimal_i128
 from komira_scalar_arithmetic.decimal_compare import (
     DEC_CMP_EQ,
     DEC_CMP_GE,
@@ -51,6 +51,7 @@ from komira_scalar_arithmetic.decimal_compare import (
 )
 
 from .column_compare import _col_cmp_nullable
+from .decimal_literal_compare import decimal_threshold, eval_decimal_threshold
 from .integer_literal_value import integer_literal_value
 from .literal_arm_domain import refuse_incomparable_literal
 from .temporal_literal_value import _temporal_literal_i64
@@ -86,7 +87,15 @@ def _col_decimal_ps(batch: RecordBatch, col_idx: Int) -> Tuple[Int, Int]:
 
 
 def _eval_decimal_col_vs_literal(batch: RecordBatch, col_idx: Int, lit: ScalarValue, op: UInt8) raises -> BooleanArray:
-    """DECIMAL128 column compared to a literal (decimal / int / float)."""
+    """DECIMAL128 column compared to a literal (decimal / int / float).
+
+    A decimal or integer literal is compared EXACTLY, on the column's own
+    integers: `decimal_threshold` turns the literal and the operator into one
+    threshold at the column's scale (a literal with more scale than the column
+    is floored or ceiled by operator, never rounded), and
+    `eval_decimal_threshold` compares every row to it (int64 SIMD for a column
+    of precision <= 18). A float literal keeps the rescale-to-the-column's-scale
+    compare below."""
     var ps = _col_decimal_ps(batch, col_idx)
     var cp = ps[0]
     var cs = ps[1]
@@ -96,49 +105,50 @@ def _eval_decimal_col_vs_literal(batch: RecordBatch, col_idx: Int, lit: ScalarVa
     var arr = col_ref.as_decimal128()
     var n = arr.length
     var dec_op = _bin_op_to_dec_cmp(op)
-    # Materialize the RHS as (i128 value, scale).  A NULL literal -> all-NULL.
-    var rhs_v: SIMD[DType.int128, 1]
-    var rhs_s: Int
     if lit.is_null():
         # `col <op> NULL` is NULL for every row -> the
         # canonical all-null predicate (byte-identical to the prior inline
         # allocate-nullable + per-row clear loop).
         return kleene_all_null_predicate(n, NullPolicy.three_valued())
-    elif lit.is_decimal128():
-        rhs_v = lit.decimal_value_i128()
-        rhs_s = lit.dec128_scale
-        if rhs_s == 0 and lit.dec128_precision == 0:
-            # Untyped decimal literal — treat its scale as the column's.
-            rhs_s = cs
-    elif lit.is_any_integer():
-        # ★ THE ONE RULE (`integer_literal_value.mojo`): the literal's EXACT
-        # value, read by its TAG, is what gets scale-aligned. This used to be
-        # `lit.is_int` + `int_to_decimal_i128(lit.int_val, ...)`, which
-        # REFUSED six of the eight integer tags ("unsupported literal type")
-        # although `literal_arm_domain` admits `is_any_integer` against a
-        # decimal column — and reading `int_val` would have turned a uint64
-        # above Int64.MAX negative. `decimal_rescale_i128` from scale 0 is the
-        # same multiply-and-check `int_to_decimal_i128` performs (and raises on
-        # a literal wider than the column's precision exactly as it did).
-        rhs_v = decimal_rescale_i128(integer_literal_value(lit), 0, cp, cs)
-        rhs_s = cs
-    elif lit.is_float():
-        # Promote: build the decimal at the column's scale.  (NaN/Inf -> the
-        # comparison is always false; mimic SQL by raising for now — rare.)
-        var ov = float_to_decimal_i128(lit.float_val, cp, cs)
-        if not ov:
-            raise Error("Decimal128 predicate: float literal is NaN/Inf or out of range")
-        rhs_v = ov.value()
-        rhs_s = cs
-    else:
+    if lit.is_decimal128() or lit.is_any_integer():
+        var lit_v: SIMD[DType.int128, 1]
+        var lit_s: Int
+        if lit.is_decimal128():
+            lit_v = lit.decimal_value_i128()
+            lit_s = lit.dec128_scale
+            if lit_s == 0 and lit.dec128_precision == 0:
+                # Untyped decimal literal — treat its scale as the column's.
+                lit_s = cs
+        else:
+            # ★ THE ONE RULE (`integer_literal_value.mojo`): the literal's EXACT
+            # value, read by its TAG, is what gets compared (it used to be
+            # `lit.is_int` + `int_to_decimal_i128(lit.int_val, ...)`, which
+            # refused six of the eight integer tags and turned a uint64 above
+            # Int64.MAX negative). It is an integer, so its scale is 0, and a
+            # literal wider than the column's precision is not an overflow: no
+            # row equals it, and the threshold orders every row against it.
+            lit_v = integer_literal_value(lit)
+            lit_s = 0
+        var threshold = decimal_threshold(lit_v, lit_s, cs, dec_op)
+        var raw = eval_decimal_threshold(arr, cp, threshold)
+        return kleene_cmp_finalize_scalar(
+            raw^, arr.validity, NullPolicy.three_valued()
+        )
+    if not lit.is_float():
         raise Error("Decimal128 predicate: unsupported literal type")
+    # Promote: build the decimal at the column's scale.  (NaN/Inf -> the
+    # comparison is always false; mimic SQL by raising for now — rare.)
+    var ov = float_to_decimal_i128(lit.float_val, cp, cs)
+    if not ov:
+        raise Error("Decimal128 predicate: float literal is NaN/Inf or out of range")
+    var rhs_v = ov.value()
     # Compute the compare data on every lane, then delegate the 3VL
     # null policy to the ONE mechanism in comparison_kleene: it merges the
     # column's validity in (RHS literal is non-null here), masks null lanes
     # to data=0 (filter-safe), and sets null_count. Byte-identical output.
     var out = BooleanArray.allocate_nullable(n)
     for i in range(n):
-        out.set(i, decimal_cmp_i128(arr.get_i128(i), cs, rhs_v, rhs_s, dec_op))
+        out.set(i, decimal_cmp_i128(arr.get_i128(i), cs, rhs_v, cs, dec_op))
     return kleene_cmp_finalize_scalar(
         out^, arr.validity, NullPolicy.three_valued()
     )

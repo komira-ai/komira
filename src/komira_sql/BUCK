@@ -3,7 +3,7 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # The analytical SQL front end's tokenizer, parser, parsed AST, scalar-function table and catalogs: tokens, the statement parser, expression, relation and statement nodes, one row per SQL function name, the table and UDF catalogs a query resolves names against,
 # the bind-time schemas and scan leaves of the read_csv / read_json / read_avro table functions,
 # and the binder so far: output-column names, operator lowering, parquet facts and name scopes (sql_bind_names, sql_bind_interval, sql_bind_ops, sql_bind_parquet, sql_bind_scope),
-# the expression binder (sql_bind_expr, sql_bind_call, sql_bind_cast, sql_bind_fn_args, sql_bind_fn_nested, sql_bind_timestamp),
+# the expression binder (sql_bind_expr, sql_bind_decimal, sql_bind_call, sql_bind_cast, sql_bind_fn_args, sql_bind_fn_nested, sql_bind_timestamp),
 # the aggregate, window and ORDER BY binders (sql_bind_agg_expr, sql_bind_aggregate, sql_bind_window_order),
 # and the join and subquery binders with the statement entry (sql_bind_join, sql_bind_subquery, sql_binder).
 mojo_library(
@@ -23,6 +23,7 @@ mojo_library(
         "//src/komira_compression:komira_compression",
         "//src/komira_counters:komira_counters",
         "//src/komira_csv:komira_csv",
+        "//src/komira_decimal_literal:komira_decimal_literal",
         "//src/komira_dynamic_filter:komira_dynamic_filter",
         "//src/komira_fork_join:komira_fork_join",
         "//src/komira_fs:komira_fs",

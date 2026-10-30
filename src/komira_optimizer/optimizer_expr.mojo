@@ -27,6 +27,10 @@ from std.memory import OwnedPointer
 from komira_arrow.schema import Schema, SchemaBuilder, Field
 from komira_arrow.arrow_types import ArrowType
 from komira_collections.slab import Slab
+from komira_decimal_literal.decimal_literal import (
+    decimal_fold_binary,
+    decimal_negate,
+)
 from komira_plan_expr.scalar_value import ScalarValue
 # UdfData import removed — CSE no longer
 # threads UDF aggs through aggregate-rewriting.
@@ -258,6 +262,21 @@ def _fold_expr(var expr: Expr) -> Expr:
                 elif op == BIN_GE:
                     return Expr.literal(ScalarValue.from_bool(lv.int_val >= rv.int_val))
 
+            # DECIMAL arithmetic: `+ - *` between decimal literals, and
+            # between a decimal and an integer literal, folds as a DECIMAL
+            # with DuckDB's result type (`0.06 - 0.01` is the DECIMAL(4, 2)
+            # 0.05). It must not fall through to a float: a bound folded in
+            # floating point is 0.049999999999999996, and a DECIMAL column
+            # is then compared with a float. A result of more than 38 digits
+            # is left for the runtime. The pair rule is owned by
+            # `komira_decimal_literal`, which the SQL binder types its
+            # literals with.
+            if lv.is_decimal128() or rv.is_decimal128():
+                if op == BIN_ADD or op == BIN_SUB or op == BIN_MUL:
+                    var decimal_folded = decimal_fold_binary(op, lv, rv)
+                    if decimal_folded:
+                        return Expr.literal(decimal_folded.take())
+
             # Float arithmetic
             if lv.is_float() and rv.is_float():
                 if op == BIN_ADD:
@@ -317,6 +336,10 @@ def _fold_expr(var expr: Expr) -> Expr:
                 if cv.int_val == Int64.MIN:
                     return Expr.unary(op, child^)
                 return Expr.literal(ScalarValue.from_int(Int(-cv.int_val)))
+            if cv.is_decimal128() and op == UN_NEGATE:
+                var negated = decimal_negate(cv)
+                if negated:
+                    return Expr.literal(negated.take())
 
         return Expr.unary(op, child^)
 

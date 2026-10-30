@@ -152,10 +152,31 @@ def test_literal_facing_a_decimal_column_is_decimal() raises:
         _bound(_w("dc >= -0.5")),
         "BinaryOp(GE, ColRef(dc), " + _d(-1, -5, 2, 1) + ")",
     )
-    # The literal on the left.
+    # The literal on the left reads the same with the column on the left: the
+    # evaluator compares a column with a literal on its right.
     assert_equal(
         _bound(_w("0.065 > dc")),
-        "BinaryOp(GT, " + _d(0, 65, 4, 3) + ", ColRef(dc))",
+        "BinaryOp(LT, ColRef(dc), " + _d(0, 65, 4, 3) + ")",
+    )
+    assert_equal(
+        _bound(_w("0.06 - 0.01 <= dc")),
+        "BinaryOp(GE, ColRef(dc), " + _d(0, 5, 4, 2) + ")",
+    )
+    assert_equal(
+        _bound(_w("0.065 = dc")),
+        "BinaryOp(EQ, ColRef(dc), " + _d(0, 65, 4, 3) + ")",
+    )
+    assert_equal(
+        _bound(_w("0.065 <> dc")),
+        "BinaryOp(NE, ColRef(dc), " + _d(0, 65, 4, 3) + ")",
+    )
+    assert_equal(
+        _bound(_w("0.065 < dc")),
+        "BinaryOp(GT, ColRef(dc), " + _d(0, 65, 4, 3) + ")",
+    )
+    assert_equal(
+        _bound(_w("0.065 >= dc")),
+        "BinaryOp(LE, ColRef(dc), " + _d(0, 65, 4, 3) + ")",
     )
     # A wider column.
     assert_equal(
@@ -231,6 +252,16 @@ def test_integer_literals_stay_integers() raises:
         _bound(_w("dc < 24")),
         "BinaryOp(LT, ColRef(dc), Literal(ScalarValue(int64, 24)))",
     )
+    # On the left of the column the integer is swapped to the right with its
+    # comparison flipped, and stays an integer.
+    assert_equal(
+        _bound(_w("24 > dc")),
+        "BinaryOp(LT, ColRef(dc), Literal(ScalarValue(int64, 24)))",
+    )
+    assert_equal(
+        _bound(_w("24 <= dc")),
+        "BinaryOp(GE, ColRef(dc), Literal(ScalarValue(int64, 24)))",
+    )
 
 
 def test_everything_else_stays_float() raises:
@@ -238,6 +269,10 @@ def test_everything_else_stays_float() raises:
     assert_equal(
         _bound(_w("v < 0.065")),
         "BinaryOp(LT, ColRef(v), Literal(ScalarValue(float64, 0.065)))",
+    )
+    assert_equal(
+        _bound(_w("0.5 < v")),
+        "BinaryOp(LT, Literal(ScalarValue(float64, 0.5)), ColRef(v))",
     )
     assert_equal(
         _bound(_w("i32 < 0.5")),

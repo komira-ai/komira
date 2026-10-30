@@ -19,7 +19,7 @@
 comptime TK_EOF: UInt8 = 0
 comptime TK_IDENT: UInt8 = 1  # identifier (lower-folded) — incl. keywords/agg names
 comptime TK_INT: UInt8 = 2  # integer literal (value in int_val)
-comptime TK_FLOAT: UInt8 = 3  # float literal (value in float_val)
+comptime TK_FLOAT: UInt8 = 3  # float literal (value in float_val, digits in text)
 comptime TK_STRING: UInt8 = 4  # single-quoted string literal (text)
 comptime TK_LPAREN: UInt8 = 5  # (
 comptime TK_RPAREN: UInt8 = 6  # )
@@ -84,7 +84,8 @@ struct Token(Copyable, Movable, Deinitable):
       var int_val: Int64     — live for TK_INT. For a literal PAST Int64.MAX
                                `text` holds its decimal digits and `int_val`
                                the wrapped bits (see `tokenize`).
-      var float_val: Float64 — live for TK_FLOAT.
+      var float_val: Float64 — live for TK_FLOAT, with `text` holding the
+                               literal's digits (`0.06`, as written).
     """
 
     var kind: UInt8
@@ -183,7 +184,14 @@ def tokenize(sql: String) raises -> List[Token]:
                     scale = scale * 10.0
                     i += 1
                 var fval = ipf + frac / scale
-                out.append(Token(TK_FLOAT, String(""), Int64(0), fval))
+                # The literal's own digits ride in `text` (ASCII digits and
+                # the point, so each byte IS its codepoint): DuckDB reads
+                # `0.06` as DECIMAL(3, 2), and the binder needs the digits, not
+                # the nearest double.
+                var literal_text = String("")
+                for j in range(digits_start, i):
+                    literal_text += chr(Int(src[j]))
+                out.append(Token(TK_FLOAT, literal_text^, Int64(0), fval))
             elif past_i64:
                 # ASCII digits only, so each byte IS its codepoint here.
                 var digits = String("")

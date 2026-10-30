@@ -24,6 +24,9 @@ from komira_sql.sql_ast import (
     SX_WINDOW, SqlExpr, TSLIT_AWARE,
 )
 from komira_sql.sql_bind_call import _bind_scalar_call
+from komira_sql.sql_bind_decimal import (
+    bind_decimal_comparison, swap_decimal_comparison,
+)
 from komira_sql.sql_bind_ops import (
     _map_unop, _bind_sql_operator, _bind_like, _BARE_NULL_REFUSAL, _sx_is_big_int,
     _big_int_literal_refusal, _big_int_cmp_serves, _bind_big_int_uint64,
@@ -261,6 +264,14 @@ def _bind_scalar(sx: SqlExpr, schema: Schema, scope: BindScope, catalog: SqlCata
             # The constant moved across the comparison; bind the rewritten
             # comparison, which the int-cast unwrap below then serves.
             return _bind_scalar(moved_opt.take(), schema, scope, catalog, cte_scope, prebound)
+        var swapped_opt = swap_decimal_comparison(sx, schema, scope)
+        if swapped_opt:
+            # A number constant on the left of a DECIMAL column: bind the
+            # comparison with the column on the left.
+            return _bind_scalar(swapped_opt.take(), schema, scope, catalog, cte_scope, prebound)
+        var decimal_cmp = bind_decimal_comparison(sx, schema, scope)
+        if decimal_cmp:
+            return decimal_cmp.take()
         var big_cmp = _big_int_cmp_serves(sx)
         var unwrap = _int_cast_cmp_side(sx, schema, scope)
         var lhs: Expr
