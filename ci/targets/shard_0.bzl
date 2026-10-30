@@ -82,6 +82,8 @@ TARGETS = [
     "komira//tools/build/toolchains:pixi-0.67.2-aarch64-apple-darwin",
     "komira//tools/build/toolchains:pixi_pin_linux_x86_64",
     "komira//tools/build/toolchains:pixi_version",
+    "komira//tools/build/toolchains:zig_macos_aarch64.tar.xz",
+    "komira//tools/build/toolchains:zig_next_macos_aarch64.tar.xz",
     "tests//functional/aws_act:doc_tree",
     "tests//functional/aws_act:driver",
     "tests//functional/bench_run:doc_tree",
