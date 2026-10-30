@@ -19,9 +19,12 @@ from komira_plan_ir.logical_plan import (
     AggExprArray, ExprArray, LogicalPlan,
 )
 from komira_scan_source.source_variant import SOURCE_VARIANT_PARQUET
+from komira_sql.sql_bind_interval import (
+    INTERVAL_STANDALONE_REFUSAL, interval_date_fold, interval_operand_side,
+)
 from komira_sql.sql_ast import (
     FromRelation, JK_FULL, JK_LEFT, JK_RIGHT, SUBQ_EXISTS, SUBQ_IN, SUBQ_NOT_IN,
-    SXOP_AND, SX_AGG, SX_BINARY, SX_BOOL, SX_CALL, SX_COLUMN, SX_DATE, SX_FLOAT, SX_INT,
+    SXOP_AND, SX_AGG, SX_BINARY, SX_INTERVAL, SX_BOOL, SX_CALL, SX_COLUMN, SX_DATE, SX_FLOAT, SX_INT,
     SX_LIKE, SX_NULL, SX_STAR, SX_STRING, SX_SUBQUERY, SX_TIMESTAMP, SX_UNARY,
     SelectStmt, SqlExpr, TSLIT_AWARE,
 )
@@ -219,7 +222,14 @@ def _bind_corr_scalar(
         )
     if sx.tag == SX_NULL:
         raise Error(_BARE_NULL_REFUSAL)
+    if sx.tag == SX_INTERVAL:
+        raise Error(INTERVAL_STANDALONE_REFUSAL)
     if sx.tag == SX_BINARY:
+        var ivl_side = interval_operand_side(sx)
+        if ivl_side == 2:
+            return interval_date_fold(sx, _bind_corr_scalar(sx._binary.value().left[], inner_schema, inner_aliases, outer, outer_refs, catalog, cte_scope, prebound))
+        if ivl_side == 1:
+            return interval_date_fold(sx, _bind_corr_scalar(sx._binary.value().right[], inner_schema, inner_aliases, outer, outer_refs, catalog, cte_scope, prebound))
         if _is_null_comparison(sx):
             if sx._binary.value().left[].tag != SX_NULL:
                 return _null_comparison(sx.op, _bind_corr_scalar(sx._binary.value().left[], inner_schema, inner_aliases, outer, outer_refs, catalog, cte_scope, prebound))
