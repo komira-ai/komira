@@ -7,22 +7,32 @@
 # write to the live registry, so it holds the members to this file instead
 # (//release:prod_claimed_names_cases): a maintainer adds a name here only AFTER claiming it
 # on the prod registry, in the pull request that adds the member.
+kci_artifact_proto
+kci_deploy_model_proto
+kci_manifest_proto
+kci_resource_proto
 komira_anomaly
 komira_async_api
 komira_atomic_alias
 komira_bench_report
+komira_broker_proto
 komira_buffer
 komira_bump_arena
+komira_calendar_proto
+komira_chat_proto
 komira_clock
 komira_collections
+komira_contacts_proto
 komira_content_line
 komira_counters
+komira_crm_proto
 komira_datetime
 komira_dynamic_filter
 komira_encoding
 komira_fork_join
 komira_hash
 komira_host
+komira_job_report_proto
 komira_json
 komira_kafka_server
 komira_kg_mode
@@ -32,6 +42,7 @@ komira_log
 komira_lz4
 komira_mail_address
 komira_mail_message
+komira_managed_mail_proto
 komira_mcp_server
 komira_metrics
 komira_name_registry
@@ -47,6 +58,7 @@ komira_scalar_arithmetic
 komira_simd
 komira_snapshotter
 komira_spsc_ring
+komira_supervisor_proto
 komira_sync
 komira_test_run_id
 komira_test_verdict
