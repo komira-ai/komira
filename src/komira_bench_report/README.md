@@ -217,7 +217,7 @@ from komira_bench_report import parse_result_json
 
 var message = String()
 try:
-    _ = parse_result_json('{"schema":"komira-bench-result/1"}')
+    _ = parse_result_json('{"schema":"komira-bench-result/2"}')
 except e:
     message = String(e)
 assert_true(message.startswith(String("BenchResultError: result: missing member")))
@@ -225,11 +225,11 @@ assert_true(message.startswith(String("BenchResultError: result: missing member"
 
 ## The schema
 
-`result.json` is one line of compact JSON (`komira-bench-result/1`) with these members, in this order:
+`result.json` is one line of compact JSON (`komira-bench-result/2`) with these members, in this order:
 
 | member | what |
 |---|---|
-| `schema` | the string `komira-bench-result/1`; any other is refused |
+| `schema` | the string `komira-bench-result/2`; any other is refused; a `komira-bench-result/1` document (before `n_departure`) is refused with a message naming both versions |
 | `run` | `mode` (`both`, `komira`, `duckdb`), `scale` (`{"sf": N}` or `{"rows": N}`), `sweeps`, `reps` (at least 2), `statistic` (`min_of_sweep_median`), `threads`, `pass_max` |
 | `env` | `hostclass`, `cpu_model`, `cores`, `mem_total_bytes`, `os`, `komira_version`, `duckdb` (`version`, `sha256`, `pin`: `PINNED` or `UNPINNED:<reason>`), `dataset_lock_sha256` |
 | `cells` | per cell: `id` (`<suite>/<name>`), `suite`, `reps`, `stage` (`EXEC_OK`, `BIND_FAIL`, `EXEC_FAIL`, `UNSUPPORTED:<construct>`), `komira` and `duckdb` (null or `rows`, `ms`, `ms_per_sweep`, `spread_pct`), `value` (`IDENTICAL`, `DIVERGENT`, `DEPARTURE:<reason>`, `UNVERIFIED:<cause>`), `ratio` (a number or null), `verdict` (`PASS`, `FAIL`, `DEPARTURE`, `NO_RATIO`) |

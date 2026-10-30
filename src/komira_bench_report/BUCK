@@ -6,7 +6,7 @@ load(":buildrules.mojo.bzl", "mojo_package")
 # The result model and report of a benchmark run: a cell's statistic (rep 0
 # dropped, the median of each sweep, the least of the sweeps), the verdicts of a
 # cell, the environment fingerprint, the result.json writer and strict reader
-# (schema komira-bench-result/1), the counts and geomean per suite, and the
+# (schema komira-bench-result/2), the counts and geomean per suite, and the
 # human table. Pure data and text: it runs no engine and reads no file.
 #
 # The tests (each file's header says which behaviour it proves):

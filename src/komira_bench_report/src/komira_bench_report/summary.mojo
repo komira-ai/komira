@@ -18,8 +18,8 @@ struct SuiteSummary(Copyable, Movable):
 
     `n_cells` is every cell, `n_ran` those whose run ended in EXEC_OK,
     `n_verified` those whose values are IDENTICAL, `n_departure` those whose
-    values are a DEPARTURE, `n_ratio` those with a ratio; `geomean` and `median_ratio` are over the ratios and absent when
-    there are none."""
+    values are a DEPARTURE, `n_ratio` those with a ratio; `geomean` and
+    `median_ratio` are over the ratios and absent when there are none."""
 
     var suite: String
     var n_cells: Int

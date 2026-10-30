@@ -17,10 +17,10 @@
 # UHUGEINT or UBIGINT is an integer cell when it fits 64 bits and an exact
 # decimal cell (scale 0) beyond; a HUGEINT is always an exact decimal cell
 # (scale 0), as the komira engine's DECIMAL(38,0) column is, so that the two
-# compare on the same statistics (the allowed departure in declared_types.mojo). A value of such a column that is not
-# written as an exact number of its type is refused, never kept as a text. The
-# value of any other type stays what it was. Without column types a quoted
-# value is a text.
+# compare on the same statistics (the allowed departure in
+# declared_types.mojo). A value of such a column that is not written as an
+# exact number of its type is refused, never kept as a text. The value of any
+# other type stays what it was. Without column types a quoted value is a text.
 
 from std.math import inf, nan
 

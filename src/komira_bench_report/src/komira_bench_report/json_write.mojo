@@ -1,4 +1,4 @@
-# The writer of result.json (schema `komira-bench-result/1`). It writes the
+# The writer of result.json (schema `komira-bench-result/2`). It writes the
 # result as one compact line of JSON with the members in a fixed order, after
 # `validate_result` has accepted it, and writes the summary the reader will
 # recompute and compare.

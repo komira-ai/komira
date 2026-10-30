@@ -1,6 +1,6 @@
 """The result model and report of a benchmark run: the cells of a run and how
 each ended, the environment fingerprint, the `result.json` writer and strict
-reader (schema `komira-bench-result/1`), the aggregates (counts, geomean) and
+reader (schema `komira-bench-result/2`), the aggregates (counts, geomean) and
 the human table. See README.md.
 
 | name | what it is |

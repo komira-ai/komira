@@ -67,7 +67,7 @@ Not mapped yet, and so refused: dictionary-encoded strings, booleans, timestamps
 
 | file | holds |
 |---|---|
-| `warm/result.json` | the warm result: `komira-bench-result/1` |
+| `warm/result.json` | the warm result: `komira-bench-result/2` |
 | `cold/result.json` | the cold result, only when cold was measured |
 | `comparison.txt` | the tolerance the answers were compared under: floats within the larger of `float_rel_tol` times the larger magnitude and `float_abs_floor`, everything else (declared column types included) exact, then one `allowed departure <reason>` line per entry of the table of allowed departures; it is also printed |
 | `queries.sha256` | `<suite>/<id> <sha256 of the text>` per query in run order, then `listing_sha256` of those lines |

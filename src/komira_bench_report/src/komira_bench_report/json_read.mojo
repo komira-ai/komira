@@ -1,5 +1,5 @@
 # The strict reader of result.json. It accepts exactly what `write_result_json`
-# writes: the schema string `komira-bench-result/1`, every member present and
+# writes: the schema string `komira-bench-result/2`, every member present and
 # no other, the right kind of value in each, no object naming a member twice,
 # and a summary equal to the one recomputed from the cells (counts and text
 # exactly, the floats to 1e-9). A document that fails raises
@@ -13,6 +13,7 @@ from .model import (
     _close,
     DuckDbPin,
     Environment,
+    PREVIOUS_SCHEMA,
     RESULT_SCHEMA,
     RunInfo,
     Side,
@@ -266,6 +267,13 @@ def parse_result_json(text: String) raises -> BenchResult:
     refuse_duplicate_keys(doc)
     var top = _object(doc, String("result"), String("schema run env cells summary"))
     var schema = _text(top.get(String("schema")), String("schema"))
+    if schema == String(PREVIOUS_SCHEMA):
+        _fail(
+            String("schema"),
+            "this is '" + schema + "', which this reader no longer reads: it reads '"
+            + String(RESULT_SCHEMA)
+            + "' only (the shape changed: n_departure and the DEPARTURE verdict); run the benchmark again",
+        )
     if schema != String(RESULT_SCHEMA):
         _fail(String("schema"), "expected '" + String(RESULT_SCHEMA) + "', got '" + schema + "'")
     var run = _read_run(top.get(String("run")))

@@ -18,7 +18,9 @@ from .verdict import (
     cell_verdict,
 )
 
-comptime RESULT_SCHEMA = "komira-bench-result/1"
+comptime RESULT_SCHEMA = "komira-bench-result/2"
+# The schema before `n_departure` and the DEPARTURE verdict; the reader refuses it by name.
+comptime PREVIOUS_SCHEMA = "komira-bench-result/1"
 comptime STATISTIC_MIN_OF_SWEEP_MEDIAN = "min_of_sweep_median"
 comptime PIN_PINNED = "PINNED"
 comptime PIN_UNPINNED_PREFIX = "UNPINNED:"
