@@ -345,8 +345,8 @@ instead.
   variables fails its second step, naming the key, instead of building on the runner.
 - **One list.** `//release:mopm_darwin_libs` (`release/darwin_libs.bzl`) builds the
   `:lib` of every package of `release/readme_e2e/packages.bzl` (every `src/<name>`
-  with a `mopm.toml`) except `DARWIN_EXCLUDED`, the packages whose closure holds
-  native code, which cannot build for macOS yet. A package moved to mopm joins the
+  with a `mopm.toml`) except `DARWIN_EXCLUDED` (empty today: a package's own C builds for macOS; a vendored
+  third_party C or C++ library is the case that would be listed). A package moved to mopm joins the
   macOS build with no second edit. The target is left out of `//ci:pr` on purpose
   (`EXCLUDED` of `tools/build/ci/rules.bzl`).
 - **Priority, timing, bound.** `farm-qos: batch` like every job of the file; once per

@@ -145,4 +145,4 @@ The end-to-end tests under `tools/build/tests` ([README](../../tools/build/tests
 - The host floor is measured on a hello-world compile and run only. A library the compiler loads lazily on another path, such as its Python interop, is not traced.
 - The floor is not part of an action key, so workers that differ in it must not share a remote cache.
 - The aarch64 assembly source lists for aws-lc are generated but not built.
-- Linux x86_64 is the target platform. macOS arm64 has its own compiler pin and wrapper, but the C and C++, Rust and protobuf toolchains are Linux x86_64 only, so a darwin target that needs one is incompatible rather than built for Linux.
+- Linux x86_64 is the target platform. macOS arm64 has its own compiler pin and wrapper, and a package's own static C (a `[native.<id>]` archive) builds for darwin-arm64 through buildrules, with its welded tests on the macOS workers. A vendored third_party C or C++ library is not yet supported in `mojo_package`, and the old rules' C and C++, Rust and protobuf toolchains remain Linux x86_64, so a darwin target that needs one is incompatible rather than built for Linux.
