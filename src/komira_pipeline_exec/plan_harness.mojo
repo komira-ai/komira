@@ -10,6 +10,9 @@
 #   * the operators of the chain (`op_filter`, `op_project`, `op_limit`);
 #   * a sample batch and readers for what comes out of a plan.
 #
+# `with_agg_sink` turns a segment into an ungrouped aggregation and
+# `ungrouped_agg_data` builds the sink data the builder keeps for it.
+#
 # The sample batch has three columns:
 #   a  INT64, no NULL, row r holds r
 #   b  INT64, NULL where r % 5 == 2, else r * 10
@@ -23,16 +26,19 @@ from komira_arrow.schema import (
     Field,
     RecordBatch,
     RecordBatchBuilder,
+    Schema,
     SchemaBuilder,
 )
 from komira_arrow.string_array import StringArray
 from komira_collections.slab import Slab
 from komira_physical_plan.physical_plan import (
+    AggSinkData,
     EDGE_E3_PUBLISH_WAIT,
     KEY_DTYPE_NONE,
     MorselOp,
     ORDER_NONE,
     SegmentDescPod,
+    SINK_AGG,
     SINK_COLLECT,
     SINK_ORIENT_COLUMNAR,
     SOURCE_BATCH,
@@ -40,6 +46,7 @@ from komira_physical_plan.physical_plan import (
     SOURCE_SINK_OUTPUT,
     SourceSpecPod,
 )
+from komira_plan_expr.agg_expr import AggExpr
 from komira_plan_expr.expr import Expr
 
 
@@ -129,6 +136,38 @@ def output_segment(
         deps^,
         tags^,
     )
+
+
+def with_agg_sink(var desc: SegmentDescPod, param_id: Int) -> SegmentDescPod:
+    """`desc` with its sink changed to the ungrouped aggregation whose data the
+    builder holds as `param_id` (`RealBuilder.add_agg_sink`)."""
+    desc.sink_kind = SINK_AGG
+    desc.sink_key_dtype = KEY_DTYPE_NONE
+    desc.sink_orientation = SINK_ORIENT_COLUMNAR
+    desc.sink_param_id = param_id
+    return desc^
+
+
+def ungrouped_agg_data(
+    var aggs: Slab[AggExpr], var output_schema: Schema
+) -> AggSinkData:
+    """The data of an ungrouped aggregation: no group-by expression."""
+    return AggSinkData(Slab[Expr](), aggs^, output_schema^)
+
+
+def agg_list(var a: AggExpr) -> Slab[AggExpr]:
+    """An aggregate list of one."""
+    var out = Slab[AggExpr]()
+    out.append(a^)
+    return out^
+
+
+def agg_list(var a: AggExpr, var b: AggExpr) -> Slab[AggExpr]:
+    """An aggregate list of two, `a` first."""
+    var out = Slab[AggExpr]()
+    out.append(a^)
+    out.append(b^)
+    return out^
 
 
 def chain(var a: MorselOp) -> Slab[MorselOp]:
