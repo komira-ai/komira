@@ -7,6 +7,9 @@
 #   divergent cell has no ratio, the DuckDB pin and dataset lock survive).
 # - test_text_shape: one line, the schema string first, the scale as a
 #   one-member object.
+# - test_reader_reads_a_result_without_warmup_runs_as_zero: a result with no
+#   warmup_runs member reads as 0 warm-up runs; a negative or non-integer
+#   count is refused. (test_round_trip checks that a written count comes back.)
 # - test_reader_refuses: a wrong schema string, an unknown member, a missing
 #   member, a member named twice, a ratio on a cell that has none, a verdict
 #   that does not follow from the ratio, a summary that is not the cells'
@@ -124,7 +127,7 @@ def _sample() raises -> BenchResult:
     cells.append(_cell(String("clickbench/q02"), String("clickbench"), StageOutcome.exec_ok(),
         _side(43, 1.0, 1.0), _side(43, 2.0, 2.0), ValueVerdict.identical()))
     var run = RunInfo(String("both"), String("sf"), 10, 2, 4,
-        String(STATISTIC_MIN_OF_SWEEP_MEDIAN), 20, 1.05)
+        String(STATISTIC_MIN_OF_SWEEP_MEDIAN), 20, 1.05, 5)
     var env = Environment(
         String("bench-class-a"), String("Example CPU 2.4GHz"), 44, 137438953472,
         String("Linux 6.1"), String("1.2.3"),
@@ -172,6 +175,8 @@ def test_round_trip() raises:
     assert_true(not Bool(back.cells[3].komira))
     assert_equal(back.cells[3].value.text(), String("UNVERIFIED:not run"))
     assert_equal(back.run.pass_max, 1.05)
+    assert_equal(back.run.warmup_runs, 5)
+    assert_true(text.find(String('"warmup_runs":5')) >= 0)
     assert_equal(back.run.scale_kind, String("sf"))
     assert_equal(back.run.scale_value, 10)
     assert_equal(back.env.hostclass, String("bench-class-a"))
@@ -187,6 +192,17 @@ def test_text_shape() raises:
     assert_true(text.startswith(String('{"schema":"komira-bench-result/1","run":')))
     assert_true(text.find(String('"scale":{"sf":10}')) >= 0)
     assert_true(text.find(String('"summary":{')) >= 0)
+
+
+def test_reader_reads_a_result_without_warmup_runs_as_zero() raises:
+    var good = write_result_json(_sample())
+    var legacy = _altered(good, String(',"warmup_runs":5'), String(""))
+    assert_true(legacy.find(String("warmup_runs")) < 0)
+    var back = parse_result_json(legacy)
+    assert_equal(back.run.warmup_runs, 0)
+    assert_equal(back.run.threads, 20)
+    assert_true(_refused(_altered(good, String('"warmup_runs":5'), String('"warmup_runs":-1'))))
+    assert_true(_refused(_altered(good, String('"warmup_runs":5'), String('"warmup_runs":5.0'))))
 
 
 def test_reader_refuses() raises:
@@ -501,6 +517,10 @@ def main() raises:
         test_text_shape()
     except e:
         failed += "\n  test_text_shape: " + String(e)
+    try:
+        test_reader_reads_a_result_without_warmup_runs_as_zero()
+    except e:
+        failed += "\n  test_reader_reads_a_result_without_warmup_runs_as_zero: " + String(e)
     try:
         test_reader_refuses()
     except e:

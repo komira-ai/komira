@@ -205,11 +205,13 @@ def _read_cell(v: JsonValue, where: String) raises -> Cell:
 
 
 def _read_run(v: JsonValue) raises -> RunInfo:
-    var o = _object(
-        v,
-        String("run"),
-        String("mode scale sweeps reps statistic threads pass_max"),
-    )
+    # warmup_runs is optional on read: a result written before the field
+    # existed has none, and read as 0 warm-up runs.
+    var with_warmup = v.is_object() and v.has(String("warmup_runs"))
+    var members = String("mode scale sweeps reps statistic threads pass_max")
+    if with_warmup:
+        members += String(" warmup_runs")
+    var o = _object(v, String("run"), members)
     var scale = o.get(String("scale"))
     if not scale.is_object() or scale.num_members() != 1:
         _fail(String("run.scale"), String("expected an object with one member, sf or rows"))
@@ -225,6 +227,7 @@ def _read_run(v: JsonValue) raises -> RunInfo:
         _text(o.get(String("statistic")), String("run.statistic")),
         _int(o.get(String("threads")), String("run.threads")),
         _float(o.get(String("pass_max")), String("run.pass_max")),
+        Int(_int(o.get(String("warmup_runs")), String("run.warmup_runs"))) if with_warmup else 0,
     )
 
 

@@ -73,6 +73,7 @@ def _run_json(run: RunInfo) raises -> JsonValue:
     o.set_member(String("statistic"), _s(run.statistic))
     o.set_member(String("threads"), _i(run.threads))
     o.set_member(String("pass_max"), JsonValue.from_f64(run.pass_max))
+    o.set_member(String("warmup_runs"), _i(Int64(run.warmup_runs)))
     return o^
 
 

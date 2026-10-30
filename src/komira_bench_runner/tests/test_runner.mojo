@@ -13,6 +13,15 @@
 #   duckdb 2 ms), the ratio 1.5 and the verdict FAIL against 1.0; the arm and
 #   DuckDB were both given the same threads and memory limit; the arm ran the
 #   check with rows before any timed run.
+# - test_wide_runs_discard_warmup_runs_and_the_result_records_them: with the
+#   warm-up count left to the thread count, 1 and 8 threads discard none and
+#   32 and 88 discard 5 runs of each query on each engine before the first
+#   sweep; an explicit count (9 at 88 threads, 2 at 8, 0 at 32) is used as
+#   given; the arm and DuckDB each ran that many extra times, the measured
+#   sweeps and the cell are unchanged, and `run.warmup_runs` in the written
+#   result reads back as the count.
+# - test_a_cold_result_discards_no_warmup_runs: at 88 threads the warm result
+#   records 5 and the cold result records 0.
 # - test_a_mismatching_answer_is_recorded_wrong_and_never_timed: rows that
 #   differ in one value give EXEC_FAIL with the cause "answer differs from
 #   duckdb", no time on either side, no ratio; the arm ran once and DuckDB ran
@@ -253,10 +262,10 @@ struct FakeDuckDb(DuckDbTransport):
         return 0
 
 
-def _settings_rule() -> Rule:
+def _settings_rule(threads: Int = 4) -> Rule:
     return Rule(
         String("current_setting('threads')"),
-        String('[{"threads":4,"memory_limit":"16.0 KiB","version":"v1.5.6","source_id":"069cc9f9b5"}]'),
+        String('[{"threads":') + String(threads) + String(',"memory_limit":"16.0 KiB","version":"v1.5.6","source_id":"069cc9f9b5"}]'),
         String(""),
         0,
     )
@@ -422,8 +431,8 @@ struct Rig(Movable):
         self.sent = ArcPointer[List[String]](List[String]())
         self.shared = ArcPointer[Shared](Shared())
 
-    def duckdb(self, var rules: List[Rule]) -> DuckDbSession[FakeDuckDb]:
-        rules.insert(0, _settings_rule())
+    def duckdb(self, var rules: List[Rule], threads: Int = 4) -> DuckDbSession[FakeDuckDb]:
+        rules.insert(0, _settings_rule(threads))
         return DuckDbSession[FakeDuckDb](FakeDuckDb(self.cell, self.sent, rules^), BenchClock.manual(self.cell))
 
     def sent_text(self) -> String:
@@ -514,6 +523,77 @@ def test_a_matching_answer_is_timed_and_recorded() raises:
     assert_equal(run_status(out), 0)
     var header = format_run(out)
     assert_equal(_count(header, String("derived from TPC-H; not comparable to published TPC-H results")), 1)
+
+
+def _warm_run_at(threads: Int, warmup_runs: Int, mut rig: Rig) raises -> RunOutput:
+    var rules = List[Rule]()
+    rules.append(Rule(String("revenue_q6"), String('[{"revenue":123.45}]'), String(""), 2 * _MS))
+    var session = rig.duckdb(rules^, threads)
+    var scripts = List[Script]()
+    scripts.append(Script(String("tpch/q6"), ARM_ROWS, String(""), _rows_one(123.45), 3 * _MS))
+    var arm = FakeArm(rig.cell, rig.shared, scripts^)
+    var dropper = NoCacheDropper()
+    var queries = List[QuerySpec]()
+    queries.append(_q(String("q6"), String("SELECT revenue_q6")))
+    return run_queries(
+        session, arm, dropper, BenchClock.manual(rig.cell), queries, _inputs(),
+        RunSettings(threads, 16384, 2, 3, 0, 3, 1.0, warmup_runs),
+    )
+
+
+def _arm_runs(log: String) -> Int:
+    return _count(log, String("run count"))
+
+
+def test_wide_runs_discard_warmup_runs_and_the_result_records_them() raises:
+    # (threads, requested, expected discarded warm-up runs)
+    var cases = List[Tuple[Int, Int, Int]]()
+    cases.append((1, -1, 0))
+    cases.append((8, -1, 0))
+    cases.append((32, -1, 5))
+    cases.append((88, -1, 5))
+    cases.append((88, 9, 9))
+    cases.append((8, 2, 2))
+    cases.append((32, 0, 0))
+    for i in range(len(cases)):
+        var threads = cases[i][0]
+        var want = cases[i][2]
+        var rig = Rig()
+        var out = _warm_run_at(threads, cases[i][1], rig)
+        # the result says how many runs were discarded before the sweeps
+        assert_equal(out.warm.run.warmup_runs, want)
+        assert_equal(out.warm.run.threads, Int64(threads))
+        assert_equal(out.outcomes[0].timed, True)
+        # the discarded runs were run, on both engines, in addition to the
+        # 2 sweeps x 3 reps that are measured
+        assert_equal(_arm_runs(rig.log_text()), 6 + want)
+        assert_equal(_runs(rig.sent_text(), String("SELECT revenue_q6")), 1 + 6 + want)
+        # the cell is the same measurement whatever was discarded
+        assert_equal(out.warm.cells[0].komira.value().ms, 3.0)
+        assert_equal(out.warm.cells[0].duckdb.value().ms, 2.0)
+        assert_equal(len(out.warm.cells[0].komira.value().ms_per_sweep), 2)
+        # and the count survives the file
+        var back = parse_result_json(write_result_json(out.warm))
+        assert_equal(back.run.warmup_runs, want)
+
+
+def test_a_cold_result_discards_no_warmup_runs() raises:
+    var rig = Rig()
+    var rules = List[Rule]()
+    rules.append(Rule(String("revenue_q6"), String('[{"revenue":123.45}]'), String(""), 2 * _MS))
+    var session = rig.duckdb(rules^, 88)
+    var scripts = List[Script]()
+    scripts.append(Script(String("tpch/q6"), ARM_ROWS, String(""), _rows_one(123.45), 3 * _MS))
+    var arm = FakeArm(rig.cell, rig.shared, scripts^, 27 * _MS)
+    var dropper = FakeDropper(rig.shared)
+    var queries = List[QuerySpec]()
+    queries.append(_q(String("q6"), String("SELECT revenue_q6")))
+    var out = run_queries(
+        session, arm, dropper, BenchClock.manual(rig.cell), queries, _inputs(),
+        RunSettings(88, 16384, 2, 3, 2, 3, 1.0),
+    )
+    assert_equal(out.warm.run.warmup_runs, 5)
+    assert_equal(out.cold.value().run.warmup_runs, 0)
 
 
 def test_a_mismatching_answer_is_recorded_wrong_and_never_timed() raises:

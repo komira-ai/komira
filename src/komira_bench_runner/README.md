@@ -6,7 +6,7 @@ The program that runs one benchmark query on both engines and writes the result.
 2. prepares the komira arm with the same tables, thread count and memory limit;
 3. runs the query on DuckDB in JSON mode (the reference rows) and on the arm with its rows materialized;
 4. compares the two by signature (exact for integers and text, a relative tolerance for floats) and, when the query has `ORDER BY` keys, checks the arm's row order;
-5. times the query only if the answers match: warm (sweeps of reps; rep 0 of each sweep is dropped, each sweep is reduced to its median, and the cell's time is the least of the sweep medians: not one median after one discarded run) and, if asked and possible, cold (the file cache dropped before every rep of either engine);
+5. times the query only if the answers match: warm (first `--warmup-runs` runs of each engine, run and discarded: 5 at 32 threads or more, none below, because a wide run's first runs page-fault while the allocator warms up; then sweeps of reps; rep 0 of each sweep is dropped, each sweep is reduced to its median, and the cell's time is the least of the sweep medians: not one median after one discarded run) and, if asked and possible, cold (the file cache dropped before every rep of either engine);
 6. fills a `BenchResult` (`komira_bench_report`) per temperature and writes it.
 
 It implements these parts of `docs/design/lowering_and_pipeline.md` section 7.4: both engines at the same thread count and memory limit, cold and warm reported separately, results checked before timing under a stated float tolerance, refusals listed. It does not implement the disclosure rule: shortcuts both engines take (a `COUNT(*)` from the footer) and options that cost throughput for reproducibility (grain state) are not marked.
@@ -65,7 +65,7 @@ Not mapped yet, and so refused: dictionary-encoded strings, booleans, timestamps
 
 | file | holds |
 |---|---|
-| `warm/result.json` | the warm result: `komira-bench-result/1` |
+| `warm/result.json` | the warm result: `komira-bench-result/1`; `run.warmup_runs` is the number of discarded warm-up runs |
 | `cold/result.json` | the cold result, only when cold was measured |
 | `comparison.txt` | the tolerance the answers were compared under: floats within the larger of `float_rel_tol` times the larger magnitude and `float_abs_floor`, everything else (declared column types included) exact; it is also printed |
 | `queries.sha256` | `<suite>/<id> <sha256 of the text>` per query in run order, then `listing_sha256` of those lines |
@@ -91,7 +91,7 @@ komira_bench_runner_main
   [--order-key COLUMN[:desc][:nulls_first]]...
   --hostclass LABEL --cpu-model TEXT --os TEXT --komira-version TEXT --cores N --mem-bytes N
   [--threads N] [--memory-limit-bytes N] [--duckdb-version V]
-  [--warm-sweeps N] [--warm-reps N] [--cold-sweeps N --cold-reps N --drop-caches-file PATH]
+  [--warm-sweeps N] [--warm-reps N] [--warmup-runs N] [--cold-sweeps N --cold-reps N --drop-caches-file PATH]
   [--pass-max X] [--max-silence-ms N]
 ```
 

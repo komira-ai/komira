@@ -229,7 +229,7 @@ assert_true(message.startswith(String("BenchResultError: result: missing member"
 | member | what |
 |---|---|
 | `schema` | the string `komira-bench-result/1`; any other is refused |
-| `run` | `mode` (`both`, `komira`, `duckdb`), `scale` (`{"sf": N}` or `{"rows": N}`), `sweeps`, `reps` (at least 2), `statistic` (`min_of_sweep_median`), `threads`, `pass_max` |
+| `run` | `mode` (`both`, `komira`, `duckdb`), `scale` (`{"sf": N}` or `{"rows": N}`), `sweeps`, `reps` (at least 2), `statistic` (`min_of_sweep_median`), `threads`, `pass_max`, `warmup_runs` (runs of each query on each engine discarded before the first sweep; optional when read, absent means 0) |
 | `env` | `hostclass`, `cpu_model`, `cores`, `mem_total_bytes`, `os`, `komira_version`, `duckdb` (`version`, `sha256`, `pin`: `PINNED` or `UNPINNED:<reason>`), `dataset_lock_sha256` |
 | `cells` | per cell: `id` (`<suite>/<name>`), `suite`, `reps`, `stage` (`EXEC_OK`, `BIND_FAIL`, `EXEC_FAIL`, `UNSUPPORTED:<construct>`), `komira` and `duckdb` (null or `rows`, `ms`, `ms_per_sweep`, `spread_pct`), `value` (`IDENTICAL`, `DIVERGENT`, `UNVERIFIED:<cause>`), `ratio` (a number or null), `verdict` (`PASS`, `FAIL`, `NO_RATIO`) |
 | `summary` | the counts, geomean and median of the ratios, a `per_suite` list and the `headline`, all recomputed by the reader from the cells: counts and text must be equal, the floats must agree to 1e-9 (the geomean goes through the platform's `log` and `exp`, so it is not bit-exact across platforms), and the geomean figure in the headline must be the rounding of the recomputed or the stored geomean |

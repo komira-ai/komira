@@ -10,7 +10,7 @@ anything is timed, times warm and cold runs, and fills a `BenchResult`
 | `QuerySpec` | one query: suite, id, dataset, text, ORDER BY keys, and the sha256 of the text |
 | `TableBinding`, `Scale`, `tables_of`, `scale_of`, `table_name_of` | a dataset manifest as named tables and a stated scale |
 | `CacheDropper`, `NoCacheDropper`, `ProcDropCaches` | the file-cache drop before a cold run |
-| `RunSettings`, `HostFacts`, `RunInputs` | what a run is told |
+| `RunSettings`, `HostFacts`, `RunInputs`, `warmup_runs_for`, `WARMUP_AUTO`, `WIDE_WARMUP_THREADS`, `WIDE_WARMUP_RUNS` | what a run is told |
 | `run_queries`, `RunOutput`, `QueryOutcome`, `register_duckdb` | the run itself |
 | `measure`, `Sweeps`, `time_komira`, `time_duckdb` | timing one query on both engines |
 | `format_run`, `write_run`, `queries_listing`, `queries_file_text` | the console report and the files of a run |
@@ -51,5 +51,13 @@ from .runner import (
     register_duckdb,
     run_queries,
 )
-from .settings import HostFacts, RunInputs, RunSettings
+from .settings import (
+    HostFacts,
+    RunInputs,
+    RunSettings,
+    WARMUP_AUTO,
+    WIDE_WARMUP_RUNS,
+    WIDE_WARMUP_THREADS,
+    warmup_runs_for,
+)
 from .tables import Scale, TableBinding, scale_of, table_name_of, tables_of

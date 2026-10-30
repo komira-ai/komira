@@ -22,7 +22,8 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
 # - test_runner: the run over a DuckDB transport, a komira arm and a cache
 #   dropper that live in the test and a manual clock: a matching answer is
 #   timed, a wrong one is recorded and never timed, a refusal is listed, cold
-#   and warm are separate results, and the files round-trip.
+#   and warm are separate results, and the files round-trip; at 32 threads or more the warm-up runs are
+#   discarded and the result records how many.
 # - test_komira_arm: the real engine arm in the same run over a lineitem-shaped
 #   Parquet file and a DuckDB stand-in: TPC-H Q6's corpus text equals an
 #   independently computed answer and is timed, a join is listed as refused, a

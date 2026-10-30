@@ -227,7 +227,9 @@ def _checked(query: QuerySpec, answer: ArmAnswer, reference: ResultSignature) ra
     )
 
 
-def _run_info(settings: RunSettings, scale_kind: String, scale_value: Int64, sweeps: Int, reps: Int) -> RunInfo:
+def _run_info(
+    settings: RunSettings, scale_kind: String, scale_value: Int64, sweeps: Int, reps: Int, warmup_runs: Int
+) -> RunInfo:
     return RunInfo(
         String("both"),
         scale_kind.copy(),
@@ -237,6 +239,7 @@ def _run_info(settings: RunSettings, scale_kind: String, scale_value: Int64, swe
         String(STATISTIC_MIN_OF_SWEEP_MEDIAN),
         Int64(settings.threads),
         settings.pass_max,
+        warmup_runs,
     )
 
 
@@ -342,7 +345,7 @@ def run_queries[
             var w = measure(
                 session, arm, dropper, clock, q, files,
                 tables, settings.threads, settings.memory_limit_bytes, checked.rows,
-                settings.warm_sweeps, settings.warm_reps, False,
+                settings.warm_sweeps, settings.warm_reps, False, settings.warm_warmup_runs(),
             )
             warm_cells.append(_timed_cell(q, checked.rows, w, settings.warm_reps, settings.pass_max))
             if cold_on:
@@ -363,7 +366,7 @@ def run_queries[
         )
 
     var warm = BenchResult(
-        _run_info(settings, scale.kind, scale.value, settings.warm_sweeps, settings.warm_reps),
+        _run_info(settings, scale.kind, scale.value, settings.warm_sweeps, settings.warm_reps, settings.warm_warmup_runs()),
         _environment(inputs),
         warm_cells^,
     )
@@ -371,7 +374,7 @@ def run_queries[
     var cold = Optional[BenchResult]()
     if cold_on:
         var r = BenchResult(
-            _run_info(settings, scale.kind, scale.value, settings.cold_sweeps, settings.cold_reps),
+            _run_info(settings, scale.kind, scale.value, settings.cold_sweeps, settings.cold_reps, 0),
             _environment(inputs),
             cold_cells^,
         )

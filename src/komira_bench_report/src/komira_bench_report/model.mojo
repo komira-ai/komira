@@ -275,6 +275,7 @@ struct RunInfo(Copyable, Movable):
     var statistic: String
     var threads: Int64
     var pass_max: Float64
+    var warmup_runs: Int
 
     def __init__(
         out self,
@@ -286,6 +287,7 @@ struct RunInfo(Copyable, Movable):
         var statistic: String,
         threads: Int64,
         pass_max: Float64,
+        warmup_runs: Int = 0,
     ):
         self.mode = mode^
         self.scale_kind = scale_kind^
@@ -295,6 +297,7 @@ struct RunInfo(Copyable, Movable):
         self.statistic = statistic^
         self.threads = threads
         self.pass_max = pass_max
+        self.warmup_runs = warmup_runs
 
 
 struct BenchResult(Copyable, Movable):
@@ -334,6 +337,8 @@ def _validate_run(run: RunInfo) raises:
         raise Error("run.statistic must be " + String(STATISTIC_MIN_OF_SWEEP_MEDIAN))
     if run.threads < 1:
         raise Error("run.threads must be at least 1")
+    if run.warmup_runs < 0:
+        raise Error("run.warmup_runs must not be negative")
     if not isfinite(run.pass_max) or run.pass_max <= 0.0:
         raise Error("run.pass_max must be finite and positive")
 

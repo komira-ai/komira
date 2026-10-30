@@ -92,7 +92,7 @@ def _drive[
     # The komira arm. Replace this line to plug in another engine.
     var arm = KomiraArm()
     var settings = RunSettings(
-        f.threads, f.memory_limit_bytes, f.warm_sweeps, f.warm_reps, f.cold_sweeps, f.cold_reps, f.pass_max
+        f.threads, f.memory_limit_bytes, f.warm_sweeps, f.warm_reps, f.cold_sweeps, f.cold_reps, f.pass_max, f.warmup_runs
     )
     var inputs = RunInputs(
         manifest.copy(),

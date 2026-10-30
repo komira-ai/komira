@@ -75,14 +75,22 @@ def measure[
     sweeps: Int,
     reps: Int,
     cold: Bool,
+    warmup_runs: Int = 0,
 ) raises -> Sweeps:
     """`sweeps` sweeps of `reps` reps of `query` on both engines; every timed
     komira run must return `rows` rows, the count of its verified run. When
     `cold`, the file cache is dropped before every rep of either engine and
     the komira arm is closed and prepared again before each of its reps, so
     what it caches in the process is gone. DuckDB's session is not restarted:
-    what DuckDB caches in its process survives a cold rep."""
+    what DuckDB caches in its process survives a cold rep. A warm measure
+    (not `cold`) first runs `warmup_runs` runs of each engine, alternating,
+    and discards their times, so the allocator warm-up of a wide run is not in
+    a sweep."""
     var out = Sweeps()
+    if not cold:
+        for _ in range(warmup_runs):
+            _ = time_komira(arm, query, clock, rows)
+            _ = time_duckdb(session, query)
     for _ in range(sweeps):
         var k = List[Float64]()
         var d = List[Float64]()
