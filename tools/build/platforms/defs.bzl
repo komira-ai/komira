@@ -481,3 +481,36 @@ def komira_default_execution_platforms(name, visibility = None):
 # Each rule and macro a BUCK file calls declares its package's doc_tree
 # (tools/build/lint/doc_tree.bzl), so no BUCK file names one.
 komira_default_execution_platforms = declares_docs(komira_default_execution_platforms)
+
+def tool_exec_row(mode, host_name):
+    """The row the build tools run on, given `execution_mode()` (None for a refused configuration) and the platform-table row this machine is (None for none).
+
+    `darwin-arm64` only for a local build on the darwin-arm64 host, whose one
+    execution platform that is; `linux-x86_64` otherwise (remote execution,
+    whatever the client's own platform; a Linux client; a refused
+    configuration, reported where it is read), which is what every tool states
+    today: the actions, their configuration and their keys are unchanged.
+    """
+    if mode == "local" and host_name == "darwin-arm64":
+        return "darwin-arm64"
+    return "linux-x86_64"
+
+def tool_exec_name():
+    """The row the build tools (the unpackers, zig, the wrappers, the lints) run on; see `tool_exec_row`.
+
+    The mode is read from the ROOT cell's config, as the macOS toolchain's host
+    mode is (`darwin_toolchain_hosts_here`), so the two never disagree.
+    """
+    mode, _ = _mode_or_refusal(read_root_config)
+    return tool_exec_row(mode, host_row(host_info()))
+
+# The constraints of the execution platform the build tools run on, for the
+# `exec_compatible_with` of a target whose actions run a tool the build itself
+# produces or unpacks (see `tool_exec_name`). A target whose binary is a Linux
+# product (kcov, the LLVM branch-coverage tools, the tests of Linux-only
+# behaviour) states LINUX_X86_64 instead.
+TOOL_EXEC = constraints(tool_exec_name())
+
+def tool_unpack_triple():
+    """The zig target of a tool that runs on `TOOL_EXEC` (`x86_64-linux-musl`, or `aarch64-macos` for a local build on a Mac)."""
+    return row(tool_exec_name())["unpack_triple"]

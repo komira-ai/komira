@@ -48,7 +48,7 @@ public_pointer	src/komira_morsel/morsel_source.mojo	3	predates the lint
 public_pointer	src/komira_morsel/source_hooks.mojo	3	predates the lint
 public_pointer	src/komira_morsel/vtable_source.mojo	1	predates the lint
 public_pointer	src/komira_simd/src/komira_simd/simd_helpers.mojo	3	predates the lint
-wildcard_origin	src/kci_reconciler/erased_resource.mojo	49	predates the lint
+wildcard_origin	src/kci_reconciler/src/kci_reconciler/erased_resource.mojo	49	predates the lint
 wildcard_origin	src/komira_agg_api/accumulator_trait.mojo	2	predates the lint
 wildcard_origin	src/komira_arrow/primitive_array.mojo	2	predates the lint
 wildcard_origin	src/komira_arrow/record_batch.mojo	2	predates the lint

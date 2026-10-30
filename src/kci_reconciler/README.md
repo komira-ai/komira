@@ -126,3 +126,36 @@ assert_true(is_our_responsibility(FAULT_UNSET))  # an unclassified fault is ours
 assert_true(is_our_responsibility(FAULT_OURS))
 assert_false(is_our_responsibility(FAULT_USER))
 ```
+
+## Build files
+
+This package is built with buildrules' `mojo_package` and packaged for mopm as `kci_reconciler`, version 0.1.0
+(`mopm.toml`). The library is `src/kci_reconciler/` (the modules above), its tests are `tests/`. It depends on two
+packages, sibling directories (`[dependencies]` of `mopm.toml`): `komira_collections` and `komira_log`, each as `{ path =
+"../<name>", version = "0.1" }`. The `.conda` of this package records `mojo-komira_collections >=0.1,<0.2` and
+`mojo-komira_log >=0.1,<0.2` as dependencies and holds none of their files: installing `kci_reconciler` installs them
+with it. `komira_log` and its dependency `komira_libc` each link a static C archive of their own, and a dependent's
+link takes both from the closure; this package owns no C. The files that are not sources:
+
+| file | what |
+|---|---|
+| `mopm.toml` | the mopm manifest: name, version, the Mojo version, the dependencies and where the library and its tests are |
+| `mopm.lock` | the toolchain pins and the path dependencies of the closure, as `mopm lock` writes them (no registry is reached: every dependency is a sibling) |
+| `mopm-toolchain.toml` | the exact mopm and Mojo versions the build uses (written by hand) |
+| `buildrules.mojo.lock.bzl`, `buildrules.mojo.bzl` | written by `buildrules mojo sync` from the files above and from the manifests of the siblings; `buildrules mojo check` fails when they are stale |
+
+`:lib` is the library file, built from the `:lib` of the two siblings, and exists only once every test of `tests/`
+has passed. After any change to a source, a test, a manifest of this package or of a sibling, run
+`buildrules mojo sync` with the package and its siblings staged, commit what it writes, and build
+`komira//src/kci_reconciler:lib` on the farm. The public-API test reads two of the library's sources; `test_data`
+stages them at `lib/` in the test's working directory.
+
+`:conda` is buildrules' `mojo_conda` over `:lib`: the `.conda` of the mopm package
+(`mojo-kci_reconciler-0.1.0-mojo1.0.0_0.conda`), packed with the manifests of the closure beside its own (`members`),
+which therefore exists only once the tests have passed. Publishing it (`mopm publish`) uploads, so it is a step of a
+CI job that takes that file, not a build action.
+
+`:kci_reconciler` is `:lib` as komira's Mojo rules take it (`mojo_adopted_library`): its `deps` are the adopted
+target of each package in `[dependencies]`, and the rule refuses a list that is not the closure `:lib` was built
+from. It also compiles and runs the README's examples above (`[tests][readme]`) against `:lib`; the tests are not
+run again.

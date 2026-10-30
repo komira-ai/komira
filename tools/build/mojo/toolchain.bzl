@@ -9,7 +9,13 @@ Actions never search the worker's PATH.
 load(":providers.bzl", "MojoToolchainInfo", "ZigExeInfo")
 load(":test_runtime.bzl", "RUNNER_ENV", "data_map")
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
+load("@komira//tools/build/platforms:defs.bzl", "tool_unpack_triple")
 load("@komira//tools/build/rerun:rerun.bzl", "RERUN_ATTRS", "rerun_env", "rerun_info")
+
+# The zig target of a tool built to run in an action: the unpack triple of the
+# row the build tools run on (`x86_64-linux-musl`; `aarch64-macos` for a build
+# that runs every action on a Mac). See platforms/defs.bzl, `tool_exec_name`.
+_TOOL_TRIPLE = tool_unpack_triple()
 
 def busybox_sh(busybox, script, *args):
     """argv running `script` under the declared busybox shell.
@@ -232,8 +238,9 @@ zig_exe_rule = rule(
         # Strip symbols and debug information from the executable.
         "strip": attrs.bool(default = True),
         # zig's -target: what the executable runs on (it is built on the
-        # linux execution platform whatever this says).
-        "target": attrs.string(default = "x86_64-linux-musl"),
+        # build tools' execution platform whatever this says; the default
+        # is that platform's own triple).
+        "target": attrs.string(default = _TOOL_TRIPLE),
         # `zig_test` targets the executable waits for.
         "unit_tests": attrs.list(attrs.dep(), default = []),
         "zig": attrs.dep(),
@@ -348,7 +355,7 @@ zig_test_rule = rule(
         # zig's -target. The tests run as part of the action, so it must be a
         # target the execution platform runs (the default, or another libc
         # of its cpu).
-        "target": attrs.string(default = "x86_64-linux-musl"),
+        "target": attrs.string(default = _TOOL_TRIPLE),
         "zig": attrs.dep(),
         # The runner of the action (tools/zig_launch.zig), built by the
         # pinned zig directly: no test needs a shell to run.
@@ -390,7 +397,7 @@ zig_bootstrap_exe_rule = rule(
     attrs = {
         "imports": attrs.list(attrs.source(), default = []),
         "src": attrs.source(),
-        "target": attrs.string(default = "x86_64-linux-musl"),
+        "target": attrs.string(default = _TOOL_TRIPLE),
         "test_src": attrs.source(),
         "zig": attrs.dep(),
     },

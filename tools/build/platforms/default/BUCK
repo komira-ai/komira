@@ -1,4 +1,4 @@
-load("@komira//tools/build/platforms:defs.bzl", "komira_default_execution_platforms")
+load("@komira//tools/build/platforms:defs.bzl", "execution_mode", "komira_default_execution_platforms")
 load("@komira//tools/build/platforms:with_buildrules.bzl", "execution_platforms_plus")
 
 # The execution platforms of a standalone checkout (`[build]
@@ -23,6 +23,7 @@ komira_default_execution_platforms(
 execution_platforms_plus(
     name = "default",
     base = ":komira",
+    local = execution_mode() == "local",
     extra = ["buildrules//platforms:linux_x86_64"],
     # The macOS arm64 platform of buildrules' Mojo rules, on komira's macOS workers when it has them.
     extra_darwin = ["buildrules//platforms:macos_aarch64"],

@@ -15,8 +15,11 @@ from komira_plan_expr.expr_walk import (
 )
 from komira_plan_expr.scalar_desugar import promote_int_literal_to_float
 from komira_plan_expr.scalar_value import ScalarValue
+from komira_sql.sql_bind_interval import (
+    INTERVAL_STANDALONE_REFUSAL, interval_date_fold, interval_operand_side,
+)
 from komira_sql.sql_ast import (
-    SX_AGG, SX_BINARY, SX_BOOL, SX_CALL, SX_CASE, SX_COLUMN, SX_DATE, SX_FLOAT, SX_INT,
+    SX_AGG, SX_BINARY, SX_INTERVAL, SX_BOOL, SX_CALL, SX_CASE, SX_COLUMN, SX_DATE, SX_FLOAT, SX_INT,
     SX_LIKE, SX_NULL, SX_STAR, SX_STRING, SX_SUBQUERY, SX_TIMESTAMP, SX_UNARY,
     SX_WINDOW, SqlExpr, TSLIT_AWARE,
 )
@@ -239,7 +242,14 @@ def _bind_scalar(sx: SqlExpr, schema: Schema, scope: BindScope, catalog: SqlCata
                 _timestamp_literal_micros(String(sx.text), sx.op == TSLIT_AWARE)
             )
         )
+    if sx.tag == SX_INTERVAL:
+        raise Error(INTERVAL_STANDALONE_REFUSAL)
     if sx.tag == SX_BINARY:
+        var ivl_side = interval_operand_side(sx)
+        if ivl_side == 2:
+            return interval_date_fold(sx, _bind_scalar(sx._binary.value().left[], schema, scope, catalog, cte_scope, prebound))
+        if ivl_side == 1:
+            return interval_date_fold(sx, _bind_scalar(sx._binary.value().right[], schema, scope, catalog, cte_scope, prebound))
         if _is_null_comparison(sx):
             if sx._binary.value().left[].tag != SX_NULL:
                 return _null_comparison(sx.op, _bind_scalar(sx._binary.value().left[], schema, scope, catalog, cte_scope, prebound))

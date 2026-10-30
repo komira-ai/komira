@@ -122,7 +122,7 @@ Three properties of this check shape everything below:
 
 The second validation kind, `CONDA_INSTALL_SMOKE`, installs into a
 digest-pinned container and runs one `program` under `release/`
-(`src/kci_release_machine/graph.mojo`). Its `docker run` uses
+(`src/kci_release_machine/src/kci_release_machine/graph.mojo`). Its `docker run` uses
 `--network=bridge`, a read-only root, no capabilities and four `-e`
 variables, and copies in only the program (`src/kci_validate/container.mojo`).
 No machine file uses it today, and it has no field for a second container.
@@ -399,7 +399,7 @@ about the installed package itself.
 | `komira_parquet`, `komira_arrow_ipc`, `komira_orc`, `komira_avro`, `komira_csv`, `komira_jsonl` | PROPOSED: an interop leg: pyarrow (Apache-2.0) and fastavro (MIT) pinned exactly from conda-forge in the same environment read what the installed komira wrote, and komira reads what they wrote | beta, installed package; or build time with pinned downloads | the write direction; C Data Interface export into a real pyarrow process; komira's native library coexisting with pyarrow's in one process | breadth (one dataset per format); other platforms |
 
 The interop leg needs a grammar change: `install` must name release members
-and `smoke` has one word (`src/kci_release_machine/graph.mojo`), so a
+and `smoke` has one word (`src/kci_release_machine/src/kci_release_machine/graph.mojo`), so a
 third-party oracle cannot be requested today.
 
 Runtime packages without a README (`komira_log`, `komira_async`, `komira_fs`,
@@ -524,7 +524,7 @@ validation run id is not `komira_test_run_id`, which names one test process.
 
 - `beta_validate` job (`validate` before M2): 60 minutes for both validations together, each of which
   may wait up to `wait_for_index_seconds` (1800 by default, 3600 at most,
-  `src/kci_release_machine/graph.mojo`) for the channel index. Measured: in
+  `src/kci_release_machine/src/kci_release_machine/graph.mojo`) for the channel index. Measured: in
   five consecutive successful `kci.yml` runs on `main` on 2026-10-07 (run
   37688200088 the latest), the whole `validate` job took 151 to 208 s
   (GitHub's `startedAt` to `completedAt` for the job: checkout, the release
@@ -553,7 +553,7 @@ validation run id is not `komira_test_run_id`, which names one test process.
   the Connect conformance run has, before it is welded.
 - A service validation beside beta's installs therefore needs its own job
   and timeout; it must not share the `beta_validate` job's hour. Inside `kci.yml`
-  that job is a part job of the stage `beta` under rule R9 of `src/kci_workflow_check/rules.mojo`: no
+  that job is a part job of the stage `beta` under rule R9 of `src/kci_workflow_check/src/kci_workflow_check/rules.mojo`: no
   environment, no identity token, and prod needs it (R2, R4, R3). A job
   that needs an environment or a token, or must not block prod, collides
   with those rules; item 7 of

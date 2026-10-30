@@ -1,0 +1,15 @@
+[package]
+name = "komira_managed_mail_proto"
+version = "0.1.0"
+description = "The managed mail API (komira.managed_mail.v1) as Mojo structs generated from its .proto files, with their proto3 canonical JSON form."
+license = "Apache-2.0"
+repository = "https://github.com/komira-ai/komira"
+readme = "README.md"
+mojo = ["1.0.0"]
+
+[dependencies]
+komira_proto_codec = { path = "../komira_proto_codec", version = "0.1" }
+
+[targets]
+lib = { path = "generated/komira_managed_mail_proto_generated" }
+tests = ["tests"]
