@@ -346,7 +346,7 @@ def test_the_pool_is_charged_while_rows_are_held_and_repaid() raises:
     var first = table(0, N // 2)
     var second = table(N // 2, N // 2)
     var kept = batch_buffer_bytes(first) + batch_buffer_bytes(second)
-    var pool = SegmentPool(100 * kept)
+    var pool = SegmentPool(10 * kept)
     var data = _data(_keys(X), _flags(False), _flags(False))
     var sink = _sink(data, pool, 2)
     sink.consume(0, Morsel(first^, 0, 0))

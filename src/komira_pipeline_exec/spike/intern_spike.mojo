@@ -54,8 +54,10 @@
 # Output: one `RESULT <config> <metric>=<value>` line per number, best of
 # `TRIALS` runs; the farm is not pinned, so read ratios, not absolutes. The
 # last line is `OK`; a layout whose counts differ from the direct count prints
-# `FAILED` and the reason instead (a failed run check records no stdout, so the
-# failure is printed, not raised). Read the recorded stdout:
+# `FAILED` and the reason and exits 1, which fails the run check. CI compiles
+# this program (it is in the check set) but does not run it; the numbers come
+# from running the `[run_check]` sub-target on the farm, and read the recorded
+# stdout:
 #
 #   ./buck2 build 'komira//src/komira_pipeline_exec:intern_spike[run_check]' --show-output
 #
@@ -63,6 +65,7 @@
 # holds a count of zero: it is not a group, and `merged_used_groups` against
 # `merged_entries` counts them.
 
+from std.sys import exit
 from std.time import perf_counter_ns
 
 comptime WORKERS = 8
@@ -450,8 +453,9 @@ def run(groups: Int, dict_size: Int, length: Int) raises:
 def main():
     # Q1-like (four groups), then the group count grows by decades; the last
     # row varies the string length at 100,000 groups. A failed check prints
-    # FAILED and its reason and still returns, so the recorded stdout of the
-    # run says what was wrong.
+    # FAILED and its reason and exits 1, which fails the run check (a failed
+    # run check records no stdout, so the reason is in this program's code path,
+    # not in the build log).
     try:
         run(4, 4, 16)
         run(1000, 1000, 16)
@@ -461,3 +465,4 @@ def main():
         print("OK")
     except e:
         print("FAILED", e)
+        exit(1)

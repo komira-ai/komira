@@ -84,28 +84,56 @@ Import each module by name; the package root exports nothing.
   non-NULL row SUM, MIN, MAX and AVG are NULL and COUNT is zero, in one row of
   the declared schema. `AggSinkData.presorted` and `estimated_groups` belong to
   grouped sinks and are ignored.
+- `sink_group_agg`, `group_table`, `group_keys`, `sink_agg_any`: the grouped
+  aggregation sinks `(SINK_AGG, KEY_DTYPE_I64 | I32 | F64 | F32,
+  SINK_ORIENT_COLUMNAR)`, over one or more keys that are integer columns (the
+  I64 and I32 rows) or float columns (F64 and F32), with the aggregates and the
+  exact folds of the ungrouped sink (`agg_fold`, `agg_output`). The output
+  schema lists the key columns, in the input's types, then the aggregates. Each
+  worker folds into a hash table of its own (`group_table`: a 64-bit cell and a
+  NULL flag per key, a count and a 128-bit integer per aggregate); a NULL key is
+  a group of its own, and 0.0 and -0.0, and all NaNs, are one group each
+  (`group_keys`). `combine` merges the tables in worker order with the same
+  overflow rule, per group, so a sum that overflows only when the workers'
+  partials are added is refused; the order of the output groups is not
+  specified. Each doubling of a table is charged to the worker's reservation
+  before it is made, the merged table to the sink's own, and a denial fails
+  the query by name; a worker's table is freed and its memory returned as soon
+  as it is merged. The table is not `komira_op_agg_hash`'s: those entries hold
+  Int64 keys without a NULL flag and 64-bit or float accumulators, with no exact
+  128-bit decimal fold. Memory outside the pool, as a known limit: the buffers
+  of the morsel being folded (about 9 bytes per row per key and 17 per row per
+  aggregate argument, freed when `consume` returns) and the old arrays of a
+  table while it doubles (at most half the bytes charged for that table). A
+  table holds at most 2^30 groups (a 32-bit group index) and refuses more by
+  name. The merge is serial, and there is no dense table for a
+  small key domain and no partitioned parallel finalize yet. `AnyAggSink` is the
+  one slot of the sink variant that holds the grouped or the ungrouped sink.
 - `segment_pool`: `SegmentPool`, an atomic byte count with an optional budget
   that any number of handles share, and `WorkerReservation`, a worker's plain
   tally inside the blocks it drew (a grant is a compare-and-swap, so the count
   never passes the budget and a request that fits is not refused). A
   reservation returns its blocks when it is dropped. The aggregation sink's
-  state is fixed in size, so it draws once per worker; the pool is the draw
-  point for sinks that grow.
+  state is fixed in size, so it draws once per worker; the grouped sink draws as
+  its tables grow.
 - `sink_sort`, `sort_nulls`: the in-memory sort `(SINK_SORT, KEY_DTYPE_NONE,
   SINK_ORIENT_COLUMNAR)`, for a small result (TPC-H Q1's ORDER BY over its
   grouped rows). It collects with a `CollectSink` (morsels in position order),
   then sorts the one batch by `SortSinkData`: keys, directions and per-key
   NULL placement (an empty `nulls_first` means the engine's default, NULLS
   LAST). `komira_op_sort.sort_batch_by_keys` is the sort and is stable, so tied
-  rows keep the collected order; it does not read a NULL placement, so
-  `sort_nulls` gives it, for each key that has a NULL, an INT32 rank column and
-  the key with its NULL slots overwritten by a valid value, and gathers the
-  input by the sorted row numbers. Each worker draws the bytes of the morsels it
-  keeps from the segment pool; at `combine` the sink draws twice the bytes kept
-  (the concatenation and the sorted copy: the peak is about three copies of the
-  input) and refuses, by name, when the pool or `SortSinkData.memory_budget` (when
-  positive) cannot hold them. There is no spill. `sort_harness` is the table
-  and the oracle of its tests.
+  rows keep the collected order. It does not read a NULL placement and orders a
+  dictionary by index, so `sort_nulls` hands it a key batch of its own: string
+  dictionaries decoded, and for each key with a NULL an INT32 rank column and
+  the key with its NULL slots overwritten by a valid value; the input is then
+  gathered by the sorted row numbers. Key types the kernel does not order
+  (DECIMAL, DATE, FLOAT32 ...) are refused by name when the sink is built.
+  Memory: the sink draws, as each exists, the morsels it keeps, the
+  concatenation, then the sorted copy plus a bound on the key batch and the
+  kernel's temporaries (`sort_scratch_bytes`), from the segment pool and from a
+  pool sized by `SortSinkData.memory_budget` (when positive). The budget bounds
+  the peak, and the consume that takes the input past it fails. There is no
+  spill. `sort_harness` is the table and the oracle of its tests.
 - `spike/intern_spike.mojo` (target `intern_spike`, not part of the library): the
   dictionary-interning spike of the string group-by. A standalone program that times
   interned dictionary codes, hashing every row, the fragment merge and the string-table
@@ -114,8 +142,8 @@ Import each module by name; the package root exports nothing.
 - `real_builder`: `RealBuilder`, the `SegmentBuilder` over these members. It
   serves SOURCE_PARQUET, SOURCE_BATCH, SOURCE_SINK_OUTPUT, OP_FILTER,
   OP_PROJECT, OP_LIMIT and the sinks `(SINK_COLLECT, KEY_DTYPE_NONE,
-  SINK_ORIENT_COLUMNAR)`, `(SINK_AGG, KEY_DTYPE_NONE,
-  SINK_ORIENT_COLUMNAR)` and `(SINK_SORT, KEY_DTYPE_NONE,
+  SINK_ORIENT_COLUMNAR)`, `(SINK_AGG, KEY_DTYPE_NONE, SINK_ORIENT_COLUMNAR)`,
+  the grouped rows I64, I32, F64 and F32, and `(SINK_SORT, KEY_DTYPE_NONE,
   SINK_ORIENT_COLUMNAR)`, and refuses every other kind by name. It keeps the
   resident batches (`add_resident`), the aggregation sink data a descriptor's
   `sink_param_id` indexes (`add_agg_sink`), the sort sink data (`add_sort_sink`) and the segment pool
@@ -126,7 +154,11 @@ Import each module by name; the package root exports nothing.
   filter).
 - `plan_harness`: segment descriptors for the three sources with an operator
   chain and a collect sink (`with_agg_sink` turns one into an aggregation),
-  `project_columns`, and a sample table with readers, for plans written by hand.
+  `project_columns`, and a sample table with readers, for plans written by hand
+  (`with_group_sink` and `grouped_agg_data` for the grouped sink).
+- `group_harness`: a table with NULL integer keys, a DECIMAL and a high-cardinality
+  column, and one with float keys, whose every cell is a function of its row
+  number.
 - `tpch_q6`: TPC-H Q6 as such a plan (scan, filter, project, SUM into a
   DECIMAL(38,4)) and a lineitem-shaped table with the types of the real files
   (DECIMAL(15,2), DATE32) whose first rows sit on every predicate's boundary.

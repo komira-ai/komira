@@ -643,17 +643,17 @@ tests that the answer equals the dictionary row's.
 **Spike result (slice 4).** `src/komira_pipeline_exec/spike/intern_spike.mojo` (target `intern_spike`, run on the farm with
 `[run_check]`) times the layouts on a synthetic workload: 8 workers, 4 row groups of 65,536 rows each, a dictionary of up to
 8,192 strings per row group drawn from a universe of 4 to 1,000,000 strings, 16-byte strings (and 48-byte at 100,000 groups).
-Every layout's counts are checked against a direct count. One farm run, best of three, unpinned: read the ratios. The hash is
+Every layout's counts are checked against a direct count. This is one farm run, best of three trials inside the run, on an unpinned worker; no machine description and no run-to-run variance was recorded, so read the ratios and treat the absolute nanoseconds as indicative. CI compiles the program and does not run it. The hash is
 FNV-1a a byte at a time (about 2.2 ns a byte), the same for every layout, so absolute hashing costs are high; a word-at-a-time
-hash lowers every row of the table that includes a hash and does not change which layout wins.
+hash would lower every cell that includes a hash; that it does not change which layout wins is an inference (the gaps are 9 times and more), not a measurement.
 
-| groups (dictionary) | interned, ns/row | by value, ns/row | merge, carried hash, ns/entry | merge, rehash, ns/entry | fragment entries per merged group | W string tables / merged table |
-|---|---|---|---|---|---|---|
-| 4 (4) | 1.6 | 133 | 139 | 183 | 8.0 | 8.0x (34 KB / 4 KB) |
-| 1,000 (1,000) | 3.8 | 141 | 111 | 150 | 8.0 | 8.0x (450 KB / 56 KB) |
-| 100,000 (8,192) | 22 | 197 | 131 | 170 | 3.8 | 3.8x (10.3 MB / 2.7 MB) |
-| 1,000,000 (8,192) | 22 | 202 | 139 | 176 | 1.5 | 1.4x (14.7 MB / 10.6 MB) |
-| 100,000 (8,192), 48-byte strings | 44 | 403 | 258 | 367 | 3.8 | 3.8x (15.7 MB / 4.1 MB) |
+| groups (dictionary) | interned, ns/row | by value, ns/row | shared table, ns/row | merge, carried hash, ns/entry | merge, rehash, ns/entry | fragment entries per merged group | W string tables / merged table |
+|---|---|---|---|---|---|---|---|
+| 4 (4) | 1.6 | 133 | 6.5 | 139 | 183 | 8.0 | 8.0x (34 KB / 4 KB) |
+| 1,000 (1,000) | 3.8 | 141 | 8.8 | 111 | 150 | 8.0 | 8.0x (450 KB / 56 KB) |
+| 100,000 (8,192) | 22 | 197 | 28 | 131 | 170 | 3.8 | 3.8x (10.3 MB / 2.7 MB) |
+| 1,000,000 (8,192) | 22 | 202 | 29 | 139 | 176 | 1.5 | 1.4x (14.7 MB / 10.6 MB) |
+| 100,000 (8,192), 48-byte strings | 44 | 403 | 53 | 258 | 367 | 3.8 | 3.8x (15.7 MB / 4.1 MB) |
 
 The three costs:
 
@@ -669,7 +669,7 @@ The three costs:
    cache misses of a large merge table, not with the rows. Carrying the hash saves 21 to 30 percent of it (the hash that
    would be recomputed: 35 ns at 16 bytes, 109 at 48), so the carried hash stays. The number of entries the merge
    handles is the workers' total, up to W times the distinct strings (8.0 when every worker sees every string): at 1,000,000
-   groups and eight workers that is about a second on one thread, which makes the merge by partition on the dispatcher
+   groups and eight workers that would be about a second on one thread. That figure is extrapolated, not measured: the spike's largest merge was 262,144 fragment entries (about 35 ms), and the extrapolation assumes the per-entry cost stays at 139 ns as the merge table outgrows the cache, which it may not. If it holds, it makes the merge by partition on the dispatcher
    (this section's design) a requirement and not an optimization.
 3. **String-table memory per worker.** About 60 bytes an entry at 16-byte strings (the bytes, a carried hash, a start, a
    length, a count and a slot at half load), so 1.3 to 1.8 MB a worker at 8,192-entry dictionaries. The W tables hold up to
@@ -677,7 +677,7 @@ The three costs:
    one copy in the merged table. The sink must charge the growth of its string table to the segment pool when it interns
    (the pool draws in blocks), not only the aggregate state.
 
-**The shared concurrent intern table** (one id space) was measured uncontended on one thread only: 28 ns a row against 22
+**The shared concurrent intern table** (one id space; the `shared table` column) was measured uncontended on one thread only: 28 ns a row against 22
 for the per-worker tables at 100,000 groups, because every worker's dictionary entries probe one larger table. It would
 remove the merge (about 130 ns a fragment entry) and keep one copy of the strings, and it would put W threads on one
 table at every dictionary boundary. Threads and cache-line traffic are not in the spike. Decision for slice 6: keep the
@@ -885,12 +885,14 @@ split at the line named in its row, not merged into a larger pull request.
 | 2c | delete `komira_morsel.vtable_source` and its three test files (`test_vtable_source_parity`, `test_vtable_source_failure_paths`, `test_vtable_seam_cost`); remove those three from `test_srcs` in `komira_morsel/BUCK`; edit the `vtable_source` mention in `komira_morsel/README.md`; drop the `vtable_source.mojo`, `test_vtable_source_parity.mojo` and `test_vtable_seam_cost.mojo` rows from `tests/pointer_lint_holds.tsv` and the failure-paths row from `tests/pointer_lint_ffi.tsv`; `scan_resolver_c_box.mojo`, `test_scan_resolver_c_box.mojo` and their rows stay | about 0.2k added, 2.6k deleted | 2b |
 | 3 | the atomic segment pool (D10); the ungrouped aggregation sink over `komira_op_agg_state` kernels with exact folds (integer, `DECIMAL`; NULL, overflow and empty-input rules) and the `DOUBLE` `AVG`; Q6 from a hand-built plan | 2.2 to 3.2k | 2b |
 | 4 | the farm spike (a Buck target) that measures dictionary interning against a by-value string row, with a high-cardinality dictionary query in its acceptance set, and that reports the three costs of §4.3 (content hash per interned entry, fragment merge per entry, string-table memory per worker); the in-memory `SINK_SORT` | 1.6 to 2.4k | 3 |
-| 5 | the grouped aggregation sink over fixed-width keys: the dense row and the radix-partitioned row with parallel finalize through the trait's partition hooks (§4.3) | 2.5 to 3.5k | 3 |
+| 5 | the grouped aggregation sink over fixed-width keys: per-worker hash tables with a serial merge, for one or more integer keys (rows I64, I32) or float keys (rows F64, F32), the pool charged as the tables grow (built; see below). The dense row and the radix-partitioned row with parallel finalize through the trait's partition hooks (§4.3, D8) are a later slice, 5b, `Needs` 5 | 2.5 to 3.5k | 3 |
 | 6 | the `DICT_ENCODED` string sink (content hash carried per interned entry, composite routing hash, string-keyed fragment merge as §4.3 says) and the `COLUMNAR` string sink, output typing, the two-worker different-intern-order test, the plain-fallback fixture; Q1 from a hand-built plan | 2.5 to 3.5k | 4, 5 |
 | 7 | `EngineContext`, `EngineOptions`, `run_plan` over the context | 2.0 to 3.0k | 1b, 2b, 6 |
 | 8 | `run_sql`, `ParquetFooters`, the end-to-end tests for Q1 and Q6 and their fixtures; the footer-answered `COUNT(*)` and `MIN`/`MAX` | 2.5 to 3.5k | 7 and the binder, komira#1216 |
 
 **What slice 3 built, against the row above.** The ungrouped sink does not use the `komira_op_agg_state` kernels, `AggLayout` or `AggSpec`: none of them folds a `DECIMAL128` value, or an integer, into an exact 128-bit accumulator with the overflow rule of §4.3 (the accumulators there are 64-bit or float, typed at compile time; `int_sum_overflow` only refuses a 64-bit overflow). The sink therefore folds in its own small module (`komira_pipeline_exec.agg_fold`: one count and one 128-bit integer per aggregate and worker, merged in worker order) and uses `komira_batch_eval` for the argument expressions, through the `MapOp` projection under the selection mask. The grouped sinks of slices 5 and 6 are the ones that need `komira_op_agg_hash`, and they take the table kernels there; whether they take their value folds from `agg_fold` or from the kernels is decided when they start.
+
+**What slice 5 built, against the row above.** `komira_pipeline_exec.sink_group_agg` does not use `komira_op_agg_hash` either: its entries hold Int64 keys with no NULL flag (SQL groups the NULLs of a key as one group) and 64-bit or float accumulators, with no exact 128-bit fold. It keeps its own small table (`group_table`: a 64-bit cell and a NULL flag per key, one `AggCell` per aggregate), folds rows with `agg_fold` per row, and merges the workers' tables serially in worker order with the same overflow rule. Each doubling of a table is charged to the segment pool before it is made. The sink serves composite keys of several columns of one family (all integers, or all floats) with the same table, so those arrive with slice 5 and not with step 8 of §7.3, which remains the mixed-type and string composites. `komira_lowering` (`cut_walk._agg_triple`) still refuses a key of more than one column unless every column is a dictionary string, so admitting the same-family composite is a change there that this slice does not make (it touches only `komira_pipeline_exec`). Not built, and the follow-up slice 5b: the dense table for a domain of at most 65,536 keys and the radix-partitioned table with a parallel finalize of D8. Until then the merge is O(workers x groups) on one core, which D8 names as its cost.
 
 The hand-built-plan harness of slice 2b gives a measured number at slice 3 (Q6) and slice 6 (Q1) before the binder
 exists; the end-to-end tests over SQL text come last only because the binder is another lane's open draft.

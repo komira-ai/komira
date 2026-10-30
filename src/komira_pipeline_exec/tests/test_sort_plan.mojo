@@ -15,6 +15,8 @@
 #     hand from the rows the scan keeps.
 #   * A key computed by a projection (b - a), whose NULL slots hold whatever the
 #     arithmetic left, orders its NULLs by the next key only.
+#   * A BOOL key computed by a comparison, with NULLs, sorts NULLs first then
+#     false then true, ties by the next key.
 #   * A segment sorts the output of another (the Q1 shape: a producer segment,
 #     then a sort over what it published).
 #   * A sort of no row returns the projected schema with no rows.
@@ -54,7 +56,7 @@ from komira_pipeline_exec.plan_harness import (
 from komira_pipeline_exec.real_builder import RealBuilder
 from komira_pipeline_exec.run_plan import run_plan
 from komira_collections.slab import Slab
-from komira_plan_expr.expr import BIN_GE, BIN_SUB, Expr
+from komira_plan_expr.expr import BIN_GE, BIN_GT, BIN_SUB, Expr
 from komira_plan_expr.expr_pool import ExprPool
 from komira_plan_expr.scalar_value import ScalarValue
 from komira_runtime_paths import test_tmpdir
@@ -268,6 +270,45 @@ def test_what_lies_under_a_computed_null_does_not_order_the_nulls() raises:
     _expect(int64_column(again.take(0), 0), want2)
 
 
+def test_a_boolean_key_with_nulls_sorts_with_the_plans_placement() raises:
+    var cache = ParquetMetadataCache()
+    var pool = ExprPool()
+    var nf = 0
+    var builder = RealBuilder[origin_of(cache), origin_of(pool), origin_of(nf)](
+        cache, pool
+    )
+    var handle = builder.add_resident(sample_batch(0, 40))
+    var exprs = Slab[Expr]()
+    exprs.append(Expr.col_ref("a"))
+    exprs.append(
+        Expr.binary(BIN_GT, Expr.col_ref("b"), Expr.literal(ScalarValue.from_int(100)))
+    )
+    var ops = chain(MorselOp.project(exprs^, _names("a", "flag")))
+    # flag is NULL where b is, false for a <= 10, true above.
+    var id = builder.add_sort_sink(
+        SortSinkData(_names("flag", "a"), _flags(False, False, 2), 0, _flags(True, False, 2))
+    )
+    var dispatch = InlineDispatch()
+    var out = run_plan(
+        _one(with_sort_sink(batch_segment(0, handle, ops^), id)),
+        builder,
+        dispatch,
+        2,
+        CancellationToken.new(),
+    )
+    var want = List[Int]()
+    for r in range(40):
+        if b_is_null(r):
+            want.append(r)
+    for r in range(40):
+        if not b_is_null(r) and r <= 10:
+            want.append(r)
+    for r in range(40):
+        if not b_is_null(r) and r > 10:
+            want.append(r)
+    _expect(int64_column(out.take(0), 0), want)
+
+
 def test_a_sort_of_no_row_returns_the_projected_schema() raises:
     var path = _write("sort_none", 40, 20)
     var cache = ParquetMetadataCache()
@@ -384,6 +425,7 @@ def main() raises:
     suite.test[test_a_parquet_scan_sorted_by_two_keys]()
     suite.test[test_a_segment_sorts_the_output_of_another]()
     suite.test[test_what_lies_under_a_computed_null_does_not_order_the_nulls]()
+    suite.test[test_a_boolean_key_with_nulls_sorts_with_the_plans_placement]()
     suite.test[test_a_sort_of_no_row_returns_the_projected_schema]()
     suite.test[test_a_pool_too_small_fails_the_query_and_leaves_nothing]()
     suite.test[test_sort_data_the_builder_does_not_hold_is_refused_by_name]()
