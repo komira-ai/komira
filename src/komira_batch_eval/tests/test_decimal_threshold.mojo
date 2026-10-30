@@ -22,9 +22,20 @@
 #     whose extra digits are zeros (0.060), a coarser scale, an integer.
 #     Catches a rescale in the wrong direction and an operator rewritten when
 #     the literal is a step.
-#   * test_thresholds_are_clamped_to_38_digits: a literal far outside any
-#     DECIMAL128 value keeps its order (+, -). Catches a 128-bit overflow of
-#     the rescale and a clamp that changes an answer.
+#   * test_a_literal_past_decimal_38_at_the_common_scale_is_refused: DuckDB
+#     compares in DECIMAL(38, the larger of the two scales) and raises
+#     "Could not cast value" when the literal does not fit it: 10^36 against a
+#     scale-2 column is 10^38 hundredths, one past the widest DECIMAL(38);
+#     10^36 - 1 fits. Catches a literal clamped and answered where DuckDB
+#     raises, and a limit off by one.
+#   * test_the_widest_literal_that_fits_floors_and_ceils: 10^38 - 1 at scale
+#     38 against a scale-2 column. Catches a 128-bit overflow of the rescale.
+#   * test_a_stored_value_past_decimal_38_at_the_common_scale_is_refused: a
+#     DECIMAL(38, 2) column holding 10^22 hundredths widens to scale 17
+#     (10^37) and not to scale 18 (10^38); a NULL row's bytes, a smaller
+#     value and a literal that needs no widening are never refused. Catches
+#     the answer DuckDB raises on, a check that reads a NULL row's bytes, and
+#     one that runs when the literal needs no widening.
 #   * test_scales_outside_the_decimal_range_are_refused.
 #   * test_int64_kernel_matches_the_definition: the int64 SIMD kernel against
 #     a per-row definition, for every operator, at thresholds on and around
@@ -37,13 +48,26 @@
 #   * test_wide_kernel_compares_128_bits: precision 19 and 38 columns hold
 #     values past int64, compared with 128-bit thresholds. Catches the int64
 #     kernel used on a column that does not fit it.
+#   * test_int64_kernel_is_exact_for_stored_values_past_the_declared_precision:
+#     a DECIMAL(15, 2) buffer holding 2^64 + 5 (low word 5), 2^63 (low word
+#     negative), -2^63 - 1, 10^30 and their neighbours, in the first block, a
+#     later block and the tail, against thresholds on and beyond them. A
+#     Parquet FIXED_LEN_BYTE_ARRAY or an Arrow IPC writer can store such a
+#     value under a narrow precision; the kernel must give the answer of the
+#     whole 128-bit value, not of its low word. Catches a kernel that trusts
+#     the declared precision.
+#   * test_a_buffer_shorter_than_the_length_is_refused: nine rows declared,
+#     three held. Catches a vector load past the buffer.
 
 from std.testing import TestSuite, assert_equal, assert_true
 
+from komira_arrow.bitmap import Bitmap
 from komira_arrow.decimal_array import Decimal128Array
 from komira_buffer.heap_region import HeapRegion
+from komira_buffer.owned_aligned_buffer import OwnedAlignedBuffer
 from komira_batch_eval.decimal_literal_compare import (
     DecimalThreshold,
+    check_decimal_column_widens,
     decimal_threshold,
     eval_decimal_threshold,
 )
@@ -157,25 +181,131 @@ def test_a_literal_on_a_step_keeps_the_operator() raises:
         _expect(24, 0, 0, op, op, I128(24))
 
 
-def test_thresholds_are_clamped_to_38_digits() raises:
-    var e38 = pow10_i256(38).cast[DType.int128]()
+def _refusal(value: I128, t: Int, s: Int, op: UInt8) -> String:
+    """The message `decimal_threshold` refuses with, or "" when it answers."""
+    try:
+        _ = decimal_threshold(value, t, s, op)
+    except e:
+        return String(e)
+    return String("")
+
+
+def _e38() -> I128:
+    return pow10_i256(38).cast[DType.int128]()
+
+
+def test_a_literal_past_decimal_38_at_the_common_scale_is_refused() raises:
+    var e36 = pow10_i256(36).cast[DType.int128]()
     for op in _ops():
-        # 10^37 as an integer against scale 2 is 10^39 hundredths.
-        var big = decimal_threshold(pow10_i256(37).cast[DType.int128](), 0, 2, op)
-        assert_equal(String(big.op), String(op))
-        assert_true(big.threshold == e38, "clamped to 10^38")
-        var small = decimal_threshold(-pow10_i256(37).cast[DType.int128](), 0, 2, op)
-        assert_equal(String(small.op), String(op))
-        assert_true(small.threshold == -e38, "clamped to -10^38")
+        var label = _name(op)
+        # 10^36 as an integer against scale 2 is 10^38 hundredths.
+        assert_true(_refusal(e36, 0, 2, op).find("DECIMAL(38,2)") >= 0, label)
+        assert_true(_refusal(-e36, 0, 2, op).find("DECIMAL(38,2)") >= 0, label)
+        assert_equal(_refusal(e36 - I128(1), 0, 2, op), "", label)
+        assert_equal(_refusal(-(e36 - I128(1)), 0, 2, op), "", label)
+        # Scale 0: 10^38 does not cast to DECIMAL(38, 0); 10^38 - 1 does.
+        assert_true(_refusal(_e38(), 0, 0, op).find("DECIMAL(38,0)") >= 0, label)
+        assert_true(_refusal(-_e38(), 0, 0, op).find("DECIMAL(38,0)") >= 0, label)
+        assert_equal(_refusal(_e38() - I128(1), 0, 0, op), "", label)
+        # A literal with more scale than the column compares at its own scale.
+        assert_true(_refusal(_e38(), 3, 2, op).find("DECIMAL(38,3)") >= 0, label)
+        assert_equal(_refusal(_e38() - I128(1), 3, 2, op), "", label)
+        # A literal with less scale is brought to the column's: 10^36 at scale 1
+        # against scale 3 is 10^38 thousandths.
+        assert_true(_refusal(e36, 1, 3, op).find("DECIMAL(38,3)") >= 0, label)
+        assert_equal(_refusal(e36 - I128(1), 1, 3, op), "", label)
+        assert_equal(_refusal(pow10_i256(35).cast[DType.int128](), 1, 3, op), "", label)
+
+
+def test_the_widest_literal_that_fits_floors_and_ceils() raises:
     # The largest 38-digit literal against a scale-2 column (t = 38): it is
     # 99.99.. hundredths, between 99 and 100.
-    var top = pow10_i256(38).cast[DType.int128]() - I128(1)
+    var top = _e38() - I128(1)
     var lt = decimal_threshold(top, 38, 2, DEC_CMP_LT)
     assert_equal(String(lt.op), String(DEC_CMP_LE))
     assert_true(lt.threshold == I128(99), "floor of 99.99...")
     var gt = decimal_threshold(top, 38, 2, DEC_CMP_GT)
     assert_equal(String(gt.op), String(DEC_CMP_GE))
     assert_true(gt.threshold == I128(100), "ceiling of 99.99...")
+    var neg_gt = decimal_threshold(-top, 38, 2, DEC_CMP_GT)
+    assert_equal(String(neg_gt.op), String(DEC_CMP_GE))
+    assert_true(neg_gt.threshold == I128(-99), "ceiling of -99.99...")
+    # At the column's scale the largest literal is the column's largest value.
+    var same = decimal_threshold(top, 0, 0, DEC_CMP_EQ)
+    assert_equal(String(same.op), String(DEC_CMP_EQ))
+    assert_true(same.threshold == top, "10^38 - 1 at scale 0")
+
+
+def _widening_refused(
+    values: List[I128],
+    null_row: Int,
+    precision: Int,
+    scale: Int,
+    literal_scale: Int,
+) raises -> String:
+    """The message the widening check refuses with, or "" when it passes."""
+    var arr = Decimal128Array.allocate_nullable(len(values), precision, scale)
+    for i in range(len(values)):
+        arr.set_i128(i, values[i])
+    if null_row >= 0:
+        arr.set_null(null_row)
+    try:
+        check_decimal_column_widens(arr, precision, scale, literal_scale)
+    except e:
+        return String(e)
+    return String("")
+
+
+def test_a_stored_value_past_decimal_38_at_the_common_scale_is_refused() raises:
+    # 10^22 hundredths (the value 10^20) widened to scale t is 10^(22 + t - 2).
+    var e22 = pow10_i256(22).cast[DType.int128]()
+    var values = List[I128]()
+    values.append(I128(0))
+    values.append(I128(5))
+    values.append(e22)
+    values.append(-e22 + I128(1))
+    # Scale 17 gives 10^37: it fits. Scale 18 gives 10^38: it does not.
+    assert_equal(_widening_refused(values, -1, 38, 2, 17), "")
+    assert_true(
+        _widening_refused(values, -1, 38, 2, 18).find("DECIMAL(38,18)") >= 0,
+        "10^22 hundredths at scale 18",
+    )
+    assert_true(
+        _widening_refused(values, -1, 38, 2, 30).find("DECIMAL(38,30)") >= 0,
+        "scale 30",
+    )
+    # The negative edge: -10^22 at scale 18 is -10^38; -10^22 + 1 fits.
+    var neg = List[I128]()
+    neg.append(-e22)
+    assert_true(_widening_refused(neg, -1, 38, 2, 18).find("DECIMAL(38,18)") >= 0)
+    var inside = List[I128]()
+    inside.append(e22 - I128(1))
+    inside.append(-e22 + I128(1))
+    assert_equal(_widening_refused(inside, -1, 38, 2, 18), "")
+    # A NULL row's stored bytes are not read.
+    var null_big = List[I128]()
+    null_big.append(I128(7))
+    null_big.append(e22)
+    assert_equal(_widening_refused(null_big, 1, 38, 2, 30), "")
+    # A literal that needs no widening of the column is never refused, however
+    # large the stored values are.
+    var huge = List[I128]()
+    huge.append(_e38() - I128(1))
+    huge.append(-(_e38() - I128(1)))
+    assert_equal(_widening_refused(huge, -1, 38, 2, 2), "")
+    assert_equal(_widening_refused(huge, -1, 38, 2, 0), "")
+    # A column whose declared precision leaves room is not scanned: DECIMAL(15,
+    # 2) widened by 18 digits is at most 33 digits.
+    assert_equal(_widening_refused(huge, -1, 15, 2, 20), "")
+    # ... and a DECIMAL(15, 2) widened by 28 digits can overflow.
+    var wide15 = List[I128]()
+    wide15.append(pow10_i256(14).cast[DType.int128]())
+    assert_true(_widening_refused(wide15, -1, 15, 2, 30).find("DECIMAL(38,30)") >= 0)
+    # Scale 0 column: any fraction needs a widening by at least a digit.
+    var max38 = List[I128]()
+    max38.append(_e38() - I128(1))
+    assert_true(_widening_refused(max38, -1, 38, 0, 1).find("DECIMAL(38,1)") >= 0)
+    assert_equal(_widening_refused(max38, -1, 38, 0, 0), "")
 
 
 def test_scales_outside_the_decimal_range_are_refused() raises:
@@ -309,13 +439,57 @@ def test_wide_kernel_compares_128_bits() raises:
     _check_kernel(longer, 38, thresholds)
 
 
+def test_int64_kernel_is_exact_for_stored_values_past_the_declared_precision() raises:
+    var two63 = I128(Int(Int64.MAX)) + I128(1)
+    var two64 = two63 * I128(2)
+    var values = List[I128]()
+    for i in range(19):
+        values.append(I128(i % 5 - 2))
+    # First block, a later block and the tail (19 rows: blocks of 8, a tail of 3).
+    values[3] = two64 + I128(5)
+    values[11] = two63
+    values[17] = -two63 - I128(1)
+    values[1] = pow10_i256(30).cast[DType.int128]()
+    values[9] = -two64 + I128(5)
+    values[18] = -pow10_i256(30).cast[DType.int128]()
+    var thresholds = List[I128]()
+    for t in [5, 0, -1, -2]:
+        thresholds.append(I128(t))
+    thresholds.append(I128(Int(Int64.MAX)))
+    thresholds.append(-I128(Int(Int64.MAX)) - I128(1))
+    thresholds.append(two63)
+    thresholds.append(two64 + I128(5))
+    thresholds.append(-two64 + I128(5))
+    thresholds.append(-two63 - I128(1))
+    thresholds.append(pow10_i256(30).cast[DType.int128]())
+    _check_kernel(values, 15, thresholds)
+    _check_kernel(values, 18, thresholds)
+
+
+def test_a_buffer_shorter_than_the_length_is_refused() raises:
+    var buf = OwnedAlignedBuffer(48)
+    buf.zero()
+    buf.set_length(Int64(48))
+    var arr = Decimal128Array(buf^, Optional[Bitmap[HeapRegion]](None), 9, 0, 15, 2)
+    var refused = False
+    try:
+        _ = eval_decimal_threshold(arr, 15, DecimalThreshold(DEC_CMP_LT, I128(1)))
+    except:
+        refused = True
+    assert_true(refused, "nine rows of 16 bytes in a 48-byte buffer")
+
+
 def main() raises:
     var suite = TestSuite()
     suite.test[test_a_literal_between_two_steps_floors_or_ceils_by_operator]()
     suite.test[test_a_literal_on_a_step_keeps_the_operator]()
-    suite.test[test_thresholds_are_clamped_to_38_digits]()
+    suite.test[test_a_literal_past_decimal_38_at_the_common_scale_is_refused]()
+    suite.test[test_the_widest_literal_that_fits_floors_and_ceils]()
+    suite.test[test_a_stored_value_past_decimal_38_at_the_common_scale_is_refused]()
     suite.test[test_scales_outside_the_decimal_range_are_refused]()
     suite.test[test_int64_kernel_matches_the_definition]()
     suite.test[test_int64_kernel_clamps_a_threshold_past_int64]()
     suite.test[test_wide_kernel_compares_128_bits]()
+    suite.test[test_int64_kernel_is_exact_for_stored_values_past_the_declared_precision]()
+    suite.test[test_a_buffer_shorter_than_the_length_is_refused]()
     suite^.run()

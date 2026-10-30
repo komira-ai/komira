@@ -1,0 +1,23 @@
+-- errors.tsv: whether DuckDB raises an error folding each constant expression (TRY gives NULL):
+-- a sum or product whose value does not fit the width DuckDB gives it (18 digits when the
+-- operands are 18 digits or fewer, 38 otherwise), or whose scale is past 38. The last two
+-- are controls that fold.
+COPY (
+SELECT * FROM (
+  SELECT 0 AS n, '12345678.123 * 12345678.123' AS expr, TRY(12345678.123 * 12345678.123) IS NULL AS errored
+  UNION ALL
+  SELECT 1 AS n, '123456789.12345 * 1234567' AS expr, TRY(123456789.12345 * 1234567) IS NULL AS errored
+  UNION ALL
+  SELECT 2 AS n, '99999999999999999.9 + 99999999999999999.9' AS expr, TRY(99999999999999999.9 + 99999999999999999.9) IS NULL AS errored
+  UNION ALL
+  SELECT 3 AS n, '-99999999999999999.9 - 99999999999999999.9' AS expr, TRY(-99999999999999999.9 - 99999999999999999.9) IS NULL AS errored
+  UNION ALL
+  SELECT 4 AS n, '9999999999.9999999999 * 9999999999.9999999999' AS expr, TRY(9999999999.9999999999 * 9999999999.9999999999) IS NULL AS errored
+  UNION ALL
+  SELECT 5 AS n, '1000000000 * 1000000000.5' AS expr, TRY(1000000000 * 1000000000.5) IS NULL AS errored
+  UNION ALL
+  SELECT 6 AS n, '0.06 - 0.01' AS expr, TRY(0.06 - 0.01) IS NULL AS errored
+  UNION ALL
+  SELECT 7 AS n, '99999999999999999.99 + 0.01' AS expr, TRY(99999999999999999.99 + 0.01) IS NULL AS errored
+) AS q ORDER BY n
+) TO 'errors.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);

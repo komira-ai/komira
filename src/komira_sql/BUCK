@@ -92,6 +92,7 @@ mojo_library(
         "tests/test_sql_parser_windows.mojo",
         "tests/test_sql_token_ast_direct.mojo",
         "tests/test_sql_token_branches.mojo",
+        "tests/test_sql_token_number_shapes.mojo",
         "tests/test_sql_tvf_bind_direct.mojo",
     ],
     visibility = ["PUBLIC"],

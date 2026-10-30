@@ -3,25 +3,32 @@ load("@komira//tools/build/sql:defs.bzl", "sql_oracle")
 
 # Test-only: DECIMAL column vs literal comparisons through run_sql (the SQL
 # door of komira_sdk_exec) against the answers of the pinned DuckDB. oracle/
-# holds the SQL that DuckDB runs: table.sql builds the table `t` (three
-# nullable DECIMAL columns of scale 2, with NULLs and extreme rows) and every
-# action starts from it; write.sql writes it as t.parquet; compare_a.sql,
-# compare_b.sql and compare_c.sql count, for each literal and each of the six
-# comparison operators, the rows of one column that the comparison keeps;
-# where.sql does the same for whole WHERE texts; types.sql records DuckDB's
-# type and value for each constant a comparison folds. The first comment of
+# holds the SQL that DuckDB runs: table.sql builds the table `t` (nine nullable
+# DECIMAL columns of precision 15 to 38 and scale 0 to 10, with NULLs and
+# extreme rows) and table_x.sql the table `tx` (four columns that hold values
+# so large that DuckDB cannot widen them to the scale of a longer literal);
+# write.sql and write_x.sql write them as t.parquet and tx.parquet; every
+# other action starts from one of them. compare_<col>.sql counts, for each
+# literal and each of the six comparison operators, the rows of one column that
+# the comparison keeps, and the rows for which DuckDB raises an error instead
+# (TRY gives NULL); where.sql does the same for whole WHERE texts; types.sql
+# records DuckDB's type and value for each constant a comparison folds;
+# errors.sql records the constants DuckDB cannot fold. The first comment of
 # each file says what it holds; each repeats one SELECT per literal or
 # predicate. A test reads the literal and the predicate text from DuckDB's own
 # answer, so a predicate has one source.
 #
-#   test_column_a/b/c            for every literal of compare_<col>.tsv and each
-#                                operator, the rows `<col> <op> <literal>` and
-#                                the reversed spelling keep are DuckDB's
+#   test_column_<col>[_n]        for every literal of compare_<col>.tsv (part n
+#                                of it, for the columns with many literals) and
+#                                each operator, the rows `<col> <op> <literal>`
+#                                and each reversed spelling keep are DuckDB's,
+#                                and a comparison DuckDB raises on is refused
 #   test_where_texts             the rows each WHERE text of where.tsv keeps
 #                                are DuckDB's
 #   test_folded_constants        the plan holds each folded constant as the
-#                                DECIMAL DuckDB computes, and Q6's range bounds
-#                                as DECIMAL literals
+#                                DECIMAL DuckDB computes, a constant DuckDB
+#                                cannot fold is refused, and Q6's range bounds
+#                                are DECIMAL literals
 #
 # The checks are in checks.mojo (library code), so each test is its own action.
 # Nothing depends on this package.
@@ -31,11 +38,35 @@ sql_oracle(
     outputs = ["t.parquet"],
 )
 
+sql_oracle(
+    name = "table_x",
+    srcs = ["oracle/table_x.sql", "oracle/write_x.sql"],
+    outputs = ["tx.parquet"],
+)
+
+[sql_oracle(
+    name = "compare_" + col,
+    srcs = ["oracle/table.sql", "oracle/compare_" + col + ".sql"],
+    outputs = ["compare_" + col + ".tsv"],
+) for col in ["a", "b", "c", "d", "e", "f", "m", "g", "h"]]
+
+[sql_oracle(
+    name = "compare_" + col,
+    srcs = ["oracle/table_x.sql", "oracle/compare_" + col + ".sql"],
+    outputs = ["compare_" + col + ".tsv"],
+) for col in ["xq", "xr", "xs", "xw"]]
+
 [sql_oracle(
     name = name,
     srcs = ["oracle/table.sql", "oracle/" + name + ".sql"],
     outputs = [name + ".tsv"],
-) for name in ["compare_a", "compare_b", "compare_c", "where", "types"]]
+) for name in ["where", "types"]]
+
+sql_oracle(
+    name = "errors",
+    srcs = ["oracle/errors.sql"],
+    outputs = ["errors.tsv"],
+)
 
 mojo_library(
     name = "komira_decimal_compare_conformance",
@@ -119,28 +150,124 @@ mojo_library(
     ],
     conda = False,
     test_srcs = [
-        "tests/test_column_a.mojo",
-        "tests/test_column_b.mojo",
-        "tests/test_column_c.mojo",
+        "tests/test_column_a_1.mojo",
+        "tests/test_column_a_2.mojo",
+        "tests/test_column_a_3.mojo",
+        "tests/test_column_b_1.mojo",
+        "tests/test_column_b_2.mojo",
+        "tests/test_column_b_3.mojo",
+        "tests/test_column_c_1.mojo",
+        "tests/test_column_c_2.mojo",
+        "tests/test_column_c_3.mojo",
+        "tests/test_column_d_1.mojo",
+        "tests/test_column_d_2.mojo",
+        "tests/test_column_e_1.mojo",
+        "tests/test_column_e_2.mojo",
+        "tests/test_column_f.mojo",
+        "tests/test_column_m.mojo",
+        "tests/test_column_g.mojo",
+        "tests/test_column_h_1.mojo",
+        "tests/test_column_h_2.mojo",
+        "tests/test_column_xq.mojo",
+        "tests/test_column_xr.mojo",
+        "tests/test_column_xs.mojo",
+        "tests/test_column_xw.mojo",
         "tests/test_folded_constants.mojo",
         "tests/test_where_texts.mojo",
     ],
     test_data = {
-        "tests/test_column_a.mojo": {
+        "tests/test_column_a_1.mojo": {
             "t.parquet": ":table[t.parquet]",
             "compare_a.tsv": ":compare_a[compare_a.tsv]",
         },
-        "tests/test_column_b.mojo": {
+        "tests/test_column_a_2.mojo": {
+            "t.parquet": ":table[t.parquet]",
+            "compare_a.tsv": ":compare_a[compare_a.tsv]",
+        },
+        "tests/test_column_a_3.mojo": {
+            "t.parquet": ":table[t.parquet]",
+            "compare_a.tsv": ":compare_a[compare_a.tsv]",
+        },
+        "tests/test_column_b_1.mojo": {
             "t.parquet": ":table[t.parquet]",
             "compare_b.tsv": ":compare_b[compare_b.tsv]",
         },
-        "tests/test_column_c.mojo": {
+        "tests/test_column_b_2.mojo": {
+            "t.parquet": ":table[t.parquet]",
+            "compare_b.tsv": ":compare_b[compare_b.tsv]",
+        },
+        "tests/test_column_b_3.mojo": {
+            "t.parquet": ":table[t.parquet]",
+            "compare_b.tsv": ":compare_b[compare_b.tsv]",
+        },
+        "tests/test_column_c_1.mojo": {
             "t.parquet": ":table[t.parquet]",
             "compare_c.tsv": ":compare_c[compare_c.tsv]",
+        },
+        "tests/test_column_c_2.mojo": {
+            "t.parquet": ":table[t.parquet]",
+            "compare_c.tsv": ":compare_c[compare_c.tsv]",
+        },
+        "tests/test_column_c_3.mojo": {
+            "t.parquet": ":table[t.parquet]",
+            "compare_c.tsv": ":compare_c[compare_c.tsv]",
+        },
+        "tests/test_column_d_1.mojo": {
+            "t.parquet": ":table[t.parquet]",
+            "compare_d.tsv": ":compare_d[compare_d.tsv]",
+        },
+        "tests/test_column_d_2.mojo": {
+            "t.parquet": ":table[t.parquet]",
+            "compare_d.tsv": ":compare_d[compare_d.tsv]",
+        },
+        "tests/test_column_e_1.mojo": {
+            "t.parquet": ":table[t.parquet]",
+            "compare_e.tsv": ":compare_e[compare_e.tsv]",
+        },
+        "tests/test_column_e_2.mojo": {
+            "t.parquet": ":table[t.parquet]",
+            "compare_e.tsv": ":compare_e[compare_e.tsv]",
+        },
+        "tests/test_column_f.mojo": {
+            "t.parquet": ":table[t.parquet]",
+            "compare_f.tsv": ":compare_f[compare_f.tsv]",
+        },
+        "tests/test_column_m.mojo": {
+            "t.parquet": ":table[t.parquet]",
+            "compare_m.tsv": ":compare_m[compare_m.tsv]",
+        },
+        "tests/test_column_g.mojo": {
+            "t.parquet": ":table[t.parquet]",
+            "compare_g.tsv": ":compare_g[compare_g.tsv]",
+        },
+        "tests/test_column_h_1.mojo": {
+            "t.parquet": ":table[t.parquet]",
+            "compare_h.tsv": ":compare_h[compare_h.tsv]",
+        },
+        "tests/test_column_h_2.mojo": {
+            "t.parquet": ":table[t.parquet]",
+            "compare_h.tsv": ":compare_h[compare_h.tsv]",
+        },
+        "tests/test_column_xq.mojo": {
+            "tx.parquet": ":table_x[tx.parquet]",
+            "compare_xq.tsv": ":compare_xq[compare_xq.tsv]",
+        },
+        "tests/test_column_xr.mojo": {
+            "tx.parquet": ":table_x[tx.parquet]",
+            "compare_xr.tsv": ":compare_xr[compare_xr.tsv]",
+        },
+        "tests/test_column_xs.mojo": {
+            "tx.parquet": ":table_x[tx.parquet]",
+            "compare_xs.tsv": ":compare_xs[compare_xs.tsv]",
+        },
+        "tests/test_column_xw.mojo": {
+            "tx.parquet": ":table_x[tx.parquet]",
+            "compare_xw.tsv": ":compare_xw[compare_xw.tsv]",
         },
         "tests/test_folded_constants.mojo": {
             "t.parquet": ":table[t.parquet]",
             "types.tsv": ":types[types.tsv]",
+            "errors.tsv": ":errors[errors.tsv]",
         },
         "tests/test_where_texts.mojo": {
             "t.parquet": ":table[t.parquet]",

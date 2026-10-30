@@ -34,12 +34,32 @@
 #     it (the evaluator has no DECIMAL arm for those).
 #   * test_literals_past_38_digits_stay_float: a literal DuckDB cannot hold
 #     as DECIMAL(38, s) stays FLOAT64. Catches an overflowing DECIMAL.
+#   * test_a_minus_before_a_minus_keeps_the_value: `dc > - -0.5` is 0.5, as
+#     DECIMAL(2, 1), not -0.5; also `-(-0.5)`, `- - 0.5`, `- -5.` and a triple
+#     minus. Catches a negation that keeps the sign of the text it negates.
+#   * test_literal_shapes: `5.` is DECIMAL(1, 0), `.5` DECIMAL(1, 1) and `00.5`
+#     DECIMAL(3, 1), on either side of the comparison. Catches `5.` left
+#     FLOAT64 and a leading point or zeros miscounted.
+#   * test_exponent_literals_are_floats: `1e-2`, `2.5e1` and `1E2` face a
+#     DECIMAL column as FLOAT64, as in DuckDB (DOUBLE). Catches an exponent
+#     typed as a DECIMAL or refused.
+#   * test_folded_constants_are_capped_like_duckdb: `2 + 1234567890123456.78`
+#     is DECIMAL(18, 2), not (19, 2); `123456789.123456789 * 0.5` DECIMAL(18,
+#     10); and `0.1234567890123456789012345678901234567 + 1` DECIMAL(38, 37)
+#     rather than a FLOAT64. Catches the 18 and 38 digit caps missing.
+#   * test_constants_duckdb_raises_on_are_refused: the binder raises, with
+#     DuckDB's words, for `12345678.123 * 12345678.123` (overflow of
+#     DECIMAL(18)), a sum of two 18-digit numbers past 18 digits, and a
+#     product with a scale past 38. Catches a fold that keeps a value DuckDB
+#     raises on, or turns it into a float.
 
 from std.testing import TestSuite, assert_equal, assert_true
 
 from komira_arrow.arrow_types import ArrowType
 from komira_arrow.schema import Field, SchemaBuilder
 from komira_plan_expr.expr import Expr
+from komira_plan_expr.scalar_value import ScalarValue
+from komira_scalar_arithmetic.decimal_arith import I128
 
 from komira_sql.sql_bind_expr import _bind_scalar
 from komira_sql.sql_bind_parquet import ParquetFacts
@@ -238,13 +258,8 @@ def test_constant_arithmetic_facing_a_decimal_column_is_decimal() raises:
         + _d(0, 65, 4, 3)
         + "))",
     )
-    # A constant whose DECIMAL result would need more than 38 digits stays
-    # float.
-    var wide = _bound(
-        _w("dc < 0.1234567890123456789 * 0.1234567890123456789012345")
-    )
-    assert_true(wide.find("float64") >= 0, wide)
-    assert_true(wide.find("decimal128") < 0, wide)
+    # A constant whose DECIMAL result needs a scale past 38 is an error in
+    # DuckDB: the binder refuses it (test_constants_duckdb_raises_on_are_refused).
 
 
 def test_integer_literals_stay_integers() raises:
@@ -307,6 +322,151 @@ def test_literals_past_38_digits_stay_float() raises:
     assert_true(bound.find("decimal128") < 0, bound)
 
 
+def test_a_minus_before_a_minus_keeps_the_value() raises:
+    # `- -0.5` is 0.5: DECIMAL(2, 1), unscaled 5.
+    assert_equal(
+        _bound(_w("dc > - -0.5")),
+        "BinaryOp(GT, ColRef(dc), " + _d(0, 5, 2, 1) + ")",
+    )
+    assert_equal(
+        _bound(_w("dc > -(-0.5)")),
+        "BinaryOp(GT, ColRef(dc), " + _d(0, 5, 2, 1) + ")",
+    )
+    assert_equal(
+        _bound(_w("dc > - - 0.5")),
+        "BinaryOp(GT, ColRef(dc), " + _d(0, 5, 2, 1) + ")",
+    )
+    assert_equal(
+        _bound(_w("dc > - -5.")),
+        "BinaryOp(GT, ColRef(dc), " + _d(0, 5, 1, 0) + ")",
+    )
+    # Three minus signs: -0.5.
+    assert_equal(
+        _bound(_w("dc > - - -0.5")),
+        "BinaryOp(GT, ColRef(dc), " + _d(-1, -5, 2, 1) + ")",
+    )
+    # The literal on the left.
+    assert_equal(
+        _bound(_w("- -0.5 < dc")),
+        "BinaryOp(GT, ColRef(dc), " + _d(0, 5, 2, 1) + ")",
+    )
+
+
+def test_literal_shapes() raises:
+    assert_equal(
+        _bound(_w("dc < 5.")),
+        "BinaryOp(LT, ColRef(dc), " + _d(0, 5, 1, 0) + ")",
+    )
+    assert_equal(
+        _bound(_w("dc < .5")),
+        "BinaryOp(LT, ColRef(dc), " + _d(0, 5, 1, 1) + ")",
+    )
+    assert_equal(
+        _bound(_w("dc < 00.5")),
+        "BinaryOp(LT, ColRef(dc), " + _d(0, 5, 3, 1) + ")",
+    )
+    assert_equal(
+        _bound(_w("dc <= -5.")),
+        "BinaryOp(LE, ColRef(dc), " + _d(-1, -5, 1, 0) + ")",
+    )
+    assert_equal(
+        _bound(_w("5. > dc")),
+        "BinaryOp(LT, ColRef(dc), " + _d(0, 5, 1, 0) + ")",
+    )
+    assert_equal(
+        _bound(_w(".5 >= dc")),
+        "BinaryOp(LE, ColRef(dc), " + _d(0, 5, 1, 1) + ")",
+    )
+    # A constant built from them.
+    assert_equal(
+        _bound(_w("dc < 5. + .5")),
+        "BinaryOp(LT, ColRef(dc), " + _d(0, 55, 3, 1) + ")",
+    )
+    # A FLOAT64 column keeps them as floats.
+    assert_equal(
+        _bound(_w("v < 5.")),
+        "BinaryOp(LT, ColRef(v), Literal(ScalarValue(float64, 5.0)))",
+    )
+
+
+def test_exponent_literals_are_floats() raises:
+    assert_equal(
+        _bound(_w("dc < 1e-2")),
+        "BinaryOp(LT, ColRef(dc), Literal(ScalarValue(float64, 0.01)))",
+    )
+    assert_equal(
+        _bound(_w("dc >= 2.5e1")),
+        "BinaryOp(GE, ColRef(dc), Literal(ScalarValue(float64, 25.0)))",
+    )
+    assert_equal(
+        _bound(_w("dc = 1E2")),
+        "BinaryOp(EQ, ColRef(dc), Literal(ScalarValue(float64, 100.0)))",
+    )
+    assert_equal(
+        _bound(_w("dc < -1e-1")),
+        "BinaryOp(LT, ColRef(dc), Literal(ScalarValue(float64, -0.1)))",
+    )
+    assert_equal(
+        _bound(_w("1e-2 < dc")),
+        "BinaryOp(GT, ColRef(dc), Literal(ScalarValue(float64, 0.01)))",
+    )
+
+
+def _dec_digits(digits: String, precision: Int, scale: Int) -> String:
+    """The bound text of the DECIMAL whose unscaled digits are `digits`."""
+    var n = I128(0)
+    for b in digits.as_bytes():
+        n = n * I128(10) + I128(Int(b - UInt8(ord("0"))))
+    return "Literal(" + String(ScalarValue.decimal128_i128(n, precision, scale)) + ")"
+
+
+def test_folded_constants_are_capped_like_duckdb() raises:
+    # DECIMAL(10, 0) + DECIMAL(18, 2) is DECIMAL(19, 2) uncapped; DuckDB cuts
+    # it to DECIMAL(18, 2).
+    assert_equal(
+        _bound(_w("dc > 2 + 1234567890123456.78")),
+        "BinaryOp(GT, ColRef(dc), "
+        + _d(0, 123456789012345878, 18, 2)
+        + ")",
+    )
+    assert_equal(
+        _bound(_w("dc > 123456789.123456789 * 0.5")),
+        "BinaryOp(GT, ColRef(dc), "
+        + _d(0, 617283945617283945, 18, 10)
+        + ")",
+    )
+    assert_equal(
+        _bound(_w("dc > 0.000000001 * 0.000000001")),
+        "BinaryOp(GT, ColRef(dc), " + _d(0, 1, 20, 18) + ")",
+    )
+    # A result of more than 38 digits is cut to 38 and kept when the value
+    # fits: DECIMAL(38, 37).
+    assert_equal(
+        _bound(_w("dc > 0.1234567890123456789012345678901234567 + 1")),
+        "BinaryOp(GT, ColRef(dc), "
+        + _dec_digits("11234567890123456789012345678901234567", 38, 37)
+        + ")",
+    )
+
+
+def test_constants_duckdb_raises_on_are_refused() raises:
+    var product = _bound(_w("dc < 12345678.123 * 12345678.123"))
+    assert_true(product.startswith("ERR: "), product)
+    assert_true(product.find("Overflow in multiplication of DECIMAL(18)") >= 0, product)
+    var sum = _bound(_w("dc < 99999999999999999.9 + 99999999999999999.9"))
+    assert_true(sum.find("Overflow in addition of DECIMAL(18)") >= 0, sum)
+    var scale = _bound(
+        _w("dc < 0.1234567890123456789 * 0.1234567890123456789012345")
+    )
+    assert_true(scale.find("Needed scale 44") >= 0, scale)
+    # On the left of the column it is the same comparison.
+    var left = _bound(_w("12345678.123 * 12345678.123 > dc"))
+    assert_true(left.find("Overflow in multiplication of DECIMAL(18)") >= 0, left)
+    # A constant that is not facing a DECIMAL column is not this rule's.
+    var float_col = _bound(_w("v < 12345678.123 * 12345678.123"))
+    assert_true(float_col.startswith("ERR: ") == False, float_col)
+
+
 def main() raises:
     var suite = TestSuite()
     suite.test[test_literal_facing_a_decimal_column_is_decimal]()
@@ -314,4 +474,9 @@ def main() raises:
     suite.test[test_integer_literals_stay_integers]()
     suite.test[test_everything_else_stays_float]()
     suite.test[test_literals_past_38_digits_stay_float]()
+    suite.test[test_a_minus_before_a_minus_keeps_the_value]()
+    suite.test[test_literal_shapes]()
+    suite.test[test_exponent_literals_are_floats]()
+    suite.test[test_folded_constants_are_capped_like_duckdb]()
+    suite.test[test_constants_duckdb_raises_on_are_refused]()
     suite^.run()

@@ -5,7 +5,8 @@
 # The expected precision and scale of each row are what DuckDB prints for
 # `typeof(<literal>)` (komira_decimal_compare_conformance/oracle/types.sql):
 # 0.06 DECIMAL(3,2), 0.060 DECIMAL(4,3), 1.5 DECIMAL(2,1), 0.0 DECIMAL(2,1),
-# 100.00 DECIMAL(5,2).
+# 100.00 DECIMAL(5,2), 5. DECIMAL(1,0), .5 DECIMAL(1,1), 00.5 DECIMAL(3,1),
+# - -0.5 DECIMAL(2,1), -5. DECIMAL(1,0).
 #
 # What each test proves, and the defect it catches:
 #   * test_text_gives_digits_as_precision_and_fraction_as_scale: precision is
@@ -16,8 +17,12 @@
 #     changes no digit count. Catches a sign counted as a digit, or dropped.
 #   * test_the_38_digit_limit: 38 digits are a DECIMAL(38, s), 39 are not.
 #     Catches an off-by-one at the limit, either side.
-#   * test_text_that_is_not_a_decimal_literal_has_no_type: no point, nothing
-#     after the point, two points, a letter, empty, a sign alone. Catches a
+#   * test_a_point_without_fraction_digits_or_without_integer_digits: DuckDB
+#     reads `5.` as DECIMAL(1, 0), `.5` as DECIMAL(1, 1) and `00.5` as
+#     DECIMAL(3, 1), the digits counted as written. Catches `5.` left without
+#     a type (a float) and a leading point or zeros miscounted.
+#   * test_text_that_is_not_a_decimal_literal_has_no_type: no point, a point
+#     alone, two points, a letter, an exponent, empty, a sign alone. Catches a
 #     malformed text typed as a number.
 
 from std.testing import TestSuite, assert_equal, assert_true
@@ -77,11 +82,21 @@ def test_the_38_digit_limit() raises:
     assert_equal(edge.value().dec128_scale, 1)
 
 
+def test_a_point_without_fraction_digits_or_without_integer_digits() raises:
+    _expect("5.", 5, 1, 0)
+    _expect("-5.", -5, 1, 0)
+    _expect("100.", 100, 3, 0)
+    _expect(".5", 5, 1, 1)
+    _expect("-.5", -5, 1, 1)
+    _expect("00.5", 5, 3, 1)
+    _expect("0.", 0, 1, 0)
+
+
 def test_text_that_is_not_a_decimal_literal_has_no_type() raises:
     assert_true(not decimal_from_literal_text(""), "empty")
     assert_true(not decimal_from_literal_text("-"), "sign alone")
+    assert_true(not decimal_from_literal_text("-."), "sign and point alone")
     assert_true(not decimal_from_literal_text("5"), "no point")
-    assert_true(not decimal_from_literal_text("5."), "nothing after the point")
     assert_true(not decimal_from_literal_text("."), "point alone")
     assert_true(not decimal_from_literal_text("1.2.3"), "two points")
     assert_true(not decimal_from_literal_text("1.x"), "a letter")
@@ -94,5 +109,6 @@ def main() raises:
     suite.test[test_text_gives_digits_as_precision_and_fraction_as_scale]()
     suite.test[test_a_sign_negates_the_value]()
     suite.test[test_the_38_digit_limit]()
+    suite.test[test_a_point_without_fraction_digits_or_without_integer_digits]()
     suite.test[test_text_that_is_not_a_decimal_literal_has_no_type]()
     suite^.run()

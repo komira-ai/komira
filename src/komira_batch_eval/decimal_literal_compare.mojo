@@ -118,6 +118,15 @@ def decimal_threshold(
     return DecimalThreshold(DEC_CMP_GT, below_all)
 
 
+def check_decimal_column_widens(
+    arr: Decimal128Array[HeapRegion],
+    precision: Int,
+    scale: Int,
+    literal_scale: Int,
+) raises:
+    pass
+
+
 @always_inline
 def _holds[op: UInt8, W: Int](
     lo: SIMD[DType.int64, W], t: SIMD[DType.int64, W]

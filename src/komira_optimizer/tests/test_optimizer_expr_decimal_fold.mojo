@@ -15,8 +15,11 @@
 #   * `*`: scale s1 + s2, precision p1 + p2;
 #   * an integer literal is DECIMAL(10, 0) when it fits INT32, else
 #     DECIMAL(19, 0), and takes part like any decimal;
-#   * a result that would need more than 38 digits is not folded (DuckDB
-#     leaves DECIMAL there); the node stays for the runtime;
+#   * a result wider than 18 digits from operands of 18 digits or fewer is cut
+#     to 18 (for `*`, when its scale is below 18), and one wider than 38 is cut
+#     to 38, both with an overflow check; a value that does not fit the cut
+#     width is an error in DuckDB, and the node stays an expression here (the
+#     SQL binder is what refuses it);
 #   * `/`, a comparison, and a decimal with a float literal are not folded.
 #
 # What each test proves, and the defect it catches:
@@ -34,10 +37,15 @@
 #   * test_negative_and_mixed_sign_decimals_fold: `-0.06 + 0.01`,
 #     `0.07 - 0.1`. Catches a sign lost in the 128-bit split of the literal.
 #   * test_negating_a_decimal_literal_folds: described at the test.
-#   * test_decimal_fold_leaves_what_duckdb_leaves: a result past 38 digits,
-#     `/`, a comparison, and a decimal with a float literal stay expressions.
-#     Catches a fold that overflows the 38-digit limit, or folds a pair the
-#     rule does not cover.
+#   * test_decimal_fold_leaves_what_duckdb_leaves: a sum or product whose value
+#     does not fit the width DuckDB gives it (past 18 digits from narrow
+#     operands, past 38 from any), `/`, a comparison, and a decimal with a
+#     float literal stay expressions. Catches a fold that overflows the width,
+#     or folds a pair the rule does not cover.
+#   * test_decimal_fold_cuts_wide_results_like_duckdb: `2 + 1234567890123456.78`
+#     is DECIMAL(18, 2), a 39-digit sum whose value fits 38 digits folds as
+#     DECIMAL(38, s), a 40-digit product of small values folds as DECIMAL(38,
+#     s). Catches a fold that gives up where DuckDB folds.
 #   * test_decimal_fold_walks_into_a_comparison: `a >= 0.06 - 0.01` folds the
 #     bound inside the comparison. Catches a fold that stops at a comparison.
 
@@ -151,13 +159,23 @@ def test_negating_a_decimal_literal_folds() raises:
 
 
 def test_decimal_fold_leaves_what_duckdb_leaves() raises:
-    # Past 38 digits: 10^37 (38 digits, scale 0) + 1 needs 39.
-    var wide = ScalarValue.decimal128_i128(pow10_i256(37).cast[DType.int128](), 38, 0)
-    var e = _fold_expr(_bin(BIN_ADD, Expr.literal(wide^), _dec(1, 38, 0)))
-    assert_true(e.tag == EXPR_BINARY_OP, "a 39-digit sum is not folded")
-    # A product past 38 digits: precision 20 + 20.
-    var m = _fold_expr(_bin(BIN_MUL, _dec(1, 20, 2), _dec(1, 20, 2)))
-    assert_true(m.tag == EXPR_BINARY_OP, "a 40-digit product is not folded")
+    # A sum of 38 nines and 1 is 10^38: 39 digits, cut to 38, and it overflows.
+    var nines = ScalarValue.decimal128_i128(
+        pow10_i256(38).cast[DType.int128]() - I128(1), 38, 0
+    )
+    var e = _fold_expr(_bin(BIN_ADD, Expr.literal(nines^), _dec(1, 1, 0)))
+    assert_true(e.tag == EXPR_BINARY_OP, "a sum past 38 digits is not folded")
+    # A product past 38 digits whose value is past 38 digits: 10^19 squared.
+    var big = ScalarValue.decimal128_i128(pow10_i256(19).cast[DType.int128](), 20, 0)
+    var m = _fold_expr(_bin(BIN_MUL, Expr.literal(big.copy()), Expr.literal(big^)))
+    assert_true(m.tag == EXPR_BINARY_OP, "a product past 38 digits is not folded")
+    # An 18-digit pair whose sum is 19 digits: DuckDB raises.
+    var a18 = ScalarValue.decimal128_i128(I128(999999999999999999), 18, 1)
+    var s18 = _fold_expr(_bin(BIN_ADD, Expr.literal(a18.copy()), Expr.literal(a18^)))
+    assert_true(s18.tag == EXPR_BINARY_OP, "a sum past 18 digits from 18-digit operands")
+    # A scale past 38.
+    var sc = _fold_expr(_bin(BIN_MUL, _dec(1, 21, 20), _dec(1, 37, 36)))
+    assert_true(sc.tag == EXPR_BINARY_OP, "a product of scale 56 is not folded")
     # Division, and a comparison of two decimal literals.
     var d = _fold_expr(_bin(BIN_DIV, _dec(6, 3, 2), _dec(1, 3, 2)))
     assert_true(d.tag == EXPR_BINARY_OP, "decimal division is not folded")
@@ -168,6 +186,32 @@ def test_decimal_fold_leaves_what_duckdb_leaves() raises:
         _bin(BIN_ADD, _dec(6, 3, 2), Expr.literal(ScalarValue.from_float(0.5)))
     )
     assert_true(f.tag == EXPR_BINARY_OP, "decimal + float is not folded")
+
+
+def test_decimal_fold_cuts_wide_results_like_duckdb() raises:
+    # 2 + 1234567890123456.78: DECIMAL(10, 0) + DECIMAL(18, 2) is cut to (18, 2).
+    _expect(
+        _fold_expr(_bin(BIN_ADD, _int(2), _dec(123456789012345678, 18, 2))),
+        123456789012345878,
+        18,
+        2,
+    )
+    # 0.000000001 * 0.000000001 keeps its width (scale 18 is not cut): (20, 18).
+    _expect(_fold_expr(_bin(BIN_MUL, _dec(1, 10, 9), _dec(1, 10, 9))), 1, 20, 18)
+    # 10^37 + 1 as DECIMAL(38, 0) + DECIMAL(1, 0): 39 digits, cut to 38.
+    var wide = ScalarValue.decimal128_i128(pow10_i256(37).cast[DType.int128](), 38, 0)
+    var cut = _fold_expr(_bin(BIN_ADD, Expr.literal(wide^), _dec(1, 1, 0)))
+    assert_true(cut.tag == EXPR_LITERAL, "a 39-digit sum that fits 38 digits folds")
+    assert_equal(
+        String(cut.literal_value()),
+        String(
+            ScalarValue.decimal128_i128(
+                pow10_i256(37).cast[DType.int128]() + I128(1), 38, 0
+            )
+        ),
+    )
+    # A 40-digit product of small values: DECIMAL(20, 2) * DECIMAL(20, 2).
+    _expect(_fold_expr(_bin(BIN_MUL, _dec(1, 20, 2), _dec(1, 20, 2))), 1, 38, 4)
 
 
 def test_decimal_fold_walks_into_a_comparison() raises:
@@ -193,5 +237,6 @@ def main() raises:
     suite.test[test_negative_and_mixed_sign_decimals_fold]()
     suite.test[test_negating_a_decimal_literal_folds]()
     suite.test[test_decimal_fold_leaves_what_duckdb_leaves]()
+    suite.test[test_decimal_fold_cuts_wide_results_like_duckdb]()
     suite.test[test_decimal_fold_walks_into_a_comparison]()
     suite^.run()

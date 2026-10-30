@@ -19,13 +19,25 @@
 # narrowest that may not. Row counts straddle the SIMD block sizes, and some
 # rows are NULL.
 #
+# Where DuckDB cannot make the comparison the evaluator raises: DuckDB compares
+# in DECIMAL(38, the larger of the two scales), and raises when the literal, or
+# a stored non-NULL value widened to that scale, has 39 digits or more. The
+# oracle derives that from the definition (|literal| * 10^(common - t) and
+# |c| * 10^(common - s) against 10^38), row by row; the answers of the pinned
+# DuckDB, errors included, are in komira_decimal_compare_conformance.
+#
 # What each test proves, and the defect it catches:
 #   * test_every_literal_every_operator_every_column: the mask of every
-#     (column, literal, operator, row count) equals the oracle's, and a NULL
-#     row is NULL, not false. Catches a literal rescaled by rounding, a wrong
-#     floor or ceil for one operator, a sign error for a negative literal, a
-#     compare narrowed to int64 for a column that does not fit, a tail of a
-#     SIMD block left unevaluated, and a NULL row that passes.
+#     (column, literal, operator, row count) equals the oracle's, or the
+#     evaluator raises where the oracle says DuckDB would, and a NULL row is
+#     NULL, not false. The integer literals include 10^15 (wider than the
+#     precision of DECIMAL(15, 2)), the int64 limits and uint64 values past
+#     Int64.MAX. Catches a literal rescaled by rounding, a wrong floor or ceil
+#     for one operator, a sign error for a negative literal, a compare
+#     narrowed to int64 for a column that does not fit, a tail of a SIMD block
+#     left unevaluated, a NULL row that passes, an integer literal wider than
+#     the column's precision raised on or answered wrongly, an answer where
+#     DuckDB raises, and a refusal where DuckDB answers.
 
 from std.testing import TestSuite, assert_equal, assert_true
 
@@ -94,7 +106,8 @@ def _holds(lhs: I256, rhs: I256, op: UInt8) -> Bool:
 
 struct _Literal(Copyable, Movable):
     """A literal of the sweep: its text, and unscaled value and scale. `scale`
-    is -1 for an integer literal (compared at scale 0)."""
+    is -1 for an int64 literal and -2 for a uint64 literal (both compared at
+    scale 0)."""
 
     var text: String
     var value: I128
@@ -106,6 +119,8 @@ struct _Literal(Copyable, Movable):
         self.scale = scale
 
     def scalar(self) -> ScalarValue:
+        if self.scale == -2:
+            return ScalarValue.from_uint64(self.value.cast[DType.uint64]())
         if self.scale < 0:
             return ScalarValue.from_int(Int(self.value.cast[DType.int64]()))
         return ScalarValue.decimal128_i128(self.value, 38, self.scale)
@@ -155,6 +170,14 @@ def _literals() raises -> List[_Literal]:
     out.append(_lit("24", 24, -1))
     out.append(_lit("-7", -7, -1))
     out.append(_lit("10", 10, -1))
+    # Integers wider than a narrow column's precision: DECIMAL(15, 2) holds
+    # 13 integer digits. DuckDB casts them to DECIMAL(38, 2) and compares.
+    out.append(_lit("10^15", 1000000000000000, -1))
+    out.append(_lit("-10^15", -1000000000000000, -1))
+    out.append(_Literal("Int64.MAX", I128(Int(Int64.MAX)), -1))
+    out.append(_Literal("Int64.MIN", -I128(Int(Int64.MAX)) - I128(1), -1))
+    out.append(_Literal("2^63 (uint64)", I128(Int(Int64.MAX)) + I128(1), -2))
+    out.append(_Literal("2^64-1 (uint64)", I128(Int(Int64.MAX)) * I128(2) + I128(1), -2))
     # Past the int64 range of the unscaled integer, at the column's scale
     # (scale 2: 92233720368547758.07 is 2^63 - 1 hundredths) and beyond it.
     out.append(_Literal("2^63-1 @2", I128(Int(Int64.MAX)), 2))
@@ -274,6 +297,7 @@ struct _Tally(Movable):
     var true_by_op: List[Int]
     var false_by_op: List[Int]
     var checked: Int
+    var refused: Int
 
     def __init__(out self):
         self.true_by_op = List[Int]()
@@ -282,6 +306,30 @@ struct _Tally(Movable):
             self.true_by_op.append(0)
             self.false_by_op.append(0)
         self.checked = 0
+        self.refused = 0
+
+
+def _duckdb_raises(
+    lit: _Literal, sh: _Shape, values: List[I128], nulls: Bool
+) raises -> Bool:
+    """True iff DuckDB cannot make `d <op> literal`: it compares in
+    DECIMAL(38, c) with c the larger of the two scales, and raises when the
+    literal, or a stored non-NULL value, has 39 digits or more at scale c."""
+    var limit = pow10_i256(38)
+    var common = max(lit.lit_scale(), sh.scale)
+    var lit_at_common = lit.value.cast[DType.int256]() * pow10_i256(
+        common - lit.lit_scale()
+    )
+    if lit_at_common >= limit or lit_at_common <= -limit:
+        return True
+    var factor = pow10_i256(common - sh.scale)
+    for i in range(len(values)):
+        if nulls and _is_null_row(i):
+            continue
+        var widened = values[i].cast[DType.int256]() * factor
+        if widened >= limit or widened <= -limit:
+            return True
+    return False
 
 
 def _sweep(mut problems: List[String], mut tally: _Tally) raises:
@@ -300,11 +348,34 @@ def _sweep(mut problems: List[String], mut tally: _Tally) raises:
                     var col_mul = pow10_i256(lit.lit_scale())
                     var lit_mul = pow10_i256(sh.scale)
                     var rhs = lit.value.cast[DType.int256]() * lit_mul
+                    var refuses = _duckdb_raises(lit, sh, values, nulls)
                     for oi in range(len(ops)):
                         var op = ops[oi]
                         var e = Expr.binary(
                             op, Expr.col_ref("d"), Expr.literal(lit.scalar())
                         )
+                        if refuses:
+                            tally.refused += 1
+                            var raised = False
+                            try:
+                                _ = _eval_predicate(e, batch)
+                            except:
+                                raised = True
+                            if not raised:
+                                problems.append(
+                                    "DECIMAL("
+                                    + String(sh.precision)
+                                    + ","
+                                    + String(sh.scale)
+                                    + ") n="
+                                    + String(n)
+                                    + ": DuckDB raises on `d "
+                                    + _op_text(op)
+                                    + " "
+                                    + lit.text
+                                    + "`, the evaluator answers"
+                                )
+                            continue
                         var mask = _eval_predicate(e, batch)
                         assert_equal(len(mask), n)
                         for i in range(n):
@@ -368,6 +439,9 @@ def test_every_literal_every_operator_every_column() raises:
     var tally = _Tally()
     _sweep(problems, tally)
     assert_true(tally.checked > 100000, "the sweep checked too few rows")
+    # Some comparisons are ones DuckDB raises on, and most are not.
+    assert_true(tally.refused > 500, "the sweep held too few refusals")
+    assert_true(tally.refused * 4 < tally.checked, "the sweep refused most of its cases")
     # The sweep holds both answers for every operator, so an oracle or a
     # table that degenerated into one answer cannot pass.
     for oi in range(6):

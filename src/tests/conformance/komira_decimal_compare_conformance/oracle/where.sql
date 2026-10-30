@@ -51,5 +51,19 @@ SELECT * FROM (
   SELECT 23 AS n, 'c between 92233720368547758.07 and 92233720368547758.08' AS pred, count(*) AS rows_kept, CAST(coalesce(sum(id), 0) AS BIGINT) AS id_sum FROM t WHERE c between 92233720368547758.07 and 92233720368547758.08
   UNION ALL
   SELECT 24 AS n, 'c = 92233720368547758.075' AS pred, count(*) AS rows_kept, CAST(coalesce(sum(id), 0) AS BIGINT) AS id_sum FROM t WHERE c = 92233720368547758.075
+  UNION ALL
+  SELECT 25 AS n, 'a > - -0.5' AS pred, count(*) AS rows_kept, CAST(coalesce(sum(id), 0) AS BIGINT) AS id_sum FROM t WHERE a > - -0.5
+  UNION ALL
+  SELECT 26 AS n, 'a < -(-0.5)' AS pred, count(*) AS rows_kept, CAST(coalesce(sum(id), 0) AS BIGINT) AS id_sum FROM t WHERE a < -(-0.5)
+  UNION ALL
+  SELECT 27 AS n, '5. > a' AS pred, count(*) AS rows_kept, CAST(coalesce(sum(id), 0) AS BIGINT) AS id_sum FROM t WHERE 5. > a
+  UNION ALL
+  SELECT 28 AS n, '.5 > a' AS pred, count(*) AS rows_kept, CAST(coalesce(sum(id), 0) AS BIGINT) AS id_sum FROM t WHERE .5 > a
+  UNION ALL
+  SELECT 29 AS n, 'd < 0.065 and e >= 0.5' AS pred, count(*) AS rows_kept, CAST(coalesce(sum(id), 0) AS BIGINT) AS id_sum FROM t WHERE d < 0.065 and e >= 0.5
+  UNION ALL
+  SELECT 30 AS n, 'h >= 0.06 - 0.01 and h <= 0.06 + 0.01 and g < 24' AS pred, count(*) AS rows_kept, CAST(coalesce(sum(id), 0) AS BIGINT) AS id_sum FROM t WHERE h >= 0.06 - 0.01 and h <= 0.06 + 0.01 and g < 24
+  UNION ALL
+  SELECT 31 AS n, 'f > 0.00000000005 or m <= -0.055' AS pred, count(*) AS rows_kept, CAST(coalesce(sum(id), 0) AS BIGINT) AS id_sum FROM t WHERE f > 0.00000000005 or m <= -0.055
 ) AS q ORDER BY n
 ) TO 'where.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
