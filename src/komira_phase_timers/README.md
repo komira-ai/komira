@@ -14,4 +14,8 @@ pt_record[PH_FILTER](t0)
 
 When on, the calling thread owns a lane of the process-global slab (found by `pthread_self`), 1152 bytes with a cache line of padding at each end, so two threads never write one line. A lane holds, for each phase, the sum of its intervals in nanoseconds, the longest interval, and the number of intervals. Only the owner writes a lane; read after the fork-join that ended the work, with `pt_lane_count` and `pt_get`. Phases nest (decode inside claim); `pt_phase_name` gives each phase's stable name.
 
+A slab has `PT_LANES` (256) lanes. A record from a thread that finds no free lane is dropped and counted in `pt_overflow_count` (zeroed by `pt_reset`); a user who sees a non-zero count must not trust the lane numbers.
+
+The readers (`pt_lane_count`, `pt_get`, `pt_overflow_count`) are plain functions, not behind the flag: they read the slab and create it if nothing has recorded, so with the timers off they allocate it once and read zeros. The recording entry points are the ones that vanish.
+
 One query at a time: the slab is process-global.

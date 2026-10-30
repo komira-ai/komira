@@ -36,7 +36,9 @@ from komira_phase_timers.phase_timers import (
     PH_COUNT,
     PH_END_STAMP,
     PH_JOIN_TAIL,
+    PT_LANES,
     pt_enabled,
+    pt_overflow_count,
     pt_phase_name,
     pt_reset,
 )
@@ -62,7 +64,13 @@ comptime NOTE: String = (
     " absolute times vary from run to run. Read the numbers as RELATIVE (the"
     " share of each phase in the total, and how the time scales with the"
     " thread count), not as a headline figure and not as a comparison with"
-    " another engine."
+    " another engine. The phase timers are not free: each interval costs two"
+    " clock reads, a pthread_self and a scan of the thread table (about the"
+    " number of threads), at row-group, morsel and segment granularity, so the"
+    " total here is somewhat above that of a build without the timers; the"
+    " overhead was not measured by this probe. timer_records_dropped is the"
+    " number of intervals lost because more threads recorded than the timers"
+    " have lanes (timer_lane_capacity); it must be 0."
 )
 
 
@@ -77,6 +85,8 @@ struct RunRecord(Copyable, Movable):
     var user_ns: Int
     var system_ns: Int
     var revenue_unscaled: Int
+    var dropped_records: Int
+    """Phase-timer records lost to a full thread table in this run."""
     var ok: Bool
 
     def __init__(out self):
@@ -90,6 +100,7 @@ struct RunRecord(Copyable, Movable):
         self.user_ns = 0
         self.system_ns = 0
         self.revenue_unscaled = -1
+        self.dropped_records = 0
         self.ok = False
 
 
@@ -111,6 +122,7 @@ def _run_once(mut ctx: EngineContext, text: String) raises -> RunRecord:
     rec.user_ns = d.user_time_us * 1000
     rec.system_ns = d.system_time_us * 1000
     rec.phases = snapshot_all()
+    rec.dropped_records = pt_overflow_count()
     if outcome.refusal:
         raise Error(
             "Q6 was refused at "
@@ -222,7 +234,9 @@ def _json_config(
     var rss = List[Int]()
     var user = List[Int]()
     var system = List[Int]()
+    var dropped = 0
     for r in range(len(runs)):
+        dropped += runs[r].dropped_records
         totals.append(runs[r].total_ns)
         minor.append(runs[r].minor_faults)
         major.append(runs[r].major_faults)
@@ -235,6 +249,7 @@ def _json_config(
     var out = String('{"threads_requested":') + String(threads_requested)
     out += ',"threads_effective":' + String(threads_effective)
     out += ',"runs":' + String(len(runs))
+    out += ',"timer_records_dropped":' + String(dropped)
     out += ',"total_ms":' + _dist_ms(totals)
     out += ',"total_ms_per_run":' + _series_ms(totals)
     out += ',"page_faults":{"minor_per_run":' + _series_int(minor)
@@ -380,7 +395,19 @@ def run_probe(settings: ProbeSettings) raises -> ProbeResult:
     var configs = String("")
     var host = String("null")
     var plan_text = String("")
+    if pt_enabled():
+        # The driver and the workers each need a lane.
+        for t in range(len(settings.threads)):
+            if settings.threads[t] + 1 > PT_LANES:
+                raise Error(
+                    "the phase timers have "
+                    + String(PT_LANES)
+                    + " lanes (the driver and the workers); "
+                    + String(settings.threads[t])
+                    + " threads do not fit"
+                )
     var answers_match = True
+    var records_dropped = 0
     for t in range(len(settings.threads)):
         var requested = settings.threads[t]
         var ctx = EngineContext(
@@ -402,6 +429,8 @@ def run_probe(settings: ProbeSettings) raises -> ProbeResult:
             if not _answer_ok(rec, settings):
                 answers_match = False
             runs.append(rec^)
+        for r in range(len(runs)):
+            records_dropped += runs[r].dropped_records
         if t > 0:
             configs += ","
         configs += _json_config(requested, ctx.host_profile.thread_count, runs)
@@ -409,6 +438,8 @@ def run_probe(settings: ProbeSettings) raises -> ProbeResult:
     json += ',"note":"' + NOTE + '"'
     json += ',"query":"tpch/q6"'
     json += ',"timers_compiled_in":' + String("true" if pt_enabled() else "false")
+    json += ',"timer_lane_capacity":' + String(PT_LANES)
+    json += ',"timer_records_dropped":' + String(records_dropped)
     json += ',"warmup_runs_discarded":1'
     json += ',"runs_per_thread_count":' + String(settings.runs)
     json += ',"expected_revenue_unscaled":' + String(settings.expected_revenue)

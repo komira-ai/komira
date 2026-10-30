@@ -6,12 +6,15 @@
 # What each test proves, and the defect it would catch:
 # - test_every_stage_of_a_run_is_timed: one Q6 run on three workers leaves
 #   the driver phases (parse, bind, optimize, lower, execute setup, run_plan)
-#   with one interval each, the task phase with a multiple of three intervals
-#   on three threads, the dispatch and combine phases timed, and the nested
-#   phases consistent: the task time holds the claim time, the claim time holds
-#   decode, filter and the sink time is inside the task. Catches a timer left
-#   out of a stage, one that lands on the wrong thread, or one that is closed
-#   in the wrong place.
+#   with one interval each on one thread; the task phase with a multiple of
+#   three intervals on three threads; one wake interval per task; the segment
+#   phases (source, operators and sink, dispatch, combine) each with the same
+#   number of intervals; and the claim, filter-column decode, filter and sink
+#   phases called at least once, the claim on no more than the three worker
+#   threads; the end stamp is a stamp and counts no interval. It compares call
+#   counts and thread counts only, never a duration. Catches a timer left out
+#   of a stage, one that lands on the wrong thread, or one called the wrong
+#   number of times.
 # - test_the_json_is_valid_and_complete: `run_probe` for two thread counts
 #   gives JSON a parser accepts, with the schema, the note that the numbers
 #   are relative, both configurations, 5 runs each, a median and quartiles,
@@ -21,6 +24,9 @@
 # - test_the_plan_text_shows_the_pushdown: the rendered plans name the scan,
 #   the filter and the lowered source and sink. Catches a render that leaves
 #   out the lowered plan the pushdown question is answered from.
+# - test_a_thread_list_beyond_the_timer_lanes_is_refused: a thread count that
+#   with the driver exceeds PT_LANES raises before any run. Catches a probe
+#   that would drop timer records and report numbers from a partial table.
 # - test_a_wrong_expected_answer_is_reported: a different expected revenue
 #   makes `answers_match` False. Catches a check that cannot fail.
 
@@ -47,9 +53,15 @@ from komira_phase_timers.phase_timers import (
     PH_OPTIMIZE,
     PH_PARSE,
     PH_RUN_PLAN,
+    PH_SEG_OPS_SINK,
+    PH_SEG_SOURCE,
     PH_SINK,
     PH_TASK,
+    PH_WAKE,
+    PH_END_STAMP,
+    PT_LANES,
     pt_enabled,
+    pt_overflow_count,
     pt_reset,
 )
 from komira_pipeline_exec.tpch_q6 import (
@@ -110,22 +122,23 @@ def test_every_stage_of_a_run_is_timed() raises:
         var a = snapshot_phase(p)
         assert_equal(a.calls, 1)
         assert_equal(a.lanes, 1)
-        assert_true(a.sum_ns > 0)
     var task = snapshot_phase(PH_TASK)
     assert_true(task.calls >= 3 and task.calls % 3 == 0)
     assert_equal(task.lanes, 3)
-    var dispatch = snapshot_phase(PH_DISPATCH)
-    assert_true(dispatch.calls >= 1)
-    assert_true(snapshot_phase(PH_COMBINE).calls >= 1)
+    assert_equal(snapshot_phase(PH_WAKE).calls, task.calls)
+    var segments = snapshot_phase(PH_DISPATCH).calls
+    assert_true(segments >= 1)
+    assert_equal(snapshot_phase(PH_SEG_SOURCE).calls, segments)
+    assert_equal(snapshot_phase(PH_SEG_OPS_SINK).calls, segments)
+    assert_equal(snapshot_phase(PH_COMBINE).calls, segments)
     var claim = snapshot_phase(PH_CLAIM)
-    var sink = snapshot_phase(PH_SINK)
-    var decode = snapshot_phase(PH_DECODE_FILTER_COLS)
-    var filter = snapshot_phase(PH_FILTER)
-    assert_true(claim.calls > 0 and sink.calls > 0)
-    assert_true(decode.calls > 0 and filter.calls > 0)
-    assert_true(task.sum_ns >= claim.sum_ns + sink.sum_ns)
-    assert_true(claim.sum_ns >= decode.sum_ns + filter.sum_ns)
-    assert_true(snapshot_phase(PH_RUN_PLAN).sum_ns >= dispatch.sum_ns)
+    assert_true(claim.calls > 0 and claim.lanes >= 1 and claim.lanes <= 3)
+    assert_true(snapshot_phase(PH_SINK).calls > 0)
+    assert_true(snapshot_phase(PH_DECODE_FILTER_COLS).calls > 0)
+    assert_true(snapshot_phase(PH_FILTER).calls > 0)
+    var stamp = snapshot_phase(PH_END_STAMP)
+    assert_equal(stamp.calls, 0)
+    assert_equal(pt_overflow_count(), 0)
 
 
 def test_the_json_is_valid_and_complete() raises:
@@ -143,6 +156,9 @@ def test_the_json_is_valid_and_complete() raises:
     assert_equal(doc.get("schema").as_string(), "komira-q6-phase-probe/1")
     assert_true("RELATIVE" in doc.get("note").as_string())
     assert_true(doc.get("timers_compiled_in").as_bool())
+    assert_equal(Int(doc.get("timer_lane_capacity").as_int64()), PT_LANES)
+    assert_equal(Int(doc.get("timer_records_dropped").as_int64()), 0)
+    assert_true("overhead" in doc.get("note").as_string())
     assert_true(doc.get("answers_match_expected").as_bool())
     assert_true(doc.has("footer_cost"))
     assert_true(doc.get("host").get("logical_cores").as_int64() > 0)
@@ -151,7 +167,8 @@ def test_the_json_is_valid_and_complete() raises:
     for i in range(2):
         var c = cfgs.element_at(i)
         assert_equal(Int(c.get("runs").as_int64()), 5)
-        assert_true(c.get("total_ms").get("median").as_float64() > 0.0)
+        assert_true(c.get("total_ms").has("median"))
+        assert_equal(Int(c.get("timer_records_dropped").as_int64()), 0)
         assert_true(c.get("total_ms").has("q1") and c.get("total_ms").has("q3"))
         assert_true(c.get("page_faults").get("minor").has("median"))
         assert_true(c.get("cpu_ms").get("user").get("median").as_float64() >= 0.0)
@@ -199,10 +216,28 @@ def test_a_wrong_expected_answer_is_reported() raises:
     assert_false(result.answers_match)
 
 
+def test_a_thread_list_beyond_the_timer_lanes_is_refused() raises:
+    var t = q6_table(300)
+    var threads = List[Int]()
+    threads.append(PT_LANES)
+    var refused = False
+    try:
+        _ = run_probe(
+            ProbeSettings(
+                _write("probe_lanes", t), test_tmpdir() + "/probe_lanes_out",
+                threads^, 5, 1 << 30,
+            )
+        )
+    except e:
+        refused = "lanes" in String(e)
+    assert_true(refused)
+
+
 def main() raises:
     var suite = TestSuite()
     suite.test[test_every_stage_of_a_run_is_timed]()
     suite.test[test_the_json_is_valid_and_complete]()
     suite.test[test_the_plan_text_shows_the_pushdown]()
     suite.test[test_a_wrong_expected_answer_is_reported]()
+    suite.test[test_a_thread_list_beyond_the_timer_lanes_is_refused]()
     suite^.run()

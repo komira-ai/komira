@@ -16,7 +16,8 @@
 # integer. Nothing reads a clock, touches a global or allocates.
 #
 # ON, the cost is a clock read at a phase's start and, at its end, a clock read,
-# one `pthread_self`, a scan of the thread table and three stores into the
+# one `pthread_self`, a linear scan of the thread table (up to the number of
+# threads that have recorded, at most PT_LANES) and three stores into the
 # calling thread's own lane. A lane is 1152 bytes with 64 bytes of padding at
 # each end, so two threads never write one cache line whatever the alignment of
 # the slab. The sites are per row group, per morsel and per segment, never per
@@ -28,6 +29,12 @@
 # read-modify-write), and a reader looks only after the fork-join that ended
 # the work. A phase nested in another (decode inside claim) is counted in both:
 # the readers decide what to add.
+#
+# MORE THREADS THAN LANES. A slab has PT_LANES lanes. A thread that finds none
+# free records nothing; each record it drops adds 1 to an overflow count
+# (`pt_overflow_count`), which `pt_reset` zeroes, and which the probe writes
+# into its JSON, so a run with dropped records is visible and its numbers are
+# not to be trusted. The probe also refuses a thread list that cannot fit.
 #
 # One query at a time: the slab is process-global because the sites sit in
 # functions no object of the caller reaches (the same reason as
@@ -112,6 +119,7 @@ comptime _LANE_WORDS: Int = PH_COUNT * _FIELDS + 2 * _PAD
 comptime _HEADER_WORDS: Int = 8
 comptime _W_FORK: Int = 0
 comptime _W_LANES_USED: Int = 1
+comptime _W_OVERFLOW: Int = 2
 comptime _TID_BASE: Int = _HEADER_WORDS
 comptime _LANES_BASE: Int = _TID_BASE + PT_LANES + _PAD
 comptime _TOTAL_WORDS: Int = _LANES_BASE + PT_LANES * _LANE_WORDS
@@ -151,13 +159,18 @@ def _lane_word(lane: Int, phase: Int, field: Int) -> Int:
 
 
 def _record_interval(phase: Int, ns: Int, stamp: Bool) raises:
+    _record_interval_as(_my_thread(), phase, ns, stamp)
+
+
+def _record_interval_as(tid: Int, phase: Int, ns: Int, stamp: Bool) raises:
     # SAFETY: `_SLAB` is process-lifetime storage of `_TOTAL_WORDS` words; every
-    # index below is inside it (lane < PT_LANES, phase < PH_COUNT, field < 4);
-    # the pointer does not leave this function.
+    # index below is inside it (`used` is clamped to PT_LANES before the scan,
+    # lane < PT_LANES is checked before any lane word is touched, phase <
+    # PH_COUNT at every call site, field < 4); the pointer does not leave this
+    # function.
     var g = _SLAB.get_or_create_ptr()
     var base = UnsafePointer(to=g[][])
-    var tid = _my_thread()
-    var used = Int((base + _W_LANES_USED)[].load())
+    var used = min(Int((base + _W_LANES_USED)[].load()), PT_LANES)
     var lane = -1
     for i in range(used):
         if Int((base + _TID_BASE + i)[].load()) == tid:
@@ -165,10 +178,14 @@ def _record_interval(phase: Int, ns: Int, stamp: Bool) raises:
             break
     if lane < 0:
         if used >= PT_LANES:
+            _ = (base + _W_OVERFLOW)[].fetch_add(Int64(1))
             return
         # A free lane: one fetch_add hands each registering thread its own.
+        # Racing registrations can push the counter past PT_LANES; every
+        # reader clamps it, and the loser here drops its record.
         lane = Int((base + _W_LANES_USED)[].fetch_add(Int64(1)))
         if lane >= PT_LANES:
+            _ = (base + _W_OVERFLOW)[].fetch_add(Int64(1))
             return
         (base + _TID_BASE + lane)[].store(Int64(tid))
     var w = _lane_word(lane, phase, 0)
@@ -221,6 +238,8 @@ def pt_stamp[phase: Int]():
 
 
 def _mark_fork() raises:
+    # SAFETY: `_SLAB` outlives the process's use; index _W_FORK is a header word
+    # inside the slab; the pointer does not leave this function.
     var g = _SLAB.get_or_create_ptr()
     var base = UnsafePointer(to=g[][])
     (base + _W_FORK)[].store(Int64(perf_counter_ns()))
@@ -237,6 +256,7 @@ def pt_mark_fork[_site: Int = 0]():
 
 
 def _wake() raises:
+    # SAFETY: as `_mark_fork`: one header word (_W_FORK) read, pointer local.
     var g = _SLAB.get_or_create_ptr()
     var fork = Int((UnsafePointer(to=g[][]) + _W_FORK)[].load())
     _record_interval(PH_WAKE, Int(perf_counter_ns()) - fork, False)
@@ -253,13 +273,16 @@ def pt_record_wake[_site: Int = 0]():
 
 
 def _join_tails() raises:
+    # SAFETY: header words and lane words read inside the slab: the lane index
+    # is below min(used, PT_LANES), so every `_lane_word` is within
+    # _TOTAL_WORDS; the pointer does not leave this function.
     var now = Int(perf_counter_ns())
     var g = _SLAB.get_or_create_ptr()
     var base = UnsafePointer(to=g[][])
     var fork = Int((base + _W_FORK)[].load())
-    var used = Int((base + _W_LANES_USED)[].load())
+    var used = min(Int((base + _W_LANES_USED)[].load()), PT_LANES)
     var tails = List[Int]()
-    for i in range(min(used, PT_LANES)):
+    for i in range(used):
         var end = Int((base + _lane_word(i, PH_END_STAMP, FIELD_SUM))[].load())
         if end > fork:
             tails.append(now - end)
@@ -279,6 +302,9 @@ def pt_record_join_tails[_site: Int = 0]():
 
 
 def _reset() raises:
+    # SAFETY: writes only words of lanes below min(used, PT_LANES) and header
+    # words, all inside the slab; called with no query running, so no owner is
+    # writing a lane; the pointer does not leave this function.
     var g = _SLAB.get_or_create_ptr()
     var base = UnsafePointer(to=g[][])
     var used = min(Int((base + _W_LANES_USED)[].load()), PT_LANES)
@@ -287,6 +313,7 @@ def _reset() raises:
             for f in range(_FIELDS):
                 (base + _lane_word(lane, p, f))[].store(Int64(0))
     (base + _W_FORK)[].store(Int64(0))
+    (base + _W_OVERFLOW)[].store(Int64(0))
 
 
 @always_inline
@@ -311,13 +338,41 @@ def pt_enabled[_site: Int = 0]() -> Bool:
         return False
 
 
+@always_inline
+def pt_record_ns_as[phase: Int](thread_id: Int, ns: Int):
+    """`pt_record_ns` as if called by the thread `thread_id`: for tests that
+    need more threads than they can start. Does nothing when off."""
+    comptime if phase_timers_on():
+        try:
+            _record_interval_as(thread_id, phase, ns, False)
+        except:
+            pass
+
+
 def pt_lane_count() -> Int:
-    """How many threads have recorded (0 when off)."""
+    """How many threads have recorded (0 when off). Reading it creates the
+    slab if nothing has recorded yet; it is a reader's call, not a hot-path
+    one, and is not behind the flag."""
     try:
+        # SAFETY: one header word (_W_LANES_USED) of the slab is read; the
+        # pointer does not leave this function.
         var g = _SLAB.get_or_create_ptr()
         return min(
             Int((UnsafePointer(to=g[][]) + _W_LANES_USED)[].load()), PT_LANES
         )
+    except:
+        return 0
+
+
+def pt_overflow_count() -> Int:
+    """How many records were dropped since `pt_reset` because more threads
+    recorded than there are lanes (PT_LANES). Non-zero means the lane numbers
+    are incomplete."""
+    try:
+        # SAFETY: one header word (_W_OVERFLOW) of the slab is read; the
+        # pointer does not leave this function.
+        var g = _SLAB.get_or_create_ptr()
+        return Int((UnsafePointer(to=g[][]) + _W_OVERFLOW)[].load())
     except:
         return 0
 
@@ -330,8 +385,13 @@ def pt_get(lane: Int, phase: Int, field: Int) -> Int:
     if field < 0 or field >= FIELD_CALLS + 1:
         return 0
     try:
+        # SAFETY: the bounds check above puts lane, phase and field inside the
+        # table, so the word is inside the slab; the pointer does not leave
+        # this function. Not behind the flag: it creates the slab if absent.
         var g = _SLAB.get_or_create_ptr()
-        return Int((UnsafePointer(to=g[][]) + _lane_word(lane, phase, field))[].load())
+        return Int(
+            (UnsafePointer(to=g[][]) + _lane_word(lane, phase, field))[].load()
+        )
     except:
         return 0
 

@@ -21,8 +21,8 @@ _LICENSE_SIZE = 1072
 
 # Who may use the pinned DuckDB: the test-only packages of src/tests that
 # declare a sql_oracle, the Q6 phase probe's rule (it runs the benchmark's
-# TPC-H staging, which starts this binary), and the fixtures of the rule's own tests in the `tests` cell. That cell exists only
-# in komira's own checkout; a label naming it would fail to load in a
+# TPC-H staging, which starts this binary), and the fixtures of the rule's own
+# tests in the `tests` cell. That cell exists only in komira's own checkout; a label naming it would fail to load in a
 # repository that uses komira as a cell, so it is named only when it exists.
 _USERS = ["komira//src/tests/...", "komira//src/komira_bench_q6_phases:"] + ([
     "tests//functional/sql_oracle:",
