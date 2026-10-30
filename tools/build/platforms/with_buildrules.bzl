@@ -26,17 +26,30 @@ unit graph, the toolchain and the execution platform from those too, so a packag
 selects the macOS graph and this platform.)
 """
 
+def first_platform_refusal(labels, first_remote):
+    """Why komira's registration cannot take buildrules' platforms, or None.
+
+    `labels` are the labels of the registered platforms in order, `first_remote`
+    whether the first one executes remotely. Komira's linux-x86_64 comes first.
+    The one exception is a local build on a Mac (`komira_local_execution_platforms`),
+    whose only platform is darwin-arm64 and runs on this machine: a lone REMOTE
+    darwin-arm64 (a Mac client with only macOS workers) is still refused, since
+    buildrules' linux-labelled platforms would silently get the macOS executor.
+    """
+    if len(labels) == 0:
+        return "no platform"
+    if labels[0].endswith("platforms:linux-x86_64"):
+        return None
+    if len(labels) == 1 and labels[0].endswith("platforms:darwin-arm64") and not first_remote:
+        return None
+    return "the first platform must be komira's linux-x86_64 (or, alone and local, a local macOS build's darwin-arm64)"
+
 def _impl(ctx):
     base = ctx.attrs.base[ExecutionPlatformRegistrationInfo].platforms
-    # Komira's linux-x86_64 comes first; the one exception is a local build on a Mac
-    # (`komira_local_execution_platforms`), whose only platform is darwin-arm64.
-    only_mac = len(base) == 1 and str(base[0].label).endswith("platforms:darwin-arm64")
-    if len(base) == 0 or not (only_mac or str(base[0].label).endswith("platforms:linux-x86_64")):
-        fail("{}: the first platform of {} must be komira's linux-x86_64 (or, alone, a local macOS build's darwin-arm64), got {}".format(
-            ctx.label,
-            ctx.attrs.base.label,
-            [str(p.label) for p in base],
-        ))
+    labels = [str(p.label) for p in base]
+    refusal = first_platform_refusal(labels, len(base) > 0 and base[0].executor_config.remote_enabled)
+    if refusal:
+        fail("{}: {} (of {}), got {}".format(ctx.label, refusal, ctx.attrs.base.label, labels))
     linux = base[0]
     extra = [
         ExecutionPlatformInfo(

@@ -482,24 +482,27 @@ def komira_default_execution_platforms(name, visibility = None):
 # (tools/build/lint/doc_tree.bzl), so no BUCK file names one.
 komira_default_execution_platforms = declares_docs(komira_default_execution_platforms)
 
-def tool_exec_name():
-    """The row the build tools (the unpackers, zig, the wrappers, the lints) run on: `linux-x86_64`, except `darwin-arm64` for a build that runs every action on a Mac.
+def tool_exec_row(mode, host_name):
+    """The row the build tools run on, given `execution_mode()` (None for a refused configuration) and the platform-table row this machine is (None for none).
 
-    That is a local `execution_mode()` (read from the root cell's config) on a macOS arm64 client, whose one
-    execution platform is darwin-arm64 (`komira_local_execution_platforms`),
-    so nothing could be placed on linux-x86_64 there. With a remote-execution
-    service (whatever the client's own platform), or on a Linux client, it is
-    `linux-x86_64`, which is what every tool states today: the actions, their
-    configuration and their keys are unchanged.
+    `darwin-arm64` only for a local build on the darwin-arm64 host, whose one
+    execution platform that is; `linux-x86_64` otherwise (remote execution,
+    whatever the client's own platform; a Linux client; a refused
+    configuration, reported where it is read), which is what every tool states
+    today: the actions, their configuration and their keys are unchanged.
     """
-    # Read from the ROOT cell's config, as the macOS toolchain's host mode is
-    # (`darwin_toolchain_hosts_here`), so the two never disagree. A refused
-    # configuration is reported where it is read (`execution_mode`, the
-    # toolchain); here it leaves the linux row.
-    mode, _ = _mode_or_refusal(read_root_config)
-    if mode == "local" and host_row(host_info()) == "darwin-arm64":
+    if mode == "local" and host_name == "darwin-arm64":
         return "darwin-arm64"
     return "linux-x86_64"
+
+def tool_exec_name():
+    """The row the build tools (the unpackers, zig, the wrappers, the lints) run on; see `tool_exec_row`.
+
+    The mode is read from the ROOT cell's config, as the macOS toolchain's host
+    mode is (`darwin_toolchain_hosts_here`), so the two never disagree.
+    """
+    mode, _ = _mode_or_refusal(read_root_config)
+    return tool_exec_row(mode, host_row(host_info()))
 
 # The constraints of the execution platform the build tools run on, for the
 # `exec_compatible_with` of a target whose actions run a tool the build itself
