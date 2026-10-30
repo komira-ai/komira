@@ -28,6 +28,12 @@
 #   * test_sums_of_other_types_keep_their_declared_types: FLOAT64 and DECIMAL(12,
 #     2) sums keep FLOAT64 and DECIMAL(38, 2), and avg, min, max and count keep
 #     their types. Catches a widening that casts a type it must not.
+#   * test_division_over_a_sum_is_double_and_integer_division_is_refused: `/`
+#     over an integer sum casts it to DOUBLE (float64 result), a FLOAT or
+#     DECIMAL(12, 2) sum keeps the plain division, and `//` over an
+#     integer sum is refused by name. Catches a division that falls to the
+#     engine's four-place DECIMAL division (3.5000 for 7 / 2) or answers 3.5
+#     for 7 // 2.
 #   * test_sum_distinct_is_still_refused: unchanged.
 #   * test_a_dataframe_door_plan_keeps_int64: the same SUM aggregate built
 #     without the SQL binder, over the same scan, keeps the INT64 / UINT64
@@ -166,6 +172,40 @@ def test_a_boolean_sum_is_widened_too() raises:
     assert_equal(
         _out_type("SELECT sum(i32 > 1) FROM t"), "decimal128(38,0)?"
     )
+
+
+def _err(sql: String) raises -> String:
+    try:
+        _ = _plan(sql)
+    except e:
+        return String(e)
+    raise Error("bound, expected a refusal: " + sql)
+
+
+def test_division_over_a_sum_is_double_and_integer_division_is_refused() raises:
+    # DuckDB's `/` over an integer sum is DOUBLE: the DECIMAL(38, 0) sum is cast
+    # to DOUBLE, not divided as a DECIMAL (which would round to four places).
+    var plan = _plan("SELECT sum(i32) / count(*) AS r FROM t")
+    assert_equal(_type_of(plan, 0), "float64?")
+    assert_true(
+        String(plan).find("DIV, Cast(ColRef(_agg_x0), float64), ColRef(_agg_x1)") >= 0,
+        String(plan),
+    )
+    var right = _plan("SELECT count(*) / sum(i32) AS r FROM t")
+    assert_equal(_type_of(right, 0), "float64?")
+    assert_true(
+        String(right).find("Cast(ColRef(_agg_x1), float64)") >= 0, String(right)
+    )
+    # A float or DECIMAL(p, s>0) sum keeps the plain division.
+    assert_true(String(_plan("SELECT sum(f) / count(*) FROM t")).find("Cast(") < 0)
+    assert_true(
+        String(_plan("SELECT sum(dc) / count(*) FROM t")).find("float64") < 0
+    )
+    # `//` over an integer sum has no 128-bit kernel and is
+    # refused by name, not answered as a DECIMAL division.
+    var want = "SQL not supported: `//` / divide() over the sum of an integer column"
+    assert_true(_err("SELECT sum(i32) // count(*) FROM t").startswith(want))
+    assert_true(_err("SELECT 7 // sum(i64) FROM t").startswith(want))
 
 
 def test_sum_distinct_is_still_refused() raises:
