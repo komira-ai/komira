@@ -640,6 +640,57 @@ dictionary query that is not Q1. (2) A column chunk that fell back to plain enco
 inputs say any chunk is plain is lowered to `(STRING, COLUMNAR)` (§4.2), and a fixture with a fallback row group
 tests that the answer equals the dictionary row's.
 
+**Spike result (slice 4).** `src/komira_pipeline_exec/spike/intern_spike.mojo` (target `intern_spike`, run on the farm with
+`[run_check]`) times the layouts on a synthetic workload: 8 workers, 4 row groups of 65,536 rows each, a dictionary of up to
+8,192 strings per row group drawn from a universe of 4 to 1,000,000 strings, 16-byte strings (and 48-byte at 100,000 groups).
+Every layout's counts are checked against a direct count. This is one farm run, best of three trials inside the run, on an unpinned worker; no machine description and no run-to-run variance was recorded, so read the ratios and treat the absolute nanoseconds as indicative. CI compiles the program and does not run it. The hash is
+FNV-1a a byte at a time (about 2.2 ns a byte), the same for every layout, so absolute hashing costs are high; a word-at-a-time
+hash would lower every cell that includes a hash; that it does not change which layout wins is an inference (the gaps are 9 times and more), not a measurement.
+
+| groups (dictionary) | interned, ns/row | by value, ns/row | shared table, ns/row | merge, carried hash, ns/entry | merge, rehash, ns/entry | fragment entries per merged group | W string tables / merged table |
+|---|---|---|---|---|---|---|---|
+| 4 (4) | 1.6 | 133 | 6.5 | 139 | 183 | 8.0 | 8.0x (34 KB / 4 KB) |
+| 1,000 (1,000) | 3.8 | 141 | 8.8 | 111 | 150 | 8.0 | 8.0x (450 KB / 56 KB) |
+| 100,000 (8,192) | 22 | 197 | 28 | 131 | 170 | 3.8 | 3.8x (10.3 MB / 2.7 MB) |
+| 1,000,000 (8,192) | 22 | 202 | 29 | 139 | 176 | 1.5 | 1.4x (14.7 MB / 10.6 MB) |
+| 100,000 (8,192), 48-byte strings | 44 | 403 | 53 | 258 | 367 | 3.8 | 3.8x (15.7 MB / 4.1 MB) |
+
+The three costs:
+
+1. **Content hash per interned entry.** Hashing a dictionary entry costs 35 ns at 16 bytes and 103 ns at 48 bytes, and
+   hashing a row costs the same per row, so hashing per row is `rows / entries` times dearer (8 times at these shapes). Interning
+   a dictionary entry (hash, probe, byte compare on a hit, append the bytes) costs 140 to 215 ns at 16 bytes and 330 ns at 48.
+   With that amortized over the rows of the row group, the interned layout is 9 to 80 times cheaper per row than hashing
+   every row and probing the string table (22 against 197 ns at 100,000 groups; 1.6 against 133 ns at four). The interned
+   per-row figure counts into an array indexed by the id: the probe of the aggregate table by the id, which a real sink pays
+   once per row, is slice 5's integer-key cost and is not in it. Inference, not measured: interning loses only where a
+   dictionary has more entries than the chunk has rows that use them, since its cost is per entry and the alternative's is per row.
+2. **Fragment merge per entry.** 110 to 140 ns an entry at 16 bytes and 258 at 48, and it grows with the byte compare and the
+   cache misses of a large merge table, not with the rows. Carrying the hash saves 21 to 30 percent of it (the hash that
+   would be recomputed: 35 ns at 16 bytes, 109 at 48), so the carried hash stays. The number of entries the merge
+   handles is the workers' total, up to W times the distinct strings (8.0 when every worker sees every string): at 1,000,000
+   groups and eight workers that would be about a second on one thread. That figure is extrapolated, not measured: the spike's largest merge was 262,144 fragment entries (about 35 ms), and the extrapolation assumes the per-entry cost stays at 139 ns as the merge table outgrows the cache, which it may not. If it holds, it makes the merge by partition on the dispatcher
+   (this section's design) a requirement and not an optimization.
+3. **String-table memory per worker.** About 60 bytes an entry at 16-byte strings (the bytes, a carried hash, a start, a
+   length, a count and a slot at half load), so 1.3 to 1.8 MB a worker at 8,192-entry dictionaries. The W tables hold up to
+   W copies of the groups (8.0 at the high-overlap shapes, 1.4 where the workers' dictionaries barely overlap), against
+   one copy in the merged table. The sink must charge the growth of its string table to the segment pool when it interns
+   (the pool draws in blocks), not only the aggregate state.
+
+**The shared concurrent intern table** (one id space; the `shared table` column) was measured uncontended on one thread only: 28 ns a row against 22
+for the per-worker tables at 100,000 groups, because every worker's dictionary entries probe one larger table. It would
+remove the merge (about 130 ns a fragment entry) and keep one copy of the strings, and it would put W threads on one
+table at every dictionary boundary. Threads and cache-line traffic are not in the spike. Decision for slice 6: keep the
+per-worker tables of this section, whose costs are measured and whose merge runs in parallel by partition. Revisit the shared
+table only if the memory of W string tables, or the merge, shows on the board at a million groups.
+
+**Two requirements the spike adds to slice 6.** (a) An interned entry is not a group: 2 of 44,691 entries at 100,000
+groups, and 34 of 177,656 at 1,000,000, were pointed at by no row (a selection mask or a filter makes this common), and
+an entry that no row used must not appear in the output. A group exists when a row reached it, so the group count and the
+"seen" state of an aggregate belong to the aggregate table keyed by the interned id, which rows populate, not to the intern table.
+(b) The spike's workload has no NULL key and no plain-encoded chunk; the NULL group and the fallback fixture stay in slice 6 as
+written.
+
 **Why wrap, and not port the earlier untyped sinks.** The earlier engine's untyped aggregation family is route ladders
 around the same kernels, with most of its size in routes particular to benchmark shapes. The kernels on `main` are the runtime-spec layer; what is missing is a thin sink over them. D4 below sets the
 size at which the sink gets its own package.
@@ -648,7 +699,7 @@ size at which the sink gets its own package.
 
 | Sink | Used by | Built from | Lane |
 |---|---|---|---|
-| `SINK_COLLECT` | every plan's root; the passthrough | resident batches, concatenated by `komira_engine_runtime`'s parallel concat | slice 2b |
+| `SINK_COLLECT` | every plan's root; the passthrough | resident batches, concatenated serially in morsel-position order for now (parallel concat is a follow-up) | slice 2b |
 | `SINK_SORT` over a small result (in memory, one batch) | Q1's `ORDER BY` over its grouped output | `komira_op_sort.sort_batch_by_keys` over the collected batch | slice 4 (MVP) |
 | `SINK_SORT`, `SINK_TOPN` in general | `ORDER BY`, `ORDER BY ... LIMIT` | `komira_op_sort` kernels (the top-N indices) and the sinks of komira#1384; parallel sort komira#1420 and komira#1421; external sort komira#1436 | step 1 of §7.3 |
 | distinct sinks | `SELECT DISTINCT`, `COUNT(DISTINCT x)` | `komira_op_agg_distinct` and komira#1385, #1390, #1401, then #1455, #1467, #1474 for string keys | step 2 |
@@ -690,13 +741,12 @@ ANALYZE, cloud scans) arrives as its own module of functions over the same struc
 
 | Module | Holds |
 |---|---|
-| `engine_options` | `EngineOptions` (§5.2) |
+| `engine_options` | `EngineOptions` (§5.2; built: `worker_count`, `memory_budget_bytes`) |
 | `engine_context` | the struct, its constructor and accessors |
-| `engine_catalog` | register a table, a Parquet path, an in-memory batch; resolve a name |
-| `engine_footers` | `ParquetFooters` and the footer cache (§6.2) |
-| `engine_optimize` | the call into `optimizer_driver.optimize` and the plan gates |
+| `engine_catalog` | built: `register_parquet`; planned: an in-memory batch, resolve a name |
+| `engine_footers`, `engine_optimize` | planned modules. Built: the context holds `ParquetFooters` (§6.2) and `engine_sql` calls `optimize` itself; the plan gates are not called |
 | `engine_lower` | `LoweringInputs` from the footers; the call into `lower` |
-| `engine_execute` | `run_plan` over the context |
+| `engine_execute` | `run_lowered_plan`: `run_plan` over the context |
 | `engine_sql` | `run_sql` (§6) |
 
 The context owns:
@@ -708,7 +758,7 @@ The context owns:
 | memory | the root reservation, sized from the host profile | `MemoryReservation.for_host` |
 | catalog | table names to schemas and scans | `komira_sql.SqlCatalog` |
 | source registry | scan kinds to resolvers | `komira_scan_resolver.ScanSourceResolvers` |
-| footer cache | parsed footers, capped, with eviction | `komira_sdk.parquet_footer` |
+| footer cache | parsed footers, one version per path, pinned to a query: `run_sql` replaces the cache with an empty one before each call (built: `komira_parquet_footers.FooterCache` is unbounded, so the context never keeps it across queries) | `komira_parquet_footers` |
 | plan cache | the two-layer compile cache | `komira_sdk_exec.plan_compile_cache` (LRU, capped) |
 | options | the flags struct (§5.2) | the caller |
 
@@ -742,8 +792,11 @@ review.
 ### 6.1 `run_sql`
 
 ```mojo
-def run_sql(text: String, mut ctx: EngineContext) raises -> List[RecordBatch]
+def run_sql(mut ctx: EngineContext, text: String) -> SqlOutcome
 ```
+
+`SqlOutcome` holds the result batches or a `SqlRefusal` (the step, one of `parse`, `bind`, `optimize`, `lower`,
+`execute`, and that step's own message). `run_sql` does not raise.
 
 The catalog is the context's `SqlCatalog`; a caller registers tables on the context (`register_parquet(name, path)`)
 and passes the context, which is the one place a name, a footer and a worker pool meet. It composes, in order:
@@ -766,18 +819,24 @@ first rejects.
 
 `read_parquet('path')` binds off the file's own footer, as `sql_tvf_bind` documents. The binder takes that footer
 through the `SqlParquetFooters` trait, which a caller implements (`footer_schema(path)`, `column_null_count(path,
-column)`). The engine supplies one, `ParquetFooters`, in `komira_sdk_exec`:
+column)`). The engine supplies one, `ParquetFooters`. It lives in `komira_parquet_footers`, a package of its own, because `EngineContext` (which would hold it in `komira_sdk_exec`) is not written yet; the context will hold the package's `FooterCache`:
 
-- `footer_schema` reads the footer of a file, or the footers of a glob's files unioned by name, through
-  `komira_sdk.parquet_footer` (`read_parquet_footer_with_cache`), so the cache of §5.1 serves it;
+- `footer_schema` reads the footer of one file through the `FooterCache` (built: a file; a glob is refused by name;
+  planned: the footers of a glob's files unioned by name). The cache is `komira_parquet_footers`' own, which never
+  re-reads a held footer; it is not `komira_parquet.ParquetMetadataCache`'s revalidating surface, which would let bind
+  and lowering see two versions of one file;
 - `column_null_count` sums a column's null counts over the row groups, and returns `None` when any row group records
   none, as the trait asks.
 
 **One cache, two readers.** Lowering's `inputs` (the statistics for payload narrowing and the key domains for the
 perfect-hash row) come from the same cache the binder used, so the plan the binder saw and the plan the host lowers
-read one version of each footer. Each cached footer is stored with the file's identity (size and modification
-identity where the store gives one); the source checks that identity at open and refuses a file that changed between
-bind and execution, naming it (§3.4). The alternative, to read the footer separately at lowering, can bind against one
+read one version of each footer. Each cached footer is stored with the file's identity (size, modification time, inode, device). Built:
+`ParquetFooters` and the `lowering_facts` functions refuse, naming the file, a file whose identity differs from the
+stamp when they are asked for its footer. Planned (no slice of §7.3 names it; the `komira_lowering` owner adds the stamp to `ScanFacts` and, as a follow-up to slice 2b tracked in #2024, `SOURCE_PARQUET` checks it at open): `ScanFacts` carries the stamp and the source checks it at open and
+refuses a file that changed between bind and execution (§3.4). **Until then a file replaced between lowering and the scan is read with the old plan's schema and min/max: a wrong-result risk.** Today the scan reads through the metadata cache of
+`komira_parquet`, which revalidates on its own, so a file replaced after the last lowering call is not refused by this
+package. The stamp does not apply the settle rule of `komira_buffer.file_identity`: a same-size rewrite inside the
+timestamp tick of a file younger than the settle window can go unseen. The alternative, to read the footer separately at lowering, can bind against one
 version of a file and run against another.
 
 A table registered by name (`add_parquet(name, path, schema)`) takes its schema from the same reader at registration.
@@ -828,10 +887,14 @@ split at the line named in its row, not merged into a larger pull request.
 | 2c | delete `komira_morsel.vtable_source` and its three test files (`test_vtable_source_parity`, `test_vtable_source_failure_paths`, `test_vtable_seam_cost`); remove those three from `test_srcs` in `komira_morsel/BUCK`; edit the `vtable_source` mention in `komira_morsel/README.md`; drop the `vtable_source.mojo`, `test_vtable_source_parity.mojo` and `test_vtable_seam_cost.mojo` rows from `tests/pointer_lint_holds.tsv` and the failure-paths row from `tests/pointer_lint_ffi.tsv`; `scan_resolver_c_box.mojo`, `test_scan_resolver_c_box.mojo` and their rows stay | about 0.2k added, 2.6k deleted | 2b |
 | 3 | the atomic segment pool (D10); the ungrouped aggregation sink over `komira_op_agg_state` kernels with exact folds (integer, `DECIMAL`; NULL, overflow and empty-input rules) and the `DOUBLE` `AVG`; Q6 from a hand-built plan | 2.2 to 3.2k | 2b |
 | 4 | the farm spike (a Buck target) that measures dictionary interning against a by-value string row, with a high-cardinality dictionary query in its acceptance set, and that reports the three costs of §4.3 (content hash per interned entry, fragment merge per entry, string-table memory per worker); the in-memory `SINK_SORT` | 1.6 to 2.4k | 3 |
-| 5 | the grouped aggregation sink over fixed-width keys: the dense row and the radix-partitioned row with parallel finalize through the trait's partition hooks (§4.3) | 2.5 to 3.5k | 3 |
+| 5 | the grouped aggregation sink over fixed-width keys: per-worker hash tables with a serial merge, for one or more integer keys (rows I64, I32) or float keys (rows F64, F32), the pool charged as the tables grow (built; see below). The dense row and the radix-partitioned row with parallel finalize through the trait's partition hooks (§4.3, D8) are a later slice, 5b, `Needs` 5 | 2.5 to 3.5k | 3 |
 | 6 | the `DICT_ENCODED` string sink (content hash carried per interned entry, composite routing hash, string-keyed fragment merge as §4.3 says) and the `COLUMNAR` string sink, output typing, the two-worker different-intern-order test, the plain-fallback fixture; Q1 from a hand-built plan | 2.5 to 3.5k | 4, 5 |
 | 7 | `EngineContext`, `EngineOptions`, `run_plan` over the context | 2.0 to 3.0k | 1b, 2b, 6 |
 | 8 | `run_sql`, `ParquetFooters`, the end-to-end tests for Q1 and Q6 and their fixtures; the footer-answered `COUNT(*)` and `MIN`/`MAX` | 2.5 to 3.5k | 7 and the binder, komira#1216 |
+
+**What slice 3 built, against the row above.** The ungrouped sink does not use the `komira_op_agg_state` kernels, `AggLayout` or `AggSpec`: none of them folds a `DECIMAL128` value, or an integer, into an exact 128-bit accumulator with the overflow rule of §4.3 (the accumulators there are 64-bit or float, typed at compile time; `int_sum_overflow` only refuses a 64-bit overflow). The sink therefore folds in its own small module (`komira_pipeline_exec.agg_fold`: one count and one 128-bit integer per aggregate and worker, merged in worker order) and uses `komira_batch_eval` for the argument expressions, through the `MapOp` projection under the selection mask. The grouped sinks of slices 5 and 6 are the ones that need `komira_op_agg_hash`, and they take the table kernels there; whether they take their value folds from `agg_fold` or from the kernels is decided when they start.
+
+**What slice 5 built, against the row above.** `komira_pipeline_exec.sink_group_agg` does not use `komira_op_agg_hash` either: its entries hold Int64 keys with no NULL flag (SQL groups the NULLs of a key as one group) and 64-bit or float accumulators, with no exact 128-bit fold. It keeps its own small table (`group_table`: a 64-bit cell and a NULL flag per key, one `AggCell` per aggregate), folds rows with `agg_fold` per row, and merges the workers' tables serially in worker order with the same overflow rule. Each doubling of a table is charged to the segment pool before it is made. The sink serves composite keys of several columns of one family (all integers, or all floats) with the same table, so those arrive with slice 5 and not with step 8 of §7.3, which remains the mixed-type and string composites. `komira_lowering` (`cut_walk._agg_triple`) still refuses a key of more than one column unless every column is a dictionary string, so admitting the same-family composite is a change there that this slice does not make (it touches only `komira_pipeline_exec`). Not built, and the follow-up slice 5b: the dense table for a domain of at most 65,536 keys and the radix-partitioned table with a parallel finalize of D8. Until then the merge is O(workers x groups) on one core, which D8 names as its cost.
 
 The hand-built-plan harness of slice 2b gives a measured number at slice 3 (Q6) and slice 6 (Q1) before the binder
 exists; the end-to-end tests over SQL text come last only because the binder is another lane's open draft.

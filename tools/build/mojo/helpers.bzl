@@ -22,7 +22,7 @@ directory.
 """
 
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
-load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
+load("@komira//tools/build/platforms:defs.bzl", "TOOL_EXEC")
 load(":providers.bzl", "MojoProgramInfo", "MojoRunnableInfo")
 
 HELPER_ATTRS = {
@@ -74,6 +74,6 @@ _mojo_helper_check = rule(
 )
 
 def _mojo_helper_check_macro(**kwargs):
-    _mojo_helper_check(exec_compatible_with = LINUX_X86_64, **kwargs)
+    _mojo_helper_check(exec_compatible_with = TOOL_EXEC, **kwargs)
 
 mojo_helper_check = declares_docs(_mojo_helper_check_macro)

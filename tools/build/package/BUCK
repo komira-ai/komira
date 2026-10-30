@@ -299,6 +299,7 @@ conda_release_set_check(
         "//src/komira_bench_duckdb:komira_bench_duckdb",
         "//src/komira_bench_data:komira_bench_data",
         "//src/komira_bench_report:komira_bench_report",
+        "//src/komira_bench_corpus:komira_bench_corpus",
     ],
     # The `native` of each library above whose mojo_library declares one (the
     # same target its `<lib>_conda` is given; release_set.bzl).
