@@ -553,7 +553,7 @@ validation run id is not `komira_test_run_id`, which names one test process.
   the Connect conformance run has, before it is welded.
 - A service validation beside beta's installs therefore needs its own job
   and timeout; it must not share the `beta_validate` job's hour. Inside `kci.yml`
-  that job is a part job of the stage `beta` under rule R9 of `src/kci_workflow_check/rules.mojo`: no
+  that job is a part job of the stage `beta` under rule R9 of `src/kci_workflow_check/src/kci_workflow_check/rules.mojo`: no
   environment, no identity token, and prod needs it (R2, R4, R3). A job
   that needs an environment or a token, or must not block prod, collides
   with those rules; item 7 of

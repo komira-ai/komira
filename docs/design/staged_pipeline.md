@@ -637,8 +637,8 @@ publishers `environment:gamma` and `environment:gamma-breakglass`) and `prod`.
   note); the comments of `.github/workflows/pr.yml` (its job list),
   `src/kci_pkg_upload/prefix_dev_registry.mojo` (the `komira-ai/gamma` examples),
   `src/kci_release_machine/src/kci_release_machine/parse.mojo` (its example machine),
-  `src/kci_workflow_check/auto_promotion.mojo` (the chain `build -> gamma -> validate -> prod`) and
-  `src/kci_workflow_check/rules.mojo` (its list of release jobs, one of them in a refusal message);
+  `src/kci_workflow_check/src/kci_workflow_check/auto_promotion.mojo` (the chain `build -> gamma -> validate -> prod`) and
+  `src/kci_workflow_check/src/kci_workflow_check/rules.mojo` (its list of release jobs, one of them in a refusal message);
   the example in `src/kci_release_machine/README.md`; and `docs/index.md`'s rows for gamma_validation.md (what "checks a release before prod") and its "CI and deploy" link text ("what gamma checks per package family"), which under the glossary describe beta. **Kept on purpose:** test fixtures under
   `src/kci_*/tests/`, `src/kci_publish/release_fixture.mojo` and `src/kci_validate/README.md`, which
   name an example channel or stage `gamma` on `example.invalid` (fixtures, not the channel);
