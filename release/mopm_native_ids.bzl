@@ -9,6 +9,7 @@
 A package of the list needs its `load` below and its row; `mopm_artifacts` refuses a package without a row.
 """
 
+load("//src/kci_reconciler:buildrules.mojo.lock.bzl", kci_reconciler = "GRAPH")
 load("//src/komira_anomaly:buildrules.mojo.lock.bzl", komira_anomaly = "GRAPH")
 load("//src/komira_async_api:buildrules.mojo.lock.bzl", komira_async_api = "GRAPH")
 load("//src/komira_atomic_alias:buildrules.mojo.lock.bzl", komira_atomic_alias = "GRAPH")
@@ -70,6 +71,7 @@ def declared_natives(graph):
     return sorted(ids)
 
 _GRAPHS = {
+    "kci_reconciler": kci_reconciler,
     "komira_anomaly": komira_anomaly,
     "komira_async_api": komira_async_api,
     "komira_atomic_alias": komira_atomic_alias,

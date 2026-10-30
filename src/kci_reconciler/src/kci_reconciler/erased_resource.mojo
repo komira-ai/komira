@@ -85,22 +85,22 @@ from kci_reconciler.resource import (
 # takes `self`). The home byte ptr is the type-erasure handle.
 comptime _LogicalIdFn = def (
     UnsafePointer[UInt8, MutUntrackedOrigin],  # the erased R home
-) raises thin -> String
+) thin -> String
 
 comptime _DependsOnFn = def (
     UnsafePointer[UInt8, MutUntrackedOrigin],
-) raises thin -> List[String]
+) thin -> List[String]
 
 comptime _RetentionFn = def (
     UnsafePointer[UInt8, MutUntrackedOrigin],
-) raises thin -> Int
+) thin -> Int
 
 # WHY a RETAIN_UNDELETABLE node cannot be deleted, in the conformer's own words.
 # Empty for every other node. Read by `destroy_graph` at the SKIP, so the reason
 # reaches the report without the delete ever being issued.
 comptime _UndeletableReasonFn = def (
     UnsafePointer[UInt8, MutUntrackedOrigin],
-) raises thin -> String
+) thin -> String
 
 # The live-read + pure-plan verbs.
 comptime _ReadStatusFn = def (
@@ -152,7 +152,7 @@ comptime _FaultDomainFn = def (
 # answers with the DEFAULT for every node of a real graph.
 comptime _InputRefsFn = def (
     UnsafePointer[UInt8, MutUntrackedOrigin],
-) raises thin -> List[InputRef]
+) thin -> List[InputRef]
 
 comptime _BindInputsFn = def (
     UnsafePointer[UInt8, MutUntrackedOrigin],
@@ -167,7 +167,7 @@ comptime _OutputsFn = def (
 
 comptime _OwnerFn = def (
     UnsafePointer[UInt8, MutUntrackedOrigin],
-) raises thin -> String
+) thin -> String
 
 # The teardown read (`Resource.read_presence`). Defaulted to `read_status`, so
 # a facade that did not forward it would read every node through the digest.
@@ -182,7 +182,7 @@ comptime _ReadPresenceFn = def (
 # verbs.
 comptime _StampsOwnershipFn = def (
     UnsafePointer[UInt8, MutUntrackedOrigin],
-) raises thin -> Bool
+) thin -> Bool
 comptime _CreateOwnedFn = def (
     UnsafePointer[UInt8, MutUntrackedOrigin],
     OwnerStamp,
@@ -196,7 +196,7 @@ comptime _AdoptOwnedFn = def (
 ) raises thin -> None
 comptime _WantedFn = def (
     UnsafePointer[UInt8, MutUntrackedOrigin],
-) raises thin -> Bool
+) thin -> Bool
 comptime _DropFn = def (
     UnsafePointer[UInt8, MutUntrackedOrigin],  # the erased R home (consumed)
 ) thin -> None
@@ -388,31 +388,21 @@ struct ErasedResource(Resource, Movable, Deinitable):
         where every verb takes `mut self`). SAFETY: R is used in-place (read-only);
         the untracked origin is confined to `_erased_home`.
 
-        `Resource.logical_id` is non-raising, but the erased trampoline is `raises`
-        (def carries implicit raises), so a (contract-forbidden) raise surfaces an
-        empty id rather than propagate. A well-formed conformer never raises."""
-        try:
-            var p = self._erased_home()
-            return self._vtable.logical_id_fn(p)
-        except e:
-            return String("")  # cov: unreachable the trampoline calls a non-raising trait method
+        `Resource.logical_id` is non-raising, and so is its trampoline and the
+        vtable entry: the facade method forwards with no `try`."""
+        var p = self._erased_home()
+        return self._vtable.logical_id_fn(p)
 
     def depends_on(mut self) -> List[String]:
         """The IN-edges. `mut self` (see `logical_id`). SAFETY: R read in-place."""
-        try:
-            var p = self._erased_home()
-            return self._vtable.depends_on_fn(p)
-        except e:
-            return List[String]()  # cov: unreachable the trampoline calls a non-raising trait method
+        var p = self._erased_home()
+        return self._vtable.depends_on_fn(p)
 
     def retention(mut self) -> Int:
         """The RETAIN_* policy. `mut self` (see `logical_id`). SAFETY: R read
         in-place."""
-        try:
-            var p = self._erased_home()
-            return self._vtable.retention_fn(p)
-        except e:
-            return 0  # cov: unreachable the trampoline calls a non-raising trait method (RETAIN_DELETE)
+        var p = self._erased_home()
+        return self._vtable.retention_fn(p)
 
     def undeletable_reason(mut self) -> String:
         """WHY the erased R is RETAIN_UNDELETABLE — FORWARDED to the concrete R
@@ -427,14 +417,10 @@ struct ErasedResource(Resource, Movable, Deinitable):
         every one of them as "the conformer stated no reason". SAFETY: R read
         in-place; the untracked origin is confined to `_erased_home`.
 
-        Non-raising for the same reason `logical_id` is: a contract-forbidden
-        raise surfaces an empty reason rather than failing a teardown over prose.
+        Non-raising for the same reason `logical_id` is.
         """
-        try:
-            var p = self._erased_home()
-            return self._vtable.undeletable_reason_fn(p)
-        except e:
-            return String("")  # cov: unreachable the trampoline calls a non-raising trait method
+        var p = self._erased_home()
+        return self._vtable.undeletable_reason_fn(p)
 
     def read_status(mut self, creds: Creds) raises -> ResourceStatus:
         """Read the live status AS `creds`. SAFETY: `_home` owns R's heap home for
@@ -510,14 +496,10 @@ struct ErasedResource(Resource, Movable, Deinitable):
     # origin is confined to `_erased_home`).
 
     def input_refs(mut self) -> List[InputRef]:
-        """FORWARDED to the concrete R. `Resource.input_refs` does not raise;
-        a (contract-forbidden) raise from the trampoline surfaces as NO refs,
-        exactly as `depends_on` surfaces one."""
-        try:
-            var p = self._erased_home()
-            return self._vtable.input_refs_fn(p)
-        except e:
-            return List[InputRef]()  # cov: unreachable the trampoline calls a non-raising trait method
+        """FORWARDED to the concrete R. `Resource.input_refs` does not raise,
+        and neither does the trampoline or the vtable entry."""
+        var p = self._erased_home()
+        return self._vtable.input_refs_fn(p)
 
     def bind_inputs(mut self, resolved: ResolvedInputs) raises:
         """FORWARDED to the concrete R."""
@@ -530,13 +512,9 @@ struct ErasedResource(Resource, Movable, Deinitable):
         return self._vtable.outputs_fn(p, physical_id, creds)
 
     def owner(mut self) -> String:
-        """FORWARDED to the concrete R; a (contract-forbidden) raise surfaces
-        as no owner."""
-        try:
-            var p = self._erased_home()
-            return self._vtable.owner_fn(p)
-        except e:
-            return String("")  # cov: unreachable the trampoline calls a non-raising trait method
+        """FORWARDED to the concrete R (non-raising, like `logical_id`)."""
+        var p = self._erased_home()
+        return self._vtable.owner_fn(p)
 
     def read_presence(mut self, creds: Creds) raises -> ResourceStatus:
         """FORWARDED to the concrete R (the teardown read). Without the
@@ -549,14 +527,9 @@ struct ErasedResource(Resource, Movable, Deinitable):
     def stamps_ownership(mut self) -> Bool:
         """FORWARDED to the concrete R. Without the forward every node would
         answer the trait default (False) and an owned apply would refuse every
-        graph. Non-raising like `logical_id`: a contract-forbidden raise reads
-        as False, which refuses (the safe direction). SAFETY: see
-        `read_status`."""
-        try:
-            var p = self._erased_home()
-            return self._vtable.stamps_ownership_fn(p)
-        except e:
-            return False  # cov: unreachable the trampoline calls a non-raising trait method
+        graph. Non-raising like `logical_id`. SAFETY: see `read_status`."""
+        var p = self._erased_home()
+        return self._vtable.stamps_ownership_fn(p)
 
     def create_owned(mut self, stamp: OwnerStamp, creds: Creds) raises -> String:
         """FORWARDED to the concrete R (the create that carries the stamp).
@@ -575,13 +548,9 @@ struct ErasedResource(Resource, Movable, Deinitable):
     def wanted(mut self) -> Bool:
         """FORWARDED to the concrete R. Without the forward every role the
         file turned off would read as wanted and never be removed.
-        Non-raising: a contract-forbidden raise reads as True (wanted), so a
-        broken conformer never causes a delete. SAFETY: see `read_status`."""
-        try:
-            var p = self._erased_home()
-            return self._vtable.wanted_fn(p)
-        except e:
-            return True  # cov: unreachable the trampoline calls a non-raising trait method
+        Non-raising, like `logical_id`. SAFETY: see `read_status`."""
+        var p = self._erased_home()
+        return self._vtable.wanted_fn(p)
 
     def __deinit__(deinit self):
         """Destroy the erased R AND free its home in ONE shot via `drop_fn`. We
@@ -628,7 +597,7 @@ def _resource_at[
 
 def _erased_logical_id_for[
     R: Resource
-](home: UnsafePointer[UInt8, MutUntrackedOrigin]) raises -> String:
+](home: UnsafePointer[UInt8, MutUntrackedOrigin]) -> String:
     """`logical_id` trampoline for concrete `R`. SAFETY: `home` is the byte-cast of
     a live `OwnedPointer[R]` home (same R bound here at erase[R]); reinterpret to
     `R*` and call `logical_id` in-place (R is NOT moved/freed — the facade owns
@@ -639,7 +608,7 @@ def _erased_logical_id_for[
 
 def _erased_depends_on_for[
     R: Resource
-](home: UnsafePointer[UInt8, MutUntrackedOrigin]) raises -> List[String]:
+](home: UnsafePointer[UInt8, MutUntrackedOrigin]) -> List[String]:
     """`depends_on` trampoline for concrete `R`. SAFETY: see `_erased_logical_id_for`."""
     var rp = _resource_at[R](home)
     return rp[].depends_on()
@@ -647,7 +616,7 @@ def _erased_depends_on_for[
 
 def _erased_retention_for[
     R: Resource
-](home: UnsafePointer[UInt8, MutUntrackedOrigin]) raises -> Int:
+](home: UnsafePointer[UInt8, MutUntrackedOrigin]) -> Int:
     """`retention` trampoline for concrete `R`. SAFETY: see `_erased_logical_id_for`."""
     var rp = _resource_at[R](home)
     return rp[].retention()
@@ -655,7 +624,7 @@ def _erased_retention_for[
 
 def _erased_undeletable_reason_for[
     R: Resource
-](home: UnsafePointer[UInt8, MutUntrackedOrigin]) raises -> String:
+](home: UnsafePointer[UInt8, MutUntrackedOrigin]) -> String:
     """`undeletable_reason` trampoline for concrete `R` (a non-undeletable R
     resolves the trait default and returns empty). SAFETY: see
     `_erased_logical_id_for`."""
@@ -761,7 +730,7 @@ def _erased_fault_domain_for[
 
 def _erased_input_refs_for[
     R: Resource
-](home: UnsafePointer[UInt8, MutUntrackedOrigin]) raises -> List[InputRef]:
+](home: UnsafePointer[UInt8, MutUntrackedOrigin]) -> List[InputRef]:
     """`input_refs` trampoline for concrete `R`. SAFETY: see
     `_erased_read_status_for` (R read in-place)."""
     var rp = _resource_at[R](home)
@@ -795,7 +764,7 @@ def _erased_outputs_for[
 
 def _erased_owner_for[
     R: Resource
-](home: UnsafePointer[UInt8, MutUntrackedOrigin]) raises -> String:
+](home: UnsafePointer[UInt8, MutUntrackedOrigin]) -> String:
     """`owner` trampoline for concrete `R`. SAFETY: see
     `_erased_read_status_for` (R read in-place)."""
     var rp = _resource_at[R](home)
@@ -816,7 +785,7 @@ def _erased_read_presence_for[
 
 def _erased_stamps_ownership_for[
     R: Resource
-](home: UnsafePointer[UInt8, MutUntrackedOrigin]) raises -> Bool:
+](home: UnsafePointer[UInt8, MutUntrackedOrigin]) -> Bool:
     """`stamps_ownership` trampoline for concrete `R`. SAFETY: see
     `_erased_read_status_for` (R read in-place)."""
     var rp = _resource_at[R](home)
@@ -852,7 +821,7 @@ def _erased_adopt_owned_for[
 
 def _erased_wanted_for[
     R: Resource
-](home: UnsafePointer[UInt8, MutUntrackedOrigin]) raises -> Bool:
+](home: UnsafePointer[UInt8, MutUntrackedOrigin]) -> Bool:
     """`wanted` trampoline for concrete `R`. SAFETY: see
     `_erased_read_status_for` (R read in-place)."""
     var rp = _resource_at[R](home)

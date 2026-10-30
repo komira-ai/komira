@@ -36,8 +36,8 @@ from kci_reconciler import (
     FAULT_USER,
 )
 
-comptime _SRC = "src/kci_reconciler/erased_resource.mojo"
-comptime _PKG_INIT = "src/kci_reconciler/__init__.mojo"
+comptime _SRC = "lib/erased_resource.mojo"
+comptime _PKG_INIT = "lib/__init__.mojo"
 
 
 # =============================================================================

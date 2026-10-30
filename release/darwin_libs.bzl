@@ -28,6 +28,7 @@ load("//release/readme_e2e:packages.bzl", README_E2E_PACKAGES = "PACKAGES")
 
 # package -> the native archive of its closure that cannot build for macOS yet
 DARWIN_EXCLUDED = {
+    "kci_reconciler": "//src/komira_libc:native_komira_libc_posix",
     "komira_async_api": "//src/komira_async_api:native_komira_concurrency_pool_depth",
     "komira_buffer": "//src/komira_libc:native_komira_libc_posix",
     "komira_bump_arena": "//src/komira_libc:native_komira_libc_posix",

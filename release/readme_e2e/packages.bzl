@@ -22,6 +22,7 @@ MOPM = "toolchains//:mopm_0_0_86"
 FIRST_MOPM_WITH_OVERLAY = "toolchains//:mopm_0_0_40"
 
 PACKAGES = {
+    "kci_reconciler": "0.1.0",
     "komira_anomaly": "0.1.0",
     "komira_async_api": "0.1.0",
     "komira_atomic_alias": "0.1.0",
