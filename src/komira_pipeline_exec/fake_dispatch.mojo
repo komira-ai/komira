@@ -4,7 +4,8 @@
 #
 # `ParallelDispatch` conformers for tests that need the order of the workers to
 # be a fact of the test rather than of a scheduler: `InlineDispatch` runs task 0
-# first, `ReverseDispatch` runs the highest task first. Each task runs to
+# first, `ReverseDispatch` runs the highest task first, `OffsetDispatch` gives the
+# tasks worker ids unrelated to their task ids. Each task runs to
 # completion before the next starts, on the calling thread.
 
 from komira_async_api.parallel_dispatch import ParallelDispatch
@@ -58,6 +59,36 @@ struct ReverseDispatch(ParallelDispatch, Movable, Deinitable):
         while t >= 0:
             seg.execute[State](state, Int32(t), Int64(t))
             t -= 1
+        return seg^
+
+    def worker_count(self) -> Int:
+        return self._workers
+
+
+struct OffsetDispatch(ParallelDispatch, Movable, Deinitable):
+    """Runs tasks 0..n-1 in order, but names the worker of task t
+    `worker_base + t` (outside 0..n-1) and reports `workers` workers, which may
+    be fewer than the tasks it runs: a driver that indexes its per-task state
+    by worker id reads outside it."""
+
+    var _workers: Int
+    var _base: Int
+
+    def __init__(out self, workers: Int = 2, worker_base: Int = 1000):
+        self._workers = workers
+        self._base = worker_base
+
+    def run_with_state[State: KeepAlive, T: Segment](
+        mut self,
+        mut state: State,
+        var seg: T,
+        n: Int,
+        var cancel_token: CancellationToken,
+        site_id: UInt32 = UInt32(0),
+    ) raises -> T:
+        _ = cancel_token^
+        for t in range(n):
+            seg.execute[State](state, Int32(self._base + t), Int64(t))
         return seg^
 
     def worker_count(self) -> Int:

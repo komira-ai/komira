@@ -19,7 +19,6 @@
 from komira_async_api.token import CancellationToken
 from komira_async_api.worker_pool_traits import KeepAlive, Segment
 from komira_arrow.schema import RecordBatch
-from komira_collections.slab import Slab
 from komira_exec_types.engine_error import EngineError
 from komira_morsel.morsel import Morsel
 from komira_morsel.morsel_operator import MorselOperatorImpl
@@ -37,7 +36,7 @@ struct SegmentRun[
     pipeline's atomics, and the dispatcher borrows it for the dispatch window."""
 
     var source: Self.S
-    var ops: Slab[Self.O]
+    var ops: List[Self.O]
     var sink: Self.K
     var pipeline: PipelineExecution
     var token: CancellationToken
@@ -46,7 +45,7 @@ struct SegmentRun[
     def __init__(
         out self,
         var source: Self.S,
-        var ops: Slab[Self.O],
+        var ops: List[Self.O],
         var sink: Self.K,
         num_workers: Int,
         n_ops: Int,
@@ -88,8 +87,11 @@ def _push[
     var finished = False
     var i = first_op
     while i < run.n_ops:
-        ref op = run.ops.get_mut_interior(wid * run.n_ops + i)
-        var rc = op.execute(m)
+        # The operator is borrowed afresh at each call: the recursive push
+        # below borrows `run` mutably, so no reference into `ops` may live
+        # across it.
+        var op_index = wid * run.n_ops + i
+        var rc = run.ops[op_index].execute(m)
         while rc.is_have_more_output():
             if m.num_rows() > 0:
                 var chunk = RecordBatch()
@@ -101,7 +103,7 @@ def _push[
                     return True
             if run.should_stop():
                 return True
-            rc = op.execute(m)
+            rc = run.ops[op_index].execute(m)
         if rc.is_finished():
             finished = True
         if rc.is_filtered_empty() or m.num_rows() == 0:
@@ -138,11 +140,18 @@ struct SegmentTask[
     def execute[State: KeepAlive](
         mut self, mut state: State, worker_id: Int32, task_id: Int64
     ) raises:
-        # SAFETY: `run_segment` passes a `SegmentRun[S, O, K]` as the dispatch
-        # state, with this task's S, O and K, so the bitcast restores the type
-        # the state was built with. Each task touches only the slots of its own
-        # worker id (its operator chain and the sink's slot); everything shared
-        # is atomic or read-only during the dispatch window.
+        # The state must be the `SegmentRun` this task was instantiated for; a
+        # wrong instantiation fails to compile instead of reinterpreting bytes.
+        comptime assert (
+            State == SegmentRun[Self.S, Self.O, Self.K]
+        ), "SegmentTask.execute: the dispatch state must be SegmentRun[S, O, K]"
+        # SAFETY: the comptime assert above proves `State` is exactly
+        # `SegmentRun[S, O, K]`, so the bitcast is the identity. Each task
+        # touches only the slots of its own task id (its operator chain in
+        # `ops` and the sink's slot); everything shared is atomic or read-only
+        # during the dispatch window. The task id, not the worker id, indexes
+        # the slots: a dispatcher may run several tasks on one worker, or name
+        # its workers by any numbering.
         var sp = UnsafePointer(to=state).bitcast[SegmentRun[Self.S, Self.O, Self.K]]()
         var wid = Int(task_id)
         try:

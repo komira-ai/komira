@@ -85,6 +85,17 @@ Import each module by name; the package root exports nothing.
   in shared counters, and run the workers one after another in an order a test
   chooses.
 
+Per-worker state lives in a typed `List`, never in a byte-backed `Slab`
+reached through `get_mut_interior`: a value that holds heap (a `List`, an
+`ArcPointer`, a `CancellationToken`) must be owned by an element the compiler
+tracks. `SegmentRun.ops` is a `List` of operators (one chain per worker, index
+`worker * n_ops + op`) mutated through the run's `mut` borrow; a sink keeps its
+slots as `List[ArcPointer[Slot]]`, each worker touching only the slot of its own
+task id. Atomics-only cells (the fakes' tally) may stay in a `Slab`. The task id
+that `ParallelDispatch` passes selects the slot, not the worker id, which only
+names the thread that runs the task; a dispatcher may run more tasks than it has
+workers.
+
 The combine order is a property of the sink: it merges its per-worker slots,
 indexed by worker id, in worker id order after every worker has joined. A
 memory budget is a property of the sink too: a sink that cannot grow raises, and
