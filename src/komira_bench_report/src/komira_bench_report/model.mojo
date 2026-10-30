@@ -51,12 +51,20 @@ def _is_sha256(s: String) -> Bool:
 
 def _refuse_path_like(text: String, field: String) raises:
     """A field of the environment is text about the machine, never a place on
-    it or an account on it: a slash, a backslash, an at sign or a control
-    character is refused."""
+    it or an account on it. Refused: a slash, a backslash, a control character,
+    and an at sign unless a space stands on both sides of it. The spaced at
+    sign is how /proc/cpuinfo writes a clock ("... CPU E5-4669 v4 @ 2.20GHz")
+    and is no address; "user@host", "a@b.c", "a @b", "a@ b", "@host" and "cpu @"
+    are refused, because the at sign is first, last or touches a character."""
     var b = text.as_bytes()
-    for i in range(len(b)):
+    var n = len(b)
+    for i in range(n):
         var c = b[i]
-        if c == 0x2F or c == 0x5C or c == 0x40 or c < 0x20:
+        var bad = c == 0x2F or c == 0x5C or c < 0x20
+        if c == 0x40:
+            var spaced = i > 0 and i + 1 < n and b[i - 1] == 0x20 and b[i + 1] == 0x20
+            bad = bad or not spaced
+        if bad:
             raise Error(
                 "environment." + field + " looks like a path or an address or"
                 " holds a control character"
