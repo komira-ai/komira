@@ -324,12 +324,14 @@ def _carry_dict_payload(
 
 
 def _code_out_of_range(
-    site: StaticString, row: Int, code: Int, dict_size: Int
+    site: StaticString, which: Int, row: Int, code: Int, dict_size: Int
 ) -> Error:
     return Error(
         String("ArrowConcatDictCodeOutOfRange: ")
         + String(site)
-        + ": input 1 row "
+        + ": input "
+        + String(which)
+        + " row "
         + String(row)
         + " carries code "
         + String(code)
@@ -348,6 +350,7 @@ def _remap_codes[
     b: Column[HeapRegion],
     remap: List[Int32],
     site: StaticString,
+    which: Int,
 ) raises:
     """`dst[dst_row + i] = remap[code_i]` for each of `b`'s rows, codes read
     at `code_dt` from element `b._offset`.
@@ -367,8 +370,108 @@ def _remap_codes[
                 continue
         var code = b._data.get_typed[C](base + i)
         if code.cast[DType.int64]().cast[DType.uint64]() >= limit:
-            raise _code_out_of_range(site, i, Int(code), b._dict_size)
+            raise _code_out_of_range(site, which, i, Int(code), b._dict_size)
         dst.set_typed[C](dst_row + i, remap[Int(code)].cast[code_dt]())
+
+
+def _remap_dict_codes(
+    mut dst: OwnedAlignedBuffer,
+    dst_row: Int,
+    b: Column[HeapRegion],
+    remap: List[Int32],
+    site: StaticString,
+    which: Int,
+    w: Int,
+) raises:
+    """`_remap_codes` with the code width `w` and the null handling
+    dispatched once for the whole column, not per row."""
+    if w == 8:
+        if b._null_count == 0:
+            _remap_codes[DType.int64, False](dst, dst_row, b, remap, site, which)
+        else:
+            _remap_codes[DType.int64, True](dst, dst_row, b, remap, site, which)
+    elif b._null_count == 0:
+        _remap_codes[DType.int32, False](dst, dst_row, b, remap, site, which)
+    else:
+        _remap_codes[DType.int32, True](dst, dst_row, b, remap, site, which)
+
+
+def _seed_dict_entries(
+    mut interner: DictInterner, col: Column[HeapRegion], vw: Int
+):
+    """`seed_append` every entry of `col`'s dictionary, in order, so entry `i`
+    keeps ordinal `i` (its codes are copied through unchanged). `vw` is the
+    numeric value width, 0 for a string dictionary. A NUMERIC dictionary
+    interns each value's `vw` bytes, so the merged arena is again a flat
+    value buffer. A string dictionary that omits its (then zero-length)
+    values buffer has only empty entries (`_require_dict_payload` proved
+    it); their key is a zero-byte view of its offsets buffer."""
+    for i in range(col._dict_size):
+        if vw > 0:
+            _ = interner.seed_append(
+                col._dict_data.value().view_ro().sub(i * vw, vw)
+            )
+        elif not col._dict_data:
+            _ = interner.seed_append(col._offsets.value().view_range_ro(0, 0))
+        else:
+            var s = Int(col._offsets.value().get_typed[Int32](i))
+            var e = Int(col._offsets.value().get_typed[Int32](i + 1))
+            _ = interner.seed_append(
+                col._dict_data.value().view_ro().sub(s, e - s)
+            )
+
+
+def _dict_remap_table(
+    mut interner: DictInterner, col: Column[HeapRegion], vw: Int
+) -> List[Int32]:
+    """`find_or_insert` every entry of `col`'s dictionary: entry `i` of `col`
+    is ordinal `result[i]` of the merged dictionary. Keys as in
+    `_seed_dict_entries`."""
+    var n = col._dict_size
+    var remap = List[Int32](capacity=max(n, 1))
+    for i in range(n):
+        if vw > 0:
+            remap.append(
+                interner.find_or_insert(
+                    col._dict_data.value().view_ro().sub(i * vw, vw)
+                )
+            )
+        elif not col._dict_data:
+            remap.append(
+                interner.find_or_insert(col._offsets.value().view_range_ro(0, 0))
+            )
+        else:
+            var s = Int(col._offsets.value().get_typed[Int32](i))
+            var e = Int(col._offsets.value().get_typed[Int32](i + 1))
+            remap.append(
+                interner.find_or_insert(
+                    col._dict_data.value().view_ro().sub(s, e - s)
+                )
+            )
+    return remap^
+
+
+def _merged_dict_offsets(
+    interner: DictInterner, numeric: Bool
+) -> Optional[OwnedAlignedBuffer]:
+    """The merged string dictionary's Int32 offsets, or None (numeric)."""
+    if numeric:
+        return None
+    comptime int32_size = size_of[Int32]()
+    var nbytes = (interner.size() + 1) * int32_size
+    var buf = OwnedAlignedBuffer(nbytes)
+    buf.copy_from_int32_list(interner.offsets())
+    buf.set_length(Int64(nbytes))
+    return buf^
+
+
+def _merged_dict_data(interner: DictInterner) -> OwnedAlignedBuffer:
+    """The merged dictionary's values buffer (one bulk copy of the arena)."""
+    var n = interner.total_bytes()
+    var buf = OwnedAlignedBuffer(max(n, 1))
+    buf.copy_from_bytes_list(interner.bytes())
+    buf.set_length(Int64(n))
+    return buf^
 
 
 def _numeric_dict_value_width(col: Column[HeapRegion]) raises -> Int:
@@ -461,92 +564,33 @@ def _concat_dict_columns[
     _require_dict_payload(site, 1, b)
     var numeric = a.is_numeric_dict()
     var vw = _numeric_dict_value_width(a) if numeric else 0
-    var dict_size_a = a._dict_size
-    var dict_size_b = b._dict_size
-    var interner = DictInterner(expected_entries=dict_size_a + dict_size_b)
-    # A string dictionary that omits its (then zero-length) values buffer has
-    # only empty entries (`_require_dict_payload` proved it); their key is a
-    # zero-byte view of its offsets buffer, so no buffer is allocated for it.
-    for i in range(dict_size_a):
-        if numeric:
-            _ = interner.seed_append(
-                a._dict_data.value().view_ro().sub(i * vw, vw)
-            )
-        elif not a._dict_data:
-            _ = interner.seed_append(a._offsets.value().view_range_ro(0, 0))
-        else:
-            var s = Int(a._offsets.value().get_typed[Int32](i))
-            var e = Int(a._offsets.value().get_typed[Int32](i + 1))
-            _ = interner.seed_append(
-                a._dict_data.value().view_ro().sub(s, e - s)
-            )
-
-    var remap = List[Int32](capacity=max(dict_size_b, 1))
-    for i in range(dict_size_b):
-        if numeric:
-            remap.append(
-                interner.find_or_insert(
-                    b._dict_data.value().view_ro().sub(i * vw, vw)
-                )
-            )
-        elif not b._dict_data:
-            remap.append(
-                interner.find_or_insert(b._offsets.value().view_range_ro(0, 0))
-            )
-        else:
-            var bs = Int(b._offsets.value().get_typed[Int32](i))
-            var be = Int(b._offsets.value().get_typed[Int32](i + 1))
-            remap.append(
-                interner.find_or_insert(
-                    b._dict_data.value().view_ro().sub(bs, be - bs)
-                )
-            )
-
+    var interner = DictInterner(expected_entries=a._dict_size + b._dict_size)
+    _seed_dict_entries(interner, a, vw)
+    var remap = _dict_remap_table(interner, b, vw)
     dict_merge_probe_add(interner.probes())
 
     var merged_size = interner.size()
-    var total_data_len = interner.total_bytes()
     # Int32-offset ceiling on the MERGED dictionary values buffer (the
     # interner's own offsets are Int32, numeric or not).
-    check_int32_offsets("concat(dictionary values)", total_data_len, merged_size)
+    check_int32_offsets(
+        "concat(dictionary values)", interner.total_bytes(), merged_size
+    )
 
     # a's codes pass through unchanged (seed_append kept a's ordinals).
     _copy_dict_codes(new_data, 0, a, w)
-    # b's codes are remapped (`_remap_codes`): width and null handling are
-    # dispatched once here, not per row.
-    if w == 8:
-        if b._null_count == 0:
-            _remap_codes[DType.int64, False](new_data, len_a, b, remap, site)
-        else:
-            _remap_codes[DType.int64, True](new_data, len_a, b, remap, site)
-    elif b._null_count == 0:
-        _remap_codes[DType.int32, False](new_data, len_a, b, remap, site)
-    else:
-        _remap_codes[DType.int32, True](new_data, len_a, b, remap, site)
-
-    var merged_offsets = Optional[OwnedAlignedBuffer](None)
-    if not numeric:
-        comptime int32_size = size_of[Int32]()
-        var merged_offs_bytes = (merged_size + 1) * int32_size
-        var merged_offs_buf = OwnedAlignedBuffer(merged_offs_bytes)
-        merged_offs_buf.copy_from_int32_list(interner.offsets())
-        merged_offs_buf.set_length(Int64(merged_offs_bytes))
-        merged_offsets = merged_offs_buf^
-
-    var merged_data_buf = OwnedAlignedBuffer(max(total_data_len, 1))
-    merged_data_buf.copy_from_bytes_list(interner.bytes())
-    merged_data_buf.set_length(Int64(total_data_len))
+    # b's codes are remapped (`_remap_codes`).
+    _remap_dict_codes(new_data, len_a, b, remap, site, 1, w)
 
     var col = Column[HeapRegion](
         arrow_type=ArrowType.DICTIONARY,
         data=new_data^,
-        offsets=merged_offsets^,
+        offsets=_merged_dict_offsets(interner, numeric),
         validity=validity^,
         length=total,
         null_count=null_count,
         offset=0,
     )
-    col._set_dict_data_from_oab(merged_data_buf^)
+    col._set_dict_data_from_oab(_merged_dict_data(interner))
     col._dict_size = merged_size
     col._dict_index_byte_width = w
     col._dict_value_dtype = a._dict_value_dtype

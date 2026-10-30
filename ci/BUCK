@@ -12,6 +12,14 @@ load("@komira//tools/build/ci:aggregate.bzl", "ci_aggregate")
 load("@komira//tools/build/ci:rules.bzl", "HEAVY")
 load(":targets.bzl", "TARGETS", "TESTS")
 
+# The shards, as a directory, for the zig cases that hold the check set free of the macOS
+# build (//:release_macos_cases).
+export_file(
+    name = "target_shards",
+    src = "targets",
+    visibility = ["//:"],
+)
+
 ci_aggregate(
     name = "pr",
     deps = TARGETS,

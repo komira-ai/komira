@@ -49,6 +49,7 @@ mojo_shared_lib(
 # `plain_hidden`, that `exports` does not name.
 mojo_shared_lib(
     name = "plain",
+    visibility = ["PUBLIC"],
     srcs = ["plain_abi.mojo"],
     exports = ["plain_add", "plain_sum_squares"],
     unlisted_exports = ["plain_hidden"],

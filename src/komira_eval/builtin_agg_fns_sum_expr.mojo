@@ -53,6 +53,7 @@
 # =============================================================================
 
 from komira_arrow.batch_view import BatchView
+from komira_arrow.morsel_view import MorselView
 from komira_agg.aggregator import Aggregator
 from komira_expr.expr_x import ExprXF64
 
@@ -110,6 +111,13 @@ struct SumOfExprF64Agg[E: ExprXF64](Aggregator):
     # float64 sum vs the scalar per-row accumulate. The default per-lane
     # `@parameter for` body keeps the typed/untyped revenue values byte-
     # identical to the scalar oracle.
+
+    @always_inline
+    def input_is_null[V: MorselView](self, view: V, i: Int) -> Bool:
+        """Always False: an `ExprXF64` has no NULL probe, so this aggregand is
+        evaluated under the non-NULL model (a NULL operand reads its data
+        word). Route a nullable operand elsewhere."""
+        return False
 
     @always_inline
     def combine(mut self, mut into: Float64, var partial: Float64):

@@ -38,7 +38,7 @@
 //!    `http_headers = x-kbf-qos:<class>` line under `[buck2_re_client]`, and left out
 //!    writes none (so a pull-request check sends no header and queues as `ci`); any
 //!    other value, or one with a line break, is refused. Every workflow step that uses
-//!    the action in release.yml passes `farm-qos: batch`, and no step of any other
+//!    the action in release.yml or release-macos.yml passes `farm-qos: batch`, and no step of any other
 //!    workflow passes `farm-qos` at all, so the release work queues behind the
 //!    pull-request checks and the pull-request checks are never lowered.
 
@@ -534,8 +534,13 @@ test "every input is used, and every use names a declared input" {
 
 const ACTION_REF = "./.github/actions/farm-connect";
 const TLS_VALUE = "${{ vars.FARM_TLS || 'false' }}";
-/// The workflow whose farm steps run at the lower class, and the class.
+/// The workflows whose farm steps run at the lower class (the release, and the macOS build of the
+/// release, a workflow of its own), and the class.
 const RELEASE_WORKFLOW = "release.yml";
+const RELEASE_MACOS_WORKFLOW = "release-macos.yml";
+fn isReleaseWorkflow(file: []const u8) bool {
+    return std.mem.eql(u8, file, RELEASE_WORKFLOW) or std.mem.eql(u8, file, RELEASE_MACOS_WORKFLOW);
+}
 const RELEASE_QOS = "batch";
 
 const Caller = struct {
@@ -677,7 +682,7 @@ fn wrongCallers(ar: std.mem.Allocator, file: []const u8, text: []const u8) !stru
             std.debug.print("{s}:{d}: the farm-connect step passes tls: {s}; want tls: {s}\n", .{ file, c.line, c.tls orelse "<none>", TLS_VALUE });
         }
         // The release workflow's steps are lowered; no other workflow's step is.
-        const want_qos: ?[]const u8 = if (std.mem.eql(u8, file, RELEASE_WORKFLOW)) RELEASE_QOS else null;
+        const want_qos: ?[]const u8 = if (isReleaseWorkflow(file)) RELEASE_QOS else null;
         const same = if (want_qos) |w| (c.qos != null and std.mem.eql(u8, c.qos.?, w)) else c.qos == null;
         if (!same) {
             wrong += 1;
@@ -808,6 +813,8 @@ test "the priority rule: a release.yml step must pass batch, every other workflo
     const ci = "          farm-qos: ci\n";
     // release.yml: batch is right; none, ci or another value is the lower class missing
     try t.expectEqual(@as(usize, 0), try wrongIn("release.yml", batch));
+    try t.expectEqual(@as(usize, 0), try wrongIn("release-macos.yml", batch));
+    try t.expectEqual(@as(usize, 1), try wrongIn("release-macos.yml", ""));
     try t.expectEqual(@as(usize, 1), try wrongIn("release.yml", ""));
     try t.expectEqual(@as(usize, 1), try wrongIn("release.yml", ci));
     try t.expectEqual(@as(usize, 1), try wrongIn("release.yml", "          farm-qos: interactive\n"));
@@ -830,6 +837,7 @@ test "every workflow step that uses the action passes tls from FARM_TLS, and far
     var callers: usize = 0;
     var wrong: usize = 0;
     var release_callers: usize = 0;
+    var macos_callers: usize = 0;
     var di = dir.iterate();
     while (try di.next()) |e| {
         if (!std.mem.endsWith(u8, e.name, ".yml")) continue;
@@ -839,6 +847,7 @@ test "every workflow step that uses the action passes tls from FARM_TLS, and far
         callers += r.callers;
         wrong += r.wrong;
         if (std.mem.eql(u8, e.name, RELEASE_WORKFLOW)) release_callers = r.callers;
+        if (std.mem.eql(u8, e.name, RELEASE_MACOS_WORKFLOW)) macos_callers = r.callers;
     }
     // The staged workflows are read, and the action has callers: a staging
     // or reader fault would otherwise pass with nothing checked.
@@ -846,5 +855,6 @@ test "every workflow step that uses the action passes tls from FARM_TLS, and far
     try t.expect(callers > 0);
     // release.yml is read and has its farm steps: with none seen, the priority rule would pass empty.
     try t.expect(release_callers > 0);
+    try t.expect(macos_callers > 0);
     try t.expectEqual(@as(usize, 0), wrong);
 }

@@ -107,11 +107,11 @@ COVERAGE_NO_GATE = {
 # all classify and its records hold an arm; the sweep of every library
 # grows it. A library of the ledger COVERAGE_NO_GATE is read by its
 # `<name>_cov_gate`. Joining also
-# means covcheck's refusal of two tests' records that give one location a
-# different number of decisions (branch_lcov.mojo, DecisionShapes) fails
-# the gate in every mode: a new test instantiating one of the library's
-# generic functions with another specialisation can turn its coverage gate
-# red in census mode. A fixture of the tests cell reads its branch records
+# means covcheck's refusal of two tests' records that give one decision a
+# different number of arms (branch_lcov.mojo, DecisionShapes) fails
+# the gate in every mode. (Records that give one location a different
+# number of decisions are not refused: the tests with the most decisions
+# are summed and the others' records at it dropped.) A fixture of the tests cell reads its branch records
 # unless it passes `coverage_branch_gate = False` (coverage.bzl). A library
 # not on the list keeps BranchNotMeasured. mojo_library looks itself up by
 # its label's exact string, so a row whose library moved, or a row spelled
@@ -140,7 +140,7 @@ COVERAGE_BRANCH_GATE = {
     "komira//src/kci_validator_rows:kci_validator_rows": "its test's branches all classify (40 arms of 2 files)",
     "komira//src/komira_agg:komira_agg": "its ten tests' branches all classify (228 arms of 7 files)",
     "komira//src/komira_async_api:komira_async_api": "its test's branches all classify (2 arms of 1 file)",
-    "komira//src/komira_buffer:komira_buffer": "its eleven tests' branches all classify (154 arms of 6 files)",
+    "komira//src/komira_buffer:komira_buffer": "its eighteen tests' branches all classify (314 arms of 8 files)",
     "komira//src/komira_clock:komira_clock": "its test's branches all classify (2 arms of 1 file)",
     "komira//src/komira_column_format:komira_column_format": "its two tests' branches all classify (170 arms of 1 file)",
     "komira//src/komira_compression:komira_compression": "its four tests' branches all classify (100 arms of 6 files, 36 of them `try` arms)",
