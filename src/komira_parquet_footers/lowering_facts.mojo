@@ -23,7 +23,9 @@ from komira_lowering.lowered_plan import LoweringInputs
 from komira_parquet.table_stats import collect_table_stats
 from komira_sql.sql_catalog import SqlCatalog
 
+from komira_parquet_footers.footer_cache import footer_error
 from komira_parquet_footers.parquet_footers import (
+    CHANGED_REASON,
     ParquetFooters,
     check_catalog_table,
 )
@@ -40,9 +42,14 @@ def add_parquet_scan(
     row groups and read by the schema's column names.
 
     Raises:
-        Error naming `path` when its footer does not read.
+        Error naming `path` when its footer does not read, or when the file
+        was replaced after the footer was read (the facts would be those of a
+        version the file no longer has).
     """
-    var meta = footers.cache().footer(path)
+    var cache = footers.cache()
+    var meta = cache.footer(path)
+    if cache.changed_since_read(path):
+        raise Error(footer_error(path, CHANGED_REASON))
     var stats = collect_table_stats(meta[], schema)
     inputs.add_scan(Optional(stats^))
 

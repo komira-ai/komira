@@ -15,9 +15,14 @@
 #
 # `register_parquet_table` takes a table's schema from the footer at
 # registration, and `check_registered_schema` refuses, by table and column, a
-# registered schema that disagrees with the file it names.
+# registered schema that disagrees with the file it names. The comparison is
+# exact: names and order, Arrow type, decimal precision and scale, time zone,
+# and nullability in both directions (a nullable column registered not null is
+# unsafe; a not-null column registered nullable is refused too, so a registered
+# schema is the file's schema and nothing looser).
 # =============================================================================
 
+from komira_arrow.arrow_types import ArrowType
 from komira_arrow.schema import Schema
 from komira_parquet_api.metadata import RowGroup
 from komira_scan_source.source_variant import SOURCE_VARIANT_PARQUET
@@ -25,6 +30,12 @@ from komira_sql.sql_bind_parquet import SqlParquetFooters, path_has_glob
 from komira_sql.sql_catalog import SqlCatalog
 
 from komira_parquet_footers.footer_cache import FooterCache, footer_error
+
+
+comptime CHANGED_REASON = (
+    "the file was replaced after its footer was read; the footer held is not"
+    " the file's now (invalidate the path to read it again)"
+)
 
 
 def _chunk_of(rg: RowGroup, name: String) -> Int:
@@ -53,6 +64,12 @@ struct ParquetFooters(SqlParquetFooters, Copyable, Movable):
         from (`lowering_facts`) or to hold in an engine context."""
         return self._cache.copy()
 
+    def _refuse_if_changed(self, path: String) raises:
+        """Refuse a file replaced since its footer was read: the footer held
+        is a version the file no longer has."""
+        if self._cache.changed_since_read(path):
+            raise Error(footer_error(path, CHANGED_REASON))
+
     def footer_schema(self, path: String) raises -> Schema:
         if path_has_glob(path):
             raise Error(
@@ -61,6 +78,8 @@ struct ParquetFooters(SqlParquetFooters, Copyable, Movable):
                     "a glob path is not read yet; name one file",
                 )
             )
+        _ = self._cache.footer(path)
+        self._refuse_if_changed(path)
         var summary = self._cache.summary(path)
         return summary.take_schema()
 
@@ -68,6 +87,7 @@ struct ParquetFooters(SqlParquetFooters, Copyable, Movable):
         self, path: String, column: String
     ) raises -> Optional[Int]:
         var meta = self._cache.footer(path)
+        self._refuse_if_changed(path)
         ref md = meta[]
         var total = 0
         for r in range(len(md.row_groups)):
@@ -123,6 +143,29 @@ def check_registered_schema(
                 + String(registered.field_arrow_type(i)) + ", the file has "
                 + String(actual.field_arrow_type(i))
             )
+        if (
+            registered.field_arrow_type(i) == ArrowType.DECIMAL128
+            and (
+                registered.field_decimal_precision(i)
+                != actual.field_decimal_precision(i)
+                or registered.field_decimal_scale(i)
+                != actual.field_decimal_scale(i)
+            )
+        ):
+            raise Error(
+                head + "column '" + rn + "' is registered as decimal("
+                + String(registered.field_decimal_precision(i)) + ", "
+                + String(registered.field_decimal_scale(i))
+                + "), the file has decimal("
+                + String(actual.field_decimal_precision(i)) + ", "
+                + String(actual.field_decimal_scale(i)) + ")"
+            )
+        if registered.field_tz(i) != actual.field_tz(i):
+            raise Error(
+                head + "column '" + rn + "' is registered with time zone '"
+                + registered.field_tz(i) + "', the file has '"
+                + actual.field_tz(i) + "'"
+            )
         if registered.field_nullable(i) != actual.field_nullable(i):
             raise Error(
                 head + "column '" + rn + "' is registered "
@@ -156,8 +199,11 @@ def check_catalog_table(
         raise Error("parquet table '" + name + "': the table is not a Parquet table")
     ref ps = table.source._parquet.value()
     if len(ps.paths) != 1:
+        var files = String("")
+        for i in range(len(ps.paths)):
+            files += ("" if i == 0 else ", ") + "'" + String(ps.paths[i]) + "'"
         raise Error(
             "parquet table '" + name + "': names " + String(len(ps.paths))
-            + " files; only a one-file table is checked"
+            + " files (" + files + "); only a one-file table is checked"
         )
     check_registered_schema(name, String(ps.paths[0]), table.schema, footers)

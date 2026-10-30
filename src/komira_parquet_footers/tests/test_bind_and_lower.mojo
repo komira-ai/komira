@@ -31,10 +31,15 @@
 #     and by `add_catalog_scan`, naming table, file and column; the matching
 #     registration passes. Catches a scan lowered on facts of a file the plan
 #     was not bound to.
-#   * test_a_file_rewritten_between_bind_and_lowering_is_seen_as_bound: after
-#     binding, the file is replaced by a 7-row one; lowering's inputs still carry
-#     the 1000 rows the plan was bound against, and `changed_since_read` says the
-#     file changed. Catches inputs read from a second version of the file.
+#   * test_a_file_rewritten_between_bind_and_lowering_is_refused: after
+#     binding, the file is replaced by a 7-row one; the scan inputs and a new
+#     bind are refused naming the file (not built on the 1000-row footer the
+#     plan was bound against), and after invalidate the new file is read.
+#   * test_parametric_types_are_compared_by_their_parameters: a DECIMAL(20,2)
+#     file against registered (20,2), (20,3) and (18,2).
+#   * test_nullability_is_exact_in_both_directions, test_swapped_column_order_is_refused,
+#     test_check_catalog_table_refuses_what_it_cannot_check (unknown table, an
+#     in-memory table, a two-file table naming both files).
 #   * test_binding_a_missing_or_text_file_names_the_file: `read_parquet` of an
 #     absent file and of a text file fail `bind_statement` with an error naming
 #     the path.
@@ -44,6 +49,7 @@ from std.testing import TestSuite, assert_equal, assert_false, assert_raises, as
 
 from komira_arrow.arrow_types import ArrowType
 from komira_arrow.column import Column
+from komira_arrow.decimal_array import Decimal128Array
 from komira_arrow.primitive_array import PrimitiveArray
 from komira_arrow.record_batch import RecordBatch, RecordBatchBuilder
 from komira_arrow.schema import Field, SchemaBuilder
@@ -66,7 +72,9 @@ from komira_parquet_writer import write_record_batch_to_parquet_bytes
 from komira_plan_expr.scalar_value import ScalarValue
 from komira_runtime_paths import test_tmpdir
 from komira_sql.sql_binder import bind_statement
-from komira_sql.sql_catalog import SqlCatalog
+from komira_scan_source.parquet_source import ParquetSource
+from komira_scan_source.source_variant import SourceVariant
+from komira_sql.sql_catalog import CatalogTable, SqlCatalog
 from komira_sql.sql_parser import parse_sql
 from komira_sql.sql_token import tokenize
 
@@ -213,7 +221,7 @@ def test_a_registered_schema_that_disagrees_is_refused_by_name() raises:
     assert_equal(len(inputs.scans), 1)
 
     var short = _registered(path, "x", ArrowType.INT64, True, 2)
-    with assert_raises(contains="registered 2 columns, the file has 3"):
+    with assert_raises(contains="2 columns, the file has 3"):
         check_catalog_table(short, "t", footers)
 
     var renamed = _registered(path, "z", ArrowType.INT64, True, 3)
@@ -234,23 +242,135 @@ def test_a_registered_schema_that_disagrees_is_refused_by_name() raises:
     assert_equal(len(refused.scans), 0)
 
 
-def test_a_file_rewritten_between_bind_and_lowering_is_seen_as_bound() raises:
+def test_a_file_rewritten_between_bind_and_lowering_is_refused() raises:
     var path = _write_table("bl_rewrite.parquet")
     var footers = ParquetFooters()
     var catalog = SqlCatalog()
     register_parquet_table(catalog, "t", path, footers)
     var bound = bind_statement(parse_sql(tokenize(_QUERY)), catalog, footers)
-    var plan = bound.take_plan()
+    _ = bound.take_plan()
     var small = write_record_batch_to_parquet_bytes(
         _batch(7), CompressionCodec.UNCOMPRESSED
     )
     _ = _put("bl_rewrite.parquet", small)
     assert_true(footers.cache().changed_since_read(path))
     var inputs = LoweringInputs()
-    add_catalog_scan(inputs, catalog, "t", footers)
-    var lowered = lower(plan, reference_host_profile("test-build"), inputs)
-    assert_equal(lowered.segments[0].card_estimate_rows, 1000)
-    assert_equal(footers.cache().read_count(), 1)
+    with assert_raises(contains="bl_rewrite.parquet"):
+        add_catalog_scan(inputs, catalog, "t", footers)
+    with assert_raises(contains="bl_rewrite.parquet"):
+        add_read_parquet_scan(inputs, footers, path)
+    assert_equal(len(inputs.scans), 0)
+    # Binding again over the replaced file is refused too, not bound on v1.
+    with assert_raises(contains="bl_rewrite.parquet"):
+        _ = bind_statement(
+            parse_sql(tokenize("SELECT x FROM read_parquet('" + path + "')")),
+            SqlCatalog(),
+            footers,
+        )
+    # Invalidating the path reads the new file.
+    footers.cache().invalidate(path)
+    assert_equal(footers.footer_schema(path).num_columns(), 3)
+    assert_equal(footers.cache().summary(path).row_count, 7)
+
+
+def _decimal_file(file_name: String) raises -> String:
+    var sb = SchemaBuilder()
+    var b = RecordBatchBuilder()
+    var d = Decimal128Array.allocate_nullable(4, 20, 2)
+    for i in range(4):
+        d.set_i128(i, SIMD[DType.int128, 1](i * 100 + 7))
+    sb.add_field(Field.decimal128("d", 20, 2, False))
+    b.add_column(Column.from_decimal128(d))
+    var bytes = write_record_batch_to_parquet_bytes(
+        b.build(sb.build()), CompressionCodec.UNCOMPRESSED
+    )
+    return _put(file_name, bytes)
+
+
+def _one_column_catalog(path: String, var field: Field) -> SqlCatalog:
+    var sb = SchemaBuilder()
+    sb.add_field(field^)
+    var catalog = SqlCatalog()
+    catalog.add_parquet("t", path, sb.build())
+    return catalog^
+
+
+def test_parametric_types_are_compared_by_their_parameters() raises:
+    var path = _decimal_file("bl_decimal.parquet")
+    var footers = ParquetFooters()
+    check_catalog_table(
+        _one_column_catalog(path, Field.decimal128("d", 20, 2, False)),
+        "t",
+        footers,
+    )
+    with assert_raises(contains="decimal(20, 3)"):
+        check_catalog_table(
+            _one_column_catalog(path, Field.decimal128("d", 20, 3, False)),
+            "t",
+            footers,
+        )
+    with assert_raises(contains="decimal(18, 2)"):
+        check_catalog_table(
+            _one_column_catalog(path, Field.decimal128("d", 18, 2, False)),
+            "t",
+            footers,
+        )
+
+
+def test_nullability_is_exact_in_both_directions() raises:
+    var path = _write_table("bl_null.parquet")
+    var footers = ParquetFooters()
+    # The file has x not null and y nullable.
+    var nullable_x = _registered_nullable_x(path)
+    with assert_raises(contains="column 'x' is registered nullable"):
+        check_catalog_table(nullable_x, "t", footers)
+    var not_null_y = _registered(path, "x", ArrowType.INT64, False, 3)
+    with assert_raises(contains="column 'y' is registered not null"):
+        check_catalog_table(not_null_y, "t", footers)
+
+
+def _registered_nullable_x(path: String) -> SqlCatalog:
+    var sb = SchemaBuilder()
+    sb.add_field(Field("x", ArrowType.INT64, True))
+    sb.add_field(Field("y", ArrowType.INT64, True))
+    sb.add_field(Field("s", ArrowType.STRING, False))
+    var catalog = SqlCatalog()
+    catalog.add_parquet("t", path, sb.build())
+    return catalog^
+
+
+def test_swapped_column_order_is_refused() raises:
+    var path = _write_table("bl_order.parquet")
+    var sb = SchemaBuilder()
+    sb.add_field(Field("y", ArrowType.INT64, True))
+    sb.add_field(Field("x", ArrowType.INT64, False))
+    sb.add_field(Field("s", ArrowType.STRING, False))
+    var catalog = SqlCatalog()
+    catalog.add_parquet("t", path, sb.build())
+    with assert_raises(contains="column 0 is registered as 'y', the file has 'x'"):
+        check_catalog_table(catalog, "t", ParquetFooters())
+
+
+def test_check_catalog_table_refuses_what_it_cannot_check() raises:
+    var footers = ParquetFooters()
+    var catalog = SqlCatalog()
+    with assert_raises(contains="unknown table"):
+        check_catalog_table(catalog, "nope", footers)
+    catalog.add_in_memory("mem", _batch(3))
+    with assert_raises(contains="not a Parquet table"):
+        check_catalog_table(catalog, "mem", footers)
+    # A table naming two files: both are named.
+    var a = _write_table("bl_multi_a.parquet")
+    var b = _write_table("bl_multi_b.parquet")
+    var src = ParquetSource(a.copy(), _batch(1).schema.copy())
+    src.paths.append(b.copy())
+    catalog._tables.append(
+        CatalogTable("multi", _batch(1).schema.copy(), SourceVariant(src^))
+    )
+    with assert_raises(contains="bl_multi_a.parquet"):
+        check_catalog_table(catalog, "multi", footers)
+    with assert_raises(contains="bl_multi_b.parquet"):
+        check_catalog_table(catalog, "multi", footers)
 
 
 def test_binding_a_missing_or_text_file_names_the_file() raises:

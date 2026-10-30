@@ -26,6 +26,16 @@
 # bump, not a copy), and sits behind a `SpinMutex`, because the binder's trait
 # methods take `self`, not `mut self`.
 #
+# KNOWN LIMITS. (1) The cache is unbounded: one full `FileMetaData` per path for
+# the life of the cache, found by a linear scan under the lock. A cap with
+# eviction conflicts with one version per path; `EngineContext` must not hold
+# this cache uncapped for a long-lived session (a per-query pin is the likely
+# shape). (2) The lock is held across the file read and the parse, so a lookup
+# waits behind another path's slow read. (3) The identity check is a field
+# comparison (`same_file_as`); it does not apply the settle rule of
+# `komira_buffer.file_identity`, so a same-size rewrite within the timestamp
+# tick of a file younger than the settle window can go unseen.
+#
 # Errors name the file: a path that is not there, a file too short to be
 # Parquet, a file whose footer does not parse, a footer the flat-schema reader
 # refuses are each an `Error` whose text starts `parquet footer '<path>': `. A
@@ -34,13 +44,13 @@
 
 from std.memory import ArcPointer
 
-from komira_arrow.schema import Schema
+from komira_arrow.schema import Schema, SchemaBuilder
 from komira_async.ops.waker_sink import NoopSink
 from komira_buffer.file_identity import FileIdentity
 from komira_fs.local_fs import LocalFs
 from komira_parquet.file_reader import ParquetFileReader
 from komira_parquet.metadata_parser import parse_full_metadata
-from komira_parquet.parquet_source_helpers import _build_schema_from_elements
+from komira_parquet.decode_helpers import field_from_schema_element
 from komira_parquet_api.metadata import FileMetaData
 from komira_parquet_api.types import FieldRepetitionType
 from komira_sync import SpinMutex
@@ -94,8 +104,10 @@ def _summarize(path: String, meta: FileMetaData) raises -> FooterSummary:
                     + "' is nested or repeated; only flat files are read",
                 )
             )
-    var schema = _build_schema_from_elements(meta.schema)
-    return FooterSummary(meta.num_rows, schema^)
+    var sb = SchemaBuilder()
+    for c in range(1, len(meta.schema)):
+        sb.add_field(field_from_schema_element(meta.schema[c]))
+    return FooterSummary(meta.num_rows, sb.build())
 
 
 struct _CacheState(Movable, Deinitable):

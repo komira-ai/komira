@@ -47,18 +47,41 @@ passes `ctx.footers` to `bind_statement` and the same cache to
 ## Limits
 
 - A glob path is refused by name (`footer_schema` of `data/*.parquet`): a
-  glob's footers are not unioned by name yet. A table naming several files is
-  not checked by `check_catalog_table`, and lowering refuses a scan of several
-  files.
+  glob's footers are not unioned yet. A table naming several files is
+  refused by `check_catalog_table` (naming the files), and lowering refuses a
+  scan of several files.
 - `ScanFacts.dict_encoded_columns` is left empty. The footer reader does not
   parse the page encoding statistics that tell a column stored entirely
   dictionary encoded from one that fell back to plain pages, so no column is
   claimed; every column lowers by value, which is correct.
-- The cache has no size cap or eviction yet (`ParquetMetadataCache` keeps one
-  entry per path for its life), and a hit does not re-stat the file.
-  `changed_since_read` is the check, and the source's check at open (design
-  section 3.4) is the engine's.
+- **The cache is unbounded.** It keeps one full `FileMetaData` per path for
+  its life and finds a path by a linear scan under the lock. Design section 5.1
+  asks every context cache to be capped; eviction conflicts with one version
+  per path, so a cap needs a different shape (a per-query pin is the likely
+  one). `EngineContext` must not hold this cache uncapped for a long-lived
+  session.
+- **The lock is held across the file read and the parse**, so a lookup waits
+  behind another path's slow read.
+- **The identity check is a field comparison** (size, modification time, inode,
+  device) and does not apply the settle rule of `komira_buffer.file_identity`:
+  a same-size rewrite inside the timestamp tick of a file younger than the
+  settle window can go unseen. Tests vary size, modification time and removal;
+  the inode is not varied (no rename is available to a test).
+- **The identity is checked here, not at open.** `ParquetFooters` and
+  `lowering_facts` refuse a file whose identity differs from the stamp when
+  they are asked for its footer. `ScanFacts` does not carry the stamp, and the
+  scan reads through `komira_parquet`'s revalidating metadata cache, so a file
+  replaced after the last call here is not refused by this package. The
+  check at open (design section 3.4) is planned.
+- The cache reads footers itself rather than through
+  `ParquetMetadataCache`'s shared surface, which revalidates each hit and would
+  let bind and lowering see two versions of one file. The alternative, a
+  no-revalidate lookup added to `ParquetMetadataCache` under a lock wrapper,
+  would give one footer cache per process; it is a change to `komira_parquet`
+  and is left for the engine context slice.
 - Flat files only: a nested or repeated column is refused by name.
+- A registered schema must equal the file's: names and order, Arrow type,
+  decimal precision and scale, time zone and nullability in both directions.
 
 ## Tests
 
@@ -69,6 +92,8 @@ The tests run when the package is built.
   named errors for a missing, text and short file, no cached failure, change
   detection, invalidation, null counts summed over every row group (unknown
   when one records none), a glob refused.
+- `test_footer_refusals`: footers built byte by byte (no schema, negative
+  `num_rows`, a nested column, a repeated leaf) refused naming the file.
 - `test_bind_and_lower`: `bind_statement` and `lower` over a real footer for a
   registered table and for `read_parquet(...)`, one read for both, the
   statistics in the inputs, a registered schema that disagrees refused by

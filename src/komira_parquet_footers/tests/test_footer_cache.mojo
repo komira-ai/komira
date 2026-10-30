@@ -26,6 +26,10 @@
 #     once the file is replaced by a valid one. Catches a cached failure.
 #   * test_changed_since_read: false while the file is untouched, true after it
 #     is replaced by a longer one; an unread path is refused by name.
+#   * test_a_new_mtime_alone_is_a_change, test_a_removed_file_is_a_change: a
+#     file with the same bytes and size but another modification time, and a
+#     removed file, read as changed. (The inode field of the identity is not
+#     varied here: no rename is available to a test.)
 #   * test_invalidate_rereads: a rewritten file is served as first read (the
 #     old row count) until invalidate; then the next lookup reads again and
 #     sees the new file's row count. Catches a cache that re-reads on a hit.
@@ -37,6 +41,7 @@
 #   * test_a_glob_path_is_refused_by_name.
 # =============================================================================
 
+from std.os import remove
 from std.testing import TestSuite, assert_equal, assert_false, assert_raises, assert_true
 
 from komira_arrow.arrow_types import ArrowType
@@ -54,6 +59,7 @@ from komira_parquet_writer import (
     make_schema_elements_nullable,
     write_record_batch_to_parquet_bytes,
 )
+from komira_buffer.file_identity import set_file_mtime_ns
 from komira_runtime_paths import test_tmpdir
 
 
@@ -161,9 +167,9 @@ def test_a_missing_file_is_a_named_error() raises:
     var cache = FooterCache()
     with assert_raises(contains="ff_absent.parquet"):
         _ = cache.footer(path)
-    with assert_raises(contains="no such file"):
+    with assert_raises(contains="ff_absent.parquet"):
         _ = cache.summary(path)
-    with assert_raises(contains="no such file"):
+    with assert_raises(contains="ff_absent.parquet"):
         _ = ParquetFooters().footer_schema(path)
     assert_equal(cache.read_count(), 0)
 
@@ -173,14 +179,14 @@ def test_a_text_file_is_a_named_error() raises:
     var cache = FooterCache()
     with assert_raises(contains="ff_text.parquet"):
         _ = cache.footer(path)
-    with assert_raises(contains="not a readable Parquet file"):
+    with assert_raises(contains="ff_text.parquet"):
         _ = cache.summary(path)
 
 
 def test_a_short_file_is_a_named_error() raises:
     var path = _put("ff_short.parquet", _text(5))
     var cache = FooterCache()
-    with assert_raises(contains="not a Parquet file: 5 bytes"):
+    with assert_raises(contains="5 bytes"):
         _ = cache.footer(path)
     with assert_raises(contains="ff_short.parquet"):
         _ = ParquetFooters().footer_schema(path)
@@ -204,6 +210,27 @@ def test_changed_since_read() raises:
     assert_false(cache.changed_since_read(path))
     _ = _write_table("ff_change.parquet", 5000, 1000)
     assert_true(cache.changed_since_read(path))
+
+
+def test_a_new_mtime_alone_is_a_change() raises:
+    # Same bytes, same size: only the modification time differs.
+    var path = _write_table("ff_mtime.parquet", 100, 100)
+    assert_true(set_file_mtime_ns(path, 1_000_000_000_000_000_000))
+    var cache = FooterCache()
+    _ = cache.footer(path)
+    assert_false(cache.changed_since_read(path))
+    assert_true(set_file_mtime_ns(path, 1_100_000_000_000_000_000))
+    assert_true(cache.changed_since_read(path))
+
+
+def test_a_removed_file_is_a_change() raises:
+    var path = _write_table("ff_removed.parquet", 100, 100)
+    var cache = FooterCache()
+    _ = cache.footer(path)
+    remove(path)
+    assert_true(cache.changed_since_read(path))
+    # The held footer is still served: a lookup never re-reads.
+    assert_equal(cache.summary(path).row_count, 100)
 
 
 def test_invalidate_rereads() raises:
@@ -254,6 +281,8 @@ def test_a_glob_path_is_refused_by_name() raises:
         _ = footers.footer_schema("data/*.parquet")
     with assert_raises(contains="glob"):
         _ = footers.footer_schema("data/part-[0-9].parquet")
+    with assert_raises(contains="part-?.parquet"):
+        _ = footers.footer_schema("data/part-?.parquet")
 
 
 def main() raises:

@@ -14,6 +14,8 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #   groups), one read for many lookups and handles, named errors for a missing,
 #   text or short file, no cached failure, change detection, invalidation, and
 #   the null count (summed over every row group, unknown when one records none).
+# - test_footer_refusals: footers built byte by byte (no schema, negative num_rows,
+#   a nested column, a repeated leaf) refused naming the file.
 # - test_bind_and_lower: bind_statement and lower over real footers through one
 #   cache, the statistics in the inputs, a registered schema that disagrees
 #   refused by name, and a missing or text file named at bind.
@@ -78,6 +80,7 @@ mojo_library(
     test_srcs = [
         "tests/test_bind_and_lower.mojo",
         "tests/test_footer_cache.mojo",
+        "tests/test_footer_refusals.mojo",
     ],
     visibility = ["PUBLIC"],
 )
