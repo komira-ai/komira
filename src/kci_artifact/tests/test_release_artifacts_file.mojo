@@ -173,6 +173,7 @@ def test_the_declared_names_in_release_order() raises:
     want.append(String("komira_bench_duckdb"))
     want.append(String("komira_bench_data"))
     want.append(String("komira_bench_report"))
+    want.append(String("komira_bench_corpus"))
     want.append(String("komira_all"))
     assert_equal(len(d.artifacts), len(want))
     for i in range(len(want)):
