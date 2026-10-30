@@ -10,6 +10,8 @@ A package of the list needs its `load` below and its row; `mopm_artifacts` refus
 """
 
 load("//src/kci_api:buildrules.mojo.lock.bzl", kci_api = "GRAPH")
+load("//src/kci_artifact:buildrules.mojo.lock.bzl", kci_artifact = "GRAPH")
+load("//src/kci_artifact_manifest:buildrules.mojo.lock.bzl", kci_artifact_manifest = "GRAPH")
 load("//src/kci_artifact_proto:buildrules.mojo.lock.bzl", kci_artifact_proto = "GRAPH")
 load("//src/kci_cell:buildrules.mojo.lock.bzl", kci_cell = "GRAPH")
 load("//src/kci_deploy_model_proto:buildrules.mojo.lock.bzl", kci_deploy_model_proto = "GRAPH")
@@ -22,6 +24,7 @@ load("//src/kci_release_machine:buildrules.mojo.lock.bzl", kci_release_machine =
 load("//src/kci_resource_proto:buildrules.mojo.lock.bzl", kci_resource_proto = "GRAPH")
 load("//src/kci_validator_report:buildrules.mojo.lock.bzl", kci_validator_report = "GRAPH")
 load("//src/kci_validator_rows:buildrules.mojo.lock.bzl", kci_validator_rows = "GRAPH")
+load("//src/kci_workflow_check:buildrules.mojo.lock.bzl", kci_workflow_check = "GRAPH")
 load("//src/komira_anomaly:buildrules.mojo.lock.bzl", komira_anomaly = "GRAPH")
 load("//src/komira_async_api:buildrules.mojo.lock.bzl", komira_async_api = "GRAPH")
 load("//src/komira_atomic_alias:buildrules.mojo.lock.bzl", komira_atomic_alias = "GRAPH")
@@ -29,6 +32,8 @@ load("//src/komira_bench_report:buildrules.mojo.lock.bzl", komira_bench_report =
 load("//src/komira_broker_proto:buildrules.mojo.lock.bzl", komira_broker_proto = "GRAPH")
 load("//src/komira_buffer:buildrules.mojo.lock.bzl", komira_buffer = "GRAPH")
 load("//src/komira_bump_arena:buildrules.mojo.lock.bzl", komira_bump_arena = "GRAPH")
+load("//src/komira_calendar:buildrules.mojo.lock.bzl", komira_calendar = "GRAPH")
+load("//src/komira_calendar_ics:buildrules.mojo.lock.bzl", komira_calendar_ics = "GRAPH")
 load("//src/komira_calendar_proto:buildrules.mojo.lock.bzl", komira_calendar_proto = "GRAPH")
 load("//src/komira_chat_proto:buildrules.mojo.lock.bzl", komira_chat_proto = "GRAPH")
 load("//src/komira_clock:buildrules.mojo.lock.bzl", komira_clock = "GRAPH")
@@ -93,6 +98,8 @@ def declared_natives(graph):
 
 _GRAPHS = {
     "kci_api": kci_api,
+    "kci_artifact": kci_artifact,
+    "kci_artifact_manifest": kci_artifact_manifest,
     "kci_artifact_proto": kci_artifact_proto,
     "kci_cell": kci_cell,
     "kci_deploy_model_proto": kci_deploy_model_proto,
@@ -105,6 +112,7 @@ _GRAPHS = {
     "kci_resource_proto": kci_resource_proto,
     "kci_validator_report": kci_validator_report,
     "kci_validator_rows": kci_validator_rows,
+    "kci_workflow_check": kci_workflow_check,
     "komira_anomaly": komira_anomaly,
     "komira_async_api": komira_async_api,
     "komira_atomic_alias": komira_atomic_alias,
@@ -112,6 +120,8 @@ _GRAPHS = {
     "komira_broker_proto": komira_broker_proto,
     "komira_buffer": komira_buffer,
     "komira_bump_arena": komira_bump_arena,
+    "komira_calendar": komira_calendar,
+    "komira_calendar_ics": komira_calendar_ics,
     "komira_calendar_proto": komira_calendar_proto,
     "komira_chat_proto": komira_chat_proto,
     "komira_clock": komira_clock,

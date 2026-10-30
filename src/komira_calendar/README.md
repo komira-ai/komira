@@ -26,12 +26,12 @@ turning local times into UTC instants, storage, and HTTP.
 
 | name | file | what it is |
 |---|---|---|
-| `check_calendar`, `check_event`, `check_override` | [validate.mojo](https://github.com/komira-ai/komira/blob/main/src/komira_calendar/validate.mojo) | the first rule a value breaks, or None |
-| `check_recurrence` | [recurrence.mojo](https://github.com/komira-ai/komira/blob/main/src/komira_calendar/recurrence.mojo) | the recurrence rule's checks, given the event's first day |
-| `expand`, `series_span`, `Occurrence`, `SeriesSpan`, `OPEN_END`, `MAX_WINDOW_OCCURRENCES` | [expand.mojo](https://github.com/komira-ai/komira/blob/main/src/komira_calendar/expand.mojo) | the occurrences overlapping a window; the first start to the last end |
-| `Refusal`, `RefusalCode`, `error_response` | [refusal.mojo](https://github.com/komira-ai/komira/blob/main/src/komira_calendar/refusal.mojo) | a refusal, its codes, the API error body |
-| `parse_local_date`, `parse_local_datetime`, `LocalDateTime` (`seconds()`), `is_time_zone_name`, `MAX_TIME_ZONE_BYTES` | [local_time.mojo](https://github.com/komira-ai/komira/blob/main/src/komira_calendar/local_time.mojo) | `YYYY-MM-DD`, `YYYY-MM-DDTHH:MM:SS`, the shape of an IANA zone name |
-| `MAX_*` | [limits.mojo](https://github.com/komira-ai/komira/blob/main/src/komira_calendar/limits.mojo) | the bounds: 5 reminders, interval 999, count 10000, 1000 exdates, 366 days, text lengths |
+| `check_calendar`, `check_event`, `check_override` | [validate.mojo](https://github.com/komira-ai/komira/blob/main/src/komira_calendar/src/komira_calendar/validate.mojo) | the first rule a value breaks, or None |
+| `check_recurrence` | [recurrence.mojo](https://github.com/komira-ai/komira/blob/main/src/komira_calendar/src/komira_calendar/recurrence.mojo) | the recurrence rule's checks, given the event's first day |
+| `expand`, `series_span`, `Occurrence`, `SeriesSpan`, `OPEN_END`, `MAX_WINDOW_OCCURRENCES` | [expand.mojo](https://github.com/komira-ai/komira/blob/main/src/komira_calendar/src/komira_calendar/expand.mojo) | the occurrences overlapping a window; the first start to the last end |
+| `Refusal`, `RefusalCode`, `error_response` | [refusal.mojo](https://github.com/komira-ai/komira/blob/main/src/komira_calendar/src/komira_calendar/refusal.mojo) | a refusal, its codes, the API error body |
+| `parse_local_date`, `parse_local_datetime`, `LocalDateTime` (`seconds()`), `is_time_zone_name`, `MAX_TIME_ZONE_BYTES` | [local_time.mojo](https://github.com/komira-ai/komira/blob/main/src/komira_calendar/src/komira_calendar/local_time.mojo) | `YYYY-MM-DD`, `YYYY-MM-DDTHH:MM:SS`, the shape of an IANA zone name |
+| `MAX_*` | [limits.mojo](https://github.com/komira-ai/komira/blob/main/src/komira_calendar/src/komira_calendar/limits.mojo) | the bounds: 5 reminders, interval 999, count 10000, 1000 exdates, 366 days, text lengths |
 
 ## Rules
 
@@ -154,3 +154,21 @@ assert_equal(parse_local_datetime("1970-01-02T00:01:05").second_of_day, 65)
 assert_true(is_time_zone_name("America/Argentina/Buenos_Aires"))
 assert_false(is_time_zone_name("Europe//London"))
 ```
+
+## Build files
+
+This package is built with buildrules' `mojo_package` and packaged for mopm as `komira_calendar`, version 0.1.0 (`mopm.toml`). The library is `src/komira_calendar/`, its tests are `tests/`. It depends on komira_calendar_proto and komira_datetime, sibling directories (`[dependencies]` of `mopm.toml`), so the `.conda` of this package records `mojo-komira_calendar_proto >=0.1,<0.2` and `mojo-komira_datetime >=0.1,<0.2` as dependencies and holds none of those packages' files: installing `komira_calendar` installs them with it. The files that are not sources:
+
+| file | what |
+|---|---|
+| `mopm.toml` | the mopm manifest: name, version, the Mojo version, the dependencies and where the library and its tests are |
+| `mopm.lock` | the toolchain pins and the path dependencies (no registry is reached: every dependency is a sibling) |
+| `mopm-toolchain.toml` | the exact mopm and Mojo versions the build uses |
+| `coverage_floor.txt` | `lines NN.NN` and `branches NN.NN`: the least line and branch coverage `:coverage` may measure; `:coverage_floor` fails when either falls below, and above it passes and prints a hint to raise the figure |
+| `buildrules.mojo.lock.bzl`, `buildrules.mojo.bzl` | written by `buildrules mojo sync` from the files above and from the manifests of the dependencies; `buildrules mojo check` fails when they are stale |
+
+`:lib` is the library file and exists only once every test of `tests/` has passed. After any change to a source, a test, or a manifest of this package or of a dependency, run `buildrules mojo sync`, commit what it writes, and build `komira//src/komira_calendar:lib` on the farm. A test file that the sync has not listed is not run: run the sync after adding one.
+
+`:conda` is buildrules' `mojo_conda` over `:lib`: the `.conda` of the mopm package (`mojo-komira_calendar-0.1.0-mojo1.0.0_0.conda`), which therefore exists only once the tests have passed. Publishing it (`mopm publish`) uploads, so it is a step of a CI job that takes that file, not a build action.
+
+`:komira_calendar` is `:lib` as komira's Mojo rules take it (`mojo_adopted_library`). Its `deps` are the adopted target of each package in `[dependencies]`, and the rule refuses a list that is not the closure `:lib` was built from. It also compiles and runs the README's examples above (`[tests][readme]`) against `:lib`; the tests are not run again.

@@ -998,7 +998,7 @@ HEAD:refs/heads/MAIN`); it must be refused.
   workflow file it runs under as it was committed (`GITHUB_WORKFLOW_REF`'s
   path at `GITHUB_WORKFLOW_SHA`, through `git show`) and holds it to the
   machine file and every channels file it names (rules R1-R12 and R14-R22 of
-  `src/kci_workflow_check/rules.mojo` and `auto_promotion.mojo`: a job per stage named for it, each job's
+  `src/kci_workflow_check/src/kci_workflow_check/rules.mojo` and `auto_promotion.mojo`: a job per stage named for it, each job's
   environment its stage's, `needs` the jobs that run the stage's `after`,
   `id-token: write` only where a stage publishes by trusted publishing or is
   farm-connected, one `kci run` per job with `--summary-file`, `--only` only
@@ -1158,7 +1158,7 @@ HEAD:refs/heads/MAIN`); it must be refused.
 ### The workflow subset kci reads
 
 kci holds a workflow to the machine file by reading it with its own reader
-(`src/kci_workflow_check/workflow_reader.mojo`), which accepts a strict subset of
+(`src/kci_workflow_check/src/kci_workflow_check/workflow_reader.mojo`), which accepts a strict subset of
 YAML and nothing else. Inside the subset every value it reads is exactly the
 value YAML, and so GitHub, reads. A line outside it is "cannot tell" (exit 5
 at start-up, a red welded test), naming the line: never read, never guessed

@@ -74,7 +74,7 @@ whose rules `kci run` applies to the workflow it runs under (item 7).
    only the released libraries, so its duration and farm cost need a
    measurement and a note of their own before it joins that job.
 7. For any new job: amendments to the workflow rules of
-   `src/kci_workflow_check/rules.mojo`, which `kci run` checks at start-up
+   `src/kci_workflow_check/src/kci_workflow_check/rules.mojo`, which `kci run` checks at start-up
    against the workflow it runs under (`check_running_workflow`), so a job
    the rules refuse cannot run kci at all. Today:
    - **R1**: every job is either the job named after a stage or a part job
@@ -102,7 +102,7 @@ whose rules `kci run` applies to the workflow it runs under (item 7).
    run` holds any workflow other than the pull request's check to the
    release workflow's rules, and R1 then refuses a file without every
    stage's job. Every such job also carries R19's set hash and R20's `the
-   prod line` (`src/kci_workflow_check/auto_promotion.mojo`). The
+   prod line` (`src/kci_workflow_check/src/kci_workflow_check/auto_promotion.mojo`). The
    amendments, or a ruling that the job does not run `kci run` and how it
    is then gated, come before any of these jobs.
 8. For installed native code: the install checks of
@@ -184,7 +184,7 @@ Each is a question with a recommendation; none is decided by this document.
    a trust naming either would hand cloud access to the publish job.
    *Accepting this accepts item 7:* a job with its own environment and an
    identity token that does not block prod is refused today by the workflow
-   rules R2, R3, R4 and R9 (`src/kci_workflow_check/rules.mojo`), and the
+   rules R2, R3, R4 and R9 (`src/kci_workflow_check/src/kci_workflow_check/rules.mojo`), and the
    rules gate the publish jobs' token; the amendment needs its own ruling.
    It also accepts item 5's two new paths: a short-lived cloud credential
    reaching the program under test (relaxing
