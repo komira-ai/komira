@@ -121,7 +121,17 @@ machine its actions need: the linux toolchains state
 [`defs.bzl`](defs.bzl)). That statement binds every target using the
 toolchain, and it is the only thing any rule says about where an action
 runs. Targets that only unpack or copy files, including the macOS
-toolchain's files, state `LINUX_X86_64` themselves: they run linux tools.
+toolchain's files, and the build tools (zig, the launchers, the lints), state
+`TOOL_EXEC` themselves: the platform the build tools run on. It is
+`LINUX_X86_64`, except for a build that runs every action on a Mac
+(`[komira] execution = local` on a macOS arm64 client, whose only execution
+platform is `darwin-arm64`), where it is `DARWIN_ARM64`: `:busybox` is then
+[`busybox.sh`](../mojo/darwin/busybox.sh), `:zig`, `:zig_next` and the linters
+are the darwin-arm64 row's pins, and `zig_exe`, `zig_test` and
+`zig_bootstrap_exe` default their `target` to that row's `unpack_triple`.
+With remote execution (whatever the client's own platform) `TOOL_EXEC` is
+`LINUX_X86_64`, so no action key changes. Linux-only products (kcov, the LLVM
+branch-coverage tools, the Linux Mojo compiler) state `LINUX_X86_64`.
 
 ## Execution platforms
 

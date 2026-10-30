@@ -28,8 +28,11 @@ selects the macOS graph and this platform.)
 
 def _impl(ctx):
     base = ctx.attrs.base[ExecutionPlatformRegistrationInfo].platforms
-    if len(base) == 0 or not str(base[0].label).endswith("platforms:linux-x86_64"):
-        fail("{}: the first platform of {} must be komira's linux-x86_64, got {}".format(
+    # Komira's linux-x86_64 comes first; the one exception is a local build on a Mac
+    # (`komira_local_execution_platforms`), whose only platform is darwin-arm64.
+    only_mac = len(base) == 1 and str(base[0].label).endswith("platforms:darwin-arm64")
+    if len(base) == 0 or not (only_mac or str(base[0].label).endswith("platforms:linux-x86_64")):
+        fail("{}: the first platform of {} must be komira's linux-x86_64 (or, alone, a local macOS build's darwin-arm64), got {}".format(
             ctx.label,
             ctx.attrs.base.label,
             [str(p.label) for p in base],

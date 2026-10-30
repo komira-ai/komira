@@ -1,6 +1,6 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_test")
-load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
+load("@komira//tools/build/platforms:defs.bzl", "TOOL_EXEC")
 load("@komira//tools/build/platforms:table.bzl", "row")
 
 # Built with zig 0.15.2 (`:zig_next`); the executables are built behind the check
@@ -29,7 +29,7 @@ _SRCS = glob(["*.zig"])
 # test` of main.zig, run as a build action.
 zig_test(
     name = "readme_examples_unit",
-    exec_compatible_with = LINUX_X86_64,
+    exec_compatible_with = TOOL_EXEC,
     imports = _SRCS,
     src = "main.zig",
     deps = ["//tools/build/markdown:markdown"],
@@ -50,7 +50,7 @@ zig_test(
 # another os than its action (tools/build/mojo/readme.bzl, ZigExeInfo).
 zig_exe(
     name = "tool",
-    exec_compatible_with = LINUX_X86_64,
+    exec_compatible_with = TOOL_EXEC,
     imports = _SRCS,
     src = "main.zig",
     target = select({
