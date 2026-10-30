@@ -1,16 +1,39 @@
-load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
+load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64", "TOOL_EXEC", "tool_exec_name")
 load("@komira//tools/build/platforms:table.bzl", "by_target_os", "pinned_kwargs", "release_version", "row", "zig_strip_prefix")
 load("@komira//tools/build/package:defs.bzl", "oci_base")
 load("@komira//tools/build/mojo:download.bzl", "pinned_file")
 load("@komira//tools/build/mojo:toolchain.bzl", "conda_closure", "mojo_runtime", "zig_dist", "zig_exe", "zig_test")
 load(":pixi.bzl", "pixi_pin_record", "pixi_version_check")
 
-# ---- Pinned inputs (linux x86_64 execution platform) -----------------------
+# ---- Pinned inputs ---------------------------------------------------------
 # Each is a row pin of the platform table (tools/build/platforms/table.bzl):
 # the URL and sha256 are stated there, once, with every other platform's.
 
-# Static busybox: `sh` and the file utilities every action uses.
-pinned_file(**pinned_kwargs("linux-x86_64", "busybox", visibility = ["PUBLIC"]))
+# The row the build tools run on (platforms/defs.bzl, `tool_exec_name`):
+# linux-x86_64 on the farm and on any Linux client, darwin-arm64 for a build
+# that runs every action on a Mac. `:busybox`, `:zig` and `:zig_next` are that
+# row's tools.
+_TOOL_ROW = tool_exec_name()
+
+# `sh` and the file utilities every action uses: the static busybox on linux
+# x86_64; macOS has none, so a build whose tools run on a Mac uses the shim over
+# the operating system's /bin and /usr/bin (mojo/darwin/busybox.sh, the same
+# calling convention and the applets of the darwin-arm64 row).
+[
+    pinned_file(**pinned_kwargs("linux-x86_64", "busybox", visibility = ["PUBLIC"]))
+    for _ in [0]
+    if _TOOL_ROW == "linux-x86_64"
+]
+
+[
+    alias(
+        name = "busybox",
+        actual = "komira//tools/build/mojo/darwin:busybox.sh",
+        visibility = ["PUBLIC"],
+    )
+    for _ in [0]
+    if _TOOL_ROW != "linux-x86_64"
+]
 
 # zig: the C link driver for `mojo build`, and the compiler for conda_unpack.
 pinned_file(**pinned_kwargs("linux-x86_64", "zig"))
@@ -19,6 +42,12 @@ pinned_file(**pinned_kwargs("linux-x86_64", "zig"))
 # names it as its `zig` (kpin does). Nothing else consumes it yet, so no action
 # key of any other target depends on it.
 pinned_file(**pinned_kwargs("linux-x86_64", "zig_next"))
+
+# The macOS arm64 zig archives, unpacked by `:zig` and `:zig_next` when the
+# build tools run on a Mac.
+pinned_file(**pinned_kwargs("darwin-arm64", "zig"))
+
+pinned_file(**pinned_kwargs("darwin-arm64", "zig_next"))
 
 # The Mojo compiler package.
 pinned_file(**pinned_kwargs("linux-x86_64", "mojo_compiler"))
@@ -64,7 +93,7 @@ pixi_pin_record(
 # The macOS pin is checked by its sha256 only: no linux worker can run it.
 zig_test(
     name = "version_check_unit",
-    exec_compatible_with = LINUX_X86_64,
+    exec_compatible_with = TOOL_EXEC,
     imports = ["version_check.zig"],
     src = "version_check_test.zig",
     busybox = ":busybox",
@@ -73,7 +102,7 @@ zig_test(
 
 zig_exe(
     name = "version_check",
-    exec_compatible_with = LINUX_X86_64,
+    exec_compatible_with = TOOL_EXEC,
     src = "version_check.zig",
     unit_tests = [":version_check_unit", ":zig_next_version"],
     busybox = ":busybox",
@@ -98,26 +127,28 @@ oci_base(
 
 # ---- Unpacked by remote actions ---------------------------------------------
 
-# Unpacking and copying run linux x86_64 binaries, so they state the linux
-# execution platform's constraints. A toolchain's `exec_compatible_with`
+# Unpacking and copying run the build tools (linux x86_64 binaries; the macOS
+# arm64 ones when every action runs on a Mac), so they state the constraints of
+# the execution platform of the tools, TOOL_EXEC. The Linux Mojo compiler and
+# its runtime below are linux x86_64 products and state the linux ones. A toolchain's `exec_compatible_with`
 # binds every target that uses it, so each Mojo target builds on the
 # execution platform of the OS its toolchain states.
 
 zig_dist(
     name = "zig",
-    exec_compatible_with = LINUX_X86_64,
-    archive = ":zig_linux_x86_64.tar.xz",
+    exec_compatible_with = TOOL_EXEC,
+    archive = ":" + pinned_kwargs(_TOOL_ROW, "zig")["name"],
     busybox = ":busybox",
-    strip_prefix = zig_strip_prefix("linux-x86_64"),
+    strip_prefix = zig_strip_prefix(_TOOL_ROW),
     visibility = ["PUBLIC"],
 )
 
 zig_dist(
     name = "zig_next",
-    exec_compatible_with = LINUX_X86_64,
-    archive = ":zig_next_linux_x86_64.tar.xz",
+    exec_compatible_with = TOOL_EXEC,
+    archive = ":" + pinned_kwargs(_TOOL_ROW, "zig_next")["name"],
     busybox = ":busybox",
-    strip_prefix = zig_strip_prefix("linux-x86_64", "zig_next"),
+    strip_prefix = zig_strip_prefix(_TOOL_ROW, "zig_next"),
     visibility = ["PUBLIC"],
 )
 
@@ -127,7 +158,7 @@ zig_dist(
 # exists unless the pin is the release it names.
 zig_test(
     name = "zig_next_version",
-    exec_compatible_with = LINUX_X86_64,
+    exec_compatible_with = TOOL_EXEC,
     env_tools = {"ZIG_NEXT": ":zig_next"},
     src = "zig_next_version_test.zig",
     busybox = ":busybox",
@@ -137,7 +168,7 @@ zig_test(
 
 zig_exe(
     name = "conda_unpack",
-    exec_compatible_with = LINUX_X86_64,
+    exec_compatible_with = TOOL_EXEC,
     src = "komira//tools/build/mojo:conda_unpack.zig",
     busybox = ":busybox",
     zig = ":zig_next",
@@ -197,7 +228,7 @@ config_setting(
 # refuses.
 zig_exe(
     name = "zig_cc_launcher",
-    exec_compatible_with = LINUX_X86_64,
+    exec_compatible_with = TOOL_EXEC,
     src = "komira//tools/build/mojo:zig_cc_launcher.zig",
     busybox = ":busybox",
     zig = ":zig_next",

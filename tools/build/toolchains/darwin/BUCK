@@ -1,4 +1,4 @@
-load("@komira//tools/build/platforms:defs.bzl", "DARWIN_ARM64", "LINUX_X86_64", "darwin_macos_hosts")
+load("@komira//tools/build/platforms:defs.bzl", "DARWIN_ARM64", "TOOL_EXEC", "darwin_macos_hosts")
 load("@komira//tools/build/platforms:table.bzl", "os_floor_version", "pinned_kwargs", "row")
 load("@komira//tools/build/mojo:darwin.bzl", "mojo_darwin_toolchain")
 load("@komira//tools/build/mojo:download.bzl", "pinned_file")
@@ -24,15 +24,16 @@ pinned_file(**pinned_kwargs("darwin-arm64", "liblz4"))
 
 # ---- Unpacked by linux actions ------------------------------------------------
 
-# Unpacking moves bytes only, so it runs on the linux execution platform,
-# with the same static unpacker as the linux toolchain. bin/lld is not kept: links
+# Unpacking moves bytes only, so it runs on the execution platform of the build
+# tools (TOOL_EXEC: linux x86_64 on the farm, the Mac itself when every action
+# runs on one), with the same unpacker as the linux toolchain. bin/lld is not kept: links
 # go through the cc on PATH (the compile wrapper's `cc` mode, the host's
 # cc and ld), as they do on linux, although modular.cfg names bin/lld in
 # `lld_path`. Measured on the macOS workers (2026-09-29): a cc that exits 7
 # fails the link of //tools/build/examples:hello.
 conda_closure(
     name = "mojo_compiler",
-    exec_compatible_with = LINUX_X86_64,
+    exec_compatible_with = TOOL_EXEC,
     target_compatible_with = DARWIN_ARM64,  # komira-limit:darwin-mojo-compiler
     libs = {
         "lib/liblz4.dylib": ":" + pinned_kwargs("darwin-arm64", "liblz4")["name"],
@@ -48,7 +49,7 @@ conda_closure(
 # every .dylib of the closure's lib/ (functional/darwin/check.sh).
 mojo_runtime(
     name = "mojo_runtime",
-    exec_compatible_with = LINUX_X86_64,
+    exec_compatible_with = TOOL_EXEC,
     busybox = "komira//tools/build/toolchains:busybox",
     compiler = ":mojo_compiler",
     target_compatible_with = DARWIN_ARM64,  # komira-limit:darwin-mojo-runtime

@@ -412,3 +412,28 @@ def komira_default_execution_platforms(name, visibility = None):
 # Each rule and macro a BUCK file calls declares its package's doc_tree
 # (tools/build/lint/doc_tree.bzl), so no BUCK file names one.
 komira_default_execution_platforms = declares_docs(komira_default_execution_platforms)
+
+def tool_exec_name():
+    """The row the build tools (the unpackers, zig, the wrappers, the lints) run on: `linux-x86_64`, except `darwin-arm64` for a build that runs every action on a Mac.
+
+    That is `execution_mode()` local on a macOS arm64 client, whose one
+    execution platform is darwin-arm64 (`komira_local_execution_platforms`),
+    so nothing could be placed on linux-x86_64 there. With a remote-execution
+    service (whatever the client's own platform), or on a Linux client, it is
+    `linux-x86_64`, which is what every tool states today: the actions, their
+    configuration and their keys are unchanged.
+    """
+    if execution_mode() == "local" and host_row(host_info()) == "darwin-arm64":
+        return "darwin-arm64"
+    return "linux-x86_64"
+
+# The constraints of the execution platform the build tools run on, for the
+# `exec_compatible_with` of a target whose actions run a tool the build itself
+# produces or unpacks (see `tool_exec_name`). A target whose binary is a Linux
+# product (kcov, the LLVM branch-coverage tools, the tests of Linux-only
+# behaviour) states LINUX_X86_64 instead.
+TOOL_EXEC = constraints(tool_exec_name())
+
+def tool_unpack_triple():
+    """The zig target of a tool that runs on `TOOL_EXEC` (`x86_64-linux-musl`, or `aarch64-macos` for a local build on a Mac)."""
+    return row(tool_exec_name())["unpack_triple"]
