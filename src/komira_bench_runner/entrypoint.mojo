@@ -2,9 +2,10 @@
 # query of one suite on the pinned DuckDB and the komira arm, writes the
 # results (output.mojo) and prints the report.
 #
-# Today the komira arm is `RefusalArm`: every query is listed as unserved and
-# nothing is timed. The line that builds the arm is the seam: a hand-built plan
-# or `run_sql` replaces it there and nothing else in this file changes.
+# The komira arm is `KomiraArm` (komira_arm.mojo): the query text goes to
+# `run_sql`. A query the engine refuses is listed as unserved and not timed.
+# The line that builds the arm is the seam; `RefusalArm` (arm.mojo) is the arm
+# that refuses everything, kept for tests of the runner.
 #
 # The query text is a file (`--sql-file`), read as it is with the trailing
 # newlines and spaces removed, so the digest in the result is that of the text
@@ -33,9 +34,10 @@ from komira_bench_data import (
 from komira_bench_duckdb import BenchClock, DuckDbSession, ProcessTransport, check_duckdb_file, open_pinned
 from komira_bench_report import DuckDbPin, exit_code, summarize
 
-from .arm import EngineArm, RefusalArm
+from .arm import EngineArm
 from .cache import CacheDropper, NoCacheDropper, ProcDropCaches
 from .flags import RunFlags, parse_flags, usage
+from .komira_arm import KomiraArm
 from .output import format_run, write_run
 from .query import QuerySpec
 from .runner import RunOutput, run_queries
@@ -87,8 +89,8 @@ def _drive[
     lock_sha256: String,
 ) raises -> Int:
     var session = open_pinned(f.duckdb_path, f.duckdb_version, f.max_silence_ms)
-    # The komira arm. Replace this line to plug in an engine.
-    var arm = RefusalArm()
+    # The komira arm. Replace this line to plug in another engine.
+    var arm = KomiraArm()
     var settings = RunSettings(
         f.threads, f.memory_limit_bytes, f.warm_sweeps, f.warm_reps, f.cold_sweeps, f.cold_reps, f.pass_max
     )

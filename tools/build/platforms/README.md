@@ -263,3 +263,33 @@ a macOS Mojo compile may run on; a macOS Mojo target fails analysis without it) 
 directories a macOS test run searches, before `/usr/local/lib:/usr/lib`, for a library it opens by its bare name,
 such as `liblz4`; empty leaves dyld's defaults). In a repository that mounts komira as a cell, the root cell's
 `.buckconfig` names them: `$(config ...)` is read in the cell that holds the line.
+
+### A build that runs every action on a Mac
+
+`[komira] execution = local` on a macOS arm64 client registers `darwin-arm64` as the only execution platform, and
+buildrules' rules need their own platform beside it: `execution_platforms_plus` ([`with_buildrules.bzl`](with_buildrules.bzl))
+adds `buildrules//platforms:macos_aarch64`, which runs on this machine, and does not add
+`buildrules//platforms:linux_x86_64`, whose actions would otherwise run on the Mac under a linux label. With komira's
+linux platform first, buildrules' linux platform is added as before (and buildrules' macOS platform too when macOS workers
+are configured). `extra_platform_kinds` decides this from the registered labels; the load-time cases of
+`tests//functional/darwin` check it.
+
+buildrules has to be told as well, in `.buckconfig.local`:
+
+```ini
+[komira]
+  execution = local
+[buildrules_re]
+  mode = local
+```
+
+`mode` is not passed through from `[komira]`: komira's `auto` is no buildrules mode, so the line is written out. Leave
+`[komira_re] darwin_macos_hosts` empty: komira passes it through to buildrules, and with no host named a local macOS
+compile names the host `local`, which skips the host-identity comparison (the compile runs on the machine that runs
+Buck2). Naming hosts with `mode = local` is the farm's behaviour. `[buildrules_re] local_host` (analysis of another
+machine's placement, never for building) is not passed through.
+
+Unproven: komira has never been built on a Mac. What is checked is the Linux side: Linux action keys, and, with the host
+faked as macOS arm64 and `komira.execution=local`, that configuration (cquery and analysis, no action) picks
+`darwin-arm64` and `macos_aarch64` and no linux node. Nothing here shows that a Mac compiles or tests a komira package;
+the first build on a Mac will meet whatever the machine's /bin, /usr/bin, C driver and SDK do differently.

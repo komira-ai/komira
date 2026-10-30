@@ -46,7 +46,7 @@ from komira_physical_plan.physical_plan import (
     SegmentDescPod,
     SINK_COLLECT,
     SINK_ORIENT_COLUMNAR,
-    SINK_SORT,
+    SINK_TOPN,
     SOURCE_BATCH,
     SOURCE_CONCAT,
     SOURCE_SINK_OUTPUT,
@@ -376,7 +376,7 @@ def test_what_the_builder_does_not_serve_is_refused_by_name() raises:
         _ = run_plan(_one(probe^), builder, dispatch, 1, CancellationToken.new())
 
     var sorted = SegmentDescPod(
-        0, SOURCE_BATCH, SourceSpecPod.batch(handle), Slab[MorselOp](), SINK_SORT,
+        0, SOURCE_BATCH, SourceSpecPod.batch(handle), Slab[MorselOp](), SINK_TOPN,
         KEY_DTYPE_NONE, SINK_ORIENT_COLUMNAR, -1, 0, List[Int](), List[UInt8](),
     )
     with assert_raises(contains="the sink of segment 0 is not served"):

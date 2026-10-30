@@ -58,8 +58,9 @@ passes `ctx.footers` to `bind_statement` and the same cache to
   its life and finds a path by a linear scan under the lock. Design section 5.1
   asks every context cache to be capped; eviction conflicts with one version
   per path, so a cap needs a different shape (a per-query pin is the likely
-  one). `EngineContext` must not hold this cache uncapped for a long-lived
-  session.
+  one). `komira_sdk_exec.EngineContext` takes the per-query pin: `run_sql`
+  replaces the cache with an empty one at the start of each call, so the
+  context holds the files of one query only.
 - **The lock is held across the file read and the parse**, so a lookup waits
   behind another path's slow read.
 - **The identity check is a field comparison** (size, modification time, inode,
