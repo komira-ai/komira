@@ -4,9 +4,18 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # (`run_plan`, `plan_check`, `edge_policy`), the run of one segment on a
 # `ParallelDispatch` (`run_segment`, `segment_task`), the closed variants of the
 # source, operator and sink traits (`source_variant`, `op_variant`,
-# `pipeline_sink`, `unused_members`), the builder seam through which a plan's
-# members are constructed (`segment_builder`) and the fakes that drive the
-# scheduler in tests (`fake_support`, `fake_members`, `fake_builder`).
+# `pipeline_sink`, `unused_members`) and the builder seam through which a plan's
+# members are constructed (`segment_builder`).
+#
+# Two sets of members stand behind that seam. The fakes (`fake_support`,
+# `fake_members`, `fake_builder`, `fake_dispatch`) drive the scheduler in tests.
+# The real members are the sources `source_parquet`, `source_batch` and
+# `source_sink_output`, the operators `op_filter`, `op_project` and `op_limit`,
+# the sinks `sink_collect` and `sink_agg` (the ungrouped aggregation, over
+# `agg_fold` and `agg_output`, drawing memory from `segment_pool`), and
+# `real_builder` that constructs them from a segment descriptor; `plan_harness`
+# writes descriptors and sample data by hand and `tpch_q6` is Q6 as such a plan
+# with a lineitem-shaped table.
 #
 # test_edge_policy_and_ready_set  the edge tag and order key policies, the plan
 #                                 checks and the ready set.
@@ -22,29 +31,86 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # test_run_plan                   segments in dependency order, independent
 #                                 segments, a published output reaching its
 #                                 dependent, a failed segment stopping the rest.
+# test_op_filter                  the filter's selection mask, all-true,
+#                                 all-false and NULL predicates, a second filter
+#                                 over a mask, the refusal of an unscopable
+#                                 predicate.
+# test_op_project_limit           reordered, dropped and computed columns, a
+#                                 projection under a mask; a limit across
+#                                 morsels, shared by workers, at zero, under a
+#                                 mask.
+# test_op_limit_concurrent       the limit's row budget drawn on by several threads at
+#                                 once: disjoint ranges, no lost count.
+# test_sink_collect               the output ordered by morsel position, masks
+#                                 gathered, the output schema of empty input.
+# test_sources                    resident and sink-output sources, the Parquet
+#                                 source built from a spec: projection, glob,
+#                                 pushed filter, morsel size, refusals.
+# test_real_plan                  hand-built plans end to end: scan, filter,
+#                                 project and limit; a segment reading another's
+#                                 output; what the builder refuses.
+# test_real_plan_concurrent       the same plans on threads, run after run, on a
+#                                 runtime stopped and started again.
+# test_segment_pool               the atomic pool and the worker reservations:
+#                                 budget, blocks, give-back, exact grants under
+#                                 contention.
+# test_sink_agg                   SUM, COUNT, COUNT(*), MIN, MAX and AVG over
+#                                 resident batches: NULL, empty input, exact
+#                                 128-bit decimal sums, refusals by name.
+# test_sink_agg_partials          non-empty partials merged: dealing, the merge's
+#                                 overflow refusal, pool return on failure.
+# test_tpch_q6                    Q6 over Parquet, end to end, against an
+#                                 oracle and a hand-computed answer.
+# test_tpch_q6_concurrent         Q6 on threads, run after run.
 mojo_library(
     name = "komira_pipeline_exec",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
         "//src/komira_arrow:komira_arrow",
+        "//src/komira_async:komira_async",
         "//src/komira_async_api:komira_async_api",
         "//src/komira_atomic_alias:komira_atomic_alias",
+        "//src/komira_batch_eval:komira_batch_eval",
+        "//src/komira_buffer:komira_buffer",
         "//src/komira_collections:komira_collections",
+        "//src/komira_column_kernels:komira_column_kernels",
         "//src/komira_exec_types:komira_exec_types",
+        "//src/komira_fs:komira_fs",
         "//src/komira_metrics:komira_metrics",
         "//src/komira_morsel:komira_morsel",
+        "//src/komira_op_sources:komira_op_sources",
+        "//src/komira_operator_api:komira_operator_api",
+        "//src/komira_parquet:komira_parquet",
+        "//src/komira_parquet_scan:komira_parquet_scan",
         "//src/komira_physical_plan:komira_physical_plan",
         "//src/komira_plan_expr:komira_plan_expr",
         "//src/komira_plan_stats:komira_plan_stats",
+        "//src/komira_scalar_arithmetic:komira_scalar_arithmetic",
+        "//src/komira_scan_planning:komira_scan_planning",
         "//src/komira_scan_source:komira_scan_source",
     ],
-    test_deps = ["//src/komira_async:komira_async"],
+    test_deps = [
+        "//src/komira_parquet_writer:komira_parquet_writer",
+        "//tools/build/mojo/runtime_paths:komira_runtime_paths",
+    ],
     test_srcs = [
         "tests/test_edge_policy_and_ready_set.mojo",
+        "tests/test_op_filter.mojo",
+        "tests/test_op_limit_concurrent.mojo",
+        "tests/test_op_project_limit.mojo",
+        "tests/test_real_plan.mojo",
+        "tests/test_real_plan_concurrent.mojo",
         "tests/test_run_plan.mojo",
         "tests/test_run_segment_concurrent.mojo",
         "tests/test_run_segment.mojo",
         "tests/test_run_segment_failures.mojo",
+        "tests/test_segment_pool.mojo",
+        "tests/test_sink_agg.mojo",
+        "tests/test_sink_agg_partials.mojo",
+        "tests/test_sink_collect.mojo",
+        "tests/test_sources.mojo",
+        "tests/test_tpch_q6.mojo",
+        "tests/test_tpch_q6_concurrent.mojo",
         "tests/test_variants.mojo",
     ],
     visibility = ["PUBLIC"],

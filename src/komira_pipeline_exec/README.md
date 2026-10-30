@@ -33,11 +33,82 @@ Import each module by name; the package root exports nothing.
   ORDER_NONE and ORDER_PARTITION_ID are served and ORDER_ROW_RANGE is refused.
 - `published_outputs`: `PublishedOutputs`, the batch each finished segment left.
 - `segment_builder`: the `SegmentBuilder` trait through which a plan's members
-  are constructed from a descriptor.
+  are constructed from a descriptor. `build_source` is given the worker count
+  (a source that sizes per-worker state at construction needs it) and
+  `build_sink` the schema of the source's morsels (a sink that must name its
+  output when no morsel reaches it needs it).
 - `source_variant`, `op_variant`, `pipeline_sink`: the closed variants. Each
   holds one of three member types, fixed where the variant is named, and a tag;
   its trait methods test the tag and call the member. `unused_members` fills
   the slots a list leaves empty with members that refuse to run.
+- `source_parquet`, `source_batch`, `source_sink_output`: the sources of a
+  plan. `build_parquet_source` makes a `komira_parquet_scan` `ParquetSource` on
+  the local file system from the Parquet arm of a `SourceSpecPod`: it refuses a
+  spec that is not total, resolves the projection names through the footer of
+  the first file the path lists (a path may be a file, a directory or a glob),
+  and installs the filter as the decode filter (every conjunct is applied; a row
+  whose predicate is UNKNOWN is dropped) and as the pushed predicate that
+  row-group statistics are checked against. The source borrows the caller's
+  footer cache and expression pool. `BatchSource` serves a copy of a resident
+  batch and `SinkOutputSource` the batch a finished segment published, each as
+  morsels claimed from one shared cursor.
+- `op_filter`, `op_project`, `op_limit`: the operators. A filter evaluates its
+  predicate and records the rows it keeps as the batch's selection mask instead
+  of gathering them; all rows kept leaves no mask, none kept is FILTERED_EMPTY,
+  a batch that arrives with a mask is gathered first, and a predicate whose NULL
+  scope the evaluator cannot derive is refused by name, when the first non-empty
+  batch reaches the filter (a query in which no row arrives is not refused). A projection is
+  `komira_operator_api.MapOp` over expressions registered once and shared by the
+  workers; it honours the mask as that package states. A limit counts the
+  selected rows of every worker against one atomic budget, cuts the morsel that
+  crosses it, and reports FINISHED once it is spent. With several workers which
+  rows survive depends on the claim order; how many does not.
+- `sink_collect`: `CollectSink` keeps each worker's morsels (gathered if masked)
+  in the worker's own slot, orders them at `combine` by (partition id, origin
+  hint) so a scan collects in file order whatever the schedule, and concatenates
+  them. With no row it returns no rows under the schema the segment would have
+  had.
+- `sink_agg`, `agg_fold`, `agg_output`: the ungrouped aggregation sink
+  `(SINK_AGG, KEY_DTYPE_NONE, SINK_ORIENT_COLUMNAR)`: SUM, COUNT, COUNT(*), MIN,
+  MAX and AVG. The aggregate arguments (`AggSinkData.agg_exprs`) are run by each
+  worker as a projection over the morsel, under its selection mask; the state
+  of a worker is one cell per aggregate, a count and one 128-bit integer. The
+  folds are exact integer folds over signed integers, DECIMAL128 (the
+  unscaled value; the scale rides beside it) and, for MIN and MAX, DATE32, so
+  the merge in worker order does not depend on the schedule. No float is
+  folded: a float input is refused by name. SUM over a decimal is a DECIMAL128 of
+  the input's scale in the declared precision, over an integer an INT64; a sum
+  that leaves 128 bits, has more digits than the declared precision, or leaves
+  INT64 is refused rather than wrapped. AVG is a DOUBLE: one conversion of the
+  exact sum (`decimal_to_float64` for a decimal) divided by the count. Over no
+  non-NULL row SUM, MIN, MAX and AVG are NULL and COUNT is zero, in one row of
+  the declared schema. `AggSinkData.presorted` and `estimated_groups` belong to
+  grouped sinks and are ignored.
+- `segment_pool`: `SegmentPool`, an atomic byte count with an optional budget
+  that any number of handles share, and `WorkerReservation`, a worker's plain
+  tally inside the blocks it drew (a grant is a compare-and-swap, so the count
+  never passes the budget and a request that fits is not refused). A
+  reservation returns its blocks when it is dropped. The aggregation sink's
+  state is fixed in size, so it draws once per worker; the pool is the draw
+  point for sinks that grow.
+- `real_builder`: `RealBuilder`, the `SegmentBuilder` over these members. It
+  serves SOURCE_PARQUET, SOURCE_BATCH, SOURCE_SINK_OUTPUT, OP_FILTER,
+  OP_PROJECT, OP_LIMIT and the sinks `(SINK_COLLECT, KEY_DTYPE_NONE,
+  SINK_ORIENT_COLUMNAR)` and `(SINK_AGG, KEY_DTYPE_NONE,
+  SINK_ORIENT_COLUMNAR)`, and refuses every other kind by name. It keeps the
+  resident batches (`add_resident`), the aggregation sink data a descriptor's
+  `sink_param_id` indexes (`add_agg_sink`) and the segment pool
+  (`set_memory_budget`, unbounded until set), shares one set of operator parts among the
+  workers of a segment run, and derives the empty-output schema by running the
+  chain's projections over a batch of no rows. Three origins name the borrows of
+  the Parquet source (the footer cache, the expression pool, an absent dynamic
+  filter).
+- `plan_harness`: segment descriptors for the three sources with an operator
+  chain and a collect sink (`with_agg_sink` turns one into an aggregation),
+  `project_columns`, and a sample table with readers, for plans written by hand.
+- `tpch_q6`: TPC-H Q6 as such a plan (scan, filter, project, SUM into a
+  DECIMAL(38,4)) and a lineitem-shaped table with the types of the real files
+  (DECIMAL(15,2), DATE32) whose first rows sit on every predicate's boundary.
 - `fake_support`, `fake_members`, `fake_builder`, `fake_dispatch`: sources,
   an operator, sinks, a builder and dispatchers that record what the driver does
   in shared counters, and run the workers one after another in an order a test
@@ -54,10 +125,31 @@ that `ParallelDispatch` passes selects the slot, not the worker id, which only
 names the thread that runs the task; a dispatcher may run more tasks than it has
 workers.
 
-The combine order is a property of the sink: it merges its per-worker slots,
-indexed by worker id, in worker id order after every worker has joined. A
+The combine order is a property of the sink. `CollectSink` merges its per-worker
+slots at `combine` into one order by (partition id, origin hint), and morsels
+that tie keep the order of the worker slots (worker id, then arrival within the
+slot); a sink without such a key (the fakes) concatenates the slots in worker id
+order. Either way the order is decided after every worker has joined. A
 memory budget is a property of the sink too: a sink that cannot grow raises, and
 the raise fails the query through the first-error slot.
+
+## Known limits
+
+- **A limit does not stop the other workers' scans.** `LimitOp` reports FINISHED
+  to the worker that sees the budget run out, and `SegmentTask` stops only that
+  worker's claims. A worker whose morsels are all FILTERED_EMPTY by an operator
+  upstream of the limit never reaches it, so it keeps draining the source after
+  the budget is spent. The result stays exact (no morsel past the budget
+  reaches the sink); the scan work is wasted. A pipeline-level stop (a shared
+  "finished" flag in `PipelineExecution` that every worker reads at the morsel
+  boundary, set by the first FINISHED) is the follow-up.
+- **The filter gathers a masked morsel first.** A morsel that reaches `op_filter`
+  with a selection mask is materialized (fully copied) before the predicate is
+  evaluated. Whether a mask-aware evaluation is worth it is for slice 3 to
+  measure.
+- **The collect sink holds every chunk until `take_output`.** Chunks stay in the
+  worker slots, then in the merged list, and `take_output` concatenates them
+  into the output batch, so a segment's peak memory is about twice its output.
 
 ## Example
 

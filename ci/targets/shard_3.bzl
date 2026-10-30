@@ -3,10 +3,15 @@
 # `guard.bxl:check` fails the pull request check when this file is out of date.
 
 TARGETS = [
+    "komira//src/kci_logs:ci",
+    "komira//src/kci_logs:coverage_floor",
+    "komira//src/kci_logs:table",
     "komira//src/kci_pkg_upload:uv_fidelity",
     "komira//src/komira_agg_api:komira_agg_api_conda",
     "komira//src/komira_aws_lambda:komira_aws_lambda_conda",
     "komira//src/komira_aws_secretsmanager:komira_aws_secretsmanager_conda",
+    "komira//src/komira_bench_runner:komira_bench_runner_conda",
+    "komira//src/komira_bench_runner:komira_bench_runner_main",
     "komira//src/komira_broker:komira_broker_conda",
     "komira//src/komira_broker_compaction:komira_broker_compaction_conda",
     "komira//src/komira_broker_coordinator:komira_broker_coordinator_conda",

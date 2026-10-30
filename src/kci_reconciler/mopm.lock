@@ -1,0 +1,112 @@
+{
+  "lock_version": 2,
+  "mojo": [
+    "1.0.0"
+  ],
+  "toolchain": {
+    "1.0.0": {
+      "linux-64": "fd654c4192487587d8f8d9402d060e45e218b79da7b8964503a703710e49b15d",
+      "linux-aarch64": "3e7db5a0f9255c9086d9d29f385e7fd90e8536fa16ffe55414f6bba4e0ef3d3e",
+      "osx-arm64": "dfb1ddbe32564e406967054fbccd4ad643bf01e72532a3eb3add28253908ac5f"
+    }
+  },
+  "channels": [
+    "https://conda.mopm.dev/"
+  ],
+  "packages": [
+    {
+      "name": "komira_atomic_alias",
+      "version": "0.1.0",
+      "source": "path",
+      "path": "../komira_atomic_alias"
+    },
+    {
+      "name": "komira_clock",
+      "version": "0.1.0",
+      "source": "path",
+      "path": "../komira_clock"
+    },
+    {
+      "name": "komira_collections",
+      "version": "0.1.0",
+      "source": "path",
+      "path": "../komira_collections",
+      "deps": [
+        "komira_atomic_alias"
+      ]
+    },
+    {
+      "name": "komira_hash",
+      "version": "0.1.0",
+      "source": "path",
+      "path": "../komira_hash"
+    },
+    {
+      "name": "komira_libc",
+      "version": "0.1.0",
+      "source": "path",
+      "path": "../komira_libc"
+    },
+    {
+      "name": "komira_log",
+      "version": "0.1.0",
+      "source": "path",
+      "path": "../komira_log",
+      "deps": [
+        "komira_atomic_alias",
+        "komira_clock",
+        "komira_collections",
+        "komira_hash",
+        "komira_libc",
+        "komira_metrics",
+        "komira_spsc_ring",
+        "komira_trace"
+      ]
+    },
+    {
+      "name": "komira_metrics",
+      "version": "0.1.0",
+      "source": "path",
+      "path": "../komira_metrics",
+      "deps": [
+        "komira_atomic_alias",
+        "komira_clock",
+        "komira_collections",
+        "komira_hash",
+        "komira_name_registry"
+      ]
+    },
+    {
+      "name": "komira_name_registry",
+      "version": "0.1.0",
+      "source": "path",
+      "path": "../komira_name_registry",
+      "deps": [
+        "komira_hash"
+      ]
+    },
+    {
+      "name": "komira_spsc_ring",
+      "version": "0.1.0",
+      "source": "path",
+      "path": "../komira_spsc_ring",
+      "deps": [
+        "komira_atomic_alias",
+        "komira_collections"
+      ]
+    },
+    {
+      "name": "komira_trace",
+      "version": "0.1.0",
+      "source": "path",
+      "path": "../komira_trace",
+      "deps": [
+        "komira_atomic_alias",
+        "komira_clock",
+        "komira_collections",
+        "komira_name_registry",
+        "komira_spsc_ring"
+      ]
+    }
+  ]
+}
