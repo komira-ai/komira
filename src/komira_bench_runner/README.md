@@ -11,6 +11,8 @@ The program that runs one benchmark query on both engines and writes the result.
 
 It implements these parts of `docs/design/lowering_and_pipeline.md` section 7.4: both engines at the same thread count and memory limit, cold and warm reported separately, results checked before timing under a stated float tolerance, refusals listed. It does not implement the disclosure rule: shortcuts both engines take (a `COUNT(*)` from the footer) and options that cost throughput for reproducibility (grain state) are not marked.
 
+**Derived from TPC-H; not comparable to published TPC-H results.** Where a run reads the `tpch` suite, the console report says so once (`suite tpch-derived: ...`); no number this program writes is a TPC-H result. The suite id in data stays `tpch`. ClickBench query text is not shipped or assumed here: the program takes the query text as a file.
+
 ## The komira arm
 
 `EngineArm` is the whole interface of the engine under test:

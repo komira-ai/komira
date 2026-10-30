@@ -455,6 +455,8 @@ def test_a_matching_answer_is_timed_and_recorded() raises:
     assert_true(sent.find(String("\"lineitem\" AS SELECT * FROM read_parquet('/cache/tpch/sf1/lineitem.parquet')")) >= 0)
     assert_true(format_run(out).find(String("PASS 0/1")) >= 0)
     assert_equal(run_status(out), 0)
+    var header = format_run(out)
+    assert_equal(_count(header, String("derived from TPC-H; not comparable to published TPC-H results")), 1)
 
 
 def test_a_mismatching_answer_is_recorded_wrong_and_never_timed() raises:

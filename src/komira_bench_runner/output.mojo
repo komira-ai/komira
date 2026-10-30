@@ -22,6 +22,7 @@ from .query import QuerySpec
 from .runner import RunOutput
 
 comptime QUERIES_FILE: String = "queries.sha256"
+comptime TPCH_NOTICE: String = "suite tpch-derived: derived from TPC-H; not comparable to published TPC-H results"
 comptime COMPARISON_FILE: String = "comparison.txt"
 
 
@@ -60,6 +61,10 @@ def format_run(run: RunOutput) raises -> String:
         + String(" | memory limit ") + run.fairness.memory_limit_readback
         + String(" | duckdb ") + run.fairness.version + String("\n")
     )
+    for i in range(len(run.queries)):
+        if run.queries[i].suite == "tpch":
+            text += String(TPCH_NOTICE) + String("\n")
+            break
     text += String("float tolerance: relative ") + String(REL_TOL) + String(", absolute floor ") + String(ABS_FLOOR)
     text += String("; integers, text and integer sums exact\n")
     text += String("== warm ==\n") + render_table(run.warm)
