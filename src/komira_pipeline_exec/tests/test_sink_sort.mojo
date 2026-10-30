@@ -112,6 +112,7 @@ def _sorted_ids(
         sink.consume(w, Morsel(table(w * per, per), w, w))
     var out = _finish(sink, workers)
     assert_equal(pool.granted(), 0)
+    _ = sink^
     return int64_column(out, 0)
 
 
@@ -310,19 +311,27 @@ def test_an_input_over_the_sorts_memory_budget_is_refused() raises:
 
 
 def test_the_pool_is_charged_while_rows_are_held_and_repaid() raises:
-    var kept = batch_buffer_bytes(table(0, N))
-    var pool = SegmentPool()
+    # A budget under one block, so every grant is exactly the bytes asked for.
+    var first = table(0, N // 2)
+    var second = table(N // 2, N // 2)
+    var kept = batch_buffer_bytes(first) + batch_buffer_bytes(second)
+    var pool = SegmentPool(10 * kept)
     var data = _data(_keys(X), _flags(False), _flags(False))
     var sink = _sink(data, pool, 2)
-    sink.consume(0, Morsel(table(0, N // 2), 0, 0))
-    sink.consume(1, Morsel(table(N // 2, N // 2), 1, 1))
-    assert_true(pool.granted() >= kept - 64, "rows held are charged")
+    sink.consume(0, Morsel(first^, 0, 0))
+    sink.consume(1, Morsel(second^, 1, 1))
+    assert_equal(pool.granted(), kept)
     var pipeline = PipelineExecution(2, 0)
     sink.combine(pipeline)
-    assert_true(pool.granted() >= 2 * kept - 64, "the sorted copy is charged")
+    # The workers' reservations went back; the concatenation and the sorted
+    # copy are held until the output is taken.
+    assert_equal(pool.granted(), 2 * kept)
     sink.finalize()
     _ = sink.take_output()
     assert_equal(pool.granted(), 0)
+    # The sink is still alive here: the pool was repaid by take_output, not by
+    # the sink going away.
+    _ = sink^
 
 
 def test_a_sink_dropped_with_rows_in_it_repays_the_pool() raises:
