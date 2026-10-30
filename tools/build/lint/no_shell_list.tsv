@@ -26,6 +26,7 @@ use	tools/build/tests/functional/install_gate/defs.bzl	sh_argv	1	exception: inst
 use	tools/build/tests/functional/platform_table/BUCK	sh_script	1	exception: the shell lint of human-run shell scripts; a lint of scripts that only people and CI run, not an action that runs a shell
 use	tools/build/tests/golden/BUCK	sh_script	1	exception: the shell lint of human-run shell scripts; a lint of scripts that only people and CI run, not an action that runs a shell
 use	tools/build/third_party_srcs/BUCK	sh_script	1	exception: the shell lint of human-run shell scripts; a lint of scripts that only people and CI run, not an action that runs a shell
+use	tools/build/toolchains/BUCK	sh_script	1	exception: the darwin busybox shim (mojo/darwin/busybox.sh), an existing script now also the :busybox of a build whose tools run on a Mac (TOOL_EXEC); a Zig replacement of the shim is the follow-up (TEMPORARY: komira-ai/komira#2023)
 use	tools/build/toolchains/darwin/BUCK	sh_script	1	exception: macOS has no static busybox, so the darwin toolchain provides the busybox calling convention through a shell shim (mojo/darwin/busybox.sh)
 use	tools/vendor/googleapis/BUCK	sh_script	1	exception: the shell lint of human-run shell scripts; a lint of scripts that only people and CI run, not an action that runs a shell
 human	.github/ci/	-	-	CI runner scripts of the coverage workflow; run on a hosted runner, never by an action

@@ -13,7 +13,7 @@
 # on), each into its own empty directory under the
 # release directory R (`{release_dir}`: the platform's directory,
 # <--release-dir>/<platform>), with the git-derived stamp S of `kci run
-# --revision-id` (src/kci_artifact/placeholders.mojo):
+# --revision-id` (src/kci_artifact/src/kci_artifact/placeholders.mojo):
 #
 #   buck2 build -c komira.package_stamp=<N> -c komira.package_commit=<C> \
 #     -c komira.package_timestamp_ms=<T> \
@@ -1060,6 +1060,15 @@ artifacts {
 }
 
 artifacts {
+  name: "komira_bench_corpus"
+  build_system: "buck2"
+  args: "//src/komira_bench_corpus:komira_bench_corpus_conda[release]"
+  args: "--out"
+  args: "{out_dir}"
+  targets: "//src/komira_bench_corpus:komira_bench_corpus_conda"
+}
+
+artifacts {
   name: "komira_all"
   build_system: "komira_pack"
   args: "conda-meta"
@@ -1283,6 +1292,8 @@ artifacts {
   args: "{release_dir}/komira_bench_data/manifest.json"
   args: "--member-manifest"
   args: "{release_dir}/komira_bench_report/manifest.json"
+  args: "--member-manifest"
+  args: "{release_dir}/komira_bench_corpus/manifest.json"
   args: "--license"
   args: "Apache-2.0"
   args: "--summary"

@@ -3,7 +3,7 @@
 # comment blocks, line numbers. A tool imports it as `@import("markdown")`
 # by naming `komira//tools/build/markdown:markdown` in its `deps`.
 load("@komira//tools/build/mojo:toolchain.bzl", "zig_module", "zig_test")
-load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
+load("@komira//tools/build/platforms:defs.bzl", "TOOL_EXEC")
 
 # Built with zig 0.15.2 (`:zig_next`); the executables are built behind the check
 # that the pin is that release.
@@ -13,7 +13,7 @@ _ZIG_VERSION = "komira//tools/build/toolchains:zig_next_version"
 # The reader's cases (markdown_test.zig), run by `zig test` as a build action.
 zig_test(
     name = "markdown_unit",
-    exec_compatible_with = LINUX_X86_64,
+    exec_compatible_with = TOOL_EXEC,
     imports = ["markdown.zig"],
     src = "markdown_test.zig",
     busybox = "komira//tools/build/toolchains:busybox",
@@ -33,7 +33,7 @@ zig_module(
 # outside the importer's directory, which zig refuses).
 zig_test(
     name = "importer_unit",
-    exec_compatible_with = LINUX_X86_64,
+    exec_compatible_with = TOOL_EXEC,
     src = "importer/importer_test.zig",
     deps = [":markdown"],
     busybox = "komira//tools/build/toolchains:busybox",

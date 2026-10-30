@@ -4,3 +4,4 @@
 # only for a tree that tests a version. A row whose file is gone is a finding.
 except	tools/build/mopm_migrate/fixtures/komira_collections/hand/mopm-toolchain.toml	mopm_migrate fixture: the hand-written expected output of the run that passed --mopm 0.0.73
 except	tools/build/mopm_migrate/fixtures/komira_resources/hand/mopm-toolchain.toml	mopm_migrate fixture: the hand-written expected output of the run that passed --mopm 0.0.73
+except	tools/build/mopm_migrate/fixtures/komira_bump_arena/hand/mopm-toolchain.toml	mopm_migrate fixture: the hand-written expected output of the run that passed --mopm 0.0.73

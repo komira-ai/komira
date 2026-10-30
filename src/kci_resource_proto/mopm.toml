@@ -1,0 +1,16 @@
+[package]
+name = "kci_resource_proto"
+version = "0.1.0"
+description = "The kci resource catalog (kci.resource.v1) as Mojo structs generated from its .proto files: the primitives and composites an author writes in a deploy step."
+license = "Apache-2.0"
+repository = "https://github.com/komira-ai/komira"
+readme = "README.md"
+mojo = ["1.0.0"]
+
+[dependencies]
+komira_proto_codec = { path = "../komira_proto_codec", version = "0.1" }
+komira_wkt = { path = "../komira_wkt", version = "0.1" }
+
+[targets]
+lib = { path = "generated/kci_resource_proto_generated" }
+tests = ["tests"]

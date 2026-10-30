@@ -20,9 +20,12 @@ from komira_plan_expr.expr import (
 from komira_plan_expr.scalar_value import ScalarValue
 from komira_plan_ir.logical_plan import AggExprArray
 from komira_plan_ir.plan_helpers import _expr_fingerprint
+from komira_sql.sql_bind_interval import (
+    INTERVAL_STANDALONE_REFUSAL, interval_date_fold, interval_operand_side,
+)
 from komira_sql.sql_ast import (
     SXAGG_COUNT, SXLIKE_ILIKE, SXOP_DIV, SXOP_IDIV, SXOP_MOD, SXUN_NEGATE, SX_AGG,
-    SX_BINARY, SX_BOOL, SX_CALL, SX_COLUMN, SX_DATE, SX_FLOAT, SX_INT, SX_LIKE, SX_NULL,
+    SX_BINARY, SX_INTERVAL, SX_BOOL, SX_CALL, SX_COLUMN, SX_DATE, SX_FLOAT, SX_INT, SX_LIKE, SX_NULL,
     SX_STAR, SX_STRING, SX_TIMESTAMP, SX_UNARY, SqlExpr, TSLIT_AWARE,
     sql_call_is_aggregate,
 )
@@ -538,7 +541,14 @@ def _extract_and_bind_post_agg(
         )
     if sx.tag == SX_NULL:
         raise Error(_BARE_NULL_REFUSAL)
+    if sx.tag == SX_INTERVAL:
+        raise Error(INTERVAL_STANDALONE_REFUSAL)
     if sx.tag == SX_BINARY:
+        var ivl_side = interval_operand_side(sx)
+        if ivl_side == 2:
+            return interval_date_fold(sx, _extract_and_bind_post_agg(sx._binary.value().left[], input_schema, scope, group_names, agg_out_names, agg_exprs, agg_counter, catalog, cte_scope, prebound))
+        if ivl_side == 1:
+            return interval_date_fold(sx, _extract_and_bind_post_agg(sx._binary.value().right[], input_schema, scope, group_names, agg_out_names, agg_exprs, agg_counter, catalog, cte_scope, prebound))
         if _is_null_comparison(sx):
             if sx._binary.value().left[].tag != SX_NULL:
                 return _null_comparison(sx.op, _extract_and_bind_post_agg(

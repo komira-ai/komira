@@ -1,5 +1,5 @@
 load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_test", "zig_test_binary", "zig_test_run")
-load("@komira//tools/build/platforms:defs.bzl", "DARWIN_ARM64", "LINUX_X86_64")
+load("@komira//tools/build/platforms:defs.bzl", "DARWIN_ARM64", "TOOL_EXEC")
 load("@komira//tools/build/platforms:table.bzl", "row")
 
 # Built with zig 0.15.2 (`:zig_next`); the executables are built behind the check
@@ -35,7 +35,7 @@ _TESTS = [
 [
     zig_test(
         name = t,
-        exec_compatible_with = LINUX_X86_64,
+        exec_compatible_with = TOOL_EXEC,
         imports = _SRCS + ["testkit.zig"],
         src = t + ".zig",
         busybox = "komira//tools/build/toolchains:busybox",
@@ -46,7 +46,7 @@ _TESTS = [
 
 zig_exe(
     name = "gate",
-    exec_compatible_with = LINUX_X86_64,
+    exec_compatible_with = TOOL_EXEC,
     imports = _SRCS,
     src = "gate.zig",
     unit_tests = [":" + t for t in _TESTS] + [_ZIG_VERSION],
@@ -72,7 +72,7 @@ _DARWIN_TESTS = [
 [
     zig_test_binary(
         name = t + "_darwin_bin",
-        exec_compatible_with = LINUX_X86_64,
+        exec_compatible_with = TOOL_EXEC,
         target_compatible_with = DARWIN_ARM64,  # komira-limit:darwin-gate-runner
         imports = _SRCS + ["testkit.zig"],
         src = t + ".zig",
@@ -96,7 +96,7 @@ _DARWIN_TESTS = [
 
 zig_exe(
     name = "gate_darwin",
-    exec_compatible_with = LINUX_X86_64,
+    exec_compatible_with = TOOL_EXEC,
     target_compatible_with = DARWIN_ARM64,  # komira-limit:darwin-gate-runner
     imports = _SRCS,
     src = "gate.zig",

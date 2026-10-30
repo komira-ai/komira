@@ -1,0 +1,21 @@
+[package]
+name = "komira_calendar_ics"
+version = "0.1.0"
+description = "Reads iCalendar (RFC 5545) into the calendar model with a report of what was dropped or refused, and writes the model back as iCalendar."
+license = "Apache-2.0"
+repository = "https://github.com/komira-ai/komira"
+readme = "README.md"
+mojo = ["1.0.0"]
+
+[dependencies]
+komira_calendar = { path = "../komira_calendar", version = "0.1" }
+komira_calendar_proto = { path = "../komira_calendar_proto", version = "0.1" }
+komira_content_line = { path = "../komira_content_line", version = "0.1" }
+komira_datetime = { path = "../komira_datetime", version = "0.1" }
+
+[dev-dependencies]
+komira_proto_codec = { path = "../komira_proto_codec", version = "0.1" }
+
+[targets]
+lib = { path = "src/komira_calendar_ics" }
+tests = ["tests"]
