@@ -95,7 +95,9 @@ def count_statement(parquet_path: String) raises -> String:
 
 def extension_status_statement() -> String:
     return (
-        String("SELECT loaded::VARCHAR AS loaded, coalesce(install_path, '') AS install_path")
+        String("SELECT loaded::VARCHAR AS loaded, coalesce(install_mode::VARCHAR, '') AS install_mode,")
+        + String(" coalesce(installed_from, '') AS installed_from,")
+        + String(" coalesce(extension_version, '') AS extension_version")
         + String(" FROM duckdb_extensions() WHERE extension_name = 'tpch'")
     )
 
@@ -165,13 +167,20 @@ struct Generated(Copyable, Movable):
 
     var settings: FairnessSettings
     var extension_loaded: String
+    var extension_version: String
+    var extension_install_mode: String
+    var extension_installed_from: String
     var extension_path: String
+    """The path given to LOAD (DuckDB does not report the path of a loaded file)."""
     var rows: List[Int]
     """The row count of each written file, in manifest order."""
 
     def __init__(out self, var settings: FairnessSettings):
         self.settings = settings^
         self.extension_loaded = String("")
+        self.extension_version = String("")
+        self.extension_install_mode = String("")
+        self.extension_installed_from = String("")
         self.extension_path = String("")
         self.rows = List[Int]()
 
@@ -180,6 +189,39 @@ def _run[T: DuckDbTransport](mut s: DuckDbSession[T], statement: String) raises:
     var t = s.run_timed(statement)
     if not t.ok():
         raise Error(String("duckdb refused `") + statement + String("`: ") + t.error)
+
+
+struct _ExtensionState(Copyable, Movable):
+    var loaded: String
+    var install_mode: String
+    var installed_from: String
+    var version: String
+
+    def __init__(out self, loaded: String, install_mode: String, installed_from: String, version: String):
+        self.loaded = loaded
+        self.install_mode = install_mode
+        self.installed_from = installed_from
+        self.version = version
+
+
+def _extension_state[T: DuckDbTransport](mut s: DuckDbSession[T]) raises -> _ExtensionState:
+    var st = s.fetch(extension_status_statement())
+    if not st.ok() or st.rows.row_count() != 1 or st.rows.column_count() != 4:
+        raise Error("duckdb cannot report the state of the tpch extension")
+    for c in range(4):
+        if st.rows.rows[0][c].kind != KIND_TEXT:
+            raise Error("duckdb reported the state of the tpch extension as something other than text")
+    return _ExtensionState(
+        st.rows.rows[0][0].s.copy(), st.rows.rows[0][1].s.copy(),
+        st.rows.rows[0][2].s.copy(), st.rows.rows[0][3].s.copy(),
+    )
+
+
+def _expected_extension_version(version: String) -> String:
+    """DuckDB reports the extension's version with a leading `v`."""
+    if version.startswith(String("v")):
+        return version.copy()
+    return String("v") + version
 
 
 def _count_rows[T: DuckDbTransport](mut s: DuckDbSession[T], parquet_path: String) raises -> Int:
@@ -210,8 +252,10 @@ def generate_tpch[
     preserved, the tpch extension is loaded from `extension_path`, and each file
     is counted back through `read_parquet` and compared with the manifest's row
     count where it has one. `extension_path` must be the private copy of the
-    pinned extension (stage_extension.mojo) and DuckDB must report that same
-    path as the extension's install path. A non-empty `temp_dir` is DuckDB's
+    pinned extension (stage_extension.mojo). DuckDB does not report the path of
+    a file loaded by path, so the check is on state: tpch is neither loaded nor
+    installed before the LOAD, and loaded at the pinned version with no install
+    source after it. A non-empty `temp_dir` is DuckDB's
     spill directory. "Never replaced" is a check before the first COPY, not an
     exclusive create: COPY overwrites, so another process of the same user that
     creates a file in between can lose it. On any failure DuckDB is stopped
@@ -220,7 +264,8 @@ def generate_tpch[
 
     Raises:
         Error: a file already exists, DuckDB refuses a statement, the tpch
-            extension is not loaded or not from `extension_path`, or a row
+            extension is loaded or installed before the LOAD, or not loaded, of
+            another version or with an install source after it, or a row
             count differs from the manifest.
     """
     if tpch_state(manifest, cache_dir) != TPCH_ABSENT:
@@ -233,19 +278,55 @@ def generate_tpch[
     try:
         if temp_dir.byte_length() > 0:
             _run(s, String("SET temp_directory=") + sql_literal(temp_dir))
-        _run(s, load_statement(extension_path))
-        var st = s.fetch(extension_status_statement())
-        if not st.ok() or st.rows.row_count() != 1 or st.rows.column_count() != 2:
-            raise Error("duckdb cannot report the state of the tpch extension")
-        if st.rows.rows[0][0].kind != KIND_TEXT or st.rows.rows[0][0].s != String("true"):
-            raise Error("the tpch extension is not loaded")
-        out.extension_loaded = st.rows.rows[0][0].s.copy()
-        out.extension_path = st.rows.rows[0][1].s.copy()
-        if out.extension_path != extension_path:
+        # Provenance. DuckDB reports install_path '' (and installed=false,
+        # install_mode NOT_INSTALLED) for an extension LOADed by path, so the
+        # path cannot be read back. What proves the checked file is the one in
+        # use: autoinstall and autoload are off, so before the LOAD tpch must be
+        # neither loaded nor installed (nothing built in, autoloaded or found in
+        # an extension directory can stand in); the LOAD names the checked copy,
+        # whose bytes were checked against the pin; DuckDB itself refuses a file
+        # with altered bytes or another name; and after it tpch must be loaded,
+        # at the pinned version, with no install source.
+        var before = _extension_state(s)
+        if before.loaded != String("false"):
             raise Error(
-                String("the tpch extension was loaded from '") + out.extension_path
-                + String("', not from the checked copy '") + extension_path + String("'")
+                String("the tpch extension is already loaded before LOAD '") + extension_path
+                + String("' (loaded='") + before.loaded + String("', extension_version='") + before.version
+                + String("'): it may not be the checked copy")
             )
+        if before.install_mode != String("NOT_INSTALLED"):
+            raise Error(
+                String("the tpch extension has install_mode '") + before.install_mode
+                + String("' before the load (expected 'NOT_INSTALLED'): a copy is installed that may not be the checked copy")
+            )
+        _run(s, load_statement(extension_path))
+        var after = _extension_state(s)
+        if after.loaded != String("true"):
+            raise Error(
+                String("the tpch extension is not loaded after LOAD '") + extension_path
+                + String("' (loaded='") + after.loaded + String("')")
+            )
+        var want = _expected_extension_version(version)
+        if after.version != want:
+            raise Error(
+                String("the tpch extension reports extension_version '") + after.version
+                + String("', expected '") + want + String("' (loaded from '") + extension_path + String("')")
+            )
+        if after.install_mode != String("NOT_INSTALLED"):
+            raise Error(
+                String("the tpch extension reports install_mode '") + after.install_mode
+                + String("' after the load, expected 'NOT_INSTALLED' for a load by path")
+            )
+        if after.installed_from.byte_length() != 0:
+            raise Error(
+                String("the tpch extension reports installed_from '") + after.installed_from
+                + String("' after the load, expected none for a load by path")
+            )
+        out.extension_loaded = after.loaded.copy()
+        out.extension_version = after.version.copy()
+        out.extension_install_mode = after.install_mode.copy()
+        out.extension_installed_from = after.installed_from.copy()
+        out.extension_path = extension_path.copy()
         _run(s, dbgen_statement(scale_factor))
         var tables = tpch_table_names()
         for i in range(len(manifest.files)):
@@ -278,7 +359,11 @@ def describe_generation(manifest: DatasetManifest, g: Generated) -> String:
     out += String(STAGE_THREADS) + String(" thread, ") + STAGE_COMPRESSION
     out += String(", row groups of ") + String(STAGE_ROW_GROUP_ROWS) + String(" rows\n")
     out += String("duckdb ") + g.settings.version + String(" build ") + g.settings.source_id + "\n"
-    out += String("tpch extension loaded=") + g.extension_loaded + String(" install_path=") + g.extension_path + "\n"
+    out += (
+        String("tpch extension loaded=") + g.extension_loaded + String(" version=") + g.extension_version
+        + String(" install_mode=") + g.extension_install_mode + String(" installed_from='")
+        + g.extension_installed_from + String("' loaded_by_path=") + g.extension_path + "\n"
+    )
     return out^
 
 
