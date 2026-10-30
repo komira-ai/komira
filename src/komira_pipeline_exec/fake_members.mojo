@@ -9,7 +9,7 @@
 
 from komira_arrow.schema import RecordBatch, Schema
 from komira_async_api.token import CancellationToken
-from komira_collections.slab import Slab
+from std.memory import ArcPointer
 from komira_exec_types.exec_result import (
     ExecResult,
     FILTERED_EMPTY,
@@ -289,6 +289,10 @@ struct FakeOp(MorselOperatorImpl):
 
 
 struct _SinkSlot(Movable):
+    # One per worker, each behind its own ArcPointer in a List, so the heap
+    # (`values`) is owned by a typed element the compiler tracks; never put a
+    # heap-holding value in a byte-backed `Slab` and mutate it through
+    # `get_mut_interior`. A worker touches only its own slot.
     var values: List[Int64]
 
     def __init__(out self):
@@ -304,22 +308,22 @@ struct FakeSink(MorselSinkImpl):
 
     var tally: Tally
     var budget_bytes: Int
-    var _slots: Slab[_SinkSlot]
+    var _slots: List[ArcPointer[_SinkSlot]]
     var _merged: List[Int64]
 
     def __init__(out self, var tally: Tally, budget_bytes: Int = -1):
         self.tally = tally^
         self.budget_bytes = budget_bytes
-        self._slots = Slab[_SinkSlot]()
+        self._slots = List[ArcPointer[_SinkSlot]]()
         self._merged = List[Int64]()
 
     def __deinit__(deinit self):
         _ = self.tally.add(SLOT_SINK_DROPS, 1)
 
     def resize_worker_state(mut self, num_workers: Int) -> None:
-        self._slots = Slab[_SinkSlot](capacity=num_workers)
+        self._slots = List[ArcPointer[_SinkSlot]](capacity=num_workers)
         for _ in range(num_workers):
-            self._slots.append(_SinkSlot())
+            self._slots.append(ArcPointer[_SinkSlot](_SinkSlot()))
 
     def consume(self, worker_id: Int, var morsel: Morsel) raises:
         var rows = morsel.num_rows()
@@ -335,7 +339,7 @@ struct FakeSink(MorselSinkImpl):
                     + String(rows * 8)
                     + " bytes"
                 )
-        ref slot = self._slots.get_mut_interior(worker_id)
+        ref slot = self._slots[worker_id][]
         var vals = batch_values(morsel.batch)
         for i in range(len(vals)):
             slot.values.append(vals[i])
@@ -347,7 +351,7 @@ struct FakeSink(MorselSinkImpl):
         var eof = self.tally.get(SLOT_EOF_SEEN)
         _ = self.tally.add(SLOT_EOF_AT_COMBINE, eof)
         for w in range(len(self._slots)):
-            ref slot = self._slots.get_mut_interior(w)
+            ref slot = self._slots[w][]
             for i in range(len(slot.values)):
                 self._merged.append(slot.values[i])
 
@@ -364,24 +368,24 @@ struct FakeCountSink(MorselSinkImpl):
     batch."""
 
     var tally: Tally
-    var _rows: Slab[_SinkSlot]
+    var _rows: List[ArcPointer[_SinkSlot]]
     var _total: Int
 
     def __init__(out self, var tally: Tally):
         self.tally = tally^
-        self._rows = Slab[_SinkSlot]()
+        self._rows = List[ArcPointer[_SinkSlot]]()
         self._total = 0
 
     def __deinit__(deinit self):
         _ = self.tally.add(SLOT_SINK_DROPS, 1)
 
     def resize_worker_state(mut self, num_workers: Int) -> None:
-        self._rows = Slab[_SinkSlot](capacity=num_workers)
+        self._rows = List[ArcPointer[_SinkSlot]](capacity=num_workers)
         for _ in range(num_workers):
-            self._rows.append(_SinkSlot())
+            self._rows.append(ArcPointer[_SinkSlot](_SinkSlot()))
 
     def consume(self, worker_id: Int, var morsel: Morsel) raises:
-        ref slot = self._rows.get_mut_interior(worker_id)
+        ref slot = self._rows[worker_id][]
         slot.values.append(Int64(morsel.num_rows()))
         _ = self.tally.add(SLOT_CONSUMED_MORSELS, 1)
         _ = self.tally.add(SLOT_CONSUMED_ROWS, morsel.num_rows())
@@ -389,7 +393,7 @@ struct FakeCountSink(MorselSinkImpl):
     def combine(mut self, mut pipeline: PipelineExecution) raises -> None:
         _ = self.tally.add(SLOT_COMBINES, 1)
         for w in range(len(self._rows)):
-            ref slot = self._rows.get_mut_interior(w)
+            ref slot = self._rows[w][]
             for i in range(len(slot.values)):
                 self._total += Int(slot.values[i])
 

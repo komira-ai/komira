@@ -27,9 +27,10 @@ from komira_pipeline_exec.fake_builder import (
     FakeScript,
     fake_desc,
 )
-from komira_pipeline_exec.fake_members import OP_FAIL_FROM
+from komira_pipeline_exec.fake_members import OP_CANCEL_AT, OP_FAIL_FROM
 from komira_pipeline_exec.fake_support import (
     SLOT_COMBINES,
+    SLOT_CONSUMED_MORSELS,
     SLOT_CONSUMED_ROWS,
     SLOT_EOF_AT_COMBINE,
     SLOT_EOF_SEEN,
@@ -128,7 +129,40 @@ def test_a_raising_operator_fails_the_segment_on_threads() raises:
         failure = String(e)
     rt.shutdown()
     assert_true("fake operator failed at execute" in failure, failure)
+    # Several workers may raise; only the first error is kept.
+    assert_equal(len(failure.split("fake operator failed")), 2, failure)
     var t = b.tally(0)
+    assert_equal(t.get(SLOT_COMBINES), 0)
+    assert_equal(t.get(SLOT_FINALIZES), 0)
+    assert_equal(t.get(SLOT_TAKES), 0)
+    assert_equal(t.get(SLOT_SINK_DROPS), 1)
+
+
+def test_a_cancel_stops_every_worker_on_threads() raises:
+    var ops = List[FakeOpSpec]()
+    ops.append(FakeOpSpec(OP_CANCEL_AT, 50))
+    var b = FakeBuilder()
+    _ = b.add(
+        FakeScript(FROM_CURSOR, n_morsels=MORSELS, rows=ROWS, ops=ops^)
+    )
+    var published = PublishedOutputs(1)
+    var token = CancellationToken.new()
+    b.cancel_token = Optional[CancellationToken](token.clone())
+    var rt = _started_runtime()
+    var failure = String("")
+    try:
+        ref disp = rt.dispatcher()
+        _ = run_segment(b, disp, fake_desc(0), published, WORKERS, token)
+    except e:
+        failure = String(e)
+    rt.shutdown()
+    assert_true(
+        "the query was cancelled: fake operator cancelled" in failure, failure
+    )
+    var t = b.tally(0)
+    # Workers stop at their next morsel boundary: far fewer than all morsels
+    # reach the sink, and nothing is combined or read.
+    assert_true(t.get(SLOT_CONSUMED_MORSELS) < MORSELS)
     assert_equal(t.get(SLOT_COMBINES), 0)
     assert_equal(t.get(SLOT_FINALIZES), 0)
     assert_equal(t.get(SLOT_TAKES), 0)
@@ -139,4 +173,5 @@ def main() raises:
     var suite = TestSuite()
     suite.test[test_every_row_arrives_once_on_threads]()
     suite.test[test_a_raising_operator_fails_the_segment_on_threads]()
+    suite.test[test_a_cancel_stops_every_worker_on_threads]()
     suite^.run()

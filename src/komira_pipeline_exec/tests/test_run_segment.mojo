@@ -36,7 +36,11 @@ from komira_pipeline_exec.fake_builder import (
     FakeScript,
     fake_desc,
 )
-from komira_pipeline_exec.fake_dispatch import InlineDispatch, ReverseDispatch
+from komira_pipeline_exec.fake_dispatch import (
+    InlineDispatch,
+    OffsetDispatch,
+    ReverseDispatch,
+)
 from komira_pipeline_exec.fake_members import (
     OP_ADD,
     OP_DROP_ODD,
@@ -286,6 +290,33 @@ def test_a_segment_needs_a_worker() raises:
     assert_equal(len(b.built_order), 0)
 
 
+def test_slots_follow_the_task_id_not_the_worker_id() raises:
+    # Worker ids 1000+ and two workers for five tasks: a driver that indexed
+    # its operator chains, sink slots or source cursors by worker id would
+    # read outside them or share one slot between tasks.
+    var d = OffsetDispatch(2, 1000)
+    var b = FakeBuilder()
+    _ = b.add(FakeScript(FROM_PER_WORKER, n_morsels=2, rows=2))
+    var got = _run(d, b, 5)
+    var want = List[Int64]()
+    for w in range(5):
+        for j in range(2):
+            var v = fake_values(w * 100 + j, 2)
+            for i in range(len(v)):
+                want.append(v[i])
+    _expect_values(got, want^)
+    assert_equal(b.tally(0).get(SLOT_EOF_SEEN), 5)
+
+
+def test_more_tasks_than_the_dispatchers_workers() raises:
+    var d = OffsetDispatch(2, 0)
+    var b = FakeBuilder()
+    _ = b.add(FakeScript(FROM_CURSOR, n_morsels=20, rows=3))
+    var got = _run(d, b, 7)
+    _expect_values(got, _keys_values(20, 3))
+    assert_equal(b.tally(0).get(SLOT_EOF_SEEN), 7)
+
+
 def main() raises:
     var suite = TestSuite()
     suite.test[test_every_row_arrives_once_first_to_last]()
@@ -299,4 +330,6 @@ def main() raises:
     suite.test[test_an_empty_source_gives_an_empty_output]()
     suite.test[test_a_per_worker_source_refuses_more_workers_than_it_holds]()
     suite.test[test_a_segment_needs_a_worker]()
+    suite.test[test_slots_follow_the_task_id_not_the_worker_id]()
+    suite.test[test_more_tasks_than_the_dispatchers_workers]()
     suite^.run()
