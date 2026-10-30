@@ -46,6 +46,12 @@
 #   written by the report package reads back to the same text; the files of
 #   a run are where output.mojo says, and the query digests file lists the
 #   sha256 of each query text.
+# - test_a_different_declared_type_is_a_wrong_answer_by_name: DuckDB's INTEGER
+#   against the arm's BIGINT with the same value is recorded wrong, not timed,
+#   and the note names "declared type" and both types; the same value with the
+#   same declared type is timed.
+# - test_only_the_fetch_of_a_query_is_described: each query is described once,
+#   by its fetch, and none of its timed runs is.
 # - test_faults_end_the_run: a DuckDB error on the reference query, a time the
 #   clock cannot resolve, an arm that stops completing after its check, a
 #   query of another dataset, a query listed twice and no queries each raise.
@@ -66,7 +72,9 @@ from komira_bench_duckdb import (
     OrderKey,
     ResultSet,
     StdoutChunk,
+    parse_json_rows,
 )
+from komira_bench_duckdb.cells import KIND_FLOAT, KIND_TEXT
 from komira_bench_duckdb.text import slice_bytes
 from komira_bench_report import (
     DuckDbPin,
@@ -110,12 +118,49 @@ struct Rule(Copyable, Movable):
     var json: String
     var error: String
     var cost: Int
+    var types: String
+    """What DuckDB answers for DESCRIBE of the query, as JSON; empty means the
+    types are worked out from the first row of `json` (see `_describe_of`)."""
 
-    def __init__(out self, needle: String, json: String, error: String, cost: Int):
+    def __init__(out self, needle: String, json: String, error: String, cost: Int, types: String = String("")):
         self.needle = needle
         self.json = json
         self.error = error
         self.cost = cost
+        self.types = types
+
+    def describe(self) -> String:
+        if self.types.byte_length() > 0:
+            return self.types.copy()
+        try:
+            return _describe_of(self.json)
+        except:
+            return String("")
+
+
+def _declared_of_cell(c: Cell) -> String:
+    if c.kind == KIND_FLOAT:
+        return String("DOUBLE")
+    if c.kind == KIND_TEXT:
+        return String("VARCHAR")
+    return String("BIGINT")
+
+
+def _describe_of(json: String) raises -> String:
+    """DuckDB's answer to DESCRIBE of a query whose rows print as `json`: a
+    bare integer is a BIGINT, a bare number with a point a DOUBLE, a quoted
+    text a VARCHAR, a NULL or an empty answer a BIGINT."""
+    var rs = parse_json_rows(json)
+    var out = String("[")
+    for c in range(rs.column_count()):
+        if c > 0:
+            out += String(",\n")
+        var ty = _declared_of_cell(rs.rows[0][c]) if rs.row_count() > 0 else String("BIGINT")
+        out += (
+            String('{"column_name":"') + rs.names[c] + String('","column_type":"') + ty
+            + String('","null":"YES","key":null,"default":null,"extra":null}')
+        )
+    return out + String("]")
 
 
 struct FakeDuckDb(DuckDbTransport):
@@ -151,6 +196,11 @@ struct FakeDuckDb(DuckDbTransport):
     def run_statement(mut self):
         for i in range(len(self.rules)):
             if self.statement.find(self.rules[i].needle) >= 0:
+                if self.statement.startswith(String("DESCRIBE ")):
+                    if self.mode == "json" and self.rules[i].json.byte_length() > 0:
+                        self.emit(self.rules[i].describe() + String("\n"), 0)
+                    self.errors += self.rules[i].error
+                    break
                 if self.mode == "json" and self.rules[i].json.byte_length() > 0:
                     self.emit(self.rules[i].json + String("\n"), 0)
                 self.errors += self.rules[i].error
@@ -326,6 +376,7 @@ struct FakeDropper(CacheDropper):
 def _rows_one(v: Float64) -> ResultSet:
     var rs = ResultSet()
     rs.names.append(String("revenue"))
+    rs.types.append(String("DOUBLE"))
     var r = List[Cell]()
     r.append(Cell.real(v))
     rs.add_row(r^)
@@ -335,6 +386,7 @@ def _rows_one(v: Float64) -> ResultSet:
 def _rows_keys(a: Int64, b: Int64) -> ResultSet:
     var rs = ResultSet()
     rs.names.append(String("k"))
+    rs.types.append(String("BIGINT"))
     var r1 = List[Cell]()
     r1.append(Cell.integer(a))
     rs.add_row(r1^)
@@ -385,6 +437,11 @@ struct Rig(Movable):
         for i in range(len(self.shared[].log)):
             out += self.shared[].log[i] + String("|")
         return out^
+
+
+def _runs(text: String, query: String) -> Int:
+    """How many times `query` was run (its DESCRIBE is not a run)."""
+    return _count(text, query) - _count(text, String("DESCRIBE ") + query)
 
 
 def _count(text: String, needle: String) -> Int:
@@ -450,7 +507,7 @@ def test_a_matching_answer_is_timed_and_recorded() raises:
     assert_true(sent.find(String("SET memory_limit='16KiB'")) >= 0)
     assert_equal(out.fairness.threads_readback, String("4"))
     # one fetch for the answer, six timed runs
-    assert_equal(_count(sent, String("SELECT revenue_q6")), 7)
+    assert_equal(_runs(sent, String("SELECT revenue_q6")), 7)
     assert_equal(_count(sent, String("CREATE OR REPLACE VIEW")), 8)
     assert_true(sent.find(String("\"lineitem\" AS SELECT * FROM read_parquet('/cache/tpch/sf1/lineitem.parquet')")) >= 0)
     assert_true(format_run(out).find(String("PASS 0/1")) >= 0)
@@ -484,7 +541,7 @@ def test_a_mismatching_answer_is_recorded_wrong_and_never_timed() raises:
     assert_true(out.outcomes[0].note.find(String("column 0")) >= 0)
     # the arm ran once (the check) and DuckDB ran the query once (its answer)
     assert_equal(rig.log_text(), String("prepare 8 4 16384|run rows|"))
-    assert_equal(_count(rig.sent_text(), String("SELECT revenue_q6")), 1)
+    assert_equal(_runs(rig.sent_text(), String("SELECT revenue_q6")), 1)
     var report = format_run(out)
     assert_equal(run_status(out), 1)
     assert_true(report.find(String("== failed ==\ntpch/q6  EXEC_FAIL")) >= 0)
@@ -513,8 +570,8 @@ def test_rows_in_the_wrong_order_are_recorded_wrong_and_never_timed() raises:
     assert_false(Bool(out.warm.cells[0].komira))
     assert_equal(out.warm.cells[1].value.text(), String("IDENTICAL"))
     assert_equal(out.warm.cells[1].ratio.value(), 1.5)
-    assert_equal(_count(rig.sent_text(), String("SELECT ordered")), 1)
-    assert_equal(_count(rig.sent_text(), String("SELECT unordered")), 7)
+    assert_equal(_runs(rig.sent_text(), String("SELECT ordered")), 1)
+    assert_equal(_runs(rig.sent_text(), String("SELECT unordered")), 7)
 
 
 def test_a_refusal_is_listed_by_name_and_nothing_is_timed() raises:
@@ -545,8 +602,8 @@ def test_a_refusal_is_listed_by_name_and_nothing_is_timed() raises:
     )
     assert_true(report.find(String("== failed ==\nnone\n")) >= 0)
     assert_true(report.find(String("== cold ==\nnot requested\n")) >= 0)
-    assert_equal(_count(rig.sent_text(), String("SELECT revenue_q6")), 1)
-    assert_equal(_count(rig.sent_text(), String("SELECT revenue_q1")), 1)
+    assert_equal(_runs(rig.sent_text(), String("SELECT revenue_q6")), 1)
+    assert_equal(_runs(rig.sent_text(), String("SELECT revenue_q1")), 1)
     assert_equal(arm.asked, 2)
     # a result of refusals is still a result the report package reads
     var back = parse_result_json(write_result_json(out.warm))
@@ -642,6 +699,7 @@ def test_a_timed_run_that_returns_other_rows_than_the_check_ends_the_run() raise
 def _one_col(name: String, var cells: List[Cell]) -> ResultSet:
     var rs = ResultSet()
     rs.names.append(name)
+    rs.types.append(_declared_of_cell(cells[0]))
     for i in range(len(cells)):
         var r = List[Cell]()
         r.append(cells[i].copy())
@@ -689,7 +747,9 @@ def test_every_kind_of_difference_is_a_wrong_answer() raises:
 
 def test_the_tolerance_is_printed_and_written() raises:
     var rig = Rig()
-    var session = rig.duckdb(List[Rule]())
+    var rules = List[Rule]()
+    rules.append(Rule(String("SELECT 1"), String('[{"v":1}]'), String(""), 2 * _MS))
+    var session = rig.duckdb(rules^)
     var arm = RefusalArm()
     var none = NoCacheDropper()
     var queries = List[QuerySpec]()
@@ -828,6 +888,73 @@ def test_faults_end_the_run() raises:
     twice.append(_q(String("q6"), String("SELECT 2")))
     with assert_raises(contains="listed twice"):
         _ = run_queries(session4, arm4, none, BenchClock.manual(rig4.cell), twice, _inputs(), _settings())
+
+
+def _int_rows(declared: String) -> ResultSet:
+    var rs = _rows_keys(1, 1)
+    rs.types[0] = declared
+    rs.rows.pop()
+    return rs^
+
+
+def test_a_different_declared_type_is_a_wrong_answer_by_name() raises:
+    var rig = Rig()
+    var rules = List[Rule]()
+    var as_integer = String('[{"column_name":"k","column_type":"INTEGER","null":"YES","key":null,"default":null,"extra":null}]')
+    var as_bigint = String('[{"column_name":"k","column_type":"BIGINT","null":"YES","key":null,"default":null,"extra":null}]')
+    rules.append(Rule(String("t_int"), String('[{"k":1}]'), String(""), 2 * _MS, as_integer))
+    rules.append(Rule(String("t_big"), String('[{"k":1}]'), String(""), 2 * _MS, as_bigint))
+    var session = rig.duckdb(rules^)
+    var scripts = List[Script]()
+    scripts.append(Script(String("tpch/a"), ARM_ROWS, String(""), _int_rows(String("BIGINT")), 3 * _MS))
+    scripts.append(Script(String("tpch/b"), ARM_ROWS, String(""), _int_rows(String("BIGINT")), 3 * _MS))
+    var arm = FakeArm(rig.cell, rig.shared, scripts^)
+    var none = NoCacheDropper()
+    var queries = List[QuerySpec]()
+    queries.append(_q(String("a"), String("SELECT t_int")))
+    queries.append(_q(String("b"), String("SELECT t_big")))
+
+    var out = run_queries(session, arm, none, BenchClock.manual(rig.cell), queries, _inputs(), _settings())
+
+    # DuckDB's INTEGER against the arm's BIGINT, the same value: wrong, by name
+    assert_equal(out.warm.cells[0].stage.text(), String("EXEC_FAIL"))
+    assert_equal(out.warm.cells[0].value.text(), String("UNVERIFIED:answer differs from duckdb"))
+    assert_false(Bool(out.warm.cells[0].komira))
+    assert_false(out.outcomes[0].timed)
+    ref note = out.outcomes[0].note
+    assert_true(note.find(String("declared type")) >= 0, note)
+    assert_true(note.find(String("INTEGER")) >= 0, note)
+    assert_true(note.find(String("BIGINT")) >= 0, note)
+    # the same value with the same declared type is timed
+    assert_equal(out.warm.cells[1].value.text(), String("IDENTICAL"))
+    assert_true(out.outcomes[1].timed)
+
+
+def test_only_the_fetch_of_a_query_is_described() raises:
+    var rig = Rig()
+    var rules = List[Rule]()
+    rules.append(Rule(String("revenue_q6"), String('[{"revenue":123.45}]'), String(""), 2 * _MS))
+    rules.append(Rule(String("revenue_q1"), String('[{"revenue":1.0}]'), String(""), 2 * _MS))
+    var session = rig.duckdb(rules^)
+    var scripts = List[Script]()
+    scripts.append(Script(String("tpch/q6"), ARM_ROWS, String(""), _rows_one(123.45), 3 * _MS))
+    scripts.append(Script(String("tpch/q1"), ARM_ROWS, String(""), _rows_one(1.0), 3 * _MS))
+    var arm = FakeArm(rig.cell, rig.shared, scripts^)
+    var none = NoCacheDropper()
+    var queries = List[QuerySpec]()
+    queries.append(_q(String("q6"), String("SELECT revenue_q6")))
+    queries.append(_q(String("q1"), String("SELECT revenue_q1")))
+
+    var out = run_queries(session, arm, none, BenchClock.manual(rig.cell), queries, _inputs(), _settings())
+
+    assert_true(out.outcomes[0].timed and out.outcomes[1].timed)
+    var sent = rig.sent_text()
+    # per query: one fetch and one DESCRIBE, then 2 sweeps of 3 timed reps
+    assert_equal(_runs(sent, String("SELECT revenue_q6")), 7)
+    assert_equal(_runs(sent, String("SELECT revenue_q1")), 7)
+    assert_equal(_count(sent, String("DESCRIBE SELECT revenue_q6")), 1)
+    assert_equal(_count(sent, String("DESCRIBE SELECT revenue_q1")), 1)
+    assert_equal(_count(sent, String("DESCRIBE")), 2)
 
 
 def main() raises:

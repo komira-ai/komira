@@ -28,6 +28,7 @@ load("//src/kci_workflow_check:buildrules.mojo.lock.bzl", kci_workflow_check = "
 load("//src/komira_anomaly:buildrules.mojo.lock.bzl", komira_anomaly = "GRAPH")
 load("//src/komira_async_api:buildrules.mojo.lock.bzl", komira_async_api = "GRAPH")
 load("//src/komira_atomic_alias:buildrules.mojo.lock.bzl", komira_atomic_alias = "GRAPH")
+load("//src/komira_awslc:buildrules.mojo.lock.bzl", komira_awslc = "GRAPH")
 load("//src/komira_bench_report:buildrules.mojo.lock.bzl", komira_bench_report = "GRAPH")
 load("//src/komira_broker_proto:buildrules.mojo.lock.bzl", komira_broker_proto = "GRAPH")
 load("//src/komira_buffer:buildrules.mojo.lock.bzl", komira_buffer = "GRAPH")
@@ -44,6 +45,7 @@ load("//src/komira_contacts_proto:buildrules.mojo.lock.bzl", komira_contacts_pro
 load("//src/komira_content_line:buildrules.mojo.lock.bzl", komira_content_line = "GRAPH")
 load("//src/komira_counters:buildrules.mojo.lock.bzl", komira_counters = "GRAPH")
 load("//src/komira_crm_proto:buildrules.mojo.lock.bzl", komira_crm_proto = "GRAPH")
+load("//src/komira_crypto:buildrules.mojo.lock.bzl", komira_crypto = "GRAPH")
 load("//src/komira_datetime:buildrules.mojo.lock.bzl", komira_datetime = "GRAPH")
 load("//src/komira_dynamic_filter:buildrules.mojo.lock.bzl", komira_dynamic_filter = "GRAPH")
 load("//src/komira_encoding:buildrules.mojo.lock.bzl", komira_encoding = "GRAPH")
@@ -82,6 +84,7 @@ load("//src/komira_test_run_id:buildrules.mojo.lock.bzl", komira_test_run_id = "
 load("//src/komira_test_verdict:buildrules.mojo.lock.bzl", komira_test_verdict = "GRAPH")
 load("//src/komira_textproto:buildrules.mojo.lock.bzl", komira_textproto = "GRAPH")
 load("//src/komira_trace:buildrules.mojo.lock.bzl", komira_trace = "GRAPH")
+load("//src/komira_uuid:buildrules.mojo.lock.bzl", komira_uuid = "GRAPH")
 load("//src/komira_validation_run:buildrules.mojo.lock.bzl", komira_validation_run = "GRAPH")
 load("//src/komira_vcard:buildrules.mojo.lock.bzl", komira_vcard = "GRAPH")
 load("//src/komira_wkt:buildrules.mojo.lock.bzl", komira_wkt = "GRAPH")
@@ -117,6 +120,7 @@ _GRAPHS = {
     "komira_anomaly": komira_anomaly,
     "komira_async_api": komira_async_api,
     "komira_atomic_alias": komira_atomic_alias,
+    "komira_awslc": komira_awslc,
     "komira_bench_report": komira_bench_report,
     "komira_broker_proto": komira_broker_proto,
     "komira_buffer": komira_buffer,
@@ -133,6 +137,7 @@ _GRAPHS = {
     "komira_content_line": komira_content_line,
     "komira_counters": komira_counters,
     "komira_crm_proto": komira_crm_proto,
+    "komira_crypto": komira_crypto,
     "komira_datetime": komira_datetime,
     "komira_dynamic_filter": komira_dynamic_filter,
     "komira_encoding": komira_encoding,
@@ -171,6 +176,7 @@ _GRAPHS = {
     "komira_test_verdict": komira_test_verdict,
     "komira_textproto": komira_textproto,
     "komira_trace": komira_trace,
+    "komira_uuid": komira_uuid,
     "komira_validation_run": komira_validation_run,
     "komira_vcard": komira_vcard,
     "komira_wkt": komira_wkt,

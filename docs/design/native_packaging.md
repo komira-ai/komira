@@ -91,7 +91,8 @@ thread-local storage (async, http_core); async_api, metrics and scan_source had 
 
 | library | native code it owns | artifact | `DT_NEEDED` |
 |---|---|---|---|
-| komira_crypto | aws-lc, prefixed `komira_awslc_`; `komira_crypto_sha256_hw` (the SHA-NI wrapper) | `libkomira_crypto_native.so.1` | glibc |
+| komira_crypto | aws-lc, prefixed `komira_awslc_`; `komira_crypto_sha256_hw` (the SHA-NI wrapper) | `libkomira_crypto_native.so.1`; and, as a mopm package, `libkomira_crypto_sha256_hw.a` (the wrapper), with aws-lc as the archive of `komira_awslc` | glibc |
+| komira_awslc | aws-lc 1.39.0 as a `native_library` (buildrules), every symbol prefixed `komira_awslc_`; the one aws-lc archive of `komira_crypto` and `komira_uuid` | `libawslc.a` (mopm package, static) | none |
 | komira_http_core | s2n-tls, prefixed `komira_s2n_`, built against the prefixed aws-lc | `libkomira_http_core_native.so.1` | `libkomira_crypto_native.so.1` |
 | komira_compression | snappy (C API prefixed `komira_snappy_`; its C++ runtime static and local) | `libkomira_compression_native.so.1` | glibc; opens system codecs (below) |
 | komira_libc / async / async_api / fs | `komira_libc_posix` / `komira_async_posix` / `komira_concurrency_pool_depth` / `komira_fs_posix` | `libkomira_<lib>_native.so.1` | glibc |

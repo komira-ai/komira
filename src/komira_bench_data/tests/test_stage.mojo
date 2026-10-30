@@ -39,8 +39,17 @@
 #   and no directory is made.
 # - test_a_failed_write_leaves_no_private_directory: the directory made for the
 #   copy is removed when the copy cannot be written, and a later run goes ahead.
-# - test_the_loaded_extension_must_be_the_checked_copy: DuckDB reporting another
-#   install path stops the run before dbgen.
+# - test_the_answers_of_the_real_cli_pass: the answers DuckDB 1.5.6 gave for a
+#   LOAD by path (install_path '', install_mode NOT_INSTALLED, version v1.5.6)
+#   are accepted, and the state is read before and after the LOAD.
+# - test_a_tpch_that_is_loaded_before_the_load_is_refused and
+#   test_a_tpch_that_is_installed_before_the_load_is_refused: a tpch that is
+#   loaded or installed before the LOAD could stand in for the checked file.
+# - test_a_tpch_that_is_not_loaded_after_the_load_is_refused,
+#   test_a_tpch_of_another_version_is_refused and
+#   test_a_tpch_with_an_install_source_after_the_load_is_refused: each field that
+#   identifies the source is checked after the LOAD; the run stops before dbgen
+#   and the message says what DuckDB reported.
 # - test_a_complete_dataset_is_refused_too: all eight present, no statement sent.
 # - test_the_spill_directory_is_set_before_anything_runs.
 # - test_duckdb_is_stopped_before_the_files_are_cleaned_up: the stop happens
@@ -122,8 +131,13 @@ struct StageFake(DuckDbTransport):
     var fail_table: String
     var wrong_rows_table: String
     var extension_loaded: String
-    var loaded_path: String
-    var report_path: String
+    """What `loaded` reads after the LOAD statement ("true" when it worked)."""
+    var load_seen: Bool
+    var preloaded: Bool
+    """tpch is already loaded (built in, or autoloaded) before the LOAD."""
+    var install_mode: String
+    var installed_from: String
+    var extension_version: String
     var probe: String
 
     def __init__(
@@ -132,11 +146,15 @@ struct StageFake(DuckDbTransport):
         fail_table: String = String(""),
         wrong_rows_table: String = String(""),
         extension_loaded: String = String("true"),
-        report_path: String = String(""),
         probe: String = String(""),
     ):
-        self.loaded_path = String("")
-        self.report_path = report_path
+        # The defaults are what the real DuckDB 1.5.6 CLI answered for an
+        # extension LOADed by path: not installed, no install path, v1.5.6.
+        self.load_seen = False
+        self.preloaded = False
+        self.install_mode = String("NOT_INSTALLED")
+        self.installed_from = String("")
+        self.extension_version = String("v1.5.6")
         self.probe = probe
         self.sent = sent
         self.queue = List[String]()
@@ -155,15 +173,30 @@ struct StageFake(DuckDbTransport):
     def _run_statement(mut self) raises:
         var s = self.statement
         self.statement = String("")
-        if s.find(String("current_setting('threads')")) >= 0:
+        if s.startswith(String("DESCRIBE ")):
+            # the column types of a fetched query: four texts for the extension
+            # state, one BIGINT for a count
+            if s.find(String("FROM duckdb_extensions()")) >= 0:
+                self._answer(
+                    String('[{"column_name":"loaded","column_type":"VARCHAR"},')
+                    + String('{"column_name":"install_mode","column_type":"VARCHAR"},')
+                    + String('{"column_name":"installed_from","column_type":"VARCHAR"},')
+                    + String('{"column_name":"extension_version","column_type":"VARCHAR"}]')
+                )
+            elif s.find(String("read_parquet(")) >= 0:
+                self._answer(String('[{"column_name":"n","column_type":"BIGINT"}]'))
+        elif s.find(String("current_setting('threads')")) >= 0:
             self._answer(
                 String('[{"threads":1,"memory_limit":"4.0 GiB","version":"v1.5.6",')
                 + String('"source_id":"069cc9f9b5","extra_0":"true"}]')
             )
         elif s.find(String("FROM duckdb_extensions()")) >= 0:
+            var loaded = self.extension_loaded if self.load_seen else (String("true") if self.preloaded else String("false"))
+            var version = self.extension_version if (self.load_seen or self.preloaded) else String("")
             self._answer(
-                String('[{"loaded":"') + self.extension_loaded + String('","install_path":"')
-                + (self.report_path if self.report_path.byte_length() > 0 else self.loaded_path) + String('"}]')
+                String('[{"loaded":"') + loaded + String('","install_mode":"') + self.install_mode
+                + String('","installed_from":"') + self.installed_from
+                + String('","extension_version":"') + version + String('"}]')
             )
         elif s.find(String("read_parquet(")) >= 0:
             var names = tpch_table_names()
@@ -174,7 +207,7 @@ struct StageFake(DuckDbTransport):
                         n += 1
                     self._answer(String('[{"n":') + String(n) + String("}]"))
         elif s.startswith(String("LOAD '")):
-            self.loaded_path = String(s[byte=6:s.find(String("'"), 6)])
+            self.load_seen = True
         elif s.startswith(String("COPY (SELECT * FROM ")):
             var from_at = String("COPY (SELECT * FROM ").byte_length()
             var close = s.find(String(")"), from_at)
@@ -284,6 +317,9 @@ def test_generation_writes_the_manifest_layout() raises:
         assert_equal(Path(d + "/tpch/sf1/" + names[i] + ".parquet").read_text(), _bytes_of(names[i]))
     assert_equal(g.extension_loaded, String("true"))
     assert_equal(g.extension_path, String("/ext/tpch.duckdb_extension"))
+    assert_equal(g.extension_version, String("v1.5.6"))
+    assert_equal(g.extension_install_mode, String("NOT_INSTALLED"))
+    assert_equal(g.extension_installed_from, String(""))
     assert_equal(g.settings.threads_readback, String("1"))
     var text = _sent_text(sent)
     var at_threads = text.find(String("SET threads=1"))
@@ -325,7 +361,11 @@ def test_the_report_prints_the_lines_to_record() raises:
     assert_true(text.startswith(String("komira-bench-stage ") + String(STAGE_VERSION) + String("\n")))
     assert_true(text.find(String("generated here: dbgen sf1, 1 thread, snappy, row groups of 122880 rows\n")) >= 0)
     assert_true(text.find(String("duckdb v1.5.6 build 069cc9f9b5\n")) >= 0)
-    assert_true(text.find(String("tpch extension loaded=true install_path=/ext/tpch.duckdb_extension\n")) >= 0)
+    assert_true(
+        text.find(
+            String("tpch extension loaded=true version=v1.5.6 install_mode=NOT_INSTALLED installed_from='' loaded_by_path=/ext/tpch.duckdb_extension\n")
+        ) >= 0
+    )
     var names = tpch_table_names()
     for i in range(8):
         var line = (
@@ -536,15 +576,81 @@ def test_a_failed_write_leaves_no_private_directory() raises:
     assert_true(exists(again.path))
 
 
-def test_the_loaded_extension_must_be_the_checked_copy() raises:
-    var d = _dir(String("other_path"))
+def _refused(var fake: StageFake, contains: String, name: String) raises:
+    """Run generation over `fake`; it must raise with `contains` before dbgen and leave nothing."""
+    var d = _dir(name)
     var manifest = tpch_manifest(1)
     var sent = ArcPointer[List[String]](List[String]())
-    var s = _session(sent, StageFake(sent, String(""), String(""), String("true"), String("/somewhere/else.duckdb_extension")))
-    with assert_raises(contains="not from the checked copy"):
+    fake.sent = sent
+    var s = _session(sent, fake^)
+    var raised = False
+    var message = String("")
+    try:
         _ = generate_tpch(s, manifest, 1, d, String("/ext/checked"), 4 * _GIB, String(_VERSION))
+    except e:
+        raised = True
+        message = String(e)
+    assert_true(raised, "generation was not refused")
+    assert_true(message.find(contains) >= 0, "refusal was: " + message)
     assert_false(_sent_text(sent).find(String("CALL dbgen")) >= 0)
     assert_equal(tpch_state(manifest, d), TPCH_ABSENT)
+
+
+def test_the_answers_of_the_real_cli_pass() raises:
+    # DuckDB 1.5.6 reports install_path '' for an extension LOADed by path, and
+    # install_mode NOT_INSTALLED; the run goes through on exactly that.
+    var d = _dir(String("real_cli"))
+    var manifest = tpch_manifest(1)
+    var sent = ArcPointer[List[String]](List[String]())
+    var s = _session(sent, StageFake(sent))
+    var g = generate_tpch(s, manifest, 1, d, String("/ext/checked"), 4 * _GIB, String(_VERSION))
+    assert_equal(g.extension_loaded, String("true"))
+    assert_equal(g.extension_version, String("v1.5.6"))
+    assert_equal(len(g.rows), 8)
+    var text = _sent_text(sent)
+    var at_before = text.find(String("FROM duckdb_extensions()"))
+    var at_load = text.find(String("LOAD '/ext/checked'"))
+    var at_after = text.find(String("FROM duckdb_extensions()"), at_load)
+    assert_true(at_before >= 0 and at_before < at_load and at_after > at_load)
+
+
+def test_a_tpch_that_is_loaded_before_the_load_is_refused() raises:
+    var fake = StageFake(ArcPointer[List[String]](List[String]()))
+    fake.preloaded = True
+    _refused(fake^, String("tpch extension is already loaded before"), String("preloaded"))
+
+
+def test_a_tpch_that_is_installed_before_the_load_is_refused() raises:
+    # Reads INSTALLED before the LOAD: an extension directory holds a copy.
+    var fake = StageFake(ArcPointer[List[String]](List[String]()))
+    fake.install_mode = String("REPOSITORY")
+    # the fake reports the same mode before and after; before is checked first
+    _refused(fake^, String("install_mode 'REPOSITORY' before the load"), String("installed_before"))
+
+
+def test_a_tpch_that_is_not_loaded_after_the_load_is_refused() raises:
+    _refused(
+        StageFake(ArcPointer[List[String]](List[String]()), String(""), String(""), String("false")),
+        String("tpch extension is not loaded after LOAD '/ext/checked'"),
+        String("not_loaded_after"),
+    )
+
+
+def test_a_tpch_of_another_version_is_refused() raises:
+    var fake = StageFake(ArcPointer[List[String]](List[String]()))
+    fake.extension_version = String("v1.4.0")
+    _refused(fake^, String("extension_version 'v1.4.0', expected 'v1.5.6'"), String("wrong_version"))
+    var empty = StageFake(ArcPointer[List[String]](List[String]()))
+    empty.extension_version = String("")
+    _refused(empty^, String("extension_version '', expected 'v1.5.6'"), String("empty_version"))
+
+
+def test_a_tpch_with_an_install_source_after_the_load_is_refused() raises:
+    # Not installed before (the fake answers NOT_INSTALLED until the LOAD), but
+    # an install source appears after it: the loaded copy did not come from the path.
+    var fake = StageFake(ArcPointer[List[String]](List[String]()))
+    fake.installed_from = String("http://example.invalid")
+    _refused(fake^, String("installed_from 'http://example.invalid'"), String("installed_from"))
 
 
 def test_a_complete_dataset_is_refused_too() raises:
@@ -578,7 +684,7 @@ def test_duckdb_is_stopped_before_the_files_are_cleaned_up() raises:
     var manifest = tpch_manifest(1)
     var sent = ArcPointer[List[String]](List[String]())
     var probe = d + "/tpch/sf1/region.parquet"
-    var s = _session(sent, StageFake(sent, String("orders"), String(""), String("true"), String(""), probe))
+    var s = _session(sent, StageFake(sent, String("orders"), String(""), String("true"), probe))
     with assert_raises(contains="cannot write orders"):
         _ = generate_tpch(s, manifest, 1, d, String("/ext/e"), 4 * _GIB, String(_VERSION))
     # at the moment DuckDB was stopped the first file was still there; afterwards nothing is

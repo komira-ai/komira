@@ -34,7 +34,9 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
 # - test_stage: the SQL and the files it names, the extension file check, the
 #   whole generation over a fake DuckDB that writes files (layout, refusal to
 #   replace, DuckDB stopped before cleanup, row counts), the report and its
-#   lines, and the pinned extension (production pin, refusal of anything else).
+#   lines, the pinned extension (production pin, refusal of anything else), and
+#   the provenance check (state read before and after the LOAD, each identifying
+#   field refused when it is not what a LOAD by path gives).
 # - test_stage_cli: the flags, the exit status, an extension that is not the
 #   pinned file refused before anything is created or started.
 # - test_no_env_reads: the sources read no environment, hold no raw pointer in a

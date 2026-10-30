@@ -26,6 +26,7 @@ kci_workflow_check
 komira_anomaly
 komira_async_api
 komira_atomic_alias
+komira_awslc
 komira_bench_report
 komira_broker_proto
 komira_buffer
@@ -42,6 +43,7 @@ komira_contacts_proto
 komira_content_line
 komira_counters
 komira_crm_proto
+komira_crypto
 komira_datetime
 komira_dynamic_filter
 komira_encoding
@@ -80,6 +82,7 @@ komira_test_run_id
 komira_test_verdict
 komira_textproto
 komira_trace
+komira_uuid
 komira_validation_run
 komira_vcard
 komira_wkt

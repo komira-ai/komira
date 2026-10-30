@@ -5,8 +5,11 @@
 # NULLs sort after every other value in both directions (DuckDB's default),
 # unless a key says otherwise. Two integers compare as integers (exactly, past
 # 2^53 too); NaN sorts after every number and ties with NaN, as DuckDB sorts it.
+# Exact decimals compare as exact values (an integer among them as its digits);
+# a decimal against a double in one column raises.
 
-from .cells import Cell, KIND_INT, KIND_NULL, KIND_TEXT, ResultSet
+from .cells import Cell, KIND_DECIMAL, KIND_INT, KIND_NULL, KIND_TEXT, ResultSet
+from .decimal_text import compare_decimals
 
 
 struct OrderKey(Copyable, Movable):
@@ -42,7 +45,7 @@ struct OrderVerdict(Copyable, Movable):
 
 def _compare_cells(a: Cell, b: Cell) raises -> Int:
     """-1, 0 or 1 for two non-null cells of one column. Raises for a number
-    against a text."""
+    against a text, or a decimal against a double."""
     if a.kind == KIND_TEXT or b.kind == KIND_TEXT:
         if a.kind != b.kind:
             raise Error("a sort key column holds a number and a text")
@@ -57,6 +60,12 @@ def _compare_cells(a: Cell, b: Cell) raises -> Int:
         if len(x) == len(y):
             return 0
         return -1 if len(x) < len(y) else 1
+    if a.kind == KIND_DECIMAL or b.kind == KIND_DECIMAL:
+        if (a.kind != KIND_DECIMAL and a.kind != KIND_INT) or (b.kind != KIND_DECIMAL and b.kind != KIND_INT):
+            raise Error("a sort key column holds a decimal and a double")
+        var x = a.s if a.kind == KIND_DECIMAL else String(a.i)
+        var y = b.s if b.kind == KIND_DECIMAL else String(b.i)
+        return compare_decimals(x, y)
     if a.kind == KIND_INT and b.kind == KIND_INT:
         if a.i < b.i:
             return -1

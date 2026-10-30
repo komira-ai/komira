@@ -10,7 +10,12 @@
 # on the stdout pipe. A timed query's duration is the stamp of its end marker
 # minus the stamp of its start marker; DuckDB's own timer is not used. A timed
 # query runs with `.mode trash`, so no result is rendered. A fetched query runs
-# with `.mode json` and its rows come back as a `ResultSet`.
+# with `.mode json` and its rows come back as a `ResultSet`. DuckDB's JSON
+# quotes DECIMAL, HUGEINT, UHUGEINT and UBIGINT values, like a text, so every
+# fetched answer is followed by `DESCRIBE <the same query>` (nothing is
+# rewritten, and a timed query never gets one): the column types it answers
+# with are recorded on the result as declared types (declared_types.mojo) and
+# the quoted values of those columns are read by them.
 #
 # Both arms of a comparison run with the same thread count and the same memory
 # limit (`start` sets and reads back both on the DuckDB side; the other arm is
@@ -27,7 +32,8 @@ from .cells import Cell, KIND_FLOAT, KIND_INT, KIND_TEXT, ResultSet
 from .clock import BenchClock
 from .memory import lower_ascii, parse_size, size_matches
 from .pins import DEFAULT_DUCKDB_VERSION, find_pin, duckdb_pins
-from .rows_json import parse_json_rows
+from .declared_types import duckdb_declared_type
+from .rows_json import EXACT_NONE, exactness_of_type, parse_json_rows
 from .text import slice_bytes
 from .transport import DuckDbTransport, StdoutChunk
 
@@ -268,13 +274,46 @@ struct DuckDbSession[T: DuckDbTransport](Movable):
 
     def fetch(mut self, sql: String) raises -> FetchResult:
         """Run `sql` in JSON mode and parse its rows. A query with no rows
-        comes back with no column names."""
+        comes back with no column names. The column types come from `DESCRIBE`
+        of the same query, sent after every successful fetch, and are recorded
+        on the rows as the declared types of the columns (an answer with no
+        rows has them too). A quoted value in a DECIMAL, HUGEINT, UHUGEINT or
+        UBIGINT column is the number it is (see rows_json.mojo)."""
+        return self._fetch(sql, True)
+
+    def _fetch(mut self, sql: String, typed: Bool) raises -> FetchResult:
         var r = self._run(String("json"), sql)
         var out = FetchResult()
         if r[2].byte_length() > 0:
             out.error = r[2].copy()
             return out^
         out.rows = parse_json_rows(r[1])
+        if not typed:
+            return out^
+        var d = self._run(String("json"), String("DESCRIBE ") + sql)
+        if d[2].byte_length() > 0:
+            out.error = String("duckdb cannot describe the columns of the query: ") + d[2]
+            return out^
+        var described = parse_json_rows(d[1])
+        var at = -1
+        for i in range(len(described.names)):
+            if described.names[i] == "column_type":
+                at = i
+        if at < 0 or (out.rows.column_count() > 0 and described.row_count() != out.rows.column_count()):
+            raise Error("duckdb's DESCRIBE did not give one column_type per column of the answer")
+        var raw = List[String]()
+        var declared = List[String]()
+        var exact = False
+        for i in range(described.row_count()):
+            var t = _as_text(described.rows[i][at])
+            if exactness_of_type(t) != EXACT_NONE:
+                exact = True
+            declared.append(duckdb_declared_type(t))
+            raw.append(t^)
+        if exact and out.rows.column_count() > 0:
+            # the same rows again, now read by their column types
+            out.rows = parse_json_rows(r[1], raw)
+        out.rows.types = declared^
         return out^
 
     def kill(mut self) raises:
@@ -335,7 +374,7 @@ struct DuckDbSession[T: DuckDbTransport](Movable):
         )
         for i in range(len(extra_settings)):
             query += String(", current_setting('") + extra_settings[i][0] + String("')::VARCHAR AS extra_") + String(i)
-        var got = self.fetch(query)
+        var got = self._fetch(query, False)
         if not got.ok():
             raise Error(String("duckdb cannot read its settings back: ") + got.error)
         if got.rows.row_count() != 1 or got.rows.column_count() != 4 + len(extra_settings):

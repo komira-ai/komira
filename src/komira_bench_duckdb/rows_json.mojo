@@ -8,10 +8,37 @@
 # -Infinity (and nan, inf, -inf) are doubles; a quoted one is a text. A number
 # that is not written as JSON writes it (`1.2.3`, `12x`, `1e`) is refused. An
 # empty output (no rows) is an empty result set with no column names.
+#
+# DuckDB's shell QUOTES the values of DECIMAL, HUGEINT, UHUGEINT and UBIGINT
+# columns as it does every non-numeric type, so the JSON alone cannot tell the
+# DECIMAL 123.4567 from the VARCHAR '123.4567'. With the column types (the
+# `column_type` of DuckDB's `DESCRIBE <query>`, one per column) a value of such
+# a column is read as the number it is: a DECIMAL is an exact decimal cell, a
+# HUGEINT, UHUGEINT or UBIGINT is an integer cell when it fits 64 bits and an
+# exact decimal cell (scale 0) beyond. A value of such a column that is not
+# written as an exact number of its type is refused, never kept as a text. The
+# value of any other type stays what it was. Without column types a quoted
+# value is a text.
 
 from std.math import inf, nan
 
 from .cells import Cell, ResultSet
+from .decimal_text import canonical_decimal
+
+comptime EXACT_NONE: Int = 0
+comptime EXACT_DECIMAL: Int = 1
+comptime EXACT_INTEGER: Int = 2
+
+
+def exactness_of_type(column_type: String) -> Int:
+    """How DuckDB's JSON writes a column of type `column_type` (as `DESCRIBE`
+    names it): `EXACT_DECIMAL` for DECIMAL(p,s), `EXACT_INTEGER` for HUGEINT,
+    UHUGEINT and UBIGINT, `EXACT_NONE` for the rest."""
+    if column_type == "HUGEINT" or column_type == "UHUGEINT" or column_type == "UBIGINT":
+        return EXACT_INTEGER
+    if column_type.startswith(String("DECIMAL(")) and column_type.endswith(String(")")):
+        return EXACT_DECIMAL
+    return EXACT_NONE
 
 
 struct _Reader(Movable):
@@ -205,11 +232,44 @@ def _integer_cell(w: String) raises -> Cell:
     return Cell.integer(Int64(mag))
 
 
-def _read_value(mut r: _Reader) raises -> Cell:
+def _fits_int64(canonical: String) -> Bool:
+    """Whether the canonical integer text `canonical` fits an `Int64`."""
+    var b = canonical.as_bytes()
+    var neg = b[0] == UInt8(45)
+    var first = 1 if neg else 0
+    var digits = len(b) - first
+    if digits < 19:
+        return True
+    if digits > 19:
+        return False
+    var limit = String("9223372036854775808") if neg else String("9223372036854775807")
+    var lim = limit.as_bytes()
+    for k in range(19):
+        var d = b[first + k]
+        if d != lim[k]:
+            return d < lim[k]
+    return True
+
+
+def _exact_cell(text: String, exactness: Int) raises -> Cell:
+    """The cell of a value of an exact column written `text`."""
+    var canonical = canonical_decimal(text)
+    if exactness == EXACT_INTEGER:
+        if canonical.find(String(".")) >= 0:
+            raise Error(String("JSON output: a fraction in an integer column: ") + text)
+        if _fits_int64(canonical):
+            return _integer_cell(canonical)
+    return Cell.decimal(canonical)
+
+
+def _read_value(mut r: _Reader, exactness: Int) raises -> Cell:
     r.skip_space()
     var c = r.peek()
     if c == 34:
-        return Cell.text(_read_string(r))
+        var quoted = _read_string(r)
+        if exactness != EXACT_NONE:
+            return _exact_cell(quoted, exactness)
+        return Cell.text(quoted^)
     if c == 91 or c == 123:
         raise Error("JSON output: a list or struct value is not supported")
     var w = _read_word(r)
@@ -221,6 +281,8 @@ def _read_value(mut r: _Reader) raises -> Cell:
         return Cell.integer(Int64(0))
     if w.byte_length() == 0:
         raise Error(String("JSON output: a value is missing at byte ") + String(r.pos))
+    if exactness != EXACT_NONE:
+        return _exact_cell(w, exactness)
     if w == "NaN" or w == "nan":
         return Cell.real(nan[DType.float64]())
     if w == "Infinity" or w == "inf":
@@ -238,9 +300,13 @@ def _read_value(mut r: _Reader) raises -> Cell:
     return Cell.real(atof(w))
 
 
-def parse_json_rows(text: String) raises -> ResultSet:
+def parse_json_rows(
+    text: String, column_types: List[String] = List[String]()
+) raises -> ResultSet:
     """The rows of DuckDB's JSON output. The column names are the keys of the
-    first row; every later row must have the same keys in the same order."""
+    first row; every later row must have the same keys in the same order.
+    `column_types` is empty (a quoted value is a text) or has one DuckDB type
+    name per column (see the top of this file)."""
     var rs = ResultSet()
     var r = _Reader(text)
     r.skip_space()
@@ -266,7 +332,12 @@ def parse_json_rows(text: String) raises -> ResultSet:
                 rs.names.append(key)
             elif col >= len(rs.names) or rs.names[col] != key:
                 raise Error(String("JSON output: row ") + String(rs.row_count()) + String(" has a different column at position ") + String(col))
-            row.append(_read_value(r))
+            var exactness = EXACT_NONE
+            if len(column_types) > 0:
+                if col >= len(column_types):
+                    raise Error(String("JSON output: more columns than the ") + String(len(column_types)) + String(" column types"))
+                exactness = exactness_of_type(column_types[col])
+            row.append(_read_value(r, exactness))
             col += 1
             r.skip_space()
             if r.peek() == 44:
@@ -276,6 +347,8 @@ def parse_json_rows(text: String) raises -> ResultSet:
             break
         if col != len(rs.names):
             raise Error(String("JSON output: row ") + String(rs.row_count()) + String(" has too few columns"))
+        if len(column_types) > 0 and col != len(column_types):
+            raise Error(String("JSON output: ") + String(col) + String(" columns against ") + String(len(column_types)) + String(" column types"))
         rs.add_row(row^)
         first = False
         r.skip_space()

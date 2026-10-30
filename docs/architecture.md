@@ -220,6 +220,7 @@ runs a whole plan yet ([Layers still to come](#layers-still-to-come)).
 
 | module | what it is |
 |---|---|
+| [`komira_awslc`](../src/komira_awslc/) | aws-lc 1.39.0's `libcrypto` as a static archive (linux x86_64 and macOS arm64) built from a sha256-pinned source archive, every global symbol renamed `komira_awslc_X`. No Mojo code beyond a self test; `komira_crypto` and `komira_uuid` link it. |
 | [`komira_crypto`](../src/komira_crypto/) | cryptographic primitives: hashes, MACs, KDFs, AEADs, key agreement, signatures, an entropy source and DRBG, hex / base64 / base32 codecs, and X.509 chain validation. The heavy primitives call AWS-LC's `libcrypto`; the traits, codecs and DER / X.509 layer are Mojo. Design: [crypto and TLS](design/crypto_and_tls.md). |
 | [`komira_group_ratchet`](../src/komira_group_ratchet/) | a Megolm-equivalent end-to-end group ratchet on `komira_crypto`: a sender's outbound session (HMAC-SHA-256 ratchet tree, HKDF key schedule, ChaCha20-Poly1305 seal, Ed25519 signature), an inbound session that ratchets forward only, X25519-sealed key delivery, and rotation on membership change. Every secret is zeroized on drop. |
 | [`komira_uuid`](../src/komira_uuid/) | UUIDv7 (RFC 9562): the `Uuid` value type, a stateless generator and a monotonic one. |

@@ -1,0 +1,26 @@
+[package]
+name = "komira_crypto"
+version = "0.1.0"
+description = "Cryptographic primitives: SHA-1 and SHA-2, BLAKE2b-256, HMAC, HKDF, PBKDF2, AES-GCM, ChaCha20-Poly1305, X25519, Ed25519, ECDSA P-256 and P-384, RSA, a health-tested entropy source and DRBG, and X.509 chain validation, over aws-lc."
+license = "Apache-2.0"
+repository = "https://github.com/komira-ai/komira"
+readme = "README.md"
+mojo = ["1.0.0"]
+
+[dependencies]
+komira_awslc = { path = "../komira_awslc", version = "0.1" }
+komira_encoding = { path = "../komira_encoding", version = "0.1" }
+
+[dev-dependencies]
+# tests/test_awslc_one_copy.mojo builds one unit from komira_crypto and komira_uuid, which share the one aws-lc archive.
+komira_uuid = { path = "../komira_uuid", version = "0.1" }
+
+# The wrapper over aws-lc's SHA-256 block functions (they are hidden in aws-lc's assembly, so Mojo reaches them through these entries). aws-lc itself is komira_awslc's archive.
+[native.komira_crypto_sha256_hw]
+kind = "static"
+srcs = ["native/komira_crypto_sha256_hw.c"]
+needs = ["libawslc.a"]
+
+[targets]
+lib = { path = "src/komira_crypto" }
+tests = ["tests"]

@@ -130,3 +130,37 @@ copy[3] ^= 1
 with assert_raises():
     cipher.open_in_place(nonce, aad, Span(copy))
 ```
+
+## Build files
+
+This package is built with buildrules' `mojo_package` and packaged for mopm as `komira_crypto`, version 0.1.0
+(`mopm.toml`). The library is `src/komira_crypto/` (the Mojo files), its tests are `tests/`. It depends on two
+packages, sibling directories (`[dependencies]` of `mopm.toml`): `komira_awslc` and `komira_encoding`, each as
+`{ path = "../<name>", version = "0.1" }`. `komira_awslc` is aws-lc as a static archive (`libawslc.a`, every symbol
+renamed `komira_awslc_X`) and a program that links this package links that archive once, however many packages
+depend on it (`komira_uuid` is one, and `tests/test_awslc_one_copy.mojo` builds a program from both).
+`komira_uuid` is a dev-dependency of the tests only.
+
+The C this package owns is the wrapper over aws-lc's SHA-256 block functions, `native/komira_crypto_sha256_hw.c`,
+`[native.komira_crypto_sha256_hw]` of `mopm.toml`: `mojo_package` compiles it into
+`libkomira_crypto_sha256_hw.a`, links it, and the archive of `komira_awslc`, into the tests of this package and of
+every package that depends on it, and packs the wrapper into the package under `lib/`. The files that are not
+sources:
+
+| file | what |
+|---|---|
+| `mopm.toml` | the mopm manifest: name, version, the Mojo version, the dependencies, the native library, where the library and its tests are |
+| `mopm.lock` | the toolchain pins and the path dependencies, as `mopm lock` writes them (no registry is reached: every dependency is a sibling) |
+| `mopm-toolchain.toml` | the exact mopm and Mojo versions the build uses (written by hand) |
+| `buildrules.mojo.lock.bzl`, `buildrules.mojo.bzl` | written by `buildrules mojo sync` from the files above and from the manifests of the siblings; `buildrules mojo check` fails when they are stale |
+
+`:lib` is the library file and exists only once every test of `tests/` has passed. After any change to a source, a
+test, the C file or a manifest of this package or of a sibling, run `buildrules mojo sync`, commit what it writes,
+and build `komira//src/komira_crypto:lib` on the farm.
+
+`:conda` is the `.conda` of the mopm package (`mojo-komira_crypto-0.1.0-mojo1.0.0_0.conda`): the `.mojoc` and
+`lib/libkomira_crypto_sha256_hw.a`, with `komira_awslc` and `komira_encoding` as dependencies. `:komira_crypto` is
+`:lib` as komira's Mojo rules take it (`mojo_adopted_library`): a package that lists it in `deps` links the same
+archives. It also compiles and runs the README's examples above (`[tests][readme]`) against `:lib`. The shared
+library `libkomira_crypto_native.so.1` (`:komira_crypto_native`) is the release set's older packaging of the
+same C and of aws-lc.

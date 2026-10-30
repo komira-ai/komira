@@ -1,34 +1,47 @@
 # The komira engine's result batches as the runner's typed rows (`ResultSet`),
 # in the form the comparison against DuckDB reads: the cells that
-# `komira_bench_duckdb.parse_json_rows` makes from DuckDB's JSON output, so the
-# two signatures are built from the same kinds of cell.
+# `komira_bench_duckdb.DuckDbSession.fetch` makes from DuckDB's JSON output, so
+# the two signatures are built from the same kinds of cell.
 #
-# What DuckDB's JSON prints, and so what a cell is here:
+# What DuckDB's JSON prints, and so what a cell is here. DuckDB's shell quotes
+# the values of DECIMAL, HUGEINT, UHUGEINT and UBIGINT columns (and of every type
+# but BIGINT and DOUBLE); the session reads those quoted values by the column
+# types `DESCRIBE` gives, so the cells below are the ones it makes:
 #
-#   engine column          DuckDB JSON          cell
-#   DECIMAL(p, s>0)        123.4567 (unquoted)  real: the double that `atof` reads from the exact decimal text
-#   DECIMAL(p, 0)          123 (unquoted)       integer when it fits 64 bits, else real (as the JSON reader does)
-#   DOUBLE                 1.5                  real
-#   FLOAT                  0.1                  real, from the shortest text of the float (as DuckDB prints it)
-#   TINYINT .. BIGINT      7                    integer
-#   UTINYINT .. UINTEGER   7                    integer
-#   UBIGINT                7                    integer when it fits 63 bits, else real
-#   VARCHAR                "abc" (quoted)       text
-#   DATE                   "1994-01-01"         text, `YYYY-MM-DD`
-#   NULL (any type)        null                 null
+#   engine column          DuckDB JSON            cell
+#   DECIMAL(p, s)          "123.4567" (quoted)    exact decimal, canonical text (any scale, scale 0 included)
+#   DOUBLE                 1.5                    real
+#   FLOAT                  0.1                    real, from the shortest text of the float (as DuckDB prints it)
+#   TINYINT .. BIGINT      7                      integer
+#   UTINYINT .. UINTEGER   7                      integer
+#   UBIGINT                "7" (quoted)           integer when it fits 63 bits, else exact decimal (scale 0)
+#   VARCHAR                "abc" (quoted)         text
+#   DATE                   "1994-01-01"           text, `YYYY-MM-DD`
+#   NULL (any type)        null                   null
 #
-# A DECIMAL is never divided as a float: the unscaled integer is written as
-# exact decimal text (`decimal_to_string`) and read with the same `atof` the
-# JSON reader uses on DuckDB's text of the same value, so equal values give
-# equal doubles bit for bit. A column type this file does not list (a
-# dictionary-encoded string, a timestamp, a boolean, a nested type) is an error
-# whose message starts with `RESULT_TYPE_UNSUPPORTED`; the arm turns that into
-# a refusal, never into a wrong value.
+# The same columns carry a declared type, in the vocabulary of
+# `komira_bench_duckdb.declared_types` (the mapping from Arrow types is the
+# table in the README of komira_bench_duckdb): DECIMAL128(p, s) is
+# DECIMAL(p,s), INT8 .. INT64 are TINYINT, SMALLINT, INTEGER and BIGINT, UINT8
+# .. UINT64 are UTINYINT, USMALLINT, UINTEGER and UBIGINT, FLOAT32 is FLOAT,
+# FLOAT64 is DOUBLE, BOOL is BOOLEAN, STRING and LARGE_STRING are VARCHAR and
+# DATE32 is DATE. An Arrow type outside that list is `UNMAPPED(arrow type N)`.
+# The declared type is not the cell kind: an INT32 and an INT64 column both
+# give integer cells and still differ as INTEGER and BIGINT. All batches of a
+# result must declare the same types.
+#
+# A DECIMAL is never divided as a float and never rounded to a double: the
+# unscaled integer is written as exact decimal text (`decimal_to_string`) and
+# kept as that text, so a sum that differs in its last digit is a different
+# answer. A column type this file does not list (a dictionary-encoded string, a
+# timestamp, a boolean, a nested type) is an error whose message starts with
+# `RESULT_TYPE_UNSUPPORTED`; the arm turns that into a refusal, never into a
+# wrong value.
 
 from komira_arrow.arrow_types import ArrowType
 from komira_arrow.column import Column
 from komira_arrow.schema import RecordBatch
-from komira_bench_duckdb import Cell, ResultSet
+from komira_bench_duckdb import Cell, ResultSet, decimal_type, duckdb_declared_type, unmapped_type
 from komira_buffer.heap_region import HeapRegion
 from komira_scalar_arithmetic.decimal_arith import I128
 from komira_scalar_arithmetic.decimal_cast import decimal_to_string
@@ -38,16 +51,10 @@ comptime RESULT_TYPE_UNSUPPORTED: String = "RESULT_TYPE_UNSUPPORTED"
 
 
 def decimal_cell(v: I128, scale: Int) raises -> Cell:
-    """The cell DuckDB's JSON reader makes for the DECIMAL value `v` with
-    `scale` fractional digits: a real read from the exact decimal text, or, at
-    scale 0, an integer when the value fits 64 bits."""
-    var text = decimal_to_string(v, scale)
-    if scale == 0:
-        var lo = I128(-9223372036854775807) - I128(1)
-        var hi = I128(9223372036854775807)
-        if v >= lo and v <= hi:
-            return Cell.integer(v.cast[DType.int64]())
-    return Cell.real(atof(text))
+    """The cell for the DECIMAL value `v` with `scale` fractional digits: the
+    exact decimal of its text, whatever the scale (DuckDB's JSON quotes every
+    DECIMAL, scale 0 included, and the session reads it as this same cell)."""
+    return Cell.decimal(decimal_to_string(v, scale))
 
 
 def date32_text(days: Int) raises -> String:
@@ -106,7 +113,7 @@ def _append_u64(ref col: Column[HeapRegion], mut rows: List[List[Cell]], base: I
         if v <= limit:
             rows[base + r].append(Cell.integer(Int64(v)))
         else:
-            rows[base + r].append(Cell.real(Float64(v)))
+            rows[base + r].append(Cell.decimal(String(v)))
 
 
 def _append_f64(ref col: Column[HeapRegion], mut rows: List[List[Cell]], base: Int) raises:
@@ -160,6 +167,44 @@ def _append_text(ref col: Column[HeapRegion], mut rows: List[List[Cell]], base: 
             rows[base + r].append(Cell.text(col.utf8_value_at(r)))
 
 
+def arrow_declared_type(ref col: Column[HeapRegion]) -> String:
+    """The declared type of an Arrow column in the shared vocabulary, or the
+    unmapped entry for an Arrow type with no name there."""
+    var t = col.arrow_type
+    if t == ArrowType.DECIMAL128:
+        return decimal_type(col.decimal_precision(), col.decimal_scale())
+    var name = String("")
+    if t == ArrowType.BOOL:
+        name = String("BOOLEAN")
+    elif t == ArrowType.INT8:
+        name = String("TINYINT")
+    elif t == ArrowType.INT16:
+        name = String("SMALLINT")
+    elif t == ArrowType.INT32:
+        name = String("INTEGER")
+    elif t == ArrowType.INT64:
+        name = String("BIGINT")
+    elif t == ArrowType.UINT8:
+        name = String("UTINYINT")
+    elif t == ArrowType.UINT16:
+        name = String("USMALLINT")
+    elif t == ArrowType.UINT32:
+        name = String("UINTEGER")
+    elif t == ArrowType.UINT64:
+        name = String("UBIGINT")
+    elif t == ArrowType.FLOAT32:
+        name = String("FLOAT")
+    elif t == ArrowType.FLOAT64:
+        name = String("DOUBLE")
+    elif t == ArrowType.STRING or t == ArrowType.LARGE_STRING:
+        name = String("VARCHAR")
+    elif t == ArrowType.DATE32:
+        name = String("DATE")
+    else:
+        return unmapped_type(String("arrow type ") + String(t))
+    return duckdb_declared_type(name)
+
+
 def _append_column(ref col: Column[HeapRegion], mut rows: List[List[Cell]], base: Int) raises:
     var t = col.arrow_type
     if t == ArrowType.DECIMAL128:
@@ -203,10 +248,18 @@ def result_set_of(batches: List[RecordBatch]) raises -> ResultSet:
     var width = batches[0].num_columns()
     for c in range(width):
         out.names.append(batches[0].schema.field_name(c))
+        out.types.append(arrow_declared_type(batches[0].column_at(c)))
     for b in range(len(batches)):
         ref batch = batches[b]
         if batch.num_columns() != width:
             raise Error("result batch " + String(b) + " has " + String(batch.num_columns()) + " columns, the first has " + String(width))
+        for c in range(width):
+            var declared = arrow_declared_type(batch.column_at(c))
+            if declared != out.types[c]:
+                raise Error(
+                    "result batch " + String(b) + " declares column " + String(c) + " as " + declared
+                    + ", the first batch as " + out.types[c]
+                )
         var base = len(out.rows)
         var n = batch.num_rows()
         for _ in range(n):
