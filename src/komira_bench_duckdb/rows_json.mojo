@@ -14,27 +14,33 @@
 # DECIMAL 123.4567 from the VARCHAR '123.4567'. With the column types (the
 # `column_type` of DuckDB's `DESCRIBE <query>`, one per column) a value of such
 # a column is read as the number it is: a DECIMAL is an exact decimal cell, a
-# HUGEINT, UHUGEINT or UBIGINT is an integer cell when it fits 64 bits and an
-# exact decimal cell (scale 0) beyond. A value of such a column that is not
-# written as an exact number of its type is refused, never kept as a text. The
-# value of any other type stays what it was. Without column types a quoted
-# value is a text.
+# UHUGEINT or UBIGINT is an integer cell when it fits 64 bits and an exact
+# decimal cell (scale 0) beyond; a HUGEINT is always an exact decimal cell
+# (scale 0), as the komira engine's DECIMAL(38,0) column is, so that the two
+# compare on the same statistics (the allowed departure in
+# declared_types.mojo). A value of such a column that is not written as an
+# exact number of its type is refused, never kept as a text. The value of any
+# other type stays what it was. Without column types a quoted value is a text.
 
 from std.math import inf, nan
 
-from .cells import Cell, KIND_TEXT, ResultSet
+from .cells import Cell, ResultSet
 from .decimal_text import canonical_decimal
 
 comptime EXACT_NONE: Int = 0
 comptime EXACT_DECIMAL: Int = 1
 comptime EXACT_INTEGER: Int = 2
+comptime EXACT_WHOLE: Int = 3
 
 
 def exactness_of_type(column_type: String) -> Int:
     """How DuckDB's JSON writes a column of type `column_type` (as `DESCRIBE`
-    names it): `EXACT_DECIMAL` for DECIMAL(p,s), `EXACT_INTEGER` for HUGEINT,
-    UHUGEINT and UBIGINT, `EXACT_NONE` for the rest."""
-    if column_type == "HUGEINT" or column_type == "UHUGEINT" or column_type == "UBIGINT":
+    names it): `EXACT_DECIMAL` for DECIMAL(p,s), `EXACT_WHOLE` for HUGEINT (an
+    exact decimal whatever its size, as the komira engine's DECIMAL(38,0) is),
+    `EXACT_INTEGER` for UHUGEINT and UBIGINT, `EXACT_NONE` for the rest."""
+    if column_type == "HUGEINT":
+        return EXACT_WHOLE
+    if column_type == "UHUGEINT" or column_type == "UBIGINT":
         return EXACT_INTEGER
     if column_type.startswith(String("DECIMAL(")) and column_type.endswith(String(")")):
         return EXACT_DECIMAL
@@ -254,40 +260,12 @@ def _fits_int64(canonical: String) -> Bool:
 def _exact_cell(text: String, exactness: Int) raises -> Cell:
     """The cell of a value of an exact column written `text`."""
     var canonical = canonical_decimal(text)
-    if exactness == EXACT_INTEGER:
+    if exactness == EXACT_INTEGER or exactness == EXACT_WHOLE:
         if canonical.find(String(".")) >= 0:
             raise Error(String("JSON output: a fraction in an integer column: ") + text)
-        if _fits_int64(canonical):
+        if exactness == EXACT_INTEGER and _fits_int64(canonical):
             return _integer_cell(canonical)
     return Cell.decimal(canonical)
-
-
-def _looks_like_number(s: String) -> Bool:
-    """Whether `s` is `[-]digits[.digits]`: a text a DECIMAL, HUGEINT, UHUGEINT
-    or UBIGINT value could be."""
-    var b = s.as_bytes()
-    var i = 0
-    if i < len(b) and b[i] == UInt8(45):
-        i += 1
-    if _digit_run(b, i) == 0:
-        return False
-    if i < len(b) and b[i] == UInt8(46):
-        i += 1
-        if _digit_run(b, i) == 0:
-            return False
-    return i == len(b)
-
-
-def has_number_like_text(rs: ResultSet) -> Bool:
-    """Whether some cell of `rs` is a text written like a number: only then can
-    a column be a DECIMAL or a wide integer that DuckDB quoted, and only then
-    are the column types worth asking for."""
-    for r in range(rs.row_count()):
-        ref row = rs.rows[r]
-        for c in range(len(row)):
-            if row[c].kind == KIND_TEXT and _looks_like_number(row[c].s):
-                return True
-    return False
 
 
 def _read_value(mut r: _Reader, exactness: Int) raises -> Cell:

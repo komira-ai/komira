@@ -28,7 +28,7 @@
 #   identical, writing it again gives the same text, and a sum or bound that is
 #   not canonical is refused.
 # - test_json_columns_are_read_by_their_types: the same quoted value is a
-#   decimal in a DECIMAL column, an integer or a decimal in a HUGEINT column, a
+#   decimal in a DECIMAL column and in a HUGEINT column, a
 #   text in a VARCHAR column and in an untyped read; a wrong number of types is
 #   refused.
 
@@ -310,6 +310,7 @@ def test_the_row_order_check_orders_decimals_by_value() raises:
 
 def test_a_decimal_column_is_recorded_and_read_back() raises:
     var rs = _wide_and_small(Int64(-3), String("18446744073709551615"))
+    rs.types.append(String("DECIMAL(38,0)"))
     var row = List[Cell]()
     row.append(Cell.decimal(String("0.00000000000000000000000000000000000001")))
     rs.add_row(row^)
@@ -324,6 +325,7 @@ def test_a_decimal_column_is_recorded_and_read_back() raises:
     assert_equal(format_reference(back), text)
     # another last digit of a recorded value is no longer the same answer
     var other = _wide_and_small(Int64(-3), String("18446744073709551614"))
+    other.types.append(String("DECIMAL(38,0)"))
     var row2 = List[Cell]()
     row2.append(Cell.decimal(String("0.00000000000000000000000000000000000001")))
     other.add_row(row2^)
@@ -354,7 +356,8 @@ def test_json_columns_are_read_by_their_types() raises:
     var typed = parse_json_rows(json, types)
     assert_equal(typed.rows[0][0].kind, KIND_DECIMAL)
     assert_equal(typed.rows[0][0].s, String("123.4"))
-    assert_equal(typed.rows[0][1].kind, KIND_INT)
+    assert_equal(typed.rows[0][1].kind, KIND_DECIMAL)
+    assert_equal(typed.rows[0][1].s, String("9223372036854775807"))
     assert_equal(typed.rows[0][2].kind, KIND_DECIMAL)
     assert_equal(typed.rows[0][2].s, String("18446744073709551615"))
     assert_equal(typed.rows[0][3].kind, KIND_TEXT)
@@ -376,7 +379,7 @@ def test_json_columns_are_read_by_their_types() raises:
     assert_equal(bare.rows[0][0].s, String("5"))
     assert_true(bare.rows[0][1].is_null())
     assert_equal(exactness_of_type(String("DECIMAL(38,4)")), 1)
-    assert_equal(exactness_of_type(String("HUGEINT")), 2)
+    assert_equal(exactness_of_type(String("HUGEINT")), 3)
     assert_equal(exactness_of_type(String("UHUGEINT")), 2)
     assert_equal(exactness_of_type(String("UBIGINT")), 2)
     assert_equal(exactness_of_type(String("BIGINT")), 0)

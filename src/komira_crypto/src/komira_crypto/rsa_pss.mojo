@@ -121,19 +121,6 @@ def _u64_from_be_bytes(b: Span[UInt8, _], off: Int) -> UInt64:
 
 
 @always_inline
-def _u64_to_be_bytes(v: UInt64, mut out: Array[UInt8, 8]):
-    """Write a UInt64 as 8 big-endian bytes."""
-    out[0] = UInt8((v >> UInt64(56)) & UInt64(0xFF))
-    out[1] = UInt8((v >> UInt64(48)) & UInt64(0xFF))
-    out[2] = UInt8((v >> UInt64(40)) & UInt64(0xFF))
-    out[3] = UInt8((v >> UInt64(32)) & UInt64(0xFF))
-    out[4] = UInt8((v >> UInt64(24)) & UInt64(0xFF))
-    out[5] = UInt8((v >> UInt64(16)) & UInt64(0xFF))
-    out[6] = UInt8((v >> UInt64(8)) & UInt64(0xFF))
-    out[7] = UInt8(v & UInt64(0xFF))
-
-
-@always_inline
 def _byte_bit_length(b: UInt8) -> Int:
     """Return the bit-position of the highest set bit of b (0 if b=0;
     1 for b=1; 8 for b=0x80..0xFF)."""

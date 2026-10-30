@@ -52,7 +52,8 @@
 # - test_a_quoted_number_in_a_varchar_column_stays_text: '1994' in a VARCHAR
 #   column is still a text.
 # - test_wide_integers_are_exact_and_small_ones_are_integers: a quoted HUGEINT
-#   inside 64 bits is an integer (as an INT64 sum from the other engine is), one
+#   is always an exact decimal (as the engine's DECIMAL(38,0) is), a UBIGINT
+#   inside 63 bits is an integer, a HUGEINT one
 #   past 2^63 or a UBIGINT at 2^64-1 is neither a text nor a double, and two
 #   values a unit apart do not compare equal.
 # - test_decimals_compare_exactly_and_by_value: 123.40 in DECIMAL(10,2) and 123.4
@@ -64,6 +65,19 @@
 # - test_text_that_is_not_an_exact_number_in_an_exact_column_is_an_error: a
 #   fraction in a HUGEINT column and a DECIMAL value with more than 38
 #   fractional digits raise instead of becoming texts.
+# - test_every_fetch_records_the_declared_types: a fetch whose answer holds no
+#   text written like a number (a BIGINT, a DOUBLE, a VARCHAR and a DECIMAL
+#   column) still sends DESCRIBE <query> once and records the four declared
+#   types in the shared vocabulary. Catches a lazy DESCRIBE that skips the types.
+# - test_an_answer_with_no_rows_still_has_its_declared_types: an empty answer
+#   has its column types.
+# - test_a_type_outside_the_mapping_is_recorded_as_unmapped: TIMESTAMP is
+#   recorded as an unmapped type that keeps its name, not dropped.
+# - test_a_describe_with_the_wrong_number_of_columns_raises: a DESCRIBE with two
+#   columns for a one-column answer is an error.
+# - test_a_timed_run_sends_no_describe: timed runs of a query send no DESCRIBE,
+#   before or after a fetch of the same query.
+# - test_the_settings_read_back_sends_no_describe: `start` sends no DESCRIBE.
 
 from std.memory import ArcPointer
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
@@ -74,11 +88,12 @@ from komira_bench_duckdb import (
     DuckDbSession,
     DuckDbTransport,
     ResultSet,
+    is_unmapped,
     StdoutChunk,
     compare_signatures,
     signature_of,
 )
-from komira_bench_duckdb.cells import KIND_FLOAT, KIND_INT, KIND_NULL, KIND_TEXT
+from komira_bench_duckdb.cells import KIND_DECIMAL, KIND_FLOAT, KIND_INT, KIND_NULL, KIND_TEXT
 from komira_bench_duckdb.text import slice_bytes
 
 
@@ -248,6 +263,26 @@ def _no_extras() -> List[Tuple[String, String]]:
     return List[Tuple[String, String]]()
 
 
+def _names2(a: String, b: String) -> List[String]:
+    var out = List[String]()
+    out.append(a)
+    out.append(b)
+    return out^
+
+
+def _describe_many(names: List[String], types: List[String]) -> String:
+    """What DuckDB answers for DESCRIBE of a query with these columns."""
+    var out = String("[")
+    for i in range(len(names)):
+        if i > 0:
+            out += String(",\n")
+        out += (
+            String('{"column_name":"') + names[i] + String('","column_type":"') + types[i]
+            + String('","null":"YES","key":null,"default":null,"extra":null}')
+        )
+    return out + String("]")
+
+
 def test_timing_is_end_marker_minus_start_marker() raises:
     var cell = ArcPointer[Int](1000)
     var sent = ArcPointer[List[String]](List[String]())
@@ -275,7 +310,10 @@ def test_markers_split_across_reads_are_still_found() raises:
     var sent = ArcPointer[List[String]](List[String]())
     var rules = List[Rule]()
     rules.append(
-        Rule(String("SELECT pieces"), String('[{"a":1,"b":"x"},\n{"a":2,"b":"y"}]'), String(""), 4000)
+        Rule(
+            String("SELECT pieces"), String('[{"a":1,"b":"x"},\n{"a":2,"b":"y"}]'), String(""), 4000,
+            _describe_many(_names2("a", "b"), _names2("BIGINT", "VARCHAR")),
+        )
     )
     var fake = FakeDuckDb(cell, sent, rules^, True)
     var s = DuckDbSession[FakeDuckDb](fake^, BenchClock.manual(cell))
@@ -308,7 +346,12 @@ def test_fetch_returns_the_rows_in_json_mode() raises:
     var cell = ArcPointer[Int](0)
     var sent = ArcPointer[List[String]](List[String]())
     var rules = List[Rule]()
-    rules.append(Rule(String("SELECT rows"), String('[{"n":7,"name":"seven"}]'), String(""), 0))
+    rules.append(
+        Rule(
+            String("SELECT rows"), String('[{"n":7,"name":"seven"}]'), String(""), 0,
+            _describe_many(_names2("n", "name"), _names2("BIGINT", "VARCHAR")),
+        )
+    )
     var s = DuckDbSession[FakeDuckDb](FakeDuckDb(cell, sent, rules^), BenchClock.manual(cell))
     var f = s.fetch(String("SELECT rows"))
     assert_true(f.ok())
@@ -319,7 +362,8 @@ def test_fetch_returns_the_rows_in_json_mode() raises:
     var text = _sent_text(sent)
     assert_true(text.find(String(".mode json\n.print @@S 1\nSELECT rows\n;\n")) >= 0)
     _ = s.run_timed(String("SELECT rows"))
-    assert_true(_sent_text(sent).find(String(".mode trash\n.print @@S 2\n")) >= 0)
+    # the fetch used two numbers: the query and its DESCRIBE
+    assert_true(_sent_text(sent).find(String(".mode trash\n.print @@S 3\n")) >= 0)
 
 
 def test_start_sets_and_reads_back_the_fairness_settings() raises:
@@ -583,9 +627,15 @@ def _one(value: String) -> String:
 
 
 def _verdict_reason(a: ResultSet, b: ResultSet) raises -> String:
-    """The first reason the two answers differ, or an empty text when they are
-    identical."""
-    var v = compare_signatures(signature_of(a), signature_of(b))
+    """The first reason the two answers differ in their values, or an empty
+    text when they are identical. The declared types are left out: these tests
+    are about the values (123.40 at two scales is one value), and the
+    declared types are compared in test_declared_types."""
+    var x = a.copy()
+    x.types = List[String]()
+    var y = b.copy()
+    y.types = List[String]()
+    var v = compare_signatures(signature_of(x), signature_of(y))
     if v.identical:
         return String("")
     return v.reasons[0].copy()
@@ -636,10 +686,13 @@ def test_a_quoted_number_in_a_varchar_column_stays_text() raises:
 
 def test_wide_integers_are_exact_and_small_ones_are_integers() raises:
     var small = _fetched(_one(String("9223372036854775807")), String("HUGEINT"))
-    assert_equal(small.rows[0][0].kind, KIND_INT)
-    assert_equal(small.rows[0][0].i, Int64(9223372036854775807))
+    assert_equal(small.rows[0][0].kind, KIND_DECIMAL)
+    assert_equal(small.rows[0][0].s, String("9223372036854775807"))
     var negative = _fetched(_one(String("-9223372036854775808")), String("HUGEINT"))
-    assert_equal(negative.rows[0][0].kind, KIND_INT)
+    assert_equal(negative.rows[0][0].kind, KIND_DECIMAL)
+    var ubig = _fetched(_one(String("9223372036854775807")), String("UBIGINT"))
+    assert_equal(ubig.rows[0][0].kind, KIND_INT)
+    assert_equal(ubig.rows[0][0].i, Int64(9223372036854775807))
     var past = _fetched(_one(String("9223372036854775808")), String("UBIGINT"))
     assert_true(past.rows[0][0].kind != KIND_TEXT)
     assert_true(past.rows[0][0].kind != KIND_FLOAT)
@@ -700,6 +753,107 @@ def test_text_that_is_not_an_exact_number_in_an_exact_column_is_an_error() raise
     except:
         raised = True
     assert_true(raised, "more than 38 fractional digits is an error")
+
+
+def _one_rule_session(
+    sent: ArcPointer[List[String]], needle: String, json: String, names: List[String], types: List[String]
+) -> DuckDbSession[FakeDuckDb]:
+    var cell = ArcPointer[Int](0)
+    var rules = List[Rule]()
+    rules.append(Rule(needle, json, String(""), 0, _describe_many(names, types)))
+    return DuckDbSession[FakeDuckDb](FakeDuckDb(cell, sent, rules^), BenchClock.manual(cell))
+
+
+def _names1(a: String) -> List[String]:
+    var out = List[String]()
+    out.append(a)
+    return out^
+
+
+def test_every_fetch_records_the_declared_types() raises:
+    var sent = ArcPointer[List[String]](List[String]())
+    var s = _one_rule_session(
+        sent, String("SELECT mixed"), String('[{"n":7,"x":1.5,"t":"a","d":"2.50"}]'),
+        _names4("n", "x", "t", "d"), _names4("BIGINT", "DOUBLE", "VARCHAR", "DECIMAL(10,2)"),
+    )
+    var f = s.fetch(String("SELECT mixed"))
+    assert_true(f.ok(), f.error)
+    assert_equal(len(f.rows.types), 4)
+    assert_equal(f.rows.types[0], String("BIGINT"))
+    assert_equal(f.rows.types[1], String("DOUBLE"))
+    assert_equal(f.rows.types[2], String("VARCHAR"))
+    assert_equal(f.rows.types[3], String("DECIMAL(10,2)"))
+    assert_equal(_count(_sent_text(sent), String("DESCRIBE SELECT mixed")), 1)
+    assert_true(
+        _sent_text(sent).find(String("\nSELECT mixed\n;\n.print @@E")) >= 0, "the query text is sent as it is"
+    )
+
+
+def test_an_answer_with_no_rows_still_has_its_declared_types() raises:
+    var sent = ArcPointer[List[String]](List[String]())
+    var s = _one_rule_session(sent, String("SELECT none"), String("[]"), _names1("v"), _names1("DOUBLE"))
+    var f = s.fetch(String("SELECT none"))
+    assert_true(f.ok(), f.error)
+    assert_equal(f.rows.row_count(), 0)
+    assert_equal(len(f.rows.types), 1)
+    assert_equal(f.rows.types[0], String("DOUBLE"))
+
+
+def test_a_type_outside_the_mapping_is_recorded_as_unmapped() raises:
+    var sent = ArcPointer[List[String]](List[String]())
+    var s = _one_rule_session(
+        sent, String("SELECT stamp"), String('[{"v":"2024-01-01 00:00:00"}]'), _names1("v"), _names1("TIMESTAMP")
+    )
+    var f = s.fetch(String("SELECT stamp"))
+    assert_true(f.ok(), f.error)
+    assert_equal(len(f.rows.types), 1)
+    assert_true(is_unmapped(f.rows.types[0]), f.rows.types[0])
+    assert_true(f.rows.types[0].find(String("TIMESTAMP")) >= 0, f.rows.types[0])
+
+
+def test_a_describe_with_the_wrong_number_of_columns_raises() raises:
+    var sent = ArcPointer[List[String]](List[String]())
+    var s = _one_rule_session(
+        sent, String("SELECT one"), String('[{"v":1}]'), _names2("v", "w"), _names2("BIGINT", "BIGINT")
+    )
+    var raised = False
+    try:
+        _ = s.fetch(String("SELECT one"))
+    except e:
+        raised = True
+        assert_true(String(e).find(String("column_type")) >= 0, String(e))
+    assert_true(raised, "two column types for a one-column answer must not be accepted")
+
+
+def test_a_timed_run_sends_no_describe() raises:
+    var sent = ArcPointer[List[String]](List[String]())
+    var s = _one_rule_session(sent, String("SELECT timed"), String('[{"v":1}]'), _names1("v"), _names1("BIGINT"))
+    _ = s.run_timed(String("SELECT timed"))
+    _ = s.run_timed(String("SELECT timed"))
+    assert_equal(_count(_sent_text(sent), String("DESCRIBE")), 0)
+    _ = s.fetch(String("SELECT timed"))
+    assert_equal(_count(_sent_text(sent), String("DESCRIBE")), 1)
+    _ = s.run_timed(String("SELECT timed"))
+    assert_equal(_count(_sent_text(sent), String("DESCRIBE")), 1, "only the fetch described the query")
+
+
+def test_the_settings_read_back_sends_no_describe() raises:
+    var cell = ArcPointer[Int](0)
+    var sent = ArcPointer[List[String]](List[String]())
+    var s = DuckDbSession[FakeDuckDb](FakeDuckDb(cell, sent, _settings_rules()), BenchClock.manual(cell))
+    var extras = List[Tuple[String, String]]()
+    extras.append((String("parquet_metadata_cache"), String("true")))
+    _ = s.start(4, 16384, String("1.5.6"), extras^)
+    assert_equal(_count(_sent_text(sent), String("DESCRIBE")), 0)
+
+
+def _names4(a: String, b: String, c: String, d: String) -> List[String]:
+    var out = List[String]()
+    out.append(a)
+    out.append(b)
+    out.append(c)
+    out.append(d)
+    return out^
 
 
 def main() raises:

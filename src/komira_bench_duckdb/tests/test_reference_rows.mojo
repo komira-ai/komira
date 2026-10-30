@@ -18,6 +18,17 @@
 #   written before the exact DECIMAL kind existed (no format line) is refused
 #   with a message that names the format, instead of being read as a record of
 #   the current layout; a record naming another format is refused too.
+# - test_format_2_is_refused_with_a_message_that_says_so: a record exactly as
+#   format 2 wrote it is refused with a message that names formats 2 and 3 and
+#   says to record the answers again; the same record in format 3 is read.
+# - test_a_recorded_answer_carries_and_checks_the_declared_types: the record
+#   starts with `format 3`, each column line ends with its declared type, the
+#   types come back from the text, writing what was read gives the same text,
+#   and the same values under another declared type (or with none) no longer
+#   match the record, with a type failure that is the only one.
+# - test_a_reference_is_not_written_or_read_without_a_mapped_type: a column with
+#   no declared type, or an unmapped one, is not written; a column line with no
+#   type, an extra field, an unmapped type or DECIMAL(39,0) is not read.
 # - test_json_rows_become_typed_cells: integers, doubles (with a point and with
 #   an exponent), texts with every escape and a surrogate pair, booleans as 1
 #   and 0, and null parse; the names are the first row's keys; an integer past
@@ -41,6 +52,7 @@ from komira_bench_duckdb import (
     ReferenceAnswer,
     ResultSet,
     compare_signatures,
+    duckdb_declared_type,
     format_reference,
     parse_json_rows,
     parse_references,
@@ -54,6 +66,9 @@ def _sample(last_int: Int) -> ResultSet:
     rs.names.append(String("n"))
     rs.names.append(String("x"))
     rs.names.append(String("t"))
+    rs.types.append(String("BIGINT"))
+    rs.types.append(String("DOUBLE"))
+    rs.types.append(String("VARCHAR"))
     var texts = List[String]()
     texts.append(String("two words"))
     texts.append(String("caf") + chr(233))
@@ -95,7 +110,7 @@ def test_a_recorded_answer_round_trips_and_checks_values_without_an_engine() rai
 
 def _record(id: String) -> String:
     return (
-        String("format 2\nquery ") + id + String("\nrows 0\ncolumn 0 0 0 0 3 0 0 0 0 0 0 0 0 0 x x 0 0 0 0 0\nend\n")
+        String("format 3\nquery ") + id + String("\nrows 0\ncolumn 0 0 0 0 3 0 0 0 0 0 0 0 0 0 x x 0 0 0 0 0 BIGINT\nend\n")
     )
 
 
@@ -115,11 +130,11 @@ def test_a_reference_set_finds_answers_by_id_and_refuses_bad_records() raises:
     assert_equal(set.find(String("a")), 0)
     assert_equal(set.find(String("c")), -1)
     assert_true(_refuses(_record(String("a")) + _record(String("a"))))
-    assert_true(_refuses(String("format 2\nquery a\nrows 0\n")))
-    assert_true(_refuses(String("format 2\nquery a\nrows 0\nbogus 1\nend\n")))
-    assert_true(_refuses(String("format 2\nquery a\nrows 0\ncolumn 1 2 3\nend\n")))
-    assert_true(_refuses(String("format 2\nrows 0\nend\n")))
-    assert_true(_refuses(String("format 2\nquery a\nend\n")))
+    assert_true(_refuses(String("format 3\nquery a\nrows 0\n")))
+    assert_true(_refuses(String("format 3\nquery a\nrows 0\nbogus 1\nend\n")))
+    assert_true(_refuses(String("format 3\nquery a\nrows 0\ncolumn 1 2 3\nend\n")))
+    assert_true(_refuses(String("format 3\nrows 0\nend\n")))
+    assert_true(_refuses(String("format 3\nquery a\nend\n")))
 
 
 def test_json_rows_become_typed_cells() raises:
@@ -161,6 +176,10 @@ def test_a_recorded_answer_keeps_large_non_finite_and_exact_values() raises:
     rs.names.append(String("f"))
     rs.names.append(String("k"))
     rs.names.append(String("t"))
+    rs.types.append(String("DOUBLE"))
+    rs.types.append(String("DOUBLE"))
+    rs.types.append(String("BIGINT"))
+    rs.types.append(String("VARCHAR"))
     var ints = List[Int]()
     ints.append(4_611_686_018_427_387_904)
     ints.append(9_223_372_036_854_775_807)
@@ -197,6 +216,7 @@ def test_a_recorded_answer_keeps_large_non_finite_and_exact_values() raises:
     # the 0.1+0.2 sum survives as the very same double
     var one = ResultSet()
     one.names.append(String("v"))
+    one.types.append(String("DOUBLE"))
     var cell = List[Cell]()
     cell.append(Cell.real(0.1 + 0.2))
     one.add_row(cell^)
@@ -283,6 +303,99 @@ def test_a_record_without_a_format_line_is_refused() raises:
         raised = True
         assert_true(String(e).find(String("format")) >= 0, "the message names the format: " + String(e))
     assert_true(raised, "a record of another format must be refused")
+
+
+def _refusal(text: String) -> String:
+    """The message `parse_references` raises for `text`, or an empty text when
+    it reads it."""
+    try:
+        _ = parse_references(text)
+    except e:
+        return String(e)
+    return String("")
+
+
+def test_format_2_is_refused_with_a_message_that_says_so() raises:
+    # a record exactly as format 2 wrote it: no declared type on the column line
+    var v2 = String(
+        "format 2\nquery q1\nrows 1\n"
+        "column 1 1 0 0 5 25 5 5 5.0 25.0 5.0 5.0 0 0 x x 0 0 0 0 0\nend\n"
+    )
+    var why = _refusal(v2)
+    assert_true(why.byte_length() > 0, "a format 2 record must be refused")
+    assert_true(why.find(String("format 2")) >= 0, why)
+    assert_true(why.find(String("format 3")) >= 0, why)
+    assert_true(why.find(String("record them again")) >= 0, why)
+    assert_equal(_refusal(_record(String("a"))), String(""), "the same record in format 3 is read")
+
+
+def test_a_recorded_answer_carries_and_checks_the_declared_types() raises:
+    var ans = ReferenceAnswer(String("q1"))
+    ans.signature = signature_of(_sample(20))
+    var text = format_reference(ans)
+    assert_true(text.startswith(String("format 3\n")), text)
+    var lines = text.split(String("\n"))
+    var column_lines = List[String]()
+    for i in range(len(lines)):
+        if String(lines[i]).startswith(String("column ")):
+            column_lines.append(String(lines[i]))
+    assert_equal(len(column_lines), 3)
+    assert_true(column_lines[0].endswith(String(" BIGINT")), column_lines[0])
+    assert_true(column_lines[1].endswith(String(" DOUBLE")), column_lines[1])
+    assert_true(column_lines[2].endswith(String(" VARCHAR")), column_lines[2])
+    var back = parse_references(text).answers[0].copy()
+    assert_equal(len(back.signature.types), 3)
+    assert_equal(back.signature.types[0], String("BIGINT"))
+    assert_equal(back.signature.types[1], String("DOUBLE"))
+    assert_equal(back.signature.types[2], String("VARCHAR"))
+    assert_true(compare_signatures(signature_of(_sample(20)), back.signature).identical)
+    assert_equal(format_reference(back), text)
+    # the same values under another declared type no longer match the record
+    var other = _sample(20)
+    other.types[0] = String("INTEGER")
+    var v = compare_signatures(signature_of(other), back.signature)
+    assert_false(v.identical)
+    assert_equal(len(v.type_reasons), 1)
+    assert_equal(len(v.reasons), 1, "the values are the same: only the type differs")
+    assert_true(v.type_reasons[0].find(String("INTEGER")) >= 0, v.type_reasons[0])
+    assert_true(v.type_reasons[0].find(String("BIGINT")) >= 0, v.type_reasons[0])
+    # an answer with no declared types does not satisfy a record that has them
+    var bare = _sample(20)
+    bare.types = List[String]()
+    assert_false(compare_signatures(signature_of(bare), back.signature).identical)
+
+
+def test_a_reference_is_not_written_or_read_without_a_mapped_type() raises:
+    var bare = _sample(20)
+    bare.types = List[String]()
+    var raised = False
+    try:
+        var ans = ReferenceAnswer(String("q"))
+        ans.signature = signature_of(bare)
+        _ = format_reference(ans)
+    except e:
+        raised = True
+        assert_true(String(e).find(String("declared type")) >= 0, String(e))
+    assert_true(raised, "a column with no declared type has no recorded form")
+    var unmapped = _sample(20)
+    unmapped.types[1] = duckdb_declared_type(String("TIMESTAMP"))
+    raised = False
+    try:
+        var ans2 = ReferenceAnswer(String("q"))
+        ans2.signature = signature_of(unmapped)
+        _ = format_reference(ans2)
+    except e:
+        raised = True
+        assert_true(String(e).find(String("mapping")) >= 0, String(e))
+    assert_true(raised, "an unmapped type is not recorded")
+    var good = String("format 3\nquery a\nrows 0\ncolumn 0 0 0 0 3 0 0 0 0 0 0 0 0 0 x x 0 0 0 0 0 ")
+    assert_equal(_refusal(good + String("BIGINT\nend\n")), String(""))
+    assert_equal(_refusal(good + String("DECIMAL(38,4)\nend\n")), String(""))
+    assert_true(_refusal(good + String("\nend\n")).byte_length() > 0, "no type field")
+    assert_true(_refusal(good + String("TIMESTAMP\nend\n")).byte_length() > 0, "not in the mapping")
+    assert_true(_refusal(good + String("UNMAPPED(TIMESTAMP)\nend\n")).byte_length() > 0, "an unmapped entry")
+    assert_true(_refusal(good + String("DECIMAL(39,0)\nend\n")).byte_length() > 0, "a precision past 38")
+    assert_true(_refusal(good + String("BIGINT extra\nend\n")).byte_length() > 0, "an extra field")
 
 
 def main() raises:
