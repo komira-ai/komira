@@ -18,9 +18,12 @@
 #   to the stand-in's answer; the cell is EXEC_OK and IDENTICAL, timed on both
 #   sides with one row each; the TPC-H notice is printed once. Catches an arm
 #   that returns a different value or kind, or rows the signature cannot match.
-# - test_the_decimal_arrives_as_duckdb_prints_it: the arm's cell for Q6 is the
-#   double that `atof` reads from the oracle's exact text, bit for bit, with
-#   the column named revenue. Catches a float division of the unscaled value.
+# - test_the_decimal_arrives_as_duckdb_prints_it: DuckDB's JSON quotes the
+#   DECIMAL(38,4) sum of Q6; the cell the session makes from that and the cell
+#   the arm makes are the same exact kind and compare identical, a unit in the
+#   last place of DuckDB's text does not, and neither is a double or a text,
+#   with the column named revenue. Catches a DECIMAL read as a text, rounded to
+#   a double, or divided as a float.
 # - test_a_join_is_refused_and_not_timed: a self-join is listed under
 #   "unserved" as UNSUPPORTED:lower.LOWERING_UNCUTTABLE_NODE, the stand-in ran
 #   it once (for its answer) and never timed, and the arm kept the engine's
@@ -90,6 +93,8 @@ from komira_bench_duckdb import (
     KIND_TEXT,
     ResultSet,
     StdoutChunk,
+    compare_signatures,
+    signature_of,
 )
 from komira_bench_duckdb.text import slice_bytes
 from komira_bench_report import DuckDbPin
@@ -143,11 +148,13 @@ struct Rule(Copyable, Movable):
     var needle: String
     var json: String
     var cost: Int
+    var types: String
 
-    def __init__(out self, needle: String, json: String, cost: Int):
+    def __init__(out self, needle: String, json: String, cost: Int, types: String = String("")):
         self.needle = needle
         self.json = json
         self.cost = cost
+        self.types = types
 
 
 struct FakeDuckDb(DuckDbTransport):
@@ -179,7 +186,11 @@ struct FakeDuckDb(DuckDbTransport):
     def run_statement(mut self):
         for i in range(len(self.rules)):
             if self.statement.find(self.rules[i].needle) >= 0:
-                if self.mode == "json" and self.rules[i].json.byte_length() > 0:
+                if self.statement.startswith(String("DESCRIBE ")):
+                    # DuckDB's answer to DESCRIBE <query>: the rule's `types`
+                    if self.mode == "json" and self.rules[i].types.byte_length() > 0:
+                        self.emit(self.rules[i].types + String("\n"), 0)
+                elif self.mode == "json" and self.rules[i].json.byte_length() > 0:
                     self.emit(self.rules[i].json + String("\n"), 0)
                 self.cost = self.rules[i].cost
                 break
@@ -324,6 +335,43 @@ def _fixed(v: Int, scale: Int) -> String:
     return String(v // unit) + "." + frac
 
 
+def _q6_rule(revenue: String) -> Rule:
+    """The stand-in's answer to Q6 as DuckDB 1.5 prints it in `.mode json`: the
+    DECIMAL(38,4) sum is QUOTED (the shell quotes DECIMAL, HUGEINT, UHUGEINT,
+    UBIGINT and every non-numeric type), and DESCRIBE names the column type."""
+    return Rule(
+        String("revenue"),
+        String('[{"revenue":"') + revenue + String('"}]'),
+        2 * _MS,
+        String('[{"column_name":"revenue","column_type":"DECIMAL(38,4)","null":"YES","key":null,"default":null,"extra":null}]'),
+    )
+
+
+def _duckdb_cell(value: String) raises -> Cell:
+    """The cell the session makes from DuckDB's JSON for the Q6 sum `value`."""
+    var rig = Rig()
+    var rules = List[Rule]()
+    rules.append(_q6_rule(value))
+    var session = rig.duckdb(rules^)
+    var f = session.fetch(_q6())
+    assert_true(f.ok(), f.error)
+    return f.rows.rows[0][0].copy()
+
+
+def _one_row(cell: Cell) -> ResultSet:
+    var rs = ResultSet()
+    rs.names.append(String("revenue"))
+    var row = List[Cell]()
+    row.append(cell.copy())
+    rs.add_row(row^)
+    return rs^
+
+
+def _runs(text: String, query: String) -> Int:
+    """How many times `query` was run (its DESCRIBE is not a run)."""
+    return _count(text, query) - _count(text, String("DESCRIBE ") + query)
+
+
 def _manifest(rows: Int) -> DatasetManifest:
     var files = List[DatasetFile]()
     files.append(DatasetFile.unrecorded(String(_LINEITEM_REL), rows))
@@ -374,7 +422,7 @@ def test_q6_text_matches_the_oracle_and_is_timed() raises:
     _ = _write_fixture(t)
     var rig = Rig()
     var rules = List[Rule]()
-    rules.append(Rule(String("revenue"), String('[{"revenue":') + _fixed(want, 4) + String("}]"), 2 * _MS))
+    rules.append(_q6_rule(_fixed(want, 4)))
     var session = rig.duckdb(rules^)
     var arm = KomiraArm()
     var dropper = NoCacheDropper()
@@ -397,12 +445,15 @@ def test_q6_text_matches_the_oracle_and_is_timed() raises:
     assert_equal(arm.prepares, 1)
     assert_equal(arm.closes, 1)
     # DuckDB ran the query once for its answer and four times timed (2 sweeps of 2)
-    assert_equal(_count(rig.sent_text(), _q6()), 5)
+    assert_equal(_runs(rig.sent_text(), _q6()), 5)
     var report = format_run(out)
     assert_equal(_count(report, String("derived from TPC-H; not comparable to published TPC-H results")), 1)
 
 
 def test_the_decimal_arrives_as_duckdb_prints_it() raises:
+    """DuckDB's JSON quotes the DECIMAL and the session turns it into the same
+    kind of cell the arm makes: both sides are one exact kind, neither a
+    double nor a text."""
     var t = q6_table(600)
     var want = _oracle_revenue(t)
     _ = _write_fixture(t)
@@ -412,8 +463,15 @@ def test_the_decimal_arrives_as_duckdb_prints_it() raises:
     assert_equal(answer.row_count, Int64(1))
     assert_equal(answer.rows.names[0], String("revenue"))
     ref cell = answer.rows.rows[0][0]
-    assert_equal(cell.kind, KIND_FLOAT)
-    assert_true(cell.f == atof(_fixed(want, 4)), "the double differs from the one read from the exact text")
+    assert_true(cell.kind != KIND_FLOAT, "a DECIMAL is not rounded to a double")
+    assert_true(cell.kind != KIND_TEXT)
+    var theirs = _duckdb_cell(_fixed(want, 4))
+    assert_equal(cell.kind, theirs.kind)
+    var verdict = compare_signatures(signature_of(_one_row(cell)), signature_of(_one_row(theirs)))
+    assert_true(verdict.identical, verdict.label())
+    # a unit in the last place of the same DuckDB text is a different answer
+    var off = _duckdb_cell(_fixed(want + 1, 4))
+    assert_false(compare_signatures(signature_of(_one_row(cell)), signature_of(_one_row(off))).identical)
     arm.close()
 
 
@@ -458,7 +516,7 @@ def test_a_wrong_fake_answer_is_wrong_and_not_timed() raises:
     var rig = Rig()
     var rules = List[Rule]()
     var wrong = want + want // 100 + 1
-    rules.append(Rule(String("revenue"), String('[{"revenue":') + _fixed(wrong, 4) + String("}]"), 2 * _MS))
+    rules.append(_q6_rule(_fixed(wrong, 4)))
     var session = rig.duckdb(rules^)
     var arm = KomiraArm()
     var dropper = NoCacheDropper()
@@ -477,7 +535,7 @@ def test_a_wrong_fake_answer_is_wrong_and_not_timed() raises:
     assert_false(out.outcomes[0].timed)
     assert_equal(run_status(out), 1)
     # the stand-in ran the query once, for its answer, and never timed
-    assert_equal(_count(rig.sent_text(), _q6()), 1)
+    assert_equal(_runs(rig.sent_text(), _q6()), 1)
     assert_equal(arm.prepares, 1)
 
 
@@ -548,7 +606,7 @@ def test_cold_reps_prepare_the_context_again() raises:
     _ = _write_fixture(t)
     var rig = Rig()
     var rules = List[Rule]()
-    rules.append(Rule(String("revenue"), String('[{"revenue":') + _fixed(want, 4) + String("}]"), 2 * _MS))
+    rules.append(_q6_rule(_fixed(want, 4)))
     var session = rig.duckdb(rules^)
     var arm = KomiraArm()
     var drops = ArcPointer[Int](0)

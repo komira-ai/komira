@@ -14,6 +14,10 @@
 #   overflowed to infinity, 0.1+0.2 and 1e-300 as double sums, integers whose
 #   64-bit sums wrap, and the hash sum of a text column come back from the
 #   recorded text bit for bit and compare identical.
+# - test_a_record_without_a_format_line_is_refused: a record in the layout
+#   written before the exact DECIMAL kind existed (no format line) is refused
+#   with a message that names the format, instead of being read as a record of
+#   the current layout; a record naming another format is refused too.
 # - test_json_rows_become_typed_cells: integers, doubles (with a point and with
 #   an exponent), texts with every escape and a surrogate pair, booleans as 1
 #   and 0, and null parse; the names are the first row's keys; an integer past
@@ -256,6 +260,29 @@ def test_json_output_edge_cases() raises:
     assert_true(_json_refused(String('[{"a":"open}]')))
     assert_true(_json_refused(String('[{"a":}]')))
     assert_true(_json_refused(String('[{"a":nonsense}]')))
+
+
+def test_a_record_without_a_format_line_is_refused() raises:
+    var old = String(
+        "query q1\nrows 1\n"
+        "column 1 1 0 0 5 25 5 5 5.0 25.0 5.0 5.0 0 0 x x\n"
+        "end\n"
+    )
+    var raised = False
+    try:
+        _ = parse_references(old)
+    except e:
+        raised = True
+        assert_true(String(e).find(String("format")) >= 0, "the message names the format: " + String(e))
+    assert_true(raised, "a record with no format line must be refused, not misread")
+    var other = String("format 1\n") + old
+    raised = False
+    try:
+        _ = parse_references(other)
+    except e:
+        raised = True
+        assert_true(String(e).find(String("format")) >= 0, "the message names the format: " + String(e))
+    assert_true(raised, "a record of another format must be refused")
 
 
 def main() raises:
