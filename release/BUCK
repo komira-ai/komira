@@ -187,6 +187,7 @@ release_set(
         "//src/komira_bench_duckdb:komira_bench_duckdb_conda",
         "//src/komira_bench_data:komira_bench_data_conda",
         "//src/komira_bench_report:komira_bench_report_conda",
+        "//src/komira_bench_corpus:komira_bench_corpus_conda",
     ],
     visibility = ["PUBLIC"],
 )
