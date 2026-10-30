@@ -44,23 +44,38 @@ def first_platform_refusal(labels, first_remote):
         return None
     return "the first platform must be komira's linux-x86_64 (or, alone and local, a local macOS build's darwin-arm64)"
 
+def extra_platform_kinds(labels):
+    """Which of buildrules' platforms get komira's executor, as `(linux, darwin)`.
+
+    `labels` are the labels of the registered platforms in order. buildrules' linux platform
+    (`extra`) takes the executor of komira's linux platform, so it is added only when komira's
+    linux-x86_64 comes first. A local build on a Mac registers darwin-arm64 alone: there the linux
+    platform must not appear (it would run on the Mac as if it were linux), and buildrules' macOS
+    platform (`extra_darwin`) takes the Mac's executor. With macOS workers beside linux, both.
+    """
+    linux = len(labels) > 0 and labels[0].endswith("platforms:linux-x86_64")
+    darwin = len([l for l in labels if l.endswith("platforms:darwin-arm64")]) > 0
+    return linux, darwin
+
 def _impl(ctx):
     base = ctx.attrs.base[ExecutionPlatformRegistrationInfo].platforms
     labels = [str(p.label) for p in base]
     refusal = first_platform_refusal(labels, not ctx.attrs.local)
     if refusal:
         fail("{}: {} (of {}), got {}".format(ctx.label, refusal, ctx.attrs.base.label, labels))
-    linux = base[0]
-    extra = [
-        ExecutionPlatformInfo(
-            label = p.label.raw_target(),
-            configuration = p[PlatformInfo].configuration,
-            executor_config = linux.executor_config,
-        )
-        for p in ctx.attrs.extra
-    ]
+    use_linux, use_darwin = extra_platform_kinds(labels)
+    extra = []
+    if use_linux:
+        extra += [
+            ExecutionPlatformInfo(
+                label = p.label.raw_target(),
+                configuration = p[PlatformInfo].configuration,
+                executor_config = base[0].executor_config,
+            )
+            for p in ctx.attrs.extra
+        ]
     darwin = [p for p in base if str(p.label).endswith("platforms:darwin-arm64")]
-    if darwin:
+    if use_darwin:
         extra += [
             ExecutionPlatformInfo(
                 label = p.label.raw_target(),

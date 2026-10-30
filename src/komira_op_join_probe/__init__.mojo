@@ -4,17 +4,28 @@ The composite-key hash join: `MultiKeyHashJoinBuilder`
 (`join_multi_key_builder`) with its INNER and LEFT probes, the SEMI and ANTI
 probes (`join_multi_key_filter`), the RIGHT and FULL probes
 (`join_multi_key_outer`), the key slots, hashes and equality arms they share
-(`join_multi_key`), the parallel build and the parallel INNER probe over the
-engine's dispatcher (`join_multi_key_parallel_build`, `join_multi_key_parallel`,
-`join_multi_key_parallel_task`), the extraction of a batch's join-key columns
-into key slots (`join_key_extract`), the composite join probe operator over a
-physical plan's `MorselOp` (`join_probe_multi_key`), and the deferred-output
-records of the streaming join probe (`join_deferred`, `join_deferred_idx`) with
-the rule that decides which morsels defer (`join_defer_verdict`) and the
-witnesses of its levers (`join_probe_levers`), the radix-partitioned
-single-INT64-key hash join (`radix_join`), and the key set of a
-single-INT64-key SEMI or ANTI join (`semi_join`, `semi_join_tasks`). Float keys
-follow the query semantics' float model.
+(`join_multi_key`), the parallel build and the parallel INNER probe over
+the engine's dispatcher (`join_multi_key_parallel_build`,
+`join_multi_key_parallel`, `join_multi_key_parallel_task`), the extraction of
+a batch's join-key columns into key slots (`join_key_extract`), and the
+composite join probe operator over a physical plan's `MorselOp`
+(`join_probe_multi_key`); and the deferred-output records of the streaming
+join probe (`join_deferred`, `join_deferred_idx`) with the rule that decides
+which morsels defer (`join_defer_verdict`) and the witnesses of its levers
+(`join_probe_levers`); the radix-partitioned single-INT64-key hash join
+(`radix_join`); and the key set of a single-INT64-key SEMI or ANTI join
+(`semi_join`, `semi_join_tasks`); and the joins whose condition carries a
+residual predicate (`nested_loop_join`, `residual_mask_eval`), with the
+parallel SEMI / ANTI mark join (`residual_semi_anti_parallel`) and their
+witnesses (`residual_latemat_counter`, `residual_mark_counter`); the join
+probe over whole batches, every join type and strategy (`join_probe`), with
+the sort-merge joins (`join_probe_sort_merge`, `sort_merge_join_outer`) and
+the join output schema (`join_output_schema`); and the streaming join probe
+operators over a morsel: the single-key `JoinProbeOp` (`join_probe_op`, its
+worker slots and helpers `join_probe_op_state`, its deferred drain
+`join_probe_op_deferred`, the 4-byte index sink `join_probe_narrow`) and the
+composite-key `MultiKeyJoinProbeOp` (`multi_key_probe_op`). Float keys follow the query
+semantics' float model.
 Settings are set once per process from flags (`join_probe_settings`); nothing
 here reads the environment.
 

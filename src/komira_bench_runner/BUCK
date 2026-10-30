@@ -5,7 +5,9 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
 # before anything is timed, times warm and cold runs of both engines at the
 # same thread count and memory limit, and fills a `BenchResult`
 # (komira_bench_report) written as result.json. The komira side is a trait
-# (`EngineArm`); the arm that exists today refuses every query by name. See
+# (`EngineArm`); the arm of the program is `KomiraArm`, which hands the query
+# text to `run_sql` (komira_sdk_exec) and refuses by name what the engine
+# refuses; `RefusalArm` refuses everything and is for tests. See
 # __init__.mojo and docs/design/lowering_and_pipeline.md section 7.4, of which
 # it implements the thread count on both engines, cold and warm reported
 # separately, results checked before timing with the stated float tolerance,
@@ -21,6 +23,12 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
 #   dropper that live in the test and a manual clock: a matching answer is
 #   timed, a wrong one is recorded and never timed, a refusal is listed, cold
 #   and warm are separate results, and the files round-trip.
+# - test_komira_arm: the real engine arm in the same run over a lineitem-shaped
+#   Parquet file and a DuckDB stand-in: TPC-H Q6's corpus text equals an
+#   independently computed answer and is timed, a join is listed as refused, a
+#   wrong answer is recorded and not timed, an uncounted run returns the checked
+#   run's row count, cold reps prepare a new context, and the conversion of the
+#   engine's batches (DECIMAL exact, DATE as text, NULLs).
 mojo_library(
     name = "komira_bench_runner",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo", "main/**/*.mojo"]),
@@ -29,14 +37,22 @@ mojo_library(
         "//src/komira_bench_data:komira_bench_data",
         "//src/komira_bench_duckdb:komira_bench_duckdb",
         "//src/komira_bench_report:komira_bench_report",
+        "//src/komira_arrow:komira_arrow",
+        "//src/komira_buffer:komira_buffer",
         "//src/komira_crypto:komira_crypto",
+        "//src/komira_scalar_arithmetic:komira_scalar_arithmetic",
+        "//src/komira_sdk_exec:komira_sdk_exec",
     ],
     test_deps = [
+        "//src/komira_bench_corpus:komira_bench_corpus",
+        "//src/komira_parquet_writer:komira_parquet_writer",
+        "//src/komira_pipeline_exec:komira_pipeline_exec",
         "//tools/build/mojo/runtime_paths:komira_runtime_paths",
     ],
     test_srcs = [
         "tests/test_entrypoint.mojo",
         "tests/test_inputs.mojo",
+        "tests/test_komira_arm.mojo",
         "tests/test_runner.mojo",
     ],
     visibility = ["PUBLIC"],

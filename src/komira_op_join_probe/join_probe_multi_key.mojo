@@ -36,7 +36,10 @@ from komira_async.runtime.local_dispatcher import LocalDispatcher
 from .join_multi_key import (
     MultiKeyColumns,
 )
-from .join_key_extract import extract_join_key_columns_typed
+from .join_key_extract import (
+    extract_join_key_columns_typed,
+    join_key_pairs_as_float64,
+)
 from .join_multi_key_builder import MultiKeyHashJoinBuilder
 from .join_multi_key_filter import multi_key_probe_semi, multi_key_probe_anti
 from .join_multi_key_parallel import parallel_multi_key_inner_probe_into
@@ -190,6 +193,11 @@ def execute_multi_key_join_probe(
 
     Returns:
         The joined result batch.
+
+    Raises:
+        On a residual predicate, a probe algorithm other than `JOIN_ALGO_HASH`,
+        a STRING key paired with a numeric key (`join_key_pairs_as_float64`),
+        or a join type other than INNER, LEFT, SEMI or ANTI.
     """
     var num_probe_rows = probe_batch.num_rows()
     var num_build_rows = build_batch.num_rows()
@@ -218,6 +226,12 @@ def execute_multi_key_join_probe(
             + " for multi-key path. INNER / SEMI / ANTI / LEFT supported."
         )
 
+    # A pair of an integer key and a FLOAT64 key compares as FLOAT64 on both
+    # sides (DuckDB's common type); a STRING against a number raises here.
+    var as_float64 = join_key_pairs_as_float64(
+        probe_batch, op.probe_left_keys, build_batch, op.probe_right_keys
+    )
+
     if num_probe_rows == 0 or (
         num_build_rows == 0 and (join_type == JOIN_INNER or join_type == JOIN_SEMI)
     ):
@@ -230,6 +244,7 @@ def execute_multi_key_join_probe(
         Optional[
             Pointer[LocalDispatcher[NoopSink], origin_of(dispatcher)]
         ](Pointer(to=dispatcher)),
+        as_float64,
     )
     var probe_keys = extract_join_key_columns_typed[
         True, LocalDispatcher[NoopSink], origin_of(dispatcher)
@@ -238,6 +253,7 @@ def execute_multi_key_join_probe(
         Optional[
             Pointer[LocalDispatcher[NoopSink], origin_of(dispatcher)]
         ](Pointer(to=dispatcher)),
+        as_float64,
     )
 
     if join_type == JOIN_SEMI:

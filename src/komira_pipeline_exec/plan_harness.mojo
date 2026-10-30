@@ -11,7 +11,8 @@
 #   * a sample batch and readers for what comes out of a plan.
 #
 # `with_agg_sink` turns a segment into an ungrouped aggregation and
-# `ungrouped_agg_data` builds the sink data the builder keeps for it.
+# `ungrouped_agg_data` builds the sink data the builder keeps for it;
+# `with_sort_sink` turns one into the in-memory sort.
 #
 # The sample batch has three columns:
 #   a  INT64, no NULL, row r holds r
@@ -36,12 +37,15 @@ from komira_physical_plan.physical_plan import (
     AggSinkData,
     EDGE_E3_PUBLISH_WAIT,
     KEY_DTYPE_NONE,
+    KEY_DTYPE_STRING,
     MorselOp,
     ORDER_NONE,
     SegmentDescPod,
     SINK_AGG,
     SINK_COLLECT,
     SINK_ORIENT_COLUMNAR,
+    SINK_ORIENT_DICT_ENCODED,
+    SINK_SORT,
     SOURCE_BATCH,
     SOURCE_PARQUET,
     SOURCE_SINK_OUTPUT,
@@ -149,6 +153,16 @@ def with_agg_sink(var desc: SegmentDescPod, param_id: Int) -> SegmentDescPod:
     return desc^
 
 
+def with_sort_sink(var desc: SegmentDescPod, param_id: Int) -> SegmentDescPod:
+    """`desc` with its sink changed to the in-memory sort whose data the
+    builder holds as `param_id` (`RealBuilder.add_sort_sink`)."""
+    desc.sink_kind = SINK_SORT
+    desc.sink_key_dtype = KEY_DTYPE_NONE
+    desc.sink_orientation = SINK_ORIENT_COLUMNAR
+    desc.sink_param_id = param_id
+    return desc^
+
+
 def ungrouped_agg_data(
     var aggs: Slab[AggExpr], var output_schema: Schema
 ) -> AggSinkData:
@@ -165,6 +179,21 @@ def with_group_sink(
     desc.sink_kind = SINK_AGG
     desc.sink_key_dtype = key_dtype
     desc.sink_orientation = SINK_ORIENT_COLUMNAR
+    desc.sink_param_id = param_id
+    return desc^
+
+
+def with_string_group_sink(
+    var desc: SegmentDescPod, param_id: Int, dict_encoded: Bool
+) -> SegmentDescPod:
+    """`desc` with its sink changed to the aggregation keyed by strings, in the
+    DICT_ENCODED row when `dict_encoded` and the COLUMNAR row otherwise, whose
+    data the builder holds as `param_id`."""
+    desc.sink_kind = SINK_AGG
+    desc.sink_key_dtype = KEY_DTYPE_STRING
+    desc.sink_orientation = (
+        SINK_ORIENT_DICT_ENCODED if dict_encoded else SINK_ORIENT_COLUMNAR
+    )
     desc.sink_param_id = param_id
     return desc^
 
