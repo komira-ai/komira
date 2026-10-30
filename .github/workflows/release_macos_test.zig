@@ -550,14 +550,13 @@ test "the macOS set is the packages of packages.bzl minus the excluded ones, in 
     try t.expect(std.mem.indexOf(u8, bzl, "linux-64") == null or std.mem.indexOf(u8, bzl, "\"linux-64/") == null);
     // an excluded package that is no package is refused at load
     try t.expect(std.mem.indexOf(u8, bzl, "which is not a package of release/readme_e2e/packages.bzl") != null);
-    // every excluded name is a package of packages.bzl, and every one names the native target that excludes it
+    // every excluded name (none today: `DARWIN_EXCLUDED = {}`) is a package of packages.bzl, with a reason
     const pk = try readData(ar, &.{"packages.bzl"});
     var in_excluded = false;
-    var excluded: usize = 0;
     var it = std.mem.splitScalar(u8, bzl, '\n');
     while (it.next()) |line| {
         if (std.mem.startsWith(u8, line, "DARWIN_EXCLUDED = {")) {
-            in_excluded = true;
+            in_excluded = !std.mem.endsWith(u8, line, "{}");
             continue;
         }
         if (!in_excluded) continue;
@@ -570,8 +569,9 @@ test "the macOS set is the packages of packages.bzl minus the excluded ones, in 
             std.debug.print("DARWIN_EXCLUDED names {s}, which packages.bzl does not\n", .{name});
             return error.NotAPackage;
         }
-        try t.expect(std.mem.indexOf(u8, line, ":native_") != null);
-        excluded += 1;
+        // the reason follows the name and is not empty
+        try t.expect(line.len > q2 + 5);
     }
-    try t.expect(excluded >= 1);
+    // the definition is found (a rename of the dict must not let this test pass on nothing)
+    try t.expect(std.mem.indexOf(u8, bzl, "\nDARWIN_EXCLUDED = {") != null);
 }
