@@ -14,6 +14,7 @@ kci_deploy_model_proto
 kci_logs
 kci_manifest_proto
 kci_params
+kci_reconciler
 kci_release_channel
 kci_release_machine
 kci_resource_proto
