@@ -16,9 +16,11 @@
 #   sink     SINK_COLLECT         `CollectSink` (`sink_collect`)
 #            SINK_AGG, key NONE   `AggSink` (`sink_agg`), from the `AggSinkData`
 #                                 the descriptor's `sink_param_id` names
+#            SINK_SORT, key NONE  `SortSink` (`sink_sort`), from the `SortSinkData`
+#                                 the descriptor's `sink_param_id` names
 #
 # Anything else (SOURCE_CONCAT, OP_JOIN_PROBE, the grouped aggregation and the
-# sort sinks) is refused by name, because no member serves it yet.
+# other sinks) is refused by name, because no member serves it yet.
 #
 # The workers of a segment each get their own operator instances, built from
 # one set of shared parts the builder keeps per operator (the predicate, the
@@ -57,6 +59,8 @@ from komira_physical_plan.physical_plan import (
     SINK_AGG,
     SINK_COLLECT,
     SINK_ORIENT_COLUMNAR,
+    SINK_SORT,
+    SortSinkData,
     SOURCE_BATCH,
     SOURCE_PARQUET,
     SOURCE_SINK_OUTPUT,
@@ -73,11 +77,11 @@ from .segment_builder import SegmentBuilder
 from .segment_pool import SegmentPool
 from .sink_agg import AggSink
 from .sink_collect import CollectSink
+from .sink_sort import SortSink
 from .source_batch import BatchSource
 from .source_parquet import LocalParquetSource, build_parquet_source
 from .source_sink_output import SinkOutputSource
 from .source_variant import SourceVariant
-from .unused_members import NoSink
 
 
 struct _OpParts(Movable):
@@ -111,7 +115,7 @@ struct RealBuilder[
         SinkOutputSource,
     ]
     comptime Op = OpVariant[FilterOp, MapOp, LimitOp]
-    comptime Sink = PipelineSink[CollectSink, AggSink, NoSink]
+    comptime Sink = PipelineSink[CollectSink, AggSink, SortSink]
 
     # The borrowed cache and pool, kept as pointers (private) because a struct
     # field cannot hold a `ref` argument; the caller's objects outlive the
@@ -121,6 +125,7 @@ struct RealBuilder[
     var _resident: List[RecordBatch]
     var _parts: List[_OpParts]
     var _agg_sinks: List[AggSinkData]
+    var _sort_sinks: List[SortSinkData]
     var _segment_pool: SegmentPool
 
     def __init__(
@@ -133,6 +138,7 @@ struct RealBuilder[
         self._resident = List[RecordBatch]()
         self._parts = List[_OpParts]()
         self._agg_sinks = List[AggSinkData]()
+        self._sort_sinks = List[SortSinkData]()
         self._segment_pool = SegmentPool()
 
     def add_agg_sink(mut self, var data: AggSinkData) -> Int:
@@ -140,6 +146,12 @@ struct RealBuilder[
         `sink_param_id` names."""
         self._agg_sinks.append(data^)
         return len(self._agg_sinks) - 1
+
+    def add_sort_sink(mut self, var data: SortSinkData) -> Int:
+        """Keep `data` for SINK_SORT segments; returns the id their
+        `sink_param_id` names."""
+        self._sort_sinks.append(data^)
+        return len(self._sort_sinks) - 1
 
     def set_memory_budget(mut self, bytes: Int):
         """Bound the memory the sinks of later segment runs may draw, in
@@ -305,13 +317,38 @@ struct RealBuilder[
                         + String(len(self._agg_sinks))
                     )
                 return Self.Sink.second(
-                    AggSink(self._agg_sinks[id], self._segment_pool.share(), desc.seg_id)
+                    AggSink(
+                        self._agg_sinks[id],
+                        self._segment_pool.share(),
+                        desc.seg_id,
+                    )
+                )
+            if desc.sink_kind == SINK_SORT:
+                var id = desc.sink_param_id
+                if id < 0 or id >= len(self._sort_sinks):
+                    raise Error(
+                        "komira_pipeline_exec: segment "
+                        + String(desc.seg_id)
+                        + " names sort sink data "
+                        + String(id)
+                        + ", and the builder holds "
+                        + String(len(self._sort_sinks))
+                    )
+                var rows_schema = self._result_schema(desc, source_schema)
+                return Self.Sink.third(
+                    SortSink(
+                        self._sort_sinks[id],
+                        self._segment_pool.share(),
+                        desc.seg_id,
+                        rows_schema^,
+                    )
                 )
         raise Error(
             "komira_pipeline_exec: the sink of segment "
             + String(desc.seg_id)
             + " is not served; only (SINK_COLLECT, KEY_DTYPE_NONE,"
-            " SINK_ORIENT_COLUMNAR) and (SINK_AGG, KEY_DTYPE_NONE,"
+            " SINK_ORIENT_COLUMNAR), (SINK_AGG, KEY_DTYPE_NONE,"
+            " SINK_ORIENT_COLUMNAR) and (SINK_SORT, KEY_DTYPE_NONE,"
             " SINK_ORIENT_COLUMNAR) are"
         )
 

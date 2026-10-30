@@ -1,4 +1,4 @@
-load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
 
 # The driver of a physical plan: the ready-set scheduler over its segments
 # (`run_plan`, `plan_check`, `edge_policy`), the run of one segment on a
@@ -12,7 +12,9 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # The real members are the sources `source_parquet`, `source_batch` and
 # `source_sink_output`, the operators `op_filter`, `op_project` and `op_limit`,
 # the sinks `sink_collect` and `sink_agg` (the ungrouped aggregation, over
-# `agg_fold` and `agg_output`, drawing memory from `segment_pool`), and
+# `agg_fold` and `agg_output`, drawing memory from `segment_pool`), `sink_sort`
+# (the in-memory sort, over `sort_nulls` and `komira_op_sort`; `sort_harness` is its
+# test table and oracle), and
 # `real_builder` that constructs them from a segment descriptor; `plan_harness`
 # writes descriptors and sample data by hand and `tpch_q6` is Q6 as such a plan
 # with a lineitem-shaped table.
@@ -59,12 +61,20 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #                                 128-bit decimal sums, refusals by name.
 # test_sink_agg_partials          non-empty partials merged: dealing, the merge's
 #                                 overflow refusal, pool return on failure.
+# test_sink_sort                  SINK_SORT by hand: one and two keys, NULLs first and
+#                                 last, ties in input order, four workers' partials,
+#                                 refusals by name, the pool's charge and return.
+# test_sort_plan                  hand-built plans into SINK_SORT: a resident batch, a
+#                                 Parquet scan, a segment's output, no row, a pool
+#                                 too small.
+# test_sort_plan_concurrent       the same sort on threads, run after run, on a
+#                                 runtime stopped and started again.
 # test_tpch_q6                    Q6 over Parquet, end to end, against an
 #                                 oracle and a hand-computed answer.
 # test_tpch_q6_concurrent         Q6 on threads, run after run.
 mojo_library(
     name = "komira_pipeline_exec",
-    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo", "spike/**/*.mojo"]),
     deps = [
         "//src/komira_arrow:komira_arrow",
         "//src/komira_async:komira_async",
@@ -78,6 +88,7 @@ mojo_library(
         "//src/komira_fs:komira_fs",
         "//src/komira_metrics:komira_metrics",
         "//src/komira_morsel:komira_morsel",
+        "//src/komira_op_sort:komira_op_sort",
         "//src/komira_op_sources:komira_op_sources",
         "//src/komira_operator_api:komira_operator_api",
         "//src/komira_parquet:komira_parquet",
@@ -108,10 +119,26 @@ mojo_library(
         "tests/test_sink_agg.mojo",
         "tests/test_sink_agg_partials.mojo",
         "tests/test_sink_collect.mojo",
+        "tests/test_sink_sort.mojo",
+        "tests/test_sort_plan.mojo",
+        "tests/test_sort_plan_concurrent.mojo",
         "tests/test_sources.mojo",
         "tests/test_tpch_q6.mojo",
         "tests/test_tpch_q6_concurrent.mojo",
         "tests/test_variants.mojo",
     ],
     visibility = ["PUBLIC"],
+)
+
+# The dictionary-interning spike of slice 4 (design section 4.3): a standalone
+# program that times interned dictionary codes against hashing every row, the
+# fragment merge, and the string-table memory per worker, on a synthetic
+# workload of growing group count. It checks every layout's counts against a
+# direct count and exits non-zero on a difference. The numbers come from the
+# farm: `./buck2 build komira//src/komira_pipeline_exec:intern_spike[run_check]`
+# runs it remotely and records its stdout; see the header of the file.
+mojo_binary(
+    name = "intern_spike",
+    srcs = ["spike/intern_spike.mojo"],
+    deps = [],
 )
