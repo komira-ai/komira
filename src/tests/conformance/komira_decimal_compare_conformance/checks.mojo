@@ -140,7 +140,8 @@ def _check(
     """DuckDB keeps `want_rows` rows (id sum `want_sum`) for `where_text`, or,
     when `want_errors` is above 0, raises a conversion error for that many
     rows: then the query must be refused, with a reason that names the
-    DECIMAL(38, ...) type DuckDB's message names too."""
+    type DuckDB's message names too (DECIMAL(38, s), or INT32 for an integer
+    overflow)."""
     var got = _ask(ctx, table, where_text)
     if want_errors > 0:
         if got.refusal.byte_length() == 0:
@@ -154,11 +155,13 @@ def _check(
                 + String(got.id_sum)
                 + ")"
             )
-        elif got.refusal.find("DECIMAL(38,") < 0:
+        elif (
+            got.refusal.find("DECIMAL(") < 0 and got.refusal.find("INT") < 0
+        ):
             problems.append(
                 where_text
-                + ": DuckDB raises a conversion error, komira refuses with a"
-                " reason that does not name the DECIMAL(38, s) type: "
+                + ": DuckDB raises an error, komira refuses with a reason that"
+                " names no DECIMAL or INT type: "
                 + got.refusal
             )
         return

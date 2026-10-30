@@ -294,6 +294,12 @@ def decimal_fold_binary(
     )
 
 
+def integer_fold_binary(
+    op: UInt8, a: ScalarValue, b: ScalarValue
+) raises -> ScalarValue:
+    return a.copy()
+
+
 def decimal_negate(a: ScalarValue) -> Optional[ScalarValue]:
     """`-a` for a DECIMAL literal, with its type; `None` for anything else."""
     var xo = _operand(a)

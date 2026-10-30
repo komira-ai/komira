@@ -39,6 +39,12 @@ sql_oracle(
 )
 
 sql_oracle(
+    name = "table_f",
+    srcs = ["oracle/table_f.sql", "oracle/write_f.sql"],
+    outputs = ["tf.parquet"],
+)
+
+sql_oracle(
     name = "table_x",
     srcs = ["oracle/table_x.sql", "oracle/write_x.sql"],
     outputs = ["tx.parquet"],
@@ -49,6 +55,12 @@ sql_oracle(
     srcs = ["oracle/table.sql", "oracle/compare_" + col + ".sql"],
     outputs = ["compare_" + col + ".tsv"],
 ) for col in ["a", "b", "c", "d", "e", "f", "m", "g", "h"]]
+
+[sql_oracle(
+    name = "compare_" + col,
+    srcs = ["oracle/table_f.sql", "oracle/compare_" + col + ".sql"],
+    outputs = ["compare_" + col + ".tsv"],
+) for col in ["fb", "fc", "fd", "fe", "ff", "fg", "fh"]]
 
 [sql_oracle(
     name = "compare_" + col,
@@ -168,6 +180,13 @@ mojo_library(
         "tests/test_column_g.mojo",
         "tests/test_column_h_1.mojo",
         "tests/test_column_h_2.mojo",
+        "tests/test_column_fb.mojo",
+        "tests/test_column_fc.mojo",
+        "tests/test_column_fd.mojo",
+        "tests/test_column_fe.mojo",
+        "tests/test_column_ff.mojo",
+        "tests/test_column_fg.mojo",
+        "tests/test_column_fh.mojo",
         "tests/test_column_xq.mojo",
         "tests/test_column_xr.mojo",
         "tests/test_column_xs.mojo",
@@ -247,6 +266,34 @@ mojo_library(
         "tests/test_column_h_2.mojo": {
             "t.parquet": ":table[t.parquet]",
             "compare_h.tsv": ":compare_h[compare_h.tsv]",
+        },
+        "tests/test_column_fb.mojo": {
+            "tf.parquet": ":table_f[tf.parquet]",
+            "compare_fb.tsv": ":compare_fb[compare_fb.tsv]",
+        },
+        "tests/test_column_fc.mojo": {
+            "tf.parquet": ":table_f[tf.parquet]",
+            "compare_fc.tsv": ":compare_fc[compare_fc.tsv]",
+        },
+        "tests/test_column_fd.mojo": {
+            "tf.parquet": ":table_f[tf.parquet]",
+            "compare_fd.tsv": ":compare_fd[compare_fd.tsv]",
+        },
+        "tests/test_column_fe.mojo": {
+            "tf.parquet": ":table_f[tf.parquet]",
+            "compare_fe.tsv": ":compare_fe[compare_fe.tsv]",
+        },
+        "tests/test_column_ff.mojo": {
+            "tf.parquet": ":table_f[tf.parquet]",
+            "compare_ff.tsv": ":compare_ff[compare_ff.tsv]",
+        },
+        "tests/test_column_fg.mojo": {
+            "tf.parquet": ":table_f[tf.parquet]",
+            "compare_fg.tsv": ":compare_fg[compare_fg.tsv]",
+        },
+        "tests/test_column_fh.mojo": {
+            "tf.parquet": ":table_f[tf.parquet]",
+            "compare_fh.tsv": ":compare_fh[compare_fh.tsv]",
         },
         "tests/test_column_xq.mojo": {
             "tx.parquet": ":table_x[tx.parquet]",

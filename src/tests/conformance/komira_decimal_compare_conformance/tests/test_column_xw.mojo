@@ -2,7 +2,7 @@
 # DECIMAL column `xw` vs literal comparisons through run_sql, against DuckDB
 # =============================================================================
 #
-# Column xw is DECIMAL(38, 10) and holds +-10^27: widening it overflows from scale 11 on (scale 10 answers; `0.0000000001000` is scale 13 and raises).
+# Column xw is DECIMAL(38, 10) and holds +-10^27: widening it overflows from scale 11 on (scale 10 answers, even when it is written with trailing zeros as 13 digits: that is scale 13 and raises).
 #
 # What this test proves, and the defect it catches:
 #   * test_column_xw_matches_duckdb: for every literal of

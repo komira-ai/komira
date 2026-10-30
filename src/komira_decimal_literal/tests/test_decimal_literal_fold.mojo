@@ -48,6 +48,13 @@
 #     product with a scale past 38 raises ("Needed scale 56"). Catches a value
 #     folded into a type too narrow for it, and an error DuckDB raises
 #     answered.
+#   * test_integer_arithmetic_keeps_the_integer_type /
+#     test_integer_arithmetic_raises_where_duckdb_does: `+ - *` over two
+#     integer-typed constants is INTEGER (10 digits), BIGINT (19) or HUGEINT
+#     (38) by the wider operand, with no promotion: a result outside the type is
+#     DuckDB's "Overflow in addition of INT32". Catches an integer sub-expression
+#     that falls back to a float, a BIGINT-typed result given INTEGER's width by
+#     its value, and an overflow that wraps or promotes.
 #   * test_pairs_the_fold_does_not_cover: two integers, a float, a typeless
 #     decimal, `/`, a comparison, a non-literal. Catches a pair folded by a
 #     rule that does not own it.
@@ -59,6 +66,7 @@ from std.testing import TestSuite, assert_equal, assert_true
 from komira_decimal_literal.decimal_literal import (
     decimal_fold_binary,
     decimal_negate,
+    integer_fold_binary,
 )
 from komira_plan_expr.expr import BIN_ADD, BIN_SUB, BIN_MUL, BIN_DIV, BIN_LT
 from komira_plan_expr.scalar_value import ScalarValue
@@ -151,9 +159,10 @@ def test_integers_take_part_as_decimal_with_duckdbs_widths() raises:
     _expect(BIN_ADD, _i(24), _d(5, 2, 1), 245, 12, 1)
     # The integer on the right.
     _expect(BIN_SUB, _d(5, 2, 1), _i(1), -5, 12, 1)
-    # INT32 edges: 10 digits; one past: 19.
+    # INT32 edges: 10 digits; one past: 19 (and -2147483648, below).
     _expect(BIN_ADD, _i(2147483647), _d(5, 2, 1), 21474836475, 12, 1)
-    _expect(BIN_ADD, _i(-2147483648), _d(5, 2, 1), -21474836475, 12, 1)
+    # -2147483648 is a BIGINT in DuckDB (the minus applies to the BIGINT 2147483648).
+    _expect(BIN_ADD, _i(-2147483648), _d(5, 2, 1), -21474836475, 21, 1)
     _expect(BIN_ADD, _i(2147483648), _d(5, 2, 1), 21474836485, 21, 1)
     _expect(BIN_ADD, _i(-2147483649), _d(5, 2, 1), -21474836485, 21, 1)
     # 3000000000 * 0.5: DECIMAL(19, 0) * DECIMAL(2, 1).
@@ -346,12 +355,75 @@ def test_negate() raises:
     assert_true(not decimal_negate(ScalarValue.from_float(0.5)), "a float")
 
 
+def _int(value: Int, precision: Int) -> ScalarValue:
+    """An integer-typed constant: INTEGER is (10, 0), BIGINT (19, 0), HUGEINT
+    (38, 0)."""
+    return ScalarValue.decimal128_i128(I128(value), precision, 0)
+
+
+def _int_expect(op: UInt8, a: ScalarValue, b: ScalarValue, value: Int, precision: Int) raises:
+    var got = integer_fold_binary(op, a, b)
+    assert_equal(String(got), String(_int(value, precision)))
+
+
+def test_integer_arithmetic_keeps_the_integer_type() raises:
+    # DuckDB: typeof(1 + 2) is INTEGER, 1 - 2 - 3 is INTEGER -4, 2147483648 + 0
+    # BIGINT, - 2147483647 - 1 is INTEGER -2147483648.
+    _int_expect(BIN_ADD, _int(1, 10), _int(2, 10), 3, 10)
+    _int_expect(BIN_SUB, _int(1, 10), _int(2, 10), -1, 10)
+    _int_expect(BIN_MUL, _int(2, 10), _int(3, 10), 6, 10)
+    _int_expect(BIN_SUB, _int(-2147483647, 10), _int(1, 10), -2147483648, 10)
+    _int_expect(BIN_ADD, _int(2147483647, 10), _int(-2147483647, 10), 0, 10)
+    # One BIGINT operand makes a BIGINT, whatever the value.
+    _int_expect(BIN_ADD, _int(3000000000, 19), _int(1, 10), 3000000001, 19)
+    _int_expect(BIN_SUB, _int(3000000000, 19), _int(2999999999, 19), 1, 19)
+    _int_expect(BIN_SUB, _int(-2147483648, 19), _int(1, 10), -2147483649, 19)
+    _int_expect(BIN_MUL, _int(3000000000, 19), _int(3000000000, 19), 9000000000000000000, 19)
+    # A HUGEINT operand makes a HUGEINT.
+    var big = ScalarValue.decimal128_i128(I128(Int(Int64.MAX)) + I128(1), 38, 0)
+    var sum = integer_fold_binary(BIN_ADD, _int(1, 10), big)
+    assert_equal(
+        String(sum),
+        String(ScalarValue.decimal128_i128(I128(Int(Int64.MAX)) + I128(2), 38, 0)),
+    )
+
+
+def test_integer_arithmetic_raises_where_duckdb_does() raises:
+    # No promotion: INTEGER + INTEGER past int32 is an error, as are BIGINT
+    # past int64 and HUGEINT past 2^127 - 1.
+    var m = _refusal_int(BIN_ADD, _int(2147483647, 10), _int(1, 10))
+    assert_true(m.find("Overflow in addition of INT32") >= 0, m)
+    m = _refusal_int(BIN_MUL, _int(2147483647, 10), _int(2, 10))
+    assert_true(m.find("Overflow in multiplication of INT32") >= 0, m)
+    m = _refusal_int(BIN_SUB, _int(2147483647, 10), _int(-1, 10))
+    assert_true(m.find("Overflow in subtraction of INT32") >= 0, m)
+    m = _refusal_int(BIN_SUB, _int(-2147483647, 10), _int(2, 10))
+    assert_true(m.find("INT32") >= 0, m)
+    m = _refusal_int(BIN_ADD, _int(Int(Int64.MAX), 19), _int(1, 10))
+    assert_true(m.find("Overflow in addition of INT64") >= 0, m)
+    m = _refusal_int(BIN_MUL, _int(Int(Int64.MAX), 19), _int(2, 10))
+    assert_true(m.find("INT64") >= 0, m)
+    var max128 = ScalarValue.decimal128_i128((I128(1) << I128(127)) - I128(1), 38, 0)
+    m = _refusal_int(BIN_ADD, max128, _int(1, 10))
+    assert_true(m.find("INT128") >= 0, m)
+
+
+def _refusal_int(op: UInt8, a: ScalarValue, b: ScalarValue) -> String:
+    try:
+        _ = integer_fold_binary(op, a, b)
+    except e:
+        return String(e)
+    return String("")
+
+
 def main() raises:
     var suite = TestSuite()
     suite.test[test_add_and_subtract]()
     suite.test[test_multiply]()
     suite.test[test_integers_take_part_as_decimal_with_duckdbs_widths]()
     suite.test[test_limits]()
+    suite.test[test_integer_arithmetic_keeps_the_integer_type]()
+    suite.test[test_integer_arithmetic_raises_where_duckdb_does]()
     suite.test[test_a_result_wider_than_18_digits_from_narrow_operands_is_cut_to_18]()
     suite.test[test_a_hugeint_sized_integer_takes_part_as_decimal_38]()
     suite.test[test_a_result_that_does_not_fit_its_cut_width_is_refused]()

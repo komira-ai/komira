@@ -357,5 +357,141 @@ SELECT * FROM (
     (SELECT count(*) FROM t WHERE TRY(a >= -1000000000000000000000000000000000000)) AS ge_n, (SELECT CAST(coalesce(sum(id), 0) AS BIGINT) FROM t WHERE TRY(a >= -1000000000000000000000000000000000000)) AS ge_s, (SELECT count(*) FROM t WHERE TRY(a >= -1000000000000000000000000000000000000) IS NULL AND a IS NOT NULL) AS ge_e,
     (SELECT count(*) FROM t WHERE TRY(a = -1000000000000000000000000000000000000)) AS eq_n, (SELECT CAST(coalesce(sum(id), 0) AS BIGINT) FROM t WHERE TRY(a = -1000000000000000000000000000000000000)) AS eq_s, (SELECT count(*) FROM t WHERE TRY(a = -1000000000000000000000000000000000000) IS NULL AND a IS NOT NULL) AS eq_e,
     (SELECT count(*) FROM t WHERE TRY(a <> -1000000000000000000000000000000000000)) AS ne_n, (SELECT CAST(coalesce(sum(id), 0) AS BIGINT) FROM t WHERE TRY(a <> -1000000000000000000000000000000000000)) AS ne_s, (SELECT count(*) FROM t WHERE TRY(a <> -1000000000000000000000000000000000000) IS NULL AND a IS NOT NULL) AS ne_e
+  UNION ALL
+  SELECT 44 AS n, 'a' AS col, '(1+2)*0.1' AS lit,
+    (SELECT count(*) FROM t WHERE TRY(a < (1+2)*0.1)) AS lt_n, (SELECT CAST(coalesce(sum(id), 0) AS BIGINT) FROM t WHERE TRY(a < (1+2)*0.1)) AS lt_s, (SELECT count(*) FROM t WHERE TRY(a < (1+2)*0.1) IS NULL AND a IS NOT NULL) AS lt_e,
+    (SELECT count(*) FROM t WHERE TRY(a <= (1+2)*0.1)) AS le_n, (SELECT CAST(coalesce(sum(id), 0) AS BIGINT) FROM t WHERE TRY(a <= (1+2)*0.1)) AS le_s, (SELECT count(*) FROM t WHERE TRY(a <= (1+2)*0.1) IS NULL AND a IS NOT NULL) AS le_e,
+    (SELECT count(*) FROM t WHERE TRY(a > (1+2)*0.1)) AS gt_n, (SELECT CAST(coalesce(sum(id), 0) AS BIGINT) FROM t WHERE TRY(a > (1+2)*0.1)) AS gt_s, (SELECT count(*) FROM t WHERE TRY(a > (1+2)*0.1) IS NULL AND a IS NOT NULL) AS gt_e,
+    (SELECT count(*) FROM t WHERE TRY(a >= (1+2)*0.1)) AS ge_n, (SELECT CAST(coalesce(sum(id), 0) AS BIGINT) FROM t WHERE TRY(a >= (1+2)*0.1)) AS ge_s, (SELECT count(*) FROM t WHERE TRY(a >= (1+2)*0.1) IS NULL AND a IS NOT NULL) AS ge_e,
+    (SELECT count(*) FROM t WHERE TRY(a = (1+2)*0.1)) AS eq_n, (SELECT CAST(coalesce(sum(id), 0) AS BIGINT) FROM t WHERE TRY(a = (1+2)*0.1)) AS eq_s, (SELECT count(*) FROM t WHERE TRY(a = (1+2)*0.1) IS NULL AND a IS NOT NULL) AS eq_e,
+    (SELECT count(*) FROM t WHERE TRY(a <> (1+2)*0.1)) AS ne_n, (SELECT CAST(coalesce(sum(id), 0) AS BIGINT) FROM t WHERE TRY(a <> (1+2)*0.1)) AS ne_s, (SELECT count(*) FROM t WHERE TRY(a <> (1+2)*0.1) IS NULL AND a IS NOT NULL) AS ne_e
+  UNION ALL
+  SELECT 45 AS n, 'a' AS col, '2*3*0.05' AS lit,
+    (SELECT count(*) FROM t WHERE TRY(a < 2*3*0.05)) AS lt_n, (SELECT CAST(coalesce(sum(id), 0) AS BIGINT) FROM t WHERE TRY(a < 2*3*0.05)) AS lt_s, (SELECT count(*) FROM t WHERE TRY(a < 2*3*0.05) IS NULL AND a IS NOT NULL) AS lt_e,
+    (SELECT count(*) FROM t WHERE TRY(a <= 2*3*0.05)) AS le_n, (SELECT CAST(coalesce(sum(id), 0) AS BIGINT) FROM t WHERE TRY(a <= 2*3*0.05)) AS le_s, (SELECT count(*) FROM t WHERE TRY(a <= 2*3*0.05) IS NULL AND a IS NOT NULL) AS le_e,
+    (SELECT count(*) FROM t WHERE TRY(a > 2*3*0.05)) AS gt_n, (SELECT CAST(coalesce(sum(id), 0) AS BIGINT) FROM t WHERE TRY(a > 2*3*0.05)) AS gt_s, (SELECT count(*) FROM t WHERE TRY(a > 2*3*0.05) IS NULL AND a IS NOT NULL) AS gt_e,
+    (SELECT count(*) FROM t WHERE TRY(a >= 2*3*0.05)) AS ge_n, (SELECT CAST(coalesce(sum(id), 0) AS BIGINT) FROM t WHERE TRY(a >= 2*3*0.05)) AS ge_s, (SELECT count(*) FROM t WHERE TRY(a >= 2*3*0.05) IS NULL AND a IS NOT NULL) AS ge_e,
+    (SELECT count(*) FROM t WHERE TRY(a = 2*3*0.05)) AS eq_n, (SELECT CAST(coalesce(sum(id), 0) AS BIGINT) FROM t WHERE TRY(a = 2*3*0.05)) AS eq_s, (SELECT count(*) FROM t WHERE TRY(a = 2*3*0.05) IS NULL AND a IS NOT NULL) AS eq_e,
+    (SELECT count(*) FROM t WHERE TRY(a <> 2*3*0.05)) AS ne_n, (SELECT CAST(coalesce(sum(id), 0) AS BIGINT) FROM t WHERE TRY(a <> 2*3*0.05)) AS ne_s, (SELECT count(*) FROM t WHERE TRY(a <> 2*3*0.05) IS NULL AND a IS NOT NULL) AS ne_e
+  UNION ALL
+  SELECT 46 AS n, 'a' AS col, '0.1*(1+2)' AS lit,
+    (SELECT count(*) FROM t WHERE TRY(a < 0.1*(1+2))) AS lt_n, (SELECT CAST(coalesce(sum(id), 0) AS BIGINT) FROM t WHERE TRY(a < 0.1*(1+2))) AS lt_s, (SELECT count(*) FROM t WHERE TRY(a < 0.1*(1+2)) IS NULL AND a IS NOT NULL) AS lt_e,
+    (SELECT count(*) FROM t WHERE TRY(a <= 0.1*(1+2))) AS le_n, (SELECT CAST(coalesce(sum(id), 0) AS BIGINT) FROM t WHERE TRY(a <= 0.1*(1+2))) AS le_s, (SELECT count(*) FROM t WHERE TRY(a <= 0.1*(1+2)) IS NULL AND a IS NOT NULL) AS le_e,
+    (SELECT count(*) FROM t WHERE TRY(a > 0.1*(1+2))) AS gt_n, (SELECT CAST(coalesce(sum(id), 0) AS BIGINT) FROM t WHERE TRY(a > 0.1*(1+2))) AS gt_s, (SELECT count(*) FROM t WHERE TRY(a > 0.1*(1+2)) IS NULL AND a IS NOT NULL) AS gt_e,
+    (SELECT count(*) FROM t WHERE TRY(a >= 0.1*(1+2))) AS ge_n, (SELECT CAST(coalesce(sum(id), 0) AS BIGINT) FROM t WHERE TRY(a >= 0.1*(1+2))) AS ge_s, (SELECT count(*) FROM t WHERE TRY(a >= 0.1*(1+2)) IS NULL AND a IS NOT NULL) AS ge_e,
+    (SELECT count(*) FROM t WHERE TRY(a = 0.1*(1+2))) AS eq_n, (SELECT CAST(coalesce(sum(id), 0) AS BIGINT) FROM t WHERE TRY(a = 0.1*(1+2))) AS eq_s, (SELECT count(*) FROM t WHERE TRY(a = 0.1*(1+2)) IS NULL AND a IS NOT NULL) AS eq_e,
+    (SELECT count(*) FROM t WHERE TRY(a <> 0.1*(1+2))) AS ne_n, (SELECT CAST(coalesce(sum(id), 0) AS BIGINT) FROM t WHERE TRY(a <> 0.1*(1+2))) AS ne_s, (SELECT count(*) FROM t WHERE TRY(a <> 0.1*(1+2)) IS NULL AND a IS NOT NULL) AS ne_e
+  UNION ALL
+  SELECT 47 AS n, 'a' AS col, '(5-3)+0.07' AS lit,
+    (SELECT count(*) FROM t WHERE TRY(a < (5-3)+0.07)) AS lt_n, (SELECT CAST(coalesce(sum(id), 0) AS BIGINT) FROM t WHERE TRY(a < (5-3)+0.07)) AS lt_s, (SELECT count(*) FROM t WHERE TRY(a < (5-3)+0.07) IS NULL AND a IS NOT NULL) AS lt_e,
+    (SELECT count(*) FROM t WHERE TRY(a <= (5-3)+0.07)) AS le_n, (SELECT CAST(coalesce(sum(id), 0) AS BIGINT) FROM t WHERE TRY(a <= (5-3)+0.07)) AS le_s, (SELECT count(*) FROM t WHERE TRY(a <= (5-3)+0.07) IS NULL AND a IS NOT NULL) AS le_e,
+    (SELECT count(*) FROM t WHERE TRY(a > (5-3)+0.07)) AS gt_n, (SELECT CAST(coalesce(sum(id), 0) AS BIGINT) FROM t WHERE TRY(a > (5-3)+0.07)) AS gt_s, (SELECT count(*) FROM t WHERE TRY(a > (5-3)+0.07) IS NULL AND a IS NOT NULL) AS gt_e,
+    (SELECT count(*) FROM t WHERE TRY(a >= (5-3)+0.07)) AS ge_n, (SELECT CAST(coalesce(sum(id), 0) AS BIGINT) FROM t WHERE TRY(a >= (5-3)+0.07)) AS ge_s, (SELECT count(*) FROM t WHERE TRY(a >= (5-3)+0.07) IS NULL AND a IS NOT NULL) AS ge_e,
+    (SELECT count(*) FROM t WHERE TRY(a = (5-3)+0.07)) AS eq_n, (SELECT CAST(coalesce(sum(id), 0) AS BIGINT) FROM t WHERE TRY(a = (5-3)+0.07)) AS eq_s, (SELECT count(*) FROM t WHERE TRY(a = (5-3)+0.07) IS NULL AND a IS NOT NULL) AS eq_e,
+    (SELECT count(*) FROM t WHERE TRY(a <> (5-3)+0.07)) AS ne_n, (SELECT CAST(coalesce(sum(id), 0) AS BIGINT) FROM t WHERE TRY(a <> (5-3)+0.07)) AS ne_s, (SELECT count(*) FROM t WHERE TRY(a <> (5-3)+0.07) IS NULL AND a IS NOT NULL) AS ne_e
+  UNION ALL
+  SELECT 48 AS n, 'a' AS col, '2147483647 + 0.5' AS lit,
+    (SELECT count(*) FROM t WHERE TRY(a < 2147483647 + 0.5)) AS lt_n, (SELECT CAST(coalesce(sum(id), 0) AS BIGINT) FROM t WHERE TRY(a < 2147483647 + 0.5)) AS lt_s, (SELECT count(*) FROM t WHERE TRY(a < 2147483647 + 0.5) IS NULL AND a IS NOT NULL) AS lt_e,
+    (SELECT count(*) FROM t WHERE TRY(a <= 2147483647 + 0.5)) AS le_n, (SELECT CAST(coalesce(sum(id), 0) AS BIGINT) FROM t WHERE TRY(a <= 2147483647 + 0.5)) AS le_s, (SELECT count(*) FROM t WHERE TRY(a <= 2147483647 + 0.5) IS NULL AND a IS NOT NULL) AS le_e,
+    (SELECT count(*) FROM t WHERE TRY(a > 2147483647 + 0.5)) AS gt_n, (SELECT CAST(coalesce(sum(id), 0) AS BIGINT) FROM t WHERE TRY(a > 2147483647 + 0.5)) AS gt_s, (SELECT count(*) FROM t WHERE TRY(a > 2147483647 + 0.5) IS NULL AND a IS NOT NULL) AS gt_e,
+    (SELECT count(*) FROM t WHERE TRY(a >= 2147483647 + 0.5)) AS ge_n, (SELECT CAST(coalesce(sum(id), 0) AS BIGINT) FROM t WHERE TRY(a >= 2147483647 + 0.5)) AS ge_s, (SELECT count(*) FROM t WHERE TRY(a >= 2147483647 + 0.5) IS NULL AND a IS NOT NULL) AS ge_e,
+    (SELECT count(*) FROM t WHERE TRY(a = 2147483647 + 0.5)) AS eq_n, (SELECT CAST(coalesce(sum(id), 0) AS BIGINT) FROM t WHERE TRY(a = 2147483647 + 0.5)) AS eq_s, (SELECT count(*) FROM t WHERE TRY(a = 2147483647 + 0.5) IS NULL AND a IS NOT NULL) AS eq_e,
+    (SELECT count(*) FROM t WHERE TRY(a <> 2147483647 + 0.5)) AS ne_n, (SELECT CAST(coalesce(sum(id), 0) AS BIGINT) FROM t WHERE TRY(a <> 2147483647 + 0.5)) AS ne_s, (SELECT count(*) FROM t WHERE TRY(a <> 2147483647 + 0.5) IS NULL AND a IS NOT NULL) AS ne_e
+  UNION ALL
+  SELECT 49 AS n, 'a' AS col, '-2147483648 + 0.5' AS lit,
+    (SELECT count(*) FROM t WHERE TRY(a < -2147483648 + 0.5)) AS lt_n, (SELECT CAST(coalesce(sum(id), 0) AS BIGINT) FROM t WHERE TRY(a < -2147483648 + 0.5)) AS lt_s, (SELECT count(*) FROM t WHERE TRY(a < -2147483648 + 0.5) IS NULL AND a IS NOT NULL) AS lt_e,
+    (SELECT count(*) FROM t WHERE TRY(a <= -2147483648 + 0.5)) AS le_n, (SELECT CAST(coalesce(sum(id), 0) AS BIGINT) FROM t WHERE TRY(a <= -2147483648 + 0.5)) AS le_s, (SELECT count(*) FROM t WHERE TRY(a <= -2147483648 + 0.5) IS NULL AND a IS NOT NULL) AS le_e,
+    (SELECT count(*) FROM t WHERE TRY(a > -2147483648 + 0.5)) AS gt_n, (SELECT CAST(coalesce(sum(id), 0) AS BIGINT) FROM t WHERE TRY(a > -2147483648 + 0.5)) AS gt_s, (SELECT count(*) FROM t WHERE TRY(a > -2147483648 + 0.5) IS NULL AND a IS NOT NULL) AS gt_e,
+    (SELECT count(*) FROM t WHERE TRY(a >= -2147483648 + 0.5)) AS ge_n, (SELECT CAST(coalesce(sum(id), 0) AS BIGINT) FROM t WHERE TRY(a >= -2147483648 + 0.5)) AS ge_s, (SELECT count(*) FROM t WHERE TRY(a >= -2147483648 + 0.5) IS NULL AND a IS NOT NULL) AS ge_e,
+    (SELECT count(*) FROM t WHERE TRY(a = -2147483648 + 0.5)) AS eq_n, (SELECT CAST(coalesce(sum(id), 0) AS BIGINT) FROM t WHERE TRY(a = -2147483648 + 0.5)) AS eq_s, (SELECT count(*) FROM t WHERE TRY(a = -2147483648 + 0.5) IS NULL AND a IS NOT NULL) AS eq_e,
+    (SELECT count(*) FROM t WHERE TRY(a <> -2147483648 + 0.5)) AS ne_n, (SELECT CAST(coalesce(sum(id), 0) AS BIGINT) FROM t WHERE TRY(a <> -2147483648 + 0.5)) AS ne_s, (SELECT count(*) FROM t WHERE TRY(a <> -2147483648 + 0.5) IS NULL AND a IS NOT NULL) AS ne_e
+  UNION ALL
+  SELECT 50 AS n, 'a' AS col, '(2147483647+1)*0.1' AS lit,
+    (SELECT count(*) FROM t WHERE TRY(a < (2147483647+1)*0.1)) AS lt_n, (SELECT CAST(coalesce(sum(id), 0) AS BIGINT) FROM t WHERE TRY(a < (2147483647+1)*0.1)) AS lt_s, (SELECT count(*) FROM t WHERE TRY(a < (2147483647+1)*0.1) IS NULL AND a IS NOT NULL) AS lt_e,
+    (SELECT count(*) FROM t WHERE TRY(a <= (2147483647+1)*0.1)) AS le_n, (SELECT CAST(coalesce(sum(id), 0) AS BIGINT) FROM t WHERE TRY(a <= (2147483647+1)*0.1)) AS le_s, (SELECT count(*) FROM t WHERE TRY(a <= (2147483647+1)*0.1) IS NULL AND a IS NOT NULL) AS le_e,
+    (SELECT count(*) FROM t WHERE TRY(a > (2147483647+1)*0.1)) AS gt_n, (SELECT CAST(coalesce(sum(id), 0) AS BIGINT) FROM t WHERE TRY(a > (2147483647+1)*0.1)) AS gt_s, (SELECT count(*) FROM t WHERE TRY(a > (2147483647+1)*0.1) IS NULL AND a IS NOT NULL) AS gt_e,
+    (SELECT count(*) FROM t WHERE TRY(a >= (2147483647+1)*0.1)) AS ge_n, (SELECT CAST(coalesce(sum(id), 0) AS BIGINT) FROM t WHERE TRY(a >= (2147483647+1)*0.1)) AS ge_s, (SELECT count(*) FROM t WHERE TRY(a >= (2147483647+1)*0.1) IS NULL AND a IS NOT NULL) AS ge_e,
+    (SELECT count(*) FROM t WHERE TRY(a = (2147483647+1)*0.1)) AS eq_n, (SELECT CAST(coalesce(sum(id), 0) AS BIGINT) FROM t WHERE TRY(a = (2147483647+1)*0.1)) AS eq_s, (SELECT count(*) FROM t WHERE TRY(a = (2147483647+1)*0.1) IS NULL AND a IS NOT NULL) AS eq_e,
+    (SELECT count(*) FROM t WHERE TRY(a <> (2147483647+1)*0.1)) AS ne_n, (SELECT CAST(coalesce(sum(id), 0) AS BIGINT) FROM t WHERE TRY(a <> (2147483647+1)*0.1)) AS ne_s, (SELECT count(*) FROM t WHERE TRY(a <> (2147483647+1)*0.1) IS NULL AND a IS NOT NULL) AS ne_e
+  UNION ALL
+  SELECT 51 AS n, 'a' AS col, '(3000000000+1)*0.1' AS lit,
+    (SELECT count(*) FROM t WHERE TRY(a < (3000000000+1)*0.1)) AS lt_n, (SELECT CAST(coalesce(sum(id), 0) AS BIGINT) FROM t WHERE TRY(a < (3000000000+1)*0.1)) AS lt_s, (SELECT count(*) FROM t WHERE TRY(a < (3000000000+1)*0.1) IS NULL AND a IS NOT NULL) AS lt_e,
+    (SELECT count(*) FROM t WHERE TRY(a <= (3000000000+1)*0.1)) AS le_n, (SELECT CAST(coalesce(sum(id), 0) AS BIGINT) FROM t WHERE TRY(a <= (3000000000+1)*0.1)) AS le_s, (SELECT count(*) FROM t WHERE TRY(a <= (3000000000+1)*0.1) IS NULL AND a IS NOT NULL) AS le_e,
+    (SELECT count(*) FROM t WHERE TRY(a > (3000000000+1)*0.1)) AS gt_n, (SELECT CAST(coalesce(sum(id), 0) AS BIGINT) FROM t WHERE TRY(a > (3000000000+1)*0.1)) AS gt_s, (SELECT count(*) FROM t WHERE TRY(a > (3000000000+1)*0.1) IS NULL AND a IS NOT NULL) AS gt_e,
+    (SELECT count(*) FROM t WHERE TRY(a >= (3000000000+1)*0.1)) AS ge_n, (SELECT CAST(coalesce(sum(id), 0) AS BIGINT) FROM t WHERE TRY(a >= (3000000000+1)*0.1)) AS ge_s, (SELECT count(*) FROM t WHERE TRY(a >= (3000000000+1)*0.1) IS NULL AND a IS NOT NULL) AS ge_e,
+    (SELECT count(*) FROM t WHERE TRY(a = (3000000000+1)*0.1)) AS eq_n, (SELECT CAST(coalesce(sum(id), 0) AS BIGINT) FROM t WHERE TRY(a = (3000000000+1)*0.1)) AS eq_s, (SELECT count(*) FROM t WHERE TRY(a = (3000000000+1)*0.1) IS NULL AND a IS NOT NULL) AS eq_e,
+    (SELECT count(*) FROM t WHERE TRY(a <> (3000000000+1)*0.1)) AS ne_n, (SELECT CAST(coalesce(sum(id), 0) AS BIGINT) FROM t WHERE TRY(a <> (3000000000+1)*0.1)) AS ne_s, (SELECT count(*) FROM t WHERE TRY(a <> (3000000000+1)*0.1) IS NULL AND a IS NOT NULL) AS ne_e
+  UNION ALL
+  SELECT 52 AS n, 'a' AS col, '1-2-3+0.5' AS lit,
+    (SELECT count(*) FROM t WHERE TRY(a < 1-2-3+0.5)) AS lt_n, (SELECT CAST(coalesce(sum(id), 0) AS BIGINT) FROM t WHERE TRY(a < 1-2-3+0.5)) AS lt_s, (SELECT count(*) FROM t WHERE TRY(a < 1-2-3+0.5) IS NULL AND a IS NOT NULL) AS lt_e,
+    (SELECT count(*) FROM t WHERE TRY(a <= 1-2-3+0.5)) AS le_n, (SELECT CAST(coalesce(sum(id), 0) AS BIGINT) FROM t WHERE TRY(a <= 1-2-3+0.5)) AS le_s, (SELECT count(*) FROM t WHERE TRY(a <= 1-2-3+0.5) IS NULL AND a IS NOT NULL) AS le_e,
+    (SELECT count(*) FROM t WHERE TRY(a > 1-2-3+0.5)) AS gt_n, (SELECT CAST(coalesce(sum(id), 0) AS BIGINT) FROM t WHERE TRY(a > 1-2-3+0.5)) AS gt_s, (SELECT count(*) FROM t WHERE TRY(a > 1-2-3+0.5) IS NULL AND a IS NOT NULL) AS gt_e,
+    (SELECT count(*) FROM t WHERE TRY(a >= 1-2-3+0.5)) AS ge_n, (SELECT CAST(coalesce(sum(id), 0) AS BIGINT) FROM t WHERE TRY(a >= 1-2-3+0.5)) AS ge_s, (SELECT count(*) FROM t WHERE TRY(a >= 1-2-3+0.5) IS NULL AND a IS NOT NULL) AS ge_e,
+    (SELECT count(*) FROM t WHERE TRY(a = 1-2-3+0.5)) AS eq_n, (SELECT CAST(coalesce(sum(id), 0) AS BIGINT) FROM t WHERE TRY(a = 1-2-3+0.5)) AS eq_s, (SELECT count(*) FROM t WHERE TRY(a = 1-2-3+0.5) IS NULL AND a IS NOT NULL) AS eq_e,
+    (SELECT count(*) FROM t WHERE TRY(a <> 1-2-3+0.5)) AS ne_n, (SELECT CAST(coalesce(sum(id), 0) AS BIGINT) FROM t WHERE TRY(a <> 1-2-3+0.5)) AS ne_s, (SELECT count(*) FROM t WHERE TRY(a <> 1-2-3+0.5) IS NULL AND a IS NOT NULL) AS ne_e
+  UNION ALL
+  SELECT 53 AS n, 'a' AS col, '+0.5' AS lit,
+    (SELECT count(*) FROM t WHERE TRY(a < +0.5)) AS lt_n, (SELECT CAST(coalesce(sum(id), 0) AS BIGINT) FROM t WHERE TRY(a < +0.5)) AS lt_s, (SELECT count(*) FROM t WHERE TRY(a < +0.5) IS NULL AND a IS NOT NULL) AS lt_e,
+    (SELECT count(*) FROM t WHERE TRY(a <= +0.5)) AS le_n, (SELECT CAST(coalesce(sum(id), 0) AS BIGINT) FROM t WHERE TRY(a <= +0.5)) AS le_s, (SELECT count(*) FROM t WHERE TRY(a <= +0.5) IS NULL AND a IS NOT NULL) AS le_e,
+    (SELECT count(*) FROM t WHERE TRY(a > +0.5)) AS gt_n, (SELECT CAST(coalesce(sum(id), 0) AS BIGINT) FROM t WHERE TRY(a > +0.5)) AS gt_s, (SELECT count(*) FROM t WHERE TRY(a > +0.5) IS NULL AND a IS NOT NULL) AS gt_e,
+    (SELECT count(*) FROM t WHERE TRY(a >= +0.5)) AS ge_n, (SELECT CAST(coalesce(sum(id), 0) AS BIGINT) FROM t WHERE TRY(a >= +0.5)) AS ge_s, (SELECT count(*) FROM t WHERE TRY(a >= +0.5) IS NULL AND a IS NOT NULL) AS ge_e,
+    (SELECT count(*) FROM t WHERE TRY(a = +0.5)) AS eq_n, (SELECT CAST(coalesce(sum(id), 0) AS BIGINT) FROM t WHERE TRY(a = +0.5)) AS eq_s, (SELECT count(*) FROM t WHERE TRY(a = +0.5) IS NULL AND a IS NOT NULL) AS eq_e,
+    (SELECT count(*) FROM t WHERE TRY(a <> +0.5)) AS ne_n, (SELECT CAST(coalesce(sum(id), 0) AS BIGINT) FROM t WHERE TRY(a <> +0.5)) AS ne_s, (SELECT count(*) FROM t WHERE TRY(a <> +0.5) IS NULL AND a IS NOT NULL) AS ne_e
+  UNION ALL
+  SELECT 54 AS n, 'a' AS col, '- +0.5' AS lit,
+    (SELECT count(*) FROM t WHERE TRY(a < - +0.5)) AS lt_n, (SELECT CAST(coalesce(sum(id), 0) AS BIGINT) FROM t WHERE TRY(a < - +0.5)) AS lt_s, (SELECT count(*) FROM t WHERE TRY(a < - +0.5) IS NULL AND a IS NOT NULL) AS lt_e,
+    (SELECT count(*) FROM t WHERE TRY(a <= - +0.5)) AS le_n, (SELECT CAST(coalesce(sum(id), 0) AS BIGINT) FROM t WHERE TRY(a <= - +0.5)) AS le_s, (SELECT count(*) FROM t WHERE TRY(a <= - +0.5) IS NULL AND a IS NOT NULL) AS le_e,
+    (SELECT count(*) FROM t WHERE TRY(a > - +0.5)) AS gt_n, (SELECT CAST(coalesce(sum(id), 0) AS BIGINT) FROM t WHERE TRY(a > - +0.5)) AS gt_s, (SELECT count(*) FROM t WHERE TRY(a > - +0.5) IS NULL AND a IS NOT NULL) AS gt_e,
+    (SELECT count(*) FROM t WHERE TRY(a >= - +0.5)) AS ge_n, (SELECT CAST(coalesce(sum(id), 0) AS BIGINT) FROM t WHERE TRY(a >= - +0.5)) AS ge_s, (SELECT count(*) FROM t WHERE TRY(a >= - +0.5) IS NULL AND a IS NOT NULL) AS ge_e,
+    (SELECT count(*) FROM t WHERE TRY(a = - +0.5)) AS eq_n, (SELECT CAST(coalesce(sum(id), 0) AS BIGINT) FROM t WHERE TRY(a = - +0.5)) AS eq_s, (SELECT count(*) FROM t WHERE TRY(a = - +0.5) IS NULL AND a IS NOT NULL) AS eq_e,
+    (SELECT count(*) FROM t WHERE TRY(a <> - +0.5)) AS ne_n, (SELECT CAST(coalesce(sum(id), 0) AS BIGINT) FROM t WHERE TRY(a <> - +0.5)) AS ne_s, (SELECT count(*) FROM t WHERE TRY(a <> - +0.5) IS NULL AND a IS NOT NULL) AS ne_e
+  UNION ALL
+  SELECT 55 AS n, 'a' AS col, '+5.' AS lit,
+    (SELECT count(*) FROM t WHERE TRY(a < +5.)) AS lt_n, (SELECT CAST(coalesce(sum(id), 0) AS BIGINT) FROM t WHERE TRY(a < +5.)) AS lt_s, (SELECT count(*) FROM t WHERE TRY(a < +5.) IS NULL AND a IS NOT NULL) AS lt_e,
+    (SELECT count(*) FROM t WHERE TRY(a <= +5.)) AS le_n, (SELECT CAST(coalesce(sum(id), 0) AS BIGINT) FROM t WHERE TRY(a <= +5.)) AS le_s, (SELECT count(*) FROM t WHERE TRY(a <= +5.) IS NULL AND a IS NOT NULL) AS le_e,
+    (SELECT count(*) FROM t WHERE TRY(a > +5.)) AS gt_n, (SELECT CAST(coalesce(sum(id), 0) AS BIGINT) FROM t WHERE TRY(a > +5.)) AS gt_s, (SELECT count(*) FROM t WHERE TRY(a > +5.) IS NULL AND a IS NOT NULL) AS gt_e,
+    (SELECT count(*) FROM t WHERE TRY(a >= +5.)) AS ge_n, (SELECT CAST(coalesce(sum(id), 0) AS BIGINT) FROM t WHERE TRY(a >= +5.)) AS ge_s, (SELECT count(*) FROM t WHERE TRY(a >= +5.) IS NULL AND a IS NOT NULL) AS ge_e,
+    (SELECT count(*) FROM t WHERE TRY(a = +5.)) AS eq_n, (SELECT CAST(coalesce(sum(id), 0) AS BIGINT) FROM t WHERE TRY(a = +5.)) AS eq_s, (SELECT count(*) FROM t WHERE TRY(a = +5.) IS NULL AND a IS NOT NULL) AS eq_e,
+    (SELECT count(*) FROM t WHERE TRY(a <> +5.)) AS ne_n, (SELECT CAST(coalesce(sum(id), 0) AS BIGINT) FROM t WHERE TRY(a <> +5.)) AS ne_s, (SELECT count(*) FROM t WHERE TRY(a <> +5.) IS NULL AND a IS NOT NULL) AS ne_e
+  UNION ALL
+  SELECT 56 AS n, 'a' AS col, '1.5e-2' AS lit,
+    (SELECT count(*) FROM t WHERE TRY(a < 1.5e-2)) AS lt_n, (SELECT CAST(coalesce(sum(id), 0) AS BIGINT) FROM t WHERE TRY(a < 1.5e-2)) AS lt_s, (SELECT count(*) FROM t WHERE TRY(a < 1.5e-2) IS NULL AND a IS NOT NULL) AS lt_e,
+    (SELECT count(*) FROM t WHERE TRY(a <= 1.5e-2)) AS le_n, (SELECT CAST(coalesce(sum(id), 0) AS BIGINT) FROM t WHERE TRY(a <= 1.5e-2)) AS le_s, (SELECT count(*) FROM t WHERE TRY(a <= 1.5e-2) IS NULL AND a IS NOT NULL) AS le_e,
+    (SELECT count(*) FROM t WHERE TRY(a > 1.5e-2)) AS gt_n, (SELECT CAST(coalesce(sum(id), 0) AS BIGINT) FROM t WHERE TRY(a > 1.5e-2)) AS gt_s, (SELECT count(*) FROM t WHERE TRY(a > 1.5e-2) IS NULL AND a IS NOT NULL) AS gt_e,
+    (SELECT count(*) FROM t WHERE TRY(a >= 1.5e-2)) AS ge_n, (SELECT CAST(coalesce(sum(id), 0) AS BIGINT) FROM t WHERE TRY(a >= 1.5e-2)) AS ge_s, (SELECT count(*) FROM t WHERE TRY(a >= 1.5e-2) IS NULL AND a IS NOT NULL) AS ge_e,
+    (SELECT count(*) FROM t WHERE TRY(a = 1.5e-2)) AS eq_n, (SELECT CAST(coalesce(sum(id), 0) AS BIGINT) FROM t WHERE TRY(a = 1.5e-2)) AS eq_s, (SELECT count(*) FROM t WHERE TRY(a = 1.5e-2) IS NULL AND a IS NOT NULL) AS eq_e,
+    (SELECT count(*) FROM t WHERE TRY(a <> 1.5e-2)) AS ne_n, (SELECT CAST(coalesce(sum(id), 0) AS BIGINT) FROM t WHERE TRY(a <> 1.5e-2)) AS ne_s, (SELECT count(*) FROM t WHERE TRY(a <> 1.5e-2) IS NULL AND a IS NOT NULL) AS ne_e
+  UNION ALL
+  SELECT 57 AS n, 'a' AS col, '1e-3' AS lit,
+    (SELECT count(*) FROM t WHERE TRY(a < 1e-3)) AS lt_n, (SELECT CAST(coalesce(sum(id), 0) AS BIGINT) FROM t WHERE TRY(a < 1e-3)) AS lt_s, (SELECT count(*) FROM t WHERE TRY(a < 1e-3) IS NULL AND a IS NOT NULL) AS lt_e,
+    (SELECT count(*) FROM t WHERE TRY(a <= 1e-3)) AS le_n, (SELECT CAST(coalesce(sum(id), 0) AS BIGINT) FROM t WHERE TRY(a <= 1e-3)) AS le_s, (SELECT count(*) FROM t WHERE TRY(a <= 1e-3) IS NULL AND a IS NOT NULL) AS le_e,
+    (SELECT count(*) FROM t WHERE TRY(a > 1e-3)) AS gt_n, (SELECT CAST(coalesce(sum(id), 0) AS BIGINT) FROM t WHERE TRY(a > 1e-3)) AS gt_s, (SELECT count(*) FROM t WHERE TRY(a > 1e-3) IS NULL AND a IS NOT NULL) AS gt_e,
+    (SELECT count(*) FROM t WHERE TRY(a >= 1e-3)) AS ge_n, (SELECT CAST(coalesce(sum(id), 0) AS BIGINT) FROM t WHERE TRY(a >= 1e-3)) AS ge_s, (SELECT count(*) FROM t WHERE TRY(a >= 1e-3) IS NULL AND a IS NOT NULL) AS ge_e,
+    (SELECT count(*) FROM t WHERE TRY(a = 1e-3)) AS eq_n, (SELECT CAST(coalesce(sum(id), 0) AS BIGINT) FROM t WHERE TRY(a = 1e-3)) AS eq_s, (SELECT count(*) FROM t WHERE TRY(a = 1e-3) IS NULL AND a IS NOT NULL) AS eq_e,
+    (SELECT count(*) FROM t WHERE TRY(a <> 1e-3)) AS ne_n, (SELECT CAST(coalesce(sum(id), 0) AS BIGINT) FROM t WHERE TRY(a <> 1e-3)) AS ne_s, (SELECT count(*) FROM t WHERE TRY(a <> 1e-3) IS NULL AND a IS NOT NULL) AS ne_e
+  UNION ALL
+  SELECT 58 AS n, 'a' AS col, '1e1' AS lit,
+    (SELECT count(*) FROM t WHERE TRY(a < 1e1)) AS lt_n, (SELECT CAST(coalesce(sum(id), 0) AS BIGINT) FROM t WHERE TRY(a < 1e1)) AS lt_s, (SELECT count(*) FROM t WHERE TRY(a < 1e1) IS NULL AND a IS NOT NULL) AS lt_e,
+    (SELECT count(*) FROM t WHERE TRY(a <= 1e1)) AS le_n, (SELECT CAST(coalesce(sum(id), 0) AS BIGINT) FROM t WHERE TRY(a <= 1e1)) AS le_s, (SELECT count(*) FROM t WHERE TRY(a <= 1e1) IS NULL AND a IS NOT NULL) AS le_e,
+    (SELECT count(*) FROM t WHERE TRY(a > 1e1)) AS gt_n, (SELECT CAST(coalesce(sum(id), 0) AS BIGINT) FROM t WHERE TRY(a > 1e1)) AS gt_s, (SELECT count(*) FROM t WHERE TRY(a > 1e1) IS NULL AND a IS NOT NULL) AS gt_e,
+    (SELECT count(*) FROM t WHERE TRY(a >= 1e1)) AS ge_n, (SELECT CAST(coalesce(sum(id), 0) AS BIGINT) FROM t WHERE TRY(a >= 1e1)) AS ge_s, (SELECT count(*) FROM t WHERE TRY(a >= 1e1) IS NULL AND a IS NOT NULL) AS ge_e,
+    (SELECT count(*) FROM t WHERE TRY(a = 1e1)) AS eq_n, (SELECT CAST(coalesce(sum(id), 0) AS BIGINT) FROM t WHERE TRY(a = 1e1)) AS eq_s, (SELECT count(*) FROM t WHERE TRY(a = 1e1) IS NULL AND a IS NOT NULL) AS eq_e,
+    (SELECT count(*) FROM t WHERE TRY(a <> 1e1)) AS ne_n, (SELECT CAST(coalesce(sum(id), 0) AS BIGINT) FROM t WHERE TRY(a <> 1e1)) AS ne_s, (SELECT count(*) FROM t WHERE TRY(a <> 1e1) IS NULL AND a IS NOT NULL) AS ne_e
+  UNION ALL
+  SELECT 59 AS n, 'a' AS col, '3e-1' AS lit,
+    (SELECT count(*) FROM t WHERE TRY(a < 3e-1)) AS lt_n, (SELECT CAST(coalesce(sum(id), 0) AS BIGINT) FROM t WHERE TRY(a < 3e-1)) AS lt_s, (SELECT count(*) FROM t WHERE TRY(a < 3e-1) IS NULL AND a IS NOT NULL) AS lt_e,
+    (SELECT count(*) FROM t WHERE TRY(a <= 3e-1)) AS le_n, (SELECT CAST(coalesce(sum(id), 0) AS BIGINT) FROM t WHERE TRY(a <= 3e-1)) AS le_s, (SELECT count(*) FROM t WHERE TRY(a <= 3e-1) IS NULL AND a IS NOT NULL) AS le_e,
+    (SELECT count(*) FROM t WHERE TRY(a > 3e-1)) AS gt_n, (SELECT CAST(coalesce(sum(id), 0) AS BIGINT) FROM t WHERE TRY(a > 3e-1)) AS gt_s, (SELECT count(*) FROM t WHERE TRY(a > 3e-1) IS NULL AND a IS NOT NULL) AS gt_e,
+    (SELECT count(*) FROM t WHERE TRY(a >= 3e-1)) AS ge_n, (SELECT CAST(coalesce(sum(id), 0) AS BIGINT) FROM t WHERE TRY(a >= 3e-1)) AS ge_s, (SELECT count(*) FROM t WHERE TRY(a >= 3e-1) IS NULL AND a IS NOT NULL) AS ge_e,
+    (SELECT count(*) FROM t WHERE TRY(a = 3e-1)) AS eq_n, (SELECT CAST(coalesce(sum(id), 0) AS BIGINT) FROM t WHERE TRY(a = 3e-1)) AS eq_s, (SELECT count(*) FROM t WHERE TRY(a = 3e-1) IS NULL AND a IS NOT NULL) AS eq_e,
+    (SELECT count(*) FROM t WHERE TRY(a <> 3e-1)) AS ne_n, (SELECT CAST(coalesce(sum(id), 0) AS BIGINT) FROM t WHERE TRY(a <> 3e-1)) AS ne_s, (SELECT count(*) FROM t WHERE TRY(a <> 3e-1) IS NULL AND a IS NOT NULL) AS ne_e
+  UNION ALL
+  SELECT 60 AS n, 'a' AS col, '(9223372036854775807*2)*0.5' AS lit,
+    (SELECT count(*) FROM t WHERE TRY(a < (9223372036854775807*2)*0.5)) AS lt_n, (SELECT CAST(coalesce(sum(id), 0) AS BIGINT) FROM t WHERE TRY(a < (9223372036854775807*2)*0.5)) AS lt_s, (SELECT count(*) FROM t WHERE TRY(a < (9223372036854775807*2)*0.5) IS NULL AND a IS NOT NULL) AS lt_e,
+    (SELECT count(*) FROM t WHERE TRY(a <= (9223372036854775807*2)*0.5)) AS le_n, (SELECT CAST(coalesce(sum(id), 0) AS BIGINT) FROM t WHERE TRY(a <= (9223372036854775807*2)*0.5)) AS le_s, (SELECT count(*) FROM t WHERE TRY(a <= (9223372036854775807*2)*0.5) IS NULL AND a IS NOT NULL) AS le_e,
+    (SELECT count(*) FROM t WHERE TRY(a > (9223372036854775807*2)*0.5)) AS gt_n, (SELECT CAST(coalesce(sum(id), 0) AS BIGINT) FROM t WHERE TRY(a > (9223372036854775807*2)*0.5)) AS gt_s, (SELECT count(*) FROM t WHERE TRY(a > (9223372036854775807*2)*0.5) IS NULL AND a IS NOT NULL) AS gt_e,
+    (SELECT count(*) FROM t WHERE TRY(a >= (9223372036854775807*2)*0.5)) AS ge_n, (SELECT CAST(coalesce(sum(id), 0) AS BIGINT) FROM t WHERE TRY(a >= (9223372036854775807*2)*0.5)) AS ge_s, (SELECT count(*) FROM t WHERE TRY(a >= (9223372036854775807*2)*0.5) IS NULL AND a IS NOT NULL) AS ge_e,
+    (SELECT count(*) FROM t WHERE TRY(a = (9223372036854775807*2)*0.5)) AS eq_n, (SELECT CAST(coalesce(sum(id), 0) AS BIGINT) FROM t WHERE TRY(a = (9223372036854775807*2)*0.5)) AS eq_s, (SELECT count(*) FROM t WHERE TRY(a = (9223372036854775807*2)*0.5) IS NULL AND a IS NOT NULL) AS eq_e,
+    (SELECT count(*) FROM t WHERE TRY(a <> (9223372036854775807*2)*0.5)) AS ne_n, (SELECT CAST(coalesce(sum(id), 0) AS BIGINT) FROM t WHERE TRY(a <> (9223372036854775807*2)*0.5)) AS ne_s, (SELECT count(*) FROM t WHERE TRY(a <> (9223372036854775807*2)*0.5) IS NULL AND a IS NOT NULL) AS ne_e
 ) AS q ORDER BY n
 ) TO 'compare_a.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);

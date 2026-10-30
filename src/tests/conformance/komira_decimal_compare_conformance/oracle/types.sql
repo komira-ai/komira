@@ -88,5 +88,29 @@ SELECT * FROM (
   SELECT 40 AS n, '9223372036854775808 + 0.5' AS expr, typeof(9223372036854775808 + 0.5) AS type, CAST(9223372036854775808 + 0.5 AS VARCHAR) AS value
   UNION ALL
   SELECT 41 AS n, '9223372036854775808 * 2.5' AS expr, typeof(9223372036854775808 * 2.5) AS type, CAST(9223372036854775808 * 2.5 AS VARCHAR) AS value
+  UNION ALL
+  SELECT 42 AS n, '(1+2)*0.1' AS expr, typeof((1+2)*0.1) AS type, CAST((1+2)*0.1 AS VARCHAR) AS value
+  UNION ALL
+  SELECT 43 AS n, '2*3*0.05' AS expr, typeof(2*3*0.05) AS type, CAST(2*3*0.05 AS VARCHAR) AS value
+  UNION ALL
+  SELECT 44 AS n, '0.1*(1+2)' AS expr, typeof(0.1*(1+2)) AS type, CAST(0.1*(1+2) AS VARCHAR) AS value
+  UNION ALL
+  SELECT 45 AS n, '(5-3)+0.07' AS expr, typeof((5-3)+0.07) AS type, CAST((5-3)+0.07 AS VARCHAR) AS value
+  UNION ALL
+  SELECT 46 AS n, '-2147483648 + 0.5' AS expr, typeof(-2147483648 + 0.5) AS type, CAST(-2147483648 + 0.5 AS VARCHAR) AS value
+  UNION ALL
+  SELECT 47 AS n, '2147483647 + 0.5' AS expr, typeof(2147483647 + 0.5) AS type, CAST(2147483647 + 0.5 AS VARCHAR) AS value
+  UNION ALL
+  SELECT 48 AS n, '3000000000+1+0.5' AS expr, typeof(3000000000+1+0.5) AS type, CAST(3000000000+1+0.5 AS VARCHAR) AS value
+  UNION ALL
+  SELECT 49 AS n, '- 2147483647 - 1 + 0.5' AS expr, typeof(- 2147483647 - 1 + 0.5) AS type, CAST(- 2147483647 - 1 + 0.5 AS VARCHAR) AS value
+  UNION ALL
+  SELECT 50 AS n, '1 + 9223372036854775808 + 0.5' AS expr, typeof(1 + 9223372036854775808 + 0.5) AS type, CAST(1 + 9223372036854775808 + 0.5 AS VARCHAR) AS value
+  UNION ALL
+  SELECT 51 AS n, '+0.5' AS expr, typeof(+0.5) AS type, CAST(+0.5 AS VARCHAR) AS value
+  UNION ALL
+  SELECT 52 AS n, '- +0.5' AS expr, typeof(- +0.5) AS type, CAST(- +0.5 AS VARCHAR) AS value
+  UNION ALL
+  SELECT 53 AS n, '+5.' AS expr, typeof(+5.) AS type, CAST(+5. AS VARCHAR) AS value
 ) AS q ORDER BY n
 ) TO 'types.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);

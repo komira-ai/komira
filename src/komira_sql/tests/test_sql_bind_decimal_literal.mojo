@@ -47,6 +47,13 @@
 #     is DECIMAL(18, 2), not (19, 2); `123456789.123456789 * 0.5` DECIMAL(18,
 #     10); and `0.1234567890123456789012345678901234567 + 1` DECIMAL(38, 37)
 #     rather than a FLOAT64. Catches the 18 and 38 digit caps missing.
+#   * test_integer_subexpressions_fold_as_integers: `(1+2)*0.1` is the DECIMAL(12,
+#     1) 0.3 (INTEGER times DECIMAL(2, 1)), `2*3*0.05` DECIMAL(13, 2), `(5-3)+0.07`
+#     DECIMAL(13, 2); the integer width follows the type (a BIGINT difference
+#     of 1, `-2147483648`) and an INTEGER overflow is an error. Catches an
+#     integer-only sub-expression that sends the whole constant to float.
+#   * test_unary_plus_is_the_literal: `+0.5`, `- +0.5`, `+5.`, `+24`. Catches a
+#     plus sign that is a syntax error.
 #   * test_constants_duckdb_raises_on_are_refused: the binder raises, with
 #     DuckDB's words, for `12345678.123 * 12345678.123` (overflow of
 #     DECIMAL(18)), a sum of two 18-digit numbers past 18 digits, and a
@@ -467,6 +474,70 @@ def test_constants_duckdb_raises_on_are_refused() raises:
     assert_true(float_col.startswith("ERR: ") == False, float_col)
 
 
+def test_integer_subexpressions_fold_as_integers() raises:
+    # DuckDB types 1 + 2 as INTEGER, so (1 + 2) * 0.1 is INTEGER * DECIMAL(2, 1)
+    # = DECIMAL(12, 1) 0.3 (not the float 0.30000000000000004).
+    assert_equal(
+        _bound(_w("dc = (1+2)*0.1")),
+        "BinaryOp(EQ, ColRef(dc), " + _d(0, 3, 12, 1) + ")",
+    )
+    assert_equal(
+        _bound(_w("dc = 2*3*0.05")),
+        "BinaryOp(EQ, ColRef(dc), " + _d(0, 30, 13, 2) + ")",
+    )
+    assert_equal(
+        _bound(_w("dc = 0.1*(1+2)")),
+        "BinaryOp(EQ, ColRef(dc), " + _d(0, 3, 12, 1) + ")",
+    )
+    assert_equal(
+        _bound(_w("dc < (5-3)+0.07")),
+        "BinaryOp(LT, ColRef(dc), " + _d(0, 207, 13, 2) + ")",
+    )
+    # The width follows the integer type, not the value: a BIGINT 3000000000
+    # minus 2999999999 is a BIGINT 1, and -2147483648 is a BIGINT too.
+    assert_equal(
+        _bound(_w("dc = (3000000000-2999999999)+0.5")),
+        "BinaryOp(EQ, ColRef(dc), " + _d(0, 15, 21, 1) + ")",
+    )
+    assert_equal(
+        _bound(_w("dc = -2147483648 + 0.5")),
+        "BinaryOp(EQ, ColRef(dc), " + _d(-1, -21474836475, 21, 1) + ")",
+    )
+    assert_equal(
+        _bound(_w("dc = - 2147483647 - 1 + 0.5")),
+        "BinaryOp(EQ, ColRef(dc), " + _d(-1, -21474836475, 12, 1) + ")",
+    )
+    # Integer overflow is an error in DuckDB, not a promotion.
+    var over = _bound(_w("dc = (2147483647+1)*0.1"))
+    assert_true(over.startswith("ERR: "), over)
+    assert_true(over.find("Overflow in addition of INT32") >= 0, over)
+    var times = _bound(_w("dc = (2147483647*2)*0.1"))
+    assert_true(times.find("Overflow in multiplication of INT32") >= 0, times)
+    # A division is DOUBLE: the constant stays a float expression.
+    var div = _bound(_w("dc = (1/2)+0.1"))
+    assert_true(div.find("float64") >= 0, div)
+    assert_true(div.find("decimal128") < 0, div)
+
+
+def test_unary_plus_is_the_literal() raises:
+    assert_equal(
+        _bound(_w("dc > +0.5")),
+        "BinaryOp(GT, ColRef(dc), " + _d(0, 5, 2, 1) + ")",
+    )
+    assert_equal(
+        _bound(_w("dc < - +0.5")),
+        "BinaryOp(LT, ColRef(dc), " + _d(-1, -5, 2, 1) + ")",
+    )
+    assert_equal(
+        _bound(_w("dc < +5.")),
+        "BinaryOp(LT, ColRef(dc), " + _d(0, 5, 1, 0) + ")",
+    )
+    assert_equal(
+        _bound(_w("dc < +24")),
+        "BinaryOp(LT, ColRef(dc), Literal(ScalarValue(int64, 24)))",
+    )
+
+
 def main() raises:
     var suite = TestSuite()
     suite.test[test_literal_facing_a_decimal_column_is_decimal]()
@@ -479,4 +550,6 @@ def main() raises:
     suite.test[test_exponent_literals_are_floats]()
     suite.test[test_folded_constants_are_capped_like_duckdb]()
     suite.test[test_constants_duckdb_raises_on_are_refused]()
+    suite.test[test_integer_subexpressions_fold_as_integers]()
+    suite.test[test_unary_plus_is_the_literal]()
     suite^.run()

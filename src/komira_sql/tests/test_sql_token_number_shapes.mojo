@@ -22,8 +22,15 @@
 #     applied to the wrong side, a sign dropped, a rounding in the digits.
 #   * test_an_e_that_is_not_an_exponent: `1e`, `1e+`, `1ex` are an INT and a
 #     name. Catches an exponent taken without digits.
-#   * test_an_exponent_out_of_range_is_refused: `1e999` and `1e-999`.
-#     Catches an infinity or a zero returned for a number that is neither.
+#   * test_an_exponent_outside_the_exact_range_is_refused: past the double range,
+#     and in range where one correctly rounded operation does not give the
+#     nearest double (a mantissa past 2^53, a large power of ten); the exact cases
+#     at the edge are accepted. Catches an infinity or a zero returned for a number
+#     that is neither, and a value one ulp off the nearest double.
+#   * test_a_decimal_converts_like_duckdbs_decimal_to_double: `123.456`,
+#     `2.675` and the like are the nearest double; a mantissa past 2^53
+#     (`90071992547409.93`) is converted in two parts, as DuckDB's cast does.
+#     Catches a sum of two rounded parts that lands one ulp away.
 
 from std.testing import TestSuite, assert_equal, assert_true
 
@@ -116,10 +123,46 @@ def _refused(sql: String) -> Bool:
     return False
 
 
-def test_an_exponent_out_of_range_is_refused() raises:
+def test_an_exponent_outside_the_exact_range_is_refused() raises:
+    # Out of the double range either way.
     assert_true(_refused("1e999"), "1e999")
     assert_true(_refused("1e-999"), "1e-999")
-    assert_true(not _refused("1e308"), "1e308")
+    # In range but not exactly convertible by one correctly rounded operation:
+    # a mantissa past 2^53, a power of ten past 10^22 on a mantissa that is not
+    # small. The nearest double is not computed, so it is not guessed (the
+    # largest double, 1.7976931348623157e308, is one of these).
+    assert_true(_refused("1.7976931348623157e308"), "DBL_MAX")
+    assert_true(_refused("123456789012345678e0"), "18-digit mantissa")
+    assert_true(_refused("9007199254740993e0"), "2^53 + 1")
+    assert_true(_refused("1.5e300"), "1.5e300")
+    assert_true(_refused("1e-30"), "1e-30")
+    # Exact: a mantissa of at most 2^53 and a power of ten up to 10^22, or a
+    # power past it that the mantissa absorbs below 2^53 (1e30 = 10^8 * 10^22).
+    _float("9007199254740992e0", "9007199254740992e0", 9007199254740992.0)
+    _float("1e30", "1e30", 1e30)
+    _float("1e23", "1e23", 1e23)
+    _float("12e35", "12e35", 12e35)
+
+
+def test_a_decimal_converts_like_duckdbs_decimal_to_double() raises:
+    # A literal with a point and at most 38 digits is a DECIMAL in DuckDB, and a
+    # DECIMAL meets a DOUBLE by DuckDB's cast: a mantissa of at most 2^53 (or no
+    # fraction) is one correctly rounded division; a larger one is its integer
+    # part plus its fraction part divided apart. Both are the nearest double for
+    # these.
+    _float("0.07", "0.07", 0.07)
+    _float("123.456", "123.456", 123.456)
+    _float("1234.5678", "1234.5678", 1234.5678)
+    _float("2.675", "2.675", 2.675)
+    _float("8.41", "8.41", 8.41)
+    _float("0.1234567890123456", "0.1234567890123456", 0.1234567890123456)
+    _float("0.30000000000000004", "0.30000000000000004", 0.30000000000000004)
+    # 2^53 + 1 hundredths: divided as one double the quotient would be
+    # 90071992547409.92; apart it is 90071992547409 + 0.93, which rounds to
+    # 90071992547409.9375.
+    _float("90071992547409.93", "90071992547409.93", 90071992547409.9375)
+    _float("90071992547409.9375", "90071992547409.9375", 90071992547409.9375)
+    _float("12345678901234567890.5", "12345678901234567890.5", 12345678901234567890.5)
 
 
 def main() raises:
@@ -128,5 +171,6 @@ def main() raises:
     suite.test[test_a_point_that_belongs_to_a_name_is_still_a_dot]()
     suite.test[test_exponents]()
     suite.test[test_an_e_that_is_not_an_exponent]()
-    suite.test[test_an_exponent_out_of_range_is_refused]()
+    suite.test[test_an_exponent_outside_the_exact_range_is_refused]()
+    suite.test[test_a_decimal_converts_like_duckdbs_decimal_to_double]()
     suite^.run()
