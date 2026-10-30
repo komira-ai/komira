@@ -47,23 +47,18 @@ host (a local result is not shareable across Macs).
 """
 
 load(":providers.bzl", "MojoToolchainInfo")
-load("@komira//tools/build/platforms:defs.bzl", "DARWIN_LOCAL_HOST")
+load("@komira//tools/build/platforms:defs.bzl", "darwin_local_hosts_refusal")
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
 
 def _mojo_darwin_toolchain_impl(ctx):
     def one(dep):
         return dep[DefaultInfo].default_outputs[0]
     hosts = sorted([h.strip() for h in ctx.attrs.macos_hosts if h.strip()])
-    if hosts and (hosts == [DARWIN_LOCAL_HOST]) != ctx.attrs.local_execution:
-        # The sentinel is for a build on this machine only: alone, and only
-        # where the BUCK file found the execution mode local on a Mac.
-        fail(("{}: the local host sentinel `{}` {} (local_execution = {}); a farm's hosts " +
-              "are real identities and never mix with it.").format(
-            ctx.label,
-            DARWIN_LOCAL_HOST,
-            "is missing" if ctx.attrs.local_execution else "is not allowed here",
-            ctx.attrs.local_execution,
-        ))
+    refusal = darwin_local_hosts_refusal(hosts, ctx.attrs.local_execution)
+    if refusal:
+        fail("{}: {}; a farm's hosts are real identities and never mix with it.".format(ctx.label, refusal))
+    if not hosts and ctx.attrs.config_refusal:
+        fail("{}: {}".format(ctx.label, ctx.attrs.config_refusal))
     if not hosts:
         fail(("{}: no macOS host identity. Set `[komira_re] darwin_macos_hosts` of the root cell " +
               "to what `mojo_compile host-identity` (komira//tools/build/mojo:mojo_compile_darwin) " +
@@ -103,6 +98,9 @@ mojo_darwin_toolchain_rule = rule(
         # True when macos_hosts is the local sentinel (a build on this Mac;
         # darwin_toolchain_hosts_here in platforms/defs.bzl decides).
         "local_execution": attrs.bool(default = False),
+        # Why the execution mode could not be read when no host is named (empty
+        # otherwise); analysing the toolchain fails with it.
+        "config_refusal": attrs.string(default = ""),
         "runtime": attrs.exec_dep(),
         "target_cpu": attrs.string(),
         # The compile watchdog of the wrapper, as mojo_toolchain's.

@@ -1,6 +1,6 @@
 """Load-time cases of `darwin_properties_refusal` (run by tools/build/tests/functional/darwin/BUCK)."""
 
-load("@komira//tools/build/platforms:defs.bzl", "DARWIN_LOCAL_HOST", "darwin_properties_refusal", "darwin_toolchain_hosts")
+load("@komira//tools/build/platforms:defs.bzl", "DARWIN_LOCAL_HOST", "darwin_local_hosts_refusal", "darwin_properties_refusal", "darwin_toolchain_hosts")
 
 # Load-time cases of `darwin_properties_refusal`: a macOS property set is
 # registered only with a non-empty property dict and at least one well-formed
@@ -15,8 +15,20 @@ _CASES = [
     ({}, ["26.5-0123456789abcdef"], True),
     ({"pool": "macos"}, ["0123456789abcdef"], True),
     ({"pool": "macos"}, ["26.5-"], True),
-    # The local sentinel is no identity: a worker set cannot list it.
+    # Regression pin: the local sentinel has no `-`, so it is no identity and a worker set cannot list it.
     ({"pool": "macos"}, [DARWIN_LOCAL_HOST], True),
+]
+
+# (hosts, local_execution) -> refused? The toolchain rule's guard.
+_LOCAL_CASES = [
+    (["26.5-0123456789abcdef"], False, False),
+    ([DARWIN_LOCAL_HOST], True, False),
+    ([], False, False),
+    ([DARWIN_LOCAL_HOST], False, True),
+    ([DARWIN_LOCAL_HOST, "26.5-0123456789abcdef"], False, True),
+    ([DARWIN_LOCAL_HOST, "26.5-0123456789abcdef"], True, True),
+    (["26.5-0123456789abcdef"], True, True),
+    ([], True, True),
 ]
 
 # (hosts named, execution mode, host row) -> (toolchain hosts, local?).
@@ -48,3 +60,8 @@ def darwin_properties_cases():
         got = darwin_toolchain_hosts(hosts, mode, host_name)
         if got != want:
             fail("darwin_toolchain_hosts({}, {}, {}) = {}, expected {}".format(repr(hosts), repr(mode), repr(host_name), repr(got), repr(want)))
+
+    for hosts, local, refused in _LOCAL_CASES:
+        got = darwin_local_hosts_refusal(hosts, local)
+        if (got != None) != refused:
+            fail("darwin_local_hosts_refusal({}, {}) = {}, expected {}".format(repr(hosts), repr(local), repr(got), "a refusal" if refused else "None"))
