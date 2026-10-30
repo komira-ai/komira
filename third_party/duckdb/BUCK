@@ -4,6 +4,7 @@ load("@komira//tools/build/mojo:toolchain.bzl", "conda_libs")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load("@komira//tools/build/platforms:table.bzl", "pinned_kwargs")
 load("@komira//tools/build/sql:defs.bzl", "duckdb_dist")
+load(":probe.bzl", "duckdb_tpch_probe")
 
 # The DuckDB CLI (github.com/duckdb/duckdb), MIT licensed (LICENSE below), at
 # its release v1.5.6: the linux amd64 CLI archive the release publishes. It is
@@ -80,4 +81,18 @@ pinned_file(
     sha256 = _LICENSE_SHA256,
     size_bytes = _LICENSE_SIZE,
     visibility = ["PUBLIC"],
+)
+
+pinned_file(
+    name = "tpch.duckdb_extension.gz",
+    url = "https://extensions.duckdb.org/v1.5.6/linux_amd64/tpch.duckdb_extension.gz",
+    sha256 = "51959cc795f6ea8c95cf8cc6cc4065358998ce959bf863e21ff1aa471c06bc41",
+    size_bytes = 5649100,
+)
+
+duckdb_tpch_probe(
+    name = "tpch_probe",
+    duckdb = ":duckdb",
+    ext = ":tpch.duckdb_extension.gz",
+    exec_compatible_with = LINUX_X86_64,
 )
