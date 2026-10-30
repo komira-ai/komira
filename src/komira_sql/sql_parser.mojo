@@ -26,6 +26,7 @@ from std.builtin.swap import swap
 
 from komira_collections.slab import Slab
 
+from .sql_interval_parse import interval_literal_starts, parse_interval_literal
 from .sql_token import (
     Token,
     TK_EOF, TK_IDENT, TK_INT, TK_FLOAT, TK_STRING, TK_LPAREN, TK_RPAREN,
@@ -2422,6 +2423,10 @@ struct _Parser(Movable):
                 var ts = String(self.tokens[self.pos].text)
                 self._advance()  # the quoted timestamp string
                 return SqlExpr.timestamp_lit(ts, aware)
+            # ★ INTERVAL literal (`sql_interval_parse`); a column called
+            # `interval` still binds as a column reference. See `SX_INTERVAL`.
+            if interval_literal_starts(self.tokens, self.pos):
+                return parse_interval_literal(self.tokens, self.pos)
             # ★★ `EXTRACT(<field> FROM <expr>)`.
             #
             # A SEPARATE GRAMMAR ARM AND NOT A FUNCTION NAME, because `FROM`

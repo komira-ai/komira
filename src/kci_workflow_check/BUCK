@@ -1,4 +1,7 @@
-load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+load("@buildrules//rules/mojo:pack.bzl", "mojo_conda", "mojo_conda_holds")
+load("@komira//tools/build/mojo:adopt.bzl", "mojo_adopted_library")
+load("@komira//tools/build/package:conda.bzl", "conda_package")
+load(":buildrules.mojo.bzl", "mojo_package")
 
 # The workflow consistency check: a hand-written CI workflow held to the
 # release machine. It is library code, not a command: `kci run` runs it at
@@ -32,49 +35,13 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # Deps: kci_release_machine (the stages), kci_release_channel (which channels
 # publish by OIDC) and kci_api (the default machine file). Pure: it
 # checks text it is given.
-mojo_library(
-    name = "kci_workflow_check",
-    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
-    deps = [
-        "//src/kci_api:kci_api",
-        "//src/kci_release_channel:kci_release_channel",
-        "//src/kci_release_machine:kci_release_machine",
-    ],
-    test_srcs = [
-        # what the fail-closed reader reads, and each construct it cannot tell
-        "tests/test_workflow_reader.mojo",
-        # the subset as a table: every spelling found to read one way to kci
-        # and another to GitHub ends in cannot tell or in the rule's finding
-        "tests/test_workflow_subset.mojo",
-        # a fixture that agrees, one mutation per rule R1-R12 and R14, the id-token
-        # stages, the start-up entry point
-        "tests/test_ci_rules.mojo",
-        # one stage split over jobs whose --only parts run all of it once
-        # (R1 and R9 as amended)
-        "tests/test_ci_split_stage.mojo",
-        # R6 for pr.yml, the pull request's check: the PULL_REQUEST stage as the
-        # ONE job `check` of a workflow of its own (no fork, no environment, no
-        # secret, minimal permissions, the base commit, the full history,
-        # pinned runner and uses, the pull_request trigger alone); one
-        # mutation per branch
-        "tests/test_ci_pull_request.mojo",
-        # R6's change base: `--affected-by "$change_base"`, the merge commit's
-        # first parent, never the event's base.sha (which widened a pull
-        # request by every later change to main); R18 lets no `${{ }}` into a
-        # script
-        "tests/test_ci_pr_change_base.mojo",
-        # R6 for kci.yml: no pull_request trigger and no job for the
-        # PULL_REQUEST stage; each file refused when read as the other
-        "tests/test_ci_two_workflows.mojo",
-        # R15-R20 and R4's allow-list: mutations of a FIXTURE workflow and
-        # machine file, each ending in its rule's finding
-        "tests/test_ci_auto_promotion.mojo",
-    ],
-    # test_ci_auto_promotion: a FIXTURE pair, the workflow and machine file
-    # komira had while it published to channels (tests/data/publish_*), so
-    # the rules that guard a publishing job stay tested while kci can publish.
-    # No workflow of this repository is held to a machine file any more: the
-    # release workflow (.github/workflows/release.yml) runs Buck2 targets.
+#
+# Built with buildrules' `mojo_package` from mopm.toml (README.md, "Build files"): `:lib` is the
+# library file and exists only once every test of tests/ has passed. The package depends on kci_api,
+# kci_release_channel and kci_release_machine, sibling packages (`[dependencies]` of mopm.toml): its
+# `:lib` is built from those packages' `:lib`.
+mojo_package(
+    path = ".",
     test_data = {
         "tests/test_ci_auto_promotion.mojo": {
             "channels.textproto": "tests/data/publish_channels.textproto",
@@ -82,5 +49,82 @@ mojo_library(
             "machine.textproto": "tests/data/publish_machine.textproto",
         },
     },
+)
+
+# `:kci_workflow_check`, the target the packages that depend on this library name, is `:lib` as
+# komira's Mojo rules take it (tools/build/mojo/adopt.bzl): the same file, so a dependent builds
+# only once the tests have passed. `deps` is `[dependencies]` of mopm.toml, as the adopted targets
+# of those packages: the rule refuses a list that is not the closure `:lib` was built from. It
+# carries the README gate too (`[tests][readme]`): the examples run against `:lib`; the tests are
+# not run again.
+mojo_adopted_library(
+    name = "kci_workflow_check",
+    deps = [
+        "//src/kci_api:kci_api",
+        "//src/kci_release_channel:kci_release_channel",
+        "//src/kci_release_machine:kci_release_machine",
+    ],
+    lib = ":lib",
+    readme = "README.md",
+    srcs = glob(["src/kci_workflow_check/**/*.mojo"]),
+    test_srcs = glob(["tests/test_*.mojo"]),
+    test_runs = ":test",
+    visibility = ["PUBLIC"],
+)
+
+# The mopm package: `mopm pack` over `:lib`, the `.conda` a mopm registry serves
+# (`mojo-kci_workflow_check-0.1.0-mojo1.0.0_0.conda`), which records kci_api, kci_release_channel
+# and kci_release_machine as dependencies (`mojo-kci_api >=0.1,<0.2`, `mojo-kci_release_channel
+# >=0.1,<0.2` and `mojo-kci_release_machine >=0.1,<0.2`) and holds those packages' files nowhere.
+# `members` is the manifests of the path dependencies, staged at their repository paths, because
+# `mopm pack` reads the manifest of each beside the one it is given. `:lib` exists only once the
+# tests passed, so this file exists only then. Publishing it (`mopm publish`) uploads, which is not
+# a build action: it is a step of a CI job that takes this target's output. `mopm` is the one
+# `mojo_package` pins (mopm-toolchain.toml).
+mojo_conda(
+    name = "conda",
+    dir = "src/kci_workflow_check",
+    lib = ":lib",
+    manifest = "mopm.toml",
+    members = {
+        "../kci_api": "//src/kci_api:mopm.toml",
+        "../kci_release_channel": "//src/kci_release_channel:mopm.toml",
+        "../kci_release_machine": "//src/kci_release_machine:mopm.toml",
+        "../komira_json": "//src/komira_json:mopm.toml",
+        "../komira_textproto": "//src/komira_textproto:mopm.toml",
+    },
+    mojo = "1.0.0",
+    mopm = "toolchains//:mopm_0_0_86",
+    package = "kci_workflow_check",
+    version = "0.1.0",
+    visibility = ["PUBLIC"],
+)
+
+# What `:conda` holds, read back from the built file (buildrules' `prebuilt_unpack`): this package's
+# own `.mojoc` and nothing else under `lib/mojo/` (kci_api, kci_release_channel and
+# kci_release_machine are not in it), and exactly 3 dependencies, `mojo-kci_api >=0.1,<0.2`,
+# `mojo-kci_release_channel >=0.1,<0.2` and `mojo-kci_release_machine >=0.1,<0.2`, which is what
+# installing the package pulls in. Red when the manifest drops a dependency, names another range, or
+# the file carries a sibling.
+mojo_conda_holds(
+    name = "conda_holds",
+    conda = ":conda",
+    depends = [
+        "mojo-kci_api >=0.1,<0.2",
+        "mojo-kci_release_channel >=0.1,<0.2",
+        "mojo-kci_release_machine >=0.1,<0.2",
+    ],
+    package = "kci_workflow_check",
+    sole = True,
+    visibility = ["PUBLIC"],
+)
+
+# Kept for the release machine, which still builds it (release/BUCK, release/artifacts.textproto):
+# komira's conda packer over `:kci_workflow_check`. It goes when the release machine takes the mopm
+# package. This library's mopm package is `:conda` above.
+conda_package(
+    name = "kci_workflow_check_conda",
+    lib = ":kci_workflow_check",
+    summary = "The `kci_workflow_check` Mojo library of komira, as a conda package.",
     visibility = ["PUBLIC"],
 )

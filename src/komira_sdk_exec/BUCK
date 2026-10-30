@@ -1,7 +1,7 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
 # The engine-execution layer of the SDK: twelve modules (ten leaves plus the
-# plan gate modules, see README.md). Each module's header says what it is for.
+# plan gate modules) and the engine context with its SQL door (see README.md). Each module's header says what it is for.
 #
 # The welded tests (each file's header says which defect it catches):
 # - test_plan_cache_full_sink_hash: the sink kind is part of the Layer 2 cache
@@ -19,6 +19,11 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # - test_secret_capability_reveal: a capability reveals exactly the secret bound
 #   to its own node id, once, and an unbound node or a removed ref raises before
 #   the consumer is called.
+# - test_run_sql_q6: run_sql over an EngineContext. TPC-H Q6's text from
+#   komira_bench_corpus over a lineitem-shaped Parquet file gives the integer
+#   oracle's DECIMAL(38,4); a join, a syntax error, an unknown table, a COPY or
+#   CTAS and a replaced file are named refusals; the footer is read once per
+#   query; contexts are created and dropped repeatedly.
 mojo_library(
     name = "komira_sdk_exec",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
@@ -32,6 +37,8 @@ mojo_library(
         "//src/komira_async:komira_async",
         "//src/komira_async_api:komira_async_api",
         "//src/komira_atomic_alias:komira_atomic_alias",
+        "//src/komira_avro:komira_avro",
+        "//src/komira_batch_eval:komira_batch_eval",
         "//src/komira_buffer:komira_buffer",
         "//src/komira_clock:komira_clock",
         "//src/komira_collections:komira_collections",
@@ -39,22 +46,41 @@ mojo_library(
         "//src/komira_compression:komira_compression",
         "//src/komira_counters:komira_counters",
         "//src/komira_crypto:komira_crypto",
+        "//src/komira_csv:komira_csv",
         "//src/komira_dynamic_filter:komira_dynamic_filter",
         "//src/komira_encoding:komira_encoding",
+        "//src/komira_engine_runtime:komira_engine_runtime",
+        "//src/komira_exec_types:komira_exec_types",
         "//src/komira_expr:komira_expr",
         "//src/komira_fork_join:komira_fork_join",
         "//src/komira_fs:komira_fs",
         "//src/komira_hash:komira_hash",
         "//src/komira_host:komira_host",
+        "//src/komira_host_profile:komira_host_profile",
         "//src/komira_join_assembly:komira_join_assembly",
         "//src/komira_json:komira_json",
+        "//src/komira_json_index:komira_json_index",
+        "//src/komira_jsonl:komira_jsonl",
         "//src/komira_kernels:komira_kernels",
         "//src/komira_libc:komira_libc",
         "//src/komira_log:komira_log",
+        "//src/komira_lowering:komira_lowering",
         "//src/komira_lz4:komira_lz4",
         "//src/komira_metrics:komira_metrics",
+        "//src/komira_morsel:komira_morsel",
         "//src/komira_name_registry:komira_name_registry",
+        "//src/komira_objectstore:komira_objectstore",
         "//src/komira_op_agg_state:komira_op_agg_state",
+        "//src/komira_op_sources:komira_op_sources",
+        "//src/komira_operator_api:komira_operator_api",
+        "//src/komira_optimizer:komira_optimizer",
+        "//src/komira_parquet:komira_parquet",
+        "//src/komira_parquet_api:komira_parquet_api",
+        "//src/komira_parquet_codec:komira_parquet_codec",
+        "//src/komira_parquet_footers:komira_parquet_footers",
+        "//src/komira_parquet_scan:komira_parquet_scan",
+        "//src/komira_physical_plan:komira_physical_plan",
+        "//src/komira_pipeline_exec:komira_pipeline_exec",
         "//src/komira_plan_expr:komira_plan_expr",
         "//src/komira_plan_ir:komira_plan_ir",
         "//src/komira_plan_proto:komira_plan_proto",
@@ -62,13 +88,18 @@ mojo_library(
         "//src/komira_plan_wire:komira_plan_wire",
         "//src/komira_proto_codec:komira_proto_codec",
         "//src/komira_protobuf:komira_protobuf",
+        "//src/komira_row_format:komira_row_format",
         "//src/komira_scalar_arithmetic:komira_scalar_arithmetic",
+        "//src/komira_scan_planning:komira_scan_planning",
         "//src/komira_scan_source:komira_scan_source",
         "//src/komira_sdk:komira_sdk",
         "//src/komira_secret_registry:komira_secret_registry",
         "//src/komira_secret_store:komira_secret_store",
+        "//src/komira_shuffle:komira_shuffle",
         "//src/komira_simd:komira_simd",
         "//src/komira_spsc_ring:komira_spsc_ring",
+        "//src/komira_sql:komira_sql",
+        "//src/komira_sync:komira_sync",
         "//src/komira_trace:komira_trace",
         "//src/komira_udf:komira_udf",
         "//src/komira_zlib:komira_zlib",
@@ -80,7 +111,12 @@ mojo_library(
         "tests/test_plan_validation_routes_ledger.mojo",
         "tests/test_resolved_cache_lru_eviction_stress.mojo",
         "tests/test_resolved_cache_pin_count.mojo",
+        "tests/test_run_sql_q6.mojo",
         "tests/test_secret_capability_reveal.mojo",
+    ],
+    test_deps = [
+        "//src/komira_bench_corpus:komira_bench_corpus",
+        "//src/komira_parquet_writer:komira_parquet_writer",
     ],
     visibility = ["PUBLIC"],
 )

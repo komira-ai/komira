@@ -365,6 +365,15 @@ elif [ "$(readlink "$U/bin/sh")" != "$BB" ] || [ -e "$U/bin/curl" ]; then
 else
     pass "busybox.sh: applets run from /bin and /usr/bin, anything else refused (127)"
 fi
+# zig_dist unpacks the zig archive with `busybox tar -xJf ... -C <dir>`: the shim carries tar.
+mkdir -p "$U/tar_src" "$U/tar_out"
+echo packed > "$U/tar_src/f"
+if sh "$BB" tar -cf "$U/t.tar" -C "$U/tar_src" f && sh "$BB" tar -xf "$U/t.tar" -C "$U/tar_out" &&
+    [ "$(cat "$U/tar_out/f")" = packed ]; then
+    pass "busybox.sh: tar packs and unpacks into a directory (zig_dist's unpack)"
+else
+    fail "busybox.sh: tar does not unpack an archive into a directory"
+fi
 # The compile wrapper's macOS behaviours (the cc shim, the host identity,
 # modular.cfg, the refusals, the watchdog) are no longer shell scripts to run
 # here: the unit tests of komira//tools/build/mojo:mojo_compile_darwin pin

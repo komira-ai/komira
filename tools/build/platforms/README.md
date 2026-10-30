@@ -6,7 +6,7 @@ and the rest of this page follows.
 | question | answered by | in komira |
 |---|---|---|
 | What is this target **built for**? | the **target platform** | the client's own platform (`host`, below), or any registered row with `--target-platforms` |
-| **Which tools** build it? | the **toolchain**, chosen by the target platform | `toolchains//:mojo` picks the linux or the macOS Mojo toolchain from the target platform's OS; C/C++, Rust and protobuf are linux x86_64 only |
+| **Which tools** build it? | the **toolchain**, chosen by the target platform | `toolchains//:mojo` picks the linux or the macOS Mojo toolchain from the target platform's OS; a package's own static C builds for darwin-arm64 through buildrules; vendored third_party C/C++ is not yet supported in `mojo_package`, and the old rules' C/C++, Rust and protobuf toolchains remain linux x86_64 |
 | **Where do its actions run?** | the **execution platform**, chosen by what the toolchain says it runs on | one per (os, cpu): `linux-x86_64`, and `darwin-arm64` when macOS workers are configured |
 
 ## The platform table
@@ -121,7 +121,17 @@ machine its actions need: the linux toolchains state
 [`defs.bzl`](defs.bzl)). That statement binds every target using the
 toolchain, and it is the only thing any rule says about where an action
 runs. Targets that only unpack or copy files, including the macOS
-toolchain's files, state `LINUX_X86_64` themselves: they run linux tools.
+toolchain's files, and the build tools (zig, the launchers, the lints), state
+`TOOL_EXEC` themselves: the platform the build tools run on. It is
+`LINUX_X86_64`, except for a build that runs every action on a Mac
+(`[komira] execution = local` on a macOS arm64 client, whose only execution
+platform is `darwin-arm64`), where it is `DARWIN_ARM64`: `:busybox` is then
+[`busybox.sh`](../mojo/darwin/busybox.sh), `:zig`, `:zig_next` and the linters
+are the darwin-arm64 row's pins, and `zig_exe`, `zig_test` and
+`zig_bootstrap_exe` default their `target` to that row's `unpack_triple`.
+With remote execution (whatever the client's own platform) `TOOL_EXEC` is
+`LINUX_X86_64`, so no action key changes. Linux-only products (kcov, the LLVM
+branch-coverage tools, the Linux Mojo compiler) state `LINUX_X86_64`.
 
 ## Execution platforms
 
