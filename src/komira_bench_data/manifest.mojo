@@ -181,6 +181,76 @@ struct DatasetManifest(Copyable, Movable):
                 raise Error("manifest: row count below the unrecorded marker: " + f.path)
 
 
+# --- Recorded checksums ---------------------------------------------------------
+# A checksum is recorded here once, by a human, from the lines the stage tool
+# prints (stage.mojo, `komira-bench-stage tpch` / `verify`). The tables of
+# TPC-H and ClickBench read this list when they are built: a path listed here
+# gets its size and sha256 (and its row count, when the line has one), so from
+# then on the verifier reports VERIFIED instead of UNRECORDED.
+
+
+struct RecordedFile(Copyable, Movable):
+    """One recorded file: the path, the size and the sha256 a first verified
+    run observed, and the row count it observed (`UNRECORDED_ROWS` when the
+    run did not count rows)."""
+
+    var path: String
+    var bytes: Int
+    var sha256: String
+    var rows: Int
+
+    def __init__(out self, var path: String, bytes: Int, var sha256: String, rows: Int):
+        self.path = path^
+        self.bytes = bytes
+        self.sha256 = sha256^
+        self.rows = rows
+
+
+def recorded_line(path: String, bytes: Int, sha256: String, rows: Int) -> String:
+    """The line `recorded_files` takes for a file, as the stage tool prints it:
+    paste it above `return out^`."""
+    return (
+        String('    out.append(RecordedFile("') + path + String('", ')
+        + String(bytes) + String(', "') + sha256 + String('", ') + String(rows) + String("))")
+    )
+
+
+def recorded_files() -> List[RecordedFile]:
+    """Every checksum recorded so far. Nothing is recorded yet: no dataset has
+    been staged and measured on a benchmark host."""
+    var out = List[RecordedFile]()
+    return out^
+
+
+def apply_recorded(mut files: List[DatasetFile], recorded: List[RecordedFile]) raises:
+    """Fill the size, sha256 and row count of every file of `files` that has a
+    record in `recorded` (a record for another dataset's path is ignored).
+
+    Raises:
+        Error: a record that is not a size of at least 0 and a sha256 of 64
+            lowercase hex characters, a path recorded twice, or a record that
+            contradicts a size or row count the manifest already knows.
+    """
+    for r in range(len(recorded)):
+        ref rec = recorded[r]
+        for q in range(r):
+            if recorded[q].path == rec.path:
+                raise Error("recorded: path recorded twice: " + rec.path)
+        if rec.bytes < 0 or not is_sha256_hex(rec.sha256) or rec.rows < UNRECORDED_ROWS:
+            raise Error("recorded: malformed record for " + rec.path)
+        for i in range(len(files)):
+            if files[i].path != rec.path:
+                continue
+            if files[i].has_bytes() and files[i].expected_bytes != rec.bytes:
+                raise Error("recorded: size of " + rec.path + " contradicts the manifest")
+            if files[i].has_rows() and rec.rows >= 0 and files[i].expected_rows != rec.rows:
+                raise Error("recorded: row count of " + rec.path + " contradicts the manifest")
+            files[i].expected_bytes = rec.bytes
+            files[i].expected_sha256 = rec.sha256.copy()
+            if rec.rows >= 0:
+                files[i].expected_rows = rec.rows
+
+
 # --- TPC-H -------------------------------------------------------------------
 # One Parquet file per table at <dir>/tpch/sf<N>/<table>.parquet. The user
 # supplies the files. Row counts follow the specification's cardinalities, which
@@ -210,6 +280,7 @@ def tpch_manifest(scale_factor: Int) raises -> DatasetManifest:
     files.append(DatasetFile.unrecorded(dir + "orders.parquet", 1_500_000 * scale_factor))
     var lineitem_rows = 6_001_215 if scale_factor == 1 else UNRECORDED_ROWS
     files.append(DatasetFile.unrecorded(dir + "lineitem.parquet", lineitem_rows))
+    apply_recorded(files, recorded_files())
     var m = DatasetManifest(String("tpch"), scale^, String(), files^)
     m.validate()
     return m^
@@ -232,6 +303,7 @@ def clickbench_manifest() raises -> DatasetManifest:
             99_997_497,
         )
     )
+    apply_recorded(files, recorded_files())
     var m = DatasetManifest(String("clickbench"), String("full"), String(), files^)
     m.validate()
     return m^

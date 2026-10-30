@@ -14,9 +14,11 @@
 #            OP_PROJECT           `MapOp`     (`op_project`)
 #            OP_LIMIT             `LimitOp`   (`op_limit`)
 #   sink     SINK_COLLECT         `CollectSink` (`sink_collect`)
+#            SINK_AGG, key NONE   `AggSink` (`sink_agg`), from the `AggSinkData`
+#                                 the descriptor's `sink_param_id` names
 #
-# Anything else (SOURCE_CONCAT, OP_JOIN_PROBE, the aggregation and sort sinks)
-# is refused by name, because no member serves it yet.
+# Anything else (SOURCE_CONCAT, OP_JOIN_PROBE, the grouped aggregation and the
+# sort sinks) is refused by name, because no member serves it yet.
 #
 # The workers of a segment each get their own operator instances, built from
 # one set of shared parts the builder keeps per operator (the predicate, the
@@ -29,7 +31,10 @@
 # The builder borrows the footer cache and the expression pool the Parquet
 # source reads from; they belong to the caller and outlive every segment run.
 # Resident batches are owned by the builder (`add_resident` returns the handle
-# a SOURCE_BATCH spec names).
+# a SOURCE_BATCH spec names), and so is the sink data of the plan
+# (`add_agg_sink` returns the id a descriptor's `sink_param_id` names). The
+# builder also owns the segment pool the sinks draw their memory from
+# (`set_memory_budget`; unbounded until set).
 
 from std.memory import Pointer
 
@@ -47,7 +52,9 @@ from komira_physical_plan.physical_plan import (
     OP_FILTER,
     OP_LIMIT,
     OP_PROJECT,
+    AggSinkData,
     SegmentDescPod,
+    SINK_AGG,
     SINK_COLLECT,
     SINK_ORIENT_COLUMNAR,
     SOURCE_BATCH,
@@ -63,6 +70,8 @@ from .op_variant import OpVariant
 from .pipeline_sink import PipelineSink
 from .published_outputs import PublishedOutputs
 from .segment_builder import SegmentBuilder
+from .segment_pool import SegmentPool
+from .sink_agg import AggSink
 from .sink_collect import CollectSink
 from .source_batch import BatchSource
 from .source_parquet import LocalParquetSource, build_parquet_source
@@ -102,7 +111,7 @@ struct RealBuilder[
         SinkOutputSource,
     ]
     comptime Op = OpVariant[FilterOp, MapOp, LimitOp]
-    comptime Sink = PipelineSink[CollectSink, NoSink, NoSink]
+    comptime Sink = PipelineSink[CollectSink, AggSink, NoSink]
 
     # The borrowed cache and pool, kept as pointers (private) because a struct
     # field cannot hold a `ref` argument; the caller's objects outlive the
@@ -111,6 +120,8 @@ struct RealBuilder[
     var _pool: Pointer[ExprPool, Self.pool_o]
     var _resident: List[RecordBatch]
     var _parts: List[_OpParts]
+    var _agg_sinks: List[AggSinkData]
+    var _segment_pool: SegmentPool
 
     def __init__(
         out self,
@@ -121,6 +132,24 @@ struct RealBuilder[
         self._pool = Pointer(to=pool)
         self._resident = List[RecordBatch]()
         self._parts = List[_OpParts]()
+        self._agg_sinks = List[AggSinkData]()
+        self._segment_pool = SegmentPool()
+
+    def add_agg_sink(mut self, var data: AggSinkData) -> Int:
+        """Keep `data` for SINK_AGG segments; returns the id their
+        `sink_param_id` names."""
+        self._agg_sinks.append(data^)
+        return len(self._agg_sinks) - 1
+
+    def set_memory_budget(mut self, bytes: Int):
+        """Bound the memory the sinks of later segment runs may draw, in
+        bytes (a negative value removes the bound). Replaces the pool, so call
+        it between runs."""
+        self._segment_pool = SegmentPool(bytes)
+
+    def pool_granted(self) -> Int:
+        """The bytes the sinks hold from the pool now; zero between runs."""
+        return self._segment_pool.granted()
 
     def add_resident(mut self, var batch: RecordBatch) -> Int:
         """Keep `batch` for SOURCE_BATCH segments; returns the handle their
@@ -257,17 +286,34 @@ struct RealBuilder[
         mut self, ref desc: SegmentDescPod, ref source_schema: Schema
     ) raises -> Self.Sink:
         if (
-            desc.sink_kind != SINK_COLLECT
-            or desc.sink_key_dtype != KEY_DTYPE_NONE
-            or desc.sink_orientation != SINK_ORIENT_COLUMNAR
+            desc.sink_key_dtype == KEY_DTYPE_NONE
+            and desc.sink_orientation == SINK_ORIENT_COLUMNAR
         ):
-            raise Error(
-                "komira_pipeline_exec: the sink of segment "
-                + String(desc.seg_id)
-                + " is not served; only (SINK_COLLECT, KEY_DTYPE_NONE,"
-                " SINK_ORIENT_COLUMNAR) is"
-            )
-        return Self.Sink.first(CollectSink(self._result_schema(desc, source_schema)))
+            if desc.sink_kind == SINK_COLLECT:
+                return Self.Sink.first(
+                    CollectSink(self._result_schema(desc, source_schema))
+                )
+            if desc.sink_kind == SINK_AGG:
+                var id = desc.sink_param_id
+                if id < 0 or id >= len(self._agg_sinks):
+                    raise Error(
+                        "komira_pipeline_exec: segment "
+                        + String(desc.seg_id)
+                        + " names aggregation sink data "
+                        + String(id)
+                        + ", and the builder holds "
+                        + String(len(self._agg_sinks))
+                    )
+                return Self.Sink.second(
+                    AggSink(self._agg_sinks[id], self._segment_pool.share(), desc.seg_id)
+                )
+        raise Error(
+            "komira_pipeline_exec: the sink of segment "
+            + String(desc.seg_id)
+            + " is not served; only (SINK_COLLECT, KEY_DTYPE_NONE,"
+            " SINK_ORIENT_COLUMNAR) and (SINK_AGG, KEY_DTYPE_NONE,"
+            " SINK_ORIENT_COLUMNAR) are"
+        )
 
     def _result_schema(
         mut self, ref desc: SegmentDescPod, ref source_schema: Schema
