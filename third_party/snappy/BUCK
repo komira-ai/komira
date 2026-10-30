@@ -257,8 +257,8 @@ _NATIVE_FILES = [
 # snappy as buildrules' native_library builds it, for the mopm package komira_compression
 # (`natives = {"libsnappy.a": ...}`): `libsnappy.a`, C++17, the flags of the compile above, the same two config.h
 # (by cpu, and macOS and Linux write the same macros for one cpu) and the same renaming: the C API (snappy-c.h)
-# is komira_snappy_*, the C++ names (_Z...) stay, so `allow` names them. It carries zig's libc++ into the link
-# of a program that includes it (`cxx_runtime`, derived from the .cc files). :snappy above is unchanged: it is what
+# is komira_snappy_*, and the C++ names of namespace snappy (_ZN6snappy...) stay, which the prefix's `cxx_namespaces` allows. It carries zig's libc++
+# into the link of a program that includes it (`cxx_runtime`, derived from the .cc files). :snappy above is unchanged: it is what
 # the packages still on the older rules link.
 native_library(
     name = "snappy_native",
@@ -289,6 +289,11 @@ native_library(
         "-fno-exceptions",
         "-fno-rtti",
         "-Wno-sign-compare",
+        # With -fno-exceptions libc++'s length and allocation errors (std::vector, std::allocator) call its verbose abort
+        # through out-of-line weak functions, and those are `std` names this archive would define: the renaming check
+        # holds a library to defining only its own names and a `cxx_namespaces` entry may not be `std`. A trap in their
+        # place leaves them inlined, so the archive defines none (the same fatal stop for the same impossible case).
+        "-D_LIBCPP_VERBOSE_ABORT(...)=__builtin_trap()",
     ] + by_os_cpu({
         "linux_aarch64": [],
         # config_x86_64.h is what CMake writes at x86-64-v3, the target_cpu of the linux-x86_64 row of the
@@ -296,8 +301,7 @@ native_library(
         "linux_x86_64": ["-mcpu=x86_64_v3"],
         "macos_aarch64": [],
     }),
-    allow = ["_Z*"],
     cxx_runtime = True,
-    prefix = {"name": "komira_snappy_", "strip": "snappy_", "min": 5},
+    prefix = {"name": "komira_snappy_", "strip": "snappy_", "min": 5, "cxx_namespaces": ["snappy"]},
     soname = "libsnappy.a",
 )
