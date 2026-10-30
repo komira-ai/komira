@@ -400,7 +400,7 @@ PLATFORMS = {
         "zig_triple": "x86_64-linux-gnu.2.34",
     },
     "darwin-arm64": {
-        "applets": ["awk", "basename", "cat", "chmod", "cmp", "cp", "cut", "dirname", "env", "expr", "find", "grep", "head", "ln", "ls", "mkdir", "mkfifo", "mktemp", "mv", "printf", "ps", "readlink", "rm", "rmdir", "sed", "sh", "sleep", "sort", "tail", "tee", "test", "touch", "tr", "uname", "wc"],
+        "applets": ["awk", "basename", "cat", "chmod", "cmp", "cp", "cut", "dirname", "env", "expr", "find", "grep", "head", "ln", "ls", "mkdir", "mkfifo", "mktemp", "mv", "printf", "ps", "readlink", "rm", "rmdir", "sed", "sh", "sleep", "sort", "tail", "tar", "tee", "test", "touch", "tr", "uname", "wc"],
         "assets": {
             "actionlint": pin(
                 "actionlint_1.7.12_darwin_arm64.tar.gz",

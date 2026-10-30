@@ -1,6 +1,7 @@
 """Load-time cases of `darwin_properties_refusal` (run by tools/build/tests/functional/darwin/BUCK)."""
 
-load("@komira//tools/build/platforms:defs.bzl", "DARWIN_LOCAL_HOST", "darwin_local_hosts_refusal", "darwin_properties_refusal", "darwin_toolchain_hosts")
+load("@komira//tools/build/platforms:defs.bzl", "DARWIN_LOCAL_HOST", "darwin_local_hosts_refusal", "darwin_properties_refusal", "darwin_toolchain_hosts", "tool_exec_row")
+load("@komira//tools/build/platforms:with_buildrules.bzl", "first_platform_refusal")
 
 # Load-time cases of `darwin_properties_refusal`: a macOS property set is
 # registered only with a non-empty property dict and at least one well-formed
@@ -45,7 +46,44 @@ _TOOLCHAIN_CASES = [
     ([], "local", None, ([], False)),
 ]
 
+# (execution mode, host row) -> the row the build tools run on (TOOL_EXEC). Only a
+# local build on the Mac moves it; remote execution never does, so the farm's
+# action keys cannot change. (`auto` is resolved to local or remote before this,
+# by the configuration, which the farm build and the Mac proof exercise.)
+_TOOL_EXEC_CASES = [
+    ("remote", "darwin-arm64", "linux-x86_64"),
+    ("local", "darwin-arm64", "darwin-arm64"),
+    ("local", "linux-x86_64", "linux-x86_64"),
+    ("remote", "linux-x86_64", "linux-x86_64"),
+    ("local", None, "linux-x86_64"),
+    (None, "darwin-arm64", "linux-x86_64"),
+]
+
+_L = "komira//tools/build/platforms:linux-x86_64"
+_D = "komira//tools/build/platforms:darwin-arm64"
+
+# (registered platform labels, first one remote?) -> refused? buildrules' platforms
+# are added only after komira's linux, or after a lone LOCAL darwin.
+_BUILDRULES_CASES = [
+    ([_L], False, False),
+    ([_L, _D], True, False),
+    ([_D], False, False),
+    ([_D], True, True),
+    ([_D, _L], False, True),
+    ([], False, True),
+]
+
 def darwin_properties_cases():
+    for mode, host_name, want in _TOOL_EXEC_CASES:
+        got = tool_exec_row(mode, host_name)
+        if got != want:
+            fail("tool_exec_row({}, {}) = {}, expected {}".format(repr(mode), repr(host_name), repr(got), repr(want)))
+
+    for labels, remote, refused in _BUILDRULES_CASES:
+        got = first_platform_refusal(labels, remote)
+        if (got != None) != refused:
+            fail("first_platform_refusal({}, {}) = {}, expected {}".format(repr(labels), repr(remote), repr(got), "a refusal" if refused else "None"))
+
     for props, hosts, refused in _CASES:
         got = darwin_properties_refusal(props, hosts)
         if (got != None) != refused:
