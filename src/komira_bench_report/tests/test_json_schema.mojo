@@ -32,6 +32,14 @@
 # - test_control_characters_are_refused_in_free_text: a control character in
 #   the operating system text or in the detail of an UNSUPPORTED or an
 #   UNVERIFIED cell is refused.
+# - test_environment_accepts_the_spaced_at_of_cpuinfo: the CPU model strings
+#   /proc/cpuinfo writes for Intel parts ("... CPU E5-4669 v4 @ 2.20GHz") and
+#   one with no at sign are written, in cpu_model and in os, and read back.
+# - test_environment_refuses_addresses_paths_and_controls: an at sign that is
+#   not spaced on both sides (user@host, a@b.c, at either end, a space on one
+#   side only), a slash, a backslash and a control character are refused in
+#   cpu_model and in os, by the writer and by the reader; a spaced at sign
+#   next to one of those is still refused.
 # - test_details_refuse_paths: the construct of UNSUPPORTED and the cause of
 #   UNVERIFIED are text about the cell, never a place on a machine.
 
@@ -324,6 +332,69 @@ def test_writer_refuses_host_identifying_text() raises:
     assert_true(_write_refused(r))
 
 
+def _cpu_written(cpu: String) raises -> Bool:
+    var r = _sample()
+    r.env.cpu_model = cpu
+    return not _write_refused(r)
+
+
+def _os_written(os: String) raises -> Bool:
+    var r = _sample()
+    r.env.os = os
+    return not _write_refused(r)
+
+
+def _cpu_read(cpu: String) raises -> Bool:
+    var good = write_result_json(_sample())
+    return not _refused(_altered(good, String("Example CPU 2.4GHz"), cpu))
+
+
+def test_environment_accepts_the_spaced_at_of_cpuinfo() raises:
+    var intel = String("Intel(R) Xeon(R) CPU E5-4669 v4 @ 2.20GHz")
+    var platinum = String("Intel(R) Xeon(R) Platinum 8375C CPU @ 2.90GHz")
+    var amd = String("AMD EPYC 7R13 48-Core Processor")
+    assert_true(_cpu_written(intel))
+    assert_true(_cpu_written(platinum))
+    assert_true(_cpu_written(amd))
+    assert_true(_os_written(intel))
+    assert_true(_cpu_read(intel))
+    assert_true(_cpu_read(platinum))
+    assert_true(_cpu_read(amd))
+    # The text survives the round trip unchanged.
+    var r = _sample()
+    r.env.cpu_model = intel
+    var back = parse_result_json(write_result_json(r))
+    assert_equal(back.env.cpu_model, intel)
+
+
+def test_environment_refuses_addresses_paths_and_controls() raises:
+    var bad = List[String]()
+    bad.append(String("adi@node-05"))
+    bad.append(String("user@example.com"))
+    bad.append(String("@host"))
+    bad.append(String("@ host"))
+    bad.append(String("cpu @"))
+    bad.append(String("cpu@"))
+    bad.append(String("a @b"))
+    bad.append(String("a@ b"))
+    bad.append(String("a @@ b"))
+    bad.append(String("a @ b@c"))
+    bad.append(String("a @ /proc/cpuinfo"))
+    bad.append(String("a @ b\\c"))
+    bad.append(String("/proc/cpuinfo"))
+    bad.append(String("C:\\cpu"))
+    bad.append(String("cpu\tmodel"))
+    bad.append(String("cpu\nmodel"))
+    for i in range(len(bad)):
+        assert_true(not _cpu_written(bad[i]))
+        assert_true(not _os_written(bad[i]))
+    # The reader, through the text of a document: JSON-safe cases only.
+    assert_true(not _cpu_read(String("adi@node-05")))
+    assert_true(not _cpu_read(String("a @b")))
+    assert_true(not _cpu_read(String("cpu @")))
+    assert_true(not _cpu_read(String("a @ /proc/cpuinfo")))
+
+
 def test_details_refuse_paths() raises:
     var raised = False
     try:
@@ -450,6 +521,14 @@ def main() raises:
         test_writer_refuses_host_identifying_text()
     except e:
         failed += "\n  test_writer_refuses_host_identifying_text: " + String(e)
+    try:
+        test_environment_accepts_the_spaced_at_of_cpuinfo()
+    except e:
+        failed += "\n  test_environment_accepts_the_spaced_at_of_cpuinfo: " + String(e)
+    try:
+        test_environment_refuses_addresses_paths_and_controls()
+    except e:
+        failed += "\n  test_environment_refuses_addresses_paths_and_controls: " + String(e)
     try:
         test_details_refuse_paths()
     except e:
