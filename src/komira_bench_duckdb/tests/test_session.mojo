@@ -44,17 +44,41 @@
 #   that ends with a semicolon inside a `--` comment is followed by a line of
 #   its own that ends the statement; a plain trailing semicolon is not
 #   doubled.
+# - test_a_quoted_decimal_is_a_decimal_and_the_timed_run_is_untouched: DuckDB's
+#   JSON quotes a DECIMAL (as it does every non-bare type); the fetch asks
+#   DuckDB for the column types with DESCRIBE <query> (never with a rewritten
+#   query), the quoted value is then neither a text nor a double, and a timed
+#   run afterwards sends no DESCRIBE.
+# - test_a_quoted_number_in_a_varchar_column_stays_text: '1994' in a VARCHAR
+#   column is still a text.
+# - test_wide_integers_are_exact_and_small_ones_are_integers: a quoted HUGEINT
+#   inside 64 bits is an integer (as an INT64 sum from the other engine is), one
+#   past 2^63 or a UBIGINT at 2^64-1 is neither a text nor a double, and two
+#   values a unit apart do not compare equal.
+# - test_decimals_compare_exactly_and_by_value: 123.40 in DECIMAL(10,2) and 123.4
+#   in DECIMAL(10,1) are the same value, 123141078.2283 and 123141078.2284 are
+#   not, and a sum of two DECIMAL(38,0) maxima, which does not fit 128 bits,
+#   still tells a unit apart.
+# - test_a_decimal_against_a_double_is_a_kind_difference: the same number as a
+#   DECIMAL and as a double does not compare equal and says the kinds differ.
+# - test_text_that_is_not_an_exact_number_in_an_exact_column_is_an_error: a
+#   fraction in a HUGEINT column and a DECIMAL value with more than 38
+#   fractional digits raise instead of becoming texts.
 
 from std.memory import ArcPointer
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
 from komira_bench_duckdb import (
     BenchClock,
+    Cell,
     DuckDbSession,
     DuckDbTransport,
+    ResultSet,
     StdoutChunk,
+    compare_signatures,
+    signature_of,
 )
-from komira_bench_duckdb.cells import KIND_INT, KIND_TEXT
+from komira_bench_duckdb.cells import KIND_FLOAT, KIND_INT, KIND_NULL, KIND_TEXT
 from komira_bench_duckdb.text import slice_bytes
 
 
@@ -63,12 +87,14 @@ struct Rule(Copyable, Movable):
     var json: String
     var error: String
     var cost: Int
+    var types: String
 
-    def __init__(out self, needle: String, json: String, error: String, cost: Int):
+    def __init__(out self, needle: String, json: String, error: String, cost: Int, types: String = String("")):
         self.needle = needle
         self.json = json
         self.error = error
         self.cost = cost
+        self.types = types
 
 
 struct FakeDuckDb(DuckDbTransport):
@@ -137,7 +163,11 @@ struct FakeDuckDb(DuckDbTransport):
     def run_statement(mut self):
         for i in range(len(self.rules)):
             if self.statement.find(self.rules[i].needle) >= 0:
-                if self.mode == "json" and self.rules[i].json.byte_length() > 0:
+                if self.statement.startswith(String("DESCRIBE ")):
+                    # what DuckDB answers for DESCRIBE <query>: the rule's `types`
+                    if self.mode == "json" and self.rules[i].types.byte_length() > 0:
+                        self.emit(self.rules[i].types + String("\n"), 0)
+                elif self.mode == "json" and self.rules[i].json.byte_length() > 0:
                     self.emit(self.rules[i].json + String("\n"), 0)
                 self.errors += self.rules[i].error
                 self.cost = self.rules[i].cost
@@ -526,6 +556,150 @@ def test_a_query_ending_in_a_comment_still_gets_its_terminator() raises:
     assert_true(text.find(String("SELECT 1\n-- done;\n;\n.print @@E 1\n")) >= 0)
     assert_true(text.find(String("SELECT 2;\n.print @@E 2\n")) >= 0)
     assert_true(text.find(String("SELECT 3\n;\n.print @@E 3\n")) >= 0)
+
+
+def _describe(ty: String) -> String:
+    return (
+        String('[{"column_name":"v","column_type":"') + ty
+        + String('","null":"YES","key":null,"default":null,"extra":null}]')
+    )
+
+
+def _fetched(json: String, ty: String) raises -> ResultSet:
+    """The rows of `SELECT one` when DuckDB prints `json` and describes the
+    column as `ty`."""
+    var cell = ArcPointer[Int](0)
+    var sent = ArcPointer[List[String]](List[String]())
+    var rules = List[Rule]()
+    rules.append(Rule(String("SELECT one"), json, String(""), 0, _describe(ty)))
+    var s = DuckDbSession[FakeDuckDb](FakeDuckDb(cell, sent, rules^), BenchClock.manual(cell))
+    var f = s.fetch(String("SELECT one"))
+    assert_true(f.ok(), f.error)
+    return f.rows.copy()
+
+
+def _one(value: String) -> String:
+    return String('[{"v":"') + value + String('"}]')
+
+
+def _verdict_reason(a: ResultSet, b: ResultSet) raises -> String:
+    """The first reason the two answers differ, or an empty text when they are
+    identical."""
+    var v = compare_signatures(signature_of(a), signature_of(b))
+    if v.identical:
+        return String("")
+    return v.reasons[0].copy()
+
+
+def test_a_quoted_decimal_is_a_decimal_and_the_timed_run_is_untouched() raises:
+    var cell = ArcPointer[Int](0)
+    var sent = ArcPointer[List[String]](List[String]())
+    var rules = List[Rule]()
+    rules.append(
+        Rule(String("SELECT revenue"), _one(String("123141078.2283")), String(""), 0, _describe(String("DECIMAL(38,4)")))
+    )
+    var s = DuckDbSession[FakeDuckDb](FakeDuckDb(cell, sent, rules^), BenchClock.manual(cell))
+    var f = s.fetch(String("SELECT revenue"))
+    assert_true(f.ok())
+    var c = f.rows.rows[0][0].copy()
+    assert_true(c.kind != KIND_TEXT, "a quoted DECIMAL must not be a text")
+    assert_true(c.kind != KIND_FLOAT, "a DECIMAL must not be rounded to a double")
+    assert_true(c.kind != KIND_NULL)
+    assert_true(c.kind != KIND_INT)
+    var text = _sent_text(sent)
+    assert_true(text.find(String("DESCRIBE SELECT revenue")) >= 0, "the column types are read with DESCRIBE <query>")
+    assert_true(text.find(String("\nSELECT revenue\n;\n.print @@E")) >= 0, "the query text is sent as it is")
+    var before = _count(text, String("DESCRIBE"))
+    _ = s.run_timed(String("SELECT revenue"))
+    assert_equal(_count(_sent_text(sent), String("DESCRIBE")), before)
+
+
+def _count(text: String, needle: String) -> Int:
+    var n = 0
+    var at = 0
+    while True:
+        var f = text.find(needle, at)
+        if f < 0:
+            return n
+        n += 1
+        at = f + needle.byte_length()
+
+
+def test_a_quoted_number_in_a_varchar_column_stays_text() raises:
+    var rows = _fetched(_one(String("1994")), String("VARCHAR"))
+    assert_equal(rows.rows[0][0].kind, KIND_TEXT)
+    assert_equal(rows.rows[0][0].s, String("1994"))
+    var dates = _fetched(_one(String("1994-01-01")), String("DATE"))
+    assert_equal(dates.rows[0][0].kind, KIND_TEXT)
+    assert_equal(dates.rows[0][0].s, String("1994-01-01"))
+
+
+def test_wide_integers_are_exact_and_small_ones_are_integers() raises:
+    var small = _fetched(_one(String("9223372036854775807")), String("HUGEINT"))
+    assert_equal(small.rows[0][0].kind, KIND_INT)
+    assert_equal(small.rows[0][0].i, Int64(9223372036854775807))
+    var negative = _fetched(_one(String("-9223372036854775808")), String("HUGEINT"))
+    assert_equal(negative.rows[0][0].kind, KIND_INT)
+    var past = _fetched(_one(String("9223372036854775808")), String("UBIGINT"))
+    assert_true(past.rows[0][0].kind != KIND_TEXT)
+    assert_true(past.rows[0][0].kind != KIND_FLOAT)
+    var top = _fetched(_one(String("18446744073709551615")), String("UBIGINT"))
+    var next = _fetched(_one(String("18446744073709551614")), String("UBIGINT"))
+    assert_true(top.rows[0][0].kind != KIND_TEXT)
+    assert_true(top.rows[0][0].kind != KIND_FLOAT)
+    assert_true(_verdict_reason(top, top).byte_length() == 0)
+    assert_true(_verdict_reason(top, next).find(String("sum differs")) >= 0)
+    var huge = _fetched(_one(String("170141183460469231731687303715884105727")), String("HUGEINT"))
+    var huge_next = _fetched(_one(String("170141183460469231731687303715884105726")), String("HUGEINT"))
+    var uhuge = _fetched(_one(String("340282366920938463463374607431768211455")), String("UHUGEINT"))
+    assert_true(huge.rows[0][0].kind != KIND_TEXT)
+    assert_true(uhuge.rows[0][0].kind != KIND_TEXT)
+    assert_true(_verdict_reason(huge, huge_next).find(String("sum differs")) >= 0)
+
+
+def test_decimals_compare_exactly_and_by_value() raises:
+    var a = _fetched(_one(String("123.40")), String("DECIMAL(10,2)"))
+    var b = _fetched(_one(String("123.4")), String("DECIMAL(10,1)"))
+    assert_equal(_verdict_reason(a, b), String(""))
+    var x = _fetched(_one(String("123141078.2283")), String("DECIMAL(38,4)"))
+    var y = _fetched(_one(String("123141078.2284")), String("DECIMAL(38,4)"))
+    assert_equal(_verdict_reason(x, x), String(""))
+    assert_true(_verdict_reason(x, y).find(String("sum differs")) >= 0)
+    # two DECIMAL(38,0) maxima add up past 128 bits; a unit still shows
+    var nines = String("99999999999999999999999999999999999999")
+    var eights = String("99999999999999999999999999999999999998")
+    var pair = String('[{"v":"') + nines + String('"},{"v":"') + nines + String('"}]')
+    var pair_less = String('[{"v":"') + nines + String('"},{"v":"') + eights + String('"}]')
+    var p = _fetched(pair, String("DECIMAL(38,0)"))
+    var q = _fetched(pair_less, String("DECIMAL(38,0)"))
+    assert_equal(_verdict_reason(p, p), String(""))
+    assert_true(_verdict_reason(p, q).find(String("sum differs")) >= 0)
+
+
+def test_a_decimal_against_a_double_is_a_kind_difference() raises:
+    var d = _fetched(_one(String("1.5")), String("DECIMAL(3,1)"))
+    var f = ResultSet()
+    f.names.append(String("v"))
+    var row = List[Cell]()
+    row.append(Cell.real(1.5))
+    f.add_row(row^)
+    var reason = _verdict_reason(d, f)
+    assert_true(reason.find(String("has kind")) >= 0, "a decimal against a double is a kind difference: " + reason)
+
+
+def test_text_that_is_not_an_exact_number_in_an_exact_column_is_an_error() raises:
+    var raised = False
+    try:
+        _ = _fetched(_one(String("1.5")), String("HUGEINT"))
+    except:
+        raised = True
+    assert_true(raised, "a fraction in a HUGEINT column is an error")
+    raised = False
+    try:
+        _ = _fetched(_one(String("0.1234567890123456789012345678901234567890")), String("DECIMAL(38,38)"))
+    except:
+        raised = True
+    assert_true(raised, "more than 38 fractional digits is an error")
 
 
 def main() raises:

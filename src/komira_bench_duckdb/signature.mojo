@@ -15,7 +15,8 @@
 
 from std.math import isnan
 
-from .cells import Cell, KIND_FLOAT, KIND_INT, KIND_NULL, KIND_TEXT, ResultSet
+from .cells import Cell, KIND_DECIMAL, KIND_FLOAT, KIND_INT, KIND_NULL, KIND_TEXT, ResultSet
+from .decimal_text import ExactSum, canonical_decimal, compare_decimals
 
 
 def cell_hash(s: String) -> Int64:
@@ -63,6 +64,12 @@ struct ColumnSignature(Copyable, Movable):
     var text_hash: Int64
     var text_min: String
     var text_max: String
+    var has_decimal: Bool
+    var dcount: Int
+    var dsum: ExactSum
+    var dmin: String
+    var dmax: String
+    var dhash: Int64
 
     def __init__(out self):
         self.count = 0
@@ -83,26 +90,41 @@ struct ColumnSignature(Copyable, Movable):
         self.text_hash = Int64(0)
         self.text_min = String("")
         self.text_max = String("")
+        self.has_decimal = False
+        self.dcount = 0
+        self.dsum = ExactSum()
+        self.dmin = String("0")
+        self.dmax = String("0")
+        self.dhash = Int64(0)
 
     def mixed(self) -> Bool:
-        """Numbers and texts in one column."""
+        """Numbers and texts in one column, or exact decimals and doubles (a
+        double has no exact value to put against a decimal)."""
+        if self.has_decimal and (self.has_text or not self.all_int):
+            return True
         return self.has_numeric and self.has_text
 
     def kind(self) -> Int:
         """KIND_NULL for a column with no value, KIND_INT for integers only,
-        KIND_FLOAT for numbers with a double among them, KIND_TEXT for texts
-        (and for a mixed column, which never compares equal to anything)."""
+        KIND_FLOAT for numbers with a double among them, KIND_DECIMAL for exact
+        decimals (integers may be among them), KIND_TEXT for texts (and for a
+        mixed column, which never compares equal to anything)."""
         if self.has_text:
             return KIND_TEXT
+        if self.has_decimal:
+            return KIND_DECIMAL
         if not self.has_numeric:
             return KIND_NULL
         if self.all_int:
             return KIND_INT
         return KIND_FLOAT
 
-    def add(mut self, cell: Cell):
+    def add(mut self, cell: Cell) raises:
         if cell.kind == KIND_NULL:
             self.nulls += 1
+            return
+        if cell.kind == KIND_DECIMAL:
+            self._add_decimal(cell.s)
             return
         if cell.kind == KIND_TEXT:
             self._add_text(cell.s)
@@ -114,6 +136,18 @@ struct ColumnSignature(Copyable, Movable):
                 self.nans += 1
                 return
         self._add_number(cell, v)
+
+    def _add_decimal(mut self, text: String) raises:
+        var s = canonical_decimal(text)
+        if self.dcount == 0 or compare_decimals(s, self.dmin) < 0:
+            self.dmin = s
+        if self.dcount == 0 or compare_decimals(s, self.dmax) > 0:
+            self.dmax = s
+        self.dsum.add(s)
+        self.dhash += cell_hash(s)
+        self.has_decimal = True
+        self.dcount += 1
+        self.count += 1
 
     def _add_text(mut self, s: String):
         if self.count == 0 or _bytes_less(s, self.text_min):

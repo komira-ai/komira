@@ -4,11 +4,13 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # a pin table and a verifier for a user-supplied DuckDB binary, one persistent
 # DuckDB process driven over stdin and stdout with host-timed markers around
 # every query, DuckDB's JSON output as typed results, the order-independent
-# value signature with its tolerance rules, the row-order check and recorded
+# value signature with its tolerance rules and its exact decimals, the row-order check and recorded
 # reference answers. DuckDB itself is never shipped or downloaded. See
 # __init__.mojo.
 #
 # The welded tests (each file's header says what each test proves):
+# - test_exact_decimal: exact decimal text and sums, and the decimal kind in
+#   the signature, the comparison and the recorded form.
 # - test_values: the signature, the tolerance rules and the row-order check on
 #   fixed inputs.
 # - test_reference_rows: recorded answers round-trip and refuse bad records;
@@ -31,6 +33,7 @@ mojo_library(
         "//src/komira_supervisor:komira_supervisor",
     ],
     test_srcs = [
+        "tests/test_exact_decimal.mojo",
         "tests/test_memory.mojo",
         "tests/test_pins.mojo",
         "tests/test_process.mojo",

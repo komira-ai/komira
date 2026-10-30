@@ -18,9 +18,12 @@
 #   to the stand-in's answer; the cell is EXEC_OK and IDENTICAL, timed on both
 #   sides with one row each; the TPC-H notice is printed once. Catches an arm
 #   that returns a different value or kind, or rows the signature cannot match.
-# - test_the_decimal_arrives_as_duckdb_prints_it: the arm's cell for Q6 is the
-#   double that `atof` reads from the oracle's exact text, bit for bit, with
-#   the column named revenue. Catches a float division of the unscaled value.
+# - test_the_decimal_arrives_as_duckdb_prints_it: DuckDB's JSON quotes the
+#   DECIMAL(38,4) sum of Q6; the cell the session makes from that and the cell
+#   the arm makes are the same exact kind and compare identical, a unit in the
+#   last place of DuckDB's text does not, and neither is a double or a text,
+#   with the column named revenue. Catches a DECIMAL read as a text, rounded to
+#   a double, or divided as a float.
 # - test_a_join_is_refused_and_not_timed: a self-join is listed under
 #   "unserved" as UNSUPPORTED:lower.LOWERING_UNCUTTABLE_NODE, the stand-in ran
 #   it once (for its answer) and never timed, and the arm kept the engine's
@@ -49,14 +52,15 @@
 #   and a join is a refusal; outcome_of_refusal maps the messages of the other
 #   steps. Catches an engine fault read as a missing feature.
 # - test_conversion_of_unsigned_float_and_dictionary_columns: UINT64 at 2^63-1
-#   is an integer and at 2^63 a real, UINT8/16/32 are integers, a FLOAT 0.1 is
+#   is an integer and at 2^63 an exact decimal, UINT8/16/32 are integers, a FLOAT 0.1 is
 #   the double 0.1 and not the widened float, a dictionary string column raises
 #   RESULT_TYPE_UNSUPPORTED.
 # - test_the_refusal_token_is_the_step_and_the_code: refusal_token on the
 #   shapes the engine's messages have, none with a slash.
-# - test_conversion_of_decimals_is_exact: DECIMAL(38,4) cells equal the
-#   literal doubles of their exact text; DECIMAL scale 0 is an integer inside
-#   64 bits and a real outside; NULL stays NULL.
+# - test_conversion_of_decimals_is_exact: DECIMAL(38,4) cells hold the
+#   canonical text of their exact value (a 36-digit value and its neighbour
+#   differ, as no double could tell them apart); DECIMAL scale 0 is an exact
+#   decimal at any size; one value at two scales is one cell; NULL stays NULL.
 # - test_conversion_of_dates: epoch, a leap day, the day before the epoch, the
 #   first day of Q6's range, year 1 and the last day of year 9999 render as
 #   YYYY-MM-DD; the day after year 9999 and the day before year 1 raise.
@@ -84,12 +88,15 @@ from komira_bench_duckdb import (
     Cell,
     DuckDbSession,
     DuckDbTransport,
+    KIND_DECIMAL,
     KIND_FLOAT,
     KIND_INT,
     KIND_NULL,
     KIND_TEXT,
     ResultSet,
     StdoutChunk,
+    compare_signatures,
+    signature_of,
 )
 from komira_bench_duckdb.text import slice_bytes
 from komira_bench_report import DuckDbPin
@@ -143,11 +150,13 @@ struct Rule(Copyable, Movable):
     var needle: String
     var json: String
     var cost: Int
+    var types: String
 
-    def __init__(out self, needle: String, json: String, cost: Int):
+    def __init__(out self, needle: String, json: String, cost: Int, types: String = String("")):
         self.needle = needle
         self.json = json
         self.cost = cost
+        self.types = types
 
 
 struct FakeDuckDb(DuckDbTransport):
@@ -179,7 +188,11 @@ struct FakeDuckDb(DuckDbTransport):
     def run_statement(mut self):
         for i in range(len(self.rules)):
             if self.statement.find(self.rules[i].needle) >= 0:
-                if self.mode == "json" and self.rules[i].json.byte_length() > 0:
+                if self.statement.startswith(String("DESCRIBE ")):
+                    # DuckDB's answer to DESCRIBE <query>: the rule's `types`
+                    if self.mode == "json" and self.rules[i].types.byte_length() > 0:
+                        self.emit(self.rules[i].types + String("\n"), 0)
+                elif self.mode == "json" and self.rules[i].json.byte_length() > 0:
                     self.emit(self.rules[i].json + String("\n"), 0)
                 self.cost = self.rules[i].cost
                 break
@@ -324,6 +337,43 @@ def _fixed(v: Int, scale: Int) -> String:
     return String(v // unit) + "." + frac
 
 
+def _q6_rule(revenue: String) -> Rule:
+    """The stand-in's answer to Q6 as DuckDB 1.5 prints it in `.mode json`: the
+    DECIMAL(38,4) sum is QUOTED (the shell quotes DECIMAL, HUGEINT, UHUGEINT,
+    UBIGINT and every non-numeric type), and DESCRIBE names the column type."""
+    return Rule(
+        String("revenue"),
+        String('[{"revenue":"') + revenue + String('"}]'),
+        2 * _MS,
+        String('[{"column_name":"revenue","column_type":"DECIMAL(38,4)","null":"YES","key":null,"default":null,"extra":null}]'),
+    )
+
+
+def _duckdb_cell(value: String) raises -> Cell:
+    """The cell the session makes from DuckDB's JSON for the Q6 sum `value`."""
+    var rig = Rig()
+    var rules = List[Rule]()
+    rules.append(_q6_rule(value))
+    var session = rig.duckdb(rules^)
+    var f = session.fetch(_q6())
+    assert_true(f.ok(), f.error)
+    return f.rows.rows[0][0].copy()
+
+
+def _one_row(cell: Cell) -> ResultSet:
+    var rs = ResultSet()
+    rs.names.append(String("revenue"))
+    var row = List[Cell]()
+    row.append(cell.copy())
+    rs.add_row(row^)
+    return rs^
+
+
+def _runs(text: String, query: String) -> Int:
+    """How many times `query` was run (its DESCRIBE is not a run)."""
+    return _count(text, query) - _count(text, String("DESCRIBE ") + query)
+
+
 def _manifest(rows: Int) -> DatasetManifest:
     var files = List[DatasetFile]()
     files.append(DatasetFile.unrecorded(String(_LINEITEM_REL), rows))
@@ -374,7 +424,7 @@ def test_q6_text_matches_the_oracle_and_is_timed() raises:
     _ = _write_fixture(t)
     var rig = Rig()
     var rules = List[Rule]()
-    rules.append(Rule(String("revenue"), String('[{"revenue":') + _fixed(want, 4) + String("}]"), 2 * _MS))
+    rules.append(_q6_rule(_fixed(want, 4)))
     var session = rig.duckdb(rules^)
     var arm = KomiraArm()
     var dropper = NoCacheDropper()
@@ -397,12 +447,15 @@ def test_q6_text_matches_the_oracle_and_is_timed() raises:
     assert_equal(arm.prepares, 1)
     assert_equal(arm.closes, 1)
     # DuckDB ran the query once for its answer and four times timed (2 sweeps of 2)
-    assert_equal(_count(rig.sent_text(), _q6()), 5)
+    assert_equal(_runs(rig.sent_text(), _q6()), 5)
     var report = format_run(out)
     assert_equal(_count(report, String("derived from TPC-H; not comparable to published TPC-H results")), 1)
 
 
 def test_the_decimal_arrives_as_duckdb_prints_it() raises:
+    """DuckDB's JSON quotes the DECIMAL and the session turns it into the same
+    kind of cell the arm makes: both sides are one exact kind, neither a
+    double nor a text."""
     var t = q6_table(600)
     var want = _oracle_revenue(t)
     _ = _write_fixture(t)
@@ -412,8 +465,15 @@ def test_the_decimal_arrives_as_duckdb_prints_it() raises:
     assert_equal(answer.row_count, Int64(1))
     assert_equal(answer.rows.names[0], String("revenue"))
     ref cell = answer.rows.rows[0][0]
-    assert_equal(cell.kind, KIND_FLOAT)
-    assert_true(cell.f == atof(_fixed(want, 4)), "the double differs from the one read from the exact text")
+    assert_true(cell.kind != KIND_FLOAT, "a DECIMAL is not rounded to a double")
+    assert_true(cell.kind != KIND_TEXT)
+    var theirs = _duckdb_cell(_fixed(want, 4))
+    assert_equal(cell.kind, theirs.kind)
+    var verdict = compare_signatures(signature_of(_one_row(cell)), signature_of(_one_row(theirs)))
+    assert_true(verdict.identical, verdict.label())
+    # a unit in the last place of the same DuckDB text is a different answer
+    var off = _duckdb_cell(_fixed(want + 1, 4))
+    assert_false(compare_signatures(signature_of(_one_row(cell)), signature_of(_one_row(off))).identical)
     arm.close()
 
 
@@ -458,7 +518,7 @@ def test_a_wrong_fake_answer_is_wrong_and_not_timed() raises:
     var rig = Rig()
     var rules = List[Rule]()
     var wrong = want + want // 100 + 1
-    rules.append(Rule(String("revenue"), String('[{"revenue":') + _fixed(wrong, 4) + String("}]"), 2 * _MS))
+    rules.append(_q6_rule(_fixed(wrong, 4)))
     var session = rig.duckdb(rules^)
     var arm = KomiraArm()
     var dropper = NoCacheDropper()
@@ -477,7 +537,7 @@ def test_a_wrong_fake_answer_is_wrong_and_not_timed() raises:
     assert_false(out.outcomes[0].timed)
     assert_equal(run_status(out), 1)
     # the stand-in ran the query once, for its answer, and never timed
-    assert_equal(_count(rig.sent_text(), _q6()), 1)
+    assert_equal(_runs(rig.sent_text(), _q6()), 1)
     assert_equal(arm.prepares, 1)
 
 
@@ -533,8 +593,8 @@ def test_results_cover_decimal_bigint_date_varchar_and_null() raises:
         if t.price_null[k]:
             assert_equal(row[1].kind, KIND_NULL)
         else:
-            assert_equal(row[1].kind, KIND_FLOAT)
-            assert_true(row[1].f == atof(_fixed(t.price[k], 2)))
+            assert_equal(row[1].kind, KIND_DECIMAL)
+            assert_equal(row[1].s, Cell.decimal(_fixed(t.price[k], 2)).s)
         assert_equal(row[2].kind, KIND_TEXT)
         assert_equal(row[2].s, date32_text(t.shipdate[k]))
         seen += 1
@@ -548,7 +608,7 @@ def test_cold_reps_prepare_the_context_again() raises:
     _ = _write_fixture(t)
     var rig = Rig()
     var rules = List[Rule]()
-    rules.append(Rule(String("revenue"), String('[{"revenue":') + _fixed(want, 4) + String("}]"), 2 * _MS))
+    rules.append(_q6_rule(_fixed(want, 4)))
     var session = rig.duckdb(rules^)
     var arm = KomiraArm()
     var drops = ArcPointer[Int](0)
@@ -652,23 +712,30 @@ def test_conversion_of_decimals_is_exact() raises:
     var rs = result_set_of(_batches_of(builder.build(sb.build())))
     assert_equal(rs.names[0], String("d"))
     assert_equal(rs.row_count(), 5)
-    assert_equal(rs.rows[0][0].kind, KIND_FLOAT)
-    assert_true(rs.rows[0][0].f == 12345678901234.5678)
-    assert_true(rs.rows[1][0].f == -0.0005)
-    assert_equal(rs.rows[2][0].kind, KIND_FLOAT)
-    assert_true(rs.rows[2][0].f == 0.0)
+    assert_equal(rs.rows[0][0].kind, KIND_DECIMAL)
+    assert_equal(rs.rows[0][0].s, String("12345678901234.5678"))
+    assert_equal(rs.rows[1][0].kind, KIND_DECIMAL)
+    assert_equal(rs.rows[1][0].s, String("-0.0005"))
+    assert_equal(rs.rows[2][0].kind, KIND_DECIMAL)
+    assert_equal(rs.rows[2][0].s, String("0"))
     assert_equal(rs.rows[3][0].kind, KIND_NULL)
-    assert_true(rs.rows[4][0].f == 0.0007)
-    # scale 0 is an integer while it fits 64 bits and a real beyond
+    assert_equal(rs.rows[4][0].s, String("0.0007"))
+    # scale 0 is an exact decimal at any size: DuckDB quotes every DECIMAL
     var small = decimal_cell(_i128(-42), 0)
-    assert_equal(small.kind, KIND_INT)
-    assert_equal(small.i, Int64(-42))
+    assert_equal(small.kind, KIND_DECIMAL)
+    assert_equal(small.s, String("-42"))
     var edge = decimal_cell(I128(9223372036854775807), 0)
-    assert_equal(edge.kind, KIND_INT)
-    assert_equal(edge.i, Int64(9223372036854775807))
+    assert_equal(edge.kind, KIND_DECIMAL)
+    assert_equal(edge.s, String("9223372036854775807"))
     var big = decimal_cell(I128(1000000000) * I128(1000000000) * I128(10), 0)
-    assert_equal(big.kind, KIND_FLOAT)
-    assert_true(big.f == 1e19)
+    assert_equal(big.kind, KIND_DECIMAL)
+    assert_equal(big.s, String("10000000000000000000"))
+    # 36 digits: far past what a double holds, and still exact
+    var wide = I128(123456789012345678) * I128(1000000000) * I128(1000000000) + I128(901234567890123456)
+    assert_equal(decimal_cell(wide, 4).s, String("12345678901234567890123456789012.3456"))
+    assert_equal(decimal_cell(wide + I128(1), 4).s, String("12345678901234567890123456789012.3457"))
+    # the same value at another scale is the same cell
+    assert_equal(decimal_cell(I128(1230), 2).s, decimal_cell(I128(123), 1).s)
 
 
 def test_conversion_of_dates() raises:
@@ -820,8 +887,8 @@ def test_conversion_of_unsigned_float_and_dictionary_columns() raises:
     )
     assert_equal(rs.rows[0][0].kind, KIND_INT)
     assert_equal(rs.rows[0][0].i, Int64(9223372036854775807))
-    assert_equal(rs.rows[1][0].kind, KIND_FLOAT)
-    assert_true(rs.rows[1][0].f == 9223372036854775808.0)
+    assert_equal(rs.rows[1][0].kind, KIND_DECIMAL)
+    assert_equal(rs.rows[1][0].s, String("9223372036854775808"))
 
     var u32 = PrimitiveArray[DType.uint32].allocate(1)
     u32.set(0, UInt32(4294967295))
