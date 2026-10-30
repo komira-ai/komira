@@ -1,4 +1,7 @@
-load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+load("@buildrules//rules/mojo:pack.bzl", "mojo_conda")
+load("@komira//tools/build/mojo:adopt.bzl", "mojo_adopted_library")
+load("@komira//tools/build/package:conda.bzl", "conda_package")
+load(":buildrules.mojo.bzl", "mojo_package")
 
 # Read the logs behind a failed step, for the release tool and its validators.
 # Two families share one bounded, redacting renderer (`RunLogTail`):
@@ -11,19 +14,47 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #     halves and the bounded paging and settle loops.
 # It has no deps and never raises: it is an enrichment on a failure path. No
 # socket: the transport is a trait, so every branch is tested with no network.
-mojo_library(
+#
+# Built with buildrules' `mojo_package` from mopm.toml (README.md, "Build files"): `:lib` is the
+# library file and exists only once every test of tests/ has passed.
+mojo_package(path = ".")
+
+# `:kci_logs`, the target the packages that depend on this library name, is `:lib` as komira's Mojo
+# rules take it (tools/build/mojo/adopt.bzl): the same file, so a dependent builds only once the
+# tests have passed. It carries the README gate too (`[tests][readme]`): the examples run against
+# `:lib`; the tests are not run again.
+mojo_adopted_library(
     name = "kci_logs",
-    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
-    test_srcs = [
-        "tests/test_cloud_log_source.mojo",
-        "tests/test_cloud_query_refusals.mojo",
-        "tests/test_empty_stream_speaks_its_own_stream.mojo",
-        "tests/test_json_scan_refusals.mojo",
-        "tests/test_json_scan_utf8.mojo",
-        "tests/test_run_log_bounds.mojo",
-        "tests/test_run_log_reader.mojo",
-        "tests/test_run_log_scan_refusals.mojo",
-        "tests/test_scripted_log_double.mojo",
-    ],
+    lib = ":lib",
+    readme = "README.md",
+    srcs = glob(["src/kci_logs/**/*.mojo"]),
+    test_srcs = glob(["tests/test_*.mojo"]),
+    test_runs = ":test",
+    visibility = ["PUBLIC"],
+)
+
+# The mopm package: `mopm pack` over `:lib`, the `.conda` a mopm registry serves
+# (`mojo-kci_logs-0.1.0-mojo1.0.0_0.conda`). `:lib` exists only once the tests passed, so this file
+# exists only then. Publishing it (`mopm publish`) uploads, which is not a build action: it is a
+# step of a CI job that takes this target's output. `mopm` is the one `mojo_package` pins
+# (mopm-toolchain.toml).
+mojo_conda(
+    name = "conda",
+    lib = ":lib",
+    manifest = "mopm.toml",
+    mojo = "1.0.0",
+    mopm = "toolchains//:mopm_0_0_86",
+    package = "kci_logs",
+    version = "0.1.0",
+    visibility = ["PUBLIC"],
+)
+
+# Kept for the release machine, which still builds it (release/BUCK, release/artifacts.textproto):
+# komira's conda packer over `:kci_logs`. It goes when the release machine takes the mopm package.
+# This library's mopm package is `:conda` above.
+conda_package(
+    name = "kci_logs_conda",
+    lib = ":kci_logs",
+    summary = "The `kci_logs` Mojo library of komira, as a conda package.",
     visibility = ["PUBLIC"],
 )

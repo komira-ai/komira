@@ -64,6 +64,19 @@ comptime SX_TIMESTAMP: UInt8 = 15
 # no untyped NULL value to project.
 comptime SX_NULL: UInt8 = 16
 
+# ★ THE INTERVAL LITERAL. `INTERVAL '<n>' <unit>`: the signed count in
+# `int_val`, the unit in `op` (SXIVL_*). It is parsed so that a constant DATE
+# can be shifted (`date '1994-01-01' + interval '1' year`); the binder folds
+# that into a DATE literal (`sql_bind_interval`) and refuses an INTERVAL
+# anywhere else, because the logical plan has no INTERVAL operand type.
+comptime SX_INTERVAL: UInt8 = 17
+
+# `SX_INTERVAL.op` — the unit keyword (singular or plural spelling).
+comptime SXIVL_YEAR: UInt8 = 0   # 12 months per unit
+comptime SXIVL_MONTH: UInt8 = 1  # calendar months, the day clamps to the month end
+comptime SXIVL_WEEK: UInt8 = 2   # 7 days
+comptime SXIVL_DAY: UInt8 = 3
+
 # `SX_TIMESTAMP.op` — which keyword introduced the literal.
 comptime TSLIT_NAIVE: UInt8 = 0  # `TIMESTAMP '...'`   — wall clock, no zone
 comptime TSLIT_AWARE: UInt8 = 1  # `TIMESTAMPTZ '...'` — an instant, zone REQUIRED
@@ -958,6 +971,14 @@ struct SqlExpr(Movable):
         var e = SqlExpr(SX_TIMESTAMP)
         e.text = v
         e.op = TSLIT_AWARE if aware else TSLIT_NAIVE
+        return e^
+
+    @staticmethod
+    def interval_lit(count: Int64, unit: UInt8) -> SqlExpr:
+        """`INTERVAL '<count>' <unit>` — see `SX_INTERVAL`."""
+        var e = SqlExpr(SX_INTERVAL)
+        e.int_val = count
+        e.op = unit
         return e^
 
     @staticmethod
