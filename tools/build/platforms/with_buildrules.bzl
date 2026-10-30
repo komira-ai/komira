@@ -26,8 +26,6 @@ unit graph, the toolchain and the execution platform from those too, so a packag
 selects the macOS graph and this platform.)
 """
 
-load("@komira//tools/build/platforms:defs.bzl", "execution_mode")
-
 def first_platform_refusal(labels, first_remote):
     """Why komira's registration cannot take buildrules' platforms, or None.
 
@@ -49,7 +47,7 @@ def first_platform_refusal(labels, first_remote):
 def _impl(ctx):
     base = ctx.attrs.base[ExecutionPlatformRegistrationInfo].platforms
     labels = [str(p.label) for p in base]
-    refusal = first_platform_refusal(labels, execution_mode() != "local")
+    refusal = first_platform_refusal(labels, not ctx.attrs.local)
     if refusal:
         fail("{}: {} (of {}), got {}".format(ctx.label, refusal, ctx.attrs.base.label, labels))
     linux = base[0]
@@ -77,6 +75,10 @@ execution_platforms_plus = rule(
     impl = _impl,
     attrs = {
         "base": attrs.dep(providers = [ExecutionPlatformRegistrationInfo]),
+        # Whether komira registered local execution (`execution_mode() == "local"`, read by the
+        # BUCK file: a rule cannot read the configuration). A lone darwin-arm64 platform is
+        # accepted only then (first_platform_refusal).
+        "local": attrs.bool(default = False),
         "extra": attrs.list(attrs.dep(providers = [PlatformInfo])),
         # Platforms that get the executor of komira's macOS arm64 platform, when komira registers one.
         "extra_darwin": attrs.list(attrs.dep(providers = [PlatformInfo]), default = []),
