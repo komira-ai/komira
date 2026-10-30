@@ -8,11 +8,12 @@
 #      relative tolerance for floats) and, for a query with ORDER BY, checked
 #      for order. A mismatch is a cell that failed, with the cause named, and
 #      nothing is timed.
-#   4. Only a verified query is timed: warm (sweeps of reps, rep 0 of each
-#      dropped by the statistic; the cell is the least of the per-sweep
-#      medians) and, when the host can drop its file cache,
-#      cold (the cache dropped before every rep). Both engines run at the
-#      thread count and memory limit of the settings.
+#   4. Only a verified query is timed: warm (sweeps of reps) and, when the host
+#      can drop its file cache, cold (the cache dropped before every rep). Both
+#      engines run at the thread count and memory limit of the settings. Every
+#      run is recorded with its time and its page faults, the first of each
+#      sweep included; the report package says what the cell's first-run and
+#      steady-state figures are made of (`STEADY_STATE_DEFINITION`).
 #
 # Warm and cold are two results because the result model holds one number of
 # reps per run and no temperature; each is a `BenchResult` of its own.
@@ -228,7 +229,7 @@ def _checked(query: QuerySpec, answer: ArmAnswer, reference: ResultSignature) ra
 
 
 def _run_info(
-    settings: RunSettings, scale_kind: String, scale_value: Int64, sweeps: Int, reps: Int, warmup_runs: Int
+    settings: RunSettings, scale_kind: String, scale_value: Int64, sweeps: Int, reps: Int
 ) -> RunInfo:
     return RunInfo(
         String("both"),
@@ -239,7 +240,6 @@ def _run_info(
         String(STATISTIC_MIN_OF_SWEEP_MEDIAN),
         Int64(settings.threads),
         settings.pass_max,
-        warmup_runs,
     )
 
 
@@ -277,8 +277,12 @@ def _timed_cell(
         query.suite.copy(),
         reps,
         StageOutcome.exec_ok(),
-        Optional[Side](Side.from_sweeps(rows, sweeps.komira)),
-        Optional[Side](Side.from_sweeps(rows, sweeps.duckdb)),
+        Optional[Side](
+            Side.from_sweeps(rows, sweeps.komira.ms.copy(), sweeps.komira.minor.copy(), sweeps.komira.major.copy())
+        ),
+        Optional[Side](
+            Side.from_sweeps(rows, sweeps.duckdb.ms.copy(), sweeps.duckdb.minor.copy(), sweeps.duckdb.major.copy())
+        ),
         ReportVerdict.identical(),
         pass_max,
     )
@@ -345,7 +349,7 @@ def run_queries[
             var w = measure(
                 session, arm, dropper, clock, q, files,
                 tables, settings.threads, settings.memory_limit_bytes, checked.rows,
-                settings.warm_sweeps, settings.warm_reps, False, settings.warm_warmup_runs(),
+                settings.warm_sweeps, settings.warm_reps, False,
             )
             warm_cells.append(_timed_cell(q, checked.rows, w, settings.warm_reps, settings.pass_max))
             if cold_on:
@@ -366,7 +370,7 @@ def run_queries[
         )
 
     var warm = BenchResult(
-        _run_info(settings, scale.kind, scale.value, settings.warm_sweeps, settings.warm_reps, settings.warm_warmup_runs()),
+        _run_info(settings, scale.kind, scale.value, settings.warm_sweeps, settings.warm_reps),
         _environment(inputs),
         warm_cells^,
     )
@@ -374,7 +378,7 @@ def run_queries[
     var cold = Optional[BenchResult]()
     if cold_on:
         var r = BenchResult(
-            _run_info(settings, scale.kind, scale.value, settings.cold_sweeps, settings.cold_reps, 0),
+            _run_info(settings, scale.kind, scale.value, settings.cold_sweeps, settings.cold_reps),
             _environment(inputs),
             cold_cells^,
         )

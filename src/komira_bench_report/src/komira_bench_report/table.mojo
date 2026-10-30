@@ -3,9 +3,16 @@
 # shows a dash; its row still stands and the footer counts it in the
 # denominator. Every footer line carries the PASS count with the threshold and
 # the DuckDB pin.
+#
+# Each cell shows, in separate columns, its first run (komira, DuckDB and their
+# ratio), its steady-state time (the same three) and the spread of each
+# engine's sweep medians. What "first" and "steady" mean is
+# `STEADY_STATE_DEFINITION`, printed once under the rows. A side read from a
+# result of schema 1 has no runs, so its first-run columns are dashes.
 
 from .format import format_fixed, pad_left, pad_right
 from .model import BenchResult, Cell, Side
+from .stats import STEADY_STATE_DEFINITION
 from .summary import summarize, summary_line
 from .verdict import (
     CELL_FAIL,
@@ -20,6 +27,21 @@ def _ms(side: Optional[Side]) -> String:
     if not side:
         return String("-")
     return format_fixed(side.value().ms, 2)
+
+
+def _first_ms(side: Optional[Side]) -> String:
+    if not side:
+        return String("-")
+    var first = side.value().first_ms()
+    if not first:
+        return String("-")
+    return format_fixed(first.value(), 2)
+
+
+def _spread(side: Optional[Side]) -> String:
+    if not side:
+        return String("-")
+    return format_fixed(side.value().spread_pct, 1)
 
 
 def _rows(c: Cell) -> String:
@@ -106,11 +128,21 @@ def render_table(result: BenchResult) raises -> String:
         String(" ")
         + pad_right(String("cell"), idw)
         + String(" ")
-        + pad_left(String("komira ms"), 10)
+        + pad_left(String("first k"), 8)
         + String(" ")
-        + pad_left(String("duckdb ms"), 10)
+        + pad_left(String("first d"), 8)
         + String(" ")
-        + pad_left(String("ratio"), 7)
+        + pad_left(String("first x"), 8)
+        + String(" ")
+        + pad_left(String("steady k"), 8)
+        + String(" ")
+        + pad_left(String("steady d"), 8)
+        + String(" ")
+        + pad_left(String("steady x"), 8)
+        + String(" ")
+        + pad_left(String("spr k %"), 8)
+        + String(" ")
+        + pad_left(String("spr d %"), 8)
         + String(" ")
         + pad_left(String("rows"), 10)
         + String("  ")
@@ -122,15 +154,28 @@ def render_table(result: BenchResult) raises -> String:
         var ratio = String("-")
         if c.ratio:
             ratio = format_fixed(c.ratio.value(), 3)
+        var first_ratio = String("-")
+        if c.first_ratio:
+            first_ratio = format_fixed(c.first_ratio.value(), 3)
         out += (
             String(" ")
             + pad_right(c.id, idw)
             + String(" ")
-            + pad_left(_ms(c.komira), 10)
+            + pad_left(_first_ms(c.komira), 8)
             + String(" ")
-            + pad_left(_ms(c.duckdb), 10)
+            + pad_left(_first_ms(c.duckdb), 8)
             + String(" ")
-            + pad_left(ratio, 7)
+            + pad_left(first_ratio, 8)
+            + String(" ")
+            + pad_left(_ms(c.komira), 8)
+            + String(" ")
+            + pad_left(_ms(c.duckdb), 8)
+            + String(" ")
+            + pad_left(ratio, 8)
+            + String(" ")
+            + pad_left(_spread(c.komira), 8)
+            + String(" ")
+            + pad_left(_spread(c.duckdb), 8)
             + String(" ")
             + pad_left(_rows(c), 10)
             + String("  ")
@@ -139,6 +184,11 @@ def render_table(result: BenchResult) raises -> String:
             + _verdict(c, result.run.pass_max)
             + String("\n")
         )
+    out += String(
+        " k = komira, d = duckdb, x = komira over duckdb, spr = spread of the sweep"
+        " medians in percent of the least\n"
+    )
+    out += String(" ") + String(STEADY_STATE_DEFINITION) + String("\n")
     var summary = summarize(result)
     for i in range(len(summary.suites)):
         out += (

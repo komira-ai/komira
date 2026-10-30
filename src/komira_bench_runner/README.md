@@ -6,7 +6,7 @@ The program that runs one benchmark query on both engines and writes the result.
 2. prepares the komira arm with the same tables, thread count and memory limit;
 3. runs the query on DuckDB in JSON mode (the reference rows) and on the arm with its rows materialized;
 4. compares the two by signature (exact for integers and text, a relative tolerance for floats) and, when the query has `ORDER BY` keys, checks the arm's row order;
-5. times the query only if the answers match: warm (first `--warmup-runs` runs of each engine, run and discarded: 5 at 32 threads or more, none below, because a wide run's first runs page-fault while the allocator warms up; then sweeps of reps; rep 0 of each sweep is dropped, each sweep is reduced to its median, and the cell's time is the least of the sweep medians: not one median after one discarded run) and, if asked and possible, cold (the file cache dropped before every rep of either engine);
+5. times the query only if the answers match: warm (sweeps of reps) and, if asked and possible, cold (the file cache dropped before every rep of either engine). Every run is kept: nothing is run to be thrown away and no run is dropped from the result, the first of each sweep included. Each run is recorded with its time and the minor and major page faults its engine's process took during it;
 6. fills a `BenchResult` (`komira_bench_report`) per temperature and writes it.
 
 It implements these parts of `docs/design/lowering_and_pipeline.md` section 7.4: both engines at the same thread count and memory limit, cold and warm reported separately, results checked before timing under a stated float tolerance, refusals listed. It does not implement the disclosure rule: shortcuts both engines take (a `COUNT(*)` from the footer) and options that cost throughput for reproducibility (grain state) are not marked.
@@ -65,10 +65,19 @@ Not mapped yet, and so refused: dictionary-encoded strings, booleans, timestamps
 
 | file | holds |
 |---|---|
-| `warm/result.json` | the warm result: `komira-bench-result/1`; `run.warmup_runs` is the number of discarded warm-up runs |
+| `warm/result.json` | the warm result: `komira-bench-result/2`, with every run of every sweep and its page faults |
 | `cold/result.json` | the cold result, only when cold was measured |
 | `comparison.txt` | the tolerance the answers were compared under: floats within the larger of `float_rel_tol` times the larger magnitude and `float_abs_floor`, everything else (declared column types included) exact; it is also printed |
 | `queries.sha256` | `<suite>/<id> <sha256 of the text>` per query in run order, then `listing_sha256` of those lines |
+
+## First run, steady state, and page faults
+
+A cell reports its first run (the first run of the first sweep, which is what a user's first query pays, the same for both engines), its steady-state time and the spread of its sweep medians in separate columns, and the headline states the steady-state ratio with the first-run ratio beside it. `komira_bench_report` defines the words once (`STEADY_STATE_DEFINITION`): the steady-state time is the median of each sweep's runs after that sweep's first run, and the least of those medians over the sweeps. The first run is not hidden by a warm-up and not discarded by the harness: a wide run's first runs take many more page faults than later ones, and that cost is the engine's to remove.
+
+The page faults of a run come from the process counters, read just before the run and just after it:
+
+- komira: `getrusage(RUSAGE_SELF)` of the runner process, through `EngineArm.faults` (the engine runs inside the runner, on its own worker threads). An arm that cannot read it reports none.
+- DuckDB: the DuckDB process is a child of the runner, so its counters are the minor and major fault fields of `/proc/<pid>/stat` of that child, read by `ProcessTransport.child_faults` around each timed query (before it is sent and after its end marker is read). On a platform without `/proc` the reading is absent, and the result records the faults of that side as not measured (null), never as zero.
 
 Warm and cold are two results because the result model holds one number of reps per run and has no temperature field. The schema has no field for the digest of a query either, hence `queries.sha256`.
 
@@ -91,7 +100,7 @@ komira_bench_runner_main
   [--order-key COLUMN[:desc][:nulls_first]]...
   --hostclass LABEL --cpu-model TEXT --os TEXT --komira-version TEXT --cores N --mem-bytes N
   [--threads N] [--memory-limit-bytes N] [--duckdb-version V]
-  [--warm-sweeps N] [--warm-reps N] [--warmup-runs N] [--cold-sweeps N --cold-reps N --drop-caches-file PATH]
+  [--warm-sweeps N] [--warm-reps N] [--cold-sweeps N --cold-reps N --drop-caches-file PATH]
   [--pass-max X] [--max-silence-ms N]
 ```
 

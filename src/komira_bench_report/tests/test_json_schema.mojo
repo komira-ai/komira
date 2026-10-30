@@ -454,6 +454,76 @@ def test_writer_refuses_runs_that_do_not_fit() raises:
     assert_true(_write_refused(r))
 
 
+def test_reader_refuses() raises:
+    var good = write_result_json(_sample())
+    assert_true(not _refused(good))
+    assert_true(_refused(_altered(good, String("komira-bench-result/2"), String("komira-bench-result/3"))))
+    assert_true(_refused(_altered(good, String('"threads":20'), String('"threads":20,"extra":1'))))
+    assert_true(_refused(_altered(good, String('"threads":20,'), String(""))))
+    assert_true(_refused(_altered(good, String('"reps":4,"statistic"'), String('"reps":4,"reps":4,"statistic"'))))
+    assert_true(_refused(_altered(good, String('"verdict":"FAIL"'), String('"verdict":"PASS"'))))
+    assert_true(_refused(_altered(good, String('"n_pass":2'), String('"n_pass":3'))))
+    assert_true(_refused(_altered(good, String('"id":"tpch/q02"'), String('"id":"q02"'))))
+    assert_true(_refused(_altered(good, String('"threads":20'), String('"threads":20.0'))))
+    assert_true(_refused(_altered(good, String("bench-class-a"), String("node/7"))))
+    assert_true(_refused(String("{")))
+    assert_true(_refused(good + String("x")))
+
+
+def test_reader_refuses_a_ratio_on_an_unverified_cell() raises:
+    var r = _sample()
+    # The divergent cell of the sample, given the ratio its times would make.
+    r.cells[2].ratio = Optional[Float64](0.25)
+    r.cells[2].verdict = String("PASS")
+    assert_true(_write_refused(r))
+    var good = write_result_json(_sample())
+    var old = String('"ratio":null,"verdict":"NO_RATIO"')
+    var at = good.find(old)
+    assert_true(at >= 0)
+    var tampered = (
+        String(good[byte=0:at])
+        + String('"ratio":0.25,"verdict":"PASS"')
+        + String(good[byte = at + old.byte_length() : good.byte_length()])
+    )
+    assert_true(tampered != good)
+    assert_true(_refused(tampered))
+
+
+def test_writer_refuses() raises:
+    assert_true(not _write_refused(_sample()))
+    var r = _sample()
+    r.env.cpu_model = String("cpu at /proc/cpuinfo")
+    assert_true(_write_refused(r))
+    r = _sample()
+    r.env.hostclass = String("Node-01.example")
+    assert_true(_write_refused(r))
+    r = _sample()
+    r.env.duckdb.sha256 = String("abc")
+    assert_true(_write_refused(r))
+    r = _sample()
+    r.env.duckdb.pin = String("UNPINNED:")
+    assert_true(_write_refused(r))
+    r = _sample()
+    r.env.duckdb.pin = String("UNPINNED:local build")
+    r.env.duckdb.sha256 = String("")
+    assert_true(not _write_refused(r))
+    r = _sample()
+    r.cells[1].id = r.cells[0].id.copy()
+    assert_true(_write_refused(r))
+    r = _sample()
+    r.cells[3].komira = _side(100, 8.0, 8.0)
+    assert_true(_write_refused(r))
+    var raised = False
+    try:
+        var sweeps = List[Float64]()
+        sweeps.append(5.0)
+        sweeps.append(3.0)
+        _ = Side(1, 5.0, sweeps^, 66.66666666666666)
+    except:
+        raised = True
+    assert_true(raised)
+
+
 def _no_ref_cell(value: ValueVerdict) raises -> Cell:
     return _cell(String("tpch/q09"), String("tpch"), StageOutcome.exec_ok(),
         _side(5, 1.0, 1.0), Optional[Side](), value)

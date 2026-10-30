@@ -34,6 +34,7 @@ from komira_bench_duckdb import (
     parse_stat_faults,
     read_stat_faults,
 )
+from komira_bench_duckdb.text import slice_bytes
 
 
 def test_the_fault_fields_are_read_after_the_command_name() raises:
@@ -118,7 +119,7 @@ struct CountingFake(DuckDbTransport):
             var line = rest
             if nl >= 0:
                 line = String(rest[byte=0:nl])
-                rest = String(rest[byte = nl + 1 : rest.byte_length()])
+                rest = slice_bytes(rest, nl + 1, rest.byte_length())
             else:
                 rest = String("")
             if line.startswith(String(".print ")):

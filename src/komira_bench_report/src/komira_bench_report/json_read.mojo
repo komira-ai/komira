@@ -1,9 +1,15 @@
 # The strict reader of result.json. It accepts exactly what `write_result_json`
-# writes: the schema string `komira-bench-result/1`, every member present and
+# writes: the schema string `komira-bench-result/2`, every member present and
 # no other, the right kind of value in each, no object naming a member twice,
 # and a summary equal to the one recomputed from the cells (counts and text
 # exactly, the floats to 1e-9). A document that fails raises
 # `BenchResultError: <where>: <what>`.
+#
+# It also reads schema `komira-bench-result/1`, which held no runs, no page
+# faults and no first-run ratio: a side read from it has empty `runs_ms` and a
+# cell has no `first_ratio`, and its summary is compared with the legacy
+# summary (`summary_json(result, legacy=True)`). A document of either schema
+# is held to that schema's members and no others.
 
 from komira_json import JsonValue, parse_json_value, refuse_duplicate_keys
 
@@ -14,6 +20,7 @@ from .model import (
     DuckDbPin,
     Environment,
     RESULT_SCHEMA,
+    RESULT_SCHEMA_V1,
     RunInfo,
     Side,
     validate_result,
@@ -94,43 +101,45 @@ def _same(a: JsonValue, b: JsonValue, skip: String) raises -> Bool:
     return a.serialize() == b.serialize()
 
 
-comptime _GEOMEAN_AT = "| geomean "
+comptime _GEOMEAN_AT = "| steady-state geomean "
+comptime _GEOMEAN_AT_V1 = "| geomean "
 comptime _GEOMEAN_END = "x over "
 
 
-def _geomean_figure(headline: String) -> String:
-    """The figure the headline gives for the geomean, or empty."""
-    var from_at = headline.find(String(_GEOMEAN_AT))
+def _geomean_figure(headline: String, at: String) -> String:
+    """The figure the headline gives for the geomean (after `at`), or empty."""
+    var from_at = headline.find(at)
     if from_at < 0:
         return String("")
-    from_at += String(_GEOMEAN_AT).byte_length()
+    from_at += at.byte_length()
     var to_at = headline.find(String(_GEOMEAN_END), from_at)
     if to_at < 0:
         return String("")
     return String(headline[byte=from_at:to_at])
 
 
-def _without_geomean_figure(headline: String) -> String:
-    var fig = _geomean_figure(headline)
+def _without_geomean_figure(headline: String, at: String) -> String:
+    var fig = _geomean_figure(headline, at)
     if fig.byte_length() == 0:
         return headline.copy()
-    return headline.replace(String(_GEOMEAN_AT) + fig, String(_GEOMEAN_AT))
+    return headline.replace(at + fig, at)
 
 
-def _check_summary(stored: JsonValue, result: BenchResult) raises:
+def _check_summary(stored: JsonValue, result: BenchResult, legacy: Bool) raises:
     """The stored summary must be the cells' summary: counts exactly, floats
     to 1e-9, and a headline equal to the recomputed one except that its
     geomean figure may be the rounding of either the recomputed geomean or
-    the stored one."""
-    var want = summary_json(result)
+    the stored one. A schema 1 document's summary is the legacy one."""
+    var at = String(_GEOMEAN_AT_V1) if legacy else String(_GEOMEAN_AT)
+    var want = summary_json(result, legacy)
     if not _same(stored, want, String("headline")):
         _fail(String("summary"), String("does not match the summary of the cells"))
     var got_line = _text(stored.get(String("headline")), String("summary.headline"))
     var want_line = _text(want.get(String("headline")), String("summary.headline"))
-    if _without_geomean_figure(got_line) != _without_geomean_figure(want_line):
+    if _without_geomean_figure(got_line, at) != _without_geomean_figure(want_line, at):
         _fail(String("summary.headline"), String("does not match the summary of the cells"))
-    var figure = _geomean_figure(got_line)
-    if figure != _geomean_figure(want_line):
+    var figure = _geomean_figure(got_line, at)
+    if figure != _geomean_figure(want_line, at):
         var member = stored.get(String("geomean_ratio_verified"))
         if not member.is_number() or figure != format_fixed(member.as_float64(), 2):
             _fail(String("summary.headline"), String("its geomean is not the geomean of the summary"))
@@ -163,10 +172,46 @@ def _opt_float(v: JsonValue, where: String) raises -> Optional[Float64]:
     return Optional[Float64](_float(v, where))
 
 
-def _read_side(v: JsonValue, where: String) raises -> Optional[Side]:
+def _read_runs(v: JsonValue, where: String) raises -> List[List[Float64]]:
+    if not v.is_array():
+        _fail(where, String("expected an array of sweeps"))
+    var out = List[List[Float64]]()
+    for i in range(v.array_len()):
+        var sweep = v.element_at(i)
+        if not sweep.is_array():
+            _fail(where + "[" + String(i) + "]", String("expected an array of runs"))
+        var one = List[Float64]()
+        for j in range(sweep.array_len()):
+            one.append(_float(sweep.element_at(j), where + "[" + String(i) + "][" + String(j) + "]"))
+        out.append(one^)
+    return out^
+
+
+def _read_counts(v: JsonValue, where: String) raises -> List[List[Int64]]:
+    """The counts of each sweep, or none when the member is null (not measured)."""
+    var out = List[List[Int64]]()
+    if v.is_null():
+        return out^
+    if not v.is_array():
+        _fail(where, String("expected null or an array of sweeps"))
+    for i in range(v.array_len()):
+        var sweep = v.element_at(i)
+        if not sweep.is_array():
+            _fail(where + "[" + String(i) + "]", String("expected an array of counts"))
+        var one = List[Int64]()
+        for j in range(sweep.array_len()):
+            one.append(_int(sweep.element_at(j), where + "[" + String(i) + "][" + String(j) + "]"))
+        out.append(one^)
+    return out^
+
+
+def _read_side(v: JsonValue, where: String, legacy: Bool) raises -> Optional[Side]:
     if v.is_null():
         return Optional[Side]()
-    var o = _object(v, where, String("rows ms ms_per_sweep spread_pct"))
+    var members = String("rows ms ms_per_sweep spread_pct")
+    if not legacy:
+        members += String(" runs_ms minor_faults major_faults")
+    var o = _object(v, where, members)
     var arr = o.get(String("ms_per_sweep"))
     if not arr.is_array():
         _fail(where + ".ms_per_sweep", String("expected an array"))
@@ -175,43 +220,54 @@ def _read_side(v: JsonValue, where: String) raises -> Optional[Side]:
         sweeps.append(
             _float(arr.element_at(i), where + ".ms_per_sweep[" + String(i) + "]")
         )
+    var runs = List[List[Float64]]()
+    var minor = List[List[Int64]]()
+    var major = List[List[Int64]]()
+    if not legacy:
+        runs = _read_runs(o.get(String("runs_ms")), where + ".runs_ms")
+        if len(runs) == 0:
+            _fail(where + ".runs_ms", String("a side of schema 2 holds its runs"))
+        minor = _read_counts(o.get(String("minor_faults")), where + ".minor_faults")
+        major = _read_counts(o.get(String("major_faults")), where + ".major_faults")
     return Optional[Side](
         Side(
             _int(o.get(String("rows")), where + ".rows"),
             _float(o.get(String("ms")), where + ".ms"),
             sweeps^,
             _float(o.get(String("spread_pct")), where + ".spread_pct"),
+            runs^,
+            minor^,
+            major^,
         )
     )
 
 
-def _read_cell(v: JsonValue, where: String) raises -> Cell:
-    var o = _object(
-        v,
-        where,
-        String("id suite reps stage komira duckdb value ratio verdict"),
-    )
+def _read_cell(v: JsonValue, where: String, legacy: Bool) raises -> Cell:
+    var members = String("id suite reps stage komira duckdb value ratio verdict")
+    if not legacy:
+        members += String(" first_ratio")
+    var o = _object(v, where, members)
+    var first_ratio = Optional[Float64]()
+    if not legacy:
+        first_ratio = _opt_float(o.get(String("first_ratio")), where + ".first_ratio")
     return Cell(
         _text(o.get(String("id")), where + ".id"),
         _text(o.get(String("suite")), where + ".suite"),
         Int(_int(o.get(String("reps")), where + ".reps")),
         StageOutcome.parse(_text(o.get(String("stage")), where + ".stage")),
-        _read_side(o.get(String("komira")), where + ".komira"),
-        _read_side(o.get(String("duckdb")), where + ".duckdb"),
+        _read_side(o.get(String("komira")), where + ".komira", legacy),
+        _read_side(o.get(String("duckdb")), where + ".duckdb", legacy),
         ValueVerdict.parse(_text(o.get(String("value")), where + ".value")),
         _opt_float(o.get(String("ratio")), where + ".ratio"),
         _text(o.get(String("verdict")), where + ".verdict"),
+        first_ratio^,
     )
 
 
 def _read_run(v: JsonValue) raises -> RunInfo:
-    # warmup_runs is optional on read: a result written before the field
-    # existed has none, and read as 0 warm-up runs.
-    var with_warmup = v.is_object() and v.has(String("warmup_runs"))
-    var members = String("mode scale sweeps reps statistic threads pass_max")
-    if with_warmup:
-        members += String(" warmup_runs")
-    var o = _object(v, String("run"), members)
+    var o = _object(
+        v, String("run"), String("mode scale sweeps reps statistic threads pass_max")
+    )
     var scale = o.get(String("scale"))
     if not scale.is_object() or scale.num_members() != 1:
         _fail(String("run.scale"), String("expected an object with one member, sf or rows"))
@@ -227,7 +283,6 @@ def _read_run(v: JsonValue) raises -> RunInfo:
         _text(o.get(String("statistic")), String("run.statistic")),
         _int(o.get(String("threads")), String("run.threads")),
         _float(o.get(String("pass_max")), String("run.pass_max")),
-        Int(_int(o.get(String("warmup_runs")), String("run.warmup_runs"))) if with_warmup else 0,
     )
 
 
@@ -269,8 +324,12 @@ def parse_result_json(text: String) raises -> BenchResult:
     refuse_duplicate_keys(doc)
     var top = _object(doc, String("result"), String("schema run env cells summary"))
     var schema = _text(top.get(String("schema")), String("schema"))
-    if schema != String(RESULT_SCHEMA):
-        _fail(String("schema"), "expected '" + String(RESULT_SCHEMA) + "', got '" + schema + "'")
+    var legacy = schema == String(RESULT_SCHEMA_V1)
+    if schema != String(RESULT_SCHEMA) and not legacy:
+        _fail(
+            String("schema"),
+            "expected '" + String(RESULT_SCHEMA) + "' (or '" + String(RESULT_SCHEMA_V1) + "'), got '" + schema + "'",
+        )
     var run = _read_run(top.get(String("run")))
     var env = _read_env(top.get(String("env")))
     var arr = top.get(String("cells"))
@@ -278,8 +337,8 @@ def parse_result_json(text: String) raises -> BenchResult:
         _fail(String("cells"), String("expected an array"))
     var cells = List[Cell]()
     for i in range(arr.array_len()):
-        cells.append(_read_cell(arr.element_at(i), "cells[" + String(i) + "]"))
+        cells.append(_read_cell(arr.element_at(i), "cells[" + String(i) + "]", legacy))
     var result = BenchResult(run^, env^, cells^)
     validate_result(result)
-    _check_summary(top.get(String("summary")), result)
+    _check_summary(top.get(String("summary")), result, legacy)
     return result^

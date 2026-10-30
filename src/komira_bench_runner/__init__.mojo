@@ -10,9 +10,10 @@ anything is timed, times warm and cold runs, and fills a `BenchResult`
 | `QuerySpec` | one query: suite, id, dataset, text, ORDER BY keys, and the sha256 of the text |
 | `TableBinding`, `Scale`, `tables_of`, `scale_of`, `table_name_of` | a dataset manifest as named tables and a stated scale |
 | `CacheDropper`, `NoCacheDropper`, `ProcDropCaches` | the file-cache drop before a cold run |
-| `RunSettings`, `HostFacts`, `RunInputs`, `warmup_runs_for`, `WARMUP_AUTO`, `WIDE_WARMUP_THREADS`, `WIDE_WARMUP_RUNS` | what a run is told |
+| `RunSettings`, `HostFacts`, `RunInputs` | what a run is told |
 | `run_queries`, `RunOutput`, `QueryOutcome`, `register_duckdb` | the run itself |
-| `measure`, `Sweeps`, `time_komira`, `time_duckdb` | timing one query on both engines |
+| `measure`, `Sweeps`, `EngineRuns`, `Timed`, `time_komira`, `time_duckdb` | timing one query on both engines: every run, with the page faults of the engine's process around it |
+| `process_faults` | the minor and major page faults of this process (what the komira arm reports) |
 | `format_run`, `write_run`, `queries_listing`, `queries_file_text` | the console report and the files of a run |
 | `RunFlags`, `parse_flags`, `run_entrypoint` | the program |
 """
@@ -39,7 +40,8 @@ from .komira_arm import (
     outcome_of_refusal,
     refusal_token,
 )
-from .measure import Sweeps, measure, time_duckdb, time_komira
+from .faults import process_faults
+from .measure import EngineRuns, Sweeps, Timed, measure, time_duckdb, time_komira
 from .output import COMPARISON_FILE, QUERIES_FILE, TPCH_NOTICE, comparison_text, format_run, queries_file_text, queries_listing, write_run
 from .query import QuerySpec
 from .runner import (
@@ -51,13 +53,5 @@ from .runner import (
     register_duckdb,
     run_queries,
 )
-from .settings import (
-    HostFacts,
-    RunInputs,
-    RunSettings,
-    WARMUP_AUTO,
-    WIDE_WARMUP_RUNS,
-    WIDE_WARMUP_THREADS,
-    warmup_runs_for,
-)
+from .settings import HostFacts, RunInputs, RunSettings
 from .tables import Scale, TableBinding, scale_of, table_name_of, tables_of

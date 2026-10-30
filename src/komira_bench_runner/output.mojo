@@ -1,6 +1,6 @@
 # What a run leaves behind: the text a person reads, and the files.
 #
-#   <dir>/warm/result.json   the warm result (komira-bench-result/1)
+#   <dir>/warm/result.json   the warm result (komira-bench-result/2)
 #   <dir>/cold/result.json   the cold result, only when cold was measured
 #   <dir>/queries.sha256     the digest of every query's text
 #   <dir>/comparison.txt     the tolerance the answers were compared under

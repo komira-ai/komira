@@ -6,7 +6,8 @@
 | `open_pinned` | verify the binary against the pin and start it: the one entry point for the DuckDB arm |
 | `DuckDbSession`, `ProcessTransport`, `DuckDbTransport` | one persistent DuckDB process over stdin and stdout, queries bracketed by host-timed markers, with a limit on silence and a way to stop the process |
 | `parse_size`, `size_matches` | DuckDB's printed sizes (`953.6 MiB`) and the check of a read-back against the request |
-| `QueryTiming`, `FetchResult`, `FairnessSettings` | what a timed query, a fetched query and the setup return |
+| `QueryTiming`, `FetchResult`, `FairnessSettings` | what a timed query, a fetched query and the setup return; a timed query carries the page faults of the DuckDB process around it |
+| `FaultCount`, `parse_stat_faults`, `read_stat_faults` | minor and major page faults of a process, read from its `/proc/<pid>/stat` (Linux; absent elsewhere) |
 | `BenchClock` | the clock the markers are stamped with (system, or a manual counter for tests) |
 | `Cell`, `ResultSet`, `parse_json_rows` | typed query results (an exact decimal is `KIND_DECIMAL`); DuckDB's JSON output as a result set, read by column types where DuckDB quotes numbers |
 | `canonical_decimal`, `compare_decimals`, `ExactSum` | exact decimal text: one form per value, its order, and a sum with no rounding and no width limit |
@@ -41,6 +42,7 @@ from .declared_types import (
     unmapped_type,
 )
 from .decimal_text import ExactSum, canonical_decimal, compare_decimals
+from .faults import FaultCount, parse_stat_faults, read_stat_faults
 from .launch import open_pinned
 from .memory import ParsedSize, parse_size, size_matches
 from .order import OrderKey, OrderVerdict, check_order

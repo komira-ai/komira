@@ -5,8 +5,6 @@
 
 from komira_bench_duckdb import OrderKey
 
-from .settings import WARMUP_AUTO
-
 comptime DEFAULT_MAX_SILENCE_MS: Int = 600_000
 comptime DEFAULT_MEMORY_PERCENT: Int = 80
 
@@ -32,7 +30,6 @@ struct RunFlags(Copyable, Movable):
     var warm_reps: Int
     var cold_sweeps: Int
     var cold_reps: Int
-    var warmup_runs: Int
     var pass_max: Float64
     var hostclass: String
     var cpu_model: String
@@ -60,7 +57,6 @@ struct RunFlags(Copyable, Movable):
         self.warm_reps = 6
         self.cold_sweeps = 0
         self.cold_reps = 3
-        self.warmup_runs = WARMUP_AUTO
         self.pass_max = 1.0
         self.hostclass = String("")
         self.cpu_model = String("")
@@ -83,7 +79,6 @@ def usage() -> String:
         "  --cores N --mem-bytes N\n"
         "  [--threads N (default: cores)] [--memory-limit-bytes N (default: 80% of mem)]\n"
         "  [--duckdb-version V] [--warm-sweeps N] [--warm-reps N]\n"
-        "  [--warmup-runs N (default: 5 at 32 threads or more, else 0)]\n"
         "  [--cold-sweeps N --cold-reps N --drop-caches-file PATH]\n"
         "  [--pass-max X] [--max-silence-ms N]\n"
     )
@@ -184,8 +179,6 @@ def parse_flags(args: List[String]) raises -> RunFlags:
             f.cold_sweeps = _int(v, flag)
         elif flag == "--cold-reps":
             f.cold_reps = _int(v, flag)
-        elif flag == "--warmup-runs":
-            f.warmup_runs = _int(v, flag)
         elif flag == "--pass-max":
             f.pass_max = _float(v, flag)
         elif flag == "--hostclass":
