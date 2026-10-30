@@ -31,6 +31,7 @@ def _stand_in() -> String:
     'while IFS= read -r l; do case "$l" in'
     ' ".print "*) echo "${l#.print }";;'
     ' "SELECT answer"*) echo \'[{"answer":42}]\';;'
+    ' "DESCRIBE SELECT answer"*) echo \'[{"column_name":"answer","column_type":"BIGINT"}]\';;'
     ' "FAIL"*) echo "Error: failed" >&2;;'
     ' "FLOOD"*) head -c 300000 /dev/zero | tr "\\0" e >&2;;'
     " esac; done"
@@ -52,12 +53,14 @@ def test_a_conversation_over_real_pipes() raises:
     assert_equal(fetched.rows.row_count(), 1)
     assert_equal(fetched.rows.names[0], String("answer"))
     assert_equal(fetched.rows.rows[0][0].i, Int64(42))
+    assert_equal(len(fetched.rows.types), 1)
+    assert_equal(fetched.rows.types[0], String("BIGINT"))
     var failed = s.fetch(String("FAIL now"))
     assert_false(failed.ok())
     assert_equal(failed.error, String("Error: failed\n"))
     var after = s.run_timed(String("SELECT answer"))
     assert_true(after.ok())
-    assert_equal(after.id, 4)
+    assert_equal(after.id, 5)
     assert_equal(s.close(), 0)
 
 

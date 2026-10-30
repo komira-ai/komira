@@ -61,6 +61,10 @@
 #   canonical text of their exact value (a 36-digit value and its neighbour
 #   differ, as no double could tell them apart); DECIMAL scale 0 is an exact
 #   decimal at any size; one value at two scales is one cell; NULL stays NULL.
+# - test_the_declared_types_of_the_real_engine_are_checked_against_duckdbs: the
+#   engine's count(*) is a BIGINT; a stand-in that declares the same value as
+#   INTEGER is recorded wrong and not timed, with a note naming the declared
+#   type and both types; one that declares BIGINT is identical and timed.
 # - test_conversion_of_dates: epoch, a leap day, the day before the epoch, the
 #   first day of Q6's range, year 1 and the last day of year 9999 render as
 #   YYYY-MM-DD; the day after year 9999 and the day before year 1 raise.
@@ -349,6 +353,13 @@ def _q6_rule(revenue: String) -> Rule:
     )
 
 
+def _describe_one(name: String, ty: String) -> String:
+    return (
+        String('[{"column_name":"') + name + String('","column_type":"') + ty
+        + String('","null":"YES","key":null,"default":null,"extra":null}]')
+    )
+
+
 def _duckdb_cell(value: String) raises -> Cell:
     """The cell the session makes from DuckDB's JSON for the Q6 sum `value`."""
     var rig = Rig()
@@ -482,7 +493,7 @@ def test_a_join_is_refused_and_not_timed() raises:
     _ = _write_fixture(t)
     var rig = Rig()
     var rules = List[Rule]()
-    rules.append(Rule(String("join lineitem"), String('[{"n":50}]'), 2 * _MS))
+    rules.append(Rule(String("join lineitem"), String('[{"n":50}]'), 2 * _MS, _describe_one(String("n"), String("BIGINT"))))
     var session = rig.duckdb(rules^)
     var arm = KomiraArm()
     var dropper = NoCacheDropper()
@@ -506,7 +517,7 @@ def test_a_join_is_refused_and_not_timed() raises:
         )
         >= 0
     )
-    assert_equal(_count(rig.sent_text(), String("join lineitem")), 1)
+    assert_equal(_runs(rig.sent_text(), String("join lineitem")), 1)
     assert_true(arm.last_refusal.startswith(String("lower: LOWERING_UNCUTTABLE_NODE")))
     arm.close()
 
@@ -711,6 +722,8 @@ def test_conversion_of_decimals_is_exact() raises:
     builder.add_column(Column.from_decimal128(arr^))
     var rs = result_set_of(_batches_of(builder.build(sb.build())))
     assert_equal(rs.names[0], String("d"))
+    assert_equal(len(rs.types), 1)
+    assert_equal(rs.types[0], String("DECIMAL(38,4)"))
     assert_equal(rs.row_count(), 5)
     assert_equal(rs.rows[0][0].kind, KIND_DECIMAL)
     assert_equal(rs.rows[0][0].s, String("12345678901234.5678"))
@@ -798,6 +811,11 @@ def test_conversion_of_other_columns() raises:
     assert_equal(rs.names[0], String("id"))
     assert_equal(rs.names[3], String("d"))
     assert_equal(rs.row_count(), 3)
+    assert_equal(len(rs.types), 4)
+    assert_equal(rs.types[0], String("BIGINT"))
+    assert_equal(rs.types[1], String("DOUBLE"))
+    assert_equal(rs.types[2], String("VARCHAR"))
+    assert_equal(rs.types[3], String("DATE"))
     assert_equal(rs.rows[0][0].i, Int64(3))
     assert_equal(rs.rows[1][0].i, Int64(-4))
     assert_equal(rs.rows[2][0].i, Int64(9))
@@ -889,6 +907,8 @@ def test_conversion_of_unsigned_float_and_dictionary_columns() raises:
     assert_equal(rs.rows[0][0].i, Int64(9223372036854775807))
     assert_equal(rs.rows[1][0].kind, KIND_DECIMAL)
     assert_equal(rs.rows[1][0].s, String("9223372036854775808"))
+    assert_equal(len(rs.types), 1)
+    assert_equal(rs.types[0], String("UBIGINT"))
 
     var u32 = PrimitiveArray[DType.uint32].allocate(1)
     u32.set(0, UInt32(4294967295))
@@ -897,12 +917,16 @@ def test_conversion_of_unsigned_float_and_dictionary_columns() raises:
     )
     assert_equal(r32.rows[0][0].kind, KIND_INT)
     assert_equal(r32.rows[0][0].i, Int64(4294967295))
+    assert_equal(len(r32.types), 1)
+    assert_equal(r32.types[0], String("UINTEGER"))
     var u16 = PrimitiveArray[DType.uint16].allocate(1)
     u16.set(0, UInt16(65535))
     var r16 = result_set_of(
         _one_column_batch(String("u"), Field("u", ArrowType.UINT16, False), Column.from_primitive[DType.uint16](u16^))
     )
     assert_equal(r16.rows[0][0].i, Int64(65535))
+    assert_equal(len(r16.types), 1)
+    assert_equal(r16.types[0], String("USMALLINT"))
     var u8 = PrimitiveArray[DType.uint8].allocate(1)
     u8.set(0, UInt8(255))
     var r8 = result_set_of(
@@ -910,6 +934,8 @@ def test_conversion_of_unsigned_float_and_dictionary_columns() raises:
     )
     assert_equal(r8.rows[0][0].kind, KIND_INT)
     assert_equal(r8.rows[0][0].i, Int64(255))
+    assert_equal(len(r8.types), 1)
+    assert_equal(r8.types[0], String("UTINYINT"))
 
     var f32 = PrimitiveArray[DType.float32].allocate(1)
     f32.set(0, Float32(0.1))
@@ -919,6 +945,8 @@ def test_conversion_of_unsigned_float_and_dictionary_columns() raises:
     assert_equal(rf.rows[0][0].kind, KIND_FLOAT)
     assert_true(rf.rows[0][0].f == atof(String("0.1")), "a FLOAT must be read from its shortest text")
     assert_true(rf.rows[0][0].f != Float64(Float32(0.1)))
+    assert_equal(len(rf.types), 1)
+    assert_equal(rf.types[0], String("FLOAT"))
 
     var idx = PrimitiveArray[DType.int32].allocate(2)
     idx.set(0, Int32(1))
@@ -931,6 +959,36 @@ def test_conversion_of_unsigned_float_and_dictionary_columns() raises:
         _ = result_set_of(
             _one_column_batch(String("d"), Field("d", ArrowType.STRING, False), Column.from_dictionary(dict^))
         )
+
+
+def test_the_declared_types_of_the_real_engine_are_checked_against_duckdbs() raises:
+    var t = q6_table(600)
+    _ = _write_fixture(t)
+    var rig = Rig()
+    var rules = List[Rule]()
+    var as_int = String("[{\"n_int\":") + String(t.rows()) + String("}]")
+    var as_big = String("[{\"n_big\":") + String(t.rows()) + String("}]")
+    rules.append(Rule(String("as n_int "), as_int, 2 * _MS, _describe_one(String("n_int"), String("INTEGER"))))
+    rules.append(Rule(String("as n_big "), as_big, 2 * _MS, _describe_one(String("n_big"), String("BIGINT"))))
+    var session = rig.duckdb(rules^)
+    var arm = KomiraArm()
+    var dropper = NoCacheDropper()
+    var queries = List[QuerySpec]()
+    queries.append(_q(String("i"), String("select count(*) as n_int from lineitem")))
+    queries.append(_q(String("b"), String("select count(*) as n_big from lineitem")))
+
+    var out = run_queries(session, arm, dropper, BenchClock.system(), queries, _inputs(t.rows()), _settings())
+    arm.close()
+
+    # the engine counts in BIGINT: DuckDB's INTEGER with the same value is a wrong answer by name
+    assert_equal(out.warm.cells[0].value.text(), String("UNVERIFIED:answer differs from duckdb"))
+    assert_false(out.outcomes[0].timed)
+    ref note = out.outcomes[0].note
+    assert_true(note.find(String("declared type")) >= 0, note)
+    assert_true(note.find(String("INTEGER")) >= 0, note)
+    assert_true(note.find(String("BIGINT")) >= 0, note)
+    assert_equal(out.warm.cells[1].value.text(), String("IDENTICAL"))
+    assert_true(out.outcomes[1].timed)
 
 
 def main() raises:

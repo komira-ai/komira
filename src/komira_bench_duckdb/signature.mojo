@@ -184,10 +184,12 @@ struct ResultSignature(Copyable, Movable):
 
     var rows: Int
     var columns: List[ColumnSignature]
+    var types: List[String]
 
     def __init__(out self):
         self.rows = 0
         self.columns = List[ColumnSignature]()
+        self.types = List[String]()
 
 
 def signature_of(rs: ResultSet) raises -> ResultSignature:

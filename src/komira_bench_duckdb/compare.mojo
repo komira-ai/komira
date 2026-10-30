@@ -65,12 +65,14 @@ struct ValueVerdict(Copyable, Movable):
 
     var identical: Bool
     var reasons: List[String]
+    var type_reasons: List[String]
     var modes: List[String]
     var max_rel: Float64
 
     def __init__(out self):
         self.identical = True
         self.reasons = List[String]()
+        self.type_reasons = List[String]()
         self.modes = List[String]()
         self.max_rel = Float64(0)
 

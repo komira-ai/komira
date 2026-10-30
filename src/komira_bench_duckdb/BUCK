@@ -33,6 +33,7 @@ mojo_library(
         "//src/komira_supervisor:komira_supervisor",
     ],
     test_srcs = [
+        "tests/test_declared_types.mojo",
         "tests/test_exact_decimal.mojo",
         "tests/test_memory.mojo",
         "tests/test_pins.mojo",

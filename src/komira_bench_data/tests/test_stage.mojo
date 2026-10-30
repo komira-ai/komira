@@ -173,7 +173,19 @@ struct StageFake(DuckDbTransport):
     def _run_statement(mut self) raises:
         var s = self.statement
         self.statement = String("")
-        if s.find(String("current_setting('threads')")) >= 0:
+        if s.startswith(String("DESCRIBE ")):
+            # the column types of a fetched query: four texts for the extension
+            # state, one BIGINT for a count
+            if s.find(String("FROM duckdb_extensions()")) >= 0:
+                self._answer(
+                    String('[{"column_name":"loaded","column_type":"VARCHAR"},')
+                    + String('{"column_name":"install_mode","column_type":"VARCHAR"},')
+                    + String('{"column_name":"installed_from","column_type":"VARCHAR"},')
+                    + String('{"column_name":"extension_version","column_type":"VARCHAR"}]')
+                )
+            elif s.find(String("read_parquet(")) >= 0:
+                self._answer(String('[{"column_name":"n","column_type":"BIGINT"}]'))
+        elif s.find(String("current_setting('threads')")) >= 0:
             self._answer(
                 String('[{"threads":1,"memory_limit":"4.0 GiB","version":"v1.5.6",')
                 + String('"source_id":"069cc9f9b5","extra_0":"true"}]')

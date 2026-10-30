@@ -32,6 +32,7 @@ from .compare import (
     compare_signatures,
     numbers_close,
 )
+from .declared_types import UNMAPPED_PREFIX, duckdb_declared_type, is_unmapped, unmapped_type
 from .decimal_text import ExactSum, canonical_decimal, compare_decimals
 from .launch import open_pinned
 from .memory import ParsedSize, parse_size, size_matches

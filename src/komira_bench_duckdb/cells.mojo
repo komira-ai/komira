@@ -70,14 +70,18 @@ struct Cell(Copyable, Movable):
 
 
 struct ResultSet(Copyable, Movable):
-    """Column names and the rows, each row one `Cell` per column."""
+    """Column names and the rows, each row one `Cell` per column. `types` holds
+    the declared type of each column in the shared vocabulary
+    (declared_types.mojo), or is empty when the types were not recorded."""
 
     var names: List[String]
     var rows: List[List[Cell]]
+    var types: List[String]
 
     def __init__(out self):
         self.names = List[String]()
         self.rows = List[List[Cell]]()
+        self.types = List[String]()
 
     def column_count(self) -> Int:
         return len(self.names)
