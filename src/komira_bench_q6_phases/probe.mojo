@@ -61,11 +61,13 @@ from komira_phase_timers.phase_timers import (
     PH_PARSE,
     PH_STAGED_DECODE_LATER,
     PH_TASK,
+    PT_LANES,
     pt_enabled,
     pt_forget_threads,
     pt_get,
     pt_lane_count,
     pt_lane_tid,
+    pt_overflow_count,
     pt_phase_name,
     pt_reset,
     pt_ru_available,
@@ -117,7 +119,13 @@ comptime NOTE: String = (
     " absolute times vary from run to run. Read the numbers as RELATIVE (the"
     " share of each phase in the total, and how the time scales with the"
     " thread count), not as a headline figure and not as a comparison with"
-    " another engine."
+    " another engine. The phase timers are not free: each interval costs two"
+    " clock reads, a pthread_self and a scan of the thread table (about the"
+    " number of threads), at row-group, morsel and segment granularity, so the"
+    " total here is somewhat above that of a build without the timers; the"
+    " overhead was not measured by this probe. timer_records_dropped is the"
+    " number of intervals lost because more threads recorded than the timers"
+    " have lanes (timer_lane_capacity); it must be 0."
 )
 
 
@@ -132,6 +140,8 @@ struct RunRecord(Copyable, Movable):
     var user_ns: Int
     var system_ns: Int
     var revenue_unscaled: Int
+    var dropped_records: Int
+    """Phase-timer records lost to a full thread table in this run."""
     var ok: Bool
     var census: CensusDelta
     var driver_tids: List[Int]
@@ -154,6 +164,7 @@ struct RunRecord(Copyable, Movable):
         self.user_ns = 0
         self.system_ns = 0
         self.revenue_unscaled = -1
+        self.dropped_records = 0
         self.ok = False
 
 
@@ -188,6 +199,7 @@ def _run_once(mut ctx: EngineContext, text: String) raises -> RunRecord:
     rec.census = census_delta(census_before, census_after, driver_tids, worker_tids)
     rec.driver_tids = driver_tids^
     rec.worker_tids = worker_tids^
+    rec.dropped_records = pt_overflow_count()
     if outcome.refusal:
         raise Error(
             "Q6 was refused at "
@@ -421,8 +433,11 @@ struct WarmupRecord(Copyable, Movable):
     var revenue_unscaled: List[Int]
     """The first aggregate each discarded run answered."""
     var settled: Bool
+    var dropped_records: Int
+    """Phase-timer records the discarded runs lost to a full thread table."""
 
     def __init__(out self):
+        self.dropped_records = 0
         self.revenue_unscaled = List[Int]()
         self.minor_faults = List[Int]()
         self.vol_switches = List[Int]()
@@ -457,7 +472,9 @@ def _json_config(
     var rss = List[Int]()
     var user = List[Int]()
     var system = List[Int]()
+    var dropped = warm.dropped_records
     for r in range(len(runs)):
+        dropped += runs[r].dropped_records
         totals.append(runs[r].total_ns)
         minor.append(runs[r].minor_faults)
         major.append(runs[r].major_faults)
@@ -479,6 +496,7 @@ def _json_config(
         idle, len(runs) > 0 and runs[0].census_taken
     )
     out += ',"runs":' + String(len(runs))
+    out += ',"timer_records_dropped":' + String(dropped)
     out += ',"total_ms":' + _dist_ms(totals)
     out += ',"total_ms_per_run":' + _series_ms(totals)
     out += ',"page_faults":{"minor_per_run":' + _series_int(minor)
@@ -640,6 +658,7 @@ def _warm_up(
         w.vol_switches.append(rec.vol_switches)
         w.total_ns.append(rec.total_ns)
         w.revenue_unscaled.append(rec.revenue_unscaled)
+        w.dropped_records += rec.dropped_records
         if len(w.minor_faults) >= min_runs and faults_settled(w.minor_faults):
             w.settled = True
             break
@@ -687,9 +706,21 @@ def run_probe(settings: ProbeSettings) raises -> ProbeResult:
     var configs = String("")
     var host = String("null")
     var plan_text = String("")
+    if pt_enabled():
+        # The driver and the workers each need a lane.
+        for t in range(len(settings.threads)):
+            if settings.threads[t] + 1 > PT_LANES:
+                raise Error(
+                    "the phase timers have "
+                    + String(PT_LANES)
+                    + " lanes (the driver and the workers); "
+                    + String(settings.threads[t])
+                    + " threads do not fit"
+                )
     var answers_match = True
     var decode_reference = NO_EXPECTED_REVENUE
     var first_config = True
+    var records_dropped = 0
     for t in range(len(settings.threads)):
         var requested = settings.threads[t]
         # The previous context's threads have ended: free their lanes (a
@@ -722,6 +753,7 @@ def run_probe(settings: ProbeSettings) raises -> ProbeResult:
                         answers_match = False
                 elif not _decode_answer_ok(wrec, settings, decode_reference):
                     answers_match = False
+            records_dropped += warm.dropped_records
             var runs = List[RunRecord]()
             for _ in range(settings.runs):
                 var rec = _run_once(ctx, query)
@@ -731,6 +763,8 @@ def run_probe(settings: ProbeSettings) raises -> ProbeResult:
                 elif not _decode_answer_ok(rec, settings, decode_reference):
                     answers_match = False
                 runs.append(rec^)
+            for r in range(len(runs)):
+                records_dropped += runs[r].dropped_records
             if not first_config:
                 configs += ","
             first_config = False
@@ -752,6 +786,8 @@ def run_probe(settings: ProbeSettings) raises -> ProbeResult:
     json += String(WARMUP_MIN_RUNS_WIDE) + " at " + String(WIDE_THREADS)
     json += " or more threads), then until two successive runs' minor faults agree within 20 percent, at most "
     json += String(WARMUP_MAX_RUNS) + '"'
+    json += ',"timer_lane_capacity":' + String(PT_LANES)
+    json += ',"timer_records_dropped":' + String(records_dropped)
     json += ',"runs_per_thread_count":' + String(settings.runs)
     json += ',"expected_revenue_unscaled":' + String(settings.expected_revenue)
     json += ',"decode_only_sum_price_unscaled":' + String(decode_reference)

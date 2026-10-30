@@ -28,6 +28,7 @@ from komira_phase_timers.phase_timers import (
     pt_enabled,
     pt_get,
     pt_lane_count,
+    pt_overflow_count,
     pt_mark_fork,
     pt_now,
     pt_record,
@@ -59,6 +60,7 @@ def test_every_entry_point_records_nothing() raises:
     pt_reset()
     pt_forget_threads()
     assert_equal(pt_lane_count(), 0)
+    assert_equal(pt_overflow_count(), 0)
     for lane in range(4):
         for phase in range(PH_COUNT):
             for field in range(FIELD_CALLS + 1):
