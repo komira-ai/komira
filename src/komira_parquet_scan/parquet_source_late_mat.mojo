@@ -48,6 +48,14 @@ from komira_parquet.payload_sel_trace import (
     payload_sel_decode_mode,
 )
 from komira_parquet.scan_copy_trace import incr_proj_copy, incr_proj_copy_other, incr_proj_share, proj_share_enabled
+from komira_phase_timers.phase_timers import (
+    PH_DECODE_FILTER_COLS,
+    PH_DECODE_PAYLOAD,
+    PH_FILTER,
+    PH_GATHER,
+    pt_now,
+    pt_record,
+)
 from komira_plan_expr.expr_id import ExprId
 from komira_plan_expr.expr_pool import ExprPool
 
@@ -203,13 +211,16 @@ def late_mat_decode[FS: FileSystem, fo: Origin[mut=True]](
     if pre_batch:
         filter_batch = pre_batch.take()
     else:
+        var t_cols = pt_now()
         filter_batch = reader.decode_columns_subset(rg_in_file, plan.cols, preserve_dict)
+        pt_record[PH_DECODE_FILTER_COLS](t_cols)
     note_whole_rg_decode(filter_batch.num_rows())
     var mask_opt: Optional[BooleanArray] = None
     if pre_mask:
         mask_opt = pre_mask^
     elif has_decode_filter:
         ref p = pool
+        var t_mask = pt_now()
         var fused = False
         if fused_eval_enabled:
             var fused_opt = try_fused_eval(p, stages, filter_batch)
@@ -218,6 +229,7 @@ def late_mat_decode[FS: FileSystem, fo: Origin[mut=True]](
                 fused = True
         if not fused:
             mask_opt = Optional(stages_mask(p, stages, filter_batch))
+        pt_record[PH_FILTER](t_mask)
         if mask_opt.value().true_count() == 0:
             return ClaimOutcome.skip()
     if dyn and dyn_key_col >= 0:
@@ -270,22 +282,30 @@ def late_mat_decode[FS: FileSystem, fo: Origin[mut=True]](
         else:
             incr_payload_sel_skip()
     var payload_full: RecordBatch
+    var t_payload = pt_now()
     if decode_arena:
         payload_full = reader.decode_columns_subset_arena(rg_in_file, payload_cols, preserve_dict)
     else:
         payload_full = reader.decode_columns_subset(rg_in_file, payload_cols, preserve_dict)
+    pt_record[PH_DECODE_PAYLOAD](t_payload)
     if sel_pipe_should_defer(sel_pipe_enabled, surviving, total):
         var dense = _assemble(proj, plan.cols, filter_batch, payload_cols, Optional(payload_full^), _MODE_SHARE)
         dense.set_selection_mask(mask^)
         return ClaimOutcome.emit(dense^)
     if surviving < total and Float64(surviving) >= LATE_MAT_HIGH_SEL_THRESHOLD * Float64(total):
+        var t_whole = pt_now()
         var whole = _assemble(proj, plan.cols, filter_batch, payload_cols, Optional(payload_full^), _MODE_COPY)
-        return ClaimOutcome.emit(gather_batch(whole, filter_to_indices(mask)))
+        var gathered = ClaimOutcome.emit(gather_batch(whole, filter_to_indices(mask)))
+        pt_record[PH_GATHER](t_whole)
+        return gathered^
     if surviving == total:
         return ClaimOutcome.emit(
             _assemble(proj, plan.cols, filter_batch, payload_cols, Optional(payload_full^), _MODE_REORDER)
         )
+    var t_idx = pt_now()
     var idx = filter_to_indices(mask)
     var fg = gather_batch(filter_batch, idx)
     var pg = gather_batch(payload_full, idx)
-    return ClaimOutcome.emit(_assemble(proj, plan.cols, fg, payload_cols, Optional(pg^), _MODE_COPY))
+    var assembled = ClaimOutcome.emit(_assemble(proj, plan.cols, fg, payload_cols, Optional(pg^), _MODE_COPY))
+    pt_record[PH_GATHER](t_idx)
+    return assembled^

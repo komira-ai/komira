@@ -122,6 +122,7 @@ mojo_library(
         "//src/komira_operator_api:komira_operator_api",
         "//src/komira_parquet:komira_parquet",
         "//src/komira_parquet_scan:komira_parquet_scan",
+        "//src/komira_phase_timers:komira_phase_timers",
         "//src/komira_physical_plan:komira_physical_plan",
         "//src/komira_plan_expr:komira_plan_expr",
         "//src/komira_plan_stats:komira_plan_stats",

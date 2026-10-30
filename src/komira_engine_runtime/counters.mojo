@@ -64,6 +64,7 @@ comptime OFF_UTIME_USEC: Int = 8
 comptime OFF_STIME_SEC: Int = 16
 comptime OFF_STIME_USEC: Int = 24
 comptime OFF_MAXRSS: Int = 32
+comptime OFF_MINFLT: Int = 64
 comptime OFF_MAJFLT: Int = 72
 comptime OFF_NVCSW: Int = 128
 comptime OFF_NIVCSW: Int = 136
@@ -79,6 +80,8 @@ struct Counters(Copyable, Movable, Writable):
     var voluntary_ctx_switches: Int
     var involuntary_ctx_switches: Int
     var major_page_faults: Int
+    var minor_page_faults: Int
+    """Minor faults of the process (`ru_minflt`); not in the printed form."""
     var peak_rss_bytes: Int
     var user_time_us: Int
     var system_time_us: Int
@@ -90,6 +93,7 @@ struct Counters(Copyable, Movable, Writable):
         self.voluntary_ctx_switches = 0
         self.involuntary_ctx_switches = 0
         self.major_page_faults = 0
+        self.minor_page_faults = 0
         self.peak_rss_bytes = 0
         self.user_time_us = 0
         self.system_time_us = 0
@@ -102,6 +106,7 @@ struct Counters(Copyable, Movable, Writable):
         peak_rss_bytes: Int,
         user_time_us: Int,
         system_time_us: Int,
+        minor_page_faults: Int = 0,
     ):
         self.voluntary_ctx_switches = voluntary_ctx_switches
         self.involuntary_ctx_switches = involuntary_ctx_switches
@@ -109,6 +114,7 @@ struct Counters(Copyable, Movable, Writable):
         self.peak_rss_bytes = peak_rss_bytes
         self.user_time_us = user_time_us
         self.system_time_us = system_time_us
+        self.minor_page_faults = minor_page_faults
 
     # --- Capture current state -----------------------------------------------
 
@@ -141,6 +147,7 @@ struct Counters(Copyable, Movable, Writable):
             result.voluntary_ctx_switches = _read_i64(ru_buf, OFF_NVCSW)
             result.involuntary_ctx_switches = _read_i64(ru_buf, OFF_NIVCSW)
             result.major_page_faults = _read_i64(ru_buf, OFF_MAJFLT)
+            result.minor_page_faults = _read_i64(ru_buf, OFF_MINFLT)
             # ru_maxrss unit differs by platform: bytes on Darwin, KB on
             # Linux (glibc). Both branches type-check; only the host's
             # branch enters codegen.
@@ -169,6 +176,7 @@ struct Counters(Copyable, Movable, Writable):
             self.peak_rss_bytes,  # peak is absolute, not delta
             self.user_time_us - before.user_time_us,
             self.system_time_us - before.system_time_us,
+            self.minor_page_faults - before.minor_page_faults,
         )
 
     # --- Writable ------------------------------------------------------------
