@@ -10,7 +10,7 @@
 #   under the threshold. Catches a departure that is dropped to NO_RATIO, one
 #   that is called PASS, and one that loses its ratio.
 # - test_the_summary_never_counts_a_departure_as_a_pass: next to a plain pass,
-#   a departure leaves PASS at 1 of 2, is not a
+#   a departure leaves PASS at 1 of 2, is counted in `n_departure`, is not a
 #   value-identical cell, and the line says `DEPARTURE 1/2`; with no departure
 #   the line has no such clause. Catches a summary that adds departures to PASS.
 # - test_the_table_shows_the_departure_and_its_reason: the row of the cell
@@ -125,6 +125,7 @@ def test_the_summary_never_counts_a_departure_as_a_pass() raises:
     assert_equal(s.overall.n_cells, 2)
     assert_equal(s.overall.n_pass, 1)
     assert_equal(s.overall.n_fail, 0)
+    assert_equal(s.overall.n_departure, 1)
     assert_equal(s.overall.n_verified, 1)
     assert_equal(s.overall.n_ratio, 2)
     var line = summary_line(s.overall, 1.05, r.env.duckdb)
@@ -165,6 +166,8 @@ def test_a_departure_round_trips_through_result_json() raises:
     var back = parse_result_json(text)
     assert_equal(back.cells[1].value.text(), String("DEPARTURE:") + String(_REASON))
     assert_equal(back.cells[1].verdict, String("DEPARTURE"))
+    assert_equal(summarize(back).overall.n_departure, 1)
+    assert_true(text.find(String('"n_departure":1')) >= 0, text)
     assert_equal(write_result_json(back), text)
 
 

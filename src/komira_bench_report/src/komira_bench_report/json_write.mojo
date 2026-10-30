@@ -102,6 +102,7 @@ def _suite_summary_json(s: SuiteSummary) raises -> JsonValue:
     o.set_member(String("n_ratio"), _i(Int64(s.n_ratio)))
     o.set_member(String("n_pass"), _i(Int64(s.n_pass)))
     o.set_member(String("n_fail"), _i(Int64(s.n_fail)))
+    o.set_member(String("n_departure"), _i(Int64(s.n_departure)))
     o.set_member(String("geomean_ratio_verified"), _opt_f64(s.geomean))
     o.set_member(String("median_ratio"), _opt_f64(s.median_ratio))
     return o^

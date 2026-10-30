@@ -379,7 +379,7 @@ def test_json_columns_are_read_by_their_types() raises:
     assert_equal(bare.rows[0][0].s, String("5"))
     assert_true(bare.rows[0][1].is_null())
     assert_equal(exactness_of_type(String("DECIMAL(38,4)")), 1)
-    assert_equal(exactness_of_type(String("HUGEINT")), 2)
+    assert_equal(exactness_of_type(String("HUGEINT")), 3)
     assert_equal(exactness_of_type(String("UHUGEINT")), 2)
     assert_equal(exactness_of_type(String("UBIGINT")), 2)
     assert_equal(exactness_of_type(String("BIGINT")), 0)

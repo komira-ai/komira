@@ -132,7 +132,8 @@ struct Side(Copyable, Movable):
 struct Cell(Copyable, Movable):
     """One query of one suite. `komira` is present exactly when the run ended
     in EXEC_OK. `ratio` is `komira.ms / duckdb.ms` and exists only for a cell
-    whose values are IDENTICAL; `verdict` is PASS, FAIL or NO_RATIO."""
+    whose values are IDENTICAL or a DEPARTURE; `verdict` is PASS, FAIL,
+    DEPARTURE or NO_RATIO."""
 
     var id: String
     var suite: String
@@ -178,10 +179,10 @@ struct Cell(Copyable, Movable):
         pass_max: Float64,
     ) raises -> Cell:
         """A cell with its ratio and verdict derived: the ratio only when the
-        run ended in EXEC_OK, the values are IDENTICAL and both sides are
-        measured."""
+        run ended in EXEC_OK, the values are IDENTICAL or a DEPARTURE and both
+        sides are measured."""
         var ratio = derive_ratio(stage, komira, duckdb, value)
-        var verdict = cell_verdict(ratio, pass_max)
+        var verdict = cell_verdict(ratio, pass_max, value.is_departure())
         return Cell(
             id^,
             suite^,
@@ -202,7 +203,7 @@ def derive_ratio(
     value: ValueVerdict,
 ) raises -> Optional[Float64]:
     """The ratio of a cell, or none when it must not be shown."""
-    if not stage.is_ok() or not value.is_identical():
+    if not stage.is_ok() or not value.is_matched():
         return Optional[Float64]()
     if not komira or not duckdb:
         return Optional[Float64]()
@@ -403,16 +404,17 @@ def validate_cell(cell: Cell, run: RunInfo) raises:
     var compared = (
         cell.value.kind == String("IDENTICAL")
         or cell.value.kind == String("DIVERGENT")
+        or cell.value.kind == String("DEPARTURE")
     )
     if compared and run.mode != String("both"):
         raise Error("cell " + cell.id + ": values are compared only in a run of mode both")
     if compared and not cell.duckdb:
         raise Error("cell " + cell.id + ": values cannot be compared without a duckdb side")
     if (
-        cell.value.kind == String("IDENTICAL")
+        cell.value.is_matched()
         and cell.komira.value().rows != cell.duckdb.value().rows
     ):
-        raise Error("cell " + cell.id + ": IDENTICAL values need equal row counts")
+        raise Error("cell " + cell.id + ": " + cell.value.kind + " values need equal row counts")
     if run.mode == String("komira") and cell.duckdb:
         raise Error("cell " + cell.id + ": a run of mode komira has no duckdb side")
     if run.mode == String("both") and cell.stage.is_ok() and not cell.duckdb:
@@ -426,7 +428,7 @@ def validate_cell(cell: Cell, run: RunInfo) raises:
         raise Error("cell " + cell.id + ": a ratio exists exactly for a value-verified cell measured on both sides")
     if want and not _close(want.value(), cell.ratio.value()):
         raise Error("cell " + cell.id + ": the ratio is not komira.ms / duckdb.ms")
-    if cell.verdict != cell_verdict(want, run.pass_max):
+    if cell.verdict != cell_verdict(want, run.pass_max, cell.value.is_departure()):
         raise Error("cell " + cell.id + ": the verdict does not follow from the ratio and run.pass_max")
 
 

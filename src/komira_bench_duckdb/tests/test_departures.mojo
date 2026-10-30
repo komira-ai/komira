@@ -21,6 +21,10 @@
 #   DECIMAL(38,0), HUGEINT against DECIMAL(37,0), DECIMAL(38,1) and UHUGEINT,
 #   and DECIMAL(38,0) against BIGINT each fail on the declared type, naming it.
 #   Catches a departure rule wider than its table.
+# - test_the_departure_table_has_one_entry: the table lists HUGEINT against
+#   DECIMAL(38,0) with the reason and nothing else; the lookup answers in both
+#   directions and refuses HUGEINT against BIGINT and UHUGEINT against
+#   DECIMAL(38,0).
 # - test_a_stored_reference_keeps_the_departure: a HUGEINT answer written with
 #   format_reference and read back with parse_references still compares as a
 #   DEPARTURE against DECIMAL(38,0), and as a failure when a value differs.
@@ -32,7 +36,9 @@ from komira_bench_duckdb import (
     ReferenceAnswer,
     ResultSet,
     ValueVerdict,
+    allowed_departures,
     compare_signatures,
+    departure_reason,
     format_reference,
     parse_json_rows,
     parse_references,
@@ -209,6 +215,21 @@ def test_a_stored_reference_keeps_the_departure() raises:
     var w = compare_signatures(signature_of(other), back.signature)
     assert_false(w.identical)
     assert_true(w.label().startswith(String("DIVERGENT")), w.label())
+
+
+def test_the_departure_table_has_one_entry() raises:
+    var table = allowed_departures()
+    assert_equal(len(table), 1)
+    assert_equal(table[0].duckdb, String("HUGEINT"))
+    assert_equal(table[0].komira, String("DECIMAL(38,0)"))
+    assert_equal(table[0].reason, String(_REASON))
+    var either = departure_reason(String("DECIMAL(38,0)"), String("HUGEINT"))
+    assert_true(Bool(either))
+    assert_equal(either.value(), String(_REASON))
+    assert_true(Bool(departure_reason(String("HUGEINT"), String("DECIMAL(38,0)"))))
+    assert_false(Bool(departure_reason(String("HUGEINT"), String("BIGINT"))))
+    assert_false(Bool(departure_reason(String("UHUGEINT"), String("DECIMAL(38,0)"))))
+    assert_false(Bool(departure_reason(String("HUGEINT"), String("HUGEINT"))))
 
 
 def main() raises:

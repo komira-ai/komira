@@ -54,9 +54,12 @@
 #   DuckDB's HUGEINT (a small and a 38-digit value) against the arm's
 #   DECIMAL(38,0) with equal values is recorded EXEC_OK with the value
 #   DEPARTURE:<reason>, is timed, keeps its ratio (1 ms against 2 ms, under the
-#   threshold) and has the verdict DEPARTURE; the console says PASS 0/1 and
-#   DEPARTURE 1/1 with the reason and the exit status is 0. A different value in
-#   the same columns, and HUGEINT against the arm's BIGINT, are wrong answers.
+#   threshold) and has the verdict DEPARTURE; next to two wrong answers (a value
+#   a unit apart, and HUGEINT against the arm's BIGINT, which are not timed and
+#   name the types) the console says PASS 0/3 and DEPARTURE 1/3 with the
+#   reason, comparison.txt lists the allowed departure, the run exits 1 for the
+#   wrong answers, and the departure cell alone exits 0 and round-trips through
+#   result.json.
 # - test_only_the_fetch_of_a_query_is_described: each query is described once,
 #   by its fetch, and none of its timed runs is.
 # - test_faults_end_the_run: a DuckDB error on the reference query, a time the
@@ -84,6 +87,7 @@ from komira_bench_duckdb import (
 from komira_bench_duckdb.cells import KIND_FLOAT, KIND_TEXT
 from komira_bench_duckdb.text import slice_bytes
 from komira_bench_report import (
+    Cell as ReportCell,
     DuckDbPin,
     exit_code,
     parse_result_json,
@@ -996,7 +1000,8 @@ def test_hugeint_against_decimal_38_0_is_a_departure_that_is_timed_and_never_a_p
     assert_true(text.find(String("DEPARTURE 1/3")) >= 0, text)
     assert_true(text.find(String("DEPARTURE(") + String(_REASON) + String(")")) >= 0, text)
     assert_equal(run_status(out), 1)
-    var only = List[Cell]()
+    assert_true(comparison_text().find(String("allowed departure ") + String(_REASON) + String("\n")) >= 0)
+    var only = List[ReportCell]()
     only.append(out.warm.cells[0].copy())
     var alone = out.warm.copy()
     alone.cells = only^

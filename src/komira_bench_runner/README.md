@@ -55,6 +55,8 @@ The rows are the cells `komira_bench_duckdb` makes from DuckDB's JSON output, so
 | DATE | `"1994-01-01"` | text `YYYY-MM-DD` (years 0001 to 9999) |
 | NULL | `null` | null |
 
+A HUGEINT is read as an exact decimal whatever its size, the representation of the engine's DECIMAL(38,0), the only column type Arrow has for it. DuckDB's HUGEINT against the arm's DECIMAL(38,0) with exactly equal values is the one allowed departure (the table in the README of `komira_bench_duckdb`, "Allowed departures"): the cell is timed and keeps its ratio, its value is `DEPARTURE:Arrow has no 128-bit integer: HUGEINT as DECIMAL(38,0)` and its verdict `DEPARTURE`, never `PASS`; the summary line says `DEPARTURE n/m` and `comparison.txt` lists the allowed departures. Unequal values, HUGEINT against INT64 and every other pair of declared types are wrong answers.
+
 A decimal column is compared exactly (count, sum, minimum, maximum and a hash of every value), and against a double column it is a difference of kinds. Which types DuckDB's JSON quotes is taken from the quoting rule of the shell's JSON renderer in DuckDB's source, and what it prints for NaN from its documented output; neither is checked against a fixture of the real binary here; the first real run checks it (a mismatch shows as a wrong answer, not a silent pass).
 
 Each column also carries a declared type from its Arrow type (`arrow_declared_type`, `ResultSet.types`): `DECIMAL128(p,s)` is `DECIMAL(p,s)`, `INT64` is `BIGINT`, `INT32` is `INTEGER`, `FLOAT64` is `DOUBLE`, `STRING` is `VARCHAR`, `DATE32` is `DATE`, and so on; the whole table, with DuckDB's names, is in the README of `komira_bench_duckdb` (Declared column types). The comparison fails by name when the two declared types differ even if every value is equal (`column 0 declared type differs: INTEGER against BIGINT`), and a type outside the table is reported as not in the mapping. The declared type is not the cell kind: an `INT32` and an `INT64` column both give integer cells and still differ.
@@ -67,7 +69,7 @@ Not mapped yet, and so refused: dictionary-encoded strings, booleans, timestamps
 |---|---|
 | `warm/result.json` | the warm result: `komira-bench-result/1` |
 | `cold/result.json` | the cold result, only when cold was measured |
-| `comparison.txt` | the tolerance the answers were compared under: floats within the larger of `float_rel_tol` times the larger magnitude and `float_abs_floor`, everything else (declared column types included) exact; it is also printed |
+| `comparison.txt` | the tolerance the answers were compared under: floats within the larger of `float_rel_tol` times the larger magnitude and `float_abs_floor`, everything else (declared column types included) exact, then one `allowed departure <reason>` line per entry of the table of allowed departures; it is also printed |
 | `queries.sha256` | `<suite>/<id> <sha256 of the text>` per query in run order, then `listing_sha256` of those lines |
 
 Warm and cold are two results because the result model holds one number of reps per run and has no temperature field. The schema has no field for the digest of a query either, hence `queries.sha256`.
