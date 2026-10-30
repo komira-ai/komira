@@ -22,12 +22,14 @@
 #   * A sink with no key, a direction or placement list of the wrong length,
 #     or a key the input does not have is refused by name when built; one read
 #     before combine is refused.
-#   * A morsel the pool denies, a concatenation and sorted copy the pool
-#     denies, and an input over the sort's own memory budget fail by name, and
-#     the pool holds nothing afterwards.
-#   * The pool is charged while rows are held and returns every block when the
-#     output is taken, when a combine fails and when the sink is dropped with
-#     morsels in it.
+#   * A morsel the pool denies, a concatenation the pool denies, a sorted copy
+#     and key batch the pool denies, the consume that takes the input past the
+#     sort's own memory budget, and a budget that holds the input and its
+#     concatenation but not the peak, fail by name, and the pool holds nothing
+#     afterwards; a budget of many inputs sorts the same rows.
+#   * The pool is charged while rows are held, holds only the sorted copy once
+#     the sort is done, and returns every block when the output is taken, when
+#     a combine fails and when the sink is dropped with morsels in it.
 
 from std.testing import TestSuite, assert_equal, assert_raises, assert_true
 
@@ -277,7 +279,7 @@ def test_a_morsel_the_pool_denies_fails_by_name_and_leaves_nothing() raises:
     assert_equal(pool.granted(), 0)
 
 
-def test_a_sorted_copy_the_pool_denies_fails_in_combine() raises:
+def test_a_concatenation_the_pool_denies_fails_in_combine() raises:
     var batch = table(0, N)
     var kept = batch_buffer_bytes(batch)
     var pool = SegmentPool(kept + kept // 2)
@@ -286,26 +288,55 @@ def test_a_sorted_copy_the_pool_denies_fails_in_combine() raises:
     sink.consume(0, Morsel(batch^, 0, 0))
     assert_equal(pool.granted(), kept)
     var pipeline = PipelineExecution(1, 0)
-    with assert_raises(contains="concatenation and the sorted copy"):
+    with assert_raises(contains="was denied"):
         sink.combine(pipeline)
     _ = sink^
     assert_equal(pool.granted(), 0)
 
 
-def test_an_input_over_the_sorts_memory_budget_is_refused() raises:
+def test_a_sorted_copy_and_key_batch_the_pool_denies_fail_in_combine() raises:
+    # Room for the rows and their concatenation, not for the sorted copy and
+    # the key batch the sort adds.
+    var batch = table(0, N)
+    var kept = batch_buffer_bytes(batch)
+    var pool = SegmentPool(2 * kept + 8)
+    var data = _data(_keys(X), _flags(False), _flags(False))
+    var sink = _sink(data, pool, 1)
+    sink.consume(0, Morsel(batch^, 0, 0))
+    var pipeline = PipelineExecution(1, 0)
+    with assert_raises(contains="the sorted copy and the key batch"):
+        sink.combine(pipeline)
+    _ = sink^
+    assert_equal(pool.granted(), 0)
+
+
+def test_the_consume_that_crosses_the_sorts_memory_budget_is_refused() raises:
     var kept = batch_buffer_bytes(table(0, N))
     var pool = SegmentPool()
     var data = _data(_keys(X), _flags(False), _flags(False), kept - 1)
     var sink = _sink(data, pool, 1)
+    with assert_raises(contains="would hold more than its memory budget of"):
+        sink.consume(0, Morsel(table(0, N), 0, 0))
+    _ = sink^
+    assert_equal(pool.granted(), 0)
+
+
+def test_the_memory_budget_bounds_the_peak_and_not_the_input() raises:
+    var kept = batch_buffer_bytes(table(0, N))
+    # Room for the input and the concatenation: the sorted copy and the key
+    # batch push the sort over.
+    var tight = _data(_keys(X), _flags(False), _flags(False), 2 * kept + 8)
+    var pool = SegmentPool()
+    var sink = _sink(tight, pool, 1)
     sink.consume(0, Morsel(table(0, N), 0, 0))
     var pipeline = PipelineExecution(1, 0)
-    with assert_raises(contains="over its memory budget of"):
+    with assert_raises(contains="the sorted copy and the key batch"):
         sink.combine(pipeline)
     _ = sink^
     assert_equal(pool.granted(), 0)
-    # At the budget exactly, the same input sorts.
-    var ok = _data(_keys(X), _flags(False), _flags(False), kept)
-    var sink2 = _sink(ok, pool, 1)
+    # A budget of many inputs sorts the same rows.
+    var roomy = _data(_keys(X), _flags(False), _flags(False), 100 * kept)
+    var sink2 = _sink(roomy, pool, 1)
     sink2.consume(0, Morsel(table(0, N), 0, 0))
     assert_equal(_finish(sink2, 1).num_rows(), N)
 
@@ -315,7 +346,7 @@ def test_the_pool_is_charged_while_rows_are_held_and_repaid() raises:
     var first = table(0, N // 2)
     var second = table(N // 2, N // 2)
     var kept = batch_buffer_bytes(first) + batch_buffer_bytes(second)
-    var pool = SegmentPool(10 * kept)
+    var pool = SegmentPool(100 * kept)
     var data = _data(_keys(X), _flags(False), _flags(False))
     var sink = _sink(data, pool, 2)
     sink.consume(0, Morsel(first^, 0, 0))
@@ -323,9 +354,10 @@ def test_the_pool_is_charged_while_rows_are_held_and_repaid() raises:
     assert_equal(pool.granted(), kept)
     var pipeline = PipelineExecution(2, 0)
     sink.combine(pipeline)
-    # The workers' reservations went back; the concatenation and the sorted
-    # copy are held until the output is taken.
-    assert_equal(pool.granted(), 2 * kept)
+    # The workers' reservations and the key batch went back; the sorted copy,
+    # about the size of the input, is held until the output is taken.
+    assert_true(pool.granted() >= kept - 16, "the sorted copy is held")
+    assert_true(pool.granted() <= kept + 16, "nothing else is held")
     sink.finalize()
     _ = sink.take_output()
     assert_equal(pool.granted(), 0)
@@ -358,8 +390,10 @@ def main() raises:
     suite.test[test_a_sink_the_plan_cannot_describe_is_refused_by_name]()
     suite.test[test_the_output_is_read_only_after_combine]()
     suite.test[test_a_morsel_the_pool_denies_fails_by_name_and_leaves_nothing]()
-    suite.test[test_a_sorted_copy_the_pool_denies_fails_in_combine]()
-    suite.test[test_an_input_over_the_sorts_memory_budget_is_refused]()
+    suite.test[test_a_concatenation_the_pool_denies_fails_in_combine]()
+    suite.test[test_a_sorted_copy_and_key_batch_the_pool_denies_fail_in_combine]()
+    suite.test[test_the_consume_that_crosses_the_sorts_memory_budget_is_refused]()
+    suite.test[test_the_memory_budget_bounds_the_peak_and_not_the_input]()
     suite.test[test_the_pool_is_charged_while_rows_are_held_and_repaid]()
     suite.test[test_a_sink_dropped_with_rows_in_it_repays_the_pool]()
     suite^.run()

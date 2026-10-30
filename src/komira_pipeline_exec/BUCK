@@ -64,6 +64,8 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
 # test_sink_sort                  SINK_SORT by hand: one and two keys, NULLs first and
 #                                 last, ties in input order, four workers' partials,
 #                                 refusals by name, the pool's charge and return.
+# test_sort_keys                  float NaN/inf/zeros, the empty string, an unsorted
+#                                 dictionary, unsortable key types refused by name.
 # test_sort_plan                  hand-built plans into SINK_SORT: a resident batch, a
 #                                 Parquet scan, a segment's output, no row, a pool
 #                                 too small.
@@ -120,6 +122,7 @@ mojo_library(
         "tests/test_sink_agg_partials.mojo",
         "tests/test_sink_collect.mojo",
         "tests/test_sink_sort.mojo",
+        "tests/test_sort_keys.mojo",
         "tests/test_sort_plan.mojo",
         "tests/test_sort_plan_concurrent.mojo",
         "tests/test_sources.mojo",

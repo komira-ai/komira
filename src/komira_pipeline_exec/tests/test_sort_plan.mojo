@@ -327,7 +327,7 @@ def test_a_pool_too_small_fails_the_query_and_leaves_nothing() raises:
     assert_equal(builder.pool_granted(), 0)
     # A budget that holds the rows but not the sorted copy.
     builder.set_memory_budget(3000)
-    with assert_raises(contains="concatenation and the sorted copy"):
+    with assert_raises(contains="was denied"):
         _ = run_plan(
             _one(with_sort_sink(batch_segment(0, handle), id)),
             builder,
