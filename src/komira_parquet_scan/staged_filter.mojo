@@ -50,6 +50,15 @@ from komira_parquet.staged_filter_trace import (
     incr_staged_filter_gather,
     incr_staged_filter_sel,
 )
+from komira_phase_timers.phase_timers import (
+    PH_DECODE_FILTER_COLS,
+    PH_DECODE_PAYLOAD,
+    PH_FILTER,
+    PH_STAGED_COMPACT,
+    PH_STAGED_DECODE_LATER,
+    pt_now,
+    pt_record,
+)
 from komira_plan_expr.expr import BIN_AND, Expr
 from komira_scan_planning.reader_factory import (
     Reader,
@@ -361,9 +370,11 @@ def run_staged_filter[R: Reader](
             if not _contains(lead, cj[k]):
                 lead.append(cj[k])
     var decoded = lead.copy()
+    var t_lead = pt_now()
     var batch: Optional[RecordBatch] = Optional[RecordBatch](
         reader.decode_columns_subset(unit_in_file, lead.copy(), preserve_dict)
     )
+    pt_record[PH_DECODE_FILTER_COLS](t_lead)
     var alive: Optional[BooleanArray] = None
     var rows = total
     var j = 0
@@ -376,7 +387,9 @@ def run_staged_filter[R: Reader](
         if len(need) > 0:
             var n_sel = 0
             var n_gat = 0
+            var t_later = pt_now()
             var part = decode_rows_of(reader, unit_in_file, need, alive, plan, preserve_dict, n_sel, n_gat)
+            pt_record[PH_STAGED_DECODE_LATER](t_later)
             if n_sel > 0:
                 incr_staged_filter_sel(rows, total)
             if n_gat > 0:
@@ -396,8 +409,10 @@ def run_staged_filter[R: Reader](
             if not fits:
                 break
             end += 1
+        var t_eval = pt_now()
         var m = definite_true(evaluate_predicate(_and_of(conjuncts, j, end), batch.value()))
         var s = m.true_count()
+        pt_record[PH_FILTER](t_eval)
         if s == 0:
             return StagedFilterOutcome(None, None, 0, decoded^)
         if j == 0 and s * 2 >= total:
@@ -407,6 +422,7 @@ def run_staged_filter[R: Reader](
             # and mask (`staged_handoff`).
             return StagedFilterOutcome(batch^, Optional[BooleanArray](m^), s, decoded^, True, end)
         if s < rows:
+            var t_compact = pt_now()
             var prev_b = batch.take()
             batch = Optional[RecordBatch](gather_batch(prev_b, filter_to_indices(m)))
             if alive:
@@ -415,6 +431,7 @@ def run_staged_filter[R: Reader](
             else:
                 alive = Optional[BooleanArray](m^)
             rows = s
+            pt_record[PH_STAGED_COMPACT](t_compact)
         j = end
     return StagedFilterOutcome(batch^, alive^, rows, decoded^)
 
@@ -443,13 +460,17 @@ def staged_handoff[R: Reader](
             rest.append(filter_cols[i])
     var rest_b: Optional[RecordBatch] = None
     if len(rest) > 0:
+        var t_rest = pt_now()
         rest_b = Optional[RecordBatch](reader.decode_columns_subset(unit_in_file, rest.copy(), preserve_dict))
+        pt_record[PH_DECODE_FILTER_COLS](t_rest)
     var full = pick_share(filter_cols, res.decoded, Optional[RecordBatch](lead_b^), rest, rest_b)
     if res.next_conjunct >= len(conjuncts):
         out_mask = Optional[BooleanArray](lead_m^)
         out_batch = Optional[RecordBatch](full^)
         return
+    var t_rest_eval = pt_now()
     var rest_m = definite_true(evaluate_predicate(_and_of(conjuncts, res.next_conjunct, len(conjuncts)), full))
+    pt_record[PH_FILTER](t_rest_eval)
     var both = lead_m.data.and_(rest_m.data)
     out_mask = Optional[BooleanArray](BooleanArray.from_bitmap(both^))
     out_batch = Optional[RecordBatch](full^)
@@ -525,9 +546,11 @@ def staged_emit_batch[R: Reader](
             pplan = selection_plan_for(reader, unit_in_file, pay, preserve_dict, payload_mode == PAYLOAD_SEL_ALL)
         var n_sel = 0
         var n_gat = 0
+        var t_pay = pt_now()
         pb_opt = Optional[RecordBatch](
             decode_rows_of(reader, unit_in_file, pay, res.alive, pplan, preserve_dict, n_sel, n_gat)
         )
+        pt_record[PH_DECODE_PAYLOAD](t_pay)
         if n_sel > 0:
             incr_payload_sel_hit(res.rows, reader.unit_num_rows(unit_in_file))
     return pick_share(projection, res.decoded, Optional[RecordBatch](fb^), pay, pb_opt)
