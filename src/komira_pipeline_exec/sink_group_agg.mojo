@@ -29,6 +29,15 @@
 # its reservation returned as soon as it is merged, and every reservation is
 # returned when the sink is dropped, whether or not the query succeeded.
 #
+# Memory the pool does not see, and its bound. The pool is charged for the
+# tables. Not charged: the buffers of the morsel being folded (each key column
+# as 8 bytes and a flag per row, each aggregate argument as 16 bytes and a flag
+# per row, plus the projected batch), freed when `consume` returns; and the old
+# arrays of a table while it doubles, which live beside the new ones until the
+# copy is done (half the charged bytes of that table at most). So a worker
+# holds at most its charge plus 1.5 times the doubling table plus
+# rows x (9 x keys + 17 x aggregate arguments) bytes of one morsel.
+#
 # Refused when the sink is built: no group-by expression, an aggregate the
 # sink does not serve, an aggregate without its argument, an output schema
 # that does not list the keys and aggregates, and a declared key column of a
@@ -72,7 +81,7 @@ from .group_keys import (
     key_output_column,
     read_key_column,
 )
-from .group_table import GroupTable, hash_key
+from .group_table import GroupTable, MAX_GROUP_CAPACITY, hash_key
 from .segment_pool import SegmentPool, WorkerReservation
 
 
@@ -86,9 +95,13 @@ struct _GroupSlot(Movable):
     var started: Bool
 
     def __init__(
-        out self, nk: Int, na: Int, var reservation: WorkerReservation
+        out self,
+        nk: Int,
+        na: Int,
+        max_groups: Int,
+        var reservation: WorkerReservation,
     ):
-        self.table = GroupTable(nk, na)
+        self.table = GroupTable(nk, na, max_groups)
         self.map = None
         self.reservation = reservation^
         self.key_arrows = List[ArrowType]()
@@ -107,6 +120,7 @@ struct GroupAggSink(MorselSinkImpl):
     var _seg_id: Int
     var _floats: Bool
     var _nk: Int
+    var _max_groups: Int
     var _funcs: List[UInt8]
     var _arg_col: List[Int]
     var _labels: List[String]
@@ -131,6 +145,7 @@ struct GroupAggSink(MorselSinkImpl):
         key_dtype: UInt8,
         var pool: SegmentPool,
         seg_id: Int,
+        max_groups: Int = MAX_GROUP_CAPACITY,
     ) raises:
         var where_ = (
             "komira_pipeline_exec: the grouped aggregation sink of segment "
@@ -157,6 +172,7 @@ struct GroupAggSink(MorselSinkImpl):
         self._seg_id = seg_id
         self._floats = key_dtype == KEY_DTYPE_F64 or key_dtype == KEY_DTYPE_F32
         self._nk = nk
+        self._max_groups = max_groups
         self._funcs = List[UInt8]()
         self._arg_col = List[Int]()
         self._labels = List[String]()
@@ -222,11 +238,23 @@ struct GroupAggSink(MorselSinkImpl):
         self._pool = pool^
         self._slots = List[ArcPointer[_GroupSlot]]()
         self._merge_reservation = WorkerReservation(self._pool.share())
-        self._merged = GroupTable(nk, na)
+        self._merged = GroupTable(nk, na, max_groups)
         self._merged_arrows = List[ArrowType]()
         for _ in range(nk):
             self._merged_arrows.append(ArrowType.NULL)
         self._combined = False
+
+    def _refused(self, too_many: Bool, denied_bytes: Int) -> Error:
+        if too_many:
+            return Error(
+                "komira_pipeline_exec: the grouped aggregation sink of"
+                " segment "
+                + String(self._seg_id)
+                + " has more groups than a group table holds ("
+                + String(self._max_groups)
+                + ")"
+            )
+        return self._denied(denied_bytes)
 
     def _denied(self, bytes: Int) -> Error:
         return Error(
@@ -250,6 +278,7 @@ struct GroupAggSink(MorselSinkImpl):
                     _GroupSlot(
                         self._nk,
                         len(self._funcs),
+                        self._max_groups,
                         WorkerReservation(self._pool.share()),
                     )
                 )
@@ -324,7 +353,9 @@ struct GroupAggSink(MorselSinkImpl):
                 h, slot.scratch_cells, slot.scratch_nulls, slot.reservation
             )
             if g < 0:
-                raise self._denied(slot.table.denied_bytes)
+                raise self._refused(
+                    slot.table.too_many, slot.table.denied_bytes
+                )
             for i in range(na):
                 if self._arg_col[i] < 0:
                     slot.table.cells[g * na + i].count += 1
@@ -372,7 +403,9 @@ struct GroupAggSink(MorselSinkImpl):
                     self._merge_reservation,
                 )
                 if mg < 0:
-                    raise self._denied(self._merged.denied_bytes)
+                    raise self._refused(
+                        self._merged.too_many, self._merged.denied_bytes
+                    )
                 for i in range(na):
                     merge_cell(
                         self._merged.cells[mg * na + i],
@@ -381,7 +414,7 @@ struct GroupAggSink(MorselSinkImpl):
                         self._labels[i],
                     )
             # This worker is merged: free its table and return its memory.
-            slot.table = GroupTable(nk, na)
+            slot.table = GroupTable(nk, na, self._max_groups)
             slot.reservation.give_back_all()
         self._combined = True
 
@@ -433,6 +466,6 @@ struct GroupAggSink(MorselSinkImpl):
                 )
             )
         var out = builder.build(self._schema.copy())
-        self._merged = GroupTable(nk, na)
+        self._merged = GroupTable(nk, na, self._max_groups)
         self._merge_reservation.give_back_all()
         return out^

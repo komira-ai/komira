@@ -18,6 +18,8 @@
 # the doubling is charged to the worker's `WorkerReservation` BEFORE any list
 # grows: `find_or_insert` returns -1 and allocates nothing when the segment
 # pool denies the step, and `denied_bytes` says how many bytes were asked for.
+# A table holds at most `MAX_GROUP_CAPACITY` (2^30) groups: past that
+# `find_or_insert` returns -1 with `too_many` set, and the sink refuses by name.
 # The charge per group covers its key cells, flags, hash, cells and two
 # 4-byte slots (the slot directory is kept at most half full).
 
@@ -28,6 +30,9 @@ from .segment_pool import WorkerReservation
 
 comptime _FIRST_CAPACITY: Int = 64
 comptime _EMPTY_SLOT: Int32 = -1
+# Group indices are Int32 in the slot directory: a table never holds more than
+# 2^30 groups of capacity, so an index and the slot count 2 * capacity fit.
+comptime MAX_GROUP_CAPACITY: Int = 1 << 30
 
 
 @always_inline
@@ -63,8 +68,15 @@ struct GroupTable(Movable):
     var _slots: List[Int32]
     var _per_group: Int
     var denied_bytes: Int
+    var max_capacity: Int
+    var too_many: Bool
 
-    def __init__(out self, num_keys: Int, num_aggs: Int):
+    def __init__(
+        out self,
+        num_keys: Int,
+        num_aggs: Int,
+        max_capacity: Int = MAX_GROUP_CAPACITY,
+    ):
         self.nk = num_keys
         self.na = num_aggs
         self.n = 0
@@ -78,6 +90,8 @@ struct GroupTable(Movable):
             num_keys * 9 + 8 + num_aggs * size_of[AggCell]() + 8
         )
         self.denied_bytes = 0
+        self.max_capacity = max_capacity
+        self.too_many = False
 
     def per_group_bytes(self) -> Int:
         """The bytes charged for each group of capacity."""
@@ -98,6 +112,9 @@ struct GroupTable(Movable):
         var new_cap = _FIRST_CAPACITY if self.capacity == 0 else (
             self.capacity * 2
         )
+        if new_cap > self.max_capacity:
+            self.too_many = True
+            return False
         var step = (new_cap - self.capacity) * self._per_group
         if not res.try_grow(step):
             self.denied_bytes = step
@@ -127,7 +144,8 @@ struct GroupTable(Movable):
         mut res: WorkerReservation,
     ) -> Int:
         """The index of the group of the key (`cells`, `nulls`) with hash `h`,
-        made if new. -1 when a new group needed memory the pool denied."""
+        made if new. -1 when a new group needed memory the pool denied, or when the table
+        is at `max_capacity` groups (`too_many`)."""
         if self.capacity > 0:
             var mask = self.capacity * 2 - 1
             var s = Int(h) & mask

@@ -17,6 +17,8 @@
 #
 #   kf  NULL where r % 9 == 0, else by r % 4: -0.0, 0.0, NaN, 1.5
 #   kg  NULL where r % 9 == 0, else by r % 4: -0.0, 0.0, NaN, 2.5
+#
+# `nan_batch()` and `small_int_batch(start, rows)` say what they hold below.
 
 from std.memory import bitcast
 
@@ -152,6 +154,81 @@ def float_batch(start: Int, rows: Int) raises -> RecordBatch:
     rb.add_column(kf^.materialize())
     sb.add_field(Field("kg", ArrowType.FLOAT32, True))
     rb.add_column(kg^.materialize())
+    sb.add_field(Field("v", ArrowType.INT64, True))
+    rb.add_column(v^.materialize())
+    return rb.build(sb.build())
+
+
+def nan_batch() raises -> RecordBatch:
+    """Seven rows (v = the row number). `kf` (FLOAT64) and `kg` (FLOAT32) hold
+    five different NaN bit patterns in rows 0 to 4 (quiet, negative,
+    signalling, with a payload, all ones) and 1.5 in rows 5 and 6."""
+    var kf = ColumnBuilder[DType.float64].with_capacity(7)
+    var kg = ColumnBuilder[DType.float32].with_capacity(7)
+    var v = ColumnBuilder[DType.int64].with_capacity(7)
+    var f64_bits = List[UInt64]()
+    f64_bits.append(0x7FF8000000000000)
+    f64_bits.append(0xFFF8000000000000)
+    f64_bits.append(0x7FF0000000000001)
+    f64_bits.append(0x7FF8000000000123)
+    f64_bits.append(0xFFFFFFFFFFFFFFFF)
+    var f32_bits = List[UInt32]()
+    f32_bits.append(0x7FC00000)
+    f32_bits.append(0xFFC00000)
+    f32_bits.append(0x7F800001)
+    f32_bits.append(0x7FC00123)
+    f32_bits.append(0xFFFFFFFF)
+    for r in range(7):
+        if r < 5:
+            kf.append(bitcast[DType.float64](f64_bits[r]))
+            kg.append(bitcast[DType.float32](f32_bits[r]))
+        else:
+            kf.append(1.5)
+            kg.append(Float32(1.5))
+        v.append(Int64(r))
+    var sb = SchemaBuilder()
+    var rb = RecordBatchBuilder()
+    sb.add_field(Field("kf", ArrowType.FLOAT64, True))
+    rb.add_column(kf^.materialize())
+    sb.add_field(Field("kg", ArrowType.FLOAT32, True))
+    rb.add_column(kg^.materialize())
+    sb.add_field(Field("v", ArrowType.INT64, True))
+    rb.add_column(v^.materialize())
+    return rb.build(sb.build())
+
+
+def k8_null(r: Int) -> Bool:
+    return r % 11 == 0
+
+
+def k8_value(r: Int) -> Int:
+    return (r * 5) % 7 - 3
+
+
+def k16_value(r: Int) -> Int:
+    return (r % 5) * 1000 - 2000
+
+
+def small_int_batch(start: Int, rows: Int) raises -> RecordBatch:
+    """`k8` INT8 (NULL where r % 11 == 0, else (r * 5) % 7 - 3, so negative
+    values occur), `k16` INT16 ((r % 5) * 1000 - 2000) and `v` INT64 (r * 3 - 50, no NULL)."""
+    var k8 = ColumnBuilder[DType.int8].with_capacity(rows)
+    var k16 = ColumnBuilder[DType.int16].with_capacity(rows)
+    var v = ColumnBuilder[DType.int64].with_capacity(rows)
+    for i in range(rows):
+        var r = start + i
+        if k8_null(r):
+            k8.append_null()
+        else:
+            k8.append(Int8(k8_value(r)))
+        k16.append(Int16(k16_value(r)))
+        v.append(Int64(v_value(r)))
+    var sb = SchemaBuilder()
+    var rb = RecordBatchBuilder()
+    sb.add_field(Field("k8", ArrowType.INT8, True))
+    rb.add_column(k8^.materialize())
+    sb.add_field(Field("k16", ArrowType.INT16, True))
+    rb.add_column(k16^.materialize())
     sb.add_field(Field("v", ArrowType.INT64, True))
     rb.add_column(v^.materialize())
     return rb.build(sb.build())

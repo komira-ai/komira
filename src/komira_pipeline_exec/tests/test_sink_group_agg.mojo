@@ -19,8 +19,13 @@
 #   * A DECIMAL(38,0) value of 10^38 - 1 under one key in each of two workers
 #     is refused by the merge, and the same values under two different keys
 #     are not: the overflow rule is per group and the merge is what hits it.
-#   * FLOAT64 and FLOAT32 keys: -0.0 and 0.0 are one group, every NaN is one
-#     group, NULL is another.
+#   * FLOAT64 and FLOAT32 keys: -0.0 and 0.0 are one group (whose key is +0.0,
+#     asserted on the bits), every NaN is one group (five bit patterns each:
+#     quiet, negative, signalling, with a payload, all ones), NULL is another.
+#   * INT8 and INT16 keys, negative values and NULLs included.
+#   * A sum that overflows inside one worker is refused at its row; a table
+#     that would pass its group limit is refused by name, in a worker and in
+#     the merge.
 #   * No rows: no group, and the declared columns.
 #   * What the sink refuses by name: a key column of the wrong family for its
 #     row, a declared key type that is not a key type of the row, a declared
@@ -31,6 +36,7 @@
 #     the sink is dropped without a combine.
 
 from std.collections import Dict
+from std.memory import bitcast
 from std.testing import TestSuite, assert_equal, assert_raises, assert_true
 
 from komira_arrow.arrow_types import ArrowType
@@ -61,10 +67,15 @@ from komira_pipeline_exec.group_harness import (
     float_class,
     float_null,
     group_batch,
+    k16_value,
     k1_null,
     k1_value,
     k2_null,
     k2_value,
+    k8_null,
+    k8_value,
+    nan_batch,
+    small_int_batch,
     v_null,
     v_value,
 )
@@ -472,6 +483,8 @@ def _check_float_groups(ref out: RecordBatch, rows: Int, f32: Bool) raises:
                 c = "nan"
             elif v == 0.0:
                 c = "zero"
+                # The group's key is +0.0 whichever zero came first.
+                assert_equal(bitcast[DType.int64](v), 0, "sign of the zero key")
             else:
                 c = "plain"
         assert_equal(Int(n.get(i)), want_n[c], "COUNT(*) of " + c)
@@ -546,6 +559,108 @@ def test_a_declared_key_type_that_is_not_the_inputs_is_refused() raises:
         _ = _combine_and_take(sink, 1)
 
 
+def test_nans_of_every_bit_pattern_are_one_group_in_float64() raises:
+    var sink = _float_sink(ArrowType.FLOAT64, KEY_DTYPE_F64, "kf")
+    sink.resize_worker_state(2)
+    sink.consume(0, Morsel(nan_batch(), 0, 0))
+    sink.consume(1, Morsel(nan_batch(), 1, 0))
+    _check_nan_groups(_combine_and_take(sink, 2), False)
+
+
+def test_nans_of_every_bit_pattern_are_one_group_in_float32() raises:
+    var sink = _float_sink(ArrowType.FLOAT32, KEY_DTYPE_F32, "kg")
+    sink.resize_worker_state(2)
+    sink.consume(0, Morsel(nan_batch(), 0, 0))
+    sink.consume(1, Morsel(nan_batch(), 1, 0))
+    _check_nan_groups(_combine_and_take(sink, 2), True)
+
+
+def _check_nan_groups(ref out: RecordBatch, f32: Bool) raises:
+    # Five NaN rows and two rows of 1.5, in each of two workers: v sums to
+    # 0+1+2+3+4 = 10 and 5+6 = 11 per worker.
+    assert_equal(out.num_rows(), 2, "all NaNs are one group, 1.5 another")
+    var n = out.column_at(1).as_primitive[DType.int64]()
+    var sv = out.column_at(2).as_primitive[DType.int64]()
+    var nans = 0
+    for i in range(2):
+        var v = Float64(0)
+        if f32:
+            v = out.column_at(0).as_primitive[DType.float32]().get(i).cast[
+                DType.float64
+            ]()
+        else:
+            v = out.column_at(0).as_primitive[DType.float64]().get(i)
+        if v != v:
+            nans += 1
+            assert_equal(Int(n.get(i)), 10)
+            assert_equal(Int(sv.get(i)), 20)
+        else:
+            assert_equal(v, 1.5)
+            assert_equal(Int(n.get(i)), 4)
+            assert_equal(Int(sv.get(i)), 22)
+    assert_equal(nans, 1)
+
+
+def test_int8_and_int16_keys_group_by_value_with_negatives_and_nulls() raises:
+    var keys = Slab[Expr]()
+    keys.append(Expr.col_ref("k8"))
+    keys.append(Expr.col_ref("k16"))
+    var aggs = Slab[AggExpr]()
+    aggs.append(AggExpr(AGG_COUNT, None, None))
+    aggs.append(_agg(AGG_SUM, "v"))
+    var sb = SchemaBuilder()
+    sb.add_field(Field("k8", ArrowType.INT8, True))
+    sb.add_field(Field("k16", ArrowType.INT16, True))
+    sb.add_field(Field("n", ArrowType.INT64, False))
+    sb.add_field(Field("sv", ArrowType.INT64, True))
+    var sink = GroupAggSink(
+        grouped_agg_data(keys^, aggs^, sb.build()),
+        KEY_DTYPE_I32,
+        SegmentPool(),
+        0,
+    )
+    sink.resize_worker_state(3)
+    for m in range(8):
+        sink.consume(m % 3, Morsel(small_int_batch(m * 50, 50), m, 0))
+    var out = _combine_and_take(sink, 3)
+    var want_n = Dict[String, Int]()
+    var want_sum = Dict[String, Int]()
+    var negative = False
+    for r in range(400):
+        var key = (
+            String("N") if k8_null(r) else String(k8_value(r))
+        ) + "|" + String(k16_value(r))
+        negative = negative or (not k8_null(r) and k8_value(r) < 0)
+        want_n[key] = want_n.get(key, 0) + 1
+        want_sum[key] = want_sum.get(key, 0) + v_value(r)
+    assert_true(negative, "the fixture has no negative INT8 key")
+    assert_equal(out.num_rows(), len(want_n))
+    assert_equal(out.schema.field_arrow_type(0), ArrowType.INT8)
+    assert_equal(out.schema.field_arrow_type(1), ArrowType.INT16)
+    var k8 = out.column_at(0).as_primitive[DType.int8]()
+    var k16 = out.column_at(1).as_primitive[DType.int16]()
+    var n = out.column_at(2).as_primitive[DType.int64]()
+    var sv = out.column_at(3).as_primitive[DType.int64]()
+    for i in range(out.num_rows()):
+        var key = (
+            String("N") if out.column_at(0).is_null_at(i) else String(
+                Int(k8.get(i))
+            )
+        ) + "|" + String(Int(k16.get(i)))
+        assert_equal(Int(n.get(i)), want_n[key], "COUNT(*) of " + key)
+        assert_equal(Int(sv.get(i)), want_sum.get(key, 0), "SUM of " + key)
+
+
+def test_a_sum_that_overflows_inside_one_worker_is_refused_at_the_row() raises:
+    var sink = _nines_sink()
+    sink.resize_worker_state(2)
+    var keys = List[Int]()
+    keys.append(7)
+    keys.append(7)
+    with assert_raises(contains="left the 128-bit range"):
+        sink.consume(0, Morsel(_nines_batch(keys), 0, 0))
+
+
 # --- memory -----------------------------------------------------------------
 
 
@@ -604,28 +719,70 @@ def test_growth_past_the_budget_is_refused_by_name_in_a_worker() raises:
     assert_equal(pool.granted(), 0)
 
 
-def _merge_denied(ref pool: SegmentPool, groups: Int) raises:
+def _two_workers(ref pool: SegmentPool, groups: Int) raises -> GroupAggSink:
+    """A sink whose two workers hold the same `groups` keys, so the merged
+    table has `groups` groups and each worker's table is as big as it."""
     var sink = _id_sink(pool.share())
     sink.resize_worker_state(2)
-    # Both workers hold the same `groups` keys, so the merged table has
-    # `groups` groups and every worker's table is as big as the merged one.
     sink.consume(0, Morsel(group_batch(0, groups), 0, 0))
     sink.consume(1, Morsel(group_batch(0, groups), 1, 0))
-    _ = _combine_and_take(sink, 2)
+    return sink^
 
 
 def test_growth_past_the_budget_is_refused_by_name_in_the_merge() raises:
-    var groups = 3000
-    var cap_bytes = 4096 * _per_group()
-    # Room for both workers' tables and half of a third (the merged one).
-    var pool = SegmentPool(2 * cap_bytes + cap_bytes // 2 + 200_000)
+    # Measure what the two workers hold, whatever the table layout is.
+    var probe = SegmentPool(1 << 30)
+    var measured = _two_workers(probe, 3000)
+    var held = probe.granted()
+    _ = measured^
+    assert_equal(probe.granted(), 0)
+    # Room for both workers and a quarter of that again: the merged table,
+    # about half of it, does not fit.
+    var tight = SegmentPool(held + held // 4)
+    var sink = _two_workers(tight, 3000)
     with assert_raises(contains="group table"):
-        _merge_denied(pool, groups)
-    assert_equal(pool.granted(), 0)
-    # With the memory for all three, the same two tables merge.
-    var roomy = SegmentPool(4 * cap_bytes + 400_000)
-    _merge_denied(roomy, groups)
+        _ = _combine_and_take(sink, 2)
+    _ = sink^
+    assert_equal(tight.granted(), 0)
+    # With room for the workers and the merged table, the same tables merge.
+    var roomy = SegmentPool(2 * held)
+    var ok = _two_workers(roomy, 3000)
+    assert_equal(_combine_and_take(ok, 2).num_rows(), 3000)
     assert_equal(roomy.granted(), 0)
+
+
+def _capped_sink(max_groups: Int) raises -> GroupAggSink:
+    var keys = Slab[Expr]()
+    keys.append(Expr.col_ref("id"))
+    var aggs = Slab[AggExpr]()
+    aggs.append(AggExpr(AGG_COUNT, None, None))
+    var sb = SchemaBuilder()
+    sb.add_field(Field("id", ArrowType.INT64, False))
+    sb.add_field(Field("n", ArrowType.INT64, False))
+    return GroupAggSink(
+        grouped_agg_data(keys^, aggs^, sb.build()),
+        KEY_DTYPE_I64,
+        SegmentPool(),
+        0,
+        max_groups,
+    )
+
+
+def test_more_groups_than_a_table_holds_are_refused_by_name() raises:
+    # A table's group index is 32 bits wide; the limit is a parameter so the
+    # refusal can be reached with a few groups. 128 groups fit, 129 do not.
+    var worker = _capped_sink(128)
+    worker.resize_worker_state(1)
+    worker.consume(0, Morsel(group_batch(0, 128), 0, 0))
+    with assert_raises(contains="more groups than a group table holds (128)"):
+        worker.consume(0, Morsel(group_batch(128, 1), 1, 0))
+    # Two workers of 100 distinct groups each fit alone; the merged 200 do not.
+    var merge = _capped_sink(128)
+    merge.resize_worker_state(2)
+    merge.consume(0, Morsel(group_batch(0, 100), 0, 0))
+    merge.consume(1, Morsel(group_batch(100, 100), 1, 0))
+    with assert_raises(contains="more groups than a group table holds (128)"):
+        _ = _combine_and_take(merge, 2)
 
 
 def test_a_sink_dropped_without_a_combine_returns_its_memory() raises:
@@ -653,6 +810,11 @@ def main() raises:
     suite.test[test_a_key_column_of_the_wrong_family_is_refused_by_name]()
     suite.test[test_what_the_sink_refuses_when_it_is_built]()
     suite.test[test_a_declared_key_type_that_is_not_the_inputs_is_refused]()
+    suite.test[test_nans_of_every_bit_pattern_are_one_group_in_float64]()
+    suite.test[test_nans_of_every_bit_pattern_are_one_group_in_float32]()
+    suite.test[test_int8_and_int16_keys_group_by_value_with_negatives_and_nulls]()
+    suite.test[test_a_sum_that_overflows_inside_one_worker_is_refused_at_the_row]()
+    suite.test[test_more_groups_than_a_table_holds_are_refused_by_name]()
     suite.test[test_the_pool_is_charged_as_the_tables_grow_and_whole_after_take_output]()
     suite.test[test_growth_past_the_budget_is_refused_by_name_in_a_worker]()
     suite.test[test_growth_past_the_budget_is_refused_by_name_in_the_merge]()

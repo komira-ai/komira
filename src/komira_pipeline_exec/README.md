@@ -101,7 +101,12 @@ Import each module by name; the package root exports nothing.
   the query by name; a worker's table is freed and its memory returned as soon
   as it is merged. The table is not `komira_op_agg_hash`'s: those entries hold
   Int64 keys without a NULL flag and 64-bit or float accumulators, with no exact
-  128-bit decimal fold. The merge is serial, and there is no dense table for a
+  128-bit decimal fold. Memory outside the pool, as a known limit: the buffers
+  of the morsel being folded (about 9 bytes per row per key and 17 per row per
+  aggregate argument, freed when `consume` returns) and the old arrays of a
+  table while it doubles (at most half the bytes charged for that table). A
+  table holds at most 2^30 groups (a 32-bit group index) and refuses more by
+  name. The merge is serial, and there is no dense table for a
   small key domain and no partitioned parallel finalize yet. `AnyAggSink` is the
   one slot of the sink variant that holds the grouped or the ungrouped sink.
 - `segment_pool`: `SegmentPool`, an atomic byte count with an optional budget
