@@ -26,7 +26,28 @@ close() raises
 
 `run` ends one of four ways, which are the stages of the result: rows (`ARM_ROWS`; `ArmAnswer.with_rows` for the check run, `ArmAnswer.counted` for a timed run that consumes the result as the engine's own sink would), a refusal (`ARM_REFUSED`, with the construct as a token: `UNSUPPORTED:<construct>` in the result), a bind failure or an execution failure. A raise is a fault of the arm and ends the run.
 
-The query is passed whole (`QuerySpec`: suite, id, dataset, text, `ORDER BY` keys, and `sha256()` of the text), so an arm can serve a query from the text (`run_sql`) or from a plan it holds for `query.key()`. `RefusalArm` refuses every query with one construct (`no_engine_arm` by default); it is the arm of `komira_bench_runner_main` until an engine exists. The line that builds the arm in `entrypoint.mojo` is the seam.
+The query is passed whole (`QuerySpec`: suite, id, dataset, text, `ORDER BY` keys, and `sha256()` of the text), so an arm can serve a query from the text (`run_sql`) or from a plan it holds for `query.key()`. `RefusalArm` refuses every query with one construct (`no_engine_arm` by default); it is for the tests of the runner. The line that builds the arm in `entrypoint.mojo` is the seam, and it builds `KomiraArm`.
+
+`KomiraArm` (`komira_arm.mojo`) is the komira engine through `komira_sdk_exec`:
+
+- `prepare` builds an `EngineContext` with `EngineOptions(worker_count = threads, memory_budget_bytes = memory_limit_bytes)` and registers every table as a Parquet table. A table the engine cannot register is a raise that names it (the run ends). Preparing again first closes the context it holds.
+- `run` hands `query.text` to `run_sql`. Batches are the answer: the typed rows when `materialize`, the row count alone otherwise (the result is still executed in full). A refusal is `UNSUPPORTED:<step>.<CODE>` in the result, for example `UNSUPPORTED:lower.LOWERING_UNCUTTABLE_NODE` (a join today): the step that refused and the code that starts the engine's message; a message with no code gives the step alone (`parse`). The token never holds the engine's text because the result refuses a token with a path in it; the whole message is in the arm's `last_refusal`. A result column type the conversion does not map is a refusal `UNSUPPORTED:result_type_unsupported`, never a wrong value.
+- `close` drops the context. A cold rep closes and prepares again.
+
+The rows are the cells `komira_bench_duckdb` makes from DuckDB's JSON output, so the two signatures are built from the same kinds of cell (`convert.mojo`):
+
+| engine column | DuckDB JSON | cell |
+|---|---|---|
+| DECIMAL(p, s>0) | `123.4567` | real: the double `atof` reads from the exact decimal text (never a float division) |
+| DECIMAL(p, 0) | `123` | integer when it fits 64 bits, else real |
+| DOUBLE / FLOAT | `1.5` | real (a FLOAT from its shortest text) |
+| TINYINT to BIGINT, UTINYINT to UINTEGER | `7` | integer |
+| UBIGINT | `7` | integer inside 63 bits, else real |
+| VARCHAR | `"abc"` | text |
+| DATE | `"1994-01-01"` | text `YYYY-MM-DD` (years 0000 to 9999) |
+| NULL | `null` | null |
+
+Not mapped yet, and so refused: dictionary-encoded strings, booleans, timestamps, times, intervals and nested types.
 
 ## What a run leaves
 
@@ -75,4 +96,4 @@ Exit status: 0 only when every query ran and its values matched, 1 otherwise (a 
 
 ## Tests
 
-`tests/test_inputs.mojo` (digests, tables and scale, flags, the refusal arm, settings) and `tests/test_runner.mojo` (the run over a DuckDB transport, an arm and a cache dropper that live in the test, with a manual clock). No test asserts a duration the machine produced: every time is a number the fakes add to the clock. Each test file's header says what each test proves.
+`tests/test_inputs.mojo` (digests, tables and scale, flags, the refusal arm, settings), `tests/test_runner.mojo` (the run over a DuckDB transport, an arm and a cache dropper that live in the test, with a manual clock) and `tests/test_komira_arm.mojo` (the real engine arm over a lineitem-shaped Parquet file and a DuckDB stand-in whose Q6 answer is computed in the test, and the conversion of result batches). No test asserts a duration the machine produced: every time is a number the fakes add to the clock. Each test file's header says what each test proves.
