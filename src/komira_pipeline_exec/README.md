@@ -129,7 +129,7 @@ Import each module by name; the package root exports nothing.
   gathered by the sorted row numbers. Key types the kernel does not order
   (DECIMAL, DATE, FLOAT32 ...) are refused by name when the sink is built.
   Memory: the sink draws, as each exists, the morsels it keeps, the
-  concatenation, then the sorted copy plus a bound on the key batch and the
+  concatenation, then the sorted copy plus an estimate of the key batch and the
   kernel's temporaries (`sort_scratch_bytes`), from the segment pool and from a
   pool sized by `SortSinkData.memory_budget` (when positive). The budget bounds
   the peak, and the consume that takes the input past it fails. There is no

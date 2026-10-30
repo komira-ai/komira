@@ -38,7 +38,7 @@
 #
 # `check_sort_keys` names the keys that cannot be sorted (a key that is not a
 # column, a type outside `sort_key_supported`) from a schema alone, so a sink
-# refuses them when it is built. `sort_scratch_bytes` is the bound the sink
+# refuses them when it is built. `sort_scratch_bytes` is the estimate the sink
 # draws from the memory pool for the key batch and the kernel's temporaries.
 
 from std.collections import Optional

@@ -17,7 +17,7 @@
 #
 # Memory. The sink holds, at its peak, the morsels it collected, the one batch
 # they are concatenated into, the sorted copy and the key batch with the
-# kernel's temporaries (`sort_nulls.sort_scratch_bytes`, a bound). Every byte of
+# kernel's temporaries (`sort_nulls.sort_scratch_bytes`, a conservative estimate). Every byte of
 # that is drawn, as it is about to exist, from the segment pool and from a pool
 # of the sort's own sized by `SortSinkData.memory_budget` (when positive):
 #
@@ -25,8 +25,8 @@
 #     the consume that takes the collected input past either budget fails;
 #   * at `combine` the sink draws the concatenation (the bytes kept again),
 #     then, once the batch is concatenated and the workers' morsels are gone,
-#     the sorted copy and the scratch. The memory budget is therefore a bound on
-#     the peak, not on the input;
+#     the sorted copy and the scratch. The memory budget therefore bounds the
+#     estimated peak, not the input;
 #   * when the sort is done the sink holds the sorted copy only, and returns it
 #     when the output is taken, and when it is dropped without a combine (a
 #     failed query).
