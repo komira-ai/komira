@@ -96,10 +96,31 @@ that `ParallelDispatch` passes selects the slot, not the worker id, which only
 names the thread that runs the task; a dispatcher may run more tasks than it has
 workers.
 
-The combine order is a property of the sink: it merges its per-worker slots,
-indexed by worker id, in worker id order after every worker has joined. A
+The combine order is a property of the sink. `CollectSink` merges its per-worker
+slots at `combine` into one order by (partition id, origin hint), and morsels
+that tie keep the order of the worker slots (worker id, then arrival within the
+slot); a sink without such a key (the fakes) concatenates the slots in worker id
+order. Either way the order is decided after every worker has joined. A
 memory budget is a property of the sink too: a sink that cannot grow raises, and
 the raise fails the query through the first-error slot.
+
+## Known limits
+
+- **A limit does not stop the other workers' scans.** `LimitOp` reports FINISHED
+  to the worker that sees the budget run out, and `SegmentTask` stops only that
+  worker's claims. A worker whose morsels are all FILTERED_EMPTY by an operator
+  upstream of the limit never reaches it, so it keeps draining the source after
+  the budget is spent. The result stays exact (no morsel past the budget
+  reaches the sink); the scan work is wasted. A pipeline-level stop (a shared
+  "finished" flag in `PipelineExecution` that every worker reads at the morsel
+  boundary, set by the first FINISHED) is the follow-up.
+- **The filter gathers a masked morsel first.** A morsel that reaches `op_filter`
+  with a selection mask is materialized (fully copied) before the predicate is
+  evaluated. Whether a mask-aware evaluation is worth it is for slice 3 to
+  measure.
+- **The collect sink holds every chunk until `take_output`.** Chunks stay in the
+  worker slots, then in the merged list, and `take_output` concatenates them
+  into the output batch, so a segment's peak memory is about twice its output.
 
 ## Example
 

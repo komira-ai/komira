@@ -24,6 +24,7 @@
 # the fan-out adds it where the dispatch is in hand.
 
 from std.builtin.swap import swap
+from std.memory import ArcPointer
 
 from komira_arrow.concat import concat_record_batches_nway
 from komira_arrow.schema import RecordBatch, Schema
@@ -116,20 +117,23 @@ struct CollectSink(MorselSinkImpl):
     """Collects the rows of every morsel into one batch."""
 
     var _empty_schema: Optional[Schema]
-    var _slots: Slab[_WorkerSlot]
+    # One slot per worker, each behind its own ArcPointer in a List: the chunks
+    # hold heap, and a heap-holding value is never kept in a byte-backed Slab
+    # mutated through get_mut_interior. A worker touches only its own slot.
+    var _slots: List[ArcPointer[_WorkerSlot]]
     var _merged: Slab[RecordBatch]
     var _combined: Bool
 
     def __init__(out self, var output_schema: Optional[Schema]):
         self._empty_schema = output_schema^
-        self._slots = Slab[_WorkerSlot]()
+        self._slots = List[ArcPointer[_WorkerSlot]]()
         self._merged = Slab[RecordBatch]()
         self._combined = False
 
     def resize_worker_state(mut self, num_workers: Int) -> None:
-        self._slots = Slab[_WorkerSlot](capacity=num_workers)
+        self._slots = List[ArcPointer[_WorkerSlot]](capacity=num_workers)
         for _ in range(num_workers):
-            self._slots.append(_WorkerSlot())
+            self._slots.append(ArcPointer[_WorkerSlot](_WorkerSlot()))
 
     def consume(self, worker_id: Int, var morsel: Morsel) raises:
         if worker_id < 0 or worker_id >= len(self._slots):
@@ -144,7 +148,7 @@ struct CollectSink(MorselSinkImpl):
         var batch = materialize_selection_if_present(morsel^.take_batch())
         if batch.num_rows() == 0:
             return
-        ref slot = self._slots.get_mut_interior(worker_id)
+        ref slot = self._slots[worker_id][]
         slot.chunks.append(_Chunk(batch^, partition_id, origin_hint))
 
     def combine(mut self, mut pipeline: PipelineExecution) raises -> None:
@@ -153,7 +157,7 @@ struct CollectSink(MorselSinkImpl):
         var at_worker = List[Int]()
         var at_index = List[Int]()
         for w in range(len(self._slots)):
-            ref slot = self._slots.get_mut_interior(w)
+            ref slot = self._slots[w][]
             for i in range(len(slot.chunks)):
                 parts.append(slot.chunks[i].partition_id)
                 hints.append(slot.chunks[i].origin_hint)
@@ -161,7 +165,7 @@ struct CollectSink(MorselSinkImpl):
                 at_index.append(i)
         var order = _stable_order(parts, hints)
         for k in range(len(order)):
-            ref slot = self._slots.get_mut_interior(at_worker[order[k]])
+            ref slot = self._slots[at_worker[order[k]]][]
             var chunk = _Chunk(RecordBatch(), 0, 0)
             swap(chunk, slot.chunks[at_index[order[k]]])
             self._merged.append(chunk^.take_batch())
