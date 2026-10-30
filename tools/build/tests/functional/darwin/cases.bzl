@@ -1,7 +1,7 @@
 """Load-time cases of `darwin_properties_refusal` (run by tools/build/tests/functional/darwin/BUCK)."""
 
 load("@komira//tools/build/platforms:defs.bzl", "DARWIN_LOCAL_HOST", "darwin_local_hosts_refusal", "darwin_properties_refusal", "darwin_toolchain_hosts", "tool_exec_row")
-load("@komira//tools/build/platforms:with_buildrules.bzl", "first_platform_refusal")
+load("@komira//tools/build/platforms:with_buildrules.bzl", "extra_platform_kinds", "first_platform_refusal")
 
 # Load-time cases of `darwin_properties_refusal`: a macOS property set is
 # registered only with a non-empty property dict and at least one well-formed
@@ -73,11 +73,27 @@ _BUILDRULES_CASES = [
     ([], False, True),
 ]
 
+# (registered platform labels) -> (buildrules' linux platform added?, buildrules' macOS platform added?).
+# A local build on a Mac registers darwin-arm64 alone and gets only the macOS platform; the linux
+# platform would otherwise run on the Mac under a linux label.
+_EXTRA_CASES = [
+    ([_L], (True, False)),
+    ([_L, _D], (True, True)),
+    ([_D], (False, True)),
+    ([], (False, False)),
+    ([_D, _L], (False, True)),
+]
+
 def darwin_properties_cases():
     for mode, host_name, want in _TOOL_EXEC_CASES:
         got = tool_exec_row(mode, host_name)
         if got != want:
             fail("tool_exec_row({}, {}) = {}, expected {}".format(repr(mode), repr(host_name), repr(got), repr(want)))
+
+    for labels, want in _EXTRA_CASES:
+        got = extra_platform_kinds(labels)
+        if got != want:
+            fail("extra_platform_kinds({}) = {}, expected {}".format(repr(labels), repr(got), repr(want)))
 
     for labels, remote, refused in _BUILDRULES_CASES:
         got = first_platform_refusal(labels, remote)

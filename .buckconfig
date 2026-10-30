@@ -34,10 +34,11 @@
 
 [external_cell_buildrules]
   git_origin = https://github.com/komira-ai/buildrules.git
-  # The commit of the buildrules release v0.0.66 (resolved through the annotated tag). A bump is one change: this line, then
+  # The commit of buildrules main that runs the build tools on a Mac that runs Buck2 and lets a local macOS compile name
+  # the host `local`; it follows the release v0.0.66. A bump is one change: this line, then
   # `buildrules mojo sync` (the pins in the directory `[cells] toolchains` names, and each package's
   # buildrules.mojo.lock.bzl) when the release pins another mopm.
-  commit_hash = 070351781cee204103fd93ede143fd4ca268929a
+  commit_hash = 30c02de72fb6c64ab0cff7e12a5d442cef304290
 
 # buildrules reads every `[buildrules_re]` key from the root cell's configuration, whichever cell evaluates its
 # rules. Komira is the root cell when it is built standalone, so this section is the one read; a repository that
