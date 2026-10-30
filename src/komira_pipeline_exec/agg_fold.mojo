@@ -152,6 +152,73 @@ def _kind_of(ref col: Column[HeapRegion], logical: ArrowType) -> UInt8:
     return IN_NONE
 
 
+struct ColBind(Copyable, Movable):
+    """What a column is to a fold: its input kind, the type a cell keeps and,
+    for a DECIMAL128, its precision and scale."""
+
+    var kind: UInt8
+    var arrow: ArrowType
+    var precision: Int
+    var scale: Int
+
+    def __init__(out self):
+        self.kind = IN_NONE
+        self.arrow = ArrowType.NULL
+        self.precision = 0
+        self.scale = 0
+
+
+def bind_column(
+    func: UInt8, ref batch: RecordBatch, col_idx: Int, ref label: String
+) raises -> ColBind:
+    """The `ColBind` of column `col_idx`, refusing by name a column type the
+    aggregate `func` does not serve. COUNT takes any type and binds to
+    `IN_NONE`."""
+    var out = ColBind()
+    if func == AGG_COUNT:
+        return out^
+    ref col = batch.column_at(col_idx)
+    var logical = batch.schema.field_arrow_type(col_idx)
+    var kind = _kind_of(col, logical)
+    var sums = func == AGG_SUM or func == AGG_MEAN
+    if kind == IN_NONE or (kind == IN_DATE and sums):
+        raise Error(
+            "komira_pipeline_exec: "
+            + label
+            + " is not served over this column type ("
+            + String(col.arrow_type)
+            + "): SUM and AVG take signed integers and DECIMAL128, MIN and"
+            " MAX also DATE32"
+        )
+    out.kind = kind
+    if kind == IN_DECIMAL:
+        out.precision = col.decimal_precision()
+        out.scale = col.decimal_scale()
+        if out.precision <= 0:
+            out.precision = batch.schema.field_decimal_precision(col_idx)
+            out.scale = batch.schema.field_decimal_scale(col_idx)
+    out.arrow = ArrowType.DATE32 if kind == IN_DATE else col.arrow_type
+    return out^
+
+
+def adopt_bind(
+    mut cell: AggCell, ref b: ColBind, ref label: String
+) raises:
+    """Give an empty cell the type of `b`, or refuse a cell that saw another."""
+    if cell.kind == IN_NONE:
+        cell.kind = b.kind
+        cell.arrow = b.arrow
+        cell.precision = b.precision
+        cell.scale = b.scale
+    elif cell.kind != b.kind or cell.arrow != b.arrow or cell.scale != b.scale:
+        raise Error(
+            "komira_pipeline_exec: "
+            + label
+            + " saw a column of another type or scale than the morsels before"
+            " it"
+        )
+
+
 def fold_column(
     mut cell: AggCell,
     func: UInt8,
@@ -176,52 +243,115 @@ def fold_column(
     if func == AGG_COUNT:
         cell.count += rows - col.null_count()
         return
-    var logical = batch.schema.field_arrow_type(col_idx)
-    var kind = _kind_of(col, logical)
-    var sums = func == AGG_SUM or func == AGG_MEAN
-    if kind == IN_NONE or (kind == IN_DATE and sums):
-        raise Error(
-            "komira_pipeline_exec: "
-            + label
-            + " is not served over this column type ("
-            + String(col.arrow_type)
-            + "): SUM and AVG take signed integers and DECIMAL128, MIN and"
-            " MAX also DATE32"
-        )
-    var precision = 0
-    var scale = 0
-    if kind == IN_DECIMAL:
-        precision = col.decimal_precision()
-        scale = col.decimal_scale()
-        if precision <= 0:
-            precision = batch.schema.field_decimal_precision(col_idx)
-            scale = batch.schema.field_decimal_scale(col_idx)
-    var arrow = ArrowType.DATE32 if kind == IN_DATE else col.arrow_type
-    if cell.kind == IN_NONE:
-        cell.kind = kind
-        cell.arrow = arrow
-        cell.precision = precision
-        cell.scale = scale
-    elif cell.kind != kind or cell.arrow != arrow or cell.scale != scale:
-        raise Error(
-            "komira_pipeline_exec: "
-            + label
-            + " saw a column of another type or scale than the morsels before"
-            " it"
-        )
+    var b = bind_column(func, batch, col_idx, label)
+    adopt_bind(cell, b, label)
     if rows == 0:
         return
-    if kind == IN_DECIMAL:
+    if b.kind == IN_DECIMAL:
         _fold_decimal(cell, func, col, rows, label)
-    elif arrow == ArrowType.INT64:
+    elif b.arrow == ArrowType.INT64:
         _fold_signed[DType.int64](cell, func, col, rows, label)
-    elif arrow == ArrowType.INT8:
+    elif b.arrow == ArrowType.INT8:
         _fold_signed[DType.int8](cell, func, col, rows, label)
-    elif arrow == ArrowType.INT16:
+    elif b.arrow == ArrowType.INT16:
         _fold_signed[DType.int16](cell, func, col, rows, label)
     else:
         # INT32, and DATE32 whose storage is the same 32-bit day number.
         _fold_signed[DType.int32](cell, func, col, rows, label)
+
+
+struct WideColumn(Movable):
+    """One aggregate argument of a morsel read once into 128-bit values, so
+    the rows can be folded into different cells by a grouped sink. `valid` is
+    empty when the column has no NULL. A COUNT argument holds no values."""
+
+    var bind: ColBind
+    var vals: List[I128]
+    var valid: List[Bool]
+
+    def __init__(out self):
+        self.bind = ColBind()
+        self.vals = List[I128]()
+        self.valid = List[Bool]()
+
+
+def _widen_signed[
+    dtype: DType
+](mut out: WideColumn, ref col: Column[HeapRegion], rows: Int) raises:
+    var arr = col.as_primitive[dtype]()
+    var has_nulls = col.null_count() > 0
+    out.vals.reserve(rows)
+    for r in range(rows):
+        if has_nulls:
+            out.valid.append(not arr.is_null(r))
+        out.vals.append(arr.get(r).cast[DType.int128]())
+
+
+def widen_column(
+    func: UInt8,
+    ref batch: RecordBatch,
+    col_idx: Int,
+    rows: Int,
+    ref label: String,
+) raises -> WideColumn:
+    """Read column `col_idx` (`rows` rows) for `fold_wide`, with the refusals
+    of `fold_column`."""
+    var out = WideColumn()
+    ref col = batch.column_at(col_idx)
+    if col.length() != rows:
+        raise Error(
+            "komira_pipeline_exec: "
+            + label
+            + " got a column of "
+            + String(col.length())
+            + " rows for "
+            + String(rows)
+            + " selected rows"
+        )
+    out.bind = bind_column(func, batch, col_idx, label)
+    var has_nulls = col.null_count() > 0
+    if func == AGG_COUNT:
+        if has_nulls:
+            for r in range(rows):
+                out.valid.append(not col.is_null_at(r))
+        return out^
+    if out.bind.kind == IN_DECIMAL:
+        var arr = col.as_decimal128()
+        out.vals.reserve(rows)
+        for r in range(rows):
+            if has_nulls:
+                out.valid.append(not arr.is_null(r))
+            out.vals.append(arr.get_i128(r))
+    elif out.bind.arrow == ArrowType.INT64:
+        _widen_signed[DType.int64](out, col, rows)
+    elif out.bind.arrow == ArrowType.INT8:
+        _widen_signed[DType.int8](out, col, rows)
+    elif out.bind.arrow == ArrowType.INT16:
+        _widen_signed[DType.int16](out, col, rows)
+    else:
+        _widen_signed[DType.int32](out, col, rows)
+    return out^
+
+
+def fold_wide(
+    mut cell: AggCell,
+    func: UInt8,
+    ref w: WideColumn,
+    row: Int,
+    ref label: String,
+) raises:
+    """Fold row `row` of `w` into `cell`: the same fold, row by row, that
+    `fold_column` makes over a whole column."""
+    if len(w.valid) > 0 and not w.valid[row]:
+        # A NULL row still gives an empty cell its type, as a column does.
+        if func != AGG_COUNT:
+            adopt_bind(cell, w.bind, label)
+        return
+    if func == AGG_COUNT:
+        cell.count += 1
+        return
+    adopt_bind(cell, w.bind, label)
+    _step(cell, func, w.vals[row], label)
 
 
 def merge_cell(
