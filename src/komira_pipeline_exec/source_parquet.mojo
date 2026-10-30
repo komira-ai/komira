@@ -71,10 +71,14 @@ def build_parquet_source[
     num_workers: Int,
     ref [cache_o] cache: ParquetMetadataCache,
     ref [pool_o] pool: ExprPool,
+    preserve_dict: Bool = False,
 ) raises -> LocalParquetSource[cache_o, pool_o, filter_o]:
     """The Parquet source `spec` describes, for `num_workers` workers.
 
     `morsel_rows` is the segment's morsel size (0: a row group per morsel).
+    `preserve_dict` keeps the string columns the file stores dictionary
+    encoded as DICTIONARY columns (the DICT_ENCODED string sink reads them by
+    code); the default decodes them to STRING.
 
     Raises:
         If the spec is not total, names no path, names a column the file lacks,
@@ -118,5 +122,6 @@ def build_parquet_source[
         Optional(Pointer(to=pool)),
         Optional[Pointer[DynamicJoinFilter, filter_o]](None),
         num_workers,
+        preserve_dict=preserve_dict,
         caps=caps^,
     )

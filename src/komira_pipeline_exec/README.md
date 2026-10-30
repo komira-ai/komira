@@ -109,6 +109,40 @@ Import each module by name; the package root exports nothing.
   name. The merge is serial, and there is no dense table for a
   small key domain and no partitioned parallel finalize yet. `AnyAggSink` is the
   one slot of the sink variant that holds the grouped or the ungrouped sink.
+- `sink_string_group_agg`, `string_keys`: the grouped aggregation sinks keyed by
+  strings, `(SINK_AGG, KEY_DTYPE_STRING, SINK_ORIENT_DICT_ENCODED | SINK_ORIENT_COLUMNAR)`,
+  over one or more STRING key columns (a fixed-width key beside a string key is
+  refused by name; `komira_lowering` never asks for one). They use slice 5's
+  `group_table`, folds (`agg_fold`), merge rule, refusals and charging. A worker
+  keeps an `InternTable` (`string_keys`): each distinct key string once, in a byte
+  arena, with its 64-bit content hash computed once when the entry is made; the
+  group table is keyed by the string's id there, and a group's hash mixes the
+  content hashes of its strings, so it is the same in every worker. The two rows
+  differ only in how a DICTIONARY column reaches the table: DICT_ENCODED interns
+  a dictionary code on first use in a morsel (one hash, probe and byte compare per
+  code however many rows carry it), COLUMNAR hashes and interns every row; a flat
+  STRING column is interned per row by both, so a Parquet chunk that fell back
+  to plain encoding gives the answer a dictionary chunk does. `RealBuilder` makes
+  the Parquet source keep dictionaries (`preserve_dict`) only for the
+  DICT_ENCODED row. NULL is a group of its own and the empty string is another.
+  A group exists when a selected row reached it; the intern table only names
+  strings, and a dictionary entry no selected row used is never interned.
+  `combine` merges by value, in worker order: each string of a worker's groups
+  (its carried hash and its bytes) is interned in a merge table, and the merged
+  group table is keyed by those merge ids, so one string met as id 3 in one worker
+  and id 9 in another is one group; nothing is re-hashed. Both tables of a worker
+  are charged to its reservation as they grow, before they grow, and freed and
+  returned once merged; the merge's tables are charged to the sink's own. A
+  dictionary's per-morsel code-to-id array and the merge's worker-to-merge id
+  array (4 bytes an entry each) are drawn from the pool before they are made and
+  given back after. Memory the pool does not see: the morsel buffers (17 bytes a
+  row per key column, 16 and a flag per aggregate argument, a flat key column
+  copied once), the old arrays while a table doubles, and the output. The order
+  of the output groups is first-seen in the merge and not specified. Limits: a table holds at
+  most 2^30 groups and 2^30 distinct strings, and a string key column in the
+  output at most 2 GiB of bytes. The merge is serial, as the fixed-width sink's.
+  `string_harness` is the test table, with dictionary columns that are rotated
+  per morsel and hold unused entries and a second copy of a string.
 - `segment_pool`: `SegmentPool`, an atomic byte count with an optional budget
   that any number of handles share, and `WorkerReservation`, a worker's plain
   tally inside the blocks it drew (a grant is a compare-and-swap, so the count
@@ -143,7 +177,9 @@ Import each module by name; the package root exports nothing.
   serves SOURCE_PARQUET, SOURCE_BATCH, SOURCE_SINK_OUTPUT, OP_FILTER,
   OP_PROJECT, OP_LIMIT and the sinks `(SINK_COLLECT, KEY_DTYPE_NONE,
   SINK_ORIENT_COLUMNAR)`, `(SINK_AGG, KEY_DTYPE_NONE, SINK_ORIENT_COLUMNAR)`,
-  the grouped rows I64, I32, F64 and F32, and `(SINK_SORT, KEY_DTYPE_NONE,
+  the grouped rows I64, I32, F64 and F32, `(SINK_AGG, KEY_DTYPE_STRING,
+  SINK_ORIENT_DICT_ENCODED)` and `(SINK_AGG, KEY_DTYPE_STRING,
+  SINK_ORIENT_COLUMNAR)`, and `(SINK_SORT, KEY_DTYPE_NONE,
   SINK_ORIENT_COLUMNAR)`, and refuses every other kind by name. It keeps the
   resident batches (`add_resident`), the aggregation sink data a descriptor's
   `sink_param_id` indexes (`add_agg_sink`), the sort sink data (`add_sort_sink`) and the segment pool
@@ -155,13 +191,18 @@ Import each module by name; the package root exports nothing.
 - `plan_harness`: segment descriptors for the three sources with an operator
   chain and a collect sink (`with_agg_sink` turns one into an aggregation),
   `project_columns`, and a sample table with readers, for plans written by hand
-  (`with_group_sink` and `grouped_agg_data` for the grouped sink).
+  (`with_group_sink`, `with_string_group_sink` and `grouped_agg_data` for the
+  grouped sinks).
 - `group_harness`: a table with NULL integer keys, a DECIMAL and a high-cardinality
   column, and one with float keys, whose every cell is a function of its row
   number.
 - `tpch_q6`: TPC-H Q6 as such a plan (scan, filter, project, SUM into a
   DECIMAL(38,4)) and a lineitem-shaped table with the types of the real files
   (DECIMAL(15,2), DATE32) whose first rows sit on every predicate's boundary.
+- `tpch_q1`: TPC-H Q1 as a two-segment plan (scan, filter, project and the
+  string-keyed grouped sink; then the sort of its output) over a lineitem-shaped
+  table whose two flag columns are dictionary encoded in row groups of 256 and
+  fall back to plain encoding in row groups of four.
 - `fake_support`, `fake_members`, `fake_builder`, `fake_dispatch`: sources,
   an operator, sinks, a builder and dispatchers that record what the driver does
   in shared counters, and run the workers one after another in an order a test
