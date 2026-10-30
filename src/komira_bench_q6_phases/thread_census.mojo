@@ -82,6 +82,16 @@ def _clean(name: String) -> String:
     return out^
 
 
+def base_name(name: String) -> String:
+    """`name` without trailing digits: the runtime names its threads
+    `Thread0`, `Thread1`, and so on, which one group should hold."""
+    var b = name.as_bytes()
+    var end = len(b)
+    while end > 0 and b[end - 1] >= UInt8(0x30) and b[end - 1] <= UInt8(0x39):
+        end -= 1
+    return String(name[byte=0:end])
+
+
 def parse_status(text: String) -> ThreadStat:
     """Name and context switches out of a `status` file's text; the other
     fields stay 0."""
@@ -219,13 +229,14 @@ def census_delta(
         if wait_ns > agg.wait_ns_max:
             agg.wait_ns_max = wait_ns
         if g == GROUP_OTHER:
+            var key = base_name(a.name)
             var k = -1
             for n in range(len(d.other_names)):
-                if d.other_names[n] == a.name:
+                if d.other_names[n] == key:
                     k = n
                     break
             if k < 0:
-                d.other_names.append(a.name.copy())
+                d.other_names.append(key^)
                 d.other_name_threads.append(0)
                 d.other_name_vol.append(0)
                 d.other_name_run_ns.append(0)

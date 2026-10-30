@@ -24,7 +24,7 @@
 #   all), 5 runs each, the warm-up record (discarded runs, their faults and
 #   whether they settled), a median and quartiles, the phase shares, the
 #   thread usage of the bracketed phases, the census of all the process's
-#   threads (the driver is one thread, with several workers at least one thread ran tasks, the
+#   threads (the driver is one thread, with several workers at least one thread ran tasks, an idle control, the
 #   largest thread of a group is at most the group's sum), the page faults, the footer cost,
 #   the expected answers matched, and phases.json and plan.txt written.
 #   Catches a malformed document, a missing section, or an answer that is not
@@ -221,6 +221,9 @@ def test_the_json_is_valid_and_complete() raises:
                 )
                 assert_true(grp.has("on_cpu_ms_sum") and grp.has("runnable_wait_ms_max"))
             assert_true(census.has("other_by_name"))
+            var idle = c.get("thread_census_idle_control")
+            assert_true(idle.get("available").as_bool())
+            assert_equal(Int(idle.get("driver").get("threads").get("median").as_float64()), 1)
         var is_q6 = c.get("mode").as_string() == "q6"
         assert_equal(i % 2 == 0, is_q6)
         assert_true(c.get("total_ms").get("median").as_float64() > 0.0)

@@ -133,11 +133,15 @@ struct RunRecord(Copyable, Movable):
     var revenue_unscaled: Int
     var ok: Bool
     var census: CensusDelta
+    var driver_tids: List[Int]
+    var worker_tids: List[Int]
     var census_taken: Bool
     """The process's threads could be listed (Linux with `/proc`)."""
 
     def __init__(out self):
         self.census = CensusDelta()
+        self.driver_tids = List[Int]()
+        self.worker_tids = List[Int]()
         self.census_taken = False
         self.total_ns = 0
         self.phases = List[PhaseAgg]()
@@ -181,6 +185,8 @@ def _run_once(mut ctx: EngineContext, text: String) raises -> RunRecord:
             worker_tids.append(pt_lane_tid(lane))
     rec.census_taken = len(census_before) > 0 and len(census_after) > 0
     rec.census = census_delta(census_before, census_after, driver_tids, worker_tids)
+    rec.driver_tids = driver_tids^
+    rec.worker_tids = worker_tids^
     if outcome.refusal:
         raise Error(
             "Q6 was refused at "
@@ -326,7 +332,7 @@ def _group_name(g: Int) -> String:
     return "other"
 
 
-def _group_json(ref runs: List[RunRecord], g: Int) -> String:
+def _group_json(ref deltas: List[CensusDelta], g: Int) -> String:
     var threads = List[Int]()
     var active = List[Int]()
     var vol_sum = List[Int]()
@@ -335,8 +341,8 @@ def _group_json(ref runs: List[RunRecord], g: Int) -> String:
     var run_ns = List[Int]()
     var wait_ns = List[Int]()
     var wait_max = List[Int]()
-    for r in range(len(runs)):
-        ref a = runs[r].census.groups[g]
+    for r in range(len(deltas)):
+        ref a = deltas[r].groups[g]
         threads.append(a.threads)
         active.append(a.active_threads)
         vol_sum.append(a.vol_sum)
@@ -358,15 +364,14 @@ def _group_json(ref runs: List[RunRecord], g: Int) -> String:
     )
 
 
-def _census_json(ref runs: List[RunRecord]) -> String:
+def _census_json(ref deltas: List[CensusDelta], taken: Bool) -> String:
     """The whole process's threads, grouped by what they did in each run
     (see thread_census.mojo): where the run's switches and CPU time are."""
-    var taken = len(runs) > 0 and runs[0].census_taken
-    if not taken:
+    if not taken or len(deltas) == 0:
         return String('{"available":false}')
     var out = String('{"available":true')
     for g in range(GROUP_COUNT):
-        out += "," + _group_json(runs, g)
+        out += "," + _group_json(deltas, g)
     # The `other` threads by name: the mean per run, over the runs in which
     # the name appeared.
     var names = List[String]()
@@ -374,8 +379,8 @@ def _census_json(ref runs: List[RunRecord]) -> String:
     var vol = List[Int]()
     var cpu = List[Int]()
     var nthreads = List[Int]()
-    for r in range(len(runs)):
-        ref c = runs[r].census
+    for r in range(len(deltas)):
+        ref c = deltas[r]
         for n in range(len(c.other_names)):
             var k = -1
             for j in range(len(names)):
@@ -441,6 +446,7 @@ def _json_config(
     threads_effective: Int,
     ref runs: List[RunRecord],
     ref warm: WarmupRecord,
+    ref idle: List[CensusDelta],
 ) -> String:
     var totals = List[Int]()
     var minor = List[Int]()
@@ -464,7 +470,13 @@ def _json_config(
     out += ',"threads_requested":' + String(threads_requested)
     out += ',"threads_effective":' + String(threads_effective)
     out += ',"warmup":' + _warmup_json(warm)
-    out += ',"thread_census":' + _census_json(runs)
+    var deltas = List[CensusDelta]()
+    for r in range(len(runs)):
+        deltas.append(runs[r].census.copy())
+    out += ',"thread_census":' + _census_json(deltas, len(runs) > 0 and runs[0].census_taken)
+    out += ',"thread_census_idle_control":' + _census_json(
+        idle, len(runs) > 0 and runs[0].census_taken
+    )
     out += ',"runs":' + String(len(runs))
     out += ',"total_ms":' + _dist_ms(totals)
     out += ',"total_ms_per_run":' + _series_ms(totals)
@@ -645,6 +657,18 @@ struct ProbeResult(Movable):
         self.answers_match = answers_match
 
 
+def _idle_control(ref last: RunRecord) -> List[CensusDelta]:
+    """Two snapshots taken back to back, no query between them, five times:
+    what the threads do over the time one snapshot takes, with the workers as
+    the last run found them. A run's census spans that time plus the run."""
+    var out = List[CensusDelta]()
+    for _ in range(5):
+        var a = thread_census()
+        var b = thread_census()
+        out.append(census_delta(a, b, last.driver_tids, last.worker_tids))
+    return out^
+
+
 def run_probe(settings: ProbeSettings) raises -> ProbeResult:
     """Run the probe, write `phases.json` and `plan.txt` into the settings'
     output directory, and return the JSON text and whether every answer was
@@ -711,6 +735,7 @@ def run_probe(settings: ProbeSettings) raises -> ProbeResult:
                 ctx.host_profile.thread_count,
                 runs,
                 warm,
+                _idle_control(runs[len(runs) - 1]),
             )
     var json = String('{"schema":"') + SCHEMA + '"'
     json += ',"note":"' + NOTE + '"'

@@ -6,6 +6,9 @@
 #   mistaken for the voluntary count (its key is a suffix of the other), and a
 #   name with a quote or a backslash is made safe for JSON. Catches a parser
 #   that matches the wrong line or writes a name that breaks the document.
+# - test_base_name_drops_trailing_digits: "Thread12" and "Thread3" share the
+#   name "Thread", "io" stays "io", and digits inside a name stay. Catches
+#   threads of one pool listed as one group each.
 # - test_parse_schedstat_reads_run_and_wait: "123456 789 4" gives 123456 ns on
 #   a CPU and 789 ns waiting; text that is not numbers gives zeros. Catches
 #   the two columns swapped or a parser that fails on odd input.
@@ -13,8 +16,8 @@
 #   one thread with a name and a positive id; elsewhere it is empty. Catches a
 #   reader that never finds the process's threads.
 # - test_delta_splits_threads_into_driver_workers_and_rest: with a driver
-#   (id 10), task workers (20, 21) and other threads (30, 31 named "idle",
-#   32 named "io" and absent before), the change of each group, the largest of
+#   (id 10), task workers (20, 21) and other threads (30 and 31 named "idle1"
+#   and "idle2", 32 named "io" and absent before), the change of each group, the largest of
 #   one thread, the threads with a voluntary switch, a thread that is new
 #   counted from zero, a thread that ended not counted, and the other threads
 #   grouped by name. Catches a thread in the wrong group, a delta taken from
@@ -28,6 +31,7 @@ from komira_bench_q6_phases.thread_census import (
     GROUP_OTHER,
     GROUP_WORKER,
     ThreadStat,
+    base_name,
     census_delta,
     parse_schedstat,
     parse_status,
@@ -61,6 +65,14 @@ def test_parse_status_reads_name_and_both_switch_counts() raises:
     assert_equal(odd.invol, 0)
 
 
+def test_base_name_drops_trailing_digits() raises:
+    assert_equal(base_name("Thread12"), "Thread")
+    assert_equal(base_name("Thread3"), "Thread")
+    assert_equal(base_name("io"), "io")
+    assert_equal(base_name("a1b"), "a1b")
+    assert_equal(base_name("123"), "")
+
+
 def test_parse_schedstat_reads_run_and_wait() raises:
     var run = -1
     var wait = -1
@@ -91,15 +103,15 @@ def test_delta_splits_threads_into_driver_workers_and_rest() raises:
     before.append(_stat(10, "main", 100, 1, 1000, 10))
     before.append(_stat(20, "w", 50, 0, 2000, 20))
     before.append(_stat(21, "w", 60, 2, 3000, 30))
-    before.append(_stat(30, "idle", 7, 0, 100, 0))
-    before.append(_stat(31, "idle", 9, 0, 100, 0))
+    before.append(_stat(30, "idle1", 7, 0, 100, 0))
+    before.append(_stat(31, "idle2", 9, 0, 100, 0))
     before.append(_stat(99, "gone", 5, 5, 5, 5))
     var after = List[ThreadStat]()
     after.append(_stat(10, "main", 103, 1, 1500, 10))
     after.append(_stat(20, "w", 58, 1, 2600, 25))
     after.append(_stat(21, "w", 60, 4, 3900, 80))
-    after.append(_stat(30, "idle", 17, 0, 400, 0))
-    after.append(_stat(31, "idle", 9, 3, 100, 0))
+    after.append(_stat(30, "idle1", 17, 0, 400, 0))
+    after.append(_stat(31, "idle2", 9, 3, 100, 0))
     after.append(_stat(32, "io", 4, 0, 50, 1))
     var drivers = List[Int]()
     drivers.append(10)
@@ -139,6 +151,7 @@ def test_delta_splits_threads_into_driver_workers_and_rest() raises:
 def main() raises:
     var suite = TestSuite()
     suite.test[test_parse_status_reads_name_and_both_switch_counts]()
+    suite.test[test_base_name_drops_trailing_digits]()
     suite.test[test_parse_schedstat_reads_run_and_wait]()
     suite.test[test_the_live_census_lists_this_thread]()
     suite.test[test_delta_splits_threads_into_driver_workers_and_rest]()
