@@ -779,8 +779,8 @@ column)`). The engine supplies one, `ParquetFooters`. It lives in `komira_parque
 perfect-hash row) come from the same cache the binder used, so the plan the binder saw and the plan the host lowers
 read one version of each footer. Each cached footer is stored with the file's identity (size, modification time, inode, device). Built:
 `ParquetFooters` and the `lowering_facts` functions refuse, naming the file, a file whose identity differs from the
-stamp when they are asked for its footer. Planned: `ScanFacts` carries the stamp and the source checks it at open and
-refuses a file that changed between bind and execution (§3.4); today the scan reads through the metadata cache of
+stamp when they are asked for its footer. Planned (no slice of §7.3 names it; the `komira_lowering` owner adds the stamp to `ScanFacts` and the source of slice 2b checks it): `ScanFacts` carries the stamp and the source checks it at open and
+refuses a file that changed between bind and execution (§3.4). **Until then a file replaced between lowering and the scan is read with the old plan's schema and min/max: a wrong-result risk.** Today the scan reads through the metadata cache of
 `komira_parquet`, which revalidates on its own, so a file replaced after the last lowering call is not refused by this
 package. The stamp does not apply the settle rule of `komira_buffer.file_identity`: a same-size rewrite inside the
 timestamp tick of a file younger than the settle window can go unseen. The alternative, to read the footer separately at lowering, can bind against one

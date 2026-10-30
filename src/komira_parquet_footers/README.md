@@ -73,6 +73,13 @@ passes `ctx.footers` to `bind_statement` and the same cache to
   scan reads through `komira_parquet`'s revalidating metadata cache, so a file
   replaced after the last call here is not refused by this package. The
   check at open (design section 3.4) is planned.
+  **This is a wrong-result risk, not only a missing refusal:** a file
+  replaced between lowering and the scan is read with the old plan's schema
+  and min/max (pruning and sink choice from version 1, data from version 2).
+  The stamp is to be carried into `ScanFacts` by the `komira_lowering` owner
+  and checked by the Parquet source at open. The design names no slice for
+  it; the natural one is the real `SOURCE_PARQUET` builder (slice 2b of
+  section 7.3), which would be its consumer.
 - The cache reads footers itself rather than through
   `ParquetMetadataCache`'s shared surface, which revalidates each hit and would
   let bind and lowering see two versions of one file. The alternative, a

@@ -35,6 +35,10 @@
 #     binding, the file is replaced by a 7-row one; the scan inputs and a new
 #     bind are refused naming the file (not built on the 1000-row footer the
 #     plan was bound against), and after invalidate the new file is read.
+#   * test_add_parquet_scan_refuses_a_replaced_file_itself and
+#     test_column_null_count_refuses_a_replaced_file_itself: each function called
+#     directly on a file replaced after its footer was cached refuses, naming the
+#     file and saying it was replaced (no other call refuses first).
 #   * test_parametric_types_are_compared_by_their_parameters: a DECIMAL(20,2)
 #     file against registered (20,2), (20,3) and (18,2).
 #   * test_nullability_is_exact_in_both_directions, test_swapped_column_order_is_refused,
@@ -271,6 +275,34 @@ def test_a_file_rewritten_between_bind_and_lowering_is_refused() raises:
     footers.cache().invalidate(path)
     assert_equal(footers.footer_schema(path).num_columns(), 3)
     assert_equal(footers.cache().summary(path).row_count, 7)
+
+
+def test_add_parquet_scan_refuses_a_replaced_file_itself() raises:
+    # Called directly, with the footer already cached and no other call
+    # between the replacement and this one.
+    var path = _write_table("bl_direct.parquet")
+    var footers = ParquetFooters()
+    var schema = footers.footer_schema(path)
+    _ = _put("bl_direct.parquet", write_record_batch_to_parquet_bytes(
+        _batch(7), CompressionCodec.UNCOMPRESSED
+    ))
+    var inputs = LoweringInputs()
+    with assert_raises(contains="replaced after its footer was read"):
+        add_parquet_scan(inputs, footers, path, schema)
+    assert_equal(len(inputs.scans), 0)
+
+
+def test_column_null_count_refuses_a_replaced_file_itself() raises:
+    var path = _write_table("bl_nulls_replaced.parquet")
+    var footers = ParquetFooters()
+    assert_equal(footers.column_null_count(path, "y").value(), 100)
+    _ = _put("bl_nulls_replaced.parquet", write_record_batch_to_parquet_bytes(
+        _batch(7), CompressionCodec.UNCOMPRESSED
+    ))
+    with assert_raises(contains="bl_nulls_replaced.parquet"):
+        _ = footers.column_null_count(path, "y")
+    with assert_raises(contains="replaced after its footer was read"):
+        _ = footers.column_null_count(path, "y")
 
 
 def _decimal_file(file_name: String) raises -> String:

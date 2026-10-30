@@ -8,8 +8,8 @@
 # inputs are built from are one cache, and a file's footer is read from storage
 # once however many lookups and handles there are.
 #
-# One footer per path, for the life of the cache. A lookup never re-stats the
-# file and never re-reads a footer it holds, so the footer the binder saw is the
+# One footer per path, for the life of the cache. A lookup (`footer`, `summary`)
+# never stats the file and never re-reads a footer it holds, so the footer the binder saw is the
 # footer lowering reads even when the file is rewritten between the two. That is
 # why this is not `komira_parquet.ParquetMetadataCache`'s shared surface: over
 # a local file system that surface revalidates each hit and re-parses an entry
@@ -17,7 +17,8 @@
 # bind and lowering see two versions of one file. What this cache stores with
 # each footer is the file's identity (size, modification time, inode, device),
 # stamped before the bytes were read, and `changed_since_read` is how a caller
-# asks whether the file at a path is still that one (the source's check at
+# asks whether the file at a path is still that one (the one place this cache
+# stats a file after the first read) (the source's check at
 # open, design section 3.4). `invalidate` is the explicit way to forget a path.
 #
 # It reads a footer with the reader `komira_parquet` already has
@@ -187,7 +188,9 @@ struct FooterCache(Copyable, Movable):
 
     def footer(self, path: String) raises -> ArcPointer[FileMetaData]:
         """A share of the parsed footer of the file `path`: read and parsed on
-        the first lookup, served from the cache after.
+        the first lookup, served from the cache after. This lookup does NOT
+        check that the file is unchanged (`changed_since_read` does; the
+        callers in `parquet_footers` and `lowering_facts` call it).
 
         Raises:
             Error naming `path` when it is not a file, is shorter than a
@@ -206,7 +209,8 @@ struct FooterCache(Copyable, Movable):
 
     def summary(self, path: String) raises -> FooterSummary:
         """The footer's row count and its schema as an Arrow `Schema` (flat
-        files only), from the same cached read as `footer`.
+        files only), from the same cached read as `footer`. Like `footer`, it
+        does not check that the file is unchanged.
 
         Raises:
             Error naming `path`, as `footer`, or when the schema is nested or
