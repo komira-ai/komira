@@ -25,6 +25,18 @@
 #   executed before any sweep, so it is the first execution of the query: its
 #   time (50 ms and 40 ms here) is the `first_run` of each side in the written
 #   result, beside the sweeps' runs, which start at 30 ms and 10 ms.
+# - test_steady_state_is_the_median_of_every_rep_of_each_sweep: komira sweeps
+#   (10,4,6) and (8,5,7) ms give sweep medians 6 and 7 and a steady state of 6,
+#   not 5 (what leaving each sweep's first rep out would give); the first reps
+#   stay in the file.
+# - test_the_check_runs_alternate_which_engine_goes_first: with three queries
+#   DuckDB's check run goes first for the first and third, the arm's for the
+#   second (by query position), so neither engine always pays the cold page
+#   cache; all are timed and verified.
+# - test_the_check_runs_of_unverified_cells_are_recorded: a wrong answer, which
+#   is not timed and not verified, keeps both check runs with their time and
+#   faults in `check_runs`; a refusal keeps DuckDB's and records none for the
+#   arm, whose refusal a clock cannot resolve.
 # - test_no_run_is_discarded_at_any_thread_count: at 1, 32 and 88 threads the
 #   arm and DuckDB each run the query exactly once to check it and then
 #   sweeps x reps times, all of which are recorded: nothing is run to be
@@ -241,6 +253,9 @@ struct FakeDuckDb(DuckDbTransport):
     var counters: Bool
     var minor: Int64
     var major: Int64
+    var order: ArcPointer[List[String]]
+    """Which engine ran its check run when: "duckdb" is appended when the fetch
+    of a query's answer runs."""
 
     def __init__(
         out self,
@@ -248,7 +263,9 @@ struct FakeDuckDb(DuckDbTransport):
         sent: ArcPointer[List[String]],
         var rules: List[Rule],
         counters: Bool = False,
+        order: ArcPointer[List[String]] = ArcPointer[List[String]](List[String]()),
     ):
+        self.order = order
         self.clock = clock
         self.sent = sent
         self.rules = rules^
@@ -280,6 +297,8 @@ struct FakeDuckDb(DuckDbTransport):
                     break
                 if self.mode == "json" and self.rules[i].json.byte_length() > 0:
                     self.emit(self.rules[i].json + String("\n"), 0)
+                    if self.rules[i].needle.startswith(String("revenue")):
+                        self.order[].append(String("duckdb"))
                 self.errors += self.rules[i].error
                 var n = self.rule_runs[i]
                 self.rule_runs[i] = n + 1
@@ -397,6 +416,7 @@ struct FakeArm(EngineArm):
     var runs_seen: Int
     var minor: Int64
     var major: Int64
+    var order: Optional[ArcPointer[List[String]]]
 
     def __init__(
         out self,
@@ -410,7 +430,9 @@ struct FakeArm(EngineArm):
         counters: Bool = False,
         var minors: List[Int] = List[Int](),
         var majors: List[Int] = List[Int](),
+        order: Optional[ArcPointer[List[String]]] = Optional[ArcPointer[List[String]]](),
     ):
+        self.order = order.copy()
         self.costs = costs^
         self.minors = minors^
         self.majors = majors^
@@ -440,6 +462,8 @@ struct FakeArm(EngineArm):
 
     def run(mut self, query: QuerySpec, materialize: Bool) raises -> ArmAnswer:
         self.shared[].log.append(String("run ") + (String("rows") if materialize else String("count")))
+        if materialize and self.order:
+            self.order.value()[].append(String("komira"))
         for i in range(len(self.scripts)):
             if self.scripts[i].key == query.key():
                 ref s = self.scripts[i]
@@ -539,18 +563,20 @@ struct Rig(Movable):
     var cell: ArcPointer[Int]
     var sent: ArcPointer[List[String]]
     var shared: ArcPointer[Shared]
+    var order: ArcPointer[List[String]]
 
     def __init__(out self):
         self.cell = ArcPointer[Int](1000)
         self.sent = ArcPointer[List[String]](List[String]())
         self.shared = ArcPointer[Shared](Shared())
+        self.order = ArcPointer[List[String]](List[String]())
 
     def duckdb(
         self, var rules: List[Rule], threads: Int = 4, counters: Bool = False
     ) -> DuckDbSession[FakeDuckDb]:
         rules.insert(0, _settings_rule(threads))
         return DuckDbSession[FakeDuckDb](
-            FakeDuckDb(self.cell, self.sent, rules^, counters), BenchClock.manual(self.cell)
+            FakeDuckDb(self.cell, self.sent, rules^, counters, self.order), BenchClock.manual(self.cell)
         )
 
     def sent_text(self) -> String:
@@ -745,6 +771,108 @@ def test_every_run_is_recorded_rep_zero_of_every_sweep_included() raises:
     assert_true(report.find(String("steady-state geomean")) >= 0)
     assert_true(report.find(String("first-run geomean 1.25x")) >= 0)
     assert_true(report.find(String(STEADY_STATE_DEFINITION)) >= 0)
+
+
+def test_steady_state_is_the_median_of_every_rep_of_each_sweep() raises:
+    var rig = Rig()
+    var duck = _q6_rule()
+    # komira sweeps (10, 4, 6) and (8, 5, 7) ms: every rep is in its sweep's
+    # median, 6 and 7, so the steady state is 6 (leaving each sweep's first rep
+    # out would give 5 and 6)
+    var out = _run_at(4, rig, duck^, _ints(3 * _MS, 10 * _MS, 4 * _MS, 6 * _MS, 8 * _MS, 5 * _MS, 7 * _MS))
+    ref k = out.warm.cells[0].komira.value()
+    assert_equal(k.ms_per_sweep[0], 6.0)
+    assert_equal(k.ms_per_sweep[1], 7.0)
+    assert_equal(k.ms, 6.0)
+    assert_equal(out.warm.cells[0].duckdb.value().ms, 2.0)
+    assert_equal(out.warm.cells[0].ratio.value(), 3.0)
+    # and every rep is still in the file
+    assert_equal(k.runs_ms[0][0], 10.0)
+    assert_equal(k.runs_ms[1][0], 8.0)
+
+
+def test_the_check_runs_alternate_which_engine_goes_first() raises:
+    var rig = Rig()
+    var rules = List[Rule]()
+    rules.append(Rule(String("revenue_q6"), String('[{"revenue":123.45}]'), String(""), 2 * _MS))
+    rules.append(Rule(String("revenue_q1"), String('[{"revenue":123.45}]'), String(""), 2 * _MS))
+    rules.append(Rule(String("revenue_q2"), String('[{"revenue":123.45}]'), String(""), 2 * _MS))
+    var session = rig.duckdb(rules^)
+    var scripts = List[Script]()
+    scripts.append(Script(String("tpch/q6"), ARM_ROWS, String(""), _rows_one(123.45), 3 * _MS))
+    scripts.append(Script(String("tpch/q1"), ARM_ROWS, String(""), _rows_one(123.45), 3 * _MS))
+    scripts.append(Script(String("tpch/q2"), ARM_ROWS, String(""), _rows_one(123.45), 3 * _MS))
+    var arm = FakeArm(rig.cell, rig.shared, scripts^, order=Optional[ArcPointer[List[String]]](rig.order))
+    var dropper = NoCacheDropper()
+    var queries = List[QuerySpec]()
+    queries.append(_q(String("q6"), String("SELECT revenue_q6")))
+    queries.append(_q(String("q1"), String("SELECT revenue_q1")))
+    queries.append(_q(String("q2"), String("SELECT revenue_q2")))
+    var out = run_queries(session, arm, dropper, BenchClock.manual(rig.cell), queries, _inputs(), _settings())
+    # by query position: the first query, the third, ... DuckDB first; the
+    # second, ... the arm first, so neither engine always pays the cold page cache
+    var want = List[String]()
+    want.append(String("duckdb"))
+    want.append(String("komira"))
+    want.append(String("komira"))
+    want.append(String("duckdb"))
+    want.append(String("duckdb"))
+    want.append(String("komira"))
+    assert_equal(len(rig.order[]), 6)
+    for i in range(6):
+        assert_equal(rig.order[][i], want[i])
+    # all three are timed and verified whichever went first
+    for i in range(3):
+        assert_true(out.outcomes[i].timed)
+        assert_true(Bool(out.warm.cells[i].komira.value().first_ms()))
+        assert_true(Bool(out.warm.cells[i].duckdb.value().first_ms()))
+
+
+def test_the_check_runs_of_unverified_cells_are_recorded() raises:
+    # a wrong answer: both engines ran their check run, nothing is timed, the
+    # cell is not verified, and the check runs are kept with their faults
+    var rig = Rig()
+    var rules = List[Rule]()
+    rules.append(Rule(
+        String("revenue_q6"), String('[{"revenue":123.45}]'), String(""), 2 * _MS, String(""),
+        _ints(40 * _MS, 0, 0, 0, 0, 0, 0), _ints(60000, 0, 0, 0, 0, 0, 0), _ints(6, 0, 0, 0, 0, 0, 0),
+    ))
+    var session = rig.duckdb(rules^, 4, True)
+    var scripts = List[Script]()
+    scripts.append(Script(String("tpch/q6"), ARM_ROWS, String(""), _rows_one(123.46), 3 * _MS))
+    var arm = FakeArm(
+        rig.cell, rig.shared, scripts^, 0, False, False, _ints(50 * _MS, 0, 0, 0, 0, 0, 0), True,
+        _ints(7000, 0, 0, 0, 0, 0, 0), _ints(4, 0, 0, 0, 0, 0, 0),
+    )
+    var dropper = NoCacheDropper()
+    var queries = List[QuerySpec]()
+    queries.append(_q(String("q6"), String("SELECT revenue_q6")))
+    var out = run_queries(session, arm, dropper, BenchClock.manual(rig.cell), queries, _inputs(), _settings())
+    assert_false(out.outcomes[0].timed)
+    assert_equal(out.warm.cells[0].value.text(), String("UNVERIFIED:answer differs from duckdb"))
+    assert_false(Bool(out.warm.cells[0].komira))
+    var doc = parse_json_value(write_result_json(out.warm))
+    var c = doc.get(String("cells")).element_at(0).get(String("check_runs"))
+    assert_equal(c.get(String("komira")).get(String("ms")).as_float64(), 50.0)
+    assert_equal(c.get(String("komira")).get(String("minor_faults")).as_int64(), Int64(7000))
+    assert_equal(c.get(String("komira")).get(String("major_faults")).as_int64(), Int64(4))
+    assert_equal(c.get(String("duckdb")).get(String("ms")).as_float64(), 40.0)
+    assert_equal(c.get(String("duckdb")).get(String("minor_faults")).as_int64(), Int64(60000))
+    assert_equal(c.get(String("duckdb")).get(String("major_faults")).as_int64(), Int64(6))
+    # a refusal: DuckDB's check run is recorded, the arm's, which did nothing a
+    # clock can resolve, is not
+    var rig2 = Rig()
+    var rules2 = List[Rule]()
+    rules2.append(Rule(String("revenue_q6"), String('[{"revenue":123.45}]'), String(""), 2 * _MS, String(""), _ints(40 * _MS, 0, 0, 0, 0, 0, 0)))
+    var session2 = rig2.duckdb(rules2^)
+    var refusal = RefusalArm()
+    var none = NoCacheDropper()
+    var out2 = run_queries(session2, refusal, none, BenchClock.manual(rig2.cell), queries, _inputs(), _settings())
+    assert_false(out2.outcomes[0].timed)
+    var doc2 = parse_json_value(write_result_json(out2.warm))
+    var c2 = doc2.get(String("cells")).element_at(0).get(String("check_runs"))
+    assert_equal(c2.get(String("duckdb")).get(String("ms")).as_float64(), 40.0)
+    assert_true(c2.get(String("komira")).is_null())
 
 
 def test_no_run_is_discarded_at_any_thread_count() raises:

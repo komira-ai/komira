@@ -5,17 +5,17 @@
 #   even count, an unsorted input, one value; an input that is not sorted
 #   first, or an even count that takes one middle value, gives another number.
 # - test_median_refuses: no values and a NaN are errors, not a number.
-# - test_drop_first_rep: only index 0 goes; a sweep (100, 1, 2, 3) has median 2
-#   once the warm-up is gone and 2.5 if it is kept; a one-rep sweep is refused.
-# - test_min_of_sweep_medians: the least of the per-sweep medians: sweeps
-#   (50,10,12,11), (50,9,30,10), (50,20,20,20) give 10, not the least rep (9),
-#   not the mean of the medians, not the median of all reps.
-# - test_steady_state: the steady-state time is the least over the sweeps of
-#   the median of the runs after that sweep's first: sweeps (50,10,12,11),
-#   (40,9,30,10), (20,20,20,20) give 10, which is not the least run (9) and not
-#   the median of every run; the first run of a sweep, the first sweep's
-#   included, never enters it; a sweep of one run has no steady state and is
-#   refused, as are no sweeps.
+# - test_sweep_median_takes_every_rep: nothing is left out of a sweep's median:
+#   (100, 1, 2, 3) has median 2.5, a one-rep sweep is its own median, no reps
+#   is an error.
+# - test_min_of_sweep_medians: the least of the per-sweep medians over all reps:
+#   sweeps (50,10,12,11), (50,9,30,10), (50,20,20,20) give 11.5, not the least
+#   rep (9), not the mean of the medians, not the median of all reps.
+# - test_steady_state: the steady-state time is the least over the sweeps of the
+#   median of all the sweep's reps: it is 11.5 for sweeps (50,10,12,11),
+#   (40,9,30,10), (20,20,20,20); a sweep's first rep is part of its median
+#   (7 gives 10.5, where leaving it out would give 11); a one-rep sweep has a
+#   steady state; no sweeps is refused.
 # - test_geomean: exact on powers of two, and zero, negative, infinite and
 #   empty inputs are refused (a log of zero must not become a ratio).
 # - test_spread_and_ratio: spread in percent of the least, the ratio komira
@@ -25,7 +25,6 @@ from std.math import inf, nan
 from std.testing import assert_almost_equal, assert_equal, assert_true
 
 from komira_bench_report import (
-    drop_first_rep,
     geomean,
     median,
     min_of_sweep_medians,
@@ -76,16 +75,17 @@ def test_median_refuses() raises:
     assert_true(raised)
 
 
-def test_drop_first_rep() raises:
-    var kept = drop_first_rep(_l(100.0, 1.0, 2.0, 3.0))
-    assert_equal(len(kept), 3)
-    assert_equal(kept[0], 1.0)
-    assert_equal(sweep_median(_l(100.0, 1.0, 2.0, 3.0)), 2.0)
+def test_sweep_median_takes_every_rep() raises:
+    # nothing is left out: (100, 1, 2, 3) has median 2.5, not 2 (without the 100)
+    assert_equal(sweep_median(_l(100.0, 1.0, 2.0, 3.0)), 2.5)
+    assert_equal(sweep_median(_l3(100.0, 1.0, 2.0)), 2.0)
+    # a sweep of one rep is its own median
     var one = List[Float64]()
     one.append(5.0)
+    assert_equal(sweep_median(one), 5.0)
     var raised = False
     try:
-        _ = drop_first_rep(one)
+        _ = sweep_median(List[Float64]())
     except:
         raised = True
     assert_true(raised)
@@ -96,7 +96,8 @@ def test_min_of_sweep_medians() raises:
     sweeps.append(_l(50.0, 10.0, 12.0, 11.0))
     sweeps.append(_l(50.0, 9.0, 30.0, 10.0))
     sweeps.append(_l(50.0, 20.0, 20.0, 20.0))
-    assert_equal(min_of_sweep_medians(sweeps), 10.0)
+    # medians of all four reps: 11.5, 20, 20
+    assert_equal(min_of_sweep_medians(sweeps), 11.5)
 
 
 def test_steady_state() raises:
@@ -104,24 +105,20 @@ def test_steady_state() raises:
     sweeps.append(_l(50.0, 10.0, 12.0, 11.0))
     sweeps.append(_l(40.0, 9.0, 30.0, 10.0))
     sweeps.append(_l(20.0, 20.0, 20.0, 20.0))
-    assert_equal(steady_state_ms(sweeps), 10.0)
-    # a later sweep's first run does not enter it, and the first run of the
-    # first sweep does not either
+    assert_equal(steady_state_ms(sweeps), 11.5)
+    # the first rep of a sweep is part of its median: 7 pulls the first sweep
+    # down to 10.5, and 900 does not move the second past 11.5
     var other = List[List[Float64]]()
     other.append(_l(7.0, 10.0, 12.0, 11.0))
     other.append(_l(900.0, 10.0, 12.0, 11.0))
-    assert_equal(steady_state_ms(other), 11.0)
+    assert_equal(steady_state_ms(other), 10.5)
+    # a sweep of one rep has a steady state
     var short = List[List[Float64]]()
     var one = List[Float64]()
     one.append(5.0)
     short.append(one^)
+    assert_equal(steady_state_ms(short), 5.0)
     var raised = False
-    try:
-        _ = steady_state_ms(short)
-    except:
-        raised = True
-    assert_true(raised)
-    raised = False
     try:
         _ = steady_state_ms(List[List[Float64]]())
     except:
@@ -174,9 +171,9 @@ def main() raises:
     except e:
         failed += "\n  test_median_refuses: " + String(e)
     try:
-        test_drop_first_rep()
+        test_sweep_median_takes_every_rep()
     except e:
-        failed += "\n  test_drop_first_rep: " + String(e)
+        failed += "\n  test_sweep_median_takes_every_rep: " + String(e)
     try:
         test_min_of_sweep_medians()
     except e:

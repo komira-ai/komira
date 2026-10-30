@@ -18,6 +18,9 @@
 # - test_a_cell_read_from_an_older_result_shows_dashes_for_its_first_run: a cell
 #   whose sides have no runs prints dashes in the three first-run columns and
 #   still prints its steady-state columns and ratio.
+# - test_an_unverified_cell_shows_the_time_of_its_check_runs: a cell that was not
+#   timed shows the time of its check runs in the first-run columns (komira and
+#   DuckDB), dashes everywhere else, and no ratio.
 # - test_ratio_is_shown_to_three_places: a ratio just above the threshold is
 #   not rounded onto it: 1.504 against 1.5 reads FAIL, and shows 1.504.
 # - test_table_of_an_unpinned_scale_in_rows: a rows scale and an unpinned DuckDB
@@ -30,6 +33,8 @@ from std.testing import assert_equal, assert_true
 from komira_bench_report import (
     BenchResult,
     Cell,
+    CheckRuns,
+    FirstRun,
     DuckDbPin,
     Environment,
     RunInfo,
@@ -98,7 +103,7 @@ def _cell(
 
 def _sample() raises -> BenchResult:
     var cells = List[Cell]()
-    # komira sweeps (99,4,6,5) and (99,3,3,3): medians 5 and 3, time 3; its
+    # komira sweeps (99,4,6,5) and (99,3,3,3): medians 5.5 and 3, time 3; its
     # first run is 99 against DuckDB's 33.
     var q01k = Side.from_sweeps(4, _sweeps(99.0, 4.0, 6.0, 5.0, 99.0, 3.0, 3.0, 3.0), Optional[Float64](99.0))
     cells.append(_cell(String("tpch/q01"), String("tpch"), StageOutcome.exec_ok(),
@@ -127,7 +132,7 @@ def test_table_of_the_sample() raises:
     var want = (
         String("komira-bench  tpch,clickbench SF10  threads=20  duckdb v1.5.6 (PINNED)  komira 1.2.3  dataset a1b2c3d4\n")
         + String(" cell            first k  first d  first x steady k steady d steady x  spr k %  spr d %       rows  values  verdict\n")
-        + String(" tpch/q01          99.00    33.00    3.000     3.00     2.00    1.500     66.7    100.0          4  IDENT   FAIL(1.05)\n")
+        + String(" tpch/q01          99.00    33.00    3.000     3.00     2.00    1.500     83.3    100.0          4  IDENT   FAIL(1.05)\n")
         + String(" tpch/q02          99.00    99.00    1.000     2.00     2.00    1.000      0.0      0.0         10  IDENT   PASS\n")
         + String(" tpch/q03          99.00    99.00        -     1.00     4.00        -      0.0      0.0          7  DIVERG  NO_RATIO(DIVERGENT)\n")
         + String(" clickbench/q01        -    99.00        -        -     8.00        -        -      0.0        100  UNVER   NO_RATIO(UNSUPPORTED:window frame)\n")
@@ -158,6 +163,23 @@ def test_a_cell_read_from_an_older_result_shows_dashes_for_its_first_run() raise
     assert_true(text.find(String(" tpch/q01        -        -        -     3.00     2.00    1.500      0.0      0.0          4  IDENT   FAIL(1.05)\n")) >= 0)
     # no first-run figure is stated for it
     assert_true(text.find(String("first-run geomean")) < 0)
+
+
+def test_an_unverified_cell_shows_the_time_of_its_check_runs() raises:
+    var r = _sample()
+    var runs = CheckRuns(
+        Optional[FirstRun](FirstRun(50.0, Optional[Int64](7000), Optional[Int64](4))),
+        Optional[FirstRun](FirstRun(40.0, Optional[Int64](60000), Optional[Int64](6))),
+    )
+    var cells = List[Cell]()
+    cells.append(Cell.build(
+        String("tpch/q09"), String("tpch"), 4, StageOutcome.exec_fail(), Optional[Side](), Optional[Side](),
+        ValueVerdict.unverified(String("answer differs from duckdb")), 1.05, Optional[CheckRuns](runs^),
+    ))
+    r.cells = cells^
+    var text = render_table(r)
+    # first k and first d show the check runs; no ratio of either kind, no steady time
+    assert_true(text.find(String(" tpch/q09    50.00    40.00        -        -        -        -        -        -          -  UNVER   NO_RATIO(EXEC_FAIL)\n")) >= 0)
 
 
 def test_ratio_is_shown_to_three_places() raises:
@@ -215,6 +237,10 @@ def main() raises:
         test_a_cell_read_from_an_older_result_shows_dashes_for_its_first_run()
     except e:
         failed += "\n  test_a_cell_read_from_an_older_result_shows_dashes_for_its_first_run: " + String(e)
+    try:
+        test_an_unverified_cell_shows_the_time_of_its_check_runs()
+    except e:
+        failed += "\n  test_an_unverified_cell_shows_the_time_of_its_check_runs: " + String(e)
     try:
         test_ratio_is_shown_to_three_places()
     except e:

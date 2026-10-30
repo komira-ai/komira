@@ -99,7 +99,7 @@ def _cell(
 
 def _sample() raises -> BenchResult:
     var cells = List[Cell]()
-    # komira sweeps (99,4,6,5) and (99,3,3,3): medians 5 and 3, time 3; its
+    # komira sweeps (99,4,6,5) and (99,3,3,3): medians 5.5 and 3, time 3; its
     # first run is 99 against DuckDB's 33.
     var q01k = Side.from_sweeps(4, _sweeps(99.0, 4.0, 6.0, 5.0, 99.0, 3.0, 3.0, 3.0), Optional[Float64](99.0))
     cells.append(_cell(String("tpch/q01"), String("tpch"), StageOutcome.exec_ok(),

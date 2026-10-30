@@ -22,7 +22,8 @@
 #   sweeps with no cache-drop file are each refused.
 # - test_the_refusal_arm_refuses_every_query_by_name: any query, materialized
 #   or not, ends in a refusal of the named construct and prepare is recorded.
-# - test_settings_are_checked: each unusable setting is refused.
+# - test_settings_are_checked: each unusable setting is refused; a sweep of one
+#   rep is usable (every rep is in the sweep's median), none is not.
 # - test_there_is_no_warmup_flag: every run of a sweep is measured and
 #   recorded, so `--warmup-runs` is an unknown flag, and the usage text does
 #   not offer it.
@@ -211,10 +212,13 @@ def test_settings_are_checked() raises:
         RunSettings(4, 4000).validate()
     with assert_raises():
         RunSettings(4, 4096, 0).validate()
+    # every rep counts in the median of its sweep, so one rep is a sweep
+    RunSettings(4, 4096, 3, 1).validate()
+    RunSettings(4, 4096, 3, 6, 1, 1).validate()
     with assert_raises():
-        RunSettings(4, 4096, 3, 1).validate()
+        RunSettings(4, 4096, 3, 0).validate()
     with assert_raises():
-        RunSettings(4, 4096, 3, 6, 1, 1).validate()
+        RunSettings(4, 4096, 3, 6, 1, 0).validate()
     with assert_raises():
         RunSettings(4, 4096, 3, 6, 0, 3, 0.0).validate()
     RunSettings(4, 4096, 3, 6, 2, 3).validate()
