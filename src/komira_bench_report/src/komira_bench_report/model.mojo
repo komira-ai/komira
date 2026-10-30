@@ -19,11 +19,13 @@ from .verdict import (
 )
 
 comptime RESULT_SCHEMA = "komira-bench-result/3"
-# The schemas the reader still reads. Schema 1 predates `n_departure` and the
-# DEPARTURE verdict; schema 2 has those and holds no runs, no page faults and no
-# first-run ratio (it is read with empty `runs_ms` and no `first_ratio`).
-comptime RESULT_SCHEMA_V1 = "komira-bench-result/1"
+# Schema 2 (the change that added `n_departure` and the DEPARTURE verdict) is
+# still read: it holds no runs, no page faults, no first run and no first-run
+# ratio (read as empty `runs_ms` and no `first_ratio`), and its times left the
+# first rep of each sweep out of the median. Schema 1 is refused by name: its
+# numbers mean something else.
 comptime RESULT_SCHEMA_V2 = "komira-bench-result/2"
+comptime PREVIOUS_SCHEMA = "komira-bench-result/1"
 comptime STATISTIC_MIN_OF_SWEEP_MEDIAN = "min_of_sweep_median"
 comptime PIN_PINNED = "PINNED"
 comptime PIN_UNPINNED_PREFIX = "UNPINNED:"
@@ -161,7 +163,7 @@ struct Side(Copyable, Movable):
     ) raises -> Side:
         """The side measured by `sweeps`, each the timings of one sweep's
         reps: all of them are kept as the side's runs, each sweep is reduced to
-        the median of its runs after its first, and the cell's steady-state
+        the median of all its reps, and the cell's steady-state
         time is the least of those (see `STEADY_STATE_DEFINITION`). `first_ms`
         is the first run of the query on that engine, executed before the
         sweeps. The page faults of each run, when measured, are given in the
@@ -186,6 +188,35 @@ struct Side(Copyable, Movable):
         return self.first.copy()
 
 
+struct FirstRun(Copyable, Movable):
+    """The first run of a query on one engine, when no side holds it: its time
+    in milliseconds and the minor and major page faults the engine's process took
+    during it (both present or both absent)."""
+
+    var ms: Float64
+    var minor: Optional[Int64]
+    var major: Optional[Int64]
+
+    def __init__(out self, ms: Float64, var minor: Optional[Int64], var major: Optional[Int64]):
+        self.ms = ms
+        self.minor = minor^
+        self.major = major^
+
+
+struct CheckRuns(Copyable, Movable):
+    """The check runs of a cell that was not timed (the engine refused the
+    query, or its answer was wrong): each engine's first run, where it was
+    executed and its clock could resolve it. A timed cell holds its first runs in
+    its sides and has none of these."""
+
+    var komira: Optional[FirstRun]
+    var duckdb: Optional[FirstRun]
+
+    def __init__(out self, var komira: Optional[FirstRun], var duckdb: Optional[FirstRun]):
+        self.komira = komira^
+        self.duckdb = duckdb^
+
+
 struct Cell(Copyable, Movable):
     """One query of one suite. `komira` is present exactly when the run ended
     in EXEC_OK. `ratio` is `komira.ms / duckdb.ms`, the steady-state ratio, and
@@ -204,6 +235,7 @@ struct Cell(Copyable, Movable):
     var ratio: Optional[Float64]
     var verdict: String
     var first_ratio: Optional[Float64]
+    var check_runs: Optional[CheckRuns]
 
     def __init__(
         out self,
@@ -217,6 +249,7 @@ struct Cell(Copyable, Movable):
         var ratio: Optional[Float64],
         var verdict: String,
         var first_ratio: Optional[Float64] = Optional[Float64](),
+        var check_runs: Optional[CheckRuns] = Optional[CheckRuns](),
     ):
         self.id = id^
         self.suite = suite^
@@ -228,6 +261,7 @@ struct Cell(Copyable, Movable):
         self.ratio = ratio^
         self.verdict = verdict^
         self.first_ratio = first_ratio^
+        self.check_runs = check_runs^
 
     @staticmethod
     def build(
@@ -239,6 +273,7 @@ struct Cell(Copyable, Movable):
         var duckdb: Optional[Side],
         var value: ValueVerdict,
         pass_max: Float64,
+        var check_runs: Optional[CheckRuns] = Optional[CheckRuns](),
     ) raises -> Cell:
         """A cell with its ratios and verdict derived: the ratio only when the
         run ended in EXEC_OK, the values are IDENTICAL or a DEPARTURE and both
@@ -258,6 +293,7 @@ struct Cell(Copyable, Movable):
             ratio^,
             verdict^,
             first_ratio^,
+            check_runs^,
         )
 
 
@@ -411,8 +447,8 @@ def _validate_run(run: RunInfo) raises:
         raise Error("run.scale must be positive")
     if run.sweeps < 1:
         raise Error("run.sweeps must be at least 1")
-    if run.reps < 2:
-        raise Error("run.reps must be at least 2 (the steady state is the runs after the first)")
+    if run.reps < 1:
+        raise Error("run.reps must be at least 1")
     if run.statistic != String(STATISTIC_MIN_OF_SWEEP_MEDIAN):
         raise Error("run.statistic must be " + String(STATISTIC_MIN_OF_SWEEP_MEDIAN))
     if run.threads < 1:
@@ -490,7 +526,7 @@ def _validate_side(side: Side, sweeps: Int, reps: Int, who: String) raises:
     var medians = sweep_medians(side.runs_ms)
     for i in range(len(medians)):
         if not _close(medians[i], side.ms_per_sweep[i]):
-            raise Error(who + ": the median of the runs after the first of sweep " + String(i) + " is not its ms_per_sweep")
+            raise Error(who + ": the median of all the reps of sweep " + String(i) + " is not its ms_per_sweep")
     var swept = len(side.minor_faults) > 0 or len(side.major_faults) > 0
     var firsts = Bool(side.first_minor) or Bool(side.first_major)
     if swept != firsts:
@@ -502,6 +538,17 @@ def _validate_side(side: Side, sweeps: Int, reps: Int, who: String) raises:
             raise Error(who + " has one count of the first run's page faults, not both")
         if side.first_minor.value() < 0 or side.first_major.value() < 0:
             raise Error(who + " has a negative count in the first run's page faults")
+
+
+def _validate_first_run(run: Optional[FirstRun], who: String) raises:
+    if not run:
+        return
+    if not isfinite(run.value().ms) or run.value().ms <= 0.0:
+        raise Error(who + ": the time must be finite and positive")
+    if Bool(run.value().minor) != Bool(run.value().major):
+        raise Error(who + ": the page-fault counts are both present or both absent")
+    if run.value().minor and (run.value().minor.value() < 0 or run.value().major.value() < 0):
+        raise Error(who + ": a page-fault count is negative")
 
 
 def validate_cell(cell: Cell, run: RunInfo) raises:
@@ -560,6 +607,11 @@ def validate_cell(cell: Cell, run: RunInfo) raises:
         raise Error("cell " + cell.id + ": a first-run ratio exists exactly for a cell with a ratio whose sides carry their runs")
     if want_first and not _close(want_first.value(), cell.first_ratio.value()):
         raise Error("cell " + cell.id + ": the first-run ratio is not komira's first run / duckdb's first run")
+    if cell.check_runs:
+        if Bool(cell.komira) or Bool(cell.duckdb):
+            raise Error("cell " + cell.id + ": a timed cell holds its first runs in its sides, not in check_runs")
+        _validate_first_run(cell.check_runs.value().komira, cell.id + String(" komira check run"))
+        _validate_first_run(cell.check_runs.value().duckdb, cell.id + String(" duckdb check run"))
     if cell.verdict != cell_verdict(want, run.pass_max, cell.value.is_departure()):
         raise Error("cell " + cell.id + ": the verdict does not follow from the ratio and run.pass_max")
 

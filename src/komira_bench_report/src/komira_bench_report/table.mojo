@@ -10,10 +10,11 @@
 # ratio), its steady-state time (the same three) and the spread of each
 # engine's sweep medians. What "first" and "steady" mean is
 # `STEADY_STATE_DEFINITION`, printed once under the rows. A side read from a
-# result of an older schema has no runs, so its first-run columns are dashes.
+# result of an older schema has no runs, so its first-run columns are dashes. A
+# cell that was not timed shows the time of its check runs there.
 
 from .format import format_fixed, pad_left, pad_right
-from .model import BenchResult, Cell, Side
+from .model import BenchResult, Cell, FirstRun, Side
 from .stats import STEADY_STATE_DEFINITION
 from .summary import summarize, summary_line
 from .verdict import (
@@ -40,6 +41,16 @@ def _first_ms(side: Optional[Side]) -> String:
     if not first:
         return String("-")
     return format_fixed(first.value(), 2)
+
+
+def _first_of(side: Optional[Side], check: Optional[FirstRun]) -> String:
+    """The first-run time of an engine: its side's, or, for a cell that was not
+    timed, its check run's."""
+    if side:
+        return _first_ms(side)
+    if check:
+        return format_fixed(check.value().ms, 2)
+    return String("-")
 
 
 def _spread(side: Optional[Side]) -> String:
@@ -162,6 +173,11 @@ def render_table(result: BenchResult) raises -> String:
         var ratio = String("-")
         if c.ratio:
             ratio = format_fixed(c.ratio.value(), 3)
+        var check_k = Optional[FirstRun]()
+        var check_d = Optional[FirstRun]()
+        if c.check_runs:
+            check_k = c.check_runs.value().komira.copy()
+            check_d = c.check_runs.value().duckdb.copy()
         var first_ratio = String("-")
         if c.first_ratio:
             first_ratio = format_fixed(c.first_ratio.value(), 3)
@@ -169,9 +185,9 @@ def render_table(result: BenchResult) raises -> String:
             String(" ")
             + pad_right(c.id, idw)
             + String(" ")
-            + pad_left(_first_ms(c.komira), 8)
+            + pad_left(_first_of(c.komira, check_k), 8)
             + String(" ")
-            + pad_left(_first_ms(c.duckdb), 8)
+            + pad_left(_first_of(c.duckdb, check_d), 8)
             + String(" ")
             + pad_left(first_ratio, 8)
             + String(" ")

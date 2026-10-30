@@ -1,28 +1,30 @@
 # The strict reader of result.json. It accepts exactly what `write_result_json`
-# writes: the schema string `komira-bench-result/2`, every member present and
+# writes: the schema string `komira-bench-result/3`, every member present and
 # no other, the right kind of value in each, no object naming a member twice,
 # and a summary equal to the one recomputed from the cells (counts and text
 # exactly, the floats to 1e-9). A document that fails raises
 # `BenchResultError: <where>: <what>`.
 #
-# It also reads schema `komira-bench-result/1`, which held no runs, no page
-# faults and no first-run ratio: a side read from it has empty `runs_ms` and a
-# cell has no `first_ratio`, and its summary is compared with the legacy
-# summary of its version (`summary_json(result, version)`). Schema 2 (from the
-# change that added `n_departure` and the DEPARTURE verdict) is read the same way;
-# schema 1 has neither, and a DEPARTURE in it is refused. A document of any schema
-# is held to that schema's members and no others.
+# It also reads schema `komira-bench-result/2` (the change that added
+# `n_departure` and the DEPARTURE verdict), which held no runs, no page faults,
+# no first run, no check runs and no first-run ratio: a side read from it has
+# empty `runs_ms` and a cell has no `first_ratio`, and its summary is compared
+# with the summary of that schema (`summary_json(result, 2)`). Schema 1 is
+# refused by name, its numbers meaning something else. A document of either
+# schema is held to that schema's members and no others.
 
 from komira_json import JsonValue, parse_json_value, refuse_duplicate_keys
 
 from .model import (
     BenchResult,
     Cell,
+    CheckRuns,
+    FirstRun,
     _close,
     DuckDbPin,
     Environment,
     RESULT_SCHEMA,
-    RESULT_SCHEMA_V1,
+    PREVIOUS_SCHEMA,
     RESULT_SCHEMA_V2,
     RunInfo,
     Side,
@@ -260,14 +262,38 @@ def _read_side(v: JsonValue, where: String, legacy: Bool) raises -> Optional[Sid
     )
 
 
+def _read_first_run(v: JsonValue, where: String) raises -> Optional[FirstRun]:
+    if v.is_null():
+        return Optional[FirstRun]()
+    var f = _object(v, where, String("ms minor_faults major_faults"))
+    var fm = f.get(String("minor_faults"))
+    var fj = f.get(String("major_faults"))
+    if fm.is_null() != fj.is_null():
+        _fail(where, String("minor_faults and major_faults are both counts or both null"))
+    var minor = Optional[Int64]()
+    var major = Optional[Int64]()
+    if not fm.is_null():
+        minor = Optional[Int64](_int(fm, where + ".minor_faults"))
+        major = Optional[Int64](_int(fj, where + ".major_faults"))
+    return Optional[FirstRun](FirstRun(_float(f.get(String("ms")), where + ".ms"), minor^, major^))
+
+
 def _read_cell(v: JsonValue, where: String, legacy: Bool) raises -> Cell:
     var members = String("id suite reps stage komira duckdb value ratio verdict")
     if not legacy:
-        members += String(" first_ratio")
+        members += String(" first_ratio check_runs")
     var o = _object(v, where, members)
     var first_ratio = Optional[Float64]()
+    var check_runs = Optional[CheckRuns]()
     if not legacy:
         first_ratio = _opt_float(o.get(String("first_ratio")), where + ".first_ratio")
+        var cr = o.get(String("check_runs"))
+        if not cr.is_null():
+            var c = _object(cr, where + ".check_runs", String("komira duckdb"))
+            check_runs = Optional[CheckRuns](CheckRuns(
+                _read_first_run(c.get(String("komira")), where + ".check_runs.komira"),
+                _read_first_run(c.get(String("duckdb")), where + ".check_runs.duckdb"),
+            ))
     return Cell(
         _text(o.get(String("id")), where + ".id"),
         _text(o.get(String("suite")), where + ".suite"),
@@ -279,6 +305,7 @@ def _read_cell(v: JsonValue, where: String, legacy: Bool) raises -> Cell:
         _opt_float(o.get(String("ratio")), where + ".ratio"),
         _text(o.get(String("verdict")), where + ".verdict"),
         first_ratio^,
+        check_runs^,
     )
 
 
@@ -343,15 +370,18 @@ def parse_result_json(text: String) raises -> BenchResult:
     var top = _object(doc, String("result"), String("schema run env cells summary"))
     var schema = _text(top.get(String("schema")), String("schema"))
     var version = 3
-    if schema == String(RESULT_SCHEMA_V1):
-        version = 1
+    if schema == String(PREVIOUS_SCHEMA):
+        _fail(
+            String("schema"),
+            "this is '" + schema + "', which this reader no longer reads (its numbers mean something else): it reads '"
+            + String(RESULT_SCHEMA) + "' and the older '" + String(RESULT_SCHEMA_V2) + "'; run the benchmark again",
+        )
     elif schema == String(RESULT_SCHEMA_V2):
         version = 2
     elif schema != String(RESULT_SCHEMA):
         _fail(
             String("schema"),
-            "expected '" + String(RESULT_SCHEMA) + "' (or the older '" + String(RESULT_SCHEMA_V2) + "' or '"
-            + String(RESULT_SCHEMA_V1) + "'), got '" + schema + "'",
+            "expected '" + String(RESULT_SCHEMA) + "' (or the older '" + String(RESULT_SCHEMA_V2) + "'), got '" + schema + "'",
         )
     var legacy = version < 3
     var run = _read_run(top.get(String("run")))
@@ -364,9 +394,5 @@ def parse_result_json(text: String) raises -> BenchResult:
         cells.append(_read_cell(arr.element_at(i), "cells[" + String(i) + "]", legacy))
     var result = BenchResult(run^, env^, cells^)
     validate_result(result)
-    if version == 1:
-        for i in range(len(result.cells)):
-            if result.cells[i].value.is_departure():
-                _fail("cells[" + String(i) + "].value", String("DEPARTURE is not in schema 1"))
     _check_summary(top.get(String("summary")), result, version)
     return result^

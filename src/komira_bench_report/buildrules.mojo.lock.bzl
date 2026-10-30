@@ -34,14 +34,14 @@ GRAPH_JSON = r'''{
       "kind": "lib",
       "root": "src/komira_bench_report/src/komira_bench_report",
       "srcs": [
-        {"path": "src/komira_bench_report/src/komira_bench_report/__init__.mojo", "sha256": "0dffcc436d5c8f3cc9d705473f793da58bc9e115dd961fca070362d6129b509b"},
+        {"path": "src/komira_bench_report/src/komira_bench_report/__init__.mojo", "sha256": "b50b2d1c3ef01c7b9b61db073c38bc7ebf1b6e9bf003e79022c4124feb412b44"},
         {"path": "src/komira_bench_report/src/komira_bench_report/format.mojo", "sha256": "40e5a8458ef7af57fd420afe57dbc445235dcb29f22cadeb4747798fe8850813"},
-        {"path": "src/komira_bench_report/src/komira_bench_report/json_read.mojo", "sha256": "38047ab5110dd6e40b82c744a9bbde0a9930fbd4ec1528c4f970ea95026eff46"},
-        {"path": "src/komira_bench_report/src/komira_bench_report/json_write.mojo", "sha256": "685cbf8f242173b1121e60d4f12a11f3e70a3da32b4c54fd3b778fda776fa17f"},
-        {"path": "src/komira_bench_report/src/komira_bench_report/model.mojo", "sha256": "dce9e31afb45f28652a150b58b5d8ee1cf19fa162fe85c68b73982c8c36b452d"},
-        {"path": "src/komira_bench_report/src/komira_bench_report/stats.mojo", "sha256": "99731facbc0465cb6244167cea6df3a4f72fa4dfc115604396737df34e19566e"},
+        {"path": "src/komira_bench_report/src/komira_bench_report/json_read.mojo", "sha256": "74e62f54cbac117200a5aa335657e050d3902a5b2361a8d4774f0d00afb7f67b"},
+        {"path": "src/komira_bench_report/src/komira_bench_report/json_write.mojo", "sha256": "c4f8f57e38e2362e8ddf4ded32ac7887bfbab5868f85f1efd19ef3a671ff8a30"},
+        {"path": "src/komira_bench_report/src/komira_bench_report/model.mojo", "sha256": "8076371af4bb9870b1169148b9aee7a8e0bd69dfa03fd702beb6ccac95cfd181"},
+        {"path": "src/komira_bench_report/src/komira_bench_report/stats.mojo", "sha256": "530cd10f3672093fd6a3132d38924e0a7fd05fdbad1dcbc9249aa5784d28349e"},
         {"path": "src/komira_bench_report/src/komira_bench_report/summary.mojo", "sha256": "e5db63c410b18570d1c685bd3892c3d7063de32fd7aabd3858f95b461bab762a"},
-        {"path": "src/komira_bench_report/src/komira_bench_report/table.mojo", "sha256": "3848b75057299290009297bdf2dafeaa133b83eb2554f1c0b149ef3a826e178a"},
+        {"path": "src/komira_bench_report/src/komira_bench_report/table.mojo", "sha256": "5368ff4c48781a29dbeecfa0d7e53cfcdd2d3bb7004e088b293986c2c048a43e"},
         {"path": "src/komira_bench_report/src/komira_bench_report/verdict.mojo", "sha256": "8e0e0436a82207067cdefc10ab6294737a1076a97acf8eedba5d2a87cccaa841"}
       ],
       "deps": ["komira_json@0.1.0#mojo1.0.0/lib"],
@@ -81,7 +81,7 @@ GRAPH_JSON = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/komira_bench_report/tests/test_stats.mojo", "sha256": "4a6d03209fcc950702b4ea4677939ad0bb34e6d8aadbffee15e5aafcd9a7cc03"}
+        {"path": "src/komira_bench_report/tests/test_stats.mojo", "sha256": "2dd474e4855c5e86d73058304261aa118a1aa01b5a987616ecb07bc3bb77bf73"}
       ],
       "deps": ["komira_bench_report@0.1.0#mojo1.0.0/lib"],
       "natives": [],
@@ -153,14 +153,14 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "kind": "lib",
       "root": "src/komira_bench_report/src/komira_bench_report",
       "srcs": [
-        {"path": "src/komira_bench_report/src/komira_bench_report/__init__.mojo", "sha256": "0dffcc436d5c8f3cc9d705473f793da58bc9e115dd961fca070362d6129b509b"},
+        {"path": "src/komira_bench_report/src/komira_bench_report/__init__.mojo", "sha256": "b50b2d1c3ef01c7b9b61db073c38bc7ebf1b6e9bf003e79022c4124feb412b44"},
         {"path": "src/komira_bench_report/src/komira_bench_report/format.mojo", "sha256": "40e5a8458ef7af57fd420afe57dbc445235dcb29f22cadeb4747798fe8850813"},
-        {"path": "src/komira_bench_report/src/komira_bench_report/json_read.mojo", "sha256": "38047ab5110dd6e40b82c744a9bbde0a9930fbd4ec1528c4f970ea95026eff46"},
-        {"path": "src/komira_bench_report/src/komira_bench_report/json_write.mojo", "sha256": "685cbf8f242173b1121e60d4f12a11f3e70a3da32b4c54fd3b778fda776fa17f"},
-        {"path": "src/komira_bench_report/src/komira_bench_report/model.mojo", "sha256": "dce9e31afb45f28652a150b58b5d8ee1cf19fa162fe85c68b73982c8c36b452d"},
-        {"path": "src/komira_bench_report/src/komira_bench_report/stats.mojo", "sha256": "99731facbc0465cb6244167cea6df3a4f72fa4dfc115604396737df34e19566e"},
+        {"path": "src/komira_bench_report/src/komira_bench_report/json_read.mojo", "sha256": "74e62f54cbac117200a5aa335657e050d3902a5b2361a8d4774f0d00afb7f67b"},
+        {"path": "src/komira_bench_report/src/komira_bench_report/json_write.mojo", "sha256": "c4f8f57e38e2362e8ddf4ded32ac7887bfbab5868f85f1efd19ef3a671ff8a30"},
+        {"path": "src/komira_bench_report/src/komira_bench_report/model.mojo", "sha256": "8076371af4bb9870b1169148b9aee7a8e0bd69dfa03fd702beb6ccac95cfd181"},
+        {"path": "src/komira_bench_report/src/komira_bench_report/stats.mojo", "sha256": "530cd10f3672093fd6a3132d38924e0a7fd05fdbad1dcbc9249aa5784d28349e"},
         {"path": "src/komira_bench_report/src/komira_bench_report/summary.mojo", "sha256": "e5db63c410b18570d1c685bd3892c3d7063de32fd7aabd3858f95b461bab762a"},
-        {"path": "src/komira_bench_report/src/komira_bench_report/table.mojo", "sha256": "3848b75057299290009297bdf2dafeaa133b83eb2554f1c0b149ef3a826e178a"},
+        {"path": "src/komira_bench_report/src/komira_bench_report/table.mojo", "sha256": "5368ff4c48781a29dbeecfa0d7e53cfcdd2d3bb7004e088b293986c2c048a43e"},
         {"path": "src/komira_bench_report/src/komira_bench_report/verdict.mojo", "sha256": "8e0e0436a82207067cdefc10ab6294737a1076a97acf8eedba5d2a87cccaa841"}
       ],
       "deps": ["komira_json@0.1.0#mojo1.0.0/lib"],
@@ -200,7 +200,7 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/komira_bench_report/tests/test_stats.mojo", "sha256": "4a6d03209fcc950702b4ea4677939ad0bb34e6d8aadbffee15e5aafcd9a7cc03"}
+        {"path": "src/komira_bench_report/tests/test_stats.mojo", "sha256": "2dd474e4855c5e86d73058304261aa118a1aa01b5a987616ecb07bc3bb77bf73"}
       ],
       "deps": ["komira_bench_report@0.1.0#mojo1.0.0/lib"],
       "natives": [],
@@ -269,14 +269,14 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "kind": "lib",
       "root": "src/komira_bench_report/src/komira_bench_report",
       "srcs": [
-        {"path": "src/komira_bench_report/src/komira_bench_report/__init__.mojo", "sha256": "0dffcc436d5c8f3cc9d705473f793da58bc9e115dd961fca070362d6129b509b"},
+        {"path": "src/komira_bench_report/src/komira_bench_report/__init__.mojo", "sha256": "b50b2d1c3ef01c7b9b61db073c38bc7ebf1b6e9bf003e79022c4124feb412b44"},
         {"path": "src/komira_bench_report/src/komira_bench_report/format.mojo", "sha256": "40e5a8458ef7af57fd420afe57dbc445235dcb29f22cadeb4747798fe8850813"},
-        {"path": "src/komira_bench_report/src/komira_bench_report/json_read.mojo", "sha256": "38047ab5110dd6e40b82c744a9bbde0a9930fbd4ec1528c4f970ea95026eff46"},
-        {"path": "src/komira_bench_report/src/komira_bench_report/json_write.mojo", "sha256": "685cbf8f242173b1121e60d4f12a11f3e70a3da32b4c54fd3b778fda776fa17f"},
-        {"path": "src/komira_bench_report/src/komira_bench_report/model.mojo", "sha256": "dce9e31afb45f28652a150b58b5d8ee1cf19fa162fe85c68b73982c8c36b452d"},
-        {"path": "src/komira_bench_report/src/komira_bench_report/stats.mojo", "sha256": "99731facbc0465cb6244167cea6df3a4f72fa4dfc115604396737df34e19566e"},
+        {"path": "src/komira_bench_report/src/komira_bench_report/json_read.mojo", "sha256": "74e62f54cbac117200a5aa335657e050d3902a5b2361a8d4774f0d00afb7f67b"},
+        {"path": "src/komira_bench_report/src/komira_bench_report/json_write.mojo", "sha256": "c4f8f57e38e2362e8ddf4ded32ac7887bfbab5868f85f1efd19ef3a671ff8a30"},
+        {"path": "src/komira_bench_report/src/komira_bench_report/model.mojo", "sha256": "8076371af4bb9870b1169148b9aee7a8e0bd69dfa03fd702beb6ccac95cfd181"},
+        {"path": "src/komira_bench_report/src/komira_bench_report/stats.mojo", "sha256": "530cd10f3672093fd6a3132d38924e0a7fd05fdbad1dcbc9249aa5784d28349e"},
         {"path": "src/komira_bench_report/src/komira_bench_report/summary.mojo", "sha256": "e5db63c410b18570d1c685bd3892c3d7063de32fd7aabd3858f95b461bab762a"},
-        {"path": "src/komira_bench_report/src/komira_bench_report/table.mojo", "sha256": "3848b75057299290009297bdf2dafeaa133b83eb2554f1c0b149ef3a826e178a"},
+        {"path": "src/komira_bench_report/src/komira_bench_report/table.mojo", "sha256": "5368ff4c48781a29dbeecfa0d7e53cfcdd2d3bb7004e088b293986c2c048a43e"},
         {"path": "src/komira_bench_report/src/komira_bench_report/verdict.mojo", "sha256": "8e0e0436a82207067cdefc10ab6294737a1076a97acf8eedba5d2a87cccaa841"}
       ],
       "deps": ["komira_json@0.1.0#mojo1.0.0/lib"],
@@ -316,7 +316,7 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/komira_bench_report/tests/test_stats.mojo", "sha256": "4a6d03209fcc950702b4ea4677939ad0bb34e6d8aadbffee15e5aafcd9a7cc03"}
+        {"path": "src/komira_bench_report/tests/test_stats.mojo", "sha256": "2dd474e4855c5e86d73058304261aa118a1aa01b5a987616ecb07bc3bb77bf73"}
       ],
       "deps": ["komira_bench_report@0.1.0#mojo1.0.0/lib"],
       "natives": [],

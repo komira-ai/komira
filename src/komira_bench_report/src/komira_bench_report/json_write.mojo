@@ -15,6 +15,7 @@ from .model import (
     DuckDbPin,
     Environment,
     RESULT_SCHEMA,
+    FirstRun,
     RunInfo,
     Side,
     validate_result,
@@ -84,6 +85,29 @@ def _side_json(side: Optional[Side]) raises -> JsonValue:
     return o^
 
 
+def _first_run_json(run: Optional[FirstRun]) raises -> JsonValue:
+    if not run:
+        return JsonValue.null()
+    var o = JsonValue.empty_object()
+    o.set_member(String("ms"), JsonValue.from_f64(run.value().ms))
+    if run.value().minor:
+        o.set_member(String("minor_faults"), _i(run.value().minor.value()))
+        o.set_member(String("major_faults"), _i(run.value().major.value()))
+    else:
+        o.set_member(String("minor_faults"), JsonValue.null())
+        o.set_member(String("major_faults"), JsonValue.null())
+    return o^
+
+
+def _check_runs_json(c: Cell) raises -> JsonValue:
+    if not c.check_runs:
+        return JsonValue.null()
+    var o = JsonValue.empty_object()
+    o.set_member(String("komira"), _first_run_json(c.check_runs.value().komira))
+    o.set_member(String("duckdb"), _first_run_json(c.check_runs.value().duckdb))
+    return o^
+
+
 def _cell_json(c: Cell) raises -> JsonValue:
     var o = JsonValue.empty_object()
     o.set_member(String("id"), _s(c.id))
@@ -96,6 +120,7 @@ def _cell_json(c: Cell) raises -> JsonValue:
     o.set_member(String("ratio"), _opt_f64(c.ratio))
     o.set_member(String("verdict"), _s(c.verdict))
     o.set_member(String("first_ratio"), _opt_f64(c.first_ratio))
+    o.set_member(String("check_runs"), _check_runs_json(c))
     return o^
 
 
@@ -139,8 +164,7 @@ def _suite_summary_json(s: SuiteSummary, version: Int) raises -> JsonValue:
     o.set_member(String("n_ratio"), _i(Int64(s.n_ratio)))
     o.set_member(String("n_pass"), _i(Int64(s.n_pass)))
     o.set_member(String("n_fail"), _i(Int64(s.n_fail)))
-    if version >= 2:
-        o.set_member(String("n_departure"), _i(Int64(s.n_departure)))
+    o.set_member(String("n_departure"), _i(Int64(s.n_departure)))
     o.set_member(String("geomean_ratio_verified"), _opt_f64(s.geomean))
     o.set_member(String("median_ratio"), _opt_f64(s.median_ratio))
     if version >= 3:
@@ -152,11 +176,10 @@ def _suite_summary_json(s: SuiteSummary, version: Int) raises -> JsonValue:
 
 def summary_json(result: BenchResult, version: Int = 3) raises -> JsonValue:
     """The `summary` member of `result`, recomputed from its cells: the
-    overall counts, a line for each suite, and the headline. With `version` 1
-    or 2 it is the summary that schema wrote: no first-run figures and a
-    headline whose geomean and median are not called steady-state, and for
-    version 1 no `n_departure`. The reader compares it with the summary of an
-    older document."""
+    overall counts, a line for each suite, and the headline. With `version` 2
+    it is the summary that schema wrote: no first-run figures and a headline
+    whose geomean and median are not called steady-state. The reader compares
+    it with the summary of a schema 2 document."""
     var summary = summarize(result)
     var o = _suite_summary_json(summary.overall, version)
     var per_suite = JsonValue.empty_array()

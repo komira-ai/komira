@@ -4,9 +4,9 @@ load("@komira//tools/build/package:conda.bzl", "conda_package")
 load(":buildrules.mojo.bzl", "mojo_package")
 
 # The result model and report of a benchmark run: every run of a cell with its
-# page faults, a cell's first run and steady-state time (the median of each
-# sweep's runs after its first, the least of the sweeps), the verdicts of a cell, the environment fingerprint, the result.json writer and strict reader
-# (schema komira-bench-result/3; schemas 2 and 1 are still read), the counts and geomean per suite, and the
+# page faults, a cell's first run and steady-state time (the median of all the
+# reps of each sweep, the least of the sweeps), the verdicts of a cell, the environment fingerprint, the result.json writer and strict reader
+# (schema komira-bench-result/3; schema 2 is still read, schema 1 refused), the counts and geomean per suite, and the
 # human table. Pure data and text: it runs no engine and reads no file.
 #
 # The tests (each file's header says which behaviour it proves):
