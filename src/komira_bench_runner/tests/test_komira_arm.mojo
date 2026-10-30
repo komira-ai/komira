@@ -45,6 +45,10 @@
 #   closes the arm and prepares a new context (3 prepares and 2 closes for one
 #   warm preparation and 2 cold reps) and the timed rows still equal the
 #   checked run's. Catches a cold rep that reuses the warm context.
+# - test_the_arm_reads_the_page_faults_of_its_process: the real arm reports
+#   the minor and major page faults of the process, and a list of two million
+#   integers built between two readings raises the minor count. Catches an arm
+#   that reports nothing, or a count that is not the process's.
 # - test_an_unregistrable_table_ends_the_run_naming_it: a table whose file is
 #   missing makes prepare raise naming the table; a run before prepare raises.
 # - test_refusals_are_recorded_by_what_they_mean: against the real engine, an
@@ -998,6 +1002,21 @@ def test_the_declared_types_of_the_real_engine_are_checked_against_duckdbs() rai
     assert_true(note.find(String("BIGINT")) >= 0, note)
     assert_equal(out.warm.cells[1].value.text(), String("IDENTICAL"))
     assert_true(out.outcomes[1].timed)
+
+
+def test_the_arm_reads_the_page_faults_of_its_process() raises:
+    var arm = KomiraArm()
+    var before = arm.faults()
+    assert_true(Bool(before))
+    assert_true(before.value().minor > 0)
+    var touched = List[Int]()
+    for i in range(2_000_000):
+        touched.append(i)
+    var after = arm.faults()
+    assert_true(Bool(after))
+    assert_true(after.value().minor > before.value().minor)
+    assert_true(after.value().major >= before.value().major)
+    assert_equal(touched[1_999_999], 1_999_999)
 
 
 def main() raises:

@@ -12,7 +12,8 @@ anything is timed, times warm and cold runs, and fills a `BenchResult`
 | `CacheDropper`, `NoCacheDropper`, `ProcDropCaches` | the file-cache drop before a cold run |
 | `RunSettings`, `HostFacts`, `RunInputs` | what a run is told |
 | `run_queries`, `RunOutput`, `QueryOutcome`, `register_duckdb` | the run itself |
-| `measure`, `Sweeps`, `time_komira`, `time_duckdb` | timing one query on both engines |
+| `measure`, `Sweeps`, `EngineRuns`, `Timed`, `CheckRun`, `check_komira`, `duckdb_check_run`, `time_komira`, `time_duckdb` | timing one query on both engines: every run, with the page faults of the engine's process around it, and the check run as the first run |
+| `process_faults` | the minor and major page faults of this process (what the komira arm reports) |
 | `format_run`, `write_run`, `queries_listing`, `queries_file_text` | the console report and the files of a run |
 | `RunFlags`, `parse_flags`, `run_entrypoint` | the program |
 """
@@ -39,7 +40,8 @@ from .komira_arm import (
     outcome_of_refusal,
     refusal_token,
 )
-from .measure import Sweeps, measure, time_duckdb, time_komira
+from .faults import process_faults
+from .measure import CheckRun, EngineRuns, KomiraCheck, Sweeps, Timed, check_komira, duckdb_check_run, measure, time_duckdb, time_komira
 from .output import COMPARISON_FILE, QUERIES_FILE, TPCH_NOTICE, comparison_text, format_run, queries_file_text, queries_listing, write_run
 from .query import QuerySpec
 from .runner import (
