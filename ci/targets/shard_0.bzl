@@ -50,6 +50,7 @@ TARGETS = [
     "komira//src/komira_op_agg_state:agg_state_bench",
     "komira//src/komira_op_agg_state:komira_op_agg_state_conda",
     "komira//src/komira_optimized_plan_header:komira_optimized_plan_header_conda",
+    "komira//src/komira_parquet_footers:komira_parquet_footers_conda",
     "komira//src/komira_resource_gate:komira_resource_gate_conda",
     "komira//src/komira_search_compaction:komira_search_compaction_conda",
     "komira//src/komira_simd:ci",

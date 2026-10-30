@@ -648,7 +648,7 @@ size at which the sink gets its own package.
 
 | Sink | Used by | Built from | Lane |
 |---|---|---|---|
-| `SINK_COLLECT` | every plan's root; the passthrough | resident batches, concatenated by `komira_engine_runtime`'s parallel concat | slice 2b |
+| `SINK_COLLECT` | every plan's root; the passthrough | resident batches, concatenated serially in morsel-position order for now (parallel concat is a follow-up) | slice 2b |
 | `SINK_SORT` over a small result (in memory, one batch) | Q1's `ORDER BY` over its grouped output | `komira_op_sort.sort_batch_by_keys` over the collected batch | slice 4 (MVP) |
 | `SINK_SORT`, `SINK_TOPN` in general | `ORDER BY`, `ORDER BY ... LIMIT` | `komira_op_sort` kernels (the top-N indices) and the sinks of komira#1384; parallel sort komira#1420 and komira#1421; external sort komira#1436 | step 1 of §7.3 |
 | distinct sinks | `SELECT DISTINCT`, `COUNT(DISTINCT x)` | `komira_op_agg_distinct` and komira#1385, #1390, #1401, then #1455, #1467, #1474 for string keys | step 2 |
@@ -708,7 +708,7 @@ The context owns:
 | memory | the root reservation, sized from the host profile | `MemoryReservation.for_host` |
 | catalog | table names to schemas and scans | `komira_sql.SqlCatalog` |
 | source registry | scan kinds to resolvers | `komira_scan_resolver.ScanSourceResolvers` |
-| footer cache | parsed footers, capped, with eviction | `komira_sdk.parquet_footer` |
+| footer cache | parsed footers, one version per path, capped with a per-query pin (planned; built today: `komira_parquet_footers.FooterCache`, unbounded) | `komira_parquet_footers` |
 | plan cache | the two-layer compile cache | `komira_sdk_exec.plan_compile_cache` (LRU, capped) |
 | options | the flags struct (§5.2) | the caller |
 
@@ -766,18 +766,24 @@ first rejects.
 
 `read_parquet('path')` binds off the file's own footer, as `sql_tvf_bind` documents. The binder takes that footer
 through the `SqlParquetFooters` trait, which a caller implements (`footer_schema(path)`, `column_null_count(path,
-column)`). The engine supplies one, `ParquetFooters`, in `komira_sdk_exec`:
+column)`). The engine supplies one, `ParquetFooters`. It lives in `komira_parquet_footers`, a package of its own, because `EngineContext` (which would hold it in `komira_sdk_exec`) is not written yet; the context will hold the package's `FooterCache`:
 
-- `footer_schema` reads the footer of a file, or the footers of a glob's files unioned by name, through
-  `komira_sdk.parquet_footer` (`read_parquet_footer_with_cache`), so the cache of §5.1 serves it;
+- `footer_schema` reads the footer of one file through the `FooterCache` (built: a file; a glob is refused by name;
+  planned: the footers of a glob's files unioned by name). The cache is `komira_parquet_footers`' own, which never
+  re-reads a held footer; it is not `komira_parquet.ParquetMetadataCache`'s revalidating surface, which would let bind
+  and lowering see two versions of one file;
 - `column_null_count` sums a column's null counts over the row groups, and returns `None` when any row group records
   none, as the trait asks.
 
 **One cache, two readers.** Lowering's `inputs` (the statistics for payload narrowing and the key domains for the
 perfect-hash row) come from the same cache the binder used, so the plan the binder saw and the plan the host lowers
-read one version of each footer. Each cached footer is stored with the file's identity (size and modification
-identity where the store gives one); the source checks that identity at open and refuses a file that changed between
-bind and execution, naming it (§3.4). The alternative, to read the footer separately at lowering, can bind against one
+read one version of each footer. Each cached footer is stored with the file's identity (size, modification time, inode, device). Built:
+`ParquetFooters` and the `lowering_facts` functions refuse, naming the file, a file whose identity differs from the
+stamp when they are asked for its footer. Planned (no slice of §7.3 names it; the `komira_lowering` owner adds the stamp to `ScanFacts` and, as a follow-up to slice 2b tracked in #2024, `SOURCE_PARQUET` checks it at open): `ScanFacts` carries the stamp and the source checks it at open and
+refuses a file that changed between bind and execution (§3.4). **Until then a file replaced between lowering and the scan is read with the old plan's schema and min/max: a wrong-result risk.** Today the scan reads through the metadata cache of
+`komira_parquet`, which revalidates on its own, so a file replaced after the last lowering call is not refused by this
+package. The stamp does not apply the settle rule of `komira_buffer.file_identity`: a same-size rewrite inside the
+timestamp tick of a file younger than the settle window can go unseen. The alternative, to read the footer separately at lowering, can bind against one
 version of a file and run against another.
 
 A table registered by name (`add_parquet(name, path, schema)`) takes its schema from the same reader at registration.

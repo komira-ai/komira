@@ -6,7 +6,7 @@ and the rest of this page follows.
 | question | answered by | in komira |
 |---|---|---|
 | What is this target **built for**? | the **target platform** | the client's own platform (`host`, below), or any registered row with `--target-platforms` |
-| **Which tools** build it? | the **toolchain**, chosen by the target platform | `toolchains//:mojo` picks the linux or the macOS Mojo toolchain from the target platform's OS; C/C++, Rust and protobuf are linux x86_64 only |
+| **Which tools** build it? | the **toolchain**, chosen by the target platform | `toolchains//:mojo` picks the linux or the macOS Mojo toolchain from the target platform's OS; a package's own static C builds for darwin-arm64 through buildrules; vendored third_party C/C++ is not yet supported in `mojo_package`, and the old rules' C/C++, Rust and protobuf toolchains remain linux x86_64 |
 | **Where do its actions run?** | the **execution platform**, chosen by what the toolchain says it runs on | one per (os, cpu): `linux-x86_64`, and `darwin-arm64` when macOS workers are configured |
 
 ## The platform table
