@@ -7,7 +7,10 @@
 #
 #   COUNT          INT64; never NULL, zero over no row
 #   SUM            INT64 over an integer input (a sum outside the 64-bit range
-#                  is refused, not wrapped), or DECIMAL128 of the input's scale
+#                  is refused, not wrapped), or DECIMAL(38, 0) over an integer
+#                  input when the plan declares that (the SQL integer sum: the
+#                  128-bit total is written as it is, and one with more than 38
+#                  digits is refused), or DECIMAL128 of the input's scale
 #                  over a DECIMAL128 input (a sum with more digits than the
 #                  declared precision is refused)
 #   AVG            FLOAT64 over an integer or DECIMAL128 input. The sum and the
@@ -210,7 +213,14 @@ def agg_result_column_rows(
             elif cell.kind == IN_DATE:
                 same = t == ArrowType.DATE32
             elif func == AGG_SUM:
-                same = t == ArrowType.INT64
+                # An integer sum is INT64, or DECIMAL(38, 0): the carrier of
+                # the SQL integer sum (DuckDB's HUGEINT), whose total the
+                # fold already holds in 128 bits.
+                same = t == ArrowType.INT64 or (
+                    t == ArrowType.DECIMAL128
+                    and schema.field_decimal_precision(idx) == 38
+                    and schema.field_decimal_scale(idx) == 0
+                )
             else:
                 same = t == cell.arrow
             if not same:

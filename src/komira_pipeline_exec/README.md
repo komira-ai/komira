@@ -77,7 +77,8 @@ Import each module by name; the package root exports nothing.
   unscaled value; the scale rides beside it) and, for MIN and MAX, DATE32, so
   the merge in worker order does not depend on the schedule. No float is
   folded: a float input is refused by name. SUM over a decimal is a DECIMAL128 of
-  the input's scale in the declared precision, over an integer an INT64; a sum
+  the input's scale in the declared precision, over an integer an INT64 (or
+  the DECIMAL(38, 0) a plan declares for the SQL integer sum); a sum
   that leaves 128 bits, has more digits than the declared precision, or leaves
   INT64 is refused rather than wrapped. AVG is a DOUBLE: one conversion of the
   exact sum (`decimal_to_float64` for a decimal) divided by the count. Over no

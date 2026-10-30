@@ -34,6 +34,7 @@
 from komira_arrow.arrow_types import ArrowType
 from komira_arrow.schema import Schema
 from komira_collections.slab import Slab
+from komira_lowering.sum_fuse import lowered_agg_expr
 from komira_lowering.lowered_plan import (
     LoweredPlan,
     LoweringInputs,
@@ -387,7 +388,12 @@ struct _Cutter(Movable):
         for i in range(len(ad.agg_exprs)):
             if ad.agg_exprs[i].func == AGG_UDF:
                 raise _uncuttable(node, "a UDF aggregate function")
-            aggs.append(ad.agg_exprs[i].copy())
+            # SUM(CAST(<signed integer> AS DECIMAL(38, 0))), the SQL integer
+            # sum, runs as the integer fold (`sum_fuse`); the declared output
+            # type is the node's and stays DECIMAL(38, 0).
+            aggs.append(
+                lowered_agg_expr(ad.agg_exprs[i], ad.child[].output_schema)
+            )
         var pipe = self.walk(ad.child[], inputs)
         var triple = _agg_triple(ad, node.output_schema, pipe, inputs)
         var pid = len(self.params.agg)
