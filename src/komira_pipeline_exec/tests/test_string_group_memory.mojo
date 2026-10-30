@@ -17,6 +17,9 @@
 #   * A budget that holds the workers' tables and not the merge's fails in
 #     `combine` by name; with room for the merge the same tables merge. The
 #     pool is whole after the refusal and after the sink is dropped.
+#   * The merge's string table is charged on its own: a budget that holds the
+#     workers and the merged group table but not the merged strings is refused.
+#   * A dictionary's code-to-id array is drawn from the pool before it is made.
 #   * More distinct strings than an intern table holds are refused by name in
 #     a worker and in the merge, where two workers' disjoint strings add up.
 #   * A sink dropped without a combine returns what its workers hold.
@@ -25,6 +28,8 @@ from std.testing import TestSuite, assert_equal, assert_raises, assert_true
 
 from komira_arrow.arrow_types import ArrowType
 from komira_arrow.column import Column
+from komira_arrow.dictionary_array import StringDictionaryArray
+from komira_arrow.primitive_array import PrimitiveArray
 from komira_arrow.schema import (
     Field,
     RecordBatch,
@@ -197,6 +202,80 @@ def test_growth_past_the_budget_is_refused_by_name_in_the_merge() raises:
     ok.finalize()
 
 
+def _long_keys(first: Int, rows: Int) raises -> RecordBatch:
+    return _unique(first, rows, 2000)
+
+
+def _two_long_workers(ref pool: SegmentPool) raises -> StringGroupAggSink:
+    """Two workers holding the same 200 keys of 2,000 bytes: a small group
+    table and a large string arena."""
+    var sink = _sink(pool)
+    sink.resize_worker_state(2)
+    sink.consume(0, Morsel(_long_keys(0, 200), 0, 0))
+    sink.consume(1, Morsel(_long_keys(0, 200), 1, 0))
+    return sink^
+
+
+def test_the_merge_intern_table_is_charged_on_its_own() raises:
+    var probe = SegmentPool(1 << 30)
+    var measured = _two_long_workers(probe)
+    var held = probe.granted()
+    _ = measured^
+    assert_equal(probe.granted(), 0)
+    # Room for both workers and 100 KB: the merged group table (200 groups,
+    # about 20 KB) fits, the 400 KB of merged strings does not.
+    var tight = SegmentPool(held + 100000)
+    var sink = _two_long_workers(tight)
+    with assert_raises(contains="for its distinct key strings"):
+        _ = _combine_and_take(sink, 2)
+    _ = sink^
+    assert_equal(tight.granted(), 0)
+    var roomy = SegmentPool(held + 1000000)
+    var ok = _two_long_workers(roomy)
+    assert_equal(_combine_and_take(ok, 2).num_rows(), 200)
+    assert_equal(roomy.granted(), 0)
+    ok.finalize()
+
+
+def _big_dictionary_batch(entries: Int) raises -> RecordBatch:
+    """One row over a dictionary of `entries` strings."""
+    var values = List[String]()
+    for i in range(entries):
+        values.append(String(i))
+    var codes = PrimitiveArray[DType.int32].allocate(2)
+    codes.set(0, 0)
+    codes.set(1, 1)
+    var sb = SchemaBuilder()
+    var rb = RecordBatchBuilder()
+    sb.add_field(Field.dictionary("a", ArrowType.INT32, False))
+    rb.add_column(
+        Column.from_dictionary(
+            StringDictionaryArray.from_parts(
+                codes^, StringArray.from_strings(values)
+            )
+        )
+    )
+    return rb.build(sb.build())
+
+
+def test_a_dictionary_code_array_is_charged_before_it_is_made() raises:
+    # A million-entry dictionary read by code needs a 4 MB code-to-id array,
+    # for two rows. A 1 MB budget refuses it by name; read by value (no array)
+    # the same two rows fit, and the pool is whole after both.
+    var pool = SegmentPool(1000000)
+    var by_code = _sink(pool, False, True)
+    by_code.resize_worker_state(1)
+    with assert_raises(contains="bytes of the segment's memory pool for its distinct key strings"):
+        by_code.consume(0, Morsel(_big_dictionary_batch(1000000), 0, 0))
+    _ = by_code^
+    assert_equal(pool.granted(), 0)
+    var by_value = _sink(pool, False, False)
+    by_value.resize_worker_state(1)
+    by_value.consume(0, Morsel(_big_dictionary_batch(1000000), 0, 0))
+    assert_equal(_combine_and_take(by_value, 1).num_rows(), 2)
+    assert_equal(pool.granted(), 0)
+
+
 def test_more_strings_than_an_intern_table_holds_are_refused_by_name() raises:
     # The limit is a parameter so the refusal can be reached with a few
     # strings. 128 fit in a worker, 129 do not.
@@ -235,6 +314,8 @@ def main() raises:
     suite.test[test_a_budget_the_string_bytes_outgrow_is_refused_by_name]()
     suite.test[test_a_budget_the_group_table_outgrows_is_refused_by_name]()
     suite.test[test_growth_past_the_budget_is_refused_by_name_in_the_merge]()
+    suite.test[test_the_merge_intern_table_is_charged_on_its_own]()
+    suite.test[test_a_dictionary_code_array_is_charged_before_it_is_made]()
     suite.test[test_more_strings_than_an_intern_table_holds_are_refused_by_name]()
     suite.test[test_a_sink_dropped_without_a_combine_returns_its_memory]()
     suite^.run()

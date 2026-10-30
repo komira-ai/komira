@@ -25,7 +25,8 @@
 #            SINK_SORT, key NONE  `SortSink` (`sink_sort`), from the `SortSinkData`
 #                                 the descriptor's `sink_param_id` names
 #
-# Anything else (SOURCE_CONCAT, OP_JOIN_PROBE and the other sinks) is refused by name, because no member serves it yet.
+# Anything else (SOURCE_CONCAT, OP_JOIN_PROBE and the other sinks) is refused
+# by name, because no member serves it yet.
 #
 # The workers of a segment each get their own operator instances, built from
 # one set of shared parts the builder keeps per operator (the predicate, the

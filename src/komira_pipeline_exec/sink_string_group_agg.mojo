@@ -52,12 +52,19 @@
 # soon as it is merged, and every reservation is returned when the sink is
 # dropped, whether or not the query succeeded.
 #
+# A dictionary's code-to-id array (4 bytes a dictionary entry, per key column
+# read) and `combine`'s worker-to-merge id array (4 bytes an entry of the
+# worker) are drawn from the pool before they are made and given back after.
+#
 # Memory the pool does not see: the buffers of the morsel being folded (per
 # key column 17 bytes a row, per aggregate argument 16 bytes and a flag a row,
-# the projected batch, a flat STRING key column copied once, a dictionary's
-# code-to-id array), freed when `consume` returns; the old arrays of a table
-# while it doubles; the worker-to-merge id array of `combine` (4 bytes per
-# entry of the worker); and the output batch.
+# the projected batch, a flat STRING key column copied once), freed when
+# `consume` returns; the old arrays of a table while it doubles; and the
+# output batch.
+#
+# The order of the output groups is the order the merge first met them (worker
+# order, then each worker's first-seen order) and is not specified: a plan that
+# needs an order sorts.
 #
 # Refused when the sink is built: no group-by expression, an aggregate the sink
 # does not serve, an aggregate without its argument, an output schema that does
@@ -415,6 +422,10 @@ struct StringGroupAggSink(MorselSinkImpl):
             ref t = slot.table
             # The merge id of each string of this worker, -1 until a group
             # uses it.
+            # Drawn from the pool before it is made, given back after.
+            var remap_bytes = 4 * slot.intern.n
+            if not self._merge_reservation.try_grow(remap_bytes):
+                raise self._refused(False, "merge id array", remap_bytes)
             var remap = List[Int32](length=slot.intern.n, fill=-1)
             for g in range(t.n):
                 for k in range(nk):
@@ -458,6 +469,7 @@ struct StringGroupAggSink(MorselSinkImpl):
                         self._funcs[i],
                         self._labels[i],
                     )
+            self._merge_reservation.release(remap_bytes)
             # This worker is merged: free its tables and return its memory.
             slot.table = GroupTable(nk, na, self._max_groups)
             slot.intern = InternTable(self._max_strings)

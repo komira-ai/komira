@@ -81,6 +81,7 @@ struct _Want(Copyable, Movable):
     var count: Int
     var qty: Int
     var price: Int
+    var disc: Int
     var disc_price: Int
     var charge: Int
 
@@ -89,6 +90,7 @@ struct _Want(Copyable, Movable):
         self.count = 0
         self.qty = 0
         self.price = 0
+        self.disc = 0
         self.disc_price = 0
         self.charge = 0
 
@@ -111,6 +113,7 @@ def _wanted(ref t: Q1Table) -> List[_Want]:
                 out[k].count += 1
                 out[k].qty += t.quantity[r]
                 out[k].price += t.price[r]
+                out[k].disc += t.discount[r]
                 out[k].disc_price += dp
                 out[k].charge += dp * (100 + t.tax[r])
     return out^
@@ -146,6 +149,19 @@ def _run_many(
                 batch.column_at(2).as_decimal128().get_i128(i)
                 == _w(want[i].qty),
                 "sum_qty differs on a run",
+            )
+            assert_true(
+                batch.column_at(3).as_decimal128().get_i128(i)
+                == _w(want[i].price),
+                "sum_base_price differs on a run",
+            )
+            assert_equal(
+                batch.column_at(6).as_primitive[DType.float64]().get(i),
+                Float64(want[i].qty) / 100.0 / Float64(want[i].count),
+            )
+            assert_equal(
+                batch.column_at(8).as_primitive[DType.float64]().get(i),
+                Float64(want[i].disc) / 100.0 / Float64(want[i].count),
             )
             assert_true(
                 batch.column_at(4).as_decimal128().get_i128(i)

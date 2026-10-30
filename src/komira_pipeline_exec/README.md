@@ -132,11 +132,13 @@ Import each module by name; the package root exports nothing.
   group table is keyed by those merge ids, so one string met as id 3 in one worker
   and id 9 in another is one group; nothing is re-hashed. Both tables of a worker
   are charged to its reservation as they grow, before they grow, and freed and
-  returned once merged; the merge's tables are charged to the sink's own. Memory
-  the pool does not see: the morsel buffers (17 bytes a row per key column, 16
-  and a flag per aggregate argument, a flat key column copied once, a
-  dictionary's code-to-id array), the old arrays while a table doubles, the
-  merge's worker-to-merge id array, and the output. Limits: a table holds at
+  returned once merged; the merge's tables are charged to the sink's own. A
+  dictionary's per-morsel code-to-id array and the merge's worker-to-merge id
+  array (4 bytes an entry each) are drawn from the pool before they are made and
+  given back after. Memory the pool does not see: the morsel buffers (17 bytes a
+  row per key column, 16 and a flag per aggregate argument, a flat key column
+  copied once), the old arrays while a table doubles, and the output. The order
+  of the output groups is first-seen in the merge and not specified. Limits: a table holds at
   most 2^30 groups and 2^30 distinct strings, and a string key column in the
   output at most 2 GiB of bytes. The merge is serial, as the fixed-width sink's.
   `string_harness` is the test table, with dictionary columns that are rotated

@@ -218,6 +218,25 @@ def _eight_rows() -> Q1Table:
     return t^
 
 
+def _days_from_civil(y_in: Int, m: Int, d: Int) -> Int:
+    """Days since 1970-01-01 of a proleptic Gregorian date (the civil-calendar
+    algorithm), computed here and not by the engine or the fixture."""
+    var y = y_in - 1 if m <= 2 else y_in
+    var era = y // 400
+    var yoe = y - era * 400
+    var mp = (m + 9) % 12
+    var doy = (153 * mp + 2) // 5 + d - 1
+    var doe = yoe * 365 + yoe // 4 - yoe // 100 + doy
+    return era * 146097 + doe - 719468
+
+
+def test_the_cutoff_day_is_1998_09_02_which_is_1998_12_01_less_90_days() raises:
+    assert_equal(_days_from_civil(1970, 1, 1), 0)
+    assert_equal(_days_from_civil(2000, 3, 1), 11017)
+    assert_equal(Q1_CUTOFF, _days_from_civil(1998, 9, 2))
+    assert_equal(Q1_CUTOFF, _days_from_civil(1998, 12, 1) - 90)
+
+
 def test_the_oracle_is_the_hand_computed_answer_on_eight_rows() raises:
     # Pins the oracle the other tests compare with, from numbers written out by
     # hand. A F: rows 0 and 1. qty 10.00 + 20.00 = 30.00, price 300.00,
@@ -340,6 +359,7 @@ def test_a_flag_the_filter_removes_from_every_row_is_not_in_the_answer() raises:
 
 def main() raises:
     var suite = TestSuite()
+    suite.test[test_the_cutoff_day_is_1998_09_02_which_is_1998_12_01_less_90_days]()
     suite.test[test_the_oracle_is_the_hand_computed_answer_on_eight_rows]()
     suite.test[test_q1_on_eight_rows_is_the_hand_computed_answer_from_both_files]()
     suite.test[test_q1_over_generated_rows_equals_the_oracle_in_every_combination]()

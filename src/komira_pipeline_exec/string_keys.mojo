@@ -37,8 +37,11 @@
 # capacity: start 8, length 4, hash 8, two 4-byte slots) as the capacity
 # doubles, and the byte arena as it doubles from 1 KiB. `intern` allocates
 # nothing and returns -1 when the pool denies a step (`denied_bytes` says how
-# many bytes were asked for), or when the table is at `max_entries`
-# (`too_many`). Not charged: the old arrays while a table doubles.
+# many bytes were asked for), or when the table already holds `max_entries`
+# entries (`too_many`). `read_string_keys` also draws the 4 bytes a dictionary
+# entry of its per-morsel code-to-id array before making it and gives them back
+# when the morsel's column is read. Not charged: the old arrays while a table
+# doubles.
 
 from komira_arrow.arrow_types import ArrowType
 from komira_arrow.bitmap import Bitmap
@@ -122,9 +125,6 @@ struct InternTable(Movable):
         var new_cap = _FIRST_ENTRIES if self.capacity == 0 else (
             self.capacity * 2
         )
-        if new_cap > self.max_entries:
-            self.too_many = True
-            return False
         var step = (new_cap - self.capacity) * _ENTRY_BYTES
         if not res.try_grow(step):
             self.denied_bytes = step
@@ -176,6 +176,9 @@ struct InternTable(Movable):
                     return id
                 s = (s + 1) & mask
         if len(span) > _MAX_STRING_BYTES:
+            self.too_many = True
+            return -1
+        if self.n >= self.max_entries:
             self.too_many = True
             return -1
         if self.n == self.capacity:
@@ -270,8 +273,15 @@ def read_string_keys(
                 " STRING and string DICTIONARY columns"
             )
         var size = col.dict_size()
+        # The code-to-id array of this morsel, 4 bytes a dictionary entry, is
+        # drawn from the pool before it is made and given back on the way out.
         var seen = List[Int32]()
+        var seen_bytes = 0
         if by_code:
+            seen_bytes = 4 * size
+            if not res.try_grow(seen_bytes):
+                table.denied_bytes = seen_bytes
+                return False
             seen = List[Int32](length=size, fill=-1)
         for r in range(rows):
             if has_nulls and col.is_null_at(r):
@@ -297,10 +307,12 @@ def read_string_keys(
                 var span = col.string_dict_value_at(code).into_span()
                 id = table.intern(span, hash_string(span), res)
                 if id < 0:
+                    res.release(seen_bytes)
                     return False
                 if by_code:
                     seen[code] = Int32(id)
             out.push(id, table.hashes[id])
+        res.release(seen_bytes)
         return True
     if t == ArrowType.STRING:
         var arr = col.as_string()

@@ -11,6 +11,7 @@
 #     its own prefix, and for the empty string, which is an entry like another.
 #   * Five thousand strings across many doublings of the slot directory and of
 #     the byte arena keep their ids and their bytes.
+#   * An entry limit that is not 64 x 2^k (100) holds exactly that many.
 #   * A step the pool denies allocates nothing and changes nothing: the call
 #     returns -1, says how many bytes it asked for, and the table still
 #     answers for what it held. A table at its entry limit says so.
@@ -132,6 +133,21 @@ def test_a_table_at_its_entry_limit_says_so() raises:
     assert_equal(table.intern(Span(held), hash_string(Span(held)), res), 7)
 
 
+def test_an_entry_limit_that_is_no_power_of_two_times_64_holds_exactly() raises:
+    # 100 is between the directory sizes 64 and 128: all 100 fit, the 101st
+    # does not.
+    var table = InternTable(100)
+    var res = WorkerReservation(SegmentPool())
+    for i in range(100):
+        var b = _bytes("entry " + String(i))
+        assert_equal(table.intern(Span(b), hash_string(Span(b)), res), i)
+    assert_true(not table.too_many)
+    var extra = _bytes("entry 100")
+    assert_equal(table.intern(Span(extra), hash_string(Span(extra)), res), -1)
+    assert_true(table.too_many)
+    assert_equal(table.n, 100)
+
+
 def test_the_content_hash_is_a_function_of_the_bytes() raises:
     var a1 = _bytes("hello")
     var a2 = _bytes("hello")
@@ -157,5 +173,6 @@ def main() raises:
     suite.test[test_thousands_of_strings_keep_their_ids_and_bytes]()
     suite.test[test_a_denied_step_allocates_nothing_and_changes_nothing]()
     suite.test[test_a_table_at_its_entry_limit_says_so]()
+    suite.test[test_an_entry_limit_that_is_no_power_of_two_times_64_holds_exactly]()
     suite.test[test_the_content_hash_is_a_function_of_the_bytes]()
     suite^.run()
