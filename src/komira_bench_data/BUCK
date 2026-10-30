@@ -1,4 +1,4 @@
-load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
 
 # The datasets of the komira benchmarks: a manifest type (name, scale, files with
 # expected size, sha256 and row count, any of which may be unrecorded) and a
@@ -6,8 +6,12 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # generated h2o-style group-by table and join tables); a verifier that checks a
 # cache directory against a manifest; a lock file that records the fingerprint of
 # the dataset a run used; and a seeded, deterministic generator of the h2o-style
-# tables that writes Parquet through komira_parquet_writer. It ships no data,
-# downloads nothing and generates no TPC-H: the user supplies those files.
+# tables that writes Parquet through komira_parquet_writer; and the staging of
+# TPC-H: the pinned DuckDB's tpch extension generates the eight tables into the
+# manifest layout (stage.mojo, stage_cli.mojo, the komira-bench-stage binary
+# below), and the verified files' checksums are printed as lines to record. It
+# ships no data and downloads nothing: the user supplies ClickBench, the DuckDB
+# binary and the extension file.
 #
 # The welded tests (each file's header says what it proves):
 # - test_manifest: the supported manifests, TPC-H row counts, ClickBench's
@@ -24,9 +28,18 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #   size, the decoded rows against the stream, ranges, batch independence.
 # - test_h2o_join: the same for x, small, medium and big, and the keys that join.
 # - test_h2o_files: generated files verified and locked, never regenerated.
+# - test_recorded: recorded checksums fill a manifest, a malformed or
+#   contradicting record is refused, the printed line has the form the table
+#   takes, and every checksum a supported manifest holds is one it records.
+# - test_stage: the SQL and the files it names, the extension file check, the
+#   whole generation over a fake DuckDB that writes files (layout, refusal to
+#   replace, DuckDB stopped before cleanup, row counts), the report and its
+#   lines, and the pinned extension (production pin, refusal of anything else).
+# - test_stage_cli: the flags, the exit status, an extension that is not the
+#   pinned file refused before anything is created or started.
 # - test_no_env_reads: the sources read no environment, hold no raw pointer in a
 #   public signature, import only these deps, and use no stdlib parallelize.
-_SRCS = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"])
+_SRCS = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo", "main/**/*.mojo"])
 
 mojo_library(
     name = "komira_bench_data",
@@ -34,7 +47,9 @@ mojo_library(
     # Direct dependencies: the rule adds each one's own closure to the compiler.
     deps = [
         "//src/komira_arrow:komira_arrow",
+        "//src/komira_bench_duckdb:komira_bench_duckdb",
         "//src/komira_collections:komira_collections",
+        "//src/komira_compression:komira_compression",
         "//src/komira_crypto:komira_crypto",
         "//src/komira_parquet_api:komira_parquet_api",
         "//src/komira_parquet_writer:komira_parquet_writer",
@@ -60,7 +75,21 @@ mojo_library(
         "tests/test_lock.mojo",
         "tests/test_manifest.mojo",
         "tests/test_no_env_reads.mojo",
+        "tests/test_recorded.mojo",
+        "tests/test_stage.mojo",
+        "tests/test_stage_cli.mojo",
         "tests/test_verify.mojo",
     ],
+    visibility = ["PUBLIC"],
+)
+
+# The staging command: `komira-bench-stage tpch|verify` (stage_cli.mojo lists
+# the flags and the exit status). Run on a benchmark host with the pinned DuckDB
+# and its tpch extension file as arguments; it is never run by a build.
+mojo_binary(
+    name = "komira_bench_stage",
+    srcs = ["main/stage_main.mojo"],
+    main = "main/stage_main.mojo",
+    deps = [":komira_bench_data"],
     visibility = ["PUBLIC"],
 )

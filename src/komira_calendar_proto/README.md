@@ -78,3 +78,33 @@ var moved = decode_json[OccurrenceOverride](
 assert_equal(moved.start.value(), "2026-10-15T10:00:00")
 assert_false(Bool(moved.title))
 ```
+
+## Build files
+
+This package is built with buildrules' `mojo_package` and packaged for mopm as `komira_calendar_proto`, version 0.1.0
+(`mopm.toml`). Its library is the generator's output, committed at `generated/komira_calendar_proto_generated/` and
+compiled as the module `komira_calendar_proto` (`[targets] lib` of `mopm.toml`); its tests are `tests/`. It depends on 2 sibling packages, `komira_proto_codec`, `komira_wkt` (each `{ path = "../<name>", version = "0.1" }`), so the `.conda` of this package records `mojo-<name> >=0.1,<0.2` for each as its dependencies
+and holds none of their files. The files that are not sources:
+
+| file | what |
+|---|---|
+| `mopm.toml` | the mopm manifest: name, version, the Mojo version, the dependencies and where the library and its tests are |
+| `mopm.lock` | the toolchain pins and the path dependencies, direct and transitive (no registry is reached: every dependency is a sibling) |
+| `mopm-toolchain.toml` | the exact mopm and Mojo versions the build uses (written by hand) |
+| `buildrules.mojo.lock.bzl`, `buildrules.mojo.bzl` | written by `buildrules mojo sync` from the files above and from the manifests of the siblings; `buildrules mojo check` fails when they are stale |
+
+The `.proto` files are the inputs of the generator. `komira_calendar_proto_generated_gen` writes the Mojo for them,
+`komira_calendar_proto_generated_fresh` compares it with the committed directory and fails when they differ, and
+`:lib` is built only after that check has passed. Regenerate with
+`./buck2 run komira//tools/build/gen:regen -- komira//src/komira_calendar_proto:komira_calendar_proto_generated`.
+`mojo_package` does not run that check itself, so the gate is a target beside it (`BUCK`).
+
+After any change to a `.proto` file, a test, or a manifest of this package or of a sibling, regenerate, run
+`buildrules mojo sync` with the packages staged, commit what it writes, and build `komira//src/komira_calendar_proto:lib`
+on the farm.
+
+`:conda` is buildrules' `mojo_conda` over `:lib`, packed with the manifests of the path dependencies beside its own
+(`members`); `:conda_holds` reads it back and fails when the dependencies are not exactly the ones above.
+`:komira_calendar_proto` is `:lib` as komira's Mojo rules take it (`mojo_adopted_library`): its `deps` are the adopted
+target of each package in `[dependencies]`, and the rule refuses a list that is not the closure `:lib` was built from.
+It also compiles and runs the README's examples (`[tests][readme]`) against `:lib`.
