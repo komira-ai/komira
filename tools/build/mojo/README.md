@@ -1134,7 +1134,11 @@ that library in its Mojo deps closure. Each C archive has one owner, the
 `THIRD_PARTY_OWNERS` row of its package
 ([`one_definition/libraries.bzl`](../one_definition/libraries.bzl)) for a
 vendored one, with the symbol prefix of its renamed build (`komira_awslc_`
-for aws-lc, whose owner is `komira_crypto`). Every `mojo_library` outside
+for aws-lc, whose owner is `komira_awslc`, the package that builds the archive that
+komira_crypto and komira_uuid link). A package built with `mojo_package`
+is named by its adopted label (`//src/<name>:<name>`, adopt.bzl), though the
+file its dependents import is the package's `:lib`; the closure holds that
+label. Every `mojo_library` outside
 `src/tests/` carries two validations
 ([`native_reach.bzl`](native_reach.bzl)), which fail its build and the build
 of every target holding it:
@@ -1143,7 +1147,7 @@ of every target holding it:
   `deps` link, with every archive those need, has its owner in the closure
   or is its own. A third_party archive with no owner row, or a row with no
   owner, is refused. So `komira_http_core`, whose `//third_party/s2n-tls:s2n`
-  needs aws-lc, depends on `komira_crypto`, and a library calling
+  needs aws-lc, depends on `komira_crypto` (which depends on `komira_awslc`), and a library calling
   `komira_fs`'s shim depends on `komira_fs`, never on `:komira_fs_posix`.
 - `native_reach_calls`, a run of the Zig tool
   [`native_reach/`](native_reach/README.md): no string literal in its
