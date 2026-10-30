@@ -5,8 +5,10 @@
 //!
 //! It refuses, with a message that names the file and the fact, rather than guess:
 //!  - an import that maps to no package of this repository, or to a package still on `mojo_library`;
-//!  - a native library: C sources, a `native*` or `dlopen` attribute, a dependency whose manifest
-//!    declares natives;
+//!  - a native library of the package itself: C sources, a `native*` or `dlopen` attribute, `DLHandle`;
+//!  - a dependency whose manifest declares natives that are not static libraries (`[native-dependencies]`,
+//!    a shared `[native.<id>]`), or a static native that only the test-only dependencies reach (a static
+//!    native the library reaches is accepted and carried to `mojo_adopted_library`);
 //!  - a BUCK file it cannot read as data (variables, comprehensions, operators, triple-quoted
 //!    strings) or reads as more than the recipe covers (other rules, other attributes, other loads);
 //!  - `deps` or `test_deps` that disagree with the imports, a `test_srcs` list that is not the
@@ -544,8 +546,7 @@ pub fn plan(c: *Ctx, files: []const File, o: Options) Error!Plan {
             return std.mem.lessThan(u8, x.name, y.name);
         }
     }.less);
-    // the static natives `lib` links: those of the packages the library reaches (a package only the tests
-    // import is linked into the tests alone)
+    // the static natives `lib` links: those of the packages the library reaches; one that only the tests reach is refused
     var lib_closure = std.ArrayList([]const u8).empty;
     try lib_closure.appendSlice(c.a, deps_sorted);
     var li: usize = 0;
@@ -555,7 +556,10 @@ pub fn plan(c: *Ctx, files: []const File, o: Options) Error!Plan {
         };
     }
     var link_natives = std.ArrayList([]const u8).empty;
-    for (natives_in.items) |nm| if (contains(lib_closure.items, nm)) try link_natives.append(c.a, nm);
+    for (natives_in.items) |nm| {
+        if (!contains(lib_closure.items, nm)) return c.refuse("'{s}' declares a static native and is reached only through the test-only dependencies ({s}), not by the library: no hand migration has a native that only the tests link, so what the BUCK file should carry is unverified", .{ nm, try std.mem.join(c.a, ", ", dev_sorted) });
+        try link_natives.append(c.a, nm);
+    }
     const link_sorted = try uniqueSorted(c.a, link_natives.items);
     for (deps_sorted) |d| for (closure.items) |m| if (std.mem.eql(u8, m.name, d)) try direct.append(c.a, try makeDep(c, d, m.version));
     for (dev_sorted) |d| for (closure.items) |m| if (std.mem.eql(u8, m.name, d)) try direct_dev.append(c.a, try makeDep(c, d, m.version));

@@ -1124,3 +1124,57 @@ test "the command line: the migrated output names the version --mopm gives" {
     try t.expect(std.mem.indexOf(u8, try writeOf(p, "src/alpha/BUCK"), "toolchains//:mopm_0_0_86") != null);
     try t.expect(std.mem.indexOf(u8, try writeOf(p, "src/alpha/mopm-toolchain.toml"), "0.0.73") == null);
 }
+
+const native_gamma = [_]plan.File{
+    .{ .path = "src/gamma/BUCK", .text = migrated_buck },
+    .{ .path = "src/gamma/mopm.toml", .text = "[package]\nname = \"gamma\"\nversion = \"0.1.4\"\n\n[native.g]\nkind = \"static\"\nsrcs = [\"native/g.c\"]\n" },
+};
+const dev_options = plan.Options{ .package = "alpha", .description = "A library.", .mopm = repo_mopm, .dev_dependencies = true };
+
+test "a static native that only the test-only dependencies reach is refused, naming the dependency" {
+    var ar = arena();
+    defer ar.deinit();
+    const a = ar.allocator();
+    const dev_buck = try buckWith(a, "    visibility", "    test_deps = [\"//src/gamma:gamma\"],\n    visibility");
+    const dev_test = "from alpha import x\nfrom gamma import y\n";
+    try expectRefusal(a, try mini(a, .{ .buck = dev_buck, .test_src = dev_test, .extra = &native_gamma }), dev_options, "'gamma' declares a static native and is reached only through the test-only dependencies (gamma)");
+}
+
+test "a native reached through both the library and the test-only dependencies gives one cxx_toolchain" {
+    var ar = arena();
+    defer ar.deinit();
+    const a = ar.allocator();
+    const beta_toml = beta_toml_text ++ "\n[dependencies]\ngamma = { path = \"../gamma\", version = \"0.1\" }\n";
+    const dev_buck = try buckWith(a, "    visibility", "    test_deps = [\"//src/gamma:gamma\"],\n    visibility");
+    const dev_test = "from alpha import x\nfrom gamma import y\n";
+    const p = try planOf(a, try mini(a, .{ .beta_toml = beta_toml, .buck = dev_buck, .test_src = dev_test, .extra = &native_gamma }), dev_options);
+    const buck = try writeOf(p, "src/alpha/BUCK");
+    try t.expectEqual(@as(usize, 1), std.mem.count(u8, buck, "cxx_toolchain = "));
+    try t.expect(std.mem.indexOf(u8, buck, "# gamma, in the closure, declares C of its own") != null);
+}
+
+test "two natives in the closure are named in the plural" {
+    var ar = arena();
+    defer ar.deinit();
+    const a = ar.allocator();
+    const beta_toml = beta_toml_text ++ "\n[dependencies]\ndelta = { path = \"../delta\", version = \"0.1\" }\ngamma = { path = \"../gamma\", version = \"0.1\" }\n";
+    const extra = [_]plan.File{
+        native_gamma[0],
+        native_gamma[1],
+        .{ .path = "src/delta/BUCK", .text = migrated_buck },
+        .{ .path = "src/delta/mopm.toml", .text = "[package]\nname = \"delta\"\nversion = \"0.1.0\"\n\n[native.d]\nkind = \"static\"\n" },
+    };
+    const p = try planOf(a, try mini(a, .{ .beta_toml = beta_toml, .extra = &extra }), mini_options);
+    const buck = try writeOf(p, "src/alpha/BUCK");
+    try t.expectEqual(@as(usize, 1), std.mem.count(u8, buck, "cxx_toolchain = "));
+    // the comment is wrapped, so the words are read without its line breaks
+    const flat = try std.mem.replaceOwned(u8, a, try std.mem.replaceOwned(u8, a, buck, "\n        # ", " "), "\n    # ", " ");
+    try t.expect(std.mem.indexOf(u8, flat, "delta and gamma, in the closure, declare C of their own (static natives), so `lib`'s closure carries those archives and a dependent's link takes them from here.") != null);
+}
+
+test "a nested C++ source of the package is refused" {
+    var ar = arena();
+    defer ar.deinit();
+    const a = ar.allocator();
+    try expectRefusal(a, try mini(a, .{ .extra = &.{.{ .path = "src/alpha/native/deep/shim.cc" }} }), mini_options, "src/alpha/native/deep/shim.cc: a native source or library");
+}

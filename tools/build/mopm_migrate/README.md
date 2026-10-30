@@ -84,8 +84,8 @@ lock and `conda` are those of any package with dependencies (the native belongs 
 `cxx_toolchain = "komira//tools/build/mojo:adopt_cxx_link_facts"`, with a comment naming the packages that declare the C,
 so `lib`'s closure archives reach a dependent's link. It gets no `c_deps` and no `native_static`: those say that
 the package owns the C. A package that does own C (a C file, a `native*`, `dlopen` or `c_deps` attribute, `DLHandle`)
-is still refused. Only the packages the library sources import count: one that only the tests import is linked into
-the tests, and does not add the attribute.
+is still refused. A static native that only the test-only dependencies reach (not the library) is refused too, naming
+the dependency: no hand migration has a native that only the tests link.
 
 `[dev-dependencies]` is behind a flag because no migrated package has one: its lock rows and the
 sync's workspaces are unverified by a hand migration.
@@ -121,7 +121,8 @@ tool keeps the comment as written, so the author edits it.
   its hand migration, with the manifests of its closure, `komira_libc` among them) requires the hand migration's manifest,
   toolchain file and lock byte for byte, its rows, and its BUCK file, where the one difference is the wording of the comment
   above `cxx_toolchain`; a native deep in the closure adds the attribute; none in the closure adds nothing; a package that
-  owns C, and a dependency with `[native-dependencies]` or a shared `[native.<id>]`, are refused.
+  owns C, a dependency with `[native-dependencies]` or a shared `[native.<id>]`, and a static native only the test-only
+  dependencies reach, are refused; a native reached by both closures gives one attribute; two natives are named in the plural.
 - the plan writes no `ci/targets` row and names the generator for each layout.
 - the dry run prints the plan and the tree is byte for byte what it was.
 - a real run on a scratch tree, and a second run that refuses.
