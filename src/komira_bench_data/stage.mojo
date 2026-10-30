@@ -25,121 +25,22 @@ from komira_bench_duckdb import (
     KIND_INT,
     KIND_TEXT,
 )
-from komira_crypto import hex_lower_array_32, sha256
+
+from std.os import rmdir
 
 from .manifest import DatasetManifest, recorded_line
+from .stage_extension import ExtensionCheck
 from .verify import FILE_UNRECORDED, VerifyReport
 
 comptime STAGE_VERSION: String = "komira-tpch-stage-1"
 comptime STAGE_THREADS: Int = 1
 comptime STAGE_ROW_GROUP_ROWS: Int = 122880
 comptime STAGE_COMPRESSION: String = "snappy"
-comptime DEFAULT_EXTENSION_PLATFORM: String = "linux_amd64"
 
 comptime TPCH_ABSENT: Int = 0
 comptime TPCH_PARTIAL: Int = 1
 comptime TPCH_PRESENT: Int = 2
 
-comptime EXT_PINNED: Int = 0
-comptime EXT_UNRECORDED: Int = 1
-comptime EXT_MISMATCH: Int = 2
-comptime EXT_GZIPPED: Int = 3
-
-
-# --- the tpch extension file -----------------------------------------------------
-
-
-struct ExtensionPin(Copyable, Movable):
-    """One accepted tpch extension file: for a DuckDB release and a platform,
-    the sha256 and size of `tpch.duckdb_extension` (unzipped)."""
-
-    var version: String
-    var platform: String
-    var sha256: String
-    var size: Int
-
-    def __init__(out self, var version: String, var platform: String, var sha256: String, size: Int):
-        self.version = version^
-        self.platform = platform^
-        self.sha256 = sha256^
-        self.size = size
-
-
-def tpch_extension_pins() -> List[ExtensionPin]:
-    """Every accepted extension file. None is recorded yet: the first staging
-    run prints the line to add (`extension_pin_line`)."""
-    var out = List[ExtensionPin]()
-    return out^
-
-
-def extension_pin_line(version: String, platform: String, sha256: String, size: Int) -> String:
-    """The line `tpch_extension_pins` takes for an observed extension file."""
-    return (
-        String('    out.append(ExtensionPin("') + version + String('", "') + platform
-        + String('", "') + sha256 + String('", ') + String(size) + String("))")
-    )
-
-
-struct ExtensionCheck(Copyable, Movable):
-    """What checking an extension file against the pins found."""
-
-    var status: Int
-    var version: String
-    var platform: String
-    var sha256: String
-    var size: Int
-
-    def __init__(
-        out self, status: Int, var version: String, var platform: String, var sha256: String, size: Int
-    ):
-        self.status = status
-        self.version = version^
-        self.platform = platform^
-        self.sha256 = sha256^
-        self.size = size
-
-    def describe(self) -> String:
-        if self.status == EXT_PINNED:
-            return String("PINNED tpch extension ") + self.version + " " + self.platform + " sha256 " + self.sha256
-        if self.status == EXT_GZIPPED:
-            return String("the extension file is gzip-compressed: unzip it and pass the .duckdb_extension file")
-        if self.status == EXT_MISMATCH:
-            return (
-                String("sha256 ") + self.sha256 + " (" + String(self.size)
-                + " bytes) is not the pinned tpch extension for duckdb " + self.version + " " + self.platform
-            )
-        return (
-            String("UNRECORDED tpch extension ") + self.version + " " + self.platform
-            + " sha256 " + self.sha256 + " (" + String(self.size) + " bytes)"
-        )
-
-
-def check_extension_bytes(
-    data: Span[UInt8, _], pins: List[ExtensionPin], version: String, platform: String
-) -> ExtensionCheck:
-    """Check the bytes of an extension file against `pins`: a pin for the
-    version and platform decides (PINNED or MISMATCH); with none, the file is
-    UNRECORDED and its observed digest is reported. A gzip file is refused."""
-    var digest = hex_lower_array_32(sha256(data))
-    var size = len(data)
-    if size >= 2 and data[0] == UInt8(0x1F) and data[1] == UInt8(0x8B):
-        return ExtensionCheck(EXT_GZIPPED, version.copy(), platform.copy(), digest^, size)
-    for i in range(len(pins)):
-        if pins[i].version == version and pins[i].platform == platform:
-            if pins[i].sha256 == digest and pins[i].size == size:
-                return ExtensionCheck(EXT_PINNED, version.copy(), platform.copy(), digest^, size)
-            return ExtensionCheck(EXT_MISMATCH, version.copy(), platform.copy(), digest^, size)
-    return ExtensionCheck(EXT_UNRECORDED, version.copy(), platform.copy(), digest^, size)
-
-
-def check_extension_file(path: String, version: String, platform: String) raises -> ExtensionCheck:
-    """Read the file at `path` and check it against `tpch_extension_pins()`.
-
-    Raises:
-        Error: the file cannot be read.
-    """
-    var data = Path(path).read_bytes()
-    return check_extension_bytes(Span(data), tpch_extension_pins(), version, platform)
 
 
 # --- SQL ---------------------------------------------------------------------------
@@ -243,6 +144,19 @@ def _remove_all(manifest: DatasetManifest, cache_dir: String):
             pass
 
 
+def _remove_empty_dirs(manifest: DatasetManifest, cache_dir: String):
+    """Remove the scale directory and `tpch/` above it when a failed run left
+    them empty (rmdir refuses a directory that holds anything)."""
+    var with_slash = _parent_of(_join_path(cache_dir, manifest.files[0].path))
+    var sf_dir = String(with_slash[byte=0:with_slash.byte_length() - 1])
+    var with_slash_up = _parent_of(sf_dir)
+    try:
+        rmdir(sf_dir)
+        rmdir(String(with_slash_up[byte=0:with_slash_up.byte_length() - 1]))
+    except:
+        pass
+
+
 # --- generation ------------------------------------------------------------------------
 
 
@@ -287,6 +201,7 @@ def generate_tpch[
     extension_path: String,
     memory_limit_bytes: Int,
     version: String,
+    temp_dir: String = String(),
 ) raises -> Generated:
     """Generate every file of `manifest` (TPC-H at `scale_factor`) under
     `cache_dir` with the DuckDB session `s`, which must not have been started.
@@ -294,11 +209,19 @@ def generate_tpch[
     never replaced. The session is started with one thread and insertion order
     preserved, the tpch extension is loaded from `extension_path`, and each file
     is counted back through `read_parquet` and compared with the manifest's row
-    count where it has one. On any failure the files this run wrote are removed.
+    count where it has one. `extension_path` must be the private copy of the
+    pinned extension (stage_extension.mojo) and DuckDB must report that same
+    path as the extension's install path. A non-empty `temp_dir` is DuckDB's
+    spill directory. "Never replaced" is a check before the first COPY, not an
+    exclusive create: COPY overwrites, so another process of the same user that
+    creates a file in between can lose it. On any failure DuckDB is stopped
+    first, then the files this run wrote are removed, then the directories it
+    made, if they are empty.
 
     Raises:
         Error: a file already exists, DuckDB refuses a statement, the tpch
-            extension is not loaded, or a row count differs from the manifest.
+            extension is not loaded or not from `extension_path`, or a row
+            count differs from the manifest.
     """
     if tpch_state(manifest, cache_dir) != TPCH_ABSENT:
         raise Error("stage: files of " + manifest.name + " " + manifest.scale + " already exist under the cache directory; nothing is replaced")
@@ -308,6 +231,8 @@ def generate_tpch[
     var out = Generated(settings^)
     makedirs(_parent_of(_join_path(cache_dir, manifest.files[0].path)), exist_ok=True)
     try:
+        if temp_dir.byte_length() > 0:
+            _run(s, String("SET temp_directory=") + sql_literal(temp_dir))
         _run(s, load_statement(extension_path))
         var st = s.fetch(extension_status_statement())
         if not st.ok() or st.rows.row_count() != 1 or st.rows.column_count() != 2:
@@ -316,6 +241,11 @@ def generate_tpch[
             raise Error("the tpch extension is not loaded")
         out.extension_loaded = st.rows.rows[0][0].s.copy()
         out.extension_path = st.rows.rows[0][1].s.copy()
+        if out.extension_path != extension_path:
+            raise Error(
+                String("the tpch extension was loaded from '") + out.extension_path
+                + String("', not from the checked copy '") + extension_path + String("'")
+            )
         _run(s, dbgen_statement(scale_factor))
         var tables = tpch_table_names()
         for i in range(len(manifest.files)):
@@ -329,7 +259,12 @@ def generate_tpch[
                 )
             out.rows.append(n)
     except e:
+        try:
+            s.kill()
+        except:
+            pass
         _remove_all(manifest, cache_dir)
+        _remove_empty_dirs(manifest, cache_dir)
         raise Error(String(e))
     return out^
 
@@ -376,9 +311,4 @@ def render_stage(
     if lines.byte_length() > 0:
         out += String("lines to record (komira_bench_data/manifest.mojo, recorded_files, above `return out^`):\n")
         out += lines
-    for i in range(len(extension)):
-        ref e = extension[i]
-        if e.status == EXT_UNRECORDED:
-            out += String("line to record (komira_bench_data/stage.mojo, tpch_extension_pins):\n")
-            out += extension_pin_line(e.version, e.platform, e.sha256, e.size) + "\n"
     return out^

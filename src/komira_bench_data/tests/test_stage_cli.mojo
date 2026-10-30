@@ -1,7 +1,6 @@
 # The `komira-bench-stage` command line: flags, exit status, and the refusals
 # that happen before DuckDB is started. The "DuckDB" the tests pass is a shell
-# script that would write a marker file if it ever ran; the pin check refuses
-# it, so the marker never appears.
+# script that would write a marker file if it ever ran; the marker never appears.
 #
 # What each test proves:
 # - test_flags_in_both_spellings: `--name value` and `--name=value` parse, and
@@ -11,9 +10,11 @@
 # - test_usage_errors_exit_2_and_run_nothing: no command, an unknown command,
 #   a missing required flag, a scale factor that is not 1, 10 or 100 and a
 #   malformed number each exit 2 and create nothing in the cache directory.
-# - test_a_binary_that_is_not_the_pinned_duckdb_is_refused: exit 1, no file
-#   written and the script never ran.
-# - test_a_gzipped_extension_is_refused_before_duckdb_starts.
+# - test_an_extension_that_is_not_the_pinned_file_stops_everything: a gzip that
+#   is not the pinned file (exit 1) and a platform with no pin (exit 1) leave
+#   no private directory and no dataset directory, and the DuckDB file never ran.
+#   (That the pin check comes before DuckDB is started is the order of
+#   `_run_tpch`; the library tests show a refused file creates nothing.)
 # - test_a_complete_dataset_is_only_verified: with all eight files present the
 #   run needs neither DuckDB nor the extension (paths that do not exist) and
 #   exits 0; with some present it exits 1 and replaces nothing.
@@ -91,27 +92,12 @@ def _write(path: String, text: String) raises:
     Path(path).write_bytes(text.as_bytes())
 
 
-def test_a_binary_that_is_not_the_pinned_duckdb_is_refused() raises:
-    var d = _dir(String("fake_binary"))
+def _stopped_at_the_extension(name: String, platform: String) raises:
+    var d = _dir(name)
     var marker = d + "/ran"
     var binary = d + "/duckdb"
-    var ext = d + "/tpch.duckdb_extension"
-    _write(binary, String("#!/bin/sh\necho ran > ") + marker + String("\n"))
-    _write(ext, String("not really an extension"))
-    var cache = d + "/cache"
-    makedirs(cache, exist_ok=True)
-    var code = run_stage(
-        _args(["tpch", "--duckdb", binary, "--tpch-extension", ext, "--cache-dir", cache, "--scale-factor", "1"])
-    )
-    assert_equal(code, 1)
-    assert_false(exists(marker))
-    assert_equal(tpch_state(tpch_manifest(1), cache), 0)
-    assert_false(exists(cache + "/tpch"))
-
-
-def test_a_gzipped_extension_is_refused_before_duckdb_starts() raises:
-    var d = _dir(String("gz"))
     var ext = d + "/tpch.duckdb_extension.gz"
+    _write(binary, String("#!/bin/sh\necho ran > ") + marker + String("\n"))
     var gz = List[UInt8]()
     gz.append(UInt8(0x1F))
     gz.append(UInt8(0x8B))
@@ -119,12 +105,20 @@ def test_a_gzipped_extension_is_refused_before_duckdb_starts() raises:
     Path(ext).write_bytes(Span(gz))
     var cache = d + "/cache"
     makedirs(cache, exist_ok=True)
-    # the binary path does not exist: if DuckDB were started the error would be about it
     var code = run_stage(
-        _args(["tpch", "--duckdb", d + "/no_such_duckdb", "--tpch-extension", ext, "--cache-dir", cache, "--scale-factor", "1"])
+        _args(["tpch", "--duckdb", binary, "--tpch-extension", ext, "--cache-dir", cache, "--scale-factor", "1", "--platform", platform])
     )
     assert_equal(code, 1)
+    assert_false(exists(marker))
+    assert_false(exists(cache + "/.komira-bench-stage"))
     assert_false(exists(cache + "/tpch"))
+
+
+def test_an_extension_that_is_not_the_pinned_file_stops_everything() raises:
+    # a file that is not the pinned linux_amd64 gzip, and a platform with no pin: both refused
+    # before the private directory is made or any DuckDB is started
+    _stopped_at_the_extension(String("ext_mismatch"), String("linux_amd64"))
+    _stopped_at_the_extension(String("ext_unrecorded"), String("osx_arm64"))
 
 
 def _put_dataset(cache: String, skip: String) raises:

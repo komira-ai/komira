@@ -29,8 +29,20 @@
 # - test_a_wrong_row_count_is_refused: a file with other rows than the
 #   manifest says raises naming the file, and nothing is left behind.
 # - test_an_extension_that_did_not_load_is_refused.
-# - test_the_extension_file_check: pinned, unrecorded, mismatched and gzipped
-#   files, and the pin line.
+# - test_the_extension_file_check: pinned, unrecorded, mismatched and wrong-size
+#   files, a pin for another platform or release, and the pin line.
+# - test_the_production_table_holds_exactly_the_one_measured_pin.
+# - test_a_pinned_gzip_is_unpacked_into_a_fresh_private_directory and
+#   test_an_unpinned_or_different_gzip_is_refused_before_anything_is_written: a
+#   fixture pin (the pin table is a parameter) accepts only its bytes; an
+#   unrecorded platform, other content, another size or a non-gzip is refused
+#   and no directory is made.
+# - test_the_loaded_extension_must_be_the_checked_copy: DuckDB reporting another
+#   install path stops the run before dbgen.
+# - test_a_complete_dataset_is_refused_too: all eight present, no statement sent.
+# - test_the_spill_directory_is_set_before_anything_runs.
+# - test_duckdb_is_stopped_before_the_files_are_cleaned_up: the stop happens
+#   while the first file still exists, then nothing is left, directories included.
 from std.memory import ArcPointer
 from std.os import makedirs
 from std.os.path import exists
@@ -38,13 +50,13 @@ from std.pathlib import Path
 from std.testing import TestSuite, assert_equal, assert_false, assert_raises, assert_true
 
 from komira_bench_duckdb import BenchClock, DuckDbSession, DuckDbTransport, StdoutChunk
+from komira_compression.compression_codecs import Gzip
 from komira_crypto import hex_lower_array_32, sha256
 from komira_runtime_paths import test_tmpdir
 
 from komira_bench_data import (
     DatasetFile,
     DatasetManifest,
-    EXT_GZIPPED,
     EXT_MISMATCH,
     EXT_PINNED,
     EXT_UNRECORDED,
@@ -57,6 +69,8 @@ from komira_bench_data import (
     TPCH_PARTIAL,
     check_extension_bytes,
     copy_statement,
+    prepare_extension,
+    tpch_extension_pins,
     count_statement,
     dbgen_statement,
     describe_generation,
@@ -106,6 +120,9 @@ struct StageFake(DuckDbTransport):
     var fail_table: String
     var wrong_rows_table: String
     var extension_loaded: String
+    var loaded_path: String
+    var report_path: String
+    var probe: String
 
     def __init__(
         out self,
@@ -113,7 +130,12 @@ struct StageFake(DuckDbTransport):
         fail_table: String = String(""),
         wrong_rows_table: String = String(""),
         extension_loaded: String = String("true"),
+        report_path: String = String(""),
+        probe: String = String(""),
     ):
+        self.loaded_path = String("")
+        self.report_path = report_path
+        self.probe = probe
         self.sent = sent
         self.queue = List[String]()
         self.at = 0
@@ -138,8 +160,8 @@ struct StageFake(DuckDbTransport):
             )
         elif s.find(String("FROM duckdb_extensions()")) >= 0:
             self._answer(
-                String('[{"loaded":"') + self.extension_loaded
-                + String('","install_path":"/ext/tpch.duckdb_extension"}]')
+                String('[{"loaded":"') + self.extension_loaded + String('","install_path":"')
+                + (self.report_path if self.report_path.byte_length() > 0 else self.loaded_path) + String('"}]')
             )
         elif s.find(String("read_parquet(")) >= 0:
             var names = tpch_table_names()
@@ -149,6 +171,8 @@ struct StageFake(DuckDbTransport):
                     if names[i] == self.wrong_rows_table:
                         n += 1
                     self._answer(String('[{"n":') + String(n) + String("}]"))
+        elif s.startswith(String("LOAD '")):
+            self.loaded_path = String(s[byte=6:s.find(String("'"), 6)])
         elif s.startswith(String("COPY (SELECT * FROM ")):
             var from_at = String("COPY (SELECT * FROM ").byte_length()
             var close = s.find(String(")"), from_at)
@@ -193,7 +217,8 @@ struct StageFake(DuckDbTransport):
         return e^
 
     def kill(mut self) raises:
-        pass
+        var present = self.probe.byte_length() > 0 and exists(self.probe)
+        self.sent[].append(String("<killed present=") + (String("1") if present else String("0")) + String(">"))
 
     def finish(mut self) raises -> Int:
         return 0
@@ -291,7 +316,9 @@ def test_the_report_prints_the_lines_to_record() raises:
     )
     var report = verify_dataset(manifest, d)
     var ext = List[ExtensionCheck]()
-    ext.append(check_extension_bytes(String("ext bytes").as_bytes(), List[ExtensionPin](), String(_VERSION), String("linux_amd64")))
+    var fixture = List[ExtensionPin]()
+    fixture.append(ExtensionPin(String(_VERSION), String("linux_amd64"), _hex(String("ext bytes")), 9))
+    ext.append(check_extension_bytes(String("ext bytes").as_bytes(), fixture, String(_VERSION), String("linux_amd64")))
     var text = render_stage(manifest, report, g.rows, describe_generation(manifest, g), ext)
     assert_true(text.startswith(String("komira-bench-stage ") + String(STAGE_VERSION) + String("\n")))
     assert_true(text.find(String("generated here: dbgen sf1, 1 thread, snappy, row groups of 122880 rows\n")) >= 0)
@@ -306,10 +333,7 @@ def test_the_report_prints_the_lines_to_record() raises:
         )
         assert_true(text.find(line) >= 0, "no record line for " + names[i])
     assert_true(
-        text.find(
-            String('    out.append(ExtensionPin("1.5.6", "linux_amd64", "')
-            + _hex(String("ext bytes")) + String('", 9))\n')
-        ) >= 0
+        text.find(String("PINNED tpch extension 1.5.6 linux_amd64 sha256 ") + _hex(String("ext bytes")) + String("\n")) >= 0
     )
     assert_true(text.find(String("8 files: 0 verified, 8 unrecorded, 0 failed")) >= 0)
 
@@ -392,30 +416,157 @@ def test_the_extension_file_check() raises:
     assert_equal(plain.status, EXT_UNRECORDED)
     assert_equal(plain.sha256, digest)
     assert_equal(plain.size, 17)
+    assert_true(plain.describe().find(String("no pin for the tpch extension of duckdb 1.5.6 linux_amd64")) >= 0)
+    assert_true(plain.describe().find(extension_pin_line(String("1.5.6"), String("linux_amd64"), digest, 17)) >= 0)
     var pins = List[ExtensionPin]()
     pins.append(ExtensionPin(String("1.5.6"), String("linux_amd64"), digest, 17))
     assert_equal(
         check_extension_bytes(bytes.as_bytes(), pins, String("1.5.6"), String("linux_amd64")).status,
         EXT_PINNED,
     )
+    # the same length, other content: a mismatch
     assert_equal(
         check_extension_bytes(String("another one!!!!!!").as_bytes(), pins, String("1.5.6"), String("linux_amd64")).status,
         EXT_MISMATCH,
     )
-    # a pin for another platform decides nothing here
+    # the right digest cannot come with another size, so a pin with the wrong size never matches
+    var wrong_size = List[ExtensionPin]()
+    wrong_size.append(ExtensionPin(String("1.5.6"), String("linux_amd64"), digest, 18))
     assert_equal(
-        check_extension_bytes(String("another one!!!!!!").as_bytes(), pins, String("1.5.6"), String("osx_arm64")).status,
-        EXT_UNRECORDED,
+        check_extension_bytes(bytes.as_bytes(), wrong_size, String("1.5.6"), String("linux_amd64")).status,
+        EXT_MISMATCH,
     )
-    var gz = List[UInt8]()
-    gz.append(UInt8(0x1F))
-    gz.append(UInt8(0x8B))
-    gz.append(UInt8(8))
-    assert_equal(check_extension_bytes(Span(gz), pins, String("1.5.6"), String("linux_amd64")).status, EXT_GZIPPED)
+    # a pin for another platform or release decides nothing: unrecorded, so refused
+    assert_equal(check_extension_bytes(bytes.as_bytes(), pins, String("1.5.6"), String("osx_arm64")).status, EXT_UNRECORDED)
+    assert_equal(check_extension_bytes(bytes.as_bytes(), pins, String("1.5.7"), String("linux_amd64")).status, EXT_UNRECORDED)
     assert_equal(
         extension_pin_line(String("1.5.6"), String("linux_amd64"), digest, 17),
         String('    out.append(ExtensionPin("1.5.6", "linux_amd64", "') + digest + String('", 17))'),
     )
+
+
+def test_the_production_table_holds_exactly_the_one_measured_pin() raises:
+    var pins = tpch_extension_pins()
+    assert_equal(len(pins), 1)
+    assert_equal(pins[0].version, String("1.5.6"))
+    assert_equal(pins[0].platform, String("linux_amd64"))
+    assert_equal(pins[0].sha256, String("51959cc795f6ea8c95cf8cc6cc4065358998ce959bf863e21ff1aa471c06bc41"))
+    assert_equal(pins[0].size, 5649100)
+
+
+def _gz_of(text: String) raises -> List[UInt8]:
+    return Gzip.compress_gzip_file(text.as_bytes())
+
+
+def _fixture_pins(data: List[UInt8]) -> List[ExtensionPin]:
+    var pins = List[ExtensionPin]()
+    pins.append(
+        ExtensionPin(String(_VERSION), String("linux_amd64"), hex_lower_array_32(sha256(Span(data))), len(data))
+    )
+    return pins^
+
+
+def test_a_pinned_gzip_is_unpacked_into_a_fresh_private_directory() raises:
+    var d = _dir(String("prepare"))
+    var gz = _gz_of(String("native code, pretend"))
+    Path(d + "/ext.gz").write_bytes(Span(gz))
+    var got = prepare_extension(d + "/ext.gz", d + "/private", String(_VERSION), String("linux_amd64"), _fixture_pins(gz))
+    assert_equal(got.check.status, EXT_PINNED)
+    assert_equal(got.path, d + "/private/tpch.duckdb_extension")
+    assert_equal(Path(got.path).read_text(), String("native code, pretend"))
+    assert_equal(got.unpacked_sha256, _hex(String("native code, pretend")))
+    assert_equal(got.unpacked_size, 20)
+    with assert_raises(contains="already exists"):
+        _ = prepare_extension(d + "/ext.gz", d + "/private", String(_VERSION), String("linux_amd64"), _fixture_pins(gz))
+
+
+def _refused_gz(name: String, data: List[UInt8], pins: List[ExtensionPin], platform: String, contains: String) raises:
+    var d = _dir(name)
+    Path(d + "/ext.gz").write_bytes(Span(data))
+    var raised = False
+    try:
+        _ = prepare_extension(d + "/ext.gz", d + "/private", String(_VERSION), platform, pins)
+    except e:
+        raised = String(e).find(contains) >= 0
+    assert_true(raised, name + ": not refused with '" + contains + "'")
+    assert_false(exists(d + "/private"), name + ": a directory was made for a refused file")
+
+
+def test_an_unpinned_or_different_gzip_is_refused_before_anything_is_written() raises:
+    var gz = _gz_of(String("native code, pretend"))
+    var pins = _fixture_pins(gz)
+    # no pin for the platform
+    _refused_gz(String("ref_unrecorded"), gz, pins, String("osx_arm64"), String("no pin for the tpch extension"))
+    # another file (a gzip of other bytes)
+    var other = _gz_of(String("other native code!!"))
+    _refused_gz(String("ref_other"), other, pins, String("linux_amd64"), String("is not the pinned tpch extension"))
+    # the pinned file with one byte appended: another size and digest
+    var longer = gz.copy()
+    longer.append(UInt8(0))
+    _refused_gz(String("ref_size"), longer, pins, String("linux_amd64"), String("is not the pinned"))
+    # not a gzip at all, even if a pin names its digest
+    var plain = List[UInt8]()
+    var words = String("this is not a gzip file at all")
+    for c in words.as_bytes():
+        plain.append(c)
+    _refused_gz(String("ref_plain"), plain, _fixture_pins(plain), String("linux_amd64"), String("unpacked size"))
+    # the production table refuses a fixture that is not its pinned file
+    var d = _dir(String("ref_prod"))
+    Path(d + "/ext.gz").write_bytes(Span(gz))
+    with assert_raises(contains="is not the pinned tpch extension"):
+        _ = prepare_extension(d + "/ext.gz", d + "/private", String(_VERSION), String("linux_amd64"), tpch_extension_pins())
+    assert_false(exists(d + "/private"))
+
+
+def test_the_loaded_extension_must_be_the_checked_copy() raises:
+    var d = _dir(String("other_path"))
+    var manifest = tpch_manifest(1)
+    var sent = ArcPointer[List[String]](List[String]())
+    var s = _session(sent, StageFake(sent, String(""), String(""), String("true"), String("/somewhere/else.duckdb_extension")))
+    with assert_raises(contains="not from the checked copy"):
+        _ = generate_tpch(s, manifest, 1, d, String("/ext/checked"), 4 * _GIB, String(_VERSION))
+    assert_false(_sent_text(sent).find(String("CALL dbgen")) >= 0)
+    assert_equal(tpch_state(manifest, d), TPCH_ABSENT)
+
+
+def test_a_complete_dataset_is_refused_too() raises:
+    var d = _dir(String("present"))
+    var manifest = tpch_manifest(1)
+    makedirs(d + "/tpch/sf1", exist_ok=True)
+    for i in range(len(manifest.files)):
+        Path(d + "/" + manifest.files[i].path).write_bytes(String("old").as_bytes())
+    var sent = ArcPointer[List[String]](List[String]())
+    var s = _session(sent, StageFake(sent))
+    with assert_raises(contains="already exist"):
+        _ = generate_tpch(s, manifest, 1, d, String("/ext/e"), 4 * _GIB, String(_VERSION))
+    assert_equal(len(sent[]), 0)
+    assert_equal(Path(d + "/tpch/sf1/lineitem.parquet").read_text(), String("old"))
+
+
+def test_the_spill_directory_is_set_before_anything_runs() raises:
+    var d = _dir(String("spill"))
+    var manifest = tpch_manifest(1)
+    var sent = ArcPointer[List[String]](List[String]())
+    var s = _session(sent, StageFake(sent))
+    _ = generate_tpch(s, manifest, 1, d, String("/ext/e"), 4 * _GIB, String(_VERSION), String("/work/spill"))
+    var text = _sent_text(sent)
+    var at_spill = text.find(String("SET temp_directory='/work/spill'"))
+    assert_true(at_spill >= 0)
+    assert_true(text.find(String("LOAD '/ext/e'")) > at_spill)
+
+
+def test_duckdb_is_stopped_before_the_files_are_cleaned_up() raises:
+    var d = _dir(String("kill_first"))
+    var manifest = tpch_manifest(1)
+    var sent = ArcPointer[List[String]](List[String]())
+    var probe = d + "/tpch/sf1/region.parquet"
+    var s = _session(sent, StageFake(sent, String("orders"), String(""), String("true"), String(""), probe))
+    with assert_raises(contains="cannot write orders"):
+        _ = generate_tpch(s, manifest, 1, d, String("/ext/e"), 4 * _GIB, String(_VERSION))
+    # at the moment DuckDB was stopped the first file was still there; afterwards nothing is
+    assert_true(_sent_text(sent).find(String("<killed present=1>")) >= 0)
+    assert_equal(tpch_state(manifest, d), TPCH_ABSENT)
+    assert_false(exists(d + "/tpch"), "the empty directories a failure left were not removed")
 
 
 def main() raises:

@@ -38,6 +38,7 @@ comptime _FILES: List[String] = [
     "manifest.mojo",
     "stage.mojo",
     "stage_cli.mojo",
+    "stage_extension.mojo",
     "verify.mojo",
 ]
 
@@ -169,6 +170,7 @@ def test_imports_only_its_deps() raises:
         "komira_bench_data",
         "komira_bench_duckdb",
         "komira_collections",
+        "komira_compression",
         "komira_crypto",
         "komira_parquet_api",
         "komira_parquet_writer",

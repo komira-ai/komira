@@ -1,11 +1,15 @@
 # The command line of `komira-bench-stage` (main/stage_main.mojo hands it the
 # arguments). Every setting is a flag; nothing is read from the environment.
 #
-#   komira-bench-stage tpch --duckdb FILE --tpch-extension FILE --cache-dir DIR
+#   komira-bench-stage tpch --duckdb FILE --tpch-extension FILE.gz --cache-dir DIR
 #       --scale-factor 1|10|100 [--duckdb-version V] [--platform P]
 #       [--memory-limit-gib N] [--max-silence-minutes N]
 #     Generates TPC-H at the scale factor into DIR/tpch/sf<N>/ with the pinned
-#     DuckDB and the tpch extension file, never replacing a file (a directory
+#     DuckDB and the tpch extension, which is the gzip as DuckDB's extension
+#     repository serves it: it must be the pinned file for --duckdb-version and
+#     --platform (stage_extension.mojo), else nothing is started or written; it
+#     is unpacked into DIR/.komira-bench-stage (made fresh, mode 0700, removed
+#     after) and DuckDB loads that copy. Never replaces a file (a directory
 #     that already holds all eight is only verified; one that holds some is
 #     refused), then verifies the files and prints the lines to record.
 #   komira-bench-stage verify --dataset NAME --scale SCALE --cache-dir DIR
@@ -19,23 +23,34 @@ from komira_bench_duckdb import DEFAULT_DUCKDB_VERSION, open_pinned
 
 from .manifest import find_manifest, tpch_manifest
 from .stage import (
-    DEFAULT_EXTENSION_PLATFORM,
-    ExtensionCheck,
-    EXT_GZIPPED,
-    EXT_MISMATCH,
     TPCH_ABSENT,
     TPCH_PARTIAL,
-    check_extension_file,
     describe_generation,
     generate_tpch,
     render_stage,
     tpch_state,
+)
+from .stage_extension import (
+    DEFAULT_EXTENSION_PLATFORM,
+    ExtensionCheck,
+    prepare_extension,
+    remove_tree,
+    tpch_extension_pins,
 )
 from .verify import verify_dataset
 
 comptime EXIT_OK: Int = 0
 comptime EXIT_FAILED: Int = 1
 comptime EXIT_USAGE: Int = 2
+comptime PRIVATE_DIR_NAME: String = ".komira-bench-stage"
+"""The directory under the cache that holds the unpacked extension and DuckDB's
+spill files during a run; only this process writes it, and it is removed after."""
+
+
+def _join(dir: String, rel: String) -> String:
+    if dir.as_bytes()[dir.byte_length() - 1] == 0x2F:
+        return dir + rel
+    return dir + "/" + rel
 
 
 struct Flags(Copyable, Movable):
@@ -152,25 +167,37 @@ def _run_tpch(flags: Flags, scale_factor: Int, memory_gib: Int, silence_minutes:
     var extension = List[ExtensionCheck]()
     var rows = List[Int]()
     if state == TPCH_ABSENT:
-        var check = check_extension_file(flags.require(String("tpch-extension")), version, platform)
-        if check.status == EXT_GZIPPED or check.status == EXT_MISMATCH:
-            raise Error(check.describe())
-        extension.append(check^)
-        var s = open_pinned(flags.require(String("duckdb")), version, silence_minutes * 60000)
+        # The extension is checked and unpacked first: nothing is started, written or created
+        # in the cache unless the gzip is the pinned file.
+        var private_dir = _join(cache_dir, String(PRIVATE_DIR_NAME))
+        var prepared = prepare_extension(
+            flags.require(String("tpch-extension")), private_dir, version, platform, tpch_extension_pins()
+        )
         try:
-            var g = generate_tpch(
-                s, manifest, scale_factor, cache_dir,
-                flags.require(String("tpch-extension")), memory_gib * 1024 * 1024 * 1024, version,
-            )
-            header = describe_generation(manifest, g)
-            rows = g.rows.copy()
-        except e:
+            var s = open_pinned(flags.require(String("duckdb")), version, silence_minutes * 60000)
             try:
-                s.kill()
-            except:
-                pass
+                var g = generate_tpch(
+                    s, manifest, scale_factor, cache_dir, prepared.path,
+                    memory_gib * 1024 * 1024 * 1024, version, private_dir + "/tmp",
+                )
+                header = describe_generation(manifest, g)
+                header += (
+                    String("extension file unpacked from the pinned gzip: sha256 ") + prepared.unpacked_sha256
+                    + String(", ") + String(prepared.unpacked_size) + String(" bytes\n")
+                )
+                rows = g.rows.copy()
+            except e:
+                try:
+                    s.kill()
+                except:
+                    pass
+                raise Error(String(e))
+            _ = s.close()
+        except e:
+            remove_tree(private_dir)
             raise Error(String(e))
-        _ = s.close()
+        remove_tree(private_dir)
+        extension.append(prepared.check.copy())
     else:
         header = String("generated earlier: every file was already present; only verified now\n")
     var report = verify_dataset(manifest, cache_dir)
