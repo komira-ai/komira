@@ -26,7 +26,6 @@ from std.testing import TestSuite, assert_equal, assert_true
 
 from komira_async_api.parallel_dispatch import ParallelDispatch
 from komira_async_api.token import CancellationToken
-from komira_collections.slab import Slab
 from komira_pipeline_exec.fake_builder import (
     FROM_CURSOR,
     FakeBuilder,
@@ -43,6 +42,7 @@ from komira_pipeline_exec.fake_members import (
     FakeSource,
     SOURCE_CURSOR,
     OP_FAIL_AT,
+    OP_FAIL_FROM,
 )
 from komira_pipeline_exec.fake_support import (
     SLOT_COMBINES,
@@ -59,7 +59,7 @@ from komira_pipeline_exec.fake_support import (
 )
 from komira_pipeline_exec.published_outputs import PublishedOutputs
 from komira_pipeline_exec.run_segment import run_segment
-from komira_pipeline_exec.segment_task import SegmentRun
+from komira_pipeline_exec.segment_task import SegmentRun, SegmentTask
 
 
 def _expect_failure[
@@ -176,22 +176,27 @@ def test_the_callers_cancel_stops_the_other_workers() raises:
 
 
 def test_a_second_error_is_dropped() raises:
+    var ops = List[FakeOp]()
+    ops.append(FakeOp(OP_FAIL_FROM, 0, Tally()))
     var run = SegmentRun[FakeSource, FakeOp, FakeSink](
-        FakeSource(SOURCE_CURSOR, 1, 1, Tally()),
-        Slab[FakeOp](),
+        FakeSource(SOURCE_CURSOR, 2, 1, Tally()),
+        ops^,
         FakeSink(Tally()),
-        2,
-        0,
+        1,
+        1,
         CancellationToken.new(),
     )
+    run.sink.resize_worker_state(1)
     assert_true(not run.should_stop())
-    run.fail(Error("first failure"))
-    run.fail(Error("second failure"))
+    # The first failure is the operator's, caught by the task's execute.
+    var task = SegmentTask[FakeSource, FakeOp, FakeSink]()
+    task.execute[SegmentRun[FakeSource, FakeOp, FakeSink]](run, Int32(0), Int64(0))
     assert_true(run.should_stop())
+    run.fail(Error("second failure"))
     var kept = run.pipeline.take_error()
     assert_true(Bool(kept))
     var text = String(kept.take().to_error())
-    assert_true("first failure" in text, text)
+    assert_true("fake operator failed at execute 1" in text, text)
     assert_true("second failure" not in text, text)
 
 

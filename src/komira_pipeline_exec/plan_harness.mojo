@@ -21,6 +21,7 @@
 
 from komira_arrow.arrow_types import ArrowType
 from komira_arrow.column import Column
+from komira_arrow.column_builder import ColumnBuilder
 from komira_arrow.primitive_array import PrimitiveArray
 from komira_arrow.schema import (
     Field,
@@ -211,21 +212,22 @@ def b_is_null(r: Int) -> Bool:
 def sample_batch(start: Int, rows: Int) raises -> RecordBatch:
     """Rows `start .. start + rows - 1` of the sample table."""
     var a = PrimitiveArray[DType.int64].allocate(rows)
-    var b = PrimitiveArray[DType.int64].allocate_nullable(rows)
+    var b = ColumnBuilder[DType.int64].with_capacity(rows)
     var s = List[String]()
     for i in range(rows):
         var r = start + i
         a.set(i, Int64(r))
-        b.set(i, Int64(r * 10))
         if b_is_null(r):
-            b._set_null(i)
+            b.append_null()
+        else:
+            b.append(Int64(r * 10))
         s.append(String("s") + String(r % 4))
     var sb = SchemaBuilder()
     var builder = RecordBatchBuilder()
     sb.add_field(Field("a", ArrowType.INT64, False))
     builder.add_column(Column.from_primitive[DType.int64](a^))
     sb.add_field(Field("b", ArrowType.INT64, True))
-    builder.add_column(Column.from_primitive[DType.int64](b^))
+    builder.add_column(b^.materialize())
     sb.add_field(Field("s", ArrowType.STRING, False))
     builder.add_column(Column.from_string(StringArray.from_strings(s)))
     return builder.build(sb.build())

@@ -25,6 +25,9 @@
 #     matching row are left out when the source is built (read from the scan's
 #     prune counters).
 #   * A glob that matches no file is refused, and the message names the glob.
+#   * A Parquet file with no row, written as one empty batch and as a list of
+#     one empty batch (whatever row groups the writer emits for it), comes
+#     back as no rows under the three-column schema, with no error.
 #   * A morsel size cuts a row group into morsels without losing or repeating a
 #     row.
 #   * A worker the source was not built for is refused.
@@ -49,6 +52,7 @@ from komira_parquet_scan.rg_prune_counter import (
 )
 from komira_parquet_writer.record_batch_writer import (
     write_record_batch_to_parquet_bytes,
+    write_record_batches_to_parquet_bytes,
 )
 from komira_physical_plan.physical_plan import SourceSpecPod
 from komira_pipeline_exec.plan_harness import (
@@ -256,6 +260,45 @@ def test_every_row_of_a_file_in_several_row_groups_comes_back() raises:
             assert_equal(batch.column_at(1).is_null_at(i), b_is_null(seen + i))
         seen += batch.num_rows()
     assert_equal(seen, 100)
+
+
+def _write_bytes(name: String, bytes: List[UInt8]) raises -> String:
+    var path = test_tmpdir() + "/" + name + ".parquet"
+    var fh = open(path, "w")
+    fh.write_bytes(Span(bytes))
+    fh.close()
+    return path^
+
+
+def _expect_empty_file(var path: String) raises:
+    var cache = ParquetMetadataCache()
+    var pool = ExprPool()
+    var nf = 0
+    var spec = SourceSpecPod.parquet(path^, None, None, True)
+    var src = build_parquet_source[origin_of(cache), origin_of(pool), origin_of(nf)](
+        spec, 0, NW, cache, pool
+    )
+    assert_equal(src.output_schema().num_columns(), 3)
+    var morsels = _drain(src)
+    assert_equal(len(_column(morsels, 0)), 0)
+    for i in range(len(morsels)):
+        assert_equal(morsels[i].num_rows(), 0)
+
+
+def test_a_file_with_no_row_comes_back_as_no_rows_with_its_schema() raises:
+    var bytes = write_record_batch_to_parquet_bytes(
+        sample_batch(0, 0), max_rows_per_rg=30
+    )
+    _expect_empty_file(_write_bytes("empty_single", bytes))
+
+
+def test_a_file_written_from_one_empty_batch_comes_back_as_no_rows() raises:
+    var batches = Slab[RecordBatch]()
+    batches.append(sample_batch(0, 0))
+    var bytes = write_record_batches_to_parquet_bytes(
+        batches^, max_rows_per_rg=30
+    )
+    _expect_empty_file(_write_bytes("empty_list", bytes))
 
 
 def test_the_projection_orders_the_columns_as_it_names_them() raises:

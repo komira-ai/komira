@@ -69,9 +69,11 @@ from komira_pipeline_exec.real_builder import RealBuilder
 from komira_pipeline_exec.run_plan import run_plan
 from komira_plan_expr.expr import (
     BIN_AND,
+    BIN_DIV,
     BIN_GE,
     BIN_GT,
     BIN_LT,
+    BIN_SUB,
     Expr,
     MATH_SQRT,
 )
@@ -426,6 +428,34 @@ def test_a_predicate_without_a_null_scope_fails_the_query() raises:
     var dispatch = InlineDispatch()
     with assert_raises(contains="OP_FILTER refuses its predicate"):
         _ = run_plan(descs, builder, dispatch, 2, CancellationToken.new())
+
+
+def test_a_predicate_that_raises_on_a_row_fails_the_query() raises:
+    var cache = ParquetMetadataCache()
+    var pool = ExprPool()
+    var nf = 0
+    var builder = RealBuilder[origin_of(cache), origin_of(pool), origin_of(nf)](
+        cache, pool
+    )
+    var handle = builder.add_resident(sample_batch(0, 12))
+    # MIN / (a - 1) < 0: row 0 divides MIN by -1.
+    var pred = Expr.binary(
+        BIN_LT,
+        Expr.binary(
+            BIN_DIV,
+            _lit(-9223372036854775807 - 1),
+            Expr.binary(BIN_SUB, Expr.col_ref("a"), _lit(1)),
+        ),
+        _lit(0),
+    )
+    var descs = _one(batch_segment(0, handle, chain(MorselOp.filter(pred^))))
+    var dispatch = InlineDispatch()
+    var failure = String("")
+    try:
+        _ = run_plan(descs, builder, dispatch, 2, CancellationToken.new())
+    except e:
+        failure = String(e)
+    assert_true(failure.byte_length() > 0, "the query must fail")
 
 
 def main() raises:

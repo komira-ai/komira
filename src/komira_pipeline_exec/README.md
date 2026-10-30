@@ -114,10 +114,42 @@ Import each module by name; the package root exports nothing.
   in shared counters, and run the workers one after another in an order a test
   chooses.
 
-The combine order is a property of the sink: it merges its per-worker slots,
-indexed by worker id, in worker id order after every worker has joined. A
+Per-worker state lives in a typed `List`, never in a byte-backed `Slab`
+reached through `get_mut_interior`: a value that holds heap (a `List`, an
+`ArcPointer`, a `CancellationToken`) must be owned by an element the compiler
+tracks. `SegmentRun.ops` is a `List` of operators (one chain per worker, index
+`worker * n_ops + op`) mutated through the run's `mut` borrow; a sink keeps its
+slots as `List[ArcPointer[Slot]]`, each worker touching only the slot of its own
+task id. Atomics-only cells (the fakes' tally) may stay in a `Slab`. The task id
+that `ParallelDispatch` passes selects the slot, not the worker id, which only
+names the thread that runs the task; a dispatcher may run more tasks than it has
+workers.
+
+The combine order is a property of the sink. `CollectSink` merges its per-worker
+slots at `combine` into one order by (partition id, origin hint), and morsels
+that tie keep the order of the worker slots (worker id, then arrival within the
+slot); a sink without such a key (the fakes) concatenates the slots in worker id
+order. Either way the order is decided after every worker has joined. A
 memory budget is a property of the sink too: a sink that cannot grow raises, and
 the raise fails the query through the first-error slot.
+
+## Known limits
+
+- **A limit does not stop the other workers' scans.** `LimitOp` reports FINISHED
+  to the worker that sees the budget run out, and `SegmentTask` stops only that
+  worker's claims. A worker whose morsels are all FILTERED_EMPTY by an operator
+  upstream of the limit never reaches it, so it keeps draining the source after
+  the budget is spent. The result stays exact (no morsel past the budget
+  reaches the sink); the scan work is wasted. A pipeline-level stop (a shared
+  "finished" flag in `PipelineExecution` that every worker reads at the morsel
+  boundary, set by the first FINISHED) is the follow-up.
+- **The filter gathers a masked morsel first.** A morsel that reaches `op_filter`
+  with a selection mask is materialized (fully copied) before the predicate is
+  evaluated. Whether a mask-aware evaluation is worth it is for slice 3 to
+  measure.
+- **The collect sink holds every chunk until `take_output`.** Chunks stay in the
+  worker slots, then in the merged list, and `take_output` concatenates them
+  into the output batch, so a segment's peak memory is about twice its output.
 
 ## Example
 

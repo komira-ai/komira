@@ -16,12 +16,13 @@
 from komira_arrow.schema import RecordBatch
 from komira_async_api.parallel_dispatch import ParallelDispatch
 from komira_async_api.token import CancellationToken
-from komira_collections.slab import Slab
 from komira_physical_plan.physical_plan import SegmentDescPod
 
 from .published_outputs import PublishedOutputs
 from .segment_builder import SegmentBuilder
 from .segment_task import SegmentRun, SegmentTask
+
+comptime MAX_INT: Int = 0x7FFFFFFFFFFFFFFF
 
 
 def cancelled_error(token: CancellationToken) -> Error:
@@ -55,7 +56,15 @@ def run_segment[
 
     var n_ops = builder.op_count(desc)
     var source = builder.build_source(desc, published, num_workers)
-    var ops = Slab[B.Op](capacity=num_workers * n_ops)
+    if n_ops > 0 and num_workers > MAX_INT // n_ops:
+        raise Error(
+            "komira_pipeline_exec: "
+            + String(num_workers)
+            + " workers of a chain of "
+            + String(n_ops)
+            + " operators overflow the operator store"
+        )
+    var ops = List[B.Op](capacity=num_workers * n_ops)
     for w in range(num_workers):
         for i in range(n_ops):
             ops.append(builder.build_op(desc, i, w))

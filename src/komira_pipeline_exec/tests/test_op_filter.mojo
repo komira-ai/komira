@@ -41,11 +41,13 @@ from komira_pipeline_exec.plan_harness import (
 )
 from komira_plan_expr.expr import (
     BIN_AND,
+    BIN_DIV,
     BIN_EQ,
     BIN_GE,
     BIN_GT,
     BIN_LT,
     BIN_OR,
+    BIN_SUB,
     Expr,
     MATH_SQRT,
     UN_IS_NULL,
@@ -177,6 +179,40 @@ def test_a_predicate_with_no_null_scope_is_refused_by_name() raises:
     var m = Morsel(sample_batch(0, 10), 0, 0)
     with assert_raises(contains="OP_FILTER refuses its predicate"):
         _ = op.execute(m)
+
+
+def _min_over_a_minus_one_is_negative() -> Expr:
+    """`MIN / (a - 1) < 0`: row 0 divides MIN by -1, which is an error; every
+    other row of the sample table divides by a positive number or by zero
+    (NULL)."""
+    var min_int = _lit(-9223372036854775807 - 1)
+    var divisor = Expr.binary(BIN_SUB, _col("a"), _lit(1))
+    return Expr.binary(
+        BIN_LT, Expr.binary(BIN_DIV, min_int^, divisor^), _lit(0)
+    )
+
+
+def test_a_predicate_that_raises_on_a_row_raises_from_execute() raises:
+    # The error comes out of `execute` as it is; the filter does not turn it
+    # into a dropped row or a NULL.
+    var op = _filter(_min_over_a_minus_one_is_negative()).make()
+    var m = Morsel(sample_batch(0, 10), 0, 0)
+    var failure = String("")
+    try:
+        _ = op.execute(m)
+    except e:
+        failure = String(e)
+    assert_true(failure.byte_length() > 0, "MIN / -1 must raise")
+
+
+def test_a_predicate_that_raises_on_no_row_of_the_morsel_does_not() raises:
+    # The same predicate over rows 2..9 never divides MIN by -1.
+    var op = _filter(_min_over_a_minus_one_is_negative()).make()
+    var m = Morsel(sample_batch(2, 8), 0, 0)
+    _ = op.execute(m)
+    # MIN / (a - 1) is negative for every a in 2..9: all rows kept, no mask.
+    assert_equal(m.num_rows(), 8)
+    assert_false(m.batch.has_selection_mask())
 
 
 def test_instances_of_one_shared_filter_agree() raises:
