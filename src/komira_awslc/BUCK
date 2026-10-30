@@ -56,7 +56,22 @@ native_library(
         "linux_x86_64": [],
         "macos_aarch64": ["-mcpu=apple_m1"],
     }),
-    prefix = {"name": "komira_awslc", "min": 1000},
+    # Mach-O arm64 assembly reads `;` as a comment, so s2n-bignum's macros of `;`-joined instructions keep only their first instruction and compute the wrong
+    # result: the preprocessed text of its arm sources has the `;` turned into line breaks before it is assembled (`asm_split`; the x86 sources are ELF and need no
+    # split, and the pattern names the arm directory only).
+    asm_split = ["third_party/s2n-bignum/arm/"],
+    # `extra_symbols` are the weak hooks aws-lc refers to and does not define (a program defines them): the prefix renames them too, so a program defines
+    # komira_awslc_OPENSSL_memory_*.
+    prefix = {
+        "name": "komira_awslc",
+        "min": 1000,
+        "extra_symbols": [
+            "OPENSSL_memory_alloc",
+            "OPENSSL_memory_free",
+            "OPENSSL_memory_get_size",
+            "OPENSSL_memory_realloc",
+        ],
+    },
     # Undefined in the archive and provided by the system: glibc names the floor list lacks, jemalloc's sized free (a weak reference aws-lc calls only on memory it got
     # from malloc), the macOS SDK function native/CommonCrypto stands in for, and the compiler builtin the archive defines itself.
     allow = ["__umodti3", "sdallocx", "fopen64", "__isoc99_sscanf", "getauxval", "CCRandomGenerateBytes"],
