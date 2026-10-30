@@ -13,6 +13,11 @@
 #   summary, an id outside its suite, a float where an integer is required,
 #   text that is not JSON and text after the document; each altered text is
 #   checked to differ from the original, so an edit that matches nothing fails.
+# - test_reader_refuses_schema_1_naming_both_versions: a document of the
+#   previous schema (komira-bench-result/1, before n_departure) is refused and
+#   the message names that version and the one the reader reads.
+# - test_schema_2_round_trip: the writer writes komira-bench-result/2 and the
+#   reader reads it back to the same text.
 # - test_writer_refuses: a result the schema forbids is not written: a path
 #   or a host-like name in the fingerprint, a PINNED duckdb without a digest, an
 #   UNPINNED one without a reason, a repeated cell id, a komira side on a cell
@@ -184,7 +189,7 @@ def test_round_trip() raises:
 def test_text_shape() raises:
     var text = write_result_json(_sample())
     assert_true(text.find(String("\n")) < 0)
-    assert_true(text.startswith(String('{"schema":"komira-bench-result/1","run":')))
+    assert_true(text.startswith(String('{"schema":"komira-bench-result/2","run":')))
     assert_true(text.find(String('"scale":{"sf":10}')) >= 0)
     assert_true(text.find(String('"summary":{')) >= 0)
 
@@ -192,7 +197,7 @@ def test_text_shape() raises:
 def test_reader_refuses() raises:
     var good = write_result_json(_sample())
     assert_true(not _refused(good))
-    assert_true(_refused(_altered(good, String("komira-bench-result/1"), String("komira-bench-result/2"))))
+    assert_true(_refused(_altered(good, String("komira-bench-result/2"), String("komira-bench-result/3"))))
     assert_true(_refused(_altered(good, String('"threads":20'), String('"threads":20,"extra":1'))))
     assert_true(_refused(_altered(good, String('"threads":20,'), String(""))))
     assert_true(_refused(_altered(good, String('"reps":4,"statistic"'), String('"reps":4,"reps":4,"statistic"'))))
@@ -203,6 +208,32 @@ def test_reader_refuses() raises:
     assert_true(_refused(_altered(good, String("bench-class-a"), String("node/7"))))
     assert_true(_refused(String("{")))
     assert_true(_refused(good + String("x")))
+
+
+def _refusal(text: String) -> String:
+    try:
+        _ = parse_result_json(text)
+    except e:
+        return String(e)
+    return String("")
+
+
+def test_reader_refuses_schema_1_naming_both_versions() raises:
+    var good = write_result_json(_sample())
+    var at = good.find(String('"run":'))
+    assert_true(at > 0)
+    var old = String('{"schema":"komira-bench-result/1",') + String(good[byte=at:])
+    var msg = _refusal(old)
+    assert_true(msg.find(String("BenchResultError: schema")) >= 0)
+    assert_true(msg.find(String("komira-bench-result/1")) >= 0)
+    assert_true(msg.find(String("komira-bench-result/2")) >= 0)
+
+
+def test_schema_2_round_trip() raises:
+    var text = write_result_json(_sample())
+    assert_true(text.find(String('"schema":"komira-bench-result/2"')) >= 0)
+    assert_true(_refusal(text) == String(""))
+    assert_equal(write_result_json(parse_result_json(text)), text)
 
 
 def test_reader_refuses_a_ratio_on_an_unverified_cell() raises:
@@ -505,6 +536,14 @@ def main() raises:
         test_reader_refuses()
     except e:
         failed += "\n  test_reader_refuses: " + String(e)
+    try:
+        test_reader_refuses_schema_1_naming_both_versions()
+    except e:
+        failed += "\n  test_reader_refuses_schema_1_naming_both_versions: " + String(e)
+    try:
+        test_schema_2_round_trip()
+    except e:
+        failed += "\n  test_schema_2_round_trip: " + String(e)
     try:
         test_reader_refuses_a_ratio_on_an_unverified_cell()
     except e:

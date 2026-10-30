@@ -11,6 +11,7 @@
 | `Cell`, `ResultSet`, `parse_json_rows` | typed query results (an exact decimal is `KIND_DECIMAL`); DuckDB's JSON output as a result set, read by column types where DuckDB quotes numbers |
 | `canonical_decimal`, `compare_decimals`, `ExactSum` | exact decimal text: one form per value, its order, and a sum with no rounding and no width limit |
 | `signature_of`, `ResultSignature`, `ColumnSignature`, `compare_signatures`, `ValueVerdict` | the order-independent value signature and its tolerance rules |
+| `AllowedDeparture`, `allowed_departures`, `departure_reason` | the table of allowed departures from "the same result as DuckDB" (HUGEINT as DECIMAL(38,0)) |
 | `check_order`, `OrderKey`, `OrderVerdict` | the row-order check of a query with ORDER BY |
 | `ReferenceAnswer`, `ReferenceSet`, `format_reference`, `parse_references` | recorded answers as text a package can compile in |
 """
@@ -33,7 +34,10 @@ from .compare import (
     numbers_close,
 )
 from .declared_types import (
+    AllowedDeparture,
     UNMAPPED_PREFIX,
+    allowed_departures,
+    departure_reason,
     decimal_type,
     duckdb_declared_type,
     is_declared_type,
@@ -65,7 +69,7 @@ from .reference import (
     format_reference,
     parse_references,
 )
-from .rows_json import EXACT_NONE, exactness_of_type, parse_json_rows
+from .rows_json import EXACT_NONE, EXACT_WHOLE, exactness_of_type, parse_json_rows
 from .session import (
     DuckDbSession,
     FairnessSettings,

@@ -2,7 +2,10 @@
 # whole run and per suite. The denominator of every count is the number of
 # cells the suite has, so a cell the engine refused or failed, and a cell whose
 # values did not match, still count against the totals; only a cell with a
-# ratio enters the geomean, and the line that reports it says how many did.
+# ratio enters the geomean, and the line that reports it says how many did. A
+# cell whose values are a DEPARTURE (equal values, an allowed difference of the
+# declared types) has a ratio and enters the geomean, but is never a PASS: it is
+# counted in `n_departure` and reported as `DEPARTURE n/m`.
 
 from .format import format_fixed
 from .model import BenchResult, Cell, DuckDbPin
@@ -14,9 +17,9 @@ struct SuiteSummary(Copyable, Movable):
     """The counts of one suite (or, for `Summary.overall`, of the whole run).
 
     `n_cells` is every cell, `n_ran` those whose run ended in EXEC_OK,
-    `n_verified` those whose values are IDENTICAL, `n_ratio` those with a
-    ratio; `geomean` and `median_ratio` are over the ratios and absent when
-    there are none."""
+    `n_verified` those whose values are IDENTICAL, `n_departure` those whose
+    values are a DEPARTURE, `n_ratio` those with a ratio; `geomean` and
+    `median_ratio` are over the ratios and absent when there are none."""
 
     var suite: String
     var n_cells: Int
@@ -25,6 +28,7 @@ struct SuiteSummary(Copyable, Movable):
     var n_ratio: Int
     var n_pass: Int
     var n_fail: Int
+    var n_departure: Int
     var geomean: Optional[Float64]
     var median_ratio: Optional[Float64]
 
@@ -37,6 +41,7 @@ struct SuiteSummary(Copyable, Movable):
         n_ratio: Int,
         n_pass: Int,
         n_fail: Int,
+        n_departure: Int,
         var geomean: Optional[Float64],
         var median_ratio: Optional[Float64],
     ):
@@ -47,6 +52,7 @@ struct SuiteSummary(Copyable, Movable):
         self.n_ratio = n_ratio
         self.n_pass = n_pass
         self.n_fail = n_fail
+        self.n_departure = n_departure
         self.geomean = geomean^
         self.median_ratio = median_ratio^
 
@@ -72,6 +78,7 @@ def _summarize_cells(
     var n_verified = 0
     var n_pass = 0
     var n_fail = 0
+    var n_departure = 0
     var ratios = List[Float64]()
     for i in range(len(cells)):
         var c = cells[i].copy()
@@ -79,6 +86,8 @@ def _summarize_cells(
             n_ran += 1
         if c.value.is_identical():
             n_verified += 1
+        if c.value.is_departure():
+            n_departure += 1
         if c.ratio:
             ratios.append(c.ratio.value())
         if c.verdict == String(CELL_PASS):
@@ -98,6 +107,7 @@ def _summarize_cells(
         len(ratios),
         n_pass,
         n_fail,
+        n_departure,
         g^,
         m^,
     )
@@ -126,12 +136,14 @@ def summarize(result: BenchResult) raises -> Summary:
 
 
 def exit_code(summary: Summary) -> Int:
-    """0 only when every cell ran and its values were verified; 1 otherwise.
-    A cell that fails the ratio threshold does not change it. A run of mode
+    """0 only when every cell ran and its values were verified (IDENTICAL, or
+    a DEPARTURE); 1 otherwise. A cell that fails the ratio threshold does not
+    change it. A run of mode
     `komira` or `duckdb` verifies no values, so it gives 1."""
     if (
         summary.overall.n_ran == summary.overall.n_cells
-        and summary.overall.n_verified == summary.overall.n_cells
+        and summary.overall.n_verified + summary.overall.n_departure
+        == summary.overall.n_cells
     ):
         return 0
     return 1
@@ -139,8 +151,9 @@ def exit_code(summary: Summary) -> Int:
 
 def summary_line(s: SuiteSummary, pass_max: Float64, duckdb: DuckDbPin) -> String:
     """One line that states a suite's result: the PASS count over every cell
-    with the threshold and the DuckDB pin beside it, then the geomean with the
-    number of cells it covers."""
+    with the threshold and the DuckDB pin beside it, `DEPARTURE n/m` when
+    some cells are departures (never counted in PASS), then the geomean with
+    the number of cells it covers."""
     var line = (
         String("PASS ")
         + String(s.n_pass)
@@ -154,6 +167,8 @@ def summary_line(s: SuiteSummary, pass_max: Float64, duckdb: DuckDbPin) -> Strin
         + duckdb.pin
         + String(")")
     )
+    if s.n_departure > 0:
+        line += String(" | DEPARTURE ") + String(s.n_departure) + String("/") + String(s.n_cells)
     if s.geomean:
         line += (
             String(" | geomean ")
