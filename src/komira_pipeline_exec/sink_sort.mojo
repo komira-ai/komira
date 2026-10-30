@@ -220,7 +220,10 @@ struct SortSink(MorselSinkImpl):
         var result = sort_batch_with_null_placement(
             rows^, self._keys, self._descending, self._nulls_first
         )
-        # Only the sorted copy is left.
+        # Only the sorted copy is left. It is returned and drawn again, not
+        # carried over: against a pool that other segments filled in the gap
+        # the draw can be refused. That is a refusal by name and nothing
+        # leaks (the sink returns what it holds when it is dropped).
         self._work.give_back_all()
         code = self._work.grow(out_bytes)
         if code != _DRAWN:

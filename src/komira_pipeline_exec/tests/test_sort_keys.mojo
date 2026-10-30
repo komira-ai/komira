@@ -12,6 +12,10 @@
 #   * A STRING dictionary whose entries are not in sorted order sorts by the
 #     strings, not by the codes: ascending and descending, as the second key
 #     behind a tie, and with a NULL code placed by the plan.
+#   * A numeric dictionary out of order sorts by its values, with a NULL row; a
+#     NULL entry inside a string dictionary reads as the empty string.
+#   * The scratch estimate is at least the string encoding's per-row allocations
+#     (140 bytes a row for distinct 8-byte strings with an INT64 key).
 #   * A key whose type cannot be sorted (DECIMAL, DATE32) is refused by name
 #     when the sink is built over a known schema; over an unknown schema it is
 #     refused by name at combine, the output is then not readable, and the pool
@@ -39,6 +43,7 @@ from komira_physical_plan.physical_plan import SortSinkData
 from komira_pipeline_exec.plan_harness import int64_column
 from komira_pipeline_exec.segment_pool import SegmentPool
 from komira_pipeline_exec.sink_sort import SortSink
+from komira_pipeline_exec.sort_nulls import sort_scratch_bytes
 
 
 def _ids(n: Int) raises -> Column[HeapRegion]:
@@ -216,6 +221,89 @@ def test_a_null_dictionary_code_is_placed_by_the_plan() raises:
     _expect(_sort(_dict_batch(True), _k("d"), _f(False), _f(False)), [1, 6, 2, 5, 0, 4, 3])
 
 
+def _numeric_dict_batch() raises -> RecordBatch:
+    # Entries in unsorted order: code 0 is 30, code 1 is 10, code 2 is 20.
+    var values = List[Int64]()
+    values.append(30)
+    values.append(10)
+    values.append(20)
+    var codes = PrimitiveArray[DType.int32].allocate_nullable(7)
+    var want = [0, 1, 2, 1, 0, 2, 1]
+    for i in range(7):
+        codes.set(i, Int32(want[i]))
+    codes._set_null(3)  # private, the only way to mark a code NULL
+    var sb = SchemaBuilder()
+    var rb = RecordBatchBuilder()
+    sb.add_field(Field("id", ArrowType.INT64, False))
+    rb.add_column(_ids(7))
+    sb.add_field(Field.dictionary("n", ArrowType.INT32, True))
+    rb.add_column(Column.from_numeric_dict[DType.int32, DType.int64](codes^, values^))
+    return rb.build(sb.build())
+
+
+def test_a_numeric_dictionary_sorts_by_its_values_with_a_null() raises:
+    # 10 (ids 1, 6), 20 (2, 5), 30 (0, 4), the NULL id 3; the codes alone
+    # would order 30 first.
+    _expect(_sort(_numeric_dict_batch(), _k("n"), _f(False), _f(True)), [3, 1, 6, 2, 5, 0, 4])
+    _expect(_sort(_numeric_dict_batch(), _k("n"), _f(True), _f(False)), [0, 4, 2, 5, 1, 6, 3])
+
+
+def test_a_null_entry_inside_a_dictionary_reads_as_the_empty_string() raises:
+    var entries = List[String]()
+    var valid = List[Bool]()
+    for e in ["b", "x", "a", ""]:
+        entries.append(String(e))
+        valid.append(True)
+    valid[1] = False  # entry 1 is NULL inside the dictionary
+    var codes = PrimitiveArray[DType.int32].allocate(5)
+    var want = [0, 1, 2, 3, 1]
+    for i in range(5):
+        codes.set(i, Int32(want[i]))
+    var sb = SchemaBuilder()
+    var rb = RecordBatchBuilder()
+    sb.add_field(Field("id", ArrowType.INT64, False))
+    rb.add_column(_ids(5))
+    sb.add_field(Field.dictionary("d", ArrowType.INT32, False))
+    rb.add_column(
+        Column.from_dictionary(
+            StringDictionaryArray.from_parts(
+                codes^, StringArray.from_strings_with_validity(entries, valid)
+            )
+        )
+    )
+    # Rows 1, 3 and 4 hold "" (a NULL entry has no bytes) and tie in input
+    # order, then "a" (row 2), then "b" (row 0).
+    _expect(_sort(rb.build(sb.build()), _k("d"), _f(False), _f(False)), [1, 3, 4, 2, 0])
+
+
+def test_the_scratch_estimate_covers_the_string_encoding_of_a_multi_key_sort() raises:
+    # n distinct 8-byte strings and an INT64 key sort in one pass through the
+    # kernel's string encoding, which holds about 110 to 140 bytes per row
+    # beside the key batch (counted from its allocations, not measured); the
+    # estimate must not fall under that.
+    var n = 200
+    var values = List[String]()
+    for i in range(n):
+        var v = n - i
+        var text = String("")
+        for _ in range(7):
+            text = String(v % 10) + text
+            v //= 10
+        values.append(String("s") + text)
+    var sb = SchemaBuilder()
+    var rb = RecordBatchBuilder()
+    sb.add_field(Field("id", ArrowType.INT64, False))
+    rb.add_column(_ids(n))
+    sb.add_field(Field("s", ArrowType.STRING, False))
+    rb.add_column(Column.from_string(StringArray.from_strings(values)))
+    var batch = rb.build(sb.build())
+    assert_true(sort_scratch_bytes(batch, _k("s", "id")) >= 140 * n)
+    # And a sort over such keys still gives the right order.
+    var order = _sort(batch^, _k("s", "id"), _f(False, False, 2), _f(False, False, 2))
+    for i in range(n):
+        assert_equal(order[i], n - 1 - i)
+
+
 def test_a_key_that_cannot_be_sorted_is_refused_when_the_sink_is_built() raises:
     var sb = SchemaBuilder()
     sb.add_field(Field("id", ArrowType.INT64, False))
@@ -260,6 +348,9 @@ def main() raises:
     suite.test[test_the_empty_string_is_the_least_string_and_not_a_null]()
     suite.test[test_a_dictionary_sorts_by_its_strings_and_not_its_codes]()
     suite.test[test_a_null_dictionary_code_is_placed_by_the_plan]()
+    suite.test[test_a_numeric_dictionary_sorts_by_its_values_with_a_null]()
+    suite.test[test_a_null_entry_inside_a_dictionary_reads_as_the_empty_string]()
+    suite.test[test_the_scratch_estimate_covers_the_string_encoding_of_a_multi_key_sort]()
     suite.test[test_a_key_that_cannot_be_sorted_is_refused_when_the_sink_is_built]()
     suite.test[test_over_an_unknown_schema_the_refusal_comes_at_combine_with_no_output]()
     suite^.run()

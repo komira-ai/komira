@@ -18,7 +18,8 @@
 # for each distinct key:
 #
 #   * a STRING dictionary key is decoded into a flat STRING column, a numeric
-#     dictionary key into its flat values;
+#     dictionary key into a flat INT64 or FLOAT64 column (a NULL row's code is
+#     never read, any other is range-checked);
 #   * a key column without NULL goes in as a value column;
 #   * a key column with NULL goes in as an INT32 rank, ascending, 0 for the
 #     rows that sort first (the NULLs when NULLS FIRST, the valid rows when
@@ -133,16 +134,47 @@ def resolve_nulls_first(
     return nulls_first.copy()
 
 
+def _longest_string(ref col: Column[HeapRegion]) raises -> Int:
+    """The longest value of a STRING or STRING-dictionary column, in bytes."""
+    var longest = 0
+    if col.arrow_type == ArrowType.DICTIONARY:
+        if col.is_string_dict():
+            for c in range(col.dict_size()):
+                longest = max(longest, col.string_dict_value_at(c).len())
+        return longest
+    var values = col.as_string()
+    for r in range(col.length()):
+        longest = max(longest, values.get_length(r))
+    return longest
+
+
 def sort_scratch_bytes(ref batch: RecordBatch, keys: List[String]) raises -> Int:
-    """An upper bound on the memory the sort holds besides the batch and its
-    sorted copy: the key batch, which the kernel gathers once per pass (two
-    copies live at once), a row number (8 bytes), the sort indices (4) and the
-    two index lists of the gathers (8 each) per row. A key column counts its
-    buffers once, twice when it has NULLs (the overwritten copy), plus a
-    4-byte rank per row; a dictionary key counts its decoded size at the
-    longest entry. A bound, not a measurement."""
+    """A conservative estimate of the memory the sort holds besides the batch
+    and its sorted copy, drawn from the pool before the sort runs. It is built
+    from what the code allocates, assuming the worst case (every value of a
+    key distinct):
+
+    * the key batch, which the kernel gathers once per pass (two copies live at
+      once), plus per row a row number (8 bytes), the sort indices (4) and the
+      two index lists of the gathers (8 each);
+    * a key column counts its buffers once, twice when it has NULLs (the
+      overwritten copy), plus a 4-byte rank per row;
+    * a STRING key (a dictionary one is decoded first) adds what the kernel's
+      string encoding builds when several keys sort in one pass
+      (`komira_op_sort.sort_lex._encode_string_key`): per row a provisional id
+      (8), a start and a length (16), a copy of the value (24 + its length), a
+      hash-table entry (about 48), a permutation and an order (16) and the
+      encoded rank (8), and the packed key (8); the estimate takes 160 bytes
+      plus the longest value per row;
+    * a dictionary key's decode, a list of byte lists (24 bytes of list, 32 of
+      allocation floor or the length, per row) and the string column built from
+      it.
+
+    An estimate from the code, not a measurement: nothing here counts the
+    allocator's own overhead."""
     var n = batch.num_rows()
     var key_batch = 8 * n
+    var strings = 0
     var seen = List[String]()
     for k in range(len(keys)):
         var dup = False
@@ -155,17 +187,22 @@ def sort_scratch_bytes(ref batch: RecordBatch, keys: List[String]) raises -> Int
         var idx = batch.schema.column_index(keys[k])
         ref col = batch.column_at(idx)
         var bytes = column_buffer_bytes(batch, idx)
-        if col.arrow_type == ArrowType.DICTIONARY and col.is_string_dict():
-            var longest = 0
-            for c in range(col.dict_size()):
-                longest = max(longest, col.string_dict_value_at(c).len())
-            bytes = n * (longest + 4) + 4
-        elif col.arrow_type == ArrowType.DICTIONARY:
-            bytes = n * 8
+        var is_string = col.arrow_type == ArrowType.STRING
+        if col.arrow_type == ArrowType.DICTIONARY:
+            if col.is_string_dict():
+                is_string = True
+                var longest = _longest_string(col)
+                bytes = n * (longest + 4) + 4
+                # The decode's list of byte lists, alive beside its result.
+                strings += n * (24 + max(longest, 32) + 16)
+            else:
+                bytes = n * 8
+        if is_string:
+            strings += n * (160 + _longest_string(col)) + 8 * n
         key_batch += bytes
         if col.null_count() > 0:
             key_batch += bytes + 4 * n
-    return 2 * key_batch + 20 * n
+    return 2 * key_batch + 20 * n + strings
 
 
 def _rank_column(
@@ -183,7 +220,9 @@ def _rank_column(
 def _decode_string_dict(ref col: Column[HeapRegion]) raises -> Column[HeapRegion]:
     """The values of a STRING dictionary column as a flat STRING column. A
     NULL row reads as the empty string (its code is never read); the caller
-    carries the NULLs in a rank column."""
+    carries the NULLs in a rank column. An entry that is NULL inside the
+    dictionary has no bytes and reads as the empty string too: it ties with a
+    real empty string."""
     var n = col.length()
     var values = List[List[UInt8]](capacity=n)
     for r in range(n):
@@ -196,6 +235,41 @@ def _decode_string_dict(ref col: Column[HeapRegion]) raises -> Column[HeapRegion
     return Column.from_string(StringArray.from_byte_lists(values))
 
 
+def _decode_numeric_dict(
+    ref col: Column[HeapRegion],
+) raises -> Column[HeapRegion]:
+    """The values of a numeric dictionary column as a flat INT64 or FLOAT64
+    column. A NULL row reads as zero and its code is never read (the caller
+    carries the NULLs in a rank column); every other code is range-checked."""
+    var n = col.length()
+    var size = col.dict_size()
+    var vdt = col.dict_value_dtype()
+    var is_float = vdt == DType.float64 or vdt == DType.float32
+    var ints = PrimitiveArray[DType.int64].allocate(n)
+    var floats = PrimitiveArray[DType.float64].allocate(n)
+    for r in range(n):
+        if col.is_null_at(r):
+            continue
+        var code = col.dict_code_at(r)
+        if code < 0 or code >= size:
+            raise Error(
+                "komira_pipeline_exec: the sort found dictionary code "
+                + String(code)
+                + " at row "
+                + String(r)
+                + " of a dictionary of "
+                + String(size)
+                + " entries"
+            )
+        if is_float:
+            floats.set(r, col.dict_value_f64(code))
+        else:
+            ints.set(r, col.dict_value_i64(code))
+    if is_float:
+        return Column.from_primitive[DType.float64](floats^)
+    return Column.from_primitive[DType.int64](ints^)
+
+
 def _value_column(
     ref batch: RecordBatch, idx: Int
 ) raises -> Column[HeapRegion]:
@@ -204,7 +278,7 @@ def _value_column(
     ref col = batch.column_at(idx)
     if col.arrow_type == ArrowType.DICTIONARY:
         if col.is_numeric_dict():
-            return col.resolve_numeric_dict_to_flat()
+            return _decode_numeric_dict(col)
         return _decode_string_dict(col)
     return copy_column(batch, idx)
 
