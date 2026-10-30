@@ -116,13 +116,37 @@ Import each module by name; the package root exports nothing.
   reservation returns its blocks when it is dropped. The aggregation sink's
   state is fixed in size, so it draws once per worker; the grouped sink draws as
   its tables grow.
+- `sink_sort`, `sort_nulls`: the in-memory sort `(SINK_SORT, KEY_DTYPE_NONE,
+  SINK_ORIENT_COLUMNAR)`, for a small result (TPC-H Q1's ORDER BY over its
+  grouped rows). It collects with a `CollectSink` (morsels in position order),
+  then sorts the one batch by `SortSinkData`: keys, directions and per-key
+  NULL placement (an empty `nulls_first` means the engine's default, NULLS
+  LAST). `komira_op_sort.sort_batch_by_keys` is the sort and is stable, so tied
+  rows keep the collected order. It does not read a NULL placement and orders a
+  dictionary by index, so `sort_nulls` hands it a key batch of its own: string
+  dictionaries decoded, and for each key with a NULL an INT32 rank column and
+  the key with its NULL slots overwritten by a valid value; the input is then
+  gathered by the sorted row numbers. Key types the kernel does not order
+  (DECIMAL, DATE, FLOAT32 ...) are refused by name when the sink is built.
+  Memory: the sink draws, as each exists, the morsels it keeps, the
+  concatenation, then the sorted copy plus an estimate of the key batch and the
+  kernel's temporaries (`sort_scratch_bytes`), from the segment pool and from a
+  pool sized by `SortSinkData.memory_budget` (when positive). The budget bounds
+  the estimated peak, and the consume that takes the input past it fails. There is no
+  spill. `sort_harness` is the table and the oracle of its tests.
+- `spike/intern_spike.mojo` (target `intern_spike`, not part of the library): the
+  dictionary-interning spike of the string group-by. A standalone program that times
+  interned dictionary codes, hashing every row, the fragment merge and the string-table
+  memory on a synthetic workload and checks each layout's counts; its numbers and what
+  they decided are in `docs/design/lowering_and_pipeline.md` (section 4.3).
 - `real_builder`: `RealBuilder`, the `SegmentBuilder` over these members. It
   serves SOURCE_PARQUET, SOURCE_BATCH, SOURCE_SINK_OUTPUT, OP_FILTER,
   OP_PROJECT, OP_LIMIT and the sinks `(SINK_COLLECT, KEY_DTYPE_NONE,
-  SINK_ORIENT_COLUMNAR)`, `(SINK_AGG, KEY_DTYPE_NONE, SINK_ORIENT_COLUMNAR)`
-  and the grouped rows I64, I32, F64 and F32, and refuses every other kind by name. It keeps the
+  SINK_ORIENT_COLUMNAR)`, `(SINK_AGG, KEY_DTYPE_NONE, SINK_ORIENT_COLUMNAR)`,
+  the grouped rows I64, I32, F64 and F32, and `(SINK_SORT, KEY_DTYPE_NONE,
+  SINK_ORIENT_COLUMNAR)`, and refuses every other kind by name. It keeps the
   resident batches (`add_resident`), the aggregation sink data a descriptor's
-  `sink_param_id` indexes (`add_agg_sink`) and the segment pool
+  `sink_param_id` indexes (`add_agg_sink`), the sort sink data (`add_sort_sink`) and the segment pool
   (`set_memory_budget`, unbounded until set), shares one set of operator parts among the
   workers of a segment run, and derives the empty-output schema by running the
   chain's projections over a batch of no rows. Three origins name the borrows of

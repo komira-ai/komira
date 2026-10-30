@@ -640,6 +640,57 @@ dictionary query that is not Q1. (2) A column chunk that fell back to plain enco
 inputs say any chunk is plain is lowered to `(STRING, COLUMNAR)` (§4.2), and a fixture with a fallback row group
 tests that the answer equals the dictionary row's.
 
+**Spike result (slice 4).** `src/komira_pipeline_exec/spike/intern_spike.mojo` (target `intern_spike`, run on the farm with
+`[run_check]`) times the layouts on a synthetic workload: 8 workers, 4 row groups of 65,536 rows each, a dictionary of up to
+8,192 strings per row group drawn from a universe of 4 to 1,000,000 strings, 16-byte strings (and 48-byte at 100,000 groups).
+Every layout's counts are checked against a direct count. This is one farm run, best of three trials inside the run, on an unpinned worker; no machine description and no run-to-run variance was recorded, so read the ratios and treat the absolute nanoseconds as indicative. CI compiles the program and does not run it. The hash is
+FNV-1a a byte at a time (about 2.2 ns a byte), the same for every layout, so absolute hashing costs are high; a word-at-a-time
+hash would lower every cell that includes a hash; that it does not change which layout wins is an inference (the gaps are 9 times and more), not a measurement.
+
+| groups (dictionary) | interned, ns/row | by value, ns/row | shared table, ns/row | merge, carried hash, ns/entry | merge, rehash, ns/entry | fragment entries per merged group | W string tables / merged table |
+|---|---|---|---|---|---|---|---|
+| 4 (4) | 1.6 | 133 | 6.5 | 139 | 183 | 8.0 | 8.0x (34 KB / 4 KB) |
+| 1,000 (1,000) | 3.8 | 141 | 8.8 | 111 | 150 | 8.0 | 8.0x (450 KB / 56 KB) |
+| 100,000 (8,192) | 22 | 197 | 28 | 131 | 170 | 3.8 | 3.8x (10.3 MB / 2.7 MB) |
+| 1,000,000 (8,192) | 22 | 202 | 29 | 139 | 176 | 1.5 | 1.4x (14.7 MB / 10.6 MB) |
+| 100,000 (8,192), 48-byte strings | 44 | 403 | 53 | 258 | 367 | 3.8 | 3.8x (15.7 MB / 4.1 MB) |
+
+The three costs:
+
+1. **Content hash per interned entry.** Hashing a dictionary entry costs 35 ns at 16 bytes and 103 ns at 48 bytes, and
+   hashing a row costs the same per row, so hashing per row is `rows / entries` times dearer (8 times at these shapes). Interning
+   a dictionary entry (hash, probe, byte compare on a hit, append the bytes) costs 140 to 215 ns at 16 bytes and 330 ns at 48.
+   With that amortized over the rows of the row group, the interned layout is 9 to 80 times cheaper per row than hashing
+   every row and probing the string table (22 against 197 ns at 100,000 groups; 1.6 against 133 ns at four). The interned
+   per-row figure counts into an array indexed by the id: the probe of the aggregate table by the id, which a real sink pays
+   once per row, is slice 5's integer-key cost and is not in it. Inference, not measured: interning loses only where a
+   dictionary has more entries than the chunk has rows that use them, since its cost is per entry and the alternative's is per row.
+2. **Fragment merge per entry.** 110 to 140 ns an entry at 16 bytes and 258 at 48, and it grows with the byte compare and the
+   cache misses of a large merge table, not with the rows. Carrying the hash saves 21 to 30 percent of it (the hash that
+   would be recomputed: 35 ns at 16 bytes, 109 at 48), so the carried hash stays. The number of entries the merge
+   handles is the workers' total, up to W times the distinct strings (8.0 when every worker sees every string): at 1,000,000
+   groups and eight workers that would be about a second on one thread. That figure is extrapolated, not measured: the spike's largest merge was 262,144 fragment entries (about 35 ms), and the extrapolation assumes the per-entry cost stays at 139 ns as the merge table outgrows the cache, which it may not. If it holds, it makes the merge by partition on the dispatcher
+   (this section's design) a requirement and not an optimization.
+3. **String-table memory per worker.** About 60 bytes an entry at 16-byte strings (the bytes, a carried hash, a start, a
+   length, a count and a slot at half load), so 1.3 to 1.8 MB a worker at 8,192-entry dictionaries. The W tables hold up to
+   W copies of the groups (8.0 at the high-overlap shapes, 1.4 where the workers' dictionaries barely overlap), against
+   one copy in the merged table. The sink must charge the growth of its string table to the segment pool when it interns
+   (the pool draws in blocks), not only the aggregate state.
+
+**The shared concurrent intern table** (one id space; the `shared table` column) was measured uncontended on one thread only: 28 ns a row against 22
+for the per-worker tables at 100,000 groups, because every worker's dictionary entries probe one larger table. It would
+remove the merge (about 130 ns a fragment entry) and keep one copy of the strings, and it would put W threads on one
+table at every dictionary boundary. Threads and cache-line traffic are not in the spike. Decision for slice 6: keep the
+per-worker tables of this section, whose costs are measured and whose merge runs in parallel by partition. Revisit the shared
+table only if the memory of W string tables, or the merge, shows on the board at a million groups.
+
+**Two requirements the spike adds to slice 6.** (a) An interned entry is not a group: 2 of 44,691 entries at 100,000
+groups, and 34 of 177,656 at 1,000,000, were pointed at by no row (a selection mask or a filter makes this common), and
+an entry that no row used must not appear in the output. A group exists when a row reached it, so the group count and the
+"seen" state of an aggregate belong to the aggregate table keyed by the interned id, which rows populate, not to the intern table.
+(b) The spike's workload has no NULL key and no plain-encoded chunk; the NULL group and the fallback fixture stay in slice 6 as
+written.
+
 **Why wrap, and not port the earlier untyped sinks.** The earlier engine's untyped aggregation family is route ladders
 around the same kernels, with most of its size in routes particular to benchmark shapes. The kernels on `main` are the runtime-spec layer; what is missing is a thin sink over them. D4 below sets the
 size at which the sink gets its own package.
