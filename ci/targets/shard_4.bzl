@@ -78,6 +78,8 @@ TARGETS = [
     "komira//src/tests/helpers/komira_mail_test_support:komira_mail_test_support_conda",
     "komira//src/tests/helpers/komira_udf_spike_node_worker:bench",
     "komira//third_party/aws-lc:srcs_drift",
+    "komira//third_party/aws-lc:srcs_files_check",
+    "komira//third_party/aws-lc:srcs_files_drift",
     "komira//third_party/pierrec-lz4:LICENSE",
     "komira//tools/build/coverage/mutate:mut_dir",
     "komira//tools/build/coverage:branch_gate_rows",
@@ -86,7 +88,11 @@ TARGETS = [
     "komira//tools/build/inspect:buildtools_conda",
     "komira//tools/build/native:glibc_floor_fixture_row",
     "komira//tools/build/third_party_srcs:aws_lc_mini_drift",
+    "komira//tools/build/third_party_srcs:aws_lc_mini_files_check",
+    "komira//tools/build/third_party_srcs:aws_lc_mini_files_drift",
     "komira//tools/build/third_party_srcs:s2n_mini_drift",
+    "komira//tools/build/third_party_srcs:s2n_mini_files_check",
+    "komira//tools/build/third_party_srcs:s2n_mini_files_drift",
     "komira//tools/build/third_party_srcs:shell_lint",
     "tests//functional/bundle_parity:doc_tree",
     "tests//functional/bundle_parity:parity",
@@ -162,8 +168,14 @@ TARGETS = [
 
 TESTS = [
     "komira//third_party/aws-lc:srcs_drift",
+    "komira//third_party/aws-lc:srcs_files_check",
+    "komira//third_party/aws-lc:srcs_files_drift",
     "komira//tools/build/third_party_srcs:aws_lc_mini_drift",
+    "komira//tools/build/third_party_srcs:aws_lc_mini_files_check",
+    "komira//tools/build/third_party_srcs:aws_lc_mini_files_drift",
     "komira//tools/build/third_party_srcs:s2n_mini_drift",
+    "komira//tools/build/third_party_srcs:s2n_mini_files_check",
+    "komira//tools/build/third_party_srcs:s2n_mini_files_drift",
     "tests//functional/rust_cargo:native_test",
 ]
 

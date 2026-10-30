@@ -12,6 +12,13 @@ declares `:srcs_gen`, the generated file (regenerate the committed copy with
 `./buck2 build //<package>:srcs_gen --out <package>/srcs.bzl`), and
 `:srcs_drift`, a test that fails, naming the first differing lines, while the
 committed copy and the archive disagree. Both run on the farm.
+
+With `committed_files = "files.bzl"` it also declares the same pair for the
+explicit file lists a `native_library` stages (`:srcs_files_gen`,
+`:srcs_files_drift`) and `:srcs_files_check`, a test that reads the committed
+copy and the archive independently of :gen: every file a list names is in the
+archive, every list is within FILES, every include directory holds a file, and
+each list named in `require` is there and not empty.
 """
 
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
@@ -20,7 +27,7 @@ load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
 
 def _gen_impl(ctx):
     gen = ctx.attrs._gen[MojoRunnableInfo]
-    out = ctx.actions.declare_output("srcs.bzl")
+    out = ctx.actions.declare_output("files.bzl" if ctx.attrs.library.endswith("-files") else "srcs.bzl")
     ctx.actions.run(
         cmd_args(
             ctx.attrs._tool[RunInfo],
@@ -53,7 +60,7 @@ _third_party_srcs_gen = rule(
         "committed_path": attrs.string(),
         "drift_label": attrs.string(),
         "gen_label": attrs.string(),
-        "library": attrs.enum(["aws-lc", "s2n-tls"]),
+        "library": attrs.enum(["aws-lc", "s2n-tls", "aws-lc-files", "s2n-tls-files"]),
         "_gen": attrs.dep(default = "komira//tools/build/third_party_srcs:gen", providers = [MojoRunnableInfo]),
         "_tool": attrs.exec_dep(default = "komira//tools/build/third_party_srcs:third_party_act", providers = [RunInfo]),
     },
@@ -79,7 +86,38 @@ _third_party_srcs_drift_test = rule(
     },
 )
 
-def third_party_srcs(name, library, archive, committed, visibility = None):
+def _check_impl(ctx):
+    command = cmd_args(
+        ctx.attrs._tool[RunInfo],
+        "files-check",
+        "--archive",
+        ctx.attrs.archive,
+        "--files",
+        ctx.attrs.committed,
+        "--regenerate",
+        ctx.attrs.regenerate,
+    )
+    for r in ctx.attrs.require:
+        command.add("--require", r)
+    return [
+        DefaultInfo(),
+        ExternalRunnerTestInfo(type = "custom", command = [command], labels = ctx.attrs.labels),
+    ]
+
+_third_party_files_check_test = rule(
+    impl = _check_impl,
+    doc = "Fails while the committed files.bzl names a file the archive lacks.",
+    attrs = {
+        "archive": attrs.source(),
+        "committed": attrs.source(),
+        "labels": attrs.list(attrs.string(), default = []),
+        "regenerate": attrs.string(),
+        "require": attrs.list(attrs.string(), default = []),
+        "_tool": attrs.exec_dep(default = "komira//tools/build/third_party_srcs:third_party_act", providers = [RunInfo]),
+    },
+)
+
+def third_party_srcs(name, library, archive, committed, committed_files = None, require = [], visibility = None):
     package = package_name()
     gen_label = "//{}:{}_gen".format(package, name)
     committed_path = "{}/{}".format(package, committed) if package else committed
@@ -100,6 +138,34 @@ def third_party_srcs(name, library, archive, committed, visibility = None):
         committed = committed,
         regenerate = "./buck2 build {} --out {}".format(gen_label, committed_path),
     )
+    if committed_files:
+        files_gen_label = "//{}:{}_files_gen".format(package, name)
+        files_path = "{}/{}".format(package, committed_files) if package else committed_files
+        _third_party_srcs_gen(
+            name = name + "_files_gen",
+            exec_compatible_with = LINUX_X86_64,
+            library = library + "-files",
+            archive = archive,
+            gen_label = files_gen_label,
+            drift_label = "//{}:{}_files_drift".format(package, name),
+            committed_path = files_path,
+            visibility = visibility,
+        )
+        _third_party_srcs_drift_test(
+            name = name + "_files_drift",
+            exec_compatible_with = LINUX_X86_64,
+            generated = ":" + name + "_files_gen",
+            committed = committed_files,
+            regenerate = "./buck2 build {} --out {}".format(files_gen_label, files_path),
+        )
+        _third_party_files_check_test(
+            name = name + "_files_check",
+            exec_compatible_with = LINUX_X86_64,
+            archive = archive,
+            committed = committed_files,
+            require = require,
+            regenerate = "./buck2 build {} --out {}".format(files_gen_label, files_path),
+        )
 
 def _fixture_archive_impl(ctx):
     prefix = ctx.attrs.strip_prefix + "/"

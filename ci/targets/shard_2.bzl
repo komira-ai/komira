@@ -108,6 +108,8 @@ TARGETS = [
     "komira//src/tests/e2e/komira_secrets_e2e:komira_secrets_e2e",
     "komira//tests/scan_binding_links:test_scan_binding_links",
     "komira//third_party/s2n-tls:srcs_drift",
+    "komira//third_party/s2n-tls:srcs_files_check",
+    "komira//third_party/s2n-tls:srcs_files_drift",
     "komira//third_party/uv:LICENSE-APACHE",
     "komira//third_party/uv:LICENSE-MIT",
     "komira//third_party/uv:uv_dist",
@@ -152,5 +154,7 @@ TESTS = [
     "komira//bin/kci:test_kci_process",
     "komira//tests/scan_binding_links:test_scan_binding_links",
     "komira//third_party/s2n-tls:srcs_drift",
+    "komira//third_party/s2n-tls:srcs_files_check",
+    "komira//third_party/s2n-tls:srcs_files_drift",
 ]
 
