@@ -1,7 +1,11 @@
-# The writer of result.json (schema `komira-bench-result/2`). It writes the
+# The writer of result.json (schema `komira-bench-result/3`). It writes the
 # result as one compact line of JSON with the members in a fixed order, after
 # `validate_result` has accepted it, and writes the summary the reader will
-# recompute and compare.
+# recompute and compare. Every run of every side is written (`runs_ms`, with
+# the page faults of each run beside it, and `first_run`: the check run executed
+# before the sweeps, with its time and faults), so a side without its runs is not
+# written: a result read from schema 2, which held no runs, is never rewritten
+# as schema 3.
 
 from komira_json import JsonValue
 
@@ -11,6 +15,7 @@ from .model import (
     DuckDbPin,
     Environment,
     RESULT_SCHEMA,
+    FirstRun,
     RunInfo,
     Side,
     validate_result,
@@ -32,6 +37,20 @@ def _opt_f64(x: Optional[Float64]) -> JsonValue:
     return JsonValue.null()
 
 
+def _counts_json(counts: List[List[Int64]]) raises -> JsonValue:
+    """The counts of each sweep as an array of arrays, or null when they were
+    not measured (an empty list)."""
+    if len(counts) == 0:
+        return JsonValue.null()
+    var sweeps = JsonValue.empty_array()
+    for i in range(len(counts)):
+        var one = JsonValue.empty_array()
+        for j in range(len(counts[i])):
+            one.push(_i(counts[i][j]))
+        sweeps.push(one^)
+    return sweeps^
+
+
 def _side_json(side: Optional[Side]) raises -> JsonValue:
     if not side:
         return JsonValue.null()
@@ -45,6 +64,47 @@ def _side_json(side: Optional[Side]) raises -> JsonValue:
     o.set_member(
         String("spread_pct"), JsonValue.from_f64(side.value().spread_pct)
     )
+    var runs = JsonValue.empty_array()
+    for i in range(len(side.value().runs_ms)):
+        var one = JsonValue.empty_array()
+        for j in range(len(side.value().runs_ms[i])):
+            one.push(JsonValue.from_f64(side.value().runs_ms[i][j]))
+        runs.push(one^)
+    o.set_member(String("runs_ms"), runs^)
+    o.set_member(String("minor_faults"), _counts_json(side.value().minor_faults))
+    o.set_member(String("major_faults"), _counts_json(side.value().major_faults))
+    var first = JsonValue.empty_object()
+    first.set_member(String("ms"), JsonValue.from_f64(side.value().first.value()))
+    if side.value().first_minor:
+        first.set_member(String("minor_faults"), _i(side.value().first_minor.value()))
+        first.set_member(String("major_faults"), _i(side.value().first_major.value()))
+    else:
+        first.set_member(String("minor_faults"), JsonValue.null())
+        first.set_member(String("major_faults"), JsonValue.null())
+    o.set_member(String("first_run"), first^)
+    return o^
+
+
+def _first_run_json(run: Optional[FirstRun]) raises -> JsonValue:
+    if not run:
+        return JsonValue.null()
+    var o = JsonValue.empty_object()
+    o.set_member(String("ms"), JsonValue.from_f64(run.value().ms))
+    if run.value().minor:
+        o.set_member(String("minor_faults"), _i(run.value().minor.value()))
+        o.set_member(String("major_faults"), _i(run.value().major.value()))
+    else:
+        o.set_member(String("minor_faults"), JsonValue.null())
+        o.set_member(String("major_faults"), JsonValue.null())
+    return o^
+
+
+def _check_runs_json(c: Cell) raises -> JsonValue:
+    if not c.check_runs:
+        return JsonValue.null()
+    var o = JsonValue.empty_object()
+    o.set_member(String("komira"), _first_run_json(c.check_runs.value().komira))
+    o.set_member(String("duckdb"), _first_run_json(c.check_runs.value().duckdb))
     return o^
 
 
@@ -59,6 +119,8 @@ def _cell_json(c: Cell) raises -> JsonValue:
     o.set_member(String("value"), _s(c.value.text()))
     o.set_member(String("ratio"), _opt_f64(c.ratio))
     o.set_member(String("verdict"), _s(c.verdict))
+    o.set_member(String("first_ratio"), _opt_f64(c.first_ratio))
+    o.set_member(String("check_runs"), _check_runs_json(c))
     return o^
 
 
@@ -93,7 +155,7 @@ def _env_json(env: Environment) raises -> JsonValue:
     return o^
 
 
-def _suite_summary_json(s: SuiteSummary) raises -> JsonValue:
+def _suite_summary_json(s: SuiteSummary, version: Int) raises -> JsonValue:
     var o = JsonValue.empty_object()
     o.set_member(String("suite"), _s(s.suite))
     o.set_member(String("n_cells"), _i(Int64(s.n_cells)))
@@ -105,28 +167,43 @@ def _suite_summary_json(s: SuiteSummary) raises -> JsonValue:
     o.set_member(String("n_departure"), _i(Int64(s.n_departure)))
     o.set_member(String("geomean_ratio_verified"), _opt_f64(s.geomean))
     o.set_member(String("median_ratio"), _opt_f64(s.median_ratio))
+    if version >= 3:
+        o.set_member(String("n_first_ratio"), _i(Int64(s.n_first_ratio)))
+        o.set_member(String("geomean_first_run"), _opt_f64(s.geomean_first))
+        o.set_member(String("median_first_run"), _opt_f64(s.median_first))
     return o^
 
 
-def summary_json(result: BenchResult) raises -> JsonValue:
+def summary_json(result: BenchResult, version: Int = 3) raises -> JsonValue:
     """The `summary` member of `result`, recomputed from its cells: the
-    overall counts, a line for each suite, and the headline."""
+    overall counts, a line for each suite, and the headline. With `version` 2
+    it is the summary that schema wrote: no first-run figures and a headline
+    whose geomean and median are not called steady-state. The reader compares
+    it with the summary of a schema 2 document."""
     var summary = summarize(result)
-    var o = _suite_summary_json(summary.overall)
+    var o = _suite_summary_json(summary.overall, version)
     var per_suite = JsonValue.empty_array()
     for i in range(len(summary.suites)):
-        per_suite.push(_suite_summary_json(summary.suites[i]))
+        per_suite.push(_suite_summary_json(summary.suites[i], version))
     o.set_member(String("per_suite"), per_suite^)
     o.set_member(
         String("headline"),
-        _s(summary_line(summary.overall, result.run.pass_max, result.env.duckdb)),
+        _s(summary_line(summary.overall, result.run.pass_max, result.env.duckdb, version >= 3)),
     )
     return o^
 
 
 def result_json(result: BenchResult) raises -> JsonValue:
-    """`result` as a JSON value. Raises if the schema does not allow it."""
+    """`result` as a JSON value. Raises if the schema does not allow it, or if
+    a side has no runs to write."""
     validate_result(result)
+    for i in range(len(result.cells)):
+        ref c = result.cells[i]
+        if (c.komira and not c.komira.value().has_runs()) or (c.duckdb and not c.duckdb.value().has_runs()):
+            raise Error(
+                "cell " + c.id + ": a side without its runs cannot be written; schema 3 holds every run"
+                " (a result read from schema 2 has none)"
+            )
     var doc = JsonValue.empty_object()
     doc.set_member(String("schema"), _s(String(RESULT_SCHEMA)))
     doc.set_member(String("run"), _run_json(result.run))

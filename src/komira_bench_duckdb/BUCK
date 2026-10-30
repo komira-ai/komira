@@ -23,6 +23,9 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #   DuckDB's JSON output becomes typed cells.
 # - test_memory: DuckDB's printed sizes and the read-back check of the memory
 #   limit and of size-valued settings.
+# - test_faults: how the minor and major page faults of the DuckDB child are
+#   read from its stat file, the delta a timed query carries, and the absence
+#   of a reading where the platform has none.
 # - test_pins: the pin table and the digest-and-size check of a file.
 # - test_session: timing from markers, errors, fetch and the fairness settings,
 #   over a stand-in process in the test and a manual clock.
@@ -42,6 +45,7 @@ mojo_library(
         "tests/test_declared_types.mojo",
         "tests/test_departures.mojo",
         "tests/test_exact_decimal.mojo",
+        "tests/test_faults.mojo",
         "tests/test_memory.mojo",
         "tests/test_pins.mojo",
         "tests/test_process.mojo",
