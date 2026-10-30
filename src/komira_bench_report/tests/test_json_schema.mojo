@@ -9,8 +9,10 @@
 #   one-member object.
 # - test_runs_and_faults_round_trip: every run of every sweep is in the file
 #   with rep 0 first (`runs_ms`), the minor and major page faults of each run
-#   are beside them where they were measured and null where they were not, a
-#   cell carries its first-run ratio, and all of it reads back unchanged.
+#   are beside them where they were measured and null where they were not, the
+#   first run of a side (the check run before the sweeps) is its own member
+#   `first_run` with its time and faults, a cell carries its first-run ratio,
+#   and all of it reads back unchanged.
 # - test_reader_reads_older_schemas_derived_from_a_current_document: the
 #   current document with the members of schema 2 (no runs, no faults, no
 #   first-run ratio; a summary without first-run figures and with
@@ -30,8 +32,9 @@
 # - test_reader_refuses_runs_and_faults_that_do_not_fit: runs that are not
 #   the run's sweeps by reps, runs whose medians are not `ms_per_sweep`, a
 #   negative fault count, faults of the wrong shape, minor faults without major
-#   ones, and a first-run ratio that is not the first runs' ratio are each
-#   refused.
+#   ones, a missing or non-positive first run, first-run faults without sweep
+#   faults (or the reverse), one of the first run's two counts, and a first-run
+#   ratio that is not the first runs' ratio are each refused.
 # - test_writer_refuses_runs_that_do_not_fit: the same checks when the result
 #   is written: a side with fewer runs than the run's reps, faults of the
 #   wrong shape and a negative fault count are not written.
@@ -122,14 +125,14 @@ def _sweeps(
 # A side whose two sweeps (rep 0 first) reduce to the medians `m1` and `m2`.
 def _side(rows: Int64, m1: Float64, m2: Float64) raises -> Optional[Side]:
     return Optional[Side](
-        Side.from_sweeps(rows, _sweeps(99.0, m1, m1, m1, 99.0, m2, m2, m2))
+        Side.from_sweeps(rows, _sweeps(99.0, m1, m1, m1, 99.0, m2, m2, m2), Optional[Float64](99.0))
     )
 
 
-# The same, with the first run of the first sweep `first` instead of 99.
+# The same, with the first run (the check run, before the sweeps) `first` instead of 99.
 def _side_first(rows: Int64, first: Float64, m1: Float64, m2: Float64) raises -> Optional[Side]:
     return Optional[Side](
-        Side.from_sweeps(rows, _sweeps(first, m1, m1, m1, 99.0, m2, m2, m2))
+        Side.from_sweeps(rows, _sweeps(99.0, m1, m1, m1, 99.0, m2, m2, m2), Optional[Float64](first))
     )
 
 
@@ -182,13 +185,15 @@ def _sample() raises -> BenchResult:
     # komira sweeps (99,4,6,5) and (99,3,3,3): medians 5 and 3, time 3; its
     # first run is 99 against DuckDB's 33, and it has page faults per run.
     var q01k = Side.from_sweeps(
-        4, _sweeps(99.0, 4.0, 6.0, 5.0, 99.0, 3.0, 3.0, 3.0), _minor(), _major()
+        4, _sweeps(99.0, 4.0, 6.0, 5.0, 99.0, 3.0, 3.0, 3.0), Optional[Float64](99.0),
+        _minor(), _major(), Optional[Int64](7000), Optional[Int64](4),
     )
     cells.append(_cell(String("tpch/q01"), String("tpch"), StageOutcome.exec_ok(),
         Optional[Side](q01k^), _side_first(4, 33.0, 2.0, 4.0), ValueVerdict.identical()))
     # DuckDB has page faults per run here, komira does not.
     var q02d = Side.from_sweeps(
-        10, _sweeps(99.0, 2.0, 2.0, 2.0, 99.0, 2.0, 2.0, 2.0), _minor(), _major()
+        10, _sweeps(99.0, 2.0, 2.0, 2.0, 99.0, 2.0, 2.0, 2.0), Optional[Float64](99.0),
+        _minor(), _major(), Optional[Int64](6000), Optional[Int64](1),
     )
     cells.append(_cell(String("tpch/q02"), String("tpch"), StageOutcome.exec_ok(),
         _side(10, 2.0, 2.0), Optional[Side](q02d^), ValueVerdict.identical()))
@@ -279,7 +284,14 @@ def test_runs_and_faults_round_trip() raises:
     assert_equal(k.runs_ms[0][1], 4.0)
     assert_equal(k.runs_ms[0][3], 5.0)
     assert_equal(k.runs_ms[1][0], 99.0)
+    # the first run is the check run before the sweeps, kept apart from them,
+    # with its own faults
     assert_equal(k.first_ms().value(), 99.0)
+    assert_equal(k.first_minor.value(), Int64(7000))
+    assert_equal(k.first_major.value(), Int64(4))
+    assert_true(text.find(String('"first_run":{"ms":')) >= 0)
+    assert_equal(back.cells[1].duckdb.value().first_minor.value(), Int64(6000))
+    assert_true(not Bool(back.cells[0].duckdb.value().first_minor))
     # the faults of each run
     assert_equal(len(k.minor_faults), 2)
     assert_equal(k.minor_faults[0][0], Int64(5000))
@@ -309,12 +321,12 @@ def _value_end(text: String, at: Int) -> Int:
     matching bracket, anything else to the next comma or closing brace."""
     var b = text.as_bytes()
     var i = at
-    if b[i] == 0x5B:
+    if b[i] == 0x5B or b[i] == 0x7B:
         var depth = 0
         while True:
-            if b[i] == 0x5B:
+            if b[i] == 0x5B or b[i] == 0x7B:
                 depth += 1
-            elif b[i] == 0x5D:
+            elif b[i] == 0x5D or b[i] == 0x7D:
                 depth -= 1
                 if depth == 0:
                     return i + 1
@@ -366,6 +378,7 @@ def _as_older(text: String, version: Int) raises -> String:
     var t = _altered(text, String("komira-bench-result/3"), String("komira-bench-result/") + String(version))
     if version == 1:
         t = _cut_all(t, String("n_departure"))
+    t = _cut_all(t, String("first_run"))
     t = _cut_all(t, String("runs_ms"))
     t = _cut_all(t, String("minor_faults"))
     t = _cut_all(t, String("major_faults"))
@@ -434,6 +447,14 @@ def test_reader_refuses_runs_and_faults_that_do_not_fit() raises:
     assert_true(_refused(_set_member(good, String("major_faults"), 0, String("[[2,0,0],[0,0,0,0]]"))))
     assert_true(_refused(_set_member(good, String("major_faults"), 0, String("null"))))
     assert_true(_refused(_set_member(good, String("minor_faults"), 0, String('[[1.5,0,0,0],[0,0,0,0]]'))))
+    # the first run: missing, not positive, faults for it but none for the sweeps
+    # (and the reverse), only one of its two counts
+    assert_true(_refused(_cut_all(good, String("first_run"))))
+    assert_true(_refused(_set_member(good, String("first_run"), 0, String('{"ms":0,"minor_faults":7000,"major_faults":4}'))))
+    assert_true(_refused(_set_member(good, String("first_run"), 0, String('{"ms":99.0,"minor_faults":null,"major_faults":null}'))))
+    assert_true(_refused(_set_member(good, String("first_run"), 0, String('{"ms":99.0,"minor_faults":7000,"major_faults":null}'))))
+    assert_true(_refused(_set_member(good, String("first_run"), 0, String('{"ms":99.0,"minor_faults":-1,"major_faults":4}'))))
+    assert_true(_refused(_set_member(good, String("first_run"), 1, String('{"ms":99.0,"minor_faults":5,"major_faults":1}'))))
     # a first-run ratio that is not komira's first run over DuckDB's
     assert_true(_refused(_set_member(good, String("first_ratio"), 0, String("7.5"))))
     assert_true(_refused(_set_member(good, String("first_ratio"), 0, String("null"))))
@@ -453,19 +474,43 @@ def test_writer_refuses_runs_that_do_not_fit() raises:
     var short = List[List[Int64]]()
     short.append(_minor()[0].copy())
     r = _sample()
-    r.cells[0].komira = Optional[Side](Side.from_sweeps(4, sweeps.copy(), short^, _major()))
-    assert_true(_write_refused(r))
-    r = _sample()
     r.cells[0].komira = Optional[Side](
-        Side.from_sweeps(4, sweeps.copy(), _counts(5000, 900, 900, 900, 800, 800, -3, 800), _major())
+        Side.from_sweeps(4, sweeps.copy(), Optional[Float64](99.0), short^, _major(), Optional[Int64](7000), Optional[Int64](4))
     )
     assert_true(_write_refused(r))
     r = _sample()
-    r.cells[0].komira = Optional[Side](Side.from_sweeps(4, sweeps.copy(), _minor()))
+    r.cells[0].komira = Optional[Side](
+        Side.from_sweeps(
+            4, sweeps.copy(), Optional[Float64](99.0), _counts(5000, 900, 900, 900, 800, 800, -3, 800), _major(),
+            Optional[Int64](7000), Optional[Int64](4),
+        )
+    )
+    assert_true(_write_refused(r))
+    r = _sample()
+    r.cells[0].komira = Optional[Side](
+        Side.from_sweeps(4, sweeps.copy(), Optional[Float64](99.0), _minor(), List[List[Int64]](), Optional[Int64](7000))
+    )
+    assert_true(_write_refused(r))
+    # faults for the first run but none for the sweeps, and the reverse
+    r = _sample()
+    r.cells[0].komira = Optional[Side](
+        Side.from_sweeps(4, sweeps.copy(), Optional[Float64](99.0), List[List[Int64]](), List[List[Int64]](), Optional[Int64](7000), Optional[Int64](4))
+    )
+    assert_true(_write_refused(r))
+    r = _sample()
+    r.cells[0].komira = Optional[Side](
+        Side.from_sweeps(4, sweeps.copy(), Optional[Float64](99.0), _minor(), _major())
+    )
+    assert_true(_write_refused(r))
+    # a side with runs but no first run is not written
+    r = _sample()
+    r.cells[0].komira = Optional[Side](Side.from_sweeps(4, sweeps.copy()))
     assert_true(_write_refused(r))
     # the same side, shaped right, is written
     r = _sample()
-    r.cells[0].komira = Optional[Side](Side.from_sweeps(4, sweeps.copy(), _minor(), _major()))
+    r.cells[0].komira = Optional[Side](
+        Side.from_sweeps(4, sweeps.copy(), Optional[Float64](99.0), _minor(), _major(), Optional[Int64](7000), Optional[Int64](4))
+    )
     assert_true(not _write_refused(r))
     # a side with no runs at all (the shape schema 1 held) is not written
     var medians = List[Float64]()

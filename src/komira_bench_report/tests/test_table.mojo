@@ -72,14 +72,14 @@ def _sweeps(
 # A side whose two sweeps (rep 0 first) reduce to the medians `m1` and `m2`.
 def _side(rows: Int64, m1: Float64, m2: Float64) raises -> Optional[Side]:
     return Optional[Side](
-        Side.from_sweeps(rows, _sweeps(99.0, m1, m1, m1, 99.0, m2, m2, m2))
+        Side.from_sweeps(rows, _sweeps(99.0, m1, m1, m1, 99.0, m2, m2, m2), Optional[Float64](99.0))
     )
 
 
-# The same, with the first run of the first sweep `first` instead of 99.
+# The same, with the first run (the check run, before the sweeps) `first` instead of 99.
 def _side_first(rows: Int64, first: Float64, m1: Float64, m2: Float64) raises -> Optional[Side]:
     return Optional[Side](
-        Side.from_sweeps(rows, _sweeps(first, m1, m1, m1, 99.0, m2, m2, m2))
+        Side.from_sweeps(rows, _sweeps(99.0, m1, m1, m1, 99.0, m2, m2, m2), Optional[Float64](first))
     )
 
 
@@ -100,7 +100,7 @@ def _sample() raises -> BenchResult:
     var cells = List[Cell]()
     # komira sweeps (99,4,6,5) and (99,3,3,3): medians 5 and 3, time 3; its
     # first run is 99 against DuckDB's 33.
-    var q01k = Side.from_sweeps(4, _sweeps(99.0, 4.0, 6.0, 5.0, 99.0, 3.0, 3.0, 3.0))
+    var q01k = Side.from_sweeps(4, _sweeps(99.0, 4.0, 6.0, 5.0, 99.0, 3.0, 3.0, 3.0), Optional[Float64](99.0))
     cells.append(_cell(String("tpch/q01"), String("tpch"), StageOutcome.exec_ok(),
         Optional[Side](q01k^), _side_first(4, 33.0, 2.0, 4.0), ValueVerdict.identical()))
     cells.append(_cell(String("tpch/q02"), String("tpch"), StageOutcome.exec_ok(),

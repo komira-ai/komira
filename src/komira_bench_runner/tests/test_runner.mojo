@@ -20,6 +20,11 @@
 #   steady-state time is 3 ms against 2 ms (ratio 1.5, from the runs after each
 #   sweep's first); the written result reads back to the same text, and the
 #   console report states the steady-state and the first-run figures.
+# - test_the_check_run_is_the_first_run_with_its_time_for_both_engines: the run
+#   that checks the answer (DuckDB's fetch, the arm's run with rows) is
+#   executed before any sweep, so it is the first execution of the query: its
+#   time (50 ms and 40 ms here) is the `first_run` of each side in the written
+#   result, beside the sweeps' runs, which start at 30 ms and 10 ms.
 # - test_no_run_is_discarded_at_any_thread_count: at 1, 32 and 88 threads the
 #   arm and DuckDB each run the query exactly once to check it and then
 #   sweeps x reps times, all of which are recorded: nothing is run to be
@@ -28,7 +33,9 @@
 #   by 12000, 900, 880, 870, 860, 850 minor faults (3 major on the first run)
 #   while the arm runs and by 54000, 1000, 900, 800, 700, 650 (5 and 1 major
 #   on the first two runs) while DuckDB runs are recorded run by run, in the
-#   shape of the runs, for each engine, and survive the written file.
+#   shape of the runs, for each engine, and survive the written file; the check
+#   run's own faults (7000 and 4 for the arm, 60000 and 6 for DuckDB) are the
+#   `first_run` faults of each side, apart from the sweeps' counts.
 # - test_runs_without_counters_say_not_measured: engines that cannot read
 #   their counters still have every run recorded, and the faults of both
 #   sides are absent, not zero.
@@ -117,6 +124,7 @@ from komira_bench_report import (
     summarize,
     write_result_json,
 )
+from komira_json import parse_json_value
 from komira_runtime_paths import test_tmpdir
 
 from komira_bench_runner import (
@@ -688,9 +696,10 @@ def _arm_runs(log: String) -> Int:
 
 def test_every_run_is_recorded_rep_zero_of_every_sweep_included() raises:
     var rig = Rig()
-    # the fetch of the answer first, then two sweeps of three runs
-    var duck = _q6_rule(_ints(2 * _MS, 10 * _MS, 2 * _MS, 2 * _MS, 7 * _MS, 2 * _MS, 2 * _MS))
-    var out = _run_at(4, rig, duck^, _ints(3 * _MS, 30 * _MS, 3 * _MS, 3 * _MS, 9 * _MS, 3 * _MS, 3 * _MS))
+    # the check run (DuckDB's fetch of the answer, the arm's run with rows)
+    # first, then two sweeps of three runs
+    var duck = _q6_rule(_ints(40 * _MS, 10 * _MS, 2 * _MS, 2 * _MS, 7 * _MS, 2 * _MS, 2 * _MS))
+    var out = _run_at(4, rig, duck^, _ints(50 * _MS, 30 * _MS, 3 * _MS, 3 * _MS, 9 * _MS, 3 * _MS, 3 * _MS))
     ref c = out.warm.cells[0]
     ref k = c.komira.value()
     ref d = c.duckdb.value()
@@ -709,10 +718,12 @@ def test_every_run_is_recorded_rep_zero_of_every_sweep_included() raises:
     assert_equal(d.runs_ms[0][2], 2.0)
     assert_equal(d.runs_ms[1][0], 7.0)
     assert_equal(d.runs_ms[1][2], 2.0)
-    # the first run, which is what a first query pays, for both engines
-    assert_equal(k.first_ms().value(), 30.0)
-    assert_equal(d.first_ms().value(), 10.0)
-    assert_equal(c.first_ratio.value(), 3.0)
+    # the first run, which is what a first query pays, for both engines: the
+    # check run (50 ms and 40 ms), executed before the sweeps, not the first
+    # run of the first sweep (30 ms and 10 ms)
+    assert_equal(k.first_ms().value(), 50.0)
+    assert_equal(d.first_ms().value(), 40.0)
+    assert_equal(c.first_ratio.value(), 1.25)
     # the steady-state time and ratio, from the runs after each sweep's first
     assert_equal(k.ms, 3.0)
     assert_equal(d.ms, 2.0)
@@ -726,11 +737,13 @@ def test_every_run_is_recorded_rep_zero_of_every_sweep_included() raises:
     assert_equal(write_result_json(back), text)
     assert_equal(back.cells[0].komira.value().runs_ms[1][0], 9.0)
     assert_equal(back.cells[0].duckdb.value().runs_ms[0][0], 10.0)
-    assert_equal(back.cells[0].first_ratio.value(), 3.0)
+    assert_equal(back.cells[0].first_ratio.value(), 1.25)
+    assert_equal(back.cells[0].komira.value().first_ms().value(), 50.0)
+    assert_equal(back.cells[0].duckdb.value().first_ms().value(), 40.0)
     # the console states both, and what steady state means
     var report = format_run(out)
     assert_true(report.find(String("steady-state geomean")) >= 0)
-    assert_true(report.find(String("first-run geomean 3.00x")) >= 0)
+    assert_true(report.find(String("first-run geomean 1.25x")) >= 0)
     assert_true(report.find(String(STEADY_STATE_DEFINITION)) >= 0)
 
 
@@ -757,22 +770,54 @@ def test_no_run_is_discarded_at_any_thread_count() raises:
 def test_page_faults_per_run_are_recorded_for_both_engines() raises:
     var rig = Rig()
     var duck = _q6_rule(
-        List[Int](), _ints(0, 54000, 1000, 900, 800, 700, 650), _ints(0, 5, 1, 0, 0, 0, 0)
+        List[Int](), _ints(60000, 54000, 1000, 900, 800, 700, 650), _ints(6, 5, 1, 0, 0, 0, 0)
     )
     var out = _run_at(
         4, rig, duck^, List[Int](), True,
-        _ints(0, 12000, 900, 880, 870, 860, 850), _ints(0, 3, 0, 0, 0, 0, 0),
+        _ints(7000, 12000, 900, 880, 870, 860, 850), _ints(4, 3, 0, 0, 0, 0, 0),
     )
     _check_faults(out.warm.cells[0])
     # and the same after the file is written and read
-    var back = parse_result_json(write_result_json(out.warm))
+    var text = write_result_json(out.warm)
+    var back = parse_result_json(text)
     _check_faults(back.cells[0])
+    # the check run, the first execution, has its own faults in the file: it is
+    # not one of the sweeps' runs, and its counts are not theirs
+    _check_first_run(text, String("komira"), 7000, 4)
+    _check_first_run(text, String("duckdb"), 60000, 6)
+
+
+def _check_first_run(text: String, engine: String, minor: Int, major: Int) raises:
+    """The `first_run` member of `engine`'s side of the first cell, read from
+    the written JSON."""
+    var doc = parse_json_value(text)
+    var side = doc.get(String("cells")).element_at(0).get(engine)
+    assert_true(side.has(String("first_run")), "no first_run member in the " + engine + " side")
+    var first = side.get(String("first_run"))
+    assert_equal(first.get(String("minor_faults")).as_int64(), Int64(minor))
+    assert_equal(first.get(String("major_faults")).as_int64(), Int64(major))
+
+
+def test_the_check_run_is_the_first_run_with_its_time_for_both_engines() raises:
+    var rig = Rig()
+    var duck = _q6_rule(_ints(40 * _MS, 10 * _MS, 2 * _MS, 2 * _MS, 7 * _MS, 2 * _MS, 2 * _MS))
+    var out = _run_at(4, rig, duck^, _ints(50 * _MS, 30 * _MS, 3 * _MS, 3 * _MS, 9 * _MS, 3 * _MS, 3 * _MS))
+    var doc = parse_json_value(write_result_json(out.warm))
+    var k = doc.get(String("cells")).element_at(0).get(String("komira"))
+    var d = doc.get(String("cells")).element_at(0).get(String("duckdb"))
+    assert_true(k.has(String("first_run")))
+    assert_true(d.has(String("first_run")))
+    assert_equal(k.get(String("first_run")).get(String("ms")).as_float64(), 50.0)
+    assert_equal(d.get(String("first_run")).get(String("ms")).as_float64(), 40.0)
+    # the sweeps are the timed runs only, and the first run is not among them
+    assert_equal(k.get(String("runs_ms")).element_at(0).element_at(0).as_float64(), 30.0)
 
 
 def _check_faults(c: ReportCell) raises:
     ref k = c.komira.value()
     ref d = c.duckdb.value()
     # one count per run, in the shape of the runs: the check run is not one
+    # (it has its own, in `first_run`)
     assert_equal(len(k.minor_faults), 2)
     assert_equal(len(k.minor_faults[0]), 3)
     assert_equal(k.minor_faults[0][0], Int64(12000))
