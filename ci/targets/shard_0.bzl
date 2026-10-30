@@ -31,6 +31,8 @@ TARGETS = [
     "komira//src/komira_aws_dynamodb:komira_aws_dynamodb_conda",
     "komira//src/komira_aws_metrics:komira_aws_metrics_conda",
     "komira//src/komira_aws_secret_store:komira_aws_secret_store_conda",
+    "komira//src/komira_awslc:awslc_cxx_asmsplit",
+    "komira//src/komira_awslc:awslc_unprefixed_cxx_asmsplit",
     "komira//src/komira_awslc:ci",
     "komira//src/komira_awslc:conda_holds",
     "komira//src/komira_awslc:coverage",
