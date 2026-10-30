@@ -106,6 +106,7 @@ TARGETS = [
     "komira//src/komira_textproto:coverage_floor",
     "komira//src/komira_textproto:table",
     "komira//src/tests/conformance/komira_calendar_store_conformance:komira_calendar_store_conformance",
+    "komira//src/tests/conformance/komira_decimal_compare_conformance:komira_decimal_compare_conformance",
     "komira//src/tests/conformance/komira_http_conformance:komira_http_conformance_conda",
     "komira//src/tests/e2e/komira_formats_e2e:komira_formats_e2e",
     "komira//src/tests/e2e/komira_pandas_door_e2e:komira_pandas_door_e2e",

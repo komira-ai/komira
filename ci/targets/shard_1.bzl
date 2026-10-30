@@ -49,6 +49,7 @@ TARGETS = [
     "komira//src/komira_crm_proto:komira_crm_proto_conda",
     "komira//src/komira_crm_proto:komira_crm_proto_generated_conda",
     "komira//src/komira_crm_proto:table",
+    "komira//src/komira_decimal_literal:komira_decimal_literal_conda",
     "komira//src/komira_dispatch_agg_exec:komira_dispatch_agg_exec_conda",
     "komira//src/komira_dynamic_filter:ci",
     "komira//src/komira_dynamic_filter:conda_holds",
