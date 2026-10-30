@@ -45,7 +45,7 @@ def main() raises:
     _ = s.close()       # on a raised query, call s.kill() instead
 ```
 
-A session sends `.print @@S <n>` before a query and `.print @@E <n>` after it. The host takes the time of each marker line when the line is read from the pipe, and a timed query's duration is the end marker minus the start marker, in nanoseconds on `BenchClock`. A timed query runs under `.mode trash`; a fetched query runs under `.mode json` and comes back as a `ResultSet`. DuckDB's JSON quotes DECIMAL, HUGEINT, UHUGEINT and UBIGINT values (as it quotes every type but BIGINT and DOUBLE), so a quoted `123.4567` is a DECIMAL or a VARCHAR only by the column's type: when a fetched answer holds a text written like a number, the session sends `DESCRIBE <the same query>` in the same session (the query is never rewritten, and a timed query never gets one) and reads those values by the column types: a DECIMAL is an exact decimal cell, a HUGEINT, UHUGEINT or UBIGINT is an integer cell when it fits 64 bits and an exact decimal cell beyond, a VARCHAR or DATE stays a text, and once the types are read a value in such a column that is not an exact number of its type is an error. DuckDB prints every DECIMAL, HUGEINT, UHUGEINT and UBIGINT value as digits, so an answer with no text written like a number has none of them quoted and needs no DESCRIBE; the settings read-back of `start` never sends one. DuckDB's own error text for a query comes back in `error` of that query's result. A query whose two markers arrive in one read has the same stamp on both: its `elapsed_ns` is 0 and `resolved` is False, which means "shorter than the clock could tell apart", not a measurement of zero. Do not record such a time as a result. A query is cheap to time only if it is long next to one pipe read.
+A session sends `.print @@S <n>` before a query and `.print @@E <n>` after it. The host takes the time of each marker line when the line is read from the pipe, and a timed query's duration is the end marker minus the start marker, in nanoseconds on `BenchClock`. A timed query runs under `.mode trash`; a fetched query runs under `.mode json` and comes back as a `ResultSet`. DuckDB's JSON quotes DECIMAL, HUGEINT, UHUGEINT and UBIGINT values (as it quotes every type but BIGINT and DOUBLE), so a quoted `123.4567` is a DECIMAL or a VARCHAR only by the column's type. Every fetched query is therefore followed by `DESCRIBE <the same query>` in the same session (the query is never rewritten, a timed query never gets one, and the settings read-back of `start` sends none). The types it answers with do two things: a DECIMAL is read as an exact decimal cell, a HUGEINT is an exact decimal cell whatever its size (as the engine's DECIMAL(38,0) is), a UHUGEINT or UBIGINT is an integer cell when it fits 64 bits and an exact decimal cell beyond, a VARCHAR or DATE stays a text, and once the types are read a value in such a column that is not an exact number of its type is an error; and each type is recorded on the result as the column's declared type (`ResultSet.types`, see Declared column types below), for an answer with no rows too. DuckDB's own error text for a query comes back in `error` of that query's result. A query whose two markers arrive in one read has the same stamp on both: its `elapsed_ns` is 0 and `resolved` is False, which means "shorter than the clock could tell apart", not a measurement of zero. Do not record such a time as a result. A query is cheap to time only if it is long next to one pipe read.
 
 A session raises when the process stops writing (its output ends, or a write to it fails) and, with `max_silence_ms` above zero, when that many milliseconds pass without any output while a query waits for its end marker. After a raise the session is unusable: stop the process with `kill()`. `ProcessTransport` drains the process's error output whenever it waits on or reads the output, so an error text of any length cannot block the process before it prints its end marker. A write to a process that has exited raises; it never ends this process with SIGPIPE.
 
@@ -88,12 +88,13 @@ def main() raises:
 The signature of a result is, per column, the count of non-null cells, the sum, the sum of squares, the minimum and the maximum. An integer column also keeps its sum and sum of squares modulo 2^64, which are exact however large the numbers are. A DECIMAL column (and an integer past 64 bits) keeps the count of its decimals, their exact sum (no rounding, no width limit), their smallest and largest value and the sum of a 64-bit hash of every value's canonical text; a decimal is never turned into a double, and `123.40` and `123.4` are one value. A text column keeps the count, the total byte length, the smallest and the largest cell, and the sum of a 64-bit hash of every cell, so a changed cell shows even when the length and the extremes are the same. Two results with the same rows in any order have the same signature. `compare_signatures` compares two of them:
 
 - the row count, the column count, each column's kind and its counts of non-null, null and NaN cells are equal;
+- each column's declared type is equal (see Declared column types below), and a difference is a failure of its own, listed in `type_reasons` as well as in `reasons`, even when every value agrees; the pairs of the table of allowed departures are the exception, kept in `departures` with `identical` still true, and `label()` says `DEPARTURE: <reason>`;
 - numbers are equal when they are the same value (two infinities of one sign included) or differ by at most the larger of `ABS_FLOOR` (1e-6) and `REL_TOL` (1e-9) times the larger magnitude;
 - an integer column's minimum, maximum, sum and sum of squares are compared exactly (the sums modulo 2^64, so there is no size at which they fall back to a tolerance);
 - an exact decimal column compares its count of decimals, sum, minimum, maximum and hash sum exactly, with no tolerance; a decimal column against a column of any other kind (a double column included) is a difference of kinds;
 - a numeric column that holds only integers on one side and doubles on the other (engines return `SUM`, `COUNT` and `AVG` as different types, and a double with no fraction may print without a point) is compared as numbers with the tolerance;
 - the verdict's `modes` list says which mode each column used (`column 0.sum=exact`, `column 1.sum=tolerance`);
-- column names are not compared, and two results with no rows are identical whatever their columns (a result with no rows carries no column names, so a reference recorded with columns would otherwise never match);
+- column names are not compared, and two results with no rows are identical whatever their columns (a result with no rows carries no column names, so a reference recorded with columns would otherwise never match), unless both carry declared types, which are then compared;
 - the comparison does not stop at the first difference.
 
 `check_order` is separate because the signature ignores order: it checks that the rows of an `ORDER BY` query are monotone in the keys (`OrderKey(column, descending, nulls_first)`; NULLs last by default, as in DuckDB).
@@ -116,12 +117,17 @@ from komira_bench_duckdb import (
 def main() raises:
     # rows as DuckDB prints them with `.mode json`
     var got = parse_json_rows('[{"k":2,"v":0.5},\n{"k":1,"v":1.5}]')
+    # a session's fetch records the declared types; rows parsed by hand name them
+    got.types.append("BIGINT")
+    got.types.append("DOUBLE")
 
     # a recorded answer is text; a package keeps it as a constant
     var recorded = ReferenceAnswer("q1")
     var expected = ResultSet()
     expected.names.append("k")
     expected.names.append("v")
+    expected.types.append("BIGINT")
+    expected.types.append("DOUBLE")
     var first = List[Cell]()
     first.append(Cell.integer(Int64(1)))
     first.append(Cell.real(1.5))
@@ -146,15 +152,52 @@ def main() raises:
         raise Error("expected the order check to fail")
 ```
 
-A recorded answer is one record per query (`format_reference`, `parse_references`; the layout is at the top of `reference.mojo`): its row count, its signature and its `ORDER BY` keys. It is how a run without DuckDB is value-checked. Recording answers is done once against the pinned DuckDB, and a run with DuckDB then also cross-checks its live answer against the recorded one, which catches a DuckDB of another version.
+A recorded answer is one record per query (`format_reference`, `parse_references`; the layout is at the top of `reference.mojo`, today `format 3`): its row count, its signature (with each column's declared type) and its `ORDER BY` keys. A record in another format, `format 2` included, is refused with a message that says to record the answers again; a column with no declared type, or one outside the vocabulary, is not written. It is how a run without DuckDB is value-checked. Recording answers is done once against the pinned DuckDB, and a run with DuckDB then also cross-checks its live answer against the recorded one, which catches a DuckDB of another version.
+
+## Declared column types
+
+Both engines state a declared type for every result column, in one vocabulary, and the comparison fails by name when they differ. A DECIMAL(38,2) against a DECIMAL(38,4), or a BIGINT against a DECIMAL(18,0), is a different result even when every value is equal, because the rule is the same result as DuckDB for the same SQL. DuckDB's side is the `column_type` of `DESCRIBE <query>`; komira's side is the Arrow type of the result batches (`komira_bench_runner`, `convert.mojo`). Equal means the same vocabulary entry:
+
+| vocabulary entry | DuckDB `DESCRIBE` name | Arrow type that equals it |
+|---|---|---|
+| `BOOLEAN` | `BOOLEAN` | `BOOL` |
+| `TINYINT` | `TINYINT` | `INT8` |
+| `SMALLINT` | `SMALLINT` | `INT16` |
+| `INTEGER` | `INTEGER` | `INT32` |
+| `BIGINT` | `BIGINT` | `INT64` |
+| `HUGEINT` | `HUGEINT` | none (Arrow has no 128-bit integer) |
+| `UTINYINT` | `UTINYINT` | `UINT8` |
+| `USMALLINT` | `USMALLINT` | `UINT16` |
+| `UINTEGER` | `UINTEGER` | `UINT32` |
+| `UBIGINT` | `UBIGINT` | `UINT64` |
+| `UHUGEINT` | `UHUGEINT` | none (Arrow has no unsigned 128-bit integer) |
+| `FLOAT` | `FLOAT` | `FLOAT32` |
+| `DOUBLE` | `DOUBLE` | `FLOAT64` |
+| `VARCHAR` | `VARCHAR` | `STRING`, `LARGE_STRING` |
+| `DATE` | `DATE` | `DATE32` |
+| `DECIMAL(p,s)`, 1 <= p <= 38, 0 <= s <= p | `DECIMAL(p,s)` (no space) | `DECIMAL128` with precision p and scale s |
+
+Rows of the table with Arrow `none` are the limits Arrow forces: a komira column holding values that need 128 bits can only be a `DECIMAL128(38,0)`, which is the entry `DECIMAL(38,0)` and differs from `HUGEINT`. The comparison reports that difference unless the pair is in the table below.
+
+### Allowed departures
+
+The rule is the same SQL gives the same result as DuckDB. It gives way in one place only, for a limit of the Arrow representation, and the places are this table (`allowed_departures()` in `declared_types.mojo`, the only list; `departure_reason` looks a pair up in either order). A pair in it is accepted when every value is exactly equal; the cell is then labelled DEPARTURE with the reason, never PASS, in the comparison text (`ValueVerdict.label()` and `departures`), the report and the summary line. With any difference of value the pair fails like every other.
+
+| DuckDB type | komira type | reason |
+|---|---|---|
+| `HUGEINT` | `DECIMAL(38,0)` | `Arrow has no 128-bit integer: HUGEINT as DECIMAL(38,0)` |
+
+Not in the table, so they fail by name: `HUGEINT` against `BIGINT` (INT64 can overflow where HUGEINT does not), `UHUGEINT` against `DECIMAL(38,0)` (the same Arrow limit, but no query of the benchmark returns a `UHUGEINT`; the day one does, it is one more row here and in the code), and every other pair. To make HUGEINT compare against DECIMAL(38,0) on the same statistics, a HUGEINT column is read as exact decimals whatever the size of its values.
+
+Everything else has no entry: TIMESTAMP and its variants, TIME, INTERVAL, BLOB, UUID, ENUM, nested types, a DuckDB name in any other spelling, and on the Arrow side `DECIMAL256`, dictionary and binary columns, timestamps and nested types. Such a type is kept as `UNMAPPED(<the name it came with>)`, and a comparison that meets one fails with a message that says the type is not in the mapping, on either side and even when both sides have the same one. An unmapped type is a reported failure, never a pass. Types recorded on one side only also fail; a result built by hand with no types on either side is compared by value alone. The mapping functions are `duckdb_declared_type`, `is_declared_type`, `is_unmapped` and `decimal_type`.
 
 ## What it does not do
 
 - No download of DuckDB and no data. The files a benchmark reads are the user's, passed as paths in the queries.
 - No unpinned run, and no ratio or report: this package returns timings and verdicts, and another package turns them into a report.
-- No nested values (lists, structs) in a result, and no `HUGEINT` beyond 64 bits (an integer past 64 bits is read as a double). NaN and infinity are read when DuckDB writes them as the bare words `NaN`, `Infinity`, `-Infinity` (or `nan`, `inf`, `-inf`); written as quoted texts they are texts.
+- No nested values (lists, structs) in a result. (A `HUGEINT`, `UHUGEINT` or `UBIGINT` is read exactly, whatever its size; only a bare JSON integer past 64 bits, in a column of another type, is read as a double.) NaN and infinity are read when DuckDB writes them as the bare words `NaN`, `Infinity`, `-Infinity` (or `nan`, `inf`, `-inf`); written as quoted texts they are texts.
 - The wire to DuckDB (`.mode`, `.print`, JSON output, `pragma_version`, `current_setting`) is DuckDB's documented CLI; this package's tests use stand-ins, so a real run is the check that the exact settings you name are accepted.
 
 ## Tests
 
-`tests/test_values.mojo` (signature, tolerance and order on fixed inputs), `tests/test_exact_decimal.mojo` (exact decimal text, sums past 128 bits, the decimal signature, its comparison and its recorded form), `tests/test_reference_rows.mojo` (recorded answers and the JSON output), `tests/test_memory.mojo` (printed sizes and the memory-limit read-back), `tests/test_pins.mojo` (the pin table and the digest check on made-up bytes), `tests/test_session.mojo` (the session over an in-test stand-in and a manual clock: timing from markers, errors, fetch, settings, silence, a failed write) and `tests/test_process.mojo` (the same session over real pipes to a shell loop, a long error text, a silent process and a write to a process that has gone). No test asserts a duration. `test_process` starts real processes: its checks are on what comes back and on the errors raised, never on how long anything took.
+`tests/test_values.mojo` (signature, tolerance and order on fixed inputs), `tests/test_declared_types.mojo` (the type mapping and the comparison of declared types), `tests/test_exact_decimal.mojo` (exact decimal text, sums past 128 bits, the decimal signature, its comparison and its recorded form), `tests/test_reference_rows.mojo` (recorded answers and the JSON output), `tests/test_memory.mojo` (printed sizes and the memory-limit read-back), `tests/test_pins.mojo` (the pin table and the digest check on made-up bytes), `tests/test_session.mojo` (the session over an in-test stand-in and a manual clock: timing from markers, errors, fetch, settings, silence, a failed write) and `tests/test_process.mojo` (the same session over real pipes to a shell loop, a long error text, a silent process and a write to a process that has gone). No test asserts a duration. `test_process` starts real processes: its checks are on what comes back and on the errors raised, never on how long anything took.

@@ -1,6 +1,6 @@
 # What a run leaves behind: the text a person reads, and the files.
 #
-#   <dir>/warm/result.json   the warm result (komira-bench-result/1)
+#   <dir>/warm/result.json   the warm result (komira-bench-result/2)
 #   <dir>/cold/result.json   the cold result, only when cold was measured
 #   <dir>/queries.sha256     the digest of every query's text
 #   <dir>/comparison.txt     the tolerance the answers were compared under
@@ -14,7 +14,7 @@
 from std.os import makedirs
 from std.pathlib import Path
 
-from komira_bench_duckdb import ABS_FLOOR, REL_TOL
+from komira_bench_duckdb import ABS_FLOOR, REL_TOL, allowed_departures
 from komira_bench_report import render_table, summarize, summary_line, write_result_json
 from komira_crypto import hex_lower_array_32, sha256
 
@@ -28,13 +28,21 @@ comptime COMPARISON_FILE: String = "comparison.txt"
 
 def comparison_text() -> String:
     """The tolerance the answers were compared under: integers, text and
-    integer sums exactly, floats within the larger of the relative tolerance
-    times the larger magnitude and the absolute floor."""
-    return (
+    integer sums and the declared column types exactly, floats within the larger of the relative tolerance
+    times the larger magnitude and the absolute floor. The allowed departures
+    (the table in komira_bench_duckdb) are listed, one line each: a pair of
+    declared types accepted as one when every value is exactly equal, and
+    recorded as DEPARTURE."""
+    var text = (
         String("float_rel_tol ") + String(REL_TOL) + String("\n")
         + String("float_abs_floor ") + String(ABS_FLOOR) + String("\n")
         + String("exact integers, text and integer sums\n")
+        + String("exact declared column types\n")
     )
+    var table = allowed_departures()
+    for i in range(len(table)):
+        text += String("allowed departure ") + table[i].reason + String("\n")
+    return text^
 
 
 def queries_listing(queries: List[QuerySpec]) -> String:
