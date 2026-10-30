@@ -8,6 +8,8 @@
 # (//release:prod_claimed_names_cases): a maintainer adds a name here only AFTER claiming it
 # on the prod registry, in the pull request that adds the member.
 kci_api
+kci_artifact
+kci_artifact_manifest
 kci_artifact_proto
 kci_cell
 kci_deploy_model_proto
@@ -20,6 +22,7 @@ kci_release_machine
 kci_resource_proto
 kci_validator_report
 kci_validator_rows
+kci_workflow_check
 komira_anomaly
 komira_async_api
 komira_atomic_alias
@@ -27,6 +30,8 @@ komira_bench_report
 komira_broker_proto
 komira_buffer
 komira_bump_arena
+komira_calendar
+komira_calendar_ics
 komira_calendar_proto
 komira_chat_proto
 komira_clock
