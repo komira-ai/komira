@@ -1,0 +1,15 @@
+[package]
+name = "komira_job_report_proto"
+version = "0.1.0"
+description = "The job report wire (komira.job_report.v1) as Mojo structs generated from its .proto file: the phase a supervised job reports and the directive the receiver answers with."
+license = "Apache-2.0"
+repository = "https://github.com/komira-ai/komira"
+readme = "README.md"
+mojo = ["1.0.0"]
+
+[dependencies]
+komira_proto_codec = { path = "../komira_proto_codec", version = "0.1" }
+
+[targets]
+lib = { path = "generated/komira_job_report_proto_generated" }
+tests = ["tests"]
