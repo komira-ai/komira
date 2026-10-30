@@ -15,6 +15,8 @@ TARGETS = [
     "komira//src/kci_workflow_check:coverage_floor",
     "komira//src/kci_workflow_check:table",
     "komira//src/komira_aws_lambda_http:komira_aws_lambda_http_conda",
+    "komira//src/komira_bench_q6_phases:komira_bench_q6_phases_conda",
+    "komira//src/komira_bench_q6_phases:q6_phase_probe",
     "komira//src/komira_buffer:ci",
     "komira//src/komira_buffer:conda_holds",
     "komira//src/komira_buffer:coverage_floor",
