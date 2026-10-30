@@ -32,7 +32,6 @@ from std.memory import ArcPointer
 from std.sys import size_of
 
 from komira_arrow.schema import RecordBatch, RecordBatchBuilder, Schema
-from komira_collections.slab import Slab
 from komira_column_kernels.compiler_helpers import (
     materialize_selection_if_present,
 )
@@ -84,7 +83,10 @@ struct AggSink(MorselSinkImpl):
     var _arg_names: List[String]
     var _state_bytes: Int
     var _pool: SegmentPool
-    var _slots: Slab[_AggSlot]
+    # One slot per worker, each behind its own ArcPointer in a List: a slot
+    # holds heap, so it is never kept in a Slab mutated through
+    # get_mut_interior. A worker touches only the slot of its own task id.
+    var _slots: List[ArcPointer[_AggSlot]]
     var _merged: List[AggCell]
     var _combined: Bool
 
@@ -157,16 +159,19 @@ struct AggSink(MorselSinkImpl):
         self._exprs = ArcPointer[ExprPool](expr_pool^)
         self._state_bytes = n * size_of[AggCell]()
         self._pool = pool^
-        self._slots = Slab[_AggSlot]()
+        self._slots = List[ArcPointer[_AggSlot]]()
         self._merged = List[AggCell]()
         self._combined = False
 
     def resize_worker_state(mut self, num_workers: Int) -> None:
-        self._slots = Slab[_AggSlot](capacity=num_workers)
+        self._slots = List[ArcPointer[_AggSlot]](capacity=num_workers)
         for _ in range(num_workers):
             self._slots.append(
-                _AggSlot(
-                    len(self._funcs), WorkerReservation(self._pool.share())
+                ArcPointer[_AggSlot](
+                    _AggSlot(
+                        len(self._funcs),
+                        WorkerReservation(self._pool.share()),
+                    )
                 )
             )
 
@@ -178,7 +183,7 @@ struct AggSink(MorselSinkImpl):
                 + " worker slots, got worker "
                 + String(worker_id)
             )
-        ref slot = self._slots.get_mut_interior(worker_id)
+        ref slot = self._slots[worker_id][]
         if not slot.started:
             if not slot.reservation.try_grow(self._state_bytes):
                 raise Error(
@@ -230,7 +235,7 @@ struct AggSink(MorselSinkImpl):
         for _ in range(len(self._funcs)):
             merged.append(AggCell())
         for w in range(len(self._slots)):
-            ref slot = self._slots.get_mut_interior(w)
+            ref slot = self._slots[w][]
             for i in range(len(self._funcs)):
                 merge_cell(merged[i], slot.cells[i], self._funcs[i], self._labels[i])
             slot.reservation.give_back_all()
