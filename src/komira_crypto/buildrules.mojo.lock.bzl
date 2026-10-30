@@ -214,7 +214,7 @@ GRAPH_JSON = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/komira_crypto/tests/test_awslc_one_copy.mojo", "sha256": "2b641e43a8ea96735183d63a87b16085239e8ea247bd73f84f3455503b651ab5"}
+        {"path": "src/komira_crypto/tests/test_awslc_one_copy.mojo", "sha256": "a1183ea8ad7f338f5af06ddc2023f26ccfb87776c7d8eb665723905995a66431"}
       ],
       "deps": ["komira_crypto@0.1.0#mojo1.0.0/lib", "komira_uuid@0.1.0#mojo1.0.0/lib"],
       "natives": [
@@ -1569,7 +1569,7 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/komira_crypto/tests/test_awslc_one_copy.mojo", "sha256": "2b641e43a8ea96735183d63a87b16085239e8ea247bd73f84f3455503b651ab5"}
+        {"path": "src/komira_crypto/tests/test_awslc_one_copy.mojo", "sha256": "a1183ea8ad7f338f5af06ddc2023f26ccfb87776c7d8eb665723905995a66431"}
       ],
       "deps": ["komira_crypto@0.1.0#mojo1.0.0/lib", "komira_uuid@0.1.0#mojo1.0.0/lib"],
       "natives": [
@@ -2921,7 +2921,7 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/komira_crypto/tests/test_awslc_one_copy.mojo", "sha256": "2b641e43a8ea96735183d63a87b16085239e8ea247bd73f84f3455503b651ab5"}
+        {"path": "src/komira_crypto/tests/test_awslc_one_copy.mojo", "sha256": "a1183ea8ad7f338f5af06ddc2023f26ccfb87776c7d8eb665723905995a66431"}
       ],
       "deps": ["komira_crypto@0.1.0#mojo1.0.0/lib", "komira_uuid@0.1.0#mojo1.0.0/lib"],
       "natives": [

@@ -8,6 +8,13 @@
 # builds links `libawslc.a` once. It would not link otherwise: a second archive
 # defining komira_awslc_* names is a duplicate definition.
 #
+# One exception holds today: komira_http_core's s2n-tls still compiles against
+# //third_party/aws-lc, so a program that links komira_http_core has two
+# archives defining komira_awslc_* names on its link line. The linker pulls
+# archive members only as they are needed, so the link resolves each name from
+# one copy (a real duplicate would be a link error). The s2n step moves s2n onto
+# komira_awslc and ends that.
+#
 # The test mints UUIDs through komira_uuid (aws-lc RAND_bytes) and hashes them
 # through komira_crypto (aws-lc SHA256) in one process, and checks that the
 # hash of a UUID's bytes is what a second, independent call to the hash gives.

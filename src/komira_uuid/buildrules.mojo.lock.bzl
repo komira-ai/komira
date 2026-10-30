@@ -72,7 +72,7 @@ GRAPH_JSON = r'''{
       "root": "src/komira_uuid/src/komira_uuid",
       "srcs": [
         {"path": "src/komira_uuid/src/komira_uuid/__init__.mojo", "sha256": "10b0c178ed6fdbad397c07bfcf5042111d0a521c78b4e77f6499e32074ddf32f"},
-        {"path": "src/komira_uuid/src/komira_uuid/entropy.mojo", "sha256": "11c4d86605bf28c0ad3d39e5a7723c43267f53e86d4cad3ebfafc097673a3235"},
+        {"path": "src/komira_uuid/src/komira_uuid/entropy.mojo", "sha256": "047ab903e361c768241aeabac93ce85d9589bda36a2bb16c1e99f86616a421fd"},
         {"path": "src/komira_uuid/src/komira_uuid/uuid.mojo", "sha256": "d697501b9713e218eee70bfe801a022e9e08a92389b3e385ff7ac749e8cdff8e"}
       ],
       "deps": ["komira_atomic_alias@0.1.0#mojo1.0.0/lib", "komira_awslc@0.1.0#mojo1.0.0/lib", "komira_clock@0.1.0#mojo1.0.0/lib"],
@@ -175,7 +175,7 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "root": "src/komira_uuid/src/komira_uuid",
       "srcs": [
         {"path": "src/komira_uuid/src/komira_uuid/__init__.mojo", "sha256": "10b0c178ed6fdbad397c07bfcf5042111d0a521c78b4e77f6499e32074ddf32f"},
-        {"path": "src/komira_uuid/src/komira_uuid/entropy.mojo", "sha256": "11c4d86605bf28c0ad3d39e5a7723c43267f53e86d4cad3ebfafc097673a3235"},
+        {"path": "src/komira_uuid/src/komira_uuid/entropy.mojo", "sha256": "047ab903e361c768241aeabac93ce85d9589bda36a2bb16c1e99f86616a421fd"},
         {"path": "src/komira_uuid/src/komira_uuid/uuid.mojo", "sha256": "d697501b9713e218eee70bfe801a022e9e08a92389b3e385ff7ac749e8cdff8e"}
       ],
       "deps": ["komira_atomic_alias@0.1.0#mojo1.0.0/lib", "komira_awslc@0.1.0#mojo1.0.0/lib", "komira_clock@0.1.0#mojo1.0.0/lib"],
@@ -275,7 +275,7 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "root": "src/komira_uuid/src/komira_uuid",
       "srcs": [
         {"path": "src/komira_uuid/src/komira_uuid/__init__.mojo", "sha256": "10b0c178ed6fdbad397c07bfcf5042111d0a521c78b4e77f6499e32074ddf32f"},
-        {"path": "src/komira_uuid/src/komira_uuid/entropy.mojo", "sha256": "11c4d86605bf28c0ad3d39e5a7723c43267f53e86d4cad3ebfafc097673a3235"},
+        {"path": "src/komira_uuid/src/komira_uuid/entropy.mojo", "sha256": "047ab903e361c768241aeabac93ce85d9589bda36a2bb16c1e99f86616a421fd"},
         {"path": "src/komira_uuid/src/komira_uuid/uuid.mojo", "sha256": "d697501b9713e218eee70bfe801a022e9e08a92389b3e385ff7ac749e8cdff8e"}
       ],
       "deps": ["komira_atomic_alias@0.1.0#mojo1.0.0/lib", "komira_awslc@0.1.0#mojo1.0.0/lib", "komira_clock@0.1.0#mojo1.0.0/lib"],

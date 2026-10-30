@@ -60,8 +60,8 @@ native_library(
     # result: the preprocessed text of its arm sources has the `;` turned into line breaks before it is assembled (`asm_split`; the x86 sources are ELF and need no
     # split, and the pattern names the arm directory only).
     asm_split = ["third_party/s2n-bignum/arm/"],
-    # `extra_symbols` are the weak hooks aws-lc refers to and does not define (a program defines them): the prefix renames them too, so a program defines
-    # komira_awslc_OPENSSL_memory_*.
+    # `extra_symbols` are the weak hooks aws-lc refers to and does not define (a program defines them): the prefix renames them too, so a program can define
+    # komira_awslc_OPENSSL_memory_* on ELF (linux). On macOS arm64 they are static NULLs in the archive and a program cannot override them.
     prefix = {
         "name": "komira_awslc",
         "min": 1000,

@@ -27,7 +27,7 @@
 # fork-safety all live in AWS-LC and are untouched by this file. There is no
 # second RNG.
 #
-# ⚠ KEEP IN SYNC with `komira_crypto/internal/asm/rng_ffi.mojo`. The two
+# ⚠ KEEP IN SYNC with `src/komira_crypto/src/komira_crypto/internal/asm/rng_ffi.mojo`. The two
 # declarations MUST name the same symbol with the same signature. If AWS-LC's
 # RNG entrypoint is ever changed there (e.g. to a FIPS-mode
 # `RAND_priv_bytes`), change it HERE TOO — a silent divergence would leave
