@@ -65,24 +65,6 @@ comptime _FfiByte = UnsafePointer[UInt8, _FFI_ORIGIN]
 
 
 @always_inline
-def _ffi_null() -> _FfiHandle:
-    """A raw NULL opaque-handle (stands in for the removed `UnsafePointer[T]()`
-    null ctor) for pre-declared-then-reassigned handle locals and explicit
-    C-NULL arguments.
-
-    # SAFETY: `Optional[UnsafePointer[...]]` is layout-compatible with the
-    # bare pointer (the Mojo non-null-pointer proposal), and `None`
-    # is the all-zero (NULL) bit pattern. We reinterpret an `Optional`-None
-    # slot to obtain a raw NULL handle WITHOUT the removed null ctor and
-    # WITHOUT the banned `unsafe_from_address=Int(0)`. Downstream sites
-    # detect NULL via `Int(h) == 0` and AWS-LC free fns are NULL-safe.
-    """
-    var none: Optional[_FfiHandle] = None
-    return UnsafePointer(to=none).bitcast[_FfiHandle]()[]
-
-
-
-@always_inline
 def _span_ptr_mut(s: Span[UInt8, _]) -> _FfiByte:
     """Coerce a `Span[UInt8, _]` to an FFI byte pointer (_FFI_ORIGIN)."""
     return (
