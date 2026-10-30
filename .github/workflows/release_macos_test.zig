@@ -534,6 +534,25 @@ test "the pull request's check set names neither the macOS set nor a macOS runne
     try t.expect(shards >= 8);
 }
 
+/// A DARWIN_EXCLUDED row `    "name": "reason",` has a reason: the quoted value after the name holds
+/// a non-whitespace character. `name_end` is the index of the name's closing quote.
+fn reasonOk(line: []const u8, name_end: usize) bool {
+    const c = std.mem.indexOfScalarPos(u8, line, name_end + 1, ':') orelse return false;
+    const v1 = std.mem.indexOfScalarPos(u8, line, c + 1, '"') orelse return false;
+    const v2 = std.mem.lastIndexOfScalar(u8, line, '"') orelse return false;
+    if (v2 <= v1) return false;
+    return std.mem.trim(u8, line[v1 + 1 .. v2], " \t").len > 0;
+}
+
+test "a DARWIN_EXCLUDED row with an empty or whitespace-only reason is refused" {
+    const empty = "    \"komira_libc\": \"\",";
+    const blank = "    \"komira_libc\": \"  \t\",";
+    const real = "    \"komira_libc\": \"vendored third_party C\",";
+    try t.expect(!reasonOk(empty, std.mem.indexOfScalarPos(u8, empty, 5, '"').?));
+    try t.expect(!reasonOk(blank, std.mem.indexOfScalarPos(u8, blank, 5, '"').?));
+    try t.expect(reasonOk(real, std.mem.indexOfScalarPos(u8, real, 5, '"').?));
+}
+
 test "the macOS set is the packages of packages.bzl minus the excluded ones, in darwin_libs.bzl" {
     var arena = std.heap.ArenaAllocator.init(t.allocator);
     defer arena.deinit();
@@ -570,7 +589,7 @@ test "the macOS set is the packages of packages.bzl minus the excluded ones, in 
             return error.NotAPackage;
         }
         // the reason follows the name and is not empty
-        try t.expect(line.len > q2 + 5);
+        try t.expect(reasonOk(line, q2));
     }
     // the definition is found (a rename of the dict must not let this test pass on nothing)
     try t.expect(std.mem.indexOf(u8, bzl, "\nDARWIN_EXCLUDED = {") != null);
