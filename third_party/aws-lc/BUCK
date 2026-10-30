@@ -46,6 +46,10 @@ third_party_srcs(
     library = "aws-lc",
     archive = ":aws-lc-1.39.0.tar.gz",
     committed = "srcs.bzl",
+    # The explicit file lists a native_library stages (files.bzl), by the
+    # same reading and held the same way (:srcs_files_drift, :srcs_files_check).
+    committed_files = "files.bzl",
+    require = ["COMMON_SRCS", "ASM_X86_64", "ASM_AARCH64_APPLE", "ASM_AARCH64_LINUX", "BIGNUM_ASM_X86_64", "BIGNUM_ASM_AARCH64", "PUBLIC_HEADERS"],
 )
 
 _SRCS = CRYPTO_SRCS + CRYPTO_ASM_X86_64 + BCM_SRCS + BCM_ASM_X86_64 + S2N_BIGNUM_ASM_X86_64
