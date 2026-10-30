@@ -18,6 +18,9 @@
 # download the .gz yourself, read the file's sha256 and size
 # with `sha256sum` and `wc -c`, have a second person repeat it, and add the
 # line `extension_pin_line` prints.
+#
+# A run that is killed (kill -9, power loss) can leave the private directory behind, and the next run then
+# refuses ("already exists"): check that no komira-bench-stage is running, then delete the directory.
 
 from std.os import listdir, makedirs, mkdir, remove, rmdir
 from std.os.path import exists, isdir, islink
@@ -152,6 +155,7 @@ def prepare_extension(
     version: String,
     platform: String,
     pins: List[ExtensionPin],
+    file_name: String = String(EXTENSION_FILE_NAME),
 ) raises -> PreparedExtension:
     """Check the gzip at `gz_path` against `pins`, then unpack it into the
     fresh directory `private_dir` (created with mode 0700; it must not exist).
@@ -160,7 +164,9 @@ def prepare_extension(
     Raises:
         Error: the file cannot be read; no pin, or another file or size than
             the pin's; the gzip's recorded unpacked size is zero or above
-            256 MiB or the stream does not unpack to it; `private_dir` exists.
+            256 MiB or the stream does not unpack to it; `private_dir` exists;
+            the copy cannot be written (the directory is removed again).
+            `file_name` is the name of the copy inside `private_dir`.
     """
     var data = Path(gz_path).read_bytes()
     var check = check_extension_bytes(Span(data), pins, version, platform)
@@ -181,8 +187,13 @@ def prepare_extension(
         raise Error("tpch extension: " + private_dir + " already exists; remove it by hand")
     makedirs(_parent(private_dir), exist_ok=True)
     mkdir(private_dir, 0o700)
-    var path = private_dir + "/" + String(EXTENSION_FILE_NAME)
-    Path(path).write_bytes(Span(unpacked))
+    var path = private_dir + "/" + file_name
+    try:
+        Path(path).write_bytes(Span(unpacked))
+    except e:
+        # A failed write (a full disk) must not leave the directory behind: a later run refuses an existing one.
+        remove_tree(private_dir)
+        raise Error("tpch extension: cannot write " + path + ": " + String(e))
     return PreparedExtension(
         check^, private_dir.copy(), path^, hex_lower_array_32(sha256(Span(unpacked))), len(unpacked)
     )

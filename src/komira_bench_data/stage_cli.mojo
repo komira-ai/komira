@@ -16,6 +16,9 @@
 #     Verifies a supplied dataset (ClickBench: --dataset clickbench --scale
 #     full) and prints the lines to record. It reads no Parquet footer.
 #
+# A run that is killed (kill -9, power loss) can leave DIR/.komira-bench-stage behind; the next run then
+# refuses. Check that no komira-bench-stage is running, then delete the directory.
+#
 # Exit status: 0 done and every file usable, 1 the run failed or a file failed
 # verification, 2 the arguments are wrong (nothing was run).
 
@@ -186,13 +189,13 @@ def _run_tpch(flags: Flags, scale_factor: Int, memory_gib: Int, silence_minutes:
                     + String(", ") + String(prepared.unpacked_size) + String(" bytes\n")
                 )
                 rows = g.rows.copy()
+                _ = s.close()
             except e:
                 try:
                     s.kill()
                 except:
                     pass
                 raise Error(String(e))
-            _ = s.close()
         except e:
             remove_tree(private_dir)
             raise Error(String(e))
@@ -232,7 +235,8 @@ def run_stage(args: List[String]) -> Int:
             flags = parse_flags(args, 1, _tpch_flags())
             _ = flags.require(String("duckdb"))
             _ = flags.require(String("tpch-extension"))
-            _ = flags.require(String("cache-dir"))
+            if not flags.require(String("cache-dir")).startswith(String("/")):
+                raise Error(String("--cache-dir must be an absolute path (DuckDB reports absolute install paths)"))
             scale_factor = parse_positive(flags.require(String("scale-factor")), String("--scale-factor"))
             if scale_factor != 1 and scale_factor != 10 and scale_factor != 100:
                 raise Error(String("--scale-factor must be 1, 10 or 100"))

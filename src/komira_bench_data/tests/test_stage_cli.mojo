@@ -85,6 +85,7 @@ def test_usage_errors_exit_2_and_run_nothing() raises:
     assert_equal(run_stage(_args(["tpch", "--duckdb", "/x", "--tpch-extension", "/y", "--cache-dir", d, "--scale-factor", "1", "--memory-limit-gib", "lots"])), 2)
     assert_equal(run_stage(_args(["tpch", "--duckdb", "/x", "--tpch-extension", "/y", "--cache-dir", d, "--scale-factor", "1", "--bogus", "1"])), 2)
     assert_equal(run_stage(_args(["verify", "--dataset", "tpch", "--scale", "sf1"])), 2)
+    assert_equal(run_stage(_args(["tpch", "--duckdb", "/x", "--tpch-extension", "/y", "--cache-dir", "relative", "--scale-factor", "1"])), 2)
     assert_false(exists(d + "/tpch"))
 
 

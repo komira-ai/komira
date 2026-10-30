@@ -37,6 +37,8 @@
 #   fixture pin (the pin table is a parameter) accepts only its bytes; an
 #   unrecorded platform, other content, another size or a non-gzip is refused
 #   and no directory is made.
+# - test_a_failed_write_leaves_no_private_directory: the directory made for the
+#   copy is removed when the copy cannot be written, and a later run goes ahead.
 # - test_the_loaded_extension_must_be_the_checked_copy: DuckDB reporting another
 #   install path stops the run before dbgen.
 # - test_a_complete_dataset_is_refused_too: all eight present, no statement sent.
@@ -516,6 +518,22 @@ def test_an_unpinned_or_different_gzip_is_refused_before_anything_is_written() r
     with assert_raises(contains="is not the pinned tpch extension"):
         _ = prepare_extension(d + "/ext.gz", d + "/private", String(_VERSION), String("linux_amd64"), tpch_extension_pins())
     assert_false(exists(d + "/private"))
+
+
+def test_a_failed_write_leaves_no_private_directory() raises:
+    var d = _dir(String("write_fails"))
+    var gz = _gz_of(String("native code, pretend"))
+    Path(d + "/ext.gz").write_bytes(Span(gz))
+    # an empty name makes the path the directory itself, so the write fails after the directory was made
+    with assert_raises(contains="cannot write"):
+        _ = prepare_extension(
+            d + "/ext.gz", d + "/private", String(_VERSION), String("linux_amd64"), _fixture_pins(gz),
+            String(""),
+        )
+    assert_false(exists(d + "/private"))
+    # and a later run is not blocked
+    var again = prepare_extension(d + "/ext.gz", d + "/private", String(_VERSION), String("linux_amd64"), _fixture_pins(gz))
+    assert_true(exists(again.path))
 
 
 def test_the_loaded_extension_must_be_the_checked_copy() raises:
