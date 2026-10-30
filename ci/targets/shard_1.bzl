@@ -3,6 +3,9 @@
 # `guard.bxl:check` fails the pull request check when this file is out of date.
 
 TARGETS = [
+    "komira//src/kci_resource_proto:ci",
+    "komira//src/kci_resource_proto:conda_holds",
+    "komira//src/kci_resource_proto:coverage",
     "komira//src/kci_resource_proto:graph_compute_graph_canonical",
     "komira//src/kci_resource_proto:graph_dns_graph_canonical",
     "komira//src/kci_resource_proto:graph_job_bucket_graph_canonical",
@@ -13,7 +16,9 @@ TARGETS = [
     "komira//src/kci_resource_proto:graph_secret_graph_canonical",
     "komira//src/kci_resource_proto:graph_service_graph_canonical",
     "komira//src/kci_resource_proto:graph_trigger_graph_canonical",
+    "komira//src/kci_resource_proto:kci_resource_proto_generated_conda",
     "komira//src/kci_resource_proto:resource_graph_fixtures",
+    "komira//src/kci_resource_proto:table",
     "komira//src/kci_validate:kci_validate_conda",
     "komira//src/kci_validate:native_load_example",
     "komira//src/kci_validate:openssl_example",
@@ -26,7 +31,12 @@ TARGETS = [
     "komira//src/komira_aws_sesv2:komira_aws_sesv2_conda",
     "komira//src/komira_azure_core:komira_azure_core_conda",
     "komira//src/komira_batch_eval:komira_batch_eval_conda",
+    "komira//src/komira_crm_proto:ci",
+    "komira//src/komira_crm_proto:conda_holds",
+    "komira//src/komira_crm_proto:coverage",
     "komira//src/komira_crm_proto:komira_crm_proto_conda",
+    "komira//src/komira_crm_proto:komira_crm_proto_generated_conda",
+    "komira//src/komira_crm_proto:table",
     "komira//src/komira_dispatch_agg_exec:komira_dispatch_agg_exec_conda",
     "komira//src/komira_dynamic_filter:ci",
     "komira//src/komira_dynamic_filter:conda_holds",
