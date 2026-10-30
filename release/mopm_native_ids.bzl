@@ -18,6 +18,7 @@ load("//src/kci_deploy_model_proto:buildrules.mojo.lock.bzl", kci_deploy_model_p
 load("//src/kci_logs:buildrules.mojo.lock.bzl", kci_logs = "GRAPH")
 load("//src/kci_manifest_proto:buildrules.mojo.lock.bzl", kci_manifest_proto = "GRAPH")
 load("//src/kci_params:buildrules.mojo.lock.bzl", kci_params = "GRAPH")
+load("//src/kci_reconciler:buildrules.mojo.lock.bzl", kci_reconciler = "GRAPH")
 load("//src/kci_release_channel:buildrules.mojo.lock.bzl", kci_release_channel = "GRAPH")
 load("//src/kci_release_machine:buildrules.mojo.lock.bzl", kci_release_machine = "GRAPH")
 load("//src/kci_resource_proto:buildrules.mojo.lock.bzl", kci_resource_proto = "GRAPH")
@@ -105,6 +106,7 @@ _GRAPHS = {
     "kci_logs": kci_logs,
     "kci_manifest_proto": kci_manifest_proto,
     "kci_params": kci_params,
+    "kci_reconciler": kci_reconciler,
     "kci_release_channel": kci_release_channel,
     "kci_release_machine": kci_release_machine,
     "kci_resource_proto": kci_resource_proto,

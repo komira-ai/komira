@@ -31,6 +31,7 @@ PACKAGES = {
     "kci_logs": "0.1.0",
     "kci_manifest_proto": "0.1.0",
     "kci_params": "0.1.0",
+    "kci_reconciler": "0.1.0",
     "kci_release_channel": "0.1.0",
     "kci_release_machine": "0.1.0",
     "kci_resource_proto": "0.1.0",
