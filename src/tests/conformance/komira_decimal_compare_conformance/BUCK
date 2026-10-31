@@ -25,8 +25,12 @@ load("@komira//tools/build/sql:defs.bzl", "sql_oracle")
 #                                and a comparison DuckDB raises on is refused
 #   test_double_sites            every place the engine converts a DECIMAL to a
 #                                DOUBLE (a sum() of an integer column, a cast, a
-#                                promotion beside a DOUBLE, a math function,
-#                                AVG) answers DuckDB's DOUBLE
+#                                promotion beside a DOUBLE, a math function)
+#                                answers DuckDB's DOUBLE
+#   test_avg_sites               every place the engine finalizes an avg() of an
+#                                integer or a DECIMAL (grouped, ungrouped, over
+#                                a window, beside a count(DISTINCT)) answers
+#                                the bits of DuckDB's own avg()
 #   test_where_texts             the rows each WHERE text of where.tsv keeps
 #                                are DuckDB's
 #   test_folded_constants        the plan holds each folded constant as the
@@ -58,6 +62,18 @@ sql_oracle(
     name = "table_s",
     srcs = ["oracle/table_s.sql", "oracle/write_s.sql"],
     outputs = ["pj.parquet", "pd.parquet", "pg.parquet"],
+)
+
+sql_oracle(
+    name = "table_a",
+    srcs = ["oracle/table_a.sql", "oracle/write_a.sql"],
+    outputs = ["pa.parquet"],
+)
+
+sql_oracle(
+    name = "avg_sites",
+    srcs = ["oracle/table_s.sql", "oracle/table_a.sql", "oracle/avg_sites.sql"],
+    outputs = ["avg_sites.tsv"],
 )
 
 sql_oracle(
@@ -217,6 +233,7 @@ mojo_library(
         "tests/test_where_texts.mojo",
         "tests/test_double_conversion.mojo",
         "tests/test_double_sites.mojo",
+        "tests/test_avg_sites.mojo",
     ],
     test_data = {
         "tests/test_column_a_1.mojo": {
@@ -348,6 +365,12 @@ mojo_library(
             "pd.parquet": ":table_s[pd.parquet]",
             "pg.parquet": ":table_s[pg.parquet]",
             "double_sites.tsv": ":double_sites[double_sites.tsv]",
+        },
+        "tests/test_avg_sites.mojo": {
+            "pj.parquet": ":table_s[pj.parquet]",
+            "pd.parquet": ":table_s[pd.parquet]",
+            "pa.parquet": ":table_a[pa.parquet]",
+            "avg_sites.tsv": ":avg_sites[avg_sites.tsv]",
         },
         "tests/test_where_texts.mojo": {
             "t.parquet": ":table[t.parquet]",
