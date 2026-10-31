@@ -209,7 +209,7 @@ The rulings that settled each item once open or departing, the table of parity g
 
 - **Rule.** MIN and MAX of BOOLEAN order FALSE before TRUE and return BOOLEAN. SUM of BOOLEAN counts the TRUE values (its type is §8.1's). BOOL_AND and BOOL_OR skip NULLs and are NULL over a group with no non-NULL value.
 - **DuckDB.** `sum(BOOLEAN)` exists (`extension/core_functions/aggregate/distributive/sum.cpp:163-164` at v1.5.6); `bool_and`/`bool_or` follow §2.1.
-- **Current behaviour.** `sum(<BOOL>)` is typed INT64 and answers the count of non-NULL TRUEs (`src/komira_plan_ir/logical_plan.mojo:2431-2460`); BOOL_AND/BOOL_OR are BOOLEAN (`src/komira_plan_expr/agg_expr.mojo:245-253`).
+- **Current behaviour.** `sum(<BOOL>)` answers the count of non-NULL TRUEs: DECIMAL(38, 0) in SQL (`src/komira_sql/sql_bind_agg_expr.mojo`), INT64 through the dataframe doors (`src/komira_plan_ir/logical_plan.mojo:2431-2460`); BOOL_AND/BOOL_OR are BOOLEAN (`src/komira_plan_expr/agg_expr.mojo:245-253`).
 - **Mark.** MATCHES.
 
 ### 2.14 MEDIAN at an even count

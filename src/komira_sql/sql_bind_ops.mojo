@@ -171,9 +171,48 @@ def _is_decimal_typed(e: Expr, typing: Schema) -> Bool:
     return missing.byte_length() == 0 and t == ArrowType.DECIMAL128
 
 
-def _bind_sql_division(op: UInt8, var lhs: Expr, var rhs: Expr, typing: Schema) -> Expr:
+def _is_integer_valued_decimal(e: Expr, typing: Schema) -> Bool:
+    """`e`'s value is PROVABLY a DECIMAL128 of scale 0 over `typing`: the type
+    an integer `sum()` is declared (DECIMAL(38, 0), DuckDB's HUGEINT)."""
+    var missing = String("")
+    var f = walk_expr_field[PlanColRefFields](e, typing, missing)
+    return (
+        missing.byte_length() == 0
+        and f.arrow_type == ArrowType.DECIMAL128
+        and f.decimal_scale == 0
+    )
+
+
+def _bind_sql_division(op: UInt8, var lhs: Expr, var rhs: Expr, typing: Schema) raises -> Expr:
     """DuckDB's `/` (`op == SXOP_DIV`) or `//` (`SXOP_IDIV`, also the
-    `divide()` row) over two bound operands. See the section header."""
+    `divide()` row) over two bound operands. See the section header.
+
+    An operand that is a DECIMAL of scale 0 is an integer `sum()` (HUGEINT in
+    DuckDB), and DuckDB's `/` over it is DOUBLE, like `/` over any integer: it
+    is cast to DOUBLE here, so `sum(a) / count(*)` answers 3.5 and not the
+    engine's DECIMAL division (`3.5000`, rounded to four places). `//` over it
+    is DuckDB's integer division, which this engine has no 128-bit kernel
+    for, and the DECIMAL division it would fall to answers 3.5 for `7 // 2`:
+    it is refused by name rather than answered wrong."""
+    var lhs_big = _is_integer_valued_decimal(lhs, typing)
+    var rhs_big = _is_integer_valued_decimal(rhs, typing)
+    if (lhs_big or rhs_big) and op == SXOP_IDIV:
+        raise Error(
+            "SQL not supported: `//` / divide() over the sum of an integer"
+            " column (DuckDB's HUGEINT, here DECIMAL(38, 0)). Integer division"
+            " over a 128-bit operand has no kernel in this engine, and DECIMAL"
+            " division would answer `7 // 2` as 3.5. CAST the sum to BIGINT"
+            " first if its value fits 64 bits"
+        )
+    if lhs_big or rhs_big:
+        # Cast the DECIMAL operand to DOUBLE: the division is then over a
+        # floating operand, DuckDB's `/`, exactly the tree `true_divide`
+        # builds for an integer numerator.
+        if lhs_big:
+            lhs = Expr.cast(lhs^, DType.float64)
+        if rhs_big:
+            rhs = Expr.cast(rhs^, DType.float64)
+        return Expr.binary(BIN_DIV, lhs^, rhs^)
     if op == SXOP_IDIV:
         # A DECIMAL operand takes the float rule too: DuckDB 1.5.3's `//` over
         # a DECIMAL is its `/` (DOUBLE) with a zero divisor NULL, so the
