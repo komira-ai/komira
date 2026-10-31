@@ -151,6 +151,13 @@ mojo_library(
         # compile-time arm, a chain, a live caller, no caller, a compiled arm, a
         # same-named function elsewhere, the result and the summary
         "tests/test_platform_gate.mojo",
+        # program sources (programs.mojo): a bins entry of mopm.toml left out of the
+        # numbers and of UnmeasuredFile; UnrunProgram when no test target runs the built
+        # program, none when one does; a bins path no manifest names, and a package with
+        # no manifest, counted as before; every manifest shape refused (a table for the
+        # array, a missing name or path, a path that is not a relative .mojo path, bins
+        # given twice); manifests read only for the packages in the run; --program-runs
+        "tests/test_programs.mojo",
     ],
     test_data = {
         "tests/test_lcov.mojo": ["tests/fixtures/basic.info"],

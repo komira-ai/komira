@@ -25,6 +25,7 @@ from covcheck.annotate import (
 from covcheck.checkrun import body_name, checkrun_bodies, valid_sha
 from covcheck.diff import parse_diff
 from covcheck.paths import RepoFiles, package_of, parse_repo_files
+from covcheck.programs import parse_program_runs
 from covcheck.held import Held, add_hold
 from covcheck.result import gate_json, report_json
 from covcheck.stats import MODE_NEUTRAL, valid_mode
@@ -42,14 +43,14 @@ comptime USAGE_REPORT = (
     "covcheck report --repo-files F --diff F --head-sha SHA --source-root DIR"
     + " (--cobertura [PKGDIR=]F | --lcov [PKGDIR=]F)... [--branch-lcov [PKGDIR=]F]... [--mutants [PKGDIR=]F]..."
     + " [--strip-prefix P]... [--held PKGDIR=F]... [--mode census|neutral|enforce] --target-bp N"
-    + " [--include-tests] [--info-package DIR]... [--name N] [--max-annotations N] --summary-out F --checkrun-dir D --result-out F"
+    + " [--include-tests] [--info-package DIR]... [--program-runs F] [--name N] [--max-annotations N] --summary-out F --checkrun-dir D --result-out F"
     + " [--annotations-out F]"
 )
 comptime USAGE_GATE = (
     "covcheck gate --package DIR --repo-files F --source-root DIR"
     + " [--cobertura [PKGDIR=]F | --lcov [PKGDIR=]F]... [--branch-lcov [PKGDIR=]F]... [--mutants [PKGDIR=]F]..."
     + " [--strip-prefix P]... [--held F] --mode census|neutral|enforce --target-bp N"
-    + " [--include-tests] [--test-source P]... [--info-package DIR]... --result-out F --summary-out F"
+    + " [--include-tests] [--test-source P]... [--info-package DIR]... [--program-runs F] --result-out F --summary-out F"
 )
 
 
@@ -120,7 +121,7 @@ def parse_args(args: List[String]) raises -> Args:
     var report = a.command == String("report")
     if not report and a.command != String("gate"):
         _usage(String("unknown command '") + a.command + String("' (report or gate)"))
-    var single = split_on(String("--repo-files --source-root --mode --target-bp --summary-out --result-out"), 32)
+    var single = split_on(String("--repo-files --source-root --mode --target-bp --summary-out --result-out --program-runs"), 32)
     if report:
         single.extend(split_on(String("--diff --head-sha --name --checkrun-dir --max-annotations --annotations-out"), 32))
     else:
@@ -258,6 +259,11 @@ def _read_inputs(fs: List[FileArg]) raises -> List[Input]:
 
 
 def _analysis(a: Args, repo: RepoFiles) raises -> Analysis:
+    var opts = _options(a)
+    # The program sources some test target runs (programs.mojo): absent, none is run.
+    var runs = a.get(String("--program-runs"))
+    if runs.byte_length() > 0:
+        opts.program_runs = parse_program_runs(read_text(runs))
     var held = Held()
     for i in range(len(a.held)):
         ref h = a.held[i]
@@ -265,7 +271,7 @@ def _analysis(a: Args, repo: RepoFiles) raises -> Analysis:
         add_hold(held, pkg, read_text(h.file), h.file, a.info_packages)
     return analyze(
         _read_inputs(a.reports), _read_inputs(a.mutants), repo, held,
-        Sources(a.get(String("--source-root"))), _options(a),
+        Sources(a.get(String("--source-root"))), opts,
     )
 
 

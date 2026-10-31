@@ -74,6 +74,8 @@ def _repo() -> RepoFiles:
 def _sources() -> Sources:
     var s = Sources(String(""))
     s.texts[String(LIB)] = String(LIB_SOURCE)
+    # The manifest of the package, read for its programs (programs.mojo): it declares none.
+    s.texts[String("src/mp/mopm.toml")] = String("[targets]\nlib = { path = \"src/mp\" }\n")
     return s^
 
 

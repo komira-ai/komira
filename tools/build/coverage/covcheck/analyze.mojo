@@ -115,6 +115,7 @@ from covcheck.lexer import executable_lines
 from covcheck.model import FileCov, merge_by_path
 from covcheck.mutants import KILLED, SURVIVED, TIMEOUT, Mutant, parse_mutants
 from covcheck.paths import MAPPED, OUTSIDE, RepoFiles, generated_test_main, is_test_source, map_path, package_of
+from covcheck.programs import MANIFEST, Program, program_sources, unrun_findings
 from covcheck.held import Held
 from covcheck.platform_gate import Cand, platform_gated
 from covcheck.uncompiled import Evidence, declared_twice, drop_lines, drop_unreliable, is_uncompiled_report, unreliable_lines
@@ -171,6 +172,8 @@ struct Options(Copyable, Movable):
     var test_sources: Dict[String, Bool]
     # The directories of test-only packages (`--info-package`; step 8).
     var info_packages: List[String]
+    # Repository paths of the program sources some test target runs (programs.mojo; step 3c).
+    var program_runs: Dict[String, Bool]
 
     def __init__(out self):
         self.mode = String(MODE_NEUTRAL)
@@ -180,6 +183,7 @@ struct Options(Copyable, Movable):
         self.strip_prefixes = List[String]()
         self.test_sources = Dict[String, Bool]()
         self.info_packages = List[String]()
+        self.program_runs = Dict[String, Bool]()
 
 
 struct Sources(Copyable, Movable):
@@ -298,6 +302,8 @@ struct Analysis(Copyable, Movable):
     var excluded_test_files: Int
     # Repository paths of the generated sources left out (generated.mojo), sorted.
     var generated_paths: List[String]
+    # Repository paths of the program sources left out (programs.mojo, step 3c), sorted.
+    var program_paths: List[String]
     var ignored_mutants: Int
     var excluded_test_mutants: Int
     var total: PackageStats
@@ -322,6 +328,7 @@ struct Analysis(Copyable, Movable):
         self.info_packages = List[String]()
         self.info_findings = List[Finding]()
         self.generated_paths = List[String]()
+        self.program_paths = List[String]()
         self.ignored_files = 0
         self.excluded_test_files = 0
         self.ignored_mutants = 0
@@ -414,6 +421,34 @@ def _package_or_empty(path: String, repo: RepoFiles) -> String:
         return String("")
 
 
+def _programs(
+    mapped: List[FileCov], bmapped: List[FileCov], held: Held, repo: RepoFiles, sources: Sources, opts: Options
+) raises -> List[Program]:
+    """The programs (programs.mojo) of the packages in the run: those a kept report path is in, the
+    gated package, and the packages given a hold. A manifest is read only for those."""
+    var pkgs = Dict[String, Bool]()
+    if opts.only_package.byte_length() > 0:
+        pkgs[opts.only_package] = True
+    for e in held.packages.items():
+        pkgs[e.key] = True
+    for i in range(len(mapped)):
+        pkgs[_package_or_empty(mapped[i].path, repo)] = True
+    for i in range(len(bmapped)):
+        pkgs[_package_or_empty(bmapped[i].path, repo)] = True
+    var list = List[String]()
+    var texts = Dict[String, String]()
+    for e in pkgs.items():
+        var pkg = e.key
+        if pkg.byte_length() == 0 or _keep(pkg, pkg + String("/BUCK"), opts) == 1:
+            continue
+        var manifest = String(MANIFEST) if pkg == String("(root)") else pkg + String("/") + String(MANIFEST)
+        if repo.has_file(manifest):
+            list.append(pkg)
+            texts[manifest] = sources.read(manifest)
+    sort_strings(list)
+    return program_sources(repo, texts, list)
+
+
 def _unmeasured_files(
     mut a: Analysis,
     mut at: Dict[String, Int],
@@ -427,6 +462,7 @@ def _unmeasured_files(
     mut notes: List[Finding],
     mut skipped: Dict[String, Bool],
     left_lines: Dict[String, Dict[Int, Bool]],
+    programs: Dict[String, Bool],
 ) raises -> List[Finding]:
     """Step 4's full source: counts every file of a `measured` package that
     is not `named` (no line report gives it a record), with the branches
@@ -436,7 +472,7 @@ def _unmeasured_files(
     var paths = List[String]()
     for e in repo.files.items():
         var path = e.key
-        if not path.endswith(".mojo") or path in named:
+        if not path.endswith(".mojo") or path in named or path in programs:
             continue
         var pkg = _package_or_empty(path, repo)
         if pkg.byte_length() == 0 or pkg not in measured or _keep(pkg, path, opts) != 0:
@@ -791,6 +827,13 @@ def analyze(
     # is read, whether a test reached it or not.
     var left_out = Dict[String, Bool]()
     var seen = Dict[String, Bool]()
+    # Program sources (programs.mojo) leave the lists the same way: `seen` says so, and they are
+    # taken back out of `left_out`, which names the generated ones.
+    var programs = _programs(mapped, bmapped, held, repo, sources, opts)
+    var program_set = Dict[String, Bool]()
+    for i in range(len(programs)):
+        seen[programs[i].path] = True
+        program_set[programs[i].path] = True
     var line_kept = List[FileCov]()
     for i in range(len(mapped)):
         if _generated_path(mapped[i].path, repo, sources, opts, seen):
@@ -815,6 +858,9 @@ def analyze(
         else:
             muts_kept.append(muts[i].copy())
     muts = muts_kept^
+    for e in program_set.items():
+        if e.key in left_out:
+            _ = left_out.pop(e.key)
 
     # The checks of the branch records, over the files kept (step 3): a
     # file left out counts nowhere, so its records are not checked.
@@ -943,12 +989,17 @@ def analyze(
         a.file_packages.append(pkg)
         a.unmeasured.append(False)
     var decl_notes = List[Finding]()
-    var unmeasured_findings = _unmeasured_files(a, at, exemptions, measured, named, pending, repo, sources, opts, decl_notes, left_out, left_lines)
+    var unmeasured_findings = _unmeasured_files(a, at, exemptions, measured, named, pending, repo, sources, opts, decl_notes, left_out, left_lines, program_set)
     var left_keys = List[String]()
     for e in left_out.items():
         left_keys.append(e.key)
     sort_strings(left_keys)
     a.generated_paths = left_keys^
+    var program_keys = List[String]()
+    for e in program_set.items():
+        program_keys.append(e.key)
+    sort_strings(program_keys)
+    a.program_paths = program_keys^
     var mut_pkgs = List[String]()
     var kept_muts = List[Mutant]()
     for i in range(len(muts)):
@@ -1065,6 +1116,9 @@ def analyze(
             reached.append(_reached(p.package, String("branch"), bbp, t))
     for i in range(len(unmeasured_findings)):
         findings.append(unmeasured_findings[i].copy())
+    var unrun = unrun_findings(programs, opts.program_runs)
+    for i in range(len(unrun)):
+        findings.append(unrun[i].copy())
     for i in range(len(branch_unmeasured)):
         findings.append(branch_unmeasured[i].copy())
     for i in range(len(a.mutants)):
