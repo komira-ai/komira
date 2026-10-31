@@ -58,7 +58,7 @@ mojo_conda(
         "../komira_clock": "//src/komira_clock:mopm.toml",
     },
     mojo = "1.0.0",
-    mopm = "toolchains//:mopm_0_0_86",
+    mopm = "toolchains//:mopm_0_0_101",
     package = "komira_uuid",
     version = "0.1.0",
     visibility = ["PUBLIC"],
