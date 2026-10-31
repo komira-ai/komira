@@ -478,7 +478,7 @@ test "each edit of the real release-macos.yml that breaks the macOS build's cont
     try expectRefused(ar, try replaced(ar, text, "    needs: release-macos\n    if: always()\n", "    needs: release-macos\n    if: failure()\n"), "not if: always()");
     try expectRefused(ar, try replaced(ar, text, "needs.release-macos.result", "needs.release-macos.outcome"), "does not read the result");
     try expectRefused(ar, try replaced(ar, text, RESULT_REASON, "the macOS build ended"), "does not say");
-    try expectRefused(ar, try replaced(ar, text, "          exit 1\n", "          exit 0\n"), "never fails");
+    try expectRefused(ar, try replaced(ar, text, "exit 1 ;;", "exit 0 ;;"), "never fails");
     try expectRefused(ar, try replaced(ar, text, "    needs: release-macos\n    if: always()\n", "    needs: release-macos\n    if: always()\n    continue-on-error: true\n"), "its failure would read as success");
 
     // nothing publishes from it
