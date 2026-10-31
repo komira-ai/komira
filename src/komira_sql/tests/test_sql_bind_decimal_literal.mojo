@@ -52,6 +52,11 @@
 #     DECIMAL(13, 2); the integer width follows the type (a BIGINT difference
 #     of 1, `-2147483648`) and an INTEGER overflow is an error. Catches an
 #     integer-only sub-expression that sends the whole constant to float.
+#   * test_integer_remainder_division_and_negation_in_a_constant: `0.1 + 0.2 +
+#     7 % 4` is DECIMAL(12, 1) 3.3, `7 // 2 * 0.5` 1.5, `-7 % 4 + 0.5` -2.5;
+#     `%` and `//` over a decimal, a zero divisor and the negation of an integer
+#     minimum are refused. Catches `%` sending the constant to float, and a
+#     negation that wraps.
 #   * test_unary_plus_is_the_literal: `+0.5`, `- +0.5`, `+5.`, `+24`. Catches a
 #     plus sign that is a syntax error.
 #   * test_constants_duckdb_raises_on_are_refused: the binder raises, with
@@ -538,6 +543,41 @@ def test_unary_plus_is_the_literal() raises:
     )
 
 
+def test_integer_remainder_division_and_negation_in_a_constant() raises:
+    # `7 % 4` is the INTEGER 3, so `0.1 + 0.2 + 7 % 4` is DECIMAL(12, 1) 3.3.
+    assert_equal(
+        _bound(_w("dc = 0.1 + 0.2 + 7 % 4")),
+        "BinaryOp(EQ, ColRef(dc), " + _d(0, 33, 12, 1) + ")",
+    )
+    assert_equal(
+        _bound(_w("dc = 7 // 2 * 0.5")),
+        "BinaryOp(EQ, ColRef(dc), " + _d(0, 15, 12, 1) + ")",
+    )
+    assert_equal(
+        _bound(_w("dc = -7 % 4 + 0.5")),
+        "BinaryOp(EQ, ColRef(dc), " + _d(-1, -25, 12, 1) + ")",
+    )
+    # Over a decimal operand DuckDB's % is exact decimal arithmetic: refused.
+    var dec = _bound(_w("dc = 0.5 % 2"))
+    assert_true(dec.startswith("ERR: "), dec)
+    assert_true(dec.find("not supported") >= 0, dec)
+    var idiv = _bound(_w("dc = 7.5 // 2"))
+    assert_true(idiv.find("not supported") >= 0, idiv)
+    # A zero divisor is NULL in DuckDB: refused.
+    var zero = _bound(_w("dc = (7 % 0) + 0.5"))
+    assert_true(zero.find("division by zero") >= 0, zero)
+    # Negating an integer minimum raises.
+    var neg32 = _bound(_w("dc = -(-2147483647 - 1) + 0.5"))
+    assert_true(neg32.find("Overflow in negation of integer") >= 0, neg32)
+    var neg64 = _bound(_w("dc = -(-9223372036854775807 - 1) + 0.5"))
+    assert_true(neg64.find("Overflow in negation of integer") >= 0, neg64)
+    # -2147483648 is a BIGINT: its negation is 2147483648, fine.
+    assert_equal(
+        _bound(_w("dc = -(-2147483648) + 0.5")),
+        "BinaryOp(EQ, ColRef(dc), " + _d(0, 21474836485, 21, 1) + ")",
+    )
+
+
 def main() raises:
     var suite = TestSuite()
     suite.test[test_literal_facing_a_decimal_column_is_decimal]()
@@ -552,4 +592,5 @@ def main() raises:
     suite.test[test_constants_duckdb_raises_on_are_refused]()
     suite.test[test_integer_subexpressions_fold_as_integers]()
     suite.test[test_unary_plus_is_the_literal]()
+    suite.test[test_integer_remainder_division_and_negation_in_a_constant]()
     suite^.run()

@@ -296,6 +296,15 @@ def decimal_fold_binary(
     )
 
 
+# The operator code `integer_fold_binary` takes for `//` (integer division);
+# `%` is BIN_MOD.
+comptime INTEGER_FOLD_IDIV: UInt8 = 100
+
+
+def integer_negate(a: ScalarValue) raises -> ScalarValue:
+    return a.copy()
+
+
 def integer_fold_binary(
     op: UInt8, a: ScalarValue, b: ScalarValue
 ) raises -> ScalarValue:

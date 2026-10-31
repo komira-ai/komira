@@ -112,5 +112,17 @@ SELECT * FROM (
   SELECT 52 AS n, '- +0.5' AS expr, typeof(- +0.5) AS type, CAST(- +0.5 AS VARCHAR) AS value
   UNION ALL
   SELECT 53 AS n, '+5.' AS expr, typeof(+5.) AS type, CAST(+5. AS VARCHAR) AS value
+  UNION ALL
+  SELECT 54 AS n, '0.1 + 0.2 + 7 % 4' AS expr, typeof(0.1 + 0.2 + 7 % 4) AS type, CAST(0.1 + 0.2 + 7 % 4 AS VARCHAR) AS value
+  UNION ALL
+  SELECT 55 AS n, '7 // 2 * 0.5' AS expr, typeof(7 // 2 * 0.5) AS type, CAST(7 // 2 * 0.5 AS VARCHAR) AS value
+  UNION ALL
+  SELECT 56 AS n, '-7 % 4 + 0.5' AS expr, typeof(-7 % 4 + 0.5) AS type, CAST(-7 % 4 + 0.5 AS VARCHAR) AS value
+  UNION ALL
+  SELECT 57 AS n, '7 % -4 + 0.5' AS expr, typeof(7 % -4 + 0.5) AS type, CAST(7 % -4 + 0.5 AS VARCHAR) AS value
+  UNION ALL
+  SELECT 58 AS n, '2 * 3 % 4 + 0.5' AS expr, typeof(2 * 3 % 4 + 0.5) AS type, CAST(2 * 3 % 4 + 0.5 AS VARCHAR) AS value
+  UNION ALL
+  SELECT 59 AS n, '-(-2147483648) + 0.5' AS expr, typeof(-(-2147483648) + 0.5) AS type, CAST(-(-2147483648) + 0.5 AS VARCHAR) AS value
 ) AS q ORDER BY n
 ) TO 'types.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);

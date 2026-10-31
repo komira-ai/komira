@@ -75,6 +75,12 @@ sql_oracle(
 ) for name in ["where", "types"]]
 
 sql_oracle(
+    name = "double_sweep",
+    srcs = ["oracle/double_sweep.sql"],
+    outputs = ["double_sweep.tsv"],
+)
+
+sql_oracle(
     name = "errors",
     srcs = ["oracle/errors.sql"],
     outputs = ["errors.tsv"],
@@ -193,6 +199,7 @@ mojo_library(
         "tests/test_column_xw.mojo",
         "tests/test_folded_constants.mojo",
         "tests/test_where_texts.mojo",
+        "tests/test_double_conversion.mojo",
     ],
     test_data = {
         "tests/test_column_a_1.mojo": {
@@ -315,6 +322,9 @@ mojo_library(
             "t.parquet": ":table[t.parquet]",
             "types.tsv": ":types[types.tsv]",
             "errors.tsv": ":errors[errors.tsv]",
+        },
+        "tests/test_double_conversion.mojo": {
+            "double_sweep.tsv": ":double_sweep[double_sweep.tsv]",
         },
         "tests/test_where_texts.mojo": {
             "t.parquet": ":table[t.parquet]",

@@ -55,6 +55,13 @@
 #     DuckDB's "Overflow in addition of INT32". Catches an integer sub-expression
 #     that falls back to a float, a BIGINT-typed result given INTEGER's width by
 #     its value, and an overflow that wraps or promotes.
+#   * test_integer_remainder_and_division_truncate: `%` and `//` over integer
+#     constants keep the dividend's sign and truncate toward zero; a zero divisor
+#     and the minimum over -1 are refused. Catches a floored division and a
+#     divisor of zero that crashes.
+#   * test_negating_an_integer_minimum_raises: -(-2147483647 - 1) and the BIGINT
+#     and HUGEINT minima raise "Overflow in negation of integer!"; the maxima and
+#     the BIGINT -2147483648 negate. Catches a negation that wraps.
 #   * test_pairs_the_fold_does_not_cover: two integers, a float, a typeless
 #     decimal, `/`, a comparison, a non-literal. Catches a pair folded by a
 #     rule that does not own it.
@@ -66,9 +73,11 @@ from std.testing import TestSuite, assert_equal, assert_true
 from komira_decimal_literal.decimal_literal import (
     decimal_fold_binary,
     decimal_negate,
+    INTEGER_FOLD_IDIV,
     integer_fold_binary,
+    integer_negate,
 )
-from komira_plan_expr.expr import BIN_ADD, BIN_SUB, BIN_MUL, BIN_DIV, BIN_LT
+from komira_plan_expr.expr import BIN_ADD, BIN_SUB, BIN_MUL, BIN_DIV, BIN_LT, BIN_MOD
 from komira_plan_expr.scalar_value import ScalarValue
 from komira_scalar_arithmetic.decimal_arith import I128, I256, pow10_i256
 
@@ -406,11 +415,72 @@ def test_integer_arithmetic_raises_where_duckdb_does() raises:
     var max128 = ScalarValue.decimal128_i128((I128(1) << I128(127)) - I128(1), 38, 0)
     m = _refusal_int(BIN_ADD, max128, _int(1, 10))
     assert_true(m.find("INT128") >= 0, m)
+    # -2^127 is a HUGEINT (DuckDB: -170141183460469231731687303715884105727 - 1
+    # is -170141183460469231731687303715884105728); one below it is not.
+    m = _refusal_int(BIN_MUL, max128, _int(2, 10))
+    assert_true(m.find("INT128") >= 0, m)
+    var negmax = ScalarValue.decimal128_i128(-((I128(1) << I128(127)) - I128(1)), 38, 0)
+    m = _refusal_int(BIN_SUB, negmax, _int(2, 10))
+    assert_true(m.find("INT128") >= 0, m)
 
 
 def _refusal_int(op: UInt8, a: ScalarValue, b: ScalarValue) -> String:
     try:
         _ = integer_fold_binary(op, a, b)
+    except e:
+        return String(e)
+    return String("")
+
+
+def test_integer_remainder_and_division_truncate() raises:
+    # DuckDB: 7 % 4 is 3, -7 % 4 is -3, 7 % -4 is 3 (the sign of the dividend);
+    # 7 // 2 is 3, -7 // 2 is -3, 7 // -2 is -3 (toward zero). Types are the
+    # wider operand's.
+    _int_expect(BIN_MOD, _int(7, 10), _int(4, 10), 3, 10)
+    _int_expect(BIN_MOD, _int(-7, 10), _int(4, 10), -3, 10)
+    _int_expect(BIN_MOD, _int(7, 10), _int(-4, 10), 3, 10)
+    _int_expect(INTEGER_FOLD_IDIV, _int(7, 10), _int(2, 10), 3, 10)
+    _int_expect(INTEGER_FOLD_IDIV, _int(-7, 10), _int(2, 10), -3, 10)
+    _int_expect(INTEGER_FOLD_IDIV, _int(7, 10), _int(-2, 10), -3, 10)
+    _int_expect(BIN_MOD, _int(3000000000, 19), _int(7, 10), 4, 19)
+    _int_expect(INTEGER_FOLD_IDIV, _int(2147483647, 10), _int(1, 10), 2147483647, 10)
+    # A zero divisor is NULL in DuckDB; it is refused here, and so is the one
+    # quotient outside the type (INTEGER minimum over -1).
+    var m = _refusal_int(BIN_MOD, _int(7, 10), _int(0, 10))
+    assert_true(m.find("division by zero") >= 0, m)
+    m = _refusal_int(INTEGER_FOLD_IDIV, _int(7, 10), _int(0, 10))
+    assert_true(m.find("division by zero") >= 0, m)
+    m = _refusal_int(INTEGER_FOLD_IDIV, _int(-2147483648, 10), _int(-1, 10))
+    assert_true(m.find("INT32") >= 0, m)
+    m = _refusal_int(BIN_MOD, _int(-2147483648, 10), _int(-1, 10))
+    assert_true(m.find("INT32") >= 0, m)
+
+
+def test_negating_an_integer_minimum_raises() raises:
+    var neg = integer_negate(_int(5, 10))
+    assert_equal(String(neg), String(_int(-5, 10)))
+    assert_equal(String(integer_negate(_int(-5, 19))), String(_int(5, 19)))
+    # -(-2147483647 - 1), the INT32 and INT64 minima, and the HUGEINT minimum.
+    var m = _refusal_negate(_int(-2147483648, 10))
+    assert_true(m.find("Overflow in negation of integer") >= 0, m)
+    m = _refusal_negate(_int(-Int(Int64.MAX) - 1, 19))
+    assert_true(m.find("Overflow in negation of integer") >= 0, m)
+    var min128 = ScalarValue.decimal128_i128(-(I128(1) << I128(127)), 38, 0)
+    m = _refusal_negate(min128)
+    assert_true(m.find("Overflow in negation of integer") >= 0, m)
+    # The maxima negate; the INT32 minimum as a BIGINT (-2147483648 the literal)
+    # negates; the HUGEINT minimum is a value (-(2^127 - 1) - 1).
+    assert_equal(
+        String(integer_negate(_int(-2147483648, 19))), String(_int(2147483648, 19))
+    )
+    var max128 = ScalarValue.decimal128_i128((I128(1) << I128(127)) - I128(1), 38, 0)
+    var held = integer_fold_binary(BIN_SUB, ScalarValue.decimal128_i128(-max128.decimal_value_i128(), 38, 0), _int(1, 10))
+    assert_true(held.decimal_value_i128() == -(I128(1) << I128(127)), "-(2^127 - 1) - 1 is the HUGEINT minimum")
+
+
+def _refusal_negate(a: ScalarValue) -> String:
+    try:
+        _ = integer_negate(a)
     except e:
         return String(e)
     return String("")
@@ -424,6 +494,8 @@ def main() raises:
     suite.test[test_limits]()
     suite.test[test_integer_arithmetic_keeps_the_integer_type]()
     suite.test[test_integer_arithmetic_raises_where_duckdb_does]()
+    suite.test[test_integer_remainder_and_division_truncate]()
+    suite.test[test_negating_an_integer_minimum_raises]()
     suite.test[test_a_result_wider_than_18_digits_from_narrow_operands_is_cut_to_18]()
     suite.test[test_a_hugeint_sized_integer_takes_part_as_decimal_38]()
     suite.test[test_a_result_that_does_not_fit_its_cut_width_is_refused]()

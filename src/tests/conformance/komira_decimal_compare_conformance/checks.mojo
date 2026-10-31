@@ -6,6 +6,8 @@ from std.pathlib import Path
 from std.testing import assert_equal, assert_true
 
 from komira_arrow.arrow_types import ArrowType
+from komira_batch_eval.decimal_to_double import decimal_to_double
+from komira_jsonl.value_parsers.parse_float import parse_float_f64
 from komira_arrow.schema import RecordBatch
 from komira_lowering.render import render_lowered_plan
 from komira_optimizer.optimizer_config import OptimizerConfig
@@ -21,7 +23,7 @@ from komira_sdk_exec.engine_options import EngineOptions
 from komira_sdk_exec.engine_sql import SqlOutcome, run_sql
 from komira_sql.sql_binder import bind_statement
 from komira_sql.sql_parser import parse_sql
-from komira_sql.sql_token import tokenize
+from komira_sql.sql_token import TK_FLOAT, tokenize
 
 
 # The comparison operators, in the order compare_<col>.tsv lists them, with
@@ -409,3 +411,72 @@ def check_q6_bounds() raises:
     )
 
 
+
+
+def _i128_of(digits: String) -> I128:
+    var negative = digits.startswith("-")
+    var n = I128(0)
+    for b in digits.as_bytes():
+        if b >= UInt8(ord("0")) and b <= UInt8(ord("9")):
+            n = n * I128(10) + I128(Int(b - UInt8(ord("0"))))
+    if negative:
+        n = -n
+    return n
+
+
+def check_double_conversion_of_columns() raises:
+    """`decimal_to_double` of every stored value of double_sweep.tsv is the
+    double DuckDB casts it to (the text DuckDB prints reads back exactly)."""
+    var rows = _rows("double_sweep.tsv")
+    assert_true(len(rows) >= 1000, "double_sweep.tsv holds too few values")
+    var problems = List[String]()
+    for r in range(len(rows)):
+        ref cells = rows[r]
+        assert_equal(len(cells), 5)
+        var scale = Int(atol(cells[1]))
+        var want = parse_float_f64(cells[4].as_bytes(), 0, cells[4].byte_length())
+        var got = decimal_to_double(_i128_of(cells[2]), scale)
+        if got != want:
+            problems.append(
+                cells[3]
+                + " (scale "
+                + String(scale)
+                + "): DuckDB gives "
+                + cells[4]
+                + ", komira "
+                + String(got)
+            )
+    _assert_no_problems(problems)
+
+
+def check_double_conversion_of_literals() raises:
+    """The tokenizer's double for the decimal text of every value of scale 1 and
+    up of double_sweep.tsv is the double DuckDB casts the value to."""
+    var rows = _rows("double_sweep.tsv")
+    var problems = List[String]()
+    var checked = 0
+    for r in range(len(rows)):
+        ref cells = rows[r]
+        var scale = Int(atol(cells[1]))
+        if scale < 1:
+            continue
+        var text = cells[3]
+        var negative = text.startswith("-")
+        if negative:
+            text = String(text[byte=1:])
+        var toks = tokenize(text)
+        var got = toks[0].float_val
+        if negative:
+            got = -got
+        var want = parse_float_f64(cells[4].as_bytes(), 0, cells[4].byte_length())
+        checked += 1
+        if toks[0].kind != TK_FLOAT or got != want:
+            problems.append(
+                cells[3]
+                + ": DuckDB gives "
+                + cells[4]
+                + ", the tokenizer "
+                + String(got)
+            )
+    assert_true(checked > 400, "too few decimal literals were checked")
+    _assert_no_problems(problems)

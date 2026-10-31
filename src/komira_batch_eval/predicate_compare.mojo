@@ -39,7 +39,6 @@ from komira_plan_expr.expr import (
 )
 from komira_plan_expr.literal_domain import int_literal_fits
 from komira_plan_expr.scalar_value import ScalarValue
-from komira_scalar_arithmetic.decimal_arith import pow10_i256
 from komira_scalar_arithmetic.decimal_compare import (
     DEC_CMP_EQ,
     DEC_CMP_GE,
@@ -51,6 +50,7 @@ from komira_scalar_arithmetic.decimal_compare import (
 )
 
 from .column_compare import _col_cmp_nullable
+from .decimal_to_double import decimal_to_double
 from .decimal_literal_compare import (
     check_decimal_column_widens,
     decimal_threshold,
@@ -169,26 +169,13 @@ def _eval_decimal_col_vs_literal(batch: RecordBatch, col_idx: Int, lit: ScalarVa
     var x = lit.float_val
     if x != x or x > Float64(1.7976931348623157e308) or x < -Float64(1.7976931348623157e308):
         raise Error("Decimal128 predicate: float literal is NaN/Inf or out of range")
-    var scale_i128 = pow10_i256(cs).cast[DType.int128]()
-    var divisor = scale_i128.cast[DType.float64]()
-    var two53 = SIMD[DType.int128, 1](9007199254740992)
     # Compute the compare data on every lane, then delegate the 3VL
     # null policy to the ONE mechanism in comparison_kleene: it merges the
     # column's validity in (RHS literal is non-null here), masks null lanes
     # to data=0 (filter-safe), and sets null_count. Byte-identical output.
     var out = BooleanArray.allocate_nullable(n)
     for i in range(n):
-        var c = arr.get_i128(i)
-        var v: Float64
-        if cs == 0 or (c <= two53 and c >= -two53):
-            v = c.cast[DType.float64]() / divisor
-        else:
-            # DuckDB converts a value past 2^53 unscaled by parts: the integer
-            # part plus the fraction part over 10^scale (the quotient and the
-            # remainder truncate toward zero, so both parts carry the sign).
-            var whole = c / scale_i128
-            var fraction = c - whole * scale_i128
-            v = whole.cast[DType.float64]() + fraction.cast[DType.float64]() / divisor
+        var v = decimal_to_double(arr.get_i128(i), cs)
         out.set(i, _holds_f64(dec_op, v, x))
     return kleene_cmp_finalize_scalar(
         out^, arr.validity, NullPolicy.three_valued()
