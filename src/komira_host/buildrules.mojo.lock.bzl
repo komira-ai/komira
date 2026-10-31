@@ -57,7 +57,7 @@ GRAPH_JSON = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_engine_placement.pass"],
-      "key": "41aa1be3b96820a006df00c02eabb77fc65ae27848661e79d3e7726ad24a5f50"
+      "key": "7ae832ebe270d7de38b4d8fa42cb5d3eb3b856f5432592a9959fb9722d2fbaa9"
     },
     {
       "id": "komira_host@0.1.0#mojo1.0.0/test:src/komira_host/tests/test_proc_probe.mojo",
@@ -71,7 +71,7 @@ GRAPH_JSON = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_proc_probe.pass"],
-      "key": "50a7c34034fa6ff5b4d83cbb4f92b80edabe2a7c502f954771f1f1cb1db76ed7"
+      "key": "4d7cbc9815394ca54b93acaf41f6353297fe01af682706976e3cbd4dd87de3c0"
     },
     {
       "id": "komira_host@0.1.0#mojo1.0.0/test:src/komira_host/tests/test_thp_frozen.mojo",
@@ -85,7 +85,7 @@ GRAPH_JSON = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_thp_frozen.pass"],
-      "key": "26634bc3b61c2d78dca96783394c3414eac479c29303d374c6ce85fbe19db70c"
+      "key": "e47b0297c2d11e9254c28ff4af561eb85687a84988c65559c6d784e1a2346870"
     },
     {
       "id": "komira_host@0.1.0#mojo1.0.0/test:src/komira_host/tests/test_thp_parse.mojo",
@@ -99,7 +99,7 @@ GRAPH_JSON = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_thp_parse.pass"],
-      "key": "7fd03bb0db6211f6a263047f463c323ba5cf9acbf697472af57bf09f2e02960e"
+      "key": "a9d4f26f10bb967e68cd7f1cb7ee3550dbe49dd48d643c73f2ae428fc5686b05"
     },
     {
       "id": "komira_host@0.1.0#mojo1.0.0/test:src/komira_host/tests/test_thp_process_disabled.mojo",
@@ -113,7 +113,7 @@ GRAPH_JSON = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_thp_process_disabled.pass"],
-      "key": "e8ce51bcd3a7d9edcadc31d00fd7fa7ee56520f0f0a33e49ee7f675f84e1324b"
+      "key": "7ca895d3faf5d091b4ffb5a9d07539614b9d18192fb5bb0abd4130039b68ebab"
     },
     {
       "id": "komira_host@0.1.0#mojo1.0.0/test:src/komira_host/tests/test_topology_derive.mojo",
@@ -127,7 +127,7 @@ GRAPH_JSON = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_topology_derive.pass"],
-      "key": "2c025fbe53bc9cafb12add2682e2f14d3806c975f49d1e195ce0796b9617b5f2"
+      "key": "6a10a776caf3b7b7b0ad6487e28b0b2b3e483cafd81a87c0bb7e8ab99ac3ceb2"
     },
     {
       "id": "komira_host@0.1.0#mojo1.0.0/test:src/komira_host/tests/test_topology_numa.mojo",
@@ -141,7 +141,7 @@ GRAPH_JSON = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_topology_numa.pass"],
-      "key": "ede7f3dce84a9e13af2ac1591c4c86b6ad9fb720a022e50d1d2994f2fce85e9f"
+      "key": "b3f7004c5460419ef5ca63cd528a51af6d6472fa43f6c74750f6f5babb759e22"
     },
     {
       "id": "komira_host@0.1.0#mojo1.0.0/test:src/komira_host/tests/test_topology_probe.mojo",
@@ -155,7 +155,7 @@ GRAPH_JSON = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_topology_probe.pass"],
-      "key": "997e28b0b6a44a4178ef938a83385a6ae3fb234d326105f5347ded00c1c2e718"
+      "key": "a69dd1b4a3501910f2c9efc0e266a4e465402ac9db55989d6e1960db11678d5b"
     }
   ]
 }
@@ -195,7 +195,7 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["komira_host.mojoc"],
-      "key": "e7871330b833effe860808cd63a02ed54e8a5eca44a2747f85f31004fe7bb79a"
+      "key": "4d46aa2332aeb593bf1ec5551c6b40150112f08cb463db500167871e36c10f21"
     },
     {
       "id": "komira_host@0.1.0#mojo1.0.0/test:src/komira_host/tests/test_engine_placement.mojo",
@@ -209,7 +209,7 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_engine_placement.pass"],
-      "key": "d060f063b8fa1591a55112eca780d60d89ed1e3d91f7bd53ee410af9c9ed9476"
+      "key": "aa2e2b523101456acf4d68eb3ae363676feb549d11cad39450796712a74aa1c0"
     },
     {
       "id": "komira_host@0.1.0#mojo1.0.0/test:src/komira_host/tests/test_proc_probe.mojo",
@@ -223,7 +223,7 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_proc_probe.pass"],
-      "key": "8ff45e4c7043f1176a7985a73ad09a6982b5076b45cf7c514e541559ec06926c"
+      "key": "3d1223ee36335343b185e9efda9b62bad103798aec224b9606f3b1b1d4d5dac7"
     },
     {
       "id": "komira_host@0.1.0#mojo1.0.0/test:src/komira_host/tests/test_thp_frozen.mojo",
@@ -237,7 +237,7 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_thp_frozen.pass"],
-      "key": "39dd23a7b71e8aee43db0009f8c54f3e18152d44cae7a6540b57a7e57f634098"
+      "key": "2a7251d81ff2ba834841cff4b3ede373c94581a21fc7c8b852f339679cbebd78"
     },
     {
       "id": "komira_host@0.1.0#mojo1.0.0/test:src/komira_host/tests/test_thp_parse.mojo",
@@ -251,7 +251,7 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_thp_parse.pass"],
-      "key": "1fa1e3ed67c27c75e14d511dc4b06057163de460f2c64eab6595d015e59d21ba"
+      "key": "1b86b2d49ac4dec8263af088885928f863f5486c7c43e0686864a533add54d2d"
     },
     {
       "id": "komira_host@0.1.0#mojo1.0.0/test:src/komira_host/tests/test_thp_process_disabled.mojo",
@@ -265,7 +265,7 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_thp_process_disabled.pass"],
-      "key": "57502ffdb2b65e525b04ae68e9778f3657ec771ff22a45f57d9cadc943cb467e"
+      "key": "6fb102af84fa7bafb34a5faf4d7b4253260c341955137cbf71815482fe64ca9e"
     },
     {
       "id": "komira_host@0.1.0#mojo1.0.0/test:src/komira_host/tests/test_topology_derive.mojo",
@@ -279,7 +279,7 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_topology_derive.pass"],
-      "key": "7b566101a5ff2345f3a6a12d23b826280a760795cf0876c16821fd802d6eaf79"
+      "key": "b8f2ac59f75164ee2c2e77d0c64cc78a883dfeba48ce6a851ad9cc9e6895fa64"
     },
     {
       "id": "komira_host@0.1.0#mojo1.0.0/test:src/komira_host/tests/test_topology_numa.mojo",
@@ -293,7 +293,7 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_topology_numa.pass"],
-      "key": "7464340faf3f7022afb1229ee8f09e1746099301746fe13f886c32c9b4112cac"
+      "key": "f258b97729119896ade606adcfb247598d3bf2a7d2bc4ca63cc1ad1c83b444b1"
     },
     {
       "id": "komira_host@0.1.0#mojo1.0.0/test:src/komira_host/tests/test_topology_probe.mojo",
@@ -307,7 +307,7 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_topology_probe.pass"],
-      "key": "88cba0235256cc1852614092741fe79995fa2ef77e7a405420ae2cf70dcc0efb"
+      "key": "9d388968be372ba4085750adf69530341900b5c4d1dbbd1396db8255eae77858"
     }
   ]
 }
@@ -344,7 +344,7 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["komira_host.mojoc"],
-      "key": "f03b59ee8ccae77050d9844af5c95552329282d5d884ec8103c2f7661f6e16f5"
+      "key": "b25b9f85fa338cc1e2b52e1f63156af7f9743d2359a34e02bd9173906b0d3175"
     },
     {
       "id": "komira_host@0.1.0#mojo1.0.0/test:src/komira_host/tests/test_engine_placement.mojo",
@@ -358,7 +358,7 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_engine_placement.pass"],
-      "key": "54083bf202e8005ce36aeefe49e652adbca76e9b8407b71fd3c5415496c424c5"
+      "key": "46b74c75a5747295307f1e56a11e0c7708d94c24d5951baefb0b9ec558b75f07"
     },
     {
       "id": "komira_host@0.1.0#mojo1.0.0/test:src/komira_host/tests/test_proc_probe.mojo",
@@ -372,7 +372,7 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_proc_probe.pass"],
-      "key": "d2a33022bf8d84184b43ba6cc2773437487e33e7065aabac38a12341d1baff67"
+      "key": "101f03ba5ac3d116b539d237b8ce064b61fd74c2db296e404776168d217c7f19"
     },
     {
       "id": "komira_host@0.1.0#mojo1.0.0/test:src/komira_host/tests/test_thp_frozen.mojo",
@@ -386,7 +386,7 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_thp_frozen.pass"],
-      "key": "cbfe6123a777f5105b702f541726e343210c189132ae73ec6a03b1ec9f30cfeb"
+      "key": "bceee9d0e57dfa403ca2552c600d424334b95ce0ea43861becee75de6610f156"
     },
     {
       "id": "komira_host@0.1.0#mojo1.0.0/test:src/komira_host/tests/test_thp_parse.mojo",
@@ -400,7 +400,7 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_thp_parse.pass"],
-      "key": "1033bb313fefd268532698931314ea45df3773244ea02adab51113bc7bd1295a"
+      "key": "d98a78a2163b1969a77dd01901ab395b629f7641478411599366ac8535b6ae87"
     },
     {
       "id": "komira_host@0.1.0#mojo1.0.0/test:src/komira_host/tests/test_thp_process_disabled.mojo",
@@ -414,7 +414,7 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_thp_process_disabled.pass"],
-      "key": "7ef810727d8d48f56e9a23c4bfd4649ae0d514e9208c45a64dfa719c40b42d8b"
+      "key": "2ff871aa4f1f11f917731c66468632f224147bee6028f17d13efdfc879e7bc61"
     },
     {
       "id": "komira_host@0.1.0#mojo1.0.0/test:src/komira_host/tests/test_topology_derive.mojo",
@@ -428,7 +428,7 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_topology_derive.pass"],
-      "key": "a65bd55691b7e8a2b51e62ab7925618c856fce24ebf1fb478520a286d68b8fee"
+      "key": "a27b95e1a8cf0635d43ad37b4e6f8d316df071b6c23ecaadffbca9df71f039e7"
     },
     {
       "id": "komira_host@0.1.0#mojo1.0.0/test:src/komira_host/tests/test_topology_numa.mojo",
@@ -442,7 +442,7 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_topology_numa.pass"],
-      "key": "2fd94f0d73ccf039651967c1f4549c832da777a45ce41cadfdaf046af83ec1fc"
+      "key": "40e2fd79de24af96aad84da1195e320e21856e123d6bd76a8e4601a896b67648"
     },
     {
       "id": "komira_host@0.1.0#mojo1.0.0/test:src/komira_host/tests/test_topology_probe.mojo",
@@ -456,7 +456,7 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_topology_probe.pass"],
-      "key": "ed924a70b1b7dbf17452806ba06e1d216bc9cb2561145f89fe849a1e42c34c2e"
+      "key": "9b739ac826ccdc56481eb44b70e6579c78a2c5d7775caa1bf4037e4575c2651c"
     }
   ]
 }
