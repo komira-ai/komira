@@ -474,12 +474,12 @@ test "each edit of the real release-macos.yml that breaks the macOS build's cont
     // the run ends failed when the build did not run
     try expectRefused(ar, try replaced(ar, text, "\n  release-macos-result:\n", "\n  release-macos-final:\n"), "has no job release-macos-result");
     try expectRefused(ar, try replaced(ar, text, "    needs: release-macos\n", "    needs: [release-macos, other]\n"), "does not need exactly release-macos");
-    try expectRefused(ar, try replaced(ar, text, "    if: always()\n", ""), "not if: always()");
-    try expectRefused(ar, try replaced(ar, text, "    if: always()\n", "    if: failure()\n"), "not if: always()");
+    try expectRefused(ar, try replaced(ar, text, "    needs: release-macos\n    if: always()\n", "    needs: release-macos\n"), "not if: always()");
+    try expectRefused(ar, try replaced(ar, text, "    needs: release-macos\n    if: always()\n", "    needs: release-macos\n    if: failure()\n"), "not if: always()");
     try expectRefused(ar, try replaced(ar, text, "needs.release-macos.result", "needs.release-macos.outcome"), "does not read the result");
     try expectRefused(ar, try replaced(ar, text, RESULT_REASON, "the macOS build ended"), "does not say");
     try expectRefused(ar, try replaced(ar, text, "          exit 1\n", "          exit 0\n"), "never fails");
-    try expectRefused(ar, try replaced(ar, text, "    if: always()\n", "    if: always()\n    continue-on-error: true\n"), "its failure would read as success");
+    try expectRefused(ar, try replaced(ar, text, "    needs: release-macos\n    if: always()\n", "    needs: release-macos\n    if: always()\n    continue-on-error: true\n"), "its failure would read as success");
 
     // nothing publishes from it
     try expectRefused(ar, try replaced(ar, text, "      - name: the macOS build failed\n", "      - run: mopm publish --staged x --registry prod --oidc\n      - name: the macOS build failed\n"), "publishes");
