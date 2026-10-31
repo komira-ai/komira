@@ -35,11 +35,12 @@ from komira_decimal_literal.decimal_literal import (
     decimal_fold_binary,
     decimal_from_literal_text,
     decimal_negate,
+    integer_fold_binary,
 )
 from komira_plan_expr.expr import BIN_ADD, BIN_MUL, BIN_SUB, Expr
 from komira_plan_expr.expr_walk import PlanColRefFields, walk_expr_field
 from komira_plan_expr.scalar_value import ScalarValue
-from komira_scalar_arithmetic.decimal_arith import I256
+from komira_scalar_arithmetic.decimal_arith import I128, I256
 from komira_sql.sql_ast import (
     SX_BINARY,
     SX_COLUMN,
@@ -101,28 +102,65 @@ def _big_integer(digits: String) -> Optional[ScalarValue]:
     )
 
 
-def _constant(sx: SqlExpr) raises -> Optional[ScalarValue]:
+struct _Const(Copyable, Movable):
+    """A folded constant: its value, and whether it is integer-typed (an
+    INTEGER, BIGINT or HUGEINT, carried as a scale-0 decimal of precision 10,
+    19 or 38) so that `+ - *` over two of them stays an integer, as in DuckDB,
+    rather than becoming a decimal."""
+
+    var value: ScalarValue
+    var integer: Bool
+
+    def __init__(out self, var value: ScalarValue, integer: Bool):
+        self.value = value^
+        self.integer = integer
+
+
+def _constant(sx: SqlExpr) raises -> Optional[_Const]:
     """The folded value of `sx` when it is a constant of number literals,
-    unary minus and `+ - *` whose every step has a DECIMAL type; else None.
+    unary minus and `+ - *` whose every step has an exact type, DECIMAL or
+    integer; `None` for a constant DuckDB types DOUBLE (a literal with an
+    exponent or of more than 38 digits, an integer past HUGEINT, a division),
+    which keeps its float binding.
 
     Raises:
         What DuckDB raises folding the constant: a sum or product that does
-        not fit the width it is cut to (18 or 38 digits), or a product with a
-        scale past 38.
+        not fit the width it is cut to (18 or 38 digits), a product with a
+        scale past 38, an integer sum, difference or product outside its
+        INTEGER, BIGINT or HUGEINT range.
     """
     if sx.tag == SX_FLOAT:
-        return decimal_from_literal_text(sx.text)
+        var parsed = decimal_from_literal_text(sx.text)
+        if not parsed:
+            return None
+        return Optional[_Const](_Const(parsed.take(), False))
     if sx.tag == SX_INT:
         # An integer past BIGINT carries its digits in `text`: DuckDB types it
         # HUGEINT, which is DECIMAL(38, 0) beside a DECIMAL column.
         if sx.text.byte_length() > 0:
-            return _big_integer(sx.text)
-        return Optional[ScalarValue](ScalarValue.from_int(Int(sx.int_val)))
+            var big = _big_integer(sx.text)
+            if not big:
+                return None
+            return Optional[_Const](_Const(big.take(), True))
+        # INTEGER when the literal's magnitude fits it, else BIGINT: the minus
+        # of `-2147483648` applies to the BIGINT 2147483648.
+        var x = Int(sx.int_val)
+        var precision = 10
+        if x <= -2147483648 or x > 2147483647:
+            precision = 19
+        return Optional[_Const](
+            _Const(
+                ScalarValue.decimal128_i128(I128(x), precision, 0), True
+            )
+        )
     if sx.tag == SX_UNARY and sx.op == SXUN_NEGATE:
         var inner = _constant(sx._agg.value().arg[])
         if not inner:
             return None
-        return decimal_negate(inner.value())
+        var negated = decimal_negate(inner.value().value)
+        if not negated:
+            return None
+        return Optional[_Const](_Const(negated.take(), inner.value().integer))
     if sx.tag == SX_BINARY and (
         sx.op == SXOP_ADD or sx.op == SXOP_SUB or sx.op == SXOP_MUL
     ):
@@ -135,7 +173,19 @@ def _constant(sx: SqlExpr) raises -> Optional[ScalarValue]:
             op = BIN_SUB
         elif sx.op == SXOP_MUL:
             op = BIN_MUL
-        return decimal_fold_binary(op, left.value(), right.value())
+        if left.value().integer and right.value().integer:
+            return Optional[_Const](
+                _Const(
+                    integer_fold_binary(
+                        op, left.value().value, right.value().value
+                    ),
+                    True,
+                )
+            )
+        var folded = decimal_fold_binary(op, left.value().value, right.value().value)
+        if not folded:
+            return None
+        return Optional[_Const](_Const(folded.take(), False))
     return None
 
 
@@ -239,8 +289,12 @@ def bind_decimal_comparison(
     var constant = _constant(right)
     if not constant:
         return None
+    var folded = constant.take()
     return Optional[Expr](
         _bind_sql_operator(
-            sx.op, column.take(), Expr.literal(constant.take()), schema
+            sx.op,
+            column.take(),
+            Expr.literal(folded.value.copy()),
+            schema,
         )
     )

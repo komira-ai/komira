@@ -2174,6 +2174,11 @@ struct _Parser(Movable):
         return left^
 
     def _parse_unary(mut self) raises -> SqlExpr:
+        if self._kind() == TK_PLUS:
+            # Unary plus is the identity (`+0.5` is DECIMAL(2, 1) 0.5, `- +0.5`
+            # is -0.5): it binds as its operand does, so a literal stays one.
+            self._advance()
+            return self._parse_unary()
         if self._kind() == TK_MINUS:
             self._advance()
             # A negative LITERAL stays a literal (`-3` is the constant DuckDB

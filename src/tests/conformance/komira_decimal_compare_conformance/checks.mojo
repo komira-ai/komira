@@ -369,11 +369,15 @@ def check_fold_refusals() raises:
                 problems.append(
                     expr + ": DuckDB raises an error, komira folds it"
                 )
-            elif message.find("DECIMAL(") < 0 and message.find("scale") < 0:
+            elif (
+                message.find("DECIMAL(") < 0
+                and message.find("scale") < 0
+                and message.find("INT") < 0
+            ):
                 problems.append(
                     expr
                     + ": DuckDB raises an error, komira's message names no"
-                    " DECIMAL type or scale: "
+                    " DECIMAL or INT type or scale: "
                     + message
                 )
         elif komira_raises:

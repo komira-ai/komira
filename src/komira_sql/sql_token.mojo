@@ -14,6 +14,8 @@
 # UnsafePointer, no wildcard origins; stored in a plain `List[Token]`.
 # =============================================================================
 
+from komira_scalar_arithmetic.decimal_arith import I128
+
 
 # Token kinds.
 comptime TK_EOF: UInt8 = 0
@@ -171,30 +173,49 @@ def _pow10_f64(k: Int) -> Float64:
     return p
 
 
+def _out_of_exact_range(sql: String, start: Int, end: Int) -> Error:
+    var src = sql.as_bytes()
+    var text = String("")
+    for j in range(start, end):
+        text += chr(Int(src[j]))
+    return Error(
+        "SQL syntax error: the number "
+        + text
+        + " is not converted: a number with an exponent is accepted only"
+        " where one correctly rounded multiplication or division gives the"
+        " nearest double (a mantissa of at most 2^53 and a power of ten of at"
+        " most 10^22, or a larger power that a small mantissa absorbs)"
+    )
+
+
 def _exponent_value(
     sql: String,
+    start: Int,
     int_start: Int,
     int_end: Int,
     frac_start: Int,
     frac_end: Int,
     negative: Bool,
     magnitude: Int,
+    end: Int,
 ) raises -> Float64:
-    """The value of the mantissa digits `[int_start, int_end)` and
-    `[frac_start, frac_end)` times 10 to the exponent.
+    """The double nearest to the mantissa digits `[int_start, int_end)` and
+    `[frac_start, frac_end)` times 10 to the exponent, for the number spelled
+    in `[start, end)`.
 
-    Exact where one rounding suffices: a mantissa of at most 2^53 times or over
-    a power of ten up to 10^22 is one correctly rounded multiplication or
-    division of two exactly represented numbers, so `1e-2` is the double
-    nearest 0.01. Past that range the value is scaled in Float64 and may differ
-    from the nearest double in its last bits.
+    Only where one correctly rounded operation gives it: a mantissa (trailing
+    zeros moved into the exponent) of at most 2^53 times or over a power of ten
+    up to 10^22, or times a larger power the mantissa absorbs while staying
+    within 2^53 (`1e30` is 10^8 * 10^22, `12e35` is 12 * 10^13 * 10^22). Any
+    other number is refused rather than approximated: repeated scaling can land
+    a unit in the last place from the nearest double, and a wrong comparison
+    constant is worse than a refusal.
 
     Raises:
-        If the value is infinite, or zero for a mantissa that is not.
+        For a number outside that range, including the largest double.
     """
     var src = sql.as_bytes()
     var mantissa = UInt64(0)
-    var approx = Float64(0.0)
     var exact = True
     var nonzero = False
     for pass_no in range(2):
@@ -204,7 +225,6 @@ def _exponent_value(
             var digit = Int(src[j]) - Int(ord("0"))
             if digit != 0:
                 nonzero = True
-            approx = approx * 10.0 + Float64(digit)
             if mantissa >= UInt64(1000000000000000000):
                 exact = False
             else:
@@ -212,26 +232,58 @@ def _exponent_value(
     if not nonzero:
         return Float64(0.0)
     var e10 = (-magnitude if negative else magnitude) - (frac_end - frac_start)
-    var value: Float64
-    if exact and mantissa <= UInt64(9007199254740992) and e10 >= -22 and e10 <= 22:
-        if e10 >= 0:
-            value = Float64(mantissa) * _pow10_f64(e10)
-        else:
-            value = Float64(mantissa) / _pow10_f64(-e10)
-    else:
-        if e10 > 400 or e10 < -400:
-            raise Error("SQL syntax error: numeric literal out of range")
-        value = approx
-        var k = e10
-        while k > 0:
-            value = value * 10.0
-            k -= 1
-        while k < 0:
-            value = value / 10.0
-            k += 1
-    if value > Float64(1.7976931348623157e308) or value == Float64(0.0):
-        raise Error("SQL syntax error: numeric literal out of range")
-    return value
+    if not exact:
+        raise _out_of_exact_range(sql, start, end)
+    while mantissa % UInt64(10) == UInt64(0):
+        mantissa = mantissa // UInt64(10)
+        e10 += 1
+    var limit = UInt64(9007199254740992)
+    if mantissa > limit:
+        raise _out_of_exact_range(sql, start, end)
+    if e10 < 0:
+        if e10 < -22:
+            raise _out_of_exact_range(sql, start, end)
+        return Float64(mantissa) / _pow10_f64(-e10)
+    if e10 <= 22:
+        return Float64(mantissa) * _pow10_f64(e10)
+    # Absorb the powers past 10^22 into the mantissa while it stays exact.
+    var rest = e10 - 22
+    var scaled = mantissa
+    for _ in range(rest):
+        if scaled > limit // UInt64(10):
+            raise _out_of_exact_range(sql, start, end)
+        scaled = scaled * UInt64(10)
+    return Float64(scaled) * _pow10_f64(22)
+
+
+def _decimal_value(
+    sql: String, int_start: Int, int_end: Int, frac_start: Int, frac_end: Int
+) -> Float64:
+    """The double DuckDB makes of a decimal literal of at most 38 digits when
+    it meets a DOUBLE (its cast of a DECIMAL): with M the digits as one integer
+    and k the digits after the point, `M / 10^k` in one correctly rounded
+    division when M is at most 2^53 or k is 0; otherwise the integer part
+    `M div 10^k` and the fraction part `M mod 10^k / 10^k` converted apart and
+    added, which is what DuckDB does past 2^53 and differs from one division by
+    a unit in the last place for some values."""
+    var src = sql.as_bytes()
+    var m = I128(0)
+    var ten = I128(10)
+    for pass_no in range(2):
+        var lo = int_start if pass_no == 0 else frac_start
+        var hi = int_end if pass_no == 0 else frac_end
+        for j in range(lo, hi):
+            m = m * ten + I128(Int(src[j]) - Int(ord("0")))
+    var k = frac_end - frac_start
+    var scale = I128(1)
+    for _ in range(k):
+        scale = scale * ten
+    var divisor = scale.cast[DType.float64]()
+    if k == 0 or m <= I128(9007199254740992):
+        return m.cast[DType.float64]() / divisor
+    var q = m / scale
+    var r = m - q * scale
+    return q.cast[DType.float64]() + r.cast[DType.float64]() / divisor
 
 
 def tokenize(sql: String) raises -> List[Token]:
@@ -319,14 +371,22 @@ def tokenize(sql: String) raises -> List[Token]:
                     fval = _exponent_value(
                         sql,
                         digits_start,
+                        digits_start,
                         int_end,
                         frac_start,
                         frac_end,
                         negative_exponent,
                         magnitude,
+                        i,
+                    )
+                elif (int_end - digits_start) + (frac_end - frac_start) <= 38:
+                    # A decimal literal: DuckDB's DECIMAL-to-DOUBLE conversion.
+                    fval = _decimal_value(
+                        sql, digits_start, int_end, frac_start, frac_end
                     )
                 else:
-                    # The integer part of a DOUBLE literal is read in Float64
+                    # More than 38 digits (a DOUBLE in DuckDB): the integer part
+                    # of a DOUBLE literal is read in Float64
                     # when it is past Int64 -- `int_part` holds wrapped bits
                     # there.
                     var ipf = Float64(int_part)

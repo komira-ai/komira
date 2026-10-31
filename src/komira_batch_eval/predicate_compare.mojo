@@ -161,21 +161,34 @@ def _eval_decimal_col_vs_literal(batch: RecordBatch, col_idx: Int, lit: ScalarVa
     if not lit.is_float():
         raise Error("Decimal128 predicate: unsupported literal type")
     # A FLOAT64 literal: DuckDB compares a DECIMAL column with a DOUBLE in
-    # DOUBLE, `double(c) / 10^scale` against the literal as it is. (Rounding the
+    # DOUBLE, the column's value as its cast to DOUBLE gives it (below) against
+    # the literal as it is. (Rounding the
     # literal to the column's scale instead would make `x = 0.015` true of the
     # row holding 0.02.) NaN and infinity have no place among the steps and are
     # refused.
     var x = lit.float_val
     if x != x or x > Float64(1.7976931348623157e308) or x < -Float64(1.7976931348623157e308):
         raise Error("Decimal128 predicate: float literal is NaN/Inf or out of range")
-    var divisor = pow10_i256(cs).cast[DType.int128]().cast[DType.float64]()
+    var scale_i128 = pow10_i256(cs).cast[DType.int128]()
+    var divisor = scale_i128.cast[DType.float64]()
+    var two53 = SIMD[DType.int128, 1](9007199254740992)
     # Compute the compare data on every lane, then delegate the 3VL
     # null policy to the ONE mechanism in comparison_kleene: it merges the
     # column's validity in (RHS literal is non-null here), masks null lanes
     # to data=0 (filter-safe), and sets null_count. Byte-identical output.
     var out = BooleanArray.allocate_nullable(n)
     for i in range(n):
-        var v = arr.get_i128(i).cast[DType.float64]() / divisor
+        var c = arr.get_i128(i)
+        var v: Float64
+        if cs == 0 or (c <= two53 and c >= -two53):
+            v = c.cast[DType.float64]() / divisor
+        else:
+            # DuckDB converts a value past 2^53 unscaled by parts: the integer
+            # part plus the fraction part over 10^scale (the quotient and the
+            # remainder truncate toward zero, so both parts carry the sign).
+            var whole = c / scale_i128
+            var fraction = c - whole * scale_i128
+            v = whole.cast[DType.float64]() + fraction.cast[DType.float64]() / divisor
         out.set(i, _holds_f64(dec_op, v, x))
     return kleene_cmp_finalize_scalar(
         out^, arr.validity, NullPolicy.three_valued()

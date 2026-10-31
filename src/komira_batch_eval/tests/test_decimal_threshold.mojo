@@ -59,6 +59,10 @@
 #     the declared precision.
 #   * test_a_buffer_shorter_than_the_length_is_refused: nine rows declared,
 #     three held. Catches a vector load past the buffer.
+#   * test_the_widening_check_refuses_a_short_buffer_before_reading_it: the scan
+#     for a value that does not widen reads rows by index from the length; nine
+#     rows claimed over two held are refused before any read, also when no scan
+#     would be needed. Catches a scan that ran ahead of the kernel's check.
 
 from std.testing import TestSuite, assert_equal, assert_true
 
@@ -485,6 +489,31 @@ def test_a_buffer_shorter_than_the_length_is_refused() raises:
     assert_true(refused, "nine rows of 16 bytes in a 48-byte buffer")
 
 
+def _short_column(precision: Int, scale: Int) raises -> Decimal128Array[HeapRegion]:
+    """A column that claims nine rows over a buffer of two."""
+    var buf = OwnedAlignedBuffer(32)
+    buf.zero()
+    buf.set_length(Int64(32))
+    return Decimal128Array(buf^, Optional[Bitmap[HeapRegion]](None), 9, 0, precision, scale)
+
+
+def test_the_widening_check_refuses_a_short_buffer_before_reading_it() raises:
+    # The check reads rows by index from the length, which a buffer can
+    # disagree with; it checks the buffer first, whether or not it would scan.
+    var scanned = False
+    try:
+        check_decimal_column_widens(_short_column(38, 2), 38, 2, 5)
+    except:
+        scanned = True
+    assert_true(scanned, "a scan over nine rows of two")
+    var skipped = False
+    try:
+        check_decimal_column_widens(_short_column(15, 2), 15, 2, 2)
+    except:
+        skipped = True
+    assert_true(skipped, "no scan is needed and the buffer is still checked")
+
+
 def main() raises:
     var suite = TestSuite()
     suite.test[test_a_literal_between_two_steps_floors_or_ceils_by_operator]()
@@ -498,4 +527,5 @@ def main() raises:
     suite.test[test_wide_kernel_compares_128_bits]()
     suite.test[test_int64_kernel_is_exact_for_stored_values_past_the_declared_precision]()
     suite.test[test_a_buffer_shorter_than_the_length_is_refused]()
+    suite.test[test_the_widening_check_refuses_a_short_buffer_before_reading_it]()
     suite^.run()

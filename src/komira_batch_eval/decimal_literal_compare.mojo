@@ -165,6 +165,22 @@ def decimal_threshold(
     return DecimalThreshold(DEC_CMP_GT, below_all)
 
 
+def check_decimal_buffer(arr: Decimal128Array[HeapRegion]) raises:
+    """Raise unless the buffer holds `arr.length` whole rows. The rows are read
+    by index from `arr.length`, which a buffer can disagree with (the reads are
+    checked in debug builds only)."""
+    if arr.data.len() < arr.length * DECIMAL128_BYTE_WIDTH:
+        raise Error(
+            "Decimal128 compare: the buffer holds "
+            + String(arr.data.len())
+            + " bytes, fewer than the "
+            + String(arr.length)
+            + " rows of "
+            + String(DECIMAL128_BYTE_WIDTH)
+            + " bytes it declares"
+        )
+
+
 def check_decimal_column_widens(
     arr: Decimal128Array[HeapRegion],
     precision: Int,
@@ -184,6 +200,7 @@ def check_decimal_column_widens(
         "Casting value ... to type DECIMAL(38,c) failed: value is out of
         range!", DuckDB's words, for the first such value.
     """
+    check_decimal_buffer(arr)
     if literal_scale <= scale:
         return
     var shift = literal_scale - scale
@@ -350,16 +367,7 @@ def eval_decimal_threshold(
     Raises:
         If the buffer holds fewer bytes than `arr.length` rows need.
     """
-    if arr.data.len() < arr.length * DECIMAL128_BYTE_WIDTH:
-        raise Error(
-            "Decimal128 compare: the buffer holds "
-            + String(arr.data.len())
-            + " bytes, fewer than the "
-            + String(arr.length)
-            + " rows of "
-            + String(DECIMAL128_BYTE_WIDTH)
-            + " bytes it declares"
-        )
+    check_decimal_buffer(arr)
     if precision <= DECIMAL_INT64_MAX_PRECISION:
         var t = plan.threshold
         var forced = 0

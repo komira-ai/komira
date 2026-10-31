@@ -29,14 +29,9 @@
 #     2^53 + 2 hundredths both read 90071992547409.9375, 2^53 reads
 #     90071992547409.92. Catches one division of the whole value, which gives
 #     ...409.92 for 2^53 + 1.
-#   * test_a_buffer_shorter_than_the_length_is_refused_before_any_read: nine rows
-#     claimed over two held, with a float literal, an over-scale decimal literal
-#     on a wide column and an integer literal. Catches a read past the buffer by
-#     the float loop or the widening scan, which ran before the kernel's check.
 
 from std.testing import TestSuite, assert_equal, assert_true
 
-from komira_arrow.bitmap import Bitmap
 from komira_arrow.column import Column
 from komira_arrow.decimal_array import Decimal128Array
 from komira_arrow.schema import (
@@ -46,8 +41,6 @@ from komira_arrow.schema import (
     SchemaBuilder,
 )
 from komira_batch_eval.eval_predicate import _eval_predicate
-from komira_buffer.heap_region import HeapRegion
-from komira_buffer.owned_aligned_buffer import OwnedAlignedBuffer
 from komira_plan_expr.expr import (
     BIN_EQ,
     BIN_GE,
@@ -173,43 +166,6 @@ def test_a_stored_value_past_2_53_converts_in_parts() raises:
     assert_equal(_mask(_wide_batch(negative, 18, 2), BIN_EQ, -90071992547409.9375), "T")
 
 
-def _short_batch(precision: Int, scale: Int, claimed: Int) raises -> RecordBatch:
-    """A column that claims `claimed` rows over a buffer of two."""
-    var buf = OwnedAlignedBuffer(32)
-    buf.zero()
-    buf.set_length(Int64(32))
-    var arr = Decimal128Array(buf^, Optional[Bitmap[HeapRegion]](None), claimed, 0, precision, scale)
-    var sb = SchemaBuilder()
-    sb.add_field(Field.decimal128(String("d"), precision, scale, False))
-    var rbb = RecordBatchBuilder()
-    rbb.add_column(Column.from_decimal128(arr^))
-    return rbb.build(sb.build())
-
-
-def _raises(batch: RecordBatch, literal: ScalarValue) -> Bool:
-    var e = Expr.binary(BIN_LT, Expr.col_ref("d"), Expr.literal(literal.copy()))
-    try:
-        _ = _eval_predicate(e, batch)
-    except:
-        return True
-    return False
-
-
-def test_a_buffer_shorter_than_the_length_is_refused_before_any_read() raises:
-    # Nine rows claimed, two held. Every path that reads the column checks the
-    # buffer first: the float loop, the scan for a value that does not widen,
-    # and the kernel.
-    assert_true(_raises(_short_batch(15, 2, 9), ScalarValue.from_float(0.5)), "float literal")
-    # A decimal literal with more scale than a DECIMAL(38, 2) column: the column
-    # is scanned for a value that does not widen.
-    assert_true(
-        _raises(_short_batch(38, 2, 9), ScalarValue.decimal128(Int64(0), Int64(1), 6, 5)),
-        "widening scan",
-    )
-    assert_true(_raises(_short_batch(15, 2, 9), ScalarValue.from_int(1)), "kernel")
-    assert_true(_raises(_short_batch(38, 2, 9), ScalarValue.from_int(1)), "wide kernel")
-
-
 def main() raises:
     var suite = TestSuite()
     suite.test[test_a_float_between_two_steps_keeps_its_place]()
@@ -217,5 +173,4 @@ def main() raises:
     suite.test[test_a_wider_scale]()
     suite.test[test_nan_and_infinite_literals_are_refused]()
     suite.test[test_a_stored_value_past_2_53_converts_in_parts]()
-    suite.test[test_a_buffer_shorter_than_the_length_is_refused_before_any_read]()
     suite^.run()

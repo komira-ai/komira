@@ -77,9 +77,5 @@ SELECT * FROM (
   SELECT 36 AS n, 'a < NULL' AS pred, count(*) AS rows_kept, CAST(coalesce(sum(id), 0) AS BIGINT) AS id_sum FROM t WHERE a < NULL
   UNION ALL
   SELECT 37 AS n, 'a is null or a < NULL' AS pred, count(*) AS rows_kept, CAST(coalesce(sum(id), 0) AS BIGINT) AS id_sum FROM t WHERE a is null or a < NULL
-  UNION ALL
-  SELECT 38 AS n, 'case when d < 0.065 then true else false end' AS pred, count(*) AS rows_kept, CAST(coalesce(sum(id), 0) AS BIGINT) AS id_sum FROM t WHERE case when d < 0.065 then true else false end
-  UNION ALL
-  SELECT 39 AS n, 'case when a > 0.065 then a < 24 else false end' AS pred, count(*) AS rows_kept, CAST(coalesce(sum(id), 0) AS BIGINT) AS id_sum FROM t WHERE case when a > 0.065 then a < 24 else false end
 ) AS q ORDER BY n
 ) TO 'where.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);

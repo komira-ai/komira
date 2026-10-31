@@ -139,7 +139,9 @@ def _operand(v: ScalarValue) -> Optional[_Operand]:
     if v.is_int():
         var x = Int(v.int_val)
         var p = 10
-        if x < _INT32_MIN or x > _INT32_MAX:
+        # INTEGER when the literal's magnitude fits it: -2147483648 is the
+        # minus of the BIGINT 2147483648.
+        if x <= _INT32_MIN or x > _INT32_MAX:
             p = 19
         return Optional[_Operand](_Operand(I128(x), p, 0))
     return None
@@ -297,7 +299,68 @@ def decimal_fold_binary(
 def integer_fold_binary(
     op: UInt8, a: ScalarValue, b: ScalarValue
 ) raises -> ScalarValue:
-    return a.copy()
+    """`a <op> b` for `+`, `-` and `*` over two integer-typed constants, each
+    a scale-0 decimal whose precision names its type: 10 for INTEGER, 19 for
+    BIGINT, 38 for HUGEINT. The result has the wider type (DuckDB does not
+    promote): `1 + 2` is an INTEGER, `3000000000 - 2999999999` a BIGINT.
+
+    Raises:
+        DuckDB's "Overflow in addition of INT32 (a + b)!" (INT64, INT128) when
+        the result is outside its type, or for an operator other than `+ - *`.
+    """
+    var width = max(a.dec128_precision, b.dec128_precision)
+    var x = a.decimal_value_i128().cast[DType.int256]()
+    var y = b.decimal_value_i128().cast[DType.int256]()
+    var r: I256
+    var what: String
+    var symbol: String
+    if op == BIN_ADD:
+        r = x + y
+        what = "addition"
+        symbol = "+"
+    elif op == BIN_SUB:
+        r = x - y
+        what = "subtraction"
+        symbol = "-"
+    elif op == BIN_MUL:
+        r = x * y
+        what = "multiplication"
+        symbol = "*"
+    else:
+        raise Error("integer_fold_binary: only + - * are folded")
+    var hi: I256
+    var type_name: String
+    if width <= 10:
+        hi = I256(_INT32_MAX)
+        type_name = "INT32"
+    elif width <= 19:
+        hi = I256(Int(Int64.MAX))
+        type_name = "INT64"
+    else:
+        hi = (I256(1) << I256(127)) - I256(1)
+        type_name = "INT128"
+    # The least value of each type is one past the negation of its greatest,
+    # except that DuckDB's HUGEINT excludes -2^127.
+    var lo = -hi - I256(1)
+    if type_name == "INT128":
+        lo = -hi
+    if r > hi or r < lo:
+        raise Error(
+            "Out of Range Error: Overflow in "
+            + what
+            + " of "
+            + type_name
+            + " ("
+            + _decimal_text(x, 0)
+            + " "
+            + symbol
+            + " "
+            + _decimal_text(y, 0)
+            + ")!"
+        )
+    return ScalarValue.decimal128_i128(
+        r.cast[DType.int128](), 10 if width <= 10 else (19 if width <= 19 else 38), 0
+    )
 
 
 def decimal_negate(a: ScalarValue) -> Optional[ScalarValue]:
