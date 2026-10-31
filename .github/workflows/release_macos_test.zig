@@ -19,8 +19,10 @@
 //!    to `//release:mopm_darwin_libs` through the buck2-farm action (which fails a step that ran
 //!    anything locally), and says in its buckconfig step that the macOS worker keys must be set;
 //!  - it does not hold up the Linux path: it `needs` nothing (nothing in release.yml `needs` it, so the prod
-//!    publish never waits on it), it is `continue-on-error: true` (the stated choice: reported, not
-//!    blocking), and it is bounded (`timeout-minutes` at most 120, the longest of the other jobs);
+//!    publish never waits on it), and it is bounded (`timeout-minutes` at most 120, the longest of the other jobs);
+//!  - a failed or skipped macOS build ends the run failed: the job is not `continue-on-error`, and a last job
+//!    `release-macos-result` (`needs: release-macos`, `if: always()`) fails with "the macOS build did not run"
+//!    when the build's result is skipped, so a run whose build never ran is not green;
 //!  - it is not triggered on a pull request: neither macOS-naming workflow's `on:` names one, and no
 //!    workflow that runs on a pull request (pr.yml, coverage.yml) has a line, comment or not,
 //!    naming darwin, macOS, osx or `--target-platforms`, and none passes the macOS worker set to farm-connect;
@@ -41,7 +43,9 @@ const DARWIN_PROPS = "          darwin-properties: ${{ vars.FARM_DARWIN_ARM64_PR
 const DARWIN_HOSTS = "          darwin-macos-hosts: ${{ vars.FARM_DARWIN_MACOS_HOSTS }}";
 const QOS = "          farm-qos: batch";
 const BOUND = "    timeout-minutes: 90";
-const NONBLOCKING = "    continue-on-error: true";
+const CONTINUE_ON_ERROR = "    continue-on-error: true";
+const RESULT_JOB = "release-macos-result";
+const RESULT_REASON = "the macOS build did not run";
 const MAX_MINUTES = 120;
 
 fn isComment(line: []const u8) bool {
@@ -197,7 +201,8 @@ fn checkMacos(ar: std.mem.Allocator, text: []const u8) !?[]const u8 {
     // it does not hold up the Linux path
     if (startsWithAny(job, "    needs:")) return "release-macos has needs: it waits on another job";
     if (startsWithAny(job, "    if:")) return "release-macos has a condition: it runs on every release run";
-    if (!has(job, NONBLOCKING)) return "release-macos is not continue-on-error: true (the choice is: reported, not blocking)";
+    // not blocking comes from nothing waiting on the job; `continue-on-error` would end a failed build green
+    if (mentions(job, "continue-on-error")) return "release-macos is continue-on-error: a failed or skipped macOS build would end the run green (the run must end failed)";
     const bound = (for (job) |l| {
         if (std.mem.startsWith(u8, l, "    timeout-minutes: ")) break std.fmt.parseInt(u32, std.mem.trim(u8, l["    timeout-minutes: ".len..], " "), 10) catch return "release-macos: timeout-minutes is not a number";
     } else return "release-macos has no timeout-minutes (a stalled macOS build would hold the next release)");
@@ -227,6 +232,21 @@ fn checkMacos(ar: std.mem.Allocator, text: []const u8) !?[]const u8 {
     if (build_at + 1 >= job.len or !std.mem.eql(u8, job[build_at + 1], ASSERT)) return "release-macos does not assert the build remote";
     if (mentions(job, "--no-remote-cache") or mentions(job, "--isolation-dir")) return "release-macos builds with --no-remote-cache or --isolation-dir";
     if (mentions(job, "|| true") and !has(job, "        run: ./buck2 kill || true")) return "release-macos ignores a failure";
+
+    // the run ends failed when the build did not run: a last job reads the build's result
+    var rn: usize = 0;
+    const res = (try jobLines(ar, text, RESULT_JOB, &rn)) orelse return "release-macos.yml has no job release-macos-result (a skipped macOS build would end the run green)";
+    if (rn != 1) return "release-macos-result is defined more than once";
+    if (!has(res, "    needs: release-macos")) return "release-macos-result does not need exactly release-macos";
+    if (!has(res, "    if: always()")) return "release-macos-result is not if: always() (a skipped build would skip it too, and the run would end green)";
+    if (!has(res, "    runs-on: ubuntu-24.04")) return "release-macos-result does not run on ubuntu-24.04";
+    if (mentions(res, "continue-on-error")) return "release-macos-result is continue-on-error: its failure would read as success";
+    if (!mentions(res, "needs.release-macos.result")) return "release-macos-result does not read the result of release-macos";
+    if (!mentions(res, "skipped")) return "release-macos-result does not test for a skipped build";
+    if (!mentions(res, RESULT_REASON)) return "release-macos-result does not say \"the macOS build did not run\"";
+    if (!mentions(res, "exit 1")) return "release-macos-result never fails";
+    if (!mentions(res, "::error")) return "release-macos-result writes no ::error annotation";
+    if (mentions(res, "uses:")) return "release-macos-result uses an action: it only reads a result";
 
     // not on a pull request, and nothing publishes from it
     if (mentions(job, "pull_request")) return "release-macos names pull_request";
@@ -427,8 +447,8 @@ test "each edit of the real release-macos.yml that breaks the macOS build's cont
     // it does not hold up the Linux path
     try expectRefused(ar, try intoJob(ar, text, "    needs: release"), "waits on another job");
     try expectRefused(ar, try intoJob(ar, text, "    if: github.event_name == 'push'"), "has a condition");
-    try expectRefused(ar, try replaced(ar, text, NONBLOCKING ++ "\n", ""), "not continue-on-error: true");
-    try expectRefused(ar, try replaced(ar, text, NONBLOCKING ++ "\n", "    continue-on-error: false\n"), "not continue-on-error: true");
+    try expectRefused(ar, try intoJob(ar, text, CONTINUE_ON_ERROR), "would end the run green");
+    try expectRefused(ar, try intoJob(ar, text, "    continue-on-error: false"), "would end the run green");
     try expectRefused(ar, try replaced(ar, text, BOUND ++ "\n", ""), "no timeout-minutes");
     try expectRefused(ar, try replaced(ar, text, BOUND ++ "\n", "    timeout-minutes: 360\n"), "not bounded at 120");
     try expectRefused(ar, try replaced(ar, text, BOUND ++ "\n", "    timeout-minutes: 0\n"), "not bounded at 120");
@@ -450,6 +470,16 @@ test "each edit of the real release-macos.yml that breaks the macOS build's cont
     try expectRefused(ar, try replaced(ar, text, BUILD_ARGS, BUILD_ARGS ++ " --no-remote-cache"), "does not build //release:mopm_darwin_libs for");
     try expectRefused(ar, try replaced(ar, text, BUILD_ARGS ++ "\n" ++ ASSERT ++ "\n      - name: the macOS build failed", BUILD_ARGS ++ "\n      - name: the macOS build failed"), "does not assert the build remote");
     try expectRefused(ar, try replaced(ar, text, "      - name: build the macOS set\n        uses: ./.github/actions/buck2-farm\n", "      - name: build the macOS set\n        uses: ./.github/actions/other\n"), "outside the buck2-farm action");
+
+    // the run ends failed when the build did not run
+    try expectRefused(ar, try replaced(ar, text, "\n  release-macos-result:\n", "\n  release-macos-final:\n"), "has no job release-macos-result");
+    try expectRefused(ar, try replaced(ar, text, "    needs: release-macos\n", "    needs: [release-macos, other]\n"), "does not need exactly release-macos");
+    try expectRefused(ar, try replaced(ar, text, "    needs: release-macos\n    if: always()\n", "    needs: release-macos\n"), "not if: always()");
+    try expectRefused(ar, try replaced(ar, text, "    needs: release-macos\n    if: always()\n", "    needs: release-macos\n    if: failure()\n"), "not if: always()");
+    try expectRefused(ar, try replaced(ar, text, "needs.release-macos.result", "needs.release-macos.outcome"), "does not read the result");
+    try expectRefused(ar, try replaced(ar, text, RESULT_REASON, "the macOS build ended"), "does not say");
+    try expectRefused(ar, try replaced(ar, text, "exit 1 ;;", "exit 0 ;;"), "never fails");
+    try expectRefused(ar, try replaced(ar, text, "    needs: release-macos\n    if: always()\n", "    needs: release-macos\n    if: always()\n    continue-on-error: true\n"), "its failure would read as success");
 
     // nothing publishes from it
     try expectRefused(ar, try replaced(ar, text, "      - name: the macOS build failed\n", "      - run: mopm publish --staged x --registry prod --oidc\n      - name: the macOS build failed\n"), "publishes");

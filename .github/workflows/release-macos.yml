@@ -17,10 +17,13 @@
 # Triggers: the same as release.yml's, so it builds the same commit once per release (never per pull
 # request): a push to main (not a documentation-only one) and a manual run, and nothing else.
 #
-# NOT BLOCKING, for now: `continue-on-error: true` on the job. A red macOS build shows as a failed run
-# of this workflow (and a line in its summary), and the release, the prod publish and main-red stay
-# green. Why: the set has never been measured on the macOS workers, and the publish must not wait on a
-# platform the release does not ship yet. Bounded: 90 minutes.
+# NOT BLOCKING, for now: nothing waits on this workflow. A red macOS build is a failed run of this
+# workflow (and a line in its summary), and the release, the prod publish and main-red stay green
+# because none of them `needs` it or reads its result. The job is not `continue-on-error`, which would
+# end a failed build green. Why not blocking: the set has never been measured on the macOS workers, and
+# the publish must not wait on a platform the release does not ship yet. Bounded: 90 minutes.
+# The last job, release-macos-result, makes a build that never ran (its job skipped) end the run
+# failed too, with "the macOS build did not run".
 #
 # It needs the repository variables FARM_DARWIN_ARM64_PROPERTIES and FARM_DARWIN_MACOS_HOSTS (and may
 # take FARM_MACOS_LIBRARY_DIRS), docs/ci.md; without them the step after the connection fails the job
@@ -50,7 +53,6 @@ jobs:
     runs-on: ubuntu-24.04
     environment: build
     timeout-minutes: 90
-    continue-on-error: true
     permissions:
       contents: read
       # for farm-connect only: the token Tailscale trusts
@@ -98,3 +100,29 @@ jobs:
       - name: Stop buck2
         if: always()
         run: ./buck2 kill || true
+
+  # A skipped build job is not a failed one, and a run whose jobs were all skipped ends green. This job
+  # runs whatever happened to the build and fails unless it succeeded, so the run list, the commit
+  # status and the badge say that the macOS build did not pass. Nothing in release.yml needs it.
+  release-macos-result:
+    needs: release-macos
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: the macOS build ran and passed
+        env:
+          BUILD_RESULT: ${{ needs.release-macos.result }}
+        run: |
+          case "$BUILD_RESULT" in
+            success) ;;
+            skipped)
+              echo "::error title=release-macos::the macOS build did not run: its job was skipped (a condition of the job was false, or an earlier job it waits on did not succeed)"
+              exit 1 ;;
+            cancelled)
+              echo "::warning title=release-macos::the macOS build was cancelled (a newer push replaces a running build)" ;;
+            *)
+              echo "::error title=release-macos::the macOS build did not pass: its job ended $BUILD_RESULT (a step failed; farm-connect refuses when a repository variable is empty, docs/ci.md)"
+              exit 1 ;;
+          esac
