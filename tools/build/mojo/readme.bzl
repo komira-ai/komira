@@ -21,6 +21,7 @@ This module loads only providers.bzl, so defs.bzl can load it.
 
 load(":providers.bzl", "ZigExeInfo")
 load(":test_limit.bzl", "hang_limit_flags")
+load("@komira//tools/build/bench_salt:bench_salt.bzl", "salted")
 
 # The README examples tool, a Zig executable: no Mojo library, so any
 # package, its own included, may hold a README.
@@ -134,6 +135,7 @@ def readme_gate(ctx, tc, import_name, ungated_tset, link_tail, env_args, ships, 
             "--examples",
             examples.as_output(),
         ),
+        env = salted(),
         category = "mojo_readme_generate",
     )
     marker = ctx.actions.declare_output("tests/readme.passed")

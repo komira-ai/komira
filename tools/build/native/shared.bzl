@@ -18,6 +18,7 @@ is linked", is the design; the checks are its "Checks, per library".
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
 load("@komira//tools/build/mojo:providers.bzl", "MojoInfo", "MojoToolchainInfo")
 load("@komira//tools/build/platforms:table.bzl", "os_floor_version", "row")
+load("@komira//tools/build/bench_salt:bench_salt.bzl", "salted")
 
 NativeSharedInfo = provider(
     doc = "A komira library's own shared library, for the libraries that declare it a NEEDED owner and for its library's conda package.",
@@ -99,6 +100,7 @@ def _native_shared_library_impl(ctx):
             callers,
             caller_archives,
         ),
+        env = salted(),
         category = "native_exports",
         identifier = soname,
     )
@@ -138,12 +140,13 @@ def _native_shared_library_impl(ctx):
             owners,
             ["-Wl,--enable-new-dtags", "-Wl,-rpath,$ORIGIN"] if owners else [],
         ),
+        env = salted(),
         category = "native_link",
         identifier = soname,
     )
     link = ctx.actions.symlink_file(soname[:-len(".1")], so)
     dynsym = ctx.actions.declare_output("dynsym.txt")
-    ctx.actions.run(cmd_args(tool, "dynsym", so, dynsym.as_output()), category = "native_dynsym", identifier = soname)
+    ctx.actions.run(cmd_args(tool, "dynsym", so, dynsym.as_output()), env = salted(), category = "native_dynsym", identifier = soname)
 
     inputs = {
         "archives": archives,
@@ -162,6 +165,7 @@ def _native_shared_library_impl(ctx):
         result = ctx.actions.declare_output("checks/{}_{}.json".format(n, name))
         ctx.actions.run(
             cmd_args(tool, "check", n, "--result", result.as_output(), "--so", so, [inputs[r] for r in reads]),
+            env = salted(),
             category = "native_check",
             identifier = "{}_{}".format(n, name),
         )
@@ -173,6 +177,7 @@ def _native_shared_library_impl(ctx):
     readme_result = ctx.actions.declare_output("checks/readme_calls.json")
     ctx.actions.run(
         cmd_args(tool, "readme", "--result", readme_result.as_output(), "--soname", soname, "--list", exports, "--objects", _readme_objects(ctx)),
+        env = salted(),
         category = "native_check",
         identifier = "readme_calls",
     )

@@ -57,6 +57,7 @@ load(":providers.bzl", "MojoInfo", "MojoPkgTSet", "mojo_pkg_children", "MojoTool
 load(":system_libs.bzl", "dep_system_libs")
 load("@komira//tools/build/gen:defs.bzl", "committed_sources", "declare_fresh", "declare_uncommitted", "declare_unmigrated", "generated_state")
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
+load("@komira//tools/build/bench_salt:bench_salt.bzl", "salted")
 
 # The directory of a generated package that holds the parts of a module the
 # generator split to keep every file under the line limit (komira_proto_codegen's
@@ -231,6 +232,7 @@ def generate_proto_dir(ctx, plugin, plugin_name, opt, trees, generate, names, im
             names,
             generate,
         ),
+        env = salted(),
         category = plugin_name + "_proto_gen",
     )
     return gen_dir
@@ -252,6 +254,7 @@ def _generate_package(ctx, plugin, plugin_name, opt, tree, trees, generate, name
     dep_closure = ctx.actions.tset(MojoPkgTSet, children = deps)
     ctx.actions.run(
         mojo_precompile_cmd(tc, dep_closure.project_as_args("include"), gen_dir, pkg.as_output()),
+        env = salted(),
         category = "mojo_precompile",
     )
 

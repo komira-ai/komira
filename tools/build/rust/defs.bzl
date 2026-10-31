@@ -26,6 +26,7 @@ load("@komira//tools/build/mojo:download.bzl", "pinned_file")
 load("@komira//tools/build/mojo:run_check.bzl", "run_check_validation")
 load("@komira//tools/build/rerun:rerun.bzl", "RERUN_ATTRS", "rerun_env", "rerun_info")
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
+load("@komira//tools/build/bench_salt:bench_salt.bzl", "salted")
 
 RustToolchainInfo = provider(fields = {
     "busybox": provider_field(typing.Any),
@@ -300,7 +301,7 @@ def _rustc(ctx, crate, crate_type, root, hidden, remap, externs, closure, metada
         ),
         # Only an `env` the target sets reaches the action, so a target
         # without one has the action it always had.
-        env = _rustc_env(ctx),
+        env = salted(_rustc_env(ctx)),
         category = "rustc",
         identifier = identifier,
     )
@@ -384,6 +385,7 @@ def _gate(ctx, tc, ungated, public, markers):
     """Publishes `ungated` as `public` once every marker in `markers` exists."""
     ctx.actions.run(
         cmd_args(tc.act, "copy", ungated, public.as_output(), hidden = markers),
+        env = salted(),
         category = "rust_gate_join",
     )
     return markers
@@ -402,7 +404,7 @@ def _test_impl(ctx):
     def runner(marker_arg):
         return _runner(tc, str(ctx.label.raw_target()), exe, marker_arg, ctx.attrs.test_timeout_s)
 
-    ctx.actions.run(runner(marker.as_output()), env = rerun_env(ctx), category = "rust_gated_test", identifier = ctx.label.name)
+    ctx.actions.run(runner(marker.as_output()), env = salted(rerun_env(ctx)), category = "rust_gated_test", identifier = ctx.label.name)
     return [
         # Building the target runs the tests. `[bin]` is the harness itself
         # (a test executable, not a shippable artifact).
@@ -476,7 +478,7 @@ def _external_tests(ctx, tc, crate, ungated, deps_closure):
         marker = ctx.actions.declare_output("test_srcs/" + name + ".passed")
         ctx.actions.run(
             _runner(tc, label + " " + src.short_path, exe, marker.as_output(), _DEFAULT_TEST_TIMEOUT_S),
-            env = rerun_env(ctx),
+            env = salted(rerun_env(ctx)),
             category = "rust_gated_test",
             identifier = ident,
         )
@@ -550,7 +552,7 @@ def _binary_impl(ctx):
         expected = ctx.actions.write(ctx.label.name + ".expected", ctx.attrs.expected_stdout)
         ctx.actions.run(
             cmd_args(tc.act, "run-check", tc.busybox, exe, out.as_output(), expected),
-            env = rerun_env(ctx),
+            env = salted(rerun_env(ctx)),
             category = "rust_run_check",
         )
         sub_targets["run_check"] = [DefaultInfo(default_output = out)]

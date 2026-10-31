@@ -18,6 +18,7 @@ komira as a cell, and so would the action's digest.
 """
 
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
+load("@komira//tools/build/bench_salt:bench_salt.bzl", "salted")
 
 _BUSYBOX = "komira//tools/build/toolchains:busybox"
 
@@ -92,7 +93,7 @@ def _prefix_header_impl(ctx):
         str(ctx.attrs.min_symbols),
         more,
     )
-    ctx.actions.run(cmd, category = "prefix_header")
+    ctx.actions.run(cmd, env = salted(), category = "prefix_header")
     return [DefaultInfo(default_output = hdr, sub_targets = {"symbols": [DefaultInfo(default_output = syms)]})]
 
 _prefix_header = rule(
@@ -135,7 +136,7 @@ def _check_impl(ctx):
         str(ctx.attrs.min_defined),
         more,
     )
-    ctx.actions.run(cmd, category = "prefixed_archive_check", identifier = ctx.label.name)
+    ctx.actions.run(cmd, env = salted(), category = "prefixed_archive_check", identifier = ctx.label.name)
     return [
         DefaultInfo(default_output = result),
         ValidationInfo(validations = [ValidationSpec(name = ctx.label.name, validation_result = result)]),

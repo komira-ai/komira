@@ -43,6 +43,7 @@ load("@komira//tools/build/mojo:providers.bzl", "MojoToolchainInfo")
 load("@komira//tools/build/package:conda.bzl", "MOJO_COMPILER_VERSION")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load("@komira//tools/build/platforms:table.bzl", "row")
+load("@komira//tools/build/bench_salt:bench_salt.bzl", "salted")
 
 def _impl(ctx):
     tc = ctx.attrs.toolchain[MojoToolchainInfo]
@@ -66,6 +67,7 @@ def _impl(ctx):
             [cmd_args("--also-dir", o[DefaultInfo].default_outputs[0]) for o in ctx.attrs.owners],
             [cmd_args("--runtime-lib", cmd_args(tc.compiler.project("lib/" + n), format = n + "={}")) for n in runtime],
         ),
+        env = salted(),
         category = "conda_install",
     )
     if ctx.attrs.expect_red != None:
@@ -87,7 +89,7 @@ def _impl(ctx):
             "--out",
             marker.as_output(),
         ),
-        env = {"LD_LIBRARY_PATH": ""},
+        env = salted({"LD_LIBRARY_PATH": ""}),
         category = "dlopen_probe",
     )
     return [DefaultInfo(default_output = marker, sub_targets = {"prefix": [DefaultInfo(default_output = prefix)]})]

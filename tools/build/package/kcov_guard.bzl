@@ -37,6 +37,7 @@ it.
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
 load("@komira//tools/build/rerun:rerun.bzl", "RERUN_ATTRS", "rerun_env", "rerun_info")
 load("@komira//tools/build/toolchains/kcov:identity.bzl", "KCOV_BIN_SHA256", "KCOV_USAGE_LINE")
+load("@komira//tools/build/bench_salt:bench_salt.bzl", "salted")
 
 # The guard's identity arguments, one definition for the package rules and the
 # cases, so a wrong constant at one call cannot pass the other.
@@ -59,6 +60,7 @@ def kcov_guard(ctx, guard, identifier, pairs):
         args.extend([dest, artifact])
     ctx.actions.run(
         cmd_args(info.tool, "kcov-guard", "guard", _IDENTITY_ARGS, out.as_output(), str(ctx.label.raw_target()), args),
+        env = salted(),
         category = "kcov_guard",
         identifier = identifier,
     )
@@ -86,7 +88,7 @@ def _cases_impl(ctx):
     report = ctx.actions.declare_output("report", dir = True)
     ctx.actions.run(
         cmd_args(ctx.attrs._tool[RunInfo], "kcov-guard", "cases", _IDENTITY_ARGS, report.as_output()),
-        env = rerun_env(ctx),
+        env = salted(rerun_env(ctx)),
         category = "kcov_guard_cases",
     )
     # One output: buck2 refuses a validation result whose action produces

@@ -34,6 +34,9 @@ const KINDS = [_]Kind{
     .{ .rule = "mojo_shared_lib", .target = "komira//tools/build/examples/shared_lib:plain" },
     .{ .rule = "rust_library", .target = "komira//tools/build/examples/rust/ext:ext" },
     .{ .rule = "rust_binary", .target = "komira//tools/build/examples/rust/ext:ext_consumer" },
+    .{ .rule = "native_shared_library", .target = "komira//src/komira_async_api:komira_async_api_native" },
+    .{ .rule = "komira_pack_tar", .target = "komira//tools/build/examples:hello_tarball" },
+    .{ .rule = "komira_conda_package", .target = "komira//src/komira_retry:komira_retry_conda" },
 };
 
 /// The categories of the actions that build the tools and unpack the
@@ -188,8 +191,32 @@ const REFUSED = [_]lib.Row{
     },
 };
 
+const FIXTURE = "tests//functional/bench_salt:env";
+const MARK = "\"KOMIRA_BENCH_SALT_FIXTURE\": \"1\"";
+
+/// The environment `salted` gives under each value, in the provider dump of
+/// the fixture: the environment as given and no `KOMIRA_BENCH_SALT` when the
+/// value is unset or empty, the variable with the value otherwise.
+fn envRows(c: *lib.Ctx) !void {
+    const Row = struct { what: []const u8, cfg: []const []const u8, want: ?[]const u8 };
+    const rows = [_]Row{
+        .{ .what = "unset", .cfg = &.{}, .want = null },
+        .{ .what = "empty", .cfg = &.{"komira.bench_salt="}, .want = null },
+        .{ .what = "blank", .cfg = &.{"komira.bench_salt=  "}, .want = null },
+        .{ .what = "a value", .cfg = &.{"komira.bench_salt=run-1.b_2"}, .want = "\"KOMIRA_BENCH_SALT\": \"run-1.b_2\"" },
+    };
+    for (rows) |row| {
+        const res = try c.run(&.{ "audit", "providers", FIXTURE }, .{ .cfg = row.cfg });
+        const given = res.ok() and lib.text.contains(res.stdout, MARK);
+        const has = lib.text.contains(res.stdout, "KOMIRA_BENCH_SALT\"");
+        const ok = given and (if (row.want) |w| lib.text.contains(res.stdout, w) else !has);
+        c.rep.check(ok, try std.fmt.allocPrint(c.a, "{s}: the environment of an action {s}", .{ row.what, if (row.want == null) "is as given, with no KOMIRA_BENCH_SALT" else "has KOMIRA_BENCH_SALT with the value" }), res.log);
+    }
+}
+
 fn body(c: *lib.Ctx) !void {
     try c.refusals(&REFUSED);
+    try envRows(c);
     const base = (try actions(c, "baseline", &.{})) orelse return;
     const empty = (try actions(c, "empty value", &.{"komira.bench_salt="})) orelse return;
     sameKeys(c, "an empty value", base, empty);

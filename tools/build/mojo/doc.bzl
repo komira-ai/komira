@@ -27,6 +27,7 @@ with `_` (a struct's dunder methods excepted).
 load(":defs.bzl", "mojo_compile_cmd")
 load(":providers.bzl", "MojoInfo", "MojoToolchainInfo")
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
+load("@komira//tools/build/bench_salt:bench_salt.bzl", "salted")
 
 def _impl(ctx):
     tc = ctx.attrs.toolchain[MojoToolchainInfo]
@@ -52,6 +53,7 @@ def _impl(ctx):
             "-o",
             raw.as_output(),
         ]),
+        env = salted(),
         category = "mojo_doc",
     )
     if not checked:
@@ -69,6 +71,7 @@ def _impl(ctx):
             str(ctx.label.raw_target()),
             ctx.attrs.symbols,
         ),
+        env = salted(),
         category = "mojo_doc_check",
     )
     return [DefaultInfo(default_output = out, sub_targets = {"raw": [DefaultInfo(default_output = raw)]})]
