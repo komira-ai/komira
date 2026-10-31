@@ -151,12 +151,11 @@ def _point_starts_number(sql: String, i: Int) -> Bool:
     return not (_is_ident(prev) or prev == UInt8(ord(")")))
 
 
-def _point_ends_number(sql: String, i: Int, has_integer_digits: Bool) -> Bool:
-    """True iff the '.' at byte `i`, no digit after it, ends a number that has
-    integer digits (`5.`, `5.,`, `5.)`, `1.e2`). A '.' before a second '.' or
+def _point_ends_number(sql: String, i: Int) -> Bool:
+    """True iff the '.' at byte `i`, no digit after it, ends a number whose
+    integer digits precede it (`5.`, `5.,`, `5.)`, `1.e2`; a number that opens
+    with the '.' always has a digit after it). A '.' before a second '.' or
     before a name is a qualifier's dot (`1..2`, `1.x`)."""
-    if not has_integer_digits:
-        return False
     var src = sql.as_bytes()
     if i + 1 >= len(src):
         return True
@@ -302,7 +301,7 @@ def tokenize(sql: String) raises -> List[Token]:
             var frac_start = i
             if i < n and src[i] == UInt8(ord(".")) and (
                 (i + 1 < n and _is_digit(src[i + 1]))
-                or _point_ends_number(sql, i, int_end > digits_start)
+                or _point_ends_number(sql, i)
             ):
                 has_point = True
                 i += 1  # consume '.'

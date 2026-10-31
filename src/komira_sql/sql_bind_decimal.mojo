@@ -165,10 +165,10 @@ def _constant(sx: SqlExpr) raises -> Optional[_Const]:
             return Optional[_Const](
                 _Const(integer_negate(inner.value().value), True)
             )
+        # A constant that is not integer-typed is a DECIMAL (a parsed literal
+        # or a fold of one), which `decimal_negate` always negates.
         var negated = decimal_negate(inner.value().value)
-        if not negated:
-            return None
-        return Optional[_Const](_Const(negated.take(), inner.value().integer))
+        return Optional[_Const](_Const(negated.take(), False))
     if sx.tag == SX_BINARY and (
         sx.op == SXOP_ADD
         or sx.op == SXOP_SUB
@@ -207,9 +207,10 @@ def _constant(sx: SqlExpr) raises -> Optional[_Const]:
                     True,
                 )
             )
+        # At least one operand is a DECIMAL here (two integers folded above),
+        # and every constant carries a precision and scale that agree with its
+        # digits, so the fold has a result or raises.
         var folded = decimal_fold_binary(op, left.value().value, right.value().value)
-        if not folded:
-            return None
         return Optional[_Const](_Const(folded.take(), False))
     return None
 
@@ -217,9 +218,8 @@ def _constant(sx: SqlExpr) raises -> Optional[_Const]:
 def _decimal_column(
     sx: SqlExpr, schema: Schema, scope: BindScope
 ) raises -> Optional[Expr]:
-    """The column reference `sx` when it names a column of a DECIMAL type."""
-    if sx.tag != SX_COLUMN:
-        return None
+    """The column reference `sx` (an SX_COLUMN, as both callers check) when it
+    names a column of a DECIMAL type."""
     var name = _resolve_col(sx, schema, scope)
     var column = Expr.col_ref(name)
     var missing = String("")

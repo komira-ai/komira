@@ -219,6 +219,11 @@ def test_limits() raises:
     var cast_message = _refusal(BIN_ADD, nines38, _d(5, 2, 1))
     assert_true(cast_message.find("Could not cast value") >= 0, cast_message)
     assert_true(cast_message.find("DECIMAL(38,1)") >= 0, cast_message)
+    # The cast is of both operands: the same sum with the wide one on the
+    # right is the same error.
+    var cast_right = _refusal(BIN_ADD, _d(5, 2, 1), nines38)
+    assert_true(cast_right.find("Could not cast value") >= 0, cast_right)
+    assert_true(cast_right.find("DECIMAL(38,1)") >= 0, cast_right)
     # A scale pushes the result past the limit the same way: 19 + 19.
     assert_true(
         Bool(decimal_fold_binary(BIN_ADD, _d(1, 19, 18), _d(1, 19, 18))),
@@ -452,6 +457,10 @@ def test_integer_remainder_and_division_truncate() raises:
     assert_true(m.find("division by zero") >= 0, m)
     m = _refusal_int(INTEGER_FOLD_IDIV, _int(-2147483648, 10), _int(-1, 10))
     assert_true(m.find("INT32") >= 0, m)
+    # `/` is a DOUBLE in DuckDB, not an integer: an integer fold of it is
+    # refused rather than rounded.
+    m = _refusal_int(BIN_DIV, _int(7, 10), _int(2, 10))
+    assert_true(m.find("only + - * % // are folded") >= 0, m)
     m = _refusal_int(BIN_MOD, _int(-2147483648, 10), _int(-1, 10))
     assert_true(m.find("INT32") >= 0, m)
 

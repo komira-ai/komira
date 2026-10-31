@@ -578,6 +578,70 @@ def test_integer_remainder_division_and_negation_in_a_constant() raises:
     )
 
 
+def test_integers_past_bigint_are_hugeint_decimals() raises:
+    # DuckDB types an integer past BIGINT HUGEINT, DECIMAL(38, 0) against a
+    # DECIMAL column (the conformance comparisons of 99999999999999999999 pin
+    # the answers): 99999999999999999999 is 5 * 2^64 + 7766279631452241919.
+    assert_equal(
+        _bound(_w("dc < 99999999999999999999")),
+        "BinaryOp(LT, ColRef(dc), " + _d(5, 7766279631452241919, 38, 0) + ")",
+    )
+    # HUGEINT's maximum 2^127 - 1 is the last one that types; 2^127 is past it
+    # and is refused by name, as every integer past BIGINT is outside the one
+    # shape served.
+    assert_equal(
+        _bound(_w("dc <= 170141183460469231731687303715884105727")),
+        "BinaryOp(LE, ColRef(dc), " + _d(9223372036854775807, -1, 38, 0) + ")",
+    )
+    var past = _bound(_w("dc <= 170141183460469231731687303715884105728"))
+    assert_true(past.startswith("ERR: SQL not supported: "), past)
+    assert_true(
+        past.find("the integer literal 170141183460469231731687303715884105728 is past BIGINT")
+        >= 0,
+        past,
+    )
+    # Negated, the literal is HUGEINT's negation; on the left of the column
+    # the comparison swaps first.
+    assert_equal(
+        _bound(_w("dc > -99999999999999999999")),
+        "BinaryOp(GT, ColRef(dc), " + _d(-6, -7766279631452241919, 38, 0) + ")",
+    )
+    assert_equal(
+        _bound(_w("-170141183460469231731687303715884105727 < dc")),
+        "BinaryOp(GT, ColRef(dc), " + _d(-9223372036854775808, 1, 38, 0) + ")",
+    )
+    var neg_past = _bound(_w("dc > -170141183460469231731687303715884105728"))
+    assert_true(neg_past.startswith("ERR: SQL not supported: "), neg_past)
+    assert_true(
+        neg_past.find("the integer literal 170141183460469231731687303715884105728 is past BIGINT")
+        >= 0,
+        neg_past,
+    )
+    # HUGEINT arithmetic overflows like DuckDB's (conformance errors.sql: the
+    # sum, product and difference of the maximum raise).
+    var sum = _bound(_w("dc = (170141183460469231731687303715884105727 + 1)*0.1"))
+    assert_true(sum.find("Overflow in addition of INT128") >= 0, sum)
+
+
+def test_a_negated_expression_constant() raises:
+    # An integer expression negates as an integer: -(1+2) is the INTEGER -3,
+    # so -(1+2) + 0.5 is DECIMAL(12, 1) -2.5 (as -7 % 4 + 0.5 is).
+    assert_equal(
+        _bound(_w("dc = -(1+2) + 0.5")),
+        "BinaryOp(EQ, ColRef(dc), " + _d(-1, -25, 12, 1) + ")",
+    )
+    # A decimal one negates as a decimal, and a number constant on the left
+    # of the column swaps: -(1 + 2.5) < dc is dc > -3.5.
+    assert_equal(
+        _bound(_w("-(1+2.5) < dc")),
+        "BinaryOp(GT, ColRef(dc), " + _d(-1, -35, 12, 1) + ")",
+    )
+    # A division is DOUBLE: the negated constant keeps its float binding.
+    var div = _bound(_w("dc < -(1.5/2)"))
+    assert_true(div.find("float64") >= 0, div)
+    assert_true(div.find("decimal128") < 0, div)
+
+
 def main() raises:
     var suite = TestSuite()
     suite.test[test_literal_facing_a_decimal_column_is_decimal]()
@@ -593,4 +657,6 @@ def main() raises:
     suite.test[test_integer_subexpressions_fold_as_integers]()
     suite.test[test_unary_plus_is_the_literal]()
     suite.test[test_integer_remainder_division_and_negation_in_a_constant]()
+    suite.test[test_integers_past_bigint_are_hugeint_decimals]()
+    suite.test[test_a_negated_expression_constant]()
     suite^.run()
