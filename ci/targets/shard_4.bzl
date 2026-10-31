@@ -98,6 +98,8 @@ TARGETS = [
     "komira//tools/build/third_party_srcs:s2n_mini_files_check",
     "komira//tools/build/third_party_srcs:s2n_mini_files_drift",
     "komira//tools/build/third_party_srcs:shell_lint",
+    "tests//functional/bench_salt:doc_tree",
+    "tests//functional/bench_salt:env",
     "tests//functional/bundle_parity:doc_tree",
     "tests//functional/bundle_parity:parity",
     "tests//functional/git_capture:doc_tree",
