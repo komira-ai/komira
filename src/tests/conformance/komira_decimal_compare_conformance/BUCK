@@ -23,6 +23,10 @@ load("@komira//tools/build/sql:defs.bzl", "sql_oracle")
 #                                each operator, the rows `<col> <op> <literal>`
 #                                and each reversed spelling keep are DuckDB's,
 #                                and a comparison DuckDB raises on is refused
+#   test_double_sites            every place the engine converts a DECIMAL to a
+#                                DOUBLE (a sum() of an integer column, a cast, a
+#                                promotion beside a DOUBLE, a math function,
+#                                AVG) answers DuckDB's DOUBLE
 #   test_where_texts             the rows each WHERE text of where.tsv keeps
 #                                are DuckDB's
 #   test_folded_constants        the plan holds each folded constant as the
@@ -48,6 +52,18 @@ sql_oracle(
     name = "table_x",
     srcs = ["oracle/table_x.sql", "oracle/write_x.sql"],
     outputs = ["tx.parquet"],
+)
+
+sql_oracle(
+    name = "table_s",
+    srcs = ["oracle/table_s.sql", "oracle/write_s.sql"],
+    outputs = ["pj.parquet", "pd.parquet", "pg.parquet"],
+)
+
+sql_oracle(
+    name = "double_sites",
+    srcs = ["oracle/table_s.sql", "oracle/double_sites.sql"],
+    outputs = ["double_sites.tsv"],
 )
 
 [sql_oracle(
@@ -200,6 +216,7 @@ mojo_library(
         "tests/test_folded_constants.mojo",
         "tests/test_where_texts.mojo",
         "tests/test_double_conversion.mojo",
+        "tests/test_double_sites.mojo",
     ],
     test_data = {
         "tests/test_column_a_1.mojo": {
@@ -325,6 +342,12 @@ mojo_library(
         },
         "tests/test_double_conversion.mojo": {
             "double_sweep.tsv": ":double_sweep[double_sweep.tsv]",
+        },
+        "tests/test_double_sites.mojo": {
+            "pj.parquet": ":table_s[pj.parquet]",
+            "pd.parquet": ":table_s[pd.parquet]",
+            "pg.parquet": ":table_s[pg.parquet]",
+            "double_sites.tsv": ":double_sites[double_sites.tsv]",
         },
         "tests/test_where_texts.mojo": {
             "t.parquet": ":table[t.parquet]",

@@ -203,6 +203,43 @@ def test_decimal_to_float64() raises:
     assert_equal(_rt_decimal_to_float64(I128(-25), 1), -2.5)
 
 
+def test_decimal_to_float64_is_duckdbs_past_2_64() raises:
+    """DuckDB's cast of a DECIMAL to DOUBLE: a 128-bit integer is the double of
+    its low word plus the double of its high word times 2^64, not one rounding.
+    The numbers are DuckDB's own for `sum(v) * 1e0` over a BIGINT column:
+    -(2^64) - 2^11 - 1 is -1.8446744073709552e+19 (one rounding gives
+    ...556e+19) and -(2^70) - 2^17 - 1 is -1.1805916207174113e+21 (...116e+21).
+    2^117 + 2^64 + 1 reads as 2^117 + 2^65."""
+    var one = I128(1)
+    assert_equal(
+        _rt_decimal_to_float64(-((one << 64) + I128(2049)), 0),
+        -1.8446744073709552e19,
+    )
+    assert_equal(
+        _rt_decimal_to_float64(-((one << 70) + I128(131073)), 0),
+        -1.1805916207174113e21,
+    )
+    assert_equal(
+        _rt_decimal_to_float64((one << 117) + (one << 64) + one, 0),
+        Float64(one << 117) + Float64(one << 65),
+    )
+
+
+def test_decimal_to_float64_of_a_scaled_value_past_2_53_is_duckdbs() raises:
+    """A scaled value past 2^53 is the double of its integer part plus the
+    double of its fraction over 10^scale (both truncating toward zero), not
+    the one-division quotient: 9007199254740993 at scale 2 is 90071992547409
+    + 0.93."""
+    assert_equal(
+        _rt_decimal_to_float64(I128(9007199254740993), 2),
+        90071992547409.0 + 0.93,
+    )
+    assert_equal(
+        _rt_decimal_to_float64(I128(-9007199254740993), 2),
+        -90071992547409.0 + -0.93,
+    )
+
+
 # --- decimal -> integer --------------------------------------------------------------
 
 
