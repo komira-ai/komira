@@ -38,6 +38,7 @@ komira_chat_proto
 komira_clock
 komira_codeworks_api
 komira_collections
+komira_compression
 komira_contacts_proto
 komira_content_line
 komira_counters

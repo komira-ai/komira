@@ -1,0 +1,25 @@
+[package]
+name = "komira_compression"
+version = "0.1.0"
+description = "Byte-stream codec trait and the codecs behind it: snappy linked statically, zstd, bzip2 and xz opened at run time, gzip and lz4 through komira_zlib and komira_lz4."
+license = "Apache-2.0"
+repository = "https://github.com/komira-ai/komira"
+readme = "README.md"
+mojo = ["1.0.0"]
+
+[dependencies]
+komira_lz4 = { path = "../komira_lz4", version = "0.1" }
+komira_zlib = { path = "../komira_zlib", version = "0.1" }
+
+[native-dependencies]
+bz2 = { version = ">=1.0.8,<2", kind = "shared", mode = "load" }
+lzma = { version = ">=5.2.5,<6", kind = "shared", mode = "load" }
+zstd = { version = ">=1.5.2,<2", kind = "shared", mode = "load" }
+
+[native.snappy]
+kind = "static"
+srcs = ["native/snappy_provided.c"]
+
+[targets]
+lib = { path = "src/komira_compression" }
+tests = ["tests"]

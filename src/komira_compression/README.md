@@ -62,3 +62,37 @@ assert_equal(snappy_uncompress_into(Span(out), Span(packed)), len(src))
 for i in range(len(src)):
     assert_equal(out[i], src[i])
 ```
+
+## Build files
+
+This package is built with buildrules' `mojo_package` and packaged for mopm as `komira_compression`, version 0.1.0
+(`mopm.toml`). The library is `src/komira_compression/`, its tests are `tests/`. It depends on `komira_lz4` and
+`komira_zlib`, and it has one native library of its own and three it opens at run time:
+
+- snappy is linked: `[native.snappy]` of `mopm.toml`, whose archive `libsnappy.a` is built by the `native_library`
+  target `//third_party/snappy:snappy_native` (snappy 1.2.2 from its pinned release archive, C++17, the C API renamed
+  `komira_snappy_*`, the C++ names left as they are) and named in `natives` of `BUCK`. It is linked into every test of
+  the package and of the packages that depend on it, and `:conda` holds it at `lib/libsnappy.a`. `native/snappy_provided.c`
+  is not compiled: `mopm.toml` names a source for every native, and this one is built elsewhere.
+- libbz2, liblzma and libzstd are opened by name when a codec is first used, so `mopm.toml` declares them under
+  `[native-dependencies]` with `mode = "load"` and the conda package records `bzip2`, `liblzma` and `zstd` as
+  dependencies; `mopm.lock` pins them for each platform.
+
+| file | what |
+|---|---|
+| `mopm.toml` | the mopm manifest: name, version, the Mojo version, the two Mojo dependencies, the three libraries opened at run time, snappy, where the library and its tests are |
+| `mopm.lock` | what `mopm lock` writes (with no registry reachable): the path dependencies and, under `system_libs`, the conda packages of the libraries opened at run time, for each platform |
+| `mopm-toolchain.toml` | the exact mopm and Mojo versions the build uses (written by hand) |
+| `buildrules.mojo.lock.bzl`, `buildrules.mojo.bzl` | written by `buildrules mojo sync` from the files above; `buildrules mojo check` fails when they are stale |
+| `coverage_floor.txt` | the line and branch coverage the package's tests must keep (`:coverage_floor`) |
+
+`:lib` is the library file and exists only once every test of `tests/` has passed. After any change to a source, a test,
+`mopm.toml`, `mopm.lock` or `mopm-toolchain.toml`, run `buildrules mojo sync`, commit what it writes, and build
+`komira//src/komira_compression:lib` on the farm.
+
+`:conda` is the `.conda` of the mopm package (`mojo-komira_compression-0.1.0-mojo1.0.0_0.conda`): the `.mojoc` and
+`lib/libsnappy.a`, requiring `komira_lz4`, `komira_zlib` and the three conda packages above; `:conda_holds` reads it back.
+`:komira_compression` is `:lib` as komira's Mojo rules take it (`mojo_adopted_library`); it declares the three
+sonames in `dlopen`, which `:komira_compression_conda` (the release set's packaging) turns into the same requirements,
+and it names `:komira_compression_native`, the shared library of the release set that links the older
+`//third_party/snappy:snappy`. It also compiles and runs the README's examples above (`[tests][readme]`) against `:lib`.
