@@ -43,6 +43,7 @@ mojo_library(
         "tests/test_window_partition_keys.mojo",
         "tests/test_window_ranking_aggregates.mojo",
         "tests/test_window_value_fns.mojo",
+        "tests/test_window_avg_is_long_double.mojo",
     ],
     test_deps = [
         "//src/komira_eval:komira_eval",

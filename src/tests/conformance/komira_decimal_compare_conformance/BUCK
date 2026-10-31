@@ -28,9 +28,8 @@ load("@komira//tools/build/sql:defs.bzl", "sql_oracle")
 #                                promotion beside a DOUBLE, a math function)
 #                                answers DuckDB's DOUBLE
 #   test_avg_sites               every place the engine finalizes an avg() of an
-#                                integer or a DECIMAL (grouped, ungrouped, over
-#                                a window, beside a count(DISTINCT)) answers
-#                                the bits of DuckDB's own avg()
+#                                integer or a DECIMAL (grouped, ungrouped)
+#                                answers the bits of DuckDB's own avg()
 #   test_where_texts             the rows each WHERE text of where.tsv keeps
 #                                are DuckDB's
 #   test_folded_constants        the plan holds each folded constant as the

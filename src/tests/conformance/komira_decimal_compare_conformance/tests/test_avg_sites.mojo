@@ -17,9 +17,10 @@
 #     groups.
 #   * test_an_ungrouped_avg_is_duckdbs: `avg(<BIGINT>)` of one group, beside
 #     min(k).
-#   * test_avg_over_a_window_is_duckdbs: `avg(<BIGINT>) OVER (PARTITION BY k)`.
-#   * test_avg_beside_a_count_distinct_is_duckdbs: `avg(<BIGINT>)` with
-#     `count(DISTINCT <BIGINT>)` in the same grouped aggregate.
+#
+# The SQL door refuses `avg(...) OVER (...)` and an avg() beside a
+# count(DISTINCT ...) today; the finalizers behind those two are held to the same
+# values by the unit tests of komira_op_window and komira_op_agg_distinct.
 
 from std.testing import TestSuite
 
@@ -42,19 +43,9 @@ def test_an_ungrouped_avg_is_duckdbs() raises:
     check_avg_query("avg_bigint_one_row_10")
 
 
-def test_avg_over_a_window_is_duckdbs() raises:
-    check_avg_query("avg_bigint_window")
-
-
-def test_avg_beside_a_count_distinct_is_duckdbs() raises:
-    check_avg_query("avg_bigint_beside_count_distinct")
-
-
 def main() raises:
     var suite = TestSuite()
     suite.test[test_avg_of_a_decimal_is_duckdbs]()
     suite.test[test_avg_of_a_bigint_is_duckdbs]()
     suite.test[test_an_ungrouped_avg_is_duckdbs]()
-    suite.test[test_avg_over_a_window_is_duckdbs]()
-    suite.test[test_avg_beside_a_count_distinct_is_duckdbs]()
     suite^.run()
