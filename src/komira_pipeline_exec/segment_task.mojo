@@ -25,6 +25,19 @@ from komira_morsel.morsel_operator import MorselOperatorImpl
 from komira_morsel.morsel_sink import MorselSinkImpl
 from komira_morsel.morsel_source import MorselSourceImpl
 from komira_morsel.pipeline_execution import PipelineExecution
+from komira_phase_timers.phase_timers import (
+    PH_CLAIM,
+    PH_END_STAMP,
+    PH_OPS,
+    PH_SINK,
+    PH_TASK,
+    pt_now,
+    pt_record,
+    pt_record_wake,
+    pt_ru_begin,
+    pt_ru_end,
+    pt_stamp,
+)
 from std.builtin.swap import swap
 from std.memory import UnsafePointer
 
@@ -91,7 +104,9 @@ def _push[
         # below borrows `run` mutably, so no reference into `ops` may live
         # across it.
         var op_index = wid * run.n_ops + i
+        var t_op = pt_now()
         var rc = run.ops[op_index].execute(m)
+        pt_record[PH_OPS](t_op)
         while rc.is_have_more_output():
             if m.num_rows() > 0:
                 var chunk = RecordBatch()
@@ -103,14 +118,18 @@ def _push[
                     return True
             if run.should_stop():
                 return True
+            var t_more = pt_now()
             rc = run.ops[op_index].execute(m)
+            pt_record[PH_OPS](t_more)
         if rc.is_finished():
             finished = True
         if rc.is_filtered_empty() or m.num_rows() == 0:
             return finished
         i += 1
     if m.num_rows() > 0:
+        var t_sink = pt_now()
         run.sink.consume(wid, m^)
+        pt_record[PH_SINK](t_sink)
     return finished
 
 
@@ -120,7 +139,11 @@ def _work[
     while True:
         if run.should_stop():
             return
+        pt_ru_begin[PH_CLAIM]()
+        var t_claim = pt_now()
         var maybe = run.source.next_morsel(wid)
+        pt_record[PH_CLAIM](t_claim)
+        pt_ru_end[PH_CLAIM]()
         if not maybe:
             return
         if _push(run, wid, 0, maybe.take()):
@@ -154,7 +177,13 @@ struct SegmentTask[
         # its workers by any numbering.
         var sp = UnsafePointer(to=state).bitcast[SegmentRun[Self.S, Self.O, Self.K]]()
         var wid = Int(task_id)
+        pt_record_wake()
+        pt_ru_begin[PH_TASK]()
+        var t_task = pt_now()
         try:
             _work(sp[], wid)
         except e:
             sp[].fail(e)
+        pt_record[PH_TASK](t_task)
+        pt_ru_end[PH_TASK]()
+        pt_stamp[PH_END_STAMP]()

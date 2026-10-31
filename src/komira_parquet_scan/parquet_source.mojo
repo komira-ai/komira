@@ -61,6 +61,7 @@ from komira_morsel.topn_boundary import TopNBoundary
 from komira_parquet.parquet_source_constants import _build_constant_column
 from komira_parquet.parquet_source_helpers import _build_union_by_name_schema
 from komira_parquet.scan_copy_trace import prefetch_mode
+from komira_phase_timers.phase_timers import PH_DECODE_PLAIN, pt_now, pt_record, pt_ru_begin, pt_ru_end
 from komira_plan_expr.expr_id import ExprId
 from komira_plan_expr.expr_pool import ExprPool
 from komira_plan_stats.source_statistics import SourceStatistics
@@ -870,6 +871,8 @@ struct ParquetSource[
             else:
                 incr_cursor_grain_decline()
         var batch: RecordBatch
+        pt_ru_begin[PH_DECODE_PLAIN]()
+        var t_plain = pt_now()
         if len(self._result_col_names) > 0:
             batch = reader.decode_columns_by_name_remap(
                 rg_in_file, self._result_col_names, self._result_col_types, self._preserve_dict
@@ -878,6 +881,8 @@ struct ParquetSource[
             batch = reader.decode_columns_subset(
                 rg_in_file, self._projection.projected_indices(reader.unit_num_columns(rg_in_file)), self._preserve_dict
             )
+        pt_record[PH_DECODE_PLAIN](t_plain)
+        pt_ru_end[PH_DECODE_PLAIN]()
         self._append_partition_columns(batch, file_idx)
         note_whole_rg_decode(batch.num_rows())
         return Optional(emit_outcome(ClaimOutcome.emit(batch^), morsel_rows, claimed_rg, cs.morsel_counter, pending))
