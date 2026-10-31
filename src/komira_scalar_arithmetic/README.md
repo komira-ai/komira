@@ -7,7 +7,9 @@ scale: `I128` (`SIMD[DType.int128, 1]`) for Decimal128 (at most 38 digits) and
 wider intermediate and raising on overflow; division rounds half away from
 zero, and the `*_result_ps` functions give the precision and scale of a
 result. `decimal_cast` converts between decimals and integers, floats and
-strings, `decimal_compare` compares two decimals at different scales, and
+strings, `decimal_compare` compares two decimals at different scales,
+`decimal_avg` finishes an average of an exact integer or decimal total the way DuckDB
+does (80-bit long double steps, emulated in integers), and
 `int_overflow` holds the overflow predicates and the checked `+ - *` for
 fixed-width integers, which raise `Out of Range Error: Overflow in ...`
 instead of wrapping.
@@ -85,7 +87,7 @@ assert_true(refused)
 
 This package is built with buildrules' `mojo_package` and packaged for mopm as `komira_scalar_arithmetic`, version
 0.1.0 (`mopm.toml`). The library is `src/komira_scalar_arithmetic/` (`decimal_arith`, `decimal256_arith`,
-`decimal_cast`, `decimal_compare`, `int_overflow`), its tests are `tests/`. The package has no native archive and
+`decimal_cast`, `decimal_avg`, `decimal_compare`, `int_overflow`), its tests are `tests/`. The package has no native archive and
 calls no foreign function: it is Mojo over `SIMD` integers and `String`. The files that are not sources:
 
 | file | what |

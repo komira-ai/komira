@@ -14,10 +14,10 @@
 #                  over a DECIMAL128 input (a sum with more digits than the
 #                  declared precision is refused)
 #   AVG            FLOAT64 over an integer or DECIMAL128 input. The sum and the
-#                  count are exact, so the answer is one conversion of the sum
-#                  (for a DECIMAL128, the existing `decimal_to_float64` of the
-#                  exact sum and the scale) and one division by the count, the
-#                  same on every schedule
+#                  count are exact, so the answer is DuckDB's: its long-double
+#                  steps on the exact sum, the count and the scale
+#                  (`avg_integer_float64`, `avg_decimal_float64`), the same on
+#                  every schedule
 #   MIN, MAX       the input's own type: its integer type, DATE32, or a
 #                  DECIMAL128 of the input's scale
 #
@@ -42,7 +42,10 @@ from komira_plan_expr.agg_expr import (
     AGG_SUM,
 )
 from komira_scalar_arithmetic.decimal_arith import I128
-from komira_scalar_arithmetic.decimal_cast import decimal_to_float64
+from komira_scalar_arithmetic.decimal_avg import (
+    avg_decimal_float64,
+    avg_integer_float64,
+)
 
 from .agg_fold import (
     AggCell,
@@ -52,6 +55,18 @@ from .agg_fold import (
     IN_NONE,
     agg_name,
 )
+
+
+def _int_bits(t: ArrowType) -> Int:
+    """The width of a signed integer type: the one fact that picks the way
+    DuckDB averages it (`komira_scalar_arithmetic.decimal_avg`)."""
+    if t == ArrowType.INT8:
+        return 8
+    if t == ArrowType.INT16:
+        return 16
+    if t == ArrowType.INT32:
+        return 32
+    return 64
 
 
 def _wide(v: Int64) -> I128:
@@ -193,10 +208,20 @@ def agg_result_column_rows(
                 arr._set_null(r)
             else:
                 ref cell = cells[first + r * stride]
-                var sum_f = cell.value.cast[DType.float64]()
                 if cell.kind == IN_DECIMAL:
-                    sum_f = decimal_to_float64(cell.value, cell.scale)
-                arr.set(r, sum_f / Float64(cell.count))
+                    arr.set(
+                        r,
+                        avg_decimal_float64(
+                            cell.value, cell.count, cell.precision, cell.scale
+                        ),
+                    )
+                else:
+                    arr.set(
+                        r,
+                        avg_integer_float64(
+                            cell.value, cell.count, _int_bits(cell.arrow)
+                        ),
+                    )
         return Column.from_primitive[DType.float64](arr^)
 
     # SUM, MIN and MAX: the value keeps the input's type.

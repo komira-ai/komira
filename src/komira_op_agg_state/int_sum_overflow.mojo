@@ -42,6 +42,8 @@
 
 from std.memory import bitcast
 
+from komira_scalar_arithmetic.decimal_avg import avg_integer_float64
+
 
 @always_inline
 def i64_add_overflows(acc: Int64, v: Int64, new_acc: Int64) -> Bool:
@@ -237,9 +239,14 @@ struct ExactIntAgg(Copyable, Movable):
         return narrow_sum_u64(self.sum, what)
 
     def mean(self) -> Float64:
-        """The exact total over the non-null count, correctly rounded once.
-        The caller has already answered NULL for `count == 0`."""
-        return self.sum.cast[DType.float64]() / Float64(self.count)
+        """The exact total over the non-null count, as DuckDB's avg() of a
+        BIGINT answers it (`avg_integer_float64`: 80-bit long double steps on
+        the exact total, rounded once to a double). A UINT64 total keeps the
+        double division: DuckDB's binding of avg() over an unsigned column is
+        not measured. The caller has already answered NULL for `count == 0`."""
+        if self.u64:
+            return self.sum.cast[DType.float64]() / Float64(self.count)
+        return avg_integer_float64(self.sum, self.count, 64)
 
 
 # -----------------------------------------------------------------------------

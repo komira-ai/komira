@@ -36,6 +36,7 @@ GRAPH_JSON = r'''{
         {"path": "src/komira_scalar_arithmetic/src/komira_scalar_arithmetic/__init__.mojo", "sha256": "c272e34bbfb5af2b0a15c2ffbc23d37a86a0dc913a05492f880871a9b015f366"},
         {"path": "src/komira_scalar_arithmetic/src/komira_scalar_arithmetic/decimal256_arith.mojo", "sha256": "d12d42bc599a904a64944a8d60f1bb63cc576e7d876f39b9e8440f7fe2cb60d3"},
         {"path": "src/komira_scalar_arithmetic/src/komira_scalar_arithmetic/decimal_arith.mojo", "sha256": "c4b3004d0d2c9fd04b2b6d46d733fc24fe80910a07acbc0a07b64623cd167693"},
+        {"path": "src/komira_scalar_arithmetic/src/komira_scalar_arithmetic/decimal_avg.mojo", "sha256": "44c0e94d36abcbb4139081ef9be0bcadd4d672785e4668e2262e3ef839ef6461"},
         {"path": "src/komira_scalar_arithmetic/src/komira_scalar_arithmetic/decimal_cast.mojo", "sha256": "7a1dbb0df35fc8c4a34126eb2476b0045579ed0b6f3cfd74a8021a92e06ac670"},
         {"path": "src/komira_scalar_arithmetic/src/komira_scalar_arithmetic/decimal_compare.mojo", "sha256": "dd48492d59aa9ccaf8bf39c59df0addcf9db46bedb7941571143a1842076d1ee"},
         {"path": "src/komira_scalar_arithmetic/src/komira_scalar_arithmetic/int_overflow.mojo", "sha256": "36c18e841d509a71c3a328de60e972ab3240fe9b5351b31e96d6b89000d15718"}
@@ -44,7 +45,7 @@ GRAPH_JSON = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["komira_scalar_arithmetic.mojoc"],
-      "key": "b77a602098d97398caa3df9064ea12a991fcb35c4d44812c41f12dbde4c59e30"
+      "key": "a9b22a52be0320c68fc48a64ec1c6ae15d07d6825820a6291a874ad718ea9784"
     },
     {
       "id": "komira_scalar_arithmetic@0.1.0#mojo1.0.0/test:src/komira_scalar_arithmetic/tests/test_decimal256_arith.mojo",
@@ -58,7 +59,7 @@ GRAPH_JSON = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_decimal256_arith.pass"],
-      "key": "8a3e9ef5366439a4eb89d7196c18826c7250691b6ae56d231957b4c01975174b"
+      "key": "51d7f4da7f892d760db7b5f2933ebd503ef14fa24f8dc1ce6abad98f1a48c608"
     },
     {
       "id": "komira_scalar_arithmetic@0.1.0#mojo1.0.0/test:src/komira_scalar_arithmetic/tests/test_decimal256_bounds.mojo",
@@ -72,7 +73,7 @@ GRAPH_JSON = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_decimal256_bounds.pass"],
-      "key": "088caa2364ec226fe1afebe8cc8adb56106097d29ffadd3837d0910aa81e9f49"
+      "key": "3b0a384818ea6f97e2a4595421e8e4e2fc714e1128c8fa5d5e89c0d5873ebcdd"
     },
     {
       "id": "komira_scalar_arithmetic@0.1.0#mojo1.0.0/test:src/komira_scalar_arithmetic/tests/test_decimal_arith.mojo",
@@ -86,7 +87,21 @@ GRAPH_JSON = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_decimal_arith.pass"],
-      "key": "43e17b489f23a184eda1699f5c08cc8ef5298c53fd1dbca6cac5072b18f54bec"
+      "key": "2d212cc11d5c922b2f7ca891ecb8c158343c10007cdcc60e4452a56e8500db00"
+    },
+    {
+      "id": "komira_scalar_arithmetic@0.1.0#mojo1.0.0/test:src/komira_scalar_arithmetic/tests/test_decimal_avg.mojo",
+      "package": "komira_scalar_arithmetic",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/komira_scalar_arithmetic/tests/test_decimal_avg.mojo", "sha256": "65b7b350c8c7807c23ae00c0e64683fc758f229354e37b19a71901dec8f31cb6"}
+      ],
+      "deps": ["komira_scalar_arithmetic@0.1.0#mojo1.0.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_decimal_avg.pass"],
+      "key": "d6288ee45444d549cd8cc66894598b37325b3b4dbbcfdab75be543c1519bb945"
     },
     {
       "id": "komira_scalar_arithmetic@0.1.0#mojo1.0.0/test:src/komira_scalar_arithmetic/tests/test_decimal_cast.mojo",
@@ -100,7 +115,7 @@ GRAPH_JSON = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_decimal_cast.pass"],
-      "key": "bd498698c0358270760ace7102555876fe04c48371fe66f1c8d935ebace6ecfb"
+      "key": "d3cf62d0afe0af377741ff295a1b0167c41dbd8364222a51f2fb0ca7b9bb75f9"
     },
     {
       "id": "komira_scalar_arithmetic@0.1.0#mojo1.0.0/test:src/komira_scalar_arithmetic/tests/test_decimal_compare.mojo",
@@ -114,7 +129,7 @@ GRAPH_JSON = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_decimal_compare.pass"],
-      "key": "c542932604b47a9cd09b0ece472e7ad0dc26169b520489ac62fe7f9c3eac1126"
+      "key": "6fdd8113a2ffef30f86c334a11d790f9c302a3ebbe3472c64f8b01ce54887069"
     },
     {
       "id": "komira_scalar_arithmetic@0.1.0#mojo1.0.0/test:src/komira_scalar_arithmetic/tests/test_decimal_parse.mojo",
@@ -128,7 +143,7 @@ GRAPH_JSON = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_decimal_parse.pass"],
-      "key": "3f662a4c56de6e43d9432d2c0c7f45467f9dab32913879cfaeb3704c76577ca3"
+      "key": "373777331e5a76367d61b2e26807b49dbfbeac34d0b677651dabde865fdf4914"
     },
     {
       "id": "komira_scalar_arithmetic@0.1.0#mojo1.0.0/test:src/komira_scalar_arithmetic/tests/test_decimal_wrap_and_refusals.mojo",
@@ -142,7 +157,7 @@ GRAPH_JSON = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_decimal_wrap_and_refusals.pass"],
-      "key": "c3c0fb08c3144fcfdd14c39cc1fdebca8a2b7bd64f409f6e3fec146ab441707e"
+      "key": "5e90d66b3fb080a5c4d36d2ec528ab9f7bd04e13a02c9def83d11bd266b5f2a7"
     },
     {
       "id": "komira_scalar_arithmetic@0.1.0#mojo1.0.0/test:src/komira_scalar_arithmetic/tests/test_int_overflow.mojo",
@@ -156,7 +171,7 @@ GRAPH_JSON = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_int_overflow.pass"],
-      "key": "14bbfd71988e7bb854893a8d4dd6ca0a8102e8c845d85bb87c821bcd17aadae9"
+      "key": "22f869bdfd97b05348954c8d529ce715022e6bb09cffe07df20803e53f6e84e4"
     }
   ]
 }
@@ -189,6 +204,7 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
         {"path": "src/komira_scalar_arithmetic/src/komira_scalar_arithmetic/__init__.mojo", "sha256": "c272e34bbfb5af2b0a15c2ffbc23d37a86a0dc913a05492f880871a9b015f366"},
         {"path": "src/komira_scalar_arithmetic/src/komira_scalar_arithmetic/decimal256_arith.mojo", "sha256": "d12d42bc599a904a64944a8d60f1bb63cc576e7d876f39b9e8440f7fe2cb60d3"},
         {"path": "src/komira_scalar_arithmetic/src/komira_scalar_arithmetic/decimal_arith.mojo", "sha256": "c4b3004d0d2c9fd04b2b6d46d733fc24fe80910a07acbc0a07b64623cd167693"},
+        {"path": "src/komira_scalar_arithmetic/src/komira_scalar_arithmetic/decimal_avg.mojo", "sha256": "44c0e94d36abcbb4139081ef9be0bcadd4d672785e4668e2262e3ef839ef6461"},
         {"path": "src/komira_scalar_arithmetic/src/komira_scalar_arithmetic/decimal_cast.mojo", "sha256": "7a1dbb0df35fc8c4a34126eb2476b0045579ed0b6f3cfd74a8021a92e06ac670"},
         {"path": "src/komira_scalar_arithmetic/src/komira_scalar_arithmetic/decimal_compare.mojo", "sha256": "dd48492d59aa9ccaf8bf39c59df0addcf9db46bedb7941571143a1842076d1ee"},
         {"path": "src/komira_scalar_arithmetic/src/komira_scalar_arithmetic/int_overflow.mojo", "sha256": "36c18e841d509a71c3a328de60e972ab3240fe9b5351b31e96d6b89000d15718"}
@@ -197,7 +213,7 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["komira_scalar_arithmetic.mojoc"],
-      "key": "57c6d704d19dac01b32bffeb3a107fbb180323e3434750422de6907da0d6fc4d"
+      "key": "cc658a2c9d408f72c9a6533f12a173e8b3a1bacb937e1bc3640fa4cea6cec567"
     },
     {
       "id": "komira_scalar_arithmetic@0.1.0#mojo1.0.0/test:src/komira_scalar_arithmetic/tests/test_decimal256_arith.mojo",
@@ -211,7 +227,7 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_decimal256_arith.pass"],
-      "key": "8bdc239318871625d7332726ea2f2b19e835521d59cbc50d9a0ee60c982f0dde"
+      "key": "9abc591442a2072736912a7da3c362958b874f7695474e969fad3ee033faf301"
     },
     {
       "id": "komira_scalar_arithmetic@0.1.0#mojo1.0.0/test:src/komira_scalar_arithmetic/tests/test_decimal256_bounds.mojo",
@@ -225,7 +241,7 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_decimal256_bounds.pass"],
-      "key": "997e83bc3adb8fd36b60a055a03bea98a97e3c0c5d080eb2b354e5c453c86558"
+      "key": "5198619a838450888c9afd9c8454738efc23fde471d23b2f74c99093543245b3"
     },
     {
       "id": "komira_scalar_arithmetic@0.1.0#mojo1.0.0/test:src/komira_scalar_arithmetic/tests/test_decimal_arith.mojo",
@@ -239,7 +255,21 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_decimal_arith.pass"],
-      "key": "5e227f2f0c16575ad625031899962952dfed20e5fa90397bb0fca358b52c9d85"
+      "key": "4e6b4f2ff35a9048bff383d3acd45011b29e18769468d70b6c19f37d58abca86"
+    },
+    {
+      "id": "komira_scalar_arithmetic@0.1.0#mojo1.0.0/test:src/komira_scalar_arithmetic/tests/test_decimal_avg.mojo",
+      "package": "komira_scalar_arithmetic",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/komira_scalar_arithmetic/tests/test_decimal_avg.mojo", "sha256": "65b7b350c8c7807c23ae00c0e64683fc758f229354e37b19a71901dec8f31cb6"}
+      ],
+      "deps": ["komira_scalar_arithmetic@0.1.0#mojo1.0.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_decimal_avg.pass"],
+      "key": "7e916ab29c7a58c8647d6cd7aab1be5447f649bbfdb32dcdb6f2e68b375eb485"
     },
     {
       "id": "komira_scalar_arithmetic@0.1.0#mojo1.0.0/test:src/komira_scalar_arithmetic/tests/test_decimal_cast.mojo",
@@ -253,7 +283,7 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_decimal_cast.pass"],
-      "key": "492dff7a49eaa8a002909e6d87a5c504d724625e87a4958dbb7b2a0861e8e6c4"
+      "key": "a61050788e6409fe335f7a207cc782bf26f0094bb6791b92efcbccdf40586d37"
     },
     {
       "id": "komira_scalar_arithmetic@0.1.0#mojo1.0.0/test:src/komira_scalar_arithmetic/tests/test_decimal_compare.mojo",
@@ -267,7 +297,7 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_decimal_compare.pass"],
-      "key": "22a902e7f558945b914f73554135a902e3faf4b3440b02e0aaab04f3a320d705"
+      "key": "fec9a93e173dcfed0084aad5057e5462f94c168ccccc5f8ffe7434c4f1f57aef"
     },
     {
       "id": "komira_scalar_arithmetic@0.1.0#mojo1.0.0/test:src/komira_scalar_arithmetic/tests/test_decimal_parse.mojo",
@@ -281,7 +311,7 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_decimal_parse.pass"],
-      "key": "281ddac0d914a612e3066b8db10f9f7e2e1331f2e6df90317544bd7f28141bf5"
+      "key": "b7df7c9a25a6feeb176a7f89901c576c25cd0c266a4c2722341bea5c1f31a704"
     },
     {
       "id": "komira_scalar_arithmetic@0.1.0#mojo1.0.0/test:src/komira_scalar_arithmetic/tests/test_decimal_wrap_and_refusals.mojo",
@@ -295,7 +325,7 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_decimal_wrap_and_refusals.pass"],
-      "key": "b8fdb9518c223b1952d97cc6141f85bad9813731a158e98d467abd495c547459"
+      "key": "22152b11742fc44d8a63f7955892c29dabb28d25bf7e4d893ebf4dfbfba02581"
     },
     {
       "id": "komira_scalar_arithmetic@0.1.0#mojo1.0.0/test:src/komira_scalar_arithmetic/tests/test_int_overflow.mojo",
@@ -309,7 +339,7 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_int_overflow.pass"],
-      "key": "8fb7295a7002ad4df0d899cc610a259a5d09b2b7c5c28c2ccc170fe05fbe9c38"
+      "key": "16fc862eb06e4ea4db51d692983ef18cb2dcfa1d65c3ce720b764f693fb5a85a"
     }
   ]
 }
@@ -339,6 +369,7 @@ GRAPH_JSON_OSX_ARM64 = r'''{
         {"path": "src/komira_scalar_arithmetic/src/komira_scalar_arithmetic/__init__.mojo", "sha256": "c272e34bbfb5af2b0a15c2ffbc23d37a86a0dc913a05492f880871a9b015f366"},
         {"path": "src/komira_scalar_arithmetic/src/komira_scalar_arithmetic/decimal256_arith.mojo", "sha256": "d12d42bc599a904a64944a8d60f1bb63cc576e7d876f39b9e8440f7fe2cb60d3"},
         {"path": "src/komira_scalar_arithmetic/src/komira_scalar_arithmetic/decimal_arith.mojo", "sha256": "c4b3004d0d2c9fd04b2b6d46d733fc24fe80910a07acbc0a07b64623cd167693"},
+        {"path": "src/komira_scalar_arithmetic/src/komira_scalar_arithmetic/decimal_avg.mojo", "sha256": "44c0e94d36abcbb4139081ef9be0bcadd4d672785e4668e2262e3ef839ef6461"},
         {"path": "src/komira_scalar_arithmetic/src/komira_scalar_arithmetic/decimal_cast.mojo", "sha256": "7a1dbb0df35fc8c4a34126eb2476b0045579ed0b6f3cfd74a8021a92e06ac670"},
         {"path": "src/komira_scalar_arithmetic/src/komira_scalar_arithmetic/decimal_compare.mojo", "sha256": "dd48492d59aa9ccaf8bf39c59df0addcf9db46bedb7941571143a1842076d1ee"},
         {"path": "src/komira_scalar_arithmetic/src/komira_scalar_arithmetic/int_overflow.mojo", "sha256": "36c18e841d509a71c3a328de60e972ab3240fe9b5351b31e96d6b89000d15718"}
@@ -347,7 +378,7 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["komira_scalar_arithmetic.mojoc"],
-      "key": "c35e70fd7e5bcbda622a68105ce54888e0271e962c58b922e6e44b39c2a13b8d"
+      "key": "6717ac1523715c03690f1276ec3f8b4b8ac1e28957ebdbd4f56536cdb7672365"
     },
     {
       "id": "komira_scalar_arithmetic@0.1.0#mojo1.0.0/test:src/komira_scalar_arithmetic/tests/test_decimal256_arith.mojo",
@@ -361,7 +392,7 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_decimal256_arith.pass"],
-      "key": "0b507b126ffdf063a9252096d0ee2d8a4c3647fe0a22285d8e3270961bd13695"
+      "key": "23bf10a8abefe28c5161184258c3c713bef100152864a02514af3c410d30e82b"
     },
     {
       "id": "komira_scalar_arithmetic@0.1.0#mojo1.0.0/test:src/komira_scalar_arithmetic/tests/test_decimal256_bounds.mojo",
@@ -375,7 +406,7 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_decimal256_bounds.pass"],
-      "key": "f244e8be743eeda6092f8c803f6563ed456c04085b76a8ddf75e3e0684cb871a"
+      "key": "08a2674d479dad20e247d10a05b09a67c868560edf89d9c50919f0cb0da24b32"
     },
     {
       "id": "komira_scalar_arithmetic@0.1.0#mojo1.0.0/test:src/komira_scalar_arithmetic/tests/test_decimal_arith.mojo",
@@ -389,7 +420,21 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_decimal_arith.pass"],
-      "key": "e0fbe12bbf709022693e2da4c96fd360674fc74236a1c7b28f76976a64646f07"
+      "key": "e33d795631b7471d3b6a0370ad683dcf975ab7acef9eb457007cbbbfb825728c"
+    },
+    {
+      "id": "komira_scalar_arithmetic@0.1.0#mojo1.0.0/test:src/komira_scalar_arithmetic/tests/test_decimal_avg.mojo",
+      "package": "komira_scalar_arithmetic",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/komira_scalar_arithmetic/tests/test_decimal_avg.mojo", "sha256": "65b7b350c8c7807c23ae00c0e64683fc758f229354e37b19a71901dec8f31cb6"}
+      ],
+      "deps": ["komira_scalar_arithmetic@0.1.0#mojo1.0.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_decimal_avg.pass"],
+      "key": "9e7ee363c67663635f3b1ed0871658a7a3822e26c545cd2937b65ed0b9c6b61c"
     },
     {
       "id": "komira_scalar_arithmetic@0.1.0#mojo1.0.0/test:src/komira_scalar_arithmetic/tests/test_decimal_cast.mojo",
@@ -403,7 +448,7 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_decimal_cast.pass"],
-      "key": "d0babec5484e3b10e62ad63abfb902b2d086c9775e850102b869f541c7e5b1db"
+      "key": "5e600d10bd5bfeeb814a9074303a72350fcb59956e9d16547166e0fdef1c35e6"
     },
     {
       "id": "komira_scalar_arithmetic@0.1.0#mojo1.0.0/test:src/komira_scalar_arithmetic/tests/test_decimal_compare.mojo",
@@ -417,7 +462,7 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_decimal_compare.pass"],
-      "key": "6bd2f1589baf7580535905c4f54bcf6aec9e889a85e77c421e7fca096a8ac86f"
+      "key": "7c220d70dc036d651fadaeb41839fa3a03c3e1c40f977c12b785f9c4cf486e93"
     },
     {
       "id": "komira_scalar_arithmetic@0.1.0#mojo1.0.0/test:src/komira_scalar_arithmetic/tests/test_decimal_parse.mojo",
@@ -431,7 +476,7 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_decimal_parse.pass"],
-      "key": "f368f585ab98155008d4b07fa4b632328ff46bcbb5b842db576b0ddad93b9f21"
+      "key": "cc989ae22abcbf9c8b6ef411963587fd1c0b000af60680632fb60bf87a6d1a9c"
     },
     {
       "id": "komira_scalar_arithmetic@0.1.0#mojo1.0.0/test:src/komira_scalar_arithmetic/tests/test_decimal_wrap_and_refusals.mojo",
@@ -445,7 +490,7 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_decimal_wrap_and_refusals.pass"],
-      "key": "985149f95b77794c37f2e61a9762503e36549d55ba19ef8ad7684b243aeb8b35"
+      "key": "a04992598c437e9ceba11d9c70a9d4e77d210592ed63c939c1cc27a31c59e8ce"
     },
     {
       "id": "komira_scalar_arithmetic@0.1.0#mojo1.0.0/test:src/komira_scalar_arithmetic/tests/test_int_overflow.mojo",
@@ -459,7 +504,7 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_int_overflow.pass"],
-      "key": "5cd32afa5aeab00667b13e605ac58a0ff744d3a11367fb640787df4f3b90984c"
+      "key": "5076507d6a0867f319346d7a8bae4eb8b20aa1c7093c1fb09bc0ac6373b4af14"
     }
   ]
 }

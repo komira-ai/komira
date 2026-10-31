@@ -62,6 +62,7 @@ from komira_arrow.band_view import BandView
 from komira_arrow.morsel_view import MorselView
 
 from komira_agg.aggregator import Aggregator
+from komira_scalar_arithmetic.decimal_avg import avg_integer_float64
 from komira_udf.float_quotient_order import (
     float_max_fold_f64,
     float_max_identity_f64,
@@ -563,12 +564,12 @@ struct AvgOp[dt: DType](HashAggOpDt):
     FLOAT64 for a float-family input, an EXACT INT128 pair for an integer one.
     `finalize` emits sum/count as Float64 (a mean -- always float, matching the
     untyped AVG output). The integer total is NOT narrowed to INT64, so an
-    AVG never refuses where its SUM would; it is rounded TWICE -- the INT128
-    total to FLOAT64 (`Scalar[int128].cast[float64]()`), then the divide.
-    That equals DuckDB 1.5.3 where `long double` is `double` (darwin arm64,
-    measured: avg([2^53+1, 0, 0]) = 3002399751580330.5 at both); DuckDB on
-    x86-64 divides in 80-bit and can differ in the last ulp past 2^53
-    (inferred from its source, not executed)."""
+    AVG never refuses where its SUM would. Over an INT32 or INT64 input the
+    finalize is DuckDB's (`avg_integer_float64`: 80-bit long double steps on
+    the exact total, emulated in integers, rounded once to a double); over an
+    INT8 or INT16 one, DuckDB's double division; over an unsigned input (whose
+    DuckDB binding is not measured) the INT128 total to FLOAT64
+    (`Scalar[int128].cast[float64]()`), then the divide."""
 
     comptime DT: DType = Self.dt
     comptime OUT_DT: DType = DType.float64
@@ -591,7 +592,14 @@ struct AvgOp[dt: DType](HashAggOpDt):
     def finalize(state: SIMD[Self.SDT, 2]) -> Scalar[Self.OUT_DT]:
         if state[1] == 0:
             return Float64(0.0)
-        return state[0].cast[DType.float64]() / state[1].cast[DType.float64]()
+        comptime if Self.dt == DType.int64 or Self.dt == DType.int32:
+            return avg_integer_float64(
+                state[0].cast[DType.int128](),
+                Int(state[1].cast[DType.int64]()),
+                64,
+            )
+        else:
+            return state[0].cast[DType.float64]() / state[1].cast[DType.float64]()
 
     @staticmethod
     @always_inline
