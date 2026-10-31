@@ -10,11 +10,16 @@
 from komira_phase_timers.phase_timers import (
     FIELD_CALLS,
     FIELD_MAX,
+    FIELD_RU_VOL,
     FIELD_SUM,
     PH_COUNT,
     pt_get,
     pt_lane_count,
 )
+
+
+comptime RU_COUNT: Int = 6
+"""Resource-usage fields per phase (`FIELD_RU_VOL` onwards)."""
 
 
 struct PhaseAgg(Copyable, Movable):
@@ -27,6 +32,12 @@ struct PhaseAgg(Copyable, Movable):
     var calls: Int
     var lanes: Int
     """Threads with at least one interval."""
+    var ru_sum: List[Int]
+    """The thread resource usage inside the phase, summed over threads: in
+    order voluntary and involuntary context switches, user and system CPU
+    time (ns), minor and major page faults (`RU_COUNT` entries)."""
+    var ru_max: List[Int]
+    """The same, the largest total of one thread."""
 
     def __init__(out self):
         self.sum_ns = 0
@@ -34,6 +45,8 @@ struct PhaseAgg(Copyable, Movable):
         self.longest_ns = 0
         self.calls = 0
         self.lanes = 0
+        self.ru_sum = List[Int](length=RU_COUNT, fill=0)
+        self.ru_max = List[Int](length=RU_COUNT, fill=0)
 
 
 def snapshot_phase(phase: Int) -> PhaseAgg:
@@ -50,6 +63,11 @@ def snapshot_phase(phase: Int) -> PhaseAgg:
             a.longest_ns = m
         if c > 0:
             a.lanes += 1
+        for k in range(RU_COUNT):
+            var v = pt_get(lane, phase, FIELD_RU_VOL + k)
+            a.ru_sum[k] += v
+            if v > a.ru_max[k]:
+                a.ru_max[k] = v
     return a^
 
 

@@ -7,12 +7,17 @@
 #   q3 32.5. Catches a quartile that picks a rank instead of interpolating.
 # - test_one_and_no_samples: one sample is its own median and quartiles; no
 #   samples give 0. Catches an index out of range.
+# - test_faults_settled_needs_two_agreeing_runs: no run or one run is not
+#   settled; 55000 then 900 is not; 10000, 900 then 880 is; 900 then 1000 is
+#   (within 20 percent); 900 then 1200 is not. Catches a rule that stops on a
+#   falling count, one that never stops, or one that needs a single run.
 # - test_sorting_leaves_the_input_alone: `sorted_copy` returns a sorted copy
 #   and the argument keeps its order.
 
-from std.testing import TestSuite, assert_equal
+from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
 from komira_bench_q6_phases.stats import (
+    faults_settled,
     maximum,
     median,
     minimum,
@@ -65,10 +70,20 @@ def test_sorting_leaves_the_input_alone() raises:
     assert_equal(xs[2], 2)
 
 
+def test_faults_settled_needs_two_agreeing_runs() raises:
+    assert_false(faults_settled(_list()))
+    assert_false(faults_settled(_list(900)))
+    assert_false(faults_settled(_list(55000, 900)))
+    assert_true(faults_settled(_list(10000, 900, 880)))
+    assert_true(faults_settled(_list(900, 1000)))
+    assert_false(faults_settled(_list(900, 1200)))
+
+
 def main() raises:
     var suite = TestSuite()
     suite.test[test_odd_sample]()
     suite.test[test_even_sample_interpolates]()
     suite.test[test_one_and_no_samples]()
+    suite.test[test_faults_settled_needs_two_agreeing_runs]()
     suite.test[test_sorting_leaves_the_input_alone]()
     suite^.run()

@@ -34,6 +34,8 @@ from komira_phase_timers.phase_timers import (
     pt_now,
     pt_record,
     pt_record_wake,
+    pt_ru_begin,
+    pt_ru_end,
     pt_stamp,
 )
 from std.builtin.swap import swap
@@ -137,9 +139,11 @@ def _work[
     while True:
         if run.should_stop():
             return
+        pt_ru_begin[PH_CLAIM]()
         var t_claim = pt_now()
         var maybe = run.source.next_morsel(wid)
         pt_record[PH_CLAIM](t_claim)
+        pt_ru_end[PH_CLAIM]()
         if not maybe:
             return
         if _push(run, wid, 0, maybe.take()):
@@ -174,10 +178,12 @@ struct SegmentTask[
         var sp = UnsafePointer(to=state).bitcast[SegmentRun[Self.S, Self.O, Self.K]]()
         var wid = Int(task_id)
         pt_record_wake()
+        pt_ru_begin[PH_TASK]()
         var t_task = pt_now()
         try:
             _work(sp[], wid)
         except e:
             sp[].fail(e)
         pt_record[PH_TASK](t_task)
+        pt_ru_end[PH_TASK]()
         pt_stamp[PH_END_STAMP]()

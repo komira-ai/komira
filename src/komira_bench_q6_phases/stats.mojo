@@ -36,6 +36,20 @@ def quantile(xs: List[Int], q: Float64) -> Float64:
     return Float64(s[lo]) + frac * Float64(s[lo + 1] - s[lo])
 
 
+def faults_settled(faults: List[Int]) -> Bool:
+    """True when the last two warm-up runs' page-fault counts agree within
+    20 percent of the larger: a context's first runs fault in the buffers
+    their workers keep, and the counts fall to a steady level after them."""
+    var n = len(faults)
+    if n < 2:
+        return False
+    var a = faults[n - 2]
+    var b = faults[n - 1]
+    var hi = max(a, b)
+    var lo = min(a, b)
+    return (hi - lo) * 5 <= hi
+
+
 def median(xs: List[Int]) -> Float64:
     return quantile(xs, 0.5)
 

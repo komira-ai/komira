@@ -3,12 +3,14 @@
 # =============================================================================
 #
 #   probe --lineitem FILE | --cache-dir DIR  --out-dir DIR
-#         [--threads 1,8,32,88] [--runs 9] [--memory-limit-gib 32]
-#         [--expect-tpch-sf1]
+#         [--threads 1,8,32,49,88] [--runs 9] [--memory-limit-gib 32]
+#         [--mode both|q6|decode-only] [--expect-tpch-sf1]
 #
 # `--cache-dir DIR` names the staged TPC-H cache; the file is
 # DIR/tpch/sf1/lineitem.parquet. `--expect-tpch-sf1` makes the probe check
-# every answer against TPC-H Q6 at scale factor 1. Every setting is a flag.
+# every answer against TPC-H Q6 at scale factor 1. `--mode` picks the query
+# run per thread count: Q6, the same scan with no predicate (`decode-only`), or
+# both (the default). Every setting is a flag.
 # A refusal raises with the reason; the program prints it and exits 2.
 
 from .probe import (
@@ -17,7 +19,7 @@ from .probe import (
     TPCH_SF1_Q6_REVENUE_UNSCALED,
 )
 
-comptime DEFAULT_THREADS: String = "1,8,32,88"
+comptime DEFAULT_THREADS: String = "1,8,32,49,88"
 comptime DEFAULT_RUNS: Int = 9
 comptime DEFAULT_MEMORY_GIB: Int = 32
 
@@ -71,6 +73,7 @@ def parse_probe_args(args: List[String]) raises -> ProbeSettings:
     var runs = DEFAULT_RUNS
     var mem_gib = DEFAULT_MEMORY_GIB
     var expect = False
+    var mode = String("both")
     var seen = List[String]()
     var i = 0
     while i < len(args):
@@ -97,6 +100,8 @@ def parse_probe_args(args: List[String]) raises -> ProbeSettings:
             out_dir = value^
         elif name == "threads":
             threads = value^
+        elif name == "mode":
+            mode = value^
         elif name == "runs":
             runs = _parse_int(value, "--runs")
         elif name == "memory-limit-gib":
@@ -108,6 +113,8 @@ def parse_probe_args(args: List[String]) raises -> ProbeSettings:
         raise Error("give exactly one of --lineitem and --cache-dir")
     if out_dir.byte_length() == 0:
         raise Error("--out-dir is required")
+    if mode != "both" and mode != "q6" and mode != "decode-only":
+        raise Error("--mode must be both, q6 or decode-only, got " + mode)
     if runs < 5:
         raise Error("--runs must be at least 5, got " + String(runs))
     if mem_gib < 1:
@@ -124,4 +131,6 @@ def parse_probe_args(args: List[String]) raises -> ProbeSettings:
         runs,
         mem_gib * 1024 * 1024 * 1024,
         expected,
+        mode != "decode-only",
+        mode != "q6",
     )

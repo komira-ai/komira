@@ -5,7 +5,8 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #
 # The welded tests (each file's header says what it proves):
 # - test_phase_timers_off: with the define absent the timers read no clock,
-#   register no thread and record nothing.
+#   register no thread and record nothing, and the per-thread usage brackets
+#   make no system call.
 mojo_library(
     name = "komira_phase_timers",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
@@ -20,7 +21,8 @@ mojo_library(
 #
 # - test_phase_timers_on: sums, the longest interval and the call count of a
 #   phase, a stamp, the wake latency, the join tails, and a reset that keeps
-#   the thread's lane.
+#   the thread's lane; the per-thread usage of a phase (context switches and
+#   page faults of the calling thread between a begin and an end).
 mojo_library(
     name = "komira_phase_timers_on",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),

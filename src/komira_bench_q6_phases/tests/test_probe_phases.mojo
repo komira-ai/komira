@@ -15,17 +15,41 @@
 #   counts and thread counts only, never a duration. Catches a timer left out
 #   of a stage, one that lands on the wrong thread, or one called the wrong
 #   number of times.
+# - test_thread_usage_is_booked_only_to_the_bracketed_phases: in one Q6 run on
+#   three workers the phases no usage bracket surrounds (parse, bind, optimize,
+#   lower, execute setup, run_plan, dispatch, combine, sink) hold no usage at
+#   all, the bracketed ones (task, claim) were called, no count is negative,
+#   and each phase's largest worker is at most its sum for the switch and
+#   fault counts. It compares counts only, never a duration or a CPU time.
+#   Catches a usage bracket booked to the wrong phase, one that leaves a
+#   negative delta (an end without its begin), or a sum and a maximum taken
+#   over different sets.
 # - test_the_json_is_valid_and_complete: `run_probe` for two thread counts
 #   gives JSON a parser accepts, with the schema, the note that the numbers
-#   are relative, both configurations, 5 runs each, a median and quartiles,
-#   the phase shares, the page faults, the footer cost, the expected answer
-#   matched, and phases.json and plan.txt written. Catches a malformed
-#   document, a missing section, or an answer that is not checked.
+#   are relative, a Q6 and a decode-only configuration per thread count (4 in
+#   all), 5 runs each, the warm-up record (discarded runs, their faults and
+#   whether they settled), a median and quartiles, the phase shares, the
+#   thread usage of the bracketed phases, the census of all the process's
+#   threads (the driver is one thread, with several workers at least one thread ran tasks, an idle control, the
+#   largest thread of a group is at most the group's sum), the page faults, the footer cost,
+#   the expected answers matched, and phases.json and plan.txt written.
+#   Catches a malformed document, a missing section, or an answer that is not
+#   checked.
+# - test_decode_only_decodes_without_filtering: in a decode-only run the plain
+#   decode is timed on every worker, the filter phases are absent, the
+#   answer is the sum of the table's prices, and a Q6 run of the same context
+#   has the filter phases and no plain decode. Catches a decode-only query
+#   that evaluates a predicate, one whose decode is not timed, or one that
+#   reads fewer columns than it should.
+# - test_only_the_selected_mode_runs: with only Q6 selected the JSON holds
+#   Q6 configurations only, and with only decode-only the other way. Catches
+#   a mode flag that is ignored.
 # - test_the_plan_text_shows_the_pushdown: the rendered plans name the scan,
 #   the filter and the lowered source and sink. Catches a render that leaves
 #   out the lowered plan the pushdown question is answered from.
 # - test_a_thread_list_beyond_the_timer_lanes_is_refused: a thread count that
-#   with the driver exceeds PT_LANES raises before any run. Catches a probe
+#   with the driver exceeds PT_LANES raises before any run, in each of the
+#   modes (Q6 only, decode-only only, both). Catches a probe
 #   that would drop timer records and report numbers from a partial table.
 # - test_a_wrong_expected_answer_is_reported: a different expected revenue
 #   makes `answers_match` False. Catches a check that cannot fail.
@@ -34,9 +58,14 @@ from std.os.path import exists
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
 from komira_bench_corpus.catalog import find_query
-from komira_bench_q6_phases.phase_snapshot import snapshot_phase
+from komira_bench_q6_phases.phase_snapshot import RU_COUNT, snapshot_phase
 from komira_bench_q6_phases.plan_render import render_plans
-from komira_bench_q6_phases.probe import ProbeSettings, run_probe
+from komira_bench_q6_phases.probe import (
+    DECODE_ONLY_TEXT,
+    NO_EXPECTED_REVENUE,
+    ProbeSettings,
+    run_probe,
+)
 from komira_json.parse import parse_json_value
 from komira_parquet_writer.record_batch_writer import (
     write_record_batch_to_parquet_bytes,
@@ -46,6 +75,7 @@ from komira_phase_timers.phase_timers import (
     PH_CLAIM,
     PH_COMBINE,
     PH_DECODE_FILTER_COLS,
+    PH_DECODE_PLAIN,
     PH_DISPATCH,
     PH_EXEC_SETUP,
     PH_FILTER,
@@ -63,6 +93,7 @@ from komira_phase_timers.phase_timers import (
     pt_enabled,
     pt_overflow_count,
     pt_reset,
+    pt_ru_available,
 )
 from komira_pipeline_exec.tpch_q6 import (
     LineitemTable,
@@ -92,6 +123,18 @@ def _revenue(ref t: LineitemTable) -> Int:
         ):
             sum += t.price[r] * t.discount[r]
     return sum
+
+
+def _sum_price(ref t: LineitemTable) -> Int:
+    var sum = 0
+    for r in range(t.rows()):
+        if not t.price_null[r]:
+            sum += t.price[r]
+    return sum
+
+
+def _decode_only() -> String:
+    return String(DECODE_ONLY_TEXT)
 
 
 def _write(name: String, ref t: LineitemTable) raises -> String:
@@ -149,11 +192,16 @@ def test_the_json_is_valid_and_complete() raises:
     threads.append(3)
     var out_dir = test_tmpdir() + "/probe_json_out"
     var result = run_probe(
-        ProbeSettings(path^, out_dir, threads^, 5, 1 << 30, _revenue(t))
+        ProbeSettings(
+            path^, out_dir, threads^, 5, 1 << 30, _revenue(t),
+            expected_decode_sum=_sum_price(t),
+        )
     )
     assert_true(result.answers_match)
     var doc = parse_json_value(result.json)
-    assert_equal(doc.get("schema").as_string(), "komira-q6-phase-probe/1")
+    assert_equal(doc.get("schema").as_string(), "komira-q6-phase-probe/2")
+    assert_equal(doc.get("thread_usage_available").as_bool(), pt_ru_available())
+    assert_true(doc.has("warmup_policy"))
     assert_true("RELATIVE" in doc.get("note").as_string())
     assert_true(doc.get("timers_compiled_in").as_bool())
     assert_equal(Int(doc.get("timer_lane_capacity").as_int64()), PT_LANES)
@@ -163,10 +211,41 @@ def test_the_json_is_valid_and_complete() raises:
     assert_true(doc.has("footer_cost"))
     assert_true(doc.get("host").get("logical_cores").as_int64() > 0)
     var cfgs = doc.get("configs")
-    assert_equal(cfgs.array_len(), 2)
-    for i in range(2):
+    assert_equal(cfgs.array_len(), 4)
+    for i in range(4):
         var c = cfgs.element_at(i)
         assert_equal(Int(c.get("runs").as_int64()), 5)
+        var warm = c.get("warmup")
+        assert_true(Int(warm.get("discarded").as_int64()) >= 2)
+        assert_true(warm.has("settled"))
+        assert_equal(
+            warm.get("minor_faults").array_len(), Int(warm.get("discarded").as_int64())
+        )
+        assert_equal(
+            warm.get("voluntary_csw").array_len(), Int(warm.get("discarded").as_int64())
+        )
+        assert_equal(
+            warm.get("total_ms").array_len(), Int(warm.get("discarded").as_int64())
+        )
+        var census = c.get("thread_census")
+        if census.get("available").as_bool():
+            assert_equal(Int(census.get("driver").get("threads").get("median").as_float64()), 1)
+            if Int(c.get("threads_requested").as_int64()) > 1:
+                # With one worker the engine may run the task on the driver.
+                assert_true(census.get("task_workers").get("threads").get("median").as_float64() >= 1.0)
+            for g in ["driver", "task_workers", "other"]:
+                var grp = census.get(String(g))
+                assert_true(
+                    grp.get("voluntary_csw_max").get("median").as_float64()
+                    <= grp.get("voluntary_csw_sum").get("median").as_float64()
+                )
+                assert_true(grp.has("on_cpu_ms_sum") and grp.has("runnable_wait_ms_max"))
+            assert_true(census.has("other_by_name"))
+            var idle = c.get("thread_census_idle_control")
+            assert_true(idle.get("available").as_bool())
+            assert_equal(Int(idle.get("driver").get("threads").get("median").as_float64()), 1)
+        var is_q6 = c.get("mode").as_string() == "q6"
+        assert_equal(i % 2 == 0, is_q6)
         assert_true(c.get("total_ms").has("median"))
         assert_equal(Int(c.get("timer_records_dropped").as_int64()), 0)
         assert_true(c.get("total_ms").has("q1") and c.get("total_ms").has("q3"))
@@ -176,13 +255,106 @@ def test_the_json_is_valid_and_complete() raises:
         var phases = c.get("phases")
         assert_true(phases.has("parse") and phases.has("task_busy"))
         assert_true(phases.has("dispatch_fork_join") and phases.has("agg_sum"))
+        assert_equal(phases.has("filter_mask"), is_q6)
+        assert_equal(phases.has("decode_plain"), not is_q6)
+        if pt_ru_available():
+            var usage = phases.get("task_busy").get("thread_usage")
+            for key in [
+                "voluntary_csw", "involuntary_csw", "user_ms", "system_ms",
+                "minor_faults", "major_faults",
+            ]:
+                var pair = usage.get(String(key))
+                assert_true(pair.get("sum").has("median") and pair.get("max").has("median"))
+                assert_true(
+                    pair.get("max").get("median").as_float64()
+                    <= pair.get("sum").get("median").as_float64()
+                )
+            assert_true(not phases.get("parse").has("thread_usage"))
         assert_true(phases.get("task_busy").has("share_of_total_pct"))
         assert_true(phases.get("task_join_tail").get("share_of_total_pct").is_null())
         assert_equal(c.get("page_faults").get("minor_per_run").array_len(), 5)
     assert_equal(Int(cfgs.element_at(0).get("threads_requested").as_int64()), 1)
-    assert_equal(Int(cfgs.element_at(1).get("threads_requested").as_int64()), 3)
+    assert_equal(Int(cfgs.element_at(1).get("threads_requested").as_int64()), 1)
+    assert_equal(Int(cfgs.element_at(2).get("threads_requested").as_int64()), 3)
+    assert_equal(Int(cfgs.element_at(3).get("threads_requested").as_int64()), 3)
     assert_true(exists(out_dir + "/phases.json"))
     assert_true(exists(out_dir + "/plan.txt"))
+
+
+def test_thread_usage_is_booked_only_to_the_bracketed_phases() raises:
+    if not pt_ru_available():
+        return
+    var t = q6_table(3000)
+    var ctx = EngineContext(EngineOptions(worker_count=3))
+    register_parquet(ctx, "lineitem", _write("probe_usage", t))
+    _ = run_sql(ctx, _q6())  # warm
+    pt_reset()
+    var outcome = run_sql(ctx, _q6())
+    assert_false(outcome.refusal.__bool__(), "Q6 was refused")
+    for p in [
+        PH_PARSE, PH_BIND, PH_OPTIMIZE, PH_LOWER, PH_EXEC_SETUP, PH_RUN_PLAN,
+        PH_DISPATCH, PH_COMBINE, PH_SINK,
+    ]:
+        var a = snapshot_phase(p)
+        for k in range(RU_COUNT):
+            assert_equal(a.ru_sum[k], 0)
+            assert_equal(a.ru_max[k], 0)
+    var task = snapshot_phase(PH_TASK)
+    var claim = snapshot_phase(PH_CLAIM)
+    assert_true(task.calls > 0 and claim.calls > 0)
+    for p in [PH_TASK, PH_CLAIM, PH_DECODE_FILTER_COLS, PH_FILTER]:
+        var a = snapshot_phase(p)
+        for k in range(RU_COUNT):
+            assert_true(a.ru_sum[k] >= 0 and a.ru_max[k] >= 0)
+        # Fields 0 and 1 are context switches, 4 and 5 page faults.
+        for k in [0, 1, 4, 5]:
+            assert_true(a.ru_max[k] <= a.ru_sum[k])
+    assert_equal(pt_overflow_count(), 0)
+
+
+def test_decode_only_decodes_without_filtering() raises:
+    var t = q6_table(3000)
+    var ctx = EngineContext(EngineOptions(worker_count=3))
+    register_parquet(ctx, "lineitem", _write("probe_decode_only", t))
+    _ = run_sql(ctx, _decode_only())  # warm
+    pt_reset()
+    var outcome = run_sql(ctx, _decode_only())
+    assert_false(outcome.refusal.__bool__(), "the decode-only query was refused")
+    ref batch = outcome.batches[0]
+    var v = batch.column_at(0).as_decimal128().get_i128(0)
+    assert_equal(Int(v.cast[DType.int64]()), _sum_price(t))
+    var plain = snapshot_phase(PH_DECODE_PLAIN)
+    assert_true(plain.calls >= 12 and plain.lanes >= 1)
+    assert_equal(snapshot_phase(PH_FILTER).calls, 0)
+    assert_equal(snapshot_phase(PH_DECODE_FILTER_COLS).calls, 0)
+    assert_true(snapshot_phase(PH_CLAIM).calls > 0)
+    assert_true(plain.lanes <= 3)
+    assert_equal(pt_overflow_count(), 0)
+    pt_reset()
+    _ = run_sql(ctx, _q6())
+    assert_equal(snapshot_phase(PH_DECODE_PLAIN).calls, 0)
+    assert_true(snapshot_phase(PH_FILTER).calls > 0)
+
+
+def test_only_the_selected_mode_runs() raises:
+    var t = q6_table(1000)
+    var path = _write("probe_modes", t)
+    for pick in range(2):
+        var threads = List[Int]()
+        threads.append(2)
+        var result = run_probe(
+            ProbeSettings(
+                path.copy(), test_tmpdir() + "/probe_modes_out", threads^, 5, 1 << 30,
+                _revenue(t) if pick == 0 else NO_EXPECTED_REVENUE,
+                pick == 0, pick == 1,
+                _sum_price(t) if pick == 1 else NO_EXPECTED_REVENUE,
+            )
+        )
+        assert_true(result.answers_match)
+        var cfgs = parse_json_value(result.json).get("configs")
+        assert_equal(cfgs.array_len(), 1)
+        var mode = cfgs.element_at(0).get("mode").as_string()
+        assert_equal(mode, String("q6") if pick == 0 else String("decode_only"))
 
 
 def test_the_plan_text_shows_the_pushdown() raises:
@@ -217,26 +389,34 @@ def test_a_wrong_expected_answer_is_reported() raises:
 
 
 def test_a_thread_list_beyond_the_timer_lanes_is_refused() raises:
+    # Q6 only, decode-only only and both refuse it before any run: the driver
+    # takes a lane, so PT_LANES workers do not fit.
     var t = q6_table(300)
-    var threads = List[Int]()
-    threads.append(PT_LANES)
-    var refused = False
-    try:
-        _ = run_probe(
-            ProbeSettings(
-                _write("probe_lanes", t), test_tmpdir() + "/probe_lanes_out",
-                threads^, 5, 1 << 30,
+    var path = _write("probe_lanes", t)
+    for pick in range(3):
+        var threads = List[Int]()
+        threads.append(1)
+        threads.append(PT_LANES)
+        var refused = False
+        try:
+            _ = run_probe(
+                ProbeSettings(
+                    path.copy(), test_tmpdir() + "/probe_lanes_out", threads^,
+                    5, 1 << 30, NO_EXPECTED_REVENUE, pick != 1, pick != 0,
+                )
             )
-        )
-    except e:
-        refused = "lanes" in String(e)
-    assert_true(refused)
+        except e:
+            refused = "lanes" in String(e)
+        assert_true(refused)
 
 
 def main() raises:
     var suite = TestSuite()
     suite.test[test_every_stage_of_a_run_is_timed]()
+    suite.test[test_thread_usage_is_booked_only_to_the_bracketed_phases]()
     suite.test[test_the_json_is_valid_and_complete]()
+    suite.test[test_decode_only_decodes_without_filtering]()
+    suite.test[test_only_the_selected_mode_runs]()
     suite.test[test_the_plan_text_shows_the_pushdown]()
     suite.test[test_a_wrong_expected_answer_is_reported]()
     suite.test[test_a_thread_list_beyond_the_timer_lanes_is_refused]()

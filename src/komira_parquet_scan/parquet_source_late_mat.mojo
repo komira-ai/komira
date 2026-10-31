@@ -55,6 +55,8 @@ from komira_phase_timers.phase_timers import (
     PH_GATHER,
     pt_now,
     pt_record,
+    pt_ru_begin,
+    pt_ru_end,
 )
 from komira_plan_expr.expr_id import ExprId
 from komira_plan_expr.expr_pool import ExprPool
@@ -211,15 +213,18 @@ def late_mat_decode[FS: FileSystem, fo: Origin[mut=True]](
     if pre_batch:
         filter_batch = pre_batch.take()
     else:
+        pt_ru_begin[PH_DECODE_FILTER_COLS]()
         var t_cols = pt_now()
         filter_batch = reader.decode_columns_subset(rg_in_file, plan.cols, preserve_dict)
         pt_record[PH_DECODE_FILTER_COLS](t_cols)
+        pt_ru_end[PH_DECODE_FILTER_COLS]()
     note_whole_rg_decode(filter_batch.num_rows())
     var mask_opt: Optional[BooleanArray] = None
     if pre_mask:
         mask_opt = pre_mask^
     elif has_decode_filter:
         ref p = pool
+        pt_ru_begin[PH_FILTER]()
         var t_mask = pt_now()
         var fused = False
         if fused_eval_enabled:
@@ -230,6 +235,7 @@ def late_mat_decode[FS: FileSystem, fo: Origin[mut=True]](
         if not fused:
             mask_opt = Optional(stages_mask(p, stages, filter_batch))
         pt_record[PH_FILTER](t_mask)
+        pt_ru_end[PH_FILTER]()
         if mask_opt.value().true_count() == 0:
             return ClaimOutcome.skip()
     if dyn and dyn_key_col >= 0:
@@ -282,12 +288,14 @@ def late_mat_decode[FS: FileSystem, fo: Origin[mut=True]](
         else:
             incr_payload_sel_skip()
     var payload_full: RecordBatch
+    pt_ru_begin[PH_DECODE_PAYLOAD]()
     var t_payload = pt_now()
     if decode_arena:
         payload_full = reader.decode_columns_subset_arena(rg_in_file, payload_cols, preserve_dict)
     else:
         payload_full = reader.decode_columns_subset(rg_in_file, payload_cols, preserve_dict)
     pt_record[PH_DECODE_PAYLOAD](t_payload)
+    pt_ru_end[PH_DECODE_PAYLOAD]()
     if sel_pipe_should_defer(sel_pipe_enabled, surviving, total):
         var dense = _assemble(proj, plan.cols, filter_batch, payload_cols, Optional(payload_full^), _MODE_SHARE)
         dense.set_selection_mask(mask^)

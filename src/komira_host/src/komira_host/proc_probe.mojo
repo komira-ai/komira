@@ -72,6 +72,13 @@ from std.sys.info import CompilationTarget
 comptime _LINUX_SMALL_FILE_MAX: Int = 4096
 
 
+def read_small_file_to_string(var path: String) -> String:
+    """The text of a small file (at most 4096 bytes are read), without its
+    trailing newline; empty on any error. For `/proc` and `/sys` readers
+    outside this package."""
+    return _read_small_file_to_string(path^)
+
+
 def _read_small_file_to_string(var path: String) -> String:
     """fopen + fread + fclose, capped at `_LINUX_SMALL_FILE_MAX` bytes.
 
