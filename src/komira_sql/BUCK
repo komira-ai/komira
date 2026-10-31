@@ -64,6 +64,7 @@ mojo_library(
         "tests/test_sql_bind_fn_nested_direct.mojo",
         "tests/test_sql_bind_group_by_direct.mojo",
         "tests/test_sql_bind_in_lhs.mojo",
+        "tests/test_sql_bind_int_sum.mojo",
         "tests/test_sql_bind_internals_direct.mojo",
         "tests/test_sql_bind_join.mojo",
         "tests/test_sql_bind_names.mojo",

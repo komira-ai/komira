@@ -24,6 +24,11 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #   oracle's DECIMAL(38,4); a join, a syntax error, an unknown table, a COPY or
 #   CTAS and a replaced file are named refusals; the footer is read once per
 #   query; contexts are created and dropped repeatedly.
+# - test_run_sql_int_sum: run_sql over INT64 and INT32 Parquet columns in several
+#   row groups: an integer sum() is declared DECIMAL(38, 0) and exact past the
+#   INT64 range (MAX and MIN rows, partials that each pass INT64, {MAX, MAX, MIN,
+#   MIN} = -2, per-group totals), an empty or all-NULL sum is NULL, and
+#   expressions, CASE and HAVING over the sum run.
 # - test_run_sql_timers_off: Q6 through run_sql on four workers in the default
 #   build gives the oracle's answer and leaves every phase timer
 #   (komira_phase_timers) unregistered and at zero.
@@ -115,6 +120,7 @@ mojo_library(
         "tests/test_plan_validation_routes_ledger.mojo",
         "tests/test_resolved_cache_lru_eviction_stress.mojo",
         "tests/test_resolved_cache_pin_count.mojo",
+        "tests/test_run_sql_int_sum.mojo",
         "tests/test_run_sql_q6.mojo",
         "tests/test_run_sql_timers_off.mojo",
         "tests/test_secret_capability_reveal.mojo",

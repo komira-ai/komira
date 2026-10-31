@@ -36,9 +36,9 @@
 #     the registered table is refused at step `lower`, naming the table.
 #   * test_a_tiny_memory_budget_is_refused_at_execute: a budget of 1 byte denies
 #     the sink its state ("was denied"), as a refusal at step `execute`.
-#   * test_a_sum_out_of_range_is_refused_and_the_context_runs_on: SUM of three
-#     INT64 values of 2^62 is refused at `execute` ("64-bit range"), and Q6
-#     then runs on the same context.
+#   * test_a_sum_past_int64_is_answered_exactly_and_the_context_runs_on: SUM of
+#     three INT64 values of 2^62 is the DECIMAL(38, 0) 3 * 2^62, and Q6 then
+#     runs on the same context.
 #   * test_a_scalar_subquery_is_refused_by_lowering: the optimizer leaves the
 #     subquery in the plan, so it is LOWERING_UNCUTTABLE_NODE at `lower`, and
 #     Q6 then runs on the same context.
@@ -358,12 +358,12 @@ def test_a_tiny_memory_budget_is_refused_at_execute() raises:
     assert_true(out.refusal.value().reason.find("was denied") >= 0)
 
 
-def test_a_sum_out_of_range_is_refused_and_the_context_runs_on() raises:
+def test_a_sum_past_int64_is_answered_exactly_and_the_context_runs_on() raises:
     var t = q6_table(200)
     var o = _oracle(t)
     var ctx = _new_context()
     register_parquet(ctx, "lineitem", _write("sql_over_q6", t))
-    # Three INT64 values of 2^62 sum past 2^63.
+    # Three INT64 values of 2^62 sum past 2^63: the sum is DECIMAL(38, 0).
     var big = List[Int]()
     for _ in range(3):
         big.append(1 << 62)
@@ -374,8 +374,17 @@ def test_a_sum_out_of_range_is_refused_and_the_context_runs_on() raises:
     fh.close()
     register_parquet(ctx, "big", path)
     var out = run_sql(ctx, "select sum(l_orderkey) from big")
-    _expect_refusal(out, String(STEP_EXECUTE), "")
-    assert_true(out.refusal.value().reason.find("64-bit range") >= 0)
+    assert_true(out.ok(), "the sum was refused")
+    assert_equal(len(out.batches), 1)
+    ref col = out.batches[0].column_at(0)
+    assert_equal(col.decimal_precision(), 38)
+    assert_equal(col.decimal_scale(), 0)
+    assert_false(col.is_null_at(0))
+    # 3 * 2^62 = 13835058055282163712.
+    assert_true(
+        col.as_decimal128().get_i128(0) == _w(1 << 62) * _w(3),
+        "the sum differs from 3 * 2^62",
+    )
     _expect_revenue(run_sql(ctx, _q6()), o.revenue)
 
 
@@ -454,7 +463,7 @@ def main() raises:
     suite.test[test_two_queries_on_one_context]()
     suite.test[test_a_file_replaced_between_queries_is_read_again]()
     suite.test[test_a_tiny_memory_budget_is_refused_at_execute]()
-    suite.test[test_a_sum_out_of_range_is_refused_and_the_context_runs_on]()
+    suite.test[test_a_sum_past_int64_is_answered_exactly_and_the_context_runs_on]()
     suite.test[test_a_scalar_subquery_is_refused_by_lowering]()
     suite.test[test_a_select_without_from_is_refused_at_execute]()
     suite.test[test_a_refusal_leaves_the_context_usable]()
