@@ -190,9 +190,15 @@ def test_small_totals_and_count_one() raises:
     assert_equal(avg_integer_float64(I128(1), 3, 64), Float64(1.0) / Float64(3.0))
     assert_equal(avg_decimal_float64(I128(12345), 1, 15, 2), Float64(123.45))
     assert_equal(avg_decimal_float64(I128(100), 4, 15, 2), Float64(0.25))
+    # A DECIMAL of 4 digits or fewer divides in double: 12.34, and 7 over 3000.
+    assert_equal(avg_decimal_float64(I128(1234), 1, 4, 2), Float64(12.34))
+    assert_equal(avg_decimal_float64(I128(7), 3, 4, 3), Float64(7.0) / Float64(3000.0))
 
 
 def test_a_count_of_zero_or_no_total_is_zero() raises:
+    assert_equal(avg_integer_float64(I128(5), 0, 16), Float64(0.0))
+    assert_equal(avg_decimal_float64(I128(5), 0, 4, 2), Float64(0.0))
+    assert_equal(_avg_long_double(I128(0), 5, 0), Float64(0.0))
     assert_equal(_avg_long_double(I128(5), 0, 0), Float64(0.0))
     assert_equal(_avg_emulated(I128(5), 0, 0), Float64(0.0))
     assert_equal(_avg_emulated(I128(0), 5, 0), Float64(0.0))

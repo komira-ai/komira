@@ -39,6 +39,7 @@ mojo_library(
         "//src/komira_operator_api:komira_operator_api",
         "//src/komira_physical_plan:komira_physical_plan",
         "//src/komira_plan_expr:komira_plan_expr",
+        "//src/komira_scalar_arithmetic:komira_scalar_arithmetic",
         "//src/komira_simd:komira_simd",
         "//src/komira_udf:komira_udf",
     ],

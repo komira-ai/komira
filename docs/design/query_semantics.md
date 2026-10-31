@@ -200,10 +200,10 @@ The rulings that settled each item once open or departing, the table of parity g
 
 ### 2.12 AVG of integers
 
-- **Rule.** AVG of an integer column sums exactly (as §8.1 does) and divides once, in DOUBLE, at the end. It must not accumulate in DOUBLE: a BIGINT sum above 2^53 would lose digits before the division.
-- **DuckDB.** Sums integers into a 128-bit accumulator, then divides (`extension/core_functions/aggregate/algebraic/avg.cpp` at v1.5.6).
-- **Current behaviour.** The Float64 channel that carries integer aggregates in multi-aggregate shapes is exact only below 2^53 (`src/komira_kernels/runtime_expr.mojo:592-600`); which AVG routes use it is not established here.
-- **Mark.** MATCHES.
+- **Rule.** AVG of an integer or DECIMAL column sums exactly (as §8.1 does) and divides at the end, as DuckDB does. It must not accumulate in DOUBLE: a BIGINT sum above 2^53 would lose digits before the division. The division is DuckDB's: of an INTEGER, BIGINT or DECIMAL wider than 4 digits, the total converted to an 80-bit long double, divided by `count * 10^scale` (the product and the quotient each rounded to a 64-bit mantissa), then rounded once to a double; of a SMALLINT or a DECIMAL of 4 digits or fewer, a division in double.
+- **DuckDB.** Sums integers into a 128-bit accumulator, then divides in `long double` (`IntegerAverageOperationHugeint` and `HugeintAverageOperation`, `GetAverageDivident` and `BindDecimalAvg`, `extension/core_functions/aggregate/algebraic/avg.cpp:92-124`, `:140-149`, `:269-278` at v1.5.6; the 128-bit to long double conversion is `CastBigintToFloating`, `src/common/types/hugeint.cpp:649-661`).
+- **Current behaviour.** `komira_scalar_arithmetic.decimal_avg` emulates those roundings in integers, and the grouped and ungrouped SQL sinks (`src/komira_pipeline_exec/agg_output.mojo`), the window AVG of an INT64 column, the COUNT(DISTINCT) driver's fixed AVG over an INT32 or INT64 column and `AvgOp` over an INT32 or INT64 column call it. Not changed, and so not DuckDB's in the last bit for a total past 2^53 or a count past 2^11: AVG on the paths that hold an INT64 or FLOAT64 sum (the mixed COUNT(DISTINCT) fold, the COUNT(DISTINCT) sink's fixed lane, the scalar-broadcast fold, the flat hash aggregate, the row-block cells) and over an unsigned column. The Float64 channel that carries integer aggregates in multi-aggregate shapes is exact only below 2^53 (`src/komira_kernels/runtime_expr.mojo:592-600`); which AVG routes use it is not established here.
+- **Mark.** MATCHES for the SQL sinks, the window AVG of INT64 and the AVG listed above; the paths named as not changed do not follow.
 
 ### 2.13 BOOLEAN aggregates
 

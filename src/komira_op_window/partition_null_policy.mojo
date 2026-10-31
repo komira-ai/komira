@@ -36,6 +36,7 @@
 from komira_arrow.column import Column
 from komira_arrow.primitive_array import PrimitiveArray
 from komira_buffer.heap_region import HeapRegion
+from komira_scalar_arithmetic.decimal_avg import avg_integer_float64
 
 
 @always_inline
@@ -110,8 +111,10 @@ def i64_sum_result(total: I128) raises -> Int64:
 
 @always_inline
 def i64_mean(total: I128, count: Int) -> Float64:
-    """An INT64 AVG: the exact total divided once, in DOUBLE (§2.12)."""
-    return total.cast[DType.float64]() / Float64(count)
+    """An INT64 AVG: the exact total divided as DuckDB's avg() of a BIGINT does,
+    in 80-bit long double rounded once to a DOUBLE (§2.12;
+    `komira_scalar_arithmetic.decimal_avg`)."""
+    return avg_integer_float64(total, count, 64)
 
 
 def alloc_out_i64(n: Int, nullable: Bool) raises -> PrimitiveArray[DType.int64]:

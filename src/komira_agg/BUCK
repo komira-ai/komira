@@ -7,6 +7,7 @@ mojo_library(
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
         "//src/komira_arrow:komira_arrow",
+        "//src/komira_scalar_arithmetic:komira_scalar_arithmetic",
         "//src/komira_udf:komira_udf",
     ],
     test_srcs = [
