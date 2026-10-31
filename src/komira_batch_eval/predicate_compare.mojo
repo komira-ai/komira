@@ -50,7 +50,7 @@ from komira_scalar_arithmetic.decimal_compare import (
 )
 
 from .column_compare import _col_cmp_nullable
-from .decimal_to_double import decimal_to_double
+from komira_scalar_arithmetic.decimal_cast import decimal_to_float64
 from .decimal_literal_compare import (
     check_decimal_column_widens,
     decimal_threshold,
@@ -175,7 +175,7 @@ def _eval_decimal_col_vs_literal(batch: RecordBatch, col_idx: Int, lit: ScalarVa
     # to data=0 (filter-safe), and sets null_count. Byte-identical output.
     var out = BooleanArray.allocate_nullable(n)
     for i in range(n):
-        var v = decimal_to_double(arr.get_i128(i), cs)
+        var v = decimal_to_float64(arr.get_i128(i), cs)
         out.set(i, _holds_f64(dec_op, v, x))
     return kleene_cmp_finalize_scalar(
         out^, arr.validity, NullPolicy.three_valued()

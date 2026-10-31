@@ -209,7 +209,7 @@ def test_decimal_to_float64_is_duckdbs_past_2_64() raises:
     The numbers are DuckDB's own for `sum(v) * 1e0` over a BIGINT column:
     -(2^64) - 2^11 - 1 is -1.8446744073709552e+19 (one rounding gives
     ...556e+19) and -(2^70) - 2^17 - 1 is -1.1805916207174113e+21 (...116e+21).
-    2^117 + 2^64 + 1 reads as 2^117 + 2^65."""
+    2^117 + 2^64 + 1 is 2^117 (one rounding gives 2^117 + 2^65)."""
     var one = I128(1)
     assert_equal(
         _rt_decimal_to_float64(-((one << 64) + I128(2049)), 0),
@@ -221,7 +221,7 @@ def test_decimal_to_float64_is_duckdbs_past_2_64() raises:
     )
     assert_equal(
         _rt_decimal_to_float64((one << 117) + (one << 64) + one, 0),
-        Float64(one << 117) + Float64(one << 65),
+        Float64(one << 117),
     )
 
 

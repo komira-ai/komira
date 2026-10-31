@@ -10,7 +10,7 @@
 # digits meets a DOUBLE operand through it too.
 #
 # What each test proves, and the defect it catches:
-#   * test_the_column_conversion_is_duckdbs: `decimal_to_double`, which the
+#   * test_the_column_conversion_is_duckdbs: `decimal_to_float64`, which the
 #     compare of a column with a DOUBLE literal uses, gives DuckDB's double for
 #     every value. Catches a 128-bit integer converted with one rounding where
 #     DuckDB adds the double of its low word to the double of its high word

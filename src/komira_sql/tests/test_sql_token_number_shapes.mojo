@@ -29,7 +29,7 @@
 #     double.
 #   * test_a_literal_of_more_than_38_digits_is_the_nearest_double: DuckDB reads
 #     it as a DOUBLE. Catches a digit-by-digit Float64 sum.
-#   * test_a_decimal_converts_like_duckdbs_decimal_to_double: `123.456`,
+#   * test_a_decimal_converts_like_duckdbs_decimal_to_float64: `123.456`,
 #     `2.675` and the like are the nearest double; a mantissa past 2^53
 #     (`90071992547409.93`) is converted in two parts, as DuckDB's cast does.
 #     Catches a sum of two rounded parts that lands one ulp away.
@@ -168,7 +168,7 @@ def test_a_literal_of_more_than_38_digits_is_the_nearest_double() raises:
     )
 
 
-def test_a_decimal_converts_like_duckdbs_decimal_to_double() raises:
+def test_a_decimal_converts_like_duckdbs_decimal_to_float64() raises:
     # A literal with a point and at most 38 digits is a DECIMAL in DuckDB, and a
     # DECIMAL meets a DOUBLE by DuckDB's cast: a mantissa of at most 2^53 (or no
     # fraction) is one correctly rounded division; a larger one is its integer
@@ -197,5 +197,5 @@ def main() raises:
     suite.test[test_an_e_that_is_not_an_exponent]()
     suite.test[test_an_exponent_is_the_nearest_double]()
     suite.test[test_a_literal_of_more_than_38_digits_is_the_nearest_double]()
-    suite.test[test_a_decimal_converts_like_duckdbs_decimal_to_double]()
+    suite.test[test_a_decimal_converts_like_duckdbs_decimal_to_float64]()
     suite^.run()

@@ -16,6 +16,7 @@
 
 from komira_jsonl.value_parsers.parse_float import parse_float_f64
 from komira_scalar_arithmetic.decimal_arith import I128
+from komira_scalar_arithmetic.decimal_cast import decimal_to_float64
 
 
 # Token kinds.
@@ -216,18 +217,6 @@ def _nearest_f64(
     return value
 
 
-def _hugeint_to_f64(h: I128) -> Float64:
-    """DuckDB's double of a 128-bit integer: the double of its low word plus the
-    double of its high word times 2^64 (two roundings), not the correctly
-    rounded value; for a high word of -1 (a negative value within 2^64 of zero)
-    it is `-double(UINT64_MAX - low word) - 1`."""
-    var low = h.cast[DType.uint64]()
-    var high = (h >> I128(64)).cast[DType.int64]()
-    if high == Int64(-1):
-        return -(UInt64.MAX - low).cast[DType.float64]() - 1.0
-    return low.cast[DType.float64]() + high.cast[DType.float64]() * 18446744073709551616.0
-
-
 def _decimal_value(
     sql: String,
     int_start: Int,
@@ -238,13 +227,9 @@ def _decimal_value(
 ) -> Float64:
     """The double DuckDB makes of a decimal literal of at most 38 digits when
     it meets a DOUBLE (its cast of a DECIMAL): with M the digits as one integer
-    and k the digits after the point, `M / 10^k` in one division when M is at
-    most 2^53 or k is 0; otherwise the integer part `M div 10^k` and the
-    fraction part `M mod 10^k / 10^k` converted apart and added. M is converted
-    as DuckDB converts a 128-bit integer (`_hugeint_to_f64`). The same sweep of
-    1000 values checks this and komira_batch_eval's `decimal_to_double`, which
-    holds the same conversion for a stored value (this package does not depend
-    on that one)."""
+    and k the digits after the point, `decimal_to_float64(M, k)`, the one
+    conversion the engine's DECIMAL columns use too (double_sweep.tsv checks it
+    for both, 1000 values bit for bit)."""
     var src = sql.as_bytes()
     var m = I128(0)
     var ten = I128(10)
@@ -255,16 +240,7 @@ def _decimal_value(
             m = m * ten + I128(Int(src[j]) - Int(ord("0")))
     if negative:
         m = -m
-    var k = frac_end - frac_start
-    var scale = I128(1)
-    for _ in range(k):
-        scale = scale * ten
-    var divisor = scale.cast[DType.float64]()
-    if k == 0 or (m <= I128(9007199254740992) and m >= I128(-9007199254740992)):
-        return _hugeint_to_f64(m) / divisor
-    var q = m / scale
-    var r = m - q * scale
-    return _hugeint_to_f64(q) + _hugeint_to_f64(r) / divisor
+    return decimal_to_float64(m, frac_end - frac_start)
 
 
 def tokenize(sql: String) raises -> List[Token]:

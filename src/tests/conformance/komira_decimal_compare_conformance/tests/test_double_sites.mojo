@@ -21,8 +21,12 @@
 #   * test_a_stored_decimal_beside_a_double_is_duckdbs: `col * 1e0` and
 #     `col + 0.5e0` over a stored DECIMAL(38, s).
 #   * test_a_math_function_over_a_stored_decimal_is_duckdbs: `cbrt(col)`.
-#   * test_avg_of_a_decimal_is_duckdbs: `avg(<DECIMAL(38, s)>)` for s = 0, 2
-#     and 10.
+#   * test_avg_of_a_decimal_is_the_cast_sum_over_the_count: `avg(<DECIMAL(38,
+#     s)>)` for s = 0, 2 and 10 is DuckDB's DOUBLE of the exact sum divided by
+#     the count (`cast(sum(col) as double) / count(*)` in DuckDB). DuckDB's own
+#     avg() divides in extended precision and differs in the last digit for
+#     sums past 2^64 (group 7: ...518e+18 where the cast sum over 3 is
+#     ...517e+18); that is not changed here.
 
 from std.testing import TestSuite
 
@@ -63,7 +67,7 @@ def test_a_math_function_over_a_stored_decimal_is_duckdbs() raises:
     check_double_site("column_math")
 
 
-def test_avg_of_a_decimal_is_duckdbs() raises:
+def test_avg_of_a_decimal_is_the_cast_sum_over_the_count() raises:
     check_double_site("avg_d0")
     check_double_site("avg_d2")
     check_double_site("avg_d10")
@@ -77,5 +81,5 @@ def main() raises:
     suite.test[test_cast_of_a_stored_decimal_is_duckdbs]()
     suite.test[test_a_stored_decimal_beside_a_double_is_duckdbs]()
     suite.test[test_a_math_function_over_a_stored_decimal_is_duckdbs]()
-    suite.test[test_avg_of_a_decimal_is_duckdbs]()
+    suite.test[test_avg_of_a_decimal_is_the_cast_sum_over_the_count]()
     suite^.run()

@@ -641,8 +641,9 @@ def _eval_cast_from_decimal128(child_col: Column[HeapRegion], target: DType, tar
         # for most operands and reports an internal error for one is worse than
         # one refused uniformly — the exact argument that withdrew REAL a day
         # earlier. ⚠ VIA FLOAT64 ON PURPOSE: `decimal_to_float64` is the single
-        # decimal->binary-float conversion, and narrowing its correctly-rounded
-        # result is what DuckDB does for `DECIMAL -> FLOAT` too.
+        # decimal->binary-float conversion (DuckDB's DECIMAL -> DOUBLE), and
+        # this narrows its result to FLOAT; the tests pin small values only, not
+        # DuckDB's own DECIMAL -> FLOAT conversion of a value past 2^53.
         var out = PrimitiveArray[DType.float32].allocate_nullable(n)
         var nulls = 0
         for i in range(n):

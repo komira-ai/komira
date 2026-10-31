@@ -6,7 +6,6 @@ from std.pathlib import Path
 from std.testing import assert_equal, assert_true
 
 from komira_arrow.arrow_types import ArrowType
-from komira_batch_eval.decimal_to_double import decimal_to_double
 from komira_jsonl.value_parsers.parse_float import parse_float_f64
 from komira_arrow.schema import RecordBatch
 from komira_lowering.render import render_lowered_plan
@@ -16,6 +15,7 @@ from komira_optimizer.optimizer_scalar_deps import ScalarDepTable
 from komira_plan_expr.scalar_value import ScalarValue
 from komira_runtime_paths import data_path
 from komira_scalar_arithmetic.decimal_arith import I128
+from komira_scalar_arithmetic.decimal_cast import decimal_to_float64
 from komira_sdk_exec.engine_catalog import register_parquet
 from komira_sdk_exec.engine_context import EngineContext
 from komira_sdk_exec.engine_lower import lower_for_context
@@ -428,7 +428,7 @@ def _i128_of(digits: String) -> I128:
 
 
 def check_double_conversion_of_columns() raises:
-    """`decimal_to_double` of every stored value of double_sweep.tsv is the
+    """`decimal_to_float64` of every stored value of double_sweep.tsv is the
     double DuckDB casts it to (the text DuckDB prints reads back exactly)."""
     var rows = _rows("double_sweep.tsv")
     assert_true(len(rows) >= 1000, "double_sweep.tsv holds too few values")
@@ -438,7 +438,7 @@ def check_double_conversion_of_columns() raises:
         assert_equal(len(cells), 5)
         var scale = Int(atol(cells[1]))
         var want = parse_float_f64(cells[4].as_bytes(), 0, cells[4].byte_length())
-        var got = decimal_to_double(_i128_of(cells[2]), scale)
+        var got = decimal_to_float64(_i128_of(cells[2]), scale)
         if got != want:
             problems.append(
                 cells[3]
