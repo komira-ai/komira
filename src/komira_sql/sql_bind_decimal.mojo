@@ -35,9 +35,11 @@ from komira_decimal_literal.decimal_literal import (
     decimal_fold_binary,
     decimal_from_literal_text,
     decimal_negate,
+    INTEGER_FOLD_IDIV,
     integer_fold_binary,
+    integer_negate,
 )
-from komira_plan_expr.expr import BIN_ADD, BIN_MUL, BIN_SUB, Expr
+from komira_plan_expr.expr import BIN_ADD, BIN_MOD, BIN_MUL, BIN_SUB, Expr
 from komira_plan_expr.expr_walk import PlanColRefFields, walk_expr_field
 from komira_plan_expr.scalar_value import ScalarValue
 from komira_scalar_arithmetic.decimal_arith import I128, I256
@@ -53,6 +55,8 @@ from komira_sql.sql_ast import (
     SXOP_GT,
     SXOP_LE,
     SXOP_LT,
+    SXOP_IDIV,
+    SXOP_MOD,
     SXOP_MUL,
     SXOP_NE,
     SXOP_SUB,
@@ -157,12 +161,20 @@ def _constant(sx: SqlExpr) raises -> Optional[_Const]:
         var inner = _constant(sx._agg.value().arg[])
         if not inner:
             return None
+        if inner.value().integer:
+            return Optional[_Const](
+                _Const(integer_negate(inner.value().value), True)
+            )
         var negated = decimal_negate(inner.value().value)
         if not negated:
             return None
         return Optional[_Const](_Const(negated.take(), inner.value().integer))
     if sx.tag == SX_BINARY and (
-        sx.op == SXOP_ADD or sx.op == SXOP_SUB or sx.op == SXOP_MUL
+        sx.op == SXOP_ADD
+        or sx.op == SXOP_SUB
+        or sx.op == SXOP_MUL
+        or sx.op == SXOP_MOD
+        or sx.op == SXOP_IDIV
     ):
         var left = _constant(sx._binary.value().left[])
         var right = _constant(sx._binary.value().right[])
@@ -173,6 +185,19 @@ def _constant(sx: SqlExpr) raises -> Optional[_Const]:
             op = BIN_SUB
         elif sx.op == SXOP_MUL:
             op = BIN_MUL
+        elif sx.op == SXOP_MOD:
+            op = BIN_MOD
+        elif sx.op == SXOP_IDIV:
+            op = INTEGER_FOLD_IDIV
+        if op == BIN_MOD or op == INTEGER_FOLD_IDIV:
+            if not (left.value().integer and right.value().integer):
+                # DuckDB's % over a DECIMAL is exact decimal arithmetic (and
+                # // over one is a DOUBLE): not folded, and not left to floats.
+                raise Error(
+                    "SQL not supported: % and // over a decimal number in a"
+                    " constant compared with a DECIMAL column; write the"
+                    " operands as integers"
+                )
         if left.value().integer and right.value().integer:
             return Optional[_Const](
                 _Const(
@@ -229,7 +254,7 @@ def _is_comparison(op: UInt8) -> Bool:
 
 
 def _is_number_constant(sx: SqlExpr) -> Bool:
-    """True iff `sx` is a number literal, or unary minus and `+ - *` over them
+    """True iff `sx` is a number literal, or unary minus and `+ - * % //` over them
     (no column, no other function). The same shape `_constant` folds, without
     the DECIMAL typing: an integer or a number past BIGINT is one too."""
     if sx.tag == SX_FLOAT or sx.tag == SX_INT:
@@ -237,7 +262,11 @@ def _is_number_constant(sx: SqlExpr) -> Bool:
     if sx.tag == SX_UNARY and sx.op == SXUN_NEGATE:
         return _is_number_constant(sx._agg.value().arg[])
     if sx.tag == SX_BINARY and (
-        sx.op == SXOP_ADD or sx.op == SXOP_SUB or sx.op == SXOP_MUL
+        sx.op == SXOP_ADD
+        or sx.op == SXOP_SUB
+        or sx.op == SXOP_MUL
+        or sx.op == SXOP_MOD
+        or sx.op == SXOP_IDIV
     ):
         return _is_number_constant(
             sx._binary.value().left[]

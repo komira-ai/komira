@@ -23,7 +23,7 @@ from komira_sdk_exec.engine_options import EngineOptions
 from komira_sdk_exec.engine_sql import SqlOutcome, run_sql
 from komira_sql.sql_binder import bind_statement
 from komira_sql.sql_parser import parse_sql
-from komira_sql.sql_token import TK_FLOAT, tokenize
+from komira_sql.sql_token import TK_FLOAT, signed_decimal_f64, tokenize
 
 
 # The comparison operators, in the order compare_<col>.tsv lists them, with
@@ -158,7 +158,9 @@ def _check(
                 + ")"
             )
         elif (
-            got.refusal.find("DECIMAL(") < 0 and got.refusal.find("INT") < 0
+            got.refusal.find("DECIMAL(") < 0
+            and got.refusal.find("INT") < 0
+            and got.refusal.find("Overflow") < 0
         ):
             problems.append(
                 where_text
@@ -375,6 +377,7 @@ def check_fold_refusals() raises:
                 message.find("DECIMAL(") < 0
                 and message.find("scale") < 0
                 and message.find("INT") < 0
+                and message.find("Overflow") < 0
             ):
                 problems.append(
                     expr
@@ -450,8 +453,10 @@ def check_double_conversion_of_columns() raises:
 
 
 def check_double_conversion_of_literals() raises:
-    """The tokenizer's double for the decimal text of every value of scale 1 and
-    up of double_sweep.tsv is the double DuckDB casts the value to."""
+    """The double the SQL front end makes of the decimal text of every value of
+    scale 1 and up of double_sweep.tsv (the tokenizer for its magnitude, the
+    signed conversion for a negative literal) is the double DuckDB casts the
+    value to."""
     var rows = _rows("double_sweep.tsv")
     var problems = List[String]()
     var checked = 0
@@ -460,22 +465,22 @@ def check_double_conversion_of_literals() raises:
         var scale = Int(atol(cells[1]))
         if scale < 1:
             continue
-        var text = cells[3]
-        var negative = text.startswith("-")
-        if negative:
-            text = String(text[byte=1:])
-        var toks = tokenize(text)
-        var got = toks[0].float_val
-        if negative:
-            got = -got
         var want = parse_float_f64(cells[4].as_bytes(), 0, cells[4].byte_length())
+        var negative = cells[3].startswith("-")
+        var got = signed_decimal_f64(cells[3], 0.0)
+        if not negative:
+            var toks = tokenize(cells[3])
+            if toks[0].kind != TK_FLOAT or toks[0].float_val != got:
+                problems.append(
+                    cells[3] + ": the tokenizer disagrees with the signed conversion"
+                )
         checked += 1
-        if toks[0].kind != TK_FLOAT or got != want:
+        if got != want:
             problems.append(
                 cells[3]
                 + ": DuckDB gives "
                 + cells[4]
-                + ", the tokenizer "
+                + ", the front end "
                 + String(got)
             )
     assert_true(checked > 400, "too few decimal literals were checked")

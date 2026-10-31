@@ -43,7 +43,7 @@
 # keeps the expression it had; the SQL binder refuses the query.
 # =============================================================================
 
-from komira_plan_expr.expr import BIN_ADD, BIN_SUB, BIN_MUL
+from komira_plan_expr.expr import BIN_ADD, BIN_SUB, BIN_MUL, BIN_MOD
 from komira_plan_expr.scalar_value import ScalarValue
 from komira_scalar_arithmetic.decimal_arith import I128, I256
 
@@ -301,21 +301,65 @@ def decimal_fold_binary(
 comptime INTEGER_FOLD_IDIV: UInt8 = 100
 
 
+struct _IntegerType(Copyable, Movable):
+    """The least and greatest value of an integer type, and its name in
+    DuckDB's messages."""
+
+    var least: I256
+    var greatest: I256
+    var name: String
+
+    def __init__(out self, least: I256, greatest: I256, name: String):
+        self.least = least
+        self.greatest = greatest
+        self.name = name
+
+
+def _integer_type(width: Int) -> _IntegerType:
+    """The integer type whose precision is `width`: 10 INTEGER, 19 BIGINT, 38
+    HUGEINT."""
+    if width <= 10:
+        return _IntegerType(I256(_INT32_MIN), I256(_INT32_MAX), String("INT32"))
+    if width <= 19:
+        return _IntegerType(
+            I256(Int(Int64.MIN)), I256(Int(Int64.MAX)), String("INT64")
+        )
+    var hi = (I256(1) << I256(127)) - I256(1)
+    return _IntegerType(-hi - I256(1), hi, String("INT128"))
+
+
 def integer_negate(a: ScalarValue) raises -> ScalarValue:
-    return a.copy()
+    """`-a` for an integer-typed constant (see `integer_fold_binary`), with its
+    type.
+
+    Raises:
+        DuckDB's "Overflow in negation of integer!" for the least value of the
+        type (-(-2147483647 - 1), the BIGINT and HUGEINT minima).
+    """
+    var kind = _integer_type(a.dec128_precision)
+    var r = -a.decimal_value_i128().cast[DType.int256]()
+    if r > kind.greatest:
+        raise Error("Out of Range Error: Overflow in negation of integer!")
+    return ScalarValue.decimal128_i128(
+        r.cast[DType.int128](), a.dec128_precision, 0
+    )
 
 
 def integer_fold_binary(
     op: UInt8, a: ScalarValue, b: ScalarValue
 ) raises -> ScalarValue:
-    """`a <op> b` for `+`, `-` and `*` over two integer-typed constants, each
-    a scale-0 decimal whose precision names its type: 10 for INTEGER, 19 for
-    BIGINT, 38 for HUGEINT. The result has the wider type (DuckDB does not
-    promote): `1 + 2` is an INTEGER, `3000000000 - 2999999999` a BIGINT.
+    """`a <op> b` for `+`, `-`, `*`, `%` (BIN_MOD) and `//`
+    (INTEGER_FOLD_IDIV) over two integer-typed constants, each a scale-0
+    decimal whose precision names its type: 10 for INTEGER, 19 for BIGINT, 38
+    for HUGEINT. The result has the wider type (DuckDB does not promote): `1 +
+    2` is an INTEGER, `3000000000 - 2999999999` a BIGINT. `%` and `//` keep the
+    sign of the dividend and truncate toward zero (`-7 % 4` is -3, `7 // -2` is
+    -3).
 
     Raises:
         DuckDB's "Overflow in addition of INT32 (a + b)!" (INT64, INT128) when
-        the result is outside its type, or for an operator other than `+ - *`.
+        the result is outside its type; for a zero divisor (NULL in DuckDB, not
+        folded); for another operator.
     """
     var width = max(a.dec128_precision, b.dec128_precision)
     var x = a.decimal_value_i128().cast[DType.int256]()
@@ -335,30 +379,33 @@ def integer_fold_binary(
         r = x * y
         what = "multiplication"
         symbol = "*"
+    elif op == BIN_MOD or op == INTEGER_FOLD_IDIV:
+        if y == I256(0):
+            raise Error(
+                "Out of Range Error: division by zero in a constant (NULL in"
+                " DuckDB) is not folded"
+            )
+        if op == BIN_MOD:
+            r = x - (x / y) * y
+            what = "modulo"
+            symbol = "%"
+        else:
+            r = x / y
+            what = "division"
+            symbol = "//"
     else:
-        raise Error("integer_fold_binary: only + - * are folded")
-    var hi: I256
-    var type_name: String
-    if width <= 10:
-        hi = I256(_INT32_MAX)
-        type_name = "INT32"
-    elif width <= 19:
-        hi = I256(Int(Int64.MAX))
-        type_name = "INT64"
-    else:
-        hi = (I256(1) << I256(127)) - I256(1)
-        type_name = "INT128"
-    # The least value of each type is one past the negation of its greatest,
-    # except that DuckDB's HUGEINT excludes -2^127.
-    var lo = -hi - I256(1)
-    if type_name == "INT128":
-        lo = -hi
-    if r > hi or r < lo:
+        raise Error("integer_fold_binary: only + - * % // are folded")
+    var kind = _integer_type(width)
+    var out_of_type = r > kind.greatest or r < kind.least
+    # The remainder of the least value by -1 is 0, and DuckDB raises for it.
+    if (op == BIN_MOD or op == INTEGER_FOLD_IDIV) and y == I256(-1) and x == kind.least:
+        out_of_type = True
+    if out_of_type:
         raise Error(
             "Out of Range Error: Overflow in "
             + what
             + " of "
-            + type_name
+            + kind.name
             + " ("
             + _decimal_text(x, 0)
             + " "

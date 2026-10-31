@@ -33,6 +33,7 @@ from .sql_token import (
     TK_COMMA, TK_SEMI, TK_STAR, TK_DOT, TK_PLUS, TK_MINUS, TK_SLASH,
     TK_EQ, TK_NE, TK_LT, TK_LE, TK_GT, TK_GE, TK_DCOLON, TK_DSLASH, TK_PERCENT,
     TK_CARET, TK_CARET_AT, TK_AT, TK_DPIPE, TK_LIKE_SYM, TK_TILDE, TK_NTILDE,
+    signed_decimal_f64,
 )
 from .sql_fn_table import CAST_DESUGAR_NAME as _CAST_DESUGAR_NAME, TRY_CAST_DESUGAR_NAME as _TRY_CAST_DESUGAR_NAME
 from .sql_fn_table import POSITION_IN_DESUGAR_NAME as _POSITION_IN_DESUGAR_NAME
@@ -2203,7 +2204,11 @@ struct _Parser(Movable):
                 var f = self.tokens[self.pos].float_val
                 var digits = String("-") + self.tokens[self.pos].text
                 self._advance()
-                return self._parse_cast_suffix(SqlExpr.float_lit(-f, digits^))
+                # A decimal literal meets a DOUBLE through DuckDB's cast of the
+                # (negative) DECIMAL, which is not the negation of the cast of
+                # its magnitude.
+                var value = signed_decimal_f64(digits, -f)
+                return self._parse_cast_suffix(SqlExpr.float_lit(value, digits^))
             # ★ UNARY MINUS ON AN EXPRESSION
             # — `-a`, `-(a + 1)`, `ORDER BY -k`. It binds TIGHTER than
             # `^` and `*` (DuckDB: `- a * 2` is `(-(a) * 2)`, `-2 ^ 2` is
@@ -2226,7 +2231,10 @@ struct _Parser(Movable):
                     negated = String(operand.text[byte=1:])
                 elif operand.text.byte_length() > 0:
                     negated = String("-") + operand.text
-                return SqlExpr.float_lit(-operand.float_val, negated^)
+                var value = -operand.float_val
+                if negated.byte_length() > 0:
+                    value = signed_decimal_f64(negated, value)
+                return SqlExpr.float_lit(value, negated^)
             return SqlExpr.unary(SXUN_NEGATE, operand^)
         if self._kind() == TK_AT:
             # ★ PREFIX `@` — absolute value. ⚠ ITS

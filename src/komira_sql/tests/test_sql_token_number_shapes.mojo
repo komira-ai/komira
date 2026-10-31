@@ -34,6 +34,7 @@
 #     (`90071992547409.93`) is converted in two parts, as DuckDB's cast does.
 #     Catches a sum of two rounded parts that lands one ulp away.
 
+from std.memory import bitcast
 from std.testing import TestSuite, assert_equal, assert_true
 
 from komira_sql.sql_token import (
@@ -137,7 +138,8 @@ def test_an_exponent_is_the_nearest_double() raises:
     _float("9007199254740993e0", "9007199254740993e0", 9007199254740992.0)
     _float("9007199254740995e0", "9007199254740995e0", 9007199254740996.0)
     _float("2.2250738585072014e-308", "2.2250738585072014e-308", 2.2250738585072014e-308)
-    _float("4.9e-324", "4.9e-324", 4.9e-324)
+    # 4.9e-324 rounds to the smallest subnormal, 2^-1074.
+    _float("4.9e-324", "4.9e-324", bitcast[DType.float64](UInt64(1)))
     _float("1e23", "1e23", 1e23)
     _float("12e35", "12e35", 12e35)
     _float("0.1234567890123456789012345e2", "0.1234567890123456789012345e2", 12.34567890123456789012345)
