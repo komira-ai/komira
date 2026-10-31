@@ -4,6 +4,7 @@ reads it with `-c komira.bench_salt` unset, empty and set.
 """
 
 load("@komira//tools/build/bench_salt:bench_salt.bzl", "salted")
+load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
 
 def _impl(ctx):
     return [
@@ -11,4 +12,6 @@ def _impl(ctx):
         ExternalRunnerTestInfo(type = "custom", command = ["true"], env = salted({"KOMIRA_BENCH_SALT_FIXTURE": "1"})),
     ]
 
-salted_env = rule(impl = _impl, attrs = {})
+_salted_env = rule(impl = _impl, attrs = {})
+
+salted_env = declares_docs(_salted_env)
