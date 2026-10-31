@@ -94,13 +94,13 @@ GRAPH_JSON = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/komira_scalar_arithmetic/tests/test_decimal_cast.mojo", "sha256": "48e9b06eb3e510cf99aa3b098a786787c5daf2f655c1f04c51dd3b01310f51ef"}
+        {"path": "src/komira_scalar_arithmetic/tests/test_decimal_cast.mojo", "sha256": "3de54f17f10ff2fa0b6eb77ecee588b2694a3b724f92be4fd74f98307310e6ee"}
       ],
       "deps": ["komira_scalar_arithmetic@0.1.0#mojo1.0.0/lib"],
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_decimal_cast.pass"],
-      "key": "de4edc2042fef9b444993b9fbbba6e06318cbb968b20f9bf53809b8f46f70980"
+      "key": "a795cf38a87090efdf30c536784e38ceab250a38abc3b7ef2cd615fd373642ab"
     },
     {
       "id": "komira_scalar_arithmetic@0.1.0#mojo1.0.0/test:src/komira_scalar_arithmetic/tests/test_decimal_compare.mojo",
@@ -247,13 +247,13 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/komira_scalar_arithmetic/tests/test_decimal_cast.mojo", "sha256": "48e9b06eb3e510cf99aa3b098a786787c5daf2f655c1f04c51dd3b01310f51ef"}
+        {"path": "src/komira_scalar_arithmetic/tests/test_decimal_cast.mojo", "sha256": "3de54f17f10ff2fa0b6eb77ecee588b2694a3b724f92be4fd74f98307310e6ee"}
       ],
       "deps": ["komira_scalar_arithmetic@0.1.0#mojo1.0.0/lib"],
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_decimal_cast.pass"],
-      "key": "ae542f9f23ebd05fbdf324088b55b74a898ec1511632fe3cb45c2e18f96c8ef5"
+      "key": "8a816a07a839bdce76f43d3ffe4e9ca23e379abad68ef07da45aa8104006b902"
     },
     {
       "id": "komira_scalar_arithmetic@0.1.0#mojo1.0.0/test:src/komira_scalar_arithmetic/tests/test_decimal_compare.mojo",
@@ -397,13 +397,13 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/komira_scalar_arithmetic/tests/test_decimal_cast.mojo", "sha256": "48e9b06eb3e510cf99aa3b098a786787c5daf2f655c1f04c51dd3b01310f51ef"}
+        {"path": "src/komira_scalar_arithmetic/tests/test_decimal_cast.mojo", "sha256": "3de54f17f10ff2fa0b6eb77ecee588b2694a3b724f92be4fd74f98307310e6ee"}
       ],
       "deps": ["komira_scalar_arithmetic@0.1.0#mojo1.0.0/lib"],
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_decimal_cast.pass"],
-      "key": "0a673fc7c0879e34e7c4a36d61c8553bb501463b70de037ffe690808c93a1207"
+      "key": "71b881263ec29e41e1aafe69bab6b98e1043622a106c32f2658f9464071862bb"
     },
     {
       "id": "komira_scalar_arithmetic@0.1.0#mojo1.0.0/test:src/komira_scalar_arithmetic/tests/test_decimal_compare.mojo",

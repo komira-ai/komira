@@ -112,18 +112,25 @@ def check_reviewer_group_sums() raises:
     ...556e+19 and ...116e+21)."""
     var ctx = _new_site_context()
     var outcome = run_sql(
-        ctx, "select k, sum(v) * 1e0 as x from pj where k = 7 or k = 10 group by k order by k"
+        ctx, "select k, sum(v) * 1e0 as x from pj where k = 7 or k = 10 group by k"
     )
     if outcome.refusal:
         assert_true(False, "refused: " + outcome.refusal.value().reason)
-    ref batch = outcome.batches[0]
-    assert_equal(batch.num_rows(), 2)
-    var xs = batch.column_at(1).as_primitive[DType.float64]()
-    var want7 = parse_float_f64(
-        String("-1.8446744073709552e+19").as_bytes(), 0, 23
-    )
-    var want10 = parse_float_f64(
-        String("-1.1805916207174113e+21").as_bytes(), 0, 23
-    )
-    assert_true(xs.get(0) == want7, "group 7: " + String(xs.get(0)))
-    assert_true(xs.get(1) == want10, "group 10: " + String(xs.get(1)))
+    var seen = 0
+    for b in range(len(outcome.batches)):
+        ref batch = outcome.batches[b]
+        var ks = batch.column_at(0).as_primitive[DType.int64]()
+        var xs = batch.column_at(1).as_primitive[DType.float64]()
+        for i in range(batch.num_rows()):
+            var want_text = String("-1.8446744073709552e+19")
+            if ks.get(i) == Int64(10):
+                want_text = String("-1.1805916207174113e+21")
+            var want = parse_float_f64(
+                want_text.as_bytes(), 0, want_text.byte_length()
+            )
+            assert_true(
+                xs.get(i) == want,
+                "group " + String(ks.get(i)) + ": " + String(xs.get(i)),
+            )
+            seen += 1
+    assert_equal(seen, 2)
