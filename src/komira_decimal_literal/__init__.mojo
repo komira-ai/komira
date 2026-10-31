@@ -1,0 +1,1 @@
+"""DECIMAL literals the way DuckDB reads and folds them: the type and value of a literal's text, and the type and value of `+`, `-`, `*` and unary minus over decimal and integer literals. The root exports nothing; import `komira_decimal_literal.decimal_literal`."""

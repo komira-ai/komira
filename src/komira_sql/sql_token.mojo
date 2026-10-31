@@ -14,12 +14,16 @@
 # UnsafePointer, no wildcard origins; stored in a plain `List[Token]`.
 # =============================================================================
 
+from komira_jsonl.value_parsers.parse_float import parse_float_f64
+from komira_scalar_arithmetic.decimal_arith import I128
+from komira_scalar_arithmetic.decimal_cast import decimal_to_float64
+
 
 # Token kinds.
 comptime TK_EOF: UInt8 = 0
 comptime TK_IDENT: UInt8 = 1  # identifier (lower-folded) — incl. keywords/agg names
 comptime TK_INT: UInt8 = 2  # integer literal (value in int_val)
-comptime TK_FLOAT: UInt8 = 3  # float literal (value in float_val)
+comptime TK_FLOAT: UInt8 = 3  # float literal (value in float_val, digits in text)
 comptime TK_STRING: UInt8 = 4  # single-quoted string literal (text)
 comptime TK_LPAREN: UInt8 = 5  # (
 comptime TK_RPAREN: UInt8 = 6  # )
@@ -84,7 +88,8 @@ struct Token(Copyable, Movable, Deinitable):
       var int_val: Int64     — live for TK_INT. For a literal PAST Int64.MAX
                                `text` holds its decimal digits and `int_val`
                                the wrapped bits (see `tokenize`).
-      var float_val: Float64 — live for TK_FLOAT.
+      var float_val: Float64 — live for TK_FLOAT, with `text` holding the
+                               literal's digits (`0.06`, as written).
     """
 
     var kind: UInt8
@@ -117,6 +122,126 @@ def _is_ident(c: UInt8) -> Bool:
     return _is_alpha(c) or _is_digit(c)
 
 
+def _exponent_at(sql: String, i: Int) -> Bool:
+    """True iff an exponent (`e` or `E`, an optional sign, at least one digit)
+    starts at byte `i`."""
+    var src = sql.as_bytes()
+    var n = len(src)
+    if i >= n or (src[i] != UInt8(ord("e")) and src[i] != UInt8(ord("E"))):
+        return False
+    if i + 1 < n and _is_digit(src[i + 1]):
+        return True
+    return (
+        i + 2 < n
+        and (src[i + 1] == UInt8(ord("+")) or src[i + 1] == UInt8(ord("-")))
+        and _is_digit(src[i + 2])
+    )
+
+
+def _point_starts_number(sql: String, i: Int) -> Bool:
+    """True iff the '.' at byte `i` opens a number (`.5`): a digit follows it
+    and it does not follow a name or `)` (`t1.5`, `f(x).5` keep their dot)."""
+    var src = sql.as_bytes()
+    var n = len(src)
+    if src[i] != UInt8(ord(".")) or i + 1 >= n or not _is_digit(src[i + 1]):
+        return False
+    if i == 0:
+        return True
+    var prev = src[i - 1]
+    return not (_is_ident(prev) or prev == UInt8(ord(")")))
+
+
+def _point_ends_number(sql: String, i: Int) -> Bool:
+    """True iff the '.' at byte `i`, no digit after it, ends a number whose
+    integer digits precede it (`5.`, `5.,`, `5.)`, `1.e2`; a number that opens
+    with the '.' always has a digit after it). A '.' before a second '.' or
+    before a name is a qualifier's dot (`1..2`, `1.x`)."""
+    var src = sql.as_bytes()
+    if i + 1 >= len(src):
+        return True
+    var next = src[i + 1]
+    if next == UInt8(ord(".")):
+        return False
+    if _is_alpha(next):
+        return _exponent_at(sql, i + 1)
+    return True
+
+
+def _nearest_f64(
+    sql: String,
+    start: Int,
+    int_start: Int,
+    int_end: Int,
+    frac_start: Int,
+    frac_end: Int,
+    exponent: String,
+    end: Int,
+) raises -> Float64:
+    """The double nearest (ties to even) to the digits `[int_start, int_end)`
+    and `[frac_start, frac_end)` times 10 to `exponent` (`""` or `e-30`), for the
+    number spelled in `[start, end)`: the correctly rounded parse of
+    komira_jsonl, for any length and exponent.
+
+    Raises:
+        If the number is outside the double range (past the largest double, or
+        a nonzero number that rounds to zero).
+    """
+    var src = sql.as_bytes()
+    var text = String("")
+    var nonzero = False
+    if int_end == int_start:
+        text += "0"
+    for j in range(int_start, int_end):
+        text += chr(Int(src[j]))
+        if src[j] != UInt8(ord("0")):
+            nonzero = True
+    text += "."
+    if frac_end == frac_start:
+        text += "0"
+    for j in range(frac_start, frac_end):
+        text += chr(Int(src[j]))
+        if src[j] != UInt8(ord("0")):
+            nonzero = True
+    text += exponent
+    var value = parse_float_f64(text.as_bytes(), 0, text.byte_length())
+    if value > Float64(1.7976931348623157e308) or (nonzero and value == Float64(0.0)):
+        var spelled = String("")
+        for j in range(start, end):
+            spelled += chr(Int(src[j]))
+        raise Error(
+            "SQL syntax error: the number "
+            + spelled
+            + " is outside the range of a double"
+        )
+    return value
+
+
+def _decimal_value(
+    sql: String,
+    int_start: Int,
+    int_end: Int,
+    frac_start: Int,
+    frac_end: Int,
+    negative: Bool = False,
+) -> Float64:
+    """The double DuckDB makes of a decimal literal of at most 38 digits when
+    it meets a DOUBLE (its cast of a DECIMAL): with M the digits as one integer
+    and k the digits after the point, `decimal_to_float64(M, k)`, the one
+    conversion the engine's DECIMAL columns use too (double_sweep.tsv checks it
+    for both, 1000 values bit for bit)."""
+    var src = sql.as_bytes()
+    var m = I128(0)
+    var ten = I128(10)
+    for pass_no in range(2):
+        var lo = int_start if pass_no == 0 else frac_start
+        var hi = int_end if pass_no == 0 else frac_end
+        for j in range(lo, hi):
+            m = m * ten + I128(Int(src[j]) - Int(ord("0")))
+    if negative:
+        m = -m
+    return decimal_to_float64(m, frac_end - frac_start)
+
+
 def tokenize(sql: String) raises -> List[Token]:
     """Tokenize `sql` into a `List[Token]` ending with a TK_EOF sentinel.
 
@@ -139,11 +264,15 @@ def tokenize(sql: String) raises -> List[Token]:
             while i < n and src[i] != UInt8(ord("\n")):
                 i += 1
             continue
-        # numeric literal: INT or FLOAT (`digits [ . digits ]`). A leading '-'
-        # is NOT fused here — the parser handles unary minus, so `1-1` and
-        # `-x` both tokenize cleanly. Digits are accumulated manually (no
-        # atol/atof dependency) so the tokenizer is self-contained.
-        if _is_digit(c):
+        # numeric literal: INT or FLOAT. A FLOAT is `digits '.' digits`,
+        # `digits '.'` (`5.`), `'.' digits` (`.5`), or one of those followed by
+        # an exponent (`1e-2`, `2.5E1`, `1.e2`); DuckDB reads the first three as
+        # DECIMAL and the last as DOUBLE, from the literal's own digits, which
+        # ride in the token's `text`. A leading '-' is NOT fused here — the
+        # parser handles unary minus, so `1-1` and `-x` both tokenize cleanly.
+        # Digits are accumulated manually (no atol/atof dependency) so the
+        # tokenizer is self-contained.
+        if _is_digit(c) or _point_starts_number(sql, i):
             var int_part: Int64 = 0
             # ⛔ AN INTEGER PAST BIGINT MAY NOT WRAP.
             # `int_part * 10 + d` in Int64 wrapped silently, so
@@ -167,23 +296,73 @@ def tokenize(sql: String) raises -> List[Token]:
                     past_i64 = True
                 int_part = int_part * 10 + dig
                 i += 1
-            if i < n and src[i] == UInt8(ord(".")) and i + 1 < n and _is_digit(src[i + 1]):
-                # The integer part of a DOUBLE literal is read in Float64 when
-                # it is past Int64 -- `int_part` holds wrapped bits there.
-                var ipf = Float64(int_part)
-                if past_i64:
-                    ipf = Float64(0.0)
-                    for j in range(digits_start, i):
-                        ipf = ipf * 10.0 + Float64(Int(src[j]) - Int(ord("0")))
+            var int_end = i
+            var has_point = False
+            var frac_start = i
+            if i < n and src[i] == UInt8(ord(".")) and (
+                (i + 1 < n and _is_digit(src[i + 1]))
+                or _point_ends_number(sql, i)
+            ):
+                has_point = True
                 i += 1  # consume '.'
-                var frac: Float64 = 0.0
-                var scale: Float64 = 1.0
+                frac_start = i
                 while i < n and _is_digit(src[i]):
-                    frac = frac * 10.0 + Float64(Int(src[i]) - Int(ord("0")))
-                    scale = scale * 10.0
                     i += 1
-                var fval = ipf + frac / scale
-                out.append(Token(TK_FLOAT, String(""), Int64(0), fval))
+            var frac_end = i
+            var has_exponent = _exponent_at(sql, i)
+            if has_point or has_exponent:
+                var fval: Float64
+                if has_exponent:
+                    var j = i + 1
+                    var negative_exponent = False
+                    if src[j] == UInt8(ord("-")) or src[j] == UInt8(ord("+")):
+                        negative_exponent = src[j] == UInt8(ord("-"))
+                        j += 1
+                    var magnitude = 0
+                    while j < n and _is_digit(src[j]):
+                        if magnitude < 100000:
+                            magnitude = magnitude * 10 + (Int(src[j]) - Int(ord("0")))
+                        j += 1
+                    i = j
+                    var exponent = String("e")
+                    exponent += "-" if negative_exponent else "+"
+                    exponent += String(magnitude)
+                    fval = _nearest_f64(
+                        sql,
+                        digits_start,
+                        digits_start,
+                        int_end,
+                        frac_start,
+                        frac_end,
+                        exponent,
+                        i,
+                    )
+                elif (int_end - digits_start) + (frac_end - frac_start) <= 38:
+                    # A decimal literal: DuckDB's DECIMAL-to-DOUBLE conversion.
+                    fval = _decimal_value(
+                        sql, digits_start, int_end, frac_start, frac_end
+                    )
+                else:
+                    # More than 38 digits: a DOUBLE in DuckDB, the nearest
+                    # double to the digits.
+                    fval = _nearest_f64(
+                        sql,
+                        digits_start,
+                        digits_start,
+                        int_end,
+                        frac_start,
+                        frac_end,
+                        String(""),
+                        i,
+                    )
+                # The literal's own text (ASCII digits, the point and the
+                # exponent, so each byte IS its codepoint): DuckDB reads `0.06`
+                # as DECIMAL(3, 2), and the binder needs the digits, not the
+                # nearest double.
+                var literal_text = String("")
+                for j in range(digits_start, i):
+                    literal_text += chr(Int(src[j]))
+                out.append(Token(TK_FLOAT, literal_text^, Int64(0), fval))
             elif past_i64:
                 # ASCII digits only, so each byte IS its codepoint here.
                 var digits = String("")
@@ -339,3 +518,33 @@ def tokenize(sql: String) raises -> List[Token]:
         raise Error("SQL syntax error: unexpected character '" + chr(Int(c)) + "'")
     out.append(Token(TK_EOF, String(""), Int64(0), Float64(0.0)))
     return out^
+
+
+def signed_decimal_f64(text: String, fallback: Float64) -> Float64:
+    """The double DuckDB makes of the decimal literal `text` (`-12.5`, `.5`,
+    `5.`; at most 38 digits, no exponent) when it meets a DOUBLE, `fallback` for
+    any other text. A negative literal is the cast of the negative DECIMAL, which
+    is not the negation of the cast of its magnitude (the 128-bit conversion
+    differs for a negative value)."""
+    var src = text.as_bytes()
+    var n = len(src)
+    var i = 0
+    var negative = n > 0 and src[0] == UInt8(ord("-"))
+    if negative:
+        i = 1
+    var int_start = i
+    while i < n and _is_digit(src[i]):
+        i += 1
+    var int_end = i
+    var frac_start = i
+    var frac_end = i
+    if i < n and src[i] == UInt8(ord(".")):
+        i += 1
+        frac_start = i
+        while i < n and _is_digit(src[i]):
+            i += 1
+        frac_end = i
+    var digits = (int_end - int_start) + (frac_end - frac_start)
+    if i != n or digits == 0 or digits > 38:
+        return fallback
+    return _decimal_value(text, int_start, int_end, frac_start, frac_end, negative)

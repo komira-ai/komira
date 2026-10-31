@@ -313,6 +313,42 @@ def test_decimal_columns_never_prune() raises:
     assert_false(_all(md, _cmp(BIN_GE, "dec", _int(1))))
 
 
+def test_decimal_columns_never_prune_on_a_decimal_literal() raises:
+    var md = _flat()
+    # dec holds 1.00 to 123.45 (100 to 12345 unscaled). The literal 1.5 is 15
+    # at scale 1; compared as 15 against the unscaled statistics, `dec < 1.5`
+    # would look impossible (the minimum 100 is above 15) and `dec > 1.5` would
+    # look true of every row. Neither is: 1.00 < 1.5.
+    var one_and_a_half = ScalarValue.decimal128(Int64(0), Int64(15), 2, 1)
+    assert_false(_prunes(md, _cmp(BIN_LT, "dec", one_and_a_half.copy())))
+    assert_false(_prunes(md, _cmp(BIN_LE, "dec", one_and_a_half.copy())))
+    assert_false(_prunes(md, _cmp(BIN_EQ, "dec", one_and_a_half.copy())))
+    assert_false(_all(md, _cmp(BIN_GT, "dec", one_and_a_half.copy())))
+    assert_false(_all(md, _cmp(BIN_GE, "dec", one_and_a_half.copy())))
+    assert_false(_all(md, _cmp(BIN_NE, "dec", one_and_a_half.copy())))
+    # The literal on the left, and a literal with more scale than the column
+    # (0.065 against scale 2).
+    assert_false(_prunes(md, _rcmp(BIN_GT, one_and_a_half.copy(), "dec")))
+    assert_false(_all(md, _rcmp(BIN_LT, one_and_a_half.copy(), "dec")))
+    var over_scale = ScalarValue.decimal128(Int64(0), Int64(65), 4, 3)
+    assert_false(_prunes(md, _cmp(BIN_LT, "dec", over_scale.copy())))
+    assert_false(_all(md, _cmp(BIN_GT, "dec", over_scale.copy())))
+    # The whole-file COUNT shortcut declines too.
+    assert_true(not all_match_row_count(md, _cmp(BIN_GT, "dec", one_and_a_half.copy())))
+    assert_true(not all_match_row_count(md, _cmp(BIN_LT, "dec", over_scale.copy())))
+    # And under an AND / OR of two such comparisons.
+    assert_false(
+        _prunes(
+            md,
+            Expr.binary(
+                BIN_AND,
+                _cmp(BIN_GE, "dec", ScalarValue.decimal128(Int64(0), Int64(5), 2, 1)),
+                _cmp(BIN_LE, "dec", ScalarValue.decimal128(Int64(0), Int64(7), 2, 1)),
+            ),
+        )
+    )
+
+
 def test_conservative_cases() raises:
     var md = _flat()
     assert_false(_prunes(md, _cmp(BIN_EQ, "n", _int(99))))

@@ -1,0 +1,128 @@
+-- types.tsv: DuckDB's type and value for each constant expression a comparison folds:
+-- the types of 0.06, 0.060 and 100.00 are their digits; for + - * the result is wide
+-- enough for either operand, unless the result is wider than 18 digits and both operands
+-- are 18 digits or fewer (and, for *, the result scale is below 18), when it is cut to 18
+-- digits with an overflow check, or wider than 38, when it is cut to 38 with one.
+COPY (
+SELECT * FROM (
+  SELECT 0 AS n, '0.06' AS expr, typeof(0.06) AS type, CAST(0.06 AS VARCHAR) AS value
+  UNION ALL
+  SELECT 1 AS n, '0.060' AS expr, typeof(0.060) AS type, CAST(0.060 AS VARCHAR) AS value
+  UNION ALL
+  SELECT 2 AS n, '1.5' AS expr, typeof(1.5) AS type, CAST(1.5 AS VARCHAR) AS value
+  UNION ALL
+  SELECT 3 AS n, '0.0' AS expr, typeof(0.0) AS type, CAST(0.0 AS VARCHAR) AS value
+  UNION ALL
+  SELECT 4 AS n, '100.00' AS expr, typeof(100.00) AS type, CAST(100.00 AS VARCHAR) AS value
+  UNION ALL
+  SELECT 5 AS n, '0.06 - 0.01' AS expr, typeof(0.06 - 0.01) AS type, CAST(0.06 - 0.01 AS VARCHAR) AS value
+  UNION ALL
+  SELECT 6 AS n, '0.06 + 0.01' AS expr, typeof(0.06 + 0.01) AS type, CAST(0.06 + 0.01 AS VARCHAR) AS value
+  UNION ALL
+  SELECT 7 AS n, '0.06 * 0.01' AS expr, typeof(0.06 * 0.01) AS type, CAST(0.06 * 0.01 AS VARCHAR) AS value
+  UNION ALL
+  SELECT 8 AS n, '0.5 * 0.1' AS expr, typeof(0.5 * 0.1) AS type, CAST(0.5 * 0.1 AS VARCHAR) AS value
+  UNION ALL
+  SELECT 9 AS n, '1 - 0.94' AS expr, typeof(1 - 0.94) AS type, CAST(1 - 0.94 AS VARCHAR) AS value
+  UNION ALL
+  SELECT 10 AS n, '2 * 0.025' AS expr, typeof(2 * 0.025) AS type, CAST(2 * 0.025 AS VARCHAR) AS value
+  UNION ALL
+  SELECT 11 AS n, '24 + 0.5' AS expr, typeof(24 + 0.5) AS type, CAST(24 + 0.5 AS VARCHAR) AS value
+  UNION ALL
+  SELECT 12 AS n, '0.1 * 0.1 * 0.1' AS expr, typeof(0.1 * 0.1 * 0.1) AS type, CAST(0.1 * 0.1 * 0.1 AS VARCHAR) AS value
+  UNION ALL
+  SELECT 13 AS n, '-0.06 + 0.01' AS expr, typeof(-0.06 + 0.01) AS type, CAST(-0.06 + 0.01 AS VARCHAR) AS value
+  UNION ALL
+  SELECT 14 AS n, '0.07 - 0.1' AS expr, typeof(0.07 - 0.1) AS type, CAST(0.07 - 0.1 AS VARCHAR) AS value
+  UNION ALL
+  SELECT 15 AS n, '99999999999999999.99 + 0.01' AS expr, typeof(99999999999999999.99 + 0.01) AS type, CAST(99999999999999999.99 + 0.01 AS VARCHAR) AS value
+  UNION ALL
+  SELECT 16 AS n, '1000000 * 0.5' AS expr, typeof(1000000 * 0.5) AS type, CAST(1000000 * 0.5 AS VARCHAR) AS value
+  UNION ALL
+  SELECT 17 AS n, '3000000000 * 0.5' AS expr, typeof(3000000000 * 0.5) AS type, CAST(3000000000 * 0.5 AS VARCHAR) AS value
+  UNION ALL
+  SELECT 18 AS n, '2 + 1234567890123456.78' AS expr, typeof(2 + 1234567890123456.78) AS type, CAST(2 + 1234567890123456.78 AS VARCHAR) AS value
+  UNION ALL
+  SELECT 19 AS n, '1234567890123456.78 + 1234567890123456.78' AS expr, typeof(1234567890123456.78 + 1234567890123456.78) AS type, CAST(1234567890123456.78 + 1234567890123456.78 AS VARCHAR) AS value
+  UNION ALL
+  SELECT 20 AS n, '123456789012345678.9 + 1' AS expr, typeof(123456789012345678.9 + 1) AS type, CAST(123456789012345678.9 + 1 AS VARCHAR) AS value
+  UNION ALL
+  SELECT 21 AS n, '0.000000001 * 0.000000001' AS expr, typeof(0.000000001 * 0.000000001) AS type, CAST(0.000000001 * 0.000000001 AS VARCHAR) AS value
+  UNION ALL
+  SELECT 22 AS n, '0.1234567890123456789012345678901234567 + 1' AS expr, typeof(0.1234567890123456789012345678901234567 + 1) AS type, CAST(0.1234567890123456789012345678901234567 + 1 AS VARCHAR) AS value
+  UNION ALL
+  SELECT 23 AS n, '123456789.123456789 * 0.5' AS expr, typeof(123456789.123456789 * 0.5) AS type, CAST(123456789.123456789 * 0.5 AS VARCHAR) AS value
+  UNION ALL
+  SELECT 24 AS n, '0.1 + 12345678901234567.1' AS expr, typeof(0.1 + 12345678901234567.1) AS type, CAST(0.1 + 12345678901234567.1 AS VARCHAR) AS value
+  UNION ALL
+  SELECT 25 AS n, '0.1 - 99999999999999999.9' AS expr, typeof(0.1 - 99999999999999999.9) AS type, CAST(0.1 - 99999999999999999.9 AS VARCHAR) AS value
+  UNION ALL
+  SELECT 26 AS n, '1234567890.123456789 * 1.5' AS expr, typeof(1234567890.123456789 * 1.5) AS type, CAST(1234567890.123456789 * 1.5 AS VARCHAR) AS value
+  UNION ALL
+  SELECT 27 AS n, '0.000000000000001 * 1000000' AS expr, typeof(0.000000000000001 * 1000000) AS type, CAST(0.000000000000001 * 1000000 AS VARCHAR) AS value
+  UNION ALL
+  SELECT 28 AS n, '0.1 * 0.1 * 0.1 * 0.1 * 0.1 * 0.1 * 0.1 * 0.1 * 0.1 * 0.1 * 0.1 * 0.1 * 0.1' AS expr, typeof(0.1 * 0.1 * 0.1 * 0.1 * 0.1 * 0.1 * 0.1 * 0.1 * 0.1 * 0.1 * 0.1 * 0.1 * 0.1) AS type, CAST(0.1 * 0.1 * 0.1 * 0.1 * 0.1 * 0.1 * 0.1 * 0.1 * 0.1 * 0.1 * 0.1 * 0.1 * 0.1 AS VARCHAR) AS value
+  UNION ALL
+  SELECT 29 AS n, '0.5 + 99999999999999999999999999999999999.5' AS expr, typeof(0.5 + 99999999999999999999999999999999999.5) AS type, CAST(0.5 + 99999999999999999999999999999999999.5 AS VARCHAR) AS value
+  UNION ALL
+  SELECT 30 AS n, '0.0000000000000001 * 0.0000000000000001' AS expr, typeof(0.0000000000000001 * 0.0000000000000001) AS type, CAST(0.0000000000000001 * 0.0000000000000001 AS VARCHAR) AS value
+  UNION ALL
+  SELECT 31 AS n, '5.' AS expr, typeof(5.) AS type, CAST(5. AS VARCHAR) AS value
+  UNION ALL
+  SELECT 32 AS n, '.5' AS expr, typeof(.5) AS type, CAST(.5 AS VARCHAR) AS value
+  UNION ALL
+  SELECT 33 AS n, '00.5' AS expr, typeof(00.5) AS type, CAST(00.5 AS VARCHAR) AS value
+  UNION ALL
+  SELECT 34 AS n, '- -0.5' AS expr, typeof(- -0.5) AS type, CAST(- -0.5 AS VARCHAR) AS value
+  UNION ALL
+  SELECT 35 AS n, '-5.' AS expr, typeof(-5.) AS type, CAST(-5. AS VARCHAR) AS value
+  UNION ALL
+  SELECT 36 AS n, '0.00000001 * 0.000000001' AS expr, typeof(0.00000001 * 0.000000001) AS type, CAST(0.00000001 * 0.000000001 AS VARCHAR) AS value
+  UNION ALL
+  SELECT 37 AS n, '0.0000000000000000001 * 0.0000000000000000001' AS expr, typeof(0.0000000000000000001 * 0.0000000000000000001) AS type, CAST(0.0000000000000000001 * 0.0000000000000000001 AS VARCHAR) AS value
+  UNION ALL
+  SELECT 38 AS n, '.123456789012345678 + .5' AS expr, typeof(.123456789012345678 + .5) AS type, CAST(.123456789012345678 + .5 AS VARCHAR) AS value
+  UNION ALL
+  SELECT 39 AS n, '0.123456789012345678 * 1.5' AS expr, typeof(0.123456789012345678 * 1.5) AS type, CAST(0.123456789012345678 * 1.5 AS VARCHAR) AS value
+  UNION ALL
+  SELECT 40 AS n, '9223372036854775808 + 0.5' AS expr, typeof(9223372036854775808 + 0.5) AS type, CAST(9223372036854775808 + 0.5 AS VARCHAR) AS value
+  UNION ALL
+  SELECT 41 AS n, '9223372036854775808 * 2.5' AS expr, typeof(9223372036854775808 * 2.5) AS type, CAST(9223372036854775808 * 2.5 AS VARCHAR) AS value
+  UNION ALL
+  SELECT 42 AS n, '(1+2)*0.1' AS expr, typeof((1+2)*0.1) AS type, CAST((1+2)*0.1 AS VARCHAR) AS value
+  UNION ALL
+  SELECT 43 AS n, '2*3*0.05' AS expr, typeof(2*3*0.05) AS type, CAST(2*3*0.05 AS VARCHAR) AS value
+  UNION ALL
+  SELECT 44 AS n, '0.1*(1+2)' AS expr, typeof(0.1*(1+2)) AS type, CAST(0.1*(1+2) AS VARCHAR) AS value
+  UNION ALL
+  SELECT 45 AS n, '(5-3)+0.07' AS expr, typeof((5-3)+0.07) AS type, CAST((5-3)+0.07 AS VARCHAR) AS value
+  UNION ALL
+  SELECT 46 AS n, '-2147483648 + 0.5' AS expr, typeof(-2147483648 + 0.5) AS type, CAST(-2147483648 + 0.5 AS VARCHAR) AS value
+  UNION ALL
+  SELECT 47 AS n, '2147483647 + 0.5' AS expr, typeof(2147483647 + 0.5) AS type, CAST(2147483647 + 0.5 AS VARCHAR) AS value
+  UNION ALL
+  SELECT 48 AS n, '3000000000+1+0.5' AS expr, typeof(3000000000+1+0.5) AS type, CAST(3000000000+1+0.5 AS VARCHAR) AS value
+  UNION ALL
+  SELECT 49 AS n, '- 2147483647 - 1 + 0.5' AS expr, typeof(- 2147483647 - 1 + 0.5) AS type, CAST(- 2147483647 - 1 + 0.5 AS VARCHAR) AS value
+  UNION ALL
+  SELECT 50 AS n, '1 + 9223372036854775808 + 0.5' AS expr, typeof(1 + 9223372036854775808 + 0.5) AS type, CAST(1 + 9223372036854775808 + 0.5 AS VARCHAR) AS value
+  UNION ALL
+  SELECT 51 AS n, '+0.5' AS expr, typeof(+0.5) AS type, CAST(+0.5 AS VARCHAR) AS value
+  UNION ALL
+  SELECT 52 AS n, '- +0.5' AS expr, typeof(- +0.5) AS type, CAST(- +0.5 AS VARCHAR) AS value
+  UNION ALL
+  SELECT 53 AS n, '+5.' AS expr, typeof(+5.) AS type, CAST(+5. AS VARCHAR) AS value
+  UNION ALL
+  SELECT 54 AS n, '0.1 + 0.2 + 7 % 4' AS expr, typeof(0.1 + 0.2 + 7 % 4) AS type, CAST(0.1 + 0.2 + 7 % 4 AS VARCHAR) AS value
+  UNION ALL
+  SELECT 55 AS n, '7 // 2 * 0.5' AS expr, typeof(7 // 2 * 0.5) AS type, CAST(7 // 2 * 0.5 AS VARCHAR) AS value
+  UNION ALL
+  SELECT 56 AS n, '-7 % 4 + 0.5' AS expr, typeof(-7 % 4 + 0.5) AS type, CAST(-7 % 4 + 0.5 AS VARCHAR) AS value
+  UNION ALL
+  SELECT 57 AS n, '7 % -4 + 0.5' AS expr, typeof(7 % -4 + 0.5) AS type, CAST(7 % -4 + 0.5 AS VARCHAR) AS value
+  UNION ALL
+  SELECT 58 AS n, '2 * 3 % 4 + 0.5' AS expr, typeof(2 * 3 % 4 + 0.5) AS type, CAST(2 * 3 % 4 + 0.5 AS VARCHAR) AS value
+  UNION ALL
+  SELECT 59 AS n, '-(-2147483648) + 0.5' AS expr, typeof(-(-2147483648) + 0.5) AS type, CAST(-(-2147483648) + 0.5 AS VARCHAR) AS value
+) AS q ORDER BY n
+) TO 'types.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
