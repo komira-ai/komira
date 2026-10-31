@@ -26,6 +26,7 @@ from komira_host.proc_probe import (
     _parse_decimal_int,
     _read_small_file_to_string,
     detect_scan_cache_ram_basis_bytes,
+    read_small_file_to_string,
 )
 
 
@@ -178,6 +179,25 @@ def test_cgroup_path_is_the_unified_line() raises:
         var nl = rest.find("\n")
         var want = rest if nl < 0 else String(rest[byte = 0:nl])
         assert_equal(rel, want)
+
+
+def test_public_reader_matches_the_private_one() raises:
+    # The public `read_small_file_to_string` is the reader outside packages use: a missing file is
+    # empty, the last newline is stripped and the 4 KiB cap holds, exactly as for the private reader.
+    var text = _scratch("pp_public")
+    var big = _scratch("pp_public_big")
+    _write(text, "max\n")
+    _write(big, _repeat("z", 5000))
+    assert_equal(read_small_file_to_string(_scratch("pp_public_missing")), "")
+    comptime if CompilationTarget.is_linux():
+        assert_equal(read_small_file_to_string(text), "max")
+        assert_equal(read_small_file_to_string(big).byte_length(), 4096)
+        assert_equal(
+            read_small_file_to_string("/proc/self/cgroup"),
+            _read_small_file_to_string("/proc/self/cgroup"),
+        )
+    else:
+        assert_equal(read_small_file_to_string(text), "")
 
 
 def main() raises:
