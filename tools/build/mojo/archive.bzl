@@ -15,6 +15,7 @@ configure step of a CMake `configure_file`, without CMake).
 """
 
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
+load("@komira//tools/build/bench_salt:bench_salt.bzl", "salted")
 
 def _archive_files_impl(ctx):
     archive = ctx.attrs.archive[DefaultInfo].default_outputs[0]
@@ -51,6 +52,7 @@ def _archive_files_impl(ctx):
     ctx.actions.run(
         # tools/build/mojo/tools/archive_files.zig: extracts, copies, substitutes. No shell.
         cmd_args(ctx.attrs._tool[RunInfo], archive, ctx.attrs.strip_prefix, subst, args),
+        env = salted(),
         category = "archive_files",
     )
     return [DefaultInfo(default_outputs = outs, sub_targets = sub_targets)]

@@ -24,6 +24,7 @@ directory.
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
 load("@komira//tools/build/platforms:defs.bzl", "TOOL_EXEC")
 load(":providers.bzl", "MojoProgramInfo", "MojoRunnableInfo")
+load("@komira//tools/build/bench_salt:bench_salt.bzl", "salted")
 
 HELPER_ATTRS = {
     # file name beside the binary -> the target whose default output it is
@@ -59,7 +60,7 @@ def _check_impl(ctx):
     # The copy in the runnable directory, not the helper's own target: a
     # binary that lost its copy fails here.
     run_dir = ctx.attrs.binary[MojoRunnableInfo].run_dir
-    ctx.actions.run(cmd_args(run_dir.project(helper), argv), category = "mojo_helper_check")
+    ctx.actions.run(cmd_args(run_dir.project(helper), argv), env = salted(), category = "mojo_helper_check")
     return [DefaultInfo(default_output = out)]
 
 _mojo_helper_check = rule(

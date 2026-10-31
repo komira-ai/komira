@@ -39,6 +39,7 @@ load("@komira//tools/build/mojo:providers.bzl", "MojoProgramInfo")
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
 load("@komira//tools/build/rerun:rerun.bzl", "RERUN_ATTRS", "rerun_env", "rerun_info")
 load(":kcov_guard.bzl", "KcovGuardInfo", "kcov_guard")
+load("@komira//tools/build/bench_salt:bench_salt.bzl", "salted")
 
 # x86-64 levels: target_cpu -> the level the launcher requires.
 _LEVELS = {
@@ -94,6 +95,7 @@ def _launcher(ctx, out_name, program, level, test_hook):
             out.as_output(),
             cmd_args(src, format = "{}/launcher.c"),
         ),
+        env = salted(),
         category = "komira_launcher",
         identifier = out_name,
     )
@@ -157,6 +159,7 @@ def _bundle_impl(ctx):
             version,
             data_args,
         ),
+        env = salted(),
         category = "komira_bundle",
     )
     # No file of the bundle is kcov (kcov_guard.bzl): built with the bundle,
@@ -227,14 +230,14 @@ def _level_test_impl(ctx):
             exe.as_output(),
             cmd_args(src, format = "{}/level_test.c"),
         ),
-        env = rerun_env(ctx),
+        env = salted(rerun_env(ctx)),
         category = "launcher_level_test_build",
     )
     # The program's report is shown whatever it decided; the target is red
     # when it exits non-zero.
     ctx.actions.run(
         cmd_args(ctx.attrs._pkg_act[RunInfo], "level-run", out.as_output(), exe),
-        env = rerun_env(ctx),
+        env = salted(rerun_env(ctx)),
         category = "launcher_level_test",
     )
     return [DefaultInfo(default_output = out, sub_targets = {"bin": [DefaultInfo(default_output = exe)]}), rerun_info(ctx)]
@@ -279,6 +282,7 @@ def _bundle_tarball_impl(ctx):
             # Packed only after the kcov guard passed over the bundle.
             hidden = [b.kcov_guard],
         ),
+        env = salted(),
         category = "komira_pack_tar",
     )
     return [DefaultInfo(default_output = out)]
@@ -423,6 +427,7 @@ def _oci_tree_impl(ctx):
     out = ctx.actions.declare_output(ctx.label.name, dir = True)
     ctx.actions.run(
         cmd_args(ctx.attrs._oci[RunInfo], "tree", "--out", out.as_output(), args),
+        env = salted(),
         category = "komira_oci_tree",
     )
     # No file of the tree is kcov (kcov_guard.bzl): read by the guard, which
@@ -522,6 +527,7 @@ def _oci_image_impl(ctx):
             # Packed only after the kcov guard passed over the bundle or tree.
             hidden = [guard],
         ),
+        env = salted(),
         category = category,
     )
     # The layer list, read from the manifest by komira_oci, which refuses
@@ -538,6 +544,7 @@ def _oci_image_impl(ctx):
             "--out",
             layer_list.as_output(),
         ),
+        env = salted(),
         category = "oci_layers",
     )
     # [release]: the layout plus kci's artifact manifest, the directory a
@@ -573,6 +580,7 @@ def _oci_image_impl(ctx):
             "--from",
             member_from,
         ),
+        env = salted(),
         category = "oci_release_manifest",
     )
     release = ctx.actions.copied_dir(ctx.label.name + ".release", {

@@ -146,6 +146,7 @@ load("@komira//tools/build/native:shared.bzl", "NativeSharedInfo", "linux_glibc_
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load("@komira//tools/build/platforms:table.bzl", "asset")
 load(":kcov_guard.bzl", "KcovGuardInfo", "kcov_guard")
+load("@komira//tools/build/bench_salt:bench_salt.bzl", "salted")
 
 def _compiler_version():
     # The version of the Mojo compiler the toolchain downloads, read from the
@@ -205,6 +206,7 @@ def _copy_dir(ctx, tool, src, dst, category, identifier, hidden):
     cmd = cmd_args(tool, "copy-dir", src, dst.as_output(), hidden = hidden)
     ctx.actions.run(
         cmd,
+        env = salted(),
         category = category,
         identifier = identifier,
     )
@@ -267,6 +269,7 @@ def _packaged_readme(ctx, lib, info):
             "--args",
             written.as_output(),
         ),
+        env = salted(),
         category = "conda_readme_link",
     )
     parsed = ctx.actions.declare_output("readme/link_args.parsed")
@@ -283,6 +286,7 @@ def _packaged_readme(ctx, lib, info):
             "--out",
             parsed.as_output(),
         ),
+        env = salted(),
         category = "conda_readme_link_check",
     )
 
@@ -421,7 +425,7 @@ def _conda_package_impl(ctx):
             "--out-dir",
             raw.as_output(),
         )
-    ctx.actions.run(cmd, category = "conda_pack", identifier = ctx.label.name)
+    ctx.actions.run(cmd, env = salted(), category = "conda_pack", identifier = ctx.label.name)
 
     def check(marker_name, extra):
         marker = ctx.actions.declare_output(marker_name)
@@ -449,6 +453,7 @@ def _conda_package_impl(ctx):
             args.append(native_check)
         ctx.actions.run(
             cmd_args(args, extra, "--out", marker.as_output()),
+            env = salted(),
             category = "conda_check",
             identifier = marker_name,
         )
@@ -599,6 +604,7 @@ def _conda_manifest_kci_impl(ctx):
     out = ctx.actions.declare_output(ctx.label.name + ".parsed")
     ctx.actions.run(
         cmd_args(ctx.attrs._pkg_act[RunInfo], "conda-manifest-kci", out.as_output(), pkg, ctx.attrs._probe[RunInfo]),
+        env = salted(),
         category = "conda_manifest_kci",
     )
     return [DefaultInfo(default_output = out)]
@@ -663,6 +669,7 @@ def _conda_doc_check_impl(ctx):
             "--out",
             marker.as_output(),
         ),
+        env = salted(),
         category = "conda_doc_check",
     )
     return [DefaultInfo(default_output = marker)]
@@ -705,6 +712,7 @@ def _conda_package_expect_impl(ctx):
             "--out",
             marker.as_output(),
         ),
+        env = salted(),
         category = "conda_expect",
     )
     return [DefaultInfo(default_output = marker)]

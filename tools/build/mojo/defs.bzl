@@ -44,6 +44,7 @@ load(":test_limit.bzl", "HANG_LIMIT_ATTRS", "TEST_LIMIT_ATTRS", "deadline_flags"
 load("@komira//tools/build/rerun:rerun.bzl", "RERUN_ATTRS", "rerun_env", "rerun_info")
 load(":compile.bzl", _TOOLCHAIN_ATTR = "toolchain_attr", _build_executable = "build_executable", _c_link = "c_link", _check_deps = "check_deps", _dep_closure = "dep_closure", _dirname = "dirname", _join = "join", _link_tail = "link_tail", _main_src = "main_src", _stem = "stem", _toolchain = "toolchain", _mojo_compile_cmd = "mojo_compile_cmd", _mojo_precompile_cmd = "mojo_precompile_cmd")
 load(":shared_lib.bzl", _mojo_shared_lib_rule = "mojo_shared_lib_rule")
+load("@komira//tools/build/bench_salt:bench_salt.bzl", "salted")
 
 # Re-exported: other files and BUCK files load these names from here.
 mojo_compile_cmd = _mojo_compile_cmd
@@ -166,6 +167,7 @@ def _library_impl(ctx):
     first = [ctx.attrs.fresh_gate[DefaultInfo].default_outputs[0]] if ctx.attrs.fresh_gate else []
     ctx.actions.run(
         cmd_args(mojo_precompile_cmd(tc, dep_closure.project_as_args("include"), src_dir, ungated.as_output()), hidden = first),
+        env = salted(),
         category = "mojo_precompile",
     )
     ungated_tset = ctx.actions.tset(MojoPkgTSet, value = ungated, children = deps)
@@ -218,7 +220,7 @@ def _library_impl(ctx):
                 gate_mojo(tc, "{}:{}".format(ctx.label.raw_target(), t.short_path), staged, marker.as_output(), cap_flags(cap) + hang, env_args),
                 hidden = test_dir,
             ),
-            env = rerun_env(ctx),
+            env = salted(rerun_env(ctx)),
             category = "mojo_gated_test",
             identifier = stem,
         )
@@ -265,6 +267,7 @@ def _library_impl(ctx):
                 public.as_output(),
                 hidden = first + markers,
             ),
+            env = salted(),
             category = "mojo_gate_join",
         )
     else:
@@ -334,13 +337,14 @@ def _readme_test_impl(actions, label, gate_label, examples, package, src, marker
                 gate_mojo(tc, "{}:{}".format(gate_label, line), staged, m.as_output(), hang_flags, env_args),
                 hidden = root,
             ),
-            env = rerun,
+            env = salted(rerun),
             category = "mojo_gated_test",
             identifier = "readme_" + line,
         )
         markers.append(m)
     actions.run(
         cmd_args(tc.act, "cat", marker, markers),
+        env = salted(),
         category = "mojo_readme_join",
     )
     actions.copied_dir(objects, built)
@@ -450,10 +454,10 @@ def _run_check(ctx, tc, command):
     out = ctx.actions.declare_output(ctx.label.name + ".stdout")
     args = [tc.act, "run-check", tc.busybox, command, out.as_output()]
     if ctx.attrs.expected_stdout == None:
-        ctx.actions.run(cmd_args(args), env = rerun_env(ctx), category = "mojo_run_check")
+        ctx.actions.run(cmd_args(args), env = salted(rerun_env(ctx)), category = "mojo_run_check")
         return out, []
     args.append(ctx.actions.write(ctx.label.name + ".expected", ctx.attrs.expected_stdout))
-    ctx.actions.run(cmd_args(args), env = rerun_env(ctx), category = "mojo_run_check")
+    ctx.actions.run(cmd_args(args), env = salted(rerun_env(ctx)), category = "mojo_run_check")
     return out, run_check_validation(ctx, out, ctx.attrs.expected_stdout)
 
 def _shared(ctx, tc, levels):

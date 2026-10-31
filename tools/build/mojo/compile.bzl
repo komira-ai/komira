@@ -11,6 +11,7 @@ accessor, the compile wrapper command lines (`mojo_compile_cmd`,
 load("@prelude//linking:link_info.bzl", "LinkStrategy", "MergedLinkInfo", "create_merged_link_info_for_propagation")
 load(":providers.bzl", "MojoInfo", "MojoPkgTSet", "mojo_pkg_children", "MojoToolchainInfo")
 load(":opt_level.bzl", "opt_level_args")
+load("@komira//tools/build/bench_salt:bench_salt.bzl", "salted")
 
 
 def _toolchain(ctx):
@@ -258,6 +259,7 @@ def _build_executable(ctx, tc, out_path, srcs, main, closure_tsets, opt_level, c
             "-o",
             exe.as_output(),
         ], runpath = "$ORIGIN/../.." if shared else None, source_root = staged, link_tail = tail, link = debug_link),
+        env = salted(),
         category = category,
         identifier = identifier,
     )

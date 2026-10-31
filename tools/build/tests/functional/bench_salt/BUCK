@@ -1,0 +1,5 @@
+load(":defs.bzl", "salted_env")
+
+# What `salted({"KOMIRA_BENCH_SALT_FIXTURE": "1"})` returns, in this target's
+# provider dump (selftest/bench_salt.zig).
+salted_env(name = "env")
