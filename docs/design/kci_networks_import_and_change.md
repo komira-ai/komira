@@ -1,6 +1,6 @@
 # kci: importing an existing network, and changing one, on any cloud
 
-> **kci is retired** in favour of ucdk (komira-ai/ucdk) and is to be deleted from this repository. No workflow runs it: the pull request check is `pr / check` and the release is `release.yml` ([ci.md](../ci.md)). This page describes the old design.
+> **kci is retired**, and its relevant logic is being ported to ucdk (komira-ai/ucdk). No workflow runs it: the pull request check is `pr / check` and the release is `release.yml` ([ci.md](../ci.md)). This page describes the old design.
 
 A decision note for the kci resource model. It assumes the neutral `network` and `subnet` primitives
 (`Resource.body` 23 and 29): a network has one private IPv4 range (`ipv4_cidr`), a subnet names its network

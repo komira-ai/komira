@@ -1,6 +1,6 @@
 # Conda packages of the Mojo libraries
 
-> **kci is retired** in favour of ucdk (komira-ai/ucdk) and is to be deleted from this repository. No workflow runs it: the pull request check is `pr / check` and the release is `release.yml` ([ci.md](../../docs/ci.md)). Where this page says "the release tool (kci)", read the release set that `release/artifacts.textproto` declares and `release.yml` builds; the kci code that reads these formats is still in the tree until it is deleted.
+> **kci is retired**, and its relevant logic is being ported to ucdk (komira-ai/ucdk). No workflow runs it: the pull request check is `pr / check` and the release is `release.yml` ([ci.md](../../docs/ci.md)). Where this page says "the release tool (kci)", read the release set that `release/artifacts.textproto` declares and `release.yml` builds; the kci code that reads these formats is still in the tree.
 
 A Mojo library published as a conda package (a `.conda`) installs
 `lib/mojo/<name>.mojoc` into the prefix, and, when the library has a README.md,

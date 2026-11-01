@@ -1,6 +1,6 @@
 # The DEPLOY step: cells, the GCP adapter, images into a cell, and deploy probes
 
-> **kci is retired** in favour of ucdk (komira-ai/ucdk) and is to be deleted from this repository. No workflow runs it: the pull request check is `pr / check` and the release is `release.yml` ([ci.md](../ci.md)). This page describes the old design.
+> **kci is retired**, and its relevant logic is being ported to ucdk (komira-ai/ucdk). No workflow runs it: the pull request check is `pr / check` and the release is `release.yml` ([ci.md](../ci.md)). This page describes the old design.
 
 Status: design, no code. It builds on the resource-model stack #682 (P8) → #690 (P9) → #696 (P10) →
 #700 (P11, registry) → #719 (P12, labels, `physical_name`, `adopt`) → #722 (label budget) → #736 (C1,

@@ -1,6 +1,6 @@
 # uv: the pin
 
-> **kci is retired** in favour of ucdk (komira-ai/ucdk) and is to be deleted from this repository. No workflow runs it: the pull request check is `pr / check` and the release is `release.yml` ([ci.md](../../docs/ci.md)). `kci_pkg_upload`, the only user of this pin, goes with kci.
+> **kci is retired**, and its relevant logic is being ported to ucdk (komira-ai/ucdk). No workflow runs it: the pull request check is `pr / check` and the release is `release.yml` ([ci.md](../../docs/ci.md)). `kci_pkg_upload` is the only user of this pin.
 
 The `uv publish` that kci_pkg_upload's fidelity fixtures are measured
 against ([src/kci_pkg_upload/tests/fidelity](../../src/kci_pkg_upload/tests/fidelity/README.md)).

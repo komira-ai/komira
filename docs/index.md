@@ -3,10 +3,9 @@
 The canonical docs: each row names what one doc is the authority FOR. When a doc and the code
 disagree, the code is what runs; when two docs disagree, the one listed here wins for its row.
 
-kci, the old build-and-deploy command line, is retired in favour of ucdk (komira-ai/ucdk) and is to
-be deleted from this repository. No workflow runs it: the pull request check is `pr / check` and the
-release is `release.yml` ([ci.md](ci.md)). Rows below that mention kci point at history or at code
-that is waiting to be deleted.
+kci, the old build-and-deploy command line, is retired, and its relevant logic is being ported to ucdk
+(komira-ai/ucdk). No workflow runs it: the pull request check is `pr / check` and the
+release is `release.yml` ([ci.md](ci.md)). Rows below that mention kci point at history or at kci code that no workflow runs.
 
 | Authority for | Doc |
 |---|---|

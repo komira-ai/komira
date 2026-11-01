@@ -3,8 +3,8 @@
 komira is a data platform written in [Mojo](https://www.modular.com/mojo): a
 columnar, Arrow-native core, the codecs and cryptography its connectors and
 storage formats are built on, and the libraries of `kci`, its retired build-and-deploy
-command line (retired in favour of ucdk, komira-ai/ucdk; no workflow runs it and
-its packages are to be deleted). Everything is built with
+command line (retired; its relevant logic is being ported to ucdk,
+komira-ai/ucdk; no workflow runs it). Everything is built with
 [Buck2](https://buck2.build) and a hermetic toolchain, and every library's
 tests are part of its build.
 
@@ -379,8 +379,8 @@ dependency order is the order of the rows.
 
 ### CI and deploy (`kci`, retired)
 
-kci is retired in favour of ucdk (komira-ai/ucdk) and is to be deleted from this
-repository; these rows describe code that is still in the tree and that no
+kci is retired, and its relevant logic is being ported to ucdk
+(komira-ai/ucdk); these rows describe code that is still in the tree and that no
 workflow runs. The pull request check is `pr / check` (`pr.yml`) and the release
 is `release.yml` ([ci.md](ci.md)). A library of kci is named `kci_<x>`. The release side (build, publish,
 validate) comes first, then the deploy side.

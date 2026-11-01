@@ -1,6 +1,6 @@
 # Native code in conda packages: each library ships its own
 
-> **kci is retired** in favour of ucdk (komira-ai/ucdk) and is to be deleted from this repository. No workflow runs it: the pull request check is `pr / check` and the release is `release.yml` ([ci.md](../ci.md)). This page describes the old design.
+> **kci is retired**, and its relevant logic is being ported to ucdk (komira-ai/ucdk). No workflow runs it: the pull request check is `pr / check` and the release is `release.yml` ([ci.md](../ci.md)). This page describes the old design.
 
 Status: plan, built in part (part of slice 9, #1391; slice 11, the beta wiring). Each item is marked **EXISTS** (with the
 path on `main` that does it) or **PROPOSED**. "On #NNN" means the code is on that open pull request and not on `main`. Scope:

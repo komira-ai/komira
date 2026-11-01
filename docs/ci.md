@@ -428,11 +428,10 @@ then-current `main`. Nothing is half-done, because the replaced run never starte
 
 The release machine file, [`release/machine.textproto`](../release/machine.textproto),
 and `kci` itself are not part of the release: no workflow runs either, and no
-workflow is held to the machine file. kci is retired in favour of ucdk
-(komira-ai/ucdk) and is to be deleted from this repository; the file stays for
-kci's own tests until then. The `kci_*` conda members that
-`release/artifacts.textproto` still lists are built by `release.yml` like any
-other member, and go when the packages are deleted.
+workflow is held to the machine file. kci is retired, and its relevant logic is
+being ported to ucdk (komira-ai/ucdk); the file stays for kci's own tests. The
+`kci_*` conda members that `release/artifacts.textproto` still lists are built by
+`release.yml` like any other member.
 
 ### The mopm jobs
 
@@ -647,8 +646,8 @@ a redirect.
 > workflow, deleted; `release.yml` has none of its stages, environments or
 > gates. It is kept as the description of what kci's publish machinery
 > enforces (the rules are still tested, against a fixture pair in
-> `src/kci_workflow_check/tests/data`) until kci is deleted. kci is retired in
-> favour of ucdk (komira-ai/ucdk): no workflow runs it. Read it as history, not
+> `src/kci_workflow_check/tests/data`) while kci's code is in the tree. kci is retired, and its
+> relevant logic is being ported to ucdk (komira-ai/ucdk): no workflow runs it. Read it as history, not
 > as what a push to `main` does today.
 
 ### Continuous auto-promotion
@@ -1208,7 +1207,7 @@ is a row of `src/kci_workflow_check/tests/test_workflow_subset.mojo`.
 one job `check`, so the status check is **`pr / check`** (GitHub lists the
 context as `check`; the repository's ruleset requires that context, and only
 pr.yml has a job of that id). It runs named Buck2 targets on the farm and does
-not run kci (retired, to be deleted). Neither it nor
+not run kci (retired). Neither it nor
 [`release.yml`](#releaseyml-the-release) is held to the machine file now.
 
 | | |

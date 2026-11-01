@@ -1,6 +1,6 @@
 # Gamma validation: kci work and open decisions
 
-> **kci is retired** in favour of ucdk (komira-ai/ucdk) and is to be deleted from this repository. No workflow runs it: the pull request check is `pr / check` and the release is `release.yml` ([ci.md](../ci.md)). This page describes the old design.
+> **kci is retired**, and its relevant logic is being ported to ucdk (komira-ai/ucdk). No workflow runs it: the pull request check is `pr / check` and the release is `release.yml` ([ci.md](../ci.md)). This page describes the old design.
 
 This note is the second half of [gamma validation](gamma_validation.md),
 which says what checks a release before prod, per package family. It lists
