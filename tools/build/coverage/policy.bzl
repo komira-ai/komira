@@ -136,7 +136,6 @@ COVERAGE_NO_GATE = {
 # work, not done.
 COVERAGE_BRANCH_GATE = {
     "komira//src/kci_cloud_fake:kci_cloud_fake": "its eleven tests' branches all classify (556 arms of 9 files, 6 of them `try` arms)",
-    "komira//src/kci_secret_writer:kci_secret_writer": "its test's branches all classify (16 arms of 1 file)",
     "komira//src/kci_validator_rows:kci_validator_rows": "its test's branches all classify (40 arms of 2 files)",
     "komira//src/komira_agg:komira_agg": "its ten tests' branches all classify (228 arms of 7 files)",
     "komira//src/komira_async_api:komira_async_api": "its test's branches all classify (2 arms of 1 file)",

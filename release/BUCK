@@ -1,16 +1,7 @@
 # The release files: what a release of komira builds (artifacts.textproto), the
-# set that builds it (release_set, below) and where it would be published
-# (channels.textproto). .github/workflows/release.yml builds the set on every
-# push to main. The release machine file (machine.textproto) is the retired
-# release tool's: no workflow runs it any more, and kci's own tests still read
-# it. Each file is welded to the test of the parser that reads it, so a file
-# kci would refuse fails `./buck2 build //...`:
-#   machine.textproto    src/kci_release_machine (the machine file)
-#   artifacts.textproto  src/kci_artifact (test_release_artifacts_file), and
-#                        release_set below holds the set to it (a build action)
-#   channels.textproto   src/kci_release_channel (test_release_channels_file);
-#                        no stage names it (komira publishes to no channel for
-#                        now)
+# set that builds it (release_set, below). .github/workflows/release.yml builds the set on every
+# push to main. release_set below holds the set to artifacts.textproto (a build
+# action).
 # release/ci (a package of its own) holds the programs of the workflows
 # (main_red, check_release_ref, release_json), built behind their cases.
 # Changes need the release approver's review (.github/CODEOWNERS).
@@ -30,13 +21,6 @@ export_file(
 export_file(
     name = "channels.textproto",
     visibility = ["//src/kci_release_channel:"],
-)
-
-# By reference: a validation target passes kci its path in the checkout.
-export_file(
-    name = "machine.textproto",
-    mode = "reference",
-    visibility = ["//release/validations:", "//src/kci_release_machine:"],
 )
 
 # The build artifacts of the libraries moved to mopm (mopm_artifacts.bzl): each

@@ -36,7 +36,7 @@ script	third_party/git/git_build.sh	-	-	exception: git's own build is make, whic
 human	tools/build/coverage/census.sh	-	-	measures every library with ./buck2 by hand at the top of a checkout (run, collect); not an action (the build actions are census_render)
 script	tools/build/mojo/darwin/busybox.sh	-	-	exception: macOS has no static busybox, so the darwin toolchain provides the busybox calling convention through a shell shim (mojo/darwin/busybox.sh)
 human	tools/build/package/list_conda_targets.sh	-	-	a development helper that runs `buck2 uquery` from outside; never a build or test action
-human	tools/build/package/release_version.sh	-	-	run by the release workflow on a runner (and read as data by kci_workflow_check's test); never a build or test action
+human	tools/build/package/release_version.sh	-	-	run by the release workflow on a runner; never a build or test action
 human	tools/build/tests/assert_level_tests.sh	-	-	client-side driver or fixture regenerator: runs buck2 or a tool from outside, never a build or test action
 human	tools/build/tests/c_libs_tests.sh	-	-	client-side driver or fixture regenerator: runs buck2 or a tool from outside, never a build or test action
 human	tools/build/tests/coverage_branch_tests.sh	-	-	client-side driver or fixture regenerator: runs buck2 or a tool from outside, never a build or test action
