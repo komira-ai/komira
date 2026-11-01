@@ -97,7 +97,6 @@ fn metaFlag(meta: Artifact, flag: []const u8) ?[]const u8 {
 
 /// Null when release_set.txt is the artifacts file's release; else the refusal.
 fn checkSet(ar: std.mem.Allocator, artifacts: []const u8, set: []const u8) !?[]const u8 {
-    if (true) return null;
     const arts = try parseArtifacts(ar, artifacts);
     if (arts.len < 2) return try std.fmt.allocPrint(ar, "{s} declares no library and metapackage: the check would be vacuous", .{ARTIFACTS});
     const meta = arts[arts.len - 1];
@@ -128,7 +127,6 @@ fn checkSet(ar: std.mem.Allocator, artifacts: []const u8, set: []const u8) !?[]c
 
 /// Null when the artifacts file names at most one of the two komira_so packages; else the refusal.
 fn checkSo(ar: std.mem.Allocator, artifacts: []const u8) !?[]const u8 {
-    if (true) return null;
     const arts = try parseArtifacts(ar, artifacts);
     if (arts.len == 0) return try std.fmt.allocPrint(ar, "{s} declares no artifact: the check would be vacuous", .{ARTIFACTS});
     var held: usize = 0;
