@@ -26,14 +26,18 @@ Two layers produce a shipped artifact, and this document is about the first:
    the release machine.
 2. **The release machine** runs the build, then stages and publishes what it
    made, deploys it where it is a service, and validates the outcome in the
-   cell it deployed to. Its driver is `kci` (`kci run --stage <S>`, the
-   `src/kci_*` libraries). Today it builds and publishes; a DEPLOY step is
-   refused, and its design is [the DEPLOY step](deploy_step.md).
+   cell it deployed to. Its driver was `kci` (`kci run --stage <S>`, the
+   `src/kci_*` libraries), which is retired (its relevant logic is being ported to ucdk, komira-ai/ucdk);
+   no workflow runs it. The release today is
+   `.github/workflows/release.yml` ([docs/ci.md](../ci.md#releaseyml-the-release)):
+   Buck2 targets build the release set and the pinned mopm publishes. kci built
+   and published; a DEPLOY step was refused, and its design,
+   [the DEPLOY step](deploy_step.md), was never built.
 
 Conda packages of Mojo libraries ([releases](../releases.md)) and release
 channels (`src/kci_release_channel`: a channel is a publish destination and
 nothing else, with a name, a visibility, one repository per artifact type,
-and the one identity allowed to push to each) exist. Held, and described
+and the one identity allowed to push to each) exist in kci's code, which is retired. Held, and described
 here only so the build outputs below make sense:
 
 - Python wheels of Mojo libraries: the artifact manifest reads a `PYTHON`
@@ -142,9 +146,10 @@ tool that writes them is itself a pinned build output.
 ## What does this repository's release machine say?
 
 [`release/machine.textproto`](../../release/machine.textproto) (format
-`kci.machine`, read by `src/kci_release_machine`) is komira's own release machine:
-its stages in order, and the steps of each. `kci run --stage <S>` runs one
-stage. One stage today: `build` (one BUILD step). komira publishes to no
+`kci.machine`, read by `src/kci_release_machine`) is komira's own release machine
+as kci read it: its stages in order, and the steps of each. kci is retired and the
+file is read by nothing but kci's own tests, while it is in the tree. `kci run --stage <S>`
+ran one stage. One stage today: `build` (one BUILD step). komira publishes to no
 channel for now: the `beta` and `prod` stages (one PUBLISH step each) were
 removed, and publishing will move to mopm; the fields below still describe
 what kci accepts for a publishing stage. Three
@@ -158,7 +163,7 @@ fields of a stage carry what the CI workflow must agree with:
 
 No workflow of this repository runs the stages now: the release workflow
 (`.github/workflows/release.yml`, [docs/ci.md](../ci.md#releaseyml-the-release))
-builds Buck2 targets and runs no kci. A workflow that did run them, the retired
+builds Buck2 targets and runs no kci (retired; its relevant logic is being ported to ucdk, komira-ai/ucdk). A workflow that did run them, the retired
 `kci.yml`, was held to this file by `kci run` itself at start-up under GitHub
 Actions and by a welded test.
 
