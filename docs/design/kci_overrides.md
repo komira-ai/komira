@@ -1,5 +1,7 @@
 # kci: overrides, the escape hatch for what is cloud-specific
 
+> **kci is retired**, and its relevant logic is being ported to ucdk (komira-ai/ucdk). No workflow runs it: the pull request check is `pr / check` and the release is `release.yml` ([ci.md](../ci.md)). This page describes the old design.
+
 A decision note for the kci resource model. The decided part: the open schema (`kci.resource.v1`,
 `src/kci_resource_proto/resource.proto`) stays cloud-agnostic, with resources named by concept, so one list
 deploys to any cloud. A cloud-specific resource or setting comes through an explicit override, never through a

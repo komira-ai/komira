@@ -1,5 +1,7 @@
 # The staged pipeline: build once, then beta, gamma and prod, each one run at a time
 
+> **kci is retired**, and its relevant logic is being ported to ucdk (komira-ai/ucdk). No workflow runs it: the pull request check is `pr / check` and the release is `release.yml` ([ci.md](../ci.md)). This page describes the old design.
+
 Status: design, not built. **EXISTS** names code or a setting on `main`; everything else is
 PROPOSED. New names (all absent from `main`): the conda channel `beta` and its environments `beta`
 and `beta-breakglass`; the job `beta_validate`; the stage `gamma` in its new meaning (real cloud
