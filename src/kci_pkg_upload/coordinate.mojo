@@ -139,7 +139,7 @@ def normalize_distribution_name(name: String) -> String:
         if c >= UInt8(65) and c <= UInt8(90):
             c += UInt8(32)
         out.append(c)
-    # `name` is valid UTF-8 and only ASCII bytes were replaced by ASCII bytes
+    # SAFETY: `name` is valid UTF-8 and only ASCII bytes were replaced by ASCII bytes
     # (or dropped as a run of ASCII separators), so `out` is valid UTF-8.
     return String(unsafe_from_utf8=Span(out))
 
