@@ -61,7 +61,7 @@ def _cases():
     expect("an unpublished package needs no target", findings(_PATHS, ["a"], ["b"]), "")
     expect("everything unpublished is fine", findings(_PATHS, [], ["a", "b"]), "")
     expect_in("a moved package neither covered nor unpublished is named", findings(_PATHS, ["a"], []), "1 moved package(s) have no README e2e target: b")
-    expect_in("an unpublished name with no mopm.toml is named", findings(_PATHS, ["a", "b"], ["z"]), "1 unpublished package(s) have no src/<name>/mopm.toml: z", "Delete each from UNPUBLISHED")
+    expect("an unpublished name with no mopm.toml (its source was deleted) is fine", findings(_PATHS, ["a", "b"], ["z"]), "")
     expect_in("a package both covered and unpublished is named", findings(_PATHS, ["a", "b"], ["b"]), "1 package(s) are both in PACKAGES and in UNPUBLISHED: b")
 
     # The row of EXCLUDED and the pinned mopm move together.
