@@ -149,6 +149,24 @@ test "a list that is unsorted, repeats a name, holds junk or a stale name is ref
     try expectRefused(ar, bzl, "a_one\nb_two\nc_old\n", "c_old, which is no release member");
 }
 
+test "a retired name (UNPUBLISHED) stays claimed: accepted in the list, refused when dropped" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const ar = arena.allocator();
+    const bzl = "PACKAGES = {\n    \"a_one\": \"0.1.0\",\n}\n\nUNPUBLISHED = [\n    \"z_old\",\n]\n";
+    try t.expect((try check(ar, bzl, "a_one\nz_old\n")) == null);
+    try expectRefused(ar, bzl, "a_one\n", "z_old is retired (UNPUBLISHED in release/readme_e2e/packages.bzl) and is not in release/prod_claimed_names.txt: a name once claimed stays claimed, keep the line");
+    try expectRefused(ar, bzl, "a_one\nc_old\nz_old\n", "c_old, which is no release member");
+}
+
+test "a name that is both a member and retired is refused" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const ar = arena.allocator();
+    const bzl = "PACKAGES = {\n    \"a_one\": \"0.1.0\",\n}\n\nUNPUBLISHED = [\n    \"a_one\",\n]\n";
+    try expectRefused(ar, bzl, "a_one\n", "a_one is both a release member and retired (UNPUBLISHED)");
+}
+
 test "an empty list or empty PACKAGES is refused, not passed vacuously" {
     var arena = std.heap.ArenaAllocator.init(t.allocator);
     defer arena.deinit();
