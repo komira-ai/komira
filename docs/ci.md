@@ -493,6 +493,13 @@ dropping of one of them, an unsorted or repeated line, and an empty file. It is 
 committed claim, not a live read: it does not notice a claim the registry lost, and `prod-stage` stays the
 last word.
 
+**The release declaration and the release set agree, and one komira_so package.** `//release:release_checks_cases`
+holds `release/artifacts.textproto` to `tools/build/package/release_set.txt`: the same metapackage, the same
+members in the same order, and the same `--license`, `--summary` and `--home`, so a member listed in one file and
+missing from the other is refused, naming it. It also refuses a release that names both `komira_so_conda` and
+`komira_so_libkomira_conda`: they are one package name, version and build with different contents, so a channel
+would be handed two files for one name.
+
 1. **`prod-stage`** runs `mopm publish --staged S --registry prod --oidc --no-commit`. The registry creates a
    group, mopm uploads every file, and the run ends 0 with the outcome `staged`: the group is `open`, the
    registry holds the bytes in quarantine, where nothing reads them, and no package is in the API, the

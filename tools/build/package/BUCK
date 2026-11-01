@@ -399,3 +399,11 @@ conda_doc_check(
     lib = "//src/komira_encoding:komira_encoding",
     package = "//src/komira_encoding:komira_encoding_conda",
 )
+
+# release_set.txt as a file: //release:release_checks_cases holds it to
+# release/artifacts.textproto (the same metapackage, members in order, licence, summary and home).
+export_file(
+    name = "release_set.txt",
+    src = "release_set.txt",
+    visibility = ["//release:"],
+)
