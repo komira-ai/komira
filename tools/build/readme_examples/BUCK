@@ -18,8 +18,7 @@ _ZIG_VERSION = "komira//tools/build/toolchains:zig_next_version"
 # release member that packages no README or one with no example
 # (tools/build/package/release_set.bzl). mojo_library runs it on its package's
 # README.md as an action, and so do the coverage build and the README API
-# census; kci ships it beside its executable and runs it on an installed
-# README (src/kci_validate). Zig, as every build tool under tools/build is;
+# census. Zig, as every build tool under tools/build is;
 # what is code, a fence and a link is the shared Markdown reader's
 # (//tools/build/markdown:markdown).
 
@@ -66,8 +65,7 @@ zig_exe(
 
 # What is left in Mojo: the Markdown reader `buildtools.doc_links`
 # (tools/build/inspect) imports, `markdown` and `text`, with their welded
-# unit tests. The README examples are the Zig tool's alone; kci ships the
-# tool (bin/kci/BUCK `helpers`) and runs it on an installed README. This
+# unit tests. The README examples are the Zig tool's alone. This
 # library is deleted by the doc_links port of komira-ai/komira#1281, which
 # moves doc_links onto //tools/build/markdown.
 mojo_library(

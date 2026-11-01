@@ -54,8 +54,8 @@ from komira_oci.oci_push import (
 )
 
 comptime _HOST: String = "us-central1-docker.pkg.dev"
-comptime _REPO: String = "acme-prod/kci-images/orders_image"
-comptime _OTHER_REPO: String = "acme-prod/kci-images/other_image"
+comptime _REPO: String = "acme-prod/images/orders_image"
+comptime _OTHER_REPO: String = "acme-prod/images/other_image"
 # A revision id: a full commit hash is a valid tag.
 comptime _TAG: String = "3f2a9c1d8b7e6f5a4c3b2a1908f7e6d5c4b3a291"
 

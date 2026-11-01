@@ -25,7 +25,7 @@
 #   tmpdir_outside_checkout
 #                   whether a directory from TEST_TMPDIR up to / holds `.git`
 #                   or `.buckconfig`. The install-path test needs its scratch
-#                   outside any checkout (kci_validate's `scratch_refusal`), so
+#                   outside any checkout, so
 #                   THAT test must refuse to run when this says no; here it is
 #                   reported only, because the gate (`gate mojo`) makes TEST_TMPDIR
 #                   under the action's working directory, which for an action

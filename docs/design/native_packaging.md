@@ -1,15 +1,13 @@
 # Native code in conda packages: each library ships its own
 
-> **kci is retired**, and its relevant logic is being ported to ucdk (komira-ai/ucdk). No workflow runs it: the pull request check is `pr / check` and the release is `release.yml` ([ci.md](../ci.md)). This page describes the old design.
-
 Status: plan, built in part (part of slice 9, #1391; slice 11, the beta wiring). Each item is marked **EXISTS** (with the
 path on `main` that does it) or **PROPOSED**. "On #NNN" means the code is on that open pull request and not on `main`. Scope:
 linux-64 (ELF) only; Mach-O (osx-arm64: install names, `@rpath`, exported-symbol lists, the two-level
-namespace) is a later design. Related: [the staged pipeline](staged_pipeline.md) (build once, then
-beta, gamma and prod), [gamma validation](gamma_validation.md) (its native rows point to this
-doc's checks), [continuous publish](continuous_publish.md) (its slice S12 also plans an
+namespace) is a later design. Related: the staged pipeline (build once, then
+beta, gamma and prod), gamma validation (its native rows point to this
+doc's checks), continuous publish (its slice S12 also plans an
 installed `.so` check in beta's install job; slice 11 below wires this doc's install checks into
-that job, so the two land as one set of rows), [release machines](release_machine.md),
+that job, so the two land as one set of rows), release machines,
 the conda packaging README ([packaging/conda/README.md](../../packaging/conda/README.md)), symbol
 prefixing ([tools/build/native/README.md](../../tools/build/native/README.md)).
 
@@ -20,8 +18,8 @@ prefixing ([tools/build/native/README.md](../../tools/build/native/README.md)).
 into it). All four are closed unmerged; what each kept is in
 "What happens to each open PR".
 
-**Stages**, as the glossary of [staged_pipeline.md](staged_pipeline.md) names them (its follow-up
-#1184, merged, holds the [glossary](staged_pipeline.md#glossary)): **beta** builds once, publishes
+**Stages**, as the glossary of staged_pipeline.md names them (its follow-up
+#1184, merged, holds the glossary): **beta** builds once, publishes
 the packages to the `beta` conda channel, installs from it and runs the README examples and the
 package test tiers; **gamma** is only real resources in the gamma cloud accounts (deploys and
 real-cloud validations) and names no conda
@@ -80,7 +78,7 @@ continuous_publish.md both use that name; `kci.yml` runs it since the staged pip
 | conda metadata kinds | **EXISTS:** `library` and `metapackage` only (`src/kci_release_set/conda_metadata.mojo`); kci reads `lib_files` on a `library` since #1391 (slice 9, the reader side) | no new kind. The packer writes `lib_files`, `native_owns`, `native_links`, `dlopen` fields on `library` (slices 3, 8) |
 | kind `native`, `native_link_args` | on #695 and #704 only, both closed unmerged (`lib_files` on `library` is on `main`, above) | `lib_files` survives on `library`; the kind goes |
 | dlopen declarations | **EXISTS:** `mojo_library(dlopen = ...)` (`tools/build/mojo/dlopen.bzl`), the map `tools/build/package/system_libs.bzl`, the packer writing each declared requirement and `dlopen` and refusing sources that open an undeclared soname (`tools/build/package/pack/conda_dlopen.zig`), and kci's acceptance of exactly the map's requirements (`src/kci_release_set/system_libs.mojo`, `closure.mojo`); `komira_lz4` and `komira_zlib` declare their sonames | slice 3 (done); releasing the two is slice 4 |
-| beta stage, `beta_validate` | **EXISTS** since the switch M2 (#1296): `kci.yml` runs `build → beta → beta_validate → prod` (`gamma` and `validate` before M2); the rest of [staged_pipeline.md](staged_pipeline.md) (merged, with its [glossary](staged_pipeline.md#glossary) from #1184) is design only | native install checks run only in `beta_validate` (section "Built once"); gamma runs none |
+| beta stage, `beta_validate` | **EXISTS** since the switch M2 (#1296): `kci.yml` runs `build → beta → beta_validate → prod` (`gamma` and `validate` before M2); the rest of staged_pipeline.md (merged, with its glossary from #1184) is design only | native install checks run only in `beta_validate` (section "Built once"); gamma runs none |
 
 ## What each library ships
 
@@ -361,7 +359,7 @@ beta's install job exists with only probe 3's evidence, is question 6.
 
 ## Built once, promoted unchanged
 
-The staged pipeline ([staged_pipeline.md](staged_pipeline.md), design, not built) rules that each
+The staged pipeline (staged_pipeline.md, design, not built) rules that each
 commit is built **once** and every stage promotes **the same files, by sha256**. Native artifacts add
 no exception:
 

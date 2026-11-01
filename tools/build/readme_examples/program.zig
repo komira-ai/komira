@@ -27,7 +27,7 @@
 //! module beside it and calls its `main` inside `try`, in README order; a
 //! failure prints `<readme>:<line>: FAILED: <error>` and the run continues.
 //! Then it prints `readme_<package> validation: P of E checks passed` (one
-//! check per example: the line kci's read-back parses) and raises if any
+//! check per example) and raises if any
 //! failed. With no example it prints that it ran nothing. The build runs
 //! each example's program on its own (`[tests][readme]`); the runner is what
 //! a single run of every example (a coverage build, an installed README's

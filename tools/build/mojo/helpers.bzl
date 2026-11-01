@@ -1,6 +1,6 @@
 """`helpers` of a `mojo_binary`: programs it runs, shipped beside it.
 
-    mojo_binary(name = "kci", ..., helpers = {"readme_examples": "//tools/build/readme_examples:tool"})
+    mojo_binary(name = "tool", ..., helpers = {"readme_examples": "//tools/build/readme_examples:tool"})
 
 Each entry names a file and the target whose default output it is (an
 executable, e.g. a `zig_exe`). The binary's runnable directory (`[runnable]`)

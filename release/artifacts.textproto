@@ -1,19 +1,16 @@
-# The release artifacts (kci.release.v1.Artifacts): what a release of komira
-# builds, in this file's order, and the set a publish step would ship. The
-# release workflow (.github/workflows/release.yml) builds the Buck2 target
-# //release:release_set, which a build action holds to this file (the names,
-# their order and the metapackage's arguments), and the workflow tests the
-# file's existence. The textproto's own build-system fields below are the
-# retired kci build step's; nothing reads them to build. Changing it changes
-# what is released: CODEOWNERS requires the release approver's review for
-# everything under release/.
+# The release artifacts: what a release of komira builds, in this file's
+# order, and the set a publish step would ship. The release workflow
+# (.github/workflows/release.yml) builds the Buck2 target //release:release_set,
+# which a build action holds to this file (the names, their order and the
+# metapackage's arguments), and the workflow tests the file's existence. The
+# textproto's own build-system fields below are the retired kci build step's;
+# nothing reads them to build. Changing it changes what is released: CODEOWNERS
+# requires the release approver's review for everything under release/.
 #
-# The release is the libraries below and their metapackage. kci builds them
-# one at a time, in THIS ORDER (each library after the libraries it depends
-# on), each into its own empty directory under the
-# release directory R (`{release_dir}`: the platform's directory,
-# <--release-dir>/<platform>), with the git-derived stamp S of `kci run
-# --revision-id` (src/kci_artifact/src/kci_artifact/placeholders.mojo):
+# The release is the libraries below and their metapackage, in THIS ORDER (each
+# library after the libraries it depends on), each built into its own empty
+# directory under the release directory R (`{release_dir}`: the platform's
+# directory, <--release-dir>/<platform>), with the git-derived stamp S:
 #
 #   buck2 build -c komira.package_stamp=<N> -c komira.package_commit=<C> \
 #     -c komira.package_timestamp_ms=<T> \
@@ -22,7 +19,7 @@
 #     --member-manifest R/komira_encoding/manifest.json ... --out-dir R/komira_all
 #
 # THE STAMP is never typed here: `{build_number}`, `{source_commit}` and
-# `{timestamp_ms}` are placeholders kci fills from git. A library built
+# `{timestamp_ms}` are placeholders filled from git. A library built
 # without them has no `[release]` sub-target, so an artifact that forgets
 # the stamp fails at build rather than shipping.
 #
@@ -30,16 +27,10 @@
 # every artifact above it, already built and verified. Its members are every
 # library of this file, one `--member-manifest` each; adding a library is
 # two edits here: its entry above the metapackage, and its manifest in
-# the metapackage's args. A PUBLISH step refuses a set whose metapackage misses
-# a library, and the welded test
-# src/kci_artifact/tests/test_release_artifacts_file.mojo refuses
-# it at build time.
+# the metapackage's args.
 #
 # THE NAMES A RELEASE PUBLISHES are the ones this file declares, and this file
-# is reviewed through CODEOWNERS; there is no per-run claim. A PUBLISH step
-# reads its channel first and reports every declared name the channel holds
-# no file of yet (NEW NAMES) in its result and the job summary; the beta
-# stage reports prod's before the prod approval.
+# is reviewed through CODEOWNERS; there is no per-run claim.
 #
 # Which farm buck2 builds on is the build job's machine configuration, written
 # by the farm-connect action (docs/ci.md), not this file's.
@@ -47,14 +38,9 @@
 # THE PULL REQUEST'S CHECK is no part of this file: .github/workflows/pr.yml
 # selects the targets a change affects with the BXL selector
 # tools/build/ci/affected.bxl and builds and tests them through buck2
-# (docs/ci.md), and runs no kci. The `targets` of an artifact below, every `//`
-# label of its combined args (its build system's, then its own) with the
-# `[subtarget]` removed, is what the per-change check of kci used to select
-# by; the welded test of this file still holds it to the args, and it goes
-# when kci does.
+# (docs/ci.md).
 #
-# The file format's major (kci_api's format table): kci refuses a file
-# without it, and one written for a newer kci.
+# The file format's major is the `schema_version` below.
 
 schema_version: 1
 

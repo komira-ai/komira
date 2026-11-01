@@ -87,7 +87,7 @@ string), so a change to a library does not reach `build_selftests`.
 `python_closure` (declared in the root package, `//:python_closure`) fails on
 Python outside the Python surface: a target whose closure, every kind of
 dependency, holds a Python rule, a target under `third_party/python/` or
-`tools/build/python/` or a `.py` source; a `.py` file; a kci textproto or a
+`tools/build/python/` or a `.py` source; a `.py` file; a release textproto or a
 workflow that runs Python. Its allowlist, `tests/python_closure_allowlist.bzl`,
 only shrinks ([`graph/python_closure.zig`](graph/python_closure.zig)).
 

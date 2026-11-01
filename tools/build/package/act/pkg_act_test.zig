@@ -380,7 +380,7 @@ fn oci(digest: []const u8, name: []const u8) misc.OciManifest {
     return .{ .digest_path = "d.txt", .digest = digest, .name = name, .version = "1.0", .platform = "linux-x86_64", .file = "img", .label = "//p:i", .repo = "komira/x", .from = "the bundle's program" };
 }
 
-test "oci manifest: the bytes kci's writer renders, and each refusal in words" {
+test "oci manifest: the bytes of the manifest, and each refusal in words" {
     var arena = std.heap.ArenaAllocator.init(t.allocator);
     defer arena.deinit();
     const a = arena.allocator();
@@ -392,10 +392,10 @@ test "oci manifest: the bytes kci's writer renders, and each refusal in words" {
         .{ .digest = hex64, .name = "a", .want = "d.txt holds '" ++ hex64 ++ "', not sha256:<64 hex>" },
         .{ .digest = "sha256:abc", .name = "a", .want = "not sha256:<64 hex>" },
         .{ .digest = "sha256:" ++ "0123456789ABCDEF0123456789abcdef0123456789abcdef0123456789abcdef", .name = "a", .want = "not sha256:<64 lowercase hex>" },
-        .{ .digest = "sha256:" ++ hex64, .name = "Hello", .want = "member name 'Hello' (the bundle's program) is not a kci artifact name ([a-z][a-z0-9_]*)" },
-        .{ .digest = "sha256:" ++ hex64, .name = "oci-check", .want = "is not a kci artifact name" },
-        .{ .digest = "sha256:" ++ hex64, .name = "1a", .want = "is not a kci artifact name" },
-        .{ .digest = "sha256:" ++ hex64, .name = "", .want = "is not a kci artifact name" },
+        .{ .digest = "sha256:" ++ hex64, .name = "Hello", .want = "member name 'Hello' (the bundle's program) is not an artifact name ([a-z][a-z0-9_]*)" },
+        .{ .digest = "sha256:" ++ hex64, .name = "oci-check", .want = "is not an artifact name" },
+        .{ .digest = "sha256:" ++ hex64, .name = "1a", .want = "is not an artifact name" },
+        .{ .digest = "sha256:" ++ hex64, .name = "", .want = "is not an artifact name" },
     };
     for (bad) |b| {
         var o = U.Out.init(a);

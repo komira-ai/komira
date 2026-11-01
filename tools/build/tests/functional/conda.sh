@@ -21,8 +21,8 @@
 #              README with its sha256; the licence is the repository's. The
 #              package is a directory: the .conda, `manifest.json` and
 #              `metadata.json`. manifest.json is EXACTLY the artifact manifest
-#              contract of kci (ten keys in a fixed order, compact, one
-#              trailing newline: kci's format name and major first,
+#              contract (ten keys in a fixed order, compact, one
+#              trailing newline: the format name and major first,
 #              `platform` linux-x86_64, `file` the channel's file name,
 #              `sha256` the file's, `metadata` the bare name `metadata.json`);
 #              every other fact is in metadata.json, which names its own
@@ -229,7 +229,7 @@ jq -e --arg s "$want_sha" --arg d "$doc_sha" --arg p "$DOC" --argjson n "$(stat 
     and .paths[1].size_in_bytes == $n' "$S/info/paths.json" > /dev/null || p paths.json
 [ "$(jq .paths[0].size_in_bytes "$S/info/paths.json")" = "$(stat -L -c %s "$LIBPKG")" ] || p paths-size
 file_sha=$(sha256sum "$CONDA" | cut -c1-64)
-# manifest.json: exactly kci's artifact manifest contract.
+# manifest.json: exactly the artifact manifest contract.
 jq -e --arg s "$file_sha" --arg v "$pin" --arg f "$F0" '(keys_unsorted == ["format","schema_version","artifact_type","name","version","platform","subdir","file","sha256","metadata"])
     and .format == "kci.artifact_manifest" and .schema_version == 1
     and .artifact_type == "CONDA" and .name == "komira_encoding" and .version == $v and .platform == "linux-x86_64" and .subdir == "linux-64"

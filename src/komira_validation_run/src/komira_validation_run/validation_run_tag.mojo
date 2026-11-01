@@ -22,15 +22,9 @@
 # is none of them (a leak checker). A copy in each would be copies that drift
 # silently — and a tag key that drifts does not fail: it stamps a key nothing
 # looks for, and the checker reports a clean fleet forever. So it is written
-# down ONCE, here, and every consumer imports it. Today they are kci_cloud,
+# down ONCE, here, and every consumer imports it. Today they are
 # komira_test_run_id (a minted id must pass the rule), and komira_test_bucket
-# / komira_test_minio (an id is checked before it names anything). kci_cloud's
-# `create_labels` writes `kci-run-id=<id>` when the cell scope carries a
-# validation run id, and the `kci-retention` mark on every object it creates
-# or adopts; its conformance kit holds every adapter to both, and plan and
-# apply refuse an id this file's rule rejects before any create. No kci verb
-# sets a scope's validation run id yet (kci_cli and kci_api have no flag for
-# it), so a kci deploy today stamps the retention mark and no run-id.
+# / komira_test_minio (an id is checked before it names anything).
 #
 # Having no deps is deliberate and load-bearing: a dep here would be placed
 # upstream of every consumer, widening each closure to carry one string.

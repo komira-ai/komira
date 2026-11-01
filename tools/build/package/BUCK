@@ -300,7 +300,7 @@ conda_release_set_check(
 # `readme_tests`).
 
 # b's README holds a ```text sketch and a ```python block, no example; a,
-# listed first, holds one. The refusal names b and quotes kci.
+# listed first, holds one. The refusal names b.
 release_readme_test(
     name = "release_readme_refuses_no_example",
     members = ["a", "b"],
@@ -308,7 +308,7 @@ release_readme_test(
         "a": "release_readme/one_example.txt",
         "b": "release_readme/no_example.txt",
     },
-    refuses = "release member b: src/b/README.md holds no ```mojo or ```mojo module example, so kci's install validation would refuse it after publish: \"src/b/README.md holds no ```mojo example, so the validation would run nothing; add one\"",
+    refuses = "release member b: src/b/README.md holds no ```mojo or ```mojo module example, so the release would refuse it: \"src/b/README.md holds no ```mojo example, so the validation would run nothing; add one\"",
 )
 
 # b packages no README.
@@ -316,7 +316,7 @@ release_readme_test(
     name = "release_readme_refuses_no_readme",
     members = ["a", "b"],
     readmes = {"a": "release_readme/one_example.txt"},
-    refuses = "release member b: no README is packaged, so kci's install validation would refuse it after publish: \"b ships no share/doc/b/README.md: a release needs a README; add src/b/README.md\"",
+    refuses = "release member b: no README is packaged, so the release would refuse it: \"b ships no share/doc/b/README.md: a release needs a README; add src/b/README.md\"",
 )
 
 # One ```mojo example.

@@ -106,7 +106,7 @@ def missing(required, reached):
 # ci/targets.bzl is a small loader of SHARDS files, ci/targets/shard_<n>.bzl, each
 # holding the rows of the packages that hash to it (shard_of). A package's rows
 # stay together and adding a package moves no other package's rows; the hash,
-# not the package's name, spreads them, so no prefix (`komira_`, `kci_`) or
+# not the package's name, spreads them, so no prefix (`komira_`) or
 # top-level directory (`src/` holds most) can fill one shard. Raising SHARDS
 # re-spreads every row (the generator rewrites them all).
 SHARDS = 8

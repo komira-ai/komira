@@ -13,16 +13,6 @@ load(":mopm_artifacts.bzl", "mopm_artifacts")
 load(":release_set.bzl", "release_set")
 load("//release/readme_e2e:packages.bzl", README_E2E_PACKAGES = "PACKAGES")
 
-export_file(
-    name = "artifacts.textproto",
-    visibility = ["//src/kci_artifact:"],
-)
-
-export_file(
-    name = "channels.textproto",
-    visibility = ["//src/kci_release_channel:"],
-)
-
 # The build artifacts of the libraries moved to mopm (mopm_artifacts.bzl): each
 # package's `:lib`, as `linux-64/<name>.mojoc`, and each package's native archive as
 # `linux-64/<name>.native/lib<id>.a`, the directory `mopm stage

@@ -5,13 +5,8 @@ Each requirement is the conda-forge package that installs `lib/<soname>`,
 bounded below by a release that ships that soname and above by the next major
 version, where a soname change would come.
 
-kci's closure checks (BUILD's `undeclared_requirements` and PUBLISH's
-`require_closure`) accept a library's requirement on a package outside the
-release set only when it is byte-equal to a requirement here. kci compiles its
-own copy (src/kci_release_set/system_libs.mojo); its welded test reads this
-table through `//tools/build/package:system_libs` (system_libs_record.bzl) and
-fails while the two differ, so a row changed here is changed there in the same
-commit.
+A library's requirement on a package outside the release set is accepted
+only when it is byte-equal to a requirement here.
 
 A library declares the sonames it opens (`mojo_library(dlopen = [...])`,
 tools/build/mojo/dlopen.bzl); a declaration this table lacks refuses its conda

@@ -214,7 +214,7 @@ fn ociArgs(c: *kit.Ctx, name: []const u8) ![]const []const u8 {
     });
 }
 
-test "oci-release-manifest: kci's compact bytes; a bad digest or member name is refused in words and writes nothing" {
+test "oci-release-manifest: compact bytes; a bad digest or member name is refused in words and writes nothing" {
     var c = try newCtx("oci");
     defer c.deinit();
     try c.write("digest.txt", "sha256:" ++ hex64 ++ "\n", 0o644);
@@ -224,7 +224,7 @@ test "oci-release-manifest: kci's compact bytes; a bad digest or member name is 
 
     const r2 = try c.run(try ociArgs(&c, "oci-check"), &.{});
     try t.expectEqual(@as(u8, 1), r2.code);
-    try t.expectEqualStrings("oci_image[release] of //p:image (repository komira/x): member name 'oci-check' (the bundle's program) is not a kci artifact name ([a-z][a-z0-9_]*)\n", r2.stderr);
+    try t.expectEqualStrings("oci_image[release] of //p:image (repository komira/x): member name 'oci-check' (the bundle's program) is not an artifact name ([a-z][a-z0-9_]*)\n", r2.stderr);
 
     std.fs.cwd().deleteFile(try c.path("m.json")) catch {};
     try c.write("digest.txt", "sha256:short\n", 0o644);

@@ -36,7 +36,7 @@ def _path(ctx, artifact):
     return get_path_without_materialization(artifact, ctx)
 
 def _scanned(path):
-    """Whether the python_closure checker reads the file itself: a kci
+    """Whether the python_closure checker reads the file itself: a release
     textproto (its `executable:` fields) or a GitHub workflow or action
     (its `run:` lines and `uses:` actions)."""
     if path.endswith(".textproto"):

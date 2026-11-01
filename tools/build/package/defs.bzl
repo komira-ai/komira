@@ -547,15 +547,13 @@ def _oci_image_impl(ctx):
         env = salted(),
         category = "oci_layers",
     )
-    # [release]: the layout plus kci's artifact manifest, the directory a
+    # [release]: the layout plus the artifact manifest, the directory a
     # BUILD step copies into the release set (`--out <release_dir>/<name>`).
     # The manifest is written from the digest the image action wrote, in the
-    # bytes kci's `render_artifact_manifest` writes (src/kci_artifact_manifest):
+    # bytes of the manifest format of conda.bzl:
     # type OCI, the member name (the bundle's program for a bundle image, the
     # repository's last segment for a tree image), `file` the layout
-    # directory, `sha256` the image manifest digest's hex. kci's
-    # `verify_member` reads it back over the real hello_image and
-    # hello_root_image (src/kci_release_set/tests/test_oci_member.mojo).
+    # directory, `sha256` the image manifest digest's hex.
     manifest = ctx.actions.declare_output(ctx.label.name + ".release_manifest.json")
     ctx.actions.run(
         cmd_args(
@@ -606,9 +604,9 @@ def _oci_image_impl(ctx):
 
 # The artifact manifest of an image (`oci_image[release]`) is written by
 # `pkg_act oci-release-manifest` (tools/build/package/act/misc.zig): compact
-# JSON in the key order of kci's `render_artifact_manifest`, one trailing
+# JSON in the key order of the artifact manifest, one trailing
 # newline. It refuses, naming the reason, a digest that is not `sha256:<64
-# lowercase hex>`, and a member name that is not a kci artifact name
+# lowercase hex>`, and a member name that is not an artifact name
 # ([a-z][a-z0-9_]*: the release set keys members by it), naming the image, its
 # repository and where the name came from. The name is refused, never
 # rewritten: a repository whose last segment has a hyphen or a dot
@@ -644,11 +642,11 @@ def oci_image(**kwargs):
     plus a Docker `manifest.json`, which `docker load` reads; `[digest]`
     holds the manifest digest; `[layers]` the digest of each layer of the
     manifest, one per line, in order. `[release]` is what a release set
-    holds: the layout and kci's artifact manifest (`manifest.json`: type
+    holds: the layout and the artifact manifest (`manifest.json`: type
     OCI, name the bundle's program for a `bundle` image and the last segment
     of `repository` for a `tree` image, `file` the layout directory,
     `sha256` the hex of `[digest]`); `[release][manifest]` is that manifest
-    alone. A name that is not a kci artifact name ([a-z][a-z0-9_]*, so no
+    alone. A name that is not an artifact name ([a-z][a-z0-9_]*, so no
     hyphen or dot) fails building `[release]`, naming the image and its
     repository; it is never rewritten. Nothing is pushed.
     """
