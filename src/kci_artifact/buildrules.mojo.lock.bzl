@@ -135,7 +135,7 @@ GRAPH_JSON = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/kci_artifact/tests/test_release_artifacts_file.mojo", "sha256": "6a828349535037388acb9c4f25f01e89bae58b6c6443e2aec3f8a37062617cfc"}
+        {"path": "src/kci_artifact/tests/test_release_artifacts_file.mojo", "sha256": "08b9ccc38f56766c4254f654ed795ee46a82f101b33cedae6c403b0de8e3b80c"}
       ],
       "deps": ["kci_artifact@0.1.0#mojo1.0.0/lib", "komira_proto_codec@0.1.0#mojo1.0.0/lib"],
       "natives": [],
@@ -331,7 +331,7 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/kci_artifact/tests/test_release_artifacts_file.mojo", "sha256": "6a828349535037388acb9c4f25f01e89bae58b6c6443e2aec3f8a37062617cfc"}
+        {"path": "src/kci_artifact/tests/test_release_artifacts_file.mojo", "sha256": "08b9ccc38f56766c4254f654ed795ee46a82f101b33cedae6c403b0de8e3b80c"}
       ],
       "deps": ["kci_artifact@0.1.0#mojo1.0.0/lib", "komira_proto_codec@0.1.0#mojo1.0.0/lib"],
       "natives": [],
@@ -524,7 +524,7 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/kci_artifact/tests/test_release_artifacts_file.mojo", "sha256": "6a828349535037388acb9c4f25f01e89bae58b6c6443e2aec3f8a37062617cfc"}
+        {"path": "src/kci_artifact/tests/test_release_artifacts_file.mojo", "sha256": "08b9ccc38f56766c4254f654ed795ee46a82f101b33cedae6c403b0de8e3b80c"}
       ],
       "deps": ["kci_artifact@0.1.0#mojo1.0.0/lib", "komira_proto_codec@0.1.0#mojo1.0.0/lib"],
       "natives": [],

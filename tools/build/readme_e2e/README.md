@@ -161,10 +161,7 @@ The packages are the list in [`packages.bzl`](../../../release/readme_e2e/packag
 ([`guard.bzl`](guard.bzl)): it fails analysis, naming the package, when a
 `src/<name>/mopm.toml` has no entry, or an entry has no `mopm.toml` (the files are
 read from the root `doc_tree`, which holds every file of the checkout). A new moved
-package needs its line in `packages.bzl` and nothing else. A package that keeps its
-`mopm.toml` (its build reads it) but is no longer released is listed in `UNPUBLISHED` of
-`packages.bzl` instead: it needs no target, and the guard refuses an `UNPUBLISHED` name with no
-`mopm.toml` or one that is also in `PACKAGES`. The guard's cases
+package needs its line in `packages.bzl` and nothing else. The guard's cases
 ([`cases.bxl`](cases.bxl)) run in the pull request check:
 `./buck2 bxl komira//tools/build/readme_e2e/cases.bxl:run`.
 

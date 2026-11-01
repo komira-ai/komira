@@ -15,26 +15,16 @@ def moved_packages(paths):
             names.append(parts[1])
     return sorted(names)
 
-def findings(paths, covered, unpublished = []):
-    """What is out of step between the moved packages of `paths`, the names in `covered` and those in `unpublished`, as one text; "" when none.
-
-    `unpublished` are packages that keep their `mopm.toml` (their build reads it) and that the release
-    no longer publishes: they need no README e2e target, must have a `mopm.toml`, and must not be in `covered`.
-    """
+def findings(paths, covered):
+    """What is out of step between the moved packages of `paths` and the names in `covered`, as one text; "" when none."""
     moved = moved_packages(paths)
-    lacking = [m for m in moved if m not in covered and m not in unpublished]
+    lacking = [m for m in moved if m not in covered]
     stale = sorted([c for c in covered if c not in moved])
-    gone = sorted([u for u in unpublished if u not in moved])
-    both = sorted([u for u in unpublished if u in covered])
     problems = []
     if lacking:
-        problems.append("{} moved package(s) have no README e2e target: {}. Add each to PACKAGES in release/readme_e2e/packages.bzl (its version is the one in its mopm.toml), or to UNPUBLISHED there when the release no longer publishes it".format(len(lacking), ", ".join(lacking)))
+        problems.append("{} moved package(s) have no README e2e target: {}. Add each to PACKAGES in release/readme_e2e/packages.bzl (its version is the one in its mopm.toml)".format(len(lacking), ", ".join(lacking)))
     if stale:
         problems.append("{} README e2e target(s) are for a package with no src/<name>/mopm.toml: {}. Delete each from PACKAGES in release/readme_e2e/packages.bzl".format(len(stale), ", ".join(stale)))
-    if gone:
-        problems.append("{} unpublished package(s) have no src/<name>/mopm.toml: {}. Delete each from UNPUBLISHED in release/readme_e2e/packages.bzl".format(len(gone), ", ".join(gone)))
-    if both:
-        problems.append("{} package(s) are both in PACKAGES and in UNPUBLISHED: {}. Keep each in one".format(len(both), ", ".join(both)))
     return "; ".join(problems)
 
 # The row of EXCLUDED (tools/build/ci/rules.bzl) that leaves the release's README e2e out of the
