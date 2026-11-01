@@ -39,6 +39,7 @@ struct RunFlags(Copyable, Movable):
     var mem_total_bytes: Int
     var drop_caches_file: String
     var max_silence_ms: Int
+    var js_measure_result: Bool
 
     def __init__(out self):
         self.duckdb_path = String("")
@@ -66,6 +67,7 @@ struct RunFlags(Copyable, Movable):
         self.mem_total_bytes = 0
         self.drop_caches_file = String("")
         self.max_silence_ms = DEFAULT_MAX_SILENCE_MS
+        self.js_measure_result = False
 
 
 def usage() -> String:
@@ -81,6 +83,7 @@ def usage() -> String:
         "  [--duckdb-version V] [--warm-sweeps N] [--warm-reps N]\n"
         "  [--cold-sweeps N --cold-reps N --drop-caches-file PATH]\n"
         "  [--pass-max X] [--max-silence-ms N]\n"
+        "  [--js-measure-result]   (print one final summary line of JSON)\n"
     )
 
 
@@ -136,6 +139,15 @@ def parse_flags(args: List[String]) raises -> RunFlags:
         var flag = args[i].copy()
         if not flag.startswith("--"):
             raise Error("unexpected argument '" + flag + "'")
+        if flag == "--js-measure-result":
+            # the one flag without a value
+            for j in range(len(seen)):
+                if seen[j] == flag:
+                    raise Error(flag + " given twice")
+            seen.append(flag.copy())
+            f.js_measure_result = True
+            i += 1
+            continue
         if i + 1 >= len(args):
             raise Error(flag + " needs a value")
         var v = args[i + 1].copy()

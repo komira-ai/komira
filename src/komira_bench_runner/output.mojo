@@ -15,8 +15,9 @@ from std.os import makedirs
 from std.pathlib import Path
 
 from komira_bench_duckdb import ABS_FLOOR, REL_TOL, allowed_departures
-from komira_bench_report import render_table, summarize, summary_line, write_result_json
+from komira_bench_report import BenchResult, Cell, render_table, summarize, summary_line, write_result_json
 from komira_crypto import hex_lower_array_32, sha256
+from komira_json import JsonValue
 
 from .query import QuerySpec
 from .runner import RunOutput
@@ -24,6 +25,8 @@ from .runner import RunOutput
 comptime QUERIES_FILE: String = "queries.sha256"
 comptime TPCH_NOTICE: String = "suite tpch-derived: derived from TPC-H; not comparable to published TPC-H results"
 comptime COMPARISON_FILE: String = "comparison.txt"
+comptime JS_MEASURE_PREFIX: String = "js-measure-result "
+comptime JS_MEASURE_MAX_BYTES: Int = 8 * 1024
 
 
 def comparison_text() -> String:
@@ -103,6 +106,64 @@ def format_run(run: RunOutput) raises -> String:
     if failed.byte_length() == 0:
         failed = String("none\n")
     text += failed
+    return text^
+
+
+def _ms_or_null(x: Optional[Float64]) -> JsonValue:
+    if x:
+        return JsonValue.from_f64(x.value())
+    return JsonValue.null()
+
+
+def js_measure_line(cell: Cell) raises -> String:
+    """The optional machine-readable summary line of one cell, as a single
+    line of JSON after the prefix `js-measure-result `:
+
+        {"steady_ms":..,"first_run_ms":..,"duckdb_steady_ms":..,"verdict":".."}
+
+    The values are the cell's own fields of result.json, all in milliseconds:
+    `steady_ms` is komira's `ms`, `first_run_ms` komira's `first_run.ms` (or,
+    for a cell that was not timed, the `check_runs.komira.ms`),
+    `duckdb_steady_ms` is DuckDB's `ms`, and `verdict` the cell's verdict. A
+    value the run did not produce (no side, no first run, a time that is not
+    finite) is `null`, never 0. Raises when the line would not fit in
+    `JS_MEASURE_MAX_BYTES`."""
+    var steady = Optional[Float64]()
+    var first = Optional[Float64]()
+    var duckdb = Optional[Float64]()
+    if cell.komira:
+        steady = Optional[Float64](cell.komira.value().ms)
+        first = cell.komira.value().first_ms()
+    if not first and cell.check_runs and cell.check_runs.value().komira:
+        first = Optional[Float64](cell.check_runs.value().komira.value().ms)
+    if cell.duckdb:
+        duckdb = Optional[Float64](cell.duckdb.value().ms)
+    var o = JsonValue.empty_object()
+    o.set_member(String("steady_ms"), _ms_or_null(steady))
+    o.set_member(String("first_run_ms"), _ms_or_null(first))
+    o.set_member(String("duckdb_steady_ms"), _ms_or_null(duckdb))
+    o.set_member(String("verdict"), JsonValue.from_string(cell.verdict.copy()))
+    var line = String(JS_MEASURE_PREFIX) + o.serialize()
+    if line.byte_length() >= JS_MEASURE_MAX_BYTES:
+        raise Error("the js-measure-result line is longer than 8 KiB")
+    return line^
+
+
+def js_measure_line_of(result: BenchResult) raises -> String:
+    """`js_measure_line` of the one cell of a result of a single query."""
+    if len(result.cells) != 1:
+        raise Error("js-measure-result needs a result of exactly one query")
+    return js_measure_line(result.cells[0])
+
+
+def console_text(run: RunOutput, js_measure_result: Bool) raises -> String:
+    """What the program prints (`print` adds the final newline): the report
+    and, only with `js_measure_result`, a blank line and the summary line of
+    the warm result, which is then the last line. Without the flag it is the
+    report alone, as it always was."""
+    var text = format_run(run)
+    if js_measure_result:
+        text += String("\n") + js_measure_line_of(run.warm)
     return text^
 
 
