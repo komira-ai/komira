@@ -88,7 +88,7 @@ mojo_conda(
         "../komira_protobuf": "//src/komira_protobuf:mopm.toml",
     },
     mojo = "1.0.0",
-    mopm = "toolchains//:mopm_0_0_86",
+    mopm = "toolchains//:mopm_0_0_101",
     package = "komira_supervisor_proto",
     version = "0.1.0",
     visibility = ["PUBLIC"],

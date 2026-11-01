@@ -24,6 +24,7 @@ from komira_arrow.column import Column
 from komira_arrow.primitive_array import PrimitiveArray
 from komira_buffer.heap_region import HeapRegion
 from komira_plan_expr.agg_expr import AGG_COUNT, AGG_MAX, AGG_MEAN, AGG_MIN, AGG_SUM
+from komira_scalar_arithmetic.decimal_avg import avg_integer_float64
 
 from komira_op_agg_state.int_sum_overflow import (
     i128_total_fits_i64,
@@ -144,9 +145,14 @@ def cd_fixed_column(
                 fa._set_null(g)
                 continue
             # AVG divides the exact total: no INT64 narrowing on this path.
-            var v = c.i_acc.cast[DType.float64]() if int_lane else c.f_acc
-            if func == AGG_MEAN:
-                v = v / Float64(c.n)
+            var v: Float64
+            if func == AGG_MEAN and int_lane:
+                # An INT32 / INT64 input: DuckDB's long double average.
+                v = avg_integer_float64(c.i_acc, Int(c.n), 64)
+            else:
+                v = c.i_acc.cast[DType.float64]() if int_lane else c.f_acc
+                if func == AGG_MEAN:
+                    v = v / Float64(c.n)
             fa.set(g, v)
         return Column.from_primitive[DType.float64](fa^)
     if not int_lane:
