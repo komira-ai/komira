@@ -129,7 +129,7 @@ def _table_cases():
 
     # the build system and the toolchain widen, whatever else is in the change
     out += _table_case("tools/build change widens", ["tools/build/mojo/defs.bzl"], WIDENED, reason = "tools/build/**")
-    out += _table_case("third_party change widens", ["third_party/uv/pin.txt"], WIDENED, reason = "third_party/**")
+    out += _table_case("third_party change widens", ["third_party/zlib/pin.txt"], WIDENED, reason = "third_party/**")
     out += _table_case(".buckconfig widens", [".buckconfig"], WIDENED, reason = ".buckconfig")
     out += _table_case("a widening file beside a leaf change widens", ["src/a/a.mojo", "tools/build/x.zig"], WIDENED)
 

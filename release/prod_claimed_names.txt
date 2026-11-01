@@ -7,6 +7,10 @@
 # write to the live registry, so it holds the members to this file instead
 # (//release:prod_claimed_names_cases): a maintainer adds a name here only AFTER claiming it
 # on the prod registry, in the pull request that adds the member.
+#
+# A line stays when its package leaves the release: the 16 kci_* names (kci is retired and its
+# libraries are deleted) stay claimed so nobody else can take them. The check refuses a dropped
+# line of that set, and a member whose name is not claimed.
 kci_api
 kci_artifact
 kci_artifact_manifest

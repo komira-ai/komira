@@ -112,7 +112,6 @@ mojo_library(
   compile error.
 - `test_srcs` lists every test file. Each holds a `main()` that raises (or
   exits non-zero) on failure. A test file that no `test_srcs` names never runs.
-- A library `kci` owns is named `kci_<x>`.
 
 Every attribute, the output layout, binaries, tests, protobuf and C
 dependencies are in

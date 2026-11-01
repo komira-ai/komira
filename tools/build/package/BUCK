@@ -1,12 +1,10 @@
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load("@komira//tools/build/lint:defs.bzl", "shell_lint")
 load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_test")
-load(":conda.bzl", "conda_manifest_kci")
+load(":conda.bzl", "conda_doc_check")
 load(":defs.bzl", "launcher_level_test")
 load(":kcov_guard.bzl", "kcov_guard_cases", "kcov_guard_tool")
 load(":release_set.bzl", "conda_release_set_check", "release_order_test", "release_readme_test")
-load(":glibc_floor_record.bzl", "glibc_floor_record")
-load(":system_libs_record.bzl", "system_libs_record")
 
 # The launcher's CPU level function against made-up CPUs (tools/build/package/launcher).
 launcher_level_test(
@@ -148,15 +146,6 @@ kcov_guard_cases(
     exec_compatible_with = LINUX_X86_64,
 )
 
-# release_version.sh as a file: kci_workflow_check's welded test holds kci.yml's
-# documentation filter (its push trigger's paths-ignore) to the documentation
-# this script does not count (rule R17).
-export_file(
-    name = "release_version.sh",
-    src = "release_version.sh",
-    visibility = ["//src/kci_workflow_check:"],
-)
-
 # Selectable form of linux-x86_64: what conda_package derives its subdir from
 # (conda.bzl). Declared here and not in //tools/build/platforms, which holds
 # exactly the platform table's targets (tests//functional/platform_table).
@@ -181,11 +170,9 @@ _OLD_NATIVE = "komira" + "_native"
 # Red if a member's [release_check] fails, if a member or the metapackage does
 # not carry the test stamp, if the metapackage does not require a member at
 # that version and build string, if a member requires a member listed after
-# it, if a member packages no README or one with no ```mojo example (kci's
-# install validation refuses both, after publish), if conda-check refuses it,
-# or if `libs` and
-# `metapackage` are not release_set.txt's (which kci_artifact's welded test
-# holds equal to release/artifacts.textproto's metapackage).
+# it, if a member packages no README or one with no ```mojo example, if
+# conda-check refuses it, or if `libs` and `metapackage` are not
+# release_set.txt's.
 conda_release_set_check(
     name = "release_set_check",
     metapackage = "komira_all",
@@ -200,17 +187,7 @@ conda_release_set_check(
         "//src/komira_hash:komira_hash",
         "//src/komira_atomic_alias:komira_atomic_alias",
         "//src/komira_proto_codec:komira_proto_codec",
-        "//src/kci_api:kci_api",
-        "//src/kci_release_channel:kci_release_channel",
-        "//src/kci_artifact_manifest:kci_artifact_manifest",
-        "//src/kci_logs:kci_logs",
-        "//src/kci_params:kci_params",
-        "//src/kci_release_machine:kci_release_machine",
         "//src/komira_wkt:komira_wkt",
-        "//src/kci_resource_proto:kci_resource_proto",
-        "//src/kci_validator_rows:kci_validator_rows",
-        "//src/kci_validator_report:kci_validator_report",
-        "//src/kci_workflow_check:kci_workflow_check",
         "//src/komira_anomaly:komira_anomaly",
         "//src/komira_clock:komira_clock",
         "//src/komira_counters:komira_counters",
@@ -236,7 +213,6 @@ conda_release_set_check(
         "//src/komira_content_line:komira_content_line",
         "//src/komira_spsc_ring:komira_spsc_ring",
         "//src/komira_sync:komira_sync",
-        "//src/kci_cell:kci_cell",
         "//src/komira_mcp_server:komira_mcp_server",
         "//src/komira_chat_proto:komira_chat_proto",
         "//src/komira_contacts_proto:komira_contacts_proto",
@@ -247,10 +223,6 @@ conda_release_set_check(
         "//src/komira_trace:komira_trace",
         "//src/komira_calendar:komira_calendar",
         "//src/komira_calendar_ics:komira_calendar_ics",
-        "//src/kci_artifact_proto:kci_artifact_proto",
-        "//src/kci_deploy_model_proto:kci_deploy_model_proto",
-        "//src/kci_manifest_proto:kci_manifest_proto",
-        "//src/kci_artifact:kci_artifact",
         "//src/komira_libc:komira_libc",
         "//src/komira_lz4:komira_lz4",
         "//src/komira_zlib:komira_zlib",
@@ -263,20 +235,15 @@ conda_release_set_check(
         "//src/komira_dynamic_filter:komira_dynamic_filter",
         "//src/komira_metrics:komira_metrics",
         "//src/komira_secret_store:komira_secret_store",
-        "//src/kci_secret_writer:kci_secret_writer",
         "//src/komira_arrow_ipc:komira_arrow_ipc",
         "//src/komira_plan_expr:komira_plan_expr",
         "//src/komira_secret_env:komira_secret_env",
         "//src/komira_column_kernels:komira_column_kernels",
         "//src/komira_log:komira_log",
         "//src/komira_plan_stats:komira_plan_stats",
-        "//src/kci_reconciler:kci_reconciler",
         "//src/komira_scan_source:komira_scan_source",
-        "//src/kci_cloud:kci_cloud",
         "//src/komira_plan_ir:komira_plan_ir",
-        "//src/kci_composites:kci_composites",
         "//src/komira_join_assembly:komira_join_assembly",
-        "//src/kci_cloud_fake:kci_cloud_fake",
         "//src/komira_async:komira_async",
         "//src/komira_fs:komira_fs",
         "//src/komira_http_core:komira_http_core",
@@ -284,17 +251,13 @@ conda_release_set_check(
         "//src/komira_supervisor:komira_supervisor",
         "//src/komira_http_client:komira_http_client",
         "//src/komira_objectstore:komira_objectstore",
-        "//src/kci_pkg_upload:kci_pkg_upload",
         "//src/komira_aws_core:komira_aws_core",
         "//src/komira_gcp_core:komira_gcp_core",
         "//src/komira_oci:komira_oci",
-        "//src/kci_publish_oci:kci_publish_oci",
-        "//src/kci_release_set:kci_release_set",
         "//src/komira_gcp_cloudresourcemanager:komira_gcp_cloudresourcemanager",
         "//src/komira_gcp_iam:komira_gcp_iam",
         "//src/komira_gcp_run:komira_gcp_run",
         "//src/komira_gcp_wif:komira_gcp_wif",
-        "//src/kci_cloud_gcp:kci_cloud_gcp",
         "//src/komira_kafka_broker:komira_kafka_broker",
         "//src/komira_bench_duckdb:komira_bench_duckdb",
         "//src/komira_bench_data:komira_bench_data",
@@ -337,7 +300,7 @@ conda_release_set_check(
 # `readme_tests`).
 
 # b's README holds a ```text sketch and a ```python block, no example; a,
-# listed first, holds one. The refusal names b and quotes kci.
+# listed first, holds one. The refusal names b.
 release_readme_test(
     name = "release_readme_refuses_no_example",
     members = ["a", "b"],
@@ -345,7 +308,7 @@ release_readme_test(
         "a": "release_readme/one_example.txt",
         "b": "release_readme/no_example.txt",
     },
-    refuses = "release member b: src/b/README.md holds no ```mojo or ```mojo module example, so kci's install validation would refuse it after publish: \"src/b/README.md holds no ```mojo example, so the validation would run nothing; add one\"",
+    refuses = "release member b: src/b/README.md holds no ```mojo or ```mojo module example, so the release would refuse it: \"src/b/README.md holds no ```mojo example, so the validation would run nothing; add one\"",
 )
 
 # b packages no README.
@@ -353,7 +316,7 @@ release_readme_test(
     name = "release_readme_refuses_no_readme",
     members = ["a", "b"],
     readmes = {"a": "release_readme/one_example.txt"},
-    refuses = "release member b: no README is packaged, so kci's install validation would refuse it after publish: \"b ships no share/doc/b/README.md: a release needs a README; add src/b/README.md\"",
+    refuses = "release member b: no README is packaged, so the release would refuse it: \"b ships no share/doc/b/README.md: a release needs a README; add src/b/README.md\"",
 )
 
 # One ```mojo example.
@@ -425,33 +388,14 @@ release_order_test(
     refuses = "member a requires {}, which release_set lists after it".format(_OLD_NATIVE),
 )
 
-# The release set file: kci_artifact's welded test holds it equal to
-# release/artifacts.textproto's metapackage (release_set.txt's header).
-export_file(
-    name = "release_set.txt",
-    src = "release_set.txt",
-    visibility = ["//src/kci_artifact:"],
-)
-
-# system_libs.bzl's table as `<soname> <requirement>` lines: kci_release_set's
-# welded test holds kci's compiled copy (the conda-forge requirements its
-# closure checks accept) equal to it, so the two cannot drift.
-system_libs_record(
-    name = "system_libs",
-    visibility = ["//src/kci_release_set:"],
-)
-
-# The platform table's glibc floor per conda subdir, as `<subdir> <floor>`
-# lines: kci_release_set's welded test holds kci's compiled copy (the one
-# `__glibc >=<floor>` requirement it accepts) equal to it.
-glibc_floor_record(
-    name = "glibc_floor",
-    visibility = ["//src/kci_release_set:"],
-)
-
-# The stamped metapackage above, read with kci's own manifest parser
-# (manifest_probe/BUCK): what a PUBLISH step reads.
-conda_manifest_kci(
-    name = "release_set_kci",
-    package = ":release_set_check",
+# The package ships its docs: komira_encoding's package must install the
+# library's README.md at share/doc/komira_encoding/README.md, byte-equal to
+# src/komira_encoding/README.md, listed in info/paths.json and in
+# metadata.json's `doc_files` (conda.bzl, `conda_doc_check`). The README is
+# read from the library, not from the package rule, so a package rule that
+# dropped it is a red `buck2 build //...`.
+conda_doc_check(
+    name = "conda_ships_readme",
+    lib = "//src/komira_encoding:komira_encoding",
+    package = "//src/komira_encoding:komira_encoding_conda",
 )

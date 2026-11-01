@@ -91,8 +91,6 @@ HEAVY = []
 # the row with the package. (The README e2e's targets, tools/build/readme_e2e/README.md, were
 # a row here while the pinned mopm lacked `--overlay`; they are Python-free and in the check now.)
 EXCLUDED = [
-    ("komira//bin/kci:", "kci is retired: its binary is one Mojo compile of several GB, and no job runs or releases it"),
-    ("komira//packaging/images/base:", "the base image: it bundles the kci binary, so the binary is reachable from it"),
     ("komira//third_party/python/...", "the pinned CPython and wheels: inputs of Python tests only"),
     ("komira//release/ci/tests:", "py_test of the CI scripts, not of the Python SDK"),
     ("komira//release:mopm_darwin_libs", "the macOS arm64 build of the release: it is built for the darwin-arm64 platform on the farm's macOS workers by release-macos.yml (job release-macos), and never by a pull request (a Linux build of its libraries is the aggregate's own)"),

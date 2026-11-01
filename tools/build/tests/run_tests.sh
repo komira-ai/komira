@@ -160,7 +160,7 @@
 #  32. The ./buck2 bootstrap installs only what tools/buck2 pins
 #      (tools/build/tests/functional/bootstrap.sh; a made-up release, no network).
 #  33a. Conda packages: see tools/build/tests/functional/conda.sh (a package is a
-#       directory read back with unzip, zstd, tar and jq; kci's manifest contract;
+#       directory read back with unzip, zstd, tar and jq; the manifest contract;
 #       a new library gets its package from the macro with no declaration; the
 #       refusals, as targets that build and releases that do not; the stamp; two
 #       uncached builds, skipped with --no-uncached; a pixi install from a
@@ -170,7 +170,7 @@
 #       that switch: no pixi on PATH is a SKIP line, and a FAIL line with it.
 #  33b. The conda package set and metapackage: see tools/build/tests/functional/conda_set.sh
 #       (every library's package target builds; the stamped releases; the metapackage
-#       from the members' manifests; kci's own parser over the emitted manifests; the
+#       from the members' manifests; the
 #       refusals; two uncached builds, skipped with --no-uncached; a pixi install of
 #       the metapackage alone, skipped or failed as in 33a).
 #  33. The client is Linux x86_64: several tests run binaries built for the

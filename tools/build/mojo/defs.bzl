@@ -245,7 +245,7 @@ def _library_impl(ctx):
     if readme_marker != None:
         if "readme" in test_subtargets:
             fail("{}: a test_srcs file is named `readme.mojo`; `[tests][readme]` is the README's examples".format(ctx.label))
-        # [generated] and [file]: the programs and README.md the gate ran, for kci_validate's golden test;
+        # [generated] and [file]: the programs and README.md the gate ran;
         # [objects]: an owner's README programs as objects, for its shared library's README check (shared.bzl).
         test_subtargets["readme"] = [DefaultInfo(default_output = readme_marker[0], other_outputs = [readme_marker[1]], sub_targets = {"file": [DefaultInfo(default_output = ctx.attrs.readme)], "generated": [DefaultInfo(default_output = readme_marker[1])], "objects": [DefaultInfo(default_output = readme_marker[3])]})]
         markers.append(readme_marker[0])

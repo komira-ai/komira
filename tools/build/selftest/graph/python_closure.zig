@@ -13,7 +13,7 @@
 //!                   files are data the lints read, every file of a
 //!                   package, and the `file` findings below see its `.py`.
 //!   file <path>     a `.py` file of the repository's trees.
-//!   exec <path>     a kci textproto whose `executable:` is a Python
+//!   exec <path>     a release textproto whose `executable:` is a Python
 //!                   interpreter, or a GitHub workflow or action with a
 //!                   `run:` line that runs one or a `setup-python` step.
 //!

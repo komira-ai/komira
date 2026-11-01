@@ -445,7 +445,7 @@ limits(
 # target of `//...` or `tests//functional/...` whose closure (every kind of
 # dependency) holds a target under third_party/python/ or
 # tools/build/python/, a Python rule or a `.py` source; no `.py` file in the
-# repository; no kci textproto or GitHub workflow that runs Python. Building
+# repository; no release textproto or GitHub workflow that runs Python. Building
 # it checks nothing: .github/workflows/pr.yml runs `./buck2 bxl
 # //tools/build/selftest/graph/checks.bxl:check -- --check //:python_closure`,
 # as it does for every graph_check.

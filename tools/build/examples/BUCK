@@ -32,20 +32,17 @@ bundle_tarball(
 )
 
 # An OCI image: distroless base plus the bundle at /opt/hello/, entrypoint
-# /opt/hello/bin/hello. `[docker_archive]` is for `docker load`. kci_release_set's
-# welded test reads `[release]` (the layout and its artifact manifest) with
-# `verify_member`, and `[digest]` to check the set hash carries that digest.
+# /opt/hello/bin/hello. `[docker_archive]` is for `docker load`.
 oci_image(
     name = "hello_image",
     bundle = ":hello_bundle",
     repository = "komira/hello",
-    visibility = ["//src/kci_release_set:"],
+    visibility = ["PUBLIC"],
 )
 
-# The same bundle as an image of a tree (oci_tree, at /app/): kci_release_set's
-# welded test reads its `[release]` too, whose member name is `hello_root`,
-# the last segment of the repository, not the tree's name. The tree and
-# repository names differ on purpose, so the test tells which one was used.
+# The same bundle as an image of a tree (oci_tree, at /app/): its `[release]` member name is
+# `hello_root`, the last segment of the repository, not the tree's name. The
+# tree and repository names differ on purpose, so a test tells which one was used.
 oci_tree(
     name = "hello_layer",
     bundles = {"app/": ":hello_bundle"},
@@ -57,7 +54,7 @@ oci_image(
     tree = ":hello_layer",
     entrypoint = "/app/bin/hello",
     repository = "komira/hello_root",
-    visibility = ["//src/kci_release_set:"],
+    visibility = ["PUBLIC"],
 )
 
 # A package: `buck2 build` produces hellopkg.mojoc.

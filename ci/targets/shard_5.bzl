@@ -3,7 +3,6 @@
 # `guard.bxl:check` fails the pull request check when this file is out of date.
 
 TARGETS = [
-    "komira//src/kci_cli:kci_cli_conda",
     "komira//src/komira_async_api:ci",
     "komira//src/komira_async_api:conda_holds",
     "komira//src/komira_async_api:coverage_floor",
@@ -84,7 +83,6 @@ TARGETS = [
     "komira//src/tests/conformance/komira_db_conformance:komira_db_conformance",
     "komira//src/tests/conformance/komira_git_pack_conformance:komira_git_pack_conformance",
     "komira//src/tests/e2e/komira_azure_blob_e2e:komira_azure_blob_e2e",
-    "komira//src/tests/helpers/kci_gcp_emulator:kci_gcp_emulator_conda",
     "komira//src/tests/helpers/komira_test_minio:farm_capability_probe",
     "komira//src/tests/helpers/komira_test_minio:komira_test_minio_conda",
     "komira//third_party/snappy:config_arm64",
@@ -100,8 +98,6 @@ TARGETS = [
     "komira//tools/build/lint:shellcheck-v0.11.0.darwin.aarch64.tar.xz",
     "komira//tools/build/lint:timing",
     "komira//tools/build/mopm_migrate:mopm_migrate",
-    "komira//tools/build/package/manifest_probe:conda_manifest_kci",
-    "komira//tools/build/package/manifest_probe:conda_ships_readme",
     "komira//tools/build/proto-codegen/routes:komira_routes_fixture_conda",
     "komira//tools/build/proto-codegen/routes:komira_routes_fixture_messages_conda",
     "komira//tools/build/selftest:analysis_refusals_adopt_deps",
@@ -181,8 +177,6 @@ TARGETS = [
     "tests//functional/gen_tools:regen",
     "tests//functional/readme_examples/module_mode:doc_tree",
     "tests//functional/readme_examples/module_mode:module_mode_conda",
-    "tests//functional/release_launch:doc_tree",
-    "tests//functional/release_launch:driver",
     "tests//functional/surface_capability_matrix/src/tests/e2e/pandas_e2e/sub:test_sub",
 ]
 
