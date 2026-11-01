@@ -22,22 +22,6 @@ MOPM = "toolchains//:mopm_0_0_101"
 FIRST_MOPM_WITH_OVERLAY = "toolchains//:mopm_0_0_40"
 
 PACKAGES = {
-    "kci_api": "0.1.0",
-    "kci_artifact": "0.1.0",
-    "kci_artifact_manifest": "0.1.0",
-    "kci_artifact_proto": "0.1.0",
-    "kci_cell": "0.1.0",
-    "kci_deploy_model_proto": "0.1.0",
-    "kci_logs": "0.1.0",
-    "kci_manifest_proto": "0.1.0",
-    "kci_params": "0.1.0",
-    "kci_reconciler": "0.1.0",
-    "kci_release_channel": "0.1.0",
-    "kci_release_machine": "0.1.0",
-    "kci_resource_proto": "0.1.0",
-    "kci_validator_report": "0.1.0",
-    "kci_validator_rows": "0.1.0",
-    "kci_workflow_check": "0.1.0",
     "komira_anomaly": "0.1.0",
     "komira_async_api": "0.1.0",
     "komira_atomic_alias": "0.1.0",
@@ -103,3 +87,26 @@ PACKAGES = {
     "komira_xml": "0.1.0",
     "komira_zlib": "0.1.0",
 }
+
+# Packages that keep their `mopm.toml` (their Buck2 build reads it) and that the release does not
+# publish: kci is retired in favour of ucdk (komira-ai/ucdk), so its libraries left the release set and the
+# mopm group. Their names stay claimed on the prod registry (release/prod_claimed_names.txt).
+# `readme_e2e_complete` (root BUCK) holds each to a `src/<name>/mopm.toml` and out of PACKAGES.
+UNPUBLISHED = [
+    "kci_api",
+    "kci_artifact",
+    "kci_artifact_manifest",
+    "kci_artifact_proto",
+    "kci_cell",
+    "kci_deploy_model_proto",
+    "kci_logs",
+    "kci_manifest_proto",
+    "kci_params",
+    "kci_reconciler",
+    "kci_release_channel",
+    "kci_release_machine",
+    "kci_resource_proto",
+    "kci_validator_report",
+    "kci_validator_rows",
+    "kci_workflow_check",
+]

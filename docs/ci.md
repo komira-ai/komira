@@ -489,7 +489,10 @@ refuses a pull request in which a member (every `src/<name>` with a `mopm.toml`,
 `release/readme_e2e/packages.bzl`) is missing from it: "<name> is a member of the release and is not in
 release/prod_claimed_names.txt: claim it on the prod registry first, then add it to release/prod_claimed_names.txt".
 A maintainer adds a name to the file only after claiming it on the prod registry, in the pull request that adds the
-member. The file also refuses a line no member has, an unsorted or repeated line, and an empty file. It is a
+member. The file also refuses a line no member has and `release/readme_e2e/packages.bzl` does not retire
+(`UNPUBLISHED`: a package that is built but no longer released, such as the `kci_*` libraries, whose
+names stay claimed; the file refuses the line of such a package being dropped), an unsorted or repeated line,
+and an empty file. It is a
 committed claim, not a live read: it does not notice a claim the registry lost, and `prod-stage` stays the
 last word.
 
