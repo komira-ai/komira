@@ -164,6 +164,23 @@ zig_test(
     visibility = ["PUBLIC"],
 )
 
+# Two rules that protect the release, held on the real files and on fixtures with the rule broken
+# (release_checks_test.zig says what each case catches): release/artifacts.textproto and
+# tools/build/package/release_set.txt are the same release (metapackage, members in order,
+# --license, --summary and --home), and a release does not name both komira_so packages.
+zig_test(
+    name = "release_checks_cases",
+    exec_compatible_with = LINUX_X86_64,
+    src = "release_checks_test.zig",
+    data = {
+        "artifacts.textproto": "artifacts.textproto",
+        "release_set.txt": "//tools/build/package:release_set.txt",
+    },
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
+    visibility = ["PUBLIC"],
+)
+
 # The macOS arm64 build set (darwin_libs.bzl): the library of every mopm package that builds for
 # macOS, built with `--target-platforms komira//tools/build/platforms:darwin-arm64` by release-macos.yml's
 # `release-macos` job on the farm's macOS workers, once per release. It is in no pull request's
