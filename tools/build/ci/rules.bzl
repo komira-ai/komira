@@ -81,26 +81,8 @@ DEFAULT = "komira//ci:pr_default"
 #   reason  why it is left off.
 # What a row costs: a change outside `own` that breaks the target is not found by the pull
 # request check. The release builds neither of these roots, so it is not found there either.
-HEAVY = [
-    (
-        "komira//bin/kci:kci",
-        [
-            "bin/kci/**",
-            "src/kci_*",
-            "packaging/images/base/**",
-            # the selector, the aggregates and their lists: a change to how the check set is
-            # chosen runs the whole of it
-            "ci/**",
-            "tools/build/ci/**",
-        ],
-        [
-            "komira//bin/kci:runnable_readme_examples",
-            "komira//bin/kci:test_kci_process",
-            "komira//packaging/images/base:komira_base",
-        ],
-        "kci is frozen and its binary is one Mojo compile of several GB; no job of the release builds it",
-    ),
-]
+# No row ships today: the mechanism stays, held by heavy_cases.bzl over rows written there.
+HEAVY = []
 
 # The checks `//ci:pr` leaves out on purpose, each a (pattern, reason). Most are Python, and
 # Python serves only the Python SDK and its py_tests (tests/python_closure_allowlist.bzl,
@@ -109,6 +91,8 @@ HEAVY = [
 # the row with the package. (The README e2e's targets, tools/build/readme_e2e/README.md, were
 # a row here while the pinned mopm lacked `--overlay`; they are Python-free and in the check now.)
 EXCLUDED = [
+    ("komira//bin/kci:", "kci is retired: its binary is one Mojo compile of several GB, and no job runs or releases it"),
+    ("komira//packaging/images/base:", "the base image: it bundles the kci binary, so the binary is reachable from it"),
     ("komira//third_party/python/...", "the pinned CPython and wheels: inputs of Python tests only"),
     ("komira//release/ci/tests:", "py_test of the CI scripts, not of the Python SDK"),
     ("komira//release:mopm_darwin_libs", "the macOS arm64 build of the release: it is built for the darwin-arm64 platform on the farm's macOS workers by release-macos.yml (job release-macos), and never by a pull request (a Linux build of its libraries is the aggregate's own)"),

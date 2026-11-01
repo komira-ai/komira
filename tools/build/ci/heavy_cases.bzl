@@ -15,7 +15,7 @@ Two rows: heavy owned by `src/h/**` and `ci/**` with root h_root, heavy2 owned b
 
 load(":affected.bzl", "AFFECTED", "WIDENED", "heavy_split", "plan", "select")
 load(":ci_graph.bzl", "default_findings")
-load(":rules.bzl", "HEAVY", "INERT", "WIDEN")
+load(":rules.bzl", "EXCLUDED", "HEAVY", "INERT", "WIDEN")
 
 _FILES = {
     "src/a/a.mojo": True,
@@ -120,48 +120,36 @@ def _split_cases():
 # ---- the shipped rows ------------------------------------------------------------
 #
 # Every row's own paths hold the selector's and the aggregate's own files (a change to how
-# the check set is chosen runs the whole of it), and kci's row owns its own directories and
-# nothing a shared library or the build system reaches it through.
+# the check set is chosen runs the whole of it). The kci binary is no row: it is left out of
+# the check set altogether (EXCLUDED), with the image that bundles it.
 
-_OWNED = [
-    "bin/kci/main.mojo",
-    "bin/kci/BUCK",
-    "src/kci_api/BUCK",
-    "src/kci_resource_proto/src/x.mojo",
-    "packaging/images/base/BUCK",
+_SELECTOR_FILES = [
     "ci/targets.bzl",
     "tools/build/ci/affected.bzl",
 ]
 
-_NOT_OWNED = [
-    "src/komira_json/BUCK",
-    "src/komira_core/src/komira_core/x.mojo",
-    "tools/build/mojo/defs.bzl",
-    "tools/build/proto-codegen/BUCK",
-    "src/kcix/BUCK",
-    "bin/kcix/main.mojo",
-    "docs/ci.md",
+_KCI_LEFT_OUT = [
+    "komira//bin/kci:",
+    "komira//packaging/images/base:",
 ]
 
 def _shipped_cases():
     out = []
-    shipped = struct(heavy = HEAVY)
-    kci = [r for r in HEAVY if r[0] == "komira//bin/kci:kci"]
-    if len(kci) != 1:
-        return ["heavy shipped: the row of komira//bin/kci:kci is missing from HEAVY"]
-    for p in _OWNED:
-        wanted, _ = heavy_split(struct(heavy = kci), [p])
-        if not wanted:
-            out.append("heavy shipped: '{}' must own the kci row".format(p))
-    for p in _NOT_OWNED:
-        wanted, _ = heavy_split(struct(heavy = kci), [p])
-        if wanted:
-            out.append("heavy shipped: '{}' must not own the kci row".format(p))
-    for r in shipped.heavy:
+    for r in HEAVY:
+        if r[0].startswith("komira//bin/kci:") or any([t.startswith("komira//bin/kci:") for t in r[2]]):
+            out.append("heavy shipped: the row of {} builds the kci binary in the pull request check".format(r[0]))
         if "ci/**" not in r[1] or "tools/build/ci/**" not in r[1]:
             out.append("heavy shipped: the row of {} must own ci/** and tools/build/ci/**".format(r[0]))
         if not r[2]:
             out.append("heavy shipped: the row of {} names no root".format(r[0]))
+        for p in _SELECTOR_FILES:
+            wanted, _ = heavy_split(struct(heavy = [r]), [p])
+            if not wanted:
+                out.append("heavy shipped: '{}' must own the row of {}".format(p, r[0]))
+    left_out = [p for p, _ in EXCLUDED]
+    for p in _KCI_LEFT_OUT:
+        if p not in left_out:
+            out.append("heavy shipped: '{}' must be left out of the check set (EXCLUDED)".format(p))
     return out
 
 # ---- the default aggregate's guard -------------------------------------------------
