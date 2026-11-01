@@ -11,8 +11,14 @@
 # - test_a_value_the_run_did_not_produce_is_null_never_zero: a refused query
 #   has null for komira's steady state and first run and DuckDB's time as
 #   measured, verdict NO_RATIO; a timed cell without a first run has null
-#   there only; a wrong answer's check run supplies the first run while the
-#   steady state stays null.
+#   there only; a wrong answer is not timed, so its check run is not given as
+#   a first run and all three times are null.
+# - test_a_timed_cell_gives_its_first_run_not_a_check_run: a timed cell that
+#   also carries check runs gives komira's `first_run.ms` as `first_run_ms`.
+# - test_a_failing_line_does_not_hide_the_report: with the flag and a result
+#   of two queries (no single line), the console text is still the report,
+#   followed by one `error: js-measure-result` line, and no line with the
+#   prefix.
 # - test_the_flag_is_read_and_given_once: the flag takes no value, is off by
 #   default, and does not swallow the flag after it; given twice it is an error.
 # - test_without_the_flag_the_console_text_is_the_report_alone: the text is
@@ -178,10 +184,33 @@ def test_a_value_the_run_did_not_produce_is_null_never_zero() raises:
     assert_true(no_first.find(String('"steady_ms":1.5,"first_run_ms":null,"duckdb_steady_ms":2.5')) >= 0)
     assert_equal(
         js_measure_line(_wrong_answer()),
-        String('js-measure-result {"steady_ms":null,"first_run_ms":40.5,"duckdb_steady_ms":null,"verdict":"NO_RATIO"}'),
+        String('js-measure-result {"steady_ms":null,"first_run_ms":null,"duckdb_steady_ms":null,"verdict":"NO_RATIO"}'),
     )
     assert_false(js_measure_line(_unserved()).find(String(":0,")) >= 0)
     assert_false(js_measure_line(_wrong_answer()).find(String(":0,")) >= 0)
+
+
+def test_a_timed_cell_gives_its_first_run_not_a_check_run() raises:
+    var cell = Cell.build(
+        String("q6"),
+        String("tpch"),
+        3,
+        StageOutcome(String("EXEC_OK"), String("")),
+        Optional[Side](_side(1.5, Optional[Float64](12.25))),
+        Optional[Side](_side(2.5, Optional[Float64](20.5))),
+        ValueVerdict.identical(),
+        1.0,
+        Optional[CheckRuns](
+            CheckRuns(
+                Optional[FirstRun](FirstRun(40.5, Optional[Int64](), Optional[Int64]())),
+                Optional[FirstRun](FirstRun(30.25, Optional[Int64](), Optional[Int64]())),
+            )
+        ),
+    )
+    assert_equal(
+        js_measure_line(cell),
+        String('js-measure-result {"steady_ms":1.5,"first_run_ms":12.25,"duckdb_steady_ms":2.5,"verdict":"PASS"}'),
+    )
 
 
 def _base_args() -> List[String]:
@@ -239,6 +268,23 @@ def test_with_the_flag_the_line_is_the_last_line_of_the_console_text() raises:
             count += 1
     assert_equal(count, 1)
     assert_true(printed.as_bytes()[printed.byte_length() - 1] == 0x0A)
+
+
+def test_a_failing_line_does_not_hide_the_report() raises:
+    var out = _output(_timed(Optional[Float64](12.25)))
+    var cells = List[Cell]()
+    cells.append(_timed(Optional[Float64](12.25)))
+    cells.append(_timed(Optional[Float64](12.25)))
+    var two = _result(_timed(Optional[Float64](12.25)))
+    two.cells = cells^
+    out.warm = two^
+    var report = format_run(out)
+    var text = console_text(out, True)
+    assert_true(text.startswith(report))
+    assert_true(text.find(String("\nerror: js-measure-result")) >= 0)
+    assert_true(text.find(String("exactly one query")) >= 0)
+    for line in _lines(text):
+        assert_false(line.startswith(JS_MEASURE_PREFIX))
 
 
 def test_the_line_is_under_8_kib() raises:
