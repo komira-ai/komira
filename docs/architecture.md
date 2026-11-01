@@ -375,6 +375,12 @@ dependency order is the order of the rows.
 | [`komira_chat_store`](../src/komira_chat_store/) | the chat's storage over `komira_db`'s backend-neutral `Database`: `ChatStore` holds users (keyed by a token's issuer and subject), public and private channels, DMs (one per set of users, the id derived from the sorted set), members, each channel's timeline of message, edit, delete, join and leave events numbered 1, 2, 3, ... with no gap (an event is inserted at the head plus one on the unique `(channel_id, seq)` and retried when another writer took it, so there is no counter to leave a hole), one-level threads, mentions, read cursors and file records; a send with a client message id is idempotent; a delete overwrites the bodies of the message and its edits; `erase_user` overwrites a user's bodies in place and deletes the user's memberships, read cursors, mention, file, user and subject rows, while event rows, channel creators and DM ids keep the user's id, which no remaining row maps to a person. It is run against SQLite and a document-store mock; Postgres is written for and not run. It carries the SQL schema (`chat_migrations`), the keys and composite indexes the document-store mock is run with, and the SQLite steps (`secure_delete`, a truncating checkpoint) that take erased text out of the file and its write-ahead log. |
 | [`komira_managed_mail_proto`](../src/komira_managed_mail_proto/) | the managed mail API, `komira.managed_mail.v1`, generated: the messages of a simple mail app (mailboxes, emails in a fixed set of folders, their parts, threads, sending through a queue of submissions, raw and mbox export), and its two HTTP contracts with a submission service, inbound delivery (the raw message as the body, an `InboundEnvelope` in a header field) and HTTP submission (`RawMessageRequest`), carried as proto3 canonical JSON. Not IMAP or JMAP. `mail_service.proto` lists the methods and their HTTP routes as `.proto` source only. |
 
+### Validation runs
+
+| module | what it is |
+|---|---|
+| [`komira_validation_run`](../src/komira_validation_run/) | the validation-run correlator: the tag key under which a validation run stamps its identity on every billable cloud resource it creates, so cleanup acts only on what it can prove that run made. |
+
 ### Benchmarks
 
 Packages the published benchmarks are made of. Datasets are never committed or shipped: they live in a cache directory the caller names.
