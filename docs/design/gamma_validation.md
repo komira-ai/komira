@@ -1,5 +1,7 @@
 # Gamma validation: what checks a release before prod, per package family, in beta's installs and gamma's real cloud
 
+> **kci is retired** in favour of ucdk (komira-ai/ucdk) and is to be deleted from this repository. No workflow runs it: the pull request check is `pr / check` and the release is `release.yml` ([ci.md](../ci.md)). This page describes the old design.
+
 **Stage names.** This document uses the words of the staged pipeline's
 [glossary](staged_pipeline.md#glossary): **beta** builds each commit once,
 publishes the packages to the beta channel and then installs them from it

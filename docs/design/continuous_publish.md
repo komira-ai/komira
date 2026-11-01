@@ -1,5 +1,7 @@
 # Continuous publish: every package built, published to beta, tested there, promoted to prod
 
+> **kci is retired** in favour of ucdk (komira-ai/ucdk) and is to be deleted from this repository. No workflow runs it: the pull request check is `pr / check` and the release is `release.yml` ([ci.md](../ci.md)). This page describes the old design.
+
 Status: design, not built (revision 5). Everything marked **EXISTS** names the code that does it on
 `main`; everything marked **PROPOSED** has no code yet. **Every name this document introduces is
 PROPOSED and absent from `main`:** `komira_test_emulator`, `EmulatorEndpoint`,

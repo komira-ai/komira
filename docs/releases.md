@@ -11,7 +11,7 @@ and nothing more; the earlier conda channels on prefix.dev are no longer
 published to, and publishing will move to mopm. (The libraries that
 already moved to mopm are the exception: every push to `main` publishes them to the mopm
 registry `prod`, as one group at the version `0.1.<run number>`, through the jobs
-`mopm-stage` and `prod-*` of the same workflow; [docs/ci.md](ci.md#the-mopm-jobs).) Two checks that kci's build stage made are not
+`mopm-stage` and `prod-*` of the same workflow; [docs/ci.md](ci.md#the-mopm-jobs).) Two checks that the retired kci's build stage made are not
 made by this build and are not enforced until mopm's publish path re-creates
 them: that every package's requirements are inside the set (requirement
 closure), and the refusal of a duplicate key in a JSON file; the header of
@@ -36,10 +36,10 @@ string is a plain version (`0.1.0`, `1.2.3+build.4`).
 Every Mojo library has a conda package target, `<name>_conda`, declared by the
 `mojo_library` macro (`conda = False` opts out); nobody writes one. The package
 is a directory: one file, `lib/mojo/<name>.mojoc`, which the compiler finds on
-its default import path, packed as a `.conda`, with the artifact manifest that
-kci reads and a metadata file. The build writes it and uploads nothing. Which
-packages are published is the release tool's reviewed list of artifact
-declarations, not a file in the build, and a name and version in a registry are
+its default import path, packed as a `.conda`, with the artifact manifest (a
+format kci, now retired, read) and a metadata file. The build writes it and uploads nothing. Which
+packages are published is the reviewed list of artifact
+declarations (`release/artifacts.textproto`), not a rule of the build, and a name and version in a registry are
 permanent in practice, so the first upload is gated. A library that cannot be
 packaged still has a target that builds, holding the reason. The layout, the
 versioning (the package version is the Mojo compiler version, the release
