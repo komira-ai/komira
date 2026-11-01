@@ -101,6 +101,7 @@ from kci_api import (
     is_full_commit_id,
 )
 from kci_pkg_upload import HttpPkgTransport
+from kci_pkg_upload.wire import decode_utf8
 from kci_publish import UsleepSleeper
 from kci_validate import (
     PIXI_SYSTEM_CONFIG_DIR,
@@ -517,10 +518,10 @@ struct LibrarySteps(StageSteps, Movable):
             if not v:
                 return String("")
             var b = v.value().revealed_bytes()
-            var out = String("")
-            for i in range(len(b)):
-                out += chr(Int(b[i]))
-            return out^
+            # The bytes are decoded once, not one chr() per byte (which turns
+            # every byte >= 0x80 into two). A value that is not UTF-8 reads as
+            # unset, like any other unreadable one.
+            return decode_utf8(b, name)
         except:
             return String("")
 

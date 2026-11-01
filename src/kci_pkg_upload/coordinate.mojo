@@ -120,22 +120,57 @@ struct PackageFile(Movable, Deinitable):
 def normalize_distribution_name(name: String) -> String:
     """PEP 503 normalisation: lowercase, and every run of `-`, `_`, `.`
     collapsed to one `-`. The simple index and the JSON API are addressed by
-    this form; `kci_pkg_upload` and `Kci.Pkg-Upload` are one project."""
-    var out = String("")
+    this form; `kci_pkg_upload` and `Kci.Pkg-Upload` are one project.
+
+    Only ASCII letters and the three separators are rewritten; every other
+    byte, including one at or above 0x80, is copied as it is. The bytes are
+    collected and decoded once, so a multi-byte character is never split."""
+    var out = List[UInt8]()
     var b = name.as_bytes()
     var in_run = False
     for i in range(len(b)):
         var c = b[i]
         if c == UInt8(ord("-")) or c == UInt8(ord("_")) or c == UInt8(ord(".")):
             if not in_run:
-                out += String("-")
+                out.append(UInt8(ord("-")))
             in_run = True
             continue
         in_run = False
         if c >= UInt8(65) and c <= UInt8(90):
             c += UInt8(32)
-        out += chr(Int(c))
-    return out^
+        out.append(c)
+    # `name` is valid UTF-8 and only ASCII bytes were replaced by ASCII bytes
+    # (or dropped as a run of ASCII separators), so `out` is valid UTF-8.
+    return String(unsafe_from_utf8=Span(out))
+
+
+def refuse_malformed_distribution(name: String) raises:
+    """RAISES unless `name` is a non-empty distribution name in the packaging
+    spec's alphabet: ASCII letters, digits, `.`, `-` and `_`. A local fault,
+    before any request path is built from it."""
+    var b = name.as_bytes()
+    if len(b) == 0:
+        raise Error(String("kci_pkg_upload: the distribution name is EMPTY"))
+    for i in range(len(b)):
+        var c = b[i]
+        var ok = (
+            (c >= UInt8(ord("a")) and c <= UInt8(ord("z")))
+            or (c >= UInt8(ord("A")) and c <= UInt8(ord("Z")))
+            or (c >= UInt8(ord("0")) and c <= UInt8(ord("9")))
+            or c == UInt8(ord("."))
+            or c == UInt8(ord("-"))
+            or c == UInt8(ord("_"))
+        )
+        if not ok:
+            raise Error(
+                String("kci_pkg_upload: the distribution name '")
+                + name
+                + String(
+                    "' has a byte outside ASCII letters, digits, '.', '-' and"
+                    " '_' at offset "
+                )
+                + String(i)
+            )
 
 
 def repo_host(repo: String) raises -> String:

@@ -26,6 +26,7 @@ from .coordinate import (
     PackageCoordinate,
     PackageFile,
     normalize_distribution_name,
+    refuse_malformed_distribution,
     refuse_malformed_file_name,
     repo_host,
     repo_path,
@@ -70,6 +71,7 @@ def pypi_upload_target(repo: String) raises -> RedirectTarget:
 
 
 def pypi_json_api_path(c: PackageCoordinate) raises -> String:
+    refuse_malformed_distribution(c.distribution)
     return (
         repo_path(c.repo)
         + String("/pypi/")
