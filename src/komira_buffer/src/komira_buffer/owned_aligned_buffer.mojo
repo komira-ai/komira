@@ -340,9 +340,13 @@ struct OwnedAlignedBuffer(
     @staticmethod
     def with_capacity(capacity: Int) -> Self:
         """Construct an OwnedAlignedBuffer of at least `capacity`
-        bytes, length 0. The Arrow-builder pattern.
+        bytes, length 0. The Arrow-builder pattern: write into
+        `into_span_capacity()`, then `set_length`. Unlike the plain
+        constructor, whose length is the capacity.
         """
-        return Self(capacity)
+        var b = Self(capacity)
+        b._length = 0
+        return b^
 
     # -------------------------------------------------------------------------
     # MmapAlignedBuffer trait surface
