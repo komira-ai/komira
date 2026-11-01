@@ -15,23 +15,22 @@ def moved_packages(paths):
             names.append(parts[1])
     return sorted(names)
 
-def findings(paths, covered, unpublished = []):
-    """What is out of step between the moved packages of `paths`, the names in `covered` and those in `unpublished`, as one text; "" when none.
+def findings(paths, covered):
+    """What is out of step between the moved packages of `paths` and the names in `covered`, as one text; "" when none.
 
-    `unpublished` are packages that keep their `mopm.toml` (their build reads it) and that the release
-    no longer publishes: they need no README e2e target and must not be in `covered`. A name may have no `mopm.toml` (its source was deleted).
+    Every `src/<name>/mopm.toml` must have a README e2e target (`covered` is PACKAGES of
+    release/readme_e2e/packages.bzl, the members of the release), and every target a `mopm.toml`.
+    `mopm stage --workspace-root src` packs every `src/<name>/mopm.toml`, and `//release:mopm_artifacts`
+    builds the members, so a `mopm.toml` that is not a member makes the release's stage fail.
     """
     moved = moved_packages(paths)
-    lacking = [m for m in moved if m not in covered and m not in unpublished]
+    lacking = [m for m in moved if m not in covered]
     stale = sorted([c for c in covered if c not in moved])
-    both = sorted([u for u in unpublished if u in covered])
     problems = []
     if lacking:
-        problems.append("{} moved package(s) have no README e2e target: {}. Add each to PACKAGES in release/readme_e2e/packages.bzl (its version is the one in its mopm.toml), or to UNPUBLISHED there when the release no longer publishes it".format(len(lacking), ", ".join(lacking)))
+        problems.append("{} moved package(s) have no README e2e target: {}. Add each to PACKAGES in release/readme_e2e/packages.bzl (its version is the one in its mopm.toml), or delete its mopm.toml: `mopm stage --workspace-root src` packs every one".format(len(lacking), ", ".join(lacking)))
     if stale:
         problems.append("{} README e2e target(s) are for a package with no src/<name>/mopm.toml: {}. Delete each from PACKAGES in release/readme_e2e/packages.bzl".format(len(stale), ", ".join(stale)))
-    if both:
-        problems.append("{} package(s) are both in PACKAGES and in UNPUBLISHED: {}. Keep each in one".format(len(both), ", ".join(both)))
     return "; ".join(problems)
 
 # The row of EXCLUDED (tools/build/ci/rules.bzl) that leaves the release's README e2e out of the

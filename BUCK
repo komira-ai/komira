@@ -14,7 +14,7 @@ load("@komira//tools/build/platforms/limits:limits.bzl", "limits")
 load("@komira//tools/build/readme_e2e:defs.bzl", "readme_e2e_complete")
 load("@komira//tools/build/selftest:defs.bzl", "graph_check")
 load("@komira//tools/build/ci:rules.bzl", "EXCLUDED")
-load("//release/readme_e2e:packages.bzl", README_E2E_PACKAGES = "PACKAGES", README_E2E_UNPUBLISHED = "UNPUBLISHED", README_E2E_MOPM = "MOPM", README_E2E_FIRST_MOPM_WITH_OVERLAY = "FIRST_MOPM_WITH_OVERLAY")
+load("//release/readme_e2e:packages.bzl", README_E2E_PACKAGES = "PACKAGES", README_E2E_MOPM = "MOPM", README_E2E_FIRST_MOPM_WITH_OVERLAY = "FIRST_MOPM_WITH_OVERLAY")
 load("//tests:python_closure_allowlist.bzl", "PYTHON_CEILING", "PYTHON_SURFACE")
 load("//tests:surface_capability_matrix.bzl", "CAPABILITIES", "MATRIX", "NOT_CAPABILITIES", "SURFACES")
 
@@ -174,7 +174,6 @@ no_endpoint(
     mopm = README_E2E_MOPM,
     targets = ["//release/readme_e2e/verify:" + name for name in sorted(README_E2E_PACKAGES.keys())],
     tree = ":doc_tree",
-    unpublished = README_E2E_UNPUBLISHED,
 ) for _ in [1] if docs_checked()]
 
 # The layout of src/ (tools/build/lint/defs.bzl, src_layout): src/<name> holds
@@ -446,7 +445,7 @@ limits(
 # target of `//...` or `tests//functional/...` whose closure (every kind of
 # dependency) holds a target under third_party/python/ or
 # tools/build/python/, a Python rule or a `.py` source; no `.py` file in the
-# repository; no kci textproto or GitHub workflow that runs Python. Building
+# repository; no release textproto or GitHub workflow that runs Python. Building
 # it checks nothing: .github/workflows/pr.yml runs `./buck2 bxl
 # //tools/build/selftest/graph/checks.bxl:check -- --check //:python_closure`,
 # as it does for every graph_check.
