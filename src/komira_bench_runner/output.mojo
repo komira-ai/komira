@@ -122,8 +122,9 @@ def js_measure_line(cell: Cell) raises -> String:
         {"steady_ms":..,"first_run_ms":..,"duckdb_steady_ms":..,"verdict":".."}
 
     The values are the cell's own fields of result.json, all in milliseconds:
-    `steady_ms` is komira's `ms`, `first_run_ms` komira's `first_run.ms` (or,
-    for a cell that was not timed, the `check_runs.komira.ms`),
+    `steady_ms` is komira's `ms`, `first_run_ms` komira's `first_run.ms`
+    (a cell that was not timed has none: a check run is not given as a first
+    run),
     `duckdb_steady_ms` is DuckDB's `ms`, and `verdict` the cell's verdict. A
     value the run did not produce (no side, no first run, a time that is not
     finite) is `null`, never 0. Raises when the line would not fit in
@@ -134,8 +135,6 @@ def js_measure_line(cell: Cell) raises -> String:
     if cell.komira:
         steady = Optional[Float64](cell.komira.value().ms)
         first = cell.komira.value().first_ms()
-    if not first and cell.check_runs and cell.check_runs.value().komira:
-        first = Optional[Float64](cell.check_runs.value().komira.value().ms)
     if cell.duckdb:
         duckdb = Optional[Float64](cell.duckdb.value().ms)
     var o = JsonValue.empty_object()
@@ -159,11 +158,16 @@ def js_measure_line_of(result: BenchResult) raises -> String:
 def console_text(run: RunOutput, js_measure_result: Bool) raises -> String:
     """What the program prints (`print` adds the final newline): the report
     and, only with `js_measure_result`, a blank line and the summary line of
-    the warm result, which is then the last line. Without the flag it is the
-    report alone, as it always was."""
+    the warm result, which is then the last line. If that line cannot be
+    built, the report is kept and the last line is `error: js-measure-result:`
+    and the reason. Without the flag it is the report alone, as it always
+    was."""
     var text = format_run(run)
     if js_measure_result:
-        text += String("\n") + js_measure_line_of(run.warm)
+        try:
+            text += String("\n") + js_measure_line_of(run.warm)
+        except e:
+            text += String("\nerror: js-measure-result: ") + String(e)
     return text^
 
 
