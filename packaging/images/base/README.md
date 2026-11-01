@@ -1,5 +1,7 @@
 # The komira base image
 
+> **kci is retired**, and its relevant logic is being ported to ucdk (komira-ai/ucdk). No workflow runs it: the pull request check is `pr / check` and the release is `release.yml` ([ci.md](../../../docs/ci.md)). The `/opt/kci` bundle below is kci's binary; it is in the image, and nothing runs it.
+
 `komira//packaging/images/base:komira_base` is the image a supervised job
 runs FROM. The build writes it as files; nothing is pushed.
 

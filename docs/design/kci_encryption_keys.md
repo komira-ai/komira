@@ -1,5 +1,7 @@
 # kci: an encryption key as a resource
 
+> **kci is retired**, and its relevant logic is being ported to ucdk (komira-ai/ucdk). No workflow runs it: the pull request check is `pr / check` and the release is `release.yml` ([ci.md](../ci.md)). This page describes the old design.
+
 A decision note for the kci resource model (`src/kci_resource_proto/resource.proto`, `src/kci_cloud`,
 `src/kci_cloud_fake`). `Resource.body` 34 is held for an encryption key. This note says what the key is,
 how "kci never deletes a key" is enforced, which verbs a grant gets, how other resources use the key, and
