@@ -35,7 +35,7 @@ from komira_oci.oci_push import (
 )
 
 comptime _HOST: String = "us-central1-docker.pkg.dev"
-comptime _REPO: String = "acme-prod/images/orders_image"
+comptime _REPO: String = "acme-prod/kci-images/orders_image"
 comptime _TAG: String = "3f2a9c1d8b7e6f5a4c3b2a1908f7e6d5c4b3a291"
 comptime _SECRET: String = "secret-token-value"
 
@@ -208,7 +208,7 @@ def test_unauthorized_names_the_scope_and_the_challenge_without_secrets() raises
     reg.required_authorization = String("Bearer something-else")
     var challenge = String(
         'Bearer realm="https://auth.example.net/token",service="registry",'
-        'scope="repository:acme-prod/images/orders_image:pull,push"'
+        'scope="repository:acme-prod/kci-images/orders_image:pull,push"'
     )
     reg.www_authenticate = challenge.copy()
     var pusher = _pusher(reg^)

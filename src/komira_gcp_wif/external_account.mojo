@@ -21,7 +21,7 @@
 #                         {"type": "json", "subject_token_field_name": "<f>"}}
 #
 # `parse_external_account` reads the file's TEXT; the caller reads the file
-# (the caller reads the path the provider-standard credentials variable names). This
+# (kci reads the path the provider-standard credentials variable names). This
 # package still reads no environment. `ExternalAccountFetcher.fetch` then:
 #
 #   1. takes the subject token from the file (through komira_gcp_core's
