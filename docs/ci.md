@@ -363,13 +363,19 @@ instead.
   start it only after the whole release finished, build the default branch's head
   instead of the pushed commit, and run for a pull request's `release.yml` run too if
   that ever changed. `timeout-minutes: 90` still bounds a stalled build.
-- **Reported, not blocking (for now).** The job is `continue-on-error: true`: a red macOS
-  build is a failed run of `release-macos.yml`, with a line in its summary, and the
-  release run, the prod publish and `main_red.yml` do not see it. The set has not yet been measured on
-  the macOS workers, and the publish must not wait on a platform the release does not
-  ship. When the set is green over several runs, remove the line and move the job back
-  into `release.yml` as a `needs` of `prod-commit` (or keep the workflow and have the
-  publish wait on it).
+- **Reported, not blocking (for now).** A red macOS build is a failed run of
+  `release-macos.yml`, with a line in its summary, and the release run, the prod publish and
+  `main_red.yml` do not see it: none of them `needs` it or reads its result. The job is not
+  `continue-on-error`, which would end a failed build green. The last job,
+  `release-macos-result` (`needs: release-macos`, `if: always()`), fails with "the macOS build
+  did not run" when the build job was skipped, and with "did not pass" when it failed, so the
+  run list, the commit status and the badge never read green for a Mac build that did not
+  pass. The farm connection refuses when a repository variable is empty (for the macOS
+  set, `FARM_DARWIN_ARM64_PROPERTIES` and `FARM_DARWIN_MACOS_HOSTS` go together), and that is a
+  failed run too. The set has not yet been measured on the macOS workers, and the publish must
+  not wait on a platform the release does not ship. When the set is green over several runs,
+  move the job back into `release.yml` as a `needs` of `prod-commit` (or keep the workflow
+  and have the publish wait on it).
 
 ## release.yml: the release
 
