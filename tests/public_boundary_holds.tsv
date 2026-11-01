@@ -5,7 +5,6 @@
 # rule: one more fails the build naming it; one fewer fails too, asking for the count
 # to be lowered or the row deleted. So this file only shrinks. The rule `deny` (a
 # private consumer's words) cannot be held.
-commit_sha	docs/ci.md	2	a public commit of this repository: the commit the run table's runs started from
 commit_sha	src/komira_column_kernels/digest_functions.mojo	1	a SHA-1 test vector (RFC 3174)
 commit_sha	src/komira_crypto/tests/test_aes_gcm_smoke.mojo	1	words of the FIPS 197 test vector
 commit_sha	src/komira_crypto/tests/test_wycheproof_hkdf_sha256.mojo	1	the public upstream commit the vectors are taken from
