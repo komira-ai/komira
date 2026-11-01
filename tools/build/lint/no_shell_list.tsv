@@ -16,7 +16,7 @@ use	tools/build/mojo/toolchain.bzl	sh_argv	3	exception: busybox_sh, the helper z
 use	third_party/git/BUCK	sh_script	3	exception: git's own build is make, which needs a shell (git_build.sh); no shell-free way to build git exists
 use	third_party/git/defs.bzl	sh_argv	1	exception: git's own build is make, which needs a shell (git_build.sh); no shell-free way to build git exists
 use	third_party/git/defs.bzl	sh_script	1	exception: git's own build is make, which needs a shell (git_build.sh); no shell-free way to build git exists
-use	tools/build/package/BUCK	sh_script	4	exception: the shell lint and the data export of the human-run scripts list_conda_targets.sh and release_version.sh
+use	tools/build/package/BUCK	sh_script	2	exception: the shell lint of the human-run scripts list_conda_targets.sh and release_version.sh
 use	tools/build/platforms/table.bzl	sh_argv	1	exception: the macOS row lists `sh` among the applets of its busybox shim (data, see mojo/darwin/busybox.sh)
 use	tools/build/run/BUCK	sh_script	1	exception: macOS has no static busybox, so the darwin toolchain provides the busybox calling convention through a shell shim (mojo/darwin/busybox.sh)
 use	tools/build/tests/BUCK	sh_script	6	exception: the shell lint of human-run shell scripts; a lint of scripts that only people and CI run, not an action that runs a shell
