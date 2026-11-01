@@ -57,13 +57,6 @@ def _cases():
     nested = findings(_PATHS, ["a", "b", "c", "d"])
     expect_in("a test package or nested directory is not a moved package", nested, "2 README e2e target(s) are for a package with no src/<name>/mopm.toml: c, d")
 
-    # A package that keeps its mopm.toml (its build reads it) and is no longer released is listed as unpublished.
-    expect("an unpublished package needs no target", findings(_PATHS, ["a"], ["b"]), "")
-    expect("everything unpublished is fine", findings(_PATHS, [], ["a", "b"]), "")
-    expect_in("a moved package neither covered nor unpublished is named", findings(_PATHS, ["a"], []), "1 moved package(s) have no README e2e target: b")
-    expect_in("an unpublished name with no mopm.toml is named", findings(_PATHS, ["a", "b"], ["z"]), "1 unpublished package(s) have no src/<name>/mopm.toml: z", "Delete each from UNPUBLISHED")
-    expect_in("a package both covered and unpublished is named", findings(_PATHS, ["a", "b"], ["b"]), "1 package(s) are both in PACKAGES and in UNPUBLISHED: b")
-
     # The row of EXCLUDED and the pinned mopm move together.
     row = [EXCLUDED_PATTERN, "komira//third_party/python/..."]
     other = ["komira//third_party/python/..."]

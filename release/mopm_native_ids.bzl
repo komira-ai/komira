@@ -9,6 +9,22 @@
 A package of the list needs its `load` below and its row; `mopm_artifacts` refuses a package without a row.
 """
 
+load("//src/kci_api:buildrules.mojo.lock.bzl", kci_api = "GRAPH")
+load("//src/kci_artifact:buildrules.mojo.lock.bzl", kci_artifact = "GRAPH")
+load("//src/kci_artifact_manifest:buildrules.mojo.lock.bzl", kci_artifact_manifest = "GRAPH")
+load("//src/kci_artifact_proto:buildrules.mojo.lock.bzl", kci_artifact_proto = "GRAPH")
+load("//src/kci_cell:buildrules.mojo.lock.bzl", kci_cell = "GRAPH")
+load("//src/kci_deploy_model_proto:buildrules.mojo.lock.bzl", kci_deploy_model_proto = "GRAPH")
+load("//src/kci_logs:buildrules.mojo.lock.bzl", kci_logs = "GRAPH")
+load("//src/kci_manifest_proto:buildrules.mojo.lock.bzl", kci_manifest_proto = "GRAPH")
+load("//src/kci_params:buildrules.mojo.lock.bzl", kci_params = "GRAPH")
+load("//src/kci_reconciler:buildrules.mojo.lock.bzl", kci_reconciler = "GRAPH")
+load("//src/kci_release_channel:buildrules.mojo.lock.bzl", kci_release_channel = "GRAPH")
+load("//src/kci_release_machine:buildrules.mojo.lock.bzl", kci_release_machine = "GRAPH")
+load("//src/kci_resource_proto:buildrules.mojo.lock.bzl", kci_resource_proto = "GRAPH")
+load("//src/kci_validator_report:buildrules.mojo.lock.bzl", kci_validator_report = "GRAPH")
+load("//src/kci_validator_rows:buildrules.mojo.lock.bzl", kci_validator_rows = "GRAPH")
+load("//src/kci_workflow_check:buildrules.mojo.lock.bzl", kci_workflow_check = "GRAPH")
 load("//src/komira_anomaly:buildrules.mojo.lock.bzl", komira_anomaly = "GRAPH")
 load("//src/komira_async_api:buildrules.mojo.lock.bzl", komira_async_api = "GRAPH")
 load("//src/komira_atomic_alias:buildrules.mojo.lock.bzl", komira_atomic_alias = "GRAPH")
@@ -84,6 +100,22 @@ def declared_natives(graph):
     return sorted(ids)
 
 _GRAPHS = {
+    "kci_api": kci_api,
+    "kci_artifact": kci_artifact,
+    "kci_artifact_manifest": kci_artifact_manifest,
+    "kci_artifact_proto": kci_artifact_proto,
+    "kci_cell": kci_cell,
+    "kci_deploy_model_proto": kci_deploy_model_proto,
+    "kci_logs": kci_logs,
+    "kci_manifest_proto": kci_manifest_proto,
+    "kci_params": kci_params,
+    "kci_reconciler": kci_reconciler,
+    "kci_release_channel": kci_release_channel,
+    "kci_release_machine": kci_release_machine,
+    "kci_resource_proto": kci_resource_proto,
+    "kci_validator_report": kci_validator_report,
+    "kci_validator_rows": kci_validator_rows,
+    "kci_workflow_check": kci_workflow_check,
     "komira_anomaly": komira_anomaly,
     "komira_async_api": komira_async_api,
     "komira_atomic_alias": komira_atomic_alias,
