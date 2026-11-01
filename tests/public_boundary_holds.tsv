@@ -56,9 +56,6 @@ email	tools/build/tests/functional/public_boundary/data_arrow.txt	1	a planted fi
 email	tools/build/tests/functional/public_boundary/held_mojo.txt	3	a planted finding of test 44 (the public boundary lint)
 home_path	tools/build/tests/functional/public_boundary/data_arrow.txt	1	a planted finding of test 44 (the public boundary lint)
 home_path	tools/build/tests/functional/public_boundary/held_mojo.txt	4	a planted finding of test 44 (the public boundary lint)
-host	src/kci_logs/src/kci_logs/run_log_path.mojo	1	a placeholder host in a docstring; an example name when the file is next edited
-host	src/kci_logs/tests/test_cloud_log_source.mojo	1	single-label or made-up hosts as test input
-host	src/kci_validator_report/tests/test_validator_report.mojo	7	made-up Cloud Run service URLs and single-label hosts (test data)
 host	src/komira_aws_core/tests/test_aws_codec.mojo	1	single-label or made-up hosts as test input
 host	src/komira_aws_core/tests/test_aws_query.mojo	2	single-label or made-up hosts as test input
 host	src/komira_aws_core/tests/test_aws_response.mojo	1	single-label or made-up hosts as test input

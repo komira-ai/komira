@@ -135,7 +135,6 @@ COVERAGE_NO_GATE = {
 # 3 in enforce mode); making mutation results report-only there is future
 # work, not done.
 COVERAGE_BRANCH_GATE = {
-    "komira//src/kci_validator_rows:kci_validator_rows": "its test's branches all classify (40 arms of 2 files)",
     "komira//src/komira_agg:komira_agg": "its ten tests' branches all classify (228 arms of 7 files)",
     "komira//src/komira_async_api:komira_async_api": "its test's branches all classify (2 arms of 1 file)",
     "komira//src/komira_buffer:komira_buffer": "its eighteen tests' branches all classify (314 arms of 8 files)",

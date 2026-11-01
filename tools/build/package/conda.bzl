@@ -592,46 +592,6 @@ def _conda_package_with_stamp(commit, stamp, timestamp_ms, **kwargs):
         **kwargs
     )
 
-# ---- the gate between the packer and kci ------------------------------------
-
-# The check itself is `pkg_act conda-manifest-kci` (tools/build/package/act/
-# misc.zig): the directory is what an uploader copies (the package, its
-# manifest and its metadata, nothing else), the probe parses the manifest and
-# renders it back, and its one line must end with the `metadata.json` next to it.
-
-def _conda_manifest_kci_impl(ctx):
-    pkg = ctx.attrs.package[DefaultInfo].default_outputs[0]
-    out = ctx.actions.declare_output(ctx.label.name + ".parsed")
-    ctx.actions.run(
-        cmd_args(ctx.attrs._pkg_act[RunInfo], "conda-manifest-kci", out.as_output(), pkg, ctx.attrs._probe[RunInfo]),
-        env = salted(),
-        category = "conda_manifest_kci",
-    )
-    return [DefaultInfo(default_output = out)]
-
-_conda_manifest_kci = rule(
-    impl = _conda_manifest_kci_impl,
-    attrs = {
-        "package": attrs.dep(),
-        "_pkg_act": attrs.exec_dep(default = "komira//tools/build/package:pkg_act", providers = [RunInfo]),
-        "_probe": attrs.exec_dep(default = "komira//tools/build/package/manifest_probe:parse_manifest", providers = [RunInfo]),
-    },
-)
-
-def conda_manifest_kci(**kwargs):
-    """Builds `package` (a conda_package) and reads its manifest with kci's parser.
-
-    Fails the build unless the package's directory holds exactly the `.conda`,
-    `manifest.json` and `metadata.json`, kci's `parse_artifact_manifest`
-    (`//tools/build/package/manifest_probe:parse_manifest`) accepts the
-    manifest, kci's writer renders it back to the same bytes, and its
-    `metadata_path` is the `metadata.json` next to it. The output is the
-    probe's line. It reads the default directory, not `[release]`: `[release]`
-    exists only in a stamped build, and is a copy of the same `komira_pack`
-    output.
-    """
-    _conda_manifest_kci(exec_compatible_with = LINUX_X86_64, **kwargs)
-
 # ---- the package ships the library's README ---------------------------------
 
 def _conda_doc_check_impl(ctx):
@@ -739,6 +699,5 @@ def conda_package_expect(**kwargs):
 
 conda_package = declares_docs(conda_package)
 conda_package_test_stamped = declares_docs(conda_package_test_stamped)
-conda_manifest_kci = declares_docs(conda_manifest_kci)
 conda_doc_check = declares_docs(conda_doc_check)
 conda_package_expect = declares_docs(conda_package_expect)
