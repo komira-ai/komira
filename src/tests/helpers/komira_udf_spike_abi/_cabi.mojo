@@ -150,14 +150,9 @@ struct CUdfCapabilities:
     var runtime_abi: Void
     var max_descriptor_version: UInt32
     var shapes: UInt32
-    var threading: UInt32
-    var thread_affine: UInt32
-    var transports: UInt32
-    var hosting: UInt32
     var devices: UInt32
     var features: UInt32
     var udf_class: UInt32
-    var global_lock: UInt32
 
 
 struct CUdfSpec:
@@ -253,6 +248,10 @@ struct Word(ImplicitlyCopyable, Movable):
     def is_null(self) -> Bool:
         return is_null(self.p)
 
+    def addr(self) -> Int:
+        """The pointer's address, for comparing handles; never read through."""
+        return Int(self.p)
+
 
 def null_void() -> Void:
     """The NULL `void *`.
@@ -276,6 +275,11 @@ def as_release(w: Void) -> ReleaseFn:
 def as_get_next(w: Void) -> GetNextFn:
     var x = w
     return UnsafePointer(to=x).bitcast[GetNextFn]()[]
+
+
+def as_last_error(w: Void) -> LastErrorFn:
+    var x = w
+    return UnsafePointer(to=x).bitcast[LastErrorFn]()[]
 
 
 def release_word(f: ReleaseFn) -> Void:

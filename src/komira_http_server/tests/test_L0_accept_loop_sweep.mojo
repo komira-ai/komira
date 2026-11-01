@@ -133,7 +133,7 @@ def _wait_readable(fd: Int32) raises:
 def _entry(fd: Int32) -> ConnEntry:
     return ConnEntry(
         stream=TcpStream(fd),
-        reg=RegistrationHandle(_fd=fd, _interest_set=INTEREST_READ),
+        reg=RegistrationHandle(_fd=fd),
     )
 
 

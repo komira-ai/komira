@@ -50,6 +50,8 @@
 # komira_aws_core first.
 # =============================================================================
 
+from std.memory import ArcPointer
+
 from komira_aws_core import (
     AwsClock,
     AwsConnectorTransport,
@@ -262,6 +264,12 @@ struct S3Store[C: Connector, T: AwsCredsSource, K: AwsClock & Movable & Deinitab
 
     def config(self) -> S3Config:
         return self._config.copy()
+
+    def set_test_clock(mut self, clock_cell: ArcPointer[Int]):
+        """Drive the request deadline of this store's HTTP client from
+        `clock_cell` (microseconds) instead of the system clock. Production
+        code never calls this."""
+        self._transport.set_test_clock(clock_cell)
 
     def _fail(self, op: String, bucket: String, key: String, res: HttpResult) -> Error:
         var status = res.status

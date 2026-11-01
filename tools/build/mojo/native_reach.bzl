@@ -6,7 +6,10 @@ code a library reaches must be in that library's Mojo deps closure, or the
 installed package lacks it. The owner of an archive is the mojo_library that
 ships it: the library of its own package (`//src/<name>:<name>`) for a
 `cxx_library` under src/, and the `THIRD_PARTY_OWNERS` row of its package
-(tools/build/one_definition/libraries.bzl) for a vendored one.
+(tools/build/one_definition/libraries.bzl) for a vendored one. A library
+built with buildrules' `mojo_package` is in a closure by its adopted label
+(`//src/<name>:<name>`, adopt.bzl), though the file its dependents import is
+the package's `:lib`.
 
 Two validations, each failing the build of the library and of every target
 holding it:
@@ -30,6 +33,7 @@ load("@prelude//linking:link_info.bzl", "LinkStrategy", "MergedLinkInfo")
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
 load("@komira//tools/build/one_definition:libraries.bzl", "THIRD_PARTY_OWNERS")
 load(":providers.bzl", "MojoInfo", "mojo_pkg_children")
+load("@komira//tools/build/bench_salt:bench_salt.bzl", "salted")
 
 NATIVE_REACH_ATTRS = {
     # The Zig scanner (native_reach/), set by the macro on linux-x86_64.
@@ -106,6 +110,12 @@ def native_reach(ctx, src_dir, deps):
                 o = pkg.owner.raw_target()
                 closure[_label(o.cell, o.package, o.name)] = True
 
+                # A library built with buildrules (adopt.bzl) makes its file as `:lib` of its package, and the label its
+                # dependents name, `//src/<name>:<name>`, is the adopted one: the owner rows name that label.
+                parts = o.package.split("/")
+                if o.name == "lib" and len(parts) == 2 and parts[0] == "src":
+                    closure[_label(o.cell, o.package, parts[1])] = True
+
     findings = []
     checked = {}
     for d in ctx.attrs.deps:
@@ -145,6 +155,7 @@ def native_reach(ctx, src_dir, deps):
                 src_dir,
                 [["--refuse", r] for r in refuse],
             ),
+            env = salted(),
             category = "native_reach",
         )
     else:

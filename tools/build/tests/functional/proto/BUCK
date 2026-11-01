@@ -39,7 +39,7 @@ mojo_proto_library(
     srcs = ["team/team.proto"],
     bundle_proto_deps = True,
     import_prefix = "example",
-    proto_deps = [":person_proto"],
+    proto_deps = [":person_proto_gen"],
     deps = [":komira_proto_codec"],
 )
 
@@ -96,7 +96,7 @@ mojo_proto_library(
     bundle_proto_deps = True,
     import_prefix = "example",
     proto_deps = [
-        ":person_proto",
+        ":person_proto_gen",
         "komira//tools/build/proto-codegen:db_options",
     ],
     deps = [":komira_proto_codec"],

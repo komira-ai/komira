@@ -1,0 +1,89 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The COUNT(DISTINCT) kernels of grouped aggregation: the STRING-key encode
+# of the grouped COUNT(DISTINCT) driver (a parallel FNV-1a hash pass and the
+# three bodies that number dict ids in first-seen row order), the
+# dictionary-code encode, the per-worker distinct-pair set, the heavy-group
+# split, the group-table sizing rule, the string key emit, the radix-parallel
+# exact COUNT(DISTINCT) of Int64 buffers and of a STRING column, the
+# per-worker state of the streaming COUNT(DISTINCT) aggregation, its global
+# group directory and its MorselSink, the stage DISTINCT breaker state and
+# its run-time-typed sibling (`DistinctState_Untyped`), the
+# parallel per-group finalize of the stage MEDIAN drain, and the grouped
+# COUNT(DISTINCT) driver over one batch (hash-partitioned across the
+# dispatcher's workers, with the bounded top-k drain, and the fused route
+# for one STRING key with only COUNT(DISTINCT)s).
+mojo_library(
+    name = "komira_op_agg_distinct",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/komira_agg:komira_agg",
+        "//src/komira_agg_api:komira_agg_api",
+        "//src/komira_arrow:komira_arrow",
+        "//src/komira_async:komira_async",
+        "//src/komira_async_api:komira_async_api",
+        "//src/komira_atomic_alias:komira_atomic_alias",
+        "//src/komira_batch_eval:komira_batch_eval",
+        "//src/komira_buffer:komira_buffer",
+        "//src/komira_collections:komira_collections",
+        "//src/komira_column_format:komira_column_format",
+        "//src/komira_column_kernels:komira_column_kernels",
+        "//src/komira_counters:komira_counters",
+        "//src/komira_dynamic_filter:komira_dynamic_filter",
+        "//src/komira_engine_runtime:komira_engine_runtime",
+        "//src/komira_expr:komira_expr",
+        "//src/komira_libc:komira_libc",
+        "//src/komira_op_agg_state:komira_op_agg_state",
+        "//src/komira_op_join_build:komira_op_join_build",
+        "//src/komira_op_sort:komira_op_sort",
+        "//src/komira_operator_api:komira_operator_api",
+        "//src/komira_physical_plan:komira_physical_plan",
+        "//src/komira_plan_expr:komira_plan_expr",
+        "//src/komira_simd:komira_simd",
+        "//src/komira_udf:komira_udf",
+    ],
+    test_srcs = [
+        "tests/test_agg_cd_group_topk_bounded_drain.mojo",
+        "tests/test_agg_cd_group_topk_null_order.mojo",
+        "tests/test_cd_adjdedup_tail_skip.mojo",
+        "tests/test_cd_allcd_no_passenger_lane.mojo",
+        "tests/test_cd_dense_gid_direct_index.mojo",
+        "tests/test_cd_dictkey_first_seen_numbering.mojo",
+        "tests/test_cd_distinct_set.mojo",
+        "tests/test_cd_global_dir.mojo",
+        "tests/test_cd_group_ht_sizing_rule.mojo",
+        "tests/test_cd_heavy_split_admission.mojo",
+        "tests/test_cd_key_emit.mojo",
+        "tests/test_cd_lastkey_memo.mojo",
+        "tests/test_cd_parallel_agrees_with_sink.mojo",
+        "tests/test_cd_parallel_driver.mojo",
+        "tests/test_cd_parallel_driver_edges.mojo",
+        "tests/test_cd_parallel_heavy_split.mojo",
+        "tests/test_cd_parallel_ht_sizing.mojo",
+        "tests/test_cd_parallel_merge_index_attribution.mojo",
+        "tests/test_cd_parallel_partition.mojo",
+        "tests/test_cd_parb_parallel_merge_and_source_keys.mojo",
+        "tests/test_cd_passenger_fold_every_channel.mojo",
+        "tests/test_cd_phaseb_parallel_equals_serial.mojo",
+        "tests/test_cd_radix_grouped_byte_equiv.mojo",
+        "tests/test_cd_radix_parallel_byte_equiv.mojo",
+        "tests/test_cd_stream_null_skip.mojo",
+        "tests/test_cd_strenc_rowdict.mojo",
+        "tests/test_cd_strenc_span_reverse_map.mojo",
+        "tests/test_cd_string_parallel_byte_equiv.mojo",
+        "tests/test_cd_strkey_fused_route.mojo",
+        "tests/test_cd_strkey_fused_served_and_values.mojo",
+        "tests/test_count_distinct_agg_sink.mojo",
+        "tests/test_count_distinct_agg_sink_filters.mojo",
+        "tests/test_count_distinct_agg_sink_mixed.mojo",
+        "tests/test_count_distinct_agg_sink_shapes.mojo",
+        "tests/test_count_distinct_agg_sink_types.mojo",
+        "tests/test_distinct_hash_store_grow.mojo",
+        "tests/test_distinct_state.mojo",
+        "tests/test_distinct_state_untyped.mojo",
+        "tests/test_distinct_state_untyped_key_types.mojo",
+        "tests/test_median_parallel_drain.mojo",
+        "tests/test_spill_distinct_state.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)

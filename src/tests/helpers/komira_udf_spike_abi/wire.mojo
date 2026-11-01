@@ -9,7 +9,7 @@
 # overflows 64 bits (UDF_WIRE_PAYLOAD_RANGE).
 
 comptime WIRE_MAGIC: UInt32 = 0x4644554B
-comptime WIRE_VERSION: UInt32 = 1
+comptime WIRE_VERSION: UInt32 = 2
 comptime WIRE_HEADER_BYTES = 40
 
 comptime WIRE_INLINE: UInt32 = 1 << 0

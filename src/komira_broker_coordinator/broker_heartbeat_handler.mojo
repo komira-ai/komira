@@ -91,26 +91,26 @@ comptime DEFAULT_ADVERTISED_PORT: Int32 = Int32(9092)
 # _parse_node_id — node_id String -> the Kafka broker.id Int32.
 # =============================================================================
 def _parse_node_id(s: String) -> Int32:
-    """Parse a numeric node_id String to the Kafka broker.id Int32. A
-    non-numeric / empty id maps to NO_LEADER_NODE_ID (-1)."""
+    """Parse a node_id String to the Kafka broker.id Int32.
+
+    A broker.id is a non-negative Int32, so the accepted form is one or more
+    ASCII digits whose value is at most 2147483647 (leading zeros allowed).
+    Every other node_id maps to NO_LEADER_NODE_ID (-1): an empty id, any
+    non-digit byte, a sign ('-' or '+'), and a value above 2147483647. An id
+    out of range is never narrowed, so it cannot alias another broker's id."""
     var bytes = s.as_bytes()
     if len(bytes) == 0:
         return NO_LEADER_NODE_ID
-    var neg = False
-    var start = 0
-    if bytes[0] == UInt8(0x2D):  # '-'
-        neg = True
-        start = 1
-        if len(bytes) == 1:
-            return NO_LEADER_NODE_ID
+    comptime int32_max = Int(Int32.MAX)
     var acc = Int(0)
-    for i in range(start, len(bytes)):
+    for i in range(len(bytes)):
         var c = bytes[i]
         if c < UInt8(0x30) or c > UInt8(0x39):  # not '0'..'9'
             return NO_LEADER_NODE_ID
+        # acc <= int32_max here, so acc * 10 + 9 cannot overflow Int.
         acc = acc * 10 + Int(c - UInt8(0x30))
-    if neg:
-        acc = -acc
+        if acc > int32_max:
+            return NO_LEADER_NODE_ID
     return Int32(acc)
 
 

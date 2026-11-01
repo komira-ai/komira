@@ -78,6 +78,7 @@ from komira_plan_expr.expr import (
     EXPR_STRUCT_FIELD,
     EXPR_STRUCT_FIELD_IDX,
     EXPR_SUBSTRING,
+    EXPR_UDF_APPLY,
     EXPR_UDF_CALL,
     EXPR_UNARY_OP,
     EXPR_WHEN,
@@ -277,6 +278,15 @@ def collect_udf_calls(
         for i in range(expr.string_fn_n_num_args()):
             collect_udf_calls(
                 expr.string_fn_n_arg_ref(i), out, refuse_correlated_subquery
+            )
+        return
+    if tag == EXPR_UDF_APPLY:
+        # A call of a `UdfRef` is not a registered call: nothing here
+        # materializes it, so it is not a site. Its arguments are ordinary
+        # expressions and may hold registered calls, in order.
+        for i in range(expr.udf_apply_num_args()):
+            collect_udf_calls(
+                expr.udf_apply_arg_ref(i), out, refuse_correlated_subquery
             )
         return
     if tag == EXPR_WHEN:

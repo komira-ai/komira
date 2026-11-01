@@ -88,9 +88,9 @@ const Scan = struct {
     fn add(self: *Scan, rule: []const u8, f: []const u8, line: usize, text: []const u8, in_path: bool) !void {
         const key = try std.fmt.allocPrint(self.alloc, "{s}\t{s}", .{ rule, f });
         const gop = try self.sites.getOrPut(key);
-        if (!gop.found_existing) gop.value_ptr.* = std.ArrayList([]const u8).init(self.alloc);
+        if (!gop.found_existing) gop.value_ptr.* = std.ArrayList([]const u8).empty;
         const msg = try self.message(rule);
-        try gop.value_ptr.append(try std.fmt.allocPrint(self.alloc, "{s}{s}:{d}: {s}: {s}{s} -- {s}", .{
+        try gop.value_ptr.append(self.alloc, try std.fmt.allocPrint(self.alloc, "{s}{s}:{d}: {s}: {s}{s} -- {s}", .{
             self.cfg.prefix, f, line, rule, text, if (in_path) " (in the path)" else "", msg,
         }));
     }
@@ -123,15 +123,15 @@ const Scan = struct {
     fn scanFile(self: *Scan, f: []const u8, text: []const u8) !void {
         var prose = rules.Prose.init(self.alloc, f);
         defer prose.deinit();
-        var lc_buf = std.ArrayList(u8).init(self.alloc);
-        defer lc_buf.deinit();
+        var lc_buf = std.ArrayList(u8).empty;
+        defer lc_buf.deinit(self.alloc);
         var lines = std.mem.splitScalar(u8, text, '\n');
         var n: usize = 0;
         while (lines.next()) |line| {
             // A final newline ends the last line; it starts no other.
             if (lines.index == null and line.len == 0) break;
             n += 1;
-            try lc_buf.resize(line.len);
+            try lc_buf.resize(self.alloc, line.len);
             const lc = std.ascii.lowerString(lc_buf.items, line);
             if (rules.findDate(self.window, lc)) |t| try self.add("date", f, n, t, false);
             if (rules.findHome(line)) |t| try self.add("home_path", f, n, t, false);
@@ -144,7 +144,7 @@ const Scan = struct {
     }
 
     fn problem(self: *Scan, comptime fmt: []const u8, args: anytype) !void {
-        try self.problems.append(try std.fmt.allocPrint(self.alloc, fmt, args));
+        try self.problems.append(self.alloc, try std.fmt.allocPrint(self.alloc, fmt, args));
     }
 };
 
@@ -159,9 +159,9 @@ fn blank(s: []const u8) bool {
 }
 
 fn fields(alloc: std.mem.Allocator, line: []const u8) ![]const []const u8 {
-    var out = std.ArrayList([]const u8).init(alloc);
+    var out = std.ArrayList([]const u8).empty;
     var it = std.mem.splitScalar(u8, line, '\t');
-    while (it.next()) |f| try out.append(f);
+    while (it.next()) |f| try out.append(alloc, f);
     return out.items;
 }
 
@@ -171,11 +171,11 @@ fn lessThan(_: void, a: []const u8, b: []const u8) bool {
 
 /// Splits text into lines: a final newline starts no line.
 fn lineList(alloc: std.mem.Allocator, text: []const u8) ![]const []const u8 {
-    var out = std.ArrayList([]const u8).init(alloc);
+    var out = std.ArrayList([]const u8).empty;
     var it = std.mem.splitScalar(u8, text, '\n');
     while (it.next()) |l| {
         if (it.index == null and l.len == 0) break;
-        try out.append(l);
+        try out.append(alloc, l);
     }
     return out.items;
 }
@@ -188,9 +188,9 @@ pub fn run(alloc: std.mem.Allocator, cfg: Config, ledgers: Ledgers, paths: []con
     for (paths) |p| {
         if (!binary(p)) checked += 1;
     }
-    var out = std.ArrayList([]const u8).init(alloc);
+    var out = std.ArrayList([]const u8).empty;
     const window = rules.Window.parse(cfg.from, cfg.public) orelse {
-        try out.append(try std.fmt.allocPrint(alloc, "public_boundary: the window is from year `{s}` to `{s}`; name a year and a later first day of a month (YYYY-MM-01)", .{ cfg.from, cfg.public }));
+        try out.append(alloc, try std.fmt.allocPrint(alloc, "public_boundary: the window is from year `{s}` to `{s}`; name a year and a later first day of a month (YYYY-MM-01)", .{ cfg.from, cfg.public }));
         return .{ .lines = out.items, .checked = checked };
     };
 
@@ -201,12 +201,12 @@ pub fn run(alloc: std.mem.Allocator, cfg: Config, ledgers: Ledgers, paths: []con
         .hosts = undefined,
         .deny = &.{},
         .sites = std.StringArrayHashMap(std.ArrayList([]const u8)).init(alloc),
-        .problems = std.ArrayList([]const u8).init(alloc),
+        .problems = std.ArrayList([]const u8).empty,
     };
 
     // The hosts ledger.
-    var domains = std.ArrayList([]const u8).init(alloc);
-    var domain_rows = std.ArrayList(usize).init(alloc);
+    var domains = std.ArrayList([]const u8).empty;
+    var domain_rows = std.ArrayList(usize).empty;
     for (try lineList(alloc, ledgers.hosts), 1..) |line, row| {
         if (comment(line)) continue;
         const f = try fields(alloc, line);
@@ -229,19 +229,19 @@ pub fn run(alloc: std.mem.Allocator, cfg: Config, ledgers: Ledgers, paths: []con
             try scan.problem("{s}:{d}: a second row for {s}", .{ cfg.hosts_name, row, d });
             continue;
         }
-        try domains.append(d);
-        try domain_rows.append(row);
+        try domains.append(alloc, d);
+        try domain_rows.append(alloc, row);
     }
     const used = try alloc.alloc(bool, domains.items.len);
     @memset(used, false);
     scan.hosts = .{ .domains = domains.items, .used = used };
 
     // The deny list.
-    var deny = std.ArrayList([]const u8).init(alloc);
+    var deny = std.ArrayList([]const u8).empty;
     for (try lineList(alloc, ledgers.deny)) |line| {
         if (comment(line)) continue;
         const w = std.mem.trim(u8, try std.ascii.allocLowerString(alloc, line), " \t");
-        if (w.len > 0) try deny.append(w);
+        if (w.len > 0) try deny.append(alloc, w);
     }
     scan.deny = deny.items;
 
@@ -303,8 +303,8 @@ pub fn run(alloc: std.mem.Allocator, cfg: Config, ledgers: Ledgers, paths: []con
         if (n <= h) continue;
         for (e.value_ptr.items) |site| {
             if (h == 0) {
-                try out.append(site);
-            } else try out.append(try std.fmt.allocPrint(alloc, "{s} ({d} findings, held {d})", .{ site, n, h }));
+                try out.append(alloc, site);
+            } else try out.append(alloc, try std.fmt.allocPrint(alloc, "{s} ({d} findings, held {d})", .{ site, n, h }));
         }
     }
     var hit = held.iterator();
@@ -315,15 +315,15 @@ pub fn run(alloc: std.mem.Allocator, cfg: Config, ledgers: Ledgers, paths: []con
         const rule = e.key_ptr.*[0..tab];
         const f = e.key_ptr.*[tab + 1 ..];
         if (c > 0) {
-            try out.append(try std.fmt.allocPrint(alloc, "{s}:{d}: {s} in {s} is held at {d} and has {d}: lower the count to {d}", .{ cfg.holds_name, e.value_ptr.row, rule, f, e.value_ptr.count, c, c }));
-        } else try out.append(try std.fmt.allocPrint(alloc, "{s}:{d}: {s} in {s} is held at {d} and has 0: delete the row", .{ cfg.holds_name, e.value_ptr.row, rule, f, e.value_ptr.count }));
+            try out.append(alloc, try std.fmt.allocPrint(alloc, "{s}:{d}: {s} in {s} is held at {d} and has {d}: lower the count to {d}", .{ cfg.holds_name, e.value_ptr.row, rule, f, e.value_ptr.count, c, c }));
+        } else try out.append(alloc, try std.fmt.allocPrint(alloc, "{s}:{d}: {s} in {s} is held at {d} and has 0: delete the row", .{ cfg.holds_name, e.value_ptr.row, rule, f, e.value_ptr.count }));
     }
     for (domains.items, used, domain_rows.items) |d, u, row| {
-        if (!u) try out.append(try std.fmt.allocPrint(alloc, "{s}:{d}: no URL host of the tree is {s} or under it; delete the row", .{ cfg.hosts_name, row, d }));
+        if (!u) try out.append(alloc, try std.fmt.allocPrint(alloc, "{s}:{d}: no URL host of the tree is {s} or under it; delete the row", .{ cfg.hosts_name, row, d }));
     }
-    try out.appendSlice(scan.problems.items);
+    try out.appendSlice(alloc, scan.problems.items);
     std.mem.sort([]const u8, out.items, {}, lessThan);
-    if (checked == 0) try out.append("public_boundary: checked nothing (no inputs, or no lines to check)");
+    if (checked == 0) try out.append(alloc, "public_boundary: checked nothing (no inputs, or no lines to check)");
     return .{ .lines = out.items, .checked = checked };
 }
 
@@ -338,27 +338,27 @@ fn positive(s: []const u8) ?usize {
 /// first 200 lines) as the message when there are finding lines, "success"
 /// with the number of files read otherwise.
 pub fn result(alloc: std.mem.Allocator, report: Report) ![]const u8 {
-    var msg = std.ArrayList(u8).init(alloc);
-    const w = msg.writer();
+    var msg = std.ArrayList(u8).empty;
+    const w = msg.writer(alloc);
     if (report.lines.len > 0) {
         try w.print("public_boundary: {d} finding line(s)\n", .{report.lines.len});
         for (report.lines[0..@min(report.lines.len, 200)]) |l| try w.print("{s}\n", .{l});
     } else try w.print("public_boundary: {d} checked", .{report.checked});
-    var json = std.ArrayList(u8).init(alloc);
-    const jw = json.writer();
+    var json = std.Io.Writer.Allocating.init(alloc);
+    const jw = &json.writer;
     try jw.print("{{\"version\": 1, \"data\": {{\"status\": \"{s}\", \"message\": ", .{if (report.lines.len > 0) "failure" else "success"});
-    try std.json.encodeJsonString(msg.items, .{}, jw);
+    try std.json.Stringify.encodeJsonString(msg.items, .{}, jw);
     try jw.writeAll("}}\n");
-    return json.items;
+    return json.written();
 }
 
 /// Every file of dir (regular files and symlinks), by its path in it, sorted.
 pub fn list(alloc: std.mem.Allocator, dir: std.fs.Dir) ![]const []const u8 {
-    var out = std.ArrayList([]const u8).init(alloc);
+    var out = std.ArrayList([]const u8).empty;
     var walker = try dir.walk(alloc);
     defer walker.deinit();
     while (try walker.next()) |e| {
-        if (e.kind == .file or e.kind == .sym_link) try out.append(try alloc.dupe(u8, e.path));
+        if (e.kind == .file or e.kind == .sym_link) try out.append(alloc, try alloc.dupe(u8, e.path));
     }
     std.mem.sort([]const u8, out.items, {}, lessThan);
     return out.items;

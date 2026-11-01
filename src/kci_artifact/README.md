@@ -125,3 +125,21 @@ assert_equal(
     " the artifact's name (compared exactly)",
 )
 ```
+
+## Build files
+
+This package is built with buildrules' `mojo_package` and packaged for mopm as `kci_artifact`, version 0.1.0 (`mopm.toml`). The library is `src/kci_artifact/`, its tests are `tests/`. It depends on kci_api, kci_artifact_proto and komira_textproto, sibling directories (`[dependencies]` of `mopm.toml`), so the `.conda` of this package records `mojo-kci_api >=0.1,<0.2`, `mojo-kci_artifact_proto >=0.1,<0.2` and `mojo-komira_textproto >=0.1,<0.2` as dependencies and holds none of those packages' files: installing `kci_artifact` installs them with it. The files that are not sources:
+
+| file | what |
+|---|---|
+| `mopm.toml` | the mopm manifest: name, version, the Mojo version, the dependencies and where the library and its tests are |
+| `mopm.lock` | the toolchain pins and the path dependencies (no registry is reached: every dependency is a sibling) |
+| `mopm-toolchain.toml` | the exact mopm and Mojo versions the build uses |
+| `coverage_floor.txt` | `lines NN.NN` and `branches NN.NN`: the least line and branch coverage `:coverage` may measure; `:coverage_floor` fails when either falls below, and above it passes and prints a hint to raise the figure |
+| `buildrules.mojo.lock.bzl`, `buildrules.mojo.bzl` | written by `buildrules mojo sync` from the files above and from the manifests of the dependencies; `buildrules mojo check` fails when they are stale |
+
+`:lib` is the library file and exists only once every test of `tests/` has passed. After any change to a source, a test, or a manifest of this package or of a dependency, run `buildrules mojo sync`, commit what it writes, and build `komira//src/kci_artifact:lib` on the farm. A test file that the sync has not listed is not run: run the sync after adding one.
+
+`:conda` is buildrules' `mojo_conda` over `:lib`: the `.conda` of the mopm package (`mojo-kci_artifact-0.1.0-mojo1.0.0_0.conda`), which therefore exists only once the tests have passed. Publishing it (`mopm publish`) uploads, so it is a step of a CI job that takes that file, not a build action.
+
+`:kci_artifact` is `:lib` as komira's Mojo rules take it (`mojo_adopted_library`). Its `deps` are the adopted target of each package in `[dependencies]`, and the rule refuses a list that is not the closure `:lib` was built from. It also compiles and runs the README's examples above (`[tests][readme]`) against `:lib`; the tests are not run again.

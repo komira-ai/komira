@@ -56,7 +56,9 @@ A pin bump changes the pin and `_VERSION` (or `_LFS_VERSION`) in
 
 ## How it is built
 
-[`git_build.sh`](git_build.sh) runs as two actions ([`defs.bzl`](defs.bzl)).
+[`git_build.sh`](git_build.sh) runs as two actions ([`defs.bzl`](defs.bzl)); it
+is the one shell script left in the build, because it drives git's own `make`,
+curl's `configure` and zlib's build, which run `sh` themselves.
 Both put a directory of busybox applets and four wrappers, `cc`
 (`zig cc -target <zig_triple>`), `ar`, `ranlib` and `ld` (`zig ld.lld`, which
 make's `configure` looks for), on an otherwise empty `PATH`.
@@ -99,8 +101,8 @@ make's `configure` looks for), on an otherwise empty `PATH`.
 
 ## Checks
 
-[`git_check.sh`](git_check.sh) runs as the validation `:git_check`, which
-`:git` depends on. Every git command runs with `PATH` set to a directory of
+[`git_check.zig`](git_check.zig) (a Zig program, no shell) runs as the
+validation `:git_check`, which `:git` depends on. Every git command runs with `PATH` set to a directory of
 decoys ahead of the busybox applets: programs named `git`,
 `git-upload-pack`, `git-receive-pack`, `git-remote-http` and `git-lfs` that
 record that they ran and exit 97. git puts its own exec path ahead of `PATH`,

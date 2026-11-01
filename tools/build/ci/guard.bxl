@@ -1,0 +1,48 @@
+# The completeness guard of `//ci:pr`: fails when a check target exists
+# outside it.
+#
+#   ./buck2 bxl komira//tools/build/ci/guard.bxl:check
+#
+# Every check of the scope (UNIVERSE of rules.bzl; a check is any target
+# but a source, SOURCE_KINDS) must be in the closure of the aggregate.
+# Building that closure is the whole check set, so a check outside it is
+# one the pull request check would never build. The failure lists the
+# targets and the command that regenerates ci/targets.bzl and its shards.
+# Configuring the aggregate also fails on a label in them that no longer exists.
+# With the default scope and aggregate it also holds the lists to the graph:
+# every row of TARGETS must be a root of the check set (the roots targets.bxl
+# writes) and every root a row, so a shard that is stale either way fails, and
+# no generated file may reach the line limit (ci_graph.bzl LINE_LIMIT).
+#
+# Options: --scope <patterns>, --aggregate <label>.
+
+load("@komira//ci:targets.bzl", "TARGETS", "TESTS")
+load(":ci_graph.bzl", "check_nodes", "closure", "findings", "roots", "shard_findings")
+load(":rules.bzl", "AGGREGATE", "EXCLUDED", "UNIVERSE")
+
+def _check(ctx):
+    scope = ctx.cli_args.scope or UNIVERSE
+    aggregate = ctx.cli_args.aggregate or AGGREGATE
+    left_out = [p for p, _ in EXCLUDED] if not ctx.cli_args.scope else []
+    nodes = check_nodes(ctx, scope, aggregate.split(":")[0] + ":", left_out)
+    text = findings(sorted(nodes.keys()), closure(ctx, aggregate), aggregate)
+    if text:
+        fail(text)
+    if not ctx.cli_args.scope and not ctx.cli_args.aggregate:
+        stale = shard_findings(roots(nodes), TARGETS, TESTS)
+        if stale:
+            fail(stale)
+    ctx.output.print("guard: all {} check target(s) of {} are in {}; left out on purpose: {}".format(
+        len(nodes),
+        " + ".join(scope),
+        aggregate,
+        "; ".join(["{} ({})".format(p, why) for p, why in EXCLUDED] if left_out else []) or "none",
+    ))
+
+check = bxl_main(
+    impl = _check,
+    cli_args = {
+        "aggregate": cli_args.string(default = ""),
+        "scope": cli_args.list(cli_args.string(), default = []),
+    },
+)

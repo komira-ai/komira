@@ -5,7 +5,8 @@
 #   (sync and async), a failing head listing, every create-CAS failure shape of
 #   the async commit (raised 412, raised transport error, transport ERR from
 #   start and from poll, a 412 deferred to take, 412s past the attempt bound),
-#   and the group-commit appender's deferred 412.
+#   the group-commit appender's deferred 412, and a failed chunk read in
+#   register_index's catch-up fold.
 # =============================================================================
 #
 # THE DOUBLE: `_FaultStore` delegates every verb to a SharedInMemorySlowCasStore
@@ -32,6 +33,9 @@
 #     deferred to take re-runs and commits; 412s past the bound error the op
 #     as retryable-exhausted after exactly 256 create-CAS starts.
 #   * the appender maps a 412 deferred to take to a lost slot.
+#   * register_index's catch-up fold retries a transient chunk read and
+#     raises a fatal one without registering the lineage, so a later
+#     register_index re-runs the fold (komira-ai/komira#1377).
 # =============================================================================
 
 from std.testing import assert_equal, assert_false, assert_true
@@ -510,6 +514,53 @@ def test_appender_take_412_is_lost_slot() raises:
     assert_equal(Int(out.kind), Int(APPEND_LOST_SLOT), "a lost slot")
 
 
+def _ik(lineage: Int, tail: String) -> List[UInt8]:
+    """A key whose 4-byte big-endian prefix is `lineage` (the ordinal
+    `TableStore._key_lineage_ord` routes on) followed by `tail`."""
+    var out = List[UInt8]()
+    for i in range(4):
+        out.append(UInt8((lineage >> (8 * (3 - i))) & 0xFF))
+    var sb = tail.as_bytes()
+    for i in range(len(sb)):
+        out.append(sb[i])
+    return out^
+
+
+def _index_rows(mut ts: TableStore[_FaultStore], lineage: Int) raises -> Int:
+    var t = ts.begin()
+    return len(
+        ts.index_scan_visible(
+            t, Int32(lineage), _ik(lineage, ""), _ik(lineage + 1, "")
+        )
+    )
+
+
+def test_register_index_catch_up_read_failure() raises:
+    print("[faults] register_index catch-up: transient read retried, fatal raised")
+    var backing = SharedInMemoryConditionalStore()
+    var ts = _open(backing)
+    var t = ts.begin()
+    t.insert(_ik(9, "a"), _b("ia"))
+    _ = ts.commit(t^)
+    # The catch-up fold's read of slot 0 is the next chunk get.
+    _arm(backing, "get", 0, 1, _MSG_TRUNCATED)
+    ts.register_index(Int32(9))
+    assert_false(_armed(backing, "get"), "the catch-up read hit the fault")
+    assert_equal(
+        _index_rows(ts, 9), 1, "a transient catch-up read is retried, not a stop"
+    )
+    _arm(backing, "get", 0, 1, _MSG_FATAL)
+    var err = String("")
+    try:
+        ts.register_index(Int32(5))
+    except e:
+        err = String(e)
+    assert_true(err.find("injected boom: fatal read") >= 0, "fatal catch-up: " + err)
+    assert_equal(len(ts._idx_lineage_ords), 1, "a failed catch-up registers nothing")
+    ts.register_index(Int32(5))
+    assert_equal(len(ts._idx_lineage_ords), 2, "a retried register completes")
+
+
 def main() raises:
     test_replay_retries_transient_and_fails_fatal()
     test_sync_occ_scan_read_failure_is_redriven()
@@ -522,4 +573,5 @@ def main() raises:
     test_async_412_deferred_to_take_reruns()
     test_async_poll_transport_err_errors()
     test_appender_take_412_is_lost_slot()
+    test_register_index_catch_up_read_failure()
     print("ALL table store fault-path tests PASSED")

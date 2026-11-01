@@ -60,11 +60,11 @@ const Dir = struct {
         try d.tmp.dir.makePath("wd/out");
         d.wd = try d.tmp.dir.openDir("wd", .{});
         d.cwd = try d.wd.realpathAlloc(al, ".");
-        try d.wd.writeFile("in/test_one.bc", try fx.bitcode(al, "body"));
-        try d.wd.writeFile("in/test_one.profdata", "indexed");
-        try d.wd.writeFile("in/test_one", try fx.binary(al, &fx.FNS));
-        try d.tmp.dir.writeFile("tc/llvm/bin/llvm-profdata.stdout", try fx.show(al, &fx.FNS));
-        try d.tmp.dir.writeFile("tc/lld/bin/lld.stderr", try std.mem.concat(al, u8, &.{ try fx.missing(al, "unrun"), try fx.dump(al, &fx.FNS) }));
+        try d.wd.writeFile(.{ .sub_path = "in/test_one.bc", .data = try fx.bitcode(al, "body") });
+        try d.wd.writeFile(.{ .sub_path = "in/test_one.profdata", .data = "indexed" });
+        try d.wd.writeFile(.{ .sub_path = "in/test_one", .data = try fx.binary(al, &fx.FNS) });
+        try d.tmp.dir.writeFile(.{ .sub_path = "tc/llvm/bin/llvm-profdata.stdout", .data = try fx.show(al, &fx.FNS) });
+        try d.tmp.dir.writeFile(.{ .sub_path = "tc/lld/bin/lld.stderr", .data = try std.mem.concat(al, u8, &.{ try fx.missing(al, "unrun"), try fx.dump(al, &fx.FNS) }) });
         // The child's environment is built here: it does not inherit
         // COV_BRANCH or anything else of the test's.
         d.env = std.process.EnvMap.init(std.heap.page_allocator);
@@ -99,10 +99,10 @@ const Dir = struct {
 
     /// The shipped executable with `argv` in the working directory.
     fn run(self: *Dir, argv: []const []const u8) !Run {
-        var full = std.ArrayList([]const u8).init(self.a());
-        try full.append(try tool(self.a(), "COV_BRANCH"));
-        try full.appendSlice(argv);
-        const r = try std.ChildProcess.run(.{
+        var full = std.ArrayList([]const u8).empty;
+        try full.append(self.a(), try tool(self.a(), "COV_BRANCH"));
+        try full.appendSlice(self.a(), argv);
+        const r = try std.process.Child.run(.{
             .allocator = self.a(),
             .argv = full.items,
             .cwd_dir = self.wd,
@@ -123,10 +123,10 @@ const Dir = struct {
     /// entry per line.
     fn recorded(self: *Dir, rel: []const u8) ![]const []const u8 {
         const t = try self.tmp.dir.readFileAlloc(self.a(), rel, 1 << 20);
-        var v = std.ArrayList([]const u8).init(self.a());
+        var v = std.ArrayList([]const u8).empty;
         var it = std.mem.splitScalar(u8, t, '\n');
-        while (it.next()) |l| try v.append(l);
-        return v.toOwnedSlice();
+        while (it.next()) |l| try v.append(self.a(), l);
+        return v.toOwnedSlice(self.a());
     }
 
     fn exists(self: *Dir, rel: []const u8) bool {
@@ -222,7 +222,7 @@ test "a missing input: exit 2, nothing run" {
 test "a refusal: exit 1 with its message, no dump written, the scratch kept" {
     var d = try Dir.init();
     defer d.deinit();
-    try d.tmp.dir.writeFile("tc/lld/bin/lld.stderr", try std.mem.concat(d.a(), u8, &.{ "lld: warning: ld-temp.o: function control flow change detected (hash mismatch) main Hash = 1\n", try fx.dump(d.a(), &fx.FNS) }));
+    try d.tmp.dir.writeFile(.{ .sub_path = "tc/lld/bin/lld.stderr", .data = try std.mem.concat(d.a(), u8, &.{ "lld: warning: ld-temp.o: function control flow change detected (hash mismatch) main Hash = 1\n", try fx.dump(d.a(), &fx.FNS) }) });
     try expect("mismatch", try d.run(d.args()), 1, "BRANCH COVERAGE ANNOTATE FAILED: lld reported 1 diagnostic(s) applying the profile: lld: warning: ld-temp.o: function control flow change detected (hash mismatch)");
     try std.testing.expect(!d.exists("wd/out/test_one.ll"));
     try std.testing.expect(d.exists("scratch/cov_branch_annotate/err"));
@@ -232,15 +232,15 @@ test "llvm-profdata or lld failing: exit 1, lld's last lines on stderr" {
     {
         var d = try Dir.init();
         defer d.deinit();
-        try d.tmp.dir.writeFile("tc/llvm/bin/llvm-profdata.exit", "3");
-        try d.tmp.dir.writeFile("tc/llvm/bin/llvm-profdata.stderr", "error: bad profile\n");
+        try d.tmp.dir.writeFile(.{ .sub_path = "tc/llvm/bin/llvm-profdata.exit", .data = "3" });
+        try d.tmp.dir.writeFile(.{ .sub_path = "tc/llvm/bin/llvm-profdata.stderr", .data = "error: bad profile\n" });
         try expect("show", try d.run(d.args()), 1, "BRANCH COVERAGE ANNOTATE FAILED: llvm-profdata show failed on in/test_one.profdata: error: bad profile");
     }
     {
         var d = try Dir.init();
         defer d.deinit();
-        try d.tmp.dir.writeFile("tc/lld/bin/lld.exit", "1");
-        try d.tmp.dir.writeFile("tc/lld/bin/lld.stderr", "ld.lld: error: cannot open profile\n");
+        try d.tmp.dir.writeFile(.{ .sub_path = "tc/lld/bin/lld.exit", .data = "1" });
+        try d.tmp.dir.writeFile(.{ .sub_path = "tc/lld/bin/lld.stderr", .data = "ld.lld: error: cannot open profile\n" });
         try expect("lld", try d.run(d.args()), 1, "ld.lld: error: cannot open profile\nBRANCH COVERAGE ANNOTATE FAILED: lld could not apply the profile in/test_one.profdata to in/test_one.bc (pgo-instr-use)\n");
     }
 }
@@ -248,7 +248,7 @@ test "llvm-profdata or lld failing: exit 1, lld's last lines on stderr" {
 test "lld's stdout is its own: what it writes there is refused, and this tool's stdout stays empty" {
     var d = try Dir.init();
     defer d.deinit();
-    try d.tmp.dir.writeFile("tc/lld/bin/lld.stdout", "stray\n");
+    try d.tmp.dir.writeFile(.{ .sub_path = "tc/lld/bin/lld.stdout", .data = "stray\n" });
     try expect("stdout", try d.run(d.args()), 1, "lld wrote to its standard output: stray");
 }
 
@@ -257,7 +257,7 @@ test "a program that cannot start: exit 1, the reason on stderr" {
     defer d.deinit();
     // Not executable, not empty: the input check passes, execve does not.
     try d.tmp.dir.deleteFile("tc/lld/bin/lld");
-    try d.tmp.dir.writeFile("tc/lld/bin/lld", "not a program");
+    try d.tmp.dir.writeFile(.{ .sub_path = "tc/lld/bin/lld", .data = "not a program" });
     const r = try d.run(d.args());
     try expect("noexec", r, 1, "lld could not apply the profile");
     try std.testing.expect(std.mem.indexOf(u8, r.stderr, "cannot run") != null);
@@ -267,19 +267,19 @@ test "a program that cannot start: exit 1, the reason on stderr" {
 /// every write to it fails (EBADF); stdout /dev/null. Its exit status.
 fn runFailingStderr(d: *Dir, argv: []const []const u8) !u8 {
     const a = d.a();
-    try d.tmp.dir.writeFile("ro", "");
+    try d.tmp.dir.writeFile(.{ .sub_path = "ro", .data = "" });
     const ro = try posix.open(try d.path("ro"), .{ .ACCMODE = .RDONLY }, 0);
     defer posix.close(ro);
     const nul = try posix.open("/dev/null", .{ .ACCMODE = .WRONLY }, 0);
     defer posix.close(nul);
-    var full = std.ArrayList(?[*:0]const u8).init(a);
-    try full.append(try a.dupeZ(u8, try tool(a, "COV_BRANCH")));
-    for (argv) |x| try full.append(try a.dupeZ(u8, x));
-    try full.append(null);
-    var envp = std.ArrayList(?[*:0]const u8).init(a);
+    var full = std.ArrayList(?[*:0]const u8).empty;
+    try full.append(a, try a.dupeZ(u8, try tool(a, "COV_BRANCH")));
+    for (argv) |x| try full.append(a, try a.dupeZ(u8, x));
+    try full.append(a, null);
+    var envp = std.ArrayList(?[*:0]const u8).empty;
     var it = d.env.iterator();
-    while (it.next()) |e| try envp.append(try std.fmt.allocPrintZ(a, "{s}={s}", .{ e.key_ptr.*, e.value_ptr.* }));
-    try envp.append(null);
+    while (it.next()) |e| try envp.append(a, try std.fmt.allocPrintSentinel(a, "{s}={s}", .{ e.key_ptr.*, e.value_ptr.* }, 0));
+    try envp.append(a, null);
     const cwd = try a.dupeZ(u8, d.cwd);
     const pid = try posix.fork();
     if (pid == 0) {
@@ -299,10 +299,10 @@ fn runFailingStderr(d: *Dir, argv: []const []const u8) !u8 {
 test "a stderr whose writes fail does not change the exit status" {
     var d = try Dir.init();
     defer d.deinit();
-    try d.wd.writeFile("in/test_one.bc", "not bitcode");
+    try d.wd.writeFile(.{ .sub_path = "in/test_one.bc", .data = "not bitcode" });
     try std.testing.expectEqual(@as(u8, 1), try runFailingStderr(d, d.args()));
     try std.testing.expectEqual(@as(u8, 2), try runFailingStderr(d, &.{"annotate"}));
-    try d.wd.writeFile("in/test_one.bc", try fx.bitcode(d.a(), "body"));
+    try d.wd.writeFile(.{ .sub_path = "in/test_one.bc", .data = try fx.bitcode(d.a(), "body") });
     try std.testing.expectEqual(@as(u8, 0), try runFailingStderr(d, d.args()));
     try std.testing.expect(d.exists("wd/out/test_one.ll"));
 }

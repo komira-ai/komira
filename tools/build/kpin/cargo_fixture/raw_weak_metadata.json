@@ -1,0 +1,544 @@
+{
+ "packages": [
+  {
+   "name": "app",
+   "version": "0.1.0",
+   "id": "path+file:///w/app#0.1.0",
+   "source": null,
+   "edition": "2021",
+   "manifest_path": "/w/app/Cargo.toml",
+   "targets": [
+    {
+     "name": "app",
+     "kind": [
+      "lib"
+     ],
+     "crate_types": [
+      "lib"
+     ],
+     "src_path": "/w/app/src/lib.rs",
+     "edition": "2021"
+    }
+   ],
+   "dependencies": [
+    {
+     "name": "web",
+     "source": "registry+https://github.com/rust-lang/crates.io-index",
+     "req": "*",
+     "kind": null,
+     "rename": null,
+     "optional": false,
+     "uses_default_features": true,
+     "features": [],
+     "target": null,
+     "registry": null
+    }
+   ],
+   "features": {}
+  },
+  {
+   "name": "web",
+   "version": "1.0.0",
+   "id": "registry+https://github.com/rust-lang/crates.io-index#web@1.0.0",
+   "source": "registry+https://github.com/rust-lang/crates.io-index",
+   "edition": "2021",
+   "manifest_path": "/w/web/Cargo.toml",
+   "targets": [
+    {
+     "name": "web",
+     "kind": [
+      "lib"
+     ],
+     "crate_types": [
+      "lib"
+     ],
+     "src_path": "/w/web/src/lib.rs",
+     "edition": "2021"
+    }
+   ],
+   "dependencies": [
+    {
+     "name": "ring",
+     "source": "registry+https://github.com/rust-lang/crates.io-index",
+     "req": "*",
+     "kind": null,
+     "rename": null,
+     "optional": true,
+     "uses_default_features": true,
+     "features": [],
+     "target": null,
+     "registry": null
+    },
+    {
+     "name": "aws-lc-rs",
+     "source": "registry+https://github.com/rust-lang/crates.io-index",
+     "req": "*",
+     "kind": null,
+     "rename": null,
+     "optional": true,
+     "uses_default_features": true,
+     "features": [],
+     "target": null,
+     "registry": null
+    },
+    {
+     "name": "zlib",
+     "source": "registry+https://github.com/rust-lang/crates.io-index",
+     "req": "*",
+     "kind": null,
+     "rename": null,
+     "optional": true,
+     "uses_default_features": true,
+     "features": [],
+     "target": null,
+     "registry": null
+    },
+    {
+     "name": "serde",
+     "source": "registry+https://github.com/rust-lang/crates.io-index",
+     "req": "*",
+     "kind": null,
+     "rename": null,
+     "optional": false,
+     "uses_default_features": true,
+     "features": [],
+     "target": null,
+     "registry": null
+    },
+    {
+     "name": "base64",
+     "source": "registry+https://github.com/rust-lang/crates.io-index",
+     "req": "*",
+     "kind": null,
+     "rename": "b64",
+     "optional": true,
+     "uses_default_features": true,
+     "features": [],
+     "target": null,
+     "registry": null
+    },
+    {
+     "name": "defmt",
+     "source": "registry+https://github.com/rust-lang/crates.io-index",
+     "req": "*",
+     "kind": null,
+     "rename": null,
+     "optional": true,
+     "uses_default_features": true,
+     "features": [],
+     "target": null,
+     "registry": null
+    },
+    {
+     "name": "cc",
+     "source": "registry+https://github.com/rust-lang/crates.io-index",
+     "req": "*",
+     "kind": "build",
+     "rename": null,
+     "optional": true,
+     "uses_default_features": true,
+     "features": [],
+     "target": null,
+     "registry": null
+    },
+    {
+     "name": "rare",
+     "source": "registry+https://github.com/rust-lang/crates.io-index",
+     "req": "*",
+     "kind": null,
+     "rename": null,
+     "optional": true,
+     "uses_default_features": true,
+     "features": [],
+     "target": null,
+     "registry": null
+    }
+   ],
+   "features": {
+    "alloc": [
+     "ring?/alloc",
+     "serde/alloc"
+    ],
+    "aws_lc_rs": [
+     "dep:aws-lc-rs"
+    ],
+    "fast": [
+     "zlib/fast"
+    ],
+    "b": [
+     "dep:b64"
+    ],
+    "ring": [
+     "dep:ring"
+    ],
+    "std": [
+     "alloc",
+     "defmt?/std"
+    ],
+    "defmt": [
+     "dep:defmt"
+    ],
+    "rare": [
+     "dep:rare"
+    ],
+    "cc": [
+     "dep:cc"
+    ],
+    "zlib": [
+     "dep:zlib"
+    ],
+    "default": [
+     "std"
+    ]
+   }
+  },
+  {
+   "name": "ring",
+   "version": "0.17.14",
+   "id": "registry+https://github.com/rust-lang/crates.io-index#ring@0.17.14",
+   "source": "registry+https://github.com/rust-lang/crates.io-index",
+   "edition": "2021",
+   "manifest_path": "/w/ring/Cargo.toml",
+   "targets": [
+    {
+     "name": "ring",
+     "kind": [
+      "lib"
+     ],
+     "crate_types": [
+      "lib"
+     ],
+     "src_path": "/w/ring/src/lib.rs",
+     "edition": "2021"
+    }
+   ],
+   "dependencies": [],
+   "features": {}
+  },
+  {
+   "name": "aws-lc-rs",
+   "version": "1.11.1",
+   "id": "registry+https://github.com/rust-lang/crates.io-index#aws-lc-rs@1.11.1",
+   "source": "registry+https://github.com/rust-lang/crates.io-index",
+   "edition": "2021",
+   "manifest_path": "/w/aws-lc-rs/Cargo.toml",
+   "targets": [
+    {
+     "name": "aws_lc_rs",
+     "kind": [
+      "lib"
+     ],
+     "crate_types": [
+      "lib"
+     ],
+     "src_path": "/w/aws-lc-rs/src/lib.rs",
+     "edition": "2021"
+    }
+   ],
+   "dependencies": [],
+   "features": {}
+  },
+  {
+   "name": "zlib",
+   "version": "1.2.0",
+   "id": "registry+https://github.com/rust-lang/crates.io-index#zlib@1.2.0",
+   "source": "registry+https://github.com/rust-lang/crates.io-index",
+   "edition": "2021",
+   "manifest_path": "/w/zlib/Cargo.toml",
+   "targets": [
+    {
+     "name": "zlib",
+     "kind": [
+      "lib"
+     ],
+     "crate_types": [
+      "lib"
+     ],
+     "src_path": "/w/zlib/src/lib.rs",
+     "edition": "2021"
+    }
+   ],
+   "dependencies": [],
+   "features": {}
+  },
+  {
+   "name": "serde",
+   "version": "1.0.100",
+   "id": "registry+https://github.com/rust-lang/crates.io-index#serde@1.0.100",
+   "source": "registry+https://github.com/rust-lang/crates.io-index",
+   "edition": "2021",
+   "manifest_path": "/w/serde/Cargo.toml",
+   "targets": [
+    {
+     "name": "serde",
+     "kind": [
+      "lib"
+     ],
+     "crate_types": [
+      "lib"
+     ],
+     "src_path": "/w/serde/src/lib.rs",
+     "edition": "2021"
+    }
+   ],
+   "dependencies": [],
+   "features": {}
+  },
+  {
+   "name": "base64",
+   "version": "0.22.0",
+   "id": "registry+https://github.com/rust-lang/crates.io-index#base64@0.22.0",
+   "source": "registry+https://github.com/rust-lang/crates.io-index",
+   "edition": "2021",
+   "manifest_path": "/w/base64/Cargo.toml",
+   "targets": [
+    {
+     "name": "base64",
+     "kind": [
+      "lib"
+     ],
+     "crate_types": [
+      "lib"
+     ],
+     "src_path": "/w/base64/src/lib.rs",
+     "edition": "2021"
+    }
+   ],
+   "dependencies": [],
+   "features": {}
+  },
+  {
+   "name": "defmt",
+   "version": "1.0.0",
+   "id": "registry+https://github.com/rust-lang/crates.io-index#defmt@1.0.0",
+   "source": "registry+https://github.com/rust-lang/crates.io-index",
+   "edition": "2021",
+   "manifest_path": "/w/defmt/Cargo.toml",
+   "targets": [
+    {
+     "name": "defmt",
+     "kind": [
+      "lib"
+     ],
+     "crate_types": [
+      "lib"
+     ],
+     "src_path": "/w/defmt/src/lib.rs",
+     "edition": "2021"
+    }
+   ],
+   "dependencies": [],
+   "features": {}
+  },
+  {
+   "name": "cc",
+   "version": "1.0.0",
+   "id": "registry+https://github.com/rust-lang/crates.io-index#cc@1.0.0",
+   "source": "registry+https://github.com/rust-lang/crates.io-index",
+   "edition": "2021",
+   "manifest_path": "/w/cc/Cargo.toml",
+   "targets": [
+    {
+     "name": "cc",
+     "kind": [
+      "lib"
+     ],
+     "crate_types": [
+      "lib"
+     ],
+     "src_path": "/w/cc/src/lib.rs",
+     "edition": "2021"
+    }
+   ],
+   "dependencies": [],
+   "features": {}
+  },
+  {
+   "name": "rare",
+   "version": "0.1.0",
+   "id": "registry+https://github.com/rust-lang/crates.io-index#rare@0.1.0",
+   "source": "registry+https://github.com/rust-lang/crates.io-index",
+   "edition": "2021",
+   "manifest_path": "/w/rare/Cargo.toml",
+   "targets": [
+    {
+     "name": "rare",
+     "kind": [
+      "lib"
+     ],
+     "crate_types": [
+      "lib"
+     ],
+     "src_path": "/w/rare/src/lib.rs",
+     "edition": "2021"
+    }
+   ],
+   "dependencies": [],
+   "features": {}
+  }
+ ],
+ "workspace_members": [
+  "path+file:///w/app#0.1.0"
+ ],
+ "workspace_default_members": [
+  "path+file:///w/app#0.1.0"
+ ],
+ "resolve": {
+  "nodes": [
+   {
+    "id": "path+file:///w/app#0.1.0",
+    "dependencies": [],
+    "features": [],
+    "deps": [
+     {
+      "name": "web",
+      "pkg": "registry+https://github.com/rust-lang/crates.io-index#web@1.0.0",
+      "dep_kinds": [
+       {
+        "kind": null,
+        "target": null
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "id": "registry+https://github.com/rust-lang/crates.io-index#web@1.0.0",
+    "dependencies": [],
+    "features": [
+     "alloc",
+     "aws_lc_rs",
+     "fast",
+     "b",
+     "std",
+     "default"
+    ],
+    "deps": [
+     {
+      "name": "ring",
+      "pkg": "registry+https://github.com/rust-lang/crates.io-index#ring@0.17.14",
+      "dep_kinds": [
+       {
+        "kind": null,
+        "target": null
+       }
+      ]
+     },
+     {
+      "name": "aws_lc_rs",
+      "pkg": "registry+https://github.com/rust-lang/crates.io-index#aws-lc-rs@1.11.1",
+      "dep_kinds": [
+       {
+        "kind": null,
+        "target": null
+       }
+      ]
+     },
+     {
+      "name": "zlib",
+      "pkg": "registry+https://github.com/rust-lang/crates.io-index#zlib@1.2.0",
+      "dep_kinds": [
+       {
+        "kind": null,
+        "target": null
+       }
+      ]
+     },
+     {
+      "name": "serde",
+      "pkg": "registry+https://github.com/rust-lang/crates.io-index#serde@1.0.100",
+      "dep_kinds": [
+       {
+        "kind": null,
+        "target": null
+       }
+      ]
+     },
+     {
+      "name": "b64",
+      "pkg": "registry+https://github.com/rust-lang/crates.io-index#base64@0.22.0",
+      "dep_kinds": [
+       {
+        "kind": null,
+        "target": null
+       }
+      ]
+     },
+     {
+      "name": "defmt",
+      "pkg": "registry+https://github.com/rust-lang/crates.io-index#defmt@1.0.0",
+      "dep_kinds": [
+       {
+        "kind": null,
+        "target": null
+       }
+      ]
+     },
+     {
+      "name": "cc",
+      "pkg": "registry+https://github.com/rust-lang/crates.io-index#cc@1.0.0",
+      "dep_kinds": [
+       {
+        "kind": "build",
+        "target": null
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "id": "registry+https://github.com/rust-lang/crates.io-index#ring@0.17.14",
+    "dependencies": [],
+    "features": [],
+    "deps": []
+   },
+   {
+    "id": "registry+https://github.com/rust-lang/crates.io-index#aws-lc-rs@1.11.1",
+    "dependencies": [],
+    "features": [],
+    "deps": []
+   },
+   {
+    "id": "registry+https://github.com/rust-lang/crates.io-index#zlib@1.2.0",
+    "dependencies": [],
+    "features": [],
+    "deps": []
+   },
+   {
+    "id": "registry+https://github.com/rust-lang/crates.io-index#serde@1.0.100",
+    "dependencies": [],
+    "features": [],
+    "deps": []
+   },
+   {
+    "id": "registry+https://github.com/rust-lang/crates.io-index#base64@0.22.0",
+    "dependencies": [],
+    "features": [],
+    "deps": []
+   },
+   {
+    "id": "registry+https://github.com/rust-lang/crates.io-index#defmt@1.0.0",
+    "dependencies": [],
+    "features": [],
+    "deps": []
+   },
+   {
+    "id": "registry+https://github.com/rust-lang/crates.io-index#cc@1.0.0",
+    "dependencies": [],
+    "features": [],
+    "deps": []
+   },
+   {
+    "id": "registry+https://github.com/rust-lang/crates.io-index#rare@0.1.0",
+    "dependencies": [],
+    "features": [],
+    "deps": []
+   }
+  ],
+  "root": "path+file:///w/app#0.1.0"
+ },
+ "target_directory": "/w/target",
+ "version": 1,
+ "workspace_root": "/w",
+ "metadata": null
+}

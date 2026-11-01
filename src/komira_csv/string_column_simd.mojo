@@ -6,8 +6,8 @@
 # quote-heavy one. The naive `_build_string_column` shape does:
 #
 #   1. Build a `List[String]` over `num_rows` entries; for each cell,
-#      `cell_to_string` does `String("") + chr(Int(b))` per byte (O(N)
-#      reallocs per byte -- the worst possible shape).
+#      `cell_to_string` copies the cell into an owned String (one heap
+#      allocation per cell).
 #   2. `StringArray.from_strings(values)` then does TWO MORE passes
 #      (count total bytes, memcpy from each owned String into the data
 #      buffer).

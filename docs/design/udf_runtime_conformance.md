@@ -1,6 +1,6 @@
 # The UDF runtime conformance corpus
 
-Status: proposed, not built. This is the case list of the shared conformance corpus that [the UDF runtime interface](udf_runtime_interface.md) defines in its §6.3: what each case runs, the defect it catches, and the planted mutant that proves it can fail. Section numbers (§x.y) refer to `udf_runtime_interface.md`; `§10.x` refers to `optimized_plan_udfs.md`, as there.
+Status: proposed, not built. This is the case list of the shared conformance corpus that [the UDF runtime interface](udf_runtime_interface.md) defines in its §6.3: what each case runs, the defect it catches, and the planted mutant that proves it can fail. Section numbers (§x.y) refer to `udf_runtime_interface.md`; `§10.1` to `§10.9` refer to `optimized_plan_udfs.md` and `§10.10` to `§10.14` to `optimized_plan_udf_runtime.md`, as there.
 
 ## Shared cases
 

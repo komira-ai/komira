@@ -52,7 +52,9 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
 # and with stores it never reaches (test_job_supervisor_s3_entry), how a reply
 # is read and the auth and credential-transport refusals
 # (test_heartbeat_delivery_edges), and the start refusals at their bounds
-# (test_entrypoint_and_boot_edges).
+# (test_entrypoint_and_boot_edges). The job's output keeps its bytes in the
+# rings, logs.txt, the heartbeat and crash_report.json, which escapes every
+# control byte (test_job_output_bytes_and_crash_json).
 mojo_library(
     name = "komira_job_supervisor",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo", "main/**/*.mojo"]),
@@ -65,6 +67,7 @@ mojo_library(
         "//src/komira_http_client:komira_http_client",
         "//src/komira_http_core:komira_http_core",
         "//src/komira_job_report_proto:komira_job_report_proto",
+        "//src/komira_json:komira_json",
         "//src/komira_libc:komira_libc",
         "//src/komira_log:komira_log",
         "//src/komira_objectstore:komira_objectstore",
@@ -95,6 +98,7 @@ mojo_library(
         "tests/test_heartbeat_delivery_edges.mojo",
         "tests/test_entrypoint_and_boot_edges.mojo",
         "tests/test_s3_transport_first_byte.mojo",
+        "tests/test_job_output_bytes_and_crash_json.mojo",
     ],
     test_env = {
         "KOMIRA_JOB_SUPERVISOR_TEST_CREDENTIAL": "tok-env-0123456789",

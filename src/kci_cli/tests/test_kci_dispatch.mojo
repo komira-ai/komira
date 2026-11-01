@@ -18,13 +18,21 @@
 from std.ffi import external_call
 from std.os import makedirs
 from std.pathlib import Path
-from std.time import perf_counter_ns
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
 from komira_libc.posix import _read_env
 
 from kci_build import BuildRequest
-from kci_cli import CliRecorder, SecretStoreChoice, StageSteps, StepEnd, kci_main_with, write_whole_file
+from kci_cli import (
+    CliRecorder,
+    NoCloudBuilt,
+    SecretStoreChoice,
+    StageSteps,
+    StepEnd,
+    kci_main_started_at,
+    kci_main_with,
+    write_whole_file,
+)
 from kci_api import (
     ERROR_BUILD_FAILED,
     ERROR_PUBLISH_DIFFERENT_BYTES,
@@ -631,15 +639,14 @@ def test_the_build_budget_reaches_the_per_change_check() raises:
     var rec = CliRecorder.memory(String(""))
     var a = _pr_run(m, String("build"), "--build-budget-s", "6543")
     a.extend(_build_flags())
-    var t0 = Int(perf_counter_ns())
-    assert_equal(kci_main_with(a, steps, rec), 0)
-    var t1 = Int(perf_counter_ns())
+    # kci's start is a number the test chooses (no clock is read)
+    var started = 123_456_789_000
+    var deploys = NoCloudBuilt()
+    assert_equal(kci_main_started_at(a, steps, deploys, rec, started), 0)
     assert_equal(len(steps.budgets), 1)
     assert_equal(steps.budgets[0], 6543)
-    # the deadline is kci's start (inside the call) plus the budget, on the
-    # monotonic clock the runner reads
-    var start = steps.deadlines[0] - 6543 * 1_000_000_000
-    assert_true(start >= t0 and start <= t1, String(t0) + String(" ") + String(start) + String(" ") + String(t1))
+    # the deadline is kci's start plus the budget, exactly
+    assert_equal(steps.deadlines[0], started + 6543 * 1_000_000_000)
     var none = FakeSteps()
     var rec2 = CliRecorder.memory(String(""))
     var b = _pr_run(m, String("build"))

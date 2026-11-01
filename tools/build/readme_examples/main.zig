@@ -15,7 +15,7 @@ pub fn main() void {
     const argv = a.alloc([]const u8, raw.len) catch @panic("out of memory");
     for (raw, 0..) |arg, i| argv[i] = arg;
     const o = cli.run(a, std.fs.cwd(), argv);
-    std.io.getStdOut().writeAll(o.stdout) catch {};
+    std.fs.File.stdout().writeAll(o.stdout) catch {};
     std.process.exit(o.code);
 }
 

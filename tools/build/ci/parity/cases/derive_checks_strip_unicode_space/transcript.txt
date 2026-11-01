@@ -1,3 +1,0 @@
-call buck2 "cquery" "//... + tests//functional/..."
-exit 0
-stdout "komira//src/a:a\n\xe2\x80\x83komira//src/f:f\xc2\xa0\n"

@@ -75,6 +75,7 @@ from komira_db.db_value import (
     LOGICAL_TIMESTAMPTZ,
     LOGICAL_JSONB,
     LOGICAL_TEXT_ARRAY,
+    text_array_literal,
 )
 from komira_db.db_row import DbRow, DbRows
 
@@ -651,9 +652,9 @@ def _render_pg_cell(
     elif oid == OID_JSONB:
         return (row.get_jsonb(col), LOGICAL_JSONB)
     elif oid == OID_TEXT_ARRAY:
-        # Binary array_send body -> elements -> the canonical {a,b,c} literal
-        # DbRow.get_text_array re-parses.
-        return (_elements_to_literal(row.get_text_array(col)), LOGICAL_TEXT_ARRAY)
+        # Binary array_send body -> elements -> the array literal (quoted as
+        # pg quotes it) that DbRow.get_text_array parses back exactly.
+        return (text_array_literal(row.get_text_array(col)), LOGICAL_TEXT_ARRAY)
     elif oid == OID_BYTEA:
         # bytea BINARY body = the raw blob bytes. `get_text` carries them VERBATIM
         # into the canonical `_text` (byte-backed String, no codepoint promotion),
@@ -663,16 +664,3 @@ def _render_pg_cell(
     else:
         # OID_TEXT / OID_VARCHAR / anything else — raw UTF-8.
         return (row.get_text(col), LOGICAL_TEXT)
-
-
-def _elements_to_literal(elements: List[String]) -> String:
-    """Render TEXT[] elements back to the canonical pg `{a,b,c}` array literal
-    (the DbValue / DbRow carrier form). The closed-set contract is simple labels
-    (no embedded ',' / '}' / quoting)."""
-    var lit = String("{")
-    for i in range(len(elements)):
-        if i > 0:
-            lit += ","
-        lit += elements[i]
-    lit += "}"
-    return lit^

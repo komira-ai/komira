@@ -1,0 +1,2 @@
+# A malformed held marker (test 46): a number after the metric, which covcheck refuses (exit 1) in every mode.
+line 9900

@@ -1,0 +1,641 @@
+# The cases of the BXL selector and the aggregate's guard.
+#
+#   ./buck2 bxl komira//tools/build/ci/cases.bxl:run
+#
+# Fails, listing every case that answered otherwise. Two layers:
+#
+#   table cases  affected.bzl over a graph written out in this file: every
+#                file shape (leaf source, BUCK, .bzl, deleted, build system,
+#                ownerless, inert, empty), the coverage holds, the patterns.
+#   real cases   the same functions over the real Buck2 graph of the fixture
+#                package (fixture/BUCK, fixture/agg/BUCK): the queries the
+#                selector asks (owner, targets in a build file, reverse
+#                dependencies, the loaders of a .bzl), and the guard green
+#                over a complete aggregate and red over one that leaves a
+#                check out.
+#
+# Each case names what it proves. A defect planted in affected.bzl,
+# ci_graph.bzl or the fixture turns a named case red (see the PR that added
+# this file for the mutants tried).
+
+load("@prelude//cxx:cxx_toolchain_types.bzl", "CxxToolchainInfo")
+load(":affected.bzl", "AFFECTED", "EMPTY", "VACUOUS", "WIDENED", "held_refusals", "is_held_file", "is_inert", "parse_held_lines", "pattern_matches", "select", "widen_reason")
+load(":heavy_cases.bzl", "heavy_cases")
+load(":rules.bzl", "EXCLUDED", "INERT", "WIDEN")
+load(":ci_graph.bzl", "check_nodes", "closure", "findings", "make_graph", "python_findings", "python_nodes", "render_all", "render_loader", "render_shard", "roots", "sdk_own_deps", "shard_findings", "shard_of", "SHARDS", "LINE_LIMIT", "without_left_out")
+
+# ---- the table graph ---------------------------------------------------
+#
+#   src/a/a.mojo  -> owned by a:a        src/a/BUCK (package src/a: a:a, a:a_test)
+#   src/b/b.mojo  -> owned by b:b        b:b depends on a:a; c:c depends on b:b
+#   src/lib.bzl   -> loaded by src/a/BUCK and src/b/BUCK
+#   docs/x.md     -> owned by docs:doc_tree
+#   .hidden       -> owned by nothing
+#   ci/BUCK, ci/targets.bzl, ci/targets/shard_3.bzl -> the aggregate's package (ci:pr)
+
+_FILES = {
+    "src/a/a.mojo": True,
+    "src/a/BUCK": True,
+    "src/b/b.mojo": True,
+    "src/b/BUCK": True,
+    "src/lib.bzl": True,
+    "docs/x.md": True,
+    "docs/BUCK": True,
+    "README.md": True,
+    ".hidden": True,
+    "ci/BUCK": True,
+    "ci/targets.bzl": True,
+    "ci/targets/shard_3.bzl": True,
+    "orphan.bzl": True,
+}
+_OWNERS = {
+    "src/a/a.mojo": ["k//src/a:a"],
+    "src/b/b.mojo": ["k//src/b:b"],
+    "docs/x.md": ["k//docs:doc_tree"],
+    "ci/targets.bzl": ["k//ci:pr"],
+}
+_PACKAGES = {
+    "src/a": ["k//src/a:a", "k//src/a:a_test"],
+    "src/b": ["k//src/b:b"],
+    "docs": ["k//docs:doc_tree"],
+    "ci": ["k//ci:pr"],
+}
+_INCLUDING = {
+    "src/lib.bzl": ["k//src/a:a", "k//src/a:a_test", "k//src/b:b"],
+    "ci/targets.bzl": ["k//ci:pr"],
+    "ci/targets/shard_3.bzl": ["k//ci:pr"],
+}
+
+# reverse edges: who depends on a target (the aggregate is not in the universe)
+_DEPENDENTS = {
+    "k//src/a:a": ["k//src/b:b", "k//src/a:a_test"],
+    "k//src/b:b": ["k//src/c:c"],
+}
+
+def _reverse_closure(seeds):
+    seen = {}
+    todo = list(seeds)
+    for _ in range(1000):
+        if not todo:
+            break
+        t = todo.pop()
+        if t in seen:
+            continue
+        seen[t] = True
+        todo += _DEPENDENTS.get(t, [])
+    return seen.keys()
+
+def _table():
+    return struct(
+        exists = lambda p: p in _FILES,
+        owners = lambda p: _OWNERS.get(p, []),
+        package_targets = lambda d: _PACKAGES.get(d, []),
+        including = lambda p: _INCLUDING.get(p, []),
+        rdeps = _reverse_closure,
+    )
+
+_RULES = struct(
+    widen = [
+        (".buckconfig", "the configuration"),
+        ("tools/build/**", "the build system"),
+        ("third_party/**", "pinned sources"),
+    ],
+    inert = ["*.md", ".github/CODEOWNERS"],
+)
+
+def _table_case(name, changed, kind, targets = None, reason = None):
+    v = select(_RULES, changed, _table(), "ci")
+    problems = []
+    if v.kind != kind:
+        problems.append("kind {} (reason: {}), wanted {}".format(v.kind, v.reason, kind))
+    if targets != None and v.targets != targets:
+        problems.append("targets {}, wanted {}".format(v.targets, targets))
+    if reason != None and reason not in v.reason:
+        problems.append("reason '{}' lacks '{}'".format(v.reason, reason))
+    return [] if not problems else ["{}: {}".format(name, "; ".join(problems))]
+
+def _table_cases():
+    out = []
+    a_and_dependents = ["k//src/a:a", "k//src/a:a_test", "k//src/b:b", "k//src/c:c"]
+
+    # a leaf change selects its owner and every dependent, transitively, and nothing else
+    out += _table_case("leaf source selects owner and dependents", ["src/a/a.mojo"], AFFECTED, a_and_dependents)
+    out += _table_case("a leaf with one dependent chain", ["src/b/b.mojo"], AFFECTED, ["k//src/b:b", "k//src/c:c"])
+
+    # BUCK seeds the package, .bzl the loaders
+    out += _table_case("BUCK change selects the package and dependents", ["src/b/BUCK"], AFFECTED, ["k//src/b:b", "k//src/c:c"])
+    out += _table_case("bzl change selects every loader and dependents", ["src/lib.bzl"], AFFECTED, a_and_dependents)
+    out += _table_case("a bzl no BUCK loads widens", ["orphan.bzl"], WIDENED, reason = "loaded by no BUCK file")
+
+    # the build system and the toolchain widen, whatever else is in the change
+    out += _table_case("tools/build change widens", ["tools/build/mojo/defs.bzl"], WIDENED, reason = "tools/build/**")
+    out += _table_case("third_party change widens", ["third_party/uv/pin.txt"], WIDENED, reason = "third_party/**")
+    out += _table_case(".buckconfig widens", [".buckconfig"], WIDENED, reason = ".buckconfig")
+    out += _table_case("a widening file beside a leaf change widens", ["src/a/a.mojo", "tools/build/x.zig"], WIDENED)
+
+    # docs only: owned by the doc tree, so selected (not vacuous)
+    out += _table_case("docs-only change selects the doc tree", ["docs/x.md"], AFFECTED, ["k//docs:doc_tree"])
+    out += _table_case("inert unowned files alone are vacuous", ["README.md", ".github/CODEOWNERS"], VACUOUS)
+    out += _table_case("an inert file beside a leaf change is ignored", ["README.md", "src/b/b.mojo"], AFFECTED, ["k//src/b:b", "k//src/c:c"])
+
+    # no owner and no inert row: widens (never silently dropped)
+    out += _table_case("an existing file no target owns widens", [".hidden"], WIDENED, reason = "no target owns '.hidden'")
+
+    # deleted files: the package above them, a deleted BUCK widens
+    out += _table_case("deleted file selects its package and dependents", ["src/a/old.mojo"], AFFECTED, a_and_dependents)
+    out += _table_case("deleted BUCK widens", ["src/a/deleted/BUCK"], WIDENED, reason = "its package is gone")
+    out += _table_case("deleted file in no package, not inert, widens", ["nowhere/old.txt"], WIDENED, reason = "no package holds it")
+    out += _table_case("deleted inert file in no package is ignored alone (vacuous)", ["gone/NOTES.md"], VACUOUS)
+
+    # the aggregate's own list changing is not a selection: it widens
+    out += _table_case("a change to the aggregate's package widens", ["ci/targets.bzl"], WIDENED, reason = "aggregate's own package")
+    out += _table_case("a change to a shard of the aggregate's list widens", ["ci/targets/shard_3.bzl"], WIDENED, reason = "aggregate's own package")
+    out += _table_case("the aggregate's BUCK widens", ["ci/BUCK"], WIDENED, reason = "aggregate's own package")
+
+    # a seed that reaches nothing widens (the universe does not hold it)
+    v = select(_RULES, ["src/a/a.mojo"], struct(exists = lambda p: True, owners = lambda p: ["k//elsewhere:x"], package_targets = lambda d: [], including = lambda p: [], rdeps = lambda s: []), "ci")
+    if v.kind != WIDENED:
+        out.append("reverse query answering nothing: kind {}, wanted {}".format(v.kind, WIDENED))
+
+    # empty
+    out += _table_case("no changed file is EMPTY, not a pass", [], EMPTY)
+    out += _table_case("blank lines are no file", ["", ""], EMPTY)
+
+    # patterns
+    for pattern, path, wanted in [
+        ("tools/build/**", "tools/build/a/b.zig", True),
+        ("tools/build/**", "tools/buildx/a", False),
+        ("tools/build/**", "tools/build", False),
+        ("tools/buck2*", "tools/buck2.toml", True),
+        ("tools/buck2*", "tools/buck", False),
+        ("*.md", "docs/a/b.md", True),
+        ("*.md", "docs/a/b.mdx", False),
+        ("buck2", "buck2", True),
+        ("buck2", "tools/buck2", False),
+    ]:
+        if pattern_matches(pattern, path) != wanted:
+            out.append("pattern {} on {}: wanted {}".format(pattern, path, wanted))
+    return out
+
+# ---- coverage holds ------------------------------------------------------
+
+def _held(changed, lines, package_stays = True):
+    base, head = parse_held_lines(lines, "HEAD")
+    g = struct(exists = lambda p: package_stays)
+    return held_refusals(changed, base, head, g)
+
+def _held_cases():
+    out = []
+    marker = "src/a/coverage_held"
+
+    def case(name, changed, lines, wanted, package_stays = True):
+        got = _held(changed, lines, package_stays)
+        if got != wanted:
+            out.append("held: {}: {}, wanted {}".format(name, got, wanted))
+
+    base = ["abc123:{}:1:# held".format(marker), "abc123:{}:2:line".format(marker), "abc123:{}:3:branch".format(marker)]
+    case("a metric taken out is refused", [marker], base + ["HEAD:{}:1:line".format(marker)], [marker + ": branch is no longer held"])
+    case("every metric taken out, marker emptied, is refused", [marker], base, [marker + ": branch is no longer held", marker + ": line is no longer held"])
+    case("a reordered marker passes", [marker], base + ["HEAD:{}:1:branch".format(marker), "HEAD:{}:2:line".format(marker)], [])
+    case("a gained metric passes", [marker], ["abc123:{}:1:line".format(marker), "HEAD:{}:1:line".format(marker), "HEAD:{}:2:branch".format(marker)], [])
+    case("a comment taken out passes", [marker], base + ["HEAD:{}:1:line".format(marker), "HEAD:{}:2:branch".format(marker)], [])
+    case("a new marker passes", [marker], ["HEAD:{}:1:line".format(marker)], [])
+    case("a marker deleted with its package stays refused", [marker], base, [marker + ": branch is no longer held", marker + ": line is no longer held"])
+    case("a marker deleted with its package's BUCK passes", [marker], base, [], package_stays = False)
+    case("a marker the change does not name is not read", ["src/a/a.mojo"], base, [])
+    case("another package's marker is its own", [marker], base + ["HEAD:src/b/coverage_held:1:line", "HEAD:{}:1:line".format(marker), "HEAD:{}:2:branch".format(marker)], [])
+    if not is_held_file("coverage_held") or not is_held_file("src/a/coverage_held") or is_held_file("src/a/coverage_held.md"):
+        out.append("held: is_held_file")
+    return out
+
+# ---- the real graph: the fixture ----------------------------------------
+
+_F = "komira//tools/build/ci/fixture"
+_SCOPE = ["{}:{}".format(_F, n) for n in ["leaf_src", "lonely_src", "leaf", "mid", "top", "lonely"]]
+_AGG = "{}/agg:agg_complete".format(_F)
+_AGG_PKG = "tools/build/ci/fixture/agg"
+_FIXTURE_RULES = struct(
+    widen = [("tools/build/ci/fixture/widen*", "a fixture row")],
+    inert = [],
+)
+
+def _real_case(g, name, changed, kind, targets = None):
+    v = select(_FIXTURE_RULES, changed, g, _AGG_PKG)
+    problems = []
+    if v.kind != kind:
+        problems.append("kind {} (reason: {}), wanted {}".format(v.kind, v.reason, kind))
+    if targets != None:
+        got = [t for t in v.targets if t.startswith(_F + ":")]
+        want = ["{}:{}".format(_F, t) for t in targets]
+        if got != want:
+            problems.append("targets {}, wanted {}".format(got, want))
+    return [] if not problems else ["real: {}: {}".format(name, "; ".join(problems))]
+
+def _real_cases(ctx):
+    out = []
+    g = make_graph(ctx, _SCOPE, "komira//" + _AGG_PKG + ":")
+    both = ["leaf", "leaf_src", "lonely", "lonely_src", "mid", "top"]
+    dir = "tools/build/ci/fixture/"
+
+    # the owner query, then the reverse dependencies within the scope
+    out += _real_case(g, "a leaf file selects its owner and every dependent, not the unrelated check", [dir + "leaf.txt"], AFFECTED, ["leaf", "leaf_src", "mid", "top"])
+    out += _real_case(g, "the other leaf selects only its own chain", [dir + "lonely.txt"], AFFECTED, ["lonely", "lonely_src"])
+    out += _real_case(g, "a BUCK file selects its whole package", [dir + "BUCK"], AFFECTED, both)
+    out += _real_case(g, "a file deleted from the package selects the package", [dir + "gone.txt"], AFFECTED, both)
+    out += _real_case(g, "a bzl selects the packages that load it", ["tools/build/ci/aggregate.bzl"], AFFECTED, both)
+
+    # a file no target owns widens; inert, it is vacuous
+    out += _real_case(g, "a file no target owns widens", [dir + ".unowned"], WIDENED)
+    out += _real_case(g, "a widen row widens", [dir + "widen_me"], WIDENED)
+    out += _real_case(g, "the aggregate's package widens", [_AGG_PKG + "/BUCK"], WIDENED)
+    v = select(struct(widen = [], inert = [dir + ".unowned"]), [dir + ".unowned"], g, _AGG_PKG)
+    if v.kind != VACUOUS:
+        out.append("real: an inert unowned file: kind {}, wanted {}".format(v.kind, VACUOUS))
+
+    # what the aggregate leaves out (rules.bzl EXCLUDED) is never selected: a change to
+    # lonely.txt reaches `lonely` and `lonely_src`; with a row naming `lonely` only the source stays
+    v = select(_FIXTURE_RULES, [dir + "lonely.txt"], g, _AGG_PKG)
+    row = [_F + ":lonely"]
+    kept = without_left_out(ctx, v.targets, row)
+    if _F + ":lonely" not in v.targets or kept != [t for t in v.targets if t != _F + ":lonely"] or _F + ":lonely_src" not in kept:
+        out.append("real: an EXCLUDED row naming `lonely` must drop it from the selection and keep `lonely_src`: selected {}, kept {}".format(v.targets, kept))
+    if without_left_out(ctx, v.targets, []) != v.targets:
+        out.append("real: no EXCLUDED row must leave the selection as it is")
+    if without_left_out(ctx, v.targets, [_F + ":"]) != []:
+        out.append("real: a package pattern in EXCLUDED must drop every target of the package")
+
+    # each shipped row names real targets, and the filter drops exactly those
+    for pattern, _ in EXCLUDED:
+        named = [str(t.label) for t in ctx.uquery().eval(pattern)]
+        if not named:
+            out.append("real: the EXCLUDED row '{}' names no target".format(pattern))
+        elif without_left_out(ctx, named + ["komira//ci:pr"], [pattern]) != ["komira//ci:pr"]:
+            out.append("real: the EXCLUDED row '{}' must drop all its targets and nothing else".format(pattern))
+
+    # the aggregate's side: roots, closure, the guard
+    nodes = check_nodes(ctx, _SCOPE, "komira//" + _AGG_PKG + ":")
+    got_checks = sorted(nodes.keys())
+    want_checks = sorted(["{}:{}".format(_F, n) for n in ["leaf", "mid", "top", "lonely"]])
+    if got_checks != want_checks:
+        out.append("real: the checks of the scope (sources are none): {}, wanted {}".format(got_checks, want_checks))
+    got_roots = roots(nodes)
+    want_roots = sorted(["{}:{}".format(_F, n) for n in ["top", "lonely"]])
+    if got_roots != want_roots:
+        out.append("real: roots of the checks: {}, wanted {}".format(got_roots, want_roots))
+    complete = findings(got_checks, closure(ctx, _AGG), _AGG)
+    if complete:
+        out.append("real: guard over the complete aggregate failed: " + complete)
+    missing_agg = "{}/agg:agg_missing".format(_F)
+    text = findings(got_checks, closure(ctx, missing_agg), missing_agg)
+    if "{}:lonely".format(_F) not in text or "1 check target(s)" not in text or "targets.bxl:generate" not in text:
+        out.append("real: guard over an aggregate that leaves `lonely` out did not name it and the regeneration: '{}'".format(text))
+    # The printed command must not be the bare `cp ... "$(generator)"/.`: an empty generator output
+    # would make it copy `/` into ci/. It assigns the output, checks it is a directory other than /.
+    if 'out=$(./buck2 bxl komira//tools/build/ci/targets.bxl:generate) && [ -d "$out" ] && [ "$out" != / ] && cp -rL' not in text or '"$(./buck2' in text:
+        out.append("real: the regeneration command in the guard message is not the fail-safe form: '{}'".format(text))
+    shard = render_shard(["a//:x"], ["a//:t"])
+    if shard[-8:] != ["TARGETS = [", '    "a//:x",', "]", "", "TESTS = [", '    "a//:t",', "]", ""]:
+        out.append("real: render of a shard: {}".format(shard[-8:]))
+    return out
+
+# ---- roots and the execution-platform registration -------------------------
+
+def _fake(label, kind, deps = []):
+    return struct(label = struct(raw_target = lambda: label), rule_type = kind, deps = lambda: [struct(label = struct(raw_target = lambda: d)) for d in deps])
+
+def _roots_cases():
+    """roots() ignores what an execution-platform registration depends on: the
+    registration names a macOS platform only in a checkout whose `[komira_re]`
+    names a macOS worker, and the list must not depend on that (the row of
+    `platforms:darwin-arm64` was lost on regeneration)."""
+    out = []
+    reg = "komira//tools/build/platforms/defs.bzl:remote_execution_platforms"
+    local = "komira//tools/build/platforms/defs.bzl:local_execution_platforms"
+    plat = "prelude//platform.bzl:platform"
+    wrap = "komira//tools/build/platforms/with_buildrules.bzl:execution_platforms_plus"
+    for name, kind in [("remote", reg), ("local", local)]:
+        named = {
+            "k//p:darwin": _fake("k//p:darwin", plat),
+            "k//p:linux": _fake("k//p:linux", plat),
+            "k//p:reg": _fake("k//p:reg", kind, ["k//p:linux", "k//p:darwin"]),
+            "k//p:wrap": _fake("k//p:wrap", wrap, ["k//p:reg"]),
+        }
+        got = roots(named)
+        if got != ["k//p:darwin", "k//p:linux", "k//p:wrap"]:
+            out.append("roots: a {} registration's platforms stay roots, its own dependent is not: got {}".format(name, got))
+    plain = {
+        "k//p:leaf": _fake("k//p:leaf", plat),
+        "k//p:top": _fake("k//p:top", wrap, ["k//p:leaf"]),
+    }
+    if roots(plain) != ["k//p:top"]:
+        out.append("roots: an ordinary dependent still removes its dependency from the roots: got {}".format(roots(plain)))
+    return out
+
+def _registration_cases(ctx):
+    """The execution platforms the checkout registers (`platforms/default:default`): whichever worker sets this
+    checkout's configuration names, komira's linux platform stays first; buildrules' linux platform is registered;
+    buildrules' macOS platform is registered exactly when komira's own macOS platform is, after it, with the
+    executor of komira's macOS platform and not the one of komira's linux platform."""
+    out = []
+    plats = ctx.analysis(ctx.configured_targets("komira//tools/build/platforms/default:default")).providers()[ExecutionPlatformRegistrationInfo].platforms
+    got = [str(p.label) for p in plats]
+    by_label = {str(p.label): p for p in plats}
+    if not got or got[0] != "komira//tools/build/platforms:linux-x86_64":
+        out.append("registration: komira's linux-x86_64 platform must stay first, got {}".format(got))
+    if "buildrules//platforms:linux_x86_64" not in got:
+        out.append("registration: buildrules' linux_x86_64 platform is missing: {}".format(got))
+    komira_mac = "komira//tools/build/platforms:darwin-arm64" in got
+    rules_mac = "buildrules//platforms:macos_aarch64" in got
+    if komira_mac != rules_mac:
+        out.append("registration: buildrules' macos_aarch64 platform must be registered exactly when komira's darwin-arm64 is (komira's: {}, buildrules': {}): {}".format(komira_mac, rules_mac, got))
+    if komira_mac and rules_mac:
+        if got.index("buildrules//platforms:macos_aarch64") < got.index("komira//tools/build/platforms:darwin-arm64"):
+            out.append("registration: buildrules' macos_aarch64 platform must come after komira's darwin-arm64: {}".format(got))
+        rules_exec = str(by_label["buildrules//platforms:macos_aarch64"].executor_config)
+        if rules_exec != str(by_label["komira//tools/build/platforms:darwin-arm64"].executor_config):
+            out.append("registration: buildrules' macos_aarch64 platform must run on komira's macOS workers (the executor of komira's darwin-arm64), but its executor differs")
+        if rules_exec == str(by_label["komira//tools/build/platforms:linux-x86_64"].executor_config):
+            out.append("registration: buildrules' macos_aarch64 platform has the executor of komira's linux-x86_64 platform")
+    return out
+
+# ---- the Python guard ------------------------------------------------------
+
+_PYTEST = "komira//tools/build/python/defs.bzl:_py_test"
+_WHEEL = "komira//tools/build/python/defs.bzl:_python_wheel"
+
+def _node(label, kind, srcs = []):
+    return struct(label = label, kind = kind, srcs = srcs)
+
+def _python_case(name, nodes, surface, own_deps, wanted):
+    """`wanted` is the list of labels the finding must name, [] for none."""
+    text = python_findings(nodes, surface, own_deps, "k//ci:pr")
+    if not wanted:
+        return [] if not text else ["python: {}: wanted none, got: {}".format(name, text)]
+    missing = [w for w in wanted if w not in text]
+    if missing or "{} Python target(s)".format(len(wanted)) not in text or "EXCLUDED" not in text:
+        return ["python: {}: wanted {} named with the way out, got: '{}'".format(name, wanted, text)]
+    return []
+
+def _python_cases(ctx):
+    out = []
+    ci_test = _node("k//release/ci/tests:test_main_red", _PYTEST)
+    sdk_test = _node("k//src/sdk_py:test_api", _PYTEST)
+    wheel = _node("k//third_party/python:six", _WHEEL)
+
+    # a py_test outside the SDK is a finding, whatever the surface says elsewhere
+    out += _python_case("a py_test of a CI script, no SDK package", [ci_test], [], {}, ["k//release/ci/tests:test_main_red"])
+    out += _python_case("a py_test outside the SDK package", [ci_test, sdk_test], ["src/sdk_py"], {}, ["k//release/ci/tests:test_main_red"])
+
+    # the SDK's own py_tests and what they reach are allowed, nobody else's
+    out += _python_case("the SDK's py_test", [sdk_test], ["src/sdk_py"], {}, [])
+    out += _python_case("a wheel the SDK's tests reach", [sdk_test, wheel], ["src/sdk_py"], {"k//third_party/python:six": True}, [])
+    out += _python_case("a wheel nothing of the SDK reaches", [sdk_test, wheel], ["src/sdk_py"], {}, ["k//third_party/python:six"])
+    out += _python_case("a package that only starts with the SDK's name is not the SDK", [_node("k//src/sdk_py_extra:test_x", _PYTEST)], ["src/sdk_py"], {}, ["k//src/sdk_py_extra:test_x"])
+
+    # what counts as Python: a kind, the hermetic packages, a .py source
+    out += _python_case("the pinned interpreter by its package", [_node("k//third_party/python:cpython", "prelude//rules.bzl:alias")], [], {}, ["k//third_party/python:cpython"])
+    out += _python_case("a rule of the hermetic-Python package by its package", [_node("k//tools/build/python:oracle_run.py", "prelude//rules.bzl:alias")], [], {}, ["k//tools/build/python:oracle_run.py"])
+    out += _python_case("a python_ rule kind elsewhere", [_node("k//x:y", "k//x.bzl:_python_oracle_rule")], [], {}, ["k//x:y"])
+    out += _python_case("a .py source of a Mojo test", [_node("k//src/m:t", "k//m.bzl:mojo_test_rule", ["t.mojo", "peer.py"])], [], {}, ["k//src/m:t"])
+    out += _python_case("a package that only starts with `python` is not Python", [_node("k//third_party/python_other:x", "k//m.bzl:mojo_library_rule", ["x.mojo"])], [], {}, [])
+
+    # what does not: the prelude's bootstrap helpers, a doc_tree's data, plain targets
+    out += _python_case("a python_bootstrap_binary", [_node("k//x:h", "prelude//python_bootstrap/python_bootstrap.bzl:python_bootstrap_binary", ["h.py"])], [], {}, [])
+    out += _python_case("the toolchain that provides no interpreter", [_node("k//x:t", "k//cxx.bzl:no_python_bootstrap_toolchain")], [], {}, [])
+    out += _python_case("a doc_tree holding a .py file as data", [_node("k//third_party/python:doc_tree", "k//doc_tree.bzl:doc_tree", ["pins.bzl", "x.py"])], [], {}, [])
+    out += _python_case("no Python at all", [_node("k//src/a:a", "k//m.bzl:mojo_library_rule", ["a.mojo"])], [], {}, [])
+
+    # the real graph: the fixture aggregate reaches no Python; the pinned interpreter's closure
+    # is Python and is allowed only as the SDK's own
+    fixture = python_findings(python_nodes(ctx, _AGG), [], {}, _AGG)
+    if fixture:
+        out.append("python: the complete fixture aggregate reached Python: " + fixture)
+    cpython = python_nodes(ctx, "komira//third_party/python:cpython")
+    red = python_findings(cpython, [], {}, "komira//third_party/python:cpython")
+    if "komira//third_party/python:cpython (" not in red:
+        out.append("python: the real pinned interpreter was not a finding: '{}'".format(red))
+    green = python_findings(cpython, ["third_party/python"], sdk_own_deps(ctx, cpython, ["third_party/python"]), "komira//third_party/python:cpython")
+    if green:
+        out.append("python: the real pinned interpreter in the surface was a finding: " + green)
+    return out
+
+# ---- the shipped rules -------------------------------------------------------
+#
+# rules.bzl as shipped, held to the paths that must never be mapped by guess: a
+# change to any of them can reach every target through the configuration, the
+# rules or the toolchain, so a widen row (not the ownerless-file fallback) names
+# it. Deleting a row of WIDEN, or narrowing a pattern, turns the named case red.
+
+_MUST_WIDEN = [
+    ".buckconfig",
+    ".buckconfig.local.example",
+    "buck2",
+    "tools/buck2/main",
+    "prelude/cxx/cxx.bzl",
+    "tools/build/platforms/BUCK",
+    "tools/build/cells/toolchains/BUCK",
+    "tools/build/mojo/defs.bzl",
+    "tools/build/ci/rules.bzl",
+    "tools/build/ci/affected.bzl",
+    "third_party/snappy/pin.bzl",
+]
+
+_ORDINARY = [
+    "src/komira_collections/BUCK",
+    "src/komira_collections/src/komira_collections/slab.mojo",
+    "docs/ci.md",
+    "release/artifacts.textproto",
+    ".github/workflows/pr.yml",
+    "ci/targets.bzl",
+]
+
+def _shipped_rules_cases():
+    out = []
+    shipped = struct(widen = WIDEN, inert = INERT)
+    for p in _MUST_WIDEN:
+        v = select(shipped, [p], _table(), "ci")
+        if v.kind != WIDENED or "matches widen rule" not in v.reason:
+            out.append("shipped rules: '{}' must match a widen row, got {} ({})".format(p, v.kind, v.reason))
+    for p in _ORDINARY:
+        if widen_reason(shipped, p):
+            out.append("shipped rules: '{}' is ordinary and must match no widen row, got '{}'".format(p, widen_reason(shipped, p)))
+    for p in ["README.md", "LICENSE", "docs/README.md"]:
+        if not is_inert(shipped, p):
+            out.append("shipped rules: '{}' builds nothing and must be inert".format(p))
+    for p in ["src/x/x.mojo", "release/channels.textproto", "tools/build/ci/BUCK"]:
+        if is_inert(shipped, p):
+            out.append("shipped rules: '{}' builds something and must not be inert".format(p))
+    return out
+
+# ---- the C/C++ toolchain per target platform ---------------------------------
+#
+# `toolchains//:cxx` (komira_cxx_toolchains) configured for each target platform, read off
+# the analysed toolchain: macOS arm64 compiles and archives for `aarch64-macos` at zig's
+# generic arm64 CPU and its linker is a refusal; linux x86_64 compiles for the glibc triple
+# and its linker is zig's; a platform that is macOS on another CPU, or arm64 on another OS,
+# is incompatible (the toolchain admits macOS AND arm64 together, never one of them).
+
+_CXX = "toolchains//:cxx"
+_FIXTURE_PLATFORMS = "komira//tools/build/ci/fixture/platforms"
+
+# (target platform, the triple the C is compiled for, the CPU it is compiled at, what must not be on the compile line)
+_CXX_ADMITTED = [
+    ("komira//tools/build/platforms:darwin-arm64", "aarch64-macos", "-mcpu=generic", ["x86_64-linux-gnu", "x86_64_v3"]),
+    ("komira//tools/build/platforms:linux-x86_64", "x86_64-linux-gnu", "-mcpu=x86_64_v3", ["aarch64-macos", "-mcpu=generic"]),
+]
+_CXX_REFUSED = [
+    _FIXTURE_PLATFORMS + ":macos_x86_64",
+    _FIXTURE_PLATFORMS + ":linux_arm64",
+]
+
+def _cxx_toolchain_cases(ctx):
+    out = []
+    for platform, triple, cpu, absent in _CXX_ADMITTED:
+        who = "{} on {}".format(_CXX, platform)
+        node = ctx.configured_targets(_CXX, target_platform = platform)
+        if node == None:
+            out.append("cxx toolchain: {}: incompatible, but the platform is one it must admit".format(who))
+            continue
+        info = ctx.analysis(node).providers()[CxxToolchainInfo]
+        flags = str(info.c_compiler_info.compiler_flags)
+        if triple not in flags:
+            out.append("cxx toolchain: {}: the C compile is not for {}: {}".format(who, triple, flags))
+        if cpu not in flags:
+            out.append("cxx toolchain: {}: the C compile is not at {}: {}".format(who, cpu, flags))
+        for a in absent:
+            if a in flags:
+                out.append("cxx toolchain: {}: the C compile carries {}, which belongs to the other platform: {}".format(who, a, flags))
+        macos = triple.startswith("aarch64-macos")
+        refused = "is not provided" in str(info.linker_info.linker)
+        if refused != macos:
+            out.append("cxx toolchain: {}: the linker is {}, and must be {}".format(who, "a refusal" if refused else "a real one", "a refusal (compile and archive only)" if macos else "a real one"))
+        if "ar" not in str(info.linker_info.archiver):
+            out.append("cxx toolchain: {}: no archiver: {}".format(who, info.linker_info.archiver))
+    for platform in _CXX_REFUSED:
+        if ctx.configured_targets(_CXX, target_platform = platform) != None:
+            out.append("cxx toolchain: {} on {}: compatible, but the toolchain admits macOS arm64 and linux x86_64 only".format(_CXX, platform))
+    return out
+
+# ---- adopted libraries on macOS arm64 ------------------------------------------
+#
+# A target configured for darwin-arm64 compiles its Mojo on macOS, and the C toolchain
+# (`toolchains//:cxx`) runs on a linux execution platform. A rule that takes the C toolchain
+# as a toolchain dep next to the Mojo one has no execution platform, and its
+# `readme_examples:tool` exec dep fails analysis ("no execution platform was resolved").
+# So `mojo_adopted_library` reaches the C toolchain through `adopt_cxx_link_facts`, a rule
+# of its own.
+#
+# Two reads, neither needing a macOS worker (a checkout without the worker properties
+# registers no macOS execution platform, so no adopted library can be configured there):
+#   - the declared graph: every adopted library's `cxx_toolchain` is a `cxx_link_facts`
+#     target, never a toolchain rule; and the library files of the package that links C
+#     (komira_libc) and the one that does not (komira_lz4) configure for darwin-arm64;
+#   - when the macOS execution platform is registered (the farm's checkouts), every
+#     adopted library is configured for darwin-arm64, which resolves its execution
+#     platform and its exec dependencies.
+
+_DARWIN = "komira//tools/build/platforms:darwin-arm64"
+_ADOPTED_LIBS = ["komira//src/komira_libc:lib", "komira//src/komira_lz4:lib"]
+_ADOPTED_WITH_C = "komira//src/komira_libc:komira_libc"
+
+def _adopted_darwin_cases(ctx):
+    out = []
+    for lib in _ADOPTED_LIBS:
+        if ctx.configured_targets(lib, target_platform = _DARWIN) == None:
+            out.append("adopted darwin: {} is incompatible with {}, but it builds there".format(lib, _DARWIN))
+    adopted = list(ctx.uquery().kind("^_adopted$", "komira//src/..."))
+    labels = [str(t.label) for t in adopted]
+    if _ADOPTED_WITH_C not in labels:
+        out.append("adopted darwin: the query for adopted libraries did not find {}, so this check proves nothing".format(_ADOPTED_WITH_C))
+    for t in adopted:
+        tc = t.get_attr("cxx_toolchain")
+        if tc == None:
+            continue
+        rule = [str(ctx.unconfigured_targets(str(tc)).rule_type)]
+        if len(rule) != 1 or not rule[0].endswith(":cxx_link_facts"):
+            out.append("adopted darwin: {} takes `cxx_toolchain` = {} ({}); a toolchain rule there leaves it no execution platform on {} (use //tools/build/mojo:adopt_cxx_link_facts)".format(t.label, tc, rule, _DARWIN))
+    platforms = ctx.analysis(ctx.configured_targets("komira//tools/build/platforms/default:default")).providers()[ExecutionPlatformRegistrationInfo].platforms
+    if _DARWIN in [str(p.label) for p in platforms]:
+        for t in adopted:
+            ctx.configured_targets(t.label, target_platform = _DARWIN)
+    return out
+
+# ---- the shards of ci/targets.bzl ------------------------------------------
+
+def _pkg_labels(n, per, prefix = "p"):
+    """`n` packages of `per` targets each, as labels."""
+    return ["k//src/{}{}:t{}".format(prefix, i, j) for i in range(n) for j in range(per)]
+
+def _shard_cases():
+    out = []
+    labels = _pkg_labels(40, 3) + ["k//:top", "k//tools/build/x:y"]
+    tests = [l for l in labels if l.endswith(":t0")]
+    files = render_all(labels, tests)
+
+    # placement: a package's rows share a shard, every shard index is in range, and
+    # the rows spread (a hash that sent every package to one shard would pass the rest)
+    for l in labels:
+        n = shard_of(l)
+        if n < 0 or n >= SHARDS:
+            out.append("shards: {} is placed in shard {}, outside 0..{}".format(l, n, SHARDS - 1))
+    if shard_of("k//src/p1:t0") != shard_of("k//src/p1:t2") or shard_of("k//src/p1:t0") != shard_of("other//src/p1:z"):
+        out.append("shards: the rows of one package must share a shard whatever their target or cell")
+    used = {shard_of(l): True for l in _pkg_labels(40, 1)}
+    if len(used) < SHARDS // 2:
+        out.append("shards: 40 packages reach only {} of {} shards".format(len(used), SHARDS))
+
+    # the files: one loader and one file per shard; the union of the shards is the input
+    want_files = sorted(["ci/targets.bzl"] + ["ci/targets/shard_{}.bzl".format(n) for n in range(SHARDS)])
+    if sorted(files.keys()) != want_files:
+        out.append("shards: render_all wrote {}, wanted {}".format(sorted(files.keys()), want_files))
+    rows = []
+    trows = []
+    for n in range(SHARDS):
+        lines = files["ci/targets/shard_{}.bzl".format(n)]
+        i = lines.index("TARGETS = [")
+        j = lines.index("TESTS = [")
+        rows += [l.strip().strip(",").strip('"') for l in lines[i + 1:j - 2]]
+        trows += [l.strip().strip(",").strip('"') for l in lines[j + 1:-2]]
+        for l in lines[i + 1:j - 2]:
+            if shard_of(l.strip().strip(",").strip('"')) != n:
+                out.append("shards: shard {} holds {}, which belongs to shard {}".format(n, l.strip(), shard_of(l.strip().strip(",").strip('"'))))
+    if sorted(rows) != sorted(labels) or sorted(trows) != sorted(tests):
+        out.append("shards: the union of the shards ({} target rows, {} test rows) is not the input ({}, {})".format(len(rows), len(trows), len(labels), len(tests)))
+
+    # the loader loads every shard and exposes the two lists, sorted
+    loader = "\n".join(render_loader())
+    for n in range(SHARDS):
+        if 'load("//ci/targets:shard_{n}.bzl", _TARGETS_{n} = "TARGETS", _TESTS_{n} = "TESTS")'.format(n = n) not in loader:
+            out.append("shards: the loader does not load shard {}".format(n))
+    if "\nTARGETS = sorted(_TARGETS_0 + " not in loader or "\nTESTS = sorted(_TESTS_0 + " not in loader or "_TARGETS_{}".format(SHARDS) in loader:
+        out.append("shards: the loader must expose TARGETS and TESTS as the sorted union of exactly the {} shards".format(SHARDS))
+
+    # the guard on the shards: current is green; stale either way, a test outside
+    # TARGETS, and a shard at the line limit are red, each naming its cause
+    if shard_findings(labels, labels, tests) != "":
+        out.append("shards: a current list failed the guard: " + shard_findings(labels, labels, tests))
+    if "no longer roots" not in shard_findings(labels, labels + ["k//src/gone:x"], tests) or "k//src/gone:x" not in shard_findings(labels, labels + ["k//src/gone:x"], tests):
+        out.append("shards: a row that is no longer a root must fail and be named")
+    if "in no shard" not in shard_findings(labels + ["k//src/new:x"], labels, tests) or "k//src/new:x" not in shard_findings(labels + ["k//src/new:x"], labels, tests):
+        out.append("shards: a root with no row must fail and be named")
+    if "not a row of TARGETS" not in shard_findings(labels, labels, tests + ["k//src/new:x"]):
+        out.append("shards: a TESTS row outside TARGETS must fail")
+    # one package's rows all land in one shard: LINE_LIMIT rows overflow it
+    big = ["k//src/one:t{}".format(i) for i in range(LINE_LIMIT)]
+    text = shard_findings(big, big, [])
+    if "limit" not in text or "shard_{}.bzl".format(shard_of(big[0])) not in text:
+        out.append("shards: a shard of {} rows must fail the line limit and name its file: '{}'".format(LINE_LIMIT, text))
+    just_under = ["k//src/one:t{}".format(i) for i in range(LINE_LIMIT - 11)]
+    if shard_findings(just_under, just_under, []) != "":
+        out.append("shards: a shard of {} lines (one under the limit) must pass".format(LINE_LIMIT - 1))
+    return out
+
+def _run(ctx):
+    table = _shard_cases() + _table_cases() + _held_cases() + _python_cases(ctx) + _roots_cases() + _shipped_rules_cases() + heavy_cases() + _registration_cases(ctx) + _cxx_toolchain_cases(ctx) + _adopted_darwin_cases(ctx)
+    real = _real_cases(ctx)
+    failures = table + real
+    if failures:
+        fail("{} case(s) failed:\n  ".format(len(failures)) + "\n  ".join(failures))
+    ctx.output.print("cases: table and real cases all passed")
+
+run = bxl_main(impl = _run, cli_args = {})

@@ -330,11 +330,9 @@ def test_the_env_credential_is_read_once_and_removed() raises:
         cfg^, CountingReporter(), None
     )
     js.spawn_child_spec(ChildSpec.shell(cmd))
-    var spins = 0
-    while not js.child_exited and spins < 2000:
+    while not js.child_exited:
         js.poll_and_drain()
         _ = external_call["usleep", Int32](UInt32(2000))
-        spins += 1
     assert_true(js.child_exited, "the child ran")
     assert_equal(len(js.stdout_ring), 1, "one line from the child")
     assert_equal(

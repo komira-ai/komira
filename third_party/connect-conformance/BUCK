@@ -33,7 +33,7 @@ _COMMIT = "fc1c52eb4a602c058882f6ad6ca0ffb1c39c4730"
 _SHA256 = "7d4d1f36980debf900b12514c8d51107245e9195b3c581e61fa165fd95c94284"
 _SIZE = 9685934
 
-_VISIBLE = ["//src/tests/conformance/komira_connect_conformance/..."]
+_VISIBLE = ["//src/tests/conformance/komira_connect_conformance/...", "komira//ci:"]
 
 pinned_file(
     name = "connectconformance.tar.gz",

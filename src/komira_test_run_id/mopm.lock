@@ -1,0 +1,30 @@
+{
+  "lock_version": 2,
+  "mojo": [
+    "1.0.0"
+  ],
+  "toolchain": {
+    "1.0.0": {
+      "linux-64": "fd654c4192487587d8f8d9402d060e45e218b79da7b8964503a703710e49b15d",
+      "linux-aarch64": "3e7db5a0f9255c9086d9d29f385e7fd90e8536fa16ffe55414f6bba4e0ef3d3e",
+      "osx-arm64": "dfb1ddbe32564e406967054fbccd4ad643bf01e72532a3eb3add28253908ac5f"
+    }
+  },
+  "channels": [
+    "https://conda.mopm.dev/"
+  ],
+  "packages": [
+    {
+      "name": "komira_clock",
+      "version": "0.1.0",
+      "source": "path",
+      "path": "../komira_clock"
+    },
+    {
+      "name": "komira_validation_run",
+      "version": "0.1.0",
+      "source": "path",
+      "path": "../komira_validation_run"
+    }
+  ]
+}

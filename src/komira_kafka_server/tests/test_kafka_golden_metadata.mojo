@@ -12,10 +12,9 @@
 # leader_epoch (v7+), offline_replicas (v5+), the authorized operations (v8+),
 # and at v9 the compact forms and tag buffers.
 #
-# A leaderless partition (map entry -1) is deliberately not encoded here: the
-# encoder reports it with error_code 0 and replicas/isr [-1], which the
-# MetadataResponse schema does not allow (komira-ai/komira#1034), so no golden
-# pins those bytes. The -1 entry takes the same lines as any other leader.
+# A second cluster, topic "t1" with leader map [1, -1], checks a leaderless
+# partition at every version: LEADER_NOT_AVAILABLE, leader -1, leader_epoch -1
+# and empty replica, isr and offline lists (komira-ai/komira#1034).
 
 from std.testing import assert_equal, assert_false, assert_true
 
@@ -156,6 +155,96 @@ def test_metadata_response_v9() raises:
         " 00"  # top-level tag buffer
     )
     _assert_bytes_eq(got, want, "v9")
+
+
+# -----------------------------------------------------------------------------
+# A leaderless partition (map entry -1, no live owner). MetadataResponse.json
+# (3.9.0): ReplicaNodes is "the set of all nodes that host this partition" and
+# IsrNodes "the set of nodes that are in sync with the leader", so -1 is not a
+# member of either; LeaderEpoch defaults to -1. A Kafka broker reports such a
+# partition with error_code LEADER_NOT_AVAILABLE (5) and leader_id -1. This
+# codec has no replica set for a partition without an owner, so it sends empty
+# replica, isr and offline lists (komira-ai/komira#1034).
+# -----------------------------------------------------------------------------
+def _leaderless_topics() -> List[MetadataTopic]:
+    var leaders = List[Int32]()
+    leaders.append(Int32(1))
+    leaders.append(Int32(-1))
+    var out = List[MetadataTopic]()
+    out.append(MetadataTopic(String("t1"), 2, False, leaders^))
+    return out^
+
+
+def _leaderless_nonflexible_golden(version: Int) -> String:
+    """The leaderless Metadata response at `version` (1, or 4 through 8)."""
+    var offline = String(" 00 00 00 00") if version >= 5 else String("")
+    var s = String("00 00 00 0a")  # correlation_id 10
+    if version >= 3:
+        s += " 00 00 00 00"  # throttle_time_ms
+    s += " 00 00 00 01"  # brokers: 1
+    s += " 00 00 00 01 | 00 02 6b 62 | 00 00 23 84 | ff ff"
+    if version >= 2:
+        s += " ff ff"  # cluster_id null
+    s += " 00 00 00 01"  # controller_id 1
+    s += " 00 00 00 01"  # topics: 1
+    s += " 00 00 | 00 02 74 31 | 00 | 00 00 00 02"  # "t1", 2 partitions
+    s += " 00 00 | 00 00 00 00 | 00 00 00 01"  # p0: no error, leader 1
+    if version >= 7:
+        s += " 00 00 00 00"  # leader_epoch 0
+    s += " 00 00 00 01 00 00 00 01 | 00 00 00 01 00 00 00 01" + offline
+    s += " 00 05 | 00 00 00 01 | ff ff ff ff"  # p1: LEADER_NOT_AVAILABLE, -1
+    if version >= 7:
+        s += " ff ff ff ff"  # leader_epoch -1
+    s += " 00 00 00 00 | 00 00 00 00" + offline  # replicas [], isr []
+    if version >= 8:
+        s += " 80 00 00 00 | 80 00 00 00"  # topic and cluster operations
+    return s
+
+
+def test_metadata_response_leaderless_partition() raises:
+    var got1 = encode_metadata_response_v1(
+        Int32(10), _brokers(), Int32(1), _leaderless_topics(), Int32(7)
+    )
+    _assert_bytes_eq(got1, _hex(_leaderless_nonflexible_golden(1)), "v1 -1")
+    var got4 = encode_metadata_response_v4(
+        Int32(10), _brokers(), Int32(1), _leaderless_topics(), Int32(7)
+    )
+    _assert_bytes_eq(got4, _hex(_leaderless_nonflexible_golden(4)), "v4 -1")
+    for v in range(5, 9):
+        var got = encode_metadata_response_v5_to_v8(
+            Int32(10),
+            Int16(v),
+            _brokers(),
+            Int32(1),
+            _leaderless_topics(),
+            Int32(7),
+        )
+        _assert_bytes_eq(
+            got,
+            _hex(_leaderless_nonflexible_golden(v)),
+            "v" + String(v) + " -1",
+        )
+    var got9 = encode_metadata_response_v9(
+        Int32(10), _brokers(), Int32(1), _leaderless_topics(), Int32(7)
+    )
+    var want9 = _hex(
+        "00 00 00 0a 00"  # correlation_id 10, header tag buffer
+        " 00 00 00 00"  # throttle_time_ms
+        " 02"  # brokers: 1
+        " 00 00 00 01 | 03 6b 62 | 00 00 23 84 | 00 | 00"
+        " 00"  # cluster_id null
+        " 00 00 00 01"  # controller_id
+        " 02"  # topics: 1
+        " 00 00 | 03 74 31 | 00 | 03"  # "t1", 2 partitions
+        " 00 00 | 00 00 00 00 | 00 00 00 01 | 00 00 00 00"  # p0 leader 1
+        " 02 00 00 00 01 | 02 00 00 00 01 | 01 | 00"
+        " 00 05 | 00 00 00 01 | ff ff ff ff | ff ff ff ff"  # p1: 5, -1, -1
+        " 01 | 01 | 01 | 00"  # replicas [], isr [], offline [], tags
+        " 80 00 00 00 | 00"  # topic_authorized_operations, tags
+        " 80 00 00 00"  # cluster_authorized_operations
+        " 00"  # top-level tag buffer
+    )
+    _assert_bytes_eq(got9, want9, "v9 -1")
 
 
 def test_metadata_copies() raises:
@@ -325,6 +414,7 @@ def main() raises:
     test_metadata_response_v4()
     test_metadata_response_v5_to_v8()
     test_metadata_response_v9()
+    test_metadata_response_leaderless_partition()
     test_metadata_copies()
     test_metadata_request_v9_named()
     test_metadata_request_v9_all_topics()

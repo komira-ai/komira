@@ -276,7 +276,7 @@ Seven notes on this table.
   when `landed` is empty, but the failing node's own call (a create whose wait timed out) may have
   landed. Exit 4 promises that no effect landed, and kci cannot promise that here.
 - **The FAILED row is only the reads made before `apply_graph_owned` is called.** The engine's own
-  pre-flight (`refuse_unless_owned` in `kci_reconciler/cell_walk.mojo`) also reads before any change,
+  pre-flight (`refuse_unless_owned` in `src/kci_reconciler/src/kci_reconciler/cell_walk.mojo`) also reads before any change,
   but its error reaches kci as the same untyped engine error as a create that timed out, so it is
   PARTIAL. Telling the two apart needs the engine to type its pre-flight errors, which is not in v1.
 - **The plan and apply paths differ.** `apply_resources` catches every engine error into `ApplyOutcome`, while `plan_report` lets `plan_graph_owned` raise. D4's typed refusal tells a raised refusal from a raised read error on both paths.
@@ -304,7 +304,7 @@ the exit number above) and the cell is left exactly as the failed apply left it:
 further step, no further stage.
 
 - **No rollback.** `apply_resources` does not unwind a failed apply, and the engine says why
-  (the `apply_graph_tracked` docstring in `kci_reconciler/engine.mojo`): the graphs are level-triggered and
+  (the `apply_graph_tracked` docstring in `src/kci_reconciler/src/kci_reconciler/engine.mojo`): the graphs are level-triggered and
   idempotent, so re-running the deploy once the cause is fixed completes what is `pending`, while
   tearing down what converged would turn a partial apply into an outage. The engine's
   `rollback_create` exists, and no deploy path calls it; this design does not change that.

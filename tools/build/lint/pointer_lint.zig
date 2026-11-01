@@ -376,27 +376,27 @@ pub fn isLibFile(a: Allocator, path: []const u8, root: []const u8) !bool {
 pub fn readFile(a: Allocator, path: []const u8, contents: []const u8, root: []const u8) !FileResult {
     var r = Reader{
         .a = a,
-        .sites = std.ArrayList(Site).init(a),
+        .sites = std.ArrayList(Site).empty,
         .libfile = try isLibFile(a, path, root),
         .bound = std.StringHashMap(usize).init(a),
-        .buf = std.ArrayList(u8).init(a),
-        .rbuf = std.ArrayList(u8).init(a),
+        .buf = std.ArrayList(u8).empty,
+        .rbuf = std.ArrayList(u8).empty,
     };
     var marked = false;
     var lx = tok.Lexer{};
-    var spans = std.ArrayList(tok.Span).init(a);
-    var code = std.ArrayList(u8).init(a);
-    var lit = std.ArrayList(u8).init(a);
+    var spans = std.ArrayList(tok.Span).empty;
+    var code = std.ArrayList(u8).empty;
+    var lit = std.ArrayList(u8).empty;
     var it = Lines{ .text = contents };
     var ln: usize = 0;
     while (it.next()) |line| {
         ln += 1;
-        try lx.scan(line, &spans);
+        try lx.scan(a, line, &spans);
         if (isMarkerLine(line)) marked = true;
         code.clearRetainingCapacity();
         lit.clearRetainingCapacity();
-        try tok.view(line, spans.items, .blank, &code);
-        try tok.view(line, spans.items, .keep, &lit);
+        try tok.view(a, line, spans.items, .blank, &code);
+        try tok.view(a, line, spans.items, .keep, &lit);
         try r.line(ln, code.items, lit.items);
     }
     try r.flush();
@@ -454,10 +454,10 @@ const Reader = struct {
 
     fn line(self: *Reader, ln: usize, code: []const u8, lit: []const u8) !void {
         if (self.pending) {
-            try self.buf.append(' ');
-            try self.buf.appendSlice(code);
-            try self.rbuf.append(' ');
-            try self.rbuf.appendSlice(lit);
+            try self.buf.append(self.a, ' ');
+            try self.buf.appendSlice(self.a, code);
+            try self.rbuf.append(self.a, ' ');
+            try self.rbuf.appendSlice(self.a, lit);
             self.dep += tok.depth(code);
             if (self.dep <= 0) try self.flush();
             return;
@@ -466,8 +466,8 @@ const Reader = struct {
         self.pending = true;
         self.buf.clearRetainingCapacity();
         self.rbuf.clearRetainingCapacity();
-        try self.buf.appendSlice(code);
-        try self.rbuf.appendSlice(lit);
+        try self.buf.appendSlice(self.a, code);
+        try self.rbuf.appendSlice(self.a, lit);
         self.pline = ln;
         self.dep = tok.depth(code);
         self.pind = skipBlank(code, 0);
@@ -480,20 +480,20 @@ const Reader = struct {
     }
 
     fn emit(self: *Reader, rule: Rule, ln: usize, text: []const u8, suffix: []const u8) !void {
-        var out = std.ArrayList(u8).init(self.a);
+        var out = std.ArrayList(u8).empty;
         var blank = false;
         for ([_][]const u8{ text, suffix }) |part| for (part) |c| {
             if (isBlank(c)) {
                 blank = true;
                 continue;
             }
-            if (blank and out.items.len > 0) try out.append(' ');
+            if (blank and out.items.len > 0) try out.append(self.a, ' ');
             blank = false;
-            try out.append(c);
+            try out.append(self.a, c);
         };
-        if (blank and out.items.len > 0) try out.append(' ');
+        if (blank and out.items.len > 0) try out.append(self.a, ' ');
         const t = out.items[0..@min(out.items.len, 160)];
-        try self.sites.append(.{ .rule = rule, .line = ln, .text = t });
+        try self.sites.append(self.a, .{ .rule = rule, .line = ln, .text = t });
     }
 
     fn emitN(self: *Reader, n: usize, rule: Rule, ln: usize, text: []const u8) !void {
@@ -630,16 +630,16 @@ const Held = struct { count: []const u8, n: u64, row: usize, file: []const u8, r
 
 /// The findings over the files, sorted bytewise.
 pub fn check(a: Allocator, input: Input) ![]const []const u8 {
-    var out = std.ArrayList([]const u8).init(a);
+    var out = std.ArrayList([]const u8).empty;
     var known = std.StringHashMap(void).init(a);
     var marked = std.StringHashMap(void).init(a);
     const root = try std.mem.concat(a, u8, &.{ input.public_root, "/" });
-    var results = std.ArrayList(FileResult).init(a);
+    var results = std.ArrayList(FileResult).empty;
     for (input.files) |f| {
         try known.put(f.path, {});
         const res = try readFile(a, f.path, f.contents, root);
         if (res.marked) try marked.put(f.path, {});
-        try results.append(res);
+        try results.append(a, res);
     }
 
     // The FFI modules: path -> row.
@@ -652,20 +652,20 @@ pub fn check(a: Allocator, input: Input) ![]const []const u8 {
         const where = try std.fmt.allocPrint(a, "{s}:{d}: ", .{ input.ffi_name, fnr });
         const nf = std.mem.count(u8, row, "\t") + 1;
         if (nf != 2) {
-            try out.append(try std.fmt.allocPrint(a, "{s}a row has 2 tab-separated fields (file, reason), not {d}", .{ where, nf }));
+            try out.append(a, try std.fmt.allocPrint(a, "{s}a row has 2 tab-separated fields (file, reason), not {d}", .{ where, nf }));
             continue;
         }
         var fields = std.mem.splitScalar(u8, row, '\t');
         const file = fields.next().?;
         const reason = fields.next().?;
         if (!known.contains(file)) {
-            try out.append(try std.fmt.allocPrint(a, "{s}{s} is not a .mojo file of the tree; delete the row", .{ where, file }));
+            try out.append(a, try std.fmt.allocPrint(a, "{s}{s} is not a .mojo file of the tree; delete the row", .{ where, file }));
         } else if (isSpaceOnly(reason)) {
-            try out.append(try std.fmt.allocPrint(a, "{s}empty reason: say which foreign resource the module owns", .{where}));
+            try out.append(a, try std.fmt.allocPrint(a, "{s}empty reason: say which foreign resource the module owns", .{where}));
         } else if (ffi.contains(file)) {
-            try out.append(try std.fmt.allocPrint(a, "{s}a second row for {s}", .{ where, file }));
+            try out.append(a, try std.fmt.allocPrint(a, "{s}a second row for {s}", .{ where, file }));
         } else if (!marked.contains(file)) {
-            try out.append(try std.fmt.allocPrint(a, "{s}{s} carries no `# FFI-BOUNDARY:` comment line, so it is not an FFI module", .{ where, file }));
+            try out.append(a, try std.fmt.allocPrint(a, "{s}{s} carries no `# FFI-BOUNDARY:` comment line, so it is not an FFI module", .{ where, file }));
         } else try ffi.put(file, fnr);
     }
 
@@ -679,7 +679,7 @@ pub fn check(a: Allocator, input: Input) ![]const []const u8 {
         const where = try std.fmt.allocPrint(a, "{s}:{d}: ", .{ input.holds_name, fnr });
         const nf = std.mem.count(u8, row, "\t") + 1;
         if (nf != 4) {
-            try out.append(try std.fmt.allocPrint(a, "{s}a row has 4 tab-separated fields (rule, file, count, reason), not {d}", .{ where, nf }));
+            try out.append(a, try std.fmt.allocPrint(a, "{s}a row has 4 tab-separated fields (rule, file, count, reason), not {d}", .{ where, nf }));
             continue;
         }
         var fields = std.mem.splitScalar(u8, row, '\t');
@@ -688,18 +688,18 @@ pub fn check(a: Allocator, input: Input) ![]const []const u8 {
         const count = fields.next().?;
         const reason = fields.next().?;
         const rule = std.meta.stringToEnum(Rule, rule_name) orelse {
-            try out.append(try std.fmt.allocPrint(a, "{s}unknown rule `{s}` (rules: {s})", .{ where, rule_name, rule_list }));
+            try out.append(a, try std.fmt.allocPrint(a, "{s}unknown rule `{s}` (rules: {s})", .{ where, rule_name, rule_list }));
             continue;
         };
         const key = try std.fmt.allocPrint(a, "{s}\t{s}", .{ rule_name, file });
         if (!known.contains(file)) {
-            try out.append(try std.fmt.allocPrint(a, "{s}{s} is not a .mojo file of the tree; delete the row", .{ where, file }));
+            try out.append(a, try std.fmt.allocPrint(a, "{s}{s} is not a .mojo file of the tree; delete the row", .{ where, file }));
         } else if (!isCount(count)) {
-            try out.append(try std.fmt.allocPrint(a, "{s}count `{s}` is not a positive whole number", .{ where, count }));
+            try out.append(a, try std.fmt.allocPrint(a, "{s}count `{s}` is not a positive whole number", .{ where, count }));
         } else if (isSpaceOnly(reason)) {
-            try out.append(try std.fmt.allocPrint(a, "{s}empty reason: say why this file still holds the sites", .{where}));
+            try out.append(a, try std.fmt.allocPrint(a, "{s}empty reason: say why this file still holds the sites", .{where}));
         } else if (held.contains(key)) {
-            try out.append(try std.fmt.allocPrint(a, "{s}a second row for {s} in {s}", .{ where, rule_name, file }));
+            try out.append(a, try std.fmt.allocPrint(a, "{s}a second row for {s} in {s}", .{ where, rule_name, file }));
         } else {
             const n = std.fmt.parseInt(u64, count, 10) catch std.math.maxInt(u64);
             try held.put(key, .{ .count = count, .n = n, .row = fnr, .file = file, .rule = rule });
@@ -717,8 +717,8 @@ pub fn check(a: Allocator, input: Input) ![]const []const u8 {
             }
             const key = try std.fmt.allocPrint(a, "{s}\t{s}", .{ @tagName(s.rule), f.path });
             const gop = try sites.getOrPut(key);
-            if (!gop.found_existing) gop.value_ptr.* = std.ArrayList([]const u8).init(a);
-            try gop.value_ptr.append(try std.fmt.allocPrint(a, "{s}{s}:{d}: {s}: {s} -- {s}", .{ input.site_prefix, f.path, s.line, @tagName(s.rule), s.text, s.rule.describe() }));
+            if (!gop.found_existing) gop.value_ptr.* = std.ArrayList([]const u8).empty;
+            try gop.value_ptr.append(a, try std.fmt.allocPrint(a, "{s}{s}:{d}: {s}: {s} -- {s}", .{ input.site_prefix, f.path, s.line, @tagName(s.rule), s.text, s.rule.describe() }));
         }
     }
     var sit = sites.iterator();
@@ -728,8 +728,8 @@ pub fn check(a: Allocator, input: Input) ![]const []const u8 {
         if (h != null and list.len <= h.?.n) continue;
         for (list) |l| {
             if (h) |hh| {
-                try out.append(try std.fmt.allocPrint(a, "{s} ({d} sites, held {s})", .{ l, list.len, hh.count }));
-            } else try out.append(l);
+                try out.append(a, try std.fmt.allocPrint(a, "{s} ({d} sites, held {s})", .{ l, list.len, hh.count }));
+            } else try out.append(a, l);
         }
     }
     var hit = held.iterator();
@@ -738,15 +738,15 @@ pub fn check(a: Allocator, input: Input) ![]const []const u8 {
         const h = e.value_ptr.*;
         if (c >= h.n) continue;
         if (c > 0) {
-            try out.append(try std.fmt.allocPrint(a, "{s}:{d}: {s} in {s} is held at {s} and has {d}: lower the count to {d}", .{ input.holds_name, h.row, @tagName(h.rule), h.file, h.count, c, c }));
+            try out.append(a, try std.fmt.allocPrint(a, "{s}:{d}: {s} in {s} is held at {s} and has {d}: lower the count to {d}", .{ input.holds_name, h.row, @tagName(h.rule), h.file, h.count, c, c }));
         } else {
-            try out.append(try std.fmt.allocPrint(a, "{s}:{d}: {s} in {s} is held at {s} and has 0: delete the row", .{ input.holds_name, h.row, @tagName(h.rule), h.file, h.count }));
+            try out.append(a, try std.fmt.allocPrint(a, "{s}:{d}: {s} in {s} is held at {s} and has 0: delete the row", .{ input.holds_name, h.row, @tagName(h.rule), h.file, h.count }));
         }
     }
     var fit = ffi.iterator();
     while (fit.next()) |e| {
         if (!fsites.contains(e.key_ptr.*)) {
-            try out.append(try std.fmt.allocPrint(a, "{s}:{d}: {s} names no wildcard origin; delete the row", .{ input.ffi_name, e.value_ptr.*, e.key_ptr.* }));
+            try out.append(a, try std.fmt.allocPrint(a, "{s}:{d}: {s} names no wildcard origin; delete the row", .{ input.ffi_name, e.value_ptr.*, e.key_ptr.* }));
         }
     }
     std.mem.sort([]const u8, out.items, {}, lessThan);
@@ -760,19 +760,19 @@ fn lessThan(_: void, x: []const u8, y: []const u8) bool {
 /// The report: the findings with `stage` (a site prefix) named `prefix`,
 /// then, when no file was read, a line saying so.
 pub fn report(a: Allocator, findings: []const []const u8, stage: []const u8, prefix: []const u8, checked: usize) ![]const []const u8 {
-    var out = std.ArrayList([]const u8).init(a);
+    var out = std.ArrayList([]const u8).empty;
     for (findings) |f| {
-        try out.append(if (stage.len > 0) try std.mem.replaceOwned(u8, a, f, stage, prefix) else f);
+        try out.append(a, if (stage.len > 0) try std.mem.replaceOwned(u8, a, f, stage, prefix) else f);
     }
-    if (checked == 0) try out.append("pointer_lint: checked nothing (no inputs, or no lines to check)");
+    if (checked == 0) try out.append(a, "pointer_lint: checked nothing (no inputs, or no lines to check)");
     return out.items;
 }
 
 /// The validation result Buck2 reads, for a report of `lines` over
 /// `checked` files: at most 200 lines in its message.
 pub fn resultJson(a: Allocator, lines: []const []const u8, checked: usize) ![]const u8 {
-    var out = std.ArrayList(u8).init(a);
-    const w = out.writer();
+    var out = std.ArrayList(u8).empty;
+    const w = out.writer(a);
     if (lines.len == 0) {
         try w.print("{{\"version\": 1, \"data\": {{\"status\": \"success\", \"message\": \"pointer_lint: {d} checked\"}}}}\n", .{checked});
         return out.items;
@@ -799,11 +799,11 @@ pub fn main() !void {
     const a = arena.allocator();
     const argv = try std.process.argsAlloc(a);
     if (argv.len != 9) {
-        std.io.getStdErr().writeAll(usage) catch {};
+        std.fs.File.stderr().writeAll(usage) catch {};
         std.process.exit(2);
     }
     const stage = argv[2];
-    var files = std.ArrayList(File).init(a);
+    var files = std.ArrayList(File).empty;
     var dir = try std.fs.cwd().openDir(stage, .{ .iterate = true });
     defer dir.close();
     var walker = try dir.walk(a);
@@ -811,7 +811,7 @@ pub fn main() !void {
         if (entry.kind != .file and entry.kind != .sym_link) continue;
         if (!std.mem.endsWith(u8, entry.basename, ".mojo")) continue;
         const path = try a.dupe(u8, entry.path);
-        try files.append(.{ .path = path, .contents = try dir.readFileAlloc(a, path, 1 << 30) });
+        try files.append(a, .{ .path = path, .contents = try dir.readFileAlloc(a, path, 1 << 30) });
     }
     const max = 1 << 30;
     const input = Input{
@@ -825,5 +825,5 @@ pub fn main() !void {
     };
     const lines = try report(a, try check(a, input), input.site_prefix, argv[3], files.items.len);
     const json = try resultJson(a, lines, files.items.len);
-    try std.fs.cwd().writeFile(argv[1], json);
+    try std.fs.cwd().writeFile(.{ .sub_path = argv[1], .data = json });
 }

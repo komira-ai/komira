@@ -431,6 +431,36 @@ struct BrokerScanRuntime[Storage: CloneableConditionalWriteStore](
             var log_start = core.log_start_offset()
             var index = core.resolve_index()
             var tags = core.chunk_txn_tags()
+            # The tag walk skips a chunk that reads not_found, so a chunk
+            # reaped after the index walk read it is in `index` with no tag.
+            # Its transaction is unknown: re-read `_LOG_START`; past the
+            # chunk, re-read all three from it (the chunk is below the new
+            # log start); otherwise the chunk is missing from the live range
+            # and the plan refuses. Each restart moves `log_start` forward.
+            while True:
+                var at = _first_untagged(index, tags)
+                if at < 0:
+                    break
+                var seq = index[at].chunk_seq
+                var base = index[at].base_offset
+                var moved = core.log_start_offset()
+                if moved <= base:
+                    raise Error(
+                        String("BrokerScanRuntime.plan_splits: chunk ")
+                        + String(seq)
+                        + String(" (offset ")
+                        + String(base)
+                        + String(") of partition ")
+                        + String(p)
+                        + String(" has no transaction tag and is at or above")
+                        + String(" _LOG_START offset ")
+                        + String(moved)
+                        + String(" (torn manifest lineage; refusing to plan it")
+                        + String(" as non-transactional)")
+                    )
+                log_start = moved
+                index = core.resolve_index()
+                tags = core.chunk_txn_tags()
             refuse_compacted_tier(
                 self._store, self._cluster, spec.topic, p, spec.start_offsets[i], hwm
             )
@@ -666,15 +696,34 @@ def _contains(xs: List[String], x: String) -> Bool:
     return False
 
 
-def _tag_of(tags: List[ChunkTagAt], chunk_seq: Int64) -> ChunkTxnTag:
-    """The transaction tag of data chunk `chunk_seq`; a chunk with no tag entry
-    (reaped mid-walk) is non-transactional."""
+def _first_untagged(index: List[SegmentRef], tags: List[ChunkTagAt]) -> Int:
+    """The position in `index` of the first chunk with no entry in `tags`
+    (reaped between the two walks), or -1 when every chunk has one. Both
+    walks emit chunks in ascending `chunk_seq`, so one merge pass decides."""
+    var t = 0
+    for s in range(len(index)):
+        var seq = index[s].chunk_seq
+        while t < len(tags) and tags[t].chunk_seq < seq:
+            t += 1
+        if t >= len(tags) or tags[t].chunk_seq != seq:
+            return s
+    return -1
+
+
+def _tag_of(tags: List[ChunkTagAt], chunk_seq: Int64) raises -> ChunkTxnTag:
+    """The transaction tag of data chunk `chunk_seq`. `plan_splits` calls it
+    only for a chunk `_first_untagged` found a tag for; a chunk with no tag
+    is refused, never read as non-transactional."""
     for i in range(len(tags)):
         if tags[i].chunk_seq == chunk_seq:
             return ChunkTxnTag(
                 tags[i].marker_type, String(tags[i].txn_id), tags[i].producer_epoch
             )
-    return ChunkTxnTag(Int64(0), String(""), Int64(0))
+    raise Error(
+        String("BrokerScanRuntime: chunk ")
+        + String(chunk_seq)
+        + String(" has no transaction tag")
+    )
 
 
 def _topic_schema_of(b: ScanBinding) raises -> Schema:

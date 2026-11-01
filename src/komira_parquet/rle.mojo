@@ -282,10 +282,9 @@ struct RleDecoder(Movable):
                     # total_bytes if near end of buffer, but we must advance
                     # by the format-specified amount to stay in sync).
                     var skip = min(total_bytes, self.reader.remaining())
-                    try:
-                        self.reader.advance(skip)
-                    except:
-                        pass  # cov: unreachable skip <= remaining(), so advance cannot raise
+                    # `skip <= remaining()`, so advance cannot raise; were it
+                    # to, the handler of the enclosing `try` ends the decode.
+                    self.reader.advance(skip)
 
                 else:
                     # --- RLE run ---

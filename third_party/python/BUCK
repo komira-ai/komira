@@ -16,6 +16,8 @@ _TEST_ONLY = [
     "komira//src/tests/e2e/komira_tls_interop_e2e/...",
     # The tests of the CI scripts under release/ci (a py_test alone).
     "komira//release/ci/tests:",
+    # The binding tests of the shared library (python_binding_test).
+    "komira//tools/build/examples/python_binding:",
 ]
 
 pinned_file(

@@ -33,7 +33,6 @@ from komira_plan_ir.logical_plan import (
     PLAN_PARTITION_BY,
     PLAN_PARTITION_TOPN,
     PLAN_SCAN,
-    PLAN_SORT,
 )
 from komira_plan_expr.expr import Expr, EXPR_COL_REF, BIN_LE, BIN_LT, BIN_GT, BIN_GE
 from komira_plan_expr.scalar_value import ScalarValue
@@ -807,112 +806,11 @@ def test_gate_default_state() raises:
 # and the query failed at runtime with "no field named 'rk'". Skipping
 # fusion when rk is referenced was correct but slow; extending
 # PartitionTopN to optionally emit the rk column keeps the fused path.
+#
+# The cases where a downstream Sort or Project reads rk live in
+# `test_optimizer_partition_topn_ancestor_refs.mojo`, under a root that drops
+# rk (the plan's root output counts as read, komira#1290).
 # =============================================================================
-
-
-def test_fires_with_rk_emission_when_rk_referenced_by_downstream_sort() raises:
-    """RANK + Filter(rk <= 10) + Sort([pid, rk]) — fuses WITH rk emission.
-
-    The downstream Sort references the rk column. The safety pre-pass
-    detects this; the fuse reacts by fusing with
-    `output_rank_col_name = Some("rk")` so the kernel emits rk for the
-    downstream Sort to resolve. This is the canonical ranked top-K
-    shape; this test asserts the fused path is wired up.
-
-    Fusion fires with rk emission (it is not skipped).
-    """
-    var scan = _scan_node()
-    var pb = _partition_by_func(
-        scan^, PF_RANK, _str_list1("pid"), _str_list1("score"), _bool_list1(True)
-    )
-    var rk_name = _window_col_name(pb)
-    var pred = Expr.binary(
-        BIN_LE,
-        Expr.col_ref(rk_name),
-        Expr.literal(ScalarValue.from_int(10)),
-    )
-    var filter_plan = LogicalPlan.filter(pred^, pb^)
-    # Sort references rk → fuse with output_rank_col_name = Some(rk).
-    var sort_keys = _str_list_n("pid", rk_name)
-    var sort_desc = _bool_list2(False, False)
-    var sort_plan = LogicalPlan.sort(sort_keys^, sort_desc^, filter_plan^)
-
-    var optimized = fuse_partition_topn(sort_plan^)
-    # Plan: Sort → PartitionTopN(func=RANK, output_rank_col_name=Some).
-    assert_equal(Int(optimized.tag), Int(PLAN_SORT))
-    ref sort_data = optimized._sort.value()[]
-    ref pt_node = sort_data.child[]
-    assert_equal(
-        Int(pt_node.tag), Int(PLAN_PARTITION_TOPN),
-        "Filter+PartitionBy must fuse into PartitionTopN even when "
-        "downstream Sort references rk (with rk emission)",
-    )
-    ref pt_data = pt_node._partition_topn.value()[]
-    assert_equal(Int(pt_data.func), Int(PF_RANK))
-    assert_equal(pt_data.k, 10)
-    assert_true(
-        Bool(pt_data.output_rank_col_name),
-        "output_rank_col_name must be Some when downstream Sort references rk",
-    )
-    assert_equal(
-        pt_data.output_rank_col_name.value(),
-        rk_name,
-        "output_rank_col_name must be the rk column name",
-    )
-    # PartitionTopN's output schema has rk col appended (child schema +
-    # 1 column).
-    assert_equal(
-        pt_node.output_schema.num_columns(), 4,
-        "fused PartitionTopN output schema = 3 child cols + rk col = 4",
-    )
-    assert_equal(pt_node.output_schema.field_name(3), rk_name)
-    print("PASS test_fires_with_rk_emission_when_rk_referenced_by_downstream_sort")
-
-
-def test_fires_with_rk_emission_when_rk_referenced_by_downstream_project() raises:
-    """RANK + Filter(rk <= 10) + Project([..., rk]) — fuses WITH rk emission.
-
-    Same shape as the Sort case but exercised through a Project that
-    re-emits the rk column.
-    """
-    var scan = _scan_node()
-    var pb = _partition_by_func(
-        scan^, PF_RANK, _str_list1("pid"), _str_list1("score"), _bool_list1(True)
-    )
-    var rk_name = _window_col_name(pb)
-    var pred = Expr.binary(
-        BIN_LE,
-        Expr.col_ref(rk_name),
-        Expr.literal(ScalarValue.from_int(10)),
-    )
-    var filter_plan = LogicalPlan.filter(pred^, pb^)
-    # Project includes rk col → fuse with rk emission.
-    from komira_collections.slab import Slab
-    var proj_exprs = Slab[Expr]()
-    proj_exprs.append(Expr.col_ref(String("pid")))
-    proj_exprs.append(Expr.col_ref(rk_name))
-    var project = LogicalPlan.project(proj_exprs^, filter_plan^)
-
-    var optimized = fuse_partition_topn(project^)
-    assert_equal(Int(optimized.tag), Int(PLAN_PROJECT))
-    ref proj_data = optimized._project.value()[]
-    ref pt_node = proj_data.child[]
-    assert_equal(
-        Int(pt_node.tag), Int(PLAN_PARTITION_TOPN),
-        "Filter+PartitionBy must fuse into PartitionTopN when "
-        "downstream Project references rk (with rk emission)",
-    )
-    ref pt_data = pt_node._partition_topn.value()[]
-    assert_true(
-        Bool(pt_data.output_rank_col_name),
-        "output_rank_col_name must be Some when downstream Project references rk",
-    )
-    assert_equal(
-        pt_data.output_rank_col_name.value(),
-        rk_name,
-        "output_rank_col_name must be the rk column name",
-    )
-    print("PASS test_fires_with_rk_emission_when_rk_referenced_by_downstream_project")
 
 
 def test_fires_when_rk_only_used_by_filter() raises:
@@ -993,7 +891,5 @@ def main() raises:
     test_epsilon_value_locked()
     test_gate_default_state()
     # Safety pre-pass / rk-emission tests
-    test_fires_with_rk_emission_when_rk_referenced_by_downstream_sort()
-    test_fires_with_rk_emission_when_rk_referenced_by_downstream_project()
     test_fires_when_rk_only_used_by_filter()
     print("All fuse_partition_topn(rank) tests passed")

@@ -123,3 +123,32 @@ def main() raises:
     assert_equal(seen[1], "REMOVE@s2")
     assert_equal(listener.polls, 4)  # the empty live poll did not end the loop
 ```
+
+## Build files
+
+This package is built with buildrules' `mojo_package` and packaged for mopm as `komira_snapshotter`, version 0.1.0
+(`mopm.toml`). The library is `src/komira_snapshotter/`, its tests are `tests/`. It depends on one package,
+`komira_rowcell`, a sibling directory (`[dependencies]` of `mopm.toml`: `{ path = "../komira_rowcell",
+version = "0.1" }`), so the `.conda` of this package records `mojo-komira_rowcell >=0.1,<0.2` as a dependency
+and holds none of that package's files. The files that are not sources:
+
+| file | what |
+|---|---|
+| `mopm.toml` | the mopm manifest: name, version, the Mojo version, the dependency and where the library and its tests are |
+| `mopm.lock` | the toolchain pins and the path dependency, as `mopm lock` writes them (no registry is reached: the only dependency is a sibling) |
+| `mopm-toolchain.toml` | the exact mopm and Mojo versions the build uses (written by hand) |
+| `coverage_floor.txt` | `lines NN.NN` and `branches NN.NN`: the least line and branch coverage `:coverage` may measure; `:coverage_floor` fails when either falls below |
+| `buildrules.mojo.lock.bzl`, `buildrules.mojo.bzl` | written by `buildrules mojo sync` from the files above and from the manifest of the sibling; `buildrules mojo check` fails when they are stale |
+
+`:lib` is the library file, built from the `:lib` of `komira_rowcell`, and exists only once the tests have passed.
+After any change to a source, a test, or a manifest of this package or of the sibling, run `buildrules mojo sync`
+with both packages staged, commit what it writes, and build `komira//src/komira_snapshotter:lib` on the farm.
+
+`:conda` is buildrules' `mojo_conda` over `:lib`: the `.conda` of the mopm package
+(`mojo-komira_snapshotter-0.1.0-mojo1.0.0_0.conda`), packed with the sibling's manifest beside its own (`members`).
+Publishing it (`mopm publish`) uploads, so it is a step of a CI job that takes that file, not a build action.
+
+`:komira_snapshotter` is `:lib` as komira's Mojo rules take it (`mojo_adopted_library`): its `deps` are the adopted
+target of each package in `[dependencies]`, and the rule refuses a list that is not the closure `:lib` was built
+from. It also compiles and runs the README's examples above (`[tests][readme]`) against `:lib`; the tests are not
+run again.

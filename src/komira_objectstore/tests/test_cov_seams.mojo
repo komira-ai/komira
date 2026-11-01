@@ -20,7 +20,6 @@
 # =============================================================================
 
 from std.testing import assert_equal, assert_false, assert_true
-from std.time import perf_counter_ns
 
 from komira_objectstore.cas_backoff_probe import (
     CAS_BACKOFF_PROBE_MAX_ATTEMPT,
@@ -236,15 +235,26 @@ def test_latency_store_sleeps_rtt() raises:
     var fast = SharedInMemoryLatencyStore()
     var p = Path.parse(String("k"))
     _ = fast.put(p, _bytes(String("abcd")))
-    # The same map, a 20 ms RTT: every body fetch takes at least that long.
+    # RTT 0: body fetches request no wait.
+    _ = fast.get(p)
+    _ = fast.get_range(p, Int64(0), Int64(2))
+    assert_equal(fast.inner_ref().n_rtt_sleeps(), Int64(0), "rtt 0: waits")
+    # The same map, a 20 ms RTT: each body fetch requests exactly one wait of
+    # that length (recorded in the shared map, so read through either handle).
     var slow = fast.with_rtt(0.02)
-    var t0 = perf_counter_ns()
     _ = slow.get(p)
-    var t1 = perf_counter_ns()
+    assert_equal(slow.inner_ref().n_rtt_sleeps(), Int64(1), "get: waits")
+    assert_equal(slow.inner_ref().rtt_slept_us(), Int64(20_000), "get: us")
     _ = slow.get_range(p, Int64(0), Int64(2))
-    var t2 = perf_counter_ns()
-    assert_true(t1 - t0 >= 20_000_000, "get did not sleep its RTT")
-    assert_true(t2 - t1 >= 20_000_000, "get_range did not sleep its RTT")
+    assert_equal(slow.inner_ref().n_rtt_sleeps(), Int64(2), "get_range: waits")
+    assert_equal(slow.inner_ref().rtt_slept_us(), Int64(40_000), "get_range: us")
+    # A verb that is not a body fetch requests none, and a clone carries the
+    # RTT into the same tally.
+    _ = slow.head(p)
+    assert_equal(slow.inner_ref().n_rtt_sleeps(), Int64(2), "head: waits")
+    _ = slow.clone().get(p)
+    assert_equal(fast.inner_ref().n_rtt_sleeps(), Int64(3), "clone get: waits")
+    assert_equal(fast.inner_ref().rtt_slept_us(), Int64(60_000), "clone get: us")
     # The two-argument init carries a supplied inner map and RTT.
     var again = SharedInMemoryLatencyStore(
         inner=fast.inner_ref().clone(), rtt_seconds=0.0

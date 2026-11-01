@@ -1,11 +1,12 @@
 """gen: the source lists of a vendored C library, read out of its pinned
 release archive.
 
-    gen <library> <archive.tar> <out> <gen-label> <drift-label> <committed-path>
+    gen <library> <archive.tar> <out> <gen-label> <drift-label> <committed-path> <archive-size>
 
-<library> is aws-lc or s2n-tls; <archive.tar> is the release archive,
-uncompressed (the rule in defs.bzl decompresses it). Writes the library's
-srcs.bzl to <out>: the lists the library's own CMake build compiles for the
+<library> is aws-lc or s2n-tls (the srcs.bzl below), or aws-lc-files or
+s2n-tls-files (the files.bzl, last paragraph); <archive.tar> is the release
+archive, uncompressed (the rule in defs.bzl decompresses it). Writes the
+library's srcs.bzl to <out>: the lists the library's own CMake build compiles for the
 configuration third_party/<library>/BUCK builds (see the comments in each
 section below). Every list is read from the archive's CMakeLists.txt, and
 every file it names must exist in the archive. The header lists are the
@@ -13,6 +14,13 @@ closure of the `#include`s of the listed sources, so a compile action gets
 exactly the headers its sources can reach. The three labels and the path
 only fill in the file's header: how to regenerate it, and which test holds
 it to the archive.
+
+files.bzl is the same reading for a rule that stages the archive's files by
+name: FILES (every file to stage, relative to the archive root), the source
+sets a select() chooses between (common C; x86_64, Apple aarch64 and Linux
+aarch64 assembly, from the generated-src set of each; the s2n-bignum
+assembly of each CPU), the public headers by the name they are included by,
+and the include directories.
 
 Exits 1 naming what changed in the archive when the CMake lists no longer
 read the way this program expects.
@@ -405,6 +413,19 @@ def bzl_dict(mut lines: List[String], name: String, keys: List[String], values: 
     lines.append("}")
 
 
+def bzl_dict_sorted(mut lines: List[String], name: String, keys: List[String], values: List[String], comment: String) raises:
+    """The bzl_dict for keys in any order (unique); values[i] belongs to keys[i]."""
+    var index = Dict[String, Int]()
+    for i in range(len(keys)):
+        index[keys[i]] = i
+    var sk = keys.copy()
+    sort_strings(sk)
+    var sv = List[String]()
+    for i in range(len(sk)):
+        sv.append(values[index[sk[i]]])
+    bzl_dict(lines, name, sk, sv, comment)
+
+
 struct Labels(Copyable, Movable):
     var gen: String
     var drift: String
@@ -481,7 +502,48 @@ def ssl_and_tool(arc: Archive) raises -> Tuple[List[String], List[String], List[
     return (ssl^, tool^, headers^)
 
 
-def aws_lc(arc: Archive, labels: Labels) raises -> List[String]:
+struct AwsLc(Movable):
+    """What aws-lc's CMake lists give: every list as archive paths (the
+    aarch64 ones as the files of each OS's generated-src set)."""
+
+    var crypto_c: List[String]
+    var bcm_c: List[String]
+    var crypto_asm_x86_64: List[String]
+    var bcm_asm_x86_64: List[String]
+    var s2n_asm_x86_64: List[String]
+    # CRYPTO_ARCH_SOURCES and BCM_ASM_SOURCES as the CMake lists name them.
+    var crypto_asm_aarch64: List[String]
+    var bcm_asm_aarch64: List[String]
+    var s2n_asm_aarch64: List[String]
+    var asm_aarch64_apple: List[String]
+    var asm_aarch64_linux: List[String]
+
+    def __init__(out self):
+        self.crypto_c = List[String]()
+        self.bcm_c = List[String]()
+        self.crypto_asm_x86_64 = List[String]()
+        self.bcm_asm_x86_64 = List[String]()
+        self.s2n_asm_x86_64 = List[String]()
+        self.crypto_asm_aarch64 = List[String]()
+        self.bcm_asm_aarch64 = List[String]()
+        self.s2n_asm_aarch64 = List[String]()
+        self.asm_aarch64_apple = List[String]()
+        self.asm_aarch64_linux = List[String]()
+
+
+def _generated_asm(arc: Archive, dir: String, crypto: List[String], bcm: List[String]) -> List[String]:
+    """The crypto and fipsmodule assembly of one OS's generated-src/<dir>/
+    set; a crypto file the set does not ship is the one under crypto/."""
+    var out = List[String]()
+    for i in range(len(crypto)):
+        var gen = "generated-src/" + dir + "/crypto/" + crypto[i]
+        out.append(gen if arc.has(gen) else arc.need("crypto/" + crypto[i]))
+    for i in range(len(bcm)):
+        out.append(arc.need("generated-src/" + dir + "/crypto/fipsmodule/" + bcm[i]))
+    return out^
+
+
+def read_aws_lc(arc: Archive) raises -> AwsLc:
     var crypto_cmake = arc.text("crypto/CMakeLists.txt")
     var fips_cmake = arc.text("crypto/fipsmodule/CMakeLists.txt")
 
@@ -540,17 +602,63 @@ def aws_lc(arc: Archive, labels: Labels) raises -> List[String]:
         cmake_block(fips_cmake, 'if\\(ARCH STREQUAL "aarch64"\\)\\s*set\\(\\s*BCM_ASM_SOURCES\\b', "aarch64 BCM_ASM_SOURCES")
     )
 
-    var s2n_words = cmake_block(fips_cmake, "set\\(\\s*S2N_BIGNUM_ASM_SOURCES\\b", "S2N_BIGNUM_ASM_SOURCES")
+    var s2n_words_common = cmake_block(fips_cmake, "set\\(\\s*S2N_BIGNUM_ASM_SOURCES\\b", "S2N_BIGNUM_ASM_SOURCES")
     var s2n_x86 = cmake_block(
         fips_cmake,
         'if\\(ARCH STREQUAL "x86_64"\\)\\s*#[^\\n]*[\\s\\S]*?list\\(APPEND S2N_BIGNUM_ASM_SOURCES\\b',
         "x86_64 S2N_BIGNUM_ASM_SOURCES",
     )
     var s2n_asm_x86_64 = List[String]()
+    for i in range(len(s2n_words_common)):
+        s2n_asm_x86_64.append(arc.need("third_party/s2n-bignum/x86_att/" + s2n_words_common[i]))
     for i in range(len(s2n_x86)):
-        s2n_words.append(s2n_x86[i])
-    for i in range(len(s2n_words)):
-        s2n_asm_x86_64.append(arc.need("third_party/s2n-bignum/x86_att/" + s2n_words[i]))
+        s2n_asm_x86_64.append(arc.need("third_party/s2n-bignum/x86_att/" + s2n_x86[i]))
+
+    # aarch64: the same common list, then the two blocks the aarch64 branch
+    # appends (the byte-level curve25519 files; the big-integer files).
+    var s2n_aarch64 = s2n_words_common.copy()
+    var s2n_a_words = cmake_block(
+        fips_cmake,
+        'elseif\\(ARCH STREQUAL "aarch64"\\)\\s*#[^\\n]*[\\s\\S]*?list\\(APPEND S2N_BIGNUM_ASM_SOURCES\\b',
+        "aarch64 S2N_BIGNUM_ASM_SOURCES",
+    )
+    var s2n_a_words2 = cmake_block(
+        fips_cmake,
+        "# Big integer arithmetics using s2n-bignum[^\\n]*\\s*list\\(APPEND S2N_BIGNUM_ASM_SOURCES\\b",
+        "aarch64 big-integer S2N_BIGNUM_ASM_SOURCES",
+    )
+    for i in range(len(s2n_a_words)):
+        s2n_aarch64.append(s2n_a_words[i])
+    for i in range(len(s2n_a_words2)):
+        s2n_aarch64.append(s2n_a_words2[i])
+    var s2n_asm_aarch64 = List[String]()
+    for i in range(len(s2n_aarch64)):
+        s2n_asm_aarch64.append(arc.need("third_party/s2n-bignum/arm/" + s2n_aarch64[i]))
+
+    var r = AwsLc()
+    r.crypto_c = crypto_c^
+    r.bcm_c = bcm_c^
+    r.crypto_asm_x86_64 = crypto_asm_x86_64^
+    r.bcm_asm_x86_64 = bcm_asm_x86_64^
+    r.s2n_asm_x86_64 = s2n_asm_x86_64^
+    # Apple arm64 (macOS, iOS) takes the ios-aarch64 set, Linux the linux-aarch64 one.
+    r.asm_aarch64_apple = _generated_asm(arc, "ios-aarch64", crypto_asm_aarch64, bcm_asm_aarch64)
+    r.asm_aarch64_linux = _generated_asm(arc, "linux-aarch64", crypto_asm_aarch64, bcm_asm_aarch64)
+    r.crypto_asm_aarch64 = crypto_asm_aarch64^
+    r.bcm_asm_aarch64 = bcm_asm_aarch64^
+    r.s2n_asm_aarch64 = s2n_asm_aarch64^
+    return r^
+
+
+def aws_lc(arc: Archive, labels: Labels) raises -> List[String]:
+    var r = read_aws_lc(arc)
+    var crypto_c = r.crypto_c.copy()
+    var bcm_c = r.bcm_c.copy()
+    var crypto_asm_x86_64 = r.crypto_asm_x86_64.copy()
+    var bcm_asm_x86_64 = r.bcm_asm_x86_64.copy()
+    var s2n_asm_x86_64 = r.s2n_asm_x86_64.copy()
+    var crypto_asm_aarch64 = r.crypto_asm_aarch64.copy()
+    var bcm_asm_aarch64 = r.bcm_asm_aarch64.copy()
 
     var public = List[String]()
     for i in range(len(arc.all_sorted)):
@@ -625,6 +733,105 @@ def aws_lc(arc: Archive, labels: Labels) raises -> List[String]:
     return out^
 
 
+def _append_all(mut xs: List[String], ys: List[String]):
+    for i in range(len(ys)):
+        xs.append(ys[i])
+
+
+def _sorted_unique(xs: List[String]) -> List[String]:
+    var seen = Dict[String, Int]()
+    var out = List[String]()
+    for i in range(len(xs)):
+        if xs[i] not in seen:
+            seen[xs[i]] = 1
+            out.append(xs[i])
+    sort_strings(out)
+    return out^
+
+
+def _exported_headers(mut lines: List[String], public: List[String], strip: String, name_prefix: String, comment: String) raises:
+    """EXPORTED_HEADERS: the name each public header is included by -> its archive path."""
+    var keys = List[String]()
+    var values = List[String]()
+    for i in range(len(public)):
+        keys.append(name_prefix + suffix(public[i], strip.byte_length()))
+        values.append(public[i])
+    bzl_dict_sorted(lines, "EXPORTED_HEADERS", keys, values, comment)
+
+
+def aws_lc_files(arc: Archive, labels: Labels, size: String) raises -> List[String]:
+    """The files.bzl of aws-lc: every file a rule must stage (FILES) and the
+    source sets a select() chooses between, all by their path in the archive
+    after its top directory is stripped."""
+    var r = read_aws_lc(arc)
+    var common = r.crypto_c.copy()
+    _append_all(common, r.bcm_c)
+    var asm_x86_64 = r.crypto_asm_x86_64.copy()
+    _append_all(asm_x86_64, r.bcm_asm_x86_64)
+
+    var public = List[String]()
+    for i in range(len(arc.all_sorted)):
+        var f = arc.all_sorted[i]
+        if f.startswith("include/openssl/") and f.endswith(".h"):
+            public.append(f)
+
+    var sources = common.copy()
+    _append_all(sources, asm_x86_64)
+    _append_all(sources, r.asm_aarch64_apple)
+    _append_all(sources, r.asm_aarch64_linux)
+    _append_all(sources, r.s2n_asm_x86_64)
+    _append_all(sources, r.s2n_asm_aarch64)
+    var includes: List[String] = ["include", "third_party/s2n-bignum/include"]
+    var files = sources.copy()
+    files.append(arc.need("LICENSE"))
+    _append_all(files, public)
+    var closure = include_closure(arc, sources, includes)
+    for i in range(len(closure)):
+        if closure[i].startswith("include/") and not (closure[i].startswith("include/openssl/") and closure[i].endswith(".h")):
+            die(closure[i] + " is reached through #include but is not a public header")
+    _append_all(files, closure)
+
+    var out = header("aws-lc", arc, labels)
+    out.append(String(""))
+    out.append("# The size in bytes of the .tar.gz the lists were read from.")
+    out.append("ARCHIVE_SIZE = " + size)
+    bzl_list(out, "COMMON_SRCS", common,
+        "The C every target compiles: crypto/CMakeLists.txt add_library(crypto_objects)\n"
+        + "(err_data.c is the shipped generated-src/err_data.c) and the non-FIPS\n"
+        + "add_library(fipsmodule) of crypto/fipsmodule/CMakeLists.txt. No source of\n"
+        + "either is chosen by CPU or OS in the file; the assembly sets below are.")
+    bzl_list(out, "ASM_X86_64", asm_x86_64,
+        "CRYPTO_ARCH_SOURCES and BCM_ASM_SOURCES for x86_64 (an assembler with AVX): the\n"
+        + "ELF set, generated-src/linux-x86_64 (crypto/ for a file that set lacks).")
+    bzl_list(out, "ASM_AARCH64_APPLE", r.asm_aarch64_apple,
+        "CRYPTO_ARCH_SOURCES and BCM_ASM_SOURCES for aarch64 on Apple (macOS, iOS):\n"
+        + "the Mach-O set, generated-src/ios-aarch64 (crypto/ for a file that set lacks).")
+    bzl_list(out, "ASM_AARCH64_LINUX", r.asm_aarch64_linux,
+        "CRYPTO_ARCH_SOURCES and BCM_ASM_SOURCES for aarch64 on Linux: the ELF set,\n"
+        + "generated-src/linux-aarch64 (crypto/ for a file that set lacks).")
+    bzl_list(out, "BIGNUM_ASM_X86_64", r.s2n_asm_x86_64,
+        "S2N_BIGNUM_ASM_SOURCES for x86_64 (third_party/s2n-bignum/x86_att). Compile\n"
+        + "with -DS2N_BN_HIDE_SYMBOLS and third_party/s2n-bignum/include on the path.")
+    bzl_list(out, "BIGNUM_ASM_AARCH64", r.s2n_asm_aarch64,
+        "S2N_BIGNUM_ASM_SOURCES for aarch64 (third_party/s2n-bignum/arm), the same files\n"
+        + "on Linux and on Apple (the header chooses the symbol spelling by __APPLE__).\n"
+        + "Compile as the x86_64 ones.")
+    bzl_list(out, "PUBLIC_HEADERS", public, "Every public header, include/openssl/**.h.")
+    _exported_headers(out, public, "include/", "", "Each public header by the name it is included by (<openssl/...>) -> its path.")
+    var exported: List[String] = ["include"]
+    bzl_list(out, "EXPORTED_INCLUDES", exported, "The include directory a dependent compiles with.")
+    var own: List[String] = [".", "include", "third_party/s2n-bignum/include"]
+    bzl_list(out, "INCLUDES", own,
+        "The include directories of the library's own compiles (EXPORTED_INCLUDES, the\n"
+        + "s2n-bignum header directory, and the archive root, through which v3_bcons.c\n"
+        + "finds \"internal.h\").")
+    bzl_list(out, "FILES", _sorted_unique(files),
+        "Every file to stage, sorted: LICENSE, all the sources above, every public\n"
+        + "header, and every other file those sources #include (headers, and the .c files\n"
+        + "bcm.c includes).")
+    return out^
+
+
 # ---- s2n-tls ------------------------------------------------------------------
 #
 # The library's sources are CMake GLOBs: crypto/*.c, error/*.c, stuffer/*.c,
@@ -650,7 +857,8 @@ def _probe_name(f: String) -> String:
     return name^
 
 
-def s2n_tls(arc: Archive, labels: Labels) raises -> List[String]:
+def s2n_sources(arc: Archive) raises -> List[String]:
+    """The library's sources: the CMake GLOBs, sorted."""
     var cmake = arc.text("CMakeLists.txt")
     var dirs: List[String] = ["crypto/", "error/", "stuffer/", "tls/", "utils/"]
     for d in range(len(dirs)):
@@ -671,6 +879,11 @@ def s2n_tls(arc: Archive, labels: Labels) raises -> List[String]:
             if f.startswith(dirs[d]) and (dirs[d] == "tls/" or suffix(f, dirs[d].byte_length()).find("/") < 0):
                 srcs.append(f)
     sort_strings(srcs)
+    return srcs^
+
+
+def s2n_tls(arc: Archive, labels: Labels) raises -> List[String]:
+    var srcs = s2n_sources(arc)
     var roots: List[String] = [".", "api"]
     var closure = include_closure(arc, srcs, roots)
     var private = List[String]()
@@ -705,21 +918,74 @@ def s2n_tls(arc: Archive, labels: Labels) raises -> List[String]:
     return out^
 
 
+def s2n_tls_files(arc: Archive, labels: Labels, size: String) raises -> List[String]:
+    """The files.bzl of s2n-tls: the sources, the headers a rule stages and
+    exports, and the files to stage. s2n-tls has no generated source and none
+    chosen by CPU or OS (its OS differences are the feature defines)."""
+    var srcs = s2n_sources(arc)
+    var roots: List[String] = [".", "api"]
+    var closure = include_closure(arc, srcs, roots)
+    var public = List[String]()
+    for i in range(len(arc.all_sorted)):
+        var f = arc.all_sorted[i]
+        if f.startswith("api/") and f.endswith(".h"):
+            public.append(f)
+    var probes = List[String]()
+    for i in range(len(arc.all_sorted)):
+        if _probe_name(arc.all_sorted[i]).byte_length() > 0:
+            probes.append(arc.all_sorted[i])
+    var files = srcs.copy()
+    files.append(arc.need("LICENSE"))
+    _append_all(files, public)
+    _append_all(files, closure)
+    _append_all(files, probes)
+
+    var out = header("s2n-tls", arc, labels)
+    out.append(String(""))
+    out.append("# The size in bytes of the .tar.gz the lists were read from.")
+    out.append("ARCHIVE_SIZE = " + size)
+    bzl_list(out, "SRCS", srcs, "The library's sources (the CMake GLOBs).")
+    bzl_list(out, "PUBLIC_HEADERS", public, "The public API, api/**.h.")
+    var keys = List[String]()
+    var values = List[String]()
+    for i in range(len(public)):
+        keys.append("s2n.h" if public[i] == "api/s2n.h" else "s2n/" + suffix(public[i], 4))
+        values.append(public[i])
+    bzl_dict_sorted(out, "EXPORTED_HEADERS", keys, values,
+        "Each public header by the name it is included by (<s2n.h>, <s2n/unstable/...>)\n"
+        + "-> its path.")
+    var exported: List[String] = ["api"]
+    bzl_list(out, "EXPORTED_INCLUDES", exported, "The include directory a dependent compiles with.")
+    var includes: List[String] = [".", "api"]
+    bzl_list(out, "INCLUDES", includes,
+        "The include directories of the library's own compiles: s2n-tls includes its\n"
+        + "headers by their path from the repository root, and api/ by name.")
+    bzl_list(out, "PROBE_SRCS", probes, "The feature probes, tests/features/<name>.c.")
+    bzl_list(out, "FILES", _sorted_unique(files),
+        "Every file to stage, sorted: LICENSE, the sources, the public headers, every\n"
+        + "other file the sources #include, and the feature probes.")
+    return out^
+
+
 def main() raises:
     var args = argv()
-    if len(args) != 7:
-        print("usage: gen aws-lc|s2n-tls <archive.tar> <out> <gen-label> <drift-label> <committed-path>")
+    if len(args) != 8:
+        print("usage: gen aws-lc|s2n-tls|aws-lc-files|s2n-tls-files <archive.tar> <out> <gen-label> <drift-label> <committed-path> <archive-size>")
         exit(2)
     var library = String(args[1])
     var arc = Archive(String(args[2]))
     var labels = Labels(String(args[4]), String(args[5]), String(args[6]))
     var lines: List[String]
-    if library == "aws-lc":
+    if library == "aws-lc-files":
+        lines = aws_lc_files(arc, labels, String(args[7]))
+    elif library == "s2n-tls-files":
+        lines = s2n_tls_files(arc, labels, String(args[7]))
+    elif library == "aws-lc":
         lines = aws_lc(arc, labels)
     elif library == "s2n-tls":
         lines = s2n_tls(arc, labels)
     else:
-        print("gen: unknown library " + library + " (aws-lc | s2n-tls)")
+        print("gen: unknown library " + library + " (aws-lc | s2n-tls | aws-lc-files | s2n-tls-files)")
         exit(2)
         return
     var text = join(lines, "\n") + "\n"

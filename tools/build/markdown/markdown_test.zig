@@ -26,10 +26,10 @@ fn mask(text: []const u8) []const u8 {
 /// spaces.
 fn links(text: []const u8) []const u8 {
     const ls = md.relativeLinks(A, lines(text)) catch unreachable;
-    var out = std.ArrayList(u8).init(A);
+    var out = std.ArrayList(u8).empty;
     for (ls, 0..) |l, i| {
-        if (i > 0) out.append(' ') catch unreachable;
-        out.writer().print("{d}:{s}", .{ l.line, l.target }) catch unreachable;
+        if (i > 0) out.append(A, ' ') catch unreachable;
+        out.writer(A).print("{d}:{s}", .{ l.line, l.target }) catch unreachable;
     }
     return out.items;
 }

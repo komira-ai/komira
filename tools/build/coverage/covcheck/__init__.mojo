@@ -6,7 +6,8 @@
 `paths`: from a report path to a repository file, and a file's package.
 `diff`: the changed lines of a unified diff. `exempt`: coverage-exemption
 markers in sources. `mutants`: the mutation-testing input. `stats`: the
-per-package numbers and the findings. `ratchet`: the floors. `analyze`: the
+per-package numbers and the findings. `held`: the metrics a package holds
+(coverage_held). `analyze`: the
 one computation `report` and `gate` share. `annotate`: touched packages,
 changed-line coverage, annotations. `summary`: the Markdown. `checkrun`: the
 check-run request bodies. `result`: the result JSON (`jsonw`: its writer).

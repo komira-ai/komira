@@ -25,6 +25,10 @@
 
 void komira_udf_spike_cancel_store(int32_t* flag) { __atomic_store_n(flag, 1, __ATOMIC_RELEASE); }
 
+/* The host's reserved-bytes count: mem_reserve and mem_release may come from
+ * several threads at once (every host callback is thread-safe). */
+void komira_udf_spike_add(int64_t* count, int64_t delta) { __atomic_fetch_add(count, delta, __ATOMIC_ACQ_REL); }
+
 /* Start the virtual clock at max(wall, last reading) and return that start. */
 int64_t komira_udf_spike_clock_arm(int64_t* clk, int64_t wall) {
   int64_t last = __atomic_load_n(&clk[1], __ATOMIC_ACQUIRE);

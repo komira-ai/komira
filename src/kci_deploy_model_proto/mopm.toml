@@ -1,0 +1,15 @@
+[package]
+name = "kci_deploy_model_proto"
+version = "0.1.0"
+description = "The kci deploy model (kci.deploy.v1) as Mojo structs generated from its .proto file: DeploymentSpec and the intent types other deploy protos reuse."
+license = "Apache-2.0"
+repository = "https://github.com/komira-ai/komira"
+readme = "README.md"
+mojo = ["1.0.0"]
+
+[dependencies]
+komira_proto_codec = { path = "../komira_proto_codec", version = "0.1" }
+
+[targets]
+lib = { path = "generated/kci_deploy_model_proto_generated" }
+tests = ["tests"]

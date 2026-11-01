@@ -1,0 +1,77 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The host-neutral half of source handling (the package of that name in
+# docs/design/knowledge_graph_port.md): raw records kept once each under their
+# content hash, the raw store and lineage a partition binds, an adapter registry
+# keyed by an opaque surface tag, and a brute-force cosine index over the
+# episodes the registry lowers raw records to. No adapter for a particular kind
+# of record or service ships. It depends on komira_kg (the Embedder,
+# EpisodeInput and SurfaceAdapter seams), komira_kg_format (cosine, the packed
+# embedding, the content hash and the UTF-8 check) and komira_objectstore (the
+# conditional-write store trait everything rides), and on their closure; it
+# reads no clock and no environment, and calls no model but the Embedder it is
+# given.
+#
+# The welded tests: test_framing pins the bounds-checked readers (a length
+# that wraps an offset sum, a text over the limit or not UTF-8, trailing bytes)
+# and the prefix and name rules; test_raw_store stores a payload once whatever
+# its tag, keeps the first record, surfaces a lost write instead of
+# overwriting, and refuses a damaged object; test_raw_codec refuses every
+# malformed stored form; test_partition_binding binds a partition to one raw
+# store and one lineage, refuses a source system outside the host's set and any
+# second, different binding, and refuses a damaged object; test_adapter_registry
+# dispatches by tag across two made-up record types, refuses a duplicate tag and
+# dispatches nothing for an unregistered one; test_b_index builds an index
+# through two registered adapters and returns the same top-k as a plain scan,
+# skips what is already indexed, and maps a hit back to its episode;
+# test_b_index_codec refuses every malformed index object.
+
+mojo_library(
+    name = "komira_kg_sources",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/komira_arrow:komira_arrow",
+        "//src/komira_arrow_ipc:komira_arrow_ipc",
+        "//src/komira_async:komira_async",
+        "//src/komira_async_api:komira_async_api",
+        "//src/komira_atomic_alias:komira_atomic_alias",
+        "//src/komira_buffer:komira_buffer",
+        "//src/komira_clock:komira_clock",
+        "//src/komira_collections:komira_collections",
+        "//src/komira_column_kernels:komira_column_kernels",
+        "//src/komira_compression:komira_compression",
+        "//src/komira_counters:komira_counters",
+        "//src/komira_dynamic_filter:komira_dynamic_filter",
+        "//src/komira_fs:komira_fs",
+        "//src/komira_hash:komira_hash",
+        "//src/komira_host:komira_host",
+        "//src/komira_json:komira_json",
+        "//src/komira_kg:komira_kg",
+        "//src/komira_kg_format:komira_kg_format",
+        "//src/komira_libc:komira_libc",
+        "//src/komira_lz4:komira_lz4",
+        "//src/komira_metrics:komira_metrics",
+        "//src/komira_objectstore:komira_objectstore",
+        "//src/komira_objectstore:komira_objectstore_posix",
+        "//src/komira_parquet:komira_parquet",
+        "//src/komira_parquet_api:komira_parquet_api",
+        "//src/komira_parquet_codec:komira_parquet_codec",
+        "//src/komira_parquet_writer:komira_parquet_writer",
+        "//src/komira_plan_expr:komira_plan_expr",
+        "//src/komira_plan_stats:komira_plan_stats",
+        "//src/komira_scalar_arithmetic:komira_scalar_arithmetic",
+        "//src/komira_simd:komira_simd",
+        "//src/komira_zlib:komira_zlib",
+        "//tools/build/mojo/runtime_paths:komira_runtime_paths",
+    ],
+    test_srcs = [
+        "tests/test_adapter_registry.mojo",
+        "tests/test_b_index.mojo",
+        "tests/test_b_index_codec.mojo",
+        "tests/test_framing.mojo",
+        "tests/test_partition_binding.mojo",
+        "tests/test_raw_codec.mojo",
+        "tests/test_raw_store.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)

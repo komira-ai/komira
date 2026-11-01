@@ -1,0 +1,11 @@
+anyhow-1.0.102.crate 48658
+bytes-1.11.1.crate 78584
+either-1.16.0.crate 21248
+itertools-0.14.0.crate 152715
+proc-macro2-1.0.106.crate 59765
+prost-0.13.5.crate 32469
+prost-derive-0.13.5.crate 20600
+prost-types-0.13.5.crate 49145
+quote-1.0.45.crate 31564
+syn-2.0.117.crate 306011
+unicode-ident-1.0.24.crate 49298

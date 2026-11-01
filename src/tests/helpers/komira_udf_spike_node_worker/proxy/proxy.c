@@ -76,6 +76,7 @@ typedef struct komira_udf_frame {
   uint64_t id;
   struct ArrowDeviceArrayStream in;
   int in_done;
+  int in_failed; /* get_next failed: nothing but release is called on `in` again */
 } frame_t;
 
 typedef struct komira_udf_groups {
@@ -176,12 +177,12 @@ static int32_t t_describe(komira_udf_rt* rt, komira_udf_capabilities* out) {
     memset(&e, 0, sizeof(e));
     st = ask(&rt->admin, rt->host, KOMIRA_UDF_OP_DESCRIBE, 0, 0, NULL, 0, 0, NULL, &r, &e);
     if (st == KOMIRA_UDF_OK) {
-      uint32_t w[10];
-      size_t at = 40;
+      uint32_t w[5];
+      size_t at = 20;
       uint32_t n1 = 0, n2 = 0;
       int ok = r.len >= at + 4;
       if (ok) {
-        memcpy(w, r.payload, 40);
+        memcpy(w, r.payload, 20);
         memcpy(&n1, r.payload + at, 4);
         ok = n1 < sizeof(rt->runtime_id) && r.len >= at + 4 + n1 + 4;
       }
@@ -201,14 +202,9 @@ static int32_t t_describe(komira_udf_rt* rt, komira_udf_capabilities* out) {
         c->runtime_abi = rt->runtime_abi;
         c->max_descriptor_version = w[0];
         c->shapes = w[1];
-        c->threading = w[2];
-        c->thread_affine = w[3];
-        c->transports = w[4];
-        c->hosting = w[5];
-        c->devices = w[6];
-        c->features = w[7];
-        c->udf_class = w[8];
-        c->global_lock = w[9];
+        c->devices = w[2];
+        c->features = w[3];
+        c->udf_class = w[4];
         rt->have_caps = 1;
       } else {
         st = KOMIRA_UDF_ERR_INTERNAL;
@@ -468,12 +464,17 @@ static void fmts_of(const kudfw_schema* s, char* fmts, int at) {
   for (int i = 0; i < s->n; i++) fmts[at + i] = s->f[i].fmt;
 }
 
-/* Encode a struct array's children as one RecordBatch body. */
+/* Encode a struct array's children as one RecordBatch body. A struct whose
+ * children or offset or bitmap break design 3.4 rule 5 is the host's breach
+ * (ERR_HOST_CONTRACT, design 4.5). */
 static int32_t encode_struct(const struct ArrowArray* a, const char* fmts, int n, kudfw_buf* b, komira_udf_error* err) {
-  if (a->release == NULL || a->n_children != n || a->offset != 0)
-    return kudfw_fail(err, KOMIRA_UDF_ERR_INTERNAL, -1,
-                      "the host passed a struct of %lld children at offset %lld; the bound schema has %d",
-                      (long long)a->n_children, (long long)a->offset, n);
+  if (a->release == NULL)
+    return kudfw_fail(err, KOMIRA_UDF_ERR_INTERNAL, -1, "a released argument struct");
+  if (a->n_children != n || a->offset != 0 || (a->n_buffers > 0 && a->buffers != NULL && a->buffers[0] != NULL))
+    return kudfw_fail(err, KOMIRA_UDF_ERR_HOST_CONTRACT, -1,
+                      "the host passed a struct of %lld children at offset %lld%s; the bound schema has %d",
+                      (long long)a->n_children, (long long)a->offset,
+                      a->n_buffers > 0 && a->buffers != NULL && a->buffers[0] != NULL ? " with a bitmap" : "", n);
   const char* why = NULL;
   if (kudfw_ipc_batch(b, a->length, n, (const struct ArrowArray* const*)a->children, fmts, &why) != 0)
     return kudfw_fail(err, b->oom ? KOMIRA_UDF_ERR_OUT_OF_MEMORY : KOMIRA_UDF_ERR_INTERNAL, -1, "%s", why);
@@ -491,7 +492,7 @@ static int32_t t_call_batch(komira_udf_instance* in, const komira_udf_call* call
   char fmts[KUDFW_MAX_FIELDS];
   udf_t* u = in->udf;
   if (dev != ARROW_DEVICE_CPU) {
-    rc = kudfw_fail(err, KOMIRA_UDF_ERR_UNSUPPORTED, -1, "arguments on device type %d", (int)dev);
+    rc = kudfw_fail(err, KOMIRA_UDF_ERR_HOST_CONTRACT, -1, "arguments on device type %d, not the CPU", (int)dev);
   } else if (cancelled(call)) {
     rc = kudfw_fail(err, KOMIRA_UDF_ERR_CANCELLED, 0, "cancelled before the batch was sent");
   } else {
@@ -548,21 +549,47 @@ static int32_t t_frame_open(komira_udf_instance* in, const komira_udf_call* call
 }
 
 /* The next input batch of a frame as a FRAME_IN body; END when the stream
- * has ended. */
-static int32_t next_input(frame_t* f, kudfw_buf* b, uint32_t* flags, komira_udf_error* err) {
+ * has ended. A failed get_next has its get_last_error text copied first,
+ * and nothing but release is called on the stream after it (design section
+ * 4.3): ERR_INTERNAL with that text, which the host ignores. A batch that
+ * comes back with the call's cancel set or past its deadline is released
+ * unsent: user code never sees it (ERR_CANCELLED, ERR_DEADLINE). */
+static int32_t next_input(frame_t* f, const komira_udf_call* call, kudfw_buf* b, uint32_t* flags,
+                          komira_udf_error* err) {
   *flags = 0;
   if (f->in_done) {
     *flags = KOMIRA_UDF_WIRE_END;
     return KOMIRA_UDF_OK;
   }
+  if (f->in_failed) return kudfw_fail(err, KOMIRA_UDF_ERR_INTERNAL, -1, "the host's input stream failed earlier");
   struct ArrowDeviceArray d;
   memset(&d, 0, sizeof(d));
-  if (f->in.get_next(&f->in, &d) != 0)
-    return kudfw_fail(err, KOMIRA_UDF_ERR_INTERNAL, -1, "the host's input stream failed");
+  int got = f->in.get_next(&f->in, &d);
+  if (got != 0) {
+    const char* why = f->in.get_last_error != NULL ? f->in.get_last_error(&f->in) : NULL;
+    f->in_failed = 1;
+    return kudfw_fail(err, KOMIRA_UDF_ERR_INTERNAL, -1, "the host's input stream failed (%d): %s", got,
+                      why != NULL ? why : "no message");
+  }
   if (d.array.release == NULL) {
     f->in_done = 1;
     *flags = KOMIRA_UDF_WIRE_END;
     return KOMIRA_UDF_OK;
+  }
+  if (d.device_type != ARROW_DEVICE_CPU) {
+    drop(&d.array);
+    return kudfw_fail(err, KOMIRA_UDF_ERR_HOST_CONTRACT, -1, "an input batch on device type %d, not the CPU",
+                      (int)d.device_type);
+  }
+  if (cancelled(call)) {
+    drop(&d.array);
+    return kudfw_fail(err, KOMIRA_UDF_ERR_CANCELLED, -1, "cancelled while the frame waited on its input; the batch was not run");
+  }
+  const komira_udf_host* host = f->inst->ctx->rt->host;
+  if (call != NULL && call->deadline_ns != 0 && host->now_ns(host->host_data) > call->deadline_ns) {
+    drop(&d.array);
+    return kudfw_fail(err, KOMIRA_UDF_ERR_DEADLINE,
+                      -1, "the deadline passed while the frame waited on its input; the batch was not run");
   }
   udf_t* u = f->inst->udf;
   char fmts[KUDFW_MAX_FIELDS + 1];
@@ -595,7 +622,7 @@ static int32_t t_frame_next(komira_udf_frame* f, const komira_udf_call* call, st
       return kudfw_fail(err, KOMIRA_UDF_ERR_INTERNAL, -1, "the worker asked for input after the end of input");
     if (cancelled(call)) return kudfw_fail(err, KOMIRA_UDF_ERR_CANCELLED, -1, "cancelled between frame batches");
     op = KOMIRA_UDF_OP_FRAME_IN;
-    rc = next_input(f, &b, &flags, err);
+    rc = next_input(f, call, &b, &flags, err);
     if (rc != KOMIRA_UDF_OK) {
       kudfw_buf_free(&b);
       return rc;
@@ -650,7 +677,7 @@ static int32_t agg_send(komira_udf_groups* g, uint32_t op, const komira_udf_call
     if (op == KOMIRA_UDF_OP_AGG_UPDATE) {
       n = u->args.n;
       if (ma.n_children != n || ma.offset != 0)
-        rc = kudfw_fail(err, KOMIRA_UDF_ERR_INTERNAL, -1, "the argument struct does not match the bound schema");
+        rc = kudfw_fail(err, KOMIRA_UDF_ERR_HOST_CONTRACT, -1, "the argument struct does not match the bound schema");
       for (int i = 0; rc == KOMIRA_UDF_OK && i < n; i++) cols[i] = ma.children[i];
       fmts_of(&u->args, fmts, 0);
     } else {

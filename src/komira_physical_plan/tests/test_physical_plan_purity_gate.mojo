@@ -58,6 +58,7 @@ from komira_plan_expr.expr import (
     STR_LIKE,
 )
 from komira_plan_expr.scalar_value import ScalarValue
+from komira_plan_expr.udf_type import UdfType
 from komira_plan_ir.logical_plan import (
     CORR_KIND_EXISTS,
     ExprArray,
@@ -190,8 +191,8 @@ def test_walker_has_an_arm_for_every_expr_tag() raises:
     the whole point — a hole in a safety check must be loud — and this test is
     what makes it loud AT DEVELOPMENT TIME instead of on a customer's plan.
 
-    Goes red the moment `EXPR_TAG_COUNT` grows past 27 for a new tag in
-    `expr.mojo` that has no arm here."""
+    Goes red the moment `EXPR_TAG_COUNT` grows for a new tag in `expr.mojo`
+    that has no arm here."""
     for t in range(EXPR_TAG_COUNT):
         var e = Expr(UInt8(t))
         var got = _walk(e)
@@ -338,6 +339,32 @@ def test_gate_finds_a_subquery_under_every_container_a_fail_open_walk_skips() ra
         ),
         String("T"),
         "UDF_CALL child",
+    )
+
+    # EXPR_UDF_APPLY — a call of a `UdfRef`, the subquery in its LAST
+    # argument, which catches an arm that reads only the first.
+    var apply_args = List[Expr]()
+    apply_args.append(Expr.col_ref(String("a")))
+    apply_args.append(_corr())
+    assert_equal(
+        _walk(
+            Expr.udf_apply(
+                0, UdfType("r", ArrowType.INT64, DType.int64, True), apply_args^
+            )
+        ),
+        String("T"),
+        "UDF_APPLY last argument",
+    )
+    var plain_args = List[Expr]()
+    plain_args.append(Expr.col_ref(String("a")))
+    assert_equal(
+        _walk(
+            Expr.udf_apply(
+                0, UdfType("r", ArrowType.INT64, DType.int64, True), plain_args^
+            )
+        ),
+        String("F"),
+        "UDF_APPLY with no subquery",
     )
 
     # And one the fail-open walker DOES model, so the fixture is not selecting

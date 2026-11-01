@@ -1,12 +1,12 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_test")
 
-# A planted defect for the time limit of a mojo_test under `buck2 test` (test
-# 49; `gate mojo --deadline-s`, tools/build/run). tools/build/tests/assert_level_tests.sh
-# runs it with `-c komira.test_timeout_s=90 ... -- --timeout 90` and requires
-# it to fail with `TEST TIME LIMIT: killed ... after 30 s` and the runner's
-# report of the kill (`GATED TEST FAILED: ... (exit 137)`), not with the test
-# runner's own timeout at 90 s, which reports a bare failure. The test sleeps 180 s and then
-# EXITS 0: with no limit at all it passes and the harness goes red.
+# The target whose `buck2 test` command carries the time limit of a mojo_test
+# (`gate mojo --deadline-s`, tools/build/run). The scenario config_refusals
+# (tools/build/selftest/config_refusals.zig) reads the command under
+# `-c komira.test_timeout_s=90` and requires `--deadline-s 30
+# --runner-timeout-s 90`; it is not run, because a time limit is checked on a
+# clock the gate's tests move themselves, not by sleeping past it. The test
+# returns at once.
 mojo_test(
     name = "test_slow",
     srcs = ["test_slow.mojo"],

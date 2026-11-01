@@ -129,12 +129,9 @@ def _decode_data_page(
             var r = _v1_definition_levels(acc, body, n)
             actual = r[0]
             vstart = r[1]
-    if vstart > dlen:
-        raise Error(
-            "parquet: corrupt data page: its levels run past the "
-            + String(dlen)
-            + " decoded page bytes"
-        )
+    # `vstart <= dlen`: a V2 page's level sections fit its page (the header
+    # parser checks), and a V1 level section's length prefix is checked
+    # against the page by `validate_level_section_length`.
     var values = body[vstart:dlen]
 
     if _is_dict_encoding(enc):

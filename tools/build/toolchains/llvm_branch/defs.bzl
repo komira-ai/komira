@@ -1,11 +1,11 @@
 """The LLVM pieces of branch coverage, unpacked from pinned packages and checked (README.md).
 
-`llvm_branch_unpack` runs unpack.sh in one build action: it writes named
+`llvm_branch_unpack` runs `llvm_branch unpack` (llvm_branch.zig) in one build action: it writes named
 members of pinned `.conda` packages into one directory, each a regular file
 (a member that is a symbolic link in its package is written as the file it
 resolves to), and nothing else.
 
-`llvm_branch_check` runs a mode of check.sh in a build action and returns a
+`llvm_branch_check` runs `llvm_branch check <mode>` in a build action and returns a
 `ValidationInfo`. `llvm_branch_tool` is what other targets use: the two
 directories and `LlvmBranchInfo`, with the checks as dependencies, so no
 build that uses them succeeds unless the checks pass. The checks and the
@@ -48,16 +48,13 @@ def _stage(ctx, name, files):
     return ctx.actions.copied_dir(name, {f.short_path: f for f in files})
 
 def _unpack_impl(ctx):
-    staged = _stage(ctx, "unpack_srcs", [ctx.attrs.script])
     out = ctx.actions.declare_output("dist", dir = True)
     packages = [cmd_args(name, "=", _out(dep), delimiter = "") for name, dep in sorted(ctx.attrs.packages.items())]
     members = [cmd_args(dest, "=", src, delimiter = "") for dest, src in sorted(ctx.attrs.members.items())]
     ctx.actions.run(
         cmd_args(
-            _out(ctx.attrs._busybox),
-            "sh",
-            staged.project(ctx.attrs.script.short_path),
-            _out(ctx.attrs._busybox),
+            ctx.attrs._tool[RunInfo],
+            "unpack",
             _out(ctx.attrs.conda_payload),
             out.as_output(),
             packages,
@@ -71,29 +68,26 @@ def _unpack_impl(ctx):
 
 _llvm_branch_unpack = rule(
     impl = _unpack_impl,
-    doc = "A directory holding `members` (destination path -> `<package name>/<member path>`) of the pinned `.conda` `packages`, each a regular file, and nothing else; unpack.sh fails the action on a member that is missing or empty.",
+    doc = "A directory holding `members` (destination path -> `<package name>/<member path>`) of the pinned `.conda` `packages`, each a regular file, and nothing else; the program fails the action on a member that is missing or empty.",
     attrs = {
         "conda_payload": attrs.exec_dep(doc = "The tool that writes a .conda package's payload tar (toolchains/kcov:conda_payload)."),
         "members": attrs.dict(attrs.string(), attrs.string(), doc = "destination -> `<package name>/<member>`."),
         "packages": attrs.dict(attrs.string(), attrs.dep(), doc = "package name -> pinned .conda."),
-        "script": attrs.source(doc = "unpack.sh"),
-        "_busybox": attrs.exec_dep(default = "komira//tools/build/toolchains:busybox"),
+        "_tool": attrs.exec_dep(default = "komira//tools/build/toolchains/llvm_branch:llvm_branch_bin", providers = [RunInfo]),
     },
 )
 
 def _check_impl(ctx):
-    # Runs `check.sh <mode> <busybox> <zig_dir> <report_dir> <lld_dir or -> <tools_dir or -> <fixture_dir or -> want...`.
+    # Runs `llvm_branch check <mode> <zig_dir> <report_dir> <lld_dir or -> <tools_dir or -> <fixture_dir or -> want...`.
     # One output: buck2 refuses a validation result whose action produces
     # more than one. The result is copied out of the directory.
-    staged = _stage(ctx, "check_srcs", [ctx.attrs.script] + ctx.attrs.fixtures)
+    staged = _stage(ctx, "check_srcs", ctx.attrs.fixtures)
     report = ctx.actions.declare_output("report", dir = True)
     ctx.actions.run(
         cmd_args(
-            _out(ctx.attrs._busybox),
-            "sh",
-            staged.project(ctx.attrs.script.short_path),
+            ctx.attrs._tool[RunInfo],
+            "check",
             ctx.attrs.mode,
-            _out(ctx.attrs._busybox),
             _out(ctx.attrs._zig),
             report.as_output(),
             _out(ctx.attrs.lld) if ctx.attrs.lld else "-",
@@ -112,15 +106,14 @@ def _check_impl(ctx):
 
 _llvm_branch_check = rule(
     impl = _check_impl,
-    doc = "Runs `check.sh <mode>` (README.md, Checks) against the unpacked `lld` and `tools` directories, with `want` (key -> expected value) as its expectations. Fails the build on a wrong result; `[report]` holds what the check measured.",
+    doc = "Runs `llvm_branch check <mode>` (README.md, Checks) against the unpacked `lld` and `tools` directories, with `want` (key -> expected value) as its expectations. Fails the build on a wrong result; `[report]` holds what the check measured.",
     attrs = {
         "fixtures": attrs.list(attrs.source(), default = [], doc = "fixtures/: the C program the raw-version check instruments."),
         "lld": attrs.option(attrs.exec_dep(), default = None, doc = "The directory of :lld24."),
         "mode": attrs.enum(["lld", "tools", "raw_version"]),
-        "script": attrs.source(doc = "check.sh"),
         "tools": attrs.option(attrs.exec_dep(), default = None, doc = "The directory of :llvm23."),
         "want": attrs.dict(attrs.string(), attrs.string(), default = {}),
-        "_busybox": attrs.exec_dep(default = "komira//tools/build/toolchains:busybox"),
+        "_tool": attrs.exec_dep(default = "komira//tools/build/toolchains/llvm_branch:llvm_branch_bin", providers = [RunInfo]),
         "_zig": attrs.exec_dep(default = "komira//tools/build/toolchains:zig"),
     },
 )

@@ -1,0 +1,2 @@
+# One exception: the fixture at tools/fx tests a version.
+except	tools/fx/mopm-toolchain.toml	the fixture names an old mopm on purpose

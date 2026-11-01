@@ -1,0 +1,12 @@
+{
+ "name": "frame_zero_columns_batches_2_2_1",
+ "defect": "a frame's input batches with no columns are dropped, or their length lost (design 3.4 rule 5)",
+ "run": "frame",
+ "entry": "frame_row_counts",
+ "shape": "MAP_BATCHES_FRAME",
+ "args": [],
+ "result": [{"type": "int64", "nullable": true}],
+ "result_is_table": true,
+ "inputs": [{"length": 2, "columns": []}, {"length": 2, "columns": []}, {"length": 1, "columns": []}],
+ "expect": {"status": "OK", "batches": [{"length": 1, "columns": [{"type": "int64", "values": [2]}]}, {"length": 1, "columns": [{"type": "int64", "values": [2]}]}, {"length": 1, "columns": [{"type": "int64", "values": [1]}]}]}
+}

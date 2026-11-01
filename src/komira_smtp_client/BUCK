@@ -1,0 +1,58 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# An SMTP client for submitting mail (RFC 5321 with STARTTLS, AUTH and the
+# size and 8-bit extensions): a session over any IoStream, a one-call send over
+# TCP with STARTTLS or implicit TLS, a hook for driving a peer in the same
+# thread, and a clock seam for the budgets. See __init__.mojo.
+#
+# The welded tests (each file's header says which defects it catches):
+# - test_reply_wire: reply and capability parsing, enhanced status codes,
+#   CRLF normalisation and dot-stuffing byte for byte, envelope validation.
+# - test_session: ScriptedStream conversations for every path of one message:
+#   greeting, EHLO, AUTH, MAIL, RCPT, DATA, SIZE, 8BITMIME, SMTPUTF8, RSET
+#   between messages, reply caps, budgets on a manual clock, the password.
+# - test_edges: DATA answered 2xx, a 421 mid-RCPT, the duplicate warning at the
+#   end of DATA, QUIT after a refused SIZE, all_accepted, the README settings.
+# - test_policy: the STARTTLS and implicit-TLS policy of `send_via_session`.
+# - test_loopback: a message over STARTTLS with AUTH PLAIN, plus the failure
+#   paths, to komira_smtp_server on 127.0.0.1 with the real s2n handshake. The
+#   server has no implicit-TLS listener: that path is in test_policy, on
+#   ScriptedStream.
+mojo_library(
+    name = "komira_smtp_client",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    # Direct dependencies: the rule adds each one's own closure to the compiler.
+    deps = [
+        "//src/komira_async:komira_async",
+        "//src/komira_clock:komira_clock",
+        "//src/komira_encoding:komira_encoding",
+        "//src/komira_http_client:komira_http_client",
+        "//src/komira_http_core:komira_http_core",
+        "//src/komira_mail_address:komira_mail_address",
+        "//src/komira_mail_message:komira_mail_message",
+        "//src/komira_net:komira_net",
+    ],
+    test_srcs = [
+        "tests/test_edges.mojo",
+        "tests/test_loopback.mojo",
+        "tests/test_policy.mojo",
+        "tests/test_reply_wire.mojo",
+        "tests/test_session.mojo",
+    ],
+    test_deps = [
+        "//src/komira_mail_auth:komira_mail_auth",
+        "//src/komira_mail_store:komira_mail_store",
+        "//src/komira_mail_tls:komira_mail_tls",
+        "//src/komira_objectstore:komira_objectstore",
+        "//src/komira_smtp_server:komira_smtp_server",
+        "//src/tests/helpers/komira_mail_test_support:komira_mail_test_support",
+    ],
+    test_data = {
+        "tests/test_loopback.mojo": {
+            "src/komira_http_core/tests/fixtures/tls/leaf_cert.pem": "//src/komira_http_core:tests/fixtures/tls/leaf_cert.pem",
+            "src/komira_http_core/tests/fixtures/tls/leaf_key.pem": "//src/komira_http_core:tests/fixtures/tls/leaf_key.pem",
+            "src/komira_http_core/tests/fixtures/tls/root_ca.pem": "//src/komira_http_core:tests/fixtures/tls/root_ca.pem",
+        },
+    },
+    visibility = ["PUBLIC"],
+)

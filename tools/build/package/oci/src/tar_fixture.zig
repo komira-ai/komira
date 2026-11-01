@@ -24,7 +24,7 @@ pub fn header(name: []const u8, flag: u8, mode: u32, size: usize, link: []const 
 /// `t` padded with zeros to a whole number of blocks.
 pub fn padBlock(t: *C.List(u8)) void {
     const want = (t.items.len + 511) / 512 * 512;
-    t.appendNTimes(0, want - t.items.len) catch C.oom();
+    t.appendNTimes(C.a(), 0, want - t.items.len) catch C.oom();
 }
 
 pub fn entry(out: *C.List(u8), name: []const u8, flag: u8, mode: u32, data: []const u8, link: []const u8) void {
@@ -40,7 +40,7 @@ pub const E = struct { []const u8, u8, u32, []const u8, []const u8 };
 pub fn tar(entries: []const E) []u8 {
     var out = C.list(u8);
     for (entries) |e| entry(&out, e[0], e[1], e[2], e[3], e[4]);
-    out.appendNTimes(0, 1024) catch C.oom();
+    out.appendNTimes(C.a(), 0, 1024) catch C.oom();
     return out.items;
 }
 
@@ -48,7 +48,7 @@ pub fn tar(entries: []const E) []u8 {
 pub fn end(t: []const u8) []u8 {
     var out = C.list(u8);
     C.add(&out, t);
-    out.appendNTimes(0, 1024) catch C.oom();
+    out.appendNTimes(C.a(), 0, 1024) catch C.oom();
     return out.items;
 }
 
@@ -104,7 +104,7 @@ pub fn failText(r: anytype) ![]const u8 {
     } else |_| return C.msg;
 }
 
-pub fn ok(r: anytype) !@typeInfo(@TypeOf(r)).ErrorUnion.payload {
+pub fn ok(r: anytype) !@typeInfo(@TypeOf(r)).error_union.payload {
     return r catch {
         std.debug.print("refused: {s}\n", .{C.msg});
         return error.TestUnexpectedResult;

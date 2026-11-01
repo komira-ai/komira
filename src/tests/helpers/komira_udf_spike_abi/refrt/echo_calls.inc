@@ -46,6 +46,10 @@ static int32_t row_call(komira_udf_instance* inst, const struct ArrowArray* in, 
   void* d;
   if (!make_col(h, o, in->length, &valid, &d))
     return fail(h, e, KOMIRA_UDF_ERR_OUT_OF_MEMORY, "call_batch: out of memory", -1);
+  if (inst->fx->id == F_ROW_CONST) { /* reads no field: the row count is the struct's length */
+    for (int64_t r = 0; r < in->length; r++) ((int64_t*)d)[r] = 7;
+    return KOMIRA_UDF_OK;
+  }
   struct row_view v = {inst->udf, in, 0, NULL, -1};
   for (int64_t r = 0; r < in->length; r++) {
     v.row = r;
@@ -67,12 +71,45 @@ static int32_t row_call(komira_udf_instance* inst, const struct ArrowArray* in, 
 
 /* ---- the column fixtures ------------------------------------------------- */
 
+/* double_batch and fahrenheit_batch: the same functions as double and
+ * fahrenheit, written as a UDF author writes a batch function. The input's
+ * value and validity pointers are read once per batch, the values computed
+ * in one loop over every row (a null row's value is unspecified), and the
+ * null rows marked in a second loop over the validity bitmap. */
+static int32_t scalar_batch(const komira_udf_host* h, int id, const struct ArrowArray* in, struct ArrowArray* o,
+                            komira_udf_error* e) {
+  int64_t n = in->length;
+  if (in->n_children < 1) return fail(h, e, KOMIRA_UDF_ERR_INTERNAL, "a batch fixture got no argument", -1);
+  const struct ArrowArray* x = in->children[0];
+  uint8_t* v;
+  void* d;
+  if (!make_col(h, o, n, &v, &d)) return fail(h, e, KOMIRA_UDF_ERR_OUT_OF_MEMORY, "call_batch: out of memory", -1);
+  int64_t off = off_of(x);
+  if (id == F_DOUBLE_BATCH) {
+    const int64_t* xs = (const int64_t*)x->buffers[1] + off;
+    int64_t* ds = (int64_t*)d;
+    for (int64_t r = 0; r < n; r++) ds[r] = 2 * xs[r];
+  } else {
+    const double* xs = (const double*)x->buffers[1] + off;
+    double* ds = (double*)d;
+    for (int64_t r = 0; r < n; r++) ds[r] = xs[r] * 1.8 + 32.0;
+  }
+  const uint8_t* xv = (const uint8_t*)x->buffers[0];
+  if (xv != NULL)
+    for (int64_t r = 0; r < n; r++) {
+      int64_t at = off + r;
+      if (!((xv[at >> 3] >> (at & 7)) & 1)) set_null(o, v, r);
+    }
+  return KOMIRA_UDF_OK;
+}
+
 /* `in` is the argument struct; `o` the result. */
 static int32_t scalar(komira_udf_instance* inst, const komira_udf_call* call, const struct ArrowArray* in,
                       struct ArrowArray* o, komira_udf_error* e) {
   const struct fixture* fx = inst->fx;
   const komira_udf_rt* rt = inst->ctx->rt;
   const komira_udf_host* h = rt->host;
+  if (fx->id == F_DOUBLE_BATCH || fx->id == F_FAHRENHEIT_BATCH) return scalar_batch(h, fx->id, in, o, e);
   int64_t n = in->length;
   const struct ArrowArray* x = in->n_children > 0 ? in->children[0] : NULL;
   const struct ArrowArray* y = in->n_children > 1 ? in->children[1] : NULL;
@@ -86,6 +123,19 @@ static int32_t scalar(komira_udf_instance* inst, const komira_udf_call* call, co
       if (is_valid(x, r) && i64_at(x, r) == 3) return fail(h, e, KOMIRA_UDF_ERR_RAISED, "raise_on_row_3: the value 3", r);
   if (fx->id == F_RAISE_ON_SECOND_CALL && inst->calls == 1)
     return fail(h, e, KOMIRA_UDF_ERR_RAISED, "raise_on_second_call: this instance's second call", -1);
+  if (fx->id == F_RAISE_IF_5 || fx->id == F_RAISE_IF_5_SMALL) /* naming no row: the host bisects to find it */
+    for (int64_t r = 0; r < n; r++)
+      if (is_valid(x, r) && i64_at(x, r) == 5) {
+        char msg[96];
+        snprintf(msg, sizeof(msg), "raise_minus_one_if_row5: the batch holds the value 5 (call %lld)",
+                 (long long)(call != NULL ? call->call_id : -1));
+        return fail(h, e, KOMIRA_UDF_ERR_RAISED, msg, fx->id == F_RAISE_IF_5_SMALL && n <= 2 ? r : -1);
+      }
+  int probe = fx->id == F_VOLATILE_COUNT && n > 0 && is_valid(x, 0) && i64_at(x, 0) == -1;
+  if (fx->id == F_VOLATILE_COUNT && !probe) {
+    inst->runs++; /* user code ran this batch once more */
+    return fail(h, e, KOMIRA_UDF_ERR_RAISED, "volatile_count_raise: raised after counting this run", -1);
+  }
   uint8_t* v;
   void* d;
   if (!make_col(h, o, rows, &v, &d)) return fail(h, e, KOMIRA_UDF_ERR_OUT_OF_MEMORY, "call_batch: out of memory", -1);
@@ -121,6 +171,10 @@ static int32_t scalar(komira_udf_instance* inst, const komira_udf_call* call, co
     if (r >= n) continue; /* long_by_one's extra row */
     if (fx->id == F_CALL_ID || fx->id == F_FLAGS_PROBE) {
       di[r] = fx->id == F_CALL_ID ? call->call_id : inst->udf->flags[r < 2 ? r : 2];
+      continue;
+    }
+    if (fx->id == F_VOLATILE_COUNT) { /* the probe: the runs so far */
+      di[r] = inst->runs;
       continue;
     }
     if (fx->id == F_SUM_WIDE) {
@@ -290,10 +344,21 @@ static int32_t echo_call_batch(komira_udf_instance* inst, const komira_udf_call*
   struct ArrowDeviceArray mine = *args; /* moved in, whatever the status */
   args->array.release = NULL;
   out->array.release = NULL;
-  int32_t rc = start_call(inst->ctx->rt, call, e);
-  if (rc == KOMIRA_UDF_OK) rc = check_args(h, &mine.array, e);
+  int32_t rc = enter(inst->ctx, e);
+  if (rc != KOMIRA_UDF_OK) {
+    release_host(h, &mine.array);
+    return rc;
+  }
+  if (inst->fx->id == F_LOST_ON_CALL) {
+    rc = lose(inst->ctx, e, "lost_on_call");
+    release_host(h, &mine.array);
+    leave(inst->ctx);
+    return rc;
+  }
+  rc = start_call(inst->ctx->rt, call, e);
   if (rc == KOMIRA_UDF_OK && !on_cpu(&mine))
-    rc = fail(h, e, KOMIRA_UDF_ERR_UNSUPPORTED, "only CPU arrays are read here", -1);
+    rc = fail(h, e, KOMIRA_UDF_ERR_HOST_CONTRACT, "an argument array on another device than the CPU (design 4.4)", -1);
+  if (rc == KOMIRA_UDF_OK) rc = check_args(h, &mine.array, inst->udf->n_args, e);
   if (rc == KOMIRA_UDF_OK &&
       (inst->fx->shape & (KOMIRA_UDF_SHAPE_SCALAR | KOMIRA_UDF_SHAPE_ROW | KOMIRA_UDF_SHAPE_MAP_BATCHES_COLUMN)) == 0)
     rc = fail(h, e, KOMIRA_UDF_ERR_UNSUPPORTED, "call_batch on a fixture of another shape", -1);
@@ -359,5 +424,6 @@ static int32_t echo_call_batch(komira_udf_instance* inst, const komira_udf_call*
     if (inst->fx->variant != CHILD_LEAKED) release_host(h, &kid); /* child_moved_out_leaked: the bug */
   }
   if (!(BROKEN && rc == KOMIRA_UDF_ERR_RAISED)) release_host(h, &mine.array); /* BROKEN (1) */
+  leave(inst->ctx);
   return rc;
 }

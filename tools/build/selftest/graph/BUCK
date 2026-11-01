@@ -1,13 +1,18 @@
 # The graph checks of the self-test package (docs/design/build_selftests.md,
 # "Graph checks in the gate"). Each `graph_check` names its check and the
-# targets it queries as strings; release/ci/build_targets.sh runs
+# targets it queries as strings; .github/workflows/pr.yml runs
 # `buck2 bxl //tools/build/selftest/graph/checks.bxl:check -- --check <label>`
-# for each one in a batch, and the check's Zig checker runs over the facts
+# for each one, and the check's Zig checker runs over the facts
 # the BXL collected as a build action.
 
 load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_test")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load("@komira//tools/build/selftest:defs.bzl", "graph_check")
+
+# Built with zig 0.15.2 (`:zig_next`); the executables are built behind the check
+# that the pin is that release.
+_ZIG = "komira//tools/build/toolchains:zig_next"
+_ZIG_VERSION = "komira//tools/build/toolchains:zig_next_version"
 
 zig_test(
     name = "graph_checks_unit",
@@ -15,7 +20,7 @@ zig_test(
     src = "graph_checks.zig",
     imports = ["python_closure.zig"],
     busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig",
+    zig = _ZIG,
 )
 
 # The root package's python_closure check and its negative fixture name it.
@@ -24,10 +29,10 @@ zig_exe(
     exec_compatible_with = LINUX_X86_64,
     src = "graph_checks.zig",
     imports = ["python_closure.zig"],
-    unit_tests = [":graph_checks_unit"],
+    unit_tests = [":graph_checks_unit", _ZIG_VERSION],
     visibility = ["//:", "tests//negative/python_closure:"],
     busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig",
+    zig = _ZIG,
 )
 
 # The closure of the self-test package holds no library under src/, so a

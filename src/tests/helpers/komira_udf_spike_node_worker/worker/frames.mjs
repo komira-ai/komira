@@ -3,8 +3,14 @@
 //
 // A frame pulls its input when user code asks for it. The engine drives a
 // frame with FRAME_OUT; when the frame needs an input batch before it can
-// yield, the worker answers OK with no batch and no END, and blocks for the
+// yield, the worker answers OK with no batch and no END, and waits for the
 // FRAME_IN the engine then sends, whose reply is the frame's next answer.
+// While it waits, the engine may call into this same context to produce that
+// input (design section 4.3, the one nesting allowed: a scalar upstream, or
+// another frame of the same instance): every request but one for this
+// frame is served as it comes, from inside the wait, and the wait goes on.
+// A request for this frame other than its FRAME_IN (a re-entry, never
+// allowed, or its FRAME_CLOSE after the engine gave up) ends the frame.
 // User code iterates its input as an ordinary iterator: the exchange happens
 // inside that iterator's next(), so a generator yields as it goes, before it
 // has read all its input.
@@ -103,8 +109,9 @@ function* step(fn, inputs) {
 }
 
 export class Frame {
-  constructor(id, inst, shape) {
+  constructor(id, inst, shape, serve) {
     this.id = id;
+    this.serve = serve; // the runtime's dispatcher, for nested requests
     this.inst = inst;
     this.shape = shape;
     this.queue = [];
@@ -130,11 +137,16 @@ export class Frame {
 
   needInput() {
     reply(this.pending.id, 0);
-    const m = nextRequest();
-    if (m.op !== OP.FRAME_IN || m.handle !== this.id) {
-      pushBack(m);
-      this.aborted = true;
-      throw new Aborted('the engine sent another request while the frame waited for input');
+    let m = nextRequest();
+    while (!(m.op === OP.FRAME_IN && m.handle === this.id)) {
+      const ours = m.handle === this.id && (m.op === OP.FRAME_OUT || m.op === OP.FRAME_IN || m.op === OP.FRAME_CLOSE);
+      if (ours || m.op === OP.SHUTDOWN || this.serve === undefined) {
+        pushBack(m);
+        this.aborted = true;
+        throw new Aborted('the engine sent another request for this frame while it waited for input');
+      }
+      this.serve(m); // nested: replies before it returns
+      m = nextRequest();
     }
     this.pending = m;
     if ((m.flags & FLAG_END) !== 0) this.ended = true;

@@ -34,11 +34,12 @@
 from std.testing import TestSuite, assert_equal, assert_true
 
 from komira_engine_runtime.hardware_detect import (
+    default_hardware_profile,
     detect_hardware_profile,
     _parse_size_with_suffix,
     _min_nonzero3,
 )
-from komira_engine_runtime.hardware import (
+from komira_host_profile.hardware import (
     HardwareProfile,
     DEFAULT_L1D_BYTES,
     DEFAULT_L2_BYTES,
@@ -107,7 +108,7 @@ def test_ctor_10_arg_zero_sentinel_falls_back() raises:
 def test_defaults_l1d_min_equals_default_l1d() raises:
     """`defaults()` is the warn-and-fall-back result; on homogeneous Apple-
     Silicon-shaped defaults, l1d_min_bytes == DEFAULT_L1D_BYTES."""
-    var hw = HardwareProfile.defaults()
+    var hw = default_hardware_profile()
     assert_equal(hw.l1d_min_bytes, DEFAULT_L1D_BYTES)
     assert_equal(hw.l1d_cache_bytes, DEFAULT_L1D_BYTES)
 
@@ -208,14 +209,14 @@ def test_defaults_is_the_fallback_shape() raises:
     (including a notebook with a restricted sandbox) and proceed; the
     one-line stderr warning is the triage signal.
     """
-    var fb = HardwareProfile.defaults()
+    var fb = default_hardware_profile()
     assert_true(fb.physical_cores >= 1)
     assert_equal(fb.l1d_cache_bytes, DEFAULT_L1D_BYTES)
     assert_equal(fb.l1d_min_bytes, DEFAULT_L1D_BYTES)
     assert_equal(fb.l2_cache_bytes, DEFAULT_L2_BYTES)
     assert_equal(fb.numa_nodes, 1)
     # Defaults must not raise; the contract is total.
-    var roundtrip = HardwareProfile.defaults()
+    var roundtrip = default_hardware_profile()
     assert_equal(roundtrip.l1d_cache_bytes, fb.l1d_cache_bytes)
 
 

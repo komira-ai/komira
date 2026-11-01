@@ -1,0 +1,1 @@
+{ "compilerOptions": { "strict": true, "noEmit": true, "types": [], "skipLibCheck": true }, "files": ["type_error.ts"] }

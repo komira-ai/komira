@@ -1,0 +1,24 @@
+{
+  "name": "komira-negative",
+  "version": "1.0.0",
+  "lockfileVersion": 3,
+  "requires": true,
+  "packages": {
+    "": {
+      "name": "komira-negative",
+      "version": "1.0.0"
+    },
+    "node_modules/fx-darwin": {
+      "version": "1.0.0",
+      "resolved": "https://registry.invalid/fx-darwin/-/fx-darwin-1.0.0.tgz",
+      "integrity": "sha512-tkaW2X9q0+6Sg41iLDExPAMQ5t8KpwWgrbwBkivil+QTA5sPrje8EN++V91BKgxkyWWOIPbaExtyby7enXpcsQ==",
+      "dev": true,
+      "os": [
+        "darwin"
+      ],
+      "cpu": [
+        "arm64"
+      ]
+    }
+  }
+}

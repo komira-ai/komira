@@ -14,9 +14,9 @@ test "the pull request number of a GitHub merge subject, and of nothing else" {
 }
 
 fn render(a: std.mem.Allocator, r: report.Report) !std.json.Value {
-    var buf = std.ArrayList(u8).init(a);
-    try report.write(r, buf.writer());
-    return (try std.json.parseFromSlice(std.json.Value, a, buf.items, .{})).value;
+    var buf = std.Io.Writer.Allocating.init(a);
+    try report.write(r, &buf.writer);
+    return (try std.json.parseFromSlice(std.json.Value, a, buf.written(), .{})).value;
 }
 
 test "a culprit verdict: first_bad with its pr, no candidates, probes and failures in order" {

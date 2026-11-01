@@ -60,15 +60,18 @@ from komira_plan_expr.expr import (
 from komira_plan_expr.partition_expr import PartitionExpr
 from komira_plan_expr.partition_frame import PartitionFrame
 from komira_plan_expr.scalar_value import ScalarValue
+from komira_plan_expr.udf_type import UdfType
 from komira_plan_ir.corr_subquery import corr_subq_inner_plan_ref
 from komira_plan_ir.logical_plan import (
     AsofTolerance,
     LogicalPlan,
     ASOF_BACKWARD,
+    EXCHANGE_KIND_GATHER,
     JOIN_INNER,
     PLAN_SCAN,
     PLAN_TAG_COUNT,
     PLAN_VIEW_REF,
+    plan_tag_is_retired,
     PLAN_CSE_REF,
     SOURCE_PARQUET,
 )
@@ -380,6 +383,22 @@ def test_single_child_nodes_without_expressions() raises:
     _walk_plan(ptopn, 1, 32)
     var cast = LogicalPlan.cast_to_varchar(_inmem(64))
     _walk_plan(cast, 1, 64)
+    # The exchange arm descends to its child (a pass-through `return 0` would
+    # leave the in-memory leaf below it unbound).
+    var ex = LogicalPlan.exchange(_inmem(128), EXCHANGE_KIND_GATHER)
+    _walk_plan(ex, 1, 128)
+
+
+def test_map_batches_binds_its_group_keys_and_child_and_a_step_binds_nothing() raises:
+    """The frame UDF node descends its `group_by` (a subquery there holds an
+    in-memory leaf) and its child; a step has neither. Catches a frame arm
+    that skips either (that leaf stays unbound) and a step arm that mints."""
+    var gb = List[Expr]()
+    gb.append(_subq(1))
+    var mb = LogicalPlan.map_batches(_inmem(2), 0, gb^, _schema())
+    _walk_plan(mb, 2, 3)
+    var st = LogicalPlan.step(0, List[ScalarValue](), _schema())
+    _walk_plan(st, 0, 0)
 
 
 def test_join_walks_both_sides_and_the_residual() raises:
@@ -447,8 +466,11 @@ def test_a_deep_tree_is_walked_end_to_end() raises:
 
 def test_every_payloadless_plan_node_binds_nothing() raises:
     """A node whose tag has an arm but whose payload is absent is answered 0,
-    not dereferenced. Every tag below `PLAN_TAG_COUNT`."""
+    not dereferenced. Every live tag below `PLAN_TAG_COUNT` (the retired ids
+    16 and 17 are refused, below)."""
     for t in range(PLAN_TAG_COUNT):
+        if plan_tag_is_retired(UInt8(t)):
+            continue
         var reg = ScanRegistry()
         var plan = LogicalPlan(UInt8(t), _schema())
         assert_equal(bind_plan_inmem_payloads(reg, plan), 0, String(t))
@@ -460,9 +482,18 @@ def test_a_plan_tag_with_no_arm_is_refused_by_name() raises:
     var plan = LogicalPlan(UInt8(PLAN_TAG_COUNT), _schema())
     with assert_raises(
         contains=String(SCAN_BIND_PASS_UNMODELLED_TAG)
-        + ": the in-memory bind walk has no arm for plan tag 16 (tag#16)."
+        + ": the in-memory bind walk has no arm for plan tag "
+        + String(PLAN_TAG_COUNT)
+        + " (tag#"
+        + String(PLAN_TAG_COUNT)
+        + ")."
     ):
         _ = bind_plan_inmem_payloads(reg, plan)
+    # A RETIRED id lies below the count and is refused like any unmodelled
+    # one: no node may carry it.
+    var retired = LogicalPlan(UInt8(16), _schema())
+    with assert_raises(contains="plan tag 16 (tag#16)."):
+        _ = bind_plan_inmem_payloads(reg, retired)
     var far = LogicalPlan(UInt8(255), _schema())
     with assert_raises(contains="plan tag 255 (tag#255). A tag with no arm"):
         _ = bind_plan_inmem_payloads(reg, far)
@@ -558,6 +589,18 @@ def test_n_child_string_fn_walks_every_argument() raises:
     _walk_expr(e, 2, 5)
 
 
+def test_udf_apply_binds_every_argument() raises:
+    """A call of a `UdfRef`: subqueries behind its first and last argument.
+    Catches an arm that walks only some arguments, or none."""
+    var args = List[Expr]()
+    args.append(_subq(1))
+    args.append(_col())
+    args.append(_subq(4))
+    var t = UdfType("r", ArrowType.INT64, DType.int64, True)
+    var e = Expr.udf_apply(0, t^, args^)
+    _walk_expr(e, 2, 5)
+
+
 def test_two_child_expressions_descend_both_sides() raises:
     var b = Expr.binary(BIN_AND, _subq(1), _subq(2))
     _walk_expr(b, 2, 3)
@@ -588,7 +631,11 @@ def test_an_expression_tag_with_no_arm_is_refused_by_name() raises:
     var e = Expr(UInt8(EXPR_TAG_COUNT))
     with assert_raises(
         contains=String(SCAN_BIND_PASS_UNMODELLED_EXPR_TAG)
-        + ": the in-memory bind walk has no arm for expression tag 27 (tag#27)."
+        + ": the in-memory bind walk has no arm for expression tag "
+        + String(EXPR_TAG_COUNT)
+        + " (tag#"
+        + String(EXPR_TAG_COUNT)
+        + ")."
     ):
         _ = bind_expr_inmem_payloads(reg, e)
     # The refusal reaches the caller of the PLAN walk through a filter.

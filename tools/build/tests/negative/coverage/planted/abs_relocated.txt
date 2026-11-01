@@ -4,6 +4,6 @@
 .debug_line
 value.mojo
 tests
-buck-out/v2/art/tests/functional/coverage/__covlib_forced__/0123456789abcdef/src/covlib
+covlib
 /__________________________________
 /__________________________________/tests/test_value.mojo

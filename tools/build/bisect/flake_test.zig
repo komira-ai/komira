@@ -123,9 +123,9 @@ test "the verdict: any failure is flake; never_failed needs every run of every t
 }
 
 fn render(a: std.mem.Allocator, m: flake.Measurement) !std.json.Value {
-    var buf = std.ArrayList(u8).init(a);
-    try flake.writeVerdict(m, buf.writer());
-    return (try std.json.parseFromSlice(std.json.Value, a, buf.items, .{})).value;
+    var buf = std.Io.Writer.Allocating.init(a);
+    try flake.writeVerdict(m, &buf.writer);
+    return (try std.json.parseFromSlice(std.json.Value, a, buf.written(), .{})).value;
 }
 
 test "bisect flake's JSON read back: verdict, per-target counts, rate, runs and excerpts" {
@@ -185,16 +185,16 @@ test "bisect's verdict carries flake_runs when it measured, null otherwise" {
     defer arena.deinit();
     const a = arena.allocator();
     const base = report.Report{ .verdict = .flake, .good = "g", .bad = "b", .targets = &.{"//t:a"}, .probes = &.{}, .failures = &.{}, .infra = &.{} };
-    var buf = std.ArrayList(u8).init(a);
-    try report.write(base, buf.writer());
-    const none = (try std.json.parseFromSlice(std.json.Value, a, buf.items, .{})).value;
+    var buf = std.Io.Writer.Allocating.init(a);
+    try report.write(base, &buf.writer);
+    const none = (try std.json.parseFromSlice(std.json.Value, a, buf.written(), .{})).value;
     try t.expect(none.object.get("flake_runs").? == .null);
 
     var with = base;
     with.flake_runs = .{ .rev = "b", .runs_requested = 5, .rerun_base = 100, .targets = &.{target("//t:a", 5, 1)} };
     buf.clearRetainingCapacity();
-    try report.write(with, buf.writer());
-    const got = (try std.json.parseFromSlice(std.json.Value, a, buf.items, .{})).value;
+    try report.write(with, &buf.writer);
+    const got = (try std.json.parseFromSlice(std.json.Value, a, buf.written(), .{})).value;
     const fr = got.object.get("flake_runs").?.object;
     try t.expectEqual(@as(i64, 100), fr.get("rerun_base").?.integer);
     try t.expectEqual(@as(i64, 1), fr.get("targets").?.array.items[0].object.get("failures").?.integer);

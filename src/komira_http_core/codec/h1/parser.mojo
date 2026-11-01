@@ -701,8 +701,8 @@ def parse_request_head(
     var line_end = _find_crlf(buf, start)
     if line_end < 0:
         # Shouldn't happen (we already saw CRLFCRLF), but be defensive.
-        out.err = ParseError.make(PARSE_ERR_REQUEST_LINE_MALFORMED, 0)
-        return out^
+        out.err = ParseError.make(PARSE_ERR_REQUEST_LINE_MALFORMED, 0)  # cov: unreachable headers_end is a CRLFCRLF at or after start, so _find_crlf(buf, start) finds a CRLF
+        return out^  # cov: unreachable headers_end is a CRLFCRLF at or after start, so _find_crlf(buf, start) finds a CRLF
 
     if line_end - start > limits.max_request_line_bytes:
         out.err = ParseError.make(PARSE_ERR_URI_TOO_LONG, line_end)
@@ -743,10 +743,10 @@ def parse_request_head(
         var line_crlf = _find_crlf(buf, hi)
         if line_crlf < 0:
             # Should not happen — defensive.
-            out.err = ParseError.make(
+            out.err = ParseError.make(  # cov: unreachable hi < headers_end and a CRLF starts at headers_end, so _find_crlf(buf, hi) finds one
                 PARSE_ERR_REQUEST_LINE_MALFORMED, hi,
             )
-            return out^
+            return out^  # cov: unreachable hi < headers_end and a CRLF starts at headers_end, so _find_crlf(buf, hi) finds one
         var line_len = line_crlf - hi
         if line_len > limits.max_header_bytes:
             out.err = ParseError.make(

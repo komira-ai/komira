@@ -19,7 +19,7 @@
 # These guard the bloom primitive that bloom-filter pushdown depends on.
 # =============================================================================
 
-from std.testing import TestSuite, assert_true, assert_equal
+from std.testing import TestSuite, assert_true, assert_false, assert_equal
 
 from komira_dynamic_filter.bloom_filter import BloomFilter, HashFamily
 
@@ -202,6 +202,65 @@ def test_fibonacci_join_fpr_within_2x() raises:
     )
 
 
+def test_copy_is_an_independent_deep_copy() raises:
+    """`BloomFilter.copy()` carries the bits, the size and the hash family, and
+    owns its own buffer: a key inserted into the copy is invisible to the
+    original (a shallow copy would share the bytes and report it).
+    """
+    var orig = BloomFilter.with_ndv_fpp(
+        4096, 0.01, HashFamily.fibonacci_join()
+    )
+    for i in range(1000):
+        orig.insert_int64(Int64(i))
+    var dup = orig.copy()
+    assert_equal(dup.num_bytes, orig.num_bytes)
+    assert_equal(dup.num_blocks, orig.num_blocks)
+    assert_true(dup.hash_family == orig.hash_family)
+    for i in range(1000):
+        assert_true(dup.might_contain_int64(Int64(i)), "copy lost a key")
+    # A key far from the inserted range; the original must stay without it.
+    var probe = Int64(7_000_000_001)
+    var before = orig.might_contain_int64(probe)
+    var inserted_into_copy = Int64(0)
+    for j in range(200):
+        var k = Int64(7_000_000_001 + j * 13)
+        if not orig.might_contain_int64(k):
+            dup.insert_int64(k)
+            inserted_into_copy = k
+            assert_true(dup.might_contain_int64(k))
+            assert_false(
+                orig.might_contain_int64(k),
+                "insert into the copy leaked into the original",
+            )
+            break
+    assert_true(inserted_into_copy != 0, "no probe key was absent")
+    assert_equal(orig.might_contain_int64(probe), before)
+
+
+def test_copy_of_empty_filter_is_empty() raises:
+    """Copying a zero-sized filter gives a zero-sized filter with the same
+    hash family, and does not allocate."""
+    var e = BloomFilter()
+    var c = e.copy()
+    assert_equal(c.num_bytes, 0)
+    assert_equal(c.num_blocks, 0)
+    assert_true(c.hash_family.is_xxhash64())
+
+
+def test_hash_family_tags_round_trip() raises:
+    """The three family constructors build distinct discriminators and each
+    `is_*` predicate answers for its own family only; a family built from a
+    raw tag equals the named constructor with that tag."""
+    var x = HashFamily.xxhash64()
+    var f = HashFamily.fnv1a()
+    var j = HashFamily.fibonacci_join()
+    assert_true(x.is_xxhash64() and not x.is_fnv1a() and not x.is_fibonacci_join())
+    assert_true(f.is_fnv1a() and not f.is_xxhash64() and not f.is_fibonacci_join())
+    assert_true(j.is_fibonacci_join() and not j.is_xxhash64() and not j.is_fnv1a())
+    assert_true(x != f and f != j and x != j)
+    assert_true(HashFamily(Int8(1)) == f)
+
+
 def main() raises:
     var suite = TestSuite()
     suite.test[test_no_false_negatives_dense]()
@@ -213,4 +272,7 @@ def main() raises:
     suite.test[test_fibonacci_join_reuse_equals_dispatch]()
     suite.test[test_insert_join_key_matches_insert_int64]()
     suite.test[test_fibonacci_join_fpr_within_2x]()
+    suite.test[test_copy_is_an_independent_deep_copy]()
+    suite.test[test_copy_of_empty_filter_is_empty]()
+    suite.test[test_hash_family_tags_round_trip]()
     suite^.run()

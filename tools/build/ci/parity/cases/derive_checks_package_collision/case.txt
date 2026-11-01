@@ -1,5 +1,0 @@
-# A derived name a declared unit holds gets _package until it is free:
-# a -> a_package -> a_package_package, docs -> docs_package.
-arg "{units_file}"
-input units_file "a\t//src/a:a\na_package\t//src/a:a_test\ndocs\t//docs:readme\n"
-exit 0

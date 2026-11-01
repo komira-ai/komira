@@ -95,6 +95,7 @@ from komira_counters.planner_scale_counter import (
 )
 
 from komira_plan_ir.plan_helpers import _copy_plan, _copy_schema
+from .optimizer_udf_carry import filter_like, project_like, aggregate_like
 
 
 # -----------------------------------------------------------------------------
@@ -438,20 +439,20 @@ def replace_agg_subtree_with_source(
             _copy_plan(plan._filter.value()[].child[]), target, source
         )
         var pred = plan._filter.value()[].predicate.copy()
-        return LogicalPlan.filter(pred^, child^)
+        return filter_like(plan._filter.value()[], pred^, child^)
     elif plan.tag == PLAN_PROJECT:
         var child = replace_agg_subtree_with_source(
             _copy_plan(plan._project.value()[].child[]), target, source
         )
         var exprs = _copy_exprs(plan._project.value()[].exprs)
-        return LogicalPlan.project(exprs^, child^)
+        return project_like(plan._project.value()[], exprs^, child^)
     elif plan.tag == PLAN_AGGREGATE:
         var child = replace_agg_subtree_with_source(
             _copy_plan(plan._aggregate.value()[].child[]), target, source
         )
         var group_by = _copy_exprs(plan._aggregate.value()[].group_by)
         var agg_exprs = _copy_aggs(plan._aggregate.value()[].agg_exprs)
-        return LogicalPlan.aggregate(group_by^, agg_exprs^, child^)
+        return aggregate_like(plan._aggregate.value()[], group_by^, agg_exprs^, child^)
     elif plan.tag == PLAN_JOIN:
         var left = replace_agg_subtree_with_source(
             _copy_plan(plan._join.value()[].left[]), target, source

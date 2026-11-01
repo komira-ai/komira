@@ -32,27 +32,27 @@ pub const Red = struct {
     lines: std.ArrayList([]const u8),
 
     pub fn init(alloc: Alloc) Red {
-        return .{ .alloc = alloc, .lines = std.ArrayList([]const u8).init(alloc) };
+        return .{ .alloc = alloc, .lines = std.ArrayList([]const u8).empty };
     }
 
     pub fn add(r: *Red, comptime fmt: []const u8, args: anytype) !void {
-        try r.lines.append(try std.fmt.allocPrint(r.alloc, fmt, args));
+        try r.lines.append(r.alloc, try std.fmt.allocPrint(r.alloc, fmt, args));
     }
 
     /// One line `<what>: a, b, c` (at most 40 names, then the count) when
     /// `names` is not empty.
     pub fn names(r: *Red, what: []const u8, list: []const []const u8) !void {
         if (list.len == 0) return;
-        var b = std.ArrayList(u8).init(r.alloc);
-        try b.writer().print("{s} ({d}):", .{ what, list.len });
+        var b = std.ArrayList(u8).empty;
+        try b.writer(r.alloc).print("{s} ({d}):", .{ what, list.len });
         for (list, 0..) |n, i| {
             if (i == 40) {
-                try b.writer().print(" ... and {d} more", .{list.len - 40});
+                try b.writer(r.alloc).print(" ... and {d} more", .{list.len - 40});
                 break;
             }
-            try b.writer().print(" {s}", .{n});
+            try b.writer(r.alloc).print(" {s}", .{n});
         }
-        try r.lines.append(try b.toOwnedSlice());
+        try r.lines.append(r.alloc, try b.toOwnedSlice(r.alloc));
     }
 
     pub fn green(r: Red) bool {
@@ -100,15 +100,15 @@ fn setOf(alloc: Alloc, list: []const []const u8) !Set {
 /// The elements of `a` that are not in `b`, sorted.
 fn minus(alloc: Alloc, a: []const []const u8, b: []const []const u8) ![][]const u8 {
     const bs = try setOf(alloc, b);
-    var out = std.ArrayList([]const u8).init(alloc);
-    for (a) |x| if (!bs.contains(x)) try out.append(x);
+    var out = std.ArrayList([]const u8).empty;
+    for (a) |x| if (!bs.contains(x)) try out.append(alloc, x);
     return sorted(alloc, out.items);
 }
 
 /// The names the shared object exports, sorted.
 pub fn exportsOf(alloc: Alloc, so: Shared) ![][]const u8 {
-    var out = std.ArrayList([]const u8).init(alloc);
-    for (so.syms) |s| if (s.exported()) try out.append(s.name);
+    var out = std.ArrayList([]const u8).empty;
+    for (so.syms) |s| if (s.exported()) try out.append(alloc, s.name);
     return sorted(alloc, out.items);
 }
 
@@ -117,12 +117,12 @@ pub fn ownerOf(alloc: Alloc, soname: []const u8, so: Shared) !Owner {
 }
 
 fn undefinedOf(alloc: Alloc, so: Shared, weak: bool) ![]Sym {
-    var out = std.ArrayList(Sym).init(alloc);
+    var out = std.ArrayList(Sym).empty;
     for (so.syms) |s| {
         if (s.defined) continue;
-        if ((s.bind == .weak) == weak) try out.append(s);
+        if ((s.bind == .weak) == weak) try out.append(alloc, s);
     }
-    return out.toOwnedSlice();
+    return out.toOwnedSlice(alloc);
 }
 
 /// A dependent owner's archive as a caller: every name it references (an
@@ -132,8 +132,8 @@ fn undefinedOf(alloc: Alloc, so: Shared, weak: bool) ![]Sym {
 pub fn archiveCalls(alloc: Alloc, label: []const u8, syms: []const Sym) !Caller {
     var defs = Set.init(alloc);
     for (syms) |s| if (s.defined and s.bind != .local) try defs.put(s.name, {});
-    var out = std.ArrayList([]const u8).init(alloc);
-    for (syms) |s| if (!s.defined and !defs.contains(s.name)) try out.append(s.name);
+    var out = std.ArrayList([]const u8).empty;
+    for (syms) |s| if (!s.defined and !defs.contains(s.name)) try out.append(alloc, s.name);
     return .{ .label = label, .calls = try sorted(alloc, out.items) };
 }
 
@@ -152,7 +152,7 @@ pub const Exports = struct {
 pub fn exportList(alloc: Alloc, archives: []const Archive, callers: []const Caller, red: *Red) !Exports {
     var owner = std.StringHashMap([]const u8).init(alloc);
     var visible = Set.init(alloc);
-    var dups = std.ArrayList([]const u8).init(alloc);
+    var dups = std.ArrayList([]const u8).empty;
     for (archives) |a| {
         var mine = Set.init(alloc);
         for (a.syms) |s| {
@@ -161,27 +161,27 @@ pub fn exportList(alloc: Alloc, archives: []const Archive, callers: []const Call
             if (mine.contains(s.name)) continue;
             try mine.put(s.name, {});
             if (owner.get(s.name)) |other| {
-                try dups.append(try std.fmt.allocPrint(alloc, "{s} ({s}, {s})", .{ s.name, other, a.label }));
+                try dups.append(alloc, try std.fmt.allocPrint(alloc, "{s} ({s}, {s})", .{ s.name, other, a.label }));
             } else try owner.put(s.name, a.label);
         }
     }
     try red.names("defined by two archives (one owner per C symbol)", try sorted(alloc, dups.items));
 
-    var all = std.ArrayList([]const u8).init(alloc);
-    for (callers) |c| try all.appendSlice(c.calls);
+    var all = std.ArrayList([]const u8).empty;
+    for (callers) |c| try all.appendSlice(alloc, c.calls);
     const calls = try sorted(alloc, all.items);
-    var names = std.ArrayList([]const u8).init(alloc);
-    var hidden = std.ArrayList([]const u8).init(alloc);
+    var names = std.ArrayList([]const u8).empty;
+    var hidden = std.ArrayList([]const u8).empty;
     for (calls) |n| {
         if (visible.contains(n)) {
-            try names.append(n);
-        } else if (owner.contains(n)) try hidden.append(n);
+            try names.append(alloc, n);
+        } else if (owner.contains(n)) try hidden.append(alloc, n);
     }
     try red.names("called names an archive defines only hidden (the library could not export them)", hidden.items);
     const exp = try setOf(alloc, names.items);
 
-    var rep = std.ArrayList(u8).init(alloc);
-    const w = rep.writer();
+    var rep = std.ArrayList(u8).empty;
+    const w = rep.writer(alloc);
     try w.print("{d} exports, from {d} callers and {d} archives\narchives (exports each defines):\n", .{ names.items.len, callers.len, archives.len });
     for (archives) |a| {
         var n: usize = 0;
@@ -205,8 +205,8 @@ pub fn exportList(alloc: Alloc, archives: []const Archive, callers: []const Call
 
 /// The version script exporting exactly `names`; every other symbol local.
 pub fn versionScript(alloc: Alloc, soname: []const u8, names: []const []const u8) ![]const u8 {
-    var b = std.ArrayList(u8).init(alloc);
-    const w = b.writer();
+    var b = std.ArrayList(u8).empty;
+    const w = b.writer(alloc);
     try w.print("/* {s}: generated by tools/build/native/native_so.zig (exports).\n   The callers' external_call names its archives define; every other symbol is local. */\n{{\n  global:\n", .{soname});
     for (names) |n| try w.print("    {s};\n", .{n});
     try w.writeAll("  local:\n    *;\n};\n");
@@ -216,7 +216,7 @@ pub fn versionScript(alloc: Alloc, soname: []const u8, names: []const []const u8
 /// The global names of a version script `versionScript` wrote: the lines
 /// between `global:` and `local:`, without their `;`.
 pub fn scriptGlobals(alloc: Alloc, text: []const u8) ![][]const u8 {
-    var out = std.ArrayList([]const u8).init(alloc);
+    var out = std.ArrayList([]const u8).empty;
     var in_global = false;
     var it = std.mem.splitScalar(u8, text, '\n');
     while (it.next()) |raw| {
@@ -226,7 +226,7 @@ pub fn scriptGlobals(alloc: Alloc, text: []const u8) ![][]const u8 {
         } else if (std.mem.eql(u8, line, "local:")) {
             in_global = false;
         } else if (in_global and line.len > 0) {
-            try out.append(std.mem.trimRight(u8, line, ";"));
+            try out.append(alloc, std.mem.trimRight(u8, line, ";"));
         }
     }
     return sorted(alloc, out.items);
@@ -234,9 +234,9 @@ pub fn scriptGlobals(alloc: Alloc, text: []const u8) ![][]const u8 {
 
 /// The lines of a file, without empty ones, sorted.
 pub fn lines(alloc: Alloc, text: []const u8) ![][]const u8 {
-    var out = std.ArrayList([]const u8).init(alloc);
+    var out = std.ArrayList([]const u8).empty;
     var it = std.mem.splitScalar(u8, text, '\n');
-    while (it.next()) |l| if (l.len > 0) try out.append(l);
+    while (it.next()) |l| if (l.len > 0) try out.append(alloc, l);
     return sorted(alloc, out.items);
 }
 
@@ -246,8 +246,8 @@ pub fn lines(alloc: Alloc, text: []const u8) ![][]const u8 {
 /// (and the version script's global names equal it too).
 pub fn check1(alloc: Alloc, so: Shared, list: []const []const u8, script: []const []const u8, red: *Red) ![]const u8 {
     const exp = try exportsOf(alloc, so);
-    var bad = std.ArrayList([]const u8).init(alloc);
-    for (exp) |n| if (!std.mem.startsWith(u8, n, komira)) try bad.append(n);
+    var bad = std.ArrayList([]const u8).empty;
+    for (exp) |n| if (!std.mem.startsWith(u8, n, komira)) try bad.append(alloc, n);
     try red.names("exports without the komira_ prefix", bad.items);
     try red.names("listed names the library does not export", try minus(alloc, list, exp));
     try red.names("exports not in the generated list", try minus(alloc, exp, list));
@@ -265,9 +265,9 @@ pub fn check2(alloc: Alloc, so: Shared, archives: []const Archive, callers: []co
     for (archives) |a| {
         for (a.syms) |s| if (s.defined and s.bind != .local) try defined.put(s.name, {});
     }
-    var want = std.ArrayList([]const u8).init(alloc);
+    var want = std.ArrayList([]const u8).empty;
     for (callers) |c| {
-        for (c.calls) |n| if (defined.contains(n)) try want.append(n);
+        for (c.calls) |n| if (defined.contains(n)) try want.append(alloc, n);
     }
     const wanted = try sorted(alloc, want.items);
     if (wanted.len == 0) try red.add("no caller calls a name the archives define (nothing to check)", .{});
@@ -285,7 +285,7 @@ pub fn check3(alloc: Alloc, so: Shared, weak: []const []const u8, owners: []cons
         for (o.exports) |e| if (!by.contains(e)) try by.put(e, o.soname);
     }
     var bound = std.StringHashMap(usize).init(alloc);
-    var strong = std.ArrayList([]const u8).init(alloc);
+    var strong = std.ArrayList([]const u8).empty;
     var strong_n: usize = 0;
     for (try undefinedOf(alloc, so, false)) |s| {
         if (!std.mem.startsWith(u8, s.name, komira)) continue;
@@ -293,30 +293,30 @@ pub fn check3(alloc: Alloc, so: Shared, weak: []const []const u8, owners: []cons
         if (by.get(s.name)) |o| {
             const g = try bound.getOrPut(o);
             g.value_ptr.* = if (g.found_existing) g.value_ptr.* + 1 else 1;
-        } else try strong.append(s.name);
+        } else try strong.append(alloc, s.name);
     }
     try red.names("strong undefined komira_ symbols no declared NEEDED owner exports", try sorted(alloc, strong.items));
-    var idle = std.ArrayList([]const u8).init(alloc);
-    for (owners) |o| if (!bound.contains(o.soname)) try idle.append(o.soname);
+    var idle = std.ArrayList([]const u8).empty;
+    for (owners) |o| if (!bound.contains(o.soname)) try idle.append(alloc, o.soname);
     try red.names("declared NEEDED owners exporting none of the library's undefined komira_ symbols", idle.items);
     const ws = try setOf(alloc, weak);
-    var unlisted = std.ArrayList([]const u8).init(alloc);
+    var unlisted = std.ArrayList([]const u8).empty;
     var n: usize = 0;
     for (try undefinedOf(alloc, so, true)) |s| {
         if (!std.mem.startsWith(u8, s.name, komira)) continue;
         n += 1;
-        if (!ws.contains(s.name)) try unlisted.append(s.name);
+        if (!ws.contains(s.name)) try unlisted.append(alloc, s.name);
     }
     try red.names("weak undefined komira_ symbols not on the weak list", try sorted(alloc, unlisted.items));
-    var b = std.ArrayList(u8).init(alloc);
-    try b.writer().print("{d} strong undefined komira_ symbols", .{strong_n});
+    var b = std.ArrayList(u8).empty;
+    try b.writer(alloc).print("{d} strong undefined komira_ symbols", .{strong_n});
     if (owners.len == 0) {
-        try b.appendSlice(" (no declared owner)");
+        try b.appendSlice(alloc, " (no declared owner)");
     } else {
-        try b.appendSlice(", each exported by a declared NEEDED owner:");
-        for (owners) |o| try b.writer().print(" {s} {d}", .{ o.soname, bound.get(o.soname) orelse 0 });
+        try b.appendSlice(alloc, ", each exported by a declared NEEDED owner:");
+        for (owners) |o| try b.writer(alloc).print(" {s} {d}", .{ o.soname, bound.get(o.soname) orelse 0 });
     }
-    try b.writer().print("; {d} weak undefined komira_ symbols, all listed", .{n});
+    try b.writer(alloc).print("; {d} weak undefined komira_ symbols, all listed", .{n});
     return b.items;
 }
 
@@ -353,15 +353,15 @@ pub fn check4(alloc: Alloc, so: Shared, soname: []const u8, owners: []const []co
     if (so.soname) |s| {
         if (!std.mem.eql(u8, s, soname)) try red.add("SONAME is {s}, not {s}", .{ s, soname });
     } else try red.add("no SONAME (want {s})", .{soname});
-    var other = std.ArrayList([]const u8).init(alloc);
+    var other = std.ArrayList([]const u8).empty;
     var libc = false;
     for (so.needed) |n| {
         if (std.mem.eql(u8, n, "libc.so.6")) libc = true;
-        if (!isGlibc(n) and !contains(owners, n)) try other.append(n);
+        if (!isGlibc(n) and !contains(owners, n)) try other.append(alloc, n);
     }
     try red.names("NEEDED entries that are neither glibc nor a declared owner", other.items);
-    var absent = std.ArrayList([]const u8).init(alloc);
-    for (owners) |o| if (!contains(so.needed, o)) try absent.append(o);
+    var absent = std.ArrayList([]const u8).empty;
+    for (owners) |o| if (!contains(so.needed, o)) try absent.append(alloc, o);
     try red.names("declared owners not NEEDED", absent.items);
     if (!libc and callsGlibc(so)) try red.add("libc.so.6 is not NEEDED, but the library has undefined symbols outside komira_ (not linked against glibc?)", .{});
     if (owners.len == 0) {
@@ -369,26 +369,26 @@ pub fn check4(alloc: Alloc, so: Shared, soname: []const u8, owners: []const []co
     } else if (so.runpath.len == 0) {
         try red.add("no RUNPATH, but a komira owner is NEEDED: the loader would not find {s} next to this library (want RUNPATH {s})", .{ owners[0], origin });
     } else {
-        var extra = std.ArrayList([]const u8).init(alloc);
-        for (so.runpath) |r| if (!std.mem.eql(u8, r, origin)) try extra.append(r);
+        var extra = std.ArrayList([]const u8).empty;
+        for (so.runpath) |r| if (!std.mem.eql(u8, r, origin)) try extra.append(alloc, r);
         try red.names("RUNPATH entries other than $ORIGIN", extra.items);
         if (so.runpath.len > 1 and extra.items.len == 0) try red.add("RUNPATH lists $ORIGIN {d} times", .{so.runpath.len});
     }
     try red.names("RPATH entries", so.rpath);
-    var b = std.ArrayList(u8).init(alloc);
-    try b.writer().print("SONAME {s}; NEEDED", .{soname});
-    for (so.needed) |n| try b.writer().print(" {s}", .{n});
-    try b.appendSlice(if (owners.len == 0) "; no run path" else "; RUNPATH $ORIGIN");
+    var b = std.ArrayList(u8).empty;
+    try b.writer(alloc).print("SONAME {s}; NEEDED", .{soname});
+    for (so.needed) |n| try b.writer(alloc).print(" {s}", .{n});
+    try b.appendSlice(alloc, if (owners.len == 0) "; no run path" else "; RUNPATH $ORIGIN");
     return b.items;
 }
 
 /// A dotted version (`2.34`) as numbers; null if any part is not a number.
 pub fn parseVersion(alloc: Alloc, v: []const u8) !?[]u32 {
-    var out = std.ArrayList(u32).init(alloc);
+    var out = std.ArrayList(u32).empty;
     var it = std.mem.splitScalar(u8, v, '.');
     while (it.next()) |p| {
         const n = std.fmt.parseInt(u32, p, 10) catch return null;
-        try out.append(n);
+        try out.append(alloc, n);
     }
     return out.items;
 }
@@ -430,9 +430,9 @@ pub fn check5(alloc: Alloc, so: Shared, floor: []const u8, red: *Red) ![]const u
             highest_n = v;
         }
         if (versionAbove(v, fl)) {
-            var users = std.ArrayList([]const u8).init(alloc);
+            var users = std.ArrayList([]const u8).empty;
             for (so.syms) |s| {
-                if (s.version) |sv| if (std.mem.eql(u8, sv, need.version)) try users.append(s.name);
+                if (s.version) |sv| if (std.mem.eql(u8, sv, need.version)) try users.append(alloc, s.name);
             }
             if (users.items.len == 0) {
                 try red.add("needs {s} from {s}, above the floor glibc {s}; no dynamic symbol carries it", .{ need.version, need.file, floor });
@@ -461,17 +461,17 @@ pub fn check6(alloc: Alloc, so: Shared, red: *Red) ![]const u8 {
 /// 7. Every strong undefined symbol is GLIBC_-versioned or a komira_ symbol
 /// (check 3's), and the weak undefined ones are exactly `weak`.
 pub fn check7(alloc: Alloc, so: Shared, weak: []const []const u8, red: *Red) ![]const u8 {
-    var stray = std.ArrayList([]const u8).init(alloc);
+    var stray = std.ArrayList([]const u8).empty;
     var strong_n: usize = 0;
     for (try undefinedOf(alloc, so, false)) |s| {
         strong_n += 1;
         if (std.mem.startsWith(u8, s.name, komira)) continue;
         if (s.version) |v| if (std.mem.startsWith(u8, v, "GLIBC_")) continue;
-        try stray.append(if (s.version) |v| try std.fmt.allocPrint(alloc, "{s}@{s}", .{ s.name, v }) else s.name);
+        try stray.append(alloc, if (s.version) |v| try std.fmt.allocPrint(alloc, "{s}@{s}", .{ s.name, v }) else s.name);
     }
     try red.names("strong undefined symbols neither GLIBC_-versioned nor komira_", try sorted(alloc, stray.items));
-    var have = std.ArrayList([]const u8).init(alloc);
-    for (try undefinedOf(alloc, so, true)) |s| try have.append(s.name);
+    var have = std.ArrayList([]const u8).empty;
+    for (try undefinedOf(alloc, so, true)) |s| try have.append(alloc, s.name);
     const ws = try sorted(alloc, weak);
     try red.names("weak undefined symbols not on the recorded weak list", try minus(alloc, have.items, ws));
     try red.names("recorded weak names the library no longer references (update the list)", try minus(alloc, ws, have.items));
@@ -502,13 +502,13 @@ pub fn checkReadme(alloc: Alloc, exports: []const []const u8, programs: []const 
         return "";
     }
     const ex = try setOf(alloc, exports);
-    var hits = std.ArrayList([]const u8).init(alloc);
-    var names = std.ArrayList([]const u8).init(alloc);
+    var hits = std.ArrayList([]const u8).empty;
+    var names = std.ArrayList([]const u8).empty;
     var calling: usize = 0;
     for (programs) |p| {
-        try names.append(p.name);
+        try names.append(alloc, p.name);
         const before = hits.items.len;
-        for (p.syms) |s| if (ex.contains(s.name)) try hits.append(try std.fmt.allocPrint(alloc, "{s} in {s}", .{ s.name, p.name }));
+        for (p.syms) |s| if (ex.contains(s.name)) try hits.append(alloc, try std.fmt.allocPrint(alloc, "{s} in {s}", .{ s.name, p.name }));
         if (hits.items.len > before) calling += 1;
     }
     if (hits.items.len == 0) {

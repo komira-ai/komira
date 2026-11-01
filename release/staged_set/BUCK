@@ -1,0 +1,17 @@
+# The staged set the release workflow made with `mopm stage` (docs/ci.md, "The mopm
+# jobs"), as a build input: every file of this directory but this one. The job
+# `mopm-stage` of .github/workflows/release.yml writes it here (`mopm stage --out
+# release/staged_set`: plan.json, `<subdir>/<file>.conda`, `<name>/README.md`) and then
+# builds //release/readme_e2e/verify:all with `-c komira_release.staged=stage`, which
+# installs from this target. The files are not in the repository (.gitignore), so the
+# target is empty in a checkout, and the e2e against it fails on the missing plan.json:
+# a release that did not stage fails.
+#
+# `mopm stage` asks the registry which versions it already holds, so it cannot run as a
+# build action (an action is offline): the farm gets the set it wrote as an input, and
+# the README e2e runs on the farm against those bytes.
+filegroup(
+    name = "set",
+    srcs = glob(["**"], exclude = ["BUCK"]),
+    visibility = ["//release/readme_e2e/verify:"],
+)

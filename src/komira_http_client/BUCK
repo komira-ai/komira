@@ -102,6 +102,7 @@ mojo_library(
         "tests/test_outbound_budget_rule.mojo",
         "tests/test_owned_byte_body_differential.mojo",
         "tests/test_park_coupled_clock.mojo",
+        "tests/test_scripted_dial_no_dns.mojo",
         "tests/test_pool_basic.mojo",
         "tests/test_pool_evict.mojo",
         "tests/test_pool_integration.mojo",

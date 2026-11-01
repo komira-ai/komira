@@ -254,30 +254,71 @@ def test_write_chunked_string_short_payload() raises:
         assert_equal(got[i], expected[i])
 
 
-def test_write_chunked_string_binary_bytes_preserved() raises:
-    """write_chunked_string on a String built from bytes > 127 (the
-    `unsafe_from_utf8` ctor preserves raw bytes; the chr()-per-byte path
-    would UTF-8 re-encode them and corrupt the binary content)."""
-    var path = _make_tmp_path("string_binary")
+def test_write_chunked_string_multibyte_utf8_preserved() raises:
+    """write_chunked_string on a String holding multi-byte UTF-8 (2-, 3- and
+    4-byte sequences) writes exactly the String's bytes."""
+    var path = _make_tmp_path("string_multibyte")
     var h = FileHandle(path, "w")
-    var raw = List[UInt8]()
-    raw.append(UInt8(0x9C))  # > 127
-    raw.append(UInt8(0xC2))
-    raw.append(UInt8(0xFE))
-    raw.append(UInt8(0x00))  # NUL — also a hazard for naive write paths
-    raw.append(UInt8(0xFF))
-    # SAFETY: deliberately not UTF-8; the String only carries these bytes to
-    # `write_chunked_string`, which must write them back unchanged.
-    var s = String(unsafe_from_utf8=Span(raw))
+    var s = String("héllo € 😀!")
     write_chunked_string(h, s)
     _ = h^
     var got = _read_file_bytes(path)
-    assert_equal(len(got), 5)
-    assert_equal(Int(got[0]), 0x9C)
-    assert_equal(Int(got[1]), 0xC2)
-    assert_equal(Int(got[2]), 0xFE)
-    assert_equal(Int(got[3]), 0x00)
-    assert_equal(Int(got[4]), 0xFF)
+    var expected = s.as_bytes()
+    assert_equal(len(expected), 16)
+    assert_equal(len(got), len(expected))
+    for i in range(len(expected)):
+        assert_equal(Int(got[i]), Int(expected[i]))
+
+
+def test_write_chunked_invalid_utf8_bytes_written_exactly() raises:
+    """A span of bytes that is NOT valid UTF-8 (lone continuation bytes, the
+    invalid bytes 0xFE and 0xFF, a truncated 3-byte lead, a NUL) lands on disk
+    unchanged. Building a String from such bytes is invalid and aborts under
+    `assert=all`, so `write_chunked` must hand the span to the file as bytes."""
+    var path = _make_tmp_path("invalid_utf8")
+    var h = FileHandle(path, "w")
+    var raw = List[UInt8]()
+    raw.append(UInt8(0xFF))
+    raw.append(UInt8(0xFE))
+    raw.append(UInt8(0x80))  # lone continuation byte
+    raw.append(UInt8(0x9C))
+    raw.append(UInt8(0xC2))  # 2-byte lead with no continuation after it
+    raw.append(UInt8(0x00))
+    raw.append(UInt8(0xE2))  # truncated 3-byte sequence
+    raw.append(UInt8(0x82))
+    write_chunked(h, Span(raw))
+    _ = h^
+    var got = _read_file_bytes(path)
+    _assert_bytes_equal(got, raw)
+    assert_equal(Int(got[0]), 0xFF)
+    assert_equal(Int(got[1]), 0xFE)
+    assert_equal(Int(got[7]), 0x82)
+
+
+def test_write_chunked_invalid_utf8_split_across_chunk_boundary() raises:
+    """Multi-chunk write whose chunk boundary falls inside an invalid
+    sequence: CHUNK_BYTES + 3 bytes of 0xFF with the bytes either side of the
+    boundary set to 0xE2 0x82 / 0xAC 0xFE. Both chunks must land in order,
+    byte for byte."""
+    var path = _make_tmp_path("invalid_utf8_boundary")
+    var h = FileHandle(path, "w")
+    var n = CHUNK_BYTES + 3
+    var buf = List[UInt8](length=n, fill=UInt8(0xFF))
+    buf[CHUNK_BYTES - 2] = UInt8(0xE2)
+    buf[CHUNK_BYTES - 1] = UInt8(0x82)
+    buf[CHUNK_BYTES] = UInt8(0xAC)
+    buf[CHUNK_BYTES + 1] = UInt8(0xFE)
+    write_chunked(h, Span(buf))
+    _ = h^
+    var got = _read_file_bytes(path)
+    assert_equal(len(got), n)
+    assert_equal(Int(got[0]), 0xFF)
+    assert_equal(Int(got[CHUNK_BYTES - 3]), 0xFF)
+    assert_equal(Int(got[CHUNK_BYTES - 2]), 0xE2)
+    assert_equal(Int(got[CHUNK_BYTES - 1]), 0x82)
+    assert_equal(Int(got[CHUNK_BYTES]), 0xAC)
+    assert_equal(Int(got[CHUNK_BYTES + 1]), 0xFE)
+    assert_equal(Int(got[CHUNK_BYTES + 2]), 0xFF)
 
 
 def test_write_chunked_byte_identity_against_chunk_size() raises:

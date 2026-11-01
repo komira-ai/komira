@@ -44,7 +44,7 @@ their import paths), and the default output is protoc's descriptor set for the
 roots (`--include_imports`).
 
 Each closure target is a `proto_check` ([proto_check.bzl](proto_check.bzl),
-[proto_check.sh](proto_check.sh)): protoc must parse the roots from the
+[proto_check.zig](proto_check.zig)): protoc must parse the roots from the
 extracted files alone, into a descriptor set naming every one of them. A file
 the closure needs and the list lacks fails the build, and so does a listed
 file nothing imports. Its fixtures in `testdata/` hold the check to refusing

@@ -1,0 +1,12 @@
+# What the coverage census measured of this package's libraries (tools/build/coverage/census.md).
+census	2026-10-10	27a2541169cb979fa9c82a032eea24919b727121	-
+komira//src/komira_gcp_secretmanager:komira_gcp_secretmanager	src/komira_gcp_secretmanager	library	OK	0	0	-	-	no	conda	-	-
+generated	src/komira_gcp_secretmanager/generated/komira_gcp_secretmanager/__init__.mojo
+generated	src/komira_gcp_secretmanager/generated/komira_gcp_secretmanager/expr.mojo
+generated	src/komira_gcp_secretmanager/generated/komira_gcp_secretmanager/iam_policy.mojo
+generated	src/komira_gcp_secretmanager/generated/komira_gcp_secretmanager/options.mojo
+generated	src/komira_gcp_secretmanager/generated/komira_gcp_secretmanager/policy.mojo
+generated	src/komira_gcp_secretmanager/generated/komira_gcp_secretmanager/resource_policy_member.mojo
+generated	src/komira_gcp_secretmanager/generated/komira_gcp_secretmanager/resources.mojo
+generated	src/komira_gcp_secretmanager/generated/komira_gcp_secretmanager/service.mojo
+generated	src/komira_gcp_secretmanager/generated/komira_gcp_secretmanager/status.mojo

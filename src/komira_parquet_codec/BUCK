@@ -81,6 +81,8 @@ _PARQUET_FIXTURES = [
 
 mojo_library(
     name = "komira_parquet_codec",
+    # Its C (the Brotli decoder) ships in its package as komira_parquet_codec_native below (lib/libkomira_parquet_codec_native.so.1).
+    native = ":komira_parquet_codec_native",
     srcs = _SRCS,
     deps = [
         "//src/komira_arrow:komira_arrow",
@@ -144,7 +146,7 @@ mojo_library(
 # libkomira_parquet_codec_native.so.1: the C this library owns (the Brotli
 # decoder, prefixed komira_brotli_), as its own shared library exporting the
 # names its callers call (tools/build/native/README.md, "Each library's shared
-# library"). Built and checked here; no package ships it yet.
+# library"). Built and checked here, and packed into the library's conda package (`native`).
 native_shared_library(
     name = "komira_parquet_codec_native",
     archives = [

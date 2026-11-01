@@ -241,9 +241,43 @@ And it reads a file's rows:
   `decode_column_chunk_from_bytes`, and `decode_numeric_dict_codes_from_bytes`
   (an INT32 / INT64 dictionary chunk as codes and entries, for a count that
   never gathers the values). A chunk outside the given range is refused.
+- `file_decode`: `decode_parquet_file_from_bytes(file, projection)`, a whole
+  in-memory file (a `ByteView`) to one `RecordBatch`: the trailer and footer
+  are checked and parsed, each row group is decoded from its own range with
+  `bytes_decode` and the row groups are concatenated in file order. An empty
+  or short buffer, a missing `PAR1` magic, a footer length that does not fit,
+  a footer that does not parse, a file with no row group, a nested column and
+  a chunk outside the data region are each refused with an `Error`. A
+  `dictionary_page_offset` of 0 is refused as outside the data region (some
+  writers use 0 for "absent"; the Parquet footer says absent by omitting it).
+  A column chunk's `num_values` must equal the values its data page headers
+  declare: the footer's count never sizes a buffer alone. A chunk whose pages
+  hold fewer values than the footer says is refused (a change for corrupt files only).
 - Every column chunk these decode is counted
   (`komira_counters.parquet_column_chunks_decoded`), so a test can see which
   columns a scan read.
+
+And it reads only the pages a filter needs:
+
+- `page_index`: `ColumnIndex` (per-page min/max as Int64, all-null pages,
+  null counts, and which pages had their bounds written) and `OffsetIndex`
+  (per-page offset, size and first row; `page_rows` is exact, the last page
+  ending at the row group's row count); `coalesce_pages` merges adjacent
+  chosen pages into byte runs, and `read_selected_pages_via_runs` decodes
+  them as one column, after the chunk's dictionary page when it has one.
+- `page_index_parser`: the two Thrift structs, every length checked.
+- `page_index_cache`: `ParquetPageIndexCache`, each chunk's indexes parsed
+  once; lookups take a `komira_sync.SpinMutex` and return copies.
+- `page_pruner`: `select_pages_for_unit`, per compared INT64 column the pages
+  a filter's `col op literal` leaves (under AND and OR) can match. UINT_64
+  and DECIMAL columns, and pages without written bounds, are never pruned.
+
+And it holds a scan source's row-group reads: `parquet_source_helpers`
+(column chunks read one by one, by index or by name across files),
+`parquet_source_constants` (typed nulls for a column a file lacks, a Hive
+partition value as a constant column, its text checked against its type)
+and `parquet_source_page_picks` (only the chosen pages, the columns joined
+by row; columns whose pages cover different rows are refused).
 
 Every example below runs as a test when the package is built.
 

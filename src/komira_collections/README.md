@@ -1,6 +1,6 @@
 # komira_collections
 
-Generic containers with no dependencies beyond `komira_atomic_alias`.
+Generic containers with no dependency beyond `komira_atomic_alias`.
 `Slab[T]` (`komira_collections.slab`) is a growable array for any movable
 type, including one that cannot be copied: values are moved in with `append`,
 borrowed in place with `get`, and moved out with `pop`, `take_at` (order kept)
@@ -141,3 +141,37 @@ def main() raises:
     with assert_raises(contains="asked for"):
         _ = dv.get[Int]()
 ```
+
+## Build files
+
+This package is built with buildrules' `mojo_package` and packaged for mopm as `komira_collections`, version 0.1.0
+(`mopm.toml`). The library is `src/komira_collections/` (`slab.mojo`, `dyn_value.mojo`, `variadic_pack.mojo`,
+`hyperloglog.mojo` and the `__init__.mojo` that ties them together), its tests are `tests/`. It depends on one
+package, `komira_atomic_alias`, a sibling directory (`[dependencies]` of `mopm.toml`: `{ path =
+"../komira_atomic_alias", version = "0.1" }`), so the `.conda` of this package records
+`mojo-komira_atomic_alias >=0.1,<0.2` as a dependency and holds none of that package's files: installing
+`komira_collections` installs `komira_atomic_alias` with it. The files that are not sources:
+
+| file | what |
+|---|---|
+| `mopm.toml` | the mopm manifest: name, version, the Mojo version, the dependency and where the library and its tests are |
+| `mopm.lock` | the toolchain pins and the path dependency, as `mopm lock` writes them (no registry is reached: the only dependency is a sibling) |
+| `mopm-toolchain.toml` | the exact mopm and Mojo versions the build uses (written by hand) |
+| `coverage_floor.txt` | `lines NN.NN` and `branches NN.NN`: the least line and branch coverage `:coverage` may measure; `:coverage_floor` fails when either falls below, and above it passes and prints a hint to raise the figure |
+| `buildrules.mojo.lock.bzl`, `buildrules.mojo.bzl` | written by `buildrules mojo sync` from the files above and from the manifest of the sibling; `buildrules mojo check` fails when they are stale |
+
+`:lib` is the library file, built from the `:lib` of `komira_atomic_alias`, and exists only once the tests of
+`tests/` have passed. After any change to a source, a test, a manifest of this package or of the sibling, run
+`buildrules mojo sync` with both packages staged, commit what it writes, and build
+`komira//src/komira_collections:lib` on the farm. A test file that the sync has not listed is not run: run the sync
+after adding one.
+
+`:conda` is buildrules' `mojo_conda` over `:lib`: the `.conda` of the mopm package
+(`mojo-komira_collections-0.1.0-mojo1.0.0_0.conda`), packed with the sibling's manifest beside its own (`members`),
+which therefore exists only once the tests have passed. Publishing it (`mopm publish`) uploads, so it is a step of a
+CI job that takes that file, not a build action.
+
+`:komira_collections` is `:lib` as komira's Mojo rules take it (`mojo_adopted_library`): its `deps` are the adopted
+target of each package in `[dependencies]`, and the rule refuses a list that is not the closure `:lib` was built
+from. It also compiles and runs the README's examples above (`[tests][readme]`) against `:lib`; the tests are not
+run again.

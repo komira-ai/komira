@@ -1,6 +1,6 @@
 {
  "name": "column_propagate_error_no_row",
- "defect": "under PROPAGATE an error that names no row (row -1, design 4.3: \"-1 otherwise\") is mapped to a caller's row",
+ "defect": "an error that names no row (row -1) is not bisected (design 4.5): under PROPAGATE the compacted batch [1, 2] is split, the first one-row half raises, and its row maps back to the caller's row 1",
  "run": "call_batch",
  "entry": "raise_no_row",
  "shape": "MAP_BATCHES_COLUMN",
@@ -8,5 +8,5 @@
  "args": [{"type": "int64", "nullable": true}],
  "result": [{"type": "int64", "nullable": true}],
  "input": {"length": 3, "columns": [{"type": "int64", "values": [null, 1, 2]}]},
- "expect": {"status": "ERR_RAISED", "run_error": "UDF_RAISED", "row": -1, "message": "nonempty"}
+ "expect": {"status": "ERR_RAISED", "run_error": "UDF_RAISED", "row": 1, "message": "nonempty"}
 }

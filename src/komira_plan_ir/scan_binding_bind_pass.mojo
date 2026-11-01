@@ -204,6 +204,7 @@ from komira_plan_expr.expr import (
     EXPR_STRING_FN,
     EXPR_STRING_FN_N,
     EXPR_UDF_CALL,
+    EXPR_UDF_APPLY,
     expr_tag_name,
 )
 from komira_plan_ir.logical_plan import (
@@ -224,6 +225,9 @@ from komira_plan_ir.logical_plan import (
     PLAN_VIEW_REF,
     PLAN_CSE_REF,
     PLAN_CAST_TO_VARCHAR,
+    PLAN_EXCHANGE,
+    PLAN_MAP_BATCHES,
+    PLAN_STEP,
     plan_tag_name,
 )
 from komira_plan_ir.corr_subquery import corr_data_inner_plan_ref
@@ -423,6 +427,24 @@ def bind_plan_inmem_payloads(
         return bind_plan_inmem_payloads(
             registry, plan._cast_to_varchar.value()[].child[]
         )
+    if tag == PLAN_EXCHANGE:
+        # Keys and ordering are column NAMES; no expression site.
+        if not plan._exchange:
+            return 0
+        return bind_plan_inmem_payloads(
+            registry, plan._exchange.value()[].child[]
+        )
+    if tag == PLAN_MAP_BATCHES:
+        if not plan._map_batches:
+            return 0
+        ref mb = plan._map_batches.value()[]
+        var n = 0
+        for i in range(len(mb.group_by)):
+            n += bind_expr_inmem_payloads(registry, mb.group_by[i])
+        return n + bind_plan_inmem_payloads(registry, mb.child[])
+    if tag == PLAN_STEP:
+        # A source with no child and literal arguments: nothing to bind.
+        return 0
 
     # ---- TWO-CHILD ---------------------------------------------------------
     # BOTH sides, always. A join whose RIGHT side is the in-memory one is the
@@ -603,6 +625,16 @@ def bind_expr_inmem_payloads(
         return bind_expr_inmem_payloads(
             registry, expr._udf_call.value().child[]
         )
+    if tag == EXPR_UDF_APPLY:
+        # N children, the call's arguments, all ordinary expressions.
+        if not expr._udf_apply:
+            return 0
+        var apply_bound = 0
+        for i in range(len(expr._udf_apply.value().args)):
+            apply_bound += bind_expr_inmem_payloads(
+                registry, expr._udf_apply.value().args[i]
+            )
+        return apply_bound
 
     # ---- TWO CHILDREN ------------------------------------------------------
     if tag == EXPR_BINARY_OP:

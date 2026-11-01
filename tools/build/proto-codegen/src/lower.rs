@@ -574,6 +574,7 @@ impl Lowerer {
 
         Ok(IrFile {
             proto_path: file.name().to_string(),
+            source_sha256: String::new(),
             proto_package: pkg.to_string(),
             mojo_package: self.mojo_package.clone(),
             messages,
@@ -1237,6 +1238,7 @@ mod nested_container_reference_edges {
     fn file(messages: Vec<IrMessage>) -> IrFile {
         IrFile {
             proto_path: "t/fixture.proto".to_string(),
+            source_sha256: String::new(),
             proto_package: "t".to_string(),
             mojo_package: "t".to_string(),
             messages,
@@ -1458,6 +1460,7 @@ mod omitted_fields {
         IrModel {
             files: vec![IrFile {
                 proto_path: "t/fixture.proto".to_string(),
+                source_sha256: String::new(),
                 proto_package: "t".to_string(),
                 mojo_package: "t".to_string(),
                 messages: vec![IrMessage {

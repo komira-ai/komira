@@ -30,7 +30,7 @@ mojo_proto_library(
     srcs = ["team/team.proto"],
     import_name = "team_proto",
     import_prefix = "example",
-    proto_deps = ["//functional/proto:person_proto"],
+    proto_deps = ["//functional/proto:person_proto_gen"],
     deps = ["//functional/proto:komira_proto_codec"],
 )
 
@@ -61,7 +61,7 @@ mojo_proto_library(
     import_name = "roster_proto",
     import_prefix = "example",
     proto_deps = [
-        "//functional/proto:person_proto",
+        "//functional/proto:person_proto_gen",
         "komira//tools/build/proto-codegen:db_options",
     ],
     deps = ["//functional/proto:komira_proto_codec"],
@@ -75,7 +75,7 @@ mojo_proto_library(
     import_name = "roster_proto",
     import_prefix = "example",
     proto_deps = [
-        "//functional/proto:person_proto",
+        "//functional/proto:person_proto_gen",
         "komira//tools/build/proto-codegen:db_options",
     ],
     deps = ["//functional/proto:komira_proto_codec"],

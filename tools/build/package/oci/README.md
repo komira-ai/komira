@@ -96,6 +96,6 @@ the check is red naming it:
 |---|---|---|
 | `:dir_whiteout` | the added layer holds `etc/.wh.ssl` | `file etc/ssl/certs/ca-certificates.crt: not in the image` |
 | `:opaque_whiteout` | the added layer holds `etc/ssl/certs/.wh..wh..opq` | the same |
-| `:wrong_entrypoint` | the check names `/bin/other`, a 0755 file of the image, but the config's Entrypoint is `["/bin/sh"]` | `the config's Entrypoint is not ["/bin/other"]` |
-| `:second_exec` | `executables = ["bin/sh", "etc/os-release"]`; the second is not mode 0755 | `exec etc/os-release: ` |
+| `:wrong_entrypoint` | the check names `/bin/other`, a 0755 file of the image, but the config's Entrypoint is `["/bin/app"]` | `the config's Entrypoint is not ["/bin/other"]` |
+| `:second_exec` | `executables = ["bin/app", "etc/os-release"]`; the second is not mode 0755 | `exec etc/os-release: ` |
 | `:second_file` | `files = [<the certificate>, "etc/nope"]`; the second is not in the image | `file etc/nope: not in the image` |

@@ -1,0 +1,164 @@
+load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_module", "zig_test")
+load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
+
+# Planted defects for the Zig rules; the cases
+# that work are tests//functional/zig_rules. Every target here must fail, and
+# tools/build/selftest requires the text named in its row of
+# analysis_refusals_zig_rules (analysis) or planted_red_builds_zig_rules (an
+# action fails). What each plants is written above it.
+
+_BUSYBOX = "komira//tools/build/toolchains:busybox"
+_ZIG = "komira//tools/build/toolchains:zig"
+
+# ---- zig_module deps ----------------------------------------------------------
+
+# REFUSED "two different modules are imported as": two modules named `shared`
+# reached through different deps.
+zig_module(
+    name = "through_a",
+    deps = ["//negative/zig_rules/clash_a:shared"],
+    src = "through_a.zig",
+)
+
+zig_module(
+    name = "through_b",
+    deps = ["//negative/zig_rules/clash_b:shared"],
+    src = "through_b.zig",
+)
+
+zig_exe(
+    name = "name_clash",
+    exec_compatible_with = LINUX_X86_64,
+    deps = [":through_a", ":through_b"],
+    src = "use_clash.zig",
+    busybox = _BUSYBOX,
+    zig = _ZIG,
+)
+
+# RED "no module named 'zr_leaf' available within module root": the importer
+# declares zr_mid, not zr_leaf; zr_mid's own dep is not visible to it.
+zig_exe(
+    name = "dep_of_dep_not_visible",
+    exec_compatible_with = LINUX_X86_64,
+    deps = ["//functional/zig_rules:zr_mid"],
+    src = "direct.zig",
+    busybox = _BUSYBOX,
+    zig = _ZIG,
+)
+
+# RED "no module named 'zr_leaf' available within module zr_mid_nodeps": a
+# module that imports a module it does not declare.
+zig_module(
+    name = "zr_mid_nodeps",
+    src = "mid_nodeps.zig",
+)
+
+zig_exe(
+    name = "module_without_deps",
+    exec_compatible_with = LINUX_X86_64,
+    deps = [":zr_mid_nodeps"],
+    src = "via_nodeps.zig",
+    busybox = _BUSYBOX,
+    zig = _ZIG,
+)
+
+# ---- optimize, strip, target ----------------------------------------------------
+
+# REFUSED "optimize \"Fast\" is not a zig optimization mode".
+zig_exe(
+    name = "exe_unknown_optimize",
+    exec_compatible_with = LINUX_X86_64,
+    optimize = "Fast",
+    src = "direct.zig",
+    busybox = _BUSYBOX,
+    zig = _ZIG,
+)
+
+zig_test(
+    name = "test_unknown_optimize",
+    exec_compatible_with = LINUX_X86_64,
+    optimize = "Fast",
+    src = "direct.zig",
+    busybox = _BUSYBOX,
+    zig = _ZIG,
+)
+
+# REFUSED "is not a zig target triple".
+zig_test(
+    name = "test_bad_target",
+    exec_compatible_with = LINUX_X86_64,
+    src = "direct.zig",
+    target = "x86 64",
+    busybox = _BUSYBOX,
+    zig = _ZIG,
+)
+
+# RED "expected builtin.OptimizeMode.ReleaseFast, found builtin.OptimizeMode.Debug": the test that passes with optimize = "ReleaseFast"
+# (functional/zig_rules:optimize_unit), built with the default mode.
+zig_test(
+    name = "optimize_not_applied",
+    exec_compatible_with = LINUX_X86_64,
+    src = "//functional/zig_rules:optimize_test.zig",
+    busybox = _BUSYBOX,
+    zig = _ZIG,
+)
+
+# RED "expected Target.Abi.gnu, found Target.Abi.musl": the test that passes with target =
+# "x86_64-linux-gnu" (functional/zig_rules:target_unit), built for the default
+# musl.
+zig_test(
+    name = "target_not_applied",
+    exec_compatible_with = LINUX_X86_64,
+    src = "//functional/zig_rules:target_test.zig",
+    busybox = _BUSYBOX,
+    zig = _ZIG,
+)
+
+# RED "got '42 Debug', expected '42 ReleaseSafe' and "app_debug is unstripped,
+# expected stripped": the driver test of the executables, given the Debug
+# build in place of the default one; optimize and strip reach the compile.
+zig_test(
+    name = "swapped_tools",
+    exec_compatible_with = LINUX_X86_64,
+    exec_tools = {
+        "APP_DEBUG": "//functional/zig_rules:app",
+        "APP_SAFE": "//functional/zig_rules:app_debug",
+        "APP_SMALL": "//functional/zig_rules:app_small",
+    },
+    src = "//functional/zig_rules:exe_check_test.zig",
+    busybox = _BUSYBOX,
+    zig = _ZIG,
+)
+
+# REFUSED "exec_tools name 1BAD is not a shell variable name".
+zig_test(
+    name = "exec_tools_bad_name",
+    exec_compatible_with = LINUX_X86_64,
+    exec_tools = {"1BAD": _ZIG},
+    src = "direct.zig",
+    busybox = _BUSYBOX,
+    zig = _ZIG,
+)
+
+# REFUSED "exec_tools name HOME is set by the action or by env_tools".
+zig_test(
+    name = "exec_tools_sets_home",
+    exec_compatible_with = LINUX_X86_64,
+    exec_tools = {"HOME": _ZIG},
+    src = "direct.zig",
+    busybox = _BUSYBOX,
+    zig = _ZIG,
+)
+
+# REFUSED "data destination d is both a file and the directory of".
+zig_test(
+    name = "data_file_and_directory",
+    exec_compatible_with = LINUX_X86_64,
+    data = {
+        "d": "direct.zig",
+        "d/inner": "direct.zig",
+    },
+    src = "direct.zig",
+    busybox = _BUSYBOX,
+    zig = _ZIG,
+)

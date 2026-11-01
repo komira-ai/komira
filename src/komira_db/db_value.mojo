@@ -16,7 +16,7 @@
 # EXACTLY ONE heap field — `_text: String` — the canonical carrier value, and
 # DERIVES every other rendering on demand. No second heap container, no nested
 # heap container, no UnsafePointer. The TEXT[] elements are carried inside the
-# single `_text` String as a `{a,b,c}` pg-array literal; `text_array_elements()`
+# single `_text` String as a pg array literal (`text_array_literal`); `text_array_elements()`
 # re-parses it. This keeps the doubly-nested-container relocation trap off the
 # row path entirely (see the PgValue / PgRow banners).
 
@@ -206,16 +206,11 @@ struct DbValue(Movable, Copyable):
 
     @staticmethod
     def text_array(elements: List[String]) -> DbValue:
-        """A TEXT[] value. Carried as the pg `{a,b,c}` array literal in the sole
-        `_text` field (no second heap container — relocation-safe). The closed-set
-        contract is simple text labels (no embedded ',' / '}')."""
-        var lit = String("{")
-        for i in range(len(elements)):
-            if i > 0:
-                lit += ","
-            lit += elements[i]
-        lit += "}"
-        return DbValue(LOGICAL_TEXT_ARRAY, False, lit^)
+        """A TEXT[] value. Carried as a pg array literal in the sole `_text`
+        field (no second heap container — relocation-safe), rendered by
+        `text_array_literal`: every String element round-trips, including one
+        holding ',' '}' '"' '\\' or whitespace, one spelled NULL, and ""."""
+        return DbValue(LOGICAL_TEXT_ARRAY, False, text_array_literal(elements))
 
     @staticmethod
     def text_array_int(elements: List[Int64]) -> DbValue:
@@ -252,9 +247,9 @@ struct DbValue(Movable, Copyable):
         return out^
 
     def text_array_elements(self) -> List[String]:
-        """Re-parse the carried `{a,b,c}` literal back to its elements (the
+        """Re-parse the carried array literal back to its elements (the
         untyped-round-trip path; drivers may re-render natively)."""
-        return _parse_array_literal(self._text)
+        return parse_text_array_literal(self._text)
 
 
 # =============================================================================
@@ -278,37 +273,116 @@ def _hex_digit_lower(nibble: Int) -> String:
     return String(chr(ord("a") + (nibble - 10)))
 
 
-def _parse_array_literal(lit: String) -> List[String]:
-    """Parse a simple pg text array literal `{a,b,c}` into its elements (the
-    closed-set contract: simple labels, no embedded ',' / '}' / quoting)."""
+# =============================================================================
+# The TEXT[] carrier literal: PostgreSQL array syntax, one dimension.
+# =============================================================================
+#
+# Writer (`text_array_literal`), the rule of pg's array_out: an element is
+# double-quoted when it is empty, spells NULL in any letter case, or holds
+# '{' '}' ',' '"' '\' or ASCII whitespace; inside the quotes '"' and '\' are
+# preceded by '\'. Every other element is written bare. So ["a,b", "", "x"]
+# is `{"a,b","",x}`, and a list of simple labels keeps the `{a,b,c}` form.
+#
+# Reader (`parse_text_array_literal`): a quoted element runs to its closing
+# '"', a '\' inside it taking the next byte literally. A bare element is taken
+# VERBATIM up to the next ',' or the closing '}' (no trimming, no '\'
+# processing, no NULL): that is everything the writer emits bare, and it is how
+# a literal written before elements were quoted (always bare) reads back, so
+# stored values keep their meaning. `{}` is the empty list. The reader does not
+# raise (it serves non-raising accessors); a malformed tail such as an
+# unterminated quote yields what was read.
+def text_array_literal(elements: List[String]) -> String:
+    """The array literal carrying `elements` (see the banner above)."""
+    var lit = String("{")
+    for i in range(len(elements)):
+        if i > 0:
+            lit += ","
+        if _needs_quotes(elements[i]):
+            var b = elements[i].as_bytes()
+            var q = List[UInt8]()
+            q.append(UInt8(ord('"')))
+            for k in range(len(b)):
+                if b[k] == UInt8(ord('"')) or b[k] == UInt8(ord("\\")):
+                    q.append(UInt8(ord("\\")))
+                q.append(b[k])
+            q.append(UInt8(ord('"')))
+            lit += _owned_utf8(q)
+        else:
+            lit += elements[i]
+    lit += "}"
+    return lit^
+
+
+def _needs_quotes(s: String) -> Bool:
+    """Whether pg's array_out would quote `s` (see the banner above)."""
+    var b = s.as_bytes()
+    var n = len(b)
+    if n == 0:
+        return True
+    if (
+        n == 4
+        and (b[0] | 0x20) == UInt8(ord("n"))
+        and (b[1] | 0x20) == UInt8(ord("u"))
+        and (b[2] | 0x20) == UInt8(ord("l"))
+        and (b[3] | 0x20) == UInt8(ord("l"))
+    ):
+        return True  # NULL in any letter case (| 0x20 lowers ASCII letters)
+    for i in range(n):
+        var c = b[i]
+        if (
+            c == UInt8(ord("{"))
+            or c == UInt8(ord("}"))
+            or c == UInt8(ord(","))
+            or c == UInt8(ord('"'))
+            or c == UInt8(ord("\\"))
+            or c == UInt8(ord(" "))
+            or (c >= UInt8(0x09) and c <= UInt8(0x0D))  # \t \n \v \f \r
+        ):
+            return True
+    return False
+
+
+def parse_text_array_literal(lit: String) -> List[String]:
+    """The elements of an array literal (see the banner above)."""
     var out = List[String]()
     var b = lit.as_bytes()
     var n = len(b)
     var i = 0
     if i < n and b[i] == UInt8(ord("{")):
         i += 1
-    var cur = List[UInt8]()
-    var any = False
+    if i >= n or b[i] == UInt8(ord("}")):
+        return out^
     while i < n:
-        var c = b[i]
-        if c == UInt8(ord("}")):
-            break
-        if c == UInt8(ord(",")):
-            out.append(_owned_utf8(cur))
-            cur = List[UInt8]()
-            any = True
+        var cur = List[UInt8]()
+        if b[i] == UInt8(ord('"')):
+            i += 1
+            while i < n and b[i] != UInt8(ord('"')):
+                if b[i] == UInt8(ord("\\")) and i + 1 < n:
+                    i += 1
+                cur.append(b[i])
+                i += 1
+            # Past the closing '"' to the delimiter (a well-formed literal has
+            # nothing between them).
+            while (
+                i < n and b[i] != UInt8(ord(",")) and b[i] != UInt8(ord("}"))
+            ):
+                i += 1
         else:
-            cur.append(c)
-            any = True
-        i += 1
-    if any or len(cur) > 0:
+            while (
+                i < n and b[i] != UInt8(ord(",")) and b[i] != UInt8(ord("}"))
+            ):
+                cur.append(b[i])
+                i += 1
         out.append(_owned_utf8(cur))
+        if i >= n or b[i] == UInt8(ord("}")):
+            break
+        i += 1  # the ','
     return out^
 
 
 def _owned_utf8(b: List[UInt8]) -> String:
     # Verbatim bytes -> owned String (copies). NOT chr()-per-byte: chr maps a
     # byte >= 0x80 to a two-byte codepoint, so a non-ASCII element came back
-    # double-encoded (`Zürich` as `ZÃ¼rich`). The bytes are slices of a valid
-    # UTF-8 `_text` cut at ASCII ',' / '}', so they are valid UTF-8 themselves.
+    # double-encoded (`Zürich` as `ZÃ¼rich`). Every caller passes bytes of
+    # valid UTF-8 cut or split only at ASCII bytes, so they are valid UTF-8.
     return String(StringSlice(unsafe_from_utf8=Span(b)))

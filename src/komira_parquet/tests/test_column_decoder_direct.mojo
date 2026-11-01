@@ -702,5 +702,19 @@ def test_malformed_chunks_are_refused() raises:
         _ = _decode(rle, ParquetType.INT64, 1, False)
 
 
+def test_a_footer_count_above_the_pages_is_refused() raises:
+    # The footer's count never sizes a buffer alone: 2^36 INT64 values would
+    # be a 512 GiB buffer, and the one page here holds two.
+    var chunk = List[UInt8]()
+    _page(chunk, _DATA, 2, _PLAIN, _ints([1, 2], 8))
+    for count in [1 << 36, 3]:
+        with assert_raises(contains="data pages hold 2"):
+            _ = _decode(chunk, ParquetType.INT64, count, False)
+    # A chunk of no data page at all and a count above zero.
+    var empty = List[UInt8]()
+    with assert_raises(contains="data pages hold 0"):
+        _ = _decode(empty, ParquetType.INT64, 5, False)
+
+
 def main() raises:
     TestSuite.discover_tests[__functions_in_module()]().run()

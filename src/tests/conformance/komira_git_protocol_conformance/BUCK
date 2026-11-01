@@ -1,14 +1,14 @@
-load("@komira//tools/build/lint:defs.bzl", "shell_lint")
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_test")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load(":defs.bzl", "git_transcripts")
 
 # Test-only: komira_git's protocol state machines against the pinned git
 # (//third_party/git). Nothing depends on this package.
 #
-# capture.sh (the :transcripts target below) runs real git on both ends of
-# fetches (protocol v2) and pushes (receive-pack) over file:// and records
-# the bytes each way, with the server repository's state (capture.sh lists
+# capture (capture.zig; the :transcripts target below) runs real git on both ends of
+# fetches (protocol v2) and pushes (receive-pack) over ssh (capture is the ssh) and records
+# the bytes each way, with the server repository's state (capture.zig lists
 # the scenarios). checks.mojo, graph.mojo and transcript.mojo hold what
 # these tests share (loading a scenario, the scenario's repository as a
 # CommitGraph, pack and push-verdict checks):
@@ -69,12 +69,26 @@ git_transcripts(
     name = "transcripts",
     exec_compatible_with = LINUX_X86_64,
     target_compatible_with = LINUX_X86_64,  # komira-limit:git-oracle-linux-x86-64
-    checks = [":shell_lint"],
     git = "//third_party/git:git",
-    script = "capture.sh",
 )
 
-shell_lint(
-    name = "shell_lint",
-    srcs = ["capture.sh"],
+# The recorder (capture.zig), which is also the ssh the git clients use, built
+# behind its unit tests.
+zig_test(
+    name = "capture_unit",
+    exec_compatible_with = LINUX_X86_64,
+    imports = ["capture.zig"],
+    src = "capture_test.zig",
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
+)
+
+zig_exe(
+    name = "capture",
+    exec_compatible_with = LINUX_X86_64,
+    src = "capture.zig",
+    unit_tests = [":capture_unit", "komira//tools/build/toolchains:zig_next_version"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
+    visibility = ["tests//functional/git_capture:"],
 )

@@ -114,6 +114,43 @@ def test_store_over_the_process_env() raises:
     )
 
 
+def _lookup_refusal(name: String) -> String:
+    """The message `ProcessEnv().lookup(name)` raises, or "<no raise>"."""
+    var env = ProcessEnv()
+    try:
+        _ = env.lookup(name)
+    except e:
+        return String(e)
+    return String("<no raise>")
+
+
+def test_lookup_refusals_are_exact() raises:
+    """The reader's own refusals, without the store's prefix: the grammar's
+    message for a bad name (checked before getenv), and the length refusal,
+    which names neither the variable nor a byte of its value."""
+    assert_equal(_lookup_refusal(""), "secret env name is empty")
+    assert_equal(
+        _lookup_refusal("A=B"),
+        "secret env name (3 bytes) is not an environment variable name:"
+        " byte 1 is outside [A-Za-z_][A-Za-z0-9_]*",
+    )
+    assert_equal(
+        _lookup_refusal("KOMIRA_SECRET_ENV_TEST_LONG"),
+        "value is longer than MAX_SECRET_LEN (4096 bytes)",
+    )
+    assert_equal(_lookup_refusal("KOMIRA_SECRET_ENV_TEST_MAX"), "<no raise>")
+
+
+def test_value_at_the_limit_is_every_byte() raises:
+    var env = ProcessEnv()
+    var got = env.lookup("KOMIRA_SECRET_ENV_TEST_MAX")
+    var v = got.take()
+    var b = v.revealed_bytes()
+    assert_equal(len(b), MAX_SECRET_LEN)
+    for i in range(MAX_SECRET_LEN):
+        assert_equal(Int(b[i]), Int(ord("q")), String("byte ") + String(i))
+
+
 def main() raises:
     test_lookup_distinguishes_set_empty_and_unset()
     test_value_is_copied_byte_for_byte()
@@ -121,4 +158,6 @@ def main() raises:
     test_value_past_the_limit_is_refused_not_truncated()
     test_lookup_refuses_a_bad_name()
     test_store_over_the_process_env()
+    test_lookup_refusals_are_exact()
+    test_value_at_the_limit_is_every_byte()
     print("PASS test_process_env")

@@ -57,8 +57,8 @@ pub const Args = struct {
             const v = argv[i + 1];
             if (has(multi, k)) {
                 const e = r.lists.getOrPut(k) catch P.oom();
-                if (!e.found_existing) e.value_ptr.* = std.ArrayList([]const u8).init(P.a());
-                e.value_ptr.append(v) catch P.oom();
+                if (!e.found_existing) e.value_ptr.* = std.ArrayList([]const u8).empty;
+                e.value_ptr.append(P.a(), v) catch P.oom();
             } else if (has(single, k)) {
                 if (r.one.contains(k)) return P.fail("prefix_tool: {s} given twice", .{k});
                 r.one.put(k, v) catch P.oom();
@@ -100,7 +100,7 @@ pub fn shown(cwd: []const u8, path: []const u8) []const u8 {
 
 /// `elfsyms <mode> <archive>`'s output; refused unless it exits 0.
 fn elfsyms(exe: []const u8, mode: []const u8, archive: []const u8) P.Fail![]const u8 {
-    const r = std.ChildProcess.run(.{
+    const r = std.process.Child.run(.{
         .allocator = P.a(),
         .argv = P.a().dupe([]const u8, &.{ exe, mode, archive }) catch P.oom(),
         .max_output_bytes = std.math.maxInt(usize),
@@ -119,7 +119,7 @@ fn read(path: []const u8) P.Fail![]const u8 {
 }
 
 fn write(path: []const u8, data: []const u8) P.Fail!void {
-    std.fs.cwd().writeFile(path, data) catch |e| return P.fail("prefix_tool: cannot write {s}: {s}", .{ path, @errorName(e) });
+    std.fs.cwd().writeFile(.{ .sub_path = path, .data = data }) catch |e| return P.fail("prefix_tool: cannot write {s}: {s}", .{ path, @errorName(e) });
 }
 
 fn header(args: Args, cwd: []const u8) P.Fail!Outcome {
@@ -139,8 +139,8 @@ fn check(args: Args, cwd: []const u8) P.Fail!Outcome {
     const min = try args.min();
     const archive = args.get("--archive");
     const symtab = try elfsyms(args.get("--elfsyms"), "symtab", archive);
-    var files = std.ArrayList([]const u8).init(P.a());
-    for (args.list("--names")) |f| files.append(try read(f)) catch P.oom();
+    var files = std.ArrayList([]const u8).empty;
+    for (args.list("--names")) |f| files.append(P.a(), try read(f)) catch P.oom();
     const v = try P.check(symtab, files.items, shown(cwd, archive), args.get("--prefix"), min, args.list("--allow"));
     if (v.red) return .{ .code = 1, .stderr = v.stderr };
     try write(args.get("--result"), v.result);

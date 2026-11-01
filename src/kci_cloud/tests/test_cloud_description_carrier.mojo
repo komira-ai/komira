@@ -107,6 +107,18 @@ def test_anything_else_in_the_description_is_not_stamped() raises:
     assert_equal(len(description_labels(String("kci:v1 owner=shop/staging/peer_x/identity"))), 0, "a segment holding _")
 
 
+def test_a_malformed_identity_line_is_not_stamped() raises:
+    """Catches: an identity line read with no ` owner=` word, no scheme
+    digit or no machine, or a mark line with an empty value."""
+    var good = String(_IDENTITY) + "\nkci-retention=delete"
+    assert_equal(len(description_labels(String("kci:v1 shop/staging/peer/identity"))), 0, "no owner word")
+    assert_equal(len(description_labels(String("kci:v owner=shop/staging/peer/identity"))), 0, "no scheme digit")
+    assert_equal(len(description_labels(String("kci:v1 owner=/staging/peer/identity"))), 0, "no machine")
+    assert_equal(len(description_labels(String(_IDENTITY) + "\nkci-retention=")), 0, "a mark with no value")
+    assert_equal(len(description_labels(good)), 7, "the six identity labels and the mark")
+    assert_equal(released_description(String("")), "", "nothing to release")
+
+
 def test_writing_refuses_what_a_description_cannot_hold() raises:
     var author = create_labels(_stamp(), RETAIN_DELETE)
     author.append(Label(String("team"), String("data")))
@@ -155,6 +167,7 @@ def main() raises:
     test_an_adoption_carries_the_mark_and_no_run()
     test_a_nested_resource_reads_back_to_the_same_identity()
     test_anything_else_in_the_description_is_not_stamped()
+    test_a_malformed_identity_line_is_not_stamped()
     test_writing_refuses_what_a_description_cannot_hold()
     test_a_release_drops_kci_lines_only()
     test_the_length_validate_checks()

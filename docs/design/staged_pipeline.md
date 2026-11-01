@@ -37,7 +37,7 @@ implements them. Continuous publish links here; it does not define them again.
 | **latest wins, superseded** | A newer arrival replaces the pending job; a revision older than what a stage (or a later one) already holds stops as `SUPERSEDED` (exit 0) and never runs on its own. |
 | **never backward** | A stage refuses to act on a revision older than the newest main-line build its own channel holds (beta, prod); gamma, which has no channel, reads prod's (c). |
 | **break-glass** | A manual run. As designed it reached **beta only**, from the environment `beta-breakglass`; as chosen in M2 it builds and publishes nothing (e3, "M1 and M2 as chosen"). Never gamma, never prod. |
-| **main red** | A push run of `kci.yml` on `main` that ends red at any stage. `release/ci/main_red.py` opens an issue; the rule is fix forward or revert within the hour ([ci.md](../ci.md)). |
+| **main red** | A push run of `kci.yml` on `main` that ends red at any stage. `release/ci/main_red.zig` opens an issue; the rule is fix forward or revert within the hour ([ci.md](../ci.md)). |
 
 **Stage → jobs → channels → credentials.**
 
@@ -161,7 +161,7 @@ release the cancelled commit. **Groups alone cannot hold rule 3.** Four parts do
 3. **The line on every job.** `the prod line`'s "main is at `<tip>`, past `<revision>`" moves into
    every release job's last step (R20), success or failure, so each stage's summary names a newer
    commit it did not carry.
-4. **Repair (P2).** `release/ci/main_red.py` runs on every completed kci run (`workflow_run`,
+4. **Repair (P2).** `release/ci/main_red.zig` runs on every completed kci run (`workflow_run`,
    `completed`). New decision `stalled`: a push run that concluded `cancelled`, with
    `run_attempt == 1`, whose `head_sha` is main's releasable tip **now**, and no other kci **push**
    run of that `head_sha` queued, waiting or in progress (the runs list filtered by `event=push`;
@@ -360,7 +360,7 @@ publisher accepts the `gamma` environment's subject; a cloud trust of the same s
 publishing identity and a cloud identity in one job. No cloud trust names `gamma` before both.
 
 **What exists, and what is new.** No validation kind on `main` runs a Buck2 target:
-`src/kci_api/verbs.mojo` names three, `CONDA_INSTALL_SMOKE`, `CONDA_INSTALL_ENV` and `DEPLOY_PROBE`.
+`src/kci_api/src/kci_api/verbs.mojo` names three, `CONDA_INSTALL_SMOKE`, `CONDA_INSTALL_ENV` and `DEPLOY_PROBE`.
 So e2 adds a fourth, **`BUCK2_TARGET`** (P7). It reuses `CONDA_INSTALL_ENV`'s child environment
 built from nothing (`src/kci_validate/env.mojo`), the secret store `--secret-store env`, kci's own
 exchange of the job's ID token (as for trusted publishing, ci.md), and the AWS SDK's web identity
@@ -636,9 +636,9 @@ publishers `environment:gamma` and `environment:gamma-breakglass`) and `prod`.
   `release/machine.textproto` (lines 19 to 77) and `release/artifacts.textproto` (the NEW NAMES
   note); the comments of `.github/workflows/pr.yml` (its job list),
   `src/kci_pkg_upload/prefix_dev_registry.mojo` (the `komira-ai/gamma` examples),
-  `src/kci_release_machine/parse.mojo` (its example machine),
-  `src/kci_workflow_check/auto_promotion.mojo` (the chain `build -> gamma -> validate -> prod`) and
-  `src/kci_workflow_check/rules.mojo` (its list of release jobs, one of them in a refusal message);
+  `src/kci_release_machine/src/kci_release_machine/parse.mojo` (its example machine),
+  `src/kci_workflow_check/src/kci_workflow_check/auto_promotion.mojo` (the chain `build -> gamma -> validate -> prod`) and
+  `src/kci_workflow_check/src/kci_workflow_check/rules.mojo` (its list of release jobs, one of them in a refusal message);
   the example in `src/kci_release_machine/README.md`; and `docs/index.md`'s rows for gamma_validation.md (what "checks a release before prod") and its "CI and deploy" link text ("what gamma checks per package family"), which under the glossary describe beta. **Kept on purpose:** test fixtures under
   `src/kci_*/tests/`, `src/kci_publish/release_fixture.mojo` and `src/kci_validate/README.md`, which
   name an example channel or stage `gamma` on `example.invalid` (fixtures, not the channel);

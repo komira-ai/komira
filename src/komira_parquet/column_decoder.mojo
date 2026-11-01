@@ -67,6 +67,51 @@ from .page_header_parser import _parse_page_header
 comptime _MAX_CHUNK_VALUES: Int = 0x7FFF_FFFF_FFFF_FFFF // 16
 
 
+@fieldwise_init
+struct _PageValueCount(Copyable, Movable):
+    """The values the chunk's data pages declare, and whether the walk
+    reached the end of the chunk cleanly."""
+
+    var values: Int
+    var clean: Bool
+
+
+def _declared_page_values(data: Span[UInt8, _]) -> _PageValueCount:
+    """Sum the `num_values` of the chunk's data pages from their headers
+    alone (no body is read or decompressed). The walk stops, `clean` False,
+    at a header that does not parse or whose size runs past the chunk; the
+    decode that follows walks the same bytes and refuses them by name."""
+    var offset = 0
+    var values = 0
+    var n = len(data)
+    while offset < n:
+        try:
+            var res = _parse_page_header(data[offset:n])
+            offset += res.bytes_consumed
+            ref hdr = res.header
+            var cps = hdr.compressed_page_size
+            if cps < 0 or cps > n - offset:
+                return _PageValueCount(values, False)
+            if (
+                hdr.type == PageType.DATA_PAGE
+                or hdr.type == PageType.DATA_PAGE_V2
+            ):
+                values += hdr.num_values
+            offset += cps
+        except:
+            return _PageValueCount(values, False)
+    return _PageValueCount(values, True)
+
+
+def _count_mismatch(footer: Int, pages: Int) -> String:
+    return (
+        "parquet: corrupt column metadata: num_values "
+        + String(footer)
+        + " but the chunk's data pages hold "
+        + String(pages)
+    )
+
+
 def decode_column_pages(
     data: Span[UInt8, _],
     ptype: ParquetType,
@@ -114,12 +159,12 @@ def decode_column_pages(
             against).
 
     Returns:
-        A Column of `num_values` rows (fewer only for a chunk whose pages
-        stop early), nulls in its validity.
+        A Column of `num_values` rows, nulls in its validity.
 
     Raises:
-        Error on an out-of-range value count, a page header that does not
-        parse or claims more bytes or values than the chunk has, a CRC
+        Error on an out-of-range value count, a count above the values the
+        chunk's data page headers declare (the chunk stops short of the count),
+        a page header that does not parse or claims more bytes or values than the chunk has, a CRC
         mismatch, and anything the page and value decoders refuse.
     """
     if num_values < 0 or num_values > _MAX_CHUNK_VALUES:
@@ -130,6 +175,16 @@ def decode_column_pages(
             + String(_MAX_CHUNK_VALUES)
             + "]"
         )
+    # The footer's count is untrusted and sizes the accumulators, so it never
+    # sizes them alone. A chunk whose pages all parse holds the values its
+    # data page headers declare: a footer count above that is refused (a
+    # smaller one is refused page by page below), and the accumulators are
+    # sized by the smaller count. A chunk with no data page header that
+    # parses is refused by name in the walk below.
+    var declared = _declared_page_values(data)
+    if declared.values > 0 and num_values > declared.values:
+        raise Error(_count_mismatch(num_values, declared.values))
+    var sized_values = min(num_values, declared.values)
     var is_decimal = converted_type == CONVERTED_TYPE_DECIMAL and (
         ptype == ParquetType.FIXED_LEN_BYTE_ARRAY
         or ptype == ParquetType.INT32
@@ -143,7 +198,7 @@ def decode_column_pages(
         and (ptype == ParquetType.INT32 or ptype == ParquetType.INT64)
     )
     var acc = _ChunkAcc(
-        ptype, num_values, nullable, type_length, is_decimal, use_recycled_codes
+        ptype, sized_values, nullable, type_length, is_decimal, use_recycled_codes
     )
     var data_len = len(data)
     var offset = 0
@@ -151,17 +206,9 @@ def decode_column_pages(
         var hdr_res = _parse_page_header(data[offset:data_len])
         offset += hdr_res.bytes_consumed
         ref hdr = hdr_res.header
+        # `_parse_page_header` has refused negative page sizes and value
+        # counts, and level sections larger than the page.
         var cps = hdr.compressed_page_size
-        var ups = hdr.uncompressed_page_size
-        if cps < 0 or ups < 0:
-            raise Error(
-                "parquet: corrupt page header: negative page size"
-                " (compressed="
-                + String(cps)
-                + " uncompressed="
-                + String(ups)
-                + ")"
-            )
         if cps > data_len - offset:
             raise Error(
                 "parquet: corrupt page header: compressed_page_size "
@@ -181,19 +228,14 @@ def decode_column_pages(
             or hdr.type == PageType.DATA_PAGE_V2
         ):
             var page_nv = hdr.num_values
-            if page_nv < 0:
-                raise Error(
-                    "parquet: corrupt data page header: negative num_values "
-                    + String(page_nv)
-                )
-            if page_nv > num_values - acc.total_decoded:
+            if page_nv > sized_values - acc.total_decoded:
                 raise Error(
                     "parquet: corrupt data page header: page declares "
                     + String(page_nv)
                     + " values but only "
-                    + String(num_values - acc.total_decoded)
+                    + String(sized_values - acc.total_decoded)
                     + " of the column chunk's "
-                    + String(num_values)
+                    + String(sized_values)
                     + " remain undecoded"
                 )
             if hdr.crc:
@@ -205,6 +247,8 @@ def decode_column_pages(
             _decode_data_page(acc, codec, hdr, page, decode_ctx)
         # Any other page (INDEX_PAGE) is skipped.
 
+    if declared.clean and acc.total_decoded < num_values:
+        raise Error(_count_mismatch(num_values, acc.total_decoded))
     return _assemble(
         acc,
         decode_ctx,

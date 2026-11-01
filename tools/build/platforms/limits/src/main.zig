@@ -48,7 +48,7 @@ pub fn main() void {
     var name: ?[]const u8 = null;
     var out: ?[]const u8 = null;
     var subjects: ?[]const u8 = null;
-    var excludes = std.ArrayList([]const u8).init(alloc);
+    var excludes = std.ArrayList([]const u8).empty;
     var i: usize = 2;
     while (i < argv.len) : (i += 2) {
         if (i + 1 >= argv.len) usageFail("{s} needs a value", .{argv[i]});
@@ -58,7 +58,7 @@ pub fn main() void {
         } else if (std.mem.eql(u8, argv[i], "--limits")) {
             name = v;
         } else if (std.mem.eql(u8, argv[i], "--exclude")) {
-            excludes.append(v) catch fail("out of memory", .{});
+            excludes.append(alloc, v) catch fail("out of memory", .{});
         } else if (std.mem.eql(u8, argv[i], "--out")) {
             out = v;
         } else if (std.mem.eql(u8, argv[i], "--subjects")) {
@@ -66,7 +66,7 @@ pub fn main() void {
         } else usageFail("unknown argument {s}", .{argv[i]});
     }
     const limits_name = name orelse usageFail("--limits is required", .{});
-    var report = std.ArrayList(u8).init(alloc);
+    var report = std.ArrayList(u8).empty;
 
     if (std.mem.eql(u8, mode, "merged")) {
         const subjects_path = subjects orelse usageFail("merged: --subjects is required", .{});
@@ -77,10 +77,10 @@ pub fn main() void {
             fail("cannot read {s}: {s}", .{ subjects_path, @errorName(err) });
         const r = limits.checkMerged(alloc, limits_name, text, subj, &report) catch fail("out of memory", .{});
         if (r.findings > 0) {
-            std.io.getStdOut().writer().print("FAIL  limits: {d} finding(s)\n{s}", .{ r.findings, report.items }) catch {};
+            std.fs.File.stdout().deprecatedWriter().print("FAIL  limits: {d} finding(s)\n{s}", .{ r.findings, report.items }) catch {};
             std.process.exit(1);
         }
-        std.io.getStdOut().writer().print("PASS  limits: no retiring PR of the {d} limits of {s} has merged\n", .{ r.limits, limits_name }) catch {};
+        std.fs.File.stdout().deprecatedWriter().print("PASS  limits: no retiring PR of the {d} limits of {s} has merged\n", .{ r.limits, limits_name }) catch {};
         return;
     }
     if (!std.mem.eql(u8, mode, "tree")) usageFail("unknown mode {s}", .{mode});
@@ -94,24 +94,24 @@ pub fn main() void {
     const text = dir.readFileAlloc(alloc, limits_name, 1 << 24) catch |err|
         fail("cannot read {s} in the tree: {s}", .{ limits_name, @errorName(err) });
     // The limits file is data, not a site.
-    excludes.append(limits_name) catch fail("out of memory", .{});
+    excludes.append(alloc, limits_name) catch fail("out of memory", .{});
     const files = limits.collect(alloc, dir, excludes.items) catch |err|
         fail("cannot read the tree {s}: {s}", .{ tree_path, @errorName(err) });
     const r = limits.checkTree(alloc, limits_name, text, files, &report) catch fail("out of memory", .{});
 
-    var message = std.ArrayList(u8).init(alloc);
+    var message = std.ArrayList(u8).empty;
     const status = if (r.findings > 0) "failure" else "success";
     if (r.findings > 0) {
-        message.writer().print("limits: {d} finding(s) over {d} file(s)\n{s}", .{ r.findings, files.len, report.items }) catch fail("out of memory", .{});
+        message.writer(alloc).print("limits: {d} finding(s) over {d} file(s)\n{s}", .{ r.findings, files.len, report.items }) catch fail("out of memory", .{});
     } else {
-        message.writer().print("limits: {d} limits, each declared at its site and listed in {s}, over {d} file(s)", .{ r.limits, limits_name, files.len }) catch fail("out of memory", .{});
+        message.writer(alloc).print("limits: {d} limits, each declared at its site and listed in {s}, over {d} file(s)", .{ r.limits, limits_name, files.len }) catch fail("out of memory", .{});
     }
-    var json = std.ArrayList(u8).init(alloc);
-    const jw = json.writer();
+    var json = std.Io.Writer.Allocating.init(alloc);
+    const jw = &json.writer;
     jw.print("{{\"version\": 1, \"data\": {{\"status\": \"{s}\", \"message\": ", .{status}) catch fail("out of memory", .{});
-    std.json.encodeJsonString(message.items, .{}, jw) catch fail("out of memory", .{});
+    std.json.Stringify.encodeJsonString(message.items, .{}, jw) catch fail("out of memory", .{});
     jw.writeAll("}}\n") catch fail("out of memory", .{});
-    std.fs.cwd().writeFile(out_path, json.items) catch |err|
+    std.fs.cwd().writeFile(.{ .sub_path = out_path, .data = json.written() }) catch |err|
         fail("cannot write {s}: {s}", .{ out_path, @errorName(err) });
     if (r.findings > 0) std.debug.print("{s}", .{message.items});
 }

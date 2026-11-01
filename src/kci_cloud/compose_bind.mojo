@@ -282,7 +282,7 @@ def _holds(r: Resource, segs: List[String]) -> Bool:
             node = next^
         return True
     except:
-        return False
+        return False  # cov: unreachable encode_json of a decoded Resource does not raise and parses, and _member returns only valid indexes
 
 
 def _json_of(v: BindValue) raises -> JsonValue:

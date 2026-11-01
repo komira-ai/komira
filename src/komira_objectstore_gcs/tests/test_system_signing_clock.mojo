@@ -7,13 +7,12 @@
 #
 #   1  a read is a plausible current instant: after 2026-09-01T00:00:00Z
 #      (a fixed instant before this code existed) and before 2100-01-01.
-#   2  a GcsV4Signer over it mints at one reading of that clock: the URL's
-#      X-Goog-Date is the stamp of the reported expiry minus the TTL, and
-#      X-Goog-Expires is the TTL. That instant lies between reads of the
-#      same clock taken before and after the mint, within one second either
-#      side. The bracket ASSUMES the host clock is not stepped by more than
-#      one second during the mint; under a monotonic clock it holds with no
-#      slack, since all three reads truncate to whole seconds.
+#   2  a GcsV4Signer mints from its clock: over a FixedSigningClock the URL's
+#      X-Goog-Date is the stamp of that instant, the expiry is that instant
+#      plus the TTL, and X-Goog-Expires is the TTL, all exact.
+#   3  a GcsV4Signer wired to SystemSigningClock mints at a real instant: the
+#      expiry minus the TTL lies between the fixed bounds of test 1 and
+#      X-Goog-Date is the stamp of that same instant.
 #
 # The key is Google's published inactive dummy service account, read from the
 # pinned conformance archive staged at conformance/.
@@ -28,13 +27,19 @@ from komira_gcp_core import (
     GcsV4ServiceAccount,
     gcs_v4_stamps_from_unix_seconds,
 )
-from komira_objectstore_gcs import GcsV4Signer, SystemSigningClock
+from komira_objectstore_gcs import (
+    FixedSigningClock,
+    GcsV4Signer,
+    SystemSigningClock,
+)
 
 
 comptime _ACCOUNT = "conformance/storage/v1/test_service_account.not-a-test.json"
 comptime _AFTER: Int = 1788220800  # 2026-09-01T00:00:00Z
 comptime _BEFORE: Int = 4102444800  # 2100-01-01T00:00:00Z
 comptime _TTL: Int = 300
+comptime _FIXED_NOW: Int = 1790000000
+comptime _FIXED_STAMP = "20260921T141320Z"
 
 
 def _account() raises -> GcsV4ServiceAccount:
@@ -71,34 +76,38 @@ def test_reads_a_plausible_now() raises:
     )
 
 
-def test_signer_signs_at_the_wall_clock() raises:
-    var probe = SystemSigningClock()
+def test_signer_mints_from_its_clock() raises:
+    var signer = GcsV4Signer(
+        _account(), String("repo-bucket"), FixedSigningClock(_FIXED_NOW)
+    )
+    var url = signer.presign_download(String("a/b"), _TTL)
+    assert_equal(url.method, String("GET"))
+    assert_equal(Int(url.expires_unix_seconds), _FIXED_NOW + _TTL)
+    assert_equal(_query_value(url.url, "X-Goog-Date"), String(_FIXED_STAMP))
+    assert_equal(
+        _query_value(url.url, "X-Goog-Date"),
+        gcs_v4_stamps_from_unix_seconds(Int64(_FIXED_NOW)).datetime_z,
+    )
+    assert_equal(_query_value(url.url, "X-Goog-Expires"), String(_TTL))
+
+
+def test_system_clock_signer_mints_at_a_real_instant() raises:
     var signer = GcsV4Signer(
         _account(), String("repo-bucket"), SystemSigningClock()
     )
-    var before = probe.now_unix_seconds()
     var url = signer.presign_download(String("a/b"), _TTL)
-    var after = probe.now_unix_seconds()
-    assert_equal(url.method, String("GET"))
-    var signed_at = Int(url.expires_unix_seconds) - _TTL
-    assert_true(
-        signed_at >= before - 1 and signed_at <= after + 1,
-        "signed at "
-        + String(signed_at)
-        + ", outside the wall-clock reads "
-        + String(before)
-        + ".."
-        + String(after),
-    )
-    # The stamps and the expiry come from the same reading.
+    var minted = Int(url.expires_unix_seconds) - _TTL
+    assert_true(minted > _AFTER, "minted at " + String(minted) + ", too early")
+    assert_true(minted < _BEFORE, "minted at " + String(minted) + ", too late")
     assert_equal(
         _query_value(url.url, "X-Goog-Date"),
-        gcs_v4_stamps_from_unix_seconds(Int64(signed_at)).datetime_z,
+        gcs_v4_stamps_from_unix_seconds(Int64(minted)).datetime_z,
     )
     assert_equal(_query_value(url.url, "X-Goog-Expires"), String(_TTL))
 
 
 def main() raises:
     test_reads_a_plausible_now()
-    test_signer_signs_at_the_wall_clock()
+    test_signer_mints_from_its_clock()
+    test_system_clock_signer_mints_at_a_real_instant()
     print("OK")

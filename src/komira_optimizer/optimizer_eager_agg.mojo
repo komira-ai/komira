@@ -134,6 +134,7 @@ from .optimizer_partial_agg import (
     _agg_output_name,
 )
 from .optimizer_stats import estimate_cardinality
+from .optimizer_udf_carry import filter_like, project_like, aggregate_like
 
 
 # =============================================================================
@@ -419,6 +420,10 @@ def _classify_eager_push(
 ) -> _EagerDecision:
     """Borrow-only classification. Returns _EAGER_LEFT / _EAGER_RIGHT when
     the cross-side pushdown is sound + beneficial, else _EAGER_NONE."""
+    # A UDF Aggregate is never split: the partial and merge aggregates are
+    # rebuilt from `agg_exprs` alone and the UDF would be gone.
+    if agg_plan.has_udf():
+        return _EagerDecision(_EAGER_NONE)
     ref jd = join_plan._join.value()[]
 
     # --- INNER (both directions) or LEFT (push-to-right only), no residual,
@@ -641,6 +646,9 @@ def _is_pure_narrowing_project(plan: LogicalPlan) -> Bool:
     """
     if plan.tag != PLAN_PROJECT:
         return False
+    # A UDF Project computes its output; peeling it deletes the UDF.
+    if plan.has_udf():
+        return False
     ref exprs = plan._project.value()[].exprs
     if len(exprs) == 0:
         return False
@@ -686,19 +694,19 @@ def _eager_rec(var plan: LogicalPlan) raises -> LogicalPlan:
         var new_aggs = _copy_agg_expr_array_local(
             plan._aggregate.value()[].agg_exprs
         )
-        return LogicalPlan.aggregate(new_gb^, new_aggs^, new_child^)
+        return aggregate_like(plan._aggregate.value()[], new_gb^, new_aggs^, new_child^)
 
     elif plan.tag == PLAN_FILTER:
         var child = _take_filter_child(plan)
         var pred = plan._filter.value()[].predicate.copy()
         var new_child = _eager_rec(child^)
-        return LogicalPlan.filter(pred^, new_child^)
+        return filter_like(plan._filter.value()[], pred^, new_child^)
 
     elif plan.tag == PLAN_PROJECT:
         var child = _take_project_child(plan)
         var new_child = _eager_rec(child^)
         var new_exprs = _copy_expr_array(plan._project.value()[].exprs)
-        return LogicalPlan.project(new_exprs^, new_child^)
+        return project_like(plan._project.value()[], new_exprs^, new_child^)
 
     elif plan.tag == PLAN_JOIN:
         var algo = plan._join.value()[].algo_hint

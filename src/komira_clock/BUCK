@@ -1,12 +1,69 @@
-load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+load("@buildrules//rules/mojo:pack.bzl", "mojo_conda", "mojo_conda_holds")
+load("@komira//tools/build/mojo:adopt.bzl", "mojo_adopted_library")
+load("@komira//tools/build/package:conda.bzl", "conda_package")
+load(":buildrules.mojo.bzl", "mojo_package")
 
 # The process clocks: monotonic nanoseconds, wall-clock milliseconds and
 # microseconds, and the calling thread's CPU nanoseconds. Each is a direct
 # `clock_gettime` call; the package has no C shim and no dependencies beyond
 # the standard library, so it is a leaf any package can import.
-mojo_library(
+#
+# Built with buildrules' `mojo_package` from mopm.toml (README.md, "Build files"): `:lib` is the
+# library file and exists only once the test of tests/ has passed. The thread-CPU test blocks in a
+# join while a second thread works; the thread helper is komira_fork_join, a sibling package named
+# under `[dev-dependencies]` of mopm.toml: it reaches the test only, never `:lib` or a consumer of
+# the clock.
+mojo_package(path = ".")
+
+# `:komira_clock`, the target the packages that depend on this library name, is `:lib` as komira's
+# Mojo rules take it (tools/build/mojo/adopt.bzl): the same file, so a dependent builds only once
+# the test has passed. It has no `deps`: the dev-dependency is not part of what `:lib` is built from.
+# It carries the README gate too (`[tests][readme]`): the examples run against `:lib`; the test is
+# not run again.
+mojo_adopted_library(
     name = "komira_clock",
-    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
-    test_srcs = ["tests/test_clock.mojo"],
+    lib = ":lib",
+    readme = "README.md",
+    srcs = glob(["src/komira_clock/**/*.mojo"]),
+    test_srcs = glob(["tests/test_*.mojo"]),
+    test_runs = ":test",
+    visibility = ["PUBLIC"],
+)
+
+# The mopm package: `mopm pack` over `:lib`, the `.conda` a mopm registry serves
+# (`mojo-komira_clock-0.1.0-mojo1.0.0_0.conda`). `:lib` exists only once the test passed, so this
+# file exists only then. Publishing it (`mopm publish`) uploads, which is not a build action: it is
+# a step of a CI job that takes this target's output. `mopm` is the one `mojo_package` pins
+# (mopm-toolchain.toml).
+mojo_conda(
+    name = "conda",
+    lib = ":lib",
+    manifest = "mopm.toml",
+    mojo = "1.0.0",
+    mopm = "toolchains//:mopm_0_0_86",
+    package = "komira_clock",
+    version = "0.1.0",
+    visibility = ["PUBLIC"],
+)
+
+# What `:conda` holds, read back from the built file (buildrules' `prebuilt_unpack`): this package's own
+# `.mojoc` and nothing else under `lib/mojo/`, and no dependency beyond the compiler: komira_fork_join is a
+# dev-dependency, which `mopm pack` leaves out of the package.
+mojo_conda_holds(
+    name = "conda_holds",
+    conda = ":conda",
+    depends = [],
+    package = "komira_clock",
+    sole = True,
+    visibility = ["PUBLIC"],
+)
+
+# Kept for the release machine, which still builds it (release/BUCK, release/artifacts.textproto):
+# komira's conda packer over `:komira_clock`. It goes when the release machine takes the mopm
+# package. This library's mopm package is `:conda` above.
+conda_package(
+    name = "komira_clock_conda",
+    lib = ":komira_clock",
+    summary = "The `komira_clock` Mojo library of komira, as a conda package.",
     visibility = ["PUBLIC"],
 )

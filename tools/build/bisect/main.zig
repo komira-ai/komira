@@ -84,8 +84,8 @@ pub fn parseArgs(a: std.mem.Allocator, argv_in: []const []const u8) !Args {
         r.mode = .flake;
         argv = argv[1..];
     }
-    var copies = std.ArrayList([]const u8).init(a);
-    var bargs = std.ArrayList([]const u8).init(a);
+    var copies = std.ArrayList([]const u8).empty;
+    var bargs = std.ArrayList([]const u8).empty;
     var i: usize = 0;
     while (i < argv.len) : (i += 1) {
         const arg = argv[i];
@@ -121,9 +121,9 @@ pub fn parseArgs(a: std.mem.Allocator, argv_in: []const []const u8) !Args {
             6 => r.git = v,
             7 => {
                 if (v.len == 0 or std.fs.path.isAbsolute(v) or std.mem.indexOf(u8, v, "..") != null) return error.BadCopy;
-                try copies.append(v);
+                try copies.append(a, v);
             },
-            8 => try bargs.append(v),
+            8 => try bargs.append(a, v),
             9 => r.timeout_s = std.fmt.parseInt(u32, v, 10) catch return error.BadTimeout,
             10 => r.rev = v,
             11 => r.runs = std.fmt.parseInt(u32, v, 10) catch return error.BadRuns,
@@ -157,8 +157,8 @@ pub fn parseArgs(a: std.mem.Allocator, argv_in: []const []const u8) !Args {
         const k: u64 = if (r.mode == .flake) r.runs else r.flake_runs;
         if (b > std.math.maxInt(u64) - k) return error.BadRerunBase;
     }
-    r.copies = try copies.toOwnedSlice();
-    r.buck2_args = try bargs.toOwnedSlice();
+    r.copies = try copies.toOwnedSlice(a);
+    r.buck2_args = try bargs.toOwnedSlice(a);
     return r;
 }
 
@@ -176,8 +176,16 @@ fn enclosingProject(a: std.mem.Allocator, dir: []const u8) !?[]const u8 {
     return null;
 }
 
+/// A failed write to stdout as the error that caused it (`NotOpenForWriting`,
+/// `BrokenPipe`, ...), not the writer's generic `WriteFailed`: the tool error
+/// printed names it.
+fn stdoutError(ow: *std.fs.File.Writer, e: anyerror) anyerror {
+    if (e == error.WriteFailed) return ow.err orelse e;
+    return e;
+}
+
 fn fail(code: u8, comptime fmt: []const u8, args: anytype) noreturn {
-    std.io.getStdErr().writer().print("bisect: " ++ fmt ++ "\n", args) catch {};
+    std.fs.File.stderr().deprecatedWriter().print("bisect: " ++ fmt ++ "\n", args) catch {};
     std.process.exit(code);
 }
 
@@ -193,7 +201,7 @@ const State = struct {
 
     /// Builds `commit`, retrying an infra outcome once.
     fn probeCommit(self: *State, commit: []const u8) !search.Outcome {
-        const err = std.io.getStdErr().writer();
+        const err = std.fs.File.stderr().deprecatedWriter();
         var why: []const u8 = "";
         var attempts: u32 = 0;
         var at: prober.Attempt = undefined;
@@ -208,19 +216,19 @@ const State = struct {
             err.print("bisect: {s} {s}: {s}\n", .{ @tagName(self.role), commit, report.outcomeName(at.classified.outcome) }) catch {};
             if (at.classified.outcome != .infra) break;
         }
-        var names = std.ArrayList([]const u8).init(self.a);
-        for (at.classified.failures) |f| try names.append(f.target);
-        try self.probes.append(.{
+        var names = std.ArrayList([]const u8).empty;
+        for (at.classified.failures) |f| try names.append(self.a, f.target);
+        try self.probes.append(self.a, .{
             .commit = commit,
             .role = self.role,
             .outcome = at.classified.outcome,
             .attempts = attempts,
             .buck2_exit = at.exit,
-            .failed_targets = try names.toOwnedSlice(),
+            .failed_targets = try names.toOwnedSlice(self.a),
             .seconds = at.seconds,
         });
         switch (at.classified.outcome) {
-            .infra => try self.infra.append(.{ .commit = commit, .buck2_exit = at.exit, .excerpt = at.tail }),
+            .infra => try self.infra.append(self.a, .{ .commit = commit, .buck2_exit = at.exit, .excerpt = at.tail }),
             .fail => try self.failures.put(commit, at.classified.failures),
             .pass => {},
         }
@@ -255,16 +263,16 @@ fn run() !void {
             const t = flake.firstWithoutCell(after) orelse "";
             fail(EXIT_USAGE, "target {s} has no cell: a rerun names a target with its cell, so prefix it with its cell, as in komira{s} (or pass --flake-runs 0 to bisect without measuring)", .{ t, t });
         }
-        std.io.getStdErr().writer().print("bisect: {s}\n{s}", .{ @errorName(e), USAGE }) catch {};
+        std.fs.File.stderr().deprecatedWriter().print("bisect: {s}\n{s}", .{ @errorName(e), USAGE }) catch {};
         std.process.exit(EXIT_USAGE);
     };
 
     // The environment of git and buck2: this process's, without BUCK*
     // variables, which an outer buck2 (`buck2 run`) sets for itself.
     var env = try std.process.getEnvMap(a);
-    var drop = std.ArrayList([]const u8).init(a);
+    var drop = std.ArrayList([]const u8).empty;
     var it = env.iterator();
-    while (it.next()) |e| if (std.mem.startsWith(u8, e.key_ptr.*, "BUCK")) try drop.append(try a.dupe(u8, e.key_ptr.*));
+    while (it.next()) |e| if (std.mem.startsWith(u8, e.key_ptr.*, "BUCK")) try drop.append(a, try a.dupe(u8, e.key_ptr.*));
     for (drop.items) |k| env.remove(k);
 
     const repo = std.fs.cwd().realpathAlloc(a, args.repo) catch |e|
@@ -320,8 +328,8 @@ fn run() !void {
             .timeout_s = args.timeout_s,
             .env = &env,
         },
-        .probes = std.ArrayList(report.Probe).init(a),
-        .infra = std.ArrayList(report.Infra).init(a),
+        .probes = std.ArrayList(report.Probe).empty,
+        .infra = std.ArrayList(report.Infra).empty,
         .failures = std.StringHashMap([]const classify.Failure).init(a),
     };
 
@@ -332,9 +340,12 @@ fn run() !void {
             error.NotOwnProject => fail(EXIT_USAGE, "{s}", .{why}),
             else => return e,
         };
-        const out = std.io.getStdOut().writer();
-        try flake.writeVerdict(m, out);
-        try out.writeAll("\n");
+        var obuf: [4096]u8 = undefined;
+        var ow = std.fs.File.stdout().writer(&obuf);
+        const out = &ow.interface;
+        flake.writeVerdict(m, out) catch |e| return stdoutError(&ow, e);
+        out.writeAll("\n") catch |e| return stdoutError(&ow, e);
+        out.flush() catch |e| return stdoutError(&ow, e);
         std.process.exit(switch (flake.verdict(m)) {
             .flake => EXIT_FLAKE,
             .never_failed => EXIT_NEVER_FAILED,
@@ -411,9 +422,12 @@ fn run() !void {
     r.infra = st.infra.items;
 
     // 5. The verdict.
-    const out = std.io.getStdOut().writer();
-    try report.write(r, out);
-    try out.writeAll("\n");
+    var obuf: [4096]u8 = undefined;
+    var ow = std.fs.File.stdout().writer(&obuf);
+    const out = &ow.interface;
+    report.write(r, out) catch |e| return stdoutError(&ow, e);
+    out.writeAll("\n") catch |e| return stdoutError(&ow, e);
+    out.flush() catch |e| return stdoutError(&ow, e);
     std.process.exit(code);
 }
 

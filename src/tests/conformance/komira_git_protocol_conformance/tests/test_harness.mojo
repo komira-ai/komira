@@ -28,7 +28,7 @@
 #   * test_scenario_files: a scenario with no connection loaded, a refs.txt
 #     line with two or with four fields accepted, HEAD invented when head.txt is
 #     absent. The scenarios are fixtures/ (BUCK maps them under
-#     transcripts/), not capture.sh output.
+#     transcripts/), not capture.zig output.
 # =============================================================================
 
 from std.testing import assert_equal, assert_false, assert_true

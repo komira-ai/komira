@@ -30,6 +30,16 @@
 # 5. A STRING WRITTEN TO A PLAIN FIELD IS A LITERAL: bound to another
 #    resource's output, or to a parameter, it is one finding at expansion.
 # 6. A VALUE_MAP KEY THE COMPONENT WRITES TOO is one finding.
+# 7. EACH BINDING LANDS ON ITS OWN INSTANCE: `acme.two@1` passes a different
+#    image to each of two instances of `acme.w@1`; an optional IMAGE input
+#    left unset writes no image.
+# 8. THE BINDING HELPERS, one by one: the type words; a BOOL into a bool
+#    field, and into a flag message (true sets it, false removes it, a map
+#    refuses both); a
+#    VALUE_MAP written in key order; an input no definition declares is not
+#    set; which inputs a nested instance sets (a `ref { input }` passed down
+#    only when set, every image and map input); a binding into an instance
+#    whose definition was not given leaves the finding to the instance.
 # =============================================================================
 
 from std.testing import assert_equal, assert_false, assert_true
@@ -38,7 +48,10 @@ from komira_proto_codec import decode_json, encode_json
 from kci_resource_proto.composite import CompositeDefinition
 from kci_resource_proto.resource import Resource, ResourceList
 
-from kci_cloud import Catalog, Expansion, expand
+from kci_resource_proto.refs import Value
+from kci_cloud import Catalog, Expansion, expand, BindValue, bind_field, INPUT_BOOL, INPUT_REF, INPUT_VALUE_MAP
+from kci_cloud import literal_value
+from kci_cloud.compose_bind import bind_problems, input_type_name, is_set, nested_set_names
 
 
 def _defs(texts: List[String]) raises -> List[CompositeDefinition]:
@@ -259,6 +272,88 @@ def test_a_map_key_written_twice() raises:
     print("  test_a_map_key_written_twice: PASS")
 
 
+comptime _TWO = (
+    '{"name":"acme.two","version":"1",'
+    + '"input":[{"name":"img_a","type":"INPUT_IMAGE","required":true},{"name":"img_b","type":"INPUT_IMAGE","required":true}],'
+    + '"component":[{"id":"a","composite":{"definition":"acme.w","version":"1","input":{"open":{"literal":"true"}}}},'
+    + '{"id":"b","composite":{"definition":"acme.w","version":"1","input":{"open":{"literal":"false"}}}}],'
+    + '"bind":[{"component":"a","field":"composite.image_input.img","input":"img_a"},'
+    + '{"component":"b","field":"composite.image_input.img","input":"img_b"}]}'
+)
+
+
+def test_each_binding_lands_on_its_own_instance() raises:
+    """Catches: a binding of the enclosing definition applied to every
+    nested instance rather than the one it names (a would get b's image),
+    and an unset optional IMAGE input that writes something."""
+    var top = String('{"resource":[{"id":"t","composite":{"definition":"acme.two","version":"1",')
+    top += String('"imageInput":{"img_a":{"digest":"sha256:aa"},"img_b":{"digest":"sha256:bb"}}}}]}')
+    var x = expand(Catalog.v1(), _defs(_two_defs(String(_W), String(_TWO))), _list(top))
+    assert_equal(len(x.findings), 0, _findings(x))
+    var got = _lines(x)
+    assert_true(got.find('{"id":"t/a/api","service":{"image":{"digest":"sha256:aa"}') >= 0, got)
+    assert_true(got.find('{"id":"t/b/api","service":{"image":{"digest":"sha256:bb"}') >= 0, got)
+    var optional = String(_W).replace('{"name":"img","type":"INPUT_IMAGE","required":true}', '{"name":"img","type":"INPUT_IMAGE"}')
+    x = expand(Catalog.v1(), _defs(_one_def(optional)), _list(_w_list(String(_ALL), image=False, env=False)))
+    assert_equal(len(x.findings), 0, _findings(x))
+    got = _lines(x)
+    assert_true(got.find('{"id":"w/api","service":{"port":8081,') >= 0, got)
+    assert_true(got.find('{"id":"w/job","containerJob":{"maxRetries":0}}') >= 0, got)
+    print("  test_each_binding_lands_on_its_own_instance: PASS")
+
+
+def _svc(body: String) raises -> Resource:
+    return decode_json[Resource](String('{"id":"s","service":{"port":1') + body + String("}}"))
+
+
+def test_the_binding_helpers() raises:
+    assert_equal(input_type_name(INPUT_BOOL), "BOOL")
+    assert_equal(input_type_name(INPUT_REF), "REF")
+    assert_equal(input_type_name(99), "99")
+    # A BOOL into a flag message: true sets it, false removes it; a map is no flag.
+    var on = BindValue(INPUT_BOOL, String("true"), None, Dict[String, Value]())
+    var off = BindValue(INPUT_BOOL, String("false"), None, Dict[String, Value]())
+    assert_equal(encode_json(bind_field(_svc(String("")), String("service.public"), on).resource.value()), '{"id":"s","service":{"port":1,"public":{}}}')
+    assert_equal(encode_json(bind_field(_svc(String(',"public":{}')), String("service.public"), off).resource.value()), '{"id":"s","service":{"port":1}}')
+    var bkt = decode_json[Resource](String('{"id":"b","bucket":{}}'))
+    assert_equal(encode_json(bind_field(bkt, String("bucket.versioning"), on).resource.value()), '{"id":"b","bucket":{"versioning":true}}')
+    var no = bind_field(_svc(String("")), String("service.env"), on)
+    assert_false(Bool(no.resource))
+    assert_true(no.err.byte_length() > 0)
+    # A VALUE_MAP is written in key order, whatever order it was built in.
+    var m = Dict[String, Value]()
+    m["B"] = literal_value(String("b"))
+    m["A"] = literal_value(String("a"))
+    var vm = bind_field(_svc(String("")), String("service.env"), BindValue(INPUT_VALUE_MAP, String(""), None, m^))
+    assert_equal(encode_json(vm.resource.value()), '{"id":"s","service":{"port":1,"env":{"A":{"literal":"a"},"B":{"literal":"b"}}}}')
+    # What a nested instance sets.
+    var d = decode_json[CompositeDefinition](
+        String('{"name":"acme.n","version":"1","input":[{"name":"r","type":"INPUT_REF"}],"component":[')
+        + String('{"id":"web","composite":{"definition":"acme.w","version":"1","input":{"peer":{"ref":{"input":"r"}}},')
+        + String('"imageInput":{"img":{"digest":"sha256:a1"}},"mapInput":{"env":{"value":{}}}}}]}')
+    )
+    assert_false(is_set(d, List[String](), String("nope")))
+    var set_r: List[String] = [String("r")]
+    var names = nested_set_names(d, set_r, d.component[0])
+    assert_equal(len(names), 3)
+    assert_equal(names[0], "peer")
+    assert_equal(names[1], "img")
+    assert_equal(names[2], "env")
+    names = nested_set_names(d, List[String](), d.component[0])
+    assert_equal(len(names), 2, "a ref { input } passed down from an unset input is unset")
+    # A binding into an instance whose definition was not given: the
+    # instance's own finding names it, so the binding adds none.
+    var b = decode_json[CompositeDefinition](
+        String('{"name":"acme.b","version":"1","input":[{"name":"i","type":"INPUT_IMAGE"}],"component":[')
+        + String('{"id":"web","composite":{"definition":"acme.gone","version":"1"}}],')
+        + String('"bind":[{"component":"web","field":"composite.image_input.img","input":"i"}]}')
+    )
+    var nested = List[Optional[CompositeDefinition]]()
+    nested.append(None)
+    assert_equal(len(bind_problems(Catalog.v1(), b, String("acme.b@1"), nested)), 0)
+    print("  test_the_binding_helpers: PASS")
+
+
 def main() raises:
     print("test_cloud_compose_bind: bindings of every type, presence, passing down")
     test_every_type_is_written()
@@ -267,4 +362,6 @@ def main() raises:
     test_passed_down()
     test_a_plain_field_takes_a_literal()
     test_a_map_key_written_twice()
+    test_each_binding_lands_on_its_own_instance()
+    test_the_binding_helpers()
     print("ALL kci_cloud COMPOSE BIND TESTS PASSED")

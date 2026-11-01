@@ -1,0 +1,10 @@
+{
+ "name": "load_entry_has_no_code",
+ "defect": "load trusts the descriptor and never opens the code, or validate opens it: an entry no code object holds passes validate (which opens no code) and fails load (design 4.3 item 4: ERR_LOAD)",
+ "run": "load",
+ "entry": "no_such_function",
+ "shape": "SCALAR",
+ "args": [{"type": "int64", "nullable": true}],
+ "result": [{"type": "int64", "nullable": true}],
+ "expect": {"status": "ERR_LOAD", "run_error": "OPTIMIZED_UDF_CODE_UNLOADABLE", "message": "nonempty"}
+}

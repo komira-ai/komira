@@ -27,6 +27,7 @@
 # =============================================================================
 
 from std.collections import List
+from std.memory import bitcast
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
 from komira_arrow.arrow_types import ArrowType
@@ -187,6 +188,49 @@ def test_f64_key_folds_signed_zero_only() raises:
     assert_true(
         cd_f64_distinct_key(Float64(1.0)) != cd_f64_distinct_key(Float64(2.0))
     )
+
+
+def test_f64_key_folds_every_nan_onto_one() raises:
+    """Quiet and signalling NaNs of both signs and several payloads all key
+    to the canonical quiet NaN 0x7FF8000000000000, which no number keys to.
+    Catches the key taking a NaN's literal bit pattern (DuckDB counts every
+    NaN as one value)."""
+    var canonical = Int64(0x7FF8000000000000)
+    var nans: List[UInt64] = [
+        0x7FF8000000000000, 0xFFF8000000000000, 0x7FF8000000000123,
+        0xFFF8000000000456, 0x7FF0000000000001, 0xFFFFFFFFFFFFFFFF,
+    ]
+    for i in range(len(nans)):
+        assert_equal(
+            cd_f64_distinct_key(bitcast[DType.float64](nans[i])),
+            canonical,
+            "NaN bits " + hex(nans[i]),
+        )
+    var inf = bitcast[DType.float64](UInt64(0x7FF0000000000000))
+    assert_true(cd_f64_distinct_key(inf) != canonical)
+    assert_true(cd_f64_distinct_key(-inf) != canonical)
+
+
+def test_keys_nan_columns_key_one_value_on_both_float_channels() raises:
+    """A FLOAT64 and a FLOAT32 column of NaNs of both signs and two payloads
+    each read back one key per NaN, the canonical one. Catches either channel
+    keying a NaN by its bits (the F32 widening keeps a payload distinct)."""
+    var canonical = Int64(0x7FF8000000000000)
+    var vf: List[Float64] = [
+        bitcast[DType.float64](UInt64(0x7FF8000000000123)),
+        bitcast[DType.float64](UInt64(0xFFF8000000000456)),
+        1.0,
+        bitcast[DType.float64](UInt64(0xFFF8000000000000)),
+    ]
+    var wf: List[Int64] = [canonical, canonical, cd_f64_distinct_key(1.0), canonical]
+    _check(_batch1(_prim[DType.float64](vf, -1), ArrowType.FLOAT64), wf, -1)
+    var v32: List[Float32] = [
+        bitcast[DType.float32](UInt32(0x7FC00123)),
+        bitcast[DType.float32](UInt32(0xFFC00456)),
+        1.0,
+        bitcast[DType.float32](UInt32(0xFFC00000)),
+    ]
+    _check(_batch1(_prim[DType.float32](v32, -1), ArrowType.FLOAT32), wf, -1)
 
 
 # =============================================================================

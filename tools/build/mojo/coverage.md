@@ -95,11 +95,12 @@ gate's outputs; the branch coverage files are only its sub-targets `[bc]`,
 The switch is read in the `mojo_library` macro ([`coverage.bzl`](coverage.bzl))
 and does one thing: it sets the attributes `coverage_debug` to
 `komira//tools/build/coverage/kcov:cov_link`, `coverage_run` to
-`komira//tools/build/coverage/kcov:cov_run` (cov_run.sh, kcov and
+`komira//tools/build/coverage/kcov:cov_run` (cov_run, kcov and
 cov_normalize), `coverage_branch` to
 `komira//tools/build/coverage/branch:cov_branch` (the branch coverage
 scripts and the LLVM pieces), `coverage_gate` to `komira//tools/build/coverage:cov_gate`
-(cov_gate.sh, covcheck and the ratchet) and `coverage_mode` to the policy's
+(cov_gate and covcheck), `coverage_held` to the package's
+`coverage_held` when it has one, and `coverage_mode` to the policy's
 (for a library of the ledger or naming `coverage_tests`: no gate; its
 `<name>_cov_gate` is declared), and a `mojo_test`'s `coverage_debug`; with it
 off, `coverage_tests` is dropped. A buckconfig
@@ -131,7 +132,7 @@ toolchain's zig as `real/` and, as `zig`, `cov_zig`
 and after the link overwrites the action's directory with a placeholder of
 the same length, with `debug_relocate`. The pinned Mojo records no
 compilation directory and names its sources by relative paths (`tests/...`,
-the staged library sources under `buck-out/`, the standard library under
+the library's by its import name, `<import>/...`, the standard library under
 `oss/modular/`); the directory overwritten is the one zig's C runtime units
 record ([names in a coverage binary](../coverage/kcov/README.md#names-in-a-coverage-binary)).
 The wrapper's own check, that no output holds the action's working directory
@@ -157,9 +158,9 @@ Scope, for now:
   kcov, nor one whose main is generated, and the library's generated
   sources are not measured.
 - A `mojo_shared_lib`'s drivers (below).
-- A test's data may not be staged at its own source's path or under
-  `buck-out/`: a coverage run stages the sources there (analysis fails,
-  naming the destination).
+- A test's data may not be staged at its own source's path or under the
+  library's import name (`<import>/`): a coverage run stages the sources
+  there (analysis fails, naming the destination).
 - Branch coverage only where the gate reads the branch records
   (`coverage_branch_gate`, above): kcov gives no branch data, so for any
   other library the gate's branch is `not measured` and never passes in

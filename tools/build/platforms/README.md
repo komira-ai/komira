@@ -6,7 +6,7 @@ and the rest of this page follows.
 | question | answered by | in komira |
 |---|---|---|
 | What is this target **built for**? | the **target platform** | the client's own platform (`host`, below), or any registered row with `--target-platforms` |
-| **Which tools** build it? | the **toolchain**, chosen by the target platform | `toolchains//:mojo` picks the linux or the macOS Mojo toolchain from the target platform's OS; C/C++, Rust and protobuf are linux x86_64 only |
+| **Which tools** build it? | the **toolchain**, chosen by the target platform | `toolchains//:mojo` picks the linux or the macOS Mojo toolchain from the target platform's OS; a package's own static C builds for darwin-arm64 through buildrules; vendored third_party C/C++ is not yet supported in `mojo_package`, and the old rules' C/C++, Rust and protobuf toolchains remain linux x86_64 |
 | **Where do its actions run?** | the **execution platform**, chosen by what the toolchain says it runs on | one per (os, cpu): `linux-x86_64`, and `darwin-arm64` when macOS workers are configured |
 
 ## The platform table
@@ -30,7 +30,7 @@ A row states, all required:
 | `cache_line_bytes`, `page_bytes`, `features`, `applets` | the cache line and page size of the platform, what it has that tests select on (`epoll`, `erms`, `futex`, `kqueue`, `neon`, `thp`, `ulock`, `x86_simd`), and the utilities a wrapper script may call (a list, or `none(reason)` where a pinned busybox carries them) |
 | `golden_config_hash`, `zig_exe_sha256` | the configuration hash of the row's platform (what every output path and action key carries; `pending` for a row with no platform), and the sha256 of the `zig` executable inside the zig archive, which the bootstrap checks after unpacking |
 | `object_format`, `runtime_libs`, `os_floor` | `elf` or `macho`; what a built binary loads from the toolchain's `lib/`; the oldest OS it runs on |
-| `assets` | every pinned download, by role (`zig`, `mojo_compiler`, `pixi`, `rustc`, `rust_std`, `protoc`, `shellcheck`, `actionlint`, `busybox`, the conda runtime libraries `libgcc`, `libstdcxx`, `libzlib`, and kcov's source and static libraries `kcov_src`, `kcov_elfutils`, `kcov_zlib`, `kcov_bzip2`, `kcov_lzma`, `kcov_zstd`, [linux-x86_64 only](../toolchains/kcov/README.md), and branch coverage's LLVM 23 packages `llvm_branch_tools`, `llvm_branch_libllvm`, `llvm_branch_libxml2`, `llvm_branch_libiconv`, `llvm_branch_zstd`, `llvm_branch_rt`, [linux-x86_64 only](../toolchains/llvm_branch/README.md)): the name of its `pinned_file`, URL, sha256 and size in bytes, or `none(reason)` where a platform needs nothing |
+| `assets` | every pinned download, by role (`zig`, `zig_next` (0.15.2, the release the build tools are moving to; its archive unpacks into `zig-<arch>-<os>-0.15.2`, the arch first), `mojo_compiler`, `pixi`, `rustc`, `rust_std`, `protoc`, `shellcheck`, `actionlint`, `busybox`, the conda runtime libraries `libgcc`, `libstdcxx`, `libzlib`, the run-time-opened `liblz4` (darwin-arm64 only: macOS ships none), and kcov's source and static libraries `kcov_src`, `kcov_elfutils`, `kcov_zlib`, `kcov_bzip2`, `kcov_lzma`, `kcov_zstd`, [linux-x86_64 only](../toolchains/kcov/README.md), and branch coverage's LLVM 23 packages `llvm_branch_tools`, `llvm_branch_libllvm`, `llvm_branch_libxml2`, `llvm_branch_libiconv`, `llvm_branch_zstd`, `llvm_branch_rt`, [linux-x86_64 only](../toolchains/llvm_branch/README.md)): the name of its `pinned_file`, URL, sha256 and size in bytes, or `none(reason)` where a platform needs nothing |
 | `oci_base`, `bundles` | the container base (its manifest, and its blobs' digests and sizes), and whether bundles, OCI images and the launcher are products of this platform (Linux server artifacts) |
 | `registered` | `True`: a build key. `False`: reserved |
 
@@ -121,7 +121,17 @@ machine its actions need: the linux toolchains state
 [`defs.bzl`](defs.bzl)). That statement binds every target using the
 toolchain, and it is the only thing any rule says about where an action
 runs. Targets that only unpack or copy files, including the macOS
-toolchain's files, state `LINUX_X86_64` themselves: they run linux tools.
+toolchain's files, and the build tools (zig, the launchers, the lints), state
+`TOOL_EXEC` themselves: the platform the build tools run on. It is
+`LINUX_X86_64`, except for a build that runs every action on a Mac
+(`[komira] execution = local` on a macOS arm64 client, whose only execution
+platform is `darwin-arm64`), where it is `DARWIN_ARM64`: `:busybox` is then
+[`busybox.sh`](../mojo/darwin/busybox.sh), `:zig`, `:zig_next` and the linters
+are the darwin-arm64 row's pins, and `zig_exe`, `zig_test` and
+`zig_bootstrap_exe` default their `target` to that row's `unpack_triple`.
+With remote execution (whatever the client's own platform) `TOOL_EXEC` is
+`LINUX_X86_64`, so no action key changes. Linux-only products (kcov, the LLVM
+branch-coverage tools, the Linux Mojo compiler) state `LINUX_X86_64`.
 
 ## Execution platforms
 
@@ -214,6 +224,7 @@ A standalone checkout reads those sets from `[komira_re]` in
 | `darwin_arm64_properties` | `darwin-arm64` | one of the two; needs `darwin_macos_hosts` as well |
 | `linux_arm64_properties` | `linux-arm64` | **reserved**: refused if set, until that row is registered |
 | `darwin_macos_hosts` | (the macOS hosts a compile may run on) | with `darwin_arm64_properties` |
+| `macos_library_dirs` | (not komira's: buildrules' macOS test runs) | optional, only with `darwin_arm64_properties`: absolute directories, separated by `:` or spaces, a macOS test run searches for a library it opens by its bare name |
 
 Each property value is comma-separated `key=value` pairs matching what the
 service routes on, e.g. `pool=mojo-sized`. The macOS set must differ from the
@@ -244,3 +255,41 @@ Two details keep action digests portable:
 needs `darwin_macos_hosts` too, since a macOS host's SDK and tools are not
 inputs of the action. Setting up the workers is in
 [the toolchain README](../toolchains/README.md), "macOS".
+
+buildrules reads every `[buildrules_re]` key from the root cell's configuration (komira's own `.buckconfig` when
+komira is built standalone), and besides `macos_aarch64_properties` its Mojo rules read two more keys; the committed
+`.buckconfig` points both at `[komira_re]` (`$(config ...)`, no value committed): `darwin_macos_hosts` (the hosts
+a macOS Mojo compile may run on; a macOS Mojo target fails analysis without it) and `macos_library_dirs` (the
+directories a macOS test run searches, before `/usr/local/lib:/usr/lib`, for a library it opens by its bare name,
+such as `liblz4`; empty leaves dyld's defaults). In a repository that mounts komira as a cell, the root cell's
+`.buckconfig` names them: `$(config ...)` is read in the cell that holds the line.
+
+### A build that runs every action on a Mac
+
+`[komira] execution = local` on a macOS arm64 client registers `darwin-arm64` as the only execution platform, and
+buildrules' rules need their own platform beside it: `execution_platforms_plus` ([`with_buildrules.bzl`](with_buildrules.bzl))
+adds `buildrules//platforms:macos_aarch64`, which runs on this machine, and does not add
+`buildrules//platforms:linux_x86_64`, whose actions would otherwise run on the Mac under a linux label. With komira's
+linux platform first, buildrules' linux platform is added as before (and buildrules' macOS platform too when macOS workers
+are configured). `extra_platform_kinds` decides this from the registered labels; the load-time cases of
+`tests//functional/darwin` check it.
+
+buildrules has to be told as well, in `.buckconfig.local`:
+
+```ini
+[komira]
+  execution = local
+[buildrules_re]
+  mode = local
+```
+
+`mode` is not passed through from `[komira]`: komira's `auto` is no buildrules mode, so the line is written out. Leave
+`[komira_re] darwin_macos_hosts` empty: komira passes it through to buildrules, and with no host named a local macOS
+compile names the host `local`, which skips the host-identity comparison (the compile runs on the machine that runs
+Buck2). Naming hosts with `mode = local` is the farm's behaviour. `[buildrules_re] local_host` (analysis of another
+machine's placement, never for building) is not passed through.
+
+Unproven: komira has never been built on a Mac. What is checked is the Linux side: Linux action keys, and, with the host
+faked as macOS arm64 and `komira.execution=local`, that configuration (cquery and analysis, no action) picks
+`darwin-arm64` and `macos_aarch64` and no linux node. Nothing here shows that a Mac compiles or tests a komira package;
+the first build on a Mac will meet whatever the machine's /bin, /usr/bin, C driver and SDK do differently.

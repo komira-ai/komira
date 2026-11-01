@@ -1,6 +1,0 @@
-call buck2 "uquery" "--output-format" "json" "owner(%s)" "src/a/a.mojo"
-exit 0
-stdout "{\"src/a/a.mojo\": [\"komira//src/a:a\", \"komira//src/a:a_test\"]}\n"
-call buck2 "cquery" "rdeps(//... + tests//..., set(komira//src/a:a komira//src/a:a_test komira//src/b:))"
-exit 1
-stderr "Error: Error looking up configured node komira//src/b:b (prelude//platforms:default#abcdef0123456789)\n\nCaused by:\n    `komira//src/a:hidden` is not visible to `komira//src/b:b` (run `buck2 help-env` to suppress this error)\n"

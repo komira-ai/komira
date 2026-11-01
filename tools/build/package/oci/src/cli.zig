@@ -122,7 +122,7 @@ pub const Layout = struct {
         const raw = try readPath(p);
         var data: []const u8 = raw;
         if (raw.len >= 2 and raw[0] == 0x1f and raw[1] == 0x8b) {
-            const r = std.ChildProcess.run(.{
+            const r = std.process.Child.run(.{
                 .allocator = C.a(),
                 .argv = C.a().dupe([]const u8, &.{ self.busybox, "gzip", "-dc", p }) catch C.oom(),
                 .max_output_bytes = std.math.maxInt(usize),
@@ -173,7 +173,7 @@ fn feedDebug(e: anyerror) []const u8 {
 /// stream's CRC, which covers the uncompressed bytes).
 pub fn gzip(busybox: []const u8, data: []const u8) Fail![]u8 {
     const argv = C.a().dupe([]const u8, &.{ busybox, "gzip", "-c" }) catch C.oom();
-    var child = std.ChildProcess.init(argv, C.a());
+    var child = std.process.Child.init(argv, C.a());
     child.stdin_behavior = .Pipe;
     child.stdout_behavior = .Pipe;
     child.stderr_behavior = .Pipe;
@@ -183,7 +183,7 @@ pub fn gzip(busybox: []const u8, data: []const u8) Fail![]u8 {
     const th = std.Thread.spawn(.{}, feed, .{&fd}) catch |e| return C.fail("gzip: {s}", .{C.ioErr(e)});
     var out = C.list(u8);
     var errs = C.list(u8);
-    const collected = child.collectOutput(&out, &errs, std.math.maxInt(usize));
+    const collected = child.collectOutput(C.a(), &out, &errs, std.math.maxInt(usize));
     th.join();
     // A program that cannot be run is reported here, not by spawn.
     const term = child.wait() catch |e| return C.fail("cannot run {s}: {s}", .{ busybox, C.ioErr(e) });

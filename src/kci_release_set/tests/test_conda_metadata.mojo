@@ -526,5 +526,49 @@ def test_refuses_bad_lib_files() raises:
     )
 
 
+def _dl(rows: String) raises -> String:
+    return _edit(String(_LIB), String("dlopen"), rows)
+
+
+def _drow(req: String, soname: String) -> String:
+    return String('{"requirement":"') + req + String('","soname":"') + soname + String('"}')
+
+
+def test_dlopen_rows_parse() raises:
+    # the shape komira_pack conda writes (pack/conda_dlopen.zig dlopenRows):
+    # {requirement, soname}, soname order. kci_validate decides a package
+    # is native from these rows, not from its requirements, so a package
+    # that forgot its codec's requirement is still checked
+    var md = parse_conda_metadata(
+        _dl(String("[") + _drow(String("lz4-c >=1.9.3,<2"), String("liblz4.so.1")) + String("]")), String(_SRC)
+    )
+    assert_true(md.has_dlopen)
+    assert_equal(len(md.dlopen), 1)
+    assert_equal(md.dlopen[0].requirement, String("lz4-c >=1.9.3,<2"))
+    assert_equal(md.dlopen[0].soname, String("liblz4.so.1"))
+    assert_equal(len(md.ignored_keys), 0)
+    var none = read_conda_metadata(String(_LIB))
+    assert_false(none.has_dlopen)
+    assert_equal(len(none.dlopen), 0)
+
+
+def test_refuses_bad_dlopen() raises:
+    _expect(_dl(String('"liblz4.so.1"')), String("'dlopen' is not an array"))
+    _expect(_dl(String("[]")), String("'dlopen' is empty: a package that opens no codec has no dlopen key"))
+    _expect(_dl(String("[1]")), String("dlopen[0]: not an object"))
+    _expect(_dl(String('[{"soname":"liblz4.so.1"}]')), String("dlopen[0]: missing 'requirement'"))
+    _expect(
+        _dl(
+            String("[") + _drow(String("libzlib >=1.2.13,<2"), String("libz.so.1")) + String(",")
+            + _drow(String("libzlib >=1.2.13,<2"), String("libz.so.1")) + String("]")
+        ),
+        String("dlopen[1]: 'soname' libz.so.1 is given twice"),
+    )
+    _expect(
+        _edit(String(_META), String("dlopen"), String("[]")),
+        String("'dlopen' does not belong to a metapackage"),
+    )
+
+
 def main() raises:
     TestSuite.discover_tests[__functions_in_module()]().run()

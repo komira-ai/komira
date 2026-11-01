@@ -21,6 +21,15 @@
 #    target does not accept (a resource or a cell resource); an edge with
 #    both or neither of target and cell; retention on a service account.
 # 4. A GOOD IDENTITY GRAPH IS CLEAN.
+# 5. THE CELL AND THE EDGES AT THEIR EDGES: a LOGS line with a verb it does
+#    not take names the verbs it does take; no cell of another number takes
+#    any verb; a grant with no principal, and an edge to a resource the list
+#    does not hold, raise (validate refuses both first).
+# 6. THE GRAPH AT ITS EDGES: an empty id; a resource with no type (one
+#    finding, on it, wherever it is named: as a grant's principal, a
+#    `uses` target or a value's producer); a grant with no principal, with
+#    one the list does not hold, or naming one of its outputs; `uses` on
+#    itself; a value reference that names no output.
 # =============================================================================
 
 from std.testing import assert_equal, assert_true, assert_false
@@ -35,6 +44,8 @@ from kci_cloud import (
     EDGE_TARGET_CELL,
     EDGE_TARGET_UNKNOWN,
     GrantEdge,
+    CELL_LOGS,
+    cell_accepts,
     edges_for,
     edges_of,
     graph_findings,
@@ -271,6 +282,64 @@ def test_a_good_identity_graph_is_clean() raises:
     print("  test_a_good_identity_graph_is_clean: PASS")
 
 
+def test_the_cell_and_the_edges_at_their_edges() raises:
+    var l = _list(
+        String('{"resource":[{"id":"api","service":{') + IMG + String(',"internal":{}},')
+        + String('"uses":[{"cell":"LOGS","access":"CALL"}]}]}')
+    )
+    var f = graph_findings(Catalog.v1(), l)
+    var t = _all_text(f)
+    assert_equal(len(f), 1, t)
+    assert_true(_has(t, "the cell's LOGS does not accept access CALL (it accepts READ, WRITE)"), t)
+    assert_true(cell_accepts(CELL_LOGS, String("WRITE")))
+    assert_false(cell_accepts(99, String("READ")))
+    var why = String("")
+    try:
+        _ = edges_of(_list(String('{"resource":[{"id":"g","grant":{"target":{"resource":"b"},"access":"READ"}}]}'))[0])
+    except e:
+        why = String(e)
+    assert_equal(why, "grant \"g\" has no principal")
+    var lone = _list(
+        String('{"resource":[{"id":"api","service":{') + IMG + String(',"internal":{}},')
+        + String('"uses":[{"target":{"resource":"nope"},"access":"CALL"}]}]}')
+    )
+    why = String("")
+    try:
+        _ = edges_for(lone, lone[0])
+    except e:
+        why = String(e)
+    assert_equal(why, "resource \"api\": an edge to \"nope\" names no resource of this list")
+    print("  test_the_cell_and_the_edges_at_their_edges: PASS")
+
+
+def test_the_graph_at_its_edges() raises:
+    var l = _list(
+        String('{"resource":[{"id":"acct","serviceAccount":{}},{"id":"store","bucket":{}},{"id":"bare"},')
+        + String('{"id":"g1","grant":{"principal":{"resource":"ghost"},"target":{"resource":"store"},"access":"READ"}},')
+        + String('{"id":"g2","grant":{"principal":{"resource":"acct","standard":"NAME"},"target":{"resource":"store"},"access":"READ"}},')
+        + String('{"id":"g3","grant":{"principal":{"resource":"bare"},"target":{"resource":"store"},"access":"READ"}},')
+        + String('{"id":"g4","grant":{"target":{"resource":"store"},"access":"READ"}},')
+        + String('{"id":"selfish","service":{') + IMG + String(',"internal":{}},"uses":[{"target":{"resource":"selfish"},"access":"CALL"}]},')
+        + String('{"id":"user","service":{') + IMG + String(',"internal":{}},"uses":[{"target":{"resource":"bare"},"access":"CALL"}]},')
+        + String('{"id":"reader","service":{') + IMG + String(',"internal":{},"env":{"A":{"ref":{"resource":"store"}},')
+        + String('"B":{"ref":{"resource":"bare","standard":"URL"}}}}},')
+        + String('{"id":"","bucket":{}}]}')
+    )
+    var t = _all_text(graph_findings(Catalog.v1(), l))
+    for want in [
+        "bare|body|",
+        'g1|grant.principal|ref to missing resource "ghost"',
+        "g2|grant.principal|a principal is an identity, not one of its outputs",
+        "g4|grant.principal|no principal",
+        "selfish|uses[0]|uses itself",
+        'reader|service.env.A|a value ref must name an output of "store"',
+        "#10|id|empty id",
+    ]:
+        assert_true(_has(t, String(want)), String("missing: ") + String(want) + "\n" + t)
+    assert_equal(t.count("\n"), 7, String("nothing else, nothing on g3, user or reader's B:\n") + t)
+    print("  test_the_graph_at_its_edges: PASS")
+
+
 def main() raises:
     print("test_cloud_identity_rules")
     test_the_role_of_an_edge_is_pinned()
@@ -278,4 +347,6 @@ def main() raises:
     test_every_identity_refusal_in_one_pass()
     test_held_values_are_refused()
     test_a_good_identity_graph_is_clean()
+    test_the_cell_and_the_edges_at_their_edges()
+    test_the_graph_at_its_edges()
     print("ALL kci_cloud IDENTITY RULE TESTS PASSED")

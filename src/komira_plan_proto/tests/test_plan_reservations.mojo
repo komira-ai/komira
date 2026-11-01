@@ -523,6 +523,7 @@ WirePlan 3
 WirePlan "orientation_plus_one"
 PlanTag 17
 PlanTag 18
+PlanTag 19
 ExprTag 11
 ExprTag 12
 SourceVariantTag 1
@@ -540,4 +541,22 @@ DeclaredNeeds "python_abi"
 DeclaredNeeds "node_abi"
 OptimizedSegment 11
 OptimizedSegment "physical"
+WireField 17
+WireField "type_deferred"
+UdfRef 9
+UdfRef "resolution"
+UdfRef 1
+UdfRef 3
+UdfRef 4
+UdfRef 5
+UdfRef 7
+UdfRef 13
+UdfRef 14
+UdfRef "runtime"
+UdfRef "installed"
+UdfRef "source"
+UdfRef "value"
+UdfRef "batch_format"
+UdfRef "js_module"
+UdfRef "js_value"
 """

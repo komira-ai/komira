@@ -1,0 +1,23 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The hang limit of a welded test (`gate mojo --hang-limit-s`, tools/build/run).
+# Both targets build: a test that ends is unchanged by the limit, whether the
+# target takes the default (1800 s) or sets its own. The twin that must go red
+# is tests//negative/mojo_hang:lib_never_ends.
+
+mojo_library(
+    name = "lib_default_limit",
+    srcs = ["__init__.mojo"],
+    conda = False,
+    import_name = "hangfix",
+    test_srcs = ["tests/test_returns.mojo"],
+)
+
+mojo_library(
+    name = "lib_override_limit",
+    srcs = ["__init__.mojo"],
+    conda = False,
+    import_name = "hangfix",
+    test_hang_limit_s = 5,
+    test_srcs = ["tests/test_returns.mojo"],
+)

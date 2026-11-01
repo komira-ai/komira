@@ -30,6 +30,13 @@
 #    and accepts nothing, takes no retention, and lands on `sub` (a role
 #    word is 8 bytes at most).
 #    SEND and RECEIVE are values of the generated `Access`.
+# 8. EVERY CODE HAS A WORD, an unknown one its number or an UNSET word
+#    (absence, retention, portability, a catalog field, an engine
+#    retention); a type outside the catalog has no retention and no primary
+#    node; an entry with no absence for a field answers None; an absence of
+#    no known kind is refused; a list with no cloud resolves nothing and
+#    says so; a lowering renders every dependency and input, and escapes
+#    what JSON must.
 # =============================================================================
 
 from std.testing import assert_equal, assert_true, assert_false
@@ -66,8 +73,16 @@ from kci_cloud import (
     primary_node,
     body_arms,
     body_field,
+    body_is,
     artifact_problems,
+    LoweredNode,
+    Setting,
+    absence_word,
+    lowering_json,
+    portability_word,
+    retention_word,
 )
+from kci_reconciler import InputRef
 
 
 def _has(haystack: String, needle: String) -> Bool:
@@ -503,8 +518,82 @@ def test_the_messaging_rows() raises:
     print("  test_the_messaging_rows: PASS")
 
 
+def test_every_code_has_a_word() raises:
+    assert_equal(absence_word(ABSENT_BY_DESIGN), "ABSENT_BY_DESIGN")
+    assert_equal(absence_word(NOT_YET), "NOT_YET")
+    assert_equal(absence_word(0), "ABSENCE_UNSET")
+    assert_equal(retention_word(RETENTION_DELETE), "DELETE")
+    assert_equal(retention_word(RETENTION_KEEP), "KEEP")
+    assert_equal(retention_word(RETENTION_NONE), "none")
+    assert_equal(retention_word(9), "9")
+    assert_equal(portability_word(CLOUD_BOUND), "CLOUD_BOUND")
+    assert_equal(portability_word(0), "PORTABILITY_UNSET")
+    var c = Catalog.v1()
+    assert_equal(c.name_of(FIELD_BUCKET), "bucket")
+    assert_equal(c.name_of(999), "field 999")
+    # A type outside the catalog: no retention, no primary node.
+    var l = _list(String('{"resource":[{"id":"b","bucket":{}}]}'))
+    var empty = Catalog()
+    var why = String("")
+    try:
+        _ = effective_retention(empty, l[0])
+    except e:
+        why = String(e)
+    assert_equal(why, "resource 'b': type field 14 is not in the catalog")
+    why = String("")
+    try:
+        _ = primary_node(empty, l, String("b"))
+    except e:
+        why = String(e)
+    assert_equal(why, "a reference to \"b\" names no resource of the catalog in this list")
+    # An entry answers an absence only for a field it declares absent.
+    var absent = List[Absence]()
+    absent.append(Absence(FIELD_TABLE, NOT_YET, String("no tables")))
+    var entry = CloudEntry(CloudId(String("x")), False, _ints(10), absent^)
+    assert_equal(entry.absence_of(FIELD_TABLE).value().reason, "no tables")
+    assert_false(Bool(entry.absence_of(FIELD_BUCKET)))
+    # An absence of no known kind is refused, by its UNSET word.
+    var odd = List[Absence]()
+    odd.append(Absence(FIELD_TABLE, 7, String("?")))
+    var p = _joined(artifact_problems(c, CloudEntry(CloudId(String("odd")), False, List[Int](), odd^)))
+    assert_true(_has(p, "cloud \"odd\": type 'table' has absence kind ABSENCE_UNSET\n"), p)
+    # A list with no cloud names none.
+    why = String("")
+    try:
+        _ = Clouds(Catalog.v1()).resolve(String("fake"))
+    except e:
+        why = String(e)
+    assert_equal(why, "kci: \"fake\" is not a cloud built into this kci (built in: none)")
+    # A lowering renders every dependency and input, and escapes for JSON.
+    var deps = List[String]()
+    deps.append(String("a/run"))
+    deps.append(String("b/run"))
+    var ins = List[InputRef]()
+    ins.append(InputRef(String("a/run"), String("URL"), String("env.A")))
+    ins.append(InputRef(String("b/run"), String("HOST"), String("env.B")))
+    var d = List[Setting]()
+    d.append(Setting(String("q"), String('say "hi"\\\n') + chr(1)))
+    var n = LoweredNode(String("x/run"), String("x"), String("svc"), deps^, ins^, d^, True, 5)
+    assert_equal(
+        lowering_json([n.copy()]),
+        String('[\n  {"id":"x/run","owner":"x","kind":"svc","wanted":true,"retention":"5","depends_on":["a/run","b/run"],')
+        + String('"inputs":[{"producer":"a/run","output":"URL","field":"env.A"},')
+        + String('{"producer":"b/run","output":"HOST","field":"env.B"}],"desired":{"q":"say \\"hi\\"\\\\\\n?"}}\n]'),
+    )
+    print("  test_every_code_has_a_word: PASS")
+
+
+def test_body_is_never_raises() raises:
+    """A resource with no arm is no type: `body_is` answers False where
+    `body_field` raises (a mutant that lets the raise through aborts)."""
+    var none = decode_json[Resource](String('{"id":"r"}'))
+    assert_false(body_is(none, FIELD_BUCKET))
+    assert_true(body_is(decode_json[Resource](String('{"id":"r","bucket":{}}')), FIELD_BUCKET))
+
+
 def main() raises:
     print("test_cloud_catalog_and_clouds")
+    test_body_is_never_raises()
     test_catalog_arms_match_the_wire()
     test_catalog_names_are_generated_enum_values()
     test_catalog_refuses_unset_and_duplicates()
@@ -516,4 +605,5 @@ def main() raises:
     test_the_identity_rows()
     test_the_table_row()
     test_the_messaging_rows()
+    test_every_code_has_a_word()
     print("ALL kci_cloud CATALOG AND CLOUDS TESTS PASSED")

@@ -61,9 +61,13 @@ from komira_compression.zlib import (
 )
 from komira_compression.zstd_frame import (
     ZSTD_DEFAULT_LEVEL,
+    ZSTD_ERROR_CORRUPTION_DETECTED,
+    ZSTD_ERROR_DST_SIZE_TOO_SMALL,
+    ZSTD_ERROR_SRC_SIZE_WRONG,
     zstd_compress_bound,
     zstd_compress_into,
     zstd_decompress_into,
+    zstd_decompress_once,
     zstd_frame_content_size,
 )
 
@@ -278,6 +282,36 @@ def test_zstd_refusals_name_result_and_sizes() raises:
     assert_equal(
         msg, "ZSTD_decompress failed (result=-72, input_len=13, output_cap=16)"
     )
+
+
+def test_zstd_decompress_once_hands_back_the_error_code() raises:
+    """`zstd_decompress_once` answers the same three cases with a code, not a
+    raise: a short destination is 70 (the one a caller grows on), a truncated
+    frame 72 and a reserved block type 20. A mutant that reads the code from
+    the wrong call, or returns 0 for any failure, changes one of these."""
+    var frame = materialize[_ZSTD_HELLO]()
+    var dst = _guarded(5)
+    var ok = zstd_decompress_once(Span(dst)[0:5], Span(frame))
+    assert_equal(ok.error_code, 0)
+    assert_equal(ok.written, 5)
+    _assert_same(Span(dst)[0:5], Span(_bytes("hello")), "zstd once")
+    _assert_pad_untouched(dst, 5, "zstd once exact destination")
+
+    var short = _guarded(4)
+    var full = zstd_decompress_once(Span(short)[0:4], Span(frame))
+    assert_equal(full.error_code, ZSTD_ERROR_DST_SIZE_TOO_SMALL)
+    assert_equal(full.written, 0)
+    _assert_pad_untouched(short, 4, "zstd once short destination")
+
+    var cut = zstd_decompress_once(Span(dst)[0:5], Span(frame)[0:13])
+    assert_equal(cut.error_code, ZSTD_ERROR_SRC_SIZE_WRONG)
+
+    # The same frame header, with its block header's type set to 3
+    # (reserved): libzstd refuses the block as corrupt.
+    var reserved = frame.copy()
+    reserved[6] = reserved[6] | 0x06
+    var bad = zstd_decompress_once(Span(dst)[0:5], Span(reserved))
+    assert_equal(bad.error_code, ZSTD_ERROR_CORRUPTION_DETECTED)
 
 
 # -----------------------------------------------------------------------------

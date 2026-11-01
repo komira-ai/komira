@@ -1,0 +1,11 @@
+{
+ "name": "validate_read_set_type_differs",
+ "defect": "with equal names, validate accepts a recorded field of another type (design 3.1: ERR_DESCRIPTOR, not a read-set mismatch)",
+ "run": "validate",
+ "entry": "pick",
+ "shape": "ROW",
+ "args": [{"type": "int64", "nullable": true, "name": "a"}, {"type": "int32", "nullable": true, "name": "b"}],
+ "result": [{"type": "int64", "nullable": true}],
+ "descriptor": {"recorded_fields": {"fields": [{"name": "a", "type": "int64"}, {"name": "b", "type": "int64"}]}},
+ "expect": {"status": "ERR_DESCRIPTOR", "run_error": "OPTIMIZED_UDF_DESCRIPTOR_INVALID", "message_contains": "the spec says int32, the descriptor int64"}
+}

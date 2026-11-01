@@ -1,0 +1,11 @@
+{
+ "name": "validate_entry_differs",
+ "defect": "validate accepts a descriptor whose entry is not code.entry (design 3.1)",
+ "run": "validate",
+ "entry": "double",
+ "shape": "SCALAR",
+ "args": [{"type": "int64", "nullable": true}],
+ "result": [{"type": "int64", "nullable": true}],
+ "descriptor": {"entry": "no_such_function"},
+ "expect": {"status": "ERR_DESCRIPTOR", "run_error": "OPTIMIZED_UDF_DESCRIPTOR_INVALID", "message_contains": "no_such_function"}
+}

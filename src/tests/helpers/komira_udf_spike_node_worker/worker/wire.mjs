@@ -16,7 +16,7 @@ export const OP = Object.freeze({
 });
 
 export const MAGIC = 0x4644554b;
-export const WIRE_VERSION = 1;
+export const WIRE_VERSION = 2;
 export const FLAG_INLINE = 1;
 export const FLAG_END = 2;
 export const HEADER_BYTES = 40;

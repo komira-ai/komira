@@ -1,0 +1,12 @@
+# none
+
+A fixture of release_readme_test (BUCK): no example. A sketch fenced
+`text` and a `python` block are not examples.
+
+```text
+print(1)
+```
+
+```python
+print(1)
+```

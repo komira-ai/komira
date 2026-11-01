@@ -194,7 +194,15 @@ def _can_match_f64(op: UInt8, v: Float64, mn: Float64, mx: Float64) -> Bool:
     `<`, `<=`, `>`, `>=` and `==` for no `v`. For `!=` it is not: `NaN != v`
     holds for every `v`, so a chunk whose only non-NaN value is `v` still
     matches if it holds a NaN. This module does not consult `nan_count`.
+
+    A NaN bound is not a bound: every comparison with NaN is false, so the
+    range checks below would answer "no row can match" for a range that
+    proves nothing. Some writers do store NaN min/max (an all-NaN chunk, or
+    a NaN-unaware min/max fold). A NaN bound is unknown, and the unit is
+    kept for every operator.
     """
+    if mn != mn or mx != mx:
+        return True
     if op == BIN_EQ:
         return mn <= v and v <= mx
     elif op == BIN_NE:
@@ -480,8 +488,9 @@ def can_prune_row_group(rg: RowGroup, metadata: FileMetaData, filter: Expr) -> B
 #
 # The safe answer here is False ("cannot prove it; decode"). A wrong True
 # miscounts. Types: INT64 and INT32 only. FLOAT and DOUBLE are declined
-# (statistics exclude NaN, and NaN fails every comparison); BYTE_ARRAY and
-# BOOLEAN are not handled.
+# (statistics exclude NaN, and NaN fails every comparison, so a NaN row or a
+# NaN bound can never be proved to match); BYTE_ARRAY and BOOLEAN are not
+# handled.
 
 
 @always_inline

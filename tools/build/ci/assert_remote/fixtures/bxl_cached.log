@@ -1,0 +1,4 @@
+[2026-10-21T14:06:52.691-05:00] Build ID: 00000000-0000-0000-0000-000000000000
+graph_check komira//tools/build/selftest/graph:selftest_closure: 63 facts of //tools/build/selftest/...; checked: <ensured <build artifact graph_check/selftest_closure.ok bound to komira//tools/build/selftest/graph/checks.bxl:check>>
+[2026-10-21T14:06:52.697-05:00] Network: up 0B  down 0B
+BXL SUCCEEDED

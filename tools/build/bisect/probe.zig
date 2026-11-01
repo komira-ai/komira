@@ -61,14 +61,14 @@ const Watch = struct {
                 std.posix.kill(w.pid, std.posix.SIG.KILL) catch {};
                 return;
             }
-            std.time.sleep(100 * std.time.ns_per_ms);
+            std.Thread.sleep(100 * std.time.ns_per_ms);
         }
     }
 };
 
 /// Runs argv in `cwd`, killing it at `timeout_s`.
 pub fn exec(a: std.mem.Allocator, argv: []const []const u8, cwd: []const u8, env: *const std.process.EnvMap, timeout_s: u32) !Exec {
-    var child = std.ChildProcess.init(argv, a);
+    var child = std.process.Child.init(argv, a);
     child.cwd = cwd;
     child.env_map = env;
     child.stdin_behavior = .Ignore;
@@ -77,9 +77,9 @@ pub fn exec(a: std.mem.Allocator, argv: []const []const u8, cwd: []const u8, env
     try child.spawn();
     var watch = Watch{ .pid = child.id, .deadline_ms = std.time.milliTimestamp() + @as(i64, timeout_s) * 1000 };
     const thread = try std.Thread.spawn(.{}, Watch.loop, .{&watch});
-    var out = std.ArrayList(u8).init(a);
-    var err = std.ArrayList(u8).init(a);
-    const collected = child.collectOutput(&out, &err, 1 << 28);
+    var out = std.ArrayList(u8).empty;
+    var err = std.ArrayList(u8).empty;
+    const collected = child.collectOutput(a, &out, &err, 1 << 28);
     const term = child.wait();
     watch.done.store(true, .release);
     thread.join();
@@ -212,11 +212,11 @@ pub fn build(cfg: Config, wt: []const u8, targets: []const []const u8, extra: []
     std.fs.deleteFileAbsolute(report_path) catch {};
     const buck2 = try buck2For(a, cfg.buck2, wt);
 
-    var argv = std.ArrayList([]const u8).init(a);
-    try argv.appendSlice(&.{ buck2, @tagName(cfg.verb), "--build-report", report_path });
-    try argv.appendSlice(cfg.buck2_args);
-    try argv.appendSlice(extra);
-    try argv.appendSlice(targets);
+    var argv = std.ArrayList([]const u8).empty;
+    try argv.appendSlice(a, &.{ buck2, @tagName(cfg.verb), "--build-report", report_path });
+    try argv.appendSlice(a, cfg.buck2_args);
+    try argv.appendSlice(a, extra);
+    try argv.appendSlice(a, targets);
     const b = exec(a, argv.items, wt, cfg.env, cfg.timeout_s) catch |e| {
         _ = exec(a, &.{ buck2, "kill" }, wt, cfg.env, 120) catch {};
         return infraAttempt(null, try std.fmt.allocPrint(a, "cannot run {s}: {s}", .{ buck2, @errorName(e) }));
@@ -241,11 +241,11 @@ pub fn bxl(cfg: Config, wt: []const u8, script: []const u8, extra: []const []con
     try std.fs.cwd().makePath(logs);
     const log_path = try std.fmt.allocPrint(a, "{s}/{s}.buck2.log", .{ logs, tag });
     const buck2 = try buck2For(a, cfg.buck2, wt);
-    var argv = std.ArrayList([]const u8).init(a);
-    try argv.appendSlice(&.{ buck2, "bxl" });
-    try argv.appendSlice(cfg.buck2_args);
-    try argv.appendSlice(extra);
-    try argv.append(script);
+    var argv = std.ArrayList([]const u8).empty;
+    try argv.appendSlice(a, &.{ buck2, "bxl" });
+    try argv.appendSlice(a, cfg.buck2_args);
+    try argv.appendSlice(a, extra);
+    try argv.append(a, script);
     const b = exec(a, argv.items, wt, cfg.env, cfg.timeout_s) catch |e| {
         _ = exec(a, &.{ buck2, "kill" }, wt, cfg.env, 120) catch {};
         return .{ .exit = null, .timed_out = false, .stdout = "", .stderr = try std.fmt.allocPrint(a, "cannot run {s}: {s}", .{ buck2, @errorName(e) }) };
@@ -262,9 +262,12 @@ fn infraAttempt(exit: ?u8, msg: []const u8) Attempt {
 fn writeLog(path: []const u8, argv: []const []const u8, b: Exec) !void {
     var f = try std.fs.cwd().createFile(path, .{});
     defer f.close();
-    const w = f.writer();
+    var fbuf: [4096]u8 = undefined;
+    var fw = f.writer(&fbuf);
+    const w = &fw.interface;
     try w.writeAll("argv:");
     for (argv) |x| try w.print(" {s}", .{x});
     if (b.exit) |e| try w.print("\nexit: {d}\n", .{e}) else try w.writeAll("\nexit: killed or signalled\n");
     try w.print("---- stdout\n{s}\n---- stderr\n{s}\n", .{ b.stdout, b.stderr });
+    try w.flush();
 }

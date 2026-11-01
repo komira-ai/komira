@@ -61,9 +61,9 @@ fn run(a: std.mem.Allocator, tmp: *std.testing.TmpDir, args: []const []const u8,
         defer f.close();
         try f.writeAll(fixture);
     }
-    var argv = std.ArrayList([]const u8).init(a);
-    try argv.append(try tool(a));
-    try argv.appendSlice(args);
+    var argv = std.ArrayList([]const u8).empty;
+    try argv.append(a, try tool(a));
+    try argv.appendSlice(a, args);
     // The child's environment is built here, empty: it does not inherit
     // COV_NORMALIZE or anything else of the test's.
     var env = std.process.EnvMap.init(a);
@@ -71,8 +71,8 @@ fn run(a: std.mem.Allocator, tmp: *std.testing.TmpDir, args: []const []const u8,
         const limit = fsize orelse break :blk try spawn(a, tmp, argv.items, &env);
         const ign = posix.Sigaction{ .handler = .{ .handler = posix.SIG.IGN }, .mask = std.mem.zeroes(posix.sigset_t), .flags = 0 };
         var old_act: posix.Sigaction = undefined;
-        try posix.sigaction(posix.SIG.XFSZ, &ign, &old_act);
-        defer posix.sigaction(posix.SIG.XFSZ, &old_act, null) catch {};
+        posix.sigaction(posix.SIG.XFSZ, &ign, &old_act);
+        defer posix.sigaction(posix.SIG.XFSZ, &old_act, null);
         const old = try posix.getrlimit(.FSIZE);
         try posix.setrlimit(.FSIZE, .{ .cur = limit, .max = old.max });
         defer posix.setrlimit(.FSIZE, old) catch {};
@@ -103,8 +103,8 @@ fn run(a: std.mem.Allocator, tmp: *std.testing.TmpDir, args: []const []const u8,
     return .{ .code = code, .stdout = r.stdout, .stderr = r.stderr, .out = out };
 }
 
-fn spawn(a: std.mem.Allocator, tmp: *std.testing.TmpDir, argv: []const []const u8, env: *const std.process.EnvMap) !std.ChildProcess.RunResult {
-    return std.ChildProcess.run(.{
+fn spawn(a: std.mem.Allocator, tmp: *std.testing.TmpDir, argv: []const []const u8, env: *const std.process.EnvMap) !std.process.Child.RunResult {
+    return std.process.Child.run(.{
         .allocator = a,
         .argv = argv,
         .cwd_dir = tmp.dir,

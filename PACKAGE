@@ -1,0 +1,7 @@
+# The default visibility of every target of this cell that names none: the
+# aggregate of the pull request check, `//ci:pr` (tools/build/ci/aggregate.bzl),
+# which depends on the roots of the check set. A target that names its own
+# visibility keeps it (and names `komira//ci:` when nothing else depends on
+# it); this changes who may depend on a target that said nothing: one more
+# package, the aggregate, and no other.
+package(visibility = ["komira//ci:"])

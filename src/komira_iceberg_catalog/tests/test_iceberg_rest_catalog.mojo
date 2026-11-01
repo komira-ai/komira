@@ -27,6 +27,9 @@
 #   (7) CONFIG IS FETCHED ONCE + CACHED across loadTable calls (the prefix is not
 #       re-fetched per resolve). FALSIFIER: a client that re-fetched config per
 #       resolve would make 2 config GETs for 2 loadTable calls.
+#   (8) A PREFIX WITH `/` (`catalogs/<name>`) KEEPS `/` AS A PATH SEPARATOR; each
+#       piece is percent-encoded. FALSIFIER: encoding the whole prefix as one
+#       segment sends `%2F`, which the server does not route.
 #
 # These tests need no network: every call goes through the scripted transport.
 # =============================================================================
@@ -361,6 +364,46 @@ def test_no_prefix_omits_prefix_segment() raises:
 
 
 # =============================================================================
+# multi-segment prefix: a `/` in the prefix stays a path separator.
+# =============================================================================
+
+
+def test_multi_segment_prefix_keeps_slash() raises:
+    """A config prefix with a `/` (Unity Catalog's `catalogs/<name>` form) is
+    joined into the path with its `/` kept, as the Iceberg Java client's
+    ResourcePaths does; each `/`-separated piece is still percent-encoded.
+    FALSIFIER: a client that encodes the whole prefix as one segment sends
+    `/v1/ten%20ant%2F1/...`, which the server does not route."""
+    var t = ScriptedIcebergRestTransport()
+    t.queue_response(
+        200, String('{"defaults":{},"overrides":{"prefix":"ten ant/1"}}')
+    )
+    t.queue_response(200, _load_table_json())
+    var client = _mk_client(t^, String(_TOKEN))
+    var _r = client.load_table(String("db"), String("t"))
+    assert_equal(client.prefix(), String("ten ant/1"))
+    ref rec = client.transport_ref()
+    assert_equal(
+        rec.call_path(1), String("/v1/ten%20ant/1/namespaces/db/tables/t")
+    )
+
+
+def test_unity_style_prefix_path() raises:
+    """The prefix form Unity Catalog returns: `catalogs/main`."""
+    var t = ScriptedIcebergRestTransport()
+    t.queue_response(
+        200, String('{"defaults":{},"overrides":{"prefix":"catalogs/main"}}')
+    )
+    t.queue_response(200, _load_table_json())
+    var client = _mk_client(t^, String(_TOKEN))
+    var _r = client.load_table(String("db"), String("orders"))
+    ref rec = client.transport_ref()
+    assert_equal(
+        rec.call_path(1), String("/v1/catalogs/main/namespaces/db/tables/orders")
+    )
+
+
+# =============================================================================
 # helper — substring containment (no stdlib `in` on String here).
 # =============================================================================
 
@@ -397,4 +440,6 @@ def main() raises:
     test_storage_based_unregistered_raises()
     test_config_fetched_once_cached()
     test_no_prefix_omits_prefix_segment()
+    test_multi_segment_prefix_keeps_slash()
+    test_unity_style_prefix_path()
     print("test_iceberg_rest_catalog: ALL PASS")

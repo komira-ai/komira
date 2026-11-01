@@ -1,7 +1,7 @@
 """The run check of a binary as a validation.
 
 `[run_check]` (mojo_binary, rust_binary) runs the binary in a build action
-through run_check.sh and records its stdout; with `expected_stdout` the action
+through `act run-check` (tools/build/mojo/tools/act.zig) and records its stdout; with `expected_stdout` the action
 fails unless that stdout is exactly it. A sub-target alone runs only when a
 build names it, so for a binary with `expected_stdout` the check is also a
 `ValidationInfo` of the binary: every `buck2 build` or `buck2 test` whose graph
@@ -11,7 +11,7 @@ A validation result must be the one output of its action, and the run check's
 action writes the stdout, so the result is written by a dynamic action that
 reads the recorded stdout: it cannot be written before the run check has
 passed, and it says "failure" unless the stdout is `expected_stdout` (a second
-comparison, in Starlark, of what run_check.sh compared). The stdout is what
+comparison, in Starlark, of what act compared). The stdout is what
 the result is computed from, not a hidden input that could be dropped while
 the result still builds.
 

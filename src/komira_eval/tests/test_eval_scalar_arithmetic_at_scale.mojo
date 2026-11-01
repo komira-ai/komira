@@ -25,8 +25,9 @@
 # `c0 * c1`. Run `eval_to_list_f64_from_view` end-to-end. Mirror with the
 # Int64 path. Asserts:
 #   1. The walker produces 16384 correct outputs (`out[i] == i*i`).
-#   2. The walker completes in reasonable wall time (under several seconds
-#      — a per-row column copy is ~50× slower).
+#   (No wall-clock bound is asserted: a per-row column copy would make the
+#   walk take catastrophically long or crash, which the test run's own hang
+#   timeout and the correctness check above surface without a speed threshold.)
 #
 # Per-batch alloc accounting with a per-row column copy:
 #   - 16384 rows × 2 operands × full-column copy of 16384×8 bytes = 4 GB

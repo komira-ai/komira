@@ -5,9 +5,9 @@
 #
 # Three connectors per fetcher, each with its own write capture: the
 # credential_source URL (plaintext, an IP literal), STS, and IAM Credentials
-# (TLS-reporting; no handshake runs). As in test_wif_mint, the client
-# resolves the two Google host names before it hands the scripted connector
-# a dial. Every claim reads back the
+# (TLS-reporting; no handshake runs). As in test_wif_mint, the two Google
+# host names are named in the requests and resolved by nothing: a
+# ScriptedConnector never reads the dial address. Every claim reads back the
 # exact bytes the client wrote.
 #
 #   §1 a file-sourced subject: the whole STS form against hand-written text
@@ -28,9 +28,7 @@
 # The URL test pins the HOST as well as the path without needing DNS: the
 # file names IP literals (127.0.0.1 for STS, 127.0.0.2 for IAM Credentials),
 # which the client parses instead of resolving, so the Host header and the
-# request line are both the file's. A Google host other than the default
-# would have to resolve on the farm, which this file does not depend on for
-# that claim.
+# request line are both the file's.
 #
 # ⛔ EVERY ABSENCE HAS A POSITIVE CONTROL. "IAM Credentials was not dialed"
 # (no impersonation URL) is paired with the impersonation case of the same
@@ -395,6 +393,40 @@ def test_url_subject_with_impersonation_returns_the_impersonated_token() raises:
     _check_sts(_text(caps.sts))
     _check_iam(_text(caps.iam))
     assert_equal(tok.token, IMPERSONATED)
+
+
+def test_every_source_header_reaches_the_get_in_the_files_order() raises:
+    """A URL source naming three headers sends each, once, with its own
+    value, in the file's order (not sorted), and nothing else but what the
+    client writes itself (Host, Content-Length, User-Agent). A sender that
+    stops after the first header, skips the last, or pairs a name with
+    another header's value fails here."""
+    var three = (
+        String('{"url":"') + SOURCE_URL + '","headers":{"X-Zeta":"zeta-1",'
+        + '"Authorization":"Bearer ' + SOURCE_BEARER + '","X-Alpha":"alpha-3"},'
+        + '"format":{"type":"json","subject_token_field_name":"value"}}'
+    )
+    var caps = Caps()
+    var f = _fetcher(_file_json(three, False), caps, _source_ok())
+    var tok = f.fetch(Int64(NOW_MS))
+    assert_equal(tok.token, FEDERATED)
+    var req = _text(caps.source)
+    assert_true(req.startswith("GET /oidc?audience=gcp HTTP/1.1\r\n"), req)
+    assert_equal(
+        _header_names(req),
+        "authorization,content-length,host,user-agent,x-alpha,x-zeta",
+    )
+    assert_equal(_header_value(req, String("x-zeta")), "zeta-1")
+    assert_equal(
+        _header_value(req, String("authorization")), String("Bearer ") + SOURCE_BEARER
+    )
+    assert_equal(_header_value(req, String("x-alpha")), "alpha-3")
+    var low = req.lower()
+    var at_zeta = low.find("\r\nx-zeta:")
+    var at_auth = low.find("\r\nauthorization:")
+    var at_alpha = low.find("\r\nx-alpha:")
+    assert_true(at_zeta > 0 and at_zeta < at_auth and at_auth < at_alpha, req)
+    _check_sts(_text(caps.sts))
 
 
 def test_a_refused_source_url_never_dials_sts() raises:
@@ -765,6 +797,7 @@ def main() raises:
     test_impersonation_sends_the_callers_scope_and_sts_cloud_platform()
     test_url_subject_without_impersonation_is_the_sts_token()
     test_url_subject_with_impersonation_returns_the_impersonated_token()
+    test_every_source_header_reaches_the_get_in_the_files_order()
     test_a_refused_source_url_never_dials_sts()
     test_each_required_field_absent_is_refused_by_name()
     test_other_types_and_sources_are_refused()

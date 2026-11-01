@@ -78,18 +78,19 @@ pub const Error = error{ Refused, Usage };
 /// read the very messages a run prints.
 pub const Diag = struct {
     text: std.ArrayList(u8),
+    alloc: Alloc,
 
     pub fn init(alloc: Alloc) Diag {
-        return .{ .text = std.ArrayList(u8).init(alloc) };
+        return .{ .text = std.ArrayList(u8).empty, .alloc = alloc };
     }
 
     fn refuse(self: *Diag, comptime fmt: []const u8, args: anytype) error{Refused} {
-        self.text.writer().print("cov_zig: " ++ fmt ++ "\n", args) catch oom();
+        self.text.writer(self.alloc).print("cov_zig: " ++ fmt ++ "\n", args) catch oom();
         return error.Refused;
     }
 
     fn usageFail(self: *Diag, comptime fmt: []const u8, args: anytype) error{Usage} {
-        self.text.writer().print("cov_zig: " ++ fmt ++ "\n", args) catch oom();
+        self.text.writer(self.alloc).print("cov_zig: " ++ fmt ++ "\n", args) catch oom();
         return error.Usage;
     }
 };
@@ -150,7 +151,7 @@ fn linkOutput(args: []const []const u8) ?[]const u8 {
 }
 
 fn le(comptime T: type, buf: []const u8, at: u64) T {
-    const n = @divExact(@typeInfo(T).Int.bits, 8);
+    const n = @divExact(@typeInfo(T).int.bits, 8);
     return std.mem.readInt(T, buf[@intCast(at)..][0..n], .little);
 }
 
@@ -202,7 +203,7 @@ fn isReleaseLevel(a: []const u8) bool {
 
 /// The status to exit with, like a child that ended with `term`, when it
 /// did not succeed; null when it did.
-fn passOn(term: std.ChildProcess.Term) ?u8 {
+fn passOn(term: std.process.Child.Term) ?u8 {
     return switch (term) {
         .Exited => |c| if (c != 0) c else null,
         .Signal => |s| @intCast(128 + (s & 0x7f)),
@@ -227,14 +228,14 @@ fn run(alloc: Alloc, diag: *Diag, argv0: []const u8, args: []const []const u8, e
     const relocate = std.fs.path.join(alloc, &.{ dir, "debug_relocate" }) catch oom();
 
     const out = linkOutput(args) orelse {
-        var same = std.ArrayList([]const u8).init(alloc);
-        same.append(real) catch oom();
-        same.appendSlice(args) catch oom();
+        var same = std.ArrayList([]const u8).empty;
+        same.append(alloc, real) catch oom();
+        same.appendSlice(alloc, args) catch oom();
         return .{ .exec = same.items };
     };
 
-    var link = std.ArrayList([]const u8).init(alloc);
-    link.append(real) catch oom();
+    var link = std.ArrayList([]const u8).empty;
+    link.append(alloc, real) catch oom();
     for (args) |a| {
         // At these levels zig 0.12 is in a release mode and gives lld -O2 or
         // -O3, which merges string tails in .debug_str: a string that is the
@@ -243,28 +244,28 @@ fn run(alloc: Alloc, diag: *Diag, argv0: []const u8, args: []const []const u8, e
             return diag.refuse("a link with the optimization level {s} is refused: zig would have lld merge string tails, and debug_relocate cannot see a string that is the tail of a directory it rewrites", .{a});
         }
         if (std.mem.eql(u8, a, "-Wl,--strip-debug")) continue;
-        link.append(a) catch oom();
+        link.append(alloc, a) catch oom();
     }
-    link.appendSlice(&.{ "-Wl,--build-id=none", "-Wl,--compress-debug-sections=none" }) catch oom();
-    var child = std.ChildProcess.init(link.items, alloc);
+    link.appendSlice(alloc, &.{ "-Wl,--build-id=none", "-Wl,--compress-debug-sections=none" }) catch oom();
+    var child = std.process.Child.init(link.items, alloc);
     child.cwd_dir = env.dir;
     const term = child.spawnAndWait() catch |err| return diag.usageFail("cannot run {s}: {s}", .{ real, @errorName(err) });
     if (passOn(term)) |status| return .{ .exit = status };
 
     const cwd = env.cwd catch |err| return diag.refuse("getcwd: {s}", .{@errorName(err)});
-    var rel_argv = std.ArrayList([]const u8).init(alloc);
-    rel_argv.appendSlice(&.{ relocate, out, cwd }) catch oom();
+    var rel_argv = std.ArrayList([]const u8).empty;
+    rel_argv.appendSlice(alloc, &.{ relocate, out, cwd }) catch oom();
     // The spellings of the working directory: getcwd, and $PWD when it is
     // another path to it.
-    var wd_dirs = std.ArrayList([]const u8).init(alloc);
-    wd_dirs.append(cwd) catch oom();
+    var wd_dirs = std.ArrayList([]const u8).empty;
+    wd_dirs.append(alloc, cwd) catch oom();
     for ([_]?[]const u8{ env.pwd, env.scratch }, [_]bool{ true, false }) |value, is_pwd| {
         const v = value orelse continue;
         if (extraDir(v, cwd)) |d| {
             var seen = false;
             for (rel_argv.items[2..]) |e| seen = seen or std.mem.eql(u8, e, d);
-            if (!seen) rel_argv.append(d) catch oom();
-            if (!seen and is_pwd) wd_dirs.append(d) catch oom();
+            if (!seen) rel_argv.append(alloc, d) catch oom();
+            if (!seen and is_pwd) wd_dirs.append(alloc, d) catch oom();
         }
     }
 
@@ -273,7 +274,7 @@ fn run(alloc: Alloc, diag: *Diag, argv0: []const u8, args: []const []const u8, e
     const debug = try hasDebugSection(diag, out, bytes);
     alloc.free(bytes);
 
-    const r = std.ChildProcess.run(.{ .allocator = alloc, .argv = rel_argv.items, .cwd_dir = env.dir, .max_output_bytes = 1 << 16 }) catch |err| return diag.refuse("cannot run {s}: {s}", .{ relocate, @errorName(err) });
+    const r = std.process.Child.run(.{ .allocator = alloc, .argv = rel_argv.items, .cwd_dir = env.dir, .max_output_bytes = 1 << 16 }) catch |err| return diag.refuse("cannot run {s}: {s}", .{ relocate, @errorName(err) });
     switch (r.term) {
         .Exited => |c| if (c != 0) return diag.refuse("debug_relocate refused {s} (exit {d}), so the link fails:\n{s}", .{ out, c, r.stderr }),
         else => return diag.refuse("debug_relocate did not exit ({s}), so the link fails:\n{s}", .{ @tagName(r.term), r.stderr }),
@@ -318,7 +319,7 @@ pub fn main() u8 {
         .pwd = std.posix.getenv("PWD"),
         .scratch = std.posix.getenv("BUCK_SCRATCH_PATH"),
     };
-    switch (entry(alloc, argv[0], args, env, std.io.getStdErr().writer())) {
+    switch (entry(alloc, argv[0], args, env, std.fs.File.stderr().deprecatedWriter())) {
         .exit => |status| return status,
         .exec => |same| {
             const err = std.process.execv(alloc, same);

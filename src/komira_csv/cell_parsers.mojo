@@ -538,6 +538,12 @@ def _try_parse_decimal128_to_int64(
 # =============================================================================
 # String unescape (RFC-4180 doubled-quote + Posix backslash).
 # =============================================================================
+#
+# Every helper here works on bytes and turns the result into a String once,
+# with `String(from_utf8_lossy=)`: valid UTF-8 keeps its bytes, and a byte
+# sequence that is not UTF-8 becomes U+FFFD so the String is always valid.
+# (Appending `chr(Int(byte))` per byte re-encoded each byte of a multi-byte
+# sequence as its own Latin-1 code point: `café` came back as `cafÃ©`.)
 
 
 def unescape_cell_double_quote(cell: Span[UInt8, _], quote: UInt8) -> String:
@@ -553,18 +559,18 @@ def unescape_cell_double_quote(cell: Span[UInt8, _], quote: UInt8) -> String:
     Returns:
         Owned String with `""` collapsed to single `"`.
     """
-    var out = String("")
     var n = len(cell)
+    var out = List[UInt8](capacity=n)
     var i = 0
     while i < n:
         var b = cell[i]
         if b == quote and i + 1 < n and cell[i + 1] == quote:
-            out += chr(Int(quote))
+            out.append(quote)
             i = i + 2
             continue
-        out += chr(Int(b))
+        out.append(b)
         i = i + 1
-    return out^
+    return String(from_utf8_lossy=Span(out))
 
 
 def unescape_cell_posix(cell: Span[UInt8, _], escape: UInt8) -> String:
@@ -572,8 +578,8 @@ def unescape_cell_posix(cell: Span[UInt8, _], escape: UInt8) -> String:
 
     Posix dialect (backslash escape).
     """
-    var out = String("")
     var n = len(cell)
+    var out = List[UInt8](capacity=n)
     var i = 0
     while i < n:
         var b = cell[i]
@@ -581,18 +587,18 @@ def unescape_cell_posix(cell: Span[UInt8, _], escape: UInt8) -> String:
             var nx = cell[i + 1]
             # Translate common escapes; everything else passes through.
             if nx == UInt8(0x6E):  # 'n'
-                out += chr(0x0A)
+                out.append(UInt8(0x0A))
             elif nx == UInt8(0x74):  # 't'
-                out += chr(0x09)
+                out.append(UInt8(0x09))
             elif nx == UInt8(0x72):  # 'r'
-                out += chr(0x0D)
+                out.append(UInt8(0x0D))
             else:
-                out += chr(Int(nx))
+                out.append(nx)
             i = i + 2
             continue
-        out += chr(Int(b))
+        out.append(b)
         i = i + 1
-    return out^
+    return String(from_utf8_lossy=Span(out))
 
 
 def cell_to_string(
@@ -614,16 +620,12 @@ def cell_to_string(
             double_quote_escapes is False).
 
     Returns:
-        Owned String.
+        Owned String holding the cell bytes (a sequence that is not
+        UTF-8 becomes U+FFFD).
     """
     if not needs_unescape:
         # Fast path: byte-for-byte copy.
-        var out = String("")
-        var i = 0
-        while i < len(cell):
-            out += chr(Int(cell[i]))
-            i = i + 1
-        return out^
+        return String(from_utf8_lossy=cell)
     if double_quote_escapes:
         return unescape_cell_double_quote(cell, quote)
     return unescape_cell_posix(cell, posix_escape)

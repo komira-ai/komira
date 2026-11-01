@@ -1,6 +1,6 @@
 # komira_sql
 
-The analytical SQL front end's first layers. `komira_sql.sql_token` lexes a
+The analytical SQL front end: a tokenizer, a parser and a binder. `komira_sql.sql_token` lexes a
 SQL string into a flat `List[Token]` that ends in `TK_EOF`: unquoted
 identifiers are lower-folded (keywords and function names are ordinary
 identifiers that the parser classifies by text), a single-quoted literal keeps
@@ -56,6 +56,88 @@ decompressed whole first (`komira_parquet_codec.text_decompress`). An inference
 that finds no column raises an `Error` naming the file. `tvf_relation_scan`
 returns a lazy row-oriented scan whose source carries the dialect and the
 file's mtime, so two dialects of one file are two different sources.
+
+The expression binder (`sql_bind_expr`, `sql_bind_call`, `sql_bind_cast`,
+`sql_bind_fn_args`, `sql_bind_fn_nested`, `sql_bind_timestamp`) lowers one
+`SqlExpr` to a plan `Expr` against a schema and a `BindScope`. `sql_bind_expr`
+binds literals, columns, operators, `CASE` and a scalar subquery by index into
+the bodies the caller bound first; `sql_bind_call` resolves a function call
+through `sql_fn_table` (a declared UDF fills in for a name no row lowers) and
+enforces the arity of each row that does not check its own; the other four hold the desugars: `CAST` and
+`DECIMAL` literals, the argument-shape functions (`greatest`, `coalesce`,
+`date_part`, `left`, `substring` and the like), the nested-value and
+date-arithmetic functions, and `TIMESTAMP` literals and `make_timestamp`. A
+shape the engine cannot answer exactly raises an `Error` that names it:
+`SQL not supported` for an unsupported shape, `SQL bind error` for malformed
+input (an arity mismatch, a DECIMAL that does not fit), `SQL internal` for a
+table row the binder has no arm for.
+
+The aggregate, window and ORDER BY binders sit on top of the expression binder.
+`sql_bind_agg_expr` binds an aggregate call (`count`, `sum`, `avg`, `min`,
+`max`, `DISTINCT` forms and the statistical family) and hoists each aggregate
+inside a larger expression into a hidden output, one accumulator per distinct
+aggregate; an aggregate inside an aggregate, or in a position that cannot hold
+one, is refused. `sql_bind_aggregate` plans a `GROUP BY` and `HAVING` (keys by
+ordinal, alias or expression) and the plain projection. `sql_bind_window_order`
+binds window functions with their `PARTITION BY` and `ORDER BY`, and the
+statement-level `ORDER BY` (column, ordinal, output alias or expression, with
+explicit `NULLS FIRST` / `NULLS LAST`).
+
+`komira_sql.sql_binder` turns a parsed statement into a plan:
+`bind_statement(stmt, catalog, footers)` returns a `BoundStatement` whose
+`take_plan()` is the `LogicalPlan` of the query (or of a COPY or CREATE TABLE
+AS source), with the statement kind and a COPY's destination or a CTAS's
+table name. It resolves names case-insensitively against the catalog, the
+`WITH` definitions and derived tables; binds scalar and aggregate
+expressions, GROUP BY and HAVING, joins (inner, outer, NATURAL / USING, semi,
+anti), subqueries (scalar, `[NOT] EXISTS`, `[NOT] IN`, the last NULL-aware),
+window functions, ORDER BY, LIMIT / OFFSET, DISTINCT and UNION ALL; and
+raises an `Error` starting `SQL bind error` or `SQL not supported`, naming
+the construct, for what it does not bind. The parquet facts a binding needs
+(the schema of a `read_parquet('path')` relation, and per-column null counts
+that let a NOT IN drop its run-time NULL checks) come from the
+`SqlParquetFooters` the caller passes (`komira_sql.sql_bind_parquet`), so no
+parquet file is opened while binding; `NoParquetFooters` serves a statement
+with no `read_parquet` relation. A `read_csv`, `read_json` or `read_avro`
+relation gets its schema from `sql_tvf_bind`, which reads the file. The
+binder's code is split over the `sql_bind_*` modules (the FROM scope,
+operators, functions, casts and timestamps, subqueries, aggregates and
+GROUP BY, output names, windows and ORDER BY, joins, parquet facts).
+
+## INTERVAL literals
+
+`INTERVAL '<n>' <unit>` (also `INTERVAL <n> <unit>`) parses to an `SX_INTERVAL`
+node holding a signed count (magnitude at most 10^9) and a unit. The units
+accepted are YEAR, MONTH, WEEK and DAY, singular or plural. The binder folds
+`<constant DATE> + INTERVAL`, `<constant DATE> - INTERVAL` and
+`INTERVAL + <constant DATE>` into a `date32` literal while binding
+(`sql_bind_interval`), in the WHERE, correlated-subquery, aggregate and
+select-list binders alike, so `date '1998-12-01' - interval '90' day` and
+the nine intervals in the TPC-H queries bind: Q1 `- interval '90' day`;
+Q4, Q10 and Q15 `+ interval '3' month`; Q14 `+ interval '1' month`; Q5, Q6,
+Q12 and Q20 `+ interval '1' year`. The plan has no INTERVAL
+type and no INTERVAL value ever reaches it. Chains fold left to right
+(`date '1994-01-01' + interval '1' year - interval '1' day`).
+
+Month and year arithmetic clamps the day to the end of the target month, as
+PostgreSQL and DuckDB do: 31 Jan + 1 month is 28 Feb (29 in a leap year),
+29 Feb + 1 year is 28 Feb, 31 Mar - 1 month is 29 Feb in a leap year. A year
+is 12 months, a week 7 days. A clamped day is not restored by the next step
+of a chain (31 Jan + 1 month + 1 month is 29 Mar in 2024). A result outside
+years 1 to 9999 is refused.
+
+Refused by name: a unit outside the accepted four (QUARTER, HOUR, MINUTE,
+SECOND, MILLISECOND, and the rest), a unit written inside the string
+(`'3 month'`), a non-integer or oversize count, a missing unit, a non-constant
+DATE operand (`col + interval '1' day`; the interval is folded at bind time,
+so a column cannot take it), a TIMESTAMP or string operand, and an INTERVAL
+anywhere else (a projection, a comparison, `INTERVAL - DATE`, `INTERVAL * n`,
+`INTERVAL + INTERVAL`). Because the fold happens in the expression binder, ORDER BY and GROUP BY see
+a constant expression like `1 + 1`, which they already accept, and not a bare
+date literal, which ORDER BY refuses as a constant key. A count
+may be signed and unquoted (`interval -3 day`). One difference from DuckDB: its `DATE + INTERVAL` is
+a TIMESTAMP, here the result stays a DATE; a comparison against a DATE column
+gives the same rows.
 
 ## Examples
 
@@ -139,4 +221,31 @@ assert_false(cat.has(String("items")))
 var scan = cat.build_scan(String("orders"))
 assert_equal(scan.output_schema.field_name(0), "k")
 assert_equal(cat.udfs.num_declared(), 0)
+```
+
+Binding a query to a plan:
+
+<!-- mojo-hidden from std.testing import assert_equal -->
+```mojo
+from komira_arrow.arrow_types import ArrowType
+from komira_arrow.schema import Field, SchemaBuilder
+from komira_sql.sql_token import tokenize
+from komira_sql.sql_parser import parse_sql
+from komira_sql.sql_catalog import SqlCatalog
+from komira_sql.sql_bind_parquet import NoParquetFooters
+from komira_sql.sql_binder import bind_statement
+
+var tsb = SchemaBuilder()
+tsb.add_field(Field(String("k"), ArrowType.INT64, False))
+tsb.add_field(Field(String("v"), ArrowType.FLOAT64, True))
+var tcat = SqlCatalog()
+tcat.add_parquet(String("t"), String("t.parquet"), tsb.build())
+var bound = bind_statement(
+    parse_sql(tokenize("SELECT k, sum(v) AS total FROM t GROUP BY k")),
+    tcat,
+    NoParquetFooters(),
+)
+var plan = bound.take_plan()
+assert_equal(plan.output_schema.field_name(0), "k")
+assert_equal(plan.output_schema.field_name(1), "total")
 ```

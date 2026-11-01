@@ -59,6 +59,7 @@ def _emit_offsets_buffer[
 ](
     col: Column[HeapRegion],
     offset_bytes: Int,
+    n_offsets: Int,
     mut body: B,
     body_cursor: Int,
     mut buffers: List[BufferDescriptor],
@@ -67,6 +68,9 @@ def _emit_offsets_buffer[
 
     `offset_bytes` is 4 (Int32 offsets) or 8 (Int64 offsets — reserved
     for LARGE_LIST).
+    `n_offsets` is the entry count: `length + 1` for LIST / LARGE_LIST /
+    MAP (a trailing end offset), `length` for a dense UNION (one offset per
+    slot, no trailing entry; Arrow columnar format, "Dense Union").
     `col._offsets` must be set; raises otherwise.
     """
     if not col._offsets:
@@ -74,7 +78,6 @@ def _emit_offsets_buffer[
             "_emit_offsets_buffer: nested type with no _offsets buffer"
         )
     ref off_ref = col._offsets.value()
-    var n_offsets = col._length + 1
     var off_bytes_total = n_offsets * offset_bytes
     if off_bytes_total > off_ref.len():
         raise Error(
@@ -140,7 +143,7 @@ def encode_list[
         )
     )
     var cursor = emit_validity_bitmap(col, body, body_cursor, buffers)
-    cursor = _emit_offsets_buffer[B](col, 4, body, cursor, buffers)
+    cursor = _emit_offsets_buffer[B](col, 4, col._length + 1, body, cursor, buffers)
     if col.num_children() != 1:
         raise Error(
             "encode_list: expected exactly 1 child, got "
@@ -172,7 +175,7 @@ def encode_large_list[
         )
     )
     var cursor = emit_validity_bitmap(col, body, body_cursor, buffers)
-    cursor = _emit_offsets_buffer[B](col, 8, body, cursor, buffers)
+    cursor = _emit_offsets_buffer[B](col, 8, col._length + 1, body, cursor, buffers)
     if col.num_children() != 1:
         raise Error(
             "encode_large_list: expected exactly 1 child, got "
@@ -283,7 +286,7 @@ def encode_map[
         )
     )
     var cursor = emit_validity_bitmap(col, body, body_cursor, buffers)
-    cursor = _emit_offsets_buffer[B](col, 4, body, cursor, buffers)
+    cursor = _emit_offsets_buffer[B](col, 4, col._length + 1, body, cursor, buffers)
     if col.num_children() != 1:
         raise Error(
             "encode_map: expected exactly 1 child (entries STRUCT), got "
@@ -331,7 +334,8 @@ def encode_union_dense[
     mut nodes: List[FieldNode],
 ) raises -> Int:
     """UNION_DENSE: emit FieldNode + Int8 type_ids buffer + Int32 offsets
-    buffer (NO validity per Arrow spec). Caller (dispatch) recurses into
+    buffer of `length` entries, with no trailing offset (NO validity per
+    Arrow spec). Caller (dispatch) recurses into
     N children — dense unions have a distinct child row per Union row;
     offsets indexes into the child.
     """
@@ -342,7 +346,7 @@ def encode_union_dense[
         )
     )
     var cursor = _emit_int8_type_ids_buffer[B](col, body, body_cursor, buffers)
-    return _emit_offsets_buffer[B](col, 4, body, cursor, buffers)
+    return _emit_offsets_buffer[B](col, 4, col._length, body, cursor, buffers)
 
 
 # =============================================================================

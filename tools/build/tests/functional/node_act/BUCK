@@ -1,0 +1,34 @@
+load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_test")
+load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
+
+# The process behaviour of `node_act` (tools/build/node_tools/node_act.zig): its
+# four subcommands over archives built in memory and a stand-in program for
+# node, an npm package's executable and esbuild (fake.zig), by messages, exit
+# statuses, the environment each child sees, and the trees written. A driver
+# test: node_act is a built tool it runs by absolute path. The unit tests of
+# its parts are tools/build/node_tools:node_act_unit; every node rule of the
+# repository runs through it too.
+
+zig_exe(
+    name = "fake",
+    exec_compatible_with = LINUX_X86_64,
+    src = "fake.zig",
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
+)
+
+zig_test(
+    name = "driver",
+    exec_compatible_with = LINUX_X86_64,
+    exec_tools = {
+        "FAKE": ":fake",
+        "NODE_ACT": "komira//tools/build/node_tools:node_act",
+    },
+    src = "driver_test.zig",
+    deps = [
+        "komira//tools/build/node_tools:node_tartest",
+        "tests//functional/driver_kit:driver_kit",
+    ],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
+)

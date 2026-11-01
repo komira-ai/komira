@@ -1,0 +1,9 @@
+load(":cases.bzl", "mopm_artifacts_case")
+
+# Must FAIL loading, one case per `-c mopm_artifacts.case=<case>`: release/mopm_artifacts.bzl holds its
+# `natives` attribute to the `[native.<id>]` of each package's mopm.toml (release/mopm_native_ids.bzl),
+# so `wrong_id` (an id the package does not declare) and `missing_entry` (a declared native with no
+# entry) are refused at analysis with a message naming the package. With no case set the package
+# declares only its doc_tree, so loading it never fails by accident. The scenario is
+# tools/build/selftest:analysis_refusals_mopm_artifacts.
+mopm_artifacts_case()

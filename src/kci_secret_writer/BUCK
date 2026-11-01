@@ -11,6 +11,9 @@ mojo_library(
     name = "kci_secret_writer",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = ["//src/komira_secret_store:komira_secret_store"],
-    test_srcs = ["tests/test_secret_writer.mojo"],
+    test_srcs = [
+        "tests/test_secret_writer.mojo",
+        "tests/test_secret_writer_state.mojo",
+    ],
     visibility = ["PUBLIC"],
 )

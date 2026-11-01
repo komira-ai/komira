@@ -26,12 +26,14 @@ from std.builtin.swap import swap
 
 from komira_collections.slab import Slab
 
+from .sql_interval_parse import interval_literal_starts, parse_interval_literal
 from .sql_token import (
     Token,
     TK_EOF, TK_IDENT, TK_INT, TK_FLOAT, TK_STRING, TK_LPAREN, TK_RPAREN,
     TK_COMMA, TK_SEMI, TK_STAR, TK_DOT, TK_PLUS, TK_MINUS, TK_SLASH,
     TK_EQ, TK_NE, TK_LT, TK_LE, TK_GT, TK_GE, TK_DCOLON, TK_DSLASH, TK_PERCENT,
     TK_CARET, TK_CARET_AT, TK_AT, TK_DPIPE, TK_LIKE_SYM, TK_TILDE, TK_NTILDE,
+    signed_decimal_f64,
 )
 from .sql_fn_table import CAST_DESUGAR_NAME as _CAST_DESUGAR_NAME, TRY_CAST_DESUGAR_NAME as _TRY_CAST_DESUGAR_NAME
 from .sql_fn_table import POSITION_IN_DESUGAR_NAME as _POSITION_IN_DESUGAR_NAME
@@ -231,7 +233,7 @@ struct _Parser(Movable):
             # ⚠ APPENDED **AFTER** THE BRANCH IS PARSED, so a nested subquery
             # inside the branch takes a LOWER index than the branch itself —
             # the same inner-before-outer ordering every other producer here
-            # maintains, which is what lets `bind_sql` pre-bind by index.
+            # maintains, which is what lets the query binder pre-bind by index.
             var idx = len(self.subqueries)
             self.subqueries.append(SubqueryDef(rhs^, SUBQ_UNION_ALL, String(""), String("")))
             if last < 0:
@@ -842,7 +844,6 @@ struct _Parser(Movable):
         # here rather than reported as "unexpected trailing tokens" (or as a
         # missing ')' one level up, in a nested SELECT).
         self._refuse_unsupported_clause()
-        _refuse_ambiguous_unnamed_subquery(stmt.from_tables)
         self.unnamed_derived = outer_unnamed
         # A nested SELECT body ends at ')' (CTE) or the top-level trailing
         # ';'/EOF — the caller (parse / _parse_with_clause) consumes those.
@@ -1030,6 +1031,14 @@ struct _Parser(Movable):
             var opts = self._parse_tvf_options(name, kind)
             self._expect(TK_RPAREN, "')'")
             var tvf_alias = self._parse_optional_alias()
+            # An unaliased table function answers to the function name as
+            # written, as in DuckDB v1.5.3 (`GetAlias` in
+            # bind_table_function.cpp): `read_parquet.k` over
+            # `FROM read_parquet('p')`. With no name it would answer to
+            # nothing, and inside a subquery body `read_parquet.k` would be
+            # taken for an outer reference.
+            if tvf_alias == "":
+                tvf_alias = name
             # ⛔ EVERY KIND CARRIES ITS `opts`, PARQUET INCLUDED. An early
             # `return FromRelation.tvf(path, tvf_alias)` for parquet would drop
             # the parsed `TvfOptions` on the floor. The per-key kind guards in
@@ -1316,11 +1325,12 @@ struct _Parser(Movable):
         """Parse `(SELECT ...) alias [(c1, c2, ...)]` — a derived table (+the
         optional column-list rename). The body is a full nested SELECT parsed by
         the re-entrant `_parse_select_stmt` (so it gets the entire grammar). It is
-        parked in the subquery side-table with kind `SUBQ_DERIVED`, its (REQUIRED)
-        alias, and any column-list rename; the parser emits a `named(alias)`
-        relation, and `bind_sql` binds the body into the CTE scope under `alias`
-        (applying the column-list rename to its output columns) so it resolves
-        through the named-derived-relation path a CTE uses."""
+        parked in the subquery side-table with kind `SUBQ_DERIVED`, its relation
+        key (`<alias>#<subquery index>`, below), and any column-list rename; the
+        parser emits a `named(key, alias)` relation, and the query binder binds the
+        body into the CTE scope under the key (applying the column-list rename to
+        its output columns) so it resolves through the named-derived-relation
+        path a CTE uses."""
         self._advance()  # '('
         if not self._is_kw("select"):
             raise Error("SQL syntax error: expected SELECT in a derived table")
@@ -1336,24 +1346,25 @@ struct _Parser(Movable):
         # `unnamed_subquery`; `SELECT unnamed_subquery.a FROM (SELECT * FROM
         # (SELECT 1 AS a))` is 1).
         #
-        # ⚠ TWO NAMES, ON PURPOSE. The QUALIFIER is DuckDB's (`rel_alias`); the
+        # ⚠ TWO NAMES, ON PURPOSE, for EVERY derived table. The QUALIFIER is
+        # the user's alias or DuckDB's synthetic name (`rel_alias`); the
         # RELATION NAME — the key the binder registers the body under in the
         # statement-wide derived-relation scope — is that plus `#<subquery
-        # index>`. The scope is ONE per statement while DuckDB's names repeat
-        # per SELECT level (two nested unaliased tables are BOTH
-        # `unnamed_subquery`), and `#` cannot occur in a lower-folded
-        # identifier, so the key can neither collide with its twin at another
-        # level nor SHADOW a real table a user named `unnamed_subquery`.
-        # A same-FROM relation that answers to the synthetic qualifier is
-        # refused by `_refuse_ambiguous_unnamed_subquery`.
-        var rel_name = d_alias
+        # index>`. The scope is ONE per statement while aliases are scoped to
+        # their own SELECT level (two nested unaliased tables are BOTH
+        # `unnamed_subquery`; a derived `t` inside an IN body is not the `t`
+        # of the top FROM), and `#` cannot occur in a lower-folded identifier,
+        # so the key can neither collide with a twin at another level nor
+        # SHADOW a catalog table or CTE outside the FROM entry that declares
+        # it. A same-FROM relation that answers to the same qualifier is
+        # bound per reference (`BindScope.resolve_qualified`).
         var synthetic = d_alias == ""
         if synthetic:
             self.unnamed_derived += 1
             d_alias = String("unnamed_subquery")
             if self.unnamed_derived > 1:
                 d_alias += String(self.unnamed_derived)
-            rel_name = d_alias + "#" + String(len(self.subqueries))
+        var rel_name = d_alias + "#" + String(len(self.subqueries))
         # Optional column-list rename `(c1, c2, ...)` right after the alias
         # (`(SELECT ...) c_orders (c_custkey, c_count)`, TPC-H q13 shape). It is
         # distinguished from a fresh derived-table `(SELECT ...)` by the parser
@@ -1907,7 +1918,7 @@ struct _Parser(Movable):
                     raise Error("SQL not supported: `IN (subquery)` requires a column on the left")
                 var in_kind = SUBQ_NOT_IN if negate else SUBQ_IN
                 var idx = len(self.subqueries)
-                self.subqueries.append(SubqueryDef(sq_body^, in_kind, String(left.text), String("")))
+                self.subqueries.append(SubqueryDef(sq_body^, in_kind, String(left.text), String(""), in_lhs_qualifier=String(left.qualifier)))
                 return SqlExpr.subquery(idx)
             # IN -> OR-of-EQ ; NOT IN -> AND-of-NE. `left` is reused per element
             # via `.copy()`; the original is dropped when this scope ends.
@@ -2164,6 +2175,11 @@ struct _Parser(Movable):
         return left^
 
     def _parse_unary(mut self) raises -> SqlExpr:
+        if self._kind() == TK_PLUS:
+            # Unary plus is the identity (`+0.5` is DECIMAL(2, 1) 0.5, `- +0.5`
+            # is -0.5): it binds as its operand does, so a literal stays one.
+            self._advance()
+            return self._parse_unary()
         if self._kind() == TK_MINUS:
             self._advance()
             # A negative LITERAL stays a literal (`-3` is the constant DuckDB
@@ -2186,8 +2202,13 @@ struct _Parser(Movable):
                 return self._parse_cast_suffix(SqlExpr.int_lit(-v))
             elif self._kind() == TK_FLOAT:
                 var f = self.tokens[self.pos].float_val
+                var digits = String("-") + self.tokens[self.pos].text
                 self._advance()
-                return self._parse_cast_suffix(SqlExpr.float_lit(-f))
+                # A decimal literal meets a DOUBLE through DuckDB's cast of the
+                # (negative) DECIMAL, which is not the negation of the cast of
+                # its magnitude.
+                var value = signed_decimal_f64(digits, -f)
+                return self._parse_cast_suffix(SqlExpr.float_lit(value, digits^))
             # ★ UNARY MINUS ON AN EXPRESSION
             # — `-a`, `-(a + 1)`, `ORDER BY -k`. It binds TIGHTER than
             # `^` and `*` (DuckDB: `- a * 2` is `(-(a) * 2)`, `-2 ^ 2` is
@@ -2203,7 +2224,17 @@ struct _Parser(Movable):
             ):
                 return SqlExpr.int_lit(-operand.int_val)
             if operand.tag == SX_FLOAT:
-                return SqlExpr.float_lit(-operand.float_val)
+                # The literal's digits are negated with its value: `- -0.5`
+                # is `0.5`.
+                var negated = String("")
+                if operand.text.startswith("-"):
+                    negated = String(operand.text[byte=1:])
+                elif operand.text.byte_length() > 0:
+                    negated = String("-") + operand.text
+                var value = -operand.float_val
+                if negated.byte_length() > 0:
+                    value = signed_decimal_f64(negated, value)
+                return SqlExpr.float_lit(value, negated^)
             return SqlExpr.unary(SXUN_NEGATE, operand^)
         if self._kind() == TK_AT:
             # ★ PREFIX `@` — absolute value. ⚠ ITS
@@ -2321,8 +2352,9 @@ struct _Parser(Movable):
             return lit^
         if k == TK_FLOAT:
             var f = self.tokens[self.pos].float_val
+            var digits = String(self.tokens[self.pos].text)
             self._advance()
-            return SqlExpr.float_lit(f)
+            return SqlExpr.float_lit(f, digits^)
         if k == TK_STRING:
             var s = String(self.tokens[self.pos].text)
             self._advance()
@@ -2413,6 +2445,10 @@ struct _Parser(Movable):
                 var ts = String(self.tokens[self.pos].text)
                 self._advance()  # the quoted timestamp string
                 return SqlExpr.timestamp_lit(ts, aware)
+            # ★ INTERVAL literal (`sql_interval_parse`); a column called
+            # `interval` still binds as a column reference. See `SX_INTERVAL`.
+            if interval_literal_starts(self.tokens, self.pos):
+                return parse_interval_literal(self.tokens, self.pos)
             # ★★ `EXTRACT(<field> FROM <expr>)`.
             #
             # A SEPARATE GRAMMAR ARM AND NOT A FUNCTION NAME, because `FROM`
@@ -2573,7 +2609,7 @@ struct _Parser(Movable):
                 # reach one (`avg` and `mean` are both SXAGG_AVG), so the
                 # unaliased output-column name cannot be re-derived from `op`
                 # without answering `avg(v)` for a query that says `mean(v)`.
-                # See `SqlExpr.agg` and `sql_binder._duckdb_agg_text`.
+                # See `SqlExpr.agg` and `sql_bind_names._duckdb_agg_text`.
                 return SqlExpr.agg(UInt8(agg), arg^, is_distinct, name)
             # ranking window function `RANK() / ROW_NUMBER() / DENSE_RANK()` — these
             # are NOT aggregates (no `_agg_code` entry) and are only valid with an
@@ -3202,41 +3238,6 @@ struct _Parser(Movable):
         )
 
 
-def _refuse_ambiguous_unnamed_subquery(from_tables: List[FromRelation]) raises:
-    """⛔ Refuse an UNALIASED derived table whose synthetic qualifier
-    (`unnamed_subquery[N]`, see `_Parser._parse_derived_table`) is ALSO the
-    name or alias of another relation in the same FROM clause.
-
-    DuckDB v1.5.3 accepts that and resolves each qualified column by name —
-    with a table that is itself called `unnamed_subquery`,
-    `unnamed_subquery.z` reaches the TABLE and `unnamed_subquery.a` the
-    SUBQUERY (measured). This binder's qualifier resolution takes the first
-    relation that answers to a qualifier, so it could pick the other one and
-    answer from the wrong relation under a plausible column. Refused, naming
-    the collision and the remedy; aliasing the derived table resolves it.
-
-    A synthetic relation is recognised by the `#` in its relation NAME, which no
-    lower-folded identifier can contain."""
-    for i in range(len(from_tables)):
-        ref s = from_tables[i]
-        if s.name.find("#") < 0 or s.rel_alias == "":
-            continue
-        var q = s.rel_alias.lower()
-        for j in range(len(from_tables)):
-            if j == i:
-                continue
-            ref o = from_tables[j]
-            if o.name.lower() == q or o.rel_alias.lower() == q:
-                raise Error(
-                    "SQL not supported: an unaliased derived table `(SELECT"
-                    + " ...)` is named `" + q + "` (DuckDB's name for it), and"
-                    + " another relation in the same FROM clause also answers"
-                    + " to `" + q + "`, so a column qualified by that name is"
-                    + " ambiguous. Give the derived table an alias:"
-                    + " `(SELECT ...) AS d`."
-                )
-
-
 def _replacement_scan_kind(path: String) raises -> UInt8:
     """The TVF kind a `FROM '<path>'` replacement scan reads, by extension —
     or a refusal naming the extension. See `_Parser._parse_replacement_scan`."""
@@ -3282,7 +3283,7 @@ def _and_into(var acc: Optional[SqlExpr], var p: SqlExpr) -> Optional[SqlExpr]:
 
 def _select_star_from(name: String) raises -> SelectStmt:
     """Synthesize the `SELECT * FROM <name>` source for a bare-table `COPY <table>
-    TO ...` — so a COPY of a catalog/CTAS table binds through the SAME `_bind_select`
+    TO ...` — so a COPY of a catalog/CTAS table binds through the SAME select binder
     path a `COPY (SELECT * FROM <table>) TO ...` subquery source would."""
     var stmt = SelectStmt()
     stmt.select_items.append(SelectItem(SqlExpr.star(), Optional[String](), True))

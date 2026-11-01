@@ -107,6 +107,12 @@ struct _SharedMap(Movable, Deinitable):
     # ZERO-LIST steady state precisely (the 2nd+ read serves discovery from the
     # per-index cache). Test-substrate-only, additive; zero production behavior.
     var n_list_lineage: Int64
+    # RTT SLEEP TALLY (`n_rtt_sleeps` / `rtt_slept_us`): the waits a
+    # `SharedInMemoryLatencyStore` over this map asked for, in count and total
+    # microseconds. A test asserts the requested round-trip from these, never
+    # from elapsed time. Test-substrate-only, additive.
+    var n_rtt_sleeps: Int64
+    var rtt_slept_us: Int64
 
     def __init__(out self):
         self.entries = List[_SharedEntry]()
@@ -124,6 +130,8 @@ struct _SharedMap(Movable, Deinitable):
         self.b_get = Int64(0)
         self.b_put = Int64(0)
         self.n_list_lineage = Int64(0)
+        self.n_rtt_sleeps = Int64(0)
+        self.rtt_slept_us = Int64(0)
 
 
 struct SharedInMemoryConditionalStore(
@@ -260,6 +268,30 @@ struct SharedInMemoryConditionalStore(
         self._release()
         return v
 
+    def n_rtt_sleeps(self) -> Int64:
+        """How many RTT waits a `SharedInMemoryLatencyStore` over this map
+        requested (see `note_rtt_sleep`)."""
+        self._acquire()
+        var v = self._map[].n_rtt_sleeps
+        self._release()
+        return v
+
+    def rtt_slept_us(self) -> Int64:
+        """The total microseconds those waits requested."""
+        self._acquire()
+        var v = self._map[].rtt_slept_us
+        self._release()
+        return v
+
+    def note_rtt_sleep(self, us: Int64):
+        """Record one RTT wait of `us` microseconds. Called by
+        `SharedInMemoryLatencyStore` just before it sleeps."""
+        self._acquire()
+        ref m = self._map[]
+        m.n_rtt_sleeps += Int64(1)
+        m.rtt_slept_us += us
+        self._release()
+
     def reset_op_counts(self):
         """Zero all op AND byte counters (so a test can isolate the ops of ONE
         subsequent operation from any setup/warm-up traffic)."""
@@ -273,6 +305,8 @@ struct SharedInMemoryConditionalStore(
         m.b_get = Int64(0)
         m.b_put = Int64(0)
         m.n_list_lineage = Int64(0)
+        m.n_rtt_sleeps = Int64(0)
+        m.rtt_slept_us = Int64(0)
         self._release()
 
     # ---- ObjectStore base surface ----

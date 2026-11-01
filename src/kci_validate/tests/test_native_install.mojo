@@ -32,7 +32,8 @@
 #       RUNPATH entry /usr/lib; NEEDED on the JIT-only holder;
 #   (5) symbolic: a .so without DF_SYMBOLIC; DT_SYMBOLIC alone passes;
 #   (6) loaded-from: the record of a good run passes; a komira .so loaded
-#       from /usr/lib and a codec (libzstd.so.1) from /lib are refused; a
+#       from /usr/lib and a declared codec (libzstd.so.1) from /lib are
+#       refused (test_native_rows_real.mojo: the undeclared, the resolved); a
 #       record with no `calling init:` line is refused; `run_loaded_from`
 #       runs the program through the runner with LD_DEBUG=libs and
 #       LD_DEBUG_OUTPUT added to the cleared environment, and reads the
@@ -544,7 +545,7 @@ def test_needed_in_a_directory_the_environment_only_prefixes_is_refused() raises
 def test_loaded_from_a_directory_lib_only_prefixes_is_refused() raises:
     var e = Env(String("loaded_lib64"))
     var lib = e.dir + String("/lib")
-    var f = loaded_from_findings(_trace(e.dir, e.dir + String("/lib64"), lib), e.dir)
+    var f = loaded_from_findings(_trace(e.dir, e.dir + String("/lib64"), lib), e.dir, _zstd())
     assert_equal(len(f), 1, _joined(f))
     _has(
         f,
@@ -581,6 +582,13 @@ def test_a_shared_library_without_df_symbolic_is_refused() raises:
     assert_equal(len(symbolic_findings(e2.dir, e2.pin)), 0)
 
 
+def _zstd() -> List[String]:
+    """The codecs the program's library declares (its closure's dlopen
+    sonames): libzstd.so.1, which the record below loads."""
+    var c: List[String] = [String("libzstd.so.1")]
+    return c^
+
+
 def _trace(env: String, komira_dir: String, codec_dir: String) -> String:
     return (
         String("     41:\tfind library=libkomira_alpha_native.so.1 [0]; searching\n")
@@ -595,16 +603,16 @@ def _trace(env: String, komira_dir: String, codec_dir: String) -> String:
 def test_the_loaded_from_row() raises:
     var e = Env(String("loaded"))
     var lib = e.dir + String("/lib")
-    var f = loaded_from_findings(_trace(e.dir, lib, lib), e.dir)
+    var f = loaded_from_findings(_trace(e.dir, lib, lib), e.dir, _zstd())
     assert_equal(len(f), 0, _joined(f))
-    var f2 = loaded_from_findings(_trace(e.dir, String("/usr/lib"), lib), e.dir)
+    var f2 = loaded_from_findings(_trace(e.dir, String("/usr/lib"), lib), e.dir, _zstd())
     assert_equal(len(f2), 1, _joined(f2))
     _has(f2, String("libkomira_alpha_native.so.1 was loaded from /usr/lib/libkomira_alpha_native.so.1, not from ") + lib + String("/"))
-    var f3 = loaded_from_findings(_trace(e.dir, lib, String("/lib/x86_64-linux-gnu")), e.dir)
+    var f3 = loaded_from_findings(_trace(e.dir, lib, String("/lib/x86_64-linux-gnu")), e.dir, _zstd())
     assert_equal(len(f3), 1, _joined(f3))
     _has(f3, String("libzstd.so.1 was loaded from /lib/x86_64-linux-gnu/libzstd.so.1, not from ") + lib + String("/"))
     _has(
-        loaded_from_findings(String("     41:\tfind library=libc.so.6 [0]; searching\n"), e.dir),
+        loaded_from_findings(String("     41:\tfind library=libc.so.6 [0]; searching\n"), e.dir, _zstd()),
         String("the loader's record holds no 'calling init:' line: LD_DEBUG=libs was not honoured, so it shows nothing"),
     )
 
@@ -624,7 +632,7 @@ def test_run_loaded_from_runs_the_program_with_the_loader_record_on() raises:
     var spec = RunSpec(String("/bin/pixi"), argv.copy(), out.copy(), 60, out + String("/o"), out + String("/e"))
     var env = List[String]()
     env.append(String("PATH=/usr/bin"))
-    var f = run_loaded_from(runner, spec^, env, prefix, e.dir)
+    var f = run_loaded_from(runner, spec^, env, prefix, e.dir, _zstd())
     assert_equal(runner.remaining(), 0)
     var got = runner.calls[0].env.value().copy()
     assert_equal(len(got), 3)
@@ -639,7 +647,7 @@ def test_run_loaded_from_runs_the_program_with_the_loader_record_on() raises:
     var spec2 = RunSpec(String("/bin/pixi"), argv.copy(), out.copy(), 60, out + String("/o"), out + String("/e"))
     var raised = False
     try:
-        _ = run_loaded_from(r2, spec2^, env, prefix, e.dir)
+        _ = run_loaded_from(r2, spec2^, env, prefix, e.dir, _zstd())
     except err:
         raised = True
         assert_true(String(err).endswith(String(" did not pass: exit 1")), String(err))
@@ -663,7 +671,7 @@ def test_run_loaded_from_unsets_ld_library_path() raises:
     var env = List[String]()
     env.append(String("LD_LIBRARY_PATH=/usr/lib"))
     env.append(String("PATH=/usr/bin"))
-    var f = run_loaded_from(runner, spec^, env, prefix, e.dir)
+    var f = run_loaded_from(runner, spec^, env, prefix, e.dir, _zstd())
     assert_equal(len(f), 0, _joined(f))
     var got = runner.calls[0].env.value().copy()
     for i in range(len(got)):

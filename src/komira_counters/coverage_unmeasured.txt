@@ -1,0 +1,2 @@
+# kcov records no line of a source whose every function is always_inline nodebug: the compiler gives the inlined code no line table.
+src/komira_counters/runtime_introspection.mojo	every hook is @always_inline("nodebug") behind a comptime if: kcov records no line of it, though test_runtime_introspection runs them

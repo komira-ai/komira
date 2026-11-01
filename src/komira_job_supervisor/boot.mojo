@@ -39,15 +39,15 @@ from komira_log import ArgStr, ArgI64
 def expected_sha_from_key(key: String) -> Optional[String]:
     """The first 64-char lowercase-hex segment of `key` (split on '/'), or
     None."""
-    var cur = String("")
     var bytes = key.as_bytes()
+    var start = 0
     for i in range(len(bytes) + 1):
         if i == len(bytes) or bytes[i] == UInt8(0x2F):
-            if is_sha256_hex(cur):
-                return Optional[String](cur)
-            cur = String("")
-        else:
-            cur += chr(Int(bytes[i]))
+            # '/' is ASCII, so each segment is whole characters of `key`.
+            var seg = String(key[byte=start:i])
+            if is_sha256_hex(seg):
+                return Optional[String](seg^)
+            start = i + 1
     return None
 
 

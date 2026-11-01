@@ -64,9 +64,9 @@ const Case = struct {
 
     fn run(self: *Case, args: Args) !Result {
         const a = self.alloc();
-        var out = std.ArrayList(u8).init(a);
-        var err = std.ArrayList(u8).init(a);
-        const status = R.entry(a, self.tmp.dir, args, out.writer(), err.writer());
+        var out = std.ArrayList(u8).empty;
+        var err = std.ArrayList(u8).empty;
+        const status = R.entry(a, self.tmp.dir, args, out.writer(a), err.writer(a));
         return .{ .status = status, .out = out.items, .err = err.items };
     }
 
@@ -126,20 +126,21 @@ const data = D ++ "\x00";
 
 const Bytes = struct {
     b: std.ArrayList(u8),
+    a: std.mem.Allocator,
 
     fn le(self: *Bytes, comptime T: type, v: u64) void {
-        const n = @divExact(@typeInfo(T).Int.bits, 8);
+        const n = @divExact(@typeInfo(T).int.bits, 8);
         var x: [n]u8 = undefined;
         std.mem.writeInt(T, &x, @intCast(v), .little);
-        self.b.appendSlice(&x) catch @panic("out of memory");
+        self.b.appendSlice(self.a, &x) catch @panic("out of memory");
     }
 
     fn raw(self: *Bytes, s: []const u8) void {
-        self.b.appendSlice(s) catch @panic("out of memory");
+        self.b.appendSlice(self.a, s) catch @panic("out of memory");
     }
 
     fn zeros(self: *Bytes, n: usize) void {
-        self.b.appendNTimes(0, n) catch @panic("out of memory");
+        self.b.appendNTimes(self.a, 0, n) catch @panic("out of memory");
     }
 
     /// One ELF64 section header.
@@ -175,7 +176,7 @@ const Bytes = struct {
 /// the headers really are. With `many`, e_shnum is 0 and section 0's sh_size
 /// holds the count (3).
 fn elf64(a: std.mem.Allocator, flags: u64, shoff: ?u64, many: bool) []const u8 {
-    var w = Bytes{ .b = std.ArrayList(u8).init(a) };
+    var w = Bytes{ .b = std.ArrayList(u8).empty, .a = a };
     const real = 64 + strtab.len + data.len;
     w.raw("\x7fELF");
     w.le(u8, 2);
@@ -205,7 +206,7 @@ fn elf64(a: std.mem.Allocator, flags: u64, shoff: ?u64, many: bool) []const u8 {
 
 /// The same as an ELF32 file: 52-byte header, 40-byte section headers.
 fn elf32(a: std.mem.Allocator, flags: u64, many: bool) []const u8 {
-    var w = Bytes{ .b = std.ArrayList(u8).init(a) };
+    var w = Bytes{ .b = std.ArrayList(u8).empty, .a = a };
     w.raw("\x7fELF");
     w.le(u8, 1);
     w.le(u8, 1);
@@ -242,10 +243,10 @@ const SizeLimit = struct {
         const posix = std.posix;
         const ign = posix.Sigaction{ .handler = .{ .handler = posix.SIG.IGN }, .mask = std.mem.zeroes(posix.sigset_t), .flags = 0 };
         var l: SizeLimit = undefined;
-        try posix.sigaction(posix.SIG.XFSZ, &ign, &l.old_act);
+        posix.sigaction(posix.SIG.XFSZ, &ign, &l.old_act);
         l.old = try posix.getrlimit(.FSIZE);
         posix.setrlimit(.FSIZE, .{ .cur = 512, .max = l.old.max }) catch |e| {
-            posix.sigaction(posix.SIG.XFSZ, &l.old_act, null) catch {};
+            posix.sigaction(posix.SIG.XFSZ, &l.old_act, null);
             return e;
         };
         return l;
@@ -253,7 +254,7 @@ const SizeLimit = struct {
 
     fn restore(self: *const SizeLimit) void {
         std.posix.setrlimit(.FSIZE, self.old) catch {};
-        std.posix.sigaction(std.posix.SIG.XFSZ, &self.old_act, null) catch {};
+        std.posix.sigaction(std.posix.SIG.XFSZ, &self.old_act, null);
     }
 };
 
@@ -403,7 +404,7 @@ test "symbolic link: exit 1, the link still a link, its target untouched" {
     const r = try c.run(&.{ "link", D });
     try expectStatus("symbolic link", r, 1);
     try has("symbolic link", r.err, "is a symbolic link");
-    var buf: [std.fs.MAX_PATH_BYTES]u8 = undefined;
+    var buf: [std.fs.max_path_bytes]u8 = undefined;
     _ = c.tmp.dir.readLink("link", &buf) catch |e| {
         std.debug.print("symbolic link: the link was replaced ({s})\n", .{@errorName(e)});
         return error.TestUnexpectedResult;
@@ -456,7 +457,7 @@ test "failed write: exit 1, the file untouched, no temporary file left" {
     }
 }
 
-const FullStdout = std.io.Writer(void, error{FileTooBig}, fullWrite);
+const FullStdout = std.io.GenericWriter(void, error{FileTooBig}, fullWrite);
 fn fullWrite(_: void, _: []const u8) error{FileTooBig}!usize {
     return error.FileTooBig;
 }
@@ -468,8 +469,8 @@ test "failed stdout: exit 1 and the file unchanged" {
     var c = Case.init();
     defer c.deinit();
     try c.put("f", data);
-    var err = std.ArrayList(u8).init(c.alloc());
-    const st = R.entry(c.alloc(), c.tmp.dir, &.{ "f", D }, FullStdout{ .context = {} }, err.writer());
+    var err = std.ArrayList(u8).empty;
+    const st = R.entry(c.alloc(), c.tmp.dir, &.{ "f", D }, FullStdout{ .context = {} }, err.writer(c.alloc()));
     if (st != 1) {
         std.debug.print("failed stdout: exit {d}, want 1; stderr:\n{s}\n", .{ st, err.items });
         return error.TestUnexpectedResult;

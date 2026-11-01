@@ -1,0 +1,11 @@
+{
+ "name": "row_zero_columns_5_rows",
+ "defect": "the row count of a ROW with an empty read set is lost with its columns (design 3.4 rule 5: the struct's length is authoritative)",
+ "run": "call_batch",
+ "entry": "row_const",
+ "shape": "ROW",
+ "args": [],
+ "result": [{"type": "int64", "nullable": true}],
+ "input": {"length": 5, "columns": []},
+ "expect": {"status": "OK", "column": {"type": "int64", "values": [7], "repeat": 5}}
+}

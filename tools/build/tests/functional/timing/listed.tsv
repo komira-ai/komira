@@ -1,0 +1,1 @@
+use	x/fixture.zig	sleepMs	1	the fixture blocks until it is killed

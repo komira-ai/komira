@@ -5,8 +5,8 @@
 #
 # `test_optimizer_portable_parity.mojo` catches a pass the portable entry
 # skips. This file catches a pass the portable entry runs at another place:
-# two adjacent pass calls, or two adjacent steps, exchanged only when
-# `narrow_payload` is False. No pass is skipped by such a change, so the
+# two adjacent pass calls, or two adjacent steps, exchanged only for the
+# portable entry. No pass is skipped by such a change, so the
 # parity file's table need not see it; on each plan below the two orders give
 # different plans, and the portable render then differs from `optimize`'s.
 #
@@ -376,14 +376,16 @@ def _semi_over_three_way_chain() -> LogicalPlan:
 # --- Steps 16-17: join order and limits ---
 
 
-def _limit_over_swapped_join() -> LogicalPlan:
-    """Limit 5 over a(10 rows) JOIN b(100000 rows): step 16 swaps the operands
-    and restores the column order with a Project, which step 17 then pushes
-    the Limit below."""
+def _limit_over_reordered_chain() -> LogicalPlan:
+    """Limit 5 over (a JOIN b) JOIN d, a 100000 rows, b 10, d 1000: step 16
+    reorders the joins and restores the column order with a Project under the
+    Limit, which step 17 then pushes the Limit below."""
     var an: List[String] = ["ak", "av"]
     var bn: List[String] = ["bk", "bv"]
-    var j = LogicalPlan.join(_scan("a", an, 10), _scan("b", bn, 100000), _l1("ak"), _l1("bk"), JOIN_INNER)
-    return LogicalPlan.limit(5, j^)
+    var dn: List[String] = ["dk", "dv"]
+    var ab = LogicalPlan.join(_scan("a", an, 100000), _scan("b", bn, 10), _l1("ak"), _l1("bk"), JOIN_INNER)
+    var abd = LogicalPlan.join(ab^, _scan("d", dn, 1000), _l1("bk"), _l1("dk"), JOIN_INNER)
+    return LogicalPlan.limit(5, abd^)
 
 
 # -----------------------------------------------------------------------------
@@ -412,7 +414,7 @@ def _plan_name(i: Int) -> String:
         "eager_aggregate_pushdown before absorb_expression_into_aggregate (14), step 14 before step 15: eager_over_a_computing_project",
         "absorb_expression_into_aggregate before convert_inner_to_semi (14), convert_inner_to_semi before materialize_agg_input (15), step 15 before step 16: sum_of_project_over_unique_join",
         "push_semi_reducers_down before reorder_joins_with_dp (16): semi_over_three_way_chain",
-        "step 16 before step 17: limit_over_swapped_join",
+        "step 16 before step 17: limit_over_reordered_chain",
     ]
     return names[i]
 
@@ -450,7 +452,7 @@ def _plan_at(i: Int) raises -> LogicalPlan:
         return _sum_of_project_over_unique_join()
     if i == 15:
         return _semi_over_three_way_chain()
-    return _limit_over_swapped_join()
+    return _limit_over_reordered_chain()
 
 
 def test_portable_runs_the_passes_in_the_driver_order() raises:
@@ -458,8 +460,8 @@ def test_portable_runs_the_passes_in_the_driver_order() raises:
     byte as `optimize`, and `optimize` records no request on it.
 
     Defect caught: two adjacent pass calls, or two adjacent steps, of the
-    driver's order exchanged only when `narrow_payload` is False, for every
-    exchange the table names."""
+    driver's order exchanged only for the portable entry, for every exchange
+    the table names."""
     for i in range(_N_PLANS):
         var deps = ScalarDepTable()
         var want = optimize(_plan_at(i), OptimizerConfig(), deps)

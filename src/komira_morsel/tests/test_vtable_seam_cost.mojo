@@ -59,11 +59,14 @@
 #   the loader, PLT thunks and cross-`.so` branch prediction are OUT. The
 #   two-library arm is an internal tool; a
 #   cross-`.so` call adds one PLT indirection on top of what is measured here.
-# * The assertions are DELIBERATELY LOOSE (a factor, not a percentage). The
-#   farm is shared -- one figure in this campaign was taken at load 223 with 0%
-#   user CPU. A tight bound here would be a flake generator; the numbers are
-#   PRINTED for a human, and the assertion only catches CATASTROPHE (a vtable
-#   called per row shows up as ~100x, never as 1.2x).
+# * NO ASSERTION HERE READS THE CLOCK. Timings depend on the machine and its
+#   load (one figure in this campaign was taken at load 223 with 0% user CPU),
+#   so the timing numbers are PRINTED for a human and nothing compares them.
+#   What is ASSERTED is deterministic: the connector counts its own thunk
+#   calls, and a drain must make exactly one `next` and one `release` call per
+#   morsel (plus the single `next` that returns EOF), never one per row. A
+#   vtable called per row would show up as ~1,000,000 calls instead of ~250,
+#   on any machine.
 # =============================================================================
 
 from komira_atomic_alias import AtomicI64
@@ -108,6 +111,8 @@ comptime _SC_ROUNDS: Int = 7
 struct _SCConn:
     var cursor: AtomicI64
     var calls: AtomicI64
+    # `release` thunk invocations: one per OK `next`, never one per row.
+    var releases: AtomicI64
     # SAFETY (safety model §7.11): heap slabs OWNED by this struct and freed
     # by its owner. The element types are machine words / C-ABI PODs -- no
     # `List`, `String` or `OwnedPointer` inside, so this is not the gap6
@@ -206,7 +211,7 @@ def _sc_next(
 
 @export
 def _sc_release(h: CScanOpaque, b: CScanBatchPtr) abi("C") -> None:
-    pass
+    _ = _sc_state(h)[].releases.fetch_add(Int64(1))
 
 
 @export
@@ -218,6 +223,7 @@ def _sc_make(mt_safe: Bool) -> _SCConnPtr:
     var s = alloc[_SCConn](1)
     s[].cursor = AtomicI64(0)
     s[].calls = AtomicI64(0)
+    s[].releases = AtomicI64(0)
     s[].data = alloc[Int64](_SC_NCOLS * Int(_SC_BATCH))
     s[].colp = alloc[CScanI64Ptr](_SC_NCOLS)
     s[].caps_bits = KOMIRA_SCAN_CAP_MT_SAFE if mt_safe else Int64(0)
@@ -400,7 +406,9 @@ struct _MonoCopySource(MorselSourceImpl):
 # =============================================================================
 
 
-def _drain_sum[S: MorselSourceImpl](imm src: S) raises -> Int64:
+def _drain_sum[S: MorselSourceImpl](
+    imm src: S, mut n_morsels: Int
+) raises -> Int64:
     """Drain to EOF and CHECKSUM every cell.
 
     The checksum is not decoration: it is what stops the optimizer from
@@ -408,10 +416,12 @@ def _drain_sum[S: MorselSourceImpl](imm src: S) raises -> Int64:
     silently produced fewer rows cannot post a faster time.
     """
     var acc = Int64(0)
+    n_morsels = 0
     while True:
         var m = src.next_morsel(0)
         if not m:
             break
+        n_morsels += 1
         var mm = m.take()
         var n = mm.batch.num_rows()
         var c0 = mm.batch.column_as_primitive_int64(0)
@@ -500,12 +510,12 @@ def test_seam_indirect_call_overhead_ns() raises:
         "ns PER ROW",
     )
     assert_true(sink != Int64(-1))
+    # ⛔ A LOOP THAT WAS DELETED WOULD LEAVE `ticks` SHORT, and its ns/call
+    # would be a meaningless ~0. The callee increments `ticks` on every call,
+    # so the exact total proves both the indirect and the direct loop ran every
+    # iteration, in every round -- the falsifier for the bug this test already
+    # had. The ns/call figures above are printed, never compared.
     assert_true(Int(s[].ticks) == 2 * N * _SC_ROUNDS)
-    # ⛔ A LOOP THAT WAS DELETED REPORTS A VERY SMALL NUMBER. Refuse it rather
-    # than publish it -- this is the falsifier for the bug this test already had.
-    assert_true(mi > 0.2)
-    # And an indirect call is a call, not a syscall.
-    assert_true(mi < 500.0)
     _sc_free(s)
     print("test_seam_indirect_call_overhead_ns OK")
 
@@ -521,28 +531,47 @@ def test_seam_cost_interleaved_abcd() raises:
     var sum_c = Int64(0)
     var sum_d = Int64(0)
 
+    # Morsels a drain of _SC_ROWS rows in _SC_BATCH-row morsels yields: the full
+    # ones plus the one partial tail (_SC_ROWS is not a multiple of _SC_BATCH).
+    var expect_morsels = Int(_SC_ROWS) // Int(_SC_BATCH) + 1
+    assert_true(Int(_SC_ROWS) % Int(_SC_BATCH) != 0)
+
     for _ in range(_SC_ROUNDS):
+        var nm = 0
         # ---- A: MONO --------------------------------------------------------
         var t0 = perf_counter_ns()
         var srcA = _MonoSource()
-        sum_a = _drain_sum(srcA)
+        sum_a = _drain_sum(srcA, nm)
+        assert_true(nm == expect_morsels)
         var t1 = perf_counter_ns()
         # ---- C: MONO+COPY (the control that makes B attributable) -----------
         var srcC = _MonoCopySource()
-        sum_c = _drain_sum(srcC)
+        sum_c = _drain_sum(srcC, nm)
+        assert_true(nm == expect_morsels)
         var t2 = perf_counter_ns()
         # ---- B: VTABLE ------------------------------------------------------
         var stB = _sc_make(mt_safe=True)
         var srcB = VTableMorselSource(_sc_vtable(stB), _sc_schema(), 1)
-        sum_b = _drain_sum(srcB)
+        sum_b = _drain_sum(srcB, nm)
+        assert_true(nm == expect_morsels)
         _ = srcB^
+        # ⭐ THE SEAM'S REAL PROPERTY, COUNTED: one `next` per morsel plus the
+        # one that returns EOF (the source latches EOF, so there is no second),
+        # and one `release` per morsel -- NOT one per row.
+        assert_true(Int(stB[].calls.load()) == expect_morsels + 1)
+        assert_true(Int(stB[].releases.load()) == expect_morsels)
         _sc_free(stB)
         var t3 = perf_counter_ns()
         # ---- D: VTABLE + the serialising lock -------------------------------
         var stD = _sc_make(mt_safe=False)
         var srcD = VTableMorselSource(_sc_vtable(stD), _sc_schema(), 1)
-        sum_d = _drain_sum(srcD)
+        sum_d = _drain_sum(srcD, nm)
+        assert_true(nm == expect_morsels)
         _ = srcD^
+        # Same counts with the serialising lock engaged: the lock changes who
+        # may call, not how many calls are made.
+        assert_true(Int(stD[].calls.load()) == expect_morsels + 1)
+        assert_true(Int(stD[].releases.load()) == expect_morsels)
         _sc_free(stD)
         var t4 = perf_counter_ns()
 
@@ -605,11 +634,9 @@ def test_seam_cost_interleaved_abcd() raises:
         "which is why B/C cannot resolve it. THE TWO MEASUREMENTS AGREE.",
     )
 
-    # ⛔ CATASTROPHE GUARD ONLY. A vtable called PER ROW lands near 100x; a
-    # tight bound here would flake on a shared farm and teach people to ignore
-    # a red. See the header.
-    assert_true(mb / ma < 6.0)
-    assert_true(mb / mc < 4.0)
+    # No time ratio is asserted (see the header). The catastrophe this test
+    # guards, a vtable called per row, is caught by the per-drain thunk-call
+    # counts asserted inside the round loop above.
     print("test_seam_cost_interleaved_abcd OK")
 
 

@@ -46,6 +46,7 @@ from komira_db_postgres.wire.pg_binary import (
     encode_jsonb_binary,
     encode_timestamptz_binary,
     encode_text_array_binary,
+    decode_text_array_binary,
 )
 
 
@@ -254,6 +255,48 @@ def test_column_count_is_min() raises:
 
 
 # =============================================================================
+# 3b. TEXT[] elements that need quoting in the array literal, both directions.
+# =============================================================================
+# Bind: the DbValue literal must parse back to the exact elements before the
+# array_send body is encoded (a split-on-',' parser binds ["a", "b"] for
+# ["a,b"]). Read: the array_recv elements must render to a literal DbRow parses
+# back exactly (an unquoted render reads ["x}y"] as ["x"] and [""] as []).
+def _free_text() -> List[String]:
+    var l = List[String]()
+    l.append(String("a,b"))
+    l.append(String(""))
+    l.append(String("x}y"))
+    l.append(String("NULL"))
+    l.append(String("q\"uote"))
+    l.append(String("back\\slash"))
+    l.append(String(" sp "))
+    return l^
+
+
+def _assert_elems(got: List[String], want: List[String], what: String) raises:
+    assert_equal(len(got), len(want), what + String(": element count"))
+    for i in range(len(want)):
+        assert_equal(got[i], want[i], what + String(": element ") + String(i))
+
+
+def test_text_array_quoted_elements() raises:
+    var want = _free_text()
+    var vals = List[DbValue]()
+    vals.append(DbValue.text_array(want))
+    var params = to_pg_params(vals)
+    _assert_elems(
+        decode_text_array_binary(Span[UInt8](params[0].binary_body())),
+        want,
+        "bind",
+    )
+    var rows_list = List[PgRow]()
+    rows_list.append(_binary_row(want))
+    var db = pg_rows_to_db_rows(PgRows(rows_list^, _names(12)), _oids(), _names(12))
+    _assert_elems(db.row(0).get_text_array(7), want, "read")
+    print("  [3b] TEXT[] with , } \" \\ space NULL and \"\" bind and read back exactly OK")
+
+
+# =============================================================================
 # 4. Dialect tokens.
 # =============================================================================
 def test_dialect_tokens() raises:
@@ -270,5 +313,6 @@ def main() raises:
     test_to_pg_params_oids()
     test_render_each_oid()
     test_column_count_is_min()
+    test_text_array_quoted_elements()
     test_dialect_tokens()
     print("== PASSED ==")

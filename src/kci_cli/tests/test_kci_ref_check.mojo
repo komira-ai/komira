@@ -37,6 +37,11 @@
 #   (3b) the result's set hash is handed on only by a run that is not
 #       `--plan` and whose every selected validation VALIDATED and
 #       SUCCEEDED (validate's is what prod publishes).
+#   (3c) beta_validate's run (validations only, no step) over a real
+#       release directory: a native library's .so changed after build
+#       changes its .conda, so the directory recomputes to another set and
+#       is REFUSED KCI-E-SET-HASH before any validation runs (step 4b of a
+#       validation-only run; native_packaging.md slice 11's first proof).
 # =============================================================================
 
 from std.ffi import external_call
@@ -61,7 +66,10 @@ from kci_api import (
     parse_result,
 )
 from kci_api import RunResult as KciRunResult
+from kci_artifact import read_artifacts
 from kci_publish import NewNamesReport, PublishRequest
+from kci_publish.inputs import load_release
+from kci_publish.release_fixture import ExampleRelease, write_text_file
 from kci_validate import ValidateRequest
 
 comptime _REV: String = "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"
@@ -100,6 +108,9 @@ struct Fake(StageSteps, Movable):
     var publish_outcome: String
     var names: List[String]
     var validation_outcome: String
+    # when set, the release directory is recomputed for real, from these
+    var real_artifacts: String
+    var real_platform_dir: String
 
     def __init__(out self):
         self.calls = List[String]()
@@ -119,6 +130,8 @@ struct Fake(StageSteps, Movable):
         self.names.append(String("komira_encoding"))
         self.names.append(String("komira_all"))
         self.validation_outcome = String(OUTCOME_SUCCEEDED)
+        self.real_artifacts = String("")
+        self.real_platform_dir = String("")
 
     def set_env(mut self, name: String, value: String):
         for i in range(len(self.env_names)):
@@ -199,6 +212,8 @@ struct Fake(StageSteps, Movable):
     def release_set_hash(mut self, artifacts_file: String, platform_dir: String) raises -> String:
         if self.release_refused:
             raise Error(String("PUBLISH step: the release directory is refused: no release.json"))
+        if self.real_artifacts.byte_length() > 0:
+            return load_release(read_artifacts(self.real_artifacts), self.real_platform_dir).set_hash()
         return self.set_hash.copy()
 
 
@@ -695,6 +710,52 @@ def test_only_a_validated_run_hands_on_its_set_hash() raises:
     var rec4 = CliRecorder.memory(String(""))
     assert_equal(kci_main_with(_publish(m, String("prod"), "--release-set-hash", _H, "--plan"), pp, rec4), 0)
     assert_equal(_last(rec4).set_hash, String(""))
+
+
+
+def test_beta_validate_refuses_a_shared_library_changed_after_build() raises:
+    var root = _root(String("so_changed"))
+    var m = _machine(root, True)
+    var r = ExampleRelease()
+    var sha = String("1111111111111111111111111111111111111111111111111111111111111111")
+    r.set_meta(
+        String("komira_alpha"), String("lib_files"),
+        String('[{"kind":"link","path":"lib/libkomira_alpha_native.so","sha256":"') + sha
+        + String('"},{"kind":"shared","path":"lib/libkomira_alpha_native.so.1","sha256":"') + sha + String('"}]'),
+    )
+    var dir = root + String("/release/linux-x86_64")
+    r.write(dir)
+    var artifacts = root + String("/artifacts.textproto")
+    write_text_file(artifacts, r.artifacts_text())
+    var built = r.set_hash(dir)
+    # the set the build handed on: validated, and handed on to prod
+    var ok = Fake()
+    ok.real_artifacts = artifacts.copy()
+    ok.real_platform_dir = dir.copy()
+    var a = _validate_only(m)
+    for i in range(len(a)):
+        if a[i] == String(_H):
+            a[i] = built.copy()
+    var rec = CliRecorder.memory(String(""))
+    assert_equal(kci_main_with(a, ok, rec), 0)
+    assert_equal(len(ok.calls), 1)
+    assert_equal(_last(rec).set_hash, built)
+    # komira_alpha's .so patched after build: its .conda holds other bytes,
+    # and the directory is rewritten as a build would write it
+    r.members[0].content = String("alpha conda bytes, its .so patched after build")
+    r.write(dir)
+    var changed = r.set_hash(dir)
+    assert_true(changed != built)
+    var f = Fake()
+    f.real_artifacts = artifacts.copy()
+    f.real_platform_dir = dir.copy()
+    var rec2 = CliRecorder.memory(String(""))
+    assert_equal(kci_main_with(a, f, rec2), 3)
+    # refused before any validation ran, naming the set it recomputes to
+    assert_equal(len(f.calls), 0)
+    assert_equal(_last(rec2).error.id, String("KCI-E-SET-HASH"))
+    assert_true(_last(rec2).error.message.find(String("recomputes to set hash ") + changed) >= 0, _last(rec2).error.message)
+    assert_equal(_last(rec2).set_hash, String(""))
 
 
 def main() raises:

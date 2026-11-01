@@ -88,3 +88,21 @@ bad.append(expected_row("livez_200", ""))
 assert_true("states NO OBLIGATION" in spec_fault("demo", bad))
 assert_equal(live_row_line(3, "[PASS] livez_200"), "LIVE-ROW 3: [PASS] livez_200")
 ```
+
+## Build files
+
+This package is built with buildrules' `mojo_package` and packaged for mopm as `kci_validator_rows`, version 0.1.0 (`mopm.toml`). The library is `src/kci_validator_rows/`, its tests are `tests/`. The files that are not sources:
+
+| file | what |
+|---|---|
+| `mopm.toml` | the mopm manifest: name, version, the Mojo version, the dependencies and where the library and its tests are |
+| `mopm.lock` | the toolchain pins and the path dependencies (no registry is reached: every dependency is a sibling) |
+| `mopm-toolchain.toml` | the exact mopm and Mojo versions the build uses |
+| `coverage_floor.txt` | `lines NN.NN` and `branches NN.NN`: the least line and branch coverage `:coverage` may measure; `:coverage_floor` fails when either falls below, and above it passes and prints a hint to raise the figure |
+| `buildrules.mojo.lock.bzl`, `buildrules.mojo.bzl` | written by `buildrules mojo sync` from the files above; `buildrules mojo check` fails when they are stale |
+
+`:lib` is the library file and exists only once every test of `tests/` has passed. After any change to a source, a test, or a manifest of this package, run `buildrules mojo sync`, commit what it writes, and build `komira//src/kci_validator_rows:lib` on the farm. A test file that the sync has not listed is not run: run the sync after adding one.
+
+`:conda` is buildrules' `mojo_conda` over `:lib`: the `.conda` of the mopm package (`mojo-kci_validator_rows-0.1.0-mojo1.0.0_0.conda`), which therefore exists only once the tests have passed. Publishing it (`mopm publish`) uploads, so it is a step of a CI job that takes that file, not a build action.
+
+`:kci_validator_rows` is `:lib` as komira's Mojo rules take it (`mojo_adopted_library`). It also compiles and runs the README's examples above (`[tests][readme]`) against `:lib`; the tests are not run again.

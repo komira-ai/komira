@@ -144,8 +144,8 @@ def test_put_over_a_directory_fails_loud() raises:
     assert_true(msg.find("atomic rename failed") >= 0, msg)
     assert_true(msg.find(root + "/d'") >= 0, msg)
     # Any spelling a downstream classifier reads as a precondition failure
-    # (`cas_manifest`'s accepts a bare "412", "precondition", "Precondition"
-    # and "PreconditionFailed") must be absent from the store's own text.
+    # (`cas_manifest`'s accepts "status=412", "precondition", "Precondition"
+    # and "PreconditionFailed"; older copies accepted a bare "412") must be absent from the store's own text.
     var own = _rename_error_store_text(msg, root + "/d")
     assert_false(own.find("412") >= 0, msg)
     assert_false(own.find("recondition") >= 0, msg)

@@ -29,6 +29,7 @@ fn color() -> IrType {
 fn file(fields: Vec<IrField>, oneofs: Vec<IrOneof>) -> IrFile {
     IrFile {
         proto_path: "p/p.proto".to_string(),
+        source_sha256: String::new(),
         proto_package: "p".to_string(),
         mojo_package: "p".to_string(),
         messages: vec![IrMessage {

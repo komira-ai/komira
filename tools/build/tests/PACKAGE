@@ -1,0 +1,3 @@
+# The default visibility of every target of this cell that names none: the
+# aggregate of the pull request check (see the cell root's PACKAGE in komira).
+package(visibility = ["komira//ci:"])

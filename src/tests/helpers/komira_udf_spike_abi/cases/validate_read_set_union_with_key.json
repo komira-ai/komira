@@ -1,0 +1,12 @@
+{
+ "name": "validate_read_set_union_with_key",
+ "defect": "validate compares the arg_types names with the recorded fields alone, ignoring key_fields (design 3.1: their union)",
+ "run": "validate",
+ "entry": "running_sum",
+ "shape": "MAP_BATCHES_FRAME",
+ "args": [{"type": "int64", "nullable": true, "name": "a"}, {"type": "int64", "nullable": true, "name": "k"}],
+ "result": [{"type": "int64", "nullable": true}],
+ "result_is_table": true,
+ "descriptor": {"recorded_fields": {"fields": [{"name": "a", "type": "int64"}], "key_fields": [{"name": "k", "type": "int64"}]}},
+ "expect": {"status": "OK"}
+}

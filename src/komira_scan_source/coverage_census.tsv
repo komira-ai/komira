@@ -1,0 +1,3 @@
+# What the coverage census measured of this package's libraries (tools/build/coverage/census.md).
+census	2026-10-10	27a2541169cb979fa9c82a032eea24919b727121	-
+komira//src/komira_scan_source:komira_scan_source	src/komira_scan_source	library	OK	1462	2314	-	-	no	conda	src/komira_scan_source/arrow_source.mojo,src/komira_scan_source/avro_source.mojo,src/komira_scan_source/compiler_registry.mojo,src/komira_scan_source/json_source.mojo,src/komira_scan_source/orc_source.mojo,src/komira_scan_source/scan_registry.mojo,src/komira_scan_source/scan_resolver.mojo,src/komira_scan_source/sink.mojo,src/komira_scan_source/source_capabilities.mojo,src/komira_scan_source/source_like.mojo	-

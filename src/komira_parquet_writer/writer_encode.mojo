@@ -33,6 +33,7 @@ from .column_page import (
     _require_no_nulls_when_required,
     dtype_to_parquet_type,
 )
+from komira_buffer.byte_buffer import write_uleb128
 from .stats import compute_statistics_int32, compute_statistics_int64
 from .writer_float_stats import float_column_statistics
 
@@ -42,22 +43,17 @@ from .writer_float_stats import float_column_statistics
 # =============================================================================
 
 
-def _write_uleb128(mut buf: List[UInt8], value: Int):
-    """Append an unsigned ULEB128 varint."""
-    var v = UInt64(value)
-    while True:
-        var byte = UInt8(v & 0x7F)
-        v = v >> 7
-        if v != 0:
-            byte = byte | UInt8(0x80)
-        buf.append(byte)
-        if v == 0:
-            break
-
-
-def _def_level_frame(length: Int) -> List[UInt8]:
+def _def_level_frame(length: Int) raises -> List[UInt8]:
     """[4-byte LE encoded length][bit-packed run header], sized for `length`
-    levels; the caller appends the `(length + 7) / 8` packed bytes."""
+    levels; the caller appends the `(length + 7) / 8` packed bytes.
+
+    Raises:
+        Error: `length` is negative.
+    """
+    if length < 0:
+        raise Error(
+            "_def_level_frame: negative level count " + String(length)
+        )
     var result = List[UInt8](capacity=16 + ((length + 7) >> 3))
     if length == 0:
         for _ in range(4):
@@ -65,7 +61,7 @@ def _def_level_frame(length: Int) -> List[UInt8]:
         return result^
     var num_groups = (length + 7) >> 3
     var header = List[UInt8]()
-    _write_uleb128(header, (num_groups << 1) | 1)
+    write_uleb128((num_groups << 1) | 1, header)
     var encoded_len = len(header) + num_groups
     result.append(UInt8(encoded_len & 0xFF))
     result.append(UInt8((encoded_len >> 8) & 0xFF))
@@ -78,7 +74,7 @@ def _def_level_frame(length: Int) -> List[UInt8]:
 
 def encode_def_levels_from_bitmap(
     validity: Bitmap[HeapRegion], offset: Int, length: Int
-) -> List[UInt8]:
+) raises -> List[UInt8]:
     """Definition levels for rows `[offset, offset + length)` of a validity
     bitmap, as the RLE / bit-packed hybrid with its 4-byte length prefix.
 
@@ -107,7 +103,7 @@ def encode_def_levels_from_bitmap(
     return result^
 
 
-def encode_def_levels_all_valid(length: Int) -> List[UInt8]:
+def encode_def_levels_all_valid(length: Int) raises -> List[UInt8]:
     """Definition levels for `length` present values (all 1 bits)."""
     var result = _def_level_frame(length)
     if length == 0:
@@ -122,7 +118,7 @@ def encode_def_levels_all_valid(length: Int) -> List[UInt8]:
 
 def _def_levels(
     validity: Optional[Bitmap[HeapRegion]], offset: Int, length: Int, null_count: Int
-) -> List[UInt8]:
+) raises -> List[UInt8]:
     """Levels from the bitmap when the column holds a null, else all present."""
     if null_count > 0 and validity:
         return encode_def_levels_from_bitmap(validity.value(), offset, length)

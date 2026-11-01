@@ -154,6 +154,10 @@ struct AzureFs[C: Connector](FileSystem, Movable, Deinitable):
     # What the lazy build (the lazy form's first verb, a clone's) makes a
     # client from: endpoint, credential and connector factory.
     var _spec: AzureClientSpec[Self.C]
+    # The page cap `list` and `list_dir_shallow` enforce: AZURE_LIST_MAX_PAGES
+    # unless `set_list_max_pages` lowered it (a test drives the cap in a few
+    # pages instead of draining 100_000). Clones keep it.
+    var _list_max_pages: Int
 
     def __init__(
         out self,
@@ -175,6 +179,7 @@ struct AzureFs[C: Connector](FileSystem, Movable, Deinitable):
         slab.append(Optional[AzureClient[Self.C]](client^))
         self._client = slab^
         self._spec = spec^
+        self._list_max_pages = AZURE_LIST_MAX_PAGES
 
     def __init__(out self, var container: String, var spec: AzureClientSpec[Self.C]):
         """Construct an AzureFs bound to `container` whose client is built
@@ -184,17 +189,20 @@ struct AzureFs[C: Connector](FileSystem, Movable, Deinitable):
         slab.append(Optional[AzureClient[Self.C]](None))
         self._client = slab^
         self._spec = spec^
+        self._list_max_pages = AZURE_LIST_MAX_PAGES
 
     def __init__(
         out self,
         var _container: String,
         var _client: Slab[Optional[AzureClient[Self.C]]],
         var _spec: AzureClientSpec[Self.C],
+        _list_max_pages: Int = AZURE_LIST_MAX_PAGES,
     ):
         """INTERNAL fieldwise ctor — used by `clone()` (infallible)."""
         self._container = _container^
         self._client = _client^
         self._spec = _spec^
+        self._list_max_pages = _list_max_pages
 
     # ---- FileSystem trait conformance ----
 
@@ -209,7 +217,32 @@ struct AzureFs[C: Connector](FileSystem, Movable, Deinitable):
             _container=self._container.copy(),
             _client=slab^,
             _spec=self._spec.copy(),
+            _list_max_pages=self._list_max_pages,
         )
+
+    def set_list_max_pages(mut self, max_pages: Int) raises:
+        """Lower (or restore) the page cap of `list` and `list_dir_shallow`,
+        which starts at `AZURE_LIST_MAX_PAGES`. For tests that exercise the cap
+        without serving 100_000 pages; a clone keeps the value.
+
+        Args:
+            max_pages: The pages one listing may read before it is refused.
+                Must be at least 1: a smaller cap would refuse every listing
+                at its first page.
+
+        Raises:
+            If `max_pages` is below 1; the cap is left as it was.
+        """
+        if max_pages < 1:
+            raise Error(
+                String("AzureFs: list_max_pages must be >= 1, got ")
+                + String(max_pages)
+            )
+        self._list_max_pages = max_pages
+
+    def list_max_pages(self) -> Int:
+        """The page cap `list` and `list_dir_shallow` enforce now."""
+        return self._list_max_pages
 
     # ---- Lazy client build (private helper, inlined into read methods) ----
     def _build_client_if_absent(self) raises:
@@ -295,10 +328,10 @@ struct AzureFs[C: Connector](FileSystem, Movable, Deinitable):
         # Flat listing -> delimiter="".
         while True:
             pages += 1
-            if pages > AZURE_LIST_MAX_PAGES:
+            if pages > self._list_max_pages:
                 raise Error(
                     String("AzureFs.list: page cap exceeded (")
-                    + String(AZURE_LIST_MAX_PAGES)
+                    + String(self._list_max_pages)
                     + String(" List Blobs pages and the service still returns"
                     " a NextMarker)")
                 )
@@ -607,10 +640,10 @@ struct AzureFs[C: Connector](FileSystem, Movable, Deinitable):
         # AZURE_LIST_MAX_PAGES requests, as `list`.
         while True:
             pages += 1
-            if pages > AZURE_LIST_MAX_PAGES:
+            if pages > self._list_max_pages:
                 raise Error(
                     String("AzureFs.list_dir_shallow: page cap exceeded (")
-                    + String(AZURE_LIST_MAX_PAGES)
+                    + String(self._list_max_pages)
                     + String(" List Blobs pages and the service still returns"
                     " a NextMarker)")
                 )

@@ -28,9 +28,9 @@ test "result: checking nothing is a finding" {
 }
 
 test "result: the message holds at most 200 lines and counts them all" {
-    var report = std.ArrayList(u8).init(std.testing.allocator);
-    defer report.deinit();
-    for (0..250) |i| try report.writer().print("line {d}\n", .{i});
+    var report = std.ArrayList(u8).empty;
+    defer report.deinit(std.testing.allocator);
+    for (0..250) |i| try report.writer(std.testing.allocator).print("line {d}\n", .{i});
     const j = try res(report.items, 1);
     try std.testing.expect(std.mem.indexOf(u8, j, "k: 250 finding line(s)") != null);
     try std.testing.expect(std.mem.indexOf(u8, j, "line 199\\n") != null);

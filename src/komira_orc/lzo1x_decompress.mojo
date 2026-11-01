@@ -398,10 +398,10 @@ def lzo1x_decompress(
             # SECOND-TO-LAST consumed byte — the control byte for the one-offset
             # -byte forms, the first offset byte for the two-offset-byte ones.
             if ip < 2:
-                raise Error(
-                    String("Lzo1xError.CORRUPT: match completed after only ")
-                    + String(ip)
-                    + " input byte(s)"
+                raise Error(  # cov: unreachable every path into MATCH_DONE has consumed at least 2 input bytes
+                    String("Lzo1xError.CORRUPT: match completed after only ")  # cov: unreachable part of the raise above
+                    + String(ip)  # cov: unreachable part of the raise above
+                    + " input byte(s)"  # cov: unreachable part of the raise above
                 )
             t = Int(src[ip - 2]) & 3
             if t == 0:

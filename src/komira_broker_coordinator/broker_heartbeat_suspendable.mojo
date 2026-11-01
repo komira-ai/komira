@@ -257,7 +257,7 @@ struct AsyncReassignOp[
         the op needs only the AsyncCasStore bound, not the ClusterAssignmentStore
         wrapper)."""
         return (
-            msg.find("412") >= 0
+            msg.find("status=412") >= 0
             or msg.find("precondition") >= 0
             or msg.find("If-Match") >= 0
             or msg.find("If-None-Match") >= 0
@@ -668,11 +668,11 @@ struct BrokerCoordSuspendableDispatcher[
         try:
             prelude = self._coord.prepare_async_heartbeat(hb, now_us)
         except he:
-            return self._one_step_json_frame(
+            return self._one_step_json_frame(  # cov: unreachable prepare_async_heartbeat raises only on a missing node_id, rejected above
                 Int32(500),
-                String('{"error":"assignment_failed","message":"')
-                + _sanitize(String(he))
-                + String('"}'),
+                String('{"error":"assignment_failed","message":"')  # cov: unreachable prepare_async_heartbeat raises only on a missing node_id, rejected above
+                + _sanitize(String(he))  # cov: unreachable prepare_async_heartbeat raises only on a missing node_id, rejected above
+                + String('"}'),  # cov: unreachable prepare_async_heartbeat raises only on a missing node_id, rejected above
                 request_id,
             )
 

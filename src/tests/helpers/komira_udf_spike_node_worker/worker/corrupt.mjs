@@ -12,7 +12,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { MAGIC, OP, FLAG_INLINE, HEADER_BYTES, nextRequest, reply, replyError, writeRaw } from './wire.mjs';
+import { MAGIC, OP, FLAG_INLINE, HEADER_BYTES, WIRE_VERSION, nextRequest, reply, replyError, writeRaw } from './wire.mjs';
 
 class Fb {
   constructor() {
@@ -388,7 +388,8 @@ const nextDescribe = () => nextCount(DESCRIBES);
 
 // HELLO replies that break the handshake (proxy/channel.c, kudfw_spawn), by
 // the order workers start in the test's TMPDIR: the first exits with status
-// 5 before answering, the second answers wire version 2, the third answers
+// 5 before answering, the second answers a wire version one above this
+// build's (3), the third answers
 // 8 bytes (too short to hold three versions), and the tenth exits like the
 // first (the test's tenth worker is a context's, not an admission worker's:
 // tests/test_node_worker.mojo, _corrupt_hellos). The others are answered by
@@ -401,7 +402,7 @@ function helloCorrupt() {
   if (k !== 0 && k !== 1 && k !== 2 && k !== 9) return;
   const m = nextRequest();
   if (k === 0 || k === 9) process.exit(5);
-  if (k === 1) reply(m.id, 0, [u32(2), u32(1), u32(0)]);
+  if (k === 1) reply(m.id, 0, [u32(WIRE_VERSION + 1), u32(1), u32(0)]);
   else reply(m.id, 0, [u32(1), u32(1)]);
 }
 

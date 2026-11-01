@@ -409,6 +409,12 @@ comptime AGG_KURTOSIS_POP: UInt8 = 36
 NULL when n < 2, and NULL when m2 is 0. MEASURED v1.5.3 over {1, 2, 3, 4}:
 -1.36, against `kurtosis` = -1.200000000000001 on the same group."""
 
+comptime AGG_UDF: UInt8 = 37
+"""A user-defined aggregate (optimized_plan_udfs.md §10.4): one argument,
+`child0`, an `EXPR_UDF_APPLY` naming an AGGREGATE `UdfRef`. Its output field
+is that call's type (the `UdfRef`'s `return_type`). Nothing in this tree
+executes it yet: the UDF runtimes and lowering are later stages."""
+
 
 @always_inline
 def agg_is_kahan_compensated(func: UInt8) -> Bool:
@@ -1355,5 +1361,7 @@ def _write_agg_func[W: Writer](mut writer: W, func: UInt8):
         writer.write("KURTOSIS")
     elif func == AGG_KURTOSIS_POP:
         writer.write("KURTOSIS_POP")
+    elif func == AGG_UDF:
+        writer.write("UDF")
     else:
         writer.write("UNKNOWN")

@@ -10,6 +10,7 @@
 //!   komira_pack conda-index --out-dir <dir> --package-manifest <m.json>...
 //!                                   (a local channel: the packages and each subdir's repodata.json)
 //!   komira_pack readme-link ...     (a packaged README: the source, then the closure's link commands)
+//!   komira_pack conda-install ...   (a package unpacked into a clean prefix, with the runtime libraries its requirements install)
 //!   komira_pack oci --bundle <dir> --name <n> --version <v> --repo <r>
 //!       --manifest <base manifest> --manifest-digest sha256:<hex>
 //!       --config <base config>
@@ -57,6 +58,7 @@
 //!   conda_meta.zig   `conda-meta`;
 //!   conda_check.zig  `conda-check`;
 //!   conda_index.zig  `conda-index`;
+//!   conda_install.zig `conda-install`;
 //!   readme_link.zig  `readme-link`.
 
 const std = @import("std");
@@ -67,6 +69,7 @@ const pack_conda_meta = @import("conda_meta.zig");
 const pack_conda_check = @import("conda_check.zig");
 const pack_conda_index = @import("conda_index.zig");
 const pack_readme_link = @import("readme_link.zig");
+const pack_conda_install = @import("conda_install.zig");
 const fail = pack_common.fail;
 const parseArgs = pack_common.parseArgs;
 const cmdOci = pack_tar_oci.cmdOci;
@@ -76,6 +79,7 @@ const cmdCondaMeta = pack_conda_meta.cmdCondaMeta;
 const cmdCondaCheck = pack_conda_check.cmdCondaCheck;
 const cmdCondaExpect = pack_conda_check.cmdCondaExpect;
 const cmdCondaIndex = pack_conda_index.cmdCondaIndex;
+const cmdCondaInstall = pack_conda_install.cmdCondaInstall;
 const cmdReadmeLink = pack_readme_link.cmdReadmeLink;
 
 pub fn main() !void {
@@ -83,7 +87,7 @@ pub fn main() !void {
     defer arena.deinit();
     const alloc = arena.allocator();
     const argv = try std.process.argsAlloc(alloc);
-    if (argv.len < 2) fail("usage: komira_pack tar|oci|conda|conda-meta|conda-check|conda-expect|conda-index|readme-link --flag value ...", .{});
+    if (argv.len < 2) fail("usage: komira_pack tar|oci|conda|conda-meta|conda-check|conda-expect|conda-index|conda-install|readme-link --flag value ...", .{});
     const a = try parseArgs(alloc, argv);
     if (std.mem.eql(u8, argv[1], "tar")) {
         try cmdTar(alloc, a);
@@ -99,6 +103,8 @@ pub fn main() !void {
         try cmdCondaExpect(alloc, a);
     } else if (std.mem.eql(u8, argv[1], "conda-index")) {
         try cmdCondaIndex(alloc, a);
+    } else if (std.mem.eql(u8, argv[1], "conda-install")) {
+        try cmdCondaInstall(alloc, a);
     } else if (std.mem.eql(u8, argv[1], "readme-link")) {
         try cmdReadmeLink(alloc, a);
     } else fail("unknown command {s}", .{argv[1]});

@@ -7,7 +7,8 @@
 #   request.mojo            BuildRequest, BuildOutcome (an outcome word and
 #                           an error id from kci_api; no exit number)
 #   runner.mojo             the ProcessRunner seam: RunSpec (with an optional
-#                           explicit child environment), RunResult
+#                           explicit child environment), RunResult, RunClock
+#                           and MonotonicClock (the clock a timeout reads)
 #   revision.mojo           derive_release_stamp: --revision-id checked
 #                           against the checkout, the stamp derived from git
 #   supervisor_runner.mojo  SupervisorRunner: real processes (komira_supervisor)
@@ -51,7 +52,9 @@ from kci_build.revision import (
 )
 from kci_build.runner import (
     STDERR_TAIL_BYTES,
+    MonotonicClock,
     ProcessRunner,
+    RunClock,
     RunResult,
     RunSpec,
     check_child_env,

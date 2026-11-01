@@ -44,12 +44,24 @@ from .temporal_parsers import (
     _try_parse_time_ms,
     _try_parse_time_us,
     _try_parse_time_ns,
-    _try_parse_duration_s,
-    _try_parse_duration_ms,
-    _try_parse_duration_us,
-    _try_parse_duration_ns,
+    _try_parse_duration_iso_to_ns,
 )
 from .null_detection import is_null_cell
+
+
+def _try_parse_iso_duration_only_ns(cell: Span[UInt8, _]) -> Optional[Int64]:
+    """Parse a cell as an ISO 8601 duration ('PnDTnHnMnS' or '-PnDTnHnMnS')
+    to nanoseconds; None for any other shape.
+
+    Inference uses this instead of the `_try_parse_duration_*` decoders,
+    which also take a bare number as seconds: during inference that shape
+    would claim every decimal column before the Float64 arm is reached.
+    """
+    if len(cell) >= 1 and cell[0] == UInt8(0x50):  # 'P'
+        return _try_parse_duration_iso_to_ns(cell)
+    if len(cell) >= 2 and cell[0] == UInt8(0x2D) and cell[1] == UInt8(0x50):  # '-P'
+        return _try_parse_duration_iso_to_ns(cell)
+    return None
 
 
 def infer_column_types(
@@ -158,7 +170,8 @@ def infer_column_types(
 #   Timestamp_MS -> ms-precision datetime
 #   Timestamp_S  -> seconds (rejects sub-second)
 #   Time_NS / Time_US / Time_MS / Time_S -> HH:MM:SS[.fff[fff[fff]]]
-#   Duration_NS / Duration_US / Duration_MS / Duration_S -> ISO 8601 P-grammar
+#   Duration_S / Duration_MS / Duration_US / Duration_NS -> ISO 8601 P-grammar
+#            only (a bare number is Int64/Float64, never a Duration)
 #   Bool   -> only true_/false_strings
 #   Float64 -> widest numeric
 #   String  -> fallback
@@ -171,7 +184,8 @@ def infer_column_types(
 #   - all-Timestamp_S cells => TIMESTAMP_S (sub-second-free datetimes).
 #   - any all-Timestamp_NS/US/MS => TIMESTAMP_NS (narrowest fits all).
 #   - all-Time_* (preferring narrowest unit that fits) => TIME64_NS / etc.
-#   - all-Duration_* => DURATION_NS (narrowest fits all).
+#   - all-ISO-Duration => the coarsest of DURATION_S / _MS / _US / _NS
+#     that holds every cell exactly (no rounding).
 #   - all-Bool => BOOL.
 #   - all-Float64 => FLOAT64.
 #   - else => STRING.
@@ -257,14 +271,23 @@ def infer_column_types_wide(
                 all_time_us = False
             if all_time_ns and not _try_parse_time_ns(cell):
                 all_time_ns = False
-            if all_dur_s and not _try_parse_duration_s(cell):
-                all_dur_s = False
-            if all_dur_ms and not _try_parse_duration_ms(cell):
-                all_dur_ms = False
-            if all_dur_us and not _try_parse_duration_us(cell):
-                all_dur_us = False
-            if all_dur_ns and not _try_parse_duration_ns(cell):
-                all_dur_ns = False
+            if all_dur_s or all_dur_ms or all_dur_us or all_dur_ns:
+                # ISO shape only, and a unit only while it holds the cell
+                # exactly (the decoders round toward zero).
+                var dur_ns = _try_parse_iso_duration_only_ns(cell)
+                if not dur_ns:
+                    all_dur_s = False
+                    all_dur_ms = False
+                    all_dur_us = False
+                    all_dur_ns = False
+                else:
+                    var ns = dur_ns.value()
+                    if ns % Int64(1000000000) != 0:
+                        all_dur_s = False
+                    if ns % Int64(1000000) != 0:
+                        all_dur_ms = False
+                    if ns % Int64(1000) != 0:
+                        all_dur_us = False
             if all_bool and not _try_parse_bool(cell, options):
                 all_bool = False
 

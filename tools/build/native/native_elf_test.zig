@@ -23,14 +23,14 @@ const Buf = std.ArrayList(u8);
 fn put(b: *Buf, comptime T: type, v: T) void {
     var x: [@sizeOf(T)]u8 = undefined;
     std.mem.writeInt(T, &x, v, .little);
-    b.appendSlice(&x) catch unreachable;
+    b.appendSlice(A, &x) catch unreachable;
 }
 
 /// Appends `s` and its NUL to the string table; returns its offset.
 fn str(tab: *Buf, s: []const u8) u32 {
     const at: u32 = @intCast(tab.items.len);
-    tab.appendSlice(s) catch unreachable;
-    tab.append(0) catch unreachable;
+    tab.appendSlice(A, s) catch unreachable;
+    tab.append(A, 0) catch unreachable;
     return at;
 }
 
@@ -41,8 +41,8 @@ fn dyn(b: *Buf, tag: u64, val: u64) void {
 
 fn sym(b: *Buf, name: u32, bind: u8, vis: u8, shndx: u16) void {
     put(b, u32, name);
-    b.append(bind << 4 | 2) catch unreachable; // STT_FUNC
-    b.append(vis) catch unreachable;
+    b.append(A, bind << 4 | 2) catch unreachable; // STT_FUNC
+    b.append(A, vis) catch unreachable;
     put(b, u16, shndx);
     put(b, u64, 0);
     put(b, u64, 0);
@@ -54,8 +54,8 @@ fn sym(b: *Buf, name: u32, bind: u8, vis: u8, shndx: u16) void {
 /// DT_FLAGS_1 0x1. More than one NEEDED and RUNPATH entry, so a reader
 /// keeping only one of each is red.
 pub fn fixture(opts: Opts) []const u8 {
-    var s = Buf.init(A);
-    s.append(0) catch unreachable;
+    var s = Buf.empty;
+    s.append(A, 0) catch unreachable;
     const n_soname = str(&s, "libkomira_t.so.1");
     const n_libc = str(&s, "libc.so.6");
     const n_pthread = str(&s, "libpthread.so.0");
@@ -74,7 +74,7 @@ pub fn fixture(opts: Opts) []const u8 {
     const n_local = str(&s, "komira_t_local");
     const n_hidden = str(&s, "komira_t_hidden");
 
-    var d = Buf.init(A);
+    var d = Buf.empty;
     dyn(&d, 1, n_pthread); // DT_NEEDED
     if (opts.stray) dyn(&d, 1, n_stray);
     dyn(&d, 1, n_libc);
@@ -92,8 +92,8 @@ pub fn fixture(opts: Opts) []const u8 {
 
     // Index: 0 null, 1 komira_t_f, 2 memcpy, 3 pthread_once, 4
     // __gmon_start__ (weak), 5 a local, 6 a hidden definition.
-    var y = Buf.init(A);
-    for (0..24) |_| y.append(0) catch unreachable;
+    var y = Buf.empty;
+    for (0..24) |_| y.append(A, 0) catch unreachable;
     sym(&y, n_f, 1, 0, 7);
     sym(&y, n_memcpy, 1, 0, 0);
     sym(&y, n_once, 1, 0, 0);
@@ -103,10 +103,10 @@ pub fn fixture(opts: Opts) []const u8 {
 
     // Version indexes: 2 GLIBC_2.14, 3 GLIBC_2.2.5 (needed), 1 the base and
     // 4 KOMIRA_T_1 (defined); komira_t_f's carries the hidden bit.
-    var v = Buf.init(A);
+    var v = Buf.empty;
     for ([_]u16{ 0, 0x8004, 2, 3, 1, 0, 1 }) |x| put(&v, u16, x);
 
-    var vn = Buf.init(A); // one Verneed (libc.so.6), two Vernaux
+    var vn = Buf.empty; // one Verneed (libc.so.6), two Vernaux
     put(&vn, u16, 1);
     put(&vn, u16, 2);
     put(&vn, u32, n_libc);
@@ -120,7 +120,7 @@ pub fn fixture(opts: Opts) []const u8 {
         put(&vn, u32, if (i == 0) 16 else 0);
     }
 
-    var vd = Buf.init(A); // two Verdef, each with one Verdaux
+    var vd = Buf.empty; // two Verdef, each with one Verdaux
     for ([_][2]u32{ .{ 1, n_soname }, .{ 4, n_kv } }, 0..) |a, i| {
         put(&vd, u16, 1); // vd_version
         put(&vd, u16, if (i == 0) 1 else 0); // VER_FLG_BASE
@@ -145,9 +145,9 @@ pub fn fixture(opts: Opts) []const u8 {
         .{ .type = 0x6ffffffd, .body = vd.items, .link = 1, .info = 2 },
         .{ .type = 1, .body = "\xc3", .link = 0, .info = 0 },
     };
-    var f = Buf.init(A);
-    f.appendSlice("\x7fELF\x02\x01\x01") catch unreachable;
-    f.appendNTimes(0, 9) catch unreachable;
+    var f = Buf.empty;
+    f.appendSlice(A, "\x7fELF\x02\x01\x01") catch unreachable;
+    f.appendNTimes(A, 0, 9) catch unreachable;
     put(&f, u16, 3); // ET_DYN
     put(&f, u16, 62); // EM_X86_64
     put(&f, u32, 1);
@@ -164,13 +164,13 @@ pub fn fixture(opts: Opts) []const u8 {
     put(&f, u16, 1); // e_shstrndx: section names are not read
     var offs: [secs.len]u64 = undefined;
     for (secs, 0..) |sec, i| {
-        while (f.items.len % 8 != 0) f.append(0) catch unreachable;
+        while (f.items.len % 8 != 0) f.append(A, 0) catch unreachable;
         offs[i] = f.items.len;
-        f.appendSlice(sec.body) catch unreachable;
+        f.appendSlice(A, sec.body) catch unreachable;
     }
-    while (f.items.len % 8 != 0) f.append(0) catch unreachable;
+    while (f.items.len % 8 != 0) f.append(A, 0) catch unreachable;
     std.mem.writeInt(u64, f.items[shoff_at..][0..8], f.items.len, .little);
-    f.appendNTimes(0, 64) catch unreachable; // section 0
+    f.appendNTimes(A, 0, 64) catch unreachable; // section 0
     for (secs, 0..) |sec, i| {
         put(&f, u32, 0);
         put(&f, u32, sec.type);
@@ -187,8 +187,8 @@ pub fn fixture(opts: Opts) []const u8 {
 }
 
 fn render(so: elf.Shared) ![]const u8 {
-    var b = Buf.init(A);
-    try elf.writeShared(b.writer(), so);
+    var b = Buf.empty;
+    try elf.writeShared(b.writer(A), so);
     return b.items;
 }
 

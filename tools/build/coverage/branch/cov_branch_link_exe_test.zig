@@ -74,7 +74,7 @@ const Box = struct {
 
     fn put(self: *Box, path: []const u8, data: []const u8) !void {
         if (std.fs.path.dirname(path)) |d| try self.tmp.dir.makePath(d);
-        try self.tmp.dir.writeFile(path, data);
+        try self.tmp.dir.writeFile(.{ .sub_path = path, .data = data });
     }
 
     fn p(self: *Box, rel: []const u8) []const u8 {
@@ -93,10 +93,11 @@ const Box = struct {
     /// `cov_branch link` with the box's inputs, relative to the box, as the
     /// rule gives them, then `extra`.
     fn linkArgs(self: *Box, extra: []const []const u8) ![]const []const u8 {
-        var v = std.ArrayList([]const u8).init(self.a());
-        try v.appendSlice(&.{ "link", "--busybox", "bb/busybox", "--compiler", "tc", "--zig", "zig", "--target", "x86_64-linux-gnu.2.28", "--lld", "link/lld/bin/lld", "--runtime", "link/llvm/runtime/libclang_rt.profile-x86_64.a", "--bitcode", "test_one.bc", "--out", "out/test_one" });
-        try v.appendSlice(extra);
-        return v.toOwnedSlice();
+        const al = self.arena.allocator();
+        var v = std.ArrayList([]const u8).empty;
+        try v.appendSlice(al, &.{ "link", "--busybox", "bb/busybox", "--compiler", "tc", "--zig", "zig", "--target", "x86_64-linux-gnu.2.28", "--lld", "link/lld/bin/lld", "--runtime", "link/llvm/runtime/libclang_rt.profile-x86_64.a", "--bitcode", "test_one.bc", "--out", "out/test_one" });
+        try v.appendSlice(al, extra);
+        return v.toOwnedSlice(al);
     }
 
     /// Runs the shipped executable in the box with `args` and the
@@ -104,12 +105,12 @@ const Box = struct {
     fn run(self: *Box, args: []const []const u8, env: []const [2][]const u8) !Run {
         const al = self.a();
         try self.tmp.dir.makePath("out");
-        var argv = std.ArrayList([]const u8).init(al);
-        try argv.append(try tool(al, "COV_BRANCH"));
-        try argv.appendSlice(args);
+        var argv = std.ArrayList([]const u8).empty;
+        try argv.append(al, try tool(al, "COV_BRANCH"));
+        try argv.appendSlice(al, args);
         var map = std.process.EnvMap.init(al);
         for (env) |e| try map.put(e[0], e[1]);
-        const r = try std.ChildProcess.run(.{ .allocator = al, .argv = argv.items, .cwd_dir = self.tmp.dir, .env_map = &map, .max_output_bytes = 1 << 20 });
+        const r = try std.process.Child.run(.{ .allocator = al, .argv = argv.items, .cwd_dir = self.tmp.dir, .env_map = &map, .max_output_bytes = 1 << 20 });
         const code: u8 = switch (r.term) {
             .Exited => |c| c,
             else => {
@@ -167,6 +168,8 @@ test "a link as a process: argv, BUCK_SCRATCH_PATH, each step's command line and
         \\{s}/pg.o
         \\--lto-O0
         \\--lto-newpm-passes=pgo-instr-gen,instrprof,default<O0>
+        \\-mllvm
+        \\-instrprof-atomic-counter-update-all
         \\
     , .{ b.p("test_one.bc"), k }), b.read("link/lld/bin/argv").?);
     try testing.expectEqualStrings(try std.fmt.allocPrint(b.a(),
@@ -322,9 +325,9 @@ test "stderr that cannot be written: the exit status is the link's all the same"
     defer b.deinit();
     try b.put("zig/stub_rc", "1");
     const a = b.a();
-    var argv = std.ArrayList([]const u8).init(a);
-    try argv.append(try tool(a, "COV_BRANCH"));
-    try argv.appendSlice(&.{ "link", "--busybox", b.p("bb/busybox"), "--compiler", b.p("tc"), "--zig", b.p("zig"), "--target", "t", "--lld", b.p("link/lld/bin/lld"), "--runtime", b.p("link/llvm/runtime/libclang_rt.profile-x86_64.a"), "--bitcode", b.p("test_one.bc"), "--out", b.p("test_one") });
+    var argv = std.ArrayList([]const u8).empty;
+    try argv.append(a, try tool(a, "COV_BRANCH"));
+    try argv.appendSlice(a, &.{ "link", "--busybox", b.p("bb/busybox"), "--compiler", b.p("tc"), "--zig", b.p("zig"), "--target", "t", "--lld", b.p("link/lld/bin/lld"), "--runtime", b.p("link/llvm/runtime/libclang_rt.profile-x86_64.a"), "--bitcode", b.p("test_one.bc"), "--out", b.p("test_one") });
     const env = [_][]const u8{try std.fmt.allocPrint(a, "BUCK_SCRATCH_PATH={s}", .{b.p("scr")})};
     const out = b.p("stdout");
     const red = try br.run(a, .{ .argv = argv.items, .env = &env, .stdout_path = out, .stderr_path = "/dev/full" });

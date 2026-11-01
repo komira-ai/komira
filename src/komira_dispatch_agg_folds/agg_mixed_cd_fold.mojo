@@ -815,8 +815,8 @@ def _mix_str_row_is_before(
     return la < lb
 
 
-# ⛔ THE FLOAT DISTINCT KEY IS NOT DEFINED HERE. It is the IEEE bit pattern
-# with `-0.0` folded onto `+0.0`, and it lives at
+# ⛔ THE FLOAT DISTINCT KEY IS NOT DEFINED HERE. It is the bit pattern of the
+# float model's canonical form (`-0.0` onto `+0.0`, every NaN onto one), at
 # `komira_agg_api.cd_distinct_key.cd_f64_distinct_key`, which BOTH this fold
 # and the all-CD sink call, so their agreement is constructed instead of
 # asserted. (A raw 8-byte bitcast read is right for FLOAT64, whose storage IS 8

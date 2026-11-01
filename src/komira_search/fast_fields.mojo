@@ -76,7 +76,7 @@ from komira_buffer.owned_aligned_buffer import OwnedAlignedBuffer
 from komira_arrow.column import Column
 from komira_buffer.heap_region import HeapRegion
 from komira_arrow.primitive_array import PrimitiveArray
-from komira_buffer.byte_buffer import write_uleb128
+from komira_buffer.byte_buffer import write_uleb128, write_uleb128_u64
 
 from .analyzer import (
     FIELD_CLASS_KEYWORD,
@@ -227,16 +227,20 @@ def _is_float_dtype(dt: DType) -> Bool:
 
 
 @always_inline
-def _zigzag_encode(v: Int) -> Int:
-    """Map a signed Int to a non-negative Int for ULEB128. 0->0, -1->1, 1->2,
-    -2->3, ... (the standard protobuf zig-zag, in 64-bit)."""
-    return (v << 1) ^ (v >> 63)
+def _zigzag_encode(v: Int) -> UInt64:
+    """Map a signed Int to an unsigned value for ULEB128. 0->0, -1->1, 1->2,
+    -2->3, ... (the standard protobuf zig-zag, in 64-bit). Unsigned because the
+    image of a magnitude of 2^62 or more needs all 64 bits; as a signed Int it
+    would be negative."""
+    return UInt64((v << 1) ^ (v >> 63))
 
 
 @always_inline
 def _zigzag_decode(u: Int) -> Int:
-    """Inverse of _zigzag_encode (treats `u` as the non-negative encoding)."""
-    return (u >> 1) ^ -(u & 1)
+    """Inverse of _zigzag_encode. `u` carries the 64-bit encoding as read by
+    `_read_uleb128_span`, whose top bit may be set."""
+    var w = UInt64(u)
+    return Int((w >> UInt64(1)) ^ (UInt64(0) - (w & UInt64(1))))
 
 
 def _pack_bits_lsb_first_u64(
@@ -551,7 +555,7 @@ struct NumericFastFieldBuilder(Copyable, Movable, Deinitable):
         var bits = _min_bit_width(max_residual)
 
         write_uleb128(n, out)
-        write_uleb128(_zigzag_encode(min_v), out)
+        write_uleb128_u64(_zigzag_encode(min_v), out)
         out.append(UInt8(bits))
         if any_null:
             out.append(1)
@@ -978,6 +982,17 @@ struct FastFieldReader(Movable, Deinitable):
             )
         ref e = self._entries[i]
         return (e.name.copy(), e.field_class, e.encoding)
+
+    def entry_arrow_type_id_at(self, i: Int) raises -> UInt8:
+        """The i-th entry's Arrow type id: the unit a DATE-class value is
+        stored in (DATE32 days, TIMESTAMP microseconds, TIMESTAMP_MS ...).
+        Raises if `i` is out of range, as `entry_meta_at` does."""
+        if i < 0 or i >= len(self._entries):
+            raise Error(
+                "FastFieldReader.entry_arrow_type_id_at: index " + String(i)
+                + " out of range [0, " + String(len(self._entries)) + ")"
+            )
+        return self._entries[i].arrow_type_id
 
     def has_field(self, name: String) -> Bool:
         for i in range(len(self._entries)):

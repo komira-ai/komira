@@ -2,7 +2,8 @@
 # komira_db/tests/test_db_row_value.mojo
 # The value carriers' edges: the logical-type names, DbRow / DbRows bounds and
 # NULL refusals, the integer-text decoder's refusals, INT4 reads, raw bytes
-# with high bytes, and the RAW_EXPR literal shapes a document backend reads.
+# with high bytes, out-of-range integer text and over-long UUID text, and the
+# RAW_EXPR literal shapes a document backend reads.
 # =============================================================================
 # Every expected value is written out by hand from the docstrings of
 # db_value.mojo, db_row.mojo and neutral_ops.mojo, never computed by the code
@@ -83,6 +84,9 @@ comptime NO_DIGITS = "DbRow: integer text had no digits"
 comptime BAD_NIBBLE = "DbRow: invalid hex nibble in UUID"
 comptime TRUNCATED = "DbRow: truncated UUID hex"
 comptime SHORT = "DbRow: UUID did not yield 16 bytes"
+comptime OUT_I64 = "DbRow: integer text out of Int64 range"
+comptime OUT_I32 = "DbRow: integer text out of Int32 range"
+comptime UUID_LONG = "DbRow: UUID text continues past 16 bytes"
 
 
 # =============================================================================
@@ -249,8 +253,7 @@ def test_uuid_round_trip_high_bytes() raises:
     """A UUID of high and low bytes renders canonical lowercase 8-4-4-4-12 hex
     and `get_uuid` decodes it back to the same 16 bytes (uppercase hex too).
     `get_uuid` refuses a non-hex nibble, an odd digit count and fewer than 16
-    bytes, each with its own message. (Hex past 16 bytes is accepted today:
-    komira-ai/komira#1314; not pinned here.)"""
+    bytes, each with its own message. (Text past 16 bytes: test 8b.)"""
     var b = Array[UInt8, 16](fill=0)
     for i in range(16):
         b[i] = UInt8((i * 17 + 0x0F) & 0xFF)
@@ -289,6 +292,76 @@ def test_uuid_round_trip_high_bytes() raises:
             msg = String(e)
         assert_equal(msg, want[i], "uuid '" + refusals[i] + "'")
     print("  [8] UUID high-byte round-trip + 8 refusals OK")
+
+
+# =============================================================================
+# 4b — out-of-range integer text and over-long UUID text (komira-ai/komira#1314)
+# =============================================================================
+def _ts_err(row: DbRow, col: Int) -> String:
+    try:
+        _ = row.get_timestamptz_micros(col)
+    except e:
+        return String(e)
+    return String("no error")
+
+
+def _uuid_err(row: DbRow, col: Int) -> String:
+    try:
+        _ = row.get_uuid(col)
+    except e:
+        return String(e)
+    return String("no error")
+
+
+def test_int_text_out_of_range_refusals() raises:
+    """Integer text one past either end of the Int64 range refuses (it used to
+    wrap: '9223372036854775808' read as Int64.MIN), and so does text whose
+    magnitude wraps a 64-bit accumulator back to a small value (2^64 read as 0).
+    INT4 refuses text one past either end of the Int32 range (it used to
+    narrow: '3000000000' read as -1294967296). Each end itself still decodes,
+    with leading zeros allowed."""
+    var i64 = List[String]()
+    i64.append("9223372036854775808")       # Int64.MAX + 1
+    i64.append("-9223372036854775809")      # Int64.MIN - 1
+    i64.append("18446744073709551616")      # 2^64: wraps to 0
+    i64.append("99999999999999999999")      # 20 nines
+    for i in range(len(i64)):
+        var row = _row2(DbValue.text(i64[i]), DbValue.text(i64[i]))
+        assert_equal(_int8_err(row, 0), String(OUT_I64), "int8 of '" + i64[i] + "'")
+        assert_equal(_ts_err(row, 0), String(OUT_I64), "micros of '" + i64[i] + "'")
+        assert_equal(_int4_err(row, 1), String(OUT_I64), "int4 of '" + i64[i] + "'")
+    var ends = _row2(
+        DbValue.text("-0009223372036854775808"), DbValue.text("+9223372036854775807")
+    )
+    assert_equal(ends.get_int8(0), Int64.MIN, "Int64.MIN text with leading zeros")
+    assert_equal(ends.get_int8(1), Int64.MAX, "Int64.MAX text with a '+'")
+    var i32 = List[String]()
+    i32.append("3000000000")
+    i32.append("2147483648")                # Int32.MAX + 1
+    i32.append("-2147483649")               # Int32.MIN - 1
+    i32.append("4294967296")                # 2^32: narrows to 0
+    for i in range(len(i32)):
+        var row = _row2(DbValue.text(i32[i]), DbValue.text(""))
+        assert_equal(_int4_err(row, 0), String(OUT_I32), "int4 of '" + i32[i] + "'")
+    var e32 = _row2(DbValue.text("-2147483648"), DbValue.text("2147483647"))
+    assert_equal(e32.get_int4(0), Int32.MIN, "Int32.MIN text")
+    assert_equal(e32.get_int4(1), Int32.MAX, "Int32.MAX text")
+    print("  [7b] integer text past Int64 / Int32 refuses OK")
+
+
+def test_uuid_text_past_16_bytes_refuses() raises:
+    """UUID text that continues after its 16th byte refuses (it used to decode
+    the first 16 bytes and drop the rest): 18 bytes of bare hex, one extra
+    nibble, a trailing hyphen, a 17th byte after a canonical UUID."""
+    var long = List[String]()
+    long.append("00112233445566778899aabbccddeeff0011")
+    long.append("00112233445566778899aabbccddeeff0")
+    long.append("00112233-4455-6677-8899-aabbccddeeff-")
+    long.append("00112233-4455-6677-8899-aabbccddeeff-00")
+    for i in range(len(long)):
+        var row = _row2(DbValue.text(long[i]), DbValue.text(""))
+        assert_equal(_uuid_err(row, 0), String(UUID_LONG), "uuid '" + long[i] + "'")
+    print("  [8b] UUID text past 16 bytes refuses OK")
 
 
 # =============================================================================
@@ -354,5 +427,7 @@ def main() raises:
     test_int8_range_ends_round_trip()
     test_bytes_round_trip_high_bytes()
     test_uuid_round_trip_high_bytes()
+    test_int_text_out_of_range_refusals()
+    test_uuid_text_past_16_bytes_refuses()
     test_classify_raw_expr_literal_shapes()
     print("PASS test_db_row_value")

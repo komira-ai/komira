@@ -102,3 +102,31 @@ def main() raises:
     assert_equal(squares([1, 2, 3, 4, 5, 6], 2), [1, 4, 9, 16, 25, 36])
     assert_equal(fork_join_pool_depth(), Int64(0))
 ```
+
+## Build files
+
+This package is built with buildrules' `mojo_package` and packaged for mopm as `komira_async_api`, version 0.1.0
+(`mopm.toml`). The library is `src/komira_async_api/` (the modules above), its tests are `tests/`. It depends on one
+package, `komira_atomic_alias`, a sibling directory (`[dependencies]` of `mopm.toml`: `{ path = "../komira_atomic_alias",
+version = "0.1" }`), so the `.conda` of this package records `mojo-komira_atomic_alias >=0.1,<0.2` as a dependency and
+holds none of that package's files. The pool-depth counter is a native library of the package,
+`[native.komira_concurrency_pool_depth]` in `mopm.toml`: `mojo_package` compiles `native/komira_concurrency_pool_depth.c`
+into `libkomira_concurrency_pool_depth.a`, links it into the tests of this package and of every package that depends on
+it, and packs it into the package under `lib/`. The files that are not sources:
+
+| file | what |
+|---|---|
+| `mopm.toml` | the mopm manifest: name, version, the Mojo version, the dependency, the native library, where the library and its tests are |
+| `mopm.lock` | the toolchain pins and the path dependency, as `mopm lock` writes them (no registry is reached: the only dependency is a sibling) |
+| `mopm-toolchain.toml` | the exact mopm and Mojo versions the build uses (written by hand) |
+| `buildrules.mojo.lock.bzl`, `buildrules.mojo.bzl` | written by `buildrules mojo sync` from the files above and from the workspace of the sibling; `buildrules mojo check` fails when they are stale |
+
+`:lib` is the library file and exists only once every test of `tests/` has passed. After any change to a source, a test,
+the C file, a manifest of this package or of the sibling, run `buildrules mojo sync` with both packages staged, commit
+what it writes, and build `komira//src/komira_async_api:lib` on the farm.
+
+`:conda` is the `.conda` of the mopm package (`mojo-komira_async_api-0.1.0-mojo1.0.0_0.conda`): the `.mojoc` and
+`lib/libkomira_concurrency_pool_depth.a`. `:komira_async_api` is `:lib` as komira's Mojo rules take it
+(`mojo_adopted_library`): a package that lists it in `deps` links the same archive. It also compiles and runs the README's
+examples above (`[tests][readme]`) against `:lib`. The shared library `libkomira_async_api_native.so.1`
+(`:komira_async_api_native`) is the release set's packaging of the same C file.

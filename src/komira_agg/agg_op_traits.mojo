@@ -91,6 +91,10 @@ trait HashAggOpF64(Copyable, Movable, ImplicitlyCopyable):
 
     comptime StateTy: Copyable & Movable & Deinitable
 
+    comptime EMPTY_IS_NULL: Bool = True
+    """A group with no non-NULL input answers NULL (False: COUNT, which
+    answers 0)."""
+
     @staticmethod
     def init() -> Self.StateTy:
         ...
@@ -128,6 +132,10 @@ trait HashAggOpI64(Copyable, Movable, ImplicitlyCopyable):
     """
 
     comptime StateTy: Copyable & Movable & Deinitable
+
+    comptime EMPTY_IS_NULL: Bool = True
+    """A group with no non-NULL input answers NULL (False: COUNT, which
+    answers 0)."""
 
     @staticmethod
     def init() -> Self.StateTy:
@@ -180,6 +188,10 @@ trait HashAggOpI32(Copyable, Movable, ImplicitlyCopyable):
 
     comptime StateTy: Copyable & Movable & Deinitable
 
+    comptime EMPTY_IS_NULL: Bool = True
+    """A group with no non-NULL input answers NULL (False: COUNT, which
+    answers 0)."""
+
     @staticmethod
     def init() -> Self.StateTy:
         ...
@@ -225,6 +237,10 @@ trait HashAggOpF32(Copyable, Movable, ImplicitlyCopyable):
     """
 
     comptime StateTy: Copyable & Movable & Deinitable
+
+    comptime EMPTY_IS_NULL: Bool = True
+    """A group with no non-NULL input answers NULL (False: COUNT, which
+    answers 0)."""
 
     @staticmethod
     def init() -> Self.StateTy:

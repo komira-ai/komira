@@ -1,0 +1,38 @@
+load("@komira//tools/build/python:defs.bzl", "python_binding_test")
+
+# The hello test of python_binding_test: pyarrow builds a table and the Mojo
+# shared library `plain` is loaded by path with ctypes and called.
+python_binding_test(
+    name = "hello",
+    src = "hello_test.py",
+    libs = ["komira//tools/build/examples/shared_lib:plain"],
+    deps = ["komira//third_party/python:pyarrow"],
+)
+
+# The same script with no library staged: it must fail on the missing file.
+python_binding_test(
+    name = "refuses_missing_lib",
+    src = "hello_test.py",
+    libs = [],
+    deps = ["komira//third_party/python:pyarrow"],
+    expect_error = "FileNotFoundError: the lib dir has no plain.so: ",
+)
+
+# A wrong expectation of the library's answer: the call is checked.
+python_binding_test(
+    name = "refuses_wrong_add",
+    src = "hello_test.py",
+    args = ["--add-expect", "43"],
+    libs = ["komira//tools/build/examples/shared_lib:plain"],
+    deps = ["komira//third_party/python:pyarrow"],
+    expect_error = "AssertionError: plain_add(40, 2) = 42, want 43",
+)
+
+python_binding_test(
+    name = "refuses_wrong_sum",
+    src = "hello_test.py",
+    args = ["--sum-expect", "284"],
+    libs = ["komira//tools/build/examples/shared_lib:plain"],
+    deps = ["komira//third_party/python:pyarrow"],
+    expect_error = "AssertionError: plain_sum_squares(10) = 285, want 284",
+)

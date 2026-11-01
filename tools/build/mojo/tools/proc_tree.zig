@@ -89,11 +89,11 @@ pub fn cpu(procs: []const Proc, members: []const i32) i64 {
 /// The members a kill may name: never pid 0 (the caller's own process
 /// group) or 1, nor a negative pid.
 pub fn killable(alloc: std.mem.Allocator, members: []const i32) ![]i32 {
-    var out = std.ArrayList(i32).init(alloc);
+    var out = std.ArrayList(i32).empty;
     for (members) |m| {
-        if (m > 1) try out.append(m);
+        if (m > 1) try out.append(alloc, m);
     }
-    return out.toOwnedSlice();
+    return out.toOwnedSlice(alloc);
 }
 
 /// The idle arithmetic. `tick` is called once a second with the tree's CPU
@@ -142,7 +142,7 @@ pub const Watch = struct {
 /// Every process /proc shows now. A process that exits while it is read is
 /// skipped.
 pub fn readAll(alloc: std.mem.Allocator) ![]Proc {
-    var out = std.ArrayList(Proc).init(alloc);
+    var out = std.ArrayList(Proc).empty;
     var dir = try std.fs.openDirAbsolute("/proc", .{ .iterate = true });
     defer dir.close();
     var it = dir.iterate();
@@ -154,9 +154,9 @@ pub fn readAll(alloc: std.mem.Allocator) ![]Proc {
         const f = dir.openFile(path, .{}) catch continue;
         defer f.close();
         const n = f.readAll(&buf) catch continue;
-        if (parseStat(buf[0..n])) |p| try out.append(p);
+        if (parseStat(buf[0..n])) |p| try out.append(alloc, p);
     }
-    return out.toOwnedSlice();
+    return out.toOwnedSlice(alloc);
 }
 
 /// The killable pids of `root`'s tree now (empty when root is gone).

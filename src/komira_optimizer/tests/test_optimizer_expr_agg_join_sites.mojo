@@ -225,7 +225,7 @@ def _slot(plan: LogicalPlan, k: Int) raises -> String:
 
 def test_rules_rewrite_aggregate_slot_2() raises:
     """Catches: any of the three rules skipping an aggregate function's
-    argument slot 2 (`_rewrite_optional_site[rule](agg.child2)`); slot 3 is
+    argument slot 2 (`agg.child2` in `_walk_expr_sites`); slot 3 is
     empty and stays empty."""
     var f = fold_constants(_agg_slots_2_3(Optional(_bin(BIN_ADD, _i(2), _i(3))), Optional[Expr]()))
     assert_equal(_slot(f, 2), "5")
@@ -240,7 +240,7 @@ def test_rules_rewrite_aggregate_slot_2() raises:
 
 def test_rules_rewrite_aggregate_slot_3() raises:
     """Catches: any of the three rules skipping an aggregate function's
-    argument slot 3 (`_rewrite_optional_site[rule](agg.child3)`), including
+    argument slot 3 (`agg.child3` in `_walk_expr_sites`), including
     when slot 2 before it is empty."""
     var f = fold_constants(_agg_slots_2_3(Optional[Expr](), Optional(_bin(BIN_ADD, _i(2), _i(3)))))
     assert_equal(_slot(f, 2), "none")
@@ -310,7 +310,7 @@ def _no_residual(plan: LogicalPlan) raises -> Bool:
 
 def test_rules_leave_absent_join_residual_absent() raises:
     """Catches: a rule reading or inventing a residual on a Join that has
-    none (`if j.residual:` in `_rewrite_agg_and_residual_sites`)."""
+    none (`if j.residual:` in `_walk_expr_sites`)."""
     assert_true(_no_residual(fold_constants(_join_without_residual())), "fold: no residual")
     assert_true(_no_residual(simplify_predicates(_join_without_residual())), "simplify: no residual")
     assert_true(_no_residual(rewrite_in_clauses(_join_without_residual())), "in: no residual")

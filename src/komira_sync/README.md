@@ -54,3 +54,34 @@ assert_equal(counter, 2)
 assert_true(m.try_lock())  # the raising call did not leave it held
 m.unlock()
 ```
+
+## Build files
+
+This package is built with buildrules' `mojo_package` and packaged for mopm as `komira_sync`, version 0.1.0
+(`mopm.toml`). The library is `src/komira_sync/` (`spin_mutex.mojo` and the `__init__.mojo` that re-exports
+`SpinMutex`), its test is `tests/`. The package depends on `komira_atomic_alias`, a sibling package named under
+`[dependencies]` of `mopm.toml`, and has no native archive and no C shim. Its test forks real threads with
+`komira_fork_join`, a sibling named under `[dev-dependencies]`: it is locked and built for the test, and is not part of
+the packed package. The files that are not sources:
+
+| file | what |
+|---|---|
+| `mopm.toml` | the mopm manifest: name, version, the Mojo version, the dependency, the dev-dependency and where the library and its test are |
+| `mopm.lock` | the toolchain pins and the path packages of the closure (`komira_atomic_alias`, and `komira_fork_join` with its own dependency), as `mopm lock` writes them (no registry is reached: they are siblings) |
+| `mopm-toolchain.toml` | the exact mopm and Mojo versions the build uses (written by hand) |
+| `coverage_floor.txt` | `lines NN.NN` and `branches NN.NN`: the least line and branch coverage `:coverage` may measure; `:coverage_floor` fails when either falls below, and above it passes and prints a hint to raise the figure |
+| `buildrules.mojo.lock.bzl`, `buildrules.mojo.bzl` | written by `buildrules mojo sync` from the files above and from the manifests of the siblings; `buildrules mojo check` fails when they are stale |
+
+`:lib` is the library file and exists only once the test has passed. After any change to a source, the test, a manifest
+of this package or of a sibling, run `buildrules mojo sync` with the packages staged, commit what it writes, and build
+`komira//src/komira_sync:lib` on the farm.
+
+`:conda` is buildrules' `mojo_conda` over `:lib`: the `.conda` of the mopm package
+(`mojo-komira_sync-0.1.0-mojo1.0.0_0.conda`), which records one dependency beyond the compiler,
+`mojo-komira_atomic_alias >=0.1,<0.2` (`:conda_holds` reads that back, so a dev-dependency that leaked into the package
+turns it red). Publishing it (`mopm publish`) uploads, so it is a step of a CI job that takes that file, not a build
+action.
+
+`:komira_sync` is `:lib` as komira's Mojo rules take it (`mojo_adopted_library`), with `deps` naming
+`komira_atomic_alias`. It also compiles and runs the README's examples above (`[tests][readme]`) against `:lib`; the
+test is not run again.

@@ -1,0 +1,13 @@
+{
+ "name": "skip_other_class",
+ "defect": "a case of another class is run instead of skipped",
+ "run": "call_batch",
+ "entry": "identity",
+ "shape": "MAP_BATCHES_COLUMN",
+ "args": [{"type": "int64", "nullable": true}],
+ "result": [{"type": "int64", "nullable": true}],
+ "classes": ["NATIVE"],
+ "input": {"length": 1, "columns": [{"type": "int64", "values": [1]}]},
+ "expect": {"status": "ERR_INTERNAL"},
+ "runner_fails_with": "SKIP"
+}

@@ -207,6 +207,65 @@ def test_zigzag_and_varint() raises:
     assert_equal(Int(b[1]), 0x02)
 
 
+def test_varint_is_total_and_unsigned() raises:
+    # The zig-zag image of a large i64 arrives as a negative Int: it is the
+    # ten-byte varint of its bit pattern, never a loop.
+    var w = ThriftCompactWriter()
+    w.write_varint(-1)
+    var b = w.take_bytes()
+    assert_equal(len(b), 10)
+    for i in range(9):
+        assert_equal(Int(b[i]), 0xFF)
+    assert_equal(Int(b[9]), 0x01)
+    # An i32 field holding a CRC with the top bit set: 0xFBB9AAAA zig-zags to
+    # 143436459 = varint AB D5 B2 44.
+    var f = ThriftCompactWriter()
+    f.write_i32_field(1, 0xFBB9AAAA)
+    var fb = f.take_bytes()
+    assert_equal(len(fb), 5)
+    assert_equal(Int(fb[0]), 0x15)
+    assert_equal(Int(fb[1]), 0xAB)
+    assert_equal(Int(fb[2]), 0xD5)
+    assert_equal(Int(fb[3]), 0xB2)
+    assert_equal(Int(fb[4]), 0x44)
+
+
+def _ref_uleb(v0: Int) -> List[UInt8]:
+    var out = List[UInt8]()
+    var v = v0
+    while True:
+        var byte = UInt8(v & 0x7F)
+        v = v >> 7
+        if v != 0:
+            byte = byte | UInt8(0x80)
+        out.append(byte)
+        if v == 0:
+            break
+    return out^
+
+
+def test_i32_field_sweep_matches_reference() raises:
+    var vals = List[Int]()
+    vals.append(0xFBB9AAAA)
+    vals.append(0x80000000)
+    vals.append(0xFFFFFFFF)
+    vals.append(0x7FFFFFFF)
+    vals.append(0x40000001)
+    vals.append(0x12345678)
+    vals.append(0xDEADBEEF)
+    vals.append(0xA5A5A5A5)
+    for i in range(len(vals)):
+        var f = ThriftCompactWriter()
+        f.write_i32_field(4, vals[i])
+        var fb = f.take_bytes()
+        var z = ThriftCompactWriter.zigzag_i32(vals[i])
+        assert_equal(Int(UInt64(z)), z, "UInt64 cast of " + String(z))
+        var want = _ref_uleb(z)
+        assert_equal(len(fb), len(want) + 1, "len for " + String(vals[i]) + " z=" + String(z))
+        for k in range(len(want)):
+            assert_equal(Int(fb[k + 1]), Int(want[k]), "byte " + String(k) + " of " + String(vals[i]) + " z=" + String(z))
+
+
 def test_long_form_field_header() raises:
     var w = ThriftCompactWriter()
     w.push_struct()

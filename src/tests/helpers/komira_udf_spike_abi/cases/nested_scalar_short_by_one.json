@@ -1,0 +1,14 @@
+{
+ "name": "nested_scalar_short_by_one",
+ "defect": "a nested call's output is handed to the waiting frame without the host's checks (design 4.4: the host validates every imported array; 4.6, the length post-condition): a result one row short reaches the frame",
+ "run": "nested_frame",
+ "entry": "running_sum",
+ "shape": "MAP_BATCHES_FRAME",
+ "args": [{"type": "int64", "nullable": true}],
+ "result": [{"type": "int64", "nullable": true}],
+ "result_is_table": true,
+ "nested": {"entry": "short_by_one", "shape": "MAP_BATCHES_COLUMN", "args": [{"type": "int64", "nullable": true}], "result": [{"type": "int64", "nullable": true}]},
+ "levels": 1,
+ "inputs": [{"length": 3, "columns": [{"type": "int64", "values": [1, 2, 3]}]}],
+ "expect": {"status": "OK", "run_error": "UDF_BATCH_LENGTH_MISMATCH", "eio_at_least": 1, "batches": []}
+}

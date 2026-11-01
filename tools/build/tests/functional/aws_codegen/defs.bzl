@@ -2,7 +2,9 @@
 
 `aws_codegen_golden` generates a module (and optionally its layout probe) in
 one action, whose directory is the `[gen]` sub-target, and compares it with
-the checked-in goldens in a second action, the default output. The second
+the checked-in goldens in a second action, the default output. No generated
+file may reach 1000 lines: the generator writes a module that would as a
+facade and its parts (`golden_parts`). The second
 action also requires each `must_contain` string in the GENERATED module, as
 whole lines compared with leading spaces removed, so a string may span lines:
 a property that holds even when someone re-copies the golden over a
@@ -18,13 +20,11 @@ It passes `--probe-out` unless `probe_out = False`.
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
 
 _GEN = "komira//tools/build/proto-codegen:aws-client-gen"
-_SCRIPT = "tests//functional/aws_codegen:aws_codegen.sh"
 
 def _common(ctx):
-    bb = ctx.attrs._busybox[DefaultInfo].default_outputs[0]
+    act = ctx.attrs._act[RunInfo]
     gen = ctx.attrs._gen[DefaultInfo].default_outputs[0]
-    script = ctx.attrs._script[DefaultInfo].default_outputs[0]
-    return bb, gen, script
+    return act, gen
 
 def _golden_impl(ctx):
     for s in ctx.attrs.must_contain:
@@ -32,16 +32,13 @@ def _golden_impl(ctx):
             fail("{}: a must_contain entry is empty; it matches every module".format(
                 ctx.label,
             ))
-    bb, gen, script = _common(ctx)
+    act, gen = _common(ctx)
     gen_dir = ctx.actions.declare_output(ctx.label.name + "_gen", dir = True)
     probe = "1" if ctx.attrs.golden_probe else "0"
     ctx.actions.run(
         cmd_args(
-            bb,
-            "sh",
-            script,
-            bb,
-            "gen",
+            act,
+            "aws-gen",
             gen,
             gen_dir.as_output(),
             ctx.attrs.module,
@@ -53,19 +50,25 @@ def _golden_impl(ctx):
         ),
         category = "aws_codegen_gen",
     )
+    # The goldens of the parts of a module the generator split, as the
+    # `_parts` directory it writes: each file under its own name.
+    parts_golden = "-"
+    if ctx.attrs.golden_parts:
+        parts_golden = ctx.actions.copied_dir(
+            ctx.label.name + "_golden_parts",
+            {g.basename: g for g in ctx.attrs.golden_parts},
+        )
     stamp = ctx.actions.declare_output(ctx.label.name + ".ok")
     ctx.actions.run(
         cmd_args(
-            bb,
-            "sh",
-            script,
-            bb,
-            "cmp",
+            act,
+            "aws-cmp",
             stamp.as_output(),
             gen_dir,
             ctx.attrs.module,
             ctx.attrs.golden,
             ctx.attrs.golden_probe if ctx.attrs.golden_probe else "-",
+            parts_golden,
             ctx.attrs.must_contain,
         ),
         category = "aws_codegen_cmp",
@@ -76,15 +79,12 @@ def _golden_impl(ctx):
     )]
 
 def _refusal_impl(ctx):
-    bb, gen, script = _common(ctx)
+    act, gen = _common(ctx)
     stamp = ctx.actions.declare_output(ctx.label.name + ".ok")
     ctx.actions.run(
         cmd_args(
-            bb,
-            "sh",
-            script,
-            bb,
-            "refuse",
+            act,
+            "aws-refuse",
             gen,
             stamp.as_output(),
             ctx.attrs.expect,
@@ -99,9 +99,8 @@ def _refusal_impl(ctx):
     return [DefaultInfo(default_output = stamp)]
 
 _TOOLS = {
-    "_busybox": attrs.exec_dep(default = "komira//tools/build/toolchains:busybox"),
+    "_act": attrs.exec_dep(default = "tests//tools:tests_act", providers = [RunInfo]),
     "_gen": attrs.exec_dep(default = _GEN),
-    "_script": attrs.dep(default = _SCRIPT),
 }
 
 aws_codegen_golden_rule = rule(
@@ -112,6 +111,11 @@ aws_codegen_golden_rule = rule(
         "golden": attrs.source(),
         # When set, the probe is generated and compared with this file.
         "golden_probe": attrs.option(attrs.source(), default = None),
+        # The goldens of the parts of a module that reaches the generator's
+        # line limit (a facade, `golden`, and the files of `_parts/`): each a
+        # file named as the generated part, in a directory of its own. Empty
+        # for a module under the limit, which must not be split.
+        "golden_parts": attrs.list(attrs.source(), default = []),
         "model": attrs.source(),
         "module": attrs.string(),
         # Strings the generated module must contain, beside the golden match.

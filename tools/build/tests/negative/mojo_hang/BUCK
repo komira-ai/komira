@@ -1,0 +1,29 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The hang limit of a welded test (`gate mojo --hang-limit-s`, tools/build/run;
+# `test_hang_limit_s`, tools/build/mojo/README.md "Time limits"). The target
+# must fail; tools/build/selftest:planted_red_builds_mojo_hang requires the
+# failure written above it. What works is in ../../functional/mojo_hang.
+
+# RED (GATED TEST FAILED (exit 137), then `hang limit: ... did not finish
+# within 5 s and was stopped`): a test that blocks forever is stopped by the
+# 5 s limit the target sets.
+mojo_library(
+    name = "lib_never_ends",
+    srcs = ["__init__.mojo"],
+    conda = False,
+    import_name = "hangfix",
+    test_hang_limit_s = 5,
+    test_srcs = ["tests/test_never_ends.mojo"],
+)
+
+# REFUSED at analysis (selftest:analysis_refusals_mojo): a hang limit of no
+# seconds would stop every test at once.
+mojo_library(
+    name = "bad_limit",
+    srcs = ["__init__.mojo"],
+    conda = False,
+    import_name = "hangfix",
+    test_hang_limit_s = 0,
+    test_srcs = ["tests/test_never_ends.mojo"],
+)

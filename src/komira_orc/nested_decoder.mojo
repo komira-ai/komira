@@ -8,12 +8,17 @@
 # child column subtrees (by schema-tree index link), and the decode is a
 # depth-first descent that composes Arrow nested arrays bottom-up.
 #
-# The unit of work here is ONE stripe (the multi-stripe primitive accumulator
-# path in column_decoder.mojo is separate).
-# `decode_column_subtree` returns a fully-materialized Arrow `Column` for a
-# schema node and its descendants:
+# The unit of work is a SET of stripes (`NestedStripes`, zero or more, in
+# file order). `decode_column_subtree_stripes` returns ONE fully-materialized
+# Arrow `Column` for a schema node and its descendants over every stripe: each
+# node decodes its per-row metadata (PRESENT, LENGTH, union tags) stripe by
+# stripe into one list, and passes each child its per-stripe row counts, so
+# list / map / dense-union offsets continue across stripe boundaries and no
+# Arrow-level concatenation of nested columns is needed.
+# `decode_column_subtree` is the one-stripe form.
 #
-#   - PRIMITIVE leaf  -> reuse the column_decoder ColumnAcc machinery (one stripe).
+#   - PRIMITIVE leaf  -> reuse the column_decoder ColumnAcc machinery (each
+#                        stripe appends to one accumulator).
 #   - STRUCT          -> PRESENT (struct-level validity) + recurse each child;
 #                        assemble a StructArray. ORC struct children carry the
 #                        FULL stripe row-count (the PRESENT bitmap only nulls
@@ -33,7 +38,7 @@
 #                        is always dense.
 #
 # Stream resolution: every schema node has a stable column id == its index in
-# the flat Footer.types list. Located streams are passed as 4 parallel lists
+# the flat Footer.types list. Each stripe's located streams are 4 parallel lists
 # (kind/column/start/end) — the flat-arena form, no back-import cycle with
 # orc_reader's `_StreamLoc`.
 #
@@ -50,6 +55,7 @@ from komira_arrow.list_array import ListArray
 from komira_arrow.map_array import MapArray
 from komira_arrow.struct_array import StructArray
 from komira_arrow.union_array import UnionArray
+from komira_arrow.schema import Schema, SchemaBuilder, Field
 from komira_collections.slab import Slab
 
 from std.sys import size_of
@@ -83,6 +89,7 @@ from .orc_schema import (
     ORC_KIND_UNION,
 )
 from .rle_decode import decode_int_rle, decode_byte_rle
+from .orc_logical_arrow import stamp_arrow_orc_metadata
 from .column_decoder import (
     StreamSpan,
     ColumnAcc,
@@ -108,6 +115,46 @@ struct _Encoding(Copyable, Movable):
     var dictionary_size: Int
 
 
+struct NestedStripes(Movable):
+    """The parsed StripeFooter and located streams of every stripe a nested
+    read spans, in file order.
+
+    Each stripe's located streams are kept in the flat parallel-list form
+    (kind / column / start / end) so this module never imports
+    `orc_reader._StreamLoc`. Zero stripes is a valid set: every subtree then
+    decodes to a zero-row column.
+    """
+
+    var footers: List[StripeFooter]
+    var locs_kind: List[List[Int]]
+    var locs_col: List[List[Int]]
+    var locs_start: List[List[Int]]
+    var locs_end: List[List[Int]]
+
+    def __init__(out self):
+        self.footers = List[StripeFooter]()
+        self.locs_kind = List[List[Int]]()
+        self.locs_col = List[List[Int]]()
+        self.locs_start = List[List[Int]]()
+        self.locs_end = List[List[Int]]()
+
+    def add_stripe(
+        mut self,
+        sf: StripeFooter,
+        locs_kind: List[Int],
+        locs_col: List[Int],
+        locs_start: List[Int],
+        locs_end: List[Int],
+    ):
+        """Append one stripe (its footer and located streams)."""
+        self.footers.append(sf.copy())
+        self.locs_kind.append(locs_kind.copy())
+        self.locs_col.append(locs_col.copy())
+        self.locs_start.append(locs_start.copy())
+        self.locs_end.append(locs_end.copy())
+
+    def count(self) -> Int:
+        return len(self.footers)
 
 
 # =============================================================================
@@ -116,16 +163,15 @@ struct _Encoding(Copyable, Movable):
 
 
 def _gather_streams_for_column(
-    locs_kind: List[Int],
-    locs_col: List[Int],
-    locs_start: List[Int],
-    locs_end: List[Int],
+    stripes: NestedStripes,
+    s: Int,
     file_bytes: Span[UInt8, _],
     col_id: Int,
     codec: Int,
     block_size: Int,
 ) raises -> List[StreamSpan]:
-    """Collect+decompress every (non-index) data stream for `col_id`."""
+    """Collect+decompress every (non-index) data stream for `col_id` in
+    stripe `s`."""
     from .footer import (
         ORC_STREAM_ROW_INDEX,
         ORC_STREAM_BLOOM_FILTER,
@@ -133,6 +179,10 @@ def _gather_streams_for_column(
     )
     from .orc_codec import decompress_stream
 
+    ref locs_kind = stripes.locs_kind[s]
+    ref locs_col = stripes.locs_col[s]
+    ref locs_start = stripes.locs_start[s]
+    ref locs_end = stripes.locs_end[s]
     var out = List[StreamSpan]()
     for i in range(len(locs_kind)):
         if locs_col[i] != col_id:
@@ -170,6 +220,14 @@ def _is_v2(enc_kind: Int) -> Bool:
     )
 
 
+@always_inline
+def _sum(values: List[Int]) -> Int:
+    var total = 0
+    for i in range(len(values)):
+        total += values[i]
+    return total
+
+
 # =============================================================================
 # Validity helpers.
 # =============================================================================
@@ -197,55 +255,70 @@ def _validity_bitmap(present: List[Bool]) raises -> Optional[Bitmap[HeapRegion]]
     return Optional[Bitmap[HeapRegion]](bm^)
 
 
-def _present_for_node(
-    locs_kind: List[Int],
-    locs_col: List[Int],
-    locs_start: List[Int],
-    locs_end: List[Int],
+def _present_in_stripe(
+    stripes: NestedStripes,
+    s: Int,
     file_bytes: Span[UInt8, _],
     node_idx: Int,
     codec: Int,
     block_size: Int,
     n_rows: Int,
 ) raises -> List[Bool]:
-    """Decode the PRESENT (validity) stream for a node, or all-present."""
+    """Decode one stripe's PRESENT (validity) stream for a node, or
+    all-present."""
     var streams = _gather_streams_for_column(
-        locs_kind, locs_col, locs_start, locs_end, file_bytes, node_idx,
-        codec, block_size,
+        stripes, s, file_bytes, node_idx, codec, block_size
     )
     return _decode_present(streams, n_rows)
 
 
+def _present_all_stripes(
+    stripes: NestedStripes,
+    file_bytes: Span[UInt8, _],
+    node_idx: Int,
+    codec: Int,
+    block_size: Int,
+    rows: List[Int],
+) raises -> List[Bool]:
+    """The node's validity over every stripe's rows, in file order."""
+    var out = List[Bool]()
+    for s in range(stripes.count()):
+        var p = _present_in_stripe(
+            stripes, s, file_bytes, node_idx, codec, block_size, rows[s]
+        )
+        for i in range(len(p)):
+            out.append(p[i])
+    return out^
+
+
 # =============================================================================
-# Primitive leaf decode -> Column (single stripe, via column_decoder's ColumnAcc).
+# Primitive leaf decode -> Column (via column_decoder's ColumnAcc).
 # =============================================================================
 
 
 def _decode_primitive_column(
     schema: OrcSchema,
     node_idx: Int,
-    sf: StripeFooter,
-    locs_kind: List[Int],
-    locs_col: List[Int],
-    locs_start: List[Int],
-    locs_end: List[Int],
+    stripes: NestedStripes,
     file_bytes: Span[UInt8, _],
     codec: Int,
     block_size: Int,
-    n_rows: Int,
+    rows: List[Int],
 ) raises -> Column[HeapRegion]:
-    """Decode one PRIMITIVE schema node into an Arrow Column[HeapRegion] for one stripe."""
+    """Decode one PRIMITIVE schema node into an Arrow Column[HeapRegion]:
+    each stripe appends `rows[s]` values to one accumulator, as the flat path
+    does."""
     var node = schema.node(node_idx)
     var at = orc_node_to_arrow(schema, node_idx)
     var acc = make_accumulator(node.kind, at)
-    var enc = _encoding_for(sf, node_idx)
-    var streams = _gather_streams_for_column(
-        locs_kind, locs_col, locs_start, locs_end, file_bytes, node_idx,
-        codec, block_size,
-    )
-    decode_stripe_column(
-        acc, node.kind, enc.kind, enc.dictionary_size, streams, n_rows
-    )
+    for s in range(stripes.count()):
+        var enc = _encoding_for(stripes.footers[s], node_idx)
+        var streams = _gather_streams_for_column(
+            stripes, s, file_bytes, node_idx, codec, block_size
+        )
+        decode_stripe_column(
+            acc, node.kind, enc.kind, enc.dictionary_size, streams, rows[s]
+        )
     return acc^.build()
 
 
@@ -288,32 +361,50 @@ def decode_column_subtree(
     """Decode schema node `node_idx` (and its descendants) into an Arrow
     Column for one stripe. `n_rows` is the number of logical rows THIS node
     spans (== the parent's element count for a child of LIST/MAP/UNION)."""
+    var stripes = NestedStripes()
+    stripes.add_stripe(sf, locs_kind, locs_col, locs_start, locs_end)
+    var rows = List[Int]()
+    rows.append(n_rows)
+    return decode_column_subtree_stripes(
+        schema, node_idx, stripes, file_bytes, codec, block_size, rows
+    )
+
+
+def decode_column_subtree_stripes(
+    schema: OrcSchema,
+    node_idx: Int,
+    stripes: NestedStripes,
+    file_bytes: Span[UInt8, _],
+    codec: Int,
+    block_size: Int,
+    rows: List[Int],
+) raises -> Column[HeapRegion]:
+    """Decode schema node `node_idx` (and its descendants) across every
+    stripe in `stripes` into ONE Arrow Column. `rows[s]` is the number of
+    logical rows this node spans in stripe `s` (a stripe's row count for a
+    top-level column; the parent's element count in that stripe for a child
+    of LIST/MAP/UNION). The output holds `sum(rows)` rows in stripe order."""
     var kind = schema.node(node_idx).kind
 
     if _is_primitive_kind(kind):
         return _decode_primitive_column(
-            schema, node_idx, sf, locs_kind, locs_col, locs_start, locs_end,
-            file_bytes, codec, block_size, n_rows,
+            schema, node_idx, stripes, file_bytes, codec, block_size, rows
         )
     elif kind == ORC_KIND_STRUCT:
         return _decode_struct(
-            schema, node_idx, sf, locs_kind, locs_col, locs_start, locs_end,
-            file_bytes, codec, block_size, n_rows,
+            schema, node_idx, stripes, file_bytes, codec, block_size, rows
         )
     elif kind == ORC_KIND_LIST:
         return _decode_list(
-            schema, node_idx, sf, locs_kind, locs_col, locs_start, locs_end,
-            file_bytes, codec, block_size, n_rows,
+            schema, node_idx, stripes, file_bytes, codec, block_size, rows
         )
     elif kind == ORC_KIND_MAP:
         return _decode_map(
-            schema, node_idx, sf, locs_kind, locs_col, locs_start, locs_end,
-            file_bytes, codec, block_size, n_rows,
+            schema, node_idx, stripes, file_bytes, codec, block_size, rows
         )
     elif kind == ORC_KIND_UNION:
         return _decode_union(
-            schema, node_idx, sf, locs_kind, locs_col, locs_start, locs_end,
-            file_bytes, codec, block_size, n_rows,
+            schema, node_idx, stripes, file_bytes, codec, block_size, rows
         )
 
     raise Error(
@@ -331,35 +422,30 @@ def decode_column_subtree(
 def _decode_struct(
     schema: OrcSchema,
     node_idx: Int,
-    sf: StripeFooter,
-    locs_kind: List[Int],
-    locs_col: List[Int],
-    locs_start: List[Int],
-    locs_end: List[Int],
+    stripes: NestedStripes,
     file_bytes: Span[UInt8, _],
     codec: Int,
     block_size: Int,
-    n_rows: Int,
+    rows: List[Int],
 ) raises -> Column[HeapRegion]:
     """STRUCT: struct-level PRESENT validity + recurse each child at full
     n_rows. ORC struct children are NOT shortened by the struct's null bitmap
-    — every child column still carries `n_rows` values."""
+    — every child column still carries the struct's row count per stripe."""
     var node = schema.node(node_idx)
-    var present = _present_for_node(
-        locs_kind, locs_col, locs_start, locs_end, file_bytes, node_idx,
-        codec, block_size, n_rows,
+    var present = _present_all_stripes(
+        stripes, file_bytes, node_idx, codec, block_size, rows
     )
     var validity = _validity_bitmap(present)
     var nc = _null_count(present)
+    var n_rows = _sum(rows)
 
     var nfields = len(node.subtypes)
     var kids = Slab[Column[HeapRegion]].create(max(nfields, 1))
     var names = List[String]()
     for i in range(nfields):
         var child_idx = node.subtypes[i]
-        var child_col = decode_column_subtree(
-            schema, child_idx, sf, locs_kind, locs_col, locs_start, locs_end,
-            file_bytes, codec, block_size, n_rows,
+        var child_col = decode_column_subtree_stripes(
+            schema, child_idx, stripes, file_bytes, codec, block_size, rows
         )
         kids.append(child_col^)
         if i < len(node.field_names):
@@ -379,22 +465,18 @@ def _decode_struct(
 
 
 def _decode_length_stream(
-    locs_kind: List[Int],
-    locs_col: List[Int],
-    locs_start: List[Int],
-    locs_end: List[Int],
+    stripes: NestedStripes,
+    s: Int,
     file_bytes: Span[UInt8, _],
     node_idx: Int,
     codec: Int,
     block_size: Int,
-    sf: StripeFooter,
     n_present: Int,
 ) raises -> List[Int64]:
-    """Decode the per-element LENGTH stream (unsigned RLE) for a LIST/MAP node.
-    Holds one entry per PRESENT (non-null) parent row."""
+    """Decode stripe `s`'s per-element LENGTH stream (unsigned RLE) for a
+    LIST/MAP node. Holds one entry per PRESENT (non-null) parent row."""
     var streams = _gather_streams_for_column(
-        locs_kind, locs_col, locs_start, locs_end, file_bytes, node_idx,
-        codec, block_size,
+        stripes, s, file_bytes, node_idx, codec, block_size
     )
     var lidx = _find_stream(streams, ORC_STREAM_LENGTH)
     if lidx < 0:
@@ -403,17 +485,16 @@ def _decode_length_stream(
             + String(node_idx)
             + " has no LENGTH stream"
         )
-    var enc = _encoding_for(sf, node_idx)
+    var enc = _encoding_for(stripes.footers[s], node_idx)
     var lens = decode_int_rle(
         streams[lidx].bytes, n_present, False, _is_v2(enc.kind)
     )
     # LIST/MAP element counts are decoded as UNSIGNED RLE into Int64, so a
     # bit-width-64 DIRECT run yields an arbitrary pattern — negative as an
-    # Int64. Those propagate straight into the CHILD subtree's `n_rows` (via the
-    # `total_child` / `total_entries` sums in `_decode_list` / `_decode_map`) and
-    # into `_build_offsets_i32`. One branchless pass here, at the single place
-    # LIST/MAP lengths enter the decoder, covers both consumers. Mirrors
-    # `column_decoder._decode_lengths`.
+    # Int64. Those propagate straight into the CHILD subtree's row counts (via
+    # `_list_row_lengths`) and into `_build_offsets_i32`. One branchless pass
+    # here, at the single place LIST/MAP lengths enter the decoder, covers both
+    # consumers. Mirrors `column_decoder._decode_lengths`.
     #
     # Call the shared helper; do not re-inline the loop. Copies of one
     # invariant drift, and a LENGTH decoder that misses it is a bounds bug.
@@ -426,7 +507,7 @@ def _check_child_total(total: Int, node_idx: Int, what: StringSlice) raises:
     """Bound a LIST/MAP child element count before it becomes an allocation.
 
     `total` is the sum of writer-chosen per-row element counts. It is passed as
-    the child subtree's `n_rows` AND ends up as the final Arrow offset, so the
+    the child subtree's row count AND ends up as the final Arrow offset, so the
     Arrow Int32 offsets type is the honest ceiling.
     """
     if total < 0 or total > Int(Int32.MAX):
@@ -482,18 +563,59 @@ def _build_offsets_i32(lengths_per_row: List[Int]) raises -> OwnedAlignedBuffer:
     return buf^
 
 
-def _per_row_lengths(present: List[Bool], dense_lengths: List[Int64]) -> List[Int]:
-    """Expand dense (present-only) per-element lengths into a per-ROW list:
-    a null row contributes length 0 (its child span is empty)."""
-    var out = List[Int]()
-    var vi = 0
-    for i in range(len(present)):
-        if present[i]:
-            out.append(Int(dense_lengths[vi]))
-            vi += 1
-        else:
-            out.append(0)
-    return out^
+struct _ListShape(Movable):
+    """A LIST/MAP node's per-row validity and element counts over every
+    stripe, plus each stripe's child element count (the child subtree's
+    `rows`)."""
+
+    var present: List[Bool]
+    var row_lengths: List[Int]
+    var child_rows: List[Int]
+
+    def __init__(out self):
+        self.present = List[Bool]()
+        self.row_lengths = List[Int]()
+        self.child_rows = List[Int]()
+
+
+def _list_row_lengths(
+    stripes: NestedStripes,
+    file_bytes: Span[UInt8, _],
+    node_idx: Int,
+    codec: Int,
+    block_size: Int,
+    rows: List[Int],
+    what: StringSlice,
+) raises -> _ListShape:
+    """Decode PRESENT + LENGTH of a LIST/MAP node in every stripe. A null row
+    contributes length 0 (its child span is empty). The running element total
+    is bounded after each stripe, BEFORE any child decode allocates for it:
+    it becomes the child's row count and the last Arrow offset, and an Int32
+    offsets buffer cannot address past `Int32.MAX` elements."""
+    var shape = _ListShape()
+    var total = 0
+    for s in range(stripes.count()):
+        var present = _present_in_stripe(
+            stripes, s, file_bytes, node_idx, codec, block_size, rows[s]
+        )
+        var dense_lengths = _decode_length_stream(
+            stripes, s, file_bytes, node_idx, codec, block_size,
+            _count_true(present),
+        )
+        var stripe_total = 0
+        var vi = 0
+        for i in range(len(present)):
+            shape.present.append(present[i])
+            var n = 0
+            if present[i]:
+                n = Int(dense_lengths[vi])
+                vi += 1
+            shape.row_lengths.append(n)
+            stripe_total += n
+        total += stripe_total
+        _check_child_total(total, node_idx, what)
+        shape.child_rows.append(stripe_total)
+    return shape^
 
 
 # =============================================================================
@@ -504,55 +626,35 @@ def _per_row_lengths(present: List[Bool], dense_lengths: List[Int64]) -> List[In
 def _decode_list(
     schema: OrcSchema,
     node_idx: Int,
-    sf: StripeFooter,
-    locs_kind: List[Int],
-    locs_col: List[Int],
-    locs_start: List[Int],
-    locs_end: List[Int],
+    stripes: NestedStripes,
     file_bytes: Span[UInt8, _],
     codec: Int,
     block_size: Int,
-    n_rows: Int,
+    rows: List[Int],
 ) raises -> Column[HeapRegion]:
-    """LIST: PRESENT + per-element LENGTH + single child column. Child spans
-    sum(lengths) rows; offsets are prefix-sum of per-row lengths."""
+    """LIST: PRESENT + per-element LENGTH + single child column. The child
+    spans sum(lengths) rows; offsets are the prefix-sum of per-row lengths
+    over every stripe, so they continue across stripe boundaries."""
     var node = schema.node(node_idx)
     if len(node.subtypes) < 1:
         raise Error("OrcDecodeError.MALFORMED: LIST node has no child")
-    var present = _present_for_node(
-        locs_kind, locs_col, locs_start, locs_end, file_bytes, node_idx,
-        codec, block_size, n_rows,
-    )
-    var n_present = _count_true(present)
-    var dense_lengths = _decode_length_stream(
-        locs_kind, locs_col, locs_start, locs_end, file_bytes, node_idx,
-        codec, block_size, sf, n_present,
-    )
-    var row_lengths = _per_row_lengths(present, dense_lengths)
-    var total_child = 0
-    for i in range(len(row_lengths)):
-        total_child += row_lengths[i]
-    # The sum of per-row element counts becomes the CHILD subtree's `n_rows` —
-    # i.e. it drives the child's allocations — and it becomes the last Arrow
-    # offset. Bound it BEFORE recursing rather than at `_build_offsets_i32`,
-    # which runs after the child decode has already allocated. The bound is the
-    # Arrow ListArray offsets type, not an arbitrary policy number: an Int32
-    # offsets buffer cannot address past `Int32.MAX` elements.
-    _check_child_total(total_child, node_idx, "LIST")
-
-    var child_col = decode_column_subtree(
-        schema, node.subtypes[0], sf, locs_kind, locs_col, locs_start,
-        locs_end, file_bytes, codec, block_size, total_child,
+    var shape = _list_row_lengths(
+        stripes, file_bytes, node_idx, codec, block_size, rows, "LIST"
     )
 
-    var offsets = _build_offsets_i32(row_lengths)
-    var validity = _validity_bitmap(present)
-    var nc = _null_count(present)
+    var child_col = decode_column_subtree_stripes(
+        schema, node.subtypes[0], stripes, file_bytes, codec, block_size,
+        shape.child_rows,
+    )
+
+    var offsets = _build_offsets_i32(shape.row_lengths)
+    var validity = _validity_bitmap(shape.present)
+    var nc = _null_count(shape.present)
     var la = ListArray[HeapRegion](
         offsets=offsets^,
         child=child_col^,
         validity=validity^,
-        length=n_rows,
+        length=_sum(rows),
         null_count=nc,
     )
     return Column.from_list(la^)
@@ -566,56 +668,39 @@ def _decode_list(
 def _decode_map(
     schema: OrcSchema,
     node_idx: Int,
-    sf: StripeFooter,
-    locs_kind: List[Int],
-    locs_col: List[Int],
-    locs_start: List[Int],
-    locs_end: List[Int],
+    stripes: NestedStripes,
     file_bytes: Span[UInt8, _],
     codec: Int,
     block_size: Int,
-    n_rows: Int,
+    rows: List[Int],
 ) raises -> Column[HeapRegion]:
     """MAP: PRESENT + per-element LENGTH + KEY child + VALUE child. Both
     children span sum(lengths) entries (parallel keys/values arrays)."""
     var node = schema.node(node_idx)
     if len(node.subtypes) < 2:
         raise Error("OrcDecodeError.MALFORMED: MAP node needs key + value child")
-    var present = _present_for_node(
-        locs_kind, locs_col, locs_start, locs_end, file_bytes, node_idx,
-        codec, block_size, n_rows,
-    )
-    var n_present = _count_true(present)
-    var dense_lengths = _decode_length_stream(
-        locs_kind, locs_col, locs_start, locs_end, file_bytes, node_idx,
-        codec, block_size, sf, n_present,
-    )
-    var row_lengths = _per_row_lengths(present, dense_lengths)
-    var total_entries = 0
-    for i in range(len(row_lengths)):
-        total_entries += row_lengths[i]
-    # As `_decode_list`: bound the child row count before it becomes two child
-    # subtree allocations (keys + values).
-    _check_child_total(total_entries, node_idx, "MAP")
-
-    var keys_col = decode_column_subtree(
-        schema, node.subtypes[0], sf, locs_kind, locs_col, locs_start,
-        locs_end, file_bytes, codec, block_size, total_entries,
-    )
-    var values_col = decode_column_subtree(
-        schema, node.subtypes[1], sf, locs_kind, locs_col, locs_start,
-        locs_end, file_bytes, codec, block_size, total_entries,
+    var shape = _list_row_lengths(
+        stripes, file_bytes, node_idx, codec, block_size, rows, "MAP"
     )
 
-    var offsets = _build_offsets_i32(row_lengths)
-    var validity = _validity_bitmap(present)
-    var nc = _null_count(present)
+    var keys_col = decode_column_subtree_stripes(
+        schema, node.subtypes[0], stripes, file_bytes, codec, block_size,
+        shape.child_rows,
+    )
+    var values_col = decode_column_subtree_stripes(
+        schema, node.subtypes[1], stripes, file_bytes, codec, block_size,
+        shape.child_rows,
+    )
+
+    var offsets = _build_offsets_i32(shape.row_lengths)
+    var validity = _validity_bitmap(shape.present)
+    var nc = _null_count(shape.present)
     var ma = MapArray[HeapRegion](
         offsets=offsets^,
         keys=keys_col^,
         values=values_col^,
         validity=validity^,
-        length=n_rows,
+        length=_sum(rows),
         null_count=nc,
         keys_sorted=False,
     )
@@ -630,82 +715,29 @@ def _decode_map(
 def _decode_union(
     schema: OrcSchema,
     node_idx: Int,
-    sf: StripeFooter,
-    locs_kind: List[Int],
-    locs_col: List[Int],
-    locs_start: List[Int],
-    locs_end: List[Int],
+    stripes: NestedStripes,
     file_bytes: Span[UInt8, _],
     codec: Int,
     block_size: Int,
-    n_rows: Int,
+    rows: List[Int],
 ) raises -> Column[HeapRegion]:
     """UNION: PRESENT + DATA (byte-RLE tag stream) + N branch children. Child
     `i` holds values ONLY for rows where tag==i (tagged-dense). Reconstruct the
     Arrow Dense Union: type_ids = per-row tag, offsets = running per-child
-    counter. Null parent rows (PRESENT=0) take tag 0 with no child slot."""
+    counter over every stripe. Null parent rows (PRESENT=0) take tag 0 with no
+    child slot."""
     var node = schema.node(node_idx)
     var nbranch = len(node.subtypes)
     if nbranch < 1:
         raise Error("OrcDecodeError.MALFORMED: UNION node has no branches")
 
-    var present = _present_for_node(
-        locs_kind, locs_col, locs_start, locs_end, file_bytes, node_idx,
-        codec, block_size, n_rows,
-    )
-    var n_present = _count_true(present)
-
-    var streams = _gather_streams_for_column(
-        locs_kind, locs_col, locs_start, locs_end, file_bytes, node_idx,
-        codec, block_size,
-    )
-    var didx = _find_stream(streams, ORC_STREAM_DATA)
-    if didx < 0:
-        raise Error("OrcDecodeError.MISSING_DATA: UNION has no TAG (DATA) stream")
-    var dense_tags = decode_byte_rle(streams[didx].bytes, n_present)
-
-    var child_counts = List[Int]()
-    for _b in range(nbranch):
-        child_counts.append(0)
-    var row_tags = List[Int8]()
-    var row_offsets = List[Int32]()
-    var vi = 0
-    for i in range(len(present)):
-        if present[i]:
-            var tag = Int(dense_tags[vi])
-            vi += 1
-            if tag < 0 or tag >= nbranch:
-                raise Error(
-                    "OrcDecodeError.UNION_TAG_OOB: tag "
-                    + String(tag)
-                    + " out of [0, "
-                    + String(nbranch)
-                    + ")"
-                )
-            row_tags.append(Int8(tag))
-            row_offsets.append(Int32(child_counts[tag]))
-            child_counts[tag] += 1
-        else:
-            row_tags.append(Int8(0))
-            row_offsets.append(Int32(0))
-
-    var kids = Slab[Column[HeapRegion]].create(max(nbranch, 1))
-    var type_ids = List[Int]()
-    for b in range(nbranch):
-        var child_col = decode_column_subtree(
-            schema, node.subtypes[b], sf, locs_kind, locs_col, locs_start,
-            locs_end, file_bytes, codec, block_size, child_counts[b],
-        )
-        kids.append(child_col^)
-        type_ids.append(b)
-
-    comptime int8_size = size_of[Int8]()
-    comptime int32_size = size_of[Int32]()
-    # `n_rows * int32_size` is an unchecked multiplication feeding an
-    # allocation, while the fill loops below run to `n_rows` — the same
+    # `n_rows * int32_size` below is an unchecked multiplication feeding an
+    # allocation, while the fill loops run to `n_rows` — the same
     # wrap-to-a-short-buffer / write-to-n_rows mismatch that `ColumnAcc.reserve`
-    # guards against on the BIGINT path. Reachable here via a UNION whose `n_rows` came
-    # from a parent LIST/MAP element sum. One check before the two allocations.
+    # guards against on the BIGINT path. Reachable here via a UNION whose row
+    # count came from a parent LIST/MAP element sum. One check before any
+    # per-row work.
+    var n_rows = _sum(rows)
     if n_rows < 0 or n_rows > ORC_MAX_ROWS:
         raise Error(
             String("OrcDecodeError.BAD_ROW_COUNT: UNION node ")
@@ -716,6 +748,66 @@ def _decode_union(
             + String(ORC_MAX_ROWS)
             + "]"
         )
+
+    # child_counts[b]: branch b's values so far (the dense offset of the next
+    # row tagged b). branch_rows[b][s]: branch b's value count in stripe s.
+    var child_counts = List[Int]()
+    var branch_rows = List[List[Int]]()
+    for _b in range(nbranch):
+        child_counts.append(0)
+        branch_rows.append(List[Int]())
+    var row_tags = List[Int8]()
+    var row_offsets = List[Int32]()
+    for s in range(stripes.count()):
+        var present = _present_in_stripe(
+            stripes, s, file_bytes, node_idx, codec, block_size, rows[s]
+        )
+        var streams = _gather_streams_for_column(
+            stripes, s, file_bytes, node_idx, codec, block_size
+        )
+        var didx = _find_stream(streams, ORC_STREAM_DATA)
+        if didx < 0:
+            raise Error(
+                "OrcDecodeError.MISSING_DATA: UNION has no TAG (DATA) stream"
+            )
+        var dense_tags = decode_byte_rle(
+            streams[didx].bytes, _count_true(present)
+        )
+        var before = child_counts.copy()
+        var vi = 0
+        for i in range(len(present)):
+            if present[i]:
+                var tag = Int(dense_tags[vi])
+                vi += 1
+                if tag < 0 or tag >= nbranch:
+                    raise Error(
+                        "OrcDecodeError.UNION_TAG_OOB: tag "
+                        + String(tag)
+                        + " out of [0, "
+                        + String(nbranch)
+                        + ")"
+                    )
+                row_tags.append(Int8(tag))
+                row_offsets.append(Int32(child_counts[tag]))
+                child_counts[tag] += 1
+            else:
+                row_tags.append(Int8(0))
+                row_offsets.append(Int32(0))
+        for b in range(nbranch):
+            branch_rows[b].append(child_counts[b] - before[b])
+
+    var kids = Slab[Column[HeapRegion]].create(max(nbranch, 1))
+    var type_ids = List[Int]()
+    for b in range(nbranch):
+        var child_col = decode_column_subtree_stripes(
+            schema, node.subtypes[b], stripes, file_bytes, codec, block_size,
+            branch_rows[b],
+        )
+        kids.append(child_col^)
+        type_ids.append(b)
+
+    comptime int8_size = size_of[Int8]()
+    comptime int32_size = size_of[Int32]()
     var types_buf = OwnedAlignedBuffer(max(n_rows * int8_size, 1))
     for i in range(n_rows):
         types_buf.set_typed[Int8](i, row_tags[i])
@@ -732,3 +824,27 @@ def _decode_union(
         type_ids, types_buf^, offsets_buf^, kids^, n_rows
     )
     return Column.from_union(ua^)
+
+
+# =============================================================================
+# Output schema.
+# =============================================================================
+
+
+def nested_output_schema(
+    schema: OrcSchema,
+    col_node_idxs: List[Int],
+    col_names: List[String],
+) raises -> Schema:
+    """Build the Arrow output Schema from the resolved output-column node
+    indices + names, stamping arrow.orc.* extension metadata per leaf."""
+    var sb = SchemaBuilder()
+    for c in range(len(col_node_idxs)):
+        var node_idx = col_node_idxs[c]
+        var at = orc_node_to_arrow(schema, node_idx)
+        var f = Field(col_names[c], at, True)
+        stamp_arrow_orc_metadata(f, schema, node_idx)
+        sb.add_field(f^)
+    return sb.build()
+
+

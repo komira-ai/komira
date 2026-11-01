@@ -1,0 +1,14 @@
+{
+ "name": "nested_two_levels",
+ "defect": "nesting works one level deep only: a frame over a frame of the same instance over a scalar, all on one context (design 4.3)",
+ "run": "nested_frame",
+ "entry": "running_sum",
+ "shape": "MAP_BATCHES_FRAME",
+ "args": [{"type": "int64", "nullable": true}],
+ "result": [{"type": "int64", "nullable": true}],
+ "result_is_table": true,
+ "nested": {"entry": "double", "shape": "SCALAR", "args": [{"type": "int64", "nullable": true}], "result": [{"type": "int64", "nullable": true}]},
+ "levels": 2,
+ "inputs": [{"length": 3, "columns": [{"type": "int64", "values": [1, 2, 3]}]}, {"length": 1, "columns": [{"type": "int64", "values": [4]}]}],
+ "expect": {"status": "OK", "batches": [{"length": 3, "columns": [{"type": "int64", "values": [2, 8, 20]}]}, {"length": 1, "columns": [{"type": "int64", "values": [40]}]}]}
+}

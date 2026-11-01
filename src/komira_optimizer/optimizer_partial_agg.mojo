@@ -173,6 +173,7 @@ from komira_plan_ir.plan_helpers import (
     _take_distinct_child,
     _take_topn_child,
 )
+from .optimizer_udf_carry import filter_like, project_like, aggregate_like
 
 
 # =============================================================================
@@ -255,19 +256,19 @@ def push_aggregate_below_join(var plan: LogicalPlan) raises -> LogicalPlan:
         # the case where all safety checks rejected the rewrite.
         var new_gb = _copy_expr_array(plan._aggregate.value()[].group_by)
         var new_aggs = _copy_agg_expr_array(plan._aggregate.value()[].agg_exprs)
-        return LogicalPlan.aggregate(new_gb^, new_aggs^, new_child^)
+        return aggregate_like(plan._aggregate.value()[], new_gb^, new_aggs^, new_child^)
 
     elif plan.tag == PLAN_FILTER:
         var child = _take_filter_child(plan)
         var pred = plan._filter.value()[].predicate.copy()
         var new_child = push_aggregate_below_join(child^)
-        return LogicalPlan.filter(pred^, new_child^)
+        return filter_like(plan._filter.value()[], pred^, new_child^)
 
     elif plan.tag == PLAN_PROJECT:
         var child = _take_project_child(plan)
         var new_child = push_aggregate_below_join(child^)
         var new_exprs = _copy_expr_array(plan._project.value()[].exprs)
-        return LogicalPlan.project(new_exprs^, new_child^)
+        return project_like(plan._project.value()[], new_exprs^, new_child^)
 
     elif plan.tag == PLAN_JOIN:
         # preserve `residual` + `algo_hint` across this recurse-rebuild.
@@ -516,6 +517,11 @@ def _classify_push_unchecked(
     soundness-clause refactor can't accidentally weaken the production
     path while editing the test path.
     """
+    # A UDF Aggregate is never split: the rewrite rebuilds it from agg_exprs.
+    # (The one check _classify_push_inner lacks: its clause (c) rejects every
+    # candidate today.)
+    if agg_plan.has_udf():
+        return _PushDecision(_PUSH_NONE)
     # Clause (a)
     if join_plan._join.value()[].join_type != JOIN_INNER:
         return _PushDecision(_PUSH_NONE)
@@ -599,19 +605,19 @@ def push_aggregate_below_join_force(var plan: LogicalPlan) raises -> LogicalPlan
 
         var new_gb = _copy_expr_array(plan._aggregate.value()[].group_by)
         var new_aggs = _copy_agg_expr_array(plan._aggregate.value()[].agg_exprs)
-        return LogicalPlan.aggregate(new_gb^, new_aggs^, new_child^)
+        return aggregate_like(plan._aggregate.value()[], new_gb^, new_aggs^, new_child^)
 
     elif plan.tag == PLAN_FILTER:
         var child = _take_filter_child(plan)
         var pred = plan._filter.value()[].predicate.copy()
         var new_child = push_aggregate_below_join_force(child^)
-        return LogicalPlan.filter(pred^, new_child^)
+        return filter_like(plan._filter.value()[], pred^, new_child^)
 
     elif plan.tag == PLAN_PROJECT:
         var child = _take_project_child(plan)
         var new_child = push_aggregate_below_join_force(child^)
         var new_exprs = _copy_expr_array(plan._project.value()[].exprs)
-        return LogicalPlan.project(new_exprs^, new_child^)
+        return project_like(plan._project.value()[], new_exprs^, new_child^)
 
     elif plan.tag == PLAN_JOIN:
         # preserve `residual` + `algo_hint` across this

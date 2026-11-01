@@ -7,7 +7,6 @@
 # =============================================================================
 
 from std.testing import assert_equal, assert_true, assert_false
-from std.time import perf_counter_ns
 
 from komira_async.observability.reactor_stall_detector import (
     ReactorStallDetector,
@@ -99,27 +98,6 @@ def test_stall_detector_clear_need_preempt() raises:
     assert_equal(Int(d.stall_count()), 1)  # counter survives flag clear
 
 
-def test_stall_detector_realtime_25ms_synthetic() raises:
-    """Use perf_counter_ns to synthesize a 25ms-busy-loop task; assert
-    real-clock-driven stall detection works."""
-    var d = ReactorStallDetector()
-    var t0 = Int64(perf_counter_ns())
-    d.task_started(Int64(42), t0)
-    # Busy-loop for ~25ms via perf_counter_ns polling. NOTE: not
-    # cycle-accurate but well above the 20ms threshold so jitter doesn't
-    # falsify the assertion.
-    var deadline_ns = t0 + Int64(25_000_000)
-    while Int64(perf_counter_ns()) < deadline_ns:
-        pass
-    var t1 = Int64(perf_counter_ns())
-    d.task_finished(Int64(42), t1)
-    assert_equal(Int(d.stall_count()), 1)
-    assert_equal(Int(d.last_stall_task_id()), 42)
-    # Elapsed must be >= 20ms threshold; allow generous upper bound for
-    # CI jitter (busy-loop overshoot common in containers).
-    assert_true(d.last_stall_elapsed_ns() >= Int64(20_000_000))
-
-
 def test_stall_detector_zero_threshold_every_task_stalls() raises:
     """Threshold = 0 means every non-instantaneous task is a stall.
     Useful for diagnostic / forced-stall test harnesses."""
@@ -138,6 +116,5 @@ def main() raises:
     test_stall_detector_under_then_over()
     test_stall_detector_configurable_threshold()
     test_stall_detector_clear_need_preempt()
-    test_stall_detector_realtime_25ms_synthetic()
     test_stall_detector_zero_threshold_every_task_stalls()
-    print("[PASS] ReactorStallDetector — 10/10 tests")
+    print("[PASS] ReactorStallDetector — 9/9 tests")

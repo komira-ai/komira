@@ -1,0 +1,75 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# mojo_library's `closure_excludes` (tools/build/mojo/defs.bzl): each library
+# depends on one package that the host profile's closure may not hold
+# (src/komira_host_profile/BUCK) and excludes that package by its import name. Every target here must fail at analysis, naming the package;
+# //tools/build/selftest:analysis_refusals_mojo requires the text.
+# The leaf's own BUCK file holds the same four names; its closure holds
+# komira_async_api, which an exact comparison does not refuse. The lowering
+# package's BUCK file holds these four and the three at the end of this file.
+
+mojo_library(
+    name = "fs",
+    srcs = ["__init__.mojo"],
+    conda = False,
+    import_name = "closure_excludes_fs",
+    deps = ["komira//src/komira_fs:komira_fs"],
+    closure_excludes = ["komira_fs"],
+)
+
+mojo_library(
+    name = "objectstore",
+    srcs = ["__init__.mojo"],
+    conda = False,
+    import_name = "closure_excludes_objectstore",
+    deps = ["komira//src/komira_objectstore:komira_objectstore"],
+    closure_excludes = ["komira_objectstore"],
+)
+
+mojo_library(
+    name = "async_runtime",
+    srcs = ["__init__.mojo"],
+    conda = False,
+    import_name = "closure_excludes_async_runtime",
+    deps = ["komira//src/komira_async:komira_async"],
+    closure_excludes = ["komira_async"],
+)
+
+mojo_library(
+    name = "shuffle",
+    srcs = ["__init__.mojo"],
+    conda = False,
+    import_name = "closure_excludes_shuffle",
+    deps = ["komira//src/komira_shuffle:komira_shuffle"],
+    closure_excludes = ["komira_shuffle"],
+)
+
+# The three packages komira_lowering's closure may not hold besides those four
+# (src/komira_lowering/BUCK): the host measurement and runtime package, the
+# optimizer and the SQL front end.
+mojo_library(
+    name = "engine_runtime",
+    srcs = ["__init__.mojo"],
+    conda = False,
+    import_name = "closure_excludes_engine_runtime",
+    deps = ["komira//src/komira_engine_runtime:komira_engine_runtime"],
+    closure_excludes = ["komira_engine_runtime"],
+)
+
+mojo_library(
+    name = "optimizer",
+    srcs = ["__init__.mojo"],
+    conda = False,
+    import_name = "closure_excludes_optimizer",
+    deps = ["komira//src/komira_optimizer:komira_optimizer"],
+    closure_excludes = ["komira_optimizer"],
+)
+
+mojo_library(
+    name = "sql",
+    srcs = ["__init__.mojo"],
+    conda = False,
+    import_name = "closure_excludes_sql",
+    deps = ["komira//src/komira_sql:komira_sql"],
+    closure_excludes = ["komira_sql"],
+)

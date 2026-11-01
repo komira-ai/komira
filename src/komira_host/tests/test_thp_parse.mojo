@@ -6,12 +6,12 @@
 # Every parser and the decision table take file CONTENTS as a `String`, so the
 # whole table is asserted here from literal text, on every host, whatever the
 # host's own THP policy is. The reader is exercised against files this test
-# writes under `TEST_TMPDIR`: a missing file, an empty file, a file holding
+# writes under a fresh temporary directory: a missing file, an empty file, a file holding
 # bytes >= 0x80 (which must come back byte for byte, not re-encoded), and files
 # on both sides of the 8 KiB read cap.
 # =============================================================================
 
-from std.os import getenv
+from std.tempfile import mkdtemp
 from std.sys.info import CompilationTarget
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
@@ -51,10 +51,9 @@ from komira_host.thp_policy import (
 
 
 def _scratch(name: String) raises -> String:
-    var base = getenv("TEST_TMPDIR")
-    if base.byte_length() == 0:
-        raise Error("TEST_TMPDIR is not set")
-    return base + String("/") + name
+    # A fresh directory of this call's own (`mkdtemp`: under `TMPDIR`, else `/tmp`), so no runner has to
+    # name a scratch directory and two runs of this test never share a path.
+    return mkdtemp(prefix="komira_host_") + String("/") + name
 
 
 def _write(path: String, bytes: List[UInt8]) raises:

@@ -106,6 +106,7 @@ from komira_plan_expr.expr import (
     EXPR_STRING_FN,
     EXPR_STRING_FN_N,
     EXPR_UDF_CALL,
+    EXPR_UDF_APPLY,
     expr_tag_name,
 )
 from komira_plan_ir.logical_plan import (
@@ -126,6 +127,9 @@ from komira_plan_ir.logical_plan import (
     PLAN_VIEW_REF,
     PLAN_CSE_REF,
     PLAN_CAST_TO_VARCHAR,
+    PLAN_EXCHANGE,
+    PLAN_MAP_BATCHES,
+    PLAN_STEP,
     plan_tag_name,
 )
 from komira_plan_ir.corr_subquery import corr_subq_inner_plan_ref
@@ -314,6 +318,27 @@ def check_plan_scan_bindings[
         return check_plan_scan_bindings(
             resolver, plan.cast_to_varchar_data_ref().child[]
         )
+    if tag == PLAN_EXCHANGE:
+        # Keys and ordering are column NAMES; no expression site.
+        if not plan._exchange:
+            return 0
+        return check_plan_scan_bindings(
+            resolver, plan.exchange_data_ref().child[]
+        )
+    if tag == PLAN_MAP_BATCHES:
+        # The grouping expressions can carry a subquery, and the child is a
+        # plan.
+        if not plan._map_batches:
+            return 0
+        ref mb = plan.map_batches_data_ref()
+        var n = 0
+        for i in range(len(mb.group_by)):
+            n += check_expr_scan_bindings(resolver, mb.group_by[i])
+        return n + check_plan_scan_bindings(resolver, mb.child[])
+    if tag == PLAN_STEP:
+        # A source with no child; its arguments are literals, no expression
+        # site and no scan.
+        return 0
 
     # ---- TWO-CHILD ---------------------------------------------------------
     # BOTH sides, always. A join whose RIGHT side carries the stale handle is
@@ -492,6 +517,15 @@ def check_expr_scan_bindings[
         if not expr._udf_call:
             return 0
         return check_expr_scan_bindings(resolver, expr.udf_call_child_ref())
+
+    if tag == EXPR_UDF_APPLY:
+        # N children, the call's arguments; each can carry a subquery.
+        if not expr._udf_apply:
+            return 0
+        var n = 0
+        for i in range(expr.udf_apply_num_args()):
+            n += check_expr_scan_bindings(resolver, expr.udf_apply_arg_ref(i))
+        return n
 
     # ---- TWO CHILDREN ------------------------------------------------------
     if tag == EXPR_BINARY_OP:

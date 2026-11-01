@@ -19,10 +19,23 @@ from std.testing import assert_equal, assert_true
 comptime _DIR = "gen/"
 
 
+def _gen_files() raises -> List[String]:
+    """Every file staged under gen/, the parts of a module the generator split
+    (the files of gen/_parts/) as `_parts/<file>`."""
+    var names = List[String]()
+    for entry in listdir(String(_DIR)):
+        if entry == "_parts":
+            for part in listdir(String(_DIR) + "_parts"):
+                names.append("_parts/" + part)
+        else:
+            names.append(entry)
+    return names^
+
+
 def _files() raises -> List[String]:
     """Every file staged under gen/. Refuses an empty staging, which would
     make each scan below pass over nothing."""
-    var names = listdir(String(_DIR))
+    var names = _gen_files()
     var has_service = False
     var has_operations = False
     for i in range(len(names)):
@@ -47,6 +60,33 @@ def _count(hay: String, needle: String) -> Int:
 def _read(name: String) raises -> String:
     with open(String(_DIR) + name, "r") as f:
         return f.read()
+
+
+def _is_part_of(file: String, stem: String) -> Bool:
+    """Whether `file` is `<stem>_pNN.mojo`: a part of module `stem`."""
+    var head = stem + "_p"
+    if not file.startswith(head) or not file.endswith(".mojo"):
+        return False
+    var digits = String(file[byte=head.byte_length():file.byte_length() - 5])
+    if digits.byte_length() == 0:
+        return False
+    var b = digits.as_bytes()
+    for i in range(len(b)):
+        if Int(b[i]) < 48 or Int(b[i]) > 57:
+            return False
+    return True
+
+
+def _module(name: String) raises -> String:
+    """The text of generated module `name`: its file and, when the generator
+    split it (the file is then a facade importing its parts from
+    gen/_parts/), each of its parts."""
+    var text = _read(name)
+    var stem = String(name[byte=0:name.byte_length() - 5])
+    for part in listdir(String(_DIR) + "_parts"):
+        if _is_part_of(part, stem):
+            text += _read("_parts/" + part)
+    return text^
 
 
 def test_no_environment_read() raises:
@@ -74,7 +114,7 @@ def test_no_environment_read() raises:
 
 def _methods_of(file: String, var names: List[String]) raises -> Int:
     """Hold `file` to exactly the client methods `names`; their count."""
-    var text = _read(file)
+    var text = _module(file)
     for j in range(len(names)):
         assert_equal(
             _count(text, String("    def ") + names[j] + "[RT: Runtime]("),
@@ -133,7 +173,7 @@ def test_only_the_used_methods_are_generated() raises:
     assert_equal(methods, total, "a method outside the list was generated")
     # One operations client: google.longrunning.Operations, generated into
     # operations.mojo with run_v2.yaml's bindings.
-    assert_equal(_count(_read("operations.mojo"), "struct OperationsClient["), 1)
+    assert_equal(_count(_module("operations.mojo"), "struct OperationsClient["), 1)
 
 
 def main() raises:

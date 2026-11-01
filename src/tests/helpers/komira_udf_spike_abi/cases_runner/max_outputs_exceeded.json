@@ -1,0 +1,13 @@
+{
+ "name": "max_outputs_exceeded",
+ "defect": "a deliberate mismatch: more outputs than the case allows",
+ "run": "frame",
+ "entry": "running_sum",
+ "shape": "MAP_BATCHES_FRAME",
+ "args": [{"type": "int64", "nullable": true}],
+ "result": [{"type": "int64", "nullable": true}],
+ "result_is_table": true,
+ "inputs": [{"length": 1, "columns": [{"type": "int64", "values": [1]}]}, {"length": 1, "columns": [{"type": "int64", "values": [2]}]}],
+ "expect": {"status": "OK", "max_outputs": 1},
+ "runner_fails_with": "2 outputs, at most 1 expected"
+}

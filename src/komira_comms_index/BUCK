@@ -1,0 +1,65 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The comms metadata and query-index substrate: a per-collection CAS-manifest
+# delta log of immutable index chunks behind a mutable `_HEAD` pointer, the
+# chunk codec (`KeyedDelta`, the compacted-base codec) and compaction, all on
+# komira_objectstore's conditional-write stores. `CommsIndex[Store]` appends a
+# delta with the manifest's create-CAS, reads the merged last-writer-wins state
+# (a tombstone removes a key; the higher per-key `seq` wins), lists the keys
+# changed since a token for incremental sync, compacts the tail into one base
+# chunk and purges a collection. Each comms type (mail flags, calendar sync, chat
+# event log) plugs its own key and value bytes in; the package wires no server.
+#
+# The welded test drives it over the in-memory conditional stores: chunk codec
+# round trip, append and read, the mutable-bit fold, compaction (state
+# preserved, window envelope, watermark against a concurrent append), a fresh
+# reader seeing the deferred tail, and the `_HEAD` compare-swap race with four
+# writers fanned out on worker threads by komira_async's
+# `parallel_fork_join_shared` (komira_async_api's `ParallelDispatch`).
+
+mojo_library(
+    name = "komira_comms_index",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    # The full transitive closure of the Mojo libraries this package and its
+    # test build on.
+    deps = [
+        "//src/komira_arrow:komira_arrow",
+        "//src/komira_arrow_ipc:komira_arrow_ipc",
+        "//src/komira_async:komira_async",
+        "//src/komira_async_api:komira_async_api",
+        "//src/komira_atomic_alias:komira_atomic_alias",
+        "//src/komira_buffer:komira_buffer",
+        "//src/komira_clock:komira_clock",
+        "//src/komira_collections:komira_collections",
+        "//src/komira_column_kernels:komira_column_kernels",
+        "//src/komira_compression:komira_compression",
+        "//src/komira_counters:komira_counters",
+        "//src/komira_dynamic_filter:komira_dynamic_filter",
+        "//src/komira_fork_join:komira_fork_join",
+        "//src/komira_fs:komira_fs",
+        "//src/komira_hash:komira_hash",
+        "//src/komira_host:komira_host",
+        "//src/komira_join_assembly:komira_join_assembly",
+        "//src/komira_libc:komira_libc",
+        "//src/komira_log:komira_log",
+        "//src/komira_lz4:komira_lz4",
+        "//src/komira_metrics:komira_metrics",
+        "//src/komira_name_registry:komira_name_registry",
+        "//src/komira_objectstore:komira_objectstore",
+        "//src/komira_objectstore:komira_objectstore_posix",
+        "//src/komira_plan_expr:komira_plan_expr",
+        "//src/komira_plan_ir:komira_plan_ir",
+        "//src/komira_plan_stats:komira_plan_stats",
+        "//src/komira_scalar_arithmetic:komira_scalar_arithmetic",
+        "//src/komira_scan_source:komira_scan_source",
+        "//src/komira_simd:komira_simd",
+        "//src/komira_spsc_ring:komira_spsc_ring",
+        "//src/komira_trace:komira_trace",
+        "//src/komira_zlib:komira_zlib",
+        "//tools/build/mojo/runtime_paths:komira_runtime_paths",
+    ],
+    test_srcs = [
+        "tests/test_comms_index_substrate.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)

@@ -25,7 +25,7 @@ is a path in that cell.
 `known_untested` is the ledger of the test files and packages allowed to
 break those rules, each with its reason. It only shrinks: a row whose
 test is welded, or whose package welds a test, is a finding, and so is a row
-naming nothing. The action is test_weld.sh. It reads the list of the tree's
+naming nothing. The action is test_weld (test_weld.zig). It reads the list of the tree's
 .mojo paths and the list of welded paths, never the files, so it re-runs
 only when one of those lists or the ledger changes.
 
@@ -42,8 +42,8 @@ checks nothing; `buck2 bxl //tools/build/lint/test_weld.bxl:check -- --lint
 WeldedTestsInfo of every target it yields, and runs the check as a build
 action (test_weld_check.bzl) on Linux x86-64, the platform its busybox is
 resolved for (so a test_weld target takes no `exec_compatible_with`). The
-pull request's check runs it for every test_weld target of a unit it builds
-(release/ci/build_targets.sh). The query is configured for the target
+pull request's check runs it for each test_weld target it names
+(.github/workflows/pr.yml). The query is configured for the target
 platform, as `buck2 cquery` sees it: a test target incompatible with that
 platform welds nothing there.
 """
@@ -71,8 +71,7 @@ def _test_weld_impl(ctx):
             root = ctx.attrs.root,
             ledger = ctx.attrs.known_untested,
             welds = cell + ctx.attrs.welds,
-            busybox = ctx.attrs._busybox[DefaultInfo].default_outputs[0],
-            script = ctx.attrs._script,
+            tool = ctx.attrs._tool[DefaultInfo].default_outputs[0],
             exec_compatible_with = LINUX_X86_64,
             label = str(ctx.label.raw_target()),
         ),
@@ -89,13 +88,12 @@ test_weld_rule = rule(
         # A target pattern of this cell, from `//` (`//src/...`): the targets
         # that weld tests.
         "welds": attrs.string(),
-        "_busybox": attrs.exec_dep(default = "komira//tools/build/toolchains:busybox"),
-        "_script": attrs.source(default = "komira//tools/build/lint:test_weld.sh"),
+        "_tool": attrs.exec_dep(default = "komira//tools/build/lint:test_weld_bin"),
     },
 )
 
 def _test_weld(**kwargs):
-    # The check runs on Linux x86-64 (test_weld.bxl); the busybox it runs is
+    # The check runs on Linux x86-64 (test_weld.bxl); the program it runs is
     # resolved for this target's execution platform, so the two are one.
     if "exec_compatible_with" in kwargs:
         fail("test_weld {}: takes no exec_compatible_with: its check runs on Linux x86-64".format(kwargs.get("name", "")))

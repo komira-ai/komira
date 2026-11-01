@@ -5,11 +5,12 @@
 #
 # What the profile promises, one test per promise:
 #
-#   * It runs the driver's pass order: on plans where payload narrowing has
-#     nothing to stamp and no scalar needs binding, its output renders exactly
-#     as `optimize`'s (seven plans here; `test_optimizer_portable_parity.mojo`
-#     has one plan for each pass these seven do not reach).
-#   * It turns off payload narrowing (a host-local rule) and folds no value
+#   * It runs the driver's pass order: on plans where no scalar needs
+#     binding, its output renders exactly as `optimize`'s (eight plans here; `test_optimizer_portable_parity.mojo`
+#     has one plan for each pass these eight do not reach). One of the eight
+#     is a join with narrowable statistics: neither entry narrows payload (a
+#     host lowering rule, `komira_lowering_rules`).
+#   * It folds no value
 #     from an execution; a plan that needs one is refused by name with its
 #     site count, and the decorrelated broadcast shape (which needs none) is
 #     kept. A pass's own refusal is raised unchanged.
@@ -45,9 +46,7 @@ from komira_plan_ir.logical_plan import (
     JOIN_INNER,
     JOIN_SEMI,
     JOIN_ALGO_AUTO,
-    PLAN_SCAN,
     PLAN_JOIN,
-    PLAN_PROJECT,
     PLAN_AGGREGATE,
 )
 from komira_optimizer.optimizer_config import OptimizerConfig
@@ -104,11 +103,6 @@ def _v1() -> PortableProfile:
 
 def _portable(var p: LogicalPlan, config: OptimizerConfig = OptimizerConfig()) raises -> LogicalPlan:
     return optimize_portable(p^, config, _v1())
-
-
-def _in_process(var p: LogicalPlan, config: OptimizerConfig = OptimizerConfig()) raises -> LogicalPlan:
-    var deps = ScalarDepTable()
-    return optimize(p^, config, deps)
 
 
 def _shared_conjunct_or() -> LogicalPlan:
@@ -299,7 +293,7 @@ def _stamped_side(path: String, payload: String, hi: Int64) raises -> LogicalPla
 
 def _narrowable_join() raises -> LogicalPlan:
     """probe(key, probe_val) INNER JOIN build(key, build_val), both payloads
-    in two bytes: `optimize` stamps both scans."""
+    in two bytes: statistics a host lowering would narrow on."""
     return LogicalPlan.join(
         _stamped_side("probe.parquet", "probe_val", 999),
         _stamped_side("build.parquet", "build_val", 9999),
@@ -308,18 +302,6 @@ def _narrowable_join() raises -> LogicalPlan:
         JOIN_INNER,
     )
 
-
-def _narrow_stamps(p: LogicalPlan) -> Int:
-    """The number of payload-narrow stamps on the scans under joins."""
-    if p.tag == PLAN_SCAN:
-        return len(p._scan.value()[].payload_narrow)
-    if p.tag == PLAN_JOIN:
-        return _narrow_stamps(p._join.value()[].left[]) + _narrow_stamps(
-            p._join.value()[].right[]
-        )
-    if p.tag == PLAN_PROJECT:
-        return _narrow_stamps(p._project.value()[].child[])
-    return 0
 
 
 # --- A four-relation star DPccp reorders, with per-column NDV statistics. ---
@@ -381,12 +363,11 @@ def _star4(reverse_stats: Bool) -> LogicalPlan:
     return LogicalPlan.project(pe^, fabc^)
 
 
-comptime _N_FIXTURES = 7
+comptime _N_FIXTURES = 8
 
 
 def _plan_at(i: Int) raises -> LogicalPlan:
-    """Plan `i` of the plans on which `optimize` stamps no narrowing and
-    records no request."""
+    """Plan `i` of the plans on which `optimize` records no request."""
     if i == 0:
         return _shared_conjunct_or()
     if i == 1:
@@ -399,7 +380,9 @@ def _plan_at(i: Int) raises -> LogicalPlan:
         return _or_of_equalities_residual_join()
     if i == 5:
         return _scalar_subquery_filter(_global_agg())
-    return _star4(False)
+    if i == 6:
+        return _star4(False)
+    return _narrowable_join()
 
 
 # -----------------------------------------------------------------------------
@@ -408,13 +391,15 @@ def _plan_at(i: Int) raises -> LogicalPlan:
 
 
 def test_portable_output_renders_as_optimize_where_no_host_rule_applies() raises:
-    """On seven plans (OR factoring, eager aggregation, SEMI pushdown, the
-    reorder/build-side swap, the IN-list rewrite, a decorrelated scalar
-    subquery, a DPccp star) where `optimize` stamps no narrowing and records no
-    request, `optimize_portable` renders byte for byte as `optimize`.
+    """On eight plans (OR factoring, eager aggregation, SEMI pushdown, the
+    reorder and build-side recording, the IN-list rewrite, a decorrelated scalar
+    subquery, a DPccp star, a join with narrowable statistics) where
+    `optimize` records no request, `optimize_portable` renders byte for byte
+    as `optimize`.
 
-    Defect caught: one of these passes made conditional on `narrow_payload`,
-    so the portable entry skips it: scalar decorrelation (step 2), the join
+    Defect caught: one of these passes made conditional on the entry, so the
+    portable entry skips it (or a statistics-driven step run by one entry
+    only, the narrowable join): scalar decorrelation (step 2), the join
     residual to side, the first OR factoring and the IN-list rewrite (steps
     5-8), eager aggregation, SEMI reducer pushdown, the join reorder,
     build-side selection and the order restore (steps 14-16).
@@ -423,20 +408,9 @@ def test_portable_output_renders_as_optimize_where_no_host_rule_applies() raises
         var deps = ScalarDepTable()
         var want = optimize(_plan_at(i), OptimizerConfig(), deps)
         assert_equal(deps.num_requests(), 0, "fixture " + String(i))
-        assert_equal(_narrow_stamps(want), 0, "fixture " + String(i))
         var got = _portable(_plan_at(i))
         assert_equal(_render(got), _render(want), "fixture " + String(i))
 
-
-def test_portable_does_not_narrow_join_payload() raises:
-    """`optimize` stamps both scans of the narrowable join; the portable
-    profile stamps none: payload narrowing is a host-local rule.
-
-    Defect caught: the portable entry running step 20."""
-    var in_process = _in_process(_narrowable_join())
-    assert_equal(_narrow_stamps(in_process), 2, _render(in_process))
-    var portable = _portable(_narrowable_join())
-    assert_equal(_narrow_stamps(portable), 0, _render(portable))
 
 
 # -----------------------------------------------------------------------------

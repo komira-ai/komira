@@ -1,0 +1,358 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+load("@komira//tools/build/sql:defs.bzl", "sql_oracle")
+
+# Test-only: DECIMAL column vs literal comparisons through run_sql (the SQL
+# door of komira_sdk_exec) against the answers of the pinned DuckDB. oracle/
+# holds the SQL that DuckDB runs: table.sql builds the table `t` (nine nullable
+# DECIMAL columns of precision 15 to 38 and scale 0 to 10, with NULLs and
+# extreme rows) and table_x.sql the table `tx` (four columns that hold values
+# so large that DuckDB cannot widen them to the scale of a longer literal);
+# write.sql and write_x.sql write them as t.parquet and tx.parquet; every
+# other action starts from one of them. compare_<col>.sql counts, for each
+# literal and each of the six comparison operators, the rows of one column that
+# the comparison keeps, and the rows for which DuckDB raises an error instead
+# (TRY gives NULL); where.sql does the same for whole WHERE texts; types.sql
+# records DuckDB's type and value for each constant a comparison folds;
+# errors.sql records the constants DuckDB cannot fold. The first comment of
+# each file says what it holds; each repeats one SELECT per literal or
+# predicate. A test reads the literal and the predicate text from DuckDB's own
+# answer, so a predicate has one source.
+#
+#   test_column_<col>[_n]        for every literal of compare_<col>.tsv (part n
+#                                of it, for the columns with many literals) and
+#                                each operator, the rows `<col> <op> <literal>`
+#                                and each reversed spelling keep are DuckDB's,
+#                                and a comparison DuckDB raises on is refused
+#   test_double_sites            every place the engine converts a DECIMAL to a
+#                                DOUBLE (a sum() of an integer column, a cast, a
+#                                promotion beside a DOUBLE, a math function,
+#                                AVG) answers DuckDB's DOUBLE
+#   test_where_texts             the rows each WHERE text of where.tsv keeps
+#                                are DuckDB's
+#   test_folded_constants        the plan holds each folded constant as the
+#                                DECIMAL DuckDB computes, a constant DuckDB
+#                                cannot fold is refused, and Q6's range bounds
+#                                are DECIMAL literals
+#
+# The checks are in checks.mojo (library code), so each test is its own action.
+# Nothing depends on this package.
+sql_oracle(
+    name = "table",
+    srcs = ["oracle/table.sql", "oracle/write.sql"],
+    outputs = ["t.parquet"],
+)
+
+sql_oracle(
+    name = "table_f",
+    srcs = ["oracle/table_f.sql", "oracle/write_f.sql"],
+    outputs = ["tf.parquet"],
+)
+
+sql_oracle(
+    name = "table_x",
+    srcs = ["oracle/table_x.sql", "oracle/write_x.sql"],
+    outputs = ["tx.parquet"],
+)
+
+sql_oracle(
+    name = "table_s",
+    srcs = ["oracle/table_s.sql", "oracle/write_s.sql"],
+    outputs = ["pj.parquet", "pd.parquet", "pg.parquet"],
+)
+
+sql_oracle(
+    name = "double_sites",
+    srcs = ["oracle/table_s.sql", "oracle/double_sites.sql"],
+    outputs = ["double_sites.tsv"],
+)
+
+[sql_oracle(
+    name = "compare_" + col,
+    srcs = ["oracle/table.sql", "oracle/compare_" + col + ".sql"],
+    outputs = ["compare_" + col + ".tsv"],
+) for col in ["a", "b", "c", "d", "e", "f", "m", "g", "h"]]
+
+[sql_oracle(
+    name = "compare_" + col,
+    srcs = ["oracle/table_f.sql", "oracle/compare_" + col + ".sql"],
+    outputs = ["compare_" + col + ".tsv"],
+) for col in ["fb", "fc", "fd", "fe", "ff", "fg", "fh"]]
+
+[sql_oracle(
+    name = "compare_" + col,
+    srcs = ["oracle/table_x.sql", "oracle/compare_" + col + ".sql"],
+    outputs = ["compare_" + col + ".tsv"],
+) for col in ["xq", "xr", "xs", "xw"]]
+
+[sql_oracle(
+    name = name,
+    srcs = ["oracle/table.sql", "oracle/" + name + ".sql"],
+    outputs = [name + ".tsv"],
+) for name in ["where", "types"]]
+
+sql_oracle(
+    name = "double_sweep",
+    srcs = ["oracle/double_sweep.sql"],
+    outputs = ["double_sweep.tsv"],
+)
+
+sql_oracle(
+    name = "errors",
+    srcs = ["oracle/errors.sql"],
+    outputs = ["errors.tsv"],
+)
+
+mojo_library(
+    name = "komira_decimal_compare_conformance",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/komira_agg:komira_agg",
+        "//src/komira_agg_api:komira_agg_api",
+        "//src/komira_arrow:komira_arrow",
+        "//src/komira_arrow_ipc:komira_arrow_ipc",
+        "//src/komira_async:komira_async",
+        "//src/komira_async_api:komira_async_api",
+        "//src/komira_atomic_alias:komira_atomic_alias",
+        "//src/komira_avro:komira_avro",
+        "//src/komira_batch_eval:komira_batch_eval",
+        "//src/komira_buffer:komira_buffer",
+        "//src/komira_clock:komira_clock",
+        "//src/komira_collections:komira_collections",
+        "//src/komira_column_kernels:komira_column_kernels",
+        "//src/komira_compression:komira_compression",
+        "//src/komira_counters:komira_counters",
+        "//src/komira_crypto:komira_crypto",
+        "//src/komira_csv:komira_csv",
+        "//src/komira_dynamic_filter:komira_dynamic_filter",
+        "//src/komira_encoding:komira_encoding",
+        "//src/komira_engine_runtime:komira_engine_runtime",
+        "//src/komira_exec_types:komira_exec_types",
+        "//src/komira_expr:komira_expr",
+        "//src/komira_fork_join:komira_fork_join",
+        "//src/komira_fs:komira_fs",
+        "//src/komira_hash:komira_hash",
+        "//src/komira_host:komira_host",
+        "//src/komira_host_profile:komira_host_profile",
+        "//src/komira_join_assembly:komira_join_assembly",
+        "//src/komira_json:komira_json",
+        "//src/komira_json_index:komira_json_index",
+        "//src/komira_jsonl:komira_jsonl",
+        "//src/komira_kernels:komira_kernels",
+        "//src/komira_libc:komira_libc",
+        "//src/komira_log:komira_log",
+        "//src/komira_lowering:komira_lowering",
+        "//src/komira_lz4:komira_lz4",
+        "//src/komira_metrics:komira_metrics",
+        "//src/komira_morsel:komira_morsel",
+        "//src/komira_name_registry:komira_name_registry",
+        "//src/komira_objectstore:komira_objectstore",
+        "//src/komira_op_agg_state:komira_op_agg_state",
+        "//src/komira_op_sources:komira_op_sources",
+        "//src/komira_operator_api:komira_operator_api",
+        "//src/komira_optimizer:komira_optimizer",
+        "//src/komira_parquet:komira_parquet",
+        "//src/komira_parquet_api:komira_parquet_api",
+        "//src/komira_parquet_codec:komira_parquet_codec",
+        "//src/komira_parquet_footers:komira_parquet_footers",
+        "//src/komira_parquet_scan:komira_parquet_scan",
+        "//src/komira_physical_plan:komira_physical_plan",
+        "//src/komira_pipeline_exec:komira_pipeline_exec",
+        "//src/komira_plan_expr:komira_plan_expr",
+        "//src/komira_plan_ir:komira_plan_ir",
+        "//src/komira_plan_proto:komira_plan_proto",
+        "//src/komira_plan_stats:komira_plan_stats",
+        "//src/komira_plan_wire:komira_plan_wire",
+        "//src/komira_proto_codec:komira_proto_codec",
+        "//src/komira_protobuf:komira_protobuf",
+        "//src/komira_row_format:komira_row_format",
+        "//src/komira_scalar_arithmetic:komira_scalar_arithmetic",
+        "//src/komira_scan_planning:komira_scan_planning",
+        "//src/komira_scan_source:komira_scan_source",
+        "//src/komira_sdk:komira_sdk",
+        "//src/komira_sdk_exec:komira_sdk_exec",
+        "//src/komira_secret_registry:komira_secret_registry",
+        "//src/komira_secret_store:komira_secret_store",
+        "//src/komira_shuffle:komira_shuffle",
+        "//src/komira_simd:komira_simd",
+        "//src/komira_spsc_ring:komira_spsc_ring",
+        "//src/komira_sql:komira_sql",
+        "//src/komira_sync:komira_sync",
+        "//src/komira_trace:komira_trace",
+        "//src/komira_udf:komira_udf",
+        "//src/komira_zlib:komira_zlib",
+        "//tools/build/mojo/runtime_paths:komira_runtime_paths",
+    ],
+    conda = False,
+    test_srcs = [
+        "tests/test_column_a_1.mojo",
+        "tests/test_column_a_2.mojo",
+        "tests/test_column_a_3.mojo",
+        "tests/test_column_b_1.mojo",
+        "tests/test_column_b_2.mojo",
+        "tests/test_column_b_3.mojo",
+        "tests/test_column_c_1.mojo",
+        "tests/test_column_c_2.mojo",
+        "tests/test_column_c_3.mojo",
+        "tests/test_column_d_1.mojo",
+        "tests/test_column_d_2.mojo",
+        "tests/test_column_e_1.mojo",
+        "tests/test_column_e_2.mojo",
+        "tests/test_column_f.mojo",
+        "tests/test_column_m.mojo",
+        "tests/test_column_g.mojo",
+        "tests/test_column_h_1.mojo",
+        "tests/test_column_h_2.mojo",
+        "tests/test_column_fb.mojo",
+        "tests/test_column_fc.mojo",
+        "tests/test_column_fd.mojo",
+        "tests/test_column_fe.mojo",
+        "tests/test_column_ff.mojo",
+        "tests/test_column_fg.mojo",
+        "tests/test_column_fh.mojo",
+        "tests/test_column_xq.mojo",
+        "tests/test_column_xr.mojo",
+        "tests/test_column_xs.mojo",
+        "tests/test_column_xw.mojo",
+        "tests/test_folded_constants.mojo",
+        "tests/test_where_texts.mojo",
+        "tests/test_double_conversion.mojo",
+        "tests/test_double_sites.mojo",
+    ],
+    test_data = {
+        "tests/test_column_a_1.mojo": {
+            "t.parquet": ":table[t.parquet]",
+            "compare_a.tsv": ":compare_a[compare_a.tsv]",
+        },
+        "tests/test_column_a_2.mojo": {
+            "t.parquet": ":table[t.parquet]",
+            "compare_a.tsv": ":compare_a[compare_a.tsv]",
+        },
+        "tests/test_column_a_3.mojo": {
+            "t.parquet": ":table[t.parquet]",
+            "compare_a.tsv": ":compare_a[compare_a.tsv]",
+        },
+        "tests/test_column_b_1.mojo": {
+            "t.parquet": ":table[t.parquet]",
+            "compare_b.tsv": ":compare_b[compare_b.tsv]",
+        },
+        "tests/test_column_b_2.mojo": {
+            "t.parquet": ":table[t.parquet]",
+            "compare_b.tsv": ":compare_b[compare_b.tsv]",
+        },
+        "tests/test_column_b_3.mojo": {
+            "t.parquet": ":table[t.parquet]",
+            "compare_b.tsv": ":compare_b[compare_b.tsv]",
+        },
+        "tests/test_column_c_1.mojo": {
+            "t.parquet": ":table[t.parquet]",
+            "compare_c.tsv": ":compare_c[compare_c.tsv]",
+        },
+        "tests/test_column_c_2.mojo": {
+            "t.parquet": ":table[t.parquet]",
+            "compare_c.tsv": ":compare_c[compare_c.tsv]",
+        },
+        "tests/test_column_c_3.mojo": {
+            "t.parquet": ":table[t.parquet]",
+            "compare_c.tsv": ":compare_c[compare_c.tsv]",
+        },
+        "tests/test_column_d_1.mojo": {
+            "t.parquet": ":table[t.parquet]",
+            "compare_d.tsv": ":compare_d[compare_d.tsv]",
+        },
+        "tests/test_column_d_2.mojo": {
+            "t.parquet": ":table[t.parquet]",
+            "compare_d.tsv": ":compare_d[compare_d.tsv]",
+        },
+        "tests/test_column_e_1.mojo": {
+            "t.parquet": ":table[t.parquet]",
+            "compare_e.tsv": ":compare_e[compare_e.tsv]",
+        },
+        "tests/test_column_e_2.mojo": {
+            "t.parquet": ":table[t.parquet]",
+            "compare_e.tsv": ":compare_e[compare_e.tsv]",
+        },
+        "tests/test_column_f.mojo": {
+            "t.parquet": ":table[t.parquet]",
+            "compare_f.tsv": ":compare_f[compare_f.tsv]",
+        },
+        "tests/test_column_m.mojo": {
+            "t.parquet": ":table[t.parquet]",
+            "compare_m.tsv": ":compare_m[compare_m.tsv]",
+        },
+        "tests/test_column_g.mojo": {
+            "t.parquet": ":table[t.parquet]",
+            "compare_g.tsv": ":compare_g[compare_g.tsv]",
+        },
+        "tests/test_column_h_1.mojo": {
+            "t.parquet": ":table[t.parquet]",
+            "compare_h.tsv": ":compare_h[compare_h.tsv]",
+        },
+        "tests/test_column_h_2.mojo": {
+            "t.parquet": ":table[t.parquet]",
+            "compare_h.tsv": ":compare_h[compare_h.tsv]",
+        },
+        "tests/test_column_fb.mojo": {
+            "tf.parquet": ":table_f[tf.parquet]",
+            "compare_fb.tsv": ":compare_fb[compare_fb.tsv]",
+        },
+        "tests/test_column_fc.mojo": {
+            "tf.parquet": ":table_f[tf.parquet]",
+            "compare_fc.tsv": ":compare_fc[compare_fc.tsv]",
+        },
+        "tests/test_column_fd.mojo": {
+            "tf.parquet": ":table_f[tf.parquet]",
+            "compare_fd.tsv": ":compare_fd[compare_fd.tsv]",
+        },
+        "tests/test_column_fe.mojo": {
+            "tf.parquet": ":table_f[tf.parquet]",
+            "compare_fe.tsv": ":compare_fe[compare_fe.tsv]",
+        },
+        "tests/test_column_ff.mojo": {
+            "tf.parquet": ":table_f[tf.parquet]",
+            "compare_ff.tsv": ":compare_ff[compare_ff.tsv]",
+        },
+        "tests/test_column_fg.mojo": {
+            "tf.parquet": ":table_f[tf.parquet]",
+            "compare_fg.tsv": ":compare_fg[compare_fg.tsv]",
+        },
+        "tests/test_column_fh.mojo": {
+            "tf.parquet": ":table_f[tf.parquet]",
+            "compare_fh.tsv": ":compare_fh[compare_fh.tsv]",
+        },
+        "tests/test_column_xq.mojo": {
+            "tx.parquet": ":table_x[tx.parquet]",
+            "compare_xq.tsv": ":compare_xq[compare_xq.tsv]",
+        },
+        "tests/test_column_xr.mojo": {
+            "tx.parquet": ":table_x[tx.parquet]",
+            "compare_xr.tsv": ":compare_xr[compare_xr.tsv]",
+        },
+        "tests/test_column_xs.mojo": {
+            "tx.parquet": ":table_x[tx.parquet]",
+            "compare_xs.tsv": ":compare_xs[compare_xs.tsv]",
+        },
+        "tests/test_column_xw.mojo": {
+            "tx.parquet": ":table_x[tx.parquet]",
+            "compare_xw.tsv": ":compare_xw[compare_xw.tsv]",
+        },
+        "tests/test_folded_constants.mojo": {
+            "t.parquet": ":table[t.parquet]",
+            "types.tsv": ":types[types.tsv]",
+            "errors.tsv": ":errors[errors.tsv]",
+        },
+        "tests/test_double_conversion.mojo": {
+            "double_sweep.tsv": ":double_sweep[double_sweep.tsv]",
+        },
+        "tests/test_double_sites.mojo": {
+            "pj.parquet": ":table_s[pj.parquet]",
+            "pd.parquet": ":table_s[pd.parquet]",
+            "pg.parquet": ":table_s[pg.parquet]",
+            "double_sites.tsv": ":double_sites[double_sites.tsv]",
+        },
+        "tests/test_where_texts.mojo": {
+            "t.parquet": ":table[t.parquet]",
+            "where.tsv": ":where[where.tsv]",
+        },
+    },
+    visibility = ["PUBLIC"],
+)

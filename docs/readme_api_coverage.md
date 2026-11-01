@@ -9,7 +9,7 @@ is: per package, the public symbols its README's examples use. It is not line
 or branch coverage, which is a separate metric.
 
 The lint is [`readme_api_coverage`](../tools/build/lint/readme_api_coverage.bzl)
-(its action, [`readme_api_coverage.sh`](../tools/build/lint/readme_api_coverage.sh),
+(its action, [`readme_api_coverage.zig`](../tools/build/lint/readme_api_coverage.zig),
 states the same rules), declared once in the root [`BUCK`](../BUCK) as
 `//:readme_api_coverage` over every file of the cell. It is a validation
 that runs on the farm like the other lints; its tests are

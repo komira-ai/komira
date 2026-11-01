@@ -31,6 +31,10 @@ third_party_srcs(
     library = "s2n-tls",
     archive = ":s2n-tls-1.5.6.tar.gz",
     committed = "srcs.bzl",
+    # The explicit file lists a native_library stages (files.bzl), by the
+    # same reading and held the same way (:srcs_files_drift, :srcs_files_check).
+    committed_files = "files.bzl",
+    require = ["SRCS", "PUBLIC_HEADERS", "PROBE_SRCS"],
 )
 
 archive_files(

@@ -1,0 +1,15 @@
+[package]
+name = "komira_vcard"
+version = "0.1.0"
+description = "vCard (RFC 6350) in Mojo: raw cards from 4.0, 3.0 and 2.1 input, the RFC 9555-guided contact subset with unknown properties kept, and a vCard 4.0 writer."
+license = "Apache-2.0"
+repository = "https://github.com/komira-ai/komira"
+readme = "README.md"
+mojo = ["1.0.0"]
+
+[dependencies]
+komira_content_line = { path = "../komira_content_line", version = "0.1" }
+
+[targets]
+lib = { path = "src/komira_vcard" }
+tests = ["tests"]

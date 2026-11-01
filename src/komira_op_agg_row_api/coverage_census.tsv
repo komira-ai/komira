@@ -1,0 +1,3 @@
+# What the coverage census measured of this package's libraries (tools/build/coverage/census.md).
+census	2026-10-10	27a2541169cb979fa9c82a032eea24919b727121	-
+komira//src/komira_op_agg_row_api:komira_op_agg_row_api	src/komira_op_agg_row_api	library	OK	41	55	-	-	no	conda	src/komira_op_agg_row_api/agg_chunk_rows.mojo	-

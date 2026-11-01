@@ -1,0 +1,52 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The window operator of the engine (`partition_scan_sink`, the parallel
+# drivers and `PartitionBySink`, its MorselSink): the window sort and
+# partition / peer boundaries (`partition_keys`, NULLs last and floats by
+# `sort_key_lt`, as DuckDB orders them), the ranking functions and running
+# aggregates, the value functions, the frame resolver and the framed and
+# whole-partition aggregates; `TopNSink` and the typed stage's top-N states
+# (`TopNState`, `PartitionTopNState`, `Stage_TopN`) over bounded heaps;
+# `PartitionTopNHashState`, the top-N rows of each partition for any key
+# types; `PartitionTopNSink`, the top K rows of each partition.
+mojo_library(
+    name = "komira_op_window",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/komira_arrow:komira_arrow",
+        "//src/komira_async:komira_async",
+        "//src/komira_async_api:komira_async_api",
+        "//src/komira_buffer:komira_buffer",
+        "//src/komira_collections:komira_collections",
+        "//src/komira_column_format:komira_column_format",
+        "//src/komira_column_kernels:komira_column_kernels",
+        "//src/komira_counters:komira_counters",
+        "//src/komira_engine_runtime:komira_engine_runtime",
+        "//src/komira_exec_types:komira_exec_types",
+        "//src/komira_expr:komira_expr",
+        "//src/komira_op_sort:komira_op_sort",
+        "//src/komira_operator_api:komira_operator_api",
+        "//src/komira_physical_plan:komira_physical_plan",
+        "//src/komira_plan_expr:komira_plan_expr",
+        "//src/komira_udf:komira_udf",
+    ],
+    test_srcs = [
+        "tests/test_partition_by_global_order.mojo",
+        "tests/test_partition_topn_build_shape.mojo",
+        "tests/test_partition_topn_hash_state.mojo",
+        "tests/test_partition_topn_hash_state_oracle.mojo",
+        "tests/test_partition_topn_hash_state_keytypes.mojo",
+        "tests/test_partition_topn_oracle.mojo",
+        "tests/test_partition_topn_sink.mojo",
+        "tests/test_topn_sink.mojo",
+        "tests/test_topn_states.mojo",
+        "tests/test_window_partition_keys.mojo",
+        "tests/test_window_ranking_aggregates.mojo",
+        "tests/test_window_value_fns.mojo",
+    ],
+    test_deps = [
+        "//src/komira_eval:komira_eval",
+        "//src/komira_libc:komira_libc",
+    ],
+    visibility = ["PUBLIC"],
+)

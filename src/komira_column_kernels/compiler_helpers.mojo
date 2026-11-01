@@ -563,8 +563,8 @@ def share_batch_like_copy(batch: RecordBatch) raises -> RecordBatch:
     normalisations to the shared column and defers to `copy_column` whenever
     `project_column_share_eligible` fails — which is where the third lives,
     the `_offset == 0` gate that matters most, because plain STRING / BINARY
-    accessors IGNORE `_offset` and a shared row-sliced STRING column would
-    read the WRONG CELLS silently. This function is that per-column decision
+    accessors refuse a sliced column and a shared row-sliced STRING column
+    would raise on every read. This function is that per-column decision
     lifted to the batch, with `copy_batch`'s schema construction
     (`Schema.field_at`, preserving tz / decimal (p,s) / dict index type /
     per-field kv-metadata) unchanged.
@@ -982,8 +982,8 @@ def project_batch_by_names(batch: RecordBatch, names: List[String]) raises -> Re
 # it also NORMALISES. It rebases a row-slice to `_offset == 0`, it drops an
 # all-valid validity bitmap, and it back-fills DECIMAL (p, s) from the batch
 # schema. `share()` preserves `_offset` verbatim — and plain STRING / BINARY
-# accessors IGNORE `_offset` (see `Column.supports_zero_copy_slice`), so
-# sharing a row-sliced STRING column would read the WRONG CELLS. Callers of
+# accessors refuse a sliced column (see `Column.supports_zero_copy_slice`), so
+# sharing a row-sliced STRING column would make every read raise. Callers of
 # `project_batch_by_src_out_pairs` can hand it batches this module does not
 # control, so the eligibility predicate below is what makes the swap sound
 # rather than a claim about who calls it.
@@ -998,9 +998,9 @@ def project_column_share_eligible(batch: RecordBatch, col_idx: Int) raises -> Bo
 
     1. `_offset == 0`. `copy_column` rebases a row-slice to offset 0;
        `share()` preserves `_offset`. For plain STRING / BINARY the accessors
-       IGNORE `_offset` entirely (`Column.supports_zero_copy_slice`'s note), so
-       a shared sliced STRING column would read from row 0 — a SILENT WRONG
-       ANSWER, not a crash. This gate is the one that matters.
+       refuse a sliced column (`Column.supports_zero_copy_slice`'s note), so
+       a shared sliced STRING column would raise on every read. This gate is
+       the one that matters.
     2. `_length == batch.num_rows()`. `copy_column` emits exactly
        `batch.num_rows()` rows regardless of the column's own length, i.e. it
        TRUNCATES an over-long column; `share()` keeps `_length`.

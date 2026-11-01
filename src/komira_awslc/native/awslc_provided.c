@@ -1,0 +1,1 @@
+/* Not compiled: libawslc.a is built by the native_library target `:awslc` of BUCK, which mojo_package(natives = ...) names. mopm's manifest has no entry for a library the package does not compile (`provided = true` is not released yet), so [native.awslc] of mopm.toml names this file. */

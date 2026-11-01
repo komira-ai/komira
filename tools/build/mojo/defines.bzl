@@ -68,21 +68,12 @@ def cap_flags(cap):
         return []
     return ["--mem-cap-mib", str(cap)]
 
-def mem_cap_script(ctx):
-    """mem_cap.sh: the darwin-arm64 toolchain's cap (test_runtime.bzl,
-    gate_mojo); linux uses the gate's."""
-    return ctx.attrs._mem_cap[DefaultInfo].default_outputs[0]
-
-_MEM_CAP_ATTR = {
-    "_mem_cap": attrs.dep(default = "komira//tools/build/mojo:mem_cap.sh"),
-}
-
 LIBRARY_DEFINE_ATTRS = {
     # See this file's docstring and ASSERT_LEVELS.
     "test_assert_level": attrs.option(attrs.string(), default = None),
     "test_defines": attrs.list(attrs.string(), default = []),
     "test_memory_cap_mib": attrs.option(attrs.int(), default = None),
-} | _MEM_CAP_ATTR
+}
 
 BINARY_DEFINE_ATTRS = {
     "assert_level": attrs.option(attrs.string(), default = None),
@@ -91,4 +82,4 @@ BINARY_DEFINE_ATTRS = {
 
 TEST_DEFINE_ATTRS = BINARY_DEFINE_ATTRS | {
     "memory_cap_mib": attrs.option(attrs.int(), default = None),
-} | _MEM_CAP_ATTR
+}

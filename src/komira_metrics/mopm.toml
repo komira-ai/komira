@@ -1,0 +1,26 @@
+[package]
+name = "komira_metrics"
+version = "0.1.0"
+description = "The metrics model: per-operator metric sets, attribute-set interning, per-worker series and histogram tables with their export sweep, and the EXPLAIN ANALYZE collector and renderer."
+license = "Apache-2.0"
+repository = "https://github.com/komira-ai/komira"
+readme = "README.md"
+mojo = ["1.0.0"]
+
+[dependencies]
+komira_atomic_alias = { path = "../komira_atomic_alias", version = "0.1" }
+komira_clock = { path = "../komira_clock", version = "0.1" }
+komira_collections = { path = "../komira_collections", version = "0.1" }
+komira_hash = { path = "../komira_hash", version = "0.1" }
+komira_name_registry = { path = "../komira_name_registry", version = "0.1" }
+
+[dev-dependencies]
+komira_fork_join = { path = "../komira_fork_join", version = "0.1" }
+
+[native.komira_metrics_ea_flag]
+kind = "static"
+srcs = ["native/komira_metrics_ea_flag.c"]
+
+[targets]
+lib = { path = "src/komira_metrics" }
+tests = ["tests"]

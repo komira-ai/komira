@@ -155,7 +155,7 @@ def compress_streams_parallel[
         if slot:
             out_streams.append(slot.take())
         else:
-            out_streams.append(List[UInt8]())
+            out_streams.append(List[UInt8]())  # cov: unreachable parallel_fork_join fills every slot or raises
         i = i + 1
     _ = fj_out^
     return out_streams^

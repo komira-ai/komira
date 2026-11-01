@@ -47,3 +47,31 @@ assert_equal(
     "item1.X-ABLabel:Work\r\nX-CUSTOM:kept\r\nEND:VCARD\r\n",
 )
 ```
+
+## Build files
+
+This package is built with buildrules' `mojo_package` and packaged for mopm as `komira_vcard`, version 0.1.0
+(`mopm.toml`). The library is `src/komira_vcard/`, its tests are `tests/`. It depends on one package,
+`komira_content_line`, a sibling directory (`[dependencies]` of `mopm.toml`: `{ path = "../komira_content_line",
+version = "0.1" }`), so the `.conda` of this package records `mojo-komira_content_line >=0.1,<0.2` as a dependency
+and holds none of that package's files: installing `komira_vcard` installs `komira_content_line` with it. The files
+that are not sources:
+
+| file | what |
+|---|---|
+| `mopm.toml` | the mopm manifest: name, version, the Mojo version, the dependency and where the library and its tests are |
+| `mopm.lock` | the toolchain pins and the path dependency (no registry is reached: the only dependency is a sibling) |
+| `mopm-toolchain.toml` | the exact mopm and Mojo versions the build uses (written by hand) |
+| `coverage_floor.txt` | `lines NN.NN` and `branches NN.NN`: the least line and branch coverage `:coverage` may measure; `:coverage_floor` fails when either falls below, and above it passes and prints a hint to raise the figure |
+| `buildrules.mojo.lock.bzl`, `buildrules.mojo.bzl` | written by `buildrules mojo sync` from the files above and from the manifest of the sibling; `buildrules mojo check` fails when they are stale |
+
+`:lib` is the library file, built from the `:lib` of `komira_content_line`, and exists only once every test of
+`tests/` has passed. After any change to a source, a test, a manifest of this package or of the sibling, run
+`buildrules mojo sync` with both packages staged, commit what it writes, and build `komira//src/komira_vcard:lib` on
+the farm. A test file that `buildrules mojo sync` has not listed is not run: run the sync after adding one.
+
+`:conda` is buildrules' `mojo_conda` over `:lib`: the `.conda` of the mopm package
+(`mojo-komira_vcard-0.1.0-mojo1.0.0_0.conda`), packed with the sibling's manifest beside its own (`members`), which
+therefore exists only once the tests have passed. Publishing it (`mopm publish`) uploads, so it is a step of a CI job
+that takes that file, not a build action. `:komira_vcard` is `:lib` as komira's Mojo rules take it
+(`mojo_adopted_library`); it also compiles and runs the README's examples above (`[tests][readme]`) against `:lib`.

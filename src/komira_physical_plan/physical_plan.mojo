@@ -58,7 +58,7 @@ from komira_collections.slab import Slab
 #       recording whether the three parquet fields beside it REPRODUCE the
 #       scan they were minted from (see its docstring).
 #   14: `SegmentDescPod.morsel_rows` — the rows per morsel the HOST chose when it
-#       lowered the segment (`komira_engine_runtime.morsel_sizing_policy`),
+#       lowered the segment (`komira_host_profile.morsel_sizing_policy`),
 #       recorded so nothing downstream re-derives it. 0 = not yet lowered.
 #   Retired `MorselOp` tag values (4-13) are not reused.
 
@@ -345,10 +345,10 @@ struct ParquetSourceData(Movable):
     #     other breaker already takes, never the other way. ---
     var preserve_string_dict: Bool
     # --- The per-column integral-narrowing
-    #     instructions carried down from `ScanData.payload_narrow` by the
-    #     engine's join executor (not in this tree). EMPTY at construction at
-    #     every site (it is deliberately NOT a ctor argument — see the same note
-    #     on `ScanData.payload_narrow`).
+    #     instructions the host derives while it lowers the plan
+    #     (`komira_lowering_rules.derive_payload_narrow`) and sets here (not in
+    #     this tree). EMPTY at construction at every site (it is deliberately
+    #     NOT a ctor argument).
     #
     #     ⚠ IT IS ADVISORY, AND EXACTLY ONE LEAF HONOURS IT.
     #     The engine's parquet join materializer narrows the BUILD-side

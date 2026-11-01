@@ -1,0 +1,21 @@
+# The fixture of tools/build/ci/cases.bxl: a small graph the cases ask the
+# selector and the guard about:
+#
+#     top -> mid -> leaf -> leaf_src (leaf.txt)        lonely -> lonely_src (lonely.txt)
+#
+# `top`, `mid`, `leaf` and `lonely` stand for checks (aggregates of nothing),
+# the `_src` groups own the files. `.unowned` is a dotfile, which no glob
+# holds, so no target owns it. The aggregates are in agg/.
+load("@komira//tools/build/ci:aggregate.bzl", "ci_aggregate")
+
+filegroup(name = "leaf_src", srcs = ["leaf.txt"], visibility = ["PUBLIC"])
+
+filegroup(name = "lonely_src", srcs = ["lonely.txt"], visibility = ["PUBLIC"])
+
+ci_aggregate(name = "leaf", deps = [":leaf_src"], visibility = ["PUBLIC"])
+
+ci_aggregate(name = "mid", deps = [":leaf"], visibility = ["PUBLIC"])
+
+ci_aggregate(name = "top", deps = [":mid"], visibility = ["PUBLIC"])
+
+ci_aggregate(name = "lonely", deps = [":lonely_src"], visibility = ["PUBLIC"])

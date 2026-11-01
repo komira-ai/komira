@@ -13,9 +13,12 @@
  * ticks. Each tick reads the host's clock (the deadline is against it) and
  * the call's cancel flag; a flag seen set is written to the cancel word; a
  * worker that has not answered KUDFW_GRACE_MS after a cancel or a passed
- * deadline is killed (section 4.7: hard limits only in workers). End of
- * file, a reset, or a reply that breaks the framing marks the worker lost:
- * ERR_INSTANCE_LOST, with the exit status or signal in the message.
+ * deadline is killed (section 4.7: hard limits only in workers): ERR_KILLED,
+ * the message saying which. End of file or a reset while a request is out,
+ * or a reply that breaks the framing, marks the worker lost with the call's
+ * user code possibly run: ERR_WORKER_CRASHED, with the exit status or signal
+ * in the message (section 4.5). A request on a worker already lost, or one
+ * the worker could not even be sent, ran no user code: ERR_INSTANCE_LOST.
  *
  * Writes use MSG_NOSIGNAL: a worker that died must be an error here, never a
  * SIGPIPE in the engine.
@@ -172,15 +175,40 @@ static int recv_all(int fd, void* dst, size_t n) {
   return 0;
 }
 
-static int32_t lost_error(kudfw_worker* w, komira_udf_error* err) {
-  return kudfw_fail(err, KOMIRA_UDF_ERR_INSTANCE_LOST, -1, "komira udf worker lost: %s", w->lost_why);
+/* The status of a worker lost while request `op` was out: ERR_WORKER_CRASHED
+ * when the request runs user code (it may have run), else ERR_INSTANCE_LOST
+ * (HELLO, DESCRIBE, VALIDATE, LOAD and the closes of contexts and instances
+ * run none). */
+static int32_t crashed(uint32_t op) {
+  switch (op) {
+    case KOMIRA_UDF_OP_OPEN_INSTANCE: /* imports the bundle: its top-level code runs */
+    case KOMIRA_UDF_OP_CALL_BATCH:
+    case KOMIRA_UDF_OP_FRAME_OPEN:
+    case KOMIRA_UDF_OP_FRAME_IN:
+    case KOMIRA_UDF_OP_FRAME_OUT:
+    case KOMIRA_UDF_OP_FRAME_CLOSE: /* a generator's finally */
+    case KOMIRA_UDF_OP_AGG_OPEN:
+    case KOMIRA_UDF_OP_AGG_UPDATE:
+    case KOMIRA_UDF_OP_AGG_MERGE:
+    case KOMIRA_UDF_OP_AGG_STATE:
+    case KOMIRA_UDF_OP_AGG_FINISH:
+      return KOMIRA_UDF_ERR_WORKER_CRASHED;
+    default:
+      return KOMIRA_UDF_ERR_INSTANCE_LOST;
+  }
+}
+
+/* A lost worker's error: ERR_INSTANCE_LOST when no user code ran for this
+ * request, ERR_WORKER_CRASHED when it may have. */
+static int32_t lost_error(kudfw_worker* w, komira_udf_error* err, int32_t code) {
+  return kudfw_fail(err, code, -1, "komira udf worker lost: %s", w->lost_why);
 }
 
 int32_t kudfw_request(kudfw_worker* w, const komira_udf_host* host, uint32_t op, uint32_t flags,
                       uint64_t handle, const komira_udf_call* call, uint32_t n_groups, uint32_t emit_first_n,
                       const uint8_t* body, size_t body_len, kudfw_reply* reply, komira_udf_error* err) {
   memset(reply, 0, sizeof(*reply));
-  if (w->lost) return lost_error(w, err);
+  if (w->lost) return lost_error(w, err, KOMIRA_UDF_ERR_INSTANCE_LOST);
   int64_t remaining = 0;
   if (call != NULL && call->deadline_ns != 0) {
     remaining = call->deadline_ns - host->now_ns(host->host_data);
@@ -207,7 +235,7 @@ int32_t kudfw_request(kudfw_worker* w, const komira_udf_host* host, uint32_t op,
     char how[160];
     reap(w, 1000, how, sizeof(how));
     mark_lost(w, how);
-    return lost_error(w, err);
+    return lost_error(w, err, KOMIRA_UDF_ERR_INSTANCE_LOST);
   }
   /* Watch the call until the reply's header is readable. */
   int cancel_sent = 0;
@@ -219,14 +247,14 @@ int32_t kudfw_request(kudfw_worker* w, const komira_udf_host* host, uint32_t op,
     if (r > 0) break;
     if (r < 0 && errno != EINTR) {
       mark_lost(w, "poll on the control channel failed");
-      return lost_error(w, err);
+      return lost_error(w, err, crashed(op));
     }
     if (call == NULL) continue;
     int64_t now = host->now_ns(host->host_data);
     if (!cancel_sent && call->cancel != NULL && __atomic_load_n(call->cancel, __ATOMIC_ACQUIRE) != 0) {
       if (pwrite(w->cancel_fd, &id, 8, 0) != 8) {
         mark_lost(w, "the cancel word could not be written");
-        return lost_error(w, err);
+        return lost_error(w, err, crashed(op));
       }
       cancel_sent = 1;
       if (kill_at == 0) {
@@ -246,8 +274,8 @@ int32_t kudfw_request(kudfw_worker* w, const komira_udf_host* host, uint32_t op,
       snprintf(why, sizeof(why), "the call was %s and the worker did not answer within %d ms; %s", kill_why,
                KUDFW_GRACE_MS, how);
       mark_lost(w, why);
-      int32_t code = cancel_sent ? KOMIRA_UDF_ERR_INSTANCE_LOST : KOMIRA_UDF_ERR_DEADLINE;
-      return kudfw_fail(err, code, -1, "komira udf worker killed: %s", why);
+      /* A forced stop, for a cancel or a deadline (section 4.7) */
+      return kudfw_fail(err, KOMIRA_UDF_ERR_KILLED, -1, "komira udf worker killed: %s", why);
     }
   }
   komira_udf_wire_header rh;
@@ -255,7 +283,7 @@ int32_t kudfw_request(kudfw_worker* w, const komira_udf_host* host, uint32_t op,
     char how[160];
     reap(w, 1000, how, sizeof(how));
     mark_lost(w, how);
-    return lost_error(w, err);
+    return lost_error(w, err, crashed(op));
   }
   if (rh.magic != KOMIRA_UDF_WIRE_MAGIC || rh.request_id != id ||
       (rh.op != KOMIRA_UDF_OP_OK && rh.op != KOMIRA_UDF_OP_ERROR) || (rh.flags & KOMIRA_UDF_WIRE_INLINE) == 0 ||
@@ -267,7 +295,7 @@ int32_t kudfw_request(kudfw_worker* w, const komira_udf_host* host, uint32_t op,
     snprintf(why, sizeof(why), "a reply broke the framing (op %u, request %llu for %llu); %s", rh.op,
              (unsigned long long)rh.request_id, (unsigned long long)id, how);
     mark_lost(w, why);
-    return lost_error(w, err);
+    return lost_error(w, err, crashed(op));
   }
   uint8_t* payload = NULL;
   if (rh.payload_len > 0) {
@@ -288,7 +316,7 @@ int32_t kudfw_request(kudfw_worker* w, const komira_udf_host* host, uint32_t op,
       char how[160];
       reap(w, 1000, how, sizeof(how));
       mark_lost(w, how);
-      return lost_error(w, err);
+      return lost_error(w, err, crashed(op));
     }
   }
   reply->op = rh.op;
@@ -345,7 +373,7 @@ int32_t kudfw_reply_status(const kudfw_reply* r, komira_udf_error* err) {
     return kudfw_fail(err, KOMIRA_UDF_ERR_INTERNAL, -1, "a malformed ERROR reply");
   }
   /* ERROR with OK, a negative code, or one past the status table */
-  if (code <= 0 || code > KOMIRA_UDF_ERR_FIELD_NOT_DECLARED) code = KOMIRA_UDF_ERR_INTERNAL;
+  if (code <= 0 || code > KOMIRA_UDF_ERR_READ_SET_MISMATCH) code = KOMIRA_UDF_ERR_INTERNAL;
   if (trace != NULL && trace[0] == 0) {
     free(trace);
     trace = NULL;

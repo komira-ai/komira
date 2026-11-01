@@ -5,7 +5,9 @@
 //! isolation dir), and `-c komira_selftest.inner=true` to every command that
 //! reads the build configuration. It captures the exit status, stdout and
 //! stderr of each command into a log file under the scenario's log
-//! directory, kills a command that outlives its timeout, and stops every
+//! directory (its argv and working directory are written before it starts, so
+//! a command that never ends is named in the log directory; the build action
+//! that runs the scenario has the time limit), and stops every
 //! daemon it started (`buck2 [--isolation-dir ...] kill`) when the scenario
 //! ends, failed or not.
 const std = @import("std");
@@ -17,7 +19,6 @@ pub const Opts = struct {
     /// `section.key=value` pairs, each passed as `-c <pair>`.
     cfg: []const []const u8 = &.{},
     target_platforms: ?[]const u8 = null,
-    timeout_s: u32 = 600,
     /// Whether the command takes `-c` (`kill`, `log` and `root` do not).
     configured: bool = true,
     /// A scratch tree's root; null is the checkout, under the isolation dir.
@@ -29,7 +30,6 @@ pub const Opts = struct {
 pub const Result = struct {
     /// The exit status, or null when the command was killed or signalled.
     exit: ?u8,
-    timed_out: bool,
     stdout: []const u8,
     stderr: []const u8,
     log: []const u8,
@@ -45,9 +45,9 @@ const Daemon = struct { cwd: ?[]const u8 };
 /// checkout), the subcommand and its words, then the inner key and the `-c`
 /// pairs and target platforms, all before a `--` the words may hold.
 pub fn argv(a: std.mem.Allocator, buck2: []const u8, isolation_dir: ?[]const u8, words: []const []const u8, opts: Opts) ![]const []const u8 {
-    var out = std.ArrayList([]const u8).init(a);
-    try out.append(buck2);
-    if (isolation_dir) |d| try out.appendSlice(&.{ "--isolation-dir", d });
+    var out = std.ArrayList([]const u8).empty;
+    try out.append(a, buck2);
+    if (isolation_dir) |d| try out.appendSlice(a, &.{ "--isolation-dir", d });
     var split = words.len;
     for (words, 0..) |w, i| {
         if (std.mem.eql(u8, w, "--")) {
@@ -55,33 +55,15 @@ pub fn argv(a: std.mem.Allocator, buck2: []const u8, isolation_dir: ?[]const u8,
             break;
         }
     }
-    try out.appendSlice(words[0..split]);
+    try out.appendSlice(a, words[0..split]);
     if (opts.configured) {
-        try out.appendSlice(&.{ "-c", INNER_KEY });
-        for (opts.cfg) |c| try out.appendSlice(&.{ "-c", c });
-        if (opts.target_platforms) |p| try out.appendSlice(&.{ "--target-platforms", p });
+        try out.appendSlice(a, &.{ "-c", INNER_KEY });
+        for (opts.cfg) |c| try out.appendSlice(a, &.{ "-c", c });
+        if (opts.target_platforms) |p| try out.appendSlice(a, &.{ "--target-platforms", p });
     }
-    try out.appendSlice(words[split..]);
-    return out.toOwnedSlice();
+    try out.appendSlice(a, words[split..]);
+    return out.toOwnedSlice(a);
 }
-
-const Watch = struct {
-    pid: std.posix.pid_t,
-    deadline_ms: i64,
-    done: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
-    fired: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
-
-    fn loop(w: *Watch) void {
-        while (!w.done.load(.acquire)) {
-            if (std.time.milliTimestamp() >= w.deadline_ms) {
-                w.fired.store(true, .release);
-                std.posix.kill(w.pid, std.posix.SIG.KILL) catch {};
-                return;
-            }
-            std.time.sleep(100 * std.time.ns_per_ms);
-        }
-    }
-};
 
 pub const Runner = struct {
     a: std.mem.Allocator,
@@ -98,9 +80,9 @@ pub const Runner = struct {
         var env = try std.process.getEnvMap(a);
         // The outer `buck2 test` may export its own BUCK* variables; an inner
         // client must not take them for its own.
-        var drop = std.ArrayList([]const u8).init(a);
+        var drop = std.ArrayList([]const u8).empty;
         var it = env.iterator();
-        while (it.next()) |e| if (std.mem.startsWith(u8, e.key_ptr.*, "BUCK")) try drop.append(try a.dupe(u8, e.key_ptr.*));
+        while (it.next()) |e| if (std.mem.startsWith(u8, e.key_ptr.*, "BUCK")) try drop.append(a, try a.dupe(u8, e.key_ptr.*));
         for (drop.items) |k| env.remove(k);
         return .{
             .a = a,
@@ -110,7 +92,7 @@ pub const Runner = struct {
             .isolation_dir = try std.fmt.allocPrint(a, "selftest_{s}", .{scenario}),
             .log_dir = log_dir,
             .env = env,
-            .daemons = std.ArrayList(Daemon).init(a),
+            .daemons = std.ArrayList(Daemon).empty,
         };
     }
 
@@ -119,7 +101,7 @@ pub const Runner = struct {
             if (d.cwd == null and cwd == null) return;
             if (d.cwd != null and cwd != null and std.mem.eql(u8, d.cwd.?, cwd.?)) return;
         }
-        try self.daemons.append(.{ .cwd = cwd });
+        try self.daemons.append(self.a, .{ .cwd = cwd });
     }
 
     /// Runs `buck2 <words>` (see `argv`) and captures it.
@@ -130,21 +112,18 @@ pub const Runner = struct {
         self.n += 1;
         const log = try std.fmt.allocPrint(self.a, "{s}/{d:0>3}_{s}.log", .{ self.log_dir, self.n, words[0] });
 
-        var child = std.ChildProcess.init(cmd, self.a);
+        var child = std.process.Child.init(cmd, self.a);
         child.cwd = opts.cwd orelse self.root;
         child.env_map = &self.env;
         child.stdin_behavior = .Ignore;
         child.stdout_behavior = .Pipe;
         child.stderr_behavior = .Pipe;
+        try writeHeader(cmd, child.cwd.?, log);
         try child.spawn();
-        var watch = Watch{ .pid = child.id, .deadline_ms = std.time.milliTimestamp() + @as(i64, opts.timeout_s) * 1000 };
-        const thread = try std.Thread.spawn(.{}, Watch.loop, .{&watch});
-        var out = std.ArrayList(u8).init(self.a);
-        var err = std.ArrayList(u8).init(self.a);
-        const collected = child.collectOutput(&out, &err, 1 << 28);
+        var out = std.ArrayList(u8).empty;
+        var err = std.ArrayList(u8).empty;
+        const collected = child.collectOutput(self.a, &out, &err, 1 << 28);
         const term = child.wait();
-        watch.done.store(true, .release);
-        thread.join();
         try collected;
         const t = try term;
         const exit: ?u8 = switch (t) {
@@ -152,8 +131,7 @@ pub const Runner = struct {
             else => null,
         };
         const res = Result{
-            .exit = if (watch.fired.load(.acquire)) null else exit,
-            .timed_out = watch.fired.load(.acquire),
+            .exit = exit,
             .stdout = out.items,
             .stderr = err.items,
             .log = log,
@@ -162,15 +140,23 @@ pub const Runner = struct {
         return res;
     }
 
+    /// What the log says while the command runs.
+    fn writeHeader(cmd: []const []const u8, cwd: []const u8, log: []const u8) !void {
+        var f = try std.fs.cwd().createFile(log, .{});
+        defer f.close();
+        const w = f.deprecatedWriter();
+        try w.print("cwd: {s}\nargv:", .{cwd});
+        for (cmd) |c| try w.print(" {s}", .{c});
+        try w.writeAll("\nexit: still running\n");
+    }
+
     fn writeLog(cmd: []const []const u8, cwd: []const u8, r: Result) !void {
         var f = try std.fs.cwd().createFile(r.log, .{});
         defer f.close();
-        const w = f.writer();
+        const w = f.deprecatedWriter();
         try w.print("cwd: {s}\nargv:", .{cwd});
         for (cmd) |c| try w.print(" {s}", .{c});
-        if (r.timed_out) {
-            try w.writeAll("\nexit: killed at its timeout\n");
-        } else if (r.exit) |e| {
+        if (r.exit) |e| {
             try w.print("\nexit: {d}\n", .{e});
         } else {
             try w.writeAll("\nexit: signalled\n");
@@ -202,7 +188,7 @@ pub const Runner = struct {
     /// Stops every daemon this runner started.
     pub fn killAll(self: *Runner) void {
         for (self.daemons.items) |d| {
-            _ = self.run(&.{"kill"}, .{ .configured = false, .cwd = d.cwd, .timeout_s = 120, .track = false }) catch {};
+            _ = self.run(&.{"kill"}, .{ .configured = false, .cwd = d.cwd, .track = false }) catch {};
         }
         self.daemons.clearRetainingCapacity();
     }

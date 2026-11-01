@@ -19,18 +19,18 @@ pub fn main() !void {
     var d = try std.fs.cwd().openDir(dir, .{});
     defer d.close();
 
-    try d.writeFile(try std.fmt.allocPrint(a, "{s}.argv", .{name}), try std.mem.join(a, "\n", args));
+    try d.writeFile(.{ .sub_path = try std.fmt.allocPrint(a, "{s}.argv", .{name}), .data = try std.mem.join(a, "\n", args) });
     var env = try std.process.getEnvMap(a);
-    var lines = std.ArrayList([]const u8).init(a);
+    var lines = std.ArrayList([]const u8).empty;
     var it = env.iterator();
-    while (it.next()) |e| try lines.append(try std.fmt.allocPrint(a, "{s}={s}", .{ e.key_ptr.*, e.value_ptr.* }));
-    try d.writeFile(try std.fmt.allocPrint(a, "{s}.env", .{name}), try std.mem.join(a, "\n", lines.items));
+    while (it.next()) |e| try lines.append(a, try std.fmt.allocPrint(a, "{s}={s}", .{ e.key_ptr.*, e.value_ptr.* }));
+    try d.writeFile(.{ .sub_path = try std.fmt.allocPrint(a, "{s}.env", .{name}), .data = try std.mem.join(a, "\n", lines.items) });
 
     if (d.readFileAlloc(a, try std.fmt.allocPrint(a, "{s}.stdout", .{name}), 1 << 26)) |t| {
-        try std.io.getStdOut().writeAll(t);
+        try std.fs.File.stdout().writeAll(t);
     } else |_| {}
     if (d.readFileAlloc(a, try std.fmt.allocPrint(a, "{s}.stderr", .{name}), 1 << 26)) |t| {
-        try std.io.getStdErr().writeAll(t);
+        try std.fs.File.stderr().writeAll(t);
     } else |_| {}
     const code = if (d.readFileAlloc(a, try std.fmt.allocPrint(a, "{s}.exit", .{name}), 16)) |t|
         try std.fmt.parseInt(u8, std.mem.trim(u8, t, " \n"), 10)

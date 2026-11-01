@@ -102,23 +102,26 @@ def _run(var p: LogicalPlan) raises -> LogicalPlan:
 # -----------------------------------------------------------------------------
 
 
-def test_a_residual_moved_to_a_filter_is_then_folded() raises:
-    """`t(a, ta) JOIN u(b, ub) ON a = b` with the residual `ta > 1 + 2`: step 5
-    moves the residual into a Filter on t, step 6's folding precheck then sees
-    that Filter, and the t scan ends with the filter `ta > 3`.
+def test_a_residual_conjunct_is_moved_before_it_is_folded() raises:
+    """`t(a, ta) JOIN u(b, ub) ON a = b` with the residual
+    `ta > 0 AND (ub > 0 OR 1 = 1)`: step 5 moves `ta > 0` into a Filter on t
+    and `ub > 0 OR 1 = 1` into a Filter on u, and step 6 then folds the
+    second to `true`, which stays as `Filter(true)` over the u scan.
 
-    Defect caught: step 6 before step 5, as a whole or as its first call
-    (`fold_constants` before `push_join_residual_to_side`). The precheck does
-    not read join residuals (komira#1306), so folding is skipped and a
-    `Filter(ta > 1 + 2)` stays over the t scan."""
+    Defect caught: step 6 before step 5 (`fold_constants` and
+    `simplify_predicates` before `push_join_residual_to_side`). Folding the
+    residual first turns it into `ta > 0` before step 5 reads it, and no
+    Filter is left over the u scan. The test pins the reference order; the
+    other order's plan is the smaller one (komira#1517)."""
     var jt: List[String] = ["a", "ta"]
     var ju: List[String] = ["b", "ub"]
-    var res = Expr.binary(BIN_GT, _c("ta"), Expr.binary(BIN_ADD, _lit(1), _lit(2)))
+    var u_side = Expr.binary(BIN_OR, _gt("ub", 0), Expr.binary(BIN_EQ, _lit(1), _lit(1)))
+    var res = _and(_gt("ta", 0), u_side^)
     var j = LogicalPlan.join(
         _scan("t.parquet", jt), _scan("u.parquet", ju), _l1("a"), _l1("b"),
         JOIN_INNER, JOIN_ALGO_AUTO, Optional[OwnedPointer[Expr]](OwnedPointer(res^)),
     )
-    assert_equal(_render(_run(j^)), _want_residual_folded())
+    assert_equal(_render(_run(j^)), _want_residual_moved_then_folded())
 
 
 def test_a_double_negation_is_removed_before_the_first_or_factoring() raises:
@@ -184,16 +187,20 @@ def test_projects_merge_before_eager_aggregation() raises:
 
 
 def test_a_limit_is_pushed_below_the_join_order_restoring_project() raises:
-    """`Limit 5` over a(10 rows) JOIN b(100000 rows): step 16 swaps the join
-    operands and restores the column order with a Project under the Limit;
-    step 17 then pushes the Limit below that Project, onto the join.
+    """`Limit 5` over (a(100000 rows) JOIN b(10) ON ak = bk) JOIN d(1000) ON
+    bk = dk: step 16 reorders the joins and puts a Project restoring the
+    query's column order under the Limit; step 17 then pushes the Limit below
+    that Project, onto the reordered join.
 
-    Defect caught: step 17 before step 16. The Limit is already on the join
-    when it runs, and the Project step 16 adds afterwards stays under it."""
+    Defect caught: step 17 before step 16. The Limit is still directly on the
+    join when step 17 runs, so it is not moved, and the Project step 16 adds
+    afterwards stays under it."""
     var an: List[String] = ["ak", "av"]
     var bn: List[String] = ["bk", "bv"]
-    var j = LogicalPlan.join(_scan("a", an, 10), _scan("b", bn, 100000), _l1("ak"), _l1("bk"), JOIN_INNER)
-    assert_equal(_render(_run(LogicalPlan.limit(5, j^))), _want_limit_under_restore())
+    var dn: List[String] = ["dk", "dv"]
+    var ab = LogicalPlan.join(_scan("a", an, 100000), _scan("b", bn, 10), _l1("ak"), _l1("bk"), JOIN_INNER)
+    var abd = LogicalPlan.join(ab^, _scan("d", dn, 1000), _l1("bk"), _l1("dk"), JOIN_INNER)
+    assert_equal(_render(_run(LogicalPlan.limit(5, abd^))), _want_limit_under_restore())
 
 
 # -----------------------------------------------------------------------------
@@ -201,12 +208,12 @@ def test_a_limit_is_pushed_below_the_join_order_restoring_project() raises:
 # -----------------------------------------------------------------------------
 
 
-def _want_residual_folded() -> String:
+def _want_residual_moved_then_folded() -> String:
     var l: List[String] = [
-        "Project(exprs=[ColRef(a), ColRef(ta), ColRef(b), ColRef(ub)])",
-        "  Join(type=INNER, on=[b=a])",
+        "Join(type=INNER, on=[a=b], build=left)",
+        "  Scan(path=\"t.parquet\", type=PARQUET, source_kind=COLUMNAR, filter=BinaryOp(GT, ColRef(ta), Literal(ScalarValue(int64, 0))))",
+        "  Filter(predicate=Literal(ScalarValue(bool, true)))",
         "    Scan(path=\"u.parquet\", type=PARQUET, source_kind=COLUMNAR)",
-        "    Scan(path=\"t.parquet\", type=PARQUET, source_kind=COLUMNAR, filter=BinaryOp(GT, ColRef(ta), Literal(ScalarValue(int64, 3))))",
     ]
     return _lines(l)
 
@@ -230,21 +237,22 @@ def _want_fold_then_cse() -> String:
 def _want_merged_then_eager() -> String:
     var l: List[String] = [
         "Aggregate(group_by=[ColRef(dim_attr)], aggs=[SUM(ColRef(__eager_sum_total)).alias(\"total\")])",
-        "  Project(exprs=[ColRef(fk_id), ColRef(__eager_sum_total), ColRef(dim_id), ColRef(dim_attr)])",
-        "    Join(type=INNER, on=[dim_id=fk_id])",
-        "      Scan(path=\"dim.parquet\", type=PARQUET, source_kind=COLUMNAR)",
-        "      Aggregate(group_by=[ColRef(fk_id)], aggs=[SUM(ColRef(measure)).alias(\"__eager_sum_total\")])",
-        "        Scan(path=\"fact.parquet\", type=PARQUET, source_kind=COLUMNAR)",
+        "  Join(type=INNER, on=[fk_id=dim_id], build=left)",
+        "    Aggregate(group_by=[ColRef(fk_id)], aggs=[SUM(ColRef(measure)).alias(\"__eager_sum_total\")])",
+        "      Scan(path=\"fact.parquet\", type=PARQUET, source_kind=COLUMNAR)",
+        "    Scan(path=\"dim.parquet\", type=PARQUET, source_kind=COLUMNAR)",
     ]
     return _lines(l)
 
 
 def _want_limit_under_restore() -> String:
     var l: List[String] = [
-        "Project(exprs=[ColRef(ak), ColRef(av), ColRef(bk), ColRef(bv)])",
+        "Project(exprs=[ColRef(ak), ColRef(av), ColRef(bk), ColRef(bv), ColRef(dk), ColRef(dv)])",
         "  Limit(n=5)",
-        "    Join(type=INNER, on=[bk=ak])",
-        "      Scan(path=\"b\", type=PARQUET, source_kind=COLUMNAR)",
+        "    Join(type=INNER, on=[bk=ak, dk=ak], build=left)",
+        "      Join(type=INNER, on=[bk=dk], build=left)",
+        "        Scan(path=\"b\", type=PARQUET, source_kind=COLUMNAR)",
+        "        Scan(path=\"d\", type=PARQUET, source_kind=COLUMNAR)",
         "      Scan(path=\"a\", type=PARQUET, source_kind=COLUMNAR)",
     ]
     return _lines(l)

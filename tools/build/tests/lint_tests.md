@@ -50,8 +50,8 @@ labels only), so building a `test_weld` target checks nothing: it declares the
 lint, and [`test_weld.bxl`](../lint/test_weld.bxl) checks it, running the
 check as a build action whose inputs are the list of `.mojo` paths, the list
 of welded paths and the ledger. The pull request's check runs it for each
-`test_weld` target of a unit it builds
-([`build_targets.sh`](../../../release/ci/build_targets.sh)); this test runs it
+`test_weld` target
+([`pr.yml`](../../../.github/workflows/pr.yml)); this test runs it
 for each target above.
 
 ```sh

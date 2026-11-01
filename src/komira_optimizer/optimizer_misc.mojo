@@ -88,9 +88,13 @@ def push_limit_down_inplace(mut plan: LogicalPlan) raises:
         # designed to be applied at the plan ROOT by the executing caller (not
         # in this tree); pushing it under Project would move it off the root.
         # offset == 0 keeps the exact pre-range pushdown behavior.
+        # A UDF Project stays below the Limit: pushing the Limit under it
+        # changes the rows the UDF sees (the same barrier
+        # `push_predicates_down` keeps for a Filter).
         if (
             plan._limit.value()[].child[].tag == PLAN_PROJECT
             and plan._limit.value()[].offset == 0
+            and not plan._limit.value()[].child[].has_udf()
         ):
             var n = plan._limit.value()[].n
             var proj_exprs = _copy_expr_array(plan._limit.value()[].child[]._project.value()[].exprs)

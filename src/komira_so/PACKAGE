@@ -1,0 +1,5 @@
+# The default visibility of a target of src/komira_so that names none: the
+# aggregate of the pull request check (the cell root's PACKAGE), and the
+# conda package of libkomira (tools/build/package/libkomira), which names the
+# shared library.
+package(visibility = ["komira//ci:", "komira//tools/build/package/libkomira:"])

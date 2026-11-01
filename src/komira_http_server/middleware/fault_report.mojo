@@ -470,13 +470,25 @@ def trace_header_of(ref req: HttpRequest) -> String:
 def _json_escaped(s: String) -> String:
     """Minimal JSON string-escape (quoted, with the mandatory escapes). Local
     rather than imported: `komira_http` must not depend on an application
-    package, and `komira_handler_kit.error_envelope` lives above this layer."""
+    package, and `komira_handler_kit.error_envelope` lives above this layer.
+
+    Bytes that need no escape, including every byte of a multi-byte UTF-8
+    sequence, are copied through as runs of the input: `s` is already UTF-8,
+    which is what RFC 8259 section 8.1 requires the JSON text to be. A run
+    only ever ends at an ASCII byte, so each slice is whole characters."""
     var out = String('"')
     var b = s.as_bytes()
     var n = len(b)
     var i = 0
+    var run = 0
     while i < n:
         var c = b[i]
+        var plain = c >= UInt8(32) and c != UInt8(34) and c != UInt8(92)
+        if plain:
+            i = i + 1
+            continue
+        if run < i:
+            out += String(s[byte=run:i])
         if c == UInt8(34):
             out += String('\\"')
         elif c == UInt8(92):
@@ -487,11 +499,12 @@ def _json_escaped(s: String) -> String:
             out += String("\\r")
         elif c == UInt8(9):
             out += String("\\t")
-        elif c < UInt8(32):
-            out += String(" ")
         else:
-            out += chr(Int(c))
+            out += String(" ")
         i = i + 1
+        run = i
+    if run < n:
+        out += String(s[byte=run:n])
     out += String('"')
     return out^
 

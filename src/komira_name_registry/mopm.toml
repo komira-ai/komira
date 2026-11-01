@@ -1,0 +1,15 @@
+[package]
+name = "komira_name_registry"
+version = "0.1.0"
+description = "Interned names: a compile-time FNV-1a id for a string literal, and a fixed-capacity table that turns an id back into its name."
+license = "Apache-2.0"
+repository = "https://github.com/komira-ai/komira"
+readme = "README.md"
+mojo = ["1.0.0"]
+
+[dependencies]
+komira_hash = { path = "../komira_hash", version = "0.1" }
+
+[targets]
+lib = { path = "src/komira_name_registry" }
+tests = ["tests"]

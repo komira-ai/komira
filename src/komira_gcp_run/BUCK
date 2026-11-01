@@ -1,4 +1,5 @@
 load("@komira//tools/build/cloud:gcp.bzl", "mojo_gcp_client")
+load("@komira//tools/build/gen:defs.bzl", "committed_data")
 
 # Cloud Run Admin v2: REST/JSON clients generated at build time from the
 # googleapis protos //tools/vendor/googleapis:run_v2 extracts from its
@@ -138,12 +139,11 @@ mojo_gcp_client(
     test_data = {
         # The whole generated package, so the scan covers every file the
         # generator writes with no second list of them to drift.
-        "tests/test_no_env_reads.mojo": {"gen": ":komira_gcp_run_gen"},
-        "tests/test_run_operations_rules.mojo": {
-            "gen": ":komira_gcp_run_gen",
+        "tests/test_no_env_reads.mojo": committed_data("komira_gcp_run"),
+        "tests/test_run_operations_rules.mojo": dict(committed_data("komira_gcp_run"), **{
             "operations_client.golden": "tests/operations_client.golden",
             "run_v2.yaml": "//tools/vendor/googleapis:googleapis[google/cloud/run/v2/run_v2.yaml]",
-        },
+        }),
     },
     test_srcs = [
         "tests/test_no_env_reads.mojo",

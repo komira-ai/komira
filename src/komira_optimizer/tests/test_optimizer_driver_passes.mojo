@@ -448,7 +448,7 @@ def _want_hive() -> String:
 def _want_symor() -> String:
     var l: List[String] = [
         "Filter(predicate=BinaryOp(OR, BinaryOp(AND, BinaryOp(EQ, ColRef(a), Literal(ScalarValue(int64, 1))), BinaryOp(EQ, ColRef(b), Literal(ScalarValue(int64, 2)))), BinaryOp(AND, BinaryOp(EQ, ColRef(a), Literal(ScalarValue(int64, 2))), BinaryOp(EQ, ColRef(b), Literal(ScalarValue(int64, 1))))))",
-        "  Join(type=INNER, on=[ta=ub])",
+        "  Join(type=INNER, on=[ta=ub], build=right)",
         "    Filter(predicate=BinaryOp(OR, BinaryOp(EQ, ColRef(a), Literal(ScalarValue(int64, 1))), BinaryOp(EQ, ColRef(a), Literal(ScalarValue(int64, 2)))))",
         "      Scan(path=\"t.parquet\", type=PARQUET, source_kind=COLUMNAR)",
         "    Filter(predicate=BinaryOp(OR, BinaryOp(EQ, ColRef(b), Literal(ScalarValue(int64, 1))), BinaryOp(EQ, ColRef(b), Literal(ScalarValue(int64, 2)))))",
@@ -481,11 +481,10 @@ def _want_or2_when_join() -> String:
         "Project(exprs=[Alias(ColRef(a), \"a\"), Alias(ColRef(b), \"b\"), Alias(ColRef(c), \"c\"), Alias(ColRef(k), \"k\"), Alias(ColRef(k2), \"k2\"), Alias(ColRef(u), \"u\")])",
         "  Filter(predicate=ColRef(_cse_0c3f27f6_0))",
         "    Project(exprs=[Alias(ColRef(a), \"a\"), Alias(ColRef(b), \"b\"), Alias(ColRef(c), \"c\"), Alias(ColRef(k), \"k\"), Alias(ColRef(k2), \"k2\"), Alias(ColRef(u), \"u\"), Alias(BinaryOp(EQ, When(WHEN BinaryOp(GT, ColRef(a), Literal(ScalarValue(int64, 1))) THEN Literal(ScalarValue(int64, 1)), ELSE Literal(ScalarValue(int64, 0))), Literal(ScalarValue(int64, 1))), \"_cse_0c3f27f6_0\")])",
-        "      Project(exprs=[ColRef(a), ColRef(b), ColRef(c), ColRef(k), ColRef(k2), ColRef(u)])",
-        "        Join(type=INNER, on=[k2=k])",
-        "          Scan(path=\"u.parquet\", type=PARQUET, source_kind=COLUMNAR)",
-        "          Filter(predicate=BinaryOp(OR, BinaryOp(EQ, ColRef(b), Literal(ScalarValue(int64, 2))), BinaryOp(EQ, ColRef(c), Literal(ScalarValue(int64, 3)))))",
-        "            Scan(path=\"t.parquet\", type=PARQUET, source_kind=COLUMNAR, filter=BinaryOp(EQ, ColRef(k), Literal(ScalarValue(int64, 1))))",
+        "      Join(type=INNER, on=[k=k2], build=left)",
+        "        Filter(predicate=BinaryOp(OR, BinaryOp(EQ, ColRef(b), Literal(ScalarValue(int64, 2))), BinaryOp(EQ, ColRef(c), Literal(ScalarValue(int64, 3)))))",
+        "          Scan(path=\"t.parquet\", type=PARQUET, source_kind=COLUMNAR, filter=BinaryOp(EQ, ColRef(k), Literal(ScalarValue(int64, 1))))",
+        "        Scan(path=\"u.parquet\", type=PARQUET, source_kind=COLUMNAR)",
     ]
     return _lines(l)
 
@@ -496,10 +495,9 @@ def _want_cross_cse() -> String:
         "  Filter(predicate=ColRef(_cse_0a156842_0))",
         "    Project(exprs=[Alias(ColRef(ax), \"ax\"), Alias(ColRef(ay), \"ay\"), Alias(ColRef(bx), \"bx\"), Alias(ColRef(by), \"by\"), Alias(BinaryOp(EQ, When(WHEN BinaryOp(GT, ColRef(ay), Literal(ScalarValue(int64, 1))) THEN Literal(ScalarValue(int64, 1)), ELSE Literal(ScalarValue(int64, 0))), Literal(ScalarValue(int64, 1))), \"_cse_0a156842_0\")])",
         "      Filter(predicate=BinaryOp(OR, BinaryOp(EQ, ColRef(by), Literal(ScalarValue(int64, 2))), BinaryOp(EQ, ColRef(ay), Literal(ScalarValue(int64, 3)))))",
-        "        Project(exprs=[ColRef(ax), ColRef(ay), ColRef(bx), ColRef(by)])",
-        "          Join(type=INNER, on=[bx=ax])",
-        "            Scan(path=\"B\", type=PARQUET, source_kind=COLUMNAR)",
-        "            Scan(path=\"A\", type=PARQUET, source_kind=COLUMNAR)",
+        "        Join(type=INNER, on=[ax=bx], build=left)",
+        "          Scan(path=\"A\", type=PARQUET, source_kind=COLUMNAR)",
+        "          Scan(path=\"B\", type=PARQUET, source_kind=COLUMNAR)",
     ]
     return _lines(l)
 
@@ -515,7 +513,7 @@ def _want_bcast_unbound() -> String:
 
 def _want_jpd2() -> String:
     var l: List[String] = [
-        "Join(type=INNER, on=[a=b], residual=BinaryOp(GT, ColRef(ta), ColRef(ub)))",
+        "Join(type=INNER, on=[a=b], residual=BinaryOp(GT, ColRef(ta), ColRef(ub)), build=right)",
         "  Scan(path=\"t.parquet\", type=PARQUET, source_kind=COLUMNAR)",
         "  Scan(path=\"u.parquet\", type=PARQUET, source_kind=COLUMNAR)",
     ]

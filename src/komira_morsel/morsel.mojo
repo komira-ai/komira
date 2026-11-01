@@ -6,7 +6,7 @@
 # thread processes one morsel at a time through a pipeline of operators.
 #
 # Morsel sizes are auto-derived from the detected hardware profile and the
-# (schema, operator-tier) pair. See `komira_engine_runtime.morsel_sizing_policy`
+# (schema, operator-tier) pair. See `komira_host_profile.morsel_sizing_policy`
 # for the formula + tier multipliers. Production callers should obtain a
 # tier-correct size via `ctx.<tier>_morsel_rows(schema)` on `EngineContext`.
 # The legacy `DEFAULT_MORSEL_ROWS = 65536` fallback in
@@ -653,9 +653,8 @@ def split_into_views(
         A MorselViewArray of zero-copy views covering all rows.
     """
     var total_rows = batch._num_rows
-    var num_cols = batch.num_columns()
 
-    if total_rows == 0 or num_cols == 0:
+    if total_rows == 0:
         var result = MorselViewArray(1)
         result.append(MorselView(0, 0))
         return result^
@@ -776,12 +775,12 @@ def split_record_batch(
     # the RG->chunk reslice becomes an Arc refcount bump instead of a per-column
     # memcpy. A column whose layout honors `_offset` (fixed-width /
     # boolean / DECIMAL / DICTIONARY) AND carries NO validity bitmap is sliced via
-    # `Column.slice` (zero-copy Arc view); STRING/BINARY/nested (accessors ignore
-    # `_offset`) AND any NULLABLE column fall back to the copy slice so the result
+    # `Column.slice` (zero-copy Arc view); STRING/BINARY/nested (accessors refuse
+    # a sliced column) AND any NULLABLE column fall back to the copy slice so the result
     # is always byte-correct. (Since lane G L3, 2026-09-25, plain STRING/BINARY
     # take a THIRD arm between the two: the payload is Arc-shared as a WINDOW,
     # the offsets and validity are rebuilt rebased, so `_offset` stays 0 and the
-    # `_offset`-ignoring accessors stay correct. Nullable included.)
+    # accessors, which refuse a sliced column, keep working. Nullable included.)
     #
     # UNCONDITIONAL (kill-switch retirement sweep): the
     # `KOMIRA_ARC_RESLICE_OFF` kill-switch and the prior no-op opt-in

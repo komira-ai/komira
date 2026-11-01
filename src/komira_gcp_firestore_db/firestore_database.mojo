@@ -30,7 +30,7 @@
 #     journal and compensate creates (see the write journal below).
 #
 #   get_by_key(table, cols, key_col, key)   -> get_document(collection=table,
-#     doc-id = key.as_text()); typed not-found -> None; decode the doc -> a
+#     doc-id = _doc_id_for(key)); typed not-found -> None; decode the doc -> a
 #     projected DbRow.
 #
 #   put(table, cols, vals)                   -> create_document(collection=table,
@@ -351,7 +351,7 @@ struct FirestoreDatabase[
             _ = self._best_effort_delete(String(cols[i]), String(ids[i]))
 
     # =========================================================================
-    # 1. get_by_key -> get_document (doc-id = key.as_text()) when key_col IS the
+    # 1. get_by_key -> get_document (doc-id = _doc_id_for(key)) when key_col IS the
     #    table's PK; else a single-field-equality query (WHERE key_col == key LIMIT
     #    1). The doc is ONLY addressable by its doc-id (= the PK value), so a lookup
     #    by a NON-PK column (a `users` row by `email`, an `api_keys` row by
@@ -399,7 +399,7 @@ struct FirestoreDatabase[
             )
         # PK-less projection (an append-only ledger whose SERIAL id is
         # server-assigned + NOT in the projected cols): mint a fresh UUIDv7 doc-id (append-only forensic ledger,
-        # one doc per row). Else the doc-id is the PK value's canonical text.
+        # one doc per row). Else the doc-id is `_doc_id_for(PK value)`.
         var doc_id = (
             generate_uuidv7().to_hyphenated()
             if pk < 0
@@ -671,7 +671,7 @@ struct FirestoreDatabase[
         var fields = _encode_fields(cols, vals)
         if pk < 0 or pk_is_unique:
             # ARM (a): the atomic doc-id=unique_val exists-check.
-            var doc_id = _encode_doc_id_part(_doc_id_for(unique_val))
+            var doc_id = _doc_id_for(unique_val)
             try:
                 var _res = self._client.create_if_absent(table, doc_id, fields^)
                 self._journal_write(table, doc_id)  # won -> a later rollback compensates
@@ -691,7 +691,7 @@ struct FirestoreDatabase[
         var existing = self._client.run_query(probe^)
         if len(existing) > 0:
             return False  # a row with this unique value is already present (we lost)
-        var pk_doc_id = _encode_doc_id_part(_doc_id_for(vals[pk]))
+        var pk_doc_id = _doc_id_for(vals[pk])
         var _doc = self._client.create_document(table, doc=pk_doc_id, fields=fields^)
         self._journal_write(table, pk_doc_id)  # won -> a later rollback compensates
         return True  # we won the key
@@ -914,8 +914,8 @@ def _encode_value(v: DbValue) -> FsValue:
     if lt == LOGICAL_TEXT_ARRAY:
         # arrayValue — a NATIVE Firestore array of stringValues (NOT the pg `{a,b,c}`
         # text literal). This is what makes the server-side `ARRAY_CONTAINS`
-        # fieldFilter work (e.g. a tag filter on `tags`). `_decode_field` reconstructs the `{a,b,c}` literal so the
-        # SQL round-trip (`DbRow.get_text_array` parses `{a,b,c}`) is UNCHANGED.
+        # fieldFilter work (e.g. a tag filter on `tags`). `_decode_field` reconstructs the array literal, so
+        # `DbRow.get_text_array` reads back the same elements.
         var elems = v.text_array_elements()
         var items = List[FsValue]()
         for i in range(len(elems)):
@@ -965,11 +965,11 @@ def _decode_field(doc: FirestoreDocument, col: String) raises -> DbValue:
         # exactly — the inverse of `_encode_value`'s bytesValue arm.
         return DbValue.bytes_list(base64_decode(fv.as_string()))
     if fv.type_tag == FS_T_ARRAY:
-        # arrayValue -> RECONSTRUCT the pg `{a,b,c}` text literal from the native
-        # array's stringValue items, so `DbRow.get_text_array` (which parses
-        # `{a,b,c}`) round-trips EXACTLY. The inverse of `_encode_value`'s
-        # LOGICAL_TEXT_ARRAY arm. A non-string item is read via `as_string()`
-        # (the closed-set contract: simple labels / hyphenated UUIDs).
+        # arrayValue -> RECONSTRUCT the TEXT[] array literal (`DbValue.text_array`
+        # quotes each element as needed) from the native array's stringValue
+        # items, so `DbRow.get_text_array` round-trips EXACTLY. The inverse of
+        # `_encode_value`'s LOGICAL_TEXT_ARRAY arm. A non-string item is read via
+        # `as_string()`.
         var elems = List[String]()
         for i in range(len(fv.list_items)):
             elems.append(fv.list_items[i].as_string())
@@ -985,10 +985,13 @@ def _decode_field(doc: FirestoreDocument, col: String) raises -> DbValue:
 
 
 def _doc_id_for(v: DbValue) -> String:
-    """The Firestore doc-id for a PK / unique value = its canonical text. A Job.id
-    UUID renders hyphenated-lowercase (Firestore-doc-id-legal: no `/`, not reserved);
-    a text idempotency key renders verbatim (percent-encoded by the caller)."""
-    return v.as_text()
+    """The Firestore doc-id for a PK / unique value: its canonical text,
+    percent-encoded by `_encode_doc_id_part` (`%` -> `%25`, `/` -> `%2F`). Every
+    path that names a document by its key (put, get_by_key, delete_by_key,
+    conditional_update's PK arm, both create_if_absent arms) goes through this one
+    function, so they all name the same document. A UUID renders
+    hyphenated-lowercase and passes through unchanged."""
+    return _encode_doc_id_part(v.as_text())
 
 
 def _composite_doc_id(
@@ -998,7 +1001,7 @@ def _composite_doc_id(
     each `conflict_cols[i]` (matched positionally against `cols`) percent-encoded
     (slash-free) and joined by `~`. Percent-encoding escapes `%`/`/`/`~` so no two
     distinct tuples produce the same id (`(a, bc)` vs `(ab, c)` cannot collide).
-    The single-column path stays keyed on `_encode_doc_id_part(_doc_id_for(val))`;
+    The single-column path stays keyed on `_doc_id_for(val)`;
     this is its composite generalization for keys like `(mailbox_id, content_hash)`.
     """
     var out = String("")
@@ -1008,7 +1011,7 @@ def _composite_doc_id(
             if cols[j] == conflict_cols[i]:
                 if i > 0:
                     out += String("~")
-                out += _encode_composite_part(_doc_id_for(vals[j]))
+                out += _encode_composite_part(vals[j].as_text())
                 found = True
                 break
         if not found:

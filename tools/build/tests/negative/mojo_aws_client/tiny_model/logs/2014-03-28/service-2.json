@@ -1,0 +1,40 @@
+{
+  "version": "2.0",
+  "metadata": {
+    "apiVersion": "2014-03-28",
+    "endpointPrefix": "logs",
+    "jsonVersion": "1.1",
+    "protocol": "json",
+    "protocols": ["json"],
+    "serviceFullName": "Amazon CloudWatch Logs",
+    "serviceId": "CloudWatch Logs",
+    "signatureVersion": "v4",
+    "targetPrefix": "Logs_20140328",
+    "uid": "logs-2014-03-28"
+  },
+  "operations": {
+    "GetLogEvents": {
+      "name": "GetLogEvents",
+      "http": {"method": "POST", "requestUri": "/"},
+      "input": {"shape": "GetLogEventsRequest"},
+      "output": {"shape": "GetLogEventsResponse"}
+    }
+  },
+  "shapes": {
+    "GetLogEventsRequest": {
+      "type": "structure",
+      "required": ["logStreamName"],
+      "members": {
+        "logStreamName": {"shape": "LogStreamName"}
+      }
+    },
+    "GetLogEventsResponse": {
+      "type": "structure",
+      "members": {
+        "nextForwardToken": {"shape": "NextToken"}
+      }
+    },
+    "LogStreamName": {"type": "string", "min": 1, "max": 512},
+    "NextToken": {"type": "string", "min": 1}
+  }
+}

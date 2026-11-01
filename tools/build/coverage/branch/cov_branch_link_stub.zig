@@ -29,28 +29,28 @@ pub fn main() !u8 {
     var dir = try std.fs.cwd().openDir(std.fs.path.dirname(argv[0]) orelse return error.NoDirectory, .{});
     defer dir.close();
 
-    var rec = std.ArrayList(u8).init(alloc);
+    var rec = std.ArrayList(u8).empty;
     var out: ?[]const u8 = null;
     for (argv[1..], 1..) |a, i| {
-        try rec.appendSlice(a);
-        try rec.append('\n');
+        try rec.appendSlice(alloc, a);
+        try rec.append(alloc, '\n');
         if (std.mem.eql(u8, a, "-o") and i + 1 < argv.len) out = argv[i + 1];
     }
-    try dir.writeFile("argv", rec.items);
+    try dir.writeFile(.{ .sub_path = "argv", .data = rec.items });
 
-    var env = std.ArrayList(u8).init(alloc);
+    var env = std.ArrayList(u8).empty;
     for (std.os.environ) |e| {
-        try env.appendSlice(std.mem.span(e));
-        try env.append('\n');
+        try env.appendSlice(alloc, std.mem.span(e));
+        try env.append(alloc, '\n');
     }
-    try dir.writeFile("env", env.items);
+    try dir.writeFile(.{ .sub_path = "env", .data = env.items });
 
     if (try readOpt(alloc, dir, "say")) |say| {
-        try std.io.getStdOut().writer().print("stdout: {s}\n", .{say});
-        try std.io.getStdErr().writer().print("stderr: {s}\n", .{say});
+        try std.fs.File.stdout().deprecatedWriter().print("stdout: {s}\n", .{say});
+        try std.fs.File.stderr().deprecatedWriter().print("stderr: {s}\n", .{say});
     }
     if (out) |o| {
-        if (try readOpt(alloc, dir, "stub_out")) |bytes| try std.fs.cwd().writeFile(o, bytes);
+        if (try readOpt(alloc, dir, "stub_out")) |bytes| try std.fs.cwd().writeFile(.{ .sub_path = o, .data = bytes });
     }
     const rc = (try readOpt(alloc, dir, "stub_rc")) orelse return 0;
     return try std.fmt.parseUnsigned(u8, std.mem.trim(u8, rc, " \n"), 10);

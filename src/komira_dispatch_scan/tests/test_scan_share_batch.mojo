@@ -684,13 +684,13 @@ def test_project_share_declines_sliced_string_column() raises:
     """THE FALSIFIER — the blast-radius case the gate exists for.
 
     `Column.share()` PRESERVES `_offset`, and plain STRING / BINARY accessors
-    IGNORE `_offset` (`Column.supports_zero_copy_slice`'s note). So sharing a
-    ROW-SLICED string column reads from physical row 0 — a SILENT WRONG ANSWER,
-    not a crash.
+    do not honour `_offset` (`Column.supports_zero_copy_slice`'s note) and
+    refuse a column with `_offset != 0`. Sharing a ROW-SLICED string column
+    would hand its consumers a column they cannot read.
 
     This test asserts three things, in the order that makes the gate's
     necessity a CHECKED fact rather than a claim:
-      1. a raw `share()` of the sliced column DOES read the wrong cells (so the
+      1. `as_string()` on a raw `share()` of the sliced column raises (so the
          hazard is real on this build, not hypothetical);
       2. `project_column_share_eligible` therefore returns False;
       3. the projection consequently returns the CORRECT (rebased) cells with
@@ -732,13 +732,18 @@ def test_project_share_declines_sliced_string_column() raises:
     var b = builder.build(sb.build())
     assert_equal(b.num_rows(), 4, "sliced string batch num_rows")
 
-    # (1) A RAW share reads the WRONG cells — rows 0..3, not 2..5.
+    # (1) A RAW share keeps `_offset`, and the plain-string accessor refuses
+    # a sliced column instead of reading from physical row 0.
     var raw_shared = b.column_at(0).share()
-    var raw_arr = raw_shared.as_string()
-    assert_equal(
-        raw_arr.get(0), String("row0"),
-        "premise broken: a raw share() of a sliced STRING column no longer"
-        " reads from physical row 0 — re-derive the gate before trusting it",
+    var refused = String("")
+    try:
+        _ = raw_shared.as_string()
+    except e:
+        refused = String(e)
+    assert_true(
+        "refusing a sliced column" in refused,
+        "premise broken: as_string() of a shared sliced STRING column must"
+        " refuse; got '" + refused + "'",
     )
 
     # (2) So the gate must decline it.

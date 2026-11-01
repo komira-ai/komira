@@ -1,0 +1,3 @@
+# What the coverage census measured of this package's libraries (tools/build/coverage/census.md).
+census	2026-10-24	07f02395de1e7e41bc8e73ac680660737898afa3	-
+komira//src/komira_secrets_azure:komira_secrets_azure	src/komira_secrets_azure	library	OK	382	382	-	-	no	conda	-	-

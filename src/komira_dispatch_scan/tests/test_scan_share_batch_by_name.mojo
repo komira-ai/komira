@@ -502,12 +502,17 @@ def test_project_by_name_share_declines_sliced_string_column() raises:
     var b = builder.build(sb.build())
     assert_equal(b.num_rows(), 4, "sliced string batch num_rows")
 
-    # (1) The hazard is real on THIS build, not hypothetical.
-    var raw_arr = b.column_at(0).share().as_string()
-    assert_equal(
-        raw_arr.get(0), String("row0"),
-        "premise broken: a raw share() of a sliced STRING column no longer"
-        " reads from physical row 0 — re-derive the gate before trusting it",
+    # (1) The hazard is real on THIS build: the plain-string accessor refuses
+    # a shared sliced column rather than reading it from physical row 0.
+    var refused = String("")
+    try:
+        _ = b.column_at(0).share().as_string()
+    except e:
+        refused = String(e)
+    assert_true(
+        "refusing a sliced column" in refused,
+        "premise broken: as_string() of a shared sliced STRING column must"
+        " refuse; got '" + refused + "'",
     )
     # (2) So the gate declines it.
     assert_false(

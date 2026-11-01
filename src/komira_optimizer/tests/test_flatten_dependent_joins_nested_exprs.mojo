@@ -38,8 +38,8 @@ from komira_plan_ir.logical_plan import (
 from komira_optimizer.flatten_dependent_joins import (
     flatten_dependent_joins,
     _expr_contains_correlated_subquery,
-    _rewrite_inner_none_to_right,
 )
+from komira_optimizer.flatten_hoist import _rewrite_inner_none_to_right
 from komira_optimizer.join_predicate_decompose import join_predicate_decompose
 
 

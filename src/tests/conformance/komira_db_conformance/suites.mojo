@@ -45,6 +45,7 @@ from komira_db_conformance.type_checks import (
     check_timestamptz,
     check_jsonb,
     check_text_array,
+    check_text_array_free_text,
     check_nulls,
 )
 from komira_db_conformance.sql_checks import (
@@ -130,6 +131,11 @@ def run_neutral_suite[T: NeutralTarget](mut t: T, gaps: List[KnownGap]) raises:
         r.ok(String("type_text_array"))
     except e:
         r.fail(String("type_text_array"), String(e))
+    try:
+        check_text_array_free_text[T](t)
+        r.ok(String("type_text_array_free_text"))
+    except e:
+        r.fail(String("type_text_array_free_text"), String(e))
     try:
         check_nulls[T](t)
         r.ok(String("type_nulls"))
