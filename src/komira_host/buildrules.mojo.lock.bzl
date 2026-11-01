@@ -34,9 +34,9 @@ GRAPH_JSON = r'''{
       "root": "src/komira_host/src/komira_host",
       "srcs": [
         {"path": "src/komira_host/src/komira_host/__init__.mojo", "sha256": "68cb9c9fa114665d4a127e1701188599fd11815a18178fa3bac40831ed217698"},
-        {"path": "src/komira_host/src/komira_host/cpu_topology.mojo", "sha256": "f2434228d4d42ca8eb281c4d1960b43d323693d39a656023dd0960bd20860f98"},
+        {"path": "src/komira_host/src/komira_host/cpu_topology.mojo", "sha256": "b9fba93bb7292f078baeb312afeafe07bc8b27c4e14fc86a23fbc6d25cd17eb7"},
         {"path": "src/komira_host/src/komira_host/engine_placement.mojo", "sha256": "af427e86253bd1b7897acf01721335f380685fd8acf2d35bbb5321fa2bf9c3f9"},
-        {"path": "src/komira_host/src/komira_host/proc_probe.mojo", "sha256": "15f48636ee93172c0f46a5f9f5dad6fc42369f91ee378055bca0b2c040ce6bb9"},
+        {"path": "src/komira_host/src/komira_host/proc_probe.mojo", "sha256": "fbe4da688a1ea7eb7d07f98d53188c958b7435d0c91b03a9f90b06d80fee22c2"},
         {"path": "src/komira_host/src/komira_host/thp_policy.mojo", "sha256": "ac554b14ba02b268c1dd28a304ea7a5acf7d617601f0a2b82a7bae996f20c0f1"}
       ],
       "deps": [],
@@ -65,7 +65,7 @@ GRAPH_JSON = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/komira_host/tests/test_proc_probe.mojo", "sha256": "9efc682902068a3e11608459755705a5313a05f2102dad2387994770e8e3d9c0"}
+        {"path": "src/komira_host/tests/test_proc_probe.mojo", "sha256": "75fdbdd50d688aae1f174e84de5ada717bbda36ff847b08f5001e616ceb06f1f"}
       ],
       "deps": ["komira_host@0.1.0#mojo1.0.0/lib"],
       "natives": [],
@@ -149,7 +149,7 @@ GRAPH_JSON = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/komira_host/tests/test_topology_probe.mojo", "sha256": "ba27c1f7ed4a46b4eb00e28ec3108ec2009e3760dad90b63e8f378525f2b3e5b"}
+        {"path": "src/komira_host/tests/test_topology_probe.mojo", "sha256": "7651c59b00e5f6f34a7a6729629bd8559a4c53bedb405e21bc9e17573518b5ee"}
       ],
       "deps": ["komira_host@0.1.0#mojo1.0.0/lib"],
       "natives": [],
@@ -186,9 +186,9 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "root": "src/komira_host/src/komira_host",
       "srcs": [
         {"path": "src/komira_host/src/komira_host/__init__.mojo", "sha256": "68cb9c9fa114665d4a127e1701188599fd11815a18178fa3bac40831ed217698"},
-        {"path": "src/komira_host/src/komira_host/cpu_topology.mojo", "sha256": "f2434228d4d42ca8eb281c4d1960b43d323693d39a656023dd0960bd20860f98"},
+        {"path": "src/komira_host/src/komira_host/cpu_topology.mojo", "sha256": "b9fba93bb7292f078baeb312afeafe07bc8b27c4e14fc86a23fbc6d25cd17eb7"},
         {"path": "src/komira_host/src/komira_host/engine_placement.mojo", "sha256": "af427e86253bd1b7897acf01721335f380685fd8acf2d35bbb5321fa2bf9c3f9"},
-        {"path": "src/komira_host/src/komira_host/proc_probe.mojo", "sha256": "15f48636ee93172c0f46a5f9f5dad6fc42369f91ee378055bca0b2c040ce6bb9"},
+        {"path": "src/komira_host/src/komira_host/proc_probe.mojo", "sha256": "fbe4da688a1ea7eb7d07f98d53188c958b7435d0c91b03a9f90b06d80fee22c2"},
         {"path": "src/komira_host/src/komira_host/thp_policy.mojo", "sha256": "ac554b14ba02b268c1dd28a304ea7a5acf7d617601f0a2b82a7bae996f20c0f1"}
       ],
       "deps": [],
@@ -217,7 +217,7 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/komira_host/tests/test_proc_probe.mojo", "sha256": "9efc682902068a3e11608459755705a5313a05f2102dad2387994770e8e3d9c0"}
+        {"path": "src/komira_host/tests/test_proc_probe.mojo", "sha256": "75fdbdd50d688aae1f174e84de5ada717bbda36ff847b08f5001e616ceb06f1f"}
       ],
       "deps": ["komira_host@0.1.0#mojo1.0.0/lib"],
       "natives": [],
@@ -301,7 +301,7 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/komira_host/tests/test_topology_probe.mojo", "sha256": "ba27c1f7ed4a46b4eb00e28ec3108ec2009e3760dad90b63e8f378525f2b3e5b"}
+        {"path": "src/komira_host/tests/test_topology_probe.mojo", "sha256": "7651c59b00e5f6f34a7a6729629bd8559a4c53bedb405e21bc9e17573518b5ee"}
       ],
       "deps": ["komira_host@0.1.0#mojo1.0.0/lib"],
       "natives": [],
@@ -335,9 +335,9 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "root": "src/komira_host/src/komira_host",
       "srcs": [
         {"path": "src/komira_host/src/komira_host/__init__.mojo", "sha256": "68cb9c9fa114665d4a127e1701188599fd11815a18178fa3bac40831ed217698"},
-        {"path": "src/komira_host/src/komira_host/cpu_topology.mojo", "sha256": "f2434228d4d42ca8eb281c4d1960b43d323693d39a656023dd0960bd20860f98"},
+        {"path": "src/komira_host/src/komira_host/cpu_topology.mojo", "sha256": "b9fba93bb7292f078baeb312afeafe07bc8b27c4e14fc86a23fbc6d25cd17eb7"},
         {"path": "src/komira_host/src/komira_host/engine_placement.mojo", "sha256": "af427e86253bd1b7897acf01721335f380685fd8acf2d35bbb5321fa2bf9c3f9"},
-        {"path": "src/komira_host/src/komira_host/proc_probe.mojo", "sha256": "15f48636ee93172c0f46a5f9f5dad6fc42369f91ee378055bca0b2c040ce6bb9"},
+        {"path": "src/komira_host/src/komira_host/proc_probe.mojo", "sha256": "fbe4da688a1ea7eb7d07f98d53188c958b7435d0c91b03a9f90b06d80fee22c2"},
         {"path": "src/komira_host/src/komira_host/thp_policy.mojo", "sha256": "ac554b14ba02b268c1dd28a304ea7a5acf7d617601f0a2b82a7bae996f20c0f1"}
       ],
       "deps": [],
@@ -366,7 +366,7 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/komira_host/tests/test_proc_probe.mojo", "sha256": "9efc682902068a3e11608459755705a5313a05f2102dad2387994770e8e3d9c0"}
+        {"path": "src/komira_host/tests/test_proc_probe.mojo", "sha256": "75fdbdd50d688aae1f174e84de5ada717bbda36ff847b08f5001e616ceb06f1f"}
       ],
       "deps": ["komira_host@0.1.0#mojo1.0.0/lib"],
       "natives": [],
@@ -450,7 +450,7 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/komira_host/tests/test_topology_probe.mojo", "sha256": "ba27c1f7ed4a46b4eb00e28ec3108ec2009e3760dad90b63e8f378525f2b3e5b"}
+        {"path": "src/komira_host/tests/test_topology_probe.mojo", "sha256": "7651c59b00e5f6f34a7a6729629bd8559a4c53bedb405e21bc9e17573518b5ee"}
       ],
       "deps": ["komira_host@0.1.0#mojo1.0.0/lib"],
       "natives": [],
