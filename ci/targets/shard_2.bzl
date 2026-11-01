@@ -3,9 +3,6 @@
 # `guard.bxl:check` fails the pull request check when this file is out of date.
 
 TARGETS = [
-    "komira//bin/kci:runnable_readme_examples",
-    "komira//bin/kci:test_kci_process",
-    "komira//packaging/images/base:komira_base",
     "komira//release:mopm_artifacts",
     "komira//release:prod_claimed_names_cases",
     "komira//release:release_set",
@@ -156,7 +153,6 @@ TARGETS = [
 ]
 
 TESTS = [
-    "komira//bin/kci:test_kci_process",
     "komira//tests/scan_binding_links:test_scan_binding_links",
     "komira//third_party/s2n-tls:srcs_drift",
     "komira//third_party/s2n-tls:srcs_files_check",
