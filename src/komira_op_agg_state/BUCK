@@ -20,6 +20,7 @@ mojo_library(
         "//src/komira_expr:komira_expr",
         "//src/komira_kernels:komira_kernels",
         "//src/komira_plan_expr:komira_plan_expr",
+        "//src/komira_scalar_arithmetic:komira_scalar_arithmetic",
         "//src/komira_udf:komira_udf",
     ],
     test_srcs = [
