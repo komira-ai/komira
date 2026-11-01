@@ -428,10 +428,10 @@ then-current `main`. Nothing is half-done, because the replaced run never starte
 
 The release machine file, [`release/machine.textproto`](../release/machine.textproto),
 and `kci` itself are not part of the release: no workflow runs either, and no
-workflow is held to the machine file. kci is retired, and its relevant logic is
-being ported to ucdk (komira-ai/ucdk); the file stays for kci's own tests. The
-`kci_*` conda members that `release/artifacts.textproto` still lists are built by
-`release.yml` like any other member.
+workflow is held to the machine file. kci is retired in favour of ucdk
+(komira-ai/ucdk) and its code is being removed; the file stays for kci's own tests. The
+`kci_*` libraries are no longer release members: `release/artifacts.textproto` and the release set list none,
+and `UNPUBLISHED` in `release/readme_e2e/packages.bzl` holds the 16 that have a `mopm.toml`.
 
 ### The mopm jobs
 
@@ -491,7 +491,10 @@ refuses a pull request in which a member (every `src/<name>` with a `mopm.toml`,
 `release/readme_e2e/packages.bzl`) is missing from it: "<name> is a member of the release and is not in
 release/prod_claimed_names.txt: claim it on the prod registry first, then add it to release/prod_claimed_names.txt".
 A maintainer adds a name to the file only after claiming it on the prod registry, in the pull request that adds the
-member. The file also refuses a line no member has, an unsorted or repeated line, and an empty file. It is a
+member. The file also refuses a line no member has and `release/readme_e2e/packages.bzl` does not retire
+(`UNPUBLISHED`: a package that is built but no longer released, such as the `kci_*` libraries, whose
+names stay claimed; the file refuses the line of such a package being dropped), an unsorted or repeated line,
+and an empty file. It is a
 committed claim, not a live read: it does not notice a claim the registry lost, and `prod-stage` stays the
 last word.
 
@@ -646,8 +649,8 @@ a redirect.
 > workflow, deleted; `release.yml` has none of its stages, environments or
 > gates. It is kept as the description of what kci's publish machinery
 > enforces (the rules are still tested, against a fixture pair in
-> `src/kci_workflow_check/tests/data`) while kci's code is in the tree. kci is retired, and its
-> relevant logic is being ported to ucdk (komira-ai/ucdk): no workflow runs it. Read it as history, not
+> `src/kci_workflow_check/tests/data`) while kci's code is in the tree. kci is retired in favour of
+> ucdk (komira-ai/ucdk) and its code is being removed: no workflow runs it. Read it as history, not
 > as what a push to `main` does today.
 
 ### Continuous auto-promotion

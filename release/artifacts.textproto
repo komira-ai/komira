@@ -169,102 +169,12 @@ artifacts {
 }
 
 artifacts {
-  name: "kci_api"
-  build_system: "buck2"
-  args: "//src/kci_api:kci_api_conda[release]"
-  args: "--out"
-  args: "{out_dir}"
-  targets: "//src/kci_api:kci_api_conda"
-}
-
-artifacts {
-  name: "kci_release_channel"
-  build_system: "buck2"
-  args: "//src/kci_release_channel:kci_release_channel_conda[release]"
-  args: "--out"
-  args: "{out_dir}"
-  targets: "//src/kci_release_channel:kci_release_channel_conda"
-}
-
-artifacts {
-  name: "kci_artifact_manifest"
-  build_system: "buck2"
-  args: "//src/kci_artifact_manifest:kci_artifact_manifest_conda[release]"
-  args: "--out"
-  args: "{out_dir}"
-  targets: "//src/kci_artifact_manifest:kci_artifact_manifest_conda"
-}
-
-artifacts {
-  name: "kci_logs"
-  build_system: "buck2"
-  args: "//src/kci_logs:kci_logs_conda[release]"
-  args: "--out"
-  args: "{out_dir}"
-  targets: "//src/kci_logs:kci_logs_conda"
-}
-
-artifacts {
-  name: "kci_params"
-  build_system: "buck2"
-  args: "//src/kci_params:kci_params_conda[release]"
-  args: "--out"
-  args: "{out_dir}"
-  targets: "//src/kci_params:kci_params_conda"
-}
-
-artifacts {
-  name: "kci_release_machine"
-  build_system: "buck2"
-  args: "//src/kci_release_machine:kci_release_machine_conda[release]"
-  args: "--out"
-  args: "{out_dir}"
-  targets: "//src/kci_release_machine:kci_release_machine_conda"
-}
-
-artifacts {
   name: "komira_wkt"
   build_system: "buck2"
   args: "//src/komira_wkt:komira_wkt_conda[release]"
   args: "--out"
   args: "{out_dir}"
   targets: "//src/komira_wkt:komira_wkt_conda"
-}
-
-artifacts {
-  name: "kci_resource_proto"
-  build_system: "buck2"
-  args: "//src/kci_resource_proto:kci_resource_proto_conda[release]"
-  args: "--out"
-  args: "{out_dir}"
-  targets: "//src/kci_resource_proto:kci_resource_proto_conda"
-}
-
-artifacts {
-  name: "kci_validator_rows"
-  build_system: "buck2"
-  args: "//src/kci_validator_rows:kci_validator_rows_conda[release]"
-  args: "--out"
-  args: "{out_dir}"
-  targets: "//src/kci_validator_rows:kci_validator_rows_conda"
-}
-
-artifacts {
-  name: "kci_validator_report"
-  build_system: "buck2"
-  args: "//src/kci_validator_report:kci_validator_report_conda[release]"
-  args: "--out"
-  args: "{out_dir}"
-  targets: "//src/kci_validator_report:kci_validator_report_conda"
-}
-
-artifacts {
-  name: "kci_workflow_check"
-  build_system: "buck2"
-  args: "//src/kci_workflow_check:kci_workflow_check_conda[release]"
-  args: "--out"
-  args: "{out_dir}"
-  targets: "//src/kci_workflow_check:kci_workflow_check_conda"
 }
 
 artifacts {
@@ -493,15 +403,6 @@ artifacts {
 }
 
 artifacts {
-  name: "kci_cell"
-  build_system: "buck2"
-  args: "//src/kci_cell:kci_cell_conda[release]"
-  args: "--out"
-  args: "{out_dir}"
-  targets: "//src/kci_cell:kci_cell_conda"
-}
-
-artifacts {
   name: "komira_mcp_server"
   build_system: "buck2"
   args: "//src/komira_mcp_server:komira_mcp_server_conda[release]"
@@ -589,42 +490,6 @@ artifacts {
   args: "--out"
   args: "{out_dir}"
   targets: "//src/komira_calendar_ics:komira_calendar_ics_conda"
-}
-
-artifacts {
-  name: "kci_artifact_proto"
-  build_system: "buck2"
-  args: "//src/kci_artifact_proto:kci_artifact_proto_conda[release]"
-  args: "--out"
-  args: "{out_dir}"
-  targets: "//src/kci_artifact_proto:kci_artifact_proto_conda"
-}
-
-artifacts {
-  name: "kci_deploy_model_proto"
-  build_system: "buck2"
-  args: "//src/kci_deploy_model_proto:kci_deploy_model_proto_conda[release]"
-  args: "--out"
-  args: "{out_dir}"
-  targets: "//src/kci_deploy_model_proto:kci_deploy_model_proto_conda"
-}
-
-artifacts {
-  name: "kci_manifest_proto"
-  build_system: "buck2"
-  args: "//src/kci_manifest_proto:kci_manifest_proto_conda[release]"
-  args: "--out"
-  args: "{out_dir}"
-  targets: "//src/kci_manifest_proto:kci_manifest_proto_conda"
-}
-
-artifacts {
-  name: "kci_artifact"
-  build_system: "buck2"
-  args: "//src/kci_artifact:kci_artifact_conda[release]"
-  args: "--out"
-  args: "{out_dir}"
-  targets: "//src/kci_artifact:kci_artifact_conda"
 }
 
 artifacts {
@@ -736,15 +601,6 @@ artifacts {
 }
 
 artifacts {
-  name: "kci_secret_writer"
-  build_system: "buck2"
-  args: "//src/kci_secret_writer:kci_secret_writer_conda[release]"
-  args: "--out"
-  args: "{out_dir}"
-  targets: "//src/kci_secret_writer:kci_secret_writer_conda"
-}
-
-artifacts {
   name: "komira_arrow_ipc"
   build_system: "buck2"
   args: "//src/komira_arrow_ipc:komira_arrow_ipc_conda[release]"
@@ -799,30 +655,12 @@ artifacts {
 }
 
 artifacts {
-  name: "kci_reconciler"
-  build_system: "buck2"
-  args: "//src/kci_reconciler:kci_reconciler_conda[release]"
-  args: "--out"
-  args: "{out_dir}"
-  targets: "//src/kci_reconciler:kci_reconciler_conda"
-}
-
-artifacts {
   name: "komira_scan_source"
   build_system: "buck2"
   args: "//src/komira_scan_source:komira_scan_source_conda[release]"
   args: "--out"
   args: "{out_dir}"
   targets: "//src/komira_scan_source:komira_scan_source_conda"
-}
-
-artifacts {
-  name: "kci_cloud"
-  build_system: "buck2"
-  args: "//src/kci_cloud:kci_cloud_conda[release]"
-  args: "--out"
-  args: "{out_dir}"
-  targets: "//src/kci_cloud:kci_cloud_conda"
 }
 
 artifacts {
@@ -835,30 +673,12 @@ artifacts {
 }
 
 artifacts {
-  name: "kci_composites"
-  build_system: "buck2"
-  args: "//src/kci_composites:kci_composites_conda[release]"
-  args: "--out"
-  args: "{out_dir}"
-  targets: "//src/kci_composites:kci_composites_conda"
-}
-
-artifacts {
   name: "komira_join_assembly"
   build_system: "buck2"
   args: "//src/komira_join_assembly:komira_join_assembly_conda[release]"
   args: "--out"
   args: "{out_dir}"
   targets: "//src/komira_join_assembly:komira_join_assembly_conda"
-}
-
-artifacts {
-  name: "kci_cloud_fake"
-  build_system: "buck2"
-  args: "//src/kci_cloud_fake:kci_cloud_fake_conda[release]"
-  args: "--out"
-  args: "{out_dir}"
-  targets: "//src/kci_cloud_fake:kci_cloud_fake_conda"
 }
 
 artifacts {
@@ -925,15 +745,6 @@ artifacts {
 }
 
 artifacts {
-  name: "kci_pkg_upload"
-  build_system: "buck2"
-  args: "//src/kci_pkg_upload:kci_pkg_upload_conda[release]"
-  args: "--out"
-  args: "{out_dir}"
-  targets: "//src/kci_pkg_upload:kci_pkg_upload_conda"
-}
-
-artifacts {
   name: "komira_aws_core"
   build_system: "buck2"
   args: "//src/komira_aws_core:komira_aws_core_conda[release]"
@@ -958,24 +769,6 @@ artifacts {
   args: "--out"
   args: "{out_dir}"
   targets: "//src/komira_oci:komira_oci_conda"
-}
-
-artifacts {
-  name: "kci_publish_oci"
-  build_system: "buck2"
-  args: "//src/kci_publish_oci:kci_publish_oci_conda[release]"
-  args: "--out"
-  args: "{out_dir}"
-  targets: "//src/kci_publish_oci:kci_publish_oci_conda"
-}
-
-artifacts {
-  name: "kci_release_set"
-  build_system: "buck2"
-  args: "//src/kci_release_set:kci_release_set_conda[release]"
-  args: "--out"
-  args: "{out_dir}"
-  targets: "//src/kci_release_set:kci_release_set_conda"
 }
 
 artifacts {
@@ -1012,15 +805,6 @@ artifacts {
   args: "--out"
   args: "{out_dir}"
   targets: "//src/komira_gcp_wif:komira_gcp_wif_conda"
-}
-
-artifacts {
-  name: "kci_cloud_gcp"
-  build_system: "buck2"
-  args: "//src/kci_cloud_gcp:kci_cloud_gcp_conda[release]"
-  args: "--out"
-  args: "{out_dir}"
-  targets: "//src/kci_cloud_gcp:kci_cloud_gcp_conda"
 }
 
 artifacts {
@@ -1095,27 +879,7 @@ artifacts {
   args: "--member-manifest"
   args: "{release_dir}/komira_proto_codec/manifest.json"
   args: "--member-manifest"
-  args: "{release_dir}/kci_api/manifest.json"
-  args: "--member-manifest"
-  args: "{release_dir}/kci_release_channel/manifest.json"
-  args: "--member-manifest"
-  args: "{release_dir}/kci_artifact_manifest/manifest.json"
-  args: "--member-manifest"
-  args: "{release_dir}/kci_logs/manifest.json"
-  args: "--member-manifest"
-  args: "{release_dir}/kci_params/manifest.json"
-  args: "--member-manifest"
-  args: "{release_dir}/kci_release_machine/manifest.json"
-  args: "--member-manifest"
   args: "{release_dir}/komira_wkt/manifest.json"
-  args: "--member-manifest"
-  args: "{release_dir}/kci_resource_proto/manifest.json"
-  args: "--member-manifest"
-  args: "{release_dir}/kci_validator_rows/manifest.json"
-  args: "--member-manifest"
-  args: "{release_dir}/kci_validator_report/manifest.json"
-  args: "--member-manifest"
-  args: "{release_dir}/kci_workflow_check/manifest.json"
   args: "--member-manifest"
   args: "{release_dir}/komira_anomaly/manifest.json"
   args: "--member-manifest"
@@ -1167,8 +931,6 @@ artifacts {
   args: "--member-manifest"
   args: "{release_dir}/komira_sync/manifest.json"
   args: "--member-manifest"
-  args: "{release_dir}/kci_cell/manifest.json"
-  args: "--member-manifest"
   args: "{release_dir}/komira_mcp_server/manifest.json"
   args: "--member-manifest"
   args: "{release_dir}/komira_chat_proto/manifest.json"
@@ -1188,14 +950,6 @@ artifacts {
   args: "{release_dir}/komira_calendar/manifest.json"
   args: "--member-manifest"
   args: "{release_dir}/komira_calendar_ics/manifest.json"
-  args: "--member-manifest"
-  args: "{release_dir}/kci_artifact_proto/manifest.json"
-  args: "--member-manifest"
-  args: "{release_dir}/kci_deploy_model_proto/manifest.json"
-  args: "--member-manifest"
-  args: "{release_dir}/kci_manifest_proto/manifest.json"
-  args: "--member-manifest"
-  args: "{release_dir}/kci_artifact/manifest.json"
   args: "--member-manifest"
   args: "{release_dir}/komira_libc/manifest.json"
   args: "--member-manifest"
@@ -1221,8 +975,6 @@ artifacts {
   args: "--member-manifest"
   args: "{release_dir}/komira_secret_store/manifest.json"
   args: "--member-manifest"
-  args: "{release_dir}/kci_secret_writer/manifest.json"
-  args: "--member-manifest"
   args: "{release_dir}/komira_arrow_ipc/manifest.json"
   args: "--member-manifest"
   args: "{release_dir}/komira_plan_expr/manifest.json"
@@ -1235,19 +987,11 @@ artifacts {
   args: "--member-manifest"
   args: "{release_dir}/komira_plan_stats/manifest.json"
   args: "--member-manifest"
-  args: "{release_dir}/kci_reconciler/manifest.json"
-  args: "--member-manifest"
   args: "{release_dir}/komira_scan_source/manifest.json"
-  args: "--member-manifest"
-  args: "{release_dir}/kci_cloud/manifest.json"
   args: "--member-manifest"
   args: "{release_dir}/komira_plan_ir/manifest.json"
   args: "--member-manifest"
-  args: "{release_dir}/kci_composites/manifest.json"
-  args: "--member-manifest"
   args: "{release_dir}/komira_join_assembly/manifest.json"
-  args: "--member-manifest"
-  args: "{release_dir}/kci_cloud_fake/manifest.json"
   args: "--member-manifest"
   args: "{release_dir}/komira_async/manifest.json"
   args: "--member-manifest"
@@ -1263,17 +1007,11 @@ artifacts {
   args: "--member-manifest"
   args: "{release_dir}/komira_objectstore/manifest.json"
   args: "--member-manifest"
-  args: "{release_dir}/kci_pkg_upload/manifest.json"
-  args: "--member-manifest"
   args: "{release_dir}/komira_aws_core/manifest.json"
   args: "--member-manifest"
   args: "{release_dir}/komira_gcp_core/manifest.json"
   args: "--member-manifest"
   args: "{release_dir}/komira_oci/manifest.json"
-  args: "--member-manifest"
-  args: "{release_dir}/kci_publish_oci/manifest.json"
-  args: "--member-manifest"
-  args: "{release_dir}/kci_release_set/manifest.json"
   args: "--member-manifest"
   args: "{release_dir}/komira_gcp_cloudresourcemanager/manifest.json"
   args: "--member-manifest"
@@ -1282,8 +1020,6 @@ artifacts {
   args: "{release_dir}/komira_gcp_run/manifest.json"
   args: "--member-manifest"
   args: "{release_dir}/komira_gcp_wif/manifest.json"
-  args: "--member-manifest"
-  args: "{release_dir}/kci_cloud_gcp/manifest.json"
   args: "--member-manifest"
   args: "{release_dir}/komira_kafka_broker/manifest.json"
   args: "--member-manifest"

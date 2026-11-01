@@ -7,6 +7,11 @@
 # write to the live registry, so it holds the members to this file instead
 # (//release:prod_claimed_names_cases): a maintainer adds a name here only AFTER claiming it
 # on the prod registry, in the pull request that adds the member.
+#
+# A line stays when its package leaves the release: the 16 kci_* libraries (kci is retired in
+# favour of ucdk, komira-ai/ucdk) are UNPUBLISHED in packages.bzl, no longer published, and their
+# names stay claimed so nobody else can take them. The check refuses a line dropped for such a
+# package, and a line for a package that is neither a member nor retired.
 kci_api
 kci_artifact
 kci_artifact_manifest

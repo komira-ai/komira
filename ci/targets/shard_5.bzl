@@ -4,6 +4,8 @@
 
 TARGETS = [
     "komira//src/kci_cli:kci_cli_conda",
+    "komira//src/kci_cloud_fake:kci_cloud_fake_conda",
+    "komira//src/kci_publish_oci:kci_publish_oci_conda",
     "komira//src/komira_async_api:ci",
     "komira//src/komira_async_api:conda_holds",
     "komira//src/komira_async_api:coverage_floor",

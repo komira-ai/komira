@@ -179,7 +179,7 @@ readme_e2e_all = declares_docs(readme_e2e_all)
 
 def _complete_impl(ctx):
     paths = ctx.attrs.tree[DocTreeInfo].files.keys()
-    why = _guard_findings(paths, ctx.attrs.covered)
+    why = _guard_findings(paths, ctx.attrs.covered, ctx.attrs.unpublished)
     if not why and ctx.attrs.mopm:
         why = _mopm_findings(ctx.attrs.mopm, ctx.attrs.first_mopm_with_overlay, ctx.attrs.excluded)
     if why:
@@ -197,6 +197,7 @@ _readme_e2e_complete = rule(
         "mopm": attrs.string(default = "", doc = "The mopm the release's e2e installs with (MOPM in release/readme_e2e/packages.bzl). When set, the row of EXCLUDED for the e2e must agree with it (guard.bzl, mopm_findings)."),
         "targets": attrs.list(attrs.dep(), default = []),
         "tree": attrs.dep(providers = [DocTreeInfo]),
+        "unpublished": attrs.list(attrs.string(), default = [], doc = "Packages that keep a `src/<name>/mopm.toml` and are not released (UNPUBLISHED in release/readme_e2e/packages.bzl): no README e2e target, and not in `covered`."),
     },
 )
 
