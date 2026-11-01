@@ -50,17 +50,41 @@ def docs_checked():
     """Whether this repository checks its Markdown.
 
     komira's own checkout does: it has the `tests` cell. A repository using
-    komira as a cell does not, so there no doc_tree is declared.
+    komira as a cell does not, so there no doc_tree is declared but in the
+    cells it names in `[komira] doc_tree_cells` (`declares_doc_trees()`).
     """
     return read_root_config("cells", "tests") != None
 
-def package_docs():
-    """Declares this package's doc_tree, unless it is declared already.
+def declares_doc_trees():
+    """Whether the packages of this BUCK file's cell declare doc_trees.
 
-    Not in the toolchains cell: //:docs does not read it (the root BUCK says
-    why), and its targets must equal a consuming repository's copy's.
+    In komira's own checkout (`docs_checked()`), every cell but toolchains.
+    In a repository using komira as a cell, the cells its root .buckconfig
+    names in `[komira] doc_tree_cells` (space-separated; none by default), so
+    that its own checks over every file of a cell (the interpreter list,
+    interpreter_budget.bzl) have the cell's tree. Never the komira cell
+    there: its root package's checks name the `tests` cell, which such a
+    repository does not have, and its targets stay those of a checkout that
+    lists nothing. Never the toolchains cell: //:docs does not read it (the
+    root BUCK says why), and its targets must equal a consuming repository's
+    copy's.
     """
-    if not docs_checked() or get_cell_name() == "toolchains" or rule_exists("doc_tree"):
+    cell = get_cell_name()
+    if cell == "toolchains":
+        return False
+    if docs_checked():
+        return True
+    cells = (read_root_config("komira", "doc_tree_cells") or "").split()
+    if "komira" in cells or "toolchains" in cells:
+        fail("[komira] doc_tree_cells names `{}`: list only this repository's own cells".format(
+            "komira" if "komira" in cells else "toolchains",
+        ))
+    return cell in cells
+
+def package_docs():
+    """Declares this package's doc_tree, unless it is declared already or its
+    cell declares none (`declares_doc_trees()`)."""
+    if not declares_doc_trees() or rule_exists("doc_tree"):
         return
     base = "//" + package_name() + "/" if package_name() else "//"
     doc_tree(

@@ -33,7 +33,7 @@ const Fake = struct {
     }
 
     fn write(path: []const u8, data: []const u8) !void {
-        try std.fs.cwd().writeFile(path, data);
+        try std.fs.cwd().writeFile(.{ .sub_path = path, .data = data });
     }
 
     fn run(ptr: *anyopaque, alloc: std.mem.Allocator, spec: br.Spec) anyerror!br.Outcome {
@@ -41,7 +41,7 @@ const Fake = struct {
         var copy = spec;
         copy.argv = try alloc.dupe([]const u8, spec.argv);
         copy.env = try alloc.dupe([]const u8, spec.env);
-        try self.calls.append(copy);
+        try self.calls.append(alloc, copy);
         for ([_][]const u8{ "PATH=", "TMPDIR=" }) |p| {
             const v = for (spec.env) |e| {
                 if (std.mem.startsWith(u8, e, p)) break e[p.len..];
@@ -79,8 +79,8 @@ pub const Case = struct {
         c.* = .{ .arena = std.heap.ArenaAllocator.init(testing.allocator), .tmp = testing.tmpDir(.{}) };
         const al = c.arena.allocator();
         c.root = try c.tmp.dir.realpathAlloc(al, ".");
-        c.err = std.ArrayList(u8).init(al);
-        c.fake = .{ .calls = std.ArrayList(br.Spec).init(al) };
+        c.err = std.ArrayList(u8).empty;
+        c.fake = .{ .calls = std.ArrayList(br.Spec).empty };
         // Inputs that pass every check, each test changing one.
         try c.tmp.dir.makePath("tc/lld/bin");
         try c.tmp.dir.makePath("tc/llvm/bin");
@@ -109,7 +109,7 @@ pub const Case = struct {
 
     pub fn put(self: *Case, rel: []const u8, data: []const u8) !void {
         if (std.fs.path.dirname(rel)) |d| try self.tmp.dir.makePath(d);
-        try self.tmp.dir.writeFile(rel, data);
+        try self.tmp.dir.writeFile(.{ .sub_path = rel, .data = data });
     }
 
     pub fn k(self: *Case) ![]const u8 {
@@ -423,13 +423,13 @@ test "step 1: a data section past the end of the file is refused" {
     // records at the very end of the file; their counter counts read as 0
     // past it, so the counters still fill the counter section.
     const data = try fx.dataOf(c.a(), &fx.FNS);
-    var b = std.ArrayList(u8).init(c.a());
-    try b.appendSlice(try fx.elf(c.a(), &.{
+    var b = std.ArrayList(u8).empty;
+    try b.appendSlice(c.a(), try fx.elf(c.a(), &.{
         .{ .name = "__llvm_prf_cnts", .size = fx.cntsSize(&fx.FNS) },
         .{ .name = "__llvm_prf_data", .size = data.len + 2 * 72, .offset = 0 },
     }, .{}));
     const off = b.items.len;
-    try b.appendSlice(data);
+    try b.appendSlice(c.a(), data);
     // The data section's header is the third (null, cnts, data): offset at +24.
     const shoff = std.mem.readInt(u64, b.items[40..48], .little);
     std.mem.writeInt(u64, b.items[shoff + 2 * 64 + 24 ..][0..8], off, .little);
@@ -560,7 +560,7 @@ test "step 1: a function the binary links that the profile lacks is refused, wit
     // The pairs of the two lost: MAIN's and SMALL's MD5 prefixes and hashes.
     var md5: [16]u8 = undefined;
     std.crypto.hash.Md5.hash("main", &md5, .{});
-    try testing.expect(c.has(try std.fmt.allocPrint(c.a(), "{s} 123456789abcdef0", .{std.fmt.fmtSliceHexLower(md5[0..8])})));
+    try testing.expect(c.has(try std.fmt.allocPrint(c.a(), "{s} 123456789abcdef0", .{&std.fmt.bytesToHex(md5[0..8].*, .lower)})));
     try testing.expect(c.has(" 0000000000000042 "));
     try testing.expectEqual(@as(usize, 1), c.fake.calls.items.len);
 }
@@ -611,7 +611,7 @@ test "step 1: of several extra functions, the one first by name MD5 and hash is 
     var best: []const u8 = "";
     for (extra) |e| {
         const r = fx.record(e);
-        const key = try std.fmt.allocPrint(c.a(), "{s}", .{std.fmt.fmtSliceHexLower(r[0..8])});
+        const key = try std.fmt.allocPrint(c.a(), "{s}", .{&std.fmt.bytesToHex(r[0..8].*, .lower)});
         if (best.len == 0 or std.mem.lessThan(u8, key, best)) {
             best = key;
             first = e.name;
@@ -637,9 +637,9 @@ test "step 1: a hash of fewer than 16 digits is read with leading zeros" {
 test "step 2: lld failing is refused, after the last 20 lines it printed, each cut to 300 bytes" {
     var c = try Case.init();
     defer c.deinit();
-    var e = std.ArrayList(u8).init(c.a());
-    for (0..25) |i| try e.writer().print("line {d}\n", .{i});
-    try e.appendSlice("y" ** 400);
+    var e = std.ArrayList(u8).empty;
+    for (0..25) |i| try e.writer(c.a()).print("line {d}\n", .{i});
+    try e.appendSlice(c.a(), "y" ** 400);
     c.fake.lld_err = e.items;
     c.fake.lld_status = .{ .exited = 1 };
     try c.refused("lld could not apply the profile in/test_one.profdata to in/test_one.bc (pgo-instr-use)");
@@ -709,8 +709,8 @@ test "step 3: a line of lld's own inside the dump is refused; the first five nam
     }
     var c = try Case.init();
     defer c.deinit();
-    var e = std.ArrayList(u8).init(c.a());
-    for (0..7) |i| try e.writer().print("warning: {d}{s}\n", .{ i, "z" ** 400 });
+    var e = std.ArrayList(u8).empty;
+    for (0..7) |i| try e.writer(c.a()).print("warning: {d}{s}\n", .{ i, "z" ** 400 });
     c.fake.lld_err = try std.mem.concat(c.a(), u8, &.{ d, e.items });
     try c.refused("lld reported 7 diagnostic(s) applying the profile: warning: 0");
     try testing.expect(c.has("warning: 4"));

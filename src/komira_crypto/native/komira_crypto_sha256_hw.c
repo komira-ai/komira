@@ -2,10 +2,9 @@
  *
  * internal/asm/sha256_compress.mojo calls aws-lc's hand-tuned block bodies.
  * aws-lc's assembly declares them `.hidden`, so no shared object can export
- * them; these wrappers are the names the Mojo code calls instead. They are
- * compiled with aws-lc's prefix header (an exported flag of
- * //third_party/aws-lc:crypto), so the calls below bind to
- * komira_awslc_sha256_block_data_order_{hw,nohw}.
+ * them; these wrappers are the names the Mojo code calls instead. aws-lc is
+ * komira_awslc's archive, built with every global symbol renamed komira_awslc_X,
+ * so the calls below name komira_awslc_sha256_block_data_order_{hw,nohw}.
  *
  * sha256_block_data_order_hw executes the x86-64 SHA extensions and dies with
  * SIGILL on a CPU without them, so komira_crypto_sha256_block_data_order
@@ -24,8 +23,8 @@
 #include <cpuid.h>
 #endif
 
-void sha256_block_data_order_hw(uint32_t state[8], const uint8_t *data, size_t num);
-void sha256_block_data_order_nohw(uint32_t state[8], const uint8_t *data, size_t num);
+void komira_awslc_sha256_block_data_order_hw(uint32_t state[8], const uint8_t *data, size_t num);
+void komira_awslc_sha256_block_data_order_nohw(uint32_t state[8], const uint8_t *data, size_t num);
 
 /* 0: not read yet; 1: no SHA extensions; 2: SHA extensions present. A race
  * between two first callers stores the same value twice. */
@@ -58,15 +57,15 @@ __attribute__((visibility("default"))) void komira_crypto_sha256_block_data_orde
                                                                                    size_t num) {
 #if defined(__x86_64__)
     if (komira_crypto_sha256_hw_capable()) {
-        sha256_block_data_order_hw(state, data, num);
+        komira_awslc_sha256_block_data_order_hw(state, data, num);
         return;
     }
 #endif
-    sha256_block_data_order_nohw(state, data, num);
+    komira_awslc_sha256_block_data_order_nohw(state, data, num);
 }
 
 __attribute__((visibility("default"))) void komira_crypto_sha256_block_data_order_nohw(uint32_t state[8],
                                                                                         const uint8_t *data,
                                                                                         size_t num) {
-    sha256_block_data_order_nohw(state, data, num);
+    komira_awslc_sha256_block_data_order_nohw(state, data, num);
 }

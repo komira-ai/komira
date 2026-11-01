@@ -7,9 +7,8 @@
 #
 #   1. Hashes. `_mix64` is the SplitMix64 finalizer: `_mix64(0)` is the
 #      published first SplitMix64 output for seed 0, and the SIMD twin agrees
-#      lane by lane. The string hash is FNV-1a 64: "abc" hashes to the
-#      published FNV-1a value, through both the column scanner and
-#      `note_string`.
+#      lane by lane. The string hash is FNV-1a 64: "abc" and "" hash to
+#      the published FNV-1a values through the column scanner.
 #   2. HyperLogLog. Register index and run length are checked bit by bit on
 #      hand-built hashes; `add_bulk` equals the scalar `add`; `merge` of two
 #      sketches equals the sketch of the union; `copy` is deep; `count` is
@@ -17,19 +16,16 @@
 #      larger sets. `_hll_sigma` / `_hll_tau` are held to their series
 #      definitions, and are non-negative over their whole input domain (the
 #      4097 fractions k/4096 `count` can pass), which is why `count`'s
-#      `e < 0.0` arm cannot run.
+#      `e < 0.0` arm cannot run. A saturated or nearly saturated sketch
+#      counts `HLL_COUNT_CAP`, as does a forged one whose estimate is in
+#      [2^63, 2^64); one whose estimate is just below 2^63 is not capped.
 #   3. ColumnStats. `null_only` is all-Absent; `copy` shares the sketch and
 #      bloom Arcs (refcount, no byte copy); `fingerprint` equals the FNV fold
 #      of its summary fields, computed by hand.
 #   4. Accumulator. The kind tag for every arrow type, the bloom sizing
-#      clamp, `note_string` (which has no caller in the package), the
-#      no-scanner finalize arm, the FLOAT16 float arm, a zero-row SIMD scan,
-#      `_col_is_null`, `_fixed_width_bytes`. Some of these are unreachable
-#      from `compute_column_stats`; each says so.
-#
-# Nothing here asserts a value believed wrong (komira-ai/komira#940): where
-# the code departs from its docstring or from the type, the test runs the
-# line and asserts only what is right under both behaviours.
+#      clamp, the int and float scanners' count-only arms, a zero-row SIMD
+#      scan, `_fixed_width_bytes`. The count-only arms are unreachable from
+#      `compute_column_stats`; the test says so.
 # =============================================================================
 
 from std.memory import ArcPointer
@@ -60,27 +56,32 @@ from komira_dynamic_filter.bloom_filter import BloomFilter
 from komira_plan_expr.scalar_value import ScalarValue
 from komira_plan_stats.precision_scalar import PrecisionScalar
 from komira_scan_source.column_stats import (
-    BLOOM_FPP,
-    BLOOM_NDV_CAP,
     COLSTATS_KIND_PRIMITIVE,
     ColumnStats,
-    HyperLogLog,
+    _finalize_accum,
+    _fixed_width_bytes,
+    compute_column_stats,
+)
+from komira_scan_source.column_stats_accum import (
+    BLOOM_FPP,
+    BLOOM_NDV_CAP,
     _ACC_KIND_BOOL,
     _ACC_KIND_FLOAT,
     _ACC_KIND_INT,
     _ACC_KIND_NONE,
     _ACC_KIND_STRING,
     _ColAccum,
-    _col_is_null,
-    _finalize_accum,
-    _fixed_width_bytes,
+    _scan_float_column,
+    _scan_int_column,
+    _scan_int_simd_no_validity,
+)
+from komira_scan_source.column_stats_hll import (
+    HLL_COUNT_CAP,
+    HyperLogLog,
     _hll_sigma,
     _hll_tau,
     _mix64,
     _mix64_simd,
-    _scan_float_column,
-    _scan_int_simd_no_validity,
-    compute_column_stats,
 )
 
 comptime W = simd_width_of[DType.int64]()
@@ -155,7 +156,7 @@ def test_mix64_is_splitmix64_and_simd_twin_agrees() raises:
         assert_equal(h[j], _mix64(x[j]), "lane " + String(j))
 
 
-def test_string_hash_is_fnv1a_in_scanner_and_note_string() raises:
+def test_string_hash_is_fnv1a_in_the_scanner() raises:
     var vals = List[String]()
     vals.append(String("abc"))
     var s = _stats1(Column.from_string(StringArray.from_strings(vals)), ArrowType.STRING)
@@ -164,11 +165,15 @@ def test_string_hash_is_fnv1a_in_scanner_and_note_string() raises:
     want.add(FNV1A64_ABC)
     for i in range(4096):
         assert_equal(s.hll.value()[].registers[i], want.registers[i], "register " + String(i))
-    var acc = _ColAccum(ArrowType.STRING, 1)
-    acc.note_string(String("abc"))
-    assert_true(FNV1A64_ABC in acc.exact_set, "note_string feeds FNV-1a(abc)")
-    acc.note_string(String(""))
-    assert_true(FNV1A64_EMPTY in acc.exact_set, "the empty string hashes to the offset basis")
+    var empty = List[String]()
+    empty.append(String(""))
+    var e = _stats1(Column.from_string(StringArray.from_strings(empty)), ArrowType.STRING)
+    var want_e = HyperLogLog()
+    want_e.add(FNV1A64_EMPTY)
+    for i in range(4096):
+        assert_equal(
+            e.hll.value()[].registers[i], want_e.registers[i], "the empty string hashes to the offset basis"
+        )
 
 
 # =============================================================================
@@ -284,26 +289,55 @@ def test_hll_count_clamps_a_forged_register() raises:
 
     In `count` the Q + 1 bucket and the Q bucket differ only by a 2^-52
     weight in z, which shows only when no register is lower: so every
-    register is forged. The value both counts take is not asserted (what a
-    saturated sketch should estimate is komira-ai/komira#940)."""
+    register is forged. Both are saturated: `HLL_COUNT_CAP`."""
     var forged = HyperLogLog()
     var honest = HyperLogLog()
     for i in range(4096):
         forged.registers[i] = UInt8(255)
         honest.registers[i] = UInt8(53)
     assert_equal(forged.count(), honest.count(), "255 counts as Q + 1")
+    assert_equal(honest.count(), HLL_COUNT_CAP, "saturated")
 
 
 def test_hll_saturating_hashes_and_count_returns() raises:
     """Hashes below 4096 put Q + 1 in every register, which makes the Ertl
-    sum z exactly 0. `count` returns there (the z == 0 arm); its value is
-    not asserted: 0 for a saturated sketch is wrong (komira-ai/komira#940)."""
+    sum z exactly 0: the estimate is unbounded, and `count` returns
+    `HLL_COUNT_CAP`, not 0."""
     var h = HyperLogLog()
     for i in range(4096):
         h.add(UInt64(i))
     for i in range(4096):
         assert_equal(h.registers[i], UInt8(53))
-    _ = h.count()
+    assert_equal(h.count(), HLL_COUNT_CAP)
+
+
+def test_hll_nearly_saturated_count_is_capped() raises:
+    """One register at Q, the rest at Q + 1: z is 2^-52 and the estimate
+    about 5e22, past what a UInt64 holds; `count` returns `HLL_COUNT_CAP`."""
+    var h = HyperLogLog()
+    for i in range(4096):
+        h.registers[i] = UInt8(53)
+    h.registers[0] = UInt8(52)
+    assert_equal(h.count(), HLL_COUNT_CAP)
+    assert_equal(Int(h.count()), Int(Int64.MAX), "converts to Int without wrapping")
+
+
+def test_hll_estimate_between_2_63_and_2_64_is_capped() raises:
+    """One register at 40, the rest at Q + 1: z is about 2^-40 and the
+    estimate about 1.22e19, inside [2^63, 2^64). A UInt64 holds it but an
+    Int would wrap it negative, so `count` must return `HLL_COUNT_CAP`.
+    With that register at 39 the estimate is about 6.38e18, below the cap,
+    and is returned as is."""
+    var h = HyperLogLog()
+    for i in range(4096):
+        h.registers[i] = UInt8(53)
+    h.registers[0] = UInt8(40)
+    assert_equal(h.count(), HLL_COUNT_CAP)
+    assert_true(Int(h.count()) > 0, "converts to a positive Int")
+    h.registers[0] = UInt8(39)
+    var below = h.count()
+    assert_true(below < HLL_COUNT_CAP, "not capped below 2^63")
+    assert_true(below > UInt64(6_300_000_000_000_000_000), "about 6.38e18")
 
 
 def test_hll_sigma_tau_series_and_domain() raises:
@@ -447,39 +481,6 @@ def test_bloom_sized_from_rows_clamped_to_1_and_cap() raises:
     )
 
 
-def test_note_string_min_max_length_and_ndv() raises:
-    """`note_string` has no caller in the package; it is held to the same
-    contract as the string scanner."""
-    var acc = _ColAccum(ArrowType.STRING, 4)
-    acc.note_string(String("m"))
-    acc.note_string(String("a"))
-    acc.note_string(String("zz"))
-    acc.note_string(String("m"))
-    assert_equal(acc.n_values, 4)
-    assert_equal(acc.total_len_bytes, 5)
-    assert_equal(acc.min_s, String("a"))
-    assert_equal(acc.max_s, String("zz"))
-    var s = _finalize_accum(acc)
-    assert_equal(s.min.value.value().string_val, String("a"))
-    assert_equal(s.max.value.value().string_val, String("zz"))
-    assert_equal(s.distinct_count.value.value().int_val, Int64(3))
-    assert_equal(s.avg_size_bytes, 1.25)
-    assert_true(s.sum.is_absent())
-
-
-def test_finalize_no_scanner_kind_with_values() raises:
-    """A NONE-kind accumulator that saw values (unreachable from
-    `compute_column_stats`, which never feeds one) gets no min/max/sum but
-    computes an NDV. Neither the NDV (komira-ai/komira#940 may make it
-    Absent for NONE kinds) nor the average size (0 for BINARY, which is not
-    fixed-width) is asserted."""
-    var acc = _ColAccum(ArrowType.BINARY, 2)
-    acc.note_int(Int64(3))
-    acc.note_int(Int64(4))
-    var s = _finalize_accum(acc)
-    assert_true(s.min.is_absent() and s.max.is_absent() and s.sum.is_absent())
-
-
 def test_note_bool_and_note_float_extremes() raises:
     var b = _ColAccum(ArrowType.BOOL, 3)
     b.note_bool(True)
@@ -497,23 +498,35 @@ def test_note_bool_and_note_float_extremes() raises:
     assert_equal(f.sum_f, 5.5)
 
 
-def test_scan_float_column_float16_counts_only() raises:
-    """`_scan_float_column`'s FLOAT16 arm counts nulls and values exactly
-    (unreachable from `compute_column_stats`: FLOAT16 is NONE kind). Whether
-    it should also scan is komira-ai/komira#940, so `seen_value` is not
-    asserted."""
+def test_scanners_count_only_arms() raises:
+    """`_scan_float_column` given FLOAT16 and `_scan_int_column` given
+    DECIMAL128 (both unreachable from `compute_column_stats`, which tags
+    those types NONE kind) count nulls exactly and read no value: after a
+    scanned value, finalize reports the nulls and nothing else, since a
+    statistic over the scanned values alone would be wrong."""
     var vals = List[Int]()
     vals.append(1)
     vals.append(2)
     vals.append(3)
-    var col = _int_col[DType.int32](vals)
     var nulls = List[Int]()
     nulls.append(1)
-    _set_nulls(col, nulls)
-    var acc = _ColAccum(ArrowType.FLOAT64, 3)
-    _scan_float_column(acc, col, ArrowType.FLOAT16, 3)
-    assert_equal(acc.null_count, 1)
-    assert_equal(acc.n_values, 2)
+    for arm in range(2):
+        var col = _int_col[DType.int32](vals)
+        _set_nulls(col, nulls)
+        var acc = _ColAccum(ArrowType.FLOAT64 if arm == 0 else ArrowType.INT64, 3)
+        if arm == 0:
+            acc.note_float(5.0)
+            _scan_float_column(acc, col, ArrowType.FLOAT16, 3)
+        else:
+            acc.note_int(Int64(5))
+            _scan_int_column(acc, col, ArrowType.DECIMAL128, 3)
+        assert_equal(acc.null_count, 1, "arm " + String(arm))
+        assert_equal(acc.n_values, 1, "arm " + String(arm) + ": only the noted value read")
+        var s = _finalize_accum(acc)
+        assert_equal(s.null_count, 1)
+        assert_true(s.min.is_absent() and s.max.is_absent() and s.sum.is_absent())
+        assert_true(s.distinct_count.is_absent(), "arm " + String(arm) + ": NDV Absent")
+        assert_false(Bool(s.hll) or Bool(s.bloom))
 
 
 def test_simd_scan_of_zero_rows_sees_nothing() raises:
@@ -524,23 +537,6 @@ def test_simd_scan_of_zero_rows_sees_nothing() raises:
     assert_equal(acc.max_i, Int64.MIN)
 
 
-def test_col_is_null() raises:
-    var vals = List[Int]()
-    for i in range(10):
-        vals.append(i)
-    var plain = _int_col[DType.int32](vals)
-    for i in range(10):
-        assert_false(_col_is_null(plain, i), "no bitmap, no nulls")
-    var col = _int_col[DType.int32](vals)
-    var nulls = List[Int]()
-    nulls.append(4)
-    _set_nulls(col, nulls)
-    var sl = col.slice(3, 5)
-    assert_false(_col_is_null(sl, 0), "physical 3")
-    assert_true(_col_is_null(sl, 1), "physical 4 through the offset")
-    assert_false(_col_is_null(sl, 2), "physical 5")
-
-
 def test_fixed_width_bytes_table() raises:
     var w1 = List[ArrowType]()
     w1.append(ArrowType.INT8)
@@ -549,6 +545,7 @@ def test_fixed_width_bytes_table() raises:
     var w2 = List[ArrowType]()
     w2.append(ArrowType.INT16)
     w2.append(ArrowType.UINT16)
+    w2.append(ArrowType.FLOAT16)
     var w4 = List[ArrowType]()
     w4.append(ArrowType.INT32)
     w4.append(ArrowType.UINT32)
@@ -558,6 +555,7 @@ def test_fixed_width_bytes_table() raises:
     w8.append(ArrowType.INT64)
     w8.append(ArrowType.UINT64)
     w8.append(ArrowType.FLOAT64)
+    w8.append(ArrowType.DATE64)
     w8.append(ArrowType.TIMESTAMP)
     w8.append(ArrowType.TIMESTAMP_S)
     w8.append(ArrowType.TIMESTAMP_MS)
@@ -573,10 +571,6 @@ def test_fixed_width_bytes_table() raises:
         assert_equal(_fixed_width_bytes(w8[i]), 8, "8-byte " + String(i))
     assert_equal(_fixed_width_bytes(ArrowType.DECIMAL128), 16)
     assert_equal(_fixed_width_bytes(ArrowType.STRING), 0)
-    # DATE64 (8 bytes) and FLOAT16 (2 bytes) read 0 today; neither is
-    # asserted (komira-ai/komira#940). The calls keep the fall-through run.
-    _ = _fixed_width_bytes(ArrowType.DATE64)
-    _ = _fixed_width_bytes(ArrowType.FLOAT16)
 
 
 def main() raises:

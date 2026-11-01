@@ -25,14 +25,17 @@
 #     `map_input` maps.
 # A new reference field of the catalog is one more line in `_walk`. One
 # it lacks is not silent: `unrewritten` reads the rewritten resource's
-# proto3 JSON for a `local`, `input` or `path` key, which only a reference
-# can hold, and expansion raises on one (compose.mojo).
+# proto3 JSON, read as a tree, for a `local`, `input` or `path` field,
+# which only a reference can hold (a key of a `labels`, `env` or
+# `secret_env` map is data, not a field), and expansion raises on one
+# (compose.mojo).
 #
 # A DROPPED site is removed: an optional reference becomes unset, a map
 # entry and a list element are deleted. That is what an optional input left
 # unbound does to the reference or value that names it.
 # =============================================================================
 
+from komira_json import JsonValue, parse_json_value
 from komira_proto_codec import encode_json
 from kci_resource_proto.refs import Ref, SecretRef, Value
 from kci_resource_proto.resource import Resource
@@ -247,17 +250,51 @@ def with_sites(r: Resource, sites: List[RefSite]) raises -> Resource:
     return out^
 
 
-def unrewritten(r: Resource) raises -> String:
-    """The first of `"local":`, `"input":` and `"path":` in `r`'s proto3
-    JSON, or empty. Only a `Ref` (`local`, `input`, `path`), a `Value`
-    (`input`) and a composite instance (`input`) have such keys, so a
-    primitive that expansion has rewritten holds none: one found here is a
-    reference position `_walk` does not know."""
-    var text = encode_json(r)
-    for key in [String('"local":'), String('"input":'), String('"path":')]:
-        if text.find(key) >= 0:
-            return key
+def _is_map_field(key: String) -> Bool:
+    """A map field a primitive can hold (the catalog's `.proto` files: a
+    resource's `labels`; a workload's `env` and `secret_env`, which proto3
+    JSON spells `secretEnv`, as `encode_json` writes it). Its keys are author
+    data (a label key, an environment variable), not field names."""
+    return key == "labels" or key == "env" or key == "secretEnv"
+
+
+def _composite_key(v: JsonValue) raises -> String:
+    """The first `local`, `input` or `path` field in `v`, as `"<key>":`, or
+    empty. A map field's keys are skipped and only its values searched, so a
+    map key spelled like a reference field is not taken for one."""
+    if v.is_array():
+        for i in range(v.array_len()):
+            var found = _composite_key(v.element_at(i))
+            if found.byte_length() > 0:
+                return found^
+        return String("")
+    for i in range(v.num_members()):
+        var key = v.key_at(i)
+        var member = v.value_at(i)
+        if _is_map_field(key) and member.is_object():
+            for k in range(member.num_members()):
+                var found = _composite_key(member.value_at(k))
+                if found.byte_length() > 0:
+                    return found^
+            continue
+        if key == "local" or key == "input" or key == "path":
+            return String('"') + key + String('":')
+        var found = _composite_key(member)
+        if found.byte_length() > 0:
+            return found^
     return String("")
+
+
+def unrewritten(r: Resource) raises -> String:
+    """The first `local`, `input` or `path` field in `r`'s proto3 JSON, as
+    `"<key>":`, or empty. Only a `Ref` (`local`, `input`, `path`), a `Value`
+    (`input`) and a composite instance (`input`) have such fields, so a
+    primitive that expansion has rewritten holds none: one found here is a
+    reference position `_walk` does not know. The JSON is read as a tree,
+    not searched as text: a key of `labels`, `env` or `secret_env` is
+    written the same way as a field name, and an environment variable
+    `path` or a label key `input` is not a reference."""
+    return _composite_key(parse_json_value(encode_json(r)))
 
 
 # ---- the grammars -----------------------------------------------------------------

@@ -27,8 +27,8 @@ fn refusal(a: std.mem.Allocator, text: []const u8, links: bool) ![]const u8 {
 
 /// `<line>|<code>` per code line.
 fn join(a: std.mem.Allocator, e: ex.Example) ![]const u8 {
-    var s = std.ArrayList(u8).init(a);
-    for (e.code, e.code_lines) |c, n| try s.writer().print("{d}|{s}\n", .{ n, c });
+    var s = std.ArrayList(u8).empty;
+    for (e.code, e.code_lines) |c, n| try s.writer(a).print("{d}|{s}\n", .{ n, c });
     return s.items;
 }
 
@@ -127,8 +127,8 @@ test "every refusal is reported in line order" {
     const a = arena.allocator();
     const why = try refusal(a, "```mojo skip\n```\n<!-- mojo-hidden x = 1 -->\n\n```Mojo\n```\n", false);
     var it = std.mem.splitScalar(u8, why, '\n');
-    var lines = std.ArrayList([]const u8).init(a);
-    while (it.next()) |l| try lines.append(l);
+    var lines = std.ArrayList([]const u8).empty;
+    while (it.next()) |l| try lines.append(a, l);
     try t.expectEqual(@as(usize, 3), lines.items.len);
     try t.expect(std.mem.startsWith(u8, lines.items[0], "R.md:1: "));
     try t.expect(std.mem.startsWith(u8, lines.items[1], "R.md:3: a mojo-hidden comment must end"));

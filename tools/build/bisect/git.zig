@@ -15,10 +15,10 @@ pub const Git = struct {
     pub const Run = struct { code: ?u8, stdout: []const u8, stderr: []const u8 };
 
     pub fn runIn(self: *Git, dir: []const u8, args: []const []const u8) !Run {
-        var argv = std.ArrayList([]const u8).init(self.a);
-        try argv.appendSlice(&.{ self.git, "-C", dir });
-        try argv.appendSlice(args);
-        const r = std.ChildProcess.run(.{
+        var argv = std.ArrayList([]const u8).empty;
+        try argv.appendSlice(self.a, &.{ self.git, "-C", dir });
+        try argv.appendSlice(self.a, args);
+        const r = std.process.Child.run(.{
             .allocator = self.a,
             .argv = argv.items,
             .env_map = self.env,
@@ -73,10 +73,10 @@ pub const Git = struct {
     pub fn firstParents(self: *Git, good: []const u8, bad: []const u8) ![]const []const u8 {
         const range = try std.fmt.allocPrint(self.a, "{s}..{s}", .{ good, bad });
         const out = try self.output(&.{ "rev-list", "--first-parent", "--reverse", range });
-        var list = std.ArrayList([]const u8).init(self.a);
+        var list = std.ArrayList([]const u8).empty;
         var it = std.mem.tokenizeAny(u8, out, " \r\n");
-        while (it.next()) |c| try list.append(c);
-        return list.toOwnedSlice();
+        while (it.next()) |c| try list.append(self.a, c);
+        return list.toOwnedSlice(self.a);
     }
 
     pub fn subject(self: *Git, c: []const u8) ![]const u8 {

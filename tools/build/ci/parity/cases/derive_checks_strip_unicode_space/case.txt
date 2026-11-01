@@ -1,5 +1,0 @@
-# A cquery line with U+2003 before the label and U+00A0 after it: what
-# strip() leaves of them is in the error.
-arg "{units_file}"
-input units_file "lib_a\t//src/a:a\n"
-exit 1

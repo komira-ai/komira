@@ -11,13 +11,13 @@ pub const Report = struct {
     out: std.ArrayList(u8),
 
     pub fn init(a: std.mem.Allocator, scenario: []const u8) Report {
-        return .{ .a = a, .scenario = scenario, .out = std.ArrayList(u8).init(a) };
+        return .{ .a = a, .scenario = scenario, .out = std.ArrayList(u8).empty };
     }
 
     fn line(self: *Report, s: []const u8) void {
-        self.out.appendSlice(s) catch {};
-        self.out.append('\n') catch {};
-        std.io.getStdOut().writer().print("{s}\n", .{s}) catch {};
+        self.out.appendSlice(self.a, s) catch {};
+        self.out.append(self.a, '\n') catch {};
+        std.fs.File.stdout().deprecatedWriter().print("{s}\n", .{s}) catch {};
     }
 
     pub fn pass(self: *Report, comptime fmt: []const u8, args: anytype) void {

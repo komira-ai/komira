@@ -20,14 +20,14 @@ pub const Tree = struct {
 
 /// The paths `git ls-files -z` printed.
 pub fn splitZ(a: std.mem.Allocator, out: []const u8) ![][]const u8 {
-    var res = std.ArrayList([]const u8).init(a);
+    var res = std.ArrayList([]const u8).empty;
     var it = std.mem.splitScalar(u8, out, 0);
-    while (it.next()) |p| if (p.len > 0) try res.append(p);
-    return res.toOwnedSlice();
+    while (it.next()) |p| if (p.len > 0) try res.append(a, p);
+    return res.toOwnedSlice(a);
 }
 
 fn copyOne(src_root: std.fs.Dir, dst_root: std.fs.Dir, rel: []const u8) !bool {
-    var link_buf: [std.fs.MAX_PATH_BYTES]u8 = undefined;
+    var link_buf: [std.fs.max_path_bytes]u8 = undefined;
     const st = src_root.statFile(rel) catch |e| switch (e) {
         error.FileNotFound => return false, // tracked, deleted in the working tree
         else => return e,
@@ -50,7 +50,7 @@ pub fn create(a: std.mem.Allocator, r: *Runner, tmp: []const u8, name: []const u
         why.* = try std.fmt.allocPrint(a, "cannot create {s}: {s}", .{ root, @errorName(e) });
         return error.Scratch;
     };
-    const ls = std.ChildProcess.run(.{
+    const ls = std.process.Child.run(.{
         .allocator = a,
         .argv = &.{ "git", "-C", r.root, "ls-files", "-z", "--cached" },
         .max_output_bytes = 1 << 26,
@@ -75,7 +75,7 @@ pub fn create(a: std.mem.Allocator, r: *Runner, tmp: []const u8, name: []const u
         if (copied) n += 1;
     }
     _ = copyOne(src, dst, ".buckconfig.local") catch false;
-    dst.writeFile(".buckroot", "") catch |e| {
+    dst.writeFile(.{ .sub_path = ".buckroot", .data = "" }) catch |e| {
         why.* = try std.fmt.allocPrint(a, "cannot write {s}/.buckroot: {s}", .{ root, @errorName(e) });
         return error.Scratch;
     };
@@ -100,7 +100,7 @@ pub fn plant(tree: Tree, rel: []const u8, bytes: []const u8) !void {
     var d = try std.fs.openDirAbsolute(tree.root, .{});
     defer d.close();
     if (std.fs.path.dirname(rel)) |p| try d.makePath(p);
-    try d.writeFile(rel, bytes);
+    try d.writeFile(.{ .sub_path = rel, .data = bytes });
 }
 
 /// Copies `from` to `to` inside the tree.

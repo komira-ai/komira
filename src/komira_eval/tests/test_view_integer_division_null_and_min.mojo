@@ -1,9 +1,10 @@
 # =============================================================================
 # Integer division in the BatchView walkers of `ExpressionExecutor`: a zero
 # divisor answers NULL (docs/design/query_semantics.md §5.3), and in the
-# Int64 and Int32 walkers signed MIN / -1 raises an overflow error (§5.4)
-# unless an operand is NULL (§5.0). The Float64 walker answers MIN / -1 with
-# 2^63 (komira-ai/komira#1478; its section below says why).
+# Int64, Int32 and Float64 walkers signed MIN / -1 raises an overflow error
+# (§5.4) unless an operand is NULL (§5.0). It raises only on rows whose answer
+# uses the quotient: a CASE branch or the right side of an AND / OR runs only
+# on the rows that use it (komira-ai/komira#1478; its section below).
 #
 # The numeric project walkers return values only. A NULL row holds a
 # placeholder value there, and `_mark_value_nulls_from_view` (the channel the
@@ -72,6 +73,7 @@ from komira_kernels.runtime_expr import (
     EXPR_LT_F64_MIXED,
     EXPR_SUB_I64,
     RuntimeExpr,
+    make_and,
     make_case_f64,
     make_case_i64,
     make_col,
@@ -410,10 +412,13 @@ def test_i64_walker_min_over_minus_one_of_a_wide_quotient_raises() raises:
 
 
 # -----------------------------------------------------------------------------
-# The Float64 walker's EXPR_DIV_I64 answers MIN / -1 as it did before
-# (komira-ai/komira#1478). CASE branches and the right side of an OR are
-# evaluated over every selected row, so a raise there would fire on rows that
-# never use the quotient. Fixture: a = [MIN, 6], z = [-1, -2].
+# MIN / -1 where the quotient is used, and only there (komira-ai/komira#1478).
+# The Float64 walker's EXPR_DIV_I64 raises like the other walkers. A CASE
+# evaluates each WHEN only over the rows no earlier WHEN took and each branch
+# only over the rows that take it; AND / OR evaluate their right side only over
+# the rows the left leaves open. So a row whose answer does not use MIN / -1
+# answers, in both walkers, and a row that does raises, as in DuckDB.
+# Fixture: a = [MIN, 6], z = [-1, -2].
 # -----------------------------------------------------------------------------
 
 
@@ -465,6 +470,156 @@ def test_probe_f64_walker_min_plus_one_over_minus_one_no_raise() raises:
     var got = _f64(_div(EXPR_DIV_I64, A, Z), batch, [0])
     assert_equal(len(got), 1)
     assert_equal(got[0], Float64(Int64.MAX))
+
+
+def test_f64_walker_min_over_minus_one_raises() raises:
+    """a / z through the Float64 walker raises on row 0 (MIN / -1). Rows 1
+    and 2 store MIN / -1 under a NULL operand and do not raise; row 3 is
+    MIN / 1 and row 4 is 6 / -1."""
+    var batch = _min_batch()
+    with assert_raises(contains="Out of Range Error: Overflow in division of INT64 (-9223372036854775808 / -1)!"):
+        _ = _f64(_div(EXPR_DIV_I64, A, Z), batch, [3, 0])
+    var got = _f64(_div(EXPR_DIV_I64, A, Z), batch, [3, 4, 1, 2])
+    assert_equal(len(got), 4)
+    assert_equal(got[0], Float64(I64_MIN), "MIN / 1")
+    assert_equal(got[1], -6.0, "6 / -1")
+
+
+def _when_z_is(mut pool: List[RuntimeExpr], k: Int) -> Int:
+    """Append `z = k`; return its slot."""
+    pool.append(make_col(Z))
+    pool.append(make_lit_i64(Int64(k)))
+    pool.append(_node(EXPR_EQ_I64, len(pool) - 2, len(pool) - 1))
+    return len(pool) - 1
+
+
+def _quotient(mut pool: List[RuntimeExpr]) -> Int:
+    """Append `a / z`; return its slot."""
+    pool.append(make_col(A))
+    pool.append(make_col(Z))
+    pool.append(_node(EXPR_DIV_I64, len(pool) - 2, len(pool) - 1))
+    return len(pool) - 1
+
+
+def _cast_quotient_gt_half(mut pool: List[RuntimeExpr]) -> Int:
+    """Append `CAST(a / z AS DOUBLE) > 0.5`, which the Int64 walker divides;
+    return its slot."""
+    var q = _quotient(pool)
+    pool.append(make_i64_to_f64(q))
+    pool.append(make_lit_f64(0.5))
+    pool.append(_node(EXPR_GT_F64_MIXED, len(pool) - 2, len(pool) - 1))
+    return len(pool) - 1
+
+
+def _case(var pool: List[RuntimeExpr], var slots: List[Int], f64: Bool) -> ExpressionExecutor:
+    """A CASE over `slots` (`[cond0, then0, ..., else]`) at the root."""
+    pool.append(make_case_f64(0) if f64 else make_case_i64(0))
+    var when = List[List[Int]]()
+    when.append(slots^)
+    return _exec(pool^, when^)
+
+
+def test_f64_case_with_min_over_minus_one_in_the_taken_branch_raises() raises:
+    """`CASE WHEN z = -2 THEN 0.5 ELSE a / z END`: row 0 takes the ELSE, so
+    its answer is MIN / -1, which raises."""
+    var pool = List[RuntimeExpr]()
+    var cond = _when_z_is(pool, -2)
+    pool.append(make_lit_f64(0.5))
+    var then_slot = len(pool) - 1
+    var q = _quotient(pool)
+    var exec = _case(pool^, [cond, then_slot, q], True)
+    with assert_raises(contains="Out of Range Error: Overflow in division of INT64 (-9223372036854775808 / -1)!"):
+        _ = _f64(exec, _untaken_min_batch(), [0, 1])
+
+
+def test_f64_or_with_min_over_minus_one_on_an_open_row_raises() raises:
+    """`z = -2 OR (a / z) > 0.5`: the left side is FALSE on row 0, so the
+    right side decides it and divides MIN / -1, which raises."""
+    var pool = List[RuntimeExpr]()
+    var left = _when_z_is(pool, -2)
+    var q = _quotient(pool)
+    pool.append(make_lit_f64(0.5))
+    pool.append(_node(EXPR_GT_F64_MIXED, q, len(pool) - 1))
+    pool.append(make_or(left, len(pool) - 1))
+    with assert_raises(contains="Out of Range Error: Overflow in division of INT64 (-9223372036854775808 / -1)!"):
+        _ = _run(_exec(pool^), _untaken_min_batch())
+
+
+def test_i64_case_with_min_over_minus_one_in_the_untaken_branch_answers() raises:
+    """`CASE WHEN z = -1 THEN 0 ELSE a / z END` through the Int64 walker is
+    [0, -3]: row 0 takes the THEN branch, so the ELSE runs on row 1 only."""
+    var pool = List[RuntimeExpr]()
+    var cond = _when_z_is(pool, -1)
+    pool.append(make_lit_i64(0))
+    var then_slot = len(pool) - 1
+    var q = _quotient(pool)
+    _expect(_i64(_case(pool^, [cond, then_slot, q], False), _untaken_min_batch(), [0, 1]), [0, -3], "Int64 CASE")
+
+
+def test_i64_case_later_when_runs_only_on_open_rows() raises:
+    """`CASE WHEN z = -1 THEN 1 WHEN CAST(a / z AS DOUBLE) > 0.5 THEN 2 ELSE 3
+    END` is [1, 3]: the second WHEN runs on row 1 only, since row 0 took the
+    first."""
+    var pool = List[RuntimeExpr]()
+    var c0 = _when_z_is(pool, -1)
+    pool.append(make_lit_i64(1))
+    var t0 = len(pool) - 1
+    var c1 = _cast_quotient_gt_half(pool)
+    pool.append(make_lit_i64(2))
+    var t1 = len(pool) - 1
+    pool.append(make_lit_i64(3))
+    var e = len(pool) - 1
+    _expect(_i64(_case(pool^, [c0, t0, c1, t1, e], False), _untaken_min_batch(), [0, 1]), [1, 3], "second WHEN")
+
+
+def test_i64_case_null_channel_reads_only_the_taken_branch() raises:
+    """The NULL channel of `CASE WHEN z = -1 THEN 0 ELSE 1 / (a / z) END`
+    is [False, False]: the ELSE's divisor `a / z` is read on row 1 only
+    (-3, not zero), never as MIN / -1 on row 0."""
+    var pool = List[RuntimeExpr]()
+    var cond = _when_z_is(pool, -1)
+    pool.append(make_lit_i64(0))
+    var then_slot = len(pool) - 1
+    pool.append(make_lit_i64(1))
+    var one = len(pool) - 1
+    var q = _quotient(pool)
+    pool.append(_node(EXPR_DIV_I64, one, q))
+    var else_slot = len(pool) - 1
+    var want: List[Bool] = [False, False]
+    _expect_bools(_nulls(_case(pool^, [cond, then_slot, else_slot], False), _untaken_min_batch(), [0, 1], False), want, "CASE nulls")
+
+
+def test_or_with_int64_min_over_minus_one_on_a_true_row_keeps_it() raises:
+    """`z = -1 OR CAST(a / z AS DOUBLE) > 0.5` keeps row 0: the left side is
+    TRUE there, so the Int64 division runs on row 1 only."""
+    var pool = List[RuntimeExpr]()
+    var left = _when_z_is(pool, -1)
+    var right = _cast_quotient_gt_half(pool)
+    pool.append(make_or(left, right))
+    _expect(_run(_exec(pool^), _untaken_min_batch()), [0], "z = -1 OR CAST(a / z) > 0.5")
+
+
+def test_not_or_with_int64_min_over_minus_one_on_a_true_row() raises:
+    """`NOT (z = -1 OR CAST(a / z AS DOUBLE) > 0.5)` keeps row 1 only. Under
+    NOT the OR is three-valued; its right side still runs on row 1 only."""
+    var pool = List[RuntimeExpr]()
+    var left = _when_z_is(pool, -1)
+    var right = _cast_quotient_gt_half(pool)
+    pool.append(make_or(left, right))
+    pool.append(make_not_bool(len(pool) - 1))
+    _expect(_run(_exec(pool^), _untaken_min_batch()), [1], "NOT (OR)")
+
+
+def test_not_and_with_int64_min_over_minus_one_on_a_false_row() raises:
+    """`NOT (z = -2 AND CAST(a / z AS DOUBLE) > 0.5)` keeps both rows: the AND
+    is FALSE on row 0 from its left side, so its right side runs on row 1
+    only, where -3 > 0.5 is FALSE."""
+    var pool = List[RuntimeExpr]()
+    var left = _when_z_is(pool, -2)
+    var right = _cast_quotient_gt_half(pool)
+    pool.append(make_and(left, right))
+    pool.append(make_not_bool(len(pool) - 1))
+    _expect(_run(_exec(pool^), _untaken_min_batch()), [0, 1], "NOT (AND)")
 
 
 def _diff_over_diff(mut pool: List[RuntimeExpr]) -> Int:
@@ -539,6 +694,15 @@ def main() raises:
     suite.test[test_f64_case_with_min_over_minus_one_in_the_untaken_branch_answers]()
     suite.test[test_f64_or_with_min_over_minus_one_on_a_true_row_keeps_it]()
     suite.test[test_probe_f64_walker_min_plus_one_over_minus_one_no_raise]()
+    suite.test[test_f64_walker_min_over_minus_one_raises]()
+    suite.test[test_f64_case_with_min_over_minus_one_in_the_taken_branch_raises]()
+    suite.test[test_f64_or_with_min_over_minus_one_on_an_open_row_raises]()
+    suite.test[test_i64_case_with_min_over_minus_one_in_the_untaken_branch_answers]()
+    suite.test[test_i64_case_later_when_runs_only_on_open_rows]()
+    suite.test[test_i64_case_null_channel_reads_only_the_taken_branch]()
+    suite.test[test_or_with_int64_min_over_minus_one_on_a_true_row_keeps_it]()
+    suite.test[test_not_or_with_int64_min_over_minus_one_on_a_true_row]()
+    suite.test[test_not_and_with_int64_min_over_minus_one_on_a_false_row]()
     suite.test[test_cast_quotient_null_channel_reads_the_int64_divisor]()
     suite.test[test_int64_case_branch_null_channel_reads_the_int64_divisor]()
     suite^.run()

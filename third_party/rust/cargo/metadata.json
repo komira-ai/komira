@@ -1,0 +1,497 @@
+{
+ "filter_platform": "x86_64-unknown-linux-gnu",
+ "packages": [
+  {
+   "name": "anyhow",
+   "version": "1.0.102",
+   "source": "registry+https://github.com/rust-lang/crates.io-index",
+   "edition": "2021",
+   "id": "registry+https://github.com/rust-lang/crates.io-index#anyhow@1.0.102",
+   "manifest_path": "/m/anyhow-1.0.102/Cargo.toml",
+   "targets": [
+    {
+     "name": "anyhow",
+     "kind": [
+      "lib"
+     ],
+     "src_path": "/m/anyhow-1.0.102/src/lib.rs"
+    },
+    {
+     "name": "build-script-build",
+     "kind": [
+      "custom-build"
+     ],
+     "src_path": "/m/anyhow-1.0.102/build.rs"
+    }
+   ]
+  },
+  {
+   "name": "bytes",
+   "version": "1.11.1",
+   "source": "registry+https://github.com/rust-lang/crates.io-index",
+   "edition": "2021",
+   "id": "registry+https://github.com/rust-lang/crates.io-index#bytes@1.11.1",
+   "manifest_path": "/m/bytes-1.11.1/Cargo.toml",
+   "targets": [
+    {
+     "name": "bytes",
+     "kind": [
+      "lib"
+     ],
+     "src_path": "/m/bytes-1.11.1/src/lib.rs"
+    }
+   ]
+  },
+  {
+   "name": "either",
+   "version": "1.16.0",
+   "source": "registry+https://github.com/rust-lang/crates.io-index",
+   "edition": "2021",
+   "id": "registry+https://github.com/rust-lang/crates.io-index#either@1.16.0",
+   "manifest_path": "/m/either-1.16.0/Cargo.toml",
+   "targets": [
+    {
+     "name": "either",
+     "kind": [
+      "lib"
+     ],
+     "src_path": "/m/either-1.16.0/src/lib.rs"
+    }
+   ]
+  },
+  {
+   "name": "itertools",
+   "version": "0.14.0",
+   "source": "registry+https://github.com/rust-lang/crates.io-index",
+   "edition": "2018",
+   "id": "registry+https://github.com/rust-lang/crates.io-index#itertools@0.14.0",
+   "manifest_path": "/m/itertools-0.14.0/Cargo.toml",
+   "targets": [
+    {
+     "name": "itertools",
+     "kind": [
+      "lib"
+     ],
+     "src_path": "/m/itertools-0.14.0/src/lib.rs"
+    }
+   ]
+  },
+  {
+   "name": "komira-proto-codegen",
+   "version": "0.1.0",
+   "source": null,
+   "edition": "2021",
+   "id": "path+file:///m/komira-proto-codegen-0.1.0#komira-proto-codegen@0.1.0",
+   "manifest_path": "/m/komira-proto-codegen-0.1.0/Cargo.toml",
+   "targets": [
+    {
+     "name": "komira_proto_codegen",
+     "kind": [
+      "lib"
+     ],
+     "src_path": "/m/komira-proto-codegen-0.1.0/src/lib.rs"
+    }
+   ]
+  },
+  {
+   "name": "proc-macro2",
+   "version": "1.0.106",
+   "source": "registry+https://github.com/rust-lang/crates.io-index",
+   "edition": "2021",
+   "id": "registry+https://github.com/rust-lang/crates.io-index#proc-macro2@1.0.106",
+   "manifest_path": "/m/proc-macro2-1.0.106/Cargo.toml",
+   "targets": [
+    {
+     "name": "proc_macro2",
+     "kind": [
+      "lib"
+     ],
+     "src_path": "/m/proc-macro2-1.0.106/src/lib.rs"
+    },
+    {
+     "name": "build-script-build",
+     "kind": [
+      "custom-build"
+     ],
+     "src_path": "/m/proc-macro2-1.0.106/build.rs"
+    }
+   ]
+  },
+  {
+   "name": "prost",
+   "version": "0.13.5",
+   "source": "registry+https://github.com/rust-lang/crates.io-index",
+   "edition": "2021",
+   "id": "registry+https://github.com/rust-lang/crates.io-index#prost@0.13.5",
+   "manifest_path": "/m/prost-0.13.5/Cargo.toml",
+   "targets": [
+    {
+     "name": "prost",
+     "kind": [
+      "lib"
+     ],
+     "src_path": "/m/prost-0.13.5/src/lib.rs"
+    }
+   ]
+  },
+  {
+   "name": "prost-derive",
+   "version": "0.13.5",
+   "source": "registry+https://github.com/rust-lang/crates.io-index",
+   "edition": "2021",
+   "id": "registry+https://github.com/rust-lang/crates.io-index#prost-derive@0.13.5",
+   "manifest_path": "/m/prost-derive-0.13.5/Cargo.toml",
+   "targets": [
+    {
+     "name": "prost_derive",
+     "kind": [
+      "proc-macro"
+     ],
+     "src_path": "/m/prost-derive-0.13.5/src/lib.rs"
+    }
+   ]
+  },
+  {
+   "name": "prost-types",
+   "version": "0.13.5",
+   "source": "registry+https://github.com/rust-lang/crates.io-index",
+   "edition": "2021",
+   "id": "registry+https://github.com/rust-lang/crates.io-index#prost-types@0.13.5",
+   "manifest_path": "/m/prost-types-0.13.5/Cargo.toml",
+   "targets": [
+    {
+     "name": "prost_types",
+     "kind": [
+      "lib"
+     ],
+     "src_path": "/m/prost-types-0.13.5/src/lib.rs"
+    }
+   ]
+  },
+  {
+   "name": "quote",
+   "version": "1.0.45",
+   "source": "registry+https://github.com/rust-lang/crates.io-index",
+   "edition": "2021",
+   "id": "registry+https://github.com/rust-lang/crates.io-index#quote@1.0.45",
+   "manifest_path": "/m/quote-1.0.45/Cargo.toml",
+   "targets": [
+    {
+     "name": "quote",
+     "kind": [
+      "lib"
+     ],
+     "src_path": "/m/quote-1.0.45/src/lib.rs"
+    },
+    {
+     "name": "build-script-build",
+     "kind": [
+      "custom-build"
+     ],
+     "src_path": "/m/quote-1.0.45/build.rs"
+    }
+   ]
+  },
+  {
+   "name": "syn",
+   "version": "2.0.117",
+   "source": "registry+https://github.com/rust-lang/crates.io-index",
+   "edition": "2021",
+   "id": "registry+https://github.com/rust-lang/crates.io-index#syn@2.0.117",
+   "manifest_path": "/m/syn-2.0.117/Cargo.toml",
+   "targets": [
+    {
+     "name": "syn",
+     "kind": [
+      "lib"
+     ],
+     "src_path": "/m/syn-2.0.117/src/lib.rs"
+    }
+   ]
+  },
+  {
+   "name": "unicode-ident",
+   "version": "1.0.24",
+   "source": "registry+https://github.com/rust-lang/crates.io-index",
+   "edition": "2021",
+   "id": "registry+https://github.com/rust-lang/crates.io-index#unicode-ident@1.0.24",
+   "manifest_path": "/m/unicode-ident-1.0.24/Cargo.toml",
+   "targets": [
+    {
+     "name": "unicode_ident",
+     "kind": [
+      "lib"
+     ],
+     "src_path": "/m/unicode-ident-1.0.24/src/lib.rs"
+    }
+   ]
+  }
+ ],
+ "workspace_members": [
+  "path+file:///m/komira-proto-codegen-0.1.0#komira-proto-codegen@0.1.0"
+ ],
+ "resolve": {
+  "nodes": [
+   {
+    "id": "registry+https://github.com/rust-lang/crates.io-index#anyhow@1.0.102",
+    "features": [
+     "default",
+     "std"
+    ],
+    "deps": []
+   },
+   {
+    "id": "registry+https://github.com/rust-lang/crates.io-index#bytes@1.11.1",
+    "features": [],
+    "deps": []
+   },
+   {
+    "id": "registry+https://github.com/rust-lang/crates.io-index#either@1.16.0",
+    "features": [
+     "std",
+     "use_std"
+    ],
+    "deps": []
+   },
+   {
+    "id": "registry+https://github.com/rust-lang/crates.io-index#itertools@0.14.0",
+    "features": [
+     "default",
+     "use_alloc",
+     "use_std"
+    ],
+    "deps": [
+     {
+      "name": "either",
+      "pkg": "registry+https://github.com/rust-lang/crates.io-index#either@1.16.0",
+      "dep_kinds": [
+       {
+        "kind": null,
+        "target": null
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "id": "path+file:///m/komira-proto-codegen-0.1.0#komira-proto-codegen@0.1.0",
+    "features": [],
+    "deps": [
+     {
+      "name": "prost",
+      "pkg": "registry+https://github.com/rust-lang/crates.io-index#prost@0.13.5",
+      "dep_kinds": [
+       {
+        "kind": null,
+        "target": null
+       }
+      ]
+     },
+     {
+      "name": "prost_types",
+      "pkg": "registry+https://github.com/rust-lang/crates.io-index#prost-types@0.13.5",
+      "dep_kinds": [
+       {
+        "kind": null,
+        "target": null
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "id": "registry+https://github.com/rust-lang/crates.io-index#proc-macro2@1.0.106",
+    "features": [
+     "default",
+     "proc-macro"
+    ],
+    "deps": [
+     {
+      "name": "unicode_ident",
+      "pkg": "registry+https://github.com/rust-lang/crates.io-index#unicode-ident@1.0.24",
+      "dep_kinds": [
+       {
+        "kind": null,
+        "target": null
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "id": "registry+https://github.com/rust-lang/crates.io-index#prost@0.13.5",
+    "features": [
+     "default",
+     "derive",
+     "prost-derive",
+     "std"
+    ],
+    "deps": [
+     {
+      "name": "bytes",
+      "pkg": "registry+https://github.com/rust-lang/crates.io-index#bytes@1.11.1",
+      "dep_kinds": [
+       {
+        "kind": null,
+        "target": null
+       }
+      ]
+     },
+     {
+      "name": "prost_derive",
+      "pkg": "registry+https://github.com/rust-lang/crates.io-index#prost-derive@0.13.5",
+      "dep_kinds": [
+       {
+        "kind": null,
+        "target": null
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "id": "registry+https://github.com/rust-lang/crates.io-index#prost-derive@0.13.5",
+    "features": [],
+    "deps": [
+     {
+      "name": "anyhow",
+      "pkg": "registry+https://github.com/rust-lang/crates.io-index#anyhow@1.0.102",
+      "dep_kinds": [
+       {
+        "kind": null,
+        "target": null
+       }
+      ]
+     },
+     {
+      "name": "itertools",
+      "pkg": "registry+https://github.com/rust-lang/crates.io-index#itertools@0.14.0",
+      "dep_kinds": [
+       {
+        "kind": null,
+        "target": null
+       }
+      ]
+     },
+     {
+      "name": "proc_macro2",
+      "pkg": "registry+https://github.com/rust-lang/crates.io-index#proc-macro2@1.0.106",
+      "dep_kinds": [
+       {
+        "kind": null,
+        "target": null
+       }
+      ]
+     },
+     {
+      "name": "quote",
+      "pkg": "registry+https://github.com/rust-lang/crates.io-index#quote@1.0.45",
+      "dep_kinds": [
+       {
+        "kind": null,
+        "target": null
+       }
+      ]
+     },
+     {
+      "name": "syn",
+      "pkg": "registry+https://github.com/rust-lang/crates.io-index#syn@2.0.117",
+      "dep_kinds": [
+       {
+        "kind": null,
+        "target": null
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "id": "registry+https://github.com/rust-lang/crates.io-index#prost-types@0.13.5",
+    "features": [
+     "default",
+     "std"
+    ],
+    "deps": [
+     {
+      "name": "prost",
+      "pkg": "registry+https://github.com/rust-lang/crates.io-index#prost@0.13.5",
+      "dep_kinds": [
+       {
+        "kind": null,
+        "target": null
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "id": "registry+https://github.com/rust-lang/crates.io-index#quote@1.0.45",
+    "features": [
+     "default",
+     "proc-macro"
+    ],
+    "deps": [
+     {
+      "name": "proc_macro2",
+      "pkg": "registry+https://github.com/rust-lang/crates.io-index#proc-macro2@1.0.106",
+      "dep_kinds": [
+       {
+        "kind": null,
+        "target": null
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "id": "registry+https://github.com/rust-lang/crates.io-index#syn@2.0.117",
+    "features": [
+     "clone-impls",
+     "default",
+     "derive",
+     "extra-traits",
+     "parsing",
+     "printing",
+     "proc-macro"
+    ],
+    "deps": [
+     {
+      "name": "proc_macro2",
+      "pkg": "registry+https://github.com/rust-lang/crates.io-index#proc-macro2@1.0.106",
+      "dep_kinds": [
+       {
+        "kind": null,
+        "target": null
+       }
+      ]
+     },
+     {
+      "name": "quote",
+      "pkg": "registry+https://github.com/rust-lang/crates.io-index#quote@1.0.45",
+      "dep_kinds": [
+       {
+        "kind": null,
+        "target": null
+       }
+      ]
+     },
+     {
+      "name": "unicode_ident",
+      "pkg": "registry+https://github.com/rust-lang/crates.io-index#unicode-ident@1.0.24",
+      "dep_kinds": [
+       {
+        "kind": null,
+        "target": null
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "id": "registry+https://github.com/rust-lang/crates.io-index#unicode-ident@1.0.24",
+    "features": [],
+    "deps": []
+   }
+  ]
+ }
+}

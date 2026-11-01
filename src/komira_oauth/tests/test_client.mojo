@@ -26,7 +26,7 @@
 # - test_time_bounds: a negative time and one too late for an expiry.
 #
 # Keys: RFC 7515 appendix A.3 (ES256), RFC 8037 appendix A.1 (EdDSA) and
-# komira_http_core's RSA test key (an RS256 signer, refused).
+# komira_jose's RSA test key (an RS256 signer, refused).
 #
 # main runs every test and reports every failure.
 # =============================================================================
@@ -59,7 +59,7 @@ from komira_secret_store import SecretValue
 
 comptime A3_D = "jpsQnnGQmL-YBIffH1136cspYG6-0iY7X1fCE9-E9LI"
 comptime SEED = "nWGxne_9WmC6hEr0kuwsxERJxWl7MmkZcDusAxyuf2A"
-comptime RSA_PEM = "src/komira_http_core/tests/fixtures/tls/leaf_key.pem"
+comptime RSA_PEM = "src/komira_jose/tests/fixtures/rsa_test_key.pem"
 comptime CLIENT = "client-1"
 comptime ENDPOINT = "https://issuer.example/a/token"
 comptime AUD = "https://issuer.example/a"

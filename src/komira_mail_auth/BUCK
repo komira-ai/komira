@@ -1,0 +1,29 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# Mail credential checks: the MailAuthVerifier trait, TestAuthVerifier (a
+# test/dev fixture holding unsalted SHA-256 digests, compared in constant time;
+# not for real credentials), the
+# SASL PLAIN (RFC 4616) and LOGIN decoders, and the 334 continuation-line cap
+# (RFC 4954). Pure: no I/O, no clock. See __init__.mojo.
+#
+# The welded tests (each file's header says which defect it catches):
+# - test_sasl_plain: a good payload, authzid equal accepted, authzid mismatch,
+#   extra and missing NUL, empty fields, bad base64, UTF-8.
+# - test_sasl_login: the LOGIN round trip, refusals, the prompts, the cap.
+# - test_test_auth_verifier: right, wrong, prefix, longer, missing user,
+#   replacement.
+mojo_library(
+    name = "komira_mail_auth",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    # The full transitive closure of the Mojo libraries this package builds on.
+    deps = [
+        "//src/komira_crypto:komira_crypto",
+        "//src/komira_encoding:komira_encoding",
+    ],
+    test_srcs = [
+        "tests/test_test_auth_verifier.mojo",
+        "tests/test_sasl_login.mojo",
+        "tests/test_sasl_plain.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)

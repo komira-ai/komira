@@ -24,11 +24,11 @@
 #
 #     <prefix>/manifest/00000000000000000404.chunk
 #
-# and so is 1404, 4040, 40400, 14040, … . `komira_telemetry_read.scan_plan`
-# narrowed the identical predicate because its 16 random hex characters contain
-# `404` "one in a few dozen runs"; here the partition simply REACHES sequence 404
-# and stays colliding for a fixed, dense, entirely predictable set of sequences
-# for the rest of its life. The prefix is caller-supplied on top of that.
+# and so is 1404, 4040, 40400, 14040, … . (A key carrying 16 random hex
+# characters spells `404` about once in a few dozen keys.) Here the partition
+# simply REACHES sequence 404 and stays colliding for a fixed, dense, entirely
+# predictable set of sequences for the rest of its life. The prefix is
+# caller-supplied on top of that.
 #
 # === WHY IT IS A WRONG ANSWER AND NOT A MISSING ONE ===
 # `_is_not_found` is the swallow at thirteen call sites in `cas_manifest`, and the
@@ -46,20 +46,12 @@
 # Every one of those turns "I could not read it" into "there is nothing there",
 # with no log line, because as far as the code is concerned nothing went wrong.
 #
-# === THE NARROWING, AND IT IS NOT NEW POLICY ===
+# === THE NARROWING ===
 # ⛔ `status=404`, NOT a bare `404` — **the `=` is the load-bearing character, not
-# the digits**. Two in-tree siblings already state exactly this and were narrowed
-# for exactly this reason:
-#
-#   * `komira_telemetry_read.scan_plan._is_not_found`
-#   * `src/cmd/cp_telemetry_validator/cp_telem_lib._store_error_says_not_found`
-#     (whose docstring names `cas_manifest._is_not_found` BY NAME as one of the
-#      two copies that still matched a bare `404`)
-#
-# and `komira_gcp_storage.gcs_grpc_conditional_store._is_not_found` is narrower
-# still. The needle set below is `cp_telem_lib`'s, verbatim: every needle is one
-# a key cannot contain, because the key alphabet admits no `[`, `]`, `=` or `_`
-# and the canonical token is uppercase.
+# the digits**. (`komira_gcp_storage.gcs_grpc_conditional_store._is_not_found` is
+# narrower still.) Every needle in the set is one a key cannot contain, because
+# the key alphabet admits no `[`, `]`, `=` or `_` and the canonical token is
+# uppercase.
 #
 # === WHAT IS FALSIFIED HERE ===
 #   test_a_403_about_chunk_404_is_NOT_absence          ★ the headline

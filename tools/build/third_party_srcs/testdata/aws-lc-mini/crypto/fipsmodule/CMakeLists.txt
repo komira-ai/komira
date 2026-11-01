@@ -14,6 +14,16 @@ if(ARCH STREQUAL "x86_64")
   list(APPEND S2N_BIGNUM_ASM_SOURCES
     curve25519/curve25519_x25519.S
   )
+elseif(ARCH STREQUAL "aarch64")
+  # The byte-level x25519 file is the aarch64 one.
+  list(APPEND S2N_BIGNUM_ASM_SOURCES
+    curve25519/curve25519_x25519_byte.S
+  )
+
+  # Big integer arithmetics using s2n-bignum
+  list(APPEND S2N_BIGNUM_ASM_SOURCES
+    fastmul/bignum_kmul_16_32.S
+  )
 endif()
 
 if(FIPS_DELOCATE)

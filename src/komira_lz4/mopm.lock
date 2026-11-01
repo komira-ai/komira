@@ -1,0 +1,49 @@
+{
+  "lock_version": 2,
+  "mojo": [
+    "1.0.0"
+  ],
+  "toolchain": {
+    "1.0.0": {
+      "linux-64": "fd654c4192487587d8f8d9402d060e45e218b79da7b8964503a703710e49b15d",
+      "linux-aarch64": "3e7db5a0f9255c9086d9d29f385e7fd90e8536fa16ffe55414f6bba4e0ef3d3e",
+      "osx-arm64": "dfb1ddbe32564e406967054fbccd4ad643bf01e72532a3eb3add28253908ac5f"
+    }
+  },
+  "channels": [
+    "https://conda.mopm.dev/"
+  ],
+  "packages": [],
+  "system_libs": {
+    "linux-64": [
+      {
+        "name": "lz4-c",
+        "version": "1.10.0",
+        "build": "hee9eb32_2",
+        "url": "https://conda.anaconda.org/conda-forge/linux-64/lz4-c-1.10.0-hee9eb32_2.conda",
+        "sha256": "b8c0e930183e6b7f83cd35ace102f2b8c2f0faae41dc05255dc72f247dfc556a",
+        "size": 181812
+      }
+    ],
+    "linux-aarch64": [
+      {
+        "name": "lz4-c",
+        "version": "1.10.0",
+        "build": "hfb11796_2",
+        "url": "https://conda.anaconda.org/conda-forge/linux-aarch64/lz4-c-1.10.0-hfb11796_2.conda",
+        "sha256": "e8392843a18954fef038f2721fde65c4dbe7693fcd07677e5e74fca85b1a690c",
+        "size": 218765
+      }
+    ],
+    "osx-arm64": [
+      {
+        "name": "lz4-c",
+        "version": "1.10.0",
+        "build": "hdca3b7d_2",
+        "url": "https://conda.anaconda.org/conda-forge/osx-arm64/lz4-c-1.10.0-hdca3b7d_2.conda",
+        "sha256": "1887867b393eb3c2b336deaffcf228574821ea1e0dcb9ef7bf6c9f59cec40f03",
+        "size": 171838
+      }
+    ]
+  }
+}

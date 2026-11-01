@@ -1,8 +1,8 @@
 # The LLVM pieces of branch coverage (README.md): Mojo's own lld (LLVM 24),
 # and the profile runtime and llvm-profdata of LLVM 23 from conda-forge.
 # linux-x86_64 only (limits.tsv `coverage-linux-x86-64`).
-load("@komira//tools/build/lint:defs.bzl", "shell_lint")
 load("@komira//tools/build/mojo:download.bzl", "pinned_file")
+load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_test")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load("@komira//tools/build/platforms:table.bzl", "pinned_kwargs", "row")
 load("@komira//tools/build/toolchains/loader_closure:defs.bzl", "loader_closure_check")
@@ -36,6 +36,28 @@ _LIBGCC = "komira//tools/build/toolchains:" + pinned_kwargs(_ROW, "libgcc")["nam
 
 _CONDA_PAYLOAD = "komira//tools/build/toolchains/kcov:conda_payload"
 
+# The unpack and the checks (llvm_branch.zig), built behind their unit tests.
+zig_test(
+    name = "llvm_branch_unit",
+    exec_compatible_with = LINUX_X86_64,
+    target_compatible_with = LINUX_X86_64,  # komira-limit:coverage-linux-x86-64
+    imports = ["llvm_branch.zig"],
+    src = "llvm_branch_test.zig",
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
+)
+
+zig_exe(
+    name = "llvm_branch_bin",
+    exec_compatible_with = LINUX_X86_64,
+    target_compatible_with = LINUX_X86_64,  # komira-limit:coverage-linux-x86-64
+    src = "llvm_branch.zig",
+    unit_tests = [":llvm_branch_unit", "komira//tools/build/toolchains:zig_next_version"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
+    visibility = ["PUBLIC"],
+)
+
 # ---- Unpacked by remote actions ----------------------------------------------------
 
 # bin/lld of the pinned Mojo package, and the C++ runtime it loads through its
@@ -55,7 +77,6 @@ llvm_branch_unpack(
         "libstdcxx": _PIN["libstdcxx"],
         "mojo": _PIN["mojo_compiler"],
     },
-    script = "unpack.sh",
 )
 
 # llvm-profdata and llvm-nm 23.1.3 with the libraries they load (through
@@ -88,7 +109,6 @@ llvm_branch_unpack(
         "tools": _PIN["llvm_branch_tools"],
         "zstd": _PIN["llvm_branch_zstd"],
     },
-    script = "unpack.sh",
 )
 
 # ---- Checks: build actions; :llvm_branch exists only when they pass ------------------
@@ -122,7 +142,6 @@ llvm_branch_check(
     target_compatible_with = LINUX_X86_64,  # komira-limit:coverage-linux-x86-64
     lld = ":lld24",
     mode = "lld",
-    script = "check.sh",
     want = {"lld": "24"},
 )
 
@@ -133,7 +152,6 @@ llvm_branch_check(
     exec_compatible_with = LINUX_X86_64,
     target_compatible_with = LINUX_X86_64,  # komira-limit:coverage-linux-x86-64
     mode = "tools",
-    script = "check.sh",
     tools = ":llvm23",
     want = {
         "profdata": "23.1.3",
@@ -151,7 +169,6 @@ llvm_branch_check(
     fixtures = ["fixtures/profile_fixture.c"],
     lld = ":lld24",
     mode = "raw_version",
-    script = "check.sh",
     tools = ":llvm23",
     want = {
         "counts": "classify:2,3",
@@ -159,14 +176,6 @@ llvm_branch_check(
         "raw": str(RAW_PROFILE_VERSION),
         "triple": row(_ROW)["zig_triple"],
     },
-)
-
-shell_lint(
-    name = "shell_lint",
-    srcs = [
-        "check.sh",
-        "unpack.sh",
-    ],
 )
 
 # ---- What other targets use --------------------------------------------------------
@@ -181,7 +190,6 @@ llvm_branch_tool(
         ":llvm23_check",
         ":llvm23_closure",
         ":raw_version_check",
-        ":shell_lint",
     ],
     lld = ":lld24",
     tools = ":llvm23",

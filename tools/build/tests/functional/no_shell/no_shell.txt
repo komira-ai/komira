@@ -1,0 +1,2 @@
+def _f(ctx):
+    ctx.actions.run(cmd_args(tool, "--flag"), category = "x")

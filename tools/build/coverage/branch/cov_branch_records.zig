@@ -64,8 +64,8 @@ pub fn render(alloc: Alloc, recs: []Record, coded: [][]const u8) []const u8 {
     std.mem.sort(Record, recs, {}, recordLess);
     std.mem.sort([]const u8, coded, {}, pathLess);
     var p: usize = 0;
-    var buf = std.ArrayList(u8).init(alloc);
-    const w = buf.writer();
+    var buf = std.ArrayList(u8).empty;
+    const w = buf.writer(alloc);
     var i: usize = 0;
     var cur: ?[]const u8 = null;
     while (i < recs.len) {
@@ -104,9 +104,10 @@ pub fn render(alloc: Alloc, recs: []Record, coded: [][]const u8) []const u8 {
 }
 
 pub fn writeOut(path: []const u8, bytes: []const u8) !void {
-    var af = try std.fs.cwd().atomicFile(path, .{});
+    var wbuf: [4096]u8 = undefined;
+    var af = try std.fs.cwd().atomicFile(path, .{ .write_buffer = &wbuf });
     defer af.deinit();
-    try af.file.writeAll(bytes);
+    af.file_writer.interface.writeAll(bytes) catch |e| return if (e == error.WriteFailed) (af.file_writer.err orelse e) else e;
     try af.finish();
 }
 

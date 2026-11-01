@@ -8,10 +8,10 @@ const awslc = N.Refuse{ .prefix = "komira_awslc_", .owner = "komira//src/komira_
 const s2n = N.Refuse{ .prefix = "komira_s2n_", .owner = "komira//src/komira_http_core:komira_http_core" };
 
 fn found(text: []const u8, refuses: []const N.Refuse) ![]const N.Finding {
-    var out = std.ArrayList(N.Finding).init(t.allocator);
-    errdefer out.deinit();
-    try N.scan("f.mojo", text, refuses, &out);
-    return out.toOwnedSlice();
+    var out = std.ArrayList(N.Finding).empty;
+    errdefer out.deinit(t.allocator);
+    try N.scan(t.allocator, "f.mojo", text, refuses, &out);
+    return out.toOwnedSlice(t.allocator);
 }
 
 // The case the check exists for: komira_uuid's entropy.mojo spelling.
@@ -127,9 +127,9 @@ test "run: reads nested .mojo files only, in sorted order, and writes the result
     var tmp = t.tmpDir(.{ .iterate = true });
     defer tmp.cleanup();
     try tmp.dir.makePath("pkg/internal/asm");
-    try tmp.dir.writeFile("pkg/__init__.mojo", "from .x import y\n");
-    try tmp.dir.writeFile("pkg/internal/asm/rng_ffi.mojo", "external_call[\"komira_awslc_RAND_bytes\", c_int]()\n");
-    try tmp.dir.writeFile("pkg/notes.txt", "\"komira_awslc_SHA256\"\n");
+    try tmp.dir.writeFile(.{ .sub_path = "pkg/__init__.mojo", .data = "from .x import y\n" });
+    try tmp.dir.writeFile(.{ .sub_path = "pkg/internal/asm/rng_ffi.mojo", .data = "external_call[\"komira_awslc_RAND_bytes\", c_int]()\n" });
+    try tmp.dir.writeFile(.{ .sub_path = "pkg/notes.txt", .data = "\"komira_awslc_SHA256\"\n" });
     var src = try tmp.dir.openDir("pkg", .{ .iterate = true });
     defer src.close();
     const files = try N.mojoFiles(a, src);

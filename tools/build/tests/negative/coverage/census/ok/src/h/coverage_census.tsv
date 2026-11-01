@@ -1,0 +1,4 @@
+# What the coverage census measured of this package's libraries (tools/build/coverage/census.md).
+census	2026-10-08	-	-
+komira//src/h:h1	src/h	library	OK	10	10	2	2	yes	release	-	-
+komira//src/h:h2	src/h	library	OK	0	0	-	-	no	no	-	-

@@ -26,11 +26,16 @@
 #     DISTINCT does -- distinct (pk, v) rows are not distinct (v) rows.
 #   * join keys whose concatenation agrees (`ab`=`c` vs `a`=`bc`): key names
 #     were folded as raw bytes with no length or boundary.
+#   * the UDF a Filter, Project or Aggregate carries: a UDF node's exprs are
+#     placeholders (`lit(true)`, bare col-refs), so a fingerprint that reads
+#     only the exprs gave two different UDFs, or a UDF and a plain
+#     `lit(true)` Filter, one fingerprint. The other side's UDF never ran.
 #
 # The q11 positive cases (the fold still fires) live in
 # `test_optimizer_shared_relation_cse_detect.mojo`.
 # =============================================================================
 
+from std.memory import OwnedPointer
 from std.testing import TestSuite, assert_false, assert_true
 
 from komira_arrow.arrow_types import ArrowType
@@ -38,6 +43,13 @@ from komira_arrow.schema import Field, Schema, SchemaBuilder
 from komira_plan_expr.agg_expr import sum as agg_sum
 from komira_plan_expr.col_expr import col
 from komira_plan_expr.expr import Expr, BIN_GT
+from komira_plan_expr.scalar_value import ScalarValue
+from komira_plan_expr.udf_data import (
+    UdfData,
+    UDF_KIND_MAP,
+    UDF_KIND_FILTER,
+    UDF_KIND_AGG,
+)
 from komira_plan_ir.logical_plan import (
     AggExprArray,
     ExprArray,
@@ -226,6 +238,128 @@ def test_equal_relations_still_fold() raises:
         _total(LogicalPlan.topn(_keys_v(), _asc(), 5, _narrow())),
     )
     assert_true(Bool(detect_shared_cross_canonical(plan)), "equal TopN relations fold")
+
+
+# -----------------------------------------------------------------------------
+# UDF identity. `_mk_udf` takes no variadic (a forwarded variadic String built
+# a UdfData that crashed a later pass in another file's fixtures).
+# -----------------------------------------------------------------------------
+
+
+def _mk_udf(kind: UInt8, factory_id: UInt32, handle: Int) -> OwnedPointer[UdfData]:
+    var ic = List[Tuple[String, UInt8]]()
+    ic.append((String("v"), UInt8(2)))
+    var oc = List[Tuple[String, UInt8]]()
+    oc.append((String("y"), UInt8(2)))
+    return OwnedPointer(
+        UdfData(
+            kind=kind,
+            name=String("f"),
+            input_columns=ic^,
+            output_columns=oc^,
+            operator_factory_id=factory_id,
+            call_site_salt=UInt32(5),
+            registered_handle_id=Optional(handle),
+        )
+    )
+
+
+def _true() -> Expr:
+    return Expr.literal(ScalarValue.from_bool(True))
+
+
+def _udf_filter(var rel: LogicalPlan, factory_id: UInt32, handle: Int) -> LogicalPlan:
+    return LogicalPlan.filter_with_udf(_true(), rel^, _mk_udf(UDF_KIND_FILTER, factory_id, handle))
+
+
+def _udf_project(var rel: LogicalPlan, wide: Bool, factory_id: UInt32) -> LogicalPlan:
+    var exprs = ExprArray()
+    if wide:
+        exprs.append(Expr.col_ref("pk"))
+    exprs.append(Expr.col_ref("v"))
+    return LogicalPlan.project_with_udf(exprs^, rel^, _mk_udf(UDF_KIND_MAP, factory_id, 6))
+
+
+def _udf_agg(var rel: LogicalPlan, factory_id: UInt32) -> LogicalPlan:
+    """Aggregate[udf](pk; sum v AS v) over `rel`: outputs (pk, v), so the
+    aggregates above it read it as they read the scan."""
+    var gb = ExprArray()
+    gb.append(Expr.col_ref("pk"))
+    var aggs = AggExprArray()
+    aggs.append(agg_sum(col("v")).alias("v"))
+    return LogicalPlan.aggregate_with_udf(gb^, aggs^, rel^, _mk_udf(UDF_KIND_AGG, factory_id, 6))
+
+
+def test_udf_filters_with_different_udfs_do_not_fold() raises:
+    """Filter[udf 7101](lit true) vs Filter[udf 7102](lit true) over one
+    table. Catches: the Filter arm not folding `FilterData.udf` (both sides
+    read as `lit(true)`)."""
+    var plan = _cross(
+        _grouped(_udf_filter(_wide(), UInt32(7101), 6)),
+        _total(_udf_filter(_narrow(), UInt32(7102), 6)),
+    )
+    _declines(plan, "Filter[udf 7101] vs Filter[udf 7102]")
+
+
+def test_udf_filter_does_not_fold_with_a_plain_filter() raises:
+    """Filter[udf](lit true) vs a plain Filter(lit true). Catches: the
+    Filter arm not folding `FilterData.udf` (the UDF side reads as the
+    plain filter, whose rows are every row)."""
+    var plan = _cross(
+        _grouped(_udf_filter(_wide(), UInt32(7101), 6)),
+        _total(LogicalPlan.filter(_true(), _narrow())),
+    )
+    _declines(plan, "Filter[udf] vs Filter(lit true)")
+
+
+def test_udf_projects_with_different_udfs_do_not_fold() raises:
+    """Project[udf 7101](pk, v) vs Project[udf 7102](v). Catches: the
+    Project arm not folding `ProjectData.udf` (its col-ref placeholders are
+    skipped, so the two read as pure selects)."""
+    var plan = _cross(
+        _grouped(_udf_project(_wide(), True, UInt32(7101))),
+        _total(_udf_project(_narrow(), False, UInt32(7102))),
+    )
+    _declines(plan, "Project[udf 7101] vs Project[udf 7102]")
+
+
+def test_udf_aggregates_with_different_udfs_do_not_fold() raises:
+    """Aggregate[udf 7101](pk; sum v) vs Aggregate[udf 7102](pk; sum v)
+    under the two consumers. Catches: the Aggregate arm not folding
+    `AggregateData.udf`."""
+    var plan = _cross(
+        _grouped(_udf_agg(_wide(), UInt32(7101))),
+        _total(_udf_agg(_wide(), UInt32(7102))),
+    )
+    _declines(plan, "Aggregate[udf 7101] vs Aggregate[udf 7102]")
+
+
+def test_udf_registered_handle_is_identity() raises:
+    """The same UDF description bound to registered handles 6 and 9.
+    Catches: the handle not folded (`UdfData.structural_hash` leaves it out,
+    and two handles can name two different chains)."""
+    var plan = _cross(
+        _grouped(_udf_filter(_wide(), UInt32(7101), 6)),
+        _total(_udf_filter(_narrow(), UInt32(7101), 9)),
+    )
+    _declines(plan, "the same UDF under handles 6 and 9")
+
+
+def test_the_same_udf_and_plain_filters_still_fold() raises:
+    """Controls, so the UDF tests above can fail: the same UDF Filter on
+    both sides is one relation, and so are two plain `lit(true)` Filters.
+    Catches: a fold that declines every UDF relation or folds an unstable
+    value (an address)."""
+    var same = _cross(
+        _grouped(_udf_filter(_wide(), UInt32(7101), 6)),
+        _total(_udf_filter(_narrow(), UInt32(7101), 6)),
+    )
+    assert_true(Bool(detect_shared_cross_canonical(same)), "the same UDF Filter folds")
+    var plain = _cross(
+        _grouped(LogicalPlan.filter(_true(), _wide())),
+        _total(LogicalPlan.filter(_true(), _narrow())),
+    )
+    assert_true(Bool(detect_shared_cross_canonical(plain)), "plain lit(true) Filters fold")
 
 
 def main() raises:

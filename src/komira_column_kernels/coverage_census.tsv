@@ -1,0 +1,3 @@
+# What the coverage census measured of this package's libraries (tools/build/coverage/census.md).
+census	2026-10-10	27a2541169cb979fa9c82a032eea24919b727121	-
+komira//src/komira_column_kernels:komira_column_kernels	src/komira_column_kernels	library	OK	4728	7061	-	-	no	conda	src/komira_column_kernels/dict_filter.mojo,src/komira_column_kernels/digest_functions.mojo,src/komira_column_kernels/fused_predicate.mojo,src/komira_column_kernels/gather_recordbatch.mojo,src/komira_column_kernels/numeric_unary.mojo,src/komira_column_kernels/selective_decode.mojo,src/komira_column_kernels/unicode_case.mojo	-

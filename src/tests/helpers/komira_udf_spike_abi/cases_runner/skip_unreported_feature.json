@@ -1,0 +1,13 @@
+{
+ "name": "skip_unreported_feature",
+ "defect": "a case needing a feature bit the runtime does not report is run instead of skipped",
+ "run": "call_batch",
+ "entry": "identity",
+ "shape": "MAP_BATCHES_COLUMN",
+ "args": [{"type": "int64", "nullable": true}],
+ "result": [{"type": "int64", "nullable": true}],
+ "needs_features": ["FORCED_STOP"],
+ "input": {"length": 1, "columns": [{"type": "int64", "values": [1]}]},
+ "expect": {"status": "ERR_KILLED"},
+ "runner_fails_with": "SKIP"
+}

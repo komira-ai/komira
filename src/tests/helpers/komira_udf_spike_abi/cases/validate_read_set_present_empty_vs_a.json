@@ -1,0 +1,11 @@
+{
+ "name": "validate_read_set_present_empty_vs_a",
+ "defect": "a present, empty field list is read as absent, so the check is skipped (design 3.1: compared like any other)",
+ "run": "validate",
+ "entry": "row_const",
+ "shape": "ROW",
+ "args": [{"type": "int64", "nullable": true, "name": "a"}],
+ "result": [{"type": "int64", "nullable": true}],
+ "descriptor": {"recorded_fields": {"fields": []}},
+ "expect": {"status": "ERR_READ_SET_MISMATCH", "run_error": "OPTIMIZED_UDF_READ_SET_DESCRIPTOR_MISMATCH"}
+}

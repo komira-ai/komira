@@ -1,0 +1,19 @@
+[package]
+name = "komira_async_api"
+version = "0.1.0"
+description = "Cancellation token, detached-drop spawn, the dispatcher / worker-pool / fork-join / scale-signal trait contracts, and the pool-depth counter."
+license = "Apache-2.0"
+repository = "https://github.com/komira-ai/komira"
+readme = "README.md"
+mojo = ["1.0.0"]
+
+[dependencies]
+komira_atomic_alias = { path = "../komira_atomic_alias", version = "0.1" }
+
+[native.komira_concurrency_pool_depth]
+kind = "static"
+srcs = ["native/komira_concurrency_pool_depth.c"]
+
+[targets]
+lib = { path = "src/komira_async_api" }
+tests = ["tests"]

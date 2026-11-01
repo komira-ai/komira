@@ -1,0 +1,12 @@
+[package]
+name = "kci_logs"
+version = "0.1.0"
+description = "Bounded, redacting reader of the logs behind a failed step: run logs behind a transport trait and cloud-unit logs behind a cloud-neutral source trait."
+license = "Apache-2.0"
+repository = "https://github.com/komira-ai/komira"
+readme = "README.md"
+mojo = ["1.0.0"]
+
+[targets]
+lib = { path = "src/kci_logs" }
+tests = ["tests"]

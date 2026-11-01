@@ -10,16 +10,14 @@
 #     every exported argument array released (a race between contexts; a
 #     leak; one worker shared by every thread);
 #   - parallelism (design section 6.3): 4 threads each call a function that
-#     spins 200 ms per call; the workers' CPU time over the wall time must
-#     be at least 0.6 x min(4, CPUs) (a lock shared across engine threads:
-#     under one lock the ratio is about 1);
+#     returns only once all 4 workers are inside it at the same time (a
+#     rendezvous across the worker processes, fixtures.ts). A lock shared
+#     across engine threads serves the calls one at a time, so no call ever
+#     sees the others and each fails after the function's safety limit.
+#     Nothing here compares a duration to a threshold;
 #   - the engine loop names no runtime and no language (it drives any
 #     runtime library through the table).
 #
-# Mutant planted: proxy.c's call_batch taking one process-wide mutex around
-# the request (a lock shared across engine threads): red (CPU/wall about 1
-# on the spin case).
-
 from std.testing import assert_equal, assert_false, assert_true
 
 from komira_json import JsonValue, parse_json_value
@@ -72,17 +70,15 @@ def main() raises:
             assert_true(p != pid, "two threads share worker " + String(pid))
         pids.append(pid)
 
-    r = parse_json_value(run(LIB, Workload("fixtures.mjs#spin", SHAPE_SCALAR, "l", 4, 1, 0, 2, 0, CHECK_ROWS, 200.0, 0.0)))
-    _ok(r, "spin")
-    var cpus = r.get("cpus").as_int64()
+    r = parse_json_value(
+        run(LIB, Workload("fixtures.mjs#rendezvous", SHAPE_SCALAR, "l", 4, 1, 0, 2, 0, CHECK_ROWS, 4.0, 0.0))
+    )
+    _ok(r, "rendezvous")
+    th = r.get("per_thread")
+    assert_equal(th.array_len(), 4)
     var wall = Float64(r.get("wall_ns").as_int64())
     var cpu = 0.0
-    th = r.get("per_thread")
     for i in range(th.array_len()):
         cpu += Float64(th.element_at(i).get("worker_cpu_ns").as_int64())
-    var ratio = cpu / wall
-    var lanes = Float64(min(Int64(4), cpus))
-    print("spin: cpus", cpus, "wall ms", Int(wall) // 1_000_000, "worker cpu ms", Int(cpu) // 1_000_000, "ratio", ratio)
-    assert_true(cpus >= 2, "the parallelism case needs 2 CPUs; this action has " + String(cpus))
-    assert_true(ratio >= 0.6 * lanes, "CPU/wall " + String(ratio) + " below 0.6 x " + String(lanes))
+    print("rendezvous: wall ms", Int(wall) // 1_000_000, "worker cpu ms", Int(cpu) // 1_000_000, "(printed, not asserted)")
     print("test_threads: ok")

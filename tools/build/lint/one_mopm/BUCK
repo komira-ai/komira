@@ -1,0 +1,37 @@
+load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_test")
+load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
+
+# Built with zig 0.15.2 (`:zig_next`); the executables are built behind the check
+# that the pin is that release.
+_ZIG = "komira//tools/build/toolchains:zig_next"
+_ZIG_VERSION = "komira//tools/build/toolchains:zig_next_version"
+
+# The one-mopm lint's tool (src/rules.zig says what it checks), run by
+# //tools/build/lint:one_mopm (tools/build/lint/one_mopm.bzl).
+
+_SRCS = glob(["src/*.zig"])
+
+# The unit tests (one version passes, one package on another is refused with
+# both versions named, an excepted fixture passes, an empty set is refused,
+# the release version, malformed and stale rows, the parse and the walk):
+# `zig test` of main.zig, run as a build action.
+zig_test(
+    name = "one_mopm_unit",
+    exec_compatible_with = LINUX_X86_64,
+    imports = _SRCS,
+    src = "src/main.zig",
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = _ZIG,
+)
+
+# Built only behind its unit tests.
+zig_exe(
+    name = "one_mopm",
+    exec_compatible_with = LINUX_X86_64,
+    imports = _SRCS,
+    src = "src/main.zig",
+    unit_tests = [":one_mopm_unit", _ZIG_VERSION],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = _ZIG,
+    visibility = ["PUBLIC"],
+)

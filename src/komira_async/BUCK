@@ -116,6 +116,7 @@ mojo_library(
         "tests/test_primitives_smoke.mojo",
         "tests/test_raii_ergonomics.mojo",
         "tests/test_reactor_completion_queue_smoke.mojo",
+        "tests/test_reactor_modify_interest.mojo",
         "tests/test_reactor_park_no_lost_wakeup.mojo",
         "tests/test_reactor_smoke.mojo",
         "tests/test_reactor_with_std_sleep.mojo",

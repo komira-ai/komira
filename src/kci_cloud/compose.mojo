@@ -277,16 +277,16 @@ struct _Expander(Movable):
             # no finding. Kept as refusals so a caller that skips load is
             # refused rather than accepted.
             if has_res:
-                return _Got.refused(self.l.static_ref(ctx.def_i, r))
+                return _Got.refused(self.l.static_ref(ctx.def_i, r))  # cov: unreachable load refuses this ref first (the comment above), and expand runs only after a load with no finding
             if r.local:
                 if self.l.component_at(ctx.def_i, r.local.value()) < 0:
-                    return _Got.refused(self.l.static_ref(ctx.def_i, r))
+                    return _Got.refused(self.l.static_ref(ctx.def_i, r))  # cov: unreachable load refuses this ref first (the comment above), and expand runs only after a load with no finding
                 target = ctx.prefix + String("/") + r.local.value()
             else:
                 var b = ctx.bindings.get(r.input.value())
                 if not b:
                     if self.l.input_type(ctx.def_i, r.input.value()) != INPUT_REF:
-                        return _Got.refused(self.l.static_ref(ctx.def_i, r))
+                        return _Got.refused(self.l.static_ref(ctx.def_i, r))  # cov: unreachable load refuses this ref first (the comment above), and expand runs only after a load with no finding
                     return _Got.dropped()
                 target = b.value().ref_.value().resource.copy()
         else:
@@ -376,7 +376,7 @@ struct _Expander(Movable):
             # (rewrite and bindings_of under instantiate), and expansion runs
             # only after a load with no finding. Kept as a refusal so a later
             # caller that skips load fails closed.
-            return _Got.refused(self.l.keys[ctx.def_i] + String(" declares no STRING, INT or BOOL input ") + _q(name))
+            return _Got.refused(self.l.keys[ctx.def_i] + String(" declares no STRING, INT or BOOL input ") + _q(name))  # cov: unreachable load refuses this value first (the comment above), and expand runs only after a load with no finding
         if v._oneof0_case == 3:
             var g = self.resolve_ref(ctx, v.ref_.value())
             if g.err.byte_length() > 0 or g.drop:

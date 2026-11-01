@@ -96,8 +96,9 @@ def test_single_shot_thread_count_returns_to_baseline() raises:
     var rt = PerCoreAsyncRuntime[NoopSink](placement=PLACEMENT_FIXED)
     rt.attach_worker(NoopSink(_placeholder=UInt8(0)), BACKEND_MOCK)
     rt.start()
-    # Tiny delay so the worker pthread is definitely live.
-    _ = external_call["usleep", Int32](UInt32(2_000))  # 2 ms
+    # `start()` returns after `pthread_create` has, and the new thread's task
+    # entry exists from the moment the clone returns: no wait is needed for
+    # the worker to be counted.
     var during = _live_thread_count()
     # 5 multi-worker: pthread_t handles live in `_thread_ids`
     # (parallel Slab[Int64], one entry per attached worker). For n=1, we
@@ -112,8 +113,8 @@ def test_single_shot_thread_count_returns_to_baseline() raises:
     )
     rt.shutdown()
     # After shutdown + join, count returns to baseline (±2 for libc
-    # transients).
-    _ = external_call["usleep", Int32](UInt32(2_000))
+    # transients, which also covers a joined thread whose task entry the
+    # kernel has not reaped yet).
     var after = _live_thread_count()
     var delta = after - baseline
     if delta < Int64(0):

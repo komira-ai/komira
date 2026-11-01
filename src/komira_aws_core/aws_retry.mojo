@@ -207,7 +207,7 @@ def _aws_token_bucket() -> TokenBucket:
             success_refill=AWS_NO_RETRY_INCREMENT,
         )
     except e:
-        abort(String("AwsRetryQuota: ") + String(e))
+        abort(String("AwsRetryQuota: ") + String(e))  # cov: unreachable TokenBucket refuses only a negative setting; both constants are positive
 
 
 def aws_is_throttling_code(code: String) -> Bool:

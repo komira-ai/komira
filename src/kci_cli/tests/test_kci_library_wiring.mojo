@@ -18,7 +18,8 @@
 #   The reads around the steps: `platform_env` reads this process's
 #   environment (KCI_CLI_TEST_SECRET is set by `test_env`; an unset name is
 #   ""), and `committed_file` and `is_ancestor` refuse, naming RUNNER_TEMP,
-#   outside a runner. `git_is_ancestor` over a scripted git: a shallow
+#   outside a runner, as do `main_tip_past` and `GitHistory` handed no
+#   temporary directory. `git_is_ancestor` over a scripted git: a shallow
 #   checkout raises, exit 0 is True, 1 False, anything else raises (asked
 #   of the full refname `refs/remotes/origin/main`, which no tag answers);
 #   `git_first_parent` over a scripted git and `carried_markdown` (what a
@@ -40,6 +41,7 @@ from komira_libc.posix import _read_env
 from kci_build import ScriptedRunner, ScriptedStep
 from kci_cli import (
     ComposedSecretStore,
+    GitHistory,
     LibrarySteps,
     MAIN_TRACKING_REF,
     SecretStoreChoice,
@@ -352,6 +354,35 @@ def test_is_ancestor_outside_a_runner_refuses() raises:
         except e:
             why = String(e)
         assert_true(why.find(String("RUNNER_TEMP is not set")) >= 0, why)
+
+
+def test_main_tip_past_outside_a_runner_refuses() raises:
+    if _read_env("RUNNER_TEMP").byte_length() == 0:
+        var steps = LibrarySteps()
+        var why = String("<read>")
+        try:
+            _ = steps.main_tip_past(String("a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"))
+        except e:
+            why = String(e)
+        assert_true(why.find(String("RUNNER_TEMP is not set")) >= 0, why)
+
+
+def test_git_history_with_no_temp_dir_refuses() raises:
+    # GitHistory("") is what a publish hands kci_publish outside a runner:
+    # both reads refuse, naming RUNNER_TEMP, and start no git
+    var h = GitHistory(String(""))
+    var why = String("<read>")
+    try:
+        _ = h.commit_of(String("a1b2c3d"))
+    except e:
+        why = String(e)
+    assert_true(why.find(String("RUNNER_TEMP is not set")) >= 0, why)
+    why = String("<read>")
+    try:
+        _ = h.is_ancestor(String("a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"), String("refs/remotes/origin/main"))
+    except e:
+        why = String(e)
+    assert_true(why.find(String("RUNNER_TEMP is not set")) >= 0, why)
 
 
 def main() raises:

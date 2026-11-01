@@ -5,6 +5,11 @@
 load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_test")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 
+# Built with zig 0.15.2 (`:zig_next`); the executables are built behind the check
+# that the pin is that release.
+_ZIG = "komira//tools/build/toolchains:zig_next"
+_ZIG_VERSION = "komira//tools/build/toolchains:zig_next_version"
+
 # One `zig test` target per scenario (README.md, Tests), each a build action
 # of its own: `<scenario>_test.zig` with the tool and the ELF fixture writer.
 _SCENARIOS = [
@@ -28,7 +33,7 @@ _SCENARIOS = [
     ],
     src = s + "_test.zig",
     busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig",
+    zig = _ZIG,
 ) for s in _SCENARIOS]
 
 # Built only when every scenario passed.
@@ -36,8 +41,8 @@ zig_exe(
     name = "loader_closure",
     exec_compatible_with = LINUX_X86_64,
     src = "loader_closure.zig",
-    unit_tests = [":" + s + "_test" for s in _SCENARIOS],
+    unit_tests = [":" + s + "_test" for s in _SCENARIOS] + [_ZIG_VERSION],
     busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig",
+    zig = _ZIG,
     visibility = ["PUBLIC"],
 )

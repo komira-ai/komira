@@ -262,7 +262,7 @@ def test_h2_large_response_drains_with_flow_control() raises:
     var client = HttpClient[FcH2Connector].with_defaults(connector^)
 
     var url = Url.https(
-        String("storage.googleapis.com"), UInt16(443), String("/storage/v1/b/x/o")
+        String("192.0.2.1"), UInt16(443), String("/storage/v1/b/x/o")
     )
     var headers = HeaderMap()
     var req = build_get_request(url^, headers^)

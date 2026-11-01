@@ -1,0 +1,3 @@
+# What the coverage census measured of this package's libraries (tools/build/coverage/census.md).
+census	2026-10-10	27a2541169cb979fa9c82a032eea24919b727121	-
+komira//src/komira_counters:komira_counters	src/komira_counters	library	OK	266	319	78	80	yes	release	src/komira_counters/runtime_introspection.mojo	-

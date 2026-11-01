@@ -1,4 +1,7 @@
-load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+load("@buildrules//rules/mojo:pack.bzl", "mojo_conda", "mojo_conda_holds")
+load("@komira//tools/build/mojo:adopt.bzl", "mojo_adopted_library")
+load("@komira//tools/build/package:conda.bzl", "conda_package")
+load(":buildrules.mojo.bzl", "mojo_package")
 
 # The `.ics` edge of a simple calendar: iCalendar (RFC 5545) read into
 # komira_calendar's model with a report of what was dropped or refused, and
@@ -19,25 +22,95 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # examples and client-shaped files are in
 # //src/tests/conformance/komira_calendar_ics_conformance. README.md's
 # examples run as one more welded test.
-mojo_library(
+#
+# Built with buildrules' `mojo_package` from mopm.toml (README.md, "Build files"): `:lib` is the
+# library file and exists only once every test of tests/ has passed. The package depends on
+# komira_calendar, komira_calendar_proto, komira_content_line and komira_datetime, sibling packages
+# (`[dependencies]` of mopm.toml): its `:lib` is built from those packages' `:lib`.
+mojo_package(path = ".")
+
+# `:komira_calendar_ics`, the target the packages that depend on this library name, is `:lib` as
+# komira's Mojo rules take it (tools/build/mojo/adopt.bzl): the same file, so a dependent builds
+# only once the tests have passed. `deps` is `[dependencies]` of mopm.toml, as the adopted targets
+# of those packages: the rule refuses a list that is not the closure `:lib` was built from. It
+# carries the README gate too (`[tests][readme]`): the examples run against `:lib`; the tests are
+# not run again.
+mojo_adopted_library(
     name = "komira_calendar_ics",
-    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
         "//src/komira_calendar:komira_calendar",
         "//src/komira_calendar_proto:komira_calendar_proto",
         "//src/komira_content_line:komira_content_line",
         "//src/komira_datetime:komira_datetime",
-        "//src/komira_proto_codec:komira_proto_codec",
-        "//src/komira_wkt:komira_wkt",
     ],
-    test_srcs = [
-        "tests/test_read.mojo",
-        "tests/test_read_cases.mojo",
-        "tests/test_read_edges.mojo",
-        "tests/test_round_trip_edges.mojo",
-        "tests/test_rrule.mojo",
-        "tests/test_values.mojo",
-        "tests/test_write.mojo",
+    lib = ":lib",
+    readme = "README.md",
+    srcs = glob(["src/komira_calendar_ics/**/*.mojo"]),
+    test_srcs = glob(["tests/test_*.mojo"]),
+    test_runs = ":test",
+    visibility = ["PUBLIC"],
+)
+
+# The mopm package: `mopm pack` over `:lib`, the `.conda` a mopm registry serves
+# (`mojo-komira_calendar_ics-0.1.0-mojo1.0.0_0.conda`), which records komira_calendar,
+# komira_calendar_proto, komira_content_line and komira_datetime as dependencies
+# (`mojo-komira_calendar >=0.1,<0.2`, `mojo-komira_calendar_proto >=0.1,<0.2`,
+# `mojo-komira_content_line >=0.1,<0.2` and `mojo-komira_datetime >=0.1,<0.2`) and holds those
+# packages' files nowhere. `members` is the manifests of the path dependencies, staged at their
+# repository paths, because `mopm pack` reads the manifest of each beside the one it is given.
+# `:lib` exists only once the tests passed, so this file exists only then. Publishing it (`mopm
+# publish`) uploads, which is not a build action: it is a step of a CI job that takes this target's
+# output. `mopm` is the one `mojo_package` pins (mopm-toolchain.toml).
+mojo_conda(
+    name = "conda",
+    dir = "src/komira_calendar_ics",
+    lib = ":lib",
+    manifest = "mopm.toml",
+    members = {
+        "../komira_calendar": "//src/komira_calendar:mopm.toml",
+        "../komira_calendar_proto": "//src/komira_calendar_proto:mopm.toml",
+        "../komira_content_line": "//src/komira_content_line:mopm.toml",
+        "../komira_datetime": "//src/komira_datetime:mopm.toml",
+        "../komira_encoding": "//src/komira_encoding:mopm.toml",
+        "../komira_json": "//src/komira_json:mopm.toml",
+        "../komira_proto_codec": "//src/komira_proto_codec:mopm.toml",
+        "../komira_protobuf": "//src/komira_protobuf:mopm.toml",
+        "../komira_wkt": "//src/komira_wkt:mopm.toml",
+    },
+    mojo = "1.0.0",
+    mopm = "toolchains//:mopm_0_0_86",
+    package = "komira_calendar_ics",
+    version = "0.1.0",
+    visibility = ["PUBLIC"],
+)
+
+# What `:conda` holds, read back from the built file (buildrules' `prebuilt_unpack`): this package's
+# own `.mojoc` and nothing else under `lib/mojo/` (komira_calendar, komira_calendar_proto,
+# komira_content_line and komira_datetime are not in it), and exactly 4 dependencies,
+# `mojo-komira_calendar >=0.1,<0.2`, `mojo-komira_calendar_proto >=0.1,<0.2`,
+# `mojo-komira_content_line >=0.1,<0.2` and `mojo-komira_datetime >=0.1,<0.2`, which is what
+# installing the package pulls in. Red when the manifest drops a dependency, names another range, or
+# the file carries a sibling.
+mojo_conda_holds(
+    name = "conda_holds",
+    conda = ":conda",
+    depends = [
+        "mojo-komira_calendar >=0.1,<0.2",
+        "mojo-komira_calendar_proto >=0.1,<0.2",
+        "mojo-komira_content_line >=0.1,<0.2",
+        "mojo-komira_datetime >=0.1,<0.2",
     ],
+    package = "komira_calendar_ics",
+    sole = True,
+    visibility = ["PUBLIC"],
+)
+
+# Kept for the release machine, which still builds it (release/BUCK, release/artifacts.textproto):
+# komira's conda packer over `:komira_calendar_ics`. It goes when the release machine takes the mopm
+# package. This library's mopm package is `:conda` above.
+conda_package(
+    name = "komira_calendar_ics_conda",
+    lib = ":komira_calendar_ics",
+    summary = "The `komira_calendar_ics` Mojo library of komira, as a conda package.",
     visibility = ["PUBLIC"],
 )

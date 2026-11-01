@@ -1,0 +1,4 @@
+def _f(ctx):
+    ctx.actions.run(busybox_sh(bb, s), category = "x")
+    ctx.actions.run(busybox_sh(bb, t), category = "x2")
+    ctx.actions.run(cmd_args(bb, "sh", "-euc", s), category = "y")

@@ -2,8 +2,10 @@
 
 Exit codes: 0 the outputs were written (whatever they conclude); 1 an input
 is malformed, a report path is unmapped, or an output cannot be written;
-2 bad usage; 3 (`gate` only) `--mode enforce` and the package has a finding
-(a test-only package, `--info-package`, has information, never a finding).
+2 bad usage; 3 (`gate` only) a Regression (a metric the package holds,
+`--held`, below the target or not measured) in any mode, or any finding with
+`--mode enforce` (a test-only package, `--info-package`, has information,
+never a finding).
 """
 
 from std.io import FileDescriptor
@@ -23,7 +25,7 @@ from covcheck.annotate import (
 from covcheck.checkrun import body_name, checkrun_bodies, valid_sha
 from covcheck.diff import parse_diff
 from covcheck.paths import RepoFiles, package_of, parse_repo_files
-from covcheck.ratchet import parse_ratchet, render_ratchet
+from covcheck.held import Held, add_hold
 from covcheck.result import gate_json, report_json
 from covcheck.stats import MODE_NEUTRAL, valid_mode
 from covcheck.summary import render_summary, truncate_summary
@@ -39,14 +41,14 @@ comptime USAGE_MARK = "usage: "
 comptime USAGE_REPORT = (
     "covcheck report --repo-files F --diff F --head-sha SHA --source-root DIR"
     + " (--cobertura [PKGDIR=]F | --lcov [PKGDIR=]F)... [--branch-lcov [PKGDIR=]F]... [--mutants [PKGDIR=]F]..."
-    + " [--strip-prefix P]... --ratchet F [--mode census|neutral|enforce] [--target-bp N]"
+    + " [--strip-prefix P]... [--held PKGDIR=F]... [--mode census|neutral|enforce] --target-bp N"
     + " [--include-tests] [--info-package DIR]... [--name N] [--max-annotations N] --summary-out F --checkrun-dir D --result-out F"
-    + " [--annotations-out F] [--ratchet-out F]"
+    + " [--annotations-out F]"
 )
 comptime USAGE_GATE = (
     "covcheck gate --package DIR --repo-files F --source-root DIR"
     + " [--cobertura [PKGDIR=]F | --lcov [PKGDIR=]F]... [--branch-lcov [PKGDIR=]F]... [--mutants [PKGDIR=]F]..."
-    + " [--strip-prefix P]... --ratchet F --mode census|neutral|enforce [--target-bp N]"
+    + " [--strip-prefix P]... [--held F] --mode census|neutral|enforce --target-bp N"
     + " [--include-tests] [--test-source P]... [--info-package DIR]... --result-out F --summary-out F"
 )
 
@@ -70,6 +72,8 @@ struct Args(Copyable, Movable):
     var values: Dict[String, String]
     var reports: List[FileArg]
     var mutants: List[FileArg]
+    # `--held [PKGDIR=]FILE`: a package's coverage_held (held.mojo).
+    var held: List[FileArg]
     var strip_prefixes: List[String]
     var test_sources: List[String]
     var info_packages: List[String]
@@ -80,6 +84,7 @@ struct Args(Copyable, Movable):
         self.values = Dict[String, String]()
         self.reports = List[FileArg]()
         self.mutants = List[FileArg]()
+        self.held = List[FileArg]()
         self.strip_prefixes = List[String]()
         self.test_sources = List[String]()
         self.info_packages = List[String]()
@@ -115,9 +120,9 @@ def parse_args(args: List[String]) raises -> Args:
     var report = a.command == String("report")
     if not report and a.command != String("gate"):
         _usage(String("unknown command '") + a.command + String("' (report or gate)"))
-    var single = split_on(String("--repo-files --source-root --ratchet --mode --target-bp --summary-out --result-out"), 32)
+    var single = split_on(String("--repo-files --source-root --mode --target-bp --summary-out --result-out"), 32)
     if report:
-        single.extend(split_on(String("--diff --head-sha --name --checkrun-dir --ratchet-out --max-annotations --annotations-out"), 32))
+        single.extend(split_on(String("--diff --head-sha --name --checkrun-dir --max-annotations --annotations-out"), 32))
     else:
         single.append(String("--package"))
     var i = 1
@@ -130,6 +135,7 @@ def parse_args(args: List[String]) raises -> Args:
         var known = (
             flag == String("--cobertura") or flag == String("--lcov") or flag == String("--branch-lcov")
             or flag == String("--mutants") or flag == String("--strip-prefix") or flag == String("--info-package")
+            or flag == String("--held")
         )
         if flag == String("--test-source") and not report:
             known = True
@@ -152,6 +158,14 @@ def parse_args(args: List[String]) raises -> Args:
             a.reports.append(file_arg(String(FORMAT_BRANCH_LCOV), v))
         elif flag == String("--mutants"):
             a.mutants.append(file_arg(String("mutants"), v))
+        elif flag == String("--held"):
+            var h = file_arg(String("held"), v)
+            # The report names each marker's package; the gate's is its own.
+            if report and h.pkgdir.byte_length() == 0:
+                _usage(String("report --held '") + v + String("' names no package (PKGDIR=FILE)"))
+            if not report and len(a.held) > 0:
+                _usage(String("gate takes one --held, its package's"))
+            a.held.append(h^)
         elif flag == String("--strip-prefix"):
             a.strip_prefixes.append(v)
         elif flag == String("--test-source"):
@@ -169,7 +183,7 @@ def parse_args(args: List[String]) raises -> Args:
             if flag in a.values:
                 _usage(String("'") + flag + String("' is given twice"))
             a.values[flag] = v
-    var required = split_on(String("--repo-files --source-root --ratchet --summary-out --result-out"), 32)
+    var required = split_on(String("--repo-files --source-root --target-bp --summary-out --result-out"), 32)
     if report:
         required.extend(split_on(String("--diff --head-sha --checkrun-dir"), 32))
     else:
@@ -199,6 +213,10 @@ def parse_args(args: List[String]) raises -> Args:
         var v = parse_count(t)
         if v < 0 or v > 10000:
             _usage(String("--target-bp '") + t + String("' is not a number of basis points from 0 to 10000"))
+    if not report and len(a.held) > 0:
+        var hp = a.held[0].pkgdir
+        if hp.byte_length() > 0 and hp != a.get(String("--package")):
+            _usage(String("gate --held names ") + hp + String(", not --package ") + a.get(String("--package")))
     var cap = a.get(String("--max-annotations"))
     if cap.byte_length() > 0 and parse_count(cap) < 1:
         _usage(String("--max-annotations '") + cap + String("' is not a number of annotations of 1 or more"))
@@ -240,10 +258,13 @@ def _read_inputs(fs: List[FileArg]) raises -> List[Input]:
 
 
 def _analysis(a: Args, repo: RepoFiles) raises -> Analysis:
-    var ratchet_path = a.get(String("--ratchet"))
-    var ratchet = parse_ratchet(read_text(ratchet_path), ratchet_path)
+    var held = Held()
+    for i in range(len(a.held)):
+        ref h = a.held[i]
+        var pkg = h.pkgdir if h.pkgdir.byte_length() > 0 else a.get(String("--package"))
+        add_hold(held, pkg, read_text(h.file), h.file, a.info_packages)
     return analyze(
-        _read_inputs(a.reports), _read_inputs(a.mutants), repo, ratchet,
+        _read_inputs(a.reports), _read_inputs(a.mutants), repo, held,
         Sources(a.get(String("--source-root"))), _options(a),
     )
 
@@ -285,9 +306,6 @@ def run_report(a: Args) raises -> Int:
         write_text(dir + String("/") + body_name(i), bodies[i])
     if anns_out.byte_length() > 0:
         write_text(anns_out, annotations_json(anns))
-    var rout = a.get(String("--ratchet-out"))
-    if rout.byte_length() > 0:
-        write_text(rout, render_ratchet(an.proposal))
     return EXIT_OK
 
 
@@ -309,7 +327,7 @@ def run_gate(a: Args) raises -> Int:
     var an = _analysis(a, repo)
     write_text(a.get(String("--summary-out")), render_summary(an, List[String](), DiffCoverage(), False, pkg))
     write_text(a.get(String("--result-out")), gate_json(an, pkg))
-    # `failure`: a finding in enforce mode, or a floor not held in any mode.
+    # `failure`: a finding in enforce mode, or a Regression (a hold) in any mode.
     if an.conclusion == String("failure"):
         return EXIT_GATE
     return EXIT_OK

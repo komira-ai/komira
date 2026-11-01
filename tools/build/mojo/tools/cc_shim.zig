@@ -13,6 +13,9 @@
 //!
 //! byte for byte: coverage's cov_zig recognises the link by that shape, and
 //! `cov_branch link` (cov_branch_link.zig) reproduces it (test 47, link_line.sh).
+//!
+//! On macOS (mojo_compile_macos.zig) the first line of shim.cfg is the host's C
+//! driver, `/usr/bin/cc`, and the shim runs `execLineMacos`.
 
 const std = @import("std");
 
@@ -34,25 +37,25 @@ pub const ConfigError = error{ BadConfig, OutOfMemory };
 
 /// The text of shim.cfg. A value holding a newline cannot be written.
 pub fn renderConfig(alloc: std.mem.Allocator, c: Config) ConfigError![]const u8 {
-    var out = std.ArrayList(u8).init(alloc);
+    var out = std.ArrayList(u8).empty;
     const head = [_][]const u8{ c.zig, c.target, c.runpath };
-    for (head) |v| try line(&out, v);
-    for (c.tail) |v| try line(&out, v);
-    return out.toOwnedSlice();
+    for (head) |v| try line(alloc, &out, v);
+    for (c.tail) |v| try line(alloc, &out, v);
+    return out.toOwnedSlice(alloc);
 }
 
-fn line(out: *std.ArrayList(u8), v: []const u8) ConfigError!void {
+fn line(alloc: std.mem.Allocator, out: *std.ArrayList(u8), v: []const u8) ConfigError!void {
     if (std.mem.indexOfScalar(u8, v, '\n') != null) return error.BadConfig;
-    try out.appendSlice(v);
-    try out.append('\n');
+    try out.appendSlice(alloc, v);
+    try out.append(alloc, '\n');
 }
 
 /// shim.cfg read back: at least three lines, every line ended by a newline.
 pub fn parseConfig(alloc: std.mem.Allocator, text: []const u8) ConfigError!Config {
     if (text.len == 0 or text[text.len - 1] != '\n') return error.BadConfig;
-    var lines = std.ArrayList([]const u8).init(alloc);
+    var lines = std.ArrayList([]const u8).empty;
     var it = std.mem.splitScalar(u8, text[0 .. text.len - 1], '\n');
-    while (it.next()) |l| try lines.append(l);
+    while (it.next()) |l| try lines.append(alloc, l);
     if (lines.items.len < 3) return error.BadConfig;
     return .{
         .zig = lines.items[0],
@@ -84,7 +87,7 @@ fn starts(a: []const u8, p: []const u8) bool {
 ///   -Wl,-L* / -Wl,-l*                    without the -Wl,
 ///   a trailing -Xlinker                  passed (unless a run path value was expected)
 pub fn rewriteLinux(alloc: std.mem.Allocator, args: []const []const u8) ![]const []const u8 {
-    var out = std.ArrayList([]const u8).init(alloc);
+    var out = std.ArrayList([]const u8).empty;
     var expect_val = false;
     var drop_val = false;
     var i: usize = 0;
@@ -100,7 +103,7 @@ pub fn rewriteLinux(alloc: std.mem.Allocator, args: []const []const u8) ![]const
             }
             if (expect_val) {
                 expect_val = false;
-                try out.appendSlice(&.{ a, b });
+                try out.appendSlice(alloc, &.{ a, b });
                 continue;
             }
             if (eql(b, "-rpath") or eql(b, "--rpath") or eql(b, "-R")) {
@@ -108,14 +111,14 @@ pub fn rewriteLinux(alloc: std.mem.Allocator, args: []const []const u8) ![]const
             } else if (starts(b, "-rpath=") or starts(b, "--rpath=")) {
                 // dropped
             } else if (starts(b, "-L") or starts(b, "-l")) {
-                try out.append(b);
+                try out.append(alloc, b);
             } else if (starts(b, "--")) {
-                try out.append(try std.fmt.allocPrint(alloc, "-Wl,{s}", .{b}));
+                try out.append(alloc, try std.fmt.allocPrint(alloc, "-Wl,{s}", .{b}));
             } else if (starts(b, "-")) {
                 expect_val = true;
-                try out.appendSlice(&.{ a, b });
+                try out.appendSlice(alloc, &.{ a, b });
             } else {
-                try out.append(b);
+                try out.append(alloc, b);
             }
             continue;
         }
@@ -137,18 +140,18 @@ pub fn rewriteLinux(alloc: std.mem.Allocator, args: []const []const u8) ![]const
             continue;
         }
         if (starts(a, "-Wl,-L") or starts(a, "-Wl,-l")) {
-            try out.append(a["-Wl,".len..]);
+            try out.append(alloc, a["-Wl,".len..]);
             continue;
         }
-        try out.append(a);
+        try out.append(alloc, a);
     }
-    return out.toOwnedSlice();
+    return out.toOwnedSlice(alloc);
 }
 
 /// The argv the shim executes (Linux): argv[0] is the absolute zig path.
 pub fn execLineLinux(alloc: std.mem.Allocator, c: Config, args: []const []const u8) ![]const []const u8 {
-    var out = std.ArrayList([]const u8).init(alloc);
-    try out.appendSlice(&.{
+    var out = std.ArrayList([]const u8).empty;
+    try out.appendSlice(alloc, &.{
         c.zig,
         "cc",
         "-target",
@@ -157,9 +160,64 @@ pub fn execLineLinux(alloc: std.mem.Allocator, c: Config, args: []const []const 
         "-Wl,--enable-new-dtags",
         try std.fmt.allocPrint(alloc, "-Wl,-rpath,{s}", .{c.runpath}),
     });
-    try out.appendSlice(try rewriteLinux(alloc, args));
-    try out.appendSlice(c.tail);
-    return out.toOwnedSlice();
+    try out.appendSlice(alloc, try rewriteLinux(alloc, args));
+    try out.appendSlice(alloc, c.tail);
+    return out.toOwnedSlice(alloc);
+}
+
+/// The compiler's link arguments as the host's cc gets them (macOS):
+///
+///   -Xlinker -rpath -Xlinker <p>         dropped, all four
+///   -Xlinker -rpath (no -Xlinker pair after it)   dropped, the two
+///   -Xlinker <x>                         passed, the pair
+///   -Wl,-rpath,*                         dropped
+///   -rpath <p>                           dropped, both
+///   a trailing -Xlinker                  passed
+pub fn rewriteMacos(alloc: std.mem.Allocator, args: []const []const u8) ![]const []const u8 {
+    var out = std.ArrayList([]const u8).empty;
+    var i: usize = 0;
+    while (i < args.len) {
+        const a = args[i];
+        i += 1;
+        if (eql(a, "-Xlinker") and i < args.len) {
+            if (eql(args[i], "-rpath")) {
+                i += 1;
+                if (args.len - i >= 2 and eql(args[i], "-Xlinker")) i += 2;
+                continue;
+            }
+            try out.appendSlice(alloc, &.{ a, args[i] });
+            i += 1;
+            continue;
+        }
+        if (starts(a, "-Wl,-rpath,")) continue;
+        if (eql(a, "-rpath")) {
+            if (i < args.len) i += 1;
+            continue;
+        }
+        try out.append(alloc, a);
+    }
+    return out.toOwnedSlice(alloc);
+}
+
+/// The argv the shim executes (macOS). shim.cfg's first line is the C driver
+/// (`/usr/bin/cc`, the host's, which links with the host's ld) and its second
+/// the deployment target, which reaches the link as MACOSX_DEPLOYMENT_TARGET,
+/// not as an argument:
+///
+///   <driver> -Wl,-S -Wl,-rpath,<runpath> <rewritten arguments> <link-tail lines>
+///
+/// `-Wl,-S` keeps debug-map entries (naming object files inside the sandbox)
+/// out of the output.
+pub fn execLineMacos(alloc: std.mem.Allocator, c: Config, args: []const []const u8) ![]const []const u8 {
+    var out = std.ArrayList([]const u8).empty;
+    try out.appendSlice(alloc, &.{
+        c.zig,
+        "-Wl,-S",
+        try std.fmt.allocPrint(alloc, "-Wl,-rpath,{s}", .{c.runpath}),
+    });
+    try out.appendSlice(alloc, try rewriteMacos(alloc, args));
+    try out.appendSlice(alloc, c.tail);
+    return out.toOwnedSlice(alloc);
 }
 
 // ---- tests -------------------------------------------------------------------
@@ -268,4 +326,56 @@ test "shim.cfg: round trip; a newline in a value and a short file are refused" {
     try testing.expectError(error.BadConfig, parseConfig(a, ""));
     const no_tail = try parseConfig(a, "/z/zig\nt\nr\n");
     try testing.expectEqual(@as(usize, 0), no_tail.tail.len);
+}
+
+// ---- macOS -------------------------------------------------------------------
+
+fn expectRewriteMacos(in: []const []const u8, want: []const []const u8) !void {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const got = try rewriteMacos(arena.allocator(), in);
+    if (got.len != want.len) {
+        std.debug.print("macOS rewrite gave {d} arguments, want {d}:\n", .{ got.len, want.len });
+        for (got) |g| std.debug.print("  got  {s}\n", .{g});
+        for (want) |w| std.debug.print("  want {s}\n", .{w});
+        return error.TestUnexpectedResult;
+    }
+    for (got, want) |g, w| try testing.expectEqualStrings(w, g);
+}
+
+// Each catches a run path naming the action's sandbox reaching the host's
+// linker (design item 18). Mutant planted: keep `-Wl,-rpath,`.
+test "macOS shim: the three run path forms drop; another -Xlinker pair passes" {
+    try expectRewriteMacos(&.{ "-Xlinker", "-rpath", "-Xlinker", "/sandbox/lib", "x.o" }, &.{"x.o"});
+    try expectRewriteMacos(&.{ "-Wl,-rpath,/sandbox/q", "x.o" }, &.{"x.o"});
+    try expectRewriteMacos(&.{ "-rpath", "/sandbox/z", "x.o" }, &.{"x.o"});
+    try expectRewriteMacos(&.{ "-Xlinker", "-install_name", "-Xlinker", "@rpath/x.dylib" }, &.{ "-Xlinker", "-install_name", "-Xlinker", "@rpath/x.dylib" });
+    try expectRewriteMacos(&.{ "-Xlinker", "-L/l", "-lm" }, &.{ "-Xlinker", "-L/l", "-lm" });
+}
+
+// The shell's edges, kept: an -Xlinker -rpath with no pair after it drops
+// the two; a trailing -Xlinker and a trailing -rpath.
+test "macOS shim: incomplete forms at the end of the line" {
+    try expectRewriteMacos(&.{ "x.o", "-Xlinker", "-rpath" }, &.{"x.o"});
+    try expectRewriteMacos(&.{ "x.o", "-Xlinker", "-rpath", "-Xlinker" }, &.{ "x.o", "-Xlinker" });
+    try expectRewriteMacos(&.{ "x.o", "-Xlinker" }, &.{ "x.o", "-Xlinker" });
+    try expectRewriteMacos(&.{ "x.o", "-rpath" }, &.{"x.o"});
+}
+
+// The line the retired darwin/cc shell shim gave for the same input
+// (functional/darwin/check.sh's golden), byte for byte.
+test "macOS shim: the exact exec line, link tail last in order" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const c = Config{ .zig = "/usr/bin/cc", .target = "11.0", .runpath = "@loader_path/lib", .tail = &.{} };
+    const got = try execLineMacos(a, c, &.{ "-o", "out", "-Xlinker", "-rpath", "-Xlinker", "/sandbox/lib", "x.o", "-Xlinker", "-L/l", "-Wl,-rpath,/q", "-rpath", "/z", "-lm" });
+    const want = [_][]const u8{ "/usr/bin/cc", "-Wl,-S", "-Wl,-rpath,@loader_path/lib", "-o", "out", "x.o", "-Xlinker", "-L/l", "-lm" };
+    try testing.expectEqual(want.len, got.len);
+    for (got, want) |g, w| try testing.expectEqualStrings(w, g);
+    const c2 = Config{ .zig = "/usr/bin/cc", .target = "11.0", .runpath = "@loader_path/../..", .tail = &.{ "libc.a", "-lc++" } };
+    const got2 = try execLineMacos(a, c2, &.{ "-o", "out", "x.o" });
+    const want2 = [_][]const u8{ "/usr/bin/cc", "-Wl,-S", "-Wl,-rpath,@loader_path/../..", "-o", "out", "x.o", "libc.a", "-lc++" };
+    try testing.expectEqual(want2.len, got2.len);
+    for (got2, want2) |g, w| try testing.expectEqualStrings(w, g);
 }

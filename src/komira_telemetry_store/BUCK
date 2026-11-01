@@ -1,0 +1,70 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The at-rest format of telemetry in an object store: the object-key layout
+# (the UTC day partition is the index), the manifest body that carries a time
+# range, discovery by manifest replay with exact GETs (the one LIST is writer
+# shard enumeration), and the log and metric segment writers, which write
+# time-sorted Parquet and then append the manifest entry. The store is a trait
+# parameter; the tests run on the in-memory conditional-write store.
+#
+# The welded tests (each file's header says which defect it catches):
+# - test_telemetry_keys: the day partition function (leap day, pre-epoch
+#   floor, the closed day bounds), key depth held constant, segment hygiene,
+#   and the sidecar key derived from the data key.
+# - test_telemetry_segment_entry: the manifest body round-trips every field,
+#   a truncated, empty, unknown or reserved-version body is refused, the
+#   inclusive time and series prunes, and the envelope's field order pinned at
+#   byte offsets.
+# - test_telemetry_manifest_replay: a replay over a store whose LIST raises
+#   still finds every segment (the forward probe past a deferred `_HEAD`), a
+#   reaped chunk below the head is a hole, the merge-input skip, and the
+#   time-range plan prunes.
+# - test_telemetry_log_segment_writer: published bytes decoded by
+#   komira_parquet: time-sorted, one object per UTC day, PUT before the
+#   manifest append, sidecar key derived, the codec and row-group knobs reach
+#   the encoder, two writer lifetimes never share a segment uuid.
+# - test_telemetry_metric_segment_writer: the same for metrics, sorted
+#   `(series_id, ts)`, with entry bounds re-derived from the decoded file.
+mojo_library(
+    name = "komira_telemetry_store",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    # The full transitive closure of the Mojo libraries this package builds on.
+    deps = [
+        "//src/komira_arrow:komira_arrow",
+        "//src/komira_async:komira_async",
+        "//src/komira_async_api:komira_async_api",
+        "//src/komira_atomic_alias:komira_atomic_alias",
+        "//src/komira_buffer:komira_buffer",
+        "//src/komira_clock:komira_clock",
+        "//src/komira_collections:komira_collections",
+        "//src/komira_column_kernels:komira_column_kernels",
+        "//src/komira_compression:komira_compression",
+        "//src/komira_counters:komira_counters",
+        "//src/komira_dynamic_filter:komira_dynamic_filter",
+        "//src/komira_fs:komira_fs",
+        "//src/komira_libc:komira_libc",
+        "//src/komira_metrics:komira_metrics",
+        "//src/komira_objectstore:komira_objectstore",
+        "//src/komira_objectstore:komira_objectstore_posix",
+        "//src/komira_parquet_api:komira_parquet_api",
+        "//src/komira_parquet_codec:komira_parquet_codec",
+        "//src/komira_parquet_writer:komira_parquet_writer",
+        "//src/komira_plan_expr:komira_plan_expr",
+        "//src/komira_scalar_arithmetic:komira_scalar_arithmetic",
+        "//src/komira_simd:komira_simd",
+        "//src/komira_zlib:komira_zlib",
+        "//tools/build/mojo/runtime_paths:komira_runtime_paths",
+    ],
+    # The reader decodes the writers' files in the writer tests. It is not a
+    # dependency of the library: a test-only package, never shipped.
+    test_deps = ["//src/komira_parquet:komira_parquet"],
+    test_srcs = [
+        "tests/test_telemetry_keys.mojo",
+        "tests/test_telemetry_log_segment_uuid.mojo",
+        "tests/test_telemetry_log_segment_writer.mojo",
+        "tests/test_telemetry_manifest_replay.mojo",
+        "tests/test_telemetry_metric_segment_writer.mojo",
+        "tests/test_telemetry_segment_entry.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)

@@ -1,4 +1,0 @@
-call buck2 "cquery" "//... + tests//functional/..."
-exit 0
-stdout "komira//src/a:a (prelude//platforms:default#abcdef0123456789)\nkomira//src/Ünïcode-Dir:x (prelude//platforms:default#abcdef0123456789)\nkomira//MyDir/x:y (prelude//platforms:default#abcdef0123456789)\nkomira//src/9lives:z (prelude//platforms:default#abcdef0123456789)\n"
-stdout "komira//tools/Build-X:t (prelude//platforms:default#abcdef0123456789)\nkomira//src/tests/e2e/日本:j (prelude//platforms:default#abcdef0123456789)\nkomira//_under:u (prelude//platforms:default#abcdef0123456789)\n"

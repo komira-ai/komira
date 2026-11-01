@@ -1,0 +1,111 @@
+load("@komira//tools/build/lint:no_shell.bzl", "no_shell")
+
+# The no-shell list's rule (tools/build/lint/no_shell.bzl), used from a cell
+# other than komira, as a repository using komira as a cell uses it: each
+# case checks this package's own doc_tree (`:doc_tree`, declared by the
+# rule's macro) plus files staged at the paths `files` names, against
+# listed.tsv (x/defs.bzl: one busybox_sh and two sh_argv sites; x/run.sh, a
+# script an action still runs; ci/, a place for scripts people run). A case
+# with `expect` builds green only while the check refuses its planted defect
+# with that text; one without passes only with no finding.
+# tests//functional/... (the pull request check's functional_tests unit)
+# builds them. The planted files are .txt fixtures staged under build-file and
+# script names: a fixture of this cell named `.bzl` or `.sh`, or holding shell
+# sites in a build file of its own, would be one of komira's own list. For the
+# same reason this file spells the script suffix in two parts (_SH).
+#
+# Each kind of finding is also a case of the tool's unit tests
+# (//tools/build/lint/no_shell).
+
+_LIST = "functional/no_shell/listed.tsv"
+
+_SH = "." + "s" + "h"
+
+_ACTIONS = "shell_actions.txt"
+
+_LISTED = {
+    "ci/go" + _SH: "plain.txt",
+    "x/defs.bzl": _ACTIONS,
+    "x/run" + _SH: "plain.txt",
+}
+
+# The listed sites and scripts: nothing to report.
+no_shell(
+    name = "listed",
+    files = _LISTED,
+    list = _LIST,
+    tree = ":doc_tree",
+)
+
+_CASES = {
+    # A site added to a listed file: the busybox helper called a second time.
+    "new_site_in_listed_file": (
+        _LISTED | {"x/defs.bzl": "shell_grown.txt"},
+        ["x/defs.bzl: 2 `busybox_sh` site(s), the row says 1: a new use of a shell"],
+    ),
+
+    # A build file with a shell site and no row.
+    "new_build_file": (
+        _LISTED | {"y/BUCK": _ACTIONS},
+        [
+            "y/BUCK: 1 `busybox_sh` site(s) with no row in " + _LIST,
+            "y/BUCK: 2 `sh_argv` site(s) with no row in " + _LIST,
+        ],
+    ),
+
+    # A genrule: a rule whose body is a shell command.
+    "genrule": (
+        _LISTED | {"w/BUCK": "genrule.txt"},
+        ["w/BUCK: 1 `shell_rule` site(s) with no row in " + _LIST],
+    ),
+
+    # A launcher script written into a rule: a #! line naming the shell.
+    "launcher_script_in_a_rule": (
+        _LISTED | {"v/defs.bzl": "launcher.txt"},
+        ["v/defs.bzl: 1 `shell_path` site(s) with no row in " + _LIST],
+    ),
+
+    # A shell script outside every listed place.
+    "new_script": (
+        _LISTED | {"z/new" + _SH: "plain.txt"},
+        ["z/new" + _SH + ": a shell script (a `" + _SH + "` file) outside the places " + _LIST + " names"],
+    ),
+
+    # A script in the directory of a place that is not the listed one (ci/ does not cover cix/).
+    "script_beside_a_listed_place": (
+        _LISTED | {"cix/go" + _SH: "plain.txt"},
+        ["cix/go" + _SH + ": a shell script"],
+    ),
+
+    # The sites were ported (the build file has none) and the rows stayed.
+    "ported_but_rows_stay": (
+        _LISTED | {"x/defs.bzl": "no_shell.txt"},
+        [
+            _LIST + ":2: x/defs.bzl: no `busybox_sh` site in this file: remove the row",
+            _LIST + ":3: x/defs.bzl: no `sh_argv` site in this file: remove the row",
+        ],
+    ),
+
+    # Some sites were ported and the row was not lowered.
+    "shrunk_but_row_stays": (
+        _LISTED | {"x/defs.bzl": "shell_shrunk.txt"},
+        [_LIST + ":3: x/defs.bzl: no `sh_argv` site in this file: remove the row"],
+    ),
+
+    # The script a row names was deleted.
+    "script_gone_row_stays": (
+        {"x/defs.bzl": _ACTIONS, "ci/go" + _SH: "plain.txt"},
+        [_LIST + ":4: x/run" + _SH + ": no shell script at this path: remove the row"],
+    ),
+}
+
+[
+    no_shell(
+        name = name,
+        expect = expect,
+        files = files,
+        list = _LIST,
+        tree = ":doc_tree",
+    )
+    for name, (files, expect) in _CASES.items()
+]

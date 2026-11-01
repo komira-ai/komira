@@ -64,10 +64,20 @@
 # know that the part of it protecting the process is one layer down, on the
 # recursion itself, where nothing has to agree with it.
 #
-# --- PLAN TAGS: 16 of 18 modelled --------------------------------------------
+# --- PLAN TAGS: 18 of 21 modelled --------------------------------------------
 #   MODELLED   SCAN, FILTER, PROJECT, AGGREGATE, JOIN, SORT, LIMIT, DISTINCT,
 #              TOPN, UNION, PARTITION_BY, PARTITION_TOPN, ASOF_JOIN, VIEW_REF,
-#              CSE_REF, CAST_TO_VARCHAR
+#              CSE_REF, CAST_TO_VARCHAR, MAP_BATCHES, STEP
+#   REFUSED    EXCHANGE (no message arm until optimized_plan.md §12 stage 3)
+#
+#   ★ THE UDF ARMS (optimized_plan_udfs.md §10.4): MAP_BATCHES, STEP and the
+#   expression arm EXPR_UDF_APPLY name a user function by its index in the
+#   `UdfRef` list beside the plan (`WirePlanEnvelope.udfs` in RAW, the caller's
+#   `DeclaredNeeds.udfs` in OPTIMIZED). The decoder threads that list
+#   (`_DecodeCtx`): a call's type and a frame's or step's output schema come
+#   from the entry it names, and the wire's schema is held to them
+#   (`check_udf_output_schema`). The checks on one entry are
+#   `plan_wire_udf.mojo`; the checks on every call, `plan_wire_udf_check.mojo`.
 #
 #   ★ EVERY MATERIALIZABLE PLAN TAG NOW HAS AN ARM. The two that do not —
 #   CONVERT_COLUMN_TO_ROW and CONVERT_ROW_TO_COLUMN — are the two no producer
@@ -143,6 +153,9 @@
 #              engine and never materialized (`insert_orientation_conversions`
 #              RAISES a deferral), so no plan carries them. Already
 #              EXEMPT in `plan_vocabulary.proto` for the same reason.
+#   REFUSED    EXCHANGE — `plan.proto` has no `exchange` arm yet, and the
+#              vocabulary keeps its wire number (19) reserved, so encoding one
+#              raises in `plan_tag_to_wire` with the tag's name.
 #
 # --- EXPR TAGS: 25 of 27 modelled --------------------------------------------
 #   MODELLED   COL_REF, COL_IDX, LITERAL, BINARY_OP, UNARY_OP, ALIAS, IN_LIST,
@@ -333,6 +346,14 @@
 #       `TableStats` is pure data and CAN be encoded; it simply is not yet.
 #       Refused rather than dropped because stats steer join-order and a
 #       silently statless decoded plan is a silent plan change.
+#   `JoinData.build_side` when recorded, `JoinData.adaptive_allowed` when set,
+#   `AggregateData.mode` when recorded, `ScanData.boundedness` when UNBOUNDED
+#       The optimizer's recorded decisions (docs/design/optimized_plan.md
+#       §5.2). `plan.proto` has no field for any of them yet, so encoding one
+#       would decode as the default: a join that builds on the right, a single
+#       aggregate, a bounded scan. Refused, by
+#       `PLAN_WIRE_UNSUPPORTED_OPTIMIZER_DECISION`. A node holding the default
+#       (UNSET, False, UNSET, BOUNDED) encodes as before.
 #
 # --- THE DECODE SIDE, WHICH DOES NOT CHOOSE ITS INPUT ------------------------
 #   Every narrowing from a wire type to an engine type is CHECKED and RAISES BY
@@ -412,6 +433,10 @@ from komira_plan_proto.plan import (
     WireViewRefNode,
     WireCseRefNode,
     WireCastToVarcharNode,
+    WireUdfApply,
+    WireMapBatchesNode,
+    WireStepNode,
+    UdfRef as WireUdfRef,
     WirePlan,
     WirePlanEnvelope,
     WireWriteTarget,
@@ -482,6 +507,10 @@ from komira_plan_expr.expr import (
     # receiver — see the EXPR_UDF_CALL arms of `_expr_to_wire` /
     # `_expr_from_wire`.
     EXPR_UDF_CALL,
+    # A call of a `UdfRef` by index (optimized_plan_udfs.md §10.4): the wire
+    # carries the index and the arguments, and the decoder fills the type in
+    # from the list it decodes against.
+    EXPR_UDF_APPLY,
     string_fn_n_arity,
     string_fn_n_arity_ok,
     string_fn_n_name,
@@ -513,12 +542,18 @@ from komira_plan_ir.logical_plan import (
     PLAN_VIEW_REF,
     PLAN_CSE_REF,
     PLAN_CAST_TO_VARCHAR,
+    PLAN_MAP_BATCHES,
+    PLAN_STEP,
     AsofTolerance,
     CORR_KIND_IN_CORRELATED,
+    JOIN_BUILD_SIDE_UNSET,
+    AGG_MODE_UNSET,
+    SCAN_BOUNDED,
 )
 from komira_plan_ir.corr_subquery import corr_subq_inner_plan_ref
 from komira_plan_ir.logical_plan_variants import UnionData
 from komira_plan_expr.udf_data import UdfData
+from komira_plan_ir.udf_ref import UdfRef
 from komira_plan_wire.plan_wire_vocabulary import (
     agg_fn_to_wire,
     agg_fn_from_wire,
@@ -610,6 +645,7 @@ from .plan_wire_admit import (
     PLAN_WIRE_VERSION_MISMATCH,
     PLAN_WIRE_WRITE_TARGET_MIN_VERSION,
     PLAN_WIRE_WRITE_TARGET_VERSION_UNDERSTATED,
+    _walk,
 )
 
 # THE THIRD PASS. `plan_wire_admit` bounds FRAMING before the parse; the ledger
@@ -624,6 +660,15 @@ from .plan_wire_values import (
     PLAN_WIRE_INCONSISTENT_COUNT,
     PLAN_WIRE_NEGATIVE_COUNT,
     PLAN_WIRE_UNCHECKED_VALUE_SITE,
+)
+from .plan_wire_udf import _check_udf_ref, _udf_ref_from_wire, _udf_ref_to_wire
+from .plan_wire_udf_check import (
+    check_udf_output_schema,
+    legacy_form_error,
+    plan_wire_check_udfs,
+    udf_column_field,
+    udf_entry_index,
+    udf_frame_schema,
 )
 from komira_plan_expr.scalar_value import ScalarValue
 from komira_scan_source.pushdown_gate import PushdownGate
@@ -759,6 +804,7 @@ comptime PLAN_WIRE_UDF_NOT_DESCRIBABLE: String = "PLAN_WIRE_UDF_NOT_DESCRIBABLE"
 comptime PLAN_WIRE_UNSUPPORTED_TABLE_STATS: String = "PLAN_WIRE_UNSUPPORTED_TABLE_STATS"
 comptime PLAN_WIRE_UNSUPPORTED_SCHEMALESS_SCAN: String = "PLAN_WIRE_UNSUPPORTED_SCHEMALESS_SCAN"
 comptime PLAN_WIRE_UNSUPPORTED_ESTIMATED_GROUPS: String = "PLAN_WIRE_UNSUPPORTED_ESTIMATED_GROUPS"
+comptime PLAN_WIRE_UNSUPPORTED_OPTIMIZER_DECISION: String = "PLAN_WIRE_UNSUPPORTED_OPTIMIZER_DECISION"
 comptime PLAN_WIRE_UNSUPPORTED_DTYPE: String = "PLAN_WIRE_UNSUPPORTED_DTYPE"
 comptime PLAN_WIRE_UNSUPPORTED_ARROW_TYPE: String = "PLAN_WIRE_UNSUPPORTED_ARROW_TYPE"
 comptime PLAN_WIRE_UNSUPPORTED_PARAM_TAG: String = "PLAN_WIRE_UNSUPPORTED_PARAM_TAG"
@@ -768,6 +814,18 @@ comptime PLAN_WIRE_MALFORMED: String = "PLAN_WIRE_MALFORMED"
 # the only place a version gate is worth anything. Same for the three
 # structural budgets. See that file for why.
 comptime PLAN_WIRE_OUTPUT_SCHEMA_DIVERGED: String = "PLAN_WIRE_OUTPUT_SCHEMA_DIVERGED"
+# `WireField.children` (optimized_plan_udfs.md §10.3): a field states its
+# children either recursively or as the flat lists 13-15, never both; and a
+# node's output column holds what the engine's `Schema` stores, one level of
+# children, so a column whose children have children of their own is refused.
+comptime PLAN_WIRE_FIELD_CHILDREN_BOTH: String = "PLAN_WIRE_FIELD_CHILDREN_BOTH"
+comptime PLAN_WIRE_FIELD_TOO_DEEP: String = "PLAN_WIRE_FIELD_TOO_DEEP"
+
+comptime PLAN_WIRE_UDFS_DROPPED: String = "PLAN_WIRE_UDFS_DROPPED"
+"""`plan_from_bytes` returns a `LogicalPlan`, which cannot carry the `UdfRef`
+list its UDF nodes index (`WirePlanEnvelope.udfs`). An envelope with a list is
+refused there, as one with a write target is; `plan_envelope_from_bytes`
+returns the list."""
 
 comptime PLAN_WIRE_WRITE_TARGET_DROPPED: String = "PLAN_WIRE_WRITE_TARGET_DROPPED"
 """★ `plan_from_bytes` RETURNS A `LogicalPlan`, AND A `LogicalPlan` CANNOT
@@ -1093,6 +1151,7 @@ def _field_to_wire(f: Field) raises -> WireField:
         f._child_names.copy(),
         child_types^,
         f._child_nullables.copy(),
+        List[WireField](),
     )
 
 
@@ -1146,6 +1205,39 @@ def _field_from_wire(w: WireField) raises -> Field:
     f._child_names = w.child_names.copy()
     f._child_types = child_types^
     f._child_nullables = w.child_nullables.copy()
+    if len(w.children) > 0:
+        # The recursive form (optimized_plan_udfs.md §10.3). A column holds one
+        # level of children, so each child must be a leaf; it lands in the
+        # flat lists exactly as the flat form would have put it.
+        if len(w.child_names) > 0:
+            raise Error(
+                PLAN_WIRE_FIELD_CHILDREN_BOTH + ": WireField '" + String(w.name)
+                + "' sets `children` and the flat child lists together"
+            )
+        var names = List[String]()
+        var types = List[UInt8]()
+        var nulls = List[Bool]()
+        for i in range(len(w.children)):
+            ref c = w.children[i]
+            if len(c.children) > 0 or len(c.child_names) > 0:
+                raise Error(
+                    PLAN_WIRE_FIELD_TOO_DEEP + ": WireField '" + String(w.name)
+                    + "' child '" + String(c.name) + "' has children of its"
+                    + " own; an output column holds what the engine's Schema"
+                    + " stores, one level of children"
+                )
+            names.append(String(c.name))
+            types.append(
+                _arrow_type_from_wire(
+                    c.arrow_type_id,
+                    "WireField '" + String(w.name) + "'.children["
+                    + String(i) + "]",
+                ).type_id
+            )
+            nulls.append(c.nullable)
+        f._child_names = names^
+        f._child_types = types^
+        f._child_nullables = nulls^
     return f^
 
 
@@ -1406,6 +1498,7 @@ def _expr_to_wire(e: Expr) raises -> WireExpr:
     var string_fn = List[WireStringFn]()
     var string_fn_n = List[WireStringFnN]()
     var udf_call = List[WireUdfCall]()
+    var udf_apply = List[WireUdfApply]()
     var regexp = List[WireRegexp]()
     var struct_field = List[WireStructField]()
     var struct_field_idx = List[WireStructFieldIdx]()
@@ -1832,6 +1925,16 @@ def _expr_to_wire(e: Expr) raises -> WireExpr:
                 uck^,
             )
         )
+    elif tag == EXPR_UDF_APPLY:
+        # Arm ordinal, not field number — `udf_apply` is field 27, arm 26.
+        arm = 26
+        # The index and the arguments only: the call's type is its `UdfRef`'s
+        # `return_type`, which the list beside the plan carries
+        # (optimized_plan_udfs.md §10.5).
+        var ua_args = List[WireExpr]()
+        for i in range(e.udf_apply_num_args()):
+            ua_args.append(_expr_to_wire(e.udf_apply_arg_ref(i)))
+        udf_apply.append(WireUdfApply(UInt32(e.udf_apply_index()), ua_args^))
     else:
         raise Error(
             PLAN_WIRE_UNSUPPORTED_EXPR_TAG + ": '"
@@ -1846,7 +1949,7 @@ def _expr_to_wire(e: Expr) raises -> WireExpr:
         alias_^, in_list^, cast^, corr_subq^, when_^, agg_fn^, extract^,
         math_fn^, math_fn2^, substring^, string_op^, regexp^, struct_field^,
         struct_field_idx^, map_get^, json_extract^, window_fn^,
-        string_fn^, string_fn_n^, udf_call^,
+        string_fn^, string_fn_n^, udf_call^, udf_apply^,
     )
 
 
@@ -1959,6 +2062,8 @@ def _expr_tag_of_arm(arm: Int) raises -> UInt8:
         return EXPR_STRING_FN_N
     if arm == 25:
         return EXPR_UDF_CALL
+    if arm == 26:
+        return EXPR_UDF_APPLY
     if arm == 0:
         raise _malformed(
             "a WireExpr with NO `node` arm set. The arm IS the node kind — the"
@@ -1972,7 +2077,22 @@ def _expr_tag_of_arm(arm: Int) raises -> UInt8:
     )
 
 
-def _expr_from_wire(w: WireExpr) raises -> Expr:
+struct _DecodeCtx(Movable):
+    """What a plan decodes against: the `UdfRef` list its UDF calls index
+    (`WirePlanEnvelope.udfs` in RAW, `DeclaredNeeds.udfs` in OPTIMIZED), and
+    the context. In OPTIMIZED the named UDF forms (`WireUdfCall`, a node-level
+    `WireUdf`) are refused (optimized_plan_udfs.md §10.4); in RAW they decode
+    as before."""
+
+    var udfs: List[UdfRef]
+    var optimized: Bool
+
+    def __init__(out self, var udfs: List[UdfRef], optimized: Bool):
+        self.udfs = udfs^
+        self.optimized = optimized
+
+
+def _expr_from_wire(w: WireExpr, ctx: _DecodeCtx) raises -> Expr:
     # ⚠ THE ARM IS THE DISCRIMINATOR, AND THE ONLY ONE. `WireExpr.tag` is
     # retired: it was a total function of this same case ordinal, so a frontend
     # could state the kind twice and disagree with itself. See plan.proto.
@@ -2001,8 +2121,8 @@ def _expr_from_wire(w: WireExpr) raises -> Expr:
             raise _malformed("EXPR_BINARY_OP missing an operand")
         return Expr.binary(
             binary_op_from_wire(Int32(b.op.number())),
-            _expr_from_wire(b.left[0]),
-            _expr_from_wire(b.right[0]),
+            _expr_from_wire(b.left[0], ctx),
+            _expr_from_wire(b.right[0], ctx),
         )
     if tag == EXPR_UNARY_OP:
         if not w.unary_op:
@@ -2015,7 +2135,7 @@ def _expr_from_wire(w: WireExpr) raises -> Expr:
             )
         return Expr.unary(
             unary_op_from_wire(Int32(u.op.number())),
-            _expr_from_wire(u.child[0]),
+            _expr_from_wire(u.child[0], ctx),
         )
     if tag == EXPR_ALIAS:
         if not w.alias_:
@@ -2026,7 +2146,7 @@ def _expr_from_wire(w: WireExpr) raises -> Expr:
                 "EXPR_ALIAS carries " + String(len(a.child))
                 + " children; exactly 1 is legal"
             )
-        return Expr.alias(_expr_from_wire(a.child[0]), String(a.name))
+        return Expr.alias(_expr_from_wire(a.child[0], ctx), String(a.name))
     if tag == EXPR_IN_LIST:
         if not w.in_list:
             raise _malformed("EXPR_IN_LIST with no in_list payload")  # cov: unreachable the generated decoder sets the oneof case with its payload
@@ -2039,7 +2159,7 @@ def _expr_from_wire(w: WireExpr) raises -> Expr:
         var vals = List[ScalarValue]()
         for i in range(len(l.values)):
             vals.append(_scalar_from_wire(l.values[i]))
-        return Expr.in_list_node(_expr_from_wire(l.child[0]), vals^)
+        return Expr.in_list_node(_expr_from_wire(l.child[0], ctx), vals^)
     if tag == EXPR_CAST:
         if not w.cast:
             raise _malformed("EXPR_CAST with no cast payload")  # cov: unreachable the generated decoder sets the oneof case with its payload
@@ -2056,7 +2176,7 @@ def _expr_from_wire(w: WireExpr) raises -> Expr:
         # first combination none of them expresses (a TRY_CAST to DECIMAL, for
         # one).
         return Expr.cast_from_parts(
-            _expr_from_wire(c.child[0]),
+            _expr_from_wire(c.child[0], ctx),
             _dtype_from_wire(c.target_dtype_code),
             _arrow_type_from_wire(
                 c.target_arrow_type_id, String("WireCast.target_arrow_type_id")
@@ -2086,7 +2206,7 @@ def _expr_from_wire(w: WireExpr) raises -> Expr:
         # `in_rhs_col` are populated ONLY for CORR_KIND_IN_CORRELATED.
         if kind == CORR_KIND_IN_CORRELATED:
             return Expr.in_correlated_subquery(
-                _plan_from_wire(cs.inner_plan[0]),
+                _plan_from_wire(cs.inner_plan[0], ctx),
                 cs.outer_refs.copy(),
                 String(cs.in_lhs_col),
                 String(cs.in_rhs_col),
@@ -2100,7 +2220,7 @@ def _expr_from_wire(w: WireExpr) raises -> Expr:
                 + " engine factory can build the state these bytes describe."
             )
         return Expr.correlated_subquery(
-            _plan_from_wire(cs.inner_plan[0]),
+            _plan_from_wire(cs.inner_plan[0], ctx),
             cs.outer_refs.copy(),
             kind,
         )
@@ -2125,8 +2245,8 @@ def _expr_from_wire(w: WireExpr) raises -> Expr:
                 )
             cases.append(
                 WhenCaseData(
-                    _expr_from_wire(c.condition[0]),
-                    _expr_from_wire(c.result[0]),
+                    _expr_from_wire(c.condition[0], ctx),
+                    _expr_from_wire(c.result[0], ctx),
                 )
             )
         # ⚠ ZERO CASES IS LEGAL AND IS NOT REFUSED. `WhenData.cases` is a plain
@@ -2136,7 +2256,7 @@ def _expr_from_wire(w: WireExpr) raises -> Expr:
         # engine does not have. An absent `default_expr` IS refused, by
         # `_one_expr`: `WhenData.default` is a non-Optional OwnedPointer.
         return Expr.when(
-            cases^, _one_expr(wh.default_expr, "WireWhen.default_expr")
+            cases^, _one_expr(wh.default_expr, "WireWhen.default_expr", ctx)
         )
     if tag == EXPR_AGG_FN:
         if not w.agg_fn:
@@ -2144,7 +2264,7 @@ def _expr_from_wire(w: WireExpr) raises -> Expr:
         var af = w.agg_fn[0].copy()
         return Expr.agg_fn(
             agg_fn_from_wire(Int32(af.op.number())),
-            _one_expr(af.child, "WireAggFn.child"),
+            _one_expr(af.child, "WireAggFn.child", ctx),
         )
     if tag == EXPR_EXTRACT:
         if not w.extract:
@@ -2159,7 +2279,7 @@ def _expr_from_wire(w: WireExpr) raises -> Expr:
         # a period the engine has no arm for.
         return Expr.extract(
             extract_field_from_wire(Int32(ex.unit.number())),
-            _one_expr(ex.child, "WireExtract.child"),
+            _one_expr(ex.child, "WireExtract.child", ctx),
         )
     if tag == EXPR_MATH_FN:
         if not w.math_fn:
@@ -2167,7 +2287,7 @@ def _expr_from_wire(w: WireExpr) raises -> Expr:
         var mf = w.math_fn[0].copy()
         return Expr.math_fn(
             math_fn1_from_wire(Int32(mf.op.number())),
-            _one_expr(mf.child, "WireMathFn.child"),
+            _one_expr(mf.child, "WireMathFn.child", ctx),
         )
     if tag == EXPR_MATH_FN2:
         if not w.math_fn2:
@@ -2179,8 +2299,8 @@ def _expr_from_wire(w: WireExpr) raises -> Expr:
         # silently re-associated into a unary node.
         return Expr.math_fn2(
             math_fn2_from_wire(Int32(m2.op.number())),
-            _one_expr(m2.left, "WireMathFn2.left"),
-            _one_expr(m2.right, "WireMathFn2.right"),
+            _one_expr(m2.left, "WireMathFn2.left", ctx),
+            _one_expr(m2.right, "WireMathFn2.right", ctx),
         )
     if tag == EXPR_SUBSTRING:
         if not w.substring:
@@ -2192,7 +2312,7 @@ def _expr_from_wire(w: WireExpr) raises -> Expr:
         # shape one arm over — and it would be invisible over any corpus whose
         # substrings happen to be open-ended.
         return Expr.substring(
-            _one_expr(sb.child, "WireSubstring.child"),
+            _one_expr(sb.child, "WireSubstring.child", ctx),
             Int(sb.start),
             Int(sb.length),
         )
@@ -2202,7 +2322,7 @@ def _expr_from_wire(w: WireExpr) raises -> Expr:
         var sf = w.string_fn[0].copy()
         return Expr.string_fn(
             string_fn_from_wire(Int32(sf.op.number())),
-            _one_expr(sf.child, "WireStringFn.child"),
+            _one_expr(sf.child, "WireStringFn.child", ctx),
         )
     if tag == EXPR_STRING_FN_N:
         if not w.string_fn_n:
@@ -2225,7 +2345,7 @@ def _expr_from_wire(w: WireExpr) raises -> Expr:
             )
         var sfnn_args = List[Expr]()
         for i in range(len(sfn.args)):
-            sfnn_args.append(_expr_from_wire(sfn.args[i]))
+            sfnn_args.append(_expr_from_wire(sfn.args[i], ctx))
         return Expr.string_fn_n(sfnn_op, sfnn_args^)
     if tag == EXPR_UDF_CALL:
         # ★ THE DECODED NODE IS **UNBOUND**, AND
@@ -2256,6 +2376,10 @@ def _expr_from_wire(w: WireExpr) raises -> Expr:
         # decode differently in two processes.
         if not w.udf_call:
             raise _malformed("EXPR_UDF_CALL with no udf_call payload")  # cov: unreachable the generated decoder sets the oneof case with its payload
+        # In OPTIMIZED, user code is named by `UdfRef` only; the named form
+        # stays RAW-only (optimized_plan_udfs.md §10.4).
+        if ctx.optimized:
+            raise legacy_form_error("an EXPR_UDF_CALL (`WireUdfCall`)")
         var uc = w.udf_call[0].copy()
         # ⚠ THE EMPTY NAME IS REFUSED ON THE WAY IN TOO, NOT ONLY ON THE WAY
         # OUT. proto3 omits an empty string, so "never wrote the field" and
@@ -2279,7 +2403,7 @@ def _expr_from_wire(w: WireExpr) raises -> Expr:
             _arrow_type_from_wire(
                 uc.out_arrow_type_id, String("WireUdfCall.out_arrow_type_id")
             ),
-            _one_expr(uc.child, "WireUdfCall.child"),
+            _one_expr(uc.child, "WireUdfCall.child", ctx),
         )
     if tag == EXPR_STRING_OP:
         if not w.string_op:
@@ -2287,7 +2411,7 @@ def _expr_from_wire(w: WireExpr) raises -> Expr:
         var so = w.string_op[0].copy()
         return Expr.string_op(
             string_op_from_wire(Int32(so.op.number())),
-            _one_expr(so.child, "WireStringOp.child"),
+            _one_expr(so.child, "WireStringOp.child", ctx),
             String(so.pattern),
         )
     if tag == EXPR_REGEXP:
@@ -2304,7 +2428,7 @@ def _expr_from_wire(w: WireExpr) raises -> Expr:
         # `cast_from_parts`.
         return Expr.regexp(
             regexp_op_from_wire(Int32(rx.op.number())),
-            _one_expr(rx.child, "WireRegexp.child"),
+            _one_expr(rx.child, "WireRegexp.child", ctx),
             String(rx.pattern),
             String(rx.replacement),
             String(rx.flags),
@@ -2316,7 +2440,7 @@ def _expr_from_wire(w: WireExpr) raises -> Expr:
             raise _malformed("EXPR_STRUCT_FIELD with no struct_field payload")  # cov: unreachable the generated decoder sets the oneof case with its payload
         var sf = w.struct_field[0].copy()
         return Expr.struct_field(
-            _one_expr(sf.parent, "WireStructField.parent"),
+            _one_expr(sf.parent, "WireStructField.parent", ctx),
             String(sf.field_name),
         )
     if tag == EXPR_STRUCT_FIELD_IDX:
@@ -2326,7 +2450,7 @@ def _expr_from_wire(w: WireExpr) raises -> Expr:
             )
         var sfi = w.struct_field_idx[0].copy()
         return Expr.struct_field_idx(
-            _one_expr(sfi.parent, "WireStructFieldIdx.parent"),
+            _one_expr(sfi.parent, "WireStructFieldIdx.parent", ctx),
             Int(sfi.field_idx),
         )
     if tag == EXPR_MAP_GET:
@@ -2337,8 +2461,8 @@ def _expr_from_wire(w: WireExpr) raises -> Expr:
         # A message that filled `parent` and left `key` empty must be refused,
         # not silently re-read as a struct projection.
         return Expr.map_get(
-            _one_expr(mg.parent, "WireMapGet.parent"),
-            _one_expr(mg.key, "WireMapGet.key"),
+            _one_expr(mg.parent, "WireMapGet.parent", ctx),
+            _one_expr(mg.key, "WireMapGet.key", ctx),
         )
     if tag == EXPR_JSON_EXTRACT:
         if not w.json_extract:
@@ -2359,7 +2483,7 @@ def _expr_from_wire(w: WireExpr) raises -> Expr:
         for i in range(len(je.path_segments)):
             segs.append(String(je.path_segments[i]))
         return Expr.json_extract_from_parts(
-            _one_expr(je.parent, "WireJsonExtract.parent"),
+            _one_expr(je.parent, "WireJsonExtract.parent", ctx),
             segs^,
             _arrow_type_from_wire(
                 je.output_arrow_type_id,
@@ -2387,6 +2511,21 @@ def _expr_from_wire(w: WireExpr) raises -> Expr:
             _frame_from_wire(wf.frame, String("WireWindowFn.frame")),
         ).with_window_spec(
             wf.partition_by.copy(), wf.order_by.copy(), wf.descending.copy()
+        )
+    if tag == EXPR_UDF_APPLY:
+        if not w.udf_apply:
+            raise _malformed("EXPR_UDF_APPLY with no udf_apply payload")  # cov: unreachable the generated decoder sets the oneof case with its payload
+        ref ua = w.udf_apply[0]
+        var index = udf_entry_index(
+            ctx.udfs, Int(ua.udf_index), String("a WireUdfApply")
+        )
+        var ua_args = List[Expr]()
+        for i in range(len(ua.args)):
+            ua_args.append(_expr_from_wire(ua.args[i], ctx))
+        # The call's type is its entry's `return_type`, which the entry's own
+        # check has required (`_udf_ref_from_wire`).
+        return Expr.udf_apply(
+            index, ctx.udfs[index].return_type.value().copy(), ua_args^
         )
     # UNREACHABLE BY CONSTRUCTION and kept anyway: `_expr_tag_of_arm` returns
     # only the 22 tags the ladder above handles and raises on everything else,
@@ -2436,7 +2575,7 @@ def _agg_expr_to_wire(a: AggExpr) raises -> WireAggExpr:
     )
 
 
-def _agg_expr_from_wire(w: WireAggExpr) raises -> AggExpr:
+def _agg_expr_from_wire(w: WireAggExpr, ctx: _DecodeCtx) raises -> AggExpr:
     var c0: Optional[Expr] = None
     var c1: Optional[Expr] = None
     var c2: Optional[Expr] = None
@@ -2444,19 +2583,19 @@ def _agg_expr_from_wire(w: WireAggExpr) raises -> AggExpr:
     if w.has_child0:
         if len(w.child0) == 0:
             raise _malformed("WireAggExpr.has_child0 set with no child0")
-        c0 = Optional(_expr_from_wire(w.child0[0]))
+        c0 = Optional(_expr_from_wire(w.child0[0], ctx))
     if w.has_child1:
         if len(w.child1) == 0:
             raise _malformed("WireAggExpr.has_child1 set with no child1")
-        c1 = Optional(_expr_from_wire(w.child1[0]))
+        c1 = Optional(_expr_from_wire(w.child1[0], ctx))
     if w.has_child2:
         if len(w.child2) == 0:
             raise _malformed("WireAggExpr.has_child2 set with no child2")
-        c2 = Optional(_expr_from_wire(w.child2[0]))
+        c2 = Optional(_expr_from_wire(w.child2[0], ctx))
     if w.has_child3:
         if len(w.child3) == 0:
             raise _malformed("WireAggExpr.has_child3 set with no child3")
-        c3 = Optional(_expr_from_wire(w.child3[0]))
+        c3 = Optional(_expr_from_wire(w.child3[0], ctx))
     var alias_name: Optional[String] = None
     if w.has_alias_name:
         alias_name = Optional(String(w.alias_name))
@@ -2975,6 +3114,8 @@ def _plan_to_wire(p: LogicalPlan) raises -> WirePlan:
     var view_ref: Optional[WireViewRefNode] = None
     var cse_ref: Optional[WireCseRefNode] = None
     var cast_to_varchar = List[WireCastToVarcharNode]()
+    var map_batches = List[WireMapBatchesNode]()
+    var step: Optional[WireStepNode] = None
     # Same as `_expr_to_wire`: every branch assigns or raises.
     var arm: Int
 
@@ -2985,6 +3126,12 @@ def _plan_to_wire(p: LogicalPlan) raises -> WirePlan:
             raise Error(
                 PLAN_WIRE_UNSUPPORTED_TABLE_STATS + ": ScanData for '"
                 + d.source_path + "' carries TableStats"
+            )
+        if d.boundedness != SCAN_BOUNDED:
+            raise Error(
+                _optimizer_decision_message(
+                    "ScanData.boundedness", "for '" + d.source_path + "'"
+                )
             )
         var sch_present = _present_schema(d.schema)
         var sch: Optional[WireSchema] = None
@@ -3045,6 +3192,12 @@ def _plan_to_wire(p: LogicalPlan) raises -> WirePlan:
     elif tag == PLAN_AGGREGATE:
         arm = 4
         ref d = p.aggregate_data_ref()
+        if d.mode != AGG_MODE_UNSET:
+            raise Error(
+                _optimizer_decision_message(
+                    "AggregateData.mode", "(engine value " + String(Int(d.mode)) + ")"
+                )
+            )
         var ag_udf: Optional[WireUdf] = None
         if d.udf:
             ag_udf = Optional(_udf_to_wire(d.udf.value()[], "AggregateData"))
@@ -3068,6 +3221,17 @@ def _plan_to_wire(p: LogicalPlan) raises -> WirePlan:
     elif tag == PLAN_JOIN:
         arm = 5
         ref d = p.join_data_ref()
+        if d.build_side != JOIN_BUILD_SIDE_UNSET:
+            raise Error(
+                _optimizer_decision_message(
+                    "JoinData.build_side",
+                    "(engine value " + String(Int(d.build_side)) + ")",
+                )
+            )
+        if d.adaptive_allowed:
+            raise Error(
+                _optimizer_decision_message("JoinData.adaptive_allowed", "")
+            )
         var lk = List[WirePlan]()
         lk.append(_plan_to_wire(d.left[]))
         var rk = List[WirePlan]()
@@ -3251,6 +3415,27 @@ def _plan_to_wire(p: LogicalPlan) raises -> WirePlan:
         var kid = List[WirePlan]()
         kid.append(_plan_to_wire(d.child[]))
         cast_to_varchar.append(WireCastToVarcharNode(kid^))
+    elif tag == PLAN_MAP_BATCHES:
+        # Arm ordinal, not field number — `map_batches` is field 21, arm 17
+        # (field 20, the exchange arm, is not declared yet).
+        arm = 17
+        ref d = p.map_batches_data_ref()
+        var kid = List[WirePlan]()
+        kid.append(_plan_to_wire(d.child[]))
+        var gb = List[WireExpr]()
+        for i in range(len(d.group_by)):
+            gb.append(_expr_to_wire(d.group_by[i]))
+        map_batches.append(
+            WireMapBatchesNode(kid^, UInt32(d.udf_index), gb^)
+        )
+    elif tag == PLAN_STEP:
+        # Arm ordinal, not field number — `step` is field 22, arm 18.
+        arm = 18
+        ref d = p.step_data_ref()
+        var args = List[WireScalar]()
+        for i in range(len(d.args)):
+            args.append(_scalar_to_wire(d.args[i]))
+        step = Optional(WireStepNode(UInt32(d.udf_index), args^))
     else:
         # ⚠ REACHABLE ONLY THROUGH THE BARE `LogicalPlan(tag, schema)` CTOR.
         # Every materializable tag now has an arm; the two that do not —
@@ -3271,6 +3456,19 @@ def _plan_to_wire(p: LogicalPlan) raises -> WirePlan:
         out_schema^, arm, scan^, filter^, project^, aggregate^,
         join^, sort^, limit^, distinct^, topn^, union_all^, partition_by^,
         partition_topn^, asof_join^, view_ref^, cse_ref^, cast_to_varchar^,
+        map_batches^, step^,
+    )
+
+
+def _optimizer_decision_message(field: String, detail: String) -> String:
+    """A recorded optimizer decision `plan.proto` has no field for yet. See
+    the FIELDS REFUSED RATHER THAN DROPPED ledger entry."""
+    var out = PLAN_WIRE_UNSUPPORTED_OPTIMIZER_DECISION + ": " + field
+    if detail != "":
+        out += " " + detail
+    return (
+        out + " is a recorded optimizer decision with no plan.proto field;"
+        + " encoding it would decode as the default"
     )
 
 
@@ -3429,7 +3627,7 @@ def _udf_message(where: String) -> String:
     )
 
 
-def _one_expr(box: List[WireExpr], where: String) raises -> Expr:
+def _one_expr(box: List[WireExpr], where: String, ctx: _DecodeCtx) raises -> Expr:
     """The expr twin of `_one_child`.
 
     ⚠ WHICH EDGES ARE `List[T]` RECURSION BOXES IS NOT A CHOICE THIS FILE
@@ -3452,16 +3650,16 @@ def _one_expr(box: List[WireExpr], where: String) raises -> Expr:
             where + " carries " + String(len(box))
             + " exprs in its recursion box; exactly 1 is legal"
         )
-    return _expr_from_wire(box[0])
+    return _expr_from_wire(box[0], ctx)
 
 
-def _one_child(kids: List[WirePlan], where: String) raises -> LogicalPlan:
+def _one_child(kids: List[WirePlan], where: String, ctx: _DecodeCtx) raises -> LogicalPlan:
     if len(kids) != 1:
         raise _malformed(
             where + " carries " + String(len(kids))
             + " children in its recursion box; exactly 1 is legal"
         )
-    return _plan_from_wire(kids[0])
+    return _plan_from_wire(kids[0], ctx)
 
 
 def _check_output_schema(
@@ -3614,6 +3812,10 @@ def _plan_tag_of_arm(arm: Int) raises -> UInt8:
         return PLAN_CSE_REF
     if arm == 16:
         return PLAN_CAST_TO_VARCHAR
+    if arm == 17:
+        return PLAN_MAP_BATCHES
+    if arm == 18:
+        return PLAN_STEP
     if arm == 0:
         raise _malformed(
             "a WirePlan with NO `node` arm set. The arm IS the node kind — the"
@@ -3627,7 +3829,7 @@ def _plan_tag_of_arm(arm: Int) raises -> UInt8:
     )
 
 
-def _plan_from_wire(w: WirePlan) raises -> LogicalPlan:
+def _plan_from_wire(w: WirePlan, ctx: _DecodeCtx) raises -> LogicalPlan:
     # ⚠ THE ARM IS THE DISCRIMINATOR, AND THE ONLY ONE — see `_expr_from_wire`
     # and the retirement block above `message WirePlan` in plan.proto.
     var tag = _plan_tag_of_arm(w._oneof0_case)
@@ -3666,7 +3868,7 @@ def _plan_from_wire(w: WirePlan) raises -> LogicalPlan:
             proj = Optional(d.projection.copy())
         var filt: Optional[Expr] = None
         if d.has_filter:
-            filt = Optional(_one_expr(d.filter, "WireScanNode.filter"))
+            filt = Optional(_one_expr(d.filter, "WireScanNode.filter", ctx))
         var rc: Optional[Int] = None
         if d.has_row_count:
             rc = Optional(Int(d.row_count))
@@ -3678,12 +3880,14 @@ def _plan_from_wire(w: WirePlan) raises -> LogicalPlan:
         if not w.filter:
             raise _malformed("PLAN_FILTER with no filter payload")  # cov: unreachable the generated decoder sets the oneof case with its payload
         var d = w.filter[0].copy()
+        if d.has_udf and ctx.optimized:
+            raise legacy_form_error("a WireFilterNode's node-level `WireUdf`")
         if d.has_udf:
             # ⚠ THE DECODED UDF IS UNBOUND — `registered_handle_id = None`.
             # The peer resolves `name` against ITS OWN registry.
             out = LogicalPlan.filter_with_udf(
-                _one_expr(d.predicate, "WireFilterNode.predicate"),
-                _one_child(d.child, "WireFilterNode.child"),
+                _one_expr(d.predicate, "WireFilterNode.predicate", ctx),
+                _one_child(d.child, "WireFilterNode.child", ctx),
                 OwnedPointer[UdfData](
                     _udf_from_wire(
                         _one_udf(d.udf, "WireFilterNode"),
@@ -3693,20 +3897,22 @@ def _plan_from_wire(w: WirePlan) raises -> LogicalPlan:
             )
         else:
             out = LogicalPlan.filter(
-                _one_expr(d.predicate, "WireFilterNode.predicate"),
-                _one_child(d.child, "WireFilterNode.child"),
+                _one_expr(d.predicate, "WireFilterNode.predicate", ctx),
+                _one_child(d.child, "WireFilterNode.child", ctx),
             )
     elif tag == PLAN_PROJECT:
         if not w.project:
             raise _malformed("PLAN_PROJECT with no project payload")  # cov: unreachable the generated decoder sets the oneof case with its payload
         var d = w.project[0].copy()
+        if d.has_udf and ctx.optimized:
+            raise legacy_form_error("a WireProjectNode's node-level `WireUdf`")
         var exprs = ExprArray()
         for i in range(len(d.exprs)):
-            exprs.append(_expr_from_wire(d.exprs[i]))
+            exprs.append(_expr_from_wire(d.exprs[i], ctx))
         if d.has_udf:
             out = LogicalPlan.project_with_udf(
                 exprs^,
-                _one_child(d.child, "WireProjectNode"),
+                _one_child(d.child, "WireProjectNode", ctx),
                 OwnedPointer[UdfData](
                     _udf_from_wire(
                         _one_udf(d.udf, "WireProjectNode"),
@@ -3718,24 +3924,26 @@ def _plan_from_wire(w: WirePlan) raises -> LogicalPlan:
         else:
             out = LogicalPlan.project(
                 exprs^,
-                _one_child(d.child, "WireProjectNode"),
+                _one_child(d.child, "WireProjectNode", ctx),
                 d.is_cse_introduced,
             )
     elif tag == PLAN_AGGREGATE:
         if not w.aggregate:
             raise _malformed("PLAN_AGGREGATE with no aggregate payload")  # cov: unreachable the generated decoder sets the oneof case with its payload
         var d = w.aggregate[0].copy()
+        if d.has_udf and ctx.optimized:
+            raise legacy_form_error("a WireAggregateNode's node-level `WireUdf`")
         var gb = ExprArray()
         for i in range(len(d.group_by)):
-            gb.append(_expr_from_wire(d.group_by[i]))
+            gb.append(_expr_from_wire(d.group_by[i], ctx))
         var ax = AggExprArray()
         for i in range(len(d.agg_exprs)):
-            ax.append(_agg_expr_from_wire(d.agg_exprs[i]))
+            ax.append(_agg_expr_from_wire(d.agg_exprs[i], ctx))
         if d.has_udf:
             out = LogicalPlan.aggregate_with_udf(
                 gb^,
                 ax^,
-                _one_child(d.child, "WireAggregateNode"),
+                _one_child(d.child, "WireAggregateNode", ctx),
                 OwnedPointer[UdfData](
                     _udf_from_wire(
                         _one_udf(d.udf, "WireAggregateNode"),
@@ -3745,7 +3953,7 @@ def _plan_from_wire(w: WirePlan) raises -> LogicalPlan:
             )
         else:
             out = LogicalPlan.aggregate(
-                gb^, ax^, _one_child(d.child, "WireAggregateNode")
+                gb^, ax^, _one_child(d.child, "WireAggregateNode", ctx)
             )
         if d.has_estimated_groups:
             raise Error(_estimated_groups_message("decoded WireAggregateNode"))
@@ -3756,11 +3964,11 @@ def _plan_from_wire(w: WirePlan) raises -> LogicalPlan:
         var residual: Optional[OwnedPointer[Expr]] = None
         if d.has_residual:
             residual = Optional(
-                OwnedPointer(_one_expr(d.residual, "WireJoinNode.residual"))
+                OwnedPointer(_one_expr(d.residual, "WireJoinNode.residual", ctx))
             )
         out = LogicalPlan.join(
-            _one_child(d.left, "WireJoinNode.left"),
-            _one_child(d.right, "WireJoinNode.right"),
+            _one_child(d.left, "WireJoinNode.left", ctx),
+            _one_child(d.right, "WireJoinNode.right", ctx),
             d.left_on.copy(),
             d.right_on.copy(),
             join_type_from_wire(Int32(d.join_type.number())),
@@ -3773,7 +3981,7 @@ def _plan_from_wire(w: WirePlan) raises -> LogicalPlan:
         var d = w.sort[0].copy()
         out = LogicalPlan.sort(
             d.keys.copy(), d.descending.copy(),
-            _one_child(d.child, "WireSortNode"),
+            _one_child(d.child, "WireSortNode", ctx),
             Optional(d.nulls_first.copy()),
         )
     elif tag == PLAN_LIMIT:
@@ -3781,7 +3989,7 @@ def _plan_from_wire(w: WirePlan) raises -> LogicalPlan:
             raise _malformed("PLAN_LIMIT with no limit payload")  # cov: unreachable the generated decoder sets the oneof case with its payload
         var d = w.limit[0].copy()
         out = LogicalPlan.limit(
-            Int(d.n), _one_child(d.child, "WireLimitNode"), Int(d.offset)
+            Int(d.n), _one_child(d.child, "WireLimitNode", ctx), Int(d.offset)
         )
     elif tag == PLAN_DISTINCT:
         if not w.distinct:
@@ -3791,7 +3999,7 @@ def _plan_from_wire(w: WirePlan) raises -> LogicalPlan:
         if d.has_columns:
             cols = Optional(d.columns.copy())
         out = LogicalPlan.distinct(
-            cols^, _one_child(d.child, "WireDistinctNode")
+            cols^, _one_child(d.child, "WireDistinctNode", ctx)
         )
         if d.has_estimated_groups:
             raise Error(_estimated_groups_message("decoded WireDistinctNode"))
@@ -3801,7 +4009,7 @@ def _plan_from_wire(w: WirePlan) raises -> LogicalPlan:
         var d = w.topn[0].copy()
         out = LogicalPlan.topn(
             d.keys.copy(), d.descending.copy(), Int(d.n),
-            _one_child(d.child, "WireTopNNode"),
+            _one_child(d.child, "WireTopNNode", ctx),
             Optional(d.nulls_first.copy()),
         )
     elif tag == PLAN_UNION:
@@ -3812,7 +4020,7 @@ def _plan_from_wire(w: WirePlan) raises -> LogicalPlan:
         # the `List`.
         var kids = List[OwnedPointer[LogicalPlan]]()
         for i in range(len(d.children)):
-            kids.append(OwnedPointer(_plan_from_wire(d.children[i])))
+            kids.append(OwnedPointer(_plan_from_wire(d.children[i], ctx)))
         # UNION's factory takes its output schema rather than deriving it
         # (`LogicalPlan.union` — "the caller is responsible", the engine does
         # not coerce). So the wire's schema is RESTORED here, not derived, and
@@ -3837,7 +4045,7 @@ def _plan_from_wire(w: WirePlan) raises -> LogicalPlan:
         out = LogicalPlan.partition_by(
             d.partition_keys.copy(), d.order_keys.copy(),
             d.descending.copy(), pxs^,
-            _one_child(d.child, "WirePartitionByNode"),
+            _one_child(d.child, "WirePartitionByNode", ctx),
         )
     elif tag == PLAN_PARTITION_TOPN:
         if not w.partition_topn:
@@ -3854,7 +4062,7 @@ def _plan_from_wire(w: WirePlan) raises -> LogicalPlan:
         # collapse a fused RANK node's tie buffer from `k + 16` back to `k`.
         out = LogicalPlan.partition_topn(
             d.partition_keys.copy(), d.sort_keys.copy(), d.descending.copy(),
-            Int(d.k), _one_child(d.child, "WirePartitionTopNNode"),
+            Int(d.k), _one_child(d.child, "WirePartitionTopNNode", ctx),
             window_fn_from_wire(Int32(d.func.number())),
             Int(d.over_fetch_k),
             rc^,
@@ -3871,8 +4079,8 @@ def _plan_from_wire(w: WirePlan) raises -> LogicalPlan:
         # keys: a hint on a side that is not actually sorted skips the sort and
         # produces wrong rows.
         out = LogicalPlan.asof_join(
-            _one_child(d.left, "WireAsofJoinNode.left"),
-            _one_child(d.right, "WireAsofJoinNode.right"),
+            _one_child(d.left, "WireAsofJoinNode.left", ctx),
+            _one_child(d.right, "WireAsofJoinNode.right", ctx),
             d.left_keys.copy(), d.right_keys.copy(),
             String(d.left_asof), String(d.right_asof),
             asof_direction_from_wire(Int32(d.strategy.number())),
@@ -3925,7 +4133,40 @@ def _plan_from_wire(w: WirePlan) raises -> LogicalPlan:
             )
         var d = w.cast_to_varchar[0].copy()
         out = LogicalPlan.cast_to_varchar(
-            _one_child(d.child, "WireCastToVarcharNode.child")
+            _one_child(d.child, "WireCastToVarcharNode.child", ctx)
+        )
+    elif tag == PLAN_MAP_BATCHES:
+        if not w.map_batches:
+            raise _malformed("PLAN_MAP_BATCHES with no map_batches payload")  # cov: unreachable the generated decoder sets the oneof case with its payload
+        ref d = w.map_batches[0]
+        var index = udf_entry_index(
+            ctx.udfs, Int(d.udf_index), String("a WireMapBatchesNode")
+        )
+        var gb = List[Expr]()
+        for i in range(len(d.group_by)):
+            gb.append(_expr_from_wire(d.group_by[i], ctx))
+        # The output schema is the children of the entry's `return_type`; the
+        # wire's is held to it below (`check_udf_output_schema`).
+        out = LogicalPlan.map_batches(
+            _one_child(d.child, "WireMapBatchesNode.child", ctx),
+            index,
+            gb^,
+            udf_frame_schema(ctx.udfs[index], index, "a WireMapBatchesNode"),
+        )
+    elif tag == PLAN_STEP:
+        if not w.step:
+            raise _malformed("PLAN_STEP with no step payload")  # cov: unreachable the generated decoder sets the oneof case with its payload
+        ref d = w.step.value()
+        var index = udf_entry_index(
+            ctx.udfs, Int(d.udf_index), String("a WireStepNode")
+        )
+        var args = List[ScalarValue]()
+        for i in range(len(d.args)):
+            args.append(_scalar_from_wire(d.args[i]))
+        out = LogicalPlan.step(
+            index,
+            args^,
+            udf_frame_schema(ctx.udfs[index], index, "a WireStepNode"),
         )
     else:
         # UNREACHABLE BY CONSTRUCTION — `_plan_tag_of_arm` returns only the 16
@@ -3936,6 +4177,20 @@ def _plan_from_wire(w: WirePlan) raises -> LogicalPlan:
             + "' has no decode arm"  # cov: unreachable see the line above
         )
 
+    # The columns a UDF's `return_type` derives are named first
+    # (OPTIMIZED_UDF_SCHEMA_DISAGREES); any other difference is the generic
+    # divergence below.
+    if w.output_schema and (
+        tag == PLAN_MAP_BATCHES
+        or tag == PLAN_STEP
+        or tag == PLAN_PROJECT
+        or tag == PLAN_AGGREGATE
+    ):
+        check_udf_output_schema(
+            out,
+            _opt_schema_from_wire(w.output_schema, "a node's output schema"),
+            plan_tag_wire_name(plan_tag_to_wire(tag)),
+        )
     _check_output_schema(
         out, w.output_schema, plan_tag_wire_name(plan_tag_to_wire(tag))
     )
@@ -3958,7 +4213,32 @@ def plan_to_bytes(p: LogicalPlan) raises -> List[UInt8]:
     WRITE the rows somewhere, use `plan_to_bytes_with_write_target`."""
     return encode_proto[WirePlanEnvelope](
         WirePlanEnvelope(
-            _envelope_version_for(False), Optional(_plan_to_wire(p)), None
+            _envelope_version_for(False),
+            Optional(_plan_to_wire(p)),
+            None,
+            List[WireUdfRef](),
+        )
+    )
+
+
+def plan_to_bytes_with_udfs(p: LogicalPlan, udfs: List[UdfRef]) raises -> List[UInt8]:
+    """Encode a RAW plan AND the `UdfRef` list its UDF calls index
+    (`WirePlanEnvelope.udfs`, optimized_plan_udfs.md §10.4). The list order is
+    part of the plan: a call names its entry by position. A set `read_set`
+    with no names is written, so it stays apart from an unset one.
+
+    The encoder writes what it is given; the decoder admits it
+    (`plan_envelope_from_bytes`), which is where a call that disagrees with
+    its entry is refused."""
+    var wire_udfs = List[WireUdfRef]()
+    for i in range(len(udfs)):
+        wire_udfs.append(_udf_ref_to_wire(udfs[i]))
+    return encode_proto[WirePlanEnvelope](
+        WirePlanEnvelope(
+            _envelope_version_for(False),
+            Optional(_plan_to_wire(p)),
+            None,
+            wire_udfs^,
         )
     )
 
@@ -3984,6 +4264,7 @@ def plan_to_bytes_with_write_target(
             _envelope_version_for(True),
             Optional(_plan_to_wire(p)),
             Optional(_write_target_to_wire(target)),
+            List[WireUdfRef](),
         )
     )
 
@@ -4055,12 +4336,19 @@ struct DecodedPlanEnvelope(Movable):
 
     var _plan: Optional[LogicalPlan]
     var write_target: Optional[WriteTarget]
+    # The `UdfRef` list the plan's UDF calls index, in order
+    # (`WirePlanEnvelope.udfs`); empty for a plan that calls none.
+    var udfs: List[UdfRef]
 
     def __init__(
-        out self, var plan: LogicalPlan, var write_target: Optional[WriteTarget]
+        out self,
+        var plan: LogicalPlan,
+        var write_target: Optional[WriteTarget],
+        var udfs: List[UdfRef] = List[UdfRef](),
     ):
         self._plan = Optional(plan^)
         self.write_target = write_target^
+        self.udfs = udfs^
 
     def take_plan(mut self) -> LogicalPlan:
         """Move the plan out, leaving `_plan` in `None`. Consumed exactly once."""
@@ -4109,6 +4397,14 @@ def plan_from_bytes(var bytes: List[UInt8]) raises -> LogicalPlan:
             " `komira_plan_endpoint.execute_plan_bytes`, which performs the"
             " write."
         )
+    if len(decoded.udfs) > 0:
+        raise Error(
+            PLAN_WIRE_UDFS_DROPPED + ": these bytes carry "
+            + String(len(decoded.udfs)) + " UdfRef entries"
+            + " (`WirePlanEnvelope.udfs`), and `plan_from_bytes` returns a"
+            + " `LogicalPlan`, which cannot carry the list its UDF calls index."
+            + " Call `plan_envelope_from_bytes`, which returns it."
+        )
     return decoded.take_plan()
 
 
@@ -4156,7 +4452,11 @@ def _decode_envelope(var bytes: List[UInt8]) raises -> DecodedPlanEnvelope:
     var write_target = Optional[WriteTarget](None)
     if env.write_target:
         write_target = Optional(_write_target_from_wire(env.write_target.value()))
-    var plan = _plan_from_wire(env.plan.value())
+    var udfs = List[UdfRef]()
+    for i in range(len(env.udfs)):
+        udfs.append(_udf_ref_from_wire(env.udfs[i], i))
+    var ctx = _DecodeCtx(udfs^, False)
+    var plan = _plan_from_wire(env.plan.value(), ctx)
     # ★ THE VALUE GATE — the third of three passes. `plan_wire_admit` bounds
     # FRAMING (size, version, depth, node count); the ledger above refuses
     # SHAPES the format cannot carry; this pass checks each VALUE against the
@@ -4172,7 +4472,66 @@ def _decode_envelope(var bytes: List[UInt8]) raises -> DecodedPlanEnvelope:
     # resolves references against schemas that `_check_output_schema` has to
     # have reconciled first. See `plan_wire_values.mojo`.
     plan_wire_check_values(plan)
-    return DecodedPlanEnvelope(plan^, write_target^)
+    # ★ THE UDF GATE: every call against the entry it names
+    # (`plan_wire_udf_check.mojo`). After the value gate, for the same reason
+    # that gate runs after `_check_output_schema`.
+    plan_wire_check_udfs(plan, ctx.udfs)
+    return DecodedPlanEnvelope(plan^, write_target^, _copy_udfs(ctx.udfs))
+
+
+def _copy_udfs(udfs: List[UdfRef]) -> List[UdfRef]:
+    var out = List[UdfRef](capacity=len(udfs))
+    for i in range(len(udfs)):
+        out.append(udfs[i].copy())
+    return out^
+
+
+# =============================================================================
+# The OPTIMIZED context (optimized_plan.md §7.2 step 6)
+# =============================================================================
+
+
+def optimized_plan_from_bytes(
+    var plan_bytes: List[UInt8], udfs: List[UdfRef]
+) raises -> LogicalPlan:
+    """Decode a `WirePlan` in the OPTIMIZED context: the plan of an
+    `OptimizedPlanBody`, a `SharedSubplan` or an `OptimizedSegment`, whose UDF
+    calls index `udfs`, the plan's `DeclaredNeeds.udfs` (decode each entry
+    with `udf_ref_from_bytes`).
+
+    What OPTIMIZED changes from RAW (optimized_plan_udfs.md §10.4): the named
+    UDF forms (`WireUdfCall`, a node-level `WireUdf`) are refused by name
+    (`OPTIMIZED_UDF_LEGACY_FORM`), and the list comes from the caller rather
+    than from an envelope. The value gate and the UDF gate run as in RAW.
+
+    Size and nesting are bounded before the bytes are parsed. The header and
+    body codecs that call this are optimized_plan.md §12 stage 5."""
+    if len(plan_bytes) > PLAN_WIRE_MAX_BYTES:
+        raise Error(
+            PLAN_WIRE_TOO_LARGE + ": an optimized plan of "
+            + String(len(plan_bytes)) + " bytes exceeds the "
+            + String(PLAN_WIRE_MAX_BYTES) + "-byte cap. Refused without parsing."
+        )
+    var depth = 0
+    _walk(plan_bytes, depth)
+    var w = decode_proto[WirePlan](plan_bytes^)
+    var ctx = _DecodeCtx(_copy_udfs(udfs), True)
+    for i in range(len(ctx.udfs)):
+        _check_udf_ref(ctx.udfs[i], i)
+    var plan = _plan_from_wire(w, ctx)
+    plan_wire_check_values(plan)
+    plan_wire_check_udfs(plan, ctx.udfs)
+    return plan^
+
+
+def optimized_plan_to_bytes(p: LogicalPlan, udfs: List[UdfRef]) raises -> List[UInt8]:
+    """The `WirePlan` bytes of an optimized plan whose UDF calls index
+    `udfs`. The bytes are decoded back in the OPTIMIZED context before they
+    are returned, so a producer learns of a call the host would refuse (a
+    named UDF, a call that disagrees with its entry) on its own machine."""
+    var bytes = encode_proto[WirePlan](_plan_to_wire(p))
+    _ = optimized_plan_from_bytes(bytes.copy(), udfs)
+    return bytes^
 
 
 def plan_round_trip(p: LogicalPlan) raises -> LogicalPlan:

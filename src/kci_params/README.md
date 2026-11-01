@@ -119,3 +119,21 @@ var store_argv = render_app_param_argv(collected)
 assert_equal(store_argv[0], "--batch=100")
 assert_equal(store_argv[1], "--store=s3://bucket/app")
 ```
+
+## Build files
+
+This package is built with buildrules' `mojo_package` and packaged for mopm as `kci_params`, version 0.1.0 (`mopm.toml`). The library is `src/kci_params/`, its tests are `tests/`. The files that are not sources:
+
+| file | what |
+|---|---|
+| `mopm.toml` | the mopm manifest: name, version, the Mojo version, the dependencies and where the library and its tests are |
+| `mopm.lock` | the toolchain pins and the path dependencies (no registry is reached: every dependency is a sibling) |
+| `mopm-toolchain.toml` | the exact mopm and Mojo versions the build uses |
+| `coverage_floor.txt` | `lines NN.NN` and `branches NN.NN`: the least line and branch coverage `:coverage` may measure; `:coverage_floor` fails when either falls below, and above it passes and prints a hint to raise the figure |
+| `buildrules.mojo.lock.bzl`, `buildrules.mojo.bzl` | written by `buildrules mojo sync` from the files above; `buildrules mojo check` fails when they are stale |
+
+`:lib` is the library file and exists only once every test of `tests/` has passed. After any change to a source, a test, or a manifest of this package, run `buildrules mojo sync`, commit what it writes, and build `komira//src/kci_params:lib` on the farm. A test file that the sync has not listed is not run: run the sync after adding one.
+
+`:conda` is buildrules' `mojo_conda` over `:lib`: the `.conda` of the mopm package (`mojo-kci_params-0.1.0-mojo1.0.0_0.conda`), which therefore exists only once the tests have passed. Publishing it (`mopm publish`) uploads, so it is a step of a CI job that takes that file, not a build action.
+
+`:kci_params` is `:lib` as komira's Mojo rules take it (`mojo_adopted_library`). It also compiles and runs the README's examples above (`[tests][readme]`) against `:lib`; the tests are not run again.

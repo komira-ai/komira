@@ -1,2 +1,0 @@
-# A malformed ratchet (test 46): a floor that is not a number, which covcheck refuses (exit 1) in every mode.
-tools/build/tests/negative/coverage	many	-

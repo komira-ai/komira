@@ -1,0 +1,4 @@
+fn took() u64 {
+    const t0 = std.time.Instant.now();
+    return t0;
+}

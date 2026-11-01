@@ -530,7 +530,7 @@ def _write_orc_bytes_core[has_dispatcher: Bool, disp_o: Origin[mut=True]](
 
     # 1-byte PostScript length.
     if len(ps_proto) > 255:
-        raise Error("OrcWriteError.POSTSCRIPT_TOO_LARGE: > 255 bytes")
+        raise Error("OrcWriteError.POSTSCRIPT_TOO_LARGE: > 255 bytes")  # cov: unreachable a PostScript is 6 varint fields and a 3-byte magic, under 70 bytes
     out.append(UInt8(len(ps_proto)))
 
     _ = metadata_start

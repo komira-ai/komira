@@ -72,7 +72,7 @@ const ROWS = [_]lib.Row{
     .{
         .name = "aws_client_env_scan_data_given",
         .target = "tests//negative/mojo_aws_client:env_scan_data_given",
-        .text = "`test_data` has an entry for `tests/_no_env_reads.mojo`, the generated environment scan; its data is the package, staged by the rule",
+        .text = "`test_data` has an entry for `_generated_tests/_no_env_reads.mojo`, the generated environment scan; its data is the package, staged by the rule",
         .also = &.{ "tests//negative/mojo_aws_client:env_scan_data_given_gen (" },
     },
 };

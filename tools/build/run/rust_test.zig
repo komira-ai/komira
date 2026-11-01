@@ -28,7 +28,7 @@ const Env = struct {
 
     fn run(e: *Env, harness: []const u8, timeout: []const u8) !kit.Result {
         const bin = try std.fmt.allocPrint(e.a, "h/{s}", .{harness});
-        return kit.runGate(e.a, e.dir, &.{ "rust", "--busybox", e.bb, "--label", "//r:t", "--test", bin, "--marker", "passed", "--timeout-s", timeout }, .{ .timeout_ms = 30_000 });
+        return kit.runGate(e.a, e.dir, &.{ "rust", "--busybox", e.bb, "--label", "//r:t", "--test", bin, "--marker", "passed", "--timeout-s", timeout }, .{ .clock = true });
     }
 
     fn marker(e: *Env) []const u8 {
@@ -84,8 +84,8 @@ test "R3 environment: exactly PATH, TMPDIR and HOME" {
     const head = "GATED TEST FAILED: //r:t (exit 7)\n";
     const i = std.mem.indexOf(u8, r.err, head).?;
     var it = util.lines(r.err[i + head.len ..]);
-    var names = std.ArrayList([]const u8).init(e.a);
-    while (it.next()) |l| try names.append(l[0 .. std.mem.indexOfScalar(u8, l, '=') orelse l.len]);
+    var names = std.ArrayList([]const u8).empty;
+    while (it.next()) |l| try names.append(e.a, l[0 .. std.mem.indexOfScalar(u8, l, '=') orelse l.len]);
     try std.testing.expectEqual(@as(usize, 3), names.items.len);
     try std.testing.expectEqualStrings("PATH", names.items[0]);
     try std.testing.expectEqualStrings("TMPDIR", names.items[1]);
@@ -132,7 +132,8 @@ test "R7 NO VERDICT: SIGKILL (137) in either run, and the timeout's SIGALRM (142
     const r3 = try e.run("rust_hangs", "01");
     try std.testing.expectEqual(@as(u8, 142), r3.status);
     try std.testing.expectEqualStrings(rule ++ "NO VERDICT: the tests of //r:t timed out after 01s (exit 142).\n  A hang is not the test's failure; find what it waits on, or raise `test_timeout_s`.\n", r3.err);
-    try std.testing.expect(r3.ms < 5000);
+    // SIGALRM goes to the harness alone, at its timeout on the test's clock.
+    try std.testing.expect(kit.hasEvents(r3.events, &.{"t=1000 ALRM C"}));
     try std.testing.expect(!kit.exists(e.marker()));
 }
 

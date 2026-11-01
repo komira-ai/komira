@@ -1,0 +1,1 @@
+"""Host lowering rules: pure functions of an admitted plan and the facts the host verified (footers), applied while the plan is lowered. The root exports nothing; import each rule's module by name."""

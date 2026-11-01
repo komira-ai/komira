@@ -10,7 +10,7 @@ its `__init__.mojo` re-exports, and the public methods of the structs among
 them) and which of it the README's examples use, reading each README through
 the same tool the gate runs (//tools/build/readme_examples:tool, `generate`),
 so hidden lines count and prose does not. The rules are in
-docs/readme_api_coverage.md and in the action, readme_api_coverage.sh.
+docs/readme_api_coverage.md and in the action, readme_api_coverage.zig.
 
 A validation, like the lints in defs.bzl. It writes the census as outputs:
 `[packages]` (one TSV row per package), `[symbols]` (one TSV row per public
@@ -61,14 +61,10 @@ def _readme_api_coverage_impl(ctx):
     packages = ctx.actions.declare_output("readme_api_packages.tsv")
     symbols = ctx.actions.declare_output("readme_api_symbols.tsv")
     report = ctx.actions.declare_output("readme_api_coverage.txt")
-    bb = ctx.attrs._busybox[DefaultInfo].default_outputs[0]
     ctx.actions.run(
         cmd_args(
-            bb,
-            "sh",
-            ctx.attrs._script,
+            ctx.attrs._census[RunInfo],
             "census",
-            bb,
             ctx.attrs._tool[RunInfo],
             findings.as_output(),
             packages.as_output(),
@@ -88,7 +84,7 @@ def _readme_api_coverage_impl(ctx):
     # A validation's action writes exactly one file: the verdict reads the findings.
     result = ctx.actions.declare_output("validation.json")
     ctx.actions.run(
-        cmd_args(bb, "sh", ctx.attrs._script, "verdict", bb, result.as_output(), findings, report),
+        cmd_args(ctx.attrs._census[RunInfo], "verdict", result.as_output(), findings, report),
         category = "lint_readme_api_coverage_verdict",
     )
     return [
@@ -116,8 +112,7 @@ _readme_api_coverage_rule = rule(
         "files": attrs.dict(attrs.string(), attrs.source(), default = {}),
         "root": attrs.string(default = "src"),
         "tree": attrs.option(attrs.dep(providers = [DocTreeInfo]), default = None),
-        "_busybox": attrs.exec_dep(default = "komira//tools/build/toolchains:busybox"),
-        "_script": attrs.source(default = "komira//tools/build/lint:readme_api_coverage.sh"),
+        "_census": attrs.exec_dep(default = "komira//tools/build/lint:readme_api_coverage_bin", providers = [RunInfo]),
         "_tool": attrs.exec_dep(default = "komira//tools/build/readme_examples:tool", providers = [RunInfo]),
     },
 )

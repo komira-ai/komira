@@ -1,4 +1,0 @@
-# The universe query fails with a dependency chain: its first label named.
-arg "{units_file}"
-input units_file "lib_a\t//src/a:a\n"
-exit 0

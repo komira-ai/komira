@@ -30,6 +30,8 @@
 # `List[String]` queues. `def`-based, Mojo 1.0.0b2.
 # =============================================================================
 
+from std.memory import ArcPointer
+
 from komira_async.ops.waker_sink import NoopSink
 from komira_async.runtime.blocking_runtime import BlockingRuntime
 
@@ -240,6 +242,10 @@ struct ScriptedIcebergRestTransport(
 # the connector is the only source of the scheme that can be right).
 
 
+def _no_connector[C: Connector]() raises -> C:
+    raise Error("HttpIcebergRestTransport: no connector factory")
+
+
 struct HttpIcebergRestTransport[C: Connector](
     IcebergRestTransport, Movable, Deinitable
 ):
@@ -261,6 +267,12 @@ struct HttpIcebergRestTransport[C: Connector](
     # plain-old-data fn-ptr field (a code pointer, no heap).
     var _mk_connector: def () raises thin -> Self.C
     var _request_timeout_us: Int
+    var _test_clock: Optional[ArcPointer[Int]]
+    """None in production. See `with_test_clock`."""
+    var _mk_clocked_connector: Optional[
+        def (ArcPointer[Int]) raises thin -> Self.C
+    ]
+    """None in production. See `with_test_clock`."""
 
     def __init__(
         out self,
@@ -270,6 +282,30 @@ struct HttpIcebergRestTransport[C: Connector](
     ):
         self._mk_connector = mk_connector
         self._request_timeout_us = request_timeout_us
+        self._test_clock = None
+        self._mk_clocked_connector = None
+
+    @staticmethod
+    def with_test_clock(
+        mk_connector: def (ArcPointer[Int]) raises thin -> Self.C,
+        clock_cell: ArcPointer[Int],
+        *,
+        request_timeout_us: Int = 0,
+    ) -> Self:
+        """A transport whose request deadline reads `clock_cell`
+        (microseconds) instead of the system clock, and whose connector
+        factory is handed the same cell so the test's peer can move it. A test
+        decides how much time passes and when. Production code never calls
+        this; the fields stay None and the deadline reads the system clock as
+        before."""
+        var t = Self(
+            _no_connector[Self.C], request_timeout_us=request_timeout_us
+        )
+        t._test_clock = Optional[ArcPointer[Int]](clock_cell.copy())
+        t._mk_clocked_connector = Optional[
+            def (ArcPointer[Int]) raises thin -> Self.C
+        ](mk_connector)
+        return t^
 
     def get(
         mut self, request: IcebergRestRequest
@@ -283,7 +319,13 @@ struct HttpIcebergRestTransport[C: Connector](
             )
         # Dial a fresh connector + drive one synchronous GET (one
         # connector per call).
-        var connector = self._mk_connector()
+        var connector: Self.C
+        if self._mk_clocked_connector:
+            connector = self._mk_clocked_connector.value()(
+                self._test_clock.value()
+            )
+        else:
+            connector = self._mk_connector()
         # The scheme follows the connector. A plaintext connector sends the
         # bearer token in cleartext: it is for loopback tests only.
         var url: Url
@@ -304,6 +346,8 @@ struct HttpIcebergRestTransport[C: Connector](
         var client = HttpClient[Self.C].with_request_timeout_us(
             connector^, self._request_timeout_us
         )
+        if self._test_clock:
+            client.set_test_clock(self._test_clock.value())
         var rt = BlockingRuntime[NoopSink].new(NoopSink(_placeholder=UInt8(0)))
         ref reactor = rt.reactor()
         var cr = client.send_buffered[BlockingRuntime[NoopSink], EmptyBody](

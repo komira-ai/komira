@@ -1,0 +1,78 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# Received mail as content-addressed objects in any komira_objectstore
+# conditional-write store, laid out Maildir-style:
+# mailboxes/<recipient>/[<folder>/]<content-hash>.eml. Store, fetch, exists,
+# list and list-folders, and the two name mappings (a recipient is one safe
+# segment by an injective escape; a folder keeps its `/` hierarchy), which
+# never produce a dot segment, an empty segment or an empty name. The store is
+# a type parameter; the library reads no environment and names no backend.
+#
+# The welded tests (each file's header says which defect it catches):
+# - test_mail_store_normalize: distinct addresses give distinct mailbox
+#   segments, the case fold, no `/` in a segment.
+# - test_mail_store_escape_recipient: `.` and `..` are escaped, `../bob` is one
+#   segment, the empty recipient is refused.
+# - test_mail_store_escape_folder: dot segments and empty segments of a folder
+#   are escaped and stay distinct, an empty or blank folder is refused.
+# - test_mail_store_key_stability: fixed (input, key) pairs for ordinary
+#   recipients and folders, and the FNV-1a-64 test vectors.
+# - test_mail_store_length_bounds: the recipient and folder limits, the longest
+#   key as a file name, and that an oversize name writes nothing.
+# - test_mail_store_store_failures: a store error naming a `Not_Found` folder or
+#   a `precondition` recipient is raised, a real not-found is absence, a leaf
+#   is 16 hex digits, a 412 over equal bytes is a duplicate.
+# - test_mail_store_roundtrip: store, duplicate, fetch, exists, list order,
+#   folders, non-ASCII names, dot-segment names and hash-collision refusal, on
+#   an in-memory store and on one that lists like an object store.
+mojo_library(
+    name = "komira_mail_store",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    # The full transitive closure of the Mojo libraries this package builds on.
+    deps = [
+        "//src/komira_arrow:komira_arrow",
+        "//src/komira_arrow_ipc:komira_arrow_ipc",
+        "//src/komira_async:komira_async",
+        "//src/komira_async_api:komira_async_api",
+        "//src/komira_atomic_alias:komira_atomic_alias",
+        "//src/komira_buffer:komira_buffer",
+        "//src/komira_clock:komira_clock",
+        "//src/komira_collections:komira_collections",
+        "//src/komira_column_kernels:komira_column_kernels",
+        "//src/komira_compression:komira_compression",
+        "//src/komira_counters:komira_counters",
+        "//src/komira_dynamic_filter:komira_dynamic_filter",
+        "//src/komira_fork_join:komira_fork_join",
+        "//src/komira_fs:komira_fs",
+        "//src/komira_hash:komira_hash",
+        "//src/komira_host:komira_host",
+        "//src/komira_join_assembly:komira_join_assembly",
+        "//src/komira_libc:komira_libc",
+        "//src/komira_log:komira_log",
+        "//src/komira_lz4:komira_lz4",
+        "//src/komira_metrics:komira_metrics",
+        "//src/komira_name_registry:komira_name_registry",
+        "//src/komira_objectstore:komira_objectstore",
+        "//src/komira_objectstore:komira_objectstore_posix",
+        "//src/komira_plan_expr:komira_plan_expr",
+        "//src/komira_plan_ir:komira_plan_ir",
+        "//src/komira_plan_stats:komira_plan_stats",
+        "//src/komira_scalar_arithmetic:komira_scalar_arithmetic",
+        "//src/komira_scan_source:komira_scan_source",
+        "//src/komira_simd:komira_simd",
+        "//src/komira_spsc_ring:komira_spsc_ring",
+        "//src/komira_trace:komira_trace",
+        "//src/komira_zlib:komira_zlib",
+        "//tools/build/mojo/runtime_paths:komira_runtime_paths",
+    ],
+    test_srcs = [
+        "tests/test_mail_store_escape_folder.mojo",
+        "tests/test_mail_store_escape_recipient.mojo",
+        "tests/test_mail_store_key_stability.mojo",
+        "tests/test_mail_store_length_bounds.mojo",
+        "tests/test_mail_store_normalize.mojo",
+        "tests/test_mail_store_roundtrip.mojo",
+        "tests/test_mail_store_store_failures.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)

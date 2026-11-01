@@ -74,9 +74,8 @@ pub fn outcomeName(o: Outcome) []const u8 {
 }
 
 /// Writes `r` as one line of JSON, in the field order README.md shows.
-pub fn write(r: Report, out: anytype) !void {
-    var w = std.json.writeStream(out, .{});
-    defer w.deinit();
+pub fn write(r: Report, out: *std.Io.Writer) !void {
+    var w: std.json.Stringify = .{ .writer = out };
     try w.beginObject();
     try w.objectField("verdict");
     try w.write(@tagName(r.verdict));

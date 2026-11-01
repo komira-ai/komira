@@ -1,3 +1,0 @@
-call buck2 "cquery" "//... + tests//functional/..."
-exit 0
-stdout "\n  \n"

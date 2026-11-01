@@ -1,6 +1,8 @@
 //! mojo_compile: runs the hermetic Mojo compiler inside one build action
 //! (Linux). It replaces tools/build/mojo/mojo_wrapper.sh; the design is
 //! docs/design/zig_compile_wrapper.md, whose numbered behaviours this keeps.
+//! The macOS build is mojo_compile_macos.zig, which reuses the helpers this
+//! file marks `pub` (scratch, refusals, paths, the output checks).
 //!
 //!   mojo_compile --compiler=<dir> --cc-target=<triple> --zig=<dir>
 //!                [--runpath=<$ORIGIN*>] [--source-root=<dir>] [--link-tail=<arg>]...
@@ -29,6 +31,12 @@
 //!     MODULAR_CRASH_REPORTING_ENABLED=false, KOMIRA_CC_SHIM, PWD, and
 //!     BUCK_SCRATCH_PATH when it is set (coverage's cov_zig reads the last
 //!     two); with --ld-debug-output also LD_DEBUG=libs and LD_DEBUG_OUTPUT;
+//!   * for `precompile` with --source-root, runs the compiler from the
+//!     root's parent (PWD is that directory), given the package by its
+//!     basename and `-o`, `-I` made absolute (compile_args.runDir,
+//!     compilerArgs), so the `.mojoc` records `<name>/<file>.mojo` and not
+//!     the staged buck-out path; the wrapper itself stays in the action
+//!     directory, where the output check below runs;
 //!   * checks the output and removes the scratch directory.
 //!
 //! The compile watchdog (idle > 0). The compiler leads a session of its own:
@@ -64,37 +72,39 @@ const compile_args = @import("compile_args.zig");
 const cc_shim = @import("cc_shim.zig");
 const modular_cfg = @import("modular_cfg.zig");
 const proc_tree = @import("proc_tree.zig");
+const watch_loop = @import("watch_loop.zig");
 
 test {
     _ = @import("compile_args.zig");
     _ = @import("cc_shim.zig");
     _ = @import("modular_cfg.zig");
     _ = @import("proc_tree.zig");
+    _ = @import("watch_loop.zig");
 }
 
 /// The scratch directory, once it may exist: removed by `finish`.
-var scratch: ?[]const u8 = null;
+pub var scratch: ?[]const u8 = null;
 /// The signal a handler caught (HUP, INT or TERM), or 0.
 var caught = std.atomic.Value(u32).init(0);
 
-const Envp = [*:null]const ?[*:0]const u8;
-const Argv = [*:null]const ?[*:0]const u8;
+pub const Envp = [*:null]const ?[*:0]const u8;
+pub const Argv = [*:null]const ?[*:0]const u8;
 
-fn finish(code: u8) noreturn {
+pub fn finish(code: u8) noreturn {
     if (scratch) |t| std.fs.deleteTreeAbsolute(t) catch {};
     std.process.exit(code);
 }
 
-fn say(comptime fmt: []const u8, args: anytype) void {
+pub fn say(comptime fmt: []const u8, args: anytype) void {
     std.debug.print("mojo_compile: " ++ fmt ++ "\n", args);
 }
 
-fn refuse(comptime fmt: []const u8, args: anytype) noreturn {
+pub fn refuse(comptime fmt: []const u8, args: anytype) noreturn {
     say(fmt, args);
     finish(2);
 }
 
-fn oom() noreturn {
+pub fn oom() noreturn {
     refuse("out of memory", .{});
 }
 
@@ -134,7 +144,7 @@ fn shimMain(arena: std.mem.Allocator, args: []const []const u8) noreturn {
     std.process.exit(if (err == .NOENT) 127 else 126);
 }
 
-fn toArgv(arena: std.mem.Allocator, items: []const []const u8) !Argv {
+pub fn toArgv(arena: std.mem.Allocator, items: []const []const u8) !Argv {
     const out = try arena.allocSentinel(?[*:0]const u8, items.len, null);
     for (items, 0..) |s, i| out[i] = try arena.dupeZ(u8, s);
     return out;
@@ -144,7 +154,7 @@ fn toArgv(arena: std.mem.Allocator, items: []const []const u8) !Argv {
 
 /// The working directory as a shell spells it: $PWD when it is absolute and
 /// names the working directory, else getcwd().
-fn shellPwd(arena: std.mem.Allocator) []const u8 {
+pub fn shellPwd(arena: std.mem.Allocator) []const u8 {
     const cwd = std.process.getCwdAlloc(arena) catch |e| refuse("cannot read the working directory: {s}", .{@errorName(e)});
     const p = posix.getenv("PWD") orelse return cwd;
     if (p.len == 0 or p[0] != '/') return cwd;
@@ -154,12 +164,12 @@ fn shellPwd(arena: std.mem.Allocator) []const u8 {
     return p;
 }
 
-fn join(arena: std.mem.Allocator, a: []const u8, b: []const u8) []const u8 {
+pub fn join(arena: std.mem.Allocator, a: []const u8, b: []const u8) []const u8 {
     return std.fmt.allocPrint(arena, "{s}/{s}", .{ a, b }) catch oom();
 }
 
 /// Exists (following links) and is not empty: the shell's `test -s`.
-fn nonEmpty(path: []const u8) bool {
+pub fn nonEmpty(path: []const u8) bool {
     const st = posix.fstatat(posix.AT.FDCWD, path, 0) catch return false;
     return st.size > 0;
 }
@@ -211,7 +221,7 @@ fn wrapperMain(arena: std.mem.Allocator, args: []const []const u8) noreturn {
     const rendered = (modular_cfg.renderChecked(arena, cfg_text, tc) catch oom()) orelse
         refuse("REFUSING: modular.cfg still holds the toolchain token after rendering", .{});
     const modular_home = join(arena, t, "modular");
-    std.fs.cwd().writeFile(join(arena, modular_home, "modular.cfg"), rendered) catch |e| refuse("cannot write modular.cfg: {s}", .{@errorName(e)});
+    std.fs.cwd().writeFile(.{ .sub_path = join(arena, modular_home, "modular.cfg"), .data = rendered }) catch |e| refuse("cannot write modular.cfg: {s}", .{@errorName(e)});
 
     // ---- the cc shim: `mojo build` links through `cc` on PATH
     const cc_dir = join(arena, t, "cc");
@@ -220,7 +230,7 @@ fn wrapperMain(arena: std.mem.Allocator, args: []const []const u8) noreturn {
         error.BadConfig => refuse("REFUSING: a shim setting holds a newline", .{}),
         error.OutOfMemory => oom(),
     };
-    std.fs.cwd().writeFile(shim_cfg, shim_text) catch |e| refuse("cannot write {s}: {s}", .{ shim_cfg, @errorName(e) });
+    std.fs.cwd().writeFile(.{ .sub_path = shim_cfg, .data = shim_text }) catch |e| refuse("cannot write {s}: {s}", .{ shim_cfg, @errorName(e) });
     const self = std.fs.selfExePathAlloc(arena) catch |e| refuse("cannot read this program's path: {s}", .{@errorName(e)});
     for (cc_shim.shim_names) |n| {
         const link = join(arena, cc_dir, n);
@@ -229,7 +239,7 @@ fn wrapperMain(arena: std.mem.Allocator, args: []const []const u8) noreturn {
     }
 
     // ---- the compiler's environment, built from nothing
-    var env = std.ArrayList([]const u8).init(arena);
+    var env = std.ArrayList([]const u8).empty;
     const cache = join(arena, t, "cache");
     const pairs = [_][2][]const u8{
         .{ "PATH", std.fmt.allocPrint(arena, "{s}:{s}/bin", .{ cc_dir, tc }) catch oom() },
@@ -246,21 +256,22 @@ fn wrapperMain(arena: std.mem.Allocator, args: []const []const u8) noreturn {
         .{ "KGEN_CompilerRT_AsyncRT_ParallelismLevel", "1" },
         .{ "MODULAR_CRASH_REPORTING_ENABLED", "false" },
         .{ "KOMIRA_CC_SHIM", shim_cfg },
-        .{ "PWD", pwd },
+        .{ "PWD", compile_args.runDir(o) orelse pwd },
     };
-    for (pairs) |kv| env.append(std.fmt.allocPrint(arena, "{s}={s}", .{ kv[0], kv[1] }) catch oom()) catch oom();
-    if (bsp.len > 0) env.append(std.fmt.allocPrint(arena, "BUCK_SCRATCH_PATH={s}", .{bsp}) catch oom()) catch oom();
+    for (pairs) |kv| env.append(arena, std.fmt.allocPrint(arena, "{s}={s}", .{ kv[0], kv[1] }) catch oom()) catch oom();
+    if (bsp.len > 0) env.append(arena, std.fmt.allocPrint(arena, "BUCK_SCRATCH_PATH={s}", .{bsp}) catch oom()) catch oom();
     if (o.ld_debug_output) |d| {
-        env.append("LD_DEBUG=libs") catch oom();
-        env.append(std.fmt.allocPrint(arena, "LD_DEBUG_OUTPUT={s}", .{d}) catch oom()) catch oom();
+        env.append(arena, "LD_DEBUG=libs") catch oom();
+        env.append(arena, std.fmt.allocPrint(arena, "LD_DEBUG_OUTPUT={s}", .{d}) catch oom()) catch oom();
     }
     const envp = toArgv(arena, env.items) catch oom();
 
     const mojo = join(arena, tc, "bin/mojo");
-    var cmd = std.ArrayList([]const u8).init(arena);
-    cmd.append(mojo) catch oom();
-    cmd.appendSlice(compile_args.compilerArgs(arena, o) catch oom()) catch oom();
+    var cmd = std.ArrayList([]const u8).empty;
+    cmd.append(arena, mojo) catch oom();
+    cmd.appendSlice(arena, compile_args.compilerArgs(arena, o) catch oom()) catch oom();
     const argv = toArgv(arena, cmd.items) catch oom();
+    if (compile_args.runDir(o)) |d| child_dir = (arena.dupeZ(u8, d) catch oom()).ptr;
     const subcmd = if (o.mojo_args.len > 0) o.mojo_args[0] else "";
 
     const rc = if (o.idle_secs == 0)
@@ -276,8 +287,24 @@ fn pipeCloexec() [2]i32 {
     return posix.pipe2(.{ .CLOEXEC = true }) catch |e| refuse("cannot make a pipe: {s}", .{@errorName(e)});
 }
 
-/// In a forked child: exec, or report the errno on `report` and exit 127.
+/// The directory the compiler runs in, when not the wrapper's own
+/// (compile_args.runDir); the forked child enters it before exec.
+var child_dir: ?[*:0]const u8 = null;
+
+/// A report-pipe errno with this bit set came from the chdir, not the exec.
+const chdir_failed: u32 = 1 << 31;
+
+/// In a forked child: enter child_dir and exec, or report the errno on
+/// `report` and exit 127.
 fn execChild(path: [*:0]const u8, argv: Argv, envp: Envp, report: i32) noreturn {
+    if (child_dir) |d| {
+        const crc = linux.chdir(d);
+        if (posix.errno(crc) != .SUCCESS) {
+            const e: u32 = @as(u32, @intFromEnum(posix.errno(crc))) | chdir_failed;
+            _ = linux.write(report, std.mem.asBytes(&e), 4);
+            linux.exit_group(127);
+        }
+    }
     const rc = linux.execve(path, argv, envp);
     const e: u32 = @intFromEnum(posix.errno(rc));
     _ = linux.write(report, std.mem.asBytes(&e), 4);
@@ -286,7 +313,7 @@ fn execChild(path: [*:0]const u8, argv: Argv, envp: Envp, report: i32) noreturn 
 
 /// Everything the child wrote on the report pipe before it closed (by exec
 /// or exit): up to 8 bytes.
-fn readReport(fd: i32, buf: *[8]u8) usize {
+pub fn readReport(fd: i32, buf: *[8]u8) usize {
     var n: usize = 0;
     while (n < buf.len) {
         const r = posix.read(fd, buf[n..]) catch break;
@@ -298,8 +325,12 @@ fn readReport(fd: i32, buf: *[8]u8) usize {
 }
 
 fn execFailed(mojo: []const u8, e: u32) u8 {
-    const err: linux.E = @enumFromInt(e);
-    say("cannot run {s}: {s}", .{ mojo, @tagName(err) });
+    const err: linux.E = @enumFromInt(e & ~chdir_failed);
+    if (e & chdir_failed != 0) {
+        say("cannot run {s}: cannot enter {s}: {s}", .{ mojo, std.mem.span(child_dir.?), @tagName(err) });
+    } else {
+        say("cannot run {s}: {s}", .{ mojo, @tagName(err) });
+    }
     return if (err == .NOENT) 127 else 126;
 }
 
@@ -325,12 +356,12 @@ fn runPlain(mojo: []const u8, argv: Argv, envp: Envp) u8 {
     return statusOf(st);
 }
 
-fn onSignal(sig: i32) callconv(.C) void {
+fn onSignal(sig: i32) callconv(.c) void {
     caught.store(@intCast(sig), .seq_cst);
 }
 
 fn setHandler(sig: u6, handler: ?linux.Sigaction.handler_fn) void {
-    const sa = linux.Sigaction{ .handler = .{ .handler = handler }, .mask = linux.empty_sigset, .flags = 0 };
+    const sa = linux.Sigaction{ .handler = .{ .handler = handler }, .mask = linux.sigemptyset(), .flags = 0 };
     _ = linux.sigaction(sig, &sa, null);
 }
 
@@ -386,6 +417,7 @@ fn rootChild(tether_pipe: [2]i32, report: [2]i32, argv: Argv, envp: Envp) noretu
 /// read returns (the wrapper is gone, however it died), it kills its own
 /// process group, which is the compiler's session.
 fn tether(fd: i32, report_w: i32) noreturn {
+    watch_loop.closeInForked();
     _ = linux.close(report_w);
     _ = linux.close(0);
     _ = linux.close(1);
@@ -404,7 +436,7 @@ fn tether(fd: i32, report_w: i32) noreturn {
 }
 
 /// The compiler's wait status once it has exited (reaping it), else null.
-fn reaped(pid: i32) ?u32 {
+fn reapedOf(pid: i32) ?u32 {
     const r = posix.waitpid(pid, linux.W.NOHANG);
     if (r.pid == pid) return r.status;
     return null;
@@ -412,11 +444,11 @@ fn reaped(pid: i32) ?u32 {
 
 fn sleepOneSecond() void {
     // Interrupted early by a caught signal (no SA_RESTART).
-    const ts = linux.timespec{ .tv_sec = 1, .tv_nsec = 0 };
+    const ts = linux.timespec{ .sec = 1, .nsec = 0 };
     _ = linux.nanosleep(&ts, null);
 }
 
-fn checkSignal(alloc: std.mem.Allocator, pid: i32) void {
+fn checkSignalOf(alloc: std.mem.Allocator, pid: i32) void {
     const s = caught.load(.seq_cst);
     if (s == 0) return;
     proc_tree.killTree(alloc, pid);
@@ -424,16 +456,42 @@ fn checkSignal(alloc: std.mem.Allocator, pid: i32) void {
 }
 
 /// The CPU ticks of the compiler's tree now, or null when it is not in /proc.
-fn treeTicks(alloc: std.mem.Allocator, pid: i32) ?i64 {
+fn treeTicksOf(alloc: std.mem.Allocator, pid: i32) ?i64 {
     const procs = proc_tree.readAll(alloc) catch return null;
     const members = (proc_tree.select(alloc, procs, pid) catch return null) orelse return null;
     return proc_tree.cpu(procs, members);
 }
 
+/// What the shared loop (watch_loop.zig) needs of this wrapper.
+const WatchEnv = struct {
+    state: *std.heap.ArenaAllocator,
+    pid: i32,
+
+    pub fn beginTick(e: *WatchEnv) void {
+        _ = e.state.reset(.retain_capacity);
+    }
+    pub fn waitTick(_: *WatchEnv) void {
+        watch_loop.waitTick(sleepOneSecond);
+    }
+    pub fn checkSignal(e: *WatchEnv) void {
+        checkSignalOf(e.state.allocator(), e.pid);
+    }
+    pub fn reaped(e: *WatchEnv) ?u32 {
+        return reapedOf(e.pid);
+    }
+    pub fn treeTicks(e: *WatchEnv) ?i64 {
+        return treeTicksOf(e.state.allocator(), e.pid);
+    }
+    pub fn ack(_: *WatchEnv) void {
+        watch_loop.ack();
+    }
+};
+
 fn runWatched(o: compile_args.Options, mojo: []const u8, argv: Argv, envp: Envp, subcmd: []const u8) u8 {
     var loop_state = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     const loop = loop_state.allocator();
     for (caught_signals) |s| setHandler(s, &onSignal);
+    watch_loop.closeOnExec();
     const tether_pipe = pipeCloexec();
     const report = pipeCloexec();
     const pid = posix.fork() catch |e| refuse("cannot fork: {s}", .{@errorName(e)});
@@ -456,21 +514,17 @@ fn runWatched(o: compile_args.Options, mojo: []const u8, argv: Argv, envp: Envp,
         return execFailed(mojo, std.mem.readInt(u32, buf[4..8], .little));
     }
 
-    var status: ?u32 = reaped(pid);
-    var watch = proc_tree.Watch.init(o.idle_secs, o.sample_secs, treeTicks(loop, pid) orelse 0);
-    while (status == null) {
-        _ = loop_state.reset(.retain_capacity);
-        sleepOneSecond();
-        checkSignal(loop, pid);
-        status = reaped(pid);
-        if (status != null) break;
-        const ticks = treeTicks(loop, pid) orelse continue;
-        if (watch.tick(ticks)) {
+    var status: ?u32 = reapedOf(pid);
+    var watch = proc_tree.Watch.init(o.idle_secs, o.sample_secs, treeTicksOf(loop, pid) orelse 0);
+    var env = WatchEnv{ .state = &loop_state, .pid = pid };
+    switch (watch_loop.run(&env, &watch, status)) {
+        .exited => |st| status = st,
+        .killed => |idle| {
             proc_tree.killTree(loop, pid);
             _ = posix.waitpid(pid, 0);
-            std.debug.print("mojo-watchdog: killed deadlocked compiler after {d}s of zero process-tree CPU (mojo {s}, output {s}); the action is safe to retry. Knobs: watchdog_idle_secs / watchdog_sample_secs of the Mojo toolchain.\n", .{ watch.idleSecs(), subcmd, o.output });
+            std.debug.print("mojo-watchdog: killed deadlocked compiler after {d}s of zero process-tree CPU (mojo {s}, output {s}); the action is safe to retry. Knobs: watchdog_idle_secs / watchdog_sample_secs of the Mojo toolchain.\n", .{ idle, subcmd, o.output });
             finish(124);
-        }
+        },
     }
     // The compiler is gone: stop the tether first (its pipe closes when the
     // wrapper exits), so the processes the compiler orphaned are left alone.
@@ -497,17 +551,17 @@ fn holdsAny(hay: []const u8, needles: []const []const u8) bool {
 /// Exit 3 when the compiler exited 0 but the output is missing or empty; 4
 /// when it holds the working directory, printing up to five printable runs
 /// (4 bytes or longer) that hold it.
-fn postCheck(arena: std.mem.Allocator, rc: u8, out: []const u8, pwd: []const u8) u8 {
+pub fn postCheck(arena: std.mem.Allocator, rc: u8, out: []const u8, pwd: []const u8) u8 {
     if (rc != 0) return rc;
     if (!nonEmpty(out)) {
         say("compiler exited 0 but {s} is missing or empty", .{out});
         return 3;
     }
     const data = std.fs.cwd().readFileAlloc(arena, out, std.math.maxInt(usize)) catch return 0;
-    var needles = std.ArrayList([]const u8).init(arena);
-    needles.append(pwd) catch oom();
+    var needles = std.ArrayList([]const u8).empty;
+    needles.append(arena, pwd) catch oom();
     const cwd = std.process.getCwdAlloc(arena) catch pwd;
-    if (!std.mem.eql(u8, cwd, pwd)) needles.append(cwd) catch oom();
+    if (!std.mem.eql(u8, cwd, pwd)) needles.append(arena, cwd) catch oom();
     if (!holdsAny(data, needles.items)) return 0;
     say("{s} contains this action's working directory ({s}):", .{ out, pwd });
     var shown: usize = 0;

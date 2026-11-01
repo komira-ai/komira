@@ -29,6 +29,16 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #                      https endpoint over a plaintext connector that raises,
 #                      and the production ADC entry's metadata request
 #                      carrying exactly the firebase.messaging scope.
+#   test_fcm_reading   outcome.mojo's readers at their edges: outcome names,
+#                      the errorCode token and the envelope shapes it turns
+#                      down (the first FcmError decides), the 65536-byte
+#                      parse cap, the accepted `name`, the status range ends
+#                      and the Retry-After and RetryInfo bounds.
+#   test_fcm_client_checks  client.mojo's checks before sending: the https
+#                      host bytes and ports, the URL by scheme, the status
+#                      a token error keeps, the transport tag bounds, and
+#                      send_one's order (body, URL, then one token ask; an
+#                      empty bearer raises and is never sent).
 mojo_library(
     name = "komira_gcp_fcm",
     srcs = glob(["*.mojo"]),
@@ -44,6 +54,8 @@ mojo_library(
         "tests/test_fcm_message.mojo",
         "tests/test_fcm_outcome.mojo",
         "tests/test_fcm_loopback.mojo",
+        "tests/test_fcm_reading.mojo",
+        "tests/test_fcm_client_checks.mojo",
     ],
     test_deps = [
         "//src/komira_http_server:komira_http_server",

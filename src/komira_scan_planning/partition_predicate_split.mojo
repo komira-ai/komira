@@ -149,7 +149,8 @@ def split_partition_predicate(
          A conjunct that touches a partition col with a shape cannot
          enumerate cleanly (e.g. `col` on BOTH sides, function-wrapped, or a
          literal with no canonical partition text: NULL, FLOAT, DATE32,
-         TIMESTAMP, binary, decimal; see `_scalar_to_partition_string`) is
+         TIMESTAMP, binary, decimal, or a literal whose kind does not match
+         the column type; see `_scalar_to_partition_string`) is
          routed CONSERVATIVELY: it becomes an `OTHER` fold constraint (so the
          fold keeps the file) AND it stays in the residual (so the
          row-group pruner still sees it). Correctness over pruning.
@@ -340,7 +341,7 @@ def _classify_binary(
         if pidx < 0:
             return _Classified.data()  # data col -> Tier-2
         var atype = partition_types[pidx]
-        var val = _scalar_to_partition_string(rhs.literal_value())
+        var val = _scalar_to_partition_string(rhs.literal_value(), atype)
         if not val:
             return _Classified.conservative(PartitionConstraint.other(col))
         return _make_compare_constraint(col, op, val.value(), atype)
@@ -352,7 +353,7 @@ def _classify_binary(
         if pidx < 0:
             return _Classified.data()
         var atype = partition_types[pidx]
-        var val = _scalar_to_partition_string(lhs.literal_value())
+        var val = _scalar_to_partition_string(lhs.literal_value(), atype)
         if not val:
             return _Classified.conservative(PartitionConstraint.other(col))
         return _make_compare_constraint(col, _flip_op(op), val.value(), atype)
@@ -389,7 +390,7 @@ def _classify_in_list(
     ref values = conj.in_list_values_ref()
     var vs = List[String]()
     for vi in range(len(values)):
-        var v = _scalar_to_partition_string(values[vi])
+        var v = _scalar_to_partition_string(values[vi], atype)
         if not v:
             # One value without a canonical text form: the fold cannot
             # match the list, so keep the file and the conjunct.
@@ -413,7 +414,9 @@ def _try_or_chain_in_list(
     so the caller falls back to the conservative route."""
     var col_name = String("")
     var values = List[String]()
-    if not _collect_or_eq_leaves(conj, col_name, values):
+    if not _collect_or_eq_leaves(
+        conj, partition_cols, partition_types, col_name, values
+    ):
         return _Classified.data()
     if col_name.byte_length() == 0 or len(values) == 0:
         return _Classified.data()
@@ -427,36 +430,49 @@ def _try_or_chain_in_list(
 
 
 def _collect_or_eq_leaves(
-    e: Expr, mut col_name: String, mut values: List[String]
+    e: Expr,
+    partition_cols: List[String],
+    partition_types: List[ArrowType],
+    mut col_name: String,
+    mut values: List[String],
 ) raises -> Bool:
     """DFS an OR-chain, collecting `col == literal` leaves. Returns False the
     moment the shape deviates from a uniform single-column EQ-disjunction:
       * an OR node recurses both sides;
-      * an EQ node of `col == literal` (or `literal == col`) records the value
-        and pins/confirms `col_name`;
-      * anything else -> False.
+      * an EQ node of `col == literal` (or `literal == col`) on a PARTITION
+        column, whose literal renders for that column's type, records the
+        value and pins/confirms `col_name`;
+      * anything else (a data column, a cross-type literal) -> False.
     `col_name` is set on the first EQ leaf and must match on every later leaf."""
     if e.tag == EXPR_BINARY_OP and e.binary_op() == BIN_OR:
-        if not _collect_or_eq_leaves(e.binary_left_ref(), col_name, values):
+        if not _collect_or_eq_leaves(
+            e.binary_left_ref(), partition_cols, partition_types, col_name, values
+        ):
             return False
-        return _collect_or_eq_leaves(e.binary_right_ref(), col_name, values)
+        return _collect_or_eq_leaves(
+            e.binary_right_ref(), partition_cols, partition_types, col_name, values
+        )
     if e.tag == EXPR_BINARY_OP and e.binary_op() == BIN_EQ:
         ref l = e.binary_left_ref()
         ref r = e.binary_right_ref()
         # col == literal  OR  literal == col
         var this_col: String
-        var this_val: Optional[String]
+        var lit: ScalarValue
         if l.tag == EXPR_COL_REF and r.tag == EXPR_LITERAL:
             this_col = l.col_ref_name()
-            this_val = _scalar_to_partition_string(r.literal_value())
+            lit = r.literal_value()
         elif r.tag == EXPR_COL_REF and l.tag == EXPR_LITERAL:
             this_col = r.col_ref_name()
-            this_val = _scalar_to_partition_string(l.literal_value())
+            lit = l.literal_value()
         else:
             return False
+        var pidx = _partition_col_index(this_col, partition_cols)
+        if pidx < 0:
+            return False  # an EQ on a data col -> not a partition IN
+        var this_val = _scalar_to_partition_string(lit, partition_types[pidx])
         if not this_val:
-            # A literal without a canonical text form: not a clean IN; the
-            # caller routes the OR conservatively.
+            # A literal without a canonical text form for this column's
+            # type: not a clean IN; the caller routes the OR conservatively.
             return False
         if col_name.byte_length() == 0:
             col_name = this_col
@@ -587,34 +603,60 @@ def _partition_col_index(col: String, partition_cols: List[String]) -> Int:
     return -1
 
 
-def _scalar_to_partition_string(value: ScalarValue) -> Optional[String]:
+def _scalar_to_partition_string(
+    value: ScalarValue, column_type: ArrowType
+) -> Optional[String]:
     """Render a literal `ScalarValue` into its CANONICAL partition-value text
-    form — the form the `PartitionConstraint` stores and the fold /
-    prefix-encode consume — or `None` when the literal has no such form.
+    form for a partition column of type `column_type` — the form the
+    `PartitionConstraint` stores and the fold / prefix-encode consume — or
+    `None` when the literal has no such form for that column.
 
-      * STRING -> the string itself.
-      * Integers that fit Int64 (int8..int64, uint8..uint32) -> decimal
-        digits. The fold compares INT64 cols numerically, so `1` matches an
-        on-disk `01` regardless.
-      * BOOL -> `true` / `false`.
-      * Every other kind -> `None`: NULL (`col = NULL` is never true, while
-        the empty text would match the null partition), FLOAT (`2020.0` is
-        neither the INT64 text `2020` nor numerically parsed by the fold),
-        DATE32 / TIMESTAMP (the day / micros count is not the `YYYY-MM-DD` /
-        `YYYY-MM-DD HH:MM:SS` path text), binary, decimal, uint64 (a value
-        >= 2^63 has no Int64 text) and the remaining kinds. The caller
-        routes such a conjunct conservatively (an OTHER constraint, kept on
-        the residual), so pruning never changes the result. A date predicate
-        written as a STRING literal (`dt = '2026-11-04'`) still prunes.
+    A literal renders only when its kind matches the column's type, because
+    only then does the fold's compare give the SQL answer:
+
+      * STRING on a STRING / DATE32 / TIMESTAMP column -> the string itself
+        (the fold compares the canonical text exactly / lexically).
+      * Integers that fit Int64 (int8..int64, uint8..uint32) on an INT64
+        column -> decimal digits. The fold compares INT64 cols numerically,
+        so `1` matches an on-disk `01` regardless.
+      * BOOL on a BOOL column -> `true` / `false`.
+
+    Every other pair is `None`:
+      * a cross-type pair (a STRING or BOOL literal on an INT64 column, an
+        integer literal on a STRING / DATE32 / TIMESTAMP / BOOL column, ...).
+        Its SQL answer depends on how the query converts across types, and
+        the plan takes no implicit casts; the fold would read non-integer
+        text on an INT64 column as 0, and compare an integer's decimal text
+        with a STRING value lexically (`region < 10` would prune
+        `region=9`).
+      * NULL (`col = NULL` is never true, while the empty text would match
+        the null partition), FLOAT (`2020.0` is neither the INT64 text
+        `2020` nor numerically parsed by the fold), DATE32 / TIMESTAMP (the
+        day / micros count is not the `YYYY-MM-DD` / `YYYY-MM-DD HH:MM:SS`
+        path text), binary, decimal, uint64 (a value >= 2^63 has no Int64
+        text) and the remaining kinds.
+    The caller routes such a conjunct conservatively (an OTHER constraint,
+    kept on the residual), so pruning never changes the result. A date
+    predicate written as a STRING literal (`dt = '2026-11-04'`) still prunes.
 
     This matches the `encode_partition_value` contract: the caller produces
     canonical text; encode url-escapes it for the path segment."""
     if value.is_string():
-        return Optional[String](value.string_val.copy())
+        if (
+            column_type == ArrowType.STRING
+            or column_type == ArrowType.DATE32
+            or column_type == ArrowType.TIMESTAMP
+        ):
+            return Optional[String](value.string_val.copy())
+        return Optional[String](None)
     if value.fits_int64_family():
-        return Optional[String](String(value.int_val))
+        if column_type == ArrowType.INT64:
+            return Optional[String](String(value.int_val))
+        return Optional[String](None)
     if value.is_bool():
-        return Optional[String](
-            String("true") if value.bool_val else String("false")
-        )
+        if column_type == ArrowType.BOOL:
+            return Optional[String](
+                String("true") if value.bool_val else String("false")
+            )
+        return Optional[String](None)
     return Optional[String](None)

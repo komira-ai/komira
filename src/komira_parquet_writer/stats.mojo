@@ -99,95 +99,130 @@ def _simd_max[dtype: DType, width: Int](
 # =============================================================================
 
 
-def _int_statistics[
-    dtype: DType
-](col: PrimitiveArray[dtype]) -> Statistics:
-    """Min/max over the non-null values, null_count, and an HLL distinct_count.
+struct IntStatsAccumulator[dtype: DType](Movable):
+    """Statistics of an INT32 or INT64 column built up array by array: the
+    min/max over the non-null values, the null count, and an HLL sketch.
 
-    `dtype` is int32 or int64. With no nulls, one SIMD min/max pass over the
-    whole buffer; with nulls, one scalar pass over the valid slots only.
-
-    SAFETY: the SIMD pass reads the array's own buffer through the
-    origin-tied, offset-aware `_typed_ptr_ro()`, bounded by `col.length`; the
-    pointer never leaves this function.
+    `add` folds one array in; `finish` emits the `Statistics` that
+    `compute_statistics_int32` / `compute_statistics_int64` would emit for
+    the arrays' concatenation, which is how a multi-batch writer gets a
+    chunk's statistics without concatenating (and why the single-array
+    functions are built on this one).
     """
-    var n = col.length
-    if n == 0:
-        return Statistics(null_count=0, distinct_count=0)
 
-    var has_nulls = False
-    if col.validity and col.null_count > 0:
-        has_nulls = True
-    var hll = HyperLogLog()
-    var seen = False
-    var current_min = Scalar[dtype](0)
-    var current_max = Scalar[dtype](0)
+    var seen: Bool
+    var min_value: Scalar[Self.dtype]
+    var max_value: Scalar[Self.dtype]
+    var null_count: Int
+    var hll: HyperLogLog
 
-    if not has_nulls:
+    def __init__(out self):
+        comptime assert (
+            Self.dtype == DType.int32 or Self.dtype == DType.int64
+        ), "IntStatsAccumulator is for INT32 and INT64"
+        self.seen = False
+        self.min_value = Scalar[Self.dtype](0)
+        self.max_value = Scalar[Self.dtype](0)
+        self.null_count = 0
+        self.hll = HyperLogLog()
+
+    def add(mut self, col: PrimitiveArray[Self.dtype]):
+        """Fold `col` in: its non-null values into min/max and the sketch,
+        its nulls into the count.
+
+        With no null this is one SIMD min/max pass over the array's buffer;
+        with nulls, one scalar pass over the valid slots.
+
+        SAFETY: the SIMD pass reads the array's own buffer through the
+        origin-tied, offset-aware `_typed_ptr_ro()`, bounded by `col.length`;
+        the pointer never leaves this function.
+        """
+        var n = col.length
+        if n == 0:
+            return
+        if col.validity and col.null_count > 0:
+            self.null_count += col.null_count
+            ref bm = col.validity.value()
+            for j in range(n):
+                if not bm.test(col.offset + j):
+                    continue
+                var val = col.load[1](j)[0]
+                self._observe(val)
+                self.hll.add_int64(Int64(val))
+            return
         var data_ptr = col._typed_ptr_ro()
-        current_min = data_ptr[0]
-        current_max = data_ptr[0]
-        comptime simd_width = simd_width_of[dtype]()
+        var lo = data_ptr[0]
+        var hi = data_ptr[0]
+        comptime simd_width = simd_width_of[Self.dtype]()
         var simd_end = (n // simd_width) * simd_width
-        var vec_min = SIMD[dtype, simd_width](current_min)
-        var vec_max = SIMD[dtype, simd_width](current_max)
+        var vec_min = SIMD[Self.dtype, simd_width](lo)
+        var vec_max = SIMD[Self.dtype, simd_width](hi)
         var i = 0
         while i < simd_end:
             var chunk = data_ptr.load[width=simd_width](i)
             vec_min = _simd_min(vec_min, chunk)
             vec_max = _simd_max(vec_max, chunk)
             i += simd_width
-        current_min = vec_min.reduce_min()
-        current_max = vec_max.reduce_max()
+        lo = vec_min.reduce_min()
+        hi = vec_max.reduce_max()
         while i < n:
             var val = data_ptr[i]
-            if val < current_min:
-                current_min = val
-            if val > current_max:
-                current_max = val
+            if val < lo:
+                lo = val
+            if val > hi:
+                hi = val
             i += 1
+        self._observe(lo)
+        self._observe(hi)
         # Values are sign-extended to i64 for hashing, so an INT32 and an
         # INT64 column holding the same numbers hash alike.
         for j in range(n):
-            hll.add_int64(Int64(data_ptr[j]))
-        seen = True
-    else:
-        ref bm = col.validity.value()
-        for j in range(n):
-            if not bm.test(col.offset + j):
-                continue
-            var val = col.load[1](j)[0]
-            if not seen:
-                current_min = val
-                current_max = val
-                seen = True
-            else:
-                if val < current_min:
-                    current_min = val
-                if val > current_max:
-                    current_max = val
-            hll.add_int64(Int64(val))
+            self.hll.add_int64(Int64(data_ptr[j]))
 
-    if not seen:
-        # Every value is null: no range to publish.
-        return Statistics(null_count=col.null_count, distinct_count=0)
+    @always_inline
+    def _observe(mut self, val: Scalar[Self.dtype]):
+        if not self.seen:
+            self.min_value = val
+            self.max_value = val
+            self.seen = True
+            return
+        if val < self.min_value:
+            self.min_value = val
+        if val > self.max_value:
+            self.max_value = val
 
-    var min_bytes: List[UInt8]
-    var max_bytes: List[UInt8]
-    comptime if dtype == DType.int32:
-        min_bytes = _encode_le_i32(Int32(current_min))
-        max_bytes = _encode_le_i32(Int32(current_max))
-    else:
-        min_bytes = _encode_le_i64(Int64(current_min))
-        max_bytes = _encode_le_i64(Int64(current_max))
+    def finish(self) -> Statistics:
+        """The statistics of everything added: with no non-null value (no
+        row, or only nulls) just the null count and a zero distinct count."""
+        if not self.seen:
+            return Statistics(null_count=self.null_count, distinct_count=0)
+        var min_bytes: List[UInt8]
+        var max_bytes: List[UInt8]
+        comptime if Self.dtype == DType.int32:
+            min_bytes = _encode_le_i32(Int32(self.min_value))
+            max_bytes = _encode_le_i32(Int32(self.max_value))
+        else:
+            min_bytes = _encode_le_i64(Int64(self.min_value))
+            max_bytes = _encode_le_i64(Int64(self.max_value))
+        return Statistics(
+            null_count=self.null_count,
+            distinct_count=self.hll.estimate(),
+            min_value=min_bytes^,
+            max_value=max_bytes^,
+            hll_registers=Optional[List[UInt8]](_hll_register_bytes(self.hll)),
+        )
 
-    return Statistics(
-        null_count=col.null_count if has_nulls else 0,
-        distinct_count=hll.estimate(),
-        min_value=min_bytes^,
-        max_value=max_bytes^,
-        hll_registers=Optional[List[UInt8]](_hll_register_bytes(hll)),
-    )
+
+def _int_statistics[
+    dtype: DType
+](col: PrimitiveArray[dtype]) -> Statistics:
+    """Min/max over the non-null values, null_count, and an HLL distinct_count.
+
+    `dtype` is int32 or int64; see `IntStatsAccumulator`.
+    """
+    var acc = IntStatsAccumulator[dtype]()
+    acc.add(col)
+    return acc.finish()
 
 
 def compute_statistics_int32(col: PrimitiveArray[DType.int32]) -> Statistics:

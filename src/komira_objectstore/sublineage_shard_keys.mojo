@@ -252,7 +252,8 @@ def _shard_id_from_key(key: String, enum_prefix: String, plen: Int) -> String:
     """Extract the `<shard_id>` from a flat object key
     `<enum_prefix><shard_id>/manifest/...` (or `.../_HEAD`). The shard_id is the
     segment between the enum prefix and the NEXT '/'. Returns "" if `key` does
-    not start with `enum_prefix` or has no following '/'."""
+    not start with `enum_prefix` or has no following '/' (a key directly under
+    `_lineage/` has no lineage behind it, so it names no shard)."""
     var kb = key.as_bytes()
     if len(kb) <= plen:
         return String("")
@@ -270,7 +271,7 @@ def _shard_id_from_key(key: String, enum_prefix: String, plen: Int) -> String:
             break
         seg.append(kb[i])
         i += 1
-    if len(seg) == 0:
+    if len(seg) == 0 or i == len(kb):
         return String("")
     return String(StringSlice(unsafe_from_utf8=Span(seg)))
 

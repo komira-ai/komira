@@ -161,7 +161,7 @@ fn readEdited(h: []u8) C.Fail![]T.Entry {
     resum(h);
     var t = C.list(u8);
     C.add(&t, h);
-    t.appendNTimes(0, 1024 + 512) catch C.oom();
+    t.appendNTimes(C.a(), 0, 1024 + 512) catch C.oom();
     return T.read(t.items);
 }
 
@@ -337,7 +337,7 @@ test "tar: a_gnu_header_has_no_name_prefix" {
 fn sized(size: usize, total: usize, fill: u8) []u8 {
     var t = C.list(u8);
     C.add(&t, F.header("f", '0', 0o644, size, ""));
-    t.appendNTimes(fill, total - 512) catch C.oom();
+    t.appendNTimes(C.a(), fill, total - 512) catch C.oom();
     return t.items;
 }
 

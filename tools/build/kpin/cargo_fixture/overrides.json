@@ -1,0 +1,53 @@
+{
+ "rustc": "1.85.0",
+ "crates": {
+  "libc 0.2.150": {
+   "class": "a",
+   "why": "x86_64 linux gnu: 64-bit time_t.",
+   "cfgs": [
+    "linux_time_bits64"
+   ]
+  },
+  "serde 1.0.100": {
+   "class": "b",
+   "why": "build.rs writes private.rs, which src/lib.rs includes from OUT_DIR.",
+   "cfgs": [
+    "no_serde_derive"
+   ],
+   "env": {
+    "SERDE_PRIVATE": "1"
+   },
+   "patch": {
+    "copy": [
+     "src",
+     "Cargo.toml"
+    ],
+    "sub": [
+     {
+      "file": "src/lib.rs",
+      "from": "concat!(env!(\"OUT_DIR\"), \"/private.rs\")",
+      "to": "\"private.rs\""
+     }
+    ],
+    "add": [
+     {
+      "file": "src/private.rs",
+      "content": "pub mod __private100 {}\n"
+     }
+    ]
+   }
+  },
+  "lzma-sys 0.1.0": {
+   "class": "c",
+   "why": "build.rs compiles liblzma; replaced by a komira target.",
+   "native_deps": [
+    "komira//third_party/xz:lzma[static-pic]"
+   ],
+   "patch": {
+    "copy": [
+     "src"
+    ]
+   }
+  }
+ }
+}

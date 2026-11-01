@@ -70,9 +70,10 @@
 #     cannot catch that; this case drives the driver itself.
 #
 # ⛔ NO `sleep` ANYWHERE. Case 4 moves time by ARITHMETIC (the deadline is a
-# plain absolute `Int`, so a test can stamp one in the past). Cases 1-3 are
-# bounded by a tight configured budget and a generous elapsed ceiling; they
-# spend real time the way their head-phase twin already does.
+# plain absolute `Int`, so a test can stamp one in the past). Cases 1, 2 and 6
+# run on a FAKE CLOCK: the scripted stream moves a shared cell on each read, so
+# when the deadline fires is a function of the script and not of how fast the
+# machine polls. Case 3 is a control with a budget far above its cost.
 #
 # ⛔ DO NOT ASSERT ON THE STRING `collect_body iteration cap exceeded`. That
 # is the 10,000-second ITERATION CAP, not a deadline — it says TIMEOUT while
@@ -87,6 +88,7 @@
 # time; the error CLASS and the phase word are the assertions.
 # =============================================================================
 
+from std.memory import ArcPointer
 from std.sys.info import CompilationTarget
 from std.testing import assert_equal, assert_false, assert_true
 
@@ -114,55 +116,36 @@ from komira_clock import now_ns as _now_ns
 
 
 # =============================================================================
-# Sizing constants. ⚠ READ THIS BEFORE CHANGING ONE.
+# Sizing constants and the fake clock.
 # =============================================================================
 #
-# The wall time of cases 1 and 2 is `polls x cost_per_poll`, and
-# `cost_per_poll` is dominated by ONE thing: `RecvRingBody.poll_frame`
-# allocates a fresh `_scratch_size`-byte (64 KiB by default) scratch List
-# by appending a zero byte at a time, on EVERY poll, INCLUDING a poll that
-# ends in Pending. Measured with the deadline check neutered so the drain ran
-# to script exhaustion:
-#     400,000 one-byte polls in 14.77 s  =>  ~37 us per poll.
-# `_report` prints that number on every run, so the next person to resize
-# these does not have to re-derive it.
-#
-# ⚠ AND IT DOES NOT TRANSFER FROM THE HEAD TWIN. That test gets its wall time
-# from `parse_response_head` RE-SCANNING the whole buffer per byte — O(n^2)
-# over 23 KiB. Body decode is INCREMENTAL and O(n), so a body dribble runs
-# far more cheaply PER BYTE and the script must be correspondingly larger to
-# outlast the same budget. Size these by measurement, never by copying the
-# head twin's numbers.
-#
-# The invariant each constant must keep:
-#   case 1:  _DRIBBLE_BODY_BYTES * cost  >>  _BUDGET_US      (deadline first)
-#   case 2:  _STALL_PENDING_READS * cost >>  _BUDGET_US      (deadline first)
-#   case 3:  _CONTROL_BODY_BYTES  * cost <<  _CONTROL_BUDGET_US (no fire)
-# and in every case `... * cost < _CEILING_US`, so the PRE-FIX red still
-# lands in bounded time instead of hanging the suite.
+# Cases 1, 2 and 6 read time from a shared cell (microseconds) that the
+# scripted stream moves: `_DATA_STEP_US` on every read that delivers a byte,
+# `_PENDING_STEP_US` on every read that answers Pending. The deadline is checked
+# before every read, so the clock stops exactly on the budget. The scripts only
+# have to outlast the budget in fake time, which they do by arithmetic.
 
 comptime _BUDGET_US: Int = 150_000
-"""The configured request budget (150 ms) for cases 1 and 2 — the same shape
-the head-phase twin uses. It bounds head AND body out of ONE budget, so it
-must also be comfortably above the cost of reading the (tiny) head."""
+"""The configured request budget (150 ms) for cases 1, 2 and 6. It bounds head
+AND body out of ONE budget."""
 
-comptime _CEILING_US: Int = 60_000_000
-"""Elapsed ceiling (60 s). Far above the 150 ms budget plus the whole scripted
-dribble, and far below the unbounded wait the defect produced."""
+comptime _CLOCK_START_US: Int = 1_000_000
+"""Where the fake clock starts (away from 0, the "no deadline" value)."""
 
-comptime _DRIBBLE_BODY_BYTES: Int = 200_000
-"""Body bytes in case 1's script, delivered ONE PER READ. Must outlast
-`_BUDGET_US`; see the invariant above. At the measured ~37 us/poll the
-150 ms budget is reached after ~4,100 polls, so this carries ~49x margin
--- and a box 10x faster still carries ~5x. The PRE-FIX red costs ~7.4 s
-(the whole script), which is why it is not larger still."""
+comptime _DATA_STEP_US: Int = 100
+"""Fake time per read that delivers bytes (case 1)."""
 
-comptime _STALL_PENDING_READS: Int = 200_000
-"""Pending reads case 2's peer returns after its script is exhausted,
-before EOF. Must outlast `_BUDGET_US`; see the invariant above -- same
-arithmetic and same margins as `_DRIBBLE_BODY_BYTES`. A Pending poll pays
-the SAME scratch allocation as a Data poll, which is why one measured cost
-sizes both."""
+comptime _PENDING_STEP_US: Int = 10_000
+"""Fake time per Pending read (cases 2 and 6)."""
+
+comptime _DRIBBLE_BODY_BYTES: Int = 10_000
+"""Body bytes in case 1's script, delivered ONE PER READ: 1_000_000 us of fake
+time, well past `_BUDGET_US`, so the peer is still dribbling when the deadline
+fires."""
+
+comptime _STALL_PENDING_READS: Int = 1_000
+"""Pending reads the stalled peers of cases 2 and 6 return: 10_000_000 us of
+fake time, well past `_BUDGET_US`."""
 
 comptime _CONTROL_BODY_BYTES: Int = 4096
 """Body bytes in case 3's COMPLETE body, delivered ONE PER READ. Must finish
@@ -244,9 +227,7 @@ def _concat(var a: List[UInt8], b: List[UInt8]) -> List[UInt8]:
 
 
 def _report(label: String, elapsed_us: Int, polls: Int):
-    """Print the measured per-poll cost. NOT an assertion — it is the number
-    the sizing constants above are derived from, printed every run so the next
-    person to resize them does not have to guess."""
+    """Print the elapsed time of a case. NOT an assertion."""
     print(
         String("  [") + label + String("] elapsed_us=") + String(elapsed_us)
         + String(" over ~") + String(polls) + String(" polls")
@@ -274,6 +255,7 @@ def test_dribbling_body_cannot_defeat_the_response_body_deadline() raises:
     can never complete; the script is FINITE so the pre-fix red lands in
     bounded time (as `EOF_MID_RESPONSE` once the dribble runs out) instead of
     hanging the suite forever, which is what a live peer would do."""
+    var clock = ArcPointer[Int](_CLOCK_START_US)
     var script = _concat(
         _head_with_content_length(100_000_000),
         _body_bytes(_DRIBBLE_BODY_BYTES),
@@ -282,10 +264,12 @@ def test_dribbling_body_cannot_defeat_the_response_body_deadline() raises:
     # THE DRIBBLE. One byte per read is the minimum that still counts as
     # progress, and it is what makes the reset fire on every single poll.
     stream.set_max_read_per_call(1)
+    stream.advance_clock_on_read(clock, 0, _DATA_STEP_US)
     var connector = ScriptedConnector.with_stream(stream^)
     var client = HttpClient[ScriptedConnector].with_request_timeout_us(
         connector^, _BUDGET_US,
     )
+    client.set_test_clock(clock)
     var reactor = _make_reactor()
 
     var url = Url.parse(String("http://127.0.0.1:8080/blob"))
@@ -294,7 +278,7 @@ def test_dribbling_body_cannot_defeat_the_response_body_deadline() raises:
 
     var raised = False
     var detail = String()
-    var start_us = Int(_now_ns() // UInt64(1000))
+    var start_us = clock[]
     try:
         var _resp = client.send_buffered[PerCoreAsyncRuntime[NoopSink]](
             req^, reactor,
@@ -302,8 +286,7 @@ def test_dribbling_body_cannot_defeat_the_response_body_deadline() raises:
     except e:
         raised = True
         detail = String(e)
-    var elapsed_us = Int(_now_ns() // UInt64(1000)) - start_us
-    _report(String("dribble"), elapsed_us, _DRIBBLE_BODY_BYTES)
+    var elapsed_us = clock[] - start_us
 
     assert_true(raised, msg="a dribbling body must raise, not return")
     # THE CLASS + PHASE ASSERTION — the one that catches the deadline never
@@ -319,19 +302,13 @@ def test_dribbling_body_cannot_defeat_the_response_body_deadline() raises:
             + String(elapsed_us) + ")"
         ),
     )
-    # THE ELAPSED ASSERTION — catches a deadline that is evaluated but wrong.
-    assert_true(
-        elapsed_us < _CEILING_US,
-        msg=(
-            "deadline must fire promptly; elapsed_us="
-            + String(elapsed_us) + " ceiling_us=" + String(_CEILING_US)
-        ),
-    )
-    # And it must not fire EARLY — a deadline that trips before its budget
-    # would satisfy both assertions above while being just as wrong.
-    assert_true(
-        elapsed_us >= _BUDGET_US,
-        msg="deadline fired before its budget: " + String(elapsed_us) + " us",
+    # THE ELAPSED ASSERTION, on the fake clock: the deadline fires at the
+    # budget, not before (a deadline that trips early is just as wrong) and not
+    # after. 100 us per byte read, checked before every read.
+    assert_equal(
+        elapsed_us,
+        _BUDGET_US,
+        msg="the dribbled body must fail at its budget on the fake clock",
     )
 
 
@@ -355,14 +332,17 @@ def test_stalled_body_is_bounded_by_the_response_body_deadline() raises:
     cap of roughly 10,000 SECONDS, which is not observable in a test. The
     FINITE pending count is what makes the pre-fix red land in bounded time
     (as EOF_MID_RESPONSE, once the peer finally closes)."""
+    var clock = ArcPointer[Int](_CLOCK_START_US)
     var stream = ScriptedStream.from_read_script(
         _head_with_content_length(1000)
     )
     stream.set_pending_after_script(_STALL_PENDING_READS)
+    stream.advance_clock_on_read(clock, _PENDING_STEP_US)
     var connector = ScriptedConnector.with_stream(stream^)
     var client = HttpClient[ScriptedConnector].with_request_timeout_us(
         connector^, _BUDGET_US,
     )
+    client.set_test_clock(clock)
     var reactor = _make_reactor()
 
     var url = Url.parse(String("http://127.0.0.1:8080/blob"))
@@ -371,7 +351,7 @@ def test_stalled_body_is_bounded_by_the_response_body_deadline() raises:
 
     var raised = False
     var detail = String()
-    var start_us = Int(_now_ns() // UInt64(1000))
+    var start_us = clock[]
     try:
         var _resp = client.send_buffered[PerCoreAsyncRuntime[NoopSink]](
             req^, reactor,
@@ -379,8 +359,7 @@ def test_stalled_body_is_bounded_by_the_response_body_deadline() raises:
     except e:
         raised = True
         detail = String(e)
-    var elapsed_us = Int(_now_ns() // UInt64(1000)) - start_us
-    _report(String("stall"), elapsed_us, _STALL_PENDING_READS)
+    var elapsed_us = clock[] - start_us
 
     assert_true(raised, msg="a stalled body must raise, not return")
     assert_true(
@@ -392,15 +371,12 @@ def test_stalled_body_is_bounded_by_the_response_body_deadline() raises:
             + String(elapsed_us) + ")"
         ),
     )
-    assert_true(
-        elapsed_us < _CEILING_US,
-        msg="stall deadline must fire promptly; elapsed_us="
-        + String(elapsed_us),
-    )
-    assert_true(
-        elapsed_us >= _BUDGET_US,
-        msg="stall deadline fired before its budget: "
-        + String(elapsed_us) + " us",
+    # On the fake clock the deadline fires at the budget exactly: the first
+    # multiple of the 10_000 us Pending step at or after 150_000 us.
+    assert_equal(
+        elapsed_us,
+        _BUDGET_US,
+        msg="the stalled body must fail at its budget on the fake clock",
     )
 
 
@@ -684,8 +660,9 @@ def test_one_stalled_stream_among_k_still_hits_its_own_deadline() raises:
     is strictly better than one shared sweep budget and it falls out of the
     design for free — which is also why the `made_progress`-across-all-K reset
     is NOT touched by this change."""
+    var clock = ArcPointer[Int](_CLOCK_START_US)
     var bodies = Slab[RecvRingBody[ScriptedStream]]()
-    var now_us = Int(_now_ns() // UInt64(1000))
+    var now_us = clock[]
     var i = 0
     while i < 3:
         # Three healthy streams: fully pre-seeded, complete on first poll.
@@ -700,6 +677,7 @@ def test_one_stalled_stream_among_k_still_hits_its_own_deadline() raises:
     # The fourth: a peer that announced 4096 bytes and sends nothing.
     var silent_stream = ScriptedStream.from_read_script(List[UInt8]())
     silent_stream.set_pending_after_script(_STALL_PENDING_READS)
+    silent_stream.advance_clock_on_read(clock, _PENDING_STEP_US)
     bodies.append(
         RecvRingBody[ScriptedStream].new_content_length(
             silent_stream^, 4096, List[UInt8](),
@@ -710,13 +688,13 @@ def test_one_stalled_stream_among_k_still_hits_its_own_deadline() raises:
     var s = 0
     while s < 4:
         bodies[s].set_deadline_us(now_us + _BUDGET_US)
+        bodies[s].set_test_clock(Optional[ArcPointer[Int]](clock))
         s = s + 1
 
     var reactor = _make_reactor()
     var tok = CancellationToken.never()
     var raised = False
     var detail = String()
-    var start_us = Int(_now_ns() // UInt64(1000))
     try:
         var _out = drain_bodies_round_robin[
             PerCoreAsyncRuntime[NoopSink], ScriptedStream,
@@ -724,8 +702,7 @@ def test_one_stalled_stream_among_k_still_hits_its_own_deadline() raises:
     except e:
         raised = True
         detail = String(e)
-    var elapsed_us = Int(_now_ns() // UInt64(1000)) - start_us
-    _report(String("k-stream"), elapsed_us, _STALL_PENDING_READS)
+    var elapsed_us = clock[] - now_us
 
     assert_true(
         raised,
@@ -739,10 +716,10 @@ def test_one_stalled_stream_among_k_still_hits_its_own_deadline() raises:
             " got: " + detail
         ),
     )
-    assert_true(
-        elapsed_us < _CEILING_US,
-        msg="K-stream deadline must fire promptly; elapsed_us="
-        + String(elapsed_us),
+    assert_equal(
+        elapsed_us,
+        _BUDGET_US,
+        msg="the stalled stream must fail at its own budget on the fake clock",
     )
 
 

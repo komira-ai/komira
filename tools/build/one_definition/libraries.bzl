@@ -38,6 +38,10 @@ SRC_C_LIBRARIES = [
     "//src/tests/helpers/komira_udf_spike_abi:komira_udf_spike_c",
     "//src/tests/helpers/komira_udf_spike_abi:komira_udf_echo",
     "//src/tests/helpers/komira_udf_spike_abi:komira_udf_echo_broken",
+    "//src/tests/helpers/komira_udf_spike_abi:komira_udf_echo_native",
+    "//src/tests/helpers/komira_udf_spike_native:komira_udf_native_rt",
+    "//src/tests/helpers/komira_udf_spike_native:komira_udf_native_variants",
+    "//src/tests/helpers/komira_udf_spike_native:komira_udf_spike_native_c",
     "//src/tests/helpers/komira_udf_spike_node_worker:komira_udf_node_worker_proxy",
     "//src/tests/helpers/komira_udf_spike_node_worker:komira_udf_spike_node_worker_engine",
 ]
@@ -77,7 +81,7 @@ def one_definition_listed(name):
 # `prefix` here, so the prefix refused is the one every symbol is proved to
 # carry.
 THIRD_PARTY_OWNERS = {
-    "third_party/aws-lc": struct(owner = "//src/komira_crypto:komira_crypto", prefix = "komira_awslc_"),
+    "third_party/aws-lc": struct(owner = "//src/komira_awslc:komira_awslc", prefix = "komira_awslc_"),
     "third_party/brotli": struct(owner = "//src/komira_parquet_codec:komira_parquet_codec", prefix = "komira_brotli_"),
     "third_party/s2n-tls": struct(owner = "//src/komira_http_core:komira_http_core", prefix = "komira_s2n_"),
     "third_party/sha1collisiondetection": struct(owner = None, prefix = ""),

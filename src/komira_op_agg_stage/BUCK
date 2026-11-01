@@ -1,0 +1,41 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The stage hash aggregation: HashAggTable, the HASH_AGG breaker state, over a
+# growable GROUP BY key block and a pack of aggregate columns.
+mojo_library(
+    name = "komira_op_agg_stage",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/komira_agg:komira_agg",
+        "//src/komira_agg_api:komira_agg_api",
+        "//src/komira_arrow:komira_arrow",
+        "//src/komira_async:komira_async",
+        "//src/komira_async_api:komira_async_api",
+        "//src/komira_atomic_alias:komira_atomic_alias",
+        "//src/komira_batch_eval:komira_batch_eval",
+        "//src/komira_buffer:komira_buffer",
+        "//src/komira_collections:komira_collections",
+        "//src/komira_column_kernels:komira_column_kernels",
+        "//src/komira_compression:komira_compression",
+        "//src/komira_counters:komira_counters",
+        "//src/komira_dynamic_filter:komira_dynamic_filter",
+        "//src/komira_engine_runtime:komira_engine_runtime",
+        "//src/komira_expr:komira_expr",
+        "//src/komira_libc:komira_libc",
+        "//src/komira_op_agg_distinct:komira_op_agg_distinct",
+        "//src/komira_op_agg_state:komira_op_agg_state",
+        "//src/komira_operator_api:komira_operator_api",
+        "//src/komira_physical_plan:komira_physical_plan",
+        "//src/komira_plan_expr:komira_plan_expr",
+        "//src/komira_simd:komira_simd",
+        "//src/komira_udf:komira_udf",
+    ],
+    test_srcs = [
+        "tests/test_agg_fn_slot.mojo",
+        "tests/test_hash_agg.mojo",
+        "tests/test_hash_agg_combine.mojo",
+        "tests/test_hash_agg_consume_band.mojo",
+        "tests/test_hash_agg_sql_semantics.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)

@@ -142,27 +142,29 @@ Between phases 1 and 2 the leaf is checked: a key usage, if present, must allow 
 
 | File | Holds | Key types and functions |
 |---|---|---|
-| `src/komira_crypto/traits.mojo` | the `Hash`, `Aead` and `KeySchedule` traits | `Hash`, `Aead`, `KeySchedule` |
-| `src/komira_crypto/hash.mojo` | streaming SHA-2 and SHA-1, one-shot SHA-1 and BLAKE2b-256 | `Sha256`, `Sha384`, `Sha512`, `Sha1`, `sha1`, `blake2b_256` |
-| `src/komira_crypto/sha256.mojo`, `hmac.mojo`, `hmac_streaming.mojo`, `hkdf.mojo`, `pbkdf2.mojo` | one-shot SHA-256 and HMAC, generic HMAC and HKDF, PBKDF2 | `sha256`, `hmac_sha256`, `constant_time_eq_32`, `Hmac`, `Hkdf`, `pbkdf2_hmac_sha256_32` |
-| `src/komira_crypto/aes_gcm.mojo`, `chacha20_poly1305.mojo`, `aead.mojo` | the AEAD conformers and a variable-length constant-time compare | `AesGcm128`, `AesGcm256`, `ChaCha20Poly1305`, `constant_time_eq_n` |
-| `src/komira_crypto/ed25519.mojo`, `ecdsa_p256.mojo`, `ecdsa_p384.mojo`, `rsa.mojo`, `rsa_pss.mojo` | signatures | `ed25519_sign`, `ecdsa_p256_sign_deterministic`, `rsa_sha256_sign`, `rsa_pss_verify` |
-| `src/komira_crypto/x25519.mojo`, `x25519_simd.mojo` | X25519 | `x25519`, `x25519_base_mult`, `x25519_4way` |
-| `src/komira_crypto/ecdh_p256.mojo` | P-256 ECDH | `p256_ecdh` |
-| `src/komira_crypto/rng.mojo`, `zeroize.mojo` | randomness and wiping | `system_entropy`, `SystemEntropy`, `ChaCha20Drbg`, `zeroize_inline_array` |
-| `src/komira_crypto/hex.mojo` | hex | `hex_lower_array_32` |
-| `src/komira_crypto/internal/asm/` | the AWS-LC bindings | `Sha2Hasher`, `HmacFfiCtx`, `rand_bytes_ffi`, `p256_sign_with_nonce`, `x25519_scalarmult` |
-| `src/komira_crypto/cert/` | ASN.1, X.509, host-name matching, roots, chain validation | `x509_parse_certificate`, `match_hostname`, `mozilla_root_store`, `chain_verify` |
-| `src/komira_crypto/BUCK` | the `komira_crypto` library and its gated tests | `mojo_library(name = "komira_crypto")` |
+| `src/komira_crypto/src/komira_crypto/traits.mojo` | the `Hash`, `Aead` and `KeySchedule` traits | `Hash`, `Aead`, `KeySchedule` |
+| `src/komira_crypto/src/komira_crypto/hash.mojo` | streaming SHA-2 and SHA-1, one-shot SHA-1 and BLAKE2b-256 | `Sha256`, `Sha384`, `Sha512`, `Sha1`, `sha1`, `blake2b_256` |
+| `src/komira_crypto/src/komira_crypto/sha256.mojo`, `hmac.mojo`, `hmac_streaming.mojo`, `hkdf.mojo`, `pbkdf2.mojo` | one-shot SHA-256 and HMAC, generic HMAC and HKDF, PBKDF2 | `sha256`, `hmac_sha256`, `constant_time_eq_32`, `Hmac`, `Hkdf`, `pbkdf2_hmac_sha256_32` |
+| `src/komira_crypto/src/komira_crypto/aes_gcm.mojo`, `chacha20_poly1305.mojo`, `aead.mojo` | the AEAD conformers and a variable-length constant-time compare | `AesGcm128`, `AesGcm256`, `ChaCha20Poly1305`, `constant_time_eq_n` |
+| `src/komira_crypto/src/komira_crypto/ed25519.mojo`, `ecdsa_p256.mojo`, `ecdsa_p384.mojo`, `rsa.mojo`, `rsa_pss.mojo` | signatures | `ed25519_sign`, `ecdsa_p256_sign_deterministic`, `rsa_sha256_sign`, `rsa_pss_verify` |
+| `src/komira_crypto/src/komira_crypto/x25519.mojo`, `x25519_simd.mojo` | X25519 | `x25519`, `x25519_base_mult`, `x25519_4way` |
+| `src/komira_crypto/src/komira_crypto/ecdh_p256.mojo` | P-256 ECDH | `p256_ecdh` |
+| `src/komira_crypto/src/komira_crypto/rng.mojo`, `zeroize.mojo` | randomness and wiping | `system_entropy`, `SystemEntropy`, `ChaCha20Drbg`, `zeroize_inline_array` |
+| `src/komira_crypto/src/komira_crypto/hex.mojo` | hex | `hex_lower_array_32` |
+| `src/komira_crypto/src/komira_crypto/internal/asm/` | the AWS-LC bindings | `Sha2Hasher`, `HmacFfiCtx`, `rand_bytes_ffi`, `p256_sign_with_nonce`, `x25519_scalarmult` |
+| `src/komira_crypto/src/komira_crypto/cert/` | ASN.1, X.509, host-name matching, roots, chain validation | `x509_parse_certificate`, `match_hostname`, `mozilla_root_store`, `chain_verify` |
+| `src/komira_crypto/BUCK` | the `komira_crypto` library and its gated tests | `mojo_package(path = ".")`, `mojo_adopted_library(name = "komira_crypto")` |
+| `src/komira_crypto/native/komira_crypto_sha256_hw.c` | the entries to AWS-LC's SHA-256 block functions | `komira_crypto_sha256_block_data_order` |
+| `src/komira_awslc/BUCK` | AWS-LC as a static archive, every symbol renamed `komira_awslc_X`: the one copy `komira_crypto` and `komira_uuid` link | `native_library(name = "awslc")` |
 
 Entry points:
 
-- **Public API:** the free functions and types re-exported by `src/komira_crypto/__init__.mojo`; `ecdsa_p256` and `cert` by module path.
+- **Public API:** the free functions and types re-exported by `src/komira_crypto/src/komira_crypto/__init__.mojo`; `ecdsa_p256` and `cert` by module path.
 - **Execution starts at:** the caller's first call into a public function; the libraries have no initialization step.
 
 ## How is it tested?
 
-`komira_crypto` lists its 61 test files in `test_srcs` in `src/komira_crypto/BUCK`, so building the library runs them all (see [the `test_srcs` gate](../../tools/build/mojo/README.md#libraries-and-the-test_srcs-gate)), and each links AWS-LC through the library's `deps`.
+`komira_crypto` is built with `mojo_package` (`src/komira_crypto/BUCK`): every `tests/test_*.mojo` runs as a build action and the library file exists only once they pass (see [the `mojo_package` rules](../../tools/build/mojo/README.md)), and each test links AWS-LC (`komira_awslc`, the dependency that holds the archive) with the SHA-256 wrapper.
 
 | Test | Covers |
 |---|---|

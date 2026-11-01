@@ -4,7 +4,7 @@ from covcheck.analyze import FORMAT_LCOV, Analysis, Input, Options, Sources, ana
 from covcheck.annotate import annotations, touched_packages
 from covcheck.diff import parse_diff
 from covcheck.paths import RepoFiles, repo_files_of
-from covcheck.ratchet import Ratchet, parse_ratchet
+from covcheck.held import Held, add_hold
 from covcheck.result import package_json
 
 # The full-source denominator: a source file of a measured package that no
@@ -85,6 +85,13 @@ def _kinds(a: Analysis) -> String:
     return s^
 
 
+def _held(text: String) raises -> Held:
+    """src/p's marker `text`."""
+    var h = Held()
+    add_hold(h, String("src/p"), text, String("src/p/coverage_held"), List[String]())
+    return h^
+
+
 def _enforce() -> Options:
     var o = Options()
     o.mode = String("enforce")
@@ -93,14 +100,14 @@ def _enforce() -> Options:
 
 def test_absent_file_fails_the_target() raises:
     # Without the full-source denominator p reads 100% (2/2) and passes.
-    var rat = parse_ratchet(String("src/p\t10000\t-\n"), String("r.tsv"))
+    var rat = _held(String("line\n"))
     var a = analyze(_report(), List[Input](), _repo(), rat, _sources(), _enforce())
     var k = a.package_index(String("src/p"))
     assert_true(k >= 0)
     # a.mojo 2 found 2 hit; z.mojo lines 4, 6, 7, 8 found, none hit.
     assert_equal(a.packages[k].line_found, 6, _kinds(a))
     assert_equal(a.packages[k].line_hit, 2)
-    assert_equal(_kinds(a), "BelowTarget BranchNotMeasured Regression UnmeasuredFile@src/p/z.mojo")
+    assert_equal(_kinds(a), "BranchNotMeasured Regression UnmeasuredFile@src/p/z.mojo")
     assert_equal(a.conclusion, "failure")
     # src/q has no record: it is not measured, so q.mojo is not read in.
     assert_equal(a.package_index(String("src/q")), -1)
@@ -114,7 +121,7 @@ def test_init_of_reexports_raises_nothing() raises:
     l.append("src/p/BUCK")
     l.append("src/p/__init__.mojo")
     l.append("src/p/a.mojo")
-    var rat = parse_ratchet(String("src/p\t10000\t10000\n"), String("r.tsv"))
+    var rat = _held(String("line\nbranch\n"))
     var a = analyze(_report_with_branches(), List[Input](), repo_files_of(l), rat, _sources(), _enforce())
     assert_equal(_kinds(a), "")
     assert_equal(a.conclusion, "success")
@@ -130,7 +137,7 @@ def test_markers_apply_to_a_file_no_test_compiled() raises:
     s.texts[String("src/p/z.mojo")] = String(Z_SOURCE).replace(
         "        abort()\n", "        abort()  # cov: unreachable callers pass x >= 0\n"
     ).replace("    return x + 1\n", "    return x + 1  # cov: unreachable\n")
-    var a = analyze(_report(), List[Input](), _repo(), parse_ratchet(String("src/p\t10000\t-\n"), String("r.tsv")), s, _enforce())
+    var a = analyze(_report(), List[Input](), _repo(), _held(String("line\n")), s, _enforce())
     var k = a.package_index(String("src/p"))
     assert_equal(a.packages[k].line_found, 5)
     assert_equal(a.packages[k].exempt_lines, 1)
@@ -138,7 +145,7 @@ def test_markers_apply_to_a_file_no_test_compiled() raises:
     assert_equal(a.exemptions[0].line, 7)
     assert_equal(a.exemptions[0].status, "exempt")
     assert_equal(a.exemptions[1].status, "no reason")
-    assert_equal(_kinds(a), "BelowTarget BranchNotMeasured Regression UnmeasuredFile@src/p/z.mojo ExemptionWithoutReason@src/p/z.mojo")
+    assert_equal(_kinds(a), "BranchNotMeasured Regression UnmeasuredFile@src/p/z.mojo ExemptionWithoutReason@src/p/z.mojo")
     for i in range(len(a.findings)):
         if a.findings[i].kind == String("UnmeasuredFile"):
             assert_equal(a.findings[i].count, 3)
@@ -156,17 +163,17 @@ def test_test_sources_and_helpers() raises:
     l.append("src/p/tests/test_a.mojo")
     var s = _sources()
     s.texts[String("src/p/testing_helpers.mojo")] = String("def fake() -> Int:\n    return 0\n")
-    var a = analyze(_report(), List[Input](), repo_files_of(l), Ratchet(), s, Options())
-    assert_equal(_kinds(a), "BelowTarget BranchNotMeasured MissingRow UnmeasuredFile@src/p/testing_helpers.mojo")
+    var a = analyze(_report(), List[Input](), repo_files_of(l), Held(), s, Options())
+    assert_equal(_kinds(a), "BelowTarget BranchNotMeasured UnmeasuredFile@src/p/testing_helpers.mojo")
     var o = Options()
     o.include_tests = True
-    var b = analyze(_report(), List[Input](), repo_files_of(l), Ratchet(), s, o)
-    assert_equal(_kinds(b), "BelowTarget BranchNotMeasured MissingRow UnmeasuredFile@src/p/testing_helpers.mojo UnmeasuredFile@src/p/tests/test_a.mojo")
+    var b = analyze(_report(), List[Input](), repo_files_of(l), Held(), s, o)
+    assert_equal(_kinds(b), "BelowTarget BranchNotMeasured UnmeasuredFile@src/p/testing_helpers.mojo UnmeasuredFile@src/p/tests/test_a.mojo")
     assert_equal(b.packages[0].line_found, 6)
 
 
 def test_gate_equals_report_with_unmeasured_files() raises:
-    var rat = parse_ratchet(String("src/p\t9000\t-\n"), String("r.tsv"))
+    var rat = _held(String("line\n"))
     var full = analyze(_report(), List[Input](), _repo(), rat, _sources(), Options())
     var o = Options()
     o.only_package = String("src/p")
@@ -174,8 +181,8 @@ def test_gate_equals_report_with_unmeasured_files() raises:
     assert_equal(package_json(gate.packages[0]), package_json(full.packages[full.package_index(String("src/p"))]))
     assert_equal(_kinds(gate), _kinds(full))
     assert_true(package_json(gate.packages[0]).find("\"unmeasured_files\":1") >= 0, package_json(gate.packages[0]))
-    # Neutral mode: the same findings; the line under its floor of 90.00%
-    # is a Regression, which fails in every mode.
+    # Neutral mode: the same findings; the held line under the target is a
+    # Regression, which fails in every mode.
     assert_true(_kinds(full).find("Regression") >= 0, _kinds(full))
     assert_equal(full.conclusion, "failure")
 
@@ -184,7 +191,7 @@ def test_annotations_of_a_file_no_test_compiled() raises:
     # One range per run of consecutive executable lines: z.mojo's 4, then
     # 6-8 (the comment on 5 breaks the run, where a line with no record in
     # a compiled file would not).
-    var a = analyze(_report(), List[Input](), _repo(), parse_ratchet(String("src/p\t10000\t-\n"), String("r.tsv")), _sources(), _enforce())
+    var a = analyze(_report(), List[Input](), _repo(), _held(String("line\n")), _sources(), _enforce())
     var d = parse_diff(String("diff --git a/src/p/a.mojo b/src/p/a.mojo\n--- a/src/p/a.mojo\n+++ b/src/p/a.mojo\n@@ -1 +1 @@\n-x\n+y\n"))
     var anns = annotations(a, d, touched_packages(a, d, _repo()))
     var s = String("")
@@ -205,7 +212,7 @@ def test_a_report_entry_with_no_record_counts_as_unmeasured() raises:
     l.append(Input(String(FORMAT_LCOV), String(""), String("t.info"), String(
         "SF:src/p/a.mojo\nDA:1,1\nDA:2,3\nend_of_record\nSF:src/p/z.mojo\nend_of_record\n"
     )))
-    var rat = parse_ratchet(String("src/p\t10000\t-\n"), String("r.tsv"))
+    var rat = _held(String("line\n"))
     var a = analyze(l, List[Input](), _repo(), rat, _sources(), _enforce())
     var k = a.package_index(String("src/p"))
     assert_true(k >= 0)
@@ -213,7 +220,7 @@ def test_a_report_entry_with_no_record_counts_as_unmeasured() raises:
     assert_equal(a.packages[k].line_hit, 2)
     assert_equal(a.packages[k].files, 2)
     assert_equal(a.packages[k].unmeasured_files, 1)
-    assert_equal(_kinds(a), "BelowTarget BranchNotMeasured Regression UnmeasuredFile@src/p/z.mojo")
+    assert_equal(_kinds(a), "BranchNotMeasured Regression UnmeasuredFile@src/p/z.mojo")
     assert_equal(a.conclusion, "failure")
     # The package's only report entry has no record: it is still measured
     # (NotMeasured), and the lines of z.mojo and a.mojo (now named by no
@@ -224,7 +231,7 @@ def test_a_report_entry_with_no_record_counts_as_unmeasured() raises:
     var j = b.package_index(String("src/p"))
     assert_equal(b.packages[j].line_found, 6, _kinds(b))
     assert_equal(b.packages[j].line_hit, 0)
-    assert_equal(_kinds(b), "BelowTarget NotMeasured Regression UnmeasuredFile@src/p/a.mojo UnmeasuredFile@src/p/z.mojo")
+    assert_equal(_kinds(b), "NotMeasured Regression UnmeasuredFile@src/p/a.mojo UnmeasuredFile@src/p/z.mojo")
 
 
 def test_unmeasured_files_counts_only_files_with_a_finding() raises:
@@ -235,7 +242,7 @@ def test_unmeasured_files_counts_only_files_with_a_finding() raises:
     var s = _sources()
     s.texts[String("src/p/z.mojo")] = String("abort()  # cov: unreachable r\n")
     s.texts[String("src/p/__init__.mojo")] = String("# cov: unreachable r\n")
-    var a = analyze(_report(), List[Input](), _repo(), parse_ratchet(String("src/p\t10000\t-\n"), String("r.tsv")), s, _enforce())
+    var a = analyze(_report(), List[Input](), _repo(), _held(String("line\n")), s, _enforce())
     var k = a.package_index(String("src/p"))
     # The report has no branch record: that, and no file finding.
     assert_equal(_kinds(a), "BranchNotMeasured")
@@ -257,7 +264,7 @@ def test_measured_means_a_report_recorded_a_line() raises:
     s.texts[String("src/p/a.mojo")] = String("abort()  # cov: unreachable r\n")
     var r = List[Input]()
     r.append(Input(String(FORMAT_LCOV), String(""), String("t.info"), String("SF:src/p/a.mojo\nDA:1,0\nend_of_record\n")))
-    var a = analyze(r, List[Input](), repo_files_of(l), Ratchet(), s, _enforce())
+    var a = analyze(r, List[Input](), repo_files_of(l), Held(), s, _enforce())
     assert_equal(a.packages[0].exempt_lines, 1)
     assert_equal(a.packages[0].line_found, 0)
     assert_true((String(" ") + _kinds(a)).find(" NotMeasured") < 0, _kinds(a))
@@ -270,7 +277,7 @@ def test_measured_means_a_report_recorded_a_line() raises:
     )
     var only = List[Input]()
     only.append(Input(String(FORMAT_LCOV), String(""), String("t.info"), String("SF:src/p/z.mojo\nend_of_record\n")))
-    var b = analyze(only, List[Input](), _repo(), Ratchet(), z, _enforce())
+    var b = analyze(only, List[Input](), _repo(), Held(), z, _enforce())
     var k = b.package_index(String("src/p"))
     assert_equal(b.packages[k].exempt_lines, 1)
     assert_true((String(" ") + _kinds(b)).find(" NotMeasured") >= 0, _kinds(b))

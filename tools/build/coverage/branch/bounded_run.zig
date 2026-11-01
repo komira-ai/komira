@@ -2,7 +2,7 @@
 //! (under which it leads a session of its own), and report how it ended.
 //!
 //! What the coverage actions do in shell today, once: cov_branch_run (no
-//! limit: the release gate's runner, waited for alone), cov_run.sh (a limit,
+//! limit: the release gate's runner, waited for alone), cov_run (a limit,
 //! then SIGKILL to the whole process group and a scan of /proc for members
 //! that survived it) and mut_step.sh (a limit, then SIGTERM to the group, a
 //! grace period, and SIGKILL). The module is pure std (no import of its own)
@@ -25,7 +25,7 @@
 //! Waiting: with no limit, a blocking wait for the command alone (like the
 //! shell's `wait`): processes it left running are not waited for, and not
 //! killed. With a limit, the command is polled; once `limit_ms` has passed
-//! the group is sent SIGKILL (or SIGTERM, then after `term_grace_ms` SIGKILL)
+//! the group is sent SIGKILL (or SIGTERM, then after `term_grace_ms`, SIGKILL)
 //! and the command is reaped. With `check_survivors`, the group's members
 //! that are not zombies are then listed from /proc, polled every 100 ms for
 //! up to `survivor_wait_ms` (SIGKILL is delivered when a process next runs).
@@ -44,6 +44,30 @@
 const std = @import("std");
 const linux = std.os.linux;
 const posix = std.posix;
+
+/// The time and the signals of a run, in one place so that a test can give
+/// them its own: a clock it moves itself and a kill it records. The default
+/// is the monotonic clock, nanosleep and kill(2).
+pub const Clock = struct {
+    ctx: ?*anyopaque = null,
+    /// Monotonic nanoseconds, null when the clock cannot be read.
+    now_ns: *const fn (?*anyopaque) ?u64 = realNow,
+    sleep_ns: *const fn (?*anyopaque, u64) void = realSleep,
+    kill: *const fn (?*anyopaque, i32, i32) void = realKill,
+};
+
+fn realNow(_: ?*anyopaque) ?u64 {
+    const ts = posix.clock_gettime(.MONOTONIC) catch return null;
+    return @as(u64, @intCast(ts.sec)) * std.time.ns_per_s + @as(u64, @intCast(ts.nsec));
+}
+
+fn realSleep(_: ?*anyopaque, ns: u64) void {
+    std.Thread.sleep(ns);
+}
+
+fn realKill(_: ?*anyopaque, pid: i32, sig: i32) void {
+    _ = linux.kill(pid, sig);
+}
 
 pub const Spec = struct {
     /// argv[0] is the program's path.
@@ -65,6 +89,7 @@ pub const Spec = struct {
     survivor_wait_ms: u64 = 10_000,
     /// The process table the scan reads; tests give a directory of their own.
     proc_root: []const u8 = "/proc",
+    clock: Clock = .{},
 };
 
 pub const Status = union(enum) {
@@ -109,9 +134,9 @@ fn sysErr(rc: usize) linux.E {
 /// NAME=VALUE entries of `map`, sorted by name (a fixed order, so a command's
 /// environment does not depend on the map's).
 pub fn envFromMap(alloc: std.mem.Allocator, map: *const std.process.EnvMap) ![]const []const u8 {
-    var names = std.ArrayList([]const u8).init(alloc);
+    var names = std.ArrayList([]const u8).empty;
     var it = map.iterator();
-    while (it.next()) |e| try names.append(e.key_ptr.*);
+    while (it.next()) |e| try names.append(alloc, e.key_ptr.*);
     std.mem.sort([]const u8, names.items, {}, lessThan);
     const out = try alloc.alloc([]const u8, names.items.len);
     for (names.items, 0..) |n, i| out[i] = try std.fmt.allocPrint(alloc, "{s}={s}", .{ n, map.get(n).? });
@@ -159,15 +184,16 @@ pub fn run(alloc: std.mem.Allocator, spec: Spec) Error!Outcome {
     if (!own_group) {
         return .{ .status = reap(pid), .timed_out = false, .pgid = null, .survivors = &.{} };
     }
-    const start = std.time.Instant.now() catch return error.Unexpected;
+    const clock = spec.clock;
+    const start = clock.now_ns(clock.ctx) orelse return error.Unexpected;
     var nap: u64 = std.time.ns_per_ms;
     while (true) {
         if (exitedNoReap(pid, false)) {
             return .{ .status = reap(pid), .timed_out = false, .pgid = pid, .survivors = &.{} };
         }
-        const now = std.time.Instant.now() catch return error.Unexpected;
-        if (now.since(start) >= spec.limit_ms.? * std.time.ns_per_ms) break;
-        std.time.sleep(nap);
+        const now = clock.now_ns(clock.ctx) orelse return error.Unexpected;
+        if (now -| start >= spec.limit_ms.? * std.time.ns_per_ms) break;
+        clock.sleep_ns(clock.ctx, nap);
         nap = @min(nap * 2, 50 * std.time.ns_per_ms);
     }
 
@@ -176,18 +202,20 @@ pub fn run(alloc: std.mem.Allocator, spec: Spec) Error!Outcome {
     // caller's group (setsid not yet run) is killed all the same, and the
     // wait below cannot block on it.
     if (spec.term_grace_ms) |grace| {
-        _ = linux.kill(-pid, linux.SIG.TERM);
-        _ = linux.kill(pid, linux.SIG.TERM);
-        std.time.sleep(grace * std.time.ns_per_ms);
+        clock.kill(clock.ctx, -pid, linux.SIG.TERM);
+        clock.kill(clock.ctx, pid, linux.SIG.TERM);
+        // The whole grace period, as it always was: members of the group
+        // other than the leader may need it after the leader has left.
+        clock.sleep_ns(clock.ctx, grace * std.time.ns_per_ms);
     }
-    _ = linux.kill(-pid, linux.SIG.KILL);
-    _ = linux.kill(pid, linux.SIG.KILL);
+    clock.kill(clock.ctx, -pid, linux.SIG.KILL);
+    clock.kill(clock.ctx, pid, linux.SIG.KILL);
     // The leader stays a zombie while the group is read.
     _ = exitedNoReap(pid, true);
     var survivors: []const Survivor = &.{};
     var scan_err: ?Error = null;
     if (spec.check_survivors) {
-        if (survivorsAfterKill(alloc, spec.proc_root, pid, spec.survivor_wait_ms)) |left| {
+        if (survivorsAfterKillOn(alloc, spec.proc_root, pid, spec.survivor_wait_ms, clock)) |left| {
             survivors = left;
         } else |e| scan_err = e;
     }
@@ -201,15 +229,20 @@ pub fn run(alloc: std.mem.Allocator, spec: Spec) Error!Outcome {
 /// process's own /proc). Whatever survived is sent SIGKILL again; the caller
 /// reports it.
 pub fn survivorsAfterKill(alloc: std.mem.Allocator, root: []const u8, pgid: i32, wait_ms: u64) Error![]const Survivor {
+    return survivorsAfterKillOn(alloc, root, pgid, wait_ms, .{});
+}
+
+/// `survivorsAfterKill` with the naps and the kill on `clock`.
+pub fn survivorsAfterKillOn(alloc: std.mem.Allocator, root: []const u8, pgid: i32, wait_ms: u64, clock: Clock) Error![]const Survivor {
     try procIsOwn(alloc, root);
     var waited: u64 = 0;
     while (true) {
         const left = try groupLeft(alloc, root, pgid);
         if (left.len == 0 or waited >= wait_ms) {
-            if (left.len != 0) _ = linux.kill(-pgid, linux.SIG.KILL);
+            if (left.len != 0) clock.kill(clock.ctx, -pgid, linux.SIG.KILL);
             return left;
         }
-        std.time.sleep(100 * std.time.ns_per_ms);
+        clock.sleep_ns(clock.ctx, 100 * std.time.ns_per_ms);
         waited += 100;
     }
 }
@@ -291,7 +324,7 @@ fn firstField(alloc: std.mem.Allocator, path: []const u8) ?[]const u8 {
     return text[0..end];
 }
 
-/// One /proc/<pid>/stat line, read as cov_run.sh reads it: the fields after
+/// One /proc/<pid>/stat line, read as cov_run reads it: the fields after
 /// the LAST ')' (comm may hold one) are state, ppid and pgrp.
 pub fn parseStat(line: []const u8) ?struct { pid: i32, comm: []const u8, state: u8, pgrp: i32 } {
     const open = std.mem.indexOfScalar(u8, line, '(') orelse return null;
@@ -310,8 +343,8 @@ pub fn parseStat(line: []const u8) ?struct { pid: i32, comm: []const u8, state: 
 /// The processes of group `pgid` under `root` that are not zombies (Z) or
 /// dead (X). A process that exits while this reads is skipped.
 pub fn groupLeft(alloc: std.mem.Allocator, root: []const u8, pgid: i32) ![]const Survivor {
-    var out = std.ArrayList(Survivor).init(alloc);
-    var dir = std.fs.cwd().openDir(root, .{ .iterate = true }) catch return out.toOwnedSlice();
+    var out = std.ArrayList(Survivor).empty;
+    var dir = std.fs.cwd().openDir(root, .{ .iterate = true }) catch return out.toOwnedSlice(alloc);
     defer dir.close();
     var it = dir.iterate();
     while (it.next() catch null) |e| {
@@ -320,10 +353,10 @@ pub fn groupLeft(alloc: std.mem.Allocator, root: []const u8, pgid: i32) ![]const
         const text = std.fs.cwd().readFileAlloc(alloc, p, 1 << 16) catch continue;
         const s = parseStat(std.mem.trimRight(u8, text, "\n")) orelse continue;
         if (s.pgrp != pgid or s.state == 'Z' or s.state == 'X') continue;
-        try out.append(.{ .pid = s.pid, .state = s.state, .comm = s.comm });
+        try out.append(alloc, .{ .pid = s.pid, .state = s.state, .comm = s.comm });
     }
     std.mem.sort(Survivor, out.items, {}, byPid);
-    return out.toOwnedSlice();
+    return out.toOwnedSlice(alloc);
 }
 
 fn byPid(_: void, a: Survivor, b: Survivor) bool {
@@ -346,6 +379,130 @@ fn which(alloc: std.mem.Allocator, name: []const u8) ![]const u8 {
         return p;
     }
     return error.FileNotFound;
+}
+
+/// A clock a test moves itself. Time moves only when `run` or the scan naps,
+/// and by the nap, so every decision made on it is on exact values; nothing
+/// in a run waits for real time. Every nap and kill is recorded.
+const Fake = struct {
+    const Ev = struct { t: u64, what: enum { nap, kill }, pid: i32 = 0, sig: i32 = 0, ns: u64 = 0 };
+
+    now: u64 = 0,
+    /// A FIFO the command writes to once it is up: the first nap waits for
+    /// that byte (a progress wait with no limit of its own) before time moves.
+    ready: ?[:0]const u8 = null,
+    started: bool = false,
+    /// Time never moves; a nap only yields (for a command that must finish
+    /// by itself before any limit could be reached).
+    frozen: bool = false,
+    /// After a SIGTERM to the group, a nap first waits for the leader's exit
+    /// (so a trap has run before the SIGKILL), then moves time.
+    term_waits_for_exit: bool = false,
+    /// After a SIGKILL to the group, a nap waits for the group's running
+    /// members under `root` to be gone before time moves: the kill cannot
+    /// be refused, so they will be.
+    settle_root: ?[]const u8 = null,
+    leader: i32 = 0,
+    termed: bool = false,
+    killed: bool = false,
+    events: [512]Ev = undefined,
+    n: usize = 0,
+
+    fn clock(f: *Fake) Clock {
+        return .{ .ctx = f, .now_ns = nowFn, .sleep_ns = napFn, .kill = killFn };
+    }
+
+    fn of(ctx: ?*anyopaque) *Fake {
+        return @ptrCast(@alignCast(ctx.?));
+    }
+
+    fn record(f: *Fake, ev: Ev) void {
+        if (f.n < f.events.len) {
+            f.events[f.n] = ev;
+            f.n += 1;
+        }
+    }
+
+    fn nowFn(ctx: ?*anyopaque) ?u64 {
+        return of(ctx).now;
+    }
+
+    fn killFn(ctx: ?*anyopaque, pid: i32, sig: i32) void {
+        const f = of(ctx);
+        f.record(.{ .t = f.now, .what = .kill, .pid = pid, .sig = sig });
+        if (pid < 0 and sig == linux.SIG.TERM) {
+            f.termed = true;
+            f.leader = -pid;
+        }
+        if (pid < 0 and sig == linux.SIG.KILL) {
+            f.killed = true;
+            f.leader = -pid;
+        }
+        _ = linux.kill(pid, sig);
+    }
+
+    fn napFn(ctx: ?*anyopaque, ns: u64) void {
+        const f = of(ctx);
+        f.record(.{ .t = f.now, .what = .nap, .ns = ns });
+        if (f.frozen) {
+            std.Thread.yield() catch {};
+            return;
+        }
+        if (!f.started) {
+            f.started = true;
+            if (f.ready) |path| {
+                const fd = posix.open(path, .{ .ACCMODE = .RDONLY }, 0) catch return;
+                defer posix.close(fd);
+                var b: [1]u8 = undefined;
+                _ = posix.read(fd, &b) catch {};
+            }
+        }
+        if (f.termed and !f.killed and f.term_waits_for_exit) {
+            _ = exitedNoReap(f.leader, true);
+        }
+        if (f.killed) if (f.settle_root) |root| {
+            var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+            defer arena.deinit();
+            const left = groupLeft(arena.allocator(), root, f.leader) catch &.{};
+            for (left) |m| waitPidExit(m.pid);
+        };
+        f.now += ns;
+    }
+
+    fn killTime(f: *const Fake, pid: i32, sig: i32) ?u64 {
+        for (f.events[0..f.n]) |e| {
+            if (e.what == .kill and e.pid == pid and e.sig == sig) return e.t;
+        }
+        return null;
+    }
+
+    fn naps(f: *const Fake) usize {
+        var c: usize = 0;
+        for (f.events[0..f.n]) |e| {
+            if (e.what == .nap) c += 1;
+        }
+        return c;
+    }
+};
+
+/// Blocks until `pid` has exited (a zombie has), with no limit of its own.
+fn waitPidExit(pid: i32) void {
+    const rc = linux.pidfd_open(pid, 0);
+    if (sysErr(rc) != .SUCCESS) return;
+    const fd: posix.fd_t = @intCast(rc);
+    defer posix.close(fd);
+    var p = [1]posix.pollfd{.{ .fd = fd, .events = posix.POLL.IN, .revents = 0 }};
+    while (true) {
+        const got = posix.poll(&p, -1) catch continue;
+        if (got > 0) return;
+    }
+}
+
+/// A FIFO in `dir` named `name`, for a command to say it is up through.
+fn makeFifo(a: std.mem.Allocator, dir: []const u8, name: []const u8) ![:0]const u8 {
+    const path = try std.fmt.allocPrintSentinel(a, "{s}/{s}", .{ dir, name }, 0);
+    if (sysErr(linux.mknodat(linux.AT.FDCWD, path, linux.S.IFIFO | 0o600, 0)) != .SUCCESS) return error.Unexpected;
+    return path;
 }
 
 fn shSpec(alloc: std.mem.Allocator, script: []const u8) !Spec {
@@ -390,6 +547,10 @@ fn catStat(a: std.mem.Allocator, limit_ms: ?u64) !struct { o: Outcome, gs: [2]i3
     var spec = try shSpec(a, "cat /proc/self/stat");
     spec.stdout_path = out;
     spec.limit_ms = limit_ms;
+    // A clock that does not move: the limit cannot be reached, whatever the
+    // host's speed; the command ends by itself.
+    var fake = Fake{ .frozen = true };
+    spec.clock = fake.clock();
     const o = try run(a, spec);
     try testing.expectEqual(Status{ .exited = 0 }, o.status);
     try testing.expect(!o.timed_out);
@@ -476,7 +637,7 @@ test "stderr_to_stdout wins over stderr_path, whose file is still created empty"
     const dir = try tmp.dir.realpathAlloc(a, ".");
     const o = try std.fs.path.join(a, &.{ dir, "o" });
     const e = try std.fs.path.join(a, &.{ dir, "e" });
-    try tmp.dir.writeFile("e", "stale\n");
+    try tmp.dir.writeFile(.{ .sub_path = "e", .data = "stale\n" });
     var spec = try shSpec(a, "echo out; echo err >&2");
     spec.stdout_path = o;
     spec.stderr_path = e;
@@ -510,14 +671,13 @@ test "no limit: the command is waited for alone, and nothing is killed" {
     defer tmp.cleanup();
     const dir = try tmp.dir.realpathAlloc(a, ".");
     const out = try std.fs.path.join(a, &.{ dir, "pid" });
-    // The shell leaves a sleeper behind, says its pid, and exits at once.
-    var spec = try shSpec(a, "sleep 3 & echo $!; exit 0");
+    // The shell leaves a sleeper behind, says its pid, and exits at once. The
+    // sleeper outlasts any test: if the run waited for it (the group, not the
+    // command alone), the run would not return.
+    var spec = try shSpec(a, "sleep 3600 & echo $!; exit 0");
     spec.stdout_path = out;
-    const t0 = try std.time.Instant.now();
     const o = try run(a, spec);
-    const took = (try std.time.Instant.now()).since(t0);
     try testing.expectEqual(Status{ .exited = 0 }, o.status);
-    try testing.expect(took < 2 * std.time.ns_per_s);
     // The sleeper is still running (it is in our group: only it is killed).
     const text = try std.fs.cwd().readFileAlloc(a, out, 64);
     const sleeper = try std.fmt.parseInt(i32, std.mem.trimRight(u8, text, "\n"), 10);
@@ -531,20 +691,30 @@ test "a limit kills the whole group, and the scan finds no survivor" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     const a = arena.allocator();
-    var spec = try shSpec(a, "sleep 30 & sleep 30; exit 0");
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try tmp.dir.realpathAlloc(a, ".");
+    const fifo = try makeFifo(a, dir, "up");
+    // A background sleeper and a foreground one, both for an hour; the
+    // shell says they are up before the clock moves.
+    var spec = try shSpec(a, try std.fmt.allocPrint(a, "sleep 3600 & echo r >{s}; sleep 3600; exit 0", .{fifo}));
     spec.stderr_path = "/dev/null";
     spec.limit_ms = 300;
     spec.check_survivors = true;
     spec.survivor_wait_ms = 2000;
-    const t0 = try std.time.Instant.now();
+    var fake = Fake{ .ready = fifo, .settle_root = "/proc" };
+    spec.clock = fake.clock();
     const o = try run(a, spec);
-    const took = (try std.time.Instant.now()).since(t0);
     try testing.expect(o.timed_out);
     try testing.expectEqual(Status{ .signaled = 9 }, o.status);
     try testing.expectEqual(@as(usize, 0), o.survivors.len);
     // Not the leader alone: the background sleeper is gone too.
     try testing.expectEqual(@as(usize, 0), (try groupLeft(a, "/proc", o.pgid.?)).len);
-    try testing.expect(took < 10 * std.time.ns_per_s);
+    // The group was killed (and the leader by its pid) at the first nap
+    // boundary at or after the limit, and not before it.
+    const at = fake.killTime(-o.pgid.?, linux.SIG.KILL).?;
+    try testing.expect(at >= 300 * std.time.ns_per_ms and at < 350 * std.time.ns_per_ms);
+    try testing.expectEqual(@as(?u64, at), fake.killTime(o.pgid.?, linux.SIG.KILL));
 }
 
 test "a command that ends within its limit is not timed out" {
@@ -553,29 +723,63 @@ test "a command that ends within its limit is not timed out" {
     const a = arena.allocator();
     var spec = try shSpec(a, "exit 5");
     spec.limit_ms = 20_000;
+    var fake = Fake{ .frozen = true };
+    spec.clock = fake.clock();
     const o = try run(a, spec);
     try testing.expect(!o.timed_out);
     try testing.expectEqual(Status{ .exited = 5 }, o.status);
 }
 
-test "a term grace sends SIGTERM first: a command that traps it exits its own way" {
+test "a term grace sends SIGTERM first: a command that traps it exits its own way, and the grace is still waited out" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     const a = arena.allocator();
-    var spec = try shSpec(a, "trap 'exit 7' TERM; while :; do sleep 0.05; done");
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const fifo = try makeFifo(a, try tmp.dir.realpathAlloc(a, "."), "up");
+    var spec = try shSpec(a, try std.fmt.allocPrint(a, "trap 'exit 7' TERM; echo r >{s}; while :; do sleep 1; done", .{fifo}));
     spec.stderr_path = "/dev/null";
     spec.limit_ms = 300;
     spec.term_grace_ms = 1000;
+    var fake = Fake{ .ready = fifo, .term_waits_for_exit = true };
+    spec.clock = fake.clock();
     const o = try run(a, spec);
     try testing.expect(o.timed_out);
     try testing.expectEqual(Status{ .exited = 7 }, o.status);
+    // The group is sent SIGTERM at the limit, and the SIGKILL that follows
+    // (for whatever else is left in the group) comes after the whole grace.
+    const termed = fake.killTime(-o.pgid.?, linux.SIG.TERM).?;
+    try testing.expect(termed >= 300 * std.time.ns_per_ms);
+    try testing.expectEqual(@as(?u64, termed + 1000 * std.time.ns_per_ms), fake.killTime(-o.pgid.?, linux.SIG.KILL));
+}
+
+test "a term grace is waited out for a command that ignores SIGTERM, then the group is sent SIGKILL" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const fifo = try makeFifo(a, try tmp.dir.realpathAlloc(a, "."), "up");
+    var spec = try shSpec(a, try std.fmt.allocPrint(a, "trap '' TERM; echo r >{s}; while :; do sleep 1; done", .{fifo}));
+    spec.stderr_path = "/dev/null";
+    spec.limit_ms = 300;
+    spec.term_grace_ms = 1000;
+    var fake = Fake{ .ready = fifo };
+    spec.clock = fake.clock();
+    const o = try run(a, spec);
+    try testing.expect(o.timed_out);
+    try testing.expectEqual(Status{ .signaled = 9 }, o.status);
+    // Exactly the grace period (1000 ms) on the clock between the two.
+    const termed = fake.killTime(-o.pgid.?, linux.SIG.TERM).?;
+    const killed = fake.killTime(-o.pgid.?, linux.SIG.KILL).?;
+    try testing.expectEqual(1000 * std.time.ns_per_ms, killed - termed);
 }
 
 fn writeStat(dir: std.fs.Dir, pid: []const u8, line: []const u8) !void {
     try dir.makePath(pid);
     const p = try std.fmt.allocPrint(testing.allocator, "{s}/stat", .{pid});
     defer testing.allocator.free(p);
-    try dir.writeFile(p, line);
+    try dir.writeFile(.{ .sub_path = p, .data = line });
 }
 
 test "the survivor scan reads state and group after the last ')', and skips zombies" {
@@ -622,10 +826,12 @@ test "a /proc that is not this process's own is refused" {
     // The real one is ours.
     try procIsOwn(a, "/proc");
     // And a limit run with check_survivors refuses a blind table.
-    var spec = try shSpec(a, "sleep 30");
+    var spec = try shSpec(a, "sleep 3600");
     spec.limit_ms = 100;
     spec.check_survivors = true;
     spec.proc_root = try std.fs.path.join(a, &.{ root, "missing" });
+    var fake = Fake{};
+    spec.clock = fake.clock();
     try testing.expectError(error.ProcNotOwn, run(a, spec));
 }
 
@@ -643,18 +849,22 @@ test "a member that survives the kill is reported, after the wait" {
     // nothing. One member in uninterruptible sleep, one zombie.
     try writeStat(tmp.dir, "4242", "4242 (stuck) D 1 2147483000 2147483000 0\n");
     try writeStat(tmp.dir, "4243", "4243 (gone) Z 1 2147483000 2147483000 0\n");
-    const t0 = try std.time.Instant.now();
-    const left = try survivorsAfterKill(a, root, 2147483000, 300);
-    const took = (try std.time.Instant.now()).since(t0);
+    var fake = Fake{};
+    const left = try survivorsAfterKillOn(a, root, 2147483000, 300, fake.clock());
     try testing.expectEqual(@as(usize, 1), left.len);
     try testing.expectEqual(@as(i32, 4242), left[0].pid);
     try testing.expectEqual(@as(u8, 'D'), left[0].state);
     try testing.expectEqualStrings("stuck", left[0].comm);
-    // It was given the wait before being reported.
-    try testing.expect(took >= 300 * std.time.ns_per_ms);
-    // A group with only a zombie left has no survivor, at once.
-    const none = try survivorsAfterKill(a, root, 2147483001, 300);
+    // It was given the wait before being reported: three naps of 100 ms
+    // (300 ms in all), and only after them the second kill of the group.
+    try testing.expectEqual(@as(usize, 3), fake.naps());
+    try testing.expectEqual(@as(u64, 300 * std.time.ns_per_ms), fake.now);
+    try testing.expectEqual(@as(?u64, 300 * std.time.ns_per_ms), fake.killTime(-2147483000, linux.SIG.KILL));
+    // A group with only a zombie left has no survivor, at once: no nap, no kill.
+    var fake2 = Fake{};
+    const none = try survivorsAfterKillOn(a, root, 2147483001, 300, fake2.clock());
     try testing.expectEqual(@as(usize, 0), none.len);
+    try testing.expectEqual(@as(usize, 0), fake2.n);
 }
 
 test "parseStat refuses lines it cannot read" {
@@ -675,7 +885,7 @@ test "survivors still running after the wait are sent SIGKILL again" {
     // it and before the scan's kill). As in run(), where the leader is still
     // a zombie during the scan, the survivor is a member, never the leader:
     // only a kill of the whole group (-pgid) reaches it.
-    const argv = try zArray(a, &.{ try which(a, "sleep"), "30" });
+    const argv = try zArray(a, &.{ try which(a, "sleep"), "3600" });
     const envp = try zArray(a, &.{});
     const leader = try posix.fork();
     if (leader == 0) {
@@ -718,10 +928,9 @@ test "survivors still running after the wait are sent SIGKILL again" {
     const left = try survivorsAfterKill(a, root, leader, 0);
     try testing.expectEqual(@as(usize, 1), left.len);
     try testing.expectEqual(member, left[0].pid);
-    // Within 5 s the member is dead of SIGKILL.
-    var waited: u32 = 0;
-    while (!exitedNoReap(member, false) and waited < 5000) : (waited += 20) std.time.sleep(20 * std.time.ns_per_ms);
-    try testing.expect(waited < 5000);
+    // The member dies of the SIGKILL (a wait with no limit of its own: the
+    // kill cannot be refused).
+    _ = exitedNoReap(member, true);
     member_reaped = true;
     try testing.expectEqual(Status{ .signaled = linux.SIG.KILL }, reap(member));
 }

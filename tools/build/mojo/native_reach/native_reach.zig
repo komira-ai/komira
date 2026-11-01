@@ -43,7 +43,7 @@ fn isIdent(c: u8) bool {
 
 /// Appends to `out` each string literal of `text` (the contents of `path`)
 /// that starts with one of `refuses`' prefixes, outside comments.
-pub fn scan(path: []const u8, text: []const u8, refuses: []const Refuse, out: *std.ArrayList(Finding)) !void {
+pub fn scan(alloc: std.mem.Allocator, path: []const u8, text: []const u8, refuses: []const Refuse, out: *std.ArrayList(Finding)) !void {
     var line_no: usize = 0;
     var lines = std.mem.splitScalar(u8, text, '\n');
     while (lines.next()) |line| {
@@ -61,7 +61,7 @@ pub fn scan(path: []const u8, text: []const u8, refuses: []const Refuse, out: *s
                     if (r.prefix.len == 0 or !std.mem.startsWith(u8, rest, r.prefix)) continue;
                     var e = r.prefix.len;
                     while (e < rest.len and isIdent(rest[e])) e += 1;
-                    try out.append(.{ .path = path, .line = line_no, .symbol = rest[0..e], .refuse = r });
+                    try out.append(alloc, .{ .path = path, .line = line_no, .symbol = rest[0..e], .refuse = r });
                     break;
                 }
             } else if (c == '\\') {
@@ -76,8 +76,8 @@ pub fn scan(path: []const u8, text: []const u8, refuses: []const Refuse, out: *s
 /// The validation message for `findings` (which `scan` found in `files`
 /// files of `library`, against `refuses`), and whether it is a failure.
 pub fn message(alloc: std.mem.Allocator, library: []const u8, files: usize, refuses: []const Refuse, findings: []const Finding) ![]const u8 {
-    var m = std.ArrayList(u8).init(alloc);
-    const w = m.writer();
+    var m = std.ArrayList(u8).empty;
+    const w = m.writer(alloc);
     if (findings.len == 0) {
         try w.print("{s}: {d} source file(s) checked; none calls a prefixed name of an owner outside its Mojo deps closure (", .{ library, files });
         for (refuses, 0..) |r, i| {
@@ -85,23 +85,23 @@ pub fn message(alloc: std.mem.Allocator, library: []const u8, files: usize, refu
             try w.print("{s}* of {s}", .{ r.prefix, r.owner });
         }
         try w.writeAll(")");
-        return m.toOwnedSlice();
+        return m.toOwnedSlice(alloc);
     }
     try w.print("{s} calls native code of a library that is not in its Mojo deps closure, so its package would not require the library that ships that code; add the owner to its deps (tools/build/mojo/native_reach.bzl):", .{library});
     for (findings) |f| {
         try w.print("\n{s}:{d}: \"{s}\" is {s}'s (prefix {s}), which is not in the closure", .{ f.path, f.line, f.symbol, f.refuse.owner, f.refuse.prefix });
     }
-    return m.toOwnedSlice();
+    return m.toOwnedSlice(alloc);
 }
 
 /// The Buck2 validation result (ValidationInfo) holding `msg`.
 pub fn result(alloc: std.mem.Allocator, failed: bool, msg: []const u8) ![]const u8 {
-    var m = std.ArrayList(u8).init(alloc);
-    try std.json.stringify(.{
+    var m = std.Io.Writer.Allocating.init(alloc);
+    try std.json.Stringify.value(.{
         .version = @as(u32, 1),
         .data = .{ .status = @as([]const u8, if (failed) "failure" else "success"), .message = msg },
-    }, .{}, m.writer());
-    try m.append('\n');
+    }, .{}, &m.writer);
+    try m.writer.writeByte('\n');
     return m.toOwnedSlice();
 }
 
@@ -117,7 +117,7 @@ pub fn parseArgs(alloc: std.mem.Allocator, argv: []const []const u8, why: *[]con
     var out: ?[]const u8 = null;
     var library: ?[]const u8 = null;
     var src: ?[]const u8 = null;
-    var refuses = std.ArrayList(Refuse).init(alloc);
+    var refuses = std.ArrayList(Refuse).empty;
     var i: usize = 0;
     while (i < argv.len) : (i += 2) {
         if (i + 1 >= argv.len) {
@@ -141,7 +141,7 @@ pub fn parseArgs(alloc: std.mem.Allocator, argv: []const []const u8, why: *[]con
                 why.* = "--refuse takes <prefix>=<owner>, both non-empty";
                 return null;
             }
-            try refuses.append(.{ .prefix = v[0..eq], .owner = v[eq + 1 ..] });
+            try refuses.append(alloc, .{ .prefix = v[0..eq], .owner = v[eq + 1 ..] });
         } else {
             why.* = "unknown flag";
             return null;
@@ -164,16 +164,16 @@ fn lessThan(_: void, a: []const u8, b: []const u8) bool {
 
 /// The `*.mojo` files under `dir`, relative to it, sorted.
 pub fn mojoFiles(alloc: std.mem.Allocator, dir: std.fs.Dir) ![][]const u8 {
-    var files = std.ArrayList([]const u8).init(alloc);
+    var files = std.ArrayList([]const u8).empty;
     var walker = try dir.walk(alloc);
     defer walker.deinit();
     while (try walker.next()) |entry| {
         if (entry.kind == .directory) continue;
         if (!std.mem.endsWith(u8, entry.basename, ".mojo")) continue;
-        try files.append(try alloc.dupe(u8, entry.path));
+        try files.append(alloc, try alloc.dupe(u8, entry.path));
     }
     std.mem.sort([]const u8, files.items, {}, lessThan);
-    return files.toOwnedSlice();
+    return files.toOwnedSlice(alloc);
 }
 
 /// Scans `a.src` and writes `a.out`.
@@ -181,20 +181,20 @@ pub fn run(alloc: std.mem.Allocator, a: Args) !void {
     var dir = try std.fs.cwd().openDir(a.src, .{ .iterate = true });
     defer dir.close();
     const files = try mojoFiles(alloc, dir);
-    var findings = std.ArrayList(Finding).init(alloc);
+    var findings = std.ArrayList(Finding).empty;
     for (files) |f| {
         const text = try dir.readFileAlloc(alloc, f, 64 << 20);
-        try scan(f, text, a.refuses, &findings);
+        try scan(alloc, f, text, a.refuses, &findings);
     }
     const msg = try message(alloc, a.library, files.len, a.refuses, findings.items);
     const out = try result(alloc, findings.items.len > 0, msg);
-    try std.fs.cwd().writeFile(a.out, out);
+    try std.fs.cwd().writeFile(.{ .sub_path = a.out, .data = out });
 }
 
 pub fn main() void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     const alloc = arena.allocator();
-    const stderr = std.io.getStdErr().writer();
+    const stderr = std.fs.File.stderr().deprecatedWriter();
     const raw = std.process.argsAlloc(alloc) catch std.process.exit(2);
     const argv = alloc.alloc([]const u8, raw.len) catch std.process.exit(2);
     for (raw, 0..) |arg, i| argv[i] = arg;

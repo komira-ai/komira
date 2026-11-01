@@ -1,0 +1,18 @@
+[package]
+name = "komira_wkt"
+version = "0.1.0"
+description = "The protobuf well-known types (Timestamp, Duration, Empty, the scalar wrappers, FieldMask, Struct, Value, ListValue and an opaque Any) as Mojo structs, each with its proto3 canonical JSON form."
+license = "Apache-2.0"
+repository = "https://github.com/komira-ai/komira"
+readme = "README.md"
+mojo = ["1.0.0"]
+
+[dependencies]
+komira_datetime = { path = "../komira_datetime", version = "0.1" }
+komira_encoding = { path = "../komira_encoding", version = "0.1" }
+komira_json = { path = "../komira_json", version = "0.1" }
+komira_proto_codec = { path = "../komira_proto_codec", version = "0.1" }
+
+[targets]
+lib = { path = "src/komira_wkt" }
+tests = ["tests"]

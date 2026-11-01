@@ -1,0 +1,30 @@
+load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_test")
+load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
+
+# The process behaviour of the rustc launcher (tools/build/rust/rustc_launch.zig),
+# run over a stand-in rustc and zig (fake.zig): the arguments rustc is given,
+# its environment, the exit statuses (3 and 4 among them), the output checks,
+# the linker shim and the refusals. A driver test: the launcher and the
+# stand-in are built tools it runs by absolute path. The launcher's unit tests
+# are in tools/build/rust; every Rust target compiles through it too.
+
+zig_exe(
+    name = "fake",
+    exec_compatible_with = LINUX_X86_64,
+    src = "fake.zig",
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
+)
+
+zig_test(
+    name = "driver",
+    exec_compatible_with = LINUX_X86_64,
+    exec_tools = {
+        "BUSYBOX": "komira//tools/build/toolchains:busybox",
+        "FAKE": ":fake",
+        "LAUNCH": "komira//tools/build/rust:rustc_launch",
+    },
+    src = "driver_test.zig",
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
+)

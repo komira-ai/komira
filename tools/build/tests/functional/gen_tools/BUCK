@@ -1,0 +1,56 @@
+load("@komira//tools/build/gen:defs.bzl", "committed_data")
+load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_test")
+load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
+
+# The process behaviour of the two tools of committed generated sources
+# (tools/build/gen): `fresh`, the check every `<name>_fresh` runs (what turns
+# it red, and the message), and `regen`, the verb (the buck2 commands it runs,
+# what it leaves in the committed directory, that a second run changes nothing),
+# over real directories and a stand-in buck2 (fake_buck2.zig). Driver tests: each
+# tool is a built executable they run by absolute path. Their unit tests are
+# tools/build/gen:fresh_unit and :regen_unit.
+
+zig_exe(
+    name = "fake_buck2",
+    exec_compatible_with = LINUX_X86_64,
+    src = "fake_buck2.zig",
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
+)
+
+zig_test(
+    name = "fresh",
+    exec_compatible_with = LINUX_X86_64,
+    exec_tools = {"FRESH": "komira//tools/build/gen:fresh"},
+    src = "fresh_driver_test.zig",
+    deps = ["tests//functional/driver_kit:driver_kit"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
+)
+
+zig_test(
+    name = "regen",
+    exec_compatible_with = LINUX_X86_64,
+    exec_tools = {
+        "FAKE_BUCK2": ":fake_buck2",
+        "REGEN": "komira//tools/build/gen:regen",
+    },
+    src = "regen_driver_test.zig",
+    deps = ["tests//functional/driver_kit:driver_kit"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
+)
+
+# `committed_data` (tools/build/gen/defs.bzl), the data a test takes of a committed
+# generated directory: a file keeps its path inside the directory, nested files
+# included (the environment scans of the generated clients take their files so),
+# and `suffix` keeps only the files ending so. The directory is a fixture of
+# plain files, not generated ones.
+zig_test(
+    name = "committed_data",
+    exec_compatible_with = LINUX_X86_64,
+    data = committed_data("nested_fixture", "all") | committed_data("nested_fixture", "mojo_only", ".mojo"),
+    src = "committed_data_test.zig",
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
+)

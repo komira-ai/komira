@@ -151,4 +151,6 @@ mojo_shared_lib(
         "komira_plan_stream",
     ],
     exports_exact = True,
+    # In the source, left out of the library: the door a host may find missing.
+    unlisted_exports = ["komira_plan_bytes"],
 )

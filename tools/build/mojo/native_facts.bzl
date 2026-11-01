@@ -50,18 +50,25 @@ def native_soname(import_name):
     """The SONAME of a library's own shared library (shared.bzl writes it)."""
     return "lib{}_native.so.1".format(import_name)
 
-def _c_deps(ctx):
-    return [d for d in ctx.attrs.deps if MojoInfo not in d and MergedLinkInfo in d]
+def _c_deps(deps):
+    return [d for d in deps if MojoInfo not in d and MergedLinkInfo in d]
 
-def native_facts(ctx, import_name):
+def native_facts(ctx, import_name, deps = None):
     """struct of the library's native facts: the three closure sets above,
     `c_direct` (the labels of its own C deps), `soname` (its own shared
-    library's, or None) and `static` (a list of [package path, archive])."""
-    c_deps = _c_deps(ctx)
+    library's, or None) and `static` (a list of [package path, archive]).
+
+    `deps` is the library's `deps` (default `ctx.attrs.deps`). A rule with no
+    `deps` and no `native_static` attribute (`mojo_adopted_library`, which
+    names the C libraries its old-rule view ships in `c_deps`) passes them."""
+    if deps == None:
+        deps = ctx.attrs.deps
+    native_static = getattr(ctx.attrs, "native_static", False)
+    c_deps = _c_deps(deps)
     c_direct = sorted([str(d.label.raw_target()) for d in c_deps])
-    if ctx.attrs.native != None and ctx.attrs.native_static:
+    if ctx.attrs.native != None and native_static:
         fail("{}: `native` and `native_static` both set; a library ships its C one way".format(ctx.label))
-    ships = ctx.attrs.native != None or ctx.attrs.native_static
+    ships = ctx.attrs.native != None or native_static
     if ships and not c_direct:
         fail("{}: `native` or `native_static` is set, but no dep is a C library".format(ctx.label))
     linked = {}
@@ -69,7 +76,7 @@ def native_facts(ctx, import_name):
     sonames = {}
     owner_rank = {}
     statics = {}
-    for d in ctx.attrs.deps:
+    for d in deps:
         if MojoInfo in d and d[MojoInfo].native != None:
             facts = d[MojoInfo].native
             linked.update(facts.linked)
@@ -87,7 +94,7 @@ def native_facts(ctx, import_name):
         sonames[soname] = import_name
         owner_rank[soname] = len(sonames)
     static = []
-    if ctx.attrs.native_static:
+    if native_static:
         for d in c_deps:
             subs = d[DefaultInfo].sub_targets
             if "static-pic" not in subs:

@@ -19,6 +19,7 @@
 #     `inner_plan` is inspected; a conjunct that references an outer column
 #     is HOISTED into the join's keys (an equality) or its residual (any
 #     other comparison), and the inner Filter keeps the rest (or is dropped).
+#     That hoist, and the shapes it refuses, live in `flatten_hoist`.
 #   - DataFusion `optimizer/src/decorrelate_predicate_subquery.rs` and
 #     `optimizer/src/scalar_subquery_to_join.rs`. The first lowers
 #     EXISTS/NOT_EXISTS to SEMI/ANTI joins; the second lowers scalar-
@@ -68,8 +69,6 @@ from komira_arrow.schema import Schema
 from komira_plan_expr.expr import (
     Expr,
     EXPR_COL_REF,
-    EXPR_COL_IDX,
-    EXPR_LITERAL,
     EXPR_BINARY_OP,
     EXPR_UNARY_OP,
     EXPR_CAST,
@@ -77,18 +76,11 @@ from komira_plan_expr.expr import (
     EXPR_STRING_OP,
     EXPR_WHEN,
     EXPR_AGG_FN,
-    EXPR_WINDOW_FN,
     EXPR_IN_LIST,
     EXPR_CORRELATED_SUBQUERY,
-    BIN_EQ,
     BIN_AND,
-    COL_SIDE_NONE,
-    COL_SIDE_LEFT,
-    COL_SIDE_RIGHT,
-    WhenCaseData,
 )
 from komira_plan_expr.agg_expr import AggExpr, AGG_MEAN
-from komira_plan_expr.scalar_value import ScalarValue
 from komira_plan_ir.logical_plan import (
     LogicalPlan,
     ExprArray,
@@ -116,6 +108,12 @@ from komira_plan_ir.logical_plan import (
     JOIN_ALGO_AUTO,
 )
 from komira_plan_ir.corr_subquery import corr_data_inner_plan_ref
+from .flatten_hoist import (
+    _schema_has_field,
+    _split_conjuncts,
+    _join_conjuncts,
+    _hoist_outer_eq_predicates,
+)
 
 
 # =============================================================================
@@ -256,20 +254,6 @@ def _expr_collect_column_names(
         return
 
 
-def _list_contains(needle: String, haystack: List[String]) -> Bool:
-    for i in range(len(haystack)):
-        if haystack[i] == needle:
-            return True
-    return False
-
-
-def _schema_has_field(schema: Schema, name: String) -> Bool:
-    for i in range(schema.num_columns()):
-        if schema.field_name(i) == name:
-            return True
-    return False
-
-
 def _plan_contains_correlated_subquery(plan: LogicalPlan) -> Bool:
     """Invariant-check helper: True if a Filter predicate or Project expr
     still carries an `EXPR_CORRELATED_SUBQUERY`. It descends Filter,
@@ -320,362 +304,6 @@ def _validate_outer_refs(
     for i in range(len(outer_refs)):
         if not _schema_has_field(parent_schema, outer_refs[i]):
             raise Error("UnresolvedOuterRef: " + outer_refs[i])
-
-
-# =============================================================================
-# Outer-ref hoist
-# =============================================================================
-#
-# DuckDB's `FlattenDependentJoins::RewriteCorrelatedExpressions` walks the
-# inner plan and classifies predicate-pieces by whether they reference
-# outer-scope columns. Pieces that touch outer refs are HOISTED into the
-# join's `on=` clause (i.e. they become equi-join keys). Pieces that
-# touch only inner columns stay inside the inner plan.
-#
-# This pass adopts a conservative single-level hoist:
-#   - If the inner plan is `Filter(child, predicate)` and `predicate` is
-#     a BIN_EQ between an outer_ref column and an inner column, hoist
-#     that equality into the join's left_on/right_on lists and replace
-#     the inner Filter with its child (predicate is fully consumed).
-#   - If the inner plan is `Filter(child, BIN_AND(p1, p2))`, recurse on the
-#     conjuncts: hoist any conjunct that references an outer_ref, and
-#     leave the rest in a (possibly simpler) Filter.
-#   - Otherwise: equi-keys default to the outer_refs (i.e. assume the
-#     inner schema exposes a same-named column for each outer_ref). This
-#     matches the Q4/Q17/Q20/Q21 shapes which all have implicit-name
-#     join columns.
-# =============================================================================
-
-
-def _split_conjuncts(expr: Expr, mut acc: ExprArray) raises:
-    """Split a binary AND tree into a flat list of conjuncts."""
-    if expr.tag == EXPR_BINARY_OP and expr._binary.value().op == BIN_AND:
-        ref b = expr._binary.value()
-        _split_conjuncts(b.left[], acc)
-        _split_conjuncts(b.right[], acc)
-    else:
-        acc.append(expr.copy())
-
-
-def _join_conjuncts(var conjuncts: ExprArray) raises -> Optional[Expr]:
-    """Recombine a list of conjuncts back into a BIN_AND tree, or None if empty."""
-    if len(conjuncts) == 0:
-        return None
-    if len(conjuncts) == 1:
-        return Optional(conjuncts[0].copy())
-    var acc = conjuncts[0].copy()
-    for i in range(1, len(conjuncts)):
-        acc = Expr.binary(BIN_AND, acc^, conjuncts[i].copy())
-    return Optional(acc^)
-
-
-# =============================================================================
-# Non-equi outer-ref hoist (self-correlated NEQ/range predicates — Q21)
-# =============================================================================
-#
-# The SQL binder (`sql_binder._bind_corr_scalar`, not in this tree) is
-# designed to mark a correlated
-# subquery's OUTER references with the `COL_SIDE_LEFT` qualifier and leaves
-# the subquery's own (inner) columns as plain `COL_SIDE_NONE` col-refs. This
-# is the ONLY channel that survives a self-correlation where the outer ref
-# and the inner column share a name (TPC-H Q21: outer `l1.l_suppkey` vs inner
-# `l3.l_suppkey` are BOTH named `l_suppkey`, so a name-only classifier cannot
-# tell them apart). When any conjunct carries a side qualifier we take the
-# side-aware hoist path below; otherwise we fall back to the legacy name-based
-# hoist (unchanged, for directly-constructed correlated subqueries with plain
-# col-refs).
-#
-# Side-aware hoist per conjunct:
-#   - references NO outer (COL_SIDE_LEFT) column  → pure-inner, stays in the
-#     inner Filter (a plain COL_SIDE_NONE predicate the inner scan evaluates).
-#   - `outer_col = inner_col` (bare EQ, one LEFT + one NONE)  → LIFTED into the
-#     equi-join keys (`left_on` = outer name, `right_on` = inner name).
-#   - any OTHER outer-referencing conjunct (`<>`, `<`, `>`, `<=`, `>=`, a
-#     non-bare EQ, …)  → hoisted into a side-qualified `residual` Expr (the
-#     inner NONE refs are re-marked COL_SIDE_RIGHT so the downstream
-#     `join_predicate_decompose` pass rewrites them to the joined-row schema,
-#     applying the `_right` collision-rename that a self-join needs). The
-#     residual is designed to be evaluated per matched pair for
-#     SEMI/ANTI/INNER/LEFT, outside komira_optimizer.
-#
-# This preserves the outer reference through the flatten — the pre-fix bug was
-# that a non-EQ outer conjunct stayed in the inner Filter where BOTH sides
-# rebind to the inner column, collapsing to a tautology (`l_suppkey <>
-# l_suppkey`) and silently dropping the correlation.
-# =============================================================================
-
-
-def _expr_has_side_qualifier(expr: Expr) -> Bool:
-    """True if `expr` (or any subtree) contains a side-qualified
-    (COL_SIDE_LEFT / COL_SIDE_RIGHT) col-ref — i.e. the binder marked an
-    outer reference, so the side-aware hoist path applies."""
-    if expr.tag == EXPR_COL_REF:
-        return expr._col_ref.value().side != COL_SIDE_NONE
-    if expr.tag == EXPR_BINARY_OP:
-        ref b = expr._binary.value()
-        if _expr_has_side_qualifier(b.left[]):
-            return True
-        return _expr_has_side_qualifier(b.right[])
-    if expr.tag == EXPR_UNARY_OP:
-        return _expr_has_side_qualifier(expr._unary.value().child[])
-    if expr.tag == EXPR_CAST:
-        return _expr_has_side_qualifier(expr._cast.value().child[])
-    if expr.tag == EXPR_ALIAS:
-        return _expr_has_side_qualifier(expr._alias.value().child[])
-    if expr.tag == EXPR_STRING_OP:
-        return _expr_has_side_qualifier(expr._string_op.value().child[])
-    if expr.tag == EXPR_IN_LIST:
-        return _expr_has_side_qualifier(expr._in_list.value().child[])
-    if expr.tag == EXPR_AGG_FN:
-        return _expr_has_side_qualifier(expr._agg_fn.value().child[])
-    return False
-
-
-def _expr_references_outer_side(expr: Expr) -> Bool:
-    """True if `expr` (or any subtree) contains a COL_SIDE_LEFT col-ref (an
-    outer reference marked by the binder)."""
-    if expr.tag == EXPR_COL_REF:
-        return expr._col_ref.value().side == COL_SIDE_LEFT
-    if expr.tag == EXPR_BINARY_OP:
-        ref b = expr._binary.value()
-        if _expr_references_outer_side(b.left[]):
-            return True
-        return _expr_references_outer_side(b.right[])
-    if expr.tag == EXPR_UNARY_OP:
-        return _expr_references_outer_side(expr._unary.value().child[])
-    if expr.tag == EXPR_CAST:
-        return _expr_references_outer_side(expr._cast.value().child[])
-    if expr.tag == EXPR_ALIAS:
-        return _expr_references_outer_side(expr._alias.value().child[])
-    if expr.tag == EXPR_STRING_OP:
-        return _expr_references_outer_side(expr._string_op.value().child[])
-    if expr.tag == EXPR_IN_LIST:
-        return _expr_references_outer_side(expr._in_list.value().child[])
-    if expr.tag == EXPR_AGG_FN:
-        return _expr_references_outer_side(expr._agg_fn.value().child[])
-    return False
-
-
-def _rewrite_inner_none_to_right(expr: Expr) -> Expr:
-    """Deep-copy `expr` re-marking every plain (COL_SIDE_NONE) col-ref as
-    COL_SIDE_RIGHT while keeping COL_SIDE_LEFT (outer) refs as LEFT. Used when
-    lifting a non-equi outer-referencing conjunct into the join residual: the
-    outer refs stay LEFT and the subquery's own columns become RIGHT, giving
-    `join_predicate_decompose` the side-qualified shape it rewrites into the
-    joined-row schema (with the `_right` self-join collision rename)."""
-    if expr.tag == EXPR_COL_REF:
-        var name = expr.col_ref_name()
-        if expr.col_ref_side() == COL_SIDE_LEFT:
-            return Expr.left(name)
-        return Expr.right(name)
-    elif expr.tag == EXPR_BINARY_OP:
-        return Expr.binary(
-            expr.binary_op(),
-            _rewrite_inner_none_to_right(expr.binary_left_ref()),
-            _rewrite_inner_none_to_right(expr.binary_right_ref()),
-        )
-    elif expr.tag == EXPR_UNARY_OP:
-        return Expr.unary(
-            expr.unary_op(), _rewrite_inner_none_to_right(expr.unary_child_ref())
-        )
-    elif expr.tag == EXPR_CAST:
-        return Expr.cast(
-            _rewrite_inner_none_to_right(expr.cast_child_ref()), expr.cast_target()
-        )
-    elif expr.tag == EXPR_STRING_OP:
-        return Expr.string_op(
-            expr.string_op_type(),
-            _rewrite_inner_none_to_right(expr.string_op_child_ref()),
-            expr.string_op_pattern(),
-        )
-    elif expr.tag == EXPR_ALIAS:
-        return Expr.alias(
-            _rewrite_inner_none_to_right(expr.alias_child_ref()), expr.alias_name()
-        )
-    elif expr.tag == EXPR_WHEN:
-        ref wd = expr._when.value()
-        var cases = List[WhenCaseData]()
-        for i in range(len(wd.cases)):
-            cases.append(WhenCaseData(
-                _rewrite_inner_none_to_right(wd.cases[i].condition[]),
-                _rewrite_inner_none_to_right(wd.cases[i].result[]),
-            ))
-        return Expr.when(cases^, _rewrite_inner_none_to_right(wd.default[]))
-    elif expr.tag == EXPR_IN_LIST:
-        ref il = expr._in_list.value()
-        var vals = List[ScalarValue]()
-        for i in range(len(il.values)):
-            vals.append(il.values[i].copy())
-        return Expr.in_list_node(_rewrite_inner_none_to_right(il.child[]), vals^)
-    elif expr.tag == EXPR_AGG_FN:
-        return Expr.agg_fn(
-            expr.agg_fn_op(), _rewrite_inner_none_to_right(expr.agg_fn_child_ref())
-        )
-    else:
-        # Literals / col-idx / other leaves: no side-qualified col-ref to
-        # remap (a residual conjunct always references at least one LEFT ref,
-        # but its literal operands copy through unchanged).
-        return expr.copy()
-
-
-def _try_lift_side_equi(
-    c: Expr, mut left_on: List[String], mut right_on: List[String]
-) -> Bool:
-    """If `c` is a bare `outer_col = inner_col` equality (one operand a
-    COL_SIDE_LEFT col-ref, the other a COL_SIDE_NONE col-ref), append the
-    outer name to `left_on` and the inner name to `right_on` and return True.
-    Otherwise return False (the conjunct is not an equi-key)."""
-    if c.tag != EXPR_BINARY_OP:
-        return False
-    ref b = c._binary.value()
-    if b.op != BIN_EQ:
-        return False
-    if b.left[].tag != EXPR_COL_REF or b.right[].tag != EXPR_COL_REF:
-        return False
-    var lside = b.left[]._col_ref.value().side
-    var rside = b.right[]._col_ref.value().side
-    var lname = b.left[]._col_ref.value().name
-    var rname = b.right[]._col_ref.value().name
-    if lside == COL_SIDE_LEFT and rside != COL_SIDE_LEFT:
-        left_on.append(lname)
-        right_on.append(rname)
-        return True
-    if rside == COL_SIDE_LEFT and lside != COL_SIDE_LEFT:
-        left_on.append(rname)
-        right_on.append(lname)
-        return True
-    return False
-
-
-def _hoist_side_qualified_conjuncts(
-    var grandchild: LogicalPlan,
-    conjuncts: ExprArray,
-    mut left_on: List[String],
-    mut right_on: List[String],
-    mut residual_conjuncts: ExprArray,
-) raises -> LogicalPlan:
-    """Side-aware hoist: classify each conjunct as pure-inner (stays in the
-    inner Filter), an equi-key (lifted into `left_on`/`right_on`), or a
-    non-equi outer-referencing conjunct (side-qualified and collected into
-    `residual_conjuncts`). Returns the inner plan rebuilt from the surviving
-    pure-inner conjuncts (the bare Scan/child if none remain)."""
-    var inner_kept = ExprArray()
-    for i in range(len(conjuncts)):
-        ref c = conjuncts[i]
-        if not _expr_references_outer_side(c):
-            # Pure-inner predicate — keep it on the inner Filter (all its
-            # col-refs are already COL_SIDE_NONE).
-            inner_kept.append(c.copy())
-            continue
-        # References an outer (COL_SIDE_LEFT) column.
-        if _try_lift_side_equi(c, left_on, right_on):
-            continue
-        # Non-equi / non-bare outer-referencing conjunct → join residual.
-        residual_conjuncts.append(_rewrite_inner_none_to_right(c))
-    var inner_opt = _join_conjuncts(inner_kept^)
-    if inner_opt:
-        var pred = inner_opt.value().copy()
-        return LogicalPlan.filter(pred^, grandchild^)
-    return grandchild^
-
-
-def _hoist_outer_eq_predicates(
-    inner_plan: LogicalPlan,
-    outer_refs: List[String],
-    mut left_on: List[String],
-    mut right_on: List[String],
-    mut residual_conjuncts: ExprArray,
-) raises -> LogicalPlan:
-    """Hoist outer-ref predicates from `inner_plan`'s top-level Filter into
-    the equi-join keys (EQ correlations) and/or the join `residual` (non-equi
-    correlations). Returns the inner plan with the hoisted conjuncts removed
-    (or unchanged if no Filter is at the root).
-
-    Two modes:
-      - Side-aware (binder-produced predicates carrying COL_SIDE_LEFT outer
-        refs): dispatched to `_hoist_side_qualified_conjuncts`. Handles the
-        self-correlated NEQ/range case (Q21) that a name-only classifier
-        cannot, and preserves the outer reference in the join residual.
-      - Legacy name-based (directly-constructed correlated subqueries with
-        plain col-refs): the original BIN_EQ-only hoist below. Equi-key
-        default: when no Filter-hoist applies, populate `left_on` /
-        `right_on` from `outer_refs` (assume same-named inner column).
-    """
-    # Pre-populate keys from outer_refs as the default. If hoisting succeeds
-    # we'll overwrite with the hoisted (col_outer, col_inner) pairs.
-    var default_left_on = List[String]()
-    var default_right_on = List[String]()
-    for i in range(len(outer_refs)):
-        default_left_on.append(outer_refs[i])
-        default_right_on.append(outer_refs[i])
-
-    if inner_plan.tag != PLAN_FILTER:
-        # Inner plan has no top-level Filter; use defaults.
-        for i in range(len(default_left_on)):
-            left_on.append(default_left_on[i])
-            right_on.append(default_right_on[i])
-        return inner_plan.copy()
-
-    # Inner plan is a Filter. Split its predicate into conjuncts and walk.
-    ref f = inner_plan._filter.value()[]
-    var conjuncts = ExprArray()
-    _split_conjuncts(f.predicate, conjuncts)
-
-    # If ANY conjunct carries a side qualifier, the binder produced this
-    # predicate: take the side-aware hoist (lifts EQ correlations to equi-keys
-    # and non-equi correlations to the join residual).
-    var side_mode = False
-    for i in range(len(conjuncts)):
-        if _expr_has_side_qualifier(conjuncts[i]):
-            side_mode = True
-            break
-    if side_mode:
-        return _hoist_side_qualified_conjuncts(
-            f.child[].copy(), conjuncts, left_on, right_on, residual_conjuncts
-        )
-
-    var hoisted_left = List[String]()
-    var hoisted_right = List[String]()
-    var residual = ExprArray()
-
-    for i in range(len(conjuncts)):
-        # Look for `outer_col EQ inner_col` (or the symmetric form).
-        var is_hoist = False
-        if conjuncts[i].tag == EXPR_BINARY_OP and conjuncts[i]._binary.value().op == BIN_EQ:
-            ref b = conjuncts[i]._binary.value()
-            if b.left[].tag == EXPR_COL_REF and b.right[].tag == EXPR_COL_REF:
-                var lname = b.left[]._col_ref.value().name
-                var rname = b.right[]._col_ref.value().name
-                if _list_contains(lname, outer_refs):
-                    hoisted_left.append(lname)
-                    hoisted_right.append(rname)
-                    is_hoist = True
-                elif _list_contains(rname, outer_refs):
-                    hoisted_left.append(rname)
-                    hoisted_right.append(lname)
-                    is_hoist = True
-        if not is_hoist:
-            residual.append(conjuncts[i].copy())
-
-    # If we hoisted at least one conjunct, use the hoisted keys.
-    if len(hoisted_left) > 0:
-        for i in range(len(hoisted_left)):
-            left_on.append(hoisted_left[i])
-            right_on.append(hoisted_right[i])
-    else:
-        for i in range(len(default_left_on)):
-            left_on.append(default_left_on[i])
-            right_on.append(default_right_on[i])
-
-    # Rebuild the inner plan: if no residual conjuncts remain, drop the
-    # Filter entirely. Otherwise wrap the Filter's child with a new Filter
-    # carrying just the residual conjuncts.
-    var grandchild_copy = f.child[].copy()
-    var residual_opt = _join_conjuncts(residual^)
-    if residual_opt:
-        var residual_pred = residual_opt.value().copy()
-        return LogicalPlan.filter(residual_pred^, grandchild_copy^)
-    return grandchild_copy^
 
 
 # =============================================================================

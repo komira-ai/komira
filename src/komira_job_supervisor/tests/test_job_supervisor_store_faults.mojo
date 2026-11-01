@@ -8,7 +8,7 @@
 # =============================================================================
 #
 # `FaultyStore` wraps a `SharedInMemoryConditionalStore`: its `put` counts
-# every attempt, refuses the next `fail_puts` attempts, and can sleep first.
+# every attempt, refuses the next `fail_puts` attempts, and can move a manual clock first.
 # The other verbs pass through.
 #
 #   test_a_refused_chunk_is_retried_once
@@ -27,20 +27,22 @@
 #       line appear; stderr lines are comma-separated; no exit_code when the
 #       job did not exit.
 #   test_a_slow_write_cannot_buy_the_job_another_beat
-#       The stream timer's write stalls 3 s, carrying the loop past a 3 s
-#       maximum runtime: the limit check at the top of the next iteration
-#       stops the job before any further RUNNING beat. Read from each beat's
-#       time, not a beat count: every RUNNING beat is sent less than 3 s after
-#       the first beat after the spawn (the spawn precedes it, so this holds
-#       however a loaded host shifts the schedule), where a loop that beat
-#       once more after the stall would beat about 5 s after it.
+#       On one manual clock: the stream timer's write stalls 3 s (the write
+#       moves the clock), carrying the loop past a 3 s maximum runtime: the
+#       limit check at the top of the next iteration stops the job before any
+#       further RUNNING beat. Exactly three RUNNING beats are sent (before the
+#       spawn, and at 0 s and 1 s after it), the terminal FAILED beat is sent
+#       at 5 s, and a loop that beat once more after the stall would send a
+#       fourth RUNNING one. The job's output is gated on a file it creates
+#       once "x" is in the pipe, so the stream has it at the first pass.
 # =============================================================================
 
 from std.ffi import external_call
 from std.memory import ArcPointer
+from std.os.path import exists
 from std.testing import assert_equal, assert_false, assert_true
 
-from komira_clock import now_ns
+from komira_libc.posix import _read_env
 from komira_objectstore import SharedInMemoryConditionalStore
 from komira_objectstore.path import Path
 from komira_objectstore.store import ConditionalWriteStore, ObjectStore
@@ -57,27 +59,44 @@ from komira_job_supervisor import (
     JobSupervisorConfig,
     JobSupervisorPhase,
     LogStreamSink,
+    ManualLoopClock,
     SupervisorHeartbeat,
     build_crash_report_json,
-    run_job_supervisor,
+    run_job_supervisor_with_clock,
     upload_crash_report,
     upload_logs,
 )
 from komira_job_supervisor.job_supervisor_state import FailureReport
 
 
-def _sleep_ms(ms: Int):
-    _ = external_call["usleep", Int32](UInt32(ms * 1000))
+comptime _CLOCK_START_NS: Int = 2_000_000_000
+"""Where a manual clock stands when a test starts it."""
+
+
+def _yield():
+    """Give the thread up for a millisecond; nothing depends on how long."""
+    _ = external_call["usleep", Int32](UInt32(1000))
 
 
 struct Knobs(Movable):
+    """What the faulty store does: refuse `fail_puts` writes, and make every
+    write take `put_delay_ms` on the manual clock `clock` (the write moves the
+    clock forward by that much; nothing sleeps)."""
+
     var fail_puts: Int
     var put_delay_ms: Int
+    var clock: ArcPointer[Int]
     var put_attempts: Int
 
-    def __init__(out self, fail_puts: Int, put_delay_ms: Int):
+    def __init__(
+        out self,
+        fail_puts: Int,
+        put_delay_ms: Int,
+        clock: ArcPointer[Int],
+    ):
         self.fail_puts = fail_puts
         self.put_delay_ms = put_delay_ms
+        self.clock = clock
         self.put_attempts = 0
 
 
@@ -112,8 +131,7 @@ struct FaultyStore(ConditionalWriteStore, ObjectStore, Movable, Deinitable):
 
     def put(self, path: Path, bytes: List[UInt8]) raises -> ObjectMeta:
         self.knobs[].put_attempts += 1
-        if self.knobs[].put_delay_ms > 0:
-            _sleep_ms(self.knobs[].put_delay_ms)
+        self.knobs[].clock[] += self.knobs[].put_delay_ms * 1_000_000
         if self.knobs[].fail_puts > 0:
             self.knobs[].fail_puts -= 1
             raise Error("scripted: the store refused the write")
@@ -132,11 +150,11 @@ struct FaultyStore(ConditionalWriteStore, ObjectStore, Movable, Deinitable):
 
 
 def _faulty(
-    fail_puts: Int, put_delay_ms: Int = 0
+    fail_puts: Int,
 ) -> Tuple[FaultyStore, SharedInMemoryConditionalStore, ArcPointer[Knobs]]:
     var inner = SharedInMemoryConditionalStore()
     var view = inner.clone()
-    var knobs = ArcPointer[Knobs](Knobs(fail_puts, put_delay_ms))
+    var knobs = ArcPointer[Knobs](Knobs(fail_puts, 0, ArcPointer[Int](0)))
     return (FaultyStore(inner^, knobs), view^, knobs)
 
 
@@ -190,7 +208,9 @@ def test_a_disabled_or_empty_stream_writes_nothing() raises:
     assert_equal(t[2][].put_attempts, 0, "disabled: no write")
 
     var empty = LogStreamSink(String("logs/e"), 4, 1, True)
-    _sleep_ms(5)  # past its 1 ms interval
+    var clock = ArcPointer[Int](_CLOCK_START_NS)
+    empty.set_test_clock(clock)
+    clock[] += 5_000_000  # past its 1 ms interval
     empty.maybe_flush[FaultyStore](t[0])
     empty.flush_current[FaultyStore](t[0])
     empty.flush_final[FaultyStore](t[0])
@@ -269,52 +289,61 @@ def test_the_crash_report_escapes_and_lists_its_fields() raises:
     print("  test_the_crash_report_escapes_and_lists_its_fields: PASS")
 
 
-struct Recorder(HeartbeatReporter):
-    var beats: ArcPointer[List[String]]
-
-    def __init__(out self, beats: ArcPointer[List[String]]):
-        self.beats = beats
-
-    def report(mut self, hb: SupervisorHeartbeat) -> HeartbeatOutcome:
-        var line = String(hb.phase.wire_str()) + String("|")
-        if hb.message:
-            line += hb.message.value()
-        self.beats[].append(line^)
-        return HeartbeatOutcome(True, False, 200)
-
-
-struct TimedRecorder(HeartbeatReporter):
-    """A Recorder that also keeps each beat's monotonic time."""
+struct ReadyGatedRecorder(HeartbeatReporter):
+    """A Recorder that keeps each beat's time on the manual clock `clock`, and
+    on the beat after the spawn (the second) waits for `ready`, the file the
+    job creates once its output is in the pipe. The wait is for that event and
+    has no bound of its own."""
 
     var beats: ArcPointer[List[String]]
-    var at_ns: ArcPointer[List[UInt64]]
+    var at_ns: ArcPointer[List[Int]]
+    var clock: ArcPointer[Int]
+    var ready: String
 
     def __init__(
-        out self, beats: ArcPointer[List[String]], at_ns: ArcPointer[List[UInt64]]
+        out self,
+        beats: ArcPointer[List[String]],
+        at_ns: ArcPointer[List[Int]],
+        clock: ArcPointer[Int],
+        ready: String,
     ):
         self.beats = beats
         self.at_ns = at_ns
+        self.clock = clock
+        self.ready = ready
 
     def report(mut self, hb: SupervisorHeartbeat) -> HeartbeatOutcome:
         var line = String(hb.phase.wire_str()) + String("|")
         if hb.message:
             line += hb.message.value()
         self.beats[].append(line^)
-        self.at_ns[].append(now_ns())
+        self.at_ns[].append(self.clock[])
+        if len(self.beats[]) == 2:
+            while not exists(self.ready):
+                _yield()
         return HeartbeatOutcome(True, False, 200)
 
 
+def _tmp(name: String) raises -> String:
+    var tmp = _read_env("TEST_TMPDIR")
+    assert_true(tmp.byte_length() > 0, "TEST_TMPDIR is unset")
+    return tmp + "/" + name
+
+
 def test_a_slow_write_cannot_buy_the_job_another_beat() raises:
-    # Interval 1 s, flush interval 2 s, limit 3 s; the job prints "x" at once.
-    # Beats: RUNNING before the spawn, RUNNING at t~0 and t~1.
-    # t~1: "x" is buffered; the stream is 1 s old, so the timer writes nothing.
-    # t~2: the inner limit check passes (2 s < 3 s); the timer writes the
-    #      chunk and the write stalls 3 s.
-    # t~5: the next iteration's limit check stops the job before its RUNNING
-    #      beat, then FAILED. A loop without that check beats RUNNING at t~5.
+    # Everything runs on one manual clock: interval 1 s, flush interval 2 s,
+    # limit 3 s; the job prints "x" and says so. Beats: RUNNING before the
+    # spawn, RUNNING at t=0 (after the spawn), RUNNING at t=1.
+    # t=1: "x" is buffered; the stream is 1 s old, so the timer writes nothing.
+    # t=2: the inner limit check passes (2 s < 3 s); the timer writes the
+    #      chunk and the write moves the clock 3 s.
+    # t=5: the next iteration's limit check stops the job before its RUNNING
+    #      beat, then FAILED. A loop without that check beats RUNNING at t=5.
+    var ready = _tmp(String("slow-store-ready"))
+    assert_false(exists(ready), "the ready file exists before the run")
     var argv = List[String]()
     argv.append(String("-c"))
-    argv.append(String("printf x; exec sleep 30"))
+    argv.append(String("printf x; : > '") + ready + String("'; exec sleep 30"))
     var config = JobSupervisorConfig(
         String("slow-store"),
         String("inst-1"),
@@ -327,29 +356,37 @@ def test_a_slow_write_cannot_buy_the_job_another_beat() raises:
         log_flush_secs=2,
         max_runtime_secs=3,
     )
+    var cell = ArcPointer[Int](_CLOCK_START_NS)
     var inner = SharedInMemoryConditionalStore()
     var view = inner.clone()
-    var slow = FaultyStore(inner^, ArcPointer[Knobs](Knobs(0, 3000)))
+    var slow = FaultyStore(inner^, ArcPointer[Knobs](Knobs(0, 3000, cell)))
     var beats = ArcPointer[List[String]](List[String]())
-    var at_ns = ArcPointer[List[UInt64]](List[UInt64]())
-    var phase = run_job_supervisor[TimedRecorder, FaultyStore](
-        config^, TimedRecorder(beats, at_ns), None, Optional[FaultyStore](slow^)
+    var at_ns = ArcPointer[List[Int]](List[Int]())
+    var clock = ManualLoopClock(cell)
+    var phase = run_job_supervisor_with_clock[
+        ReadyGatedRecorder, FaultyStore, ManualLoopClock
+    ](
+        config^,
+        ReadyGatedRecorder(beats, at_ns, cell, ready),
+        None,
+        Optional[FaultyStore](slow^),
+        clock,
     )
     assert_true(phase == JobSupervisorPhase.failed(), "the limit stopped it")
-    # Beat 0 is sent before the spawn, beat 1 after it.
-    assert_true(len(beats[]) >= 3, "two RUNNING beats and the terminal one")
-    assert_true(beats[][1].startswith(String("RUNNING|")), beats[][1])
+    # Beat 0 is sent before the spawn, beat 1 after it, beat 2 a second later.
+    assert_equal(len(beats[]), 4, "three RUNNING beats and the terminal one")
+    for i in range(3):
+        assert_true(beats[][i].startswith(String("RUNNING|")), beats[][i])
     var after_spawn = at_ns[][1]
-    for i in range(1, len(beats[])):
-        if beats[][i].startswith(String("RUNNING|")):
-            var ms = Int((at_ns[][i] - after_spawn) // 1_000_000)
-            assert_true(
-                ms < 3000,
-                "a RUNNING beat " + String(ms) + " ms after the spawn's beat,"
-                " past the 3 s limit",
-            )
+    assert_equal(after_spawn, _CLOCK_START_NS, "no time passed before the spawn")
+    assert_equal(at_ns[][2] - after_spawn, 1_000_000_000, "beat 2 a second on")
     var last = beats[][len(beats[]) - 1]
     assert_true(last.startswith(String("FAILED|max runtime of 3 s exceeded")), last)
+    # The terminal beat is sent when the stalled write has carried the clock
+    # to 5 s: a RUNNING beat after the stall would be a fourth RUNNING one.
+    assert_equal(
+        at_ns[][3] - after_spawn, 5_000_000_000, "the stall moved the clock 3 s"
+    )
     assert_equal(_text_at(view, String("logs/slow/chunks/0.log")), String("x"))
     print("  test_a_slow_write_cannot_buy_the_job_another_beat: PASS")
 

@@ -1,0 +1,18 @@
+{
+  "name": "komira-negative",
+  "version": "1.0.0",
+  "lockfileVersion": 3,
+  "requires": true,
+  "packages": {
+    "": {
+      "name": "komira-negative",
+      "version": "1.0.0"
+    },
+    "node_modules/fx-b": {
+      "version": "1.0.0",
+      "resolved": "https://registry.invalid/fx-b/-/fx-b-1.0.0.tgz",
+      "integrity": "sha512-QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ==",
+      "dev": true
+    }
+  }
+}

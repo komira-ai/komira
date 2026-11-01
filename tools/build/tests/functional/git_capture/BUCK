@@ -1,0 +1,26 @@
+load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_test")
+load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
+
+# The process behaviour of capture as the ssh of a git client (the recorder of
+# komira_git_protocol_conformance) over real directories and a stand-in server
+# (probe.zig). A driver test: capture is a built tool it runs by absolute path.
+
+zig_exe(
+    name = "probe",
+    exec_compatible_with = LINUX_X86_64,
+    src = "probe.zig",
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
+)
+
+zig_test(
+    name = "driver",
+    exec_compatible_with = LINUX_X86_64,
+    exec_tools = {
+        "CAPTURE": "komira//src/tests/conformance/komira_git_protocol_conformance:capture",
+        "PROBE": ":probe",
+    },
+    src = "driver_test.zig",
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
+)

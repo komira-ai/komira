@@ -101,25 +101,25 @@ const Case = struct {
 
     /// `bytes` as the stand-in's link output.
     fn raw(self: *Case, bytes: []const u8) !void {
-        try self.tmp.dir.writeFile("fx", bytes);
-        try self.tmp.dir.writeFile("shim/real/stub_out", try self.path("fx"));
+        try self.tmp.dir.writeFile(.{ .sub_path = "fx", .data = bytes });
+        try self.tmp.dir.writeFile(.{ .sub_path = "shim/real/stub_out", .data = try self.path("fx") });
     }
 
     /// Runs the program with `args`, and the command line it says to exec.
     fn run(self: *Case, args: Args, o: Opts) !Result {
         const a = self.alloc();
-        try self.tmp.dir.writeFile("shim/real/stub_rc", o.rc orelse "0");
+        try self.tmp.dir.writeFile(.{ .sub_path = "shim/real/stub_rc", .data = o.rc orelse "0" });
         self.tmp.dir.deleteFile("shim/real/argv") catch |e| switch (e) {
             error.FileNotFound => {},
             else => return e,
         };
-        var err = std.ArrayList(u8).init(a);
+        var err = std.ArrayList(u8).empty;
         const argv0 = try std.fs.path.join(a, &.{ self.shim, "zig" });
         const env = Z.Env{ .dir = self.dir, .cwd = self.cwd, .pwd = o.pwd orelse self.cwd, .scratch = o.scratch };
-        switch (Z.entry(a, argv0, args, env, err.writer())) {
+        switch (Z.entry(a, argv0, args, env, err.writer(a))) {
             .exit => |status| return .{ .status = status, .err = err.items, .exec = null },
             .exec => |line| {
-                const r = try std.ChildProcess.run(.{ .allocator = a, .argv = line, .cwd_dir = self.dir });
+                const r = try std.process.Child.run(.{ .allocator = a, .argv = line, .cwd_dir = self.dir });
                 const status: u8 = switch (r.term) {
                     .Exited => |s| s,
                     else => return error.TestUnexpectedResult,
@@ -162,10 +162,10 @@ fn check(ok: bool, comptime what: []const u8, r: Result) !void {
 }
 
 fn lines(a: std.mem.Allocator, items: Args) ![]const u8 {
-    var b = std.ArrayList(u8).init(a);
+    var b = std.ArrayList(u8).empty;
     for (items) |i| {
-        try b.appendSlice(i);
-        try b.append('\n');
+        try b.appendSlice(a, i);
+        try b.append(a, '\n');
     }
     return b.items;
 }

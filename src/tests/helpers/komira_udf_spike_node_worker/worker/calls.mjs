@@ -12,7 +12,7 @@ import { cancelRequested } from './wire.mjs';
 
 export const ST = Object.freeze({
   ABI: 1, DESCRIPTOR: 2, UNSUPPORTED: 3, CODE_DIGEST: 4, LOAD: 5, RAISED: 6, RETURN_TYPE: 7, LENGTH: 8,
-  CANCELLED: 11, DEADLINE: 12, INTERNAL: 15, FIELD_NOT_DECLARED: 16,
+  CANCELLED: 11, DEADLINE: 12, INTERNAL: 15, FIELD_NOT_DECLARED: 16, READ_SET_MISMATCH: 20,
 });
 
 export class UdfError extends Error {

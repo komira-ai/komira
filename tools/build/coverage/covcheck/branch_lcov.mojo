@@ -32,7 +32,12 @@ Across reports (`DecisionShapes`): one test's classifier sees only its own
 copies of the code, so two tests whose copies hold the same number of
 decisions at a location but different ones are summed crosswise unnoticed;
 what can be seen is two tests giving one location (line, column, kind) a
-different `N`, or one decision a different number of arms, and both are
+different `N`, or one decision a different number of arms. For a different
+`N` (an inlined function whose copies were cut down differently) the tests
+whose copy has the most decisions are the location's set and are summed; the
+records of the others at that location are dropped, never added
+(`drop_smaller_copies`), so the figure under-reports rather than guess which
+arm of the larger copy a smaller copy's arm is. A different number of arms is
 refused naming the file, the line and the two reports.
 """
 
@@ -227,43 +232,48 @@ def parse_branch_lcov(text: String, origin: String) raises -> List[FileCov]:
     return files^
 
 
+def drop_smaller_copies(mut files: List[FileCov], kept: List[Int]) raises:
+    """Where the kept files (indices into `files`) give one location of one
+    path different numbers of decisions, removes the records of that location
+    from every file whose copy has fewer than the most; files at the maximum
+    stay whole, so their records are summed as before."""
+    var best = Dict[String, Int]()
+    for i in kept:
+        for e in files[i].branches.items():
+            var b = split_id(e.key)
+            var k = files[i].path + String("\x00") + b.site
+            if k not in best or best[k] < b.total:
+                best[k] = b.total
+    for i in kept:
+        var drop = List[String]()
+        for e in files[i].branches.items():
+            var b = split_id(e.key)
+            if b.total < best[files[i].path + String("\x00") + b.site]:
+                drop.append(e.key)
+        for key in drop:
+            _ = files[i].branches.pop(key)
+
+
 struct DecisionShapes(Movable):
     """What the reports read so far give each location and decision, to
     refuse a report that disagrees (module header)."""
 
-    var totals: Dict[String, Int]
     var arms: Dict[String, Int]
     var origins: Dict[String, String]
 
     def __init__(out self):
-        self.totals = Dict[String, Int]()
         self.arms = Dict[String, Int]()
         self.origins = Dict[String, String]()
 
     def add(mut self, f: FileCov, origin: String) raises:
         """Records the shapes of `f` (a repository path's branches from the
-        report `origin`); raises on a disagreement with an earlier report."""
+        report `origin`); raises on a disagreement with an earlier report.
+        Call `drop_smaller_copies` over the reports first: a location's
+        records here all come from copies of one size."""
         var arms = Dict[String, Int]()
-        var totals = Dict[String, Int]()
-        var lines = Dict[String, Int]()
         for e in f.branches.items():
             var b = split_id(e.key)
             arms[b.decision] = arms.get(b.decision, 0) + 1
-            totals[b.site] = b.total
-            lines[b.site] = b.line
-        for e in totals.items():
-            var k = f.path + String("\x00") + e.key
-            if k in self.totals and self.totals[k] != e.value:
-                var col_kind = suffix(e.key, e.key.find(",") + 1)
-                raise Error(
-                    f.path + String(":") + String(lines[e.key]) + String(": ") + self.origins[k] + String(" gives ")
-                    + String(self.totals[k]) + String(" decision(s) at ") + col_kind + String(" and ") + origin
-                    + String(" gives ") + String(e.value)
-                    + String(": the tests' copies of this code hold different decisions at one location, so their branch records cannot be summed by id")
-                )
-            if k not in self.totals:
-                self.totals[k] = e.value
-                self.origins[k] = origin
         for e in arms.items():
             var k = f.path + String("\x00") + e.key
             if k in self.arms and self.arms[k] != e.value:

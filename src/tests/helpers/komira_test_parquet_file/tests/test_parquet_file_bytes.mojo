@@ -26,10 +26,11 @@ def _assert_bytes(got: List[UInt8], want: List[UInt8]) raises:
         assert_equal(Int(got[i]), Int(want[i]), "byte " + String(i))
 
 
-def test_one_row_int64_file_byte_for_byte() raises:
-    var cols = List[TestColumn]()
-    cols.append(TestColumn.int64("a", [7]))
-    var got = parquet_file_bytes(cols, TestFileLayout.single())
+def _one_row_int64_file(zero_dict_offset: Bool, timestamp_micros: Bool) -> List[UInt8]:
+    """The hand-encoded one-row file; with `zero_dict_offset` the column
+    chunk also stores field 11, dictionary_page_offset, as 0, and with
+    `timestamp_micros` the column's schema element also carries field 10, a
+    LogicalType TIMESTAMP (UTC, MICROS)."""
     # fmt: off
     var want = _expect([
         0x50, 0x41, 0x52, 0x31,                     # PAR1
@@ -67,12 +68,47 @@ def test_one_row_int64_file_byte_for_byte() raises:
         0x00,
     ])
     # fmt: on
+    if zero_dict_offset:
+        # 11: dictionary_page_offset 0 (delta 2, I64), then 12 at delta 1.
+        var at = len(want) - 1
+        while not (want[at] == 0x3C and want[at - 1] == 0x08 and want[at - 2] == 0x26):
+            at -= 1
+        want[at] = 0x26
+        want.insert(at + 1, 0x00)
+        want.insert(at + 2, 0x1C)
+    if timestamp_micros:
+        # The schema element of "a" ends 0x18 0x01 0x61 0x00 (name, STOP);
+        # 10: LogicalType {8: TIMESTAMP {1: true, 2: unit {2: MICROS {}}}}.
+        var at = 0
+        while not (want[at] == 0x18 and want[at + 1] == 0x01 and want[at + 2] == 0x61 and want[at + 3] == 0x00):
+            at += 1
+        var ins = _expect([0x6C, 0x8C, 0x11, 0x1C, 0x2C, 0x00, 0x00, 0x00, 0x00])
+        for k in range(len(ins)):
+            want.insert(at + 3 + k, ins[k])
     var footer_len = len(want) - 4 - 25
     for k in range(4):
         want.append(UInt8((footer_len >> (8 * k)) & 0xFF))
     for b in [0x50, 0x41, 0x52, 0x31]:
         want.append(UInt8(b))
-    _assert_bytes(got, want)
+    return want^
+
+
+def test_one_row_int64_file_byte_for_byte() raises:
+    var cols = List[TestColumn]()
+    cols.append(TestColumn.int64("a", [7]))
+    _assert_bytes(parquet_file_bytes(cols, TestFileLayout.single()), _one_row_int64_file(False, False))
+
+
+def test_a_plain_chunk_can_store_a_zero_dictionary_offset() raises:
+    var cols = List[TestColumn]()
+    cols.append(TestColumn.int64("a", [7]).with_zero_dictionary_offset())
+    _assert_bytes(parquet_file_bytes(cols, TestFileLayout.single()), _one_row_int64_file(True, False))
+
+
+def test_an_int64_column_can_carry_a_timestamp_logical_type() raises:
+    var cols = List[TestColumn]()
+    cols.append(TestColumn.int64("a", [7]).with_timestamp_logical_type(2))
+    _assert_bytes(parquet_file_bytes(cols, TestFileLayout.single()), _one_row_int64_file(False, True))
 
 
 def _u32_le(b: List[UInt8], at: Int) -> Int:

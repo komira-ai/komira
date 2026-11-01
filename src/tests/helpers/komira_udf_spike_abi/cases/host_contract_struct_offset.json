@@ -1,0 +1,12 @@
+{
+ "name": "host_contract_struct_offset",
+ "defect": "a host defect is blamed on the runtime or on user code: an argument struct at a non-zero offset (design 3.4 rule 5, 4.5)",
+ "run": "call_batch",
+ "entry": "identity",
+ "shape": "MAP_BATCHES_COLUMN",
+ "args": [{"type": "int64", "nullable": true}],
+ "result": [{"type": "int64", "nullable": true}],
+ "options": {"plant_struct_offset": true},
+ "input": {"length": 2, "columns": [{"type": "int64", "values": [1, 2]}]},
+ "expect": {"status": "ERR_HOST_CONTRACT", "run_error": "UDF_HOST_CONTRACT_VIOLATION", "message": "nonempty"}
+}

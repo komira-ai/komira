@@ -1,4 +1,4 @@
-/* The program kcov_check.sh runs under the built kcov, with no arguments.
+/* The program kcov_check runs under the built kcov, with no arguments.
  * A line marked COV:hit must be reported with hits >= 1, a COV:miss line
  * with hits 0, and the report must be cov_fixture.cobertura.xml: an edit
  * that moves a line changes that golden too. */

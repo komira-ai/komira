@@ -1,0 +1,4 @@
+# The template of covparts/_parts/part.mojo, which BUCK generates: a source in a
+# generated directory, which a coverage run does not measure.
+def triple(x: Int) -> Int:
+    return x * @FACTOR@

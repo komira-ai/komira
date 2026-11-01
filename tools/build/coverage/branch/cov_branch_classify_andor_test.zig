@@ -23,11 +23,11 @@ fn bothUntested(c: *h.Case, cond: []const u8) !h.Ir {
         if (std.mem.endsWith(u8, l.*, "preds = %7")) l.* = try std.mem.concat(c.a(), u8, &.{ l.*[0 .. l.len - "preds = %7".len], "preds = %86" });
     }
     const at = try e.find(f[0], f[1], "  br i1 %8, label %9, label %10, !dbg !119, !prof !133");
-    var add = std.ArrayList([]const u8).init(c.a());
-    try add.appendSlice(&.{ "  br label %86, !dbg !119", "", "86:                                               ; preds = %7", "  %87 = phi i1 [ %8, %7 ], !dbg !117" });
-    if (std.mem.eql(u8, cond, "%80")) try add.append("  %80 = icmp eq i64 %0, 7, !dbg !119");
-    try add.append(try std.mem.concat(c.a(), u8, &.{ "  br i1 ", cond, ", label %9, label %10, !dbg !119, !prof !133" }));
-    try e.lines.replaceRange(at, 1, add.items);
+    var add = std.ArrayList([]const u8).empty;
+    try add.appendSlice(c.a(), &.{ "  br label %86, !dbg !119", "", "86:                                               ; preds = %7", "  %87 = phi i1 [ %8, %7 ], !dbg !117" });
+    if (std.mem.eql(u8, cond, "%80")) try add.append(c.a(), "  %80 = icmp eq i64 %0, 7, !dbg !119");
+    try add.append(c.a(), try std.mem.concat(c.a(), u8, &.{ "  br i1 ", cond, ", label %9, label %10, !dbg !119, !prof !133" }));
+    try e.lines.replaceRange(e.al, at, 1, add.items);
     return e;
 }
 
@@ -165,9 +165,9 @@ fn spendFlag(c: *h.Case, flag: []const u8) !h.Ir {
     _ = try e.subIn(f[0], f[1], "select i1 %8, ", "select i1 %80, ");
     _ = try e.subIn(f[0], f[1], "br i1 %8, ", "br i1 %80, ");
     const at = try e.find(f[0], f[1], "  %6 = icmp sgt i64 %0, %1, !dbg !112");
-    try e.lines.insertSlice(at + 1, &.{ "  %84 = call { i1, i1 } @\"pkg::c::check\"(i64 %0), !dbg !112", try std.mem.concat(c.a(), u8, &.{ "  %83 = ", flag, ", !dbg !112" }) });
+    try e.lines.insertSlice(e.al, at + 1, &.{ "  %84 = call { i1, i1 } @\"pkg::c::check\"(i64 %0), !dbg !112", try std.mem.concat(c.a(), u8, &.{ "  %83 = ", flag, ", !dbg !112" }) });
     const phi = try e.find(f[0], f[1] + 2, "  %8 = phi i1 [ %6, %5 ], [ true, %4 ], !dbg !111");
-    try e.lines.insertSlice(phi + 1, &.{ "  %82 = phi i1 [ %83, %5 ], [ false, %4 ], !dbg !111", "  %80 = icmp eq i64 %1, 7, !dbg !113" });
+    try e.lines.insertSlice(e.al, phi + 1, &.{ "  %82 = phi i1 [ %83, %5 ], [ false, %4 ], !dbg !111", "  %80 = icmp eq i64 %1, 7, !dbg !113" });
     return e;
 }
 

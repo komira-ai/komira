@@ -248,16 +248,12 @@ def test_item6_modify_to_write_then_back_to_read() raises:
         # Manually register the conn with INTEREST_READ (mirrors the
         # server's pattern after accept).
         var reg = reactor.register_long_lived(fd, INTEREST_READ)
-        assert_equal(reg.interest_set(), INTEREST_READ)
+        assert_equal(reactor.interest_set(reg), INTEREST_READ)
 
         # Switch to INTEREST_WRITE — should succeed.
         reactor.modify(reg, INTEREST_WRITE)
-        # Note: the RegistrationHandle returned to the caller is a POD
-        # value; modify does NOT mutate the caller's local view of
-        # _interest_set (the kernel state changes but the handle's field
-        # tracks what the LAST register call armed). Production callers
-        # track current interest in their per-conn state machine
-        # (ConnEntry._interest_set in the server). Here we just verify
+        # The reactor records the armed mask (pinned by
+        # test_reactor_completion_queue_smoke.mojo); here we just verify
         # the syscall doesn't raise.
 
         # Switch back to INTEREST_READ — also succeeds.
@@ -271,7 +267,7 @@ def test_item6_modify_to_write_then_back_to_read() raises:
 
 
 def test_item6_no_op_modify_when_interest_unchanged() raises:
-    """Item 6 fast path: if new_interest_set == reg.interest_set(), modify
+    """Item 6 fast path: if new_interest_set == reactor.interest_set(reg), modify
     is a no-op and does NOT issue a syscall. Verified by calling modify
     with the same interest twice in quick succession; both should
     succeed without raising."""

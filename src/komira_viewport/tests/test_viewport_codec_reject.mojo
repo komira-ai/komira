@@ -12,6 +12,8 @@
 #     trip, so two swapped tags cannot pass as a symmetric pair.
 #   * The response envelope refuses each malformed field with its own reason,
 #     and when two fields are wrong the earlier one is the reason given.
+#   * The payload length is refused past the buffer end at every width,
+#     including lengths of 2^63 and above that are negative as an Int.
 # =============================================================================
 
 from std.testing import TestSuite, assert_equal, assert_raises, assert_true
@@ -471,6 +473,33 @@ def test_response_accepted_kinds() raises:
     assert_equal(len(decode_grid_response(Span(e)).payload), 0)
 
 
+def test_response_payload_length_at_and_past_the_buffer() raises:
+    # The declared payload length is a UInt64; the decoder must compare it
+    # with the bytes left before narrowing it to Int. Two bytes follow the
+    # length in every case here.
+    var ok = _response(declared_len=UInt64(2))
+    assert_equal(len(decode_grid_response(Span(ok)).payload), 2)
+    var past: List[UInt64] = [
+        UInt64(3),                     # one past the end
+        UInt64(0x7FFFFFFFFFFFFFFF),    # Int64.max, the largest non-negative Int
+        UInt64(0x8000000000000000),    # 2^63, Int(x) is Int64.min
+        UInt64(0x8000000000000001),    # 2^63 + 1
+        UInt64(0xFFFFFFFFFFFFFFFE),    # Int(x) is -2
+        UInt64(0xFFFFFFFFFFFFFFFF),    # UInt64.max, Int(x) is -1
+    ]
+    for i in range(len(past)):
+        var b = _response(declared_len=past[i])
+        with assert_raises(contains="payload length runs past buffer end"):
+            _ = decode_grid_response(Span(b))
+    # No payload bytes at all: the 2^63 and UInt64.max lengths still refuse.
+    var e = _response(declared_len=UInt64(0xFFFFFFFFFFFFFFFF), actual_len=0)
+    with assert_raises(contains="payload length runs past buffer end"):
+        _ = decode_grid_response(Span(e))
+    e = _response(declared_len=UInt64(0x8000000000000000), actual_len=0)
+    with assert_raises(contains="payload length runs past buffer end"):
+        _ = decode_grid_response(Span(e))
+
+
 def test_response_first_fault_is_reported() raises:
     # Two faults at once: the field read first names the refusal.
     var b = _response(magic_bad_at=3, version=UInt64(9))
@@ -523,6 +552,7 @@ def main() raises:
     suite.test[test_response_bad_magic_at_each_byte]()
     suite.test[test_response_field_refusals]()
     suite.test[test_response_accepted_kinds]()
+    suite.test[test_response_payload_length_at_and_past_the_buffer]()
     suite.test[test_response_first_fault_is_reported]()
     suite.test[test_rowcount_copy_is_independent]()
     suite^.run()

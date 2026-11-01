@@ -1,8 +1,0 @@
-# --coverage: the targets no unit builds or depends on, exit 12.
-arg "--coverage"
-arg "--units-file"
-arg "{units_file}"
-input units_file %units
-file ".buckconfig" %buckconfig
-file "tools/build/ci/rules.txt" %rules.txt
-exit 12

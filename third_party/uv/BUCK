@@ -36,7 +36,7 @@ archive_files(
     archive = ":uv-x86_64-unknown-linux-musl.tar.gz",
     strip_prefix = "uv-x86_64-unknown-linux-musl",
     files = ["uv"],
-    visibility = ["komira//src/kci_pkg_upload:"],
+    visibility = ["komira//src/kci_pkg_upload:", "komira//ci:"],
 )
 
 # The release archive carries no license text; these are the LICENSE files

@@ -17,6 +17,12 @@
 #     cut off at the end of input;
 #   - the tree: the xml and xmlns namespace names refused as the default or a
 #     prefix binding, `canonical_node`, and the accessors' absent cases;
+#   - the canonical walk's depth: the deepest document `parse_xml` accepts
+#     (512 levels) and a 513-node chain (depth 512) written in full, a
+#     514-node chain (depth 513) refused naming the bound, and a subtree
+#     closed before its next sibling opens. The 512-level rows also check
+#     that the walk's thread-stack use does not grow with depth: a walk whose
+#     frames grow per level overflows before the bound in an -O0 build;
 #   - the writer: `end_element` with nothing open, `raw_text`, `depth`,
 #     `is_empty`; the reader's `local_name_of`, `attr_local_name` and
 #     `slice_text`.
@@ -26,8 +32,10 @@ from komira_xml import (
     XML_EOF,
     XML_START,
     XmlReader,
+    XmlNode,
     XmlWriter,
     canonical_node,
+    canonical_xml,
     parse_xml,
     xml_unescape,
 )
@@ -247,6 +255,62 @@ def test_canonical_node() raises -> Int:
     return f
 
 
+def _nest(n: Int) -> String:
+    var s = String()
+    for _ in range(n):
+        s += "<a>"
+    for _ in range(n):
+        s += "</a>"
+    return s^
+
+
+def _chain(nodes: Int) -> XmlNode:
+    """`nodes` elements `<a>`, each the only child of the one above, built
+    directly so the chain can go one level past what `parse_xml` accepts."""
+    var node = XmlNode()
+    node.local = String("a")
+    for _ in range(nodes - 1):
+        var parent = XmlNode()
+        parent.local = String("a")
+        parent.children.append(node^)
+        node = parent^
+    return node^
+
+
+def test_canonical_depth() raises -> Int:
+    var f = 0
+    f += _eq(
+        canonical_xml(_nest(512)),
+        _nest(512),
+        "canonical_xml of the deepest document parse_xml accepts (512)",
+    )
+    f += _eq(
+        canonical_node(_chain(513)),
+        _nest(513),
+        "canonical_node of a 513-node chain (depth 512, the bound)",
+    )
+    try:
+        var s = canonical_node(_chain(514))
+        f += _true(
+            False,
+            "514-node chain (depth 513): accepted, "
+            + String(s.byte_length())
+            + " bytes",
+        )
+    except e:
+        f += _eq(
+            String(e),
+            String("xml: element nesting deeper than 512"),
+            "514-node chain (depth 513) refused",
+        )
+    f += _eq(
+        canonical_xml('<r><a k="1"><b>x</b><c/></a> t <d><e/></d><f/></r>'),
+        String('<r>t<a k="1"><b>x</b><c></c></a><d><e></e></d><f></f></r>'),
+        "each subtree closes before its next sibling opens",
+    )
+    return f
+
+
 def test_tree_accessors_absent() raises -> Int:
     var f = 0
     var root = parse_xml('<r k="v"><x/><y/></r>')
@@ -301,6 +365,7 @@ def main() raises:
     failures += test_reader_accessors()
     failures += test_reserved_namespace_names()
     failures += test_canonical_node()
+    failures += test_canonical_depth()
     failures += test_tree_accessors_absent()
     failures += test_writer_edges()
     if failures != 0:

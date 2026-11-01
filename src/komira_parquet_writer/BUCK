@@ -7,7 +7,8 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # page index tracker; page-body compression and the schema builders; and the
 # page builders that turn one Arrow column into one column chunk (PLAIN,
 # DELTA_BINARY_PACKED, BYTE_STREAM_SPLIT, dictionary, Decimal128). It writes
-# no file and does not depend on the reader (komira_parquet).
+# no file of its own: the file writer returns the bytes. It does not depend on
+# the reader (komira_parquet); the tests do, as test_deps.
 #
 # The welded tests (each file's header says which defect it catches):
 # - test_thrift_writer_direct: the serializer's bytes, read back by a
@@ -41,6 +42,39 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #   and numeric dictionary chunks, sliced nullable numeric columns.
 # - test_decimal_encode_direct: big-endian FLBA(16) values, signed-order
 #   statistics, the schema element, invalid precision/scale refused.
+# - test_file_decode_roundtrip: komira_parquet's whole-file decode
+#   (decode_parquet_file_from_bytes) on this package's record-batch files:
+#   every type under each codec, row groups in file order, a projection, zero
+#   rows, and footers rewritten to have no row group, a nested column and a
+#   chunk outside the data region.
+# - test_file_writer_roundtrip: ParquetFileWriter's bytes decoded by
+#   komira_parquet's reader (a separate implementation): every type and
+#   null, four codecs, the footer's offsets and sizes, schema-order chunks,
+#   dictionary-or-PLAIN by cardinality, statistics, a foreign page builder's
+#   page.
+# - test_file_writer_errors: a closed writer, a bad index, a repeated or
+#   missing column, mismatched row counts, a null in a REQUIRED column.
+# - test_encoded_column: encode_column_to_buffer's bytes equal the writer's,
+#   and the column-parallel assembly decodes.
+# - test_multi_batch_direct: two arrays (and n raw-byte arrays) encode to the
+#   page the single-array encoder gives for their concatenation, byte for
+#   byte, with the same statistics; nulls, slices, codecs.
+# - test_multi_batch_stats_direct: chunk statistics folded across batches
+#   equal the concatenation's (ints with HLL, floats with NaN and signed
+#   zero), all-null and all-NaN publish no bounds.
+# - test_advanced_writer_roundtrip: three row groups decoded by komira_parquet's
+#   reader; chunks in schema order; the page CRC is the standard CRC-32 the
+#   reader checks (and a flipped byte is refused); incomplete row groups and
+#   bad chunks refused.
+# - test_advanced_writer_index_bloom: ColumnIndex and OffsetIndex blobs decoded
+#   by a decoder in the test (the location is the data page, past a dictionary
+#   page); a chunk with no range gets no ColumnIndex; a bloom filter's header,
+#   bitset and probes read back from the file.
+# - test_record_batch_writer: RecordBatches (twelve column kinds, nulls) written
+#   to bytes and decoded by komira_parquet's reader: one batch under three
+#   codecs, DATE32 and DECIMAL128 types kept, row-group cutting with a page
+#   index, several batches with and without the concat-free path, nullability
+#   per field or per data, refusals.
 # - test_no_env_reads: the package's sources read no environment, hold no
 #   raw pointer in a public signature, and import only these deps. It is
 #   staged every source `srcs` compiles.
@@ -54,10 +88,16 @@ mojo_library(
         "//src/komira_atomic_alias:komira_atomic_alias",
         "//src/komira_buffer:komira_buffer",
         "//src/komira_collections:komira_collections",
+        "//src/komira_column_kernels:komira_column_kernels",
+        "//src/komira_dynamic_filter:komira_dynamic_filter",
         "//src/komira_parquet_api:komira_parquet_api",
         "//src/komira_parquet_codec:komira_parquet_codec",
         "//src/komira_simd:komira_simd",
+        "//src/komira_zlib:komira_zlib",
     ],
+    # The reader decodes the writer's bytes in the file-writer tests. It is
+    # not a dependency of the library: a test-only package, never shipped.
+    test_deps = ["//src/komira_parquet:komira_parquet"],
     test_data = {
         "tests/test_no_env_reads.mojo": {
             "src/" + f: f
@@ -65,10 +105,19 @@ mojo_library(
         },
     },
     test_srcs = [
+        "tests/test_advanced_writer_index_bloom.mojo",
+        "tests/test_advanced_writer_roundtrip.mojo",
         "tests/test_decimal_encode_direct.mojo",
         "tests/test_dict_encoder_direct.mojo",
+        "tests/test_encoded_column.mojo",
+        "tests/test_file_decode_roundtrip.mojo",
+        "tests/test_file_writer_errors.mojo",
+        "tests/test_file_writer_roundtrip.mojo",
+        "tests/test_multi_batch_direct.mojo",
+        "tests/test_multi_batch_stats_direct.mojo",
         "tests/test_no_env_reads.mojo",
         "tests/test_numeric_dict_preestimate.mojo",
+        "tests/test_record_batch_writer.mojo",
         "tests/test_page_size_limit_direct.mojo",
         "tests/test_stats_direct.mojo",
         "tests/test_thrift_writer_direct.mojo",

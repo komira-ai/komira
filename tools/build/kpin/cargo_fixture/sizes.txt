@@ -1,0 +1,9 @@
+cc-1.0.0.crate 1000
+foo-bar-1.0.0.crate 1037
+http-0.2.12.crate 1074
+http-1.1.0.crate 1111
+libc-0.2.150.crate 1148
+lzma-sys-0.1.0.crate 1185
+my-derive-0.3.0.crate 1222
+serde-1.0.100.crate 1259
+tempfile-3.0.0.crate 1296

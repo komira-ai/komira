@@ -43,10 +43,10 @@ test "tail: 0, 1, 200, 201 and 10,000 lines, with and without a final newline, m
     // Lines long enough that 10,000 of them cross the 64 KiB read block.
     for ([_]usize{ 0, 1, 2, 199, 200, 201, 10_000 }) |lines| {
         for ([_]bool{ true, false }) |final_nl| {
-            var text = std.ArrayList(u8).init(a);
+            var text = std.ArrayList(u8).empty;
             var k: usize = 1;
             while (k <= lines) : (k += 1) {
-                try text.writer().print("line {d} of the test's output, padded to be long\n", .{k});
+                try text.writer(a).print("line {d} of the test's output, padded to be long\n", .{k});
             }
             if (!final_nl and text.items.len > 0) text.items.len -= 1;
             // An empty line in the middle counts as a line.
@@ -96,16 +96,7 @@ test "positiveStrict refuses empty, non-digits and a leading zero" {
 }
 
 test "the process table: status and stat parsing" {
-    const st =
-        \\Name:	cat
-        \\State:	S (sleeping)
-        \\Tgid:	42
-        \\Pid:	42
-        \\PPid:	7
-        \\TracerPid:	0
-        \\VmRSS:	    1234 kB
-        \\
-    ;
+    const st = "Name:\tcat\nState:\tS (sleeping)\nTgid:\t42\nPid:\t42\nPPid:\t7\nTracerPid:\t0\nVmRSS:\t    1234 kB\n";
     const p = proctab.parseStatus(st).?;
     try std.testing.expectEqual(@as(i32, 42), p.pid);
     try std.testing.expectEqual(@as(i32, 7), p.ppid);

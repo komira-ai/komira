@@ -23,7 +23,7 @@ KEEP retention is not enough. KEEP is a policy: the engine's `destroy_graph` ski
 `force_delete_data` is set, and that flag is the whole-project `--delete-data` teardown. A key kept only by
 KEEP would be deleted by the first such teardown, and the data under it with it. The engine already has the
 right mechanism: `RETAIN_UNDELETABLE` is a capability, no flag lifts it, and `destroy_graph` returns each
-skipped node as an `UndeletableSkip` so the caller names the survivors (`src/kci_reconciler/engine.mojo`).
+skipped node as an `UndeletableSkip` so the caller names the survivors (`src/kci_reconciler/src/kci_reconciler/engine.mojo`).
 What is missing is the path from the catalog to it: `kci_cloud/deploy.mojo` `engine_retention` maps a catalog
 retention only to `RETAIN_KEEP` or `RETAIN_DELETE`, and no catalog row can say "no delete".
 

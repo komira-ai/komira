@@ -29,7 +29,7 @@
 #   - an aggregate update's error names its row and group (the ERROR
 #     reply's group decoded);
 #   - a future deadline: a batch function that ignores it is killed at it,
-#     ERR_DEADLINE; a frame whose deadline is reached by frame_next's own
+#     ERR_KILLED (a forced stop, design section 4.7); a frame whose deadline is reached by frame_next's own
 #     clock read is refused before sending.
 #
 # Mutants planted (the sweep's ids in the pull request): calls.mjs Out.set
@@ -271,11 +271,11 @@ def _future_deadlines(mut rt: UdfRuntime, ctx: Handle) raises:
     # A future deadline on the harness's virtual clock (1 ms per read of
     # the host's clock). A batch function that never checks it is killed
     # once the proxy's own reads pass it, after the grace period, as
-    # ERR_DEADLINE.
+    # ERR_KILLED (a forced stop, design section 4.7).
     var s = _spec(SHAPE_MAP_BATCHES_COLUMN, "fixtures.mjs#spin_forever")
     var b = _bind(rt, ctx, s)
     var r = rt.call_batch(b.inst, s, _ints([1]), CallOptions(False, False, False, 2_500_000))
-    _expect(r.outcome, ERR_DEADLINE, "past its deadline and the worker did not answer within 500 ms", "a deadline user code ignores")
+    _expect(r.outcome, ERR_KILLED, "past its deadline and the worker did not answer within 500 ms", "a deadline user code ignores")
     assert_equal(r.outcome.row, -1, "the row of a worker killed at its deadline")
     _unbind(rt, b)
 

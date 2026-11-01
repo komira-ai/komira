@@ -23,6 +23,8 @@
 # - col EQ literal (Int64) on a column with a bloom filter
 # - col EQ literal (Int32: the spec hashes its 4 little-endian bytes)
 # - col EQ literal (String / BYTE_ARRAY)
+# - a DECIMAL column is never probed (its filter holds the unscaled integers,
+#   which no literal is written in)
 # - AND(a, b)  → prune if either child proves unsatisfiable (bloom miss)
 # - OR(a, b)   → prune only if both children prove unsatisfiable
 # - NOT / NE / LT / LE / GT / GE / arithmetic / other → conservative
@@ -38,6 +40,7 @@ from komira_parquet.bloom_reader import (
 )
 from komira_fs.file_system import FileSystem
 from komira_parquet.file_reader import ParquetFileReader
+from komira_parquet.rg_pruner import _is_decimal, _leaf_by_name
 from komira_parquet_api.metadata import (
     ColumnMetaData,
     FileMetaData,
@@ -260,6 +263,13 @@ def _can_match_rg_via_bloom[fs_o: FileSystem](
 
     var col_idx = _col_idx_by_name(metadata, col_name)
     if col_idx < 0 or col_idx >= len(rg.columns):
+        return True
+    # A DECIMAL column's filter holds the unscaled integers (24.00 on a
+    # scale-2 column is 2400); a literal is not in those units, so probing with
+    # it finds a value the filter never holds and prunes a row group that has
+    # the row.
+    var resolved = _leaf_by_name(metadata, col_name)
+    if resolved.leaf >= 0 and _is_decimal(metadata, resolved.element):
         return True
 
     var column_meta = rg.columns[col_idx].meta_data.copy()

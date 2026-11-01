@@ -43,13 +43,13 @@ fn run(a: std.mem.Allocator, tmp: *std.testing.TmpDir, bytes: []const u8, args: 
         try f.writeAll(bytes);
     }
     const exe = try tool(a);
-    var argv = std.ArrayList([]const u8).init(a);
-    try argv.append(exe);
-    try argv.appendSlice(args);
+    var argv = std.ArrayList([]const u8).empty;
+    try argv.append(a, exe);
+    try argv.appendSlice(a, args);
     // The child's environment is built here, empty: it does not inherit
     // DEBUG_RELOCATE or anything else of the test's.
     var env = std.process.EnvMap.init(a);
-    const r = try std.ChildProcess.run(.{
+    const r = try std.process.Child.run(.{
         .allocator = a,
         .argv = argv.items,
         .cwd_dir = tmp.dir,
@@ -124,7 +124,8 @@ fn runFullStdout(a: std.mem.Allocator, tmp: *std.testing.TmpDir, bytes: []const 
         try f.writeAll(bytes);
         var o = try tmp.dir.createFile("out", .{});
         defer o.close();
-        try o.writer().writeByteNTimes('o', 1024);
+        var full: [1024]u8 = @splat('o');
+        try o.writeAll(&full);
     }
     const out = try posix.openat(tmp.dir.fd, "out", .{ .ACCMODE = .WRONLY, .APPEND = true, .CLOEXEC = true }, 0);
     defer posix.close(out);
@@ -142,7 +143,7 @@ fn runFullStdout(a: std.mem.Allocator, tmp: *std.testing.TmpDir, bytes: []const 
         posix.dup2(out, 1) catch linux.exit_group(126);
         posix.dup2(pipe[1], 2) catch linux.exit_group(126);
         posix.fchdir(tmp.dir.fd) catch linux.exit_group(126);
-        posix.sigaction(posix.SIG.XFSZ, &ign, null) catch linux.exit_group(126);
+        posix.sigaction(posix.SIG.XFSZ, &ign, null);
         posix.setrlimit(.FSIZE, limit) catch linux.exit_group(126);
         switch (posix.execveZ(argv[0].?, argv.ptr, envp.ptr)) {
             else => linux.exit_group(127),
@@ -151,7 +152,7 @@ fn runFullStdout(a: std.mem.Allocator, tmp: *std.testing.TmpDir, bytes: []const 
     posix.close(pipe[1]);
     const rd = std.fs.File{ .handle = pipe[0] };
     defer rd.close();
-    const stderr = try rd.reader().readAllAlloc(a, 1 << 20);
+    const stderr = try rd.readToEndAlloc(a, 1 << 20);
     const w = posix.waitpid(pid, 0);
     if (!posix.W.IFEXITED(w.status)) {
         std.debug.print("debug_relocate did not exit: status 0x{x}; stderr:\n{s}\n", .{ w.status, stderr });

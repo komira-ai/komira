@@ -27,9 +27,10 @@
 //!      symbolic link is followed), else a usage error; the bitcode starts
 //!      with the bitcode magic `BC 0xC0DE`.
 //!   1. lld instruments the bitcode, as an LTO link with -r at -O0 whose pass
-//!      pipeline is `pgo-instr-gen,instrprof,default<O0>`: a relocatable
-//!      object with IR profile counters. lld is the LLVM the Mojo compiler is
-//!      built on, so the bitcode is read by its own LLVM.
+//!      pipeline is `pgo-instr-gen,instrprof,default<O0>` and
+//!      `-mllvm -instrprof-atomic-counter-update-all`: a relocatable object
+//!      with IR profile counters, each updated atomically. lld is the LLVM
+//!      the Mojo compiler is built on, so the bitcode is read by its own LLVM.
 //!   2. zig links that object as a release test is linked (the line zig is
 //!      given when `mojo build` links through mojo_compile's `cc` shim:
 //!      the compiler's runtime library, `--gc-sections`, `-lm`,
@@ -150,22 +151,26 @@ pub const ELF_MAGIC = [4]u8{ 0x7f, 'E', 'L', 'F' };
 
 /// lld's command line (step 1). Paths are absolute.
 pub fn lldArgv(alloc: std.mem.Allocator, lld: []const u8, bc: []const u8, k: []const u8) ![]const []const u8 {
-    var v = std.ArrayList([]const u8).init(alloc);
-    try v.appendSlice(&.{ lld, "-flavor", "gnu", "-r", "-m", "elf_x86_64", bc, "-o" });
-    try v.append(try std.fmt.allocPrint(alloc, "{s}/pg.o", .{k}));
-    try v.appendSlice(&.{ "--lto-O0", "--lto-newpm-passes=pgo-instr-gen,instrprof,default<O0>" });
-    return v.toOwnedSlice();
+    var v = std.ArrayList([]const u8).empty;
+    try v.appendSlice(alloc, &.{ lld, "-flavor", "gnu", "-r", "-m", "elf_x86_64", bc, "-o" });
+    try v.append(alloc, try std.fmt.allocPrint(alloc, "{s}/pg.o", .{k}));
+    try v.appendSlice(alloc, &.{ "--lto-O0", "--lto-newpm-passes=pgo-instr-gen,instrprof,default<O0>" });
+    // Atomic counter updates (README.md, "Atomic counters"): `instrprof`
+    // lowers each increment to an `atomicrmw add` (a `lock`-prefixed add),
+    // so threads that increment one counter at once lose none.
+    try v.appendSlice(alloc, &.{ "-mllvm", "-instrprof-atomic-counter-update-all" });
+    return v.toOwnedSlice(alloc);
 }
 
 /// zig's command line (step 2): `zig`, `kgen`, `rt` and `out` absolute,
 /// the tail as given.
 pub fn zigArgv(alloc: std.mem.Allocator, zig: []const u8, target: []const u8, k: []const u8, kgen: []const u8, out: []const u8, rt: []const u8, tail: []const []const u8) ![]const []const u8 {
-    var v = std.ArrayList([]const u8).init(alloc);
-    try v.appendSlice(&.{ zig, "cc", "-target", target, "-Wl,--strip-debug", "-Wl,--enable-new-dtags", "-Wl,-rpath,$ORIGIN/lib" });
-    try v.append(try std.fmt.allocPrint(alloc, "{s}/pg.o", .{k}));
-    try v.appendSlice(&.{ kgen, "-o", out, "-Wl,--gc-sections", "-lm", "-Wl,--whole-archive", rt, "-Wl,--no-whole-archive" });
-    try v.appendSlice(tail);
-    return v.toOwnedSlice();
+    var v = std.ArrayList([]const u8).empty;
+    try v.appendSlice(alloc, &.{ zig, "cc", "-target", target, "-Wl,--strip-debug", "-Wl,--enable-new-dtags", "-Wl,-rpath,$ORIGIN/lib" });
+    try v.append(alloc, try std.fmt.allocPrint(alloc, "{s}/pg.o", .{k}));
+    try v.appendSlice(alloc, &.{ kgen, "-o", out, "-Wl,--gc-sections", "-lm", "-Wl,--whole-archive", rt, "-Wl,--no-whole-archive" });
+    try v.appendSlice(alloc, tail);
+    return v.toOwnedSlice(alloc);
 }
 
 /// `base` with PATH, HOME, TMPDIR, ZIG_GLOBAL_CACHE_DIR, ZIG_LOCAL_CACHE_DIR
@@ -173,16 +178,16 @@ pub fn zigArgv(alloc: std.mem.Allocator, zig: []const u8, target: []const u8, k:
 pub fn childEnv(alloc: std.mem.Allocator, base: []const []const u8, k: []const u8) ![]const []const u8 {
     const set = [_][]const u8{ "PATH", "HOME", "TMPDIR", "ZIG_GLOBAL_CACHE_DIR", "ZIG_LOCAL_CACHE_DIR", "LC_ALL" };
     const val = [_][]const u8{ "/bin", "/home", "/tmp", "/zig-global", "/zig-local" };
-    var v = std.ArrayList([]const u8).init(alloc);
+    var v = std.ArrayList([]const u8).empty;
     outer: for (base) |e| {
         for (set) |n| {
             if (e.len > n.len and std.mem.startsWith(u8, e, n) and e[n.len] == '=') continue :outer;
         }
-        try v.append(e);
+        try v.append(alloc, e);
     }
-    for (val, 0..) |s, j| try v.append(try std.fmt.allocPrint(alloc, "{s}={s}{s}", .{ set[j], k, s }));
-    try v.append("LC_ALL=C");
-    return v.toOwnedSlice();
+    for (val, 0..) |s, j| try v.append(alloc, try std.fmt.allocPrint(alloc, "{s}={s}{s}", .{ set[j], k, s }));
+    try v.append(alloc, "LC_ALL=C");
+    return v.toOwnedSlice(alloc);
 }
 
 /// `[ -s path ]`: a file (a symbolic link followed) of size above 0.
@@ -204,7 +209,7 @@ pub fn head4(path: []const u8, buf: *[4]u8) []const u8 {
 /// three runs of at least 4 printable bytes (0x20 to 0x7e, or a tab) that
 /// hold `needle`, each followed by a space.
 pub fn stringsWith(alloc: std.mem.Allocator, bytes: []const u8, needle: []const u8) ![]const u8 {
-    var out = std.ArrayList(u8).init(alloc);
+    var out = std.ArrayList(u8).empty;
     var found: usize = 0;
     var start: usize = 0;
     var i: usize = 0;
@@ -213,13 +218,13 @@ pub fn stringsWith(alloc: std.mem.Allocator, bytes: []const u8, needle: []const 
         if (printable) continue;
         const run = bytes[start..i];
         if (run.len >= 4 and std.mem.indexOf(u8, run, needle) != null) {
-            try out.appendSlice(run);
-            try out.append(' ');
+            try out.appendSlice(alloc, run);
+            try out.append(alloc, ' ');
             found += 1;
         }
         start = i + 1;
     }
-    return out.toOwnedSlice();
+    return out.toOwnedSlice(alloc);
 }
 
 /// The last `n` lines of `text` (`tail -n N`).
@@ -239,7 +244,7 @@ pub fn lastLines(text: []const u8, n: usize) []const u8 {
 }
 
 fn red(alloc: std.mem.Allocator, err: *std.ArrayList(u8), k: []const u8, msg: []const u8) !u8 {
-    const w = err.writer();
+    const w = err.writer(alloc);
     try w.print("BRANCH COVERAGE LINK FAILED: {s}\n", .{msg});
     const log_path = try std.fmt.allocPrint(alloc, "{s}/log", .{k});
     if (std.fs.cwd().readFileAlloc(alloc, log_path, 1 << 30)) |log| {
@@ -276,17 +281,17 @@ pub fn linkAll(alloc: std.mem.Allocator, a: Args, where: run_cmd.Where, runner: 
         };
     }
     if (cannot) |c| {
-        try err.writer().print("cov_branch link: cannot make {s}\n", .{c});
+        try err.writer(alloc).print("cov_branch link: cannot make {s}\n", .{c});
         return 2;
     }
 
     // 0b. The busybox applets, in this tool's environment.
     const inst = runner.runFn(runner.ptr, alloc, .{ .argv = &.{ bb, "--install", "-s", bin }, .env = where.env }) catch |e| {
-        try err.writer().print("cov_branch link: cannot run {s}: {s}\n", .{ bb, @errorName(e) });
+        try err.writer(alloc).print("cov_branch link: cannot run {s}: {s}\n", .{ bb, @errorName(e) });
         return 2;
     };
     if (inst.shellStatus() != 0) {
-        try err.writer().print("cov_branch link: {s} --install -s {s} failed (exit {d})\n", .{ bb, bin, inst.shellStatus() });
+        try err.writer(alloc).print("cov_branch link: {s} --install -s {s} failed (exit {d})\n", .{ bb, bin, inst.shellStatus() });
         return 2;
     }
 
@@ -294,7 +299,7 @@ pub fn linkAll(alloc: std.mem.Allocator, a: Args, where: run_cmd.Where, runner: 
     // error), in this order.
     for ([_][]const u8{ lld, rt, kgen, zig, bc }) |f| {
         if (!nonEmpty(f)) {
-            try err.writer().print("cov_branch link: {s} is missing or empty\n", .{f});
+            try err.writer(alloc).print("cov_branch link: {s} is missing or empty\n", .{f});
             return 2;
         }
     }
@@ -306,7 +311,7 @@ pub fn linkAll(alloc: std.mem.Allocator, a: Args, where: run_cmd.Where, runner: 
 
     // 1. Instrument.
     const l = runner.runFn(runner.ptr, alloc, .{ .argv = try lldArgv(alloc, lld, bc, k), .env = env, .stdout_path = log, .stderr_to_stdout = true }) catch |e| {
-        try err.writer().print("cov_branch link: cannot run {s}: {s}\n", .{ lld, @errorName(e) });
+        try err.writer(alloc).print("cov_branch link: cannot run {s}: {s}\n", .{ lld, @errorName(e) });
         return 2;
     };
     if (l.shellStatus() != 0) {
@@ -315,7 +320,7 @@ pub fn linkAll(alloc: std.mem.Allocator, a: Args, where: run_cmd.Where, runner: 
 
     // 2. Link, as mojo_compile's cc shim links a release test.
     const z = runner.runFn(runner.ptr, alloc, .{ .argv = try zigArgv(alloc, zig, a.target, k, kgen, out, rt, a.tail), .env = env, .stdout_path = log, .stderr_to_stdout = true }) catch |e| {
-        try err.writer().print("cov_branch link: cannot run {s}: {s}\n", .{ zig, @errorName(e) });
+        try err.writer(alloc).print("cov_branch link: cannot run {s}: {s}\n", .{ zig, @errorName(e) });
         return 2;
     };
     if (z.shellStatus() != 0) {
@@ -347,7 +352,7 @@ pub fn linkAll(alloc: std.mem.Allocator, a: Args, where: run_cmd.Where, runner: 
 pub fn cli(alloc: std.mem.Allocator, argv: []const []const u8, where: run_cmd.Where, runner: run_cmd.Runner, err: *std.ArrayList(u8)) !u8 {
     var why: []const u8 = "";
     const a = (try parseArgs(alloc, argv, &why)) orelse {
-        try err.writer().print("cov_branch link: usage error: {s}\n{s}\n", .{ why, USAGE });
+        try err.writer(alloc).print("cov_branch link: usage error: {s}\n{s}\n", .{ why, USAGE });
         return 2;
     };
     return linkAll(alloc, a, where, runner, err);

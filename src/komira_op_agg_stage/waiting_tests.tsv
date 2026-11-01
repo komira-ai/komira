@@ -1,0 +1,11 @@
+# test	gate: a test that imports this package and a package not on main yet; it moves with that package.
+komira_engine_operators tests/test_agg_emit_at_offset_byte_equiv.mojo (10 tests): the drain-at-offset orchestrator against drain + concat	komira_op_stage_exec (stage_partition_emit_at_offset)
+komira_engine_operators tests/test_hash_agg_band_sink.mojo (2 tests): the band sink that drives consume_band	komira_op_agg_sinks (hash_agg_band_sink)
+komira_engine_operators tests/test_hash_agg_column_native_transparency.mojo (5 tests): the Stage HASH_AGG arm's output through the column-native bridge	komira_op_stage_exec (stage, engine)
+komira_engine_operators tests/test_sel_pipe_scalar_agg_native_walk.mojo (1 test): the Stage's ungrouped fold over a selection mask	komira_op_stage_exec (stage)
+komira_engine_operators tests/test_stage_bstate_arity_bridge.mojo (6 tests): the breaker-state arity bridge over HashAggTable and the other states	komira_op_stage_exec (stage, breaker_state)
+komira_engine_operators tests/test_stage_filter_breaker_fusion.mojo (6 tests): filter + HASH_AGG fusion in the Stage	komira_op_stage_exec (stage, engine)
+komira_engine_operators tests/test_stage_hash_agg_arm.mojo (5 tests): the Stage HASH_AGG arm end to end	komira_op_stage_exec (stage, engine)
+komira_engine_operators tests/test_stage_morsel_sink_adapter.mojo (5 tests): the Stage morsel-sink adapter's combine and parallel drain	komira_op_stage_exec (stage_morsel_sink_adapter)
+komira_engine_operators tests/test_stage_program_engine.mojo (4 tests): a stage program with a HASH_AGG breaker run by the engine	komira_op_stage_exec (stage, engine)
+komira_engine_operators tests/test_breaker_state_combinable.mojo (11 tests): combine laws of every breaker state, HashAggTable among them	komira_op_stage_exec (sort_buffer, topn_state, window_state, join_build, partition_topn_state)

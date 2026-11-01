@@ -27,6 +27,11 @@ mojo_library(
         # layout whose digest is not the release set's refused with zero
         # requests, under plan too
         "tests/test_publish_oci_arm.mojo",
+        # every field of the result over grids: the check order over layouts
+        # x digests x revisions x platforms x plan, every PUSH_* end state,
+        # the code mappings over every code, and the run-result rows of 0, 1
+        # and 2 records of every kind
+        "tests/test_publish_oci_grid.mojo",
     ],
     visibility = ["PUBLIC"],
 )

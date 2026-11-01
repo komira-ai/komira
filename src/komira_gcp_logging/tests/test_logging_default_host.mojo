@@ -5,14 +5,12 @@
 # names it in the request's Host header, so its bearer token goes to the
 # service it was minted for and to no other host.
 #
-# The default is read off a fresh client without sending: a send to
-# logging.googleapis.com would resolve the name through the system resolver
-# before the connector is asked to dial, so it would need outbound DNS. That
-# the client's host is what is dialled and named in the Host header is shown
-# by the override half, which sends to `localhost` (resolved without the
-# network) through komira_http_core's ScriptedConnector, which records the
-# host of every dial (`dial_host_at`) and captures what was written; no
-# socket is used.
+# The default is read off a fresh client without sending. That the client's
+# host is what is dialled and named in the Host header is shown by the
+# override half, which sends to `localhost` through komira_http_core's
+# ScriptedConnector, which records the host of every dial (`dial_host_at`)
+# and captures what was written; no socket is used and no name is resolved
+# (a ScriptedConnector never reads the address, so the client looks nothing up).
 from std.memory import ArcPointer
 from std.testing import assert_equal, assert_true
 
@@ -86,8 +84,8 @@ def test_a_fresh_client_starts_at_the_default_host() raises:
 
 
 def test_set_rest_host_still_overrides_the_default() raises:
-    # A caller pointing the client at another endpoint (here a local test
-    # server, which resolves without the network) is dialled there instead.
+    # A caller pointing the client at another endpoint (here `localhost`) is
+    # dialled there instead.
     var capture = ArcPointer[List[UInt8]](List[UInt8]())
     var c = LoggingServiceV2Client[ScriptedConnector, StaticTokenSource](
         HttpClient[ScriptedConnector].with_defaults(

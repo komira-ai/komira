@@ -1,0 +1,36 @@
+# The Python guard of `//ci:pr`: fails when the aggregate reaches a Python
+# target other than the Python SDK's tests.
+#
+#   ./buck2 bxl komira//tools/build/ci/python_guard.bxl:check
+#
+# Python serves only komira's Python SDK and its tests
+# (tests/python_closure_allowlist.bzl, PYTHON_SURFACE: package paths). The
+# aggregate builds on every pull request, so it must not reach the hermetic
+# CPython, its wheels, a py_test or a `.py` source of any other package. The
+# failure lists the targets and says how to leave them out (EXCLUDED of
+# rules.bzl). The check walks the configured closure of the aggregate, every
+# kind of dependency (target, exec, toolchain); ci_graph.bzl says what counts
+# as Python.
+#
+# Options: --aggregate <label>, --surface <package paths> (default PYTHON_SURFACE).
+
+load("//tests:python_closure_allowlist.bzl", "PYTHON_SURFACE")
+load(":ci_graph.bzl", "python_findings", "python_nodes", "sdk_own_deps")
+load(":rules.bzl", "AGGREGATE")
+
+def _check(ctx):
+    aggregate = ctx.cli_args.aggregate or AGGREGATE
+    surface = ctx.cli_args.surface or PYTHON_SURFACE
+    nodes = python_nodes(ctx, aggregate)
+    text = python_findings(nodes, surface, sdk_own_deps(ctx, nodes, surface), aggregate)
+    if text:
+        fail(text)
+    ctx.output.print("python guard: {} reaches {} target(s), none Python outside the SDK ({})".format(aggregate, len(nodes), ", ".join(surface) or "no SDK package yet"))
+
+check = bxl_main(
+    impl = _check,
+    cli_args = {
+        "aggregate": cli_args.string(default = ""),
+        "surface": cli_args.list(cli_args.string(), default = []),
+    },
+)

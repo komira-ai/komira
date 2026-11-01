@@ -241,7 +241,7 @@ struct _Link(Movable):
         var fds = _socketpair()
         self.entry = ConnEntry(
             stream=TcpStream(fds[0]),
-            reg=RegistrationHandle(_fd=fds[0], _interest_set=INTEREST_READ),
+            reg=RegistrationHandle(_fd=fds[0]),
             tls_stream=TlsStream(srv_cfg, fds[0]),
             initial_state=CONN_STATE_TLS_HANDSHAKE_IN,
         )
@@ -385,7 +385,7 @@ def test_plaintext_connection_is_refused() raises:
     var fds = _socketpair()
     var entry = ConnEntry(
         stream=TcpStream(fds[0]),
-        reg=RegistrationHandle(_fd=fds[0], _interest_set=INTEREST_READ),
+        reg=RegistrationHandle(_fd=fds[0]),
     )
     var router = Router()
     var grpc = NoopGrpcDispatch()

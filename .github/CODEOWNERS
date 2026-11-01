@@ -5,8 +5,8 @@
 # ships) and the channels file (where, and with which credential). A name and
 # version published to the channel is permanent, so a change here needs the
 # release approver's review. The workflow that acts on them,
-# .github/workflows/kci.yml, is owned the same way: it decides when a run
-# publishes. So is the pull request's check, pr.yml: it decides what a pull
+# .github/workflows/release.yml, is owned the same way: it decides when a run
+# builds a release. So is the pull request's check, pr.yml: it decides what a pull
 # request's code may reach (a tailnet node, no secret). So is the farm-connect action its build job runs: it decides
 # which job joins the farm's tailnet.
 #
@@ -18,7 +18,7 @@
 # required only where the branch rules of main turn on "Require review from
 # Code Owners".
 /release/                   @komira-ai/release-approvers
-/.github/workflows/kci.yml  @komira-ai/release-approvers
+/.github/workflows/release.yml  @komira-ai/release-approvers
 /.github/workflows/pr.yml   @komira-ai/release-approvers
 /.github/actions/farm-connect/  @komira-ai/release-approvers
 /.github/CODEOWNERS         @komira-ai/release-approvers

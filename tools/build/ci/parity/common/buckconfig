@@ -1,6 +1,0 @@
-[cells]
-  komira = .
-  prelude = prelude
-  toolchains = tools/build/cells/toolchains
-  tests = tools/build/tests
-  none = none

@@ -27,9 +27,9 @@ pub fn record(f: Fn) [72]u8 {
 
 /// The `__llvm_prf_data` bytes of `fns`.
 pub fn dataOf(alloc: std.mem.Allocator, fns: []const Fn) ![]const u8 {
-    var v = std.ArrayList(u8).init(alloc);
-    for (fns) |f| try v.appendSlice(&record(f));
-    return v.toOwnedSlice();
+    var v = std.ArrayList(u8).empty;
+    for (fns) |f| try v.appendSlice(alloc, &record(f));
+    return v.toOwnedSlice(alloc);
 }
 
 /// The `__llvm_prf_cnts` size `fns` need: 8 bytes per counter.
@@ -64,47 +64,47 @@ pub const Odd = struct {
 /// `.shstrtab` (the last, which the header names), the section headers at
 /// the end.
 pub fn elf(alloc: std.mem.Allocator, sections: []const Section, odd: Odd) ![]const u8 {
-    var names = std.ArrayList(u8).init(alloc);
-    try names.append(0);
-    var name_at = std.ArrayList(u32).init(alloc);
+    var names = std.ArrayList(u8).empty;
+    try names.append(alloc, 0);
+    var name_at = std.ArrayList(u32).empty;
     for (sections) |s| {
-        try name_at.append(@intCast(names.items.len));
-        try names.appendSlice(s.name);
-        try names.append(0);
+        try name_at.append(alloc, @intCast(names.items.len));
+        try names.appendSlice(alloc, s.name);
+        try names.append(alloc, 0);
     }
     const strtab_name: u32 = @intCast(names.items.len);
-    try names.appendSlice(".shstrtab");
-    try names.append(0);
+    try names.appendSlice(alloc, ".shstrtab");
+    try names.append(alloc, 0);
 
-    var out = std.ArrayList(u8).init(alloc);
-    try out.appendNTimes(0, 64);
-    var offs = std.ArrayList(u64).init(alloc);
+    var out = std.ArrayList(u8).empty;
+    try out.appendNTimes(alloc, 0, 64);
+    var offs = std.ArrayList(u64).empty;
     for (sections) |s| {
-        try offs.append(out.items.len);
-        try out.appendSlice(s.bytes);
+        try offs.append(alloc, out.items.len);
+        try out.appendSlice(alloc, s.bytes);
     }
     const strtab_off = out.items.len;
-    try out.appendSlice(names.items);
-    while (out.items.len % 8 != 0) try out.append(0);
+    try out.appendSlice(alloc, names.items);
+    while (out.items.len % 8 != 0) try out.append(alloc, 0);
     const shoff = out.items.len;
     const n: u16 = @intCast(sections.len + 2);
 
     var sh = [_]u8{0} ** 64;
-    try out.appendSlice(&sh); // the null section
+    try out.appendSlice(alloc, &sh); // the null section
     for (sections, 0..) |s, i| {
         sh = [_]u8{0} ** 64;
         std.mem.writeInt(u32, sh[0..4], name_at.items[i], .little);
         std.mem.writeInt(u32, sh[4..8], 1, .little);
         std.mem.writeInt(u64, sh[24..32], s.offset orelse offs.items[i], .little);
         std.mem.writeInt(u64, sh[32..40], s.size orelse s.bytes.len, .little);
-        try out.appendSlice(&sh);
+        try out.appendSlice(alloc, &sh);
     }
     sh = [_]u8{0} ** 64;
     std.mem.writeInt(u32, sh[0..4], strtab_name, .little);
     std.mem.writeInt(u32, sh[4..8], 3, .little);
     std.mem.writeInt(u64, sh[24..32], strtab_off, .little);
     std.mem.writeInt(u64, sh[32..40], names.items.len, .little);
-    try out.appendSlice(&sh);
+    try out.appendSlice(alloc, &sh);
 
     const h = out.items[0..64];
     @memcpy(h[0..odd.ident.len], odd.ident);
@@ -112,7 +112,7 @@ pub fn elf(alloc: std.mem.Allocator, sections: []const Section, odd: Odd) ![]con
     std.mem.writeInt(u16, h[58..60], odd.shentsize, .little);
     std.mem.writeInt(u16, h[60..62], odd.shnum orelse n, .little);
     std.mem.writeInt(u16, h[62..64], odd.shstrndx orelse n - 1, .little);
-    const bytes = try out.toOwnedSlice();
+    const bytes = try out.toOwnedSlice(alloc);
     return if (odd.cut) |c| bytes[0..@min(c, bytes.len)] else bytes;
 }
 
@@ -127,14 +127,14 @@ pub fn binary(alloc: std.mem.Allocator, fns: []const Fn) ![]const u8 {
 
 /// What `llvm-profdata show --all-functions` prints for `fns`.
 pub fn show(alloc: std.mem.Allocator, fns: []const Fn) ![]const u8 {
-    var v = std.ArrayList(u8).init(alloc);
-    const w = v.writer();
+    var v = std.ArrayList(u8).empty;
+    const w = v.writer(alloc);
     try w.writeAll("Counters:\n");
     for (fns) |f| {
         try w.print("  {s}:\n    Hash: 0x{x:0>16}\n    Counters: {d}\n    Function count: 0\n", .{ f.name, f.hash, f.counters });
     }
     try w.print("Instrumentation level: IR  entry_first = 0\nFunctions shown: {d}\nTotal functions: {d}\nMaximum function count: 1\nMaximum internal block count: 0\n", .{ fns.len, fns.len });
-    return v.toOwnedSlice();
+    return v.toOwnedSlice(alloc);
 }
 
 /// Bitcode as far as the annotation reads it: the magic, then `body`.
@@ -152,14 +152,14 @@ pub fn missing(alloc: std.mem.Allocator, name: []const u8) ![]const u8 {
 
 /// The dump lld prints for `fns`, each defined with an entry count.
 pub fn dump(alloc: std.mem.Allocator, fns: []const Fn) ![]const u8 {
-    var v = std.ArrayList(u8).init(alloc);
-    const w = v.writer();
+    var v = std.ArrayList(u8).empty;
+    const w = v.writer(alloc);
     try w.print("{s}\n; ModuleID = 'ld-temp.o'\nsource_filename = \"ld-temp.o\"\n\n", .{HEADER});
     for (fns, 0..) |f, i| {
         try w.print("define void @\"{s}\"() !prof !{d} {{\n  br i1 true, label %a, label %b, !prof !{d}\na:\n  ret void\nb:\n  ret void\n}}\n\n", .{ f.name, 10 + i, 100 + i });
     }
     try w.writeAll("define internal void @unrun() {\n  ret void\n}\n\n!10 = !{!\"function_entry_count\", i64 1}\n");
-    return v.toOwnedSlice();
+    return v.toOwnedSlice(alloc);
 }
 
 pub const MAIN = Fn{ .name = "main", .hash = 0x1234_5678_9abc_def0, .counters = 3 };

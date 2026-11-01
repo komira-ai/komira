@@ -154,6 +154,37 @@ test "what-ran: farm runs and cache hits pass, a local action and an empty list 
     try t.expect(!lib.whatran.remoteExecutor("remote_dep_file_cache_local"));
 }
 
+// `buck2 log what-ran` of a warm build of //tools/build/examples/libgate_ok
+// rebuilt with `-c komira.rerun=komira//tools/build/examples/libgate_ok:libgate_ok#<n>`.
+const LIBGATE = "komira//tools/build/examples/libgate_ok:libgate_ok";
+const WHATRAN_RERUN =
+    "build\tkomira//tools/build/examples/libgate_ok:libgate_ok (komira//tools/build/platforms:linux-x86_64#03cc1a891c89e4be) (mojo_gated_test test_payload_passes)\tre(pool=mojo-sized)\t2d3bb7f140485d25b0d946f3e996da3965d4fc7846d0aaf65be397610fd16319:141\n";
+
+test "what-ran of a rerun: only the named target's actions, each executed on the farm" {
+    const ok = lib.whatran.rerun(WHATRAN_RERUN, &.{LIBGATE});
+    try t.expect(ok.ok());
+    try t.expectEqual(@as(usize, 1), ok.ran);
+    // The helper salting every target: another target's test ran too.
+    const salted = lib.whatran.rerun(WHATRAN_RERUN ++ "build\tkomira//tools/build/markdown:markdown_unit (komira//tools/build/platforms:linux-x86_64#03cc1a891c89e4be) (zig_test)\tre(pool=mojo-sized)\tab:141\n", &.{LIBGATE});
+    try t.expect(!salted.ok());
+    try t.expectEqual(@as(usize, 1), salted.others);
+    try t.expectEqualStrings("komira//tools/build/markdown:markdown_unit (komira//tools/build/platforms:linux-x86_64#03cc1a891c89e4be) (zig_test)", salted.first_other.?);
+    // A rule that does not call rerun_env: nothing re-ran.
+    try t.expect(!lib.whatran.rerun("", &.{LIBGATE}).ok());
+    // The same <n> again: the action was a cache hit, not a fresh run.
+    const cached = lib.whatran.rerun("build\tkomira//tools/build/examples/libgate_ok:libgate_ok (cfg) (mojo_gated_test x)\tcache\tab:141\n", &.{LIBGATE});
+    try t.expect(!cached.ok());
+    try t.expectEqual(@as(usize, 1), cached.stale);
+    // A target whose label the named one's is a prefix of is another target.
+    try t.expect(!lib.whatran.ofTarget("komira//tools/build/examples/libgate_ok:libgate_ok_x (cfg) (mojo_gated_test x)", LIBGATE));
+    try t.expect(lib.whatran.ofTarget("komira//tools/build/examples/libgate_ok:libgate_ok (cfg) (mojo_gated_test x)", LIBGATE));
+    // Several targets named: each one's runs are counted, an unnamed one is another.
+    const two = WHATRAN_RERUN ++ "build\tkomira//tools/build/markdown:markdown_unit (cfg) (zig_test)\tre(pool=mojo-sized)\tab:141\n";
+    try t.expect(lib.whatran.rerun(two, &.{ LIBGATE, "komira//tools/build/markdown:markdown_unit" }).ok());
+    try t.expectEqual(@as(usize, 1), lib.whatran.ranOf(two, "komira//tools/build/markdown:markdown_unit"));
+    try t.expectEqual(@as(usize, 0), lib.whatran.ranOf(two, "komira//tools/build/markdown:importer_unit"));
+}
+
 test "a refusal passes only when the command failed with the exact text" {
     const want = "pointer_lint tests//negative/pointer_lint:no_tree: name the files in exactly one of `tree` and `files`";
     try t.expectEqual(lib.refusals.Verdict.refused, lib.refusals.verdict(false, "", "Caused by:\n  " ++ want ++ "\n", want, &.{}));

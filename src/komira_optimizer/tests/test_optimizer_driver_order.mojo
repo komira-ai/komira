@@ -450,7 +450,7 @@ def _want_hive_in_subquery() -> String:
     var l: List[String] = [
         "Project(exprs=[ColRef(c_custkey), ColRef(c_acctbal)])",
         "  Filter(predicate=BinaryOp(GT, ColRef(c_acctbal), ColRef(__scalar_subq_0)))",
-        "    Join(type=CROSS, on=[])",
+        "    Join(type=CROSS, on=[], build=right)",
         "      Scan(path=\"customer.parquet\", type=PARQUET, source_kind=COLUMNAR)",
         "      Project(exprs=[Alias(ColRef(hv), \"__scalar_subq_0\")])",
         "        Aggregate(group_by=[], aggs=[SUM(ColRef(v)).alias(\"hv\")])",
@@ -461,10 +461,9 @@ def _want_hive_in_subquery() -> String:
 
 def _want_residual_left() -> String:
     var l: List[String] = [
-        "Project(exprs=[ColRef(a), ColRef(ta), ColRef(b), ColRef(ub)])",
-        "  Join(type=INNER, on=[b=a])",
-        "    Scan(path=\"u.parquet\", type=PARQUET, source_kind=COLUMNAR)",
-        "    Scan(path=\"t.parquet\", type=PARQUET, source_kind=COLUMNAR, filter=BinaryOp(GT, ColRef(ta), Literal(ScalarValue(int64, 5))))",
+        "Join(type=INNER, on=[a=b], build=left)",
+        "  Scan(path=\"t.parquet\", type=PARQUET, source_kind=COLUMNAR, filter=BinaryOp(GT, ColRef(ta), Literal(ScalarValue(int64, 5))))",
+        "  Scan(path=\"u.parquet\", type=PARQUET, source_kind=COLUMNAR)",
     ]
     return _lines(l)
 
@@ -472,17 +471,16 @@ def _want_residual_left() -> String:
 def _want_residual_right() -> String:
     var l: List[String] = [
         "Project(exprs=[ColRef(a), ColRef(ta), ColRef(b), ColRef(ub)])",
-        "  Project(exprs=[ColRef(b), ColRef(ub), ColRef(a), ColRef(ta)])",
-        "    Join(type=INNER, on=[ta=ub, a=b])",
-        "      Scan(path=\"t.parquet\", type=PARQUET, source_kind=COLUMNAR)",
-        "      Scan(path=\"u.parquet\", type=PARQUET, source_kind=COLUMNAR, filter=BinaryOp(GT, ColRef(ub), Literal(ScalarValue(int64, 5))))",
+        "  Join(type=INNER, on=[ub=ta, b=a], build=left)",
+        "    Scan(path=\"u.parquet\", type=PARQUET, source_kind=COLUMNAR, filter=BinaryOp(GT, ColRef(ub), Literal(ScalarValue(int64, 5))))",
+        "    Scan(path=\"t.parquet\", type=PARQUET, source_kind=COLUMNAR)",
     ]
     return _lines(l)
 
 
 def _want_exists_residual() -> String:
     var l: List[String] = [
-        "Join(type=SEMI, on=[c_custkey=o_custkey], residual=BinaryOp(GT, ColRef(o_v), ColRef(c_v)))",
+        "Join(type=SEMI, on=[c_custkey=o_custkey], residual=BinaryOp(GT, ColRef(o_v), ColRef(c_v)), build=right)",
         "  Scan(path=\"customer.parquet\", type=PARQUET, source_kind=COLUMNAR)",
         "  Scan(path=\"orders.parquet\", type=PARQUET, source_kind=COLUMNAR, projection=[o_custkey, o_v])",
     ]
@@ -516,7 +514,7 @@ def _want_symor_when() -> String:
 
 def _want_cross_eq_side() -> String:
     var l: List[String] = [
-        "Join(type=SEMI, on=[ax=cx])",
+        "Join(type=SEMI, on=[ax=cx], build=right)",
         "  Scan(path=\"A\", type=PARQUET, source_kind=COLUMNAR, filter=BinaryOp(EQ, ColRef(ay), Literal(ScalarValue(int64, 1))))",
         "  Aggregate(group_by=[ColRef(cx)], aggs=[SUM(ColRef(cy)).alias(\"s_cx\")])",
         "    Scan(path=\"C\", type=PARQUET, source_kind=COLUMNAR)",
@@ -537,11 +535,10 @@ def _want_agg_proj_unique() -> String:
     var l: List[String] = [
         "Aggregate(group_by=[ColRef(ax)], aggs=[SUM(ColRef(__agg_in_0)).alias(\"s\")])",
         "  Project(exprs=[ColRef(ax), Alias(Alias(BinaryOp(MUL, ColRef(ax), ColRef(ay)), \"x\"), \"__agg_in_0\")])",
-        "    Project(exprs=[ColRef(cx), ColRef(s_cx), ColRef(ax), ColRef(ay)])",
-        "      Join(type=INNER, on=[ax=cx])",
-        "        Scan(path=\"A\", type=PARQUET, source_kind=COLUMNAR)",
-        "        Aggregate(group_by=[ColRef(cx)], aggs=[SUM(ColRef(cy)).alias(\"s_cx\")])",
-        "          Scan(path=\"C\", type=PARQUET, source_kind=COLUMNAR)",
+        "    Join(type=INNER, on=[cx=ax], build=left)",
+        "      Aggregate(group_by=[ColRef(cx)], aggs=[SUM(ColRef(cy)).alias(\"s_cx\")])",
+        "        Scan(path=\"C\", type=PARQUET, source_kind=COLUMNAR)",
+        "      Scan(path=\"A\", type=PARQUET, source_kind=COLUMNAR)",
     ]
     return _lines(l)
 
@@ -550,11 +547,10 @@ def _want_agg_expr_unique() -> String:
     var l: List[String] = [
         "Aggregate(group_by=[ColRef(ax)], aggs=[SUM(ColRef(__agg_in_0)).alias(\"s\")])",
         "  Project(exprs=[ColRef(ax), Alias(BinaryOp(MUL, ColRef(ax), ColRef(ay)), \"__agg_in_0\")])",
-        "    Project(exprs=[ColRef(cx), ColRef(s_cx), ColRef(ax), ColRef(ay)])",
-        "      Join(type=INNER, on=[ax=cx])",
-        "        Scan(path=\"A\", type=PARQUET, source_kind=COLUMNAR)",
-        "        Aggregate(group_by=[ColRef(cx)], aggs=[SUM(ColRef(cy)).alias(\"s_cx\")])",
-        "          Scan(path=\"C\", type=PARQUET, source_kind=COLUMNAR)",
+        "    Join(type=INNER, on=[cx=ax], build=left)",
+        "      Aggregate(group_by=[ColRef(cx)], aggs=[SUM(ColRef(cy)).alias(\"s_cx\")])",
+        "        Scan(path=\"C\", type=PARQUET, source_kind=COLUMNAR)",
+        "      Scan(path=\"A\", type=PARQUET, source_kind=COLUMNAR)",
     ]
     return _lines(l)
 
@@ -562,14 +558,12 @@ def _want_agg_expr_unique() -> String:
 def _want_semi_three_way() -> String:
     var l: List[String] = [
         "Project(exprs=[ColRef(ak), ColRef(av), ColRef(bk), ColRef(bv), ColRef(dk), ColRef(dv)])",
-        "  Join(type=SEMI, on=[ak=ck])",
-        "    Project(exprs=[ColRef(bk), ColRef(bv), ColRef(dk), ColRef(dv), ColRef(ak), ColRef(av)])",
-        "      Join(type=INNER, on=[ak=bk, ak=dk])",
-        "        Scan(path=\"a\", type=PARQUET, source_kind=COLUMNAR)",
-        "        Project(exprs=[ColRef(bk), ColRef(bv), ColRef(dk), ColRef(dv)])",
-        "          Join(type=INNER, on=[dk=bk])",
-        "            Scan(path=\"d\", type=PARQUET, source_kind=COLUMNAR)",
-        "            Scan(path=\"b\", type=PARQUET, source_kind=COLUMNAR)",
+        "  Join(type=SEMI, on=[ak=ck], build=right)",
+        "    Join(type=INNER, on=[bk=ak, dk=ak], build=left)",
+        "      Join(type=INNER, on=[bk=dk], build=left)",
+        "        Scan(path=\"b\", type=PARQUET, source_kind=COLUMNAR)",
+        "        Scan(path=\"d\", type=PARQUET, source_kind=COLUMNAR)",
+        "      Scan(path=\"a\", type=PARQUET, source_kind=COLUMNAR)",
         "    Scan(path=\"c\", type=PARQUET, source_kind=COLUMNAR, projection=[ck])",
     ]
     return _lines(l)

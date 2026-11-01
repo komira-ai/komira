@@ -13,7 +13,10 @@
 //!     differs or is a prefix, nested or absent, a version that is a number,
 //!     an exe that does not run or prints another version;
 //!   - node_dist's archive and version checks;
-//!   - c_shared_lib compiles with `-Wall -Werror`.
+//!   - c_shared_lib compiles with `-Wall -Werror`;
+//!   - node_binding_test: a failing test, a file that registers no test and a
+//!     skipped test fail though node may exit 0, an addon that is not staged
+//!     fails its test, and an addon that returns the wrong number fails it.
 //!
 //! The analysis refusals of the same rules are analysis_refusals_node.
 const std = @import("std");
@@ -194,6 +197,31 @@ const ROWS = [_]lib.Row{
         .name = "node_dist_does_not_run",
         .target = "tests//negative/node:node_does_not_run",
         .text = "/bin/node does not run",
+    },
+    .{
+        .name = "node_binding_fails",
+        .target = "tests//negative/node:binding_fails",
+        .text = "binding_test: node --test exited 1",
+    },
+    .{
+        .name = "node_binding_no_test",
+        .target = "tests//negative/node:binding_no_test",
+        .text = "binding_no_test.test.mjs registers no test of its own",
+    },
+    .{
+        .name = "node_binding_skipped",
+        .target = "tests//negative/node:binding_skipped",
+        .text = "a test was skipped or left todo",
+    },
+    .{
+        .name = "node_binding_addon_missing",
+        .target = "tests//negative/node:binding_addon_missing",
+        .text = "answer.node was not built or staged",
+    },
+    .{
+        .name = "node_binding_addon_wrong",
+        .target = "tests//negative/node:binding_addon_wrong",
+        .text = "answer() must return 42",
     },
     .{
         .name = "node_c_warns",

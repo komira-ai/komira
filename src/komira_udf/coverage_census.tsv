@@ -1,0 +1,3 @@
+# What the coverage census measured of this package's libraries (tools/build/coverage/census.md).
+census	2026-10-10	27a2541169cb979fa9c82a032eea24919b727121	-
+komira//src/komira_udf:komira_udf	src/komira_udf	library	OK	118	674	36	36	yes	conda	src/komira_udf/float_quotient_order.mojo,src/komira_udf/frame_view.mojo,src/komira_udf/partition_row_view.mojo,src/komira_udf/predicate.mojo,src/komira_udf/purity.mojo,src/komira_udf/row_transform.mojo,src/komira_udf/row_udf.mojo,src/komira_udf/stateful_contract.mojo,src/komira_udf/udf_descriptor.mojo,src/komira_udf/window_fn.mojo,src/komira_udf/window_frame_spec.mojo	-

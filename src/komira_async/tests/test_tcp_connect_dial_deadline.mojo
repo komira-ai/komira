@@ -29,8 +29,7 @@
 # is on the recurrence, which is where the defect actually lived.
 # =============================================================================
 
-from std.testing import assert_equal, assert_true
-from std.time import perf_counter_ns
+from std.testing import assert_equal, assert_false, assert_true
 
 from komira_async.ops.waker_sink import NoopSink
 from komira_async.runtime.blocking_runtime import BlockingRuntime
@@ -295,13 +294,15 @@ def test_default_argument_dial_still_connects_to_a_live_loopback_peer() raises:
     _ = listener^
 
 
-def test_default_argument_dial_to_a_closed_port_returns_promptly() raises:
-    """A refused dial on the DEFAULT argument RETURNS — it does not become the
-    default budget's worth of waiting, and it does not hang.
+def test_default_argument_dial_to_a_closed_port_is_refused() raises:
+    """A refused dial on the DEFAULT argument raises the refusal: it does not
+    become the default budget's worth of waiting, and it does not connect.
 
-    The bound asserted is deliberately loose (2 s against a resolved default of
-    10 s): the point is that a refusal is a refusal, not that loopback is
-    fast."""
+    Nothing listens on the port, so the kernel answers the SYN with a reset.
+    The error is either the hard `connect() error` before the SYN is queued or
+    `connect failed (errno=...)` from the socket's pending error; the other
+    way out of the dial, `connect timed out`, would mean the refusal was
+    missed and the dial waited out its budget. No elapsed time is measured."""
     var rt = BlockingRuntime[NoopSink].new(NoopSink(_placeholder=UInt8(0)))
     ref reactor = rt.reactor()
     # Bind, read the port, then DROP the listener so nothing is listening.
@@ -309,20 +310,22 @@ def test_default_argument_dial_to_a_closed_port_returns_promptly() raises:
     var closed_port = l.local_port()
     _ = l^
 
-    var t0 = Int64(perf_counter_ns())
-    var raised = False
+    var message = String("")
     try:
         var s = TcpStream.connect[NoopSink](
             reactor, inet_loopback_be(), closed_port,
         )
-        # A kernel that eagerly completes against a dead port is not a failure
-        # of this test's subject; the subject is that the call RETURNED.
         _ = s^
-    except:
-        raised = True
-    var elapsed_ns = Int64(perf_counter_ns()) - t0
-    _ = raised
-    assert_true(elapsed_ns < Int64(2_000_000_000))
+    except e:
+        message = String(e)
+    assert_true(
+        message.startswith("TcpStream.connect: connect"),
+        "a dial to a closed port must raise a connect refusal; got: " + message,
+    )
+    assert_false(
+        message.find("timed out") >= 0,
+        "the refusal was missed and the dial waited out its budget: " + message,
+    )
 
 
 def main() raises:
@@ -332,5 +335,5 @@ def main() raises:
     test_dial_loop_terminates_when_every_park_runs_its_full_slice()
     test_dial_loop_terminates_when_every_park_returns_instantly()
     test_default_argument_dial_still_connects_to_a_live_loopback_peer()
-    test_default_argument_dial_to_a_closed_port_returns_promptly()
+    test_default_argument_dial_to_a_closed_port_is_refused()
     print("PASS komira_async.runtime.tcp_stream dial deadline — the loop ENDS")

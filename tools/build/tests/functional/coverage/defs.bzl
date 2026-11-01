@@ -1,11 +1,11 @@
-"""Checks of coverage builds, as build actions: check.sh over the binaries
+"""Checks of coverage builds, as build actions: tests_act cov-debug-check over the binaries
 (test 41), with debug_relocate, which refuses a file holding a compressed
-section; report.sh over the per-test reports of the coverage runs (test 43);
+section; cov-report-check over the per-test reports of the coverage runs (test 43);
 cov_plant, a copy of a script (or a Zig source) with one planted defect,
 cov_zig_tree, a Zig tool's sources with such a copy among them, and
 kcov_stub_dir, a kcov distribution whose bin/kcov is a stand-in (test 43); and
-cov_branch_check, branch_check.sh over a branch coverage run's profile,
-and cov_link_line_check, link_line.sh over a branch coverage link
+cov_branch_check, cov-branch-check over a branch coverage run's profile,
+and cov_link_line_check, cov-link-line over a branch coverage link
 (test 47); cov_conda_gate_check, at analysis, that a conda package's joins
 wait for the library's coverage markers."""
 
@@ -15,14 +15,11 @@ load("@komira//tools/build/package:conda.bzl", "CondaJoinInfo")
 load("@komira//tools/build/toolchains/llvm_branch:defs.bzl", "LlvmBranchInfo")
 
 def _impl(ctx):
-    tc = ctx.attrs._toolchain[MojoToolchainInfo]
     out = ctx.actions.declare_output(ctx.label.name + ".txt")
     ctx.actions.run(
         cmd_args(
-            tc.busybox,
-            "sh",
-            ctx.attrs.script,
-            tc.busybox,
+            ctx.attrs._act[RunInfo],
+            "cov-debug-check",
             out.as_output(),
             ctx.attrs._relocate[DefaultInfo].default_outputs[0],
             ctx.attrs.mode,
@@ -40,7 +37,7 @@ cov_debug_check = rule(
         # Coverage binaries ([coverage][bin][<test>] sub-targets).
         "bins": attrs.list(attrs.source()),
         # `hermetic`: each binary has line tables and no sandbox path; `same`:
-        # the binaries are the same bytes (see check.sh).
+        # the binaries are the same bytes (see tools/cov_checks.zig).
         # hermetic: extended regular expressions, each matched by a whole
         # string of each binary: the relative directories of the line tables.
         "dirs": attrs.list(attrs.string(), default = []),
@@ -49,9 +46,8 @@ cov_debug_check = rule(
         # file name of a library source the test calls, which only the
         # compile's line tables put there.
         "names": attrs.list(attrs.string(), default = []),
-        "script": attrs.source(),
+        "_act": attrs.exec_dep(default = "tests//tools:tests_act", providers = [RunInfo]),
         "_relocate": attrs.exec_dep(default = "komira//tools/build/coverage/kcov:debug_relocate"),
-        "_toolchain": attrs.toolchain_dep(default = "toolchains//:mojo", providers = [MojoToolchainInfo]),
     },
 )
 
@@ -76,7 +72,6 @@ cov_set_check = rule(
 )
 
 def _report_impl(ctx):
-    tc = ctx.attrs._toolchain[MojoToolchainInfo]
     out = ctx.actions.declare_output(ctx.label.name + ".txt")
     if ctx.attrs.mode == "golden":
         if len(ctx.attrs.goldens) != len(ctx.attrs.reports):
@@ -97,13 +92,13 @@ def _report_impl(ctx):
             [["--cobertura", r] for r in ctx.attrs.reports],
         ]
     ctx.actions.run(
-        cmd_args(tc.busybox, "sh", ctx.attrs.script, tc.busybox, out.as_output(), ctx.attrs.mode, args),
+        cmd_args(ctx.attrs._act[RunInfo], "cov-report-check", out.as_output(), ctx.attrs.mode, args),
         category = "cov_report_check",
     )
     return [DefaultInfo(default_output = out)]
 
 # Checks of the per-test reports of a coverage run (test 43), as a build
-# action (report.sh): `golden`, each report is its golden file byte for byte;
+# action (tests_act cov-report-check): `golden`, each report is its golden file byte for byte;
 # `census`, covcheck's build gate in census mode reads the reports over the
 # package's sources (`files`, {repository path: source}) and its result JSON
 # holds each `expect` string; `result` (test 46), the result JSON of a
@@ -120,24 +115,18 @@ cov_report_check = rule(
         "package": attrs.string(default = ""),
         # [coverage][tests][<test>] sub-targets.
         "reports": attrs.list(attrs.source()),
-        "script": attrs.source(),
-        "_toolchain": attrs.toolchain_dep(default = "toolchains//:mojo", providers = [MojoToolchainInfo]),
+        "_act": attrs.exec_dep(default = "tests//tools:tests_act", providers = [RunInfo]),
     },
 )
 
 def _plant_impl(ctx):
-    tc = ctx.attrs._toolchain[MojoToolchainInfo]
     out = ctx.actions.declare_output(ctx.attrs.out)
     ctx.actions.run(
         cmd_args(
-            tc.busybox,
-            "sh",
-            "-c",
-            # The copy must differ from the original, so a sed expression
+            ctx.attrs._act[RunInfo],
+            # The copy must differ from the original, so an expression
             # that no longer matches fails here, not as a plant that plants nothing.
-            '"$1" sed -e "$2" "$3" > "$4" && ! "$1" cmp -s "$3" "$4"',
-            "cov_plant",
-            tc.busybox,
+            "cov-plant",
             ctx.attrs.expr,
             ctx.attrs.src,
             out.as_output(),
@@ -154,7 +143,20 @@ cov_plant = rule(
         "expr": attrs.string(),
         "out": attrs.string(),
         "src": attrs.source(),
-        "_toolchain": attrs.toolchain_dep(default = "toolchains//:mojo", providers = [MojoToolchainInfo]),
+        "_act": attrs.exec_dep(default = "tests//tools:tests_act", providers = [RunInfo]),
+    },
+)
+
+def _dir_impl(ctx):
+    return [DefaultInfo(default_output = ctx.actions.copied_dir(ctx.attrs.path, ctx.attrs.files))]
+
+# A directory of `files` (name -> source, a generated one among them) at
+# `path` in the package: a generated source that is a directory (covparts).
+cov_dir = rule(
+    impl = _dir_impl,
+    attrs = {
+        "files": attrs.dict(attrs.string(), attrs.source()),
+        "path": attrs.string(),
     },
 )
 
@@ -196,14 +198,11 @@ kcov_stub_dir = rule(
 )
 
 def _branch_check_impl(ctx):
-    tc = ctx.attrs._toolchain[MojoToolchainInfo]
     out = ctx.actions.declare_output(ctx.label.name + ".txt")
     ctx.actions.run(
         cmd_args(
-            tc.busybox,
-            "sh",
-            ctx.attrs.script,
-            tc.busybox,
+            ctx.attrs._act[RunInfo],
+            "cov-branch-check",
             out.as_output(),
             ctx.attrs._llvm[LlvmBranchInfo].tools_dir,
             ctx.attrs.profdata,
@@ -216,16 +215,15 @@ def _branch_check_impl(ctx):
 
 # Test 47: the profile of a branch coverage run ([coverage][branch][<test>])
 # holds exactly one function named like `function`, whose block counts,
-# sorted, are `counts` (branch_check.sh).
+# sorted, are `counts` (tests_act cov-branch-check).
 cov_branch_check = rule(
     impl = _branch_check_impl,
     attrs = {
         "counts": attrs.list(attrs.int()),
         "function": attrs.string(),
         "profdata": attrs.source(),
-        "script": attrs.source(),
+        "_act": attrs.exec_dep(default = "tests//tools:tests_act", providers = [RunInfo]),
         "_llvm": attrs.exec_dep(providers = [LlvmBranchInfo], default = "komira//tools/build/toolchains/llvm_branch:llvm_branch"),
-        "_toolchain": attrs.toolchain_dep(default = "toolchains//:mojo", providers = [MojoToolchainInfo]),
     },
 )
 
@@ -234,11 +232,10 @@ def _link_line_impl(ctx):
     out = ctx.actions.declare_output(ctx.label.name + ".txt")
     ctx.actions.run(
         cmd_args(
-            tc.busybox,
-            "sh",
-            ctx.attrs.script,
-            tc.busybox,
+            ctx.attrs._act[RunInfo],
+            "cov-link-line",
             out.as_output(),
+            tc.busybox,
             tc.wrapper,
             tc.compiler,
             tc.link,
@@ -256,15 +253,15 @@ def _link_line_impl(ctx):
 # Test 47: the branch coverage link of `src` (its bitcode `bc`, linked by
 # the link directory of `branch`) is the link mojo_compile gives `mojo
 # build` of `src` against `lib`'s closure, plus the profile runtime
-# (link_line.sh).
+# (tests_act cov-link-line).
 cov_link_line_check = rule(
     impl = _link_line_impl,
     attrs = {
         "bc": attrs.source(),
         "branch": attrs.dep(default = "komira//tools/build/coverage/branch:cov_branch"),
         "lib": attrs.dep(providers = [MojoInfo]),
-        "script": attrs.source(),
         "src": attrs.source(),
+        "_act": attrs.exec_dep(default = "tests//tools:tests_act", providers = [RunInfo]),
         "_toolchain": attrs.toolchain_dep(default = "toolchains//:mojo", providers = [MojoToolchainInfo]),
     },
 )

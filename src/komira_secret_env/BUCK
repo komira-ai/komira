@@ -18,7 +18,9 @@ mojo_library(
         "//src/komira_secret_store:komira_secret_store",
     ],
     test_srcs = [
+        "tests/test_env_name.mojo",
         "tests/test_env_secret_store.mojo",
+        "tests/test_map_env_grid.mojo",
         "tests/test_process_env.mojo",
     ],
     test_env = {

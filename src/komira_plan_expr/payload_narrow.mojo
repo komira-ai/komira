@@ -26,13 +26,18 @@
 # internally, where the narrow representation is created and destroyed inside
 # one function and cannot escape.
 #
+# WHO MAKES IT. The host lowering rule `derive_payload_narrow`
+# (`komira_lowering_rules.payload_narrow`) derives the specs from each scan's
+# verified footer statistics while the host lowers a plan; the physical plan
+# carries them on `ParquetSourceData.payload_narrow` (`komira_physical_plan`).
+#
 # ⚠ THE SPEC IS ADVISORY. A carrier that reaches a route with no narrowing
 # implementation is IGNORED, never half-applied: `base` is only ever added back
 # by the same code that subtracted it.
 #
 # POINTER DISCIPLINE: Copyable + Movable,
 # owns only `String` + `UInt8` + `Int64`. No OwnedPointer, no ArcPointer, no
-# UnsafePointer in any signature. It sits on `ScanData` / `ParquetSourceData`
+# UnsafePointer in any signature. It sits on `ParquetSourceData`
 # BY VALUE, never as a byte-slab element, so the stale-bytes hazard of a
 # List stored inside a byte slab does not apply.
 # =============================================================================
@@ -61,8 +66,9 @@ struct PayloadNarrowSpec(Movable, Copyable):
 
     Fields:
         column_name: the column this applies to, by NAME. Positional indices
-            are not usable here — the spec is stamped on a SCAN and read after
-            projection pushdown has re-ordered and pruned the column set.
+            are not usable here — the spec is set on a scan's source and
+            matched against the batch the join leaf holds, whose columns are a
+            projection of the scan's, in another order.
         target_bytes: 1, 2 or 4. Never 0 and never 8 — a spec that would not
             narrow is not constructed.
         base: the frame-of-reference origin. Stored value is `v - base`;

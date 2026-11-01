@@ -15,5 +15,8 @@ mojo_library(
     conda = False,
     deps = [],
     test_srcs = ["tests/test_parquet_file_bytes.mojo"],
-    visibility = ["//src/komira_parquet:"],
+    visibility = [
+        "//src/komira_parquet:",
+        "//src/komira_parquet_scan:",
+    ],
 )

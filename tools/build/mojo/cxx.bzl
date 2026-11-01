@@ -19,6 +19,13 @@ zig's clang targets `target` (a glibc-versioned triple) and `target_cpu`
 whatever worker runs it, and compiles with `-g0` by default: debug info would
 record the action's working directory. The C++ standard library is zig's
 libc++, linked statically (see `komira//tools/build/toolchains:libcxx`).
+
+For a macOS arm64 target platform (the `macos` attribute, set by a `select` on
+the target platform in `komira_cxx_toolchains`) it targets `macos_target`
+(`aarch64-macos`) at zig's generic arm64 CPU instead: the same zig, on the same
+linux x86_64 execution platform, writes the object files and the static archive
+of a library's C. No executable or shared library is linked for macOS: the
+linker is a refusal, because a link would write a linux program.
 """
 
 load(
@@ -41,15 +48,14 @@ load("@prelude//linking:link_info.bzl", "LinkStyle")
 load("@prelude//python_bootstrap:python_bootstrap.bzl", "PythonBootstrapToolchainInfo")
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
 
-def _refusal(bb, what):
-    # A tool the toolchain does not provide. It is still a declared input (the
-    # busybox), so reaching it fails the action with a message, never a
+def _refusal(act, what):
+    # A tool the toolchain does not provide. `act refuse` prints the message
+    # and exits 2, so reaching it fails the action with a message, never a
     # search of the worker's PATH.
     return RunInfo(args = cmd_args(
-        bb,
-        "sh",
-        "-c",
-        "echo \"cxx toolchain: {} is not provided (see tools/build/mojo/cxx.bzl)\" >&2; exit 2".format(what),
+        act,
+        "refuse",
+        "cxx toolchain: {} is not provided (see tools/build/mojo/cxx.bzl)".format(what),
     ))
 
 def _zig_tool(launcher, zig, sub):
@@ -58,14 +64,18 @@ def _zig_tool(launcher, zig, sub):
     return RunInfo(args = cmd_args(launcher, zig, sub))
 
 def _zig_cxx_toolchain_impl(ctx):
-    bb = ctx.attrs.busybox[DefaultInfo].default_outputs[0]
+    act = ctx.attrs._act[DefaultInfo].default_outputs[0]
     zig = ctx.attrs.zig[DefaultInfo].default_outputs[0]
     launcher = ctx.attrs.launcher[DefaultInfo].default_outputs[0]
     cc = _zig_tool(launcher, zig, "cc")
     cxx = _zig_tool(launcher, zig, "c++")
 
-    # Flags every compile gets, before the target's own.
-    base = ["-target", ctx.attrs.target, "-mcpu=" + ctx.attrs.target_cpu.replace("-", "_"), "-fPIC", "-g0"]
+    # Flags every compile gets, before the target's own. A macOS arm64 target (`macos`)
+    # compiles for `macos_target` at zig's generic arm64 CPU; every other target is the
+    # linux one, as it was.
+    target = ctx.attrs.macos_target if ctx.attrs.macos else ctx.attrs.target
+    cpu = "generic" if ctx.attrs.macos else ctx.attrs.target_cpu.replace("-", "_")
+    base = ["-target", target, "-mcpu=" + cpu, "-fPIC", "-g0"]
     c_info = CCompilerInfo(
         compiler = cc,
         compiler_type = "clang",
@@ -102,8 +112,9 @@ def _zig_cxx_toolchain_impl(ctx):
         link_libraries_locally = False,
         link_style = LinkStyle("static_pic"),
         link_weight = 1,
-        linker = cxx,
-        linker_flags = cmd_args("-target", ctx.attrs.target),
+        # A macOS arm64 target gets no linker: the toolchain compiles and archives for it.
+        linker = _refusal(act, "a linker for macOS") if ctx.attrs.macos else cxx,
+        linker_flags = cmd_args("-target", target),
         object_file_extension = "o",
         shlib_interfaces = ShlibInterfacesMode("disabled"),
         shared_dep_runtime_ld_flags = [],
@@ -118,7 +129,7 @@ def _zig_cxx_toolchain_impl(ctx):
         use_archiver_flags = True,
         is_pdb_generated = False,
     )
-    refuse = lambda what: _refusal(bb, what)
+    refuse = lambda what: _refusal(act, what)
     internal_tools = CxxInternalTools(
         check_nonempty_output = refuse("check_nonempty_output"),
         clang_tidy_wrapper = refuse("clang_tidy_wrapper"),
@@ -166,11 +177,19 @@ zig_cxx_toolchain = rule(
     impl = _zig_cxx_toolchain_impl,
     is_toolchain_rule = True,
     attrs = {
+        # Unused: kept so the toolchain BUCK files that pass it still load.
         "busybox": attrs.exec_dep(),
+        "_act": attrs.exec_dep(default = "komira//tools/build/mojo:act"),
         "c_compiler_flags": attrs.list(attrs.string(), default = []),
         "cxx_compiler_flags": attrs.list(attrs.string(), default = []),
         # A `zig_exe` of mojo/tools/zig_cc_launcher.zig.
         "launcher": attrs.exec_dep(),
+        # True when the target platform is macOS arm64 (a `select` in `komira_cxx_toolchains`):
+        # the compile then targets `macos_target`, and `target` and `target_cpu` are not used.
+        "macos": attrs.bool(default = False),
+        # zig target triple of a macOS arm64 target: its C is cross-compiled by the pinned zig
+        # on the (linux) execution platform of this toolchain.
+        "macos_target": attrs.string(default = "aarch64-macos"),
         # zig target triple, with the glibc floor, e.g. x86_64-linux-gnu.2.34.
         "target": attrs.string(),
         # e.g. x86-64-v3; passed to zig as -mcpu.
@@ -180,15 +199,13 @@ zig_cxx_toolchain = rule(
 )
 
 def _no_python_bootstrap_toolchain_impl(ctx):
-    bb = ctx.attrs.busybox[DefaultInfo].default_outputs[0]
+    act = ctx.attrs._act[DefaultInfo].default_outputs[0]
     return [
         DefaultInfo(),
         PythonBootstrapToolchainInfo(interpreter = cmd_args(
-            bb,
-            "sh",
-            "-c",
-            "echo 'python bootstrap toolchain: no Python interpreter is provided (see tools/build/mojo/cxx.bzl)' >&2; exit 2",
-            "sh",
+            act,
+            "refuse",
+            "python bootstrap toolchain: no Python interpreter is provided (see tools/build/mojo/cxx.bzl)",
         )),
     ]
 
@@ -200,7 +217,11 @@ def _no_python_bootstrap_toolchain_impl(ctx):
 no_python_bootstrap_toolchain = rule(
     impl = _no_python_bootstrap_toolchain_impl,
     is_toolchain_rule = True,
-    attrs = {"busybox": attrs.exec_dep()},
+    attrs = {
+        # Unused: kept so the toolchain BUCK files that pass it still load.
+        "busybox": attrs.exec_dep(),
+        "_act": attrs.exec_dep(default = "komira//tools/build/mojo:act"),
+    },
 )
 
 def _staged_files_impl(ctx):

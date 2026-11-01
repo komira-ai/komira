@@ -1,0 +1,53 @@
+komira
+Licensed under the Apache License, Version 2.0 (see LICENSE).
+
+This file records third-party material that text committed to this repository
+is derived from. Material that is only built or tested against (the C and C++
+libraries of third_party/, the toolchains) is fetched from pinned archives at
+build time and is not committed; each is under its own license, which its
+archive carries.
+
+Generated clients: text derived from Apache-2.0 inputs
+------------------------------------------------------
+
+The files under `src/*/generated/*/` are written by the generators of
+tools/build/proto-codegen (see docs/design/generated_sources.md). Each file's
+first lines name its generator and, where the generator pins them, the
+sha256 of each input. Not every generated library derives from third-party
+input: those generated from komira's own `.proto` files and models (for
+example komira_plan_proto, and records_db in komira_db_sqlite) are komira's
+own text. The inputs
+themselves are not committed here; the archives are pinned by sha256 and
+fetched at build time.
+
+1. AWS clients (`komira_aws_*`). Generated from the AWS service models
+   (`service-2.json`) and endpoint rulesets of botocore, pinned in
+   third_party/botocore/BUCK (version and archive sha256 there). botocore is
+   licensed under the Apache License, Version 2.0, and its NOTICE reads:
+
+       Botocore
+       Copyright 2012-2022 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+
+   (The rest of botocore's NOTICE concerns the vendorized parts of the
+   `requests` and `urllib3` libraries and a bundle of CA root certificates
+   inside botocore's Python code and data; none of that is read or
+   reproduced here.) botocore's LICENSE.txt and NOTICE are extracted
+   unmodified from the archive as `//third_party/botocore:files[LICENSE.txt]`
+   and `[NOTICE]`.
+
+2. Google Cloud clients (`komira_gcp_*`) and the modules of their googleapis
+   protos. Generated from the `.proto` files of
+   https://github.com/googleapis/googleapis (Apache License, Version 2.0; it
+   ships no NOTICE), at the commit pinned in tools/vendor/googleapis/BUCK.
+   The archive's LICENSE is extracted unmodified as
+   `//tools/vendor/googleapis:googleapis[LICENSE]`. The copyright holder
+   is Google LLC: the headers of the pinned protos read "Copyright <year>
+   Google LLC" and the Apache-2.0 notice (checked on google/type/expr.proto,
+   google/iam/v1/iam_policy.proto and
+   google/cloud/secretmanager/v1/service.proto). The generated Mojo does not
+   carry that header; this entry is where the attribution is.
+
+The Apache License, Version 2.0 is at http://www.apache.org/licenses/LICENSE-2.0
+and in the LICENSE file of this repository. The generated files are modified
+forms of the inputs' definitions (their structure re-expressed as Mojo); they
+are distributed here under the same license as the rest of komira.

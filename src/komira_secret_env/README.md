@@ -34,3 +34,75 @@ The value goes from the environ block straight into the `SecretValue`; no
 `ProcessEnv` reads through komira_libc's `_read_env_into`, so the binary
 keeps its one `getenv` declaration, into a stack buffer that it wipes with
 komira_crypto's `zeroize_inline_array` on every path out.
+
+## Examples
+
+Every example below runs as a test when the package is built, so it cannot
+go stale. They read through `MapEnv`, the hermetic double, so they need no
+variable in the process environment.
+
+### Resolving a handle
+
+The handle names the variable; the store returns its bytes as a
+`SecretValue` whose `Display` is redacted.
+
+```mojo
+from komira_secret_env import EnvSecretStore, MapEnv
+from std.testing import assert_equal
+
+var env = MapEnv()
+env.set("PYPI_TOKEN", "pypi-s3cr3t")
+var probe = env.share()  # the same variables, for reading the lookup count
+var store = EnvSecretStore[MapEnv](env^)
+
+var value = store.resolve("PYPI_TOKEN")
+assert_equal(value.len(), 11)
+var got = value.revealed_bytes()
+var want = "pypi-s3cr3t".as_bytes()
+for i in range(len(want)):
+    assert_equal(got[i], want[i])
+assert_equal(String(value), "SecretValue(<redacted:11B>)")
+assert_equal(probe.lookup_count(), 1)
+```
+
+### Refusals
+
+An unset variable and an empty one are refused with different messages that
+name the handle. A handle outside the grammar is refused before any lookup,
+and the refusal does not quote it: it may be a pasted secret.
+
+```mojo
+from komira_secret_env import EnvSecretStore, MapEnv, is_secret_env_name
+from std.testing import assert_equal, assert_false, assert_true
+
+var env = MapEnv()
+env.set("EMPTY_TOKEN", "")
+var probe = env.share()
+var store = EnvSecretStore[MapEnv](env^)
+
+var unset = String()
+try:
+    _ = store.resolve("PYPI_TOKEN")
+except e:
+    unset = String(e)
+assert_equal(unset, "EnvSecretStore: environment variable PYPI_TOKEN is not set")
+
+var empty = String()
+try:
+    _ = store.resolve("EMPTY_TOKEN")
+except e:
+    empty = String(e)
+assert_equal(empty, "EnvSecretStore: environment variable EMPTY_TOKEN is set but empty")
+assert_equal(probe.lookup_count(), 2)
+
+var pasted = String("ghp_pasted.token/value")
+assert_false(is_secret_env_name(pasted))
+var refused = String()
+try:
+    _ = store.resolve(pasted)
+except e:
+    refused = String(e)
+assert_true(refused.startswith("EnvSecretStore: secret env name"), refused)
+assert_equal(refused.find(pasted), -1)
+assert_equal(probe.lookup_count(), 2)  # no lookup for a refused handle
+```

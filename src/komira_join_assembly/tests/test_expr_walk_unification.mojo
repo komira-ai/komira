@@ -31,7 +31,7 @@
 #       (a missing column: raise vs placeholder). Both halves are pinned.
 #   (3) THE TAG UNIVERSE ITSELF. The corpus is DERIVED, not hand-listed:
 #       `_corpus_expr` is a ladder over `[0, EXPR_TAG_COUNT)` whose fallthrough
-#       RAISES BY NAME, so adding tag 26 to `expr.mojo` fails this file until
+#       RAISES BY NAME, so adding a tag to `expr.mojo` fails this file until
 #       someone supplies a corpus expression for it. A hand-written tag list
 #       here would be the same defect one level up — it goes stale exactly
 #       when a new tag lands.
@@ -61,6 +61,7 @@ from std.collections import Set, Optional
 from komira_arrow.arrow_types import ArrowType
 from komira_arrow.schema import Schema, SchemaBuilder, Field
 from komira_plan_expr.scalar_value import ScalarValue
+from komira_plan_expr.udf_type import UdfType
 from komira_plan_expr.partition_expr import (
     PartitionFrame,
     PF_ROW_NUMBER,
@@ -106,6 +107,7 @@ from komira_plan_expr.expr import (
     EXPR_STRING_FN,
     EXPR_STRING_FN_N,
     EXPR_UDF_CALL,
+    EXPR_UDF_APPLY,
     BIN_ADD,
     BIN_GT,
     UN_NOT,
@@ -294,6 +296,16 @@ def _corpus_expr(t: Int) raises -> Expr:
             ArrowType.INT64,
             Expr.col_ref("a"),
         )
+    elif tag == EXPR_UDF_APPLY:
+        # A call of a `UdfRef` with two arguments over two different columns,
+        # typed by the call's own return type (FLOAT64), which both field
+        # adapters must read off the node.
+        var uargs = List[Expr]()
+        uargs.append(Expr.col_ref("a"))
+        uargs.append(Expr.col_ref("b"))
+        return Expr.udf_apply(
+            0, UdfType("r", ArrowType.FLOAT64, DType.float64, True), uargs^
+        )
     raise Error(
         "EXPR_WALK_CORPUS_MISSING_TAG: no corpus expression for tag "
         + String(t)
@@ -333,7 +345,7 @@ def _joined(names: List[String]) -> String:
 def test_every_expr_tag_has_a_corpus_expression() raises:
     """EVERY tag in `[0, EXPR_TAG_COUNT)` must be constructible here.
 
-    Goes red the moment tag 26 is added to `expr.mojo` with no corpus entry,
+    Goes red the moment a tag is added to `expr.mojo` with no corpus entry,
     which is what stops the tag list in this file from going stale exactly
     when a new tag lands."""
     for t in range(EXPR_TAG_COUNT):

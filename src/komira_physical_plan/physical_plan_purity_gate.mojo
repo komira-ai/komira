@@ -109,6 +109,7 @@ from komira_plan_expr.expr import (
     EXPR_STRING_FN,
     EXPR_STRING_FN_N,
     EXPR_UDF_CALL,
+    EXPR_UDF_APPLY,
     EXPR_UNARY_OP,
     EXPR_WHEN,
     EXPR_WINDOW_FN,
@@ -279,6 +280,15 @@ def expr_carries_correlated_subquery(expr: Expr) raises -> Bool:
         if not expr._udf_call:
             return False
         return expr_carries_correlated_subquery(expr.udf_call_child_ref())
+    if tag == EXPR_UDF_APPLY:
+        # N children, the arguments of a call of a `UdfRef`; a subquery may
+        # hide in any of them.
+        if not expr._udf_apply:
+            return False
+        for i in range(expr.udf_apply_num_args()):
+            if expr_carries_correlated_subquery(expr.udf_apply_arg_ref(i)):
+                return True
+        return False
 
     # ---- TWO CHILDREN ------------------------------------------------------
     if tag == EXPR_BINARY_OP:

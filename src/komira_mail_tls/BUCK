@@ -1,0 +1,39 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# STARTTLS for a mail server: a side table of server-mode TLS connections keyed
+# by connection id, over komira_http_core's s2n-tls layer. See __init__.mojo.
+#
+# The welded tests (each file's header says which defect it catches):
+# - test_entry_lifetime: every table entry freed exactly once (churn, growth,
+#   removal from the middle, a destroyed table), unknown ids, the refusal of
+#   buffered plaintext at the upgrade, a bad key.
+# - test_loopback_handshake: a komira_http_core TLS client against an entry
+#   over a TCP connection on 127.0.0.1: the handshake, data both ways, the
+#   close_notify, a plaintext peer, drop leaving the socket open.
+mojo_library(
+    name = "komira_mail_tls",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    # Direct dependencies: the rule adds each one's own closure to the compiler.
+    deps = [
+        "//src/komira_atomic_alias:komira_atomic_alias",
+        "//src/komira_collections:komira_collections",
+        "//src/komira_http_core:komira_http_core",
+    ],
+    test_deps = ["//src/komira_async:komira_async"],
+    test_srcs = [
+        "tests/test_entry_lifetime.mojo",
+        "tests/test_loopback_handshake.mojo",
+    ],
+    test_data = {
+        "tests/test_entry_lifetime.mojo": {
+            "src/komira_http_core/tests/fixtures/tls/leaf_cert.pem": "//src/komira_http_core:tests/fixtures/tls/leaf_cert.pem",
+            "src/komira_http_core/tests/fixtures/tls/leaf_key.pem": "//src/komira_http_core:tests/fixtures/tls/leaf_key.pem",
+        },
+        "tests/test_loopback_handshake.mojo": {
+            "src/komira_http_core/tests/fixtures/tls/leaf_cert.pem": "//src/komira_http_core:tests/fixtures/tls/leaf_cert.pem",
+            "src/komira_http_core/tests/fixtures/tls/leaf_key.pem": "//src/komira_http_core:tests/fixtures/tls/leaf_key.pem",
+            "src/komira_http_core/tests/fixtures/tls/root_ca.pem": "//src/komira_http_core:tests/fixtures/tls/root_ca.pem",
+        },
+    },
+    visibility = ["PUBLIC"],
+)

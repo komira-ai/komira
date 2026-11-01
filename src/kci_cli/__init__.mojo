@@ -22,6 +22,7 @@
 #   * seam.mojo           `StageSteps` (the steps and the reads around
 #                         them), `StepEnd`
 #   * dispatch.mojo       `run_stage_with`, `kci_main_with`,
+#                         `kci_main_started_at`,
 #                         `evidence_line_of`
 #   * start_checks.mojo   under GitHub Actions, at start-up: the workflow,
 #                         the ref (main only; break-glass with a reason),
@@ -84,6 +85,7 @@ from kci_cli.start_checks import (
 )
 from kci_cli.dispatch import (
     evidence_line_of,
+    kci_main_started_at,
     kci_main_with,
     recorder_for,
     run_stage_with,

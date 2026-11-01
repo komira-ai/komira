@@ -137,13 +137,13 @@ pub fn scratchDir(alloc: std.mem.Allocator, cwd: []const u8, buck_scratch: ?[]co
 /// The environment of lld and llvm-profdata: `base` with PATH=<k>/bin,
 /// TMPDIR=<k>/tmp and LC_ALL=C in place of its own.
 pub fn toolEnv(alloc: std.mem.Allocator, base: []const []const u8, k: []const u8) ![]const []const u8 {
-    var v = std.ArrayList([]const u8).init(alloc);
+    var v = std.ArrayList([]const u8).empty;
     for (try run_cmd.childEnv(alloc, base, try std.fmt.allocPrint(alloc, "{s}/bin", .{k}), true)) |e| {
         if (std.mem.startsWith(u8, e, "TMPDIR=")) continue;
-        try v.append(e);
+        try v.append(alloc, e);
     }
-    try v.append(try std.fmt.allocPrint(alloc, "TMPDIR={s}/tmp", .{k}));
-    return v.toOwnedSlice();
+    try v.append(alloc, try std.fmt.allocPrint(alloc, "TMPDIR={s}/tmp", .{k}));
+    return v.toOwnedSlice(alloc);
 }
 
 /// lld's command line for step 2 (`bc`, `prof` and `k` absolute).
@@ -174,11 +174,11 @@ pub fn lldArgv(alloc: std.mem.Allocator, lld: []const u8, bc: []const u8, prof: 
 /// The lines of `text`: split at each newline, a final newline ending the
 /// last line rather than starting an empty one (as awk and grep read).
 pub fn lines(alloc: std.mem.Allocator, text: []const u8) ![]const []const u8 {
-    var v = std.ArrayList([]const u8).init(alloc);
+    var v = std.ArrayList([]const u8).empty;
     var it = std.mem.splitScalar(u8, text, '\n');
-    while (it.next()) |l| try v.append(l);
+    while (it.next()) |l| try v.append(alloc, l);
     if (v.items.len > 0 and v.items[v.items.len - 1].len == 0) _ = v.pop();
-    return v.toOwnedSlice();
+    return v.toOwnedSlice(alloc);
 }
 
 /// The first `n` bytes of `s` (`cut -c1-N` in the C locale).
@@ -189,12 +189,12 @@ fn cut(s: []const u8, n: usize) []const u8 {
 /// The first `n` of `ls`, each cut to `width` bytes and followed by a space
 /// (`head -n N | cut -c1-W | tr '\n' ' '`).
 pub fn joinHead(alloc: std.mem.Allocator, ls: []const []const u8, n: usize, width: usize) ![]const u8 {
-    var out = std.ArrayList(u8).init(alloc);
+    var out = std.ArrayList(u8).empty;
     for (ls[0..@min(ls.len, n)]) |l| {
-        try out.appendSlice(cut(l, width));
-        try out.append(' ');
+        try out.appendSlice(alloc, cut(l, width));
+        try out.append(alloc, ' ');
     }
-    return out.toOwnedSlice();
+    return out.toOwnedSlice(alloc);
 }
 
 /// Whether `line` matches `^[^ ]*<lit>`: `lit` (which holds a space) after
@@ -348,7 +348,7 @@ pub fn binaryRecords(alloc: std.mem.Allocator, name: []const u8, bin: []const u8
     const recs = try alloc.alloc([]const u8, whole);
     for (recs, 0..) |*r, n| {
         const rec = data[n * RECORD ..][0..RECORD];
-        r.* = try std.fmt.allocPrint(alloc, "{s} {x:0>16}", .{ std.fmt.fmtSliceHexLower(rec[0..8]), std.mem.readInt(u64, rec[8..16], .little) });
+        r.* = try std.fmt.allocPrint(alloc, "{s} {x:0>16}", .{ &std.fmt.bytesToHex(rec[0..8].*, .lower), std.mem.readInt(u64, rec[8..16], .little) });
     }
     sortStrings(recs);
     return .{ .recs = recs, .records = records };
@@ -372,15 +372,15 @@ pub const ProfileFunctions = struct {
 /// name line is two spaces, the name and a colon; the next line must be
 /// `    Hash: 0x<hex>`.
 pub fn profileFunctions(alloc: std.mem.Allocator, name: []const u8, show: []const u8) !ProfileFunctions {
-    var full = std.ArrayList([]const u8).init(alloc);
-    var names = std.ArrayList([]const u8).init(alloc);
-    var totals = std.ArrayList([]const u8).init(alloc);
+    var full = std.ArrayList([]const u8).empty;
+    var names = std.ArrayList([]const u8).empty;
+    var totals = std.ArrayList([]const u8).empty;
     var held = false;
     const ls = try lines(alloc, show);
     for (ls, 1..) |l, nr| {
         const is_name = l.len >= 3 and std.mem.startsWith(u8, l, "  ") and l[2] != ' ' and l[l.len - 1] == ':';
         if (!held and is_name) {
-            try names.append(l[2 .. l.len - 1]);
+            try names.append(alloc, l[2 .. l.len - 1]);
             held = true;
             continue;
         }
@@ -396,7 +396,7 @@ pub fn profileFunctions(alloc: std.mem.Allocator, name: []const u8, show: []cons
             var md5: [16]u8 = undefined;
             std.crypto.hash.Md5.hash(names.items[names.items.len - 1], &md5, .{});
             const pad = if (hex.len < 16) 16 - hex.len else 0;
-            try full.append(try std.fmt.allocPrint(alloc, "{s} {s}{s} {d}", .{ std.fmt.fmtSliceHexLower(md5[0..8]), "0000000000000000"[0..pad], hex, names.items.len }));
+            try full.append(alloc, try std.fmt.allocPrint(alloc, "{s} {s}{s} {d}", .{ &std.fmt.bytesToHex(md5[0..8].*, .lower), "0000000000000000"[0..pad], hex, names.items.len }));
             held = false;
             continue;
         }
@@ -405,7 +405,7 @@ pub fn profileFunctions(alloc: std.mem.Allocator, name: []const u8, show: []cons
             const d = l[t.len..];
             for (d) |c| {
                 if (!std.ascii.isDigit(c)) break;
-            } else try totals.append(d);
+            } else try totals.append(alloc, d);
         }
     }
     const fns = if (totals.items.len == 0) "none" else try std.mem.join(alloc, "\n", totals.items);
@@ -414,7 +414,7 @@ pub fn profileFunctions(alloc: std.mem.Allocator, name: []const u8, show: []cons
         return .{ .why = try std.fmt.allocPrint(alloc, "read {s} functions from {s}, but llvm-profdata show reports '{s}'", .{ read, name, fns }) };
     }
     sortStrings(full.items);
-    return .{ .full = try full.toOwnedSlice(), .names = try names.toOwnedSlice(), .fns = fns };
+    return .{ .full = try full.toOwnedSlice(alloc), .names = try names.toOwnedSlice(alloc), .fns = fns };
 }
 
 /// The first two fields of a "<md5> <hash> <n>" line.
@@ -426,7 +426,7 @@ fn pairOf(s: []const u8) []const u8 {
 
 /// `a` minus `b`, both sorted, as multisets (`comm -23`).
 pub fn minus(alloc: std.mem.Allocator, a: []const []const u8, b: []const []const u8) ![]const []const u8 {
-    var out = std.ArrayList([]const u8).init(alloc);
+    var out = std.ArrayList([]const u8).empty;
     var j: usize = 0;
     for (a) |x| {
         while (j < b.len and std.mem.lessThan(u8, b[j], x)) j += 1;
@@ -434,9 +434,9 @@ pub fn minus(alloc: std.mem.Allocator, a: []const []const u8, b: []const []const
             j += 1;
             continue;
         }
-        try out.append(x);
+        try out.append(alloc, x);
     }
-    return out.toOwnedSlice();
+    return out.toOwnedSlice(alloc);
 }
 
 /// Step 1: why the binary's records and the profile's functions are not
@@ -477,18 +477,18 @@ pub const Dump = struct {
 
 pub fn checkDump(alloc: std.mem.Allocator, err: []const u8, out: []const u8, fns: []const u8, prof_name: []const u8, bc_name: []const u8) !Dump {
     const ls = try lines(alloc, err);
-    var diag = std.ArrayList([]const u8).init(alloc);
+    var diag = std.ArrayList([]const u8).empty;
     var start: ?usize = null;
     for (ls, 0..) |l, i| {
         if (std.mem.eql(u8, l, HEADER)) {
             start = i;
             break;
         }
-        if (!isMissingLine(l)) try diag.append(l);
+        if (!isMissingLine(l)) try diag.append(alloc, l);
     }
     const dump = if (start) |s| ls[s..] else ls[0..0];
     for (dump) |l| {
-        if (isDiagLine(l)) try diag.append(l);
+        if (isDiagLine(l)) try diag.append(alloc, l);
     }
     if (diag.items.len > 0) {
         // Counted as `grep -c .` counts: the lines that are not empty.
@@ -530,8 +530,8 @@ fn step(runner: run_cmd.Runner, alloc: std.mem.Allocator, spec: br.Spec) !br.Out
     return runner.runFn(runner.ptr, alloc, spec);
 }
 
-fn red(err: *std.ArrayList(u8), why: []const u8) !u8 {
-    try err.writer().print("BRANCH COVERAGE ANNOTATE FAILED: {s}\n", .{why});
+fn red(alloc: std.mem.Allocator, err: *std.ArrayList(u8), why: []const u8) !u8 {
+    try err.writer(alloc).print("BRANCH COVERAGE ANNOTATE FAILED: {s}\n", .{why});
     return 1;
 }
 
@@ -550,7 +550,7 @@ pub fn runAll(alloc: std.mem.Allocator, a: Args, where: run_cmd.Where, runner: r
     const k = where.k;
     for ([_][]const u8{ a.lld, a.profdata, a.bitcode, a.profile, a.binary }) |f| {
         if (!nonEmpty(f)) {
-            try err.writer().print("cov_branch annotate: {s} is missing or empty\n", .{f});
+            try err.writer(alloc).print("cov_branch annotate: {s} is missing or empty\n", .{f});
             return 2;
         }
     }
@@ -562,13 +562,13 @@ pub fn runAll(alloc: std.mem.Allocator, a: Args, where: run_cmd.Where, runner: r
     const bc = try run_cmd.abs(alloc, where.cwd, a.bitcode);
 
     // 0. No branch weights before the profile is applied, and no entry counts.
-    const bc_bytes = readFile(alloc, bc) catch |e| return red(err, try std.fmt.allocPrint(alloc, "could not read {s}: {s}", .{ a.bitcode, @errorName(e) }));
-    if (try checkBitcode(alloc, a.bitcode, bc_bytes)) |why| return red(err, why);
+    const bc_bytes = readFile(alloc, bc) catch |e| return red(alloc, err, try std.fmt.allocPrint(alloc, "could not read {s}: {s}", .{ a.bitcode, @errorName(e) }));
+    if (try checkBitcode(alloc, a.bitcode, bc_bytes)) |why| return red(alloc, err, why);
 
     // 1. The profile holds exactly the functions the binary links.
-    const bin_bytes = readFile(alloc, a.binary) catch |e| return red(err, try std.fmt.allocPrint(alloc, "could not read {s}: {s}", .{ a.binary, @errorName(e) }));
+    const bin_bytes = readFile(alloc, a.binary) catch |e| return red(alloc, err, try std.fmt.allocPrint(alloc, "could not read {s}: {s}", .{ a.binary, @errorName(e) }));
     const recs = try binaryRecords(alloc, a.binary, bin_bytes);
-    if (recs.why) |why| return red(err, why);
+    if (recs.why) |why| return red(alloc, err, why);
     const show_txt = try std.fmt.allocPrint(alloc, "{s}/show.txt", .{k});
     const show_err = try std.fmt.allocPrint(alloc, "{s}/show.err", .{k});
     const s = step(runner, alloc, .{
@@ -577,16 +577,16 @@ pub fn runAll(alloc: std.mem.Allocator, a: Args, where: run_cmd.Where, runner: r
         .stdout_path = show_txt,
         .stderr_path = show_err,
     }) catch |e| {
-        try err.writer().print("cov_branch annotate: cannot run {s}: {s}\n", .{ a.profdata, @errorName(e) });
+        try err.writer(alloc).print("cov_branch annotate: cannot run {s}: {s}\n", .{ a.profdata, @errorName(e) });
         return 2;
     };
     if (s.shellStatus() != 0) {
         const head = try joinHead(alloc, try lines(alloc, readFile(alloc, show_err) catch ""), 2, std.math.maxInt(usize));
-        return red(err, try std.fmt.allocPrint(alloc, "llvm-profdata show failed on {s}: {s}", .{ a.profile, head }));
+        return red(alloc, err, try std.fmt.allocPrint(alloc, "llvm-profdata show failed on {s}: {s}", .{ a.profile, head }));
     }
     const fns = try profileFunctions(alloc, a.profile, readFile(alloc, show_txt) catch "");
-    if (fns.why) |why| return red(err, why);
-    if (try compareRecords(alloc, a.profile, a.binary, recs, fns)) |why| return red(err, why);
+    if (fns.why) |why| return red(alloc, err, why);
+    if (try compareRecords(alloc, a.profile, a.binary, recs, fns)) |why| return red(alloc, err, why);
 
     // 2. The profile applied, the module printed after the pass.
     const lld_out = try std.fmt.allocPrint(alloc, "{s}/out", .{k});
@@ -597,7 +597,7 @@ pub fn runAll(alloc: std.mem.Allocator, a: Args, where: run_cmd.Where, runner: r
         .stdout_path = lld_out,
         .stderr_path = lld_err,
     }) catch |e| {
-        try err.writer().print("cov_branch annotate: cannot run {s}: {s}\n", .{ a.lld, @errorName(e) });
+        try err.writer(alloc).print("cov_branch annotate: cannot run {s}: {s}\n", .{ a.lld, @errorName(e) });
         return 2;
     };
     const lld_text = readFile(alloc, lld_err) catch "";
@@ -605,21 +605,21 @@ pub fn runAll(alloc: std.mem.Allocator, a: Args, where: run_cmd.Where, runner: r
         // Its message is at the end of what it printed (the dump, if any, first).
         const ls = try lines(alloc, lld_text);
         for (ls[ls.len -| 20..]) |x| {
-            try err.appendSlice(cut(x, 300));
-            try err.append('\n');
+            try err.appendSlice(alloc, cut(x, 300));
+            try err.append(alloc, '\n');
         }
-        return red(err, try std.fmt.allocPrint(alloc, "lld could not apply the profile {s} to {s} (pgo-instr-use)", .{ a.profile, a.bitcode }));
+        return red(alloc, err, try std.fmt.allocPrint(alloc, "lld could not apply the profile {s} to {s} (pgo-instr-use)", .{ a.profile, a.bitcode }));
     }
 
     // 3. Only the functions the profile does not hold before the header, no
     // other diagnostic, one dump, and an entry count for each function of
     // the profile.
     const dump = try checkDump(alloc, lld_text, readFile(alloc, lld_out) catch "", fns.fns, a.profile, a.bitcode);
-    if (dump.why) |why| return red(err, why);
+    if (dump.why) |why| return red(alloc, err, why);
 
     // 4. The dump.
-    std.fs.cwd().writeFile(try run_cmd.abs(alloc, where.cwd, a.out), dump.ir) catch |e| {
-        try err.writer().print("cov_branch annotate: cannot write {s}: {s}\n", .{ a.out, @errorName(e) });
+    std.fs.cwd().writeFile(.{ .sub_path = try run_cmd.abs(alloc, where.cwd, a.out), .data = dump.ir }) catch |e| {
+        try err.writer(alloc).print("cov_branch annotate: cannot write {s}: {s}\n", .{ a.out, @errorName(e) });
         return 1;
     };
     std.fs.cwd().deleteTree(k) catch {};
@@ -631,7 +631,7 @@ pub fn runAll(alloc: std.mem.Allocator, a: Args, where: run_cmd.Where, runner: r
 pub fn cli(alloc: std.mem.Allocator, argv: []const []const u8, where: run_cmd.Where, runner: run_cmd.Runner, err: *std.ArrayList(u8)) !u8 {
     var why: []const u8 = "";
     const a = (try parseArgs(alloc, argv, &why)) orelse {
-        try err.writer().print("cov_branch annotate: usage error: {s}\n{s}\n", .{ why, USAGE });
+        try err.writer(alloc).print("cov_branch annotate: usage error: {s}\n{s}\n", .{ why, USAGE });
         return 2;
     };
     return runAll(alloc, a, where, runner, err);

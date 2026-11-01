@@ -136,7 +136,7 @@ pub fn failedTargets(a: std.mem.Allocator, report: []const u8, targets: []const 
     const results = field(root, "results") orelse return null;
     if (results != .object) return null;
     const strings = field(root, "strings");
-    var out = std.ArrayList(Failure).init(a);
+    var out = std.ArrayList(Failure).empty;
     var it = results.object.iterator();
     while (it.next()) |kv| {
         if (!std.mem.eql(u8, str(field(kv.value_ptr.*, "success")) orelse "", "FAIL")) continue;
@@ -149,9 +149,9 @@ pub fn failedTargets(a: std.mem.Allocator, report: []const u8, targets: []const 
         }
         if (!given) continue;
         const text = firstError(strings, kv.value_ptr.*) orelse "(the build report has no error text for this target)";
-        try out.append(.{ .target = stripCell(kv.key_ptr.*), .excerpt = excerpt(text) });
+        try out.append(a, .{ .target = stripCell(kv.key_ptr.*), .excerpt = excerpt(text) });
     }
-    return try out.toOwnedSlice();
+    return try out.toOwnedSlice(a);
 }
 
 /// `exit` is null when buck2 was killed (its timeout) or died of a signal;

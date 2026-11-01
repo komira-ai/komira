@@ -97,7 +97,7 @@ pub const Parsed = struct {
 /// The well-formed rows of `text` (the limits file named `name`); every
 /// malformed one is a finding written to `w`.
 pub fn parseRows(alloc: Alloc, name: []const u8, text: []const u8, w: anytype) !Parsed {
-    var rows = std.ArrayList(Row).init(alloc);
+    var rows = std.ArrayList(Row).empty;
     var seen = std.StringHashMap(void).init(alloc);
     var findings: usize = 0;
     var lines = std.mem.splitScalar(u8, text, '\n');
@@ -141,7 +141,7 @@ pub fn parseRows(alloc: Alloc, name: []const u8, text: []const u8, w: anytype) !
             continue;
         }
         try seen.put(id, {});
-        try rows.append(.{ .id = id, .by = by, .line = n });
+        try rows.append(alloc, .{ .id = id, .by = by, .line = n });
     }
     if (rows.items.len == 0) {
         try w.print("{s} lists no limit: an empty list is indistinguishable from an unchecked tree\n", .{name});
@@ -167,7 +167,7 @@ fn lessThan(_: void, a: File, b: File) bool {
 /// The files of `dir` (opened with `.iterate = true`) that the check reads,
 /// sorted by path. A symbolic link is followed.
 pub fn collect(alloc: Alloc, dir: std.fs.Dir, excludes: []const []const u8) ![]File {
-    var list = std.ArrayList(File).init(alloc);
+    var list = std.ArrayList(File).empty;
     var walker = try dir.walk(alloc);
     defer walker.deinit();
     while (try walker.next()) |e| {
@@ -181,9 +181,9 @@ pub fn collect(alloc: Alloc, dir: std.fs.Dir, excludes: []const []const u8) ![]F
             else => return err,
         };
         if (std.mem.indexOfScalar(u8, data[0..@min(data.len, binary_probe)], 0) != null) continue;
-        try list.append(.{ .path = try alloc.dupe(u8, e.path), .data = data });
+        try list.append(alloc, .{ .path = try alloc.dupe(u8, e.path), .data = data });
     }
-    const files = try list.toOwnedSlice();
+    const files = try list.toOwnedSlice(alloc);
     std.mem.sort(File, files, {}, lessThan);
     return files;
 }
@@ -191,14 +191,14 @@ pub fn collect(alloc: Alloc, dir: std.fs.Dir, excludes: []const []const u8) ![]F
 /// Checks the rows of `text` (the limits file named `name`) against `files`
 /// (rules 1 to 3), writing one line per finding to `out`.
 pub fn checkTree(alloc: Alloc, name: []const u8, text: []const u8, files: []const File, out: *std.ArrayList(u8)) !Result {
-    const w = out.writer();
+    const w = out.writer(alloc);
     const parsed = try parseRows(alloc, name, text, w);
     var findings = parsed.findings;
     var by_id = std.StringHashMap(usize).init(alloc);
     for (parsed.rows, 0..) |r, i| try by_id.put(r.id, i);
 
-    var unknown = std.ArrayList(u8).init(alloc);
-    const uw = unknown.writer();
+    var unknown = std.ArrayList(u8).empty;
+    const uw = unknown.writer(alloc);
     for (files) |f| {
         var lines = std.mem.splitScalar(u8, f.data, '\n');
         var n: usize = 0;
@@ -255,7 +255,7 @@ pub fn merged(subjects: []const u8, pr: []const u8) bool {
 /// Checks the rows of `text` against `subjects`, the commit subjects of the
 /// main branch one per line (rule 4; malformed rows are findings too).
 pub fn checkMerged(alloc: Alloc, name: []const u8, text: []const u8, subjects: []const u8, out: *std.ArrayList(u8)) !Result {
-    const w = out.writer();
+    const w = out.writer(alloc);
     const parsed = try parseRows(alloc, name, text, w);
     var findings = parsed.findings;
     for (parsed.rows) |r| {

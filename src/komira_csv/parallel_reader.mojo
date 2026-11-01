@@ -1662,6 +1662,23 @@ struct _CsvConcatTask[in_o: ImmOrigin](Segment):
             sp[].col_errors.value()[c] = Optional[String](String(e))
 
 
+def _empty_batch_with_schema(
+    header_names: List[String], col_types: List[ArrowType]
+) raises -> RecordBatch:
+    """Zero rows, one zero-length column per field (komira-ai/komira#1128).
+
+    A field with no column makes `RecordBatchBuilder.build` raise, so each
+    column is built by the per-worker materializer over no cells: the same
+    type and buffer shape a worker's zero-row column has. The quote style
+    and options are not read when there are no rows.
+    """
+    var no_bytes = List[UInt8]()
+    return _materialize_batch_with_schema[Rfc4180](
+        Span(no_bytes), ScannedCells(), 0, header_names, col_types, 0,
+        CsvReadOptions(),
+    )
+
+
 def _concat_csv_batches_column_parallel[
     has_dispatcher: Bool,
     disp_o: Origin[mut=True],
@@ -1698,9 +1715,9 @@ def _concat_csv_batches_column_parallel[
         all worker batches, columns in shared_col_types order.
 
     Note:
-        On all-empty input (every worker returned None), emits an empty
-        batch stamped with the inferred schema -- mirrors the single-thread
-        empty-row path.
+        On all-empty input (no worker contributed a row), emits a zero-row
+        batch with one zero-length column per inferred field -- the same
+        result the single-thread reader gives a header with no records.
     """
     # Drain the input slab into a contiguous storage Slab[Optional[
     # RecordBatch]] over which we hand a stable byte pointer to each
@@ -1713,16 +1730,8 @@ def _concat_csv_batches_column_parallel[
 
     # Fast paths.
     if num_cols == 0 or k == 0:
-        var sb_empty = SchemaBuilder()
-        var f_idx = 0
-        while f_idx < num_cols:
-            sb_empty.add_field(
-                Field(header_names[f_idx], shared_col_types[f_idx], True)
-            )
-            f_idx = f_idx + 1
-        var rbb_empty = RecordBatchBuilder()
         _ = batches^
-        return rbb_empty.build(sb_empty.build())
+        return _empty_batch_with_schema(header_names, shared_col_types)
 
     # Pre-fill output Slab[Column] with empty placeholders. Workers
     # __setitem__ their disjoint slot -- no growth across the dispatch.
@@ -1839,17 +1848,8 @@ def _concat_csv_batches_column_parallel[
         probe = probe + 1
 
     if not any_nonempty:
-        # Build empty schema-stamped batch.
-        var sb_e = SchemaBuilder()
-        var f_i = 0
-        while f_i < num_cols:
-            sb_e.add_field(
-                Field(header_names[f_i], shared_col_types[f_i], True)
-            )
-            f_i = f_i + 1
         _ = out_columns^
-        var rbb_e = RecordBatchBuilder()
-        return rbb_e.build(sb_e.build())
+        return _empty_batch_with_schema(header_names, shared_col_types)
 
     # Assemble the output RecordBatch. Schema from header_names +
     # shared_col_types so the result matches the inferred schema even

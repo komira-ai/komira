@@ -1,14 +1,41 @@
-load("@komira//tools/build/python:defs.bzl", "py_test")
+load("@komira//tools/build/mojo:toolchain.bzl", "zig_test")
+load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 
-# The tests of release/ci's scripts, each a py_test: its cases run with the
-# hermetic Python (tools/build/python) as a build action, so building the
-# target is running them. Test-only: nothing here is shipped.
-
-# release/ci/main_red.py, the main-red alert of .github/workflows/main_red.yml
-# (docs/ci.md, "main_red.yml"): what each case proves is in the test's header.
-# fixtures/ holds excerpts of real job logs of kci runs.
-py_test(
+# The cases of release/ci/main_red.zig, the main red alert of
+# .github/workflows/main_red.yml (docs/ci.md, "The main red alert"): a
+# zig_test, run as a build action, so building the target is running them
+# and the program is not built unless they pass. What each case proves is in
+# the header of test_main_red.zig; run_cases.zig is the whole run against a
+# fake API. fixtures/ holds excerpts of buck2's own failure output as a
+# runner prints it (the download URL's host and the package names changed).
+zig_test(
     name = "test_main_red",
-    src = "test_main_red.py",
-    srcs = ["//release:main_red.py"] + glob(["fixtures/*.log"]),
+    exec_compatible_with = LINUX_X86_64,
+    src = "test_main_red.zig",
+    deps = ["//release/ci:main_red_lib"],
+    imports = [
+        "run_cases.zig",
+        "fixtures/buck2_action_failed.log",
+        "fixtures/buck2_gated_test_failed.log",
+        "fixtures/buck2_no_target.log",
+    ],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
+    visibility = ["//release/ci:"],
+)
+
+# The cases of the release workflow's tools (release/ci/check_release_ref.zig
+# and release_json.zig): the guard, the stamp, the artifacts file the release
+# set is held to, and the release set's hash and release.json (test_set_json.zig),
+# the last against goldens of the writer they replace. Run as a build action:
+# building either tool is running them.
+zig_test(
+    name = "test_release",
+    exec_compatible_with = LINUX_X86_64,
+    src = "test_release.zig",
+    deps = ["//release/ci:release_lib"],
+    imports = ["test_set_json.zig"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
+    visibility = ["//release/ci:"],
 )

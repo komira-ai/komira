@@ -14,8 +14,8 @@ pub const Run = struct {
 
 /// Rule 1 alone: the rows of `text`.
 pub fn rows(a: std.mem.Allocator, text: []const u8) !Run {
-    var out = std.ArrayList(u8).init(a);
-    const p = try limits.parseRows(a, name, text, out.writer());
+    var out = std.ArrayList(u8).empty;
+    const p = try limits.parseRows(a, name, text, out.writer(a));
     return .{ .limits = p.rows.len, .findings = p.findings, .report = out.items };
 }
 
@@ -23,14 +23,14 @@ pub fn rows(a: std.mem.Allocator, text: []const u8) !Run {
 pub fn tree(a: std.mem.Allocator, text: []const u8, files: []const [2][]const u8) !Run {
     const fs = try a.alloc(limits.File, files.len);
     for (files, 0..) |f, i| fs[i] = .{ .path = f[0], .data = f[1] };
-    var out = std.ArrayList(u8).init(a);
+    var out = std.ArrayList(u8).empty;
     const r = try limits.checkTree(a, name, text, fs, &out);
     return .{ .limits = r.limits, .findings = r.findings, .report = out.items };
 }
 
 /// Rule 4: the rows of `text` against `subjects`.
 pub fn merged(a: std.mem.Allocator, text: []const u8, subjects: []const u8) !Run {
-    var out = std.ArrayList(u8).init(a);
+    var out = std.ArrayList(u8).empty;
     const r = try limits.checkMerged(a, name, text, subjects, &out);
     return .{ .limits = r.limits, .findings = r.findings, .report = out.items };
 }

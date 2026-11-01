@@ -4,22 +4,25 @@
 //! ("cov_branch_classify") has the rules with their evidence; in brief:
 //!
 //! usage: cov_branch_classify --ir <test.ll> --out <file> --map <PREFIX>=<REPO>
-//!            --stdlib <PREFIX> [--gen <REL>]... [--exclude <PREFIX>]...
-//!            [--exclude-file <NAME>]...
+//!            [--src <DIR>] --stdlib <PREFIX> [--gen <REL>]...
+//!            [--exclude <PREFIX>]... [--exclude-file <NAME>]...
 //!
 //! <test.ll> is the module `cov_branch annotate` prints after LLVM's
 //! `pgo-instr-use`: each `br i1`, `select i1` and `switch` that ran carries
 //! `!prof !{!"branch_weights", ...}`, the counts of its arms.
 //!
 //! Files. A branch is attributed to its innermost `!dbg` location. A file
-//! name is measured when it starts with --map's PREFIX (the library's [src],
-//! `.../<16 hex>/src/<lib>/`; a PREFIX with no such segment is bad usage) and
-//! is not a --gen source; its repository path
-//! is REPO followed by the rest. A name holding `/<16 hex>/src/<lib>/` but not
-//! PREFIX (the library's sources under another [src]) is refused; one equal
-//! to an --exclude-file or under an --exclude prefix is not measured; any
-//! other name is refused. Every `.mojo` file under PREFIX is read for the
-//! functions it declares `@always_inline("nodebug")`. --stdlib names where
+//! name is measured when it starts with --map's PREFIX (what the IR names
+//! the library's sources by: `<lib>/` for a package compiled from the
+//! parent of its [src]) and is not a --gen source; its repository path is
+//! REPO followed by the rest, and it is read at --src (the library's [src],
+//! `.../<16 hex>/src/<lib>/`; PREFIX when --src is not given) followed by
+//! the rest. A --src with no such segment is bad usage. A name holding
+//! `/<16 hex>/src/<lib>/` but not PREFIX (the library's sources under a
+//! [src], this one or another) is refused; one equal to an --exclude-file
+//! or under an --exclude prefix is not measured; any other name is refused.
+//! Every `.mojo` file under --src is read for the functions it declares
+//! `@always_inline("nodebug")`. --stdlib names where
 //! the standard library's sources are (a String's last-reference test is
 //! its code, inlined at the branch).
 //!
@@ -96,8 +99,8 @@ const lessStr = records.lessStr;
 
 const usage =
     \\usage: cov_branch_classify --ir <test.ll> --out <file> --map <PREFIX>=<REPO>
-    \\           --stdlib <PREFIX> [--gen <REL>]... [--exclude <PREFIX>]...
-    \\           [--exclude-file <NAME>]...
+    \\           [--src <DIR>] --stdlib <PREFIX> [--gen <REL>]...
+    \\           [--exclude <PREFIX>]... [--exclude-file <NAME>]...
     \\
 ;
 
@@ -163,7 +166,7 @@ pub const State = struct {
     records: std.ArrayList(Record),
     errors: std.ArrayList([]const u8),
     unmapped: std.StringHashMap(void),
-    counts: [@typeInfo(Class).Enum.fields.len]usize = [_]usize{0} ** @typeInfo(Class).Enum.fields.len,
+    counts: [@typeInfo(Class).@"enum".fields.len]usize = [_]usize{0} ** @typeInfo(Class).@"enum".fields.len,
     outside: usize = 0,
     derived: usize = 0,
     escaped: usize = 0, // and/or results no test reads: the and/or's two arms
@@ -178,7 +181,7 @@ pub const State = struct {
     copies: std.StringHashMap(Copy),
 
     pub fn err(self: *State, comptime fmt: []const u8, args: anytype) void {
-        self.errors.append(std.fmt.allocPrint(self.alloc, fmt, args) catch oom()) catch oom();
+        self.errors.append(self.alloc, std.fmt.allocPrint(self.alloc, fmt, args) catch oom()) catch oom();
     }
 
     fn fileOf(self: *State, name: []const u8) *File {
@@ -188,7 +191,7 @@ pub const State = struct {
             f.* = placeFile(self.alloc, self.opts, name);
             slot.value_ptr.* = f;
             if (f.where == .unmapped) self.unmapped.put(name, {}) catch oom();
-            if (f.where == .other_src) self.err("'{s}' is the library's source under another [src] than --map's ('{s}'): the IR was compiled from other sources than the ones measured", .{ name, self.opts.prefix });
+            if (f.where == .other_src) self.err("'{s}' is the library's source under a [src], not under --map's PREFIX ('{s}', read at '{s}'): the IR was compiled from other sources than the ones measured", .{ name, self.opts.prefix, self.opts.src });
         }
         return slot.value_ptr.*;
     }
@@ -351,7 +354,7 @@ fn branch(st: *State, kind: Kind, arms: usize, cond: []const u8, text: []const u
         return .{ .weights = w };
     }
     if (!c.class.decision()) return .{ .weights = w };
-    st.decs.append(.{ .file = at.file, .line = at.line, .col = at.col, .inl = at.inlined_at, .kind = kind, .class = c.class, .arms = arms, .weights = w, .cond = cond, .prof = prof, .fp = condPos(st, cond, at), .block = blk }) catch oom();
+    st.decs.append(st.alloc, .{ .file = at.file, .line = at.line, .col = at.col, .inl = at.inlined_at, .kind = kind, .class = c.class, .arms = arms, .weights = w, .cond = cond, .prof = prof, .fp = condPos(st, cond, at), .block = blk }) catch oom();
     return .{ .dec = st.decs.items.len - 1, .weights = w, .decision = true };
 }
 
@@ -379,7 +382,7 @@ fn tryDecision(st: *State, at: State.At, w: ?[]const u64, cond: []const u8, prof
             arms = sw;
         }
     }
-    st.decs.append(.{ .file = at.file, .line = at.line, .col = at.col, .inl = at.inlined_at, .kind = .@"try", .class = .try_, .arms = 2, .weights = arms, .cond = cond, .prof = prof, .fp = condPos(st, cond, at), .block = blk }) catch oom();
+    st.decs.append(st.alloc, .{ .file = at.file, .line = at.line, .col = at.col, .inl = at.inlined_at, .kind = .@"try", .class = .try_, .arms = 2, .weights = arms, .cond = cond, .prof = prof, .fp = condPos(st, cond, at), .block = blk }) catch oom();
     // No source decision's test: an and/or's result is never counted from it.
     return .{ .dec = st.decs.items.len - 1, .weights = w, .decision = false };
 }
@@ -409,18 +412,18 @@ fn endFunction(st: *State) void {
     }
     // Ordinals per copy: (file, line, col, kind, inlined copy).
     var per = std.StringHashMap(std.ArrayList(usize)).init(st.alloc);
-    var order = std.ArrayList([]const u8).init(st.alloc);
+    var order = std.ArrayList([]const u8).empty;
     for (ds, 0..) |d, i| {
         if (!d.keep or d.kind == .rhs) continue;
         const key = std.fmt.allocPrint(st.alloc, "{s}\x00{d}\x00{d}\x00{s}", .{ d.file.repo, d.line, d.col, @tagName(d.kind) }) catch oom();
         const copy = std.fmt.allocPrint(st.alloc, "{s}\x00{d}\x00{d}", .{ key, st.function, if (d.inl) |x| x + 1 else 0 }) catch oom();
         const slot = per.getOrPut(copy) catch oom();
         if (!slot.found_existing) {
-            slot.value_ptr.* = std.ArrayList(usize).init(st.alloc);
-            order.append(copy) catch oom();
+            slot.value_ptr.* = std.ArrayList(usize).empty;
+            order.append(st.alloc, copy) catch oom();
             st.copies.put(copy, .{ .key = key, .where = std.fmt.allocPrint(st.alloc, "{s} ({s})", .{ st.whereOf(d), @tagName(d.kind) }) catch oom(), .file = d.file, .line = d.line, .col = d.col, .n = 0, .fp = &.{} }) catch oom();
         }
-        slot.value_ptr.append(i) catch oom();
+        slot.value_ptr.append(st.alloc, i) catch oom();
     }
     for (order.items) |copy| {
         const idx = per.get(copy).?.items;
@@ -441,7 +444,7 @@ fn endFunction(st: *State) void {
             r.ordinal = ds[p].ordinal;
             r.total = ds[p].total;
         }
-        st.records.append(r) catch oom();
+        st.records.append(st.alloc, r) catch oom();
     }
     st.decs.clearRetainingCapacity();
     st.awaits.clearRetainingCapacity();
@@ -557,10 +560,11 @@ pub fn main() void {
     var ir_path: ?[]const u8 = null;
     var out_path: ?[]const u8 = null;
     var map: ?[]const u8 = null;
+    var src_dir: ?[]const u8 = null;
     var stdlib: ?[]const u8 = null;
-    var gens = std.ArrayList([]const u8).init(alloc);
-    var excludes = std.ArrayList([]const u8).init(alloc);
-    var exclude_files = std.ArrayList([]const u8).init(alloc);
+    var gens = std.ArrayList([]const u8).empty;
+    var excludes = std.ArrayList([]const u8).empty;
+    var exclude_files = std.ArrayList([]const u8).empty;
     var a: usize = 1;
     while (a < argv.len) : (a += 2) {
         const flag = argv[a];
@@ -575,19 +579,23 @@ pub fn main() void {
         } else if (std.mem.eql(u8, flag, "--map")) {
             if (map != null) usageFail("--map given twice", .{});
             map = v;
+        } else if (std.mem.eql(u8, flag, "--src")) {
+            if (src_dir != null) usageFail("--src given twice", .{});
+            if (v.len < 2 or v[v.len - 1] != '/') usageFail("--src '{s}' must end with '/'", .{v});
+            src_dir = v;
         } else if (std.mem.eql(u8, flag, "--stdlib")) {
             if (stdlib != null) usageFail("--stdlib given twice", .{});
             if (v.len < 2 or v[v.len - 1] != '/') usageFail("--stdlib '{s}' must end with '/'", .{v});
             stdlib = v;
         } else if (std.mem.eql(u8, flag, "--gen")) {
             if (v.len == 0 or v[0] == '/') usageFail("--gen '{s}' must be a relative path", .{v});
-            gens.append(v) catch oom();
+            gens.append(alloc, v) catch oom();
         } else if (std.mem.eql(u8, flag, "--exclude")) {
             if (v.len < 2 or v[v.len - 1] != '/') usageFail("--exclude '{s}' must end with '/'", .{v});
-            excludes.append(v) catch oom();
+            excludes.append(alloc, v) catch oom();
         } else if (std.mem.eql(u8, flag, "--exclude-file")) {
             if (v.len == 0) usageFail("--exclude-file is empty", .{});
-            exclude_files.append(v) catch oom();
+            exclude_files.append(alloc, v) catch oom();
         } else {
             usageFail("unknown flag '{s}'", .{flag});
         }
@@ -597,9 +605,11 @@ pub fn main() void {
     const m = map orelse usageFail("--map is required", .{});
     const std_prefix = stdlib orelse usageFail("--stdlib is required", .{});
     const eq = std.mem.indexOfScalar(u8, m, '=') orelse usageFail("--map '{s}' is not PREFIX=REPO", .{m});
+    const src = src_dir orelse m[0..eq];
     const opts = Opts{
         .prefix = m[0..eq],
-        .hash_tail = hashTail(m[0..eq]),
+        .src = src,
+        .hash_tail = hashTail(src),
         .repo = m[eq + 1 ..],
         .gens = gens.items,
         .excludes = excludes.items,
@@ -608,10 +618,9 @@ pub fn main() void {
     };
     if (opts.prefix.len < 2 or opts.prefix[opts.prefix.len - 1] != '/') usageFail("--map PREFIX '{s}' must end with '/'", .{opts.prefix});
     if (opts.repo.len > 0 and (opts.repo[0] == '/' or opts.repo[opts.repo.len - 1] != '/')) usageFail("--map REPO '{s}' must be empty or relative and end with '/'", .{opts.repo});
-    // With no content hash in the [src] name, the library's sources under
-    // another [src] could not be told, and `--exclude buck-out/` would drop
-    // them unseen.
-    if (opts.hash_tail == null) usageFail("the --map PREFIX '{s}' holds no '/<16 hex>/' segment: it is not a [src] of a library, and its sources under another [src] could not be told", .{opts.prefix});
+    // With no content hash in the [src] name, the library's sources named by
+    // a [src] could not be told, and an exclusion would drop them unseen.
+    if (opts.hash_tail == null) usageFail("the [src] '{s}' (--src, or --map's PREFIX without it) holds no '/<16 hex>/' segment: it is not a [src] of a library, and its sources named by a [src] could not be told", .{opts.src});
 
     const ir = std.fs.cwd().readFileAlloc(alloc, in_file, max_ir) catch |err| fail("{s}: {s}", .{ in_file, @errorName(err) });
     const first = ir[0 .. std.mem.indexOfScalar(u8, ir, '\n') orelse ir.len];
@@ -623,21 +632,21 @@ pub fn main() void {
         .meta = std.AutoHashMap(u32, Meta).init(alloc),
         .files = std.StringHashMap(*File).init(alloc),
         .nodebug = nodebugNames(alloc, &opts),
-        .records = std.ArrayList(Record).init(alloc),
-        .errors = std.ArrayList([]const u8).init(alloc),
+        .records = std.ArrayList(Record).empty,
+        .errors = std.ArrayList([]const u8).empty,
         .unmapped = std.StringHashMap(void).init(alloc),
         .fun = Fn.init(alloc),
-        .decs = std.ArrayList(Dec).init(alloc),
+        .decs = std.ArrayList(Dec).empty,
         .awaits = std.StringHashMap(andor.Await).init(alloc),
         .copies = std.StringHashMap(Copy).init(alloc),
     };
     // A nodebug operator, constructor or destructor lands on any token.
-    var names = std.ArrayList([]const u8).init(alloc);
+    var names = std.ArrayList([]const u8).empty;
     var ni = st.nodebug.iterator();
     while (ni.next()) |e| {
         const n = e.key_ptr.*;
         if (n.len > 4 and std.mem.startsWith(u8, n, "__") and std.mem.endsWith(u8, n, "__"))
-            names.append(std.fmt.allocPrint(alloc, "{s}: {s} is declared @always_inline(\"nodebug\"): its code carries the locations of the operators, calls and scope ends that run it, where its decisions cannot be told from the compiler's", .{ e.value_ptr.*, n }) catch oom()) catch oom();
+            names.append(alloc, std.fmt.allocPrint(alloc, "{s}: {s} is declared @always_inline(\"nodebug\"): its code carries the locations of the operators, calls and scope ends that run it, where its decisions cannot be told from the compiler's", .{ e.value_ptr.*, n }) catch oom()) catch oom();
     }
     std.mem.sort([]const u8, names.items, {}, lessStr);
     for (names.items) |n| st.err("{s}", .{n});
@@ -654,7 +663,7 @@ pub fn main() void {
 
     names.clearRetainingCapacity();
     var ui = st.unmapped.keyIterator();
-    while (ui.next()) |k| names.append(k.*) catch oom();
+    while (ui.next()) |k| names.append(alloc, k.*) catch oom();
     std.mem.sort([]const u8, names.items, {}, lessStr);
     for (names.items) |n| st.err("unmapped file name '{s}': neither --map, --exclude nor --exclude-file covers it", .{n});
 
@@ -721,16 +730,16 @@ pub fn main() void {
     // Every measured file the IR holds code of is named, a decision-free
     // one with no record, so covcheck can tell "measured, nothing to take"
     // from "not measured".
-    var coded = std.ArrayList([]const u8).init(alloc);
+    var coded = std.ArrayList([]const u8).empty;
     var cf = st.files.valueIterator();
     while (cf.next()) |fp| {
-        if (fp.*.where == .measured and fp.*.exec.count() > 0) coded.append(fp.*.repo) catch oom();
+        if (fp.*.where == .measured and fp.*.exec.count() > 0) coded.append(alloc, fp.*.repo) catch oom();
     }
     const bytes = render(alloc, st.records.items, coded.items);
     writeOut(out_file, bytes) catch |err| fail("{s}: {s}; nothing written", .{ out_file, @errorName(err) });
     var decisions: usize = 0;
     var made: usize = 0;
-    inline for (@typeInfo(Class).Enum.fields) |f| {
+    inline for (@typeInfo(Class).@"enum".fields) |f| {
         const c: Class = @enumFromInt(f.value);
         if (c.decision()) decisions += st.counts[f.value] else if (c != .unknown) made += st.counts[f.value];
     }

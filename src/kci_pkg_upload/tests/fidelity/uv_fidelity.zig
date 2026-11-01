@@ -129,16 +129,16 @@ pub fn makeWheel(a: Allocator, metadata: []const u8) ![]u8 {
         .{ .name = INFO ++ "/METADATA", .data = metadata },
         .{ .name = INFO ++ "/WHEEL", .data = WHEEL_FILE },
     };
-    var record = std.ArrayList(u8).init(a);
-    defer record.deinit();
+    var record = std.ArrayList(u8).empty;
+    defer record.deinit(a);
     for (listed) |m| {
         var digest: [32]u8 = undefined;
         std.crypto.hash.sha2.Sha256.hash(m.data, &digest, .{});
         var b64: [43]u8 = undefined;
         _ = std.base64.url_safe_no_pad.Encoder.encode(&b64, &digest);
-        try record.writer().print("{s},sha256={s},{d}\n", .{ m.name, &b64, m.data.len });
+        try record.writer(a).print("{s},sha256={s},{d}\n", .{ m.name, &b64, m.data.len });
     }
-    try record.appendSlice(INFO ++ "/RECORD,,\n");
+    try record.appendSlice(a, INFO ++ "/RECORD,,\n");
 
     var members = [_]Member{
         listed[0],
@@ -148,9 +148,9 @@ pub fn makeWheel(a: Allocator, metadata: []const u8) ![]u8 {
     };
     std.mem.sort(Member, &members, {}, memberLess);
 
-    var out = std.ArrayList(u8).init(a);
-    errdefer out.deinit();
-    const w = out.writer();
+    var out = std.ArrayList(u8).empty;
+    errdefer out.deinit(a);
+    const w = out.writer(a);
     var offsets: [members.len]u32 = undefined;
     var crcs: [members.len]u32 = undefined;
     for (members, 0..) |m, i| {
@@ -200,7 +200,7 @@ pub fn makeWheel(a: Allocator, metadata: []const u8) ![]u8 {
     try w.writeInt(u32, cd_size, .little);
     try w.writeInt(u32, cd_start, .little);
     try w.writeInt(u16, 0, .little); // comment
-    return out.toOwnedSlice();
+    return out.toOwnedSlice(a);
 }
 
 // ---- Where the recorder listens ---------------------------------------------
@@ -263,11 +263,11 @@ pub fn parseRequest(a: Allocator, buf: []const u8) (ParseError || Allocator.Erro
     if (method.len == 0 or path.len == 0 or !std.mem.startsWith(u8, version, "HTTP/") or parts.next() != null)
         return error.BadRequestLine;
 
-    var headers = std.ArrayList(Header).init(a);
+    var headers = std.ArrayList(Header).empty;
     while (lines.next()) |line| {
         const colon = std.mem.indexOfScalar(u8, line, ':') orelse return error.BadHeader;
         if (colon == 0) return error.BadHeader;
-        try headers.append(.{
+        try headers.append(a, .{
             .name = try a.dupe(u8, line[0..colon]),
             .value = try a.dupe(u8, std.mem.trim(u8, line[colon + 1 ..], " \t")),
         });
@@ -283,7 +283,7 @@ pub fn parseRequest(a: Allocator, buf: []const u8) (ParseError || Allocator.Erro
 
     var pos = head_end + 4;
     if (req.chunked) {
-        var body = std.ArrayList(u8).init(a);
+        var body = std.ArrayList(u8).empty;
         while (true) {
             const line_end = std.mem.indexOfPos(u8, buf, pos, "\r\n") orelse return null;
             const size_field = buf[pos..line_end];
@@ -300,7 +300,7 @@ pub fn parseRequest(a: Allocator, buf: []const u8) (ParseError || Allocator.Erro
                 break;
             }
             if (buf.len < pos + size + 2) return null;
-            try body.appendSlice(buf[pos .. pos + size]);
+            try body.appendSlice(a, buf[pos .. pos + size]);
             if (!std.mem.eql(u8, buf[pos + size .. pos + size + 2], "\r\n")) return error.BadChunk;
             pos += size + 2;
         }
@@ -400,7 +400,7 @@ pub fn compareFile(a: Allocator, w: anytype, name: []const u8, committed: []cons
     const at = firstDifference(old, new) orelse return true;
     const form = if (is_request) " (boundary-normalised)" else "";
     try w.print("  {s}: committed {d} bytes, captured {d} bytes{s}; first difference at byte {d}\n", .{ name, old.len, new.len, form, at });
-    try w.print("    committed: \"{}\"\n", .{std.fmt.fmtSliceEscapeLower(old[at..@min(old.len, at + 48)])});
-    try w.print("    captured:  \"{}\"\n", .{std.fmt.fmtSliceEscapeLower(new[at..@min(new.len, at + 48)])});
+    try w.print("    committed: \"{f}\"\n", .{std.ascii.hexEscape(old[at..@min(old.len, at + 48)], .lower)});
+    try w.print("    captured:  \"{f}\"\n", .{std.ascii.hexEscape(new[at..@min(new.len, at + 48)], .lower)});
     return false;
 }

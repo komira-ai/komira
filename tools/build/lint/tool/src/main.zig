@@ -93,6 +93,6 @@ pub fn main() void {
         else => fail("{s}: {s}", .{ kind, @errorName(err) }),
     };
     const json = lint.result(alloc, kind, stage, argv[4], c.report.items, c.checked) catch fail("out of memory", .{});
-    std.fs.cwd().writeFile(argv[1], json) catch |err| fail("cannot write {s}: {s}", .{ argv[1], @errorName(err) });
+    std.fs.cwd().writeFile(.{ .sub_path = argv[1], .data = json }) catch |err| fail("cannot write {s}: {s}", .{ argv[1], @errorName(err) });
     std.fs.cwd().deleteTree(scratch) catch {};
 }

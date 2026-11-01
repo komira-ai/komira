@@ -48,6 +48,10 @@ library:
     name, or its static archives, each with a `lib_files` row of
     metadata.json; a shared library whose NEEDED names a komira owner
     outside the Mojo deps closure is refused by the packer;
+  * a C ABI shared library of the library (`shared_lib`, a `mojo_shared_lib`)
+    is packed at lib/<its file name> (`lib<name>.so`, its SONAME) with one
+    `lib_files` row and no link name; the Mojo runtime it is NEEDED on comes
+    from the `mojo-compiler` requirement above, and the glibc floor applies;
   * the library's README.md, when its package holds one, is installed at
     `share/doc/<name>/README.md` (a file of the package, listed in
     info/paths.json): what a user reads is inside what they installed, and
@@ -138,11 +142,11 @@ load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
 load("@komira//tools/build/mojo:coverage.bzl", "MojoCoverageGateInfo")
 load("@komira//tools/build/mojo:native_facts.bzl", "readme_link_names")
 load("@komira//tools/build/mojo:providers.bzl", "MojoInfo")
-load("@komira//tools/build/mojo:toolchain.bzl", "busybox_sh")
 load("@komira//tools/build/native:shared.bzl", "NativeSharedInfo", "linux_glibc_floor")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load("@komira//tools/build/platforms:table.bzl", "asset")
 load(":kcov_guard.bzl", "KcovGuardInfo", "kcov_guard")
+load("@komira//tools/build/bench_salt:bench_salt.bzl", "salted")
 
 def _compiler_version():
     # The version of the Mojo compiler the toolchain downloads, read from the
@@ -175,8 +179,6 @@ _HOME = "https://github.com/komira-ai/komira"
 PACKAGE_LICENSE = _LICENSE
 PACKAGE_HOME = _HOME
 
-_COPY_DIR = '"$1" mkdir -p "$3"; "$1" cp -R "$2"/. "$3"/'
-
 def _subdir(ctx):
     # Set by the macro from the TARGET platform's constraints (a select), so no
     # BUCK file states it.
@@ -197,13 +199,14 @@ CondaJoinInfo = provider(fields = {
     "release_join": provider_field(typing.Any),
 })
 
-def _copy_dir(ctx, bb, src, dst, category, identifier, hidden):
+def _copy_dir(ctx, tool, src, dst, category, identifier, hidden):
     # The published directories are copies made after the check passed, so none
     # of them exists unless it did (the gate join of mojo_library, one level up).
     # Returns the command line, for CondaJoinInfo.
-    cmd = cmd_args(bb, "sh", "-euc", _COPY_DIR, "sh", bb, src, dst.as_output(), hidden = hidden)
+    cmd = cmd_args(tool, "copy-dir", src, dst.as_output(), hidden = hidden)
     ctx.actions.run(
         cmd,
+        env = salted(),
         category = category,
         identifier = identifier,
     )
@@ -266,6 +269,7 @@ def _packaged_readme(ctx, lib, info):
             "--args",
             written.as_output(),
         ),
+        env = salted(),
         category = "conda_readme_link",
     )
     parsed = ctx.actions.declare_output("readme/link_args.parsed")
@@ -282,11 +286,31 @@ def _packaged_readme(ctx, lib, info):
             "--out",
             parsed.as_output(),
         ),
+        env = salted(),
         category = "conda_readme_link_check",
     )
 
     # The packer reads the README only once the tool parsed it back.
     return readme, parsed
+
+def _shared_lib_args(ctx, info):
+    """(packer arguments, check arguments, [path, file] packed) of a library
+    whose package also ships a C ABI shared library (`shared_lib`, a
+    `mojo_shared_lib`): the one file at `lib/<its name>`, whose SONAME is that
+    name. The library has no C of its own to ship (`native`, `native_static`).
+    The glibc floor is the platform table's, as for a library's own shared
+    library. The Mojo runtime the file is NEEDED on comes from the
+    `mojo-compiler` requirement every package has; the packer holds a komira
+    owner it is NEEDED on to the Mojo closure."""
+    if ctx.attrs.native != None or (info.native != None and (info.native.soname != None or info.native.static)):
+        fail("{}: `shared_lib` is for a library with no native files of its own, but {} has some".format(ctx.label, ctx.attrs.lib.label))
+    so = ctx.attrs.shared_lib[DefaultInfo].default_outputs[0]
+    name = so.basename
+    if not name.startswith("lib") or not name.endswith(".so"):
+        fail("{}: shared_lib {} is `{}`, not lib<name>.so (a package ships a C ABI library as lib/lib<name>.so)".format(ctx.label, ctx.attrs.shared_lib.label, name))
+    files = [cmd_args("--lib-shared", cmd_args(so, format = name + "={}")), "--glibc-floor", linux_glibc_floor()]
+    owners = [cmd_args("--closure-owner", o) for o in sorted(info.native.sonames)] if info.native != None else []
+    return files + owners, files, [["lib/" + name, so]]
 
 def _native_args(ctx, info):
     """(packer arguments, check arguments, [path, file] packed) of the
@@ -297,6 +321,8 @@ def _native_args(ctx, info):
     (the komira owners a packed `.so` may name in NEEDED)."""
     facts = info.native
     native = ctx.attrs.native
+    if ctx.attrs.shared_lib != None:
+        return _shared_lib_args(ctx, info)
     soname = facts.soname if facts != None else None
     if soname == None:
         if native != None:
@@ -399,7 +425,7 @@ def _conda_package_impl(ctx):
             "--out-dir",
             raw.as_output(),
         )
-    ctx.actions.run(cmd, category = "conda_pack", identifier = ctx.label.name)
+    ctx.actions.run(cmd, env = salted(), category = "conda_pack", identifier = ctx.label.name)
 
     def check(marker_name, extra):
         marker = ctx.actions.declare_output(marker_name)
@@ -427,6 +453,7 @@ def _conda_package_impl(ctx):
             args.append(native_check)
         ctx.actions.run(
             cmd_args(args, extra, "--out", marker.as_output()),
+            env = salted(),
             category = "conda_check",
             identifier = marker_name,
         )
@@ -452,16 +479,16 @@ def _conda_package_impl(ctx):
             fail("{}: coverage_gate is {}, not {}, the gate of its library".format(ctx.label.raw_target(), ctx.attrs.coverage_gate.label.raw_target(), want))
         gate = gate + ctx.attrs.coverage_gate[DefaultInfo].default_outputs
 
-    bb = ctx.attrs._busybox[DefaultInfo].default_outputs[0]
+    tool = ctx.attrs._pkg_act[RunInfo]
     out = ctx.actions.declare_output("out", dir = True)
-    join = _copy_dir(ctx, bb, raw, out, "conda_join", ctx.label.name, [checked, guarded] + gate)
+    join = _copy_dir(ctx, tool, raw, out, "conda_join", ctx.label.name, [checked, guarded] + gate)
 
     # [release]: the same directory, copied only after the RELEASE check passed
     # (stamped, with its source commit and a positive commit time, and not
     # refused) and the kcov guard passed. This is the only thing an uploader
     # reads.
     rel = ctx.actions.declare_output("release", dir = True)
-    release_join = _copy_dir(ctx, bb, raw, rel, "conda_release_join", ctx.label.name, [release_checked, guarded] + gate)
+    release_join = _copy_dir(ctx, tool, raw, rel, "conda_release_join", ctx.label.name, [release_checked, guarded] + gate)
     return [CondaJoinInfo(join = join, lib = lib.label, release_join = release_join), DefaultInfo(
         default_output = out,
         sub_targets = {
@@ -494,13 +521,16 @@ _conda_package = rule(
         # The library's own shared library (`native` of the mojo_library),
         # packed at lib/<soname> with its link name; set by the macro.
         "native": attrs.option(attrs.dep(providers = [NativeSharedInfo]), default = None),
+        # A `mojo_shared_lib` packed at lib/<its file name> beside the
+        # library's `.mojoc` (`_shared_lib_args`); excludes `native`.
+        "shared_lib": attrs.option(attrs.dep(), default = None),
         "stamp": attrs.string(),
         "subdir": attrs.string(),
         "summary": attrs.string(),
         "timestamp_ms": attrs.string(),
-        "_busybox": attrs.exec_dep(default = "komira//tools/build/toolchains:busybox"),
         "_kcov_guard": attrs.exec_dep(default = "komira//tools/build/package:kcov_guard", providers = [KcovGuardInfo]),
         "_license_file": attrs.source(default = "komira//:LICENSE"),
+        "_pkg_act": attrs.exec_dep(default = "komira//tools/build/package:pkg_act", providers = [RunInfo]),
         "_pack": attrs.exec_dep(default = "komira//tools/build/package:komira_pack", providers = [RunInfo]),
         "_readme_tool": attrs.exec_dep(default = "komira//tools/build/readme_examples:tool", providers = [RunInfo]),
     },
@@ -564,46 +594,17 @@ def _conda_package_with_stamp(commit, stamp, timestamp_ms, **kwargs):
 
 # ---- the gate between the packer and kci ------------------------------------
 
-_KCI_CHECK = """
-BB="$1"; OUT="$2"; DIR="$3"; shift 3
-case "$BB" in /*) ;; *) BB="$PWD/$BB" ;; esac
-case "$DIR" in /*) ;; *) DIR="$PWD/$DIR" ;; esac
-# Private scratch, as every busybox action here (defs.bzl `_PRELUDE`).
-case "${BUCK_SCRATCH_PATH:-}" in
-    "") T="$PWD/.komira_action" ;;
-    /*) T="$BUCK_SCRATCH_PATH/komira" ;;
-    *) T="$PWD/$BUCK_SCRATCH_PATH/komira" ;;
-esac
-"$BB" mkdir -p "$T/bin" "$T/tmp" "$T/home"
-"$BB" --install -s "$T/bin"
-PATH="$T/bin"; TMPDIR="$T/tmp"; HOME="$T/home"; export PATH TMPDIR HOME
-unset LD_LIBRARY_PATH LD_PRELOAD || true
-no() { echo "conda_manifest_kci: $*" >&2; exit 1; }
-# The directory is what an uploader copies: the package, its manifest and its
-# metadata, nothing else.
-listing=$(ls -A "$DIR" | tr '\\n' ' ')
-[ "$(ls -A "$DIR" | wc -l)" = 3 ] && [ -f "$DIR/manifest.json" ] && [ -s "$DIR/metadata.json" ] &&
-    [ "$(ls "$DIR" | grep -c '\\.conda$')" = 1 ] ||
-    no "$DIR holds [$listing], not exactly one .conda, manifest.json and metadata.json"
-rc=0
-"$@" "$DIR/manifest.json" > "$T/probe" 2>&1 < /dev/null || rc=$?
-line=$(cat "$T/probe")
-[ "$rc" = 0 ] || no "kci's artifact-manifest parser refuses $DIR/manifest.json (exit $rc): $line"
-want=" metadata=metadata.json metadata_path=$DIR/metadata.json render-identical=yes"
-case "$line" in
-    "OK CONDA "*"$want") ;;
-    *) no "kci reads $DIR/manifest.json as [$line]; it must be one OK CONDA line ending [$want]" ;;
-esac
-printf '%s\\n' "$line" | sed "s|$DIR/||" > "$OUT"
-rm -rf "$T"
-"""
+# The check itself is `pkg_act conda-manifest-kci` (tools/build/package/act/
+# misc.zig): the directory is what an uploader copies (the package, its
+# manifest and its metadata, nothing else), the probe parses the manifest and
+# renders it back, and its one line must end with the `metadata.json` next to it.
 
 def _conda_manifest_kci_impl(ctx):
     pkg = ctx.attrs.package[DefaultInfo].default_outputs[0]
-    bb = ctx.attrs._busybox[DefaultInfo].default_outputs[0]
     out = ctx.actions.declare_output(ctx.label.name + ".parsed")
     ctx.actions.run(
-        busybox_sh(bb, _KCI_CHECK, out.as_output(), pkg, ctx.attrs._probe[RunInfo]),
+        cmd_args(ctx.attrs._pkg_act[RunInfo], "conda-manifest-kci", out.as_output(), pkg, ctx.attrs._probe[RunInfo]),
+        env = salted(),
         category = "conda_manifest_kci",
     )
     return [DefaultInfo(default_output = out)]
@@ -612,7 +613,7 @@ _conda_manifest_kci = rule(
     impl = _conda_manifest_kci_impl,
     attrs = {
         "package": attrs.dep(),
-        "_busybox": attrs.exec_dep(default = "komira//tools/build/toolchains:busybox"),
+        "_pkg_act": attrs.exec_dep(default = "komira//tools/build/package:pkg_act", providers = [RunInfo]),
         "_probe": attrs.exec_dep(default = "komira//tools/build/package/manifest_probe:parse_manifest", providers = [RunInfo]),
     },
 )
@@ -668,6 +669,7 @@ def _conda_doc_check_impl(ctx):
             "--out",
             marker.as_output(),
         ),
+        env = salted(),
         category = "conda_doc_check",
     )
     return [DefaultInfo(default_output = marker)]
@@ -710,6 +712,7 @@ def _conda_package_expect_impl(ctx):
             "--out",
             marker.as_output(),
         ),
+        env = salted(),
         category = "conda_expect",
     )
     return [DefaultInfo(default_output = marker)]

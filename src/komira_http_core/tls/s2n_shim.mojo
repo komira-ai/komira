@@ -1284,10 +1284,10 @@ struct TlsConnection(Movable, Deinitable):
         # read/write syscalls.
         var rc = s2n_connection_set_fd(self._handle[]._raw, fd)
         if rc != S2N_SUCCESS:
-            raise Error(
-                "TlsConnection.bind_fd: s2n_connection_set_fd failed "
-                "(rc=" + String(Int(rc)) + ", errno="
-                + String(Int(last_s2n_errno())) + ")"
+            raise Error(  # cov: unreachable s2n_connection_set_fd fails only on a NULL connection or a failed allocation
+                "TlsConnection.bind_fd: s2n_connection_set_fd failed "  # cov: unreachable s2n_connection_set_fd fails only on a NULL connection or a failed allocation
+                "(rc=" + String(Int(rc)) + ", errno="  # cov: unreachable s2n_connection_set_fd fails only on a NULL connection or a failed allocation
+                + String(Int(last_s2n_errno())) + ")"  # cov: unreachable s2n_connection_set_fd fails only on a NULL connection or a failed allocation
             )
         self._fd = fd
 
@@ -1488,7 +1488,7 @@ struct TlsConnection(Movable, Deinitable):
             # rc == 0 with a block status is degenerate (s2n normally returns
             # -1 on a pure block); treat as "nothing accepted", caller retries
             # the same buffer.
-            return (outcome, 0)
+            return (outcome, 0)  # cov: unreachable s2n_send returns the bytes it took or -1, never 0 for a non-empty buffer
         # rc < 0 with BLOCKED_ON_WRITE / BLOCKED_ON_READ — nothing consumed;
         # caller parks + re-calls with the SAME unshrunk buffer.
         return (outcome, 0)
@@ -1941,15 +1941,15 @@ struct TlsConnection(Movable, Deinitable):
             self._handle[]._raw, buf_ptr, Int64(capacity),
         )
         if written < Int32(0):
-            raise Error(
-                "TlsConnection.get_session: "
+            raise Error(  # cov: unreachable s2n_connection_get_session fails only on NULL or a buffer under get_session_length
+                "TlsConnection.get_session: "  # cov: unreachable s2n_connection_get_session fails only on NULL or a buffer under get_session_length
                 "s2n_connection_get_session failed (rc="
-                + String(Int(written)) + ", errno="
-                + String(Int(last_s2n_errno())) + ")"
+                + String(Int(written)) + ", errno="  # cov: unreachable s2n_connection_get_session fails only on NULL or a buffer under get_session_length
+                + String(Int(last_s2n_errno())) + ")"  # cov: unreachable s2n_connection_get_session fails only on NULL or a buffer under get_session_length
             )
         if written == Int32(0):
             # Defensive: should not happen if length > 0, but handle.
-            return Optional[List[UInt8]]()
+            return Optional[List[UInt8]]()  # cov: unreachable a session length above 0 is serialized whole, so s2n writes that many bytes
         # SAFETY: resize the buf to the actual byte count s2n produced.
         buf.resize(unsafe_uninit_length=Int(written))
         return Optional[List[UInt8]](buf^)
@@ -1998,7 +1998,7 @@ struct TlsConnection(Movable, Deinitable):
         # escape this method.
         var p = s2n_connection_get_cipher(self._handle[]._raw)
         if Int(p) == 0:
-            return String()
+            return String()  # cov: unreachable after a DONE handshake s2n's cipher is the negotiated suite's static name
         return _ptr_to_string(p)
 
     def last_handshake_message_name(self) -> String:
@@ -2098,9 +2098,9 @@ struct TlsConnection(Movable, Deinitable):
             self._handle[]._raw, sent_ptr, received_ptr
         )
         if rc != S2N_SUCCESS:
-            raise Error(
-                "TlsConnection.key_update_counts: "
-                + s2n_strerror_message(last_s2n_errno())
+            raise Error(  # cov: unreachable s2n_connection_get_key_update_counts fails only on a NULL argument
+                "TlsConnection.key_update_counts: "  # cov: unreachable s2n_connection_get_key_update_counts fails only on a NULL argument
+                + s2n_strerror_message(last_s2n_errno())  # cov: unreachable s2n_connection_get_key_update_counts fails only on a NULL argument
             )
         return KeyUpdateCounts(sent=Int(sent), received=Int(received))
 
@@ -2119,7 +2119,7 @@ def last_s2n_errno() -> Int32:
     # retained.
     var p = s2n_errno_location()
     if Int(p) == 0:
-        return Int32(-1)
+        return Int32(-1)  # cov: unreachable s2n_errno_location returns the address of a thread-local, never NULL
     return p[]
 
 
@@ -2133,7 +2133,7 @@ def s2n_strerror_message(errno: Int32) -> String:
     var null_lang = _null_ptr[UInt8, _S2N_FFI_ORIGIN]()
     var p = s2n_strerror(errno, null_lang)
     if Int(p) == 0:
-        return String("(unknown errno)")
+        return String("(unknown errno)")  # cov: unreachable s2n_strerror returns a static string for every errno, never NULL
     var max_len = 1024
     var n = 0
     while n < max_len:

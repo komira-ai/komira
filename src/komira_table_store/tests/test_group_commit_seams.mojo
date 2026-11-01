@@ -10,15 +10,17 @@
 #     as two little-endian i64 at start, its poll is READY, a second take_read
 #     with nothing staged is refused, and the stage-blob stubs are READY/no-op.
 #   * classify_read_error: each torn/truncated/retryable wording is TORN, a
-#     412/precondition is CONFLICT, anything else FATAL.
+#     status=412 / precondition is CONFLICT, anything else FATAL.
 #   * decode_head: an absent head is (-1, 0); a body shorter than 16 bytes is
 #     refused; every byte of both fields is read (values with all bytes set).
 #   * estimate_bytes sums key + row + 9 per write.
 #   * encode_group_batch: a member whose OCC window reaches a chunk that is not
 #     there raises the RETRYABLE-tagged in-flight error naming the seq.
-#   * classify_append_error: 412 / precondition / If-None-Match are a lost
-#     slot, anything else an error. "If-Match" is not asserted
-#     (komira-ai/komira#1402).
+#   * classify_append_error: status=412 / precondition / If-None-Match are a lost
+#     slot, anything else an error, including an "If-Match" error (the
+#     appender's create-CAS is If-None-Match, so it agrees with the async
+#     commit classifier `_is_lost_slot_412` on every row; komira-ai/komira#1402)
+#     and an I/O error whose only 412 is in a path (komira-ai/komira#1275).
 # =============================================================================
 
 from std.testing import assert_equal, assert_false, assert_true
@@ -49,7 +51,11 @@ from komira_objectstore.shared_in_memory_slow_cas_store import (
 from komira_objectstore.store import CasReadResult
 
 from komira_table_store.table_store_codec import TS_OP_PUT, WriteOp
-from komira_table_store.table_store import TableStore, is_commit_retryable
+from komira_table_store.table_store import (
+    TableStore,
+    _is_lost_slot_412,
+    is_commit_retryable,
+)
 from komira_table_store.group_commit import (
     TableStoreExactSlotAppender,
     TableStoreGroupCommitCodec,
@@ -154,7 +160,12 @@ def test_classify_read_error() raises:
             Int(reader.classify_read_error(torn[i])), Int(READ_ERR_TORN), torn[i]
         )
     assert_equal(
-        Int(reader.classify_read_error(String("HTTP 412"))), Int(READ_ERR_CONFLICT)
+        Int(
+            reader.classify_read_error(
+                String("StoreError[PRECONDITION] PutObject s3://b/k status=412")
+            )
+        ),
+        Int(READ_ERR_CONFLICT),
     )
     assert_equal(
         Int(reader.classify_read_error(String("precondition failed"))),
@@ -231,18 +242,32 @@ def test_classify_append_error() raises:
     var backing = SharedInMemoryConditionalStore()
     var app = TableStoreExactSlotAppender[_Store](_wal(backing, "gc/app"))
     var lost = List[String]()
-    lost.append(String("HTTP 412"))
+    lost.append(String("StoreError[PRECONDITION] PutObject s3://b/k status=412"))
     lost.append(String("precondition failed"))
     lost.append(String("If-None-Match: *"))
-    # "If-Match" is deliberately not asserted either way: the appender matches
-    # it and the async classifier (LOW-2) does not (komira-ai/komira#1402).
     for i in range(len(lost)):
         assert_equal(
             Int(app.classify_append_error(lost[i])), Int(APPEND_LOST_SLOT), lost[i]
         )
-    assert_equal(
-        Int(app.classify_append_error(String("connection reset"))), Int(APPEND_ERR)
+        assert_true(_is_lost_slot_412(lost[i]), "async agrees: " + lost[i])
+    var errs = List[String]()
+    errs.append(String("connection reset"))
+    # The create-CAS is If-None-Match, so an If-Match error is not a lost slot
+    # (komira-ai/komira#1402); the async classifier says the same (LOW-2).
+    errs.append(String("If-Match mismatch"))
+    # An I/O failure whose only 412 is in a path is not a lost slot
+    # (komira-ai/komira#1275): the matcher needs `status=412`, not a bare 412.
+    errs.append(
+        String(
+            "LocalFsConditionalStore: atomic rename failed ('/srv/412/k.tmp."
+            + "0000000000000412' -> '/srv/412/k', rc=-1)"
+        )
     )
+    for i in range(len(errs)):
+        assert_equal(
+            Int(app.classify_append_error(errs[i])), Int(APPEND_ERR), errs[i]
+        )
+        assert_false(_is_lost_slot_412(errs[i]), "async agrees: " + errs[i])
 
 
 def main() raises:

@@ -1,0 +1,12 @@
+[package]
+name = "komira_hash"
+version = "0.1.0"
+description = "Byte-wise FNV-1a, 32 and 64 bit, with the published constants and no dependencies in Mojo: a stable hash for identifiers, table keys and sharding, not a cryptographic one."
+license = "Apache-2.0"
+repository = "https://github.com/komira-ai/komira"
+readme = "README.md"
+mojo = ["1.0.0"]
+
+[targets]
+lib = { path = "src/komira_hash" }
+tests = ["tests"]

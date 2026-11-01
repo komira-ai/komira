@@ -271,9 +271,32 @@ def check_jsonb[T: NeutralTarget](mut t: T) raises:
     assert_equal(rows[0].get_jsonb(0), want, "jsonb round trip")
 
 
+def check_text_array_free_text[T: NeutralTarget](mut t: T) raises:
+    """TEXT[] elements the array literal must quote: ',' '}' '{' '"' '\\',
+    spaces, the spelling NULL, and the empty string (alone and among others).
+    Compared element by element: `assert_strs` joins with ',', so it cannot
+    tell ["a,b"] from ["a", "b"]."""
+    var want = List[List[String]]()
+    want.append(strs("a,b"))
+    want.append(strs("x}y", "z"))
+    want.append(strs(""))
+    want.append(strs("a", "", "b"))
+    want.append(strs('a"b', "c\\d"))
+    want.append(strs("NULL", "{x}", " lead", "trail "))
+    var vals = List[DbValue]()
+    for i in range(len(want)):
+        vals.append(DbValue.text_array(want[i]))
+    var rows = _store_and_read(t, String("t_text_array"), vals)
+    for i in range(len(want)):
+        var got = rows[i].get_text_array(0)
+        var what = String("text[] free text case ") + String(i)
+        assert_equal(len(got), len(want[i]), what + String(": element count"))
+        for j in range(len(want[i])):
+            assert_equal(got[j], want[i][j], what)
+
+
 def check_text_array[T: NeutralTarget](mut t: T) raises:
-    """TEXT[] of simple labels (the documented closed set: no ',' or '}'),
-    ASCII and non-ASCII, one element and none."""
+    """TEXT[] of simple labels, ASCII and non-ASCII, one element and none."""
     var want = List[List[String]]()
     want.append(strs("a", "b", "c"))
     want.append(strs("solo"))

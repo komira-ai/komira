@@ -275,7 +275,7 @@ def test_mismatch_host_drops_cache_and_dials_fresh() raises:
     client._connector.arm(stream_2^)
 
     # Send #2 to a DIFFERENT host. Cache mismatch → drop + dial fresh.
-    var url_b = Url.parse(String("http://10.0.0.1:9090/"))
+    var url_b = Url.parse(String("http://192.0.2.1:9090/"))
     var hdrs_b = HeaderMap()
     var req_b = build_get_request(url_b^, hdrs_b^)
     var resp_b = client.send_buffered[PerCoreAsyncRuntime[NoopSink]](

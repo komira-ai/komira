@@ -1,0 +1,14 @@
+{
+ "name": "nested_scalar_bisected",
+ "defect": "a nested call that raises naming no row is not bisected before its pull returns EIO (design 4.3: \"If the failing call is being bisected, the host finishes bisection before get_next returns EIO\"; 4.5, the ERR_RAISED row): the run error names row -1",
+ "run": "nested_frame",
+ "entry": "running_sum",
+ "shape": "MAP_BATCHES_FRAME",
+ "args": [{"type": "int64", "nullable": true}],
+ "result": [{"type": "int64", "nullable": true}],
+ "result_is_table": true,
+ "nested": {"entry": "raise_minus_one_if_row5", "shape": "MAP_BATCHES_COLUMN", "args": [{"type": "int64", "nullable": true}], "result": [{"type": "int64", "nullable": true}]},
+ "levels": 1,
+ "inputs": [{"length": 2, "columns": [{"type": "int64", "values": [1, 2]}]}, {"length": 8, "columns": [{"type": "int64", "values": [0, 1, 2, 3, 4, 5, 6, 7]}]}],
+ "expect": {"status": "ERR_RAISED", "run_error": "UDF_RAISED", "row": 5, "message_contains": "raise_minus_one_if_row5", "eio_at_least": 1, "frame_carries_failure": true, "batches": [{"length": 2, "columns": [{"type": "int64", "values": [1, 3]}]}]}
+}

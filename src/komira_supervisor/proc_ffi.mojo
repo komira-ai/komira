@@ -163,6 +163,84 @@ def proc_spawn(
 
 
 # -----------------------------------------------------------------------------
+# komira_proc_spawn_stdin thunk — proc_spawn, and the child's stdin is a pipe
+# too. Same arguments as proc_spawn plus `out_stdin_fd`, the WRITE end of the
+# child's stdin (close-on-exec in this process). Returns rc: 0, or -errno.
+#
+# FFI-BOUNDARY: the shim writes three caller-owned stack Int32 slots (the two
+# capture read ends and the stdin write end) and retains no pointer. On rc 0 the
+# caller owns all three descriptors and closes them (Supervisor.close); on a
+# negative rc the shim has closed every descriptor it made and wrote none.
+# -----------------------------------------------------------------------------
+def proc_spawn_stdin(
+    path: String,
+    mut argv_blob: List[UInt8],
+    argc: Int,
+    mut env_blob: List[UInt8],
+    envc: Int,
+    cwd: String,
+    has_cwd: Bool,
+    flags: Int32,
+    mut out_stdout_fd: Int32,
+    mut out_stderr_fd: Int32,
+    mut out_stdin_fd: Int32,
+    mut out_pid: Int32,
+) -> Int32:
+    # SAFETY: as proc_spawn: path_local / cwd_local are owned locals whose C
+    # strings the shim reads during the call; the blobs are caller Lists read
+    # during the call only; out_* are stack slots the shim writes. Nothing
+    # escapes; every source is anchored past the call below.
+    var path_local = path
+    var path_ptr = path_local.as_c_string_slice().unsafe_ptr()
+    var cwd_local = cwd
+    var cwd_ptr = cwd_local.as_c_string_slice().unsafe_ptr()
+    var argv_ptr = argv_blob.unsafe_ptr()
+    var env_ptr = env_blob.unsafe_ptr()
+    var sout_ptr = UnsafePointer(to=out_stdout_fd)
+    var serr_ptr = UnsafePointer(to=out_stderr_fd)
+    var sin_ptr = UnsafePointer(to=out_stdin_fd)
+    var pid_ptr = UnsafePointer(to=out_pid)
+
+    var rc = external_call["komira_proc_spawn_stdin", Int32](
+        path_ptr,
+        argv_ptr,
+        Int32(argc),
+        env_ptr,
+        Int32(envc),
+        cwd_ptr,
+        Int32(1) if has_cwd else Int32(0),
+        flags,
+        sout_ptr,
+        serr_ptr,
+        sin_ptr,
+        pid_ptr,
+    )
+    _ = path_local
+    _ = cwd_local
+    _ = argv_blob[0]
+    _ = env_blob[0]
+    _ = out_stdout_fd
+    _ = out_stderr_fd
+    _ = out_stdin_fd
+    _ = out_pid
+    return rc
+
+
+# FFI-BOUNDARY: the shim reads the span's bytes during the call and keeps no
+# pointer; the descriptor stays owned by the caller. The call blocks while the
+# pipe is full and the reader is not reading.
+def proc_write(fd: Int32, data: Span[UInt8, _]) -> Int:
+    """Write every byte of `data` to `fd`. Returns the byte count, or -errno (the count already written is not reported on an error). Blocks while the pipe is full."""
+    # SAFETY: the shim reads `len(data)` bytes from the span's storage during
+    # the call and keeps no pointer; `data` outlives the call.
+    return Int(
+        external_call["komira_proc_write", Int](
+            fd, data.unsafe_ptr(), Int64(len(data))
+        )
+    )
+
+
+# -----------------------------------------------------------------------------
 # komira_proc_spawn_detached thunk — DETACHED spawn, NO capture pipes.
 #   path       : absolute binary path (NUL-terminated C string)
 #   argv_blob  : flat NUL-delimited argv (argc entries) — MUST include argv[0]
@@ -255,6 +333,13 @@ def proc_read(fd: Int32, mut buf: List[UInt8], cap: Int) -> Int:
     )
     _ = buf[0]  # anchor
     return Int(n)
+
+
+def proc_wait_readable(fd: Int32, timeout_ms: Int) -> Int:
+    """Wait up to `timeout_ms` (negative: without limit) until a read of `fd`
+    would not block. 1 when it would not (data, end of file or an error is
+    waiting), 0 on timeout, a negative errno on failure."""
+    return Int(external_call["komira_proc_wait_readable", Int32](fd, Int32(timeout_ms)))
 
 
 def proc_set_nonblocking(fd: Int32) -> Int32:
@@ -437,9 +522,9 @@ def proc_probe_children() raises -> ChildProbe:
         return ChildProbe(any_child=True, exited_pid=out_exited_pid)
     if r == Int32(0):
         return ChildProbe(any_child=False, exited_pid=Int32(0))
-    raise Error(
-        String("waitid(P_ALL, WEXITED|WNOHANG|WNOWAIT) failed: errno ")
-        + String(out_errno)
+    raise Error(  # cov: unreachable waitid with fixed arguments fails only with ECHILD or EINTR
+        String("waitid(P_ALL, WEXITED|WNOHANG|WNOWAIT) failed: errno ")  # cov: unreachable see the line above
+        + String(out_errno)  # cov: unreachable see the line above
     )
 
 

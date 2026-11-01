@@ -121,19 +121,26 @@ def test_project_keeps_only_needed_exprs_and_their_columns() raises:
     assert_equal(_proj(_under_project(inner)), String("a,b"))
 
 
-def test_project_needed_by_nothing_keeps_every_expr() raises:
-    """COUNT(*) over Project(a, b) over Scan(a,b,c): the aggregate needs no
-    column, so the Project keeps both exprs and the scan reads [a,b].
+def test_project_needed_by_nothing_prunes_to_zero_exprs() raises:
+    """COUNT(*) over Project(a, b) over Scan(a..h): the aggregate needs no
+    column, so the Project is pruned to zero exprs (a zero-column output
+    whose rows still carry the row count) and the scan, asked for nothing,
+    reads one column, `a` (a scan cannot express a zero-column read, and an
+    unprojected scan reads all eight).
 
-    Catches: the empty-`needed` case taking the narrowing branch (an empty
-    Project)."""
+    Catches: an empty `needed` set treated as keep-every-expr (the Project
+    keeps a, b); the scan left unprojected (`*`, every column read)."""
     var aggs = AggExprArray()
     aggs.append(AggExpr(AGG_COUNT, None, Optional(String("n"))))
-    var plan = LogicalPlan.aggregate(ExprArray(), aggs^, LogicalPlan.project(_cols("a", "b"), _scan("a,b,c")))
+    var plan = LogicalPlan.aggregate(
+        ExprArray(), aggs^, LogicalPlan.project(_cols("a", "b"), _scan("a,b,c,d,e,f,g,h"))
+    )
     var out = push_projections_down(plan^)
     ref proj = out._aggregate.value()[].child[]
-    assert_equal(len(proj._project.value()[].exprs), 2)
-    assert_equal(_proj(proj._project.value()[].child[]), String("a,b"))
+    assert_equal(proj.tag, PLAN_PROJECT)
+    assert_equal(len(proj._project.value()[].exprs), 0)
+    assert_equal(proj.output_schema.num_columns(), 0)
+    assert_equal(_proj(proj._project.value()[].child[]), String("a"))
 
 
 def test_filter_keeps_its_predicate_columns() raises:
@@ -169,18 +176,59 @@ def test_scan_keeps_its_pushed_filter_columns_and_fields() raises:
     assert_equal(sd.source_kind, SOURCE_KIND_ROW)
 
 
-def test_scan_left_alone_when_all_or_none_needed() raises:
-    """Project(a, b, c) over Scan(a,b,c) and COUNT(*) over Scan(a,b,c): both
-    scans keep no projection (`*`).
-
-    Catches: an all-columns projection written (a needless rebuild); an
-    empty projection written (a scan that reads nothing)."""
-    var all_needed = push_projections_down(LogicalPlan.project(_cols("a", "b", "c"), _scan("a,b,c")))
-    assert_equal(_proj(_under_project(all_needed)), String("*"))
+def _count_star(var child: LogicalPlan) -> LogicalPlan:
     var aggs = AggExprArray()
     aggs.append(AggExpr(AGG_COUNT, None, Optional(String("n"))))
-    var none_needed = push_projections_down(LogicalPlan.aggregate(ExprArray(), aggs^, _scan("a,b,c")))
-    assert_equal(_proj(none_needed._aggregate.value()[].child[]), String("*"))
+    return LogicalPlan.aggregate(ExprArray(), aggs^, child^)
+
+
+def test_scan_left_alone_when_all_needed_and_one_column_when_none() raises:
+    """Project(a, b, c) over Scan(a,b,c) keeps no projection (`*`); COUNT(*)
+    over Scan(a,b,c) reads one column, `a`; COUNT(*) over Scan(a) keeps `*`
+    (its one column is that column); and a second pass (`prune_columns`)
+    keeps `a`.
+
+    Catches: an all-columns projection written (a needless rebuild); an
+    empty projection left as `*` (every column read for a row count); an
+    empty projection written (a scan that reads nothing); a second pass
+    that moves the kept column."""
+    var all_needed = push_projections_down(LogicalPlan.project(_cols("a", "b", "c"), _scan("a,b,c")))
+    assert_equal(_proj(_under_project(all_needed)), String("*"))
+    var none_needed = push_projections_down(_count_star(_scan("a,b,c")))
+    assert_equal(_proj(none_needed._aggregate.value()[].child[]), String("a"))
+    var again = prune_columns(none_needed^)
+    assert_equal(_proj(again._aggregate.value()[].child[]), String("a"))
+    var one_col = push_projections_down(_count_star(_scan("a")))
+    assert_equal(_proj(one_col._aggregate.value()[].child[]), String("*"))
+
+
+def _typed_scan(names: List[String], types: List[ArrowType]) -> LogicalPlan:
+    var sb = SchemaBuilder()
+    for i in range(len(names)):
+        sb.add_field(Field(names[i], types[i], nullable=False))
+    return LogicalPlan.scan("t.parquet", SOURCE_PARQUET, sb.build(), None, None)
+
+
+def test_scan_read_by_nothing_keeps_its_narrowest_fixed_width_column() raises:
+    """COUNT(*) over Scan(s STRING, q BOOL, x INT64, d INT32, e INT32,
+    t STRING) reads `d`: the narrowest fixed-width column, the first of the
+    two INT32s.
+    COUNT(*) over Scan(s STRING, t STRING) reads `s`, the first column.
+
+    Catches: the kept column chosen by position alone (`s`); a later
+    equal-width column winning a tie (`e`); a column with no fixed width
+    ranked as narrowest; the all-variable-width fallback taking another
+    column than the first."""
+    var n1: List[String] = ["s", "q", "x", "d", "e", "t"]
+    var t1: List[ArrowType] = [
+        ArrowType.STRING, ArrowType.BOOL, ArrowType.INT64, ArrowType.INT32, ArrowType.INT32, ArrowType.STRING
+    ]
+    var mixed = push_projections_down(_count_star(_typed_scan(n1, t1)))
+    assert_equal(_proj(mixed._aggregate.value()[].child[]), String("d"))
+    var n2: List[String] = ["s", "t"]
+    var t2: List[ArrowType] = [ArrowType.STRING, ArrowType.STRING]
+    var varlen = push_projections_down(_count_star(_typed_scan(n2, t2)))
+    assert_equal(_proj(varlen._aggregate.value()[].child[]), String("s"))
 
 
 # =============================================================================
@@ -399,10 +447,11 @@ def test_collect_referenced_columns_walks_every_node() raises:
 
 def main() raises:
     test_project_keeps_only_needed_exprs_and_their_columns()
-    test_project_needed_by_nothing_keeps_every_expr()
+    test_project_needed_by_nothing_prunes_to_zero_exprs()
     test_filter_keeps_its_predicate_columns()
     test_scan_keeps_its_pushed_filter_columns_and_fields()
-    test_scan_left_alone_when_all_or_none_needed()
+    test_scan_left_alone_when_all_needed_and_one_column_when_none()
+    test_scan_read_by_nothing_keeps_its_narrowest_fixed_width_column()
     test_sort_topn_limit_distinct_keep_their_keys()
     test_aggregate_reads_group_keys_and_every_agg_slot()
     test_join_residual_columns_reach_each_side()

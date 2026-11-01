@@ -22,6 +22,7 @@
 
 from std.memory import unsafe_memcpy
 
+from komira_buffer.byte_buffer import write_uleb128
 from komira_buffer.owned_aligned_buffer import OwnedAlignedBuffer
 from komira_parquet_api.types import (
     CompressionCodec,
@@ -251,20 +252,12 @@ def _admit_all_pages(
     return True
 
 
-def _zero_code_stream(page_nv: Int) -> List[UInt8]:
+def _zero_code_stream(page_nv: Int) raises -> List[UInt8]:
     """The RLE / Bit-Packing Hybrid stream, at bit width 1, of `page_nv`
     zeros: one RLE run header `(page_nv << 1) | 0` as a ULEB128, then the
     value byte 0. A dictionary-index page of bit width 0 means every code is
     0; decoding this stream keeps the cursor's resume logic unchanged."""
     var body = List[UInt8]()
-    var v = page_nv << 1
-    while True:
-        var b = UInt8(v & 0x7F)
-        v = v >> 7
-        if v != 0:
-            body.append(b | UInt8(0x80))
-        else:
-            body.append(b)
-            break
+    write_uleb128(page_nv << 1, body)
     body.append(UInt8(0))
     return body^

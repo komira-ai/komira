@@ -1,8 +1,65 @@
+load("@buildrules//rules/mojo:pack.bzl", "mojo_conda_holds")
+load("@komira//tools/build/mojo:adopt.bzl", "mojo_adopted_library")
 load("@komira//tools/build/mojo:cxx.bzl", "staged_files")
-load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 load("@komira//tools/build/native:shared.bzl", "native_shared_library")
+load("@komira//tools/build/package:conda.bzl", "conda_package")
+load(":buildrules.mojo.bzl", "mojo_package")
 
-# The pool-depth counter: three C functions over one process-global static.
+# Cancellation token, detached-drop spawn, the dispatcher / worker-pool / fork-join / scale-signal trait contracts, and the pool-depth counter.
+#
+# Built with buildrules' `mojo_package` from mopm.toml (README.md, "Build files"). `:lib` is the library
+# file and exists only once the test of tests/ has passed. The C it owns, native/komira_concurrency_pool_depth.c
+# (the pool-depth counter: three C functions over one process-global static), is
+# `[native.komira_concurrency_pool_depth]` of mopm.toml: `mojo_package` compiles it into
+# `:native_komira_concurrency_pool_depth` (`libkomira_concurrency_pool_depth.a`), links it into every test of the
+# package and of the packages that depend on it, and packs it into `:conda`
+# (`lib/libkomira_concurrency_pool_depth.a`).
+mojo_package(path = ".")
+
+# `:komira_async_api`, the target the packages that depend on this library name, is `:lib` as komira's Mojo
+# rules take it (tools/build/mojo/adopt.bzl): the same file, so a dependent builds only once the test has
+# passed. It also hands the native archive of `:lib` to a dependent's link (`MojoInfo.c_link`).
+# `c_deps` and `native` carry the older packaging below as the facts `mojo_library` gave it.
+mojo_adopted_library(
+    name = "komira_async_api",
+    c_deps = [":komira_concurrency_pool_depth"],
+    deps = ["//src/komira_atomic_alias:komira_atomic_alias"],
+    lib = ":lib",
+    native = ":komira_async_api_native",
+    readme = "README.md",
+    srcs = glob(["src/komira_async_api/**/*.mojo"]),
+    test_srcs = glob(["tests/test_*.mojo"]),
+    test_runs = ":test",
+    visibility = ["PUBLIC"],
+)
+
+# `:conda`, the mopm package (made by `mojo_package` because the package owns a native library), holds the archive
+# that was built and tested, and records the one dependency.
+mojo_conda_holds(
+    name = "conda_holds",
+    conda = ":conda",
+    depends = ["mojo-komira_atomic_alias >=0.1,<0.2"],
+    natives = {"libkomira_concurrency_pool_depth.a": ":native_komira_concurrency_pool_depth"},
+    package = "komira_async_api",
+    sole = True,
+    visibility = ["PUBLIC"],
+)
+
+# The release machine builds `komira_async_api_conda` (release/artifacts.textproto): komira's conda packer over
+# `:komira_async_api`, with the library's own shared library below. It goes when the release machine takes `:conda`.
+conda_package(
+    name = "komira_async_api_conda",
+    lib = ":komira_async_api",
+    native = ":komira_async_api_native",
+    summary = "The `komira_async_api` Mojo library of komira, as a conda package.",
+    visibility = ["PUBLIC"],
+)
+
+# The older packaging of the same C, kept while the release set ships it
+# (tools/build/package/BUCK, `native`) and the one-definition gate links it
+# (tools/build/one_definition/libraries.bzl): the C file as a `cxx_library`, and
+# `komira_async_api_native` below, its shared library. No test or program links this
+# archive: the Mojo side links `:native_komira_concurrency_pool_depth`, built from the same file.
 staged_files(
     name = "pool_depth_files",
     srcs = ["native/komira_concurrency_pool_depth.c"],
@@ -11,22 +68,6 @@ staged_files(
 cxx_library(
     name = "komira_concurrency_pool_depth",
     srcs = [":pool_depth_files[native/komira_concurrency_pool_depth.c]"],
-    visibility = ["PUBLIC"],
-)
-
-# Cancellation token, detached-drop spawn, the dispatcher / worker-pool / fork-join / scale-signal trait contracts, and the pool-depth counter.
-mojo_library(
-    name = "komira_async_api",
-    # Its C ships in its package as komira_async_api_native below (lib/libkomira_async_api_native.so.1).
-    native = ":komira_async_api_native",
-    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
-    deps = [
-        ":komira_concurrency_pool_depth",
-        "//src/komira_atomic_alias:komira_atomic_alias",
-    ],
-    test_srcs = [
-        "tests/test_spawn_drop.mojo",
-    ],
     visibility = ["PUBLIC"],
 )
 

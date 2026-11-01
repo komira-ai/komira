@@ -1,0 +1,8 @@
+[2026-10-21T14:06:01.424-05:00] Build ID: 00000000-0000-0000-0000-000000000000
+[2026-10-21T14:06:01.428-05:00] Network: up 0B  down 0B
+BUILD FAILED
+Unknown target `nonexistent` from package `komira//tools/build/ci/parity`.
+Did you mean one of the 75 targets in komira//tools/build/ci/parity:BUCK?
+
+Available targets (showing 25 of 75):
+  komira//tools/build/ci/parity:affected_affected

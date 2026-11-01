@@ -445,5 +445,31 @@ def test_dictionary_chunks_it_refuses() raises:
         _ = _decode(dec, ParquetType.INT32, 2, False, ctx, converted_type=5)
 
 
+def test_a_dictionary_page_does_not_count_toward_the_chunks_values() raises:
+    # Dictionary of 3 entries, then one data page of 2 values.
+    var chunk = List[UInt8]()
+    _page(chunk, _DICT, 3, _PLAIN, _ints([10, 20, 30], 8))
+    _page(chunk, _DATA, 2, _RLE_DICT, _codes([2, 0], 2))
+    var ctx = ColumnDecodeContext()
+    var c = _decode(chunk, ParquetType.INT64, 2, False, ctx, False)
+    assert_equal(c.length(), 2)
+    assert_equal(Int(c.as_primitive[DType.int64]().get(0)), 30)
+    # 4 is the dictionary entries plus the data values: if the dictionary
+    # page were counted this would decode; it is above the 2 the data page
+    # holds, so it is refused.
+    with assert_raises(contains="data pages hold 2"):
+        _ = _decode(chunk, ParquetType.INT64, 4, False, ctx, False)
+
+
+def test_a_huge_count_after_a_good_page_and_a_corrupt_header_is_refused() raises:
+    var chunk = List[UInt8]()
+    _page(chunk, _DATA, 2, _PLAIN, _ints([1, 2], 8))
+    for _ in range(6):
+        chunk.append(UInt8(0xFF))
+    var ctx = ColumnDecodeContext()
+    with assert_raises(contains="data pages hold 2"):
+        _ = _decode(chunk, ParquetType.INT64, 1 << 36, False, ctx)
+
+
 def main() raises:
     TestSuite.discover_tests[__functions_in_module()]().run()

@@ -21,10 +21,24 @@
 # the EMIT cost, not the drop-counter path.
 #
 # This is a TEST target (not a bench suite) so it builds AOT with the same
-# toolchain the production binary uses. It prints ns/emit; the
-# assert is a generous ceiling that only fails on a gross regression (so the
-# number is informational + the gate is the printed value, which the report
-# captures).
+# toolchain the production binary uses. It prints ns/emit as information only;
+# NO TIME IS ASSERTED (a threshold on ns/emit depends on the machine and fails
+# on a loaded one). What it asserts is counted exactly, and is what a per-emit
+# cost regression on this path would break:
+#
+#   * every emit reached the ring and was drained: records drained over the
+#     measured loop == emits made, and no ring dropped one. An emit that reached
+#     the ring returned before the cold render block (the only place that builds
+#     Strings and Lists). A drop, or the synchronous fallback arm, changes the
+#     count; allocations are not counted, so an emit that also built a String
+#     before pushing would still pass (a known gap).
+#   * site registration does not repeat: the SiteDictionary has one entry for
+#     the one site, and its length is the same after the measured loop as after
+#     the warm-up. A registration that re-ran per emit would grow it (and
+#     allocate a String each time).
+#
+# The toolchain has no process-wide allocation counter, so allocation is not
+# counted directly; these two are the observable effects of an allocating emit.
 # =============================================================================
 
 import komira_log as log
@@ -34,7 +48,7 @@ from komira_log.env_filter import EnvFilter
 from komira_log.levels import LEVEL_TRACE
 from komira_log.log_arg import ArgI64
 
-from std.testing import assert_true
+from std.testing import assert_equal
 from std.time import perf_counter_ns
 
 
@@ -42,6 +56,19 @@ def _all_filter() -> EnvFilter:
     var f = EnvFilter()
     f.global_level = LEVEL_TRACE
     return f^
+
+
+# Drain one worker's ring and return how many records came out. This is the
+# engine's inspectable drain, NOT `drain_worker`: `drain_worker` writes every
+# record to the engine's log sink, and this test drains about 200 thousand records, which
+# as sink output was about 13 MB of test log. Log records are decoded the same
+# way and each yields one line, so for this test (log records only) the count
+# equals `drain_worker`'s. In general `drain_worker` returns every popped record
+# (span, metric and unknown kinds too) while `drain_worker_to_lines` counts log
+# records only. Only the delivery differs: the lines are dropped here, not
+# printed. Every drain below is outside a timed window.
+def _drain(mut eng: SharedEngine) -> Int:
+    return len(eng.drain_worker_to_lines(0, 1 << 16))
 
 
 def main() raises:
@@ -53,10 +80,14 @@ def main() raises:
 
     # Warm-up: register the site (first emit appends to the dict) + prime the
     # ring + the TLS path so we measure steady state.
+    var warm_drained = 0
     for _ in range(1000):
         log.info["aot emit bench {}", "komira_engine"](ArgI64(0))
         # Drain so the bounded ring never fills (measure emit, not drop).
-        _ = eng.drain_worker(0, 1 << 16)
+        warm_drained += _drain(eng)
+    assert_equal(warm_drained, 1000, "warm-up: every emit drained")
+    var sites_after_warmup = eng.site_dict_len()
+    assert_equal(sites_after_warmup, 1, "warm-up registered the one site once")
 
     # The measured loop: emit a fixed-arg site, draining every CHUNK emits so the
     # ring stays well below capacity. The drain cost is EXCLUDED from the timed
@@ -65,6 +96,7 @@ def main() raises:
     comptime CHUNK = 256
     var total_ns: Int64 = 0
     var emitted = 0
+    var drained = 0
 
     while emitted < TOTAL:
         var t0 = Int64(perf_counter_ns())
@@ -74,7 +106,7 @@ def main() raises:
         total_ns += t1 - t0
         emitted += CHUNK
         # Drain OUTSIDE the timed window — keep the ring from filling.
-        _ = eng.drain_worker(0, 1 << 16)
+        drained += _drain(eng)
 
     var ns_per_emit = Float64(Int(total_ns)) / Float64(emitted)
     print("=== P2b AOT hot-path perf ===")
@@ -82,9 +114,17 @@ def main() raises:
     print("total_ns:", total_ns)
     print("ns/emit:", ns_per_emit)
 
-    # Generous ceiling — only fails on a gross regression. The REPORTED number
-    # is what a reader compares (anything around 100ns+ deserves a look).
-    assert_true(ns_per_emit < 5000.0)
+    print("records drained:", drained)
+
+    # THE COUNTED PROPERTIES. The ns/emit above is information only.
+    assert_equal(drained, emitted, "every emit reached the ring and drained")
+    assert_equal(eng.overflow_dropped_count(), Int64(0), "no ring dropped")
+    assert_equal(eng.unknown_kind_dropped_count(), Int64(0), "no refused kind")
+    assert_equal(
+        eng.site_dict_len(),
+        sites_after_warmup,
+        "no site was re-registered over the measured loop",
+    )
 
     LogManager._test_reset()
     print("test_log_p2b_aot_perf: DONE")

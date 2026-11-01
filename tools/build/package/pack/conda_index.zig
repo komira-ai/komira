@@ -80,7 +80,7 @@ pub fn cmdCondaIndex(alloc: Alloc, a: Args) !void {
         else => fail("cannot open {s}: {s}", .{ out, @errorName(err) }),
     }
 
-    var list = std.ArrayList(IndexedPackage).init(alloc);
+    var list = std.ArrayList(IndexedPackage).empty;
     for (manifests) |m| {
         const doc = try readContractManifest(alloc, m);
         const file = memberStr(doc, "file", m);
@@ -102,9 +102,9 @@ pub fn cmdCondaIndex(alloc: Alloc, a: Args) !void {
         try record.object.put("sha256", str(memberStr(doc, "sha256", m)));
         try record.object.put("size", .{ .integer = @intCast(bytes.len) });
         for (list.items) |p| if (std.mem.eql(u8, p.file, file) and std.mem.eql(u8, p.subdir, subdir)) fail("{s}/{s} is given twice", .{ subdir, file });
-        try list.append(.{ .subdir = subdir, .file = file, .bytes = bytes, .record = record });
+        try list.append(alloc, .{ .subdir = subdir, .file = file, .bytes = bytes, .record = record });
     }
-    const pkgs = try list.toOwnedSlice();
+    const pkgs = try list.toOwnedSlice(alloc);
     std.mem.sort(IndexedPackage, pkgs, {}, lessIndexed);
 
     std.fs.cwd().makePath(out) catch |err| fail("cannot create {s}: {s}", .{ out, @errorName(err) });

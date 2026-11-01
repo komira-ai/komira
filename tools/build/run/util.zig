@@ -110,7 +110,7 @@ pub fn actionDir(alloc: std.mem.Allocator) ![]const u8 {
             if (a != null and b != null and a.?.dev == b.?.dev and a.?.ino == b.?.ino) return alloc.dupe(u8, pwd);
         }
     }
-    var buf: [std.fs.MAX_PATH_BYTES]u8 = undefined;
+    var buf: [std.fs.max_path_bytes]u8 = undefined;
     return alloc.dupe(u8, try posix.getcwd(&buf));
 }
 
@@ -139,7 +139,7 @@ pub fn makeTempDir(alloc: std.mem.Allocator, parent: []const u8, prefix: []const
 
 pub fn mkdirs(alloc: std.mem.Allocator, base: []const u8, names: []const []const u8) !void {
     for (names) |n| {
-        const p = try std.fmt.allocPrintZ(alloc, "{s}/{s}", .{ base, n });
+        const p = try std.fmt.allocPrintSentinel(alloc, "{s}/{s}", .{ base, n }, 0);
         posix.mkdirZ(p, 0o777) catch |e| switch (e) {
             error.PathAlreadyExists => {},
             else => return e,

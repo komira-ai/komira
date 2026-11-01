@@ -1,0 +1,11 @@
+{
+ "name": "validate_read_set_present_empty",
+ "defect": "a present, empty field list is refused, or read as absent (design 3.1): it equals an empty read set",
+ "run": "validate",
+ "entry": "row_const",
+ "shape": "ROW",
+ "args": [],
+ "result": [{"type": "int64", "nullable": true}],
+ "descriptor": {"recorded_fields": {"fields": []}},
+ "expect": {"status": "OK"}
+}

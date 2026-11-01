@@ -1,0 +1,12 @@
+{
+ "name": "host_contract_extra_child",
+ "defect": "a host defect is blamed on the runtime or on user code: an argument struct with one child more than the bound schema (design 4.5: ERR_HOST_CONTRACT, UDF_HOST_CONTRACT_VIOLATION, not retried)",
+ "run": "call_batch",
+ "entry": "identity",
+ "shape": "MAP_BATCHES_COLUMN",
+ "args": [{"type": "int64", "nullable": true}],
+ "result": [{"type": "int64", "nullable": true}],
+ "options": {"plant_extra_child": true},
+ "input": {"length": 2, "columns": [{"type": "int64", "values": [1, 2]}]},
+ "expect": {"status": "ERR_HOST_CONTRACT", "run_error": "UDF_HOST_CONTRACT_VIOLATION", "message": "nonempty"}
+}

@@ -1,0 +1,19 @@
+[package]
+name = "komira_calendar"
+version = "0.1.0"
+description = "A simple calendar's model and validation over the calendar messages, with the local date and date-time forms and the occurrences of a recurring event."
+license = "Apache-2.0"
+repository = "https://github.com/komira-ai/komira"
+readme = "README.md"
+mojo = ["1.0.0"]
+
+[dependencies]
+komira_calendar_proto = { path = "../komira_calendar_proto", version = "0.1" }
+komira_datetime = { path = "../komira_datetime", version = "0.1" }
+
+[dev-dependencies]
+komira_proto_codec = { path = "../komira_proto_codec", version = "0.1" }
+
+[targets]
+lib = { path = "src/komira_calendar" }
+tests = ["tests"]

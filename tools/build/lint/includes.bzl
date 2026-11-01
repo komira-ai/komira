@@ -21,6 +21,7 @@ def _cxx_library(**kwargs):
     one_definition_listed(kwargs.get("name", ""))
     native.cxx_library(**kwargs)
 
+alias = declares_docs(native.alias)
 constraint_setting = declares_docs(native.constraint_setting)
 constraint_value = declares_docs(native.constraint_value)
 cxx_library = declares_docs(_cxx_library)

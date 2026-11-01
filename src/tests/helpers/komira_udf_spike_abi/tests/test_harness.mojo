@@ -4,7 +4,10 @@
 #   - the status table: every status of the header has a name that maps back
 #     to it, and each maps to the run error design section 4.5 gives it, with
 #     ERR_UNSUPPORTED an admission refusal from validate and a runtime fault
-#     from a call (a status renamed or mapped to another run's error);
+#     from a call, ERR_DEADLINE a step's timeout on a STEP, and ERR_KILLED the
+#     run's cancel when the call's cancel was set, else the deadline (or the
+#     step's timeout); and exactly the four statuses that lose a context do
+#     (a status renamed or mapped to another run's error);
 #   - the runtime id grammar `<namespace>/<name>`, each part
 #     `[a-z0-9][a-z0-9._-]{0,62}` (an id the design refuses accepted, or the
 #     reverse);
@@ -12,9 +15,10 @@
 #     case read as a default and passing vacuously);
 #   - UdfRuntime.open refuses a missing library, a library without the init
 #     export, and a runtime that refuses the host's ABI major, each by name;
-#     and a runtime reporting THREAD_SAFE with global_lock 1
-#     (echo_global_lock.so), naming both capabilities (design section 4.2: a
-#     runtime with a global lock bound as a parallel virtual machine);
+#   - a call into a context a status lost is refused by the harness, and
+#     closing it is not (design section 4.5: nothing is retried after a loss);
+#   - bisection gives each half a call id of its own (a call id is unique per
+#     call, for diagnostics);
 #   - a handle passed to an entry of another kind is refused before the
 #     runtime sees it; a run the reader does not know is refused;
 #   - memory_report reaches the optional entry (echo reports 0);
@@ -24,19 +28,25 @@
 #     refrt/echo_variants.inc): UdfRuntime.open refuses a table of another
 #     major, a table short of a required entry, a describe that fails, and a
 #     runtime the variant library cannot name; it opens a table that stops
-#     before the optional entry (and reads that entry as absent) and a
-#     CONTEXT_PER_THREAD runtime with global_lock 1; init_refusal reports an
-#     init that accepts another major; both release an error init filled on
-#     success (error_on_ok_init: the reserved bytes return to 0, a release
-#     skipped on success caught); and the capability check fails each
-#     describe answer that breaks one of its rules, for that rule, and passes
-#     each legal edge (SINGLE_THREAD, NATIVE with hosting 0,
-#     HOST_INTERPRETER, no MEMORY_REPORT with no entry).
+#     before the optional entry (and reads that entry as absent);
+#     init_refusal reports an init that accepts another major; both release
+#     an error init filled on success (error_on_ok_init: the reserved bytes
+#     return to 0, a release skipped on success caught); and the capability
+#     check fails each describe answer that breaks one of its rules (no CPU,
+#     with no device or with another device's bit only,
+#     class 0 or 3, a feature bit this ABI does not define, the
+#     MEMORY_REPORT bit and entry disagreeing, a bad id), for that rule, and
+#     passes each legal edge (NATIVE, every defined feature bit, no
+#     MEMORY_REPORT with no entry).
 # Mutants planted: runtime_id_ok accepting upper-case letters (A to Z among
-# the alphanumerics): red ("upper case"). UdfRuntime.open not reading
-# global_lock: red (echo_global_lock.so opens). The mutants of the variant
-# and handle checks are listed with this file in the pull request's sweep
-# table.
+# the alphanumerics): red ("upper case"). status_name dropping
+# ERR_READ_SET_MISMATCH: red (UNKNOWN(20)). run_error mapping every
+# ERR_KILLED to the run's cancel: red on the deadline arm. run_error mapping
+# ERR_INSTANCE_LOST to UDF_INSTANCE_LOST: red. The capability check without
+# its unknown-feature arm: red on features_bit_3. UdfRuntime._live not
+# refusing: red on the lost-context arm. _bisect reusing the parent's call
+# id: red on the call id arm. The capability check's CPU test reduced to
+# `devices == 0`: red on gpu_only.
 
 from std.os import setenv, unsetenv
 from std.testing import assert_equal, assert_false, assert_true
@@ -66,7 +76,7 @@ def _raises_with(text: String, name: String) raises:
 def _statuses() raises:
     var want: List[String] = [
         "",
-        "UDF_RUNTIME_FAULT",
+        "UDF_RUNTIME_ABI_MISMATCH",
         "OPTIMIZED_UDF_DESCRIPTOR_INVALID",
         "UDF_RUNTIME_FAULT",
         "OPTIMIZED_UDF_CODE_DIGEST_MISMATCH",
@@ -79,19 +89,42 @@ def _statuses() raises:
         "UDF_CANCELLED",
         "UDF_DEADLINE_EXCEEDED",
         "UDF_OUT_OF_MEMORY",
-        "UDF_INSTANCE_LOST",
+        "UDF_WORKER_CRASHED",
         "UDF_RUNTIME_FAULT",
         "UDF_FIELD_NOT_DECLARED",
+        "UDF_WORKER_CRASHED",
+        "UDF_HOST_CONTRACT_VIOLATION",
+        "UDF_DEADLINE_EXCEEDED",
+        "OPTIMIZED_UDF_READ_SET_DESCRIPTOR_MISMATCH",
     ]
+    var lost: List[Int] = [13, 14, 17, 19]
     assert_equal(len(want), STATUS_COUNT)
     for c in range(STATUS_COUNT):
         var name = status_name(Int32(c))
         assert_false(name.startswith("UNKNOWN"), "status " + String(c) + " has no name")
         assert_equal(Int(status_from_name(name)), c)
         assert_equal(run_error(Int32(c), True), want[c], name)
-    assert_equal(run_error(ERR_UNSUPPORTED, False), "OPTIMIZED_UDF_KIND_UNSUPPORTED")
+        assert_equal(loses_context(Int32(c)), c in lost, name + " loses its context")
+    assert_equal(run_error(ERR_UNSUPPORTED, False), "OPTIMIZED_UDF_UNSUPPORTED")
+    # ERR_KILLED: the run's cancel when the host had set the call's flag,
+    # else the deadline, a step's own; ERR_DEADLINE: a step's timeout.
+    assert_equal(run_error(ERR_KILLED, True, SHAPE_SCALAR, True), RUN_CANCEL)
+    assert_equal(run_error(ERR_KILLED, True, SHAPE_STEP, True), RUN_CANCEL)
+    assert_equal(run_error(ERR_KILLED, True, SHAPE_SCALAR, False), "UDF_DEADLINE_EXCEEDED")
+    assert_equal(run_error(ERR_KILLED, True, SHAPE_STEP, False), "UDF_STEP_TIMED_OUT")
+    assert_equal(run_error(ERR_DEADLINE, True, SHAPE_STEP, False), "UDF_STEP_TIMED_OUT")
+    assert_equal(run_error(ERR_DEADLINE, True, SHAPE_MAP_BATCHES_FRAME, True), "UDF_DEADLINE_EXCEEDED")
+    assert_equal(run_error(ERR_CANCELLED, True, SHAPE_STEP, False), RUN_CANCEL)
+    assert_equal(
+        Outcome(ERR_KILLED, "m", "", -1, -1, "", SHAPE_STEP, False).run_error(), "UDF_STEP_TIMED_OUT",
+        "an outcome's shape reaches the table",
+    )
+    assert_equal(
+        Outcome(ERR_KILLED, "m", "", -1, -1, "", SHAPE_SCALAR, True).run_error(), RUN_CANCEL,
+        "an outcome's cancel state reaches the table",
+    )
     assert_equal(run_error(Int32(STATUS_COUNT), True), "UDF_RUNTIME_FAULT", "an unknown status")
-    assert_equal(status_name(Int32(STATUS_COUNT)), "UNKNOWN(17)")
+    assert_equal(status_name(Int32(STATUS_COUNT)), "UNKNOWN(21)")
     var msg = String()
     try:
         _ = status_from_name("ERR_NOPE")
@@ -137,6 +170,31 @@ def _case_refusals() raises:
     _raises_with(
         '{"name": "n", "defect": "d", "run": "validate", "args": [{"type": "int8"}], "expect": {}}',
         "UDF_TYPE_UNKNOWN",
+    )
+    _raises_with(
+        '{"name": "n", "defect": "d", "run": "validate", "descriptor": {"entri": "x"}, "expect": {}}',
+        "UDF_CASE_MALFORMED: descriptor key entri",
+    )
+    _raises_with(
+        '{"name": "n", "defect": "d", "run": "validate", "descriptor": {"recorded_fields": "none"}, "expect": {}}',
+        "UDF_CASE_MALFORMED: recorded_fields none",
+    )
+    _raises_with('{"name": "n", "defect": "d", "run": "validate", "classes": ["NATIV"], "expect": {}}', "UDF_CASE_MALFORMED: class NATIV")
+    _raises_with(
+        '{"name": "n", "defect": "d", "run": "validate", "needs_features": ["FORCED"], "expect": {}}',
+        "UDF_CASE_MALFORMED: feature FORCED",
+    )
+    _raises_with(
+        '{"name": "n", "defect": "d", "run": "nested_frame", "pull_action": {"at": 0, "do": "nap"}, "expect": {}}',
+        "UDF_CASE_MALFORMED: pull_action nap",
+    )
+    _raises_with(
+        '{"name": "n", "defect": "d", "run": "call_batch", "expect": {"then": {"column": {"type": "int64", "values": []}}}}',
+        "UDF_CASE_MALFORMED: a follow-up with no input",
+    )
+    _raises_with(
+        '{"name": "n", "defect": "d", "run": "agg_split", "state": [], "expect": {}}',
+        "UDF_CASE_MALFORMED: state is a list of one field",
     )
     _raises_with(
         '{"name": "n", "defect": "d", "run": "call_batch", "input": {"length": 2, "columns":'
@@ -211,7 +269,7 @@ def _host_values() raises:
     """Values the host hands a runtime or a caller, each pinned: the spec's
     defaults, call ids, an unset error's group, a frame with no output."""
     var spec = UdfSpec(SHAPE_SCALAR, "e", List[ColumnType](), List[ColumnType]())
-    assert_equal(spec.descriptor_version, 0)
+    assert_equal(spec.descriptor_version, 1)
     assert_false(spec.result_is_table)
     var rt = UdfRuntime.open("./echo.so")
     # call ids: 1 on the runtime's first call, one more on each call
@@ -222,13 +280,27 @@ def _host_values() raises:
     assert_equal(first.column.bits[0], 1, "the first call's id")
     assert_equal(second.column.bits[1], 2, "the second call's id")
     _unbound(rt, h)
-    # an error whose runtime set neither row nor group: both stay -1
+    # an error whose runtime set neither row nor group: both stay -1 (VOLATILE,
+    # so the host does not bisect it)
     c = _call_case("raise_row_unset", "MAP_BATCHES_COLUMN", 2)
+    c.spec.stability = VOLATILE
     h = _bound(rt, c)
     var res = rt.call_batch(h[2], c.spec, c.input, c.options)
     assert_equal(res.outcome.status, ERR_RAISED)
     assert_equal(res.outcome.row, -1)
     assert_equal(res.outcome.group, -1)
+    _unbound(rt, h)
+    # bisection: each half is a call of its own, with a call id of its own;
+    # the fixture names its call id in its message, and the half that ends
+    # bisection reports it
+    c = _call_case("raise_minus_one_if_row5", "MAP_BATCHES_COLUMN", 8)
+    h = _bound(rt, c)
+    var parent = rt.calls() + 1
+    res = rt.call_batch(h[2], c.spec, c.input, c.options)
+    assert_equal(res.outcome.row, 4, String(res.outcome))  # the value 5 is row 4 of [1, ..., 8]
+    assert_false("(call " + String(parent) + ")" in res.outcome.message, "a half reused its parent's call id: " + res.outcome.message)
+    assert_true("(call " in res.outcome.message, res.outcome.message)
+    assert_equal(rt.calls(), parent + 4, "8 rows bisect in 4 calls after the first: [1..4] OK, [5..8], [5, 6], [5]")
     _unbound(rt, h)
     # a frame with no input and no output: no first output, -1
     var f = parse_case(
@@ -494,22 +566,14 @@ def _open_refusals() raises:
     except e:
         msg = String(e)
     assert_true(msg.startswith("UDF_RUNTIME_INIT") and "ERR_ABI" in msg, msg)
-    msg = String()
-    try:
-        _ = UdfRuntime.open("./echo_global_lock.so")
-    except e:
-        msg = String(e)
-    assert_true(
-        msg.startswith("UDF_RUNTIME_FAULT") and "THREAD_SAFE" in msg and "global_lock 1" in msg, msg
-    )
 
 
 def _handles_and_runs() raises:
     var rt = UdfRuntime.open("./echo.so")
     var caps = rt.describe()
     assert_equal(caps.udf_class, CLASS_MANAGED)
-    assert_equal(caps.threading, THREAD_SAFE)
-    assert_equal(caps.global_lock, 0)
+    assert_equal(caps.max_descriptor_version, 1)
+    assert_equal(caps.features, FEATURE_MEMORY_REPORT)
     assert_true(caps.has_memory_report)
     var ctx = rt.open_context(0)
     assert_true(ctx.outcome.is_ok())
@@ -653,11 +717,6 @@ def _variants() raises:
     assert_equal(rt.memory_report(ctx.handle), -2, "memory_report called past struct_size")
     rt.close_context(ctx.handle)
     rt.shutdown()
-    rt = _open_variant("per_thread_global_lock")
-    var caps = rt.describe()
-    assert_equal(caps.threading, CONTEXT_PER_THREAD)
-    assert_equal(caps.global_lock, 1)
-    rt.shutdown()
     rt = _open_variant("any_major")
     var o = rt.init_refusal(ABI_MAJOR + 1)
     assert_true(o.fault.startswith("UDF_RUNTIME_FAULT: init accepted ABI major"), String(o))
@@ -686,17 +745,12 @@ def _variants() raises:
     # name|PASS, or name|a fragment of the capability check's reason
     var want: List[String] = [
         "table_without_optional|PASS",
-        "per_thread_global_lock|PASS",
-        "single_thread|PASS",
         "native|PASS",
-        "host_interpreter|PASS",
+        "features_all_defined|PASS",
         "bad_id|runtime id 'Komira-test/echo'",
         "no_cpu|devices lacks CPU",
-        "worker_only|transports lacks IN_PROCESS",
-        "threading_0|threading 0 is none",
-        "threading_4|threading 4 is none",
-        "native_embedded|a NATIVE runtime reports hosting 0",
-        "managed_hosting_0|a MANAGED runtime reports hosting EMBEDDED or HOST_INTERPRETER",
+        "gpu_only|devices lacks CPU",
+        "features_bit_3|a feature bit this ABI does not define: features 9",
         "class_0|udf_class 0 is neither",
         "class_3|udf_class 3 is neither",
         "feature_without_entry|the MEMORY_REPORT feature bit and the memory_report entry disagree",
@@ -715,8 +769,37 @@ def _variants() raises:
             assert_true(why in r.reason, name + " failed for another reason: " + r.reason)
 
 
+def _lost_context_refused() raises:
+    """After a status that loses its context, the harness refuses any call
+    into it (UDF_HARNESS_LOST_CONTEXT_REUSED), and closing still works."""
+    var rt = UdfRuntime.open("./echo.so")
+    var c = _call_case("lost_on_call", "MAP_BATCHES_COLUMN", 2)
+    var h = _bound(rt, c)
+    var res = rt.call_batch(h[2], c.spec, c.input, c.options)
+    assert_equal(res.outcome.status, ERR_INSTANCE_LOST, String(res.outcome))
+    assert_equal(res.outcome.run_error(), "UDF_WORKER_CRASHED")
+    assert_true(rt.context_lost(h[1]), "the context is marked lost")
+    var msg = String()
+    try:
+        _ = rt.call_batch(h[2], c.spec, c.input, c.options)
+    except e:
+        msg = String(e)
+    assert_true(msg.startswith("UDF_HARNESS_LOST_CONTEXT_REUSED"), "a call into a lost context: '" + msg + "'")
+    msg = String()
+    try:
+        _ = rt.agg_open(h[2])
+    except e:
+        msg = String(e)
+    assert_true(msg.startswith("UDF_HARNESS_LOST_CONTEXT_REUSED"), "agg_open into a lost context: '" + msg + "'")
+    _unbound(rt, h)
+    assert_false(rt.context_lost(h[1]), "a closed context is forgotten")
+    rt.shutdown()
+    assert_equal(rt.ledger().reserved_bytes, 0, "a call reached the lost context: the runtime charged the host")
+
+
 def main() raises:
     _statuses()
+    _lost_context_refused()
     _runtime_ids()
     _case_refusals()
     _open_refusals()

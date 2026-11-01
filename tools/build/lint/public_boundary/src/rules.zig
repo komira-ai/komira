@@ -694,17 +694,19 @@ pub const Prose = struct {
     docstrings: bool,
     in_doc: bool = false,
     buf: std.ArrayList(u8),
+    alloc: std.mem.Allocator,
 
     pub fn init(alloc: std.mem.Allocator, path: []const u8) Prose {
         return .{
             .kind = kindOf(path),
             .docstrings = std.mem.endsWith(u8, path, ".mojo") or std.mem.endsWith(u8, path, ".py"),
-            .buf = std.ArrayList(u8).init(alloc),
+            .buf = std.ArrayList(u8).empty,
+            .alloc = alloc,
         };
     }
 
     pub fn deinit(self: *Prose) void {
-        self.buf.deinit();
+        self.buf.deinit(self.alloc);
     }
 
     /// The prose of the next line s, or "".
@@ -719,13 +721,13 @@ pub const Prose = struct {
                     while (rest.len > 0) {
                         const i = std.mem.indexOf(u8, rest, "\"\"\"");
                         if (self.in_doc) {
-                            try self.buf.append(' ');
+                            try self.buf.append(self.alloc, ' ');
                             if (i) |q| {
-                                try self.buf.appendSlice(rest[0..q]);
+                                try self.buf.appendSlice(self.alloc, rest[0..q]);
                                 rest = rest[q + 3 ..];
                                 self.in_doc = false;
                             } else {
-                                try self.buf.appendSlice(rest);
+                                try self.buf.appendSlice(self.alloc, rest);
                                 rest = "";
                             }
                         } else {

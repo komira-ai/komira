@@ -412,6 +412,34 @@ def test_sts_partition() raises:
     _sts_region_refused(String("eu-isoe-west-1"))
 
 
+def _sts_host_of(region: String) raises -> String:
+    return build_assume_role_with_web_identity(
+        String("arn:aws:iam::123456789012:role/r"),
+        String("komira-test"),
+        String("tok"),
+        region,
+    ).host
+
+
+def test_sts_partition_middle_word() raises:
+    """The middle word of a region is regionRegex's \\w+ in both partitions
+    (aws ^(us|eu|ap|sa|ca|me|af|il|mx)-\\w+-\\d+$, aws-us-gov
+    ^us-gov-\\w+-\\d+$), and \\w admits a digit, as endpoint.mojo's _is_word
+    reads it. No published region has one yet; komira-ai/komira#1141."""
+    assert_equal(_sts_host_of(String("us-ea5t-1")), "sts.us-ea5t-1.amazonaws.com")
+    assert_equal(_sts_host_of(String("eu-9-2")), "sts.eu-9-2.amazonaws.com")
+    assert_equal(
+        _sts_host_of(String("us-gov-we5t-1")), "sts.us-gov-we5t-1.amazonaws.com"
+    )
+    assert_equal(_sts_host_of(String("us-gov-9-1")), "sts.us-gov-9-1.amazonaws.com")
+    # \w+ is one or more: an empty middle word stays refused, and a digit in
+    # it does not admit a partition outside the two.
+    _sts_region_refused(String("us--1"))
+    _sts_region_refused(String("us-gov--1"))
+    _sts_region_refused(String("cn-ea5t-1"))
+    _sts_region_refused(String("us-iso-ea5t-1"))
+
+
 def main() raises:
     test_sts_web_identity()
     test_sts_assume_role_signed()
@@ -419,4 +447,5 @@ def main() raises:
     test_imds()
     test_amz_date_from_unix()
     test_sts_partition()
+    test_sts_partition_middle_word()
     print("OK")

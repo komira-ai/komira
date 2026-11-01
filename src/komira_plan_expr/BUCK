@@ -24,6 +24,7 @@ mojo_library(
         "tests/test_typed_schema_descriptor.mojo",
         "tests/test_typed_schema_or_returns.mojo",
         "tests/test_typed_schema_tags.mojo",
+        "tests/test_udf_apply_expr.mojo",
     ],
     visibility = ["PUBLIC"],
 )

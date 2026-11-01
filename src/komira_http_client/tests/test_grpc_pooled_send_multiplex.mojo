@@ -130,7 +130,7 @@ def _build_n_response_script(n: Int) raises -> List[UInt8]:
 def _grpc_post_request() raises -> Url:
     """A gRPC-shaped POST target — https authority so send_grpc_pooled
     takes the h2 multiplex path (NOT the plaintext fallback)."""
-    return Url.parse(String("https://storage.googleapis.com:443/pkg.Svc/M"))
+    return Url.parse(String("https://192.0.2.1:443/pkg.Svc/M"))
 
 
 def test_n_grpc_rpcs_multiplex_on_one_pooled_h2_conn() raises:

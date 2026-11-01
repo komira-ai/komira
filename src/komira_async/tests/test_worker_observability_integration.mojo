@@ -20,7 +20,6 @@
 # =============================================================================
 
 from std.testing import assert_equal, assert_false, assert_true
-from std.time import perf_counter_ns
 
 from komira_async.observability.reactor_stall_detector import (
     DEFAULT_STALL_THRESHOLD_NS,
@@ -137,30 +136,25 @@ def test_worker_iter_count_increments_per_run_one_iteration() raises:
     assert_equal(Int(w.stall_detector().stall_count()), 0)
 
 
-def test_worker_stall_detector_realtime_busy_loop() raises:
-    """REALTIME smoke: invoke task_started with t0=now, then busy-loop for
-    >25ms, then task_finished with t1=now. Detector should record the stall
-    using actual perf_counter_ns timestamps. This validates the wall-clock
-    sensitivity of the per-Worker detector wiring (matches the Class F
-    realtime test for the standalone primitive)."""
+def test_worker_stall_detector_passed_timestamps_spanning_threshold() raises:
+    """task_started / task_finished with caller-supplied timestamps 25 ms
+    apart: the per-Worker detector records one stall whose elapsed time is
+    exactly the difference, and raises the preempt flag. No clock is read."""
     var w = Worker[NoopSink](
         worker_id=UInt16(0),
         sink=NoopSink(_placeholder=UInt8(0)),
         backend=BACKEND_MOCK,
     )
-    var t0 = Int64(perf_counter_ns())
+    var t0 = Int64(1_000_000)
+    var t1 = t0 + Int64(25_000_000)
     w.stall_detector().task_started(Int64(99), t0)
-    # Busy-loop for ~25ms via repeated perf_counter_ns reads. Sleep would
-    # be cleaner but pulls FFI; the busy-loop is portable and short enough
-    # to keep test wall time bounded.
-    var deadline = t0 + Int64(25_000_000)  # 25ms in ns
-    while Int64(perf_counter_ns()) < deadline:
-        pass
-    var t1 = Int64(perf_counter_ns())
     w.stall_detector().task_finished(Int64(99), t1)
     assert_true(w.stall_detector().has_recorded_stall())
     assert_equal(Int(w.stall_detector().stall_count()), 1)
-    assert_true(w.stall_detector().last_stall_elapsed_ns() >= Int64(25_000_000))
+    assert_equal(Int(w.stall_detector().last_stall_task_id()), 99)
+    assert_equal(
+        Int(w.stall_detector().last_stall_elapsed_ns()), 25_000_000
+    )
     assert_true(w.stall_detector().need_preempt())
 
 
@@ -205,6 +199,6 @@ def main() raises:
     test_worker_clear_need_preempt_after_stall()
     test_worker_imbalance_metrics_increment_via_record()
     test_worker_iter_count_increments_per_run_one_iteration()
-    test_worker_stall_detector_realtime_busy_loop()
+    test_worker_stall_detector_passed_timestamps_spanning_threshold()
     test_worker_aggregator_pattern_across_two_workers()
     print("PASS komira_async Worker observability integration")

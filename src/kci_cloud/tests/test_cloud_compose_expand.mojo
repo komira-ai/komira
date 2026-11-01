@@ -30,6 +30,12 @@
 # 4. A LIST WITH NO INSTANCE IS UNCHANGED: same resources, same order, no
 #    produced id, every reference as written.
 # 5. THE OWNER OF A PATH is its first segment at any depth.
+# 6. THE TREE NAMES A PRIMITIVE'S TYPE even when it has none (`resource with
+#    no type`) or the catalog has no row for it (`type field <n>`); a
+#    reference that names no base is passed through for validate to refuse.
+# 7. THE REFERENCE WALK REFUSES SITES OUT OF STEP: a value where it holds a
+#    reference, a reference where it holds a value (a map and a list), and
+#    sites left over.
 # =============================================================================
 
 from std.testing import assert_equal, assert_false, assert_true
@@ -39,6 +45,10 @@ from kci_resource_proto.composite import CompositeDefinition
 from kci_resource_proto.resource import Resource, ResourceList
 
 from kci_cloud import (
+    RefSite,
+    literal_value,
+    no_ref,
+    with_sites,
     Catalog,
     Expansion,
     definition_digest,
@@ -315,6 +325,48 @@ def test_the_owner_of_a_path_is_its_first_segment() raises:
     print("  test_the_owner_of_a_path_is_its_first_segment: PASS")
 
 
+def test_the_tree_names_every_primitive() raises:
+    var x = expand(Catalog.v1(), List[CompositeDefinition](), _list(String('{"resource":[{"id":"x"}]}')))
+    assert_equal(x.tree, "x: resource with no type\n")
+    x = expand(Catalog(), List[CompositeDefinition](), _list(String('{"resource":[{"id":"b","bucket":{}}]}')))
+    assert_equal(x.tree, "b: type field 14\n")
+    var nothing = String('{"resource":[{"id":"s","service":{"port":1,"runAs":{}}}]}')
+    x = expand(Catalog.v1(), List[CompositeDefinition](), _list(nothing))
+    assert_equal(len(x.findings), 0, _findings(x))
+    assert_equal(_lines(x), '{"id":"s","service":{"port":1,"runAs":{}}}\n')
+    print("  test_the_tree_names_every_primitive: PASS")
+
+
+def _walk_error(json: String, var sites: List[RefSite]) -> String:
+    try:
+        _ = with_sites(decode_json[Resource](json), sites)
+    except e:
+        return String(e)
+    return String("it wrote")
+
+
+def test_the_walk_refuses_sites_out_of_step() raises:
+    var lit = literal_value(String("x"))
+    var a: List[RefSite] = [RefSite(String("uses[0].target"), lit)]
+    assert_equal(
+        _walk_error(String('{"id":"s","uses":[{"target":{"resource":"b"}}]}'), a^),
+        "reference walk out of step at uses[0].target",
+    )
+    var b: List[RefSite] = [RefSite(String("service.env.A"), no_ref())]
+    assert_equal(
+        _walk_error(String('{"id":"s","service":{"env":{"A":{"literal":"x"}}}}'), b^),
+        "reference walk out of step at service.env.A",
+    )
+    var c: List[RefSite] = [RefSite(String("dns_record.zone"), no_ref())]
+    assert_equal(
+        _walk_error(String('{"id":"r","dnsRecord":{"values":[{"literal":"x"}]}}'), c^),
+        "reference walk out of step at dns_record.values[0]",
+    )
+    var d: List[RefSite] = [RefSite(String("service.env.A"), lit)]
+    assert_equal(_walk_error(String('{"id":"b","bucket":{}}'), d^), "reference walk wrote 0 of 1 sites")
+    print("  test_the_walk_refuses_sites_out_of_step: PASS")
+
+
 def main() raises:
     print("test_cloud_compose_expand: expansion goldens")
     test_a_nested_composite_expands_to_its_golden()
@@ -322,4 +374,6 @@ def main() raises:
     test_every_reference_position_is_rewritten()
     test_a_list_with_no_instance_is_unchanged()
     test_the_owner_of_a_path_is_its_first_segment()
+    test_the_tree_names_every_primitive()
+    test_the_walk_refuses_sites_out_of_step()
     print("ALL kci_cloud COMPOSE EXPAND TESTS PASSED")

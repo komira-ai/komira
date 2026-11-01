@@ -19,6 +19,15 @@
 #     fired during the cycles. The exact count is not load-bearing for
 #     this test — what we DON'T want is N register/deregister pairs.
 #
+# test_stream_reads_after_its_interest_goes_read_write_read drives the
+# TcpStream side of komira-ai/komira#1406: `_ensure_registered` switches a
+# stream's interest READ -> WRITE -> READ through `Reactor.modify`, and a byte
+# the peer sends after the switch back must be reported and read. It catches
+# the switch back skipped as "unchanged" (an armed mask that the WRITE switch
+# did not update where the READ switch looks: on a copy of the stream's
+# handle, or nowhere). Three rounds on one reactor reuse the fd numbers, so a
+# record left by a closed stream must not leak into the next one.
+#
 # Linux-only (epoll backend); macOS gate handled in __init__ via the
 # existing CompilationTarget guards in Reactor + tcp_stream.
 # =============================================================================
@@ -199,7 +208,60 @@ def test_long_lived_register_fires_on_real_eagain() raises:
         close_fd(client_fd)
 
 
+def _reports_for(
+    mut reactor: Reactor[NoopSink], fd: Int32, timeout_us: Int32
+) raises -> Int:
+    """Completions reported for `fd` (the long-lived cookie is the fd)."""
+    var got = reactor.poll_completions(timeout_us=timeout_us)
+    var n = 0
+    for i in range(len(got)):
+        if got[i].op_id == Int64(fd):
+            n += 1
+    return n
+
+
+def test_stream_reads_after_its_interest_goes_read_write_read() raises:
+    comptime if CompilationTarget.is_linux():
+        var listener = TcpListener.bind_loopback(
+            port=UInt16(0), backlog=Int32(16),
+        )
+        var reactor = Reactor[NoopSink](
+            NoopSink(_placeholder=UInt8(0)), BACKEND_EPOLL,
+        )
+        for round in range(3):
+            var client_fd = _connect_blocking(listener.local_port())
+            var r = listener.try_accept()
+            assert_true(r.is_ready())
+            var stream = TcpStream(Int32(Int(r.value())))
+            var fd = stream.fd()
+            # What a read that finds no data does: register for READ.
+            stream._ensure_registered[NoopSink](reactor, is_read=True)
+            assert_true(stream.is_registered())
+            assert_equal(_reports_for(reactor, fd, Int32(0)), 0, "nothing sent")
+            # What a write that would block does: switch to WRITE. The
+            # socket is writable, so the switch reports it once.
+            stream._ensure_registered[NoopSink](reactor, is_read=False)
+            assert_true(
+                _reports_for(reactor, fd, Int32(200_000)) >= 1, "no write edge"
+            )
+            # A read that would block again: back to READ.
+            stream._ensure_registered[NoopSink](reactor, is_read=True)
+            assert_equal(_reports_for(reactor, fd, Int32(0)), 0, "spurious")
+            var send_buf = Array[UInt8, 4](fill=UInt8(0x40 + round))
+            _send_bytes(client_fd, send_buf)
+            assert_true(
+                _reports_for(reactor, fd, Int32(200_000)) >= 1,
+                "a readable stream was not reported after READ -> WRITE -> READ",
+            )
+            var server_buf = Array[UInt8, 4](fill=UInt8(0))
+            var n = stream.read[NoopSink](reactor, Span[UInt8](server_buf))
+            assert_equal(n, Int64(4))
+            assert_equal(Int(server_buf[3]), 0x40 + round)
+            close_fd(client_fd)
+
+
 def main() raises:
     test_long_lived_many_cycles_no_register_explosion()
     test_long_lived_register_fires_on_real_eagain()
+    test_stream_reads_after_its_interest_goes_read_write_read()
     print("PASS komira_async.runtime TcpStream long-lived registration")

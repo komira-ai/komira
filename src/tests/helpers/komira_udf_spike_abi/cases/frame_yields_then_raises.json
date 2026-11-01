@@ -1,12 +1,12 @@
 {
  "name": "frame_yields_then_raises",
- "defect": "an error after some outputs is lost, or the input the frame left unread is leaked",
+ "defect": "output yielded before an error is lost or buffered, or the input the frame left unread is leaked (a managed generator reports no row, so the row is not pinned)",
  "run": "frame",
- "entry": "yield_two_then_raise",
+ "entry": "yield_three_then_raise",
  "shape": "MAP_BATCHES_FRAME",
  "args": [{"type": "int64", "nullable": true}],
  "result": [{"type": "int64", "nullable": true}],
  "result_is_table": true,
- "inputs": [{"length": 1, "columns": [{"type": "int64", "values": [1]}]}, {"length": 1, "columns": [{"type": "int64", "values": [2]}]}, {"length": 1, "columns": [{"type": "int64", "values": [3]}]}],
- "expect": {"status": "ERR_RAISED", "run_error": "UDF_RAISED", "message": "nonempty"}
+ "inputs": [{"length": 1, "columns": [{"type": "int64", "values": [1]}]}, {"length": 1, "columns": [{"type": "int64", "values": [2]}]}, {"length": 1, "columns": [{"type": "int64", "values": [3]}]}, {"length": 1, "columns": [{"type": "int64", "values": [4]}]}],
+ "expect": {"status": "ERR_RAISED", "run_error": "UDF_RAISED", "message": "nonempty", "batches": [{"length": 1, "columns": [{"type": "int64", "values": [1]}]}, {"length": 1, "columns": [{"type": "int64", "values": [2]}]}, {"length": 1, "columns": [{"type": "int64", "values": [3]}]}]}
 }

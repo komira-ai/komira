@@ -1,6 +1,6 @@
 # =============================================================================
 # komira_git_pack_conformance/tests/test_git_packs.mojo -- the sha1 packs git
-# wrote (gen_packs.sh), each read by komira_git and checked against git.
+# wrote (gen_packs.zig), each read by komira_git and checked against git.
 # =============================================================================
 #
 # For every pack, `check_git_pack` (check.mojo) requires:

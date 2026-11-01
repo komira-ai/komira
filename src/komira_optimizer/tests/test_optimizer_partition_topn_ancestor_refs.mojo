@@ -8,26 +8,36 @@
 # PartitionTopN must then emit `rk` (`output_rank_col_name` set), or the
 # ancestor names a column its child no longer produces.
 #
+# The plan's root output counts as read (komira#1290), so every case's root is
+# a Project that does not output `rk` (`_drop_rank`, or the Project under
+# test, which reads `rk` under another name): the ancestor under test is then
+# the only reader of `rk`, and a walk arm that forgets that ancestor's columns
+# fails the case. `_assert_rank_dropped` checks the root really does not
+# output `rk`.
+#
 # Every plan is built in memory; no file is read.
 # =============================================================================
 
 from std.memory import OwnedPointer
-from std.testing import TestSuite, assert_equal
+from std.testing import TestSuite, assert_equal, assert_true
 
 from komira_arrow.schema import SchemaBuilder, Field
 from komira_arrow.arrow_types import ArrowType
 
-from komira_plan_expr.expr import Expr, BIN_LE, BIN_GE, BIN_GT
+from komira_plan_expr.expr import Expr, BIN_ADD, BIN_LE, BIN_GE, BIN_GT
 from komira_plan_expr.scalar_value import ScalarValue
-from komira_plan_expr.partition_expr import PartitionExpr
+from komira_plan_expr.partition_expr import PartitionExpr, PF_RANK
 from komira_plan_ir.logical_plan import (
     LogicalPlan,
+    ExprArray,
     JOIN_INNER,
     JOIN_ALGO_AUTO,
     PLAN_FILTER,
     PLAN_JOIN,
     PLAN_PARTITION_BY,
     PLAN_PARTITION_TOPN,
+    PLAN_PROJECT,
+    PLAN_SORT,
 )
 
 from komira_optimizer.optimizer_partition_topn import fuse_partition_topn
@@ -74,6 +84,25 @@ def _assert_emits(plan: LogicalPlan, rk: String, what: String) raises:
     assert_equal(name.value(), rk, what)
 
 
+def _drop_rank(var child: LogicalPlan, keep: List[String]) -> LogicalPlan:
+    """`Project(keep...)` over `child`: a root that does not output the
+    window column, so the root's output does not count as a reader of it."""
+    var exprs = ExprArray()
+    for name in keep:
+        exprs.append(Expr.col_ref(name))
+    return LogicalPlan.project(exprs^, child^)
+
+
+def _assert_rank_dropped(plan: LogicalPlan, rk: String) raises:
+    """`plan` is the root Project from `_drop_rank` and does not output
+    `rk`."""
+    assert_equal(Int(plan.tag), Int(PLAN_PROJECT), "root project")
+    for i in range(plan.output_schema.num_columns()):
+        assert_true(
+            plan.output_schema.field_name(i) != rk, "root outputs the rank"
+        )
+
+
 # =============================================================================
 # A Filter above the fused Filter
 # =============================================================================
@@ -88,10 +117,13 @@ def test_outer_filter_on_the_rank_emits_it() raises:
     var pb = _rank_pb()
     var rk = _win(pb)
     var inner = LogicalPlan.filter(_cmp(BIN_LE, rk, 3), pb^)
-    var plan = LogicalPlan.filter(_cmp(BIN_GE, rk, 2), inner^)
+    var outer = LogicalPlan.filter(_cmp(BIN_GE, rk, 2), inner^)
+    var plan = _drop_rank(outer^, ["pid", "score", "val"])
     var out = fuse_partition_topn(plan^)
-    assert_equal(Int(out.tag), Int(PLAN_FILTER))
-    _assert_emits(out._filter.value()[].child[], rk, "inner filter")
+    _assert_rank_dropped(out, rk)
+    ref top = out._project.value()[].child[]
+    assert_equal(Int(top.tag), Int(PLAN_FILTER))
+    _assert_emits(top._filter.value()[].child[], rk, "inner filter")
 
 
 # =============================================================================
@@ -125,9 +157,11 @@ def test_outer_partition_by_keyed_on_the_rank_emits_it() raises:
     var pk: List[String] = [rk.copy()]
     var ok: List[String] = ["score"]
     var plan = _outer_pb(pk^, ok^, "val", _fusable(rk, pb^))
-    var out = fuse_partition_topn(plan^)
-    assert_equal(Int(out.tag), Int(PLAN_PARTITION_BY))
-    _assert_emits(out._partition_by.value()[].child[], rk, "partition key")
+    var out = fuse_partition_topn(_drop_rank(plan^, ["pid", "rs"]))
+    _assert_rank_dropped(out, rk)
+    ref top = out._project.value()[].child[]
+    assert_equal(Int(top.tag), Int(PLAN_PARTITION_BY))
+    _assert_emits(top._partition_by.value()[].child[], rk, "partition key")
 
 
 def test_outer_partition_by_ordered_on_the_rank_emits_it() raises:
@@ -138,9 +172,11 @@ def test_outer_partition_by_ordered_on_the_rank_emits_it() raises:
     var pk: List[String] = ["pid"]
     var ok: List[String] = [rk.copy()]
     var plan = _outer_pb(pk^, ok^, "val", _fusable(rk, pb^))
-    var out = fuse_partition_topn(plan^)
-    assert_equal(Int(out.tag), Int(PLAN_PARTITION_BY))
-    _assert_emits(out._partition_by.value()[].child[], rk, "order key")
+    var out = fuse_partition_topn(_drop_rank(plan^, ["pid", "rs"]))
+    _assert_rank_dropped(out, rk)
+    ref top = out._project.value()[].child[]
+    assert_equal(Int(top.tag), Int(PLAN_PARTITION_BY))
+    _assert_emits(top._partition_by.value()[].child[], rk, "order key")
 
 
 def test_outer_partition_by_summing_the_rank_emits_it() raises:
@@ -152,9 +188,11 @@ def test_outer_partition_by_summing_the_rank_emits_it() raises:
     var pk: List[String] = ["pid"]
     var ok: List[String] = ["score"]
     var plan = _outer_pb(pk^, ok^, rk, _fusable(rk, pb^))
-    var out = fuse_partition_topn(plan^)
-    assert_equal(Int(out.tag), Int(PLAN_PARTITION_BY))
-    _assert_emits(out._partition_by.value()[].child[], rk, "argument")
+    var out = fuse_partition_topn(_drop_rank(plan^, ["pid", "rs"]))
+    _assert_rank_dropped(out, rk)
+    ref top = out._project.value()[].child[]
+    assert_equal(Int(top.tag), Int(PLAN_PARTITION_BY))
+    _assert_emits(top._partition_by.value()[].child[], rk, "argument")
 
 
 def test_outer_partition_topn_keyed_on_the_rank_emits_it() raises:
@@ -166,9 +204,11 @@ def test_outer_partition_topn_keyed_on_the_rank_emits_it() raises:
     var sk: List[String] = ["score"]
     var desc: List[Bool] = [False]
     var plan = LogicalPlan.partition_topn(pk^, sk^, desc^, 2, _fusable(rk, pb^))
-    var out = fuse_partition_topn(plan^)
-    assert_equal(Int(out.tag), Int(PLAN_PARTITION_TOPN))
-    _assert_emits(out._partition_topn.value()[].child[], rk, "topn partition key")
+    var out = fuse_partition_topn(_drop_rank(plan^, ["pid", "val"]))
+    _assert_rank_dropped(out, rk)
+    ref top = out._project.value()[].child[]
+    assert_equal(Int(top.tag), Int(PLAN_PARTITION_TOPN))
+    _assert_emits(top._partition_topn.value()[].child[], rk, "topn partition key")
 
 
 def test_outer_partition_topn_sorted_on_the_rank_emits_it() raises:
@@ -180,9 +220,11 @@ def test_outer_partition_topn_sorted_on_the_rank_emits_it() raises:
     var sk: List[String] = [rk.copy()]
     var desc: List[Bool] = [False]
     var plan = LogicalPlan.partition_topn(pk^, sk^, desc^, 2, _fusable(rk, pb^))
-    var out = fuse_partition_topn(plan^)
-    assert_equal(Int(out.tag), Int(PLAN_PARTITION_TOPN))
-    _assert_emits(out._partition_topn.value()[].child[], rk, "topn sort key")
+    var out = fuse_partition_topn(_drop_rank(plan^, ["pid", "val"]))
+    _assert_rank_dropped(out, rk)
+    ref top = out._project.value()[].child[]
+    assert_equal(Int(top.tag), Int(PLAN_PARTITION_TOPN))
+    _assert_emits(top._partition_topn.value()[].child[], rk, "topn sort key")
 
 
 # =============================================================================
@@ -216,9 +258,11 @@ def test_join_residual_on_the_rank_left_emits_it() raises:
         _fusable(rk, pb^), _other_side(), lo^, ro^, JOIN_INNER,
         JOIN_ALGO_AUTO, _residual(rk),
     )
-    var out = fuse_partition_topn(plan^)
-    assert_equal(Int(out.tag), Int(PLAN_JOIN))
-    _assert_emits(out._join.value()[].left[], rk, "join left")
+    var out = fuse_partition_topn(_drop_rank(plan^, ["pid", "q"]))
+    _assert_rank_dropped(out, rk)
+    ref top = out._project.value()[].child[]
+    assert_equal(Int(top.tag), Int(PLAN_JOIN))
+    _assert_emits(top._join.value()[].left[], rk, "join left")
 
 
 def test_join_residual_on_the_rank_right_emits_it() raises:
@@ -232,9 +276,71 @@ def test_join_residual_on_the_rank_right_emits_it() raises:
         _other_side(), _fusable(rk, pb^), lo^, ro^, JOIN_INNER,
         JOIN_ALGO_AUTO, _residual(rk),
     )
-    var out = fuse_partition_topn(plan^)
-    assert_equal(Int(out.tag), Int(PLAN_JOIN))
-    _assert_emits(out._join.value()[].right[], rk, "join right")
+    var out = fuse_partition_topn(_drop_rank(plan^, ["pid", "q"]))
+    _assert_rank_dropped(out, rk)
+    ref top = out._project.value()[].child[]
+    assert_equal(Int(top.tag), Int(PLAN_JOIN))
+    _assert_emits(top._join.value()[].right[], rk, "join right")
+
+
+# =============================================================================
+# A Sort or a Project above the fused Filter
+# =============================================================================
+
+
+def test_fires_with_rk_emission_when_rk_referenced_by_downstream_sort() raises:
+    """`Project(pid, val)` over `Sort(pid, rk)` over the fusable Filter: the
+    canonical ranked top-K shape, with a root that drops rk. Catches the Sort
+    arm skipping its own keys: the fused node then drops rk and the Sort
+    names a column its child no longer produces."""
+    var pb = _rank_pb()
+    var rk = _win(pb)
+    var keys: List[String] = ["pid", rk.copy()]
+    var desc: List[Bool] = [False, False]
+    var sort = LogicalPlan.sort(keys^, desc^, _fusable(rk, pb^))
+    var out = fuse_partition_topn(_drop_rank(sort^, ["pid", "val"]))
+    _assert_rank_dropped(out, rk)
+    ref top = out._project.value()[].child[]
+    assert_equal(Int(top.tag), Int(PLAN_SORT))
+    ref fused = top._sort.value()[].child[]
+    _assert_emits(fused, rk, "sort child")
+    assert_equal(Int(fused._partition_topn.value()[].func), Int(PF_RANK))
+    assert_equal(fused._partition_topn.value()[].k, 3)
+    # The fused node's output is its child's 3 columns plus rk.
+    assert_equal(fused.output_schema.num_columns(), 4)
+    assert_equal(fused.output_schema.field_name(3), rk)
+
+
+def test_fires_with_rk_emission_when_rk_referenced_by_downstream_project() raises:
+    """`Project(pid, rk AS rank_out)` over the fusable Filter: the Project
+    reads rk under another name, so its output (the root's) does not hold
+    rk. Catches the Project arm skipping its own expressions, or not
+    walking into an alias."""
+    var pb = _rank_pb()
+    var rk = _win(pb)
+    var exprs = ExprArray()
+    exprs.append(Expr.col_ref("pid"))
+    exprs.append(Expr.alias(Expr.col_ref(rk), "rank_out"))
+    var out = fuse_partition_topn(LogicalPlan.project(exprs^, _fusable(rk, pb^)))
+    _assert_rank_dropped(out, rk)
+    assert_equal(out.output_schema.field_name(1), "rank_out")
+    _assert_emits(out._project.value()[].child[], rk, "project child")
+
+
+def test_a_project_computing_from_the_rank_emits_it() raises:
+    """`Project(pid, rk + 1)` over the fusable Filter: the Project reads rk
+    inside an expression whose output column has another name. Catches the
+    Project arm collecting only bare column references."""
+    var pb = _rank_pb()
+    var rk = _win(pb)
+    var exprs = ExprArray()
+    exprs.append(Expr.col_ref("pid"))
+    exprs.append(
+        Expr.binary(BIN_ADD, Expr.col_ref(rk), Expr.literal(ScalarValue.from_int(1)))
+    )
+    var out = fuse_partition_topn(LogicalPlan.project(exprs^, _fusable(rk, pb^)))
+    _assert_rank_dropped(out, rk)
+    _assert_emits(out._project.value()[].child[], rk, "project child")
 
 
 def main() raises:

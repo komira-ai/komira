@@ -16,7 +16,7 @@ the text at a line end and says how many bytes were left out.
 
 from covcheck.analyze import Analysis
 from covcheck.annotate import DiffCoverage
-from covcheck.stats import BELOW_TARGET, MODE_CENSUS, Finding, PackageStats
+from covcheck.stats import BELOW_TARGET, MODE_CENSUS, MODE_ENFORCE, Finding, PackageStats
 from covcheck.text import basis_points, render_bp, render_bp_or_na
 
 comptime MAX_SUMMARY: Int = 65535
@@ -48,10 +48,13 @@ def _branch_ratio(hit: Int, found: Int) -> String:
     return _ratio(hit, found)
 
 
-def _floor(p: PackageStats) -> String:
-    if not p.has_row:
-        return String("-")
-    return render_bp(p.line_floor) + String(" / ") + (render_bp(p.branch_floor) if p.branch_floor >= 0 else String("-"))
+def _held(p: PackageStats) -> String:
+    """The metrics the package holds, or `-`."""
+    if p.held_line and p.held_branch:
+        return String("line, branch")
+    if p.held_line or p.held_branch:
+        return String("line") if p.held_line else String("branch")
+    return String("-")
 
 
 def _mutants(p: PackageStats) -> String:
@@ -94,10 +97,11 @@ def _status(a: Analysis, package: String) -> String:
 
 
 def _finding_line(f: Finding, census: Bool) -> String:
-    """One finding as a list item; `census` tags a BelowTarget."""
+    """One finding as a list item; `census` tags a BelowTarget, which fails
+    nothing there: its metric is not held."""
     var s = String("- **") + f.kind + String("**")
     if f.kind == String(BELOW_TARGET) and census:
-        s += String(" (census)")
+        s += String(" (not held)")
     s += String(" ") + md_code(f.package)
     if f.path.byte_length() > 0 and f.line > 0:
         s += String(" ") + md_code(f.path + String(":") + String(f.line))
@@ -111,7 +115,7 @@ def _row(a: Analysis, p: PackageStats, touched: Bool) -> String:
     return (
         String("| ") + name + String(" | ") + _ratio(p.line_hit, p.line_found) + String(" | ")
         + _branch_ratio(p.branch_hit, p.branch_found) + String(" | ") + _mutants(p) + String(" | ")
-        + _floor(p) + String(" | ") + _status(a, p.package) + String(" |\n")
+        + _held(p) + String(" | ") + _status(a, p.package) + String(" |\n")
     )
 
 
@@ -140,6 +144,8 @@ def render_summary(
     s += String("\n\n") + String(CAVEAT) + String("\n\n")
     s += String("Mode: **") + a.mode + String("**, conclusion **") + a.conclusion + String("**. Target: ")
     s += render_bp(a.target_bp) + String(" line and branch coverage per package")
+    if a.mode != String(MODE_ENFORCE):
+        s += String(", failing only a metric the package holds (coverage_held)")
     if len(a.info_dirs) > 0:
         s += String(", except a test-only package (")
         for i in range(len(a.info_dirs)):
@@ -155,7 +161,7 @@ def render_summary(
     if len(a.packages) == 0:
         s += String("No package was measured.\n\n")
     else:
-        s += String("| package | line % (hit/found) | branch % (hit/found) | mutants killed/total | floor line / branch | status |\n")
+        s += String("| package | line % (hit/found) | branch % (hit/found) | mutants killed/total | held | status |\n")
         s += String("|---|---|---|---|---|---|\n")
         for i in range(len(a.packages)):
             if _is_in(touched, a.packages[i].package):
@@ -176,8 +182,8 @@ def render_summary(
             s += _finding_line(a.findings[i], a.mode == String(MODE_CENSUS))
         s += String("\n")
     if len(a.info_findings) > 0:
-        s += String("### Info: test-only packages, declaration-only files (") + String(len(a.info_findings)) + String(")\n\n")
-        s += String("What the policy would find in a package held to no target, and files no test compiled that emit no code; none of it counts.\n\n")
+        s += String("### Info: test-only packages, metrics to hold, declaration-only files (") + String(len(a.info_findings)) + String(")\n\n")
+        s += String("What the policy would find in a package held to no target, metrics at the target that their package does not hold yet, and files no test compiled that emit no code; none of it counts.\n\n")
         for i in range(len(a.info_findings)):
             s += _finding_line(a.info_findings[i], False)
         s += String("\n")
@@ -220,6 +226,40 @@ def render_summary(
     s += String("### Set aside\n\n")
     s += String("- ") + String(a.ignored_files) + String(" report files outside the repository (the Mojo standard library, other code not in the repository)\n")
     s += String("- ") + String(a.excluded_test_files) + String(" test source files (`<package>/tests/` and each `--test-source`; `--include-tests` counts them)\n")
+    s += String("- ") + String(len(a.generated_paths)) + String(" generated source files (first line `# @generated`; neither measured nor counted)")
+    if len(a.generated_paths) > 0:
+        s += String(": ")
+        var shown = min(len(a.generated_paths), 10)
+        for g in range(shown):
+            if g > 0:
+                s += String(", ")
+            s += md_code(a.generated_paths[g])
+        if len(a.generated_paths) > shown:
+            s += String(", and ") + String(len(a.generated_paths) - shown) + String(" more (the result JSON names every one)")
+    s += String("\n")
+    if len(a.excluded) > 0:
+        s += (
+            String("- ") + String(a.excluded_lines()) + String(" lines and ") + String(a.excluded_arms())
+            + String(" branch arms of the code no test compiled (a function a test calls that is inlined, or sits in a compile-time arm): ")
+        )
+        var shown = min(len(a.excluded), 10)
+        for x in range(shown):
+            if x > 0:
+                s += String(", ")
+            s += md_code(a.excluded[x].path) + String(" (") + String(a.excluded[x].lines) + String(" lines, ") + String(a.excluded[x].arms) + String(" arms)")
+        if len(a.excluded) > shown:
+            s += String(", and ") + String(len(a.excluded) - shown) + String(" more files (the result JSON names every one)")
+        s += String("\n")
+    if len(a.platform_gated) > 0:
+        s += (
+            String("- ") + String(len(a.platform_gated)) + String(" platform-gated functions, ") + String(a.platform_gated_lines())
+            + String(" lines (every use of them is in a compile-time arm this target did not compile; all named here): ")
+        )
+        for x in range(len(a.platform_gated)):
+            if x > 0:
+                s += String(", ")
+            s += md_code(a.platform_gated[x].name) + String(" in ") + md_code(a.platform_gated[x].path) + String(" (") + String(a.platform_gated[x].lines) + String(" lines)")
+        s += String("\n")
     s += String("- ") + String(a.ignored_mutants) + String(" mutants outside the repository, ") + String(a.excluded_test_mutants) + String(" in test sources\n")
     return s^
 

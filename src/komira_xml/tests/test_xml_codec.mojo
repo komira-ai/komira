@@ -257,6 +257,31 @@ def test_round_trip() raises -> Int:
     return f
 
 
+def test_canonical_attribute_order() raises -> Int:
+    """Attributes are ordered by the pair (namespace name, local name), an
+    attribute in no namespace first, as C14N 2.0 orders them. Comparing the
+    `{ns}local` strings instead puts `{urn:ab}c` before `{urn:a}z` ('b' 0x62
+    < '}' 0x7D) and `{urn:x}k` before an unnamespaced `é` ('{' 0x7B < 0xC3),
+    so the first two expectations go red under that order."""
+    var f = 0
+    f += _eq(
+        canonical_xml('<a xmlns:p="urn:ab" xmlns:q="urn:a" p:c="1" q:z="2"/>'),
+        String('<a {urn:a}z="2" {urn:ab}c="1"></a>'),
+        "a namespace name that is a prefix of another sorts first",
+    )
+    f += _eq(
+        canonical_xml('<a xmlns:p="urn:x" p:k="1" é="2"/>'),
+        String('<a é="2" {urn:x}k="1"></a>'),
+        "an attribute in no namespace sorts before a namespaced one",
+    )
+    f += _eq(
+        canonical_xml('<a xmlns:p="urn:x" p:b="1" p:a="2" z="3" b="4"/>'),
+        String('<a b="4" z="3" {urn:x}a="2" {urn:x}b="1"></a>'),
+        "local name orders attributes within one namespace",
+    )
+    return f
+
+
 def main() raises:
     var failures = 0
     failures += test_escape()
@@ -266,6 +291,7 @@ def main() raises:
     failures += test_tree_and_namespaces()
     failures += test_malformed_raises()
     failures += test_round_trip()
+    failures += test_canonical_attribute_order()
     if failures != 0:
         raise Error(String(failures) + " xml codec assertion(s) failed")
     print("OK — xml codec unit tests pass")

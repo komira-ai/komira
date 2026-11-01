@@ -10,18 +10,18 @@
 const std = @import("std");
 
 fn fail(comptime fmt: []const u8, args: anytype) noreturn {
-    std.io.getStdErr().writer().print("unzst: " ++ fmt ++ "\n", args) catch {};
+    std.fs.File.stderr().deprecatedWriter().print("unzst: " ++ fmt ++ "\n", args) catch {};
     std.process.exit(1);
 }
 
 /// The decompressed bytes of `data`, or an error naming why not.
 pub fn decompress(a: std.mem.Allocator, data: []const u8) ![]u8 {
     if (data.len == 0) return error.EmptyInput;
-    var fbs = std.io.fixedBufferStream(data);
-    const window = try a.alloc(u8, 1 << 27);
+    var in: std.Io.Reader = .fixed(data);
+    const window = try a.alloc(u8, (1 << 27) + std.compress.zstd.block_size_max);
     defer a.free(window);
-    var dz = std.compress.zstd.decompressor(fbs.reader(), .{ .window_buffer = window });
-    const out = try dz.reader().readAllAlloc(a, 1 << 31);
+    var dz = std.compress.zstd.Decompress.init(&in, window, .{ .window_len = 1 << 27 });
+    const out = dz.reader.allocRemaining(a, .limited(1 << 31)) catch |e| return if (e == error.ReadFailed) (dz.err orelse e) else e;
     if (out.len == 0) return error.EmptyOutput;
     return out;
 }

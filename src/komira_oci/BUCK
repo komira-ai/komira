@@ -16,6 +16,7 @@ mojo_library(
         "//src/komira_http_client:komira_http_client",
         "//src/komira_http_core:komira_http_core",
         "//src/komira_json:komira_json",
+        "//src/komira_retry:komira_retry",
     ],
     test_srcs = [
         "tests/test_oci_copy_blob_redirect.mojo",

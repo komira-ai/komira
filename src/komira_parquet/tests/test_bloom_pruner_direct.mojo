@@ -17,6 +17,11 @@
 #     schema position, not its leaf position), and that column's filter
 #     pruned a row group holding the value. A group's name and a nested
 #     leaf's name match nothing;
+#   * a DECIMAL column is never probed: its filter holds the unscaled
+#     integers (24.00 on a scale-2 column is 2400) and a literal is not in
+#     those units, so an integer literal 24 hashed to a value the filter never
+#     holds, and a row group holding 24.00 was pruned; a decimal literal is not
+#     an integer to probe with either;
 #   * everything else is conservative (no prune): another operator, a
 #     literal of the wrong type or out of INT32 range, a column with no
 #     filter or of a type with no probe, a name not in the schema, a filter
@@ -36,7 +41,12 @@ from komira_parquet_api.metadata import (
     RowGroup,
     SchemaElement,
 )
-from komira_parquet_api.types import CompressionCodec, Encoding, ParquetType
+from komira_parquet_api.types import (
+    CONVERTED_TYPE_DECIMAL,
+    CompressionCodec,
+    Encoding,
+    ParquetType,
+)
 from komira_plan_expr.expr import BIN_AND, BIN_EQ, BIN_NE, BIN_OR, Expr
 from komira_plan_expr.scalar_value import ScalarValue
 from komira_parquet.file_reader import ParquetFileReader
@@ -331,6 +341,55 @@ def test_columns_are_resolved_among_leaves() raises:
     var malformed = _footer(short_root^, two^)
     assert_true(_prunes(fx, malformed, _eq("a", ScalarValue.from_int64(9))))
     assert_false(_prunes(fx, malformed, _eq("b", ScalarValue.from_int64(1))))
+
+
+def test_decimal_columns_are_not_probed() raises:
+    # d INT64 DECIMAL(15, 2) holding 24.00 (2400 unscaled) and 0.06 (6);
+    # e INT32 DECIMAL(9, 2) holding 24.00 (2400).
+    var blocks: List[List[UInt8]] = [
+        _int64_filter([Int64(2400), Int64(6)]),
+        _int32_filter([Int64(2400)]),
+    ]
+    var fx = _write("prune_decimal.parquet", blocks)
+    var schema: List[SchemaElement] = [
+        _group("schema", 2),
+        SchemaElement(
+            name="d",
+            type=ParquetType.INT64,
+            converted_type=Optional[Int](CONVERTED_TYPE_DECIMAL),
+            scale=Optional[Int](2),
+        ),
+        SchemaElement(
+            name="e",
+            type=ParquetType.INT32,
+            converted_type=Optional[Int](CONVERTED_TYPE_DECIMAL),
+            scale=Optional[Int](2),
+        ),
+    ]
+    var columns: List[ColumnChunk] = [
+        _chunk(ParquetType.INT64, fx.offsets[0], fx.lengths[0]),
+        _chunk(ParquetType.INT32, fx.offsets[1], fx.lengths[1]),
+    ]
+    var md = _footer(schema^, columns^)
+    # An integer literal 24 is 24.00, a value the column holds; the filter
+    # holds 2400.
+    assert_false(_prunes(fx, md, _eq("d", ScalarValue.from_int64(24))))
+    assert_false(_prunes(fx, md, _eq("e", ScalarValue.from_int64(24))))
+    # An integer that is neither a value nor an unscaled one: no knowledge,
+    # no prune.
+    assert_false(_prunes(fx, md, _eq("d", ScalarValue.from_int64(99))))
+    # A decimal literal (24.00 and 0.065) is not an integer to hash.
+    assert_false(_prunes(fx, md, _eq("d", ScalarValue.decimal128(Int64(0), Int64(2400), 4, 2))))
+    assert_false(_prunes(fx, md, _eq("d", ScalarValue.decimal128(Int64(0), Int64(65), 4, 3))))
+    # A plain INT64 column is still probed, so the guard is not a blanket skip.
+    var plain: List[SchemaElement] = [
+        _group("schema", 1),
+        _leaf("d", ParquetType.INT64),
+    ]
+    var one: List[ColumnChunk] = [_chunk(ParquetType.INT64, fx.offsets[0], fx.lengths[0])]
+    var plain_md = _footer(plain^, one^)
+    assert_true(_prunes(fx, plain_md, _eq("d", ScalarValue.from_int64(24))))
+    assert_false(_prunes(fx, plain_md, _eq("d", ScalarValue.from_int64(2400))))
 
 
 def main() raises:

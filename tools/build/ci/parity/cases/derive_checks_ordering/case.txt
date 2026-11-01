@@ -1,5 +1,0 @@
-# Output order: the root cell's groups, by least pattern, then the tests
-# cell's, whatever order the query printed them in.
-arg "{units_file}"
-input units_file "lib_q\t//src/q:q\n"
-exit 0

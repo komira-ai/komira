@@ -101,14 +101,14 @@ pub fn commands(alloc: Alloc, owners: []const []const u8, statics: []const []con
         if (seen.contains(s)) return refuse(alloc, "readme-link: {s} given twice", .{s});
         try seen.put(s, {});
     }
-    var run = std.ArrayList([]const u8).init(alloc);
-    try run.appendSlice(&.{ "-Xlinker", "-L$CONDA_PREFIX/lib" });
-    for (owners) |o| try run.appendSlice(&.{ "-Xlinker", try std.mem.concat(alloc, u8, &.{ "-l", o }) });
-    var build = std.ArrayList([]const u8).init(alloc);
-    try build.appendSlice(run.items);
-    for (statics) |s| try build.appendSlice(&.{ "-Xlinker", try std.mem.concat(alloc, u8, &.{ "-l", s }) });
-    try build.appendSlice(&.{ "-Xlinker", "-rpath", "-Xlinker", "$ORIGIN/../lib" });
-    return .{ .run = try run.toOwnedSlice(), .build = try build.toOwnedSlice() };
+    var run = std.ArrayList([]const u8).empty;
+    try run.appendSlice(alloc, &.{ "-Xlinker", "-L$CONDA_PREFIX/lib" });
+    for (owners) |o| try run.appendSlice(alloc, &.{ "-Xlinker", try std.mem.concat(alloc, u8, &.{ "-l", o }) });
+    var build = std.ArrayList([]const u8).empty;
+    try build.appendSlice(alloc, run.items);
+    for (statics) |s| try build.appendSlice(alloc, &.{ "-Xlinker", try std.mem.concat(alloc, u8, &.{ "-l", s }) });
+    try build.appendSlice(alloc, &.{ "-Xlinker", "-rpath", "-Xlinker", "$ORIGIN/../lib" });
+    return .{ .run = try run.toOwnedSlice(alloc), .build = try build.toOwnedSlice(alloc) };
 }
 
 /// One owner's shared library: its SONAME and its bytes (`--needed-of`).
@@ -151,20 +151,20 @@ fn shellWord(alloc: Alloc, w: []const u8) Alloc.Error![]const u8 {
 }
 
 fn line(alloc: Alloc, out: *std.ArrayList(u8), verb: []const u8, args: []const []const u8, tail: []const u8) !void {
-    try out.appendSlice("mojo ");
-    try out.appendSlice(verb);
+    try out.appendSlice(alloc, "mojo ");
+    try out.appendSlice(alloc, verb);
     for (args) |a| {
-        try out.append(' ');
-        try out.appendSlice(try shellWord(alloc, a));
+        try out.append(alloc, ' ');
+        try out.appendSlice(alloc, try shellWord(alloc, a));
     }
-    try out.appendSlice(tail);
-    try out.append('\n');
+    try out.appendSlice(alloc, tail);
+    try out.append(alloc, '\n');
 }
 
 /// The section appended to the README (file header).
 pub fn section(alloc: Alloc, c: Commands) Alloc.Error![]const u8 {
-    var out = std.ArrayList(u8).init(alloc);
-    try out.appendSlice("\n## Linking\n\n" ++
+    var out = std.ArrayList(u8).empty;
+    try out.appendSlice(alloc, "\n## Linking\n\n" ++
         "<!-- Written by the packer from the package's closure (komira_pack readme-link); not in the source README. -->\n" ++
         "A program using this package links every native library of its closure,\n" ++
         "dependents first. In the environment holding the package (`$CONDA_PREFIX`,\n" ++
@@ -172,16 +172,16 @@ pub fn section(alloc: Alloc, c: Commands) Alloc.Error![]const u8 {
         "```" ++ block_info ++ "\n");
     try line(alloc, &out, "run", c.run, " prog.mojo");
     try line(alloc, &out, "build", c.build, " prog.mojo -o $CONDA_PREFIX/bin/prog");
-    try out.appendSlice("```\n");
-    return out.toOwnedSlice();
+    try out.appendSlice(alloc, "```\n");
+    return out.toOwnedSlice(alloc);
 }
 
 /// The `run\t<word>` / `build\t<word>` lines of `c` (file header).
 pub fn argsText(alloc: Alloc, c: Commands) Alloc.Error![]const u8 {
-    var out = std.ArrayList(u8).init(alloc);
-    for (c.run) |a| try out.writer().print("run\t{s}\n", .{a});
-    for (c.build) |a| try out.writer().print("build\t{s}\n", .{a});
-    return out.toOwnedSlice();
+    var out = std.ArrayList(u8).empty;
+    for (c.run) |a| try out.writer(alloc).print("run\t{s}\n", .{a});
+    for (c.build) |a| try out.writer(alloc).print("build\t{s}\n", .{a});
+    return out.toOwnedSlice(alloc);
 }
 
 /// Whether `text` (one line) opens or closes a fence (``` or ~~~ after any
@@ -218,10 +218,10 @@ pub fn cmdReadmeLink(alloc: Alloc, a: Args) !void {
         error.Refused => fail("{s}", .{why}),
         else => return e,
     };
-    var objects = std.ArrayList(SharedObject).init(alloc);
+    var objects = std.ArrayList(SharedObject).empty;
     for (try all(alloc, a, "--needed-of")) |v| {
         const eq = std.mem.indexOfScalar(u8, v, '=') orelse fail("readme-link: --needed-of `{s}` is not <SONAME>=<file>", .{v});
-        try objects.append(.{ .soname = v[0..eq], .data = pack_common.readAll(alloc, v[eq + 1 ..]) });
+        try objects.append(alloc, .{ .soname = v[0..eq], .data = pack_common.readAll(alloc, v[eq + 1 ..]) });
     }
     checkOrder(alloc, owners, objects.items) catch |e| switch (e) {
         error.Refused => fail("{s}", .{why}),

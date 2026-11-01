@@ -202,7 +202,7 @@ def _label(labels: List[Label], key: String) -> String:
     for i in range(len(labels)):
         if labels[i].key == key:
             return decode_label_value(labels[i].value)
-    return String("")
+    return String("")  # cov: unreachable _stamp_of reads only a complete stamp, which holds all six keys
 
 
 def _stamp_of(labels: List[Label]) -> Optional[_Stamp]:

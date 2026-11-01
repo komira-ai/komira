@@ -1,0 +1,12 @@
+[package]
+name = "komira_scalar_arithmetic"
+version = "0.1.0"
+description = "Scalar 128 and 256-bit decimal arithmetic in Mojo, with no dependencies: add, subtract, multiply and divide with overflow raised, casts between decimals, integers, floats and strings, scale-aware comparison, and checked fixed-width integer arithmetic."
+license = "Apache-2.0"
+repository = "https://github.com/komira-ai/komira"
+readme = "README.md"
+mojo = ["1.0.0"]
+
+[targets]
+lib = { path = "src/komira_scalar_arithmetic" }
+tests = ["tests"]

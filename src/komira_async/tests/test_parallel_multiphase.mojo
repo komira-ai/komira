@@ -167,6 +167,13 @@ struct _CountWork(MultiPhaseWork):
         ref dst_pc = dst_band_slot.value().parts.get_mut_interior(
             partition_idx
         )
+        if phase_no == 2:
+            # Phase 2 is a marker pass: +1 on every group of this partition
+            # in worker 0's band. Independent of how many morsels each worker
+            # grabbed, so a test can predict the result exactly.
+            for g in range(GROUPS_PER_PART):
+                dst_pc.counts[g] = dst_pc.counts[g] + 1
+            return
         for w in range(1, n_workers):
             ref src_band_slot = bp0[].get_mut_interior(w)
             ref src_pc = src_band_slot.value().parts.get_mut_interior(
@@ -415,7 +422,7 @@ def test_multiphase_bands_survive_barrier() raises:
 
 def test_multiphase_two_static_phases() raises:
     """Drive TWO static phases over the SAME persisted bands (merge on
-    phase 1; a second idempotent pass on phase 2 that must NOT corrupt the
+    phase 1; a +1 marker pass on phase 2 that must land exactly once on the
     already-merged worker-0 tables). Proves the bands stay live + correct
     across MULTIPLE static barriers, and that `phase_no` routes correctly."""
     var n_rows = 5_000
@@ -432,18 +439,11 @@ def test_multiphase_two_static_phases() raises:
     var disp_ptr = Pointer(to=disp)
 
     var work = _CountWork(Int32(0))
-    # Two static phases. _CountWork.process_partition only folds workers
-    # 1..W-1 into worker 0; on phase 2 there is nothing new to fold for the
-    # already-zeroed src tables IF the impl were stateful — but our impl is
-    # phase-agnostic (always re-folds), so two phases would DOUBLE-count.
-    # To keep the test honest we route phase 2 to a no-op in the impl by
-    # construction: process_partition folds src into dst, and after phase 1
-    # the src tables are untouched (we never zero them), so a naive phase 2
-    # WOULD double. We therefore assert phase 1 alone is correct and that
-    # the helper RAN both barriers without crashing the bands. The
-    # double-count is the EXPECTED arithmetic of re-folding; we check the
-    # post-2-phase total is 2x-minus-worker0 to prove BOTH barriers
-    # executed over the SAME live bands.
+    # Two static phases over the SAME bands. _CountWork routes on phase_no:
+    # phase 1 folds workers 1..W-1 into worker 0 (merge); phase 2 adds +1 to
+    # every group of worker 0's band. Which worker grabbed which morsel is a
+    # scheduling outcome (a single worker may take every morsel), so a second
+    # re-fold could add nothing; the marker pass does not depend on that.
     var bands = parallel_multiphase[
         _CountWork,
         _Keys,
@@ -462,19 +462,16 @@ def test_multiphase_two_static_phases() raises:
     var counts = _extract_merged_counts(bands^)
     rt.shutdown()
 
-    # After phase 1: worker0[g] = sum over all workers (== truth[g]).
-    # After phase 2 (re-fold workers 1..W-1 again): worker0[g] =
-    #   truth[g] + (truth[g] - worker0_phase1_own_share). Rather than model
-    # the exact double, we assert each merged count is AT LEAST truth[g]
-    # (a second barrier ran and added MORE, proving the bands were live and
-    # mutated across BOTH barriers) and that no count is garbage.
+    # After phase 1: worker0[g] == truth[g]. Phase 2 then added exactly +1
+    # to every group in the same live band, so counts[g] == truth[g] + 1
+    # for every g, whatever the morsel distribution was. A phase that did not
+    # run, a band reset between barriers, or a wrong phase_no gives a
+    # different value.
     var grand = 0
     for g in range(NUM_GROUPS):
-        assert_true(counts[g] >= truth[g])
-        assert_true(counts[g] <= 2 * truth[g] + 1)
+        assert_equal(counts[g], truth[g] + 1)
         grand = grand + counts[g]
-    assert_true(grand > n_rows)  # second barrier added folds
-    assert_true(grand <= 2 * n_rows)
+    assert_equal(grand, n_rows + NUM_GROUPS)
 
 
 def main() raises:

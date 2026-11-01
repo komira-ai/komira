@@ -476,6 +476,24 @@ def test_sharded_should_fold() raises:
     # A disabled timer never fires.
     assert_false(sl.should_fold(1, Int64(1000), Int64(0)))
 
+
+def test_sharded_lineage_skips_a_bare_key() raises:
+    # A key directly under `_lineage/` (no `/` after the segment) is not a
+    # shard; a common prefix always ends in `/`, so it still names one. This is
+    # the same reading as `_discover_shard_ids`.
+    assert_equal(shard_id_from_listing_entry(String("p/_lineage/loose"), String("p/_lineage/")), String(""))
+    assert_equal(shard_id_from_listing_entry(String("p/_lineage/s/"), String("p/_lineage/")), String("s"))
+    var shared = SharedInMemoryConditionalStore()
+    _ = shared.put(Path.parse(String("p/bk/_lineage/loose")), List[UInt8]())
+    var sl = ShardedLineage[SharedInMemoryConditionalStore](shared.clone(), String("p/bk"))
+    assert_equal(sl.live_shard_count(), 0)
+    var f = _Fold(shared.clone(), String("p/bk"))
+    _ = f.append_batch(String("w"), _recs(1, 1))
+    var ids = sl.enumerate_live_shards()
+    assert_equal(len(ids), 1)
+    assert_equal(ids[0], String("w"))
+
+
 def test_starts_with_empty_prefix() raises:
     # Every string starts with the empty prefix, the empty string included.
     assert_true(_str_starts_with(String("p/_lineage/x"), String("")))
@@ -494,5 +512,6 @@ def main() raises:
     test_sharded_lineage_sorts_and_listing()
     test_listing_errors_and_strays()
     test_sharded_should_fold()
+    test_sharded_lineage_skips_a_bare_key()
     test_starts_with_empty_prefix()
     print("[test_cov_sublineage] PASS")

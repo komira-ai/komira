@@ -34,6 +34,7 @@ from .grpc_timeout import (
 )
 from .io_stream import (
     Connector,
+    NoDialAddress,
     IoStream,
     NEGOTIATED_HTTP_1_1,
     NEGOTIATED_HTTP_2,

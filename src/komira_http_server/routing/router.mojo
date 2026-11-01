@@ -147,8 +147,8 @@ def _parse_pattern(pattern: String) raises -> _ParsedPattern:
         var sb = s.as_bytes()
         var sl = len(sb)
         if sl == 0:
-            i = i + 1
-            continue
+            i = i + 1  # cov: unreachable _split_path never yields an empty segment
+            continue  # cov: unreachable _split_path never yields an empty segment
         if sb[0] == UInt8(0x2A):    # '*'
             if sl != 1:
                 raise Error(
@@ -385,7 +385,7 @@ def _try_match(
                 params[String(seg.literal_or_name)] = String(path_segs[i])
             else:
                 # Wildcard in non-tail; _parse_pattern would've raised.
-                return False
+                return False  # cov: unreachable _parse_pattern refuses a non-tail wildcard, so none reaches this branch
             i = i + 1
         return True
 
@@ -401,6 +401,6 @@ def _try_match(
         elif seg.kind == _SEGMENT_KIND_PARAM:
             params[String(seg.literal_or_name)] = String(path_segs[i])
         else:
-            return False
+            return False  # cov: unreachable _parse_pattern refuses a non-tail wildcard, so none reaches this branch
         i = i + 1
     return True

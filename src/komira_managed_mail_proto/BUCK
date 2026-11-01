@@ -1,4 +1,8 @@
+load("@buildrules//rules/mojo:pack.bzl", "mojo_conda", "mojo_conda_holds")
+load("@komira//tools/build/mojo:adopt.bzl", "mojo_adopted_library")
 load("@komira//tools/build/mojo:proto.bzl", "mojo_proto_library", "proto_srcs")
+load("@komira//tools/build/package:conda.bzl", "conda_package")
+load(":buildrules.mojo.bzl", "mojo_package")
 load("@komira//tools/build/mojo:proto_fixture.bzl", "proto_encode")
 
 # The managed mail API (`komira/managed_mail/v1/mail.proto`, package
@@ -19,20 +23,29 @@ load("@komira//tools/build/mojo:proto_fixture.bzl", "proto_encode")
 # encodes corpus.txtpb to exactly those committed bytes (`:corpus_canonical`,
 # staged), and pin every enum value's number and name. README.md's examples
 # run as one more welded test.
+
+# The generator's half: `komira_managed_mail_proto_generated_gen` writes the Mojo of the `.proto` files, `komira_managed_mail_proto_generated_fresh` holds the
+# committed directory `generated/komira_managed_mail_proto_generated/` to it, byte for byte, and fails with the command that regenerates
+# (tools/build/gen/README.md). That directory is the library of mopm.toml (`[targets] lib`), compiled as the module
+# `komira_managed_mail_proto`: `import_name` is that module's name, and the rule names the directory after the target, which
+# `:komira_managed_mail_proto` below cannot be. The library this call declares itself (`:komira_managed_mail_proto_generated`, the same files without the
+# tests) is not what dependents use. Regenerate with
+#   ./buck2 run komira//tools/build/gen:regen -- komira//src/komira_managed_mail_proto:komira_managed_mail_proto_generated
 mojo_proto_library(
-    name = "komira_managed_mail_proto",
+    name = "komira_managed_mail_proto_generated",
     srcs = ["mail.proto"],
+    import_name = "komira_managed_mail_proto",
     import_prefix = "komira/managed_mail/v1",
     deps = ["//src/komira_proto_codec:komira_proto_codec"],
-    test_srcs = [
-        "tests/test_mail_enum_numbers.mojo",
-        "tests/test_mail_goldens.mojo",
-    ],
-    # Staged at these paths under the test's working directory. protoc's
-    # encoding of corpus.txtpb is made in this build (`:corpus_canonical`), so
-    # the test compares the committed bytes with what protoc writes for the
-    # schema being built. mail.proto is staged so the test can hold the golden
-    # file to the messages it declares.
+    visibility = ["PUBLIC"],
+)
+
+# Built with buildrules' `mojo_package` from mopm.toml (README.md, "Build files"): `:lib` is the
+# library file, compiled from the committed directory, and exists only once the tests of tests/
+# have passed.
+# `test_data` stages what the tests read, under the paths they open.
+mojo_package(
+    path = ".",
     test_data = {
         "tests/test_mail_goldens.mojo": {
             "src/komira_managed_mail_proto/mail.proto": "mail.proto",
@@ -41,8 +54,65 @@ mojo_proto_library(
             "src/komira_managed_mail_proto/tests/goldens/mail_v1.golden": "tests/goldens/mail_v1.golden",
         },
     },
+)
+
+# `:komira_managed_mail_proto`, the target the packages that depend on this library name, is `:lib` as
+# komira's Mojo rules take it (tools/build/mojo/adopt.bzl): the same file, so a dependent builds
+# only once the tests have passed. `deps` is `[dependencies]` of mopm.toml, as the adopted targets
+# of those packages: the rule refuses a list that is not the closure `:lib` was built from. It
+# carries the README gate too (`[tests][readme]`): the examples run against `:lib`.
+mojo_adopted_library(
+    name = "komira_managed_mail_proto",
+    deps = ["//src/komira_proto_codec:komira_proto_codec"],
+    lib = ":lib",
+    readme = "README.md",
+    srcs = glob(["generated/komira_managed_mail_proto_generated/**/*.mojo"]),
+    test_srcs = glob(["tests/test_*.mojo"]),
+    test_runs = ":test",
     visibility = ["PUBLIC"],
 )
+
+# The mopm package: `mopm pack` over `:lib`, the `.conda` a mopm registry serves. `members` is the
+# manifests of the path dependencies of the closure, staged at their repository paths, because
+# `mopm pack` reads the manifest of each beside the one it is given.
+mojo_conda(
+    name = "conda",
+    dir = "generated/komira_managed_mail_proto_generated",
+    lib = ":lib",
+    manifest = "mopm.toml",
+    members = {
+        "../komira_encoding": "//src/komira_encoding:mopm.toml",
+        "../komira_json": "//src/komira_json:mopm.toml",
+        "../komira_proto_codec": "//src/komira_proto_codec:mopm.toml",
+        "../komira_protobuf": "//src/komira_protobuf:mopm.toml",
+    },
+    mojo = "1.0.0",
+    mopm = "toolchains//:mopm_0_0_86",
+    package = "komira_managed_mail_proto",
+    version = "0.1.0",
+    visibility = ["PUBLIC"],
+)
+
+# What `:conda` holds, read back from the built file: this package's own `.mojoc` and nothing else
+# under `lib/mojo/`, and exactly the direct dependencies of mopm.toml.
+mojo_conda_holds(
+    name = "conda_holds",
+    conda = ":conda",
+    depends = ["mojo-komira_proto_codec >=0.1,<0.2"],
+    package = "komira_managed_mail_proto",
+    sole = True,
+    visibility = ["PUBLIC"],
+)
+
+# Kept for the release machine, which still builds it (release/BUCK, release/artifacts.textproto):
+# komira's conda packer over `:komira_managed_mail_proto`. This library's mopm package is `:conda` above.
+conda_package(
+    name = "komira_managed_mail_proto_conda",
+    lib = ":komira_managed_mail_proto",
+    summary = "The `komira_managed_mail_proto` Mojo library of komira, as a conda package.",
+    visibility = ["PUBLIC"],
+)
+
 
 # The service: `komira/managed_mail/v1/mail_service.proto`, the methods and
 # their HTTP routes. A `service` in a generated file brings a gRPC client and
@@ -54,7 +124,7 @@ proto_srcs(
     name = "mail_service",
     srcs = ["mail_service.proto"],
     import_prefix = "komira/managed_mail/v1",
-    proto_deps = [":komira_managed_mail_proto_gen"],
+    proto_deps = [":komira_managed_mail_proto_generated_gen"],
     visibility = ["PUBLIC"],
 )
 
@@ -69,7 +139,7 @@ proto_encode(
     name = "corpus_canonical",
     srcs = ["tests/mail_corpus.proto"],
     proto_deps = [
-        ":komira_managed_mail_proto_gen",
+        ":komira_managed_mail_proto_generated_gen",
         ":mail_service",
     ],
     root = "komira.managed_mail.v1.corpus.MailCorpus",

@@ -1,0 +1,11 @@
+{
+ "name": "validate_recorded_fields_unsorted",
+ "defect": "validate accepts recorded fields out of the canonical order (design 3.1: ERR_DESCRIPTOR)",
+ "run": "validate",
+ "entry": "pick",
+ "shape": "ROW",
+ "args": [{"type": "int64", "nullable": true, "name": "flag"}, {"type": "int64", "nullable": true, "name": "a"}],
+ "result": [{"type": "int64", "nullable": true}],
+ "descriptor": {"recorded_fields": {"fields": [{"name": "flag", "type": "int64"}, {"name": "a", "type": "int64"}]}},
+ "expect": {"status": "ERR_DESCRIPTOR", "run_error": "OPTIMIZED_UDF_DESCRIPTOR_INVALID"}
+}

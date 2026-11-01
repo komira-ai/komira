@@ -1,0 +1,11 @@
+{
+ "name": "bisect_finds_row_5",
+ "defect": "a non-VOLATILE batch that raises naming no row is not bisected, a half drops a row, or a half's row is not mapped back to the batch's (design 4.5, the ERR_RAISED row)",
+ "run": "call_batch",
+ "entry": "raise_minus_one_if_row5",
+ "shape": "MAP_BATCHES_COLUMN",
+ "args": [{"type": "int64", "nullable": true}],
+ "result": [{"type": "int64", "nullable": true}],
+ "input": {"length": 8, "columns": [{"type": "int64", "values": [0, 1, 2, 3, 4, 5, 6, 7]}]},
+ "expect": {"status": "ERR_RAISED", "run_error": "UDF_RAISED", "row": 5, "message": "nonempty"}
+}

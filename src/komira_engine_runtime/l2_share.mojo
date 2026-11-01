@@ -120,7 +120,7 @@
 # no filesystem, no syscalls, no platform branches. That is what lets
 # `tests/unit/test_l2_share_hybrid.mojo` assert the derived share on a
 # FABRICATED hybrid topology on any machine, including a non-hybrid CI box.
-# The thin probe that reads real sysfs lives in `hardware.mojo` (which already
+# The thin probe that reads real sysfs lives in `hardware_detect.mojo` (which already
 # owns those readers), so this module has no import cycle with it.
 #
 # Mojo safety: no `UnsafePointer` anywhere (public or private); every type is a
@@ -402,7 +402,7 @@ def _sorted_unique(xs: List[Int]) -> List[Int]:
 # CONSOLIDATION NOTE: `komira_host/cpu_topology.mojo` and
 # `komira_engine_runtime/machine_topology.mojo` each carry a PRIVATE copy of
 # this parser. This one is PUBLIC because the probe that feeds this module lives
-# in another file (`hardware.mojo`) and must not duplicate it a fourth time.
+# in another file (`hardware_detect.mojo`) and must not duplicate it a fourth time.
 # Folding the two private copies onto this one is a mechanical follow-up; it is
 # deliberately NOT done here so this change does not churn the scheduler POC's
 # topology module.

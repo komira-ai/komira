@@ -1,0 +1,3 @@
+# test	gate: a test that imports this package and a package not on main yet; it moves with that package.
+tests/test_stage_asof_join_arm.mojo	komira_op_stage_exec (the typed Stage and its engine driver)
+tests/test_stage_asof_join_build_arm.mojo	komira_op_stage_exec (the typed Stage and its engine driver)

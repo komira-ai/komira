@@ -68,6 +68,8 @@
 # the HTTP client can call (komira_async declares no `nanosleep` of its own).
 # =============================================================================
 
+from std.memory import ArcPointer
+
 from komira_async.ops.waker_sink import NoopSink
 from komira_async.runtime.blocking_runtime import BlockingRuntime
 from komira_http_client.body import BytesBody
@@ -180,6 +182,12 @@ struct AwsConnectorTransport[C: Connector](AwsHttpTransport, Movable, Deinitable
         """A client from the caller's `config`."""
         self._client = HttpClient[Self.C](config, connector^)
         self._rt = BlockingRuntime[NoopSink].new(NoopSink(_placeholder=UInt8(0)))
+
+    def set_test_clock(mut self, clock_cell: ArcPointer[Int]):
+        """Drive this transport's request deadline from `clock_cell`
+        (microseconds) instead of the system clock; see
+        `HttpClient.set_test_clock`. Production code never calls this."""
+        self._client.set_test_clock(clock_cell)
 
     def http_config(self) -> HttpClientConfig:
         """The config this transport's HTTP client was built from."""

@@ -14,18 +14,19 @@
 # are skipped by name, and adopt_orphans() is asserted to refuse instead.
 #
 #   test_the_run_loop_turns_a_platform_sigterm_into_cancelled  (runs FIRST)
-#       `run_job_supervisor` on `sh -c 'kill -TERM $PPID; exec sleep 30'`: the
-#       job SIGTERMs its parent, this process, as a platform stops a container.
-#       The run ends CANCELLED, the last beat is CANCELLED naming SIGTERM, well
-#       before the job's 30 s. Nothing in this file installs the handler
+#       `run_job_supervisor_with_clock` (on a manual clock) on `sh -c 'kill
+#       -TERM $PPID; exec sleep 30'`: the job SIGTERMs its parent, this
+#       process, as a platform stops a container. The run ends CANCELLED and
+#       the last beat is CANCELLED naming SIGTERM (a run that ignored the stop
+#       would end COMPLETED after the job's own 30 s). Nothing in this file
+#       installs the handler
 #       before this test, so with run_job_supervisor's install removed
 #       (mutant: no handler) the SIGTERM kills this process and the build fails.
 #   test_a_stop_before_the_spawn_starts_no_job
 #       The reporter SIGTERMs this process while the first RUNNING beat is
 #       being sent, as a platform may stop a container during the fetch or
 #       the first beat. The run ends CANCELLED with two beats, the second
-#       saying the job was not started, and returns long before the job's
-#       30 s. Mutant: no stop check before the spawn -> the job is spawned
+#       saying the job was not started, and the loop never waits. Mutant: no stop check before the spawn -> the job is spawned
 #       and stopped on the first loop pass ("the job was stopped").
 #       It also asserts that this process has no child when the run returns,
 #       so a job that is spawned and left running fails here, on every
@@ -34,20 +35,21 @@
 #   test_a_stop_signal_reaches_the_grandchild
 #       Stepping: the job starts `sleep 60` in the background, prints its pid,
 #       SIGTERMs this process and waits. act_on_stop_signal forwards SIGTERM
-#       to the job's process group: the shell and the grandchild both die,
-#       the grace (5 s) is not waited out, the grandchild pid is gone, and
-#       the beat is CANCELLED. Mutant: signal the pid, not the group
+#       to the job's process group: the shell and the grandchild both die of
+#       the SIGTERM (not of a SIGKILL after the grace), the grandchild pid is
+#       gone, and the beat is CANCELLED. Mutant: signal the pid, not the group
 #       (Supervisor._signal_child) -> the grandchild survives the SIGTERM and
-#       the SIGKILL, and the call takes the whole grace.
+#       the SIGKILL.
 #   test_sigkill_reaches_a_grandchild_that_ignores_sigterm
 #       The job starts a grandchild that ignores SIGTERM (`trap '' TERM`,
 #       kept across exec), which prints its pid and then SIGTERMs this
 #       process, so the ignore is in place before any stop is sent. The
 #       stop's SIGTERM kills the shell only; with a 500 ms grace (the
-#       grace_ms argument), act_on_stop_signal must wait the grace out,
-#       SIGKILL the group and return only once the group is empty: the
+#       grace_ms argument), act_on_stop_signal must SIGKILL the group when the
+#       grace is out and return only once the group is empty: the
 #       grandchild is gone and the group signal finds nobody before the
-#       CANCELLED beat is sent. Mutants: the SIGKILL sent to the job's pid
+#       CANCELLED beat is sent. The grace is komira_supervisor's own wait; its
+#       length is that package's to test, so no elapsed time is read here. Mutants: the SIGKILL sent to the job's pid
 #       instead of its group (Supervisor.terminate_with) -> the grandchild
 #       survives; the grace loop returning as soon as the job itself is
 #       reaped (group condition dropped) -> no SIGKILL at all, the
@@ -56,10 +58,10 @@
 #       The job sends SIGINT to this process; the job is stopped by SIGINT
 #       (signal 2), not by a SIGTERM substituted for it.
 #   test_orphans_are_reaped
-#       The job starts three background subshells and exits at once; they are
-#       re-parented to this process (a subreaper) and exit 0.2 s later. ONE
-#       poll_and_drain after they exited leaves this process with no child at
-#       all. Mutants: no reap in poll_and_drain -> three zombies; the shim's
+#       The job starts three background subshells, prints their pids and exits
+#       at once; they are re-parented to this process (a subreaper) and exit
+#       0.2 s later. Once /proc shows all three exited (zombies of this
+#       process), ONE poll_and_drain leaves this process with no child at all. Mutants: no reap in poll_and_drain -> three zombies; the shim's
 #       loop collecting only the first -> two zombies.
 #   test_the_job_starts_with_default_signals
 #       This process ignores SIGPIPE (as it does after any TLS connection);
@@ -70,7 +72,8 @@
 #       A reporter answering 503 then 200: finalize_heartbeat sends twice and
 #       returns ok (mutant: send once). CONTROLS: a 403 is sent once; an
 #       always-503 receiver gets exactly max_attempts sends, and a short
-#       budget stops the retries before max_attempts.
+#       budget stops the retries before max_attempts. The jobs run on a manual
+#       clock the retries' waits move, so the budget is counted, not timed.
 # =============================================================================
 
 from std.ffi import external_call
@@ -79,7 +82,6 @@ from std.memory import ArcPointer
 from std.testing import assert_equal, assert_false, assert_true
 
 from komira_async.reactor.graceful_shutdown import ignore_sigpipe
-from komira_clock import now_ns
 from komira_objectstore import InMemoryConditionalStore
 from komira_supervisor import (
     ChildSpec,
@@ -101,8 +103,9 @@ from komira_job_supervisor import (
     HeartbeatReporter,
     JobSupervisor,
     JobSupervisorConfig,
+    ManualLoopClock,
     SupervisorHeartbeat,
-    run_job_supervisor,
+    run_job_supervisor_with_clock,
     terminal_beat_retryable,
 )
 from komira_job_supervisor.job_supervisor_state import JobSupervisorPhase
@@ -158,7 +161,8 @@ struct StopOnFirstBeat(HeartbeatReporter):
 
 
 comptime TestJob = JobSupervisor[Recorder, InMemoryConditionalStore]
-comptime _MS: UInt64 = 1_000_000
+comptime _CLOCK_START_NS: Int = 4_000_000_000
+"""Where a manual clock stands when a run starts."""
 
 
 def _shell_job(script: String) -> JobSupervisorConfig:
@@ -179,28 +183,27 @@ def _sleep_ms(ms: Int):
     _ = external_call["usleep", Int32](UInt32(ms * 1000))
 
 
-def _await_stop(mut js: TestJob, grace_ms: Int) raises -> Int:
+def _await_stop(mut js: TestJob, grace_ms: Int) raises:
     """Call act_on_stop_signal every 10 ms until it takes a signal (the job
-    sends it); returns how long THAT call took, in ms."""
-    for _ in range(500):
-        var t0 = now_ns()
-        if js.act_on_stop_signal(grace_ms):
-            return Int((now_ns() - t0) // _MS)
+    sends it). The signal is the event waited for, so the wait has no bound of
+    its own."""
+    while not js.act_on_stop_signal(grace_ms):
         js.poll_and_drain()
         _sleep_ms(10)
-    raise Error("no stop signal arrived within 5 s")
 
 
 def test_the_run_loop_turns_a_platform_sigterm_into_cancelled() raises:
     var beats = ArcPointer[List[String]](List[String]())
-    var t0 = now_ns()
-    var phase = run_job_supervisor[Recorder, InMemoryConditionalStore](
+    var clock = ManualLoopClock(ArcPointer[Int](_CLOCK_START_NS))
+    var phase = run_job_supervisor_with_clock[
+        Recorder, InMemoryConditionalStore, ManualLoopClock
+    ](
         _shell_job(String("kill -TERM $PPID; exec sleep 30")),
         Recorder(beats),
         None,
         None,
+        clock,
     )
-    var took_ms = Int((now_ns() - t0) // _MS)
     assert_true(phase == JobSupervisorPhase.cancelled(), "a platform SIGTERM cancels")
     var last = beats[][len(beats[]) - 1]
     assert_true(
@@ -208,20 +211,21 @@ def test_the_run_loop_turns_a_platform_sigterm_into_cancelled() raises:
         "the terminal beat: " + last,
     )
     assert_true(beats[][0].startswith(String("RUNNING|")), "RUNNING first")
-    assert_true(took_ms < 20_000, "long before the job's 30 s: " + String(took_ms))
     print("  test_the_run_loop_turns_a_platform_sigterm_into_cancelled: PASS")
 
 
 def test_a_stop_before_the_spawn_starts_no_job() raises:
     var beats = ArcPointer[List[String]](List[String]())
-    var t0 = now_ns()
-    var phase = run_job_supervisor[StopOnFirstBeat, InMemoryConditionalStore](
+    var clock = ManualLoopClock(ArcPointer[Int](_CLOCK_START_NS))
+    var phase = run_job_supervisor_with_clock[
+        StopOnFirstBeat, InMemoryConditionalStore, ManualLoopClock
+    ](
         _shell_job(String("exec sleep 30")),
         StopOnFirstBeat(beats),
         None,
         None,
+        clock,
     )
-    var took_ms = Int((now_ns() - t0) // _MS)
     assert_true(phase == JobSupervisorPhase.cancelled(), "a stop before the spawn cancels")
     assert_equal(len(beats[]), 2, "RUNNING, then the terminal beat")
     assert_true(beats[][0].startswith(String("RUNNING|")), beats[][0])
@@ -232,7 +236,7 @@ def test_a_stop_before_the_spawn_starts_no_job() raises:
         ),
         "the job was never spawned",
     )
-    assert_true(took_ms < 4000, "no grace was waited: " + String(took_ms))
+    assert_equal(len(clock.slept_ms), 0, "the loop never waited: no job to wait for")
     # The heartbeats alone cannot tell "never spawned" from "spawned and left
     # running": check that this process has no child at all. waitid(P_ALL) is
     # POSIX, so this runs on every platform. The test before this one reaps
@@ -255,21 +259,20 @@ def test_a_stop_signal_reaches_the_grandchild() raises:
     js.spawn_child_spec(
         ChildSpec.shell(String("sleep 60 & echo $!; kill -TERM $PPID; wait"))
     )
-    var spins = 0
-    while len(js.stdout_ring) == 0 and spins < 500:
+    while len(js.stdout_ring) == 0:
         js.poll_and_drain()
         _sleep_ms(10)
-        spins += 1
     assert_equal(len(js.stdout_ring), 1, "the job printed its grandchild's pid")
     var grandchild = Int32(atol(js.stdout_ring[0]))
     assert_equal(proc_kill(grandchild, Int32(0)), Int32(0), "the grandchild runs")
 
-    var took_ms = _await_stop(js, 5000)
+    _await_stop(js, 5000)
     var survived = proc_kill(grandchild, Int32(0)) == Int32(0)
     if survived:
         _ = proc_kill(grandchild, SIGKILL)  # do not leave it to the next test
     assert_false(survived, "the group SIGTERM reached the grandchild")
-    assert_true(took_ms < 4000, "the grace was not waited out: " + String(took_ms))
+    # The job died of the SIGTERM, not of the SIGKILL that follows the grace:
+    # the group emptied within the grace.
     assert_equal(js.exit_info.signal, SIGTERM, "the job died of the SIGTERM")
     js.analyze_exit()
     assert_true(js.terminal_phase() == JobSupervisorPhase.cancelled(), "CANCELLED")
@@ -300,17 +303,15 @@ def test_sigkill_reaches_a_grandchild_that_ignores_sigterm() raises:
     js.spawn_child_spec(ChildSpec.shell(String(_TERM_IGNORING_GRANDCHILD)))
     var group = js.supervisor.process_group()
     assert_true(group > Int32(1), "the job leads its own group")
-    var spins = 0
-    while len(js.stdout_ring) == 0 and spins < 500:
+    while len(js.stdout_ring) == 0:
         js.poll_and_drain()
         _sleep_ms(10)
-        spins += 1
     assert_equal(len(js.stdout_ring), 1, "the grandchild printed its pid")
     var grandchild = Int32(atol(js.stdout_ring[0]))
     assert_equal(proc_kill(grandchild, Int32(0)), Int32(0), "the grandchild runs")
 
     comptime GRACE_MS = 500
-    var took_ms = _await_stop(js, GRACE_MS)
+    _await_stop(js, GRACE_MS)
     # Read before anything else runs: the stop has returned, the CANCELLED
     # beat has not been sent yet.
     var survived = proc_kill(grandchild, Int32(0)) == Int32(0)
@@ -319,11 +320,6 @@ def test_sigkill_reaches_a_grandchild_that_ignores_sigterm() raises:
         _ = proc_kill(grandchild, SIGKILL)  # do not leave it to the next test
     assert_false(survived, "the SIGKILL after the grace reached the grandchild")
     assert_false(group_left, "the group was empty when the stop returned")
-    assert_true(
-        took_ms >= GRACE_MS - 20,
-        "the grace was waited out for the grandchild: " + String(took_ms),
-    )
-    assert_true(took_ms < 4000, "bounded by grace + settle: " + String(took_ms))
     assert_equal(js.exit_info.signal, SIGTERM, "the job died of the SIGTERM")
     js.analyze_exit()
     _ = js.finalize_heartbeat()
@@ -352,6 +348,28 @@ def test_a_forwarded_sigint_stays_sigint() raises:
     print("  test_a_forwarded_sigint_stays_sigint: PASS")
 
 
+def _await_zombie(pid: Int32):
+    """Wait until `pid` has exited and waits to be collected (state Z in
+    /proc), or /proc no longer lists it. The exit is the event, so the wait
+    has no bound of its own."""
+    var path = String("/proc/") + String(Int(pid)) + String("/stat")
+    while True:
+        try:
+            with open(path, "r") as f:
+                # "pid (comm) S ...": the state follows the last ')'.
+                var stat = f.read()
+                var bytes = stat.as_bytes()
+                var close = len(bytes) - 1
+                while close >= 0 and bytes[close] != UInt8(41):
+                    close -= 1
+                if close >= 0 and close + 2 < len(bytes):
+                    if bytes[close + 2] == UInt8(90):  # 'Z'
+                        return
+        except:
+            return
+        _sleep_ms(5)
+
+
 def test_orphans_are_reaped() raises:
     assert_true(adopt_orphans(), "this process receives orphans (Linux)")
     var js = TestJob(
@@ -359,20 +377,21 @@ def test_orphans_are_reaped() raises:
         Recorder(ArcPointer[List[String]](List[String]())),
         None,
     )
+    # Each background subshell prints its pid, then exits 7 after 0.2 s.
     js.spawn_child_spec(
         ChildSpec.shell(
-            String("for i in 1 2 3; do (sleep 0.2; exit 7) & done; exit 0")
+            String("for i in 1 2 3; do (sleep 0.2; exit 7) & echo $!; done; exit 0")
         )
     )
-    var spins = 0
-    while not js.child_exited and spins < 500:
+    while not js.child_exited:
         js.poll_and_drain()
         _sleep_ms(10)
-        spins += 1
-    assert_true(js.child_exited, "the job exited")
     assert_equal(js.exit_info.exit_code, Int32(0), "the job itself exited 0")
-    # Every orphan has exited by now (0.2 s) and is a zombie of this process.
-    _sleep_ms(1500)
+    assert_equal(len(js.stdout_ring), 3, "the job printed its three orphans' pids")
+    # Wait for the event the pass is about: every orphan has exited and is a
+    # zombie of this process (nothing here collects it).
+    for i in range(3):
+        _await_zombie(Int32(atol(js.stdout_ring[i])))
     js.poll_and_drain()  # ONE pass
     var p = proc_probe_children()
     assert_false(
@@ -410,12 +429,9 @@ def test_the_job_starts_with_default_signals() raises:
         None,
     )
     js.spawn_child_spec(ChildSpec.shell(String(_SIGPIPE_IGNORED_EXIT)))
-    var spins = 0
-    while not js.child_exited and spins < 500:
+    while not js.child_exited:
         js.poll_and_drain()
         _sleep_ms(10)
-        spins += 1
-    assert_true(js.child_exited, "the job exited")
     assert_equal(js.exit_info.exit_code, Int32(0), "the job's SIGPIPE is default")
     _ = js^
     print("  test_the_job_starts_with_default_signals: PASS")
@@ -424,6 +440,7 @@ def test_the_job_starts_with_default_signals() raises:
 def _finished_job(var script: List[Int], beats: ArcPointer[List[String]]) -> TestJob:
     var js = TestJob(_shell_job(String("unused")), Recorder(beats, script^), None)
     js.state.phase = JobSupervisorPhase.completed()
+    js.set_test_clock(ArcPointer[Int](_CLOCK_START_NS))
     return js^
 
 

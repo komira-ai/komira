@@ -1,0 +1,34 @@
+[2026-10-25T12:38:53.175+00:00] Build ID: 00000000-0000-0000-0000-000000000000
+[2026-10-25T12:38:53.512+00:00] RE Session: GRPC-SESSION-ID
+[2026-10-25T12:38:55.547+00:00] ✓ Pass: komira//src/tests/e2e/broker_e2e:test_broker_lifecycle_e2e (0.5s)
+[2026-10-25T12:38:55.547+00:00] ---- STDOUT ----
+[2026-10-25T12:38:55.547+00:00]
+[2026-10-25T12:38:55.547+00:00] ---- STDERR ----
+[2026-10-25T12:38:55.547+00:00]
+[2026-10-25T12:38:55.559+00:00] ✓ Pass: komira//tests/scan_binding_links:test_scan_binding_links (0.4s)
+[2026-10-25T12:38:55.559+00:00] ---- STDOUT ----
+[2026-10-25T12:38:55.559+00:00]
+[2026-10-25T12:38:55.559+00:00] ---- STDERR ----
+[2026-10-25T12:38:55.559+00:00]
+[2026-10-25T12:38:55.737+00:00] ✓ Pass: komira//tests/kafka_produce_error_tokens:test_kafka_produce_error_tokens (0.4s)
+[2026-10-25T12:38:55.737+00:00] ---- STDOUT ----
+[2026-10-25T12:38:55.737+00:00]
+[2026-10-25T12:38:55.737+00:00] ---- STDERR ----
+[2026-10-25T12:38:55.737+00:00]
+[2026-10-25T12:38:56.421+00:00] ✓ Pass: komira//src/tests/e2e/komira_shuffle_e2e:test_shuffle_dead_reducer_reread (1.2s)
+[2026-10-25T12:38:56.421+00:00] ---- STDOUT ----
+[2026-10-25T12:38:56.421+00:00]
+[2026-10-25T12:38:56.421+00:00] ---- STDERR ----
+[2026-10-25T12:38:56.421+00:00]
+[2026-10-25T12:38:56.996+00:00] ✓ Pass: komira//src/tests/e2e/komira_shuffle_e2e:test_shuffle_dead_map_replay (1.8s)
+[2026-10-25T12:38:56.996+00:00] ---- STDOUT ----
+[2026-10-25T12:38:56.996+00:00]
+[2026-10-25T12:38:56.996+00:00] ---- STDERR ----
+[2026-10-25T12:38:56.996+00:00]
+[2026-10-25T12:38:57.174+00:00] ✓ Pass: komira//src/tests/e2e/komira_shuffle_e2e:test_shuffle_elastic_reducers (1.5s)
+[2026-10-25T12:38:57.174+00:00] ---- STDOUT ----
+[2026-10-25T12:38:57.174+00:00]
+[2026-10-25T12:38:57.174+00:00] ---- STDERR ----
+[2026-10-25T12:38:57.174+00:00]
+[2026-10-25T12:38:57.177+00:00] Network: up 11KiB  down 15KiB  session GRPC-SESSION-ID
+Tests finished: [38;5;10mPass 6[39m. Fail 0. Timeout 0. Fatal 0. Skip 0. Omit 0. Infra Failure 0. Build failure 0

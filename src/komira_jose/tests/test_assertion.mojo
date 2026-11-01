@@ -7,7 +7,7 @@
 # =============================================================================
 #
 # Keys as in test_signer: RFC 7515 A.3 (ES256), RFC 8037 A.1 (EdDSA) and
-# komira_http_core's RSA test key (RS256). The client id is `client-1`, the
+# komira_jose's RSA test key (RS256). The client id is `client-1`, the
 # audience the token endpoint `https://issuer.example/token`, the time
 # NOW = 1000000. Verifiers are built from the signer's published key,
 # rendered and parsed back.
@@ -39,7 +39,7 @@ from komira_secret_store import SecretValue
 
 comptime A3_D = "jpsQnnGQmL-YBIffH1136cspYG6-0iY7X1fCE9-E9LI"
 comptime SEED = "nWGxne_9WmC6hEr0kuwsxERJxWl7MmkZcDusAxyuf2A"
-comptime RSA_PEM = "src/komira_http_core/tests/fixtures/tls/leaf_key.pem"
+comptime RSA_PEM = "src/komira_jose/tests/fixtures/rsa_test_key.pem"
 comptime CLIENT = "client-1"
 comptime ENDPOINT = "https://issuer.example/token"
 comptime NOW: Int64 = 1000000

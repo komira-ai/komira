@@ -11,7 +11,8 @@ The process clocks, each read as a plain integer:
 
 Every read is a direct `clock_gettime` call (on macOS, `now_ns` is
 `clock_gettime_nsec_np`). The package has no C shim and depends on nothing
-but the standard library, so any package can import it. A read the platform
+but the standard library (its tests also use `komira_fork_join`), so any
+package can import it. A read the platform
 refuses returns 0; neither kernel documents that as possible for these
 clocks.
 
@@ -31,14 +32,20 @@ a hot path.
 ```mojo
 from komira_clock import now_ns
 from std.testing import assert_true
-from std.time import sleep
 
 var start = now_ns()
-sleep(0.02)
-var elapsed = now_ns() - start
-assert_true(elapsed >= UInt64(15_000_000))  # slept 20 ms
-assert_true(elapsed < UInt64(2_000_000_000))
+var total = 0
+for i in range(1000):
+    total += i  # the work being measured
+var elapsed = now_ns() - start  # nanoseconds; never negative
+print("summed", total, "in", elapsed, "ns")
+assert_true(total == 499500)
+assert_true(now_ns() >= start)
 ```
+
+The reads are monotonic, so `elapsed` cannot underflow. Its value depends on the
+machine, so report it (a metric, a log line) rather than compare it to a
+constant.
 
 ## Wall-clock time
 
@@ -70,20 +77,46 @@ cost of `now_ns()`, so read it once per region, not per row.
 ```mojo
 from komira_clock import now_ns, thread_cpu_ns
 from std.testing import assert_true
-from std.time import sleep
 
+var wall_start = now_ns()
 var cpu_start = thread_cpu_ns()
 var acc = UInt64(0)
 for i in range(20_000_000):
     acc = acc + UInt64(i) * UInt64(i)
 var cpu_busy = thread_cpu_ns() - cpu_start
+var wall_busy = now_ns() - wall_start
 assert_true(acc != UInt64(1))  # the loop's result is used
 assert_true(cpu_busy > UInt64(0))  # computing burns this thread's CPU
-
-var wall_start = now_ns()
-var cpu_before_sleep = thread_cpu_ns()
-sleep(0.05)
-var slept_cpu = thread_cpu_ns() - cpu_before_sleep
-var slept_wall = now_ns() - wall_start
-assert_true(slept_cpu < slept_wall)  # a sleeping thread burns (almost) none
+# Occupancy is cpu_busy / wall_busy: near 1.0 for a loop that never blocks.
+# It depends on the machine and its load, so report it; do not assert on it.
+print("cpu", cpu_busy, "ns of wall", wall_busy, "ns")
 ```
+
+## Build files
+
+This package is built with buildrules' `mojo_package` and packaged for mopm as `komira_clock`, version 0.1.0
+(`mopm.toml`). The library is `src/komira_clock/` (`clock.mojo` and the `__init__.mojo` that re-exports the four
+functions), its test is `tests/`. The package has no dependencies, no native archive and no C shim. Its test blocks one
+thread in a join while another works, and takes that thread helper from `komira_fork_join`, a sibling package named
+under `[dev-dependencies]` of `mopm.toml`: it is locked and built for the test, and is not part of the packed package.
+The files that are not sources:
+
+| file | what |
+|---|---|
+| `mopm.toml` | the mopm manifest: name, version, the Mojo version, the dev-dependency and where the library and its test are |
+| `mopm.lock` | the toolchain pins and the path packages of the dev-dependency's closure, as `mopm lock` writes them (no registry is reached: they are siblings) |
+| `mopm-toolchain.toml` | the exact mopm and Mojo versions the build uses (written by hand) |
+| `coverage_floor.txt` | `lines NN.NN` and `branches NN.NN`: the least line and branch coverage `:coverage` may measure; `:coverage_floor` fails when either falls below, and above it passes and prints a hint to raise the figure |
+| `buildrules.mojo.lock.bzl`, `buildrules.mojo.bzl` | written by `buildrules mojo sync` from the files above and from the manifests of the siblings; `buildrules mojo check` fails when they are stale |
+
+`:lib` is the library file and exists only once the test has passed. After any change to a source, the test, a manifest
+of this package or of a sibling, run `buildrules mojo sync` with the packages staged, commit what it writes, and build
+`komira//src/komira_clock:lib` on the farm.
+
+`:conda` is buildrules' `mojo_conda` over `:lib`: the `.conda` of the mopm package
+(`mojo-komira_clock-0.1.0-mojo1.0.0_0.conda`), which records no dependency beyond the compiler (`:conda_holds` reads
+that back, so a dev-dependency that leaked into the package turns it red). Publishing it (`mopm publish`) uploads, so it
+is a step of a CI job that takes that file, not a build action.
+
+`:komira_clock` is `:lib` as komira's Mojo rules take it (`mojo_adopted_library`), with no `deps`. It also compiles and
+runs the README's examples above (`[tests][readme]`) against `:lib`; the test is not run again.

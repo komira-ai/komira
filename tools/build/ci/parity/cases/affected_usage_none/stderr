@@ -1,3 +1,0 @@
-affected: give --base, or --files (with --base to read deleted files' packages from)
-usage: affected (--base <rev> | --files <file> [--base <rev>]) [--units-file <file>] [--json] [--rules <file>]
-                [--buckconfig <file>] [--buck2 <path>] [--isolation-dir <name>] [--buck2-arg <arg>]

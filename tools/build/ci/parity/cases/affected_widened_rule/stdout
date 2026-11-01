@@ -1,1 +1,0 @@
-WIDENED 'tools/build/ci/affected.mojo' matches widen rule tools/build/**: the Mojo rules, platforms, toolchains and build tooling are loaded by every target

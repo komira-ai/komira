@@ -15,12 +15,15 @@ load("@komira//tools/build/native:shared.bzl", "native_shared_library")
 # per-platform exit-wait primitives.
 staged_files(
     name = "proc_shim_files",
-    srcs = ["_proc_shim.c"],
+    srcs = ["_proc_shim.c", "_proc_io_shim.c"],
 )
 
 cxx_library(
     name = "komira_supervisor_proc",
-    srcs = [":proc_shim_files[_proc_shim.c]"],
+    srcs = [
+        ":proc_shim_files[_proc_shim.c]",
+        ":proc_shim_files[_proc_io_shim.c]",
+    ],
     compiler_flags = ["-O2", "-Wall", "-Werror"],
     visibility = ["PUBLIC"],
 )
@@ -36,7 +39,10 @@ mojo_library(
     ],
     test_srcs = [
         "tests/test_child_probe.mojo",
+        "tests/test_pid1.mojo",
         "tests/test_process_group.mojo",
+        "tests/test_stdin_pipe.mojo",
+        "tests/test_supervisor_edges.mojo",
         "tests/test_supervisor_scenarios.mojo",
     ],
     visibility = ["PUBLIC"],

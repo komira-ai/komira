@@ -148,9 +148,9 @@ pub const Failed = struct { run: u64, excerpt: []const u8 };
 /// The failing runs grouped by first failing line, in the order each line
 /// first appeared.
 pub fn dedup(a: std.mem.Allocator, failed: []const Failed) ![]const Excerpt {
-    var keys = std.ArrayList([]const u8).init(a);
-    var runs = std.ArrayList(std.ArrayList(u64)).init(a);
-    var texts = std.ArrayList([]const u8).init(a);
+    var keys = std.ArrayList([]const u8).empty;
+    var runs = std.ArrayList(std.ArrayList(u64)).empty;
+    var texts = std.ArrayList([]const u8).empty;
     for (failed) |f| {
         const k = firstFailingLine(f.excerpt);
         var at: ?usize = null;
@@ -158,13 +158,13 @@ pub fn dedup(a: std.mem.Allocator, failed: []const Failed) ![]const Excerpt {
             if (std.mem.eql(u8, x, k)) at = j;
         }
         if (at) |j| {
-            try runs.items[j].append(f.run);
+            try runs.items[j].append(a, f.run);
         } else {
-            try keys.append(k);
-            try texts.append(f.excerpt);
-            var l = std.ArrayList(u64).init(a);
-            try l.append(f.run);
-            try runs.append(l);
+            try keys.append(a, k);
+            try texts.append(a, f.excerpt);
+            var l = std.ArrayList(u64).empty;
+            try l.append(a, f.run);
+            try runs.append(a, l);
         }
     }
     const out = try a.alloc(Excerpt, keys.items.len);
@@ -219,9 +219,9 @@ fn measureTarget(cfg: prober.Config, wt: []const u8, rev: []const u8, idx: usize
         return .{ .target = target, .check = verdict_of_check, .check_excerpt = tail, .runs = 0, .failures = 0, .attempts = 0, .failing_runs = &.{}, .excerpts = &.{}, .infra = infra_runs };
     }
 
-    var failed = std.ArrayList(Failed).init(a);
-    var failing = std.ArrayList(u64).init(a);
-    var infra = std.ArrayList(InfraRun).init(a);
+    var failed = std.ArrayList(Failed).empty;
+    var failing = std.ArrayList(u64).empty;
+    var infra = std.ArrayList(InfraRun).empty;
     var counted: u32 = 0;
     var attempts: u32 = 0;
     var i: u64 = 1;
@@ -242,11 +242,11 @@ fn measureTarget(cfg: prober.Config, wt: []const u8, rev: []const u8, idx: usize
             .pass => counted += 1,
             .fail => {
                 counted += 1;
-                try failing.append(n);
+                try failing.append(a, n);
                 const text = if (at.classified.failures.len > 0) at.classified.failures[0].excerpt else at.tail;
-                try failed.append(.{ .run = n, .excerpt = text });
+                try failed.append(a, .{ .run = n, .excerpt = text });
             },
-            .infra => try infra.append(.{ .run = n, .buck2_exit = at.exit, .excerpt = at.tail }),
+            .infra => try infra.append(a, .{ .run = n, .buck2_exit = at.exit, .excerpt = at.tail }),
         }
     }
     return .{
@@ -266,7 +266,7 @@ fn measureTarget(cfg: prober.Config, wt: []const u8, rev: []const u8, idx: usize
 /// target's infra excerpt. Errors as `probe.attempt`'s.
 pub fn measure(cfg: prober.Config, rev: []const u8, runs: u32, base: u64, why: *[]const u8) !Measurement {
     const a = cfg.a;
-    const err = std.io.getStdErr().writer();
+    const err = std.fs.File.stderr().deprecatedWriter();
     var ready: ?[]const u8 = null;
     var reason: prober.Attempt = undefined;
     var tries: u32 = 0;
@@ -365,9 +365,8 @@ pub fn write(m: Measurement, w: anytype) !void {
 
 /// The `bisect flake` verdict: `{"mode":"flake","verdict":...}` and the
 /// measurement's fields, as one line.
-pub fn writeVerdict(m: Measurement, out: anytype) !void {
-    var w = std.json.writeStream(out, .{});
-    defer w.deinit();
+pub fn writeVerdict(m: Measurement, out: *std.Io.Writer) !void {
+    var w: std.json.Stringify = .{ .writer = out };
     try w.beginObject();
     try w.objectField("mode");
     try w.write("flake");

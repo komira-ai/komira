@@ -1,0 +1,12 @@
+[package]
+name = "komira_validation_run"
+version = "0.1.0"
+description = "The tag and label key a validation run stamps on every billable cloud resource it creates, legal verbatim on both AWS and GCP, with the run-id and retention-mark rules, in Mojo with no dependencies."
+license = "Apache-2.0"
+repository = "https://github.com/komira-ai/komira"
+readme = "README.md"
+mojo = ["1.0.0"]
+
+[targets]
+lib = { path = "src/komira_validation_run" }
+tests = ["tests"]

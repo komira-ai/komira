@@ -1,0 +1,3 @@
+# What the coverage census measured of this package's libraries (tools/build/coverage/census.md).
+census	2026-10-08	-	-
+komira//src/d:d	src/d	library	OK	10	10	-	-	no	conda	-	-

@@ -1,0 +1,14 @@
+{
+ "name": "max_calls_exceeded",
+ "defect": "a deliberate mismatch: more calls crossed than the case allows",
+ "run": "agg_split",
+ "entry": "sum",
+ "shape": "AGG_MERGEABLE",
+ "args": [{"type": "int64", "nullable": true}],
+ "result": [{"type": "int64", "nullable": true}],
+ "state": [{"type": "int64", "nullable": true}],
+ "partials": [{"input": {"length": 1, "columns": [{"type": "int64", "values": [1]}]}, "group_ids": [0], "n_groups": 1}],
+ "n_groups": 1,
+ "expect": {"status": "OK", "column": {"type": "int64", "values": [1]}, "max_calls": 1},
+ "runner_fails_with": "2 calls crossed into the runtime, at most 1 expected"
+}

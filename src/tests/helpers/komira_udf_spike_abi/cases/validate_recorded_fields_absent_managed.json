@@ -1,0 +1,12 @@
+{
+ "name": "validate_recorded_fields_absent_managed",
+ "defect": "a runtime that reads a row lazily refuses a descriptor with no field list (design 3.1: absent skips the check)",
+ "run": "validate",
+ "entry": "pick",
+ "shape": "ROW",
+ "args": [{"type": "int64", "nullable": true, "name": "flag"}, {"type": "int64", "nullable": true, "name": "a"}],
+ "result": [{"type": "int64", "nullable": true}],
+ "descriptor": {"recorded_fields": "absent"},
+ "classes": ["MANAGED"],
+ "expect": {"status": "OK"}
+}

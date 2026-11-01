@@ -143,6 +143,68 @@ def test_dst_all_year() raises:
         assert_equal(tz.offset_at(instants[i]).utc_offset, -14400)
 
 
+def test_start_past_31_december() raises:
+    # komira-ai/komira#883. AAA is UTC+0, BBB UTC+1. DST starts on day 365
+    # (31 December) at 120:00 standard time, which is 5 January 00:00Z of the
+    # NEXT year, and ends on 30 January at 02:00 daylight time (01:00Z). So
+    # each year is standard until 5 January, DST to 30 January, then standard
+    # (tzcode localtime.c computes the same: it never folds a rule instant
+    # back into the calendar year the rule names).
+    var tz = parse_posix_tz("AAA0BBB,J365/120,J30")
+    var standard = [
+        seconds_from_fields(2030, 12, 31, 23, 59, 59),
+        seconds_from_fields(2031, 1, 1),
+        seconds_from_fields(2031, 1, 2),
+        seconds_from_fields(2031, 1, 4, 23, 59, 59),
+        seconds_from_fields(2031, 1, 30, 1),
+        seconds_from_fields(2031, 7, 1),
+        seconds_from_fields(2032, 1, 4, 23, 59, 59),
+    ]
+    for i in range(len(standard)):
+        assert_false(tz.offset_at(standard[i]).is_dst, "standard #" + String(i))
+        assert_equal(tz.offset_at(standard[i]).abbreviation, "AAA")
+    var daylight = [
+        seconds_from_fields(2031, 1, 5),
+        seconds_from_fields(2031, 1, 30, 0, 59, 59),
+        seconds_from_fields(2032, 1, 5),
+    ]
+    for i in range(len(daylight)):
+        assert_true(tz.offset_at(daylight[i]).is_dst, "daylight #" + String(i))
+        assert_equal(tz.offset_at(daylight[i]).utc_offset, 3600)
+    # The edge the zone's transition list uses is the one offset_at changes at.
+    var edge = tz.next_edge_after(seconds_from_fields(2031, 1, 1))
+    assert_equal(edge, seconds_from_fields(2031, 1, 5))
+    assert_false(tz.offset_at(edge - 1).is_dst)
+    assert_true(tz.offset_at(edge).is_dst)
+
+
+def test_end_past_31_december() raises:
+    # The mirror: DST starts on 30 January at 02:00 standard time (02:00Z)
+    # and ends on day 365 at 120:00 daylight time, 4 January 23:00Z of the
+    # next year. So each year is DST until 4 January 23:00Z, standard to 30
+    # January 02:00Z, then DST.
+    var tz = parse_posix_tz("AAA0BBB,J30,J365/120")
+    var daylight = [
+        seconds_from_fields(2030, 12, 31, 23, 59, 59),
+        seconds_from_fields(2031, 1, 1),
+        seconds_from_fields(2031, 1, 2),
+        seconds_from_fields(2031, 1, 4, 22, 59, 59),
+        seconds_from_fields(2031, 1, 30, 2),
+        seconds_from_fields(2031, 7, 1),
+    ]
+    for i in range(len(daylight)):
+        assert_true(tz.offset_at(daylight[i]).is_dst, "daylight #" + String(i))
+        assert_equal(tz.offset_at(daylight[i]).abbreviation, "BBB")
+    var standard = [
+        seconds_from_fields(2031, 1, 4, 23),
+        seconds_from_fields(2031, 1, 30, 1, 59, 59),
+        seconds_from_fields(2032, 1, 4, 23),
+    ]
+    for i in range(len(standard)):
+        assert_false(tz.offset_at(standard[i]).is_dst, "standard #" + String(i))
+        assert_equal(tz.offset_at(standard[i]).utc_offset, 0)
+
+
 def test_fixed_offsets() raises:
     var utc = parse_posix_tz("UTC0")
     assert_false(utc.has_dst)
@@ -193,6 +255,8 @@ def main() raises:
     test_southern_half_hour_rules()
     test_negative_rule_time()
     test_dst_all_year()
+    test_start_past_31_december()
+    test_end_past_31_december()
     test_fixed_offsets()
     test_refusals()
     print("all posix tz tests passed")

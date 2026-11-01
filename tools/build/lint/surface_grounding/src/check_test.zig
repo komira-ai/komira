@@ -38,7 +38,7 @@ const named = [_]g.Named{
 const Run = struct { findings: usize, report: []const u8 };
 
 fn run(a: std.mem.Allocator, fams: []const g.Family, nams: []const g.Named) !Run {
-    var out = std.ArrayList(u8).init(a);
+    var out = std.ArrayList(u8).empty;
     const n = try g.check(a, fams, nams, &out);
     return .{ .findings = n, .report = out.items };
 }

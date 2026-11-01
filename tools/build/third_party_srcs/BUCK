@@ -1,5 +1,7 @@
 load("@komira//tools/build/lint:defs.bzl", "shell_lint")
 load("@komira//tools/build/mojo:defs.bzl", "mojo_binary")
+load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_test")
+load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load(":defs.bzl", "fixture_archive", "third_party_srcs")
 
 # Reads a vendored C library's source lists out of its release archive; see
@@ -18,7 +20,10 @@ mojo_binary(
 # relative and -I includes, the s2n-bignum key, libssl's and the bssl tool's
 # lists (a C file among the C++ ones, a test and a benchmark left out, an
 # include of a file the archive lacks), non-recursive and recursive GLOBs,
-# and the feature probes with their flags.
+# and the feature probes with their flags. The same archives give the
+# files.bzl each (committed_files): the per-CPU assembly sets (a file shipped
+# only under crypto/ for aarch64, the s2n-bignum arm lists), the exported
+# headers and include directories, and FILES.
 fixture_archive(
     name = "aws-lc-mini.tar.gz",
     srcs = glob(["testdata/aws-lc-mini/**"]),
@@ -31,6 +36,8 @@ third_party_srcs(
     library = "aws-lc",
     archive = ":aws-lc-mini.tar.gz",
     committed = "testdata/aws_lc_mini_srcs.bzl",
+    committed_files = "testdata/aws_lc_mini_files.bzl",
+    require = ["COMMON_SRCS", "ASM_X86_64", "ASM_AARCH64_APPLE", "ASM_AARCH64_LINUX", "BIGNUM_ASM_X86_64", "BIGNUM_ASM_AARCH64"],
 )
 
 fixture_archive(
@@ -45,6 +52,8 @@ third_party_srcs(
     library = "s2n-tls",
     archive = ":s2n-mini.tar.gz",
     committed = "testdata/s2n_mini_srcs.bzl",
+    committed_files = "testdata/s2n_mini_files.bzl",
+    require = ["SRCS", "PUBLIC_HEADERS", "PROBE_SRCS"],
 )
 
 # The non-gating report of pinned downloads against their newest upstream
@@ -52,4 +61,31 @@ third_party_srcs(
 shell_lint(
     name = "shell_lint",
     srcs = ["upstream_versions.sh"],
+)
+
+# third_party_act (third_party_act.zig): the actions of the vendored-source
+# rules in place of their busybox scripts. Built behind its unit tests; its
+# process cases are tests//functional/third_party_act.
+zig_test(
+    name = "third_party_act_unit",
+    exec_compatible_with = LINUX_X86_64,
+    src = "third_party_act_test.zig",
+    imports = ["third_party_act.zig"],
+    deps = [
+        "//tools/build/act_util:act_util",
+        "//tools/build/node_tools:node_tartest",
+    ],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
+)
+
+zig_exe(
+    name = "third_party_act",
+    exec_compatible_with = LINUX_X86_64,
+    src = "third_party_act.zig",
+    deps = ["//tools/build/act_util:act_util"],
+    unit_tests = [":third_party_act_unit", "komira//tools/build/toolchains:zig_next_version"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
+    visibility = ["PUBLIC"],
 )

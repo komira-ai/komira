@@ -99,6 +99,10 @@ from .action_table import (
     NULL_NONE,
     NULL_FIRST,
     NULL_SECOND,
+)
+from .union_route import (
+    BranchRoute,
+    UnionRouteData,
     PROMOTE_NONE,
     PROMOTE_TO_LONG,
     PROMOTE_TO_FLOAT,

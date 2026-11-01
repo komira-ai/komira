@@ -240,11 +240,25 @@ struct AdaptiveFilter(Movable, Deinitable):
         # Defensive against clock skew / preemption: clamp negative
         # durations to zero. Should not happen under perf_counter_ns
         # (monotonic) but the cost is one branch per iter.
-        var dur_ns: Float64
+        var dur_ns = UInt64(0)
         if now_ns >= start_ns:
-            dur_ns = Float64(now_ns - start_ns)
-        else:
-            dur_ns = Float64(0)
+            dur_ns = now_ns - start_ns
+        self.record_duration_ns(dur_ns)
+
+    @always_inline
+    def record_duration_ns(mut self, duration_ns: UInt64):
+        """Advance the state machine with an explicit duration.
+
+        `end_filter` measures the clock and calls this. Calling it directly
+        feeds the state machine a duration that does not depend on the wall
+        clock, so a caller that already measured the batch (or a test that
+        needs an exact cost model) gets a fully deterministic keep / revert
+        decision.
+
+        Args:
+            duration_ns: The iteration's duration in nanoseconds.
+        """
+        var dur_ns = Float64(duration_ns)
 
         self.iteration_count += UInt64(1)
 

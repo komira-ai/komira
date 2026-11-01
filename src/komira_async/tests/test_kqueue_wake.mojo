@@ -588,7 +588,7 @@ def test_kqueue_register_long_lived_actually_observes_event() raises:
 # transitions between read-only and read+write phases will hit it.
 #
 # Post-fix: kqueue branch computes the per-filter delta against the
-# old interest set (carried in RegistrationHandle._interest_set) and
+# old interest set (the reactor's record for the fd) and
 # emits kevent_register / kevent_deregister calls for the changes only.
 # EV_ADD on an already-registered (fd, filter) is idempotent in-place
 # update per `man kevent`.
@@ -632,12 +632,9 @@ def test_kqueue_modify_changes_interest_set() raises:
         # modify to WRITE only (drops READ). Pre-fix raises;
         # post-fix calls kevent_deregister(EVFILT_READ) +
         # kevent_register(EVFILT_WRITE, idempotent in-place update).
-        # We rebuild a fresh handle that reflects the new interest set
-        # so the subsequent _deregister_long_lived path is consistent.
-        var h2 = RegistrationHandle(_fd=rfd, _interest_set=INTEREST_READ | INTEREST_WRITE)
-        r.modify(h2, INTEREST_WRITE)
+        r.modify(h, INTEREST_WRITE)
+        assert_equal(r.interest_set(h), INTEREST_WRITE)
         # Cleanup.
-        _ = h
         r._deregister_long_lived(rfd)
         _close_fd(rfd)
         _close_fd(wfd)

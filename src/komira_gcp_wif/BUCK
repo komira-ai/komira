@@ -32,13 +32,28 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # test_wif_mint runs both legs over komira_http_core's ScriptedConnector (no
 # socket, AWS's documentation key pair): the exact header sets and bodies on
 # the wire, the twice-encoded subject token, the token cache, signJwt never
-# dialed after a refused or tokenless leg 1, and failure messages holding no
-# token and no body byte. test_external_account runs the external_account
+# dialed after a refused or tokenless leg 1, failure messages holding no
+# token and no body byte, and each host override refused with a bad byte
+# first, inside or last. test_external_account runs the external_account
 # flow over ScriptedConnector: a file-sourced and a URL-sourced subject, each
-# with and without impersonation, the whole STS and generateAccessToken bodies
+# with and without impersonation, a URL source's headers each on the GET
+# once in the file's order, the whole STS and generateAccessToken bodies
 # against hand-written text, the file's own token_url and impersonation URL
 # on the wire (IP-literal hosts and a non-default path, so no DNS), and each
 # refused file naming its field.
+# test_parse_refusals checks the pure readers with no connector: each refused
+# answer and file shape by its whole message, expires_in and expireTime at
+# their boundaries, an expireTime calendar sweep against an epoch the test
+# computes itself, the 65536-byte cap on an OAuth error body, and the subject
+# token's UTF-8 check and its edges kept as given, an endpoint's user, port,
+# query and fragment, the :generateAccessToken suffix, and a source header's
+# value and name bytes at their edges. test_fetch_failures runs the
+# remaining failure paths on the wire beside their controls: an empty bearer
+# never sent, an unreadable source file never exchanged, a refused
+# impersonation quoting no token or body, a refused exchange adding an OAuth
+# code only when one is listed, the 2xx range ending at 299 (impersonation
+# and source URL), a token file's trailing newline sent, and the AWS
+# fetcher's scope on the form.
 # test_env_source_only scans the package's own
 # sources, staged as its data, for any environment read.
 mojo_library(
@@ -61,6 +76,8 @@ mojo_library(
         "tests/test_wif_mint.mojo",
         "tests/test_external_account.mojo",
         "tests/test_env_source_only.mojo",
+        "tests/test_parse_refusals.mojo",
+        "tests/test_fetch_failures.mojo",
     ],
     test_data = {
         "tests/test_env_source_only.mojo": glob(["*.mojo"]),

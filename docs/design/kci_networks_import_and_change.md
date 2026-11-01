@@ -12,7 +12,7 @@ an account kci cannot reach. Nothing here is built yet.
 Most users who "import" a network do not want kci to own it: a platform team owns the network, and the list
 wants to place services in it. The engine's adoption is the other thing: `--adopt <id>` stamps an unstamped
 object of a wanted name, and from then on it is the list's own, changed by apply and deleted by destroy
-(`src/kci_reconciler/ownership.mojo`). Both are needed and they must not be confused:
+(`src/kci_reconciler/src/kci_reconciler/ownership.mojo`). Both are needed and they must not be confused:
 
 | Verb | What kci does to the object | Closed world and destroy | Cost |
 |---|---|---|---|

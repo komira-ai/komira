@@ -1,0 +1,11 @@
+{
+ "name": "kind_unsupported_without_validate",
+ "defect": "a deliberate mismatch: a validate case of a shape the runtime lacks gets the host's refusal, not the status it names",
+ "run": "validate",
+ "entry": "identity",
+ "shape": "MAP_BATCHES_FRAME_GROUPED",
+ "args": [{"type": "int64", "nullable": true}],
+ "result": [{"type": "int64", "nullable": true}],
+ "expect": {"status": "OK"},
+ "runner_fails_with": "status ERR_UNSUPPORTED"
+}

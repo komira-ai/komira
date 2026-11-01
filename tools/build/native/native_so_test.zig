@@ -56,9 +56,9 @@ const list = [_][]const u8{ "komira_awslc_SHA256", "komira_crypto_sha256_hw_capa
 
 fn withSym(s: Sym) elf.Shared {
     var so = good();
-    var syms = std.ArrayList(Sym).init(A);
-    syms.appendSlice(so.syms) catch unreachable;
-    syms.append(s) catch unreachable;
+    var syms = std.ArrayList(Sym).empty;
+    syms.appendSlice(A, so.syms) catch unreachable;
+    syms.append(A, s) catch unreachable;
     so.syms = syms.items;
     return so;
 }
@@ -74,9 +74,9 @@ fn expectRed(red: checks.Red, needle: []const u8) !void {
 // ---- call sites -------------------------------------------------------------
 
 fn scanAll(src: []const u8) ![][]const u8 {
-    var out = std.ArrayList([]const u8).init(A);
+    var out = std.ArrayList([]const u8).empty;
     var fail = cs.Failure{};
-    try cs.scan(src, &out, &fail);
+    try cs.scan(A, src, &out, &fail);
     return cs.sortUnique(out.items);
 }
 
@@ -116,11 +116,11 @@ test "call sites: names in comments, docstrings and strings are not read" {
 }
 
 test "call sites: a name that is not a string literal is refused with its line" {
-    var out = std.ArrayList([]const u8).init(A);
+    var out = std.ArrayList([]const u8).empty;
     var fail = cs.Failure{};
-    try t.expectError(error.CallSite, cs.scan("x\n\n_ = external_call[NAME, Int]()\n", &out, &fail));
+    try t.expectError(error.CallSite, cs.scan(A, "x\n\n_ = external_call[NAME, Int]()\n", &out, &fail));
     try t.expectEqual(@as(usize, 3), fail.line);
-    try t.expectError(error.CallSite, cs.scan("_ = external_call[\"\", Int]()\n", &out, &fail));
+    try t.expectError(error.CallSite, cs.scan(A, "_ = external_call[\"\", Int]()\n", &out, &fail));
 }
 
 // ---- the export list and version script -------------------------------------

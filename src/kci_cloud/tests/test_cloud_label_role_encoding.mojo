@@ -11,12 +11,21 @@
 # 2. DEPTH-N IDS: a node `top/a/b/c/run` is owned by `top` and stamped with
 #    role `a/b/c/run`, written `a_b_c_run`, and the stamp round-trips; a role
 #    value holding `--` is an ordinary value, never split into segments.
+# 3. THE MARKS AND THE RULE'S REFUSALS: an engine retention with no mark
+#    raises; `kci-retention=retain` is retained; a validation run id outside
+#    the rule is named, and a stamp carrying one cannot be labelled; a key of
+#    0 or 64 bytes, and a value of 64 bytes, are each refused (63 pass).
 # =============================================================================
 
 from std.testing import assert_equal, assert_true
 
-from kci_reconciler import CellScope, Label, Provenance
+from kci_reconciler import CellScope, Label, OwnerStamp, Provenance, RETAIN_KEEP
 from kci_cloud import (
+    retain_labels,
+    retained_by,
+    retention_label_value,
+    validation_run_labels,
+    validation_run_problem,
     decode_label_value,
     encode_label_value,
     label_problems,
@@ -113,9 +122,46 @@ def test_a_double_dash_role_label_is_never_an_owner() raises:
     print("  test_a_double_dash_role_label_is_never_an_owner: PASS")
 
 
+# ---- 3. the marks and the rule's refusals --------------------------------------------
+
+
+def test_the_marks_and_the_rules_refusals() raises:
+    var why = String("")
+    try:
+        _ = retention_label_value(9)
+    except e:
+        why = String(e)
+    assert_equal(why, "retention_label_value: engine retention 9 has no retention mark; state which side it is on")
+    assert_true(retained_by(retain_labels(RETAIN_KEEP)))
+    var bad = String("validation run id \"Run 1\" is not 1 to 63 bytes of [a-z0-9_-]; it would not be the same id on every cloud")
+    assert_equal(validation_run_problem(String("Run 1")), bad)
+    assert_equal(validation_run_problem(String("run-1")), "")
+    why = String("")
+    try:
+        _ = validation_run_labels(
+            OwnerStamp(String("shop"), String("blue"), String("api"), String("run"), validation_run_id=String("Run 1"))
+        )
+    except e:
+        why = String(e)
+    assert_equal(why, bad)
+    var labels = List[Label]()
+    labels.append(Label(String(""), String("v")))
+    labels.append(Label(_repeat(String("k"), 64), String("v")))
+    labels.append(Label(_repeat(String("k"), 63), String("v")))
+    labels.append(Label(String("long"), _repeat(String("v"), 64)))
+    labels.append(Label(String("edge"), _repeat(String("v"), 63)))
+    var p = label_problems(labels)
+    assert_equal(len(p), 3)
+    assert_equal(p[0], "label key \"\" has a bad length")
+    assert_equal(p[1], String("label key \"") + _repeat(String("k"), 64) + String("\" has a bad length"))
+    assert_equal(p[2], "label \"long\" value is too long")
+    print("  test_the_marks_and_the_rules_refusals: PASS")
+
+
 def main() raises:
     print("test_cloud_label_role_encoding")
     test_the_label_rule_writes_slash_as_underscore()
     test_depth_n_ids_round_trip_the_owner_and_the_stamp()
     test_a_double_dash_role_label_is_never_an_owner()
+    test_the_marks_and_the_rules_refusals()
     print("ALL kci_cloud LABEL ROLE ENCODING TESTS PASSED")

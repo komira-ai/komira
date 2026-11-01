@@ -673,6 +673,7 @@ pub fn lower_aws_service(
 
     let file = IrFile {
         proto_path: model_path.to_string(),
+        source_sha256: String::new(),
         proto_package: format!("aws.{}", lowerer.meta.service),
         mojo_package: package_prefix.to_string(),
         messages,

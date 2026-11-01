@@ -74,6 +74,7 @@ pub fn lower_openapi(
 
     let file = IrFile {
         proto_path: doc_path.to_string(),
+        source_sha256: String::new(),
         // OpenAPI has no proto `package`; synthesize a stable label from
         // the document `info.title` so the IR-dump is informative.
         proto_package: openapi_package_label(root),

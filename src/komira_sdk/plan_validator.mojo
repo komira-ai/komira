@@ -66,7 +66,16 @@ from komira_plan_ir.logical_plan import (
     PLAN_ASOF_JOIN,
     PLAN_UNION,
     PLAN_CAST_TO_VARCHAR,
+    PLAN_EXCHANGE,
 )
+
+
+comptime VALIDATE_PLAN_EXCHANGE_REFUSED: StaticString = (
+    "validate_plan: PLAN_EXCHANGE is refused: an optimizer-placed exchange has"
+    " no lowering in the SDK"
+)
+"""Raised for a `PLAN_EXCHANGE` node by name, rather than by the generic
+unknown-tag message."""
 
 
 # =============================================================================
@@ -231,6 +240,8 @@ def _validate_plan_node(plan: LogicalPlan, mut report: PlanValidationReport) rai
         _validate_partition_by(plan, report)
     elif plan.tag == PLAN_PARTITION_TOPN:
         _validate_partition_topn(plan, report)
+    elif plan.tag == PLAN_EXCHANGE:
+        raise Error(String(VALIDATE_PLAN_EXCHANGE_REFUSED))
     else:
         raise Error("validate_plan: unknown plan tag " + String(Int(plan.tag)))
 
@@ -279,6 +290,15 @@ def _subtree_has_offset_limit(plan: LogicalPlan) -> Bool:
         return False
     elif plan.tag == PLAN_CAST_TO_VARCHAR:
         return _subtree_has_offset_limit(plan._cast_to_varchar.value()[].child[])
+    elif plan.tag == PLAN_EXCHANGE:
+        # ⛔ NOT A FALLTHROUGH. This predicate cannot raise, so its refusal is
+        # to keep looking: an offset LIMIT under an exchange must still trip
+        # the RANGE invariant (a `False` here would let a nested slice window
+        # be silently dropped). The exchange itself is refused by name in
+        # `_validate_plan_node`.
+        if not plan._exchange:
+            return False
+        return _subtree_has_offset_limit(plan._exchange.value()[].child[])
     return False
 
 

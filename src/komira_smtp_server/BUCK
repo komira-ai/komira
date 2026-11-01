@@ -1,0 +1,74 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# An SMTP server that receives mail: the connection table, CRLF line framing
+# with caps, the command state machine, AUTH over komira_mail_auth, the DATA
+# phase, the MailDelivery seam, a caller-polled serve loop over non-blocking
+# sockets with STARTTLS (komira_mail_tls), and LocalMailboxDelivery into
+# komira_mail_store. The registry has no socket and no clock. See __init__.mojo.
+#
+# The welded tests (each file's header says which defects it catches):
+# - test_framing: the line caps with a bounded buffer, strict CRLF, split and
+#   pipelined input, the registry's connection lifetime and deadlines, the
+#   reply-queue caps.
+# - test_commands: one case per command rule (EHLO reset, FROM:/TO: keywords,
+#   exact STARTTLS, VRFY/HELP, advertised capabilities, MAIL parameters, the
+#   recipient cap, address syntax).
+# - test_auth: PLAIN and LOGIN, TLS only, the second AUTH, the failure cap,
+#   MAIL needing AUTH on a submission listener.
+# - test_data: the DATA terminator corpus, dot-unstuffing, the size cap.
+# - test_delivery_seam: the calls and the replies against a recording fake.
+# - test_starttls: the STARTTLS reset and pipelined bytes after it.
+# - test_local_delivery: LocalMailboxDelivery against an in-memory store (the
+#   RCPT rule, store before hook, a raising hook, a store error as 451, two
+#   identical deliveries, the hook per stored recipient, exact trace headers,
+#   header escaping, a path kept inside its brackets, a sender's own
+#   Return-Path and Authentication-Results renamed).
+# - test_smtp_starttls: STARTTLS, AUTH and a message over loopback sockets;
+#   the pipelined line after STARTTLS; AUTH in the clear.
+# - test_serve_loop: max_conns, expiry by now_ms and its exact boundaries, a
+#   full send window at expiry, a reset, a bad TLS hello, a peer that leaves
+#   mid-handshake, no certificate, short writes, over loopback sockets.
+mojo_library(
+    name = "komira_smtp_server",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    # Direct dependencies: the rule adds each one's own closure to the compiler.
+    deps = [
+        "//src/komira_async:komira_async",
+        "//src/komira_collections:komira_collections",
+        "//src/komira_mail_address:komira_mail_address",
+        "//src/komira_mail_auth:komira_mail_auth",
+        "//src/komira_mail_message:komira_mail_message",
+        "//src/komira_mail_store:komira_mail_store",
+        "//src/komira_mail_tls:komira_mail_tls",
+        "//src/komira_objectstore:komira_objectstore",
+    ],
+    test_srcs = [
+        "tests/test_auth.mojo",
+        "tests/test_commands.mojo",
+        "tests/test_data.mojo",
+        "tests/test_delivery_seam.mojo",
+        "tests/test_framing.mojo",
+        "tests/test_local_delivery.mojo",
+        "tests/test_serve_loop.mojo",
+        "tests/test_smtp_starttls.mojo",
+        "tests/test_starttls.mojo",
+    ],
+    test_deps = [
+        "//src/komira_encoding:komira_encoding",
+        "//src/komira_http_core:komira_http_core",
+        "//src/tests/helpers/komira_mail_test_support:komira_mail_test_support",
+    ],
+    test_data = {
+        "tests/test_serve_loop.mojo": {
+            "src/komira_http_core/tests/fixtures/tls/leaf_cert.pem": "//src/komira_http_core:tests/fixtures/tls/leaf_cert.pem",
+            "src/komira_http_core/tests/fixtures/tls/leaf_key.pem": "//src/komira_http_core:tests/fixtures/tls/leaf_key.pem",
+            "src/komira_http_core/tests/fixtures/tls/root_ca.pem": "//src/komira_http_core:tests/fixtures/tls/root_ca.pem",
+        },
+        "tests/test_smtp_starttls.mojo": {
+            "src/komira_http_core/tests/fixtures/tls/leaf_cert.pem": "//src/komira_http_core:tests/fixtures/tls/leaf_cert.pem",
+            "src/komira_http_core/tests/fixtures/tls/leaf_key.pem": "//src/komira_http_core:tests/fixtures/tls/leaf_key.pem",
+            "src/komira_http_core/tests/fixtures/tls/root_ca.pem": "//src/komira_http_core:tests/fixtures/tls/root_ca.pem",
+        },
+    },
+    visibility = ["PUBLIC"],
+)

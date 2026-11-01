@@ -42,16 +42,16 @@ fn usage(comptime fmt: []const u8, a: anytype) u8 {
 fn firstLine(alloc: std.mem.Allocator, path: []const u8) ?[]const u8 {
     const f = std.fs.cwd().openFile(path, .{}) catch return null;
     defer f.close();
-    var buf = std.ArrayList(u8).init(alloc);
+    var buf = std.ArrayList(u8).empty;
     var b: [512]u8 = undefined;
     while (true) {
         const n = f.read(&b) catch return null;
         if (n == 0) break;
         if (std.mem.indexOfScalar(u8, b[0..n], '\n')) |nl| {
-            buf.appendSlice(b[0..nl]) catch return null;
+            buf.appendSlice(alloc, b[0..nl]) catch return null;
             break;
         }
-        buf.appendSlice(b[0..n]) catch return null;
+        buf.appendSlice(alloc, b[0..n]) catch return null;
     }
     return buf.items;
 }
@@ -67,7 +67,7 @@ fn run(alloc: std.mem.Allocator, argv: []const []const u8) !u8 {
     var status: ?[]const u8 = null;
     var limit_s: ?[]const u8 = null;
     var go = true;
-    var infra = std.ArrayList([]const u8).init(alloc);
+    var infra = std.ArrayList([]const u8).empty;
     var i: usize = 0;
     while (i < argv.len and !std.mem.eql(u8, argv[i], "--")) : (i += 2) {
         const flag = argv[i];
@@ -94,7 +94,7 @@ fn run(alloc: std.mem.Allocator, argv: []const []const u8) !u8 {
                 if (c < '0' or c > '9') ok = false;
             }
             if (!ok) return usage("--infra-exit {s} is not a status", .{v});
-            try infra.append(v);
+            try infra.append(alloc, v);
         } else {
             return usage("unknown argument {s}", .{flag});
         }
@@ -112,11 +112,11 @@ fn run(alloc: std.mem.Allocator, argv: []const []const u8) !u8 {
         break :blk s;
     };
 
-    var cmd = std.ArrayList([]const u8).init(alloc);
+    var cmd = std.ArrayList([]const u8).empty;
     for (argv[i + 1 ..]) |a| {
         if (std.mem.startsWith(u8, a, scratch_token)) {
-            try cmd.append(try std.fmt.allocPrint(alloc, "{s}{s}", .{ scratch, a[scratch_token.len..] }));
-        } else try cmd.append(a);
+            try cmd.append(alloc, try std.fmt.allocPrint(alloc, "{s}{s}", .{ scratch, a[scratch_token.len..] }));
+        } else try cmd.append(alloc, a);
     }
 
     const st = status.?;
@@ -129,8 +129,8 @@ fn run(alloc: std.mem.Allocator, argv: []const []const u8) !u8 {
     const log = try std.fmt.allocPrint(alloc, "{s}/log", .{scratch});
     const log_fd = try util.createLog(log);
     const path = try resolve(alloc, cmd.items[0]);
-    var env = std.ArrayList([]const u8).init(alloc);
-    for (std.os.environ) |e| try env.append(std.mem.span(e));
+    var env = std.ArrayList([]const u8).empty;
+    for (std.os.environ) |e| try env.append(alloc, std.mem.span(e));
     const o = try supervise.run(alloc, .{
         .path = (try alloc.dupeZ(u8, path)).ptr,
         .argv = (try util.zList(alloc, cmd.items)).ptr,

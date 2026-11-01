@@ -3,8 +3,12 @@
 # machine buckconfig for buck2 (docs/ci.md, "The runner").
 #
 # Nothing here names the farm. Its address, instance name and worker property
-# set arrive as inputs, which a workflow takes from repository variables, so no
-# committed file holds an endpoint (checked by //:no_endpoint). The tailnet
+# sets arrive as inputs, which a workflow takes from repository variables, so no
+# committed file holds an endpoint (checked by //:no_endpoint). The macOS
+# worker set and its host identities, and TLS with an optional CA file, are
+# optional inputs; left out, the buckconfig is the linux-only, plain-text one.
+# Every input is checked before the tailnet is joined, and the cases of the
+# checks and of the buckconfig written are //:farm_connect_cases. The tailnet
 # credential is workload identity federation: the job asks GitHub for an OIDC
 # token and Tailscale trusts it for this repository only, so no secret is
 # stored anywhere. The calling job therefore needs
@@ -37,7 +41,31 @@ inputs:
   execution-concurrency-limit:
     description: How many actions this client lets run on the farm at once.
     required: false
-    default: "32"
+    default: "256"
+  darwin-properties:
+    description: The macOS arm64 worker property set. Given together with darwin-macos-hosts or not at all, and different from farm-properties. Left out, no macOS platform is configured.
+    required: false
+    default: ""
+  darwin-macos-hosts:
+    description: The host identities of the macOS workers, separated by spaces (what `mojo_compile_darwin host-identity` prints on each; tools/build/toolchains/README.md, "macOS"). Given together with darwin-properties.
+    required: false
+    default: ""
+  macos-library-dirs:
+    description: Absolute directories, separated by `:` or spaces, that a macOS test run searches for a library it opens by its bare name, before /usr/local/lib:/usr/lib (buildrules' `macos_library_dirs`). Only with darwin-properties; left out, dyld's own defaults apply.
+    required: false
+    default: ""
+  farm-qos:
+    description: The priority class the farm queues this job's actions in, `ci` or `batch` (a `batch` action starts after every queued `ci` action, so the pull-request checks go first when the farm is full). Written as the request header `x-kbf-qos` (buck2's `http_headers`); it is no platform property, so it does not change an action's digest or its cache entry. Left out, no header is sent and the farm queues the actions as `ci`. It takes effect only on a farm whose front end reads the header; one that does not ignores it.
+    required: false
+    default: ""
+  tls:
+    description: Whether the remote-execution service is reached over TLS, `true` or `false`.
+    required: false
+    default: "false"
+  tls-ca-certs:
+    description: The absolute path, on the runner, of a PEM file of the CA certificates the service's certificate is checked against (buck2's `tls_ca_certs`). Only with tls `true`; left out, the system's roots are used.
+    required: false
+    default: ""
 
 runs:
   using: composite
@@ -53,8 +81,18 @@ runs:
         FARM_ADDRESS: ${{ inputs.farm-address }}
         FARM_INSTANCE: ${{ inputs.farm-instance }}
         FARM_PROPERTIES: ${{ inputs.farm-properties }}
+        DARWIN_PROPERTIES: ${{ inputs.darwin-properties }}
+        DARWIN_MACOS_HOSTS: ${{ inputs.darwin-macos-hosts }}
+        MACOS_LIBRARY_DIRS: ${{ inputs.macos-library-dirs }}
+        TLS: ${{ inputs.tls }}
+        TLS_CA_CERTS: ${{ inputs.tls-ca-certs }}
+        FARM_QOS: ${{ inputs.farm-qos }}
       run: |
         set -eu
+        refuse() {
+          echo "::error title=farm-connect::$1"
+          exit 1
+        }
         missing=""
         [ -n "$TS_CLIENT_ID" ] || missing="$missing TS_CLIENT_ID"
         [ -n "$TS_AUDIENCE" ] || missing="$missing TS_AUDIENCE"
@@ -68,6 +106,67 @@ runs:
         # The logs are public: keep the farm's address out of them.
         echo "::add-mask::$FARM_ADDRESS"
         echo "::add-mask::${FARM_ADDRESS#*://}"
+        # Each value becomes one line of the buckconfig: a line break in one
+        # would add keys of its own.
+        nl='
+        '
+        cr=$(printf '\r')
+        for v in "$FARM_ADDRESS" "$FARM_INSTANCE" "$FARM_PROPERTIES" "$DARWIN_PROPERTIES" "$DARWIN_MACOS_HOSTS" "$MACOS_LIBRARY_DIRS" "$TLS" "$TLS_CA_CERTS" "$FARM_QOS"; do
+          case "$v" in
+            *"$nl"* | *"$cr"*) refuse "an input holds a line break; each value must be one line of the buckconfig" ;;
+          esac
+        done
+        # The one header the action writes: its value is a level name and nothing else.
+        case "$FARM_QOS" in
+          ''|ci|batch) ;;
+          *) refuse "farm-qos is neither ci nor batch" ;;
+        esac
+        # The macOS platform needs both: buck2 refuses a macOS property set
+        # without host identities, and hosts without a set configure nothing.
+        if [ -n "$DARWIN_PROPERTIES" ] && [ -z "$DARWIN_MACOS_HOSTS" ]; then
+          refuse "darwin-properties is set but darwin-macos-hosts is empty: no macOS compile could run"
+        fi
+        if [ -z "$DARWIN_PROPERTIES" ] && [ -n "$DARWIN_MACOS_HOSTS" ]; then
+          refuse "darwin-macos-hosts is set but darwin-properties is empty"
+        fi
+        if [ -n "$DARWIN_PROPERTIES" ] && [ "$DARWIN_PROPERTIES" = "$FARM_PROPERTIES" ]; then
+          refuse "darwin-properties equals farm-properties: a macOS action would match a linux worker"
+        fi
+        # The directories only mean something to a macOS test run, and each must be
+        # absolute (buildrules refuses a relative one at analysis, which would fail
+        # every macOS target of the job).
+        if [ -n "$MACOS_LIBRARY_DIRS" ]; then
+          [ -n "$DARWIN_PROPERTIES" ] || refuse "macos-library-dirs is set but darwin-properties is empty"
+          case "$MACOS_LIBRARY_DIRS" in
+            *'$'*) refuse "macos-library-dirs holds a \$" ;;
+          esac
+          n=0
+          set -f
+          for d in $(printf '%s' "$MACOS_LIBRARY_DIRS" | tr ':' ' '); do
+            case "$d" in
+              /*) n=$((n + 1)) ;;
+              *) refuse "macos-library-dirs holds '$d', which is not an absolute directory" ;;
+            esac
+          done
+          set +f
+          [ "$n" -gt 0 ] || refuse "macos-library-dirs is set but names no directory"
+        fi
+        case "$TLS" in
+          true | false) ;;
+          *) refuse "tls is '$TLS', not true or false" ;;
+        esac
+        if [ -n "$TLS_CA_CERTS" ]; then
+          [ "$TLS" = true ] || refuse "tls-ca-certs is set but tls is false"
+          case "$TLS_CA_CERTS" in
+            /*) ;;
+            *) refuse "tls-ca-certs is not an absolute path" ;;
+          esac
+          # buck2 replaces $NAME in tls_ca_certs with the variable's value.
+          case "$TLS_CA_CERTS" in
+            *'$'*) refuse "tls-ca-certs holds a \$, which buck2 reads as an environment variable" ;;
+          esac
+          [ -f "$TLS_CA_CERTS" ] && [ -r "$TLS_CA_CERTS" ] || refuse "tls-ca-certs is not a readable file on this runner"
+        fi
 
     - name: join the tailnet
       uses: tailscale/github-action@d1b6cd204f8dceda5b3eaad7f1f767be390056cd # v4.2.0
@@ -111,6 +210,12 @@ runs:
         FARM_INSTANCE: ${{ inputs.farm-instance }}
         FARM_PROPERTIES: ${{ inputs.farm-properties }}
         CONCURRENCY: ${{ inputs.execution-concurrency-limit }}
+        DARWIN_PROPERTIES: ${{ inputs.darwin-properties }}
+        DARWIN_MACOS_HOSTS: ${{ inputs.darwin-macos-hosts }}
+        MACOS_LIBRARY_DIRS: ${{ inputs.macos-library-dirs }}
+        TLS: ${{ inputs.tls }}
+        TLS_CA_CERTS: ${{ inputs.tls-ca-certs }}
+        FARM_QOS: ${{ inputs.farm-qos }}
       run: |
         set -eu
         case "$CONCURRENCY" in
@@ -124,9 +229,22 @@ runs:
           echo "  action_cache_address = $FARM_ADDRESS"
           echo "  cas_address = $FARM_ADDRESS"
           echo "  instance_name = $FARM_INSTANCE"
-          echo "  tls = false"
+          echo "  tls = $TLS"
+          if [ -n "$TLS_CA_CERTS" ]; then
+            echo "  tls_ca_certs = $TLS_CA_CERTS"
+          fi
           echo "  execution_concurrency_limit = $CONCURRENCY"
+          if [ -n "$FARM_QOS" ]; then
+            echo "  http_headers = x-kbf-qos:$FARM_QOS"
+          fi
           echo "[komira_re]"
           echo "  linux_x86_64_properties = $FARM_PROPERTIES"
+          if [ -n "$DARWIN_PROPERTIES" ]; then
+            echo "  darwin_arm64_properties = $DARWIN_PROPERTIES"
+            echo "  darwin_macos_hosts = $DARWIN_MACOS_HOSTS"
+            if [ -n "$MACOS_LIBRARY_DIRS" ]; then
+              echo "  macos_library_dirs = $MACOS_LIBRARY_DIRS"
+            fi
+          fi
         } > "$dir/farm.buckconfig"
         echo "wrote the farm's machine buckconfig ($dir/farm.buckconfig)"

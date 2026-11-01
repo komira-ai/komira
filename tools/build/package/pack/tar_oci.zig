@@ -164,11 +164,11 @@ pub fn cmdOci(alloc: Alloc, a: Args) !void {
     const docker_manifest_bytes = try toJson(alloc, docker_manifest);
 
     // The layout directory and the archive hold the same files.
-    var blobs = std.ArrayList([]const u8).init(alloc);
-    for (layer_bytes) |b| try blobs.append(b);
-    try blobs.append(layer_gz);
-    try blobs.append(config_bytes);
-    try blobs.append(manifest_bytes);
+    var blobs = std.ArrayList([]const u8).empty;
+    for (layer_bytes) |b| try blobs.append(alloc, b);
+    try blobs.append(alloc, layer_gz);
+    try blobs.append(alloc, config_bytes);
+    try blobs.append(alloc, manifest_bytes);
     const oci_layout = "{\"imageLayoutVersion\":\"1.0.0\"}";
 
     const out_path = need(a.out, "--out");
@@ -176,22 +176,22 @@ pub fn cmdOci(alloc: Alloc, a: Args) !void {
     var out = try std.fs.cwd().openDir(out_path, .{});
     defer out.close();
     try out.makePath("blobs/sha256");
-    var entries = std.ArrayList(Entry).init(alloc);
-    try entries.append(.{ .path = "blobs/", .mode = 0o755, .data = "" });
-    try entries.append(.{ .path = "blobs/sha256/", .mode = 0o755, .data = "" });
+    var entries = std.ArrayList(Entry).empty;
+    try entries.append(alloc, .{ .path = "blobs/", .mode = 0o755, .data = "" });
+    try entries.append(alloc, .{ .path = "blobs/sha256/", .mode = 0o755, .data = "" });
     for (blobs.items) |b| {
         const p = try std.fmt.allocPrint(alloc, "blobs/sha256/{s}", .{sha256Hex(b)});
         var seen = false;
         for (entries.items) |e| seen = seen or std.mem.eql(u8, e.path, p);
         if (seen) continue; // the same blob twice (e.g. two identical base layers)
         try writeFile(out, p, b);
-        try entries.append(.{ .path = p, .mode = 0o644, .data = b });
+        try entries.append(alloc, .{ .path = p, .mode = 0o644, .data = b });
     }
     try writeFile(out, "oci-layout", oci_layout);
     try writeFile(out, "index.json", index_bytes);
-    try entries.append(.{ .path = "oci-layout", .mode = 0o644, .data = oci_layout });
-    try entries.append(.{ .path = "index.json", .mode = 0o644, .data = index_bytes });
-    try entries.append(.{ .path = "manifest.json", .mode = 0o644, .data = docker_manifest_bytes });
+    try entries.append(alloc, .{ .path = "oci-layout", .mode = 0o644, .data = oci_layout });
+    try entries.append(alloc, .{ .path = "index.json", .mode = 0o644, .data = index_bytes });
+    try entries.append(alloc, .{ .path = "manifest.json", .mode = 0o644, .data = docker_manifest_bytes });
     try writeFile(std.fs.cwd(), need(a.archive, "--archive"), try writeTar(alloc, entries.items));
     try writeFile(std.fs.cwd(), need(a.digest, "--digest"), try std.fmt.allocPrint(alloc, "{s}\n", .{manifest_digest}));
 }

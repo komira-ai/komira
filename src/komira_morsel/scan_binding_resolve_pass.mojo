@@ -121,6 +121,7 @@ from komira_plan_expr.expr import (
     EXPR_STRING_FN,
     EXPR_STRING_FN_N,
     EXPR_UDF_CALL,
+    EXPR_UDF_APPLY,
     expr_tag_name,
 )
 from komira_plan_expr.expr_helpers import flatten_and_conjuncts
@@ -143,6 +144,9 @@ from komira_plan_ir.logical_plan import (
     PLAN_VIEW_REF,
     PLAN_CSE_REF,
     PLAN_CAST_TO_VARCHAR,
+    PLAN_EXCHANGE,
+    PLAN_MAP_BATCHES,
+    PLAN_STEP,
     plan_tag_name,
 )
 from komira_plan_ir.scan_binding_bind_pass import bind_plan_inmem_payloads
@@ -986,6 +990,32 @@ def resolve_plan_binding_leaves(
             scan_registry,
             snapshots,
         )
+    if tag == PLAN_EXCHANGE:
+        # Keys and ordering are column NAMES; no expression site.
+        if not plan._exchange:
+            return 0
+        return resolve_plan_binding_leaves(
+            plan._exchange.value()[].child[],
+            resolvers,
+            scan_registry,
+            snapshots,
+        )
+    if tag == PLAN_MAP_BATCHES:
+        # A frame UDF: its grouping expressions and its child.
+        if not plan._map_batches:
+            return 0
+        ref mb = plan._map_batches.value()[]
+        var n = 0
+        for i in range(len(mb.group_by)):
+            n += resolve_expr_binding_leaves(
+                mb.group_by[i], resolvers, scan_registry, snapshots
+            )
+        return n + resolve_plan_binding_leaves(
+            mb.child[], resolvers, scan_registry, snapshots
+        )
+    if tag == PLAN_STEP:
+        # A source with no child and literal arguments: nothing to resolve.
+        return 0
 
     # ---- TWO OR MORE CHILDREN ---------------------------------------------------
     if tag == PLAN_JOIN:
@@ -1176,6 +1206,17 @@ def resolve_expr_binding_leaves(
         )
 
     # ---- N CHILDREN -------------------------------------------------------------
+    if tag == EXPR_UDF_APPLY:
+        # A call of a `UdfRef`: every argument.
+        if not expr._udf_apply:
+            return 0
+        var na = 0
+        for i in range(len(expr._udf_apply.value().args)):
+            na += resolve_expr_binding_leaves(
+                expr._udf_apply.value().args[i], resolvers, scan_registry,
+                snapshots,
+            )
+        return na
     if tag == EXPR_STRING_FN_N:
         if not expr._string_fn_n:
             return 0

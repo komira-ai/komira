@@ -28,19 +28,19 @@ pub const Outcome = struct {
 pub fn selftestClosure(a: std.mem.Allocator, cell: []const u8, facts: []const u8) !Outcome {
     const prefix = try std.fmt.allocPrint(a, "{s}//src/", .{cell});
     const exact = try std.fmt.allocPrint(a, "{s}//src:", .{cell});
-    var findings = std.ArrayList([]const u8).init(a);
+    var findings = std.ArrayList([]const u8).empty;
     var n: usize = 0;
     var it = std.mem.splitScalar(u8, facts, '\n');
     while (it.next()) |line| {
         if (line.len == 0) continue;
         n += 1;
-        if (std.mem.startsWith(u8, line, prefix) or std.mem.startsWith(u8, line, exact)) try findings.append(line);
+        if (std.mem.startsWith(u8, line, prefix) or std.mem.startsWith(u8, line, exact)) try findings.append(a, line);
     }
-    return .{ .facts = n, .findings = try findings.toOwnedSlice() };
+    return .{ .facts = n, .findings = try findings.toOwnedSlice(a) };
 }
 
 fn fail(comptime fmt: []const u8, args: anytype) noreturn {
-    std.io.getStdErr().writer().print("graph_checks: " ++ fmt ++ "\n", args) catch {};
+    std.fs.File.stderr().deprecatedWriter().print("graph_checks: " ++ fmt ++ "\n", args) catch {};
     std.process.exit(1);
 }
 
@@ -69,13 +69,13 @@ pub fn main() !void {
     const o = try selftestClosure(a, cell.?, facts);
     if (o.facts == 0) fail("{s}: selftest_closure read no label: the closure query matched nothing, so it checked nothing", .{label.?});
     if (o.findings.len > 0) {
-        const w = std.io.getStdErr().writer();
+        const w = std.fs.File.stderr().deprecatedWriter();
         for (o.findings) |f| try w.print("{s}: selftest_closure: {s} is in the closure of the self-test package; a scenario names what it builds as a string, never as a dependency\n", .{ label.?, f });
         fail("{s}: selftest_closure: {d} of {d} labels are of {s}//src/", .{ label.?, o.findings.len, o.facts, cell.? });
     }
     const f = std.fs.cwd().createFile(out_path.?, .{}) catch |e| fail("cannot create {s}: {s}", .{ out_path.?, @errorName(e) });
     defer f.close();
-    try f.writer().print("selftest_closure: {d} labels, none under {s}//src/\n", .{ o.facts, cell.? });
+    try f.deprecatedWriter().print("selftest_closure: {d} labels, none under {s}//src/\n", .{ o.facts, cell.? });
 }
 
 fn pythonClosureMain(a: std.mem.Allocator, cell: []const u8, label: []const u8, facts: []const u8, scan_dir: ?[]const u8, out_path: []const u8) !void {
@@ -93,13 +93,13 @@ fn pythonClosureMain(a: std.mem.Allocator, cell: []const u8, label: []const u8, 
     const o = try python_closure.pythonClosure(a, cell, facts, &texts);
     if (o.nodes == 0) fail("{s}: python_closure read no target: the closure query matched nothing, so it checked nothing", .{label});
     if (o.refused.len > 0) {
-        const w = std.io.getStdErr().writer();
+        const w = std.fs.File.stderr().deprecatedWriter();
         for (o.refused) |r| try w.print("{s}: python_closure: {s}\n", .{ label, r });
         fail("{s}: python_closure: {d} refused ({d} targets, {d} files, {d} files read; {d} findings allowed by the surface and the ceiling)", .{ label, o.refused.len, o.nodes, o.files, o.scanned, o.allowed });
     }
     const f = std.fs.cwd().createFile(out_path, .{}) catch |e| fail("cannot create {s}: {s}", .{ out_path, @errorName(e) });
     defer f.close();
-    try f.writer().print("python_closure: {d} targets, {d} files, {d} files read; no Python outside the allowlist ({d} findings allowed)\n", .{ o.nodes, o.files, o.scanned, o.allowed });
+    try f.deprecatedWriter().print("python_closure: {d} targets, {d} files, {d} files read; no Python outside the allowlist ({d} findings allowed)\n", .{ o.nodes, o.files, o.scanned, o.allowed });
 }
 
 test {

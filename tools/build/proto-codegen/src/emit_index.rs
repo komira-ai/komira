@@ -374,6 +374,7 @@ mod tests {
     fn file_with(messages: Vec<IrMessage>) -> IrFile {
         IrFile {
             proto_path: "example/v1/jobs.proto".to_string(),
+            source_sha256: String::new(),
             proto_package: "komira.jobs.v1".to_string(),
             mojo_package: "komira_rpc_storage".to_string(),
             messages,

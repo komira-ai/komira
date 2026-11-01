@@ -27,6 +27,7 @@ from komira_arrow.primitive_array import PrimitiveArray
 from komira_arrow.record_batch import RecordBatch
 from komira_arrow.schema import Field, Schema
 from komira_arrow.batch_view import BatchView, batch_view_over
+from komira_arrow.morsel_view import MorselView
 
 from komira_arrow.multi_column_builder import (
     MultiColumnSink,
@@ -196,6 +197,9 @@ struct SumI64Agg(Aggregator):
         bo: Origin[mut=False]
     ](mut self, mut state: Int64, batch: BatchView[bo], i: Int):
         state += batch.col_i64(0).load[1](i)[0]
+
+    def input_is_null[V: MorselView](self, view: V, i: Int) -> Bool:
+        return view.col_is_null(0, i)
 
     def combine(mut self, mut into: Int64, var partial: Int64):
         into += partial

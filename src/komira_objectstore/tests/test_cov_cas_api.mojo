@@ -266,6 +266,29 @@ def test_discover_shard_ids_both_listing_shapes() raises:
     assert_equal(dids[1], String("s2"))
 
 
+def test_discover_shard_ids_skips_a_bare_key() raises:
+    # A shard is a directory under `_lineage/`: an object key directly under
+    # it (no `/` after the segment) has no lineage behind it and is not a
+    # shard id, on a flat backend and on a delimiter-honouring one alike.
+    var shared = SharedInMemoryConditionalStore()
+    var m = _manifest(shared, String("a/bare"))
+    _ = shared.put(Path.parse(String("idx/meta/_lineage/loose")), _body(1))
+    assert_equal(len(m.discover_shard_ids(String("idx/meta"))), 0)
+    _ = shared.put(Path.parse(String("idx/meta/_lineage/w1/_HEAD")), _body(1))
+    var ids = m.discover_shard_ids(String("idx/meta"))
+    assert_equal(len(ids), 1)
+    assert_equal(ids[0], String("w1"))
+    var df = DelimiterFaithfulConditionalStore()
+    var dm = CasManifestStore[DelimiterFaithfulConditionalStore](
+        store=df.clone(), prefix=String("a/dfbare")
+    )
+    _ = df.put(Path.parse(String("idx/meta/_lineage/loose")), _body(1))
+    _ = df.put(Path.parse(String("idx/meta/_lineage/s1/_HEAD")), _body(1))
+    var dids = dm.discover_shard_ids(String("idx/meta"))
+    assert_equal(len(dids), 1)
+    assert_equal(dids[0], String("s1"))
+
+
 def test_value_helpers() raises:
     var e = ManifestHead.empty()
     assert_equal(e.chunk_seq, Int64(-1))
@@ -423,6 +446,7 @@ def main() raises:
     test_deferred_head_cadence()
     test_sidecar_and_catalog()
     test_discover_shard_ids_both_listing_shapes()
+    test_discover_shard_ids_skips_a_bare_key()
     test_value_helpers()
     test_async_take_arms()
     print("[test_cov_cas_api] PASS")

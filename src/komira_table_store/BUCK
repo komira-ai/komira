@@ -38,6 +38,7 @@ mojo_library(
         "tests/test_group_commit_crash_atomicity.mojo",
         "tests/test_group_commit_e2e.mojo",
         "tests/test_group_commit_seams.mojo",
+        "tests/test_lost_slot_is_anchored.mojo",
         "tests/test_partitioned_table_store.mojo",
         "tests/test_partitioned_table_store_edges.mojo",
         "tests/test_table_store_async_commit_park_e2e.mojo",

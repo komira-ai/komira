@@ -16,13 +16,10 @@
 #     swap_likeliness_at, pending_swap, get_permutation).
 #   - n == 1 corner case: no slots to swap, machine is a no-op.
 #
-# NOTE: These tests run on the REAL wall-clock-driven state machine.
-# `begin_filter` calls `perf_counter_ns()` for the start time and
-# `end_filter` calls it again — the iteration's duration is whatever
-# the test loop takes. For determinism on KEEP/REVERT logic, we use a
-# `_test_step_with_synthetic_ns` private path (NOT exposed to production)
-# that calls the state-machine helpers directly with a chosen Float64
-# duration. See `_synthetic_*` test fixtures below.
+# NOTE: no test here reads or compares the wall clock. Every duration is
+# fed to the state machine through `record_duration_ns`, the entry point
+# `end_filter` itself calls after it measures the clock, so each
+# keep / revert / baseline decision is exact and reproducible.
 # =============================================================================
 
 from std.testing import TestSuite, assert_equal, assert_true, assert_false
@@ -42,36 +39,18 @@ from komira_eval.adaptive_filter import (
 
 
 # -----------------------------------------------------------------------------
-# Helper: run one cycle of begin/end with a synthetic duration.
-#
-# We can't easily inject synthetic ns through begin_filter / end_filter
-# (those call perf_counter_ns internally). Instead, the tests below that
-# need deterministic ns drive the internal state-machine helpers via a
-# carefully-constructed start_ns offset: pass `start_ns = U64::MAX -
-# desired_dur_ns` so end_filter's `now_ns - start_ns` resolves to a
-# specific positive value. This works because perf_counter_ns() is
-# monotonically increasing and the absolute time doesn't matter — only
-# the delta.
-#
-# Actually, the cleaner approach: pass start_ns ≈ now - desired_dur and
-# accept ~µs jitter. For the keep/revert assertions we use ratios with
-# >>µs differences so the jitter is irrelevant.
+# Helper: run one begin/end cycle with an exact duration.
 # -----------------------------------------------------------------------------
 
 
 def _drive_one_iter_synthetic_ns(mut af: AdaptiveFilter, synthetic_ns: UInt64):
-    """Drive one begin/end cycle with an approximately-synthetic duration.
+    """Drive one begin/record cycle with exactly `synthetic_ns`.
 
-    Uses real perf_counter_ns() but offsets the start to produce the
-    requested duration. Real clock jitter is on the order of µs — well
-    below the ms-scale differences we use in keep/revert tests.
+    `begin_filter` still applies the EXPLORE swap; the duration bypasses the
+    clock via `record_duration_ns`.
     """
-    var start = af.begin_filter()
-    # We want end_filter to see (now - start) ~= synthetic_ns. Since the
-    # iter body is empty, end_filter's perf_counter_ns() ~= start.
-    # Subtract synthetic_ns from start to backdate it.
-    var backdated_start = start - synthetic_ns
-    af.end_filter(backdated_start)
+    _ = af.begin_filter()
+    af.record_duration_ns(synthetic_ns)
 
 
 # -----------------------------------------------------------------------------
@@ -143,6 +122,7 @@ def test_warmup_baseline_populates() raises:
     for _ in range(5):
         _drive_one_iter_synthetic_ns(af, UInt64(1_000_000))
     assert_true(af.baseline_ns() < ADAPTIVE_FILTER_BASELINE_SENTINEL_NS)
+    assert_equal(af.baseline_ns(), Float64(1_000_000))
 
 
 def test_warmup_to_explore_transition_at_iter_5() raises:
@@ -193,7 +173,7 @@ def test_explore_entry_applies_swap() raises:
         if i != idx and i != idx + 1:
             assert_equal(perm[i], UInt32(i))
     # Complete the iteration so the AdaptiveFilter doesn't leak state.
-    af.end_filter(_start)
+    af.record_duration_ns(UInt64(1_000_000))
 
 
 # -----------------------------------------------------------------------------
@@ -220,7 +200,7 @@ def test_observe_revert_when_swap_regresses() raises:
     # EXPLORE entry will swap one pair. Get the slot index.
     var _start = af.begin_filter()
     var swapped_idx = af.pending_swap()
-    af.end_filter(_start - UInt64(10_000_000))  # this iter ran 10 ms
+    af.record_duration_ns(UInt64(10_000_000))  # this iter ran 10 ms
 
     # The remaining OBSERVE iters: 10 × 10 ms (terrible).
     for _ in range(Int(ADAPTIVE_FILTER_OBSERVE_ITERS)):
@@ -234,6 +214,8 @@ def test_observe_revert_when_swap_regresses() raises:
         assert_equal(post_perm[i], pre_perm[i])
     # Swap_likeliness for that slot should have halved (100 → 50).
     assert_equal(af.swap_likeliness_at(swapped_idx), UInt32(50))
+    # A revert leaves the baseline at the warmup mean.
+    assert_equal(af.baseline_ns(), Float64(1_000_000))
 
 
 def test_observe_keep_when_swap_improves() raises:
@@ -253,7 +235,7 @@ def test_observe_keep_when_swap_improves() raises:
     var _start = af.begin_filter()
     var swapped_idx = af.pending_swap()
     # Then 11 iters (EXPLORE + OBSERVE) at 1 ms each.
-    af.end_filter(_start - UInt64(1_000_000))  # first iter at 1 ms
+    af.record_duration_ns(UInt64(1_000_000))  # first iter at 1 ms
     for _ in range(Int(ADAPTIVE_FILTER_OBSERVE_ITERS)):
         _drive_one_iter_synthetic_ns(af, UInt64(1_000_000))
 
@@ -263,13 +245,107 @@ def test_observe_keep_when_swap_improves() raises:
     var perm = af.get_permutation()
     assert_equal(perm[swapped_idx], UInt32(swapped_idx + 1))
     assert_equal(perm[swapped_idx + 1], UInt32(swapped_idx))
-    # Baseline has dropped (was ~10ms, now ~1ms).
-    assert_true(af.baseline_ns() < baseline_pre)
+    # Baseline has dropped (was exactly 10 ms, now exactly 1 ms).
+    assert_equal(baseline_pre, Float64(10_000_000))
+    assert_equal(af.baseline_ns(), Float64(1_000_000))
     # Swap_likeliness slot stayed at 100 (keep resets to initial).
     assert_equal(
         af.swap_likeliness_at(swapped_idx),
         ADAPTIVE_FILTER_INITIAL_SWAP_LIKELINESS,
     )
+
+
+# -----------------------------------------------------------------------------
+# Exact boundaries — only possible with exact durations
+# -----------------------------------------------------------------------------
+
+
+def test_warmup_baseline_is_exact_mean_of_five_durations() raises:
+    """The baseline is the arithmetic mean of the 5 warmup durations."""
+    var af = AdaptiveFilter(n_predicates=4, worker_id=0)
+    var durations = List[UInt64]()
+    durations.append(UInt64(1000))
+    durations.append(UInt64(2000))
+    durations.append(UInt64(3000))
+    durations.append(UInt64(4000))
+    durations.append(UInt64(10_000))
+    for k in range(len(durations)):
+        _drive_one_iter_synthetic_ns(af, durations[k])
+    assert_equal(af.baseline_ns(), Float64(4000))
+
+
+def test_end_filter_clamps_a_start_in_the_future_to_zero() raises:
+    """`end_filter` measures `now - start`; a start time after `now` (clock
+    skew) is clamped to a zero duration instead of wrapping. A start of
+    UInt64.MAX is after any reading, so this holds on every machine with no
+    clock comparison: five such iterations leave the baseline at exactly 0."""
+    var af = AdaptiveFilter(n_predicates=4, worker_id=0)
+    for _ in range(5):
+        _ = af.begin_filter()
+        af.end_filter(UInt64.MAX)
+    assert_equal(af.total_iterations(), UInt64(5))
+    assert_equal(af.current_phase(), ADAPTIVE_FILTER_PHASE_EXPLORE)
+    assert_equal(af.baseline_ns(), Float64(0))
+
+
+def _run_one_window(mut af: AdaptiveFilter, first_ns: UInt64, rest_ns: UInt64):
+    """One EXPLORE iter at `first_ns`, then the OBSERVE iters at `rest_ns`."""
+    _ = af.begin_filter()
+    af.record_duration_ns(first_ns)
+    for _ in range(Int(ADAPTIVE_FILTER_OBSERVE_ITERS)):
+        _drive_one_iter_synthetic_ns(af, rest_ns)
+
+
+def test_observe_window_mean_equal_to_baseline_reverts() raises:
+    """The keep test is strict `mean < baseline`: a window whose mean equals
+    the baseline reverts (and halves the slot)."""
+    var af = AdaptiveFilter(n_predicates=4, worker_id=0)
+    for _ in range(5):
+        _drive_one_iter_synthetic_ns(af, UInt64(1_000))
+    var idx = -1
+    _ = af.begin_filter()
+    idx = af.pending_swap()
+    af.record_duration_ns(UInt64(1_000))
+    for _ in range(Int(ADAPTIVE_FILTER_OBSERVE_ITERS)):
+        _drive_one_iter_synthetic_ns(af, UInt64(1_000))
+    var perm = af.get_permutation()
+    for i in range(4):
+        assert_equal(perm[i], UInt32(i))
+    assert_equal(af.swap_likeliness_at(idx), UInt32(50))
+    assert_equal(af.baseline_ns(), Float64(1_000))
+
+
+def test_observe_window_mean_one_ns_below_baseline_keeps() raises:
+    """11 samples summing to 11 * baseline - 11 (mean one ns lower) keep."""
+    var af = AdaptiveFilter(n_predicates=4, worker_id=0)
+    for _ in range(5):
+        _drive_one_iter_synthetic_ns(af, UInt64(1_000))
+    _ = af.begin_filter()
+    var idx = af.pending_swap()
+    af.record_duration_ns(UInt64(999))
+    for _ in range(Int(ADAPTIVE_FILTER_OBSERVE_ITERS)):
+        _drive_one_iter_synthetic_ns(af, UInt64(999))
+    var perm = af.get_permutation()
+    assert_equal(perm[idx], UInt32(idx + 1))
+    assert_equal(perm[idx + 1], UInt32(idx))
+    assert_equal(af.baseline_ns(), Float64(999))
+
+
+def test_observe_window_averages_explore_iter_with_observe_iters() raises:
+    """The EXPLORE iter is the first of the 11 window samples, so the window
+    mean is (first + 10 * rest) / 11 and decides keep vs revert."""
+    var af = AdaptiveFilter(n_predicates=4, worker_id=0)
+    for _ in range(5):
+        _drive_one_iter_synthetic_ns(af, UInt64(1_000))
+    # (1011 + 10 * 999) / 11 = 11001 / 11 = 1000.09 >= 1000: revert.
+    _run_one_window(af, UInt64(1_011), UInt64(999))
+    assert_equal(af.baseline_ns(), Float64(1_000))
+    var perm = af.get_permutation()
+    for i in range(4):
+        assert_equal(perm[i], UInt32(i))
+    # (1000 + 10 * 999) / 11 = 10990 / 11 = 999.09 < 1000: keep.
+    _run_one_window(af, UInt64(1_000), UInt64(999))
+    assert_equal(af.baseline_ns(), Float64(10_990) / Float64(11))
 
 
 # -----------------------------------------------------------------------------
@@ -326,8 +402,8 @@ def test_different_worker_ids_explore_paths_diverge() raises:
     assert_true(idx0 >= 0 and idx0 < 3)
     assert_true(idx1 >= 0 and idx1 < 3)
     # Complete the iters so the AdaptiveFilters don't leak state.
-    af0.end_filter(_s0)
-    af1.end_filter(_s1)
+    af0.record_duration_ns(UInt64(1_000_000))
+    af1.record_duration_ns(UInt64(1_000_000))
     # NOTE: idx0 and idx1 may coincidentally match — RNG can pick the
     # same slot in two independent streams. The distinctness guarantee
     # is at the RNG layer; this test just verifies no crash + both

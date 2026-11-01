@@ -10,6 +10,8 @@
 // typed array, a Vector or an array. The imports from apache-arrow are
 // types only: esbuild drops them, so the bundle carries no Arrow code.
 
+import { mkdirSync, readdirSync, rmdirSync, unlinkSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import type { Float64, Int64, RecordBatch, Vector } from 'apache-arrow';
 
 type I64 = bigint | null;
@@ -216,6 +218,43 @@ export function* raise_again(_batches: Iterable<RecordBatch>): Generator<Table> 
   throw new Error('raise_again: raised');
 }
 
+// A batch function that raises naming no row when its batch holds the
+// value 5: the host bisects the batch to find the row.
+export function raise_minus_one_if_row5(x: Vector<Int64>): Vector<Int64> {
+  for (let i = 0; i < x.length; i++) if (x.get(i) === 5n) throw new Error('raise_minus_one_if_row5: the batch holds the value 5');
+  return x;
+}
+
+// A VOLATILE batch function that counts the batches it ran (per worker, so
+// per context) and raises naming no row; a batch whose row 0 is -1 returns
+// the count in every row instead.
+let volatileRuns = 0n;
+export function volatile_count_raise(x: Vector<Int64>): BigInt64Array {
+  if (x.length > 0 && x.get(0) === -1n) return new BigInt64Array(x.length).fill(volatileRuns);
+  volatileRuns += 1n;
+  throw new Error('volatile_count_raise: raised after counting this run');
+}
+
+// A frame over no columns: a one-row table of each batch's row count.
+export function* frame_row_counts(batches: Iterable<RecordBatch>): Generator<Table> {
+  for (const b of batches) yield { numRows: 1, columns: [[BigInt(b.numRows)]] };
+}
+
+// ROW over any read set, the empty one included: 7 per row.
+export function row_const(_r: Record<string, unknown>): bigint {
+  return 7n;
+}
+
+// Yields its first three input batches unchanged, then raises.
+export function* yield_three_then_raise(batches: Iterable<RecordBatch>): Generator<RecordBatch> {
+  let n = 0;
+  for (const b of batches) {
+    if (n === 3) throw new Error('yield_three_then_raise: a fourth batch');
+    n++;
+    yield b;
+  }
+}
+
 // ---- this runtime's own cases --------------------------------------------------
 
 // Rows seen by this module in this process: a module global, so each worker
@@ -243,13 +282,51 @@ export function spin_forever(x: Vector<Int64>): Vector<Int64> {
   for (;;) if (x.length < 0) return x;
 }
 
-// Spins on the CPU for `ms` milliseconds of wall time per row.
-export function spin(ms: bigint): bigint {
-  const end = performance.now() + Number(ms);
-  while (performance.now() < end) {
-    // busy
+// A rendezvous across worker processes: returns `n` once `n` live workers
+// of the one engine process (their common parent) have each entered this
+// function, and fails if they have not within RENDEZVOUS_SAFETY_MS. Each
+// worker announces itself with a file named by its pid in a directory keyed
+// by the parent pid, and counts the announced pids that are still alive.
+// Workers served one after another can never see each other here, so the
+// call returns only if the workers really run at the same time. The safety
+// limit only ends a hang with an error; no result depends on it being short.
+const RENDEZVOUS_SAFETY_MS = 60_000;
+
+function pidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
   }
-  return ms;
+}
+
+let announced = false;
+
+export function rendezvous(n: bigint): bigint {
+  const want = Number(n);
+  const dir = join(process.env.TMPDIR ?? '/tmp', `komira-udf-rendezvous-${process.ppid}`);
+  mkdirSync(dir, { recursive: true });
+  const mine = join(dir, String(process.pid));
+  if (!announced) {
+    announced = true;
+    writeFileSync(mine, '');
+    process.once('exit', () => {
+      try {
+        unlinkSync(mine);
+        rmdirSync(dir);
+      } catch {
+        // another worker's file remains, or it is already gone
+      }
+    });
+  }
+  const end = performance.now() + RENDEZVOUS_SAFETY_MS;
+  for (;;) {
+    const here = readdirSync(dir).filter((f) => pidAlive(Number(f))).length;
+    if (here >= want) return n;
+    if (performance.now() >= end) throw new Error(`rendezvous: ${here} of ${want} workers arrived`);
+    sleepMs(2);
+  }
 }
 
 export function returns_float(_x: I64): number {
