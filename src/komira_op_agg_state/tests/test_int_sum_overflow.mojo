@@ -276,6 +276,22 @@ def test_exact_int_agg_mean_divides_the_unnarrowed_total() raises:
     assert_true(a.mean() == Float64(1.0) / Float64(3.0))
 
 
+def test_exact_int_agg_mean_is_duckdbs_long_double_division() raises:
+    # DuckDB divides the exact total in 80-bit long double and rounds once:
+    # -(2^64 + 2049) over 3 rows is exactly -6148914691236517888 (one rounding
+    # of the total to a double gives -6.148914691236519e+18), and 2473 over 2051
+    # rows is the double below the double division (a 64-bit rounding lands on
+    # a midpoint 2^-53/2051 below the quotient, and the tie goes to even).
+    var p64 = _i128(1) << 64
+    var a = _state(3, -(p64 + 2049), 0, 0)
+    assert_true(a.mean() == Float64(-6148914691236517888.0))
+    var b = _state(2051, _i128(2473), 0, 0)
+    assert_true(
+        b.mean()
+        == Float64(2473.0) / Float64(2051.0) - Float64(2.220446049250313e-16)
+    )
+
+
 # =============================================================================
 # The two-word 128-bit cell
 # =============================================================================
