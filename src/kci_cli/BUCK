@@ -113,10 +113,14 @@ mojo_library(
         # registry then NOOP, a read-back mismatch INDETERMINATE, --plan sends
         # nothing, the step holds the set, trust, the binary's refusal, the flag
         "tests/test_kci_cell_publish.mojo",
+        # platform_env returns an environment value's bytes exactly
+        "tests/test_kci_platform_env_non_ascii.mojo",
     ],
     test_env = {
         # resolved by name through --secret-store=env's store
         "KCI_CLI_TEST_SECRET": "kci-cli-test-value",
+        # a value with a byte at or above 0x80 (U+00E9)
+        "KCI_CLI_TEST_NON_ASCII": "/work/café",
     },
     test_data = {
         "tests/test_exit_numbers_in_one_place.mojo": {

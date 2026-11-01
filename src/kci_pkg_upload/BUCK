@@ -76,6 +76,9 @@ mojo_library(
         "tests/test_pkg_upload_oidc_edges.mojo",
         # the production transport over a scripted connector (nothing dials)
         "tests/test_pkg_upload_http_transport_scripted.mojo",
+        # a byte at or above 0x80 in a distribution name: kept by the
+        # normaliser, refused before the JSON API path is built
+        "tests/test_pkg_upload_non_ascii_names.mojo",
     ],
     test_data = {
         "tests/test_pkg_upload_uv_fidelity.mojo": glob([
