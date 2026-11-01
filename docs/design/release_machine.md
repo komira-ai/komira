@@ -27,7 +27,7 @@ Two layers produce a shipped artifact, and this document is about the first:
 2. **The release machine** runs the build, then stages and publishes what it
    made, deploys it where it is a service, and validates the outcome in the
    cell it deployed to. Its driver was `kci` (`kci run --stage <S>`, the
-   `src/kci_*` libraries), which is retired (its relevant logic is being ported to ucdk, komira-ai/ucdk)
+   `src/kci_*` libraries), which is retired (its relevant logic is being ported to ucdk, komira-ai/ucdk);
    no workflow runs it. The release today is
    `.github/workflows/release.yml` ([docs/ci.md](../ci.md#releaseyml-the-release)):
    Buck2 targets build the release set and the pinned mopm publishes. kci built
