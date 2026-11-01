@@ -1,5 +1,7 @@
 # Native code in conda packages: each library ships its own
 
+> **kci is retired and removed.** Where this document names kci, its libraries (`src/kci_*`), `bin/kci`, `kci.yml` or `kci run`, it describes a design that no longer exists in the tree; it is kept as a record. The release today is `.github/workflows/release.yml`, and the pull request check is the `check` job of `pr.yml` ([docs/ci.md](../ci.md)).
+
 Status: plan, built in part (part of slice 9, #1391; slice 11, the beta wiring). Each item is marked **EXISTS** (with the
 path on `main` that does it) or **PROPOSED**. "On #NNN" means the code is on that open pull request and not on `main`. Scope:
 linux-64 (ELF) only; Mach-O (osx-arm64: install names, `@rpath`, exported-symbol lists, the two-level
