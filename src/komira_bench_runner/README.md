@@ -105,9 +105,12 @@ komira_bench_runner_main
   [--threads N] [--memory-limit-bytes N] [--duckdb-version V]
   [--warm-sweeps N] [--warm-reps N] [--cold-sweeps N --cold-reps N --drop-caches-file PATH]
   [--pass-max X] [--max-silence-ms N]
+  [--js-measure-result]
 ```
 
 Every value is a flag; nothing is read from the environment. The DuckDB binary is checked against the pin before it is started. The dataset is verified against its manifest, and its lock (`<cache-dir>/locks/`) is read and verified or, if there is none, written from that verification; the lock's fingerprint is in the result. The query text is the file with its trailing newlines and spaces removed. The host class is an opaque label you choose, never the output of `hostname`. `--cores` and `--mem-bytes` are asserted by the caller and written to the result as given; the program does not detect them (the default thread count is `--cores`).
+
+`--js-measure-result` (no value) adds an optional machine-readable summary: after `warm/result.json` is written and the report is printed, the program prints one last line, `js-measure-result ` and a single line of compact JSON with the four members `steady_ms`, `first_run_ms`, `duckdb_steady_ms` and `verdict`. They are fields of the warm result's cell, in milliseconds: komira's `ms`, komira's `first_run.ms`, DuckDB's `ms`, and the cell's `verdict`. A value the run did not produce is `null`, never 0; a cell that was not timed (refused or answered wrongly) has no first run, and its check runs are not given in its place. If the line cannot be built, the report is still printed, followed by one line `error: js-measure-result: <reason>` instead, and the exit status is the run's. The line is under 8 KiB and nothing is printed after it. Without the flag the output is as it was. `--scale` is the manifest's spelling (`sf1`), not a bare number.
 
 Exit status: 0 only when every query ran and its values matched, 1 otherwise (a refused query is 1), 2 for a bad argument or a fault of the run.
 
@@ -120,4 +123,4 @@ Exit status: 0 only when every query ran and its values matched, 1 otherwise (a 
 
 ## Tests
 
-`tests/test_inputs.mojo` (digests, tables and scale, flags, the refusal arm, settings), `tests/test_runner.mojo` (the run over a DuckDB transport, an arm and a cache dropper that live in the test, with a manual clock) and `tests/test_komira_arm.mojo` (the real engine arm over a lineitem-shaped Parquet file and a DuckDB stand-in whose Q6 answer is computed in the test, and the conversion of result batches). No test asserts a duration the machine produced: every time is a number the fakes add to the clock. Each test file's header says what each test proves.
+`tests/test_inputs.mojo` (digests, tables and scale, flags, the refusal arm, settings), `tests/test_js_measure.mojo` (the summary line and the flag), `tests/test_runner.mojo` (the run over a DuckDB transport, an arm and a cache dropper that live in the test, with a manual clock) and `tests/test_komira_arm.mojo` (the real engine arm over a lineitem-shaped Parquet file and a DuckDB stand-in whose Q6 answer is computed in the test, and the conversion of result batches). No test asserts a duration the machine produced: every time is a number the fakes add to the clock. Each test file's header says what each test proves.
