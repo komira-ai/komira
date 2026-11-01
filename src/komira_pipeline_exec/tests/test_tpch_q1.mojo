@@ -17,8 +17,11 @@
 # is held in cents, so the expected sums are integers computed here, row by
 # row, from the same table, never from the engine; the sums are compared as
 # DECIMAL(38,s) values (the unscaled 128-bit integer, its precision and
-# scale), the averages as DOUBLEs computed as the design says (one conversion
-# of the exact sum and one division by the count). What these tests prove:
+# scale), the averages as the DOUBLEs of DuckDB's avg() of a DECIMAL(15, 2)
+# (`avg_decimal_float64` of the exact sum, the count and the scale: its
+# arithmetic is held to DuckDB by the unit tests of komira_scalar_arithmetic and
+# by komira_decimal_compare_conformance; what these tests hold is that the plan
+# feeds it the right sum and count). What these tests prove:
 #
 #   * On eight rows the oracle's answer is the hand-computed one (the numbers
 #     are written out below), and the plan returns it, sorted, from the
@@ -61,6 +64,7 @@ from komira_pipeline_exec.tpch_q1 import (
 from komira_plan_expr.expr_pool import ExprPool
 from komira_runtime_paths import test_tmpdir
 from komira_scalar_arithmetic.decimal_arith import I128
+from komira_scalar_arithmetic.decimal_avg import avg_decimal_float64
 
 
 def _w(v: Int) -> I128:
@@ -181,20 +185,19 @@ def _check(ref out: RecordBatch, ref t: Q1Table) raises:
         _check_decimal(out, 3, i, g.price, 2, "sum_base_price of " + who)
         _check_decimal(out, 4, i, g.disc_price, 4, "sum_disc_price of " + who)
         _check_decimal(out, 5, i, g.charge, 6, "sum_charge of " + who)
-        var n = Float64(g.count)
         assert_equal(
             out.column_at(6).as_primitive[DType.float64]().get(i),
-            Float64(g.qty) / 100.0 / n,
+            avg_decimal_float64(_w(g.qty), g.count, 15, 2),
             "avg_qty of " + who,
         )
         assert_equal(
             out.column_at(7).as_primitive[DType.float64]().get(i),
-            Float64(g.price) / 100.0 / n,
+            avg_decimal_float64(_w(g.price), g.count, 15, 2),
             "avg_price of " + who,
         )
         assert_equal(
             out.column_at(8).as_primitive[DType.float64]().get(i),
-            Float64(g.disc) / 100.0 / n,
+            avg_decimal_float64(_w(g.disc), g.count, 15, 2),
             "avg_disc of " + who,
         )
         assert_equal(

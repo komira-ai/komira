@@ -43,6 +43,7 @@ from komira_pipeline_exec.tpch_q1 import (
 from komira_plan_expr.expr_pool import ExprPool
 from komira_runtime_paths import test_tmpdir
 from komira_scalar_arithmetic.decimal_arith import I128
+from komira_scalar_arithmetic.decimal_avg import avg_decimal_float64
 
 comptime WORKERS = 4
 comptime RUNS = 12
@@ -157,11 +158,11 @@ def _run_many(
             )
             assert_equal(
                 batch.column_at(6).as_primitive[DType.float64]().get(i),
-                Float64(want[i].qty) / 100.0 / Float64(want[i].count),
+                avg_decimal_float64(_w(want[i].qty), want[i].count, 15, 2),
             )
             assert_equal(
                 batch.column_at(8).as_primitive[DType.float64]().get(i),
-                Float64(want[i].disc) / 100.0 / Float64(want[i].count),
+                avg_decimal_float64(_w(want[i].disc), want[i].count, 15, 2),
             )
             assert_true(
                 batch.column_at(4).as_decimal128().get_i128(i)
@@ -175,7 +176,7 @@ def _run_many(
             )
             assert_equal(
                 batch.column_at(7).as_primitive[DType.float64]().get(i),
-                Float64(want[i].price) / 100.0 / Float64(want[i].count),
+                avg_decimal_float64(_w(want[i].price), want[i].count, 15, 2),
             )
             assert_equal(
                 Int(batch.column_at(9).as_primitive[DType.int64]().get(i)),
