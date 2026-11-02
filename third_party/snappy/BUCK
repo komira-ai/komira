@@ -257,9 +257,10 @@ _NATIVE_FILES = [
 # snappy as buildrules' native_library builds it, for the mopm package komira_compression
 # (`natives = {"libsnappy.a": ...}`): `libsnappy.a`, C++17, the flags of the compile above, the same two config.h
 # (by cpu, and macOS and Linux write the same macros for one cpu) and the same renaming: the C API (snappy-c.h)
-# is komira_snappy_*, and the C++ names of namespace snappy (_ZN6snappy...) stay, which the prefix's `cxx_namespaces` allows. It carries zig's libc++
-# into the link of a program that includes it (`cxx_runtime`, derived from the .cc files). :snappy above is unchanged: it is what
-# the packages still on the older rules link.
+# is komira_snappy_*, and the C++ names of namespace snappy (_ZN6snappy...) stay, which the prefix's `cxx_namespaces` allows.
+# `cxx_runtime` says the library is C++ (checked against the .cc files); a program that links it gets libc++ because the
+# package that ships it says so (`[native.snappy] link = ["c++"]` of src/komira_compression/mopm.toml). :snappy above is
+# unchanged: it is what the packages still on the older rules link.
 native_library(
     name = "snappy_native",
     upstream = {

@@ -27,9 +27,10 @@
 # FFI-BOUNDARY discipline:
 #   - All conformer compress/decompress methods accept `Span[UInt8, _]`
 #     (origin-polymorphic, safe surface — encapsulation rule).
-#   - The Zstd conformer calls libzstd through `_zstd_handle()`
-#     (codec_libraries.mojo) for its decompression contexts and its
-#     pointer-taking `*_into` methods; helpers use `.unsafe_ptr()` +
+#   - The Zstd conformer's `compress` goes through zstd_frame.mojo; it
+#     calls libzstd through `_zstd_handle()` (codec_libraries.mojo) for its
+#     decompression contexts (each boxed with the handle as a `_ZstdDCtx`)
+#     and its pointer-taking `*_into` methods; helpers use `.unsafe_ptr()` +
 #     `.unsafe_origin_cast[MutUntrackedOrigin]()` ONLY at those call sites,
 #     with `# FFI-BOUNDARY:` comments.
 #   - The Snappy / Zstd / Uncompressed conformers each build a
@@ -42,6 +43,7 @@
 # with their own process-lifetime singletons and known-answer tests.
 # =============================================================================
 
+from std.ffi import OwnedDLHandle
 from std.memory import OwnedPointer, unsafe_memcpy, alloc
 
 from komira_compression.codec_libraries import _zstd_handle
@@ -51,6 +53,10 @@ from komira_compression.snappy_block import (
     snappy_max_compressed_length,
     snappy_uncompress_into,
     snappy_uncompressed_length,
+)
+from komira_compression.zstd_frame import (
+    zstd_compress_bound,
+    zstd_compress_into,
 )
 from komira_lz4.codec import (
     lz4_compress_bound,
@@ -128,6 +134,16 @@ def _list_ptr(
     # because the caller pre-reserved capacity (no append happens between
     # this call and consumption of the pointer).
     return buf.unsafe_ptr().unsafe_origin_cast[MutUntrackedOrigin]()
+
+
+def _require_dctx(
+    dctx: UnsafePointer[UInt8, MutUntrackedOrigin], refusal: String
+) raises:
+    """Raise `refusal` when `dctx` is null (a context that was never created,
+    or one the codec library could not allocate)."""
+    # SAFETY: the pointer is only compared with null, never dereferenced.
+    if Int(dctx) == 0:
+        raise Error(refusal)
 
 
 # =============================================================================
@@ -312,11 +328,7 @@ struct Snappy(Compression):
         # SAFETY: the `max_out` bytes are the List's reserved capacity; snappy
         # writes the block into them and the List is cut to what it wrote.
         out.resize(unsafe_uninit_length=max_out)
-        var written: Int
-        try:
-            written = snappy_compress_into(Span(out), input)
-        except e:
-            raise Error("Snappy.compress: " + String(e))
+        var written = snappy_compress_into(Span(out), input)
         out.resize(unsafe_uninit_length=written)
         return out^
 
@@ -367,6 +379,20 @@ struct Snappy(Compression):
 
 
 @fieldwise_init
+struct _ZstdDCtx(Movable):
+    """What `Zstd.create_dctx` boxes: a `ZSTD_DCtx*` and the libzstd handle
+    that made it. `free_dctx` frees the context through `_handle`, so the
+    path that cannot raise needs no handle lookup (which raises)."""
+
+    # SAFETY: the context `ZSTD_createDCtx` returned, owned by the box until
+    # `Zstd.free_dctx` frees it; only libzstd dereferences it.
+    var _dctx: UnsafePointer[UInt8, MutUntrackedOrigin]
+    # SAFETY: the process-lifetime libzstd handle slot of codec_libraries.mojo
+    # (`_zstd_handle()`), which is never freed.
+    var _handle: UnsafePointer[OwnedDLHandle, MutUntrackedOrigin]
+
+
+@fieldwise_init
 struct Zstd[level: Int = 3](ArrowIpcCompression):
     """The libzstd FFI compression codec. Parquet codec id 6.
 
@@ -389,26 +415,15 @@ struct Zstd[level: Int = 3](ArrowIpcCompression):
 
     @staticmethod
     def compress(input: Span[UInt8, _]) raises -> List[UInt8]:
-        var n = len(input)
-        var handle_ptr = _zstd_handle()
-        var bound = handle_ptr[].call["ZSTD_compressBound", Int](n)
+        # One frame through zstd_frame.mojo, into a destination of
+        # `ZSTD_compressBound` bytes (always enough).
+        var bound = zstd_compress_bound(len(input))
         var out = List[UInt8](capacity=bound)
-
-        # FFI-BOUNDARY:
-        var result = handle_ptr[].call["ZSTD_compress", Int](
-            _list_ptr(out),
-            bound,
-            _span_ptr(input),
-            n,
-            Int32(Self.level),
-        )
-        var is_err = handle_ptr[].call["ZSTD_isError", Int](result)
-        if is_err != 0:
-            raise Error(
-                "Zstd.compress: ZSTD_compress failed (result="
-                + String(result) + ", n=" + String(n) + ")"
-            )
-        out.resize(unsafe_uninit_length=result)
+        # SAFETY: the `bound` bytes are the List's reserved capacity; libzstd
+        # writes the frame into them and the List is cut to what it wrote.
+        out.resize(unsafe_uninit_length=bound)
+        var written = zstd_compress_into(Span(out), input, Int32(Self.level))
+        out.resize(unsafe_uninit_length=written)
         return out^
 
     @staticmethod
@@ -441,10 +456,10 @@ struct Zstd[level: Int = 3](ArrowIpcCompression):
 
     @staticmethod
     def create_dctx() raises -> UnsafePointer[UInt8, MutUntrackedOrigin]:
-        """Create a `ZSTD_DCtx*` via `ZSTD_createDCtx()`. The returned
-        pointer is opaque to the caller; pass through `free_dctx` /
-        `decompress_into_with_dctx`. Raises on alloc failure (null
-        return from libzstd, indicates OOM).
+        """Create a `ZSTD_DCtx*` via `ZSTD_createDCtx()`, boxed with the
+        libzstd handle as a `_ZstdDCtx`. The returned pointer is opaque to
+        the caller; pass through `free_dctx` / `decompress_into_with_dctx`.
+        Raises on alloc failure (null return from libzstd, indicates OOM).
         """
         var handle_ptr = _zstd_handle()
         # FFI-BOUNDARY: ZSTD_createDCtx() returns a ZSTD_DCtx* (opaque);
@@ -453,28 +468,35 @@ struct Zstd[level: Int = 3](ArrowIpcCompression):
             "ZSTD_createDCtx",
             UnsafePointer[UInt8, MutUntrackedOrigin],
         ]()
-        if Int(dctx) == 0:
-            raise Error(
-                "Zstd.create_dctx: ZSTD_createDCtx returned null (OOM)"
-            )
-        return dctx
+        _require_dctx(
+            dctx, "Zstd.create_dctx: ZSTD_createDCtx returned null (OOM)"
+        )
+        # SAFETY: a fresh one-element allocation, initialised on the next
+        # line before any read. Its single owner is the returned pointer until
+        # `free_dctx` reclaims it.
+        var box = alloc[_ZstdDCtx](1)
+        box.unsafe_write(_ZstdDCtx(dctx, handle_ptr))
+        return box.bitcast[UInt8]().unsafe_origin_cast[MutUntrackedOrigin]()
 
     @staticmethod
     def free_dctx(var dctx: UnsafePointer[UInt8, MutUntrackedOrigin]):
-        """Release a `ZSTD_DCtx*` via `ZSTD_freeDCtx(dctx)`. Null-safe."""
+        """Release a context from `create_dctx`: `ZSTD_freeDCtx` on the
+        context, through the handle boxed with it, then the box. Null-safe.
+        """
         if Int(dctx) == 0:
             return
-        try:
-            var handle_ptr = _zstd_handle()
-            # FFI-BOUNDARY: ZSTD_freeDCtx returns a size_t result; for
-            # the well-formed pointer case it returns 0, but we don't
-            # check (destructor path, can't raise).
-            var _rc = handle_ptr[].call["ZSTD_freeDCtx", Int](dctx)
-        except:
-            # Destructor swallows handle-lookup errors (process-lifetime
-            # singleton; failure here implies a deeper system issue
-            # we can't recover from in a __deinit__ path).
-            pass
+        # SAFETY: `dctx` is the byte view of the `alloc[_ZstdDCtx](1)` box
+        # `create_dctx` filled, released here exactly once (the trait
+        # contract), so this `OwnedPointer` is its single owner: dropping it
+        # frees the box.
+        var owned = OwnedPointer[_ZstdDCtx](
+            unsafe_from_raw_pointer=dctx.bitcast[_ZstdDCtx]()
+        )
+        # FFI-BOUNDARY: ZSTD_freeDCtx returns a size_t result; for the
+        # well-formed pointer case it returns 0, but we don't check
+        # (destructor path, can't raise).
+        var _rc = owned[]._handle[].call["ZSTD_freeDCtx", Int](owned[]._dctx)
+        _ = owned^
 
     @staticmethod
     def decompress_into_with_dctx[
@@ -499,25 +521,30 @@ struct Zstd[level: Int = 3](ArrowIpcCompression):
                 "Zstd.decompress_into_with_dctx: dst_capacity must be > 0 "
                 "(got " + String(dst_capacity) + ")"
             )
-        if Int(dctx) == 0:
-            raise Error(
-                "Zstd.decompress_into_with_dctx: null dctx (call "
-                "create_dctx first)"
-            )
-        var handle_ptr = _zstd_handle()
+        _require_dctx(
+            dctx,
+            "Zstd.decompress_into_with_dctx: null dctx (call create_dctx"
+            " first)",
+        )
+        # SAFETY: the trait contract: `dctx` came from `create_dctx` (a boxed
+        # `_ZstdDCtx`, live until `free_dctx`) and is used by one worker at a
+        # time.
+        var boxed = dctx.bitcast[_ZstdDCtx]()
+        var zdctx = boxed[]._dctx
+        var handle_ptr = boxed[]._handle
         # FFI-BOUNDARY: ZSTD_DCtx_reset(dctx, 1) where
         # ZSTD_reset_session_only = 1 per zstd.h `ZSTD_ResetDirective`
         # enum. Resets the streaming session but preserves any cached
         # parameters/dictionaries (which we don't use; the call is
         # cheap regardless).
         var _reset_rc = handle_ptr[].call["ZSTD_DCtx_reset", Int](
-            dctx, Int32(1)
+            zdctx, Int32(1)
         )
         # FFI-BOUNDARY: ZSTD_decompressDCtx is the dctx-using variant of
         # ZSTD_decompress; same semantics, but reuses the passed context
         # instead of allocating a fresh one.
         var result = handle_ptr[].call["ZSTD_decompressDCtx", Int](
-            dctx,
+            zdctx,
             dst.unsafe_origin_cast[MutUntrackedOrigin](),
             dst_capacity,
             _span_ptr(src),
@@ -691,10 +718,7 @@ struct Gzip[level: Int = 6](Compression):
 
     @staticmethod
     def compress(input: Span[UInt8, _]) raises -> List[UInt8]:
-        try:
-            return Self._deflate_zlib(input, 0)
-        except e:
-            raise Error("Gzip.compress: " + String(e))
+        return Self._deflate_zlib(input, 0)
 
     @staticmethod
     def compress_gzip_file(input: Span[UInt8, _]) raises -> List[UInt8]:
@@ -714,20 +738,13 @@ struct Gzip[level: Int = 6](Compression):
         place. The deflate payload — all of it — is never moved.
         """
         var n = len(input)
-        var out: List[UInt8]
-        var crc: UInt32
-        try:
-            # 8 leading bytes, so the deflate body lands at 10.
-            out = Self._deflate_zlib(input, 8)
-            crc = zlib_crc32(input)
-        except e:
-            raise Error("Gzip.compress_gzip_file: " + String(e))
+        # 8 leading bytes, so the deflate body lands at 10.
+        var out = Self._deflate_zlib(input, 8)
+        var crc = zlib_crc32(input)
+        # A zlib stream is at least 8 bytes (the 2-byte header, the 2-byte
+        # empty final block of an empty input, the 4-byte adler32), so the
+        # header and trailer below overwrite bytes the stream wrote.
         var zlen = len(out) - 8
-        if zlen < 6:
-            raise Error(
-                "Gzip.compress_gzip_file: zlib stream too short to reframe"
-                " (zlen=" + String(zlen) + ")"
-            )
 
         # RFC 1952 §2.3 header: magic, CM=8 (deflate), FLG=0 (no name/extra),
         # MTIME=0 (no timestamp — keeps the output BYTE-DETERMINISTIC, which a
@@ -886,15 +903,11 @@ struct Lz4Raw(Compression):
         # The block format carries NO length/frame prefix — the caller stores
         # the uncompressed size out-of-band (Parquet page header carries it).
         # An empty input is the one-byte empty block 0x00.
-        var out: List[UInt8]
-        try:
-            var bound = lz4_compress_bound(len(input))
-            out = List[UInt8](capacity=bound)
-            out.resize(unsafe_uninit_length=bound)
-            var written = lz4_compress_into(Span(out), input)
-            out.resize(written, UInt8(0))
-        except e:
-            raise Error("Lz4Raw.compress: " + String(e))
+        var bound = lz4_compress_bound(len(input))
+        var out = List[UInt8](capacity=bound)
+        out.resize(unsafe_uninit_length=bound)
+        var written = lz4_compress_into(Span(out), input)
+        out.resize(written, UInt8(0))
         return out^
 
     @staticmethod
@@ -972,15 +985,11 @@ struct Lz4Frame(ArrowIpcCompression):
     def compress(input: Span[UInt8, _]) raises -> List[UInt8]:
         # Default preferences (liblz4's NULL prefs), so the bytes are the ones
         # `compress_into` writes.
-        var out: List[UInt8]
-        try:
-            var bound = lz4_frame_compress_bound(len(input))
-            out = List[UInt8](capacity=bound)
-            out.resize(unsafe_uninit_length=bound)
-            var written = lz4_frame_compress_into(Span(out), input)
-            out.resize(written, UInt8(0))
-        except e:
-            raise Error("Lz4Frame.compress: " + String(e))
+        var bound = lz4_frame_compress_bound(len(input))
+        var out = List[UInt8](capacity=bound)
+        out.resize(unsafe_uninit_length=bound)
+        var written = lz4_frame_compress_into(Span(out), input)
+        out.resize(written, UInt8(0))
         return out^
 
     @staticmethod
@@ -1040,11 +1049,7 @@ struct Lz4Frame(ArrowIpcCompression):
         + LZ4F_freeDecompressionContext pair per compressed buffer.
         Same pattern as arrow-cpp's per-thread dctx cache.
         """
-        var decoder: Lz4FrameDecoder
-        try:
-            decoder = Lz4FrameDecoder()
-        except e:
-            raise Error("Lz4Frame.create_dctx: " + String(e))
+        var decoder = Lz4FrameDecoder()
         # SAFETY: a fresh one-element allocation, move-initialised on the next
         # line before any read. Its single owner is the returned pointer until
         # `free_dctx` reclaims it.
@@ -1091,11 +1096,11 @@ struct Lz4Frame(ArrowIpcCompression):
                 "Lz4Frame.decompress_into_with_dctx: dst_capacity must"
                 " be > 0 (got " + String(dst_capacity) + ")"
             )
-        if Int(dctx) == 0:
-            raise Error(
-                "Lz4Frame.decompress_into_with_dctx: null dctx (call"
-                " create_dctx first)"
-            )
+        _require_dctx(
+            dctx,
+            "Lz4Frame.decompress_into_with_dctx: null dctx (call create_dctx"
+            " first)",
+        )
         # SAFETY: the trait contract: `dctx` came from `create_dctx` (a boxed
         # `Lz4FrameDecoder`, live until `free_dctx`) and is used by one worker
         # at a time; `dst` holds `dst_capacity` writable bytes for the duration
@@ -1215,9 +1220,9 @@ struct Zlib[level: Int = 6](Compression):
 #   - Per-worker disjointness: the dispatch driver guarantees that
 #     handle slot `tid` is touched only by worker `tid`. No cross-thread
 #     access to one handle.
-#   - The `_raw` pointer is opaque (a boxed `Lz4FrameDecoder` or a
-#     `ZSTD_DCtx*`);
-#     the FFI side is the SOLE site that dereferences it. The handle
+#   - The `_raw` pointer is opaque (a boxed `Lz4FrameDecoder` or a boxed
+#     `_ZstdDCtx`, the `ZSTD_DCtx*` with its libzstd handle);
+#     the codec's own methods are the SOLE site that dereferences it. The handle
 #     does not pointer-arithmetic on it.
 # =============================================================================
 
@@ -1235,7 +1240,7 @@ struct _CodecDctxHandle[C: ArrowIpcCompression](
       var _raw: UnsafePointer[UInt8, MutUntrackedOrigin]
         # SAFETY: opaque codec-specific dctx pointer from `C.create_dctx`
         # (a heap-boxed `komira_lz4.frame.Lz4FrameDecoder` for Lz4Frame,
-        # ZSTD_DCtx* for Zstd, null for Uncompressed). Null = no dctx
+        # a heap-boxed `_ZstdDCtx` for Zstd, null for Uncompressed). Null = no dctx
         # created yet (default-constructed, `acquire` not called); the
         # destructor skips `free_dctx` then. A moved-from handle is never
         # destroyed, so it needs no null.
