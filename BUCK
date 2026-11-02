@@ -81,7 +81,7 @@ zig_test(
 # case catches): the shared core of AGENTS.md is byte for byte its canonical copy,
 # tools/build/agents_md/shared_core.md, whose SHA-256 is the one in shared_core.sha256 beside it
 # (the copy and the hash are the same in every repository carrying the core), and CLAUDE.md
-# imports AGENTS.md. A build action.
+# imports AGENTS.md (a line `@AGENTS.md` outside a code block or code span). A build action.
 zig_test(
     name = "agents_md_cases",
     exec_compatible_with = LINUX_X86_64,
@@ -92,6 +92,8 @@ zig_test(
         "shared_core.md": "tools/build/agents_md/shared_core.md",
         "shared_core.sha256": "tools/build/agents_md/shared_core.sha256",
     },
+    # The repository's Markdown reader: lines, line endings and fenced blocks of CLAUDE.md.
+    deps = ["komira//tools/build/markdown:markdown"],
     busybox = "komira//tools/build/toolchains:busybox",
     zig = "komira//tools/build/toolchains:zig_next",
 )

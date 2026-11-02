@@ -8,10 +8,19 @@
 //!     tools/build/agents_md/shared_core.sha256. The copy and the hash are the same in every
 //!     repository that carries the core, so an edit to the core here alone fails, and so does an
 //!     edit to the core and the copy without the hash.
-//!  2. CLAUDE.md imports AGENTS.md: it has a line that is exactly `@AGENTS.md`, outside a fenced
-//!     code block (an import inside a fence is not read as one).
+//!  2. CLAUDE.md imports AGENTS.md: it has a line that is exactly `@AGENTS.md` outside a fenced
+//!     code block and outside a code span, since an import in either is not read as one. Lines,
+//!     line endings and fences are read by the repository's Markdown reader
+//!     (tools/build/markdown/markdown.zig, CommonMark fences: backticks or tildes, closed only by
+//!     a run of the same character at least as long). A code span may run over several lines of
+//!     one paragraph, so spans are read per paragraph here.
+//!
+//! The four files are read from a directory the caller passes (the real ones from the action's
+//! KOMIRA_TEST_WORK, the fixtures from a scratch directory of the test's own), each up to
+//! MAX_BYTES; a file that cannot be read is refused, naming it and the error.
 
 const std = @import("std");
+const md = @import("markdown");
 const t = std.testing;
 
 const AGENTS = "AGENTS.md";
@@ -22,6 +31,9 @@ const CLAUDE = "CLAUDE.md";
 const BEGIN = "<!-- shared-core:begin -->";
 const END = "<!-- shared-core:end -->";
 const IMPORT = "@AGENTS.md";
+
+/// The most bytes read from one input file.
+const MAX_BYTES = 1 << 22;
 
 /// The offsets of every line of `text` that is exactly `line` (no other bytes, `\n`-ended or last).
 fn lineStarts(ar: std.mem.Allocator, text: []const u8, line: []const u8) ![]const usize {
@@ -85,6 +97,9 @@ fn checkCore(ar: std.mem.Allocator, agents: []const u8, copy: []const u8, hash: 
     };
     if (!std.mem.eql(u8, core, copy)) {
         const n = firstDifferentLine(core, copy);
+        if (std.mem.eql(u8, lineAt(core, n), lineAt(copy, n))) {
+            return try std.fmt.allocPrint(ar, "the shared core of {s} differs from {s} at the end of line {d} of the core: one ends the line with a newline and the other ends there", .{ AGENTS, COPY, n });
+        }
         return try std.fmt.allocPrint(ar, "the shared core of {s} differs from {s} at line {d} of the core: \"{s}\" in {s}, \"{s}\" in {s}", .{ AGENTS, COPY, n, lineAt(core, n), AGENTS, lineAt(copy, n), COPY });
     }
     const want = std.mem.trimRight(u8, hash, "\n");
@@ -100,24 +115,96 @@ fn checkCore(ar: std.mem.Allocator, agents: []const u8, copy: []const u8, hash: 
     return null;
 }
 
-/// Null when CLAUDE.md imports AGENTS.md (a line exactly `@AGENTS.md` outside a fenced code
-/// block); else the refusal.
-fn checkImport(ar: std.mem.Allocator, claude: []const u8) !?[]const u8 {
-    var fenced = false;
-    var it = std.mem.splitScalar(u8, claude, '\n');
-    while (it.next()) |line| {
-        if (std.mem.startsWith(u8, std.mem.trimLeft(u8, line, " "), "```")) {
-            fenced = !fenced;
+/// Whether a line of `para` (the lines of one paragraph) is exactly the import and is not inside
+/// a code span. A run of N backticks opens a span that the next run of exactly N backticks in the
+/// paragraph closes, across lines; a run with no such partner is literal text (CommonMark).
+fn importOutsideSpans(ar: std.mem.Allocator, para: []const []const u8) !bool {
+    var text = std.ArrayList(u8){};
+    const starts = try ar.alloc(usize, para.len);
+    for (para, 0..) |line, k| {
+        starts[k] = text.items.len;
+        try text.appendSlice(ar, line);
+        try text.append(ar, '\n');
+    }
+    const s = text.items;
+    var covered = try ar.alloc(bool, s.len);
+    @memset(covered, false);
+    var i: usize = 0;
+    while (i < s.len) {
+        if (s[i] != '`') {
+            i += 1;
             continue;
         }
-        if (!fenced and std.mem.eql(u8, line, IMPORT)) return null;
+        const open = i;
+        while (i < s.len and s[i] == '`') i += 1;
+        const n = i - open;
+        var j = i;
+        const close: ?usize = while (j < s.len) {
+            if (s[j] != '`') {
+                j += 1;
+                continue;
+            }
+            const run = j;
+            while (j < s.len and s[j] == '`') j += 1;
+            if (j - run == n) break run;
+        } else null;
+        if (close) |c| {
+            @memset(covered[open .. c + n], true);
+            i = c + n;
+        }
     }
-    return try std.fmt.allocPrint(ar, "{s} has no line `{s}` outside a code block, so it does not import {s}", .{ CLAUDE, IMPORT, AGENTS });
+    for (para, starts) |line, at| {
+        if (std.mem.eql(u8, line, IMPORT) and !covered[at]) return true;
+    }
+    return false;
 }
 
-fn read(ar: std.mem.Allocator, name: []const u8) ![]const u8 {
-    const work = try std.process.getEnvVarOwned(ar, "KOMIRA_TEST_WORK");
-    return std.fs.cwd().readFileAlloc(ar, try std.fs.path.join(ar, &.{ work, name }), 1 << 22);
+/// Null when CLAUDE.md imports AGENTS.md (a line exactly `@AGENTS.md` outside a fenced code
+/// block and outside a code span); else the refusal.
+fn checkImport(ar: std.mem.Allocator, claude: []const u8) !?[]const u8 {
+    const lines = try md.splitLines(ar, claude);
+    const code = try md.codeMask(ar, lines);
+    var i: usize = 0;
+    while (i < lines.len) {
+        if (code[i] or md.strip(lines[i]).len == 0) {
+            i += 1;
+            continue;
+        }
+        var j = i;
+        while (j < lines.len and !code[j] and md.strip(lines[j]).len != 0) j += 1;
+        if (try importOutsideSpans(ar, lines[i..j])) return null;
+        i = j;
+    }
+    return try std.fmt.allocPrint(ar, "{s} has no line `{s}` outside a code block or code span, so it does not import {s}", .{ CLAUDE, IMPORT, AGENTS });
+}
+
+const Loaded = union(enum) {
+    bytes: []const u8,
+    refused: []const u8,
+};
+
+/// The bytes of `name` in `dir`, or why it cannot be read (missing, a directory, unreadable, or
+/// over MAX_BYTES).
+fn load(ar: std.mem.Allocator, dir: std.fs.Dir, name: []const u8) !Loaded {
+    const bytes = dir.readFileAlloc(ar, name, MAX_BYTES) catch |e| switch (e) {
+        error.OutOfMemory => return e,
+        else => return .{ .refused = try std.fmt.allocPrint(ar, "{s} cannot be read: {s}", .{ name, @errorName(e) }) },
+    };
+    return .{ .bytes = bytes };
+}
+
+/// Null when the four files in `dir` (AGENTS.md, CLAUDE.md, shared_core.md, shared_core.sha256)
+/// pass both checks; else the first refusal.
+fn checkDir(ar: std.mem.Allocator, dir: std.fs.Dir) !?[]const u8 {
+    var got: [4][]const u8 = undefined;
+    for ([_][]const u8{ AGENTS, CLAUDE, "shared_core.md", "shared_core.sha256" }, 0..) |name, k| {
+        got[k] = switch (try load(ar, dir, name)) {
+            .bytes => |b| b,
+            .refused => |why| return why,
+        };
+    }
+    if (try checkCore(ar, got[0], got[2], got[3])) |why| return why;
+    return checkImport(ar, got[1]);
 }
 
 fn expectRefused(got_opt: ?[]const u8, want: []const u8) !void {
@@ -155,21 +242,14 @@ fn replaced(ar: std.mem.Allocator, text: []const u8, from: []const u8, to: []con
     return out;
 }
 
-test "the real AGENTS.md shared core is the canonical copy, and the copy hashes to the recorded SHA-256" {
+test "the real AGENTS.md, CLAUDE.md, canonical copy and hash pass both checks" {
     var arena = std.heap.ArenaAllocator.init(t.allocator);
     defer arena.deinit();
     const ar = arena.allocator();
-    if (try checkCore(ar, try read(ar, AGENTS), try read(ar, "shared_core.md"), try read(ar, "shared_core.sha256"))) |why| {
-        std.debug.print("{s}\n", .{why});
-        return error.Refused;
-    }
-}
-
-test "the real CLAUDE.md imports AGENTS.md" {
-    var arena = std.heap.ArenaAllocator.init(t.allocator);
-    defer arena.deinit();
-    const ar = arena.allocator();
-    if (try checkImport(ar, try read(ar, CLAUDE))) |why| {
+    const work = try std.process.getEnvVarOwned(ar, "KOMIRA_TEST_WORK");
+    var dir = try std.fs.cwd().openDir(work, .{});
+    defer dir.close();
+    if (try checkDir(ar, dir)) |why| {
         std.debug.print("{s}\n", .{why});
         return error.Refused;
     }
@@ -304,29 +384,203 @@ test "a CLAUDE.md that is the import, or holds it among other lines, imports AGE
     var arena = std.heap.ArenaAllocator.init(t.allocator);
     defer arena.deinit();
     const ar = arena.allocator();
-    try t.expect((try checkImport(ar, "@AGENTS.md\n")) == null);
-    try t.expect((try checkImport(ar, "@AGENTS.md")) == null);
-    try t.expect((try checkImport(ar, "# Notes\n\n@AGENTS.md\n\nRepository notes.\n")) == null);
-    try t.expect((try checkImport(ar, "```sh\n./buck2 build\n```\n@AGENTS.md\n")) == null);
+    const goods = [_][]const u8{
+        "@AGENTS.md\n",
+        "@AGENTS.md",
+        "@AGENTS.md\r\n", // a CRLF line ending is a line ending
+        "# Notes\n\n@AGENTS.md\n\nRepository notes.\n",
+        "```sh\n./buck2 build\n```\n@AGENTS.md\n",
+        // After a closed tilde block that quotes a backtick fence.
+        "~~~\n```\nx\n~~~\n@AGENTS.md\n",
+        // A run of backticks with a backtick in its info string opens no fence.
+        "``` a`b\n@AGENTS.md\n",
+        // A code span closed on the same line, before the import's paragraph line.
+        "Use `x` here\n@AGENTS.md\n",
+        // A backtick run with no partner of its length is literal text.
+        "a `` b\n@AGENTS.md\n",
+        // A span that does not reach the import: it closes before it.
+        "`one\ntwo`\n@AGENTS.md\n",
+        // An unclosed run in another paragraph does not reach across a blank line.
+        "`open\n\n@AGENTS.md\n",
+    };
+    for (goods) |good| {
+        if (try checkImport(ar, good)) |why| {
+            std.debug.print("refused \"{s}\": {s}\n", .{ good, why });
+            return error.Refused;
+        }
+    }
 }
 
-test "a CLAUDE.md without the import line, or with it only in prose, a code block or another spelling, is refused" {
+test "a CLAUDE.md without the import line, or with it only in prose, a code block, a code span or another spelling, is refused" {
     var arena = std.heap.ArenaAllocator.init(t.allocator);
     defer arena.deinit();
     const ar = arena.allocator();
-    const want = "CLAUDE.md has no line `@AGENTS.md` outside a code block, so it does not import AGENTS.md";
+    const want = "CLAUDE.md has no line `@AGENTS.md` outside a code block or code span, so it does not import AGENTS.md";
     const bads = [_][]const u8{
         "",
         "# Notes\n",
         "Read @AGENTS.md first.\n",
         " @AGENTS.md\n",
+        "\t@AGENTS.md\n",
         "@AGENTS.md \n",
-        "@AGENTS.md\r\n",
         "@agents.md\n",
         "@./AGENTS.md\n",
         "@AGENTS.md.bak\n",
         "```\n@AGENTS.md\n```\n",
         "  ```md\n@AGENTS.md\n  ```\n",
+        "\t```\n@AGENTS.md\n\t```\n", // a tab-indented fence
+        "~~~md\n@AGENTS.md\n~~~\n", // a tilde fence
+        "~~~\n@AGENTS.md\n", // an unclosed tilde fence runs to the end
+        "```\n@AGENTS.md\n", // an unclosed backtick fence runs to the end
+        "````\n```\n@AGENTS.md\n````\n", // a shorter run does not close a longer fence
+        "```\n``` md\n@AGENTS.md\n```\n", // a run with an info string does not close a fence
+        "~~~\n```\n@AGENTS.md\n```\n~~~\n", // a backtick block quoted in a tilde block
+        "```\n~~~\n@AGENTS.md\n```\n", // a tilde line does not close a backtick fence
+        "`\n@AGENTS.md\n`\n", // a code span over three lines
+        "Run ``x\n@AGENTS.md\ny`` here.\n", // a double-backtick span
     };
-    for (bads) |bad| try expectRefused(try checkImport(ar, bad), want);
+    for (bads) |bad| {
+        expectRefused(try checkImport(ar, bad), want) catch |e| {
+            std.debug.print("for \"{s}\"\n", .{bad});
+            return e;
+        };
+    }
+}
+
+test "a minimal AGENTS.md, begin line first and end line last with no newline, is accepted" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const ar = arena.allocator();
+    const core = "- **T1 BLOCK.** A rule.\n";
+    try t.expect((try checkCore(ar, BEGIN ++ "\n" ++ core ++ END, core, try fixtureHash(ar, core))) == null);
+}
+
+test "a begin line at the end of the file, or a core of tabs and carriage returns, is refused" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const ar = arena.allocator();
+    const hash = try fixtureHash(ar, FIXTURE_CORE);
+    try expectRefused(try checkCore(ar, "# Rules\n" ++ BEGIN, FIXTURE_CORE, hash), "AGENTS.md has 0 lines `<!-- shared-core:end -->`, wanted exactly one");
+    try expectRefused(try checkCore(ar, END ++ "\n" ++ BEGIN, FIXTURE_CORE, hash), "AGENTS.md: `<!-- shared-core:end -->` comes before `<!-- shared-core:begin -->`");
+    const blank = "\t\r\n\t\n\r\n";
+    try expectRefused(try checkCore(ar, BEGIN ++ "\n" ++ blank ++ END ++ "\n", blank, try fixtureHash(ar, blank)), "AGENTS.md: the shared core is empty, so the check would be vacuous");
+}
+
+test "a canonical copy changed, emptied or truncated on its own is refused" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const ar = arena.allocator();
+    const hash = try fixtureHash(ar, FIXTURE_CORE);
+    const changed = try replaced(ar, FIXTURE_CORE, "A rule.", "A changed rule.");
+    try expectRefused(
+        try checkCore(ar, FIXTURE_AGENTS, changed, hash),
+        "the shared core of AGENTS.md differs from tools/build/agents_md/shared_core.md at line 3 of the core: \"- **T1 BLOCK.** A rule.\" in AGENTS.md, \"- **T1 BLOCK.** A changed rule.\" in tools/build/agents_md/shared_core.md",
+    );
+    try expectRefused(
+        try checkCore(ar, FIXTURE_AGENTS, "", hash),
+        "the shared core of AGENTS.md differs from tools/build/agents_md/shared_core.md at line 1 of the core: \"## Shared core\" in AGENTS.md, \"\" in tools/build/agents_md/shared_core.md",
+    );
+    try expectRefused(
+        try checkCore(ar, FIXTURE_AGENTS, FIXTURE_CORE[0..20], hash),
+        "the shared core of AGENTS.md differs from tools/build/agents_md/shared_core.md at line 3 of the core: \"- **T1 BLOCK.** A rule.\" in AGENTS.md, \"- **\" in tools/build/agents_md/shared_core.md",
+    );
+    const no_newline = FIXTURE_CORE[0 .. FIXTURE_CORE.len - 1];
+    try expectRefused(
+        try checkCore(ar, FIXTURE_AGENTS, no_newline, try fixtureHash(ar, no_newline)),
+        "the shared core of AGENTS.md differs from tools/build/agents_md/shared_core.md at the end of line 4 of the core: one ends the line with a newline and the other ends there",
+    );
+}
+
+test "a well-formed hash that is not the copy's, and hashes malformed by CRLF, an inner newline or one digit too many, are refused" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const ar = arena.allocator();
+    const hash = try fixtureHash(ar, FIXTURE_CORE);
+    const digits = hash[0..64];
+    const other = try fixtureHash(ar, "another text\n");
+    const want = try std.fmt.allocPrint(ar, "the SHA-256 of tools/build/agents_md/shared_core.md is {s}, but tools/build/agents_md/shared_core.sha256 records {s}", .{ digits, other[0..64] });
+    try expectRefused(try checkCore(ar, FIXTURE_AGENTS, FIXTURE_CORE, other), want);
+    const malformed = "tools/build/agents_md/shared_core.sha256 is not one line of 64 lowercase hex digits";
+    const bads = [_][]const u8{
+        try std.fmt.allocPrint(ar, "{s}\r\n", .{digits}),
+        try std.fmt.allocPrint(ar, "{s}\n{s}\n", .{ digits[0..32], digits[32..] }),
+        try std.fmt.allocPrint(ar, "{s}0\n", .{digits}), // 65 digits
+        try std.fmt.allocPrint(ar, "{s}\n", .{digits[0..63]}), // 63 digits
+    };
+    for (bads) |bad| try expectRefused(try checkCore(ar, FIXTURE_AGENTS, FIXTURE_CORE, bad), malformed);
+}
+
+/// A scratch directory of the test's own holding the four files of a passing fixture.
+fn fixtureDir(ar: std.mem.Allocator) !t.TmpDir {
+    var tmp = t.tmpDir(.{});
+    try tmp.dir.writeFile(.{ .sub_path = AGENTS, .data = FIXTURE_AGENTS });
+    try tmp.dir.writeFile(.{ .sub_path = CLAUDE, .data = "@AGENTS.md\n" });
+    try tmp.dir.writeFile(.{ .sub_path = "shared_core.md", .data = FIXTURE_CORE });
+    try tmp.dir.writeFile(.{ .sub_path = "shared_core.sha256", .data = try fixtureHash(ar, FIXTURE_CORE) });
+    return tmp;
+}
+
+test "a fixture directory holding the four files passes; each file missing is refused, naming it" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const ar = arena.allocator();
+    {
+        var tmp = try fixtureDir(ar);
+        defer tmp.cleanup();
+        try t.expect((try checkDir(ar, tmp.dir)) == null);
+    }
+    for ([_][]const u8{ AGENTS, CLAUDE, "shared_core.md", "shared_core.sha256" }) |name| {
+        var tmp = try fixtureDir(ar);
+        defer tmp.cleanup();
+        try tmp.dir.deleteFile(name);
+        try expectRefused(try checkDir(ar, tmp.dir), try std.fmt.allocPrint(ar, "{s} cannot be read: FileNotFound", .{name}));
+    }
+}
+
+test "a directory in place of an input file is refused, naming it" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const ar = arena.allocator();
+    var tmp = try fixtureDir(ar);
+    defer tmp.cleanup();
+    try tmp.dir.deleteFile(CLAUDE);
+    try tmp.dir.makeDir(CLAUDE);
+    try expectRefused(try checkDir(ar, tmp.dir), "CLAUDE.md cannot be read: IsDir");
+}
+
+test "an input file of exactly MAX_BYTES is read, and one byte more is refused" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const ar = arena.allocator();
+    var tmp = try fixtureDir(ar);
+    defer tmp.cleanup();
+    // CLAUDE.md padded with blank lines after its import: read whole, it still imports.
+    const at_limit = try ar.alloc(u8, MAX_BYTES);
+    @memset(at_limit, '\n');
+    @memcpy(at_limit[0..IMPORT.len], IMPORT);
+    try tmp.dir.writeFile(.{ .sub_path = CLAUDE, .data = at_limit });
+    try t.expect((try checkDir(ar, tmp.dir)) == null);
+    const over = try ar.alloc(u8, MAX_BYTES + 1);
+    @memset(over, '\n');
+    @memcpy(over[0..IMPORT.len], IMPORT);
+    try tmp.dir.writeFile(.{ .sub_path = CLAUDE, .data = over });
+    try expectRefused(try checkDir(ar, tmp.dir), "CLAUDE.md cannot be read: FileTooBig");
+}
+
+test "an input file without read permission is refused, naming it" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const ar = arena.allocator();
+    var tmp = try fixtureDir(ar);
+    defer tmp.cleanup();
+    var f = try tmp.dir.openFile(AGENTS, .{});
+    try f.chmod(0);
+    f.close();
+    // A process with CAP_DAC_OVERRIDE (root) reads the file anyway; then this case cannot be
+    // shown, and it says so instead of passing.
+    if (tmp.dir.readFileAlloc(ar, AGENTS, MAX_BYTES)) |_| {
+        std.debug.print("skipped: this process reads a file with mode 000 (it runs as root), so an unreadable file cannot be made here\n", .{});
+        return error.SkipZigTest;
+    } else |_| {}
+    try expectRefused(try checkDir(ar, tmp.dir), "AGENTS.md cannot be read: AccessDenied");
 }
