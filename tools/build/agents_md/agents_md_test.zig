@@ -117,7 +117,8 @@ fn checkCore(ar: std.mem.Allocator, agents: []const u8, copy: []const u8, hash: 
 
 /// Whether a line of `para` (the lines of one paragraph) is exactly the import and is not inside
 /// a code span. A run of N backticks opens a span that the next run of exactly N backticks in the
-/// paragraph closes, across lines; a run with no such partner is literal text (CommonMark).
+/// paragraph closes, across lines; a run with no such partner is literal text, and so is a
+/// backtick escaped by an odd number of backslashes outside a span (CommonMark).
 fn importOutsideSpans(ar: std.mem.Allocator, para: []const []const u8) !bool {
     var text = std.ArrayList(u8){};
     const starts = try ar.alloc(usize, para.len);
@@ -130,8 +131,20 @@ fn importOutsideSpans(ar: std.mem.Allocator, para: []const []const u8) !bool {
     var covered = try ar.alloc(bool, s.len);
     @memset(covered, false);
     var i: usize = 0;
+    // The end of the last span: backslashes before it are inside that span, not escapes.
+    var after_span: usize = 0;
     while (i < s.len) {
         if (s[i] != '`') {
+            i += 1;
+            continue;
+        }
+        // Outside a span, a backtick after an odd number of backslashes is escaped: literal
+        // text, so it opens nothing (CommonMark backslash escapes). The backticks after it
+        // start a run of their own. Inside a span a backslash is literal, so the closer search
+        // below ignores them.
+        var slashes: usize = 0;
+        while (i - slashes > after_span and s[i - slashes - 1] == '\\') slashes += 1;
+        if (slashes % 2 == 1) {
             i += 1;
             continue;
         }
@@ -151,6 +164,7 @@ fn importOutsideSpans(ar: std.mem.Allocator, para: []const []const u8) !bool {
         if (close) |c| {
             @memset(covered[open .. c + n], true);
             i = c + n;
+            after_span = i;
         }
     }
     for (para, starts) |line, at| {
@@ -402,6 +416,14 @@ test "a CLAUDE.md that is the import, or holds it among other lines, imports AGE
         "`one\ntwo`\n@AGENTS.md\n",
         // An unclosed run in another paragraph does not reach across a blank line.
         "`open\n\n@AGENTS.md\n",
+        // An escaped backtick is literal: it opens no span, so the last line's backtick has no partner.
+        "\\` \n@AGENTS.md\n`\n",
+        // An escaped backtick, then a span closed on the same line; the last backtick has no partner.
+        "\\` `x`\n@AGENTS.md\n`\n",
+        // Two backslashes escape each other: the backtick opens a span that closes on its line.
+        "\\\\` `\n@AGENTS.md\n`\n",
+        // Inside a span a backslash is literal, so the span closes on the first line.
+        "`a\\`\n@AGENTS.md\n`\n",
     };
     for (goods) |good| {
         if (try checkImport(ar, good)) |why| {
@@ -438,6 +460,10 @@ test "a CLAUDE.md without the import line, or with it only in prose, a code bloc
         "```\n~~~\n@AGENTS.md\n```\n", // a tilde line does not close a backtick fence
         "`\n@AGENTS.md\n`\n", // a code span over three lines
         "Run ``x\n@AGENTS.md\ny`` here.\n", // a double-backtick span
+        "\\` `\n@AGENTS.md\n`\n", // an escaped backtick opens nothing; the next one opens a span
+        "\\\\\\` `\n@AGENTS.md\n`\n", // three backslashes: the last escapes the backtick
+        "\\\\`\n@AGENTS.md\n`\n", // two backslashes: the backtick is not escaped and opens a span
+        "\\``\n@AGENTS.md\n`\n", // the escaped backtick's neighbour opens a run of one
     };
     for (bads) |bad| {
         expectRefused(try checkImport(ar, bad), want) catch |e| {
