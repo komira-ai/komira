@@ -1,12 +1,14 @@
 from std.os import getenv, makedirs
+
+from komira_json import parse_json_value
 from std.testing import assert_equal, assert_true
 
-from covcheck.analyze import FORMAT_BRANCH_LCOV, FORMAT_LCOV, Analysis, Input, Options, Sources, analyze
-from covcheck.cli import EXIT_GATE, EXIT_OK, parse_args, run
+from covcheck.analyze import FORMAT_BRANCH_LCOV, FORMAT_COBERTURA, FORMAT_LCOV, Analysis, Input, Options, Sources, analyze
+from covcheck.cli import EXIT_GATE, EXIT_INPUT, EXIT_OK, EXIT_USAGE, parse_args, run
 from covcheck.held import Held, add_hold
 from covcheck.paths import RepoFiles, repo_files_of
-from covcheck.programs import BinEntry, parse_bins, parse_program_runs, program_sources
-from covcheck.text import write_text
+from covcheck.programs import parse_program_targets
+from covcheck.text import read_text, write_text
 
 # Program sources: a file the package's mopm.toml names in `[targets] bins` is
 # left out of the line and branch numbers and of UnmeasuredFile, and is an
@@ -25,8 +27,22 @@ comptime MANIFEST = (
     "tests = [\"tests\"]\n"
 )
 
+comptime TABLES = (
+    "[package]\n"
+    "name = \"p\"\n"
+    "\n"
+    "[[targets.bins]]\n"
+    "name = \"tool\"\n"
+    "path = \"bins/tool.mojo\"\n"
+    "\n"
+    "[targets]\n"
+    "lib = { path = \"src/p\" }\n"
+)
+
 comptime TOOL = "def main():\n    run()\n"
 comptime TOOL_PATH = "src/p/bins/tool.mojo"
+# The query's output when a test target of src/p depends on the program's target.
+comptime RAN_JSON = "{\"komira//src/p:tool\": {\"main\": null, \"srcs\": [\"komira//src/p/bins/tool.mojo\"]}}\n"
 
 
 def _repo(manifest: Bool = True, other: Bool = False) -> RepoFiles:
@@ -44,6 +60,9 @@ def _repo(manifest: Bool = True, other: Bool = False) -> RepoFiles:
     l.append("src/q/q.mojo")
     l.append("src/r/BUCK")
     l.append("src/r/r.mojo")
+    # A package below src/p, with its own BUCK file.
+    l.append("src/p/sub/BUCK")
+    l.append("src/p/sub/x.mojo")
     return repo_files_of(l)
 
 
@@ -99,197 +118,6 @@ def _kinds(a: Analysis) -> String:
         if a.findings[i].path.byte_length() > 0:
             s += String("@") + a.findings[i].path
     return s^
-
-
-def _names(es: List[BinEntry]) -> String:
-    var s = String("")
-    for i in range(len(es)):
-        if i > 0:
-            s += String(" ")
-        s += es[i].name + String("=") + es[i].path
-    return s^
-
-
-def _refused(text: String, fragment: String) raises:
-    var raised = False
-    try:
-        _ = parse_bins(text, String("m.toml"))
-    except e:
-        raised = True
-        assert_true(String(e).find(fragment) >= 0, String(e) + String(" lacks ") + fragment)
-        assert_true(String(e).startswith("m.toml:"), String(e))
-    assert_true(raised, String("not refused: ") + text)
-
-
-# ---- the manifest reader --------------------------------------------------
-
-
-def test_inline_array_in_every_layout() raises:
-    assert_equal(_names(parse_bins(String(MANIFEST), String("m.toml"))), "tool=bins/tool.mojo")
-    var multi = String(
-        "[targets]\n"
-        "bins = [  # the programs\n"
-        "    { name = \"a\", path = \"bins/a.mojo\" },\n"
-        "    { path = 'bins/b.mojo', name = \"b\", },  # a comment, with a } and a ]\n"
-        "]\n"
-        "tests = [\"tests\"]\n"
-    )
-    assert_equal(_names(parse_bins(multi, String("m.toml"))), "a=bins/a.mojo b=bins/b.mojo")
-    # CRLF line ends, and spaces inside the table's header.
-    var crlf = String("[ targets ]\r\nbins = [{ name = \"a\", path = \"bins/a.mojo\" }]\r\n")
-    assert_equal(_names(parse_bins(crlf, String("m.toml"))), "a=bins/a.mojo")
-
-
-def test_array_of_tables() raises:
-    var t = String(
-        "[package]\nname = \"p\"\n\n"
-        "[[targets.bins]]\nname = \"a\"\npath = \"bins/a.mojo\"\n\n"
-        "[[targets.bins]]\npath = \"bins/b.mojo\" # trailing\nname = \"b\"\nkind = \"x\"\n\n"
-        "[targets]\nlib = { path = \"src/p\" }\n"
-    )
-    assert_equal(_names(parse_bins(t, String("m.toml"))), "a=bins/a.mojo b=bins/b.mojo")
-
-
-def test_no_bins_is_no_programs() raises:
-    assert_equal(len(parse_bins(String(""), String("m.toml"))), 0)
-    assert_equal(len(parse_bins(String("[package]\nname = \"p\"\n"), String("m.toml"))), 0)
-    assert_equal(len(parse_bins(String("[targets]\nlib = { path = \"x\" }\nbins = []\n"), String("m.toml"))), 0)
-    assert_equal(len(parse_bins(String("[targets]\nbins = [\n]\n"), String("m.toml"))), 0)
-    # `bins` in another table is not the targets' bins.
-    var other = String("[package]\nbins = [{ name = \"a\", path = \"bins/a.mojo\" }]\n[extra]\nbins = 3\n")
-    assert_equal(len(parse_bins(other, String("m.toml"))), 0)
-
-
-def test_other_values_are_skipped_not_read() raises:
-    # A `#` in a string is no comment; a multi-line string holds look-alike lines.
-    var t = String(
-        "[package]\n"
-        "description = \"a # b = [\"\n"
-        "notes = \"\"\"\n"
-        "[targets]\n"
-        "bins = [{ name = \"fake\", path = \"bins/fake.mojo\" }]\n"
-        "\"\"\"\n"
-        "one = '''a''' # after\n"
-        "[targets]\n"
-        "bins = [{ name = \"real\", path = \"bins/real.mojo\" }]\n"
-    )
-    assert_equal(_names(parse_bins(t, String("m.toml"))), "real=bins/real.mojo")
-
-
-def test_shapes_that_are_refused() raises:
-    # One inline table where the array belongs.
-    _refused(String("[targets]\nbins = { name = \"a\", path = \"bins/a.mojo\" }\n"), String("array of entries"))
-    # An array of something else.
-    _refused(String("[targets]\nbins = [\"bins/a.mojo\"]\n"), String("inline table"))
-    _refused(String("[targets]\nbins = \"bins/a.mojo\"\n"), String("array of entries"))
-    _refused(String("[targets]\nbins = [{ name = \"a\", path = \"bins/a.mojo\" } { name = \"b\", path = \"bins/b.mojo\" }]\n"), String("separated by"))
-    _refused(String("[targets]\nbins = [{ name = \"a\", path = \"bins/a.mojo\" },, { name = \"b\", path = \"bins/b.mojo\" }]\n"), String("inline table"))
-    # A table, not an array of tables.
-    _refused(String("[targets.bins]\nname = \"a\"\npath = \"bins/a.mojo\"\n"), String("is a table"))
-    _refused(String("[targets]\nbins.a = 1\n"), String("dotted key"))
-    _refused(String("[[targets.bins]]\nname = \"a\"\npath = \"bins/a.mojo\"\n[targets.bins.extra]\n"), String("not a shape"))
-    _refused(String("[[targets]]\nbins = []\n"), String("not a shape"))
-    _refused(String("targets = { bins = [] }\n"), String("as a table"))
-    _refused(String("targets.bins = []\n"), String("as a table"))
-    # Both shapes, and the key twice.
-    _refused(
-        String("[targets]\nbins = []\n[[targets.bins]]\nname = \"a\"\npath = \"bins/a.mojo\"\n"), String("inline array and as")
-    )
-    _refused(
-        String("[[targets.bins]]\nname = \"a\"\npath = \"bins/a.mojo\"\n[targets]\nbins = [{ name = \"b\", path = \"bins/b.mojo\" }]\n"),
-        String("given twice"),
-    )
-    _refused(String("[targets]\nbins = []\nbins = []\n"), String("given twice"))
-    # Text that is no manifest.
-    _refused(String("[targets\nbins = []\n"), String("table header"))
-    _refused(String("[targets]\nbins\n"), String("key = value"))
-    _refused(String("[targets]\nbins = [{ name = \"a\", path = \"bins/a.mojo\" }\n"), String("never closed"))
-    _refused(String("[targets]\nbins = [{ name = \"a\", path = \"bins/a.mojo\"\n]\n"), String("never closed"))
-    _refused(String("[package]\nnotes = \"\"\"\nno end\n"), String("never closed"))
-    # A quoted table name, which would hide `bins` from this reader.
-    _refused(String("[\"targets\"]\nbins = []\n"), String("quoted table name"))
-    _refused(String("[[targets.'bins']]\nname = \"a\"\npath = \"bins/a.mojo\"\n"), String("quoted table name"))
-
-
-def test_entries_must_name_and_path() raises:
-    _refused(String("[targets]\nbins = [{ name = \"a\" }]\n"), String("no `path`"))
-    _refused(String("[targets]\nbins = [{ path = \"bins/a.mojo\" }]\n"), String("no `name`"))
-    _refused(String("[targets]\nbins = [{ name = \"\", path = \"bins/a.mojo\" }]\n"), String("no `name`"))
-    _refused(String("[[targets.bins]]\nname = \"a\"\n"), String("no `path`"))
-    _refused(String("[[targets.bins]]\npath = \"bins/a.mojo\"\n"), String("no `name`"))
-    _refused(String("[[targets.bins]]\n[[targets.bins]]\nname = \"a\"\npath = \"bins/a.mojo\"\n"), String("no `path`"))
-    _refused(String("[targets]\nbins = [{ name = \"a\", name = \"b\", path = \"bins/a.mojo\" }]\n"), String("given twice"))
-    _refused(String("[[targets.bins]]\nname = \"a\"\nname = \"b\"\npath = \"bins/a.mojo\"\n"), String("given twice"))
-    _refused(String("[[targets.bins]]\nname = \"a\"\npath = \"x.mojo\"\npath = \"y.mojo\"\n"), String("given twice"))
-    _refused(String("[targets]\nbins = [{ name = \"a\", path = 5 }]\n"), String("plain quoted string"))
-    _refused(String("[targets]\nbins = [{ name = \"a\", path = \"bins/\\a.mojo\" }]\n"), String("plain quoted string"))
-    _refused(String("[targets]\nbins = [{ name = \"a\", path = \"bins/a.mojo }]\n"), String("never closed"))
-    _refused(String("[targets]\nbins = [{ name = \"a\", path }]\n"), String("key = value"))
-    _refused(String("[targets]\nbins = [{ name = \"a\", path = \"bins/a.mojo\", }, { }]\n"), String("empty field"))
-
-
-def test_paths_must_be_relative_mojo_files() raises:
-    var head = String("[targets]\nbins = [{ name = \"a\", path = \"")
-    var tail = String("\" }]\n")
-    _refused(head + String("") + tail, String("is empty"))
-    _refused(head + String("/bins/a.mojo") + tail, String("relative path"))
-    _refused(head + String("bins/a.txt") + tail, String("`.mojo` file"))
-    _refused(head + String("../bins/a.mojo") + tail, String("segment"))
-    _refused(head + String("bins/../a.mojo") + tail, String("segment"))
-    _refused(head + String("./bins/a.mojo") + tail, String("segment"))
-    _refused(head + String("bins//a.mojo") + tail, String("segment"))
-    _refused(head + String("bins/") + tail, String("`.mojo` file"))
-    assert_equal(_names(parse_bins(head + String("a.mojo") + tail, String("m.toml"))), "a=a.mojo")
-
-
-def test_quoting_and_nesting_in_the_manifest() raises:
-    # A backslash-escaped quote does not end a string, so the `#` after it is inside the string.
-    var esc = String(
-        "[package]\n"
-        "note = \"say \\\"hi\\\" # not a comment\"\n"
-        "[targets]\n"
-        "bins = [{ name = \"a\", path = \"bins/a.mojo\" }]\n"
-    )
-    assert_equal(_names(parse_bins(esc, String("m.toml"))), "a=bins/a.mojo")
-    # Quoted keys, and a nested array inside an entry, whose brackets do not end the entry.
-    var quoted = String(
-        "[targets]\n"
-        "\"bins\" = [{ \"name\" = \"q\", 'path' = \"bins/q.mojo\", tags = [\"x\", \"y\"] }]\n"
-    )
-    assert_equal(_names(parse_bins(quoted, String("m.toml"))), "q=bins/q.mojo")
-    # A quoted key holding an escaped quote and an `=`: the key ends at its closing quote.
-    var key = String(
-        "[package]\n"
-        "\"we\\\"ird = key\" = 1\n"
-        "[targets]\n"
-        "bins = [{ name = \"k\", path = \"bins/k.mojo\" }]\n"
-    )
-    assert_equal(_names(parse_bins(key, String("m.toml"))), "k=bins/k.mojo")
-    # A key given twice inside one entry; an entry whose brace is never matched.
-    _refused(String("[targets]\nbins = [{ name = \"a\", path = \"x.mojo\", path = \"y.mojo\" }]\n"), String("given twice"))
-    _refused(String("[targets]\nbins = [{ name = \"a\", path = \"bins/a.mojo\" ] ]\n"), String("never closed"))
-
-
-def test_a_package_without_a_manifest_has_no_programs() raises:
-    var packages = List[String]()
-    packages.append(String("src/r"))
-    packages.append(String("src/p"))
-    var manifests = Dict[String, String]()
-    manifests[String("src/p/mopm.toml")] = String(MANIFEST)
-    var ps = program_sources(_repo(), manifests, packages)
-    assert_equal(len(ps), 1)
-    assert_equal(ps[0].package, "src/p")
-    assert_equal(ps[0].path, TOOL_PATH)
-
-
-def test_the_error_names_the_line() raises:
-    var raised = False
-    try:
-        _ = parse_bins(String("[package]\nname = \"p\"\n\n[targets]\nbins = [{ name = \"a\" }]\n"), String("src/p/mopm.toml"))
-    except e:
-        raised = True
-        assert_true(String(e).startswith("src/p/mopm.toml:5: "), String(e))
-    assert_true(raised)
 
 
 # ---- the rule, in the analysis ---------------------------------------------
@@ -439,7 +267,7 @@ def test_a_bad_manifest_fails_the_run() raises:
         _ = analyze(_report(), List[Input](), _repo(), _held(), _sources(gone), _enforce(_ran()))
     except e:
         raised = True
-        assert_true(String(e).find("src/p/bins/gone.mojo, which is not a file of the repository") >= 0, String(e))
+        assert_equal(String(e), "src/p/mopm.toml:6: bins entry `tool` names src/p/bins/gone.mojo, which is not a file of the repository")
     assert_true(raised)
     # Two entries naming one file.
     var twice = String(MANIFEST).replace(
@@ -453,7 +281,7 @@ def test_a_bad_manifest_fails_the_run() raises:
         raised = True
         assert_equal(
             String(e),
-            "src/p/mopm.toml: bins entry `again` names src/p/bins/tool.mojo, which another bins entry names too",
+            "src/p/mopm.toml:6: bins entry `again` names src/p/bins/tool.mojo, which src/p/mopm.toml:6: bins entry `tool` names too",
         )
     assert_true(raised)
 
@@ -528,27 +356,14 @@ def test_the_root_package() raises:
             found = True
             assert_equal(a.findings[i].path, "bins/tool.mojo")
     assert_true(found, _kinds(a))
-    var b = analyze(r, List[Input](), repo_files_of(l), Held(), s, _enforce(parse_runs("bins/tool.mojo\n")))
+    var root_runs = List[String]()
+    for e in parse_program_targets(String("{\"komira//:tool\": {\"main\": null, \"srcs\": [\"komira//bins/tool.mojo\"]}}"), String("t.json")).items():
+        root_runs.append(e.key)
+    assert_equal(len(root_runs), 1)
+    var b = analyze(r, List[Input](), repo_files_of(l), Held(), s, _enforce(root_runs))
     for i in range(len(b.findings)):
         assert_true(b.findings[i].kind != String("UnrunProgram"))
     assert_equal(b.packages[b.package_index(String("(root)"))].line_found, 2)
-
-
-def parse_runs(text: String) -> List[String]:
-    var d = parse_program_runs(text)
-    var l = List[String]()
-    for e in d.items():
-        l.append(e.key)
-    return l^
-
-
-def test_the_runs_file() raises:
-    var d = parse_program_runs(String("src/p/bins/tool.mojo\r\n\n  src/q/bins/x.mojo  \n\n"))
-    assert_equal(len(d), 2)
-    assert_true(String("src/p/bins/tool.mojo") in d)
-    assert_true(String("src/q/bins/x.mojo") in d)
-    assert_equal(len(parse_program_runs(String(""))), 0)
-    assert_equal(len(parse_program_runs(String("\n\n"))), 0)
 
 
 # ---- the command line --------------------------------------------------------
@@ -561,7 +376,7 @@ def _tmp(name: String) raises -> String:
 
 
 def _write_tree(dir: String) raises -> List[String]:
-    """A tiny repository under `dir/root` and the gate's arguments over it, less --program-runs."""
+    """A tiny repository under `dir/root` and the gate's arguments over it, less --program-targets."""
     makedirs(dir + String("/root/src/p/bins"), exist_ok=True)
     write_text(dir + String("/root/src/p/a.mojo"), String("def f() -> Int:\n    return 1\n"))
     write_text(dir + String("/root/src/p/bins/tool.mojo"), String(TOOL))
@@ -600,28 +415,34 @@ def _write_tree(dir: String) raises -> List[String]:
     return a^
 
 
-def test_the_program_runs_flag() raises:
+def test_the_program_targets_flag() raises:
     var dir = _tmp(String("programs_cli"))
     var args = _write_tree(dir)
     # No evidence: the program is a finding and the gate fails.
     assert_equal(run(args.copy()), EXIT_GATE)
-    # An empty evidence file says the same.
-    write_text(dir + String("/runs_none"), String(""))
+    # The query's empty object says the same.
+    write_text(dir + String("/runs_none"), String("{}\n"))
     var none = args.copy()
-    none.append("--program-runs")
+    none.append("--program-targets")
     none.append(dir + String("/runs_none"))
     assert_equal(run(none^), EXIT_GATE)
-    # The evidence names the program: the gate passes.
-    write_text(dir + String("/runs"), String(TOOL_PATH) + String("\n"))
+    # A test of the package depends on the program's target: the gate passes.
+    write_text(dir + String("/runs"), String(RAN_JSON))
     var ran = args.copy()
-    ran.append("--program-runs")
+    ran.append("--program-targets")
     ran.append(dir + String("/runs"))
     assert_equal(run(ran^), EXIT_OK)
+    # An empty file is not the query's output: an input error, not "no program runs".
+    write_text(dir + String("/runs_empty"), String(""))
+    var empty = args.copy()
+    empty.append("--program-targets")
+    empty.append(dir + String("/runs_empty"))
+    assert_equal(run(empty^), EXIT_INPUT)
     # The flag is parsed for both commands and given once.
     var p = parse_args(_flag_args(dir))
-    assert_equal(p.get(String("--program-runs")), dir + String("/runs"))
+    assert_equal(p.get(String("--program-targets")), dir + String("/runs"))
     var twice = _flag_args(dir)
-    twice.append("--program-runs")
+    twice.append("--program-targets")
     twice.append(dir + String("/runs"))
     var raised = False
     try:
@@ -632,10 +453,11 @@ def test_the_program_runs_flag() raises:
     assert_true(raised)
     # A runs file that cannot be read is an input error, not "no program runs".
     var missing = args.copy()
-    missing.append("--program-runs")
+    missing.append("--program-targets")
     missing.append(dir + String("/no_such_file"))
-    assert_true(run(missing^) != EXIT_OK)
-    assert_true(run(missing_flag_value(args)) != EXIT_OK)
+    assert_equal(run(missing^), EXIT_INPUT)
+    # The flag with no value is a usage error.
+    assert_equal(run(missing_flag_value(args)), EXIT_USAGE)
 
 
 def test_a_manifest_that_cannot_be_read_fails_the_run() raises:
@@ -657,28 +479,187 @@ def test_a_manifest_that_cannot_be_read_fails_the_run() raises:
 
 def missing_flag_value(args: List[String]) -> List[String]:
     var l = args.copy()
-    l.append("--program-runs")
+    l.append("--program-targets")
     return l^
 
 
 def _flag_args(dir: String) raises -> List[String]:
     var a = _write_tree(dir)
-    a.append("--program-runs")
+    a.append("--program-targets")
     a.append(dir + String("/runs"))
     return a^
 
 
+def test_a_program_that_is_a_test_source_is_an_error() raises:
+    var m = String(MANIFEST).replace("bins/tool.mojo", "tests/test_a.mojo")
+    var raised = False
+    try:
+        _ = analyze(_report(), List[Input](), _repo(), _held(), _sources(m), _enforce(_ran()))
+    except e:
+        raised = True
+        assert_equal(
+            String(e),
+            "src/p/mopm.toml:6: bins entry `tool` names src/p/tests/test_a.mojo, which is a test source of src/p (under its tests/, or a --test-source)",
+        )
+    assert_true(raised)
+
+
+# ---- the rule, in more shapes of the run ------------------------------------
+
+
+def test_the_array_of_tables_in_the_analysis() raises:
+    var a = analyze(_report(), List[Input](), _repo(), _held(), _sources(String(TABLES)), _enforce())
+    assert_equal(_kinds(a), "UnrunProgram@src/p/bins/tool.mojo")
+    var k = a.package_index(String("src/p"))
+    assert_equal(a.packages[k].line_found, 2)
+    assert_equal(a.packages[k].branch_found, 2)
+    assert_equal(a.packages[k].unmeasured_files, 0)
+    var b = analyze(_report(), List[Input](), _repo(), _held(), _sources(String(TABLES)), _enforce(_ran()))
+    assert_equal(_kinds(b), "")
+    assert_equal(len(b.program_paths), 1)
+    assert_equal(b.program_paths[0], TOOL_PATH)
+
+
+def test_a_report_of_the_program_alone_still_measures_the_package() raises:
+    # The only record is the program's, and src/p has no hold: a.mojo is still counted, from its
+    # source, as a file no test compiled.
+    var l = List[Input]()
+    l.append(Input(String(FORMAT_LCOV), String(""), String("t.info"), String("SF:src/p/bins/tool.mojo\nDA:2,1\nend_of_record\n")))
+    var a = analyze(l, List[Input](), _repo(), Held(), _sources(), _enforce(_ran()))
+    var k = a.package_index(String("src/p"))
+    assert_true(k >= 0, _kinds(a))
+    assert_equal(a.packages[k].line_found, 2)
+    assert_equal(a.packages[k].line_hit, 0)
+    assert_equal(a.packages[k].unmeasured_files, 1)
+    # No record of src/p is left, so its line is also NotMeasured: nothing measured the package.
+    assert_equal(_kinds(a), "BelowTarget NotMeasured UnmeasuredFile@src/p/a.mojo")
+
+
+def test_manifests_of_packages_only_left_out_files_name_are_not_read() raises:
+    # src/q's manifest cannot be read, and a report names only a test source of src/q, or only a
+    # generated source of it: src/q is not in the run, so the manifest is not read.
+    var l = _report()
+    l.append(Input(String(FORMAT_LCOV), String(""), String("q.info"), String("SF:src/q/tests/test_q.mojo\nDA:1,1\nend_of_record\n")))
+    var files = List[String]()
+    files.append("src/p/BUCK")
+    files.append("src/p/a.mojo")
+    files.append("src/p/bins/tool.mojo")
+    files.append("src/p/mopm.toml")
+    files.append("src/q/BUCK")
+    files.append("src/q/mopm.toml")
+    files.append("src/q/gen.mojo")
+    files.append("src/q/tests/test_q.mojo")
+    var s = _sources()
+    s.texts[String("src/q/gen.mojo")] = String("# @generated by a tool\ndef g():\n    pass\n")
+    s.texts[String("src/q/tests/test_q.mojo")] = String("def main():\n    pass\n")
+    var a = analyze(l, List[Input](), repo_files_of(files), _held(), s, _enforce(_ran()))
+    assert_equal(_kinds(a), "")
+    var g = _report()
+    g.append(Input(String(FORMAT_LCOV), String(""), String("g.info"), String("SF:src/q/gen.mojo\nDA:2,1\nend_of_record\n")))
+    var b = analyze(g, List[Input](), repo_files_of(files), _held(), s, _enforce(_ran()))
+    assert_equal(_kinds(b), "")
+    assert_equal(len(b.generated_paths), 1)
+    assert_equal(b.generated_paths[0], "src/q/gen.mojo")
+
+
+def test_a_program_with_a_generated_marker_is_a_program() raises:
+    var s = _sources()
+    s.texts[String(TOOL_PATH)] = String("# @generated\ndef main():\n    run()\n")
+    var l = _report()
+    l.append(Input(String(FORMAT_LCOV), String(""), String("t2.info"), String("SF:src/p/bins/tool.mojo\nDA:2,0\nend_of_record\n")))
+    var a = analyze(l, List[Input](), _repo(), _held(), s, _enforce())
+    assert_equal(_kinds(a), "UnrunProgram@src/p/bins/tool.mojo")
+    assert_equal(len(a.program_paths), 1)
+    assert_equal(len(a.generated_paths), 0)
+    assert_equal(a.packages[a.package_index(String("src/p"))].line_found, 2)
+
+
+def _cobertura(path: String, lines: String) -> String:
+    return (
+        String("<coverage><packages><package name=\"\"><classes><class name=\"c\" filename=\"") + path
+        + String("\"><lines>") + lines + String("</lines></class></classes></package></packages></coverage>")
+    )
+
+
+def test_a_program_in_the_uncompiled_report_is_left_out() raises:
+    # buildrules' report of the code no test compiled names the program: its lines are not counted,
+    # and nothing about it is listed as left out by that report.
+    var l = List[Input]()
+    l.append(Input(String(FORMAT_COBERTURA), String(""), String("t.xml"), _cobertura(
+        String("src/p/a.mojo"), String("<line number=\"1\" hits=\"1\"/><line number=\"2\" hits=\"1\"/>")
+    )))
+    l.append(Input(String(FORMAT_COBERTURA), String(""), String("x/__coverage__/uncompiled.cobertura.xml"), _cobertura(
+        String(TOOL_PATH), String("<line number=\"2\" hits=\"0\"/>")
+    )))
+    var a = analyze(l, List[Input](), _repo(), _held(), _sources(), _enforce(_ran()))
+    var k = a.package_index(String("src/p"))
+    assert_equal(a.packages[k].line_found, 2)
+    assert_equal(a.packages[k].line_hit, 2)
+    assert_equal(a.packages[k].unmeasured_files, 0)
+    assert_equal(len(a.excluded), 0)
+    assert_equal(len(a.program_paths), 1)
+    for i in range(len(a.findings)):
+        assert_true(a.findings[i].kind != String("UnrunProgram") and a.findings[i].kind != String("UnmeasuredFile"), _kinds(a))
+
+
+# ---- the report command --------------------------------------------------------
+
+
+def _report_args(dir: String, mode: String, run_name: String) raises -> List[String]:
+    var gate = _write_tree(dir)
+    write_text(dir + String("/diff.txt"), String(""))
+    var a = List[String]()
+    a.append("report")
+    # The gate's arguments less `gate --package src/p`, and the report's own.
+    for i in range(3, len(gate)):
+        if gate[i] == String("--mode"):
+            continue
+        if i > 0 and gate[i - 1] == String("--mode"):
+            continue
+        a.append(gate[i])
+    a.append("--mode")
+    a.append(mode)
+    a.append("--diff")
+    a.append(dir + String("/diff.txt"))
+    a.append("--head-sha")
+    a.append("0123456789abcdef0123456789abcdef01234567")
+    a.append("--checkrun-dir")
+    a.append(dir + String("/checkrun_") + run_name)
+    return a^
+
+
+def _result_kinds(path: String) raises -> String:
+    var doc = parse_json_value(read_text(path))
+    var fs = doc.get(String("findings"))
+    var s = doc.get(String("conclusion")).as_string()
+    for i in range(fs.array_len()):
+        s += String(" ") + fs.element_at(i).get(String("kind")).as_string() + String("@") + fs.element_at(i).get(String("path")).as_string()
+    return s^
+
+
+def test_the_report_reads_the_program_targets() raises:
+    var dir = _tmp(String("programs_report"))
+    write_text(dir + String("/none.json"), String("{}\n"))
+    write_text(dir + String("/ran.json"), String(RAN_JSON))
+    for m in range(3):
+        var mode = String("census") if m == 0 else (String("neutral") if m == 1 else String("enforce"))
+        var none = _report_args(dir, mode, mode + String("_none"))
+        none.append("--program-targets")
+        none.append(dir + String("/none.json"))
+        # The report exits 0 whatever it finds; the conclusion carries the mode.
+        assert_equal(run(none^), EXIT_OK)
+        var want = String("failure") if m == 2 else String("neutral")
+        assert_equal(_result_kinds(dir + String("/result.json")), want + String(" UnrunProgram@src/p/bins/tool.mojo"))
+        var summary = read_text(dir + String("/summary.md"))
+        assert_true(summary.find("**UnrunProgram** `src/p` `src/p/bins/tool.mojo`: bins entry `tool` of src/p/mopm.toml") >= 0, summary)
+        var ran = _report_args(dir, mode, mode + String("_ran"))
+        ran.append("--program-targets")
+        ran.append(dir + String("/ran.json"))
+        assert_equal(run(ran^), EXIT_OK)
+        var want_ran = String("success") if m == 2 else String("neutral")
+        assert_equal(_result_kinds(dir + String("/result.json")), want_ran)
+
 def main() raises:
-    test_inline_array_in_every_layout()
-    test_array_of_tables()
-    test_no_bins_is_no_programs()
-    test_other_values_are_skipped_not_read()
-    test_shapes_that_are_refused()
-    test_entries_must_name_and_path()
-    test_paths_must_be_relative_mojo_files()
-    test_quoting_and_nesting_in_the_manifest()
-    test_a_package_without_a_manifest_has_no_programs()
-    test_the_error_names_the_line()
     test_program_nothing_runs_is_a_finding()
     test_program_a_test_runs_is_excluded_without_a_finding()
     test_evidence_is_per_program_path()
@@ -691,7 +672,13 @@ def main() raises:
     test_a_package_with_a_hold_is_read_though_no_report_names_it()
     test_program_of_a_test_only_package_is_information()
     test_the_root_package()
-    test_the_runs_file()
-    test_the_program_runs_flag()
+    test_a_program_that_is_a_test_source_is_an_error()
+    test_the_array_of_tables_in_the_analysis()
+    test_a_report_of_the_program_alone_still_measures_the_package()
+    test_manifests_of_packages_only_left_out_files_name_are_not_read()
+    test_a_program_with_a_generated_marker_is_a_program()
+    test_a_program_in_the_uncompiled_report_is_left_out()
+    test_the_report_reads_the_program_targets()
+    test_the_program_targets_flag()
     test_a_manifest_that_cannot_be_read_fails_the_run()
     print("test_programs: PASS")

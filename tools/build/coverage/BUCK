@@ -156,8 +156,13 @@ mojo_library(
         # program, none when one does; a bins path no manifest names, and a package with
         # no manifest, counted as before; every manifest shape refused (a table for the
         # array, a missing name or path, a path that is not a relative .mojo path, bins
-        # given twice); manifests read only for the packages in the run; --program-runs
+        # given twice); manifests read only for the packages in the run; --program-targets
         "tests/test_programs.mojo",
+        # the program sources' readers: the manifest's statements read strictly (strings,
+        # multi-line strings, nested values, table names), every refused `bins` shape with its
+        # line, what an entry may name (a file of its own package, once, by one name), and the
+        # buck2 JSON of the program targets (entry points; every refused shape)
+        "tests/test_program_manifest.mojo",
     ],
     test_data = {
         "tests/test_lcov.mojo": ["tests/fixtures/basic.info"],

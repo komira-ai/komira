@@ -42,7 +42,8 @@ struct Options(Copyable, Movable):
     var test_sources: Dict[String, Bool]
     # The directories of test-only packages (`--info-package`; step 8).
     var info_packages: List[String]
-    # Repository paths of the program sources some test target runs (programs.mojo; step 3c).
+    # Repository paths of the entry points of the program targets a test target of their package
+    # depends on (programs.parse_program_targets; step 3c).
     var program_runs: Dict[String, Bool]
 
     def __init__(out self):

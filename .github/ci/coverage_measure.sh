@@ -532,35 +532,34 @@ N_RECORDS=$(grep -c . "$OUT/branch_records.txt" || true)
 
 # 5. The report.
 if [ "$N_REPORTS" -gt 0 ]; then
-    # The program sources some test target runs (tools/build/coverage/README.md,
-    # "Program sources"): of each measured package with a mopm.toml, the source
-    # inputs of every program target (a mojo_binary_rule, or a mojo_unit_rule of
-    # kind `bin`) that a test target of the package (a mojo_test_rule or
-    # mojo_test_run_rule) depends on, as buck2's `inputs()` prints them: repository
-    # paths, one per line. The build graph is the evidence: no file's text is
-    # searched for a program's name. covcheck reads which files are programs from
-    # each manifest; this file only says which of them a test target depends on.
-    # A failing query is an error, never "none run".
-    : >"$OUT/program_runs.txt"
-    ppats=""
-    # The root package is the empty line of measured_packages.txt (komira//:x).
+    # The program targets each measured package's tests depend on
+    # (tools/build/coverage/README.md, "Program sources"): of each measured
+    # package P with a mopm.toml, the program targets of P (a mojo_binary_rule,
+    # or a mojo_unit_rule of kind `bin`) that a test target of P (a
+    # mojo_test_rule or mojo_test_run_rule) depends on, one selection per
+    # package joined in one query, so a test of another package is no evidence
+    # for P. buck2's JSON of their `main` and `srcs` is the file covcheck reads
+    # (--program-targets), which takes each target's entry point from it; no
+    # file's text is searched for a program's name. With no such package the
+    # file is an empty object; a failing query is an error, never "none run".
+    echo '{}' >"$OUT/program_targets.json"
+    pquery=""
     while IFS= read -r p; do
         [ -f "${p:-.}/mopm.toml" ] || continue
         case "$p" in *[!A-Za-z0-9_./+-]*) die "package directory '$p' holds a character a target pattern cannot" ;; esac
-        ppats="$ppats //$p:"
+        tdeps="deps(kind('^mojo_test(_run)?_rule\$', //$p:))"
+        sel="((kind('^mojo_binary_rule\$', $tdeps) + attrfilter('kind', 'bin', kind('^mojo_unit_rule\$', $tdeps))) intersect //$p:)"
+        if [ -z "$pquery" ]; then pquery="$sel"; else pquery="$pquery + $sel"; fi
     done <"$OUT/measured_packages.txt"
-    if [ -n "$ppats" ]; then
-        tdeps="deps(kind('^mojo_test(_run)?_rule\$', set($ppats )))"
-        pquery="inputs((kind('^mojo_binary_rule\$', $tdeps) + attrfilter('kind', 'bin', kind('^mojo_unit_rule\$', $tdeps))) intersect set($ppats ))"
-        say "buck2 uquery \"$pquery\""
+    if [ -n "$pquery" ]; then
+        say "buck2 uquery \"$pquery\" --output-attribute '^(main|srcs)\$'"
         rc=0
-        "$BUCK2" uquery -c komira.coverage=true "$pquery" \
-            >"$OUT/program_runs.txt" 2>"$OUT/logs/uquery_programs.log" </dev/null || rc=$?
+        "$BUCK2" uquery -c komira.coverage=true "$pquery" --output-attribute '^(main|srcs)$' \
+            >"$OUT/program_targets.json" 2>"$OUT/logs/uquery_programs.log" </dev/null || rc=$?
         if [ "$rc" -ne 0 ]; then
             tail -n 20 "$OUT/logs/uquery_programs.log"
             die "buck2 uquery of the programs the tests depend on exited $rc"
         fi
-        say "$(grep -c . "$OUT/program_runs.txt" || true) source file(s) of the programs a test target depends on"
     fi
     set -- report --repo-files "$OUT/repo-files" --diff "$OUT/diff.txt" --head-sha "$HEAD" \
         --source-root . --mode "$MODE" --target-bp "$TARGET" --name "$NAME" \
@@ -569,7 +568,7 @@ if [ "$N_REPORTS" -gt 0 ]; then
     while IFS= read -r x; do set -- "$@" --cobertura "$x"; done <"$OUT/reports.txt"
     while IFS= read -r x; do set -- "$@" --branch-lcov "$x"; done <"$OUT/branch_records.txt"
     for d in $INFO_DIRS; do set -- "$@" --info-package "$d"; done
-    set -- "$@" --program-runs "$OUT/program_runs.txt"
+    set -- "$@" --program-targets "$OUT/program_targets.json"
     # A mojo_package with no branch records (its tests link a native library) is
     # given a copy of its hold without `branch`, which covcheck would read as a
     # Regression (a held metric not measured); every other package's hold is read as it is.

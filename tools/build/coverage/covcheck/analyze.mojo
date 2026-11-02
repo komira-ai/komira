@@ -209,20 +209,33 @@ def _package_or_empty(path: String, repo: RepoFiles) -> String:
         return String("")
 
 
+def _counted_package(path: String, repo: RepoFiles, sources: Sources, opts: Options) -> String:
+    """The package of a report path step 3 counts (kept, no test source, not generated), else empty."""
+    var pkg = _package_or_empty(path, repo)
+    if pkg.byte_length() == 0 or _keep(pkg, path, opts) != 0:
+        return String("")
+    try:
+        if is_generated(sources.read(path)):
+            return String("")
+    except:
+        pass
+    return pkg^
+
+
 def _programs(
     mapped: List[FileCov], bmapped: List[FileCov], held: Held, repo: RepoFiles, sources: Sources, opts: Options
 ) raises -> List[Program]:
-    """The programs (programs.mojo) of the packages in the run: those a kept report path is in, the
-    gated package, and the packages given a hold. A manifest is read only for those."""
+    """The programs (programs.mojo) of the packages in the run (a counted report path's, the gated
+    one, a held one; no other manifest is read). A program that is a test source is an error."""
     var pkgs = Dict[String, Bool]()
     if opts.only_package.byte_length() > 0:
         pkgs[opts.only_package] = True
     for e in held.packages.items():
         pkgs[e.key] = True
     for i in range(len(mapped)):
-        pkgs[_package_or_empty(mapped[i].path, repo)] = True
+        pkgs[_counted_package(mapped[i].path, repo, sources, opts)] = True
     for i in range(len(bmapped)):
-        pkgs[_package_or_empty(bmapped[i].path, repo)] = True
+        pkgs[_counted_package(bmapped[i].path, repo, sources, opts)] = True
     var list = List[String]()
     var texts = Dict[String, String]()
     for e in pkgs.items():
@@ -234,7 +247,15 @@ def _programs(
             list.append(pkg)
             texts[manifest] = sources.read(manifest)
     sort_strings(list)
-    return program_sources(repo, texts, list)
+    var programs = program_sources(repo, texts, list)
+    for i in range(len(programs)):
+        ref p = programs[i]
+        if _keep(p.package, p.path, opts) == 2:
+            raise Error(
+                p.manifest + String(":") + String(p.line) + String(": bins entry `") + p.name + String("` names ") + p.path
+                + String(", which is a test source of ") + p.package + String(" (under its tests/, or a --test-source)")
+            )
+    return programs^
 
 
 def _unmeasured_files(
@@ -699,6 +720,9 @@ def analyze(
             raise Error(String("coverage_held of ") + e.key + String(": the directory has no BUCK file"))
         if _keep(e.key, e.key + String("/BUCK"), opts) == 0:
             measured[e.key] = True
+    # A program's package is measured though its records were left out: its other files still count.
+    for i in range(len(programs)):
+        measured[programs[i].package] = True
     var named = Dict[String, Bool]()
     var pending = Dict[String, FileCov]()
     var branch_unmeasured = List[Finding]()
