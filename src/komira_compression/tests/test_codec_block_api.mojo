@@ -209,8 +209,9 @@ def test_snappy_refusals_name_status_and_sizes() raises:
 
 
 # A block whose literal declares 2^32 bytes: the stream of upstream snappy's
-# regression test `Snappy.LiteralLengthU32Overflow` (snappy_unittest.cc,
-# google/snappy commit 7406111ac4ae539ea0db8b7ea2dc76730cd957f4, in 1.3.0).
+# regression test `Snappy.LiteralLengthU32Overflow` (snappy_unittest.cc),
+# added with the fix "Reject streams with literal spans of 2^32 bytes" in
+# google/snappy 1.3.0.
 # The preamble declares 65536 bytes. A 1-byte literal "D" and 260 copies of
 # 64 bytes at offset 1 write 16641 bytes; a 1-byte literal "F" makes 16642.
 # Then `literal`, when given: tag 0xFC (a literal whose length - 1 is in the
