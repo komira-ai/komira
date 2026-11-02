@@ -257,6 +257,14 @@ def test_quoting_and_nesting_in_the_manifest() raises:
         "\"bins\" = [{ \"name\" = \"q\", 'path' = \"bins/q.mojo\", tags = [\"x\", \"y\"] }]\n"
     )
     assert_equal(_names(parse_bins(quoted, String("m.toml"))), "q=bins/q.mojo")
+    # A quoted key holding an escaped quote and an `=`: the key ends at its closing quote.
+    var key = String(
+        "[package]\n"
+        "\"we\\\"ird = key\" = 1\n"
+        "[targets]\n"
+        "bins = [{ name = \"k\", path = \"bins/k.mojo\" }]\n"
+    )
+    assert_equal(_names(parse_bins(key, String("m.toml"))), "k=bins/k.mojo")
     # A key given twice inside one entry; an entry whose brace is never matched.
     _refused(String("[targets]\nbins = [{ name = \"a\", path = \"x.mojo\", path = \"y.mojo\" }]\n"), String("given twice"))
     _refused(String("[targets]\nbins = [{ name = \"a\", path = \"bins/a.mojo\" ] ]\n"), String("never closed"))
@@ -630,6 +638,23 @@ def test_the_program_runs_flag() raises:
     assert_true(run(missing_flag_value(args)) != EXIT_OK)
 
 
+def test_a_manifest_that_cannot_be_read_fails_the_run() raises:
+    # The repository lists src/p/mopm.toml, but the source root holds no such file.
+    var dir = _tmp(String("programs_unreadable"))
+    var s = Sources(dir)
+    s.texts[String("src/p/a.mojo")] = String("def f() -> Int:\n    return 1\n")
+    var raised = False
+    try:
+        _ = analyze(_report(), List[Input](), _repo(), _held(), s, _enforce(_ran()))
+    except e:
+        raised = True
+        assert_true(
+            String(e).startswith(String("cannot read the source src/p/mopm.toml under --source-root ") + dir + String(": ")),
+            String(e),
+        )
+    assert_true(raised)
+
+
 def missing_flag_value(args: List[String]) -> List[String]:
     var l = args.copy()
     l.append("--program-runs")
@@ -668,4 +693,5 @@ def main() raises:
     test_the_root_package()
     test_the_runs_file()
     test_the_program_runs_flag()
+    test_a_manifest_that_cannot_be_read_fails_the_run()
     print("test_programs: PASS")
