@@ -30,6 +30,8 @@ const CLAUDE = "CLAUDE.md";
 
 const BEGIN = "<!-- shared-core:begin -->";
 const END = "<!-- shared-core:end -->";
+// Fixtures spell the import as `IMPORT` joined to the text around it: written out after a
+// letter (such as the `n` of an escaped newline), it reads as an email address to //:public_boundary.
 const IMPORT = "@AGENTS.md";
 
 /// The most bytes read from one input file.
@@ -402,28 +404,28 @@ test "a CLAUDE.md that is the import, or holds it among other lines, imports AGE
         "@AGENTS.md\n",
         "@AGENTS.md",
         "@AGENTS.md\r\n", // a CRLF line ending is a line ending
-        "# Notes\n\n@AGENTS.md\n\nRepository notes.\n",
-        "```sh\n./buck2 build\n```\n@AGENTS.md\n",
+        "# Notes\n\n" ++ IMPORT ++ "\n\nRepository notes.\n",
+        "```sh\n./buck2 build\n```\n" ++ IMPORT ++ "\n",
         // After a closed tilde block that quotes a backtick fence.
-        "~~~\n```\nx\n~~~\n@AGENTS.md\n",
+        "~~~\n```\nx\n~~~\n" ++ IMPORT ++ "\n",
         // A run of backticks with a backtick in its info string opens no fence.
-        "``` a`b\n@AGENTS.md\n",
+        "``` a`b\n" ++ IMPORT ++ "\n",
         // A code span closed on the same line, before the import's paragraph line.
-        "Use `x` here\n@AGENTS.md\n",
+        "Use `x` here\n" ++ IMPORT ++ "\n",
         // A backtick run with no partner of its length is literal text.
-        "a `` b\n@AGENTS.md\n",
+        "a `` b\n" ++ IMPORT ++ "\n",
         // A span that does not reach the import: it closes before it.
-        "`one\ntwo`\n@AGENTS.md\n",
+        "`one\ntwo`\n" ++ IMPORT ++ "\n",
         // An unclosed run in another paragraph does not reach across a blank line.
-        "`open\n\n@AGENTS.md\n",
+        "`open\n\n" ++ IMPORT ++ "\n",
         // An escaped backtick is literal: it opens no span, so the last line's backtick has no partner.
-        "\\` \n@AGENTS.md\n`\n",
+        "\\` \n" ++ IMPORT ++ "\n`\n",
         // An escaped backtick, then a span closed on the same line; the last backtick has no partner.
-        "\\` `x`\n@AGENTS.md\n`\n",
+        "\\` `x`\n" ++ IMPORT ++ "\n`\n",
         // Two backslashes escape each other: the backtick opens a span that closes on its line.
-        "\\\\` `\n@AGENTS.md\n`\n",
+        "\\\\` `\n" ++ IMPORT ++ "\n`\n",
         // Inside a span a backslash is literal, so the span closes on the first line.
-        "`a\\`\n@AGENTS.md\n`\n",
+        "`a\\`\n" ++ IMPORT ++ "\n`\n",
     };
     for (goods) |good| {
         if (try checkImport(ar, good)) |why| {
@@ -443,27 +445,27 @@ test "a CLAUDE.md without the import line, or with it only in prose, a code bloc
         "# Notes\n",
         "Read @AGENTS.md first.\n",
         " @AGENTS.md\n",
-        "\t@AGENTS.md\n",
+        "\t" ++ IMPORT ++ "\n",
         "@AGENTS.md \n",
         "@agents.md\n",
         "@./AGENTS.md\n",
         "@AGENTS.md.bak\n",
-        "```\n@AGENTS.md\n```\n",
-        "  ```md\n@AGENTS.md\n  ```\n",
-        "\t```\n@AGENTS.md\n\t```\n", // a tab-indented fence
-        "~~~md\n@AGENTS.md\n~~~\n", // a tilde fence
-        "~~~\n@AGENTS.md\n", // an unclosed tilde fence runs to the end
-        "```\n@AGENTS.md\n", // an unclosed backtick fence runs to the end
-        "````\n```\n@AGENTS.md\n````\n", // a shorter run does not close a longer fence
-        "```\n``` md\n@AGENTS.md\n```\n", // a run with an info string does not close a fence
-        "~~~\n```\n@AGENTS.md\n```\n~~~\n", // a backtick block quoted in a tilde block
-        "```\n~~~\n@AGENTS.md\n```\n", // a tilde line does not close a backtick fence
-        "`\n@AGENTS.md\n`\n", // a code span over three lines
-        "Run ``x\n@AGENTS.md\ny`` here.\n", // a double-backtick span
-        "\\` `\n@AGENTS.md\n`\n", // an escaped backtick opens nothing; the next one opens a span
-        "\\\\\\` `\n@AGENTS.md\n`\n", // three backslashes: the last escapes the backtick
-        "\\\\`\n@AGENTS.md\n`\n", // two backslashes: the backtick is not escaped and opens a span
-        "\\``\n@AGENTS.md\n`\n", // the escaped backtick's neighbour opens a run of one
+        "```\n" ++ IMPORT ++ "\n```\n",
+        "  ```md\n" ++ IMPORT ++ "\n  ```\n",
+        "\t```\n" ++ IMPORT ++ "\n\t```\n", // a tab-indented fence
+        "~~~md\n" ++ IMPORT ++ "\n~~~\n", // a tilde fence
+        "~~~\n" ++ IMPORT ++ "\n", // an unclosed tilde fence runs to the end
+        "```\n" ++ IMPORT ++ "\n", // an unclosed backtick fence runs to the end
+        "````\n```\n" ++ IMPORT ++ "\n````\n", // a shorter run does not close a longer fence
+        "```\n``` md\n" ++ IMPORT ++ "\n```\n", // a run with an info string does not close a fence
+        "~~~\n```\n" ++ IMPORT ++ "\n```\n~~~\n", // a backtick block quoted in a tilde block
+        "```\n~~~\n" ++ IMPORT ++ "\n```\n", // a tilde line does not close a backtick fence
+        "`\n" ++ IMPORT ++ "\n`\n", // a code span over three lines
+        "Run ``x\n" ++ IMPORT ++ "\ny`` here.\n", // a double-backtick span
+        "\\` `\n" ++ IMPORT ++ "\n`\n", // an escaped backtick opens nothing; the next one opens a span
+        "\\\\\\` `\n" ++ IMPORT ++ "\n`\n", // three backslashes: the last escapes the backtick
+        "\\\\`\n" ++ IMPORT ++ "\n`\n", // two backslashes: the backtick is not escaped and opens a span
+        "\\``\n" ++ IMPORT ++ "\n`\n", // the escaped backtick's neighbour opens a run of one
     };
     for (bads) |bad| {
         expectRefused(try checkImport(ar, bad), want) catch |e| {
