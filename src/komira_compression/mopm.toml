@@ -16,9 +16,13 @@ bz2 = { version = ">=1.0.8,<2", kind = "shared", mode = "load" }
 lzma = { version = ">=5.2.5,<6", kind = "shared", mode = "load" }
 zstd = { version = ">=1.5.2,<2", kind = "shared", mode = "load" }
 
+# libsnappy.a is built by the `native_library` target //third_party/snappy:snappy_native, which BUCK's
+# `natives = {...}` names: an archive of the build, not compiled from sources by mopm. snappy is C++, so every
+# program that links it ends its link with `-lc++`.
 [native.snappy]
 kind = "static"
-srcs = ["native/snappy_provided.c"]
+provided = true
+link = ["c++"]
 
 [targets]
 lib = { path = "src/komira_compression" }
