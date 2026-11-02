@@ -12,7 +12,7 @@ MOJO = "1.0.0"
 # The pinned mopm the e2e installs with. It must have `mopm add --overlay`; one that lacks it fails every
 # target of //release/readme_e2e/verify at its install step, naming the option. It is the mopm every package
 # of the repository builds with (`mopm-toolchain.toml`), which buildrules pins for all three hosts.
-MOPM = "toolchains//:mopm_0_0_86"
+MOPM = "toolchains//:mopm_0_0_101"
 
 # The first mopm that has `mopm add --overlay`, as a label like MOPM, or None while no release
 # has it. `readme_e2e_complete` (root BUCK) compares it with MOPM: the row of EXCLUDED in
@@ -22,22 +22,6 @@ MOPM = "toolchains//:mopm_0_0_86"
 FIRST_MOPM_WITH_OVERLAY = "toolchains//:mopm_0_0_40"
 
 PACKAGES = {
-    "kci_api": "0.1.0",
-    "kci_artifact": "0.1.0",
-    "kci_artifact_manifest": "0.1.0",
-    "kci_artifact_proto": "0.1.0",
-    "kci_cell": "0.1.0",
-    "kci_deploy_model_proto": "0.1.0",
-    "kci_logs": "0.1.0",
-    "kci_manifest_proto": "0.1.0",
-    "kci_params": "0.1.0",
-    "kci_reconciler": "0.1.0",
-    "kci_release_channel": "0.1.0",
-    "kci_release_machine": "0.1.0",
-    "kci_resource_proto": "0.1.0",
-    "kci_validator_report": "0.1.0",
-    "kci_validator_rows": "0.1.0",
-    "kci_workflow_check": "0.1.0",
     "komira_anomaly": "0.1.0",
     "komira_async_api": "0.1.0",
     "komira_atomic_alias": "0.1.0",

@@ -34,9 +34,7 @@ const Member = pack_conda_meta.Member;
 // is in packaging/conda/README.md.
 
 const conda_subdir = "linux-64";
-/// The kci platform of `conda_subdir` (kci_api's platform table, which
-/// the manifest probe holds this to: kci refuses a manifest whose platform
-/// and subdir disagree).
+/// The platform of `conda_subdir` (the manifest names both, and they agree).
 const conda_platform = "linux-x86_64";
 pub const conda_metadata = "{\"conda_pkg_format_version\":2}";
 const mojo_conda_name = "mojo-compiler";
@@ -449,12 +447,11 @@ pub fn assembleConda(alloc: Alloc, stem: []const u8, pkg_entries: []Entry, info_
 //   <name>-<version>-<build>.conda   the package; this is the name the channel
 //                              carries. <version> is the Mojo compiler version,
 //                              <build> is `h<8 hex of the source commit>_<N>`
-//   manifest.json              the artifact manifest, exactly the contract of
-//                              kci's `kci_artifact_manifest`: ten keys,
+//   manifest.json              the artifact manifest: ten keys,
 //                              compact, in this order, one trailing newline:
 //                                format (`kci.artifact_manifest`),
 //                                schema_version (the integer 1), artifact_type
-//                                (`CONDA`), name, version, platform (the kci
+//                                (`CONDA`), name, version, platform (the
 //                                platform of the subdir: `linux-x86_64`),
 //                                subdir, file (the package's name above,
 //                                relative to the manifest), sha256 (of that
@@ -467,15 +464,12 @@ pub fn assembleConda(alloc: Alloc, stem: []const u8, pkg_entries: []Entry, info_
 //                              timestamp_ms, label, payload_path,
 //                              payload_sha256, ...
 //
-// The format names and majors are kci's (kci_api's format table). Nothing
+// The format names and majors are those the retired kci used, kept as they are. Nothing
 // run-specific (a run id, an attempt) is written here: these files are action
 // outputs, and a per-run value would make every run a cache miss.
 //
-// The manifest names metadata.json as a bare file name: kci's parser requires
-// `metadata` on a CONDA artifact and refuses one that is not a file next to
-// the manifest, so copying the directory cannot separate the two. The probe
-// //tools/build/package/manifest_probe:conda_manifest_kci runs kci's parser
-// over a package this tool wrote, so the two cannot drift apart.
+// The manifest names metadata.json as a bare file name, a file next to the
+// manifest, so copying the directory cannot separate the two.
 //
 // A library the tool cannot package (native code, no tests, a dependency with
 // no package, a run-time shared library its `dlopen` does not declare) is
@@ -497,15 +491,14 @@ fn writeRefusal(alloc: Alloc, a: Args, why: []const u8) !void {
     try writeFile(d, "REFUSED", try std.fmt.allocPrint(alloc, "{s}\n", .{why}));
 }
 
-/// The contract manifest, byte for byte what kci's `render_artifact_manifest`
-/// writes for a CONDA artifact (its key order: `metadata` last).
+/// The contract manifest for a CONDA artifact (its key order: `metadata` last).
 /// The metadata file a CONDA manifest names: next to it, under this name.
 pub const conda_manifest_metadata = "metadata.json";
 
-/// The kci platform of a conda subdir this tool writes (only `conda_subdir`).
+/// The platform of a conda subdir this tool writes (only `conda_subdir`).
 pub fn platformFor(subdir: []const u8) []const u8 {
     if (std.mem.eql(u8, subdir, conda_subdir)) return conda_platform;
-    fail("subdir `{s}`: this tool writes {s} only, whose kci platform is {s}", .{ subdir, conda_subdir, conda_platform });
+    fail("subdir `{s}`: this tool writes {s} only, whose platform is {s}", .{ subdir, conda_subdir, conda_platform });
 }
 
 pub fn contractManifest(alloc: Alloc, name: []const u8, version: []const u8, subdir: []const u8, file: []const u8, sha: []const u8) ![]u8 {

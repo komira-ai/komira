@@ -16,7 +16,7 @@ use	tools/build/mojo/toolchain.bzl	sh_argv	3	exception: busybox_sh, the helper z
 use	third_party/git/BUCK	sh_script	3	exception: git's own build is make, which needs a shell (git_build.sh); no shell-free way to build git exists
 use	third_party/git/defs.bzl	sh_argv	1	exception: git's own build is make, which needs a shell (git_build.sh); no shell-free way to build git exists
 use	third_party/git/defs.bzl	sh_script	1	exception: git's own build is make, which needs a shell (git_build.sh); no shell-free way to build git exists
-use	tools/build/package/BUCK	sh_script	4	exception: the shell lint and the data export of the human-run scripts list_conda_targets.sh and release_version.sh
+use	tools/build/package/BUCK	sh_script	2	exception: the shell lint of the human-run scripts list_conda_targets.sh and release_version.sh
 use	tools/build/platforms/table.bzl	sh_argv	1	exception: the macOS row lists `sh` among the applets of its busybox shim (data, see mojo/darwin/busybox.sh)
 use	tools/build/run/BUCK	sh_script	1	exception: macOS has no static busybox, so the darwin toolchain provides the busybox calling convention through a shell shim (mojo/darwin/busybox.sh)
 use	tools/build/tests/BUCK	sh_script	6	exception: the shell lint of human-run shell scripts; a lint of scripts that only people and CI run, not an action that runs a shell
@@ -36,7 +36,7 @@ script	third_party/git/git_build.sh	-	-	exception: git's own build is make, whic
 human	tools/build/coverage/census.sh	-	-	measures every library with ./buck2 by hand at the top of a checkout (run, collect); not an action (the build actions are census_render)
 script	tools/build/mojo/darwin/busybox.sh	-	-	exception: macOS has no static busybox, so the darwin toolchain provides the busybox calling convention through a shell shim (mojo/darwin/busybox.sh)
 human	tools/build/package/list_conda_targets.sh	-	-	a development helper that runs `buck2 uquery` from outside; never a build or test action
-human	tools/build/package/release_version.sh	-	-	run by the release workflow on a runner (and read as data by kci_workflow_check's test); never a build or test action
+human	tools/build/package/release_version.sh	-	-	run by the release workflow on a runner; never a build or test action
 human	tools/build/tests/assert_level_tests.sh	-	-	client-side driver or fixture regenerator: runs buck2 or a tool from outside, never a build or test action
 human	tools/build/tests/c_libs_tests.sh	-	-	client-side driver or fixture regenerator: runs buck2 or a tool from outside, never a build or test action
 human	tools/build/tests/coverage_branch_tests.sh	-	-	client-side driver or fixture regenerator: runs buck2 or a tool from outside, never a build or test action

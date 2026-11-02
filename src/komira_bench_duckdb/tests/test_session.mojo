@@ -52,7 +52,8 @@
 # - test_a_quoted_number_in_a_varchar_column_stays_text: '1994' in a VARCHAR
 #   column is still a text.
 # - test_wide_integers_are_exact_and_small_ones_are_integers: a quoted HUGEINT
-#   inside 64 bits is an integer (as an INT64 sum from the other engine is), one
+#   is always an exact decimal (as the engine's DECIMAL(38,0) is), a UBIGINT
+#   inside 63 bits is an integer, a HUGEINT one
 #   past 2^63 or a UBIGINT at 2^64-1 is neither a text nor a double, and two
 #   values a unit apart do not compare equal.
 # - test_decimals_compare_exactly_and_by_value: 123.40 in DECIMAL(10,2) and 123.4
@@ -92,7 +93,7 @@ from komira_bench_duckdb import (
     compare_signatures,
     signature_of,
 )
-from komira_bench_duckdb.cells import KIND_FLOAT, KIND_INT, KIND_NULL, KIND_TEXT
+from komira_bench_duckdb.cells import KIND_DECIMAL, KIND_FLOAT, KIND_INT, KIND_NULL, KIND_TEXT
 from komira_bench_duckdb.text import slice_bytes
 
 
@@ -685,10 +686,13 @@ def test_a_quoted_number_in_a_varchar_column_stays_text() raises:
 
 def test_wide_integers_are_exact_and_small_ones_are_integers() raises:
     var small = _fetched(_one(String("9223372036854775807")), String("HUGEINT"))
-    assert_equal(small.rows[0][0].kind, KIND_INT)
-    assert_equal(small.rows[0][0].i, Int64(9223372036854775807))
+    assert_equal(small.rows[0][0].kind, KIND_DECIMAL)
+    assert_equal(small.rows[0][0].s, String("9223372036854775807"))
     var negative = _fetched(_one(String("-9223372036854775808")), String("HUGEINT"))
-    assert_equal(negative.rows[0][0].kind, KIND_INT)
+    assert_equal(negative.rows[0][0].kind, KIND_DECIMAL)
+    var ubig = _fetched(_one(String("9223372036854775807")), String("UBIGINT"))
+    assert_equal(ubig.rows[0][0].kind, KIND_INT)
+    assert_equal(ubig.rows[0][0].i, Int64(9223372036854775807))
     var past = _fetched(_one(String("9223372036854775808")), String("UBIGINT"))
     assert_true(past.rows[0][0].kind != KIND_TEXT)
     assert_true(past.rows[0][0].kind != KIND_FLOAT)

@@ -120,48 +120,24 @@ def _split_cases():
 # ---- the shipped rows ------------------------------------------------------------
 #
 # Every row's own paths hold the selector's and the aggregate's own files (a change to how
-# the check set is chosen runs the whole of it), and kci's row owns its own directories and
-# nothing a shared library or the build system reaches it through.
+# the check set is chosen runs the whole of it).
 
-_OWNED = [
-    "bin/kci/main.mojo",
-    "bin/kci/BUCK",
-    "src/kci_api/BUCK",
-    "src/kci_resource_proto/src/x.mojo",
-    "packaging/images/base/BUCK",
+_SELECTOR_FILES = [
     "ci/targets.bzl",
     "tools/build/ci/affected.bzl",
 ]
 
-_NOT_OWNED = [
-    "src/komira_json/BUCK",
-    "src/komira_core/src/komira_core/x.mojo",
-    "tools/build/mojo/defs.bzl",
-    "tools/build/proto-codegen/BUCK",
-    "src/kcix/BUCK",
-    "bin/kcix/main.mojo",
-    "docs/ci.md",
-]
-
 def _shipped_cases():
     out = []
-    shipped = struct(heavy = HEAVY)
-    kci = [r for r in HEAVY if r[0] == "komira//bin/kci:kci"]
-    if len(kci) != 1:
-        return ["heavy shipped: the row of komira//bin/kci:kci is missing from HEAVY"]
-    for p in _OWNED:
-        wanted, _ = heavy_split(struct(heavy = kci), [p])
-        if not wanted:
-            out.append("heavy shipped: '{}' must own the kci row".format(p))
-    for p in _NOT_OWNED:
-        wanted, _ = heavy_split(struct(heavy = kci), [p])
-        if wanted:
-            out.append("heavy shipped: '{}' must not own the kci row".format(p))
-    for r in shipped.heavy:
+    for r in HEAVY:
         if "ci/**" not in r[1] or "tools/build/ci/**" not in r[1]:
             out.append("heavy shipped: the row of {} must own ci/** and tools/build/ci/**".format(r[0]))
         if not r[2]:
             out.append("heavy shipped: the row of {} names no root".format(r[0]))
+        for p in _SELECTOR_FILES:
+            wanted, _ = heavy_split(struct(heavy = [r]), [p])
+            if not wanted:
+                out.append("heavy shipped: '{}' must own the row of {}".format(p, r[0]))
     return out
 
 # ---- the default aggregate's guard -------------------------------------------------

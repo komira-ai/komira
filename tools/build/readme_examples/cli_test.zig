@@ -196,9 +196,9 @@ test "link-check: equal arguments pass; a README without an owner's -l is exit 1
     try t.expectError(error.FileNotFound, tmp.dir.access("ok", .{}));
 }
 
-const NO_EXAMPLE_REFUSAL = "release member b: src/b/README.md holds no ```mojo or ```mojo module example, so kci's install validation would refuse it after publish:" ++
+const NO_EXAMPLE_REFUSAL = "release member b: src/b/README.md holds no ```mojo or ```mojo module example, so the release would refuse it:" ++
     " \"src/b/README.md holds no ```mojo example, so the validation would run nothing; add one\"\n";
-const NO_README_REFUSAL = "release member c: no README is packaged, so kci's install validation would refuse it after publish:" ++
+const NO_README_REFUSAL = "release member c: no README is packaged, so the release would refuse it:" ++
     " \"c ships no share/doc/c/README.md: a release needs a README; add src/c/README.md\"\n";
 
 test "release-check: a member with an example passes, writing its count; ```mojo module counts" {
@@ -216,7 +216,7 @@ test "release-check: a member with an example passes, writing its count; ```mojo
     try t.expectEqualStrings("a 2\nm 1\n", try tmp.dir.readFileAlloc(a, "ok", 1 << 20));
 }
 
-test "release-check: no example and no README are each refused, naming the member and quoting kci; exit 1, nothing written" {
+test "release-check: no example and no README are each refused, naming the member; exit 1, nothing written" {
     var arena = Arena.init(t.allocator);
     defer arena.deinit();
     const a = arena.allocator();
@@ -230,12 +230,12 @@ test "release-check: no example and no README are each refused, naming the membe
     try t.expectEqual(@as(u8, 1), o.code);
     try t.expectEqualStrings(NO_EXAMPLE_REFUSAL ++ NO_README_REFUSAL, o.stdout);
     try t.expectError(error.FileNotFound, tmp.dir.access("ok", .{}));
-    // A README the read refuses (a relative link: --links refuse, as kci) is refused too.
+    // A README the read refuses (a relative link: --links refuse) is refused too.
     try tmp.dir.writeFile(.{ .sub_path = "link.md", .data = "See [x](x.md).\n\n```mojo\nprint(1)\n```\n" });
     const linked = [_][]const u8{ "tool", "release-check", "--out", "ok", "--member", "l", "src/l/README.md", "link.md" };
     const r = cli.run(a, tmp.dir, &linked);
     try t.expectEqual(@as(u8, 1), r.code);
-    try t.expect(std.mem.startsWith(u8, r.stdout, "release member l: kci's install validation would refuse its README after publish: src/l/README.md:1: x.md: a relative link"));
+    try t.expect(std.mem.startsWith(u8, r.stdout, "release member l: the release would refuse its README: src/l/README.md:1: x.md: a relative link"));
 }
 
 test "release-check --expect-refusal: passes only on a refusal containing the text" {

@@ -54,7 +54,7 @@ _CONFIG_PINS = [
     ]),
 ]
 
-# The module kci_logs needs first: GetLogEvents, without transport.
+# The CloudWatch Logs module first: GetLogEvents, without transport.
 aws_codegen_golden(
     name = "logs_pure",
     gen_args = _LOGS + [

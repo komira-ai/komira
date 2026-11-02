@@ -101,16 +101,13 @@ oci_image(name = "hello_image", bundle = ":hello_bundle", repository = "komira/h
   ```
 
   `[release]` is the image as a release set holds it: a directory with the
-  layout (`hello_image.oci/`) and kci's artifact manifest, `manifest.json`
+  layout (`hello_image.oci/`) and the artifact manifest, `manifest.json`
   (type `OCI`, `file` the layout directory, `sha256` the hex of `[digest]`,
   and as the name the bundle's program for an image of a bundle, or the last
   segment of `repository` for an image of a tree: one tree can make several
   images). A BUILD step copies it into the release directory
-  (`--out <release_dir>/<name>`), and kci's `verify_member` hashes every blob
-  of the layout and requires its manifest digest to be the manifest's
-  `sha256` (`src/kci_release_set`, which reads the real `hello_image[release]`
-  and `hello_root_image[release]`, an image of a tree, in a welded test). The
-  name must be a kci artifact name (`[a-z][a-z0-9_]*`): it is never rewritten,
+  (`--out <release_dir>/<name>`). The
+  name must be an artifact name (`[a-z][a-z0-9_]*`): it is never rewritten,
   so a repository such as `komira/oci-check` (a hyphen) makes a valid image
   whose `[release]` fails to build, naming the image and its repository.
 
@@ -280,7 +277,7 @@ for linux-64: one file, `lib/mojo/<name>.mojoc`, where the compiler already
 looks. The `mojo_library` macro declares it (`<name>_conda`) for every library,
 so nobody writes one and no list of names lives in the build.
 `komira_pack conda` writes the zip, the two tars and the JSON into a directory
-(the `.conda`, `manifest.json` in kci's artifact-manifest format, whose
+(the `.conda`, `manifest.json` in the artifact-manifest format, whose
 `metadata` names the `metadata.json` next to it),
 `komira_pack conda-meta` writes the metapackage from the members' manifests, and
 `komira_pack conda-check` reads either back and refuses what is wrong; nothing is
@@ -291,19 +288,10 @@ packaged keeps a target that builds as a refusal, and the bytes are reproducible
 
 [`system_libs.bzl`](system_libs.bzl) maps each system library a package may open
 at run time (by soname) to the conda-forge requirement of the package that ships
-it. kci's closure checks accept exactly those requirements on a library; the
-target `:system_libs` ([`system_libs_record.bzl`](system_libs_record.bzl)) writes
-the table for the welded test that holds kci's compiled copy equal to it. A
+it. A
 library declares the sonames it opens (`mojo_library(dlopen = [...])`), and its
 package requires each one's row, byte for byte
 ([packaging/conda/README.md](../../../packaging/conda/README.md#a-library-that-opens-a-shared-library-at-run-time)).
-
-The target `:glibc_floor` ([`glibc_floor_record.bzl`](glibc_floor_record.bzl))
-writes the platform table's glibc floor of each subdir the packer writes
-(`linux-64 2.34`, from `os_floor_version`) for the welded test that holds kci's
-compiled copy (`src/kci_release_set/glibc_floor.mojo`) equal to it: kci accepts
-`__glibc >=<floor>` on a library shipping native files, and no other `__glibc`
-requirement.
 
 With coverage on (`-c komira.coverage=true`), both copies of a conda package
 (its default output and `[release]`) also wait for the library's coverage runs
@@ -319,9 +307,6 @@ marker of a fixture library whose coverage is on whatever the switch says. A
 bundle, a tarball and an OCI image do not wait for the coverage of the
 libraries their program is built from.
 
-`conda_manifest_kci` ([`manifest_probe/BUCK`](manifest_probe/BUCK)) is the build
-gate between the two: it builds one real package and reads its manifest with
-kci's parser, so `buck2 build //...` fails if the packer and kci disagree.
 `conda_release_set_check` ([`release_set.bzl`](release_set.bzl); the target
 `:release_set_check` in [`BUCK`](BUCK)) builds the stamped release path without a
 release's `-c komira.package_*`, in any build that includes it (`buck2 build //...`
@@ -348,19 +333,15 @@ fails the build in these cases:
   `release_order/` and must pass first;
 - a member packages no README, or its README holds no example (a ```` ```mojo ````
   or ```` ```mojo module ```` fence, as the README examples tool's `generate --links refuse`
-  reads it; the check is that tool's `release-check`). kci's install validation
-  refuses both, but only after the release is published; the message names the
-  member and quotes kci. The `release_readme_*` targets in [`BUCK`](BUCK) run this
+  reads it; the check is that tool's `release-check`). The `release_readme_*` targets in [`BUCK`](BUCK) run this
   check over the fixtures in `release_readme/` and must pass first;
 - `komira_pack conda-check --kind metapackage --require-stamped true` refuses the
   metapackage;
 - its `libs`, its metapackage name, or the `--license`, `--summary` and `--home`
   it gives conda-meta differ from [`release_set.txt`](release_set.txt).
 
-The welded test `test_release_artifacts_file` of `src/kci_artifact` holds
-`release_set.txt` equal to `release/artifacts.textproto`'s metapackage, so a
-library added to the release set and not here is red. `:release_set_kci` reads
-the stamped metapackage's manifest with kci's parser. Not covered: the macro's
+`release_set.txt` copies the metapackage of `release/artifacts.textproto` (its name, members, license, summary and
+home); the stamp check holds `release_set_check` to the file. Not covered: the macro's
 reading of `-c komira.package_*` (these packages are given the test stamp), that
 a member's requirement on another member is at the set's version and build
 string (the packer writes it so; the order check reads only requirements that

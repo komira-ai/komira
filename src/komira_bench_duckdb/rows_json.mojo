@@ -14,11 +14,13 @@
 # DECIMAL 123.4567 from the VARCHAR '123.4567'. With the column types (the
 # `column_type` of DuckDB's `DESCRIBE <query>`, one per column) a value of such
 # a column is read as the number it is: a DECIMAL is an exact decimal cell, a
-# HUGEINT, UHUGEINT or UBIGINT is an integer cell when it fits 64 bits and an
-# exact decimal cell (scale 0) beyond. A value of such a column that is not
-# written as an exact number of its type is refused, never kept as a text. The
-# value of any other type stays what it was. Without column types a quoted
-# value is a text.
+# UHUGEINT or UBIGINT is an integer cell when it fits 64 bits and an exact
+# decimal cell (scale 0) beyond; a HUGEINT is always an exact decimal cell
+# (scale 0), as the komira engine's DECIMAL(38,0) column is, so that the two
+# compare on the same statistics (the allowed departure in
+# declared_types.mojo). A value of such a column that is not written as an
+# exact number of its type is refused, never kept as a text. The value of any
+# other type stays what it was. Without column types a quoted value is a text.
 
 from std.math import inf, nan
 
@@ -28,13 +30,17 @@ from .decimal_text import canonical_decimal
 comptime EXACT_NONE: Int = 0
 comptime EXACT_DECIMAL: Int = 1
 comptime EXACT_INTEGER: Int = 2
+comptime EXACT_WHOLE: Int = 3
 
 
 def exactness_of_type(column_type: String) -> Int:
     """How DuckDB's JSON writes a column of type `column_type` (as `DESCRIBE`
-    names it): `EXACT_DECIMAL` for DECIMAL(p,s), `EXACT_INTEGER` for HUGEINT,
-    UHUGEINT and UBIGINT, `EXACT_NONE` for the rest."""
-    if column_type == "HUGEINT" or column_type == "UHUGEINT" or column_type == "UBIGINT":
+    names it): `EXACT_DECIMAL` for DECIMAL(p,s), `EXACT_WHOLE` for HUGEINT (an
+    exact decimal whatever its size, as the komira engine's DECIMAL(38,0) is),
+    `EXACT_INTEGER` for UHUGEINT and UBIGINT, `EXACT_NONE` for the rest."""
+    if column_type == "HUGEINT":
+        return EXACT_WHOLE
+    if column_type == "UHUGEINT" or column_type == "UBIGINT":
         return EXACT_INTEGER
     if column_type.startswith(String("DECIMAL(")) and column_type.endswith(String(")")):
         return EXACT_DECIMAL
@@ -254,10 +260,10 @@ def _fits_int64(canonical: String) -> Bool:
 def _exact_cell(text: String, exactness: Int) raises -> Cell:
     """The cell of a value of an exact column written `text`."""
     var canonical = canonical_decimal(text)
-    if exactness == EXACT_INTEGER:
+    if exactness == EXACT_INTEGER or exactness == EXACT_WHOLE:
         if canonical.find(String(".")) >= 0:
             raise Error(String("JSON output: a fraction in an integer column: ") + text)
-        if _fits_int64(canonical):
+        if exactness == EXACT_INTEGER and _fits_int64(canonical):
             return _integer_cell(canonical)
     return Cell.decimal(canonical)
 

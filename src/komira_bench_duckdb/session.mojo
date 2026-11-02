@@ -33,6 +33,7 @@ from .clock import BenchClock
 from .memory import lower_ascii, parse_size, size_matches
 from .pins import DEFAULT_DUCKDB_VERSION, find_pin, duckdb_pins
 from .declared_types import duckdb_declared_type
+from .faults import FaultCount
 from .rows_json import EXACT_NONE, exactness_of_type, parse_json_rows
 from .text import slice_bytes
 from .transport import DuckDbTransport, StdoutChunk
@@ -57,32 +58,53 @@ struct QueryTiming(Copyable, Movable):
     its end marker in nanoseconds, and DuckDB's error text if it had one.
     `resolved` is False when both markers were stamped with the same clock
     reading (they arrived in one read), so the query took less than the clock
-    could tell apart and `elapsed_ns` is 0 for that reason, not a measurement."""
+    could tell apart and `elapsed_ns` is 0 for that reason, not a measurement.
+    `faults` is the page faults of the DuckDB process between the two readings
+    taken around the query (one just before it is sent, one just after its end
+    marker is read), or nothing where the transport cannot read them."""
 
     var id: Int
     var elapsed_ns: Int
     var error: String
     var resolved: Bool
+    var faults: Optional[FaultCount]
 
-    def __init__(out self, id: Int, elapsed_ns: Int, var error: String, resolved: Bool = True):
+    def __init__(
+        out self,
+        id: Int,
+        elapsed_ns: Int,
+        var error: String,
+        resolved: Bool = True,
+        var faults: Optional[FaultCount] = Optional[FaultCount](),
+    ):
         self.id = id
         self.elapsed_ns = elapsed_ns
         self.error = error^
         self.resolved = resolved
+        self.faults = faults^
 
     def ok(self) -> Bool:
         return self.error.byte_length() == 0
 
 
 struct FetchResult(Copyable, Movable):
-    """The rows of a fetched query, or DuckDB's error text."""
+    """The rows of a fetched query, or DuckDB's error text. `elapsed_ns`,
+    `resolved` and `faults` describe the query's own run, marker to marker, as
+    a `QueryTiming` does (the `DESCRIBE` that follows is not part of it); the
+    run renders its rows in JSON, which a timed run does not."""
 
     var rows: ResultSet
     var error: String
+    var elapsed_ns: Int
+    var resolved: Bool
+    var faults: Optional[FaultCount]
 
     def __init__(out self):
         self.rows = ResultSet()
         self.error = String("")
+        self.elapsed_ns = 0
+        self.resolved = False
+        self.faults = Optional[FaultCount]()
 
     def ok(self) -> Bool:
         return self.error.byte_length() == 0
@@ -171,6 +193,7 @@ struct DuckDbSession[T: DuckDbTransport](Movable):
     var _eof: Bool
     var _broken: Bool
     var _query_id: Int
+    var _last_faults: Optional[FaultCount]
 
     def __init__(out self, var transport: Self.T, var clock: BenchClock, max_silence_ms: Int = 0):
         """`max_silence_ms` above zero bounds every wait for output: that many
@@ -184,6 +207,7 @@ struct DuckDbSession[T: DuckDbTransport](Movable):
         self._eof = False
         self._broken = False
         self._query_id = 0
+        self._last_faults = Optional[FaultCount]()
 
     # --- reading -------------------------------------------------------------
 
@@ -227,17 +251,26 @@ struct DuckDbSession[T: DuckDbTransport](Movable):
     def _marker(self, kind: String, id: Int) -> String:
         return kind + String(" ") + String(id)
 
-    def _run(mut self, mode: String, sql: String) raises -> Tuple[Int, String, String, Bool]:
+    def _run(
+        mut self, mode: String, sql: String, with_faults: Bool = False
+    ) raises -> Tuple[Int, String, String, Bool]:
         """Send one marked query and wait for its end marker. Returns the
         elapsed nanoseconds between the markers, the text between them, the
         error text and whether the two markers carry different clock
-        readings."""
+        readings. With `with_faults` the transport's page-fault counters are
+        read just before the query is sent and just after its end marker is
+        read, and the difference is left in `_last_faults` (nothing when the
+        transport has no counters)."""
         if self._broken:
             raise Error("the session is unusable after an earlier failure")
         self._query_id += 1
         var id = self._query_id
         var start = self._marker(String(START_MARKER), id)
         var end = self._marker(String(END_MARKER), id)
+        var before = Optional[FaultCount]()
+        self._last_faults = Optional[FaultCount]()
+        if with_faults:
+            before = self._t.child_faults()
         try:
             self._t.send(
                 String(".mode ") + mode + String("\n.print ") + start + String("\n")
@@ -257,6 +290,10 @@ struct DuckDbSession[T: DuckDbTransport](Movable):
                     t0 = l.stamp
                 continue
             if l.text == end:
+                if with_faults and before:
+                    var after = self._t.child_faults()
+                    if after:
+                        self._last_faults = Optional[FaultCount](after.value().minus(before.value()))
                 var err = self._t.take_stderr()
                 if self._next >= len(self._lines):
                     self._lines = List[StampedLine]()
@@ -269,8 +306,8 @@ struct DuckDbSession[T: DuckDbTransport](Movable):
     def run_timed(mut self, sql: String) raises -> QueryTiming:
         """Run `sql` with no result rendered and return the marker-to-marker
         time. The id of the timing is the query's number in this session."""
-        var r = self._run(String("trash"), sql)
-        return QueryTiming(self._query_id, r[0], r[2].copy(), r[3])
+        var r = self._run(String("trash"), sql, True)
+        return QueryTiming(self._query_id, r[0], r[2].copy(), r[3], self._last_faults.copy())
 
     def fetch(mut self, sql: String) raises -> FetchResult:
         """Run `sql` in JSON mode and parse its rows. A query with no rows
@@ -282,8 +319,11 @@ struct DuckDbSession[T: DuckDbTransport](Movable):
         return self._fetch(sql, True)
 
     def _fetch(mut self, sql: String, typed: Bool) raises -> FetchResult:
-        var r = self._run(String("json"), sql)
+        var r = self._run(String("json"), sql, typed)
         var out = FetchResult()
+        out.elapsed_ns = r[0]
+        out.resolved = r[3]
+        out.faults = self._last_faults.copy()
         if r[2].byte_length() > 0:
             out.error = r[2].copy()
             return out^

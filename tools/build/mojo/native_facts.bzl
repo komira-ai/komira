@@ -21,9 +21,7 @@ SHIPS each C library among its direct `deps`.
     owning library's own closure ships, itself included. An owner that
     needs another has the higher rank, so ordering by rank, highest first,
     then by name names dependents first: the order of the link commands
-    the packer writes into the packaged README (`readme_link_names`), which
-    kci computes the same way from the packages' `depends` and `lib_files`
-    (src/kci_validate, readme_link.mojo);
+    the packer writes into the packaged README (`readme_link_names`);
   * `statics`: the link name of each static archive the closure ships
     (`lib<name>.a`, komira_log's holder), mapped to its import name.
 

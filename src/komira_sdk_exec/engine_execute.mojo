@@ -14,6 +14,12 @@ from komira_arrow.schema import RecordBatch
 from komira_async_api.token import CancellationToken
 from komira_lowering.lowered_plan import LoweredPlan
 from komira_parquet.runtime_footer_cache import ParquetMetadataCache
+from komira_phase_timers.phase_timers import (
+    PH_EXEC_SETUP,
+    PH_RUN_PLAN,
+    pt_now,
+    pt_record,
+)
 from komira_physical_plan.physical_plan import AggSinkData
 from komira_pipeline_exec.real_builder import RealBuilder
 from komira_pipeline_exec.run_plan import run_plan
@@ -47,6 +53,7 @@ def run_lowered_plan(
             + ": the plan scans an in-memory batch; this door runs Parquet"
             " scans only"
         )
+    var t_setup = pt_now()
     var cache = ParquetMetadataCache()
     var pool = ExprPool()
     var placeholder = 0
@@ -63,6 +70,8 @@ def run_lowered_plan(
         _ = builder.add_agg_sink(reversed_sinks.pop())
     var token = CancellationToken.new()
     ref dispatch = ctx.runtime.dispatcher()
+    pt_record[PH_EXEC_SETUP](t_setup)
+    var t_run = pt_now()
     var out = run_plan(
         lowered.segments,
         builder,
@@ -70,6 +79,7 @@ def run_lowered_plan(
         ctx.host_profile.thread_count,
         token,
     )
+    pt_record[PH_RUN_PLAN](t_run)
     var result = out.take(lowered.result_seg_id)
     if builder.pool_granted() != 0:
         raise Error(

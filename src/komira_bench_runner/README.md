@@ -6,7 +6,7 @@ The program that runs one benchmark query on both engines and writes the result.
 2. prepares the komira arm with the same tables, thread count and memory limit;
 3. runs the query on DuckDB in JSON mode (the reference rows) and on the arm with its rows materialized;
 4. compares the two by signature (exact for integers and text, a relative tolerance for floats) and, when the query has `ORDER BY` keys, checks the arm's row order;
-5. times the query only if the answers match: warm (sweeps of reps; rep 0 of each sweep is dropped, each sweep is reduced to its median, and the cell's time is the least of the sweep medians: not one median after one discarded run) and, if asked and possible, cold (the file cache dropped before every rep of either engine);
+5. times the query only if the answers match: warm (sweeps of reps) and, if asked and possible, cold (the file cache dropped before every rep of either engine). Every run is kept: nothing is run to be thrown away and no run is dropped from the result, the first of each sweep included. The run that checks the answer (step 3) is the first execution of the query on each engine, so it is timed and counted too and recorded as that engine's first run, including for a query that is refused or answered wrongly (its check runs are kept in the cell's `check_runs`, and the cell stays unverified). The engine whose check run goes first alternates by the query's position: DuckDB's first for the first, third, ... query, the arm's first for the second, ..., so neither always pays the reads of a cold page cache. This balances the order effect only across queries: a single query's first-run ratio still carries it (whichever engine ran first read the cold file pages). Each run is recorded with its time and the minor and major page faults its engine's process took during it;
 6. fills a `BenchResult` (`komira_bench_report`) per temperature and writes it.
 
 It implements these parts of `docs/design/lowering_and_pipeline.md` section 7.4: both engines at the same thread count and memory limit, cold and warm reported separately, results checked before timing under a stated float tolerance, refusals listed. It does not implement the disclosure rule: shortcuts both engines take (a `COUNT(*)` from the footer) and options that cost throughput for reproducibility (grain state) are not marked.
@@ -55,6 +55,8 @@ The rows are the cells `komira_bench_duckdb` makes from DuckDB's JSON output, so
 | DATE | `"1994-01-01"` | text `YYYY-MM-DD` (years 0001 to 9999) |
 | NULL | `null` | null |
 
+A HUGEINT is read as an exact decimal whatever its size, the representation of the engine's DECIMAL(38,0), the only column type Arrow has for it. DuckDB's HUGEINT against the arm's DECIMAL(38,0) with exactly equal values is the one allowed departure (the table in the README of `komira_bench_duckdb`, "Allowed departures"): the cell is timed and keeps its ratio, its value is `DEPARTURE:Arrow has no 128-bit integer: HUGEINT as DECIMAL(38,0)` and its verdict `DEPARTURE`, never `PASS`; the summary line says `DEPARTURE n/m` and `comparison.txt` lists the allowed departures. Unequal values, HUGEINT against INT64 and every other pair of declared types are wrong answers.
+
 A decimal column is compared exactly (count, sum, minimum, maximum and a hash of every value), and against a double column it is a difference of kinds. Which types DuckDB's JSON quotes is taken from the quoting rule of the shell's JSON renderer in DuckDB's source, and what it prints for NaN from its documented output; neither is checked against a fixture of the real binary here; the first real run checks it (a mismatch shows as a wrong answer, not a silent pass).
 
 Each column also carries a declared type from its Arrow type (`arrow_declared_type`, `ResultSet.types`): `DECIMAL128(p,s)` is `DECIMAL(p,s)`, `INT64` is `BIGINT`, `INT32` is `INTEGER`, `FLOAT64` is `DOUBLE`, `STRING` is `VARCHAR`, `DATE32` is `DATE`, and so on; the whole table, with DuckDB's names, is in the README of `komira_bench_duckdb` (Declared column types). The comparison fails by name when the two declared types differ even if every value is equal (`column 0 declared type differs: INTEGER against BIGINT`), and a type outside the table is reported as not in the mapping. The declared type is not the cell kind: an `INT32` and an `INT64` column both give integer cells and still differ.
@@ -65,10 +67,20 @@ Not mapped yet, and so refused: dictionary-encoded strings, booleans, timestamps
 
 | file | holds |
 |---|---|
-| `warm/result.json` | the warm result: `komira-bench-result/1` |
+| `warm/result.json` | the warm result: `komira-bench-result/2`, with every run of every sweep and its page faults |
 | `cold/result.json` | the cold result, only when cold was measured |
-| `comparison.txt` | the tolerance the answers were compared under: floats within the larger of `float_rel_tol` times the larger magnitude and `float_abs_floor`, everything else (declared column types included) exact; it is also printed |
+| `comparison.txt` | the tolerance the answers were compared under: floats within the larger of `float_rel_tol` times the larger magnitude and `float_abs_floor`, everything else (declared column types included) exact, then one `allowed departure <reason>` line per entry of the table of allowed departures; it is also printed |
 | `queries.sha256` | `<suite>/<id> <sha256 of the text>` per query in run order, then `listing_sha256` of those lines |
+
+## First run, steady state, and page faults
+
+A cell reports its first run (the run that checks the answer, executed before the sweeps on each engine, which is what a user's first query pays), its steady-state time and the spread of its sweep medians in separate columns (the steady-state time is the median of all the reps of each sweep, then the least over the sweeps; nothing is excluded), and the headline states the steady-state ratio with the first-run ratio beside it. `komira_bench_report` defines the words once (`STEADY_STATE_DEFINITION`): the steady-state time is the median of all the reps of each sweep, and the least of those medians over the sweeps. The first run is not hidden by a warm-up and not discarded by the harness (it differs from a timed run in materializing its rows, and each engine's first run includes something different: DuckDB's is marker to marker in its child process, the query plus the JSON rendering of every row to stdout; komira's is the host clock around `arm.run` with rows, the execution plus the Arrow-to-rows conversion; the harness's own parsing of the answer is in neither, and the two overheads differ, so a large result set skews the first-run ratio; in the cold result, where every rep starts from a dropped cache and a fresh context, the first run is the first cold rep instead): a wide run's first runs take many more page faults than later ones, and that cost is the engine's to remove.
+
+The page faults of a run come from the process counters, read just before the run and just after it:
+
+- komira: `getrusage(RUSAGE_SELF)` of the runner process, through `EngineArm.faults` (the engine runs inside the runner, on its own worker threads). An arm that cannot read it reports none.
+- Faults are all or nothing per side: if any run of a side, its first run included, had no reading, the faults of the whole side are `null`.
+- DuckDB: the DuckDB process is a child of the runner, so its counters are the minor and major fault fields of `/proc/<pid>/stat` of that child, read by `ProcessTransport.child_faults` around each timed query (before it is sent and after its end marker is read). On a platform without `/proc` the reading is absent, and the result records the faults of that side as not measured (null), never as zero.
 
 Warm and cold are two results because the result model holds one number of reps per run and has no temperature field. The schema has no field for the digest of a query either, hence `queries.sha256`.
 
@@ -93,9 +105,12 @@ komira_bench_runner_main
   [--threads N] [--memory-limit-bytes N] [--duckdb-version V]
   [--warm-sweeps N] [--warm-reps N] [--cold-sweeps N --cold-reps N --drop-caches-file PATH]
   [--pass-max X] [--max-silence-ms N]
+  [--js-measure-result]
 ```
 
 Every value is a flag; nothing is read from the environment. The DuckDB binary is checked against the pin before it is started. The dataset is verified against its manifest, and its lock (`<cache-dir>/locks/`) is read and verified or, if there is none, written from that verification; the lock's fingerprint is in the result. The query text is the file with its trailing newlines and spaces removed. The host class is an opaque label you choose, never the output of `hostname`. `--cores` and `--mem-bytes` are asserted by the caller and written to the result as given; the program does not detect them (the default thread count is `--cores`).
+
+`--js-measure-result` (no value) adds an optional machine-readable summary: after `warm/result.json` is written and the report is printed, the program prints one last line, `js-measure-result ` and a single line of compact JSON with the four members `steady_ms`, `first_run_ms`, `duckdb_steady_ms` and `verdict`. They are fields of the warm result's cell, in milliseconds: komira's `ms`, komira's `first_run.ms`, DuckDB's `ms`, and the cell's `verdict`. A value the run did not produce is `null`, never 0; a cell that was not timed (refused or answered wrongly) has no first run, and its check runs are not given in its place. If the line cannot be built, the report is still printed, followed by one line `error: js-measure-result: <reason>` instead, and the exit status is the run's. The line is under 8 KiB and nothing is printed after it. Without the flag the output is as it was. `--scale` is the manifest's spelling (`sf1`), not a bare number.
 
 Exit status: 0 only when every query ran and its values matched, 1 otherwise (a refused query is 1), 2 for a bad argument or a fault of the run.
 
@@ -108,4 +123,4 @@ Exit status: 0 only when every query ran and its values matched, 1 otherwise (a 
 
 ## Tests
 
-`tests/test_inputs.mojo` (digests, tables and scale, flags, the refusal arm, settings), `tests/test_runner.mojo` (the run over a DuckDB transport, an arm and a cache dropper that live in the test, with a manual clock) and `tests/test_komira_arm.mojo` (the real engine arm over a lineitem-shaped Parquet file and a DuckDB stand-in whose Q6 answer is computed in the test, and the conversion of result batches). No test asserts a duration the machine produced: every time is a number the fakes add to the clock. Each test file's header says what each test proves.
+`tests/test_inputs.mojo` (digests, tables and scale, flags, the refusal arm, settings), `tests/test_js_measure.mojo` (the summary line and the flag), `tests/test_runner.mojo` (the run over a DuckDB transport, an arm and a cache dropper that live in the test, with a manual clock) and `tests/test_komira_arm.mojo` (the real engine arm over a lineitem-shaped Parquet file and a DuckDB stand-in whose Q6 answer is computed in the test, and the conversion of result batches). No test asserts a duration the machine produced: every time is a number the fakes add to the clock. Each test file's header says what each test proves.

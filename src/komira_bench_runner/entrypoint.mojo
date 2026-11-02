@@ -38,7 +38,7 @@ from .arm import EngineArm
 from .cache import CacheDropper, NoCacheDropper, ProcDropCaches
 from .flags import RunFlags, parse_flags, usage
 from .komira_arm import KomiraArm
-from .output import format_run, write_run
+from .output import console_text, write_run
 from .query import QuerySpec
 from .runner import RunOutput, run_queries
 from .settings import HostFacts, RunInputs, RunSettings
@@ -114,7 +114,7 @@ def _drive[
     try:
         var out = run_queries(session, arm, dropper, BenchClock.system(), queries, inputs, settings)
         write_run(out, f.out_dir)
-        print(format_run(out))
+        print(console_text(out, f.js_measure_result))
         status = run_status(out)
     except e:
         session.kill()

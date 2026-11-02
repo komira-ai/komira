@@ -33,6 +33,7 @@ load("@prelude//linking:link_info.bzl", "LinkStrategy", "MergedLinkInfo")
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
 load("@komira//tools/build/one_definition:libraries.bzl", "THIRD_PARTY_OWNERS")
 load(":providers.bzl", "MojoInfo", "mojo_pkg_children")
+load("@komira//tools/build/bench_salt:bench_salt.bzl", "salted")
 
 NATIVE_REACH_ATTRS = {
     # The Zig scanner (native_reach/), set by the macro on linux-x86_64.
@@ -154,6 +155,7 @@ def native_reach(ctx, src_dir, deps):
                 src_dir,
                 [["--refuse", r] for r in refuse],
             ),
+            env = salted(),
             category = "native_reach",
         )
     else:

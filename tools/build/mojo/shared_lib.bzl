@@ -14,6 +14,7 @@ load(":opt_level.bzl", "SHIPPED_OPT_LEVEL", "TEST_OPT_LEVEL")
 load(":test_limit.bzl", "HANG_LIMIT_ATTRS", "hang_limit_flags")
 load(":system_libs.bzl", "dep_system_libs", "run_args")
 load(":test_runtime.bzl", _test_root = "test_root", gate_mojo = "gate_mojo")
+load("@komira//tools/build/bench_salt:bench_salt.bzl", "salted")
 
 # ---- mojo_shared_lib --------------------------------------------------------
 #
@@ -189,6 +190,7 @@ def _shared_lib_impl(ctx):
             "--",
             ctx.attrs.unlisted_exports,
         ),
+        env = salted(),
         category = "mojo_shared_lib_exports",
     )
     markers.append(exports_ok)
@@ -202,7 +204,7 @@ def _shared_lib_impl(ctx):
                 gate_mojo(tc, "{}:{}".format(ctx.label.raw_target(), stem), staged, marker.as_output(), hang_limit_flags(str(ctx.label.raw_target()), ctx.attrs.test_hang_limit_s), run_args([], dep_system_libs(ctx.attrs.deps))),
                 hidden = root,
             ),
-            env = rerun_env(ctx),
+            env = salted(rerun_env(ctx)),
             category = "mojo_shared_lib_gate",
             identifier = stem,
         )
@@ -212,6 +214,7 @@ def _shared_lib_impl(ctx):
     public = ctx.actions.declare_output("pub/" + so_file)
     ctx.actions.run(
         cmd_args(tc.act, "copy", ungated, public.as_output(), hidden = markers),
+        env = salted(),
         category = "mojo_shared_lib_join",
     )
     sub_targets = {

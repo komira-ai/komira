@@ -161,7 +161,7 @@ user's side adds may contain:
 **Added layers write only their prefixes.** An added layer may contain paths only under a runtime's environment
 directory `/opt/env/<runtime>/` (dependencies), `/komira-code/` (code and data) and
 `/komira-runtimes/<namespace>/<name>/` (third-party runtimes), and no whiteout. Everything else belongs to the base: its program prefixes
-(`/komira/`, `/opt/kci/`), and also its C library, loader configuration and CA certificates
+(`/komira/`), and also its C library, loader configuration and CA certificates
 (`packaging/images/base/README.md` in komira-ai/komira#1070), any of which an added layer could otherwise use to run
 code inside the supervisor. System libraries a dependency needs are a builder concern and land in the same
 runtime's environment directory *(inferred: a relocatable install prefix; see question 8 in §14)*.

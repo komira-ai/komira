@@ -336,9 +336,9 @@ ADVICE_HUGEPAGE) != 0` and `(flg & 0x08) == 0`). A `nodebug` helper of the
 library's would give its `icmp` the helper call's column, not the `if`'s. A branch at
 the `(` of a measured `nodebug` function's call is refused whatever its
 shape (below). Evidence: the sweep's sample of 20 libraries' IR (every
-refusal class), e.g. `kci_api/exit_codes.mojo` 101:17 (`if error_id ==
+refusal class), e.g. `exit_codes.mojo` 101:17 of a sampled library (`if error_id ==
 ERROR_INTERNAL:`, the temporary's destroy at `==`, the `if` a branch of its
-own at 101:5 on `String.__eq__`'s result), `kci_api/result.mojo` 481:9 (two
+own at 101:5 on `String.__eq__`'s result), `result.mojo` 481:9 of the same library (two
 owned arguments destroyed on the `if`'s return path: eight branches at the
 `if`), `komira_eval/expression_executor.mojo` 3979:13 (the capacity select
 at a `while`), `komira_parquet/delta.mojo` 329:54 (the phi web, an inlined
@@ -451,7 +451,7 @@ and its counts can be the whole's (an `or` true at least as often as its
 left operand, an `and` at most as often): a test of the value that runs
 another number of times reads it on some paths only, or elsewhere (`var
 lower = c >= 97 and c <= 122`, then `lower or ...` only when `i != 0`:
-`kci_api`'s `run_identity.mojo` 98, test 47's `values.mojo` 80:29), and
+the sampled library's `run_identity.mojo` 98, test 47's `values.mojo` 80:29), and
 one that never ran while the left operand did (or the reverse) is not its
 test either. Matching counts are necessary, not sufficient: a test whose
 counts happen to match is read as the result's (`r = a or g(b)`, then a

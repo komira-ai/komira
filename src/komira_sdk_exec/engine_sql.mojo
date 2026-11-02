@@ -16,6 +16,14 @@ from komira_arrow.schema import RecordBatch
 from komira_optimizer.optimizer_config import OptimizerConfig
 from komira_optimizer.optimizer_driver import optimize
 from komira_optimizer.optimizer_scalar_deps import ScalarDepTable
+from komira_phase_timers.phase_timers import (
+    PH_BIND,
+    PH_LOWER,
+    PH_OPTIMIZE,
+    PH_PARSE,
+    pt_now,
+    pt_record,
+)
 from komira_sql.sql_ast import STMT_QUERY
 from komira_sql.sql_binder import bind_statement
 from komira_sql.sql_parser import parse_sql
@@ -75,9 +83,13 @@ def run_sql(mut ctx: EngineContext, text: String) -> SqlOutcome:
     ctx.begin_query()
     var step = String(STEP_PARSE)
     try:
+        var t_parse = pt_now()
         var stmt = parse_sql(tokenize(text))
+        pt_record[PH_PARSE](t_parse)
         step = String(STEP_BIND)
+        var t_bind = pt_now()
         var bound = bind_statement(stmt, ctx.catalog, ctx.footers)
+        pt_record[PH_BIND](t_bind)
         if bound.kind != STMT_QUERY:
             raise Error(
                 String(STATEMENT_NOT_A_QUERY)
@@ -87,14 +99,18 @@ def run_sql(mut ctx: EngineContext, text: String) -> SqlOutcome:
         var plan = bound.take_plan()
         step = String(STEP_OPTIMIZE)
         var deps = ScalarDepTable()
+        var t_optimize = pt_now()
         var optimized = optimize(plan^, OptimizerConfig(), deps)
+        pt_record[PH_OPTIMIZE](t_optimize)
         if deps.has_requests():
             raise Error(
                 String(OPTIMIZE_UNRESOLVED_SCALAR)
                 + ": the plan needs a scalar subquery executed first"
             )
         step = String(STEP_LOWER)
+        var t_lower = pt_now()
         var lowered = lower_for_context(optimized, ctx)
+        pt_record[PH_LOWER](t_lower)
         step = String(STEP_EXECUTE)
         var batch = run_lowered_plan(ctx, lowered^)
         var outcome = SqlOutcome()

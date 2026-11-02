@@ -24,6 +24,7 @@ and its one output is that verdict (the image is not forwarded).
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load(":defs.bzl", "OciImageInfo")
+load("@komira//tools/build/bench_salt:bench_salt.bzl", "salted")
 
 def _with_check(ctx, name, d, out):
     """Sub-target `name` of the image, `d`, with the check's output added to it
@@ -68,6 +69,7 @@ def _impl(ctx):
             "--out",
             out.as_output(),
         ),
+        env = salted(),
         category = "oci_check",
     )
     if ctx.attrs.expect_red != None:

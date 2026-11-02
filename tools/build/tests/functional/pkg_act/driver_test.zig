@@ -214,7 +214,7 @@ fn ociArgs(c: *kit.Ctx, name: []const u8) ![]const []const u8 {
     });
 }
 
-test "oci-release-manifest: kci's compact bytes; a bad digest or member name is refused in words and writes nothing" {
+test "oci-release-manifest: compact bytes; a bad digest or member name is refused in words and writes nothing" {
     var c = try newCtx("oci");
     defer c.deinit();
     try c.write("digest.txt", "sha256:" ++ hex64 ++ "\n", 0o644);
@@ -224,7 +224,7 @@ test "oci-release-manifest: kci's compact bytes; a bad digest or member name is 
 
     const r2 = try c.run(try ociArgs(&c, "oci-check"), &.{});
     try t.expectEqual(@as(u8, 1), r2.code);
-    try t.expectEqualStrings("oci_image[release] of //p:image (repository komira/x): member name 'oci-check' (the bundle's program) is not a kci artifact name ([a-z][a-z0-9_]*)\n", r2.stderr);
+    try t.expectEqualStrings("oci_image[release] of //p:image (repository komira/x): member name 'oci-check' (the bundle's program) is not an artifact name ([a-z][a-z0-9_]*)\n", r2.stderr);
 
     std.fs.cwd().deleteFile(try c.path("m.json")) catch {};
     try c.write("digest.txt", "sha256:short\n", 0o644);
@@ -250,57 +250,6 @@ test "level-run: the program's stdout is the target's output and is shown; its e
     try t.expectEqualStrings("level report: wrong\n", try c.read("out2.txt"));
     try t.expect(has(r2.stderr, "level report: wrong"));
     try t.expectEqual(@as(u8, 2), (try c.run(&.{ "level-run", "o" }, &.{})).code);
-}
-
-// ---- conda-manifest-kci --------------------------------------------------------
-
-fn laydir(c: *kit.Ctx, dir: []const u8) !void {
-    const al = c.alloc();
-    try c.write(try std.fmt.allocPrint(al, "{s}/p-1.0-0.conda", .{dir}), "pkg", 0o644);
-    try c.write(try std.fmt.allocPrint(al, "{s}/manifest.json", .{dir}), "{}", 0o644);
-    try c.write(try std.fmt.allocPrint(al, "{s}/metadata.json", .{dir}), "{}", 0o644);
-}
-
-test "conda-manifest-kci: the probe's line, with the directory taken out; refused for each way it can be wrong" {
-    var c = try newCtx("kci");
-    defer c.deinit();
-    const probe = try c.env("PROBE");
-    try laydir(&c, "pkg");
-    const r = try c.run(&.{ "conda-manifest-kci", "out.parsed", "pkg", probe }, &.{.{ "PROBE_MODE", "ok" }});
-    if (r.code != 0) std.debug.print("[pkg_act stderr] {s}\n", .{r.stderr});
-    try t.expectEqual(@as(u8, 0), r.code);
-    try t.expectEqualStrings("OK CONDA pkg 1.0 metadata=metadata.json metadata_path=metadata.json render-identical=yes\n", try c.read("out.parsed"));
-
-    // A parser that refuses: its exit status and words are in the message.
-    const r2 = try c.run(&.{ "conda-manifest-kci", "o2", "pkg", probe }, &.{.{ "PROBE_MODE", "refuse" }});
-    try t.expectEqual(@as(u8, 1), r2.code);
-    try t.expect(has(r2.stderr, "conda_manifest_kci: kci's artifact-manifest parser refuses "));
-    try t.expect(has(r2.stderr, "(exit 1): cannot parse the manifest"));
-    try t.expect(!c.exists("o2"));
-    // A metadata path that is not the file next to the manifest.
-    const r3 = try c.run(&.{ "conda-manifest-kci", "o3", "pkg", probe }, &.{.{ "PROBE_MODE", "elsewhere" }});
-    try t.expectEqual(@as(u8, 1), r3.code);
-    try t.expect(has(r3.stderr, "it must be one OK CONDA line ending"));
-    try t.expect(!c.exists("o3"));
-    // Another file in the directory; a directory with two packages.
-    try c.write("pkg/notes.txt", "x", 0o644);
-    const r4 = try c.run(&.{ "conda-manifest-kci", "o4", "pkg", probe }, &.{.{ "PROBE_MODE", "ok" }});
-    try t.expectEqual(@as(u8, 1), r4.code);
-    try t.expect(has(r4.stderr, "holds [manifest.json metadata.json notes.txt p-1.0-0.conda ], not exactly one .conda, manifest.json and metadata.json"));
-    try laydir(&c, "two");
-    try c.write("two/q-1.0-0.conda", "x", 0o644);
-    try std.fs.cwd().deleteFile(try c.path("two/manifest.json"));
-    try t.expectEqual(@as(u8, 1), (try c.run(&.{ "conda-manifest-kci", "o5", "two", probe }, &.{.{ "PROBE_MODE", "ok" }})).code);
-}
-
-test "conda-manifest-kci: the probe sees no library path, a TMPDIR and a HOME that exist" {
-    var c = try newCtx("kci_env");
-    defer c.deinit();
-    const probe = try c.env("PROBE");
-    try laydir(&c, "pkg");
-    const r = try c.run(&.{ "conda-manifest-kci", "out.parsed", "pkg", probe }, &.{ .{ "PROBE_MODE", "env" }, .{ "LD_LIBRARY_PATH", "/a" }, .{ "LD_PRELOAD", "/b" } });
-    try t.expectEqual(@as(u8, 0), r.code);
-    try t.expectEqualStrings("OK CONDA ld=unset_preload=unset_tmp=dir_home=dir 1.0 metadata=metadata.json metadata_path=metadata.json render-identical=yes\n", try c.read("out.parsed"));
 }
 
 // ---- the release-set checks --------------------------------------------------------

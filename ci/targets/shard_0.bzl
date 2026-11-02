@@ -4,6 +4,7 @@
 
 TARGETS = [
     "komira//:action_pins",
+    "komira//:agents_md_cases",
     "komira//:buck2_farm_cases",
     "komira//:coverage_census",
     "komira//:coverage_ci_cases",
@@ -93,7 +94,6 @@ TARGETS = [
     "komira//tools/build/toolchains:is_macos_arm64",
     "komira//tools/build/toolchains:pixi",
     "komira//tools/build/toolchains:pixi-0.67.2-aarch64-apple-darwin",
-    "komira//tools/build/toolchains:pixi_pin_linux_x86_64",
     "komira//tools/build/toolchains:pixi_version",
     "komira//tools/build/toolchains:zig_macos_aarch64.tar.xz",
     "komira//tools/build/toolchains:zig_next_macos_aarch64.tar.xz",

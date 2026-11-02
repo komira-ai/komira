@@ -16,6 +16,16 @@
 from komira_arrow.schema import RecordBatch
 from komira_async_api.parallel_dispatch import ParallelDispatch
 from komira_async_api.token import CancellationToken
+from komira_phase_timers.phase_timers import (
+    PH_COMBINE,
+    PH_DISPATCH,
+    PH_SEG_OPS_SINK,
+    PH_SEG_SOURCE,
+    pt_mark_fork,
+    pt_now,
+    pt_record,
+    pt_record_join_tails,
+)
 from komira_physical_plan.physical_plan import SegmentDescPod
 
 from .published_outputs import PublishedOutputs
@@ -55,7 +65,9 @@ def run_segment[
         raise cancelled_error(token)
 
     var n_ops = builder.op_count(desc)
+    var t_source = pt_now()
     var source = builder.build_source(desc, published, num_workers)
+    pt_record[PH_SEG_SOURCE](t_source)
     if n_ops > 0 and num_workers > MAX_INT // n_ops:
         raise Error(
             "komira_pipeline_exec: "
@@ -64,6 +76,7 @@ def run_segment[
             + String(n_ops)
             + " operators overflow the operator store"
         )
+    var t_ops = pt_now()
     var ops = List[B.Op](capacity=num_workers * n_ops)
     for w in range(num_workers):
         for i in range(n_ops):
@@ -74,11 +87,16 @@ def run_segment[
         source^, ops^, sink^, num_workers, n_ops, token.clone()
     )
     run.sink.resize_worker_state(num_workers)
+    pt_record[PH_SEG_OPS_SINK](t_ops)
 
+    pt_mark_fork()
+    var t_dispatch = pt_now()
     _ = dispatch.run_with_state[
         SegmentRun[B.Source, B.Op, B.Sink],
         SegmentTask[B.Source, B.Op, B.Sink],
     ](run, SegmentTask[B.Source, B.Op, B.Sink](), num_workers, token.clone())
+    pt_record[PH_DISPATCH](t_dispatch)
+    pt_record_join_tails()
 
     var err = run.pipeline.take_error()
     if err:
@@ -92,6 +110,9 @@ def run_segment[
             "komira_pipeline_exec: the segment stopped without a recorded error"
         )
 
+    var t_combine = pt_now()
     run.sink.combine(run.pipeline)
     run.sink.finalize()
-    return run.sink.take_output()
+    var output = run.sink.take_output()
+    pt_record[PH_COMBINE](t_combine)
+    return output^

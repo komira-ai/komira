@@ -39,6 +39,12 @@ from komira_morsel.morsel import Morsel
 from komira_morsel.morsel_sink import MorselSinkImpl
 from komira_morsel.pipeline_execution import PipelineExecution
 from komira_operator_api.map_op import MapOp
+from komira_phase_timers.phase_timers import (
+    PH_SINK_FOLD,
+    PH_SINK_MAP,
+    pt_now,
+    pt_record,
+)
 from komira_physical_plan.physical_plan import AggSinkData
 from komira_plan_expr.agg_expr import (
     AGG_COUNT,
@@ -216,8 +222,11 @@ struct AggSink(MorselSinkImpl):
             for i in range(len(self._funcs)):
                 slot.cells[i].count += selected
             return
+        var t_map = pt_now()
         _ = slot.map.value().execute(morsel)
         var dense = materialize_selection_if_present(morsel^.take_batch())
+        pt_record[PH_SINK_MAP](t_map)
+        var t_fold = pt_now()
         for i in range(len(self._funcs)):
             if self._arg_col[i] < 0:
                 slot.cells[i].count += selected
@@ -230,6 +239,7 @@ struct AggSink(MorselSinkImpl):
                     selected,
                     self._labels[i],
                 )
+        pt_record[PH_SINK_FOLD](t_fold)
 
     def combine(mut self, mut pipeline: PipelineExecution) raises -> None:
         var merged = List[AggCell]()

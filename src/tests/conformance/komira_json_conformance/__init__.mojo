@@ -63,7 +63,6 @@ from .testees import (
     PARSER_JSON,
     PARSER_JSON_INDEX,
     PARSER_JSONL,
-    PARSER_KCI_LOGS,
     PARSER_LOG_QUERY,
     PARSER_PROTO_CODEC,
     is_crash_only,

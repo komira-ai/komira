@@ -392,6 +392,73 @@ def test_the_same_values_under_different_keys_do_not_overflow() raises:
     assert_true(sums.get_i128(0) == sums.get_i128(1))
 
 
+def _valued_batch(keys: List[Int], value: I128) raises -> RecordBatch:
+    """A batch of rows (`keys[i]`, `value`) with `d` DECIMAL(38, 0)."""
+    var k = PrimitiveArray[DType.int64].allocate(len(keys))
+    var d = Decimal128Array.allocate_nullable(len(keys), 38, 0)
+    for i in range(len(keys)):
+        k.set(i, Int64(keys[i]))
+        d.set_i128(i, value)
+    var sb = SchemaBuilder()
+    var rb = RecordBatchBuilder()
+    sb.add_field(Field("k", ArrowType.INT64, False))
+    rb.add_column(Column.from_primitive[DType.int64](k^))
+    sb.add_field(Field.decimal128("d", 38, 0, True))
+    rb.add_column(Column.from_decimal128(d^))
+    return rb.build(sb.build())
+
+
+def _repeat_key(k: Int, n: Int) -> List[Int]:
+    var out = List[Int]()
+    for _ in range(n):
+        out.append(k)
+    return out^
+
+
+def _row_of_key(ref out: RecordBatch, key: Int) raises -> Int:
+    var keys = out.column_at(0).as_primitive[DType.int64]()
+    for r in range(out.num_rows()):
+        if keys.get(r) == Int64(key):
+            return r
+    assert_true(False, "no group " + String(key))
+    return -1
+
+
+def test_decimal_group_partials_past_int64_merge_exactly() raises:
+    # SQL integer sum() is DECIMAL(38, 0). Key 1: each of three workers folds
+    # four 2^63 - 1 (a partial past INT64), the merge is 12 * (2^63 - 1). Key 2:
+    # {MAX, MAX} in one worker and {MIN, MIN} in another cancel to -2.
+    var max64 = I128(Int(Int64.MAX))
+    var min64 = I128(Int(Int64.MIN))
+    var sink = _nines_sink()
+    sink.resize_worker_state(3)
+    for w in range(3):
+        sink.consume(w, Morsel(_valued_batch(_repeat_key(1, 4), max64), w, 0))
+    sink.consume(0, Morsel(_valued_batch(_repeat_key(2, 2), max64), 3, 0))
+    sink.consume(1, Morsel(_valued_batch(_repeat_key(2, 2), min64), 4, 0))
+    var out = _combine_and_take(sink, 3)
+    assert_equal(out.num_rows(), 2)
+    assert_equal(out.column_at(1).decimal_precision(), 38)
+    assert_equal(out.column_at(1).decimal_scale(), 0)
+    var sums = out.column_at(1).as_decimal128()
+    assert_true(sums.get_i128(_row_of_key(out, 1)) == I128(12) * max64)
+    assert_true(sums.get_i128(_row_of_key(out, 2)) == I128(-2))
+
+
+def test_a_group_total_past_ten_to_the_38_is_refused_not_wrapped() raises:
+    # Two workers fold 6 * 10^37 each under one key: the merged 1.2 * 10^38 is
+    # inside the 128-bit range and has 39 digits.
+    var six = I128(6)
+    for _ in range(37):
+        six = six * I128(10)
+    var sink = _nines_sink()
+    sink.resize_worker_state(2)
+    sink.consume(0, Morsel(_valued_batch(_one(7), six), 0, 0))
+    sink.consume(1, Morsel(_valued_batch(_one(7), six), 1, 0))
+    with assert_raises(contains="more digits than the declared DECIMAL(38,0)"):
+        _ = _combine_and_take(sink, 2)
+
+
 def test_null_is_a_group_of_its_own_and_not_zero() raises:
     # Keys: NULL, 0, NULL, 0, 0 -> two groups of two and three rows.
     var k = PrimitiveArray[DType.int64].allocate_nullable(5)

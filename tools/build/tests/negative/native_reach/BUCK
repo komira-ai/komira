@@ -9,7 +9,7 @@ load("@komira//tools/build/mojo:native_reach.bzl", "native_reach_case")
 # functional_tests unit), not by run_tests.sh.
 #
 # The owners these cases name: komira_fs ships //src/komira_fs:komira_fs_posix
-# (its own package), komira_crypto ships aws-lc and its komira_awslc_ names,
+# (its own package), komira_awslc ships aws-lc and its komira_awslc_ names,
 # komira_http_core s2n-tls (komira_s2n_), komira_compression snappy
 # (komira_snappy_).
 
@@ -30,7 +30,7 @@ native_reach_case(
     name = "vendored_owner_missing",
     srcs = ["plain.mojo"],
     deps = ["komira//third_party/aws-lc:crypto"],
-    expect_archives = ["links komira//third_party/aws-lc:crypto_prefixed", "which komira//src/komira_crypto:komira_crypto owns"],
+    expect_archives = ["links komira//third_party/aws-lc:crypto_prefixed", "which komira//src/komira_awslc:komira_awslc owns"],
     visibility = _PUBLIC,
 )
 
@@ -65,7 +65,7 @@ native_reach_case(
     name = "archive_needed_by_c_dep",
     srcs = ["plain.mojo"],
     deps = [":needs_awslc"],
-    expect_archives = ["links komira//third_party/aws-lc:crypto_prefixed through ", ":needs_awslc, which komira//src/komira_crypto:komira_crypto owns"],
+    expect_archives = ["links komira//third_party/aws-lc:crypto_prefixed through ", ":needs_awslc, which komira//src/komira_awslc:komira_awslc owns"],
     visibility = _PUBLIC,
 )
 
@@ -86,7 +86,7 @@ native_reach_case(
 native_reach_case(
     name = "call_owner_missing",
     srcs = ["calls.mojo"],
-    expect_calls = ["calls.mojo:5: \"komira_awslc_RAND_bytes\" is komira//src/komira_crypto:komira_crypto's (prefix komira_awslc_)"],
+    expect_calls = ["calls.mojo:5: \"komira_awslc_RAND_bytes\" is komira//src/komira_awslc:komira_awslc's (prefix komira_awslc_)"],
     visibility = _PUBLIC,
 )
 

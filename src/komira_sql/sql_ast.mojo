@@ -22,7 +22,7 @@ from komira_collections.slab import Slab
 # --- SqlExpr node tags -------------------------------------------------------
 comptime SX_COLUMN: UInt8 = 0  # a column reference (name in `text`)
 comptime SX_INT: UInt8 = 1  # integer literal (int_val)
-comptime SX_FLOAT: UInt8 = 2  # float literal (float_val)
+comptime SX_FLOAT: UInt8 = 2  # float literal (float_val; `text` = its digits as written, '' when unknown)
 comptime SX_STRING: UInt8 = 3  # string literal (text)
 comptime SX_BINARY: UInt8 = 4  # binary op (op in `op`; children in _left/_right)
 comptime SX_AGG: UInt8 = 5  # aggregate call (func in `op`; arg in _agg_arg)
@@ -941,9 +941,13 @@ struct SqlExpr(Movable):
         return e^
 
     @staticmethod
-    def float_lit(v: Float64) -> SqlExpr:
+    def float_lit(v: Float64, text: String = String("")) -> SqlExpr:
+        """A number literal with a point. `text` is the literal as written
+        (`0.06`, `-0.5`): the digits DuckDB types it from as a DECIMAL. Empty
+        for a literal built without text."""
         var e = SqlExpr(SX_FLOAT)
         e.float_val = v
+        e.text = text
         return e^
 
     @staticmethod

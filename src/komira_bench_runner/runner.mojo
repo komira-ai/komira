@@ -8,11 +8,14 @@
 #      relative tolerance for floats) and, for a query with ORDER BY, checked
 #      for order. A mismatch is a cell that failed, with the cause named, and
 #      nothing is timed.
-#   4. Only a verified query is timed: warm (sweeps of reps, rep 0 of each
-#      dropped by the statistic; the cell is the least of the per-sweep
-#      medians) and, when the host can drop its file cache,
-#      cold (the cache dropped before every rep). Both engines run at the
-#      thread count and memory limit of the settings.
+#   4. Only a verified query is timed: warm (sweeps of reps) and, when the host
+#      can drop its file cache, cold (the cache dropped before every rep). Both
+#      engines run at the thread count and memory limit of the settings. Every
+#      run is recorded with its time and its page faults, the first of each
+#      sweep included, and so is the check run of step 2 and 3 as the first run
+#      of each engine (the cold result takes its first cold rep instead). The
+#      report package says what the cell's first-run and steady-state figures
+#      are made of (`STEADY_STATE_DEFINITION`).
 #
 # Warm and cold are two results because the result model holds one number of
 # reps per run and no temperature; each is a `BenchResult` of its own.
@@ -20,6 +23,7 @@
 from komira_bench_data import DatasetManifest
 from komira_bench_duckdb import (
     BenchClock,
+    FetchResult,
     DuckDbSession,
     DuckDbTransport,
     FairnessSettings,
@@ -31,6 +35,8 @@ from komira_bench_duckdb import (
 from komira_bench_report import (
     BenchResult,
     Cell as ReportCell,
+    CheckRuns,
+    FirstRun,
     Environment,
     RunInfo,
     STATISTIC_MIN_OF_SWEEP_MEDIAN,
@@ -42,7 +48,7 @@ from komira_bench_report import (
 
 from .arm import ARM_BIND_FAIL, ARM_EXEC_FAIL, ARM_REFUSED, ArmAnswer, EngineArm
 from .cache import CacheDropper
-from .measure import Sweeps, measure
+from .measure import CheckRun, EngineRuns, KomiraCheck, Sweeps, check_komira, duckdb_check_run, measure
 from .query import QuerySpec
 from .settings import HostFacts, RunInputs, RunSettings
 from .tables import TableBinding, scale_of, tables_of
@@ -218,16 +224,23 @@ def _checked(query: QuerySpec, answer: ArmAnswer, reference: ResultSignature) ra
                 False,
                 order.label(),
             )
+    var matched = ReportVerdict.identical()
+    if verdict.departed():
+        # equal values and an allowed departure of the declared types: timed
+        # like any verified answer, and recorded as DEPARTURE, never IDENTICAL
+        matched = ReportVerdict.departure(verdict.departures[0].copy())
     return _Checked(
         StageOutcome.exec_ok(),
-        ReportVerdict.identical(),
+        matched^,
         Int64(answer.rows.row_count()),
         True,
         String(""),
     )
 
 
-def _run_info(settings: RunSettings, scale_kind: String, scale_value: Int64, sweeps: Int, reps: Int) -> RunInfo:
+def _run_info(
+    settings: RunSettings, scale_kind: String, scale_value: Int64, sweeps: Int, reps: Int
+) -> RunInfo:
     return RunInfo(
         String("both"),
         scale_kind.copy(),
@@ -253,7 +266,35 @@ def _environment(inputs: RunInputs) -> Environment:
     )
 
 
-def _untimed_cell(query: QuerySpec, checked: _Checked, reps: Int, pass_max: Float64) raises -> ReportCell:
+def _first_run_of(run: CheckRun) -> Optional[FirstRun]:
+    """A check run as the record kept for a cell that is not timed, or nothing
+    when the clock could not resolve it."""
+    if not run.resolved:
+        return Optional[FirstRun]()
+    var minor = Optional[Int64]()
+    var major = Optional[Int64]()
+    if run.faults:
+        minor = Optional[Int64](run.faults.value().minor)
+        major = Optional[Int64](run.faults.value().major)
+    return Optional[FirstRun](FirstRun(run.ms, minor^, major^))
+
+
+def _untimed_cell(
+    query: QuerySpec,
+    checked: _Checked,
+    reps: Int,
+    pass_max: Float64,
+    komira_check: CheckRun,
+    duckdb_check: CheckRun,
+) raises -> ReportCell:
+    """A cell that is not timed (refused, failed or a wrong answer). Its check
+    runs were executed all the same, so they are kept as its first runs; the
+    cell stays unverified."""
+    var kept = Optional[CheckRuns]()
+    var k = _first_run_of(komira_check)
+    var d = _first_run_of(duckdb_check)
+    if Bool(k) or Bool(d):
+        kept = Optional[CheckRuns](CheckRuns(k^, d^))
     return ReportCell.build(
         query.key(),
         query.suite.copy(),
@@ -263,20 +304,63 @@ def _untimed_cell(query: QuerySpec, checked: _Checked, reps: Int, pass_max: Floa
         Optional[Side](),
         checked.verdict.copy(),
         pass_max,
+        kept^,
+    )
+
+
+def _side_of(
+    who: String, query: QuerySpec, rows: Int64, runs: EngineRuns, first: Optional[CheckRun]
+) raises -> Side:
+    """The side for one engine. With a `first` (the run that checked the
+    answer) that run is the side's first run. Without one (a cold result,
+    where every rep starts from a dropped cache and a fresh context, so the
+    check run is not what a cold first query is), the first run is the first
+    rep of the first sweep, which stays in the sweeps too. The faults are kept
+    only when the first run and every sweep run had a reading."""
+    var first_ms = Float64(0.0)
+    var first_minor = Optional[Int64]()
+    var first_major = Optional[Int64]()
+    var counted = len(runs.minor) > 0
+    if first:
+        ref f = first.value()
+        if not f.resolved:
+            raise Error("the " + who + " time of the first run of " + query.key() + " is below the clock resolution; use a larger dataset")
+        first_ms = f.ms
+        if f.faults:
+            first_minor = Optional[Int64](f.faults.value().minor)
+            first_major = Optional[Int64](f.faults.value().major)
+        else:
+            counted = False
+    else:
+        first_ms = runs.ms[0][0]
+        if counted:
+            first_minor = Optional[Int64](runs.minor[0][0])
+            first_major = Optional[Int64](runs.major[0][0])
+    if not counted:
+        return Side.from_sweeps(rows, runs.ms.copy(), Optional[Float64](first_ms))
+    return Side.from_sweeps(
+        rows, runs.ms.copy(), Optional[Float64](first_ms), runs.minor.copy(), runs.major.copy(),
+        first_minor^, first_major^,
     )
 
 
 def _timed_cell(
-    query: QuerySpec, rows: Int64, sweeps: Sweeps, reps: Int, pass_max: Float64
+    query: QuerySpec,
+    checked: _Checked,
+    sweeps: Sweeps,
+    reps: Int,
+    pass_max: Float64,
+    komira_first: Optional[CheckRun],
+    duckdb_first: Optional[CheckRun],
 ) raises -> ReportCell:
     return ReportCell.build(
         query.key(),
         query.suite.copy(),
         reps,
         StageOutcome.exec_ok(),
-        Optional[Side](Side.from_sweeps(rows, sweeps.komira)),
-        Optional[Side](Side.from_sweeps(rows, sweeps.duckdb)),
-        ReportVerdict.identical(),
+        Optional[Side](_side_of(String("komira"), query, checked.rows, sweeps.komira, komira_first)),
+        Optional[Side](_side_of(String("duckdb"), query, checked.rows, sweeps.duckdb, duckdb_first)),
+        checked.verdict.copy(),
         pass_max,
     )
 
@@ -333,10 +417,25 @@ def run_queries[
     var outcomes = List[QueryOutcome]()
     for i in range(len(queries)):
         ref q = queries[i]
-        var reference = session.fetch(q.text)
-        if not reference.ok():
-            raise Error("duckdb failed on " + q.key() + ": " + reference.error)
-        var answer = arm.run(q, True)
+        # The check run is the first execution of the query on each engine: it
+        # is timed, with its page faults, and recorded as the first run. Which
+        # engine goes first alternates by the query's position (DuckDB for the
+        # first, third, ...; the arm for the second, ...), so neither always
+        # pays the reads of a cold page cache.
+        var reference: FetchResult
+        var komira_check: KomiraCheck
+        if i % 2 == 0:
+            reference = session.fetch(q.text)
+            if not reference.ok():
+                raise Error("duckdb failed on " + q.key() + ": " + reference.error)
+            komira_check = check_komira(arm, q, clock)
+        else:
+            komira_check = check_komira(arm, q, clock)
+            reference = session.fetch(q.text)
+            if not reference.ok():
+                raise Error("duckdb failed on " + q.key() + ": " + reference.error)
+        var duckdb_check = duckdb_check_run(reference)
+        ref answer = komira_check.answer
         var checked = _checked(q, answer, signature_of(reference.rows))
         if checked.verified:
             var w = measure(
@@ -344,18 +443,31 @@ def run_queries[
                 tables, settings.threads, settings.memory_limit_bytes, checked.rows,
                 settings.warm_sweeps, settings.warm_reps, False,
             )
-            warm_cells.append(_timed_cell(q, checked.rows, w, settings.warm_reps, settings.pass_max))
+            warm_cells.append(
+                _timed_cell(
+                    q, checked, w, settings.warm_reps, settings.pass_max,
+                    Optional[CheckRun](komira_check.run.copy()), Optional[CheckRun](duckdb_check.copy()),
+                )
+            )
             if cold_on:
                 var c = measure(
                     session, arm, dropper, clock, q, files,
                     tables, settings.threads, settings.memory_limit_bytes, checked.rows,
                     settings.cold_sweeps, settings.cold_reps, True,
                 )
-                cold_cells.append(_timed_cell(q, checked.rows, c, settings.cold_reps, settings.pass_max))
+                cold_cells.append(
+                    _timed_cell(
+                        q, checked, c, settings.cold_reps, settings.pass_max, Optional[CheckRun](), Optional[CheckRun]()
+                    )
+                )
         else:
-            warm_cells.append(_untimed_cell(q, checked, settings.warm_reps, settings.pass_max))
+            warm_cells.append(
+                _untimed_cell(q, checked, settings.warm_reps, settings.pass_max, komira_check.run, duckdb_check)
+            )
             if cold_on:
-                cold_cells.append(_untimed_cell(q, checked, settings.cold_reps, settings.pass_max))
+                cold_cells.append(
+                    _untimed_cell(q, checked, settings.cold_reps, settings.pass_max, komira_check.run, duckdb_check)
+                )
         outcomes.append(
             QueryOutcome(
                 q.key(), q.sha256(), checked.stage.text(), checked.verdict.text(), checked.verified, checked.note.copy()

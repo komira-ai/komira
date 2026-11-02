@@ -18,9 +18,14 @@
 #   later queries are refused, and `kill` ends it.
 # - test_a_write_to_a_process_that_has_gone_raises: after the process has
 #   exited, sending raises an error and this process carries on.
+# - test_the_fault_counters_of_a_real_child_are_read: on Linux the transport
+#   reads the minor and major page faults of its child process once the child
+#   has run (minor faults above zero) and reads nothing once the child is
+#   finished; on other platforms it reads nothing.
 # - test_a_binary_that_cannot_start_raises: a path that does not exist is an
 #   error from `ProcessTransport`, not a session that hangs.
 
+from std.sys.info import CompilationTarget
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
 from komira_bench_duckdb import BenchClock, DuckDbSession, ProcessTransport
@@ -117,6 +122,26 @@ def test_a_write_to_a_process_that_has_gone_raises() raises:
         raised = True
     assert_true(raised)
     assert_equal(t.finish(), 0)
+
+
+def test_the_fault_counters_of_a_real_child_are_read() raises:
+    var args = List[String]()
+    args.append(String("-c"))
+    args.append(_stand_in())
+    var t = ProcessTransport(String("/bin/sh"), args)
+    t.send(String(".print ready\n"))
+    # the child has run once its answer has arrived
+    var got = t.read_stdout(0)
+    assert_false(got.eof)
+    comptime if CompilationTarget.is_linux():
+        var f = t.child_faults()
+        assert_true(Bool(f))
+        assert_true(f.value().minor > 0)
+        assert_true(f.value().major >= 0)
+    else:
+        assert_false(Bool(t.child_faults()))
+    assert_equal(t.finish(), 0)
+    assert_false(Bool(t.child_faults()))
 
 
 def test_a_binary_that_cannot_start_raises() raises:

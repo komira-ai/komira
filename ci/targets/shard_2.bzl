@@ -3,19 +3,11 @@
 # `guard.bxl:check` fails the pull request check when this file is out of date.
 
 TARGETS = [
-    "komira//bin/kci:runnable_readme_examples",
-    "komira//bin/kci:test_kci_process",
     "komira//packaging/images/base:komira_base",
     "komira//release:mopm_artifacts",
     "komira//release:prod_claimed_names_cases",
+    "komira//release:release_checks_cases",
     "komira//release:release_set",
-    "komira//src/kci_cell:ci",
-    "komira//src/kci_cell:conda_holds",
-    "komira//src/kci_cell:coverage_floor",
-    "komira//src/kci_cell:table",
-    "komira//src/kci_validator_rows:ci",
-    "komira//src/kci_validator_rows:coverage_floor",
-    "komira//src/kci_validator_rows:table",
     "komira//src/komira_aws_ecs:komira_aws_ecs_conda",
     "komira//src/komira_aws_iam:komira_aws_iam_conda",
     "komira//src/komira_aws_scheduler:komira_aws_scheduler_conda",
@@ -106,6 +98,7 @@ TARGETS = [
     "komira//src/komira_textproto:coverage_floor",
     "komira//src/komira_textproto:table",
     "komira//src/tests/conformance/komira_calendar_store_conformance:komira_calendar_store_conformance",
+    "komira//src/tests/conformance/komira_decimal_compare_conformance:komira_decimal_compare_conformance",
     "komira//src/tests/conformance/komira_http_conformance:komira_http_conformance_conda",
     "komira//src/tests/e2e/komira_formats_e2e:komira_formats_e2e",
     "komira//src/tests/e2e/komira_pandas_door_e2e:komira_pandas_door_e2e",
@@ -114,9 +107,6 @@ TARGETS = [
     "komira//third_party/s2n-tls:srcs_drift",
     "komira//third_party/s2n-tls:srcs_files_check",
     "komira//third_party/s2n-tls:srcs_files_drift",
-    "komira//third_party/uv:LICENSE-APACHE",
-    "komira//third_party/uv:LICENSE-MIT",
-    "komira//third_party/uv:uv_dist",
     "komira//tools/build/bisect:bisect",
     "komira//tools/build/ci/fixture/agg:agg_complete",
     "komira//tools/build/ci/fixture/agg:agg_missing",
@@ -155,7 +145,6 @@ TARGETS = [
 ]
 
 TESTS = [
-    "komira//bin/kci:test_kci_process",
     "komira//tests/scan_binding_links:test_scan_binding_links",
     "komira//third_party/s2n-tls:srcs_drift",
     "komira//third_party/s2n-tls:srcs_files_check",

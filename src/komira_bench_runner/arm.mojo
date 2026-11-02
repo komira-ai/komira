@@ -10,7 +10,7 @@
 #     `query.sha256()`, runs the plan it has for it and refuses the rest.
 #   * `run_sql`, once it exists: `run` hands `query.text` to the engine.
 
-from komira_bench_duckdb import ResultSet
+from komira_bench_duckdb import FaultCount, ResultSet
 
 from .query import QuerySpec
 from .tables import TableBinding
@@ -99,6 +99,13 @@ trait EngineArm(Movable, Deinitable):
     def close(mut self) raises:
         """Release whatever `prepare` acquired."""
         ...
+
+    def faults(self) -> Optional[FaultCount]:
+        """The minor and major page faults of the process the engine runs
+        in, so far; the runner reads it before and after each timed run. An
+        arm that cannot read them reports none, and the result then says the
+        faults of its runs were not measured."""
+        return Optional[FaultCount]()
 
 
 struct RefusalArm(EngineArm):

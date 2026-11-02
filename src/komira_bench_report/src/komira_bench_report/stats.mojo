@@ -6,6 +6,17 @@
 
 from std.math import exp, isfinite, log
 
+comptime STEADY_STATE_DEFINITION: String = (
+    "first = the first run of the query on that engine, the run that checks the"
+    " answer, before the sweeps; steady = the median of all the reps of a sweep,"
+    " and the least of those medians over the sweeps; every run is in"
+    " result.json"
+)
+"""What a cell's first-run and steady-state times are. This is the one place
+the definition is written; the table prints it and the README quotes it. No run
+is dropped from the data, and none is left out of the steady-state median: the
+definition only says which runs make which number."""
+
 
 def _require_finite(values: List[Float64], what: String) raises:
     for i in range(len(values)):
@@ -65,23 +76,10 @@ def maximum(values: List[Float64]) raises -> Float64:
     return m
 
 
-def drop_first_rep(reps: List[Float64]) raises -> List[Float64]:
-    """The timings of one sweep without rep 0, the warm-up. A sweep of fewer
-    than two reps has nothing left to measure and is refused."""
-    if len(reps) < 2:
-        raise Error(
-            "drop_first_rep: a sweep needs at least two reps, got "
-            + String(len(reps))
-        )
-    var out = List[Float64]()
-    for i in range(1, len(reps)):
-        out.append(reps[i])
-    return out^
-
-
 def sweep_median(reps: List[Float64]) raises -> Float64:
-    """The median of one sweep's reps once rep 0 is dropped."""
-    return median(drop_first_rep(reps))
+    """The median of every rep of one sweep: nothing is left out. Raises on a
+    sweep with no reps."""
+    return median(reps)
 
 
 def sweep_medians(sweeps: List[List[Float64]]) raises -> List[Float64]:
@@ -95,9 +93,16 @@ def sweep_medians(sweeps: List[List[Float64]]) raises -> List[Float64]:
 
 
 def min_of_sweep_medians(sweeps: List[List[Float64]]) raises -> Float64:
-    """The statistic of a cell, `min_of_sweep_median`: the least, over the
-    sweeps, of each sweep's median with rep 0 dropped."""
+    """The statistic `min_of_sweep_median`: the least, over the sweeps, of the
+    median of all the reps of each sweep."""
     return minimum(sweep_medians(sweeps))
+
+
+def steady_state_ms(sweeps: List[List[Float64]]) raises -> Float64:
+    """The steady-state time of a cell (`STEADY_STATE_DEFINITION`): the least,
+    over the sweeps, of the median of all the reps of each sweep. Raises on no
+    sweeps and on a sweep with no reps."""
+    return min_of_sweep_medians(sweeps)
 
 
 def spread_pct(values: List[Float64]) raises -> Float64:

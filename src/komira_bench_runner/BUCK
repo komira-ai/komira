@@ -17,12 +17,17 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
 # The welded tests (each file's header says what each test proves):
 # - test_entrypoint: the query text trim, the cache dropper's control file, the
 #   dataset lock, and the exit status 2 of a bad command line.
+# - test_js_measure: the optional `--js-measure-result` summary line: its exact
+#   shape for a PASS cell, a null for a value the run did not produce, no line
+#   without the flag, the line last, and the ids of the example run.
 # - test_inputs: the query digest, the tables and scale of a manifest, the
 #   flags, the refusal arm and the settings checks.
 # - test_runner: the run over a DuckDB transport, a komira arm and a cache
 #   dropper that live in the test and a manual clock: a matching answer is
 #   timed, a wrong one is recorded and never timed, a refusal is listed, cold
-#   and warm are separate results, and the files round-trip.
+#   and warm are separate results, and the files round-trip; every run of
+#   every sweep is recorded (rep 0 included) with its page faults for both
+#   engines, and the first-run and steady-state figures come from them.
 # - test_komira_arm: the real engine arm in the same run over a lineitem-shaped
 #   Parquet file and a DuckDB stand-in: TPC-H Q6's corpus text equals an
 #   independently computed answer and is timed, a join is listed as refused, a
@@ -40,6 +45,7 @@ mojo_library(
         "//src/komira_arrow:komira_arrow",
         "//src/komira_buffer:komira_buffer",
         "//src/komira_crypto:komira_crypto",
+        "//src/komira_json:komira_json",
         "//src/komira_scalar_arithmetic:komira_scalar_arithmetic",
         "//src/komira_sdk_exec:komira_sdk_exec",
     ],
@@ -52,6 +58,7 @@ mojo_library(
     test_srcs = [
         "tests/test_entrypoint.mojo",
         "tests/test_inputs.mojo",
+        "tests/test_js_measure.mojo",
         "tests/test_komira_arm.mojo",
         "tests/test_runner.mojo",
     ],

@@ -14,6 +14,10 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # test_lower_refusals    every refusal token, raised by the plan that should
 #                        raise it with the text that names why, and a plan
 #                        beside each that lowers.
+# test_lower_sum_fuse    SUM(CAST(<signed integer> AS DECIMAL(38, 0))), the SQL
+#                        integer sum, is lowered to SUM(<integer>) with its
+#                        declared DECIMAL(38, 0) output kept; every other shape
+#                        of cast, argument type and aggregate is left alone.
 # test_sink_capability   the capability table's rows, which triples are not
 #                        served, and admission of hand-built segments.
 #
@@ -49,6 +53,7 @@ mojo_library(
     test_srcs = [
         "tests/test_lower_plans.mojo",
         "tests/test_lower_refusals.mojo",
+        "tests/test_lower_sum_fuse.mojo",
         "tests/test_sink_capability.mojo",
     ],
     visibility = ["PUBLIC"],

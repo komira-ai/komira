@@ -1,7 +1,6 @@
 //! The link block of a packaged README: the commands a user copies to run or
 //! build a program against the package, which the packer writes
-//! (tools/build/package/pack/readme_link.zig) and kci's install validation
-//! runs with (src/kci_validate, readme_link.mojo). Pure: no I/O.
+//! (tools/build/package/pack/readme_link.zig) and a user runs. Pure: no I/O.
 //!
 //! The block is the fenced block whose info string is exactly
 //! `sh komira-link`. It holds two commands, one per line, in this order:
@@ -12,11 +11,11 @@
 //! ARGS are what `parse` returns: the words between the verb and the
 //! program. A word is split on spaces and tabs; a single-quoted part is
 //! taken as it stands, quotes removed; outside quotes `$` may only begin
-//! `$CONDA_PREFIX` (the environment, which kci puts in its place), and none
+//! `$CONDA_PREFIX` (the environment, which the user's prefix replaces), and none
 //! of `"`, `\`, a backquote, `;`, `|`, `&`, `<`, `>`, `(` or `)` may appear:
 //! a block a shell would read another way than this parser is refused, never
 //! guessed. `$CONDA_PREFIX` inside quotes is refused too, since it would mean
-//! the literal text to a shell and the environment to kci.
+//! the literal text to a shell and the environment to the reader.
 //!
 //! No block is no commands (a package without native files). A second
 //! block, an unclosed one, a fence whose info string names the marker some

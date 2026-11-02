@@ -6,7 +6,7 @@ load(":buildrules.mojo.bzl", "mojo_package")
 # A small general JSON library (RFC 8259): the `JsonValue` tagged value, a
 # strict depth-limited non-recursive parser, a duplicate-member check, and direct-byte writers for
 # strings, numbers, booleans and null. It has no deps, so the proto3-JSON
-# codec, the generated cloud clients, validators and kci can all import it
+# codec, the generated cloud clients, and validators can all import it
 # cheaply.
 #
 # Built with buildrules' `mojo_package` from mopm.toml (README.md, "Build files"): `:lib` is the
@@ -35,7 +35,7 @@ mojo_conda(
     lib = ":lib",
     manifest = "mopm.toml",
     mojo = "1.0.0",
-    mopm = "toolchains//:mopm_0_0_86",
+    mopm = "toolchains//:mopm_0_0_101",
     package = "komira_json",
     version = "0.1.0",
     visibility = ["PUBLIC"],

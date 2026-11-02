@@ -45,12 +45,18 @@
 #   closes the arm and prepares a new context (3 prepares and 2 closes for one
 #   warm preparation and 2 cold reps) and the timed rows still equal the
 #   checked run's. Catches a cold rep that reuses the warm context.
+# - test_the_arm_reads_the_page_faults_of_its_process: the real arm reports
+#   the minor and major page faults of the process, and a list of two million
+#   integers built between two readings raises the minor count. Catches an arm
+#   that reports nothing, or a count that is not the process's.
 # - test_an_unregistrable_table_ends_the_run_naming_it: a table whose file is
 #   missing makes prepare raise naming the table; a run before prepare raises.
 # - test_refusals_are_recorded_by_what_they_mean: against the real engine, an
-#   unknown column is BIND_FAIL, three INT64 values of 2^62 summed are EXEC_FAIL
-#   and a join is a refusal; outcome_of_refusal maps the messages of the other
-#   steps. Catches an engine fault read as a missing feature.
+#   unknown column is BIND_FAIL, three INT64 values of 2^62 summed are answered
+#   (SQL integer sum() is DECIMAL(38, 0)), an INT64 multiplication that leaves
+#   the 64-bit range is EXEC_FAIL and a join is a refusal; outcome_of_refusal
+#   maps the messages of the other steps. Catches an engine fault read as a
+#   missing feature.
 # - test_conversion_of_unsigned_float_and_dictionary_columns: UINT64 at 2^63-1
 #   is an integer and at 2^63 an exact decimal, UINT8/16/32 are integers, a FLOAT 0.1 is
 #   the double 0.1 and not the widened float, a dictionary string column raises
@@ -867,7 +873,12 @@ def test_refusals_are_recorded_by_what_they_mean() raises:
     assert_equal(unknown.kind, ARM_BIND_FAIL, arm.last_refusal)
     assert_true(unknown.detail.startswith(String("bind: ")))
 
-    var overflow = arm.run(_q(String("o"), String("select sum(v) as s from big")), True)
+    # A sum past INT64 is a DECIMAL(38, 0) answer, not a failure.
+    var wide = arm.run(_q(String("w"), String("select sum(v) as s from big")), True)
+    assert_equal(wide.kind, ARM_ROWS, arm.last_refusal)
+
+    # An INT64 product outside the 64-bit range still fails at execute.
+    var overflow = arm.run(_q(String("o"), String("select max(v * 4) as s from big")), True)
     assert_equal(overflow.kind, ARM_EXEC_FAIL, arm.last_refusal)
     assert_true(overflow.detail.startswith(String("execute: ")))
 
@@ -991,6 +1002,21 @@ def test_the_declared_types_of_the_real_engine_are_checked_against_duckdbs() rai
     assert_true(note.find(String("BIGINT")) >= 0, note)
     assert_equal(out.warm.cells[1].value.text(), String("IDENTICAL"))
     assert_true(out.outcomes[1].timed)
+
+
+def test_the_arm_reads_the_page_faults_of_its_process() raises:
+    var arm = KomiraArm()
+    var before = arm.faults()
+    assert_true(Bool(before))
+    assert_true(before.value().minor > 0)
+    var touched = List[Int]()
+    for i in range(2_000_000):
+        touched.append(i)
+    var after = arm.faults()
+    assert_true(Bool(after))
+    assert_true(after.value().minor > before.value().minor)
+    assert_true(after.value().major >= before.value().major)
+    assert_equal(touched[1_999_999], 1_999_999)
 
 
 def main() raises:

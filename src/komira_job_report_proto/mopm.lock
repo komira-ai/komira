@@ -5,9 +5,9 @@
   ],
   "toolchain": {
     "1.0.0": {
-      "linux-64": "fd654c4192487587d8f8d9402d060e45e218b79da7b8964503a703710e49b15d",
-      "linux-aarch64": "3e7db5a0f9255c9086d9d29f385e7fd90e8536fa16ffe55414f6bba4e0ef3d3e",
-      "osx-arm64": "dfb1ddbe32564e406967054fbccd4ad643bf01e72532a3eb3add28253908ac5f"
+      "linux-64": "3ed75e01401544e0d660ee48dc387dacce437e3833ac296d4a0601f28abd4aec",
+      "linux-aarch64": "84a22df9ff1ca84c7eb47a3b3d5eaede4c970ee85b660853f640841b5dfa03c3",
+      "osx-arm64": "0d34e9a60951231f6c2161f6620957ff086542b217b187774fdf9d82b76046a1"
     }
   },
   "channels": [

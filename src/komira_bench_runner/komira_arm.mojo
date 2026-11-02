@@ -31,8 +31,11 @@ from komira_sdk_exec.engine_context import EngineContext
 from komira_sdk_exec.engine_options import EngineOptions
 from komira_sdk_exec.engine_sql import run_sql
 
+from komira_bench_duckdb import FaultCount
+
 from .arm import ArmAnswer, EngineArm
 from .convert import RESULT_TYPE_UNSUPPORTED, result_set_of
+from .faults import process_faults
 from .query import QuerySpec
 from .tables import TableBinding
 
@@ -109,6 +112,11 @@ struct KomiraArm(EngineArm):
 
     def label(self) -> String:
         return String("run_sql")
+
+    def faults(self) -> Optional[FaultCount]:
+        """The engine runs inside this process, on its own worker threads, so
+        the faults of a run are the process's."""
+        return process_faults()
 
     def is_prepared(self) -> Bool:
         return Bool(self._ctx)
