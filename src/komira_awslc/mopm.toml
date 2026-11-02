@@ -1,0 +1,18 @@
+[package]
+name = "komira_awslc"
+version = "0.1.0"
+description = "aws-lc 1.39.0's libcrypto as a static archive for linux x86_64 and macOS arm64, every global symbol renamed komira_awslc_X, built from a sha256-pinned source archive."
+license = "Apache-2.0"
+repository = "https://github.com/komira-ai/komira"
+readme = "README.md"
+mojo = ["1.0.0"]
+
+# libawslc.a is built by the `native_library` target `:awslc` of BUCK, which `mojo_package(natives = ...)` names. mopm's manifest has no entry for a
+# library the package does not compile (`provided = true` is not released), so the manifest names a source; the file is not compiled.
+[native.awslc]
+kind = "static"
+srcs = ["native/awslc_provided.c"]
+
+[targets]
+lib = { path = "src/komira_awslc" }
+tests = ["tests"]

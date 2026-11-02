@@ -12,11 +12,12 @@
 #   2. `--` comments run to the newline or to the end of input; a lone `-`
 #      (mid-input or last) is TK_MINUS.
 #      (mutant caught: the comment loop not stopping at the newline)
-#   3. Numbers: an INT; a FLOAT with fraction digits; `1.` and `1.x` are INT
-#      then DOT; a FLOAT whose integer part is past Int64.MAX is read in
-#      Float64; the overflow test's two arms (greater than MAX // 10, and
-#      equal with the last digit over 7).
-#      (mutants caught: `1.` lexed as a float; the past-Int64 float reading
+#   3. Numbers: an INT; a FLOAT with fraction digits; `1.` is a FLOAT (DuckDB
+#      reads it as DECIMAL(1, 0)) and `1.x` is INT then DOT then IDENT; a FLOAT
+#      whose integer part is past Int64.MAX is read in Float64; the overflow
+#      test's two arms (greater than MAX // 10, and equal with the last digit
+#      over 7). test_sql_token_number_shapes holds the rest of the shapes.
+#      (mutants caught: `1.x` lexed as a float; the past-Int64 float reading
 #      the wrapped bits; the equal-prefix arm removed)
 #   4. Strings: a `''` at the very end of input is an unterminated literal; a
 #      quote that closes mid-input; non-ASCII bytes survive as bytes; a lone
@@ -111,8 +112,9 @@ def test_numbers() raises:
     assert_equal(toks[1].float_val, 3.25)
     assert_equal(Int(toks[2].kind), Int(TK_FLOAT))
     assert_equal(toks[2].float_val, 0.5)
-    # A dot with no digit after it is not a fraction: INT then DOT.
-    _assert_kinds("1.", [Int(TK_INT), Int(TK_DOT), Int(TK_EOF)])
+    # A dot with no digit after it ends the number: `1.` is a FLOAT, and a dot
+    # that a name follows is a qualifier's dot: INT, DOT, IDENT.
+    _assert_kinds("1.", [Int(TK_FLOAT), Int(TK_EOF)])
     _assert_kinds("t1.x", [Int(TK_IDENT), Int(TK_DOT), Int(TK_IDENT), Int(TK_EOF)])
     _assert_kinds("1.x", [Int(TK_INT), Int(TK_DOT), Int(TK_IDENT), Int(TK_EOF)])
     # A FLOAT whose integer part is past Int64.MAX: read in Float64, so the

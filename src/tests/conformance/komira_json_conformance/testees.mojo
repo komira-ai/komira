@@ -14,9 +14,9 @@
 # The parsers, by the name their test and allowlist carry:
 #
 #   komira_json         parse_json_bytes: the strict RFC 8259 parser most of
-#                       komira's JSON readers sit on (kci's manifests, release
+#                       komira's JSON readers sit on (release
 #                       sets and API documents, the cloud SDKs, proto3-JSON).
-#                       komira_avro, kci_logs, komira_log_query and
+#                       komira_avro, komira_log_query and
 #                       komira_connect have scanners of their own, below.
 #                       Takes bytes.
 #   komira_proto_codec  decode_json[komira_wkt.Value]: proto3-JSON decode of
@@ -57,14 +57,6 @@
 #                       contract is exactly one object, so a y_ text whose top
 #                       level is not an object is rightly refused (listed).
 #                       Takes a String.
-#   kci_logs            CRASH-ONLY. json_skip_value over the whole text as one
-#                       value followed only by whitespace, json_scan_string on
-#                       the raw bytes from the text's first `"`, and the three
-#                       body parsers built on them (CloudWatch GetLogEvents,
-#                       Cloud Logging entries.list, the run-log API) on the
-#                       text. A skipper that checks nothing inside a value and
-#                       parsers that never raise by design: only a crash is
-#                       gated.
 #   komira_connect      CRASH-ONLY. parse_connect_error_json on the raw bytes:
 #                       a tolerant scan for two keys, not a JSON parser.
 #
@@ -81,10 +73,6 @@
 
 from std.os import abort
 
-from kci_logs import json_scan_string, json_skip_space, json_skip_value
-from kci_logs.aws_cloudwatch_query import parse_get_log_events_body
-from kci_logs.gcp_logging_query import parse_entries_list_body
-from kci_logs.run_log_tail import parse_run_logs_body
 from komira_avro import decode_ocf_header
 from komira_connect import parse_connect_error_json
 from komira_arrow.arrow_types import ArrowType
@@ -105,7 +93,6 @@ comptime PARSER_JSONL = "komira_jsonl"
 comptime PARSER_JSON_INDEX = "komira_json_index"
 comptime PARSER_AVRO = "komira_avro"
 comptime PARSER_LOG_QUERY = "komira_log_query"
-comptime PARSER_KCI_LOGS = "kci_logs"
 comptime PARSER_CONNECT = "komira_connect"
 # Not a parser: a testee that aborts on one suite file (module header).
 comptime PARSER_ABORT_PROBE = "abort_probe"
@@ -126,7 +113,6 @@ def parser_names() -> List[String]:
         String(PARSER_JSON_INDEX),
         String(PARSER_AVRO),
         String(PARSER_LOG_QUERY),
-        String(PARSER_KCI_LOGS),
         String(PARSER_CONNECT),
     ]
 
@@ -135,7 +121,6 @@ def is_crash_only(parser: String) -> Bool:
     """The parsers whose verdicts are not gated (module header)."""
     return (
         parser == PARSER_JSON_INDEX
-        or parser == PARSER_KCI_LOGS
         or parser == PARSER_CONNECT
         or parser == PARSER_ABORT_PROBE
     )
@@ -312,27 +297,6 @@ def log_query_testee(b: List[UInt8]) raises:
         raise Error("is_json_object_text: not exactly one well-formed JSON object")
 
 
-def kci_logs_testee(b: List[UInt8]) raises:
-    var s = String("")
-    for i in range(len(b)):
-        if b[i] == UInt8(ord('"')):
-            _ = json_scan_string(Span(b), i, s)
-            break
-    try:
-        var text = _as_string(b)
-        _ = parse_get_log_events_body(text)
-        _ = parse_entries_list_body(text, String("handle"))
-        _ = parse_run_logs_body(text, String("run"))
-    except:
-        pass  # they never raise; NOT_UTF8 only skips them
-    var end = json_skip_value(Span(b), 0)
-    if end < 0:
-        raise Error("json_skip_value: cannot skip a value at byte 0")
-    var rest = json_skip_space(Span(b), end)
-    if rest != len(b):
-        raise Error("json_skip_value: byte " + String(rest) + " follows the value")
-
-
 def connect_testee(b: List[UInt8]) raises:
     _ = parse_connect_error_json(Span(b))
 
@@ -364,8 +328,6 @@ def run_testee(parser: String, b: List[UInt8]) raises:
         avro_testee(b)
     elif parser == PARSER_LOG_QUERY:
         log_query_testee(b)
-    elif parser == PARSER_KCI_LOGS:
-        kci_logs_testee(b)
     elif parser == PARSER_CONNECT:
         connect_testee(b)
     elif parser == PARSER_ABORT_PROBE:

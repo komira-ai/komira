@@ -10,16 +10,48 @@
 //!    naming the package and saying to claim it first and then add it to the file;
 //!  - a list that is not sorted, holds a name twice, or holds a line that is no package name,
 //!    so a merge cannot leave it unreadable;
-//!  - a list holding a name no member has: a deleted or renamed member leaves its line behind,
-//!    so the file cannot drift from the release (a name still claimed on prod stays claimed;
-//!    removing the line costs nothing);
-//!  - an empty PACKAGES, or an empty list, which would make the check vacuous.
+//!  - an empty PACKAGES, or an empty list, which would make the check vacuous;
+//!  - a dropped line of KEPT: a name once claimed on prod stays claimed after its package leaves the
+//!    release, so the list may hold names no member has (the deleted libraries of KEPT).
 //! The cases plant each defect in the text of the real files and expect the exact message.
 
 const std = @import("std");
 const t = std.testing;
 
 const FILE = "release/prod_claimed_names.txt";
+
+/// Names claimed on prod whose packages left the release: they stay in the list.
+const KEPT = [_][]const u8{
+    "kci_api",
+    "kci_artifact",
+    "kci_artifact_manifest",
+    "kci_artifact_proto",
+    "kci_cell",
+    "kci_deploy_model_proto",
+    "kci_logs",
+    "kci_manifest_proto",
+    "kci_params",
+    "kci_reconciler",
+    "kci_release_channel",
+    "kci_release_machine",
+    "kci_resource_proto",
+    "kci_validator_report",
+    "kci_validator_rows",
+    "kci_workflow_check",
+};
+
+/// The first of KEPT the list lacks, or null.
+fn droppedKept(list: []const u8) ?[]const u8 {
+    for (KEPT) |name| {
+        var found = false;
+        var it = std.mem.splitScalar(u8, list, '\n');
+        while (it.next()) |raw| {
+            if (std.mem.eql(u8, std.mem.trim(u8, raw, " \t\r"), name)) found = true;
+        }
+        if (!found) return name;
+    }
+    return null;
+}
 
 /// The package names of `PACKAGES = { ... }` in packages.bzl.
 fn members(ar: std.mem.Allocator, bzl: []const u8) ![]const []const u8 {
@@ -72,13 +104,6 @@ fn check(ar: std.mem.Allocator, bzl: []const u8, list: []const u8) !?[]const u8 
             ar,
             "{s} is a member of the release and is not in {s}: claim it on the prod registry first, then add it to {s}",
             .{ name, FILE, FILE },
-        );
-    }
-    for (have.items) |name| {
-        if (!contains(want, name)) return try std.fmt.allocPrint(
-            ar,
-            "{s} lists {s}, which is no release member (no src/{s}/mopm.toml in PACKAGES of release/readme_e2e/packages.bzl): delete the line",
-            .{ FILE, name, name },
         );
     }
     return null;
@@ -137,7 +162,7 @@ test "a name dropped from the list is refused" {
     try expectRefused(ar, bzl, dropped, "komira_json is a member of the release and is not in");
 }
 
-test "a list that is unsorted, repeats a name, holds junk or a stale name is refused" {
+test "a list that is unsorted, repeats a name, or holds junk is refused" {
     var arena = std.heap.ArenaAllocator.init(t.allocator);
     defer arena.deinit();
     const ar = arena.allocator();
@@ -146,7 +171,26 @@ test "a list that is unsorted, repeats a name, holds junk or a stale name is ref
     try expectRefused(ar, bzl, "b_two\na_one\n", "a_one is not in sorted order (it follows b_two)");
     try expectRefused(ar, bzl, "a_one\na_one\nb_two\n", "a_one is listed twice");
     try expectRefused(ar, bzl, "a_one\nB-two\n", "\"B-two\" is not a package name");
-    try expectRefused(ar, bzl, "a_one\nb_two\nc_old\n", "c_old, which is no release member");
+    try t.expect((try check(ar, bzl, "a_one\nb_two\nc_old\n")) == null);
+}
+
+test "the claimed names of the deleted libraries stay in the real list; a dropped one is found" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const ar = arena.allocator();
+    const list = try read(ar, "prod_claimed_names.txt");
+    try t.expect(droppedKept(list) == null);
+    const dropped = try std.mem.replaceOwned(u8, ar, list, "kci_logs\n", "");
+    try t.expect(!std.mem.eql(u8, dropped, list));
+    try t.expectEqualStrings("kci_logs", droppedKept(dropped).?);
+}
+
+test "a claimed name that is no member stays accepted" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const ar = arena.allocator();
+    const bzl = "PACKAGES = {\n    \"a_one\": \"0.1.0\",\n}\n";
+    try t.expect((try check(ar, bzl, "a_one\nz_old\n")) == null);
 }
 
 test "an empty list or empty PACKAGES is refused, not passed vacuously" {

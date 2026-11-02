@@ -30,8 +30,8 @@ The governing rule, same SQL, same result as DuckDB, was ruled by the maintainer
 | §7.13 | Readers: empty field vs NULL | MATCHES | DuckDB's `read_csv` defaults, measured. |
 | §7.15 | Invalid UTF-8 in a string column | MATCHES | The reader raises by name, as DuckDB does, measured per reader. |
 | §7.16 | SUBSTRING with a negative start or length | MATCHES | DuckDB's meaning; the two-argument form gets its own encoding. |
-| §8.1 | SUM of a signed integer or BOOLEAN | REPRESENTATION DEPARTURE | INT64 in place of HUGEINT; a total outside INT64 is an error naming the column. |
-| §8.2 | SUM of an unsigned integer | REPRESENTATION DEPARTURE | UINT64 in place of HUGEINT, with §8.1's overflow error. |
+| §8.1 | SUM of a signed integer or BOOLEAN | REPRESENTATION DEPARTURE | SQL: DECIMAL(38, 0) in place of HUGEINT, exact; the dataframe doors keep INT64, and a total outside INT64 is an error naming the column. |
+| §8.2 | SUM of an unsigned integer | REPRESENTATION DEPARTURE | SQL: DECIMAL(38, 0) in place of HUGEINT, exact; the dataframe doors keep UINT64, with §8.1's overflow error. |
 | §8.9 | Result type of integer and mixed arithmetic | MATCHES | DuckDB's narrowest common type; "left operand wins" is retired. |
 | §8.11 | Decimal addition and subtraction | MATCHES | DuckDB's precision and scale, including its 18-digit case and its overflow error. |
 | §8.12 | Decimal multiplication | MATCHES | DuckDB's precision and scale, including its 18-digit case; the code's `+ 1` goes. |

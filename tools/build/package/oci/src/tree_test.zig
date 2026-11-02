@@ -43,14 +43,14 @@ fn strs(want: []const []const u8, got: []const []const u8) !void {
 }
 
 test "tree: the_base_images_tree_is_accepted" {
-    try strs(&.{}, try refusals(&.{ "komira/", "opt/kci/" }, &.{"bin/sh"}));
+    try strs(&.{}, try refusals(&.{ "komira/", "opt/app/" }, &.{"bin/sh"}));
     try strs(&.{}, try refusals(&.{ "komira/", "komira2/" }, &.{ "bin/sh", "bin/sh2", "bin/s" }));
     try strs(&.{}, try refusals(&.{}, &.{ "etc/.wh.ssl", "etc/ssl/certs/.wh..wh..opq" }));
 }
 
 test "tree: a_path_inside_another_is_refused" {
     try strs(&.{"`komira/bin/supervisor` is inside `komira/`"}, try refusals(&.{"komira/"}, &.{"komira/bin/supervisor"}));
-    try strs(&.{"`opt/kci/` is inside `opt/`"}, try refusals(&.{ "opt/", "opt/kci/" }, &.{}));
+    try strs(&.{"`opt/app/` is inside `opt/`"}, try refusals(&.{ "opt/", "opt/app/" }, &.{}));
     try strs(&.{"`a/b` is inside `a`"}, try refusals(&.{}, &.{ "a", "a/b" }));
     try strs(&.{"`bin/` is inside `bin`"}, try refusals(&.{"bin/"}, &.{"bin"}));
     try strs(&.{"`a` given twice"}, try refusals(&.{}, &.{ "a", "a" }));

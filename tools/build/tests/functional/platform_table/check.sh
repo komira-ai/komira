@@ -66,6 +66,16 @@ else
     fail "table: darwin-arm64 applets [$dar_table] differ from busybox.sh's [$dar_sh]"
 fi
 
+# zig_dist unpacks the zig archive with `busybox tar`: both lists must carry tar, so a
+# macOS build that runs every action on a Mac can unpack its tools.
+case " $dar_table " in
+    *" tar "*) case " $dar_sh " in
+        *" tar "*) pass "table: tar is an applet of the darwin-arm64 row and of busybox.sh (zig_dist's unpack)" ;;
+        *) fail "busybox.sh: APPLETS has no tar, which zig_dist's unpack runs" ;;
+        esac ;;
+    *) fail "table: the darwin-arm64 applets have no tar, which zig_dist's unpack runs" ;;
+esac
+
 # 8
 if [ "$(uname -s) $(uname -m)" = "Linux x86_64" ]; then
     GOLD=tools/build/tests/golden/golden.sh

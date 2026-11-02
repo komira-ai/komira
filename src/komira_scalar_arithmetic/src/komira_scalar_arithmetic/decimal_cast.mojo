@@ -114,14 +114,42 @@ def float_to_decimal_i128(f: Float64, precision: Int, scale: Int) raises -> Opti
 # --- decimal -> float64 ----------------------------------------------------
 
 
-@always_inline
+def hugeint_to_float64(h: I128) -> Float64:
+    """DuckDB's double of a 128-bit integer: the double of its low word plus
+    the double of its high word times 2^64 (two roundings and a product), not
+    the correctly rounded value (2^117 + 2^64 + 1 is 2^117, where one rounding
+    gives 2^117 + 2^65); for a
+    high word of -1 (a negative value within 2^64 of zero) it is
+    `-double(UINT64_MAX - low word) - 1`."""
+    var low = h.cast[DType.uint64]()
+    var high = (h >> I128(64)).cast[DType.int64]()
+    if high == Int64(-1):
+        return -(UInt64.MAX - low).cast[DType.float64]() - 1.0
+    return low.cast[DType.float64]() + high.cast[DType.float64]() * 18446744073709551616.0
+
+
 def decimal_to_float64(v: I128, scale: Int) -> Float64:
-    """Cast a D(_, scale) value to Float64 (lossy for >15 sig digits)."""
-    var fv = v.cast[DType.float64]()
-    var pow_f = Float64(1.0)
+    """`v / 10^scale` as DuckDB's cast of a D(_, scale) to DOUBLE gives it
+    (0 <= scale <= 38; every DECIMAL-to-DOUBLE conversion of the engine goes
+    through this function, the SQL tokenizer's decimal literal included).
+
+    A value within 2^53, or at scale 0, is `hugeint_to_float64(v)` over 10^scale
+    (a correctly rounded division); a larger one is converted by parts: the
+    double of the integer part `v / 10^scale` plus the double of the fraction
+    part `v % 10^scale` over 10^scale, both truncating toward zero. The pinned
+    DuckDB's doubles are the test (komira_decimal_compare_conformance,
+    double_sweep.tsv, 1000 values bit for bit; double_sites.tsv for the
+    engine's sites)."""
+    var scale_i128 = I128(1)
     for _ in range(scale):
-        pow_f *= 10.0
-    return Float64(fv) / pow_f
+        scale_i128 = scale_i128 * I128(10)
+    var divisor = scale_i128.cast[DType.float64]()
+    var two53 = I128(9007199254740992)
+    if scale == 0 or (v <= two53 and v >= -two53):
+        return hugeint_to_float64(v) / divisor
+    var whole = v / scale_i128
+    var fraction = v - whole * scale_i128
+    return hugeint_to_float64(whole) + hugeint_to_float64(fraction) / divisor
 
 
 # --- decimal -> int64 (HALF_UP: round half away from zero) ----------------

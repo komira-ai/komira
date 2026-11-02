@@ -101,12 +101,13 @@ test "srcs-gen: the archive is decompressed into the scratch directory and hande
     var c = try newCtx("gen_ok");
     defer c.deinit();
     const tar = try tt.tar(c.alloc(), &.{ .{ .name = "lib-1.0/CMakeLists.txt", .data = "project(x)\n" }, .{ .name = "lib-1.0/a.c", .data = "int a;\n" } });
-    try c.write("a.tar.gz", try tt.gzip(c.alloc(), tar), 0o644);
+    const gz = try tt.gzip(c.alloc(), tar);
+    try c.write("a.tar.gz", gz, 0o644);
     const scratch = try c.path("scratch");
     const r = try c.run(try genArgs(&c, "aws-lc"), &.{.{ "BUCK_SCRATCH_PATH", scratch }});
     if (r.code != 0) std.debug.print("[third_party_act stderr] {s}\n", .{r.stderr});
     try t.expectEqual(@as(u8, 0), r.code);
-    const want = try std.fmt.allocPrint(c.alloc(), "library=aws-lc\ntar_bytes={d}\ntar_name=lib-1.0/CMakeLists.txt\ngen_label=//p:srcs_gen\ndrift_label=//p:srcs_drift\ncommitted=p/srcs.bzl\ntar_path_is_absolute=yes\n", .{tar.len});
+    const want = try std.fmt.allocPrint(c.alloc(), "library=aws-lc\ntar_bytes={d}\ntar_name=lib-1.0/CMakeLists.txt\ngen_label=//p:srcs_gen\ndrift_label=//p:srcs_drift\ncommitted=p/srcs.bzl\narchive_size={d}\ntar_path_is_absolute=yes\n", .{ tar.len, gz.len });
     try t.expectEqualStrings(want, try c.read("srcs.bzl"));
     try t.expect(!c.exists("scratch/komira"));
 }
@@ -124,4 +125,32 @@ test "srcs-gen: the generator's status is the action's; an archive that is no gz
     try t.expect(has(r2.stderr, "gzip: a.tar.gz: "));
     try t.expect(!c.exists("srcs.bzl"));
     try t.expectEqual(@as(u8, 2), (try c.run(&.{ "srcs-gen", "--archive", "a.tar.gz" }, &.{})).code);
+}
+
+// ---- files-check --------------------------------------------------------------
+
+fn checkArgs(extra: []const []const u8, c: *kit.Ctx) ![]const []const u8 {
+    var args = std.ArrayList([]const u8).empty;
+    try args.appendSlice(c.alloc(), &.{ "files-check", "--archive", "a.tar.gz", "--files", "files.bzl", "--regenerate", "make it" });
+    try args.appendSlice(c.alloc(), extra);
+    return args.items;
+}
+
+test "files-check: green when every listed file is in the archive and in FILES; red, naming the file, when one is not" {
+    var c = try newCtx("check");
+    defer c.deinit();
+    const tar = try tt.tar(c.alloc(), &.{
+        .{ .name = "lib-1/a.S", .data = "A" },
+        .{ .name = "lib-1/include/x.h", .data = "H" },
+    });
+    try c.write("a.tar.gz", try tt.gzip(c.alloc(), tar), 0o644);
+    try c.write("files.bzl", "ASM = [\n    \"a.S\",\n]\nINCLUDES = [\n    \"include\",\n]\nFILES = [\n    \"a.S\",\n    \"include/x.h\",\n]\n", 0o644);
+    const ok = try c.run(try checkArgs(&.{ "--require", "ASM" }, &c), &.{});
+    try t.expectEqual(@as(u8, 0), ok.code);
+    try c.write("files.bzl", "ASM = [\n    \"b.S\",\n]\nFILES = [\n    \"a.S\",\n]\n", 0o644);
+    const bad = try c.run(try checkArgs(&.{}, &c), &.{});
+    try t.expectEqual(@as(u8, 1), bad.code);
+    try t.expect(has(bad.stderr, "ASM: b.S is not in the archive"));
+    try t.expect(has(bad.stderr, "regenerate: make it"));
+    try t.expectEqual(@as(u8, 2), (try c.run(&.{ "files-check", "--archive", "a.tar.gz" }, &.{})).code);
 }

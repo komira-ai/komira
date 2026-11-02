@@ -1,5 +1,5 @@
 load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_test")
-load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
+load("@komira//tools/build/platforms:defs.bzl", "TOOL_EXEC")
 
 # The lint action (src/main.zig): every lint rule of tools/build/lint/defs.bzl
 # but pointer_lint and public_boundary (each a Zig tool of its own) runs it.
@@ -9,7 +9,7 @@ _SRCS = glob(["src/*.zig"])
 
 _ZIG = {
     "busybox": "komira//tools/build/toolchains:busybox",
-    "exec_compatible_with": LINUX_X86_64,
+    "exec_compatible_with": TOOL_EXEC,
     "imports": _SRCS,
     "zig": "komira//tools/build/toolchains:zig_next",
 }

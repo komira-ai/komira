@@ -52,7 +52,7 @@ fn emptyRepodata(alloc: Alloc, subdir: []const u8) !json.Value {
 /// komira_pack conda-index --out-dir D --package-manifest M.json...
 ///
 /// A LOCAL conda channel made from packages this tool wrote, so a release can
-/// be installed (and validated: kci run --channel file:///D) before anything
+/// be installed before anything
 /// is published. Each --package-manifest is a package directory's artifact manifest
 /// (the contract, exactly); the file it names must have its sha256. D must
 /// not exist or be empty. For each package, `D/<subdir>/<file>` is a copy of

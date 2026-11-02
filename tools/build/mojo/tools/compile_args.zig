@@ -231,6 +231,23 @@ pub fn compilerArgs(alloc: std.mem.Allocator, o: Options) ![]const []const u8 {
 
 // ---- macOS -------------------------------------------------------------------
 
+/// The `--macos-host` value of a compile that runs on the machine running
+/// Buck2 (mojo/darwin.bzl DARWIN_LOCAL_HOST): the identity comparison is
+/// skipped. It holds no "-", so it is never a host identity
+/// (`<sdk version>-<digest>`). Only a lone sentinel is accepted: beside a real
+/// identity it is a farm command line that claims the local mode.
+pub const local_host = "local";
+
+/// Whether a compile naming `hosts` may run on a host whose identity is
+/// `have` (null: unreadable). The lone sentinel accepts any host, readable or
+/// not; otherwise `have` must be listed.
+pub fn hostAccepted(hosts: []const []const u8, have: ?[]const u8) bool {
+    if (hosts.len == 1 and std.mem.eql(u8, hosts[0], local_host)) return true;
+    const h = have orelse return false;
+    for (hosts) |listed| if (std.mem.eql(u8, listed, h)) return true;
+    return false;
+}
+
 /// The macOS command line (mojo_compile_macos.zig):
 ///
 ///   mojo_compile --compiler=<dir> --deployment-target=<v> --macos-host=<id>...
@@ -327,6 +344,11 @@ pub fn parseMacos(alloc: std.mem.Allocator, pwd: []const u8, args: []const []con
     if (i >= args.len) return refuse(d, alloc, "expected -- before compiler arguments", .{});
     if (compiler == null or deployment == null or deployment.?.len == 0) {
         return refuse(d, alloc, "usage: mojo_compile --compiler=<dir> --deployment-target=<v> --macos-host=<id>... [options] -- <mojo arguments...>", .{});
+    }
+    if (hosts.items.len > 1) {
+        for (hosts.items) |h| if (std.mem.eql(u8, h, local_host)) {
+            return refuse(d, alloc, "REFUSING: --macos-host={s} (a build on this machine) beside other hosts: a compile that names host identities is not a local one", .{local_host});
+        };
     }
     if (hosts.items.len == 0) {
         return refuse(d, alloc, "REFUSING: no --macos-host: the compile names no macOS host it may run on ([komira_re] darwin_macos_hosts)", .{});
@@ -698,6 +720,47 @@ test "macOS options: precompile with a source root runs in the root's parent, as
 test "macOS options: no --macos-host, or an empty one, is refused" {
     try expectRefusedMacos(&.{ "--compiler=tc", "--deployment-target=11.0", "--", "build", "-o", "o" }, "no --macos-host");
     try expectRefusedMacos(macWithBase(&.{"--macos-host="}, &.{ "build", "-o", "o" }), "an empty --macos-host");
+}
+
+// Catches: the local sentinel riding in a farm command line (beside real
+// host identities), which would let a remote compile skip the identity check.
+// Mutant planted: drop the mixed-list refusal (red: the first case parses).
+test "macOS options: the local sentinel beside a host identity is refused, alone it parses" {
+    try expectRefusedMacos(macWithBase(&.{"--macos-host=local"}, &.{ "build", "-o", "o" }), "beside other hosts");
+    try expectRefusedMacos(&.{ "--compiler=tc", "--deployment-target=11.0", "--macos-host=local", "--macos-host=26.5-0123456789abcdef", "--", "build", "-o", "o" }, "beside other hosts");
+    var p = tryParseMacos(&.{ "--compiler=tc", "--deployment-target=11.0", "--macos-host=local", "--", "build", "-o", "o" });
+    defer p.deinit();
+    const o = try p.result;
+    try testing.expectEqual(@as(usize, 1), o.macos_hosts.len);
+    try testing.expectEqualStrings(local_host, o.macos_hosts[0]);
+}
+
+const ident = "26.5-0123456789abcdef";
+
+// Catches: a local build refused on a Mac whose identity is unlisted or
+// unreadable. Mutant planted: hostAccepted ignores the sentinel (red).
+test "host check: the lone local sentinel accepts any host, readable or not" {
+    try testing.expect(hostAccepted(&.{local_host}, ident));
+    try testing.expect(hostAccepted(&.{local_host}, "15.0-ffffffffffffffff"));
+    try testing.expect(hostAccepted(&.{local_host}, null));
+}
+
+// Catches: the farm refusal weakened: an unlisted or unreadable host accepted
+// when identities are named. Mutant planted: accept any host (red).
+test "host check: with identities named, only a listed host is accepted" {
+    try testing.expect(hostAccepted(&.{ ident, "15.0-fedcba9876543210" }, ident));
+    try testing.expect(hostAccepted(&.{ ident, "15.0-fedcba9876543210" }, "15.0-fedcba9876543210"));
+    try testing.expect(!hostAccepted(&.{ident}, "26.5-aaaaaaaaaaaaaaaa"));
+    try testing.expect(!hostAccepted(&.{ident}, null));
+    try testing.expect(!hostAccepted(&.{ident}, "local"));
+}
+
+// Catches: the sentinel honoured in farm mode: a host list that holds `local`
+// beside identities must not accept an unlisted host. Mutant planted:
+// hostAccepted accepts when any listed host is the sentinel (red).
+test "host check: the sentinel beside identities does not accept an unknown host" {
+    try testing.expect(!hostAccepted(&.{ local_host, ident }, "26.5-aaaaaaaaaaaaaaaa"));
+    try testing.expect(!hostAccepted(&.{ ident, local_host }, null));
 }
 
 // Catches: one source run under the other platform's contract.

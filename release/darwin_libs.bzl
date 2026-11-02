@@ -13,30 +13,23 @@ What it builds: each package's `:lib` for `--target-platforms komira//tools/buil
 workers of the farm. The output is one directory, `osx-arm64/<name>.mojoc`, the layout `mopm stage
 --artifacts` reads for that platform. Nothing is staged or published from it.
 
-DARWIN_EXCLUDED is the packages whose closure holds native code (an `//src/<name>:native_*` archive,
-reached through `deps`): a C or C++ dependency cannot build for darwin-arm64 yet (DEVELOPMENT.md, "macOS
-workers"). Each entry names the native target that puts it there; a package leaves the list when its native
-code builds for macOS. The list is the answer of
+DARWIN_EXCLUDED is the packages left out of that build: a package whose closure cannot build for
+darwin-arm64, each with the reason. It is empty: the C a package owns (a `[native.<id>]` archive such as
+libc_posix, log_holder, metrics_ea_flag, concurrency_pool_depth) is compiled for aarch64-macos by the
+pinned zig, so every package of the list builds there and its welded tests run on the macOS workers.
+What is not supported is a vendored third_party C or C++ library inside a `mojo_package`; a package
+whose closure reaches one is added here with that reason, which is the answer of
 
-    ./buck2 uquery 'rdeps(<every :lib of packages.bzl>, <every native_* archive of mopm_artifacts>)'
+    ./buck2 uquery 'rdeps(<every :lib of packages.bzl>, <the third_party archives>)'
 
-so a package that comes to depend on native code is a red `release-macos` job (not a red release: the
-job reports and does not block, release.yml says why) until it is added here.
+so such a package is a red `release-macos` job (not a red release: the job reports and does not
+block, release.yml says why) until it is added here.
 """
 
 load("//release/readme_e2e:packages.bzl", README_E2E_PACKAGES = "PACKAGES")
 
-# package -> the native archive of its closure that cannot build for macOS yet
-DARWIN_EXCLUDED = {
-    "komira_async_api": "//src/komira_async_api:native_komira_concurrency_pool_depth",
-    "komira_buffer": "//src/komira_libc:native_komira_libc_posix",
-    "komira_bump_arena": "//src/komira_libc:native_komira_libc_posix",
-    "komira_dynamic_filter": "//src/komira_libc:native_komira_libc_posix",
-    "komira_libc": "//src/komira_libc:native_komira_libc_posix",
-    "komira_log": "//src/komira_log:native_komira_log_holder",
-    "komira_mail_message": "//src/komira_libc:native_komira_libc_posix",
-    "komira_metrics": "//src/komira_metrics:native_komira_metrics_ea_flag",
-}
+# package -> why it cannot build for macOS (none today)
+DARWIN_EXCLUDED = {}
 
 def darwin_packages(packages = README_E2E_PACKAGES, excluded = DARWIN_EXCLUDED):
     """The packages of `packages` (a dict or a list of names) that are not in `excluded`, sorted. Refuses an excluded name that is no package, so a deleted package leaves the list."""

@@ -142,13 +142,13 @@ def _apply_memory_hint(
             var r = external_call["madvise", Int32](
                 target, length, _MADV_HUGEPAGE
             )
-            if r != Int32(0):
+            if r != Int32(0):  # cov: unreachable madvise(MADV_HUGEPAGE) on our own mapped, aligned span fails only on a kernel built without transparent hugepages
                 rc = r
         if (mode & ADVICE_POPULATE) != 0:
             var r2 = external_call["madvise", Int32](
                 target, length, _MADV_POPULATE_WRITE
             )
-            if r2 != Int32(0) and rc == Int32(0):
+            if r2 != Int32(0) and rc == Int32(0):  # cov: unreachable madvise(MADV_POPULATE_WRITE) on our own mapped, writable span fails only on a kernel before 5.14 or when memory runs out
                 rc = r2
     return rc
 
@@ -340,9 +340,13 @@ struct OwnedAlignedBuffer(
     @staticmethod
     def with_capacity(capacity: Int) -> Self:
         """Construct an OwnedAlignedBuffer of at least `capacity`
-        bytes, length 0. The Arrow-builder pattern.
+        bytes, length 0. The Arrow-builder pattern: write into
+        `into_span_capacity()`, then `set_length`. Unlike the plain
+        constructor, whose length is the capacity.
         """
-        return Self(capacity)
+        var b = Self(capacity)
+        b._length = 0
+        return b^
 
     # -------------------------------------------------------------------------
     # MmapAlignedBuffer trait surface
@@ -791,7 +795,7 @@ struct OwnedAlignedBuffer(
         """True iff `_ptr` is aligned to `_OWNED_ALIGN` (64) bytes.
         Vacuously True for empty buffers (null cached pointer).
         """
-        if self._capacity == 0 and Int(self._ptr) == 0:
+        if self._capacity == 0 and Int(self._ptr) == 0:  # cov: unreachable every path that sets _capacity to 0 also nulls _ptr, so the right operand is never False when the left is True
             return True
         return Int(self._ptr) % _OWNED_ALIGN == 0
 
@@ -849,7 +853,7 @@ struct OwnedAlignedBuffer(
         if keep > 0:
             unsafe_memcpy(dest=aligned, src=self._ptr, count=keep)
         # Zero tail padding (deterministic SIMD over-read)
-        if padded_size > keep:
+        if padded_size > keep:  # cov: unreachable keep is _length, which the set_length precondition (length <= capacity) holds <= the old _capacity < min_size <= padded_size, so the comparison is never False
             unsafe_memset(aligned + keep, 0, padded_size - keep)
 
         # ★★ THIS LINE IS LOAD-BEARING. IT IS NOT DEAD CODE. DO NOT DELETE IT.

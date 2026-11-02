@@ -73,10 +73,13 @@ fn planOf(a: std.mem.Allocator, files: []const plan.File, o: plan.Options) !plan
 fn normalize(a: std.mem.Allocator, text: []const u8) ![]u8 {
     var out = std.ArrayList(u8).empty;
     var para = std.ArrayList(u8).empty;
+    var indent: []const u8 = "";
     var lines = std.mem.splitScalar(u8, text, '\n');
     while (lines.next()) |line| {
-        if (std.mem.startsWith(u8, line, "#")) {
-            var words = std.mem.tokenizeAny(u8, line[1..], " \t");
+        const bare = std.mem.trimLeft(u8, line, " ");
+        if (std.mem.startsWith(u8, bare, "#")) {
+            if (para.items.len == 0) indent = line[0 .. line.len - bare.len];
+            var words = std.mem.tokenizeAny(u8, bare[1..], " \t");
             var any = false;
             while (words.next()) |w| {
                 any = true;
@@ -86,12 +89,14 @@ fn normalize(a: std.mem.Allocator, text: []const u8) ![]u8 {
             if (any) continue;
         }
         if (para.items.len > 0) {
+            try out.appendSlice(a, indent);
             try out.append(a, '#');
             try out.appendSlice(a, para.items);
             try out.append(a, '\n');
             para.clearRetainingCapacity();
         }
-        if (std.mem.startsWith(u8, line, "#")) {
+        if (std.mem.startsWith(u8, bare, "#")) {
+            try out.appendSlice(a, indent);
             try out.appendSlice(a, "#\n");
         } else {
             try out.appendSlice(a, line);
@@ -418,6 +423,174 @@ test "golden collections: five library files move, the tests and the tables stay
     }
 }
 
+// ---- the golden: komira_bump_arena (a dependency whose closure links C) ----------------------------
+//
+// komira_bump_arena owns no C; it depends on komira_buffer, whose closure reaches komira_libc, which
+// declares a static native. The hand migration of the package keeps `mojo_adopted_library` taking
+// the C toolchain's link facts (`cxx_toolchain`), so a dependent's link carries libc's archive.
+
+const bx = struct {
+    const dir = "fixtures/komira_bump_arena/";
+    const old_buck = @embedFile(dir ++ "old/BUCK.fixture");
+    const old_readme = @embedFile(dir ++ "old/README.md");
+    const old_init = @embedFile(dir ++ "old/__init__.mojo.fixture");
+    const old_arena = @embedFile(dir ++ "old/bump_arena.mojo.fixture");
+    const old_test = @embedFile(dir ++ "old/tests/test_bump_arena.mojo.fixture");
+    const buffer_toml = @embedFile(dir ++ "old/siblings/komira_buffer.mopm.toml");
+    const host_toml = @embedFile(dir ++ "old/siblings/komira_host.mopm.toml");
+    const simd_toml = @embedFile(dir ++ "old/siblings/komira_simd.mopm.toml");
+    const libc_toml = @embedFile(dir ++ "old/siblings/komira_libc.mopm.toml");
+    const hand_buck = @embedFile(dir ++ "hand/BUCK.fixture");
+    const hand_toml = @embedFile(dir ++ "hand/mopm.toml");
+    const hand_toolchain = @embedFile(dir ++ "hand/mopm-toolchain.toml");
+    const hand_lock = @embedFile(dir ++ "hand/mopm.lock");
+    const ids_before = @embedFile(dir ++ "rows/mopm_native_ids.before.bzl");
+    const ids_diff = @embedFile(dir ++ "rows/mopm_native_ids.diff");
+    const packages_before = @embedFile(dir ++ "rows/packages.before.bzl");
+    const packages_diff = @embedFile(dir ++ "rows/packages.diff");
+};
+
+const bump_description = "An O(1)-reset bump allocator over a fixed-capacity byte region.";
+
+fn bumpTree() []const plan.File {
+    return &.{
+        .{ .path = "src/komira_bump_arena/BUCK", .text = bx.old_buck },
+        .{ .path = "src/komira_bump_arena/README.md", .text = bx.old_readme },
+        .{ .path = "src/komira_bump_arena/__init__.mojo", .text = bx.old_init },
+        .{ .path = "src/komira_bump_arena/bump_arena.mojo", .text = bx.old_arena },
+        .{ .path = "src/komira_bump_arena/tests/test_bump_arena.mojo", .text = bx.old_test },
+        .{ .path = "src/komira_buffer/BUCK", .text = migrated_buck },
+        .{ .path = "src/komira_buffer/mopm.toml", .text = bx.buffer_toml },
+        .{ .path = "src/komira_host/BUCK", .text = migrated_buck },
+        .{ .path = "src/komira_host/mopm.toml", .text = bx.host_toml },
+        .{ .path = "src/komira_simd/BUCK", .text = migrated_buck },
+        .{ .path = "src/komira_simd/mopm.toml", .text = bx.simd_toml },
+        .{ .path = "src/komira_libc/BUCK", .text = migrated_buck },
+        .{ .path = "src/komira_libc/mopm.toml", .text = bx.libc_toml },
+        .{ .path = "release/readme_e2e/packages.bzl", .text = bx.packages_before },
+        .{ .path = "release/mopm_native_ids.bzl", .text = bx.ids_before },
+    };
+}
+
+const bump_options = plan.Options{ .package = "komira_bump_arena", .description = bump_description, .mopm = fixture_mopm };
+
+test "golden bump_arena: a dependency with natives is accepted, and the manifest, toolchain file and lock are the hand migration's, byte for byte" {
+    var ar = arena();
+    defer ar.deinit();
+    const p = try planOf(ar.allocator(), bumpTree(), bump_options);
+    try expectSameBytes("mopm.toml", bx.hand_toml, try writeOf(p, "src/komira_bump_arena/mopm.toml"));
+    try expectSameBytes("mopm-toolchain.toml", bx.hand_toolchain, try writeOf(p, "src/komira_bump_arena/mopm-toolchain.toml"));
+    try expectSameBytes("mopm.lock", bx.hand_lock, try writeOf(p, "src/komira_bump_arena/mopm.lock"));
+}
+
+test "golden bump_arena: the two shared rows files get the lines the hand migration added" {
+    var ar = arena();
+    defer ar.deinit();
+    const a = ar.allocator();
+    const p = try planOf(a, bumpTree(), bump_options);
+    try expectRowsAsDiff(a, "release/readme_e2e/packages.bzl", bx.packages_before, try writeOf(p, "release/readme_e2e/packages.bzl"), bx.packages_diff);
+    try expectRowsAsDiff(a, "release/mopm_native_ids.bzl", bx.ids_before, try writeOf(p, "release/mopm_native_ids.bzl"), bx.ids_diff);
+}
+
+test "golden bump_arena: the BUCK file is the hand migration's, with the C link facts carried and the comment above them in other words" {
+    var ar = arena();
+    defer ar.deinit();
+    const a = ar.allocator();
+    const p = try planOf(a, bumpTree(), bump_options);
+    const raw = try writeOf(p, "src/komira_bump_arena/BUCK");
+    // the attribute is code: the same line, between deps and lib, as the hand file has it
+    try t.expect(std.mem.indexOf(u8, raw, "    cxx_toolchain = \"komira//tools/build/mojo:adopt_cxx_link_facts\",\n    lib = \":lib\",\n") != null);
+    // no c_deps and no native_static: this package owns no C
+    try t.expect(std.mem.indexOf(u8, raw, "c_deps = ") == null);
+    try t.expect(std.mem.indexOf(u8, raw, "native_static = ") == null);
+    const got = try normalize(a, raw);
+    var want = try normalize(a, bx.hand_buck);
+    // the hand comment names the one package that links C and says it is in the closure through
+    // komira_buffer; the tool's names every package of the closure that declares a static native.
+    const hand_words = "    # komira_libc, in the closure through komira_buffer, links C (its posix shim), so a dependent's link takes that archive from here. This package owns no C, so it names no `c_deps`: it takes the C toolchain's link facts directly.\n";
+    const tool_words = "    # komira_libc, in the closure, declares C of its own (a static native), so `lib`'s closure carries that archive and a dependent's link takes it from here. This package owns no C, so it names no `c_deps`: it takes the C toolchain's link facts directly.\n";
+    try t.expect(std.mem.indexOf(u8, want, hand_words) != null);
+    try t.expect(std.mem.indexOf(u8, got, tool_words) != null);
+    want = try std.mem.replaceOwned(u8, a, want, hand_words, tool_words);
+    // The package has one test and one dependency: the hand file words the general case ("every test",
+    // "the tests have", "the adopted target of that package"), the tool the case at hand. The same facts.
+    const wording = [_][2][]const u8{
+        .{ "once every test of tests/ has passed", "once the test of tests/ has passed" },
+        .{ "once the tests have passed", "once the test has passed" },
+        .{ "the tests are not run again", "the test is not run again" },
+        .{ "the adopted target of that package", "the adopted targets of those packages" },
+        .{ "and holds none of its files. `members` is the manifests of the path dependencies of the closure,", "and holds that package's files nowhere. `members` is the manifests of the path dependencies," },
+        .{ "once the tests passed", "once the test passed" },
+        // the package is in no file of release/ in the fixture, as in the tree before the hand migration: the
+        // tool says only that the label stays valid
+        .{ "Kept for the release machine, which still builds it (release/BUCK, release/artifacts.textproto): komira's", "Kept so the label `:komira_bump_arena_conda` stays valid: komira's" },
+        .{ "    depends = [\n        \"mojo-komira_buffer >=0.1,<0.2\",\n    ],\n", "    depends = [\"mojo-komira_buffer >=0.1,<0.2\"],\n" },
+        .{ "nothing else under `lib/mojo/`, and exactly one dependency, which is what installing the package pulls in. Red when the manifest drops the dependency, names another range, or the file carries a sibling.", "nothing else under `lib/mojo/` (komira_buffer is not in it), and exactly one dependency, `mojo-komira_buffer >=0.1,<0.2`, which is what installing the package pulls in. Red when the manifest drops the dependency, names another range, or the file carries the sibling." },
+        // a one-item list: the hand file kept the old file's three lines, the tool writes one line (as the hand
+        // file of komira_counters does)
+        .{ "    deps = [\n        \"//src/komira_buffer:komira_buffer\",\n    ],\n", "    deps = [\"//src/komira_buffer:komira_buffer\"],\n" },
+    };
+    for (wording) |w| want = try std.mem.replaceOwned(u8, a, want, w[0], w[1]);
+    try expectSameBytes("BUCK (comments normalized)", want, got);
+}
+
+test "bump_arena: a closure with no native gets no cxx_toolchain" {
+    var ar = arena();
+    defer ar.deinit();
+    const a = ar.allocator();
+    const clean_libc = "[package]\nname = \"komira_libc\"\nversion = \"0.1.0\"\n\n[targets]\nlib = { path = \"src/komira_libc\" }\n";
+    var files = std.ArrayList(plan.File).empty;
+    for (bumpTree()) |f| try files.append(a, if (std.mem.eql(u8, f.path, "src/komira_libc/mopm.toml")) .{ .path = f.path, .text = clean_libc } else f);
+    const p = try planOf(a, files.items, bump_options);
+    try t.expect(std.mem.indexOf(u8, try writeOf(p, "src/komira_bump_arena/BUCK"), "cxx_toolchain") == null);
+}
+
+test "bump_arena: a package that owns C is still refused, in each form, with the package that owns it named" {
+    var ar = arena();
+    defer ar.deinit();
+    const a = ar.allocator();
+    var with_c = std.ArrayList(plan.File).empty;
+    try with_c.appendSlice(a, bumpTree());
+    try with_c.append(a, .{ .path = "src/komira_bump_arena/native/shim.c" });
+    try expectRefusal(a, with_c.items, bump_options, "src/komira_bump_arena/native/shim.c: a native source or library");
+    const c_deps = try std.mem.replaceOwned(u8, a, bx.old_buck, "    visibility", "    c_deps = [\":shim\"],\n    visibility");
+    var with_attr = std.ArrayList(plan.File).empty;
+    for (bumpTree()) |f| try with_attr.append(a, if (std.mem.eql(u8, f.path, "src/komira_bump_arena/BUCK")) .{ .path = f.path, .text = c_deps } else f);
+    try expectRefusal(a, with_attr.items, bump_options, "'c_deps' declares native code");
+    var with_dl = std.ArrayList(plan.File).empty;
+    try with_dl.appendSlice(a, bumpTree());
+    try with_dl.append(a, .{ .path = "src/komira_bump_arena/ffi.mojo", .text = "fn f():\n    var h = OwnedDLHandle(\"libx.so\")\n" });
+    try expectRefusal(a, with_dl.items, bump_options, "uses DLHandle");
+}
+
+test "a dependency that loads a system library at run time is refused, naming it" {
+    var ar = arena();
+    defer ar.deinit();
+    const a = ar.allocator();
+    const beta_toml = beta_toml_text ++ "\n[native-dependencies]\nlz4 = { version = \">=1.9.3,<2\", kind = \"shared\", mode = \"load\" }\n";
+    try expectRefusal(a, try mini(a, .{ .beta_toml = beta_toml }), mini_options, "src/beta/mopm.toml declares [native-dependencies]");
+    // a native section that is not a static library of its own is refused too
+    const shared = beta_toml_text ++ "\n[native.x]\nkind = \"shared\"\n";
+    try expectRefusal(a, try mini(a, .{ .beta_toml = shared }), mini_options, "src/beta/mopm.toml declares [native.x] with kind \"shared\"");
+}
+
+test "a static native deep in the closure reaches the BUCK file of a package that owns none" {
+    var ar = arena();
+    defer ar.deinit();
+    const a = ar.allocator();
+    const beta_toml = beta_toml_text ++ "\n[dependencies]\ngamma = { path = \"../gamma\", version = \"0.1\" }\n";
+    const extra = [_]plan.File{
+        .{ .path = "src/gamma/BUCK", .text = migrated_buck },
+        .{ .path = "src/gamma/mopm.toml", .text = "[package]\nname = \"gamma\"\nversion = \"0.1.4\"\n\n[native.g]\nkind = \"static\"\nsrcs = [\"native/g.c\"]\n" },
+    };
+    const p = try planOf(a, try mini(a, .{ .beta_toml = beta_toml, .extra = &extra }), mini_options);
+    const buck = try writeOf(p, "src/alpha/BUCK");
+    try t.expect(std.mem.indexOf(u8, buck, "    cxx_toolchain = \"komira//tools/build/mojo:adopt_cxx_link_facts\",\n") != null);
+    try t.expect(std.mem.indexOf(u8, buck, "    # gamma, in the closure, declares C of its own") != null);
+    // the manifest and lock carry no native section: the package owns none
+    try t.expect(std.mem.indexOf(u8, try writeOf(p, "src/alpha/mopm.toml"), "native") == null);
+}
+
 // ---- a small repository for the refusals -----------------------------------------------------------
 
 const mini_buck =
@@ -554,14 +727,13 @@ test "refuses a dependency still on the old rule, naming it" {
     try expectRefusal(a, no_toml.items, mini_options, "'beta', which is still on the old rule (mojo_library)");
 }
 
-test "refuses native code in each form: C sources, a native attribute, a native rule, a native dependency" {
+test "refuses native code the package owns, in each form: C sources, a native attribute, a native rule" {
     var ar = arena();
     defer ar.deinit();
     const a = ar.allocator();
     try expectRefusal(a, try mini(a, .{ .extra = &.{.{ .path = "src/alpha/shim.c" }} }), mini_options, "a native source or library");
     try expectRefusal(a, try mini(a, .{ .buck = try buckWith(a, "    visibility", "    native = \":alpha_native\",\n    visibility") }), mini_options, "'native' declares native code");
     try expectRefusal(a, try mini(a, .{ .buck = try std.mem.concat(a, u8, &.{ mini_buck, "\nnative_shared_library(name = \"x\")\n" }) }), mini_options, "native_shared_library: a native library");
-    try expectRefusal(a, try mini(a, .{ .beta_toml = beta_toml_text ++ "\n[native.lz4]\nkind = \"static\"\n" }), mini_options, "declares natives");
 }
 
 test "refuses a BUCK file it cannot read as data: a variable, a comprehension, an operator, a triple-quoted string" {
@@ -951,4 +1123,58 @@ test "the command line: the migrated output names the version --mopm gives" {
     try t.expect(std.mem.indexOf(u8, try writeOf(p, "src/alpha/mopm-toolchain.toml"), "mopm = \"0.0.86\"") != null);
     try t.expect(std.mem.indexOf(u8, try writeOf(p, "src/alpha/BUCK"), "toolchains//:mopm_0_0_86") != null);
     try t.expect(std.mem.indexOf(u8, try writeOf(p, "src/alpha/mopm-toolchain.toml"), "0.0.73") == null);
+}
+
+const native_gamma = [_]plan.File{
+    .{ .path = "src/gamma/BUCK", .text = migrated_buck },
+    .{ .path = "src/gamma/mopm.toml", .text = "[package]\nname = \"gamma\"\nversion = \"0.1.4\"\n\n[native.g]\nkind = \"static\"\nsrcs = [\"native/g.c\"]\n" },
+};
+const dev_options = plan.Options{ .package = "alpha", .description = "A library.", .mopm = repo_mopm, .dev_dependencies = true };
+
+test "a static native that only the test-only dependencies reach is refused, naming the dependency" {
+    var ar = arena();
+    defer ar.deinit();
+    const a = ar.allocator();
+    const dev_buck = try buckWith(a, "    visibility", "    test_deps = [\"//src/gamma:gamma\"],\n    visibility");
+    const dev_test = "from alpha import x\nfrom gamma import y\n";
+    try expectRefusal(a, try mini(a, .{ .buck = dev_buck, .test_src = dev_test, .extra = &native_gamma }), dev_options, "'gamma' declares a static native and is reached only through the test-only dependencies (gamma)");
+}
+
+test "a native reached through both the library and the test-only dependencies gives one cxx_toolchain" {
+    var ar = arena();
+    defer ar.deinit();
+    const a = ar.allocator();
+    const beta_toml = beta_toml_text ++ "\n[dependencies]\ngamma = { path = \"../gamma\", version = \"0.1\" }\n";
+    const dev_buck = try buckWith(a, "    visibility", "    test_deps = [\"//src/gamma:gamma\"],\n    visibility");
+    const dev_test = "from alpha import x\nfrom gamma import y\n";
+    const p = try planOf(a, try mini(a, .{ .beta_toml = beta_toml, .buck = dev_buck, .test_src = dev_test, .extra = &native_gamma }), dev_options);
+    const buck = try writeOf(p, "src/alpha/BUCK");
+    try t.expectEqual(@as(usize, 1), std.mem.count(u8, buck, "cxx_toolchain = "));
+    try t.expect(std.mem.indexOf(u8, buck, "# gamma, in the closure, declares C of its own") != null);
+}
+
+test "two natives in the closure are named in the plural" {
+    var ar = arena();
+    defer ar.deinit();
+    const a = ar.allocator();
+    const beta_toml = beta_toml_text ++ "\n[dependencies]\ndelta = { path = \"../delta\", version = \"0.1\" }\ngamma = { path = \"../gamma\", version = \"0.1\" }\n";
+    const extra = [_]plan.File{
+        native_gamma[0],
+        native_gamma[1],
+        .{ .path = "src/delta/BUCK", .text = migrated_buck },
+        .{ .path = "src/delta/mopm.toml", .text = "[package]\nname = \"delta\"\nversion = \"0.1.0\"\n\n[native.d]\nkind = \"static\"\n" },
+    };
+    const p = try planOf(a, try mini(a, .{ .beta_toml = beta_toml, .extra = &extra }), mini_options);
+    const buck = try writeOf(p, "src/alpha/BUCK");
+    try t.expectEqual(@as(usize, 1), std.mem.count(u8, buck, "cxx_toolchain = "));
+    // the comment is wrapped, so the words are read without its line breaks
+    const flat = try std.mem.replaceOwned(u8, a, try std.mem.replaceOwned(u8, a, buck, "\n        # ", " "), "\n    # ", " ");
+    try t.expect(std.mem.indexOf(u8, flat, "delta and gamma, in the closure, declare C of their own (static natives), so `lib`'s closure carries those archives and a dependent's link takes them from here.") != null);
+}
+
+test "a nested C++ source of the package is refused" {
+    var ar = arena();
+    defer ar.deinit();
+    const a = ar.allocator();
+    try expectRefusal(a, try mini(a, .{ .extra = &.{.{ .path = "src/alpha/native/deep/shim.cc" }} }), mini_options, "src/alpha/native/deep/shim.cc: a native source or library");
 }

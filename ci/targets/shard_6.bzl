@@ -5,7 +5,6 @@
 TARGETS = [
     "komira//release/ci:check_release_ref",
     "komira//release/ci:main_red",
-    "komira//src/kci_build:kci_build_lib_conda",
     "komira//src/komira_atomic_alias:ci",
     "komira//src/komira_atomic_alias:coverage",
     "komira//src/komira_atomic_alias:table",
@@ -88,6 +87,8 @@ TARGETS = [
     "komira//tools/build/examples/libgate_ok:libgate_ok_conda",
     "komira//tools/build/examples/rust:run_check_wired",
     "komira//tools/build/examples/s2n_tls:opt_levels",
+    "komira//tools/build/examples:hello_image",
+    "komira//tools/build/examples:hello_root_image",
     "komira//tools/build/examples:hello_tarball",
     "komira//tools/build/examples:hellopkg_conda",
     "komira//tools/build/examples:hellopkg_doc",

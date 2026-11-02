@@ -1,0 +1,71 @@
+"""The benchmark runner: for a query, it registers the dataset, runs the DuckDB
+arm and the komira arm, checks the komira answer against DuckDB's before
+anything is timed, times warm and cold runs, and fills a `BenchResult`
+(`komira_bench_report`). See README.md.
+
+| name | what it is |
+|---|---|
+| `EngineArm`, `ArmAnswer`, `RefusalArm`, `ARM_ROWS`, `ARM_REFUSED`, `ARM_BIND_FAIL`, `ARM_EXEC_FAIL` | the komira side as the runner drives it: prepare, run (rows, a named refusal or a failure), close; and the arm that refuses every query |
+| `KomiraArm`, `outcome_of_refusal`, `refusal_token`, `result_set_of`, `arrow_declared_type`, `decimal_cell`, `date32_text` | the komira engine as an arm (`run_sql`), the token a refusal is recorded under, and the engine's result batches as the typed rows (with each column's declared type) the comparison reads |
+| `QuerySpec` | one query: suite, id, dataset, text, ORDER BY keys, and the sha256 of the text |
+| `TableBinding`, `Scale`, `tables_of`, `scale_of`, `table_name_of` | a dataset manifest as named tables and a stated scale |
+| `CacheDropper`, `NoCacheDropper`, `ProcDropCaches` | the file-cache drop before a cold run |
+| `RunSettings`, `HostFacts`, `RunInputs` | what a run is told |
+| `run_queries`, `RunOutput`, `QueryOutcome`, `register_duckdb` | the run itself |
+| `measure`, `Sweeps`, `EngineRuns`, `Timed`, `CheckRun`, `check_komira`, `duckdb_check_run`, `time_komira`, `time_duckdb` | timing one query on both engines: every run, with the page faults of the engine's process around it, and the check run as the first run |
+| `process_faults` | the minor and major page faults of this process (what the komira arm reports) |
+| `format_run`, `console_text`, `js_measure_line`, `js_measure_line_of`, `write_run`, `queries_listing`, `queries_file_text` | the console report, the optional one-line JSON summary (`--js-measure-result`) and the files of a run |
+| `RunFlags`, `parse_flags`, `run_entrypoint` | the program |
+"""
+
+from .arm import (
+    ARM_BIND_FAIL,
+    ARM_EXEC_FAIL,
+    ARM_REFUSED,
+    ARM_ROWS,
+    ArmAnswer,
+    EngineArm,
+    REFUSAL_NO_ARM,
+    RefusalArm,
+)
+from .cache import CacheDropper, NoCacheDropper, ProcDropCaches
+from .entrypoint import lock_fingerprint, run_entrypoint, run_status, trim_query_text
+from .convert import RESULT_TYPE_UNSUPPORTED, arrow_declared_type, date32_text, decimal_cell, result_set_of
+from .flags import RunFlags, parse_flags, parse_order_key, usage
+from .komira_arm import (
+    KomiraArm,
+    OUTCOME_BIND_FAILURE,
+    OUTCOME_EXEC_FAILURE,
+    OUTCOME_UNSUPPORTED,
+    outcome_of_refusal,
+    refusal_token,
+)
+from .faults import process_faults
+from .measure import CheckRun, EngineRuns, KomiraCheck, Sweeps, Timed, check_komira, duckdb_check_run, measure, time_duckdb, time_komira
+from .output import (
+    COMPARISON_FILE,
+    JS_MEASURE_MAX_BYTES,
+    JS_MEASURE_PREFIX,
+    QUERIES_FILE,
+    TPCH_NOTICE,
+    comparison_text,
+    console_text,
+    format_run,
+    js_measure_line,
+    js_measure_line_of,
+    queries_file_text,
+    queries_listing,
+    write_run,
+)
+from .query import QuerySpec
+from .runner import (
+    CAUSE_NOT_RUN,
+    CAUSE_WRONG_ANSWER,
+    CAUSE_WRONG_ORDER,
+    QueryOutcome,
+    RunOutput,
+    register_duckdb,
+    run_queries,
+)
+from .settings import HostFacts, RunInputs, RunSettings
+from .tables import Scale, TableBinding, scale_of, table_name_of, tables_of

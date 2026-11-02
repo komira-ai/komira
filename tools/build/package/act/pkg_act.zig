@@ -12,7 +12,6 @@
 //!   pkg_act oci-release-manifest --out <f> --digest <f> --name <n> --version <v>
 //!       --platform <p> --file <f> --label <l> --repo <r> --from <where>
 //!   pkg_act level-run <out> <exe>
-//!   pkg_act conda-manifest-kci <out> <dir> <probe>...
 //!   pkg_act release-stamp-check --out <f> --version <v> --build-number <n> --commit <c>
 //!       --timestamp-ms <ms> --build <b> --meta <name> --meta-dir <dir> --set <f>
 //!       --license <l> --summary <s> --home <h> [--member <name> <dir>]...
@@ -134,48 +133,6 @@ fn cmdLevelRun(a: std.mem.Allocator, args: []const []const u8) u8 {
     return r.code;
 }
 
-fn cmdCondaManifestKci(a: std.mem.Allocator, args: []const []const u8) u8 {
-    if (args.len < 3) return usage("usage: pkg_act conda-manifest-kci <out> <dir> <probe>...", .{});
-    const cwd = std.fs.cwd().realpathAlloc(a, ".") catch return 2;
-    const dir = U.abs(a, cwd, args[1]) catch return 2;
-    const listing = misc.condaDirListing(a, dir) catch |e| return usage("cannot read {s}: {s}", .{ dir, @errorName(e) });
-    if (listing) |l| {
-        std.debug.print("conda_manifest_kci: {s} holds [{s}], not exactly one .conda, manifest.json and metadata.json\n", .{ dir, l });
-        return 1;
-    }
-    // A private scratch directory for the probe's TMPDIR and HOME.
-    const scratch = U.scratchRoot(a, cwd, std.posix.getenv("BUCK_SCRATCH_PATH")) catch return 2;
-    const tmp = std.fs.path.join(a, &.{ scratch, "tmp" }) catch return 2;
-    const home = std.fs.path.join(a, &.{ scratch, "home" }) catch return 2;
-    std.fs.cwd().makePath(tmp) catch return 2;
-    std.fs.cwd().makePath(home) catch return 2;
-    defer std.fs.cwd().deleteTree(scratch) catch {};
-    var env = U.envWithoutLoaderVars(a) catch return 2;
-    env.put("TMPDIR", tmp) catch return 2;
-    env.put("HOME", home) catch return 2;
-
-    const manifest = std.fs.path.join(a, &.{ dir, "manifest.json" }) catch return 2;
-    var argv = std.ArrayList([]const u8).empty;
-    argv.appendSlice(a, args[2..]) catch return 2;
-    argv.append(a, manifest) catch return 2;
-    const r = U.runCapture(a, argv.items, &env, null) catch |e| return usage("cannot run {s}: {s}", .{ args[2], @errorName(e) });
-    const all = std.mem.concat(a, u8, &.{ r.stdout, r.stderr }) catch return 2;
-    const line = U.trimNewlines(all);
-    if (r.code != 0) {
-        std.debug.print("conda_manifest_kci: kci's artifact-manifest parser refuses {s} (exit {d}): {s}\n", .{ manifest, r.code, line });
-        return 1;
-    }
-    const ok = misc.kciLineOk(a, line, dir) catch return 2;
-    if (!ok) {
-        std.debug.print("conda_manifest_kci: kci reads {s} as [{s}]; it must be one OK CONDA line ending [ metadata=metadata.json metadata_path={s}/metadata.json render-identical=yes]\n", .{ manifest, line, dir });
-        return 1;
-    }
-    const stripped = misc.stripDir(a, line, dir) catch return 2;
-    const text = std.fmt.allocPrint(a, "{s}\n", .{stripped}) catch return 2;
-    U.writeAll(std.fs.cwd(), args[0], text) catch |e| return usage("cannot write {s}: {s}", .{ args[0], @errorName(e) });
-    return 0;
-}
-
 fn cmdStamp(a: std.mem.Allocator, args: []const []const u8) u8 {
     const spec = [_]U.Spec{
         .{ .name = "out" },       .{ .name = "version" }, .{ .name = "build-number" }, .{ .name = "commit" },
@@ -256,7 +213,7 @@ pub fn main() void {
     var arena_state = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     const a = arena_state.allocator();
     const argv = std.process.argsAlloc(a) catch std.process.exit(2);
-    if (argv.len < 2) std.process.exit(usage("usage: pkg_act (bundle|kcov-guard|copy-dir|oci-release-manifest|level-run|conda-manifest-kci|release-stamp-check|release-order-check|release-order-test) ...", .{}));
+    if (argv.len < 2) std.process.exit(usage("usage: pkg_act (bundle|kcov-guard|copy-dir|oci-release-manifest|level-run|release-stamp-check|release-order-check|release-order-test) ...", .{}));
     const sub = argv[1];
     const rest = argv[2..];
     const plain = a.alloc([]const u8, rest.len) catch std.process.exit(2);
@@ -272,8 +229,6 @@ pub fn main() void {
         cmdOci(a, plain)
     else if (std.mem.eql(u8, sub, "level-run"))
         cmdLevelRun(a, plain)
-    else if (std.mem.eql(u8, sub, "conda-manifest-kci"))
-        cmdCondaManifestKci(a, plain)
     else if (std.mem.eql(u8, sub, "release-stamp-check"))
         cmdStamp(a, plain)
     else if (std.mem.eql(u8, sub, "release-order-check"))

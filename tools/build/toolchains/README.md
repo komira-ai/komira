@@ -195,3 +195,13 @@ refuses `--emit shared-lib` unless the library names itself with
 `-Xlinker -install_name` (`mojo_shared_lib`, a `.dylib`). `tools/build/tests/functional/darwin/check.sh` checks all
 of this, most of it without a macOS worker; with the keys above set, it also
 builds and runs `//tools/build/examples:hello` on the workers.
+
+On a Mac that runs Buck2 itself (`-c komira.execution=local`, no worker property
+set, no `darwin_macos_hosts`) the toolchain names the one host `local`
+(`DARWIN_LOCAL_HOST`, platforms/defs.bzl) and the compile wrapper skips its
+identity comparison, since the compile runs on this machine. The sentinel is
+produced only in that case, only alone, and is refused by the toolchain rule
+anywhere else, by the wrapper beside a real identity, and by
+`darwin_properties_refusal` in `darwin_macos_hosts`. Its action key does not
+name the host, so a result built this way is not shareable across Macs. The
+other tools of the darwin toolchain still run on linux in this change.

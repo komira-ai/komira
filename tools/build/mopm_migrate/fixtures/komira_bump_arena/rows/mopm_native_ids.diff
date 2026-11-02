@@ -1,0 +1,8 @@
+@@ -16,2 +16,3 @@
+ load("//src/komira_buffer:buildrules.mojo.lock.bzl", komira_buffer = "GRAPH")
++load("//src/komira_bump_arena:buildrules.mojo.lock.bzl", komira_bump_arena = "GRAPH")
+ load("//src/komira_clock:buildrules.mojo.lock.bzl", komira_clock = "GRAPH")
+@@ -75,2 +76,3 @@
+     "komira_buffer": komira_buffer,
++    "komira_bump_arena": komira_bump_arena,
+     "komira_clock": komira_clock,

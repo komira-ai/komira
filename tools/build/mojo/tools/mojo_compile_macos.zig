@@ -25,7 +25,9 @@
 //!   * refuses (exit 2, printing this host's fields) a host whose identity
 //!     (host_identity.zig) is not one of the `--macos-host` values, so a
 //!     result is never filed under a host toolchain the action key does not
-//!     name;
+//!     name; the one exception is a lone `--macos-host=local` (a build on
+//!     the machine running Buck2, mojo/darwin.bzl), which skips the check,
+//!     and which is refused beside any other host;
 //!   * runs <compiler>/bin/mojo with exactly this environment, nothing
 //!     inherited: PATH=<scratch>/cc:<compiler>/bin, MODULAR_HOME, CC,
 //!     MACOSX_DEPLOYMENT_TARGET, MODULAR_CACHE_DIR, XDG_CACHE_HOME, TMPDIR,
@@ -208,13 +210,12 @@ fn hostIdentityMain(arena: std.mem.Allocator, args: []const []const u8) noreturn
     std.process.exit(0);
 }
 
-/// Refuses (exit 2) unless this host's identity is one of `hosts`.
+/// Refuses (exit 2) unless this host's identity is one of `hosts`, or `hosts`
+/// is the lone local sentinel (compile_args.local_host: a build on this machine).
 fn checkHost(arena: std.mem.Allocator, hosts: []const []const u8) void {
     const v = hostFields(arena);
     const have: ?[]const u8 = if (host_identity.firstEmpty(&v) == null) host_identity.identity(arena, v) catch oom() else null;
-    if (have) |h| {
-        for (hosts) |listed| if (std.mem.eql(u8, listed, h)) return;
-    }
+    if (compile_args.hostAccepted(hosts, have)) return;
     var listed = std.ArrayList(u8).empty;
     for (hosts) |h| {
         listed.appendSlice(arena, h) catch oom();

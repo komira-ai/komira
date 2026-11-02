@@ -23,4 +23,5 @@ use	tools/build/run/sys.zig	nanosleep	1	production: the sleep the gate's platfor
 use	tools/build/run/sys.zig	monotonicMs	2	production: the clock the gate's platform interface defaults to
 use	tools/build/run/testkit.zig	sleepMs	7	fixtures: programs that block until the gate kills them (or hold for the seconds they are given); the test's own waits never sleep
 use	tools/build/selftest/rerun.zig	nanoTimestamp	1	a value used as a nonce, not waited on
+use	tools/build/selftest/bench_salt.zig	nanoTimestamp	1	a value used as a nonce, not waited on
 use	tools/build/tests/functional/watchdog/standin.zig	Thread.sleep	1	fixture: the stand-in compiler blocks until the watchdog or the tether kills it, or (the nap modes) ends by itself after its seconds: the 'disabled' case's exit 0 is the nap ending, nothing is raced

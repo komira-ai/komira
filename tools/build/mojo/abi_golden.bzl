@@ -44,6 +44,7 @@ current tree.
 """
 
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
+load("@komira//tools/build/bench_salt:bench_salt.bzl", "salted")
 
 def _impl(ctx):
     name = ctx.attrs.header_name or (ctx.label.name + ".h")
@@ -60,6 +61,7 @@ def _impl(ctx):
             name,
             ctx.attrs.constants_src if ctx.attrs.constants_src else [],
         ),
+        env = salted(),
         category = "abi_golden",
     )
     return [DefaultInfo(default_output = header)]

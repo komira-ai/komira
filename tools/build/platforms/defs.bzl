@@ -221,6 +221,64 @@ def darwin_macos_hosts():
     """
     return sorted([h for h in read_root_config("komira_re", DARWIN_HOSTS_KEY, "").split(" ") if h])
 
+# The host identity of a compile that runs on the machine running Buck2
+# instead of on a named worker. The wrapper (mojo_compile_macos) skips its
+# identity comparison for it. It holds no "-", so it is never a well-formed
+# identity (darwin_properties_refusal refuses it in `darwin_macos_hosts`), and
+# a toolchain carries it only alone, only when the execution mode is `local`
+# on a macOS arm64 host and no host is named (`darwin_toolchain_hosts`).
+DARWIN_LOCAL_HOST = "local"
+
+def darwin_toolchain_hosts(hosts, mode, host_name):
+    """The `--macos-host` values of the macOS toolchain, as `(hosts, local)`.
+
+    `hosts` is `darwin_macos_hosts()`, `mode` is `execution_mode()` and
+    `host_name` the platform-table row this machine is (None for none). With
+    hosts named the answer is those hosts, unchanged, whatever the mode (the
+    farm's action keys do not move). With none, a local build on the
+    darwin-arm64 host gets the local sentinel; anything else gets `([], False)`,
+    which the toolchain rule refuses at analysis.
+    """
+    if hosts:
+        return hosts, False
+    if mode == "local" and host_name == "darwin-arm64":
+        return [DARWIN_LOCAL_HOST], True
+    return [], False
+
+def darwin_toolchain_hosts_here():
+    """`(hosts, local, refusal)` for this checkout.
+
+    Read from the ROOT cell's config, as `darwin_macos_hosts` is and as the
+    execution platforms are registered, so a komira mounted as a cell cannot
+    decide `local` while its root registers remote platforms. The mode is read
+    only when no host is named, and a refused configuration comes back as
+    `refusal` (the toolchain rule fails with it when analysed) instead of
+    failing the load of the BUCK file.
+    """
+    hosts = darwin_macos_hosts()
+    if hosts:
+        h, local = darwin_toolchain_hosts(hosts, None, None)
+        return h, local, ""
+    mode, refusal = _mode_or_refusal(read_root_config)
+    h, local = darwin_toolchain_hosts(hosts, mode, host_row(host_info()))
+    return h, local, refusal or ""
+
+def darwin_local_hosts_refusal(hosts, local_execution):
+    """Why a toolchain's `macos_hosts` and `local_execution` cannot go together, or None.
+
+    The sentinel is alone or absent: a list that holds it beside anything
+    else is refused, as is the sentinel without `local_execution` and
+    `local_execution` without exactly the sentinel.
+    """
+    has_local = DARWIN_LOCAL_HOST in hosts
+    if has_local and hosts != [DARWIN_LOCAL_HOST]:
+        return "the local host sentinel `{}` is mixed with other hosts {}".format(DARWIN_LOCAL_HOST, hosts)
+    if has_local and not local_execution:
+        return "the local host sentinel `{}` is not allowed here (local_execution = False)".format(DARWIN_LOCAL_HOST)
+    if local_execution and not has_local:
+        return "local_execution is set but the host list {} is not the sentinel `{}`".format(hosts, DARWIN_LOCAL_HOST)
+    return None
+
 def darwin_properties_refusal(props, hosts):
     """Why a macOS property set cannot be registered, or None.
 
@@ -319,8 +377,8 @@ EXECUTION_MODES = ("auto", "local", "remote")
 # registered row of the platform table.
 _REMOTE_KEYS = tuple([PLATFORMS[n]["re_key"] for n in registered_names()])
 
-def _set_keys():
-    return [k for k in _REMOTE_KEYS if read_config("komira_re", k, "").strip()]
+def _set_keys(read = read_config):
+    return [k for k in _REMOTE_KEYS if read("komira_re", k, "").strip()]
 
 # The `[buck2_re_client]` keys that name a remote-execution service. A
 # checkout that names one but no `[komira_re]` worker property set was meant
@@ -329,56 +387,67 @@ def _set_keys():
 # its own.
 _RE_CLIENT_KEYS = ("address", "engine_address", "cas_address", "action_cache_address")
 
-def _refuse_retired_keys():
+def _retired_refusal(read = read_config):
+    """Why a retired or reserved `[komira_re]` key refuses the build, or None. `read` is read_config or read_root_config."""
     for old in sorted(_RETIRED_KEYS):
-        if read_config("komira_re", old, "").strip():
+        if read("komira_re", old, "").strip():
             new = _RETIRED_KEYS[old]
-            fail(("`[komira_re] {}` is no longer read: komira registers one execution platform " +
-                  "per (os, cpu) and says nothing about worker classes or NUMA placement. {}").format(
+            return (("`[komira_re] {}` is no longer read: komira registers one execution platform " +
+                     "per (os, cpu) and says nothing about worker classes or NUMA placement. {}").format(
                 old,
                 "Rename it to `{}` (one property set for every action of that platform).".format(new) if new else "Delete it.",
             ))
     for key in sorted(_RESERVED_KEYS):
-        if read_config("komira_re", key, "").strip():
-            fail(("`[komira_re] {}` is reserved for the {} platform, which komira declares " +
-                  "(tools/build/platforms/table.bzl) but does not build for yet, so no execution " +
-                  "platform reads it. Delete it.").format(key, _RESERVED_KEYS[key]))
+        if read("komira_re", key, "").strip():
+            return (("`[komira_re] {}` is reserved for the {} platform, which komira declares " +
+                     "(tools/build/platforms/table.bzl) but does not build for yet, so no execution " +
+                     "platform reads it. Delete it.").format(key, _RESERVED_KEYS[key]))
+    return None
 
 def _host_key():
     """The `[komira_re]` key of this client's own platform (the linux one on a host no row matches)."""
     name = host_row(host_info())
     return PLATFORMS[name]["re_key"] if name != None else LINUX_PROPERTIES_KEY
 
-def execution_mode():
-    """`local` or `remote`: where a standalone checkout's actions run."""
-    _refuse_retired_keys()
-    mode = read_config("komira", "execution", "auto").strip() or "auto"
+def _mode_or_refusal(read):
+    """`(mode, None)` or `(None, why the configuration is refused)`; `read` is read_config or read_root_config."""
+    refusal = _retired_refusal(read)
+    if refusal:
+        return None, refusal
+    mode = read("komira", "execution", "auto").strip() or "auto"
     if mode not in EXECUTION_MODES:
-        fail("`[komira] execution`: expected one of {}, got `{}`".format(EXECUTION_MODES, mode))
+        return None, "`[komira] execution`: expected one of {}, got `{}`".format(EXECUTION_MODES, mode)
     if mode != "auto":
-        return mode
+        return mode, None
     host_name = host_row(host_info())
-    set_keys = _set_keys()
+    set_keys = _set_keys(read)
     if host_name == None and set_keys:
         # No row runs here, so nothing can run locally: a set names the
         # service that builds for a platform stated with --target-platforms.
-        return "remote"
+        return "remote", None
     if host_name != None and PLATFORMS[host_name]["re_key"] in set_keys:
-        return "remote"
+        return "remote", None
     if set_keys:
         # Another platform's set only: this client's own platform builds here.
-        return "local"
-    named = [k for k in _RE_CLIENT_KEYS if read_config("buck2_re_client", k, "").strip()]
+        return "local", None
+    named = [k for k in _RE_CLIENT_KEYS if read("buck2_re_client", k, "").strip()]
     if named:
-        fail(("`[buck2_re_client] {}` names a remote-execution service, but `[komira_re]` " +
-              "names no worker property set ({}), so it is not clear whether to build here " +
-              "or there. Set `[komira_re] {}` to build remotely (.buckconfig.local.example), " +
-              "or pass `-c komira.execution=local` to build on this machine.").format(
+        return None, (("`[buck2_re_client] {}` names a remote-execution service, but `[komira_re]` " +
+                       "names no worker property set ({}), so it is not clear whether to build here " +
+                       "or there. Set `[komira_re] {}` to build remotely (.buckconfig.local.example), " +
+                       "or pass `-c komira.execution=local` to build on this machine.").format(
             named[0],
             ", ".join(_REMOTE_KEYS),
             _host_key(),
         ))
-    return "local"
+    return "local", None
+
+def execution_mode():
+    """`local` or `remote`: where a standalone checkout's actions run."""
+    mode, refusal = _mode_or_refusal(read_config)
+    if refusal:
+        fail(refusal)
+    return mode
 
 def _remote_properties(key):
     """The property set of `[komira_re] <key>`, or None; remote mode requires this client's own platform's."""
@@ -412,3 +481,36 @@ def komira_default_execution_platforms(name, visibility = None):
 # Each rule and macro a BUCK file calls declares its package's doc_tree
 # (tools/build/lint/doc_tree.bzl), so no BUCK file names one.
 komira_default_execution_platforms = declares_docs(komira_default_execution_platforms)
+
+def tool_exec_row(mode, host_name):
+    """The row the build tools run on, given `execution_mode()` (None for a refused configuration) and the platform-table row this machine is (None for none).
+
+    `darwin-arm64` only for a local build on the darwin-arm64 host, whose one
+    execution platform that is; `linux-x86_64` otherwise (remote execution,
+    whatever the client's own platform; a Linux client; a refused
+    configuration, reported where it is read), which is what every tool states
+    today: the actions, their configuration and their keys are unchanged.
+    """
+    if mode == "local" and host_name == "darwin-arm64":
+        return "darwin-arm64"
+    return "linux-x86_64"
+
+def tool_exec_name():
+    """The row the build tools (the unpackers, zig, the wrappers, the lints) run on; see `tool_exec_row`.
+
+    The mode is read from the ROOT cell's config, as the macOS toolchain's host
+    mode is (`darwin_toolchain_hosts_here`), so the two never disagree.
+    """
+    mode, _ = _mode_or_refusal(read_root_config)
+    return tool_exec_row(mode, host_row(host_info()))
+
+# The constraints of the execution platform the build tools run on, for the
+# `exec_compatible_with` of a target whose actions run a tool the build itself
+# produces or unpacks (see `tool_exec_name`). A target whose binary is a Linux
+# product (kcov, the LLVM branch-coverage tools, the tests of Linux-only
+# behaviour) states LINUX_X86_64 instead.
+TOOL_EXEC = constraints(tool_exec_name())
+
+def tool_unpack_triple():
+    """The zig target of a tool that runs on `TOOL_EXEC` (`x86_64-linux-musl`, or `aarch64-macos` for a local build on a Mac)."""
+    return row(tool_exec_name())["unpack_triple"]

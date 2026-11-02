@@ -106,13 +106,13 @@ def missing(required, reached):
 # ci/targets.bzl is a small loader of SHARDS files, ci/targets/shard_<n>.bzl, each
 # holding the rows of the packages that hash to it (shard_of). A package's rows
 # stay together and adding a package moves no other package's rows; the hash,
-# not the package's name, spreads them, so no prefix (`komira_`, `kci_`) or
+# not the package's name, spreads them, so no prefix (`komira_`) or
 # top-level directory (`src/` holds most) can fill one shard. Raising SHARDS
 # re-spreads every row (the generator rewrites them all).
 SHARDS = 8
 
-# A generated file stays under this many lines (CLAUDE.md: "files under 1000
-# lines"); `shard_findings` fails the guard before a shard reaches it.
+# A generated file stays under this many lines (AGENTS.md, R12 and M15: "Files
+# stay under 1000 lines"); `shard_findings` fails the guard before a shard reaches it.
 LINE_LIMIT = 1000
 
 REGENERATE = 'out=$(./buck2 bxl komira//tools/build/ci/targets.bxl:generate) && [ -d "$out" ] && [ "$out" != / ] && cp -rL --no-preserve=mode "$out"/. ci/'

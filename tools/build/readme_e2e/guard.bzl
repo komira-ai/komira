@@ -16,13 +16,19 @@ def moved_packages(paths):
     return sorted(names)
 
 def findings(paths, covered):
-    """What is out of step between the moved packages of `paths` and the names in `covered`, as one text; "" when none."""
+    """What is out of step between the moved packages of `paths` and the names in `covered`, as one text; "" when none.
+
+    Every `src/<name>/mopm.toml` must have a README e2e target (`covered` is PACKAGES of
+    release/readme_e2e/packages.bzl, the members of the release), and every target a `mopm.toml`.
+    `mopm stage --workspace-root src` packs every `src/<name>/mopm.toml`, and `//release:mopm_artifacts`
+    builds the members, so a `mopm.toml` that is not a member makes the release's stage fail.
+    """
     moved = moved_packages(paths)
     lacking = [m for m in moved if m not in covered]
     stale = sorted([c for c in covered if c not in moved])
     problems = []
     if lacking:
-        problems.append("{} moved package(s) have no README e2e target: {}. Add each to PACKAGES in release/readme_e2e/packages.bzl (its version is the one in its mopm.toml)".format(len(lacking), ", ".join(lacking)))
+        problems.append("{} moved package(s) have no README e2e target: {}. Add each to PACKAGES in release/readme_e2e/packages.bzl (its version is the one in its mopm.toml), or delete its mopm.toml: `mopm stage --workspace-root src` packs every one".format(len(lacking), ", ".join(lacking)))
     if stale:
         problems.append("{} README e2e target(s) are for a package with no src/<name>/mopm.toml: {}. Delete each from PACKAGES in release/readme_e2e/packages.bzl".format(len(stale), ", ".join(stale)))
     return "; ".join(problems)

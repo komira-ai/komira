@@ -116,10 +116,7 @@ for the execution platform of the action that runs it (macOS for a
 darwin-arm64 library; analysis refuses a mismatch, `readme.bzl`). It
 reads Markdown through the shared Zig module
 [`//tools/build/markdown`](../markdown/BUCK) (CommonMark fences, code spans,
-links). kci ships the same tool beside its executable (`bin/kci` `helpers`)
-and runs it on an installed README, so the programs an ENV validation runs
-are the ones `[tests][readme]` ran (`src/kci_validate`, whose test compares
-them with `[tests][readme][generated]`, made from `[tests][readme][file]`). Only
+links). Only
 `buildtools.doc_links` (the link check) still reads Markdown through a Mojo
 reader, the `markdown` of the package's Mojo library `readme_examples`,
 until it moves to the Zig module.
@@ -400,7 +397,7 @@ binary's `helpers` (`{file name: target}`, e.g. a `zig_exe`) sit beside it
 there, and in `bin/` of its bundle, where it finds them next to its own
 executable ([helpers.bzl](helpers.bzl)). A `mojo_helper_check` (same file)
 runs a helper's copy in `[runnable]` as a build action, so a binary that lost
-it, or a copy that does not start, is red (`//bin/kci:runnable_readme_examples`).
+it, or a copy that does not start, is red.
 (`act launch` ([`act.zig`](tools/act.zig)) starts a binary from outside its
 runnable directory, pointing the loader at the toolchain's `lib/`.) The list of
 libraries is checked against what the loader actually maps during a run
@@ -1134,7 +1131,11 @@ that library in its Mojo deps closure. Each C archive has one owner, the
 `THIRD_PARTY_OWNERS` row of its package
 ([`one_definition/libraries.bzl`](../one_definition/libraries.bzl)) for a
 vendored one, with the symbol prefix of its renamed build (`komira_awslc_`
-for aws-lc, whose owner is `komira_crypto`). Every `mojo_library` outside
+for aws-lc, whose owner is `komira_awslc`, the package that builds the archive that
+komira_crypto and komira_uuid link). A package built with `mojo_package`
+is named by its adopted label (`//src/<name>:<name>`, adopt.bzl), though the
+file its dependents import is the package's `:lib`; the closure holds that
+label. Every `mojo_library` outside
 `src/tests/` carries two validations
 ([`native_reach.bzl`](native_reach.bzl)), which fail its build and the build
 of every target holding it:
@@ -1143,7 +1144,7 @@ of every target holding it:
   `deps` link, with every archive those need, has its owner in the closure
   or is its own. A third_party archive with no owner row, or a row with no
   owner, is refused. So `komira_http_core`, whose `//third_party/s2n-tls:s2n`
-  needs aws-lc, depends on `komira_crypto`, and a library calling
+  needs aws-lc, depends on `komira_crypto` (which depends on `komira_awslc`), and a library calling
   `komira_fs`'s shim depends on `komira_fs`, never on `:komira_fs_posix`.
 - `native_reach_calls`, a run of the Zig tool
   [`native_reach/`](native_reach/README.md): no string literal in its

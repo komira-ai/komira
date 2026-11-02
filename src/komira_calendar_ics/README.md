@@ -63,12 +63,12 @@ the rest of the calendar is still written.
 
 | name | file | what it is |
 |---|---|---|
-| `read_ics`, `IcsImport` | [read.mojo](https://github.com/komira-ai/komira/blob/main/src/komira_calendar_ics/read.mojo) | a file to events and a report; raises when the input as a whole is refused |
-| `write_ics`, `IcsExport`, `PRODID` | [write.mojo](https://github.com/komira-ai/komira/blob/main/src/komira_calendar_ics/write.mojo) | events to a file (`text`) and the uids of the series left out because they recur on no day (`skipped`); raises for an event that breaks the model or a written event naming an unknown zone |
-| `IcsEvent` | [read_event.mojo](https://github.com/komira-ai/komira/blob/main/src/komira_calendar_ics/read_event.mojo) | an event and its one-occurrence edits |
-| `IcsReport`, `IcsRefusal`, `IcsDropped`, `IcsCode`, `MAX_DROPPED_KINDS`, `OVERFLOW_DETAIL` | [report.mojo](https://github.com/komira-ai/komira/blob/main/src/komira_calendar_ics/report.mojo) | the report: `refused` and `dropped`, `refuse`, `drop`, `merge`, `is_clean`; the refusal codes; the cap on itemised kinds and the detail of the entry past it |
-| `ZoneSource`, `ZoneinfoDirectory`, `ZoneTable` | [zones.mojo](https://github.com/komira-ai/komira/blob/main/src/komira_calendar_ics/zones.mojo) | where zone rules come from; `ZoneTable.add`, `zone` |
-| `IcsLimits` | [tree.mojo](https://github.com/komira-ai/komira/blob/main/src/komira_calendar_ics/tree.mojo) | input octets, line octets and components per import |
+| `read_ics`, `IcsImport` | [read.mojo](https://github.com/komira-ai/komira/blob/main/src/komira_calendar_ics/src/komira_calendar_ics/read.mojo) | a file to events and a report; raises when the input as a whole is refused |
+| `write_ics`, `IcsExport`, `PRODID` | [write.mojo](https://github.com/komira-ai/komira/blob/main/src/komira_calendar_ics/src/komira_calendar_ics/write.mojo) | events to a file (`text`) and the uids of the series left out because they recur on no day (`skipped`); raises for an event that breaks the model or a written event naming an unknown zone |
+| `IcsEvent` | [read_event.mojo](https://github.com/komira-ai/komira/blob/main/src/komira_calendar_ics/src/komira_calendar_ics/read_event.mojo) | an event and its one-occurrence edits |
+| `IcsReport`, `IcsRefusal`, `IcsDropped`, `IcsCode`, `MAX_DROPPED_KINDS`, `OVERFLOW_DETAIL` | [report.mojo](https://github.com/komira-ai/komira/blob/main/src/komira_calendar_ics/src/komira_calendar_ics/report.mojo) | the report: `refused` and `dropped`, `refuse`, `drop`, `merge`, `is_clean`; the refusal codes; the cap on itemised kinds and the detail of the entry past it |
+| `ZoneSource`, `ZoneinfoDirectory`, `ZoneTable` | [zones.mojo](https://github.com/komira-ai/komira/blob/main/src/komira_calendar_ics/src/komira_calendar_ics/zones.mojo) | where zone rules come from; `ZoneTable.add`, `zone` |
+| `IcsLimits` | [tree.mojo](https://github.com/komira-ai/komira/blob/main/src/komira_calendar_ics/src/komira_calendar_ics/tree.mojo) | input octets, line octets and components per import |
 
 ## Examples
 
@@ -153,3 +153,21 @@ assert_equal(encode_json(back.events[0].event), encode_json(events[0].event))
 `src/tests/conformance/komira_calendar_ics_conformance` holds the RFC 5545
 examples (§3.6.1, §4, every §3.8.5.3 RRULE, the §3.6.5 VTIMEZONE) and files
 in the shape Google, Apple, Outlook and Thunderbird export.
+
+## Build files
+
+This package is built with buildrules' `mojo_package` and packaged for mopm as `komira_calendar_ics`, version 0.1.0 (`mopm.toml`). The library is `src/komira_calendar_ics/`, its tests are `tests/`. It depends on komira_calendar, komira_calendar_proto, komira_content_line and komira_datetime, sibling directories (`[dependencies]` of `mopm.toml`), so the `.conda` of this package records `mojo-komira_calendar >=0.1,<0.2`, `mojo-komira_calendar_proto >=0.1,<0.2`, `mojo-komira_content_line >=0.1,<0.2` and `mojo-komira_datetime >=0.1,<0.2` as dependencies and holds none of those packages' files: installing `komira_calendar_ics` installs them with it. The files that are not sources:
+
+| file | what |
+|---|---|
+| `mopm.toml` | the mopm manifest: name, version, the Mojo version, the dependencies and where the library and its tests are |
+| `mopm.lock` | the toolchain pins and the path dependencies (no registry is reached: every dependency is a sibling) |
+| `mopm-toolchain.toml` | the exact mopm and Mojo versions the build uses |
+| `coverage_floor.txt` | `lines NN.NN` and `branches NN.NN`: the least line and branch coverage `:coverage` may measure; `:coverage_floor` fails when either falls below, and above it passes and prints a hint to raise the figure |
+| `buildrules.mojo.lock.bzl`, `buildrules.mojo.bzl` | written by `buildrules mojo sync` from the files above and from the manifests of the dependencies; `buildrules mojo check` fails when they are stale |
+
+`:lib` is the library file and exists only once every test of `tests/` has passed. After any change to a source, a test, or a manifest of this package or of a dependency, run `buildrules mojo sync`, commit what it writes, and build `komira//src/komira_calendar_ics:lib` on the farm. A test file that the sync has not listed is not run: run the sync after adding one.
+
+`:conda` is buildrules' `mojo_conda` over `:lib`: the `.conda` of the mopm package (`mojo-komira_calendar_ics-0.1.0-mojo1.0.0_0.conda`), which therefore exists only once the tests have passed. Publishing it (`mopm publish`) uploads, so it is a step of a CI job that takes that file, not a build action.
+
+`:komira_calendar_ics` is `:lib` as komira's Mojo rules take it (`mojo_adopted_library`). Its `deps` are the adopted target of each package in `[dependencies]`, and the rule refuses a list that is not the closure `:lib` was built from. It also compiles and runs the README's examples above (`[tests][readme]`) against `:lib`; the tests are not run again.

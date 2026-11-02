@@ -1,0 +1,47 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The per-worker operators a join pipeline constructs over the join probe:
+# `JoinProbeOpAdapter`, the single-key probe a driver allocates per worker
+# (it forwards to `JoinProbeOp`); the probe cascades `MultiProbeOpAdapter`
+# (single-key `JoinProbeOp`s) and `MultiKeyProbeCascadeAdapter` (composite
+# `MultiKeyJoinProbeOp`s), which run several joins over one morsel in turn;
+# and the LEFT-built SEMI / ANTI join's marking pass, `MarkSemiAntiProbeOp`,
+# over `FinalizedHashIndex` (a finished single-INT64-key table with a matched
+# flag per build row).
+mojo_library(
+    name = "komira_op_join_sinks",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/komira_arrow:komira_arrow",
+        "//src/komira_async:komira_async",
+        "//src/komira_async_api:komira_async_api",
+        "//src/komira_atomic_alias:komira_atomic_alias",
+        "//src/komira_batch_eval:komira_batch_eval",
+        "//src/komira_buffer:komira_buffer",
+        "//src/komira_collections:komira_collections",
+        "//src/komira_column_kernels:komira_column_kernels",
+        "//src/komira_counters:komira_counters",
+        "//src/komira_dynamic_filter:komira_dynamic_filter",
+        "//src/komira_engine_runtime:komira_engine_runtime",
+        "//src/komira_exec_types:komira_exec_types",
+        "//src/komira_join_assembly:komira_join_assembly",
+        "//src/komira_metrics:komira_metrics",
+        "//src/komira_morsel:komira_morsel",
+        "//src/komira_op_fused_kernels:komira_op_fused_kernels",
+        "//src/komira_op_join_build:komira_op_join_build",
+        "//src/komira_op_join_probe:komira_op_join_probe",
+        "//src/komira_op_sort:komira_op_sort",
+        "//src/komira_operator_api:komira_operator_api",
+        "//src/komira_physical_plan:komira_physical_plan",
+        "//src/komira_plan_expr:komira_plan_expr",
+        "//src/komira_plan_ir:komira_plan_ir",
+        "//src/komira_simd:komira_simd",
+        "//src/komira_udf:komira_udf",
+    ],
+    test_srcs = [
+        "tests/test_join_probe_op_adapter.mojo",
+        "tests/test_mark_semi_anti.mojo",
+        "tests/test_multi_probe_op_adapter.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)
