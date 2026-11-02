@@ -1096,7 +1096,7 @@ runtime's C++ internals.
 `archive_files` ([`archive.bzl`](archive.bzl)) takes named files out of a
 pinned source archive, with CMake-style template substitution, for
 third-party code built from source: see
-[`third_party/snappy`](../../../third_party/snappy) (snappy 1.2.2, called from
+[`third_party/snappy`](../../../third_party/snappy) (snappy 1.3.1, called from
 Mojo in [`../examples/snappy`](../examples/snappy)). With `one_tree = True`
 its output is one directory holding every file at its archive path, for code
 that includes its own headers by relative path; `tree_dirs` names directories

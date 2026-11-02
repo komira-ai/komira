@@ -6,18 +6,18 @@ load("@komira//tools/build/mojo:download.bzl", "pinned_file")
 load("@komira//tools/build/mojo:toolchain.bzl", "zig_test")
 load("@komira//tools/build/native:defs.bzl", "checked_cxx_library", "prefix_header", "prefixed_archive_check")
 
-# google/snappy 1.2.2, BSD-3-Clause (COPYING in the archive).
+# google/snappy 1.3.1, BSD-3-Clause (COPYING in the archive).
 pinned_file(
-    name = "snappy-1.2.2.tar.gz",
-    url = "https://github.com/google/snappy/archive/refs/tags/1.2.2.tar.gz",
-    sha256 = "90f74bc1fbf78a6c56b3c4a082a05103b3a56bb17bca1a27e052ea11723292dc",
-    size_bytes = 1108618,
+    name = "snappy-1.3.1.tar.gz",
+    url = "https://github.com/google/snappy/archive/refs/tags/1.3.1.tar.gz",
+    sha256 = "893f708a0bf4b5529d555ffcee390e940e932fcf90261f682604475a76cd0247",
+    size_bytes = 1116583,
 )
 
 archive_files(
     name = "src",
     exec_compatible_with = LINUX_X86_64,
-    archive = ":snappy-1.2.2.tar.gz",
+    archive = ":snappy-1.3.1.tar.gz",
     files = [
         "COPYING",
         "snappy-c.cc",
@@ -30,13 +30,13 @@ archive_files(
         "snappy.cc",
         "snappy.h",
     ],
-    strip_prefix = "snappy-1.2.2",
+    strip_prefix = "snappy-1.3.1",
     # What CMake's configure_file writes for this platform.
     substitutions = {
         "${HAVE_SYS_UIO_H_01}": "1",
         "${PROJECT_VERSION_MAJOR}": "1",
-        "${PROJECT_VERSION_MINOR}": "2",
-        "${PROJECT_VERSION_PATCH}": "2",
+        "${PROJECT_VERSION_MINOR}": "3",
+        "${PROJECT_VERSION_PATCH}": "1",
     },
     templates = {"snappy-stubs-public.h": "snappy-stubs-public.h.in"},
 )
@@ -48,7 +48,7 @@ archive_files(
 archive_files(
     name = "testdata",
     exec_compatible_with = LINUX_X86_64,
-    archive = ":snappy-1.2.2.tar.gz",
+    archive = ":snappy-1.3.1.tar.gz",
     one_tree = True,
     files = [
         "COPYING",
@@ -67,7 +67,7 @@ archive_files(
         "testdata/plrabn12.txt",
         "testdata/urls.10K",
     ],
-    strip_prefix = "snappy-1.2.2",
+    strip_prefix = "snappy-1.3.1",
     visibility = ["PUBLIC"],
 )
 
@@ -107,9 +107,9 @@ staged_files(
 archive_files(
     name = "config_template",
     exec_compatible_with = LINUX_X86_64,
-    archive = ":snappy-1.2.2.tar.gz",
+    archive = ":snappy-1.3.1.tar.gz",
     files = ["cmake/config.h.in"],
-    strip_prefix = "snappy-1.2.2",
+    strip_prefix = "snappy-1.3.1",
 )
 
 # The two headers read as text (config_test.zig says what it catches). The
