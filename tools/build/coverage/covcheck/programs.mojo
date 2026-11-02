@@ -16,7 +16,8 @@ or, the same list as an array of tables:
 reachable only through the built program, which the census cannot
 instrument, so such a file is PROGRAM SOURCE: it is left out of the line and
 branch numbers (and is no `UnmeasuredFile`), and it is a finding,
-`UnrunProgram`, when no test target of the package runs the built program.
+`UnrunProgram`, when no test target of the package depends on the built
+program.
 The floor is unchanged: this says what the floor measures.
 
 What "runs" means is evidence, not a reading of the program's text: the
@@ -30,8 +31,9 @@ A `.mojo` path that no manifest names stays ordinary source, and a package
 with no `mopm.toml` has no program. A manifest is read for the packages
 under analysis only, and read strictly: a `bins` that is not an array of
 entries with a quoted `name` and `path`, a `path` that is not a relative
-`.mojo` path of the repository, a `[targets.bins]` table, `bins` given
-twice or in both shapes, an unterminated value: each is an error naming the
+`.mojo` path of the repository, two entries naming one path, a
+`[targets.bins]` table, a quoted table name, `bins` given twice or in both
+shapes, an unterminated value: each is an error naming the
 manifest and line, never a silent exclusion. Everything else in a manifest
 is skipped, multi-line strings included.
 """
@@ -191,7 +193,10 @@ def _statements(text: String, origin: String) raises -> List[_Stmt]:
             var skip = 2 if array else 1
             if not line.endswith("]]" if array else "]") or line.byte_length() < 2 * skip:
                 raise Error(_where(origin, no) + String("a table header that does not end with its brackets: ") + line)
-            out.append(_Stmt(_ARRAY if array else _TABLE, _squeeze(substr(line, skip, line.byte_length() - skip)), String(""), no))
+            var header = _squeeze(substr(line, skip, line.byte_length() - skip))
+            if header.find("\"") >= 0 or header.find("'") >= 0:
+                raise Error(_where(origin, no) + String("a quoted table name is not a shape this tool reads: ") + line)
+            out.append(_Stmt(_ARRAY if array else _TABLE, header, String(""), no))
             continue
         var eq = _find_eq(line)
         if eq < 0:
@@ -464,6 +469,7 @@ def program_sources(repo: RepoFiles, manifests: Dict[String, String], packages: 
     not in the repository is an error: the manifest and the checkout
     disagree."""
     var out = List[Program]()
+    var named = Dict[String, Bool]()
     for i in range(len(packages)):
         var pkg = packages[i]
         var dir = String("") if pkg == String("(root)") else pkg + String("/")
@@ -475,6 +481,9 @@ def program_sources(repo: RepoFiles, manifests: Dict[String, String], packages: 
             var p = dir + bins[k].path
             if not repo.has_file(p):
                 raise Error(manifest + String(": bins entry `") + bins[k].name + String("` names ") + p + String(", which is not a file of the repository"))
+            if p in named:
+                raise Error(manifest + String(": bins entry `") + bins[k].name + String("` names ") + p + String(", which another bins entry names too"))
+            named[p] = True
             out.append(Program(pkg, bins[k].name, p, manifest))
     return out^
 
@@ -503,7 +512,7 @@ def unrun_findings(programs: List[Program], runs: Dict[String, Bool]) -> List[Fi
         out.append(Finding(
             String(UNRUN_PROGRAM), p.package, String(""), -1, -1, p.path, 0,
             String("bins entry `") + p.name + String("` of ") + p.manifest
-            + String(" is program source, left out of the numbers, and no test target of the package runs its built program:")
+            + String(" is program source, left out of the numbers, and no test target of the package depends on its built program:")
             + String(" add a test (a mojo_test whose data is the program's binary target) that runs it"),
         ))
     return out^

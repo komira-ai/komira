@@ -543,10 +543,11 @@ if [ "$N_REPORTS" -gt 0 ]; then
     # A failing query is an error, never "none run".
     : >"$OUT/program_runs.txt"
     ppats=""
+    # The root package is the empty line of measured_packages.txt (komira//:x).
     while IFS= read -r p; do
-        [ -f "$p/mopm.toml" ] || continue
+        [ -f "${p:-.}/mopm.toml" ] || continue
         case "$p" in *[!A-Za-z0-9_./+-]*) die "package directory '$p' holds a character a target pattern cannot" ;; esac
-        if [ "$p" = . ]; then ppats="$ppats //:"; else ppats="$ppats //$p:"; fi
+        ppats="$ppats //$p:"
     done <"$OUT/measured_packages.txt"
     if [ -n "$ppats" ]; then
         tdeps="deps(kind('^mojo_test(_run)?_rule\$', set($ppats )))"

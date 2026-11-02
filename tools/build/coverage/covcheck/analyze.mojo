@@ -19,6 +19,10 @@ and the findings: the one computation both `covcheck report` and
    records and its mutants are dropped, and step 4 skips it, so it is
    neither measured nor counted as a file no test compiled, and is in no
    floor. `Analysis.generated_paths` lists them.
+3c. A file a package's mopm.toml names in `[targets] bins` is program
+   source (programs.mojo) and leaves the run the same way;
+   `Analysis.program_paths` lists them, and step 7 raises `UnrunProgram`
+   for one no test target depends on (`Options.program_runs`).
 4. Each kept file's source is read for exemption markers (exempt.mojo).
    Then the full source: a package is measured when a report names a kept
    file in it (with or without records), and the gated package

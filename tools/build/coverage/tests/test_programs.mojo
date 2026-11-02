@@ -206,6 +206,9 @@ def test_shapes_that_are_refused() raises:
     _refused(String("[targets]\nbins = [{ name = \"a\", path = \"bins/a.mojo\" }\n"), String("never closed"))
     _refused(String("[targets]\nbins = [{ name = \"a\", path = \"bins/a.mojo\"\n]\n"), String("never closed"))
     _refused(String("[package]\nnotes = \"\"\"\nno end\n"), String("never closed"))
+    # A quoted table name, which would hide `bins` from this reader.
+    _refused(String("[\"targets\"]\nbins = []\n"), String("quoted table name"))
+    _refused(String("[[targets.'bins']]\nname = \"a\"\npath = \"bins/a.mojo\"\n"), String("quoted table name"))
 
 
 def test_entries_must_name_and_path() raises:
@@ -300,7 +303,7 @@ def test_program_nothing_runs_is_a_finding() raises:
     assert_equal(f.line, 0)
     assert_true(f.message.find("`tool`") >= 0, f.message)
     assert_true(f.message.find("src/p/mopm.toml") >= 0, f.message)
-    assert_true(f.message.find("no test target of the package runs its built program") >= 0, f.message)
+    assert_true(f.message.find("no test target of the package depends on its built program") >= 0, f.message)
     assert_true(f.message.find("add a test") >= 0, f.message)
 
 
@@ -395,6 +398,12 @@ def test_a_program_a_report_names_is_still_left_out() raises:
     # Without evidence the same reports still raise exactly the finding.
     var c = analyze(l, List[Input](), _repo(), _held(), _sources(), _enforce())
     assert_equal(_kinds(c), "UnrunProgram@src/p/bins/tool.mojo")
+    # A surviving mutant of the program is dropped with it: no MutantSurvived.
+    var m = List[Input]()
+    m.append(Input(String("mutants"), String(""), String("m.tsv"), String("src/p/bins/tool.mojo\t2\tsurvived\top\td\n")))
+    var d = analyze(l, m, _repo(), _held(), _sources(), _enforce(_ran()))
+    assert_equal(_kinds(d), "")
+    assert_equal(len(d.mutants), 0)
 
 
 def test_the_hold_is_read_without_the_program() raises:
@@ -423,6 +432,21 @@ def test_a_bad_manifest_fails_the_run() raises:
     except e:
         raised = True
         assert_true(String(e).find("src/p/bins/gone.mojo, which is not a file of the repository") >= 0, String(e))
+    assert_true(raised)
+    # Two entries naming one file.
+    var twice = String(MANIFEST).replace(
+        "bins = [{ name = \"tool\", path = \"bins/tool.mojo\" }]",
+        "bins = [{ name = \"tool\", path = \"bins/tool.mojo\" }, { name = \"again\", path = \"bins/tool.mojo\" }]",
+    )
+    raised = False
+    try:
+        _ = analyze(_report(), List[Input](), _repo(), _held(), _sources(twice), _enforce(_ran()))
+    except e:
+        raised = True
+        assert_equal(
+            String(e),
+            "src/p/mopm.toml: bins entry `again` names src/p/bins/tool.mojo, which another bins entry names too",
+        )
     assert_true(raised)
 
 
