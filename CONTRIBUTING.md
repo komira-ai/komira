@@ -30,16 +30,13 @@ targets you changed is the evidence a review starts from.
 
 ## What a change should carry
 
-- **A test that fails without the change.** A bug fix ships with the test that
-  reproduced the bug; name it in the library's `test_srcs`, or it never runs.
-- **Docs that match the code.** If you change what a library does, change its
-  `README.md` and any design doc that describes it in the same pull request.
-- **Mojo that follows the safety rules** in
-  [docs/design/mojo_safety_and_idioms.md](docs/design/mojo_safety_and_idioms.md):
-  no pointer type in a public API, and every `UnsafePointer` carries a
-  `# SAFETY:` comment that says why the access is sound.
-- **One subject per pull request**, with a description that says what changed,
-  why, and how it was tested.
+The rules every change is written to, and that review checks it against, are in
+[AGENTS.md](AGENTS.md), each with an id; that file is their one source. The ones
+a first pull request most often meets are a test that fails without the change
+and is wired into its library's `test_srcs` (T5, T6), docs that match the code
+in the same pull request (T19, P10), the Mojo pointer rules (M1 to M15), and one
+subject per pull request with a description that says what changed, why, and
+which tests show it (P7, P2, T8).
 
 ## Pull requests from forks
 
