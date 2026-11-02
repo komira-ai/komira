@@ -533,13 +533,14 @@ N_RECORDS=$(grep -c . "$OUT/branch_records.txt" || true)
 # 5. The report.
 if [ "$N_REPORTS" -gt 0 ]; then
     # The program sources some test target runs (tools/build/coverage/README.md,
-    # "Program sources"): of each measured package with a mopm.toml, the `srcs` of
-    # every program target (a mojo_binary_rule, or a mojo_unit_rule of kind `bin`)
-    # that a test target of the package (a mojo_test_rule or mojo_test_run_rule)
-    # depends on, as repository paths, one per line. The build graph is the
-    # evidence: no file's text is searched for a program's name. covcheck reads
-    # which files are programs from each manifest; this file only says which of them
-    # a test target depends on. A failing query is an error, never "none run".
+    # "Program sources"): of each measured package with a mopm.toml, the source
+    # inputs of every program target (a mojo_binary_rule, or a mojo_unit_rule of
+    # kind `bin`) that a test target of the package (a mojo_test_rule or
+    # mojo_test_run_rule) depends on, as buck2's `inputs()` prints them: repository
+    # paths, one per line. The build graph is the evidence: no file's text is
+    # searched for a program's name. covcheck reads which files are programs from
+    # each manifest; this file only says which of them a test target depends on.
+    # A failing query is an error, never "none run".
     : >"$OUT/program_runs.txt"
     ppats=""
     while IFS= read -r p; do
@@ -549,24 +550,16 @@ if [ "$N_REPORTS" -gt 0 ]; then
     done <"$OUT/measured_packages.txt"
     if [ -n "$ppats" ]; then
         tdeps="deps(kind('^mojo_test(_run)?_rule\$', set($ppats )))"
-        pquery="(kind('^mojo_binary_rule\$', $tdeps) + attrfilter('kind', 'bin', kind('^mojo_unit_rule\$', $tdeps))) intersect set($ppats )"
-        say "buck2 uquery \"$pquery\" --output-attribute '^srcs\$'"
+        pquery="inputs((kind('^mojo_binary_rule\$', $tdeps) + attrfilter('kind', 'bin', kind('^mojo_unit_rule\$', $tdeps))) intersect set($ppats ))"
+        say "buck2 uquery \"$pquery\""
         rc=0
-        "$BUCK2" uquery -c komira.coverage=true "$pquery" --output-attribute '^srcs$' \
-            >"$OUT/program_runs.raw" 2>"$OUT/logs/uquery_programs.log" </dev/null || rc=$?
+        "$BUCK2" uquery -c komira.coverage=true "$pquery" \
+            >"$OUT/program_runs.txt" 2>"$OUT/logs/uquery_programs.log" </dev/null || rc=$?
         if [ "$rc" -ne 0 ]; then
             tail -n 20 "$OUT/logs/uquery_programs.log"
             die "buck2 uquery of the programs the tests depend on exited $rc"
         fi
-        # buck2's JSON, pretty-printed: a source file is a line of six spaces and
-        # a quoted `<cell>//<path>` (`<cell>//<package>:<path>` for a file of a
-        # target's own package); a target label is a key, four spaces in.
-        awk '
-            /^      "[A-Za-z0-9_]*\/\/[^"]*",?$/ {
-                x = $0; sub(/^      "[A-Za-z0-9_]*\/\//, "", x); sub(/",?$/, "", x); sub(/:/, "/", x); print x
-            }
-        ' "$OUT/program_runs.raw" | sort -u >"$OUT/program_runs.txt"
-        say "$(grep -c . "$OUT/program_runs.txt" || true) program source(s) a test target depends on"
+        say "$(grep -c . "$OUT/program_runs.txt" || true) source file(s) of the programs a test target depends on"
     fi
     set -- report --repo-files "$OUT/repo-files" --diff "$OUT/diff.txt" --head-sha "$HEAD" \
         --source-root . --mode "$MODE" --target-bp "$TARGET" --name "$NAME" \
