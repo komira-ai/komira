@@ -14,7 +14,9 @@ this package's API in follow-up changes.
 
 - `compression` / `compression_codecs`: the `Compression` and
   `ArrowIpcCompression` traits and their conformers (`Snappy`, `Zstd`, `Gzip`,
-  `Lz4Raw`, `Lz4Frame`, ...).
+  `Lz4Raw`, `Lz4Frame`, ...). The conformers that take and return only Spans
+  and Lists (`Snappy`, `Gzip`, `Lz4Raw` and the scaffolds) live in
+  `span_codecs`, and `compression_codecs` re-exports them.
 - `snappy_block`: `snappy_compress_into`, `snappy_uncompress_into` (never
   writes past `len(dst)`), `snappy_uncompressed_length`,
   `snappy_max_compressed_length`.
@@ -44,7 +46,8 @@ the soname nor the loader's error.
 ## Examples
 
 A raw snappy block, compressed and decompressed by the snappy library this
-package links (its shared library, from an installed package):
+package links (from an installed package, the static archive
+`lib/libsnappy.a` it ships, linked into the program with libc++):
 
 <!-- mojo-hidden from std.testing import assert_equal -->
 ```mojo
@@ -61,6 +64,52 @@ var out = List[UInt8](length=len(src), fill=0)  # the destination's length is it
 assert_equal(snappy_uncompress_into(Span(out), Span(packed)), len(src))
 for i in range(len(src)):
     assert_equal(out[i], src[i])
+```
+
+The codecs opened at run time, each a round trip: zstd (libzstd), gzip (libz)
+and the LZ4 frame (liblz4) through their conformers, bzip2 (libbz2) and xz
+(liblzma) through the block API. From an installed package, each library is
+the one its conda dependency put in the environment:
+
+<!-- mojo-hidden from std.testing import assert_equal -->
+```mojo
+from komira_compression.bzip2_buffer import BZIP2_DEFAULT_BLOCK_SIZE_100K, BZIP2_DEFAULT_WORK_FACTOR
+from komira_compression.bzip2_buffer import bzip2_compress_into, bzip2_decompress_into
+from komira_compression.compression_codecs import Gzip, Lz4Frame, Zstd
+from komira_compression.xz_buffer import XZ_CHECK_CRC64, XZ_DEFAULT_MEMLIMIT, XZ_PRESET_DEFAULT
+from komira_compression.xz_buffer import xz_compress_into, xz_decompress_into
+
+var src = List[UInt8]()
+for i in range(1000):
+    src.append(UInt8(97 + i % 7))
+
+var zstd_frame = Zstd[3].compress(Span(src))
+var gzip_stream = Gzip[6].compress(Span(src))
+var lz4_frame = Lz4Frame.compress(Span(src))
+var decoded = List[List[UInt8]]()
+decoded.append(Zstd[3].decompress(Span(zstd_frame), len(src)))
+decoded.append(Gzip[6].decompress(Span(gzip_stream), len(src)))
+decoded.append(Lz4Frame.decompress(Span(lz4_frame), len(src)))
+
+var packed = List[UInt8](length=4096, fill=0)
+var n = bzip2_compress_into(
+    Span(packed), Span(src), BZIP2_DEFAULT_BLOCK_SIZE_100K, BZIP2_DEFAULT_WORK_FACTOR
+)
+var from_bzip2 = List[UInt8](length=len(src), fill=0)
+assert_equal(bzip2_decompress_into(Span(from_bzip2), Span(packed)[0:n]).value(), len(src))
+decoded.append(from_bzip2^)
+
+n = xz_compress_into(Span(packed), Span(src), XZ_PRESET_DEFAULT, XZ_CHECK_CRC64)
+var from_xz = List[UInt8](length=len(src), fill=0)
+assert_equal(
+    xz_decompress_into(Span(from_xz), Span(packed)[0:n], XZ_DEFAULT_MEMLIMIT).value(), len(src)
+)
+decoded.append(from_xz^)
+
+for d in range(len(decoded)):
+    assert_equal(len(decoded[d]), len(src))
+    for i in range(len(src)):
+        assert_equal(decoded[d][i], src[i])
 ```
 
 ## Build files

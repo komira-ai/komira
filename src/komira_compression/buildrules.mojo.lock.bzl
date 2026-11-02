@@ -46,9 +46,10 @@ GRAPH_JSON = r'''{
         {"path": "src/komira_compression/src/komira_compression/bzip2_buffer.mojo", "sha256": "9cc015805c676cc96d5461e7f28c7d05475834b8da71098505470fd33a762469"},
         {"path": "src/komira_compression/src/komira_compression/codec_libraries.mojo", "sha256": "d754fa55447ea907b056e0cc896bff9eb694790580acf0293538d11036cbb2d2"},
         {"path": "src/komira_compression/src/komira_compression/compression.mojo", "sha256": "3267e736498c3b67bda7c5d3f1488b7f5260e5bea97c58fd182eb19ec27b3da4"},
-        {"path": "src/komira_compression/src/komira_compression/compression_codecs.mojo", "sha256": "8cccf6bb1196cdfc73dabc516ccc0ad5207cf2b5f7211a400c6596ec90826a42"},
+        {"path": "src/komira_compression/src/komira_compression/compression_codecs.mojo", "sha256": "b04bfa3878564d7c2d61f88aa6d372ef428e08e27677cfe8d16bdb278862160c"},
         {"path": "src/komira_compression/src/komira_compression/lz4.mojo", "sha256": "410c190f92e3050298552ba934f6920814053a4b3c3b78e89317f30485eff7a5"},
         {"path": "src/komira_compression/src/komira_compression/snappy_block.mojo", "sha256": "86c4ae2f12387b82f53267d93f74ee910f388e075c58bb09a65af4ee560c0690"},
+        {"path": "src/komira_compression/src/komira_compression/span_codecs.mojo", "sha256": "d51338cf50308d309115e7c8b69b1eae3846f52fbf10c687e31cf2205b25735c"},
         {"path": "src/komira_compression/src/komira_compression/xz_buffer.mojo", "sha256": "991718b468b394cc29784e3230823d9f9383a8f05d9552887a7d3e661382b15c"},
         {"path": "src/komira_compression/src/komira_compression/zlib.mojo", "sha256": "418abe3a535a74ec3bd3acfa844b01c7b39bffce057ebb60e0944db0458472fe"},
         {"path": "src/komira_compression/src/komira_compression/zstd_frame.mojo", "sha256": "25e430cc932a1bac58fa31e7c4b9fe9a7f7258a58310bf0efa24e8824c426846"}
@@ -84,7 +85,7 @@ GRAPH_JSON = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/komira_compression/tests/test_codec_block_guards.mojo", "sha256": "755ac5904f3dab11f293416597646b8e22c8f060ea4f4f70bdc6f92764388bb0"}
+        {"path": "src/komira_compression/tests/test_codec_block_guards.mojo", "sha256": "963b13971ec11a2338a364c2f7b25970bdacded7a2ed466d66d528616ef400a9"}
       ],
       "deps": ["komira_compression@0.1.0#mojo1.0.0/lib"],
       "natives": [
@@ -111,6 +112,23 @@ GRAPH_JSON = r'''{
       "loads": ["bzip2", "liblzma", "libzlib", "lz4-c", "zstd"],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_codec_conformers.pass"]
+    },
+    {
+      "id": "komira_compression@0.1.0#mojo1.0.0/test:src/komira_compression/tests/test_codec_edges.mojo",
+      "package": "komira_compression",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/komira_compression/tests/test_codec_edges.mojo", "sha256": "376c0cb48eb89cd17835891828dc35275062d0a32a8093d0657c65948c3251f2"}
+      ],
+      "deps": ["komira_compression@0.1.0#mojo1.0.0/lib"],
+      "natives": [
+        {"id": "snappy", "soname": "libsnappy.a", "package": "komira_compression", "kind": "static", "built": "native:komira_compression/snappy"}
+      ],
+      "link": ["c++"],
+      "loads": ["bzip2", "liblzma", "libzlib", "lz4-c", "zstd"],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_codec_edges.pass"]
     },
     {
       "id": "komira_compression@0.1.0#mojo1.0.0/test:src/komira_compression/tests/test_codec_libraries.mojo",
@@ -236,9 +254,10 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
         {"path": "src/komira_compression/src/komira_compression/bzip2_buffer.mojo", "sha256": "9cc015805c676cc96d5461e7f28c7d05475834b8da71098505470fd33a762469"},
         {"path": "src/komira_compression/src/komira_compression/codec_libraries.mojo", "sha256": "d754fa55447ea907b056e0cc896bff9eb694790580acf0293538d11036cbb2d2"},
         {"path": "src/komira_compression/src/komira_compression/compression.mojo", "sha256": "3267e736498c3b67bda7c5d3f1488b7f5260e5bea97c58fd182eb19ec27b3da4"},
-        {"path": "src/komira_compression/src/komira_compression/compression_codecs.mojo", "sha256": "8cccf6bb1196cdfc73dabc516ccc0ad5207cf2b5f7211a400c6596ec90826a42"},
+        {"path": "src/komira_compression/src/komira_compression/compression_codecs.mojo", "sha256": "b04bfa3878564d7c2d61f88aa6d372ef428e08e27677cfe8d16bdb278862160c"},
         {"path": "src/komira_compression/src/komira_compression/lz4.mojo", "sha256": "410c190f92e3050298552ba934f6920814053a4b3c3b78e89317f30485eff7a5"},
         {"path": "src/komira_compression/src/komira_compression/snappy_block.mojo", "sha256": "86c4ae2f12387b82f53267d93f74ee910f388e075c58bb09a65af4ee560c0690"},
+        {"path": "src/komira_compression/src/komira_compression/span_codecs.mojo", "sha256": "d51338cf50308d309115e7c8b69b1eae3846f52fbf10c687e31cf2205b25735c"},
         {"path": "src/komira_compression/src/komira_compression/xz_buffer.mojo", "sha256": "991718b468b394cc29784e3230823d9f9383a8f05d9552887a7d3e661382b15c"},
         {"path": "src/komira_compression/src/komira_compression/zlib.mojo", "sha256": "418abe3a535a74ec3bd3acfa844b01c7b39bffce057ebb60e0944db0458472fe"},
         {"path": "src/komira_compression/src/komira_compression/zstd_frame.mojo", "sha256": "25e430cc932a1bac58fa31e7c4b9fe9a7f7258a58310bf0efa24e8824c426846"}
@@ -274,7 +293,7 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/komira_compression/tests/test_codec_block_guards.mojo", "sha256": "755ac5904f3dab11f293416597646b8e22c8f060ea4f4f70bdc6f92764388bb0"}
+        {"path": "src/komira_compression/tests/test_codec_block_guards.mojo", "sha256": "963b13971ec11a2338a364c2f7b25970bdacded7a2ed466d66d528616ef400a9"}
       ],
       "deps": ["komira_compression@0.1.0#mojo1.0.0/lib"],
       "natives": [
@@ -301,6 +320,23 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "loads": ["bzip2", "liblzma", "libzlib", "lz4-c", "zstd"],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_codec_conformers.pass"]
+    },
+    {
+      "id": "komira_compression@0.1.0#mojo1.0.0/test:src/komira_compression/tests/test_codec_edges.mojo",
+      "package": "komira_compression",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/komira_compression/tests/test_codec_edges.mojo", "sha256": "376c0cb48eb89cd17835891828dc35275062d0a32a8093d0657c65948c3251f2"}
+      ],
+      "deps": ["komira_compression@0.1.0#mojo1.0.0/lib"],
+      "natives": [
+        {"id": "snappy", "soname": "libsnappy.a", "package": "komira_compression", "kind": "static", "built": "native:komira_compression/snappy"}
+      ],
+      "link": ["c++"],
+      "loads": ["bzip2", "liblzma", "libzlib", "lz4-c", "zstd"],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_codec_edges.pass"]
     },
     {
       "id": "komira_compression@0.1.0#mojo1.0.0/test:src/komira_compression/tests/test_codec_libraries.mojo",
@@ -423,9 +459,10 @@ GRAPH_JSON_OSX_ARM64 = r'''{
         {"path": "src/komira_compression/src/komira_compression/bzip2_buffer.mojo", "sha256": "9cc015805c676cc96d5461e7f28c7d05475834b8da71098505470fd33a762469"},
         {"path": "src/komira_compression/src/komira_compression/codec_libraries.mojo", "sha256": "d754fa55447ea907b056e0cc896bff9eb694790580acf0293538d11036cbb2d2"},
         {"path": "src/komira_compression/src/komira_compression/compression.mojo", "sha256": "3267e736498c3b67bda7c5d3f1488b7f5260e5bea97c58fd182eb19ec27b3da4"},
-        {"path": "src/komira_compression/src/komira_compression/compression_codecs.mojo", "sha256": "8cccf6bb1196cdfc73dabc516ccc0ad5207cf2b5f7211a400c6596ec90826a42"},
+        {"path": "src/komira_compression/src/komira_compression/compression_codecs.mojo", "sha256": "b04bfa3878564d7c2d61f88aa6d372ef428e08e27677cfe8d16bdb278862160c"},
         {"path": "src/komira_compression/src/komira_compression/lz4.mojo", "sha256": "410c190f92e3050298552ba934f6920814053a4b3c3b78e89317f30485eff7a5"},
         {"path": "src/komira_compression/src/komira_compression/snappy_block.mojo", "sha256": "86c4ae2f12387b82f53267d93f74ee910f388e075c58bb09a65af4ee560c0690"},
+        {"path": "src/komira_compression/src/komira_compression/span_codecs.mojo", "sha256": "d51338cf50308d309115e7c8b69b1eae3846f52fbf10c687e31cf2205b25735c"},
         {"path": "src/komira_compression/src/komira_compression/xz_buffer.mojo", "sha256": "991718b468b394cc29784e3230823d9f9383a8f05d9552887a7d3e661382b15c"},
         {"path": "src/komira_compression/src/komira_compression/zlib.mojo", "sha256": "418abe3a535a74ec3bd3acfa844b01c7b39bffce057ebb60e0944db0458472fe"},
         {"path": "src/komira_compression/src/komira_compression/zstd_frame.mojo", "sha256": "25e430cc932a1bac58fa31e7c4b9fe9a7f7258a58310bf0efa24e8824c426846"}
@@ -461,7 +498,7 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/komira_compression/tests/test_codec_block_guards.mojo", "sha256": "755ac5904f3dab11f293416597646b8e22c8f060ea4f4f70bdc6f92764388bb0"}
+        {"path": "src/komira_compression/tests/test_codec_block_guards.mojo", "sha256": "963b13971ec11a2338a364c2f7b25970bdacded7a2ed466d66d528616ef400a9"}
       ],
       "deps": ["komira_compression@0.1.0#mojo1.0.0/lib"],
       "natives": [
@@ -488,6 +525,23 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "loads": ["bzip2", "liblzma", "libzlib", "lz4-c", "zstd"],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_codec_conformers.pass"]
+    },
+    {
+      "id": "komira_compression@0.1.0#mojo1.0.0/test:src/komira_compression/tests/test_codec_edges.mojo",
+      "package": "komira_compression",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/komira_compression/tests/test_codec_edges.mojo", "sha256": "376c0cb48eb89cd17835891828dc35275062d0a32a8093d0657c65948c3251f2"}
+      ],
+      "deps": ["komira_compression@0.1.0#mojo1.0.0/lib"],
+      "natives": [
+        {"id": "snappy", "soname": "libsnappy.a", "package": "komira_compression", "kind": "static", "built": "native:komira_compression/snappy"}
+      ],
+      "link": ["c++"],
+      "loads": ["bzip2", "liblzma", "libzlib", "lz4-c", "zstd"],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_codec_edges.pass"]
     },
     {
       "id": "komira_compression@0.1.0#mojo1.0.0/test:src/komira_compression/tests/test_codec_libraries.mojo",

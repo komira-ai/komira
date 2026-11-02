@@ -226,14 +226,15 @@ archive_files(
 )
 
 # snappy-stubs-public.h is committed (what CMake writes from the template, the substitutions of :src), because
-# native_library takes the headers of the package as files of the package. This holds it to the template.
+# native_library takes the headers of the package as files of the package. This holds it, byte for byte, to the
+# header :src generates, and that header to the template (stubs_test.zig says what it refuses).
 zig_test(
     name = "stubs_cases",
     exec_compatible_with = LINUX_X86_64,
     src = "stubs_test.zig",
     busybox = "komira//tools/build/toolchains:busybox",
     data = {
-        "BUCK": "BUCK",
+        "generated/snappy-stubs-public.h": ":src[snappy-stubs-public.h]",
         "snappy-stubs-public.h": "snappy-stubs-public.h",
         "snappy-stubs-public.h.in": ":stubs_template[snappy-stubs-public.h.in]",
     },
