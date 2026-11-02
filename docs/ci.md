@@ -49,8 +49,11 @@ build of the whole repository covers, and so what the affected targets add up to
      own cell, reached through `//:tests_lints`); actionlint over the
      workflows; every `uses:` pinned to a commit SHA; every push to `main`
      in a concurrency group of its own; no remote-execution endpoint in a
-     committed file; and every relative link and anchor in the repository's
-     Markdown resolving (`//:docs`, a `markdown_docs` target). The lint of
+     committed file; every relative link and anchor in the repository's
+     Markdown resolving (`//:docs`, a `markdown_docs` target); and the
+     shared core of [AGENTS.md](../AGENTS.md) equal byte for byte to its
+     canonical copy and that copy's recorded SHA-256, with `CLAUDE.md`
+     importing `AGENTS.md` (`//:agents_md_cases`). The lint of
      the scripts the Mojo and Rust rules run
      is reached through their toolchains, so no Mojo or Rust target builds
      while one of those scripts has a finding. The linters are pinned

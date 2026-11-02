@@ -77,6 +77,25 @@ zig_test(
     zig = "komira//tools/build/toolchains:zig_next",
 )
 
+# The repository's engineering rules (tools/build/agents_md/agents_md_test.zig says what each
+# case catches): the shared core of AGENTS.md is byte for byte its canonical copy,
+# tools/build/agents_md/shared_core.md, whose SHA-256 is the one in shared_core.sha256 beside it
+# (the copy and the hash are the same in every repository carrying the core), and CLAUDE.md
+# imports AGENTS.md. A build action.
+zig_test(
+    name = "agents_md_cases",
+    exec_compatible_with = LINUX_X86_64,
+    src = "tools/build/agents_md/agents_md_test.zig",
+    data = {
+        "AGENTS.md": "AGENTS.md",
+        "CLAUDE.md": "CLAUDE.md",
+        "shared_core.md": "tools/build/agents_md/shared_core.md",
+        "shared_core.sha256": "tools/build/agents_md/shared_core.sha256",
+    },
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
+)
+
 # The cases of the mopm jobs of release.yml: the continuous prod publish (each prod job's
 # gate, needs, environment and permissions, the commands), no beta job, no schedule, the
 # release-main concurrency group, no secret and the version of every run

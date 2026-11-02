@@ -7,6 +7,7 @@ disagree, the code is what runs; when two docs disagree, the one listed here win
 |---|---|
 | What komira is, and the map of its docs | [README.md](../README.md) |
 | Developer setup: buck2, the build farm, running the tests | [DEVELOPMENT.md](../DEVELOPMENT.md) |
+| The engineering rules every change is written to and reviewed against, each with an id (the shared core, the language rules, komira's own) | [AGENTS.md](../AGENTS.md) |
 | The build tooling, and using komira from another repository | [tools/build/README.md](../tools/build/README.md) |
 | The Mojo rules | [tools/build/mojo/README.md](../tools/build/mojo/README.md) |
 | The end-to-end tests | [tools/build/tests/README.md](../tools/build/tests/README.md) |

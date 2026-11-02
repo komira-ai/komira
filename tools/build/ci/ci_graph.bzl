@@ -111,8 +111,8 @@ def missing(required, reached):
 # re-spreads every row (the generator rewrites them all).
 SHARDS = 8
 
-# A generated file stays under this many lines (CLAUDE.md: "files under 1000
-# lines"); `shard_findings` fails the guard before a shard reaches it.
+# A generated file stays under this many lines (AGENTS.md, R12 and M15: "Files
+# stay under 1000 lines"); `shard_findings` fails the guard before a shard reaches it.
 LINE_LIMIT = 1000
 
 REGENERATE = 'out=$(./buck2 bxl komira//tools/build/ci/targets.bxl:generate) && [ -d "$out" ] && [ "$out" != / ] && cp -rL --no-preserve=mode "$out"/. ci/'
