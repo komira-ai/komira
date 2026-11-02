@@ -14,6 +14,8 @@
 //!    is zig's generic CPU (cxx.bzl forces -mcpu=generic for macOS, whose platform row names apple-m1),
 //!    which has no CRC32 extension, so NEON_CRC32 must be 0;
 //!  - config_x86_64.h with a NEON feature on, or an x86 feature off (it is the x86-64-v3 compile);
+//!  - either config with a RISC-V vector feature on (SNAPPY_RVV_1, SNAPPY_RVV_0_7): snappy-internal.h
+//!    then includes <riscv_vector.h>, which neither cpu has;
 //!  - the two configs differing in a macro that does not depend on the cpu (the sys/ headers, builtins,
 //!    endianness), which the select by cpu alone assumes;
 //!  - the BUCK file selecting a config for the wrong cpu, or no longer selecting by cpu;
@@ -28,6 +30,9 @@ const Define = struct { name: []const u8, value: []const u8 };
 // The macros that say what the cpu has. Every other macro must be equal in the two configs.
 const x86_features = [_][]const u8{ "SNAPPY_HAVE_SSSE3", "SNAPPY_HAVE_X86_CRC32", "SNAPPY_HAVE_BMI2" };
 const arm_features = [_][]const u8{ "SNAPPY_HAVE_NEON", "SNAPPY_HAVE_NEON_CRC32" };
+// The RISC-V vector macros (snappy 1.3.0 added them): off on both cpus, so they are not exempt from
+// the two configs being equal.
+const riscv_features = [_][]const u8{ "SNAPPY_RVV_1", "SNAPPY_RVV_0_7" };
 
 fn readData(ar: std.mem.Allocator, name: []const u8) ![]const u8 {
     const w = try std.process.getEnvVarOwned(ar, "KOMIRA_TEST_WORK");
@@ -131,11 +136,12 @@ test "each config defines exactly the macros of snappy's config.h.in, as 0 or 1"
     }
 }
 
-test "config_arm64.h: NEON on, no x86 feature, no CRC32 extension" {
+test "config_arm64.h: NEON on, no x86 or RISC-V vector feature, no CRC32 extension" {
     var arena = std.heap.ArenaAllocator.init(t.allocator);
     defer arena.deinit();
     const s = try subjects(arena.allocator());
     for (x86_features) |name| try expectValue(s.arm, "config_arm64.h", name, "0");
+    for (riscv_features) |name| try expectValue(s.arm, "config_arm64.h", name, "0");
     try expectValue(s.arm, "config_arm64.h", "SNAPPY_HAVE_NEON", "1");
     // zig's generic arm64 CPU has no CRC32 extension (the macOS platform row names apple-m1, but
     // tools/build/mojo/cxx.bzl compiles macOS with -mcpu=generic, which is what makes this hold): <arm_acle.h> declares no __crc32cw, and 1 here would not compile.
@@ -143,12 +149,13 @@ test "config_arm64.h: NEON on, no x86 feature, no CRC32 extension" {
     try expectValue(s.arm, "config_arm64.h", "SNAPPY_IS_BIG_ENDIAN", "0");
 }
 
-test "config_x86_64.h: the x86-64-v3 features on, no NEON" {
+test "config_x86_64.h: the x86-64-v3 features on, no NEON or RISC-V vector feature" {
     var arena = std.heap.ArenaAllocator.init(t.allocator);
     defer arena.deinit();
     const s = try subjects(arena.allocator());
     for (x86_features) |name| try expectValue(s.x86, "config_x86_64.h", name, "1");
     for (arm_features) |name| try expectValue(s.x86, "config_x86_64.h", name, "0");
+    for (riscv_features) |name| try expectValue(s.x86, "config_x86_64.h", name, "0");
     try expectValue(s.x86, "config_x86_64.h", "SNAPPY_IS_BIG_ENDIAN", "0");
 }
 
