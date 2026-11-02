@@ -11,15 +11,16 @@
 # incompressible bytes through every entry (the List, the `*_into` and the
 # cached-context paths), and every refusal compared with its whole message: a
 # size that is not positive, a destination too small, a corrupt or empty
-# input, and a null context. The scaffolds raise their exact messages from
-# both directions.
+# input, and a null context. The one exception is Lz4Frame's corrupt frame,
+# compared up to liblz4's result code, which is liblz4's to choose. The
+# scaffolds raise their exact messages from both directions.
 #
 # What it catches: an identity codec that drops or adds a byte, a capacity
 # check that lets a source past `dst_capacity`, a snappy decode that ignores
 # `expected_size` or the block's own declared length, a zstd error read as
-# success, a context handle that frees a null context, never creates one or
-# creates a second one per call, and a message that drops the codec, the
-# library's result or a size.
+# success, a context handle that never creates a context, or creates a new one
+# per decode or per `acquire` (its context pointer is compared across calls),
+# and a message that drops the codec, the library's result or a size.
 # =============================================================================
 
 from std.testing import TestSuite, assert_equal, assert_true
@@ -535,7 +536,8 @@ def _decode_twice[
     C: ArrowIpcCompression
 ](mut h: _CodecDctxHandle[C], src: Span[UInt8, _], want: Span[UInt8, _]) raises:
     """Two decodes through one handle: the first creates the context when the
-    handle has none, the second reuses it."""
+    handle has none, the second reuses it (the same pointer)."""
+    var first = 0
     for round in range(2):
         var out = List[UInt8](length=len(want) + 1, fill=UInt8(0))
         assert_equal(
@@ -543,36 +545,47 @@ def _decode_twice[
             len(want),
         )
         _assert_same(Span(out)[0 : len(want)], want, "handle round " + String(round))
+        if round == 0:
+            first = Int(h._raw)
+        assert_equal(Int(h._raw), first, "the context changed between decodes")
 
 
-def test_dctx_handle_creates_lazily_eagerly_and_frees_once() raises:
+def test_dctx_handle_creates_lazily_eagerly_and_reuses_one_context() raises:
     var hello = _hello()
     var zstd_frame = materialize[_ZSTD_HELLO]()
     var lz4_frame = Lz4Frame.compress(Span(hello))
 
     # Lazily, on the first decode.
     var lazy = _CodecDctxHandle[Zstd[3]]()
+    assert_equal(Int(lazy._raw), 0, "an empty handle has a context")
     _decode_twice(lazy, Span(zstd_frame), Span(hello))
+    assert_true(Int(lazy._raw) != 0, "the first decode made no context")
     var lazy_lz4 = _CodecDctxHandle[Lz4Frame]()
     _decode_twice(lazy_lz4, Span(lz4_frame), Span(hello))
 
     # Eagerly; `acquire` on a handle that has a context keeps it.
     var eager = _CodecDctxHandle[Zstd[3]].create()
+    var made = Int(eager._raw)
+    assert_true(made != 0, "create made no context")
     eager.acquire()
+    assert_equal(Int(eager._raw), made, "acquire replaced a context")
     _decode_twice(eager, Span(zstd_frame), Span(hello))
 
     # `acquire` on an empty handle creates the context, twice is once.
     var acquired = _CodecDctxHandle[Lz4Frame]()
     acquired.acquire()
+    var once = Int(acquired._raw)
+    assert_true(once != 0, "acquire made no context")
     acquired.acquire()
+    assert_equal(Int(acquired._raw), once, "a second acquire made another")
     _decode_twice(acquired, Span(lz4_frame), Span(hello))
 
-    # Uncompressed's context is null: its handle copies, and frees nothing.
+    # Uncompressed's context is null: its handle copies.
     var plain = _CodecDctxHandle[Uncompressed].create()
     var stored = hello.copy()
     _decode_twice(plain, Span(stored), Span(hello))
 
-    # A handle that never made a context frees nothing.
+    # A handle that never made a context is dropped without one.
     var unused = _CodecDctxHandle[Zstd[3]]()
     _ = unused^
 

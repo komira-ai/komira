@@ -45,7 +45,7 @@ GRAPH_JSON = r'''{
         {"path": "src/komira_compression/src/komira_compression/__init__.mojo", "sha256": "1d998f4a5eb72de170aada59404bed9815a32a2279fda2c954e9c8cb43cc0be3"},
         {"path": "src/komira_compression/src/komira_compression/bzip2_buffer.mojo", "sha256": "9cc015805c676cc96d5461e7f28c7d05475834b8da71098505470fd33a762469"},
         {"path": "src/komira_compression/src/komira_compression/codec_libraries.mojo", "sha256": "d754fa55447ea907b056e0cc896bff9eb694790580acf0293538d11036cbb2d2"},
-        {"path": "src/komira_compression/src/komira_compression/compression.mojo", "sha256": "45afa88dbf8e954bbda3563fb78d3e04c1e8bfe92ef000bb668d94a700ada083"},
+        {"path": "src/komira_compression/src/komira_compression/compression.mojo", "sha256": "3267e736498c3b67bda7c5d3f1488b7f5260e5bea97c58fd182eb19ec27b3da4"},
         {"path": "src/komira_compression/src/komira_compression/compression_codecs.mojo", "sha256": "8cccf6bb1196cdfc73dabc516ccc0ad5207cf2b5f7211a400c6596ec90826a42"},
         {"path": "src/komira_compression/src/komira_compression/lz4.mojo", "sha256": "410c190f92e3050298552ba934f6920814053a4b3c3b78e89317f30485eff7a5"},
         {"path": "src/komira_compression/src/komira_compression/snappy_block.mojo", "sha256": "86c4ae2f12387b82f53267d93f74ee910f388e075c58bb09a65af4ee560c0690"},
@@ -101,7 +101,7 @@ GRAPH_JSON = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/komira_compression/tests/test_codec_conformers.mojo", "sha256": "627401e703362c235b2a3e91e6f0fd7043a8af2e6aee757928a30361a9b5c86c"}
+        {"path": "src/komira_compression/tests/test_codec_conformers.mojo", "sha256": "96ac187941ca0a11be800441d0307463bb3d510c75f8d8a69f4fbb29cd9f8972"}
       ],
       "deps": ["komira_compression@0.1.0#mojo1.0.0/lib"],
       "natives": [
@@ -235,7 +235,7 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
         {"path": "src/komira_compression/src/komira_compression/__init__.mojo", "sha256": "1d998f4a5eb72de170aada59404bed9815a32a2279fda2c954e9c8cb43cc0be3"},
         {"path": "src/komira_compression/src/komira_compression/bzip2_buffer.mojo", "sha256": "9cc015805c676cc96d5461e7f28c7d05475834b8da71098505470fd33a762469"},
         {"path": "src/komira_compression/src/komira_compression/codec_libraries.mojo", "sha256": "d754fa55447ea907b056e0cc896bff9eb694790580acf0293538d11036cbb2d2"},
-        {"path": "src/komira_compression/src/komira_compression/compression.mojo", "sha256": "45afa88dbf8e954bbda3563fb78d3e04c1e8bfe92ef000bb668d94a700ada083"},
+        {"path": "src/komira_compression/src/komira_compression/compression.mojo", "sha256": "3267e736498c3b67bda7c5d3f1488b7f5260e5bea97c58fd182eb19ec27b3da4"},
         {"path": "src/komira_compression/src/komira_compression/compression_codecs.mojo", "sha256": "8cccf6bb1196cdfc73dabc516ccc0ad5207cf2b5f7211a400c6596ec90826a42"},
         {"path": "src/komira_compression/src/komira_compression/lz4.mojo", "sha256": "410c190f92e3050298552ba934f6920814053a4b3c3b78e89317f30485eff7a5"},
         {"path": "src/komira_compression/src/komira_compression/snappy_block.mojo", "sha256": "86c4ae2f12387b82f53267d93f74ee910f388e075c58bb09a65af4ee560c0690"},
@@ -291,7 +291,7 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/komira_compression/tests/test_codec_conformers.mojo", "sha256": "627401e703362c235b2a3e91e6f0fd7043a8af2e6aee757928a30361a9b5c86c"}
+        {"path": "src/komira_compression/tests/test_codec_conformers.mojo", "sha256": "96ac187941ca0a11be800441d0307463bb3d510c75f8d8a69f4fbb29cd9f8972"}
       ],
       "deps": ["komira_compression@0.1.0#mojo1.0.0/lib"],
       "natives": [
@@ -422,7 +422,7 @@ GRAPH_JSON_OSX_ARM64 = r'''{
         {"path": "src/komira_compression/src/komira_compression/__init__.mojo", "sha256": "1d998f4a5eb72de170aada59404bed9815a32a2279fda2c954e9c8cb43cc0be3"},
         {"path": "src/komira_compression/src/komira_compression/bzip2_buffer.mojo", "sha256": "9cc015805c676cc96d5461e7f28c7d05475834b8da71098505470fd33a762469"},
         {"path": "src/komira_compression/src/komira_compression/codec_libraries.mojo", "sha256": "d754fa55447ea907b056e0cc896bff9eb694790580acf0293538d11036cbb2d2"},
-        {"path": "src/komira_compression/src/komira_compression/compression.mojo", "sha256": "45afa88dbf8e954bbda3563fb78d3e04c1e8bfe92ef000bb668d94a700ada083"},
+        {"path": "src/komira_compression/src/komira_compression/compression.mojo", "sha256": "3267e736498c3b67bda7c5d3f1488b7f5260e5bea97c58fd182eb19ec27b3da4"},
         {"path": "src/komira_compression/src/komira_compression/compression_codecs.mojo", "sha256": "8cccf6bb1196cdfc73dabc516ccc0ad5207cf2b5f7211a400c6596ec90826a42"},
         {"path": "src/komira_compression/src/komira_compression/lz4.mojo", "sha256": "410c190f92e3050298552ba934f6920814053a4b3c3b78e89317f30485eff7a5"},
         {"path": "src/komira_compression/src/komira_compression/snappy_block.mojo", "sha256": "86c4ae2f12387b82f53267d93f74ee910f388e075c58bb09a65af4ee560c0690"},
@@ -478,7 +478,7 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/komira_compression/tests/test_codec_conformers.mojo", "sha256": "627401e703362c235b2a3e91e6f0fd7043a8af2e6aee757928a30361a9b5c86c"}
+        {"path": "src/komira_compression/tests/test_codec_conformers.mojo", "sha256": "96ac187941ca0a11be800441d0307463bb3d510c75f8d8a69f4fbb29cd9f8972"}
       ],
       "deps": ["komira_compression@0.1.0#mojo1.0.0/lib"],
       "natives": [
