@@ -4,7 +4,7 @@ check's unit that holds it): a release set's libraries packaged with a fixed
 TEST stamp, their `[release]` manifests given to `komira_pack conda-meta`, and
 the metapackage read back.
 
-A release builds `<lib>_conda[release]` with the stamp kci derives from git
+A release builds `<lib>_conda[release]` with the stamp release_json derives from git
 (`-c komira.package_stamp=<N> ...`) and then runs `komira_pack conda-meta` over
 those manifests (release/artifacts.textproto). A build without that `-c` has no
 stamped `[release]`, so neither step runs before a release does. This rule runs
@@ -33,8 +33,7 @@ not in `libs` is refused here. Then, as build actions:
   * `komira_pack conda-meta --name <metapackage>` over each member's
     `[release]/manifest.json`. Its `--license`, `--summary` and `--home` are
     copied from release/artifacts.textproto's metapackage into this file and
-    conda.bzl; the stamp check holds them equal to `release_set`, and
-    src/kci_artifact's welded test holds `release_set` equal to the textproto.
+    conda.bzl; the stamp check holds them equal to `release_set`.
     Its `--label` is this target's, not a release's;
   * a stamp check, naming what it fails on:
       - `release_set` names `metapackage` and, in order, the conda names of
@@ -60,11 +59,8 @@ not in `libs` is refused here. Then, as build actions:
     (tools/build/readme_examples, cli.zig) over each member's packaged
     README (its package's `[readme]`), refusing a member that packages no
     README or whose README holds no example (a ```mojo or ```mojo module
-    fence, read as `generate --links refuse` reads it). kci's install
-    validation (src/kci_validate, readme_installed.mojo) refuses both, but
-    only after the release is published; the refusal names the member and
-    quotes kci's words. The display of a member's README is
-    `<package dir>/README.md`, as kci names it. The target's `readme_tests`
+    fence, read as `generate --links refuse` reads it). The display of a member's README is
+    `<package dir>/README.md`. The target's `readme_tests`
     (release_readme_test: this check over fixture READMEs) must pass first;
   * after the stamp check, `komira_pack conda-check --kind metapackage
     --require-stamped true` over the metapackage, with every member's manifest and the compiler pin: the

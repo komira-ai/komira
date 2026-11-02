@@ -19,6 +19,9 @@ and no environment variable and touches no global, so equal arguments give a
   aggregation or a sort ends it in a sink and opens a pipeline that reads that
   segment's output over an `E3` edge. The root is a `SINK_COLLECT` segment
   unless the top node is a breaker, which is then the result.
+- `sum_fuse`: SUM(CAST(e AS DECIMAL(38, 0))) over a signed integer `e`, the
+  SQL integer sum, is put into a sink's data as SUM(e); the node's declared
+  output stays DECIMAL(38, 0) and the sink writes its 128-bit total there.
 - `sink_capability`: the table of `(sink_kind, key_dtype, orientation)` rows a
   host serves, and admission. A group key picks its row from its column type;
   a string key is `DICT_ENCODED` only when the scan's footers say every row

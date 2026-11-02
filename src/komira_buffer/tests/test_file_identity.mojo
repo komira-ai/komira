@@ -1,21 +1,16 @@
 # =============================================================================
-# test_file_identity.mojo — FileIdentity: stat, same-file comparison, the settle
-# clause and the trust predicate.
+# FileIdentity: what stat(2) says about a path, the settle clause, and the
+# one predicate that decides whether a cached entry may be served.
 # =============================================================================
 #
-# Each test writes its own file under $TEST_TMPDIR and ages it with
-# `set_file_mtime_ns`, so the real predicate runs with the real default
-# threshold:
-#   - a missing path gives the invalid identity, which matches nothing;
-#   - a stat of a file reports its size and a valid identity;
-#   - a rewrite that changes the size is not the same file;
-#   - a file backdated past the default threshold is settled, a fresh one is
-#     not;
-#   - the trust predicate needs both the field match and the settle clause;
-#     `min_age_ns <= 0` turns the settle clause off.
+# Each test works in its own fresh directory (mkdtemp) and removes it, so no
+# two runs share a path. Ages are set with set_file_mtime_ns rather than
+# waited for: a backdated mtime is an hour old the moment it is written.
 # =============================================================================
 
-from std.io import FileHandle
+from std.os import remove, rmdir
+from std.os.path import exists
+from std.tempfile import mkdtemp
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
 from komira_buffer.file_identity import (
@@ -24,135 +19,176 @@ from komira_buffer.file_identity import (
     cached_entry_is_trustworthy,
     set_file_mtime_ns,
 )
-from komira_libc.posix import _read_env
 
-
-def _scratch_dir() -> String:
-    var d = _read_env("TEST_TMPDIR")
-    if d.byte_length() == 0:
-        d = _read_env("TMPDIR")
-    if d.byte_length() == 0:
-        return String("/tmp")
-    return d
-
-
-def _path(name: String) -> String:
-    return (_scratch_dir() + String("/komira_test_file_identity_")) + name
+comptime _HOUR_NS = 3600 * 1_000_000_000
 
 
 def _write(path: String, text: String) raises:
-    var h = FileHandle(path, "w")
-    h.write(text)
-    h.close()
+    with open(path, "w") as f:
+        f.write(text)
 
 
-# One hour in nanoseconds, well past the 10 second default.
-comptime _HOUR_NS: Int = 3_600_000_000_000
+def _cleanup(dir: String, path: String) raises:
+    if exists(path):
+        remove(path)
+    rmdir(dir)
 
 
-def test_invalid_identity_matches_nothing() raises:
-    var missing = FileIdentity.stat_path(_path("does_not_exist"))
-    assert_false(missing.valid, "a missing path must give the invalid identity")
-    var blank = FileIdentity()
-    assert_false(blank.valid)
-    assert_false(missing.same_file_as(missing))
-    assert_false(blank.same_file_as(blank))
-    assert_false(missing.is_settled(1))
-    assert_false(cached_entry_is_trustworthy(missing, missing, 0))
+def test_default_identity_is_invalid() raises:
+    """FileIdentity() is the invalid identity, every field 0."""
+    var i = FileIdentity()
+    assert_false(i.valid)
+    assert_equal(i.size, 0)
+    assert_equal(i.mtime_ns, 0)
+    assert_equal(i.ino, 0)
+    assert_equal(i.dev, 0)
+    assert_equal(i.age_ns, 0)
 
 
-def test_stat_path_reports_the_file() raises:
-    var p = _path("stat")
-    _write(p, String("hello"))
-    var a = FileIdentity.stat_path(p)
-    assert_true(a.valid)
-    assert_equal(a.size, 5)
-    assert_true(a.ino != 0)
-    assert_true(a.same_file_as(FileIdentity.stat_path(p)))
+def test_stat_existing_file() raises:
+    """A stat of a written file is valid, has its byte size and a non-zero
+    inode, and matches a second stat of the same unchanged file."""
+    var dir = mkdtemp()
+    var path = dir + "/f.txt"
+    try:
+        _write(path, "abcdefg")
+        var a = FileIdentity.stat_path(path)
+        assert_true(a.valid)
+        assert_equal(a.size, 7)
+        assert_true(a.ino != 0)
+        assert_true(a.mtime_ns > 0)
+        var b = FileIdentity.stat_path(path)
+        assert_true(a.same_file_as(b))
+        assert_true(b.same_file_as(a))
+    finally:
+        _cleanup(dir, path)
 
 
-def test_size_change_is_a_different_file() raises:
-    var p = _path("resize")
-    _write(p, String("abc"))
-    var before = FileIdentity.stat_path(p)
-    _write(p, String("abcdef"))
-    var after = FileIdentity.stat_path(p)
-    assert_true(before.valid and after.valid)
-    assert_false(before.same_file_as(after), "a size change must not match")
+def test_stat_missing_path_is_invalid_and_matches_nothing() raises:
+    """A failed stat is the invalid identity; it matches neither a valid
+    identity (either way round) nor another invalid one, and is never
+    settled."""
+    var dir = mkdtemp()
+    var path = dir + "/present.txt"
+    try:
+        _write(path, "x")
+        var good = FileIdentity.stat_path(path)
+        var gone = FileIdentity.stat_path(dir + "/absent.txt")
+        assert_false(gone.valid)
+        assert_equal(gone.size, 0)
+        assert_equal(gone.ino, 0)
+        assert_false(gone.same_file_as(good))
+        assert_false(good.same_file_as(gone))
+        assert_false(gone.same_file_as(FileIdentity()))
+        assert_false(gone.is_settled(0))
+        assert_false(gone.is_settled(-1))
+    finally:
+        _cleanup(dir, path)
 
 
-def test_mtime_change_is_a_different_file() raises:
-    var p = _path("mtime")
-    _write(p, String("abc"))
-    assert_true(set_file_mtime_ns(p, 1_000_000_000_000_000_000))
-    var before = FileIdentity.stat_path(p)
-    assert_equal(before.mtime_ns, 1_000_000_000_000_000_000)
-    assert_true(set_file_mtime_ns(p, 1_000_000_001_000_000_000))
-    var after = FileIdentity.stat_path(p)
-    assert_equal(after.mtime_ns, 1_000_000_001_000_000_000)
-    assert_false(before.same_file_as(after), "an mtime change must not match")
+def test_same_file_as_compares_every_field() raises:
+    """Changing any one of size, mtime, inode or device alone makes two
+    otherwise identical valid identities differ; age does not count."""
+    var base = FileIdentity()
+    base.valid = True
+    base.size = 10
+    base.mtime_ns = 20
+    base.ino = 30
+    base.dev = 40
+    base.age_ns = 50
+    var same = base
+    same.age_ns = 51
+    assert_true(base.same_file_as(same))
+
+    var c = base
+    c.size = 11
+    assert_false(base.same_file_as(c))
+    c = base
+    c.mtime_ns = 21
+    assert_false(base.same_file_as(c))
+    c = base
+    c.ino = 31
+    assert_false(base.same_file_as(c))
+    c = base
+    c.dev = 41
+    assert_false(base.same_file_as(c))
+    c = base
+    c.valid = False
+    assert_false(base.same_file_as(c))
+    assert_false(c.same_file_as(base))
 
 
-def test_set_file_mtime_on_missing_path_fails() raises:
-    assert_false(set_file_mtime_ns(_path("no_such_file"), 5))
+def test_is_settled_is_strictly_older_than_the_threshold() raises:
+    """is_settled(m) is age_ns > m: equal is not settled, one less is."""
+    var i = FileIdentity()
+    i.valid = True
+    i.age_ns = 5
+    assert_false(i.is_settled(5))
+    assert_true(i.is_settled(4))
+    assert_false(i.is_settled(6))
+    i.age_ns = -1
+    assert_false(i.is_settled(0))
 
 
-def test_settle_clause_needs_an_old_mtime() raises:
-    var p = _path("settle")
-    _write(p, String("x"))
-    var fresh = FileIdentity.stat_path(p)
-    assert_false(
-        fresh.is_settled(DEFAULT_STALENESS_MIN_AGE_NS),
-        "a file written just now is inside the threshold",
-    )
-    # Back-date by an hour: the identity is now older than the default.
-    var now_ns = fresh.mtime_ns + fresh.age_ns
-    assert_true(set_file_mtime_ns(p, now_ns - _HOUR_NS))
-    var old = FileIdentity.stat_path(p)
-    assert_true(old.age_ns > DEFAULT_STALENESS_MIN_AGE_NS)
-    assert_true(old.is_settled(DEFAULT_STALENESS_MIN_AGE_NS))
+def test_set_file_mtime_ns_backdates_and_settles() raises:
+    """A fresh file is not settled under the shipped threshold; backdated by
+    an hour it is, its mtime is the value set to the nanosecond, and its age
+    is about an hour. A missing path returns False."""
+    assert_equal(DEFAULT_STALENESS_MIN_AGE_NS, 10_000_000_000)
+    var dir = mkdtemp()
+    var path = dir + "/aged.txt"
+    try:
+        _write(path, "payload")
+        var fresh = FileIdentity.stat_path(path)
+        assert_false(fresh.is_settled(DEFAULT_STALENESS_MIN_AGE_NS))
+        var target = fresh.mtime_ns - _HOUR_NS + 123
+        assert_true(set_file_mtime_ns(path, target))
+        var aged = FileIdentity.stat_path(path)
+        assert_equal(aged.mtime_ns, target)
+        assert_true(aged.age_ns >= _HOUR_NS - 123)
+        assert_true(aged.age_ns < _HOUR_NS + 600 * 1_000_000_000)
+        assert_true(aged.is_settled(DEFAULT_STALENESS_MIN_AGE_NS))
+        assert_false(fresh.same_file_as(aged))
+        assert_false(set_file_mtime_ns(dir + "/absent.txt", target))
+    finally:
+        _cleanup(dir, path)
 
 
-def test_trust_needs_match_and_settle() raises:
-    var p = _path("trust")
-    _write(p, String("payload"))
-    var now_ns = FileIdentity.stat_path(p).mtime_ns + FileIdentity.stat_path(p).age_ns
-    # Fresh file: fields match, settle clause fails.
-    var cached = FileIdentity.stat_path(p)
-    var current = FileIdentity.stat_path(p)
-    assert_false(
-        cached_entry_is_trustworthy(cached, current, DEFAULT_STALENESS_MIN_AGE_NS)
-    )
-    # Settle clause off (test configuration): the field match alone passes.
+def test_cached_entry_is_trustworthy_needs_both_clauses() raises:
+    """Served only when the identities match AND the current file is
+    settled; min_age_ns <= 0 drops the settle clause but never the match."""
+    var cached = FileIdentity()
+    cached.valid = True
+    cached.size = 1
+    cached.mtime_ns = 2
+    cached.ino = 3
+    cached.dev = 4
+    cached.age_ns = 100
+
+    var current = cached
+    assert_true(cached_entry_is_trustworthy(cached, current, 99))
+    assert_false(cached_entry_is_trustworthy(cached, current, 100))
     assert_true(cached_entry_is_trustworthy(cached, current, 0))
-    # Aged file: both clauses hold.
-    assert_true(set_file_mtime_ns(p, now_ns - _HOUR_NS))
-    var aged_cached = FileIdentity.stat_path(p)
-    var aged_current = FileIdentity.stat_path(p)
-    assert_true(
-        cached_entry_is_trustworthy(
-            aged_cached, aged_current, DEFAULT_STALENESS_MIN_AGE_NS
-        )
-    )
-    # Aged but changed since the entry was built: the match clause refuses,
-    # settled or not.
-    assert_true(set_file_mtime_ns(p, now_ns - _HOUR_NS + 1_000_000_000))
-    var moved = FileIdentity.stat_path(p)
-    assert_false(
-        cached_entry_is_trustworthy(
-            aged_cached, moved, DEFAULT_STALENESS_MIN_AGE_NS
-        )
-    )
-    assert_false(cached_entry_is_trustworthy(aged_cached, moved, 0))
+    assert_true(cached_entry_is_trustworthy(cached, current, -5))
+
+    current.age_ns = 0
+    assert_false(cached_entry_is_trustworthy(cached, current, 1))
+    assert_true(cached_entry_is_trustworthy(cached, current, 0))
+
+    var other = cached
+    other.ino = 9
+    assert_false(cached_entry_is_trustworthy(cached, other, 99))
+    assert_false(cached_entry_is_trustworthy(cached, other, 0))
+    assert_false(cached_entry_is_trustworthy(cached, FileIdentity(), 0))
 
 
 def main() raises:
-    var suite = TestSuite()
-    suite.test[test_invalid_identity_matches_nothing]()
-    suite.test[test_stat_path_reports_the_file]()
-    suite.test[test_size_change_is_a_different_file]()
-    suite.test[test_mtime_change_is_a_different_file]()
-    suite.test[test_set_file_mtime_on_missing_path_fails]()
-    suite.test[test_settle_clause_needs_an_old_mtime]()
-    suite.test[test_trust_needs_match_and_settle]()
-    suite^.run()
+    var s = TestSuite()
+    s.test[test_default_identity_is_invalid]()
+    s.test[test_stat_existing_file]()
+    s.test[test_stat_missing_path_is_invalid_and_matches_nothing]()
+    s.test[test_same_file_as_compares_every_field]()
+    s.test[test_is_settled_is_strictly_older_than_the_threshold]()
+    s.test[test_set_file_mtime_ns_backdates_and_settles]()
+    s.test[test_cached_entry_is_trustworthy_needs_both_clauses]()
+    s^.run()

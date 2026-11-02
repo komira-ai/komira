@@ -47,10 +47,8 @@
 //! (`"lib" + name + ".so.1"`) or spell with an escape (`"libz\x2eso.1"`) is
 //! not found, since the reader compares a literal's bytes as written; and
 //! only `.mojo` files are read, so a source named `*.🔥` is not (a library
-//! whose only opener is one is read as opening nothing). The
-//! installed-package checks are PLANNED, not built (step S12, the
-//! installed-bytes checks of docs/design/continuous_publish.md), and their
-//! design does not yet cover a run-time dlopen requirement
+//! whose only opener is one is read as opening nothing). No
+//! installed-package check is built, and a design for one does not yet cover a run-time dlopen requirement
 //! (komira-ai/komira#1327), so today this static check is the only guard.
 
 const std = @import("std");
@@ -351,8 +349,8 @@ test "scanSource: code opens; comments and docstrings do not" {
     try testing.expectEqual(@as(usize, 1), code.sonames.len);
     try testing.expectEqualStrings("libz.so.1", code.sonames[0]);
     // A comment naming the call and a soname, and a docstring doing the same:
-    // nothing is opened and no soname is held (src/kci_release_set's
-    // system_libs.mojo names OwnedDLHandle("libzstd.so.1") in a comment).
+    // nothing is opened and no soname is held (a source file naming
+    // OwnedDLHandle("libzstd.so.1") in a comment).
     const quiet = try scanSource(a, "# OwnedDLHandle(\"libzstd.so.1\")\ndef f():\n    \"\"\"OwnedDLHandle(\"libz.so.1\")\n    \"\"\"\n    x = \"# not a comment\"\n");
     try testing.expect(!quiet.opens);
     try testing.expectEqual(@as(usize, 0), quiet.sonames.len);

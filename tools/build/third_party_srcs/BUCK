@@ -20,7 +20,10 @@ mojo_binary(
 # relative and -I includes, the s2n-bignum key, libssl's and the bssl tool's
 # lists (a C file among the C++ ones, a test and a benchmark left out, an
 # include of a file the archive lacks), non-recursive and recursive GLOBs,
-# and the feature probes with their flags.
+# and the feature probes with their flags. The same archives give the
+# files.bzl each (committed_files): the per-CPU assembly sets (a file shipped
+# only under crypto/ for aarch64, the s2n-bignum arm lists), the exported
+# headers and include directories, and FILES.
 fixture_archive(
     name = "aws-lc-mini.tar.gz",
     srcs = glob(["testdata/aws-lc-mini/**"]),
@@ -33,6 +36,8 @@ third_party_srcs(
     library = "aws-lc",
     archive = ":aws-lc-mini.tar.gz",
     committed = "testdata/aws_lc_mini_srcs.bzl",
+    committed_files = "testdata/aws_lc_mini_files.bzl",
+    require = ["COMMON_SRCS", "ASM_X86_64", "ASM_AARCH64_APPLE", "ASM_AARCH64_LINUX", "BIGNUM_ASM_X86_64", "BIGNUM_ASM_AARCH64"],
 )
 
 fixture_archive(
@@ -47,6 +52,8 @@ third_party_srcs(
     library = "s2n-tls",
     archive = ":s2n-mini.tar.gz",
     committed = "testdata/s2n_mini_srcs.bzl",
+    committed_files = "testdata/s2n_mini_files.bzl",
+    require = ["SRCS", "PUBLIC_HEADERS", "PROBE_SRCS"],
 )
 
 # The non-gating report of pinned downloads against their newest upstream

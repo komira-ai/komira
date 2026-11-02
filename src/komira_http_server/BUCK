@@ -50,6 +50,8 @@ mojo_library(
         "tests/test_chunked_request_body_dispatch.mojo",
         "tests/test_claims_principal.mojo",
         "tests/test_cov_dispatch_bodies.mojo",
+        "tests/test_cov_dispatch_loops.mojo",
+        "tests/test_cov_loop_round_parks.mojo",
         "tests/test_cov_dispatch_round_parks.mojo",
         "tests/test_cov_h2_guards.mojo",
         "tests/test_cov_middleware_edges.mojo",

@@ -1,7 +1,7 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
 # A SecretStore whose handle is the NAME of an environment variable: the
-# store kci composes for `--secret-store=env`. It depends on
+# store behind `--secret-store=env`. It depends on
 # komira_secret_store (the port), komira_libc (the one getenv
 # declaration) and komira_crypto (the buffer wipe).
 #

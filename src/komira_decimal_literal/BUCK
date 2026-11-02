@@ -1,0 +1,27 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# DECIMAL literals as DuckDB reads and folds them (decimal_literal.mojo), shared
+# by the SQL binder (which types a literal facing a DECIMAL column) and the
+# optimizer's constant folding (which folds + - * over decimal literals), so the
+# two cannot disagree on a result type.
+#
+# test_decimal_literal_text   a literal's text is DECIMAL(digits, digits after
+#                             the point) with DuckDB's widths; text it does not
+#                             type (past 38 digits, no point, malformed).
+# test_decimal_literal_fold   + - * between decimal and integer literals give
+#                             DuckDB's precision, scale and value; the limits
+#                             (38 digits, the declared precision), the integer
+#                             widths, unary minus, and the pairs it leaves.
+mojo_library(
+    name = "komira_decimal_literal",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/komira_plan_expr:komira_plan_expr",
+        "//src/komira_scalar_arithmetic:komira_scalar_arithmetic",
+    ],
+    test_srcs = [
+        "tests/test_decimal_literal_fold.mojo",
+        "tests/test_decimal_literal_text.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)

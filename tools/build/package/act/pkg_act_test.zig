@@ -380,7 +380,7 @@ fn oci(digest: []const u8, name: []const u8) misc.OciManifest {
     return .{ .digest_path = "d.txt", .digest = digest, .name = name, .version = "1.0", .platform = "linux-x86_64", .file = "img", .label = "//p:i", .repo = "komira/x", .from = "the bundle's program" };
 }
 
-test "oci manifest: the bytes kci's writer renders, and each refusal in words" {
+test "oci manifest: the bytes of the manifest, and each refusal in words" {
     var arena = std.heap.ArenaAllocator.init(t.allocator);
     defer arena.deinit();
     const a = arena.allocator();
@@ -392,10 +392,10 @@ test "oci manifest: the bytes kci's writer renders, and each refusal in words" {
         .{ .digest = hex64, .name = "a", .want = "d.txt holds '" ++ hex64 ++ "', not sha256:<64 hex>" },
         .{ .digest = "sha256:abc", .name = "a", .want = "not sha256:<64 hex>" },
         .{ .digest = "sha256:" ++ "0123456789ABCDEF0123456789abcdef0123456789abcdef0123456789abcdef", .name = "a", .want = "not sha256:<64 lowercase hex>" },
-        .{ .digest = "sha256:" ++ hex64, .name = "Hello", .want = "member name 'Hello' (the bundle's program) is not a kci artifact name ([a-z][a-z0-9_]*)" },
-        .{ .digest = "sha256:" ++ hex64, .name = "oci-check", .want = "is not a kci artifact name" },
-        .{ .digest = "sha256:" ++ hex64, .name = "1a", .want = "is not a kci artifact name" },
-        .{ .digest = "sha256:" ++ hex64, .name = "", .want = "is not a kci artifact name" },
+        .{ .digest = "sha256:" ++ hex64, .name = "Hello", .want = "member name 'Hello' (the bundle's program) is not an artifact name ([a-z][a-z0-9_]*)" },
+        .{ .digest = "sha256:" ++ hex64, .name = "oci-check", .want = "is not an artifact name" },
+        .{ .digest = "sha256:" ++ hex64, .name = "1a", .want = "is not an artifact name" },
+        .{ .digest = "sha256:" ++ hex64, .name = "", .want = "is not an artifact name" },
     };
     for (bad) |b| {
         var o = U.Out.init(a);
@@ -403,42 +403,4 @@ test "oci manifest: the bytes kci's writer renders, and each refusal in words" {
         try t.expect(std.mem.startsWith(u8, o.items, "oci_image[release] of //p:i (repository komira/x): "));
         try t.expect(U.contains(o.items, b.want));
     }
-}
-
-test "kciLineOk and stripDir" {
-    var arena = std.heap.ArenaAllocator.init(t.allocator);
-    defer arena.deinit();
-    const a = arena.allocator();
-    const line = "OK CONDA komira_hash 1.0 metadata=metadata.json metadata_path=/w/d/metadata.json render-identical=yes";
-    try t.expect(try misc.kciLineOk(a, line, "/w/d"));
-    try t.expect(!try misc.kciLineOk(a, line, "/w/e"));
-    try t.expect(!try misc.kciLineOk(a, "NOT " ++ line[3..], "/w/d"));
-    try t.expect(!try misc.kciLineOk(a, line[0 .. line.len - 1], "/w/d"));
-    try t.expectEqualStrings("OK CONDA komira_hash 1.0 metadata=metadata.json metadata_path=metadata.json render-identical=yes", try misc.stripDir(a, line, "/w/d"));
-    try t.expectEqualStrings("x\ny", try misc.stripDir(a, "x\ny", "/w/d"));
-}
-
-test "condaDirListing: exactly one .conda, manifest.json and a non-empty metadata.json" {
-    var arena = std.heap.ArenaAllocator.init(t.allocator);
-    defer arena.deinit();
-    const a = arena.allocator();
-    var tmp = t.tmpDir(.{ .iterate = true });
-    defer tmp.cleanup();
-    try put(&tmp, "ok/p.conda", "x");
-    try put(&tmp, "ok/manifest.json", "{}");
-    try put(&tmp, "ok/metadata.json", "{}");
-    try put(&tmp, "extra/p.conda", "x");
-    try put(&tmp, "extra/manifest.json", "{}");
-    try put(&tmp, "extra/metadata.json", "{}");
-    try put(&tmp, "extra/notes", "x");
-    try put(&tmp, "empty/p.conda", "x");
-    try put(&tmp, "empty/manifest.json", "{}");
-    try put(&tmp, "empty/metadata.json", "");
-    try put(&tmp, "two/a.conda", "x");
-    try put(&tmp, "two/b.conda", "x");
-    try put(&tmp, "two/manifest.json", "{}");
-    try t.expect((try misc.condaDirListing(a, try tmpPath(a, &tmp, "ok"))) == null);
-    try t.expectEqualStrings("manifest.json metadata.json notes p.conda ", (try misc.condaDirListing(a, try tmpPath(a, &tmp, "extra"))).?);
-    try t.expect((try misc.condaDirListing(a, try tmpPath(a, &tmp, "empty"))) != null);
-    try t.expect((try misc.condaDirListing(a, try tmpPath(a, &tmp, "two"))) != null);
 }

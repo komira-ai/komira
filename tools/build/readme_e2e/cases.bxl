@@ -57,6 +57,9 @@ def _cases():
     nested = findings(_PATHS, ["a", "b", "c", "d"])
     expect_in("a test package or nested directory is not a moved package", nested, "2 README e2e target(s) are for a package with no src/<name>/mopm.toml: c, d")
 
+    # A mopm.toml that is not a member is named: `mopm stage` would pack it with no build artifact.
+    expect_in("a package with a mopm.toml and no member entry is named", findings(_PATHS, ["a"]), "1 moved package(s) have no README e2e target: b", "delete its mopm.toml")
+
     # The row of EXCLUDED and the pinned mopm move together.
     row = [EXCLUDED_PATTERN, "komira//third_party/python/..."]
     other = ["komira//third_party/python/..."]

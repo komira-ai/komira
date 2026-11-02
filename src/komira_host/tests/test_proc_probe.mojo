@@ -5,7 +5,8 @@
 # The primitives (`_parse_decimal_int`, `_find_substring_bytes`,
 # `_parent_cgroup_path`) are pure and are asserted from literals. The reader is
 # asserted against files written under a fresh temporary directory: missing, empty, a lone
-# newline, the trailing-newline strip, and both sides of the 4 KiB cap. The
+# newline, the trailing-newline strip, both sides of the 4 KiB cap, and bytes >= 0x80 coming
+# back unchanged. The
 # basis rule (`_min_of_readable`) is pure and asserted from literals. The probe
 # itself reads this host's `/proc/meminfo` and cgroup files, whose
 # MemAvailable moves between reads, so it is asserted only by bounds that hold
@@ -17,6 +18,7 @@ from std.sys.info import CompilationTarget
 from std.testing import TestSuite, assert_equal, assert_true
 
 from komira_host.proc_probe import (
+    _cgroup_v2_rel_path_of,
     _cgroup_v2_self_rel_path,
     _find_substring_bytes,
     _linux_read_cgroup_v2_mem_max_bytes,
@@ -26,6 +28,7 @@ from komira_host.proc_probe import (
     _parse_decimal_int,
     _read_small_file_to_string,
     detect_scan_cache_ram_basis_bytes,
+    read_small_file_to_string,
 )
 
 
@@ -89,6 +92,30 @@ def test_parent_cgroup_path() raises:
     assert_equal(_parent_cgroup_path("ab"), "/")
 
 
+def test_parent_cgroup_path_keeps_bytes_above_0x7f() raises:
+    # "/a/é" is 5 bytes (é is C3 A9). Copying with `chr(byte)` would give 7.
+    var parent = _parent_cgroup_path("/a/é/b")
+    assert_equal(parent.byte_length(), 5, "one byte out per byte in")
+    assert_equal(parent, "/a/é")
+
+
+def test_cgroup_rel_path_of_the_unified_line() raises:
+    assert_equal(_cgroup_v2_rel_path_of(""), "")
+    assert_equal(_cgroup_v2_rel_path_of("1:cpu:/x\n"), "", "no 0:: line")
+    assert_equal(_cgroup_v2_rel_path_of("0::/a/b\n"), "/a/b")
+    assert_equal(_cgroup_v2_rel_path_of("0::/a/b"), "/a/b", "no newline")
+    assert_equal(_cgroup_v2_rel_path_of("0::/a\r\n"), "/a", "stops at CR")
+    assert_equal(
+        _cgroup_v2_rel_path_of("1:cpu:/x\n0::/user.slice/s.scope\n"),
+        "/user.slice/s.scope",
+        "hybrid file",
+    )
+    # "/é" is 3 bytes (é is C3 A9); `chr(byte)` per byte would give 5.
+    var got = _cgroup_v2_rel_path_of("0::/é\n")
+    assert_equal(got.byte_length(), 3, "one byte out per byte in")
+    assert_equal(got, "/é")
+
+
 # -----------------------------------------------------------------------------
 # _read_small_file_to_string
 # -----------------------------------------------------------------------------
@@ -131,6 +158,20 @@ def test_reader_caps_at_4_kib() raises:
         assert_equal(_read_small_file_to_string(nl_at_cap), _repeat("c", 4095))
     else:
         assert_equal(_read_small_file_to_string(at_cap), "")
+
+
+def test_reader_keeps_bytes_above_0x7f() raises:
+    # "/é\n" is the 4 bytes 2F C3 A9 0A; the trailing newline is stripped.
+    # A reader that appends `chr(byte)` returns 2F C3 83 C2 A9 (5 bytes), so
+    # `/sys/fs/cgroup<path>/memory.max` names a directory that does not exist.
+    var path = _scratch("pp_non_ascii")
+    _write(path, "/é\n")
+    comptime if CompilationTarget.is_linux():
+        var got = _read_small_file_to_string(path)
+        assert_equal(got.byte_length(), 3, "one byte out per byte in")
+        assert_equal(got, "/é")
+    else:
+        assert_equal(_read_small_file_to_string(path), "")
 
 
 # -----------------------------------------------------------------------------
@@ -178,6 +219,25 @@ def test_cgroup_path_is_the_unified_line() raises:
         var nl = rest.find("\n")
         var want = rest if nl < 0 else String(rest[byte = 0:nl])
         assert_equal(rel, want)
+
+
+def test_public_reader_matches_the_private_one() raises:
+    # The public `read_small_file_to_string` is the reader outside packages use: a missing file is
+    # empty, the last newline is stripped and the 4 KiB cap holds, exactly as for the private reader.
+    var text = _scratch("pp_public")
+    var big = _scratch("pp_public_big")
+    _write(text, "max\n")
+    _write(big, _repeat("z", 5000))
+    assert_equal(read_small_file_to_string(_scratch("pp_public_missing")), "")
+    comptime if CompilationTarget.is_linux():
+        assert_equal(read_small_file_to_string(text), "max")
+        assert_equal(read_small_file_to_string(big).byte_length(), 4096)
+        assert_equal(
+            read_small_file_to_string("/proc/self/cgroup"),
+            _read_small_file_to_string("/proc/self/cgroup"),
+        )
+    else:
+        assert_equal(read_small_file_to_string(text), "")
 
 
 def main() raises:

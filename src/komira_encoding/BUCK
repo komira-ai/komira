@@ -16,8 +16,7 @@ mojo_package(path = ".")
 
 # `:komira_encoding`, the target the packages that depend on this library name, is `:lib` as komira's
 # Mojo rules take it (tools/build/mojo/adopt.bzl): the same file, so a dependent builds only once the
-# tests have passed. It carries the README gate too (`[tests][readme]`, with `[file]` and `[generated]`,
-# which kci_validate's golden test reads): the examples run against `:lib`; the tests are not run again.
+# tests have passed. It carries the README gate too (`[tests][readme]`, with `[file]` and `[generated]`): the examples run against `:lib`; the tests are not run again.
 mojo_adopted_library(
     name = "komira_encoding",
     lib = ":lib",
@@ -37,7 +36,7 @@ mojo_conda(
     lib = ":lib",
     manifest = "mopm.toml",
     mojo = "1.0.0",
-    mopm = "toolchains//:mopm_0_0_86",
+    mopm = "toolchains//:mopm_0_0_101",
     package = "komira_encoding",
     version = "0.1.0",
     visibility = ["PUBLIC"],

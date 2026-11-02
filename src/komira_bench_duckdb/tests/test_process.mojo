@@ -18,9 +18,14 @@
 #   later queries are refused, and `kill` ends it.
 # - test_a_write_to_a_process_that_has_gone_raises: after the process has
 #   exited, sending raises an error and this process carries on.
+# - test_the_fault_counters_of_a_real_child_are_read: on Linux the transport
+#   reads the minor and major page faults of its child process once the child
+#   has run (minor faults above zero) and reads nothing once the child is
+#   finished; on other platforms it reads nothing.
 # - test_a_binary_that_cannot_start_raises: a path that does not exist is an
 #   error from `ProcessTransport`, not a session that hangs.
 
+from std.sys.info import CompilationTarget
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
 from komira_bench_duckdb import BenchClock, DuckDbSession, ProcessTransport
@@ -31,6 +36,7 @@ def _stand_in() -> String:
     'while IFS= read -r l; do case "$l" in'
     ' ".print "*) echo "${l#.print }";;'
     ' "SELECT answer"*) echo \'[{"answer":42}]\';;'
+    ' "DESCRIBE SELECT answer"*) echo \'[{"column_name":"answer","column_type":"BIGINT"}]\';;'
     ' "FAIL"*) echo "Error: failed" >&2;;'
     ' "FLOOD"*) head -c 300000 /dev/zero | tr "\\0" e >&2;;'
     " esac; done"
@@ -52,12 +58,14 @@ def test_a_conversation_over_real_pipes() raises:
     assert_equal(fetched.rows.row_count(), 1)
     assert_equal(fetched.rows.names[0], String("answer"))
     assert_equal(fetched.rows.rows[0][0].i, Int64(42))
+    assert_equal(len(fetched.rows.types), 1)
+    assert_equal(fetched.rows.types[0], String("BIGINT"))
     var failed = s.fetch(String("FAIL now"))
     assert_false(failed.ok())
     assert_equal(failed.error, String("Error: failed\n"))
     var after = s.run_timed(String("SELECT answer"))
     assert_true(after.ok())
-    assert_equal(after.id, 4)
+    assert_equal(after.id, 5)
     assert_equal(s.close(), 0)
 
 
@@ -114,6 +122,26 @@ def test_a_write_to_a_process_that_has_gone_raises() raises:
         raised = True
     assert_true(raised)
     assert_equal(t.finish(), 0)
+
+
+def test_the_fault_counters_of_a_real_child_are_read() raises:
+    var args = List[String]()
+    args.append(String("-c"))
+    args.append(_stand_in())
+    var t = ProcessTransport(String("/bin/sh"), args)
+    t.send(String(".print ready\n"))
+    # the child has run once its answer has arrived
+    var got = t.read_stdout(0)
+    assert_false(got.eof)
+    comptime if CompilationTarget.is_linux():
+        var f = t.child_faults()
+        assert_true(Bool(f))
+        assert_true(f.value().minor > 0)
+        assert_true(f.value().major >= 0)
+    else:
+        assert_false(Bool(t.child_faults()))
+    assert_equal(t.finish(), 0)
+    assert_false(Bool(t.child_faults()))
 
 
 def test_a_binary_that_cannot_start_raises() raises:

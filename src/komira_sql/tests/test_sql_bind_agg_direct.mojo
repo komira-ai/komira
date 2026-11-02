@@ -352,20 +352,20 @@ def test_unaliased_aggregate_names() raises:
 def test_expressions_over_aggregates() raises:
     _check(
         "SELECT k, sum(v) / count(*) AS r, 100.0 * sum(v) / sum(g) AS p, max(v) - min(v) AS m FROM t GROUP BY k",
-        "Project(exprs=[ColRef(k), Alias(BinaryOp(DIV, ColRef(_agg_x0), ColRef(_agg_x1)), \"r\"), Alias(BinaryOp(DIV, BinaryOp(MUL, Literal(ScalarValue(float64, 100.0)), ColRef(_agg_x0)), ColRef(_agg_x2)), \"p\"), Alias(BinaryOp(SUB, ColRef(_agg_x3), ColRef(_agg_x4)), \"m\")])\n"
-        "  Aggregate(group_by=[ColRef(k)], aggs=[SUM(ColRef(v)).alias(\"_agg_x0\"), COUNT(*).alias(\"_agg_x1\"), SUM(ColRef(g)).alias(\"_agg_x2\"), MAX(ColRef(v)).alias(\"_agg_x3\"), MIN(ColRef(v)).alias(\"_agg_x4\")])\n"
+        "Project(exprs=[ColRef(k), Alias(BinaryOp(DIV, ColRef(_agg_x0), ColRef(_agg_x1)), \"r\"), Alias(BinaryOp(DIV, BinaryOp(MUL, Literal(ScalarValue(float64, 100.0)), ColRef(_agg_x0)), Cast(ColRef(_agg_x2), float64)), \"p\"), Alias(BinaryOp(SUB, ColRef(_agg_x3), ColRef(_agg_x4)), \"m\")])\n"
+        "  Aggregate(group_by=[ColRef(k)], aggs=[SUM(ColRef(v)).alias(\"_agg_x0\"), COUNT(*).alias(\"_agg_x1\"), SUM(Cast(ColRef(g), float8_e5m2, arrow=decimal128, p=38, s=0)).alias(\"_agg_x2\"), MAX(ColRef(v)).alias(\"_agg_x3\"), MIN(ColRef(v)).alias(\"_agg_x4\")])\n"
         "    Scan(path=\"t.parquet\", type=PARQUET, source_kind=COLUMNAR)\n"
     )
     _check(
         "SELECT k, sum(k) / count(*) AS r FROM t GROUP BY k",
         "Project(exprs=[ColRef(k), Alias(BinaryOp(DIV, Cast(ColRef(_agg_x0), float64), ColRef(_agg_x1)), \"r\")])\n"
-        "  Aggregate(group_by=[ColRef(k)], aggs=[SUM(ColRef(k)).alias(\"_agg_x0\"), COUNT(*).alias(\"_agg_x1\")])\n"
+        "  Aggregate(group_by=[ColRef(k)], aggs=[SUM(Cast(ColRef(k), float8_e5m2, arrow=decimal128, p=38, s=0)).alias(\"_agg_x0\"), COUNT(*).alias(\"_agg_x1\")])\n"
         "    Scan(path=\"t.parquet\", type=PARQUET, source_kind=COLUMNAR)\n"
     )
     _check(
         "SELECT k, sum(v) / sum(k) AS c FROM t GROUP BY k",
-        "Project(exprs=[ColRef(k), Alias(BinaryOp(DIV, ColRef(_agg_x0), ColRef(_agg_x1)), \"c\")])\n"
-        "  Aggregate(group_by=[ColRef(k)], aggs=[SUM(ColRef(v)).alias(\"_agg_x0\"), SUM(ColRef(k)).alias(\"_agg_x1\")])\n"
+        "Project(exprs=[ColRef(k), Alias(BinaryOp(DIV, ColRef(_agg_x0), Cast(ColRef(_agg_x1), float64)), \"c\")])\n"
+        "  Aggregate(group_by=[ColRef(k)], aggs=[SUM(ColRef(v)).alias(\"_agg_x0\"), SUM(Cast(ColRef(k), float8_e5m2, arrow=decimal128, p=38, s=0)).alias(\"_agg_x1\")])\n"
         "    Scan(path=\"t.parquet\", type=PARQUET, source_kind=COLUMNAR)\n"
     )
     _check(
@@ -405,7 +405,7 @@ def test_expressions_over_aggregates() raises:
     _check(
         "SELECT k, sum(k) ^ 2 AS c FROM t GROUP BY k",
         "Project(exprs=[ColRef(k), Alias(MathFn2(op=1, ColRef(_agg_x0), Literal(ScalarValue(int64, 2))), \"c\")])\n"
-        "  Aggregate(group_by=[ColRef(k)], aggs=[SUM(ColRef(k)).alias(\"_agg_x0\")])\n"
+        "  Aggregate(group_by=[ColRef(k)], aggs=[SUM(Cast(ColRef(k), float8_e5m2, arrow=decimal128, p=38, s=0)).alias(\"_agg_x0\")])\n"
         "    Scan(path=\"t.parquet\", type=PARQUET, source_kind=COLUMNAR)\n"
     )
     _check(
@@ -463,7 +463,7 @@ def test_one_accumulator_per_distinct_aggregate() raises:
         "SELECT k, sum(v) FROM t GROUP BY k HAVING sum(k) > 1 AND sum(k) < 9",
         "Project(exprs=[ColRef(k), ColRef(sum(v))])\n"
         "  Filter(predicate=BinaryOp(AND, BinaryOp(GT, ColRef(_agg_x0), Literal(ScalarValue(int64, 1))), BinaryOp(LT, ColRef(_agg_x0), Literal(ScalarValue(int64, 9)))))\n"
-        "    Aggregate(group_by=[ColRef(k)], aggs=[SUM(ColRef(v)).alias(\"sum(v)\"), SUM(ColRef(k)).alias(\"_agg_x0\")])\n"
+        "    Aggregate(group_by=[ColRef(k)], aggs=[SUM(ColRef(v)).alias(\"sum(v)\"), SUM(Cast(ColRef(k), float8_e5m2, arrow=decimal128, p=38, s=0)).alias(\"_agg_x0\")])\n"
         "      Scan(path=\"t.parquet\", type=PARQUET, source_kind=COLUMNAR)\n"
     )
     _check(
@@ -652,7 +652,7 @@ def test_deparse_names_of_expressions() raises:
     _check(
         "SELECT mean(v), MEAN(v), avg(v), SUM(K), max(t.k) FROM t",
         "Project(exprs=[ColRef(mean(v)), ColRef(mean(v)_1), ColRef(avg(v)), ColRef(sum(k)), ColRef(max(t.k))])\n"
-        "  Aggregate(group_by=[], aggs=[MEAN(ColRef(v)).alias(\"mean(v)\"), MEAN(ColRef(v)).alias(\"mean(v)_1\"), MEAN(ColRef(v)).alias(\"avg(v)\"), SUM(ColRef(k)).alias(\"sum(k)\"), MAX(ColRef(k)).alias(\"max(t.k)\")])\n"
+        "  Aggregate(group_by=[], aggs=[MEAN(ColRef(v)).alias(\"mean(v)\"), MEAN(ColRef(v)).alias(\"mean(v)_1\"), MEAN(ColRef(v)).alias(\"avg(v)\"), SUM(Cast(ColRef(k), float8_e5m2, arrow=decimal128, p=38, s=0)).alias(\"sum(k)\"), MAX(ColRef(k)).alias(\"max(t.k)\")])\n"
         "    Scan(path=\"t.parquet\", type=PARQUET, source_kind=COLUMNAR)\n"
     )
     _check(
@@ -764,7 +764,7 @@ def test_dedup_keys_cover_every_keyable_argument() raises:
         "SELECT k, sum(1) AS a FROM t GROUP BY k HAVING sum(1) > 0",
         "Project(exprs=[ColRef(k), ColRef(a)])\n"
         "  Filter(predicate=BinaryOp(GT, ColRef(a), Literal(ScalarValue(int64, 0))))\n"
-        "    Aggregate(group_by=[ColRef(k)], aggs=[SUM(Literal(ScalarValue(int64, 1))).alias(\"a\")])\n"
+        "    Aggregate(group_by=[ColRef(k)], aggs=[SUM(Cast(Literal(ScalarValue(int64, 1)), float8_e5m2, arrow=decimal128, p=38, s=0)).alias(\"a\")])\n"
         "      Scan(path=\"t.parquet\", type=PARQUET, source_kind=COLUMNAR)\n"
     )
     _check(
@@ -899,7 +899,7 @@ def test_aggregate_output_types() raises:
     the argument type and count is int64."""
     assert_equal(
         _types("SELECT sum(k), avg(k), min(k), max(k), count(k) FROM t"),
-        "sum(k):int64,avg(k):float64,min(k):int64,max(k):int64,count(k):int64",
+        "sum(k):decimal128(38,0),avg(k):float64,min(k):int64,max(k):int64,count(k):int64",
     )
     assert_equal(
         _types("SELECT sum(dc), avg(dc), min(dc), max(dc), count(dc) FROM t"),

@@ -14,11 +14,30 @@
 #   when they are the same value (infinities included) or differ by at most
 #   the larger of the absolute floor and the relative tolerance times the
 #   larger magnitude;
+# - an exact decimal column (a DECIMAL, or integers past 64 bits) compares its
+#   count of decimals, their exact sum, their smallest and largest value and the
+#   hash sum of their canonical texts exactly, and the integers among them as
+#   an integer column does; a decimal column against a column of any other kind,
+#   a double column included, is a difference of kinds, never a tolerance;
 # - text columns compare the byte length of all cells, the smallest and the
 #   largest cell, and the sum of a hash of each cell, exactly.
+# - the declared type of each column (declared_types.mojo) is compared before the
+#   values, and a difference is a failure of its own (`type_reasons`, also in
+#   `reasons`): DECIMAL(38,2) against DECIMAL(38,4), or BIGINT against
+#   DECIMAL(18,0), fails even when the values agree. A type outside the
+#   vocabulary fails, even against itself. The one exception is a pair of the
+#   table of allowed departures (declared_types.mojo; HUGEINT against
+#   DECIMAL(38,0)): with exactly equal values it is not a failure, it is listed
+#   in `departures`, and `label()` says DEPARTURE with the reason instead of
+#   IDENTICAL; with any other difference it is a failure like every other
+#   pair. Types recorded on one side only fail,
+#   and when neither side has any (a result built by hand) there is nothing to
+#   compare. With no rows on both sides the types are compared only when both
+#   sides have them.
 # Column names are not compared: engines name computed columns differently.
 
-from .cells import KIND_FLOAT, KIND_INT, KIND_NULL, KIND_TEXT
+from .cells import KIND_DECIMAL, KIND_FLOAT, KIND_INT, KIND_NULL, KIND_TEXT
+from .declared_types import departure_reason, is_unmapped
 from .signature import ColumnSignature, ResultSignature
 
 comptime REL_TOL: Float64 = 1e-9
@@ -60,12 +79,16 @@ struct ValueVerdict(Copyable, Movable):
 
     var identical: Bool
     var reasons: List[String]
+    var type_reasons: List[String]
+    var departures: List[String]
     var modes: List[String]
     var max_rel: Float64
 
     def __init__(out self):
         self.identical = True
         self.reasons = List[String]()
+        self.type_reasons = List[String]()
+        self.departures = List[String]()
         self.modes = List[String]()
         self.max_rel = Float64(0)
 
@@ -73,8 +96,28 @@ struct ValueVerdict(Copyable, Movable):
         self.identical = False
         self.reasons.append(reason)
 
+    def fail_type(mut self, reason: String):
+        """A failure of the declared types, kept apart from value failures."""
+        self.fail(reason)
+        self.type_reasons.append(reason)
+
+    def departed(self) -> Bool:
+        """Whether the answers agree except for an allowed departure of the
+        declared types (`identical` is True then, and `departures` is not
+        empty)."""
+        return self.identical and len(self.departures) > 0
+
     def label(self) -> String:
-        """`IDENTICAL`, or `DIVERGENT` with the first reason."""
+        """`IDENTICAL`, `DEPARTURE` with the reason of the allowed departure
+        (reasons joined by `; ` when there are several), or `DIVERGENT` with
+        the first reason."""
+        if self.departed():
+            var text = String("DEPARTURE: ")
+            for i in range(len(self.departures)):
+                if i > 0:
+                    text += String("; ")
+                text += self.departures[i]
+            return text^
         if self.identical:
             return String("IDENTICAL")
         return String("DIVERGENT: ") + self.reasons[0]
@@ -95,6 +138,20 @@ def _check_number(
         v.fail(where + String(" differs: ") + String(a) + String(" against ") + String(b))
 
 
+def kind_name(kind: Int) -> String:
+    """A column kind as its number and its name."""
+    var name = String("no value")
+    if kind == KIND_INT:
+        name = String("integer")
+    elif kind == KIND_FLOAT:
+        name = String("double")
+    elif kind == KIND_TEXT:
+        name = String("text")
+    elif kind == KIND_DECIMAL:
+        name = String("exact decimal")
+    return String(kind) + String(" (") + name + String(")")
+
+
 def _check_exact_int(mut v: ValueVerdict, where: String, a: Int64, b: Int64):
     if a != b:
         v.fail(where + String(" differs: ") + String(a) + String(" against ") + String(b))
@@ -110,14 +167,14 @@ def _compare_column(
 ):
     var col = String("column ") + String(c)
     if a.mixed() or b.mixed():
-        v.fail(col + String(" mixes numbers and texts"))
+        v.fail(col + String(" mixes values that cannot be compared (numbers and texts, or exact decimals and doubles)"))
         return
     var numeric_mix = (
         (a.kind() == KIND_INT and b.kind() == KIND_FLOAT)
         or (a.kind() == KIND_FLOAT and b.kind() == KIND_INT)
     )
     if a.kind() != b.kind() and not numeric_mix:
-        v.fail(col + String(" has kind ") + String(a.kind()) + String(" against ") + String(b.kind()))
+        v.fail(col + String(" has kind ") + kind_name(a.kind()) + String(" against ") + kind_name(b.kind()))
         return
     if a.count != b.count:
         v.fail(col + String(" count differs: ") + String(a.count) + String(" against ") + String(b.count))
@@ -139,6 +196,25 @@ def _compare_column(
             v.fail(col + String(" texts differ (the hash sum of the cells)"))
         v.modes.append(col + String(".text=exact"))
         return
+    if kind == KIND_DECIMAL:
+        if a.dcount != b.dcount:
+            v.fail(col + String(" decimal count differs: ") + String(a.dcount) + String(" against ") + String(b.dcount))
+        var sa = a.dsum.text()
+        var sb = b.dsum.text()
+        if sa != sb:
+            v.fail(col + String(" sum differs: ") + sa + String(" against ") + sb)
+        if a.dmin != b.dmin:
+            v.fail(col + String(" minimum differs: ") + a.dmin + String(" against ") + b.dmin)
+        if a.dmax != b.dmax:
+            v.fail(col + String(" maximum differs: ") + a.dmax + String(" against ") + b.dmax)
+        if a.dhash != b.dhash:
+            v.fail(col + String(" decimals differ (the hash sum of the cells)"))
+        _check_exact_int(v, col + String(" integer sum"), a.isum, b.isum)
+        _check_exact_int(v, col + String(" integer sum of squares"), a.isumsq, b.isumsq)
+        _check_exact_int(v, col + String(" integer minimum"), a.imin, b.imin)
+        _check_exact_int(v, col + String(" integer maximum"), a.imax, b.imax)
+        v.modes.append(col + String(".sum=exact"))
+        return
     if kind == KIND_INT and not numeric_mix:
         _check_exact_int(v, col + String(" sum"), a.isum, b.isum)
         _check_exact_int(v, col + String(" sum of squares"), a.isumsq, b.isumsq)
@@ -153,6 +229,43 @@ def _compare_column(
     v.modes.append(col + String(".sum=tolerance"))
 
 
+def _note_departure(mut v: ValueVerdict, reason: String):
+    for i in range(len(v.departures)):
+        if v.departures[i] == reason:
+            return
+    v.departures.append(reason.copy())
+
+
+def _compare_types(mut v: ValueVerdict, actual: ResultSignature, expected: ResultSignature):
+    var have = len(actual.types) > 0
+    if not have and len(expected.types) == 0:
+        return
+    if have != (len(expected.types) > 0):
+        var side = String("the actual side") if have else String("the expected side")
+        v.fail_type(String("declared types are recorded on one side only (") + side + String(" has them)"))
+        return
+    if len(actual.types) != len(expected.types):
+        v.fail_type(
+            String("declared type count differs: ") + String(len(actual.types))
+            + String(" against ") + String(len(expected.types))
+        )
+        return
+    for c in range(len(actual.types)):
+        var a = actual.types[c]
+        var e = expected.types[c]
+        var col = String("column ") + String(c)
+        if is_unmapped(a):
+            v.fail_type(col + String(" declared type ") + a + String(" is not in the mapping (see README.md)"))
+        if is_unmapped(e):
+            v.fail_type(col + String(" declared type ") + e + String(" is not in the mapping (see README.md)"))
+        if not is_unmapped(a) and not is_unmapped(e) and a != e:
+            var reason = departure_reason(a, e)
+            if reason:
+                _note_departure(v, reason.value())
+            else:
+                v.fail_type(col + String(" declared type differs: ") + a + String(" against ") + e)
+
+
 def compare_signatures(
     actual: ResultSignature,
     expected: ResultSignature,
@@ -164,10 +277,15 @@ def compare_signatures(
     if actual.rows != expected.rows:
         v.fail(String("row count differs: ") + String(actual.rows) + String(" against ") + String(expected.rows))
     if actual.rows == 0 and expected.rows == 0:
+        if len(actual.types) > 0 and len(expected.types) > 0:
+            _compare_types(v, actual, expected)
         return v^
     if len(actual.columns) != len(expected.columns):
         v.fail(String("column count differs: ") + String(len(actual.columns)) + String(" against ") + String(len(expected.columns)))
         return v^
+    _compare_types(v, actual, expected)
     for c in range(len(actual.columns)):
         _compare_column(v, c, actual.columns[c], expected.columns[c], rel_tol, abs_floor)
+    if not v.identical:
+        v.departures = List[String]()  # a departure is only for equal values
     return v^

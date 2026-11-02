@@ -16,8 +16,7 @@
 //!     tool link --readme <README.md> --display <name> --out <file>
 //!         Writes to --out the arguments of the README's link block
 //!         (link.zig), one `run\t<word>` or `build\t<word>` line each; an
-//!         empty file when the README holds no block. kci's install
-//!         validation reads them (src/kci_validate, readme_link.mojo).
+//!         empty file when the README holds no block.
 //!     tool link-check --readme <README.md> --display <name> --expect <file> --out <file>
 //!         When the block's arguments, in `link`'s form, are the bytes of
 //!         --expect, writes them to --out (exit 0); otherwise prints both and
@@ -30,10 +29,7 @@
 //!         refuses each member that ships no README (`--no-readme`), and each
 //!         whose README holds no example as `generate --links refuse` reads
 //!         it (a ```mojo or ```mojo module fence; examples.zig), or is refused
-//!         by that read. kci's install validation (src/kci_validate,
-//!         readme_installed.mojo) refuses both after a release is published;
-//!         each refusal is one line naming the member and quoting kci's
-//!         words. Passing, writes to --out `<conda name> <examples>` per
+//!         by that read. Each refusal is one line naming the member. Passing, writes to --out `<conda name> <examples>` per
 //!         member. With --expect-refusal (the build's own tests of this
 //!         check), exit 0 and write the refusal to --out only when the
 //!         members are refused and the refusal contains <text>; otherwise
@@ -218,11 +214,11 @@ fn linkCheck(alloc: Allocator, dir: std.fs.Dir, argv: []const []const u8) Outcom
 
 const Member = struct { name: []const u8, display: []const u8, readme: ?[]const u8 };
 
-/// Why kci's install validation refuses release member `m` (one line per
+/// Why the release refuses release member `m` (one line per
 /// reason, each naming the member), or null when it holds an example; adds
 /// `<name> <examples>` to `passed` then.
 fn releaseRefusal(alloc: Allocator, dir: std.fs.Dir, m: Member, passed: *std.ArrayList(u8)) union(enum) { why: ?[]const u8, failed: Outcome } {
-    const path = m.readme orelse return .{ .why = fmt(alloc, "release member {s}: no README is packaged, so kci's install validation would refuse it after publish:" ++
+    const path = m.readme orelse return .{ .why = fmt(alloc, "release member {s}: no README is packaged, so the release would refuse it:" ++
         " \"{s} ships no share/doc/{s}/README.md: a release needs a README; add {s}\"", .{ m.name, m.name, m.name, m.display }) };
     const text = switch (readReadme(alloc, dir, path)) {
         .text => |x| x,
@@ -236,12 +232,12 @@ fn releaseRefusal(alloc: Allocator, dir: std.fs.Dir, m: Member, passed: *std.Arr
             while (it.next()) |line| {
                 if (!first) out.append(alloc, '\n') catch oom();
                 first = false;
-                out.writer(alloc).print("release member {s}: kci's install validation would refuse its README after publish: {s}", .{ m.name, line }) catch oom();
+                out.writer(alloc).print("release member {s}: the release would refuse its README: {s}", .{ m.name, line }) catch oom();
             }
             return .{ .why = out.items };
         },
         .examples => |exs| {
-            if (exs.len == 0) return .{ .why = fmt(alloc, "release member {s}: {s} holds no ```mojo or ```mojo module example, so kci's install validation would refuse it after publish:" ++
+            if (exs.len == 0) return .{ .why = fmt(alloc, "release member {s}: {s} holds no ```mojo or ```mojo module example, so the release would refuse it:" ++
                 " \"{s} holds no ```mojo example, so the validation would run nothing; add one\"", .{ m.name, m.display, m.display }) };
             passed.writer(alloc).print("{s} {d}\n", .{ m.name, exs.len }) catch oom();
             return .{ .why = null };

@@ -20,6 +20,8 @@ _TEST_ONLY = [
     "komira//src/tests/helpers/komira_test_npm_modules_ts_jest/...",
     # The Node.js UDF runtime of the UDF runtime spike (worker transport).
     "komira//src/tests/helpers/komira_udf_spike_node_worker/...",
+    # The Node addon over libkomira (node/): built against the node headers, tested with this runtime.
+    "komira//node/...",
 ]
 
 # The planted defects of test 54 (tools/build/tests/negative/node), which must

@@ -15,12 +15,18 @@ from komira_plan_expr.expr_walk import (
 )
 from komira_plan_expr.scalar_desugar import promote_int_literal_to_float
 from komira_plan_expr.scalar_value import ScalarValue
+from komira_sql.sql_bind_interval import (
+    INTERVAL_STANDALONE_REFUSAL, interval_date_fold, interval_operand_side,
+)
 from komira_sql.sql_ast import (
-    SX_AGG, SX_BINARY, SX_BOOL, SX_CALL, SX_CASE, SX_COLUMN, SX_DATE, SX_FLOAT, SX_INT,
+    SX_AGG, SX_BINARY, SX_INTERVAL, SX_BOOL, SX_CALL, SX_CASE, SX_COLUMN, SX_DATE, SX_FLOAT, SX_INT,
     SX_LIKE, SX_NULL, SX_STAR, SX_STRING, SX_SUBQUERY, SX_TIMESTAMP, SX_UNARY,
     SX_WINDOW, SqlExpr, TSLIT_AWARE,
 )
 from komira_sql.sql_bind_call import _bind_scalar_call
+from komira_sql.sql_bind_decimal import (
+    bind_decimal_comparison, swap_decimal_comparison,
+)
 from komira_sql.sql_bind_ops import (
     _map_unop, _bind_sql_operator, _bind_like, _BARE_NULL_REFUSAL, _sx_is_big_int,
     _big_int_literal_refusal, _big_int_cmp_serves, _bind_big_int_uint64,
@@ -239,7 +245,14 @@ def _bind_scalar(sx: SqlExpr, schema: Schema, scope: BindScope, catalog: SqlCata
                 _timestamp_literal_micros(String(sx.text), sx.op == TSLIT_AWARE)
             )
         )
+    if sx.tag == SX_INTERVAL:
+        raise Error(INTERVAL_STANDALONE_REFUSAL)
     if sx.tag == SX_BINARY:
+        var ivl_side = interval_operand_side(sx)
+        if ivl_side == 2:
+            return interval_date_fold(sx, _bind_scalar(sx._binary.value().left[], schema, scope, catalog, cte_scope, prebound))
+        if ivl_side == 1:
+            return interval_date_fold(sx, _bind_scalar(sx._binary.value().right[], schema, scope, catalog, cte_scope, prebound))
         if _is_null_comparison(sx):
             if sx._binary.value().left[].tag != SX_NULL:
                 return _null_comparison(sx.op, _bind_scalar(sx._binary.value().left[], schema, scope, catalog, cte_scope, prebound))
@@ -251,6 +264,14 @@ def _bind_scalar(sx: SqlExpr, schema: Schema, scope: BindScope, catalog: SqlCata
             # The constant moved across the comparison; bind the rewritten
             # comparison, which the int-cast unwrap below then serves.
             return _bind_scalar(moved_opt.take(), schema, scope, catalog, cte_scope, prebound)
+        var swapped_opt = swap_decimal_comparison(sx, schema, scope)
+        if swapped_opt:
+            # A number constant on the left of a DECIMAL column: bind the
+            # comparison with the column on the left.
+            return _bind_scalar(swapped_opt.take(), schema, scope, catalog, cte_scope, prebound)
+        var decimal_cmp = bind_decimal_comparison(sx, schema, scope)
+        if decimal_cmp:
+            return decimal_cmp.take()
         var big_cmp = _big_int_cmp_serves(sx)
         var unwrap = _int_cast_cmp_side(sx, schema, scope)
         var lhs: Expr

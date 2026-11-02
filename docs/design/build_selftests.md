@@ -1,5 +1,7 @@
 # Build self-tests: dissolving run_tests.sh
 
+> **kci is retired and removed.** Where this document names kci, its libraries (`src/kci_*`), `bin/kci`, `kci.yml` or `kci run`, it describes a design that no longer exists in the tree; it is kept as a record. The release today is `.github/workflows/release.yml`, and the pull request check is the `check` job of `pr.yml` ([docs/ci.md](../ci.md)).
+
 This is the design for replacing [tools/build/tests/run_tests.sh](../../tools/build/tests/run_tests.sh),
 the files it sources, [tool_lib.sh](../../tools/build/tests/tool_lib.sh),
 [golden.sh](../../tools/build/tests/golden/golden.sh) and

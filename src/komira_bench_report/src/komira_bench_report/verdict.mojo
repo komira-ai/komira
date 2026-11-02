@@ -1,7 +1,10 @@
 # The two verdict vocabularies of a cell and the pass verdict. A cell records
 # how komira's run ended (`StageOutcome`) and whether its values matched the
 # reference (`ValueVerdict`); a ratio is only ever derived from a cell whose
-# run ended in EXEC_OK and whose values are IDENTICAL.
+# run ended in EXEC_OK and whose values are IDENTICAL or a DEPARTURE (equal
+# values whose declared types differ in a way the Arrow representation forces,
+# for the reason the verdict carries). A DEPARTURE cell is never a PASS: its
+# verdict is DEPARTURE, whatever its ratio.
 
 comptime STAGE_EXEC_OK = "EXEC_OK"
 comptime STAGE_BIND_FAIL = "BIND_FAIL"
@@ -11,10 +14,12 @@ comptime STAGE_UNSUPPORTED = "UNSUPPORTED"
 comptime VALUE_IDENTICAL = "IDENTICAL"
 comptime VALUE_DIVERGENT = "DIVERGENT"
 comptime VALUE_UNVERIFIED = "UNVERIFIED"
+comptime VALUE_DEPARTURE = "DEPARTURE"
 
 comptime CELL_PASS = "PASS"
 comptime CELL_FAIL = "FAIL"
 comptime CELL_NO_RATIO = "NO_RATIO"
+comptime CELL_DEPARTURE = "DEPARTURE"
 
 
 def split_tag(text: String) -> List[String]:
@@ -106,7 +111,8 @@ struct StageOutcome(Copyable, Movable):
 
 struct ValueVerdict(Copyable, Movable):
     """Whether the values of a cell matched the reference: `IDENTICAL`,
-    `DIVERGENT`, or `UNVERIFIED:<cause>` when they could not be compared."""
+    `DIVERGENT`, `DEPARTURE:<reason>` (equal values, an allowed departure of the
+    declared types), or `UNVERIFIED:<cause>` when they could not be compared."""
 
     var kind: String
     var detail: String
@@ -121,11 +127,13 @@ struct ValueVerdict(Copyable, Movable):
         if plain and self.detail.byte_length() != 0:
             raise Error("value verdict " + self.kind + " takes no detail")
         if not plain:
-            if self.kind != String(VALUE_UNVERIFIED):
+            if self.kind != String(VALUE_UNVERIFIED) and self.kind != String(VALUE_DEPARTURE):
                 raise Error("unknown value verdict '" + self.kind + "'")
             if self.detail.byte_length() == 0:
-                raise Error("value verdict UNVERIFIED must name the cause")
-            _refuse_place(self.detail, String("value verdict UNVERIFIED"))
+                raise Error("value verdict " + self.kind + " must name the " + (
+                    String("cause") if self.kind == String(VALUE_UNVERIFIED) else String("reason")
+                ))
+            _refuse_place(self.detail, String("value verdict ") + self.kind)
 
     @staticmethod
     def identical() raises -> ValueVerdict:
@@ -140,6 +148,10 @@ struct ValueVerdict(Copyable, Movable):
         return ValueVerdict(String(VALUE_UNVERIFIED), cause^)
 
     @staticmethod
+    def departure(var reason: String) raises -> ValueVerdict:
+        return ValueVerdict(String(VALUE_DEPARTURE), reason^)
+
+    @staticmethod
     def parse(text: String) raises -> ValueVerdict:
         var parts = split_tag(text)
         var detail = String("")
@@ -150,15 +162,28 @@ struct ValueVerdict(Copyable, Movable):
     def is_identical(self) -> Bool:
         return self.kind == String(VALUE_IDENTICAL)
 
+    def is_departure(self) -> Bool:
+        return self.kind == String(VALUE_DEPARTURE)
+
+    def is_matched(self) -> Bool:
+        """Equal values: `IDENTICAL`, or a `DEPARTURE` (which is counted and
+        shown apart from a pass)."""
+        return self.is_identical() or self.is_departure()
+
     def text(self) -> String:
         return _joined(self.kind, self.detail)
 
 
-def cell_verdict(ratio: Optional[Float64], pass_max: Float64) -> String:
+def cell_verdict(
+    ratio: Optional[Float64], pass_max: Float64, departure: Bool = False
+) -> String:
     """`PASS` when the ratio is at most `pass_max`, `FAIL` above it, and
-    `NO_RATIO` for a cell that has none."""
+    `NO_RATIO` for a cell that has none. A cell whose values are a `DEPARTURE`
+    (`departure` True) is `DEPARTURE` whatever the ratio, never `PASS`."""
     if not ratio:
         return String(CELL_NO_RATIO)
+    if departure:
+        return String(CELL_DEPARTURE)
     if ratio.value() <= pass_max:
         return String(CELL_PASS)
     return String(CELL_FAIL)

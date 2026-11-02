@@ -62,6 +62,10 @@ pub const Model = struct {
     binaries: []const Binary,
     /// The files of release/ that name the `<name>_conda` label.
     release_files: []const []const u8,
+    /// The packages of the library's dependency closure that declare a static native (`[native.<id>]`),
+    /// sorted. The package owns none itself, so its archives reach a dependent's link through the
+    /// C toolchain's link facts.
+    link_natives: []const []const u8 = &.{},
 };
 
 pub const mojo_version = "1.0.0";
@@ -69,13 +73,21 @@ pub const package_version = "0.1.0";
 
 /// Comment prose, wrapped to 100 columns: every line starts with `# `.
 pub fn para(b: *Buf, prose: []const u8) !void {
-    var len: usize = 1;
+    try paraIndented(b, "", prose);
+}
+
+/// `para` with every line indented by `indent` (a comment inside a call).
+fn paraIndented(b: *Buf, indent: []const u8, prose: []const u8) !void {
+    var len: usize = indent.len + 1;
+    try b.add(indent);
     try b.add("#");
     var it = std.mem.tokenizeScalar(u8, prose, ' ');
     while (it.next()) |w| {
-        if (len > 1 and len + 1 + w.len > 100) {
-            try b.add("\n#");
-            len = 1;
+        if (len > indent.len + 1 and len + 1 + w.len > 100) {
+            try b.add("\n");
+            try b.add(indent);
+            try b.add("#");
+            len = indent.len + 1;
         }
         try b.add(" ");
         try b.add(w);
@@ -254,6 +266,19 @@ pub fn buck(a: Allocator, m: Model) ![]u8 {
         const labels = try a.alloc([]const u8, m.deps.len);
         for (m.deps, labels) |d, *l| l.* = try std.fmt.allocPrint(a, "//src/{s}:{s}", .{ d.name, d.name });
         try listAttr(&b, "deps", labels);
+    }
+    if (m.link_natives.len > 0) {
+        const owners = try andList(a, m.link_natives);
+        const many = m.link_natives.len > 1;
+        try paraIndented(&b, "    ", try std.fmt.allocPrint(a, "{s}, in the closure, {s} C of {s} own ({s}), so `lib`'s closure carries {s} and a dependent's link takes {s} from here. This package owns no C, so it names no `c_deps`: it takes the C toolchain's link facts directly.", .{
+            owners,
+            if (many) "declare" else "declares",
+            if (many) "their" else "its",
+            if (many) "static natives" else "a static native",
+            if (many) "those archives" else "that archive",
+            if (many) "them" else "it",
+        }));
+        try b.add("    cxx_toolchain = \"komira//tools/build/mojo:adopt_cxx_link_facts\",\n");
     }
     try b.print(
         \\    lib = ":lib",

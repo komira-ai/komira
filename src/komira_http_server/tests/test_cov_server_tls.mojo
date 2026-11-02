@@ -21,7 +21,8 @@
 #      shares the connection table with `serve_one_iteration`, so a TLS
 #      connection accepted by the latter can reach the former. It must be
 #      dropped, never read as plaintext (komira-ai/komira#635: a
-#      RequestDispatcher cannot be served over TLS).
+#      RequestDispatcher cannot be served over TLS). The same holds for the
+#      middleware-chained, suspendable and type-erased dispatch loops.
 # =============================================================================
 
 from std.ffi import external_call
@@ -43,10 +44,21 @@ from komira_http_core.codec.h2.hpack import (
     HpackEncoder,
     HpackHeader,
 )
-from komira_async.ops.waker_sink import NoopSink
+from komira_async.ops.waker_sink import NoopSink, WakerSink
 from komira_async.reactor.reactor import Reactor
 from komira_async.runtime.blocking_runtime import BlockingRuntime
 from komira_async.runtime.runtime_trait import Runtime
+from komira_async.runtime.shared_erasure import (
+    ErasedHandlerDriver,
+    ErasedHandlerFrame,
+    make_erased_handler_frame,
+)
+from komira_async.runtime.suspendable_handler import (
+    HandlerStepResult,
+    SuspendableHandler,
+    SuspendableHandlerDriver,
+    SuspendedFrame,
+)
 from komira_http_core.codec import HttpRequest, HttpResponse
 from komira_http_core.codec.types import HttpMethod
 from komira_http_core.tls import (
@@ -58,7 +70,15 @@ from komira_http_core.tls import (
     tls_init,
 )
 from komira_http_core.transport.grpc_emit import NoopGrpcDispatch
-from komira_http_server.dispatch import RequestDispatcher
+from komira_http_server.dispatch import (
+    CtxRequestDispatcher,
+    ErasedDispatcher,
+    RequestDispatcher,
+    SuspendableDispatcher,
+)
+from komira_http_server.middleware import MiddlewareChain
+from komira_http_server.middleware.middleware import RequestContext
+from komira_http_server.middleware.passthrough import PassthroughMiddleware
 from komira_http_server.routing import Router
 from komira_http_server.server import HttpServer, HttpServerConfig
 
@@ -386,6 +406,159 @@ def test_dispatch_loop_drops_a_tls_connection_unread() raises:
         r.fd, buf.unsafe_ptr(), UInt64(4096), Int32(0)
     )
     assert_true(n <= 0, "the server wrote " + String(n) + " bytes back")
+
+
+struct _CountingChain(CtxRequestDispatcher):
+    """Answers 200 and counts its calls (the chained loop's dispatcher)."""
+
+    var calls: Int
+
+    def __init__(out self):
+        self.calls = 0
+
+    def dispatch[
+        RT: Runtime,
+    ](
+        mut self, mut reactor: Reactor[RT.Sink], var req: HttpRequest
+    ) raises -> HttpResponse:
+        self.calls += 1
+        return HttpResponse.ok(String("dispatched"))
+
+    def dispatch_with_ctx[
+        RT: Runtime,
+    ](
+        mut self,
+        mut reactor: Reactor[RT.Sink],
+        mut req: HttpRequest,
+        ctx: RequestContext,
+    ) raises -> HttpResponse:
+        self.calls += 1
+        return HttpResponse.ok(String("dispatched"))
+
+
+struct _DispatchedSM(SuspendableHandler):
+    comptime Resp = HttpResponse
+
+    def __init__(out self):
+        pass
+
+    def step[
+        S: WakerSink & Movable & Deinitable,
+    ](mut self, mut reactor: Reactor[S]) raises -> HandlerStepResult[Self.Resp]:
+        return HandlerStepResult[Self.Resp].done(
+            HttpResponse.ok(String("dispatched"))
+        )
+
+
+struct _CountingSusp(SuspendableDispatcher):
+    comptime Handler = _DispatchedSM
+    var calls: Int
+
+    def __init__(out self):
+        self.calls = 0
+
+    def make_frame[
+        RT: Runtime,
+    ](
+        mut self,
+        mut reactor: Reactor[RT.Sink],
+        var req: HttpRequest,
+        request_id: Int64,
+    ) raises -> SuspendedFrame[Self.Handler]:
+        self.calls += 1
+        return SuspendedFrame[Self.Handler](_DispatchedSM(), request_id)
+
+
+struct _CountingErased(ErasedDispatcher):
+    comptime Sink = NoopSink
+    comptime Resp = HttpResponse
+    var calls: Int
+
+    def __init__(out self):
+        self.calls = 0
+
+    def make_erased_frame[
+        RT: Runtime,
+    ](
+        mut self,
+        mut reactor: Reactor[RT.Sink],
+        var req: HttpRequest,
+        request_id: Int64,
+    ) raises -> ErasedHandlerFrame[Self.Sink]:
+        self.calls += 1
+        return make_erased_handler_frame[_DispatchedSM, Self.Sink](
+            _DispatchedSM(), request_id
+        )
+
+
+def _send_plaintext_get(r: _Rig) raises:
+    var req = _bytes("GET / HTTP/1.1\r\nHost: example.com\r\n\r\n")
+    var rc = external_call["send", Int64](
+        r.fd, req.unsafe_ptr(), UInt64(len(req)), Int32(0)
+    )
+    assert_equal(Int(rc), len(req))
+
+
+def _assert_dropped_unread(mut r: _Rig, calls: Int) raises:
+    assert_equal(calls, 0, "the dispatcher ran on a TLS connection")
+    assert_equal(r.server.live_conn_count(), 0, "the TLS connection was kept")
+    var buf = List[UInt8](length=4096, fill=UInt8(0))
+    var n = external_call["recv", Int64](
+        r.fd, buf.unsafe_ptr(), UInt64(4096), Int32(0)
+    )
+    assert_true(n <= 0, "the server wrote " + String(n) + " bytes back")
+
+
+def test_chained_loop_drops_a_tls_connection_unread() raises:
+    """As `test_dispatch_loop_drops_a_tls_connection_unread`, for
+    `serve_one_iteration_dispatch_chained`."""
+    var empty = List[String]()
+    var r = _Rig(empty, empty)
+    _send_plaintext_get(r)
+    var chain = MiddlewareChain.default()
+    var mw = PassthroughMiddleware()
+    var d = _CountingChain()
+    for _ in range(200):
+        _ = r.server.serve_one_iteration_dispatch_chained[
+            _CountingChain, PassthroughMiddleware, _Rt
+        ](chain, mw, d, Int32(20_000))
+        if r.server.live_conn_count() == 0:
+            break
+    _assert_dropped_unread(r, d.calls)
+
+
+def test_suspendable_loop_drops_a_tls_connection_unread() raises:
+    """As `test_dispatch_loop_drops_a_tls_connection_unread`, for
+    `serve_one_iteration_dispatch_suspendable`."""
+    var empty = List[String]()
+    var r = _Rig(empty, empty)
+    _send_plaintext_get(r)
+    var d = _CountingSusp()
+    var drv = SuspendableHandlerDriver[NoopSink, _DispatchedSM]()
+    for _ in range(200):
+        _ = r.server.serve_one_iteration_dispatch_suspendable[
+            _CountingSusp, _Rt
+        ](d, drv, Int32(20_000))
+        if r.server.live_conn_count() == 0:
+            break
+    _assert_dropped_unread(r, d.calls)
+
+
+def test_erased_loop_drops_a_tls_connection_unread() raises:
+    """As `test_dispatch_loop_drops_a_tls_connection_unread`, for
+    `serve_one_iteration_dispatch_erased`."""
+    var empty = List[String]()
+    var r = _Rig(empty, empty)
+    _send_plaintext_get(r)
+    var d = _CountingErased()
+    var drv = ErasedHandlerDriver[NoopSink, HttpResponse]()
+    for _ in range(200):
+        _ = r.server.serve_one_iteration_dispatch_erased[_CountingErased, _Rt](
+            d, drv, Int32(20_000)
+        )
+        if r.server.live_conn_count() == 0:
+            break
+    _assert_dropped_unread(r, d.calls)
 
 
 def main() raises:

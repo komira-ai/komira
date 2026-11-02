@@ -24,6 +24,7 @@ load("@komira//tools/build/rerun:rerun.bzl", "RERUN_ATTRS", "rerun_env", "rerun_
 load(":compile.bzl", _TOOLCHAIN_ATTR = "toolchain_attr", _toolchain = "toolchain")
 load(":test_limit.bzl", "HANG_LIMIT_ATTRS", "hang_limit_flags")
 load(":test_runtime.bzl", _test_root = "test_root", gate_mojo = "gate_mojo")
+load("@komira//tools/build/bench_salt:bench_salt.bzl", "salted")
 
 def _impl(ctx):
     tc = _toolchain(ctx)
@@ -42,7 +43,7 @@ def _impl(ctx):
             gate_mojo(tc, str(ctx.label.raw_target()), staged, marker.as_output(), hang_limit_flags(str(ctx.label.raw_target()), ctx.attrs.test_hang_limit_s)),
             hidden = root,
         ),
-        env = rerun_env(ctx),
+        env = salted(rerun_env(ctx)),
         category = "c_abi_check",
     )
     return [DefaultInfo(default_output = marker), rerun_info(ctx)]

@@ -77,6 +77,27 @@ zig_test(
     zig = "komira//tools/build/toolchains:zig_next",
 )
 
+# The repository's engineering rules (tools/build/agents_md/agents_md_test.zig says what each
+# case catches): the shared core of AGENTS.md is byte for byte its canonical copy,
+# tools/build/agents_md/shared_core.md, whose SHA-256 is the one in shared_core.sha256 beside it
+# (the copy and the hash are the same in every repository carrying the core), and CLAUDE.md
+# imports AGENTS.md (a line `@AGENTS.md` outside a code block or code span). A build action.
+zig_test(
+    name = "agents_md_cases",
+    exec_compatible_with = LINUX_X86_64,
+    src = "tools/build/agents_md/agents_md_test.zig",
+    data = {
+        "AGENTS.md": "AGENTS.md",
+        "CLAUDE.md": "CLAUDE.md",
+        "shared_core.md": "tools/build/agents_md/shared_core.md",
+        "shared_core.sha256": "tools/build/agents_md/shared_core.sha256",
+    },
+    # The repository's Markdown reader: lines, line endings and fenced blocks of CLAUDE.md.
+    deps = ["komira//tools/build/markdown:markdown"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
+)
+
 # The cases of the mopm jobs of release.yml: the continuous prod publish (each prod job's
 # gate, needs, environment and permissions, the commands), no beta job, no schedule, the
 # release-main concurrency group, no secret and the version of every run
@@ -445,7 +466,7 @@ limits(
 # target of `//...` or `tests//functional/...` whose closure (every kind of
 # dependency) holds a target under third_party/python/ or
 # tools/build/python/, a Python rule or a `.py` source; no `.py` file in the
-# repository; no kci textproto or GitHub workflow that runs Python. Building
+# repository; no release textproto or GitHub workflow that runs Python. Building
 # it checks nothing: .github/workflows/pr.yml runs `./buck2 bxl
 # //tools/build/selftest/graph/checks.bxl:check -- --check //:python_closure`,
 # as it does for every graph_check.

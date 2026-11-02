@@ -1,19 +1,16 @@
-# The release artifacts (kci.release.v1.Artifacts): what a release of komira
-# builds, in this file's order, and the set a publish step would ship. The
-# release workflow (.github/workflows/release.yml) builds the Buck2 target
-# //release:release_set, which a build action holds to this file (the names,
-# their order and the metapackage's arguments), and the workflow tests the
-# file's existence. The textproto's own build-system fields below are the
-# retired kci build step's; nothing reads them to build. Changing it changes
-# what is released: CODEOWNERS requires the release approver's review for
-# everything under release/.
+# The release artifacts: what a release of komira builds, in this file's
+# order, and the set a publish step would ship. The release workflow
+# (.github/workflows/release.yml) builds the Buck2 target //release:release_set,
+# which a build action holds to this file (the names, their order and the
+# metapackage's arguments), and the workflow tests the file's existence. The
+# textproto's own build-system fields below are the retired kci build step's;
+# nothing reads them to build. Changing it changes what is released: CODEOWNERS
+# requires the release approver's review for everything under release/.
 #
-# The release is the libraries below and their metapackage. kci builds them
-# one at a time, in THIS ORDER (each library after the libraries it depends
-# on), each into its own empty directory under the
-# release directory R (`{release_dir}`: the platform's directory,
-# <--release-dir>/<platform>), with the git-derived stamp S of `kci run
-# --revision-id` (src/kci_artifact/placeholders.mojo):
+# The release is the libraries below and their metapackage, in THIS ORDER (each
+# library after the libraries it depends on), each built into its own empty
+# directory under the release directory R (`{release_dir}`: the platform's
+# directory, <--release-dir>/<platform>), with the git-derived stamp S:
 #
 #   buck2 build -c komira.package_stamp=<N> -c komira.package_commit=<C> \
 #     -c komira.package_timestamp_ms=<T> \
@@ -22,7 +19,7 @@
 #     --member-manifest R/komira_encoding/manifest.json ... --out-dir R/komira_all
 #
 # THE STAMP is never typed here: `{build_number}`, `{source_commit}` and
-# `{timestamp_ms}` are placeholders kci fills from git. A library built
+# `{timestamp_ms}` are placeholders filled from git. A library built
 # without them has no `[release]` sub-target, so an artifact that forgets
 # the stamp fails at build rather than shipping.
 #
@@ -30,16 +27,10 @@
 # every artifact above it, already built and verified. Its members are every
 # library of this file, one `--member-manifest` each; adding a library is
 # two edits here: its entry above the metapackage, and its manifest in
-# the metapackage's args. A PUBLISH step refuses a set whose metapackage misses
-# a library, and the welded test
-# src/kci_artifact/tests/test_release_artifacts_file.mojo refuses
-# it at build time.
+# the metapackage's args.
 #
 # THE NAMES A RELEASE PUBLISHES are the ones this file declares, and this file
-# is reviewed through CODEOWNERS; there is no per-run claim. A PUBLISH step
-# reads its channel first and reports every declared name the channel holds
-# no file of yet (NEW NAMES) in its result and the job summary; the beta
-# stage reports prod's before the prod approval.
+# is reviewed through CODEOWNERS; there is no per-run claim.
 #
 # Which farm buck2 builds on is the build job's machine configuration, written
 # by the farm-connect action (docs/ci.md), not this file's.
@@ -47,14 +38,9 @@
 # THE PULL REQUEST'S CHECK is no part of this file: .github/workflows/pr.yml
 # selects the targets a change affects with the BXL selector
 # tools/build/ci/affected.bxl and builds and tests them through buck2
-# (docs/ci.md), and runs no kci. The `targets` of an artifact below, every `//`
-# label of its combined args (its build system's, then its own) with the
-# `[subtarget]` removed, is what the per-change check of kci used to select
-# by; the welded test of this file still holds it to the args, and it goes
-# when kci does.
+# (docs/ci.md).
 #
-# The file format's major (kci_api's format table): kci refuses a file
-# without it, and one written for a newer kci.
+# The file format's major is the `schema_version` below.
 
 schema_version: 1
 
@@ -169,102 +155,12 @@ artifacts {
 }
 
 artifacts {
-  name: "kci_api"
-  build_system: "buck2"
-  args: "//src/kci_api:kci_api_conda[release]"
-  args: "--out"
-  args: "{out_dir}"
-  targets: "//src/kci_api:kci_api_conda"
-}
-
-artifacts {
-  name: "kci_release_channel"
-  build_system: "buck2"
-  args: "//src/kci_release_channel:kci_release_channel_conda[release]"
-  args: "--out"
-  args: "{out_dir}"
-  targets: "//src/kci_release_channel:kci_release_channel_conda"
-}
-
-artifacts {
-  name: "kci_artifact_manifest"
-  build_system: "buck2"
-  args: "//src/kci_artifact_manifest:kci_artifact_manifest_conda[release]"
-  args: "--out"
-  args: "{out_dir}"
-  targets: "//src/kci_artifact_manifest:kci_artifact_manifest_conda"
-}
-
-artifacts {
-  name: "kci_logs"
-  build_system: "buck2"
-  args: "//src/kci_logs:kci_logs_conda[release]"
-  args: "--out"
-  args: "{out_dir}"
-  targets: "//src/kci_logs:kci_logs_conda"
-}
-
-artifacts {
-  name: "kci_params"
-  build_system: "buck2"
-  args: "//src/kci_params:kci_params_conda[release]"
-  args: "--out"
-  args: "{out_dir}"
-  targets: "//src/kci_params:kci_params_conda"
-}
-
-artifacts {
-  name: "kci_release_machine"
-  build_system: "buck2"
-  args: "//src/kci_release_machine:kci_release_machine_conda[release]"
-  args: "--out"
-  args: "{out_dir}"
-  targets: "//src/kci_release_machine:kci_release_machine_conda"
-}
-
-artifacts {
   name: "komira_wkt"
   build_system: "buck2"
   args: "//src/komira_wkt:komira_wkt_conda[release]"
   args: "--out"
   args: "{out_dir}"
   targets: "//src/komira_wkt:komira_wkt_conda"
-}
-
-artifacts {
-  name: "kci_resource_proto"
-  build_system: "buck2"
-  args: "//src/kci_resource_proto:kci_resource_proto_conda[release]"
-  args: "--out"
-  args: "{out_dir}"
-  targets: "//src/kci_resource_proto:kci_resource_proto_conda"
-}
-
-artifacts {
-  name: "kci_validator_rows"
-  build_system: "buck2"
-  args: "//src/kci_validator_rows:kci_validator_rows_conda[release]"
-  args: "--out"
-  args: "{out_dir}"
-  targets: "//src/kci_validator_rows:kci_validator_rows_conda"
-}
-
-artifacts {
-  name: "kci_validator_report"
-  build_system: "buck2"
-  args: "//src/kci_validator_report:kci_validator_report_conda[release]"
-  args: "--out"
-  args: "{out_dir}"
-  targets: "//src/kci_validator_report:kci_validator_report_conda"
-}
-
-artifacts {
-  name: "kci_workflow_check"
-  build_system: "buck2"
-  args: "//src/kci_workflow_check:kci_workflow_check_conda[release]"
-  args: "--out"
-  args: "{out_dir}"
-  targets: "//src/kci_workflow_check:kci_workflow_check_conda"
 }
 
 artifacts {
@@ -493,15 +389,6 @@ artifacts {
 }
 
 artifacts {
-  name: "kci_cell"
-  build_system: "buck2"
-  args: "//src/kci_cell:kci_cell_conda[release]"
-  args: "--out"
-  args: "{out_dir}"
-  targets: "//src/kci_cell:kci_cell_conda"
-}
-
-artifacts {
   name: "komira_mcp_server"
   build_system: "buck2"
   args: "//src/komira_mcp_server:komira_mcp_server_conda[release]"
@@ -589,42 +476,6 @@ artifacts {
   args: "--out"
   args: "{out_dir}"
   targets: "//src/komira_calendar_ics:komira_calendar_ics_conda"
-}
-
-artifacts {
-  name: "kci_artifact_proto"
-  build_system: "buck2"
-  args: "//src/kci_artifact_proto:kci_artifact_proto_conda[release]"
-  args: "--out"
-  args: "{out_dir}"
-  targets: "//src/kci_artifact_proto:kci_artifact_proto_conda"
-}
-
-artifacts {
-  name: "kci_deploy_model_proto"
-  build_system: "buck2"
-  args: "//src/kci_deploy_model_proto:kci_deploy_model_proto_conda[release]"
-  args: "--out"
-  args: "{out_dir}"
-  targets: "//src/kci_deploy_model_proto:kci_deploy_model_proto_conda"
-}
-
-artifacts {
-  name: "kci_manifest_proto"
-  build_system: "buck2"
-  args: "//src/kci_manifest_proto:kci_manifest_proto_conda[release]"
-  args: "--out"
-  args: "{out_dir}"
-  targets: "//src/kci_manifest_proto:kci_manifest_proto_conda"
-}
-
-artifacts {
-  name: "kci_artifact"
-  build_system: "buck2"
-  args: "//src/kci_artifact:kci_artifact_conda[release]"
-  args: "--out"
-  args: "{out_dir}"
-  targets: "//src/kci_artifact:kci_artifact_conda"
 }
 
 artifacts {
@@ -736,15 +587,6 @@ artifacts {
 }
 
 artifacts {
-  name: "kci_secret_writer"
-  build_system: "buck2"
-  args: "//src/kci_secret_writer:kci_secret_writer_conda[release]"
-  args: "--out"
-  args: "{out_dir}"
-  targets: "//src/kci_secret_writer:kci_secret_writer_conda"
-}
-
-artifacts {
   name: "komira_arrow_ipc"
   build_system: "buck2"
   args: "//src/komira_arrow_ipc:komira_arrow_ipc_conda[release]"
@@ -799,30 +641,12 @@ artifacts {
 }
 
 artifacts {
-  name: "kci_reconciler"
-  build_system: "buck2"
-  args: "//src/kci_reconciler:kci_reconciler_conda[release]"
-  args: "--out"
-  args: "{out_dir}"
-  targets: "//src/kci_reconciler:kci_reconciler_conda"
-}
-
-artifacts {
   name: "komira_scan_source"
   build_system: "buck2"
   args: "//src/komira_scan_source:komira_scan_source_conda[release]"
   args: "--out"
   args: "{out_dir}"
   targets: "//src/komira_scan_source:komira_scan_source_conda"
-}
-
-artifacts {
-  name: "kci_cloud"
-  build_system: "buck2"
-  args: "//src/kci_cloud:kci_cloud_conda[release]"
-  args: "--out"
-  args: "{out_dir}"
-  targets: "//src/kci_cloud:kci_cloud_conda"
 }
 
 artifacts {
@@ -835,30 +659,12 @@ artifacts {
 }
 
 artifacts {
-  name: "kci_composites"
-  build_system: "buck2"
-  args: "//src/kci_composites:kci_composites_conda[release]"
-  args: "--out"
-  args: "{out_dir}"
-  targets: "//src/kci_composites:kci_composites_conda"
-}
-
-artifacts {
   name: "komira_join_assembly"
   build_system: "buck2"
   args: "//src/komira_join_assembly:komira_join_assembly_conda[release]"
   args: "--out"
   args: "{out_dir}"
   targets: "//src/komira_join_assembly:komira_join_assembly_conda"
-}
-
-artifacts {
-  name: "kci_cloud_fake"
-  build_system: "buck2"
-  args: "//src/kci_cloud_fake:kci_cloud_fake_conda[release]"
-  args: "--out"
-  args: "{out_dir}"
-  targets: "//src/kci_cloud_fake:kci_cloud_fake_conda"
 }
 
 artifacts {
@@ -925,15 +731,6 @@ artifacts {
 }
 
 artifacts {
-  name: "kci_pkg_upload"
-  build_system: "buck2"
-  args: "//src/kci_pkg_upload:kci_pkg_upload_conda[release]"
-  args: "--out"
-  args: "{out_dir}"
-  targets: "//src/kci_pkg_upload:kci_pkg_upload_conda"
-}
-
-artifacts {
   name: "komira_aws_core"
   build_system: "buck2"
   args: "//src/komira_aws_core:komira_aws_core_conda[release]"
@@ -958,24 +755,6 @@ artifacts {
   args: "--out"
   args: "{out_dir}"
   targets: "//src/komira_oci:komira_oci_conda"
-}
-
-artifacts {
-  name: "kci_publish_oci"
-  build_system: "buck2"
-  args: "//src/kci_publish_oci:kci_publish_oci_conda[release]"
-  args: "--out"
-  args: "{out_dir}"
-  targets: "//src/kci_publish_oci:kci_publish_oci_conda"
-}
-
-artifacts {
-  name: "kci_release_set"
-  build_system: "buck2"
-  args: "//src/kci_release_set:kci_release_set_conda[release]"
-  args: "--out"
-  args: "{out_dir}"
-  targets: "//src/kci_release_set:kci_release_set_conda"
 }
 
 artifacts {
@@ -1015,15 +794,6 @@ artifacts {
 }
 
 artifacts {
-  name: "kci_cloud_gcp"
-  build_system: "buck2"
-  args: "//src/kci_cloud_gcp:kci_cloud_gcp_conda[release]"
-  args: "--out"
-  args: "{out_dir}"
-  targets: "//src/kci_cloud_gcp:kci_cloud_gcp_conda"
-}
-
-artifacts {
   name: "komira_kafka_broker"
   build_system: "buck2"
   args: "//src/komira_kafka_broker:komira_kafka_broker_conda[release]"
@@ -1042,12 +812,30 @@ artifacts {
 }
 
 artifacts {
+  name: "komira_bench_data"
+  build_system: "buck2"
+  args: "//src/komira_bench_data:komira_bench_data_conda[release]"
+  args: "--out"
+  args: "{out_dir}"
+  targets: "//src/komira_bench_data:komira_bench_data_conda"
+}
+
+artifacts {
   name: "komira_bench_report"
   build_system: "buck2"
   args: "//src/komira_bench_report:komira_bench_report_conda[release]"
   args: "--out"
   args: "{out_dir}"
   targets: "//src/komira_bench_report:komira_bench_report_conda"
+}
+
+artifacts {
+  name: "komira_bench_corpus"
+  build_system: "buck2"
+  args: "//src/komira_bench_corpus:komira_bench_corpus_conda[release]"
+  args: "--out"
+  args: "{out_dir}"
+  targets: "//src/komira_bench_corpus:komira_bench_corpus_conda"
 }
 
 artifacts {
@@ -1077,27 +865,7 @@ artifacts {
   args: "--member-manifest"
   args: "{release_dir}/komira_proto_codec/manifest.json"
   args: "--member-manifest"
-  args: "{release_dir}/kci_api/manifest.json"
-  args: "--member-manifest"
-  args: "{release_dir}/kci_release_channel/manifest.json"
-  args: "--member-manifest"
-  args: "{release_dir}/kci_artifact_manifest/manifest.json"
-  args: "--member-manifest"
-  args: "{release_dir}/kci_logs/manifest.json"
-  args: "--member-manifest"
-  args: "{release_dir}/kci_params/manifest.json"
-  args: "--member-manifest"
-  args: "{release_dir}/kci_release_machine/manifest.json"
-  args: "--member-manifest"
   args: "{release_dir}/komira_wkt/manifest.json"
-  args: "--member-manifest"
-  args: "{release_dir}/kci_resource_proto/manifest.json"
-  args: "--member-manifest"
-  args: "{release_dir}/kci_validator_rows/manifest.json"
-  args: "--member-manifest"
-  args: "{release_dir}/kci_validator_report/manifest.json"
-  args: "--member-manifest"
-  args: "{release_dir}/kci_workflow_check/manifest.json"
   args: "--member-manifest"
   args: "{release_dir}/komira_anomaly/manifest.json"
   args: "--member-manifest"
@@ -1149,8 +917,6 @@ artifacts {
   args: "--member-manifest"
   args: "{release_dir}/komira_sync/manifest.json"
   args: "--member-manifest"
-  args: "{release_dir}/kci_cell/manifest.json"
-  args: "--member-manifest"
   args: "{release_dir}/komira_mcp_server/manifest.json"
   args: "--member-manifest"
   args: "{release_dir}/komira_chat_proto/manifest.json"
@@ -1170,14 +936,6 @@ artifacts {
   args: "{release_dir}/komira_calendar/manifest.json"
   args: "--member-manifest"
   args: "{release_dir}/komira_calendar_ics/manifest.json"
-  args: "--member-manifest"
-  args: "{release_dir}/kci_artifact_proto/manifest.json"
-  args: "--member-manifest"
-  args: "{release_dir}/kci_deploy_model_proto/manifest.json"
-  args: "--member-manifest"
-  args: "{release_dir}/kci_manifest_proto/manifest.json"
-  args: "--member-manifest"
-  args: "{release_dir}/kci_artifact/manifest.json"
   args: "--member-manifest"
   args: "{release_dir}/komira_libc/manifest.json"
   args: "--member-manifest"
@@ -1203,8 +961,6 @@ artifacts {
   args: "--member-manifest"
   args: "{release_dir}/komira_secret_store/manifest.json"
   args: "--member-manifest"
-  args: "{release_dir}/kci_secret_writer/manifest.json"
-  args: "--member-manifest"
   args: "{release_dir}/komira_arrow_ipc/manifest.json"
   args: "--member-manifest"
   args: "{release_dir}/komira_plan_expr/manifest.json"
@@ -1217,19 +973,11 @@ artifacts {
   args: "--member-manifest"
   args: "{release_dir}/komira_plan_stats/manifest.json"
   args: "--member-manifest"
-  args: "{release_dir}/kci_reconciler/manifest.json"
-  args: "--member-manifest"
   args: "{release_dir}/komira_scan_source/manifest.json"
-  args: "--member-manifest"
-  args: "{release_dir}/kci_cloud/manifest.json"
   args: "--member-manifest"
   args: "{release_dir}/komira_plan_ir/manifest.json"
   args: "--member-manifest"
-  args: "{release_dir}/kci_composites/manifest.json"
-  args: "--member-manifest"
   args: "{release_dir}/komira_join_assembly/manifest.json"
-  args: "--member-manifest"
-  args: "{release_dir}/kci_cloud_fake/manifest.json"
   args: "--member-manifest"
   args: "{release_dir}/komira_async/manifest.json"
   args: "--member-manifest"
@@ -1245,17 +993,11 @@ artifacts {
   args: "--member-manifest"
   args: "{release_dir}/komira_objectstore/manifest.json"
   args: "--member-manifest"
-  args: "{release_dir}/kci_pkg_upload/manifest.json"
-  args: "--member-manifest"
   args: "{release_dir}/komira_aws_core/manifest.json"
   args: "--member-manifest"
   args: "{release_dir}/komira_gcp_core/manifest.json"
   args: "--member-manifest"
   args: "{release_dir}/komira_oci/manifest.json"
-  args: "--member-manifest"
-  args: "{release_dir}/kci_publish_oci/manifest.json"
-  args: "--member-manifest"
-  args: "{release_dir}/kci_release_set/manifest.json"
   args: "--member-manifest"
   args: "{release_dir}/komira_gcp_cloudresourcemanager/manifest.json"
   args: "--member-manifest"
@@ -1265,13 +1007,15 @@ artifacts {
   args: "--member-manifest"
   args: "{release_dir}/komira_gcp_wif/manifest.json"
   args: "--member-manifest"
-  args: "{release_dir}/kci_cloud_gcp/manifest.json"
-  args: "--member-manifest"
   args: "{release_dir}/komira_kafka_broker/manifest.json"
   args: "--member-manifest"
   args: "{release_dir}/komira_bench_duckdb/manifest.json"
   args: "--member-manifest"
+  args: "{release_dir}/komira_bench_data/manifest.json"
+  args: "--member-manifest"
   args: "{release_dir}/komira_bench_report/manifest.json"
+  args: "--member-manifest"
+  args: "{release_dir}/komira_bench_corpus/manifest.json"
   args: "--license"
   args: "Apache-2.0"
   args: "--summary"

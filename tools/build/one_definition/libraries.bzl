@@ -81,7 +81,7 @@ def one_definition_listed(name):
 # `prefix` here, so the prefix refused is the one every symbol is proved to
 # carry.
 THIRD_PARTY_OWNERS = {
-    "third_party/aws-lc": struct(owner = "//src/komira_crypto:komira_crypto", prefix = "komira_awslc_"),
+    "third_party/aws-lc": struct(owner = "//src/komira_awslc:komira_awslc", prefix = "komira_awslc_"),
     "third_party/brotli": struct(owner = "//src/komira_parquet_codec:komira_parquet_codec", prefix = "komira_brotli_"),
     "third_party/s2n-tls": struct(owner = "//src/komira_http_core:komira_http_core", prefix = "komira_s2n_"),
     "third_party/sha1collisiondetection": struct(owner = None, prefix = ""),

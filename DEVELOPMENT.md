@@ -26,7 +26,6 @@ A new module is `src/<module>/BUCK` with a `mojo_library(name = "<module>")`
 and a row in the [module map](docs/architecture.md#the-module-map), which
 `//:src_layout` requires; the Markdown link check reads its files with
 nothing more ([step 2](#2-build-linux-x86_64)).
-A library kci owns is named `kci_<x>`.
 
 ## 1. Get buck2
 
@@ -288,9 +287,10 @@ service.
   run on the macOS workers before `run:gate_darwin` is built) check that the
   environment the gate builds for a test holds it. Section 7 of
   check.sh builds `//tools/build/examples/libgate_ok:libgate_ok`, whose welded
-  test needs the variable, on the macOS workers. A C or C++ dependency cannot
-  build for `darwin-arm64` yet (the C toolchain is Linux x86_64 only), so no
-  welded test with native code runs on macOS.
+  test needs the variable, on the macOS workers. A package's own C (a
+  `[native.<id>]` static archive) builds for `darwin-arm64`, and its welded tests run on
+  the macOS workers; a vendored `third_party` C or C++ library is not yet supported in
+  `mojo_package` for macOS.
 
 ## Host floor
 

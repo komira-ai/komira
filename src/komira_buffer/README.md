@@ -7,7 +7,8 @@ The package root re-exports nothing; import each name from its module:
 - `komira_buffer.owned_aligned_buffer`: `OwnedAlignedBuffer`, a single-owner
   heap buffer whose start is 64-byte aligned and whose capacity is rounded up
   to a multiple of 64 bytes, so a SIMD load at the tail stays inside the
-  allocation. A new buffer's length equals the capacity it was asked for.
+  allocation. A buffer from the constructor has length equal to the capacity
+  it was asked for; one from `with_capacity` has length 0.
 - `komira_buffer.shared_aligned_buffer`: `SharedAlignedBuffer[K]`, the
   reference-counted buffer over a region `K` (`HeapRegion` by default,
   `MmapRegion` for a mapped file). `from_owned` promotes an

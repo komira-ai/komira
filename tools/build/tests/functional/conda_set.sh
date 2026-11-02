@@ -12,12 +12,6 @@
 #              of //src with no declaration anywhere; every one of them builds (a refusal is a
 #              value, not a build failure), and the libraries that cannot be packaged say why
 #              (komira_libc: native code). The rest are the set the later checks use.
-#   contract   the manifest of every package of the set, and of the metapackage, is read by
-#              kci's own parser (src/kci_artifact_manifest, run as the probe
-#              //tools/build/package/manifest_probe:parse_manifest) and rendered again by kci's
-#              writer: the bytes are identical, and each names its metadata.json next to it. The
-#              same probe refuses a manifest without `metadata`, so it is not a probe that accepts
-#              anything.
 #   release    every package of the stamped set has the Mojo compiler version as its version and
 #              one build number and build string (h<8 hex of the commit>_<N>) across the set.
 #   metapackage `komira_pack conda-meta` over the members' manifests gives a package with no
@@ -217,21 +211,6 @@ if [ -z "$problems" ]; then
 fi
 if [ -n "$problems" ]; then fail "metapackage:$problems (see $W)"; else
     pass "metapackage: conda-meta over ${#OK[@]} member manifests gives $MF with no file, requiring exactly the platform guard and every member at $VERSION $BUILD (version and build string; no compiler pin); the same inputs give the same bytes; conda-check accepts it, as a release too"
-fi
-
-# ---- contract: kci's own parser reads what the build emits -----------------
-PROBE=$("$BUCK2" build //tools/build/package/manifest_probe:parse_manifest 2> "$W/probe_build.log" && "$BUCK2" run //tools/build/package/manifest_probe:parse_manifest -- "${MAN[@]}" "$K/meta1/manifest.json" 2> "$W/probe.err")
-problems=""
-lines=$(printf '%s\n' "$PROBE" | grep -c '^OK CONDA ')
-[ "$lines" = "$((${#OK[@]} + 1))" ] || problems="$problems read-$lines-of-$((${#OK[@]} + 1))"
-printf '%s\n' "$PROBE" | grep -v '^OK CONDA .* render-identical=yes$' | grep -q . && problems="$problems not-rendered-identically-or-refused:[$(printf '%s\n' "$PROBE" | grep -v '^OK CONDA .* render-identical=yes$' | head -n 2)]"
-printf '%s\n' "$PROBE" | grep -v '^OK CONDA .* metadata=metadata\.json metadata_path=[^ ]*/metadata\.json render-identical=yes$' | grep -q . && problems="$problems metadata-not-named-next-to-the-manifest"
-printf '%s\n' "$PROBE" | grep -q "^OK CONDA $META $VERSION linux-64 $MF " || problems="$problems metapackage-line"
-jq -c 'del(.metadata)' "$K/meta1/manifest.json" > "$W/without_metadata.json"
-"$BUCK2" run //tools/build/package/manifest_probe:parse_manifest -- "$W/without_metadata.json" > "$W/probe_neg.out" 2>&1 && problems="$problems probe-accepted-a-manifest-without-metadata"
-grep -q "a CONDA artifact needs 'metadata'" "$W/probe_neg.out" || problems="$problems probe-negative-text"
-if [ -n "$problems" ]; then fail "contract:$problems (see $W)"; else
-    pass "contract: kci's artifact-manifest parser reads the manifests of all ${#OK[@]} packages and of the metapackage, and kci's writer renders each one back to the same bytes; each names the metadata.json next to it; the same probe refuses a manifest without \`metadata\` (so it can fail)"
 fi
 
 # ---- refusals -------------------------------------------------------------

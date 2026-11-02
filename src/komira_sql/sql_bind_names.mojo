@@ -11,7 +11,8 @@ from komira_sql.sql_ast import (
     SXOP_MUL, SXOP_NE, SXOP_OR, SXOP_POW, SXOP_STARTS_WITH, SXOP_SUB, SXUN_ABS,
     SXUN_IS_NOT_NULL, SXUN_IS_NULL, SXUN_NEGATE, SX_AGG, SX_BINARY, SX_BOOL, SX_CALL,
     SX_CASE, SX_COLUMN, SX_DATE, SX_FLOAT, SX_INT, SX_LIKE, SX_NULL, SX_STAR, SX_STRING,
-    SX_SUBQUERY, SX_TIMESTAMP, SX_UNARY, SelectStmt, SqlExpr, TSLIT_AWARE,
+    SX_INTERVAL, SX_SUBQUERY, SX_TIMESTAMP, SX_UNARY, SXIVL_DAY, SXIVL_MONTH, SXIVL_WEEK,
+    SelectStmt, SqlExpr, TSLIT_AWARE,
 )
 from komira_sql.sql_bind_ops import _sx_is_big_int
 from komira_sql.sql_bind_scope import _schema_has_col
@@ -267,6 +268,18 @@ def _duckdb_expr_text(sx: SqlExpr) raises -> String:
         if sx.op == TSLIT_AWARE:
             return "CAST('" + sx.text + "' AS \"TIMESTAMP WITH TIME ZONE\")"
         return "CAST('" + sx.text + "' AS TIMESTAMP)"
+    if sx.tag == SX_INTERVAL:
+        # Not byte-exact with DuckDB (which deparses to `to_years(...)` /
+        # `to_months(...)` calls): a deterministic name that contains the
+        # expression.
+        var unit = String("YEAR")
+        if sx.op == SXIVL_MONTH:
+            unit = String("MONTH")
+        elif sx.op == SXIVL_WEEK:
+            unit = String("WEEK")
+        elif sx.op == SXIVL_DAY:
+            unit = String("DAY")
+        return "INTERVAL '" + String(sx.int_val) + "' " + unit
     if sx.tag == SX_NULL:
         return String("NULL")
     if sx.tag == SX_BOOL:

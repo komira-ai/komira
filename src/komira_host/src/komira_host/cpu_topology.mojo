@@ -2397,9 +2397,15 @@ def _read_cgroup_v2_quota_cores() -> Int:
 
 def _read_unified_cgroup_path() -> String:
     """Return the relative cgroup path from `/proc/self/cgroup`'s unified
-    (`0::<path>`) line, or "" if absent. v2 hosts have exactly one `0::` line;
-    we return the `<path>` (already leading-slash, e.g. "/user.slice/...")."""
-    var contents = _read_small_file(String("/proc/self/cgroup"))
+    (`0::<path>`) line, or "" if absent. See `_unified_cgroup_path_of`."""
+    return _unified_cgroup_path_of(_read_small_file(String("/proc/self/cgroup")))
+
+
+def _unified_cgroup_path_of(contents: String) -> String:
+    """Return the `<path>` of the first line of `contents` that begins `0::`,
+    or "" if there is none. v2 hosts have exactly one `0::` line; the `<path>`
+    is already leading-slash, e.g. "/user.slice/...". The path is copied as a
+    byte slice: a cgroup name may hold bytes >= 0x80."""
     var n = contents.byte_length()
     if n == 0:
         return String("")
@@ -2414,13 +2420,12 @@ def _read_unified_cgroup_path() -> String:
             and Int(bs[i + 1]) == 58  # ':'
             and Int(bs[i + 2]) == 58  # ':'
         ):
-            # Collect to end of line.
+            # Collect to end of line. The slice starts just after ':' and ends
+            # at a '\n' or the end, so it never splits a UTF-8 sequence.
             var j = i + 3
-            var path = String("")
             while j < n and Int(bs[j]) != _ASCII_NEWLINE:
-                path += chr(Int(bs[j]))
                 j += 1
-            return path
+            return String(contents[byte = i + 3 : j])
         # Advance to next line.
         while i < n and Int(bs[i]) != _ASCII_NEWLINE:
             i += 1
@@ -2464,12 +2469,14 @@ def _read_small_file(var path: String) -> String:
             buf.free()
             return String("")
         var n_int = Int(n_read)
-        var s = String("")
-        var i = 0
-        while i < n_int:
-            s += chr(Int(buf[i]))
-            i += 1
+        # Collect the BYTES and decode once: `chr` takes a code point, so
+        # `s += chr(Int(buf[i]))` re-encodes every byte >= 0x80 as two bytes
+        # (a non-ASCII cgroup path then misses its `cpu.max`).
+        var bytes = List[UInt8](capacity=n_int)
+        for i in range(n_int):
+            bytes.append(buf[i])
         buf.free()
-        return s
+        var s = String(StringSlice(unsafe_from_utf8=Span[UInt8](bytes)))
+        return s^
     else:
         return String("")

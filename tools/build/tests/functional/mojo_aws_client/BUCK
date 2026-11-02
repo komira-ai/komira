@@ -94,7 +94,7 @@ mojo_library(
     ],
 )
 
-# GetLogEvents only, pure: the module kci_logs needs first.
+# GetLogEvents only, pure.
 mojo_aws_client(
     name = "komira_aws_logs",
     mode = "pure",

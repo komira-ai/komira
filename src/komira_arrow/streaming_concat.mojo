@@ -2,13 +2,14 @@
 # Streaming concat helpers — merge per-RG RecordBatches into one
 # =============================================================================
 #
-# Two concat strategies:
-# - _concat_rg_batches_into_one: fast O(N) memcpy for fixed-width columns
-# - _concat_variable_width_batches: pairwise concat for string/dict columns
+# `_concat_variable_width_batches` builds each output column with its own
+# kernel: a single-pass multi-way copy for fixed-width and STRING/BINARY
+# columns (`_concat_fixed_columns_multi`, the string kernels), the pair-wise
+# fold for BOOL and DICTIONARY columns.
 # =============================================================================
 
 from std.math import max
-from std.memory import alloc, unsafe_memcpy, unsafe_memset, UnsafePointer
+from std.memory import UnsafePointer
 from std.sys import size_of
 
 from komira_arrow.arrow_types import ArrowType
@@ -26,144 +27,6 @@ from komira_arrow.offset_overflow import (
 )
 from komira_buffer.owned_aligned_buffer import OwnedAlignedBuffer
 from komira_buffer.heap_region import HeapRegion
-
-
-def _concat_rg_batches_into_one[o: Origin[mut=True]](
-    rg_batches: UnsafePointer[Optional[RecordBatch], o],
-    num_rgs: Int,
-) raises -> RecordBatch:
-    """Single-pass O(N) concat of per-RG RecordBatches.
-
-    Preconditions:
-    - `rg_batches[i]` is either None (empty RG) or Some(batch) where
-      every batch has the same schema.
-    - The destination slot `rg_batches[i]` is taken (moved out) during
-      the concat; callers should treat this buffer as consumed.
-
-    Strategy: compute total_rows + (per-column total_data_bytes for
-    var-width) from the slot metadata, pre-allocate one output
-    `MmapAlignedBuffer[64]` per column sized for the totals, then for
-    each RG memcpy its columns into the destination slot at the
-    current write offset. One memcpy per (RG, column) pair -- O(N),
-    vs the legacy `_concat_columns` which is O(N^2) pairwise.
-
-    Supports fixed-width numeric columns (INT32, INT64, FLOAT32,
-    FLOAT64). Other types raise; `_concat_variable_width_batches` handles
-    STRING and DICTIONARY.
-    """
-    # Find the first non-empty RG to source the schema from.
-    var schema_rg_idx = -1
-    for i in range(num_rgs):
-        if (rg_batches + i)[]:
-            schema_rg_idx = i
-            break
-    if schema_rg_idx < 0:
-        return RecordBatch()
-
-    var num_cols = (rg_batches + schema_rg_idx)[].value().num_columns()
-
-    # Stream AQ count-only fast path. When every per-RG batch is the
-    # synthetic zero-column count batch (see
-    # `RecordBatch.count_only`), we just sum `num_rows` across morsels
-    # and return a single zero-column batch. This complements the
-    # `_decode_with_late_mat` count-only hook used by CB-02 / CB-03.
-    # Correctness: callers that see `num_columns() == 0` use num_rows
-    # only (`_execute_agg_sink_no_keys` count-star fast path).
-    if num_cols == 0:
-        var total_rows_co = 0
-        for i in range(num_rgs):
-            if (rg_batches + i)[]:
-                total_rows_co += (rg_batches + i)[].value().num_rows()
-                # Drain the slot so the caller's subsequent `.free()`
-                # does not destroy already-moved RecordBatch internals.
-                # `_` receives the taken Optional and drops it at end of
-                # statement; the inner RecordBatch has no owning
-                # pointers, so drop is trivially cheap.
-                var _taken = (rg_batches + i).take_pointee()
-                _ = _taken^
-        return RecordBatch.count_only(total_rows_co)
-
-    # Per-column totals and type info.
-    var total_rows = 0
-    var col_types = List[ArrowType]()
-    var col_widths = List[Int]()
-    for c in range(num_cols):
-        ref col_ref = (rg_batches + schema_rg_idx)[].value().column_at(c)
-        col_types.append(col_ref.arrow_type)
-        col_widths.append(_arrow_type_byte_width(col_ref.arrow_type))
-    for i in range(num_rgs):
-        if (rg_batches + i)[]:
-            total_rows += (rg_batches + i)[].value().num_rows()
-
-    # Pre-allocate one destination buffer per column.
-    # SAFETY: dst_bufs owns `num_cols` heap allocations. They're moved
-    # into Column instances at the end and freed when those Columns die.
-    var dst_bufs = alloc[OwnedAlignedBuffer](num_cols)
-    for c in range(num_cols):
-        var nbytes = max(total_rows * col_widths[c], 1)
-        (dst_bufs + c).unsafe_write(OwnedAlignedBuffer(nbytes))
-
-    # Walk each RG and memcpy its columns into the destination slots.
-    var write_rows = 0
-    for i in range(num_rgs):
-        if not (rg_batches + i)[]:
-            continue
-        var rg_rows = (rg_batches + i)[].value().num_rows()
-        for c in range(num_cols):
-            var width = col_widths[c]
-            if width == 0:
-                raise Error(
-                    "streaming_parquet: non-fixed-width column in "
-                    "_concat_rg_batches_into_one (fixed-width columns only)"
-                )
-            ref src_col = (rg_batches + i)[].value().column_at(c)
-            var src_bytes = rg_rows * width
-            if src_bytes > 0:
-                # Dest copy at non-zero
-                # offset routes through MmapAlignedBuffer.copy_from_view_at
-                # (offset-aware variant of copy_from_view). Pointer
-                # arithmetic stays inside the primitive; this site no
-                # longer touches MmapAlignedBuffer's raw pointer.
-                var src_view = src_col._data.view_range_ro(
-                    src_col._offset * width, src_bytes
-                )
-                (dst_bufs + c)[].copy_from_view_at(write_rows * width, src_view)
-        write_rows += rg_rows
-
-    # Build the schema and RecordBatch from the destination buffers.
-    #
-    # `field_at(c)` COPIES THE WHOLE Field, and the 3-argument
-    # `Field(name, type, nullable)` rebuild this replaced did not. A Field also
-    # carries the IANA timezone (TIMESTAMP_* — tz is NOT part of the ArrowType,
-    # so `timestamp[us, tz=UTC]` and a naive `timestamp[us]` are the same
-    # ArrowType) and the decimal (precision, scale). Reconstructing from three
-    # arguments silently drops both, which turns a UTC-stamped column into a
-    # naive one and a scale-2 decimal into a scale-0 integer. The sibling copy
-    # of this loop (the engine runtime's parallel streaming concat, serial arm)
-    # carries the same `field_at(c)` for the same reason.
-    var sb = SchemaBuilder()
-    for c in range(num_cols):
-        sb.add_field((rg_batches + schema_rg_idx)[].value().schema.field_at(c))
-    var out_schema = sb.build()
-
-    var builder = RecordBatchBuilder.with_capacity(num_cols)
-    for c in range(num_cols):
-        var at = col_types[c]
-        var buf = (dst_bufs + c).take_pointee()
-        buf.set_length(Int64(total_rows * col_widths[c]))
-
-        builder.add_column(Column[HeapRegion](
-            arrow_type=at,
-            data=buf^,
-            offsets=None,
-            validity=None,
-            length=total_rows,
-            null_count=0,
-            offset=0,
-        ))
-    dst_bufs.free()
-
-    return builder.build(out_schema^)
 
 
 # =============================================================================
@@ -191,7 +54,7 @@ def _concat_rg_batches_into_one[o: Origin[mut=True]](
 # DICTIONARY, the nested and *_VIEW layouts). Every caller of THIS function
 # branches on `width == 0` to route to the string / pair-wise / raise arms
 # (`_concat_variable_width_batches`, `concat_record_batches_column_parallel`'s
-# `any_untiled_type` gate, `_concat_rg_batches_into_one`), so the sentinel is
+# `any_untiled_type` gate), so the sentinel is
 # the contract here and converting the raise back into it keeps every one of
 # those branches meaning what it meant.
 # =============================================================================
@@ -300,9 +163,13 @@ def _concat_variable_width_batches[o: Origin[mut=True]](
 
     # Multi-way fast path. Build each output column in one allocation
     # + one pass across the staging slots.
-    # `field_at(c)` — the WHOLE Field, including the TIMESTAMP timezone and the
-    # decimal (precision, scale) that a 3-argument Field rebuild drops. See the
-    # note in `_concat_rg_batches_into_one`.
+    # `field_at(c)` COPIES THE WHOLE Field, and a 3-argument
+    # `Field(name, type, nullable)` rebuild does not. A Field also carries the
+    # IANA timezone (TIMESTAMP_* — tz is NOT part of the ArrowType, so
+    # `timestamp[us, tz=UTC]` and a naive `timestamp[us]` are the same
+    # ArrowType) and the decimal (precision, scale). Reconstructing from three
+    # arguments silently drops both, which turns a UTC-stamped column into a
+    # naive one and a scale-2 decimal into a scale-0 integer.
     var sb = SchemaBuilder()
     for c in range(num_cols):
         sb.add_field((rg_batches + schema_idx)[].value().schema.field_at(c))
@@ -905,9 +772,8 @@ def _concat_fixed_columns_multi[o: Origin[mut=True]](
 ) raises -> Column[HeapRegion]:
     """Single-pass multi-way concat for one fixed-width numeric column.
 
-    Mirrors the fast path in `_concat_rg_batches_into_one` but scoped
-    to one column so it can coexist with string columns in the same
-    output batch.
+    Scoped to one column so it can coexist with string columns in the
+    same output batch.
 
     Routes through the shared `_concat_fixed_column_into_range` (data) +
     `_build_fixed_validity` (validity) + `_sum_fixed_null_count` (null
@@ -1106,7 +972,7 @@ def _concat_two_batches(
         # This is the BOOL / DICTIONARY fallback arm, so a file that mixes a
         # bool column with a tz-stamped timestamp routes its ENTIRE batch
         # through here; the 3-argument rebuild dropped the tz for every column
-        # in it. See the note in `_concat_rg_batches_into_one`.
+        # in it. See the note in `_concat_variable_width_batches`.
         sb.add_field(left.schema.field_at(c))
         ref a_ref = left.column_at(c)
         ref b_ref = right.column_at(c)

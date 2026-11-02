@@ -58,6 +58,19 @@ def _all_filter() -> EnvFilter:
     return f^
 
 
+# Drain one worker's ring and return how many records came out. This is the
+# engine's inspectable drain, NOT `drain_worker`: `drain_worker` writes every
+# record to the engine's log sink, and this test drains about 200 thousand records, which
+# as sink output was about 13 MB of test log. Log records are decoded the same
+# way and each yields one line, so for this test (log records only) the count
+# equals `drain_worker`'s. In general `drain_worker` returns every popped record
+# (span, metric and unknown kinds too) while `drain_worker_to_lines` counts log
+# records only. Only the delivery differs: the lines are dropped here, not
+# printed. Every drain below is outside a timed window.
+def _drain(mut eng: SharedEngine) -> Int:
+    return len(eng.drain_worker_to_lines(0, 1 << 16))
+
+
 def main() raises:
     var eng = SharedEngine(num_workers=1, filter=_all_filter())
     # SAFETY: `eng` owned by main for the whole measurement; install borrows its
@@ -67,10 +80,12 @@ def main() raises:
 
     # Warm-up: register the site (first emit appends to the dict) + prime the
     # ring + the TLS path so we measure steady state.
+    var warm_drained = 0
     for _ in range(1000):
         log.info["aot emit bench {}", "komira_engine"](ArgI64(0))
         # Drain so the bounded ring never fills (measure emit, not drop).
-        _ = eng.drain_worker(0, 1 << 16)
+        warm_drained += _drain(eng)
+    assert_equal(warm_drained, 1000, "warm-up: every emit drained")
     var sites_after_warmup = eng.site_dict_len()
     assert_equal(sites_after_warmup, 1, "warm-up registered the one site once")
 
@@ -91,7 +106,7 @@ def main() raises:
         total_ns += t1 - t0
         emitted += CHUNK
         # Drain OUTSIDE the timed window — keep the ring from filling.
-        drained += eng.drain_worker(0, 1 << 16)
+        drained += _drain(eng)
 
     var ns_per_emit = Float64(Int(total_ns)) / Float64(emitted)
     print("=== P2b AOT hot-path perf ===")

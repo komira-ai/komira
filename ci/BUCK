@@ -4,7 +4,7 @@
 # generated (targets.bzl) and held complete by tools/build/ci/guard.bxl.
 #
 # `pr_default` is the same set without the roots of the heavy checks
-# (HEAVY of tools/build/ci/rules.bzl: the kci binary and what depends on it):
+# (HEAVY of tools/build/ci/rules.bzl, none today):
 # the pull request check builds it, and the roots of a heavy row besides, when
 # the change owns paths of that row. tools/build/ci/default_guard.bxl holds it
 # to that: it reaches no heavy target and leaves out only roots that reach one.

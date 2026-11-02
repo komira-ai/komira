@@ -6,11 +6,19 @@
 //!   third_party_act srcs-gen --archive <tgz> --out <file> --gen <program> --library <l>
 //!       --gen-label <s> --drift-label <s> --committed-path <s>
 //!       Decompresses the release archive into the scratch directory and runs
-//!       <program> <l> <tar> <out> <gen-label> <drift-label> <committed-path>.
+//!       <program> <l> <tar> <out> <gen-label> <drift-label> <committed-path> <size of the
+//!       archive in bytes>.
 //!   third_party_act drift --generated <f> --committed <f> --regenerate <command>
 //!       Exit 0 when the two files are the same bytes; else names the first
 //!       differing lines (- committed, + generated) and the command that
 //!       regenerates the committed copy, and exits 1.
+//!   third_party_act files-check --archive <tgz> --files <file> --regenerate <command>
+//!       [--require <list>]...
+//!       Reads the committed files.bzl and the release archive, each on its own:
+//!       exit 0 when every file a list (or a dict value) names is in the archive
+//!       and in FILES, FILES is sorted and has no duplicate, every *INCLUDES
+//!       directory holds a file of the archive, and every --require list is
+//!       there and not empty; else names the first problems and exits 1.
 //!   third_party_act botocore-model --src <f> --sha256 <hex> --out <f>
 //!       Copies the model once its sha256 is the one models.bzl states.
 //!
@@ -184,9 +192,161 @@ fn cmdSrcsGen(a: std.mem.Allocator, args: []const []const u8) u8 {
         return 1;
     };
     const gen_abs = U.abs(a, cwd, gen) catch return 2;
-    var child = std.process.Child.init(&.{ gen_abs, library, tar, out, gen_label, drift_label, committed }, a);
+    const size = (std.fs.cwd().statFile(archive) catch |e| return usage("cannot stat {s}: {s}", .{ archive, @errorName(e) })).size;
+    const size_text = std.fmt.allocPrint(a, "{d}", .{size}) catch return 2;
+    var child = std.process.Child.init(&.{ gen_abs, library, tar, out, gen_label, drift_label, committed, size_text }, a);
     const term = child.spawnAndWait() catch |e| return usage("cannot run {s}: {s}", .{ gen, @errorName(e) });
     return U.exitCodeOf(term);
+}
+
+// ---- files-check ------------------------------------------------------------
+
+pub const Table = struct { name: []const u8, values: []const []const u8 };
+
+/// The strings in double quotes on `line`, in order (the generated file escapes none).
+fn quotedStrings(a: std.mem.Allocator, line: []const u8) ![]const []const u8 {
+    var out = std.ArrayList([]const u8).empty;
+    var i: usize = 0;
+    while (std.mem.indexOfScalarPos(u8, line, i, '"')) |open| {
+        const close = std.mem.indexOfScalarPos(u8, line, open + 1, '"') orelse break;
+        try out.append(a, line[open + 1 .. close]);
+        i = close + 1;
+    }
+    return out.toOwnedSlice(a);
+}
+
+/// The lists and dicts of a generated .bzl file: a line `NAME = [` or `NAME = {`
+/// opens one, a line `]` or `}` closes it. A list entry is `    "x",` and gives
+/// x; a dict entry is `    "key": "x",` and gives x (the key is a name, not a
+/// file). Every other line is not read.
+pub fn parseTables(a: std.mem.Allocator, text: []const u8) ![]const Table {
+    var tables = std.ArrayList(Table).empty;
+    var values = std.ArrayList([]const u8).empty;
+    var name: ?[]const u8 = null;
+    var dict = false;
+    var it = std.mem.splitScalar(u8, text, '\n');
+    while (it.next()) |line| {
+        if (name) |n| {
+            if (std.mem.eql(u8, line, "]") or std.mem.eql(u8, line, "}")) {
+                try tables.append(a, .{ .name = n, .values = try values.toOwnedSlice(a) });
+                values = .empty;
+                name = null;
+                continue;
+            }
+            const qs = try quotedStrings(a, line);
+            const want: usize = if (dict) 2 else 1;
+            if (qs.len >= want) try values.append(a, qs[want - 1]);
+            continue;
+        }
+        const open_list = std.mem.endsWith(u8, line, " = [");
+        if (open_list or std.mem.endsWith(u8, line, " = {")) {
+            name = line[0 .. line.len - 4];
+            dict = !open_list;
+        }
+    }
+    if (name != null) return error.UnclosedTable;
+    return tables.toOwnedSlice(a);
+}
+
+/// The regular files of the tar `bytes`, each below the archive's top
+/// directory (which is dropped), in archive order.
+pub fn archiveFiles(a: std.mem.Allocator, bytes: []const u8) ![]const []const u8 {
+    var reader: std.Io.Reader = .fixed(bytes);
+    var name_buf: [4096]u8 = undefined;
+    var link_buf: [4096]u8 = undefined;
+    var it = std.tar.Iterator.init(&reader, .{ .file_name_buffer = &name_buf, .link_name_buffer = &link_buf });
+    var out = std.ArrayList([]const u8).empty;
+    while (try it.next()) |f| {
+        if (f.kind != .file) continue;
+        const slash = std.mem.indexOfScalar(u8, f.name, '/') orelse continue;
+        try out.append(a, try a.dupe(u8, f.name[slash + 1 ..]));
+    }
+    return out.toOwnedSlice(a);
+}
+
+fn holdsFile(archive: []const []const u8, dir: []const u8) bool {
+    if (std.mem.eql(u8, dir, ".")) return archive.len > 0;
+    for (archive) |f| {
+        if (f.len > dir.len and f[dir.len] == '/' and std.mem.startsWith(u8, f, dir)) return true;
+    }
+    return false;
+}
+
+/// What is wrong with the files.bzl `text` against the files of the archive
+/// (see the header of this file); empty when nothing is.
+pub fn filesProblems(a: std.mem.Allocator, text: []const u8, archive: []const []const u8, require: []const []const u8) ![]const []const u8 {
+    var have = std.StringHashMap(void).init(a);
+    for (archive) |n| try have.put(n, {});
+    const tables = try parseTables(a, text);
+    var out = std.ArrayList([]const u8).empty;
+    var in_files = std.StringHashMap(void).init(a);
+    var has_files = false;
+    for (tables) |t| {
+        if (!std.mem.eql(u8, t.name, "FILES")) continue;
+        has_files = true;
+        for (t.values, 0..) |v, i| {
+            try in_files.put(v, {});
+            if (i > 0 and !std.mem.lessThan(u8, t.values[i - 1], v)) {
+                try out.append(a, try std.fmt.allocPrint(a, "FILES: {s} follows {s}; the list is sorted with no duplicate", .{ v, t.values[i - 1] }));
+            }
+        }
+    }
+    if (!has_files) try out.append(a, "there is no FILES list");
+    for (tables) |t| {
+        const dirs = std.mem.endsWith(u8, t.name, "INCLUDES");
+        for (t.values) |v| {
+            if (dirs) {
+                if (!holdsFile(archive, v)) try out.append(a, try std.fmt.allocPrint(a, "{s}: {s} holds no file of the archive", .{ t.name, v }));
+            } else if (!have.contains(v)) {
+                try out.append(a, try std.fmt.allocPrint(a, "{s}: {s} is not in the archive", .{ t.name, v }));
+            } else if (has_files and !in_files.contains(v)) {
+                try out.append(a, try std.fmt.allocPrint(a, "{s}: {s} is not in FILES", .{ t.name, v }));
+            }
+        }
+    }
+    for (require) |r| {
+        var found = false;
+        for (tables) |t| {
+            if (!std.mem.eql(u8, t.name, r)) continue;
+            found = true;
+            if (t.values.len == 0) try out.append(a, try std.fmt.allocPrint(a, "{s} is required and is empty", .{r}));
+        }
+        if (!found) try out.append(a, try std.fmt.allocPrint(a, "{s} is required and is not in the file", .{r}));
+    }
+    return out.toOwnedSlice(a);
+}
+
+fn cmdFilesCheck(a: std.mem.Allocator, args: []const []const u8) u8 {
+    const spec = [_]U.Spec{ .{ .name = "archive" }, .{ .name = "files" }, .{ .name = "regenerate" }, .{ .name = "require" } };
+    var bad: []const u8 = "";
+    const f = U.parseFlags(a, args, &spec, &bad) catch |e| return usage("files-check: {s}: {s}", .{ @errorName(e), bad });
+    const archive = f.need("archive") catch return usage("files-check needs --archive", .{});
+    const files = f.need("files") catch return usage("files-check needs --files", .{});
+    const regenerate = f.need("regenerate") catch return usage("files-check needs --regenerate", .{});
+    var require = std.ArrayList([]const u8).empty;
+    for (f.all(a, "require") catch return 2) |it| require.append(a, it.vals[0]) catch return 2;
+
+    const cwd = std.fs.cwd().realpathAlloc(a, ".") catch return 2;
+    const scratch = U.scratchRoot(a, cwd, std.posix.getenv("BUCK_SCRATCH_PATH")) catch return 2;
+    std.fs.cwd().makePath(scratch) catch |e| return usage("cannot create {s}: {s}", .{ scratch, @errorName(e) });
+    defer std.fs.cwd().deleteTree(scratch) catch {};
+    const tar = std.fs.path.join(a, &.{ scratch, "archive.tar" }) catch return 2;
+    gunzip(std.fs.cwd(), archive, tar) catch |e| {
+        std.debug.print("gzip: {s}: {s}\n", .{ archive, @errorName(e) });
+        return 1;
+    };
+    const tar_bytes = std.fs.cwd().readFileAlloc(a, tar, 1 << 31) catch |e| return usage("cannot read {s}: {s}", .{ tar, @errorName(e) });
+    const names = archiveFiles(a, tar_bytes) catch |e| return usage("cannot read {s}: {s}", .{ archive, @errorName(e) });
+    const text = std.fs.cwd().readFileAlloc(a, files, 1 << 28) catch |e| return usage("cannot read {s}: {s}", .{ files, @errorName(e) });
+    const problems = filesProblems(a, text, names, require.items) catch |e| return usage("cannot read {s}: {s}", .{ files, @errorName(e) });
+    if (problems.len == 0) {
+        std.debug.print("third_party_srcs: {s} names only files of the archive ({d} files)\n", .{ files, names.len });
+        return 0;
+    }
+    std.debug.print("third_party_srcs: {s} disagrees with the archive ({d} problems; first {d}):\n", .{ files, problems.len, @min(problems.len, 10) });
+    for (problems[0..@min(problems.len, 10)]) |p| std.debug.print("  {s}\n", .{p});
+    std.debug.print("regenerate: {s}\n", .{regenerate});
+    return 1;
 }
 
 // ---- botocore-model -----------------------------------------------------------
@@ -219,7 +379,7 @@ pub fn main() void {
     var arena_state = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     const a = arena_state.allocator();
     const argv = std.process.argsAlloc(a) catch std.process.exit(2);
-    if (argv.len < 2) std.process.exit(usage("usage: third_party_act (srcs-gen|drift|botocore-model) ...", .{}));
+    if (argv.len < 2) std.process.exit(usage("usage: third_party_act (srcs-gen|drift|files-check|botocore-model) ...", .{}));
     const plain = a.alloc([]const u8, argv.len - 2) catch std.process.exit(2);
     for (argv[2..], 0..) |s, i| plain[i] = s;
     const sub = argv[1];
@@ -227,6 +387,8 @@ pub fn main() void {
         cmdSrcsGen(a, plain)
     else if (std.mem.eql(u8, sub, "drift"))
         cmdDrift(a, plain)
+    else if (std.mem.eql(u8, sub, "files-check"))
+        cmdFilesCheck(a, plain)
     else if (std.mem.eql(u8, sub, "botocore-model"))
         cmdBotocore(a, plain)
     else

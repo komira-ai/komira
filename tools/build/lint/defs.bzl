@@ -20,7 +20,7 @@ a Zig tool of their own (pointer_lint.zig there, and
 validation result, a JSON file whose message holds the findings.
 """
 
-load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
+load("@komira//tools/build/platforms:defs.bzl", "TOOL_EXEC")
 load(":doc_tree.bzl", "DocTreeInfo", "collect_docs", "declares_docs")
 
 _COMMON = {
@@ -342,7 +342,7 @@ tar_member_rule = rule(
 )
 
 def _linux(kwargs):
-    kwargs.setdefault("exec_compatible_with", LINUX_X86_64)
+    kwargs.setdefault("exec_compatible_with", TOOL_EXEC)
     return kwargs
 
 # Every lint runs linux x86_64 tools (the lint tool, shellcheck): it reads a few files.

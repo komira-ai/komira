@@ -21,7 +21,7 @@
 //! THE SOURCE AND THE PACKAGED README. The packaged README is the source
 //! README's bytes, then the generated section, appended: every line of the
 //! source keeps its number, so a README run's report names the line of the
-//! repository's README (src/kci_validate, readme_installed.mojo), and the
+//! repository's README, and the
 //! welded README gate, which runs the source's examples, runs exactly the
 //! examples the package ships (the section holds no ```mojo block). The
 //! section is derived from the build graph, so the source never carries it:
@@ -31,8 +31,8 @@
 //! ships the source unchanged).
 //!
 //! THE ORDER, CHECKED FROM THE OBJECTS. The order comes from the build graph
-//! (native_facts.bzl `readme_link_names`), and kci computes it the same
-//! way, so neither would notice the other ordering the owners backwards.
+//! (native_facts.bzl `readme_link_names`), and nothing else computes it,
+//! so this check from the objects is what notices the owners backwards.
 //! Each `--needed-of SONAME=FILE` is the shared library of one owner
 //! (conda.bzl passes the package's own and, through `needed_owners`, every
 //! owner it NEEDs): its DT_NEEDED is read, and every owner of `--owner` it

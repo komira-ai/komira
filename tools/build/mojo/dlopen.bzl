@@ -33,7 +33,7 @@ def dlopen_refusal(ctx):
         seen[s] = True
     unknown = [s for s in ctx.attrs.dlopen if s not in SYSTEM_LIBS]
     if unknown:
-        return "{} declares `dlopen` of {}, for which tools/build/package/system_libs.bzl names no conda package; add the soname's row there (and to kci's copy) or remove the declaration".format(ctx.label.raw_target(), ", ".join(unknown))
+        return "{} declares `dlopen` of {}, for which tools/build/package/system_libs.bzl names no conda package; add the soname's row there or remove the declaration".format(ctx.label.raw_target(), ", ".join(unknown))
     return None
 
 def dlopen_rows(ctx):

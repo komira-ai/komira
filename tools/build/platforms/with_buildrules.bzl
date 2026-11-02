@@ -26,25 +26,56 @@ unit graph, the toolchain and the execution platform from those too, so a packag
 selects the macOS graph and this platform.)
 """
 
+def first_platform_refusal(labels, first_remote):
+    """Why komira's registration cannot take buildrules' platforms, or None.
+
+    `labels` are the labels of the registered platforms in order, `first_remote`
+    whether the first one executes remotely. Komira's linux-x86_64 comes first.
+    The one exception is a local build on a Mac (`komira_local_execution_platforms`),
+    whose only platform is darwin-arm64 and runs on this machine: a lone REMOTE
+    darwin-arm64 (a Mac client with only macOS workers) is still refused, since
+    buildrules' linux-labelled platforms would silently get the macOS executor.
+    """
+    if len(labels) == 0:
+        return "no platform"
+    if labels[0].endswith("platforms:linux-x86_64"):
+        return None
+    if len(labels) == 1 and labels[0].endswith("platforms:darwin-arm64") and not first_remote:
+        return None
+    return "the first platform must be komira's linux-x86_64 (or, alone and local, a local macOS build's darwin-arm64)"
+
+def extra_platform_kinds(labels):
+    """Which of buildrules' platforms get komira's executor, as `(linux, darwin)`.
+
+    `labels` are the labels of the registered platforms in order. buildrules' linux platform
+    (`extra`) takes the executor of komira's linux platform, so it is added only when komira's
+    linux-x86_64 comes first. A local build on a Mac registers darwin-arm64 alone: there the linux
+    platform must not appear (it would run on the Mac as if it were linux), and buildrules' macOS
+    platform (`extra_darwin`) takes the Mac's executor. With macOS workers beside linux, both.
+    """
+    linux = len(labels) > 0 and labels[0].endswith("platforms:linux-x86_64")
+    darwin = len([l for l in labels if l.endswith("platforms:darwin-arm64")]) > 0
+    return linux, darwin
+
 def _impl(ctx):
     base = ctx.attrs.base[ExecutionPlatformRegistrationInfo].platforms
-    if len(base) == 0 or not str(base[0].label).endswith("platforms:linux-x86_64"):
-        fail("{}: the first platform of {} must be komira's linux-x86_64, got {}".format(
-            ctx.label,
-            ctx.attrs.base.label,
-            [str(p.label) for p in base],
-        ))
-    linux = base[0]
-    extra = [
-        ExecutionPlatformInfo(
-            label = p.label.raw_target(),
-            configuration = p[PlatformInfo].configuration,
-            executor_config = linux.executor_config,
-        )
-        for p in ctx.attrs.extra
-    ]
+    labels = [str(p.label) for p in base]
+    refusal = first_platform_refusal(labels, not ctx.attrs.local)
+    if refusal:
+        fail("{}: {} (of {}), got {}".format(ctx.label, refusal, ctx.attrs.base.label, labels))
+    use_linux, use_darwin = extra_platform_kinds(labels)
+    extra = []
+    if use_linux:
+        extra += [
+            ExecutionPlatformInfo(
+                label = p.label.raw_target(),
+                configuration = p[PlatformInfo].configuration,
+                executor_config = base[0].executor_config,
+            )
+            for p in ctx.attrs.extra
+        ]
     darwin = [p for p in base if str(p.label).endswith("platforms:darwin-arm64")]
-    if darwin:
+    if use_darwin:
         extra += [
             ExecutionPlatformInfo(
                 label = p.label.raw_target(),
@@ -59,6 +90,10 @@ execution_platforms_plus = rule(
     impl = _impl,
     attrs = {
         "base": attrs.dep(providers = [ExecutionPlatformRegistrationInfo]),
+        # Whether komira registered local execution (`execution_mode() == "local"`, read by the
+        # BUCK file: a rule cannot read the configuration). A lone darwin-arm64 platform is
+        # accepted only then (first_platform_refusal).
+        "local": attrs.bool(default = False),
         "extra": attrs.list(attrs.dep(providers = [PlatformInfo])),
         # Platforms that get the executor of komira's macOS arm64 platform, when komira registers one.
         "extra_darwin": attrs.list(attrs.dep(providers = [PlatformInfo]), default = []),

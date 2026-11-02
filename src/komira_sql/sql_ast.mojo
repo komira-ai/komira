@@ -22,7 +22,7 @@ from komira_collections.slab import Slab
 # --- SqlExpr node tags -------------------------------------------------------
 comptime SX_COLUMN: UInt8 = 0  # a column reference (name in `text`)
 comptime SX_INT: UInt8 = 1  # integer literal (int_val)
-comptime SX_FLOAT: UInt8 = 2  # float literal (float_val)
+comptime SX_FLOAT: UInt8 = 2  # float literal (float_val; `text` = its digits as written, '' when unknown)
 comptime SX_STRING: UInt8 = 3  # string literal (text)
 comptime SX_BINARY: UInt8 = 4  # binary op (op in `op`; children in _left/_right)
 comptime SX_AGG: UInt8 = 5  # aggregate call (func in `op`; arg in _agg_arg)
@@ -63,6 +63,19 @@ comptime SX_TIMESTAMP: UInt8 = 15
 # desugars `IN` to `=`s) — and REFUSES it by name everywhere else: this IR has
 # no untyped NULL value to project.
 comptime SX_NULL: UInt8 = 16
+
+# ★ THE INTERVAL LITERAL. `INTERVAL '<n>' <unit>`: the signed count in
+# `int_val`, the unit in `op` (SXIVL_*). It is parsed so that a constant DATE
+# can be shifted (`date '1994-01-01' + interval '1' year`); the binder folds
+# that into a DATE literal (`sql_bind_interval`) and refuses an INTERVAL
+# anywhere else, because the logical plan has no INTERVAL operand type.
+comptime SX_INTERVAL: UInt8 = 17
+
+# `SX_INTERVAL.op` — the unit keyword (singular or plural spelling).
+comptime SXIVL_YEAR: UInt8 = 0   # 12 months per unit
+comptime SXIVL_MONTH: UInt8 = 1  # calendar months, the day clamps to the month end
+comptime SXIVL_WEEK: UInt8 = 2   # 7 days
+comptime SXIVL_DAY: UInt8 = 3
 
 # `SX_TIMESTAMP.op` — which keyword introduced the literal.
 comptime TSLIT_NAIVE: UInt8 = 0  # `TIMESTAMP '...'`   — wall clock, no zone
@@ -928,9 +941,13 @@ struct SqlExpr(Movable):
         return e^
 
     @staticmethod
-    def float_lit(v: Float64) -> SqlExpr:
+    def float_lit(v: Float64, text: String = String("")) -> SqlExpr:
+        """A number literal with a point. `text` is the literal as written
+        (`0.06`, `-0.5`): the digits DuckDB types it from as a DECIMAL. Empty
+        for a literal built without text."""
         var e = SqlExpr(SX_FLOAT)
         e.float_val = v
+        e.text = text
         return e^
 
     @staticmethod
@@ -958,6 +975,14 @@ struct SqlExpr(Movable):
         var e = SqlExpr(SX_TIMESTAMP)
         e.text = v
         e.op = TSLIT_AWARE if aware else TSLIT_NAIVE
+        return e^
+
+    @staticmethod
+    def interval_lit(count: Int64, unit: UInt8) -> SqlExpr:
+        """`INTERVAL '<count>' <unit>` — see `SX_INTERVAL`."""
+        var e = SqlExpr(SX_INTERVAL)
+        e.int_val = count
+        e.op = unit
         return e^
 
     @staticmethod

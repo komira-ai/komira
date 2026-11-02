@@ -198,7 +198,7 @@ At execution, `ScanResolver` (`src/komira_scan_source/scan_resolver.mojo`) answe
 | `src/komira_simd/width_policy.mojo` | SIMD width policy | `komira_simd_width`, `komira_simd_width_bitpack`, `komira_simd_width_delta` |
 | `src/komira_scan_source/scan_binding.mojo`, `scan_resolver.mojo`, `scan_registry.mojo` | Scan descriptions and resolution | `ScanBinding`, `ScanResolver`, `ScanRegistry` |
 | `src/komira_rowcell/src/komira_rowcell/row_cell.mojo` | The table cell | `RowCell` |
-| `src/komira_uuid/uuid.mojo`, `clock.mojo` | UUIDv7 and the wall clock | `Uuid`, `generate_uuidv7`, `now_unix_ms` |
+| `src/komira_uuid/src/komira_uuid/uuid.mojo`, `clock.mojo` | UUIDv7 and the wall clock | `Uuid`, `generate_uuidv7`, `now_unix_ms` |
 
 Entry points:
 

@@ -24,6 +24,7 @@ from komira_dynamic_filter.selectivity_tracker import SelectivityTracker
 from komira_fs.column_set import ColumnSet
 from komira_fs.file_system import FileSystem
 from komira_morsel.dynamic_join_filter import DynamicJoinFilter
+from komira_phase_timers.phase_timers import PH_LATE_MAT, PH_STAGED, pt_now, pt_record
 from komira_plan_expr.expr_id import ExprId
 from komira_plan_expr.expr_pool import ExprPool
 from komira_scan_planning.source_capability_config import SourceCapabilityConfig
@@ -152,7 +153,9 @@ def _decode_filtered[FS: FileSystem, fo: Origin[mut=True]](
     var pre_batch: Optional[RecordBatch] = None
     var pre_mask: Optional[BooleanArray] = None
     if has_decode and not has_dyn:
+        var t_staged = pt_now()
         var sf = arm_staged_filter(reader, rg_in_file, p, stages, plan.cols, projection, preserve_dict, count_only)
+        pt_record[PH_STAGED](t_staged)
         if sf.outcome.kind != OUTCOME_FALL_THROUGH:
             var out = ClaimOutcome.fall_through()
             swap(out, sf.outcome)
@@ -165,8 +168,11 @@ def _decode_filtered[FS: FileSystem, fo: Origin[mut=True]](
             if plan.names[i] == caps.dynamic_filter_key_name:
                 dyn_key_col = i
                 break
-    return late_mat_decode[FS, fo](
+    var t_late = pt_now()
+    var late = late_mat_decode[FS, fo](
         reader, rg_in_file, plan, p, stages, has_decode, dyn, dyn_key_col, range_trk, in_list_trk, bloom_trk,
         pre_batch^, pre_mask^, caps.fused_eval_enabled, projection, preserve_dict, count_only,
         options.sel_pipe_enabled, options.decode_arena,
     )
+    pt_record[PH_LATE_MAT](t_late)
+    return late^

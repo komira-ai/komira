@@ -4,7 +4,11 @@
 # `ProcessTransport` is the real one, over komira_supervisor: it starts the
 # binary with a stdin pipe and no shell. A test supplies another conformer.
 
+from std.sys.info import CompilationTarget
+
 from komira_supervisor import ChildSpec, Supervisor
+
+from .faults import FaultCount, read_stat_faults
 
 comptime _SLICE_MS: Int = 50
 """How long one wait on stdout lasts before stderr is drained and the wait
@@ -52,6 +56,12 @@ trait DuckDbTransport(Movable, Deinitable):
     def finish(mut self) raises -> Int:
         """Close its stdin, wait for it to exit and return its exit code."""
         ...
+
+    def child_faults(self) -> Optional[FaultCount]:
+        """The minor and major page faults the process has taken so far, or
+        nothing where the transport cannot read them. A transport that does not
+        override this reports none."""
+        return Optional[FaultCount]()
 
 
 struct ProcessTransport(DuckDbTransport):
@@ -127,6 +137,16 @@ struct ProcessTransport(DuckDbTransport):
         var out = self._err.copy()
         self._err = String("")
         return out^
+
+    def child_faults(self) -> Optional[FaultCount]:
+        """The child's page faults so far, read from `/proc/<pid>/stat`; none
+        on a platform without it and once the child has been stopped."""
+        var reading = Optional[FaultCount]()
+        if self._done:
+            return reading^
+        comptime if CompilationTarget.is_linux():
+            reading = read_stat_faults(String("/proc/") + String(Int(self._sup.pid())) + String("/stat"))
+        return reading^
 
     def kill(mut self) raises:
         if self._done:
