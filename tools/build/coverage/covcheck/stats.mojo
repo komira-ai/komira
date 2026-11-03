@@ -21,6 +21,7 @@ comptime STALE_EXEMPTION = "StaleExemption"
 comptime UNMEASURED_FILE = "UnmeasuredFile"
 comptime BRANCH_UNMEASURED_FILE = "BranchUnmeasuredFile"
 comptime DECLARATION_ONLY_FILE = "DeclarationOnlyFile"
+comptime UNRUN_PROGRAM = "UnrunProgram"
 
 
 struct PackageStats(Copyable, Movable):

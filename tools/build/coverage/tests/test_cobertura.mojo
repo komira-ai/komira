@@ -137,6 +137,68 @@ def test_refusals() raises:
     _refused(String("\xef\xbb\xbf<coverage></coverage>"), String("text outside the root element"))
 
 
+def _refused_exactly(text: String, want: String) raises:
+    var raised = False
+    try:
+        _ = parse_cobertura(text, String("c.xml"))
+    except e:
+        raised = True
+        assert_equal(String(e), want)
+    assert_true(raised, String("accepted: ") + text)
+
+
+def test_prolog_comment_and_doctype_are_skipped() raises:
+    var fs = parse_cobertura(
+        String("<?xml version=\"1.0\"?><!-- a note --><!DOCTYPE coverage SYSTEM \"cov.dtd\"><coverage><classes><class filename=\"a.mojo\"/></classes></coverage>"),
+        String("c.xml"),
+    )
+    assert_equal(len(fs), 1)
+    assert_equal(fs[0].path, "a.mojo")
+
+
+def test_self_closing_class_is_a_file_with_no_lines() raises:
+    var fs = parse_cobertura(String("<coverage><classes><class filename=\"a.mojo\"/></classes></coverage>"), String("c.xml"))
+    assert_equal(len(fs), 1)
+    assert_equal(fs[0].path, "a.mojo")
+    assert_equal(fs[0].line_found(), 0)
+
+
+def test_spaces_around_equals_and_before_end_tag_close() raises:
+    var fs = parse_cobertura(
+        String("<coverage v = \"1\" ><classes><class filename = 'a.mojo'/></classes></coverage  >"),
+        String("c.xml"),
+    )
+    assert_equal(len(fs), 1)
+    assert_equal(fs[0].path, "a.mojo")
+
+
+def test_refusals_of_the_markup_around_the_elements() raises:
+    _refused_exactly(String("<coverage/><"), String("c.xml:1: a tag with no name"))
+    _refused_exactly(String("<?xml version=\"1.0\""), String("c.xml:1: unterminated <?"))
+    _refused_exactly(String("<!DOCTYPE coverage"), String("c.xml:1: unterminated DOCTYPE"))
+    _refused_exactly(String("<!DOCTYPE coverage [ <!ENTITY x \"y\"> ]><coverage/>"), String("c.xml:1: a DOCTYPE with an internal subset"))
+    _refused_exactly(String("<coverage><![CDATA[x]]></coverage>"), String("c.xml:1: unsupported markup '<!' (CDATA is not read)"))
+    _refused_exactly(String("<coverage></coverage"), String("c.xml:1: unterminated end tag </coverage"))
+    _refused_exactly(String("<coverage/><coverage/>"), String("c.xml:1: a second root element <coverage>"))
+
+
+def test_refusals_of_attributes() raises:
+    _refused_exactly(String("<coverage a=\"<\"/>"), String("c.xml:1: '<' in an attribute value"))
+    _refused_exactly(String("<coverage a=\"x&amp\"/>"), String("c.xml:1: an '&' that starts no entity"))
+    _refused_exactly(String("<coverage /x>"), String("c.xml:1: '/' not followed by '>' in <coverage"))
+    _refused_exactly(String("<coverage =\"1\">"), String("c.xml:1: malformed attribute in <coverage"))
+    _refused_exactly(String("<coverage a/>"), String("c.xml:1: attribute a of <coverage> has no value"))
+    _refused_exactly(String("<coverage a=\"1/>"), String("c.xml:1: unterminated value of a in <coverage"))
+
+
+def test_refusals_of_classes_and_line_numbers() raises:
+    _refused_exactly(
+        String("<coverage><class filename=\"a\"><class filename=\"b\"/></class></coverage>"),
+        String("c.xml:1: <class> inside <class>"),
+    )
+    _refused_exactly(_doc(String("<line number=\"0\" hits=\"1\"/>")), String("c.xml:1: <line> number 0 (lines start at 1)"))
+
+
 def test_refusal_names_the_line() raises:
     _refused(String("<coverage>\n<classes>\n<class filename=\"x\">\n<lines>\n<line number=\"1\" hits=\"z\"/>\n</lines></class></classes></coverage>"), String("c.xml:5:"))
 
@@ -149,5 +211,11 @@ def main() raises:
     test_entities_in_attribute_values()
     test_two_classes_same_file_sum()
     test_refusals()
+    test_prolog_comment_and_doctype_are_skipped()
+    test_self_closing_class_is_a_file_with_no_lines()
+    test_spaces_around_equals_and_before_end_tag_close()
+    test_refusals_of_the_markup_around_the_elements()
+    test_refusals_of_attributes()
+    test_refusals_of_classes_and_line_numbers()
     test_refusal_names_the_line()
     print("test_cobertura: PASS")

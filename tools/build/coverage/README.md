@@ -53,8 +53,8 @@ covcheck report --repo-files F --diff F --head-sha SHA --source-root DIR
                 (--cobertura [PKGDIR=]F | --lcov [PKGDIR=]F)... [--branch-lcov [PKGDIR=]F]...
                 [--mutants [PKGDIR=]F]...
                 [--strip-prefix P]... [--held PKGDIR=F]... [--mode census|neutral|enforce]
-                --target-bp N [--include-tests] [--info-package DIR]... [--name N]
-                [--max-annotations N] --summary-out F --checkrun-dir D --result-out F
+                --target-bp N [--include-tests] [--info-package DIR]... [--program-targets F]
+                [--name N] [--max-annotations N] --summary-out F --checkrun-dir D --result-out F
                 [--annotations-out F]
 
 covcheck gate   --package DIR --repo-files F --source-root DIR
@@ -62,7 +62,9 @@ covcheck gate   --package DIR --repo-files F --source-root DIR
                 [--mutants [PKGDIR=]F]...
                 [--strip-prefix P]... [--held F] --mode census|neutral|enforce
                 --target-bp N [--include-tests] [--test-source P]... [--info-package DIR]...
-                --result-out F --summary-out F
+                [--program-targets F] --result-out F --summary-out F
+
+covcheck program-query --repo-files F --packages F --out F
 ```
 
 Every input is a flag; nothing is read from the environment.
@@ -81,6 +83,9 @@ Every input is a flag; nothing is read from the environment.
 | `--include-tests` | count test sources (left out by default) |
 | `--test-source P` | `gate`: repeatable; the repository path of a test source of `--package` outside its `tests/` (a welded test elsewhere), left out like those; a path that is not a file of `--repo-files` or not in `--package` is an error (exit 1) |
 | `--info-package DIR` | repeatable; `DIR` (a trailing `/` dropped; an absolute path, `.` or one holding `//` is bad usage) and every package under it, at a path-segment boundary, are test-only: see Test-only packages |
+| `--program-targets F` | buck2's JSON (`uquery ... --output-attribute '^(main|srcs)$'`) of the program targets a test target of their own package depends on; each target's entry point (its `main`, else its one source, when it is a file of the target's own cell) is a program some test runs (see Program sources); `{}`: none is; absent while a manifest of the run declares a program, or a file that is not that JSON object (an empty one included): an input error (exit 1) |
+| `--packages F` | `program-query`: the measured packages, one repository directory per line (an empty line for the root package) |
+| `--out F` | `program-query`: where the query is written; an empty file when no package of `--packages` has a `mopm.toml` |
 | `--diff F` | the output of `git diff --no-color --no-ext-diff --src-prefix=a/ --dst-prefix=b/ --unified=0 -M <merge-base> <head>` (the explicit prefixes override a `diff.noprefix` setting) |
 | `--head-sha SHA` | the commit the check run is for: 40 lowercase hex digits |
 | `--name N` | the check run's name; default `coverage` |
@@ -329,6 +334,71 @@ contrived text that puts it out of step with the compiler and back in step
 before the end of the file can hide a line of code from the heuristic and
 from this test alike.
 
+## Program sources
+
+A package's `mopm.toml` names the programs it ships in `[targets]`: `bins = [{ name = "x", path = "bins/x.mojo" }]`, or the same entries as `[[targets.bins]]` tables; `path` is relative to the manifest's directory. A program's `main` is reachable only through the built program, which the census cannot instrument, so each named file is program source (covcheck/programs.mojo): it is counted in no line or branch number and is no `UnmeasuredFile` (any line record, branch record or mutant of it is dropped, as for a generated source, and the program wins over a generated marker; `Analysis.program_paths` lists them), and it is an `UnrunProgram` finding when no test target of its package depends on the built program. Its package is measured even when the program's records were its only ones, so its other sources are still counted.
+
+The evidence is the build graph's, given as data: `--program-targets F` is buck2's JSON for the program targets (a `mojo_binary_rule`, or a `mojo_unit_rule` of kind `bin`) that a `mojo_test_rule` or `mojo_test_run_rule` target of the same package depends on, with their `main` and `srcs`. `covcheck program-query` writes the query for the measured packages (one selection per package that has a `mopm.toml`, so a test of another package is no evidence; no query when none has one), and `.github/ci/coverage_measure.sh` runs it with `buck2 uquery` and passes the answer. covcheck takes each target's entry point, its `main`, else its one source, and only when it is a file of the target's own cell: a target with several sources and no `main` is evidence for none of them, a source a program target merely lists is no evidence for it, and neither is a file of another cell whose path reads the same. A run whose manifests declare a program and that is given no `--program-targets` (or an empty file, what a failed query leaves) is an input error, so a query that was not run or failed never reads as "no program runs". The gate of a `mojo_library` (tools/build/mojo/coverage.bzl) passes no `--program-targets`: no `mojo_library` package declares `bins` today, and the packages that ship programs are built with buildrules' `mojo_package`, whose numbers come from this report, so a `bins` entry of a `mojo_library` is an input error at its gate until the gate is given the query.
+
+A `.mojo` file under `bins/` that no manifest names stays ordinary source, and a package with no `mopm.toml` has no program. A manifest is read only for a package in the run: one a report path the census counts is in (not a test source, not generated), the gated package, or one given a hold. It is read strictly (covcheck/manifest.mojo reads the statements, every value to its real end, strings, multi-line strings, arrays and inline tables included): an unclosed string or value, a `]` or `}` that does not close the bracket or brace that opened last, text after a value, a table name that is not a dotted list of bare keys (a quoted one included), `bins` as a single inline table or a `[targets.bins]` table, given twice or in both shapes, an entry without a quoted `name` or `path`, a `path` that is not a relative `.mojo` path, two entries naming one file or sharing a name, an entry naming a file that is not in the repository, a file of another package (a directory with its own BUCK file) or a test source of the package: each is an error (exit 1) naming the manifest and line, never a silent exclusion. The floor does not change: this says what it measures. The design is in [docs/design/coverage_program_sources.md](https://github.com/komira-ai/komira/blob/main/docs/design/coverage_program_sources.md).
+
+The manifest's statements, the programs a package declares, the query and its answer, the findings, and the analysis's use of them:
+
+```mojo
+from std.testing import assert_equal
+from covcheck.analyze import FORMAT_LCOV, Input, Options, Sources, analyze
+from covcheck.held import Held
+from covcheck.manifest import STMT_KEYVAL, STMT_TABLE, toml_statements
+from covcheck.paths import repo_files_of
+from covcheck.programs import parse_bins, parse_program_targets, program_query, program_sources, unrun_findings
+
+var manifest = String("[targets]\nbins = [{ name = \"x\", path = \"bins/x.mojo\" }]\n")
+# The statements: the `[targets]` header, then `bins` with its value and line.
+var stmts = toml_statements(manifest, "src/p/mopm.toml")
+assert_equal(stmts[0].kind, STMT_TABLE)
+assert_equal(stmts[1].kind, STMT_KEYVAL)
+assert_equal(stmts[1].name, "bins")
+assert_equal(stmts[1].line, 2)
+# The entries as written, then as programs of the package src/p.
+var bins = parse_bins(manifest, "src/p/mopm.toml")
+assert_equal(bins[0].name, "x")
+assert_equal(bins[0].path, "bins/x.mojo")
+assert_equal(bins[0].line, 2)
+var files = List[String]()
+files.append("src/p/BUCK")
+files.append("src/p/a.mojo")
+files.append("src/p/bins/x.mojo")
+files.append("src/p/mopm.toml")
+var repo = repo_files_of(files)
+var manifests = Dict[String, String]()
+manifests[String("src/p/mopm.toml")] = manifest
+var packages = List[String]()
+packages.append(String("src/p"))
+var programs = program_sources(repo, manifests, packages)
+assert_equal(programs[0].package, "src/p")
+assert_equal(programs[0].path, "src/p/bins/x.mojo")
+assert_equal(programs[0].manifest, "src/p/mopm.toml")
+# The census's query for src/p, and its answer: a test of src/p depends on the program's target.
+assert_equal(program_query(repo, packages).endswith("intersect //src/p:)"), True)
+var runs = parse_program_targets("{\"komira//src/p:x\": {\"main\": null, \"srcs\": [\"komira//src/p/bins/x.mojo\"]}}", "t.json")
+assert_equal(String("src/p/bins/x.mojo") in runs, True)
+assert_equal(len(unrun_findings(programs, runs)), 0)
+var unrun = unrun_findings(programs, Dict[String, Bool]())
+assert_equal(unrun[0].kind, "UnrunProgram")
+# The analysis: `Options.program_runs` is the answer; the program leaves the numbers.
+var sources = Sources(String(""))
+sources.texts[String("src/p/a.mojo")] = String("def f() -> Int:\n    return 1\n")
+sources.texts[String("src/p/bins/x.mojo")] = String("def main():\n    pass\n")
+sources.texts[String("src/p/mopm.toml")] = manifest
+var reports = List[Input]()
+reports.append(Input(String(FORMAT_LCOV), String(""), String("t.info"), String("SF:src/p/a.mojo\nDA:1,1\nDA:2,1\nend_of_record\n")))
+var opts = Options()
+opts.program_runs = runs.copy()
+var a = analyze(reports, List[Input](), repo, Held(), sources, opts)
+assert_equal(a.program_paths[0], "src/p/bins/x.mojo")
+assert_equal(a.packages[a.package_index(String("src/p"))].line_found, 2)
+```
+
 ## Functions with no recorded line
 
 Report only: these lists change no number and raise no finding.
@@ -526,6 +596,7 @@ hits > 0), branch (only when the package has a branch record), mutants.
 | `ReachedTarget` | information, never counted (`info_findings`): a metric at or above `--target-bp` that the package does not hold; it says to add the metric to the package's `coverage_held`. Not for a test-only package |
 | `MutantSurvived` | a surviving mutant |
 | `UnmeasuredFile` | a source file of a measured package that no report names still has lines counted (see Files no test compiled) |
+| `UnrunProgram` | a file a package's `mopm.toml` names in `[targets] bins` is program source (left out of the numbers), and no test target of the package depends on the built program (see Program sources) |
 | `DeclarationOnlyFile` | information, never counted: a file no report names is declaration-only and counts no line (see Files no test compiled) |
 | `BranchUnmeasuredFile` | a file with a line record, in a package one of whose kept files a branch record file names, that no branch record file names and whose line report gives no branch record of its own: cov_branch_classify names every measured file its test holds code of (a decision-free one with no `BRDA`), so this file's branches were not read, and counting them as none would lift the package's branch number. A failure in enforce mode, listed in census mode, as `UnmeasuredFile` is |
 | `ExemptionWithoutReason`, `StaleExemption` | see Exemptions |

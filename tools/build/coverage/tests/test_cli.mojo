@@ -3,7 +3,7 @@ from std.testing import assert_equal, assert_true
 
 from komira_json import JsonValue, parse_json_value
 
-from covcheck.cli import EXIT_GATE, EXIT_INPUT, EXIT_OK, EXIT_USAGE, max_annotations, parse_args, run
+from covcheck.cli import USAGE_MARK, EXIT_GATE, EXIT_INPUT, EXIT_OK, EXIT_USAGE, max_annotations, parse_args, run
 from covcheck.text import read_text, sort_strings, write_text
 
 # The command line end to end on the e2e fixtures: the summary byte for
@@ -307,6 +307,42 @@ def test_usage_errors_exit_2() raises:
     assert_equal(run(dangling), EXIT_USAGE)
 
 
+def _usage_of(args: List[String]) -> String:
+    """The message `parse_args` refuses `args` with, or the empty string."""
+    try:
+        _ = parse_args(args)
+    except e:
+        return String(e)
+    return String("")
+
+
+def test_usage_messages_name_the_flag_at_fault() raises:
+    var dir = _tmp(String("usage_text"))
+    assert_equal(
+        _usage_of(_with(_without(_report(dir), String("--target-bp")), String("--target-bp"), String("10001"))),
+        String(USAGE_MARK) + "--target-bp '10001' is not a number of basis points from 0 to 10000",
+    )
+    assert_equal(
+        _usage_of(_with(_without(_report(dir), String("--target-bp")), String("--target-bp"), String("lots"))),
+        String(USAGE_MARK) + "--target-bp 'lots' is not a number of basis points from 0 to 10000",
+    )
+    assert_equal(
+        _usage_of(_with(_report(dir), String("--name"), String(""))),
+        String(USAGE_MARK) + "'--name' has an empty value",
+    )
+
+
+def test_include_tests_and_strip_prefix_are_read() raises:
+    var dir = _tmp(String("usage_flags"))
+    var args = _report(dir)
+    args.append("--include-tests")
+    var a = parse_args(_with(args^, String("--strip-prefix"), String("/work/root")))
+    assert_true(a.include_tests)
+    assert_equal(len(a.strip_prefixes), 1)
+    assert_equal(a.strip_prefixes[0], "/work/root")
+    assert_true(not parse_args(_report(dir)).include_tests)
+
+
 def test_input_errors_exit_1() raises:
     var dir = _tmp(String("input"))
     var bad = dir + "/bad_held"
@@ -555,6 +591,8 @@ def main() raises:
     test_report_exit_never_carries_the_conclusion()
     test_annotation_cap_and_full_list()
     test_usage_errors_exit_2()
+    test_usage_messages_name_the_flag_at_fault()
+    test_include_tests_and_strip_prefix_are_read()
     test_input_errors_exit_1()
     test_gate_with_no_report()
     test_gate_test_sources()

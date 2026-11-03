@@ -532,6 +532,32 @@ N_RECORDS=$(grep -c . "$OUT/branch_records.txt" || true)
 
 # 5. The report.
 if [ "$N_REPORTS" -gt 0 ]; then
+    # The program targets each measured package's tests depend on
+    # (tools/build/coverage/README.md, "Program sources"). covcheck writes the
+    # query (`covcheck program-query`: one selection per measured package with
+    # a mopm.toml, so a test of another package is no evidence), or nothing
+    # when no such package is measured; buck2's JSON answer is the file the
+    # report reads (--program-targets). covcheck refuses a run whose manifests
+    # declare a program and that gives no such file, or an empty one, so a
+    # query that was not run or failed is an error, never "none run".
+    rc=0
+    "$COVCHECK" program-query --repo-files "$OUT/repo-files" --packages "$OUT/measured_packages.txt" \
+        --out "$OUT/program_query.txt" >"$OUT/logs/program_query.log" 2>&1 </dev/null || rc=$?
+    if [ "$rc" -ne 0 ]; then
+        cat "$OUT/logs/program_query.log"
+        die "covcheck program-query exited $rc"
+    fi
+    pquery=$(cat "$OUT/program_query.txt")
+    if [ -n "$pquery" ]; then
+        say "buck2 uquery \"$pquery\" --output-attribute '^(main|srcs)\$'"
+        rc=0
+        "$BUCK2" uquery -c komira.coverage=true "$pquery" --output-attribute '^(main|srcs)$' \
+            >"$OUT/program_targets.json" 2>"$OUT/logs/uquery_programs.log" </dev/null || rc=$?
+        if [ "$rc" -ne 0 ]; then
+            tail -n 20 "$OUT/logs/uquery_programs.log"
+            die "buck2 uquery of the programs the tests depend on exited $rc"
+        fi
+    fi
     set -- report --repo-files "$OUT/repo-files" --diff "$OUT/diff.txt" --head-sha "$HEAD" \
         --source-root . --mode "$MODE" --target-bp "$TARGET" --name "$NAME" \
         --max-annotations "$MAXANN" --summary-out "$PUB/summary.md" --checkrun-dir "$PUB/checkrun" \
@@ -539,6 +565,7 @@ if [ "$N_REPORTS" -gt 0 ]; then
     while IFS= read -r x; do set -- "$@" --cobertura "$x"; done <"$OUT/reports.txt"
     while IFS= read -r x; do set -- "$@" --branch-lcov "$x"; done <"$OUT/branch_records.txt"
     for d in $INFO_DIRS; do set -- "$@" --info-package "$d"; done
+    [ -z "$pquery" ] || set -- "$@" --program-targets "$OUT/program_targets.json"
     # A mojo_package with no branch records (its tests link a native library) is
     # given a copy of its hold without `branch`, which covcheck would read as a
     # Regression (a held metric not measured); every other package's hold is read as it is.

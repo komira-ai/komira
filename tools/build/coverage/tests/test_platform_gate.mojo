@@ -286,6 +286,40 @@ def test_a_name_declared_twice_is_counted_by_the_gate_too() raises:
     assert_equal(len(a.platform_gated), 0)
 
 
+def test_a_quote_escaped_in_a_string_does_not_end_it_early() raises:
+    # Line 2 mentions `other(` only inside a string, after an escaped quote: that is no use. The one real use
+    # is in the dropped arm, so `other` is gated.
+    var src = String(
+        "def driver(x: Int) -> Int:\n"        # 1
+        "    var s = \"say \\\" other(1)\"\n"   # 2
+        "    comptime if D:\n"                # 3
+        "        return other(x)\n"           # 4
+        "    return x\n"                      # 5
+        "\n"                                  # 6
+        "def other(x: Int) -> Int:\n"         # 7
+        "    return x\n"                      # 8
+    )
+    var a = _one(src, _ints(1, 2, 5), _ints(8))
+    assert_equal(len(a.platform_gated), 1)
+    assert_equal(a.platform_gated[0].name, "other")
+
+
+def test_a_recursive_use_says_nothing_about_the_callers() raises:
+    var src = String(
+        "def driver(x: Int) -> Int:\n"        # 1
+        "    comptime if D:\n"                # 2
+        "        return rec(x)\n"             # 3
+        "    return x\n"                      # 4
+        "\n"                                  # 5
+        "def rec(x: Int) -> Int:\n"           # 6
+        "    return rec(x - 1)\n"             # 7
+    )
+    var a = _one(src, _ints(1, 4), _ints(7))
+    assert_equal(len(a.platform_gated), 1)
+    assert_equal(a.platform_gated[0].name, "rec")
+    assert_equal(a.platform_gated[0].lines, 1)
+
+
 def main() raises:
     test_every_caller_in_a_dropped_arm_is_gated_and_a_chain_of_them_too()
     test_a_live_caller_a_missing_caller_or_a_compiled_arm_keeps_a_function_counted()
@@ -296,3 +330,5 @@ def main() raises:
     test_a_use_in_the_condition_of_a_comptime_if_is_live()
     test_functions_that_call_only_each_other_from_a_dropped_arm_stay_counted()
     test_a_name_declared_twice_is_counted_by_the_gate_too()
+    test_a_quote_escaped_in_a_string_does_not_end_it_early()
+    test_a_recursive_use_says_nothing_about_the_callers()

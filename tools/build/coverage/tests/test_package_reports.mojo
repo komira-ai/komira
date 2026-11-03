@@ -48,6 +48,8 @@ def _sources() -> Sources:
     s.texts[String(LIB)] = String(LIB_SOURCE)
     s.texts[String(TEST_A)] = String("def main():\n    pass\n")
     s.texts[String(TEST_B)] = String("def main():\n    pass\n")
+    # The manifest of the package, read for its programs (programs.mojo): it declares none.
+    s.texts[String("src/mp/mopm.toml")] = String("[targets]\nlib = { path = \"src/mp\" }\n")
     return s^
 
 
