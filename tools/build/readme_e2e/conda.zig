@@ -4,12 +4,18 @@
 //! and `info-*.tar.zst`. mopm writes only these payload paths (spec/channel.md,
 //! "Inside a package"):
 //!
-//!     lib/mojo/<name>.mojoc          the compiled Mojo package
-//!     lib/mojo/<name>.mopm.json      its metadata
-//!     lib/<soname>                   a native library, when the package ships one
+//!     lib/mojo/<name>.mojoc                  the compiled Mojo package
+//!     lib/mojo/<name>.mopm.json              its metadata
+//!     lib/mojo/<name>.bins/<program>.mojo    the source of a program of
+//!                                            `[targets] bins`, when the package
+//!                                            ships one (`<program>`: a-z, 0-9, _)
+//!     lib/<soname>                           a native library, when the package
+//!                                            ships one
 //!
-//! `read` returns those files and refuses anything else: a link, a path that
-//! leaves `lib/`, a name twice, a member over 512 MiB. The zip walk and the
+//! `read` returns the files at `lib/<file>`, `lib/mojo/<file>` and program
+//! sources, and refuses anything else: a link, a path that leaves `lib/`, a
+//! deeper path that is not a program source, a name twice, a member over
+//! 512 MiB. The zip walk and the
 //! zstd and tar reading are those of the compiler closure's unpacker
 //! (tools/build/mojo/tools/conda_unpack.zig), which insists on the compiler's
 //! members and so cannot be used here.

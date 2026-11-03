@@ -42,14 +42,23 @@ RESULT push_pop cap=1024 ns_per_op=11.25
 | `--hide-times` | print `-` for every measured value, so the output is the same on every machine |
 | `--help` | print the flags and their defaults |
 
-Any other argument, and a number that is not a positive integer, is refused by name; nothing runs.
+A number is decimal digits only (no sign, no space), from 1 to 9223372036854775807. `spsc_ring` measures capacities
+that are powers of two from 1 to 16777216: the ring would round any other up, and the line would then name a capacity
+that was not measured. Any other argument, a number outside these rules, or a capacity `spsc_ring` does not measure is
+refused by name, `--help` or not, and nothing runs: the program exits with status 1 and its last line is
+`Unhandled exception caught during execution: komira_bench: ...`, naming the argument. A flag given twice keeps its last
+value; both values are checked. Each measurement times exactly `--total-ops` operations (`push_only` in rounds of
+the capacity and a last, shorter round when the count is not a multiple of it).
 
 A time on a shared machine is noise. Run on a quiet one, pinned to one core (`taskset -c 2 ./spsc_ring`), several
 times, and compare the minimum.
 
 ## The harness
 
-`komira_bench.harness` has the one place that spells a `RESULT` line, and the command line every program reads:
+`komira_bench.harness` has the one place that spells a `RESULT` line, and the command line every program reads. The
+op, each parameter name and the metric are tokens (one or more of `a`-`z`, `0`-`9` and `_`), a parameter name appears
+once, and a shown value is a finite number; `result_line` refuses anything else by name, so no line can take another
+shape:
 
 <!-- mojo-hidden from std.testing import assert_equal, assert_true, assert_false -->
 ```mojo
@@ -66,6 +75,13 @@ assert_equal(
     result_line("push_pop", params, "ns_per_op", 11.25, True),
     "RESULT push_pop cap=1024 ns_per_op=-",
 )
+
+var message = String()
+try:
+    _ = result_line("push pop", params, "ns_per_op", 11.25)
+except e:
+    message = String(e)
+assert_equal(message, "komira_bench: a RESULT op is one or more of a-z, 0-9 and _, got 'push pop'")
 ```
 
 `parse_args` takes the arguments without the program name and the defaults of the program:
@@ -93,11 +109,64 @@ try:
     _ = parse_args(bad, 20_000_000, defaults)
 except e:
     message = String(e)
-assert_equal(message, "komira_bench: --total-ops must be a positive integer, got '0'")
+assert_equal(
+    message,
+    "komira_bench: --total-ops must be a positive integer (decimal digits, at most 9223372036854775807), got '0'",
+)
+```
+
+`parse_args` returns a `BenchArgs`, which can also be made directly; it refuses settings no program can run with (a
+count below 1, no capacity, a capacity below 1), so a program never starts with them. `usage` is the `--help` text
+for the program's defaults, and `command_line` is the process's own arguments without the program name, what a
+program's `main` passes on:
+
+<!-- mojo-hidden from std.testing import assert_equal, assert_true, assert_false -->
+```mojo
+from komira_bench.harness import BenchArgs, command_line, usage
+
+var caps = List[Int]()
+caps.append(64)
+var settings = BenchArgs(1000, caps^)
+assert_equal(settings.total_ops, 1000)
+assert_false(settings.hide_times)
+
+var refused = String()
+try:
+    _ = BenchArgs(0, List[Int]())
+except e:
+    refused = String(e)
+assert_equal(refused, "komira_bench: total_ops must be at least 1, got 0")
+
+var defaults = List[Int]()
+defaults.append(64)
+assert_true(usage("spsc_ring", 1000, defaults).startswith("usage: spsc_ring [--total-ops=N]"))
+
+var arguments = command_line()  # without the program name
+_ = len(arguments)
 ```
 
 A new program is a file under `bins/` whose `main` is one call into the library, a line in `[targets] bins` of `mopm.toml`, and a module in
-`src/komira_bench/` whose function returns its lines, so a test can run it on a few records.
+`src/komira_bench/` whose function returns its lines, so a test can run it on a few records. The `spsc_ring` module's
+public names are what its program needs: `program_lines` (the lines for a command line), `run_program` (prints
+them), `DEFAULT_TOTAL_OPS`, `default_caps` and `MAX_CAP`:
+
+<!-- mojo-hidden from std.testing import assert_equal, assert_true, assert_false -->
+```mojo
+from komira_bench.spsc_ring_bench import DEFAULT_TOTAL_OPS, MAX_CAP, default_caps, program_lines
+
+var arguments = List[String]()
+arguments.append("--total-ops=100")
+arguments.append("--caps=8")
+arguments.append("--hide-times")
+var lines = program_lines(arguments)
+assert_equal(len(lines), 3)
+assert_equal(lines[0], "RESULT push_only cap=8 ns_per_op=-")
+assert_equal(lines[1], "RESULT push_pop cap=8 ns_per_op=-")
+assert_equal(lines[2], "RESULT drop_push cap=8 ns_per_op=-")
+assert_equal(DEFAULT_TOTAL_OPS, 20_000_000)
+assert_equal(len(default_caps()), 4)
+assert_equal(MAX_CAP, 16777216)
+```
 
 ## Build files
 
@@ -127,9 +196,13 @@ that the sync has not listed is not run: run the sync after adding one.
 
 `:bins_smoke` (`tests/standalone/bins_smoke.mojo`) is a `mojo_test` (not welded: the program imports `:komira_bench`, which waits for its welded tests):
 it runs `:spsc_ring_bench`, komira's build of `bins/spsc_ring.mojo` (`buck2 run //src/komira_bench:spsc_ring_bench -- --caps=64`), on a few records with `--hide-times` and requires
-the whole output to be the three `RESULT` lines of one capacity, then once with real values, where it requires the
-lines and no value. `:conda` is buildrules' `mojo_conda` over `:lib` (`mojo-komira_bench-0.1.0-mojo1.0.0_0.conda`);
-publishing it (`mopm publish`) uploads, so it is a step of a CI job that takes that file, not a build action.
+the whole output, standard error included, to be the three `RESULT` lines of one capacity; then once with real values,
+where it requires the three lines, each value a finite number; then `--help`; and refused arguments, which must exit
+with status 1 (not a signal or a launch failure), print no `RESULT` line and end with the named error. `:conda` is
+buildrules' `mojo_conda` over `:lib` (`mojo-komira_bench-0.1.0-mojo1.0.0_0.conda`), with the program source
+staged (`bins`); `:conda_holds` reads the built file back and requires its `lib/mojo/komira_bench.bins/spsc_ring.mojo`
+to be the bytes of `bins/spsc_ring.mojo`, the file `:bins_smoke` runs a build of. Publishing it (`mopm publish`)
+uploads, so it is a step of a CI job that takes that file, not a build action.
 
 `:komira_bench` is `:lib` as komira's Mojo rules take it (`mojo_adopted_library`): its `deps` are the adopted target of
 each package in `[dependencies]`, and the rule refuses a list that is not the closure `:lib` was built from. It also

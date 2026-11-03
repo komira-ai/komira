@@ -67,10 +67,14 @@ mojo_conda(
 # What `:conda` holds, read back from the built file (buildrules' `prebuilt_unpack`): this package's
 # own `.mojoc`, its `.mopm.json` and its program sources (`lib/mojo/komira_bench.bins/`) and nothing
 # else under `lib/mojo/`, and exactly the dependencies of `[dependencies]`. Red when the manifest
-# drops one, names another range, or the file carries a sibling.
+# drops one, names another range, or the file carries a sibling. `holds` holds the program source the
+# `.conda` ships, `lib/mojo/komira_bench.bins/spsc_ring.mojo`, to the bytes of `bins/spsc_ring.mojo`:
+# the file `:spsc_ring_bench` is built from and `:bins_smoke` runs, so the installed source is the
+# tested one. Red when the member is missing, empty, a link, or any other bytes.
 mojo_conda_holds(
     name = "conda_holds",
     conda = ":conda",
+    holds = {"lib/mojo/komira_bench.bins/spsc_ring.mojo": "bins/spsc_ring.mojo"},
     depends = [
         "mojo-komira_atomic_alias >=0.1,<0.2",
         "mojo-komira_spsc_ring >=0.1,<0.2",
