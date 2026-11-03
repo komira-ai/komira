@@ -6,7 +6,8 @@ from covcheck.paths import RepoFiles, repo_files_of
 from covcheck.result import report_json
 from covcheck.annotate import DiffCoverage
 from covcheck.summary import render_summary
-from covcheck.uncompiled import is_uncompiled_report
+from covcheck.text import join, sort_strings
+from covcheck.uncompiled import Evidence, call_keys, is_uncompiled_report, unreliable_lines
 
 # buildrules' report of the code no test compiled (`uncompiled.cobertura.xml`, `uncompiled.branches.info`):
 # the executable lines of every function none of whose lines has a record, as found and not hit, and the
@@ -74,6 +75,8 @@ def _repo() -> RepoFiles:
 def _sources() -> Sources:
     var s = Sources(String(""))
     s.texts[String(LIB)] = String(LIB_SOURCE)
+    # The manifest of the package, read for its programs (programs.mojo): it declares none.
+    s.texts[String("src/mp/mopm.toml")] = String("[targets]\nlib = { path = \"src/mp\" }\n")
     return s^
 
 
@@ -511,6 +514,58 @@ def test_a_method_needs_a_call_that_names_its_type() raises:
     assert_equal(b.excluded_lines(), 2)
 
 
+def _keys(line: String) -> String:
+    var ks = call_keys(line)
+    sort_strings(ks)
+    return join(ks, String(","))
+
+
+def test_call_keys_name_the_calls_of_the_code_of_a_line() raises:
+    assert_equal(_keys(String("T(a).name(1)")), ".name,T,T.name")
+    assert_equal(_keys(String("x.name(1)")), ".name,x.name")
+    # A comment is not code, and a quote escaped inside a string does not end it.
+    assert_equal(_keys(String("f(x)  # g(y)")), "f")
+    assert_equal(_keys(String("s = \"a\\\" g(1)\" + f(x)")), "f")
+
+
+def test_a_method_call_whose_receiver_is_no_name_is_a_bare_method_key() raises:
+    # No receiver before the dot, an unmatched `)`, a parenthesis at the line start, an index, and a
+    # parenthesised expression that is no call.
+    assert_equal(_keys(String(".name(1)")), ".name")
+    assert_equal(_keys(String(").name(1)")), ".name")
+    assert_equal(_keys(String("(a).name(1)")), ".name")
+    assert_equal(_keys(String("x[0].name(1)")), ".name,x")
+    assert_equal(_keys(String("a + (b).name(1)")), ".name")
+
+
+def test_a_module_path_without_the_extension_is_the_module_name() raises:
+    var text = String("@always_inline\ndef foo(x: Int) -> Int:\n    return x\n")
+    var hit = Dict[Int, Bool]()
+    hit[2] = True
+    var ev = Evidence()
+    ev.add(String("src/p/use.mojo"), String("from p.lib import other\nx = foo(1)\n"), hit)
+    var out = unreliable_lines(text, String("src/p/lib"), ev, Dict[String, Bool]())
+    assert_true(3 in out)
+    # The same file under another module name: the import names neither `foo` nor that module.
+    var other = unreliable_lines(text, String("src/p/elsewhere"), ev, Dict[String, Bool]())
+    assert_equal(len(other), 0)
+
+
+def _lib_with_uncompiled_file(name: String) raises -> Analysis:
+    var l = List[Input]()
+    l.append(Input(String(FORMAT_COBERTURA), String(""), String(UNCOMPILED_REPORT), String(
+        "<coverage><classes><class filename=\"") + name + String("\"><lines><line number=\"1\" hits=\"0\"/></lines></class></classes></coverage>"
+    )))
+    l.append(_report(String(TEST_REPORT), _ints(1), 1))
+    return analyze(l, List[Input](), _repo(), Held(), _sources(), Options())
+
+
+def test_an_uncompiled_report_that_names_nothing_of_the_repository_gates_nothing() raises:
+    var a = _lib_with_uncompiled_file(String("/usr/lib/std/x.mojo"))
+    assert_equal(len(a.platform_gated), 0)
+    assert_equal(len(a.excluded), 0)
+
+
 def main() raises:
     test_a_function_a_test_called_is_left_out_and_the_rest_is_counted()
     test_a_function_nobody_calls_is_counted_whatever_its_class()
@@ -527,5 +582,9 @@ def main() raises:
     test_a_method_is_told_by_the_type_its_call_names()
     test_a_call_named_inside_a_multi_line_string_is_no_evidence()
     test_a_free_function_needs_a_call_that_can_reach_it()
+    test_call_keys_name_the_calls_of_the_code_of_a_line()
+    test_a_method_call_whose_receiver_is_no_name_is_a_bare_method_key()
+    test_a_module_path_without_the_extension_is_the_module_name()
+    test_an_uncompiled_report_that_names_nothing_of_the_repository_gates_nothing()
     test_a_method_needs_a_call_that_names_its_type()
     test_the_names_that_set_the_reports_apart()

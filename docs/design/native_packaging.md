@@ -46,7 +46,7 @@ continuous_publish.md both use that name; `kci.yml` runs it since the staged pip
   package shipping that library, which this tool does not derive yet"); slice 3 declares their sonames,
   and their packages now build, requiring `lz4-c` and `libzlib`, but neither is released.
   `komira_compression` opens zstd, bz2 and lzma the same way
-  (`src/komira_compression/codec_libraries.mojo`) and also links snappy, so it is in both lists.
+  (`src/komira_compression/src/komira_compression/codec_libraries.mojo`) and also links snappy, so it is in both lists.
 - The released set today is its member libraries plus the metapackage `komira_all`
   (`release/artifacts.textproto`, held equal to `tools/build/package/release_set.txt`), none with
   native code (no member's directory holds a C or C++ source or opens a library at run time).
@@ -96,7 +96,7 @@ thread-local storage (async, http_core); async_api, metrics and scan_source had 
 | komira_crypto | aws-lc, prefixed `komira_awslc_`; `komira_crypto_sha256_hw` (the SHA-NI wrapper) | `libkomira_crypto_native.so.1`; and, as a mopm package, `libkomira_crypto_sha256_hw.a` (the wrapper), with aws-lc as the archive of `komira_awslc` | glibc |
 | komira_awslc | aws-lc 1.39.0 as a `native_library` (buildrules), every symbol prefixed `komira_awslc_`; the one aws-lc archive of `komira_crypto` and `komira_uuid` | `libawslc.a` (mopm package, static) | none |
 | komira_http_core | s2n-tls, prefixed `komira_s2n_`, built against the prefixed aws-lc | `libkomira_http_core_native.so.1` | `libkomira_crypto_native.so.1` |
-| komira_compression | snappy (C API prefixed `komira_snappy_`; its C++ runtime static and local) | `libkomira_compression_native.so.1` | glibc; opens system codecs (below) |
+| komira_compression | snappy 1.3.1 (C API prefixed `komira_snappy_`); in the shared library its C++ runtime is static and local; as a mopm package snappy is the `native_library` `//third_party/snappy:snappy_native`, declared `link = ["c++"]` so every consumer's link ends with `-lc++` | `libkomira_compression_native.so.1`; and, as a mopm package, `libsnappy.a` (static) | glibc; opens system codecs (below) |
 | komira_libc / async / async_api / fs | `komira_libc_posix` / `komira_async_posix` / `komira_concurrency_pool_depth` / `komira_fs_posix` | `libkomira_<lib>_native.so.1` | glibc |
 | komira_objectstore / metrics / scan_source / supervisor | `komira_objectstore_posix` / `komira_metrics_ea_flag` / `komira_scan_source_inmem_id` / `komira_supervisor_proc` | `libkomira_<lib>_native.so.1` | glibc |
 | komira_log | `komira_log_holder` (per-library state) | `libkomira_log_holder.a`; with question 2 (A) also `libkomira_log_holder_jit.so.1` and its link name `libkomira_log_holder_jit.so` | none |

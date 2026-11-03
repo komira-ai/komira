@@ -1,7 +1,9 @@
-"""The command line: `covcheck report` and `covcheck gate` (see README.md).
+"""The command line: `covcheck report`, `covcheck gate` and
+`covcheck program-query` (see README.md).
 
 Exit codes: 0 the outputs were written (whatever they conclude); 1 an input
-is malformed, a report path is unmapped, or an output cannot be written;
+is malformed, a report path is unmapped, an output cannot be written, or a
+manifest of the run declares a program and no `--program-targets` is given;
 2 bad usage; 3 (`gate` only) a Regression (a metric the package holds,
 `--held`, below the target or not measured) in any mode, or any finding with
 `--mode enforce` (a test-only package, `--info-package`, has information,
@@ -25,6 +27,7 @@ from covcheck.annotate import (
 from covcheck.checkrun import body_name, checkrun_bodies, valid_sha
 from covcheck.diff import parse_diff
 from covcheck.paths import RepoFiles, package_of, parse_repo_files
+from covcheck.programs import parse_program_targets, program_query
 from covcheck.held import Held, add_hold
 from covcheck.result import gate_json, report_json
 from covcheck.stats import MODE_NEUTRAL, valid_mode
@@ -42,15 +45,16 @@ comptime USAGE_REPORT = (
     "covcheck report --repo-files F --diff F --head-sha SHA --source-root DIR"
     + " (--cobertura [PKGDIR=]F | --lcov [PKGDIR=]F)... [--branch-lcov [PKGDIR=]F]... [--mutants [PKGDIR=]F]..."
     + " [--strip-prefix P]... [--held PKGDIR=F]... [--mode census|neutral|enforce] --target-bp N"
-    + " [--include-tests] [--info-package DIR]... [--name N] [--max-annotations N] --summary-out F --checkrun-dir D --result-out F"
+    + " [--include-tests] [--info-package DIR]... [--program-targets F] [--name N] [--max-annotations N] --summary-out F --checkrun-dir D --result-out F"
     + " [--annotations-out F]"
 )
 comptime USAGE_GATE = (
     "covcheck gate --package DIR --repo-files F --source-root DIR"
     + " [--cobertura [PKGDIR=]F | --lcov [PKGDIR=]F]... [--branch-lcov [PKGDIR=]F]... [--mutants [PKGDIR=]F]..."
     + " [--strip-prefix P]... [--held F] --mode census|neutral|enforce --target-bp N"
-    + " [--include-tests] [--test-source P]... [--info-package DIR]... --result-out F --summary-out F"
+    + " [--include-tests] [--test-source P]... [--info-package DIR]... [--program-targets F] --result-out F --summary-out F"
 )
+comptime USAGE_PROGRAM_QUERY = "covcheck program-query --repo-files F --packages F --out F"
 
 
 struct FileArg(Copyable, Movable):
@@ -115,20 +119,23 @@ def parse_args(args: List[String]) raises -> Args:
     """`args` without the program name. Raises `usage: ...` on bad usage."""
     var a = Args()
     if len(args) == 0:
-        _usage(String("give a command: report or gate"))
+        _usage(String("give a command: report, gate or program-query"))
     a.command = args[0]
     var report = a.command == String("report")
-    if not report and a.command != String("gate"):
-        _usage(String("unknown command '") + a.command + String("' (report or gate)"))
-    var single = split_on(String("--repo-files --source-root --mode --target-bp --summary-out --result-out"), 32)
-    if report:
+    var query = a.command == String("program-query")
+    if not report and not query and a.command != String("gate"):
+        _usage(String("unknown command '") + a.command + String("' (report, gate or program-query)"))
+    var single = split_on(String("--repo-files --source-root --mode --target-bp --summary-out --result-out --program-targets"), 32)
+    if query:
+        single = split_on(String("--repo-files --packages --out"), 32)
+    elif report:
         single.extend(split_on(String("--diff --head-sha --name --checkrun-dir --max-annotations --annotations-out"), 32))
     else:
         single.append(String("--package"))
     var i = 1
     while i < len(args):
         var flag = args[i]
-        if flag == String("--include-tests"):
+        if flag == String("--include-tests") and not query:
             a.include_tests = True
             i += 1
             continue
@@ -136,8 +143,8 @@ def parse_args(args: List[String]) raises -> Args:
             flag == String("--cobertura") or flag == String("--lcov") or flag == String("--branch-lcov")
             or flag == String("--mutants") or flag == String("--strip-prefix") or flag == String("--info-package")
             or flag == String("--held")
-        )
-        if flag == String("--test-source") and not report:
+        ) and not query
+        if flag == String("--test-source") and a.command == String("gate"):
             known = True
         for k in range(len(single)):
             if single[k] == flag:
@@ -184,7 +191,9 @@ def parse_args(args: List[String]) raises -> Args:
                 _usage(String("'") + flag + String("' is given twice"))
             a.values[flag] = v
     var required = split_on(String("--repo-files --source-root --target-bp --summary-out --result-out"), 32)
-    if report:
+    if query:
+        required = single.copy()
+    elif report:
         required.extend(split_on(String("--diff --head-sha --checkrun-dir"), 32))
     else:
         required.append(String("--package"))
@@ -192,6 +201,8 @@ def parse_args(args: List[String]) raises -> Args:
     for k in range(len(required)):
         if required[k] not in a.values:
             _usage(a.command + String(" needs ") + required[k])
+    if query:
+        return a^
     # `gate` takes none: a library with no test has no report, and its
     # package, always measured by the gate, is then NotMeasured. A branch
     # record file (`--branch-lcov`) is no line report, and is read with
@@ -258,15 +269,32 @@ def _read_inputs(fs: List[FileArg]) raises -> List[Input]:
 
 
 def _analysis(a: Args, repo: RepoFiles) raises -> Analysis:
+    var opts = _options(a)
+    # The entry points of the program targets a test target of their package depends on
+    # (programs.mojo); absent while a manifest of the run declares a program: refused below.
+    var targets = a.get(String("--program-targets"))
+    if targets.byte_length() > 0:
+        opts.program_runs = parse_program_targets(read_text(targets), targets)
     var held = Held()
     for i in range(len(a.held)):
         ref h = a.held[i]
         var pkg = h.pkgdir if h.pkgdir.byte_length() > 0 else a.get(String("--package"))
         add_hold(held, pkg, read_text(h.file), h.file, a.info_packages)
-    return analyze(
+    var an = analyze(
         _read_inputs(a.reports), _read_inputs(a.mutants), repo, held,
-        Sources(a.get(String("--source-root"))), _options(a),
+        Sources(a.get(String("--source-root"))), opts,
     )
+    # Without the query's answer nothing can say which program a test runs: a run that dropped
+    # the flag, or whose query was not run, is an input error, never "no program runs".
+    if len(an.program_paths) > 0 and targets.byte_length() == 0:
+        var names = String("")
+        for i in range(len(an.program_paths)):
+            names += (String(", ") if i > 0 else String("")) + an.program_paths[i]
+        raise Error(
+            String("the manifests of the run declare programs (") + names
+            + String("), and no --program-targets gives the answer of `covcheck program-query`'s query")
+        )
+    return an^
 
 
 def _title(an: Analysis) -> String:
@@ -333,6 +361,20 @@ def run_gate(a: Args) raises -> Int:
     return EXIT_OK
 
 
+def run_program_query(a: Args) raises -> Int:
+    """Writes to `--out` the evidence query (programs.mojo, program_query) for
+    the packages of `--packages` (one repository directory per line, an empty
+    line for the root package), or an empty file when none has a manifest."""
+    var repo_path = a.get(String("--repo-files"))
+    var repo = parse_repo_files(read_bytes(repo_path), repo_path)
+    var lines = split_on(read_text(a.get(String("--packages"))), 10)
+    # The file ends with a line end: the piece after it is no package.
+    if len(lines) > 0 and lines[len(lines) - 1].byte_length() == 0:
+        _ = lines.pop()
+    write_text(a.get(String("--out")), program_query(repo, lines))
+    return EXIT_OK
+
+
 def run(args: List[String]) -> Int:
     """Runs the command line `args` (without the program name); errors go
     to stderr. Returns the exit code."""
@@ -342,6 +384,8 @@ def run(args: List[String]) -> Int:
         try:
             if parsed.command == String("report"):
                 return run_report(parsed)
+            if parsed.command == String("program-query"):
+                return run_program_query(parsed)
             return run_gate(parsed)
         except e:
             print(String("covcheck: ") + String(e), file=err)
@@ -350,4 +394,5 @@ def run(args: List[String]) -> Int:
         print(String("covcheck: ") + String(e), file=err)
         print(String("usage: ") + String(USAGE_REPORT), file=err)
         print(String("       ") + String(USAGE_GATE), file=err)
+        print(String("       ") + String(USAGE_PROGRAM_QUERY), file=err)
         return EXIT_USAGE

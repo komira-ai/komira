@@ -78,6 +78,10 @@ def test_reader_keys_counts_and_dash() raises:
     assert_equal(t[0].branches[String("5,14:try:0/1,1")], 0)
 
 
+def test_a_column_above_ten_to_the_ninth_is_refused() raises:
+    _refused(_rec(String("BRDA:2,1000000001:br:0/1,0,1\n")), String("b.info:2: BRDA column 1000000001 is above 10^9"))
+
+
 def test_reader_refusals() raises:
     # Line data and every other lcov record: this file holds branches only.
     _refused(_rec(String("DA:2,1\n")), String("b.info:2: 'DA' record in a branch record file"))
@@ -523,6 +527,7 @@ def test_annotations_of_branch_records() raises:
 
 def main() raises:
     test_reader_keys_counts_and_dash()
+    test_a_column_above_ten_to_the_ninth_is_refused()
     test_reader_refusals()
     test_records_sum_by_id_across_tests()
     test_branch_numbers_replace_branch_not_measured()

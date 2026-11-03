@@ -2,10 +2,13 @@ from std.testing import assert_equal, assert_true
 
 from komira_json import JsonValue, parse_json_value
 
+from covcheck.analysis import ExcludedFile
 from covcheck.analyze import FORMAT_LCOV, Analysis, Input, Options, Sources, analyze
 from covcheck.annotate import (
     DEFAULT_MAX_ANNOTATIONS,
     Annotation,
+    DiffCoverage,
+    PathRange,
     annotations,
     annotations_json,
     cap_annotations,
@@ -18,10 +21,12 @@ from covcheck.annotate import (
 )
 from covcheck.checkrun import body_name, checkrun_bodies, valid_sha
 from covcheck.diff import parse_diff
+from covcheck.result import gate_json
+from covcheck.jsonw import JsonOut
 from covcheck.model import FileCov
 from covcheck.paths import RepoFiles, repo_files_of
 from covcheck.held import Held
-from covcheck.summary import MAX_SUMMARY, truncate_summary
+from covcheck.summary import MAX_SUMMARY, md_code, render_summary, truncate_summary
 
 # What the PR check adds: check-run batching, annotations (scope, order,
 # ranges, kinds, levels), changed-line coverage, the summary's size limit,
@@ -311,6 +316,32 @@ def test_diff_coverage_covered_line() raises:
     assert_equal(dc.uncovered, 0)
 
 
+def test_changes_that_are_no_source_of_a_measured_package_count_for_nothing() raises:
+    var a = _analysis(String("neutral"))
+    # A file with no extension, a change in a test source of the package
+    # (left out unless tests are included), and a path in no package at all.
+    var l = List[String]()
+    l.append("src/a/BUCK")
+    l.append("src/a/x.mojo")
+    l.append("loose/q.mojo")
+    var repo = repo_files_of(l)
+    var d = parse_diff(String(
+        "diff --git a/src/a/LICENSE b/src/a/LICENSE\n--- a/src/a/LICENSE\n+++ b/src/a/LICENSE\n@@ -0,0 +1 @@\n+x\n"
+        "diff --git a/src/a/tests/test_x.mojo b/src/a/tests/test_x.mojo\n--- a/src/a/tests/test_x.mojo\n+++ b/src/a/tests/test_x.mojo\n@@ -0,0 +1 @@\n+x\n"
+        "diff --git a/loose/q.mojo b/loose/q.mojo\n--- a/loose/q.mojo\n+++ b/loose/q.mojo\n@@ -0,0 +1 @@\n+x\n"
+    ))
+    var dc = diff_coverage(a, d, repo, False)
+    assert_equal(dc.covered + dc.uncovered + dc.not_instrumented + dc.exempt, 0)
+    var with_tests = diff_coverage(a, d, repo, True)
+    assert_equal(with_tests.covered + with_tests.uncovered + with_tests.not_instrumented + with_tests.exempt, 1)
+
+
+def test_the_gate_result_of_a_package_nothing_measured_is_all_zero() raises:
+    var v = parse_json_value(gate_json(Analysis(), String("src/none")))
+    assert_equal(v.get(String("package")).get(String("package")).as_string(), "src/none")
+    assert_equal(Int(v.get(String("package")).get(String("line_found")).as_int64()), 0)
+
+
 def test_summary_truncation() raises:
     var line = String("")
     for _ in range(99):
@@ -346,6 +377,91 @@ def test_summary_limit_is_exactly_65535() raises:
     assert_true(t.find("**Summary truncated**") >= 0)
 
 
+def test_md_code_spans() raises:
+    assert_equal(md_code(String("a|b")), "`a\\|b`")
+    # A backtick inside needs a double-backtick span.
+    assert_equal(md_code(String("a`b|c")), "`` a`b\\|c ``")
+
+
+def test_summary_of_a_run_that_measured_nothing() raises:
+    var s = render_summary(Analysis(), List[String](), DiffCoverage(), False, String(""))
+    assert_true(s.startswith("## Coverage: line n/a, branch not measured\n\n"), s)
+    assert_true(s.find("### Packages\n\nNo package was measured.\n\n") >= 0, s)
+    assert_true(s.find("### Findings (0)\n\nNone.\n\n") >= 0, s)
+
+
+def test_summary_names_every_test_only_package() raises:
+    var a = Analysis()
+    a.info_dirs.append(String("src/a/tests"))
+    a.info_dirs.append(String("src/b/tests"))
+    var s = render_summary(a, List[String](), DiffCoverage(), False, String(""))
+    assert_true(s.find("except a test-only package (`src/a/tests`, `src/b/tests` and under): measured and shown") >= 0, s)
+
+
+def test_summary_writes_uncovered_changed_lines_as_ranges() raises:
+    var d = DiffCoverage()
+    d.uncovered = 3
+    d.ranges.append(PathRange(String("src/a/x.mojo"), 2, 3))
+    d.ranges.append(PathRange(String("src/a/x.mojo"), 6, 6))
+    d.ranges.append(PathRange(String("src/a/y.mojo"), 1, 1))
+    var s = render_summary(Analysis(), List[String](), d, True, String(""))
+    assert_true(s.find("Uncovered changed lines:\n\n- `src/a/x.mojo`: 2-3, 6\n- `src/a/y.mojo`: 1\n\n") >= 0, s)
+
+
+def test_summary_counts_the_ranges_it_leaves_out() raises:
+    var d = DiffCoverage()
+    for i in range(201):
+        d.ranges.append(PathRange(String("src/a/x.mojo"), 2 * i + 1, 2 * i + 1))
+    var s = render_summary(Analysis(), List[String](), d, True, String(""))
+    assert_true(s.find(", 399\n- and 1 more ranges, omitted here (the --annotations-out file lists every one)\n\n") >= 0, s)
+    assert_true(s.find("401") < 0, s)
+
+
+def test_summary_names_at_most_ten_uncompiled_files() raises:
+    var a = Analysis()
+    for i in range(11):
+        var x = ExcludedFile(String("src/a"), String("src/a/f") + String(i) + String(".mojo"))
+        x.lines = 1
+        x.arms = 2
+        a.excluded.append(x^)
+    var s = render_summary(a, List[String](), DiffCoverage(), False, String(""))
+    assert_true(s.find("- 11 lines and 22 branch arms of the code no test compiled") >= 0, s)
+    assert_true(s.find("`src/a/f0.mojo` (1 lines, 2 arms), `src/a/f1.mojo` (1 lines, 2 arms)") >= 0, s)
+    assert_true(s.find("`src/a/f9.mojo` (1 lines, 2 arms), and 1 more files (the result JSON names every one)\n") >= 0, s)
+    assert_true(s.find("f10.mojo") < 0, s)
+
+
+def test_summary_truncation_without_a_line_end_keeps_utf8_whole() raises:
+    # No line end in reach: the cut falls on byte 200, inside the 2-byte
+    # sequence that starts at 199, so the cut moves back to 199.
+    var text = String("a")
+    for _ in range(300):
+        text += String("é")
+    assert_equal(text.byte_length(), 601)
+    var t = truncate_summary(text, 400)
+    var kept = String("a")
+    for _ in range(99):
+        kept += String("é")
+    assert_equal(kept.byte_length(), 199)
+    assert_true(t.startswith(kept + String("\n**Summary truncated**: 402 bytes left out")), t)
+
+
+def test_json_writer_places_commas_between_members_only() raises:
+    var j = JsonOut()
+    j.begin_array()
+    j.item()
+    j.int_value(1)
+    j.item()
+    j.str_value(String("a\"b"))
+    j.end_array()
+    assert_equal(j.text(), "[1,\"a\\\"b\"]")
+    # An element named outside any container is just the value.
+    var top = JsonOut()
+    top.item()
+    top.int_value(7)
+    assert_equal(top.text(), "7")
+
+
 def main() raises:
     test_checkrun_batching()
     test_annotation_cap()
@@ -361,6 +477,16 @@ def main() raises:
     test_binary_change_touches_its_package()
     test_diff_coverage_counts()
     test_diff_coverage_covered_line()
+    test_changes_that_are_no_source_of_a_measured_package_count_for_nothing()
+    test_the_gate_result_of_a_package_nothing_measured_is_all_zero()
     test_summary_truncation()
     test_summary_limit_is_exactly_65535()
+    test_md_code_spans()
+    test_summary_of_a_run_that_measured_nothing()
+    test_summary_names_every_test_only_package()
+    test_summary_writes_uncovered_changed_lines_as_ranges()
+    test_summary_counts_the_ranges_it_leaves_out()
+    test_summary_names_at_most_ten_uncompiled_files()
+    test_summary_truncation_without_a_line_end_keeps_utf8_whole()
+    test_json_writer_places_commas_between_members_only()
     print("test_report: PASS")

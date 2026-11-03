@@ -136,6 +136,31 @@ def test_refuses_data_outside_a_record() raises:
     _refused(String("garbage\n"), String("t.info:1: not a record"))
 
 
+def test_blank_lines_between_records_are_skipped() raises:
+    var fs = parse_lcov(String("\nSF:x\n\nDA:1,1\n\nend_of_record\n\n"), String("t.info"))
+    assert_equal(len(fs), 1)
+    assert_equal(fs[0].line_found(), 1)
+
+
+def test_refuses_malformed_structure_records() raises:
+    _refused(String("SF:x\nTN:a\nend_of_record\n"), String("t.info:2: TN inside a record"))
+    _refused(String("SF:\nend_of_record\n"), String("t.info:1: SF names no file"))
+
+
+def test_refuses_records_with_too_few_fields() raises:
+    _refused(String("SF:x\nBRDA:1,0,1\nend_of_record\n"), String("t.info:2: BRDA needs <line>,<block>,<branch>,<taken>"))
+    _refused(String("SF:x\nBRDA:1,0,,1\nend_of_record\n"), String("t.info:2: BRDA branch id is empty"))
+    _refused(String("SF:x\nFN:3\nend_of_record\n"), String("t.info:2: FN needs <line>,<name>"))
+    _refused(String("SF:x\nFNDA:3\nend_of_record\n"), String("t.info:2: FNDA needs <count>,<name>"))
+    _refused(String("SF:x\nFNA:0,1\nend_of_record\n"), String("t.info:2: FNA needs <index>,<count>,<name>"))
+
+
+def test_last_record_may_lack_a_final_line_end() raises:
+    var fs = parse_lcov(String("SF:x\nDA:1,1\nend_of_record"), String("t.info"))
+    assert_equal(len(fs), 1)
+    assert_equal(fs[0].line_found(), 1)
+
+
 def main() raises:
     test_basic_lines_and_branches()
     test_summary_records_that_lie_are_ignored()
@@ -148,4 +173,8 @@ def main() raises:
     test_refuses_missing_end_of_record()
     test_refuses_bad_numbers()
     test_refuses_data_outside_a_record()
+    test_blank_lines_between_records_are_skipped()
+    test_refuses_malformed_structure_records()
+    test_refuses_records_with_too_few_fields()
+    test_last_record_may_lack_a_final_line_end()
     print("test_lcov: PASS")

@@ -345,7 +345,8 @@ trait ArrowIpcCompression(Compression):
 
         For LZ4-Frame: a heap-boxed `komira_lz4.frame.Lz4FrameDecoder`,
         which owns one `LZ4F_dctx`.
-        For Zstd: wraps `ZSTD_createDCtx` returning the ZSTD_DCtx pointer.
+        For Zstd: a heap-boxed `_ZstdDCtx`, the `ZSTD_createDCtx` context
+        with the libzstd handle that made it.
         For Uncompressed: returns a null sentinel (memcpy path requires
         no dctx state).
 
@@ -366,7 +367,7 @@ trait ArrowIpcCompression(Compression):
         `create_dctx`. Null sentinel is a no-op.
 
         For LZ4-Frame: `LZ4F_freeDecompressionContext(dctx)`.
-        For Zstd: `ZSTD_freeDCtx(dctx)`.
+        For Zstd: `ZSTD_freeDCtx` on the boxed context, then the box.
         For Uncompressed: no-op (sentinel was already null).
         """
         ...
