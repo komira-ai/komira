@@ -137,6 +137,7 @@ COVERAGE_NO_GATE = {
 COVERAGE_BRANCH_GATE = {
     "komira//src/komira_agg:komira_agg": "its ten tests' branches all classify (228 arms of 7 files)",
     "komira//src/komira_async_api:komira_async_api": "its test's branches all classify (2 arms of 1 file)",
+    "komira//src/komira_bench:komira_bench": "its two tests' branches all classify (58 arms of 2 files, 2 of them `try` arms)",
     "komira//src/komira_buffer:komira_buffer": "its eighteen tests' branches all classify (314 arms of 8 files)",
     "komira//src/komira_clock:komira_clock": "its test's branches all classify (2 arms of 1 file)",
     "komira//src/komira_column_format:komira_column_format": "its two tests' branches all classify (170 arms of 1 file)",

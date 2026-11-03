@@ -50,7 +50,10 @@ user's resolution from mopm, and does the unpacking itself:
   (see "Offline, enforced" below).
 * The e2e reads the lock, checks each locked file against the staged file and the
   plan, and unpacks it into the prefix, the layout `mopm sync` leaves in
-  `.mopm/.pixi/envs/default` (`lib/mojo/<name>.mojoc` and `<name>.mopm.json`;
+  `.mopm/.pixi/envs/default` (`lib/mojo/<name>.mojoc` and `<name>.mopm.json`, and
+  for a package that ships programs, the source of each at
+  `lib/mojo/<name>.bins/<program>.mojo`, which the e2e unpacks but does not
+  build or run: its examples are the README's;
   [`conda.zig`](conda.zig) reads a package the way a client does and refuses
   anything outside the paths mopm writes).
 

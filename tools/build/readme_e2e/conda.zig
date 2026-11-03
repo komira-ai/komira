@@ -4,12 +4,18 @@
 //! and `info-*.tar.zst`. mopm writes only these payload paths (spec/channel.md,
 //! "Inside a package"):
 //!
-//!     lib/mojo/<name>.mojoc          the compiled Mojo package
-//!     lib/mojo/<name>.mopm.json      its metadata
-//!     lib/<soname>                   a native library, when the package ships one
+//!     lib/mojo/<name>.mojoc                  the compiled Mojo package
+//!     lib/mojo/<name>.mopm.json              its metadata
+//!     lib/mojo/<name>.bins/<program>.mojo    the source of a program of
+//!                                            `[targets] bins`, when the package
+//!                                            ships one (`<program>`: a-z, 0-9, _)
+//!     lib/<soname>                           a native library, when the package
+//!                                            ships one
 //!
-//! `read` returns those files and refuses anything else: a link, a path that
-//! leaves `lib/`, a name twice, a member over 512 MiB. The zip walk and the
+//! `read` returns the files at `lib/<file>`, `lib/mojo/<file>` and program
+//! sources, and refuses anything else: a link, a path that leaves `lib/`, a
+//! deeper path that is not a program source, a name twice, a member over
+//! 512 MiB. The zip walk and the
 //! zstd and tar reading are those of the compiler closure's unpacker
 //! (tools/build/mojo/tools/conda_unpack.zig), which insists on the compiler's
 //! members and so cannot be used here.
@@ -95,7 +101,9 @@ fn payload(a: Allocator, data: []const u8, why: *[]const u8) Error![]const u8 {
     return corrupt(a, why, "no pkg-*.tar.zst member", .{});
 }
 
-/// Whether `name` is a payload path mopm writes: `lib/mojo/<file>` or `lib/<file>`.
+/// Whether `name` is a payload path mopm writes: `lib/mojo/<file>`, `lib/<file>`, or the source of a
+/// program the package ships, `lib/mojo/<package>.bins/<program>.mojo` (`[targets] bins`; `<program>` is
+/// lower case letters, digits and underscores, as the registry requires).
 fn allowed(name: []const u8) bool {
     if (!std.mem.startsWith(u8, name, "lib/")) return false;
     if (std.mem.indexOfScalar(u8, name, '\\') != null) return false;
@@ -107,7 +115,23 @@ fn allowed(name: []const u8) bool {
         depth += 1;
     }
     if (depth == 2) return std.mem.startsWith(u8, rest, "mojo/");
+    if (depth == 3) return isProgramSource(rest);
     return depth == 1;
+}
+
+/// Whether `rest` (a path below `lib/`, three segments) is `mojo/<package>.bins/<program>.mojo`.
+fn isProgramSource(rest: []const u8) bool {
+    var it = std.mem.splitScalar(u8, rest, '/');
+    if (!std.mem.eql(u8, it.next().?, "mojo")) return false;
+    const dir = it.next().?;
+    const file = it.next().?;
+    if (!std.mem.endsWith(u8, dir, ".bins")) return false;
+    if (!std.mem.endsWith(u8, file, ".mojo")) return false;
+    for (file[0 .. file.len - ".mojo".len]) |c| {
+        const ok = (c >= 'a' and c <= 'z') or (c >= '0' and c <= '9') or c == '_';
+        if (!ok) return false;
+    }
+    return true;
 }
 
 /// The files of the package `data` (the bytes of a `.conda`), in archive order.
@@ -129,7 +153,7 @@ pub fn read(a: Allocator, data: []const u8, why: *[]const u8) Error![]const File
             .file => {},
             else => return corrupt(a, why, "{s}: not a regular file (a package holds regular files only)", .{f.name}),
         }
-        if (!allowed(f.name)) return corrupt(a, why, "{s}: not a path a mopm package holds (lib/mojo/<file> or lib/<file>)", .{f.name});
+        if (!allowed(f.name)) return corrupt(a, why, "{s}: not a path a mopm package holds (lib/mojo/<file>, lib/mojo/<package>.bins/<program>.mojo or lib/<file>)", .{f.name});
         for (out.items) |o| {
             if (std.mem.eql(u8, o.name, f.name)) return corrupt(a, why, "{s} appears twice", .{f.name});
         }

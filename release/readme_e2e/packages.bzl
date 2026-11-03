@@ -26,6 +26,7 @@ PACKAGES = {
     "komira_async_api": "0.1.0",
     "komira_atomic_alias": "0.1.0",
     "komira_awslc": "0.1.0",
+    "komira_bench": "0.1.0",
     "komira_bench_report": "0.1.0",
     "komira_broker_proto": "0.1.0",
     "komira_buffer": "0.1.0",

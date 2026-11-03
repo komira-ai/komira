@@ -31,6 +31,7 @@ komira_anomaly
 komira_async_api
 komira_atomic_alias
 komira_awslc
+komira_bench
 komira_bench_report
 komira_broker_proto
 komira_buffer
