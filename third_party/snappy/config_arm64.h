@@ -5,7 +5,8 @@
  * is 0. The linux-arm64 row of the platform table names target_cpu generic; the
  * darwin-arm64 row names apple-m1, and the claim holds there only because
  * tools/build/mojo/cxx.bzl passes -mcpu=generic for macOS whatever the row says.
- * No x86 intrinsic header is available here.
+ * No x86 intrinsic header is available here, and no RISC-V vector header
+ * (<riscv_vector.h>, which SNAPPY_RVV_1 or SNAPPY_RVV_0_7 would include).
  * Compressed bytes differ between x86_64 (CRC32C hash) and arm64 (multiplicative
  * hash): both are valid snappy streams that decode identically, so no golden of
  * compressed bytes may be shared across cpus. */
@@ -33,5 +34,7 @@
 #define SNAPPY_HAVE_NEON 1
 #define SNAPPY_HAVE_NEON_CRC32 0
 #define SNAPPY_IS_BIG_ENDIAN 0
+#define SNAPPY_RVV_1 0
+#define SNAPPY_RVV_0_7 0
 
 #endif  /* THIRD_PARTY_SNAPPY_CONFIG_H_ */
