@@ -119,7 +119,7 @@ This package is built with buildrules' `mojo_package` and packaged for mopm as `
 `komira_zlib`, and it has one native library of its own and three it opens at run time:
 
 - snappy is linked: `[native.snappy]` of `mopm.toml`, whose archive `libsnappy.a` is built by the `native_library`
-  target `//third_party/snappy:snappy_native` (snappy 1.2.2 from its pinned release archive, C++17, the C API renamed
+  target `//third_party/snappy:snappy_native` (snappy 1.3.1 from its pinned release archive, C++17, the C API renamed
   `komira_snappy_*`, the C++ names left as they are) and named in `natives` of `BUCK`. It is linked into every test of
   the package and of the packages that depend on it, and `:conda` holds it at `lib/libsnappy.a`. `mopm.toml` declares it
   `provided = true` (mopm compiles no source for it) and `link = ["c++"]`: snappy is C++, so the link of every program

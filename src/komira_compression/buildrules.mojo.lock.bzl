@@ -68,7 +68,7 @@ GRAPH_JSON = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/komira_compression/tests/test_codec_block_api.mojo", "sha256": "703857ffcff4f77cb96f5927f5bab453d90395392a4cab3ac7986bbb8323dfd3"}
+        {"path": "src/komira_compression/tests/test_codec_block_api.mojo", "sha256": "f961fdc01ceb91e792bf267fa1e2ed80d40bac60ecd420119f14d8c3b301348a"}
       ],
       "deps": ["komira_compression@0.1.0#mojo1.0.0/lib"],
       "natives": [
@@ -276,7 +276,7 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/komira_compression/tests/test_codec_block_api.mojo", "sha256": "703857ffcff4f77cb96f5927f5bab453d90395392a4cab3ac7986bbb8323dfd3"}
+        {"path": "src/komira_compression/tests/test_codec_block_api.mojo", "sha256": "f961fdc01ceb91e792bf267fa1e2ed80d40bac60ecd420119f14d8c3b301348a"}
       ],
       "deps": ["komira_compression@0.1.0#mojo1.0.0/lib"],
       "natives": [
@@ -481,7 +481,7 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/komira_compression/tests/test_codec_block_api.mojo", "sha256": "703857ffcff4f77cb96f5927f5bab453d90395392a4cab3ac7986bbb8323dfd3"}
+        {"path": "src/komira_compression/tests/test_codec_block_api.mojo", "sha256": "f961fdc01ceb91e792bf267fa1e2ed80d40bac60ecd420119f14d8c3b301348a"}
       ],
       "deps": ["komira_compression@0.1.0#mojo1.0.0/lib"],
       "natives": [
