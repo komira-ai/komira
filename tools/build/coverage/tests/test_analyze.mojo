@@ -203,7 +203,7 @@ def test_an_unknown_report_format_is_refused_by_name() raises:
     assert_true(raised)
 
 
-def test_mutants_in_test_sources_are_set_aside_and_counted() raises:
+def test_mutation_records_of_test_sources_are_set_aside_and_counted() raises:
     var m = List[Input]()
     m.append(Input(String("mutants"), String(""), String("m.tsv"), String(
         "src/alpha/a.mojo\t1\tkilled\top\td\n"
@@ -514,7 +514,7 @@ def main() raises:
     test_exemptions_change_the_counts_and_find_stale_and_reasonless()
     test_mutants_score_and_survivors()
     test_an_unknown_report_format_is_refused_by_name()
-    test_mutants_in_test_sources_are_set_aside_and_counted()
+    test_mutation_records_of_test_sources_are_set_aside_and_counted()
     test_target_and_branch_na()
     test_conclusion_per_mode()
     test_branch_not_measured()
