@@ -51,28 +51,29 @@ def _open_codec_library(soname: String) raises -> OwnedDLHandle:
         )
 
 
-def _init_zstd_handle() -> OwnedDLHandle:
-    """`_Global` init function: open libzstd once per process."""
+def _open_or_abort(soname: String) -> OwnedDLHandle:
+    """`_open_codec_library(soname)`, aborting the process with its message
+    when the library cannot be loaded (a `_Global` init function cannot
+    raise)."""
     try:
-        return _open_codec_library(LIBZSTD_SONAME)
+        return _open_codec_library(soname)
     except e:
         abort(String(e))
+
+
+def _init_zstd_handle() -> OwnedDLHandle:
+    """`_Global` init function: open libzstd once per process."""
+    return _open_or_abort(LIBZSTD_SONAME)
 
 
 def _init_bz2_handle() -> OwnedDLHandle:
     """`_Global` init function: open libbz2 once per process."""
-    try:
-        return _open_codec_library(LIBBZ2_SONAME)
-    except e:
-        abort(String(e))
+    return _open_or_abort(LIBBZ2_SONAME)
 
 
 def _init_lzma_handle() -> OwnedDLHandle:
     """`_Global` init function: open liblzma once per process."""
-    try:
-        return _open_codec_library(LIBLZMA_SONAME)
-    except e:
-        abort(String(e))
+    return _open_or_abort(LIBLZMA_SONAME)
 
 
 comptime _ZSTD_GLOBAL = _Global[

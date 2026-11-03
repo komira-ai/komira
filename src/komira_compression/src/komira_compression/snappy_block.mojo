@@ -41,6 +41,19 @@ from std.ffi import external_call
 comptime _SNAPPY_OK: Int32 = 0
 
 
+def _check_written(what: StaticString, written: Int, cap: Int) raises -> Int:
+    """`written`, the length snappy stored back, when it is within the `cap`
+    bytes it was given; raises `<what> reported W bytes written into a C-byte
+    buffer` when it is not (snappy never does that, and a caller that trusted
+    such a length would read past its buffer)."""
+    if written > cap:
+        raise Error(
+            String(what) + " reported " + String(written)
+            + " bytes written into a " + String(cap) + "-byte buffer"
+        )
+    return written
+
+
 @always_inline
 def _src_ptr(
     s: Span[UInt8, _], ref scratch: InlineArray[UInt8, 1]
@@ -126,13 +139,7 @@ def snappy_compress_into[
             + ", input_len=" + String(input_len)
             + ", output_cap=" + String(output_cap) + ")"
         )
-    var written = Int(size)
-    if written > output_cap:
-        raise Error(
-            "snappy_compress reported " + String(written)
-            + " bytes written into a " + String(output_cap) + "-byte buffer"
-        )
-    return written
+    return _check_written("snappy_compress", Int(size), output_cap)
 
 
 def snappy_uncompress_into[
@@ -175,13 +182,7 @@ def snappy_uncompress_into[
             + ", input_len=" + String(input_len)
             + ", output_cap=" + String(output_cap) + ")"
         )
-    var written = Int(size)
-    if written > output_cap:
-        raise Error(
-            "snappy_uncompress reported " + String(written)
-            + " bytes written into a " + String(output_cap) + "-byte buffer"
-        )
-    return written
+    return _check_written("snappy_uncompress", Int(size), output_cap)
 
 
 def snappy_uncompressed_length(src: Span[UInt8, _]) raises -> Int:

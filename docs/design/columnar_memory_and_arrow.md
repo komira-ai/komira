@@ -82,7 +82,7 @@ A `Table` is a query result: one schema and a `Slab[RecordBatch]` of chunks in o
 - **Compress.** `encode_record_batch_message_compressed[C]` and `decompress_record_batch_frame[C]` take a codec that conforms to `ArrowIpcCompression`. Arrow IPC's `CompressionType` defines two codecs, `LZ4_FRAME` and `ZSTD`, and `Lz4Frame` and `Zstd[level]` carry their ids, 0 and 1. The third conformer, `Uncompressed`, carries `ARROW_IPC_CODEC_ID = -1`, a sentinel for "write no `BodyCompression` table". The compressed encoder's caller contract is that `C` is `Lz4Frame` or `Zstd[*]`; an uncompressed stream goes through the uncompressed encoder. The `_with_dispatcher` variants work on a `ParallelDispatch`.
 - **Tensors.** `encode_tensor` and `encode_sparse_tensor` in `src/komira_arrow_ipc/` write Arrow's tensor messages. A tensor is not a column.
 
-`compression_codecs.mojo` also defines `Snappy`, `Gzip`, `Lz4Raw`, `Lzo`, `Brotli` and `Zlib` for file formats. `Snappy` calls the snappy C API, linked statically into the binary (`//third_party/snappy:snappy` is a dep of `komira_compression`). `Zstd`, `Gzip`, `Lz4Raw` and `Lz4Frame` call `libzstd`, `libz` and `liblz4`, each loaded with `dlopen` once per process. `Lzo`, `Brotli` and `Zlib` raise.
+`compression_codecs.mojo` also defines `Snappy`, `Gzip`, `Lz4Raw`, `Lzo`, `Brotli` and `Zlib` for file formats. `Snappy` calls the snappy C API, linked statically into the binary: the mopm package `komira_compression` links `libsnappy.a` (`//third_party/snappy:snappy_native`, with libc++ at the end of the link), and the shared library of the release set links `//third_party/snappy:snappy`. `Zstd`, `Gzip`, `Lz4Raw` and `Lz4Frame` call `libzstd`, `libz` and `liblz4`, each loaded with `dlopen` once per process. `Lzo`, `Brotli` and `Zlib` raise.
 
 ### How do batches cross the Arrow C Data Interface?
 
@@ -192,7 +192,7 @@ At execution, `ScanResolver` (`src/komira_scan_source/scan_resolver.mojo`) answe
 | `src/komira_arrow/schema.mojo`, `record_batch.mojo`, `table.mojo` | Schemas, batches, results | `Field`, `Schema`, `RecordBatch`, `Table` |
 | `src/komira_arrow_ipc/ipc_encoder_dispatch.mojo`, `ipc_decoder_dispatch.mojo` | IPC messages | `encode_record_batch_message`, `decode_record_batch_message` |
 | `src/komira_arrow_ipc/ipc_flatbuf.mojo` | IPC metadata | `FlatbufWriter`, `FlatbufReader` |
-| `src/komira_compression/compression_codecs.mojo` | Codec bindings | `Lz4Frame`, `Zstd`, `Snappy` |
+| `src/komira_compression/src/komira_compression/compression_codecs.mojo` | Codec bindings | `Lz4Frame`, `Zstd`, `Snappy` |
 | `src/komira_arrow_ipc/c_data_stream.mojo` | C stream export and import | `build_record_batch_stream`, `drain_record_batch_stream` |
 | `src/komira_collections/src/komira_collections/slab.mojo` | Typed slab | `Slab` |
 | `src/komira_simd/width_policy.mojo` | SIMD width policy | `komira_simd_width`, `komira_simd_width_bitpack`, `komira_simd_width_delta` |

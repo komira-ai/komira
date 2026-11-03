@@ -47,6 +47,19 @@ comptime ZSTD_ERROR_DST_SIZE_TOO_SMALL: Int = 70
 comptime ZSTD_ERROR_SRC_SIZE_WRONG: Int = 72
 
 
+def _check_written(what: StaticString, written: Int, cap: Int) raises -> Int:
+    """`written`, the length libzstd returned, when it is within the `cap`
+    bytes it was given; raises `<what> reported W bytes written into a C-byte
+    buffer` when it is not (libzstd never does that, and a caller that trusted
+    such a length would read past its buffer)."""
+    if written > cap:
+        raise Error(
+            String(what) + " reported " + String(written)
+            + " bytes written into a " + String(cap) + "-byte buffer"
+        )
+    return written
+
+
 @always_inline
 def _src_ptr(
     s: Span[UInt8, _], ref scratch: InlineArray[UInt8, 1]
@@ -131,12 +144,7 @@ def zstd_compress_into[
             + ", input_len=" + String(src_size)
             + ", output_cap=" + String(dst_capacity) + ")"
         )
-    if result > dst_capacity:
-        raise Error(
-            "ZSTD_compress reported " + String(result)
-            + " bytes written into a " + String(dst_capacity) + "-byte buffer"
-        )
-    return result
+    return _check_written("ZSTD_compress", result, dst_capacity)
 
 
 def zstd_decompress_into[
@@ -170,12 +178,7 @@ def zstd_decompress_into[
             + ", input_len=" + String(src_size)
             + ", output_cap=" + String(dst_capacity) + ")"
         )
-    if result > dst_capacity:
-        raise Error(
-            "ZSTD_decompress reported " + String(result)
-            + " bytes written into a " + String(dst_capacity) + "-byte buffer"
-        )
-    return result
+    return _check_written("ZSTD_decompress", result, dst_capacity)
 
 
 @fieldwise_init
@@ -215,12 +218,9 @@ def zstd_decompress_once[
         # is a C enum, read as a 32-bit int.
         var code = handle_ptr[].call["ZSTD_getErrorCode", Int32](result)
         return ZstdDecodeOutcome(0, Int(code))
-    if result > dst_capacity:
-        raise Error(
-            "ZSTD_decompress reported " + String(result)
-            + " bytes written into a " + String(dst_capacity) + "-byte buffer"
-        )
-    return ZstdDecodeOutcome(result, 0)
+    return ZstdDecodeOutcome(
+        _check_written("ZSTD_decompress", result, dst_capacity), 0
+    )
 
 
 def zstd_frame_content_size(src: Span[UInt8, _]) raises -> UInt64:

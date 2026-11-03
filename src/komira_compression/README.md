@@ -14,7 +14,9 @@ this package's API in follow-up changes.
 
 - `compression` / `compression_codecs`: the `Compression` and
   `ArrowIpcCompression` traits and their conformers (`Snappy`, `Zstd`, `Gzip`,
-  `Lz4Raw`, `Lz4Frame`, ...).
+  `Lz4Raw`, `Lz4Frame`, ...). The conformers that take and return only Spans
+  and Lists (`Snappy`, `Gzip`, `Lz4Raw` and the scaffolds) live in
+  `span_codecs`, and `compression_codecs` re-exports them.
 - `snappy_block`: `snappy_compress_into`, `snappy_uncompress_into` (never
   writes past `len(dst)`), `snappy_uncompressed_length`,
   `snappy_max_compressed_length`.
@@ -44,7 +46,8 @@ the soname nor the loader's error.
 ## Examples
 
 A raw snappy block, compressed and decompressed by the snappy library this
-package links (its shared library, from an installed package):
+package links (from an installed package, the static archive
+`lib/libsnappy.a` it ships, linked into the program with libc++):
 
 <!-- mojo-hidden from std.testing import assert_equal -->
 ```mojo
@@ -62,3 +65,85 @@ assert_equal(snappy_uncompress_into(Span(out), Span(packed)), len(src))
 for i in range(len(src)):
     assert_equal(out[i], src[i])
 ```
+
+The codecs opened at run time, each a round trip: zstd (libzstd), gzip (libz)
+and the LZ4 frame (liblz4) through their conformers, bzip2 (libbz2) and xz
+(liblzma) through the block API. From an installed package, each library is
+the one its conda dependency put in the environment:
+
+<!-- mojo-hidden from std.testing import assert_equal -->
+```mojo
+from komira_compression.bzip2_buffer import BZIP2_DEFAULT_BLOCK_SIZE_100K, BZIP2_DEFAULT_WORK_FACTOR
+from komira_compression.bzip2_buffer import bzip2_compress_into, bzip2_decompress_into
+from komira_compression.compression_codecs import Gzip, Lz4Frame, Zstd
+from komira_compression.xz_buffer import XZ_CHECK_CRC64, XZ_DEFAULT_MEMLIMIT, XZ_PRESET_DEFAULT
+from komira_compression.xz_buffer import xz_compress_into, xz_decompress_into
+
+var src = List[UInt8]()
+for i in range(1000):
+    src.append(UInt8(97 + i % 7))
+
+var zstd_frame = Zstd[3].compress(Span(src))
+var gzip_stream = Gzip[6].compress(Span(src))
+var lz4_frame = Lz4Frame.compress(Span(src))
+var decoded = List[List[UInt8]]()
+decoded.append(Zstd[3].decompress(Span(zstd_frame), len(src)))
+decoded.append(Gzip[6].decompress(Span(gzip_stream), len(src)))
+decoded.append(Lz4Frame.decompress(Span(lz4_frame), len(src)))
+
+var packed = List[UInt8](length=4096, fill=0)
+var n = bzip2_compress_into(
+    Span(packed), Span(src), BZIP2_DEFAULT_BLOCK_SIZE_100K, BZIP2_DEFAULT_WORK_FACTOR
+)
+var from_bzip2 = List[UInt8](length=len(src), fill=0)
+assert_equal(bzip2_decompress_into(Span(from_bzip2), Span(packed)[0:n]).value(), len(src))
+decoded.append(from_bzip2^)
+
+n = xz_compress_into(Span(packed), Span(src), XZ_PRESET_DEFAULT, XZ_CHECK_CRC64)
+var from_xz = List[UInt8](length=len(src), fill=0)
+assert_equal(
+    xz_decompress_into(Span(from_xz), Span(packed)[0:n], XZ_DEFAULT_MEMLIMIT).value(), len(src)
+)
+decoded.append(from_xz^)
+
+for d in range(len(decoded)):
+    assert_equal(len(decoded[d]), len(src))
+    for i in range(len(src)):
+        assert_equal(decoded[d][i], src[i])
+```
+
+## Build files
+
+This package is built with buildrules' `mojo_package` and packaged for mopm as `komira_compression`, version 0.1.0
+(`mopm.toml`). The library is `src/komira_compression/`, its tests are `tests/`. It depends on `komira_lz4` and
+`komira_zlib`, and it has one native library of its own and three it opens at run time:
+
+- snappy is linked: `[native.snappy]` of `mopm.toml`, whose archive `libsnappy.a` is built by the `native_library`
+  target `//third_party/snappy:snappy_native` (snappy 1.3.1 from its pinned release archive, C++17, the C API renamed
+  `komira_snappy_*`, the C++ names left as they are) and named in `natives` of `BUCK`. It is linked into every test of
+  the package and of the packages that depend on it, and `:conda` holds it at `lib/libsnappy.a`. `mopm.toml` declares it
+  `provided = true` (mopm compiles no source for it) and `link = ["c++"]`: snappy is C++, so the link of every program
+  that includes it, the package's tests and an installed user's alike, ends with `-lc++`, which `mopm pack` records in
+  the package's metadata.
+- libbz2, liblzma and libzstd are opened by name when a codec is first used, so `mopm.toml` declares them under
+  `[native-dependencies]` with `mode = "load"` and the conda package records `bzip2`, `liblzma` and `zstd` as
+  dependencies; `mopm.lock` pins them for each platform.
+
+| file | what |
+|---|---|
+| `mopm.toml` | the mopm manifest: name, version, the Mojo version, the two Mojo dependencies, the three libraries opened at run time, snappy, where the library and its tests are |
+| `mopm.lock` | what `mopm lock` writes (with no registry reachable): the path dependencies and, under `system_libs`, the conda packages of the libraries opened at run time, for each platform |
+| `mopm-toolchain.toml` | the exact mopm and Mojo versions the build uses (written by hand) |
+| `buildrules.mojo.lock.bzl`, `buildrules.mojo.bzl` | written by `buildrules mojo sync` from the files above; `buildrules mojo check` fails when they are stale |
+| `coverage_floor.txt` | the line and branch coverage the package's tests must keep (`:coverage_floor`) |
+
+`:lib` is the library file and exists only once every test of `tests/` has passed. After any change to a source, a test,
+`mopm.toml`, `mopm.lock` or `mopm-toolchain.toml`, run `buildrules mojo sync`, commit what it writes, and build
+`komira//src/komira_compression:lib` on the farm.
+
+`:conda` is the `.conda` of the mopm package (`mojo-komira_compression-0.1.0-mojo1.0.0_0.conda`): the `.mojoc` and
+`lib/libsnappy.a`, requiring `komira_lz4`, `komira_zlib` and the three conda packages above; `:conda_holds` reads it back.
+`:komira_compression` is `:lib` as komira's Mojo rules take it (`mojo_adopted_library`); it declares the three
+sonames in `dlopen`, which `:komira_compression_conda` (the release set's packaging) turns into the same requirements,
+and it names `:komira_compression_native`, the shared library of the release set that links the older
+`//third_party/snappy:snappy`. It also compiles and runs the README's examples above (`[tests][readme]`) against `:lib`.

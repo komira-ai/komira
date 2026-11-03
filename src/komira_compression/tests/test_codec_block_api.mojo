@@ -395,7 +395,7 @@ def test_zstd_refusals_name_result_and_sizes() raises:
 def test_zstd_decompress_once_hands_back_the_error_code() raises:
     """`zstd_decompress_once` answers the same three cases with a code, not a
     raise: a short destination is 70 (the one a caller grows on), a truncated
-    frame 72 and a reserved block type 20. A mutant that reads the code from
+    frame 72 and a reserved block type 20. A decoder that reads the code from
     the wrong call, or returns 0 for any failure, changes one of these."""
     var frame = materialize[_ZSTD_HELLO]()
     var dst = _guarded(5)
