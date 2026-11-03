@@ -418,9 +418,10 @@ def _write_tree(dir: String) raises -> List[String]:
 def test_the_program_targets_flag() raises:
     var dir = _tmp(String("programs_cli"))
     var args = _write_tree(dir)
-    # No evidence: the program is a finding and the gate fails.
-    assert_equal(run(args.copy()), EXIT_GATE)
-    # The query's empty object says the same.
+    # No --program-targets though the manifest declares a program: nothing says which program a test
+    # runs, so the run is an input error, not a gate result.
+    assert_equal(run(args.copy()), EXIT_INPUT)
+    # The query's empty object: no test runs the program, a finding, and the gate fails.
     write_text(dir + String("/runs_none"), String("{}\n"))
     var none = args.copy()
     none.append("--program-targets")
@@ -432,6 +433,12 @@ def test_the_program_targets_flag() raises:
     ran.append("--program-targets")
     ran.append(dir + String("/runs"))
     assert_equal(run(ran^), EXIT_OK)
+    # A test runs a binary whose entry point is the same path in another cell: no evidence.
+    write_text(dir + String("/runs_other_cell"), String("{\"komira//src/p:tool\": {\"main\": \"other//src/p/bins/tool.mojo\", \"srcs\": []}}\n"))
+    var other = args.copy()
+    other.append("--program-targets")
+    other.append(dir + String("/runs_other_cell"))
+    assert_equal(run(other^), EXIT_GATE)
     # An empty file is not the query's output: an input error, not "no program runs".
     write_text(dir + String("/runs_empty"), String(""))
     var empty = args.copy()
@@ -488,6 +495,57 @@ def _flag_args(dir: String) raises -> List[String]:
     a.append("--program-targets")
     a.append(dir + String("/runs"))
     return a^
+
+
+def _query_args(dir: String, packages: String) raises -> List[String]:
+    write_text(dir + String("/packages"), packages)
+    var a = List[String]()
+    a.append("program-query")
+    a.append("--repo-files")
+    a.append(dir + String("/repo_files"))
+    a.append("--packages")
+    a.append(dir + String("/packages"))
+    a.append("--out")
+    a.append(dir + String("/query.txt"))
+    return a^
+
+
+def test_the_program_query_command() raises:
+    # What the census runs before its query: the query for the measured packages, as a file.
+    var dir = _tmp(String("programs_query"))
+    _ = _write_tree(dir)
+    assert_equal(run(_query_args(dir, String("src/p\nsrc/q\n"))), EXIT_OK)
+    assert_equal(
+        read_text(dir + String("/query.txt")),
+        "((kind('^mojo_binary_rule$', deps(kind('^mojo_test(_run)?_rule$', //src/p:))) + attrfilter('kind', 'bin',"
+        + " kind('^mojo_unit_rule$', deps(kind('^mojo_test(_run)?_rule$', //src/p:))))) intersect //src/p:)",
+    )
+    # No measured package has a manifest (src/q; the root package, the empty line), or none is
+    # measured: the file is empty, the census runs no query and passes no --program-targets.
+    assert_equal(run(_query_args(dir, String("src/q\n\n"))), EXIT_OK)
+    assert_equal(read_text(dir + String("/query.txt")), "")
+    assert_equal(run(_query_args(dir, String(""))), EXIT_OK)
+    assert_equal(read_text(dir + String("/query.txt")), "")
+    # A packages file that cannot be read is an input error.
+    var missing = _query_args(dir, String(""))
+    missing[4] = dir + String("/no_such_file")
+    assert_equal(run(missing^), EXIT_INPUT)
+    # Its own flags only, each needed.
+    var no_out = _query_args(dir, String(""))
+    _ = no_out.pop()
+    _ = no_out.pop()
+    assert_equal(run(no_out^), EXIT_USAGE)
+    for k in range(3):
+        var extra = _query_args(dir, String(""))
+        if k == 0:
+            extra.append("--include-tests")
+        elif k == 1:
+            extra.append("--test-source")
+            extra.append("src/p/a.mojo")
+        else:
+            extra.append("--lcov")
+            extra.append(dir + String("/p.info"))
+        assert_equal(run(extra^), EXIT_USAGE)
 
 
 def test_a_program_that_is_a_test_source_is_an_error() raises:
@@ -641,6 +699,9 @@ def test_the_report_reads_the_program_targets() raises:
     var dir = _tmp(String("programs_report"))
     write_text(dir + String("/none.json"), String("{}\n"))
     write_text(dir + String("/ran.json"), String(RAN_JSON))
+    # Without --program-targets the report is refused: the census passes the query's answer
+    # whenever a measured package has a manifest.
+    assert_equal(run(_report_args(dir, String("census"), String("no_flag"))), EXIT_INPUT)
     for m in range(3):
         var mode = String("census") if m == 0 else (String("neutral") if m == 1 else String("enforce"))
         var none = _report_args(dir, mode, mode + String("_none"))
@@ -680,5 +741,6 @@ def main() raises:
     test_a_program_in_the_uncompiled_report_is_left_out()
     test_the_report_reads_the_program_targets()
     test_the_program_targets_flag()
+    test_the_program_query_command()
     test_a_manifest_that_cannot_be_read_fails_the_run()
     print("test_programs: PASS")

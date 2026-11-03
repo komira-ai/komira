@@ -1,7 +1,8 @@
 """The statements of a mopm.toml: table headers and `key = value` lines.
 
 One scanner walks the whole text, so a value is read to its real end: a
-basic string (`"..."`, with `\\` escapes), a literal string (`'...'`), a
+basic string (`"..."`, with `\\` escapes; a backslash may end a line only in
+a multi-line string), a literal string (`'...'`), a
 multi-line string of either kind (`\"\"\"...\"\"\"`, `'''...'''`, where an escaped
 quote does not end it), an array or an inline table (which may span lines,
 hold comments and nest; each `]` and `}` must close the bracket or brace
@@ -136,7 +137,10 @@ struct _Scan(Movable):
                 raise self.fail(start_line, String("a string that is never closed"))
             if c == _BS and q == _DQ:
                 self.advance()
-                if self.at(0) == -1:
+                # A backslash may end a line only inside a multi-line string: a one-line string
+                # does not continue on the next line, so it is never closed.
+                var e = self.at(0)
+                if e == -1 or (not multi and (e == _NL or e == _CR)):
                     raise self.fail(start_line, String("a string that is never closed"))
                 self.advance()
                 continue
@@ -193,8 +197,8 @@ struct _Scan(Movable):
                 lines.append(self.line)
             elif b == _RBRACK or b == _RBRACE:
                 var want = _RBRACK if b == _RBRACK else _RBRACE
-                if len(stack) == 0:
-                    raise self.fail(self.line, String("an unmatched `") + substr(self.text, self.i, self.i + 1) + String("`"))
+                # The stack is never empty here: the value starts with its opener, and the loop
+                # returns as soon as the closer of that opener empties it.
                 var opener = stack.pop()
                 var opened = lines.pop()
                 if (opener == _LBRACK) != (want == _RBRACK):

@@ -23,11 +23,12 @@ What "depends on" means is evidence from the build graph, not a reading of
 the program's text: `parse_program_targets` reads the JSON that
 `buck2 uquery ... --output-attribute '^(main|srcs)$'` prints for the program
 targets (a `mojo_binary_rule`, or a `mojo_unit_rule` of kind `bin`) that a
-test target of their own package depends on (.github/ci/coverage_measure.sh
-runs that query), and keeps each target's ENTRY POINT: its `main`, else its
-one source. A target with several sources and no `main` is evidence for
-none of them. This module is pure: manifest text and that JSON in, programs
-and findings out.
+test target of their own package depends on (`program_query` writes that
+query; .github/ci/coverage_measure.sh runs it), and keeps each target's
+ENTRY POINT: its `main`, else its one source, when it is a file of the
+target's own cell. A target with several sources and no `main` is evidence
+for none of them. This module is pure: manifest text and that JSON in, the
+query, programs and findings out.
 
 A `.mojo` path that no manifest names stays ordinary source, and a package
 with no `mopm.toml` has no program. The manifest is read strictly
@@ -82,22 +83,41 @@ struct Program(Copyable, Movable):
         self.line = line
 
 
-def _find_eq(s: String) -> Int:
-    """The first `=` of `s` outside quotes, or -1."""
+def _string_end(s: String, i: Int) -> Int:
+    """Just past the string that starts at `s[i]` (a `"` or `'`), read as the
+    manifest scanner reads it: one-line or multi-line (three quotes, which may
+    end with up to two more of their own), `\\` escaping in a basic string.
+    The scanner has already refused an unclosed string, so the end is found."""
     var n = s.byte_length()
-    var quote = 0
+    var q = byte_at(s, i)
+    var multi = i + 2 < n and byte_at(s, i + 1) == q and byte_at(s, i + 2) == q
+    var j = i + (3 if multi else 1)
+    while j < n:
+        var c = byte_at(s, j)
+        if c == 92 and q == 34:
+            j += 2
+            continue
+        if c == q and (not multi or (j + 2 < n and byte_at(s, j + 1) == q and byte_at(s, j + 2) == q)):
+            j += 3 if multi else 1
+            var extra = 0
+            while multi and extra < 2 and j < n and byte_at(s, j) == q:
+                j += 1
+                extra += 1
+            return j
+        j += 1
+    return n
+
+
+def _find_eq(s: String) -> Int:
+    """The first `=` of `s` outside strings, or -1."""
+    var n = s.byte_length()
     var i = 0
     while i < n:
         var c = byte_at(s, i)
-        if quote != 0:
-            if c == 92 and quote == 34:
-                i += 2
-                continue
-            if c == quote:
-                quote = 0
-        elif c == 34 or c == 39:
-            quote = c
-        elif c == 61:
+        if c == 34 or c == 39:
+            i = _string_end(s, i)
+            continue
+        if c == 61:
             return i
         i += 1
     return -1
@@ -164,21 +184,15 @@ def _inline_table(body: String, origin: String, line: Int) raises -> BinEntry:
     """`name = "..", path = ".."`: the inside of one inline table."""
     var n = body.byte_length()
     var pieces = List[String]()
-    var quote = 0
     var start = 0
     var depth = 0
     var i = 0
     while i < n:
         var c = byte_at(body, i)
-        if quote != 0:
-            if c == 92 and quote == 34:
-                i += 2
-                continue
-            if c == quote:
-                quote = 0
-        elif c == 34 or c == 39:
-            quote = c
-        elif c == 91 or c == 123:
+        if c == 34 or c == 39:
+            i = _string_end(body, i)
+            continue
+        if c == 91 or c == 123:
             depth += 1
         elif c == 93 or c == 125:
             depth -= 1
@@ -234,21 +248,16 @@ def _inline_bins(value: String, origin: String, line: Int) raises -> List[BinEnt
             break
         if byte_at(inner, i) != 123:
             raise Error(where(origin, line) + String("each `bins` entry must be an inline table `{ name = \"..\", path = \"..\" }`, got: ") + substr(inner, i, m))
-        var quote = 0
+        # The manifest scanner has matched every brace of the value, so the entry's `}` is found.
         var depth = 0
         var j = i
-        var close = -1
+        var close = m
         while j < m:
             var c = byte_at(inner, j)
-            if quote != 0:
-                if c == 92 and quote == 34:
-                    j += 2
-                    continue
-                if c == quote:
-                    quote = 0
-            elif c == 34 or c == 39:
-                quote = c
-            elif c == 123:
+            if c == 34 or c == 39:
+                j = _string_end(inner, j)
+                continue
+            if c == 123:
                 depth += 1
             elif c == 125:
                 depth -= 1
@@ -256,8 +265,6 @@ def _inline_bins(value: String, origin: String, line: Int) raises -> List[BinEnt
                     close = j
                     break
             j += 1
-        if close < 0:
-            raise Error(where(origin, line) + String("a `bins` entry that is never closed"))
         out.append(_inline_table(substr(inner, i + 1, close), origin, line))
         i = close + 1
         while i < m and (byte_at(inner, i) == 32 or byte_at(inner, i) == 9):
@@ -388,6 +395,11 @@ def _repo_path(label_path: String, origin: String) raises -> String:
     return substr(rest, 0, colon) + String("/") + suffix(rest, colon + 1)
 
 
+def _cell(label: String) -> String:
+    """The cell of a label or source the caller has checked is `<cell>//...`: the text before `//`."""
+    return substr(label, 0, label.find("//"))
+
+
 def _json(text: String, origin: String) raises -> JsonValue:
     try:
         return parse_json_value(text)
@@ -400,7 +412,8 @@ def parse_program_targets(text: String, origin: String) raises -> Dict[String, B
     `text`: buck2's JSON for `uquery ... --output-attribute '^(main|srcs)$'`,
     an object of target label to its attributes. A target's entry point is
     its `main`, else its one source; one with several sources and no `main`
-    gives none. Anything else than that shape is an error naming `origin`
+    gives none, and so does an entry point of another cell than the target's
+    (another repository's file, though its path may read the same). Anything else than that shape is an error naming `origin`
     (an empty file included: the query always writes an object)."""
     var doc = _json(text, origin)
     if not doc.is_object():
@@ -409,6 +422,8 @@ def parse_program_targets(text: String, origin: String) raises -> Dict[String, B
     for i in range(doc.num_members()):
         var label = doc.key_at(i)
         var attrs = doc.value_at(i)
+        if label.find("//") < 0:
+            raise Error(origin + String(": a target label that is not `<cell>//<package>:<name>`: ") + label)
         if not attrs.is_object():
             raise Error(origin + String(": ") + label + String(": not an object of attributes"))
         var main = String("")
@@ -427,10 +442,17 @@ def parse_program_targets(text: String, origin: String) raises -> Dict[String, B
                 if not sv.children[k].is_string():
                     raise Error(origin + String(": ") + label + String(": a source in `srcs` is not a path"))
                 srcs.append(sv.children[k].as_string())
+        var entry = String("")
         if main.byte_length() > 0:
-            out[_repo_path(main, origin)] = True
+            entry = main^
         elif len(srcs) == 1:
-            out[_repo_path(srcs[0], origin)] = True
+            entry = srcs[0]
+        if entry.byte_length() == 0:
+            continue
+        var path = _repo_path(entry, origin)
+        # A source of another cell is not this repository's file, though its path may read the same.
+        if _cell(entry) == _cell(label):
+            out[path] = True
     return out^
 
 
@@ -447,4 +469,37 @@ def unrun_findings(programs: List[Program], runs: Dict[String, Bool]) -> List[Fi
             + String(" is program source, left out of the numbers, and no test target of the package depends on its built program:")
             + String(" add a test (a mojo_test whose data is the program's binary target) that runs it"),
         ))
+    return out^
+
+
+def program_query(repo: RepoFiles, packages: List[String]) raises -> String:
+    """The `buck2 uquery` expression whose answer is the program targets'
+    file (`parse_program_targets`): for each of `packages` (repository
+    directories, the empty string for the root package) whose `mopm.toml` is
+    a file of `repo`, the program targets of that package (a
+    `mojo_binary_rule`, or a `mojo_unit_rule` of kind `bin`) that a test
+    target of that package (a `mojo_test_rule` or `mojo_test_run_rule`)
+    depends on; one selection per package, joined, so a test of another
+    package is no evidence. The empty string when no package has a manifest:
+    no query is run, and no program is declared. A directory holding a
+    character a target pattern cannot is an error."""
+    var out = String("")
+    for i in range(len(packages)):
+        var p = packages[i]
+        var manifest = String(MANIFEST) if p.byte_length() == 0 else p + String("/") + String(MANIFEST)
+        if not repo.has_file(manifest):
+            continue
+        for k in range(p.byte_length()):
+            var c = byte_at(p, k)
+            var ok = (c >= 65 and c <= 90) or (c >= 97 and c <= 122) or (c >= 48 and c <= 57) or c == 95 or c == 46 or c == 47 or c == 43 or c == 45
+            if not ok:
+                raise Error(String("package directory '") + p + String("' holds a character a target pattern cannot"))
+        var tdeps = String("deps(kind('^mojo_test(_run)?_rule$', //") + p + String(":))")
+        var sel = (
+            String("((kind('^mojo_binary_rule$', ") + tdeps + String(") + attrfilter('kind', 'bin', kind('^mojo_unit_rule$', ")
+            + tdeps + String("))) intersect //") + p + String(":)")
+        )
+        if out.byte_length() > 0:
+            out += String(" + ")
+        out += sel
     return out^

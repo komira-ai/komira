@@ -533,24 +533,21 @@ N_RECORDS=$(grep -c . "$OUT/branch_records.txt" || true)
 # 5. The report.
 if [ "$N_REPORTS" -gt 0 ]; then
     # The program targets each measured package's tests depend on
-    # (tools/build/coverage/README.md, "Program sources"): of each measured
-    # package P with a mopm.toml, the program targets of P (a mojo_binary_rule,
-    # or a mojo_unit_rule of kind `bin`) that a test target of P (a
-    # mojo_test_rule or mojo_test_run_rule) depends on, one selection per
-    # package joined in one query, so a test of another package is no evidence
-    # for P. buck2's JSON of their `main` and `srcs` is the file covcheck reads
-    # (--program-targets), which takes each target's entry point from it; no
-    # file's text is searched for a program's name. With no such package the
-    # file is an empty object; a failing query is an error, never "none run".
-    echo '{}' >"$OUT/program_targets.json"
-    pquery=""
-    while IFS= read -r p; do
-        [ -f "${p:-.}/mopm.toml" ] || continue
-        case "$p" in *[!A-Za-z0-9_./+-]*) die "package directory '$p' holds a character a target pattern cannot" ;; esac
-        tdeps="deps(kind('^mojo_test(_run)?_rule\$', //$p:))"
-        sel="((kind('^mojo_binary_rule\$', $tdeps) + attrfilter('kind', 'bin', kind('^mojo_unit_rule\$', $tdeps))) intersect //$p:)"
-        if [ -z "$pquery" ]; then pquery="$sel"; else pquery="$pquery + $sel"; fi
-    done <"$OUT/measured_packages.txt"
+    # (tools/build/coverage/README.md, "Program sources"). covcheck writes the
+    # query (`covcheck program-query`: one selection per measured package with
+    # a mopm.toml, so a test of another package is no evidence), or nothing
+    # when no such package is measured; buck2's JSON answer is the file the
+    # report reads (--program-targets). covcheck refuses a run whose manifests
+    # declare a program and that gives no such file, or an empty one, so a
+    # query that was not run or failed is an error, never "none run".
+    rc=0
+    "$COVCHECK" program-query --repo-files "$OUT/repo-files" --packages "$OUT/measured_packages.txt" \
+        --out "$OUT/program_query.txt" >"$OUT/logs/program_query.log" 2>&1 </dev/null || rc=$?
+    if [ "$rc" -ne 0 ]; then
+        cat "$OUT/logs/program_query.log"
+        die "covcheck program-query exited $rc"
+    fi
+    pquery=$(cat "$OUT/program_query.txt")
     if [ -n "$pquery" ]; then
         say "buck2 uquery \"$pquery\" --output-attribute '^(main|srcs)\$'"
         rc=0
@@ -568,7 +565,7 @@ if [ "$N_REPORTS" -gt 0 ]; then
     while IFS= read -r x; do set -- "$@" --cobertura "$x"; done <"$OUT/reports.txt"
     while IFS= read -r x; do set -- "$@" --branch-lcov "$x"; done <"$OUT/branch_records.txt"
     for d in $INFO_DIRS; do set -- "$@" --info-package "$d"; done
-    set -- "$@" --program-targets "$OUT/program_targets.json"
+    [ -z "$pquery" ] || set -- "$@" --program-targets "$OUT/program_targets.json"
     # A mojo_package with no branch records (its tests link a native library) is
     # given a copy of its hold without `branch`, which covcheck would read as a
     # Regression (a held metric not measured); every other package's hold is read as it is.

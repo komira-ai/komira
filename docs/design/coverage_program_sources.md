@@ -25,21 +25,26 @@ test ran the program on every build.
    count. The floor does not change; this says what it measures.
 3. **Leaving a program out is honest only if a test runs it: `UnrunProgram`.** The evidence is the build graph,
    not a reading of source text: a test target of the program's own package depends on the program target
-   (typically `data = {"bin": ":prog[runnable]"}`). The census runs one `buck2 uquery`, the union of one selection
-   per measured package with a manifest, and passes buck2's JSON of the selected targets' `main` and `srcs` to
-   covcheck. covcheck takes each target's entry point (its `main`, else its one source), so a file a program
-   target merely lists is no evidence, and a test in another package is none either. A failing query fails the
-   census; it never reads as "no program runs".
-4. **covcheck stays pure.** It reads manifests, reports and the JSON as data; the query is the census script's one
-   build-graph step, next to the queries it already runs for the library lists.
+   (typically `data = {"bin": ":prog[runnable]"}`). `covcheck program-query` writes one `buck2 uquery`, the union of
+   one selection per measured package with a manifest; the census runs it and passes buck2's JSON of the selected
+   targets' `main` and `srcs` to covcheck. covcheck takes each target's entry point (its `main`, else its one source),
+   and only a file of the target's own cell, so a file a program target merely lists is no evidence, a file of
+   another cell whose path reads the same is none, and a test in another package is none either.
+4. **A missing answer is an error, never "no program runs".** A run whose manifests declare a program and that is
+   given no answer, or an empty one (what a failed query leaves), is an input error. The census script's part is
+   then only to run the query covcheck wrote and pass its output: a script that dropped the flag, or swallowed a
+   failed query and passed the empty file it left, makes covcheck refuse the run, and covcheck's tests hold that
+   refusal. The script itself has no test of its own (shell tests are not added).
+5. **covcheck stays pure.** It reads manifests, reports and the JSON as data and writes the query as text; running
+   it is the census script's one build-graph step, next to the queries it already runs for the library lists.
 
 ## Report and gate
 
 The report (`covcheck report`, the pull request's coverage check) gets the evidence. The build gate of a
 `mojo_library` (`tools/build/mojo/coverage.bzl`) does not: no `mojo_library` package declares `bins`, and the
 packages that ship programs are built with buildrules' `mojo_package`, whose numbers come from the report. A
-`bins` entry in a `mojo_library` is therefore always `UnrunProgram` at its gate until the gate is given the same
-query; that change belongs with the first such library.
+`bins` entry in a `mojo_library` is therefore an input error at its gate (no answer is given) until the gate is
+given the same query; that change belongs with the first such library.
 
 ## Options weighed
 

@@ -1,7 +1,7 @@
 from std.testing import assert_equal, assert_true
 
 from covcheck.paths import RepoFiles, repo_files_of
-from covcheck.programs import BinEntry, parse_bins, parse_program_targets, program_sources
+from covcheck.programs import BinEntry, parse_bins, parse_program_targets, program_query, program_sources
 
 # The program sources' readers: the `bins` of a mopm.toml (programs.parse_bins over
 # manifest.toml_statements), what an entry may name (programs.program_sources), and the
@@ -388,6 +388,110 @@ def test_entries_name_files_of_their_own_package() raises:
     )
 
 
+def test_a_backslash_does_not_continue_a_one_line_string() raises:
+    # A one-line basic string cannot go on to the next line, with LF or CRLF line ends, in a value
+    # or in an array; the error names the line the string starts on.
+    var ok = String(MANIFEST)
+    _refused(ok + String("extra = \"a\\\nb\"\n"), String("m.toml:8: a string that is never closed"))
+    _refused(ok + String("extra = \"a\\\r\nb\"\r\n"), String("m.toml:8: a string that is never closed"))
+    _refused(ok + String("extra = [\"a\\\nb\"]\n"), String("m.toml:8: a string that is never closed"))
+    _refused(String("[targets]\nbins = [{ name = \"a\\\n\", path = \"bins/a.mojo\" }]\n"), String("m.toml:2: a string that is never closed"))
+    # A multi-line basic string may: a backslash at a line end is its line-ending backslash.
+    var lf = String("[package]\nnotes = \"\"\"one \\\n  two\"\"\"\n[targets]\nbins = [{ name = \"a\", path = \"bins/a.mojo\" }]\n")
+    assert_equal(_names(parse_bins(lf, String("m.toml"))), "a=bins/a.mojo")
+    var crlf = String("[package]\r\nnotes = \"\"\"one \\\r\n  two\"\"\"\r\n[targets]\r\nbins = [{ name = \"a\", path = \"bins/a.mojo\" }]\r\n")
+    assert_equal(_names(parse_bins(crlf, String("m.toml"))), "a=bins/a.mojo")
+
+
+def test_the_last_statement_may_end_the_file() raises:
+    # No line end after the last statement or header.
+    assert_equal(_names(parse_bins(String("[targets]\nbins = [{ name = \"a\", path = \"bins/a.mojo\" }]"), String("m.toml"))), "a=bins/a.mojo")
+    assert_equal(len(parse_bins(String("[targets]"), String("m.toml"))), 0)
+    assert_equal(len(parse_bins(String("[targets]\nlib = 1 # done"), String("m.toml"))), 0)
+
+
+def test_an_entry_reads_its_strings_as_the_scanner_does() raises:
+    # A quoted key holding an escaped quote and a `=`, before the entry's `name`.
+    var key = String("[targets]\nbins = [{ \"k\\\"=\" = 1, name = \"a\", path = \"bins/a.mojo\" }]\n")
+    assert_equal(_names(parse_bins(key, String("m.toml"))), "a=bins/a.mojo")
+    # Another key whose multi-line string holds a quote, a brace and a comma.
+    var multi = String("[targets]\nbins = [{ name = \"a\", x = \"\"\" \" { , \"\"\", path = \"bins/a.mojo\" }, { name = \"b\", path = \"bins/b.mojo\" }]\n")
+    assert_equal(_names(parse_bins(multi, String("m.toml"))), "a=bins/a.mojo b=bins/b.mojo")
+    # A multi-line string that ends with a quote of its own, and a literal one holding a brace.
+    var ends = String("[targets]\nbins = [{ x = \"\"\"q\"\"\"\", y = ''' } ''', name = \"a\", path = \"bins/a.mojo\" }]\n")
+    assert_equal(_names(parse_bins(ends, String("m.toml"))), "a=bins/a.mojo")
+    # A name or path written as a multi-line string is not a plain one.
+    _refused(
+        String("[targets]\nbins = [{ name = \"\"\"a\"\"\", path = \"bins/a.mojo\" }]\n"),
+        String("m.toml:2: `name` of a bins entry must be a plain quoted string (no escape, no quote inside), got: \"\"\"a\"\"\""),
+    )
+
+
+def test_an_entry_point_of_another_cell_is_no_evidence() raises:
+    # The same relative path in another cell is another repository's file.
+    assert_equal(_targets(String("{\"komira//src/p:tool\": {\"main\": \"other//src/p/bins/tool.mojo\", \"srcs\": []}}")), "")
+    assert_equal(_targets(String("{\"komira//src/p:tool\": {\"srcs\": [\"other//src/p/bins/tool.mojo\"]}}")), "")
+    assert_equal(
+        _targets(String(
+            "{\"komira//src/p:tool\": {\"srcs\": [\"komira//src/p/bins/tool.mojo\"]},"
+            " \"komira//src/p:shadow\": {\"main\": \"other//src/p/bins/other.mojo\", \"srcs\": []}}"
+        )),
+        "src/p/bins/tool.mojo",
+    )
+    # A label buck2 would print with its cell, given without one, is no target label.
+    _targets_refused(
+        String("{\"tool\": {\"srcs\": [\"komira//src/p/bins/tool.mojo\"]}}"),
+        String("t.json: a target label that is not `<cell>//<package>:<name>`: tool"),
+    )
+
+
+comptime P_SELECTION = (
+    "((kind('^mojo_binary_rule$', deps(kind('^mojo_test(_run)?_rule$', //src/p:))) + attrfilter('kind', 'bin',"
+    " kind('^mojo_unit_rule$', deps(kind('^mojo_test(_run)?_rule$', //src/p:))))) intersect //src/p:)"
+)
+comptime ROOT_SELECTION = (
+    "((kind('^mojo_binary_rule$', deps(kind('^mojo_test(_run)?_rule$', //:))) + attrfilter('kind', 'bin',"
+    " kind('^mojo_unit_rule$', deps(kind('^mojo_test(_run)?_rule$', //:))))) intersect //:)"
+)
+
+
+def test_the_program_query() raises:
+    var l = List[String]()
+    l.append("BUCK")
+    l.append("mopm.toml")
+    l.append("src/p/BUCK")
+    l.append("src/p/mopm.toml")
+    l.append("src/q/BUCK")
+    l.append("src/a b/BUCK")
+    l.append("src/a b/mopm.toml")
+    var repo = repo_files_of(l)
+    var only_p = List[String]()
+    only_p.append(String("src/p"))
+    assert_equal(program_query(repo, only_p), P_SELECTION)
+    # One selection per package with a manifest, in the order given, the root package as `//:`;
+    # src/q has no manifest and is left out.
+    var three = List[String]()
+    three.append(String(""))
+    three.append(String("src/q"))
+    three.append(String("src/p"))
+    assert_equal(program_query(repo, three), String(ROOT_SELECTION) + String(" + ") + String(P_SELECTION))
+    # No package with a manifest, or no package: no query.
+    var only_q = List[String]()
+    only_q.append(String("src/q"))
+    assert_equal(program_query(repo, only_q), "")
+    assert_equal(program_query(repo, List[String]()), "")
+    # A directory a target pattern cannot spell.
+    var bad = List[String]()
+    bad.append(String("src/a b"))
+    var raised = False
+    try:
+        _ = program_query(repo, bad)
+    except e:
+        raised = True
+        assert_equal(String(e), "package directory 'src/a b' holds a character a target pattern cannot")
+    assert_true(raised)
+
+
 
 def main() raises:
     test_inline_array_in_every_layout()
@@ -405,4 +509,9 @@ def main() raises:
     test_multi_line_strings_are_read_to_their_real_end()
     test_entries_name_files_of_their_own_package()
     test_the_program_targets_file()
+    test_a_backslash_does_not_continue_a_one_line_string()
+    test_the_last_statement_may_end_the_file()
+    test_an_entry_reads_its_strings_as_the_scanner_does()
+    test_an_entry_point_of_another_cell_is_no_evidence()
+    test_the_program_query()
     print("test_program_manifest: PASS")
