@@ -39,12 +39,16 @@ mojo_adopted_library(
 # komira_spsc_ring as dependencies (`mojo-komira_atomic_alias >=0.1,<0.2`,
 # `mojo-komira_spsc_ring >=0.1,<0.2`) and holds those packages' files nowhere. `members` is the
 # manifests of the path dependencies of the closure, staged at their repository paths, because
-# `mopm pack` reads the manifest of each beside the one it is given. `:lib` exists only once the
+# `mopm pack` reads the manifest of each beside the one it is given. `bins` is the source of each
+# program of `[targets] bins`, keyed by the path mopm.toml writes: `mopm pack` reads it and ships it
+# as `lib/mojo/komira_bench.bins/spsc_ring.mojo`, so without it the pack fails with "cannot read
+# .../bins/spsc_ring.mojo". `:lib` exists only once the
 # tests passed, so this file exists only then. Publishing it (`mopm publish`) uploads, which is not
 # a build action: it is a step of a CI job that takes this target's output. `mopm` is the one
 # `mojo_package` pins (mopm-toolchain.toml).
 mojo_conda(
     name = "conda",
+    bins = {"bins/spsc_ring.mojo": "bins/spsc_ring.mojo"},
     dir = "src/komira_bench",
     lib = ":lib",
     manifest = "mopm.toml",
