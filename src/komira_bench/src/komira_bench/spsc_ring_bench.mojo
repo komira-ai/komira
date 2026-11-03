@@ -118,15 +118,32 @@ def _check_caps(caps: List[Int]) raises:
             )
 
 
-def _push_only_rounds(cap: Int, total_ops: Int) -> List[Int]:
-    """The pushes of each timed round of push_only: `cap` each, then the rest
-    (`total_ops % cap`) when it is not zero. They add up to `total_ops`."""
-    var rounds = List[Int]()
-    for _ in range(total_ops // cap):
-        rounds.append(cap)
-    if total_ops % cap != 0:
-        rounds.append(total_ops % cap)
-    return rounds^
+struct _Rounds(Copyable, Movable):
+    """The timed rounds of push_only: `full` rounds of `cap` pushes, then one
+    round of `last` (`total_ops % cap`) when that is not zero. They add up to
+    `total_ops`. Three counters whatever the count: nothing is stored per
+    round."""
+
+    var cap: Int
+    var full: Int
+    var last: Int
+
+    def __init__(out self, cap: Int, total_ops: Int):
+        self.cap = cap
+        self.full = total_ops // cap
+        self.last = total_ops % cap
+
+    def count(self) -> Int:
+        """How many rounds there are."""
+        if self.last != 0:
+            return self.full + 1
+        return self.full
+
+    def size(self, r: Int) -> Int:
+        """The pushes of round `r` (from 0, below `count()`)."""
+        if r < self.full:
+            return self.cap
+        return self.last
 
 
 def _push_only(cap: Int, total_ops: Int) raises -> _Run:
@@ -137,16 +154,17 @@ def _push_only(cap: Int, total_ops: Int) raises -> _Run:
         _ = ring.try_push(pkt)
     for _ in range(cap):
         _ = ring.try_pop()
-    var rounds = _push_only_rounds(cap, total_ops)
+    var rounds = _Rounds(cap, total_ops)
     var ns = 0
     var ops = 0
-    for r in range(len(rounds)):
+    for r in range(rounds.count()):
+        var n = rounds.size(r)
         var t0 = Int(perf_counter_ns())
-        for _ in range(rounds[r]):
+        for _ in range(n):
             _ = ring.try_push(pkt)
         ns += Int(perf_counter_ns()) - t0
-        ops += rounds[r]
-        for _ in range(rounds[r]):
+        ops += n
+        for _ in range(n):
             _ = ring.try_pop()
     return _Run(ns, ops)
 
@@ -235,15 +253,34 @@ def _bench_lines(cap: Int, args: BenchArgs) raises -> List[String]:
     return lines^
 
 
+def _parse(arguments: List[String]) raises -> BenchArgs:
+    """`parse_args` with spsc_ring's own capacity rule held in argument order.
+
+    The harness checks each argument in turn; this program also requires each
+    `--caps` to name powers of two from 1 to MAX_CAP. So that a bad `--caps`
+    is refused where it stands, before a later argument is read and even when
+    a later `--caps` replaces it, each argument is read as the end of the
+    command line so far: the first prefix that is refused, by the harness or
+    by `_check_caps` on the `--caps` that ends it, is the error. (A command
+    line is a few arguments; reading it once per argument costs nothing.)"""
+    var seen = List[String]()
+    for i in range(len(arguments)):
+        seen.append(arguments[i])
+        var so_far = parse_args(seen, DEFAULT_TOTAL_OPS, default_caps())
+        if arguments[i].startswith("--caps="):
+            _check_caps(so_far.caps)
+    return parse_args(arguments, DEFAULT_TOTAL_OPS, default_caps())
+
+
 def program_lines(arguments: List[String]) raises -> List[String]:
     """What the `spsc_ring` program prints for `arguments` (the command line
     without the program name): the usage text for `--help`, else the lines of
     each capacity in the order given, a repeated capacity measured again.
     Raises on an argument `parse_args` refuses, and on a capacity that is not a
     power of two from 1 to MAX_CAP, `--help` or not, before anything is
-    measured."""
-    var args = parse_args(arguments, DEFAULT_TOTAL_OPS, default_caps())
-    _check_caps(args.caps)
+    measured. The arguments are checked in order and the first refused one is
+    the error, a `--caps` that a later one replaces included (`_parse`)."""
+    var args = _parse(arguments)
     var out = List[String]()
     if args.help:
         out.append(usage("spsc_ring", DEFAULT_TOTAL_OPS, default_caps()))

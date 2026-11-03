@@ -47,7 +47,8 @@ that are powers of two from 1 to 16777216: the ring would round any other up, an
 that was not measured. Any other argument, a number outside these rules, or a capacity `spsc_ring` does not measure is
 refused by name, `--help` or not, and nothing runs: the program exits with status 1 and its last line is
 `Unhandled exception caught during execution: komira_bench: ...`, naming the argument. A flag given twice keeps its last
-value; both values are checked. Each measurement times exactly `--total-ops` operations (`push_only` in rounds of
+value; both values are checked, in order, so a `--caps` that `spsc_ring` does not measure is refused even when a later
+one would pass. Each measurement times exactly `--total-ops` operations (`push_only` in rounds of
 the capacity and a last, shorter round when the count is not a multiple of it).
 
 A time on a shared machine is noise. Run on a quiet one, pinned to one core (`taskset -c 2 ./spsc_ring`), several

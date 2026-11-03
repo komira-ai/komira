@@ -19,7 +19,11 @@
 #   - capacities are measured in the order given, a repeated one again;
 #   - a capacity that is not a power of two from 1 to MAX_CAP (one the ring
 #     would round, or one whose rounding would overflow) is refused by name
-#     before any ring is made, `--help` or not.
+#     before any ring is made, `--help` or not, where it stands: a later
+#     `--caps` does not excuse it and a later bad argument is not reported
+#     first;
+#   - push_only's rounds are two counters, also at the largest counts (no
+#     round is stored or run to check them).
 # =============================================================================
 
 from std.math import isfinite
@@ -32,7 +36,7 @@ from komira_bench.spsc_ring_bench import (
     _bench_lines,
     _drop_push,
     _push_only,
-    _push_only_rounds,
+    _Rounds,
     _push_pop,
     default_caps,
     program_lines,
@@ -115,23 +119,50 @@ def test_hidden_times_are_exact() raises:
     assert_equal(lines[2], "RESULT drop_push cap=64 ns_per_op=-")
 
 
+def _sizes(r: _Rounds) -> List[Int]:
+    var out = List[Int]()
+    for k in range(r.count()):
+        out.append(r.size(k))
+    return out^
+
+
 def test_push_only_rounds_add_up_to_total_ops() raises:
-    var below = _push_only_rounds(64, 63)
+    var below = _sizes(_Rounds(64, 63))
     assert_equal(len(below), 1)
     assert_equal(below[0], 63)
-    var at = _push_only_rounds(64, 64)
+    var at = _sizes(_Rounds(64, 64))
     assert_equal(len(at), 1)
     assert_equal(at[0], 64)
-    var above = _push_only_rounds(64, 65)
+    var above = _sizes(_Rounds(64, 65))
     assert_equal(len(above), 2)
     assert_equal(above[0], 64)
     assert_equal(above[1], 1)
-    var two = _push_only_rounds(64, 128)
+    var two = _sizes(_Rounds(64, 128))
     assert_equal(len(two), 2)
+    assert_equal(two[0], 64)
     assert_equal(two[1], 64)
-    var one = _push_only_rounds(4096, 1)
+    var one = _sizes(_Rounds(4096, 1))
     assert_equal(len(one), 1)
     assert_equal(one[0], 1)
+
+
+def test_push_only_rounds_at_the_largest_counts() raises:
+    # Counted, never listed: the largest supported counts take two numbers,
+    # and no round is run or stored here.
+    var max_int = 9223372036854775807
+    var each = _Rounds(1, max_int)
+    assert_equal(each.count(), max_int)
+    assert_equal(each.size(0), 1)
+    assert_equal(each.size(max_int - 1), 1)
+    var big = _Rounds(64, max_int)
+    assert_equal(big.full, 144115188075855871)
+    assert_equal(big.last, 63)
+    assert_equal(big.count(), 144115188075855872)
+    assert_equal(big.size(144115188075855870), 64)
+    assert_equal(big.size(144115188075855871), 63)
+    var widest = _Rounds(16777216, max_int)
+    assert_equal(widest.full * 16777216 + widest.last, max_int)
+    assert_equal(widest.size(widest.count() - 1), widest.last)
 
 
 def test_each_measurement_times_exactly_total_ops() raises:
@@ -190,6 +221,24 @@ def test_a_capacity_that_is_not_a_power_of_two_in_range_is_refused() raises:
     # Its next power of two does not fit in an Int: refused, never rounded.
     assert_equal(_refused(_list("--caps=4611686018427387905")), want + "4611686018427387905")
     assert_equal(_refused(_list("--help", "--caps=3")), want + "3")
+    # Each `--caps` is held to the rule where it stands: a later one that would
+    # pass does not excuse it, and a later bad argument is not reported first.
+    assert_equal(_refused(_list("--caps=3", "--caps=8")), want + "3")
+    assert_equal(_refused(_list("--caps=3", "--caps=8", "--help")), want + "3")
+    assert_equal(_refused(_list("--help", "--caps=3", "--caps=8")), want + "3")
+    assert_equal(_refused(_list("--caps=33554432", "--caps=8")), want + "33554432")
+    assert_equal(_refused(_list("--caps=3", "--bogus")), want + "3")
+    assert_equal(_refused(_list("--caps=3", "--total-ops=0", "--help")), want + "3")
+    # And the other way round: an earlier bad argument is the error.
+    assert_equal(
+        _refused(_list("--bogus", "--caps=3")),
+        "komira_bench: unknown argument '--bogus' (try --help)",
+    )
+    assert_equal(_refused(_list("--caps=8", "--caps=3")), want + "3")
+    # A valid repeat is still the last value.
+    var kept = program_lines(_list("--caps=8", "--caps=16", "--total-ops=10", "--hide-times"))
+    assert_equal(len(kept), 3)
+    assert_equal(kept[0], "RESULT push_only cap=16 ns_per_op=-")
     # The bounds themselves are taken (parsed only: nothing is measured).
     var lines = program_lines(_list("--caps=1,16777216", "--help"))
     assert_equal(len(lines), 1)
@@ -219,6 +268,7 @@ def main() raises:
     test_three_lines_with_a_value()
     test_hidden_times_are_exact()
     test_push_only_rounds_add_up_to_total_ops()
+    test_push_only_rounds_at_the_largest_counts()
     test_each_measurement_times_exactly_total_ops()
     test_capacity_above_the_record_count()
     test_program_lines_keep_the_order_and_repeats_given()
