@@ -65,8 +65,9 @@ mojo_conda(
 )
 
 # What `:conda` holds, read back from the built file (buildrules' `prebuilt_unpack`): this package's
-# own `.mojoc` and nothing else under `lib/mojo/`, and exactly the dependencies of `[dependencies]`.
-# Red when the manifest drops one, names another range, or the file carries a sibling.
+# own `.mojoc`, its `.mopm.json` and its program sources (`lib/mojo/komira_bench.bins/`) and nothing
+# else under `lib/mojo/`, and exactly the dependencies of `[dependencies]`. Red when the manifest
+# drops one, names another range, or the file carries a sibling.
 mojo_conda_holds(
     name = "conda_holds",
     conda = ":conda",
