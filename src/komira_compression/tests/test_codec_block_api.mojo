@@ -8,14 +8,18 @@
 # bytes, a hand-built or known stream decoded to its exact bytes where one is
 # small enough to write here, a destination of exactly the decoded size with
 # sentinel bytes past it (nothing is written there), a destination one byte
-# short, and a corrupt input refused with the exact message.
+# short, and a corrupt input refused with the exact message. For snappy also
+# a block whose literal declares 2^32 bytes (the length wrapped to 0 in 32
+# bits up to snappy 1.2.2), refused, next to the same block without that
+# literal, decoded.
 #
 # What it catches: a capacity passed to the C library that is not `len(dst)`
 # (the sentinels change, or the short destination is accepted), a status
 # code read as success, a zlib_inflate_once with an empty destination that
 # drops the source instead of handing it to libz, the Optional "destination
-# full" answers of bzip2 / xz swapped with a raise, and an error message that
-# drops the code, the input length or the capacity.
+# full" answers of bzip2 / xz swapped with a raise, an error message that
+# drops the code, the input length or the capacity, and a snappy pin that
+# accepts a 2^32-byte literal length as a 0-byte one.
 #
 # What it cannot catch: an empty Span handed to C as a null pointer. Spans
 # and Lists built in Mojo carry a dangling, non-null pointer when empty, so
@@ -39,6 +43,7 @@ from komira_compression.lz4 import (
     lz4_frame_compress_into,
     lz4_frames_decompress_into,
 )
+from komira_compression.compression_codecs import Snappy
 from komira_compression.snappy_block import (
     snappy_compress_into,
     snappy_max_compressed_length,
@@ -201,6 +206,109 @@ def test_snappy_refusals_name_status_and_sizes() raises:
     assert_equal(
         msg, "snappy_compress failed (status=2, input_len=3, output_cap=34)"
     )
+
+
+# A block whose literal declares 2^32 bytes: the stream of upstream snappy's
+# regression test `Snappy.LiteralLengthU32Overflow` (snappy_unittest.cc),
+# added with the fix "Reject streams with literal spans of 2^32 bytes" in
+# google/snappy 1.3.0.
+# The preamble declares 65536 bytes. A 1-byte literal "D" and 260 copies of
+# 64 bytes at offset 1 write 16641 bytes; a 1-byte literal "F" makes 16642.
+# Then `literal`, when given: tag 0xFC (a literal whose length - 1 is in the
+# next 4 bytes) and those 4 bytes, with no literal bytes after them. Then 763
+# copies of 64 and one of 62 at offset 1: 48894 bytes, which fill the
+# declared 65536 exactly if the literal is read as 0 bytes long.
+#
+# With length - 1 = 0xFFFFFFFF, snappy up to 1.2.2 added the 1 in 32 bits,
+# read the literal as 0 bytes long, skipped it and returned 65536 bytes with
+# SNAPPY_OK. 1.3.0 adds it in 64 bits: 2^32 bytes, more than the block holds,
+# so the block is refused.
+comptime _SNAPPY_OVERFLOW_DECLARED: Int = 65536
+comptime _SNAPPY_OVERFLOW_D_RUN: Int = 1 + 260 * 64
+comptime _SNAPPY_OVERFLOW_F_RUN: Int = 1 + 763 * 64 + 62
+
+
+def _snappy_overflow_block(literal: List[UInt8]) -> List[UInt8]:
+    var out: List[UInt8] = [0x80, 0x80, 0x04]  # varint 65536
+    out.append(0x00)  # literal tag, length 1
+    out.append(0x44)  # "D"
+    for _ in range(260):
+        out.append(0xFE)  # copy, 2-byte offset, length 64
+        out.append(0x01)
+        out.append(0x00)
+    out.append(0x00)  # literal tag, length 1
+    out.append(0x46)  # "F"
+    for b in literal:
+        out.append(b)
+    for _ in range(763):
+        out.append(0xFE)
+        out.append(0x01)
+        out.append(0x00)
+    out.append(0xF6)  # copy, 2-byte offset, length 62
+    out.append(0x01)
+    out.append(0x00)
+    return out^
+
+
+def _snappy_uncompress_message(block: List[UInt8]) raises -> String:
+    var dst = List[UInt8](length=_SNAPPY_OVERFLOW_DECLARED, fill=0)
+    try:
+        _ = snappy_uncompress_into(Span(dst), Span(block))
+    except e:
+        return String(e)
+    return "accepted"
+
+
+def test_snappy_refuses_literal_length_u32_overflow() raises:
+    var literal: List[UInt8] = [0xFC, 0xFF, 0xFF, 0xFF, 0xFF]
+    var block = _snappy_overflow_block(literal)
+    assert_equal(len(block), 3084)
+    # The preamble is well formed: the refusal comes from the literal.
+    assert_equal(snappy_uncompressed_length(Span(block)), 65536)
+    assert_equal(
+        _snappy_uncompress_message(block),
+        "snappy_uncompress failed (status=1, input_len=3084, output_cap=65536)",
+    )
+    # The same refusal through the codec, with and without an expected size.
+    for expected_size in [0, 65536]:
+        var msg = String("accepted")
+        try:
+            _ = Snappy.decompress(Span(block), expected_size)
+        except e:
+            msg = String(e)
+        assert_equal(
+            msg,
+            "Snappy.decompress: snappy_uncompress failed (status=1,"
+            + " input_len=3084, output_cap=65536)",
+        )
+
+
+def test_snappy_refuses_literal_length_just_below_u32_overflow() raises:
+    # length - 1 = 0xFFFFFFFE: 2^32 - 1 bytes, no wrap in either addition;
+    # more than the block holds, so refused.
+    var literal: List[UInt8] = [0xFC, 0xFE, 0xFF, 0xFF, 0xFF]
+    var block = _snappy_overflow_block(literal)
+    assert_equal(
+        _snappy_uncompress_message(block),
+        "snappy_uncompress failed (status=1, input_len=3084, output_cap=65536)",
+    )
+
+
+def test_snappy_overflow_block_without_the_literal_decodes() raises:
+    # The rest of the block is well formed: without the literal it decodes
+    # to exactly 16641 "D" then 48895 "F".
+    var block = _snappy_overflow_block(List[UInt8]())
+    assert_equal(len(block), 3079)
+    var dst = _guarded(_SNAPPY_OVERFLOW_DECLARED)
+    var n = snappy_uncompress_into(
+        Span(dst)[0:_SNAPPY_OVERFLOW_DECLARED], Span(block)
+    )
+    assert_equal(n, _SNAPPY_OVERFLOW_DECLARED)
+    assert_equal(_SNAPPY_OVERFLOW_D_RUN + _SNAPPY_OVERFLOW_F_RUN, n)
+    for i in range(n):
+        var want = UInt8(0x44) if i < _SNAPPY_OVERFLOW_D_RUN else UInt8(0x46)
+        assert_equal(dst[i], want, "byte " + String(i))
+    _assert_pad_untouched(dst, n, "snappy overflow block without the literal")
 
 
 # -----------------------------------------------------------------------------
