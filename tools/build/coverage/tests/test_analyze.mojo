@@ -191,6 +191,38 @@ def test_mutants_score_and_survivors() raises:
     assert_equal(a.findings[1].line, 2)
 
 
+def test_an_unknown_report_format_is_refused_by_name() raises:
+    var r = List[Input]()
+    r.append(Input(String("bogus"), String(""), String("t.dat"), String("SF:src/alpha/a.mojo\n")))
+    var raised = False
+    try:
+        _ = _run(r, _none(), _sources(), Options())
+    except e:
+        raised = True
+        assert_equal(String(e), "unknown report format bogus")
+    assert_true(raised)
+
+
+def test_mutants_in_test_sources_are_set_aside_and_counted() raises:
+    var m = List[Input]()
+    m.append(Input(String("mutants"), String(""), String("m.tsv"), String(
+        "src/alpha/a.mojo\t1\tkilled\top\td\n"
+        "src/alpha/tests/test_a.mojo\t1\tsurvived\top\td\n"
+        "src/alpha/tests/test_a.mojo\t2\tsurvived\top\td\n"
+    )))
+    var a = _run(_lcov(String("SF:src/alpha/a.mojo\nDA:1,1\nend_of_record\n")), m, _sources(), Options())
+    assert_equal(a.excluded_test_mutants, 2)
+    assert_equal(a.ignored_mutants, 0)
+    assert_equal(a.packages[0].mutants, 1)
+    assert_equal(a.packages[0].survived, 0)
+    var o = Options()
+    o.include_tests = True
+    var b = _run(_lcov(String("SF:src/alpha/a.mojo\nDA:1,1\nend_of_record\n")), m, _sources(), o)
+    assert_equal(b.excluded_test_mutants, 0)
+    assert_equal(b.packages[0].mutants, 3)
+    assert_equal(b.packages[0].survived, 2)
+
+
 def test_target_and_branch_na() raises:
     var t = String("SF:src/alpha/a.mojo\nDA:1,1\nDA:2,0\nend_of_record\n")
     var o = Options()
@@ -481,6 +513,8 @@ def main() raises:
     test_basis_points_round_down()
     test_exemptions_change_the_counts_and_find_stale_and_reasonless()
     test_mutants_score_and_survivors()
+    test_an_unknown_report_format_is_refused_by_name()
+    test_mutants_in_test_sources_are_set_aside_and_counted()
     test_target_and_branch_na()
     test_conclusion_per_mode()
     test_branch_not_measured()

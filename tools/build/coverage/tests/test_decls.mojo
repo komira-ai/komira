@@ -389,6 +389,47 @@ def test_scanner_edges() raises:
     assert_equal(_render(declared_functions(String("def h():\nx = 1\n"))), "")
 
 
+def test_an_escaped_quote_in_a_default_string_does_not_end_the_signature_early() raises:
+    # The `\"` does not close the string, so the `(` after it is text and the
+    # signature's `:` is the one after the `)`.
+    var src = String("def f(s: String = \"\\\"(\"): return s\nx = 1\n")
+    assert_equal(_render(declared_functions(src)), "f@1-1:1")
+
+
+def test_a_signature_with_no_colon_declares_nothing() raises:
+    assert_equal(_render(declared_functions(String("def f() -> Int\nx = 1\n"))), "")
+
+
+def test_a_nameless_def_declares_nothing() raises:
+    assert_equal(_render(declared_functions(String("def (x):\n    return 1\nfn (y):\n    return 2\n"))), "")
+
+
+def test_a_byte_order_mark_does_not_hide_a_declaration_after_the_first_line() raises:
+    var fns = declared_functions(String("\xef\xbb\xbf# header\ndef f():\n    return 1\n"))
+    assert_equal(len(fns), 1)
+    assert_equal(fns[0].name, "f")
+    assert_equal(fns[0].line, 2)
+    assert_equal(fns[0].end, 3)
+
+
+def test_a_parameter_loop_is_an_arm_past_comments_decorators_and_blank_lines() raises:
+    var src = String(
+        "def c() -> Int:\n"        # 1
+        "    @parameter\n"         # 2
+        "\n"                       # 3
+        "    # why\n"              # 4
+        "    @always_inline\n"     # 5
+        "    for i in range(3):\n" # 6
+        "        pass\n"           # 7
+        "    return 0\n"           # 8
+    )
+    assert_equal(_arms(declared_functions(src)), String("c=") + KIND_COMPTIME_IF + ":2,5,6,7;")
+
+
+def test_a_parameter_decorator_with_no_statement_after_it_opens_no_arm() raises:
+    assert_equal(_arms(declared_functions(String("def c() -> Int:\n    return 0\n    @parameter\n\n    # last\n"))), String("c=") + KIND_PLAIN + ":;")
+
+
 def test_a_file_no_test_compiled_lists_no_function() raises:
     # Its lines are already counted (UnmeasuredFile); listing its functions
     # as well would say the same thing twice.
@@ -422,5 +463,11 @@ def main() raises:
     test_the_class_of_a_function()
     test_a_gated_function_has_arms_and_a_closure_is_a_function_of_its_own()
     test_scanner_edges()
+    test_an_escaped_quote_in_a_default_string_does_not_end_the_signature_early()
+    test_a_signature_with_no_colon_declares_nothing()
+    test_a_nameless_def_declares_nothing()
+    test_a_byte_order_mark_does_not_hide_a_declaration_after_the_first_line()
+    test_a_parameter_loop_is_an_arm_past_comments_decorators_and_blank_lines()
+    test_a_parameter_decorator_with_no_statement_after_it_opens_no_arm()
     test_a_file_no_test_compiled_lists_no_function()
     print("test_decls: PASS")

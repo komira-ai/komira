@@ -47,6 +47,7 @@ def test_declaration_only_shapes() raises:
     yes.append("comptime N = 3\ncomptime M: Int = N + 1\n")
     yes.append("from x import y\n\ntrait T:\n    def f(self) -> Int: ...\n")
     yes.append("trait T:\n    def f(self) -> Int:  # why\n        \"\"\"Doc.\n\n        return 1\n        \"\"\"\n        ...  # required\n")
+    yes.append("trait T: ...\n")
     yes.append("comptime D = {\n    \"a\": 1,\n}\n")
     yes.append("trait T:\n    comptime S: Dict[\n        String, Int\n    ]\n    def f(self, m: Dict[String,\n            Int]) -> Int:\n        ...\n")
     var wrong = List[String]()
@@ -105,6 +106,15 @@ def test_near_misses_keep_counting() raises:
     no.append("comptime N = 1\rdef f() -> Int:\r    return 1\r")
     # the lexer ends inside a string: r"""C:\""" never closes, hiding code
     no.append("trait T:\n    ...\ncomptime P = r\"\"\"C:\\\"\"\"\ndef f() -> Int:\n    return 1\n")
+    # a trait header that ends neither with `:` nor with `: ...`
+    no.append("trait T: x\n")
+    no.append("trait T\n")
+    no.append("trait T ...\n")
+    # an indented statement outside a trait, and one in a trait that is no member
+    no.append("comptime N = 1\n    comptime M = 2\n")
+    no.append("trait T:\n    x = 1\n")
+    # a statement that closes a bracket it never opened
+    no.append("comptime N = 1)\n")
     # nothing executable: nothing to leave out
     no.append("\"\"\"Doc.\"\"\"\nfrom x import y\n")
     var wrong = List[String]()

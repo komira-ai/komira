@@ -238,6 +238,77 @@ def test_refusals() raises:
     _refused(String("diff --git a/f b/f\n--- a/f\n+++ b/f\n@@ -1 +1000000001 @@\n"), String("above 10^9"))
 
 
+def test_refusals_of_quoted_paths() raises:
+    var head = String("diff --git a/f b/f\n--- ")
+    _refused(head + String("\"a/f\"x\n"), String("diff:2: text after a quoted path: \"a/f\"x"))
+    _refused(head + String("\"a/f\\\n"), String("diff:2: an unterminated quoted path: \"a/f\\"))
+    _refused(head + String("\"a/f\n"), String("diff:2: an unterminated quoted path: \"a/f"))
+    _refused(head + String("\"a/\\1\"\n"), String("diff:2: a short octal escape in \"a/\\1\""))
+    _refused(head + String("\"a/\\1xyz\"\n"), String("diff:2: a malformed octal escape in \"a/\\1xyz\""))
+    _refused(head + String("\"a/\\777\"\n"), String("diff:2: an octal escape above 377 in \"a/\\777\""))
+    _refused(head + String("\"a/\\q\"\n"), String("diff:2: an unknown escape in \"a/\\q\""))
+
+
+def test_refusals_of_malformed_diff_headers() raises:
+    _refused(String("diff --git \"a/f b/f\n"), String("diff:1: a malformed 'diff --git' line"))
+    _refused(String("diff --git a/f x\"b/f\"\n"), String("diff:1: a malformed 'diff --git' line"))
+
+
+def test_header_with_one_quoted_name_after_an_unquoted_one() raises:
+    var d = parse_diff(String("diff --git a/old \"b/ne\\tw\"\nrename from old\nrename to ne\tw\n"))
+    assert_equal(_paths(d), "old|ne\tw")
+
+
+def test_header_whose_halves_cannot_be_told_apart_names_nothing() raises:
+    # An even length cannot be two equal halves around a space; an odd length
+    # whose middle byte is no space is one name.
+    assert_equal(len(parse_diff(String("diff --git a/f b/gg\n")).paths), 0)
+    assert_equal(len(parse_diff(String("diff --git abcdefghi\n")).paths), 0)
+
+
+def test_context_lines_and_no_newline_marker_inside_a_hunk() raises:
+    var d = parse_diff(String(
+        "diff --git a/f b/f\n"
+        "--- a/f\n"
+        "+++ b/f\n"
+        "@@ -5,4 +5,4 @@\n"
+        " keep\n"
+        "\n"
+        "-old\n"
+        "\\ No newline at end of file\n"
+        "+new\n"
+        " tail\n"
+        "\\ No newline at end of file\n"
+    ))
+    assert_equal(_lines(d, 0), "7")
+
+
+def test_blank_lines_outside_hunks_are_skipped() raises:
+    var d = parse_diff(String(
+        "\n"
+        "diff --git a/f b/f\n"
+        "\n"
+        "--- a/f\n"
+        "+++ b/f\n"
+        "@@ -1 +1 @@\n"
+        "-a\n"
+        "+b\n"
+        "\\ No newline at end of file\n"
+    ))
+    assert_equal(_lines(d, 0), "1")
+
+
+def test_refusals_inside_and_around_hunks() raises:
+    var head = String("diff --git a/f b/f\n--- a/f\n+++ b/f\n")
+    _refused(head + String("@@ -1,2 +1 @@\n+x\n+y\n"), String("diff:6: more added lines than the hunk counts"))
+    _refused(head + String("@@ -1 +1,2 @@\n-a\n-b\n"), String("diff:6: more removed lines than the hunk counts"))
+    _refused(head + String("@@ -1,2 +1 @@\n a\n b\n"), String("diff:6: a context line past the hunk's counts"))
+    _refused(head + String("@@ -1 +1 @@\nzzz\n"), String("diff:5: the hunk ends early: 'zzz'"))
+    _refused(head + String("@@ -1 +1\n"), String("diff:4: a malformed hunk header"))
+    _refused(head + String("@@ 1 +1 @@\n"), String("diff:4: a malformed hunk header"))
+    _refused(String("diff --git a/f b/f\nbogus\n"), String("diff:2: not a diff line: 'bogus'"))
+
+
 def test_errors_name_the_diff_file() raises:
     var raised = False
     try:
@@ -262,5 +333,12 @@ def main() raises:
     test_unquoted_path_with_tab_and_space()
     test_removed_line_that_looks_like_a_header()
     test_refusals()
+    test_refusals_of_quoted_paths()
+    test_refusals_of_malformed_diff_headers()
+    test_header_with_one_quoted_name_after_an_unquoted_one()
+    test_header_whose_halves_cannot_be_told_apart_names_nothing()
+    test_context_lines_and_no_newline_marker_inside_a_hunk()
+    test_blank_lines_outside_hunks_are_skipped()
+    test_refusals_inside_and_around_hunks()
     test_errors_name_the_diff_file()
     print("test_diff: PASS")

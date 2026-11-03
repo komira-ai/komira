@@ -1,5 +1,6 @@
 from std.testing import assert_equal, assert_true
 
+from covcheck.text import bytes_less, render_bp_or_na, sort_strings, split_lines, truncate_utf8
 from covcheck.paths import MAPPED, OUTSIDE, UNMAPPED, RepoFiles, is_test_source, map_path, package_of, parse_repo_files, repo_files_of
 
 # From a report path to a repository file, in the documented order, with the
@@ -170,6 +171,53 @@ def test_ls_files_z() raises:
     assert_true(raised)
 
 
+def test_prefixes_that_do_not_match_are_passed_over() raises:
+    # An empty prefix and one the path does not start with are skipped; the
+    # one that matches still strips.
+    var p = List[String]()
+    p.append("")
+    p.append("/zzz")
+    p.append("/w")
+    _check(String("/w/src/komira_retry/policy.mojo"), String(""), p, MAPPED, String("src/komira_retry/policy.mojo"))
+
+
+def test_buck_out_hash_must_be_all_hex() raises:
+    # 16 characters, but `g` is not a hex digit: no rewrite.
+    var raw = String("buck-out/v2/art/komira/src/komira_retry/__komira_retry__/fedcba987654321g/src/komira_retry/policy.mojo")
+    _check(raw, String(""), _no_prefixes(), OUTSIDE, raw)
+
+
+def test_byte_order_puts_a_prefix_first() raises:
+    assert_true(bytes_less(String("a"), String("ab")))
+    assert_true(not bytes_less(String("ab"), String("a")))
+    assert_true(not bytes_less(String("ab"), String("ab")))
+    var xs = List[String]()
+    xs.append("ab")
+    xs.append("b")
+    xs.append("a")
+    sort_strings(xs)
+    assert_equal(xs[0], "a")
+    assert_equal(xs[1], "ab")
+    assert_equal(xs[2], "b")
+
+
+def test_a_last_line_without_a_line_end_is_kept() raises:
+    var ls = split_lines(String("one\ntwo"))
+    assert_equal(len(ls), 2)
+    assert_equal(ls[0], "one")
+    assert_equal(ls[1], "two")
+
+
+def test_rendering_helpers() raises:
+    assert_equal(render_bp_or_na(-1), "n/a")
+    assert_equal(render_bp_or_na(9905), "99.05%")
+    assert_equal(truncate_utf8(String("abc"), 3), "abc")
+    assert_equal(truncate_utf8(String("abcdef"), 3), "abc")
+    # The cut at byte 2 would fall inside the 2-byte sequence at bytes 1-2.
+    assert_equal(truncate_utf8(String("aéz"), 2), "a")
+    assert_equal(truncate_utf8(String("aéz"), 3), "aé")
+
+
 def main() raises:
     test_strip_prefix()
     test_longest_prefix_wins()
@@ -188,4 +236,9 @@ def main() raises:
     test_no_buck_anywhere_is_an_error()
     test_test_sources()
     test_ls_files_z()
+    test_prefixes_that_do_not_match_are_passed_over()
+    test_buck_out_hash_must_be_all_hex()
+    test_byte_order_puts_a_prefix_first()
+    test_a_last_line_without_a_line_end_is_kept()
+    test_rendering_helpers()
     print("test_paths: PASS")
