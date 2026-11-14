@@ -25,7 +25,7 @@ mopm_artifacts(
     name = "mopm_artifacts",
     natives = {
         "async_api": {"komira_concurrency_pool_depth": "//src/async_api:native_komira_concurrency_pool_depth"},
-        "awslc": {"awslc": "//src/awslc:awslc"},
+        "awslc": {"awslc": "//src/awslc:awslc_native"},
         "compression": {"snappy": "//third_party/snappy:snappy_native"},
         "crypto": {"komira_crypto_sha256_hw": "//src/crypto:native_komira_crypto_sha256_hw"},
         "libc": {"komira_libc_posix": "//src/libc:native_komira_libc_posix"},

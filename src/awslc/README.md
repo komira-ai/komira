@@ -42,7 +42,7 @@ for i in range(32):
 ## Build files
 
 This package is built with buildrules' `mojo_package` and packaged for mopm as `awslc`, version 0.1.0 (`mopm.toml`). `libawslc.a` is built by the `native_library`
-target `:awslc` of `BUCK`, and `mojo_package(natives = ...)` takes it as `[native.awslc]` of `mopm.toml`: it links the archive into the tests of this package and of every
+target `:awslc_native` of `BUCK`, and `mojo_package(natives = ...)` takes it as `[native.awslc]` of `mopm.toml`: it links the archive into the tests of this package and of every
 package that depends on it, and packs it into the package under `lib/`. The files that are not sources:
 
 | file | what |

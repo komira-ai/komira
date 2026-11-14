@@ -14,7 +14,7 @@ load(":buildrules.mojo.bzl", "mojo_package")
 # renamed komira_awslc_X (`prefix`: C and assembly alike, ELF and Mach-O), so this copy can share a process with any other libcrypto; `__umodti3`, the compiler builtin
 # native/umodti3.c adds so that zig's compiler_rt stays out of the link, is not renamed.
 native_library(
-    name = "awslc",
+    name = "awslc_native",
     upstream = {
         "url": "https://github.com/aws/aws-lc/archive/refs/tags/v1.39.0.tar.gz",
         "sha256": "37f5a379081b97adba3e1316017e09484d6c4ed6dc336d57fae6f0b7b27472fc",
@@ -80,14 +80,14 @@ native_library(
 # The library has no Mojo code: `mojo_package` links the archive into the tests of this package and of every package that depends on it, and packs it into `:conda`.
 mojo_package(
     path = ".",
-    natives = {"libawslc.a": ":awslc"},
+    natives = {"libawslc.a": ":awslc_native"},
 )
 
-# What `:conda` holds, read back from the built file: this package's own `.mojoc` and the archive that was built and tested (`lib/libawslc.a` is exactly the bytes of `:awslc`).
+# What `:conda` holds, read back from the built file: this package's own `.mojoc` and the archive that was built and tested (`lib/libawslc.a` is exactly the bytes of `:awslc_native`).
 mojo_conda_holds(
     name = "conda_holds",
     conda = ":conda",
-    natives = {"libawslc.a": ":awslc"},
+    natives = {"libawslc.a": ":awslc_native"},
     package = "awslc",
     visibility = ["PUBLIC"],
 )
@@ -97,7 +97,7 @@ mojo_conda_holds(
 # conda package of this library (`native_static`).
 mojo_adopted_library(
     name = "awslc",
-    c_deps = [":awslc_cxx"],
+    c_deps = [":awslc_native_cxx"],
     native_static = True,
     lib = ":lib",
     readme = "README.md",
