@@ -1,0 +1,19 @@
+# The Buck2 build (BUCK) compiles this crate with the pinned rustc; this
+# manifest lets it build with Cargo too. The empty `[workspace]` table makes
+# the crate its own workspace root. No dependencies: the standard library only.
+[workspace]
+
+[package]
+name = "komira-ns-rename"
+version = "0.1.0"
+edition = "2021"
+description = "ns-rename: renames komira's komira_* packages to their namespaced names from a mapping."
+publish = false
+
+[lib]
+name = "komira_ns_rename"
+path = "src/lib.rs"
+
+[[bin]]
+name = "ns-rename"
+path = "src/main.rs"
