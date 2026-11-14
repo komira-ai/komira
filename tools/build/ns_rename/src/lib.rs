@@ -1,6 +1,7 @@
 //! `ns-rename`: renames komira's `komira_*` packages from the mapping of mopm's design of owner
 //! namespaces (section 12.3). Each `src/komira_<x>` directory moves to `src/<new name>`; every
-//! whole word that is an old name, in every text file and every path, becomes the new name (imports,
+//! whole word that is an old name, in every listed text file and path (`--files`, the checkout's
+//! tracked files), becomes the new name (imports,
 //! BUCK targets and paths, docs); each `mopm.toml` gets `name = "komira-ai/<new name>"` and quoted
 //! `"komira-ai/<new name>"` dependency keys. Everything is read and checked before anything is
 //! written; `--dry-run` prints the summary and writes nothing. See README.md.
@@ -18,18 +19,23 @@ mod scenario_tests;
 
 use error::Error;
 use map::Mapping;
+use std::ffi::OsStr;
 use std::fs;
 use std::io::Write;
+use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 
 /// The usage line.
-pub const USAGE: &str = "usage: ns-rename --repo <checkout> --map <mapping.tsv> [--dry-run]";
+pub const USAGE: &str =
+    "usage: ns-rename --repo <checkout> --map <mapping.tsv> --files <list> [--dry-run]";
 
 /// The parsed command line.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Args {
     pub repo: PathBuf,
     pub map: PathBuf,
+    /// The checkout's tracked files, NUL-separated and relative to it (`git ls-files -z`).
+    pub files: PathBuf,
     pub dry_run: bool,
 }
 
@@ -41,15 +47,20 @@ fn usage(problem: &str) -> Error {
 pub fn parse_args(args: &[String]) -> Result<Args, Error> {
     let mut repo = None;
     let mut map = None;
+    let mut files = None;
     let mut dry_run = false;
     let mut it = args.iter();
     while let Some(arg) = it.next() {
         match arg.as_str() {
-            "--repo" | "--map" => {
+            "--repo" | "--map" | "--files" => {
                 let value = it
                     .next()
                     .ok_or_else(|| usage(&format!("{arg} needs a value")))?;
-                let slot = if arg == "--repo" { &mut repo } else { &mut map };
+                let slot = match arg.as_str() {
+                    "--repo" => &mut repo,
+                    "--map" => &mut map,
+                    _ => &mut files,
+                };
                 if slot.replace(PathBuf::from(value)).is_some() {
                     return Err(usage(&format!("{arg} is given twice")));
                 }
@@ -61,6 +72,7 @@ pub fn parse_args(args: &[String]) -> Result<Args, Error> {
     Ok(Args {
         repo: repo.ok_or_else(|| usage("--repo is required"))?,
         map: map.ok_or_else(|| usage("--map is required"))?,
+        files: files.ok_or_else(|| usage("--files is required"))?,
         dry_run,
     })
 }
@@ -84,7 +96,16 @@ pub fn rename(args: &Args) -> Result<String, Error> {
         path: args.map.clone(),
         source,
     })?;
-    let plan = tree::plan(&repo, &mapping, Some(&map_path))?;
+    let list = fs::read(&args.files).map_err(|source| Error::Io {
+        path: args.files.clone(),
+        source,
+    })?;
+    let listed: Vec<PathBuf> = list
+        .split(|b| *b == 0)
+        .filter(|entry| !entry.is_empty())
+        .map(|entry| PathBuf::from(OsStr::from_bytes(entry)))
+        .collect();
+    let plan = tree::plan(&repo, &mapping, Some(&map_path), &listed)?;
     if !args.dry_run {
         tree::apply(&repo, &plan)?;
     }

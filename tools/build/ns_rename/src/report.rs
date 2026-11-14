@@ -106,7 +106,7 @@ pub fn summary(plan: &Plan, dry_run: bool) -> String {
     }
     let _ = writeln!(
         out,
-        "entries that are not files or directories, left unchanged: {}",
+        "listed entries that are not regular files, left unchanged: {}",
         plan.not_files.len()
     );
     for path in &plan.not_files {
@@ -173,7 +173,7 @@ mod tests {
              \x20   src/: 3 files, 9 lines\n\
              files that are not UTF-8 and hold an old name, left unchanged: 1\n\
              \x20 docs/x.png\n\
-             entries that are not files or directories, left unchanged: 1\n\
+             listed entries that are not regular files, left unchanged: 1\n\
              \x20 link\n\
              .mojo files that import a renamed module and already use its new name (check for shadowing): 1\n\
              \x20 src/komira_json/a.mojo: json\n"
@@ -191,7 +191,7 @@ mod tests {
              \x20 by kind:\n\
              \x20 by top-level directory:\n\
              files that are not UTF-8 and hold an old name, left unchanged: 0\n\
-             entries that are not files or directories, left unchanged: 0\n\
+             listed entries that are not regular files, left unchanged: 0\n\
              .mojo files that import a renamed module and already use its new name (check for shadowing): 0\n"
         );
     }

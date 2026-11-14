@@ -112,6 +112,10 @@ fn checkout(test: &str) -> Scratch {
     );
     s.write("src/README.md", "packages: komira_json, komira_hash\n");
     s.write("docs/komira_json.md", "# komira_json\n");
+    s.write(
+        "release/staged_set/komira_json/mopm.toml",
+        "name = \"komira_json\"\n",
+    );
     s.write("README.md", "See src/komira_json.\n");
     s.write("tools/build/ns_rename/kept.txt", "komira_json\n");
     s.write(".git/HEAD", "komira_json\n");
@@ -122,10 +126,49 @@ fn checkout(test: &str) -> Scratch {
     s
 }
 
+/// The paths of the checkout a `git ls-files` would list: every file and symbolic link but those
+/// under `.git`, `buck-out` and `release/staged_set` (untracked, as a build leaves them).
+fn tracked(s: &Scratch) -> Vec<PathBuf> {
+    fn walk(root: &Path, dir: &Path, out: &mut Vec<PathBuf>) {
+        for entry in fs::read_dir(dir).unwrap() {
+            let path = entry.unwrap().path();
+            let rel = path.strip_prefix(root).unwrap().to_path_buf();
+            if [".git", "buck-out", "release/staged_set"]
+                .iter()
+                .any(|u| rel.starts_with(u))
+            {
+                continue;
+            }
+            if path.symlink_metadata().unwrap().is_dir() {
+                walk(root, &path, out);
+            } else {
+                out.push(rel);
+            }
+        }
+    }
+    let mut out = Vec::new();
+    walk(&s.0, &s.0, &mut out);
+    out
+}
+
+/// Writes `paths` as a `git ls-files -z` list beside the mapping and returns its path.
+fn list_file(map: &Path, paths: &[PathBuf]) -> PathBuf {
+    use std::os::unix::ffi::OsStrExt;
+    let mut bytes = Vec::new();
+    for path in paths {
+        bytes.extend_from_slice(path.as_os_str().as_bytes());
+        bytes.push(0);
+    }
+    let list = map.with_file_name("files.list");
+    fs::write(&list, bytes).unwrap();
+    list
+}
+
 fn args(s: &Scratch, map: &Path, dry_run: bool) -> Args {
     Args {
         repo: s.0.clone(),
         map: map.to_path_buf(),
+        files: list_file(map, &tracked(s)),
         dry_run,
     }
 }
@@ -153,7 +196,7 @@ const SUMMARY_BODY: &str = "packages renamed: 2\n\
      \x20   src/: 9 files, 15 lines\n\
      files that are not UTF-8 and hold an old name, left unchanged: 1\n\
      \x20 docs/logo.bin\n\
-     entries that are not files or directories, left unchanged: 1\n\
+     listed entries that are not regular files, left unchanged: 1\n\
      \x20 link_komira_json\n\
      .mojo files that import a renamed module and already use its new name (check for shadowing): 1\n\
      \x20 src/komira_json/src/komira_json/codec.mojo: hashing\n";
@@ -217,6 +260,11 @@ fn renames_directories_imports_targets_and_manifests() {
     assert_eq!(s.read("tools/build/ns_rename/kept.txt"), "komira_json\n");
     assert_eq!(s.read(".git/HEAD"), "komira_json\n");
     assert_eq!(s.read("buck-out/v2/komira_json"), "komira_json\n");
+    // An untracked path is neither rewritten nor moved.
+    assert_eq!(
+        s.read("release/staged_set/komira_json/mopm.toml"),
+        "name = \"komira_json\"\n"
+    );
     assert_eq!(
         fs::read(s.0.join("docs/logo.bin")).unwrap(),
         b"\xff\xfe komira_json \x00"
@@ -437,7 +485,7 @@ fn plan_with_no_mapping_path_walks_everything() {
     let s = checkout("nomappath");
     s.write("map.tsv", MAP);
     let mapping = Mapping::parse(MAP).unwrap();
-    let plan = tree::plan(&s.0, &mapping, None).unwrap();
+    let plan = tree::plan(&s.0, &mapping, None, &tracked(&s)).unwrap();
     assert!(plan.rewrites.iter().any(|r| r.path == Path::new("map.tsv")));
 }
 
@@ -448,15 +496,25 @@ fn strings(args: &[&str]) -> Vec<String> {
 #[test]
 fn parses_the_command_line() {
     assert_eq!(
-        parse_args(&strings(&["--map", "m", "--dry-run", "--repo", "r"])).unwrap(),
+        parse_args(&strings(&[
+            "--map",
+            "m",
+            "--dry-run",
+            "--files",
+            "f",
+            "--repo",
+            "r"
+        ]))
+        .unwrap(),
         Args {
             repo: "r".into(),
             map: "m".into(),
+            files: "f".into(),
             dry_run: true,
         }
     );
     assert!(
-        !parse_args(&strings(&["--repo", "r", "--map", "m"]))
+        !parse_args(&strings(&["--repo", "r", "--map", "m", "--files", "f"]))
             .unwrap()
             .dry_run
     );
@@ -467,6 +525,12 @@ fn parses_the_command_line() {
         (vec!["--apply"], "unknown argument '--apply'"),
         (vec!["--map", "m"], "--repo is required"),
         (vec!["--repo", "r"], "--map is required"),
+        (vec!["--repo", "r", "--map", "m"], "--files is required"),
+        (
+            vec!["--files", "f", "--files", "g"],
+            "--files is given twice",
+        ),
+        (vec!["--files"], "--files needs a value"),
         (vec![], "--repo is required"),
     ];
     for (argv, problem) in cases {
@@ -486,6 +550,8 @@ fn run_prints_the_summary_and_exits_0() {
         s.0.to_str().unwrap(),
         "--map",
         map.to_str().unwrap(),
+        "--files",
+        list_file(&map, &tracked(&s)).to_str().unwrap(),
         "--dry-run",
     ]);
     let (mut out, mut err) = (Vec::new(), Vec::new());
@@ -515,13 +581,16 @@ fn run_prints_a_refusal_with_its_exit_code() {
         s.0.to_str().unwrap(),
         "--map",
         absent.to_str().unwrap(),
+        "--files",
+        absent.to_str().unwrap(),
     ]);
     assert_eq!(run(&argv, &mut out, &mut err), 1);
     assert_eq!(
         String::from_utf8(err).unwrap(),
         format!(
-            "ns-rename: {}: No such file or directory (os error 2)\n",
-            absent.display()
+            "ns-rename: {}: {}\n",
+            absent.display(),
+            io::Error::from_raw_os_error(2)
         )
     );
 }
@@ -548,6 +617,8 @@ fn run_fails_when_the_summary_cannot_be_written() {
         s.0.to_str().unwrap(),
         "--map",
         map.to_str().unwrap(),
+        "--files",
+        list_file(&map, &tracked(&s)).to_str().unwrap(),
         "--dry-run",
     ]);
     let mut err = Vec::new();
@@ -583,4 +654,65 @@ fn only_a_plain_import_binds_the_module_name() {
     ] {
         assert!(!tree::binds_module(text, "komira_json"), "{text:?}");
     }
+}
+
+#[test]
+fn refuses_a_file_list_entry_outside_the_checkout() {
+    let s = checkout("listentry");
+    let m = map_file("listentry", MAP);
+    let map = m.0.join("map.tsv");
+    let mapping = Mapping::parse(MAP).unwrap();
+    let err = tree::plan(&s.0, &mapping, None, &[PathBuf::new()]).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "file list entry '' is not a relative path inside the checkout"
+    );
+    for entry in ["../outside", "/abs", "a/../b", "."] {
+        let mut a = args(&s, &map, true);
+        a.files = list_file(&map, &[PathBuf::from(entry)]);
+        let err = rename(&a).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            format!("file list entry '{entry}' is not a relative path inside the checkout"),
+        );
+    }
+}
+
+#[test]
+fn refuses_a_listed_path_that_does_not_exist_and_a_missing_list() {
+    let s = checkout("listmissing");
+    let m = map_file("listmissing", MAP);
+    let map = m.0.join("map.tsv");
+    let mut a = args(&s, &map, true);
+    a.files = list_file(&map, &[PathBuf::from("docs/gone.md")]);
+    let err = rename(&a).unwrap_err();
+    assert!(matches!(err, Error::Io { ref path, .. } if path == &s.0.join("docs/gone.md")));
+    a.files = m.0.join("no-such.list");
+    let err = rename(&a).unwrap_err();
+    assert!(matches!(err, Error::Io { ref path, .. } if path == &m.0.join("no-such.list")));
+}
+
+#[test]
+fn a_listed_directory_is_left_as_another_entry_and_empty_entries_are_ignored() {
+    let s = checkout("listdir");
+    s.write("vendor/komira_json_sub/x", "komira_json\n");
+    let m = map_file("listdir", MAP);
+    let map = m.0.join("map.tsv");
+    let mut a = args(&s, &map, false);
+    // A submodule is listed as its directory, not as its files.
+    let mut paths = tracked(&s);
+    paths.retain(|p| !p.starts_with("vendor"));
+    paths.push(PathBuf::from("vendor"));
+    a.files = list_file(&map, &paths);
+    let mut bytes = fs::read(&a.files).unwrap();
+    bytes.extend_from_slice(b"\0\0");
+    fs::write(&a.files, bytes).unwrap();
+    let summary = rename(&a).unwrap();
+    assert!(
+        summary.contains(
+            "listed entries that are not regular files, left unchanged: 2\n  link_komira_json\n  vendor\n"
+        ),
+        "{summary}"
+    );
+    assert_eq!(s.read("vendor/komira_json_sub/x"), "komira_json\n");
 }

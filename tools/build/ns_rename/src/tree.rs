@@ -8,10 +8,7 @@ use crate::words::{changed_lines, contains_word, replace_words};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io;
-use std::path::{Path, PathBuf};
-
-/// Directories never walked: git's own, and buck2's output.
-pub const SKIPPED_DIRS: &[&str] = &[".git", "buck-out"];
+use std::path::{Component, Path, PathBuf};
 
 /// Repository paths kept as they are: this tool, whose sources and tests hold the old names on
 /// purpose, and with it the copy of the mapping.
@@ -82,7 +79,7 @@ pub struct Plan {
     pub manifest_keys: usize,
     /// Files that are not UTF-8 and hold an old name as a whole word: left unchanged.
     pub binary: Vec<PathBuf>,
-    /// Entries that are neither a file nor a directory (symbolic links): left unchanged.
+    /// Listed entries that are not regular files (symbolic links, submodules): left unchanged.
     pub not_files: Vec<PathBuf>,
     /// `.mojo` files that change, bind a package's module name (`import komira_x`) and already use
     /// its new name as a word before the rename, with those names: the places a renamed module
@@ -103,33 +100,30 @@ fn moved_path(rel: &Path, mapping: &Mapping) -> Option<PathBuf> {
     replace_words(text, mapping.pairs()).map(PathBuf::from)
 }
 
-/// The files and other entries under `repo`, relative, sorted, minus the skipped and kept ones.
-fn walk(repo: &Path, skip_file: Option<&Path>) -> Result<(Vec<PathBuf>, Vec<PathBuf>), Error> {
+/// The listed paths sorted into files and other entries (symbolic links, directories such as a
+/// submodule), minus the kept ones and `skip_file`. Each must be a relative path of normal
+/// components that exists in `repo`.
+fn classify(
+    repo: &Path,
+    listed: &[PathBuf],
+    skip_file: Option<&Path>,
+) -> Result<(Vec<PathBuf>, Vec<PathBuf>), Error> {
     let mut files = Vec::new();
     let mut others = Vec::new();
-    let mut stack = vec![PathBuf::new()];
-    while let Some(rel) = stack.pop() {
-        let dir = repo.join(&rel);
-        let mut entries = fs::read_dir(&dir)
-            .and_then(|it| it.collect::<Result<Vec<_>, _>>())
-            .map_err(io_error(&dir))?;
-        entries.sort_by_key(|e| e.file_name());
-        for entry in entries {
-            let child = rel.join(entry.file_name());
-            if rel.as_os_str().is_empty() && SKIPPED_DIRS.iter().any(|s| entry.file_name() == **s) {
-                continue;
-            }
-            if KEPT.iter().any(|k| child == Path::new(k)) || Some(child.as_path()) == skip_file {
-                continue;
-            }
-            let kind = entry.file_type().map_err(io_error(&repo.join(&child)))?;
-            if kind.is_dir() {
-                stack.push(child);
-            } else if kind.is_file() {
-                files.push(child);
-            } else {
-                others.push(child);
-            }
+    for rel in listed {
+        let normal = rel.components().count() > 0
+            && rel.components().all(|c| matches!(c, Component::Normal(_)));
+        if !normal {
+            return Err(Error::ListEntry(rel.clone()));
+        }
+        if KEPT.iter().any(|k| rel.starts_with(k)) || Some(rel.as_path()) == skip_file {
+            continue;
+        }
+        let full = repo.join(rel);
+        if full.symlink_metadata().map_err(io_error(&full))?.is_file() {
+            files.push(rel.clone());
+        } else {
+            others.push(rel.clone());
         }
     }
     files.sort();
@@ -242,12 +236,18 @@ fn bytes_hold_old_name(bytes: &[u8], mapping: &Mapping) -> bool {
         .any(|word| std::str::from_utf8(word).is_ok_and(|w| mapping.new_name(w).is_some()))
 }
 
-/// Reads the checkout at `repo` and computes the rename, refusing a conflict before anything is
-/// written. `map_path` is left out of the walk when it lies inside `repo`.
-pub fn plan(repo: &Path, mapping: &Mapping, map_path: Option<&Path>) -> Result<Plan, Error> {
+/// Reads the `listed` paths of the checkout at `repo` (its tracked files, `git ls-files`) and
+/// computes the rename, refusing a conflict before anything is written. `map_path` is left out
+/// when it lies inside `repo`.
+pub fn plan(
+    repo: &Path,
+    mapping: &Mapping,
+    map_path: Option<&Path>,
+    listed: &[PathBuf],
+) -> Result<Plan, Error> {
     check_tree(repo, mapping)?;
     let skip_file = map_path.and_then(|p| p.strip_prefix(repo).ok());
-    let (files, others) = walk(repo, skip_file)?;
+    let (files, others) = classify(repo, listed, skip_file)?;
     let mut plan = Plan {
         packages: mapping
             .pairs()

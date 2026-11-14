@@ -14,6 +14,8 @@ pub enum Error {
     Map { path: PathBuf, source: MapError },
     /// Reading or writing a path failed.
     Io { path: PathBuf, source: io::Error },
+    /// An entry of the file list is not a relative path of normal components.
+    ListEntry(PathBuf),
     /// A mapped old name has no `src/` directory.
     MissingPackage(String),
     /// A `src/komira_*` directory has no line in the mapping.
@@ -46,6 +48,11 @@ impl fmt::Display for Error {
             Error::Usage(text) => f.write_str(text),
             Error::Map { path, source } => write!(f, "{}: {source}", path.display()),
             Error::Io { path, source } => write!(f, "{}: {source}", path.display()),
+            Error::ListEntry(path) => write!(
+                f,
+                "file list entry '{}' is not a relative path inside the checkout",
+                path.display()
+            ),
             Error::MissingPackage(old) => {
                 write!(
                     f,
@@ -118,6 +125,10 @@ mod tests {
                     source: io::Error::new(io::ErrorKind::NotFound, "gone"),
                 },
                 "a/b: gone",
+            ),
+            (
+                Error::ListEntry("../x".into()),
+                "file list entry '../x' is not a relative path inside the checkout",
             ),
             (
                 Error::MissingPackage("komira_a".into()),

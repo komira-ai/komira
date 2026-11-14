@@ -7,12 +7,16 @@ the tool never invents a name.
 
 ```sh
 cargo build --release --manifest-path tools/build/ns_rename/Cargo.toml
-ns-rename --repo . --map tools/build/ns_rename/namespaces-komira-map.tsv --dry-run
-ns-rename --repo . --map tools/build/ns_rename/namespaces-komira-map.tsv
+ns-rename --repo . --map tools/build/ns_rename/namespaces-komira-map.tsv --files <(git ls-files -z) --dry-run
+ns-rename --repo . --map tools/build/ns_rename/namespaces-komira-map.tsv --files <(git ls-files -z)
 ```
 
-The Buck2 target is `komira//tools/build/ns_rename:ns-rename`. Both flags are required; `--dry-run`
-prints the summary and writes nothing. Exit codes: 0 done, 1 refused (the message names the line,
+The Buck2 target is `komira//tools/build/ns_rename:ns-rename`. `--repo`, `--map` and `--files` are
+required. `--files` is the checkout's tracked paths, NUL-separated and relative to it (`git ls-files
+-z`): the tool reads and changes those paths only, so build caches, staged releases and other
+untracked or ignored files are never touched, and every checkout of one commit gives the same
+result. An entry that is not a relative path of normal components (`..`, an absolute path) is
+refused. `--dry-run` prints the summary and writes nothing. Exit codes: 0 done, 1 refused (the message names the line,
 package or path), 2 a usage error.
 
 ## The mapping
@@ -48,10 +52,10 @@ A word is a maximal run of ASCII letters, digits and `_` (as `git grep -w` reads
 `//src/komira_json:komira_json`. Every word that is an old name is replaced by its new name, in one
 pass:
 
-- in every path: each file under a component holding an old name moves (`src/komira_json/src/komira_json/x.mojo`
+- in every listed path: each file under a component holding an old name moves (`src/komira_json/src/komira_json/x.mojo`
   to `src/json/src/json/x.mojo`, `docs/komira_json.md` to `docs/json.md`), and the directories the
   moves empty are removed;
-- in the text of every UTF-8 file: imports, BUCK targets and paths, `.bzl` files, docs, workflows.
+- in the text of every listed UTF-8 file: imports, BUCK targets and paths, `.bzl` files, docs, workflows.
 
 Each file named `mopm.toml` also gets full names (mopm's design, section 3): `[package] name =
 "komira_json"` becomes `name = "komira-ai/json"`, and a `[dependencies]` or `[dev-dependencies]` key
@@ -67,10 +71,10 @@ restore.
 
 ## What it leaves
 
-- `.git` and `buck-out` at the root, and this directory (`tools/build/ns_rename`, whose sources and
+- Every path not in the `--files` list (untracked and ignored files), and this directory (`tools/build/ns_rename`, whose sources and
   tests hold the old names on purpose), and the mapping file wherever it is.
 - A file that is not UTF-8: listed when it holds an old name as a word, for a hand edit.
-- Symbolic links: listed.
+- Listed entries that are not regular files (symbolic links, a submodule's directory): listed.
 - Words that are not exactly an old name: `komira_json_index`, `libkomira_json`, `KOMIRA_JSON`.
 - Hashes and generated files that depend on the text it changes (`buildrules.mojo.lock.bzl`,
   `mopm.lock`): the pull request that applies the rename regenerates them with the tools that own
