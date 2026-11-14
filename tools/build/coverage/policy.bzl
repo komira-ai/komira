@@ -75,7 +75,7 @@ COVERAGE_INFO_ONLY_DIRS = ["src/tests"]
 # label, each with why and where it is gated instead.
 # tools/build/coverage/no_gate.bxl holds this list equal to the Mojo
 # libraries the gate depends on (covcheck_bin's; the README tool that
-# komira_json's README runs through is Zig and adds none), so a row whose
+# json's README runs through is Zig and adds none), so a row whose
 # library leaves that closure fails the check until it is deleted, and a library that joins it fails
 # until it has a row (without one, the library would depend on its own
 # gate's directory, which depends on the library: a cycle of configured
@@ -89,7 +89,7 @@ COVERAGE_INFO_ONLY_DIRS = ["src/tests"]
 _CLOSURE = "covcheck_bin, the gate's tool, depends on it"
 
 COVERAGE_NO_GATE = {
-    "komira//src/komira_json:komira_json": _CLOSURE + " (covcheck reads and writes JSON with it)",
+    "komira//src/json:json": _CLOSURE + " (covcheck reads and writes JSON with it)",
     "komira//tools/build/coverage:covcheck": _CLOSURE + " (the library covcheck_bin runs)",
 }
 
@@ -135,24 +135,24 @@ COVERAGE_NO_GATE = {
 # 3 in enforce mode); making mutation results report-only there is future
 # work, not done.
 COVERAGE_BRANCH_GATE = {
-    "komira//src/komira_agg:komira_agg": "its ten tests' branches all classify (228 arms of 7 files)",
-    "komira//src/komira_async_api:komira_async_api": "its test's branches all classify (2 arms of 1 file)",
-    "komira//src/komira_bench:komira_bench": "its two tests' branches all classify (58 arms of 2 files, 2 of them `try` arms)",
-    "komira//src/komira_buffer:komira_buffer": "its eighteen tests' branches all classify (314 arms of 8 files)",
-    "komira//src/komira_clock:komira_clock": "its test's branches all classify (2 arms of 1 file)",
-    "komira//src/komira_column_format:komira_column_format": "its two tests' branches all classify (170 arms of 1 file)",
-    "komira//src/komira_compression:komira_compression": "its four tests' branches all classify (100 arms of 6 files, 36 of them `try` arms)",
-    "komira//src/komira_counters:komira_counters": "its six tests' branches all classify (80 arms of 3 files, 2 of them `try` arms)",
-    "komira//src/komira_dynamic_filter:komira_dynamic_filter": "its nine tests' branches all classify (76 arms of 5 files)",
-    "komira//src/komira_exec_types:komira_exec_types": "its test's branches all classify (58 arms of 1 file)",
-    "komira//src/komira_fork_join:komira_fork_join": "its test's branches all classify (26 arms of 1 file, 2 of them `try` arms)",
-    "komira//src/komira_hash:komira_hash": "its test's branches all classify (4 arms of 1 file)",
-    "komira//src/komira_json:komira_json": "its six tests' branches all classify (564 arms of 3 files)",
-    "komira//src/komira_jwks:komira_jwks": "its test's branches all classify (6 arms of 2 files)",
-    "komira//src/komira_libc:komira_libc": "its eight tests' branches all classify (94 arms of 5 files)",
-    "komira//src/komira_lz4:komira_lz4": "its three tests' branches all classify (76 arms of 2 files, 16 of them `try` arms)",
-    "komira//src/komira_name_registry:komira_name_registry": "its test's branches all classify (32 arms of 1 file)",
-    # komira_parquet left the list: ten of its tests' branches do not all
+    "komira//src/agg:agg": "its ten tests' branches all classify (228 arms of 7 files)",
+    "komira//src/async_api:async_api": "its test's branches all classify (2 arms of 1 file)",
+    "komira//src/bench:bench": "its two tests' branches all classify (58 arms of 2 files, 2 of them `try` arms)",
+    "komira//src/byte_buffer:byte_buffer": "its eighteen tests' branches all classify (314 arms of 8 files)",
+    "komira//src/clock:clock": "its test's branches all classify (2 arms of 1 file)",
+    "komira//src/column_format:column_format": "its two tests' branches all classify (170 arms of 1 file)",
+    "komira//src/compression:compression": "its four tests' branches all classify (100 arms of 6 files, 36 of them `try` arms)",
+    "komira//src/counters:counters": "its six tests' branches all classify (80 arms of 3 files, 2 of them `try` arms)",
+    "komira//src/dynamic_filter:dynamic_filter": "its nine tests' branches all classify (76 arms of 5 files)",
+    "komira//src/exec_types:exec_types": "its test's branches all classify (58 arms of 1 file)",
+    "komira//src/fork_join:fork_join": "its test's branches all classify (26 arms of 1 file, 2 of them `try` arms)",
+    "komira//src/hashing:hashing": "its test's branches all classify (4 arms of 1 file)",
+    "komira//src/json:json": "its six tests' branches all classify (564 arms of 3 files)",
+    "komira//src/jwks:jwks": "its test's branches all classify (6 arms of 2 files)",
+    "komira//src/libc:libc": "its eight tests' branches all classify (94 arms of 5 files)",
+    "komira//src/lz4:lz4": "its three tests' branches all classify (76 arms of 2 files, 16 of them `try` arms)",
+    "komira//src/name_registry:name_registry": "its test's branches all classify (32 arms of 1 file)",
+    # parquet left the list: ten of its tests' branches do not all
     # classify at this head, without the `try` rule as with it. An `or` and
     # an `and` whose result is returned (decode_helpers.mojo 210:9,
     # dict_gather_fused.mojo 144:31), and at calls in `try:` bodies
@@ -161,27 +161,27 @@ COVERAGE_BRANCH_GATE = {
     # callee's String flags carried through a `select`, which the String
     # rule does not read: the select refused before the rule, the br, a
     # call's compiler-made branch before, refused in a `try:` body by it.
-    "komira//src/komira_parquet_api:komira_parquet_api": "its four tests' branches all classify (124 arms of 2 files)",
-    "komira//src/komira_parquet_codec:komira_parquet_codec": "its 16 tests' branches all classify (416 arms of 8 files, 14 of them `try` arms)",
-    "komira//src/komira_physical_plan:komira_physical_plan": "its two tests' branches all classify (148 arms of 2 files)",
-    "komira//src/komira_plan_ir:komira_plan_ir": "its 25 tests' branches all classify (1514 arms of 10 files)",
-    "komira//src/komira_plan_stats:komira_plan_stats": "its test's branches all classify (116 arms of 2 files)",
-    "komira//src/komira_protobuf:komira_protobuf": "its two tests' branches all classify (106 arms of 2 files)",
-    "komira//src/komira_resources:komira_resources": "its test's branches all classify (2 arms of 1 file)",
-    "komira//src/komira_retry:komira_retry": "its six tests' branches all classify (74 arms of 4 files)",
-    "komira//src/komira_row_format:komira_row_format": "its nine tests' branches all classify (682 arms of 5 files)",
-    "komira//src/komira_scalar_arithmetic:komira_scalar_arithmetic": "its test's branches all classify (24 arms of 1 file)",
-    "komira//src/komira_secret_registry:komira_secret_registry": "its test's branches all classify (16 arms of 2 files)",
-    "komira//src/komira_secret_store:komira_secret_store": "its test's branches all classify (10 arms of 2 files)",
-    "komira//src/komira_snapshotter:komira_snapshotter": "its two tests' branches all classify (30 arms of 1 file)",
-    "komira//src/komira_spsc_ring:komira_spsc_ring": "its four tests' branches all classify (50 arms of 2 files, 2 of them `try` arms)",
-    "komira//src/komira_sync:komira_sync": "its test's branches all classify (4 arms of 1 file)",
-    "komira//src/komira_test_run_id:komira_test_run_id": "its two tests' branches all classify (16 arms of 2 files, 4 of them `try` arms)",
-    "komira//src/komira_trace:komira_trace": "its eight tests' branches all classify (102 arms of 2 files)",
-    "komira//src/komira_udf:komira_udf": "its four tests' branches all classify (36 arms of 1 file)",
-    "komira//src/komira_uuid:komira_uuid": "its test's branches all classify (84 arms of 2 files)",
-    "komira//src/komira_wkt:komira_wkt": "its eight tests' branches all classify (556 arms of 6 files, 2 of them `try` arms)",
-    "komira//src/komira_zlib:komira_zlib": "its test's branches all classify (76 arms of 1 file, 2 of them `try` arms)",
+    "komira//src/parquet_api:parquet_api": "its four tests' branches all classify (124 arms of 2 files)",
+    "komira//src/parquet_codec:parquet_codec": "its 16 tests' branches all classify (416 arms of 8 files, 14 of them `try` arms)",
+    "komira//src/physical_plan:physical_plan": "its two tests' branches all classify (148 arms of 2 files)",
+    "komira//src/plan_ir:plan_ir": "its 25 tests' branches all classify (1514 arms of 10 files)",
+    "komira//src/plan_stats:plan_stats": "its test's branches all classify (116 arms of 2 files)",
+    "komira//src/protobuf:protobuf": "its two tests' branches all classify (106 arms of 2 files)",
+    "komira//src/resources:resources": "its test's branches all classify (2 arms of 1 file)",
+    "komira//src/retry:retry": "its six tests' branches all classify (74 arms of 4 files)",
+    "komira//src/row_format:row_format": "its nine tests' branches all classify (682 arms of 5 files)",
+    "komira//src/scalar_arithmetic:scalar_arithmetic": "its test's branches all classify (24 arms of 1 file)",
+    "komira//src/secret_registry:secret_registry": "its test's branches all classify (16 arms of 2 files)",
+    "komira//src/secret_store:secret_store": "its test's branches all classify (10 arms of 2 files)",
+    "komira//src/snapshotter:snapshotter": "its two tests' branches all classify (30 arms of 1 file)",
+    "komira//src/spsc_ring:spsc_ring": "its four tests' branches all classify (50 arms of 2 files, 2 of them `try` arms)",
+    "komira//src/sync:sync": "its test's branches all classify (4 arms of 1 file)",
+    "komira//src/test_run_id:test_run_id": "its two tests' branches all classify (16 arms of 2 files, 4 of them `try` arms)",
+    "komira//src/trace:trace": "its eight tests' branches all classify (102 arms of 2 files)",
+    "komira//src/udf:udf": "its four tests' branches all classify (36 arms of 1 file)",
+    "komira//src/uuid:uuid": "its test's branches all classify (84 arms of 2 files)",
+    "komira//src/wkt:wkt": "its eight tests' branches all classify (556 arms of 6 files, 2 of them `try` arms)",
+    "komira//src/zlib:zlib": "its test's branches all classify (76 arms of 1 file, 2 of them `try` arms)",
     "komira//src/tests/e2e/komira_udf_e2e:komira_udf_e2e": "its four tests' branches all classify (16 arms of 1 file)",
     "komira//src/tests/helpers/komira_test_minio:komira_test_minio": "its two tests' branches all classify (110 arms of 4 files, 42 of them `try` arms)",
 }

@@ -11,7 +11,7 @@ once a plan can run.
 ```text
 plan_case.mojo            Case, Dataset, the expectation kinds, the .err format
 datasets.mojo             the datasets and their schemas
-cases_<shard>.mojo        one shard's plans, built with komira_plan_ir factories
+cases_<shard>.mojo        one shard's plans, built with plan_ir factories
 registry.mojo             the shards, and the cases each one registers
 corpus.mojo               the checks test_corpus runs
 datasets/<name>.jsonl     hand-written inputs, one JSON object per line
@@ -29,7 +29,7 @@ expect/<shard>/<id>.err   expected refusal
 ## Adding a case
 
 1. Write the plan in `cases_<shard>.mojo` as a `def () raises -> LogicalPlan`
-   built with `komira_plan_ir` factories, not the SDK's verbs. Register it in
+   built with `plan_ir` factories, not the SDK's verbs. Register it in
    the shard's `cases()` list with its comparison policy. Rows without an
    ORDER BY compare as a multiset (`CanonPolicy.unordered()`).
 2. Write the expectation by hand, from the dataset and the query-semantics
@@ -92,5 +92,5 @@ cell, `.err` and dataset checks. On the wire it plants a build that raises
 and a plan the admission gate refuses. Three wire legs are not planted,
 because each needs a broken codec rather than a broken case:
 `plan_to_bytes` refusing a plan, `plan_wire_check_values` refusing one, and
-a round trip that changes the hash or the schema. `komira_plan_wire`'s own
+a round trip that changes the hash or the schema. `plan_wire`'s own
 tests prove those raise.

@@ -2,7 +2,7 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library", "mojo_shared_lib")
 
 # Test-only: the canonical result text of a query result, for conformance
 # suites that run plans and compare results (canon_text.mojo states the
-# format). render.mojo turns a komira_arrow RecordBatch or Table into the
+# format). render.mojo turns a arrow RecordBatch or Table into the
 # text, reading the Arrow buffers itself; parse.mojo reads an expected file
 # (a hand-written one may give a float as an exactly representable decimal),
 # and nested_floats.mojo walks a nested cell along its type to refuse a
@@ -68,10 +68,10 @@ mojo_library(
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     conda = False,
     deps = [
-        "//src/komira_arrow:komira_arrow",
-        "//src/komira_arrow_ipc:komira_arrow_ipc",
-        "//src/komira_buffer:komira_buffer",
-        "//src/komira_collections:komira_collections",
+        "//src/arrow:arrow",
+        "//src/arrow_ipc:arrow_ipc",
+        "//src/byte_buffer:byte_buffer",
+        "//src/containers:containers",
     ],
     test_srcs = [
         "tests/test_compare.mojo",
@@ -94,7 +94,7 @@ mojo_library(
 )
 
 # Test-only: a plan door with canned answers (tests/door_stub/plan_door_stub.mojo
-# says which), for test_door_stub. It starts a komira_async runtime inside the
+# says which), for test_door_stub. It starts a async_rt runtime inside the
 # library, so a Mojo process dlopening a Mojo library that runs its own
 # threads is exercised before a real plan door exists. Its gate checks that
 # the eight symbols resolve; test_door_stub is what calls them.
@@ -113,12 +113,12 @@ mojo_shared_lib(
     ],
     exports_exact = True,
     deps = [
-        "//src/komira_arrow:komira_arrow",
-        "//src/komira_arrow_ipc:komira_arrow_ipc",
-        "//src/komira_async:komira_async",
-        "//src/komira_async_api:komira_async_api",
-        "//src/komira_buffer:komira_buffer",
-        "//src/komira_collections:komira_collections",
+        "//src/arrow:arrow",
+        "//src/arrow_ipc:arrow_ipc",
+        "//src/async_rt:async_rt",
+        "//src/async_api:async_api",
+        "//src/byte_buffer:byte_buffer",
+        "//src/containers:containers",
     ],
 )
 

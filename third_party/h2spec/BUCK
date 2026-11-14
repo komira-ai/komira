@@ -8,7 +8,7 @@ load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 # the sha256 below is of the archive as downloaded, twice, from the release
 # URL. Nothing of it is committed here, and nothing ships it: it is test data
 # of //src/tests/conformance/komira_http_conformance only, run there as a child process against
-# a komira_http_server HttpServer on 127.0.0.1. No library or binary depends
+# a http_server HttpServer on 127.0.0.1. No library or binary depends
 # on it.
 #
 # It lives here, beside the other pinned third-party test inputs

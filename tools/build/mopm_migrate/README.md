@@ -1,7 +1,7 @@
 # mopm_migrate
 
 Moves one komira Mojo library (`src/<name>`, built by `mojo_library`) onto buildrules'
-`mojo_package` and a mopm package, the way the hand migrations did (`komira_resources` is the worked
+`mojo_package` and a mopm package, the way the hand migrations did (`resources` is the worked
 example: a library with a dependency). It derives what the old files state, writes what the
 migration needs and refuses, with a message that names the file and the fact, whatever it would have
 to guess.
@@ -77,8 +77,8 @@ for the sharded layout (`ci/targets/shard_<n>.bzl`; the form refuses an empty or
 ## Dependencies that link C
 
 A package whose own sources have no native code but whose dependency closure holds a package with a
-static `[native.<id>]` (`komira_libc`, `komira_log`, `komira_metrics`, `komira_async_api`) is migrated as the hand
-migrations did it (`komira_buffer`, `komira_bump_arena`, `komira_dynamic_filter`, `komira_mail_message`): the manifest,
+static `[native.<id>]` (`libc`, `log`, `metrics`, `async_api`) is migrated as the hand
+migrations did it (`byte_buffer`, `bump_arena`, `dynamic_filter`, `mail_message`): the manifest,
 lock and `conda` are those of any package with dependencies (the native belongs to the dependency, and
 `mopm pack` records the dependency, not its archive), and `mojo_adopted_library` gets
 `cxx_toolchain = "komira//tools/build/mojo:adopt_cxx_link_facts"`, with a comment naming the packages that declare the C,
@@ -98,27 +98,27 @@ tool keeps the comment as written, so the author edits it.
 
 `mopm_migrate_test.zig` (welded into the tool: it is built only when they pass):
 
-- **golden** (`fixtures/komira_resources`): the tool runs on the tree `komira_resources` had before its
+- **golden** (`fixtures/resources`): the tool runs on the tree `resources` had before its
   hand migration, and the output must be the hand migration's: `mopm.toml`, `mopm-toolchain.toml` and
   `mopm.lock` byte for byte; the two shared rows files as the line-for-line diff the hand
   migration made (`rows/*.diff`: the output minus the added lines is the old file, in order, and each
   hunk with its context is one run of lines); the `BUCK` file with its code byte for byte and its
   comments word for word.
-- **golden** (`fixtures/komira_collections`): the same for a library with a `[dependencies]` entry
-  (`komira_atomic_alias`) and seven tests, from the tree before its hand migration. Three differences
+- **golden** (`fixtures/containers`): the same for a library with a `[dependencies]` entry
+  (`atomic_alias`) and seven tests, from the tree before its hand migration. Three differences
   in comment words are asserted where they are tested (the old header said "no dependencies"; two
   sentences the hand file worded differently). The library sources are stored as `*.mojo.fixture`, so
   the Mojo lints do not read them.
 - the documented differences of the golden: the hand migration wrapped comments by eye (the test
   compares paragraphs, not lines); it edited one path in the carried header comment (`see resources.mojo`
-  became `see src/komira_resources/resources.mojo`; the tool carries the comment as written); it added a
+  became `see src/resources/resources.mojo`; the tool carries the comment as written); it added a
   comment above the helper binary that the old file did not have; the rows diffs keep
   only the package's rows (the same pull request added unrelated rows); `release/BUCK` and
   `release/artifacts.textproto` are the lines that name the label, not the whole files.
 - each class of refusal above, and that a refused run writes nothing (a file git does not track
   refuses before the first move: the test passes the tracked list in, the workers have no git).
-- a dependency with a static native: the golden of `komira_bump_arena` (`fixtures/komira_bump_arena`: the tree before
-  its hand migration, with the manifests of its closure, `komira_libc` among them) requires the hand migration's manifest,
+- a dependency with a static native: the golden of `bump_arena` (`fixtures/bump_arena`: the tree before
+  its hand migration, with the manifests of its closure, `libc` among them) requires the hand migration's manifest,
   toolchain file and lock byte for byte, its rows, and its BUCK file, where the one difference is the wording of the comment
   above `cxx_toolchain`; a native deep in the closure adds the attribute; none in the closure adds nothing; a package that
   owns C, a dependency with `[native-dependencies]` or a shared `[native.<id>]`, and a static native only the test-only

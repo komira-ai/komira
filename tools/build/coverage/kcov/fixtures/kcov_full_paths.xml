@@ -15,7 +15,7 @@
 						<line number="19" hits="0"/>
 					</lines>
 				</class>
-				<class name="budget_mojo" filename="/worker/build/0123456789abcdef/root/srcroot/buck-out/v2/art/komira/src/komira_retry/__komira_retry__/fedcba9876543210/src/komira_retry/budget.mojo" branch-rate="1.0" complexity="1.0" line-rate="1.0">
+				<class name="budget_mojo" filename="/worker/build/0123456789abcdef/root/srcroot/buck-out/v2/art/komira/src/retry/__komira_retry__/fedcba9876543210/src/retry/budget.mojo" branch-rate="1.0" complexity="1.0" line-rate="1.0">
 					<lines>
 						<line number="33" hits="1"/>
 						<line number="37" hits="3" branch="true" condition-coverage="50% (1/2)"/>
@@ -29,14 +29,14 @@
 						</method>
 					</methods>
 				</class>
-				<class name="policy_mojo" filename="/worker/build/0123456789abcdef/root/srcroot/buck-out/v2/art/komira/src/komira_retry/__komira_retry__/fedcba9876543210/src/komira_retry/policy.mojo" branch-rate="1.0" complexity="1.0" line-rate="1.0">
+				<class name="policy_mojo" filename="/worker/build/0123456789abcdef/root/srcroot/buck-out/v2/art/komira/src/retry/__komira_retry__/fedcba9876543210/src/retry/policy.mojo" branch-rate="1.0" complexity="1.0" line-rate="1.0">
 					<lines>
 						<line number="55" hits="0"/>
 						<line number="56" hits="1"/>
 						<line number="143" hits="0" branch="true" condition-coverage="0% (0/2)"/>
 					</lines>
 				</class>
-				<class name="policy_mojo" filename="/__________________________________/buck-out/v2/art/komira/src/komira_retry/__komira_retry__/fedcba9876543210/src/komira_retry/policy.mojo" branch-rate="1.0" complexity="1.0" line-rate="1.0">
+				<class name="policy_mojo" filename="/__________________________________/buck-out/v2/art/komira/src/retry/__komira_retry__/fedcba9876543210/src/retry/policy.mojo" branch-rate="1.0" complexity="1.0" line-rate="1.0">
 					<lines>
 						<line number="200" hits="0"/>
 						<line number="55" hits="3"/>

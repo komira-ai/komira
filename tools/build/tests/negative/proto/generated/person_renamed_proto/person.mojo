@@ -5,10 +5,10 @@
 # proto package: example.v1
 # Mojo package:  person_proto
 #
-# Generated message structs conform to the komira_proto_codec
+# Generated message structs conform to the proto_codec
 # `Serializable` trait: encode[E: WireEncoder] / decode[D: WireDecoder].
 
-from komira_proto_codec import Serializable, WireEncoder, WireDecoder
+from proto_codec import Serializable, WireEncoder, WireDecoder
 
 
 # proto message Person (.example.v1.Person)

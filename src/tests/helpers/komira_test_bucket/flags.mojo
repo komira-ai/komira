@@ -77,8 +77,8 @@
 from std.sys import argv
 
 from komira_test_minio import EmbeddedMinio, ProcessRunner, start_embedded_minio
-from komira_test_run_id import Entropy, RunId, WallClock
-from komira_test_verdict import (
+from test_run_id import Entropy, RunId, WallClock
+from test_verdict import (
     CANNOT_TELL_EXIT_CODE,
     SKIP_EXIT_CODE,
     exit_cannot_tell,

@@ -11,7 +11,7 @@
 #   enumerate  tools/build/package/list_conda_targets.sh prints a package target for every library
 #              of //src with no declaration anywhere; every one of them builds (a refusal is a
 #              value, not a build failure), and the libraries that cannot be packaged say why
-#              (komira_libc: native code). The rest are the set the later checks use.
+#              (libc: native code). The rest are the set the later checks use.
 #   release    every package of the stamped set has the Mojo compiler version as its version and
 #              one build number and build string (h<8 hex of the commit>_<N>) across the set.
 #   metapackage `komira_pack conda-meta` over the members' manifests gives a package with no
@@ -112,12 +112,12 @@ while read -r target path; do
 done < "$W/all.out"
 problems=""
 [ "$((${#OK[@]} + ${#REFUSED[@]}))" = "${#TARGETS[@]}" ] || problems="$problems targets-without-output"
-printf '%s\n' "${REFUSED[@]}" | grep -qx komira_libc || problems="$problems komira_libc-not-refused"
-grep -q 'links native code' "$K/dev/komira_libc/REFUSED" 2> /dev/null || problems="$problems komira_libc-reason:[$(cat "$K/dev/komira_libc/REFUSED" 2> /dev/null)]"
-printf '%s\n' "${OK[@]}" | grep -qx komira_encoding || problems="$problems komira_encoding-refused"
+printf '%s\n' "${REFUSED[@]}" | grep -qx libc || problems="$problems libc-not-refused"
+grep -q 'links native code' "$K/dev/libc/REFUSED" 2> /dev/null || problems="$problems libc-reason:[$(cat "$K/dev/libc/REFUSED" 2> /dev/null)]"
+printf '%s\n' "${OK[@]}" | grep -qx encoding || problems="$problems encoding-refused"
 for r in "${REFUSED[@]}"; do [ -s "$K/dev/$r/REFUSED" ] || problems="$problems $r-has-no-reason"; done
 if [ -n "$problems" ]; then fail "enumerate:$problems (see $W)"; else
-    pass "enumerate: ${#TARGETS[@]} package targets, one per library of //src (and of komira_runtime_paths, which a package requires), none declared anywhere; all build; ${#REFUSED[@]} are refused with a reason (komira_libc: native code) and ${#OK[@]} make a package"
+    pass "enumerate: ${#TARGETS[@]} package targets, one per library of //src (and of runtime_paths, which a package requires), none declared anywhere; all build; ${#REFUSED[@]} are refused with a reason (libc: native code) and ${#OK[@]} make a package"
 fi
 
 # The release tool's completeness rule, played here: every requirement of a package of the set is
@@ -329,9 +329,9 @@ if [ "$gate" = 0 ]; then
     mkdir -p "$C/linux-64" "$C/noarch" "$W/with" "$W/without" "$W/unpinned" "$W/badpin"
     problems=""
     entries='{}'
-    # The channel holds TWO builds of komira_encoding at one version: build 7 (the set's) and build 8.
-    [ -d "$K/rel8/komira_encoding" ] || problems="$problems no-second-build-of-komira_encoding"
-    for dir in "${OK[@]/#/$K/rel/}" "$K/meta1" "$K/rel8/komira_encoding"; do
+    # The channel holds TWO builds of encoding at one version: build 7 (the set's) and build 8.
+    [ -d "$K/rel8/encoding" ] || problems="$problems no-second-build-of-encoding"
+    for dir in "${OK[@]/#/$K/rel/}" "$K/meta1" "$K/rel8/encoding"; do
         fn=$(jq -r .file "$dir/manifest.json")
         f="$dir/$fn"
         cp "$f" "$C/linux-64/$fn"
@@ -342,8 +342,8 @@ if [ "$gate" = 0 ]; then
     jq -n --argjson e "$entries" '{info: {subdir: "linux-64"}, packages: {}, "packages.conda": $e, removed: [], repodata_version: 1}' > "$C/linux-64/repodata.json"
     jq -n '{info: {subdir: "noarch"}, packages: {}, "packages.conda": {}, removed: [], repodata_version: 1}' > "$C/noarch/repodata.json"
     cat > "$W/hello.mojo" << 'EOM'
-from komira_encoding import hex_encode
-from komira_hash import fnv1a_64
+from encoding import hex_encode
+from hashing import fnv1a_64
 
 
 def main():
@@ -356,13 +356,13 @@ def main():
     print(fnv1a_64(String("a").as_bytes()))
 EOM
     # badpin: the same channel, but its repodata says the metapackage requires a BUILD of
-    # komira_encoding that the channel does not have (the files are not needed: it must fail to solve).
+    # encoding that the channel does not have (the files are not needed: it must fail to solve).
     mkdir -p "$W/badchannel/linux-64" "$W/badchannel/noarch"
     cp "$C/noarch/repodata.json" "$W/badchannel/noarch/repodata.json"
     jq --arg m "$META-$VERSION-$BUILD.conda" --arg v "$VERSION" --arg b "$BUILD" \
-        '.["packages.conda"][$m].depends |= map(if startswith("komira_encoding ") then "komira_encoding ==\($v) h01234567_9" else . end)' \
+        '.["packages.conda"][$m].depends |= map(if startswith("encoding ") then "encoding ==\($v) h01234567_9" else . end)' \
         "$C/linux-64/repodata.json" > "$W/badchannel/linux-64/repodata.json"
-    jq -e --arg m "$META-$VERSION-$BUILD.conda" --arg d "komira_encoding ==$VERSION h01234567_9" '.["packages.conda"][$m].depends | index($d)' "$W/badchannel/linux-64/repodata.json" > /dev/null ||
+    jq -e --arg m "$META-$VERSION-$BUILD.conda" --arg d "encoding ==$VERSION h01234567_9" '.["packages.conda"][$m].depends | index($d)' "$W/badchannel/linux-64/repodata.json" > /dev/null ||
         problems="$problems bad-channel-not-made"
     for variant in with without unpinned badpin; do
         ch=$C
@@ -371,7 +371,7 @@ EOM
             printf '[workspace]\nname = "komira-conda-set-test"\nchannels = ["file://%s", "https://conda.modular.com/max", "conda-forge"]\nplatforms = ["linux-64"]\n\n[dependencies]\n' "$ch"
             case "$variant" in
                 with | badpin) printf '%s = "==%s"\n' "$META" "$VERSION" ;;
-                unpinned) printf 'komira_encoding = "==%s"\n' "$VERSION" ;;
+                unpinned) printf 'encoding = "==%s"\n' "$VERSION" ;;
                 *) printf 'mojo-compiler = "==%s"\n' "$pin" ;;
             esac
         } > "$W/$variant/pixi.toml"
@@ -385,34 +385,34 @@ EOM
         done
         grep -q "$META-$VERSION-$BUILD.conda" "$W/with/pixi.lock" || problems="$problems lock-lacks-the-metapackage"
         # two builds of one member are in the channel, and only the PINNED build is installed
-        grep -q "komira_encoding-$VERSION-$BUILD.conda" "$W/with/pixi.lock" || problems="$problems lock-lacks-the-pinned-build"
-        grep -q "komira_encoding-$VERSION-$BUILD8.conda" "$W/with/pixi.lock" && problems="$problems lock-has-the-other-build"
-        [ -f "$W/with/.pixi/envs/default/conda-meta/komira_encoding-$VERSION-$BUILD.json" ] || problems="$problems pinned-build-not-installed"
-        [ -f "$W/with/.pixi/envs/default/conda-meta/komira_encoding-$VERSION-$BUILD8.json" ] && problems="$problems other-build-installed"
+        grep -q "encoding-$VERSION-$BUILD.conda" "$W/with/pixi.lock" || problems="$problems lock-lacks-the-pinned-build"
+        grep -q "encoding-$VERSION-$BUILD8.conda" "$W/with/pixi.lock" && problems="$problems lock-has-the-other-build"
+        [ -f "$W/with/.pixi/envs/default/conda-meta/encoding-$VERSION-$BUILD.json" ] || problems="$problems pinned-build-not-installed"
+        [ -f "$W/with/.pixi/envs/default/conda-meta/encoding-$VERSION-$BUILD8.json" ] && problems="$problems other-build-installed"
         got=$(cd "$W/with" && timeout 600 pixi run --manifest-path "$W/with/pixi.toml" mojo run hello.mojo 2> "$W/run_with.err")
         [ "$got" = "$(printf 'deadbeef\n12638187200555641996')" ] || problems="$problems program-output:[$got]"
     fi
     # Control: with no build pin the solver takes the newer build (so the two builds ARE distinguishable
     # and the pin, not luck, chose the older one).
     if pixi install --manifest-path "$W/unpinned/pixi.toml" > "$W/install_unpinned.log" 2>&1; then
-        [ -f "$W/unpinned/.pixi/envs/default/conda-meta/komira_encoding-$VERSION-$BUILD8.json" ] || problems="$problems unpinned-control-did-not-take-the-newer-build"
+        [ -f "$W/unpinned/.pixi/envs/default/conda-meta/encoding-$VERSION-$BUILD8.json" ] || problems="$problems unpinned-control-did-not-take-the-newer-build"
     else
         problems="$problems unpinned-control-install-failed"
     fi
     # A requirement naming a build the channel does not have cannot be solved.
     if pixi install --manifest-path "$W/badpin/pixi.toml" > "$W/install_badpin.log" 2>&1; then
         problems="$problems install-accepted-a-requirement-on-a-missing-build"
-    elif ! grep -qF "komira_encoding" "$W/install_badpin.log"; then
+    elif ! grep -qF "encoding" "$W/install_badpin.log"; then
         problems="$problems badpin-failed-for-another-reason:[$(tail -c 300 "$W/install_badpin.log")]"
     fi
     pixi install --manifest-path "$W/without/pixi.toml" > "$W/install_without.log" 2>&1 || problems="$problems control-install-failed"
     if (cd "$W/without" && timeout 600 pixi run --manifest-path "$W/without/pixi.toml" mojo run hello.mojo > "$W/run_without.out" 2>&1); then
         problems="$problems control-imported-without-the-metapackage"
-    elif ! grep -qF "komira_encoding" "$W/run_without.out"; then
+    elif ! grep -qF "encoding" "$W/run_without.out"; then
         problems="$problems control-failed-for-another-reason"
     fi
     if [ -n "$problems" ]; then fail "install:$problems (see $W)"; else
-        pass "install: pixi installs only '$META ==$VERSION' from a file:// channel of the set (which also holds a newer build $BUILD8 of komira_encoding: the requirement name ==$VERSION $BUILD installs build $BUILD and not $BUILD8, while an unpinned requirement takes $BUILD8, and a requirement on a build the channel lacks fails to solve), the solver brings all ${#OK[@]} libraries (each .mojoc installed as built) and mojo-compiler ==$pin, and a program importing komira_encoding and komira_hash prints deadbeef and 12638187200555641996; the same project without the metapackage cannot import"
+        pass "install: pixi installs only '$META ==$VERSION' from a file:// channel of the set (which also holds a newer build $BUILD8 of encoding: the requirement name ==$VERSION $BUILD installs build $BUILD and not $BUILD8, while an unpinned requirement takes $BUILD8, and a requirement on a build the channel lacks fails to solve), the solver brings all ${#OK[@]} libraries (each .mojoc installed as built) and mojo-compiler ==$pin, and a program importing encoding and hashing prints deadbeef and 12638187200555641996; the same project without the metapackage cannot import"
     fi
 fi
 

@@ -3,8 +3,8 @@
 //! guessed from a BUCK file that disagrees with the sources, a shared row inserted out of order,
 //! a plan that writes before it has refused, or a dry run that writes.
 //!
-//! The golden case runs the tool on the tree komira_resources had before its hand migration
-//! (fixtures/komira_resources/old: the files as they were, with the BUCK file and manifest of the one
+//! The golden case runs the tool on the tree resources had before its hand migration
+//! (fixtures/resources/old: the files as they were, with the BUCK file and manifest of the one
 //! dependency) and requires the hand migration's files: `mopm.toml`, `mopm-toolchain.toml` and
 //! `mopm.lock` byte for byte, the two shared rows files as the line-for-line diff the hand
 //! migration made (fixtures/.../rows/*.diff), and the BUCK file code byte for byte with its comments
@@ -172,44 +172,44 @@ fn expectRowsAsDiff(a: std.mem.Allocator, what: []const u8, before: []const u8, 
     }
 }
 
-// ---- the golden: komira_resources ---------------------------------------------------------------
+// ---- the golden: resources ---------------------------------------------------------------
 
 const fx = struct {
-    const old_buck = @embedFile("fixtures/komira_resources/old/BUCK.fixture");
-    const old_readme = @embedFile("fixtures/komira_resources/old/README.md");
-    const old_init = @embedFile("fixtures/komira_resources/old/__init__.mojo");
-    const old_resources = @embedFile("fixtures/komira_resources/old/resources.mojo");
-    const old_probe = @embedFile("fixtures/komira_resources/old/tests/resources_probe.mojo");
-    const old_test = @embedFile("fixtures/komira_resources/old/tests/test_resources.mojo");
-    const sibling_buck = @embedFile("fixtures/komira_resources/old/sibling/BUCK.fixture");
-    const sibling_toml = @embedFile("fixtures/komira_resources/old/sibling/mopm.toml");
-    const release_buck = @embedFile("fixtures/komira_resources/old/release/BUCK.excerpt");
-    const release_artifacts = @embedFile("fixtures/komira_resources/old/release/artifacts.textproto.excerpt");
-    const hand_buck = @embedFile("fixtures/komira_resources/hand/BUCK.fixture");
-    const hand_toml = @embedFile("fixtures/komira_resources/hand/mopm.toml");
-    const hand_toolchain = @embedFile("fixtures/komira_resources/hand/mopm-toolchain.toml");
-    const hand_lock = @embedFile("fixtures/komira_resources/hand/mopm.lock");
-    const ids_before = @embedFile("fixtures/komira_resources/rows/mopm_native_ids.before.bzl");
-    const ids_diff = @embedFile("fixtures/komira_resources/rows/mopm_native_ids.diff");
-    const packages_before = @embedFile("fixtures/komira_resources/rows/packages.before.bzl");
-    const packages_diff = @embedFile("fixtures/komira_resources/rows/packages.diff");
+    const old_buck = @embedFile("fixtures/resources/old/BUCK.fixture");
+    const old_readme = @embedFile("fixtures/resources/old/README.md");
+    const old_init = @embedFile("fixtures/resources/old/__init__.mojo");
+    const old_resources = @embedFile("fixtures/resources/old/resources.mojo");
+    const old_probe = @embedFile("fixtures/resources/old/tests/resources_probe.mojo");
+    const old_test = @embedFile("fixtures/resources/old/tests/test_resources.mojo");
+    const sibling_buck = @embedFile("fixtures/resources/old/sibling/BUCK.fixture");
+    const sibling_toml = @embedFile("fixtures/resources/old/sibling/mopm.toml");
+    const release_buck = @embedFile("fixtures/resources/old/release/BUCK.excerpt");
+    const release_artifacts = @embedFile("fixtures/resources/old/release/artifacts.textproto.excerpt");
+    const hand_buck = @embedFile("fixtures/resources/hand/BUCK.fixture");
+    const hand_toml = @embedFile("fixtures/resources/hand/mopm.toml");
+    const hand_toolchain = @embedFile("fixtures/resources/hand/mopm-toolchain.toml");
+    const hand_lock = @embedFile("fixtures/resources/hand/mopm.lock");
+    const ids_before = @embedFile("fixtures/resources/rows/mopm_native_ids.before.bzl");
+    const ids_diff = @embedFile("fixtures/resources/rows/mopm_native_ids.diff");
+    const packages_before = @embedFile("fixtures/resources/rows/packages.before.bzl");
+    const packages_diff = @embedFile("fixtures/resources/rows/packages.diff");
 };
 
 const resources_description = "The files a program reads at run time, found under its own share directory: a resource is named by its path, and an undeclared one is refused.";
 
 fn resourcesTree() []const plan.File {
     return &.{
-        .{ .path = "src/komira_resources/BUCK", .text = fx.old_buck },
-        .{ .path = "src/komira_resources/README.md", .text = fx.old_readme },
-        .{ .path = "src/komira_resources/__init__.mojo", .text = fx.old_init },
-        .{ .path = "src/komira_resources/resources.mojo", .text = fx.old_resources },
-        .{ .path = "src/komira_resources/coverage_census.tsv" },
-        .{ .path = "src/komira_resources/coverage_held" },
-        .{ .path = "src/komira_resources/tests/resources_probe.mojo", .text = fx.old_probe },
-        .{ .path = "src/komira_resources/tests/test_resources.mojo", .text = fx.old_test },
-        .{ .path = "src/komira_resources/tests/fixtures/declared.txt" },
-        .{ .path = "src/komira_runtime_paths/BUCK", .text = fx.sibling_buck },
-        .{ .path = "src/komira_runtime_paths/mopm.toml", .text = fx.sibling_toml },
+        .{ .path = "src/resources/BUCK", .text = fx.old_buck },
+        .{ .path = "src/resources/README.md", .text = fx.old_readme },
+        .{ .path = "src/resources/__init__.mojo", .text = fx.old_init },
+        .{ .path = "src/resources/resources.mojo", .text = fx.old_resources },
+        .{ .path = "src/resources/coverage_census.tsv" },
+        .{ .path = "src/resources/coverage_held" },
+        .{ .path = "src/resources/tests/resources_probe.mojo", .text = fx.old_probe },
+        .{ .path = "src/resources/tests/test_resources.mojo", .text = fx.old_test },
+        .{ .path = "src/resources/tests/fixtures/declared.txt" },
+        .{ .path = "src/runtime_paths/BUCK", .text = fx.sibling_buck },
+        .{ .path = "src/runtime_paths/mopm.toml", .text = fx.sibling_toml },
         .{ .path = "release/BUCK", .text = fx.release_buck },
         .{ .path = "release/artifacts.textproto", .text = fx.release_artifacts },
         .{ .path = "release/readme_e2e/packages.bzl", .text = fx.packages_before },
@@ -224,7 +224,7 @@ const fixture_mopm = "0.0.73";
 const repo_mopm = "0.0.86";
 
 const resources_options = plan.Options{
-    .package = "komira_resources",
+    .package = "resources",
     .description = resources_description,
     .mopm = fixture_mopm,
     .test_layout = "installed",
@@ -234,9 +234,9 @@ test "golden: the manifest, the toolchain file and the lock are the hand migrati
     var ar = arena();
     defer ar.deinit();
     const p = try planOf(ar.allocator(), resourcesTree(), resources_options);
-    try expectSameBytes("mopm.toml", fx.hand_toml, try writeOf(p, "src/komira_resources/mopm.toml"));
-    try expectSameBytes("mopm-toolchain.toml", fx.hand_toolchain, try writeOf(p, "src/komira_resources/mopm-toolchain.toml"));
-    try expectSameBytes("mopm.lock", fx.hand_lock, try writeOf(p, "src/komira_resources/mopm.lock"));
+    try expectSameBytes("mopm.toml", fx.hand_toml, try writeOf(p, "src/resources/mopm.toml"));
+    try expectSameBytes("mopm-toolchain.toml", fx.hand_toolchain, try writeOf(p, "src/resources/mopm-toolchain.toml"));
+    try expectSameBytes("mopm.lock", fx.hand_lock, try writeOf(p, "src/resources/mopm.lock"));
 }
 
 test "golden: the two shared rows files get the lines the hand migration added, in the same places" {
@@ -255,21 +255,21 @@ test "golden: the BUCK file is the hand migration's in code and in comment words
     defer ar.deinit();
     const a = ar.allocator();
     const p = try planOf(a, resourcesTree(), resources_options);
-    const got = try normalize(a, try writeOf(p, "src/komira_resources/BUCK"));
+    const got = try normalize(a, try writeOf(p, "src/resources/BUCK"));
     var want = try normalize(a, fx.hand_buck);
 
     // Difference 1: the tool keeps the comment above the old mojo_library as written. The hand
     // migration edited one path in it, because the library file moved.
     const old_ref = "see resources.mojo.";
-    const new_ref = "see src/komira_resources/resources.mojo.";
+    const new_ref = "see src/resources/resources.mojo.";
     try t.expect(std.mem.indexOf(u8, got, old_ref) != null);
     try t.expect(std.mem.indexOf(u8, want, new_ref) != null);
     const got_fixed = try std.mem.replaceOwned(u8, a, got, old_ref, new_ref);
 
     // Difference 2: the hand migration wrote a comment for the helper binary (why it depends on
-    // komira_runtime_paths and not on the library whose test runs it). The old file had none,
+    // runtime_paths and not on the library whose test runs it). The old file had none,
     // so the tool writes none.
-    const hand_only = "# The program the test runs as its data (see above). It uses komira_runtime_paths.data_path, the rule komira_resources applies, rather than komira_resources itself: that library's gated test runs this program, so depending on the gated library would be a cycle.\n";
+    const hand_only = "# The program the test runs as its data (see above). It uses runtime_paths.data_path, the rule resources applies, rather than resources itself: that library's gated test runs this program, so depending on the gated library would be a cycle.\n";
     try t.expect(std.mem.indexOf(u8, want, hand_only) != null);
     want = try std.mem.replaceOwned(u8, a, want, hand_only, "");
 
@@ -281,28 +281,28 @@ test "golden: the files move into the nested layout and the sources that are not
     defer ar.deinit();
     const p = try planOf(ar.allocator(), resourcesTree(), resources_options);
     try t.expectEqual(@as(usize, 2), p.moves.len);
-    try t.expectEqualStrings("src/komira_resources/__init__.mojo", p.moves[0].from);
-    try t.expectEqualStrings("src/komira_resources/src/komira_resources/__init__.mojo", p.moves[0].to);
-    try t.expectEqualStrings("src/komira_resources/resources.mojo", p.moves[1].from);
-    try t.expectEqualStrings("src/komira_resources/src/komira_resources/resources.mojo", p.moves[1].to);
+    try t.expectEqualStrings("src/resources/__init__.mojo", p.moves[0].from);
+    try t.expectEqualStrings("src/resources/src/resources/__init__.mojo", p.moves[0].to);
+    try t.expectEqualStrings("src/resources/resources.mojo", p.moves[1].from);
+    try t.expectEqualStrings("src/resources/src/resources/resources.mojo", p.moves[1].to);
 }
 
 test "golden: the README keeps its text and gains the Build files section" {
     var ar = arena();
     defer ar.deinit();
     const p = try planOf(ar.allocator(), resourcesTree(), resources_options);
-    const readme = try writeOf(p, "src/komira_resources/README.md");
+    const readme = try writeOf(p, "src/resources/README.md");
     try t.expect(std.mem.startsWith(u8, readme, fx.old_readme));
     const tail = readme[fx.old_readme.len..];
     try t.expect(std.mem.startsWith(u8, tail, "\n## Build files\n"));
-    try t.expect(std.mem.indexOf(u8, tail, "`mojo-komira_runtime_paths >=0.1,<0.2`") != null);
+    try t.expect(std.mem.indexOf(u8, tail, "`mojo-runtime_paths >=0.1,<0.2`") != null);
     try t.expect(std.mem.indexOf(u8, tail, "| `mopm.lock` |") != null);
 }
 
-// ---- the golden: komira_collections (a library with [dependencies]) ------------------------------
+// ---- the golden: containers (a library with [dependencies]) ------------------------------
 
 const cx = struct {
-    const dir = "fixtures/komira_collections/";
+    const dir = "fixtures/containers/";
     const old_buck = @embedFile(dir ++ "old/BUCK.fixture");
     const old_readme = @embedFile(dir ++ "old/README.md");
     const old_init = @embedFile(dir ++ "old/__init__.mojo.fixture");
@@ -335,23 +335,23 @@ const collections_description = "Generic containers: a typed slab, a type-erased
 
 fn collectionsTree() []const plan.File {
     return &.{
-        .{ .path = "src/komira_collections/BUCK", .text = cx.old_buck },
-        .{ .path = "src/komira_collections/README.md", .text = cx.old_readme },
-        .{ .path = "src/komira_collections/__init__.mojo", .text = cx.old_init },
-        .{ .path = "src/komira_collections/dyn_value.mojo", .text = cx.old_dyn },
-        .{ .path = "src/komira_collections/hyperloglog.mojo", .text = cx.old_hll },
-        .{ .path = "src/komira_collections/slab.mojo", .text = cx.old_slab },
-        .{ .path = "src/komira_collections/variadic_pack.mojo", .text = cx.old_pack },
-        .{ .path = "src/komira_collections/coverage_census.tsv" },
-        .{ .path = "src/komira_collections/tests/test_atomic_slab.mojo", .text = cx.old_t_atomic },
-        .{ .path = "src/komira_collections/tests/test_dyn_value.mojo", .text = cx.old_t_dyn },
-        .{ .path = "src/komira_collections/tests/test_hyperloglog.mojo", .text = cx.old_t_hll },
-        .{ .path = "src/komira_collections/tests/test_owned_slab.mojo", .text = cx.old_t_owned },
-        .{ .path = "src/komira_collections/tests/test_slab.mojo", .text = cx.old_t_slab },
-        .{ .path = "src/komira_collections/tests/test_slab_edges.mojo", .text = cx.old_t_edges },
-        .{ .path = "src/komira_collections/tests/test_variadic_pack.mojo", .text = cx.old_t_pack },
-        .{ .path = "src/komira_atomic_alias/BUCK", .text = cx.sibling_buck },
-        .{ .path = "src/komira_atomic_alias/mopm.toml", .text = cx.sibling_toml },
+        .{ .path = "src/containers/BUCK", .text = cx.old_buck },
+        .{ .path = "src/containers/README.md", .text = cx.old_readme },
+        .{ .path = "src/containers/__init__.mojo", .text = cx.old_init },
+        .{ .path = "src/containers/dyn_value.mojo", .text = cx.old_dyn },
+        .{ .path = "src/containers/hyperloglog.mojo", .text = cx.old_hll },
+        .{ .path = "src/containers/slab.mojo", .text = cx.old_slab },
+        .{ .path = "src/containers/variadic_pack.mojo", .text = cx.old_pack },
+        .{ .path = "src/containers/coverage_census.tsv" },
+        .{ .path = "src/containers/tests/test_atomic_slab.mojo", .text = cx.old_t_atomic },
+        .{ .path = "src/containers/tests/test_dyn_value.mojo", .text = cx.old_t_dyn },
+        .{ .path = "src/containers/tests/test_hyperloglog.mojo", .text = cx.old_t_hll },
+        .{ .path = "src/containers/tests/test_owned_slab.mojo", .text = cx.old_t_owned },
+        .{ .path = "src/containers/tests/test_slab.mojo", .text = cx.old_t_slab },
+        .{ .path = "src/containers/tests/test_slab_edges.mojo", .text = cx.old_t_edges },
+        .{ .path = "src/containers/tests/test_variadic_pack.mojo", .text = cx.old_t_pack },
+        .{ .path = "src/atomic_alias/BUCK", .text = cx.sibling_buck },
+        .{ .path = "src/atomic_alias/mopm.toml", .text = cx.sibling_toml },
         .{ .path = "release/BUCK", .text = cx.release_buck },
         .{ .path = "release/artifacts.textproto", .text = cx.release_artifacts },
         .{ .path = "release/readme_e2e/packages.bzl", .text = cx.packages_before },
@@ -359,15 +359,15 @@ fn collectionsTree() []const plan.File {
     };
 }
 
-const collections_options = plan.Options{ .package = "komira_collections", .description = collections_description, .mopm = fixture_mopm };
+const collections_options = plan.Options{ .package = "containers", .description = collections_description, .mopm = fixture_mopm };
 
 test "golden collections: the manifest with [dependencies], the toolchain file and the lock are the hand migration's, byte for byte" {
     var ar = arena();
     defer ar.deinit();
     const p = try planOf(ar.allocator(), collectionsTree(), collections_options);
-    try expectSameBytes("mopm.toml", cx.hand_toml, try writeOf(p, "src/komira_collections/mopm.toml"));
-    try expectSameBytes("mopm-toolchain.toml", cx.hand_toolchain, try writeOf(p, "src/komira_collections/mopm-toolchain.toml"));
-    try expectSameBytes("mopm.lock", cx.hand_lock, try writeOf(p, "src/komira_collections/mopm.lock"));
+    try expectSameBytes("mopm.toml", cx.hand_toml, try writeOf(p, "src/containers/mopm.toml"));
+    try expectSameBytes("mopm-toolchain.toml", cx.hand_toolchain, try writeOf(p, "src/containers/mopm-toolchain.toml"));
+    try expectSameBytes("mopm.lock", cx.hand_lock, try writeOf(p, "src/containers/mopm.lock"));
 }
 
 test "golden collections: the two shared rows files get the lines the hand migration added, in the same places" {
@@ -384,14 +384,14 @@ test "golden collections: the BUCK file is the hand migration's in code and in c
     defer ar.deinit();
     const a = ar.allocator();
     const p = try planOf(a, collectionsTree(), collections_options);
-    const got = try normalize(a, try writeOf(p, "src/komira_collections/BUCK"));
+    const got = try normalize(a, try writeOf(p, "src/containers/BUCK"));
     const want = try normalize(a, cx.hand_buck);
 
     // The old header comment said "generic containers with no dependencies"; the package has one
     // dependency, and the hand migration edited the sentence. The tool keeps the comment as
     // written and says so in its notes.
     const old_words = "generic containers with no dependencies.";
-    const new_words = "generic containers. The only dependency is komira_atomic_alias.";
+    const new_words = "generic containers. The only dependency is atomic_alias.";
     try t.expect(std.mem.indexOf(u8, got, old_words) != null);
     try t.expect(std.mem.indexOf(u8, want, new_words) != null);
     // Second: with several tests the tool says "every test of tests/ has passed"; the hand file
@@ -400,8 +400,8 @@ test "golden collections: the BUCK file is the hand migration's in code and in c
     const hand_words = "exists only once the tests of tests/ have passed.";
     try t.expect(std.mem.indexOf(u8, got, tool_words) != null);
     // Third: the tool's comment on `conda_holds` adds a clause the hand comment does not have.
-    const holds_tool = "under `lib/mojo/` (komira_atomic_alias is not in it), and exactly one dependency, `mojo-komira_atomic_alias >=0.1,<0.2`, which is what installing the package pulls in.";
-    const holds_hand = "under `lib/mojo/`, and exactly one dependency, `mojo-komira_atomic_alias >=0.1,<0.2`.";
+    const holds_tool = "under `lib/mojo/` (atomic_alias is not in it), and exactly one dependency, `mojo-atomic_alias >=0.1,<0.2`, which is what installing the package pulls in.";
+    const holds_hand = "under `lib/mojo/`, and exactly one dependency, `mojo-atomic_alias >=0.1,<0.2`.";
     try t.expect(std.mem.indexOf(u8, got, holds_tool) != null);
     var fixed = try std.mem.replaceOwned(u8, a, got, old_words, new_words);
     fixed = try std.mem.replaceOwned(u8, a, fixed, tool_words, hand_words);
@@ -418,28 +418,28 @@ test "golden collections: five library files move, the tests and the tables stay
     const p = try planOf(ar.allocator(), collectionsTree(), collections_options);
     try t.expectEqual(@as(usize, 5), p.moves.len);
     for (p.moves) |m| {
-        try t.expect(std.mem.startsWith(u8, m.to, "src/komira_collections/src/komira_collections/"));
+        try t.expect(std.mem.startsWith(u8, m.to, "src/containers/src/containers/"));
         try t.expect(std.mem.indexOf(u8, m.from, "/tests/") == null);
     }
 }
 
-// ---- the golden: komira_bump_arena (a dependency whose closure links C) ----------------------------
+// ---- the golden: bump_arena (a dependency whose closure links C) ----------------------------
 //
-// komira_bump_arena owns no C; it depends on komira_buffer, whose closure reaches komira_libc, which
+// bump_arena owns no C; it depends on byte_buffer, whose closure reaches libc, which
 // declares a static native. The hand migration of the package keeps `mojo_adopted_library` taking
 // the C toolchain's link facts (`cxx_toolchain`), so a dependent's link carries libc's archive.
 
 const bx = struct {
-    const dir = "fixtures/komira_bump_arena/";
+    const dir = "fixtures/bump_arena/";
     const old_buck = @embedFile(dir ++ "old/BUCK.fixture");
     const old_readme = @embedFile(dir ++ "old/README.md");
     const old_init = @embedFile(dir ++ "old/__init__.mojo.fixture");
     const old_arena = @embedFile(dir ++ "old/bump_arena.mojo.fixture");
     const old_test = @embedFile(dir ++ "old/tests/test_bump_arena.mojo.fixture");
-    const buffer_toml = @embedFile(dir ++ "old/siblings/komira_buffer.mopm.toml");
-    const host_toml = @embedFile(dir ++ "old/siblings/komira_host.mopm.toml");
-    const simd_toml = @embedFile(dir ++ "old/siblings/komira_simd.mopm.toml");
-    const libc_toml = @embedFile(dir ++ "old/siblings/komira_libc.mopm.toml");
+    const buffer_toml = @embedFile(dir ++ "old/siblings/byte_buffer.mopm.toml");
+    const host_toml = @embedFile(dir ++ "old/siblings/host_probe.mopm.toml");
+    const simd_toml = @embedFile(dir ++ "old/siblings/simd_ops.mopm.toml");
+    const libc_toml = @embedFile(dir ++ "old/siblings/libc.mopm.toml");
     const hand_buck = @embedFile(dir ++ "hand/BUCK.fixture");
     const hand_toml = @embedFile(dir ++ "hand/mopm.toml");
     const hand_toolchain = @embedFile(dir ++ "hand/mopm-toolchain.toml");
@@ -454,33 +454,33 @@ const bump_description = "An O(1)-reset bump allocator over a fixed-capacity byt
 
 fn bumpTree() []const plan.File {
     return &.{
-        .{ .path = "src/komira_bump_arena/BUCK", .text = bx.old_buck },
-        .{ .path = "src/komira_bump_arena/README.md", .text = bx.old_readme },
-        .{ .path = "src/komira_bump_arena/__init__.mojo", .text = bx.old_init },
-        .{ .path = "src/komira_bump_arena/bump_arena.mojo", .text = bx.old_arena },
-        .{ .path = "src/komira_bump_arena/tests/test_bump_arena.mojo", .text = bx.old_test },
-        .{ .path = "src/komira_buffer/BUCK", .text = migrated_buck },
-        .{ .path = "src/komira_buffer/mopm.toml", .text = bx.buffer_toml },
-        .{ .path = "src/komira_host/BUCK", .text = migrated_buck },
-        .{ .path = "src/komira_host/mopm.toml", .text = bx.host_toml },
-        .{ .path = "src/komira_simd/BUCK", .text = migrated_buck },
-        .{ .path = "src/komira_simd/mopm.toml", .text = bx.simd_toml },
-        .{ .path = "src/komira_libc/BUCK", .text = migrated_buck },
-        .{ .path = "src/komira_libc/mopm.toml", .text = bx.libc_toml },
+        .{ .path = "src/bump_arena/BUCK", .text = bx.old_buck },
+        .{ .path = "src/bump_arena/README.md", .text = bx.old_readme },
+        .{ .path = "src/bump_arena/__init__.mojo", .text = bx.old_init },
+        .{ .path = "src/bump_arena/bump_arena.mojo", .text = bx.old_arena },
+        .{ .path = "src/bump_arena/tests/test_bump_arena.mojo", .text = bx.old_test },
+        .{ .path = "src/byte_buffer/BUCK", .text = migrated_buck },
+        .{ .path = "src/byte_buffer/mopm.toml", .text = bx.buffer_toml },
+        .{ .path = "src/host_probe/BUCK", .text = migrated_buck },
+        .{ .path = "src/host_probe/mopm.toml", .text = bx.host_toml },
+        .{ .path = "src/simd_ops/BUCK", .text = migrated_buck },
+        .{ .path = "src/simd_ops/mopm.toml", .text = bx.simd_toml },
+        .{ .path = "src/libc/BUCK", .text = migrated_buck },
+        .{ .path = "src/libc/mopm.toml", .text = bx.libc_toml },
         .{ .path = "release/readme_e2e/packages.bzl", .text = bx.packages_before },
         .{ .path = "release/mopm_native_ids.bzl", .text = bx.ids_before },
     };
 }
 
-const bump_options = plan.Options{ .package = "komira_bump_arena", .description = bump_description, .mopm = fixture_mopm };
+const bump_options = plan.Options{ .package = "bump_arena", .description = bump_description, .mopm = fixture_mopm };
 
 test "golden bump_arena: a dependency with natives is accepted, and the manifest, toolchain file and lock are the hand migration's, byte for byte" {
     var ar = arena();
     defer ar.deinit();
     const p = try planOf(ar.allocator(), bumpTree(), bump_options);
-    try expectSameBytes("mopm.toml", bx.hand_toml, try writeOf(p, "src/komira_bump_arena/mopm.toml"));
-    try expectSameBytes("mopm-toolchain.toml", bx.hand_toolchain, try writeOf(p, "src/komira_bump_arena/mopm-toolchain.toml"));
-    try expectSameBytes("mopm.lock", bx.hand_lock, try writeOf(p, "src/komira_bump_arena/mopm.lock"));
+    try expectSameBytes("mopm.toml", bx.hand_toml, try writeOf(p, "src/bump_arena/mopm.toml"));
+    try expectSameBytes("mopm-toolchain.toml", bx.hand_toolchain, try writeOf(p, "src/bump_arena/mopm-toolchain.toml"));
+    try expectSameBytes("mopm.lock", bx.hand_lock, try writeOf(p, "src/bump_arena/mopm.lock"));
 }
 
 test "golden bump_arena: the two shared rows files get the lines the hand migration added" {
@@ -497,7 +497,7 @@ test "golden bump_arena: the BUCK file is the hand migration's, with the C link 
     defer ar.deinit();
     const a = ar.allocator();
     const p = try planOf(a, bumpTree(), bump_options);
-    const raw = try writeOf(p, "src/komira_bump_arena/BUCK");
+    const raw = try writeOf(p, "src/bump_arena/BUCK");
     // the attribute is code: the same line, between deps and lib, as the hand file has it
     try t.expect(std.mem.indexOf(u8, raw, "    cxx_toolchain = \"komira//tools/build/mojo:adopt_cxx_link_facts\",\n    lib = \":lib\",\n") != null);
     // no c_deps and no native_static: this package owns no C
@@ -506,9 +506,9 @@ test "golden bump_arena: the BUCK file is the hand migration's, with the C link 
     const got = try normalize(a, raw);
     var want = try normalize(a, bx.hand_buck);
     // the hand comment names the one package that links C and says it is in the closure through
-    // komira_buffer; the tool's names every package of the closure that declares a static native.
-    const hand_words = "    # komira_libc, in the closure through komira_buffer, links C (its posix shim), so a dependent's link takes that archive from here. This package owns no C, so it names no `c_deps`: it takes the C toolchain's link facts directly.\n";
-    const tool_words = "    # komira_libc, in the closure, declares C of its own (a static native), so `lib`'s closure carries that archive and a dependent's link takes it from here. This package owns no C, so it names no `c_deps`: it takes the C toolchain's link facts directly.\n";
+    // byte_buffer; the tool's names every package of the closure that declares a static native.
+    const hand_words = "    # libc, in the closure through byte_buffer, links C (its posix shim), so a dependent's link takes that archive from here. This package owns no C, so it names no `c_deps`: it takes the C toolchain's link facts directly.\n";
+    const tool_words = "    # libc, in the closure, declares C of its own (a static native), so `lib`'s closure carries that archive and a dependent's link takes it from here. This package owns no C, so it names no `c_deps`: it takes the C toolchain's link facts directly.\n";
     try t.expect(std.mem.indexOf(u8, want, hand_words) != null);
     try t.expect(std.mem.indexOf(u8, got, tool_words) != null);
     want = try std.mem.replaceOwned(u8, a, want, hand_words, tool_words);
@@ -524,11 +524,11 @@ test "golden bump_arena: the BUCK file is the hand migration's, with the C link 
         // the package is in no file of release/ in the fixture, as in the tree before the hand migration: the
         // tool says only that the label stays valid
         .{ "Kept for the release machine, which still builds it (release/BUCK, release/artifacts.textproto): komira's", "Kept so the label `:komira_bump_arena_conda` stays valid: komira's" },
-        .{ "    depends = [\n        \"mojo-komira_buffer >=0.1,<0.2\",\n    ],\n", "    depends = [\"mojo-komira_buffer >=0.1,<0.2\"],\n" },
-        .{ "nothing else under `lib/mojo/`, and exactly one dependency, which is what installing the package pulls in. Red when the manifest drops the dependency, names another range, or the file carries a sibling.", "nothing else under `lib/mojo/` (komira_buffer is not in it), and exactly one dependency, `mojo-komira_buffer >=0.1,<0.2`, which is what installing the package pulls in. Red when the manifest drops the dependency, names another range, or the file carries the sibling." },
+        .{ "    depends = [\n        \"mojo-byte_buffer >=0.1,<0.2\",\n    ],\n", "    depends = [\"mojo-byte_buffer >=0.1,<0.2\"],\n" },
+        .{ "nothing else under `lib/mojo/`, and exactly one dependency, which is what installing the package pulls in. Red when the manifest drops the dependency, names another range, or the file carries a sibling.", "nothing else under `lib/mojo/` (byte_buffer is not in it), and exactly one dependency, `mojo-byte_buffer >=0.1,<0.2`, which is what installing the package pulls in. Red when the manifest drops the dependency, names another range, or the file carries the sibling." },
         // a one-item list: the hand file kept the old file's three lines, the tool writes one line (as the hand
-        // file of komira_counters does)
-        .{ "    deps = [\n        \"//src/komira_buffer:komira_buffer\",\n    ],\n", "    deps = [\"//src/komira_buffer:komira_buffer\"],\n" },
+        // file of counters does)
+        .{ "    deps = [\n        \"//src/byte_buffer:byte_buffer\",\n    ],\n", "    deps = [\"//src/byte_buffer:byte_buffer\"],\n" },
     };
     for (wording) |w| want = try std.mem.replaceOwned(u8, a, want, w[0], w[1]);
     try expectSameBytes("BUCK (comments normalized)", want, got);
@@ -538,11 +538,11 @@ test "bump_arena: a closure with no native gets no cxx_toolchain" {
     var ar = arena();
     defer ar.deinit();
     const a = ar.allocator();
-    const clean_libc = "[package]\nname = \"komira_libc\"\nversion = \"0.1.0\"\n\n[targets]\nlib = { path = \"src/komira_libc\" }\n";
+    const clean_libc = "[package]\nname = \"libc\"\nversion = \"0.1.0\"\n\n[targets]\nlib = { path = \"src/libc\" }\n";
     var files = std.ArrayList(plan.File).empty;
-    for (bumpTree()) |f| try files.append(a, if (std.mem.eql(u8, f.path, "src/komira_libc/mopm.toml")) .{ .path = f.path, .text = clean_libc } else f);
+    for (bumpTree()) |f| try files.append(a, if (std.mem.eql(u8, f.path, "src/libc/mopm.toml")) .{ .path = f.path, .text = clean_libc } else f);
     const p = try planOf(a, files.items, bump_options);
-    try t.expect(std.mem.indexOf(u8, try writeOf(p, "src/komira_bump_arena/BUCK"), "cxx_toolchain") == null);
+    try t.expect(std.mem.indexOf(u8, try writeOf(p, "src/bump_arena/BUCK"), "cxx_toolchain") == null);
 }
 
 test "bump_arena: a package that owns C is still refused, in each form, with the package that owns it named" {
@@ -551,15 +551,15 @@ test "bump_arena: a package that owns C is still refused, in each form, with the
     const a = ar.allocator();
     var with_c = std.ArrayList(plan.File).empty;
     try with_c.appendSlice(a, bumpTree());
-    try with_c.append(a, .{ .path = "src/komira_bump_arena/native/shim.c" });
-    try expectRefusal(a, with_c.items, bump_options, "src/komira_bump_arena/native/shim.c: a native source or library");
+    try with_c.append(a, .{ .path = "src/bump_arena/native/shim.c" });
+    try expectRefusal(a, with_c.items, bump_options, "src/bump_arena/native/shim.c: a native source or library");
     const c_deps = try std.mem.replaceOwned(u8, a, bx.old_buck, "    visibility", "    c_deps = [\":shim\"],\n    visibility");
     var with_attr = std.ArrayList(plan.File).empty;
-    for (bumpTree()) |f| try with_attr.append(a, if (std.mem.eql(u8, f.path, "src/komira_bump_arena/BUCK")) .{ .path = f.path, .text = c_deps } else f);
+    for (bumpTree()) |f| try with_attr.append(a, if (std.mem.eql(u8, f.path, "src/bump_arena/BUCK")) .{ .path = f.path, .text = c_deps } else f);
     try expectRefusal(a, with_attr.items, bump_options, "'c_deps' declares native code");
     var with_dl = std.ArrayList(plan.File).empty;
     try with_dl.appendSlice(a, bumpTree());
-    try with_dl.append(a, .{ .path = "src/komira_bump_arena/ffi.mojo", .text = "fn f():\n    var h = OwnedDLHandle(\"libx.so\")\n" });
+    try with_dl.append(a, .{ .path = "src/bump_arena/ffi.mojo", .text = "fn f():\n    var h = OwnedDLHandle(\"libx.so\")\n" });
     try expectRefusal(a, with_dl.items, bump_options, "uses DLHandle");
 }
 
@@ -832,8 +832,8 @@ test "the scanner reads every module of an import list" {
     defer ar.deinit();
     var out = std.ArrayList([]const u8).empty;
     var bad = imp.Bad{};
-    try imp.scan(ar.allocator(), "import std.sys, komira_resources\nimport a as x, b.c, d\nfrom m import n, o\n", &out, &bad);
-    const want = [_][]const u8{ "std", "komira_resources", "a", "b", "d", "m" };
+    try imp.scan(ar.allocator(), "import std.sys, resources\nimport a as x, b.c, d\nfrom m import n, o\n", &out, &bad);
+    const want = [_][]const u8{ "std", "resources", "a", "b", "d", "m" };
     try t.expectEqual(want.len, out.items.len);
     for (want, out.items) |w, g| try t.expectEqualStrings(w, g);
     var out2 = std.ArrayList([]const u8).empty;
@@ -949,12 +949,12 @@ test "imports count in code, indented or not; docstrings, comments and relative 
         \\"""
         \\# from fake_in_comment import y
         \\from std.memory import memcpy
-        \\from komira_hash import fnv
-        \\import komira_json
+        \\from hashing import fnv
+        \\import json
         \\from . import sibling
         \\
         \\def f():
-        \\    from komira_zlib.inner import z
+        \\    from zlib.inner import z
         \\    var s = """
         \\import fake_in_string
         \\"""
@@ -965,9 +965,9 @@ test "imports count in code, indented or not; docstrings, comments and relative 
     try imp.scan(a, src, &out, &bad);
     try t.expectEqual(@as(usize, 4), out.items.len);
     try t.expectEqualStrings("std", out.items[0]);
-    try t.expectEqualStrings("komira_hash", out.items[1]);
-    try t.expectEqualStrings("komira_json", out.items[2]);
-    try t.expectEqualStrings("komira_zlib", out.items[3]);
+    try t.expectEqualStrings("hashing", out.items[1]);
+    try t.expectEqualStrings("json", out.items[2]);
+    try t.expectEqualStrings("zlib", out.items[3]);
 }
 
 test "a from line that names no module outside a string is an error with its line" {

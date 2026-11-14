@@ -1,0 +1,21 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# A SecretStore over CyberArk Conjur's REST API (an authn POST for the access
+# token, a GET for the variable). It depends on secret_store (the port),
+# http_client and http_core (the REST client, the Connector seam
+# and the scripted connector the tests use) and async_rt (the blocking
+# runtime that drives one request per call). The welded test runs over
+# ScriptedConnector: no socket, no DNS.
+mojo_library(
+    name = "secrets_conjur",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/async_rt:async_rt",
+        "//src/crypto:crypto",
+        "//src/http_client:http_client",
+        "//src/http_core:http_core",
+        "//src/secret_store:secret_store",
+    ],
+    test_srcs = ["tests/test_conjur_secret_store.mojo"],
+    visibility = ["PUBLIC"],
+)

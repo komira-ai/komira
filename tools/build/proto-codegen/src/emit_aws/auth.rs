@@ -278,7 +278,7 @@ mod tests {
         assert!(!send_with.contains("clock"), "{send_with}");
         assert!(
             src.contains(
-                "from komira_aws_core import (\n    send_unsigned_request,\n    \
+                "from aws_core import (\n    send_unsigned_request,\n    \
                  send_unsigned_request_with,\n)\n"
             ),
             "{src}"

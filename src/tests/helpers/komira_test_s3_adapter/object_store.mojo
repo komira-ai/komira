@@ -1,6 +1,6 @@
 # =============================================================================
 # komira_test_s3_adapter/object_store.mojo -- `MinioObjectStore`, a
-# komira_test_bucket `ObjectStoreClient` over komira_objectstore_s3's
+# komira_test_bucket `ObjectStoreClient` over objectstore_s3's
 # `S3Store`.
 # =============================================================================
 #
@@ -8,11 +8,11 @@
 # embedded MinIO on 127.0.0.1), with the credential read from the
 # shared-credentials FILE the target names (profile `default`); it reads no
 # environment. The connector is a type parameter and its factory a value, so
-# the welded tests drive every verb over komira_http_core's
+# the welded tests drive every verb over http_core's
 # `ScriptedConnector`; `minio_object_store()` is the real one, over
 # `KernelTcpConnector`.
 #
-# The bucket is created with one signed `PUT /<bucket>` (komira_aws_s3
+# The bucket is created with one signed `PUT /<bucket>` (aws_s3
 # generates no CreateBucket): 200 is created, a 409 whose body says
 # `BucketAlreadyOwnedByYou` is "created by an earlier call of this run", and
 # anything else raises (`create_bucket_status_ok`). Every error names the
@@ -20,7 +20,7 @@
 # `<endpoint>`, so a deployment fact never reaches a log.
 # =============================================================================
 
-from komira_aws_core import (
+from aws_core import (
     AwsCredential,
     AwsEndpoint,
     AwsRetryQuota,
@@ -30,12 +30,12 @@ from komira_aws_core import (
     parse_profile_file,
     send_sigv4_signed_request,
 )
-from komira_http_client.client import HttpClientConfig
-from komira_http_core.transport.io_stream import Connector
-from komira_http_core.transport.kernel_tcp import KernelTcpConnector
-from komira_objectstore.types import WritePrecondition
-from komira_objectstore_s3.config import S3Config
-from komira_objectstore_s3.store import S3Store
+from http_client.client import HttpClientConfig
+from http_core.transport.io_stream import Connector
+from http_core.transport.kernel_tcp import KernelTcpConnector
+from objectstore.types import WritePrecondition
+from objectstore_s3.config import S3Config
+from objectstore_s3.store import S3Store
 from komira_test_bucket import ObjectStoreClient, StoreTarget
 
 

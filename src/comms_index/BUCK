@@ -1,0 +1,65 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The comms metadata and query-index substrate: a per-collection CAS-manifest
+# delta log of immutable index chunks behind a mutable `_HEAD` pointer, the
+# chunk codec (`KeyedDelta`, the compacted-base codec) and compaction, all on
+# objectstore's conditional-write stores. `CommsIndex[Store]` appends a
+# delta with the manifest's create-CAS, reads the merged last-writer-wins state
+# (a tombstone removes a key; the higher per-key `seq` wins), lists the keys
+# changed since a token for incremental sync, compacts the tail into one base
+# chunk and purges a collection. Each comms type (mail flags, calendar sync, chat
+# event log) plugs its own key and value bytes in; the package wires no server.
+#
+# The welded test drives it over the in-memory conditional stores: chunk codec
+# round trip, append and read, the mutable-bit fold, compaction (state
+# preserved, window envelope, watermark against a concurrent append), a fresh
+# reader seeing the deferred tail, and the `_HEAD` compare-swap race with four
+# writers fanned out on worker threads by async_rt's
+# `parallel_fork_join_shared` (async_api's `ParallelDispatch`).
+
+mojo_library(
+    name = "comms_index",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    # The full transitive closure of the Mojo libraries this package and its
+    # test build on.
+    deps = [
+        "//src/arrow:arrow",
+        "//src/arrow_ipc:arrow_ipc",
+        "//src/async_rt:async_rt",
+        "//src/async_api:async_api",
+        "//src/atomic_alias:atomic_alias",
+        "//src/byte_buffer:byte_buffer",
+        "//src/clock:clock",
+        "//src/containers:containers",
+        "//src/column_kernels:column_kernels",
+        "//src/compression:compression",
+        "//src/counters:counters",
+        "//src/dynamic_filter:dynamic_filter",
+        "//src/fork_join:fork_join",
+        "//src/fs:fs",
+        "//src/hashing:hashing",
+        "//src/host_probe:host_probe",
+        "//src/join_assembly:join_assembly",
+        "//src/libc:libc",
+        "//src/log:log",
+        "//src/lz4:lz4",
+        "//src/metrics:metrics",
+        "//src/name_registry:name_registry",
+        "//src/objectstore:objectstore",
+        "//src/objectstore:komira_objectstore_posix",
+        "//src/plan_expr:plan_expr",
+        "//src/plan_ir:plan_ir",
+        "//src/plan_stats:plan_stats",
+        "//src/scalar_arithmetic:scalar_arithmetic",
+        "//src/scan_source:scan_source",
+        "//src/simd_ops:simd_ops",
+        "//src/spsc_ring:spsc_ring",
+        "//src/trace:trace",
+        "//src/zlib:zlib",
+        "//tools/build/mojo/runtime_paths:runtime_paths",
+    ],
+    test_srcs = [
+        "tests/test_comms_index_substrate.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)

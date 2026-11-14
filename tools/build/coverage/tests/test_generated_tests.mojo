@@ -10,12 +10,12 @@ from covcheck.held import Held
 # aside as a test source; every other path that names a repository
 # directory but no repository file stays an error.
 
-comptime PKG = "src/komira_gcp_firestore"
+comptime PKG = "src/gcp_firestore"
 # The two reports of the failing coverage run, as the build names them.
-comptime LISTEN = "buck-out/v2/art/komira/03cc1a891c89e4be/src/komira_gcp_firestore/__komira_gcp_firestore_listen__/cov/tests/_layout_probe.xml"
-comptime V1 = "buck-out/v2/art/komira/03cc1a891c89e4be/src/komira_gcp_firestore/__komira_gcp_firestore_v1__/cov/tests/_layout_probe.xml"
-comptime LISTEN_PROBE = "src/komira_gcp_firestore/gen/komira_gcp_firestore_listen/_layout_probe.mojo"
-comptime V1_PROBE = "src/komira_gcp_firestore/gen/komira_gcp_firestore_v1/_layout_probe.mojo"
+comptime LISTEN = "buck-out/v2/art/komira/03cc1a891c89e4be/src/gcp_firestore/__komira_gcp_firestore_listen__/cov/tests/_layout_probe.xml"
+comptime V1 = "buck-out/v2/art/komira/03cc1a891c89e4be/src/gcp_firestore/__komira_gcp_firestore_v1__/cov/tests/_layout_probe.xml"
+comptime LISTEN_PROBE = "src/gcp_firestore/gen/komira_gcp_firestore_listen/_layout_probe.mojo"
+comptime V1_PROBE = "src/gcp_firestore/gen/komira_gcp_firestore_v1/_layout_probe.mojo"
 
 
 def _repo() -> RepoFiles:
@@ -41,7 +41,7 @@ def _report(origin: String, path: String) -> Input:
     return Input(String(FORMAT_COBERTURA), String(""), origin, String(
         "<coverage><classes><class filename=\"") + path + String("\"><lines>"
         "<line number=\"1\" hits=\"1\"/></lines></class>"
-        "<class filename=\"src/komira_gcp_firestore/firestore_value.mojo\"><lines>"
+        "<class filename=\"src/gcp_firestore/firestore_value.mojo\"><lines>"
         "<line number=\"1\" hits=\"1\"/><line number=\"2\" hits=\"0\"/></lines></class></classes></coverage>"
     ))
 
@@ -114,7 +114,7 @@ def test_generated_environment_scan_is_a_test_source_only_outside_tests() raises
     # `_generated_tests/_no_env_reads.mojo` of its package (a directory no package
     # has), and its report names that path: a test source, no error. Staged in the
     # package's real tests/ directory it would be a file missing from the checkout.
-    var origin = String("buck-out/v2/art/komira/03cc1a891c89e4be/src/komira_gcp_firestore/__komira_gcp_firestore_v1__/cov/tests/_no_env_reads.xml")
+    var origin = String("buck-out/v2/art/komira/03cc1a891c89e4be/src/gcp_firestore/__komira_gcp_firestore_v1__/cov/tests/_no_env_reads.xml")
     var r = List[Input]()
     r.append(_report(origin, String(PKG) + "/_generated_tests/_no_env_reads.mojo"))
     var a = _run(r, Options())

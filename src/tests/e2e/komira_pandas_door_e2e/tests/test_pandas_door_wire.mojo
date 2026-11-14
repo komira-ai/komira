@@ -17,7 +17,7 @@
 #      name: `nulls_first`, `join_type`, the COUNT's input slot, the CSV
 #      binding. A defect there fails with that field's message first;
 #   5. the decoded plan equals the plan `door_plans` builds with
-#      `komira_plan_ir`: the same render and `structural_hash`, the same output
+#      `plan_ir`: the same render and `structural_hash`, the same output
 #      schema field by field, and the same `plan_shape`.
 #
 # For the sort fixtures the plan render is a partial witness. It omits
@@ -50,9 +50,9 @@ from komira_pandas_door_e2e import (
     sort_values_plan,
     wire_bytes_from_hex,
 )
-from komira_plan_expr.agg_expr import AggExpr, AGG_COUNT
-from komira_plan_expr.expr import Expr, EXPR_COL_REF
-from komira_plan_ir.logical_plan import (
+from plan_expr.agg_expr import AggExpr, AGG_COUNT
+from plan_expr.expr import Expr, EXPR_COL_REF
+from plan_ir.logical_plan import (
     JOIN_INNER,
     JOIN_LEFT,
     LogicalPlan,
@@ -62,18 +62,18 @@ from komira_plan_ir.logical_plan import (
     PLAN_SORT,
     SOURCE_KIND_ROW,
 )
-from komira_plan_wire import (
+from plan_wire import (
     plan_from_bytes,
     plan_wire_admit,
     plan_wire_check_values,
     plan_wire_supported_versions,
 )
-from komira_scan_source.scan_binding import (
+from scan_source.scan_binding import (
     SCAN_KIND_NAME_CSV,
     SCAN_ORIENTATION_ROW,
     SNAPSHOT_PINNED,
 )
-from komira_scan_source.source_variant import SOURCE_VARIANT_CSV
+from scan_source.source_variant import SOURCE_VARIANT_CSV
 
 
 def _wire(stem: String) raises -> List[UInt8]:
@@ -249,7 +249,7 @@ def test_groupby_count_of_a_column() raises:
 
 def test_read_csv_scan() raises:
     """`read_csv(path)`: the `komira.csv` binding. Its fingerprint in the
-    fixture is the literal `komira_plan_ir`'s CSV arm test derived
+    fixture is the literal `plan_ir`'s CSV arm test derived
     independently, so equality with the Mojo-built plan also holds
     `CsvSource`'s fold to that literal."""
     var p = _admitted(String("read_csv"))

@@ -1,0 +1,77 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The host-neutral half of source handling (the package of that name in
+# docs/design/knowledge_graph_port.md): raw records kept once each under their
+# content hash, the raw store and lineage a partition binds, an adapter registry
+# keyed by an opaque surface tag, and a brute-force cosine index over the
+# episodes the registry lowers raw records to. No adapter for a particular kind
+# of record or service ships. It depends on kg (the Embedder,
+# EpisodeInput and SurfaceAdapter seams), kg_format (cosine, the packed
+# embedding, the content hash and the UTF-8 check) and objectstore (the
+# conditional-write store trait everything rides), and on their closure; it
+# reads no clock and no environment, and calls no model but the Embedder it is
+# given.
+#
+# The welded tests: test_framing pins the bounds-checked readers (a length
+# that wraps an offset sum, a text over the limit or not UTF-8, trailing bytes)
+# and the prefix and name rules; test_raw_store stores a payload once whatever
+# its tag, keeps the first record, surfaces a lost write instead of
+# overwriting, and refuses a damaged object; test_raw_codec refuses every
+# malformed stored form; test_partition_binding binds a partition to one raw
+# store and one lineage, refuses a source system outside the host's set and any
+# second, different binding, and refuses a damaged object; test_adapter_registry
+# dispatches by tag across two made-up record types, refuses a duplicate tag and
+# dispatches nothing for an unregistered one; test_b_index builds an index
+# through two registered adapters and returns the same top-k as a plain scan,
+# skips what is already indexed, and maps a hit back to its episode;
+# test_b_index_codec refuses every malformed index object.
+
+mojo_library(
+    name = "kg_sources",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/arrow:arrow",
+        "//src/arrow_ipc:arrow_ipc",
+        "//src/async_rt:async_rt",
+        "//src/async_api:async_api",
+        "//src/atomic_alias:atomic_alias",
+        "//src/byte_buffer:byte_buffer",
+        "//src/clock:clock",
+        "//src/containers:containers",
+        "//src/column_kernels:column_kernels",
+        "//src/compression:compression",
+        "//src/counters:counters",
+        "//src/dynamic_filter:dynamic_filter",
+        "//src/fs:fs",
+        "//src/hashing:hashing",
+        "//src/host_probe:host_probe",
+        "//src/json:json",
+        "//src/kg:kg",
+        "//src/kg_format:kg_format",
+        "//src/libc:libc",
+        "//src/lz4:lz4",
+        "//src/metrics:metrics",
+        "//src/objectstore:objectstore",
+        "//src/objectstore:komira_objectstore_posix",
+        "//src/parquet:parquet",
+        "//src/parquet_api:parquet_api",
+        "//src/parquet_codec:parquet_codec",
+        "//src/parquet_writer:parquet_writer",
+        "//src/plan_expr:plan_expr",
+        "//src/plan_stats:plan_stats",
+        "//src/scalar_arithmetic:scalar_arithmetic",
+        "//src/simd_ops:simd_ops",
+        "//src/zlib:zlib",
+        "//tools/build/mojo/runtime_paths:runtime_paths",
+    ],
+    test_srcs = [
+        "tests/test_adapter_registry.mojo",
+        "tests/test_b_index.mojo",
+        "tests/test_b_index_codec.mojo",
+        "tests/test_framing.mojo",
+        "tests/test_partition_binding.mojo",
+        "tests/test_raw_codec.mojo",
+        "tests/test_raw_store.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)

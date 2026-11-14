@@ -1,14 +1,14 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
-# Test-only: komira_job_supervisor's whole run loop over HTTP, against a
-# stateful heartbeat receiver served by a real komira_http_server HttpServer
-# on 127.0.0.1, in one build action (komira_fork_join: the server steps on one
+# Test-only: job_supervisor's whole run loop over HTTP, against a
+# stateful heartbeat receiver served by a real http_server HttpServer
+# on 127.0.0.1, in one build action (fork_join: the server steps on one
 # thread while run_job_supervisor runs on the other). The supervisor's peer is
 # not in komira, so the library supplies one: HeartbeatReceiver decodes each
 # komira.job_report.v1 JobHeartbeat, keeps one run's state (ASSIGNED, RUNNING,
 # CANCELLING, then COMPLETED, FAILED or CANCELLED), records every beat that
 # breaks that machine, and answers with a JobHeartbeatReply. It is a package
-# of its own so komira_job_supervisor's deps do not gain an HTTP server.
+# of its own so job_supervisor's deps do not gain an HTTP server.
 #
 # The welded tests: every rule of the receiver's state machine fires on a beat
 # that breaks it (test_heartbeat_receiver_rules, no socket); and
@@ -23,17 +23,17 @@ mojo_library(
     name = "komira_job_supervisor_loopback",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
-        "//src/komira_async:komira_async",
-        "//src/komira_atomic_alias:komira_atomic_alias",
-        "//src/komira_fork_join:komira_fork_join",
-        "//src/komira_http_core:komira_http_core",
-        "//src/komira_http_server:komira_http_server",
-        "//src/komira_job_report_proto:komira_job_report_proto",
-        "//src/komira_job_supervisor:komira_job_supervisor",
-        "//src/komira_objectstore:komira_objectstore",
-        "//src/komira_proto_codec:komira_proto_codec",
-        "//src/komira_supervisor:komira_supervisor",
-        "//tools/build/mojo/runtime_paths:komira_runtime_paths",
+        "//src/async_rt:async_rt",
+        "//src/atomic_alias:atomic_alias",
+        "//src/fork_join:fork_join",
+        "//src/http_core:http_core",
+        "//src/http_server:http_server",
+        "//src/job_report_proto:job_report_proto",
+        "//src/job_supervisor:job_supervisor",
+        "//src/objectstore:objectstore",
+        "//src/proto_codec:proto_codec",
+        "//src/supervisor:supervisor",
+        "//tools/build/mojo/runtime_paths:runtime_paths",
     ],
     test_srcs = [
         "tests/test_heartbeat_receiver_rules.mojo",

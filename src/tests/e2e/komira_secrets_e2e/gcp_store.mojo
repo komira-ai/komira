@@ -19,8 +19,8 @@
 # string, bytes as standard base64, Timestamps in RFC 3339.
 # =============================================================================
 
-from komira_encoding import base64_encode
-from komira_json import JsonValue
+from encoding import base64_encode
+from json import JsonValue
 
 # The project every test addresses, its number, and the one location whose
 # regional endpoint the fake serves.

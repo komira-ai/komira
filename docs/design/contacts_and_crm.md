@@ -1,9 +1,9 @@
 # Contacts and CRM: the data model, the store, keys, erasure and authorization
 
-Status: design, no code. It decides the data model that `komira_contacts_proto`, `komira_contacts`, `komira_crm_proto`
-and `komira_crm` will implement; none of them is in the tree yet. It builds on `komira_vcard` and `komira_content_line`
+Status: design, no code. It decides the data model that `contacts_proto`, `contacts`, `crm_proto`
+and `crm` will implement; none of them is in the tree yet. It builds on `vcard` and `content_line`
 (the vCard reader and writer, in the tree: `parse_contacts` and the `Contact` type), on the `Database` trait of
-`komira_db` ([databases](databases.md)) and on `AuthzPort` and `AuthzResource` in `komira_authz_api` (the
+`db` ([databases](databases.md)) and on `AuthzPort` and `AuthzResource` in `authz_api` (the
 `{kind, id, attributes}` resource shape is open in #790).
 Related: #828 (the `unique_together` emitter).
 

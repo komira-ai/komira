@@ -46,7 +46,7 @@ pub const ALL_PROTOCOLS: &[AwsProtocol] = &[
 ];
 
 /// The protocols whose request and response bodies are JSON documents, and
-/// so whose generated code imports the `komira_json` runtime.
+/// so whose generated code imports the `json` runtime.
 pub const JSON_BODY_PROTOCOLS: &[AwsProtocol] = &[AwsProtocol::Json, AwsProtocol::RestJson];
 
 /// The protocols that bind members to the HTTP message (URI labels and
@@ -55,7 +55,7 @@ pub const JSON_BODY_PROTOCOLS: &[AwsProtocol] = &[AwsProtocol::Json, AwsProtocol
 pub const REST_PROTOCOLS: &[AwsProtocol] = &[AwsProtocol::RestJson, AwsProtocol::RestXml];
 
 /// The protocols whose request and response bodies are XML documents, and
-/// so whose generated code imports the `komira_xml` runtime and the core's
+/// so whose generated code imports the `xml` runtime and the core's
 /// restXml body codec.
 pub const XML_BODY_PROTOCOLS: &[AwsProtocol] = &[AwsProtocol::RestXml];
 

@@ -37,9 +37,9 @@
 #     one mojo_cov_gate, a conda package none; the gate's inputs hold each
 #     test's mojo_cov_run, and each test's mojo_cov_branch_classify for a
 #     library whose gate reads its branch records ("reads" in the table: a
-#     fixture of the tests cell, or komira_retry, a library of
+#     fixture of the tests cell, or retry, a library of
 #     COVERAGE_BRANCH_GATE in tools/build/coverage/policy.bzl) and none for
-#     one whose gate does not ("unread": komira_rowcell, not in that list);
+#     one whose gate does not ("unread": rowcell, not in that list);
 #   - with it unset (`-c komira.coverage=`, which clears a global value), every
 #     fact is the one of `=false`: the default is off;
 #   - on darwin-arm64 with it on, no library has the `coverage_debug`, the
@@ -102,9 +102,9 @@ TARGETS="
 tests//functional/coverage:covlib 2 no reads 0
 tests//functional/coverage:covbare 0 no reads 0
 tests//functional/coverage:covuser 1 build reads 0
-komira//src/komira_retry:komira_retry 6 readme reads 1
-komira//src/komira_retry:komira_retry_conda 6 conda reads 1
-komira//src/komira_rowcell:komira_rowcell 1 readme unread 1
+komira//src/retry:retry 6 readme reads 1
+komira//src/retry:komira_retry_conda 6 conda reads 1
+komira//src/rowcell:rowcell 1 readme unread 1
 komira//tools/build/examples:test_hellopkg 1 test unread 0
 "
 

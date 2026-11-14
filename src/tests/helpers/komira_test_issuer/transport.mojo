@@ -1,5 +1,5 @@
 # =============================================================================
-# komira_test_issuer/transport.mojo: `IssuerTokenTransport`, a komira_oauth
+# komira_test_issuer/transport.mojo: `IssuerTokenTransport`, a oauth
 #   `TokenEndpointTransport` that answers from a `TestIssuer`'s token
 #   endpoint in process, so a `ClientCredentialSource` runs against the test
 #   issuer with no socket.
@@ -16,7 +16,7 @@
 # through the transport. No pointer crosses this file's API.
 # =============================================================================
 
-from komira_oauth import TokenEndpointReply, TokenEndpointTransport
+from oauth import TokenEndpointReply, TokenEndpointTransport
 
 from komira_test_issuer.issuer import TestIssuer
 

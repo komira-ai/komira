@@ -24,7 +24,7 @@
 # byte-equal, a version 4 UUID, and the version id the client reports; how
 # many writes were applied and replayed; the versions DescribeSecret lists.
 # Last, a self-check of the FAKE, not of the client: the line
-# komira_http_server writes to stdout for the scripted 500 (`server_log`,
+# http_server writes to stdout for the scripted 500 (`server_log`,
 # rendered by the server's own `error_response_log_line`) holds neither
 # value, as the server's contract for a returned 5xx body requires. Nothing
 # the client does can change that line; the check exists so a fake that
@@ -33,7 +33,7 @@
 # in test_secret_lifecycle and test_signature_refusals; this test raises no
 # error to check.
 #
-# Defects it catches, each seen red with a mutant planted in komira_aws_core's
+# Defects it catches, each seen red with a mutant planted in aws_core's
 # `_send_with_retries`: a fresh token minted per attempt (red at the Put
 # byte-equality assertion; the Create run goes red too, answered
 # ResourceExistsException), and the token dropped on the resend (the resend
@@ -43,7 +43,7 @@
 
 from std.testing import assert_equal, assert_false, assert_true
 
-from komira_aws_secretsmanager.komira_aws_secretsmanager import (
+from aws_secretsmanager.aws_secretsmanager import (
     SecretsManagerCreateSecretRequest,
     SecretsManagerDescribeSecretRequest,
     SecretsManagerGetSecretValueRequest,

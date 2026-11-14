@@ -41,9 +41,9 @@ _LOGS = [
 # takes it with no default (`= ...` cannot match the trailing comma), stores
 # the caller's value rather than one of its own, and the send passes that
 # field as its second argument. send_sigv4_signed_request is in
-# komira//src/komira_aws_core/aws_send.mojo; signed_request.mojo's header
+# komira//src/aws_core/aws_send.mojo; signed_request.mojo's header
 # states the signature these pins assume, which the tests cell's stub
-# (../mojo_aws_client/stub/komira_aws_core) keeps; all three change together.
+# (../mojo_aws_client/stub/aws_core) keeps; all three change together.
 _CONFIG_PINS = [
     "http_config: HttpClientConfig,",
     "self._http_config = http_config.copy()",
@@ -62,29 +62,29 @@ aws_codegen_golden(
         "GetLogEvents",
         "--pure-only",
         "--probe-import",
-        "komira_aws_logs.komira_aws_logs",
+        "aws_logs.aws_logs",
     ],
     golden = "golden/logs_pure.mojo",
     golden_probe = "golden/logs_pure_probe.mojo",
     model = _LOGS_MODEL,
-    module = "komira_aws_logs",
+    module = "aws_logs",
 )
 
-# The same operation as a client: it adds the komira_aws_core transport names,
-# komira_http_client.client.HttpClientConfig and
-# komira_http_core.transport.io_stream.Connector.
+# The same operation as a client: it adds the aws_core transport names,
+# http_client.client.HttpClientConfig and
+# http_core.transport.io_stream.Connector.
 aws_codegen_golden(
     name = "logs_client",
     gen_args = _LOGS + [
         "--operations",
         "GetLogEvents",
         "--probe-import",
-        "komira_aws_logs.komira_aws_logs",
+        "aws_logs.aws_logs",
     ],
     golden = "golden/logs_client.mojo",
     golden_probe = "golden/logs_client_probe.mojo",
     model = _LOGS_MODEL,
-    module = "komira_aws_logs",
+    module = "aws_logs",
     must_contain = _CONFIG_PINS,
 )
 
@@ -214,7 +214,7 @@ gen_check(
     name = "tiny_rest_xml_pure_scoped",
     absent = [
         "komira_http",
-        "komira_json",
+        "json",
     ],
     files = [
         "_parts",
@@ -284,7 +284,7 @@ gen_check(
     name = "tiny_query_pure_scoped",
     absent = [
         "komira_http",
-        "komira_json",
+        "json",
     ],
     files = [
         "_parts",
@@ -320,7 +320,7 @@ tests_check(
 # awsQuery errors.
 gen_check(
     name = "tiny_query_client_scoped",
-    absent = ["komira_json"],
+    absent = ["json"],
     files = [
         "_parts",
         "__init__.mojo",
@@ -332,7 +332,7 @@ gen_check(
         "protocol     : query (awsQuery)",
         "mode         : client",
         "var info = aws_query_error(res.to_response())",
-        "from komira_http_core.transport.io_stream import Connector",
+        "from http_core.transport.io_stream import Connector",
         "var res = self.send_unsigned(req^)",
         "return send_unsigned_request[Self.C](",
     ],
@@ -406,7 +406,7 @@ gen_check(
     name = "tiny_ec2_pure_scoped",
     absent = [
         "komira_http",
-        "komira_json",
+        "json",
     ],
     files = [
         "_parts",
@@ -654,7 +654,7 @@ aws_codegen_refusal(
         "--operations",
         "GetLogEvents",
         "--probe-import",
-        "komira_aws_logs.komira_aws_logs",
+        "aws_logs.aws_logs",
     ],
     model = _LOGS_MODEL,
     probe_out = False,

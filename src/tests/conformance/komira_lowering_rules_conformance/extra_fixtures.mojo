@@ -30,19 +30,19 @@
 
 from std.memory import OwnedPointer
 
-from komira_arrow.arrow_types import ArrowType
-from komira_plan_expr.expr import Expr
-from komira_plan_expr.scalar_value import ScalarValue
-from komira_plan_ir.logical_plan import (
+from arrow.arrow_types import ArrowType
+from plan_expr.expr import Expr
+from plan_expr.scalar_value import ScalarValue
+from plan_ir.logical_plan import (
     LogicalPlan,
     ExprArray,
     SOURCE_CSV,
     SOURCE_NDJSON,
     JOIN_INNER,
 )
-from komira_plan_stats.table_stats import ColumnStats, TableStats
-from komira_scan_source.orc_source import OrcSource
-from komira_scan_source.source_variant import SourceVariant
+from plan_stats.table_stats import ColumnStats, TableStats
+from scan_source.orc_source import OrcSource
+from scan_source.source_variant import SourceVariant
 
 from komira_lowering_rules_conformance.fixtures import (
     Col,

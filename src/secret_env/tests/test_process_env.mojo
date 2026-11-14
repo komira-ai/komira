@@ -1,0 +1,163 @@
+# =============================================================================
+# tests/test_process_env.mojo: ProcessEnv and EnvSecretStore[ProcessEnv] over
+#   the real process environment.
+# =============================================================================
+#
+# The variables come from the library's `test_env` (BUCK), which the gate
+# runner exports for this test: nothing is set in-process and nothing is read
+# from the host. Pinned here: set, empty and unset are three different
+# answers from `ProcessEnv.lookup`, a value is copied byte for byte (a
+# non-ASCII byte is not re-encoded), a value of exactly MAX_SECRET_LEN bytes
+# is read whole and one byte longer is refused rather than truncated, and the
+# store's refusals hold over the real reader.
+# =============================================================================
+
+from std.testing import assert_equal, assert_true, assert_false
+
+from secret_store import MAX_SECRET_LEN, SecretValue
+
+from secret_env import EnvSecretStore, ProcessEnv
+
+
+def _bytes_equal(v: SecretValue, want: String) -> Bool:
+    var got = v.revealed_bytes()
+    var w = want.as_bytes()
+    if len(got) != len(w):
+        return False
+    for i in range(len(w)):
+        if got[i] != w[i]:
+            return False
+    return True
+
+
+def _refusal(mut store: EnvSecretStore[ProcessEnv], handle: String) -> String:
+    try:
+        _ = store.resolve(handle)
+    except e:
+        return String(e)
+    return String("<resolved>")
+
+
+def test_lookup_distinguishes_set_empty_and_unset() raises:
+    var env = ProcessEnv()
+    var set_ = env.lookup("KOMIRA_SECRET_ENV_TEST_SET")
+    assert_true(Bool(set_), "a set variable is found")
+    assert_true(_bytes_equal(set_.take(), "s3cr3t-value"))
+
+    var empty = env.lookup("KOMIRA_SECRET_ENV_TEST_EMPTY")
+    assert_true(Bool(empty), "a set-but-empty variable is found")
+    assert_equal(empty.take().len(), 0)
+
+    var unset = env.lookup("KOMIRA_SECRET_ENV_TEST_NEVER_SET")
+    assert_false(Bool(unset), "an unset variable is None")
+
+
+def test_value_is_copied_byte_for_byte() raises:
+    var env = ProcessEnv()
+    var got = env.lookup("KOMIRA_SECRET_ENV_TEST_UTF8")
+    assert_true(Bool(got))
+    var v = got.take()
+    assert_true(_bytes_equal(v, "données=1"), "non-ASCII bytes are not re-encoded")
+    assert_equal(v.len(), 10)
+
+
+def test_value_at_the_limit_is_read_whole() raises:
+    """KOMIRA_SECRET_ENV_TEST_MAX is MAX_SECRET_LEN bytes of 'q'."""
+    var env = ProcessEnv()
+    var got = env.lookup("KOMIRA_SECRET_ENV_TEST_MAX")
+    assert_true(Bool(got))
+    var v = got.take()
+    assert_equal(v.len(), MAX_SECRET_LEN)
+    var b = v.revealed_bytes()
+    assert_equal(Int(b[0]), Int(ord("q")))
+    assert_equal(Int(b[MAX_SECRET_LEN - 1]), Int(ord("q")))
+
+
+def test_value_past_the_limit_is_refused_not_truncated() raises:
+    """KOMIRA_SECRET_ENV_TEST_LONG is MAX_SECRET_LEN + 1 bytes of 'q'.
+
+    Killed by: a scan that stops at MAX_SECRET_LEN, which would hand back
+    the first MAX_SECRET_LEN bytes, a corrupted credential. The refusal names
+    the handle and carries no byte of the value."""
+    var store = EnvSecretStore[ProcessEnv](ProcessEnv())
+    var msg = _refusal(store, "KOMIRA_SECRET_ENV_TEST_LONG")
+    assert_equal(
+        msg,
+        "EnvSecretStore: environment variable KOMIRA_SECRET_ENV_TEST_LONG:"
+        " value is longer than MAX_SECRET_LEN (4096 bytes)",
+    )
+    assert_false("qqqq" in msg, "the refusal quotes no value bytes")
+
+
+def test_lookup_refuses_a_bad_name() raises:
+    var env = ProcessEnv()
+    var refused = False
+    try:
+        _ = env.lookup("A=B")
+    except:
+        refused = True
+    assert_true(refused, "a name with '=' never reaches getenv")
+
+
+def test_store_over_the_process_env() raises:
+    var store = EnvSecretStore[ProcessEnv](ProcessEnv())
+    var v = store.resolve("KOMIRA_SECRET_ENV_TEST_SET")
+    assert_true(_bytes_equal(v, "s3cr3t-value"))
+    assert_equal(String(v), "SecretValue(<redacted:12B>)")
+    assert_equal(
+        _refusal(store, "KOMIRA_SECRET_ENV_TEST_EMPTY"),
+        "EnvSecretStore: environment variable KOMIRA_SECRET_ENV_TEST_EMPTY is set but empty",
+    )
+    assert_equal(
+        _refusal(store, "KOMIRA_SECRET_ENV_TEST_NEVER_SET"),
+        "EnvSecretStore: environment variable KOMIRA_SECRET_ENV_TEST_NEVER_SET is not set",
+    )
+
+
+def _lookup_refusal(name: String) -> String:
+    """The message `ProcessEnv().lookup(name)` raises, or "<no raise>"."""
+    var env = ProcessEnv()
+    try:
+        _ = env.lookup(name)
+    except e:
+        return String(e)
+    return String("<no raise>")
+
+
+def test_lookup_refusals_are_exact() raises:
+    """The reader's own refusals, without the store's prefix: the grammar's
+    message for a bad name (checked before getenv), and the length refusal,
+    which names neither the variable nor a byte of its value."""
+    assert_equal(_lookup_refusal(""), "secret env name is empty")
+    assert_equal(
+        _lookup_refusal("A=B"),
+        "secret env name (3 bytes) is not an environment variable name:"
+        " byte 1 is outside [A-Za-z_][A-Za-z0-9_]*",
+    )
+    assert_equal(
+        _lookup_refusal("KOMIRA_SECRET_ENV_TEST_LONG"),
+        "value is longer than MAX_SECRET_LEN (4096 bytes)",
+    )
+    assert_equal(_lookup_refusal("KOMIRA_SECRET_ENV_TEST_MAX"), "<no raise>")
+
+
+def test_value_at_the_limit_is_every_byte() raises:
+    var env = ProcessEnv()
+    var got = env.lookup("KOMIRA_SECRET_ENV_TEST_MAX")
+    var v = got.take()
+    var b = v.revealed_bytes()
+    assert_equal(len(b), MAX_SECRET_LEN)
+    for i in range(MAX_SECRET_LEN):
+        assert_equal(Int(b[i]), Int(ord("q")), String("byte ") + String(i))
+
+
+def main() raises:
+    test_lookup_distinguishes_set_empty_and_unset()
+    test_value_is_copied_byte_for_byte()
+    test_value_at_the_limit_is_read_whole()
+    test_value_past_the_limit_is_refused_not_truncated()
+    test_lookup_refuses_a_bad_name()
+    test_store_over_the_process_env()
+    test_lookup_refusals_are_exact()
+    test_value_at_the_limit_is_every_byte()
+    print("PASS test_process_env")

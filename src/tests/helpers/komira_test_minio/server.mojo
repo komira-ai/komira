@@ -48,9 +48,9 @@
 
 from std.os import abort
 
-from komira_test_run_id import Entropy, RunId, hex16_lower
-from komira_test_verdict import Verdict
-from komira_validation_run.validation_run_tag import is_valid_validation_run_id
+from test_run_id import Entropy, RunId, hex16_lower
+from test_verdict import Verdict
+from validation_run.validation_run_tag import is_valid_validation_run_id
 
 from ._private_files import (
     _make_private_dir,

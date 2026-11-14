@@ -5,11 +5,11 @@
 # proto package: example.logging.v1
 # Mojo package:  komira_example_logging
 #
-# Generated message structs conform to the komira_proto_codec
+# Generated message structs conform to the proto_codec
 # `Serializable` trait: encode[E: WireEncoder] / decode[D: WireDecoder].
 
-from komira_proto_codec import Serializable, WireEncoder, WireDecoder
-from komira_grpc import (
+from proto_codec import Serializable, WireEncoder, WireDecoder
+from grpc import (
     Protocol,
     CallOptions,
     GrpcClient,
@@ -19,11 +19,11 @@ from komira_grpc import (
     ClientStreamEncoder,
     BidiStreamCodec,
 )
-from komira_proto_codec.proto_binary import PbEncoder, PbDecoder
-from komira_http_core.transport.io_stream import Connector
-from komira_async.reactor.reactor import Reactor
-from komira_async.runtime.runtime_trait import Runtime
-from komira_async.cancellation.token import CancellationToken
+from proto_codec.proto_binary import PbEncoder, PbDecoder
+from http_core.transport.io_stream import Connector
+from async_rt.reactor.reactor import Reactor
+from async_rt.runtime.runtime_trait import Runtime
+from async_rt.cancellation.token import CancellationToken
 from komira_example_logging.log_entry import LogEntry
 from komira_example_logging.monitored_resource import MonitoredResource
 from komira_example_logging.monitored_resource import MonitoredResourceDescriptor

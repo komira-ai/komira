@@ -1,6 +1,6 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
-# Test-only: komira_calendar_ics against RFC 5545 and against files in the
+# Test-only: calendar_ics against RFC 5545 and against files in the
 # shape calendar clients export.
 #
 #   test_rfc5545        the §3.6.1 VEVENT examples, the §4 iCalendar
@@ -21,13 +21,13 @@ mojo_library(
     name = "komira_calendar_ics_conformance",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
-        "//src/komira_calendar:komira_calendar",
-        "//src/komira_calendar_ics:komira_calendar_ics",
-        "//src/komira_calendar_proto:komira_calendar_proto",
-        "//src/komira_content_line:komira_content_line",
-        "//src/komira_datetime:komira_datetime",
-        "//src/komira_proto_codec:komira_proto_codec",
-        "//src/komira_wkt:komira_wkt",
+        "//src/calendar:calendar",
+        "//src/calendar_ics:calendar_ics",
+        "//src/calendar_proto:calendar_proto",
+        "//src/content_line:content_line",
+        "//src/datetime:datetime",
+        "//src/proto_codec:proto_codec",
+        "//src/wkt:wkt",
     ],
     conda = False,
     test_srcs = [

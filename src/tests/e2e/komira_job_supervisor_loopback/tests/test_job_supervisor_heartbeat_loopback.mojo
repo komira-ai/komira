@@ -1,11 +1,11 @@
 # =============================================================================
 # test_job_supervisor_heartbeat_loopback.mojo -- run_job_supervisor, the REAL
 # HttpHeartbeatReporter and REAL children, against a stateful heartbeat
-# receiver on a real komira_http_server HttpServer, in one build action
+# receiver on a real http_server HttpServer, in one build action
 # =============================================================================
 #
 # Each case runs `run_job_supervisor` on one thread (a `/bin/sh` job spawned
-# through komira_supervisor) while a `HeartbeatReceiver` (heartbeat_receiver.mojo)
+# through supervisor) while a `HeartbeatReceiver` (heartbeat_receiver.mojo)
 # is served on 127.0.0.1 on the other. Every assertion about what the
 # supervisor reported is made from the receiver's side, i.e. from the decoded
 # wire, and every case asserts the receiver recorded no violation of its state
@@ -49,7 +49,7 @@
 #       every line, byte for byte, exit code 3 (this one IS read off the wire,
 #       from the JobFailure), no signal, history ASSIGNED, RUNNING, FAILED.
 #       The FAILED beat's body is larger than the server's first-recv buffer
-#       (komira_http_server REQ_BUF_BYTES), so the server needed more than one
+#       (http_server REQ_BUF_BYTES), so the server needed more than one
 #       recv to reassemble it (dispatch's cross-recv body accumulation; argued
 #       from the buffer size, not counted). Catches: a tail cut at a byte
 #       budget (planted: truncate at 4096 bytes), a dropped or reordered line;
@@ -59,7 +59,7 @@
 #       name for; `sleep 3` runs to COMPLETED. Without it, (b) is satisfied by a
 #       supervisor that stops on any reply.
 #
-# This replaces komira_job_supervisor's test_heartbeat_send_cancel, whose
+# This replaces job_supervisor's test_heartbeat_send_cancel, whose
 # responder was a raw-socket pthread replaying scripted replies: (b) and the
 # CONTROL are its two cases, now against a receiver that holds the run's state.
 # =============================================================================
@@ -68,23 +68,23 @@ from std.os import remove
 from std.pathlib import Path
 from std.testing import assert_equal, assert_true
 
-from komira_http_core.codec import HttpMethod
-from komira_http_server.connection import REQ_BUF_BYTES
-from komira_http_server.routing import Router
-from komira_http_server.server import HttpServer, HttpServerConfig
-from komira_objectstore import InMemoryConditionalStore
-from komira_runtime_paths import test_tmpdir
-from komira_supervisor.proc_ffi import proc_kill
+from http_core.codec import HttpMethod
+from http_server.connection import REQ_BUF_BYTES
+from http_server.routing import Router
+from http_server.server import HttpServer, HttpServerConfig
+from objectstore import InMemoryConditionalStore
+from runtime_paths import test_tmpdir
+from supervisor.proc_ffi import proc_kill
 
-from komira_job_report_proto.job_report import JobDirective, JobPhase
+from job_report_proto.job_report import JobDirective, JobPhase
 
-from komira_job_supervisor import (
+from job_supervisor import (
     HttpHeartbeatReporter,
     JobSupervisorConfig,
     JobSupervisorPhase,
     run_job_supervisor,
 )
-from komira_job_supervisor.heartbeat_auth import NoHeartbeatAuth
+from job_supervisor.heartbeat_auth import NoHeartbeatAuth
 
 from komira_job_supervisor_loopback import (
     BEAT_PATH,

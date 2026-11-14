@@ -58,12 +58,12 @@ row. Each is **grounded**: its grounding names the plan constants that
 express it, which the lint requires a grounding file to declare at column 0,
 as `comptime <ID>: UInt8 = <n>` or `comptime <ID> = UInt8(<n>)`. The
 grounding files, and the identifier prefixes (families) of each, are named
-in the root [`BUCK`](../BUCK): `src/komira_plan_ir/logical_plan.mojo`
+in the root [`BUCK`](../BUCK): `src/plan_ir/logical_plan.mojo`
 (`PLAN_`, the plan node tags; `SOURCE_`, the source kinds; `JOIN_`, the join
-kinds), `src/komira_plan_expr/expr.mojo` (`EXPR_`, the expression kinds),
-`src/komira_plan_expr/fs_descriptor_pod.mojo` (`FS_SCHEME_`, the remote
-prefixes), `src/komira_plan_expr/udf_data.mojo` (`UDF_KIND_`) and
-`src/komira_arrow/write_target.mojo` (`WFMT_`, the formats a result is
+kinds), `src/plan_expr/expr.mojo` (`EXPR_`, the expression kinds),
+`src/plan_expr/fs_descriptor_pod.mojo` (`FS_SCHEME_`, the remote
+prefixes), `src/plan_expr/udf_data.mojo` (`UDF_KIND_`) and
+`src/arrow/write_target.mojo` (`WFMT_`, the formats a result is
 written in). Every constant of a family must be named by a capability or a
 `NOT_CAPABILITIES` row, so a new plan node, expression kind, join kind,
 source kind or write format fails the build until it is classified. A

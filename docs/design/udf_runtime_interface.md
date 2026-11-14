@@ -103,8 +103,8 @@ Decisions this document makes that go beyond the language rulings it implements:
 ## 2. What exists today, and why the shape must change now
 
 **The logical plan names a function, and the receiving process resolves the name.**
-- `WireUdfCall` carries `name=1`, `in_arrow_type_id=2`, `out_arrow_type_id=3` and a single `child=4`. That child "MAY NOT BECOME `repeated`" (`src/komira_plan_proto/plan.proto:791-824`).
-- The node form, `WireUdf` (`plan.proto:1186`), mirrors `UdfData` (`src/komira_plan_expr/udf_data.mojo:216-293`). The `UdfData` field `operator_factory_id` only means something for a Mojo function known at compile time.
+- `WireUdfCall` carries `name=1`, `in_arrow_type_id=2`, `out_arrow_type_id=3` and a single `child=4`. That child "MAY NOT BECOME `repeated`" (`src/plan_proto/plan.proto:791-824`).
+- The node form, `WireUdf` (`plan.proto:1186`), mirrors `UdfData` (`src/plan_expr/udf_data.mojo:216-293`). The `UdfData` field `operator_factory_id` only means something for a Mojo function known at compile time.
 - A UDF whose name cannot be resolved is refused (`plan.proto:88-94`).
 - No field names a language.
 
@@ -112,21 +112,21 @@ Decisions this document makes that go beyond the language rulings it implements:
 - Kinds: `UDF_KIND_MAP/FILTER/AGG` (`udf_data.mojo:143-145`).
 - Null modes (`:154-156`) and stability (`:165-167`).
 - Parallelism contracts: `STATELESS`, `SERIAL_ORDERED`, `MERGEABLE`, `PARTITION_LOCAL` (`:186-189`), carried on the wire as `WireUdf.parallelism_tag` (`plan.proto:1204`). The optimized-plan `UdfRef` has no parallelism field; §3.4 states the rule that replaces it.
-- The Mojo aggregate trait already has the lifecycle every language needs: `init`, `update`, `merge`, `finalize` (`src/komira_udf/agg_fn.mojo:67-140`).
+- The Mojo aggregate trait already has the lifecycle every language needs: `init`, `update`, `merge`, `finalize` (`src/udf/agg_fn.mojo:67-140`).
 
 **Part of the data plane exists.**
 
-- Arrow C Data structs with release callbacks: `CArrowSchema` and `CArrowArray` (`src/komira_arrow_ipc/c_data_interface.mojo:136`, `:234`), under an `FFI-BOUNDARY` header (`:1-25`). That exporter *borrows*: "Caller promises the Mojo-owned backing buffers outlive the consumer's reads", and its release never frees the buffer bytes (`:17-20`). It cannot back an array whose release runs after the call returns.
-- The C Stream interface, `CArrowArrayStream` (`src/komira_arrow_ipc/c_data_stream.mojo:232`).
+- Arrow C Data structs with release callbacks: `CArrowSchema` and `CArrowArray` (`src/arrow_ipc/c_data_interface.mojo:136`, `:234`), under an `FFI-BOUNDARY` header (`:1-25`). That exporter *borrows*: "Caller promises the Mojo-owned backing buffers outlive the consumer's reads", and its release never frees the buffer bytes (`:17-20`). It cannot back an array whose release runs after the call returns.
+- The C Stream interface, `CArrowArrayStream` (`src/arrow_ipc/c_data_stream.mojo:232`).
   - Export makes no copy, and each exported column holds a shared reference on its buffer (`c_data_stream.mojo:385-395`). This is the model the UDF exporter reuses (§4.4).
   - Import copies: "buffers are COPIED" (`drain_record_batch_stream`, `:3083-3087`; `drain_c_abi_record_batch_stream`, `:3264-3278`).
-- Arrow IPC can decode from mapped memory without copying: `decode_record_batch_message_mmap` (`src/komira_arrow_ipc/ipc_decoder_dispatch.mojo:4088`) and `borrow_from_mmap` (`src/komira_buffer/src/komira_buffer/shared_aligned_buffer.mojo:467`).
+- Arrow IPC can decode from mapped memory without copying: `decode_record_batch_message_mmap` (`src/arrow_ipc/ipc_decoder_dispatch.mojo:4088`) and `borrow_from_mmap` (`src/byte_buffer/src/byte_buffer/shared_aligned_buffer.mojo:467`).
 - Missing:
   - import of a foreign array without a copy, with validation of its layout;
   - the Arrow C Device structs;
   - any shared-memory channel (`git grep -E 'memfd|shm_open' origin/main -- src` finds nothing);
   - a UDF executor;
-  - a UDF operator in the physical plan. `src/komira_plan_ir/physical_plan.mojo:206-209` lists only `OP_FILTER/PROJECT/LIMIT/JOIN_PROBE`. Today the SDK walks the expression and evaluates UDF calls itself, because of a package cycle (`src/komira_plan_ir/expr_udf_sites.mojo:1-30`).
+  - a UDF operator in the physical plan. `src/plan_ir/physical_plan.mojo:206-209` lists only `OP_FILTER/PROJECT/LIMIT/JOIN_PROBE`. Today the SDK walks the expression and evaluates UDF calls itself, because of a package cycle (`src/plan_ir/expr_udf_sites.mojo:1-30`).
 
 **Why the plan format must not name languages.** A plan format with a per-language shape hard-codes its languages in at least six places. This design keeps the plan language-neutral in each of them, and the optimized-plan UDF section follows it:
 
@@ -280,7 +280,7 @@ Every digest the runtime will read is listed in `code.code` with a role. So admi
 - **the shapes** the entry supports, as `UdfKind` values (`MAP_BATCHES_FRAME` grouped or not, `AGGREGATE` plain or mergeable, as the capability bits of §4.2 distinguish them);
 - **the signature**: the argument types in call order (for `ROW` and `MAP_BATCHES_FRAME`, the field list, when the producer knows it: a native library's export helper, or a Python `TypedDict` or dataclass annotation; otherwise the list is absent. A present, empty list means the function reads no column), the return type and, for a mergeable aggregate, the state type, each as a `WireField` (an Arrow type, nested to any depth).
 
-The field list is a message, so that absent and empty differ, as for `UdfRef.read_set` (field 19, §3.1); each runtime's descriptor carries it as a field of this type, emitted whenever it is set, even when empty. `RecordedFields` is added to `src/komira_plan_proto/plan.proto`, beside `WireField`, in stage 11 of `optimized_plan.md` §12, and every runtime's descriptor schema imports both from there rather than copying them. `validate` refuses a `RecordedFields` that breaks its order, its uniqueness or the disjointness of its two lists with `ERR_DESCRIPTOR`; that `key_fields` holds only `group_by` columns is the producer's rule, which `validate` cannot check because the spec carries no `group_by`:
+The field list is a message, so that absent and empty differ, as for `UdfRef.read_set` (field 19, §3.1); each runtime's descriptor carries it as a field of this type, emitted whenever it is set, even when empty. `RecordedFields` is added to `src/plan_proto/plan.proto`, beside `WireField`, in stage 11 of `optimized_plan.md` §12, and every runtime's descriptor schema imports both from there rather than copying them. `validate` refuses a `RecordedFields` that breaks its order, its uniqueness or the disjointness of its two lists with `ERR_DESCRIPTOR`; that `key_fields` holds only `group_by` columns is the producer's rule, which `validate` cannot check because the spec carries no `group_by`:
 
 ```proto
 message RecordedFields {            // in a runtime's descriptor, for ROW and MAP_BATCHES_FRAME entries
@@ -765,7 +765,7 @@ A language may ship a producer without a runtime, for plans that reference only 
 ### 6.2 Type mapping
 
 **The Arrow type in the plan is the only source of truth.**
-- Every runtime publishes its own mapping table, Arrow to the language's types and back, for both null modes. For a native UDF the table belongs to the language's SDK: the library receives Arrow C Data unchanged, and the SDK gives typed views of it (for example `arrow-rs` arrays in Rust, `komira_arrow` arrays in Mojo), so no value is converted inside the runtime.
+- Every runtime publishes its own mapping table, Arrow to the language's types and back, for both null modes. For a native UDF the table belongs to the language's SDK: the library receives Arrow C Data unchanged, and the SDK gives typed views of it (for example `arrow-rs` arrays in Rust, `arrow` arrays in Mojo), so no value is converted inside the runtime.
 - Each table states every loss.
 - The format never encodes a native type.
 
@@ -881,7 +881,7 @@ Each stage lands with its tests welded and its testing plan stated: what each te
 | Stage | Work | Owner area | Done when |
 |---|---|---|---|
 | S0 | This document, and the optimized-plan UDF section aligned to it before any `format_version` ships: open runtime ids, `CodeForm`, `needs.runtimes`, `STEP`, the two `MAP_BATCHES` kinds and the `ROW` kind (`DataFrame.apply(f, axis=1)` and `map_rows` map to `ROW`), and the optional read set on `ROW` and `MAP_BATCHES_FRAME`; one mode per language in place of #1094's three modes (§1.3); a review rule, or a lint if one is written, that no runtime's descriptor schema declares its own copy of `RecordedFields` (§3.1; the message itself is added to `plan.proto` in stage 11 of `optimized_plan.md` §12) | design | Both merged, and the review rule written down |
-| S1 | `komira_udf_runtime.h`; a Mojo binding package, with private pointers behind a safe API; the Arrow C Device structs; an args exporter on the stream path's shared-reference model, and C Data import without copying, with layout validation and release ownership, in `komira_arrow_ipc`; the host library `komira_udf_host` (post-conditions, compaction and scatter, error table); the reference runtime `komira-test/echo`, in C | engine, Arrow | Echo passes every ABI case, and the host maps each status echo can be set to return; the leak, double-release and skip-validation mutants go red |
+| S1 | `komira_udf_runtime.h`; a Mojo binding package, with private pointers behind a safe API; the Arrow C Device structs; an args exporter on the stream path's shared-reference model, and C Data import without copying, with layout validation and release ownership, in `arrow_ipc`; the host library `komira_udf_host` (post-conditions, compaction and scatter, error table); the reference runtime `komira-test/echo`, in C | engine, Arrow | Echo passes every ABI case, and the host maps each status echo can be set to return; the leak, double-release and skip-validation mutants go red |
 | S2 | The conformance corpus package (ABI cases), the harness and the coverage assertion; the runtime-swap invariance test for the optimizer (§3.2) | tests, optimizer | The corpus runs against echo; the invariance mutant goes red |
 | S3 | `komira_udf_worker`: a private C library the Python and Node runtimes link to run user code in worker processes (§5, informative): spawning, slot heaps, copy-out, frame credits, cancel and forced stop, crash and memory reporting. The engine does not link it | engine | A test runtime built on it passes the corpus through the C ABI, with the forced-stop, crash, out-of-memory, held-views and cancel cases |
 | S3b | The `komira/native` runtime (§1.2): `validate` against the descriptor, digest check before `dlopen`, library choice per platform, `komira_udf_native_init_v1`, the library's own `validate` at `load`, forwarding; the fixture libraries `komira-test/native-c` and `komira-test/native-mojo`; export helpers for C and Mojo that record each entry's shapes and signature; the native cases (§6.3); the supervisor's crash reporter that names a faulting native library (§7) | engine, Mojo | Both fixture libraries pass the corpus and the native cases; the digest-after-`dlopen`, unchecked-capabilities and missing-catch mutants go red (the catch case uses the Mojo fixture's raising function; C cannot raise); **the three launch gates pass: the run-token case, the `RTLD_GLOBAL` case and the NULL-dereference case**, with the supervisor's crash reporter that names the faulting library. Native UDFs do not ship before they are green |

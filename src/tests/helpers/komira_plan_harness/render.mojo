@@ -39,19 +39,19 @@
 #
 # canon reads the Arrow buffers itself (the values buffer through
 # `values_view_native`, offsets through the column's offsets buffer, honouring
-# the column's slice offset) instead of komira_arrow's typed accessors, so a
+# the column's slice offset) instead of arrow's typed accessors, so a
 # reader defect is not shared with the typed accessors it may also break.
 # Every offset and length is checked against its buffer before a read.
 # =============================================================================
 
 from std.memory import bitcast
 
-from komira_arrow.arrow_types import ArrowType
-from komira_arrow.column import Column
-from komira_arrow.record_batch import RecordBatch
-from komira_arrow.schema import Field, Schema
-from komira_arrow.table import Table
-from komira_buffer.heap_region import HeapRegion
+from arrow.arrow_types import ArrowType
+from arrow.column import Column
+from arrow.record_batch import RecordBatch
+from arrow.schema import Field, Schema
+from arrow.table import Table
+from byte_buffer.heap_region import HeapRegion
 
 from ._bignat import BigNat
 from .canon_text import CanonPolicy, CanonText
@@ -401,7 +401,7 @@ def render_column(col: Column[HeapRegion], path: String, nested: Bool) raises ->
         return cells^
 
     if t == ArrowType.FIXED_SIZE_BINARY:
-        # komira_arrow keeps the byte width on the column only.
+        # arrow keeps the byte width on the column only.
         var bw = col._inner_size
         if bw <= 0:
             raise Error("canon: column " + path + ": fixed_size_binary width " + String(bw))

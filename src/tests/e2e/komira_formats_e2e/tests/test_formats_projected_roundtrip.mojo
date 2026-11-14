@@ -58,18 +58,18 @@
 
 from std.testing import assert_equal, assert_true
 
-from komira_async.ops.waker_sink import NoopSink
-from komira_avro import read_avro_file_resolved
-from komira_arrow.arrow_types import ArrowType
-from komira_arrow.record_batch import RecordBatch
-from komira_arrow.schema import Field, SchemaBuilder
-from komira_csv import CsvReadOptions, Rfc4180
-from komira_csv.reader import read_csv_bytes_to_batch
-from komira_fs.local_fs import LocalFs
-from komira_fs.pruned_hive_discovery import PrunedHiveDiscovery
-from komira_jsonl.columnar_materializer import materialize_jsonl_to_batch
-from komira_orc import read_orc_bytes_projected
-from komira_runtime_paths import test_tmpdir
+from async_rt.ops.waker_sink import NoopSink
+from avro import read_avro_file_resolved
+from arrow.arrow_types import ArrowType
+from arrow.record_batch import RecordBatch
+from arrow.schema import Field, SchemaBuilder
+from csv import CsvReadOptions, Rfc4180
+from csv.reader import read_csv_bytes_to_batch
+from fs.local_fs import LocalFs
+from fs.pruned_hive_discovery import PrunedHiveDiscovery
+from jsonl.columnar_materializer import materialize_jsonl_to_batch
+from orc import read_orc_bytes_projected
+from runtime_paths import test_tmpdir
 
 from komira_formats_e2e import (
     cities,

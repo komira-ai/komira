@@ -8,7 +8,7 @@ const map =
     \\# Architecture
     \\
     \\| [`komira_a`](../src/komira_a/) | a |
-    \\| [`komira_test_kit`](../src/komira_test_kit) | the shipped kit |
+    \\| [`test_kit`](../src/test_kit) | the shipped kit |
     \\| [`komira_x_e2e`](../src/tests/e2e/komira_x_e2e/) | e2e |
     \\
 ;
@@ -17,7 +17,7 @@ test "src_layout: a clean layout and map pass" {
     var f = try fx.Fixture.init();
     defer f.deinit();
     const m = try f.write("stage/docs/architecture.md", map);
-    const r = try f.run("src_layout", "stage", &.{}, &.{ "src", "komira_test_kit", "komira//", m, "src/komira_a", "src/komira_test_kit", "src/tests/e2e/komira_x_e2e", "tools/other" });
+    const r = try f.run("src_layout", "stage", &.{}, &.{ "src", "test_kit", "komira//", m, "src/komira_a", "src/test_kit", "src/tests/e2e/komira_x_e2e", "tools/other" });
     try fx.expectPass(r, 3);
 }
 
@@ -31,19 +31,19 @@ test "src_layout: an e2e package directly under src/ is refused" {
 test "src_layout: misplaced and unshipped packages are refused" {
     var f = try fx.Fixture.init();
     defer f.deinit();
-    const r = try f.run("src_layout", "stage", &.{}, &.{ "src", "komira_test_gone", "komira//", "-", "src/komira_test_kit", "src/tests/helpers/komira_w_e2e", "src/tests/bench/komira_y", "src/komira_a/inner" });
-    try fx.expectFinding(r, "komira//src/komira_test_kit: a test library directly under src/ that `shipped` does not name");
+    const r = try f.run("src_layout", "stage", &.{}, &.{ "src", "test_gone", "komira//", "-", "src/test_kit", "src/tests/helpers/komira_w_e2e", "src/tests/bench/komira_y", "src/komira_a/inner" });
+    try fx.expectFinding(r, "komira//src/test_kit: a test library directly under src/ that `shipped` does not name");
     try fx.expectFinding(r, "this one belongs in src/tests/e2e/komira_w_e2e");
     try fx.expectFinding(r, "komira//src/tests/bench/komira_y: src/tests holds packages only at src/tests/<kind>/<name>");
     try fx.expectFinding(r, "komira//src/komira_a/inner: a package is src/<name>");
-    try fx.expectFinding(r, "shipped names komira_test_gone, which is no package directly under src/; delete it");
+    try fx.expectFinding(r, "shipped names test_gone, which is no package directly under src/; delete it");
 }
 
 test "src_layout: a package with no row, a stale, second or misnamed row are refused" {
     var f = try fx.Fixture.init();
     defer f.deinit();
     const m = try f.write("stage/map.md", map ++ "| [`komira_b`](../src/komira_a) | again |\n");
-    const r = try f.run("src_layout", "stage", &.{}, &.{ "src", "komira_test_kit", "komira//", m, "src/komira_test_kit", "src/tests/e2e/komira_x_e2e", "src/komira_new" });
+    const r = try f.run("src_layout", "stage", &.{}, &.{ "src", "test_kit", "komira//", m, "src/test_kit", "src/tests/e2e/komira_x_e2e", "src/komira_new" });
     try fx.expectFinding(r, "komira//src/komira_new: no row in");
     try fx.expectFinding(r, "map.md:3: a row for src/komira_a, which is no package");
     try fx.expectFinding(r, "map.md:6: a second row for src/komira_a (the first is line 3)");

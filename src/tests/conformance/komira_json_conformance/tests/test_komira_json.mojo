@@ -3,8 +3,8 @@
 # =============================================================================
 #
 # Feeds every file of the pinned test_parsing corpus (318: 95 y_, 188 n_,
-# 35 i_), as raw bytes, to the komira_json testee (testees.mojo), prints every
-# verdict, and gates them on allowlists/komira_json.txt (gate.mojo); a corpus of any
+# 35 i_), as raw bytes, to the json testee (testees.mojo), prints every
+# verdict, and gates them on allowlists/json.txt (gate.mojo); a corpus of any
 # other size fails. An unlisted abort ends the process, so the test is red.
 # Its allowlist lists no y_ or n_ file: it must accept every y_ file and
 # reject every n_ file. It records the verdict on each i_ file (10 ACCEPTS:
@@ -21,4 +21,4 @@ from komira_json_conformance import PARSER_JSON, conformance_main
 
 def main() raises:
     conformance_main(PARSER_JSON)
-    print("PASS komira_json_conformance komira_json")
+    print("PASS komira_json_conformance json")

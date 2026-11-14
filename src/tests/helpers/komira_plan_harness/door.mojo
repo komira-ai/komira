@@ -7,7 +7,7 @@
 # dlopens one, whose path is given on the command line (`--plan-door=<path>`,
 # door_path_from_args), and is the only code of the harness that touches its
 # C ABI. Everything public here takes and returns values: plan bytes in,
-# a komira_arrow Table (or an Arrow IPC byte list) out, a named error on any
+# a arrow Table (or an Arrow IPC byte list) out, a named error on any
 # refusal or protocol fault. No pointer type appears in a public signature.
 #
 # The C ABI this file speaks (PLAN_DOOR_ABI_VERSION):
@@ -34,7 +34,7 @@
 #
 # Door A. The library fills a caller-owned ArrowArrayStream; the caller owns
 # the stream from then on and releases it exactly once (Arrow C Stream
-# Interface). This file drains it with komira_arrow_ipc's
+# Interface). This file drains it with arrow_ipc's
 # drain_record_batch_stream, which copies every buffer and calls the
 # stream's own release callback, then checks that the callback marked the
 # struct released (PLAN_DOOR_STREAM_NOT_RELEASED otherwise).
@@ -62,7 +62,7 @@
 #   - the OwnedDLHandle: allocated here, never freed, so the library is never
 #     dlclosed. A Mojo library closed while its runtime's globals or threads
 #     are live kills the process at exit (the same reason the dlopen gate
-#     drivers of komira_arrow_ipc never close theirs). One leaked handle and
+#     drivers of arrow_ipc never close theirs). One leaked handle and
 #     one loader reference per PlanDoor.open.
 #   - ctx: created by komira_ctx_new, owned by the PlanDoor, freed exactly
 #     once by komira_ctx_free in PlanDoor's destructor.
@@ -81,15 +81,15 @@ from std.ffi import OwnedDLHandle
 from std.memory import alloc
 from std.sys import size_of
 
-from komira_arrow.schema import RecordBatch, Schema
-from komira_arrow.table import Table
-from komira_arrow_ipc.c_data_stream import (
+from arrow.schema import RecordBatch, Schema
+from arrow.table import Table
+from arrow_ipc.c_data_stream import (
     CArrowArrayStream,
     c_abi_stream_schema,
     consumer_release_c_stream,
     drain_record_batch_stream,
 )
-from komira_collections.slab import Slab
+from containers.slab import Slab
 
 from .door_ipc import decode_ipc_stream
 
@@ -357,7 +357,7 @@ struct PlanDoor(Movable):
         Raises PLAN_DOOR_EMPTY_PLAN for an empty plan, before any call."""
         _require_plan(plan)
         # SAFETY: one heap slot for the ArrowArrayStream, untracked because
-        # komira_arrow_ipc's C-stream functions take that origin; freed on
+        # arrow_ipc's C-stream functions take that origin; freed on
         # every path below. `words` views the same five pointer-sized slots as
         # UInt64s (size asserted next); every `words[i]` and `box[]` below
         # stays inside that one slot.

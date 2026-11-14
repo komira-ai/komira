@@ -13,7 +13,7 @@
 
 from std.testing import assert_equal
 
-from komira_db_sqlite import SqliteDatabase
+from db_sqlite import SqliteDatabase
 
 from komira_contacts_store_conformance import ContactsTarget, run_contacts_suite
 

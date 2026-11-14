@@ -30,7 +30,7 @@ pub struct IrFile {
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct IrImport {
-    /// The Mojo module to import from, e.g. `komira_wkt`.
+    /// The Mojo module to import from, e.g. `wkt`.
     pub module: String,
     /// The symbol to import, e.g. `Timestamp`.
     pub symbol: String,

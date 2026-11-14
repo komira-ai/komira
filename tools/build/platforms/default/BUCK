@@ -19,7 +19,7 @@ komira_default_execution_platforms(
 
 # `default` is komira's registration plus the platform buildrules' rules run on
 # (with_buildrules.bzl says why), so that a library built with buildrules'
-# `mojo_package` (src/komira_json) builds here. Komira's own platform stays first.
+# `mojo_package` (src/json) builds here. Komira's own platform stays first.
 execution_platforms_plus(
     name = "default",
     base = ":komira",

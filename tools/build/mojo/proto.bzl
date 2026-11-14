@@ -6,7 +6,7 @@ protoc-gen-mojo plugin, writing one `<stem>.mojo` per `.proto` plus an
 a mojo_library: other Mojo targets name it in `deps`, and it provides the
 same MojoInfo.
 
-  * The generated code imports its runtime (for example `komira_proto_codec`), a
+  * The generated code imports its runtime (for example `proto_codec`), a
     Mojo library like any other: list it in `deps`.
   * A `.proto` is found by protoc at its import path, `import_prefix`
     joined with its path in the package. Each library's `.proto` files are
@@ -677,7 +677,7 @@ def _mojo_db_proto_library(name, srcs, outs, **kwargs):
 # side of the services `srcs` declare, from their RPCs' `(google.api.http)`
 # rules. protoc-gen-mojo-routes (tools/build/proto-codegen/src/routes/) writes
 # `<stem>_routes.mojo` for each `.proto` of `srcs` that declares a service: per
-# service a handler trait, a komira_http_server `Router` table and a
+# service a handler trait, a http_server `Router` table and a
 # `RequestDispatcher`. `outs` states those files, as mojo_db_proto_library's
 # does. The request and response messages come from `messages`, the Mojo
 # proto library generated from the same `.proto` files or from the files they

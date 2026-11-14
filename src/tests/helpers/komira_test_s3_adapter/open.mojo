@@ -16,7 +16,7 @@
 # tests do not call it; the opt-in MinIO end-to-end binaries that use it do.
 # =============================================================================
 
-from komira_libc.posix import _read_env
+from libc.posix import _read_env
 from komira_test_bucket import (
     BACKEND_CHOICE_EMBEDDED_MINIO,
     FLAG_MINIO_BINARY,
@@ -25,8 +25,8 @@ from komira_test_bucket import (
     open_test_bucket_from_flags,
     select_backend,
 )
-from komira_test_run_id import SystemClock, UrandomEntropy, mint_run_id
-from komira_test_verdict import exit_cannot_tell
+from test_run_id import SystemClock, UrandomEntropy, mint_run_id
+from test_verdict import exit_cannot_tell
 
 from .object_store import KernelMinioObjectStore, minio_object_store
 from .runner import SpawnedProcessRunner

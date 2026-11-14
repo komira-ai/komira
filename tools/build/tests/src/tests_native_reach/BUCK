@@ -9,7 +9,7 @@ load("@komira//tools/build/mojo:native_reach.bzl", "native_reach_case")
 native_reach_case(
     name = "prefix_sibling_checked",
     srcs = ["plain.mojo"],
-    deps = ["komira//src/komira_fs:komira_fs_posix"],
-    expect_archives = ["links komira//src/komira_fs:komira_fs_posix, which komira//src/komira_fs:komira_fs owns"],
+    deps = ["komira//src/fs:komira_fs_posix"],
+    expect_archives = ["links komira//src/fs:komira_fs_posix, which komira//src/fs:fs owns"],
     visibility = ["//functional/native_reach:"],
 )

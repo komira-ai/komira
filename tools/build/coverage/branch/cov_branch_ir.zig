@@ -382,7 +382,7 @@ pub const Fn = struct {
     }
 
     /// Whether block `b` calls the standard library's raise hook (Mojo's
-    /// code for a `raise`: test 47's trial.mojo, komira_parquet's rle.mojo).
+    /// code for a `raise`: test 47's trial.mojo, parquet's rle.mojo).
     fn raiseBlock(self: *const Fn, b: []const u8) bool {
         const bi = self.by_name.get(b) orelse return false;
         const blk = self.blocks.items[bi];

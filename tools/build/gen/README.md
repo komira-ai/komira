@@ -6,11 +6,11 @@ directory `generated/<name>/` of its package, committed to the repository.
 Nothing else is a source of the library. The generator still runs, in a check.
 
 ```text
-src/komira_aws_sqs/
+src/aws_sqs/
   BUCK
-  generated/komira_aws_sqs/      what the generator wrote; the library's sources
+  generated/aws_sqs/      what the generator wrote; the library's sources
     __init__.mojo
-    komira_aws_sqs.mojo
+    aws_sqs.mojo
     _layout_probe.mojo           (aws and gcp clients) the library's first test
 ```
 
@@ -41,7 +41,7 @@ The check fails for each of these, and its message says which:
 The message ends with the command:
 
 ```text
-./buck2 run komira//tools/build/gen:regen -- komira//src/komira_aws_sqs:komira_aws_sqs
+./buck2 run komira//tools/build/gen:regen -- komira//src/aws_sqs:aws_sqs
 ```
 
 ## Regenerating

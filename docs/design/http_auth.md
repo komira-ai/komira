@@ -29,18 +29,18 @@ code with PKCE), token exchange (RFC 8693), DPoP (RFC 9449), mTLS-bound tokens (
 
 | piece | package | state |
 |---|---|---|
-| `Principal{scheme, subject, claims, presented}`, `PresentedCredential` | `komira_http_server` | #790. On `main` a `Principal` is a subject and claims only. |
-| `AuthzPort`, `AuthzAction`, `AuthzResource{kind, id, attributes}`, the two reference conformers | `komira_authz_api` | #790 replaces `main`'s scope-shaped `AuthzResource` with an opaque `kind` and `id`. |
-| strict JWK and JWK Set parse and render: OKP Ed25519, EC P-256, RSA 2048 to 4096 bits | `komira_jwks` | on `main` |
-| `komira_json.refuse_duplicate_keys` | `komira_json` | on `main` |
-| `BearerJwtMiddleware[V]`, `Rs256JwksVerifier`, the JWKS cache, the flags | `komira_http_auth` | #810: one RS256 trust anchor per process; the signature checked by `komira_jose` (#1106) |
-| ES256, EdDSA and RS256 verify, one pinned algorithm per verifier, the strict JOSE header gate and the claims policy (`ClaimPolicy`) | `komira_jose` | built; `komira_http_auth` verifies through it |
-| signing, a key ring | `komira_jose` | target |
-| several trust anchors per process, chosen by exact `iss` | `komira_http_auth` | target, after `komira_jose` |
-| `client_credentials` client, RFC 8414 metadata and RFC 7591 registration codecs | `komira_oauth` | built: `ClientCredentialSource` over a transport trait; the registration record pins the assertion algorithm (`token_endpoint_auth_signing_alg`). No transport over `komira_http_client` yet. |
+| `Principal{scheme, subject, claims, presented}`, `PresentedCredential` | `http_server` | #790. On `main` a `Principal` is a subject and claims only. |
+| `AuthzPort`, `AuthzAction`, `AuthzResource{kind, id, attributes}`, the two reference conformers | `authz_api` | #790 replaces `main`'s scope-shaped `AuthzResource` with an opaque `kind` and `id`. |
+| strict JWK and JWK Set parse and render: OKP Ed25519, EC P-256, RSA 2048 to 4096 bits | `jwks` | on `main` |
+| `json.refuse_duplicate_keys` | `json` | on `main` |
+| `BearerJwtMiddleware[V]`, `Rs256JwksVerifier`, the JWKS cache, the flags | `http_auth` | #810: one RS256 trust anchor per process; the signature checked by `jose` (#1106) |
+| ES256, EdDSA and RS256 verify, one pinned algorithm per verifier, the strict JOSE header gate and the claims policy (`ClaimPolicy`) | `jose` | built; `http_auth` verifies through it |
+| signing, a key ring | `jose` | target |
+| several trust anchors per process, chosen by exact `iss` | `http_auth` | target, after `jose` |
+| `client_credentials` client, RFC 8414 metadata and RFC 7591 registration codecs | `oauth` | built: `ClientCredentialSource` over a transport trait; the registration record pins the assertion algorithm (`token_endpoint_auth_signing_alg`). No transport over `http_client` yet. |
 | `RemoteAuthzPort` on AuthZEN, with the decision cache and batch `check_many` | `komira_authz_client` | target |
-| route catalog and deny-by-default gate | `komira_resource_gate` | target |
-| an in-process AuthZEN PDP for tests, and its scenario table | `src/tests/helpers/komira_test_pdp` | built. It verifies tokens through a `TokenVerifier`; the one it ships is a table of issued tokens, and a signed-JWT verifier conforms to the same trait once `komira_jose` exists. |
+| route catalog and deny-by-default gate | `resource_gate` | target |
+| an in-process AuthZEN PDP for tests, and its scenario table | `src/tests/helpers/komira_test_pdp` | built. It verifies tokens through a `TokenVerifier`; the one it ships is a table of issued tokens, and a signed-JWT verifier conforms to the same trait once `jose` exists. |
 | an in-process issuer for tests | `src/tests/helpers/komira_test_issuer` | target. With the PDP it is the executable spec of this document: any issuer or PDP that claims this contract passes their scenario tables. |
 
 ## How it works
@@ -66,7 +66,7 @@ of callers, a data partition) names that claim with `--copy-claim` and keys on i
 
 ### The middleware, request by request
 
-`BearerJwtMiddleware[V]` sits in `komira_http_server`'s user-middleware slot. For every request it:
+`BearerJwtMiddleware[V]` sits in `http_server`'s user-middleware slot. For every request it:
 
 1. clears `ctx.principal`;
 2. reads `Authorization`. The credential comes from `Authorization: Bearer <token68>` only, never from the query
@@ -75,7 +75,7 @@ of callers, a data partition) names that claim with `--copy-claim` and keys on i
 3. asks the verifier `V` (below);
 4. on success, replaces `ctx.principal` with a new `Principal`. It never merges into an earlier one.
 
-The middleware logs nothing. Every refusal carries a fixed reason code (`komira_http_auth/reasons.mojo`), which
+The middleware logs nothing. Every refusal carries a fixed reason code (`http_auth/reasons.mojo`), which
 `last_reason()` returns to the embedder and which is safe to log and count. No response carries any part of the token.
 
 ### Checks on a token, in order
@@ -94,7 +94,7 @@ Header, before any key work or signature check:
 
 Key and signature: the key whose `kid` matches, from the anchor's key set. An unknown `kid` triggers at most one
 refetch per refetch window (see the key set, below) and is then refused. The middleware checks the RS256 signature with
-`komira_jose`'s `JwsVerifier` pinned to RS256 (typ JWT, kid required); target, every algorithm through `komira_jose`,
+`jose`'s `JwsVerifier` pinned to RS256 (typ JWT, kid required); target, every algorithm through `jose`,
 which verifies all three.
 
 Claims, only after the signature verifies (the payload is decoded again from its signed segment, with no repeated
@@ -117,7 +117,7 @@ not widened into a verifier that accepts ES256, or the reverse: an issuer that w
 (a cloud's service-account ID tokens, for example) must never reach a verifier that trusts another issuer's keys.
 
 Today a process accepts exactly one anchor, and it must be RS256 with `typ` `JWT` (the case built first: a cloud's
-service-account ID tokens). Target, in `komira_http_auth` after `komira_jose`:
+service-account ID tokens). Target, in `http_auth` after `jose`:
 
 - `alg` per anchor is one of `ES256`, `EdDSA` or `RS256`; `typ` per anchor is exactly one of `at+jwt` (RFC 9068) or
   `JWT`, a property of the issuer's token format. An issuer's own access tokens are `at+jwt`; `JWT` is for an issuer
@@ -189,11 +189,11 @@ what a running deployment accepts.
 these two forms. The refetch window, the default max-age and the fetch timeout have no flags; an embedder sets them
 with `BearerJwtConfig`'s `with_*` methods.
 
-Target flags for authorization (`komira_authz_client`, `komira_oauth`): `--authz=remote` with `--authz-url` (the
+Target flags for authorization (`komira_authz_client`, `oauth`): `--authz=remote` with `--authz-url` (the
 PDP's evaluation URL), `--authz-token-url`, `--authz-client-id` and `--authz-client-key` (a secret-store reference,
 never the key itself); or `--authz=allow-authenticated`. With no `--authz`, every governed route is denied.
 
-### Client credentials (`komira_oauth`)
+### Client credentials (`oauth`)
 
 A service that calls the PDP, or another service, is an OAuth client. It gets a short-lived token for one audience
 from the issuer's token endpoint and presents it as a bearer token:
@@ -215,7 +215,7 @@ from the issuer's token endpoint and presents it as a bearer token:
 The registration record type and its JSON codec (RFC 7591: `client_id`, `client_name`, `jwks` or `jwks_uri`,
 `token_endpoint_auth_method: "private_key_jwt"`, `grant_types: ["client_credentials"]`, `scope`,
 `token_endpoint_auth_signing_alg` (the OpenID Connect registration member: ES256 or EdDSA, the one algorithm the issuer
-verifies the client's assertions with), and one extension member `resource_types`) are in `komira_oauth`. The registry is the issuer's. A client never registers itself; the
+verifies the client's assertions with), and one extension member `resource_types`) are in `oauth`. The registry is the issuer's. A client never registers itself; the
 private key stays in the client's secret store and only the public key enters the record.
 
 ### The decision point (target: `komira_authz_client`)
@@ -265,7 +265,7 @@ Client semantics (each row has a mutant in `komira_authz_client`'s tests):
 | 400, 403 | unavailable, logged as a misconfiguration | never |
 | 429, 5xx, a timeout | unavailable | never |
 
-The body is read with `komira_json`, never by substring search: a body `{"decision":false,"x":{"decision":true}}` is
+The body is read with `json`, never by substring search: a body `{"decision":false,"x":{"decision":true}}` is
 a deny, and anything the client cannot read as a top-level boolean is unavailable.
 
 Vocabulary: `action.name` is `read`, `write`, `delete`, `admin` or a service-namespaced verb (`<service>.<verb>`).
@@ -332,10 +332,10 @@ one JSON error envelope, `{"error": {"code", "message"}}`, for every service.
 
 ## Where the code is
 
-`src/komira_http_server/middleware/middleware.mojo` (`Principal`), `src/komira_authz_api`, `src/komira_jwks`,
-`src/komira_jose`; in review, `src/komira_http_auth` (`middleware.mojo`, `verifier.mojo`,
+`src/http_server/middleware/middleware.mojo` (`Principal`), `src/authz_api`, `src/jwks`,
+`src/jose`; in review, `src/http_auth` (`middleware.mojo`, `verifier.mojo`,
 `claims.mojo`, `jwks_cache.mojo`, `jwks_fetch.mojo`, `flags.mojo`, `config.mojo`, `reasons.mojo`). Targets:
-`src/komira_oauth`, `src/komira_authz_client`, `src/komira_resource_gate`,
+`src/oauth`, `src/komira_authz_client`, `src/resource_gate`,
 `src/tests/helpers/komira_test_issuer`, `src/tests/helpers/komira_test_pdp`, `src/tests/conformance/jose_rfc_vectors`,
 `src/tests/e2e/http_auth_roundtrip`.
 
@@ -348,20 +348,20 @@ dates.
 
 Target, each step with its planted defects (a mutant that must turn a named test red):
 
-- `komira_jose`: RFC 7515 appendix A.2 (RS256) and A.3 (ES256), RFC 8037 appendix A.4 (Ed25519) as fixed vectors;
+- `jose`: RFC 7515 appendix A.2 (RS256) and A.3 (ES256), RFC 8037 appendix A.4 (Ed25519) as fixed vectors;
   mutants: an EdDSA header accepted by an ES256 verifier, `alg: none`, a repeated `aud` member, a `crit` hiding an
   `alg`, `exp == now` accepted with zero leeway, an `aud` array without ours, a `kid` outside the set, `iat` in the
   future beyond the leeway.
 - several anchors: the anchor chosen by `alg` instead of `iss`, or a fall-through to a second anchor (a token signed
   by one issuer that claims another's `iss` is admitted).
-- `komira_oauth`: an assertion without `jti`; a replayed `jti` accepted by the test issuer; a stale token served after
+- `oauth`: an assertion without `jti`; a replayed `jti` accepted by the test issuer; a stale token served after
   a failed refresh.
 - `komira_test_pdp`: `subject.id` taken from the body instead of `properties.token` (the subject-mismatch scenario
   goes red).
 - `komira_authz_client`: the nested-`decision` body read as an allow; an unescaped action; a cache key without the
   token hash (user B served user A's allow); a cache key without the PEP's `client_id`; a TTL not clipped to `exp`; the
   deny ceiling raised; an allow honoured after a revoke past 300 s on an advanced clock; a 5xx cached as a deny.
-- `komira_resource_gate`: an unrouted path proceeds; a missing row is treated as public.
+- `resource_gate`: an unrouted path proceeds; a missing row is treated as public.
 - the end-to-end round trip (test issuer, middleware, gate, test PDP): a gate built with `AllowAuthenticatedAuthz`
   instead of the remote port turns the revoke assertion red.
 
@@ -371,7 +371,7 @@ against itself.
 ## Limits
 
 - Today one trust anchor per process, RS256 with `typ` `JWT` only.
-- HTTP/2 requests do not reach the middleware: `komira_http_server`'s chained serving path closes HTTP/2
+- HTTP/2 requests do not reach the middleware: `http_server`'s chained serving path closes HTTP/2
   connections.
 - The key-set fetch stalls a serving worker, and DNS resolution has no time bound.
 - Issuer discovery (RFC 8414 metadata from `--issuer` alone) is not built: `--jwks-url` is explicit.

@@ -1,0 +1,85 @@
+load("@komira//tools/build/mojo:adopt.bzl", "mojo_adopted_library")
+load("@buildrules//rules/mojo:pack.bzl", "mojo_conda")
+load("@komira//tools/build/package:conda.bzl", "conda_package")
+load(":buildrules.mojo.bzl", "mojo_package")
+
+# Regression detection over an abstract series: a change-point detector
+# (E-divisive with a seeded permutation test), an advisory CUSUM chart for
+# slow drift, O(1) running bounds, the state machine over them
+# (ACCUMULATING / NORMAL / ANOMALY / UNCALIBRATED, with an ANOMALY that
+# latches), a post-a-point online monitor, and the `SeriesSource` /
+# `MeasurementStore` seams a producer implements.
+#
+# The empty `deps` is the design: the surface is stated over `Int64`,
+# `Float64` and an opaque `String` key, so a producer on any data model and
+# any storage format can conform to the seams without this package changing.
+# A first `deps` entry would mean the detector started needing to know what a
+# measurement is.
+#
+# The welded tests are pure properties of this library (no fixture files, no
+# host requirement; the recorded calibration series are compiled into the test
+# sources):
+# - test_edivisive: the energy statistic, the split scan's boundaries, and
+#   determinism (golden PRNG stream, seed derivation, a repeated fit).
+# - test_cusum: the robust scale, the three refusals, the short-reference guard.
+# - test_detector_states: every state transition, the latch, and the
+#   activation boundary on both sides.
+# - test_series_source_seam: a `SeriesSource` conformer driven through the
+#   generic `evaluate_source`.
+# - test_known_zero_corpus: ten recorded sweeps of one binary (a known zero),
+#   every published false-positive and power figure asserted by equality.
+# - test_bounds: Welford against the naive estimator, judged-before-folded-in
+#   ordering, the bounded Phase-I prefix, unarmed-is-not-unbreached.
+# - test_online_api: the online verdict equals the batch verdict at every
+#   prefix.
+# - test_store_seam: three store conformers and the replay-after-restart
+#   property.
+# - test_real_launch_series: the advisory CUSUM arm measured on six real
+#   order-preserving known-zero series.
+# - test_names_and_refusals: every decline/reject word, the constructor
+#   refusals on both sides of each boundary, the empty-input answers.
+# - test_downward_and_combined_arms: downward bound and chart, several arms
+#   named in one detail, an UNCALIBRATED series in the sweep census.
+#
+# Built with buildrules' `mojo_package` from mopm.toml (README.md, "Build files"): `:lib` is the
+# library file and exists only once every test of tests/ has passed.
+mojo_package(path = ".")
+
+# `:anomaly`, the target the packages that depend on this library name, is `:lib` as komira's
+# Mojo rules take it (tools/build/mojo/adopt.bzl): the same file, so a dependent builds only once the
+# tests have passed. It carries the README gate too (`[tests][readme]`): the examples run against
+# `:lib`; the tests are not run again.
+mojo_adopted_library(
+    name = "anomaly",
+    lib = ":lib",
+    readme = "README.md",
+    srcs = glob(["src/anomaly/**/*.mojo"]),
+    test_srcs = glob(["tests/test_*.mojo"]),
+    test_runs = ":test",
+    visibility = ["PUBLIC"],
+)
+
+# The mopm package: `mopm pack` over `:lib`, the `.conda` a mopm registry serves
+# (`mojo-anomaly-0.1.0-mojo1.0.0_0.conda`). `:lib` exists only once the tests passed, so this file
+# exists only then. Publishing it (`mopm publish`) uploads, which is not a build action: it is a step
+# of a CI job that takes this target's output. `mopm` is the one `mojo_package` pins (mopm-toolchain.toml).
+mojo_conda(
+    name = "conda",
+    lib = ":lib",
+    manifest = "mopm.toml",
+    mojo = "1.0.0",
+    mopm = "toolchains//:mopm_0_0_101",
+    package = "anomaly",
+    version = "0.1.0",
+    visibility = ["PUBLIC"],
+)
+
+# Kept for the release machine, which still builds it (release/artifacts.textproto): komira's conda
+# packer over `:anomaly`. It goes when the release machine takes the mopm package. This
+# library's mopm package is `:conda` above.
+conda_package(
+    name = "komira_anomaly_conda",
+    lib = ":anomaly",
+    summary = "The `anomaly` Mojo library of komira, as a conda package.",
+    visibility = ["PUBLIC"],
+)

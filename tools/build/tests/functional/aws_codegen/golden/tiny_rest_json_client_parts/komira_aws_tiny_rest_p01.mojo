@@ -4,13 +4,13 @@
 # Part 1 of 2 of `komira_aws_tiny_rest`: declarations of `komira_aws_tiny_rest.mojo`, which is split so
 # that no generated file reaches 1000 lines. Import them from `komira_aws_tiny_rest`; it re-exports all.
 
-from komira_aws_core import (
+from aws_core import (
     AWS_TS_RFC822, AWS_TS_UNIX, AwsRequest, AwsResponse, aws_blob_from_json, aws_json_blob,
     aws_json_i32, aws_json_i64, aws_json_string, aws_ts_from_json, aws_ts_to_json, AwsRestUri,
     aws_header_field, aws_header_list, aws_i64_from_text, aws_prefix_headers, aws_response_code,
     aws_set_prefix_headers, aws_text_int, aws_text_ts,
 )
-from komira_json import JsonValue, parse_json_bytes
+from json import JsonValue, parse_json_bytes
 
 
 # ---------------------------------------------------------------------------

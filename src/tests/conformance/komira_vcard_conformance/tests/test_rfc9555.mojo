@@ -20,7 +20,7 @@
 
 from std.testing import assert_equal, assert_true
 
-from komira_vcard import ContactImport, emit_contacts, parse_contacts
+from vcard import ContactImport, emit_contacts, parse_contacts
 from komira_vcard_conformance import rfc9555_figures
 
 

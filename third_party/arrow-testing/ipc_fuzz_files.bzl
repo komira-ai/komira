@@ -4,7 +4,7 @@
 # files). Upstream's README of each directory: these are Arrow IPC streams
 # (files), "usually invalid, that used to produce crashes or undesirable
 # behaviour when ingested by the Arrow C++ IPC reader". This is the only list
-# of them; //src/komira_arrow_ipc's corpus test lists the extracted
+# of them; //src/arrow_ipc's corpus test lists the extracted
 # directories and requires exactly these counts.
 IPC_FUZZ_FILES = [
     "arrow-ipc-file/clusterfuzz-testcase-arrow-ipc-file-fuzz-4561721038274560",

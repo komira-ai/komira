@@ -2,8 +2,8 @@
 
     mopm_artifacts(
         name = "mopm_artifacts",
-        packages = ["komira_encoding", "komira_json"],
-        natives = {"komira_libc": {"komira_libc_posix": "//src/komira_libc:native_komira_libc_posix"}},
+        packages = ["encoding", "json"],
+        natives = {"libc": {"komira_libc_posix": "//src/libc:native_komira_libc_posix"}},
     )
 
 A package is a library built with buildrules' `mojo_package` (its BUCK file has

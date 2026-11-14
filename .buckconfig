@@ -13,7 +13,7 @@
   # holds no target that fails by design. Not needed by a consuming repository.
   tests = tools/build/tests
   # buildrules, a git external cell (a git external cell needs no directory): the rules of
-  # libraries built with `mojo_package` (src/komira_json). Pinned below. Its rules are loaded
+  # libraries built with `mojo_package` (src/json). Pinned below. Its rules are loaded
   # from this one cell only, never copied or aliased, so a provider they make has one identity
   # (facebook/buck2#683).
   buildrules = buildrules-ext

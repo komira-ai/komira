@@ -7,19 +7,19 @@
 //! - The body is `application/x-www-form-urlencoded; charset=utf-8`:
 //!   `Action=<operation>&Version=<apiVersion>`, then one parameter per
 //!   scalar the input holds, in declared member order
-//!   (`komira_aws_core.AwsQueryWriter`, which percent-encodes as botocore
+//!   (`aws_core.AwsQueryWriter`, which percent-encodes as botocore
 //!   does). Every member is a parameter, whatever its `location`.
 //! - A member is named by its `locationName`, else its member name, and a
 //!   member of a nested structure is `<outer>.<name>`. ec2Query names it by
 //!   its `queryName`, else its `locationName` with the first letter
 //!   capitalized, else its member name.
-//! - A scalar is `komira_aws_core`'s `aws_text_*` text: "true" / "false",
+//! - A scalar is `aws_core`'s `aws_text_*` text: "true" / "false",
 //!   the decimal integer, the number or "NaN" / "Infinity" / "-Infinity",
 //!   standard base64, a timestamp in the member's format (date-time by
 //!   default). One divergence from botocore: a fraction of a second is
 //!   written as milliseconds (`aws_text_ts`) in date-time and epoch-seconds,
 //!   where botocore writes six digits and whole seconds respectively
-//!   (`komira_aws_core/aws_query.mojo`'s header; pinned by test_aws_query).
+//!   (`aws_core/aws_query.mojo`'s header; pinned by test_aws_query).
 //! - awsQuery lists: wrapped, `<name>.<member>.<i>` from 1, the item name the
 //!   list member's `locationName` or `member`; flattened (the member or the
 //!   list shape says `flattened`), `<name>.<i>`, and when the list member
@@ -34,7 +34,7 @@
 //!
 //! Response (`parse_<op>_response`): the members are read by the XML codec
 //! (`xml_codec`, maps included) from the element the operation's
-//! `resultWrapper` names under the root (`komira_aws_core.aws_query_result`,
+//! `resultWrapper` names under the root (`aws_core.aws_query_result`,
 //! botocore's `QueryParser`), else from the root itself (ec2Query has no
 //! wrapper). An operation with no output reads nothing. An empty body is
 //! read as an empty element, so a 200 with no body sets no member. That is
@@ -46,7 +46,7 @@
 //! substituting `<xml/>` for a query response that has no body
 //! (`tests/unit/test_protocols.py`).
 //!
-//! Errors: `komira_aws_core.aws_query_error`, which reads
+//! Errors: `aws_core.aws_query_error`, which reads
 //! `<ErrorResponse><Error>` and ec2Query's `<Response><Errors><Error>`
 //! through the shared XML error reader (`aws_xml_error_info`).
 //!

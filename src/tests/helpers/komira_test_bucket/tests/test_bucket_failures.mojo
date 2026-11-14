@@ -11,8 +11,8 @@ from komira_test_bucket import (
     TestBucket,
     open_test_bucket,
 )
-from komira_test_run_id import FixedWallClock, RunId
-from komira_test_verdict import VERDICT_CANNOT_TELL, VERDICT_CLEAN, VERDICT_LEAK, Verdict
+from test_run_id import FixedWallClock, RunId
+from test_verdict import VERDICT_CANNOT_TELL, VERDICT_CLEAN, VERDICT_LEAK, Verdict
 
 
 def _scope() -> StoreScope:

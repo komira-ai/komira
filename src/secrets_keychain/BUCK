@@ -1,0 +1,18 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# A SecretStore over the operating system's keychain, for local runs. It
+# depends on secret_store (the port) and supervisor (the process
+# runner behind the macOS backend). The welded tests drive the in-memory
+# backend only; they never start a process.
+mojo_library(
+    name = "secrets_keychain",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/async_rt:async_rt",
+        "//src/crypto:crypto",
+        "//src/secret_store:secret_store",
+        "//src/supervisor:supervisor",
+    ],
+    test_srcs = ["tests/test_keychain_secret_store.mojo"],
+    visibility = ["PUBLIC"],
+)

@@ -6,10 +6,10 @@
 # Part 1 of 2 of `endpoint_bindings`: declarations of `endpoint_bindings.mojo`, which is split so
 # that no generated file reaches 1000 lines. Import them from `endpoint_bindings`; it re-exports all.
 
-from komira_aws_core import (
+from aws_core import (
     AwsRequest, AwsResponse, aws_json_string, AwsPartitionSet, EndpointParams, EndpointRuleSet,
 )
-from komira_json import JsonValue, parse_json_bytes, parse_json_value
+from json import JsonValue, parse_json_bytes, parse_json_value
 
 
 # ---------------------------------------------------------------------------
@@ -793,7 +793,7 @@ def parse_write_get_object_response_response(resp: AwsResponse) raises -> Endpoi
 #
 # The ruleset and the partition table are botocore's published data,
 # embedded from the pinned archive when this module was generated (their
-# sha256 are in the header). `komira_aws_core.EndpointRuleSet` evaluates
+# sha256 are in the header). `aws_core.EndpointRuleSet` evaluates
 # them: nothing below chooses a host, an addressing style or a signer.
 #
 # A call's parameters, lowest precedence first: the client's endpoint

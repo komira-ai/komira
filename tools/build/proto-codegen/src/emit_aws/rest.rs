@@ -7,7 +7,7 @@
 //!
 //! - `uri` members fill the labels of `requestUri` (`{Name}`, greedy
 //!   `{Name+}`), and the literal query of `requestUri` comes first;
-//!   `komira_aws_core.AwsRestUri` encodes both.
+//!   `aws_core.AwsRestUri` encodes both.
 //! - `querystring` members are query parameters, in declared order: a list
 //!   is one parameter per element, and a map is one parameter per entry
 //!   (a map of lists, one per element), which a named member of the same
@@ -36,7 +36,7 @@
 //! also gets `parse_<op>_head`, which reads everything but the body, so a
 //! caller can read the status and headers before the body arrives.
 //!
-//! Scalar text (labels, query values, headers) is `komira_aws_core`'s
+//! Scalar text (labels, query values, headers) is `aws_core`'s
 //! `aws_text_*` writers and `aws_*_from_text` readers; a timestamp uses the
 //! member's resolved format (`aws_in::resolve_timestamp_format`).
 

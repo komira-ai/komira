@@ -98,10 +98,10 @@ need its published bytes (fetched from the registry or carried in the set), and 
 would have to install and test them. The scenario `skipped_member` holds today's behaviour.
 
 The release's targets run the real mopm, the real compiler and the real packages.
-[`tests//functional/readme_e2e:komira_hash`](../tests/functional/readme_e2e/BUCK) is the
-same pipeline over the real `.conda` of `komira_hash` with the stand-in for `mopm add
+[`tests//functional/readme_e2e:hashing`](../tests/functional/readme_e2e/BUCK) is the
+same pipeline over the real `.conda` of `hashing` with the stand-in for `mopm add
 --overlay` ([`fake.zig`](fake.zig)) as mopm. It was the proof of everything but mopm's
-resolution while the pinned mopm lacked `--overlay`; `//release/readme_e2e/verify:komira_hash`
+resolution while the pinned mopm lacked `--overlay`; `//release/readme_e2e/verify:hashing`
 now covers it, so it stays only as the one target that runs the tool with the stand-in
 and a real compiler together, and can be deleted with `standin_mopm` without losing a check.
 

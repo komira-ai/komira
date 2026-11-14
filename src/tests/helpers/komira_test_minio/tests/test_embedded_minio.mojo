@@ -14,7 +14,7 @@ from std.os import listdir, mkdir, stat
 from std.os.path import exists, isdir
 from std.testing import assert_equal, assert_false, assert_true
 
-from komira_libc.posix import _read_env
+from libc.posix import _read_env
 from komira_test_minio import (
     MINIO_REGION,
     UNSTOPPED_SERVER_MARKER,
@@ -26,8 +26,8 @@ from komira_test_minio import (
     start_embedded_minio,
     start_embedded_minio_with_pins,
 )
-from komira_test_run_id import RunId, ScriptedEntropy
-from komira_test_verdict import VERDICT_CANNOT_TELL, VERDICT_CLEAN
+from test_run_id import RunId, ScriptedEntropy
+from test_verdict import VERDICT_CANNOT_TELL, VERDICT_CLEAN
 
 
 def _tmp() raises -> String:

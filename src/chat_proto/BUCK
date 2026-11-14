@@ -1,0 +1,160 @@
+load("@buildrules//rules/mojo:pack.bzl", "mojo_conda", "mojo_conda_holds")
+load("@komira//tools/build/mojo:adopt.bzl", "mojo_adopted_library")
+load("@komira//tools/build/mojo:proto.bzl", "mojo_proto_library", "proto_srcs")
+load("@komira//tools/build/package:conda.bzl", "conda_package")
+load(":buildrules.mojo.bzl", "mojo_package")
+load("@komira//tools/build/mojo:proto_fixture.bzl", "proto_encode", "proto_fixture_check")
+
+# The chat API (`komira/chat/v1/chat.proto`, package `komira.chat.v1`): the
+# request, response and resource messages of a small Slack-like chat, carried
+# as proto3 canonical JSON over HTTP, generated into the Mojo package
+# `chat_proto`:
+#
+#   from chat_proto.chat import SendMessageRequest, Message, ...
+#
+# `chat_service.proto` lists the methods and their HTTP routes; no code is
+# generated from it (see `:chat_service`). Nothing here imports another
+# `.proto`.
+#
+# The welded tests check every message against its proto3-JSON golden
+# (tests/goldens/chat_v1.golden) and against protoc's encoding of the same
+# values (tests/fixtures/corpus.canonical.hex), and pin every enum value's
+# number and name. README.md's examples run as one more welded test.
+
+# The generator's half: `komira_chat_proto_generated_gen` writes the Mojo of the `.proto` files, `komira_chat_proto_generated_fresh` holds the
+# committed directory `generated/komira_chat_proto_generated/` to it, byte for byte, and fails with the command that regenerates
+# (tools/build/gen/README.md). That directory is the library of mopm.toml (`[targets] lib`), compiled as the module
+# `chat_proto`: `import_name` is that module's name, and the rule names the directory after the target, which
+# `:chat_proto` below cannot be. The library this call declares itself (`:komira_chat_proto_generated`, the same files without the
+# tests) is not what dependents use. Regenerate with
+#   ./buck2 run komira//tools/build/gen:regen -- komira//src/chat_proto:komira_chat_proto_generated
+mojo_proto_library(
+    name = "komira_chat_proto_generated",
+    srcs = ["chat.proto"],
+    import_name = "chat_proto",
+    import_prefix = "komira/chat/v1",
+    deps = ["//src/proto_codec:proto_codec"],
+    visibility = ["PUBLIC"],
+)
+
+# Built with buildrules' `mojo_package` from mopm.toml (README.md, "Build files"): `:lib` is the
+# library file, compiled from the committed directory, and exists only once the tests of tests/
+# have passed.
+# `test_data` stages what the tests read, under the paths they open.
+mojo_package(
+    path = ".",
+    test_data = {
+        "tests/test_chat_goldens.mojo": {
+            "src/chat_proto/chat.proto": "chat.proto",
+            "src/chat_proto/tests/fixtures/corpus.canonical.hex": "tests/fixtures/corpus.canonical.hex",
+            "src/chat_proto/tests/fixtures/corpus_protoc_check.txt": ":chat_corpus_fixture",
+            "src/chat_proto/tests/goldens/chat_v1.golden": "tests/goldens/chat_v1.golden",
+        },
+    },
+)
+
+# `:chat_proto`, the target the packages that depend on this library name, is `:lib` as
+# komira's Mojo rules take it (tools/build/mojo/adopt.bzl): the same file, so a dependent builds
+# only once the tests have passed. `deps` is `[dependencies]` of mopm.toml, as the adopted targets
+# of those packages: the rule refuses a list that is not the closure `:lib` was built from. It
+# carries the README gate too (`[tests][readme]`): the examples run against `:lib`.
+mojo_adopted_library(
+    name = "chat_proto",
+    deps = ["//src/proto_codec:proto_codec"],
+    lib = ":lib",
+    readme = "README.md",
+    srcs = glob(["generated/komira_chat_proto_generated/**/*.mojo"]),
+    test_srcs = glob(["tests/test_*.mojo"]),
+    test_runs = ":test",
+    visibility = ["PUBLIC"],
+)
+
+# The mopm package: `mopm pack` over `:lib`, the `.conda` a mopm registry serves. `members` is the
+# manifests of the path dependencies of the closure, staged at their repository paths, because
+# `mopm pack` reads the manifest of each beside the one it is given.
+mojo_conda(
+    name = "conda",
+    dir = "generated/komira_chat_proto_generated",
+    lib = ":lib",
+    manifest = "mopm.toml",
+    members = {
+        "../encoding": "//src/encoding:mopm.toml",
+        "../json": "//src/json:mopm.toml",
+        "../proto_codec": "//src/proto_codec:mopm.toml",
+        "../protobuf": "//src/protobuf:mopm.toml",
+    },
+    mojo = "1.0.0",
+    mopm = "toolchains//:mopm_0_0_101",
+    package = "chat_proto",
+    version = "0.1.0",
+    visibility = ["PUBLIC"],
+)
+
+# What `:conda` holds, read back from the built file: this package's own `.mojoc` and nothing else
+# under `lib/mojo/`, and exactly the direct dependencies of mopm.toml.
+mojo_conda_holds(
+    name = "conda_holds",
+    conda = ":conda",
+    depends = ["mojo-proto_codec >=0.1,<0.2"],
+    package = "chat_proto",
+    sole = True,
+    visibility = ["PUBLIC"],
+)
+
+# Kept for the release machine, which still builds it (release/BUCK, release/artifacts.textproto):
+# komira's conda packer over `:chat_proto`. This library's mopm package is `:conda` above.
+conda_package(
+    name = "komira_chat_proto_conda",
+    lib = ":chat_proto",
+    summary = "The `chat_proto` Mojo library of komira, as a conda package.",
+    visibility = ["PUBLIC"],
+)
+
+
+# The service: `komira/chat/v1/chat_service.proto`, the methods and their HTTP
+# routes. A `service` in a generated file brings a gRPC client and its runtime
+# into the package, and the chat server speaks plain JSON over HTTP, so this
+# file is published as `.proto` source only. protoc reads it in
+# `:chat_corpus_fixture` below, so each method must name messages chat.proto
+# declares.
+proto_srcs(
+    name = "chat_service",
+    srcs = ["chat_service.proto"],
+    import_prefix = "komira/chat/v1",
+    proto_deps = [":komira_chat_proto_generated_gen"],
+    visibility = ["PUBLIC"],
+)
+
+# protoc, the reference implementation, reading the corpus: one value of every
+# message as fields of the test-only `ChatCorpus` (tests/chat_corpus.proto).
+# `corpus.txtpb` is that value as protoc text and `corpus.canonical.hex` is
+# protoc's encoding of it, made by `:corpus_canonical`:
+#   ./buck2 build //src/chat_proto:corpus_canonical \
+#       --out src/chat_proto/tests/fixtures/corpus.canonical.hex
+# The canonical bytes stand in for the producer's `.hex` (`canonical_producer`):
+# that this package's encoder writes the same bytes is checked by
+# tests/test_chat_goldens.mojo.
+_CORPUS_ROOT = "komira.chat.v1.corpus.ChatCorpus"
+
+_CORPUS_PROTO = [
+    ":chat_service",
+    ":komira_chat_proto_generated_gen",
+]
+
+proto_fixture_check(
+    name = "chat_corpus_fixture",
+    srcs = ["tests/chat_corpus.proto"],
+    canonical_producer = ["corpus"],
+    dir = "tests/fixtures",
+    fixtures = {"corpus": _CORPUS_ROOT},
+    hex = {"corpus": "tests/fixtures/corpus.canonical.hex"},
+    proto_deps = _CORPUS_PROTO,
+)
+
+proto_encode(
+    name = "corpus_canonical",
+    srcs = ["tests/chat_corpus.proto"],
+    proto_deps = _CORPUS_PROTO,
+    root = _CORPUS_ROOT,
+    txtpb = "tests/fixtures/corpus.txtpb",
+)

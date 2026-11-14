@@ -1,5 +1,5 @@
 # =============================================================================
-# test_fetch_client.mojo -- komira_git's protocol v2 client writes the
+# test_fetch_client.mojo -- git's protocol v2 client writes the
 # requests the pinned git client wrote, byte for byte, and reads everything
 # the pinned git server sent back.
 # =============================================================================
@@ -28,7 +28,7 @@
 
 from std.testing import assert_equal, assert_false, assert_true
 
-from komira_git import (
+from git import (
     FETCH_ACK,
     FETCH_END,
     FETCH_NEED_MORE,
@@ -221,4 +221,4 @@ def main() raises:
     test_since()
     test_unborn()
     test_negotiate_only()
-    print("komira_git conformance: fetch v2 client passed")
+    print("git conformance: fetch v2 client passed")

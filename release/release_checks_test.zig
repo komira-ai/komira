@@ -6,7 +6,7 @@
 //!     the same metapackage, the same members in the same order, and the same --license,
 //!     --summary and --home for the metapackage. A member in one and missing from the other is
 //!     refused, naming it.
-//!  2. A release does not name both komira_so packages. `komira_so_conda` and
+//!  2. A release does not name both so packages. `komira_so_conda` and
 //!     `komira_so_libkomira_conda` are one package name, version and build with different
 //!     contents (the second adds lib/libkomira.so), so naming both would hand a channel two
 //!     different files for one name.
@@ -125,7 +125,7 @@ fn checkSet(ar: std.mem.Allocator, artifacts: []const u8, set: []const u8) !?[]c
     return null;
 }
 
-/// Null when the artifacts file names at most one of the two komira_so packages; else the refusal.
+/// Null when the artifacts file names at most one of the two so packages; else the refusal.
 fn checkSo(ar: std.mem.Allocator, artifacts: []const u8) !?[]const u8 {
     const arts = try parseArtifacts(ar, artifacts);
     if (arts.len == 0) return try std.fmt.allocPrint(ar, "{s} declares no artifact: the check would be vacuous", .{ARTIFACTS});
@@ -135,7 +135,7 @@ fn checkSo(ar: std.mem.Allocator, artifacts: []const u8) !?[]const u8 {
             if (std.mem.endsWith(u8, target, ":komira_so_conda") or std.mem.endsWith(u8, target, ":komira_so_libkomira_conda")) held += 1;
         }
     }
-    if (held > 1) return try std.fmt.allocPrint(ar, "{s} declares both komira_so packages (komira_so_conda and komira_so_libkomira_conda are one package name with different contents)", .{ARTIFACTS});
+    if (held > 1) return try std.fmt.allocPrint(ar, "{s} declares both so packages (komira_so_conda and komira_so_libkomira_conda are one package name with different contents)", .{ARTIFACTS});
     return null;
 }
 
@@ -282,7 +282,7 @@ test "an artifacts file or release set with nothing in it is refused, not passed
     try expectRefused(try checkSet(ar, FIXTURE_ARTIFACTS, "metapackage meta_all\nlicense x\n"), "names no member");
 }
 
-test "the real release names at most one komira_so package" {
+test "the real release names at most one so package" {
     var arena = std.heap.ArenaAllocator.init(t.allocator);
     defer arena.deinit();
     const ar = arena.allocator();
@@ -292,19 +292,19 @@ test "the real release names at most one komira_so package" {
     }
 }
 
-test "a release naming both komira_so packages is refused" {
+test "a release naming both so packages is refused" {
     var arena = std.heap.ArenaAllocator.init(t.allocator);
     defer arena.deinit();
     const ar = arena.allocator();
-    const both = try withSo(ar, &.{ "//src/komira_so:komira_so_conda", "//tools/build/package/libkomira:komira_so_libkomira_conda" });
-    try expectRefused(try checkSo(ar, both), "declares both komira_so packages");
+    const both = try withSo(ar, &.{ "//src/so:komira_so_conda", "//tools/build/package/libkomira:komira_so_libkomira_conda" });
+    try expectRefused(try checkSo(ar, both), "declares both so packages");
 }
 
-test "a release naming either komira_so package alone, or neither, is accepted" {
+test "a release naming either so package alone, or neither, is accepted" {
     var arena = std.heap.ArenaAllocator.init(t.allocator);
     defer arena.deinit();
     const ar = arena.allocator();
-    try t.expect((try checkSo(ar, try withSo(ar, &.{"//src/komira_so:komira_so_conda"}))) == null);
+    try t.expect((try checkSo(ar, try withSo(ar, &.{"//src/so:komira_so_conda"}))) == null);
     try t.expect((try checkSo(ar, try withSo(ar, &.{"//tools/build/package/libkomira:komira_so_libkomira_conda"}))) == null);
     try t.expect((try checkSo(ar, FIXTURE_ARTIFACTS)) == null);
 }

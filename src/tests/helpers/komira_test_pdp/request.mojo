@@ -38,14 +38,14 @@
 # (pdp.mojo), after both tokens verify.
 # =============================================================================
 
-from komira_json import (
+from json import (
     JSON_ARRAY,
     JSON_OBJECT,
     JSON_STRING,
     JsonValue,
     parse_json_bytes,
 )
-from komira_json import refuse_duplicate_keys
+from json import refuse_duplicate_keys
 
 from komira_test_pdp.reasons import (
     REASON_ACTION_INVALID,

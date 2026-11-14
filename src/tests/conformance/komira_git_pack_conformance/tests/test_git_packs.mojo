@@ -1,15 +1,15 @@
 # =============================================================================
 # komira_git_pack_conformance/tests/test_git_packs.mojo -- the sha1 packs git
-# wrote (gen_packs.zig), each read by komira_git and checked against git.
+# wrote (gen_packs.zig), each read by git and checked against git.
 # =============================================================================
 #
 # For every pack, `check_git_pack` (check.mojo) requires:
-#   * the index komira_git writes byte-equal to `git index-pack`'s: every
+#   * the index git writes byte-equal to `git index-pack`'s: every
 #     id, offset, CRC-32, the fan-out table, the pack checksum and the index
 #     checksum. Catches an entry boundary off by a byte (wrong offsets and
 #     CRCs), a wrong id (an object resolved from the wrong base or with the
 #     wrong kind), a fan-out or order mistake;
-#   * git's index, parsed, equal to the index komira_git built;
+#   * git's index, parsed, equal to the index git built;
 #   * per entry, verify-pack's offset, size in the pack, kind, delta depth
 #     and base id. Catches an OFS_DELTA distance decoded without the "+1 per
 #     continuation" of gitformat-pack (a wrong base, or none), a size varint
@@ -28,7 +28,7 @@
 
 from std.testing import assert_equal, assert_true
 
-from komira_git import ObjectFormat, PackLimits, index_pack, parse_pack_index
+from git import ObjectFormat, PackLimits, index_pack, parse_pack_index
 
 from komira_git_pack_conformance import (
     check_git_pack,

@@ -1,8 +1,8 @@
 # komira_lowering_rules_conformance
 
-Test-only. Checks `komira_lowering_rules`' payload-narrowing rule,
+Test-only. Checks `lowering_rules`' payload-narrowing rule,
 `derive_payload_narrow`, against the decisions of the rule it replaced,
-`komira_optimizer`'s payload-narrowing pass (deleted), on a fixture set.
+`optimizer`'s payload-narrowing pass (deleted), on a fixture set.
 
 ```text
 fixtures.mojo                the builders and fixtures of that pass's parity

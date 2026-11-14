@@ -1,7 +1,7 @@
 """mojo_gcp_client: a Google Cloud client generated from `.proto` files at build time.
 
     mojo_gcp_client(
-        name = "komira_gcp_logging",
+        name = "gcp_logging",
         protos = [...],                 # .proto files of this package (may be empty)
         proto_deps = [...],             # proto_srcs / mojo_proto_library targets
         bundle_proto_deps = True,
@@ -10,7 +10,7 @@
         messages_only = True,
         protocol = "rest",              # the default, or "grpc"
         service_config = "logging_v2.yaml",   # optional, REST: "Service configuration"
-        deps = ["komira//src/komira_proto_codec:komira_proto_codec", ...],
+        deps = ["komira//src/proto_codec:proto_codec", ...],
     )
 
 is three targets, built from committed sources (tools/build/gen/README.md):
@@ -44,8 +44,8 @@ holding either, `=` or whitespace is refused here rather than mis-split.
 `omit_fields` names fields (`pkg.Message.field`) left out of their
 message: a field whose type the runtime cannot represent and no caller
 reads, such as Service Usage's `Service.config` (its `ServiceConfig` reaches
-`google.protobuf.Api`, which komira_wkt does not provide, and
-`map<string, int64>` fields, which komira_proto_codec does not decode). The
+`google.protobuf.Api`, which wkt does not provide, and
+`map<string, int64>` fields, which proto_codec does not decode). The
 message is generated without it, so a response's value for it is skipped
 like any unknown key, a request never sends it, and the closure no longer
 reaches its type. A name that is not a field of a generated message is
@@ -56,8 +56,8 @@ passed to protoc-gen-mojo as `default_protocol`. It is "rest" (JSON over
 HTTP, the default) or "grpc"; any other value is refused naming the
 accepted ones. Both service shapes are Google Cloud clients (the plugin is
 passed `gcp=true`): `<Service>Client[C: Connector, T: GcpTokenSource]`, whose
-token source (komira_gcp_core) supplies each request's bearer token. Under
-"rest" the client builds the JSON request over komira_http_client and maps a
+token source (gcp_core) supplies each request's bearer token. Under
+"rest" the client builds the JSON request over http_client and maps a
 non-2xx response through `gcp_status_error`; it starts at the service's
 `(google.api.default_host)`, and a client of a service that declares none
 refuses every call, before any dial, until `set_rest_host` names a host. A
@@ -67,11 +67,11 @@ bidirectional method has no REST form: any such method a "rest" target keeps
 is refused by name at generation (so a `methods` entry naming one is
 refused, and a plugin run with no `methods` filter over a service holding one
 fails rather than skipping it). Under "grpc" it calls
-komira_grpc's `GrpcClient` with classic gRPC, sets
+grpc's `GrpcClient` with classic gRPC, sets
 `authorization: Bearer <token>` on each call's `CallOptions.raw_metadata`
 before the call (the token hook), and raises a non-OK gRPC status through
-`gcp_grpc_status_error`; its `deps` then name komira_grpc, komira_gcp_core,
-komira_http_core and komira_async beside komira_proto_codec. The plugin
+`gcp_grpc_status_error`; its `deps` then name grpc, gcp_core,
+http_core and async_rt beside proto_codec. The plugin
 branches on the protocol only for service code, so `messages_only = True`
 generates the same messages under both. The attribute is a string checked in
 `<name>_gen`, not an `attrs.enum`: an enum is coerced when the BUCK file is
@@ -120,7 +120,7 @@ refused, and so is a `module_names` entry for a file the target does not
 generate; two files generating one module are refused as before.
 
 Runtime. `deps` is required and non-empty, and nothing is added to it: the
-generated code imports its runtime (komira_proto_codec, komira_wkt, and with
+generated code imports its runtime (proto_codec, wkt, and with
 services the transport), which the caller names as `komira//` labels, or as
 stubs in a test. They are the library's `deps`, so they take what
 `mojo_library.deps` takes (C and C++ libraries too); `<name>_gen` sees only
@@ -213,7 +213,7 @@ def _gcp_client_gen_impl(ctx):
         if ":" in p or not p.endswith(".proto"):
             fail("{}: `protos` entry `{}` is not a source path of a `.proto` file. `protos` takes source paths only, never a label (not even one to a generated .proto): the library's `<stem>.mojo` file names are derived from these paths".format(ctx.label, p))
     if ctx.attrs.runtime_dep_count == 0:
-        fail("{}: `deps` is empty. The generated code imports its runtime (komira_proto_codec, komira_wkt, ...); name it, as komira// labels. No runtime is added by default.".format(ctx.label))
+        fail("{}: `deps` is empty. The generated code imports its runtime (proto_codec, wkt, ...); name it, as komira// labels. No runtime is added by default.".format(ctx.label))
     if not ctx.attrs.roots and not ctx.attrs.methods:
         fail("{}: neither `roots` nor `methods` is set. A mojo_gcp_client generates the closure of the messages and methods it names, never a whole API".format(ctx.label))
     if ctx.attrs.protocol not in _PROTOCOLS:

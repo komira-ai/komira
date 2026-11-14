@@ -19,7 +19,7 @@
 #   mode         : client
 #
 # THE SIGNER AND THE CREDENTIAL CHAIN ARE NOT GENERATED. The transport
-# call below goes to the hand-written `komira_aws_core.send_sigv4_signed_request`,
+# call below goes to the hand-written `aws_core.send_sigv4_signed_request`,
 # which is tested against the AWS SigV4 test vectors. Nothing here signs.
 #
 # HAND-OVERRIDE SEAM: no overrides are declared for this service.

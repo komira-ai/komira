@@ -1,0 +1,46 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# A simple calendar service's store: `CalendarStore[DB]` over the
+# backend-neutral db `Database` (calendars, events, one-occurrence
+# edits, the change feed, erasure), the stored UTC span that makes a time
+# window one indexed query, the SQL migration chain and the document-store
+# indexes. The messages are calendar_proto's; calendar checks
+# and expands them; zones come from a calendar_ics ZoneSource.
+#
+# test_span pins utc_span against hand-computed instants on POSIX-rule
+# zones (no zone data needed). test_store_sqlite runs every store call on
+# SQLite, a `test_deps` package (it reaches the tests only, never a
+# consumer), so this package measures its own lines. test_store_races plays
+# a peer that writes between the store's read and its write, and a writer
+# that stopped part way (the paths one SQLite connection never reaches).
+# test_store_interleave runs two writers and a reader interleaved on the
+# Firestore mock, where nothing serializes them but the store. The store's
+# contract on SQLite and the Firestore mock is
+# //src/tests/conformance/komira_calendar_store_conformance.
+mojo_library(
+    name = "calendar_store",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/async_rt:async_rt",
+        "//src/calendar:calendar",
+        "//src/calendar_ics:calendar_ics",
+        "//src/calendar_proto:calendar_proto",
+        "//src/datetime:datetime",
+        "//src/db:db",
+        "//src/proto_codec:proto_codec",
+        "//src/wkt:wkt",
+    ],
+    test_deps = [
+        "//src/db_sqlite:db_sqlite",
+        "//src/gcp_firestore:gcp_firestore",
+        "//src/gcp_firestore_db:gcp_firestore_db",
+    ],
+    test_srcs = [
+        "tests/test_span.mojo",
+        "tests/test_store_interleave.mojo",
+        "tests/test_store_overrides.mojo",
+        "tests/test_store_races.mojo",
+        "tests/test_store_sqlite.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)

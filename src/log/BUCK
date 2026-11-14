@@ -1,0 +1,102 @@
+load("@buildrules//rules/mojo:pack.bzl", "mojo_conda_holds")
+load("@komira//tools/build/mojo:adopt.bzl", "mojo_adopted_library")
+load("@komira//tools/build/mojo:cxx.bzl", "staged_files")
+load("@komira//tools/build/package:conda.bzl", "conda_package")
+load(":buildrules.mojo.bzl", "mojo_package")
+
+# Structured logging: the five-level facade (`log.info[fmt, module](*args)`),
+# the typed argument model, the per-module level filter, the synchronous P1
+# stderr path, and the P2 engine behind the same call sites (per-core binary
+# record rings, decode-at-flush drain, file/stderr/metric sinks, spans). It
+# depends on libc (raw fd writes), spsc_ring (`SpscRing[T]`),
+# containers (`Slab[T]`), clock, hashing (the FNV-1a
+# constants), atomic_alias (the atomic level gate), trace (the
+# span-line formatter the drain renders with) and metrics (the metric
+# point types the engine feeds). It also owns the one-line JSON structured
+# logger and the bounded write(2) loop every rendered line goes through
+# (`structured_log`, `log_write`). runtime_paths is a dev-dependency
+# because several tests take their scratch directory from `test_tmpdir()`.
+#
+# Built with buildrules' `mojo_package` from mopm.toml (README.md, "Build files"). `:lib` is the library
+# file and exists only once every test of tests/ has passed. The C it owns, native/komira_log_holder.c
+# (the process-global holders: the immortal engine's address, the P1 config's address and the selected line
+# layout, three one-word C cells with no logic), is `[native.komira_log_holder]` of mopm.toml: `mojo_package`
+# compiles it into `:native_komira_log_holder` (`libkomira_log_holder.a`), links it into every test of the
+# package and of the packages that depend on it, and packs it into `:conda`. The holder is per-library state
+# (one engine per image), so it is a static archive and never a shared library
+# (docs/design/native_packaging.md, "Per-library state").
+mojo_package(path = ".", test_layout = "installed")
+
+# `:log`, the target the packages that depend on this library name, is `:lib` as komira's Mojo
+# rules take it (tools/build/mojo/adopt.bzl): the same file, so a dependent builds only once the tests have
+# passed. `deps` is `[dependencies]` of mopm.toml, as the adopted targets of those packages (the
+# dev-dependency is not part of what `:lib` is built from); the rule refuses a list that is not the closure
+# `:lib` was built from. It also hands the native archive of `:lib` to a dependent's link, and carries the
+# README gate (`[tests][readme]`).
+mojo_adopted_library(
+    name = "log",
+    c_deps = [":komira_log_holder"],
+    native_static = True,
+    deps = [
+        "//src/atomic_alias:atomic_alias",
+        "//src/clock:clock",
+        "//src/containers:containers",
+        "//src/hashing:hashing",
+        "//src/libc:libc",
+        "//src/metrics:metrics",
+        "//src/spsc_ring:spsc_ring",
+        "//src/trace:trace",
+    ],
+    lib = ":lib",
+    readme = "README.md",
+    srcs = glob(["src/log/**/*.mojo"]),
+    test_srcs = glob(["tests/test_*.mojo"]),
+    test_runs = ":test",
+    visibility = ["PUBLIC"],
+)
+
+# What `:conda` holds, read back from the built file (buildrules' `prebuilt_unpack`): this package's own
+# `.mojoc` and nothing else under `lib/mojo/`, the archive that was built and tested
+# (`lib/libkomira_log_holder.a` is exactly the bytes of `:native_komira_log_holder`), and the direct
+# dependencies only (runtime_paths is a dev-dependency, which `mopm pack` leaves out).
+mojo_conda_holds(
+    name = "conda_holds",
+    conda = ":conda",
+    depends = [
+        "mojo-atomic_alias >=0.1,<0.2",
+        "mojo-clock >=0.1,<0.2",
+        "mojo-containers >=0.1,<0.2",
+        "mojo-hashing >=0.1,<0.2",
+        "mojo-libc >=0.1,<0.2",
+        "mojo-metrics >=0.1,<0.2",
+        "mojo-spsc_ring >=0.1,<0.2",
+        "mojo-trace >=0.1,<0.2",
+    ],
+    natives = {"libkomira_log_holder.a": ":native_komira_log_holder"},
+    package = "log",
+    sole = True,
+    visibility = ["PUBLIC"],
+)
+
+# The release machine builds `komira_log_conda` (release/artifacts.textproto): komira's conda packer over
+# `:log`. It goes when the release machine takes `:conda`, which is this library's mopm package.
+conda_package(
+    name = "komira_log_conda",
+    lib = ":log",
+    summary = "The `log` Mojo library of komira, as a conda package.",
+    visibility = ["PUBLIC"],
+)
+
+# The C file as a `cxx_library`, kept because the one-definition gate links it
+# (tools/build/one_definition/libraries.bzl): no test or program links this archive, the Mojo side links
+# `:native_komira_log_holder`, built from the same file.
+staged_files(
+    name = "log_holder_files",
+    srcs = ["native/komira_log_holder.c"],
+)
+
+cxx_library(
+    name = "komira_log_holder",
+    srcs = [":log_holder_files[native/komira_log_holder.c]"],
+    visibility = ["PUBLIC"],
+)

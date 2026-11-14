@@ -165,7 +165,7 @@ relocation that did not happen fails there; test 41 plants one ([tests README](.
 
 What the line tables of a `mojo_library` coverage binary name, and what the
 step that runs kcov over it has to map. Read from the binaries of
-`komira_retry` and of test 41's `covlib` with `readelf --debug-dump`:
+`retry` and of test 41's `covlib` with `readelf --debug-dump`:
 
 | units | directory | file names | maps to |
 |---|---|---|---|

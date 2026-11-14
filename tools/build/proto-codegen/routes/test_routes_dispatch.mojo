@@ -5,13 +5,13 @@
 
 from std.testing import assert_equal, assert_true
 
-from komira_async.ops.waker_sink import NoopSink
-from komira_async.reactor.reactor import Reactor
-from komira_async.runtime.blocking_runtime import BlockingRuntime
-from komira_async.runtime.runtime_trait import Runtime
-from komira_http_core.codec.types import HttpMethod, HttpRequest, HttpResponse
-from komira_http_server.routing.compose import ComposedRoutes
-from komira_proto_codec import decode_json
+from async_rt.ops.waker_sink import NoopSink
+from async_rt.reactor.reactor import Reactor
+from async_rt.runtime.blocking_runtime import BlockingRuntime
+from async_rt.runtime.runtime_trait import Runtime
+from http_core.codec.types import HttpMethod, HttpRequest, HttpResponse
+from http_server.routing.compose import ComposedRoutes
+from proto_codec import decode_json
 
 from komira_routes_fixture.library_service_routes import (
     BookServiceHandler,

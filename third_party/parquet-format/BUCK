@@ -12,7 +12,7 @@ pinned_file(
     size_bytes = 565551,
 )
 
-# Test data of //src/komira_parquet_api: parquet.thrift, the format's own
+# Test data of //src/parquet_api: parquet.thrift, the format's own
 # definition of every enum value and field id, which the package's tests read
 # their expected values from rather than restating them.
 archive_files(

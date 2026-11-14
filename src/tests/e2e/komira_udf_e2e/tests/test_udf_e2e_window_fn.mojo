@@ -40,9 +40,9 @@
 
 from std.testing import TestSuite, assert_equal, assert_true
 
-from komira_arrow.record_batch import RecordBatch
-from komira_arrow.schema import Field, SchemaBuilder
-from komira_plan_expr.partition_expr import (
+from arrow.record_batch import RecordBatch
+from arrow.schema import Field, SchemaBuilder
+from plan_expr.partition_expr import (
     FRAME_BOUND_CURRENT_ROW,
     FRAME_BOUND_FOLLOWING,
     FRAME_BOUND_PRECEDING,
@@ -52,13 +52,13 @@ from komira_plan_expr.partition_expr import (
     FRAME_UNITS_ROWS,
 )
 
-from komira_udf.auto_komira_schema import AutoKomiraSchema
-from komira_udf.frame_view import FrameView
-from komira_udf.partition_row_view import MAX_PARTITION_UDF_ARITY
-from komira_udf.schema_descriptor import DT_F64, DT_I32, DT_I64, schema_of
-from komira_udf.stateful_contract import KeyList
-from komira_udf.window_fn import WindowFn
-from komira_udf.window_frame_spec import WindowFrameSpec
+from udf.auto_komira_schema import AutoKomiraSchema
+from udf.frame_view import FrameView
+from udf.partition_row_view import MAX_PARTITION_UDF_ARITY
+from udf.schema_descriptor import DT_F64, DT_I32, DT_I64, schema_of
+from udf.stateful_contract import KeyList
+from udf.window_fn import WindowFn
+from udf.window_frame_spec import WindowFrameSpec
 
 from komira_udf_e2e.columns import (
     all_valid,

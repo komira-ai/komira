@@ -1,10 +1,10 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library", "mojo_test")
 
-# Test-only: komira_shuffle across separate processes. `shuffle_task` runs one
+# Test-only: shuffle across separate processes. `shuffle_task` runs one
 # task of a shuffle (a map, the driver's seal, a reduce of one partition, or a
 # pool reducer that pulls partitions by claim) over a LocalFsConditionalStore
 # root it shares with the other tasks; the store is all they share. Each
-# mojo_test below starts the tasks as child processes (komira_supervisor),
+# mojo_test below starts the tasks as child processes (supervisor),
 # kills some of them at chosen points, and judges what the survivors and
 # their replacements produce against the rows the library computes. The
 # tests get the binary through `args` ($(exe_target)), and run under
@@ -17,10 +17,10 @@ mojo_library(
     name = "komira_shuffle_e2e",
     srcs = glob(["*.mojo"]),
     deps = [
-        "//src/komira_objectstore:komira_objectstore",
-        "//src/komira_shuffle:komira_shuffle",
-        "//src/komira_supervisor:komira_supervisor",
-        "//tools/build/mojo/runtime_paths:komira_runtime_paths",
+        "//src/objectstore:objectstore",
+        "//src/shuffle:shuffle",
+        "//src/supervisor:supervisor",
+        "//tools/build/mojo/runtime_paths:runtime_paths",
     ],
     test_srcs = [
         "tests/test_rows.mojo",
@@ -30,10 +30,10 @@ mojo_library(
 
 _DEPS = [
     ":komira_shuffle_e2e",
-    "//src/komira_objectstore:komira_objectstore",
-    "//src/komira_shuffle:komira_shuffle",
-    "//src/komira_supervisor:komira_supervisor",
-    "//tools/build/mojo/runtime_paths:komira_runtime_paths",
+    "//src/objectstore:objectstore",
+    "//src/shuffle:shuffle",
+    "//src/supervisor:supervisor",
+    "//tools/build/mojo/runtime_paths:runtime_paths",
 ]
 
 # A test program, so it states the tests' optimization level.

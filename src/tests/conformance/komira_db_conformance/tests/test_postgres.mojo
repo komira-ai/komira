@@ -1,5 +1,5 @@
 # =============================================================================
-# test_postgres.mojo -- komira_db_postgres's PgDatabase: the suites wired, the
+# test_postgres.mojo -- db_postgres's PgDatabase: the suites wired, the
 #   server-free part run.
 # =============================================================================
 #
@@ -27,7 +27,7 @@
 #      prints it normalised (spaces after ':' and ','), so type_jsonb's byte
 #      comparison would fail. Either is then a defect or a gap to list.
 #
-# The now column (`updated_at`) is TIMESTAMPTZ here, as komira_db types a
+# The now column (`updated_at`) is TIMESTAMPTZ here, as db types a
 # column `now_expr()` writes (migration.mojo): pg's NOW() is a timestamptz.
 #
 # `fresh()` on a server cannot open a new database per check the way the
@@ -36,10 +36,10 @@
 # database.
 # =============================================================================
 
-from komira_db import DbValue
-from komira_db.blocking import db_blocking_execute
-from komira_db_postgres import PgDatabase
-from komira_db_postgres.wire.connection import PgConfig
+from db import DbValue
+from db.blocking import db_blocking_execute
+from db_postgres import PgDatabase
+from db_postgres.wire.connection import PgConfig
 
 from komira_db_conformance import (
     ERR_NO_TABLE,
@@ -86,7 +86,7 @@ struct PgNeutral(NeutralTarget):
         self.config = config^
 
     def name(self) -> String:
-        return String("komira_db_postgres")
+        return String("db_postgres")
 
     def fresh(mut self) raises -> PgDatabase:
         var db = _connect_clean(self.config)
@@ -125,7 +125,7 @@ struct PgSql(SqlTarget):
         self.config = config^
 
     def name(self) -> String:
-        return String("komira_db_postgres")
+        return String("db_postgres")
 
     def fresh(mut self) raises -> PgDatabase:
         return _connect_clean(self.config)
@@ -155,6 +155,6 @@ def _run_live(config: PgConfig) raises:
 def main() raises:
     check_dialect_tokens[PgSql]()
     print(
-        "PASS komira_db_conformance komira_db_postgres: dialect tokens only;"
+        "PASS komira_db_conformance db_postgres: dialect tokens only;"
         " the live suites did NOT run (no Postgres server in a build action)"
     )

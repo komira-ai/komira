@@ -7,9 +7,9 @@
 from std.collections import Dict
 from std.pathlib import Path
 
-from komira_runtime_paths import data_path
+from runtime_paths import data_path
 
-from komira_git import ObjectFormat, ObjectId, ObjectKind
+from git import ObjectFormat, ObjectId, ObjectKind
 
 
 def read_fixture(name: String) raises -> List[UInt8]:

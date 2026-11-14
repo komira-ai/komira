@@ -3,7 +3,7 @@
 Status: proposed, second revision, not built. No graph over data is in komira.
 
 The first revision put two ways of storing such a graph side by side (tables on a CAS manifest, or
-`komira_search` splits) and recommended a hybrid: tables as the source of truth, search splits as a
+`search` splits) and recommended a hybrid: tables as the source of truth, search splits as a
 derived index. That comparison is kept below as the rationale. This revision moves the tables onto
 the storage stack of [storage_stack.md](storage_stack.md) (PR #1134, second revision):
 
@@ -42,7 +42,7 @@ nearest-neighbour indexes (similarity starts exact).
 
 | first revision | this revision | why |
 |---|---|---|
-| tables as immutable objects on a `komira_objectstore` CAS manifest lineage | four Iceberg tables committed through the user's catalog | storage_stack.md decision 1: durable tables are native Iceberg tables, readable by the user's other tools with no export |
+| tables as immutable objects on a `objectstore` CAS manifest lineage | four Iceberg tables committed through the user's catalog | storage_stack.md decision 1: durable tables are native Iceberg tables, readable by the user's other tools with no export |
 | a base plus a chain of IPC deltas, folded at 32 deltas or half the base's bytes | a graph-delta tail that rolls into the tables within `target_lag`; Iceberg maintenance compacts the tables | storage_stack.md decision 6 and [the roll](storage_stack.md#the-roll); "IPC remains the tail format, and a graph table is in IPC only until its first roll" |
 | Arrow IPC as the table format until a Parquet writer exists, with a format tag per table entry | Parquet data files in Iceberg; IPC only in the tail | storage_stack.md withdraws IPC as a durable table format and the per-entry format tag |
 | embeddings as their own object per table | an embedding column in the tables; Parquet projection keeps it out of traversal and text reads | a columnar file already gives what a separate object gave |
@@ -162,7 +162,7 @@ and the files it covers), and each rebuildable from the tables:
   edge: about 0.6 GB at 10M edges), forward and backward. A long-lived reader keeps it resident and
   applies each delta and each new graph snapshot record; a cold reader loads the persisted
   generation instead of rebuilding it from Parquet.
-- **The text index:** `komira_search` splits over entity names and summaries, fact text and episode
+- **The text index:** `search` splits over entity names and summaries, fact text and episode
   content, one index per kind and text field (today's one-field split format suffices).
 - **The vector index:** over the `embedding` columns. Exact (a scan of the column with a fixed
   reduction order) until a graph needs an approximate index; the builder fingerprint names the
@@ -275,13 +275,13 @@ Checked against `src/` on `main` when this revision was written:
 
 | capability | in komira | consequence |
 |---|---|---|
-| an Iceberg catalog client | read-only: `IcebergCatalog.load_table` with a storage-based and a REST implementation (`src/komira_iceberg_catalog/`); no commit, no writer | the tables need storage_stack.md's order of work, steps 1 and 2 |
-| Parquet | a reader (`src/komira_parquet/file_reader.mojo`, the decoders and gathers); no writer | the tables need the Parquet writer, step 1 |
-| Arrow IPC | record-batch, schema and footer encoders and decoders, fixed-size lists included (`src/komira_arrow_ipc/`) | the tail's delta format exists |
-| CAS manifest, conditional writes | yes (`src/komira_objectstore/cas_manifest.mojo`, `compact_window.mojo`) | the tail lineage's substrate exists |
-| search splits | one text field per split, keyword fast fields single-valued, no deletes, no vectors (`src/komira_search/`) | enough for the derived text index |
-| scan kinds | `komira.search.index` (`src/komira_search_scan/search_scan_kind.mojo`) and `komira.broker.topic` (`src/komira_broker/broker_scan_binding.mojo`); no Iceberg kind, no access paths | the graph needs the `komira.iceberg.table` kind, pin groups and the `TEXT` and `VECTOR` access paths that optimized_plan_sources.md specifies |
-| joins and SQL | join kernels and join assembly (`src/komira_dispatch_join_kernels/`, `src/komira_join_assembly/`) and a SQL parser (`src/komira_sql/sql_parser.mojo`); this revision did not check that a whole plan runs end to end | the Expand node is new; its iterated-join definition is what tests check it against, and its `HASH` access can build on the join kernels |
+| an Iceberg catalog client | read-only: `IcebergCatalog.load_table` with a storage-based and a REST implementation (`src/iceberg_catalog/`); no commit, no writer | the tables need storage_stack.md's order of work, steps 1 and 2 |
+| Parquet | a reader (`src/parquet/file_reader.mojo`, the decoders and gathers); no writer | the tables need the Parquet writer, step 1 |
+| Arrow IPC | record-batch, schema and footer encoders and decoders, fixed-size lists included (`src/arrow_ipc/`) | the tail's delta format exists |
+| CAS manifest, conditional writes | yes (`src/objectstore/cas_manifest.mojo`, `compact_window.mojo`) | the tail lineage's substrate exists |
+| search splits | one text field per split, keyword fast fields single-valued, no deletes, no vectors (`src/search/`) | enough for the derived text index |
+| scan kinds | `komira.search.index` (`src/search_scan/search_scan_kind.mojo`) and `komira.broker.topic` (`src/broker/broker_scan_binding.mojo`); no Iceberg kind, no access paths | the graph needs the `komira.iceberg.table` kind, pin groups and the `TEXT` and `VECTOR` access paths that optimized_plan_sources.md specifies |
+| joins and SQL | join kernels and join assembly (`src/dispatch_join_kernels/`, `src/join_assembly/`) and a SQL parser (`src/sql/sql_parser.mojo`); this revision did not check that a whole plan runs end to end | the Expand node is new; its iterated-join definition is what tests check it against, and its `HASH` access can build on the join kernels |
 
 ## Revision 1: tables on a CAS manifest compared with search splits (rationale)
 
@@ -293,7 +293,7 @@ and a tail. The record is kept because it is why the graph is tables and not spl
   `entities`, `edges`, later `communities`), each an immutable, content-addressed object; a snapshot
   is one chunk on a CAS manifest listing the table objects. Traversal is a join or a breadth-first
   search over `edges`; similarity is an exact scan over an embedding column.
-- **Option B: search splits.** Nodes, edges and episodes as documents in `komira_search` splits.
+- **Option B: search splits.** Nodes, edges and episodes as documents in `search` splits.
   Adjacency is keyword postings on an edge's source and destination fields; similarity is a vector
   region in the split; deletes are delete sets in the split catalog.
 
@@ -337,7 +337,7 @@ library header stated the principle: "The KG is *files*, not a database." Its de
   tombstone row in a delta, hidden on read and dropped at the next fold.
 - **It chose not to build on the search engine.** Its embedding-only search layer, written later
   against the same raw corpus, records the decision at the top of its source file: "the verdict:
-  REUSE the [graph library's] embedder primitives — NOT komira_search, NOT a greenfield build". The
+  REUSE the [graph library's] embedder primitives — NOT search, NOT a greenfield build". The
   record gives the reasons as reuse (the same embedder, so its similarity scores were comparable with
   the graph's; the same packed embedding column and cosine kernel; the same result format) and gives
   no measurement against the search engine.

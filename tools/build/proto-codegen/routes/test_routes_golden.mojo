@@ -6,7 +6,7 @@
 
 from std.testing import assert_equal
 
-from komira_runtime_paths import read_data
+from runtime_paths import read_data
 
 
 def test_generated_module_matches_golden() raises:

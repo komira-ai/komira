@@ -133,7 +133,7 @@ checked_cxx_library(
     visibility = ["PUBLIC"],
 )
 
-# Test data of //src/komira_parquet_codec (tests/test_compression_brotli.mojo):
+# Test data of //src/parquet_codec (tests/test_compression_brotli.mojo):
 # the release's decoder test vectors, each a Brotli stream next to the text
 # it decodes to.
 archive_files(

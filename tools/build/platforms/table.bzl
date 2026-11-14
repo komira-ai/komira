@@ -85,10 +85,10 @@ _KCOV_ROLES = ["kcov_bzip2", "kcov_elfutils", "kcov_lzma", "kcov_src", "kcov_zli
 # llvm-profdata 23 with the libraries it loads, and the compiler-rt 23 profile
 # runtime. linux-x86_64 only, like kcov; every other row states `none`.
 _LLVM_BRANCH_ROLES = ["llvm_branch_libiconv", "llvm_branch_libllvm", "llvm_branch_libxml2", "llvm_branch_rt", "llvm_branch_tools", "llvm_branch_zstd"]
-# liblz4, which komira_lz4 opens at run time: a platform pins it only where
+# liblz4, which lz4 opens at run time: a platform pins it only where
 # the operating system of its workers ships none (macOS). On linux the
 # loader finds `liblz4.so.1` without a pin.
-_LIBLZ4_LINUX = "the loader of a linux worker finds liblz4.so.1 (komira_lz4's dlopen) without a pin"
+_LIBLZ4_LINUX = "the loader of a linux worker finds liblz4.so.1 (lz4's dlopen) without a pin"
 _NONE_ALLOWED = ["busybox", "libgcc", "liblz4", "libstdcxx", "libzlib"] + _KCOV_ROLES + _LLVM_BRANCH_ROLES
 
 # Roles whose pin is the executable itself, downloaded with its mode bit set
@@ -419,7 +419,7 @@ PLATFORMS = {
             "kcov_zlib": none(_KCOV_NONE),  # komira-limit:coverage-linux-x86-64
             "kcov_zstd": none(_KCOV_NONE),  # komira-limit:coverage-linux-x86-64
             "libgcc": none("the osx-arm64 compiler links only the operating system (every load command names @rpath/, /usr/lib or /System)"),
-            # liblz4, which komira_lz4 opens at run time (dlopen of
+            # liblz4, which lz4 opens at run time (dlopen of
             # `liblz4.dylib`): macOS ships none, so the toolchain's lib/,
             # the directory the gate puts on DYLD_LIBRARY_PATH, carries it
             # (tools/build/toolchains/darwin/BUCK). It loads only libSystem.

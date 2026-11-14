@@ -1,5 +1,5 @@
 # =============================================================================
-# test_sqlite.mojo -- komira_calendar_store over komira_db_sqlite's
+# test_sqlite.mojo -- calendar_store over db_sqlite's
 #   SqliteDatabase.
 # =============================================================================
 #
@@ -15,11 +15,11 @@
 from std.os import getenv
 from std.testing import assert_equal
 
-from komira_db import DbValue
-from komira_db.blocking import db_blocking_query
-from komira_db_sqlite import SqliteDatabase
+from db import DbValue
+from db.blocking import db_blocking_query
+from db_sqlite import SqliteDatabase
 
-from komira_calendar_store import calendar_tables, migrate
+from calendar_store import calendar_tables, migrate
 from komira_calendar_store_conformance import CalendarTarget, Rt, new_rt, run_calendar_suite
 
 
@@ -40,7 +40,7 @@ struct SqliteCalendar(CalendarTarget):
         self._path = String()
 
     def name(self) -> String:
-        return String("komira_calendar_store over komira_db_sqlite")
+        return String("calendar_store over db_sqlite")
 
     def fresh(mut self) raises -> SqliteDatabase:
         self._n += 1
@@ -84,5 +84,5 @@ def main() raises:
         run_calendar_suite(t)
     except e:
         failures += String(e)
-    assert_equal(failures, String(), "komira_calendar_store over komira_db_sqlite")
-    print("PASS komira_calendar_store_conformance komira_db_sqlite")
+    assert_equal(failures, String(), "calendar_store over db_sqlite")
+    print("PASS komira_calendar_store_conformance db_sqlite")

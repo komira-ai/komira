@@ -19,7 +19,7 @@ load("@komira//tools/build/mojo:proto.bzl", "mojo_proto_library", "mojo_routes_p
 mojo_proto_library(
     name = "komira_routes_fixture_messages",
     srcs = ["example/library/v1/library.proto"],
-    deps = ["//src/komira_proto_codec:komira_proto_codec"],
+    deps = ["//src/proto_codec:proto_codec"],
 )
 
 mojo_routes_proto_library(
@@ -32,11 +32,11 @@ mojo_routes_proto_library(
         "//tools/vendor/googleapis:api_http",
     ],
     deps = [
-        "//src/komira_async:komira_async",
-        "//src/komira_http_core:komira_http_core",
-        "//src/komira_http_server:komira_http_server",
-        "//src/komira_proto_codec:komira_proto_codec",
-        "//tools/build/mojo/runtime_paths:komira_runtime_paths",
+        "//src/async_rt:async_rt",
+        "//src/http_core:http_core",
+        "//src/http_server:http_server",
+        "//src/proto_codec:proto_codec",
+        "//tools/build/mojo/runtime_paths:runtime_paths",
     ],
     test_srcs = [
         "test_routes_dispatch.mojo",

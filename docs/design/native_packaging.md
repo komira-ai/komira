@@ -38,15 +38,15 @@ continuous_publish.md both use that name; `kci.yml` runs it since the staged pip
   build refuses their conda packages (**EXISTS:** `_conda_facts` in
   [tools/build/mojo/defs.bzl](../../tools/build/mojo/defs.bzl): "links native code"). Every cloud SDK
   package is in the list, and so are eleven `kci_*` libraries, `kci_cli` among them
-  (`kci_release_set` computes the set hash with `komira_crypto`'s SHA-256).
-- **Two more open a system library at run time** and link no native code: `komira_lz4`
-  (`liblz4.so.1`, `src/komira_lz4/codec.mojo`) and `komira_zlib` (`libz.so.1`,
-  `src/komira_zlib/zlib_ffi.mojo`) (#1188). Before slice 3 the packer refused them when it read the
+  (`kci_release_set` computes the set hash with `crypto`'s SHA-256).
+- **Two more open a system library at run time** and link no native code: `lz4`
+  (`liblz4.so.1`, `src/lz4/codec.mojo`) and `zlib` (`libz.so.1`,
+  `src/zlib/zlib_ffi.mojo`) (#1188). Before slice 3 the packer refused them when it read the
   sources ("opens a shared library at run time (OwnedDLHandle); its conda package must depend on the
   package shipping that library, which this tool does not derive yet"); slice 3 declares their sonames,
   and their packages now build, requiring `lz4-c` and `libzlib`, but neither is released.
-  `komira_compression` opens zstd, bz2 and lzma the same way
-  (`src/komira_compression/src/komira_compression/codec_libraries.mojo`) and also links snappy, so it is in both lists.
+  `compression` opens zstd, bz2 and lzma the same way
+  (`src/compression/src/compression/codec_libraries.mojo`) and also links snappy, so it is in both lists.
 - The released set today is its member libraries plus the metapackage `komira_all`
   (`release/artifacts.textproto`, held equal to `tools/build/package/release_set.txt`), none with
   native code (no member's directory holds a C or C++ source or opens a library at run time).
@@ -60,7 +60,7 @@ continuous_publish.md both use that name; `kci.yml` runs it since the staged pip
    a system copy (**EXISTS:** [tools/build/native/README.md](../../tools/build/native/README.md),
    #672; brotli and SQLite by #1356, open question 4).
 4. Shared libraries only; no static archive in a package except C holding per-library state
-   (komira_log's holder). `mojo run` (the JIT) links no static archive, and a README run must pass.
+   (log's holder). `mojo run` (the JIT) links no static archive, and a README run must pass.
 5. System-library codecs stay out: opened by soname, required from conda-forge.
 6. **Built once, promoted unchanged.** Each `.so` is built inside its library's `.conda` by the
    `build` job; beta, gamma and prod handle those files and no other (the staged pipeline's rule 1).
@@ -79,7 +79,7 @@ continuous_publish.md both use that name; `kci.yml` runs it since the staged pip
 | glibc floor | **EXISTS:** `os_floor` `glibc-2.34` in `tools/build/platforms/table.bzl` (rows `linux-x86_64` and `linux-arm64`; read by `os_floor_version`), the floor zig links against (`zig_triple` `x86_64-linux-gnu.2.34`, `aarch64-linux-gnu.2.34`). The packer writes only the platform guard `__linux` (`guardFor` in `tools/build/package/pack/conda.zig`), no `__glibc` requirement | the packer writes `__glibc >=2.34` from that cell on each library with C (slice 8); per-library check 5 reads the same cell; kci accepts it (**EXISTS** since #1391, slice 9: `src/kci_release_set/glibc_floor.mojo`). No second floor |
 | conda metadata kinds | **EXISTS:** `library` and `metapackage` only (`src/kci_release_set/conda_metadata.mojo`); kci reads `lib_files` on a `library` since #1391 (slice 9, the reader side) | no new kind. The packer writes `lib_files`, `native_owns`, `native_links`, `dlopen` fields on `library` (slices 3, 8) |
 | kind `native`, `native_link_args` | on #695 and #704 only, both closed unmerged (`lib_files` on `library` is on `main`, above) | `lib_files` survives on `library`; the kind goes |
-| dlopen declarations | **EXISTS:** `mojo_library(dlopen = ...)` (`tools/build/mojo/dlopen.bzl`), the map `tools/build/package/system_libs.bzl`, the packer writing each declared requirement and `dlopen` and refusing sources that open an undeclared soname (`tools/build/package/pack/conda_dlopen.zig`), and kci's acceptance of exactly the map's requirements (`src/kci_release_set/system_libs.mojo`, `closure.mojo`); `komira_lz4` and `komira_zlib` declare their sonames | slice 3 (done); releasing the two is slice 4 |
+| dlopen declarations | **EXISTS:** `mojo_library(dlopen = ...)` (`tools/build/mojo/dlopen.bzl`), the map `tools/build/package/system_libs.bzl`, the packer writing each declared requirement and `dlopen` and refusing sources that open an undeclared soname (`tools/build/package/pack/conda_dlopen.zig`), and kci's acceptance of exactly the map's requirements (`src/kci_release_set/system_libs.mojo`, `closure.mojo`); `lz4` and `zlib` declare their sonames | slice 3 (done); releasing the two is slice 4 |
 | beta stage, `beta_validate` | **EXISTS** since the switch M2 (#1296): `kci.yml` runs `build → beta → beta_validate → prod` (`gamma` and `validate` before M2); the rest of staged_pipeline.md (merged, with its glossary from #1184) is design only | native install checks run only in `beta_validate` (section "Built once"); gamma runs none |
 
 ## What each library ships
@@ -93,28 +93,28 @@ thread-local storage (async, http_core); async_api, metrics and scan_source had 
 
 | library | native code it owns | artifact | `DT_NEEDED` |
 |---|---|---|---|
-| komira_crypto | aws-lc, prefixed `komira_awslc_`; `komira_crypto_sha256_hw` (the SHA-NI wrapper) | `libkomira_crypto_native.so.1`; and, as a mopm package, `libkomira_crypto_sha256_hw.a` (the wrapper), with aws-lc as the archive of `komira_awslc` | glibc |
-| komira_awslc | aws-lc 1.39.0 as a `native_library` (buildrules), every symbol prefixed `komira_awslc_`; the one aws-lc archive of `komira_crypto` and `komira_uuid` | `libawslc.a` (mopm package, static) | none |
-| komira_http_core | s2n-tls, prefixed `komira_s2n_`, built against the prefixed aws-lc | `libkomira_http_core_native.so.1` | `libkomira_crypto_native.so.1` |
-| komira_compression | snappy 1.3.1 (C API prefixed `komira_snappy_`); in the shared library its C++ runtime is static and local; as a mopm package snappy is the `native_library` `//third_party/snappy:snappy_native`, declared `link = ["c++"]` so every consumer's link ends with `-lc++` | `libkomira_compression_native.so.1`; and, as a mopm package, `libsnappy.a` (static) | glibc; opens system codecs (below) |
-| komira_libc / async / async_api / fs | `komira_libc_posix` / `komira_async_posix` / `komira_concurrency_pool_depth` / `komira_fs_posix` | `libkomira_<lib>_native.so.1` | glibc |
-| komira_objectstore / metrics / scan_source / supervisor | `komira_objectstore_posix` / `komira_metrics_ea_flag` / `komira_scan_source_inmem_id` / `komira_supervisor_proc` | `libkomira_<lib>_native.so.1` | glibc |
-| komira_log | `komira_log_holder` (per-library state) | `libkomira_log_holder.a`; with question 2 (A) also `libkomira_log_holder_jit.so.1` and its link name `libkomira_log_holder_jit.so` | none |
-| komira_parquet_codec | the brotli decoder, prefixed `komira_brotli_` | `libkomira_parquet_codec_native.so.1` | glibc |
-| komira_db_sqlite | SQLite, prefixed `komira_sqlite3_` | `libkomira_db_sqlite_native.so.1`, built and checked; shipped by no package until the library has welded tests (its BUCK file has no `test_srcs`, so no conda package) | glibc |
+| crypto | aws-lc, prefixed `komira_awslc_`; `komira_crypto_sha256_hw` (the SHA-NI wrapper) | `libkomira_crypto_native.so.1`; and, as a mopm package, `libkomira_crypto_sha256_hw.a` (the wrapper), with aws-lc as the archive of `awslc` | glibc |
+| awslc | aws-lc 1.39.0 as a `native_library` (buildrules), every symbol prefixed `komira_awslc_`; the one aws-lc archive of `crypto` and `uuid` | `libawslc.a` (mopm package, static) | none |
+| http_core | s2n-tls, prefixed `komira_s2n_`, built against the prefixed aws-lc | `libkomira_http_core_native.so.1` | `libkomira_crypto_native.so.1` |
+| compression | snappy 1.3.1 (C API prefixed `komira_snappy_`); in the shared library its C++ runtime is static and local; as a mopm package snappy is the `native_library` `//third_party/snappy:snappy_native`, declared `link = ["c++"]` so every consumer's link ends with `-lc++` | `libkomira_compression_native.so.1`; and, as a mopm package, `libsnappy.a` (static) | glibc; opens system codecs (below) |
+| libc / async / async_api / fs | `komira_libc_posix` / `komira_async_posix` / `komira_concurrency_pool_depth` / `komira_fs_posix` | `libkomira_<lib>_native.so.1` | glibc |
+| objectstore / metrics / scan_source / supervisor | `komira_objectstore_posix` / `komira_metrics_ea_flag` / `komira_scan_source_inmem_id` / `komira_supervisor_proc` | `libkomira_<lib>_native.so.1` | glibc |
+| log | `komira_log_holder` (per-library state) | `libkomira_log_holder.a`; with question 2 (A) also `libkomira_log_holder_jit.so.1` and its link name `libkomira_log_holder_jit.so` | none |
+| parquet_codec | the brotli decoder, prefixed `komira_brotli_` | `libkomira_parquet_codec_native.so.1` | glibc |
+| db_sqlite | SQLite, prefixed `komira_sqlite3_` | `libkomira_db_sqlite_native.so.1`, built and checked; shipped by no package until the library has welded tests (its BUCK file has no `test_srcs`, so no conda package) | glibc |
 
 `//third_party/sha1collisiondetection:sha1dc` is in `THIRD_PARTY_C_LIBRARIES` but only a conformance
-test (`src/tests/conformance/komira_git_conformance`) links it; `komira_git` is Mojo, so no package
+test (`src/tests/conformance/komira_git_conformance`) links it; `git` is Mojo, so no package
 ships it. The other libraries of #1187 own no C: they reach these owners through their
 closure and ship only a `.mojoc`, with a run requirement on each owner.
 
 **One owner per C archive (PROPOSED).** A caller of another library's C goes through that owner's
 `.so`, never a second copy. Callers on `main`, by `external_call` name (library sources, not tests):
-`komira_awslc_*` from komira_crypto and komira_uuid (komira_http_core reaches aws-lc only through
-s2n-tls's archive); `komira_s2n_*` from komira_http_core and komira_http_client; `komira_snappy_*`
-from komira_compression; `komira_on_pool_depth` (komira_async_api's) from komira_async and
-komira_column_kernels; komira_libc's shims from several; komira_fs's shims (`komira_free`,
-`komira_fs_enoent`, `komira_fs_errno_name`) from komira_objectstore. `callers` and the completeness
+`komira_awslc_*` from crypto and uuid (http_core reaches aws-lc only through
+s2n-tls's archive); `komira_s2n_*` from http_core and http_client; `komira_snappy_*`
+from compression; `komira_on_pool_depth` (async_api's) from async_rt and
+column_kernels; libc's shims from several; fs's shims (`komira_free`,
+`komira_fs_enoent`, `komira_fs_errno_name`) from objectstore. `callers` and the completeness
 lint count library sources only, never `test_srcs` (welded tests link the archives).
 
 **Three libraries reached an owner they did not depend on (fixed by #1325, slice 7).** A package's run requirements come from
@@ -126,37 +126,37 @@ vendored-archive dependencies, and the archives those archives need) against its
 
 | library | owner it reaches | how, before #1325 | Mojo closure held the owner |
 |---|---|---|---|
-| komira_uuid | komira_crypto | declares `komira_awslc_RAND_bytes` and depended on `//third_party/aws-lc:crypto` directly, by design (its BUCK said "so the package does not depend on `komira_crypto`") | no; now a dependency |
-| komira_http_core | komira_crypto | its own archive: `//third_party/s2n-tls:s2n` has `exported_deps = ["//third_party/aws-lc:crypto"]`, so its `.so` has `NEEDED` on `libkomira_crypto_native.so.1`; its Mojo deps were komira_async, komira_clock, komira_collections, komira_libc and s2n | no; now a dependency |
-| komira_objectstore | komira_fs | depended on `//src/komira_fs:komira_fs_posix` directly and calls three of its functions | no; now depends on `//src/komira_fs:komira_fs` |
+| uuid | crypto | declares `komira_awslc_RAND_bytes` and depended on `//third_party/aws-lc:crypto` directly, by design (its BUCK said "so the package does not depend on `crypto`") | no; now a dependency |
+| http_core | crypto | its own archive: `//third_party/s2n-tls:s2n` has `exported_deps = ["//third_party/aws-lc:crypto"]`, so its `.so` has `NEEDED` on `libkomira_crypto_native.so.1`; its Mojo deps were async_rt, clock, containers, libc and s2n | no; now a dependency |
+| objectstore | fs | depended on `//src/fs:komira_fs_posix` directly and calls three of its functions | no; now depends on `//src/fs:fs` |
 
 (`komira_search_e2e`, an end-to-end suite under `src/tests/e2e`, also links `komira_fs_posix` without
-komira_fs; it is never packaged.) In a static link each is the same archive. Shipped, they differ:
-komira_uuid has no C of its own, so no `.so`, and without komira_crypto it carries a second aws-lc;
-komira_objectstore's `.so` (its own shim) needs glibc only, because its calls into komira_fs come from
+fs; it is never packaged.) In a static link each is the same archive. Shipped, they differ:
+uuid has no C of its own, so no `.so`, and without crypto it carries a second aws-lc;
+objectstore's `.so` (its own shim) needs glibc only, because its calls into fs come from
 Mojo `external_call`s (`local_fs_conditional_store.mojo`), which no `NEEDED` records; only
-komira_http_core's `.so` has a `NEEDED` (on crypto's) that no requirement installs. A single
+http_core's `.so` has a `NEEDED` (on crypto's) that no requirement installs. A single
 environment holding the whole set (beta's install job) hides all three, and the release-order check
 and the `install-set` validation refuse wrong requirements (a member listed before what it requires,
 a requirement on a package the set omits), not missing ones.
 
 **Rule (EXISTS since #1325, slice 7):** every owner a library reaches is in its Mojo closure, so the
 requirement comes from the one existing `depends` path and nothing derives requirements a second
-way. #1325 added the three Mojo dependencies (`komira_uuid` and `komira_http_core` on
-`//src/komira_crypto:komira_crypto`, `komira_objectstore` on `//src/komira_fs:komira_fs`), removed
-komira_uuid's direct dependency on `//third_party/aws-lc:crypto` and komira_objectstore's on
-`//src/komira_fs:komira_fs_posix`, and gave every `mojo_library` outside `src/tests/` two
+way. #1325 added the three Mojo dependencies (`uuid` and `http_core` on
+`//src/crypto:crypto`, `objectstore` on `//src/fs:fs`), removed
+uuid's direct dependency on `//third_party/aws-lc:crypto` and objectstore's on
+`//src/fs:komira_fs_posix`, and gave every `mojo_library` outside `src/tests/` two
 validations (`tools/build/mojo/native_reach.bzl`; [tools/build/mojo/README.md](../../tools/build/mojo/README.md),
 "Native reach"): `native_reach_archives` refuses a linked archive whose owner (`THIRD_PARTY_OWNERS`
 in `tools/build/one_definition/libraries.bzl` for a vendored one) is outside the closure, and
 `native_reach_calls` (a Zig tool) refuses a string literal in library sources starting with such an
-owner's prefix. The calls check is the only one that covers komira_uuid and komira_objectstore, by
+owner's prefix. The calls check is the only one that covers uuid and objectstore, by
 construction: their reach is a Mojo call, which no `.so` records. Still open from slice 7: the
 weak/common pair across two owners and the `callers` entry for a new `external_call` (slice 5). The packer
 (slice 8) checks the `NEEDED` kind of reach on each built package: every komira owner in the `.so`'s
-`NEEDED` is in the library's closure (planted: komira_http_core packed with its crypto dependency
+`NEEDED` is in the library's closure (planted: http_core packed with its crypto dependency
 removed must go red), and beta's install job loads each package with C installed alone (install
-check 4), which catches komira_http_core's gap and neither of the other two.
+check 4), which catches http_core's gap and neither of the other two.
 
 ## How each shared library is linked (PROPOSED, generalizing #681)
 
@@ -188,7 +188,7 @@ slice 6):
    are allowed only if listed: aws-lc's four `komira_awslc_OPENSSL_memory_*` allocator hooks, undefined
    by design (**EXISTS:** `extra_symbols` in the native README). `-Bsymbolic` does not bind an
    undefined symbol, so any loaded object exporting such a definition would install allocator hooks
-   into komira_crypto's aws-lc; probe 3's ONE and IR cases assert the hooks stay unbound (planted: a
+   into crypto's aws-lc; probe 3's ONE and IR cases assert the hooks stay unbound (planted: a
    strong undefined `komira_` symbol no `NEEDED` owner exports);
 4. `NEEDED` is glibc plus the declared komira owners, nothing else, with glibc named as its files:
    `libc.so.6`, `libpthread.so.0` and `ld-linux-x86-64.so.2` (probe 3's owners need the last one when
@@ -203,10 +203,10 @@ slice 6):
 7. every **strong** undefined symbol is either `GLIBC_`-versioned or a `komira_` symbol of check
    3, and every weak undefined one is on an explicit list: the four hooks, `sdallocx` (jemalloc's
    sized free, which aws-lc references weak and `:crypto_symbols` in `third_party/aws-lc/BUCK`
-   already allows) and the C runtime's `__gmon_start__`. That is komira_crypto's list in probe 3
+   already allows) and the C runtime's `__gmon_start__`. That is crypto's list in probe 3
    (#1304); the zig C runtime adds no `_ITM_*TMCloneTable` pair. Slice 5 records it from its own
    first green link. No other name may stay unresolved, whatever flags the link used (planted in
-   slice 5: a komira_crypto object referencing an undefined name that is neither `komira_` nor
+   slice 5: a crypto object referencing an undefined name that is neither `komira_` nor
    `GLIBC_`, linked without `-z defs`; in slice 6, the real case: snappy's `.so` linked without its
    static, local C++ runtime and without `-z defs`, leaving `_Znwm` undefined with `NEEDED` on glibc
    only, which checks 1 to 6 pass and the load fails at run time).
@@ -220,11 +220,11 @@ which is the limit the table above states.
 ## Linking from Mojo
 
 A `.mojoc` holds no machine code, so Mojo is compiled into the consumer and every native package of
-the closure is named at its link. `DT_NEEDED` does not cover a call made from Mojo: komira_http_core's
-TLS init calls komira_async's `ignore_sigpipe` (`src/komira_http_core/tls/s2n_shim.mojo` imports it
-from `komira_async.reactor.graceful_shutdown`), yet s2n-tls's `.so` has no reason to need
-komira_async's. A program using komira_http_core needs eight owners (http_core, crypto, async,
-async_api, metrics, compression, scan_source, libc) plus komira_log's holder. Below, `<env>` is the
+the closure is named at its link. `DT_NEEDED` does not cover a call made from Mojo: http_core's
+TLS init calls async_rt's `ignore_sigpipe` (`src/http_core/tls/s2n_shim.mojo` imports it
+from `async_rt.reactor.graceful_shutdown`), yet s2n-tls's `.so` has no reason to need
+async_rt's. A program using http_core needs eight owners (http_core, crypto, async,
+async_api, metrics, compression, scan_source, libc) plus log's holder. Below, `<env>` is the
 conda environment and `-lA ... -lH` those owners, dependents first, each behind `-Xlinker`:
 
 ```sh
@@ -275,7 +275,7 @@ refuses it unless it is, word for word, what kci computes from the release's `de
 `lib_files`, and runs the README with the block's `mojo run` arguments (`src/kci_validate/readme_link.mojo`).
 The `mojo run` line names no holder: the JIT object of question 2's option (A) is not built yet. So a
 README whose closure ships a static archive (its block's `mojo build` line links one the `mojo run`
-line does not: komira_log's holder, and so every library depending on komira_log) is run built: kci
+line does not: log's holder, and so every library depending on log) is run built: kci
 runs the block's `mojo build` command into `<env>/bin` and executes that program instead of `mojo run`
 (`run_readme` in `src/kci_validate/native_rows.mojo`, install checks 5 and 6 below).
 
@@ -283,9 +283,9 @@ Welded tests and the welded README gate do not change: they link static archives
 #685 records why they must not also link a shared copy (a test hook set in one copy is unread by the
 other).
 
-## Per-library state: komira_log's holder
+## Per-library state: log's holder
 
-`src/komira_log/native/komira_log_holder.c` (**EXISTS**) has twelve `KOMIRA_SHIM_LOCAL` (hidden)
+`src/log/native/komira_log_holder.c` (**EXISTS**) has twelve `KOMIRA_SHIM_LOCAL` (hidden)
 accessors: the engine holder (`komira_log_holder_set`, `_get`, `_get_engine`, `_clear`), the
 configuration (`komira_log_config_holder_set`, `_get`, `komira_log_holder_get_config`), the layout
 (`komira_log_layout_set`, `_get`) and the worker-id thread-local (`komira_log_tls_key_create`, `_set`,
@@ -295,8 +295,8 @@ its own cells and creates its own pthread key: **one engine per library**. As an
 `.so`, two Mojo images would share the cells; the second install would do nothing and that image would
 read the first's struct, the type confusion the file's header describes.
 
-Other shims hold process state with no Mojo struct (komira_async's CAS gate and counters,
-komira_libc's mmap counters, komira_objectstore's test fault hooks, and the like). Installed, each is
+Other shims hold process state with no Mojo struct (async_rt's CAS gate and counters,
+libc's mmap counters, objectstore's test fault hooks, and the like). Installed, each is
 intentionally **one copy per process** in its owner's `.so`; welded tests keep a static copy per
 image, and test hooks stay exercised only there (the two-copy hazard #685 named). The split this
 allows (two copies of one counter) is impossible in today's static links, where an archive member
@@ -304,14 +304,14 @@ loads whole or not at all; it becomes possible only with several link units, so 
 is its first test.
 
 **On #685:** `lib/libkomira_log_holder.a` is linked into each built program, and a closure holding
-komira_log (most native libraries, through komira_async) must be built, not `mojo run`.
+log (most native libraries, through async_rt) must be built, not `mojo run`.
 
 **Options (open question 2):**
 
 | option | what | requirements and cost |
 |---|---|---|
 | **(A)** | ship `libkomira_log_holder.a` for `mojo build` (`-lkomira_log_holder`, as on #685) and, for `mojo run` only, `libkomira_log_holder_jit.so.1` with its unversioned link name `libkomira_log_holder_jit.so`. A JIT process is one image | a second compile of the shim with all twelve accessors exported (a `.so` linked from the hidden archive exports nothing: "Symbols not found"); the export check lists the twelve for this artifact. No `libkomira_log_holder.so` exists, so `-lkomira_log_holder` can only pick the archive, and a built image never names the JIT object; each gets its own hidden cells and pthread key. Probe 3's LOG2 checks no built image has `NEEDED` on the JIT object; the install check refuses any installed `.so` that does |
-| **(B)** | keep one slot per image, keyed by an address private to that image, shipped as an ordinary `.so` | a change to komira_log needing a Mojo-safety review; it must also decide whether the worker-id pthread key is per image |
+| **(B)** | keep one slot per image, keyed by an address private to that image, shipped as an ordinary `.so` | a change to log needing a Mojo-safety review; it must also decide whether the worker-id pthread key is per image |
 | **(C)** | keep #685's rule: no `mojo run` for these libraries | no install validation can run their READMEs through `mojo run` |
 
 Recommendation: **(A)**, confirmed by probe 3's LOG1 and LOG2 (#1304).
@@ -323,14 +323,14 @@ Each codec is opened at first use by soname, with `OwnedDLHandle`, by its owning
 
 | library | soname | conda-forge requirement (from #685's `system_libs.bzl`) |
 |---|---|---|
-| komira_compression | `libzstd.so.1`, `libbz2.so.1.0`, `liblzma.so.5` | `zstd >=1.5.2,<2`, `bzip2 >=1.0.8,<2`, `xz >=5.2.5,<6` (question 10: the library-only names) |
-| komira_zlib | `libz.so.1` | `libzlib >=1.2.13,<2` |
-| komira_lz4 | `liblz4.so.1` | `lz4-c >=1.9.3,<2` |
+| compression | `libzstd.so.1`, `libbz2.so.1.0`, `liblzma.so.5` | `zstd >=1.5.2,<2`, `bzip2 >=1.0.8,<2`, `xz >=5.2.5,<6` (question 10: the library-only names) |
+| zlib | `libz.so.1` | `libzlib >=1.2.13,<2` |
+| lz4 | `liblz4.so.1` | `lz4-c >=1.9.3,<2` |
 
 No other library under `src/` (tests aside) calls `OwnedDLHandle`.
 
 - **EXISTS (slice 3, #1305, from #685):** `mojo_library(dlopen = [...])` declares the sonames
-  (komira_lz4 and komira_zlib declare theirs; komira_compression its three, with slice 12); `tools/build/package/system_libs.bzl` maps each to its
+  (lz4 and zlib declare theirs; compression its three, with slice 12); `tools/build/package/system_libs.bzl` maps each to its
   requirement, and analysis refuses a declaration the map lacks. The packer writes the requirement
   into `depends`, records `dlopen` in `metadata.json`, and marks the package REFUSED, so its release
   fails, when its sources open a soname its declaration omits or it declares one it never opens
@@ -339,10 +339,10 @@ No other library under `src/` (tests aside) calls `OwnedDLHandle`.
   byte-equal to the map (`src/kci_release_set/system_libs.mojo`),
   plus the `__glibc` floor (slice 9), as the only non-komira, non-compiler requirements of a library
   package.
-- **komira_lz4 and komira_zlib (#1188) go first, in slices 3 and 4.** They link no native code, so
+- **lz4 and zlib (#1188) go first, in slices 3 and 4.** They link no native code, so
   nothing in the shared-library work blocks them, and they prove the conda-forge requirement path end
   to end (pinned, installed from conda-forge, checked by kci) before the larger slices depend on it.
-  `komira_compression` follows only with its own `.so` (slice 8), because it also links snappy.
+  `compression` follows only with its own `.so` (slice 8), because it also links snappy.
 
 **Loading from the environment's `lib/` with `LD_LIBRARY_PATH` unset (probe 3, #1304).** A built
 program finds each codec through its own run path, `$ORIGIN/../lib`. Under `mojo run` the `dlopen`
@@ -353,8 +353,8 @@ and an installed `<env>/bin/mojo` carries `DT_RPATH $ORIGIN/../lib`, so the load
 apply to a `dlopen` attributed to the main program, but not to libraries its dependencies load. The
 pinned `mojo`'s `DT_RPATH` also lists `$ORIGIN/mojo.runfiles/...` entries. When the environment lacks
 the codec, both ways load the runner image's copy and the program still passes (DL-MISS), so a
-passing README run proves nothing about the requirement. **komira_lz4 and komira_zlib carry this
-hazard exactly as komira_compression does,** so their release waits on the loaded-from row
+passing README run proves nothing about the requirement. **lz4 and zlib carry this
+hazard exactly as compression does,** so their release waits on the loaded-from row
 of beta's install job (install check 5: the `/proc/self/maps` row of earlier drafts), which slice 4
 brings in for these two packages with a planted defect. The alternative, releasing them before
 beta's install job exists with only probe 3's evidence, is question 6.
@@ -395,8 +395,8 @@ no exception:
      fail at load under either flag; `RTLD_NOW` keeps the row independent of how a `.so` was
      linked). It runs twice: once in the environment holding the whole set, and once per package
      with C in an environment holding only that package and its own requirements, which is what
-     catches a `NEEDED` owner the package does not require (komira_http_core above; komira_uuid and
-     komira_objectstore reach their owner from Mojo, which only slice 7's `native_reach_calls` covers);
+     catches a `NEEDED` owner the package does not require (http_core above; uuid and
+     objectstore reach their owner from Mojo, which only slice 7's `native_reach_calls` covers);
   5. **the loaded-from row:** each README program (row 6) runs with the loader's record on
      (`LD_DEBUG=libs`, the record `tests//functional/runtime_libs:loader_trace` already reads for
      `runtime_libs`), and every komira `.so` and every codec its library's closure declares (the
@@ -408,7 +408,7 @@ no exception:
      nothing about the package. A declared codec loaded from outside the environment stays red. The
      record holds every process a run starts, and on the first `mojo run` in a fresh environment a
      process the compiler starts loads libz and libzstd from the system (kci run 38397209148 refused
-     komira_zlib alone, installed with libzlib, on that load), so a README whose library's closure
+     zlib alone, installed with libzlib, on that load), so a README whose library's closure
      declares a codec is not judged under `mojo run`: it is built with `mojo build` and the block's
      build words (none when the block is empty) into `<env>/bin`, with no record, and the built program
      run under the record, which then holds the program's own loads only. The compiler's
@@ -421,7 +421,7 @@ no exception:
      test;
   6. every installed README run under `mojo run` with the owners' flags (question 5: the README's
      own `sh komira-link` block, which kci refuses unless it is what the closure needs; slice 10),
-     except a README whose closure ships a static archive (komira_log's holder; the block's `mojo build`
+     except a README whose closure ships a static archive (log's holder; the block's `mojo build`
      line links it and its `mojo run` line cannot, the JIT loading no archive) or declares a codec
      (row 5 above): that one runs as the
      block's `mojo build` into `<env>/bin` and the built program executed, in the whole set and alone,
@@ -432,13 +432,13 @@ no exception:
      built program would load no komira `.so`; one whose closure declares a codec is already built for
      row 5 (above). Building
      every README would add one `mojo build` per package of the set to `beta_validate` for that;
-  7. one program per owner of komira_http_core's closure beside a system OpenSSL (probe 3's IR1),
+  7. one program per owner of http_core's closure beside a system OpenSSL (probe 3's IR1),
      installed from conda-forge as an extra requirement of that validation only.
 
   **Every owner is called, not only loaded.** Row 4 loads each `.so` but calls nothing; row 6 calls
-  an owner's C only if its README does. Before slice 10, komira_metrics's README imported only
+  an owner's C only if its README does. Before slice 10, metrics's README imported only
   `histogram` and `metrics_set` (its only `external_call` is in `explain_analyze_collect.mojo`), and
-  komira_scan_source's README had no Mojo import, so a broken metrics `.so` or a missing
+  scan_source's README had no Mojo import, so a broken metrics `.so` or a missing
   `-lkomira_metrics_native` would have passed. **EXISTS (slice 10):** each owner's shared library
   has a README check (`[readme_calls]`, a validation, `native_so readme` in `tools/build/native/`):
   the welded README gate compiles each example's program a second time to an object
@@ -446,12 +446,12 @@ no exception:
   C function the example reaches is an undefined symbol, and the check refuses an owner none of
   whose README objects references one of its exports. The linked programs cannot be read for this,
   as this paragraph first proposed: `mojo build` strips their symbol tables. The check found seven
-  owners whose README reached none of their C, not two: komira_metrics, komira_scan_source,
-  komira_compression (no example), komira_async, komira_http_core, komira_objectstore and
-  komira_parquet_codec, each of which gained an example that calls it (the armed flag, the id
+  owners whose README reached none of their C, not two: metrics, scan_source,
+  compression (no example), async_rt, http_core, objectstore and
+  parquet_codec, each of which gained an example that calls it (the armed flag, the id
   counter, snappy, the signal shim, s2n-tls, the file shim, the Brotli decoder); the other six
-  owners' READMEs already called theirs (komira_db_sqlite's examples call SQLite, for one).
-  Planted: komira_metrics's README without its example (build red); the installed README without `-lkomira_metrics_native` (row 6's `readme` row red,
+  owners' READMEs already called theirs (db_sqlite's examples call SQLite, for one).
+  Planted: metrics's README without its example (build red); the installed README without `-lkomira_metrics_native` (row 6's `readme` row red,
   `src/kci_validate/tests/test_readme_link.mojo`); still to plant with slice 9's row 4: a metrics
   `.so` with an unresolved symbol, linked without `-z now` (row 4 red under `RTLD_NOW`, green under
   `RTLD_LAZY`, which is why the flag is fixed).
@@ -480,9 +480,9 @@ Mojo"); the generated version script (probe 3 exported `komira_*` by wildcard); 
 installed from `.conda` packages (probe 3 assembled its environment as a build output); linux-arm64.
 
 **Probe 3 (the plan; built as draft #1304, a farm target on a never-merged branch).** Every owner of
-komira_http_core's closure, linked as above (crypto with aws-lc and the SHA-NI wrapper; http_core
+http_core's closure, linked as above (crypto with aws-lc and the SHA-NI wrapper; http_core
 with s2n-tls, `NEEDED` crypto, `DT_RUNPATH` `$ORIGIN`), plus the holder archive and JIT object. R1
-and B1 go through komira_http_core's Mojo API and name every owner. Built cases go through
+and B1 go through http_core's Mojo API and name every owner. Built cases go through
 the compile wrapper (`mojo_compile`), so their run path is the wrapper's `DT_RUNPATH`, not a user-spelled `-rpath`.
 
 | case | what it shows |
@@ -494,17 +494,17 @@ the compile wrapper (`mojo_compile`), so their run path is the wrapper's `DT_RUN
 | R1-MISS (must fail) | R1 without `-lkomira_async_native`: fails, and the missing names include `komira_ignore_sigpipe`, the Mojo-to-C edge `DT_NEEDED` does not carry |
 | B3 (must fail) | B2 with http_core's `DT_RUNPATH` removed: the load fails naming `libkomira_crypto_native.so.1` |
 | IR1, IR2 | R1 and B1 beside a system OpenSSL loaded `RTLD_GLOBAL`, before and after ours: no interposition; the `komira_awslc_OPENSSL_memory_*` hooks stay unbound |
-| ONE | the aws-lc reached from komira_crypto and from s2n-tls is one copy (`dladdr` of a `komira_awslc_` function from both sides names one file); the weak hooks stay unbound |
+| ONE | the aws-lc reached from crypto and from s2n-tls is one copy (`dladdr` of a `komira_awslc_` function from both sides names one file); the weak hooks stay unbound |
 | LOG1 | option (A): `-lkomira_log_holder_jit` under `mojo run`; the archive under `mojo build` |
 | LOG2 | a built program and a Mojo shared library, both with `-lkomira_log_holder`: neither has `NEEDED` on the JIT object; each reads its own engine |
-| DL | `libzstd.so.1` opened by komira_compression, `liblz4.so.1` by komira_lz4 and `libz.so.1` by komira_zlib, each under `mojo run` and from a built program, `LD_LIBRARY_PATH` unset, on a runner image that also ships its own copy: the loader's record names the environment's copy |
+| DL | `libzstd.so.1` opened by compression, `liblz4.so.1` by lz4 and `libz.so.1` by zlib, each under `mojo run` and from a built program, `LD_LIBRARY_PATH` unset, on a runner image that also ships its own copy: the loader's record names the environment's copy |
 | DL-MISS (must fail) | DL with the environment's codec removed: the loader's record names the image's copy, so the loaded-from row goes red rather than passing on the system library |
 
 ### Probe 3 results
 
 Draft #1304 (never merged; `tests/native_probe3/` on its branch) built eight owners
 (`libkomira_<lib>_native.so.1` for crypto, http_core, compression, async, async_api, metrics,
-scan_source and libc), komira_log's holder archive and JIT object, and the codecs from conda-forge
+scan_source and libc), log's holder archive and JIT object, and the codecs from conda-forge
 into one environment. Every link passed `-z defs` on the first try. Each case is a farm target whose
 action fails unless the case met its expectation; a must-fail case passes only when its run phase
 exits with the named status and prints every line of its failure signature, and its `<case>_raw`
@@ -543,16 +543,16 @@ channel, a new package name, or a change to what a release publishes.
 |---|---|---|---|
 | 1 | **Probe 3**, a farm target on a scratch branch. **Done:** draft #1304 (never merged); results recorded in this doc by #1313 (section "Probe 3 results", with its `Commands:` line, `local: 0`) | R1-MISS, B3 and DL-MISS must fail and are shown failing; the other cases are the findings | none (nothing uploaded, nothing merged) |
 | 2 | **Drop the `komira_native` exemption** (done by #1361, merged 2026-10-11), which served only the superseded plan: the skip in `_ORDER_CHECK` (`tools/build/package/release_set.bzl`), the fixture `release_order_exempts_komira_native` (`tools/build/package/BUCK`; its `release_order/requires_komira_native.json` stays, under the must-refuse fixture `release_order_refuses_a_komira_native_requirement_listed_later`), the mentions in `release_set.bzl` and `tools/build/package/README.md` | the fixture turned must-refuse ("a requires komira_native, listed after it") passes on `main`, where the skip exempts it: red | none |
-| 3 | **dlopen declarations** (#1188): `mojo_library(dlopen)`, `system_libs.bzl`, the packer writes the requirement and `dlopen`, kci accepts exactly the map's requirements; `komira_lz4` and `komira_zlib` declare their sonames (in the build only, not in the release) | the packer fixture `fx_dlopen_conda` (`tools/build/tests/functional/conda.sh`) is refused today; new fixtures: a source opening an undeclared soname refused, a declaration missing from the map refused, kci refusing a requirement off the map; mutants: kci accepts any `depends`, the packer omits the `depends` row (a package without `lz4-c` must be refused at the build) | none (nothing declared in the release) |
-| 4 | **komira_lz4 and komira_zlib released** (**declared** with slice 12, in one change that merges after slice 11; the loaded-from row is slice 11's): the loaded-from row (install check 5) in `kci_validate` for packages with `dlopen`, run by `beta_validate`; the two declared in `release/artifacts.textproto` and `release_set.txt`. Needs slice 1's DL case green, slice 3, and the staged pipeline's P4 (question 6 for the alternative) | planted: a komira_lz4 package without its `lz4-c` requirement (and komira_zlib without `libzlib`), installed alone on an image that ships its own `liblz4.so.1`/`libz.so.1`: the README run passes, the per-package loaded-from row is red (red only because nothing else installed ships the codec; the whole-set run may stay green if another package pulls it in) | **Go**: two new package names on the channel |
-| 5 | **`elfsyms dynsym`** and the per-library link rule (`native_archive` reworked from #681, `callers`, version-script generator, checks 1 to 7) over **komira_crypto only**, no package change | the planted defect of each of checks 1 to 7 (above), each red | none |
+| 3 | **dlopen declarations** (#1188): `mojo_library(dlopen)`, `system_libs.bzl`, the packer writes the requirement and `dlopen`, kci accepts exactly the map's requirements; `lz4` and `zlib` declare their sonames (in the build only, not in the release) | the packer fixture `fx_dlopen_conda` (`tools/build/tests/functional/conda.sh`) is refused today; new fixtures: a source opening an undeclared soname refused, a declaration missing from the map refused, kci refusing a requirement off the map; mutants: kci accepts any `depends`, the packer omits the `depends` row (a package without `lz4-c` must be refused at the build) | none (nothing declared in the release) |
+| 4 | **lz4 and zlib released** (**declared** with slice 12, in one change that merges after slice 11; the loaded-from row is slice 11's): the loaded-from row (install check 5) in `kci_validate` for packages with `dlopen`, run by `beta_validate`; the two declared in `release/artifacts.textproto` and `release_set.txt`. Needs slice 1's DL case green, slice 3, and the staged pipeline's P4 (question 6 for the alternative) | planted: a lz4 package without its `lz4-c` requirement (and zlib without `libzlib`), installed alone on an image that ships its own `liblz4.so.1`/`libz.so.1`: the README run passes, the per-package loaded-from row is red (red only because nothing else installed ships the codec; the whole-set run may stay green if another package pulls it in) | **Go**: two new package names on the channel |
+| 5 | **`elfsyms dynsym`** and the per-library link rule (`native_archive` reworked from #681, `callers`, version-script generator, checks 1 to 7) over **crypto only**, no package change | the planted defect of each of checks 1 to 7 (above), each red | none |
 | 6 | the rule over every owner in the table above, including http_core's `NEEDED` and `DT_RUNPATH` | planted: http_core without `DT_RUNPATH` (B3's check at build time), a caller dropped from `callers`, snappy's `.so` without its C++ runtime (check 7's real case: `_Znwm` undefined) | none |
-| 7 | **completeness lint**: **done in part** by #1325 (the per-library `native_reach_archives` and `native_reach_calls` validations, and the three missing Mojo dependencies: komira_uuid and komira_http_core on komira_crypto, komira_objectstore on komira_fs); open: the weak/common pair and the `callers` entry | was red on `main` before #1325: those three libraries; #1325's planted cases are the `native_reach_case` targets in `tools/build/tests/negative/native_reach`; still to plant: a weak pair across two owners, a new `external_call` with no `callers` entry, a library depending on another owner's `cxx_library` | none |
-| 8 | **the packer**: `lib_files` (`shared`, `link`, `static`), `native_owns`, `native_links`; the `.so` into the library's `.conda`; `__glibc >=2.34` written from the platform row's `os_floor` beside `__linux`; every `NEEDED` owner in the library's closure; `_conda_facts` stops refusing a library whose every linked archive has an owner in its closure; komira_log's holder archive and (with 2A) JIT object; brotli prefixed before komira_parquet_codec is packaged (question 4) | `_conda_facts` refuses komira_crypto today; planted: a `.so` whose `lib_files` sha256 differs, an archive with no owner in the closure, a holder JIT object named in a built `.so`'s `NEEDED`, komira_http_core packed with its crypto dependency removed; mutant: the packer writes a constant `__glibc` instead of reading `os_floor` (a fixture platform row with another floor goes red) | none (builds only; nothing declared) |
+| 7 | **completeness lint**: **done in part** by #1325 (the per-library `native_reach_archives` and `native_reach_calls` validations, and the three missing Mojo dependencies: uuid and http_core on crypto, objectstore on fs); open: the weak/common pair and the `callers` entry | was red on `main` before #1325: those three libraries; #1325's planted cases are the `native_reach_case` targets in `tools/build/tests/negative/native_reach`; still to plant: a weak pair across two owners, a new `external_call` with no `callers` entry, a library depending on another owner's `cxx_library` | none |
+| 8 | **the packer**: `lib_files` (`shared`, `link`, `static`), `native_owns`, `native_links`; the `.so` into the library's `.conda`; `__glibc >=2.34` written from the platform row's `os_floor` beside `__linux`; every `NEEDED` owner in the library's closure; `_conda_facts` stops refusing a library whose every linked archive has an owner in its closure; log's holder archive and (with 2A) JIT object; brotli prefixed before parquet_codec is packaged (question 4) | `_conda_facts` refuses crypto today; planted: a `.so` whose `lib_files` sha256 differs, an archive with no owner in the closure, a holder JIT object named in a built `.so`'s `NEEDED`, http_core packed with its crypto dependency removed; mutant: the packer writes a constant `__glibc` instead of reading `os_floor` (a fixture platform row with another floor goes red) | none (builds only; nothing declared) |
 | 9 | **kci reads `lib_files`** (in part on `main`, #1391: the `lib_files` reader, the `__glibc` acceptance in PUBLISH, and in `src/kci_validate/native_install.mojo` install checks 2, 3 and 5 and a `DF_SYMBOLIC` row (per-library check 6 on the installed bytes), run by `beta_validate` since slice 11, which also added install checks 4, 6 and 7 in `src/kci_validate/native_rows.mojo`; the rest of this row is open): the generalised `native_link_args` (every pin, dependency order, or the README's flags with 5a), readback of `lib_files` sha256, install checks 3, 4, 6 and 7 (the generated load program, whole set and per package alone; the `mojo build` README row; the system OpenSSL row), and install check 5 extended from slice 4's `dlopen` packages to every package; kci accepts the one `__glibc` requirement, equal on every package of the set; the `native` kind and `_native_depends` never land | kci fixtures, each refused, with a mutant per check: a missing owner flag, a `.so` with an unresolved `NEEDED`, a `lib_files` sha256 mismatch, a JIT object in a built image's `NEEDED`, a `.so` with an unresolved symbol, linked without `-z now` (red only under `RTLD_NOW`), a package missing an owner requirement installed alone, two different `__glibc` values in one set, an unprefixed export planted in crypto's `.so` (install check 7: the system OpenSSL's `SSL_CTX_new` crashes, as in probe 2's leaky control) | none |
-| 10 | **README link commands and every owner called** (question 5a; **done**: section "Where a user gets these flags" and the "Every owner is called" paragraph say what landed, including the five further owners the README check found): the packer writes the `sh` block; the readme tool parses it; the install validation uses it or refuses a difference; the build refuses an owner whose README program references none of its exports; komira_metrics's and komira_scan_source's READMEs gain an example reaching their C | planted: a README without an owner's `-l` (install validation red); komira_metrics's README without its new example (build red) | none |
-| 11 | **beta wiring** (**EXISTS**: `src/kci_validate/native_rows.mojo`, called by `run_install_env`): install checks 2 to 7 run in `beta_validate` for every native package (one whose `metadata.json` has `lib_files` or `dlopen` rows, so a package that forgot its codec requirement is still native; a release with none gets no row); row 6 builds the READMEs whose closure links native files (install check 6's decision). They live in kci's CONDA_INSTALL_ENV validation, which `beta_validate` already runs, so `kci.yml` does not change and the rows do not wait for the staged pipeline's P4 (which rewrites the job, not the rows): this takes question 7's alternative. Slices 4 and 12 declared native packages (#1592), so the rows run from the first `beta_validate` after this slice lands. Row 7 checks every owner, which includes komira_http_core's closure | nothing on `main` can be red (`beta_validate` runs none of these rows); shown by mutants on the new job: a `.so` changed after `build` is refused by step 4b (mutant: skip step 4b in `beta_validate`), and a planted `.so` with an unresolved symbol makes row 4 red | **Go**: it changes the release (given) |
-| 12 | **the release set**: declare the first native batch (the owners and their dependents up to the cloud SDKs, question 9) in `release/artifacts.textproto` and `release_set.txt`. **Declared** (with slice 4): the owners, the `kci_*` libraries and their closure, the cloud SDKs among it; `release_set_check` gives each native library its `native` target. Not declared: komira_db_sqlite and komira_parquet_codec (no `native` yet), and kci_build, kci_publish (their library targets are `<name>_lib`, so no artifact named for the package passes the artifacts test's `<name>_conda` rule) with kci_validate and kci_cli, which require them. Taken back out once, because `beta_validate`'s README check refuses a member whose package ships no README or whose README holds no ` ```mojo ` example (kci_cloud_gcp and kci_composites had no README; komira_arrow, komira_arrow_ipc, komira_column_kernels, komira_join_assembly, komira_plan_expr, komira_plan_ir, komira_plan_stats and komira_secret_env had no ` ```mojo ` example), with the 19 members that require one of them; all 29 are declared again now that each of the 10 ships a README with a runnable ` ```mojo ` example, which its library's build runs as the welded `[tests][readme]` test | `release_set_check` red on a batch member listed before an owner it requires | **Go**: new package names on the channel, a change to what beta and prod publish |
+| 10 | **README link commands and every owner called** (question 5a; **done**: section "Where a user gets these flags" and the "Every owner is called" paragraph say what landed, including the five further owners the README check found): the packer writes the `sh` block; the readme tool parses it; the install validation uses it or refuses a difference; the build refuses an owner whose README program references none of its exports; metrics's and scan_source's READMEs gain an example reaching their C | planted: a README without an owner's `-l` (install validation red); metrics's README without its new example (build red) | none |
+| 11 | **beta wiring** (**EXISTS**: `src/kci_validate/native_rows.mojo`, called by `run_install_env`): install checks 2 to 7 run in `beta_validate` for every native package (one whose `metadata.json` has `lib_files` or `dlopen` rows, so a package that forgot its codec requirement is still native; a release with none gets no row); row 6 builds the READMEs whose closure links native files (install check 6's decision). They live in kci's CONDA_INSTALL_ENV validation, which `beta_validate` already runs, so `kci.yml` does not change and the rows do not wait for the staged pipeline's P4 (which rewrites the job, not the rows): this takes question 7's alternative. Slices 4 and 12 declared native packages (#1592), so the rows run from the first `beta_validate` after this slice lands. Row 7 checks every owner, which includes http_core's closure | nothing on `main` can be red (`beta_validate` runs none of these rows); shown by mutants on the new job: a `.so` changed after `build` is refused by step 4b (mutant: skip step 4b in `beta_validate`), and a planted `.so` with an unresolved symbol makes row 4 red | **Go**: it changes the release (given) |
+| 12 | **the release set**: declare the first native batch (the owners and their dependents up to the cloud SDKs, question 9) in `release/artifacts.textproto` and `release_set.txt`. **Declared** (with slice 4): the owners, the `kci_*` libraries and their closure, the cloud SDKs among it; `release_set_check` gives each native library its `native` target. Not declared: db_sqlite and parquet_codec (no `native` yet), and kci_build, kci_publish (their library targets are `<name>_lib`, so no artifact named for the package passes the artifacts test's `<name>_conda` rule) with kci_validate and kci_cli, which require them. Taken back out once, because `beta_validate`'s README check refuses a member whose package ships no README or whose README holds no ` ```mojo ` example (kci_cloud_gcp and kci_composites had no README; arrow, arrow_ipc, column_kernels, join_assembly, plan_expr, plan_ir, plan_stats and secret_env had no ` ```mojo ` example), with the 19 members that require one of them; all 29 are declared again now that each of the 10 ships a README with a runnable ` ```mojo ` example, which its library's build runs as the welded `[tests][readme]` test | `release_set_check` red on a batch member listed before an owner it requires | **Go**: new package names on the channel, a change to what beta and prod publish |
 | 13 | **gamma_validation.md** rewritten (done by #1361, merged 2026-10-11): its `komira_native` rows are replaced by a pointer to this doc's beta install checks, and `gamma_validation_decisions.md` likewise; its stage and channel text (gamma publishing to and installing from a `gamma` conda channel, which was `kci.yml`'s before M2) is rewritten to #1184's glossary, replacing its "Vocabulary" note, since #1184 does not edit this file | `komira_native` joins the root `retired_names` lint (root `BUCK`), which refuses a retired name outside a dated history note: red while either doc still carries it (the doc links lint cannot go red on a content rewrite); every mention left in this doc moves onto a dated history line. Slice 2's exemption in `tools/build/package` was deleted with this slice; the lint entry landed in a follow-up that first moved this doc's remaining mentions onto dated history lines or reworded them (#1313, merged, recorded probe 3 but left them in place). `retired_names` reads the whole doc tree; its `unchecked` list leaves out one file, `tools/build/package/release_order/requires_komira_native.json`, the metadata of the must-refuse fixture that keeps the exemption gone (JSON holds no comment, so no date) | none |
 
 Slices 1, 2 and 3 are independent; 4 needs 1, 3 and P4; 5 to 10 are a chain (5 needs nothing
@@ -575,16 +575,16 @@ until it has welded tests).
 ## Open questions for the project owner
 
 1. **Per-package shared libraries, no static archives except per-library state.** Recommended: yes.
-2. **komira_log's holder under `mojo run`:** (A), (B) or (C) above. Recommended: (A), confirmed by
+2. **log's holder under `mojo run`:** (A), (B) or (C) above. Recommended: (A), confirmed by
    probe 3.
 3. **The `.so` in the library's own package, or a separate `<library>_native` package** the SDK
    engine could also require. Recommended: the library's own; split only if something needs the C
    without the Mojo. A separate package doubles the new package names slice 12 asks a go for.
-4. **Prefix brotli (and SQLite) before komira_parquet_codec (and komira_db_sqlite) ship.**
+4. **Prefix brotli (and SQLite) before parquet_codec (and db_sqlite) ship.**
    Recommended: yes, by `tools/build/native/`. An unprefixed exported `BrotliDecoder*` would
    interpose on a system `libbrotlidec`.
 5. **Where a user gets the link flags:** (a), (b) or (c) in "Linking from Mojo". Recommended: (a).
-6. **komira_lz4 and komira_zlib: wait for beta's install job, or accept the risk.** Recommended:
+6. **lz4 and zlib: wait for beta's install job, or accept the risk.** Recommended:
    wait. Their go (slice 4) needs probe 3's DL case green and the loaded-from row running in
    `beta_validate` (the job exists since M2, #1296; slice 11 wired the rows into it). The alternative is to declare
    them after slice 3 with only probe 3's evidence: today's installed README run would pass even if
@@ -615,7 +615,7 @@ until it has welded tests).
 ## Out of scope: the SDK engine library
 
 The SDKs' engine shared library is not built yet (`docs/index.md`: the ABI is "coming with
-`komira_so`") and has its own design. `mojo_shared_lib` links C archives into the library itself
+`so`") and has its own design. `mojo_shared_lib` links C archives into the library itself
 (**EXISTS:** `force_load` in `tools/build/mojo/defs.bzl`), with no `-Bsymbolic` and a version script
 only with `exports_exact = True` (default False). Prefixing (#672) does not separate it from the
 per-library `.so` files (same `komira_awslc_`, `komira_s2n_`, `komira_snappy_` names), so by default
@@ -626,7 +626,7 @@ loads native libraries `RTLD_LOCAL`, which keeps their symbols out of the global
 stop their own references binding to an earlier global definition without `-Bsymbolic`).
 
 **The engine library's package (EXISTS).** `libkomira` is shipped in the package of its Mojo library,
-`komira_so` (`tools/build/package/libkomira`, target `komira_so_libkomira_conda`): the library's `.mojoc` and
+`so` (`tools/build/package/libkomira`, target `komira_so_libkomira_conda`): the library's `.mojoc` and
 `lib/libkomira.so`, with one `lib_files` row of kind `shared` (its SONAME is the file name, so there is
 no link name; the packer writes one only for a versioned SONAME). `conda_package` takes the shared
 library as `shared_lib`, and the plain `komira_so_conda` is the same package without it: a release

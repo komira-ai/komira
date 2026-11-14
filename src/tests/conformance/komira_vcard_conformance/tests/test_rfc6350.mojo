@@ -28,7 +28,7 @@
 
 from std.testing import assert_equal, assert_true
 
-from komira_vcard import Contact, emit_contacts, parse_contacts
+from vcard import Contact, emit_contacts, parse_contacts
 from komira_vcard_conformance import (
     rfc2426_7_example,
     rfc6350_6_1_4_kind,

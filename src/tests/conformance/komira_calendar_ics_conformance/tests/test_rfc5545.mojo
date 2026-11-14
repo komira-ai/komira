@@ -1,5 +1,5 @@
 # =============================================================================
-# test_rfc5545.mojo -- komira_calendar_ics against the examples of RFC 5545.
+# test_rfc5545.mojo -- calendar_ics against the examples of RFC 5545.
 #
 #   §3.6.1  the four VEVENT examples, in one VCALENDAR: UTC times, an
 #           all-day yearly event, an eleven-day event; CLASS, CATEGORIES and
@@ -26,11 +26,11 @@
 
 from std.testing import assert_equal
 
-from komira_proto_codec import encode_json
-from komira_calendar_ics import read_ics
-from komira_calendar_ics.vtimezone import write_vtimezone
-from komira_datetime import seconds_from_fields
-from komira_datetime import posix_zone
+from proto_codec import encode_json
+from calendar_ics import read_ics
+from calendar_ics.vtimezone import write_vtimezone
+from datetime import seconds_from_fields
+from datetime import posix_zone
 from komira_calendar_ics_conformance import crlf, events_text, report_text, rfc_zones
 
 

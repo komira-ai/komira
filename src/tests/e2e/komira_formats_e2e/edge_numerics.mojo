@@ -34,11 +34,11 @@
 
 from std.memory import bitcast
 
-from komira_arrow.arrow_types import ArrowType
-from komira_arrow.column import Column
-from komira_arrow.primitive_array import PrimitiveArray
-from komira_arrow.record_batch import RecordBatch, RecordBatchBuilder
-from komira_arrow.schema import Field, SchemaBuilder
+from arrow.arrow_types import ArrowType
+from arrow.column import Column
+from arrow.primitive_array import PrimitiveArray
+from arrow.record_batch import RecordBatch, RecordBatchBuilder
+from arrow.schema import Field, SchemaBuilder
 
 
 comptime NUM_INT_EDGE_ROWS: Int = 6

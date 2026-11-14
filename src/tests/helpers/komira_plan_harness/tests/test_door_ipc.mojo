@@ -1,5 +1,5 @@
 # door_ipc.mojo's decode_ipc_stream, on its claims (its header lists them),
-# over streams built with komira_arrow_ipc's encoders, no library involved.
+# over streams built with arrow_ipc's encoders, no library involved.
 #
 # What each test proves, and the defect it would catch:
 #   test_every_claimed_type_round_trips
@@ -22,15 +22,15 @@
 
 from std.testing import TestSuite, assert_equal, assert_true
 
-from komira_arrow.arrow_types import ArrowType
-from komira_arrow.schema import Field, RecordBatch, SchemaBuilder
-from komira_arrow_ipc.ipc_encoder_dispatch import (
+from arrow.arrow_types import ArrowType
+from arrow.schema import Field, RecordBatch, SchemaBuilder
+from arrow_ipc.ipc_encoder_dispatch import (
     arrow_ipc_eos_bytes,
     encode_record_batch_message,
     encode_schema_message,
 )
-from komira_buffer.heap_region import HeapRegion
-from komira_buffer.shared_aligned_buffer import SharedAlignedBuffer
+from byte_buffer.heap_region import HeapRegion
+from byte_buffer.shared_aligned_buffer import SharedAlignedBuffer
 
 from komira_plan_harness import (
     CanonPolicy,

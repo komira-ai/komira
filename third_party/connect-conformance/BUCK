@@ -9,7 +9,7 @@ load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 # test speaks. Nothing of it is committed here and nothing ships it: it is
 # test data of //src/tests/conformance/komira_connect_conformance only. That
 # package runs the binary in a build action, in server mode, against a
-# komira_connect server it starts as a child process on 127.0.0.1; the binary
+# connect server it starts as a child process on 127.0.0.1; the binary
 # embeds every test case and its reference clients, and needs no network.
 #
 # The archive's sha256 is the one the release's checksums file

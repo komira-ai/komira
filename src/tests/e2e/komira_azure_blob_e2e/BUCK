@@ -1,17 +1,17 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
-# Test-only: komira_azure_blob's AzureFs and AzureClient over a real
+# Test-only: azure_blob's AzureFs and AzureClient over a real
 # KernelTcpConnector, against a fake Blob service on 127.0.0.1:0 served by a
-# real komira_http_server on a second thread (komira_fork_join). The fake
+# real http_server on a second thread (fork_join). The fake
 # recomputes each request's Shared Key signature with its own canonicalizer
-# (written from the Shared Key document, not komira_azure_blob's) under the
+# (written from the Shared Key document, not azure_blob's) under the
 # published Azurite development key, and refuses a mismatch with 403
 # AuthenticationFailed. Nothing ships, so `conda = False`.
 #
-# A package of its own, not a test of komira_azure_blob: the fake needs an
+# A package of its own, not a test of azure_blob: the fake needs an
 # HTTP server and a second thread, and a welded test's imports are the
-# library's deps, so testing it there would put komira_http_server and
-# komira_fork_join into every consumer of komira_azure_blob.
+# library's deps, so testing it there would put http_server and
+# fork_join into every consumer of azure_blob.
 #
 # The welded test, test_azure_loopback_e2e: read_at (several ranges, the last
 # byte, a short read at EOF), file_size, read_footer, read_ranges_prefetched
@@ -27,38 +27,38 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # misreading with the signer unseen.
 #
 # `deps` lists the Mojo packages of the full transitive closure of
-# komira_azure_blob, komira_http_server and komira_fork_join.
+# azure_blob, http_server and fork_join.
 mojo_library(
     name = "komira_azure_blob_e2e",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     conda = False,
     deps = [
-        "//src/komira_async:komira_async",
-        "//src/komira_atomic_alias:komira_atomic_alias",
-        "//src/komira_azure_blob:komira_azure_blob",
-        "//src/komira_azure_core:komira_azure_core",
-        "//src/komira_buffer:komira_buffer",
-        "//src/komira_clock:komira_clock",
-        "//src/komira_crypto:komira_crypto",
-        "//src/komira_datetime:komira_datetime",
-        "//src/komira_encoding:komira_encoding",
-        "//src/komira_fork_join:komira_fork_join",
-        "//src/komira_fs:komira_fs",
-        "//src/komira_hash:komira_hash",
-        "//src/komira_http_client:komira_http_client",
-        "//src/komira_http_core:komira_http_core",
-        "//src/komira_http_server:komira_http_server",
-        "//src/komira_json:komira_json",
-        "//src/komira_log:komira_log",
-        "//src/komira_metrics:komira_metrics",
-        "//src/komira_name_registry:komira_name_registry",
-        "//src/komira_net:komira_net",
-        "//src/komira_objectstore:komira_objectstore",
-        "//src/komira_spsc_ring:komira_spsc_ring",
-        "//src/komira_trace:komira_trace",
-        "//src/komira_uuid:komira_uuid",
-        "//src/komira_xml:komira_xml",
-        "//tools/build/mojo/runtime_paths:komira_runtime_paths",
+        "//src/async_rt:async_rt",
+        "//src/atomic_alias:atomic_alias",
+        "//src/azure_blob:azure_blob",
+        "//src/azure_core:azure_core",
+        "//src/byte_buffer:byte_buffer",
+        "//src/clock:clock",
+        "//src/crypto:crypto",
+        "//src/datetime:datetime",
+        "//src/encoding:encoding",
+        "//src/fork_join:fork_join",
+        "//src/fs:fs",
+        "//src/hashing:hashing",
+        "//src/http_client:http_client",
+        "//src/http_core:http_core",
+        "//src/http_server:http_server",
+        "//src/json:json",
+        "//src/log:log",
+        "//src/metrics:metrics",
+        "//src/name_registry:name_registry",
+        "//src/net:net",
+        "//src/objectstore:objectstore",
+        "//src/spsc_ring:spsc_ring",
+        "//src/trace:trace",
+        "//src/uuid:uuid",
+        "//src/xml:xml",
+        "//tools/build/mojo/runtime_paths:runtime_paths",
     ],
     test_srcs = [
         "tests/test_azure_loopback_e2e.mojo",

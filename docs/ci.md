@@ -264,7 +264,7 @@ other run.
 
 | capability | observed | enables |
 |---|---|---|
-| `child_reap` (required): start `sleep 30` through `komira_supervisor`, stop it, reap it | alive after 300 ms, died of SIGTERM (15), a second reap finds no child | any test that runs its own server process (the embedded MinIO of `komira_test_minio`) |
+| `child_reap` (required): start `sleep 30` through `supervisor`, stop it, reap it | alive after 300 ms, died of SIGTERM (15), a second reap finds no child | any test that runs its own server process (the embedded MinIO of `komira_test_minio`) |
 | `loopback` (required): bind 127.0.0.1 port 0, connect, accept, move one byte | all three yes | a client and a server talking over 127.0.0.1 in one action |
 | `pdeathsig` (required): `/usr/bin/setpriv --pdeathsig KILL`, parent SIGKILLed | setpriv present; the child died with its parent; the control child, started without setpriv, outlived its parent | a server that dies with the test (`die_with_parent` in `komira_test_minio/process.mojo`), so a killed test leaves no process behind |
 | `disk_1gib` (required): write 1 GiB under `TEST_TMPDIR`, read the size back, delete it | written and deleted, in 0.7 and 0.85 s; 749 and 835 GiB available in the two runs | tests that write large data (object store contents) |
@@ -496,7 +496,7 @@ dropping of one of them, an unsorted or repeated line, and an empty file. It is 
 committed claim, not a live read: it does not notice a claim the registry lost, and `prod-stage` stays the
 last word.
 
-**The release declaration and the release set agree, and one komira_so package.** `//release:release_checks_cases`
+**The release declaration and the release set agree, and one so package.** `//release:release_checks_cases`
 holds `release/artifacts.textproto` to `tools/build/package/release_set.txt`: the same metapackage, the same
 members in the same order, and the same `--license`, `--summary` and `--home`, so a member listed in one file and
 missing from the other is refused, naming it. It also refuses a release that names both `komira_so_conda` and

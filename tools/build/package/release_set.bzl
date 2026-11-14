@@ -15,7 +15,7 @@ both, with a stamp that no release carries:
     conda_release_set_check(
         name = "release_set_check",
         metapackage = "komira_all",
-        libs = ["//src/komira_encoding:komira_encoding"],
+        libs = ["//src/encoding:encoding"],
         release_set = "release_set.txt",
     )
 

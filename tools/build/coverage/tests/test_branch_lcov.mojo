@@ -326,7 +326,7 @@ def _merged(b: List[String]) raises -> Analysis:
 
 
 def test_unequal_copies_merge_in_either_order() raises:
-    # The komira_log shape: one test's copy holds 1 decision at the
+    # The log shape: one test's copy holds 1 decision at the
     # location, another's 4. Neither order is refused; the 4 are counted.
     var small = _rec(_copy(2, 1, _list(0)))
     var large = _rec(_copy(2, 4, _list(0, 0, 0, 0)))

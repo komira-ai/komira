@@ -2,11 +2,11 @@
 # sigv4_check.mojo -- the fake's own SigV4 verifier
 # =============================================================================
 #
-# The fake checks every request's signature WITHOUT komira_aws_core: it
+# The fake checks every request's signature WITHOUT aws_core: it
 # rebuilds the canonical request from the request as the server parsed it
 # (method, path, the headers the Authorization header lists, the body's
 # SHA-256), the string to sign and the signing key from the secret it holds
-# for the access key id, with komira_crypto's SHA-256 and HMAC only, and
+# for the access key id, with crypto's SHA-256 and HMAC only, and
 # compares the hex signature. A client that signs with a different scope,
 # key, header set or body than the one it sends is refused, as the service
 # refuses it.
@@ -24,7 +24,7 @@
 # refused).
 # =============================================================================
 
-from komira_crypto import hex_lower_array_32, hmac_sha256_string, sha256
+from crypto import hex_lower_array_32, hmac_sha256_string, sha256
 
 comptime SIGV4_ALGORITHM = "AWS4-HMAC-SHA256"
 

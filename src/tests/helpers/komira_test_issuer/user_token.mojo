@@ -21,8 +21,8 @@
 # this file's API.
 # =============================================================================
 
-from komira_jose import JOSE_MAX_TTL_S
-from komira_json import write_i64_dec, write_json_string
+from jose import JOSE_MAX_TTL_S
+from json import write_i64_dec, write_json_string
 
 
 def _refuse(reason: String) raises:

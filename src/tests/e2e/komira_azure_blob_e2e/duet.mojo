@@ -4,7 +4,7 @@
 #
 # `AzureFs` blocks its thread until each request completes, and `HttpServer`
 # only makes progress when something steps its serve loop, so the two cannot
-# share a thread. `serve_while` runs them on two `komira_fork_join` threads:
+# share a thread. `serve_while` runs them on two `fork_join` threads:
 #
 #   thread 0  steps the server (`serve_one_iteration_dispatch`) until the
 #             client is done;
@@ -39,15 +39,15 @@
 
 from std.memory import Pointer
 
-from komira_atomic_alias import AtomicI64
-from komira_clock import now_ns
-from komira_fork_join import ForkJoinBody, fork_join
+from atomic_alias import AtomicI64
+from clock import now_ns
+from fork_join import ForkJoinBody, fork_join
 
-from komira_async.ops.waker_sink import NoopSink
-from komira_async.runtime.blocking_runtime import BlockingRuntime
-from komira_http_core.transport.grpc_emit import NoopGrpcDispatch
-from komira_http_server.server import HttpServer, HttpServerConfig
-from komira_http_server.routing import Router
+from async_rt.ops.waker_sink import NoopSink
+from async_rt.runtime.blocking_runtime import BlockingRuntime
+from http_core.transport.grpc_emit import NoopGrpcDispatch
+from http_server.server import HttpServer, HttpServerConfig
+from http_server.routing import Router
 
 from .fake_blob_service import FakeBlobService
 

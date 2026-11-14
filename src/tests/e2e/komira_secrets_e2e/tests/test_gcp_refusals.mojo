@@ -4,7 +4,7 @@
 # =============================================================================
 #
 # Each refusal is a google.rpc.Status envelope from the fake; the generated
-# client raises it through komira_gcp_core's `gcp_status_error`. The leg
+# client raises it through gcp_core's `gcp_status_error`. The leg
 # sends, in order:
 #
 #   AccessSecretVersion of a secret that does not exist   404 NOT_FOUND
@@ -18,7 +18,7 @@
 #   DeleteSecret of a secret that does not exist          404 NOT_FOUND
 #
 # What each assertion catches:
-#   * each raised text EXACTLY, as komira_gcp_core renders it (verb, RPC,
+#   * each raised text EXACTLY, as gcp_core renders it (verb, RPC,
 #     HTTP status, code name and number, the byte counts of error.message
 #     and the body, both taken from what the fake sent): a client that maps
 #     a status to the wrong code, raises another error, or quotes the body;
@@ -33,18 +33,18 @@
 
 from std.testing import assert_equal, assert_false, assert_true
 
-from komira_async.ops.waker_sink import NoopSink
-from komira_async.runtime.blocking_runtime import BlockingRuntime
-from komira_encoding import base64_encode
-from komira_gcp_core import StaticTokenSource
-from komira_gcp_secretmanager.service import (
+from async_rt.ops.waker_sink import NoopSink
+from async_rt.runtime.blocking_runtime import BlockingRuntime
+from encoding import base64_encode
+from gcp_core import StaticTokenSource
+from gcp_secretmanager.service import (
     AccessSecretVersionRequest,
     AddSecretVersionRequest,
     CreateSecretRequest,
     DeleteSecretRequest,
 )
-from komira_http_core.tls import tls_init
-from komira_proto_codec.codec import decode_json
+from http_core.tls import tls_init
+from proto_codec.codec import decode_json
 
 from komira_secrets_e2e import (
     GLOBAL_HOST,

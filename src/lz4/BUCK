@@ -1,0 +1,80 @@
+load("@buildrules//rules/mojo:pack.bzl", "mojo_conda")
+load("@komira//tools/build/mojo:adopt.bzl", "mojo_adopted_library")
+load("@komira//tools/build/package:conda.bzl", "conda_package")
+load(":buildrules.mojo.bzl", "mojo_package")
+
+# The shared LZ4 codecs over liblz4: the raw block (compress, decompress and
+# the compress bound) and the frame (LZ4F_*, the Arrow IPC LZ4_FRAME
+# framing). liblz4 is loaded at run time with dlopen and kept in one
+# process-lifetime `_Global` slot, so there is no link dep, and there are no
+# first-party deps: the Parquet page codecs, the document store's `_source`
+# compression and compression's codecs depend on this leaf and on
+# nothing of each other.
+#
+# Built with buildrules' `mojo_package` from mopm.toml (README.md, "Build files"): `:lib` is the
+# library file and exists only once every test of tests/ has passed. The welded tests:
+# - test_codec: the List API (`lz4_compress` / `lz4_decompress`) round trips.
+# - test_codec_into: the into-buffer API (`lz4_compress_into` /
+#   `lz4_decompress_into`): a known-answer block from //third_party/pierrec-lz4
+#   (pinned by sha256, staged at golden/), round trips, the empty block, the
+#   too-small destination and corrupt blocks.
+# - test_frame: the frame API (`lz4_frame_*`, `Lz4FrameDecoder`): the same
+#   golden file decoded as the whole frame it is, round trips, a reused
+#   decoder, the too-small destination, corrupt and doubled frames.
+mojo_package(
+    path = ".",
+    test_data = {
+        "tests/test_codec_into.mojo": {
+            "golden/gettysburg.txt": "//third_party/pierrec-lz4:gettysburg.txt",
+            "golden/gettysburg.txt.lz4": "//third_party/pierrec-lz4:gettysburg.txt.lz4",
+        },
+        "tests/test_frame.mojo": {
+            "golden/gettysburg.txt": "//third_party/pierrec-lz4:gettysburg.txt",
+            "golden/gettysburg.txt.lz4": "//third_party/pierrec-lz4:gettysburg.txt.lz4",
+        },
+    },
+)
+
+# `:lz4`, the target the packages that depend on this library name, is `:lib` as komira's
+# Mojo rules take it (tools/build/mojo/adopt.bzl): the same file, so a dependent builds only once the
+# tests have passed. `dlopen` is the soname the library opens at run time (OwnedDLHandle): the
+# conda package `komira_lz4_conda` requires the conda-forge package
+# tools/build/package/system_libs.bzl names for it, and `[native-dependencies]` of mopm.toml
+# says the same for `:conda`.
+mojo_adopted_library(
+    name = "lz4",
+    dlopen = ["liblz4.so.1"],
+    lib = ":lib",
+    readme = "README.md",
+    srcs = glob(["src/lz4/**/*.mojo"]),
+    test_srcs = glob(["tests/test_*.mojo"]),
+    test_runs = ":test",
+    visibility = ["PUBLIC"],
+)
+
+# The mopm package: `mopm pack` over `:lib`, the `.conda` a mopm registry serves
+# (`mojo-lz4-0.1.0-mojo1.0.0_0.conda`), requiring the conda package that ships liblz4
+# (`[native-dependencies]`, `mode = "load"`). `:lib` exists only once the tests passed, so this file
+# exists only then. Publishing it (`mopm publish`) uploads, which is not a build action: it is a
+# step of a CI job that takes this target's output. `mopm` is the one `mojo_package` pins
+# (mopm-toolchain.toml).
+mojo_conda(
+    name = "conda",
+    lib = ":lib",
+    manifest = "mopm.toml",
+    mojo = "1.0.0",
+    mopm = "toolchains//:mopm_0_0_101",
+    package = "lz4",
+    version = "0.1.0",
+    visibility = ["PUBLIC"],
+)
+
+# Kept for the release machine, which still builds it (release/artifacts.textproto): komira's conda
+# packer over `:lz4`. It goes when the release machine takes `:conda`, which is this
+# library's mopm package.
+conda_package(
+    name = "komira_lz4_conda",
+    lib = ":lz4",
+    summary = "The `lz4` Mojo library of komira, as a conda package.",
+    visibility = ["PUBLIC"],
+)

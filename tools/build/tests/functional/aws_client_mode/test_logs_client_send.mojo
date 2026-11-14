@@ -15,7 +15,7 @@
 # as the only signed extra header, and calls the connector factory; that
 # `get_log_events` goes through `send`, parses a 200, and turns a non-2xx
 # into an error naming the operation, the status and the code and message
-# komira_aws_core's aws_json_error_info reads (an X-Amzn-Errortype code
+# aws_core's aws_json_error_info reads (an X-Amzn-Errortype code
 # included), never the raw body; that `send` hands the transport the
 # client's own retry quota, the one its calls share (500 at the start); and
 # that it does not send `s3_200_error` (the transport's default, False). It
@@ -26,13 +26,13 @@
 # `send_sigv4_signed_request_with`, which sends one unsigned request through
 # the caller's transport, reads the caller's clock and drives the caller's
 # retry loop and budget. Signing, retries and the conditional-write rule
-# are tested in komira//src/komira_aws_core.
+# are tested in komira//src/aws_core.
 from komira_aws_logs_client.komira_aws_logs_client import (
     CloudWatchLogsClient,
     CloudWatchLogsGetLogEventsRequest,
     build_get_log_events_request,
 )
-from komira_aws_core import (
+from aws_core import (
     AwsClock,
     AwsCredential,
     AwsCredsSource,
@@ -42,9 +42,9 @@ from komira_aws_core import (
     CredentialHttpRequest,
     HttpResult,
 )
-from komira_http_client.client import HttpClientConfig
-from komira_http_core.transport.io_stream import Connector
-from komira_retry import MonotonicClock, RetryBudget, RetryLoop, RetryRng, Sleeper
+from http_client.client import HttpClientConfig
+from http_core.transport.io_stream import Connector
+from retry import MonotonicClock, RetryBudget, RetryLoop, RetryRng, Sleeper
 from std.testing import assert_equal, assert_false, assert_raises, assert_true
 
 

@@ -4,7 +4,7 @@ scenario table every issuer in the HTTP auth design must pass.
 Test-only (no conda package): a library names it in `test_deps`, never in
 `deps`. Modules:
   - issuer.mojo     : `TestIssuer`, a JWK Set document and a user-token mint
-                      over a komira_jose `Keyring`, with key rotation that
+                      over a jose `Keyring`, with key rotation that
                       publishes before it signs and keeps a former key until
                       the max lifetime plus the largest leeway (60 s) have
                       passed.
@@ -14,7 +14,7 @@ Test-only (no conda package): a library names it in `test_deps`, never in
                       `IssuerProfile`, what a relying party configures.
   - token_endpoint.mojo : `ClientRegistry`, the clients and the checks of
                       the issuer's `client_credentials` token endpoint.
-  - transport.mojo  : `IssuerTokenTransport`, that endpoint as a komira_oauth
+  - transport.mojo  : `IssuerTokenTransport`, that endpoint as a oauth
                       `TokenEndpointTransport`.
   - scenarios.mojo  : `issuer_scenarios()`, `run_issuer_scenario[I]`,
                       `run_issuer_scenarios[I]`, `verify_as_relying_party`

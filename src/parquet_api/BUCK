@@ -1,0 +1,93 @@
+load("@komira//tools/build/mojo:adopt.bzl", "mojo_adopted_library")
+load("@buildrules//rules/mojo:pack.bzl", "mojo_conda")
+load("@komira//tools/build/package:conda.bzl", "conda_package")
+load(":buildrules.mojo.bzl", "mojo_package")
+
+# The Parquet format's own vocabulary, as plain values: the Thrift enums
+# (page type, encoding, compression codec, physical type, field repetition,
+# boundary order) and the footer metadata structs (FileMetaData, RowGroup,
+# ColumnChunk, ColumnMetaData, Statistics, SchemaElement, PageHeader,
+# SortingColumn, KeyValue). It reads no file and decodes no byte; a reader
+# fills these structs and a writer serializes them.
+#
+# A zero-dependency leaf: the package has no deps (mopm.toml has no
+# [dependencies] table), and that is load-bearing, because a Parquet codec,
+# reader or writer depends on this library, so anything added here lands in
+# each of their closures.
+#
+# The welded tests:
+# - test_parquet_types: each enum's names and equality, and each footer
+#   struct built and read back.
+# - test_values_match_parquet_thrift: every enum value and ConvertedType
+#   constant against parquet.thrift, read from the parquet-format archive
+#   //third_party/parquet-format pins by sha256 and staged at format/ by
+#   `test_data`; no expected value is written by hand. It also holds the
+#   PageHeader.crc and Statistics.nan_count docs to the spec's fields 4 and 9,
+#   and ColumnMetaData.key_value_metadata to field 8.
+# - test_enum_unknown_values: every enum written for each byte 0..255 through
+#   both constructors: the defined values by name, every other value (the
+#   Encoding gap at 1 included) as `<Type>(<n>)`.
+# - test_hll_footer: the registers' key-value encoding (round trip, the
+#   pinned alphabet, every malformed value refused, other keys ignored) and
+#   the field 9 rule (only i64 is nan_count; the old binary is not).
+# - test_no_env_reads: the package's sources read no environment, import no
+#   first-party package and hold no raw pointer. `test_data` stages every
+#   source of the library, subdirectories included, at lib/, so a module the
+#   scan does not read fails it.
+#
+# Built with buildrules' `mojo_package` from mopm.toml (README.md, "Build files"): `:lib` is the
+# library file and exists only once every test of tests/ has passed. `test_data` gives a test the
+# files it opens, in its working directory (buildrules docs/contract.md, 12.9).
+_SRCS = glob(["src/parquet_api/**/*.mojo"])
+
+mojo_package(
+    path = ".",
+    test_data = {
+        "tests/test_values_match_parquet_thrift.mojo": {
+            "format": "//third_party/parquet-format:files",
+        },
+        "tests/test_no_env_reads.mojo": {
+            "lib/" + f[len("src/parquet_api/"):]: f
+            for f in _SRCS        },
+    },
+)
+
+# `:parquet_api`, the target the packages that depend on this library name, is `:lib` as
+# komira's Mojo rules take it (tools/build/mojo/adopt.bzl): the same file, so a dependent builds only
+# once the tests have passed. It carries the README gate too (`[tests][readme]`): the examples run
+# against `:lib`; the tests are not run again.
+mojo_adopted_library(
+    name = "parquet_api",
+    lib = ":lib",
+    readme = "README.md",
+    srcs = _SRCS,
+    test_srcs = glob(["tests/test_*.mojo"]),
+    test_runs = ":test",
+    visibility = ["PUBLIC"],
+)
+
+# The mopm package: `mopm pack` over `:lib`, the `.conda` a mopm registry serves
+# (`mojo-parquet_api-0.1.0-mojo1.0.0_0.conda`). `:lib` exists only once the tests passed, so
+# this file exists only then. Publishing it (`mopm publish`) uploads, which is not a build action:
+# it is a step of a CI job that takes this target's output. `mopm` is the one `mojo_package` pins
+# (mopm-toolchain.toml).
+mojo_conda(
+    name = "conda",
+    lib = ":lib",
+    manifest = "mopm.toml",
+    mojo = "1.0.0",
+    mopm = "toolchains//:mopm_0_0_101",
+    package = "parquet_api",
+    version = "0.1.0",
+    visibility = ["PUBLIC"],
+)
+
+# Kept for the release machine, which still builds it (release/BUCK, release/artifacts.textproto):
+# komira's conda packer over `:parquet_api`. It goes when the release machine takes the mopm
+# package. This library's mopm package is `:conda` above.
+conda_package(
+    name = "komira_parquet_api_conda",
+    lib = ":parquet_api",
+    summary = "The `parquet_api` Mojo library of komira, as a conda package.",
+    visibility = ["PUBLIC"],
+)

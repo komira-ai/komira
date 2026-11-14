@@ -33,8 +33,8 @@
 
 from std.testing import assert_equal, assert_false, assert_true
 
-from komira_crypto import sha1
-from komira_git import (
+from crypto import sha1
+from git import (
     ObjectFormat,
     ObjectId,
     append_pkt_data,
@@ -226,17 +226,17 @@ def test_expect_bytes() raises:
     assert_equal(expect_bytes(List[UInt8](), Span(_b("x")), 1, "t"), 1)
     _bytes_refusal(
         _b("abc"), _b("xxabd"), 2,
-        "t: differs from git at byte 4\n  komira_git: c\n  git:        d",
+        "t: differs from git at byte 4\n  git: c\n  git:        d",
     )
     # Longer than git's bytes: git's side is empty from the first extra byte.
     _bytes_refusal(
         _b("abcd"), _b("ab"), 0,
-        "t: differs from git at byte 2\n  komira_git: cd\n  git:        ",
+        "t: differs from git at byte 2\n  git: cd\n  git:        ",
     )
     # Starting past the end of git's bytes: git's side is empty.
     _bytes_refusal(
         _b("a"), _b("b"), 5,
-        "t: differs from git at byte 5\n  komira_git: a\n  git:        ",
+        "t: differs from git at byte 5\n  git: a\n  git:        ",
     )
     var odd = List[UInt8]()
     for c in [0x1F, 0x20, 0x41, 0x7E, 0x7F, 0xFF]:
@@ -245,7 +245,7 @@ def test_expect_bytes() raises:
     nul.append(0)
     _bytes_refusal(
         odd, nul, 0,
-        "t: differs from git at byte 0\n  komira_git: \\x1f A~\\x7f\\xff\n  git:        \\x00",
+        "t: differs from git at byte 0\n  git: \\x1f A~\\x7f\\xff\n  git:        \\x00",
     )
     # At most 60 bytes of each side are shown.
     var a = List[UInt8](length=100, fill=UInt8(0x61))
@@ -257,7 +257,7 @@ def test_expect_bytes() raises:
         sixty_b += "b"
     _bytes_refusal(
         a, b, 0,
-        "t: differs from git at byte 0\n  komira_git: " + sixty_a + "\n  git:        " + sixty_b,
+        "t: differs from git at byte 0\n  git: " + sixty_a + "\n  git:        " + sixty_b,
     )
 
 
@@ -305,4 +305,4 @@ def main() raises:
     test_graph()
     test_expect_bytes()
     test_scenario_files()
-    print("komira_git conformance: harness checks passed")
+    print("git conformance: harness checks passed")

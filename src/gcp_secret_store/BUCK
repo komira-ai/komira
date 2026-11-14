@@ -1,0 +1,35 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The resolve seam over GCP Secret Manager: `GcpSecretManagerStore`, a
+# secret_store `SecretStore` (AccessSecretVersion, its payload's
+# CRC32C required and checked) over the generated gcp_secretmanager
+# `SecretManagerServiceClient` it is given, the handle grammar
+# (`parse_gcp_secret_ref`) and `crc32c`. Hand-written; it reads no
+# environment. It has no write verb, so a resolve-only closure
+# holds no writer.
+#
+# The welded test, test_gcp_secret_store, sends over http_core's
+# ScriptedConnector with a write capture: the handle grammar (the project,
+# location, secret-id and version shapes, version aliases among them) and
+# its refusals, never quoting the handle; CRC32C against published values; a resolve's request line for
+# `latest` and for a version number; a payload decoded; a checksum mismatch,
+# an answer with no checksum and an answer with no payload raised; an error
+# answer raised naming the handle without the body's canary.
+#
+# No test here talks to the service.
+mojo_library(
+    name = "gcp_secret_store",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/async_rt:async_rt",
+        "//src/crypto:crypto",
+        "//src/gcp_core:gcp_core",
+        "//src/gcp_secretmanager:gcp_secretmanager",
+        # For the test's HttpClient; the library imports nothing of it.
+        "//src/http_client:http_client",
+        "//src/http_core:http_core",
+        "//src/secret_store:secret_store",
+    ],
+    test_srcs = ["tests/test_gcp_secret_store.mojo"],
+    visibility = ["PUBLIC"],
+)

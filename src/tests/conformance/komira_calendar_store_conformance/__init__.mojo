@@ -1,4 +1,4 @@
-"""Test-only: komira_calendar_store's contract, generic over the backend.
+"""Test-only: calendar_store's contract, generic over the backend.
 
   targets.mojo  CalendarTarget: what a backend supplies; the runtime and
                 fixtures the checks share

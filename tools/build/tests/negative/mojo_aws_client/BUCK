@@ -21,8 +21,8 @@ _TINY_MODEL = "tiny_model/logs/2014-03-28/service-2.json"
 _TINY_SHA256 = "d8fc1433f12bf41f81936b0bb51e03b1e9047a116d9f54ce9080a3da27585383"
 
 _RUNTIME = [
-    "//functional/mojo_aws_client:komira_aws_core",
-    "//functional/mojo_aws_client:komira_json",
+    "//functional/mojo_aws_client:aws_core",
+    "//functional/mojo_aws_client:json",
 ]
 
 # "`operations` is empty", at analysis: the client is operation-scoped.

@@ -1,7 +1,7 @@
 """`mojo_library(dlopen = [...])`: the shared libraries a library opens at run
 time, by soname, and what its conda package then requires.
 
-    mojo_library(name = "komira_zlib", ..., dlopen = ["libz.so.1"])
+    mojo_library(name = "zlib", ..., dlopen = ["libz.so.1"])
 
 Each soname must be a row of tools/build/package/system_libs.bzl, which names
 the conda-forge package that ships it. A declaration that table lacks is a

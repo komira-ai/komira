@@ -1,0 +1,67 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The enrichment queue of the knowledge-graph port (docs/design/knowledge_graph_port.md,
+# PR 18): a durable, partition-scoped, at-least-once queue of opaque items, the
+# per-partition drain lease, the delayed-retry seam and the drain worker that
+# delivers each item through an `EnrichmentSender` the host supplies and arms a
+# retry for what was refused. The queue and the lease live on objectstore's
+# conditional-write stores. No network, vendor or vocabulary is named, and no clock
+# or environment is read: time is an argument, and the fakes run on a clock a test
+# advances.
+#
+# The welded tests: test_enrichment_queue runs one contract over the in-memory and the
+# object-store queue and pins the object-store key layout and refusals;
+# test_drain_lease pins exclusion, expiry, epochs, release and the changed-under-me
+# race; test_retry_scheduler pins the fake scheduler's due times and dedup;
+# test_enrichment_sender pins the fake sender; test_drain_worker pins delivery and ack, fencing,
+# the retry schedule, per-source order, sender faults and the lease behaviour.
+mojo_library(
+    name = "kg_enrich",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    # The full transitive closure of the Mojo libraries this package and its tests
+    # build on: objectstore and what it builds on.
+    deps = [
+        "//src/arrow:arrow",
+        "//src/arrow_ipc:arrow_ipc",
+        "//src/async_rt:async_rt",
+        "//src/async_api:async_api",
+        "//src/atomic_alias:atomic_alias",
+        "//src/byte_buffer:byte_buffer",
+        "//src/clock:clock",
+        "//src/containers:containers",
+        "//src/column_kernels:column_kernels",
+        "//src/compression:compression",
+        "//src/counters:counters",
+        "//src/dynamic_filter:dynamic_filter",
+        "//src/fork_join:fork_join",
+        "//src/fs:fs",
+        "//src/hashing:hashing",
+        "//src/host_probe:host_probe",
+        "//src/join_assembly:join_assembly",
+        "//src/libc:libc",
+        "//src/log:log",
+        "//src/lz4:lz4",
+        "//src/metrics:metrics",
+        "//src/name_registry:name_registry",
+        "//src/objectstore:objectstore",
+        "//src/objectstore:komira_objectstore_posix",
+        "//src/plan_expr:plan_expr",
+        "//src/plan_ir:plan_ir",
+        "//src/plan_stats:plan_stats",
+        "//src/scalar_arithmetic:scalar_arithmetic",
+        "//src/scan_source:scan_source",
+        "//src/simd_ops:simd_ops",
+        "//src/spsc_ring:spsc_ring",
+        "//src/trace:trace",
+        "//src/zlib:zlib",
+        "//tools/build/mojo/runtime_paths:runtime_paths",
+    ],
+    test_srcs = [
+        "tests/test_drain_lease.mojo",
+        "tests/test_drain_worker.mojo",
+        "tests/test_enrichment_queue.mojo",
+        "tests/test_enrichment_sender.mojo",
+        "tests/test_retry_scheduler.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)

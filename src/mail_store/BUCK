@@ -1,0 +1,78 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# Received mail as content-addressed objects in any objectstore
+# conditional-write store, laid out Maildir-style:
+# mailboxes/<recipient>/[<folder>/]<content-hash>.eml. Store, fetch, exists,
+# list and list-folders, and the two name mappings (a recipient is one safe
+# segment by an injective escape; a folder keeps its `/` hierarchy), which
+# never produce a dot segment, an empty segment or an empty name. The store is
+# a type parameter; the library reads no environment and names no backend.
+#
+# The welded tests (each file's header says which defect it catches):
+# - test_mail_store_normalize: distinct addresses give distinct mailbox
+#   segments, the case fold, no `/` in a segment.
+# - test_mail_store_escape_recipient: `.` and `..` are escaped, `../bob` is one
+#   segment, the empty recipient is refused.
+# - test_mail_store_escape_folder: dot segments and empty segments of a folder
+#   are escaped and stay distinct, an empty or blank folder is refused.
+# - test_mail_store_key_stability: fixed (input, key) pairs for ordinary
+#   recipients and folders, and the FNV-1a-64 test vectors.
+# - test_mail_store_length_bounds: the recipient and folder limits, the longest
+#   key as a file name, and that an oversize name writes nothing.
+# - test_mail_store_store_failures: a store error naming a `Not_Found` folder or
+#   a `precondition` recipient is raised, a real not-found is absence, a leaf
+#   is 16 hex digits, a 412 over equal bytes is a duplicate.
+# - test_mail_store_roundtrip: store, duplicate, fetch, exists, list order,
+#   folders, non-ASCII names, dot-segment names and hash-collision refusal, on
+#   an in-memory store and on one that lists like an object store.
+mojo_library(
+    name = "mail_store",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    # The full transitive closure of the Mojo libraries this package builds on.
+    deps = [
+        "//src/arrow:arrow",
+        "//src/arrow_ipc:arrow_ipc",
+        "//src/async_rt:async_rt",
+        "//src/async_api:async_api",
+        "//src/atomic_alias:atomic_alias",
+        "//src/byte_buffer:byte_buffer",
+        "//src/clock:clock",
+        "//src/containers:containers",
+        "//src/column_kernels:column_kernels",
+        "//src/compression:compression",
+        "//src/counters:counters",
+        "//src/dynamic_filter:dynamic_filter",
+        "//src/fork_join:fork_join",
+        "//src/fs:fs",
+        "//src/hashing:hashing",
+        "//src/host_probe:host_probe",
+        "//src/join_assembly:join_assembly",
+        "//src/libc:libc",
+        "//src/log:log",
+        "//src/lz4:lz4",
+        "//src/metrics:metrics",
+        "//src/name_registry:name_registry",
+        "//src/objectstore:objectstore",
+        "//src/objectstore:komira_objectstore_posix",
+        "//src/plan_expr:plan_expr",
+        "//src/plan_ir:plan_ir",
+        "//src/plan_stats:plan_stats",
+        "//src/scalar_arithmetic:scalar_arithmetic",
+        "//src/scan_source:scan_source",
+        "//src/simd_ops:simd_ops",
+        "//src/spsc_ring:spsc_ring",
+        "//src/trace:trace",
+        "//src/zlib:zlib",
+        "//tools/build/mojo/runtime_paths:runtime_paths",
+    ],
+    test_srcs = [
+        "tests/test_mail_store_escape_folder.mojo",
+        "tests/test_mail_store_escape_recipient.mojo",
+        "tests/test_mail_store_key_stability.mojo",
+        "tests/test_mail_store_length_bounds.mojo",
+        "tests/test_mail_store_normalize.mojo",
+        "tests/test_mail_store_roundtrip.mojo",
+        "tests/test_mail_store_store_failures.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)

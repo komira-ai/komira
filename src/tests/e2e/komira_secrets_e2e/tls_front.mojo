@@ -1,13 +1,13 @@
 # =============================================================================
-# tls_front.mojo -- TLS in front of a plaintext komira_http_server
+# tls_front.mojo -- TLS in front of a plaintext http_server
 # =============================================================================
 #
-# komira_http_server answers a TLS connection with its canned health
+# http_server answers a TLS connection with its canned health
 # response only: `serve_one_iteration_dispatch`, the path that hands a parsed
 # request to a `RequestDispatcher`, is plaintext (it drops a TLS connection).
 # A client that speaks only HTTPS, as the generated Google clients do, can
 # reach a stateful fake only through a TLS terminator, and `TlsFront` is
-# that terminator, built from the server side of komira_http_core's TLS
+# that terminator, built from the server side of http_core's TLS
 # (`TlsStream`, s2n in server mode):
 #
 #   * it listens on 127.0.0.1 on an ephemeral port and accepts each
@@ -26,18 +26,18 @@
 # the server's own step), so the front adds no thread.
 #
 # The front is test infrastructure, not a product TLS path; the gap it
-# covers (a TLS dispatch path in komira_http_server) is stated in BUCK.
+# covers (a TLS dispatch path in http_server) is stated in BUCK.
 # =============================================================================
 
 from std.memory import ArcPointer
 
-from komira_async.ops.waker_sink import NoopSink
-from komira_async.reactor.socket_io import try_io_read, try_io_write
-from komira_async.runtime.blocking_runtime import BlockingRuntime
-from komira_async.runtime.tcp_stream import TcpListener, TcpStream
-from komira_http_core.tls import TlsConfig
-from komira_http_core.tls.conn import TlsStream
-from komira_http_core.tls.s2n_shim import (
+from async_rt.ops.waker_sink import NoopSink
+from async_rt.reactor.socket_io import try_io_read, try_io_write
+from async_rt.runtime.blocking_runtime import BlockingRuntime
+from async_rt.runtime.tcp_stream import TcpListener, TcpStream
+from http_core.tls import TlsConfig
+from http_core.tls.conn import TlsStream
+from http_core.tls.s2n_shim import (
     TLS_OUTCOME_BLOCKED_ON_READ,
     TLS_OUTCOME_BLOCKED_ON_WRITE,
     TLS_OUTCOME_DONE,

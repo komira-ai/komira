@@ -575,9 +575,9 @@ fn reasonOk(line: []const u8, name_end: usize) bool {
 }
 
 test "a DARWIN_EXCLUDED row with an empty or whitespace-only reason is refused" {
-    const empty = "    \"komira_libc\": \"\",";
-    const blank = "    \"komira_libc\": \"  \t\",";
-    const real = "    \"komira_libc\": \"vendored third_party C\",";
+    const empty = "    \"libc\": \"\",";
+    const blank = "    \"libc\": \"  \t\",";
+    const real = "    \"libc\": \"vendored third_party C\",";
     try t.expect(!reasonOk(empty, std.mem.indexOfScalarPos(u8, empty, 5, '"').?));
     try t.expect(!reasonOk(blank, std.mem.indexOfScalarPos(u8, blank, 5, '"').?));
     try t.expect(reasonOk(real, std.mem.indexOfScalarPos(u8, real, 5, '"').?));

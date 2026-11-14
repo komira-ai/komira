@@ -1,0 +1,8 @@
+@@ -24,6 +24,7 @@ FIRST_MOPM_WITH_OVERLAY = "toolchains//:mopm_0_0_40"
+ PACKAGES = {
+     "anomaly": "0.1.0",
+     "atomic_alias": "0.1.0",
++    "containers": "0.1.0",
+     "content_line": "0.1.0",
+     "datetime": "0.1.0",
+     "encoding": "0.1.0",

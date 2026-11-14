@@ -12,8 +12,8 @@
 
 from std.memory import bitcast
 
-from komira_arrow.arrow_types import ArrowType
-from komira_arrow.record_batch import RecordBatch
+from arrow.arrow_types import ArrowType
+from arrow.record_batch import RecordBatch
 
 
 struct Mismatches(Movable):

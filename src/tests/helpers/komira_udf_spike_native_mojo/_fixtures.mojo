@@ -41,7 +41,7 @@ from komira_udf_spike_abi.contract import (
     SHAPE_SCALAR,
     SHAPE_STEP,
 )
-from komira_atomic_alias import AtomicI32
+from atomic_alias import AtomicI32
 from std.atomic import Ordering
 from std.sys import size_of
 

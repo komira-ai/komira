@@ -1,0 +1,30 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The expression language of a plan (Expr, AggExpr, ScalarValue, ColExpr builder, UDF payloads, ExprId/ExprPool) and the comptime schema descriptor.
+mojo_library(
+    name = "plan_expr",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/arrow:arrow",
+        "//src/containers:containers",
+        "//src/scalar_arithmetic:scalar_arithmetic",
+    ],
+    test_srcs = [
+        "tests/test_agg_expr_children.mojo",
+        "tests/test_agg_expr_copy.mojo",
+        "tests/test_agg_expr_named_ctors.mojo",
+        "tests/test_date_to_days_closed_form.mojo",
+        "tests/test_expr_copy.mojo",
+        "tests/test_expr_render_is_plan_identity.mojo",
+        "tests/test_expr_render_value_identity.mojo",
+        "tests/test_expr_walk_field.mojo",
+        "tests/test_expr_walk_refs.mojo",
+        "tests/test_sdk_expr.mojo",
+        "tests/test_typed_schema_builders.mojo",
+        "tests/test_typed_schema_descriptor.mojo",
+        "tests/test_typed_schema_or_returns.mojo",
+        "tests/test_typed_schema_tags.mojo",
+        "tests/test_udf_apply_expr.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)

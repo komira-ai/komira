@@ -88,7 +88,7 @@ archive_files(
 # partition table their `aws.partition` reads, and botocore's endpoint test
 # cases for each. Each file is a sub-target named by its path
 # (`botocore_endpoint_file`), read by the generated clients
-# (`botocore_model(...).endpoint_rules` / `.partitions`), komira_aws_core's
+# (`botocore_model(...).endpoint_rules` / `.partitions`), aws_core's
 # endpoint ruleset tests (test_s3_endpoint_rules, test_endpoint_rules_library)
 # and the generated clients' endpoint tests
 # (komira//tools/build/proto-codegen/aws_endpoint_rules).
@@ -110,7 +110,7 @@ archive_files(
 # botocore's standard retry mode: `botocore/retries/standard.py` (its retry
 # conditions, attempt limits, backoff and quota costs), `quota.py` (the
 # retry quota) and `special.py` (the STS and DynamoDB special cases), read by
-# komira_aws_core's test_aws_retry, which checks its classifier, policy and
+# aws_core's test_aws_retry, which checks its classifier, policy and
 # quota against every list and constant of those files (no Python is run;
 # the files are read as text).
 archive_files(

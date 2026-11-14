@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # conda.sh -- tests of the conda packages (tools/build/package/conda.bzl, and
-# `komira_pack conda` / `conda-check` behind it), on //src/komira_encoding:komira_encoding_conda
+# `komira_pack conda` / `conda-check` behind it), on //src/encoding:komira_encoding_conda
 # and the fixture libraries of tests//negative/conda.
 #
 # usage: tools/build/tests/functional/conda.sh [--no-uncached] [--no-install | --require-install]   (from anywhere; BUCK2 overrides;
@@ -15,8 +15,8 @@
 #              the run requirements in order (guard, exact mojo-compiler pin;
 #              each dependency as `name ==V BUILD`); the pkg tar holds the
 #              library's .mojoc, byte for byte, and the library's README at
-#              share/doc/komira_encoding/README.md, byte-equal to
-#              src/komira_encoding/README.md, and nothing else; info/paths.json
+#              share/doc/encoding/README.md, byte-equal to
+#              src/encoding/README.md, and nothing else; info/paths.json
 #              lists exactly those two, and metadata.json's doc_files names the
 #              README with its sha256; the licence is the repository's. The
 #              package is a directory: the .conda, `manifest.json` and
@@ -86,7 +86,7 @@
 #              file:// directory (written by komira_pack conda-index) installs it
 #              with the pinned compiler, and `mojo run` of a program importing
 #              the library, with no -I, prints the right bytes, and the env
-#              holds share/doc/komira_encoding/README.md byte-equal to the
+#              holds share/doc/encoding/README.md byte-equal to the
 #              source README; the same project
 #              without the package cannot import it. Needs pixi, jq and network
 #              (the compiler comes from the channel it is pinned to); otherwise SKIP,
@@ -134,12 +134,12 @@ done
 pin=$(sed -n 's/.*"mojo_compiler_\(.*\)_linux-64\.conda".*/\1/p' tools/build/platforms/table.bzl)
 [ -n "$pin" ] && [ "$(printf '%s\n' "$pin" | wc -l)" = 1 ] || { echo "FAIL  conda cannot read the compiler pin from tools/build/platforms/table.bzl"; exit 1; }
 B0=h00000000_0 # the unstamped build string
-F0=komira_encoding-$pin-$B0.conda
+F0=encoding-$pin-$B0.conda
 # The library's README, which its package installs at $DOC.
-README=$ROOT/src/komira_encoding/README.md
-DOC=share/doc/komira_encoding/README.md
+README=$ROOT/src/encoding/README.md
+DOC=share/doc/encoding/README.md
 
-PKG=//src/komira_encoding:komira_encoding_conda
+PKG=//src/encoding:komira_encoding_conda
 FX=tests//negative/conda
 out_of() { # target -> its full output path
     "$BUCK2" build "$1" --materializations all --show-full-output 2>> "$W/build.log" | sed -n 's/^[^ ]* //p' | tail -n 1
@@ -171,7 +171,7 @@ refused() { # name, required reason text, package target: it BUILDS, as a REFUSE
 
 # ---- shape ----------------------------------------------------------------
 OUT=$(out_of "$PKG")
-LIBPKG=$(out_of //src/komira_encoding:komira_encoding)
+LIBPKG=$(out_of //src/encoding:encoding)
 CHECK=$(out_of "${PKG}[check]")
 if [ -z "$OUT" ] || [ -z "$LIBPKG" ] || [ -z "$CHECK" ]; then
     fail "shape: cannot build $PKG and its sub-targets (see $W/build.log)"
@@ -209,21 +209,21 @@ for t in info pkg; do
     TZ=UTC tar -tvf "$S/$t.tar" | awk '$1 != "-rw-r--r--" || $2 != "0/0" || $4 != "1970-01-01"' | grep -q . && p "$t-tar-members"
 done
 [ "$(tar -tf "$S/info.tar" | tr '\n' ' ')" = "info/about.json info/index.json info/licenses/LICENSE info/paths.json " ] || p "info-files:[$(tar -tf "$S/info.tar" | tr '\n' ' ')]"
-[ "$(tar -tf "$S/pkg.tar" | tr '\n' ' ')" = "lib/mojo/komira_encoding.mojoc $DOC " ] || p "pkg-files:[$(tar -tf "$S/pkg.tar" | tr '\n' ' ')]"
-cmp -s "$S/lib/mojo/komira_encoding.mojoc" "$LIBPKG" || p payload-differs-from-library
+[ "$(tar -tf "$S/pkg.tar" | tr '\n' ' ')" = "lib/mojo/encoding.mojoc $DOC " ] || p "pkg-files:[$(tar -tf "$S/pkg.tar" | tr '\n' ' ')]"
+cmp -s "$S/lib/mojo/encoding.mojoc" "$LIBPKG" || p payload-differs-from-library
 cmp -s "$S/$DOC" "$README" || p readme-differs-from-source
 cmp -s "$S/info/licenses/LICENSE" "$ROOT/LICENSE" || p licence
 for f in info/index.json info/paths.json info/about.json; do
     [ "$(jq -S -c . "$S/$f")" = "$(cat "$S/$f")" ] || p "$f-not-sorted-compact"
 done
 jq -e --arg v "$pin" --arg b "$B0" '(keys == ["arch","build","build_number","depends","license","name","platform","subdir","timestamp","version"])
-    and .name == "komira_encoding" and .subdir == "linux-64" and .platform == "linux" and .arch == "x86_64"
+    and .name == "encoding" and .subdir == "linux-64" and .platform == "linux" and .arch == "x86_64"
     and .build == $b and .build_number == 0 and .version == $v and .license == "Apache-2.0"
     and (has("noarch") | not)
     and .depends == ["__linux", "mojo-compiler ==\($v)"]' "$S/info/index.json" > /dev/null || p index.json
-want_sha=$(sha256sum "$S/lib/mojo/komira_encoding.mojoc" | cut -c1-64)
+want_sha=$(sha256sum "$S/lib/mojo/encoding.mojoc" | cut -c1-64)
 doc_sha=$(sha256sum "$README" | cut -c1-64)
-jq -e --arg s "$want_sha" --arg d "$doc_sha" --arg p "$DOC" --argjson n "$(stat -L -c %s "$README")" '.paths_version == 1 and (.paths | length) == 2 and .paths[0]._path == "lib/mojo/komira_encoding.mojoc"
+jq -e --arg s "$want_sha" --arg d "$doc_sha" --arg p "$DOC" --argjson n "$(stat -L -c %s "$README")" '.paths_version == 1 and (.paths | length) == 2 and .paths[0]._path == "lib/mojo/encoding.mojoc"
     and .paths[0].path_type == "hardlink" and .paths[0].sha256 == $s
     and .paths[1]._path == $p and .paths[1].path_type == "hardlink" and .paths[1].sha256 == $d
     and .paths[1].size_in_bytes == $n' "$S/info/paths.json" > /dev/null || p paths.json
@@ -232,17 +232,17 @@ file_sha=$(sha256sum "$CONDA" | cut -c1-64)
 # manifest.json: exactly the artifact manifest contract.
 jq -e --arg s "$file_sha" --arg v "$pin" --arg f "$F0" '(keys_unsorted == ["format","schema_version","artifact_type","name","version","platform","subdir","file","sha256","metadata"])
     and .format == "kci.artifact_manifest" and .schema_version == 1
-    and .artifact_type == "CONDA" and .name == "komira_encoding" and .version == $v and .platform == "linux-x86_64" and .subdir == "linux-64"
+    and .artifact_type == "CONDA" and .name == "encoding" and .version == $v and .platform == "linux-x86_64" and .subdir == "linux-64"
     and .file == $f and .sha256 == $s and .metadata == "metadata.json"' "$MANIFEST" > /dev/null || p manifest-contract
 [ "$(jq -c . "$MANIFEST")" = "$(head -c -1 "$MANIFEST")" ] && [ "$(tail -c 1 "$MANIFEST" | od -An -c | tr -d ' ')" = '\n' ] || p manifest-not-compact-with-newline
 # metadata.json: everything else.
 jq -e --arg s "$file_sha" --arg p "$want_sha" --arg v "$pin" --arg b "$B0" --arg f "$F0" --argjson z "$(stat -L -c %s "$CONDA")" '.format == "kci.conda_metadata" and .schema_version == 1 and .kind == "library"
-    and .size == $z and .payload_sha256 == $p and .file_name == $f and .payload_path == "lib/mojo/komira_encoding.mojoc"
-    and .stamped == false and .source_commit == "" and .name == "komira_encoding" and .import_name == "komira_encoding"
+    and .size == $z and .payload_sha256 == $p and .file_name == $f and .payload_path == "lib/mojo/encoding.mojoc"
+    and .stamped == false and .source_commit == "" and .name == "encoding" and .import_name == "encoding"
     and .subdir == "linux-64" and .version == $v and .timestamp_ms == 0 and .build == $b and .build_number == 0
     and .mojo_pin == $v and .depends == ["__linux", "mojo-compiler ==\($v)"]
-    and .label == "komira//src/komira_encoding:komira_encoding_conda"
-    and .doc_files == [{"path": "share/doc/komira_encoding/README.md", "sha256": $d}]' --arg d "$doc_sha" "$METADATA" > /dev/null || p metadata
+    and .label == "komira//src/encoding:komira_encoding_conda"
+    and .doc_files == [{"path": "share/doc/encoding/README.md", "sha256": $d}]' --arg d "$doc_sha" "$METADATA" > /dev/null || p metadata
 [ "$(jq -S -c . "$METADATA")" = "$(cat "$METADATA")" ] || p metadata-not-sorted-compact
 [ "$(cat "$CHECK")" = ok ] || p check-marker
 if [ -n "$problems" ]; then fail "shape:$problems (see $S)"; else
@@ -254,13 +254,13 @@ fi
 # and they are the bytes the rule's action wrote; conda-check refuses what is
 # wrong with a package, so a green check is evidence.
 PACK=$(out_of //tools/build/package:komira_pack)
-SRCS=$(out_of //src/komira_encoding:komira_encoding[src])
-LABEL=komira//src/komira_encoding:komira_encoding_conda
-SUMMARY='The `komira_encoding` Mojo library of komira, as a conda package.'
+SRCS=$(out_of //src/encoding:encoding[src])
+LABEL=komira//src/encoding:komira_encoding_conda
+SUMMARY='The `encoding` Mojo library of komira, as a conda package.'
 pack() { # out-dir, payload [extra komira_pack args...]
     local o=$1 payload=$2
     shift 2
-    "$PACK" conda --name komira_encoding --import-name komira_encoding\
+    "$PACK" conda --name encoding --import-name encoding\
         --stamp 0 --timestamp-ms 0 --subdir linux-64 --mojo-pin "$pin" --license Apache-2.0 \
         --summary "$SUMMARY" --home https://github.com/komira-ai/komira --payload "$payload" --sources "$SRCS" \
         --extra-file "info/licenses/LICENSE=$ROOT/LICENSE" --label "$LABEL" --doc-file "README.md=$README" --out-dir "$o" "$@"
@@ -268,7 +268,7 @@ pack() { # out-dir, payload [extra komira_pack args...]
 packs() { # out-dir, stamp, timestamp-ms [extra komira_pack args...]: a stamped package
     local o=$1 st=$2 ts=$3
     shift 3
-    "$PACK" conda --name komira_encoding --import-name komira_encoding\
+    "$PACK" conda --name encoding --import-name encoding\
         --stamp "$st" --timestamp-ms "$ts" --subdir linux-64 --mojo-pin "$pin" --license Apache-2.0 \
         --summary "s" --home https://github.com/komira-ai/komira --payload "$LIBPKG" --sources "$SRCS" \
         --extra-file "info/licenses/LICENSE=$ROOT/LICENSE" --label "$LABEL" --doc-file "README.md=$README" --out-dir "$o" "$@"
@@ -276,7 +276,7 @@ packs() { # out-dir, stamp, timestamp-ms [extra komira_pack args...]: a stamped 
 check() { # dir payload [extra args...]
     local d=$1 payload=$2
     shift 2
-    "$PACK" conda-check --dir "$d" --kind library --name komira_encoding --import-name komira_encoding --expect-subdir linux-64 \
+    "$PACK" conda-check --dir "$d" --kind library --name encoding --import-name encoding --expect-subdir linux-64 \
         --mojo-pin "$pin" --payload "$payload" --doc-file "README.md=$README" --out "$W/check.marker" "$@"
 }
 problems=""
@@ -290,11 +290,11 @@ if [ -z "$problems" ]; then
     check "$W/pack1" "$LIBPKG" 2> "$W/check_ok.err" || problems="$problems check-refused-a-good-package"
     # A package whose file name sorts AFTER metadata.json (komira_* sorts before it, rest_url after):
     # the check finds the .conda among the three files, never by its position in a sorted listing.
-    "$PACK" conda --name rest_url --import-name komira_encoding --stamp 0 --timestamp-ms 0 --subdir linux-64 \
+    "$PACK" conda --name rest_url --import-name encoding --stamp 0 --timestamp-ms 0 --subdir linux-64 \
         --mojo-pin "$pin" --license Apache-2.0 --summary "$SUMMARY" --home https://github.com/komira-ai/komira \
         --payload "$LIBPKG" --sources "$SRCS" --extra-file "info/licenses/LICENSE=$ROOT/LICENSE" \
         --label "$LABEL" --out-dir "$W/pack_late" 2> "$W/pack_late.err" || problems="$problems pack-late-failed"
-    "$PACK" conda-check --dir "$W/pack_late" --kind library --name rest_url --import-name komira_encoding --expect-subdir linux-64 \
+    "$PACK" conda-check --dir "$W/pack_late" --kind library --name rest_url --import-name encoding --expect-subdir linux-64 \
         --mojo-pin "$pin" --payload "$LIBPKG" --out "$W/check_late.marker" 2> "$W/check_late.err" || problems="$problems check-refused-a-late-sorting-name"
     # One byte of the payload changed: a different package (only its pkg member and the
     # checksums over it), which the check refuses against the real payload and accepts against its own.
@@ -306,12 +306,12 @@ if [ -z "$problems" ]; then
     check "$W/pack3" "$W/payload2.mojoc" 2> /dev/null || problems="$problems check-refused-its-own-payload"
     check "$W/pack1" "$LIBPKG" --require-stamped true 2> "$W/check_unstamped.err" && problems="$problems check-accepted-unstamped-as-release"
     grep -q 'never stamped' "$W/check_unstamped.err" || problems="$problems unstamped-text"
-    "$PACK" conda-check --dir "$W/pack1" --kind library --name komira_other --import-name komira_encoding --expect-subdir linux-64 \
+    "$PACK" conda-check --dir "$W/pack1" --kind library --name komira_other --import-name encoding --expect-subdir linux-64 \
         --mojo-pin "$pin" --payload "$LIBPKG" --doc-file "README.md=$README" --out "$W/check.marker" 2> "$W/check_name.err" && problems="$problems check-accepted-another-name"
-    "$PACK" conda-check --dir "$W/pack1" --kind library --name komira_encoding --import-name komira_encoding --expect-subdir osx-arm64 \
+    "$PACK" conda-check --dir "$W/pack1" --kind library --name encoding --import-name encoding --expect-subdir osx-arm64 \
         --mojo-pin "$pin" --payload "$LIBPKG" --doc-file "README.md=$README" --out "$W/check.marker" 2> "$W/check_subdir.err" && problems="$problems check-accepted-another-subdir"
     # The caller states the dependencies; a package that requires others, or fewer, is refused.
-    check "$W/pack1" "$LIBPKG" --dep komira_json 2> "$W/check_dep.err" && problems="$problems check-accepted-a-missing-dependency"
+    check "$W/pack1" "$LIBPKG" --dep json 2> "$W/check_dep.err" && problems="$problems check-accepted-a-missing-dependency"
     grep -q 'index depends has' "$W/check_dep.err" || problems="$problems check-dep-text"
     # A package whose zip was edited by one byte is refused.
     cp -r "$W/pack1" "$W/pack4" && chmod -R u+w "$W/pack4" && printf 'Z' | dd of="$W/pack4/$F0" bs=1 seek=200 conv=notrunc 2> /dev/null
@@ -348,14 +348,14 @@ if [ -z "$problems" ]; then
     cp -r "$W/pack1" "$W/pack5" && chmod -R u+w "$W/pack5" && echo stray > "$W/pack5/stray.txt"
     check "$W/pack5" "$LIBPKG" 2> "$W/check_stray.err" && problems="$problems check-accepted-a-stray-file"
     # The docs: the caller states them, and the check holds the package to exactly those, byte-equal.
-    "$PACK" conda-check --dir "$W/pack1" --kind library --name komira_encoding --import-name komira_encoding --expect-subdir linux-64 \
+    "$PACK" conda-check --dir "$W/pack1" --kind library --name encoding --import-name encoding --expect-subdir linux-64 \
         --mojo-pin "$pin" --payload "$LIBPKG" --out "$W/check.marker" 2> "$W/check_doc_undeclared.err" && problems="$problems check-accepted-an-undeclared-doc"
     grep -q 'must be exactly the .mojoc and the 0 declared doc file' "$W/check_doc_undeclared.err" || problems="$problems doc-undeclared-text"
     # Two docs: both installed, sorted by path, and a check told of both accepts it.
     pack "$W/pack_twodocs" "$LIBPKG" --doc-file "notes/NOTES.md=$ROOT/LICENSE" 2> /dev/null || problems="$problems pack-two-docs-failed"
     check "$W/pack_twodocs" "$LIBPKG" --doc-file "notes/NOTES.md=$ROOT/LICENSE" 2> "$W/check_twodocs.err" || problems="$problems check-refused-two-docs"
-    jq -e '[.doc_files[].path] == ["share/doc/komira_encoding/README.md", "share/doc/komira_encoding/notes/NOTES.md"]' "$W/pack_twodocs/metadata.json" > /dev/null || problems="$problems two-docs-metadata"
-    "$PACK" conda --name komira_encoding --import-name komira_encoding --stamp 0 --timestamp-ms 0 --subdir linux-64 \
+    jq -e '[.doc_files[].path] == ["share/doc/encoding/README.md", "share/doc/encoding/notes/NOTES.md"]' "$W/pack_twodocs/metadata.json" > /dev/null || problems="$problems two-docs-metadata"
+    "$PACK" conda --name encoding --import-name encoding --stamp 0 --timestamp-ms 0 --subdir linux-64 \
         --mojo-pin "$pin" --license Apache-2.0 --summary "$SUMMARY" --home https://github.com/komira-ai/komira \
         --payload "$LIBPKG" --sources "$SRCS" --extra-file "info/licenses/LICENSE=$ROOT/LICENSE" \
         --label "$LABEL" --out-dir "$W/pack_nodoc2" 2> /dev/null || problems="$problems pack-without-doc-failed"
@@ -363,10 +363,10 @@ if [ -z "$problems" ]; then
     check "$W/pack_nodoc2" "$LIBPKG" 2> "$W/check_doc_missing.err" && problems="$problems check-accepted-a-missing-doc"
     grep -q 'must be exactly the .mojoc and the 1 declared doc file' "$W/check_doc_missing.err" || problems="$problems doc-missing-text"
     cp "$README" "$W/readme_changed.md" && chmod u+w "$W/readme_changed.md" && printf 'X' | dd of="$W/readme_changed.md" bs=1 seek=10 conv=notrunc 2> /dev/null
-    "$PACK" conda-check --dir "$W/pack1" --kind library --name komira_encoding --import-name komira_encoding --expect-subdir linux-64 \
+    "$PACK" conda-check --dir "$W/pack1" --kind library --name encoding --import-name encoding --expect-subdir linux-64 \
         --mojo-pin "$pin" --payload "$LIBPKG" --doc-file "README.md=$W/readme_changed.md" --out "$W/check.marker" 2> "$W/check_doc_byte.err" && problems="$problems check-accepted-a-changed-doc"
     grep -q "$DOC differs from the declared doc file" "$W/check_doc_byte.err" || problems="$problems doc-byte-text"
-    "$PACK" conda-check --dir "$W/pack1" --kind library --name komira_encoding --import-name komira_encoding --expect-subdir linux-64 \
+    "$PACK" conda-check --dir "$W/pack1" --kind library --name encoding --import-name encoding --expect-subdir linux-64 \
         --mojo-pin "$pin" --payload "$LIBPKG" --doc-file "readme.md=$README" --out "$W/check.marker" 2> "$W/check_doc_path.err" && problems="$problems check-accepted-a-doc-at-another-path"
     mutate metadata-doc-sha 'meta:.doc_files[0].sha256 = ("2" * 64)'
     mutate metadata-no-doc-files 'meta:del(.doc_files)'
@@ -381,36 +381,36 @@ fi
 if [ -z "$problems" ]; then
     C40=0123456789abcdef0123456789abcdef01234567
     packs "$W/rel_ok" 7 86400000 --commit "$C40" 2> "$W/rel_ok.err" || problems="$problems stamped-pack-failed"
-    "$PACK" conda-check --dir "$W/rel_ok" --kind library --name komira_encoding --import-name komira_encoding --expect-subdir linux-64 \
+    "$PACK" conda-check --dir "$W/rel_ok" --kind library --name encoding --import-name encoding --expect-subdir linux-64 \
         --mojo-pin "$pin" --payload "$LIBPKG" --doc-file "README.md=$README" --require-stamped true --out "$W/check.marker" 2> "$W/rel_ok_check.err" || problems="$problems release-check-refused-a-good-release"
     B7=h01234567_7
     jq -e --arg c "$C40" --arg v "$pin" --arg b "$B7" '.stamped == true and .version == $v and .source_commit == $c and .timestamp_ms == 86400000 and .build == $b and .build_number == 7' "$W/rel_ok/metadata.json" > /dev/null || problems="$problems metadata-lacks-source-commit-or-build"
-    jq -e --arg v "$pin" --arg f "komira_encoding-$pin-$B7.conda" '.version == $v and .file == $f' "$W/rel_ok/manifest.json" > /dev/null || problems="$problems manifest-version"
-    [ -f "$W/rel_ok/komira_encoding-$pin-$B7.conda" ] || problems="$problems release-file-name"
-    unzip -p "$W/rel_ok/komira_encoding-$pin-$B7.conda" 'info-*' | zstd -dc | tar -xO -f - info/index.json |
+    jq -e --arg v "$pin" --arg f "encoding-$pin-$B7.conda" '.version == $v and .file == $f' "$W/rel_ok/manifest.json" > /dev/null || problems="$problems manifest-version"
+    [ -f "$W/rel_ok/encoding-$pin-$B7.conda" ] || problems="$problems release-file-name"
+    unzip -p "$W/rel_ok/encoding-$pin-$B7.conda" 'info-*' | zstd -dc | tar -xO -f - info/index.json |
         jq -e --arg b "$B7" '.build == $b and .build_number == 7' > /dev/null || problems="$problems index-build"
     # Two builds of ONE version: another build number, or another commit at the same number, is another
     # build string and another file, and the version is unchanged (what the channel tells them apart by).
     packs "$W/rel_n8" 8 86400000 --commit "$C40" 2> /dev/null || problems="$problems n8-pack-failed"
     packs "$W/rel_c2" 7 86400000 --commit 89abcdef0123456789abcdef0123456789abcdef 2> /dev/null || problems="$problems c2-pack-failed"
-    [ -f "$W/rel_n8/komira_encoding-$pin-h01234567_8.conda" ] && [ -f "$W/rel_c2/komira_encoding-$pin-h89abcdef_7.conda" ] || problems="$problems builds-not-named-by-number-and-commit"
+    [ -f "$W/rel_n8/encoding-$pin-h01234567_8.conda" ] && [ -f "$W/rel_c2/encoding-$pin-h89abcdef_7.conda" ] || problems="$problems builds-not-named-by-number-and-commit"
     [ "$(jq -r .version "$W/rel_n8/manifest.json")" = "$pin" ] && [ "$(jq -r .version "$W/rel_c2/manifest.json")" = "$pin" ] || problems="$problems two-builds-differ-in-version"
-    cmp -s "$W/rel_ok/komira_encoding-$pin-$B7.conda" "$W/rel_n8/komira_encoding-$pin-h01234567_8.conda" && problems="$problems two-builds-gave-the-same-bytes"
+    cmp -s "$W/rel_ok/encoding-$pin-$B7.conda" "$W/rel_n8/encoding-$pin-h01234567_8.conda" && problems="$problems two-builds-gave-the-same-bytes"
     for d in rel_n8 rel_c2; do
-        "$PACK" conda-check --dir "$W/$d" --kind library --name komira_encoding --import-name komira_encoding --expect-subdir linux-64 \
+        "$PACK" conda-check --dir "$W/$d" --kind library --name encoding --import-name encoding --expect-subdir linux-64 \
             --mojo-pin "$pin" --payload "$LIBPKG" --doc-file "README.md=$README" --require-stamped true --out "$W/check.marker" 2> /dev/null || problems="$problems $d-release-check-refused"
     done
     # The build string names the commit and the number the metadata states: each lie is refused.
     for case_ in 'build-number:.build_number = 8' 'commit:.source_commit = "89abcdef0123456789abcdef0123456789abcdef"' 'build:.build = "h01234567_8"' 'stamped:.stamped = false'; do
         d="$W/lie_${case_%%:*}"
         cp -r "$W/rel_ok" "$d" && chmod -R u+w "$d" && jq -S -c "${case_#*:}" "$W/rel_ok/metadata.json" > "$d/metadata.json"
-        "$PACK" conda-check --dir "$d" --kind library --name komira_encoding --import-name komira_encoding --expect-subdir linux-64 \
+        "$PACK" conda-check --dir "$d" --kind library --name encoding --import-name encoding --expect-subdir linux-64 \
             --mojo-pin "$pin" --payload "$LIBPKG" --doc-file "README.md=$README" --require-stamped true --out "$W/check.marker" 2> "$d.err" && problems="$problems check-accepted-a-metadata-lie-${case_%%:*}"
     done
     for case_ in "rel_ts0:0:timestamp is not positive" "rel_tsneg:-5:timestamp is not positive"; do
         d=${case_%%:*} rest=${case_#*:} ts=${rest%%:*} text=${rest#*:}
         packs "$W/$d" 7 "$ts" --commit "$C40" 2> /dev/null || problems="$problems $d-pack-failed"
-        "$PACK" conda-check --dir "$W/$d" --kind library --name komira_encoding --import-name komira_encoding --expect-subdir linux-64 \
+        "$PACK" conda-check --dir "$W/$d" --kind library --name encoding --import-name encoding --expect-subdir linux-64 \
             --mojo-pin "$pin" --payload "$LIBPKG" --doc-file "README.md=$README" --require-stamped true --out "$W/check.marker" 2> "$W/$d.err" && problems="$problems release-check-accepted-$d"
         grep -q "$text" "$W/$d.err" || problems="$problems $d-text"
     done
@@ -478,13 +478,13 @@ grep -qE 'package = ":mojo_compiler_[0-9]' tools/build/toolchains/BUCK && proble
     problems="$problems package-version-or-compiler-requirement-is-not-the-pin"
 # Version skew: a package built for another compiler (version 9.9.9) is refused when
 # checked against the pinned one, and the good package against another pin.
-"$PACK" conda --name komira_encoding --import-name komira_encoding --stamp 0 --timestamp-ms 0 --subdir linux-64 --mojo-pin 9.9.9 \
+"$PACK" conda --name encoding --import-name encoding --stamp 0 --timestamp-ms 0 --subdir linux-64 --mojo-pin 9.9.9 \
     --license Apache-2.0 --summary s --home https://github.com/komira-ai/komira --payload "$LIBPKG" --sources "$SRCS" \
     --extra-file "info/licenses/LICENSE=$ROOT/LICENSE" --label "$LABEL" --out-dir "$W/skew" 2> "$W/skew.err" || problems="$problems skew-pack-failed"
-[ -f "$W/skew/komira_encoding-9.9.9-$B0.conda" ] || problems="$problems skew-package-not-named-by-its-version"
+[ -f "$W/skew/encoding-9.9.9-$B0.conda" ] || problems="$problems skew-package-not-named-by-its-version"
 check "$W/skew" "$LIBPKG" 2> "$W/skew_check.err" && problems="$problems check-accepted-a-package-for-another-compiler"
 grep -q 'must be the Mojo compiler version' "$W/skew_check.err" || problems="$problems skew-text:[$(head -c 200 "$W/skew_check.err")]"
-"$PACK" conda-check --dir "$W/pack1" --kind library --name komira_encoding --import-name komira_encoding --expect-subdir linux-64 \
+"$PACK" conda-check --dir "$W/pack1" --kind library --name encoding --import-name encoding --expect-subdir linux-64 \
     --mojo-pin 9.9.9 --payload "$LIBPKG" --out "$W/check.marker" 2> "$W/skew2.err" && problems="$problems check-accepted-the-package-against-another-pin"
 if [ -n "$problems" ]; then fail "pin:$problems (see $W)"; else
     pass "pin: the packages' version and their compiler requirement are both $pin, the version of the pinned compiler (stated once, in the platform table: no other file states it; its asset name and URL agree); conda-check refuses a package for another compiler version (9.9.9) and the right package against another pin"
@@ -576,7 +576,7 @@ if "$BUCK2" build $STAMP "${PKG}[release]" > "$W/stamp_check.log" 2>&1; then
         s_dir=$("$BUCK2" build $STAMP "${PKG}[release]" --materializations all --show-full-output 2> "$W/stamp_manifest.log" | sed -n 's/^[^ ]* //p' | tail -n 1)
         s_manifest=$s_dir/manifest.json s_meta=$s_dir/metadata.json
         B_STAMP=h89abcdef_$N_STAMP
-        if jq -e --arg v "$pin" --arg b "$B_STAMP" '.version == $v and .file == "komira_encoding-\($v)-\($b).conda"' "$s_manifest" > /dev/null &&
+        if jq -e --arg v "$pin" --arg b "$B_STAMP" '.version == $v and .file == "encoding-\($v)-\($b).conda"' "$s_manifest" > /dev/null &&
             jq -e --arg v "$pin" --arg b "$B_STAMP" --arg c "$C_STAMP" --argjson n "$N_STAMP" '.version == $v and .build == $b and .build_number == $n and .stamped == true and .source_commit == $c and .timestamp_ms == 86400000' "$s_meta" > /dev/null &&
             [ "$(jq -r .sha256 "$s_manifest")" = "$(sha256sum < "$s_dir/$(jq -r .file "$s_manifest")" | cut -c1-64)" ]; then
             pass "stamp: -c komira.package_stamp=$N_STAMP gives version $pin, build number $N_STAMP and build string $B_STAMP ([release] green: manifest with the file name and sha256 of the file, metadata with the build number, build string and source commit) and the new stamp re-ran only the packing actions, no compile"
@@ -677,7 +677,7 @@ if [ "$gate" = 0 ]; then
     mkdir -p "$W/with" "$W/without"
     "$PACK" conda-index --out-dir "$C" --package-manifest "$MANIFEST" > "$W/channel.log" 2>&1 || problems="$problems channel-not-indexed"
     cat > "$W/hello.mojo" << 'EOF'
-from komira_encoding import base64_encode, hex_encode
+from encoding import base64_encode, hex_encode
 
 
 def main():
@@ -692,15 +692,15 @@ EOF
     for variant in with without; do
         {
             printf '[workspace]\nname = "komira-conda-test"\nchannels = ["file://%s", "https://conda.modular.com/max", "conda-forge"]\nplatforms = ["linux-64"]\n\n[dependencies]\n' "$C"
-            if [ "$variant" = with ]; then printf 'komira_encoding = "==%s"\n' "$pin"; else printf 'mojo-compiler = "==%s"\n' "$pin"; fi
+            if [ "$variant" = with ]; then printf 'encoding = "==%s"\n' "$pin"; else printf 'mojo-compiler = "==%s"\n' "$pin"; fi
         } > "$W/$variant/pixi.toml"
         cp "$W/hello.mojo" "$W/$variant/hello.mojo"
     done
     export PIXI_CACHE_DIR="$W/pixi_cache" PIXI_HOME="$W/pixi_home"
     pixi install --manifest-path "$W/with/pixi.toml" > "$W/install_with.log" 2>&1 || problems="$problems install-failed"
     if [ -z "$problems" ]; then
-        [ -f "$W/with/.pixi/envs/default/lib/mojo/komira_encoding.mojoc" ] || problems="$problems payload-not-installed-at-lib/mojo"
-        cmp -s "$W/with/.pixi/envs/default/lib/mojo/komira_encoding.mojoc" "$LIBPKG" || problems="$problems installed-payload-differs"
+        [ -f "$W/with/.pixi/envs/default/lib/mojo/encoding.mojoc" ] || problems="$problems payload-not-installed-at-lib/mojo"
+        cmp -s "$W/with/.pixi/envs/default/lib/mojo/encoding.mojoc" "$LIBPKG" || problems="$problems installed-payload-differs"
         cmp -s "$W/with/.pixi/envs/default/$DOC" "$README" || problems="$problems installed-readme-missing-or-differs"
         grep -qF "mojo-compiler" "$W/with/pixi.lock" && grep -q "$F0" "$W/with/pixi.lock" || problems="$problems lock-lacks-the-packages"
         got=$(cd "$W/with" && pixi run --manifest-path "$W/with/pixi.toml" mojo run hello.mojo 2> "$W/run_with.err")
@@ -709,7 +709,7 @@ EOF
     pixi install --manifest-path "$W/without/pixi.toml" > "$W/install_without.log" 2>&1 || problems="$problems control-install-failed"
     if (cd "$W/without" && pixi run --manifest-path "$W/without/pixi.toml" mojo run hello.mojo > "$W/run_without.out" 2>&1); then
         problems="$problems control-imported-without-the-package"
-    elif ! grep -qF "komira_encoding" "$W/run_without.out"; then
+    elif ! grep -qF "encoding" "$W/run_without.out"; then
         problems="$problems control-failed-for-another-reason"
     fi
     if [ -n "$problems" ]; then fail "install:$problems (see $W)"; else

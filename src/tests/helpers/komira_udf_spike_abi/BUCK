@@ -74,7 +74,7 @@ mojo_library(
     conda = False,
     deps = [
         ":komira_udf_spike_c",
-        "//src/komira_json:komira_json",
+        "//src/json:json",
     ],
     test_srcs = [
         "tests/test_conform_broken.mojo",

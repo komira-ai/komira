@@ -2,20 +2,20 @@
 
 ## What is it for, and what is out of scope?
 
-`komira_arrow` (over `komira_buffer`) holds the engine's data in memory in the [Arrow columnar format](https://arrow.apache.org/docs/format/Columnar.html): a column is a few byte buffers (values, offsets, a validity bitmap), and a batch is a schema plus columns. Readers, operators and writers across the tree pass data to each other as `RecordBatch` values.
+`arrow` (over `byte_buffer`) holds the engine's data in memory in the [Arrow columnar format](https://arrow.apache.org/docs/format/Columnar.html): a column is a few byte buffers (values, offsets, a validity bitmap), and a batch is a schema plus columns. Readers, operators and writers across the tree pass data to each other as `RecordBatch` values.
 
 The design idea is **one type-erased column over shared buffers**. A `Column` carries an `ArrowType` tag and its buffers, and typed arrays such as `PrimitiveArray[dtype]` are views built from it on demand. Each buffer is a `SharedAlignedBuffer`, a refcounted (`ArcPointer`) handle to a memory region, so sharing a column is a refcount bump. Copies happen only where a consumer contract needs them ([when](#when-does-reading-a-column-copy-its-bytes)).
 
-Beside `komira_arrow`, `komira_arrow_ipc` holds the Arrow IPC encoder and decoder, the Arrow C Data Interface and dense and sparse tensors; `komira_compression` holds the compression codec bindings, `komira_simd` the SIMD kernels, `komira_collections` the typed collections the engine is built on, and `komira_scan_source` the plan-time description of a scan source. Three small packages sit beside them:
+Beside `arrow`, `arrow_ipc` holds the Arrow IPC encoder and decoder, the Arrow C Data Interface and dense and sparse tensors; `compression` holds the compression codec bindings, `simd_ops` the SIMD kernels, `containers` the typed collections the engine is built on, and `scan_source` the plan-time description of a scan source. Three small packages sit beside them:
 
-- `komira_atomic_alias` defines `AtomicI8`, `AtomicI32`, `AtomicI64`, `AtomicU8`, `AtomicU32` and `AtomicU64` as aliases of the standard library's `Atomic`.
-- `komira_rowcell` defines `RowCell`, one typed table cell (boolean, 32- or 64-bit integer, float, double or string), and imports nothing from this repository.
-- `komira_uuid` mints UUIDv7 identifiers (`Uuid`, `generate_uuidv7`, `Uuidv7Generator`) and reads the wall clock (`now_unix_ms`).
+- `atomic_alias` defines `AtomicI8`, `AtomicI32`, `AtomicI64`, `AtomicU8`, `AtomicU32` and `AtomicU64` as aliases of the standard library's `Atomic`.
+- `rowcell` defines `RowCell`, one typed table cell (boolean, 32- or 64-bit integer, float, double or string), and imports nothing from this repository.
+- `uuid` mints UUIDv7 identifiers (`Uuid`, `generate_uuidv7`, `Uuidv7Generator`) and reads the wall clock (`now_unix_ms`).
 
 Out of scope:
 
-- The plan IR and scalar evaluation in `src/komira_plan_expr/`, `src/komira_plan_ir/` and `src/komira_column_kernels/`, which are separate packages with their own designs.
-- The worker traits and cancellation in `src/komira_async_api/`, which belong to the async runtime's design.
+- The plan IR and scalar evaluation in `src/plan_expr/`, `src/plan_ir/` and `src/column_kernels/`, which are separate packages with their own designs.
+- The worker traits and cancellation in `src/async_api/`, which belong to the async runtime's design.
 - Parquet decoding, the Arrow IPC file reader, and the spill codec with its bridge to column-native batches. They live in the file-format and engine libraries, which build on this one.
 
 ## How does it work?
@@ -67,11 +67,11 @@ The `Column.from_borrowed_*` constructors borrow more weakly. They wrap a `ByteV
 
 ### How are batches and tables built?
 
-A `Schema` stores its fields column-wise, one list per attribute (`_names`, `_arrow_types`, `_nullables`, ...), and a `Field` is one entry. A `RecordBatch` is a `Schema`, a `Slab[Column[HeapRegion]]` and a row count, and `RecordBatchBuilder` assembles one. A batch may carry a selection mask, a `BooleanArray` of live rows, while its columns keep every row. The Parquet source and some operators set one; a consumer either honours it or calls `materialize_selection_if_present` (`src/komira_column_kernels/compiler_helpers.mojo`) to gather the live rows first.
+A `Schema` stores its fields column-wise, one list per attribute (`_names`, `_arrow_types`, `_nullables`, ...), and a `Field` is one entry. A `RecordBatch` is a `Schema`, a `Slab[Column[HeapRegion]]` and a row count, and `RecordBatchBuilder` assembles one. A batch may carry a selection mask, a `BooleanArray` of live rows, while its columns keep every row. The Parquet source and some operators set one; a consumer either honours it or calls `materialize_selection_if_present` (`src/column_kernels/compiler_helpers.mojo`) to gather the live rows first.
 
 A `Table` is a query result: one schema and a `Slab[RecordBatch]` of chunks in output order. `to_record_batch` returns one batch, concatenating the chunks when there are several. `into_single_batch` does not concatenate: it returns the only chunk, returns an empty batch with the table's schema when there are none, and raises when there are more.
 
-`ColumnNativeBatch` (`src/komira_arrow/column_native.mojo`) is a second batch type, used by engine stages such as sort, top-N, window and join probing. In wrapped mode it holds a `RecordBatch`'s columns, moved in without a copy. In contiguous mode it holds one body buffer in the layout the spill codec writes. The engine's spill layer converts between the two.
+`ColumnNativeBatch` (`src/arrow/column_native.mojo`) is a second batch type, used by engine stages such as sort, top-N, window and join probing. In wrapped mode it holds a `RecordBatch`'s columns, moved in without a copy. In contiguous mode it holds one body buffer in the layout the spill codec writes. The engine's spill layer converts between the two.
 
 ### How are Arrow IPC messages encoded and decoded?
 
@@ -80,9 +80,9 @@ A `Table` is a query result: one schema and a `Slab[RecordBatch]` of chunks in o
 - **Encode.** `encode_schema_message`, `encode_record_batch_message` and `encode_footer_message` return one buffer each; `encode_record_batch_message_streaming` writes the body to a `BodySink`. The body and schema legs cover different types. The body leg, `encode_column`, writes 46 of the 51 types: it refuses the four view types by name, and `ERROR` has no arm. The schema leg, `encode_schema_message`, writes 38 and refuses 13: those five, plus `LIST`, `LARGE_LIST`, `FIXED_SIZE_LIST`, `FIXED_SIZE_BINARY`, `STRUCT`, `MAP`, `UNION_SPARSE` and `UNION_DENSE`. A stream carries only types both legs write, so 38 types can be written to one, `DECIMAL128` and `DECIMAL256` only when their `Field` states a precision.
 - **Decode.** A record batch message does not carry column types, so the caller passes them from the schema message: a `List[ArrowType]`, or `ColumnTypeSpec`s for the nested decoders. `decode_record_batch_message` copies each buffer. `decode_record_batch_zerocopy` borrows into the frame. It accepts `NULL`, the fixed-width types `_fixed_width_bytes_for` sizes (integers, floats, dates, times, timestamps, durations, intervals and decimals), and `STRING`, `BINARY`, `LARGE_STRING` and `LARGE_BINARY`; every other type raises, `BOOL` and `DICTIONARY` included. It does not check the frame's compression codec. `decode_record_batch_message_nested_zerocopy` borrows nested columns and raises for view types and for a compressed body. `decode_record_batch_message_mmap` borrows into a mapping and also raises for a compressed body. The copying `decode_record_batch_message_nested` turns view types into their non-view equivalents.
 - **Compress.** `encode_record_batch_message_compressed[C]` and `decompress_record_batch_frame[C]` take a codec that conforms to `ArrowIpcCompression`. Arrow IPC's `CompressionType` defines two codecs, `LZ4_FRAME` and `ZSTD`, and `Lz4Frame` and `Zstd[level]` carry their ids, 0 and 1. The third conformer, `Uncompressed`, carries `ARROW_IPC_CODEC_ID = -1`, a sentinel for "write no `BodyCompression` table". The compressed encoder's caller contract is that `C` is `Lz4Frame` or `Zstd[*]`; an uncompressed stream goes through the uncompressed encoder. The `_with_dispatcher` variants work on a `ParallelDispatch`.
-- **Tensors.** `encode_tensor` and `encode_sparse_tensor` in `src/komira_arrow_ipc/` write Arrow's tensor messages. A tensor is not a column.
+- **Tensors.** `encode_tensor` and `encode_sparse_tensor` in `src/arrow_ipc/` write Arrow's tensor messages. A tensor is not a column.
 
-`compression_codecs.mojo` also defines `Snappy`, `Gzip`, `Lz4Raw`, `Lzo`, `Brotli` and `Zlib` for file formats. `Snappy` calls the snappy C API, linked statically into the binary: the mopm package `komira_compression` links `libsnappy.a` (`//third_party/snappy:snappy_native`, with libc++ at the end of the link), and the shared library of the release set links `//third_party/snappy:snappy`. `Zstd`, `Gzip`, `Lz4Raw` and `Lz4Frame` call `libzstd`, `libz` and `liblz4`, each loaded with `dlopen` once per process. `Lzo`, `Brotli` and `Zlib` raise.
+`compression_codecs.mojo` also defines `Snappy`, `Gzip`, `Lz4Raw`, `Lzo`, `Brotli` and `Zlib` for file formats. `Snappy` calls the snappy C API, linked statically into the binary: the mopm package `compression` links `libsnappy.a` (`//third_party/snappy:snappy_native`, with libc++ at the end of the link), and the shared library of the release set links `//third_party/snappy:snappy`. `Zstd`, `Gzip`, `Lz4Raw` and `Lz4Frame` call `libzstd`, `libz` and `liblz4`, each loaded with `dlopen` once per process. `Lzo`, `Brotli` and `Zlib` raise.
 
 ### How do batches cross the Arrow C Data Interface?
 
@@ -96,13 +96,13 @@ A `Table` is a query result: one schema and a `Slab[RecordBatch]` of chunks in o
 - `ByteView[origin]` is a byte range tied to its source's origin, with little-endian reads and writes.
 - `BatchView[origin]`, `ColView` and `StringColumnView` are read-only typed views over a batch or column that cannot outlive it.
 - `BloomFilter`, `ColumnBuilder[dtype]` and `MultiColumnBuilder` serve filtering and row-by-row column building.
-- `src/komira_simd/` holds popcount, gather, compress, blend, bit-unpacking, validity-packing, pattern-copy and horizontal-add kernels, and `fast_copy_bytes`; `byte_class/` adds byte-level kernels such as byte equality, `memmem`, movemask and table lookup. The width-policy functions `komira_simd_width`, `komira_simd_width_bitpack` and `komira_simd_width_delta` halve the native vector width on AVX-512 builds unless the build defines `KOMIRA_SIMD_ALLOW_AVX512`, to avoid the clock drop some AVX-512 cores take on 512-bit instructions.
+- `src/simd_ops/` holds popcount, gather, compress, blend, bit-unpacking, validity-packing, pattern-copy and horizontal-add kernels, and `fast_copy_bytes`; `byte_class/` adds byte-level kernels such as byte equality, `memmem`, movemask and table lookup. The width-policy functions `komira_simd_width`, `komira_simd_width_bitpack` and `komira_simd_width_delta` halve the native vector width on AVX-512 builds unless the build defines `KOMIRA_SIMD_ALLOW_AVX512`, to avoid the clock drop some AVX-512 cores take on 512-bit instructions.
 
 ### How does a scan name its source?
 
-`ScanBinding` (`src/komira_scan_source/scan_binding.mojo`) describes a scan at plan time. It holds a kind id that `scan_kind_id` hashes from a reverse-DNS name such as `"komira.arrow.ipc"`, opaque `ScanParams`, a schema, optional statistics and a fingerprint, and no data. The concrete sources in `src/komira_scan_source/` implement `SourceLike`. `SourceVariant` holds a `tag` and three optional arms: `ParquetSource`, `InMemorySource` and `ScanBinding`. The other five sources, `ArrowSource`, `AvroSource`, `CsvSource`, `JsonSource` and `OrcSource`, have no arm: `SourceVariant`'s constructors for them (`from_arrow_uncompressed`, `from_arrow_lz4_frame`, `from_arrow_zstd`, and an `__init__` for each of the other four) build a `ScanBinding`.
+`ScanBinding` (`src/scan_source/scan_binding.mojo`) describes a scan at plan time. It holds a kind id that `scan_kind_id` hashes from a reverse-DNS name such as `"komira.arrow.ipc"`, opaque `ScanParams`, a schema, optional statistics and a fingerprint, and no data. The concrete sources in `src/scan_source/` implement `SourceLike`. `SourceVariant` holds a `tag` and three optional arms: `ParquetSource`, `InMemorySource` and `ScanBinding`. The other five sources, `ArrowSource`, `AvroSource`, `CsvSource`, `JsonSource` and `OrcSource`, have no arm: `SourceVariant`'s constructors for them (`from_arrow_uncompressed`, `from_arrow_lz4_frame`, `from_arrow_zstd`, and an `__init__` for each of the other four) build a `ScanBinding`.
 
-At execution, `ScanResolver` (`src/komira_scan_source/scan_resolver.mojo`) answers only identity and freshness, through `epoch`, `is_bound` and `resolve_snapshot`. Its refinement `ScanPayloadResolver` adds `payload_arc`, which returns a handle's batches as an `ArcPointer[Slab[RecordBatch]]`. `ScanRegistry` (`src/komira_scan_source/scan_registry.mojo`) is the one type in `komira_scan_source` that conforms to `ScanPayloadResolver`; the SDK's engine context holds one and binds in-memory sources into it. `scan_resolver.mojo` also describes a second tier, `ScanMorselResolver`, defined by the morsel scheduler, whose `open_scan` returns a scan's rows at execution. The five file kinds are not resolved: `ScanData.__init__` (`src/komira_plan_ir/logical_plan_variants.mojo`) reads the binding's `legacy_source_type` and `name` and turns them back into a legacy `SOURCE_*` type and a path.
+At execution, `ScanResolver` (`src/scan_source/scan_resolver.mojo`) answers only identity and freshness, through `epoch`, `is_bound` and `resolve_snapshot`. Its refinement `ScanPayloadResolver` adds `payload_arc`, which returns a handle's batches as an `ArcPointer[Slab[RecordBatch]]`. `ScanRegistry` (`src/scan_source/scan_registry.mojo`) is the one type in `scan_source` that conforms to `ScanPayloadResolver`; the SDK's engine context holds one and binds in-memory sources into it. `scan_resolver.mojo` also describes a second tier, `ScanMorselResolver`, defined by the morsel scheduler, whose `open_scan` returns a scan's rows at execution. The five file kinds are not resolved: `ScanData.__init__` (`src/plan_ir/logical_plan_variants.mojo`) reads the binding's `legacy_source_type` and `name` and turns them back into a legacy `SOURCE_*` type and a path.
 
 ## Why is it built this way?
 
@@ -160,7 +160,7 @@ At execution, `ScanResolver` (`src/komira_scan_source/scan_resolver.mojo`) answe
 
 **Decision.** `RowCell` and the `Atomic*` aliases live in their own dependency-free packages.
 
-**Because.** `komira_snapshotter` needs only a cell and takes it from `komira_rowcell`, its one dependency; taking it from the Iceberg library would pull in that library's closure, which includes Parquet and the engine. `komira_atomic_alias/atypes.mojo` is the one file a compiler change to `Atomic` must edit.
+**Because.** `snapshotter` needs only a cell and takes it from `rowcell`, its one dependency; taking it from the Iceberg library would pull in that library's closure, which includes Parquet and the engine. `atomic_alias/atypes.mojo` is the one file a compiler change to `Atomic` must edit.
 
 **Alternatives weighed.**
 
@@ -184,21 +184,21 @@ At execution, `ScanResolver` (`src/komira_scan_source/scan_resolver.mojo`) answe
 
 | File | Holds | Key types and functions |
 |---|---|---|
-| `src/komira_buffer/src/komira_buffer/memory_region.mojo` | The region trait | `MemoryRegion`; `HeapRegion`, `MmapRegion` in siblings |
-| `src/komira_buffer/src/komira_buffer/owned_aligned_buffer.mojo` | Single-owner buffers | `OwnedAlignedBuffer` |
-| `src/komira_buffer/src/komira_buffer/shared_aligned_buffer.mojo` | Refcounted buffers | `SharedAlignedBuffer`, `borrow_mmap_erased`, `share` |
-| `src/komira_arrow/column.mojo` | The type-erased column | `Column`, `as_primitive`, `share`, `slice` |
-| `src/komira_arrow/arrow_types.mojo` | Type tags | `ArrowType` |
-| `src/komira_arrow/schema.mojo`, `record_batch.mojo`, `table.mojo` | Schemas, batches, results | `Field`, `Schema`, `RecordBatch`, `Table` |
-| `src/komira_arrow_ipc/ipc_encoder_dispatch.mojo`, `ipc_decoder_dispatch.mojo` | IPC messages | `encode_record_batch_message`, `decode_record_batch_message` |
-| `src/komira_arrow_ipc/ipc_flatbuf.mojo` | IPC metadata | `FlatbufWriter`, `FlatbufReader` |
-| `src/komira_compression/src/komira_compression/compression_codecs.mojo` | Codec bindings | `Lz4Frame`, `Zstd`, `Snappy` |
-| `src/komira_arrow_ipc/c_data_stream.mojo` | C stream export and import | `build_record_batch_stream`, `drain_record_batch_stream` |
-| `src/komira_collections/src/komira_collections/slab.mojo` | Typed slab | `Slab` |
-| `src/komira_simd/width_policy.mojo` | SIMD width policy | `komira_simd_width`, `komira_simd_width_bitpack`, `komira_simd_width_delta` |
-| `src/komira_scan_source/scan_binding.mojo`, `scan_resolver.mojo`, `scan_registry.mojo` | Scan descriptions and resolution | `ScanBinding`, `ScanResolver`, `ScanRegistry` |
-| `src/komira_rowcell/src/komira_rowcell/row_cell.mojo` | The table cell | `RowCell` |
-| `src/komira_uuid/src/komira_uuid/uuid.mojo`, `clock.mojo` | UUIDv7 and the wall clock | `Uuid`, `generate_uuidv7`, `now_unix_ms` |
+| `src/byte_buffer/src/byte_buffer/memory_region.mojo` | The region trait | `MemoryRegion`; `HeapRegion`, `MmapRegion` in siblings |
+| `src/byte_buffer/src/byte_buffer/owned_aligned_buffer.mojo` | Single-owner buffers | `OwnedAlignedBuffer` |
+| `src/byte_buffer/src/byte_buffer/shared_aligned_buffer.mojo` | Refcounted buffers | `SharedAlignedBuffer`, `borrow_mmap_erased`, `share` |
+| `src/arrow/column.mojo` | The type-erased column | `Column`, `as_primitive`, `share`, `slice` |
+| `src/arrow/arrow_types.mojo` | Type tags | `ArrowType` |
+| `src/arrow/schema.mojo`, `record_batch.mojo`, `table.mojo` | Schemas, batches, results | `Field`, `Schema`, `RecordBatch`, `Table` |
+| `src/arrow_ipc/ipc_encoder_dispatch.mojo`, `ipc_decoder_dispatch.mojo` | IPC messages | `encode_record_batch_message`, `decode_record_batch_message` |
+| `src/arrow_ipc/ipc_flatbuf.mojo` | IPC metadata | `FlatbufWriter`, `FlatbufReader` |
+| `src/compression/src/compression/compression_codecs.mojo` | Codec bindings | `Lz4Frame`, `Zstd`, `Snappy` |
+| `src/arrow_ipc/c_data_stream.mojo` | C stream export and import | `build_record_batch_stream`, `drain_record_batch_stream` |
+| `src/containers/src/containers/slab.mojo` | Typed slab | `Slab` |
+| `src/simd_ops/width_policy.mojo` | SIMD width policy | `komira_simd_width`, `komira_simd_width_bitpack`, `komira_simd_width_delta` |
+| `src/scan_source/scan_binding.mojo`, `scan_resolver.mojo`, `scan_registry.mojo` | Scan descriptions and resolution | `ScanBinding`, `ScanResolver`, `ScanRegistry` |
+| `src/rowcell/src/rowcell/row_cell.mojo` | The table cell | `RowCell` |
+| `src/uuid/src/uuid/uuid.mojo`, `clock.mojo` | UUIDv7 and the wall clock | `Uuid`, `generate_uuidv7`, `now_unix_ms` |
 
 Entry points:
 
@@ -207,13 +207,13 @@ Entry points:
 
 ## How is it tested?
 
-Each core package lists the files of its own `tests/` directory in the `test_srcs` of its target (`komira_arrow` in `src/komira_arrow/BUCK`, `komira_arrow_ipc`, `komira_buffer` and the rest likewise), so each runs as part of building the library (see [the `test_srcs` gate](../../tools/build/mojo/README.md#libraries-and-the-test_srcs-gate)). `komira_uuid` and `komira_atomic_alias` do the same with `test_uuid_v7` and `test_atomic_alias_widths`. Run: `./buck2 build //src/komira_arrow:komira_arrow //src/komira_arrow_ipc:komira_arrow_ipc //src/komira_buffer:komira_buffer //src/komira_uuid:komira_uuid //src/komira_atomic_alias:komira_atomic_alias`.
+Each core package lists the files of its own `tests/` directory in the `test_srcs` of its target (`arrow` in `src/arrow/BUCK`, `arrow_ipc`, `byte_buffer` and the rest likewise), so each runs as part of building the library (see [the `test_srcs` gate](../../tools/build/mojo/README.md#libraries-and-the-test_srcs-gate)). `uuid` and `atomic_alias` do the same with `test_uuid_v7` and `test_atomic_alias_widths`. Run: `./buck2 build //src/arrow:arrow //src/arrow_ipc:arrow_ipc //src/byte_buffer:byte_buffer //src/uuid:uuid //src/atomic_alias:atomic_alias`.
 
 Some of the core packages' tests and what they cover:
 
 | Test | Covers |
 |---|---|
-| `test_arrow_ipc_pyarrow_parity` | Decoding IPC bytes that pyarrow wrote, from `src/komira_arrow_ipc/tests/fixtures/arrow_ipc/` |
+| `test_arrow_ipc_pyarrow_parity` | Decoding IPC bytes that pyarrow wrote, from `src/arrow_ipc/tests/fixtures/arrow_ipc/` |
 | `test_arrow_ipc_type_census` | Which of the 50 type ids the encoder writes, refuses or has no arm for |
 | `test_arrow_ipc_flatbuf_wire_canonical` | Lengths and offsets above 4 GiB in IPC metadata |
 | `test_lz4_raw_conformer_roundtrip` | The `Lz4Raw` codec |
@@ -222,7 +222,7 @@ Some of the core packages' tests and what they cover:
 
 Not tested:
 
-- `komira_rowcell` declares no tests.
+- `rowcell` declares no tests.
 - No test file calls `decode_record_batch_message_mmap`, `drain_c_abi_record_batch_stream`, or `komira_simd_width` or its `_bitpack` and `_delta` siblings by name.
 
 ## What are its limits and open questions?
@@ -237,4 +237,4 @@ Not tested:
 - **Limit: many types cannot be sliced without a copy.** `supports_zero_copy_slice()` is a whitelist that leaves out strings, binaries, booleans, `TIME*`, durations and nested types. Its docstring gives reasons for three: string and binary accessors read offsets from position 0, booleans are bit-packed, and nested child offsets do not compose with a parent offset.
 - **Limit: the width policy is not used inside the core packages.** The width-policy functions serve the Parquet writer's float-statistics, bit-packing and delta kernels. Code in the core packages sizes vectors with `simd_width_of`, the native width.
 - **Limit: some docstrings disagree with the code.** `Column`'s names fields `_dict_indices` and `_dict_values` that do not exist, `as_primitive`'s says it always copies, and `decode_record_batch_zerocopy`'s says it refuses nullable columns. Trust the code.
-- **Where `Schema` and `ArrowType` live.** The columnar layer is its own package, `komira_arrow` (over `komira_buffer`), separate from the plan IR (`komira_plan_expr`, `komira_plan_ir`) and scalar evaluation (`komira_column_kernels`), so a change to either no longer rebuilds the columnar library. `Schema` and `ArrowType` are in `komira_arrow`, and the plan packages import them from there.
+- **Where `Schema` and `ArrowType` live.** The columnar layer is its own package, `arrow` (over `byte_buffer`), separate from the plan IR (`plan_expr`, `plan_ir`) and scalar evaluation (`column_kernels`), so a change to either no longer rebuilds the columnar library. `Schema` and `ArrowType` are in `arrow`, and the plan packages import them from there.

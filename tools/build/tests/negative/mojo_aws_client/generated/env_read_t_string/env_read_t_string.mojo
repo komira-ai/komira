@@ -59,7 +59,7 @@
 #     reason : builds a string with a t-string.
 # ===========================================================================
 
-from komira_aws_core import (
+from aws_core import (
     AWS_TS_ISO8601,
     AWS_TS_RFC822,
     AWS_TS_UNIX,
@@ -82,7 +82,7 @@ from komira_aws_core import (
     aws_ts_from_json,
     aws_ts_to_json,
 )
-from komira_json import (
+from json import (
     JsonValue,
     parse_json_bytes,
     parse_json_value,

@@ -15,8 +15,8 @@
 
 from std.sys import argv, exit
 
-from komira_runtime_paths import executable_path, read_data
-from komira_supervisor import ChildSpec, Supervisor
+from runtime_paths import executable_path, read_data
+from supervisor import ChildSpec, Supervisor
 
 from komira_json_conformance.gate import (
     AbortCheck,
