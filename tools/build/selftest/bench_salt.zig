@@ -34,9 +34,9 @@ const KINDS = [_]Kind{
     .{ .rule = "mojo_shared_lib", .target = "komira//tools/build/examples/shared_lib:plain" },
     .{ .rule = "rust_library", .target = "komira//tools/build/examples/rust/ext:ext" },
     .{ .rule = "rust_binary", .target = "komira//tools/build/examples/rust/ext:ext_consumer" },
-    .{ .rule = "native_shared_library", .target = "komira//src/komira_async_api:komira_async_api_native" },
+    .{ .rule = "native_shared_library", .target = "komira//src/async_api:komira_async_api_native" },
     .{ .rule = "komira_pack_tar", .target = "komira//tools/build/examples:hello_tarball" },
-    .{ .rule = "komira_conda_package", .target = "komira//src/komira_retry:komira_retry_conda" },
+    .{ .rule = "komira_conda_package", .target = "komira//src/retry:komira_retry_conda" },
 };
 
 /// The categories of the actions that build the tools and unpack the

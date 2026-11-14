@@ -42,15 +42,15 @@ native_refusal_test(
     unshipped = ["//tools/build/examples/cshim:add"],
 )
 
-# The owners of this slice: each closure's C is shipped (komira_http_core's
-# closure holds komira_log's holder archive, shipped static, and every
+# The owners of this slice: each closure's C is shipped (http_core's
+# closure holds log's holder archive, shipped static, and every
 # owner its NEEDED names).
 native_refusal_test(
     name = "crypto_ships",
-    lib = "//src/komira_crypto:komira_crypto",
+    lib = "//src/crypto:crypto",
 )
 
 native_refusal_test(
     name = "http_core_ships",
-    lib = "//src/komira_http_core:komira_http_core",
+    lib = "//src/http_core:http_core",
 )

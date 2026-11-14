@@ -29,7 +29,7 @@
 
 from std.testing import assert_equal, assert_false, assert_true
 
-from komira_aws_secretsmanager.komira_aws_secretsmanager import (
+from aws_secretsmanager.aws_secretsmanager import (
     SecretsManagerCreateSecretRequest,
 )
 from komira_secrets_e2e import (

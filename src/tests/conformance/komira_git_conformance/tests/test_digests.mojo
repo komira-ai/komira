@@ -1,5 +1,5 @@
 # =============================================================================
-# komira_git_conformance/tests/test_digests.mojo -- komira_git's `Sha1dc`
+# komira_git_conformance/tests/test_digests.mojo -- git's `Sha1dc`
 # against sha1collisiondetection's C, digest and verdict, under every
 # combination of the four switches.
 # =============================================================================
@@ -29,7 +29,7 @@
 from std.pathlib import Path
 from std.testing import assert_equal
 
-from komira_git import Sha1dc
+from git import Sha1dc
 
 from komira_git_conformance import CSha1dc
 

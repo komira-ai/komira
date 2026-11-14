@@ -19,14 +19,14 @@ pub struct RestServiceEmit {
     /// The generated client-struct source (already indented; appended raw to
     /// the file buffer by the caller).
     pub source: String,
-    /// Whether the source calls `komira_encoding.base64_encode` (a `bytes`
+    /// Whether the source calls `encoding.base64_encode` (a `bytes`
     /// query parameter), so the file must import it.
     pub needs_base64: bool,
 }
 
 /// The hand-written GCP core the generated REST clients import from (its
 /// package root, never a submodule, so the core may lay its files out freely).
-pub const GCP_CORE: &str = "komira_gcp_core";
+pub const GCP_CORE: &str = "gcp_core";
 
 /// The token-source trait of [`GCP_CORE`]. Its contract:
 /// `trait GcpTokenSource(Movable): def access_token(mut self) raises -> String`,
@@ -77,24 +77,24 @@ pub fn rest_stream_import(file: &IrFile) -> Option<String> {
 /// `emit.rs::emit_header` when `ProtocolMode::Rest`). One source line per
 /// emitted entry, no trailing blank — the header owns surrounding blanks.
 ///
-/// The `komira_gcp_core` line is the core's contract: [`GCP_TOKEN_SOURCE`] and
+/// The `gcp_core` line is the core's contract: [`GCP_TOKEN_SOURCE`] and
 /// [`GCP_STATUS_ERROR`], re-exported from its package root.
 pub fn rest_imports() -> &'static [&'static str] {
     &[
-        "from komira_gcp_core import GcpTokenSource, gcp_status_error",
-        "from komira_proto_codec.codec import encode_json, decode_json_lenient",
-        "from komira_http_client.client import (",
+        "from gcp_core import GcpTokenSource, gcp_status_error",
+        "from proto_codec.codec import encode_json, decode_json_lenient",
+        "from http_client.client import (",
         "    HttpClient,",
         "    build_get_request,",
         "    build_request_with_body,",
         ")",
-        "from komira_http_client.body import BytesBody, EmptyBody",
-        "from komira_http_client.header_map import HeaderMap",
-        "from komira_http_client.url import Url",
-        "from komira_http_core.codec.types import HttpMethod",
-        "from komira_http_core.transport.io_stream import Connector",
-        "from komira_async.reactor.reactor import Reactor",
-        "from komira_async.runtime.runtime_trait import Runtime",
+        "from http_client.body import BytesBody, EmptyBody",
+        "from http_client.header_map import HeaderMap",
+        "from http_client.url import Url",
+        "from http_core.codec.types import HttpMethod",
+        "from http_core.transport.io_stream import Connector",
+        "from async_rt.reactor.reactor import Reactor",
+        "from async_rt.runtime.runtime_trait import Runtime",
     ]
 }
 
@@ -431,7 +431,7 @@ impl<'a> MessageIndex<'a> {
 /// JSON string, which `google/api/http.proto` sends as the parameter's
 /// value: a FieldMask's `title,includedPermissions`, a Timestamp's RFC 3339
 /// `2026-10-01T00:00:00.5Z` and a Duration's `60s`. The generated code calls
-/// komira_wkt's `to_proto3_json()`, the formatter its JSON codec uses, so the
+/// wkt's `to_proto3_json()`, the formatter its JSON codec uses, so the
 /// query and a JSON body spell one value the same way. Sending their fields
 /// instead (`at.seconds=&at.nanos=`) would be wrong even when the type is
 /// declared among the generated files.
@@ -1296,7 +1296,7 @@ fn emit_query_leaf(w: &mut Writer, leaf: &QueryLeaf) {
 /// every field *not* bound by the path template, so a field the URL carries is
 /// left out of the body (`_rest_drop_members`). For a named field the single
 /// field's message serializes. Both go through
-/// `komira_proto_codec.codec.encode_json`, so a well-known type writes its
+/// `proto_codec.codec.encode_json`, so a well-known type writes its
 /// canonical JSON value.
 fn emit_body_build(
     w: &mut Writer,
@@ -1908,7 +1908,7 @@ mod tests {
         assert!(!src.contains("return decode_json_lenient[Req](resp_text)"));
         assert_eq!(
             rest_stream_import(&file).as_deref(),
-            Some("from komira_gcp_core import gcp_rest_stream_items")
+            Some("from gcp_core import gcp_rest_stream_items")
         );
     }
 
@@ -3247,7 +3247,7 @@ mod tests {
             "query += String(\"etag=\") + _rest_pct_encode(base64_encode(Span(req.etag)))"
         ));
         let mojo = crate::emit::Emitter::with_protocol(&file, crate::ProtocolMode::Rest).emit();
-        assert!(mojo.contains("\nfrom komira_encoding import base64_encode\n"), "{mojo}");
+        assert!(mojo.contains("\nfrom encoding import base64_encode\n"), "{mojo}");
     }
 
     #[test]
@@ -3318,7 +3318,7 @@ mod tests {
         let svc = svc_over(&req, rule("get", "/v1/{name=projects/*}", "", &[]));
         let file = file_with(vec![req], svc);
         let mojo = crate::emit::Emitter::with_protocol(&file, crate::ProtocolMode::Rest).emit();
-        assert!(!mojo.contains("komira_encoding"), "{mojo}");
+        assert!(!mojo.contains("encoding"), "{mojo}");
     }
 
     fn message(name: &str, fields: Vec<IrField>) -> IrMessage {

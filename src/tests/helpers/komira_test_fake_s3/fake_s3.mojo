@@ -1,5 +1,5 @@
 # A fake S3 that keeps objects in memory, for tests of S3 clients:
-# `FakeS3Connector`, a komira_http_core Connector whose streams parse each
+# `FakeS3Connector`, a http_core Connector whose streams parse each
 # HTTP/1.1 request written to them and answer it as S3 does, path-style
 # (`/<bucket>/<key>`): GET (a `bytes=a-b` range, or the suffix form
 # `bytes=-n`), HEAD, ListObjectsV2 (a prefix, a delimiter, max-keys and
@@ -21,19 +21,19 @@
 # DeleteObject and the multipart verbs as the object `~fake/writes` of
 # bucket `lake`, which a test reads back through the store.
 #
-# Test-only: komira_objectstore_s3's welded tests name it in `test_deps`.
+# Test-only: objectstore_s3's welded tests name it in `test_deps`.
 from std.memory import ArcPointer
 
-from komira_async.reactor.reactor import Reactor
-from komira_async.runtime.runtime_trait import Runtime
-from komira_http_core.transport.io_stream import (
+from async_rt.reactor.reactor import Reactor
+from async_rt.runtime.runtime_trait import Runtime
+from http_core.transport.io_stream import (
     Connector,
     IoStream,
     NEGOTIATED_HTTP_1_1,
     StreamIo,
     TRANSPORT_KIND_KERNEL_TCP,
 )
-from komira_http_core.transport.scripted import ScriptedStream
+from http_core.transport.scripted import ScriptedStream
 
 
 struct FakeS3State(Movable):

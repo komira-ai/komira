@@ -3,15 +3,15 @@
 # `_private_files`.
 # =============================================================================
 #
-# The libc declaration lives here, not in komira_libc, so that this
+# The libc declaration lives here, not in libc, so that this
 # library touches only its own package. The wrapper returns a plain value;
 # the `external_call` and its pointer stay inside this file, so no
 # `UnsafePointer` crosses a module boundary.
 #
 # `chmod` is declared nowhere else in the tree; if a second site ever needs
-# it, move the declaration to komira_libc in one change instead. (The
-# wall clock this file used to declare is komira_clock's, through
-# komira_test_run_id's `SystemClock`.)
+# it, move the declaration to libc in one change instead. (The
+# wall clock this file used to declare is clock's, through
+# test_run_id's `SystemClock`.)
 # =============================================================================
 
 from std.ffi import external_call

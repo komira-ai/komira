@@ -4,7 +4,7 @@ docs/design/native_packaging.md, slice 8 ("the packer"). A library that owns
 C ships it in its own conda package: `native = ":<name>_native"` names its
 shared library (tools/build/native/shared.bzl), whose `archives` must be
 exactly the library's C `deps`; `native_static = True` ships those C `deps` as
-static archives instead, for per-library state only (komira_log's holder:
+static archives instead, for per-library state only (log's holder:
 docs/design/native_packaging.md, "Per-library state"). Either way the library
 SHIPS each C library among its direct `deps`.
 
@@ -23,7 +23,7 @@ SHIPS each C library among its direct `deps`.
     then by name names dependents first: the order of the link commands
     the packer writes into the packaged README (`readme_link_names`);
   * `statics`: the link name of each static archive the closure ships
-    (`lib<name>.a`, komira_log's holder), mapped to its import name.
+    (`lib<name>.a`, log's holder), mapped to its import name.
 
 A library whose closure links a C library no library of the closure ships has
 no conda package (`native_refusal`, read by `_conda_facts` in defs.bzl): a

@@ -282,11 +282,11 @@ impl<'a> DbEmitter<'a> {
         self.line(&format!("# proto package: {}", self.file.proto_package));
         self.line(&format!("# Mojo package:  {}", self.file.mojo_package));
         self.line("#");
-        self.line("# Generated structs conform to komira_db.DbStorable:");
+        self.line("# Generated structs conform to db.DbStorable:");
         self.line("# column_names / column_types / to_row / from_row /");
         self.line("# insert_sql / create_table_ddl. Backend-neutral logical types.");
         self.blank();
-        self.line("from komira_db import (");
+        self.line("from db import (");
         if self.file_has_dbstorable_target() {
             self.line("    DbStorable,");
         }
@@ -314,7 +314,7 @@ impl<'a> DbEmitter<'a> {
         if self.file_has_json_field() {
             if self.file_has_message_json_field() {
                 self.line(
-                    "from komira_db.proto_json import (",
+                    "from db.proto_json import (",
                 );
                 self.line("    to_proto_json,");
                 self.line("    from_proto_json,");
@@ -322,7 +322,7 @@ impl<'a> DbEmitter<'a> {
                 self.line("    repeated_from_proto_json,");
                 self.line(")");
             } else {
-                self.line("from komira_db.proto_json import to_proto_json, from_proto_json");
+                self.line("from db.proto_json import to_proto_json, from_proto_json");
             }
         }
         self.blank();

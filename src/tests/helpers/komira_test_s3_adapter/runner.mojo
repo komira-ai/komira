@@ -4,7 +4,7 @@
 # and the pure pieces it is built from.
 # =============================================================================
 #
-# `start` runs komira_supervisor's `spawn_detached` on
+# `start` runs supervisor's `spawn_detached` on
 #
 #     /bin/sh -c 'cd "$0" && exec /usr/bin/setpriv --pdeathsig KILL -- "$@"' DIR ARGV...
 #
@@ -30,10 +30,10 @@
 from std.os.path import exists
 from std.sys.info import CompilationTarget
 
-from komira_aws_core import AwsConnectorTransport, AwsHttpTransport, Header
-from komira_aws_core.credential_transport import CredentialHttpRequest
-from komira_http_core.transport.kernel_tcp import KernelTcpConnector
-from komira_supervisor.supervisor import DetachedChild, DetachedExit, spawn_detached
+from aws_core import AwsConnectorTransport, AwsHttpTransport, Header
+from aws_core.credential_transport import CredentialHttpRequest
+from http_core.transport.kernel_tcp import KernelTcpConnector
+from supervisor.supervisor import DetachedChild, DetachedExit, spawn_detached
 from komira_test_minio import ProcessRunner, ProcessSpec, Readiness
 
 from ._sys import _sleep_ms

@@ -3,9 +3,9 @@
 # =============================================================================
 #
 # `GcpFakeServer` is what the duet steps for the GCP tests: a plaintext
-# komira_http_server `HttpServer` whose requests reach `FakeSecretManager`,
+# http_server `HttpServer` whose requests reach `FakeSecretManager`,
 # and the `TlsFront` (tls_front.mojo) that terminates TLS for it with
-# komira_http_core's fixture leaf. Both are stepped by the duet's server
+# http_core's fixture leaf. Both are stepped by the duet's server
 # thread, the front after the server.
 #
 # `gcp_loopback_client` builds the generated `SecretManagerServiceClient`
@@ -31,27 +31,27 @@
 
 from std.pathlib import Path
 
-from komira_async.ops.waker_sink import NoopSink
-from komira_async.runtime.blocking_runtime import BlockingRuntime
-from komira_gcp_core import GcpTokenSource
-from komira_gcp_secretmanager.service import SecretManagerServiceClient
-from komira_http_client.client import HttpClient
-from komira_http_client.pool import VERIFY_PEER
-from komira_http_client.tls_connector import TlsConnector
-from komira_http_core.tls import TlsConfig
-from komira_http_core.transport.grpc_emit import NoopGrpcDispatch
-from komira_http_core.transport.kernel_tcp import KernelTcpConnector
-from komira_http_server.routing import Router
-from komira_http_server.server import HttpServer, HttpServerConfig
+from async_rt.ops.waker_sink import NoopSink
+from async_rt.runtime.blocking_runtime import BlockingRuntime
+from gcp_core import GcpTokenSource
+from gcp_secretmanager.service import SecretManagerServiceClient
+from http_client.client import HttpClient
+from http_client.pool import VERIFY_PEER
+from http_client.tls_connector import TlsConnector
+from http_core.tls import TlsConfig
+from http_core.transport.grpc_emit import NoopGrpcDispatch
+from http_core.transport.kernel_tcp import KernelTcpConnector
+from http_server.routing import Router
+from http_server.server import HttpServer, HttpServerConfig
 
 from .duet import ServeStep
 from .gcp_fake import FakeSecretManager
 from .gcp_store import GCP_REGION
 from .tls_front import TlsFront
 
-comptime LEAF_CERT_PATH = "src/komira_http_core/tests/fixtures/tls/leaf_cert.pem"
-comptime LEAF_KEY_PATH = "src/komira_http_core/tests/fixtures/tls/leaf_key.pem"
-comptime ROOT_CA_PATH = "src/komira_http_core/tests/fixtures/tls/root_ca.pem"
+comptime LEAF_CERT_PATH = "src/http_core/tests/fixtures/tls/leaf_cert.pem"
+comptime LEAF_KEY_PATH = "src/http_core/tests/fixtures/tls/leaf_key.pem"
+comptime ROOT_CA_PATH = "src/http_core/tests/fixtures/tls/root_ca.pem"
 
 comptime GLOBAL_HOST = "localhost"
 comptime REGIONAL_HOST = "127.0.0.1"

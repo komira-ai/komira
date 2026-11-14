@@ -3,8 +3,8 @@
 # =============================================================================
 #
 # Feeds every file of the pinned test_parsing corpus (318: 95 y_, 188 n_,
-# 35 i_), as raw bytes, to the komira_proto_codec testee (testees.mojo), prints every
-# verdict, and gates them on allowlists/komira_proto_codec.txt (gate.mojo); a corpus of any
+# 35 i_), as raw bytes, to the proto_codec testee (testees.mojo), prints every
+# verdict, and gates them on allowlists/proto_codec.txt (gate.mojo); a corpus of any
 # other size fails. An unlisted abort ends the process, so the test is red.
 # Its entry point takes a String, so a file that is not UTF-8 is a BOUNDARY
 # verdict, not a rejection of the decoder's. Its listed number cases are
@@ -18,4 +18,4 @@ from komira_json_conformance import PARSER_PROTO_CODEC, conformance_main
 
 def main() raises:
     conformance_main(PARSER_PROTO_CODEC)
-    print("PASS komira_json_conformance komira_proto_codec")
+    print("PASS komira_json_conformance proto_codec")

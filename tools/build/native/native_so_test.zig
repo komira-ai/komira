@@ -1,6 +1,6 @@
 //! Unit tests of native_so (run by `:native_so_unit`, a build action the
 //! tool waits for). Each check is shown green on a shared object shaped as
-//! komira_crypto's first green link is, and red on that object with the one
+//! crypto's first green link is, and red on that object with the one
 //! defect the check exists for: the planted defects of
 //! docs/design/native_packaging.md, "Checks, per library", as inputs.
 
@@ -29,7 +29,7 @@ fn weakUnd(name: []const u8) Sym {
 
 const weak_list = [_][]const u8{ "__gmon_start__", "komira_awslc_OPENSSL_memory_alloc", "sdallocx" };
 
-/// komira_crypto's shape: two exports, glibc only, -Bsymbolic with -z now.
+/// crypto's shape: two exports, glibc only, -Bsymbolic with -z now.
 fn good() elf.Shared {
     const syms = A.dupe(Sym, &[_]Sym{
         def("komira_awslc_SHA256"),
@@ -131,7 +131,7 @@ test "exports: called and defined visible; libc names and uncalled symbols left 
         .{ .label = "aws-lc", .syms = &.{ def("komira_awslc_SHA256"), def("komira_awslc_internal"), und("memcpy", null) } },
         .{ .label = "sha256_hw", .syms = &.{def("komira_crypto_sha256_hw_capable")} },
     };
-    const callers = [_]checks.Caller{.{ .label = "komira_crypto", .calls = &.{ "explicit_bzero", "komira_awslc_SHA256", "komira_crypto_sha256_hw_capable" } }};
+    const callers = [_]checks.Caller{.{ .label = "crypto", .calls = &.{ "explicit_bzero", "komira_awslc_SHA256", "komira_crypto_sha256_hw_capable" } }};
     const e = try checks.exportList(A, &archives, &callers, &red);
     try t.expect(red.green());
     try t.expectEqual(@as(usize, 2), e.names.len);
@@ -186,7 +186,7 @@ test "exports: a dependent owner's archive calls what it references and does not
     // The owner exports what the Mojo caller calls and what the archive needs.
     var red = checks.Red.init(A);
     const archives = [_]checks.Archive{.{ .label = "aws-lc", .syms = &.{ def("komira_awslc_SHA256"), def("komira_awslc_EVP_sha256"), def("komira_awslc_RAND_bytes"), def("komira_awslc_internal") } }};
-    const callers = [_]checks.Caller{ .{ .label = "komira_crypto", .calls = &.{"komira_awslc_SHA256"} }, c };
+    const callers = [_]checks.Caller{ .{ .label = "crypto", .calls = &.{"komira_awslc_SHA256"} }, c };
     const e = try checks.exportList(A, &archives, &callers, &red);
     try t.expect(red.green());
     try t.expectEqual(@as(usize, 3), e.names.len);
@@ -282,7 +282,7 @@ test "check 4: green with libpthread, libc and ld-linux; red on an extra NEEDED,
 
 const crypto_owner = checks.Owner{ .soname = "libkomira_crypto_native.so.1", .exports = &.{ "komira_awslc_EVP_sha256", "komira_awslc_SHA256" } };
 
-/// komira_http_core's shape: s2n-tls's exports, aws-lc's functions undefined
+/// http_core's shape: s2n-tls's exports, aws-lc's functions undefined
 /// and NEEDED from crypto's library, found through RUNPATH $ORIGIN.
 fn httpCore() elf.Shared {
     var so = good();
@@ -428,7 +428,7 @@ test "check 5: green at the floor; red above it, on GLIBC_PRIVATE, and on no gli
 }
 
 test "checks 4 and 5: a shim calling nothing outside komira is green without libc; one undefined libc name makes both red" {
-    // komira_async_api's shape: three exports over an atomic counter; the
+    // async_api's shape: three exports over an atomic counter; the
     // link records no NEEDED and no version at all.
     var so: elf.Shared = .{
         .soname = "libkomira_async_api_native.so.1",
@@ -531,7 +531,7 @@ test "README check: green when one program references an export (undefined) or d
     try t.expectEqualStrings("2 of 3 README programs reference an export: komira_ea_armed in readme_komira_metrics_99 and more", msg);
 }
 
-test "README check: red when no program references any export (komira_metrics's README before its example)" {
+test "README check: red when no program references any export (metrics's README before its example)" {
     var red = checks.Red.init(A);
     const progs = [_]checks.Program{
         .{ .name = "readme_komira_metrics_33", .syms = &.{ def("main"), def("komira_other_owner_fn") } },

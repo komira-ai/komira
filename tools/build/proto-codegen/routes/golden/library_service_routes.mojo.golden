@@ -5,7 +5,7 @@
 # Messages: the Mojo package komira_routes_fixture_messages
 #
 # For each service: a handler trait with one method per RPC, `<service>_router()`
-# (komira_http_server's `Router`, one entry per HTTP binding of each RPC's
+# (http_server's `Router`, one entry per HTTP binding of each RPC's
 # `(google.api.http)` rule), and `<Service>Routes[H]`, a `RoutedDispatcher`
 # (`ComposedRoutes` serves several from one server) that answers:
 #   no route matches the path                     404
@@ -19,12 +19,12 @@
 
 from std.collections.dict import Dict
 
-from komira_async.reactor.reactor import Reactor
-from komira_async.runtime.runtime_trait import Runtime
-from komira_http_core.codec import HttpMethod, HttpRequest, HttpResponse
-from komira_http_server.routing.compose import RoutedDispatcher
-from komira_http_server.routing.router import Router
-from komira_proto_codec import decode_json, encode_json
+from async_rt.reactor.reactor import Reactor
+from async_rt.runtime.runtime_trait import Runtime
+from http_core.codec import HttpMethod, HttpRequest, HttpResponse
+from http_server.routing.compose import RoutedDispatcher
+from http_server.routing.router import Router
+from proto_codec import decode_json, encode_json
 from komira_routes_fixture_messages.library import Book
 from komira_routes_fixture_messages.library import CreateBookRequest
 from komira_routes_fixture_messages.library import DeleteBookRequest

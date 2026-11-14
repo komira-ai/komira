@@ -1,6 +1,6 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
-# Test-only: komira_crm's CrmStore, checked once, generic over the komira_db
+# Test-only: crm's CrmStore, checked once, generic over the db
 # `Database` it runs on, against every backend that can run in a build
 # action:
 #
@@ -16,7 +16,7 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #   tests/test_suite_failures.mojo  a target whose every check fails: the
 #                                   suite raises naming each one.
 #
-# The checks live here, written once for both backends. (komira_crm's own
+# The checks live here, written once for both backends. (crm's own
 # tests run the store on SQLite, so that package measures its lines.)
 # Nothing depends on this package. Postgres is not claimed: no Postgres
 # server runs in a build action.
@@ -24,16 +24,16 @@ mojo_library(
     name = "komira_crm_store_conformance",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
-        "//src/komira_async:komira_async",
-        "//src/komira_crm:komira_crm",
-        "//src/komira_crm_proto:komira_crm_proto",
-        "//src/komira_db:komira_db",
-        "//src/komira_proto_codec:komira_proto_codec",
-        "//src/komira_wkt:komira_wkt",
+        "//src/async_rt:async_rt",
+        "//src/crm:crm",
+        "//src/crm_proto:crm_proto",
+        "//src/db:db",
+        "//src/proto_codec:proto_codec",
+        "//src/wkt:wkt",
         # Imported only by the tests (the backends under test).
-        "//src/komira_db_sqlite:komira_db_sqlite",
-        "//src/komira_gcp_firestore:komira_gcp_firestore",
-        "//src/komira_gcp_firestore_db:komira_gcp_firestore_db",
+        "//src/db_sqlite:db_sqlite",
+        "//src/gcp_firestore:gcp_firestore",
+        "//src/gcp_firestore_db:gcp_firestore_db",
     ],
     conda = False,
     test_srcs = [

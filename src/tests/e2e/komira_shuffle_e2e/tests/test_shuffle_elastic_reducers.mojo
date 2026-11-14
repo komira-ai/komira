@@ -18,7 +18,7 @@
 #   leave/join   worker 0 alone, limited to one claim: it takes partition 0
 #                and leaves; then three workers join at once and must share the
 #                other R-1 between them, leaving partition 0 alone.
-from komira_runtime_paths import test_tmpdir
+from runtime_paths import test_tmpdir
 
 from komira_shuffle_e2e.children import TaskOutcome
 from komira_shuffle_e2e.harness import ShuffleRun, fail, require_ok, snapshot_diff, task_bin_from_args, word

@@ -293,7 +293,7 @@ fn requireText(c: *Ctx, repo: Repo, path: []const u8) Error![]const u8 {
     return repo.text(path) orelse c.refuse("{s} was not read: the shared rows cannot be updated", .{path});
 }
 
-/// A BUCK dep label's alias form (`//tools/build/mojo/runtime_paths:komira_runtime_paths`) is
+/// A BUCK dep label's alias form (`//tools/build/mojo/runtime_paths:runtime_paths`) is
 /// written as the package's own label in a binary kept from the old file.
 fn fixBinary(c: *Ctx, repo: Repo, buck: []const u8, st: sl.Stmt) Error![]const u8 {
     const deps = st.call.kwarg("deps") orelse return buck[st.start..st.end];

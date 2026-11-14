@@ -8,8 +8,8 @@
 
 from std.testing import TestSuite, assert_equal, assert_false, assert_raises, assert_true
 
-from komira_arrow.arrow_types import ArrowType
-from komira_arrow.schema import Field
+from arrow.arrow_types import ArrowType
+from arrow.schema import Field
 
 from komira_plan_harness import (
     CanonPolicy,

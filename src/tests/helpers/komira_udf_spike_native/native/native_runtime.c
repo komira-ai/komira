@@ -50,7 +50,7 @@
  * table beside the library's handle, so a call costs one more indirect call.
  *
  * The SHA-256 here is FIPS 180-4 written out. The tests compute every
- * expected digest with komira_crypto (AWS-LC) and stage files of the
+ * expected digest with crypto (AWS-LC) and stage files of the
  * lengths where the padding changes (0, 1, 55, 56, 63, 64, 65, 119, 120,
  * 127, 128 bytes): each must be refused for failing dlopen, never for its
  * digest, so a hash that disagrees with AWS-LC at any of those lengths

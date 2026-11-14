@@ -3,7 +3,7 @@
 # =============================================================================
 #
 # The builders and fixtures below, from `Col` through `_nested_fixture`, were
-# copied verbatim from the parity test of komira_optimizer's payload-narrowing
+# copied verbatim from the parity test of optimizer's payload-narrowing
 # pass (deleted with that pass), whose table is the first block of
 # golden/payload_narrow.txt. Each row of that table names the fixture built
 # here under the same name, so the host rule is checked against the
@@ -15,14 +15,14 @@
 
 from std.memory import OwnedPointer
 
-from komira_arrow.arrow_types import ArrowType
-from komira_arrow.schema import Field, Schema, SchemaBuilder
-from komira_plan_expr.agg_expr import AggExpr, AGG_SUM
-from komira_plan_expr.expr import Expr, BIN_ADD, BIN_GT, UN_NEGATE
-from komira_plan_expr.partition_expr import PartitionExpr
-from komira_plan_expr.scalar_value import ScalarValue
-from komira_plan_expr.udf_data import UdfData, UDF_KIND_MAP, DTAG_I64
-from komira_plan_ir.logical_plan import (
+from arrow.arrow_types import ArrowType
+from arrow.schema import Field, Schema, SchemaBuilder
+from plan_expr.agg_expr import AggExpr, AGG_SUM
+from plan_expr.expr import Expr, BIN_ADD, BIN_GT, UN_NEGATE
+from plan_expr.partition_expr import PartitionExpr
+from plan_expr.scalar_value import ScalarValue
+from plan_expr.udf_data import UdfData, UDF_KIND_MAP, DTAG_I64
+from plan_ir.logical_plan import (
     LogicalPlan,
     ExprArray,
     AggExprArray,
@@ -38,8 +38,8 @@ from komira_plan_ir.logical_plan import (
     JOIN_ANTI,
     JOIN_CROSS,
 )
-from komira_plan_stats.cardinality_estimator import merge_table_stats
-from komira_plan_stats.table_stats import (
+from plan_stats.cardinality_estimator import merge_table_stats
+from plan_stats.table_stats import (
     ColumnStats,
     TableStats,
     STATS_SOURCE_PARQUET_METADATA,

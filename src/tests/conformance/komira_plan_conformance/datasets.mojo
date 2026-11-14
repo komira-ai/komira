@@ -16,11 +16,11 @@
 #                  null-k group holds three rows, k = 2 only NULL values.
 # =============================================================================
 
-from komira_arrow.arrow_types import ArrowType
-from komira_arrow.schema import Field, Schema, SchemaBuilder
-from komira_plan_ir.logical_plan import LogicalPlan
-from komira_scan_source.json_source import JsonSource
-from komira_scan_source.source_variant import SourceVariant
+from arrow.arrow_types import ArrowType
+from arrow.schema import Field, Schema, SchemaBuilder
+from plan_ir.logical_plan import LogicalPlan
+from scan_source.json_source import JsonSource
+from scan_source.source_variant import SourceVariant
 
 from .plan_case import Dataset
 

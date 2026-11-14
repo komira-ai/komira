@@ -8,8 +8,8 @@
 from std.pathlib import Path
 from std.testing import assert_equal, assert_false, assert_true
 
-from komira_async.reactor.socket_io import try_io_accept, try_recv, try_send
-from komira_async.reactor.socket_setup import (
+from async_rt.reactor.socket_io import try_io_accept, try_recv, try_send
+from async_rt.reactor.socket_setup import (
     bind_inet,
     close_fd,
     getsockname_port,

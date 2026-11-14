@@ -1,5 +1,5 @@
 # =============================================================================
-# test_udf_e2e_plan_wire.mojo: a declared UDF crosses komira_plan_wire and
+# test_udf_e2e_plan_wire.mojo: a declared UDF crosses plan_wire and
 # comes back with its identity and signature; a live closure is refused at
 # encode with the codec's exact message.
 # =============================================================================
@@ -42,20 +42,20 @@
 #     `byte_length() == 0` -> `byte_length() == 0 and not
 #     Bool(e.udf_call_handle())` (a call that carries its handle slips
 #     through). Only `test_live_closure_call_is_refused_at_encode` went red
-#     ("a live closure was encoded"); komira_plan_wire's own tests stayed
+#     ("a live closure was encoded"); plan_wire's own tests stayed
 #     green.
 #   * `plan_wire_codec._udf_to_wire`, `if not u.is_describable():` ->
 #     `if not u.is_describable() and not u.has_registered_handle():` (a
 #     closure that carries its handle slips through). Only
 #     `test_live_closure_map_node_is_refused_at_encode` went red ("a live
-#     closure was encoded"): komira_plan_wire's own refusal test builds its
+#     closure was encoded"): plan_wire's own refusal test builds its
 #     closure without a handle, so it stayed green.
 #   * `_expr_to_wire`, EXPR_UDF_CALL arm, the in/out type ids swapped: caught
-#     first by komira_plan_wire's own `test_a_udf_call_whose_in_and_out_
+#     first by plan_wire's own `test_a_udf_call_whose_in_and_out_
 #     dtypes_DIFFER_round_trips`, so the library did not publish and this
 #     package's tests did not run; it proves nothing about this file.
 #   * `_udf_from_wire`, `has_vector_path=w.has_vector_path` -> `False`:
-#     caught first by komira_plan_wire's own `test_plan_wire_udf_tier`, so
+#     caught first by plan_wire's own `test_plan_wire_udf_tier`, so
 #     this package's tests did not run. A decode mutant on any one tag field
 #     is caught there first; the FILTER test's per-field checks have not been
 #     seen red from this file.
@@ -64,12 +64,12 @@
 from std.memory import OwnedPointer
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
-from komira_arrow.arrow_types import ArrowType
-from komira_arrow.schema import Field, SchemaBuilder
-from komira_plan_expr.expr import Expr
-from komira_plan_ir.logical_plan import ExprArray, LogicalPlan, SOURCE_PARQUET
-from komira_plan_expr.scalar_value import ScalarValue
-from komira_plan_expr.udf_data import (
+from arrow.arrow_types import ArrowType
+from arrow.schema import Field, SchemaBuilder
+from plan_expr.expr import Expr
+from plan_ir.logical_plan import ExprArray, LogicalPlan, SOURCE_PARQUET
+from plan_expr.scalar_value import ScalarValue
+from plan_expr.udf_data import (
     UDF_KIND_FILTER,
     UDF_KIND_MAP,
     UDF_NULL_PROPAGATE,
@@ -82,9 +82,9 @@ from komira_plan_expr.udf_data import (
     arrow_type_of_dtag,
 )
 
-from komira_udf.schema_descriptor import DT_F64, DT_I64
-from komira_expr.typed_udf_sugar import Map1, Map2
-from komira_plan_wire import plan_from_bytes, plan_to_bytes
+from udf.schema_descriptor import DT_F64, DT_I64
+from expr.typed_udf_sugar import Map1, Map2
+from plan_wire import plan_from_bytes, plan_to_bytes
 
 
 def affine(x: Int64) -> Float64:
@@ -223,7 +223,7 @@ def _assert_refused(plan: LogicalPlan, want: String) raises:
         _ = b^
     except e:
         refused = True
-        # The whole message, as komira_plan_wire's plan_wire_codec.mojo
+        # The whole message, as plan_wire's plan_wire_codec.mojo
         # `_udf_not_describable_message(where)` builds it.
         assert_equal(String(e), want)
     assert_true(refused, "a live closure was encoded")

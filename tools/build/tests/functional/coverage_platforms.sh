@@ -35,7 +35,7 @@ TARGETS=(
     tests//functional/coverage:covlib_forced
     komira//tools/build/examples/shared_lib:plain
     tests//functional/coverage:covso
-    komira//src/komira_retry:komira_retry_conda
+    komira//src/retry:komira_retry_conda
 )
 DARWIN=(--target-platforms komira//tools/build/platforms:darwin-arm64
     -c komira_re.darwin_arm64_properties=pool=unreachable-check-only -c komira_re.darwin_macos_hosts=0.0-check)

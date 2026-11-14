@@ -1,9 +1,9 @@
-# git, the oracle of komira_git
+# git, the oracle of git
 
 `komira//third_party/git:git` is git 2.56.0, built from source on the farm,
 and with the pinned git-lfs 3.8.0 ([`third_party/git-lfs`](../git-lfs/BUCK))
-it is the oracle of komira_git's conformance tests: what real git writes and
-accepts is what komira_git must write and accept. The target is a directory
+it is the oracle of git's conformance tests: what real git writes and
+accepts is what git must write and accept. The target is a directory
 (`[bin]` is its `bin/git`):
 
 | path | what |
@@ -48,7 +48,7 @@ is:
 | `:git-2.56.0.tar.gz` | git's release archive from kernel.org (GPL-2.0-only); kernel.org's `sha256sums.asc` lists the same sha256 |
 | `:curl-8.22.0.tar.gz` | curl's release archive from curl.se (the curl licence) |
 | `:make-4.4.1.tar.gz` | GNU make's release archive from ftp.gnu.org (GPL-3.0-or-later), the build tool of curl and git; nothing of it is in the distribution |
-| `//third_party/zlib:zlib-1.3.1.tar.gz` | zlib's release archive, the pin komira_zlib's tests already use |
+| `//third_party/zlib:zlib-1.3.1.tar.gz` | zlib's release archive, the pin zlib's tests already use |
 | `//third_party/git-lfs:git-lfs-linux-amd64.tar.gz` | git-lfs's release binary archive (MIT); the release notes list the same sha256 |
 
 A pin bump changes the pin and `_VERSION` (or `_LFS_VERSION`) in

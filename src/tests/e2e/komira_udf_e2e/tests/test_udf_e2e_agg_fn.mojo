@@ -1,6 +1,6 @@
 # =============================================================================
 # test_udf_e2e_agg_fn.mojo: a custom stateful AggFn, per group, over a
-# nullable column, through komira_agg's `AggFnAgg` adapter.
+# nullable column, through agg's `AggFnAgg` adapter.
 # =============================================================================
 #
 # The UDF: `DistinctBelow`, a distinct count of small non-negative integers
@@ -56,14 +56,14 @@
 
 from std.testing import TestSuite, assert_equal, assert_true
 
-from komira_arrow.record_batch import RecordBatch
-from komira_arrow.schema import Field, SchemaBuilder
-from komira_arrow.batch_view import BatchView, batch_view_over
+from arrow.record_batch import RecordBatch
+from arrow.schema import Field, SchemaBuilder
+from arrow.batch_view import BatchView, batch_view_over
 
-from komira_udf.agg_fn import AggFn, PodState
-from komira_udf.auto_komira_schema import AutoKomiraSchema
-from komira_udf.schema_descriptor import DT_I64, schema_of
-from komira_agg.agg_fn_agg import AggFnAgg
+from udf.agg_fn import AggFn, PodState
+from udf.auto_komira_schema import AutoKomiraSchema
+from udf.schema_descriptor import DT_I64, schema_of
+from agg.agg_fn_agg import AggFnAgg
 
 from komira_udf_e2e.columns import all_valid, i64_column
 

@@ -11,7 +11,7 @@ measures time or gives up, so a hung server shows as a hung test.
 | name | does |
 |---|---|
 | `Peer` | `connect`, `send`, `send_bytes`, `poll`, `has`, `take_through`, `start_tls`, `tls_step`, `close`, `reset` |
-| `read_fixture` | a PEM file of komira_http_core's test fixtures |
+| `read_fixture` | a PEM file of http_core's test fixtures |
 | `scratch_dir` | the run's private scratch directory |
 | `yield_cpu` | `sched_yield` |
 """

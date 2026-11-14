@@ -1,6 +1,6 @@
 from std.testing import assert_equal, assert_true
 
-from komira_json import JsonValue, parse_json_value
+from json import JsonValue, parse_json_value
 
 from covcheck.analysis import ExcludedFile
 from covcheck.analyze import FORMAT_LCOV, Analysis, Input, Options, Sources, analyze

@@ -1,0 +1,31 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# Scan planning contracts: the reader-factory trait, the partition/data
+# predicate split and the source capability bundle. They are format and
+# optimizer contracts parked here until the optimizer and parquet packages
+# move.
+#
+# Deps: fs for the filesystem types and partition discovery, and
+# the core packages for the Arrow and plan-expression types (`plan.expr` lives in
+# the core packages until the core split is cut over).
+mojo_library(
+    name = "scan_planning",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/arrow:arrow",
+        "//src/byte_buffer:byte_buffer",
+        "//src/containers:containers",
+        "//src/fs:fs",
+        "//src/plan_expr:plan_expr",
+    ],
+    test_srcs = [
+        "tests/test_partition_pred_bridge_fields.mojo",
+        "tests/test_partition_pred_bridge_roundtrip.mojo",
+        "tests/test_partition_predicate_split.mojo",
+        "tests/test_partition_predicate_split_cross_type.mojo",
+        "tests/test_partition_predicate_split_literals.mojo",
+        "tests/test_partition_predicate_split_ops.mojo",
+        "tests/test_partition_predicate_split_shapes.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)

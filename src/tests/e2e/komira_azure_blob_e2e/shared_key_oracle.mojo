@@ -6,7 +6,7 @@
 # the request AS IT ARRIVED ON THE WIRE (the parsed method, path, query string
 # and headers), with this canonicalizer, written from Microsoft's "Authorize
 # with Shared Key" document and sharing no canonicalization code with
-# komira_azure_blob's signer:
+# azure_blob's signer:
 #
 #   StringToSign = VERB "\n"
 #                  Content-Encoding "\n" Content-Language "\n"
@@ -29,7 +29,7 @@
 # the document says for the storage emulator.
 #
 # Only the two primitives are shared with the signer: HMAC-SHA256
-# (komira_crypto) and base64 (komira_encoding), each pinned to published
+# (crypto) and base64 (encoding), each pinned to published
 # vectors by its own package. A canonicalization defect on either side (a
 # header dropped, a field out of order, the query left out or not decoded)
 # makes the two strings differ, and the fake answers 403. Planted on the
@@ -42,7 +42,7 @@
 #
 # One known difference from the signer: the document folds runs of linear
 # whitespace inside an x-ms-* value to one space, and this oracle does;
-# komira_azure_blob's canonicalize_headers only trims the ends. AzureStore
+# azure_blob's canonicalize_headers only trims the ends. AzureStore
 # sends no x-ms-* value with an inner run, so no test here can see it.
 #
 # The Azurite development account and key below are the published,
@@ -50,8 +50,8 @@
 # authenticate nothing outside a local emulator.
 # =============================================================================
 
-from komira_crypto import hmac_sha256_string
-from komira_encoding import base64_decode, base64_encode
+from crypto import hmac_sha256_string
+from encoding import base64_decode, base64_encode
 
 
 comptime AZURITE_ACCOUNT: StaticString = "devstoreaccount1"

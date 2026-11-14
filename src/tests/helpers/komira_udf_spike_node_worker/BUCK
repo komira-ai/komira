@@ -101,7 +101,7 @@ mojo_library(
     conda = False,
     deps = [
         ":komira_udf_spike_node_worker_engine",
-        "//src/komira_json:komira_json",
+        "//src/json:json",
         _ABI + ":komira_udf_spike_abi",
     ],
     test_srcs = [
@@ -213,7 +213,7 @@ mojo_binary(
     deps = [
         ":komira_udf_spike_node_worker",
         ":komira_udf_spike_node_worker_engine",
-        "//src/komira_json:komira_json",
+        "//src/json:json",
         _ABI + ":komira_udf_spike_abi",
     ],
 )

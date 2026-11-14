@@ -2,7 +2,7 @@
 # komira_plan_conformance/plan_case.mojo -- one conformance case, and its inputs.
 # =============================================================================
 #
-# A case is a logical plan built with komira_plan_ir's factories, the shard
+# A case is a logical plan built with plan_ir's factories, the shard
 # it belongs to, and how its expected answer was obtained:
 #
 #   HAND    a person derived the rows from the dataset and the query-semantics
@@ -26,9 +26,9 @@
 # the query-semantics document proposes (§7.13, undecided).
 # =============================================================================
 
-from komira_arrow.schema import Schema
+from arrow.schema import Schema
 from komira_plan_harness import CanonPolicy
-from komira_plan_ir.logical_plan import LogicalPlan
+from plan_ir.logical_plan import LogicalPlan
 from komira_plan_harness.type_text import schema_entry_of_field
 
 comptime EXPECT_HAND: Int = 0

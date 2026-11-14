@@ -1,6 +1,6 @@
 # =============================================================================
 # heartbeat_receiver.mojo -- a stateful komira.job_report.v1 heartbeat
-# receiver, served by komira_http_server, for the supervisor's loopback tests
+# receiver, served by http_server, for the supervisor's loopback tests
 # =============================================================================
 #
 # The supervisor's peer is not in komira, so the tests supply one: a
@@ -60,7 +60,7 @@
 # ORDER of events, not from a wait. When beat 1 arrives, and before it is
 # answered, the receiver (1) asks the kernel whether THIS process has any
 # SIGCHLD-reporting child (every posix_spawn child), in any state
-# (komira_supervisor's `proc_probe_children`:
+# (supervisor's `proc_probe_children`:
 # `waitid(P_ALL, WEXITED | WNOHANG | WNOWAIT)`, which never reaps), then
 # (2) creates the file `first_beat_gate`, then (3) answers.
 #
@@ -92,23 +92,23 @@
 from std.pathlib import Path
 from std.time import sleep
 
-from komira_async.reactor.reactor import Reactor
-from komira_async.runtime.runtime_trait import Runtime
-from komira_http_core.codec.types import (
+from async_rt.reactor.reactor import Reactor
+from async_rt.runtime.runtime_trait import Runtime
+from http_core.codec.types import (
     HTTP_METHOD_POST,
     HttpMethod,
     HttpRequest,
     HttpResponse,
 )
-from komira_http_server.dispatch import RequestDispatcher
-from komira_proto_codec import decode_proto, encode_proto
+from http_server.dispatch import RequestDispatcher
+from proto_codec import decode_proto, encode_proto
 
-# Test-only reuse of komira_supervisor's kill(2) wrapper as a liveness probe
+# Test-only reuse of supervisor's kill(2) wrapper as a liveness probe
 # (signal 0) and of its non-reaping waitid(2) child probe as the first-beat
 # probe; no foreign function is declared here.
-from komira_supervisor.proc_ffi import proc_kill, proc_probe_children
+from supervisor.proc_ffi import proc_kill, proc_probe_children
 
-from komira_job_report_proto.job_report import (
+from job_report_proto.job_report import (
     JobDirective,
     JobHeartbeat,
     JobHeartbeatReply,

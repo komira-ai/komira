@@ -118,10 +118,10 @@ mojo_library(
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     conda = False,
     deps = [
-        "//src/komira_arrow:komira_arrow",
-        "//src/komira_arrow_ipc:komira_arrow_ipc",
-        "//src/komira_buffer:komira_buffer",
-        "//src/komira_collections:komira_collections",
+        "//src/arrow:arrow",
+        "//src/arrow_ipc:arrow_ipc",
+        "//src/byte_buffer:byte_buffer",
+        "//src/containers:containers",
         "//src/tests/helpers/komira_plan_harness:komira_plan_harness",
     ],
     test_srcs = [

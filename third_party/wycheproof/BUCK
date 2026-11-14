@@ -5,7 +5,7 @@ load("@komira//tools/build/mojo:download.bzl", "pinned_file")
 # commit of its default branch. Each file is fetched at build time and checked
 # against its sha256; nothing of it is committed here.
 #
-# Test data of //src/komira_jose (tests/test_wycheproof_jws.mojo):
+# Test data of //src/jose (tests/test_wycheproof_jws.mojo):
 #   json_web_signature_test.json - 401 compact JWS vectors over HS*, ES256,
 #                                  RS*, PS* and the RFC 7520 examples, each
 #                                  with the public JWK it is checked against.

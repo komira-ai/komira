@@ -43,8 +43,8 @@
 from std.math import log
 from std.testing import assert_equal, assert_true
 
-from komira_json import parse_json_value
-from komira_runtime_paths import test_tmpdir
+from json import parse_json_value
+from runtime_paths import test_tmpdir
 
 from komira_search_e2e.http_wire import (
     WireReply,

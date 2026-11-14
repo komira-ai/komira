@@ -4,25 +4,25 @@ from std.ffi import external_call
 from std.pathlib import Path
 from std.sys.info import CompilationTarget
 
-from komira_async.reactor.socket_io import (
+from async_rt.reactor.socket_io import (
     errno_is_would_block,
     try_recv,
     try_send,
 )
-from komira_async.reactor.socket_setup import (
+from async_rt.reactor.socket_setup import (
     close_fd,
     inet_loopback_be,
     sockaddr_in_bytes,
 )
-from komira_http_core.tls import (
+from http_core.tls import (
     TLS_OUTCOME_DONE,
     TLS_OUTCOME_ERROR,
     TlsConfig,
     TlsConnection,
 )
-from komira_runtime_paths import test_tmpdir
+from runtime_paths import test_tmpdir
 
-comptime _FIXTURES: String = "src/komira_http_core/tests/fixtures/tls/"
+comptime _FIXTURES: String = "src/http_core/tests/fixtures/tls/"
 comptime _CHUNK: Int = 16 * 1024
 
 
@@ -32,7 +32,7 @@ def yield_cpu():
 
 
 def read_fixture(name: String) raises -> String:
-    """A file of komira_http_core's TLS test fixtures (`leaf_cert.pem`,
+    """A file of http_core's TLS test fixtures (`leaf_cert.pem`,
     `leaf_key.pem`, `root_ca.pem`). The test declares the file in `test_data`."""
     return Path(_FIXTURES + name).read_text()
 

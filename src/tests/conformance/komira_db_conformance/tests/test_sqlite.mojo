@@ -1,5 +1,5 @@
 # =============================================================================
-# test_sqlite.mojo -- komira_db_sqlite's SqliteDatabase against both suites.
+# test_sqlite.mojo -- db_sqlite's SqliteDatabase against both suites.
 # =============================================================================
 #
 # Every check gets a new in-memory database (":memory:"), so no check sees
@@ -15,9 +15,9 @@
 #                     apart on the schema-unknown query path.
 # =============================================================================
 
-from komira_db.blocking import db_blocking_execute
-from komira_db import DbValue
-from komira_db_sqlite import SqliteDatabase
+from db.blocking import db_blocking_execute
+from db import DbValue
+from db_sqlite import SqliteDatabase
 
 from komira_db_conformance import (
     ERR_NO_TABLE,
@@ -43,7 +43,7 @@ struct SqliteNeutral(NeutralTarget):
         pass
 
     def name(self) -> String:
-        return String("komira_db_sqlite")
+        return String("db_sqlite")
 
     def fresh(mut self) raises -> SqliteDatabase:
         var db = SqliteDatabase(String(":memory:"))
@@ -75,7 +75,7 @@ struct SqliteSql(SqlTarget):
         pass
 
     def name(self) -> String:
-        return String("komira_db_sqlite")
+        return String("db_sqlite")
 
     def fresh(mut self) raises -> SqliteDatabase:
         return SqliteDatabase(String(":memory:"))
@@ -116,4 +116,4 @@ def main() raises:
         failures += String(e)
     if failures.byte_length() > 0:
         raise Error(failures)
-    print("PASS komira_db_conformance komira_db_sqlite")
+    print("PASS komira_db_conformance db_sqlite")

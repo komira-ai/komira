@@ -41,7 +41,7 @@ fn metaLast(e: *h.Ir, prefix: []const u8, line: []const u8) ![]const u8 {
 // phi of the and's result shape: the `if` (49,9) is the and's test, not the
 // `try` decision (as rules.ll's 74,12, in a `try:` body), and a callee
 // inlined from another file whose flag is a phi of `true` and `false`
-// arriving from its raise path and its return (56,30, as `komira_parquet`'s
+// arriving from its raise path and its return (56,30, as `parquet`'s
 // rle.mojo 226:54, `read_uleb128`). A String's destructor and a select at
 // 5,14 stay compiler-made, so does the error check of a call in an
 // `except` (17), an `else` (19) or after the `try` (22), in a `def` nested

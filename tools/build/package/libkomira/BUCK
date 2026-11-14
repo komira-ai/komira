@@ -1,19 +1,19 @@
 load("@komira//tools/build/package:conda.bzl", "conda_package")
 load("@komira//tools/build/package/install_check:install_check.bzl", "conda_install_check")
 
-# libkomira as a conda package. The package is komira_so's own: the library's
+# libkomira as a conda package. The package is so's own: the library's
 # `.mojoc` and `lib/libkomira.so` (the one shared library every SDK loads),
 # with a `lib_files` row for the library in its metadata. Its requirements are
 # the Mojo compiler pin (the package whose `lib/` holds the Mojo runtime the
 # library is NEEDED on, libKGENCompilerRTShared.so and what that loads), the
-# glibc floor of the platform table, and komira_so's Mojo dependencies, all at
+# glibc floor of the platform table, and so's Mojo dependencies, all at
 # the release's version and build. The plain `komira_so_conda` of the library
 # is the same package without the shared library: a release declares one of
 # the two.
 conda_package(
     name = "komira_so_libkomira_conda",
-    lib = "//src/komira_so:komira_so",
-    shared_lib = "//src/komira_so:libkomira",
+    lib = "//src/so:so",
+    shared_lib = "//src/so:libkomira",
     summary = "libkomira, the shared library with komira's flat C API, and the Mojo library it is built from.",
     visibility = ["PUBLIC"],
 )
@@ -40,14 +40,14 @@ conda_install_check(
         "libkomira_parquet_codec_native.so.1",
     ],
     owners = [
-        "//src/komira_async:komira_async_conda",
-        "//src/komira_async_api:komira_async_api_conda",
-        "//src/komira_compression:komira_compression_conda",
-        "//src/komira_fs:komira_fs_conda",
-        "//src/komira_libc:komira_libc_conda",
-        "//src/komira_metrics:komira_metrics_conda",
-        "//src/komira_scan_source:komira_scan_source_conda",
-        "//src/komira_parquet_codec:komira_parquet_codec_conda",
+        "//src/async_rt:komira_async_conda",
+        "//src/async_api:komira_async_api_conda",
+        "//src/compression:komira_compression_conda",
+        "//src/fs:komira_fs_conda",
+        "//src/libc:komira_libc_conda",
+        "//src/metrics:komira_metrics_conda",
+        "//src/scan_source:komira_scan_source_conda",
+        "//src/parquet_codec:komira_parquet_codec_conda",
     ],
     package = ":komira_so_libkomira_conda",
     symbols = [

@@ -209,7 +209,7 @@ test "usage errors exit 2: no target, an argument that is not a label, an unknow
     const r1 = try runRegen(&c, &.{});
     try t.expectEqual(@as(u8, 2), r1.code);
     try t.expect(has(r1.stderr, "usage: regen"));
-    const r2 = try runRegen(&c, &.{"komira_aws_sqs"});
+    const r2 = try runRegen(&c, &.{"aws_sqs"});
     try t.expectEqual(@as(u8, 2), r2.code);
     try t.expect(has(r2.stderr, "is not a target label"));
     const r3 = try c.run(&.{ "--bogus", svc }, &.{});

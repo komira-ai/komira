@@ -1,0 +1,53 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The Postgres driver for db: `PgDatabase` conforms to the
+# backend-generic `SqlDatabase` trait over the wire client in `wire/`, and
+# `PgPool` is the `Pool[PgDatabase]` specialization.
+#
+# `wire/` is the native Postgres pgwire-v3 client: SCRAM-SHA-256 authentication
+# over TLS 1.3 (s2n, through komira_http's TLS layer), the simple and extended
+# query protocols with binary-format codecs for a closed OID set, and
+# poll-shaped query and transaction operations driven by a async_rt
+# reactor.
+#
+# The tests (under tests/ and wire/tests) need no database server: SCRAM and codec
+# vectors, hand-built rows, host resolution through /etc/hosts, the
+# poll-shaped read frame driven over a local socketpair, and a PgConnection
+# reading a canned reply over an in-process TLS session on a socketpair (with
+# http_core's throwaway test certificate).
+
+mojo_library(
+    name = "db_postgres",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo", "wire/tests/**/*.mojo"]),
+    deps = [
+        "//src/async_rt:async_rt",
+        "//src/crypto:crypto",
+        "//src/db:db",
+        "//src/encoding:encoding",
+        "//src/http_core:http_core",
+        "//src/net:net",
+    ],
+    test_srcs = [
+        "tests/test_pg_driver_mappers.mojo",
+        "tests/test_pg_pool_lease.mojo",
+        "wire/tests/test_binary_codec.mojo",
+        "wire/tests/test_dns_resolve_pg_host.mojo",
+        "wire/tests/test_frame_and_wire_edges.mojo",
+        "wire/tests/test_pg_query_op_poll.mojo",
+        "wire/tests/test_pg_tx_op_sequence.mojo",
+        "wire/tests/test_pgrow_accumulation.mojo",
+        "wire/tests/test_read_frame_guard.mojo",
+        "wire/tests/test_scram_and_pgwire.mojo",
+        "wire/tests/test_server_free_helpers.mojo",
+        "wire/tests/test_truncated_closes_connection.mojo",
+        "wire/tests/test_truncated_messages.mojo",
+        "wire/tests/test_wire_decode_edges.mojo",
+    ],
+    test_data = {
+        "wire/tests/test_truncated_closes_connection.mojo": {
+            "src/http_core/tests/fixtures/tls/leaf_cert.pem": "//src/http_core:tests/fixtures/tls/leaf_cert.pem",
+            "src/http_core/tests/fixtures/tls/leaf_key.pem": "//src/http_core:tests/fixtures/tls/leaf_key.pem",
+        },
+    },
+    visibility = ["PUBLIC"],
+)

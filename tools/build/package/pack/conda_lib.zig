@@ -532,10 +532,10 @@ test "a NEEDED owner missing from the Mojo closure is refused" {
     const alloc = arena.allocator();
     const needs = try needed(alloc, try testElf(alloc, &.{ "libkomira_crypto_native.so.1", "libc.so.6" }));
     const lib = "lib/libkomira_http_core_native.so.1";
-    // komira_http_core with komira_crypto in its closure: accepted.
-    try checkNeededOwners(alloc, "komira_http_core", lib, needs, &.{ "libkomira_crypto_native.so.1", "libkomira_http_core_native.so.1" });
-    // komira_http_core packed with its crypto dependency removed: refused.
-    try testing.expectError(error.Refused, checkNeededOwners(alloc, "komira_http_core", lib, needs, &.{"libkomira_http_core_native.so.1"}));
+    // http_core with crypto in its closure: accepted.
+    try checkNeededOwners(alloc, "http_core", lib, needs, &.{ "libkomira_crypto_native.so.1", "libkomira_http_core_native.so.1" });
+    // http_core packed with its crypto dependency removed: refused.
+    try testing.expectError(error.Refused, checkNeededOwners(alloc, "http_core", lib, needs, &.{"libkomira_http_core_native.so.1"}));
     try testing.expect(std.mem.indexOf(u8, why, "NEEDED libkomira_crypto_native.so.1") != null);
 }
 
@@ -545,8 +545,8 @@ test "the packer's __glibc comes only after the NEEDED check" {
     const alloc = arena.allocator();
     const elf = try testElf(alloc, &.{ "libkomira_crypto_native.so.1", "libc.so.6" });
     const files = try libFilesOf(alloc, &.{.{ .name = "libkomira_http_core_native.so.1", .data = elf }}, &.{});
-    try testing.expectEqualStrings("__glibc >=2.17", try checkedGlibc(alloc, "komira_http_core", files, "2.17", &.{"libkomira_crypto_native.so.1"}));
-    try testing.expectError(error.Refused, checkedGlibc(alloc, "komira_http_core", files, "2.17", &.{"libkomira_http_core_native.so.1"}));
+    try testing.expectEqualStrings("__glibc >=2.17", try checkedGlibc(alloc, "http_core", files, "2.17", &.{"libkomira_crypto_native.so.1"}));
+    try testing.expectError(error.Refused, checkedGlibc(alloc, "http_core", files, "2.17", &.{"libkomira_http_core_native.so.1"}));
     try testing.expect(std.mem.indexOf(u8, why, "NEEDED libkomira_crypto_native.so.1") != null);
 }
 

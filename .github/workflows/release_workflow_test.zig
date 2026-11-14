@@ -626,7 +626,7 @@ test "each edit of the prod jobs of the real release.yml that breaks the contrac
     try expectRefused(ar, try replaced(ar, text, PROD_E2E_RUN ++ nl ++ E2E_ASSERT ++ nl, PROD_E2E_RUN ++ nl), "not asserted remote");
     try expectRefused(ar, try replaced(ar, text, PROD_BUILD_VERIFY ++ nl ++ E2E_ASSERT ++ nl, PROD_BUILD_VERIFY ++ nl), "not asserted remote");
     try expectRefused(ar, try replaced(ar, text, e2e_step, e2e_step ++ "        continue-on-error: true\n"), "prod-test ignores a failure");
-    const writers = [_][]const u8{ "mopm publish --staged x --registry prod", "mopm yank komira_hash 0.1.1", "mopm login --registry prod", "curl -X PUT https://x.test/y", "curl --request POST https://x.test/y", "wget --post-data=x https://x.test/y", "mopm-x --oidc" };
+    const writers = [_][]const u8{ "mopm publish --staged x --registry prod", "mopm yank hashing 0.1.1", "mopm login --registry prod", "curl -X PUT https://x.test/y", "curl --request POST https://x.test/y", "wget --post-data=x https://x.test/y", "mopm-x --oidc" };
     inline for (writers) |cmd| try expectRefused(ar, try replaced(ar, text, e2e_step, "      - run: " ++ cmd ++ "\n" ++ e2e_step), "prod-test publishes, yanks");
 
     // the commit: the same command without --no-commit, on the directory prod-stage kept, with an identity of its own

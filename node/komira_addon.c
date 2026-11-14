@@ -1,5 +1,5 @@
 // The Node-API addon over libkomira, komira's one shared library with a flat C
-// ABI (src/komira_so). It is built by node_addon (BUCK, `komira_addon`) with
+// ABI (src/so). It is built by node_addon (BUCK, `komira_addon`) with
 // every napi_* symbol left undefined for node to resolve, and it exposes the
 // library to JavaScript:
 //

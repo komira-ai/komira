@@ -1,6 +1,6 @@
 # =============================================================================
 # komira_git_conformance/tests/test_recompression.mojo -- the disturbance-
-# vector loop of komira_git's `Sha1dc`, one DV at a time, against
+# vector loop of git's `Sha1dc`, one DV at a time, against
 # sha1collisiondetection's C.
 # =============================================================================
 #
@@ -49,9 +49,9 @@
 
 from std.testing import assert_equal, assert_true
 
-from komira_git import Sha1dc
-from komira_git.sha1dc import _expand
-from komira_git.sha1dc_ubc import _DV_COUNT
+from git import Sha1dc
+from git.sha1dc import _expand
+from git.sha1dc_ubc import _DV_COUNT
 
 from komira_git_conformance import CSha1dc, c_dv_word, c_ubc_check
 

@@ -22,7 +22,7 @@ const C = "c" ** 64;
 
 // the old writer's golden vector: three members, any order
 const HASH_GOLDEN = "7a85e80aabbb553803809d3c2b516b8eaaeae467668051498fbeb82790682efe";
-// the old writer's golden for two members (komira metapackage, komira_hash)
+// the old writer's golden for two members (komira metapackage, hashing)
 const SET_GOLDEN = "c5e97905a05bcab80064d0b583b4f963ea55cdc03ebc73959a623dc0dfbf941c";
 
 fn member(name: []const u8, kind: []const u8, sha: []const u8, version: []const u8, build: []const u8) set_json.Member {
@@ -40,8 +40,8 @@ fn member(name: []const u8, kind: []const u8, sha: []const u8, version: []const 
 
 fn three() [3]set_json.Member {
     return .{
-        member("komira_hash", "library", A, "1.0.0", "h01234567_7"),
-        member("komira_name_registry", "library", B, "1.0.0", "h01234567_7"),
+        member("hashing", "library", A, "1.0.0", "h01234567_7"),
+        member("name_registry", "library", B, "1.0.0", "h01234567_7"),
         member("komira", "metapackage", C, "1.0.0", "h01234567_7"),
     };
 }
@@ -69,8 +69,8 @@ test "the hashed text is a header line then the member lines sorted bytewise: a 
     const tail = "\tlinux-x86_64\t1.0.0\th01234567_7\tlinux-64\tCONDA\t";
     const want = "release_set\t2\t" ++ REV ++ "\tlinux-x86_64\n" ++
         "komira" ++ tail ++ C ++ "\n" ++
-        "komira_hash" ++ tail ++ A ++ "\n" ++
-        "komira_name_registry" ++ tail ++ B ++ "\n";
+        "hashing" ++ tail ++ A ++ "\n" ++
+        "name_registry" ++ tail ++ B ++ "\n";
     try t.expectEqualStrings(want, try set_json.setHashText(a, REV, PLAT, &m));
 }
 
@@ -116,11 +116,11 @@ test "release.json is byte-for-byte the old writer's golden, members sorted by n
     var ctx = set_json.Ctx{ .a = arena.allocator() };
     // deliberately out of order: the render sorts
     const members = [_]set_json.Member{
-        member("komira_hash", "library", A, "0.1.7", "0"),
+        member("hashing", "library", A, "0.1.7", "0"),
         member("komira", "metapackage", C, "0.1.7", "0"),
     };
     const got = try set_json.renderReleaseJson(&ctx, .{ .revision = REV, .platform = PLAT, .run_id = "gh-1", .attempt = 1 }, &members);
-    const want = comptime doc(row("komira", "metapackage", C) ++ "," ++ row("komira_hash", "library", A));
+    const want = comptime doc(row("komira", "metapackage", C) ++ "," ++ row("hashing", "library", A));
     try t.expectEqualStrings(want, got);
 }
 
@@ -129,7 +129,7 @@ test "produced_by is in release.json and not in the hash" {
     defer arena.deinit();
     var ctx = set_json.Ctx{ .a = arena.allocator() };
     const members = [_]set_json.Member{
-        member("komira_hash", "library", A, "0.1.7", "0"),
+        member("hashing", "library", A, "0.1.7", "0"),
         member("komira", "metapackage", C, "0.1.7", "0"),
     };
     const got = try set_json.renderReleaseJson(&ctx, .{ .revision = REV, .platform = PLAT, .run_id = "gh-99", .attempt = 3 }, &members);
@@ -194,9 +194,9 @@ const PKG_SHA = "59381d868da89adeb813a6c459beab8c673f845e8fb7b6e2996da04efad399d
 const OTHER_SHA = "1c55d9b826e8dfa994370e306ae8dc2e849f3e003381dc848a0b95f782c0c0e3"; // sha256 of "OTHER"
 
 const Layout = struct {
-    dir: []const u8 = "komira_hash",
-    manifest_name: []const u8 = "komira_hash",
-    file: []const u8 = "komira_hash-1.0.0-h01234567_7.conda",
+    dir: []const u8 = "hashing",
+    manifest_name: []const u8 = "hashing",
+    file: []const u8 = "hashing-1.0.0-h01234567_7.conda",
     file_bytes: []const u8 = "PACKAGE-BYTES",
     sha: []const u8 = PKG_SHA,
     platform: []const u8 = PLAT,
@@ -238,7 +238,7 @@ test "a package directory as the build leaves it is a member, with the fields re
     defer arena.deinit();
     var ctx = set_json.Ctx{ .a = arena.allocator() };
     const m = try verifyLayout(&ctx, .{});
-    try t.expectEqualStrings("komira_hash", m.name);
+    try t.expectEqualStrings("hashing", m.name);
     try t.expectEqualStrings("1.0.0", m.version);
     try t.expectEqualStrings("h01234567_7", m.build);
     try t.expectEqualStrings("library", m.kind);
@@ -253,7 +253,7 @@ test "an unstamped member is accepted only when the check is told the set is uns
     defer arena.deinit();
     var ctx = set_json.Ctx{ .a = arena.allocator(), .require_stamped = false };
     const m = try verifyLayout(&ctx, .{ .stamped = "false" });
-    try t.expectEqualStrings("komira_hash", m.name);
+    try t.expectEqualStrings("hashing", m.name);
     // every other check still holds
     try expectRefused(&ctx, verifyLayout(&ctx, .{ .stamped = "false", .md_size = 14 }), "says size 14");
 }
@@ -276,7 +276,7 @@ test "a member is refused for each way it can disagree with itself" {
         // an empty package file
         .{ .l = .{ .file_bytes = "", .md_size = 0, .sha = OTHER_SHA }, .says = "EMPTY" },
         // a manifest named for another package than its directory
-        .{ .l = .{ .manifest_name = "komira_json" }, .says = "is not the artifact's name" },
+        .{ .l = .{ .manifest_name = "json" }, .says = "is not the artifact's name" },
         // another platform than the release's
         .{ .l = .{ .platform = "linux-arm64", .subdir = "linux-aarch64" }, .says = "neither the release's" },
         // a subdir that is not the platform's
@@ -307,7 +307,7 @@ test "a member is refused for each way it can disagree with itself" {
             var d = try tmp.dir.openDir(c.l.dir, .{});
             defer d.close();
             try d.writeFile(.{ .sub_path = "manifest.json", .data = try std.fmt.allocPrint(ctx.a,
-                \\{{"format":"kci.artifact_manifest","schema_version":1,"artifact_type":"CONDA","name":"komira_hash","version":"1.0.0","platform":"linux-x86_64","subdir":"linux-64","file":"..","sha256":"{s}","metadata":"metadata.json"}}
+                \\{{"format":"kci.artifact_manifest","schema_version":1,"artifact_type":"CONDA","name":"hashing","version":"1.0.0","platform":"linux-x86_64","subdir":"linux-64","file":"..","sha256":"{s}","metadata":"metadata.json"}}
             , .{PKG_SHA}) });
         } else {
             try writeMember(ctx.a, tmp.dir, c.l);
@@ -323,16 +323,16 @@ test "a member that is a symlink, or holds one, is refused before anything is re
     var tmp = t.tmpDir(.{ .iterate = true });
     defer tmp.cleanup();
     try writeMember(ctx.a, tmp.dir, .{ .dir = "real" });
-    try tmp.dir.symLink("real", "komira_hash", .{ .is_directory = true });
-    try expectRefused(&ctx, set_json.verifyMember(&ctx, tmp.dir, "komira_hash", PLAT), "symlink");
+    try tmp.dir.symLink("real", "hashing", .{ .is_directory = true });
+    try expectRefused(&ctx, set_json.verifyMember(&ctx, tmp.dir, "hashing", PLAT), "symlink");
 
     var inner = t.tmpDir(.{ .iterate = true });
     defer inner.cleanup();
     try writeMember(ctx.a, inner.dir, .{});
-    var d = try inner.dir.openDir("komira_hash", .{});
+    var d = try inner.dir.openDir("hashing", .{});
     defer d.close();
     try d.symLink("manifest.json", "link.json", .{});
-    try expectRefused(&ctx, set_json.verifyMember(&ctx, inner.dir, "komira_hash", PLAT), "not a regular file");
+    try expectRefused(&ctx, set_json.verifyMember(&ctx, inner.dir, "hashing", PLAT), "not a regular file");
 }
 
 test "a set is the declared members and nothing else, in the declared order" {
@@ -343,17 +343,17 @@ test "a set is the declared members and nothing else, in the declared order" {
     defer tmp.cleanup();
     try writeMember(ctx.a, tmp.dir, .{});
     try writeMember(ctx.a, tmp.dir, .{ .dir = "komira", .manifest_name = "komira", .kind = "metapackage", .file = "komira-1.0.0-h01234567_7.conda" });
-    const names = [_][]const u8{ "komira_hash", "komira" };
+    const names = [_][]const u8{ "hashing", "komira" };
     const members = try set_json.verifySet(&ctx, tmp.dir, &names, PLAT);
     try t.expectEqual(@as(usize, 2), members.len);
-    try t.expectEqualStrings("komira_hash", members[0].name);
+    try t.expectEqualStrings("hashing", members[0].name);
     try t.expectEqualStrings("komira", members[1].name);
 
     // a directory no artifact declares (a build that wrote beside its own)
     try tmp.dir.makePath("stray");
     try expectRefused(&ctx, set_json.verifySet(&ctx, tmp.dir, &names, PLAT), "which no artifact declares");
     // a declared member that is not there
-    const more = [_][]const u8{ "komira_hash", "komira", "stray", "komira_json" };
+    const more = [_][]const u8{ "hashing", "komira", "stray", "json" };
     try expectRefused(&ctx, set_json.verifySet(&ctx, tmp.dir, &more, PLAT), "stray");
 }
 
@@ -364,6 +364,6 @@ test "a declared member missing from the directory is named" {
     var tmp = t.tmpDir(.{ .iterate = true });
     defer tmp.cleanup();
     try writeMember(ctx.a, tmp.dir, .{});
-    const names = [_][]const u8{ "komira_hash", "komira_json" };
-    try expectRefused(&ctx, set_json.verifySet(&ctx, tmp.dir, &names, PLAT), "komira_json");
+    const names = [_][]const u8{ "hashing", "json" };
+    try expectRefused(&ctx, set_json.verifySet(&ctx, tmp.dir, &names, PLAT), "json");
 }

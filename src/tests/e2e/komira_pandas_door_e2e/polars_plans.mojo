@@ -2,10 +2,10 @@
 
 Each function here builds the `LogicalPlan` that one committed fixture
 (`fixtures/polars_<stem>.txtpb`) describes, in the shapes a polars-shaped
-frontend emits for polars 1.44.2. The plan nodes come from `komira_plan_ir`'s
+frontend emits for polars 1.44.2. The plan nodes come from `plan_ir`'s
 factories, the ones the decoder uses. The expressions that this repository's
 polars surface already lowers (`is_in`, `sum_horizontal`) come from that
-surface (`komira_plan_expr.col_expr`, bound over the input schema by
+surface (`plan_expr.col_expr`, bound over the input schema by
 `col_expr_bind` as a verb binds them), so a fixture that disagrees with the
 in-tree lowering fails the comparison.
 
@@ -41,22 +41,22 @@ The shapes:
   the cross-door check (`door_plans.groupby_sum_plan` is the pandas half).
 """
 
-from komira_arrow.arrow_types import ArrowType
-from komira_arrow.schema import Field, Schema, SchemaBuilder
-from komira_plan_expr.agg_expr import AggExpr, AGG_SUM
-from komira_plan_expr.col_expr import col, sum_horizontal
-from komira_plan_expr.col_expr_bind import bind_unbound_expr
-from komira_plan_expr.expr import Expr
-from komira_plan_expr.partition_expr import PartitionExpr, PF_SUM
-from komira_plan_expr.partition_frame import PartitionFrame
-from komira_plan_ir.logical_plan import (
+from arrow.arrow_types import ArrowType
+from arrow.schema import Field, Schema, SchemaBuilder
+from plan_expr.agg_expr import AggExpr, AGG_SUM
+from plan_expr.col_expr import col, sum_horizontal
+from plan_expr.col_expr_bind import bind_unbound_expr
+from plan_expr.expr import Expr
+from plan_expr.partition_expr import PartitionExpr, PF_SUM
+from plan_expr.partition_frame import PartitionFrame
+from plan_ir.logical_plan import (
     AggExprArray,
     ExprArray,
     LogicalPlan,
     SOURCE_KIND_COLUMNAR,
 )
-from komira_scan_source.parquet_source import ParquetSource
-from komira_scan_source.source_variant import SourceVariant
+from scan_source.parquet_source import ParquetSource
+from scan_source.source_variant import SourceVariant
 
 from .door_plans import DOOR_MTIME_NS, orders_scan
 

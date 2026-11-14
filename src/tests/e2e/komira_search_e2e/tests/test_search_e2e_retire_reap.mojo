@@ -50,7 +50,7 @@
 #      lineage recovers the head from the log start (`start_seq - 1`), so it
 #      reports the same generation with or without the floor; the planted
 #      mutant that drops the floor raise stays green on this file.
-#      komira_search_catalog's lifecycle tests own the floor.
+#      search_catalog's lifecycle tests own the floor.
 #   4. test_a_store_error_naming_404_is_not_absence: the index is named
 #      `run404`, so every key in its lineage contains "404". A store that
 #      refuses the read of chunk 1 with a permission error naming that key
@@ -74,7 +74,7 @@ from std.testing import (
     assert_true,
 )
 
-from komira_objectstore import (
+from objectstore import (
     CoalescePolicy,
     ListResult,
     LocalFsConditionalStore,
@@ -83,19 +83,19 @@ from komira_objectstore import (
     WritePrecondition,
     chunk_key,
 )
-from komira_objectstore.cas_manifest import is_not_found
-from komira_objectstore.path import Path
-from komira_objectstore.store import (
+from objectstore.cas_manifest import is_not_found
+from objectstore.path import Path
+from objectstore.store import (
     CloneableConditionalWriteStore,
     ConditionalWriteStore,
     ObjectStore,
 )
 
-from komira_scan_source.scan_binding import ScanBinding
+from scan_source.scan_binding import ScanBinding
 
-from komira_search_scan.search_scan_kind import SearchScanResolver
+from search_scan.search_scan_kind import SearchScanResolver
 
-from komira_runtime_paths import test_tmpdir
+from runtime_paths import test_tmpdir
 
 from komira_search_e2e.corpus import (
     INDEX_NAME,

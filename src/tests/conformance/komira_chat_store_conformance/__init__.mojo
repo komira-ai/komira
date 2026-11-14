@@ -1,4 +1,4 @@
-"""`komira_chat_store_conformance`: komira_chat_store's behaviour, written
+"""`komira_chat_store_conformance`: chat_store's behaviour, written
 once, generic over the backend, and run against each backend a build action
 can run (test-only).
 

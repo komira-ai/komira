@@ -1,0 +1,17 @@
+[package]
+name = "komira-ai/byte_buffer"
+version = "0.1.0"
+description = "Aligned, shared and memory-mapped byte buffers and the region trait that columns sit on."
+license = "Apache-2.0"
+repository = "https://github.com/komira-ai/komira"
+readme = "README.md"
+mojo = ["1.0.0"]
+
+[dependencies]
+"komira-ai/host_probe" = { path = "../host_probe", version = "0.1" }
+"komira-ai/libc" = { path = "../libc", version = "0.1" }
+"komira-ai/simd_ops" = { path = "../simd_ops", version = "0.1" }
+
+[targets]
+lib = { path = "src/byte_buffer" }
+tests = ["tests"]

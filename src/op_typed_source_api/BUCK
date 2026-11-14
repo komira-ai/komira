@@ -1,0 +1,46 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The contract of the engine's typed sources: the `TypedSource` and
+# `SourceReader` traits, the `FlatContribution` a source contributes to a
+# flattened plan, and the leaf aggregation's RADIX-by-rows decision
+# (typed_source); and the row-format conformers for CSV (csv_typed_source),
+# JSONL (jsonl_typed_source) and Avro OCF (avro_typed_source). The parquet
+# conformer is not here. The traits' signatures name the parquet footer cache,
+# the physical-plan scan types, the morsel sizing policy and the dynamic join
+# filter, so this is the lowest package that can hold them.
+#
+# The welded test:
+# - test_leaf_agg_radix_by_rows_pin: the by-rows RADIX decision at its default
+#   thresholds, the low-cardinality decline, and both boundaries (rows ==
+#   min_rows engages, estimate == min_groups admits, -1 admits) with the
+#   thresholds passed as parameters.
+mojo_library(
+    name = "op_typed_source_api",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/arrow:arrow",
+        "//src/arrow_ipc:arrow_ipc",
+        "//src/async_rt:async_rt",
+        "//src/async_api:async_api",
+        "//src/avro:avro",
+        "//src/containers:containers",
+        "//src/column_format:column_format",
+        "//src/csv:csv",
+        "//src/engine_runtime:engine_runtime",
+        "//src/fs:fs",
+        "//src/host_profile:host_profile",
+        "//src/jsonl:jsonl",
+        "//src/morsel:morsel",
+        "//src/op_agg_row_api:op_agg_row_api",
+        "//src/parquet:parquet",
+        "//src/parquet_codec:parquet_codec",
+        "//src/physical_plan:physical_plan",
+        "//src/plan_expr:plan_expr",
+        "//src/plan_ir:plan_ir",
+        "//src/scan_source:scan_source",
+    ],
+    test_srcs = [
+        "tests/test_leaf_agg_radix_by_rows_pin.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)

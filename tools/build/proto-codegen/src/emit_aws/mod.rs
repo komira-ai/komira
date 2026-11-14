@@ -123,7 +123,7 @@ pub const AWS_GENERATOR_VERSION: &str = "15";
 /// The hand-written AWS core every generated module imports from: codecs,
 /// SigV4, credential providers, endpoints, retry and the signed-request
 /// transport. There is one core per cloud and no other AWS library.
-pub const AWS_CORE: &str = "komira_aws_core";
+pub const AWS_CORE: &str = "aws_core";
 
 /// When an emitted module needs an import.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -169,12 +169,12 @@ pub struct AwsImport {
 /// shared pure preamble and the prose that cites a core symbol all read
 /// this table, so a layout change is an edit here and nowhere else.
 ///
-/// The [`AWS_CORE`] rows are the contract `komira_aws_core` must meet, as
+/// The [`AWS_CORE`] rows are the contract `aws_core` must meet, as
 /// names re-exported from its package root. The `Always` rows are what a
 /// pure-mode module needs, so the core's socket-free half can land before
 /// any HTTP library; the `ClientOnly` rows need the transport. A row
 /// applies to the protocols it lists: the JSON codec names and the
-/// `komira_json` runtime only to [`JSON_BODY_PROTOCOLS`].
+/// `json` runtime only to [`JSON_BODY_PROTOCOLS`].
 ///
 /// Rows of one module merge into one `from` statement, in table order, so
 /// the row order is the order of the emitted names.
@@ -407,43 +407,43 @@ pub const AWS_IMPORTS: &[AwsImport] = &[
         protocols: ALL_PROTOCOLS,
     },
     AwsImport {
-        module: "komira_json",
+        module: "json",
         names: &["JsonValue", "parse_json_bytes", "parse_json_value"],
         mode: AwsImportMode::Always,
         protocols: JSON_BODY_PROTOCOLS,
     },
     AwsImport {
-        module: "komira_json",
+        module: "json",
         names: &["JsonValue"],
         mode: AwsImportMode::ModelJson,
         protocols: XML_RESPONSE_PROTOCOLS,
     },
     AwsImport {
-        module: "komira_xml",
+        module: "xml",
         names: &["XmlNode", "XmlWriter"],
         mode: AwsImportMode::Always,
         protocols: XML_BODY_PROTOCOLS,
     },
     AwsImport {
-        module: "komira_xml",
+        module: "xml",
         names: &["XmlNode"],
         mode: AwsImportMode::Always,
         protocols: QUERY_PROTOCOLS,
     },
     AwsImport {
-        module: "komira_http_client.client",
+        module: "http_client.client",
         names: &["HttpClientConfig"],
         mode: AwsImportMode::ClientOnly,
         protocols: ALL_PROTOCOLS,
     },
     AwsImport {
-        module: "komira_http_core.transport.io_stream",
+        module: "http_core.transport.io_stream",
         names: &["Connector"],
         mode: AwsImportMode::ClientOnly,
         protocols: ALL_PROTOCOLS,
     },
     AwsImport {
-        module: "komira_retry",
+        module: "retry",
         names: &["MonotonicClock", "RetryBudget", "RetryLoop", "RetryRng", "Sleeper"],
         mode: AwsImportMode::ClientOnly,
         protocols: ALL_PROTOCOLS,
@@ -2621,12 +2621,12 @@ mod tests {
                 .collect();
             assert_eq!(rows.len(), 1, "{p:?}: exactly one row imports JsonValue");
             let row = rows[0];
-            assert_eq!(row.module, "komira_json");
+            assert_eq!(row.module, "json");
             assert_eq!(row.names, &["JsonValue", "parse_json_bytes", "parse_json_value"]);
             assert_eq!(row.mode, AwsImportMode::Always);
             for pure_only in [true, false] {
                 assert!(
-                    aws_import_section(*p, pure_only).contains("from komira_json import ("),
+                    aws_import_section(*p, pure_only).contains("from json import ("),
                     "{p:?} pure_only={pure_only}"
                 );
             }
@@ -2641,7 +2641,7 @@ mod tests {
                 .into_iter()
                 .filter(|row| row.mode != AwsImportMode::ModelJson)
             {
-                assert_ne!(row.module, "komira_json", "{p:?}");
+                assert_ne!(row.module, "json", "{p:?}");
                 assert!(
                     !row.names.iter().any(|n| n.contains("json")),
                     "{p:?} imports a JSON codec name from {}: {:?}",
@@ -2650,7 +2650,7 @@ mod tests {
                 );
             }
             for pure_only in [true, false] {
-                assert!(!aws_import_section(*p, pure_only).contains("komira_json"), "{p:?}");
+                assert!(!aws_import_section(*p, pure_only).contains("json"), "{p:?}");
             }
         }
     }
@@ -2660,11 +2660,11 @@ mod tests {
         let p = AwsProtocol::RestXml;
         for pure_only in [true, false] {
             let s = aws_import_section(p, pure_only);
-            assert!(s.contains("from komira_xml import (\n    XmlNode,\n    XmlWriter,\n)"), "{s}");
+            assert!(s.contains("from xml import (\n    XmlNode,\n    XmlWriter,\n)"), "{s}");
             assert!(s.contains("    aws_xml_write_string,"), "{s}");
-            assert!(!s.contains("komira_json"), "{s}");
+            assert!(!s.contains("json"), "{s}");
             let m = aws_import_section_with(&[p], pure_only, false, true, false);
-            assert!(m.contains("from komira_json import JsonValue"), "{m}");
+            assert!(m.contains("from json import JsonValue"), "{m}");
             assert!(m.contains("    aws_json_f64,"), "{m}");
         }
         // A client reads restXml errors; a pure module only with the `s3`
@@ -3047,7 +3047,7 @@ mod tests {
     fn an_unset_idempotency_token_is_filled_once_per_call() {
         let token = r#"{"shape": "S", "idempotencyToken": true}"#;
         let src = emit_with_token(token, "", false).unwrap();
-        let import = "from komira_aws_core import aws_idempotency_token\n";
+        let import = "from aws_core import aws_idempotency_token\n";
         assert_eq!(src.matches(import).count(), 1, "{src}");
         // Both verbs fill it before building the request, and build from
         // the filled copy.

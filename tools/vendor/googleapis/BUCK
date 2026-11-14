@@ -21,7 +21,7 @@ pinned_file(
     size_bytes = _SIZE,
 )
 
-# Cloud Logging v2 (ListLogEntries, for the generated komira_gcp_logging): the
+# Cloud Logging v2 (ListLogEntries, for the generated gcp_logging): the
 # roots and their import closure, google/protobuf/* excepted (protoc's own).
 # :logging_v2 refuses this list unless it is exactly that closure, so a bump
 # that changes the imports fails the build until the list follows.
@@ -69,7 +69,7 @@ _STORAGE_V2_CLOSURE = _STORAGE_V2_ROOTS + [
 ]
 
 # Compute Engine v1 (the REST compute API, for the generated
-# komira_gcp_compute client): the root and its import closure,
+# gcp_compute client): the root and its import closure,
 # google/protobuf/* excepted. :compute_v1 refuses this list unless it is
 # exactly that closure, so a bump that changes the imports fails the build
 # until the list follows.
@@ -87,7 +87,7 @@ _COMPUTE_V1_CLOSURE = _COMPUTE_V1_ROOTS + [
     "google/cloud/extended_operations.proto",
 ]
 
-# Artifact Registry v1 (for the generated komira_gcp_artifactregistry
+# Artifact Registry v1 (for the generated gcp_artifactregistry
 # client): the root and its import closure, google/protobuf/* excepted, as
 # :compute_v1 above.
 _ARTIFACTREGISTRY_V1_ROOTS = [
@@ -122,7 +122,7 @@ _ARTIFACTREGISTRY_V1_CLOSURE = _ARTIFACTREGISTRY_V1_ROOTS + [
     "google/type/expr.proto",
 ]
 
-# API Gateway v1 (for the generated komira_gcp_apigateway client): the root
+# API Gateway v1 (for the generated gcp_apigateway client): the root
 # and its import closure, google/protobuf/* excepted, as :compute_v1 above.
 _APIGATEWAY_V1_ROOTS = [
     "google/cloud/apigateway/v1/apigateway_service.proto",
@@ -141,7 +141,7 @@ _APIGATEWAY_V1_CLOSURE = _APIGATEWAY_V1_ROOTS + [
 ]
 
 # Cloud Firestore v1 (the document methods over REST and Listen over gRPC,
-# for the generated komira_gcp_firestore clients): the root and its import
+# for the generated gcp_firestore clients): the root and its import
 # closure, google/protobuf/* excepted. :firestore_v1 refuses this list unless
 # it is exactly that closure, so a bump that changes the imports fails the
 # build until the list follows.
@@ -198,7 +198,7 @@ _API_CLIENT_CLOSURE = _API_CLIENT_ROOTS + [
 
 # IAM (the service accounts, custom roles and service-account IAM policies
 # of IAM v1, and the workload identity pool providers, for the generated
-# komira_gcp_iam): the roots and their import closure, google/protobuf/*
+# gcp_iam): the roots and their import closure, google/protobuf/*
 # excepted. :iam_admin_v1 refuses this list unless it is exactly that
 # closure. The workload identity pools are in the pin as v1beta only
 # (google/iam/v1beta); there is no google/iam/v1 file for them.
@@ -223,7 +223,7 @@ _IAM_ADMIN_V1_CLOSURE = _IAM_ADMIN_V1_ROOTS + [
 ]
 
 # Resource Manager v3 Projects (project reads and project IAM policies, for
-# the generated komira_gcp_cloudresourcemanager): the root and its import
+# the generated gcp_cloudresourcemanager): the root and its import
 # closure, google/protobuf/* excepted, checked as above.
 _RESOURCEMANAGER_V3_ROOTS = [
     "google/cloud/resourcemanager/v3/projects.proto",
@@ -245,7 +245,7 @@ _RESOURCEMANAGER_V3_CLOSURE = _RESOURCEMANAGER_V3_ROOTS + [
 ]
 
 # Service Usage v1 (enabling and reading a project's services, for the
-# generated komira_gcp_serviceusage): the root and its import closure,
+# generated gcp_serviceusage): the root and its import closure,
 # google/protobuf/* excepted, checked as above.
 _SERVICEUSAGE_V1_ROOTS = [
     "google/api/serviceusage/v1/serviceusage.proto",
@@ -272,7 +272,7 @@ _SERVICEUSAGE_V1_CLOSURE = _SERVICEUSAGE_V1_ROOTS + [
 ]
 
 # Cloud Run Admin v2 (services, revisions, jobs, executions, worker pools and
-# their long-running operations, for the generated komira_gcp_run): the roots and
+# their long-running operations, for the generated gcp_run): the roots and
 # their import closure, google/protobuf/* excepted. :run_v2 refuses this list
 # unless it is exactly that closure, so a bump that changes the imports fails
 # the build until the list follows.
@@ -313,11 +313,11 @@ _RUN_V2_CLOSURE = _RUN_V2_ROOTS + [
 # Cloud Run Admin v2's service configuration. Its `http.rules` bind the
 # google.longrunning.Operations mixin to Run's own paths
 # (`/v2/{name=projects/*/locations/*/operations/*}`), which no .proto
-# states; komira_gcp_run generates its operations client from them
+# states; gcp_run generates its operations client from them
 # (mojo_gcp_client's `service_config`).
 _RUN_V2_SERVICE_CONFIG = ["google/cloud/run/v2/run_v2.yaml"]
 
-# Cloud Scheduler v1 (jobs, for the generated komira_gcp_cloudscheduler): the
+# Cloud Scheduler v1 (jobs, for the generated gcp_cloudscheduler): the
 # root and its import closure, google/protobuf/* excepted. :cloudscheduler_v1
 # refuses this list unless it is exactly that closure.
 _CLOUDSCHEDULER_V1_ROOTS = [
@@ -337,7 +337,7 @@ _CLOUDSCHEDULER_V1_CLOSURE = _CLOUDSCHEDULER_V1_ROOTS + [
 ]
 
 # Secret Manager v1 (secrets and versions, for the generated
-# komira_gcp_secretmanager): the root and its import closure,
+# gcp_secretmanager): the root and its import closure,
 # google/protobuf/* excepted. :secretmanager_v1 refuses this list unless it
 # is exactly that closure.
 _SECRETMANAGER_V1_ROOTS = [
@@ -361,7 +361,7 @@ _SECRETMANAGER_V1_CLOSURE = _SECRETMANAGER_V1_ROOTS + [
 ]
 
 # Cloud Monitoring v3 MetricService (ListTimeSeries, for the generated
-# komira_gcp_monitoring_client; komira_gcp_monitoring's test_monitoring_protos
+# gcp_monitoring_client; gcp_monitoring's test_monitoring_protos
 # also checks its constants against these files): the root and its import
 # closure, google/protobuf/*
 # excepted. :monitoring_v3 refuses this list unless it is exactly that

@@ -1,0 +1,37 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The packed-row representation the engine's sinks and spill write through:
+# row blocks and their directory, row sort, the `RowOutput` / `RowSink`
+# contract, Arrow row conversion, xxh3 hashing, and the `cell_source` row
+# walker. It depends on the core packages and, for the float ordering model, udf.
+mojo_library(
+    name = "row_format",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/arrow:arrow",
+        "//src/byte_buffer:byte_buffer",
+        "//src/containers:containers",
+        "//src/counters:counters",
+        "//src/scan_source:scan_source",
+        "//src/simd_ops:simd_ops",
+        "//src/udf:udf",
+    ],
+    test_srcs = [
+        "tests/test_arrow_row.mojo",
+        "tests/test_arrow_row_composite.mojo",
+        "tests/test_cell_source.mojo",
+        "tests/test_row_block_fixed_dt_kernels.mojo",
+        "tests/test_row_block_incremental_regrow.mojo",
+        "tests/test_row_block_layout_guards.mojo",
+        "tests/test_row_block_nested.mojo",
+        "tests/test_row_block_var_offset_ceiling.mojo",
+        "tests/test_row_block_var_string_copy.mojo",
+        "tests/test_row_directory.mojo",
+        "tests/test_row_evaluator.mojo",
+        "tests/test_row_output.mojo",
+        "tests/test_row_sort_buffer_refuses_nulls.mojo",
+        "tests/test_row_sort_buffer_wire_in.mojo",
+        "tests/test_xxh3.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)

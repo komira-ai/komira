@@ -5,7 +5,7 @@ writes a packaging target and no list of packages lives in Buck. WHICH of them
 are published is not decided here: the release (release/artifacts.textproto) holds the reviewed list
 of artifact declarations, each naming a library's `[release]` sub-target.
 
-    mojo_library(name = "komira_json", ...)         # also declares :komira_json_conda
+    mojo_library(name = "json", ...)         # also declares :komira_json_conda
     mojo_library(name = "x", conda = False, ...)    # opts out: no package target
     mojo_library(name = "x", conda_name = "other")  # published as `other`; the
                                                     # import name is still `x`
@@ -14,7 +14,7 @@ of artifact declarations, each naming a library's `[release]` sub-target.
 
     conda_package(
         name = "komira_json_conda",
-        lib = ":komira_json",
+        lib = ":json",
         summary = "One line for the channel page.",
     )
 

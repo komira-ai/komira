@@ -4,7 +4,7 @@
 //! `agree` (the control, the same `lib` with the right list) analyses. Catches either direction of the
 //! check removed: a dependency the manifest has and the BUCK file lacks building green (the dependents of
 //! the label would then compile without it), and one the BUCK file adds that the manifest does not reach.
-//! The `native_*` cases hold `native_static`: an adopted library with `c_deps` (komira_metrics' `:lib`) and a dependent whose closure
+//! The `native_*` cases hold `native_static`: an adopted library with `c_deps` (metrics' `:lib`) and a dependent whose closure
 //! check (`native_refusal_test`) states no unshipped C is refused without `native_static = True` (the closure
 //! links the C and no library ships it) and analyses with it; the same library with the C stated as unshipped
 //! analyses, so the refusal is about the library's attribute and not about the check. Catches `native_static`
@@ -16,13 +16,13 @@ const ROWS = [_]lib.Row{
     .{
         .name = "missing",
         .target = "tests//negative/adopt_deps:adopted",
-        .text = "is built from komira_runtime_paths, which `deps` does not bring",
+        .text = "is built from runtime_paths, which `deps` does not bring",
         .cfg = &.{"adopt_deps.case=missing"},
     },
     .{
         .name = "extra",
         .target = "tests//negative/adopt_deps:adopted",
-        .text = "`deps` brings komira_json, which `lib` (komira//src/komira_resources:lib) is not built from",
+        .text = "`deps` brings json, which `lib` (komira//src/resources:lib) is not built from",
         .cfg = &.{"adopt_deps.case=extra"},
     },
     .{
@@ -40,7 +40,7 @@ fn body(c: *lib.Ctx) !void {
     const target = "tests//negative/adopt_deps:adopted";
     const res = try c.run(&.{ "audit", "providers", target }, .{ .cfg = &.{"adopt_deps.case=agree"} });
     if (res.ok()) {
-        c.pass("agree: {s} analyses with deps = [komira_runtime_paths]", .{target});
+        c.pass("agree: {s} analyses with deps = [runtime_paths]", .{target});
     } else {
         c.fail("agree: {s} was refused, but its deps are the closure of its lib (see {s})", .{ target, res.log });
     }

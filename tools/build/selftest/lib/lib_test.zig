@@ -136,10 +136,10 @@ test "a line, exactly" {
     try t.expect(!lib.parse.hasLine(" toolchains//:cxx_no_default_deps\n", "toolchains//:cxx_no_default_deps"));
 }
 
-// `buck2 log what-ran` after a warm build of //tools/build/package/oci:komira_oci.
+// `buck2 log what-ran` after a warm build of //tools/build/package/oci:oci.
 const WHATRAN_CACHE =
     "build\tkomira//tools/build/toolchains:zig (komira//tools/build/platforms:linux-x86_64#03cc1a891c89e4be) (zig_unpack)\tcache\tc74a55b0eb25f62e8f470a5d47bc44716bbfc4d87237e61d60c1ecd585bca9ad:141\n" ++
-    "build\tkomira//tools/build/package/oci:komira_oci (komira//tools/build/platforms:linux-x86_64#03cc1a891c89e4be) (zig_build_exe)\tre(pool=mojo-sized)\tc1f07a47:142\n";
+    "build\tkomira//tools/build/package/oci:oci (komira//tools/build/platforms:linux-x86_64#03cc1a891c89e4be) (zig_build_exe)\tre(pool=mojo-sized)\tc1f07a47:142\n";
 
 test "what-ran: farm runs and cache hits pass, a local action and an empty list do not" {
     const ok = lib.whatran.read(WHATRAN_CACHE);

@@ -1,6 +1,6 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
-# Test-only: komira_git's SHA-1 collision detection (komira_git/sha1dc.mojo, a
+# Test-only: git's SHA-1 collision detection (git/sha1dc.mojo, a
 # pure-Mojo port) against sha1collisiondetection's C, the library the port
 # follows, pinned in //third_party/sha1collisiondetection and linked into
 # these tests only (oracle.mojo holds the FFI). Nothing depends on this
@@ -19,12 +19,12 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #   test_recompression -- the disturbance-vector loop one DV at a time:
 #     for every DV, blocks whose ubc mask has it as the highest bit, and
 #     the recompressed message and starting chaining value of that DV
-#     (upstream's ctx->m2 and ctx->ihv2) against komira_git's, and the set
+#     (upstream's ctx->m2 and ctx->ihv2) against git's, and the set
 #     of DVs recompressed against upstream's mask (all 32 with the filter
 #     off); for every DV below 31, blocks where it is set below a higher
 #     DV, sampled from the blocks meeting DV 27 to 31's bit conditions.
 #
-# komira_git's oracles that need the pinned git (//third_party/git, built for
+# git's oracles that need the pinned git (//third_party/git, built for
 # linux-x86_64 only) are their own packages, so this one carries no platform
 # limit: the pack reader in komira_git_pack_conformance, the protocol state
 # machines in komira_git_protocol_conformance.
@@ -39,10 +39,10 @@ mojo_library(
     name = "komira_git_conformance",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
-        "//src/komira_crypto:komira_crypto",
-        "//src/komira_encoding:komira_encoding",
-        "//src/komira_git:komira_git",
-        "//src/komira_zlib:komira_zlib",
+        "//src/crypto:crypto",
+        "//src/encoding:encoding",
+        "//src/git:git",
+        "//src/zlib:zlib",
         "//third_party/sha1collisiondetection:sha1dc",
     ],
     conda = False,

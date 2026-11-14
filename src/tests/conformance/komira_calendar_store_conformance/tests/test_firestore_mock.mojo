@@ -1,6 +1,6 @@
 # =============================================================================
-# test_firestore_mock.mojo -- komira_calendar_store over
-#   komira_gcp_firestore_db's FirestoreDatabase and its in-process
+# test_firestore_mock.mojo -- calendar_store over
+#   gcp_firestore_db's FirestoreDatabase and its in-process
 #   MockFirestore.
 # =============================================================================
 #
@@ -20,18 +20,18 @@
 
 from std.testing import assert_equal, assert_true
 
-from komira_calendar_proto.calendar import Calendar
-from komira_gcp_firestore.firestore_client import FirestoreClient
-from komira_gcp_firestore_db import (
+from calendar_proto.calendar import Calendar
+from gcp_firestore.firestore_client import FirestoreClient
+from gcp_firestore_db import (
     DeclaredIndexSet,
     FirestoreDatabase,
     MockFirestore,
     MockFirestoreConnector,
     TableKeys,
 )
-from komira_proto_codec import decode_json
+from proto_codec import decode_json
 
-from komira_calendar_store import CALENDAR_DOCUMENT_INDEXES, CalendarStore
+from calendar_store import CALENDAR_DOCUMENT_INDEXES, CalendarStore
 from komira_calendar_store_conformance import CalendarTarget, Rt, new_rt, run_calendar_suite, zones
 
 comptime _FsDb = FirestoreDatabase[MockFirestoreConnector]
@@ -62,7 +62,7 @@ struct FirestoreMockCalendar(CalendarTarget):
         self._transport = Optional[MockFirestore]()
 
     def name(self) -> String:
-        return String("komira_calendar_store over komira_gcp_firestore_db (mock)")
+        return String("calendar_store over gcp_firestore_db (mock)")
 
     def fresh(mut self) raises -> _FsDb:
         self._transport = Optional[MockFirestore](MockFirestore())
@@ -100,5 +100,5 @@ def main() raises:
         run_calendar_suite(t)
     except e:
         failures += String(e)
-    assert_equal(failures, String(), "komira_calendar_store over komira_gcp_firestore_db (mock)")
-    print("PASS komira_calendar_store_conformance komira_gcp_firestore_db")
+    assert_equal(failures, String(), "calendar_store over gcp_firestore_db (mock)")
+    print("PASS komira_calendar_store_conformance gcp_firestore_db")

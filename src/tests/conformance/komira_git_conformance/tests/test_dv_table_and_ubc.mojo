@@ -1,5 +1,5 @@
 # =============================================================================
-# komira_git_conformance/tests/test_dv_table_and_ubc.mojo -- komira_git's
+# komira_git_conformance/tests/test_dv_table_and_ubc.mojo -- git's
 # disturbance-vector table and unavoidable-bit-condition check against
 # sha1collisiondetection's C.
 # =============================================================================
@@ -8,7 +8,7 @@
 #   * test_dv_table: a DV missing, out of order, or with a wrong type, K, b
 #     or recompression step; a DV whose mask bit is not its index; any of
 #     the 80 words of a DV's message difference that differs from upstream's
-#     table (komira_git keeps the first 16 and expands them with its own
+#     table (git keeps the first 16 and expands them with its own
 #     `_expand`, so this also checks that expansion).
 #     It also checks that `_ALL_DVS`, the mask sha1dc checks with the
 #     filter off, is the OR of every DV's upstream mask bit, so an edit to
@@ -28,8 +28,8 @@
 from std.pathlib import Path
 from std.testing import assert_equal, assert_true
 
-from komira_git.sha1dc import _expand
-from komira_git.sha1dc_ubc import _ALL_DVS, _DV_COUNT, _dv_field, _dv_word, _ubc_check
+from git.sha1dc import _expand
+from git.sha1dc_ubc import _ALL_DVS, _DV_COUNT, _dv_field, _dv_word, _ubc_check
 
 from komira_git_conformance import c_dv_count, c_dv_field, c_dv_word, c_ubc_check
 

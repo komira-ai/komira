@@ -5,25 +5,25 @@ are separate files so the farm runs them as separate actions."""
 from std.pathlib import Path
 from std.testing import assert_equal, assert_true
 
-from komira_arrow.arrow_types import ArrowType
-from komira_jsonl.value_parsers.parse_float import parse_float_f64
-from komira_arrow.schema import RecordBatch
-from komira_lowering.render import render_lowered_plan
-from komira_optimizer.optimizer_config import OptimizerConfig
-from komira_optimizer.optimizer_driver import optimize
-from komira_optimizer.optimizer_scalar_deps import ScalarDepTable
-from komira_plan_expr.scalar_value import ScalarValue
-from komira_runtime_paths import data_path
-from komira_scalar_arithmetic.decimal_arith import I128
-from komira_scalar_arithmetic.decimal_cast import decimal_to_float64
-from komira_sdk_exec.engine_catalog import register_parquet
-from komira_sdk_exec.engine_context import EngineContext
-from komira_sdk_exec.engine_lower import lower_for_context
-from komira_sdk_exec.engine_options import EngineOptions
-from komira_sdk_exec.engine_sql import SqlOutcome, run_sql
-from komira_sql.sql_binder import bind_statement
-from komira_sql.sql_parser import parse_sql
-from komira_sql.sql_token import TK_FLOAT, signed_decimal_f64, tokenize
+from arrow.arrow_types import ArrowType
+from jsonl.value_parsers.parse_float import parse_float_f64
+from arrow.schema import RecordBatch
+from lowering.render import render_lowered_plan
+from optimizer.optimizer_config import OptimizerConfig
+from optimizer.optimizer_driver import optimize
+from optimizer.optimizer_scalar_deps import ScalarDepTable
+from plan_expr.scalar_value import ScalarValue
+from runtime_paths import data_path
+from scalar_arithmetic.decimal_arith import I128
+from scalar_arithmetic.decimal_cast import decimal_to_float64
+from sdk_exec.engine_catalog import register_parquet
+from sdk_exec.engine_context import EngineContext
+from sdk_exec.engine_lower import lower_for_context
+from sdk_exec.engine_options import EngineOptions
+from sdk_exec.engine_sql import SqlOutcome, run_sql
+from sql.sql_binder import bind_statement
+from sql.sql_parser import parse_sql
+from sql.sql_token import TK_FLOAT, signed_decimal_f64, tokenize
 
 
 # The comparison operators, in the order compare_<col>.tsv lists them, with

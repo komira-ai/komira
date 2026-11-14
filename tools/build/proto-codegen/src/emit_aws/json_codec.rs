@@ -2,7 +2,7 @@
 //! botocore MODEL convention the conformance corpus states values in.
 //!
 //! Every method here writes one method of a generated shape struct. The
-//! JSON runtime is `komira_json` (`JsonValue`) and the scalar encoders are
+//! JSON runtime is `json` (`JsonValue`) and the scalar encoders are
 //! the core's `aws_json_*` names; both arrive through the
 //! [`super::AWS_IMPORTS`] rows scoped to [`super::JSON_BODY_PROTOCOLS`].
 

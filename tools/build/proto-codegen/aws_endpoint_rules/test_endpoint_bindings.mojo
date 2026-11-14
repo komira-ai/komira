@@ -27,7 +27,7 @@
 # The cases are read from the botocore archive //third_party/botocore pins,
 # staged at their path in it.
 
-from komira_json import (
+from json import (
     JSON_ARRAY,
     JSON_BOOL,
     JSON_NUMBER,
@@ -37,7 +37,7 @@ from komira_json import (
     parse_json_value,
 )
 
-from komira_aws_core import (
+from aws_core import (
     EndpointRuleSet,
     ResolvedEndpoint,
     aws_signing_target,
@@ -316,7 +316,7 @@ def _check_signing(
         # Every S3 endpoint states its auth schemes.
         var want = (
             "the endpoint must be signed with the auth scheme(s) " + offered
-            + ", and komira_aws_core signs sigv4 only"
+            + ", and aws_core signs sigv4 only"
         )
         try:
             _ = aws_signing_target(got, region, "s3")

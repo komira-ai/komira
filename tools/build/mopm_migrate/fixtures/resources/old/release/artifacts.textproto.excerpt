@@ -1,0 +1,11 @@
+
+artifacts {
+  name: "resources"
+  build_system: "buck2"
+  args: "//src/resources:komira_resources_conda[release]"
+  args: "--out"
+  args: "{out_dir}"
+  targets: "//src/resources:komira_resources_conda"
+}
+
+artifacts {

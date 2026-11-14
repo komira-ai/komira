@@ -1,0 +1,5 @@
+# What the coverage census measured of this package's libraries (tools/build/coverage/census.md).
+census	2026-10-10	27a2541169cb979fa9c82a032eea24919b727121	-
+komira//src/gcp_firestore:gcp_firestore	src/gcp_firestore	library	OK	1829	1950	-	-	no	conda	-	-
+komira//src/gcp_firestore:komira_gcp_firestore_listen	src/gcp_firestore	library	OK	0	0	-	-	no	conda	-	-
+komira//src/gcp_firestore:komira_gcp_firestore_v1	src/gcp_firestore	library	OK	0	0	-	-	no	conda	-	-

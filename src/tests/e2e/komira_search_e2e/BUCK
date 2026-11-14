@@ -2,9 +2,9 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
 # A test-only package: a search index published to the real local filesystem
 # and read back cold. Three splits of a small corpus (ASCII and non-ASCII
-# terms) are serialized with komira_search, written as objects into a
+# terms) are serialized with search, written as objects into a
 # LocalFsConditionalStore rooted in the run's TEST_TMPDIR, and published
-# through komira_search_catalog's SearchMetastore. The sources are the shared
+# through search_catalog's SearchMetastore. The sources are the shared
 # fixture (the corpus, a SearchIndexCatalog over the metastore, and the row
 # readers); the tests are the point. Nothing ships, so `conda = False`.
 #
@@ -22,7 +22,7 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #     contention with nothing visible; a cold handle then lists exactly the
 #     three splits, the generation went 0, 1, 2, 3 and the durable head never
 #     moved backwards. (Each loss is the store's existence-probe 412; the
-#     O_EXCL branch of a truly simultaneous create is komira_objectstore's.)
+#     O_EXCL branch of a truly simultaneous create is objectstore's.)
 #   test_search_e2e_scan_equals_core -- the `komira.search.index` scan,
 #     drained over the published splits, returns exactly the documents a
 #     hand-written table names, the same rows as SearchCore run on the
@@ -41,7 +41,7 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #
 #   test_search_http_front_door -- the search shim's front door over a real
 #     loopback socket: a SearchHttpDispatcher over a LocalFsConditionalStore
-#     behind a komira_http_server HttpServer on port 0, driven with raw
+#     behind a http_server HttpServer on port 0, driven with raw
 #     HTTP/1.1 (http_wire.mojo). A five-document `_bulk` then a `_search`
 #     return the hits in the order [1, 0, 2, 3] with BM25 scores re-derived by
 #     hand (within 1e-9), `_source` byte for byte, total 4 `eq` and `_shards`;
@@ -54,71 +54,71 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #     the good documents are searchable.
 #
 # `deps` lists the Mojo packages of the full transitive closure of
-# komira_search, komira_search_catalog, komira_search_scan, komira_objectstore,
-# komira_search_http and komira_http_tls_e2e (the loopback server and client
+# search, search_catalog, search_scan, objectstore,
+# search_http and komira_http_tls_e2e (the loopback server and client
 # runner; each package's C helper libraries come with it), plus
-# komira_runtime_paths for `test_tmpdir()`.
+# runtime_paths for `test_tmpdir()`.
 mojo_library(
     name = "komira_search_e2e",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     conda = False,
     deps = [
-        "//src/komira_arrow:komira_arrow",
-        "//src/komira_arrow_ipc:komira_arrow_ipc",
-        "//src/komira_async:komira_async",
-        "//src/komira_async_api:komira_async_api",
-        "//src/komira_atomic_alias:komira_atomic_alias",
-        "//src/komira_buffer:komira_buffer",
-        "//src/komira_clock:komira_clock",
-        "//src/komira_collections:komira_collections",
-        "//src/komira_column_kernels:komira_column_kernels",
-        "//src/komira_compression:komira_compression",
-        "//src/komira_counters:komira_counters",
-        "//src/komira_crypto:komira_crypto",
-        "//src/komira_dynamic_filter:komira_dynamic_filter",
-        "//src/komira_encoding:komira_encoding",
-        "//src/komira_fork_join:komira_fork_join",
-        "//src/komira_fs:komira_fs",
-        "//src/komira_fs:komira_fs_posix",
-        "//src/komira_hash:komira_hash",
-        "//src/komira_host:komira_host",
-        "//src/komira_http_client:komira_http_client",
-        "//src/komira_http_core:komira_http_core",
-        "//src/komira_http_server:komira_http_server",
-        "//src/komira_join_assembly:komira_join_assembly",
-        "//src/komira_json:komira_json",
-        "//src/komira_libc:komira_libc",
-        "//src/komira_log:komira_log",
-        "//src/komira_log_index:komira_log_index",
-        "//src/komira_log_query:komira_log_query",
-        "//src/komira_lz4:komira_lz4",
-        "//src/komira_metrics:komira_metrics",
-        "//src/komira_name_registry:komira_name_registry",
-        "//src/komira_net:komira_net",
-        "//src/komira_objectstore:komira_objectstore",
-        "//src/komira_parquet:komira_parquet",
-        "//src/komira_parquet_api:komira_parquet_api",
-        "//src/komira_parquet_codec:komira_parquet_codec",
-        "//src/komira_parquet_writer:komira_parquet_writer",
-        "//src/komira_plan_expr:komira_plan_expr",
-        "//src/komira_plan_ir:komira_plan_ir",
-        "//src/komira_plan_stats:komira_plan_stats",
-        "//src/komira_scalar_arithmetic:komira_scalar_arithmetic",
-        "//src/komira_scan_resolver:komira_scan_resolver",
-        "//src/komira_scan_source:komira_scan_source",
-        "//src/komira_search:komira_search",
-        "//src/komira_search_catalog:komira_search_catalog",
-        "//src/komira_search_http:komira_search_http",
-        "//src/komira_search_scan:komira_search_scan",
-        "//src/komira_simd:komira_simd",
-        "//src/komira_spsc_ring:komira_spsc_ring",
-        "//src/komira_telemetry_read:komira_telemetry_read",
-        "//src/komira_telemetry_store:komira_telemetry_store",
-        "//src/komira_trace:komira_trace",
-        "//src/komira_uuid:komira_uuid",
-        "//src/komira_zlib:komira_zlib",
+        "//src/arrow:arrow",
+        "//src/arrow_ipc:arrow_ipc",
+        "//src/async_rt:async_rt",
+        "//src/async_api:async_api",
+        "//src/atomic_alias:atomic_alias",
+        "//src/byte_buffer:byte_buffer",
+        "//src/clock:clock",
+        "//src/containers:containers",
+        "//src/column_kernels:column_kernels",
+        "//src/compression:compression",
+        "//src/counters:counters",
+        "//src/crypto:crypto",
+        "//src/dynamic_filter:dynamic_filter",
+        "//src/encoding:encoding",
+        "//src/fork_join:fork_join",
+        "//src/fs:fs",
+        "//src/fs:komira_fs_posix",
+        "//src/hashing:hashing",
+        "//src/host_probe:host_probe",
+        "//src/http_client:http_client",
+        "//src/http_core:http_core",
+        "//src/http_server:http_server",
+        "//src/join_assembly:join_assembly",
+        "//src/json:json",
+        "//src/libc:libc",
+        "//src/log:log",
+        "//src/log_index:log_index",
+        "//src/log_query:log_query",
+        "//src/lz4:lz4",
+        "//src/metrics:metrics",
+        "//src/name_registry:name_registry",
+        "//src/net:net",
+        "//src/objectstore:objectstore",
+        "//src/parquet:parquet",
+        "//src/parquet_api:parquet_api",
+        "//src/parquet_codec:parquet_codec",
+        "//src/parquet_writer:parquet_writer",
+        "//src/plan_expr:plan_expr",
+        "//src/plan_ir:plan_ir",
+        "//src/plan_stats:plan_stats",
+        "//src/scalar_arithmetic:scalar_arithmetic",
+        "//src/scan_resolver:scan_resolver",
+        "//src/scan_source:scan_source",
+        "//src/search:search",
+        "//src/search_catalog:search_catalog",
+        "//src/search_http:search_http",
+        "//src/search_scan:search_scan",
+        "//src/simd_ops:simd_ops",
+        "//src/spsc_ring:spsc_ring",
+        "//src/telemetry_read:telemetry_read",
+        "//src/telemetry_store:telemetry_store",
+        "//src/trace:trace",
+        "//src/uuid:uuid",
+        "//src/zlib:zlib",
         "//src/tests/e2e/komira_http_tls_e2e:komira_http_tls_e2e",
-        "//tools/build/mojo/runtime_paths:komira_runtime_paths",
+        "//tools/build/mojo/runtime_paths:runtime_paths",
     ],
     test_srcs = [
         "tests/test_search_e2e_catalog_generation.mojo",

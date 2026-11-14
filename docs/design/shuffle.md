@@ -2,7 +2,7 @@
 
 ## What is it for, and what is out of scope?
 
-`komira_shuffle` (`src/komira_shuffle`) moves rows from a set of map-side producers to a variable number of reduce-side workers through a bucket, with no server between them. A producer writes its output once, durably; a seal says the map phase is complete; reducers pull partitions by claiming them, so the partitions are processed exactly once however many reducers run. It builds on `komira_objectstore` (the CAS manifest, the conditional-write stores and `Path`); that package does not depend on this one.
+`shuffle` (`src/shuffle`) moves rows from a set of map-side producers to a variable number of reduce-side workers through a bucket, with no server between them. A producer writes its output once, durably; a seal says the map phase is complete; reducers pull partitions by claiming them, so the partitions are processed exactly once however many reducers run. It builds on `objectstore` (the CAS manifest, the conditional-write stores and `Path`); that package does not depend on this one.
 
 Out of scope:
 
@@ -31,17 +31,17 @@ The shuffle moves rows from producers to reducers through a bucket, with keys un
 
 | Path | Holds | Key names |
 |---|---|---|
-| `src/komira_shuffle/sink.mojo`, `partitioner.mojo`, `radix.mojo`, `segment.mojo` | the map side | `sink_shuffle_write`, `HashPartitioner`, `radix_partition`, `SegWriter` |
-| `src/komira_shuffle/entry.mojo`, `seal.mojo`, `seal_driver.mojo` | the manifest entry and the seal | `ShuffleEntry`, `StepComplete`, `seal_step`, `read_seal` |
-| `src/komira_shuffle/claim.mojo`, `source.mojo` | the reduce side | `claim_partition`, `read_shuffle_partition` |
-| `src/komira_shuffle/retention.mojo` | the reaper | `reclaim_floor`, `reap_epoch`, `reap_epochs_below` |
-| `src/komira_shuffle/codec.mojo` | little-endian encoders | `put_i64_le`, `get_i64_le` |
+| `src/shuffle/sink.mojo`, `partitioner.mojo`, `radix.mojo`, `segment.mojo` | the map side | `sink_shuffle_write`, `HashPartitioner`, `radix_partition`, `SegWriter` |
+| `src/shuffle/entry.mojo`, `seal.mojo`, `seal_driver.mojo` | the manifest entry and the seal | `ShuffleEntry`, `StepComplete`, `seal_step`, `read_seal` |
+| `src/shuffle/claim.mojo`, `source.mojo` | the reduce side | `claim_partition`, `read_shuffle_partition` |
+| `src/shuffle/retention.mojo` | the reaper | `reclaim_floor`, `reap_epoch`, `reap_epochs_below` |
+| `src/shuffle/codec.mojo` | little-endian encoders | `put_i64_le`, `get_i64_le` |
 
 - **Execution starts at:** `sink_shuffle_write` for a producer, `seal_step` at the driver join, `read_shuffle_partition` for a reducer.
 
 ## How is it tested?
 
-The library welds its 5 files in `src/komira_shuffle/tests/` through `test_srcs`, so building it runs them. Run: `./buck2 build //src/komira_shuffle:komira_shuffle`.
+The library welds its 5 files in `src/shuffle/tests/` through `test_srcs`, so building it runs them. Run: `./buck2 build //src/shuffle:shuffle`.
 
 | Test | Covers |
 |---|---|

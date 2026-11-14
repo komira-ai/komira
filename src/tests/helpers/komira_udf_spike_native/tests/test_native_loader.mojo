@@ -16,7 +16,7 @@
 #     checked; a compare of part of the digest, at load or in the lookup of
 #     an open library; a refusal remembered, so a good copy is refused too).
 #   - SHA-256 known answers: files of 0, 1, 55, 56, 63, 64, 65, 119, 120,
-#     127 and 128 bytes, each staged under its sha256 from komira_crypto, are
+#     127 and 128 bytes, each staged under its sha256 from crypto, are
 #     refused for failing dlopen (ERR_LOAD), never for their digest (the
 #     runtime's own SHA-256 wrong at a padding boundary, where a refused
 #     good library would otherwise go unseen).

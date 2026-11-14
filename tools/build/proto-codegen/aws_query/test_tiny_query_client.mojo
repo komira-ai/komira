@@ -1,11 +1,11 @@
 # The generated awsQuery client (`TinyQueryClient`) end to end over
-# komira_http_client and komira_http_core's ScriptedConnector (no socket): a
+# http_client and http_core's ScriptedConnector (no socket): a
 # SendThing answered with its <SendThingResult>, and one answered with an
 # <ErrorResponse>, raised under the error's code and message (a 400 naming
 # no code botocore retries, so nothing is retried).
 #
 # Then the Ping request as it reached the wire: the client is given
-# komira_aws_core's AwsEchoConnector, whose answer is an XML error naming the
+# aws_core's AwsEchoConnector, whose answer is an XML error naming the
 # request head, so the row asserts the request line, the Host, the form
 # Content-Type and the SigV4 scope, through the generated client.
 #
@@ -22,7 +22,7 @@ from komira_aws_tiny_query_client.komira_aws_tiny_query_client import (
     TinyQuerySendThingRequest,
     TinyQueryClient,
 )
-from komira_aws_core import (
+from aws_core import (
     AWS_ECHO_CODE,
     AwsCredential,
     AwsCredsSource,
@@ -30,9 +30,9 @@ from komira_aws_core import (
     AwsEndpoint,
     StaticCredsSource,
 )
-from komira_http_client.client import HttpClientConfig
-from komira_http_core.transport.io_stream import Connector
-from komira_http_core.transport.scripted import ScriptedConnector, ScriptedStream
+from http_client.client import HttpClientConfig
+from http_core.transport.io_stream import Connector
+from http_core.transport.scripted import ScriptedConnector, ScriptedStream
 from std.testing import assert_equal, assert_raises, assert_true
 
 

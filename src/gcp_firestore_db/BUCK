@@ -1,0 +1,56 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# gcp_firestore_db: the db `Database` conformer over Google Cloud
+# Firestore, and an in-process Firestore double for tests.
+#
+#   - firestore_database: `FirestoreDatabase[C, S]`, the neutral `Database`
+#     operations (get, insert, conditional update, query, delete, the
+#     create-if-absent and updateTime CAS) on gcp_firestore's document
+#     client, which is the generated Firestore client underneath.
+#     `begin`/`commit`/`rollback` journal the creates of a transaction and
+#     roll back by deleting them: each write is its own one-write Commit.
+#   - firestore_index_guard: every structured query is checked against the
+#     composite indexes the caller declared for the database (the
+#     `DeclaredIndexSet` passed to `FirestoreDatabase`), and a shape that
+#     needs an undeclared one is refused before it is sent (Firestore would
+#     answer FAILED_PRECONDITION).
+#   - mock_firestore: `MockFirestore`, a stateful in-memory Firestore that
+#     answers the client's BatchGetDocuments, Commit and RunQuery at the HTTP
+#     boundary (a gcp_firestore `HttpExchange` behind an
+#     `ExchangeConnector`), reading each request with the generated messages,
+#     so a `FirestoreDatabase` runs the real generated client in a test with
+#     no network.
+#
+# Every test runs on MockFirestore: no network, no credentials, no emulator.
+mojo_library(
+    name = "gcp_firestore_db",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/async_rt:async_rt",
+        "//src/clock:clock",
+        "//src/db:db",
+        "//src/encoding:encoding",
+        "//src/gcp_core:gcp_core",
+        "//src/gcp_firestore:gcp_firestore",
+        "//src/gcp_firestore:komira_gcp_firestore_v1",
+        "//src/http_core:http_core",
+        "//src/proto_codec:proto_codec",
+        "//src/wkt:wkt",
+    ],
+    test_srcs = [
+        "tests/test_firestore_conditional_update_multirow.mojo",
+        "tests/test_firestore_database_standalone.mojo",
+        "tests/test_firestore_db_batch_cap_delete.mojo",
+        "tests/test_firestore_db_batch_cap_update.mojo",
+        "tests/test_firestore_db_claim.mojo",
+        "tests/test_firestore_db_doc_id_escape.mojo",
+        "tests/test_firestore_db_encoding.mojo",
+        "tests/test_firestore_db_non_ascii_doc_id.mojo",
+        "tests/test_firestore_db_query.mojo",
+        "tests/test_firestore_db_tx.mojo",
+        "tests/test_firestore_index_guard.mojo",
+        "tests/test_firestore_index_guard_shapes.mojo",
+        "tests/test_mock_firestore.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)

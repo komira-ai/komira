@@ -15,7 +15,7 @@ tools/build/proto-codegen (see docs/design/generated_sources.md). Each file's
 first lines name its generator and, where the generator pins them, the
 sha256 of each input. Not every generated library derives from third-party
 input: those generated from komira's own `.proto` files and models (for
-example komira_plan_proto, and records_db in komira_db_sqlite) are komira's
+example plan_proto, and records_db in db_sqlite) are komira's
 own text. The inputs
 themselves are not committed here; the archives are pinned by sha256 and
 fetched at build time.

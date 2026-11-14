@@ -1,0 +1,33 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The resolve seam over AWS Secrets Manager: `AwsSecretsManagerStore`, a
+# secret_store `SecretStore` (GetSecretValue) over the generated
+# aws_secretsmanager `SecretsManagerClient` it is given, and the
+# handle grammar (`parse_aws_secret_ref`). Hand-written; it reads no
+# environment. It has no write verb, so a resolve-only closure
+# holds no writer.
+#
+# The welded test, test_aws_secret_store, sends over http_core's
+# ScriptedConnector or a connector factory that raises if dialled: the
+# handle grammar (a name's character set and length, a full ARN's shape,
+# the selectors' sets) and its refusals, never quoting the handle; a resolve
+# of a SecretString, of a SecretBinary and of an answer with neither; an
+# error answer raised naming the handle without the body's canary value;
+# and a handle outside the grammar refused before anything is sent.
+#
+# No test here talks to the service.
+mojo_library(
+    name = "aws_secret_store",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/aws_core:aws_core",
+        "//src/aws_secretsmanager:aws_secretsmanager",
+        "//src/crypto:crypto",
+        # For the test's HttpClientConfig; the library imports nothing of it.
+        "//src/http_client:http_client",
+        "//src/http_core:http_core",
+        "//src/secret_store:secret_store",
+    ],
+    test_srcs = ["tests/test_aws_secret_store.mojo"],
+    visibility = ["PUBLIC"],
+)

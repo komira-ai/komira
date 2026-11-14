@@ -45,7 +45,7 @@
 # it asks.
 # =============================================================================
 
-from komira_json import JsonValue
+from json import JsonValue
 
 from komira_test_pdp.reasons import (
     REASON_AUDIENCE_MISMATCH,

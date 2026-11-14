@@ -41,7 +41,7 @@ file of another package (a directory below with its own BUCK file), a file
 another entry names, or a name another entry has.
 """
 
-from komira_json import JsonValue, parse_json_value
+from json import JsonValue, parse_json_value
 
 from covcheck.manifest import STMT_ARRAY_TABLE, STMT_KEYVAL, STMT_TABLE, toml_statements, where
 from covcheck.paths import RepoFiles, package_of

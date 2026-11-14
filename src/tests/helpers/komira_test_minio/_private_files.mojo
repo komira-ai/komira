@@ -20,7 +20,7 @@ from std.os import listdir, mkdir, remove, rmdir
 from std.os.path import isdir, islink, lexists
 
 from ._sys import _chmod
-from komira_crypto import hex_lower_array_32, sha256
+from crypto import hex_lower_array_32, sha256
 
 
 def _make_private_dir(path: String, what: String) raises:

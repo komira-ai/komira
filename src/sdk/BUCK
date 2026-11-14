@@ -1,0 +1,72 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The plan-building half of the Mojo SDK, first part: aggregate output naming,
+# the derived row schema, statement-scoped CTE bindings, Parquet read options,
+# the plan validator, table display, select/with_columns aggregate lowering,
+# the filter refusals, join helpers, the row UDF chains and the alias, concat,
+# drop_nulls, rename and with_columns plan builders; and the plan-time Parquet
+# footer reads (row count and Arrow schema, through parquet).
+#
+# deps is the full transitive closure, the deps of udf (row_udf_chain's
+# row UDF types) included; op_agg_state and what it needs
+# (agg, expr, hashing, kernels) are there for the
+# welded test_display_stats only, which tests its statistical accumulators.
+# runtime_paths is likewise for tests only (the scratch directory).
+mojo_library(
+    name = "sdk",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/agg:agg",
+        "//src/arrow:arrow",
+        "//src/arrow_ipc:arrow_ipc",
+        "//src/async_rt:async_rt",
+        "//src/async_api:async_api",
+        "//src/atomic_alias:atomic_alias",
+        "//src/byte_buffer:byte_buffer",
+        "//src/containers:containers",
+        "//src/compression:compression",
+        "//src/counters:counters",
+        "//src/dynamic_filter:dynamic_filter",
+        "//src/expr:expr",
+        "//src/fs:fs",
+        "//src/hashing:hashing",
+        "//src/host_probe:host_probe",
+        "//src/kernels:kernels",
+        "//src/libc:libc",
+        "//src/lz4:lz4",
+        "//src/op_agg_state:op_agg_state",
+        "//src/parquet:parquet",
+        "//src/parquet_api:parquet_api",
+        "//src/parquet_codec:parquet_codec",
+        "//src/plan_expr:plan_expr",
+        "//src/plan_ir:plan_ir",
+        "//src/plan_stats:plan_stats",
+        "//src/scalar_arithmetic:scalar_arithmetic",
+        "//src/scan_source:scan_source",
+        "//src/simd_ops:simd_ops",
+        "//src/sync:sync",
+        "//src/udf:udf",
+        "//src/zlib:zlib",
+        "//tools/build/mojo/runtime_paths:runtime_paths",
+    ],
+    test_srcs = [
+        "tests/test_agg_output_naming_direct.mojo",
+        "tests/test_auto_schema.mojo",
+        "tests/test_auto_schema_direct.mojo",
+        "tests/test_cte_binding_direct.mojo",
+        "tests/test_dataframe_builders_direct.mojo",
+        "tests/test_display_stats.mojo",
+        "tests/test_display_width_non_ascii.mojo",
+        "tests/test_filter_refusal_direct.mojo",
+        "tests/test_parquet_footer_handbuilt.mojo",
+        "tests/test_parquet_read_options_direct.mojo",
+        "tests/test_plan_validator_exprs.mojo",
+        "tests/test_plan_validator_nodes.mojo",
+        "tests/test_row_udf_chain_direct.mojo",
+        "tests/test_sdk_exchange_refusals.mojo",
+        "tests/test_select_aggregates_plans.mojo",
+        "tests/test_select_aggregates_shapes.mojo",
+        "tests/test_table_display_direct.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)

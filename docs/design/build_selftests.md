@@ -448,10 +448,10 @@ filters them. The one change to `build_targets.sh` is for the graph checks, not 
   `tools_build`. A derived check names its group's pattern, and `tools_build`'s is `//tools/build/...`,
   which still matches `//tools/build/selftest/...`; kci builds and tests a unit by its patterns
   (`build_targets.sh`), so a change that reaches `tools_build` runs the scenarios there too. Slice 3's
-  `--plan` of a change to `src/komira_json` lists `tools_build` and not `build_selftests`. The
+  `--plan` of a change to `src/json` lists `tools_build` and not `build_selftests`. The
   package has to leave `tools_build`. `tools_build` is reached through reverse dependencies by changes far outside
   `tools/build`: targets under `tools/build` depend on libraries under `src/` (`tools/build/coverage`
-  on `komira_json`, `tools/build/examples/shared_lib_mid` on seven libraries; `git grep '"//src/'
+  on `json`, `tools/build/examples/shared_lib_mid` on seven libraries; `git grep '"//src/'
   -- 'tools/build/**/BUCK'` lists them). In `tools_build`, a change to one of those libraries would run
   every scenario.
 - **Only a widened change reaches `build_selftests`.** `//tools/build/ci:affected` maps each changed
@@ -714,7 +714,7 @@ after the slice of its last callee. Slice 11 deletes `run_tests.sh` last.
    - Add the two Rust unit tests (`omit_pruned_field`, `unknown_operation`) and the window-pin check.
    - Deleted: the spsc_ring falsifier scripts and their fixtures, `negative/spsc_ring_element.sh`,
      `negative/spsc_ring_prefix_layout.sh` and `negative/spsc_ring_prefix_layout/` (two `.mojo`
-     files). Nothing calls them. The regression tests they falsified stay in `komira_spsc_ring`
+     files). Nothing calls them. The regression tests they falsified stay in `spsc_ring`
      (`test_consumer_polling_before_the_slot_store_exists`, `test_layout_guards`). What goes is the
      script that showed the first one can fail, by a race seen in at least one of 30 runs.
 3. **Helper lib, the scenario rule and the analysis-only scenarios.**

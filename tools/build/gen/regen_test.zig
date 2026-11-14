@@ -119,11 +119,11 @@ test "patternOf: all, a package, and a library label become the patterns the que
     defer arena.deinit();
     const a = arena.allocator();
     try t.expectEqualStrings("komira//...", try R.patternOf(a, "all"));
-    try t.expectEqualStrings("komira//src/komira_gcp_firestore:", try R.patternOf(a, "komira//src/komira_gcp_firestore:"));
-    try t.expectEqualStrings("komira//src/komira_aws_sqs:komira_aws_sqs_fresh", try R.patternOf(a, "komira//src/komira_aws_sqs:komira_aws_sqs"));
+    try t.expectEqualStrings("komira//src/gcp_firestore:", try R.patternOf(a, "komira//src/gcp_firestore:"));
+    try t.expectEqualStrings("komira//src/aws_sqs:komira_aws_sqs_fresh", try R.patternOf(a, "komira//src/aws_sqs:aws_sqs"));
     try t.expectEqualStrings("tests//functional/x:y_fresh", try R.patternOf(a, "tests//functional/x:y"));
-    try t.expectError(error.NotALabel, R.patternOf(a, "komira_aws_sqs"));
-    try t.expectError(error.NotALabel, R.patternOf(a, "src/komira_aws_sqs"));
+    try t.expectError(error.NotALabel, R.patternOf(a, "aws_sqs"));
+    try t.expectError(error.NotALabel, R.patternOf(a, "src/aws_sqs"));
 }
 
 test "parseJobs: each fresh target's committed directory is under its package, in label order" {

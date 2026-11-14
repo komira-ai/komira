@@ -1,0 +1,36 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The INNER join and aggregation kernels that fuse a probe with its output:
+# the parallel single-INT64-key probes of a chained or perfect-hash join over
+# the engine's dispatcher; the single-pass fused join that writes output rows
+# during the chain walk (all columns, or a projection); the chunked join that
+# probes into chunks of index pairs and gathers per column; which inputs
+# those two can carry; and a FlatHashAggregator's groups as a RecordBatch.
+mojo_library(
+    name = "op_fused_kernels",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/arrow:arrow",
+        "//src/async_rt:async_rt",
+        "//src/async_api:async_api",
+        "//src/atomic_alias:atomic_alias",
+        "//src/byte_buffer:byte_buffer",
+        "//src/containers:containers",
+        "//src/column_kernels:column_kernels",
+        "//src/engine_runtime:engine_runtime",
+        "//src/join_assembly:join_assembly",
+        "//src/op_agg_hash:op_agg_hash",
+        "//src/op_join_build:op_join_build",
+        "//src/plan_expr:plan_expr",
+        "//src/plan_ir:plan_ir",
+    ],
+    test_srcs = [
+        "tests/test_flat_agg_output.mojo",
+        "tests/test_grow_fixed_width_buffers.mojo",
+        "tests/test_join_chunked_gather.mojo",
+        "tests/test_join_fused_gather.mojo",
+        "tests/test_join_fused_route.mojo",
+        "tests/test_parallel_inner_probe.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)

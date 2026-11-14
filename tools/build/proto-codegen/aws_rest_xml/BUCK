@@ -3,7 +3,7 @@ load(":model.bzl", "TINY_REST_XML")
 
 # A restXml client of a tiny S3-shaped model (serviceId S3, signature
 # version `s3`), generated in pure mode with the `s3` customization and
-# compiled against the real komira_aws_core and komira_xml: a label after a
+# compiled against the real aws_core and xml: a label after a
 # literal query, a header, the input's root element in its namespace, a
 # wrapped list with renamed items, a flattened list of structures, a
 # structure payload, blob (streaming and not) and string output payloads,
@@ -41,7 +41,7 @@ mojo_aws_client(
     test_srcs = ["test_tiny_rest_xml.mojo"],
     visibility = ["PUBLIC"],
     deps = [
-        "//src/komira_aws_core:komira_aws_core",
-        "//src/komira_xml:komira_xml",
+        "//src/aws_core:aws_core",
+        "//src/xml:xml",
     ],
 )

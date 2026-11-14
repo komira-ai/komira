@@ -163,9 +163,9 @@ pub struct Scope {
     /// Fields left out of their message, each named by its fully-qualified
     /// proto name (`pkg.Message.field`, a leading `.` optional): for a field
     /// the client's callers do not read and whose type the runtime cannot
-    /// represent (one reaching a `google.protobuf.Api`, which `komira_wkt`
+    /// represent (one reaching a `google.protobuf.Api`, which `wkt`
     /// does not provide, or a `map<string, int64>`, which
-    /// `komira_proto_codec` does not decode). The generated message has no
+    /// `proto_codec` does not decode). The generated message has no
     /// such member, so a response's value for it is skipped as an unknown
     /// key (a lenient JSON read skips one; a binary read skips an unknown
     /// field number), a request never sends it, and its type is reached
@@ -190,7 +190,7 @@ impl Scope {
 /// [`lower_with_http_and_routing_rules`], then restricted to `scope`.
 ///
 /// When `scope` prunes, a type reachable from it must be declared in a file
-/// of `file_to_generate` (or be a well-known type of `komira_wkt`), and every
+/// of `file_to_generate` (or be a well-known type of `wkt`), and every
 /// file of `file_to_generate` must keep at least one type or service: the
 /// set of generated files is then exactly the closure, so a rule's
 /// `bundle_only` cannot carry a file nothing uses.
@@ -649,13 +649,13 @@ impl Lowerer {
     }
 
     /// Build the `IrImport` for a cross-file type. A well-known type
-    /// (`.google.protobuf.*`) imports from the `komira_wkt` runtime
+    /// (`.google.protobuf.*`) imports from the `wkt` runtime
     /// package; any other imported type imports from the sibling generated
     /// module `<mojo_package>.<stem-of-the-declaring-proto>`.
     fn import_for(&self, fq_name: &str, nt: &NamedType) -> IrImport {
         if let Some(symbol) = wkt_symbol(fq_name) {
             return IrImport {
-                module: "komira_wkt".to_string(),
+                module: "wkt".to_string(),
                 symbol: symbol.to_string(),
             };
         }

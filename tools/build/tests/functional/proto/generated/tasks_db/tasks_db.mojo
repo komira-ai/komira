@@ -5,11 +5,11 @@
 # proto package: example.tasks.v1
 # Mojo package:  tasks_db
 #
-# Generated structs conform to komira_db.DbStorable:
+# Generated structs conform to db.DbStorable:
 # column_names / column_types / to_row / from_row /
 # insert_sql / create_table_ddl. Backend-neutral logical types.
 
-from komira_db import (
+from db import (
     DbStorable,
     SqlDatabase,
     DbValue,

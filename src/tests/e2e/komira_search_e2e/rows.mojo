@@ -10,17 +10,17 @@
 # source bytes, in the same order.
 # =============================================================================
 
-from komira_arrow.record_batch import RecordBatch
-from komira_scan_source.scan_binding import ScanBinding
-from komira_scan_source.scan_params import ScanParams
-from komira_scan_source.scan_resolver import resolve_for_execution
+from arrow.record_batch import RecordBatch
+from scan_source.scan_binding import ScanBinding
+from scan_source.scan_params import ScanParams
+from scan_source.scan_resolver import resolve_for_execution
 
-from komira_scan_resolver.drain_scan import drain_scan
-from komira_scan_resolver.scan_source_resolver import ScanRequest
+from scan_resolver.drain_scan import drain_scan
+from scan_resolver.scan_source_resolver import ScanRequest
 
-from komira_search.source import QueryIR, SearchCore
+from search.source import QueryIR, SearchCore
 
-from komira_search_scan.search_scan_kind import (
+from search_scan.search_scan_kind import (
     SEARCH_RESOLVED_GENERATION,
     SearchIndexCatalog,
     SearchScanResolver,

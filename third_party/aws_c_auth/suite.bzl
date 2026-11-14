@@ -4,7 +4,7 @@ aws-c-auth carries the official suite at tests/aws-signing-test-suite/v4:
 one directory per case, each holding the same ten files. BUCK extracts
 exactly those files, so a case is listed here or not extracted at all;
 nothing of the suite is committed to this repository. The archive's sha256
-pins every byte, and //src/komira_aws_core's test_sigv4_test_suite refuses a
+pins every byte, and //src/aws_core's test_sigv4_test_suite refuses a
 case directory missing any of the ten files and a case count other than its
 own, so neither list can shrink without a red build.
 """

@@ -4,8 +4,8 @@ const std = @import("std");
 const N = @import("native_reach.zig");
 
 const t = std.testing;
-const awslc = N.Refuse{ .prefix = "komira_awslc_", .owner = "komira//src/komira_crypto:komira_crypto" };
-const s2n = N.Refuse{ .prefix = "komira_s2n_", .owner = "komira//src/komira_http_core:komira_http_core" };
+const awslc = N.Refuse{ .prefix = "komira_awslc_", .owner = "komira//src/crypto:crypto" };
+const s2n = N.Refuse{ .prefix = "komira_s2n_", .owner = "komira//src/http_core:http_core" };
 
 fn found(text: []const u8, refuses: []const N.Refuse) ![]const N.Finding {
     var out = std.ArrayList(N.Finding).empty;
@@ -14,7 +14,7 @@ fn found(text: []const u8, refuses: []const N.Refuse) ![]const N.Finding {
     return out.toOwnedSlice(t.allocator);
 }
 
-// The case the check exists for: komira_uuid's entropy.mojo spelling.
+// The case the check exists for: uuid's entropy.mojo spelling.
 test "scan: finds the name an external_call spells, with its line" {
     const f = try found("    var rc = external_call[\n        \"komira_awslc_RAND_bytes\",\n        c_int,\n", &.{awslc});
     defer t.allocator.free(f);
@@ -94,10 +94,10 @@ test "result: failure names each finding, success when there is none" {
     defer arena.deinit();
     const a = arena.allocator();
     const fs = [_]N.Finding{.{ .path = "entropy.mojo", .line = 44, .symbol = "komira_awslc_RAND_bytes", .refuse = awslc }};
-    const bad = try N.message(a, "komira//src/komira_uuid:komira_uuid", 3, &.{awslc}, &fs);
-    try t.expect(std.mem.indexOf(u8, bad, "entropy.mojo:44: \"komira_awslc_RAND_bytes\" is komira//src/komira_crypto:komira_crypto's") != null);
+    const bad = try N.message(a, "komira//src/uuid:uuid", 3, &.{awslc}, &fs);
+    try t.expect(std.mem.indexOf(u8, bad, "entropy.mojo:44: \"komira_awslc_RAND_bytes\" is komira//src/crypto:crypto's") != null);
     try t.expectEqualStrings("failure", try status(try N.result(a, true, bad)));
-    const good = try N.message(a, "komira//src/komira_uuid:komira_uuid", 3, &.{awslc}, &.{});
+    const good = try N.message(a, "komira//src/uuid:uuid", 3, &.{awslc}, &.{});
     try t.expect(std.mem.indexOf(u8, good, "3 source file(s) checked") != null);
     try t.expectEqualStrings("success", try status(try N.result(a, false, good)));
 }

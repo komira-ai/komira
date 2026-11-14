@@ -6,16 +6,16 @@
 # GcpTokenSource for a token and before anything is dialled. A placeholder
 # host would have sent the bearer token to whatever answers there.
 #
-# The connector is komira_http_core's ScriptedConnector (every dial's host
+# The connector is http_core's ScriptedConnector (every dial's host
 # recorded, every written byte captured); no socket is used.
 from std.memory import ArcPointer
 from std.testing import assert_equal, assert_true
 
-from komira_async.ops.waker_sink import NoopSink
-from komira_async.runtime.blocking_runtime import BlockingRuntime
-from komira_gcp_core import GcpTokenSource
-from komira_http_client.client import HttpClient
-from komira_http_core.transport.scripted import ScriptedConnector, ScriptedStream
+from async_rt.ops.waker_sink import NoopSink
+from async_rt.runtime.blocking_runtime import BlockingRuntime
+from gcp_core import GcpTokenSource
+from http_client.client import HttpClient
+from http_core.transport.scripted import ScriptedConnector, ScriptedStream
 
 from komira_gcp_nohost_rest.nohost import GetThingRequest, NoHostServiceClient
 

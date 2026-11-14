@@ -1,4 +1,4 @@
-# h2spec cases komira_http_server does not pass, one per line:
+# h2spec cases http_server does not pass, one per line:
 #
 #     <case id> <what the server does instead>       a failing case
 #     <case id> skip: <why h2spec skips it>          a skipped case

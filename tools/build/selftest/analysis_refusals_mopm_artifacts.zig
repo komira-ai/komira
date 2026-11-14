@@ -12,13 +12,13 @@ const ROWS = [_]lib.Row{
     .{
         .name = "wrong_id",
         .target = "tests//negative/mopm_artifacts:artifacts",
-        .text = "artifacts: natives names komira_libc.komira_libc_posx, but the mopm.toml of komira_libc declares no [native.komira_libc_posx] (it declares: komira_libc_posix)",
+        .text = "artifacts: natives names libc.komira_libc_posx, but the mopm.toml of libc declares no [native.komira_libc_posx] (it declares: komira_libc_posix)",
         .cfg = &.{"mopm_artifacts.case=wrong_id"},
     },
     .{
         .name = "missing_entry",
         .target = "tests//negative/mopm_artifacts:artifacts",
-        .text = "artifacts: komira_libc declares [native.komira_libc_posix] in its mopm.toml, and natives has no entry for it",
+        .text = "artifacts: libc declares [native.komira_libc_posix] in its mopm.toml, and natives has no entry for it",
         .cfg = &.{"mopm_artifacts.case=missing_entry"},
     },
 };

@@ -1,5 +1,5 @@
-"""`komira_job_supervisor_loopback`: test-only. komira_job_supervisor's run
-loop against a stateful heartbeat receiver served by komira_http_server, over
+"""`komira_job_supervisor_loopback`: test-only. job_supervisor's run
+loop against a stateful heartbeat receiver served by http_server, over
 127.0.0.1, in one build action.
 
   HeartbeatReceiver   a `RequestDispatcher` that decodes each

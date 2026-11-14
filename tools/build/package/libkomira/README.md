@@ -1,9 +1,9 @@
 # libkomira package
 
 The conda package that ships `libkomira`, the shared library with komira's flat
-C API (`src/komira_so`), and the check that installs it.
+C API (`src/so`), and the check that installs it.
 
-- `komira_so_libkomira_conda` is the package of the `komira_so` Mojo library
+- `komira_so_libkomira_conda` is the package of the `so` Mojo library
   with `lib/libkomira.so` added (`conda_package(shared_lib = ...)`,
   [`../conda.bzl`](../conda.bzl)). Its metadata lists the library in
   `lib_files`. The Mojo runtime the library is linked against is not in the

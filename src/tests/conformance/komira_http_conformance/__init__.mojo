@@ -1,4 +1,4 @@
-"""`komira_http_conformance`: komira_http_server against an external HTTP/2
+"""`komira_http_conformance`: http_server against an external HTTP/2
 conformance suite (h2spec), test-only.
 
   * `report`    - an h2spec run's per-case results, from its JUnit report,
@@ -9,7 +9,7 @@ conformance suite (h2spec), test-only.
   * `duet`      - step an HttpServer on one thread while a client leg runs
                   on another;
   * `tls`       - the server's TLS configuration and a verifying client
-                  connector, over komira_http_core's test certificates.
+                  connector, over http_core's test certificates.
 """
 
 from .allowlist import AllowEntry, gate, parse_allowlist

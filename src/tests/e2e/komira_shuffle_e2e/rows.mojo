@@ -20,8 +20,8 @@
 # Bytes travel between processes as lowercase hex on one stdout line.
 # =============================================================================
 
-from komira_shuffle.partitioner import HashPartitioner
-from komira_shuffle.sink import ShuffleRow, encode_partition_body
+from shuffle.partitioner import HashPartitioner
+from shuffle.sink import ShuffleRow, encode_partition_body
 
 comptime _KEY_SEARCH_LIMIT = 4096
 

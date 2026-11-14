@@ -58,7 +58,7 @@
 # skip it). test_conform_runner holds each one to it; the cases of cases/
 # have none.
 
-from komira_json import JsonValue, parse_json_value
+from json import JsonValue, parse_json_value
 
 from .contract import (
     CLASS_MANAGED,

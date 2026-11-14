@@ -1,4 +1,4 @@
-//! `komira_oci tree`: bundles and files laid at paths in one directory, the
+//! `oci tree`: bundles and files laid at paths in one directory, the
 //! tree `oci_image` lays at / in an image.
 //!
 //! The places are refused unless every path is plain (no empty, `.` or `..`

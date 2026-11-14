@@ -1,15 +1,15 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
-# Test-only: komira_xml's canonical form against the AWS conformance
+# Test-only: xml's canonical form against the AWS conformance
 # harness's independent XML equivalence (komira//tools/build/proto-codegen,
 # `xml_equiv`), over every XML body of botocore's rest-xml protocol corpus.
 # test_xml_canonical_differential reads the verdicts xml-equiv-verdicts
 # writes, the target //tools/build/proto-codegen:rest_xml_verdicts, and the
 # two rest-xml case files they were written from, read from the botocore
 # archive //third_party/botocore pins by sha256 and staged at their paths in
-# it; it requires komira_xml to agree with every verdict.
+# it; it requires xml to agree with every verdict.
 #
-# The test is welded here, not to komira_aws_core: there it made the AWS
+# The test is welded here, not to aws_core: there it made the AWS
 # core's build, and so every generated client's, build the Rust tool and run
 # it over the corpus, for a check of the generator's XML equivalence rather
 # than of the AWS core. Welded (not a mojo_test), the verdict is a build
@@ -31,8 +31,8 @@ mojo_library(
     name = "komira_xml_conformance",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
-        "//src/komira_json:komira_json",
-        "//src/komira_xml:komira_xml",
+        "//src/json:json",
+        "//src/xml:xml",
     ],
     conda = False,
     test_srcs = ["tests/test_xml_canonical_differential.mojo"],

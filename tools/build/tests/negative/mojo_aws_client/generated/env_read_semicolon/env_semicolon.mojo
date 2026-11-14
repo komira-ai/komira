@@ -6,7 +6,7 @@ The generated environment scan (_no_env_reads) reads each statement of the
 line and refuses std.pathlib, which is not on its allow-list.
 """
 
-from komira_aws_core import AwsRequest; from std.pathlib import Path
+from aws_core import AwsRequest; from std.pathlib import Path
 
 from .env_read_semicolon import (
     CloudWatchLogsGetLogEventsRequest,

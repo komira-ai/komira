@@ -14,7 +14,7 @@
 #
 # The schema entry is the escaped column name, `:`, the type as
 # plan_vocabulary's ArrowType spells it without the `ARROW_TYPE_` prefix, in
-# lower case, with the parameters komira_arrow's Field carries (decimal
+# lower case, with the parameters arrow's Field carries (decimal
 # precision and scale, timestamp time zone, dictionary index type, union type
 # ids) and its one level of children (`list<item:int32?>`), then `?` when
 # nullable. Cells are in render.mojo; escapes in escape.mojo; floats in

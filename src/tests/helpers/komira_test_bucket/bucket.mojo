@@ -71,9 +71,9 @@
 from std.os import abort
 
 from komira_test_minio import EmbeddedMinio, NoProcess, ProcessRunner
-from komira_test_run_id import RunId, WallClock
-from komira_test_verdict import Verdict
-from komira_validation_run.validation_run_tag import is_valid_validation_run_id
+from test_run_id import RunId, WallClock
+from test_verdict import Verdict
+from validation_run.validation_run_tag import is_valid_validation_run_id
 
 from ._redact import _Redactor
 from .leak_check import _key_in_run, _leak_check_prefix, _run_prefix_for
