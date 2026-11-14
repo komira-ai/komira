@@ -64,6 +64,7 @@ TARGETS = [
     "komira//tools/build/mojo:mojo_compile_darwin",
     "komira//tools/build/mojo:mojo_compile_darwin_ticked",
     "komira//tools/build/mojo:proto_gen",
+    "komira//tools/build/ns_rename:ns-rename",
     "komira//tools/build/package:conda_ships_readme",
     "komira//tools/build/package:is_linux_x86_64",
     "komira//tools/build/package:level_test",
