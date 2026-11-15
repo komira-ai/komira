@@ -14,13 +14,13 @@ pub const OLD_PREFIX: &str = "komira_";
 /// `_gen` in tools/build/mojo/proto.bzl and tools/build/cloud, `_fresh` in tools/build/gen). A
 /// word that is an old name with one of them is the derived target of the renamed one, so it is
 /// renamed with it: `komira_json_conda` becomes `json_conda`.
-pub const DERIVED_SUFFIXES: &[&str] = &["_conda", "_cov_gate", "_fresh", "_gen"];
+pub(crate) const DERIVED_SUFFIXES: &[&str] = &["_conda", "_cov_gate", "_fresh", "_gen"];
 
 /// The prefix of the test file of a package: `test_<name>.mojo` holds the tests of `<name>`
 /// (`tests/test_komira_json.mojo` of the JSON conformance suite), so `test_<old>` becomes
 /// `test_<new>`, and a test file named after the package's new name moves to it
 /// (`tree::own_name_test`).
-pub const TEST_PREFIX: &str = "test_";
+pub(crate) const TEST_PREFIX: &str = "test_";
 
 /// A mapping that passed every check: old names to new import names.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -220,7 +220,7 @@ impl Mapping {
 
     /// Every word the rename replaces, with its replacement: each old name, its `test_<old>`
     /// and each `<old><suffix>` of [`DERIVED_SUFFIXES`].
-    pub fn words(&self) -> &BTreeMap<String, String> {
+    pub(crate) fn words(&self) -> &BTreeMap<String, String> {
         &self.words
     }
 }

@@ -419,6 +419,13 @@ fn own_name_test_needs_a_direct_test_file_of_a_mapped_package() {
     assert_eq!(own("src/komira_test_run_id/tests/test_run_id.txt"), None);
     assert_eq!(own("src/komira_other/tests/test_run_id.mojo"), None);
     assert_eq!(own("lib/komira_test_run_id/tests/test_run_id.mojo"), None);
+    // A path that is not UTF-8 is no package's test file.
+    let not_utf8 = Path::new(
+        <std::ffi::OsStr as std::os::unix::ffi::OsStrExt>::from_bytes(
+            b"src/komira_test_run_id/tests/\xff.mojo",
+        ),
+    );
+    assert_eq!(crate::tree::own_name_test(not_utf8, &m), None);
 }
 
 #[test]

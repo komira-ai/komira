@@ -108,7 +108,7 @@ fn moved_path(rel: &Path, mapping: &Mapping) -> Option<PathBuf> {
 /// to `src/<new>/tests/test_<new>.mojo`. buildrules' `mojo_package` declares a target per test
 /// file named by its stem, so the file's target and the package's own `<new>` target would be one
 /// name (`src/komira_test_run_id/tests/test_run_id.mojo`). Only a file directly under `tests/`.
-pub fn own_name_test(rel: &Path, mapping: &Mapping) -> Option<PathBuf> {
+pub(crate) fn own_name_test(rel: &Path, mapping: &Mapping) -> Option<PathBuf> {
     let parts: Vec<&str> = rel
         .components()
         .map(|c| c.as_os_str().to_str())
