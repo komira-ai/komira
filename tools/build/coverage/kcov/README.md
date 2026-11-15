@@ -186,7 +186,7 @@ compares a binary across two checkouts.
 
 ```
 cov_normalize --in <report.xml> --out <file> --map <ABS>=<REPO>...
-              [--exclude <PREFIX>]... --must-contain <REPO_PATH>... [--forbid <S>]...
+              [--exclude <PREFIX>]... --must-contain <REPO_PATH>... [--forbid <S>]... [--forbid-path <S>]...
 ```
 
 Reads the report kcov writes with `cobertura-full-paths=1`, where every
@@ -229,8 +229,11 @@ It also refuses, writing nothing:
 - an output containing a `--forbid` string, as given or escaped the way the
   output writes it (`a&b` is `a&amp;b` in the bytes). That no sandbox path
   leaves the action comes first from the mapping: every output path is
-  relative and clean, so it cannot be an absolute path. `--forbid` with the
-  action's own working directory is the backstop against one inside a path;
+  relative and clean, so it cannot be an absolute path. `--forbid-path` with
+  the action's own working directory is the backstop against one inside a
+  path: an occurrence counts only as a whole path, with no byte of
+  [A-Za-z0-9._-] before or after it (`/work` is in `/work/x`, not in
+  `/workflows`). `--forbid` is for a string forbidden wherever it appears;
 - a malformed report, with the same refusals as covcheck's reader (an unknown
   entity, a mismatched tag, a `<line>` number of 0, a branch line without
   `condition-coverage`, and so on). The `<lines>` inside a `<method>` repeat
@@ -549,6 +552,7 @@ both the sandbox and the placeholder form) and small reports of its own:
 | unmapped | exit 1 naming the file, nothing written | unmapped names passed through |
 | must-contain | a missing test source: exit 1, nothing written | no `--must-contain` check |
 | must-contain, no line | a test source whose class has no line: exit 1 | an empty class taken as read |
+| forbid-path | the string as a whole path: exit 1; as a part of a longer name (`src/komira` in `src/komira_retry/`): exit 0 | a bare substring search for the working directory |
 | forbid | a forbidden string, given as the path holds it (`a&b`) and as the bytes hold it (`a&amp;b`): exit 1 | no `--forbid` check; only the escaped form looked for |
 | `..` mapping | an unclean mapped path: exit 1 | |
 | not UTF-8 | a mapped path with byte 0xff: exit 1 | a name covcheck would decode into another |

@@ -5,7 +5,7 @@
 //!            --map <ABS>=<REPO>...          (at least one)
 //!            [--exclude <PREFIX>]...
 //!            --must-contain <REPO_PATH>...  (at least one)
-//!            [--forbid <S>]...
+//!            [--forbid <S>]... [--forbid-path <S>]...
 //!
 //! The report is kcov's, written with `--configure=cobertura-full-paths=1`, so
 //! every `<class filename=...>` is an absolute path. Each is, in this order:
@@ -41,10 +41,14 @@
 //! not a clean relative path (an empty, '.' or '..' segment) or holds a
 //! control byte or is not UTF-8, a --must-contain path with no class in the
 //! output or whose class has no line, and an output holding any --forbid
-//! string, as given or escaped as the output writes it. Every output path is
-//! relative and clean (the mapping and the check above), so an absolute
-//! sandbox path cannot be one; --forbid (the caller passes its own working
-//! directory) is the backstop against one appearing inside a path.
+//! string, as given or escaped as the output writes it, or any --forbid-path
+//! string as a whole path. A whole path is an occurrence whose preceding and
+//! following bytes (when there are any) are not in [A-Za-z0-9._-]: `/work` is
+//! found in `/work/x` and not in `/workflows` or `/a/work`. Every output path
+//! is relative and clean (the mapping and the check above), so an absolute
+//! sandbox path cannot be one; --forbid-path (the caller passes its own
+//! working directory) is the backstop against one appearing inside a path,
+//! and --forbid is for a string that is forbidden wherever it appears.
 //!
 //! The output is written through a temporary file renamed over <file>, so a
 //! failed write leaves no file.
@@ -63,7 +67,7 @@ const Alloc = std.mem.Allocator;
 
 const usage =
     \\usage: cov_normalize --in <report.xml> --out <file> --map <ABS>=<REPO>...
-    \\           [--exclude <PREFIX>]... --must-contain <REPO_PATH>... [--forbid <S>]...
+    \\           [--exclude <PREFIX>]... --must-contain <REPO_PATH>... [--forbid <S>]... [--forbid-path <S>]...
     \\
 ;
 
@@ -530,6 +534,7 @@ const Options = struct {
     excludes: []const []const u8,
     musts: []const []const u8,
     forbids: []const []const u8,
+    forbid_paths: []const []const u8,
 };
 
 /// `args` (the command line after the program name) as Options; bad usage
@@ -541,6 +546,7 @@ fn parseArgs(alloc: Alloc, diag: *Diag, args: []const []const u8) Error!Options 
     var excludes = std.ArrayList([]const u8).empty;
     var musts = std.ArrayList([]const u8).empty;
     var forbids = std.ArrayList([]const u8).empty;
+    var forbid_paths = std.ArrayList([]const u8).empty;
     var a: usize = 0;
     while (a < args.len) : (a += 2) {
         const flag = args[a];
@@ -571,6 +577,9 @@ fn parseArgs(alloc: Alloc, diag: *Diag, args: []const []const u8) Error!Options 
         } else if (std.mem.eql(u8, flag, "--forbid")) {
             if (v.len == 0) return diag.usageFail("--forbid is empty", .{});
             forbids.append(alloc, v) catch oom();
+        } else if (std.mem.eql(u8, flag, "--forbid-path")) {
+            if (v.len == 0) return diag.usageFail("--forbid-path is empty", .{});
+            forbid_paths.append(alloc, v) catch oom();
         } else {
             return diag.usageFail("unknown flag '{s}'", .{flag});
         }
@@ -586,7 +595,27 @@ fn parseArgs(alloc: Alloc, diag: *Diag, args: []const []const u8) Error!Options 
         .excludes = excludes.items,
         .musts = musts.items,
         .forbids = forbids.items,
+        .forbid_paths = forbid_paths.items,
     };
+}
+
+/// Whether `b` can be part of a path component's name: [A-Za-z0-9._-].
+pub fn isNameByte(b: u8) bool {
+    return std.ascii.isAlphanumeric(b) or b == '.' or b == '_' or b == '-';
+}
+
+/// Whether `hay` holds `needle` as a whole path: an occurrence whose preceding
+/// and following bytes, when there are any, are not name bytes. The report is
+/// read whole, so no occurrence is split across reads.
+pub fn holdsPath(hay: []const u8, needle: []const u8) bool {
+    if (needle.len == 0) return false;
+    var from: usize = 0;
+    while (std.mem.indexOfPos(u8, hay, from, needle)) |i| {
+        const after = i + needle.len;
+        if ((i == 0 or !isNameByte(hay[i - 1])) and (after == hay.len or !isNameByte(hay[after]))) return true;
+        from = i + 1;
+    }
+    return false;
 }
 
 /// One run: `args` is the command line after the program name; `dir` is
@@ -647,6 +676,13 @@ fn run(alloc: Alloc, diag: *Diag, dir: std.fs.Dir, args: []const []const u8) Err
         writeEscaped(esc.writer(alloc), s);
         if (std.mem.indexOf(u8, bytes, s) != null or std.mem.indexOf(u8, bytes, esc.items) != null)
             return diag.refuse("the output would hold '{s}' (--forbid); nothing written", .{s});
+    }
+
+    for (opt.forbid_paths) |s| {
+        var esc = std.ArrayList(u8).empty;
+        writeEscaped(esc.writer(alloc), s);
+        if (holdsPath(bytes, s) or holdsPath(bytes, esc.items))
+            return diag.refuse("the output would hold '{s}' as a whole path (--forbid-path); nothing written", .{s});
     }
 
     writeOut(dir, out_file, bytes) catch |err| return diag.refuse("{s}: {s}; nothing written", .{ out_file, @errorName(err) });

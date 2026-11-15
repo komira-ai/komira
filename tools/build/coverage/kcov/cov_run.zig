@@ -724,13 +724,13 @@ pub fn main() !void {
         const re = std.fs.cwd().realpathAlloc(a, e) catch break :blk cwd;
         break :blk if (std.mem.eql(u8, re, cwd)) e else cwd;
     };
-    try norm.appendSlice(a, &.{ "--must-contain", args.test_repo, "--forbid", pwd, "--forbid", r, "--forbid", l });
+    try norm.appendSlice(a, &.{ "--must-contain", args.test_repo, "--forbid-path", pwd, "--forbid-path", r, "--forbid-path", l });
     if (args.solib != null) {
         if (test_dir.len > 0) try norm.appendSlice(a, &.{ "--map", try std.fmt.allocPrint(a, "{s}/={s}", .{ s, pkg_repo }) });
         try norm.appendSlice(a, &.{ "--must-contain", try std.fmt.allocPrint(a, "{s}{s}", .{ pkg_repo, args.solib_srcs[0] }) });
     }
     const p_real = realpath(a, pwd);
-    if (!std.mem.eql(u8, p_real, pwd)) try norm.appendSlice(a, &.{ "--forbid", p_real });
+    if (!std.mem.eql(u8, p_real, pwd)) try norm.appendSlice(a, &.{ "--forbid-path", p_real });
     var nchild = std.process.Child.init(norm.items, a);
     nchild.env_map = &env;
     nchild.stdout_behavior = .Pipe;

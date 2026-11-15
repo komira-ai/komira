@@ -393,3 +393,44 @@ test "failed write: a write cut short leaves the output's directory empty" {
         return error.TestUnexpectedResult;
     }
 }
+
+// 6b. --forbid-path refuses an output holding the string as a whole path (the
+// bytes before and after it are not in [A-Za-z0-9._-]), not one holding it as
+// a part of a longer name: the working directory `/work` is in `/work/x`, not
+// in `/workflows/ci.yml`.
+test "forbid-path: refused as a whole path, as the path holds it and escaped" {
+    var c = try Case.init();
+    defer c.deinit();
+    _ = try c.refused("forbid-path", "would hold 'src/komira_retry' as a whole path (--forbid-path)", &(IO ++ M1 ++ M2 ++ M3 ++ EX ++ MUST ++ [_][]const u8{ "--forbid-path", "src/komira_retry" }));
+    _ = try c.refused("forbid-path, escaped", "would hold 'a&amp;b' as a whole path (--forbid-path)", &(IO ++ M1 ++ M2 ++ M3 ++ EX ++ MUST ++ [_][]const u8{ "--forbid-path", "a&amp;b" }));
+}
+
+test "forbid-path: a string that is only a part of a longer name passes" {
+    var c = try Case.init();
+    defer c.deinit();
+    const args = c.cat(&.{ &IO, &M1, &M2, &M3, &EX, &MUST, &.{ "--forbid-path", "src/komira", "--forbid-path", "retry/tests", "--forbid-path", "src/komira_retry/te" } });
+    _ = try c.ok("forbid-path, part of a name", args);
+}
+
+test "forbid-path: an empty string is a usage error" {
+    var c = try Case.init();
+    defer c.deinit();
+    const r = try c.run(&(IO ++ M1 ++ M2 ++ M3 ++ EX ++ MUST ++ [_][]const u8{ "--forbid-path", "" }));
+    try std.testing.expectEqual(@as(u8, 2), r.status);
+    try has("forbid-path, empty", r.err, "--forbid-path is empty");
+}
+
+test "holdsPath: whole paths, the ends of the text, NUL, and names that merely hold the string" {
+    const L = @import("cov_normalize.zig");
+    const t = std.testing;
+    try t.expect(L.holdsPath("/work", "/work"));
+    try t.expect(L.holdsPath("x /work/buck-out/x", "/work"));
+    try t.expect(L.holdsPath("x /work\x00y", "/work"));
+    try t.expect(L.holdsPath("file:///work/a", "/work"));
+    try t.expect(L.holdsPath("/workflows and /work/x", "/work"));
+    try t.expect(!L.holdsPath("github.com/tokio-rs/prost/actions/workflows/ci.yml", "/work"));
+    try t.expect(!L.holdsPath("/work-x /work.rs /work_a /work9", "/work"));
+    try t.expect(!L.holdsPath("/a/work/x a/work ./work", "/work"));
+    try t.expect(!L.holdsPath("", "/work"));
+    try t.expect(!L.holdsPath("/work", ""));
+}

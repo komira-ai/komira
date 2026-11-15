@@ -15,6 +15,7 @@ _MOJO_COMPILE_SRCS = [
     "tools/compile_args.zig",
     "tools/modular_cfg.zig",
     "tools/mojo_compile.zig",
+    "tools/mojo_compile_check_test.zig",
     "tools/proc_tree.zig",
     "tools/watch_loop.zig",
 ]

@@ -59,7 +59,9 @@
 //! Exit status: the compiler's (128+N when signal N killed it); 124 the
 //! watchdog killed it; 129, 130, 143 the wrapper was signalled; 2 a refusal;
 //! 3 the compiler exited 0 but the -o output is missing or empty; 4 the output
-//! holds the working directory ($PWD, or getcwd() when it differs); 126 or
+//! holds the working directory ($PWD, or getcwd() when it differs) as a whole
+//! path (the bytes before and after it are not in [A-Za-z0-9._-]: `/work` is
+//! in `/work/x` and not in `/workflows`); 126 or
 //! 127 the compiler could not be started (127: not found). mutation.bzl's
 //! _INFRA_EXITS reads these numbers. The scratch directory is removed on
 //! every exit the wrapper makes; a SIGKILLed wrapper, or a signal with idle 0,
@@ -80,6 +82,7 @@ test {
     _ = @import("modular_cfg.zig");
     _ = @import("proc_tree.zig");
     _ = @import("watch_loop.zig");
+    _ = @import("mojo_compile_check_test.zig");
 }
 
 /// The scratch directory, once it may exist: removed by `finish`.
@@ -541,15 +544,35 @@ fn printable(c: u8) bool {
     return c == '\t' or (c >= 0x20 and c <= 0x7e);
 }
 
+/// Whether `b` can be part of a path component's name: [A-Za-z0-9._-].
+pub fn isNameByte(b: u8) bool {
+    return std.ascii.isAlphanumeric(b) or b == '.' or b == '_' or b == '-';
+}
+
+/// Whether `hay` holds `needle` as a whole path: an occurrence whose preceding
+/// and following bytes, when there are any, are not name bytes. `/work` is in
+/// `/work/x` and not in `/workflows` or `/a/work`. The output is read whole,
+/// so no occurrence is split across reads.
+pub fn holdsPath(hay: []const u8, needle: []const u8) bool {
+    if (needle.len == 0) return false;
+    var from: usize = 0;
+    while (std.mem.indexOfPos(u8, hay, from, needle)) |i| {
+        const after = i + needle.len;
+        if ((i == 0 or !isNameByte(hay[i - 1])) and (after == hay.len or !isNameByte(hay[after]))) return true;
+        from = i + 1;
+    }
+    return false;
+}
+
 fn holdsAny(hay: []const u8, needles: []const []const u8) bool {
     for (needles) |n| {
-        if (n.len > 0 and std.mem.indexOf(u8, hay, n) != null) return true;
+        if (holdsPath(hay, n)) return true;
     }
     return false;
 }
 
 /// Exit 3 when the compiler exited 0 but the output is missing or empty; 4
-/// when it holds the working directory, printing up to five printable runs
+/// when it holds the working directory as a whole path, printing up to five printable runs
 /// (4 bytes or longer) that hold it.
 pub fn postCheck(arena: std.mem.Allocator, rc: u8, out: []const u8, pwd: []const u8) u8 {
     if (rc != 0) return rc;
