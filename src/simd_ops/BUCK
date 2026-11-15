@@ -42,7 +42,7 @@ mojo_conda(
 # packer over `:simd_ops`. It goes when the release machine takes `:conda`. This library's mopm
 # package is `:conda` above.
 conda_package(
-    name = "komira_simd_conda",
+    name = "simd_ops_conda",
     lib = ":simd_ops",
     summary = "The `simd_ops` Mojo library of komira, as a conda package.",
     visibility = ["PUBLIC"],

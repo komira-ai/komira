@@ -397,7 +397,7 @@ release_order_test(
 conda_doc_check(
     name = "conda_ships_readme",
     lib = "//src/encoding:encoding",
-    package = "//src/encoding:komira_encoding_conda",
+    package = "//src/encoding:encoding_conda",
 )
 
 # release_set.txt as a file: //release:release_checks_cases holds it to

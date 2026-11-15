@@ -104,7 +104,7 @@ mojo_conda_holds(
 # Kept for the release machine, which still builds it (release/BUCK, release/artifacts.textproto):
 # komira's conda packer over `:chat_proto`. This library's mopm package is `:conda` above.
 conda_package(
-    name = "komira_chat_proto_conda",
+    name = "chat_proto_conda",
     lib = ":chat_proto",
     summary = "The `chat_proto` Mojo library of komira, as a conda package.",
     visibility = ["PUBLIC"],

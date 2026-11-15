@@ -49,13 +49,32 @@ and running the tool a second time over a renamed tree is refused.
 
 A word is a maximal run of ASCII letters, digits and `_` (as `git grep -w` reads one), so
 `komira_gcp_firestore` never matches inside `komira_gcp_firestore_v1`, and `komira_json` matches in
-`//src/komira_json:komira_json`. Every word that is an old name is replaced by its new name, in one
-pass:
+`//src/komira_json:komira_json`. Every word that is an old name is replaced by its new name, and
+so is every word derived from one, in one pass:
+
+- `<old>_conda`, `<old>_cov_gate`, `<old>_fresh` and `<old>_gen` become `<new>` with the same
+  suffix. komira's and buildrules' rules name the targets they derive from a target `name` that way
+  (`name + "_conda"` in `tools/build/mojo/defs.bzl`), so a reference such as
+  `//src/komira_json:komira_json_conda` must follow the renamed target: `//src/json:json_conda`.
+  A rule that derives a target name with another suffix adds it to `DERIVED_SUFFIXES` in
+  `src/map.rs`.
+- `test_<old>` becomes `test_<new>`: a suite that names its test files after the packages it tests
+  (`tests/test_{}.mojo".format(p)` over a list of package names) finds `tests/test_json.mojo`.
+
+A mapping where one of these derived words is itself an old name is refused, naming its line.
+
+The rename applies:
 
 - in every listed path: each file under a component holding an old name moves (`src/komira_json/src/komira_json/x.mojo`
   to `src/json/src/json/x.mojo`, `docs/komira_json.md` to `docs/json.md`), and the directories the
   moves empty are removed;
 - in the text of every listed UTF-8 file: imports, BUCK targets and paths, `.bzl` files, docs, workflows.
+
+One move is not a word replacement: a test file directly under a package's `tests/` whose stem is the
+package's new name (`src/komira_test_run_id/tests/test_run_id.mojo`, package `test_run_id`) moves to
+`tests/test_<new>.mojo` (`tests/test_test_run_id.mojo`). buildrules' `mojo_package` declares a target
+per test file named by its stem, so without the move the test's target and the package's own target
+would have one name and the BUCK file would fail to load. The summary lists these moves.
 
 Each file named `mopm.toml` also gets full names (mopm's design, section 3): `[package] name =
 "komira_json"` becomes `name = "komira-ai/json"`, and a `[dependencies]` or `[dev-dependencies]` key
@@ -75,14 +94,15 @@ restore.
   tests hold the old names on purpose), and the mapping file wherever it is.
 - A file that is not UTF-8: listed when it holds an old name as a word, for a hand edit.
 - Listed entries that are not regular files (symbolic links, a submodule's directory): listed.
-- Words that are not exactly an old name: `komira_json_index`, `libkomira_json`, `KOMIRA_JSON`.
+- Words that are neither an old name nor derived from one as above: `komira_json_index`,
+  `komira_json_v1`, `libkomira_json`, `libkomira_json_gen`, `KOMIRA_JSON`.
 - Hashes and generated files that depend on the text it changes (`buildrules.mojo.lock.bzl`,
   `mopm.lock`): the pull request that applies the rename regenerates them with the tools that own
   them.
 
 ## The summary
 
-The summary lists the packages renamed, the files moved, the files rewritten and the lines changed,
+The summary lists the packages renamed, the files moved (with the test files moved off their package's new name), the files rewritten and the lines changed,
 by kind (`.mojo` with its import lines, BUCK and `.bzl`, `mopm.toml` with the names and keys set to
 full names, other) and by top-level directory, then the files left unchanged and the `.mojo` files
 that import a renamed module by its own name (`import komira_x`, which binds the name) and already
@@ -94,7 +114,8 @@ The crate's inline `#[test]`s (`komira_ns_rename_unit`, welded to the library) c
 `names` (the lists and the grammar), `words` (whole-word replacement), `map` (the checked-in mapping
 and each refusal), `manifest` (each manifest form), `report` (the summary), `error` (each message),
 and `scenario_tests`, which writes small checkouts into a scratch directory of each test's own and
-runs the whole rename over them: the result file by file, a dry run that writes nothing, each
+runs the whole rename over them: the result file by file (with the derived words and the test
+file named after its package's new name), a dry run that writes nothing, each
 refusal leaving the checkout unchanged, a second run refused, and the command line.
 
 ## Why Rust

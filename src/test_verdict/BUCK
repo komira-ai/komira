@@ -45,7 +45,7 @@ mojo_conda(
 # packer over `:test_verdict`. It goes when the release machine takes the mopm package. This
 # library's mopm package is `:conda` above.
 conda_package(
-    name = "komira_test_verdict_conda",
+    name = "test_verdict_conda",
     lib = ":test_verdict",
     summary = "The `test_verdict` Mojo library of komira, as a conda package.",
     visibility = ["PUBLIC"],

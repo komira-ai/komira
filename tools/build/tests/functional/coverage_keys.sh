@@ -103,7 +103,7 @@ tests//functional/coverage:covlib 2 no reads 0
 tests//functional/coverage:covbare 0 no reads 0
 tests//functional/coverage:covuser 1 build reads 0
 komira//src/retry:retry 6 readme reads 1
-komira//src/retry:komira_retry_conda 6 conda reads 1
+komira//src/retry:retry_conda 6 conda reads 1
 komira//src/rowcell:rowcell 1 readme unread 1
 komira//tools/build/examples:test_hellopkg 1 test unread 0
 "

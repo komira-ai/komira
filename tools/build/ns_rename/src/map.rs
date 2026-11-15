@@ -9,10 +9,25 @@ use std::fmt;
 /// The prefix every old name has.
 pub const OLD_PREFIX: &str = "komira_";
 
+/// The suffixes komira's and buildrules' rules append to a target's name to name the targets
+/// they derive from it (`name + "_conda"` in tools/build/mojo/defs.bzl, `_cov_gate` beside it,
+/// `_gen` in tools/build/mojo/proto.bzl and tools/build/cloud, `_fresh` in tools/build/gen). A
+/// word that is an old name with one of them is the derived target of the renamed one, so it is
+/// renamed with it: `komira_json_conda` becomes `json_conda`.
+pub const DERIVED_SUFFIXES: &[&str] = &["_conda", "_cov_gate", "_fresh", "_gen"];
+
+/// The prefix of the test file of a package: `test_<name>.mojo` holds the tests of `<name>`
+/// (`tests/test_komira_json.mojo` of the JSON conformance suite), so `test_<old>` becomes
+/// `test_<new>`, and a test file named after the package's new name moves to it
+/// (`tree::own_name_test`).
+pub const TEST_PREFIX: &str = "test_";
+
 /// A mapping that passed every check: old names to new import names.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Mapping {
     pairs: BTreeMap<String, String>,
+    /// `pairs`, plus each old name's `test_` and derived-suffix words with their new forms.
+    words: BTreeMap<String, String>,
 }
 
 /// Why a mapping is refused. `line` counts from 1.
@@ -48,6 +63,9 @@ pub enum MapError {
         name: String,
         first_line: usize,
     },
+    /// A word derived from the old name of a line (`test_<old>`, `<old>_conda`, ...) is itself an
+    /// old name, so it would be renamed two ways.
+    DerivedIsOld { line: usize, word: String },
 }
 
 impl fmt::Display for MapError {
@@ -90,6 +108,10 @@ impl fmt::Display for MapError {
             } => write!(
                 f,
                 "line {line}: new name '{name}' is already the new name of line {first_line}"
+            ),
+            MapError::DerivedIsOld { line, word } => write!(
+                f,
+                "line {line}: '{word}', a word derived from its old name, is also an old name"
             ),
         }
     }
@@ -163,7 +185,27 @@ impl Mapping {
                 name: new.to_string(),
             });
         }
-        Ok(Mapping { pairs })
+        let mut words = pairs.clone();
+        for (line, (old, new)) in pairs.iter().enumerate() {
+            let derived =
+                std::iter::once((format!("{TEST_PREFIX}{old}"), format!("{TEST_PREFIX}{new}")))
+                    .chain(
+                        DERIVED_SUFFIXES
+                            .iter()
+                            .map(|suffix| (format!("{old}{suffix}"), format!("{new}{suffix}"))),
+                    );
+            for (word, renamed) in derived {
+                if pairs.contains_key(&word) {
+                    // Lines are sorted by the old name, so the index is the line less one.
+                    return Err(MapError::DerivedIsOld {
+                        line: line + 1,
+                        word,
+                    });
+                }
+                words.insert(word, renamed);
+            }
+        }
+        Ok(Mapping { pairs, words })
     }
 
     /// Old name to new name, sorted by the old name.
@@ -174,6 +216,12 @@ impl Mapping {
     /// The new name of `old`, if `old` is mapped.
     pub fn new_name(&self, old: &str) -> Option<&str> {
         self.pairs.get(old).map(String::as_str)
+    }
+
+    /// Every word the rename replaces, with its replacement: each old name, its `test_<old>`
+    /// and each `<old><suffix>` of [`DERIVED_SUFFIXES`].
+    pub fn words(&self) -> &BTreeMap<String, String> {
+        &self.words
     }
 }
 
@@ -291,6 +339,53 @@ mod tests {
         assert_eq!(
             refused("komira_a\tkomira_b\nkomira_b\tbb\n"),
             "line 1: new name 'komira_b' is also an old name"
+        );
+    }
+
+    #[test]
+    fn words_add_the_test_file_and_derived_target_forms_of_each_name() {
+        let mapping = Mapping::parse("komira_a\taa\n").unwrap();
+        let words: Vec<(&str, &str)> = mapping
+            .words()
+            .iter()
+            .map(|(a, b)| (a.as_str(), b.as_str()))
+            .collect();
+        assert_eq!(
+            words,
+            [
+                ("komira_a", "aa"),
+                ("komira_a_conda", "aa_conda"),
+                ("komira_a_cov_gate", "aa_cov_gate"),
+                ("komira_a_fresh", "aa_fresh"),
+                ("komira_a_gen", "aa_gen"),
+                ("test_komira_a", "test_aa"),
+            ]
+        );
+    }
+
+    #[test]
+    fn refuses_a_derived_word_that_is_an_old_name() {
+        assert_eq!(
+            refused("komira_a\taa\nkomira_a_gen\tbb\n"),
+            "line 1: 'komira_a_gen', a word derived from its old name, is also an old name"
+        );
+        assert_eq!(
+            refused("komira_a\taa\nkomira_b\tbb\nkomira_b_conda\tcc\n"),
+            "line 2: 'komira_b_conda', a word derived from its old name, is also an old name"
+        );
+    }
+
+    #[test]
+    fn the_checked_in_mapping_derives_no_old_name() {
+        let mapping = Mapping::parse(include_str!("../namespaces-komira-map.tsv")).unwrap();
+        assert_eq!(mapping.words().len(), 260 * 6);
+        assert_eq!(
+            mapping.words().get("komira_hash_conda").map(String::as_str),
+            Some("hashing_conda")
+        );
+        assert_eq!(
+            mapping.words().get("test_komira_json").map(String::as_str),
+            Some("test_json")
         );
     }
 }

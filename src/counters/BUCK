@@ -81,7 +81,7 @@ mojo_conda_holds(
 # komira's conda packer over `:counters`. It goes when the release machine takes the mopm
 # package. This library's mopm package is `:conda` above.
 conda_package(
-    name = "komira_counters_conda",
+    name = "counters_conda",
     lib = ":counters",
     summary = "The `counters` Mojo library of komira, as a conda package.",
     visibility = ["PUBLIC"],

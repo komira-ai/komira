@@ -184,6 +184,7 @@ const SUMMARY_BODY: &str = "packages renamed: 2\n\
      \x20 src/komira_hash -> src/hashing\n\
      \x20 src/komira_json -> src/json\n\
      files moved: 10\n\
+     \x20 of them, test files named after their package's new name, moved to test_<name>: 0\n\
      files rewritten: 11, lines changed: 17\n\
      \x20 by kind:\n\
      \x20   .mojo: 4 files, 6 lines (5 import lines)\n\
@@ -278,6 +279,146 @@ fn renames_directories_imports_targets_and_manifests() {
         assert!(!s.exists(old), "{old}");
     }
     assert!(s.exists("docs"));
+}
+
+/// A checkout where a test file is named after its package's new name, a suite names its test
+/// files `test_<package>.mojo` from a list of package names, and targets are named by a rule's
+/// derived suffixes.
+fn derived_checkout(test: &str) -> Scratch {
+    let s = Scratch::new(test);
+    s.write(
+        "src/komira_test_run_id/BUCK",
+        "mojo_adopted_library(name = \"komira_test_run_id\", test_srcs = glob([\"tests/test_*.mojo\"]))\n",
+    );
+    s.write(
+        "src/komira_test_run_id/tests/test_run_id.mojo",
+        "from komira_test_run_id import mint\nprint(\"test_run_id: OK\")\n",
+    );
+    s.write(
+        "src/komira_test_run_id/tests/test_clock.mojo",
+        "from komira_test_run_id import clock\n",
+    );
+    s.write(
+        "src/komira_json/BUCK",
+        "mojo_library(name = \"komira_json\")\n\
+         proto(name = \"komira_json_proto\", gen = \":komira_json_gen\")\n",
+    );
+    s.write(
+        "src/komira_json/tests/test_run_id.mojo",
+        "from komira_json import parse\n",
+    );
+    s.write(
+        "src/tests/conformance/suite/BUCK",
+        "_PARSERS = [\"komira_json\"]\n\
+         test_srcs = [\"tests/test_{}.mojo\".format(p) for p in _PARSERS]\n",
+    );
+    s.write(
+        "src/tests/conformance/suite/tests/test_komira_json.mojo",
+        "conformance_main(\"komira_json\")\n",
+    );
+    s.write(
+        "ci/targets/shard_0.bzl",
+        "TARGETS = [\"komira//src/komira_json:komira_json_conda\", \"//src/komira_json:komira_json_cov_gate\",\n\
+         \x20   \"komira//src/komira_json:komira_json_fresh\", \"komira_json_index_conda\", \"komira_json_v1\", \"libkomira_json_gen\"]\n",
+    );
+    s
+}
+
+#[test]
+fn renames_test_files_and_derived_target_names_with_their_package() {
+    let s = derived_checkout("derived");
+    let m = map_file(
+        "derived",
+        "komira_json\tjson\nkomira_json_index\tjson_index\nkomira_test_run_id\ttest_run_id\n",
+    );
+    s.write(
+        "src/komira_json_index/BUCK",
+        "mojo_library(name = \"komira_json_index\")\n",
+    );
+    let summary = rename(&args(&s, &m.0.join("map.tsv"), false)).unwrap();
+    assert!(
+        summary.contains(
+            "  of them, test files named after their package's new name, moved to test_<name>: 1\n\
+             \x20   src/komira_test_run_id/tests/test_run_id.mojo -> src/test_run_id/tests/test_test_run_id.mojo\n"
+        ),
+        "{summary}"
+    );
+    // The test named after the package's new name moves; its text is word-replaced as any file.
+    assert_eq!(
+        s.read("src/test_run_id/tests/test_test_run_id.mojo"),
+        "from test_run_id import mint\nprint(\"test_run_id: OK\")\n"
+    );
+    assert!(!s.exists("src/test_run_id/tests/test_run_id.mojo"));
+    // Another test file of the package keeps its name.
+    assert_eq!(
+        s.read("src/test_run_id/tests/test_clock.mojo"),
+        "from test_run_id import clock\n"
+    );
+    // A file of another package that happens to have that stem is not this package's own name.
+    assert_eq!(
+        s.read("src/json/tests/test_run_id.mojo"),
+        "from json import parse\n"
+    );
+    // `test_<old>` moves and is renamed with the list that names it.
+    assert_eq!(
+        s.read("src/tests/conformance/suite/BUCK"),
+        "_PARSERS = [\"json\"]\n\
+         test_srcs = [\"tests/test_{}.mojo\".format(p) for p in _PARSERS]\n"
+    );
+    assert_eq!(
+        s.read("src/tests/conformance/suite/tests/test_json.mojo"),
+        "conformance_main(\"json\")\n"
+    );
+    assert!(!s.exists("src/tests/conformance/suite/tests/test_komira_json.mojo"));
+    // A derived target name follows its target; a longer word, or one with a prefix, does not.
+    assert_eq!(
+        s.read("src/json/BUCK"),
+        "mojo_library(name = \"json\")\n\
+         proto(name = \"komira_json_proto\", gen = \":json_gen\")\n"
+    );
+    assert_eq!(
+        s.read("ci/targets/shard_0.bzl"),
+        "TARGETS = [\"komira//src/json:json_conda\", \"//src/json:json_cov_gate\",\n\
+         \x20   \"komira//src/json:json_fresh\", \"json_index_conda\", \"komira_json_v1\", \"libkomira_json_gen\"]\n"
+    );
+}
+
+#[test]
+fn refuses_an_own_name_test_moving_onto_an_existing_test_file() {
+    let s = derived_checkout("own_taken");
+    s.write(
+        "src/komira_test_run_id/tests/test_test_run_id.mojo",
+        "pass\n",
+    );
+    let m = map_file(
+        "own_taken",
+        "komira_json\tjson\nkomira_test_run_id\ttest_run_id\n",
+    );
+    let before = s.snapshot();
+    let err = rename(&args(&s, &m.0.join("map.tsv"), false)).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "src/komira_test_run_id/tests/test_run_id.mojo and src/komira_test_run_id/tests/test_test_run_id.mojo would both move to src/test_run_id/tests/test_test_run_id.mojo"
+    );
+    assert_eq!(s.snapshot(), before);
+}
+
+#[test]
+fn own_name_test_needs_a_direct_test_file_of_a_mapped_package() {
+    let m = Mapping::parse("komira_test_run_id\ttest_run_id\n").unwrap();
+    let own = |p: &str| crate::tree::own_name_test(Path::new(p), &m);
+    assert_eq!(
+        own("src/komira_test_run_id/tests/test_run_id.mojo"),
+        Some(PathBuf::from("src/test_run_id/tests/test_test_run_id.mojo"))
+    );
+    assert_eq!(
+        own("src/komira_test_run_id/tests/sub/test_run_id.mojo"),
+        None
+    );
+    assert_eq!(own("src/komira_test_run_id/test_run_id.mojo"), None);
+    assert_eq!(own("src/komira_test_run_id/tests/test_run_id.txt"), None);
+    assert_eq!(own("src/komira_other/tests/test_run_id.mojo"), None);
+    assert_eq!(own("lib/komira_test_run_id/tests/test_run_id.mojo"), None);
 }
 
 #[test]

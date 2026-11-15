@@ -39,13 +39,13 @@ The `mojo_library` macro declares a package target for every library, named
 `<name>_conda`. Nobody writes one:
 
 ```python
-mojo_library(name = "json", ...)           # also declares :komira_json_conda
+mojo_library(name = "json", ...)           # also declares :json_conda
 mojo_library(name = "x", conda = False, ...)      # opts out: no package target
 mojo_library(name = "x", conda_name = "other")    # published as `other`; the import
                                                   # name stays `x`
 ```
 
-`./buck2 build //src/json:komira_json_conda` writes a directory (below).
+`./buck2 build //src/json:json_conda` writes a directory (below).
 Everything about the package is derived from the library, so the package cannot
 disagree with it ([`conda.bzl`](../../tools/build/package/conda.bzl) lists each):
 

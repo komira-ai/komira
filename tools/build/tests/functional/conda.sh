@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # conda.sh -- tests of the conda packages (tools/build/package/conda.bzl, and
-# `komira_pack conda` / `conda-check` behind it), on //src/encoding:komira_encoding_conda
+# `komira_pack conda` / `conda-check` behind it), on //src/encoding:encoding_conda
 # and the fixture libraries of tests//negative/conda.
 #
 # usage: tools/build/tests/functional/conda.sh [--no-uncached] [--no-install | --require-install]   (from anywhere; BUCK2 overrides;
@@ -139,7 +139,7 @@ F0=encoding-$pin-$B0.conda
 README=$ROOT/src/encoding/README.md
 DOC=share/doc/encoding/README.md
 
-PKG=//src/encoding:komira_encoding_conda
+PKG=//src/encoding:encoding_conda
 FX=tests//negative/conda
 out_of() { # target -> its full output path
     "$BUCK2" build "$1" --materializations all --show-full-output 2>> "$W/build.log" | sed -n 's/^[^ ]* //p' | tail -n 1
@@ -241,7 +241,7 @@ jq -e --arg s "$file_sha" --arg p "$want_sha" --arg v "$pin" --arg b "$B0" --arg
     and .stamped == false and .source_commit == "" and .name == "encoding" and .import_name == "encoding"
     and .subdir == "linux-64" and .version == $v and .timestamp_ms == 0 and .build == $b and .build_number == 0
     and .mojo_pin == $v and .depends == ["__linux", "mojo-compiler ==\($v)"]
-    and .label == "komira//src/encoding:komira_encoding_conda"
+    and .label == "komira//src/encoding:encoding_conda"
     and .doc_files == [{"path": "share/doc/encoding/README.md", "sha256": $d}]' --arg d "$doc_sha" "$METADATA" > /dev/null || p metadata
 [ "$(jq -S -c . "$METADATA")" = "$(cat "$METADATA")" ] || p metadata-not-sorted-compact
 [ "$(cat "$CHECK")" = ok ] || p check-marker
@@ -255,7 +255,7 @@ fi
 # wrong with a package, so a green check is evidence.
 PACK=$(out_of //tools/build/package:komira_pack)
 SRCS=$(out_of //src/encoding:encoding[src])
-LABEL=komira//src/encoding:komira_encoding_conda
+LABEL=komira//src/encoding:encoding_conda
 SUMMARY='The `encoding` Mojo library of komira, as a conda package.'
 pack() { # out-dir, payload [extra komira_pack args...]
     local o=$1 payload=$2

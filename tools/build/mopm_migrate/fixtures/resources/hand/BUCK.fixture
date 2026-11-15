@@ -98,7 +98,7 @@ mojo_conda_holds(
 # komira's conda packer over `:resources`. It goes when the release machine takes the mopm
 # package. This library's mopm package is `:conda` above.
 conda_package(
-    name = "komira_resources_conda",
+    name = "resources_conda",
     lib = ":resources",
     summary = "The `resources` Mojo library of komira, as a conda package.",
     visibility = ["PUBLIC"],

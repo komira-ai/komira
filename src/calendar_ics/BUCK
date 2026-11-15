@@ -109,7 +109,7 @@ mojo_conda_holds(
 # komira's conda packer over `:calendar_ics`. It goes when the release machine takes the mopm
 # package. This library's mopm package is `:conda` above.
 conda_package(
-    name = "komira_calendar_ics_conda",
+    name = "calendar_ics_conda",
     lib = ":calendar_ics",
     summary = "The `calendar_ics` Mojo library of komira, as a conda package.",
     visibility = ["PUBLIC"],

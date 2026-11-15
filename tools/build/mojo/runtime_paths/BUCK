@@ -7,7 +7,7 @@ alias(
 )
 
 alias(
-    name = "komira_runtime_paths_conda",
-    actual = "//src/runtime_paths:komira_runtime_paths_conda",
+    name = "runtime_paths_conda",
+    actual = "//src/runtime_paths:runtime_paths_conda",
     visibility = ["PUBLIC"],
 )

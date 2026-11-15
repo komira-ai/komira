@@ -3,7 +3,7 @@
 
 use crate::error::Error;
 use crate::manifest::rewrite_manifest;
-use crate::map::{Mapping, OLD_PREFIX};
+use crate::map::{Mapping, OLD_PREFIX, TEST_PREFIX};
 use crate::words::{changed_lines, contains_word, replace_words};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -81,6 +81,10 @@ pub struct Plan {
     pub binary: Vec<PathBuf>,
     /// Listed entries that are not regular files (symbolic links, submodules): left unchanged.
     pub not_files: Vec<PathBuf>,
+    /// Test files named after their package's new name (`src/<old>/tests/<new>.mojo`), moved to
+    /// `tests/test_<new>.mojo`, from and to: buildrules' `mojo_package` names the test target of
+    /// a file by its stem, which would be the package's own target name.
+    pub own_name_tests: Vec<(PathBuf, PathBuf)>,
     /// `.mojo` files that change, bind a package's module name (`import komira_x`) and already use
     /// its new name as a word before the rename, with those names: the places a renamed module
     /// name could meet a local name.
@@ -94,10 +98,27 @@ fn io_error(path: &Path) -> impl FnOnce(io::Error) -> Error + '_ {
     }
 }
 
-/// The relative path with every whole word that is an old name replaced in each component.
+/// The relative path with every word of [`Mapping::words`] replaced in each component.
 fn moved_path(rel: &Path, mapping: &Mapping) -> Option<PathBuf> {
     let text = rel.to_str()?;
-    replace_words(text, mapping.pairs()).map(PathBuf::from)
+    replace_words(text, mapping.words()).map(PathBuf::from)
+}
+
+/// Where a test file named after its package's new name moves: `src/<old>/tests/<new>.mojo`
+/// to `src/<new>/tests/test_<new>.mojo`. buildrules' `mojo_package` declares a target per test
+/// file named by its stem, so the file's target and the package's own `<new>` target would be one
+/// name (`src/komira_test_run_id/tests/test_run_id.mojo`). Only a file directly under `tests/`.
+pub fn own_name_test(rel: &Path, mapping: &Mapping) -> Option<PathBuf> {
+    let parts: Vec<&str> = rel
+        .components()
+        .map(|c| c.as_os_str().to_str())
+        .collect::<Option<_>>()?;
+    let ["src", old, "tests", file] = parts[..] else {
+        return None;
+    };
+    let new = mapping.new_name(old)?;
+    (file.strip_suffix(".mojo") == Some(new))
+        .then(|| PathBuf::from(format!("src/{new}/tests/{TEST_PREFIX}{new}.mojo")))
 }
 
 /// The listed paths sorted into files and other entries (symbolic links, directories such as a
@@ -198,7 +219,7 @@ fn rewrite_text(rel: &Path, text: &str, mapping: &Mapping, plan: &mut Plan) {
             new
         })
     } else {
-        replace_words(text, mapping.pairs())
+        replace_words(text, mapping.words())
     };
     let Some(new) = new else {
         return;
@@ -229,11 +250,11 @@ fn rewrite_text(rel: &Path, text: &str, mapping: &Mapping, plan: &mut Plan) {
     });
 }
 
-/// True when `bytes` hold an old name as a whole word.
+/// True when `bytes` hold a word of [`Mapping::words`].
 fn bytes_hold_old_name(bytes: &[u8], mapping: &Mapping) -> bool {
     bytes
         .split(|b| !crate::words::is_word_byte(*b))
-        .any(|word| std::str::from_utf8(word).is_ok_and(|w| mapping.new_name(w).is_some()))
+        .any(|word| std::str::from_utf8(word).is_ok_and(|w| mapping.words().contains_key(w)))
 }
 
 /// Reads the `listed` paths of the checkout at `repo` (its tracked files, `git ls-files`) and
@@ -266,7 +287,8 @@ pub fn plan(
             Err(_) if bytes_hold_old_name(&bytes, mapping) => plan.binary.push(rel.clone()),
             Err(_) => {}
         }
-        if let Some(to) = moved_path(rel, mapping) {
+        let own = own_name_test(rel, mapping);
+        if let Some(to) = own.clone().or_else(|| moved_path(rel, mapping)) {
             if let Some(first) = targets.insert(to.clone(), rel.clone()) {
                 return Err(Error::SameTarget {
                     first,
@@ -280,6 +302,9 @@ pub fn plan(
                     from: rel.clone(),
                     target: to,
                 });
+            }
+            if own.is_some() {
+                plan.own_name_tests.push((rel.clone(), to.clone()));
             }
             plan.moves.push((rel.clone(), to));
         }

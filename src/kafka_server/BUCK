@@ -61,7 +61,7 @@ mojo_conda(
 # komira's conda packer over `:kafka_server`. It goes when the release machine takes the mopm
 # package. This library's mopm package is `:conda` above.
 conda_package(
-    name = "komira_kafka_server_conda",
+    name = "kafka_server_conda",
     lib = ":kafka_server",
     summary = "The `kafka_server` Mojo library of komira, as a conda package.",
     visibility = ["PUBLIC"],

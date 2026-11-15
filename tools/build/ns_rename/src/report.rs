@@ -65,6 +65,14 @@ pub fn summary(plan: &Plan, dry_run: bool) -> String {
     let _ = writeln!(out, "files moved: {}", plan.moves.len());
     let _ = writeln!(
         out,
+        "  of them, test files named after their package's new name, moved to test_<name>: {}",
+        plan.own_name_tests.len()
+    );
+    for (from, to) in &plan.own_name_tests {
+        let _ = writeln!(out, "    {} -> {}", from.display(), to.display());
+    }
+    let _ = writeln!(
+        out,
         "files rewritten: {}, lines changed: {}",
         total.files, total.lines
     );
@@ -143,7 +151,17 @@ mod tests {
     fn prints_every_section_with_its_count() {
         let plan = Plan {
             packages: vec![("komira_json".into(), "json".into())],
-            moves: vec![("src/komira_json/BUCK".into(), "src/json/BUCK".into())],
+            moves: vec![
+                ("src/komira_json/BUCK".into(), "src/json/BUCK".into()),
+                (
+                    "src/komira_json/tests/json.mojo".into(),
+                    "src/json/tests/test_json.mojo".into(),
+                ),
+            ],
+            own_name_tests: vec![(
+                "src/komira_json/tests/json.mojo".into(),
+                "src/json/tests/test_json.mojo".into(),
+            )],
             rewrites: vec![
                 rewrite("src/komira_json/a.mojo", Kind::Mojo, 3, 2),
                 rewrite("src/komira_json/BUCK", Kind::Build, 4, 0),
@@ -161,7 +179,9 @@ mod tests {
             "ns-rename: dry run, nothing written\n\
              packages renamed: 1\n\
              \x20 src/komira_json -> src/json\n\
-             files moved: 1\n\
+             files moved: 2\n\
+             \x20 of them, test files named after their package's new name, moved to test_<name>: 1\n\
+             \x20   src/komira_json/tests/json.mojo -> src/json/tests/test_json.mojo\n\
              files rewritten: 4, lines changed: 10\n\
              \x20 by kind:\n\
              \x20   .mojo: 1 files, 3 lines (2 import lines)\n\
@@ -187,6 +207,7 @@ mod tests {
             "ns-rename: written\n\
              packages renamed: 0\n\
              files moved: 0\n\
+             \x20 of them, test files named after their package's new name, moved to test_<name>: 0\n\
              files rewritten: 0, lines changed: 0\n\
              \x20 by kind:\n\
              \x20 by top-level directory:\n\

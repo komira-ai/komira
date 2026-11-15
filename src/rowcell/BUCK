@@ -47,7 +47,7 @@ mojo_conda(
 # packer over `:rowcell`. It goes when the release machine takes the mopm package. This
 # library's mopm package is `:conda` above.
 conda_package(
-    name = "komira_rowcell_conda",
+    name = "rowcell_conda",
     lib = ":rowcell",
     summary = "The `rowcell` Mojo library of komira, as a conda package.",
     visibility = ["PUBLIC"],

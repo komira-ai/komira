@@ -32,7 +32,7 @@ mojo_package(
 # `:zlib`, the target the packages that depend on this library name, is `:lib` as komira's
 # Mojo rules take it (tools/build/mojo/adopt.bzl): the same file, so a dependent builds only once the
 # test has passed. `dlopen` is the soname the library opens at run time (OwnedDLHandle): the
-# conda package `komira_zlib_conda` requires the conda-forge package
+# conda package `zlib_conda` requires the conda-forge package
 # tools/build/package/system_libs.bzl names for it, and `[native-dependencies]` of mopm.toml
 # says the same for `:conda`.
 mojo_adopted_library(
@@ -67,7 +67,7 @@ mojo_conda(
 # packer over `:zlib`. It goes when the release machine takes `:conda`, which is this
 # library's mopm package.
 conda_package(
-    name = "komira_zlib_conda",
+    name = "zlib_conda",
     lib = ":zlib",
     summary = "The `zlib` Mojo library of komira, as a conda package.",
     visibility = ["PUBLIC"],

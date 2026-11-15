@@ -85,7 +85,7 @@ mojo_conda_holds(
 # packer over `:uuid`. It goes when the release machine takes the mopm package. This library's
 # mopm package is `:conda` above.
 conda_package(
-    name = "komira_uuid_conda",
+    name = "uuid_conda",
     lib = ":uuid",
     summary = "The `uuid` Mojo library of komira, as a conda package.",
     visibility = ["PUBLIC"],

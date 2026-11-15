@@ -66,7 +66,7 @@ mojo_conda_holds(
 # komira's conda packer over `:fork_join`. It goes when the release machine takes the mopm
 # package. This library's mopm package is `:conda` above.
 conda_package(
-    name = "komira_fork_join_conda",
+    name = "fork_join_conda",
     lib = ":fork_join",
     summary = "The `fork_join` Mojo library of komira, as a conda package.",
     visibility = ["PUBLIC"],

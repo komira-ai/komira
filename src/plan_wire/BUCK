@@ -78,7 +78,7 @@ export_file(name = "tests/fixtures/golden/topic_live.hex", visibility = ["//test
 #       --out src/plan_wire/tests/fixtures/<dir>/<stem>.canonical.hex
 _PLAN_ROOT = "komira.plan.v1.WirePlanEnvelope"
 
-_PLAN_PROTO = ["//src/plan_proto:komira_plan_proto_gen"]
+_PLAN_PROTO = ["//src/plan_proto:plan_proto_gen"]
 
 # `aggregate_every_fn` (COUNT(*) and one aggregate per AggFn member, each with
 # its arguments) is frozen and read back by tests/test_plan_wire_agg_args.mojo;

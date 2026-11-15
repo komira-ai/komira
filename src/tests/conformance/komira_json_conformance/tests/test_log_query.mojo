@@ -1,5 +1,5 @@
 # =============================================================================
-# test_komira_log_query.mojo -- is_json_object_text, the log route embed check, against JSONTestSuite
+# test_log_query.mojo -- is_json_object_text, the log route embed check, against JSONTestSuite
 # =============================================================================
 #
 # Feeds every file of the pinned test_parsing corpus (318: 95 y_, 188 n_,

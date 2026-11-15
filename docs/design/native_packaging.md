@@ -629,7 +629,7 @@ stop their own references binding to an earlier global definition without `-Bsym
 `so` (`tools/build/package/libkomira`, target `komira_so_libkomira_conda`): the library's `.mojoc` and
 `lib/libkomira.so`, with one `lib_files` row of kind `shared` (its SONAME is the file name, so there is
 no link name; the packer writes one only for a versioned SONAME). `conda_package` takes the shared
-library as `shared_lib`, and the plain `komira_so_conda` is the same package without it: a release
+library as `shared_lib`, and the plain `so_conda` is the same package without it: a release
 declares one of the two. The package's requirements are the usual ones: the platform guard, `__glibc`
 at the table's floor, `mojo-compiler` at the pin, and the Mojo dependencies of the library. The Mojo
 runtime the library is `NEEDED` on (`libKGENCompilerRTShared.so`, and what it loads) is not bundled: it

@@ -124,7 +124,7 @@ gen_check(
         "_layout_probe.mojo",
         "aws_logs.mojo",
     ],
-    gen = ":komira_aws_logs_gen",
+    gen = ":aws_logs_gen",
     present = [
         "mode         : pure (no transport)",
         "operations   : GetLogEvents",

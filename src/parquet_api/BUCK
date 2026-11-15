@@ -86,7 +86,7 @@ mojo_conda(
 # komira's conda packer over `:parquet_api`. It goes when the release machine takes the mopm
 # package. This library's mopm package is `:conda` above.
 conda_package(
-    name = "komira_parquet_api_conda",
+    name = "parquet_api_conda",
     lib = ":parquet_api",
     summary = "The `parquet_api` Mojo library of komira, as a conda package.",
     visibility = ["PUBLIC"],

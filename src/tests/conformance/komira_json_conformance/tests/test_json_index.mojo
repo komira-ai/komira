@@ -1,5 +1,5 @@
 # =============================================================================
-# test_komira_json_index.mojo -- extract_column and the string unescaper, against JSONTestSuite
+# test_json_index.mojo -- extract_column and the string unescaper, against JSONTestSuite
 # =============================================================================
 #
 # Feeds every file of the pinned test_parsing corpus (318: 95 y_, 188 n_,

@@ -46,7 +46,7 @@ mojo_conda(
 # still builds it (release/artifacts.textproto): komira's conda packer over `:encoding`. It goes
 # when those packages move to mopm. This library's mopm package is `:conda` above.
 conda_package(
-    name = "komira_encoding_conda",
+    name = "encoding_conda",
     lib = ":encoding",
     summary = "The `encoding` Mojo library of komira, as a conda package.",
     visibility = ["PUBLIC"],

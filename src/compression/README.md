@@ -144,6 +144,6 @@ This package is built with buildrules' `mojo_package` and packaged for mopm as `
 `:conda` is the `.conda` of the mopm package (`mojo-compression-0.1.0-mojo1.0.0_0.conda`): the `.mojoc` and
 `lib/libsnappy.a`, requiring `lz4`, `zlib` and the three conda packages above; `:conda_holds` reads it back.
 `:compression` is `:lib` as komira's Mojo rules take it (`mojo_adopted_library`); it declares the three
-sonames in `dlopen`, which `:komira_compression_conda` (the release set's packaging) turns into the same requirements,
+sonames in `dlopen`, which `:compression_conda` (the release set's packaging) turns into the same requirements,
 and it names `:komira_compression_native`, the shared library of the release set that links the older
 `//third_party/snappy:snappy`. It also compiles and runs the README's examples above (`[tests][readme]`) against `:lib`.

@@ -107,7 +107,7 @@ mojo_conda_holds(
 # Kept for the release machine, which still builds it (release/BUCK, release/artifacts.textproto):
 # komira's conda packer over `:managed_mail_proto`. This library's mopm package is `:conda` above.
 conda_package(
-    name = "komira_managed_mail_proto_conda",
+    name = "managed_mail_proto_conda",
     lib = ":managed_mail_proto",
     summary = "The `managed_mail_proto` Mojo library of komira, as a conda package.",
     visibility = ["PUBLIC"],

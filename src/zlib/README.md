@@ -133,5 +133,5 @@ writes, and build `komira//src/zlib:lib` on the farm.
 
 `:conda` is the `.conda` of the mopm package (`mojo-zlib-0.1.0-mojo1.0.0_0.conda`): the `.mojoc`, requiring
 `libzlib`. `:zlib` is `:lib` as komira's Mojo rules take it (`mojo_adopted_library`); it declares
-`dlopen = ["libz.so.1"]`, which `:komira_zlib_conda` (the release set's packaging) turns into the same requirement.
+`dlopen = ["libz.so.1"]`, which `:zlib_conda` (the release set's packaging) turns into the same requirement.
 It also compiles and runs the README's examples above (`[tests][readme]`) against `:lib`.
