@@ -6,7 +6,7 @@
 //!     the same metapackage, the same members in the same order, and the same --license,
 //!     --summary and --home for the metapackage. A member in one and missing from the other is
 //!     refused, naming it.
-//!  2. A release does not name both so packages. `komira_so_conda` and
+//!  2. A release does not name both so packages. `so_conda` and
 //!     `komira_so_libkomira_conda` are one package name, version and build with different
 //!     contents (the second adds lib/libkomira.so), so naming both would hand a channel two
 //!     different files for one name.
@@ -132,10 +132,10 @@ fn checkSo(ar: std.mem.Allocator, artifacts: []const u8) !?[]const u8 {
     var held: usize = 0;
     for (arts) |a| {
         for (a.targets) |target| {
-            if (std.mem.endsWith(u8, target, ":komira_so_conda") or std.mem.endsWith(u8, target, ":komira_so_libkomira_conda")) held += 1;
+            if (std.mem.endsWith(u8, target, ":so_conda") or std.mem.endsWith(u8, target, ":komira_so_libkomira_conda")) held += 1;
         }
     }
-    if (held > 1) return try std.fmt.allocPrint(ar, "{s} declares both so packages (komira_so_conda and komira_so_libkomira_conda are one package name with different contents)", .{ARTIFACTS});
+    if (held > 1) return try std.fmt.allocPrint(ar, "{s} declares both so packages (so_conda and komira_so_libkomira_conda are one package name with different contents)", .{ARTIFACTS});
     return null;
 }
 
@@ -296,7 +296,7 @@ test "a release naming both so packages is refused" {
     var arena = std.heap.ArenaAllocator.init(t.allocator);
     defer arena.deinit();
     const ar = arena.allocator();
-    const both = try withSo(ar, &.{ "//src/so:komira_so_conda", "//tools/build/package/libkomira:komira_so_libkomira_conda" });
+    const both = try withSo(ar, &.{ "//src/so:so_conda", "//tools/build/package/libkomira:komira_so_libkomira_conda" });
     try expectRefused(try checkSo(ar, both), "declares both so packages");
 }
 
@@ -304,7 +304,7 @@ test "a release naming either so package alone, or neither, is accepted" {
     var arena = std.heap.ArenaAllocator.init(t.allocator);
     defer arena.deinit();
     const ar = arena.allocator();
-    try t.expect((try checkSo(ar, try withSo(ar, &.{"//src/so:komira_so_conda"}))) == null);
+    try t.expect((try checkSo(ar, try withSo(ar, &.{"//src/so:so_conda"}))) == null);
     try t.expect((try checkSo(ar, try withSo(ar, &.{"//tools/build/package/libkomira:komira_so_libkomira_conda"}))) == null);
     try t.expect((try checkSo(ar, FIXTURE_ARTIFACTS)) == null);
 }

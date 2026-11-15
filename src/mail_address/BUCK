@@ -45,7 +45,7 @@ mojo_conda(
 # packer over `:mail_address`. It goes when the release machine takes the mopm package. This
 # library's mopm package is `:conda` above.
 conda_package(
-    name = "komira_mail_address_conda",
+    name = "mail_address_conda",
     lib = ":mail_address",
     summary = "The `mail_address` Mojo library of komira, as a conda package.",
     visibility = ["PUBLIC"],

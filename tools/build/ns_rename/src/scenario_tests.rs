@@ -184,7 +184,9 @@ const SUMMARY_BODY: &str = "packages renamed: 2\n\
      \x20 src/komira_hash -> src/hashing\n\
      \x20 src/komira_json -> src/json\n\
      files moved: 10\n\
+     \x20 of them, test files named after their package's new name, moved to test_<name>: 0\n\
      files rewritten: 11, lines changed: 17\n\
+     \x20 of them, files whose rows were sorted again: 0\n\
      \x20 by kind:\n\
      \x20   .mojo: 4 files, 6 lines (5 import lines)\n\
      \x20   BUCK and .bzl: 3 files, 5 lines\n\
@@ -278,6 +280,262 @@ fn renames_directories_imports_targets_and_manifests() {
         assert!(!s.exists(old), "{old}");
     }
     assert!(s.exists("docs"));
+}
+
+/// A checkout where a test file is named after its package's new name, a suite names its test
+/// files `test_<package>.mojo` from a list of package names, and targets are named by a rule's
+/// derived suffixes.
+fn derived_checkout(test: &str) -> Scratch {
+    let s = Scratch::new(test);
+    s.write(
+        "src/komira_test_run_id/BUCK",
+        "mojo_adopted_library(name = \"komira_test_run_id\", test_srcs = glob([\"tests/test_*.mojo\"]))\n",
+    );
+    s.write(
+        "src/komira_test_run_id/tests/test_run_id.mojo",
+        "from komira_test_run_id import mint\nprint(\"test_run_id: OK\")\n",
+    );
+    s.write(
+        "src/komira_test_run_id/buildrules.mojo.lock.bzl",
+        "{\"id\": \"t/test:src/komira_test_run_id/tests/test_run_id.mojo\",\n\
+         \x20\"path\": \"src/komira_test_run_id/tests/test_run_id.mojo\",\n\
+         \x20\"other\": \"src/komira_test_run_id/tests/test_run_id.mojo.bak\"}\n",
+    );
+    s.write(
+        "src/komira_test_run_id/tests/test_clock.mojo",
+        "from komira_test_run_id import clock\n",
+    );
+    s.write(
+        "src/komira_json/BUCK",
+        "mojo_library(name = \"komira_json\")\n\
+         proto(name = \"komira_json_proto\", gen = \":komira_json_gen\")\n",
+    );
+    s.write(
+        "src/komira_json/tests/test_run_id.mojo",
+        "from komira_json import parse\n",
+    );
+    s.write(
+        "src/tests/conformance/suite/BUCK",
+        "_PARSERS = [\"komira_json\"]\n\
+         test_srcs = [\"tests/test_{}.mojo\".format(p) for p in _PARSERS]\n",
+    );
+    s.write(
+        "src/tests/conformance/suite/tests/test_komira_json.mojo",
+        "conformance_main(\"komira_json\")\n",
+    );
+    s.write(
+        "ci/targets/shard_0.bzl",
+        "TARGETS = [\"komira//src/komira_json:komira_json_conda\", \"//src/komira_json:komira_json_cov_gate\",\n\
+         \x20   \"komira//src/komira_json:komira_json_fresh\", \"komira_json_index_conda\", \"komira_json_v1\", \"libkomira_json_gen\"]\n",
+    );
+    s
+}
+
+#[test]
+fn renames_test_files_and_derived_target_names_with_their_package() {
+    let s = derived_checkout("derived");
+    let m = map_file(
+        "derived",
+        "komira_json\tjson\nkomira_json_index\tjson_index\nkomira_test_run_id\ttest_run_id\n",
+    );
+    s.write(
+        "src/komira_json_index/BUCK",
+        "mojo_library(name = \"komira_json_index\")\n",
+    );
+    let summary = rename(&args(&s, &m.0.join("map.tsv"), false)).unwrap();
+    assert!(
+        summary.contains(
+            "  of them, test files named after their package's new name, moved to test_<name>: 1\n\
+             \x20   src/komira_test_run_id/tests/test_run_id.mojo -> src/test_run_id/tests/test_test_run_id.mojo\n"
+        ),
+        "{summary}"
+    );
+    // The test named after the package's new name moves; its text is word-replaced as any file.
+    assert_eq!(
+        s.read("src/test_run_id/tests/test_test_run_id.mojo"),
+        "from test_run_id import mint\nprint(\"test_run_id: OK\")\n"
+    );
+    assert!(!s.exists("src/test_run_id/tests/test_run_id.mojo"));
+    // The lock names the test file where it moved; a longer path is not that file.
+    assert_eq!(
+        s.read("src/test_run_id/buildrules.mojo.lock.bzl"),
+        "{\"id\": \"t/test:src/test_run_id/tests/test_test_run_id.mojo\",\n\
+         \x20\"path\": \"src/test_run_id/tests/test_test_run_id.mojo\",\n\
+         \x20\"other\": \"src/test_run_id/tests/test_run_id.mojo.bak\"}\n"
+    );
+    // Another test file of the package keeps its name.
+    assert_eq!(
+        s.read("src/test_run_id/tests/test_clock.mojo"),
+        "from test_run_id import clock\n"
+    );
+    // A file of another package that happens to have that stem is not this package's own name.
+    assert_eq!(
+        s.read("src/json/tests/test_run_id.mojo"),
+        "from json import parse\n"
+    );
+    // `test_<old>` moves and is renamed with the list that names it.
+    assert_eq!(
+        s.read("src/tests/conformance/suite/BUCK"),
+        "_PARSERS = [\"json\"]\n\
+         test_srcs = [\"tests/test_{}.mojo\".format(p) for p in _PARSERS]\n"
+    );
+    assert_eq!(
+        s.read("src/tests/conformance/suite/tests/test_json.mojo"),
+        "conformance_main(\"json\")\n"
+    );
+    assert!(!s.exists("src/tests/conformance/suite/tests/test_komira_json.mojo"));
+    // A derived target name follows its target; a longer word, or one with a prefix, does not.
+    assert_eq!(
+        s.read("src/json/BUCK"),
+        "mojo_library(name = \"json\")\n\
+         proto(name = \"komira_json_proto\", gen = \":json_gen\")\n"
+    );
+    assert_eq!(
+        s.read("ci/targets/shard_0.bzl"),
+        "TARGETS = [\"komira//src/json:json_conda\", \"//src/json:json_cov_gate\",\n\
+         \x20   \"komira//src/json:json_fresh\", \"json_index_conda\", \"komira_json_v1\", \"libkomira_json_gen\"]\n"
+    );
+}
+
+#[test]
+fn sorts_the_rows_of_a_sorted_file_again_and_keeps_the_release_set_fixtures() {
+    let s = Scratch::new("rows");
+    s.write(
+        "src/komira_buffer/BUCK",
+        "mojo_library(name = \"komira_buffer\")\n",
+    );
+    s.write(
+        "src/komira_bump_arena/BUCK",
+        "mojo_library(name = \"komira_bump_arena\")\n",
+    );
+    s.write(
+        "release/prod_claimed_names.txt",
+        "# sorted\nkci_api\nkomira_buffer\nkomira_bump_arena\n",
+    );
+    s.write(
+        "release/readme_e2e/packages.bzl",
+        "PACKAGES = {\n    \"komira_buffer\": \"0.1.0\",\n    \"komira_bump_arena\": \"0.1.0\",\n}\n",
+    );
+    s.write(
+        "release/mopm_native_ids.bzl",
+        "load(\"//src/komira_buffer:l.bzl\", komira_buffer = \"G\")\n\
+         load(\"//src/komira_bump_arena:l.bzl\", komira_bump_arena = \"G\")\n",
+    );
+    // Not listed: its rows are renamed and left where they were.
+    s.write("docs/order.txt", "komira_buffer\nkomira_bump_arena\n");
+    s.write(
+        "release/ci/tests/test_set_json.zig",
+        "member(\"komira_buffer\", \"library\")\n",
+    );
+    let m = map_file(
+        "rows",
+        "komira_buffer\tbyte_buffer\nkomira_bump_arena\tbump_arena\n",
+    );
+    let summary = rename(&args(&s, &m.0.join("map.tsv"), false)).unwrap();
+    assert!(
+        summary.contains(
+            "  of them, files whose rows were sorted again: 3\n\
+             \x20   release/mopm_native_ids.bzl\n\
+             \x20   release/prod_claimed_names.txt\n\
+             \x20   release/readme_e2e/packages.bzl\n"
+        ),
+        "{summary}"
+    );
+    assert_eq!(
+        s.read("release/prod_claimed_names.txt"),
+        "# sorted\nbump_arena\nbyte_buffer\nkci_api\n"
+    );
+    assert_eq!(
+        s.read("release/readme_e2e/packages.bzl"),
+        "PACKAGES = {\n    \"bump_arena\": \"0.1.0\",\n    \"byte_buffer\": \"0.1.0\",\n}\n"
+    );
+    assert_eq!(
+        s.read("release/mopm_native_ids.bzl"),
+        "load(\"//src/bump_arena:l.bzl\", bump_arena = \"G\")\n\
+         load(\"//src/byte_buffer:l.bzl\", byte_buffer = \"G\")\n"
+    );
+    assert_eq!(s.read("docs/order.txt"), "byte_buffer\nbump_arena\n");
+    assert_eq!(
+        s.read("release/ci/tests/test_set_json.zig"),
+        "member(\"komira_buffer\", \"library\")\n"
+    );
+}
+
+#[test]
+fn refuses_an_own_name_test_moving_onto_an_existing_test_file() {
+    let s = derived_checkout("own_taken");
+    s.write(
+        "src/komira_test_run_id/tests/test_test_run_id.mojo",
+        "pass\n",
+    );
+    let m = map_file(
+        "own_taken",
+        "komira_json\tjson\nkomira_test_run_id\ttest_run_id\n",
+    );
+    let before = s.snapshot();
+    let err = rename(&args(&s, &m.0.join("map.tsv"), false)).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "src/komira_test_run_id/tests/test_run_id.mojo and src/komira_test_run_id/tests/test_test_run_id.mojo would both move to src/test_run_id/tests/test_test_run_id.mojo"
+    );
+    assert_eq!(s.snapshot(), before);
+}
+
+#[test]
+fn replace_paths_replaces_whole_paths_only() {
+    let paths = [(
+        "src/a/tests/a.mojo".to_string(),
+        "src/a/tests/test_a.mojo".to_string(),
+    )];
+    let r = |t: &str| crate::tree::replace_paths(t, &paths);
+    assert_eq!(
+        r("src/a/tests/a.mojo \"src/a/tests/a.mojo\" x:src/a/tests/a.mojo").as_deref(),
+        Some("src/a/tests/test_a.mojo \"src/a/tests/test_a.mojo\" x:src/a/tests/test_a.mojo")
+    );
+    // Inside a longer path, a longer name, or followed by a word byte: not the path.
+    assert_eq!(r("lib/src/a/tests/a.mojo"), None);
+    assert_eq!(r("xsrc/a/tests/a.mojo"), None);
+    assert_eq!(r(".src/a/tests/a.mojo -src/a/tests/a.mojo"), None);
+    assert_eq!(r("src/a/tests/a.mojox"), None);
+    assert_eq!(r("src/a/tests/a.mojo.bak src/a/tests/a.mojo/x"), None);
+    assert_eq!(r(""), None);
+    // Two pairs each replace their own path.
+    let two = [
+        paths[0].clone(),
+        (
+            "src/b/tests/b.mojo".to_string(),
+            "src/b/tests/test_b.mojo".to_string(),
+        ),
+    ];
+    assert_eq!(
+        crate::tree::replace_paths("src/b/tests/b.mojo src/a/tests/a.mojo", &two).as_deref(),
+        Some("src/b/tests/test_b.mojo src/a/tests/test_a.mojo")
+    );
+}
+
+#[test]
+fn own_name_test_needs_a_direct_test_file_of_a_mapped_package() {
+    let m = Mapping::parse("komira_test_run_id\ttest_run_id\n").unwrap();
+    let own = |p: &str| crate::tree::own_name_test(Path::new(p), &m);
+    assert_eq!(
+        own("src/komira_test_run_id/tests/test_run_id.mojo"),
+        Some(PathBuf::from("src/test_run_id/tests/test_test_run_id.mojo"))
+    );
+    assert_eq!(
+        own("src/komira_test_run_id/tests/sub/test_run_id.mojo"),
+        None
+    );
+    assert_eq!(own("src/komira_test_run_id/test_run_id.mojo"), None);
+    assert_eq!(own("src/komira_test_run_id/tests/test_run_id.txt"), None);
+    assert_eq!(own("src/komira_other/tests/test_run_id.mojo"), None);
+    assert_eq!(own("lib/komira_test_run_id/tests/test_run_id.mojo"), None);
+    // A path that is not UTF-8 is no package's test file.
+    let not_utf8 = Path::new(
+        <std::ffi::OsStr as std::os::unix::ffi::OsStrExt>::from_bytes(
+            b"src/komira_test_run_id/tests/\xff.mojo",
+        ),
+    );
+    assert_eq!(crate::tree::own_name_test(not_utf8, &m), None);
 }
 
 #[test]

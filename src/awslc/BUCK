@@ -107,9 +107,9 @@ mojo_adopted_library(
     visibility = ["PUBLIC"],
 )
 
-# The release machine builds `komira_awslc_conda` (release/artifacts.textproto): komira's conda packer over `:awslc`.
+# The release machine builds `awslc_conda` (release/artifacts.textproto): komira's conda packer over `:awslc`.
 conda_package(
-    name = "komira_awslc_conda",
+    name = "awslc_conda",
     lib = ":awslc",
     summary = "aws-lc's libcrypto of komira, as a static archive in a conda package.",
     visibility = ["PUBLIC"],

@@ -44,11 +44,11 @@ mojo_conda_holds(
     visibility = ["PUBLIC"],
 )
 
-# The release machine builds `komira_libc_conda` (release/artifacts.textproto): komira's conda packer over
+# The release machine builds `libc_conda` (release/artifacts.textproto): komira's conda packer over
 # `:libc`, with the library's own shared library below. It goes when the release machine takes
 # `:conda`, which is this library's mopm package.
 conda_package(
-    name = "komira_libc_conda",
+    name = "libc_conda",
     lib = ":libc",
     native = ":komira_libc_native",
     summary = "The `libc` Mojo library of komira, as a conda package.",

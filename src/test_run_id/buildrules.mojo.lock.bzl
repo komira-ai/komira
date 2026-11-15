@@ -56,12 +56,12 @@ GRAPH_JSON = r'''{
       "outputs": ["test_run_id.mojoc"]
     },
     {
-      "id": "test_run_id@0.1.0#mojo1.0.0/test:src/test_run_id/tests/test_run_id.mojo",
+      "id": "test_run_id@0.1.0#mojo1.0.0/test:src/test_run_id/tests/test_test_run_id.mojo",
       "package": "test_run_id",
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/test_run_id/tests/test_run_id.mojo", "sha256": "d78573a43820c5b8024622b215bf06a8c1530ee1943ecbf46b9129b98441a6be"}
+        {"path": "src/test_run_id/tests/test_test_run_id.mojo", "sha256": "d78573a43820c5b8024622b215bf06a8c1530ee1943ecbf46b9129b98441a6be"}
       ],
       "deps": ["test_run_id@0.1.0#mojo1.0.0/lib"],
       "natives": [],
@@ -141,12 +141,12 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "outputs": ["test_run_id.mojoc"]
     },
     {
-      "id": "test_run_id@0.1.0#mojo1.0.0/test:src/test_run_id/tests/test_run_id.mojo",
+      "id": "test_run_id@0.1.0#mojo1.0.0/test:src/test_run_id/tests/test_test_run_id.mojo",
       "package": "test_run_id",
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/test_run_id/tests/test_run_id.mojo", "sha256": "d78573a43820c5b8024622b215bf06a8c1530ee1943ecbf46b9129b98441a6be"}
+        {"path": "src/test_run_id/tests/test_test_run_id.mojo", "sha256": "d78573a43820c5b8024622b215bf06a8c1530ee1943ecbf46b9129b98441a6be"}
       ],
       "deps": ["test_run_id@0.1.0#mojo1.0.0/lib"],
       "natives": [],
@@ -223,12 +223,12 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "outputs": ["test_run_id.mojoc"]
     },
     {
-      "id": "test_run_id@0.1.0#mojo1.0.0/test:src/test_run_id/tests/test_run_id.mojo",
+      "id": "test_run_id@0.1.0#mojo1.0.0/test:src/test_run_id/tests/test_test_run_id.mojo",
       "package": "test_run_id",
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/test_run_id/tests/test_run_id.mojo", "sha256": "d78573a43820c5b8024622b215bf06a8c1530ee1943ecbf46b9129b98441a6be"}
+        {"path": "src/test_run_id/tests/test_test_run_id.mojo", "sha256": "d78573a43820c5b8024622b215bf06a8c1530ee1943ecbf46b9129b98441a6be"}
       ],
       "deps": ["test_run_id@0.1.0#mojo1.0.0/lib"],
       "natives": [],

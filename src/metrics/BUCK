@@ -73,11 +73,11 @@ mojo_conda_holds(
     visibility = ["PUBLIC"],
 )
 
-# The release machine builds `komira_metrics_conda` (release/artifacts.textproto): komira's conda packer over
+# The release machine builds `metrics_conda` (release/artifacts.textproto): komira's conda packer over
 # `:metrics`, with the library's own shared library below. It goes when the release machine takes
 # `:conda`, which is this library's mopm package.
 conda_package(
-    name = "komira_metrics_conda",
+    name = "metrics_conda",
     lib = ":metrics",
     native = ":komira_metrics_native",
     summary = "The `metrics` Mojo library of komira, as a conda package.",

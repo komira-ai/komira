@@ -45,10 +45,10 @@ mojo_conda_holds(
     visibility = ["PUBLIC"],
 )
 
-# The release machine builds `komira_async_api_conda` (release/artifacts.textproto): komira's conda packer over
+# The release machine builds `async_api_conda` (release/artifacts.textproto): komira's conda packer over
 # `:async_api`, with the library's own shared library below. It goes when the release machine takes `:conda`.
 conda_package(
-    name = "komira_async_api_conda",
+    name = "async_api_conda",
     lib = ":async_api",
     native = ":komira_async_api_native",
     summary = "The `async_api` Mojo library of komira, as a conda package.",

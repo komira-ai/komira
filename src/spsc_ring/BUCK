@@ -77,7 +77,7 @@ mojo_conda_holds(
 # komira's conda packer over `:spsc_ring`. It goes when the release machine takes the mopm
 # package. This library's mopm package is `:conda` above.
 conda_package(
-    name = "komira_spsc_ring_conda",
+    name = "spsc_ring_conda",
     lib = ":spsc_ring",
     summary = "The `spsc_ring` Mojo library of komira, as a conda package.",
     visibility = ["PUBLIC"],

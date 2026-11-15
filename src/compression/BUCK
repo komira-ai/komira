@@ -29,7 +29,7 @@ mojo_package(
 # Mojo rules take it (tools/build/mojo/adopt.bzl): the same file, so a dependent builds only once the tests
 # have passed. `deps` is `[dependencies]` of mopm.toml, as the adopted targets of those packages. `dlopen` is
 # the sonames the library opens at run time (OwnedDLHandle, codec_libraries.mojo): the conda package
-# `komira_compression_conda` requires the conda-forge package tools/build/package/system_libs.bzl names for
+# `compression_conda` requires the conda-forge package tools/build/package/system_libs.bzl names for
 # each, and `[native-dependencies]` of mopm.toml says the same for `:conda`. `c_deps` and `native` are the
 # older packaging of the same snappy (below): the shared library of the release set.
 mojo_adopted_library(
@@ -79,7 +79,7 @@ mojo_conda_holds(
 # over `:compression`. It goes when the release machine takes `:conda`, which is this library's mopm
 # package.
 conda_package(
-    name = "komira_compression_conda",
+    name = "compression_conda",
     lib = ":compression",
     native = ":komira_compression_native",
     summary = "The `compression` Mojo library of komira, as a conda package.",

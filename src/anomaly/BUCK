@@ -78,7 +78,7 @@ mojo_conda(
 # packer over `:anomaly`. It goes when the release machine takes the mopm package. This
 # library's mopm package is `:conda` above.
 conda_package(
-    name = "komira_anomaly_conda",
+    name = "anomaly_conda",
     lib = ":anomaly",
     summary = "The `anomaly` Mojo library of komira, as a conda package.",
     visibility = ["PUBLIC"],

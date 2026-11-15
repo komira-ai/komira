@@ -8,7 +8,7 @@ C API (`src/so`), and the check that installs it.
   [`../conda.bzl`](../conda.bzl)). Its metadata lists the library in
   `lib_files`. The Mojo runtime the library is linked against is not in the
   package: it comes from the `mojo-compiler` requirement. A release declares
-  this target or the plain `komira_so_conda`, not both (they are the same name,
+  this target or the plain `so_conda`, not both (they are the same name,
   version and build with different contents). `release/artifacts.textproto` is
   where a release declares its packages, and it must name only one of them.
 - `libkomira_install` installs that package into an empty prefix with the Mojo

@@ -72,7 +72,7 @@
 #      and have a coverage build: //tools/build/selftest:analysis_refusals_coverage);
 #      db_sqlite (outside the tests cell,
 #      naming coverage_tests) analyzes with the switch on, with no gate
-#      action of its own and one in komira_db_sqlite_cov_gate.
+#      action of its own and one in db_sqlite_cov_gate.
 #      A shared library's gate (COVERAGE_SHARED_LIB_MODE): covso_traced is
 #      green with the switch on and its driver's coverage run red (nothing
 #      waits for it); enforce is refused in analysis (covso_enforce), and so
@@ -159,7 +159,7 @@ else
 fi
 # A library outside the tests cell naming coverage_tests analyzes with the
 # switch on (the rule accepts no gate of its own for it), and its gate is the
-# one action of komira_db_sqlite_cov_gate (analysis only: aquery).
+# one action of db_sqlite_cov_gate (analysis only: aquery).
 DB=//src/db_sqlite:db_sqlite
 if "$BUCK2" aquery "attrfilter(category, mojo_cov_gate, all_actions(set($DB ${DB}_cov_gate)))" -c komira.coverage=true > "$LOG/coverage_gate_db_sqlite.log" 2> "$LOG/coverage_gate_db_sqlite.err" &&
     [ "$(grep -c "^(target: \`komira${DB} (" "$LOG/coverage_gate_db_sqlite.log")" = 0 ] &&

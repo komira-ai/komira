@@ -7,7 +7,7 @@ load("@komira//tools/build/package/install_check:install_check.bzl", "conda_inst
 # the Mojo compiler pin (the package whose `lib/` holds the Mojo runtime the
 # library is NEEDED on, libKGENCompilerRTShared.so and what that loads), the
 # glibc floor of the platform table, and so's Mojo dependencies, all at
-# the release's version and build. The plain `komira_so_conda` of the library
+# the release's version and build. The plain `so_conda` of the library
 # is the same package without the shared library: a release declares one of
 # the two.
 conda_package(
@@ -40,14 +40,14 @@ conda_install_check(
         "libkomira_parquet_codec_native.so.1",
     ],
     owners = [
-        "//src/async_rt:komira_async_conda",
-        "//src/async_api:komira_async_api_conda",
-        "//src/compression:komira_compression_conda",
-        "//src/fs:komira_fs_conda",
-        "//src/libc:komira_libc_conda",
-        "//src/metrics:komira_metrics_conda",
-        "//src/scan_source:komira_scan_source_conda",
-        "//src/parquet_codec:komira_parquet_codec_conda",
+        "//src/async_rt:async_rt_conda",
+        "//src/async_api:async_api_conda",
+        "//src/compression:compression_conda",
+        "//src/fs:fs_conda",
+        "//src/libc:libc_conda",
+        "//src/metrics:metrics_conda",
+        "//src/scan_source:scan_source_conda",
+        "//src/parquet_codec:parquet_codec_conda",
     ],
     package = ":komira_so_libkomira_conda",
     symbols = [

@@ -45,7 +45,7 @@ mojo_conda(
 # still builds it (release/artifacts.textproto): komira's conda packer over `:json`. It goes
 # when those packages move to mopm. This library's mopm package is `:conda` above.
 conda_package(
-    name = "komira_json_conda",
+    name = "json_conda",
     lib = ":json",
     summary = "The `json` Mojo library of komira, as a conda package.",
     visibility = ["PUBLIC"],

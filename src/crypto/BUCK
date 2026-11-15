@@ -77,11 +77,11 @@ mojo_conda_holds(
     visibility = ["PUBLIC"],
 )
 
-# The release machine builds `komira_crypto_conda` (release/artifacts.textproto): komira's conda packer over
+# The release machine builds `crypto_conda` (release/artifacts.textproto): komira's conda packer over
 # `:crypto`, with the library's own shared library below. It goes when the release machine takes
 # `:conda`, which is this library's mopm package.
 conda_package(
-    name = "komira_crypto_conda",
+    name = "crypto_conda",
     lib = ":crypto",
     native = ":komira_crypto_native",
     summary = "The `crypto` Mojo library of komira, as a conda package.",

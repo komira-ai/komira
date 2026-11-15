@@ -78,10 +78,10 @@ mojo_conda_holds(
     visibility = ["PUBLIC"],
 )
 
-# The release machine builds `komira_log_conda` (release/artifacts.textproto): komira's conda packer over
+# The release machine builds `log_conda` (release/artifacts.textproto): komira's conda packer over
 # `:log`. It goes when the release machine takes `:conda`, which is this library's mopm package.
 conda_package(
-    name = "komira_log_conda",
+    name = "log_conda",
     lib = ":log",
     summary = "The `log` Mojo library of komira, as a conda package.",
     visibility = ["PUBLIC"],

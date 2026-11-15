@@ -91,7 +91,7 @@ fn header(rest: &str, mapping: &Mapping) -> Option<(Section, Option<String>)> {
 fn rewrite_key(rest: &str, mapping: &Mapping) -> Option<String> {
     let (key, tail) = split_key(rest)?;
     let new = mapping.new_name(key)?;
-    let tail = replace_words(tail, mapping.pairs()).unwrap_or_else(|| tail.to_string());
+    let tail = replace_words(tail, mapping.words()).unwrap_or_else(|| tail.to_string());
     Some(format!("{}{tail}", full_name(new)))
 }
 
@@ -149,7 +149,7 @@ pub fn rewrite_manifest(text: &str, mapping: &Mapping) -> Option<(String, Manife
                 out.push_str(indent);
                 out.push_str(&rest);
             }
-            None => match replace_words(body, mapping.pairs()) {
+            None => match replace_words(body, mapping.words()) {
                 Some(replaced) => out.push_str(&replaced),
                 None => out.push_str(body),
             },

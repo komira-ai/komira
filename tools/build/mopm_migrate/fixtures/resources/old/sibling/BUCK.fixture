@@ -60,7 +60,7 @@ mojo_conda(
 # komira's conda packer over `:runtime_paths`. It goes when the release machine takes the mopm
 # package. This library's mopm package is `:conda` above.
 conda_package(
-    name = "komira_runtime_paths_conda",
+    name = "runtime_paths_conda",
     lib = ":runtime_paths",
     summary = "The `runtime_paths` Mojo library of komira, as a conda package.",
     visibility = ["PUBLIC"],

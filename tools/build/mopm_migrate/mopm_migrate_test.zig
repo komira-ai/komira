@@ -523,7 +523,7 @@ test "golden bump_arena: the BUCK file is the hand migration's, with the C link 
         .{ "once the tests passed", "once the test passed" },
         // the package is in no file of release/ in the fixture, as in the tree before the hand migration: the
         // tool says only that the label stays valid
-        .{ "Kept for the release machine, which still builds it (release/BUCK, release/artifacts.textproto): komira's", "Kept so the label `:komira_bump_arena_conda` stays valid: komira's" },
+        .{ "Kept for the release machine, which still builds it (release/BUCK, release/artifacts.textproto): komira's", "Kept so the label `:bump_arena_conda` stays valid: komira's" },
         .{ "    depends = [\n        \"mojo-byte_buffer >=0.1,<0.2\",\n    ],\n", "    depends = [\"mojo-byte_buffer >=0.1,<0.2\"],\n" },
         .{ "nothing else under `lib/mojo/`, and exactly one dependency, which is what installing the package pulls in. Red when the manifest drops the dependency, names another range, or the file carries a sibling.", "nothing else under `lib/mojo/` (byte_buffer is not in it), and exactly one dependency, `mojo-byte_buffer >=0.1,<0.2`, which is what installing the package pulls in. Red when the manifest drops the dependency, names another range, or the file carries the sibling." },
         // a one-item list: the hand file kept the old file's three lines, the tool writes one line (as the hand

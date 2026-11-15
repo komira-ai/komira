@@ -655,7 +655,7 @@ tools/build/tests/functional/bootstrap.sh "$(mktemp -d)/bootstrap"
 
 ## 33a. Conda packages
 
-The conda package of `//src/encoding:komira_encoding_conda` and of the
+The conda package of `//src/encoding:encoding_conda` and of the
 fixture libraries of [`negative/conda`](negative/conda/BUCK) ([`conda.sh`](functional/conda.sh)):
 a package is a directory (the `.conda`, `manifest.json`, `metadata.json`), read
 back with `unzip`, `zstd`, `tar` and `jq`, not the tool that wrote it (three

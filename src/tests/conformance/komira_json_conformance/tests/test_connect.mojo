@@ -1,5 +1,5 @@
 # =============================================================================
-# test_komira_connect.mojo -- parse_connect_error_json, against JSONTestSuite
+# test_connect.mojo -- parse_connect_error_json, against JSONTestSuite
 # =============================================================================
 #
 # Feeds every file of the pinned test_parsing corpus (318: 95 y_, 188 n_,

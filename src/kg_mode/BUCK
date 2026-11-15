@@ -48,7 +48,7 @@ mojo_conda(
 # Komira's conda packer over `:kg_mode`: the target `ci/targets.bzl` builds and the one the release
 # machine takes, if it takes this library. This library's mopm package is `:conda` above.
 conda_package(
-    name = "komira_kg_mode_conda",
+    name = "kg_mode_conda",
     lib = ":kg_mode",
     summary = "The `kg_mode` Mojo library of komira, as a conda package.",
     visibility = ["PUBLIC"],

@@ -1,5 +1,5 @@
 # =============================================================================
-# test_komira_avro.mojo -- the Avro reader's schema JSON, through an OCF header, against JSONTestSuite
+# test_avro.mojo -- the Avro reader's schema JSON, through an OCF header, against JSONTestSuite
 # =============================================================================
 #
 # Feeds every file of the pinned test_parsing corpus (318: 95 y_, 188 n_,

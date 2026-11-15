@@ -65,7 +65,7 @@ mojo_conda(
 # packer over `:datetime`. It goes when the release machine takes the mopm package. This
 # library's mopm package is `:conda` above.
 conda_package(
-    name = "komira_datetime_conda",
+    name = "datetime_conda",
     lib = ":datetime",
     summary = "The `datetime` Mojo library of komira, as a conda package.",
     visibility = ["PUBLIC"],

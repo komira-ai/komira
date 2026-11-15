@@ -46,7 +46,7 @@ mojo_conda(
 # packer over `:content_line`. It goes when the release machine takes the mopm package. This
 # library's mopm package is `:conda` above.
 conda_package(
-    name = "komira_content_line_conda",
+    name = "content_line_conda",
     lib = ":content_line",
     summary = "The `content_line` Mojo library of komira, as a conda package.",
     visibility = ["PUBLIC"],

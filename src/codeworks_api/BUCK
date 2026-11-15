@@ -41,11 +41,11 @@ mojo_conda(
     visibility = ["PUBLIC"],
 )
 
-# Kept so the label `:komira_codeworks_api_conda` stays valid: komira's conda packer over
+# Kept so the label `:codeworks_api_conda` stays valid: komira's conda packer over
 # `:codeworks_api`. It goes when the release machine takes the mopm package. This library's
 # mopm package is `:conda` above.
 conda_package(
-    name = "komira_codeworks_api_conda",
+    name = "codeworks_api_conda",
     lib = ":codeworks_api",
     summary = "The `codeworks_api` Mojo library of komira, as a conda package.",
     visibility = ["PUBLIC"],

@@ -2,7 +2,7 @@
 
     release_set(
         name = "release_set",
-        packages = ["//src/encoding:komira_encoding_conda", ...],
+        packages = ["//src/encoding:encoding_conda", ...],
         artifacts = "artifacts.textproto",
         metapackage = "komira_all",
         ...

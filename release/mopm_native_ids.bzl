@@ -16,17 +16,17 @@ load("//src/awslc:buildrules.mojo.lock.bzl", awslc = "GRAPH")
 load("//src/bench:buildrules.mojo.lock.bzl", bench = "GRAPH")
 load("//src/bench_report:buildrules.mojo.lock.bzl", bench_report = "GRAPH")
 load("//src/broker_proto:buildrules.mojo.lock.bzl", broker_proto = "GRAPH")
-load("//src/byte_buffer:buildrules.mojo.lock.bzl", byte_buffer = "GRAPH")
 load("//src/bump_arena:buildrules.mojo.lock.bzl", bump_arena = "GRAPH")
+load("//src/byte_buffer:buildrules.mojo.lock.bzl", byte_buffer = "GRAPH")
 load("//src/calendar:buildrules.mojo.lock.bzl", calendar = "GRAPH")
 load("//src/calendar_ics:buildrules.mojo.lock.bzl", calendar_ics = "GRAPH")
 load("//src/calendar_proto:buildrules.mojo.lock.bzl", calendar_proto = "GRAPH")
 load("//src/chat_proto:buildrules.mojo.lock.bzl", chat_proto = "GRAPH")
 load("//src/clock:buildrules.mojo.lock.bzl", clock = "GRAPH")
 load("//src/codeworks_api:buildrules.mojo.lock.bzl", codeworks_api = "GRAPH")
-load("//src/containers:buildrules.mojo.lock.bzl", containers = "GRAPH")
 load("//src/compression:buildrules.mojo.lock.bzl", compression = "GRAPH")
 load("//src/contacts_proto:buildrules.mojo.lock.bzl", contacts_proto = "GRAPH")
+load("//src/containers:buildrules.mojo.lock.bzl", containers = "GRAPH")
 load("//src/content_line:buildrules.mojo.lock.bzl", content_line = "GRAPH")
 load("//src/counters:buildrules.mojo.lock.bzl", counters = "GRAPH")
 load("//src/crm_proto:buildrules.mojo.lock.bzl", crm_proto = "GRAPH")
@@ -93,17 +93,17 @@ _GRAPHS = {
     "bench": bench,
     "bench_report": bench_report,
     "broker_proto": broker_proto,
-    "byte_buffer": byte_buffer,
     "bump_arena": bump_arena,
+    "byte_buffer": byte_buffer,
     "calendar": calendar,
     "calendar_ics": calendar_ics,
     "calendar_proto": calendar_proto,
     "chat_proto": chat_proto,
     "clock": clock,
     "codeworks_api": codeworks_api,
-    "containers": containers,
     "compression": compression,
     "contacts_proto": contacts_proto,
+    "containers": containers,
     "content_line": content_line,
     "counters": counters,
     "crm_proto": crm_proto,

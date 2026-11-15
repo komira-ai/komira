@@ -78,7 +78,7 @@ mojo_conda_holds(
 # komira's conda packer over `:kg_spec`. It goes when the release machine takes the mopm
 # package. This library's mopm package is `:conda` above.
 conda_package(
-    name = "komira_kg_spec_conda",
+    name = "kg_spec_conda",
     lib = ":kg_spec",
     summary = "The `kg_spec` Mojo library of komira, as a conda package.",
     visibility = ["PUBLIC"],

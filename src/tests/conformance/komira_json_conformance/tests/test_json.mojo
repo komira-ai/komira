@@ -1,5 +1,5 @@
 # =============================================================================
-# test_komira_json.mojo -- parse_json_bytes, the strict RFC 8259 parser, against JSONTestSuite
+# test_json.mojo -- parse_json_bytes, the strict RFC 8259 parser, against JSONTestSuite
 # =============================================================================
 #
 # Feeds every file of the pinned test_parsing corpus (318: 95 y_, 188 n_,

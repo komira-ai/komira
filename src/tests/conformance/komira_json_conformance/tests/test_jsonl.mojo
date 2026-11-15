@@ -1,5 +1,5 @@
 # =============================================================================
-# test_komira_jsonl.mojo -- the JSONL reader (infer, then materialize), against JSONTestSuite
+# test_jsonl.mojo -- the JSONL reader (infer, then materialize), against JSONTestSuite
 # =============================================================================
 #
 # Feeds every file of the pinned test_parsing corpus (318: 95 y_, 188 n_,

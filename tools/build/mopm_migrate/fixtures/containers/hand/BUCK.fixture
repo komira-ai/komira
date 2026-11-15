@@ -67,7 +67,7 @@ mojo_conda_holds(
 # komira's conda packer over `:containers`. It goes when the release machine takes the mopm
 # package. This library's mopm package is `:conda` above.
 conda_package(
-    name = "komira_collections_conda",
+    name = "containers_conda",
     lib = ":containers",
     summary = "The `containers` Mojo library of komira, as a conda package.",
     visibility = ["PUBLIC"],

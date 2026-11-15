@@ -1,8 +1,10 @@
 //! `ns-rename`: renames komira's `komira_*` packages from the mapping of mopm's design of owner
 //! namespaces (section 12.3). Each `src/komira_<x>` directory moves to `src/<new name>`; every
-//! whole word that is an old name, in every listed text file and path (`--files`, the checkout's
-//! tracked files), becomes the new name (imports,
-//! BUCK targets and paths, docs); each `mopm.toml` gets `name = "komira-ai/<new name>"` and quoted
+//! whole word that is an old name, or derived from one (`test_<old>`, `<old>_conda` and the other
+//! derived target names of `map::DERIVED_SUFFIXES`), in every listed text file and path
+//! (`--files`, the checkout's tracked files), becomes the new name or its derived form (imports,
+//! BUCK targets and paths, docs); a test file named after its package's new name moves to
+//! `tests/test_<new>.mojo`; each `mopm.toml` gets `name = "komira-ai/<new name>"` and quoted
 //! `"komira-ai/<new name>"` dependency keys. Everything is read and checked before anything is
 //! written; `--dry-run` prints the summary and writes nothing. See README.md.
 
@@ -11,6 +13,7 @@ pub mod manifest;
 pub mod map;
 pub mod names;
 pub mod report;
+pub(crate) mod rows;
 pub mod tree;
 pub mod words;
 

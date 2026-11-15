@@ -45,7 +45,7 @@ mojo_conda(
 # packer over `:host_probe`. It goes when the release machine takes the mopm package. This
 # library's mopm package is `:conda` above.
 conda_package(
-    name = "komira_host_conda",
+    name = "host_probe_conda",
     lib = ":host_probe",
     summary = "The `host_probe` Mojo library of komira, as a conda package.",
     visibility = ["PUBLIC"],

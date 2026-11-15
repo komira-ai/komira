@@ -499,7 +499,7 @@ last word.
 **The release declaration and the release set agree, and one so package.** `//release:release_checks_cases`
 holds `release/artifacts.textproto` to `tools/build/package/release_set.txt`: the same metapackage, the same
 members in the same order, and the same `--license`, `--summary` and `--home`, so a member listed in one file and
-missing from the other is refused, naming it. It also refuses a release that names both `komira_so_conda` and
+missing from the other is refused, naming it. It also refuses a release that names both `so_conda` and
 `komira_so_libkomira_conda`: they are one package name, version and build with different contents, so a channel
 would be handed two files for one name.
 

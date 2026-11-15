@@ -60,7 +60,7 @@ _STEMS = _PANDAS_STEMS + _POLARS_STEMS
 [
     proto_encode(
         name = "{}_wire".format(s),
-        proto_deps = ["//src/plan_proto:komira_plan_proto_gen"],
+        proto_deps = ["//src/plan_proto:plan_proto_gen"],
         root = "komira.plan.v1.WirePlanEnvelope",
         txtpb = "fixtures/{}.txtpb".format(s),
     )

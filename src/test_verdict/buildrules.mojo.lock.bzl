@@ -72,12 +72,12 @@ GRAPH_JSON = r'''{
       "key": "2b0878df62efd5ab0a7e7560aa582603dea137efddefe73bde5017975b87bf0f"
     },
     {
-      "id": "test_verdict@0.1.0#mojo1.0.0/test:src/test_verdict/tests/test_verdict.mojo",
+      "id": "test_verdict@0.1.0#mojo1.0.0/test:src/test_verdict/tests/test_test_verdict.mojo",
       "package": "test_verdict",
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/test_verdict/tests/test_verdict.mojo", "sha256": "5c7d54a5c873fa7d67c4fe775dbf72c5b618fe31b95294bd5648817abd6c81da"}
+        {"path": "src/test_verdict/tests/test_test_verdict.mojo", "sha256": "5c7d54a5c873fa7d67c4fe775dbf72c5b618fe31b95294bd5648817abd6c81da"}
       ],
       "deps": ["test_verdict@0.1.0#mojo1.0.0/lib"],
       "natives": [],
@@ -152,12 +152,12 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "key": "297156889201b841831be09283f58b2a23ffb54ee18620e475693bf6a8919470"
     },
     {
-      "id": "test_verdict@0.1.0#mojo1.0.0/test:src/test_verdict/tests/test_verdict.mojo",
+      "id": "test_verdict@0.1.0#mojo1.0.0/test:src/test_verdict/tests/test_test_verdict.mojo",
       "package": "test_verdict",
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/test_verdict/tests/test_verdict.mojo", "sha256": "5c7d54a5c873fa7d67c4fe775dbf72c5b618fe31b95294bd5648817abd6c81da"}
+        {"path": "src/test_verdict/tests/test_test_verdict.mojo", "sha256": "5c7d54a5c873fa7d67c4fe775dbf72c5b618fe31b95294bd5648817abd6c81da"}
       ],
       "deps": ["test_verdict@0.1.0#mojo1.0.0/lib"],
       "natives": [],
@@ -229,12 +229,12 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "key": "3b17eacd5fda150f9cc72d2d5f89aa6f83994ff471c2d695f6de69f7a3c5e23c"
     },
     {
-      "id": "test_verdict@0.1.0#mojo1.0.0/test:src/test_verdict/tests/test_verdict.mojo",
+      "id": "test_verdict@0.1.0#mojo1.0.0/test:src/test_verdict/tests/test_test_verdict.mojo",
       "package": "test_verdict",
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/test_verdict/tests/test_verdict.mojo", "sha256": "5c7d54a5c873fa7d67c4fe775dbf72c5b618fe31b95294bd5648817abd6c81da"}
+        {"path": "src/test_verdict/tests/test_test_verdict.mojo", "sha256": "5c7d54a5c873fa7d67c4fe775dbf72c5b618fe31b95294bd5648817abd6c81da"}
       ],
       "deps": ["test_verdict@0.1.0#mojo1.0.0/lib"],
       "natives": [],

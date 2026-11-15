@@ -68,7 +68,7 @@ mojo_conda_holds(
 # komira's conda packer over `:snapshotter`. It goes when the release machine takes the mopm
 # package. This library's mopm package is `:conda` above.
 conda_package(
-    name = "komira_snapshotter_conda",
+    name = "snapshotter_conda",
     lib = ":snapshotter",
     summary = "The `snapshotter` Mojo library of komira, as a conda package.",
     visibility = ["PUBLIC"],

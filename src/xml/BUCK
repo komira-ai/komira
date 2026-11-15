@@ -53,7 +53,7 @@ mojo_conda(
 # packer over `:xml`. It goes when the release machine takes the mopm package. This
 # library's mopm package is `:conda` above.
 conda_package(
-    name = "komira_xml_conda",
+    name = "xml_conda",
     lib = ":xml",
     summary = "The `xml` Mojo library of komira, as a conda package.",
     visibility = ["PUBLIC"],

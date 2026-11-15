@@ -1,5 +1,5 @@
 # =============================================================================
-# test_komira_proto_codec.mojo -- decode_json[Value], proto3-JSON, against JSONTestSuite
+# test_proto_codec.mojo -- decode_json[Value], proto3-JSON, against JSONTestSuite
 # =============================================================================
 #
 # Feeds every file of the pinned test_parsing corpus (318: 95 y_, 188 n_,

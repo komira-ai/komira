@@ -44,7 +44,7 @@ mojo_conda(
 # packer over `:hashing`. It goes when the release machine takes the mopm package. This
 # library's mopm package is `:conda` above.
 conda_package(
-    name = "komira_hash_conda",
+    name = "hashing_conda",
     lib = ":hashing",
     summary = "The `hashing` Mojo library of komira, as a conda package.",
     visibility = ["PUBLIC"],
