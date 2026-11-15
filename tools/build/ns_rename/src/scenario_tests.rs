@@ -186,6 +186,7 @@ const SUMMARY_BODY: &str = "packages renamed: 2\n\
      files moved: 10\n\
      \x20 of them, test files named after their package's new name, moved to test_<name>: 0\n\
      files rewritten: 11, lines changed: 17\n\
+     \x20 of them, files whose rows were sorted again: 0\n\
      \x20 by kind:\n\
      \x20   .mojo: 4 files, 6 lines (5 import lines)\n\
      \x20   BUCK and .bzl: 3 files, 5 lines\n\
@@ -295,6 +296,12 @@ fn derived_checkout(test: &str) -> Scratch {
         "from komira_test_run_id import mint\nprint(\"test_run_id: OK\")\n",
     );
     s.write(
+        "src/komira_test_run_id/buildrules.mojo.lock.bzl",
+        "{\"id\": \"t/test:src/komira_test_run_id/tests/test_run_id.mojo\",\n\
+         \x20\"path\": \"src/komira_test_run_id/tests/test_run_id.mojo\",\n\
+         \x20\"other\": \"src/komira_test_run_id/tests/test_run_id.mojo.bak\"}\n",
+    );
+    s.write(
         "src/komira_test_run_id/tests/test_clock.mojo",
         "from komira_test_run_id import clock\n",
     );
@@ -349,6 +356,13 @@ fn renames_test_files_and_derived_target_names_with_their_package() {
         "from test_run_id import mint\nprint(\"test_run_id: OK\")\n"
     );
     assert!(!s.exists("src/test_run_id/tests/test_run_id.mojo"));
+    // The lock names the test file where it moved; a longer path is not that file.
+    assert_eq!(
+        s.read("src/test_run_id/buildrules.mojo.lock.bzl"),
+        "{\"id\": \"t/test:src/test_run_id/tests/test_test_run_id.mojo\",\n\
+         \x20\"path\": \"src/test_run_id/tests/test_test_run_id.mojo\",\n\
+         \x20\"other\": \"src/test_run_id/tests/test_run_id.mojo.bak\"}\n"
+    );
     // Another test file of the package keeps its name.
     assert_eq!(
         s.read("src/test_run_id/tests/test_clock.mojo"),
@@ -384,6 +398,59 @@ fn renames_test_files_and_derived_target_names_with_their_package() {
 }
 
 #[test]
+fn sorts_the_rows_of_a_sorted_file_again_and_keeps_the_release_set_fixtures() {
+    let s = Scratch::new("rows");
+    s.write(
+        "src/komira_buffer/BUCK",
+        "mojo_library(name = \"komira_buffer\")\n",
+    );
+    s.write(
+        "src/komira_bump_arena/BUCK",
+        "mojo_library(name = \"komira_bump_arena\")\n",
+    );
+    s.write(
+        "release/prod_claimed_names.txt",
+        "# sorted\nkci_api\nkomira_buffer\nkomira_bump_arena\n",
+    );
+    s.write(
+        "release/readme_e2e/packages.bzl",
+        "PACKAGES = {\n    \"komira_buffer\": \"0.1.0\",\n    \"komira_bump_arena\": \"0.1.0\",\n}\n",
+    );
+    // Not listed: its rows are renamed and left where they were.
+    s.write("docs/order.txt", "komira_buffer\nkomira_bump_arena\n");
+    s.write(
+        "release/ci/tests/test_set_json.zig",
+        "member(\"komira_buffer\", \"library\")\n",
+    );
+    let m = map_file(
+        "rows",
+        "komira_buffer\tbyte_buffer\nkomira_bump_arena\tbump_arena\n",
+    );
+    let summary = rename(&args(&s, &m.0.join("map.tsv"), false)).unwrap();
+    assert!(
+        summary.contains(
+            "  of them, files whose rows were sorted again: 2\n\
+             \x20   release/prod_claimed_names.txt\n\
+             \x20   release/readme_e2e/packages.bzl\n"
+        ),
+        "{summary}"
+    );
+    assert_eq!(
+        s.read("release/prod_claimed_names.txt"),
+        "# sorted\nbump_arena\nbyte_buffer\nkci_api\n"
+    );
+    assert_eq!(
+        s.read("release/readme_e2e/packages.bzl"),
+        "PACKAGES = {\n    \"bump_arena\": \"0.1.0\",\n    \"byte_buffer\": \"0.1.0\",\n}\n"
+    );
+    assert_eq!(s.read("docs/order.txt"), "byte_buffer\nbump_arena\n");
+    assert_eq!(
+        s.read("release/ci/tests/test_set_json.zig"),
+        "member(\"komira_buffer\", \"library\")\n"
+    );
+}
+
+#[test]
 fn refuses_an_own_name_test_moving_onto_an_existing_test_file() {
     let s = derived_checkout("own_taken");
     s.write(
@@ -401,6 +468,26 @@ fn refuses_an_own_name_test_moving_onto_an_existing_test_file() {
         "src/komira_test_run_id/tests/test_run_id.mojo and src/komira_test_run_id/tests/test_test_run_id.mojo would both move to src/test_run_id/tests/test_test_run_id.mojo"
     );
     assert_eq!(s.snapshot(), before);
+}
+
+#[test]
+fn replace_paths_replaces_whole_paths_only() {
+    let paths = [(
+        "src/a/tests/a.mojo".to_string(),
+        "src/a/tests/test_a.mojo".to_string(),
+    )];
+    let r = |t: &str| crate::tree::replace_paths(t, &paths);
+    assert_eq!(
+        r("src/a/tests/a.mojo \"src/a/tests/a.mojo\" x:src/a/tests/a.mojo").as_deref(),
+        Some("src/a/tests/test_a.mojo \"src/a/tests/test_a.mojo\" x:src/a/tests/test_a.mojo")
+    );
+    // Inside a longer path, a longer name, or followed by a word byte: not the path.
+    assert_eq!(r("lib/src/a/tests/a.mojo"), None);
+    assert_eq!(r("xsrc/a/tests/a.mojo"), None);
+    assert_eq!(r(".src/a/tests/a.mojo -src/a/tests/a.mojo"), None);
+    assert_eq!(r("src/a/tests/a.mojox"), None);
+    assert_eq!(r("src/a/tests/a.mojo.bak src/a/tests/a.mojo/x"), None);
+    assert_eq!(r(""), None);
 }
 
 #[test]

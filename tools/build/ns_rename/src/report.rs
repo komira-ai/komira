@@ -76,6 +76,14 @@ pub fn summary(plan: &Plan, dry_run: bool) -> String {
         "files rewritten: {}, lines changed: {}",
         total.files, total.lines
     );
+    let _ = writeln!(
+        out,
+        "  of them, files whose rows were sorted again: {}",
+        plan.resorted.len()
+    );
+    for path in &plan.resorted {
+        let _ = writeln!(out, "    {}", path.display());
+    }
     let _ = writeln!(out, "  by kind:");
     for (kind, t) in &by_kind {
         let _ = write!(
@@ -172,6 +180,7 @@ mod tests {
             manifest_keys: 1,
             binary: vec!["docs/x.png".into()],
             not_files: vec!["link".into()],
+            resorted: vec!["release/prod_claimed_names.txt".into()],
             shadow: vec![("src/komira_json/a.mojo".into(), vec!["json".into()])],
         };
         assert_eq!(
@@ -183,6 +192,8 @@ mod tests {
              \x20 of them, test files named after their package's new name, moved to test_<name>: 1\n\
              \x20   src/komira_json/tests/json.mojo -> src/json/tests/test_json.mojo\n\
              files rewritten: 4, lines changed: 10\n\
+             \x20 of them, files whose rows were sorted again: 1\n\
+             \x20   release/prod_claimed_names.txt\n\
              \x20 by kind:\n\
              \x20   .mojo: 1 files, 3 lines (2 import lines)\n\
              \x20   BUCK and .bzl: 1 files, 4 lines\n\
@@ -209,6 +220,7 @@ mod tests {
              files moved: 0\n\
              \x20 of them, test files named after their package's new name, moved to test_<name>: 0\n\
              files rewritten: 0, lines changed: 0\n\
+             \x20 of them, files whose rows were sorted again: 0\n\
              \x20 by kind:\n\
              \x20 by top-level directory:\n\
              files that are not UTF-8 and hold an old name, left unchanged: 0\n\

@@ -4,6 +4,7 @@
 use crate::error::Error;
 use crate::manifest::rewrite_manifest;
 use crate::map::{Mapping, OLD_PREFIX, TEST_PREFIX};
+use crate::rows::{keeps_rows_sorted, sort_rows};
 use crate::words::{changed_lines, contains_word, replace_words};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -11,8 +12,13 @@ use std::io;
 use std::path::{Component, Path, PathBuf};
 
 /// Repository paths kept as they are: this tool, whose sources and tests hold the old names on
-/// purpose, and with it the copy of the mapping.
-pub const KEPT: &[&str] = &["tools/build/ns_rename"];
+/// purpose, and with it the copy of the mapping; and the release set's cases, whose member names
+/// are fixture rows that goldens taken from the retired writer hash, so a renamed row would no
+/// longer be the row the golden was computed over.
+pub const KEPT: &[&str] = &[
+    "tools/build/ns_rename",
+    "release/ci/tests/test_set_json.zig",
+];
 
 /// The kind of a rewritten file, for the summary.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -81,6 +87,9 @@ pub struct Plan {
     pub binary: Vec<PathBuf>,
     /// Listed entries that are not regular files (symbolic links, submodules): left unchanged.
     pub not_files: Vec<PathBuf>,
+    /// Files of [`crate::rows::SORTED_ROWS`] whose rows the rename put out of byte order, sorted
+    /// again.
+    pub resorted: Vec<PathBuf>,
     /// Test files named after their package's new name (`src/<old>/tests/<new>.mojo`), moved to
     /// `tests/test_<new>.mojo`, from and to: buildrules' `mojo_package` names the test target of
     /// a file by its stem, which would be the package's own target name.
@@ -210,7 +219,41 @@ pub fn binds_module(text: &str, old: &str) -> bool {
     })
 }
 
-fn rewrite_text(rel: &Path, text: &str, mapping: &Mapping, plan: &mut Plan) {
+/// `text` with each whole occurrence of a `from` path replaced by its `to`: an occurrence is one
+/// not inside a longer path or word (neither the byte before it nor the byte after it is a word byte,
+/// `/`, `.` or `-`). `None` when nothing is replaced.
+pub(crate) fn replace_paths(text: &str, paths: &[(String, String)]) -> Option<String> {
+    let path_byte = |b: u8| crate::words::is_word_byte(b) || matches!(b, b'/' | b'.' | b'-');
+    let mut out = text.to_string();
+    let mut changed = false;
+    for (from, to) in paths {
+        let mut next = String::with_capacity(out.len());
+        let mut last = 0;
+        for (at, _) in out.match_indices(from.as_str()) {
+            let end = at + from.len();
+            let bytes = out.as_bytes();
+            let starts = at == 0 || !path_byte(bytes[at - 1]);
+            let ends = end == bytes.len() || !path_byte(bytes[end]);
+            if starts && ends {
+                next.push_str(&out[last..at]);
+                next.push_str(to);
+                last = end;
+                changed = true;
+            }
+        }
+        next.push_str(&out[last..]);
+        out = next;
+    }
+    changed.then_some(out)
+}
+
+fn rewrite_text(
+    rel: &Path,
+    text: &str,
+    mapping: &Mapping,
+    own_paths: &[(String, String)],
+    plan: &mut Plan,
+) {
     let kind = Kind::of(rel);
     let new = if kind == Kind::Manifest {
         rewrite_manifest(text, mapping).map(|(new, stats)| {
@@ -221,9 +264,21 @@ fn rewrite_text(rel: &Path, text: &str, mapping: &Mapping, plan: &mut Plan) {
     } else {
         replace_words(text, mapping.words())
     };
-    let Some(new) = new else {
+    let Some(mut new) = new else {
         return;
     };
+    // A path that names a test file moved off its package's own name names it where it moves
+    // (buildrules.mojo.lock.bzl lists each test file by its path). Every such path holds an old
+    // name before the rename, so a file that holds one is always rewritten.
+    if let Some(moved) = replace_paths(&new, own_paths) {
+        new = moved;
+    }
+    if keeps_rows_sorted(rel) {
+        if let Some(sorted) = sort_rows(&new, kind == Kind::Build) {
+            new = sorted;
+            plan.resorted.push(rel.to_path_buf());
+        }
+    }
     let mut import_lines = 0;
     if kind == Kind::Mojo {
         import_lines = text
@@ -278,12 +333,22 @@ pub fn plan(
         not_files: others,
         ..Plan::default()
     };
+    // The test files that move off their package's own name, as the paths the word replacement
+    // gives them and the paths they move to.
+    let own_paths: Vec<(String, String)> = files
+        .iter()
+        .filter_map(|rel| {
+            let to = own_name_test(rel, mapping)?;
+            let renamed = moved_path(rel, mapping)?;
+            Some((renamed.to_str()?.to_string(), to.to_str()?.to_string()))
+        })
+        .collect();
     let mut targets: BTreeMap<PathBuf, PathBuf> = BTreeMap::new();
     for rel in &files {
         let full = repo.join(rel);
         let bytes = fs::read(&full).map_err(io_error(&full))?;
         match std::str::from_utf8(&bytes) {
-            Ok(text) => rewrite_text(rel, text, mapping, &mut plan),
+            Ok(text) => rewrite_text(rel, text, mapping, &own_paths, &mut plan),
             Err(_) if bytes_hold_old_name(&bytes, mapping) => plan.binary.push(rel.clone()),
             Err(_) => {}
         }
