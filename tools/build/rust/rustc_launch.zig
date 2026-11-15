@@ -26,8 +26,11 @@
 //!
 //! Exit status: rustc's (128 + N when a signal N ended it); 2 for a toolchain
 //! or usage refusal; 3 when rustc exits 0 but <output> is missing or empty; 4
-//! when <output> contains this action's working directory (it would differ on
-//! every run). The scratch directory is removed whatever the status.
+//! when <output> contains this action's working directory as a whole path (it
+//! would differ on every run). A whole path is an occurrence whose preceding
+//! and following bytes (when there are any) are not in [A-Za-z0-9._-]: `/work`
+//! is found in `/work`, `/work/x`, `/work` then NUL and `/work` at the end of
+//! the file, and not in `/workflows` or `/a/work`. The scratch directory is removed whatever the status.
 
 const std = @import("std");
 
@@ -98,31 +101,58 @@ pub fn exitCodeOf(term: std.process.Child.Term) u8 {
 
 pub const OutputCheck = enum { ok, missing_or_empty, has_cwd };
 
-/// Whether `f` holds `needle` anywhere; `buf` is the read buffer (longer than
-/// `needle`). A match across two reads is found.
-pub fn fileContains(f: std.fs.File, needle: []const u8, buf: []u8) !bool {
-    std.debug.assert(needle.len > 0 and buf.len > needle.len);
+/// Whether `b` can be part of a path component's name: [A-Za-z0-9._-].
+pub fn isNameByte(b: u8) bool {
+    return std.ascii.isAlphanumeric(b) or b == '.' or b == '_' or b == '-';
+}
+
+/// Whether `f` holds the path `needle` as a whole path: an occurrence counts
+/// only when the byte before it and the byte after it (when there is one) are
+/// not name bytes (`isNameByte`). So `/work` is found in `/work`, `/work/x`,
+/// `file:///work` and `/work` before a NUL or the end of the file, and not in
+/// `/workflows` or `a/work` (a component of a longer name, or a path under
+/// another directory). `buf` is the read buffer (at least two bytes longer
+/// than `needle`); a match across two reads is found, and one at the end of a
+/// read is judged by the first byte of the next.
+pub fn fileHoldsPath(f: std.fs.File, needle: []const u8, buf: []u8) !bool {
+    std.debug.assert(needle.len > 0 and buf.len > needle.len + 1);
     var have: usize = 0;
+    var at_start = true;
     while (true) {
         const n = try f.read(buf[have..]);
-        if (n == 0) return false;
+        const eof = n == 0;
         const end = have + n;
-        if (std.mem.indexOf(u8, buf[0..end], needle) != null) return true;
-        const keep = @min(needle.len - 1, end);
+        var from: usize = 0;
+        while (std.mem.indexOfPos(u8, buf[0..end], from, needle)) |i| {
+            from = i + 1;
+            // The kept bytes of an earlier read start at their own offset 0;
+            // a match there was already judged with its real preceding byte.
+            if (i == 0 and !at_start) continue;
+            const after = i + needle.len;
+            if (after == end and !eof) break; // the next read decides
+            const before_ok = i == 0 or !isNameByte(buf[i - 1]);
+            const after_ok = after == end or !isNameByte(buf[after]);
+            if (before_ok and after_ok) return true;
+        }
+        if (eof) return false;
+        // Keep the last needle.len + 1 bytes: a pending match and its preceding byte.
+        const keep = @min(needle.len + 1, end);
         std.mem.copyForwards(u8, buf[0..keep], buf[end - keep .. end]);
+        at_start = at_start and keep == end;
         have = keep;
     }
 }
 
 /// The checks on rustc's output after an exit 0: it exists and is not empty,
-/// and it does not hold the working directory `cwd`. A directory is not read.
+/// and it does not hold the working directory `cwd` as a whole path (see
+/// `fileHoldsPath`). A directory is not read.
 pub fn checkOutput(path: []const u8, cwd: []const u8, buf: []u8) !OutputCheck {
     const st = std.fs.cwd().statFile(path) catch return .missing_or_empty;
     if (st.size == 0) return .missing_or_empty;
     if (st.kind == .directory) return .ok;
     const f = try std.fs.cwd().openFile(path, .{});
     defer f.close();
-    return if (try fileContains(f, cwd, buf)) .has_cwd else .ok;
+    return if (try fileHoldsPath(f, cwd, buf)) .has_cwd else .ok;
 }
 
 fn die(code: u8, comptime fmt: []const u8, args: anytype) noreturn {

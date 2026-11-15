@@ -83,23 +83,50 @@ fn put(dir: std.fs.Dir, name: []const u8, data: []const u8) !void {
     try f.writeAll(data);
 }
 
-test "fileContains: a match anywhere, across reads, and not a near miss" {
-    var tmp = t.tmpDir(.{});
-    defer tmp.cleanup();
-    // The needle (9 bytes) straddles the first read of a 20-byte buffer.
-    try put(tmp.dir, "f", "aaaaaaaaaaaaaaa/work/dir/bbbbbbbbbbbbbbbbbb");
-    var small: [20]u8 = undefined;
+fn holds(tmp: std.testing.TmpDir, data: []const u8, needle: []const u8, buf: []u8) !bool {
+    try put(tmp.dir, "f", data);
     const f = try tmp.dir.openFile("f", .{});
     defer f.close();
-    try t.expect(try L.fileContains(f, "/work/dir", &small));
-    try f.seekTo(0);
-    try t.expect(!try L.fileContains(f, "/work/dix", &small));
-    try f.seekTo(0);
-    try t.expect(try L.fileContains(f, "aaaa", &small));
-    try f.seekTo(0);
-    try t.expect(try L.fileContains(f, "bbbbbbbbbbbbbbbbbb", &small));
-    try f.seekTo(0);
-    try t.expect(!try L.fileContains(f, "bbbbbbbbbbbbbbbbbbb", &small));
+    return L.fileHoldsPath(f, needle, buf);
+}
+
+test "fileHoldsPath: a whole path is found; a longer name or another directory is not" {
+    var tmp = t.tmpDir(.{});
+    defer tmp.cleanup();
+    var buf: [64]u8 = undefined;
+    try t.expect(try holds(tmp, "/work", "/work", &buf));
+    try t.expect(try holds(tmp, "x /work/buck-out/x", "/work", &buf));
+    try t.expect(try holds(tmp, "x /work\x00y", "/work", &buf));
+    try t.expect(try holds(tmp, "file:///work/a", "/work", &buf));
+    try t.expect(try holds(tmp, "p=/work:/usr", "/work", &buf));
+    try t.expect(!try holds(tmp, "github.com/tokio-rs/prost/actions/workflows/ci.yml", "/work", &buf));
+    try t.expect(!try holds(tmp, "/work-x /work.rs /work_a /work9", "/work", &buf));
+    try t.expect(!try holds(tmp, "/a/work/x a/work ./work", "/work", &buf));
+    // A refused occurrence does not hide a later whole one.
+    try t.expect(try holds(tmp, "/workflows and /work/x", "/work", &buf));
+    try t.expect(!try holds(tmp, "", "/work", &buf));
+}
+
+test "fileHoldsPath: matches split across reads of a small buffer" {
+    var tmp = t.tmpDir(.{});
+    defer tmp.cleanup();
+    var small: [8]u8 = undefined;
+    // The first read is "ab /work": the needle ends it, the next byte decides.
+    try t.expect(try holds(tmp, "ab /work/x", "/work", &small));
+    try t.expect(try holds(tmp, "ab /work", "/work", &small));
+    try t.expect(try holds(tmp, "ab /work\x00", "/work", &small));
+    try t.expect(!try holds(tmp, "ab /workflows", "/work", &small));
+    // The needle straddles two reads ("abcde /w", "ork/").
+    try t.expect(try holds(tmp, "abcde /work/", "/work", &small));
+    try t.expect(!try holds(tmp, "abcde /work.rs", "/work", &small));
+    // The byte before a match is kept across reads.
+    try t.expect(!try holds(tmp, "abcdefa/work/x", "/work", &small));
+    try t.expect(!try holds(tmp, "abcdefgh/work/x", "/work", &small));
+    try t.expect(try holds(tmp, "abcdefg /work/x", "/work", &small));
+    try t.expect(try holds(tmp, "abcdefgh /work/x", "/work", &small));
+    // A long file of near misses, then a whole path in a later read.
+    try t.expect(try holds(tmp, "/workflows/workflows/workflows /work", "/work", &small));
+    try t.expect(!try holds(tmp, "/workflows/workflows/workflows /works", "/work", &small));
 }
 
 test "checkOutput: missing, empty, clean, and one holding the working directory" {
@@ -128,6 +155,19 @@ test "checkOutput: missing, empty, clean, and one holding the working directory"
     const dirty = try at(root, "dirty");
     defer t.allocator.free(dirty);
     try t.expectEqual(L.OutputCheck.has_cwd, try L.checkOutput(dirty, "/work", &buf));
+    // The cwd as a part of a longer name or path (a README's `/workflows`) is not a leak.
+    try put(tmp.dir, "readme", "see github.com/tokio-rs/prost/actions/workflows/ci.yml");
+    const readme = try at(root, "readme");
+    defer t.allocator.free(readme);
+    try t.expectEqual(L.OutputCheck.ok, try L.checkOutput(readme, "/work", &buf));
+    try put(tmp.dir, "bare", "/work");
+    const bare = try at(root, "bare");
+    defer t.allocator.free(bare);
+    try t.expectEqual(L.OutputCheck.has_cwd, try L.checkOutput(bare, "/work", &buf));
+    try put(tmp.dir, "nul", "ab /work\x00y");
+    const nul = try at(root, "nul");
+    defer t.allocator.free(nul);
+    try t.expectEqual(L.OutputCheck.has_cwd, try L.checkOutput(nul, "/work", &buf));
     // A directory is neither empty nor read.
     try tmp.dir.makeDir("adir");
     try put(tmp.dir, "adir/f", "/work");
