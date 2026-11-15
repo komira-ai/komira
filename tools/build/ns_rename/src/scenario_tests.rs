@@ -416,6 +416,11 @@ fn sorts_the_rows_of_a_sorted_file_again_and_keeps_the_release_set_fixtures() {
         "release/readme_e2e/packages.bzl",
         "PACKAGES = {\n    \"komira_buffer\": \"0.1.0\",\n    \"komira_bump_arena\": \"0.1.0\",\n}\n",
     );
+    s.write(
+        "release/mopm_native_ids.bzl",
+        "load(\"//src/komira_buffer:l.bzl\", komira_buffer = \"G\")\n\
+         load(\"//src/komira_bump_arena:l.bzl\", komira_bump_arena = \"G\")\n",
+    );
     // Not listed: its rows are renamed and left where they were.
     s.write("docs/order.txt", "komira_buffer\nkomira_bump_arena\n");
     s.write(
@@ -429,7 +434,8 @@ fn sorts_the_rows_of_a_sorted_file_again_and_keeps_the_release_set_fixtures() {
     let summary = rename(&args(&s, &m.0.join("map.tsv"), false)).unwrap();
     assert!(
         summary.contains(
-            "  of them, files whose rows were sorted again: 2\n\
+            "  of them, files whose rows were sorted again: 3\n\
+             \x20   release/mopm_native_ids.bzl\n\
              \x20   release/prod_claimed_names.txt\n\
              \x20   release/readme_e2e/packages.bzl\n"
         ),
@@ -442,6 +448,11 @@ fn sorts_the_rows_of_a_sorted_file_again_and_keeps_the_release_set_fixtures() {
     assert_eq!(
         s.read("release/readme_e2e/packages.bzl"),
         "PACKAGES = {\n    \"bump_arena\": \"0.1.0\",\n    \"byte_buffer\": \"0.1.0\",\n}\n"
+    );
+    assert_eq!(
+        s.read("release/mopm_native_ids.bzl"),
+        "load(\"//src/bump_arena:l.bzl\", bump_arena = \"G\")\n\
+         load(\"//src/byte_buffer:l.bzl\", byte_buffer = \"G\")\n"
     );
     assert_eq!(s.read("docs/order.txt"), "byte_buffer\nbump_arena\n");
     assert_eq!(
@@ -488,6 +499,18 @@ fn replace_paths_replaces_whole_paths_only() {
     assert_eq!(r("src/a/tests/a.mojox"), None);
     assert_eq!(r("src/a/tests/a.mojo.bak src/a/tests/a.mojo/x"), None);
     assert_eq!(r(""), None);
+    // Two pairs each replace their own path.
+    let two = [
+        paths[0].clone(),
+        (
+            "src/b/tests/b.mojo".to_string(),
+            "src/b/tests/test_b.mojo".to_string(),
+        ),
+    ];
+    assert_eq!(
+        crate::tree::replace_paths("src/b/tests/b.mojo src/a/tests/a.mojo", &two).as_deref(),
+        Some("src/b/tests/test_b.mojo src/a/tests/test_a.mojo")
+    );
 }
 
 #[test]

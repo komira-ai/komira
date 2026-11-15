@@ -13,7 +13,7 @@ pub mod manifest;
 pub mod map;
 pub mod names;
 pub mod report;
-pub mod rows;
+pub(crate) mod rows;
 pub mod tree;
 pub mod words;
 

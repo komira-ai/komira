@@ -219,9 +219,11 @@ pub fn binds_module(text: &str, old: &str) -> bool {
     })
 }
 
-/// `text` with each whole occurrence of a `from` path replaced by its `to`: an occurrence is one
-/// not inside a longer path or word (neither the byte before it nor the byte after it is a word byte,
-/// `/`, `.` or `-`). `None` when nothing is replaced.
+/// `text` with each whole occurrence of a `from` path replaced by its `to`, the pairs applied in
+/// order: an occurrence is one not inside a longer path or word (neither the byte before it nor
+/// the byte after it is a word byte, `/`, `.` or `-`). So a path that ends a sentence with a full
+/// stop (`see src/a/tests/a.mojo.`) is not replaced; the tool's summary lists the moves, for such a
+/// line to be edited by hand. `None` when nothing is replaced.
 pub(crate) fn replace_paths(text: &str, paths: &[(String, String)]) -> Option<String> {
     let path_byte = |b: u8| crate::words::is_word_byte(b) || matches!(b, b'/' | b'.' | b'-');
     let mut out = text.to_string();
