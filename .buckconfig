@@ -35,10 +35,10 @@
 [external_cell_buildrules]
   git_origin = https://github.com/komira-ai/buildrules.git
   # The commit of buildrules main that runs the build tools on a Mac that runs Buck2 and lets a local macOS compile name
-  # the host `local`: v0.0.73 and the commit after it on main, which reads mopm 0.0.101 (unit graph formats 4 and 5, `link` from mopm, provided natives) and stages the source of each `[targets] bins` program for `mojo_conda` (`bins`); a package whose native library has C++ sources declares `link = ["c++"]`. A bump is one change: this line, then
+  # the host `local`: v0.0.73 and the commit after it on main, which reads mopm 0.0.101 (unit graph formats 4 and 5, `link` from mopm, provided natives) and stages the source of each `[targets] bins` program for `mojo_conda` (`bins`); a package whose native library has C++ sources declares `link = ["c++"]`; with komira-ai/buildrules#152 (runspec_test starts its installed copies from the case's scratch directory, not a `noexec` /tmp) and komira-ai/buildrules#153 (cov_normalize and mojo_compile refuse the working directory only as a whole path). A bump is one change: this line, then
   # `buildrules mojo sync` (the pins in the directory `[cells] toolchains` names, and each package's
   # buildrules.mojo.lock.bzl) when the release pins another mopm.
-  commit_hash = d57389bea21747f60723d0ef41e3779b9695d744
+  commit_hash = c96b3b3ae4ba1d93295eca72e37f8149ed0025c8
 
 # buildrules reads every `[buildrules_re]` key from the root cell's configuration, whichever cell evaluates its
 # rules. Komira is the root cell when it is built standalone, so this section is the one read; a repository that
