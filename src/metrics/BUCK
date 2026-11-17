@@ -47,10 +47,10 @@ mojo_adopted_library(
 )
 
 # The mopm package is `:conda`, which `mojo_package` makes for a package that owns a native library: `mopm pack`
-# over `:lib`, the `.conda` a mopm registry serves (`mojo-metrics-0.1.0-mojo1.0.0_0.conda`), with the
+# over `:lib`, the `.conda` a mopm registry serves (`mojo-komira-ai.metrics-0.1.0-mojo1.0.0_0.conda`), with the
 # manifest of every path dependency of the closure staged at its repository path. It records the direct
-# dependencies of mopm.toml (`mojo-atomic_alias`, `mojo-clock`, `mojo-containers`,
-# `mojo-hashing`, `mojo-name_registry`, each `>=0.1,<0.2`), holds none of their files, and holds
+# dependencies of mopm.toml (`mojo-komira-ai.atomic_alias`, `mojo-komira-ai.clock`, `mojo-komira-ai.containers`,
+# `mojo-komira-ai.hashing`, `mojo-komira-ai.name_registry`, each `>=0.1,<0.2`), holds none of their files, and holds
 # `lib/libkomira_metrics_ea_flag.a`.
 
 # What `:conda` holds, read back from the built file (buildrules' `prebuilt_unpack`): this package's own
@@ -61,11 +61,11 @@ mojo_conda_holds(
     name = "conda_holds",
     conda = ":conda",
     depends = [
-        "mojo-atomic_alias >=0.1,<0.2",
-        "mojo-clock >=0.1,<0.2",
-        "mojo-containers >=0.1,<0.2",
-        "mojo-hashing >=0.1,<0.2",
-        "mojo-name_registry >=0.1,<0.2",
+        "mojo-komira-ai.atomic_alias >=0.1,<0.2",
+        "mojo-komira-ai.clock >=0.1,<0.2",
+        "mojo-komira-ai.containers >=0.1,<0.2",
+        "mojo-komira-ai.hashing >=0.1,<0.2",
+        "mojo-komira-ai.name_registry >=0.1,<0.2",
     ],
     natives = {"libkomira_metrics_ea_flag.a": ":native_komira_metrics_ea_flag"},
     package = "metrics",

@@ -204,7 +204,7 @@ This package is built with buildrules' `mojo_package` and packaged for mopm as `
 (`mopm.toml`). The library is `src/kg_spec/` (`graph_spec.mojo`, and the `__init__.mojo` that re-exports it),
 its tests are `tests/` (`test_graph_spec_resolve.mojo`, `test_graph_spec_validation.mojo`). It depends on one
 package, `kg_mode`, a sibling directory (`[dependencies]` of `mopm.toml`: `{ path = "../kg_mode",
-version = "0.1" }`), so the `.conda` of this package records `mojo-kg_mode >=0.1,<0.2` as a dependency and
+version = "0.1" }`), so the `.conda` of this package records `mojo-komira-ai.kg_mode >=0.1,<0.2` as a dependency and
 holds none of that package's files: installing `kg_spec` installs `kg_mode` with it. The package has no
 native archive and calls no foreign function. The files that are not sources:
 
@@ -222,7 +222,7 @@ with both packages staged, commit what it writes, and build `komira//src/kg_spec
 that the sync has not listed is not run: run the sync after adding one.
 
 `:conda` is buildrules' `mojo_conda` over `:lib`: the `.conda` of the mopm package
-(`mojo-kg_spec-0.1.0-mojo1.0.0_0.conda`), packed with the sibling's manifest beside its own (`members`), which
+(`mojo-komira-ai.kg_spec-0.1.0-mojo1.0.0_0.conda`), packed with the sibling's manifest beside its own (`members`), which
 therefore exists only once the tests have passed. Publishing it (`mopm publish`) uploads, so it is a step of a CI job
 that takes that file, not a build action.
 

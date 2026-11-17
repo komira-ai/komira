@@ -87,7 +87,7 @@ the test has passed. After any change to a source, a test, `mopm.toml`, `mopm.lo
 `buildrules mojo sync`, commit what it writes, and build `komira//src/runtime_paths:lib` on the farm.
 
 `:conda` is buildrules' `mojo_conda` over `:lib`: the `.conda` of the mopm package
-(`mojo-runtime_paths-0.1.0-mojo1.0.0_0.conda`), which therefore exists only once the test has passed.
+(`mojo-komira-ai.runtime_paths-0.1.0-mojo1.0.0_0.conda`), which therefore exists only once the test has passed.
 Publishing it (`mopm publish`) uploads, so it is a step of a CI job that takes that file, not a build action.
 
 `:runtime_paths` is `:lib` as komira's Mojo rules take it (`mojo_adopted_library`). It also compiles and runs

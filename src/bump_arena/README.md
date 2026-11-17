@@ -39,7 +39,7 @@ assert_true(arena.would_fit(256))
 This package is built with buildrules' `mojo_package` and packaged for mopm as `bump_arena`, version 0.1.0
 (`mopm.toml`). The library is `src/bump_arena/`, its tests are `tests/`. It depends on one package, a sibling
 directory (`[dependencies]` of `mopm.toml`): `byte_buffer`, as `{ path = "../byte_buffer", version = "0.1" }`. The
-`.conda` of this package records `mojo-byte_buffer >=0.1,<0.2` as a dependency and holds none of its files:
+`.conda` of this package records `mojo-komira-ai.byte_buffer >=0.1,<0.2` as a dependency and holds none of its files:
 installing `bump_arena` installs `byte_buffer` (and, through it, its own dependencies) with it. This package
 owns no C. The files that are not sources:
 
@@ -57,7 +57,7 @@ with this package and the packages of its closure staged, commit what it writes,
 `komira//src/bump_arena:lib` on the farm.
 
 `:conda` is buildrules' `mojo_conda` over `:lib`: the `.conda` of the mopm package
-(`mojo-bump_arena-0.1.0-mojo1.0.0_0.conda`), packed with the manifests of the path dependencies beside its own
+(`mojo-komira-ai.bump_arena-0.1.0-mojo1.0.0_0.conda`), packed with the manifests of the path dependencies beside its own
 (`members`), which therefore exists only once the tests have passed. Publishing it (`mopm publish`) uploads, so it is
 a step of a CI job that takes that file, not a build action.
 

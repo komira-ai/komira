@@ -63,8 +63,8 @@ mojo_conda_holds(
     name = "conda_holds",
     conda = ":conda",
     depends = [
-        "mojo-lz4 >=0.1,<0.2",
-        "mojo-zlib >=0.1,<0.2",
+        "mojo-komira-ai.lz4 >=0.1,<0.2",
+        "mojo-komira-ai.zlib >=0.1,<0.2",
         "bzip2 >=1.0.8,<2",
         "liblzma >=5.2.5,<6",
         "zstd >=1.5.2,<2",

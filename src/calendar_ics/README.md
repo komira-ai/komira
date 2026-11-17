@@ -156,7 +156,7 @@ in the shape Google, Apple, Outlook and Thunderbird export.
 
 ## Build files
 
-This package is built with buildrules' `mojo_package` and packaged for mopm as `calendar_ics`, version 0.1.0 (`mopm.toml`). The library is `src/calendar_ics/`, its tests are `tests/`. It depends on calendar, calendar_proto, content_line and datetime, sibling directories (`[dependencies]` of `mopm.toml`), so the `.conda` of this package records `mojo-calendar >=0.1,<0.2`, `mojo-calendar_proto >=0.1,<0.2`, `mojo-content_line >=0.1,<0.2` and `mojo-datetime >=0.1,<0.2` as dependencies and holds none of those packages' files: installing `calendar_ics` installs them with it. The files that are not sources:
+This package is built with buildrules' `mojo_package` and packaged for mopm as `calendar_ics`, version 0.1.0 (`mopm.toml`). The library is `src/calendar_ics/`, its tests are `tests/`. It depends on calendar, calendar_proto, content_line and datetime, sibling directories (`[dependencies]` of `mopm.toml`), so the `.conda` of this package records `mojo-komira-ai.calendar >=0.1,<0.2`, `mojo-komira-ai.calendar_proto >=0.1,<0.2`, `mojo-komira-ai.content_line >=0.1,<0.2` and `mojo-komira-ai.datetime >=0.1,<0.2` as dependencies and holds none of those packages' files: installing `calendar_ics` installs them with it. The files that are not sources:
 
 | file | what |
 |---|---|
@@ -168,6 +168,6 @@ This package is built with buildrules' `mojo_package` and packaged for mopm as `
 
 `:lib` is the library file and exists only once every test of `tests/` has passed. After any change to a source, a test, or a manifest of this package or of a dependency, run `buildrules mojo sync`, commit what it writes, and build `komira//src/calendar_ics:lib` on the farm. A test file that the sync has not listed is not run: run the sync after adding one.
 
-`:conda` is buildrules' `mojo_conda` over `:lib`: the `.conda` of the mopm package (`mojo-calendar_ics-0.1.0-mojo1.0.0_0.conda`), which therefore exists only once the tests have passed. Publishing it (`mopm publish`) uploads, so it is a step of a CI job that takes that file, not a build action.
+`:conda` is buildrules' `mojo_conda` over `:lib`: the `.conda` of the mopm package (`mojo-komira-ai.calendar_ics-0.1.0-mojo1.0.0_0.conda`), which therefore exists only once the tests have passed. Publishing it (`mopm publish`) uploads, so it is a step of a CI job that takes that file, not a build action.
 
 `:calendar_ics` is `:lib` as komira's Mojo rules take it (`mojo_adopted_library`). Its `deps` are the adopted target of each package in `[dependencies]`, and the rule refuses a list that is not the closure `:lib` was built from. It also compiles and runs the README's examples above (`[tests][readme]`) against `:lib`; the tests are not run again.

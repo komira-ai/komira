@@ -45,9 +45,9 @@ mojo_adopted_library(
 )
 
 # The mopm package: `mopm pack` over `:lib`, the `.conda` a mopm registry serves
-# (`mojo-trace-0.1.0-mojo1.0.0_0.conda`), which records the five direct dependencies
-# (`mojo-atomic_alias`, `mojo-clock`, `mojo-containers`,
-# `mojo-name_registry`, `mojo-spsc_ring`, each `>=0.1,<0.2`) and holds none of their
+# (`mojo-komira-ai.trace-0.1.0-mojo1.0.0_0.conda`), which records the five direct dependencies
+# (`mojo-komira-ai.atomic_alias`, `mojo-komira-ai.clock`, `mojo-komira-ai.containers`,
+# `mojo-komira-ai.name_registry`, `mojo-komira-ai.spsc_ring`, each `>=0.1,<0.2`) and holds none of their
 # files. `members` is the manifests of the path dependencies of the closure, staged at their
 # repository paths, because `mopm pack` reads the manifest of each beside the one it is given.
 # `:lib` exists only once the tests passed, so this file exists only then. Publishing it
@@ -67,8 +67,8 @@ mojo_conda(
         "../spsc_ring": "//src/spsc_ring:mopm.toml",
     },
     mojo = "1.0.0",
-    mopm = "toolchains//:mopm_0_0_101",
-    package = "trace",
+    mopm = "toolchains//:mopm_0_0_113",
+    package = "komira-ai/trace",
     version = "0.1.0",
     visibility = ["PUBLIC"],
 )
@@ -81,11 +81,11 @@ mojo_conda_holds(
     name = "conda_holds",
     conda = ":conda",
     depends = [
-        "mojo-atomic_alias >=0.1,<0.2",
-        "mojo-clock >=0.1,<0.2",
-        "mojo-containers >=0.1,<0.2",
-        "mojo-name_registry >=0.1,<0.2",
-        "mojo-spsc_ring >=0.1,<0.2",
+        "mojo-komira-ai.atomic_alias >=0.1,<0.2",
+        "mojo-komira-ai.clock >=0.1,<0.2",
+        "mojo-komira-ai.containers >=0.1,<0.2",
+        "mojo-komira-ai.name_registry >=0.1,<0.2",
+        "mojo-komira-ai.spsc_ring >=0.1,<0.2",
     ],
     package = "trace",
     sole = True,

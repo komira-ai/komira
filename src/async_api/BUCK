@@ -38,7 +38,7 @@ mojo_adopted_library(
 mojo_conda_holds(
     name = "conda_holds",
     conda = ":conda",
-    depends = ["mojo-atomic_alias >=0.1,<0.2"],
+    depends = ["mojo-komira-ai.atomic_alias >=0.1,<0.2"],
     natives = {"libkomira_concurrency_pool_depth.a": ":native_komira_concurrency_pool_depth"},
     package = "async_api",
     sole = True,

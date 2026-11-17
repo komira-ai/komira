@@ -169,8 +169,8 @@ mojo_conda(
         "../protobuf": "//src/protobuf:mopm.toml",
     },
     mojo = "1.0.0",
-    mopm = "toolchains//:mopm_0_0_101",
-    package = "plan_proto",
+    mopm = "toolchains//:mopm_0_0_113",
+    package = "komira-ai/plan_proto",
     version = "0.1.0",
     visibility = ["PUBLIC"],
 )
@@ -180,7 +180,7 @@ mojo_conda(
 mojo_conda_holds(
     name = "conda_holds",
     conda = ":conda",
-    depends = ["mojo-proto_codec >=0.1,<0.2"],
+    depends = ["mojo-komira-ai.proto_codec >=0.1,<0.2"],
     package = "plan_proto",
     sole = True,
     visibility = ["PUBLIC"],

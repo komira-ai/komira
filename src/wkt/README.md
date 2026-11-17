@@ -142,8 +142,8 @@ def main() raises:
 This package is built with buildrules' `mojo_package` and packaged for mopm as `wkt`, version 0.1.0
 (`mopm.toml`). The library is `src/wkt/`, its tests are `tests/`. It depends on four sibling packages,
 `datetime`, `encoding`, `json` and `proto_codec` (`[dependencies]` of `mopm.toml`, each
-`{ path = "../<name>", version = "0.1" }`), so the `.conda` of this package records `mojo-datetime >=0.1,<0.2`,
-`mojo-encoding >=0.1,<0.2`, `mojo-json >=0.1,<0.2` and `mojo-proto_codec >=0.1,<0.2` as
+`{ path = "../<name>", version = "0.1" }`), so the `.conda` of this package records `mojo-komira-ai.datetime >=0.1,<0.2`,
+`mojo-komira-ai.encoding >=0.1,<0.2`, `mojo-komira-ai.json >=0.1,<0.2` and `mojo-komira-ai.proto_codec >=0.1,<0.2` as
 dependencies and holds none of their files. The files that are not sources:
 
 | file | what |

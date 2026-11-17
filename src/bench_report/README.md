@@ -245,7 +245,7 @@ The reader refuses a missing or unknown member at any level, a member named twic
 This package is built with buildrules' `mojo_package` and packaged for mopm as `bench_report`, version 0.1.0
 (`mopm.toml`). The library is `src/bench_report/`, its tests are `tests/`. It depends on one package,
 `json`, a sibling directory (`[dependencies]` of `mopm.toml`: `{ path = "../json", version = "0.1" }`),
-so the `.conda` of this package records `mojo-json >=0.1,<0.2` as a dependency and holds none of that
+so the `.conda` of this package records `mojo-komira-ai.json >=0.1,<0.2` as a dependency and holds none of that
 package's files: installing `bench_report` installs `json` with it. The files that are not sources:
 
 | file | what |
@@ -261,9 +261,9 @@ After any change to a source, a test, a manifest of this package or of the sibli
 both packages staged, commit what it writes, and build `komira//src/bench_report:lib` on the farm.
 
 `:conda` is buildrules' `mojo_conda` over `:lib`: the `.conda` of the mopm package
-(`mojo-bench_report-0.1.0-mojo1.0.0_0.conda`), packed with the sibling's manifest beside its own (`members`),
+(`mojo-komira-ai.bench_report-0.1.0-mojo1.0.0_0.conda`), packed with the sibling's manifest beside its own (`members`),
 which therefore exists only once the tests have passed. `:conda_holds` reads it back and requires the one dependency
-`mojo-json >=0.1,<0.2`. Publishing it (`mopm publish`) uploads, so it is a step of a CI job that takes that
+`mojo-komira-ai.json >=0.1,<0.2`. Publishing it (`mopm publish`) uploads, so it is a step of a CI job that takes that
 file, not a build action.
 
 `:bench_report` is `:lib` as komira's Mojo rules take it (`mojo_adopted_library`): its `deps` are the adopted

@@ -106,7 +106,7 @@ writes, and build `komira//src/scalar_arithmetic:lib` on the farm. (The sync wri
 run: run the sync after adding one.
 
 `:conda` is buildrules' `mojo_conda` over `:lib`: the `.conda` of the mopm package
-(`mojo-scalar_arithmetic-0.1.0-mojo1.0.0_0.conda`), which therefore exists only once the tests have passed.
+(`mojo-komira-ai.scalar_arithmetic-0.1.0-mojo1.0.0_0.conda`), which therefore exists only once the tests have passed.
 Publishing it (`mopm publish`) uploads, so it is a step of a CI job that takes that file, not a build action.
 
 `:scalar_arithmetic` is `:lib` as komira's Mojo rules take it (`mojo_adopted_library`). It also compiles and

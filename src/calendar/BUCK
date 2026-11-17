@@ -47,8 +47,8 @@ mojo_adopted_library(
 )
 
 # The mopm package: `mopm pack` over `:lib`, the `.conda` a mopm registry serves
-# (`mojo-calendar-0.1.0-mojo1.0.0_0.conda`), which records calendar_proto and
-# datetime as dependencies (`mojo-calendar_proto >=0.1,<0.2` and `mojo-datetime
+# (`mojo-komira-ai.calendar-0.1.0-mojo1.0.0_0.conda`), which records calendar_proto and
+# datetime as dependencies (`mojo-komira-ai.calendar_proto >=0.1,<0.2` and `mojo-komira-ai.datetime
 # >=0.1,<0.2`) and holds those packages' files nowhere. `members` is the manifests of the path
 # dependencies, staged at their repository paths, because `mopm pack` reads the manifest of each
 # beside the one it is given. `:lib` exists only once the tests passed, so this file exists only
@@ -69,23 +69,23 @@ mojo_conda(
         "../wkt": "//src/wkt:mopm.toml",
     },
     mojo = "1.0.0",
-    mopm = "toolchains//:mopm_0_0_101",
-    package = "calendar",
+    mopm = "toolchains//:mopm_0_0_113",
+    package = "komira-ai/calendar",
     version = "0.1.0",
     visibility = ["PUBLIC"],
 )
 
 # What `:conda` holds, read back from the built file (buildrules' `prebuilt_unpack`): this package's
 # own `.mojoc` and nothing else under `lib/mojo/` (calendar_proto and datetime are not
-# in it), and exactly 2 dependencies, `mojo-calendar_proto >=0.1,<0.2` and
-# `mojo-datetime >=0.1,<0.2`, which is what installing the package pulls in. Red when the
+# in it), and exactly 2 dependencies, `mojo-komira-ai.calendar_proto >=0.1,<0.2` and
+# `mojo-komira-ai.datetime >=0.1,<0.2`, which is what installing the package pulls in. Red when the
 # manifest drops a dependency, names another range, or the file carries a sibling.
 mojo_conda_holds(
     name = "conda_holds",
     conda = ":conda",
     depends = [
-        "mojo-calendar_proto >=0.1,<0.2",
-        "mojo-datetime >=0.1,<0.2",
+        "mojo-komira-ai.calendar_proto >=0.1,<0.2",
+        "mojo-komira-ai.datetime >=0.1,<0.2",
     ],
     package = "calendar",
     sole = True,

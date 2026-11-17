@@ -77,8 +77,8 @@ of this package or of a sibling, run `buildrules mojo sync` with the packages st
 `komira//src/sync:lib` on the farm.
 
 `:conda` is buildrules' `mojo_conda` over `:lib`: the `.conda` of the mopm package
-(`mojo-sync-0.1.0-mojo1.0.0_0.conda`), which records one dependency beyond the compiler,
-`mojo-atomic_alias >=0.1,<0.2` (`:conda_holds` reads that back, so a dev-dependency that leaked into the package
+(`mojo-komira-ai.sync-0.1.0-mojo1.0.0_0.conda`), which records one dependency beyond the compiler,
+`mojo-komira-ai.atomic_alias >=0.1,<0.2` (`:conda_holds` reads that back, so a dev-dependency that leaked into the package
 turns it red). Publishing it (`mopm publish`) uploads, so it is a step of a CI job that takes that file, not a build
 action.
 

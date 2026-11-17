@@ -83,7 +83,7 @@ assert_true("must not hold an empty, '.' or '..' segment" in message)
 This package is built with buildrules' `mojo_package` and packaged for mopm as `resources`, version 0.1.0
 (`mopm.toml`). The library is `src/resources/`, its test is `tests/`. It depends on one package,
 `runtime_paths`, a sibling directory (`[dependencies]` of `mopm.toml`: `{ path = "../runtime_paths",
-version = "0.1" }`), so the `.conda` of this package records `mojo-runtime_paths >=0.1,<0.2` as a dependency
+version = "0.1" }`), so the `.conda` of this package records `mojo-komira-ai.runtime_paths >=0.1,<0.2` as a dependency
 and holds none of that package's files: installing `resources` installs `runtime_paths` with it. The
 files that are not sources:
 
@@ -102,7 +102,7 @@ manifest of this package or of the sibling, run `buildrules mojo sync` with both
 writes, and build `komira//src/resources:lib` on the farm.
 
 `:conda` is buildrules' `mojo_conda` over `:lib`: the `.conda` of the mopm package
-(`mojo-resources-0.1.0-mojo1.0.0_0.conda`), packed with the sibling's manifest beside its own (`members`),
+(`mojo-komira-ai.resources-0.1.0-mojo1.0.0_0.conda`), packed with the sibling's manifest beside its own (`members`),
 which therefore exists only once the test has passed. Publishing it (`mopm publish`) uploads, so it is a step of a
 CI job that takes that file, not a build action.
 

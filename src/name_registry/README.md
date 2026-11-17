@@ -65,7 +65,7 @@ assert_false(Bool(reg.lookup(UInt32(0))))  # 0 is the empty-slot marker
 This package is built with buildrules' `mojo_package` and packaged for mopm as `name_registry`, version 0.1.0
 (`mopm.toml`). The library is `src/name_registry/`, its tests are `tests/`. It depends on one package,
 `hashing`, a sibling directory (`[dependencies]` of `mopm.toml`: `{ path = "../hashing", version = "0.1" }`),
-so the `.conda` of this package records `mojo-hashing >=0.1,<0.2` as a dependency and holds none of that
+so the `.conda` of this package records `mojo-komira-ai.hashing >=0.1,<0.2` as a dependency and holds none of that
 package's files. The files that are not sources:
 
 | file | what |
@@ -81,7 +81,7 @@ After any change to a source, a test, or a manifest of this package or of the si
 with both packages staged, commit what it writes, and build `komira//src/name_registry:lib` on the farm.
 
 `:conda` is buildrules' `mojo_conda` over `:lib`: the `.conda` of the mopm package
-(`mojo-name_registry-0.1.0-mojo1.0.0_0.conda`), packed with the sibling's manifest beside its own
+(`mojo-komira-ai.name_registry-0.1.0-mojo1.0.0_0.conda`), packed with the sibling's manifest beside its own
 (`members`). Publishing it (`mopm publish`) uploads, so it is a step of a CI job, not a build action.
 
 `:name_registry` is `:lib` as komira's Mojo rules take it (`mojo_adopted_library`): its `deps` are the adopted

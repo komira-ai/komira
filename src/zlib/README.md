@@ -131,7 +131,7 @@ installing `zlib` installs libz. The files that are not sources:
 source, a test, `mopm.toml`, `mopm.lock` or `mopm-toolchain.toml`, run `buildrules mojo sync`, commit what it
 writes, and build `komira//src/zlib:lib` on the farm.
 
-`:conda` is the `.conda` of the mopm package (`mojo-zlib-0.1.0-mojo1.0.0_0.conda`): the `.mojoc`, requiring
+`:conda` is the `.conda` of the mopm package (`mojo-komira-ai.zlib-0.1.0-mojo1.0.0_0.conda`): the `.mojoc`, requiring
 `libzlib`. `:zlib` is `:lib` as komira's Mojo rules take it (`mojo_adopted_library`); it declares
 `dlopen = ["libz.so.1"]`, which `:zlib_conda` (the release set's packaging) turns into the same requirement.
 It also compiles and runs the README's examples above (`[tests][readme]`) against `:lib`.

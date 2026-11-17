@@ -76,7 +76,7 @@ A counter that has one owner lives in its owner's package and uses `global_count
 This package is built with buildrules' `mojo_package` and packaged for mopm as `counters`, version 0.1.0
 (`mopm.toml`). The library is `src/counters/`, its tests are `tests/`. It depends on one package,
 `atomic_alias`, a sibling directory (`[dependencies]` of `mopm.toml`: `{ path = "../atomic_alias",
-version = "0.1" }`), so the `.conda` of this package records `mojo-atomic_alias >=0.1,<0.2` as a dependency and
+version = "0.1" }`), so the `.conda` of this package records `mojo-komira-ai.atomic_alias >=0.1,<0.2` as a dependency and
 holds none of that package's files: installing `counters` installs `atomic_alias` with it. Its tests
 also use `runtime_paths` (`[dev-dependencies]`), which reaches the tests only and is not in the `.conda`. The
 files that are not sources:
@@ -97,7 +97,7 @@ of this package or of a sibling, run `buildrules mojo sync` with the packages st
 build `komira//src/counters:lib` on the farm.
 
 `:conda` is buildrules' `mojo_conda` over `:lib`: the `.conda` of the mopm package
-(`mojo-counters-0.1.0-mojo1.0.0_0.conda`), packed with the sibling's manifest beside its own (`members`),
+(`mojo-komira-ai.counters-0.1.0-mojo1.0.0_0.conda`), packed with the sibling's manifest beside its own (`members`),
 which therefore exists only once the tests have passed. Publishing it (`mopm publish`) uploads, so it is a step of a
 CI job that takes that file, not a build action.
 

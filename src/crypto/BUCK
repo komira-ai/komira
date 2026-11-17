@@ -68,8 +68,8 @@ mojo_conda_holds(
     name = "conda_holds",
     conda = ":conda",
     depends = [
-        "mojo-awslc >=0.1,<0.2",
-        "mojo-encoding >=0.1,<0.2",
+        "mojo-komira-ai.awslc >=0.1,<0.2",
+        "mojo-komira-ai.encoding >=0.1,<0.2",
     ],
     natives = {"libkomira_crypto_sha256_hw.a": ":native_komira_crypto_sha256_hw"},
     package = "crypto",

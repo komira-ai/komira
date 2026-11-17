@@ -122,8 +122,8 @@ After any change to a source, the test, a manifest of this package or of the sib
 packages staged, commit what it writes, and build `komira//src/fork_join:lib` on the farm.
 
 `:conda` is buildrules' `mojo_conda` over `:lib`: the `.conda` of the mopm package
-(`mojo-fork_join-0.1.0-mojo1.0.0_0.conda`), packed with the sibling's manifest beside its own (`members`), which
-therefore exists only once the test has passed. It records `mojo-atomic_alias >=0.1,<0.2` and holds none of that
+(`mojo-komira-ai.fork_join-0.1.0-mojo1.0.0_0.conda`), packed with the sibling's manifest beside its own (`members`), which
+therefore exists only once the test has passed. It records `mojo-komira-ai.atomic_alias >=0.1,<0.2` and holds none of that
 package's files (`:conda_holds` reads both back). Publishing it (`mopm publish`) uploads, so it is a step of a CI job
 that takes that file, not a build action.
 

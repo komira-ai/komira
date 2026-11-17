@@ -40,7 +40,7 @@ mojo_adopted_library(
 )
 
 # The mopm package: `mopm pack` over `:lib`, the `.conda` a mopm registry serves
-# (`mojo-mail_message-0.1.0-mojo1.0.0_0.conda`), which records byte_buffer, datetime,
+# (`mojo-komira-ai.mail_message-0.1.0-mojo1.0.0_0.conda`), which records byte_buffer, datetime,
 # encoding and mail_address as dependencies (`mojo-<name> >=0.1,<0.2`) and holds none of
 # their files. `members` is the manifests of the path dependencies of the closure, staged at their
 # repository paths, because `mopm pack` reads the manifest of each beside the one it is given. `:lib`
@@ -62,8 +62,8 @@ mojo_conda(
         "../simd_ops": "//src/simd_ops:mopm.toml",
     },
     mojo = "1.0.0",
-    mopm = "toolchains//:mopm_0_0_101",
-    package = "mail_message",
+    mopm = "toolchains//:mopm_0_0_113",
+    package = "komira-ai/mail_message",
     version = "0.1.0",
     visibility = ["PUBLIC"],
 )
@@ -76,10 +76,10 @@ mojo_conda_holds(
     name = "conda_holds",
     conda = ":conda",
     depends = [
-        "mojo-byte_buffer >=0.1,<0.2",
-        "mojo-datetime >=0.1,<0.2",
-        "mojo-encoding >=0.1,<0.2",
-        "mojo-mail_address >=0.1,<0.2",
+        "mojo-komira-ai.byte_buffer >=0.1,<0.2",
+        "mojo-komira-ai.datetime >=0.1,<0.2",
+        "mojo-komira-ai.encoding >=0.1,<0.2",
+        "mojo-komira-ai.mail_address >=0.1,<0.2",
     ],
     package = "mail_message",
     sole = True,

@@ -106,5 +106,5 @@ writes, and build `komira//src/json:lib` on the farm. (The sync writes the toolc
 `tools/build/cells/toolchains/` here.)
 
 `:conda` is buildrules' `mojo_conda` over `:lib`: the `.conda` of the mopm package
-(`mojo-json-0.1.0-mojo1.0.0_0.conda`), which therefore exists only once the tests have passed.
+(`mojo-komira-ai.json-0.1.0-mojo1.0.0_0.conda`), which therefore exists only once the tests have passed.
 Publishing it (`mopm publish`) uploads, so it is a step of a CI job that takes that file, not a build action.

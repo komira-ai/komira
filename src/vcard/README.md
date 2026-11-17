@@ -53,7 +53,7 @@ assert_equal(
 This package is built with buildrules' `mojo_package` and packaged for mopm as `vcard`, version 0.1.0
 (`mopm.toml`). The library is `src/vcard/`, its tests are `tests/`. It depends on one package,
 `content_line`, a sibling directory (`[dependencies]` of `mopm.toml`: `{ path = "../content_line",
-version = "0.1" }`), so the `.conda` of this package records `mojo-content_line >=0.1,<0.2` as a dependency
+version = "0.1" }`), so the `.conda` of this package records `mojo-komira-ai.content_line >=0.1,<0.2` as a dependency
 and holds none of that package's files: installing `vcard` installs `content_line` with it. The files
 that are not sources:
 
@@ -71,7 +71,7 @@ that are not sources:
 the farm. A test file that `buildrules mojo sync` has not listed is not run: run the sync after adding one.
 
 `:conda` is buildrules' `mojo_conda` over `:lib`: the `.conda` of the mopm package
-(`mojo-vcard-0.1.0-mojo1.0.0_0.conda`), packed with the sibling's manifest beside its own (`members`), which
+(`mojo-komira-ai.vcard-0.1.0-mojo1.0.0_0.conda`), packed with the sibling's manifest beside its own (`members`), which
 therefore exists only once the tests have passed. Publishing it (`mopm publish`) uploads, so it is a step of a CI job
 that takes that file, not a build action. `:vcard` is `:lib` as komira's Mojo rules take it
 (`mojo_adopted_library`); it also compiles and runs the README's examples above (`[tests][readme]`) against `:lib`.

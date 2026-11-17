@@ -127,8 +127,8 @@ This package is built with buildrules' `mojo_package` and packaged for mopm as `
 (`mopm.toml`). The library is `src/mail_message/`, its tests are `tests/`. It depends on four packages, sibling
 directories (`[dependencies]` of `mopm.toml`): `byte_buffer`, `datetime`, `encoding` and
 `mail_address`, each as `{ path = "../<name>", version = "0.1" }`. The `.conda` of this package records
-`mojo-byte_buffer >=0.1,<0.2`, `mojo-datetime >=0.1,<0.2`, `mojo-encoding >=0.1,<0.2` and
-`mojo-mail_address >=0.1,<0.2` as dependencies and holds none of their files: installing `mail_message`
+`mojo-komira-ai.byte_buffer >=0.1,<0.2`, `mojo-komira-ai.datetime >=0.1,<0.2`, `mojo-komira-ai.encoding >=0.1,<0.2` and
+`mojo-komira-ai.mail_address >=0.1,<0.2` as dependencies and holds none of their files: installing `mail_message`
 installs them with it. `byte_buffer` reaches `libc`, which links a C shim of its own, and a dependent's link
 takes it from the closure; this package owns no C. The files that are not sources:
 
@@ -144,6 +144,6 @@ passed. After any change to a source, a test, a manifest of this package or of a
 with all five packages staged, commit what it writes, and build `komira//src/mail_message:lib` on the farm.
 
 `:conda` is buildrules' `mojo_conda` over `:lib`: the `.conda` of the mopm package
-(`mojo-mail_message-0.1.0-mojo1.0.0_0.conda`), packed with the manifests of the siblings of its closure beside
+(`mojo-komira-ai.mail_message-0.1.0-mojo1.0.0_0.conda`), packed with the manifests of the siblings of its closure beside
 its own (`members`), which therefore exists only once the tests have passed. Publishing it (`mopm publish`) uploads, so
 it is a step of a CI job that takes that file, not a build action.

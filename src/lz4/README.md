@@ -127,7 +127,7 @@ package, so installing `lz4` installs liblz4. The files that are not sources:
 source, a test, `mopm.toml`, `mopm.lock` or `mopm-toolchain.toml`, run `buildrules mojo sync`, commit what it
 writes, and build `komira//src/lz4:lib` on the farm.
 
-`:conda` is the `.conda` of the mopm package (`mojo-lz4-0.1.0-mojo1.0.0_0.conda`): the `.mojoc`, requiring
+`:conda` is the `.conda` of the mopm package (`mojo-komira-ai.lz4-0.1.0-mojo1.0.0_0.conda`): the `.mojoc`, requiring
 `lz4-c`. `:lz4` is `:lib` as komira's Mojo rules take it (`mojo_adopted_library`); it declares
 `dlopen = ["liblz4.so.1"]`, which `:lz4_conda` (the release set's packaging) turns into the same requirement.
 It also compiles and runs the README's examples above (`[tests][readme]`) against `:lib`.

@@ -201,7 +201,7 @@ This package is built with buildrules' `mojo_package` and packaged for mopm as `
 (`mopm.toml`). The library is `src/mcp_server/`, its tests are `tests/`. It depends on two packages,
 `encoding` and `json`, sibling directories (`[dependencies]` of `mopm.toml`: `{ path = "../json",
 version = "0.1" }` and the same for `encoding`), so the `.conda` of this package records
-`mojo-encoding >=0.1,<0.2` and `mojo-json >=0.1,<0.2` as dependencies and holds none of their files:
+`mojo-komira-ai.encoding >=0.1,<0.2` and `mojo-komira-ai.json >=0.1,<0.2` as dependencies and holds none of their files:
 installing `mcp_server` installs both with it. The files that are not sources:
 
 | file | what |
@@ -217,7 +217,7 @@ After any change to a source, a test, a manifest of this package or of a sibling
 three packages staged, commit what it writes, and build `komira//src/mcp_server:lib` on the farm.
 
 `:conda` is buildrules' `mojo_conda` over `:lib`: the `.conda` of the mopm package
-(`mojo-mcp_server-0.1.0-mojo1.0.0_0.conda`), packed with the siblings' manifests beside its own (`members`),
+(`mojo-komira-ai.mcp_server-0.1.0-mojo1.0.0_0.conda`), packed with the siblings' manifests beside its own (`members`),
 which therefore exists only once the tests have passed. Publishing it (`mopm publish`) uploads, so it is a step of a
 CI job that takes that file, not a build action.
 

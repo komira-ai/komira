@@ -129,7 +129,7 @@ def main() raises:
 This package is built with buildrules' `mojo_package` and packaged for mopm as `snapshotter`, version 0.1.0
 (`mopm.toml`). The library is `src/snapshotter/`, its tests are `tests/`. It depends on one package,
 `rowcell`, a sibling directory (`[dependencies]` of `mopm.toml`: `{ path = "../rowcell",
-version = "0.1" }`), so the `.conda` of this package records `mojo-rowcell >=0.1,<0.2` as a dependency
+version = "0.1" }`), so the `.conda` of this package records `mojo-komira-ai.rowcell >=0.1,<0.2` as a dependency
 and holds none of that package's files. The files that are not sources:
 
 | file | what |
@@ -145,7 +145,7 @@ After any change to a source, a test, or a manifest of this package or of the si
 with both packages staged, commit what it writes, and build `komira//src/snapshotter:lib` on the farm.
 
 `:conda` is buildrules' `mojo_conda` over `:lib`: the `.conda` of the mopm package
-(`mojo-snapshotter-0.1.0-mojo1.0.0_0.conda`), packed with the sibling's manifest beside its own (`members`).
+(`mojo-komira-ai.snapshotter-0.1.0-mojo1.0.0_0.conda`), packed with the sibling's manifest beside its own (`members`).
 Publishing it (`mopm publish`) uploads, so it is a step of a CI job that takes that file, not a build action.
 
 `:snapshotter` is `:lib` as komira's Mojo rules take it (`mojo_adopted_library`): its `deps` are the adopted

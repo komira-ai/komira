@@ -37,7 +37,7 @@ mojo_adopted_library(
 )
 
 # The mopm package: `mopm pack` over `:lib`, the `.conda` a mopm registry serves
-# (`mojo-test_run_id-0.1.0-mojo1.0.0_0.conda`), which records clock and
+# (`mojo-komira-ai.test_run_id-0.1.0-mojo1.0.0_0.conda`), which records clock and
 # validation_run as dependencies and holds their files nowhere. `members` is the manifests
 # of the path dependencies, staged at their repository paths, because `mopm pack` reads the
 # manifest of each beside the one it is given. `:lib` exists only once the tests passed, so this
@@ -54,8 +54,8 @@ mojo_conda(
         "../validation_run": "//src/validation_run:mopm.toml",
     },
     mojo = "1.0.0",
-    mopm = "toolchains//:mopm_0_0_101",
-    package = "test_run_id",
+    mopm = "toolchains//:mopm_0_0_113",
+    package = "komira-ai/test_run_id",
     version = "0.1.0",
     visibility = ["PUBLIC"],
 )
@@ -68,8 +68,8 @@ mojo_conda_holds(
     name = "conda_holds",
     conda = ":conda",
     depends = [
-        "mojo-clock >=0.1,<0.2",
-        "mojo-validation_run >=0.1,<0.2",
+        "mojo-komira-ai.clock >=0.1,<0.2",
+        "mojo-komira-ai.validation_run >=0.1,<0.2",
     ],
     package = "test_run_id",
     sole = True,

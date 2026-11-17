@@ -146,8 +146,8 @@ def main() raises:
 This package is built with buildrules' `mojo_package` and packaged for mopm as `proto_codec`, version 0.1.0
 (`mopm.toml`). The library is `src/proto_codec/`, its tests are `tests/`. It depends on three sibling
 packages, `encoding`, `json` and `protobuf` (`[dependencies]` of `mopm.toml`, each `{ path =
-"../<name>", version = "0.1" }`), so the `.conda` of this package records `mojo-encoding >=0.1,<0.2`,
-`mojo-json >=0.1,<0.2` and `mojo-protobuf >=0.1,<0.2` as dependencies and holds none of their files.
+"../<name>", version = "0.1" }`), so the `.conda` of this package records `mojo-komira-ai.encoding >=0.1,<0.2`,
+`mojo-komira-ai.json >=0.1,<0.2` and `mojo-komira-ai.protobuf >=0.1,<0.2` as dependencies and holds none of their files.
 The files that are not sources:
 
 | file | what |

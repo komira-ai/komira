@@ -85,8 +85,8 @@ assert_equal(after_step_back.unix_ts_ms(), now)
 This package is built with buildrules' `mojo_package` and packaged for mopm as `uuid`, version 0.1.0
 (`mopm.toml`). The library is `src/uuid/`, its tests are `tests/`. It depends on three packages, sibling
 directories (`[dependencies]` of `mopm.toml`): `atomic_alias`, `awslc` and `clock`, each as
-`{ path = "../<name>", version = "0.1" }`. The `.conda` of this package records `mojo-atomic_alias >=0.1,<0.2`,
-`mojo-awslc >=0.1,<0.2` and `mojo-clock >=0.1,<0.2` as dependencies and holds none of their files:
+`{ path = "../<name>", version = "0.1" }`. The `.conda` of this package records `mojo-komira-ai.atomic_alias >=0.1,<0.2`,
+`mojo-komira-ai.awslc >=0.1,<0.2` and `mojo-komira-ai.clock >=0.1,<0.2` as dependencies and holds none of their files:
 installing `uuid` installs them with it. `awslc` is aws-lc's archive, and a dependent's link takes it
 from the closure; this package owns no C. The files that are not sources:
 
@@ -103,7 +103,7 @@ has passed. After any change to a source, a test, a manifest of this package or 
 `komira//src/uuid:lib` on the farm.
 
 `:conda` is buildrules' `mojo_conda` over `:lib`: the `.conda` of the mopm package
-(`mojo-uuid-0.1.0-mojo1.0.0_0.conda`), packed with the siblings' manifests beside its own (`members`),
+(`mojo-komira-ai.uuid-0.1.0-mojo1.0.0_0.conda`), packed with the siblings' manifests beside its own (`members`),
 which therefore exists only once the test has passed. Publishing it (`mopm publish`) uploads, so it is a step of a
 CI job that takes that file, not a build action.
 

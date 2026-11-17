@@ -149,7 +149,7 @@ This package is built with buildrules' `mojo_package` and packaged for mopm as `
 `hyperloglog.mojo` and the `__init__.mojo` that ties them together), its tests are `tests/`. It depends on one
 package, `atomic_alias`, a sibling directory (`[dependencies]` of `mopm.toml`: `{ path =
 "../atomic_alias", version = "0.1" }`), so the `.conda` of this package records
-`mojo-atomic_alias >=0.1,<0.2` as a dependency and holds none of that package's files: installing
+`mojo-komira-ai.atomic_alias >=0.1,<0.2` as a dependency and holds none of that package's files: installing
 `containers` installs `atomic_alias` with it. The files that are not sources:
 
 | file | what |
@@ -167,7 +167,7 @@ package, `atomic_alias`, a sibling directory (`[dependencies]` of `mopm.toml`: `
 after adding one.
 
 `:conda` is buildrules' `mojo_conda` over `:lib`: the `.conda` of the mopm package
-(`mojo-containers-0.1.0-mojo1.0.0_0.conda`), packed with the sibling's manifest beside its own (`members`),
+(`mojo-komira-ai.containers-0.1.0-mojo1.0.0_0.conda`), packed with the sibling's manifest beside its own (`members`),
 which therefore exists only once the tests have passed. Publishing it (`mopm publish`) uploads, so it is a step of a
 CI job that takes that file, not a build action.
 

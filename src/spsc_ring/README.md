@@ -82,7 +82,7 @@ bench:spsc_ring`). It depends on two packages,
 `atomic_alias` and `containers`, sibling directories (`[dependencies]` of `mopm.toml`: `{ path =
 "../atomic_alias", version = "0.1" }` and `{ path = "../containers", version = "0.1" }`).
 `containers` depends on `atomic_alias` in turn, so the lock holds both and the `.conda` of this package
-records `mojo-atomic_alias >=0.1,<0.2` and `mojo-containers >=0.1,<0.2` as dependencies and holds none
+records `mojo-komira-ai.atomic_alias >=0.1,<0.2` and `mojo-komira-ai.containers >=0.1,<0.2` as dependencies and holds none
 of their files: installing `spsc_ring` installs both with it. The files that are not sources:
 
 | file | what |
@@ -100,7 +100,7 @@ writes, and build `komira//src/spsc_ring:lib` on the farm. A test file that the 
 run: run the sync after adding one.
 
 `:conda` is buildrules' `mojo_conda` over `:lib`: the `.conda` of the mopm package
-(`mojo-spsc_ring-0.1.0-mojo1.0.0_0.conda`), packed with the siblings' manifests beside its own (`members`),
+(`mojo-komira-ai.spsc_ring-0.1.0-mojo1.0.0_0.conda`), packed with the siblings' manifests beside its own (`members`),
 which therefore exists only once the tests have passed. Publishing it (`mopm publish`) uploads, so it is a step of a
 CI job that takes that file, not a build action.
 

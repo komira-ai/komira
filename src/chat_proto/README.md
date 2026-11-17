@@ -108,7 +108,7 @@ assert_equal(encode_json(clear), '{"channelId":"c-general","topic":""}')
 
 This package is built with buildrules' `mojo_package` and packaged for mopm as `chat_proto`, version 0.1.0
 (`mopm.toml`). Its library is the generator's output, committed at `generated/chat_proto/` and
-compiled as the module `chat_proto` (`[targets] lib` of `mopm.toml`); its tests are `tests/`. It depends on one sibling package, `proto_codec` (`{ path = "../proto_codec", version = "0.1" }`), so the `.conda` of this package records `mojo-proto_codec >=0.1,<0.2` as its dependency
+compiled as the module `chat_proto` (`[targets] lib` of `mopm.toml`); its tests are `tests/`. It depends on one sibling package, `proto_codec` (`{ path = "../proto_codec", version = "0.1" }`), so the `.conda` of this package records `mojo-komira-ai.proto_codec >=0.1,<0.2` as its dependency
 and holds none of their files. The files that are not sources:
 
 | file | what |

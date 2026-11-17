@@ -31,8 +31,8 @@ mojo_adopted_library(
 )
 
 # The mopm package: `mopm pack` over `:lib`, the `.conda` a mopm registry serves
-# (`mojo-vcard-0.1.0-mojo1.0.0_0.conda`), which records content_line as a dependency
-# (`mojo-content_line >=0.1,<0.2`) and holds that package's files nowhere. `members` is the
+# (`mojo-komira-ai.vcard-0.1.0-mojo1.0.0_0.conda`), which records content_line as a dependency
+# (`mojo-komira-ai.content_line >=0.1,<0.2`) and holds that package's files nowhere. `members` is the
 # manifests of the path dependencies, staged at their repository paths, because `mopm pack` reads
 # the manifest of each beside the one it is given. `:lib` exists only once the tests passed, so this
 # file exists only then. Publishing it (`mopm publish`) uploads, which is not a build action: it is
@@ -45,20 +45,20 @@ mojo_conda(
     manifest = "mopm.toml",
     members = {"../content_line": "//src/content_line:mopm.toml"},
     mojo = "1.0.0",
-    mopm = "toolchains//:mopm_0_0_101",
-    package = "vcard",
+    mopm = "toolchains//:mopm_0_0_113",
+    package = "komira-ai/vcard",
     version = "0.1.0",
     visibility = ["PUBLIC"],
 )
 
 # What `:conda` holds, read back from the built file (buildrules' `prebuilt_unpack`): this package's
 # own `.mojoc` and nothing else under `lib/mojo/` (content_line is not in it), and exactly
-# one dependency, `mojo-content_line >=0.1,<0.2`, which is what installing the package pulls
+# one dependency, `mojo-komira-ai.content_line >=0.1,<0.2`, which is what installing the package pulls
 # in. Red when the manifest drops the dependency, names another range, or the file carries the sibling.
 mojo_conda_holds(
     name = "conda_holds",
     conda = ":conda",
-    depends = ["mojo-content_line >=0.1,<0.2"],
+    depends = ["mojo-komira-ai.content_line >=0.1,<0.2"],
     package = "vcard",
     sole = True,
     visibility = ["PUBLIC"],

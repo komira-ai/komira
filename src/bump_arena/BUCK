@@ -35,8 +35,8 @@ mojo_adopted_library(
 )
 
 # The mopm package: `mopm pack` over `:lib`, the `.conda` a mopm registry serves
-# (`mojo-bump_arena-0.1.0-mojo1.0.0_0.conda`), which records byte_buffer as a dependency
-# (`mojo-byte_buffer >=0.1,<0.2`) and holds none of its files. `members` is the manifests of the
+# (`mojo-komira-ai.bump_arena-0.1.0-mojo1.0.0_0.conda`), which records byte_buffer as a dependency
+# (`mojo-komira-ai.byte_buffer >=0.1,<0.2`) and holds none of its files. `members` is the manifests of the
 # path dependencies of the closure, staged at their repository paths, because `mopm pack` reads the
 # manifest of each beside the one it is given. `:lib` exists only once the tests passed, so this file
 # exists only then. Publishing it (`mopm publish`) uploads, which is not a build action: it is a step
@@ -54,8 +54,8 @@ mojo_conda(
         "../simd_ops": "//src/simd_ops:mopm.toml",
     },
     mojo = "1.0.0",
-    mopm = "toolchains//:mopm_0_0_101",
-    package = "bump_arena",
+    mopm = "toolchains//:mopm_0_0_113",
+    package = "komira-ai/bump_arena",
     version = "0.1.0",
     visibility = ["PUBLIC"],
 )
@@ -68,7 +68,7 @@ mojo_conda_holds(
     name = "conda_holds",
     conda = ":conda",
     depends = [
-        "mojo-byte_buffer >=0.1,<0.2",
+        "mojo-komira-ai.byte_buffer >=0.1,<0.2",
     ],
     package = "bump_arena",
     sole = True,

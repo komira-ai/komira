@@ -53,8 +53,8 @@ mojo_conda(
         "../protobuf": "//src/protobuf:mopm.toml",
     },
     mojo = "1.0.0",
-    mopm = "toolchains//:mopm_0_0_101",
-    package = "proto_codec",
+    mopm = "toolchains//:mopm_0_0_113",
+    package = "komira-ai/proto_codec",
     version = "0.1.0",
     visibility = ["PUBLIC"],
 )
@@ -65,9 +65,9 @@ mojo_conda_holds(
     name = "conda_holds",
     conda = ":conda",
     depends = [
-        "mojo-encoding >=0.1,<0.2",
-        "mojo-json >=0.1,<0.2",
-        "mojo-protobuf >=0.1,<0.2",
+        "mojo-komira-ai.encoding >=0.1,<0.2",
+        "mojo-komira-ai.json >=0.1,<0.2",
+        "mojo-komira-ai.protobuf >=0.1,<0.2",
     ],
     package = "proto_codec",
     sole = True,
