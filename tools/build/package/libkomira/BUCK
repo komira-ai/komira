@@ -30,7 +30,7 @@ conda_install_check(
     # each native owner's own package, installed beside it (libkomira bundles no
     # owner's library: each C owner ships its own in its own package), and each owner's library must be loaded from the prefix.
     owner_libs = [
-        "libkomira_async_native.so.1",
+        "libkomira_async_rt_native.so.1",
         "libkomira_async_api_native.so.1",
         "libkomira_compression_native.so.1",
         "libkomira_fs_native.so.1",

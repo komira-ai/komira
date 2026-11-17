@@ -86,8 +86,8 @@ continuous_publish.md both use that name; `kci.yml` runs it since the staged pip
 
 Every owned C archive below **EXISTS** as a `cxx_library` in
 [tools/build/one_definition/libraries.bzl](../../tools/build/one_definition/libraries.bzl). Each
-artifact is **PROPOSED**, named `lib<library>_native.so.1` plus the unversioned link name
-`lib<library>_native.so` (a symbolic link). "glibc" means `NEEDED` on glibc only: in probe 3
+artifact is **PROPOSED**, named `libkomira_<library>_native.so.1` plus the unversioned link name
+`libkomira_<library>_native.so` (a symbolic link). "glibc" means `NEEDED` on glibc only: in probe 3
 (#1304) that is `libpthread.so.0` and `libc.so.6`, plus `ld-linux-x86-64.so.2` where the library uses
 thread-local storage (async, http_core); async_api, metrics and scan_source had no `NEEDED` at all.
 
@@ -166,7 +166,7 @@ generated version script (on #681: `native_archive` in `tools/build/native/defs.
 
 | step | rule |
 |---|---|
-| contents, SONAME | the library's own archives, linked whole (dependencies' via `DT_NEEDED`); SONAME `lib<library>_native.so.1`, stable because a release pins every package to one version and build string (`runRequirements` writes `name ==version build`), until symbol versioning is decided. **Limit:** that holds inside one environment only. Two images built against different releases in one process (the SDK engine beside a program, or a user's Mojo shared library) share whichever `.so.1` loaded first, and an export the other image needs may be missing from it; symbol versioning is what would close this |
+| contents, SONAME | the library's own archives, linked whole (dependencies' via `DT_NEEDED`); SONAME `libkomira_<library>_native.so.1`, stable because a release pins every package to one version and build string (`runRequirements` writes `name ==version build`), until symbol versioning is decided. **Limit:** that holds inside one environment only. Two images built against different releases in one process (the SDK engine beside a program, or a user's Mojo shared library) share whichever `.so.1` loaded first, and an export the other image needs may be missing from it; symbol versioning is what would close this |
 | `DT_RUNPATH` | `$ORIGIN` when the library has a komira `DT_NEEDED`, relaxing #681's `native_check.sh`, which refuses any run path; none otherwise. A program's `DT_RUNPATH` is not searched for its dependencies' dependencies (a `DT_RPATH` would be), so http_core's `.so` must find crypto's by its own |
 | callers, declared | an owner's export list depends on its reverse dependencies, which a Buck2 target cannot discover, so each owner declares its `callers` (Mojo libraries and dependent owners' archives), as #681's rule for the one library does (`ctx.attrs.callers`). This replaces #685's central `members.bzl` |
 | completeness lint | a root target reads every `mojo_library` from the build graph (as `//:src_layout` does) and every owner archive, runs the call-site reader, and refuses: an `external_call` into an owner by a library its `callers` omits; a weak or common symbol defined in two owners' archives (the one-definition gate's blind spot); a `src/` library depending on a vendored archive or `cxx_library` another library owns; a library whose Mojo closure lacks an owner it reaches (by a call, a direct archive dependency, or an archive its own archive needs; this last refusal **EXISTS** since #1325, per library rather than at the root: `native_reach_archives` and `native_reach_calls`, section "Three libraries reached an owner"). Without it a new caller passes its welded tests (static archives) and fails only at a consumer's link |

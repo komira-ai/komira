@@ -109,7 +109,7 @@ pub const Given = struct { name: []const u8, data: []const u8 };
 /// then each static archive, sorted by path.
 pub fn libFilesOf(alloc: Alloc, shared: []const Given, statics: []const Given) Error![]LibFile {
     var list = std.ArrayList(LibFile).empty;
-    if (shared.len > 1) return refuse(alloc, "{d} shared libraries given; a library ships one, lib<library>_native.so.1", .{shared.len});
+    if (shared.len > 1) return refuse(alloc, "{d} shared libraries given; a library ships one, libkomira_<library>_native.so.1", .{shared.len});
     for (shared) |s| {
         // A versioned SONAME (an owner's) has its unversioned link name; an
         // unversioned one (`lib<name>.so`, a C ABI library) is its own name

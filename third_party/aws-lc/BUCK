@@ -153,7 +153,7 @@ prefix_header(
     ],
     header = "boringssl_prefix_symbols.h",
     min_symbols = 1000,
-    prefix = "awslc",
+    prefix = "komira_awslc",
     style = "boringssl",
     visibility = ["//third_party/s2n-tls:"],
 )

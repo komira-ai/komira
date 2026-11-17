@@ -45,8 +45,12 @@ NATIVE_ATTRS = {
 }
 
 def native_soname(import_name):
-    """The SONAME of a library's own shared library (shared.bzl writes it)."""
-    return "lib{}_native.so.1".format(import_name)
+    """The SONAME of a library's own shared library (shared.bzl writes it): `libkomira_<import name>_native.so.1`.
+
+    `komira_` keeps the name komira's own whatever the import name is: an import name such as `crypto`
+    or `libc` alone would give `libcrypto_native.so.1`, a name another project's library may well carry.
+    """
+    return "libkomira_{}_native.so.1".format(import_name)
 
 def _c_deps(deps):
     return [d for d in deps if MojoInfo not in d and MergedLinkInfo in d]

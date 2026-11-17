@@ -11,7 +11,7 @@
 
 comptime LIB = "./libkomira.so"
 comptime OWNERS = (
-    "libkomira_async_native.so.1",
+    "libkomira_async_rt_native.so.1",
     "libkomira_async_api_native.so.1",
     "libkomira_compression_native.so.1",
     "libkomira_fs_native.so.1",

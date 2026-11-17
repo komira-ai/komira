@@ -95,7 +95,7 @@ The command line is in [`src/cli.zig`](src/cli.zig); the cases are in
 ## Each library's shared library
 
 A Mojo library that owns C ships it as its own shared library,
-`lib<library>_native.so.1`
+`libkomira_<library>_native.so.1`
 ([the design](../../../docs/design/native_packaging.md)).
 `native_shared_library` ([`shared.bzl`](shared.bzl)) builds one from the
 C archives the library owns (`archives`), the Mojo libraries that call
@@ -120,7 +120,7 @@ Mojo library calls) and the owners whose C its own archives call
    none of the exports.
 2. The link: every archive whole, `-Bsymbolic`, `--gc-sections`,
    `-z defs`, the version script, `--strip-debug`, SONAME
-   `lib<library>_native.so.1`, for the toolchain's target (the platform
+   `libkomira_<library>_native.so.1`, for the toolchain's target (the platform
    row's `zig_triple`). Then `-lc++` when `cxx_runtime` is set (snappy is
    C++: zig's libc++ and libc++abi, static, made local by the version
    script), and each of `needed_owners`' shared libraries, with

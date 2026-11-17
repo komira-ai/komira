@@ -15,6 +15,8 @@ load(":buildrules.mojo.bzl", "mojo_package")
 # native/umodti3.c adds so that zig's compiler_rt stays out of the link, is not renamed.
 native_library(
     name = "awslc_native",
+    # The archive keeps the name mopm.toml gives the native (`[native.awslc]`, libawslc.a); the target is `awslc_native` because `:awslc` is the library.
+    soname = "libawslc.a",
     upstream = {
         "url": "https://github.com/aws/aws-lc/archive/refs/tags/v1.39.0.tar.gz",
         "sha256": "37f5a379081b97adba3e1316017e09484d6c4ed6dc336d57fae6f0b7b27472fc",
@@ -63,7 +65,7 @@ native_library(
     # `extra_symbols` are the weak hooks aws-lc refers to and does not define (a program defines them): the prefix renames them too, so a program can define
     # komira_awslc_OPENSSL_memory_* on ELF (linux). On macOS arm64 they are static NULLs in the archive and a program cannot override them.
     prefix = {
-        "name": "awslc",
+        "name": "komira_awslc",
         "min": 1000,
         "extra_symbols": [
             "OPENSSL_memory_alloc",
