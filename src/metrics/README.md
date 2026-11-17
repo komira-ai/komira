@@ -124,7 +124,7 @@ This package is built with buildrules' `mojo_package` and packaged for mopm as `
 (`[dependencies]` of `mopm.toml`, each `{ path = "../<name>", version = "0.1" }`): `atomic_alias`,
 `clock`, `containers`, `hashing` and `name_registry`. `containers` and
 `name_registry` have dependencies of their own, so `mopm.lock` lists the whole closure, direct and transitive,
-while the `.conda` of this package records only the five direct ones (`mojo-<name> >=0.1,<0.2`) and holds none of
+while the `.conda` of this package records only the five direct ones (`mojo-komira-ai.<name> >=0.1,<0.2`) and holds none of
 their files. `fork_join`, which the tests use to fork real threads, is under `[dev-dependencies]`: it reaches
 the tests, never `:lib` or a consumer. The C file `native/komira_metrics_ea_flag.c` is a native library of the
 package, `[native.komira_metrics_ea_flag]` in `mopm.toml`: `mojo_package` compiles it into

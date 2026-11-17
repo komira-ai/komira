@@ -97,7 +97,7 @@ This package is built with buildrules' `mojo_package` and packaged for mopm as `
 (`[dependencies]` of `mopm.toml`, each `{ path = "../<name>", version = "0.1" }`): `atomic_alias`,
 `clock`, `containers`, `hashing`, `libc`, `metrics`, `spsc_ring` and
 `trace`. Several of them have dependencies of their own, so `mopm.lock` lists the whole closure, direct and
-transitive, while the `.conda` of this package records only the eight direct ones (`mojo-<name> >=0.1,<0.2`) and
+transitive, while the `.conda` of this package records only the eight direct ones (`mojo-komira-ai.<name> >=0.1,<0.2`) and
 holds none of their files. `runtime_paths`, which the tests use for their scratch directory, is under
 `[dev-dependencies]`: it reaches the tests, never `:lib` or a consumer. The C file `native/komira_log_holder.c` (the
 process-global holders: the engine's address, the configuration's address and the selected line layout) is a native

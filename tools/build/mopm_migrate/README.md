@@ -8,8 +8,8 @@ to guess.
 
 ```sh
 ./buck2 build komira//tools/build/mopm_migrate:mopm_migrate --show-output
-mopm_migrate --package example --description "One sentence for mopm." --mopm 0.0.101 --dry-run
-mopm_migrate --package example --description "One sentence for mopm." --mopm 0.0.101
+mopm_migrate --package example --description "One sentence for mopm." --mopm 0.0.113 --dry-run
+mopm_migrate --package example --description "One sentence for mopm." --mopm 0.0.113
 ```
 
 Run it from the repository root (or pass `--repo <dir>`). The flags:

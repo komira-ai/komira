@@ -105,7 +105,7 @@ assert_equal(JobPhase(JobPhase.JOB_PHASE_FAILED).json_name(), "JOB_PHASE_FAILED"
 
 This package is built with buildrules' `mojo_package` and packaged for mopm as `supervisor_proto`, version 0.1.0
 (`mopm.toml`). Its library is the generator's output, committed at `generated/supervisor_proto/` and
-compiled as the module `supervisor_proto` (`[targets] lib` of `mopm.toml`); its tests are `tests/`. It depends on 2 sibling packages, `broker_proto`, `proto_codec` (each `{ path = "../<name>", version = "0.1" }`), so the `.conda` of this package records `mojo-<name> >=0.1,<0.2` for each as its dependencies
+compiled as the module `supervisor_proto` (`[targets] lib` of `mopm.toml`); its tests are `tests/`. It depends on 2 sibling packages, `broker_proto`, `proto_codec` (each `{ path = "../<name>", version = "0.1" }`), so the `.conda` of this package records `mojo-komira-ai.<name> >=0.1,<0.2` for each as its dependencies
 and holds none of their files. The files that are not sources:
 
 | file | what |

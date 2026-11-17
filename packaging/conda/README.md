@@ -116,7 +116,7 @@ refuse`): the installed copy has no neighbours. A metapackage ships no doc.
 
 A `.mojoc` holds no machine code, so a program using a library links every
 native library of the library's closure. When the closure ships any (a
-`lib<owner>_native.so.1`, or log's holder archive), the installed
+`libkomira_<owner>_native.so.1`, or log's holder archive), the installed
 README is the library's README.md byte for byte, then a section `## Linking`
 that `komira_pack readme-link`
 ([`readme_link.zig`](../../tools/build/package/pack/readme_link.zig)) appends,
@@ -145,8 +145,8 @@ A library that owns C ships it in its own package
 (docs/design/native_packaging.md): `mojo_library(native = ":<name>_native")`
 names its shared library (tools/build/native/shared.bzl), which must link
 exactly the library's C `deps`, and the package holds it at
-`lib/lib<name>_native.so.1` (mode 0755) with the link name
-`lib/lib<name>_native.so`, a symbolic link to it. log's holder is
+`lib/libkomira_<name>_native.so.1` (mode 0755) with the link name
+`lib/libkomira_<name>_native.so`, a symbolic link to it. log's holder is
 per-library state, so `native_static = True` ships it as
 `lib/libkomira_log_holder.a`. Each file has one `info/paths.json` row (the
 link a `softlink` with the sha256 and size of what it resolves to) and one

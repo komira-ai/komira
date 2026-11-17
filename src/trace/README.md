@@ -84,7 +84,7 @@ on five sibling packages (`[dependencies]` of `mopm.toml`, each `{ path = "../<n
 `atomic_alias`, `clock`, `containers`, `name_registry` and `spsc_ring`. Several have
 dependencies of their own (`name_registry` on `hashing`, `spsc_ring` on `atomic_alias` and
 `containers`), so `mopm.lock` lists the whole closure, direct and transitive, while the `.conda` of this package
-records only the five direct ones (`mojo-<name> >=0.1,<0.2`) and holds none of their files. `fork_join`, which
+records only the five direct ones (`mojo-komira-ai.<name> >=0.1,<0.2`) and holds none of their files. `fork_join`, which
 the tests use to fork real threads, and `runtime_paths`, which gives `test_jsonl_exporter.mojo` its scratch
 directory, are under `[dev-dependencies]`: they reach the tests, never `:lib` or a consumer. The files that are not
 sources:

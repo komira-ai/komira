@@ -148,7 +148,7 @@ pub fn get(a: Allocator, base: []const u8, target: []const u8) !Answer {
 }
 
 /// `/index/v2/<aa>/<bb>/<namespace>/<name>`: where mopm asks a registry for a package's records
-/// (spec/index.md of mopm: `aa` and `bb` are the first and the next two characters of the
+/// (spec/index.md of mopm: `aa` and `bb` are the first two and the next two characters of the
 /// namespace, `_`-padded on the right, as two directories). `full` is `<namespace>/<name>`.
 pub fn indexTarget(a: Allocator, full: []const u8) ![]u8 {
     const namespace = full[0 .. std.mem.indexOfScalar(u8, full, '/') orelse full.len];

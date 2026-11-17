@@ -41,7 +41,7 @@ mojo_adopted_library(
 
 # The mopm package: `mopm pack` over `:lib`, the `.conda` a mopm registry serves
 # (`mojo-komira-ai.uuid-0.1.0-mojo1.0.0_0.conda`), which records atomic_alias, awslc and
-# clock as dependencies (`mojo-<name> >=0.1,<0.2`) and holds none of their files. `members` is
+# clock as dependencies (`mojo-komira-ai.<name> >=0.1,<0.2`) and holds none of their files. `members` is
 # the manifests of the path dependencies, staged at their repository paths, because `mopm pack` reads
 # the manifest of each beside the one it is given. `:lib` exists only once the test passed, so this
 # file exists only then. Publishing it (`mopm publish`) uploads, which is not a build action: it is a
