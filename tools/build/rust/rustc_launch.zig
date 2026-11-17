@@ -26,8 +26,10 @@
 //!
 //! Exit status: rustc's (128 + N when a signal N ended it); 2 for a toolchain
 //! or usage refusal; 3 when rustc exits 0 but <output> is missing or empty; 4
-//! when <output> contains this action's working directory (it would differ on
-//! every run). The scratch directory is removed whatever the status.
+//! when <output> contains this action's working directory as a path (it would
+//! differ on every run; a longer name that starts with its bytes, like
+//! `/worker.rs` under `/work`, is not it). The scratch directory is removed
+//! whatever the status.
 
 const std = @import("std");
 
@@ -98,31 +100,60 @@ pub fn exitCodeOf(term: std.process.Child.Term) u8 {
 
 pub const OutputCheck = enum { ok, missing_or_empty, has_cwd };
 
-/// Whether `f` holds `needle` anywhere; `buf` is the read buffer (longer than
-/// `needle`). A match across two reads is found.
-pub fn fileContains(f: std.fs.File, needle: []const u8, buf: []u8) !bool {
-    std.debug.assert(needle.len > 0 and buf.len > needle.len);
+/// Whether `c`, after a match of the working directory, continues the last
+/// name of the path: an ASCII letter or digit, `.`, `_`, `-`, `+`, `~`, `@`,
+/// or a byte of a multi-byte UTF-8 sequence. The same set as
+/// tools/build/mojo/tools/dir_match.zig (this launcher is built from its one
+/// file): a change to one is made to both.
+pub fn continuesName(c: u8) bool {
+    return std.ascii.isAlphanumeric(c) or c >= 0x80 or switch (c) {
+        '.', '_', '-', '+', '~', '@' => true,
+        else => false,
+    };
+}
+
+/// Whether `f` holds the directory `dir` as a path: a match of its bytes
+/// counts only where its last name ends, at the end of the file or before a
+/// byte that cannot continue a name (`/`, NUL, a quote, a space, ...). With
+/// the working directory `/work`, `/work/src/lib.rs` counts and `/worker.rs`
+/// does not; a `dir` that ends in `/` counts wherever it is. `buf` is the
+/// read buffer (longer than `dir`). A match across two reads is found, and a
+/// match at the end of one read is decided by the first byte of the next.
+pub fn fileHoldsDir(f: std.fs.File, dir: []const u8, buf: []u8) !bool {
+    std.debug.assert(dir.len > 0 and buf.len > dir.len);
+    const open_ended = dir[dir.len - 1] == '/';
     var have: usize = 0;
     while (true) {
         const n = try f.read(buf[have..]);
-        if (n == 0) return false;
         const end = have + n;
-        if (std.mem.indexOf(u8, buf[0..end], needle) != null) return true;
-        const keep = @min(needle.len - 1, end);
+        var from: usize = 0;
+        while (std.mem.indexOfPos(u8, buf[0..end], from, dir)) |at| {
+            const after = at + dir.len;
+            if (open_ended or (after == end and n == 0)) return true;
+            // A match at the end of what was read waits for the next byte.
+            if (after == end) break;
+            if (!continuesName(buf[after])) return true;
+            from = at + 1;
+        }
+        if (n == 0) return false;
+        // Keep the last dir.len bytes: a match that is cut by the read, or
+        // one that ends the read and whose next byte is not read yet.
+        const keep = @min(dir.len, end);
         std.mem.copyForwards(u8, buf[0..keep], buf[end - keep .. end]);
         have = keep;
     }
 }
 
 /// The checks on rustc's output after an exit 0: it exists and is not empty,
-/// and it does not hold the working directory `cwd`. A directory is not read.
+/// and it does not hold the working directory `cwd` as a path (fileHoldsDir).
+/// A directory is not read.
 pub fn checkOutput(path: []const u8, cwd: []const u8, buf: []u8) !OutputCheck {
     const st = std.fs.cwd().statFile(path) catch return .missing_or_empty;
     if (st.size == 0) return .missing_or_empty;
     if (st.kind == .directory) return .ok;
     const f = try std.fs.cwd().openFile(path, .{});
     defer f.close();
-    return if (try fileContains(f, cwd, buf)) .has_cwd else .ok;
+    return if (try fileHoldsDir(f, cwd, buf)) .has_cwd else .ok;
 }
 
 fn die(code: u8, comptime fmt: []const u8, args: anytype) noreturn {

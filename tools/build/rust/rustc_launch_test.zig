@@ -83,7 +83,7 @@ fn put(dir: std.fs.Dir, name: []const u8, data: []const u8) !void {
     try f.writeAll(data);
 }
 
-test "fileContains: a match anywhere, across reads, and not a near miss" {
+test "fileHoldsDir: the directory as a path, across reads; not a near miss" {
     var tmp = t.tmpDir(.{});
     defer tmp.cleanup();
     // The needle (9 bytes) straddles the first read of a 20-byte buffer.
@@ -91,18 +91,76 @@ test "fileContains: a match anywhere, across reads, and not a near miss" {
     var small: [20]u8 = undefined;
     const f = try tmp.dir.openFile("f", .{});
     defer f.close();
-    try t.expect(try L.fileContains(f, "/work/dir", &small));
+    try t.expect(try L.fileHoldsDir(f, "/work/dir", &small));
     try f.seekTo(0);
-    try t.expect(!try L.fileContains(f, "/work/dix", &small));
+    try t.expect(!try L.fileHoldsDir(f, "/work/dix", &small));
     try f.seekTo(0);
-    try t.expect(try L.fileContains(f, "aaaa", &small));
+    // The last bytes of the file, then one byte more than the file holds.
+    try t.expect(try L.fileHoldsDir(f, "bbbbbbbbbbbbbbbbbb", &small));
     try f.seekTo(0);
-    try t.expect(try L.fileContains(f, "bbbbbbbbbbbbbbbbbb", &small));
+    try t.expect(!try L.fileHoldsDir(f, "bbbbbbbbbbbbbbbbbbb", &small));
     try f.seekTo(0);
-    try t.expect(!try L.fileContains(f, "bbbbbbbbbbbbbbbbbbb", &small));
+    // `aaaa` is followed by `a` at every match but the last, whose next
+    // byte is `/`; a directory that ends in `/` counts wherever it is.
+    try t.expect(try L.fileHoldsDir(f, "aaaa", &small));
+    try f.seekTo(0);
+    try t.expect(try L.fileHoldsDir(f, "/work/", &small));
 }
 
-test "checkOutput: missing, empty, clean, and one holding the working directory" {
+test "fileHoldsDir: a longer name that starts with the directory's bytes does not count" {
+    var tmp = t.tmpDir(.{});
+    defer tmp.cleanup();
+    var small: [8]u8 = undefined;
+    const cases = [_]struct { data: []const u8, held: bool }{
+        .{ .data = "src/runtime/worker.rs", .held = false },
+        .{ .data = "/workspace /work.d /work_1 /work-a /work+b /work~ /work@c /work9", .held = false },
+        .{ .data = "/work\xc3\xa9", .held = false },
+        .{ .data = "/wor", .held = false },
+        .{ .data = "/work", .held = true },
+        .{ .data = "x\x00/work\x00", .held = true },
+        .{ .data = "-I/work/inc", .held = true },
+        .{ .data = "PWD=\"/work\"", .held = true },
+        .{ .data = "/work:/usr/lib", .held = true },
+        .{ .data = "runtime/worker.rs then /work/x", .held = true },
+    };
+    for (cases) |c| {
+        try put(tmp.dir, "f", c.data);
+        const f = try tmp.dir.openFile("f", .{});
+        defer f.close();
+        t.expectEqual(c.held, try L.fileHoldsDir(f, "/work", &small)) catch |e| {
+            std.debug.print("data: {s}\n", .{c.data});
+            return e;
+        };
+    }
+}
+
+test "fileHoldsDir: a match that ends a read is decided by the next read's first byte" {
+    var tmp = t.tmpDir(.{});
+    defer tmp.cleanup();
+    // An 8-byte buffer: the first read is `xxx/work`, the match's next byte
+    // is the first of the second read.
+    var small: [8]u8 = undefined;
+    try put(tmp.dir, "e", "xxx/worker");
+    const e = try tmp.dir.openFile("e", .{});
+    defer e.close();
+    try t.expect(!try L.fileHoldsDir(e, "/work", &small));
+    try put(tmp.dir, "s", "xxx/work/x");
+    const s = try tmp.dir.openFile("s", .{});
+    defer s.close();
+    try t.expect(try L.fileHoldsDir(s, "/work", &small));
+    // The match ends the read and the file: it counts.
+    try put(tmp.dir, "z", "xxx/work");
+    const z = try tmp.dir.openFile("z", .{});
+    defer z.close();
+    try t.expect(try L.fileHoldsDir(z, "/work", &small));
+}
+
+test "continuesName: name bytes and the bytes that end a name" {
+    for ("az09AZ._-+~@\x80\xff") |c| try t.expect(L.continuesName(c));
+    for ("/\x00\"' =:;,\n\t") |c| try t.expect(!L.continuesName(c));
+}
+
+test "checkOutput: missing, empty, clean, a near miss, and one holding the working directory" {
     var tmp = t.tmpDir(.{});
     defer tmp.cleanup();
     var buf: [64]u8 = undefined;
@@ -128,6 +186,11 @@ test "checkOutput: missing, empty, clean, and one holding the working directory"
     const dirty = try at(root, "dirty");
     defer t.allocator.free(dirty);
     try t.expectEqual(L.OutputCheck.has_cwd, try L.checkOutput(dirty, "/work", &buf));
+    // A source path whose name starts with the working directory's bytes.
+    try put(tmp.dir, "near", "src/runtime/worker.rs");
+    const near = try at(root, "near");
+    defer t.allocator.free(near);
+    try t.expectEqual(L.OutputCheck.ok, try L.checkOutput(near, "/work", &buf));
     // A directory is neither empty nor read.
     try tmp.dir.makeDir("adir");
     try put(tmp.dir, "adir/f", "/work");

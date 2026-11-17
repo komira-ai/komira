@@ -13,6 +13,7 @@ load(":toolchain.bzl", "zig_bootstrap_exe", "zig_exe", "zig_module", "zig_test")
 _MOJO_COMPILE_SRCS = [
     "tools/cc_shim.zig",
     "tools/compile_args.zig",
+    "tools/dir_match.zig",
     "tools/modular_cfg.zig",
     "tools/mojo_compile.zig",
     "tools/proc_tree.zig",

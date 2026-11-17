@@ -35,6 +35,8 @@
 //!   link        exec `cc` from PATH with every row of the cc shim's rewrite table
 //!   empty       write an empty output, exit 0
 //!   cwd         write the working directory into the output
+//!   cwdname     write a longer file name that starts with the working
+//!               directory's bytes (`<cwd>er.mojo`) into the output
 //!
 //! Built for macOS (tests//functional/watchdog:cases_darwin) it is the same
 //! program through libc; `link` is Linux only.
@@ -350,6 +352,10 @@ pub fn main() void {
     } else if (eql(mode, "cwd")) {
         const cwd = std.process.getCwdAlloc(arena) catch die("cannot read the working directory", .{});
         write(out orelse die("cwd: no -o", .{}), std.fmt.allocPrint(arena, "built in {s}\n", .{cwd}) catch unreachable);
+        std.process.exit(0);
+    } else if (eql(mode, "cwdname")) {
+        const cwd = std.process.getCwdAlloc(arena) catch die("cannot read the working directory", .{});
+        write(out orelse die("cwdname: no -o", .{}), std.fmt.allocPrint(arena, "source {s}er.mojo\n", .{cwd}) catch unreachable);
         std.process.exit(0);
     }
     if (out) |o| write(o, "compiled\n");
