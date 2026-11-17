@@ -84,17 +84,18 @@ _PROTOS = [
 
 # The generator's half: `komira_plan_proto_generated_gen` writes the Mojo of `_PROTOS`,
 # `komira_plan_proto_generated_fresh` holds the committed directory
-# `generated/komira_plan_proto_generated/` to it, byte for byte, and fails with the command that
+# `generated/plan_proto/` to it, byte for byte, and fails with the command that
 # regenerates (tools/build/gen/README.md). That directory is the library of mopm.toml
 # (`[targets] lib`), compiled as the module `plan_proto`: `import_name` is that module's
-# name, and the rule names the directory after the target, which `:plan_proto` below
-# cannot be. The library this call declares itself (`:komira_plan_proto_generated`, the same
+# name, and `dir_is_import_name` names the directory after it, as mopm requires of a library
+# (the target cannot have that name: `:plan_proto` below has it). The library this call declares itself (`:komira_plan_proto_generated`, the same
 # files without the tests) is not what dependents use. Regenerate with
 #   ./buck2 run komira//tools/build/gen:regen -- komira//src/plan_proto:komira_plan_proto_generated
 mojo_proto_library(
     name = "komira_plan_proto_generated",
     srcs = _PROTOS,
     import_name = "plan_proto",
+    dir_is_import_name = True,
     import_prefix = "komira/plan/v1",
     deps = ["//src/proto_codec:proto_codec"],
     visibility = ["PUBLIC"],
@@ -146,7 +147,7 @@ mojo_adopted_library(
     deps = ["//src/proto_codec:proto_codec"],
     lib = ":lib",
     readme = "README.md",
-    srcs = glob(["generated/komira_plan_proto_generated/**/*.mojo"]),
+    srcs = glob(["generated/plan_proto/**/*.mojo"]),
     test_srcs = glob(["tests/test_*.mojo"]),
     test_runs = ":test",
     visibility = ["PUBLIC"],
@@ -158,7 +159,7 @@ mojo_adopted_library(
 # `mojo_package` pins (mopm-toolchain.toml).
 mojo_conda(
     name = "conda",
-    dir = "generated/komira_plan_proto_generated",
+    dir = "generated/plan_proto",
     lib = ":lib",
     manifest = "mopm.toml",
     members = {

@@ -35,13 +35,13 @@ GRAPH_JSON = r'''{
       "package": "contacts_proto",
       "version": "0.1.0",
       "kind": "lib",
-      "root": "src/contacts_proto/generated/komira_contacts_proto_generated",
+      "root": "src/contacts_proto/generated/contacts_proto",
       "srcs": [
-        {"path": "src/contacts_proto/generated/komira_contacts_proto_generated/__init__.mojo", "sha256": "dc2a80fdbf615bfea0d42c8478a647e8b14b94bce3f47f6cd28a02e1d3ff9d20"},
-        {"path": "src/contacts_proto/generated/komira_contacts_proto_generated/_parts/__init__.mojo", "sha256": "7712116c68b53f810b80a05a7b8e411633e45db849ac9d7d7df53fb250cb901c"},
-        {"path": "src/contacts_proto/generated/komira_contacts_proto_generated/_parts/contacts_p01.mojo", "sha256": "415b1198b64c52428e38563cc660b60ac8b2e0fd7e712527b4e2dc05cd03a41c"},
-        {"path": "src/contacts_proto/generated/komira_contacts_proto_generated/_parts/contacts_p02.mojo", "sha256": "84b60ddac9c447dfdfe1adb3089490b56fe60b1cf628674fd0e16720f3d6b8ce"},
-        {"path": "src/contacts_proto/generated/komira_contacts_proto_generated/contacts.mojo", "sha256": "00b329c3bbb47e1983f3fe4c41bd09f108e8619a2cb093fc165125af0f371ef6"}
+        {"path": "src/contacts_proto/generated/contacts_proto/__init__.mojo", "sha256": "dc2a80fdbf615bfea0d42c8478a647e8b14b94bce3f47f6cd28a02e1d3ff9d20"},
+        {"path": "src/contacts_proto/generated/contacts_proto/_parts/__init__.mojo", "sha256": "7712116c68b53f810b80a05a7b8e411633e45db849ac9d7d7df53fb250cb901c"},
+        {"path": "src/contacts_proto/generated/contacts_proto/_parts/contacts_p01.mojo", "sha256": "415b1198b64c52428e38563cc660b60ac8b2e0fd7e712527b4e2dc05cd03a41c"},
+        {"path": "src/contacts_proto/generated/contacts_proto/_parts/contacts_p02.mojo", "sha256": "84b60ddac9c447dfdfe1adb3089490b56fe60b1cf628674fd0e16720f3d6b8ce"},
+        {"path": "src/contacts_proto/generated/contacts_proto/contacts.mojo", "sha256": "00b329c3bbb47e1983f3fe4c41bd09f108e8619a2cb093fc165125af0f371ef6"}
       ],
       "deps": ["proto_codec@0.1.0#mojo1.0.0/lib"],
       "natives": [],
@@ -131,13 +131,13 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "package": "contacts_proto",
       "version": "0.1.0",
       "kind": "lib",
-      "root": "src/contacts_proto/generated/komira_contacts_proto_generated",
+      "root": "src/contacts_proto/generated/contacts_proto",
       "srcs": [
-        {"path": "src/contacts_proto/generated/komira_contacts_proto_generated/__init__.mojo", "sha256": "dc2a80fdbf615bfea0d42c8478a647e8b14b94bce3f47f6cd28a02e1d3ff9d20"},
-        {"path": "src/contacts_proto/generated/komira_contacts_proto_generated/_parts/__init__.mojo", "sha256": "7712116c68b53f810b80a05a7b8e411633e45db849ac9d7d7df53fb250cb901c"},
-        {"path": "src/contacts_proto/generated/komira_contacts_proto_generated/_parts/contacts_p01.mojo", "sha256": "415b1198b64c52428e38563cc660b60ac8b2e0fd7e712527b4e2dc05cd03a41c"},
-        {"path": "src/contacts_proto/generated/komira_contacts_proto_generated/_parts/contacts_p02.mojo", "sha256": "84b60ddac9c447dfdfe1adb3089490b56fe60b1cf628674fd0e16720f3d6b8ce"},
-        {"path": "src/contacts_proto/generated/komira_contacts_proto_generated/contacts.mojo", "sha256": "00b329c3bbb47e1983f3fe4c41bd09f108e8619a2cb093fc165125af0f371ef6"}
+        {"path": "src/contacts_proto/generated/contacts_proto/__init__.mojo", "sha256": "dc2a80fdbf615bfea0d42c8478a647e8b14b94bce3f47f6cd28a02e1d3ff9d20"},
+        {"path": "src/contacts_proto/generated/contacts_proto/_parts/__init__.mojo", "sha256": "7712116c68b53f810b80a05a7b8e411633e45db849ac9d7d7df53fb250cb901c"},
+        {"path": "src/contacts_proto/generated/contacts_proto/_parts/contacts_p01.mojo", "sha256": "415b1198b64c52428e38563cc660b60ac8b2e0fd7e712527b4e2dc05cd03a41c"},
+        {"path": "src/contacts_proto/generated/contacts_proto/_parts/contacts_p02.mojo", "sha256": "84b60ddac9c447dfdfe1adb3089490b56fe60b1cf628674fd0e16720f3d6b8ce"},
+        {"path": "src/contacts_proto/generated/contacts_proto/contacts.mojo", "sha256": "00b329c3bbb47e1983f3fe4c41bd09f108e8619a2cb093fc165125af0f371ef6"}
       ],
       "deps": ["proto_codec@0.1.0#mojo1.0.0/lib"],
       "natives": [],
@@ -224,13 +224,13 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "package": "contacts_proto",
       "version": "0.1.0",
       "kind": "lib",
-      "root": "src/contacts_proto/generated/komira_contacts_proto_generated",
+      "root": "src/contacts_proto/generated/contacts_proto",
       "srcs": [
-        {"path": "src/contacts_proto/generated/komira_contacts_proto_generated/__init__.mojo", "sha256": "dc2a80fdbf615bfea0d42c8478a647e8b14b94bce3f47f6cd28a02e1d3ff9d20"},
-        {"path": "src/contacts_proto/generated/komira_contacts_proto_generated/_parts/__init__.mojo", "sha256": "7712116c68b53f810b80a05a7b8e411633e45db849ac9d7d7df53fb250cb901c"},
-        {"path": "src/contacts_proto/generated/komira_contacts_proto_generated/_parts/contacts_p01.mojo", "sha256": "415b1198b64c52428e38563cc660b60ac8b2e0fd7e712527b4e2dc05cd03a41c"},
-        {"path": "src/contacts_proto/generated/komira_contacts_proto_generated/_parts/contacts_p02.mojo", "sha256": "84b60ddac9c447dfdfe1adb3089490b56fe60b1cf628674fd0e16720f3d6b8ce"},
-        {"path": "src/contacts_proto/generated/komira_contacts_proto_generated/contacts.mojo", "sha256": "00b329c3bbb47e1983f3fe4c41bd09f108e8619a2cb093fc165125af0f371ef6"}
+        {"path": "src/contacts_proto/generated/contacts_proto/__init__.mojo", "sha256": "dc2a80fdbf615bfea0d42c8478a647e8b14b94bce3f47f6cd28a02e1d3ff9d20"},
+        {"path": "src/contacts_proto/generated/contacts_proto/_parts/__init__.mojo", "sha256": "7712116c68b53f810b80a05a7b8e411633e45db849ac9d7d7df53fb250cb901c"},
+        {"path": "src/contacts_proto/generated/contacts_proto/_parts/contacts_p01.mojo", "sha256": "415b1198b64c52428e38563cc660b60ac8b2e0fd7e712527b4e2dc05cd03a41c"},
+        {"path": "src/contacts_proto/generated/contacts_proto/_parts/contacts_p02.mojo", "sha256": "84b60ddac9c447dfdfe1adb3089490b56fe60b1cf628674fd0e16720f3d6b8ce"},
+        {"path": "src/contacts_proto/generated/contacts_proto/contacts.mojo", "sha256": "00b329c3bbb47e1983f3fe4c41bd09f108e8619a2cb093fc165125af0f371ef6"}
       ],
       "deps": ["proto_codec@0.1.0#mojo1.0.0/lib"],
       "natives": [],

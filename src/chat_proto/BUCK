@@ -22,16 +22,17 @@ load("@komira//tools/build/mojo:proto_fixture.bzl", "proto_encode", "proto_fixtu
 # number and name. README.md's examples run as one more welded test.
 
 # The generator's half: `komira_chat_proto_generated_gen` writes the Mojo of the `.proto` files, `komira_chat_proto_generated_fresh` holds the
-# committed directory `generated/komira_chat_proto_generated/` to it, byte for byte, and fails with the command that regenerates
+# committed directory `generated/chat_proto/` to it, byte for byte, and fails with the command that regenerates
 # (tools/build/gen/README.md). That directory is the library of mopm.toml (`[targets] lib`), compiled as the module
-# `chat_proto`: `import_name` is that module's name, and the rule names the directory after the target, which
-# `:chat_proto` below cannot be. The library this call declares itself (`:komira_chat_proto_generated`, the same files without the
+# `chat_proto`: `import_name` is that module's name, and `dir_is_import_name` names the directory after it, as mopm
+# requires of a library (the target cannot have that name: `:chat_proto` below has it). The library this call declares itself (`:komira_chat_proto_generated`, the same files without the
 # tests) is not what dependents use. Regenerate with
 #   ./buck2 run komira//tools/build/gen:regen -- komira//src/chat_proto:komira_chat_proto_generated
 mojo_proto_library(
     name = "komira_chat_proto_generated",
     srcs = ["chat.proto"],
     import_name = "chat_proto",
+    dir_is_import_name = True,
     import_prefix = "komira/chat/v1",
     deps = ["//src/proto_codec:proto_codec"],
     visibility = ["PUBLIC"],
@@ -63,7 +64,7 @@ mojo_adopted_library(
     deps = ["//src/proto_codec:proto_codec"],
     lib = ":lib",
     readme = "README.md",
-    srcs = glob(["generated/komira_chat_proto_generated/**/*.mojo"]),
+    srcs = glob(["generated/chat_proto/**/*.mojo"]),
     test_srcs = glob(["tests/test_*.mojo"]),
     test_runs = ":test",
     visibility = ["PUBLIC"],
@@ -74,7 +75,7 @@ mojo_adopted_library(
 # `mopm pack` reads the manifest of each beside the one it is given.
 mojo_conda(
     name = "conda",
-    dir = "generated/komira_chat_proto_generated",
+    dir = "generated/chat_proto",
     lib = ":lib",
     manifest = "mopm.toml",
     members = {

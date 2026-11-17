@@ -37,11 +37,11 @@ GRAPH_JSON = r'''{
       "package": "calendar_proto",
       "version": "0.1.0",
       "kind": "lib",
-      "root": "src/calendar_proto/generated/komira_calendar_proto_generated",
+      "root": "src/calendar_proto/generated/calendar_proto",
       "srcs": [
-        {"path": "src/calendar_proto/generated/komira_calendar_proto_generated/__init__.mojo", "sha256": "dc2a80fdbf615bfea0d42c8478a647e8b14b94bce3f47f6cd28a02e1d3ff9d20"},
-        {"path": "src/calendar_proto/generated/komira_calendar_proto_generated/_parts/__init__.mojo", "sha256": "7712116c68b53f810b80a05a7b8e411633e45db849ac9d7d7df53fb250cb901c"},
-        {"path": "src/calendar_proto/generated/komira_calendar_proto_generated/calendar.mojo", "sha256": "a19af03085c538b4bd93d81be4cc5da0bce32012f39dc223fc9ea252f4bff7de"}
+        {"path": "src/calendar_proto/generated/calendar_proto/__init__.mojo", "sha256": "dc2a80fdbf615bfea0d42c8478a647e8b14b94bce3f47f6cd28a02e1d3ff9d20"},
+        {"path": "src/calendar_proto/generated/calendar_proto/_parts/__init__.mojo", "sha256": "7712116c68b53f810b80a05a7b8e411633e45db849ac9d7d7df53fb250cb901c"},
+        {"path": "src/calendar_proto/generated/calendar_proto/calendar.mojo", "sha256": "a19af03085c538b4bd93d81be4cc5da0bce32012f39dc223fc9ea252f4bff7de"}
       ],
       "deps": ["proto_codec@0.1.0#mojo1.0.0/lib", "wkt@0.1.0#mojo1.0.0/lib"],
       "natives": [],
@@ -153,11 +153,11 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "package": "calendar_proto",
       "version": "0.1.0",
       "kind": "lib",
-      "root": "src/calendar_proto/generated/komira_calendar_proto_generated",
+      "root": "src/calendar_proto/generated/calendar_proto",
       "srcs": [
-        {"path": "src/calendar_proto/generated/komira_calendar_proto_generated/__init__.mojo", "sha256": "dc2a80fdbf615bfea0d42c8478a647e8b14b94bce3f47f6cd28a02e1d3ff9d20"},
-        {"path": "src/calendar_proto/generated/komira_calendar_proto_generated/_parts/__init__.mojo", "sha256": "7712116c68b53f810b80a05a7b8e411633e45db849ac9d7d7df53fb250cb901c"},
-        {"path": "src/calendar_proto/generated/komira_calendar_proto_generated/calendar.mojo", "sha256": "a19af03085c538b4bd93d81be4cc5da0bce32012f39dc223fc9ea252f4bff7de"}
+        {"path": "src/calendar_proto/generated/calendar_proto/__init__.mojo", "sha256": "dc2a80fdbf615bfea0d42c8478a647e8b14b94bce3f47f6cd28a02e1d3ff9d20"},
+        {"path": "src/calendar_proto/generated/calendar_proto/_parts/__init__.mojo", "sha256": "7712116c68b53f810b80a05a7b8e411633e45db849ac9d7d7df53fb250cb901c"},
+        {"path": "src/calendar_proto/generated/calendar_proto/calendar.mojo", "sha256": "a19af03085c538b4bd93d81be4cc5da0bce32012f39dc223fc9ea252f4bff7de"}
       ],
       "deps": ["proto_codec@0.1.0#mojo1.0.0/lib", "wkt@0.1.0#mojo1.0.0/lib"],
       "natives": [],
@@ -266,11 +266,11 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "package": "calendar_proto",
       "version": "0.1.0",
       "kind": "lib",
-      "root": "src/calendar_proto/generated/komira_calendar_proto_generated",
+      "root": "src/calendar_proto/generated/calendar_proto",
       "srcs": [
-        {"path": "src/calendar_proto/generated/komira_calendar_proto_generated/__init__.mojo", "sha256": "dc2a80fdbf615bfea0d42c8478a647e8b14b94bce3f47f6cd28a02e1d3ff9d20"},
-        {"path": "src/calendar_proto/generated/komira_calendar_proto_generated/_parts/__init__.mojo", "sha256": "7712116c68b53f810b80a05a7b8e411633e45db849ac9d7d7df53fb250cb901c"},
-        {"path": "src/calendar_proto/generated/komira_calendar_proto_generated/calendar.mojo", "sha256": "a19af03085c538b4bd93d81be4cc5da0bce32012f39dc223fc9ea252f4bff7de"}
+        {"path": "src/calendar_proto/generated/calendar_proto/__init__.mojo", "sha256": "dc2a80fdbf615bfea0d42c8478a647e8b14b94bce3f47f6cd28a02e1d3ff9d20"},
+        {"path": "src/calendar_proto/generated/calendar_proto/_parts/__init__.mojo", "sha256": "7712116c68b53f810b80a05a7b8e411633e45db849ac9d7d7df53fb250cb901c"},
+        {"path": "src/calendar_proto/generated/calendar_proto/calendar.mojo", "sha256": "a19af03085c538b4bd93d81be4cc5da0bce32012f39dc223fc9ea252f4bff7de"}
       ],
       "deps": ["proto_codec@0.1.0#mojo1.0.0/lib", "wkt@0.1.0#mojo1.0.0/lib"],
       "natives": [],

@@ -114,7 +114,7 @@ assert_equal(
 ## Build files
 
 This package is built with buildrules' `mojo_package` and packaged for mopm as `job_report_proto`, version 0.1.0
-(`mopm.toml`). Its library is the generator's output, committed at `generated/komira_job_report_proto_generated/` and
+(`mopm.toml`). Its library is the generator's output, committed at `generated/job_report_proto/` and
 compiled as the module `job_report_proto` (`[targets] lib` of `mopm.toml`); its tests are `tests/`. It depends on one sibling package, `proto_codec` (`{ path = "../proto_codec", version = "0.1" }`), so the `.conda` of this package records `mojo-proto_codec >=0.1,<0.2` as its dependency
 and holds none of their files. The files that are not sources:
 

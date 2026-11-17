@@ -11,5 +11,5 @@ mojo = ["1.0.0"]
 "komira-ai/proto_codec" = { path = "../proto_codec", version = "0.1" }
 
 [targets]
-lib = { path = "generated/komira_job_report_proto_generated" }
+lib = { path = "generated/job_report_proto" }
 tests = ["tests"]

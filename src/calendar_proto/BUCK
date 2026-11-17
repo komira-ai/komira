@@ -19,16 +19,17 @@ load(":buildrules.mojo.bzl", "mojo_package")
 # `calendar` validates these messages.
 
 # The generator's half: `komira_calendar_proto_generated_gen` writes the Mojo of the `.proto` files, `komira_calendar_proto_generated_fresh` holds the
-# committed directory `generated/komira_calendar_proto_generated/` to it, byte for byte, and fails with the command that regenerates
+# committed directory `generated/calendar_proto/` to it, byte for byte, and fails with the command that regenerates
 # (tools/build/gen/README.md). That directory is the library of mopm.toml (`[targets] lib`), compiled as the module
-# `calendar_proto`: `import_name` is that module's name, and the rule names the directory after the target, which
-# `:calendar_proto` below cannot be. The library this call declares itself (`:komira_calendar_proto_generated`, the same files without the
+# `calendar_proto`: `import_name` is that module's name, and `dir_is_import_name` names the directory after it, as mopm
+# requires of a library (the target cannot have that name: `:calendar_proto` below has it). The library this call declares itself (`:komira_calendar_proto_generated`, the same files without the
 # tests) is not what dependents use. Regenerate with
 #   ./buck2 run komira//tools/build/gen:regen -- komira//src/calendar_proto:komira_calendar_proto_generated
 mojo_proto_library(
     name = "komira_calendar_proto_generated",
     srcs = ["komira/calendar/v1/calendar.proto"],
     import_name = "calendar_proto",
+    dir_is_import_name = True,
     deps = [
         "//src/proto_codec:proto_codec",
         "//src/wkt:wkt",
@@ -54,7 +55,7 @@ mojo_adopted_library(
     ],
     lib = ":lib",
     readme = "README.md",
-    srcs = glob(["generated/komira_calendar_proto_generated/**/*.mojo"]),
+    srcs = glob(["generated/calendar_proto/**/*.mojo"]),
     test_srcs = glob(["tests/test_*.mojo"]),
     test_runs = ":test",
     visibility = ["PUBLIC"],
@@ -65,7 +66,7 @@ mojo_adopted_library(
 # `mopm pack` reads the manifest of each beside the one it is given.
 mojo_conda(
     name = "conda",
-    dir = "generated/komira_calendar_proto_generated",
+    dir = "generated/calendar_proto",
     lib = ":lib",
     manifest = "mopm.toml",
     members = {

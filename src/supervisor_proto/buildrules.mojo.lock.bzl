@@ -36,7 +36,7 @@ GRAPH_JSON = r'''{
       "package": "broker_proto",
       "version": "0.1.0",
       "kind": "lib",
-      "root": "src/broker_proto/generated/komira_broker_proto_generated",
+      "root": "src/broker_proto/generated/broker_proto",
       "deps": ["proto_codec@0.1.0#mojo1.0.0/lib"],
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
@@ -91,11 +91,11 @@ GRAPH_JSON = r'''{
       "package": "supervisor_proto",
       "version": "0.1.0",
       "kind": "lib",
-      "root": "src/supervisor_proto/generated/komira_supervisor_proto_generated",
+      "root": "src/supervisor_proto/generated/supervisor_proto",
       "srcs": [
-        {"path": "src/supervisor_proto/generated/komira_supervisor_proto_generated/__init__.mojo", "sha256": "dc2a80fdbf615bfea0d42c8478a647e8b14b94bce3f47f6cd28a02e1d3ff9d20"},
-        {"path": "src/supervisor_proto/generated/komira_supervisor_proto_generated/_parts/__init__.mojo", "sha256": "7712116c68b53f810b80a05a7b8e411633e45db849ac9d7d7df53fb250cb901c"},
-        {"path": "src/supervisor_proto/generated/komira_supervisor_proto_generated/supervisor.mojo", "sha256": "4f0d55b2ff7d73a267a018c927cf57f11387eabd8ef347406d0b93b24e4025e0"}
+        {"path": "src/supervisor_proto/generated/supervisor_proto/__init__.mojo", "sha256": "dc2a80fdbf615bfea0d42c8478a647e8b14b94bce3f47f6cd28a02e1d3ff9d20"},
+        {"path": "src/supervisor_proto/generated/supervisor_proto/_parts/__init__.mojo", "sha256": "7712116c68b53f810b80a05a7b8e411633e45db849ac9d7d7df53fb250cb901c"},
+        {"path": "src/supervisor_proto/generated/supervisor_proto/supervisor.mojo", "sha256": "4f0d55b2ff7d73a267a018c927cf57f11387eabd8ef347406d0b93b24e4025e0"}
       ],
       "deps": ["broker_proto@0.1.0#mojo1.0.0/lib", "proto_codec@0.1.0#mojo1.0.0/lib"],
       "natives": [],
@@ -141,7 +141,7 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "package": "broker_proto",
       "version": "0.1.0",
       "kind": "lib",
-      "root": "src/broker_proto/generated/komira_broker_proto_generated",
+      "root": "src/broker_proto/generated/broker_proto",
       "deps": ["proto_codec@0.1.0#mojo1.0.0/lib"],
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
@@ -196,11 +196,11 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "package": "supervisor_proto",
       "version": "0.1.0",
       "kind": "lib",
-      "root": "src/supervisor_proto/generated/komira_supervisor_proto_generated",
+      "root": "src/supervisor_proto/generated/supervisor_proto",
       "srcs": [
-        {"path": "src/supervisor_proto/generated/komira_supervisor_proto_generated/__init__.mojo", "sha256": "dc2a80fdbf615bfea0d42c8478a647e8b14b94bce3f47f6cd28a02e1d3ff9d20"},
-        {"path": "src/supervisor_proto/generated/komira_supervisor_proto_generated/_parts/__init__.mojo", "sha256": "7712116c68b53f810b80a05a7b8e411633e45db849ac9d7d7df53fb250cb901c"},
-        {"path": "src/supervisor_proto/generated/komira_supervisor_proto_generated/supervisor.mojo", "sha256": "4f0d55b2ff7d73a267a018c927cf57f11387eabd8ef347406d0b93b24e4025e0"}
+        {"path": "src/supervisor_proto/generated/supervisor_proto/__init__.mojo", "sha256": "dc2a80fdbf615bfea0d42c8478a647e8b14b94bce3f47f6cd28a02e1d3ff9d20"},
+        {"path": "src/supervisor_proto/generated/supervisor_proto/_parts/__init__.mojo", "sha256": "7712116c68b53f810b80a05a7b8e411633e45db849ac9d7d7df53fb250cb901c"},
+        {"path": "src/supervisor_proto/generated/supervisor_proto/supervisor.mojo", "sha256": "4f0d55b2ff7d73a267a018c927cf57f11387eabd8ef347406d0b93b24e4025e0"}
       ],
       "deps": ["broker_proto@0.1.0#mojo1.0.0/lib", "proto_codec@0.1.0#mojo1.0.0/lib"],
       "natives": [],
@@ -243,7 +243,7 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "package": "broker_proto",
       "version": "0.1.0",
       "kind": "lib",
-      "root": "src/broker_proto/generated/komira_broker_proto_generated",
+      "root": "src/broker_proto/generated/broker_proto",
       "deps": ["proto_codec@0.1.0#mojo1.0.0/lib"],
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
@@ -298,11 +298,11 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "package": "supervisor_proto",
       "version": "0.1.0",
       "kind": "lib",
-      "root": "src/supervisor_proto/generated/komira_supervisor_proto_generated",
+      "root": "src/supervisor_proto/generated/supervisor_proto",
       "srcs": [
-        {"path": "src/supervisor_proto/generated/komira_supervisor_proto_generated/__init__.mojo", "sha256": "dc2a80fdbf615bfea0d42c8478a647e8b14b94bce3f47f6cd28a02e1d3ff9d20"},
-        {"path": "src/supervisor_proto/generated/komira_supervisor_proto_generated/_parts/__init__.mojo", "sha256": "7712116c68b53f810b80a05a7b8e411633e45db849ac9d7d7df53fb250cb901c"},
-        {"path": "src/supervisor_proto/generated/komira_supervisor_proto_generated/supervisor.mojo", "sha256": "4f0d55b2ff7d73a267a018c927cf57f11387eabd8ef347406d0b93b24e4025e0"}
+        {"path": "src/supervisor_proto/generated/supervisor_proto/__init__.mojo", "sha256": "dc2a80fdbf615bfea0d42c8478a647e8b14b94bce3f47f6cd28a02e1d3ff9d20"},
+        {"path": "src/supervisor_proto/generated/supervisor_proto/_parts/__init__.mojo", "sha256": "7712116c68b53f810b80a05a7b8e411633e45db849ac9d7d7df53fb250cb901c"},
+        {"path": "src/supervisor_proto/generated/supervisor_proto/supervisor.mojo", "sha256": "4f0d55b2ff7d73a267a018c927cf57f11387eabd8ef347406d0b93b24e4025e0"}
       ],
       "deps": ["broker_proto@0.1.0#mojo1.0.0/lib", "proto_codec@0.1.0#mojo1.0.0/lib"],
       "natives": [],

@@ -634,6 +634,11 @@ compares with the committed directory and fails with
 `./buck2 run komira//tools/build/gen:regen -- <target>`, the command that
 rewrites it; `<name>_fresh` is the library's first gate, whatever `test_srcs`
 say. The welded form then also takes `bundle_proto_deps` and `bundle_only`.
+A `mojo_proto_library` of committed sources also takes
+`dir_is_import_name = True`, which moves its committed directory to
+`generated/<import_name>/`: the `[targets] lib` of a mopm package must be a
+directory named like the module Mojo imports, and the target cannot always
+have that name. A library of the transition ledger refuses the keyword.
 Reference: [`../gen/README.md`](../gen/README.md). Other Mojo targets name it in `deps`
 like a `mojo_library`. `deps` are the Mojo libraries the generated code
 imports (its runtime). A `.proto` is imported by other `.proto` files at

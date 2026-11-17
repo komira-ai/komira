@@ -46,11 +46,11 @@ GRAPH_JSON = r'''{
       "package": "job_report_proto",
       "version": "0.1.0",
       "kind": "lib",
-      "root": "src/job_report_proto/generated/komira_job_report_proto_generated",
+      "root": "src/job_report_proto/generated/job_report_proto",
       "srcs": [
-        {"path": "src/job_report_proto/generated/komira_job_report_proto_generated/__init__.mojo", "sha256": "dc2a80fdbf615bfea0d42c8478a647e8b14b94bce3f47f6cd28a02e1d3ff9d20"},
-        {"path": "src/job_report_proto/generated/komira_job_report_proto_generated/_parts/__init__.mojo", "sha256": "7712116c68b53f810b80a05a7b8e411633e45db849ac9d7d7df53fb250cb901c"},
-        {"path": "src/job_report_proto/generated/komira_job_report_proto_generated/job_report.mojo", "sha256": "ca6e957de8cdba556a46e0c671dbd3be94a8b92a722beabce71a79b99fdc6294"}
+        {"path": "src/job_report_proto/generated/job_report_proto/__init__.mojo", "sha256": "dc2a80fdbf615bfea0d42c8478a647e8b14b94bce3f47f6cd28a02e1d3ff9d20"},
+        {"path": "src/job_report_proto/generated/job_report_proto/_parts/__init__.mojo", "sha256": "7712116c68b53f810b80a05a7b8e411633e45db849ac9d7d7df53fb250cb901c"},
+        {"path": "src/job_report_proto/generated/job_report_proto/job_report.mojo", "sha256": "ca6e957de8cdba556a46e0c671dbd3be94a8b92a722beabce71a79b99fdc6294"}
       ],
       "deps": ["proto_codec@0.1.0#mojo1.0.0/lib"],
       "natives": [],
@@ -166,11 +166,11 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "package": "job_report_proto",
       "version": "0.1.0",
       "kind": "lib",
-      "root": "src/job_report_proto/generated/komira_job_report_proto_generated",
+      "root": "src/job_report_proto/generated/job_report_proto",
       "srcs": [
-        {"path": "src/job_report_proto/generated/komira_job_report_proto_generated/__init__.mojo", "sha256": "dc2a80fdbf615bfea0d42c8478a647e8b14b94bce3f47f6cd28a02e1d3ff9d20"},
-        {"path": "src/job_report_proto/generated/komira_job_report_proto_generated/_parts/__init__.mojo", "sha256": "7712116c68b53f810b80a05a7b8e411633e45db849ac9d7d7df53fb250cb901c"},
-        {"path": "src/job_report_proto/generated/komira_job_report_proto_generated/job_report.mojo", "sha256": "ca6e957de8cdba556a46e0c671dbd3be94a8b92a722beabce71a79b99fdc6294"}
+        {"path": "src/job_report_proto/generated/job_report_proto/__init__.mojo", "sha256": "dc2a80fdbf615bfea0d42c8478a647e8b14b94bce3f47f6cd28a02e1d3ff9d20"},
+        {"path": "src/job_report_proto/generated/job_report_proto/_parts/__init__.mojo", "sha256": "7712116c68b53f810b80a05a7b8e411633e45db849ac9d7d7df53fb250cb901c"},
+        {"path": "src/job_report_proto/generated/job_report_proto/job_report.mojo", "sha256": "ca6e957de8cdba556a46e0c671dbd3be94a8b92a722beabce71a79b99fdc6294"}
       ],
       "deps": ["proto_codec@0.1.0#mojo1.0.0/lib"],
       "natives": [],
@@ -283,11 +283,11 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "package": "job_report_proto",
       "version": "0.1.0",
       "kind": "lib",
-      "root": "src/job_report_proto/generated/komira_job_report_proto_generated",
+      "root": "src/job_report_proto/generated/job_report_proto",
       "srcs": [
-        {"path": "src/job_report_proto/generated/komira_job_report_proto_generated/__init__.mojo", "sha256": "dc2a80fdbf615bfea0d42c8478a647e8b14b94bce3f47f6cd28a02e1d3ff9d20"},
-        {"path": "src/job_report_proto/generated/komira_job_report_proto_generated/_parts/__init__.mojo", "sha256": "7712116c68b53f810b80a05a7b8e411633e45db849ac9d7d7df53fb250cb901c"},
-        {"path": "src/job_report_proto/generated/komira_job_report_proto_generated/job_report.mojo", "sha256": "ca6e957de8cdba556a46e0c671dbd3be94a8b92a722beabce71a79b99fdc6294"}
+        {"path": "src/job_report_proto/generated/job_report_proto/__init__.mojo", "sha256": "dc2a80fdbf615bfea0d42c8478a647e8b14b94bce3f47f6cd28a02e1d3ff9d20"},
+        {"path": "src/job_report_proto/generated/job_report_proto/_parts/__init__.mojo", "sha256": "7712116c68b53f810b80a05a7b8e411633e45db849ac9d7d7df53fb250cb901c"},
+        {"path": "src/job_report_proto/generated/job_report_proto/job_report.mojo", "sha256": "ca6e957de8cdba556a46e0c671dbd3be94a8b92a722beabce71a79b99fdc6294"}
       ],
       "deps": ["proto_codec@0.1.0#mojo1.0.0/lib"],
       "natives": [],

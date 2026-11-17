@@ -12,5 +12,5 @@ mojo = ["1.0.0"]
 "komira-ai/wkt" = { path = "../wkt", version = "0.1" }
 
 [targets]
-lib = { path = "generated/komira_calendar_proto_generated" }
+lib = { path = "generated/calendar_proto" }
 tests = ["tests"]

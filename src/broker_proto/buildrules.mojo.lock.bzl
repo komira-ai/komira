@@ -35,11 +35,11 @@ GRAPH_JSON = r'''{
       "package": "broker_proto",
       "version": "0.1.0",
       "kind": "lib",
-      "root": "src/broker_proto/generated/komira_broker_proto_generated",
+      "root": "src/broker_proto/generated/broker_proto",
       "srcs": [
-        {"path": "src/broker_proto/generated/komira_broker_proto_generated/__init__.mojo", "sha256": "dc2a80fdbf615bfea0d42c8478a647e8b14b94bce3f47f6cd28a02e1d3ff9d20"},
-        {"path": "src/broker_proto/generated/komira_broker_proto_generated/_parts/__init__.mojo", "sha256": "7712116c68b53f810b80a05a7b8e411633e45db849ac9d7d7df53fb250cb901c"},
-        {"path": "src/broker_proto/generated/komira_broker_proto_generated/broker.mojo", "sha256": "a579ab0b82da954377089c0061d92b4578cc296bca0db54681c741e300981500"}
+        {"path": "src/broker_proto/generated/broker_proto/__init__.mojo", "sha256": "dc2a80fdbf615bfea0d42c8478a647e8b14b94bce3f47f6cd28a02e1d3ff9d20"},
+        {"path": "src/broker_proto/generated/broker_proto/_parts/__init__.mojo", "sha256": "7712116c68b53f810b80a05a7b8e411633e45db849ac9d7d7df53fb250cb901c"},
+        {"path": "src/broker_proto/generated/broker_proto/broker.mojo", "sha256": "a579ab0b82da954377089c0061d92b4578cc296bca0db54681c741e300981500"}
       ],
       "deps": ["proto_codec@0.1.0#mojo1.0.0/lib"],
       "natives": [],
@@ -129,11 +129,11 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "package": "broker_proto",
       "version": "0.1.0",
       "kind": "lib",
-      "root": "src/broker_proto/generated/komira_broker_proto_generated",
+      "root": "src/broker_proto/generated/broker_proto",
       "srcs": [
-        {"path": "src/broker_proto/generated/komira_broker_proto_generated/__init__.mojo", "sha256": "dc2a80fdbf615bfea0d42c8478a647e8b14b94bce3f47f6cd28a02e1d3ff9d20"},
-        {"path": "src/broker_proto/generated/komira_broker_proto_generated/_parts/__init__.mojo", "sha256": "7712116c68b53f810b80a05a7b8e411633e45db849ac9d7d7df53fb250cb901c"},
-        {"path": "src/broker_proto/generated/komira_broker_proto_generated/broker.mojo", "sha256": "a579ab0b82da954377089c0061d92b4578cc296bca0db54681c741e300981500"}
+        {"path": "src/broker_proto/generated/broker_proto/__init__.mojo", "sha256": "dc2a80fdbf615bfea0d42c8478a647e8b14b94bce3f47f6cd28a02e1d3ff9d20"},
+        {"path": "src/broker_proto/generated/broker_proto/_parts/__init__.mojo", "sha256": "7712116c68b53f810b80a05a7b8e411633e45db849ac9d7d7df53fb250cb901c"},
+        {"path": "src/broker_proto/generated/broker_proto/broker.mojo", "sha256": "a579ab0b82da954377089c0061d92b4578cc296bca0db54681c741e300981500"}
       ],
       "deps": ["proto_codec@0.1.0#mojo1.0.0/lib"],
       "natives": [],
@@ -220,11 +220,11 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "package": "broker_proto",
       "version": "0.1.0",
       "kind": "lib",
-      "root": "src/broker_proto/generated/komira_broker_proto_generated",
+      "root": "src/broker_proto/generated/broker_proto",
       "srcs": [
-        {"path": "src/broker_proto/generated/komira_broker_proto_generated/__init__.mojo", "sha256": "dc2a80fdbf615bfea0d42c8478a647e8b14b94bce3f47f6cd28a02e1d3ff9d20"},
-        {"path": "src/broker_proto/generated/komira_broker_proto_generated/_parts/__init__.mojo", "sha256": "7712116c68b53f810b80a05a7b8e411633e45db849ac9d7d7df53fb250cb901c"},
-        {"path": "src/broker_proto/generated/komira_broker_proto_generated/broker.mojo", "sha256": "a579ab0b82da954377089c0061d92b4578cc296bca0db54681c741e300981500"}
+        {"path": "src/broker_proto/generated/broker_proto/__init__.mojo", "sha256": "dc2a80fdbf615bfea0d42c8478a647e8b14b94bce3f47f6cd28a02e1d3ff9d20"},
+        {"path": "src/broker_proto/generated/broker_proto/_parts/__init__.mojo", "sha256": "7712116c68b53f810b80a05a7b8e411633e45db849ac9d7d7df53fb250cb901c"},
+        {"path": "src/broker_proto/generated/broker_proto/broker.mojo", "sha256": "a579ab0b82da954377089c0061d92b4578cc296bca0db54681c741e300981500"}
       ],
       "deps": ["proto_codec@0.1.0#mojo1.0.0/lib"],
       "natives": [],
