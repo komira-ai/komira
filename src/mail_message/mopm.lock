@@ -1,5 +1,5 @@
 {
-  "lock_version": 2,
+  "lock_version": 3,
   "mojo": [
     "1.0.0"
   ],
@@ -15,48 +15,48 @@
   ],
   "packages": [
     {
-      "name": "byte_buffer",
+      "name": "komira-ai/byte_buffer",
       "version": "0.1.0",
       "source": "path",
       "path": "../byte_buffer",
       "deps": [
-        "host_probe",
-        "libc",
-        "simd_ops"
+        "komira-ai/host_probe",
+        "komira-ai/libc",
+        "komira-ai/simd_ops"
       ]
     },
     {
-      "name": "datetime",
+      "name": "komira-ai/datetime",
       "version": "0.1.0",
       "source": "path",
       "path": "../datetime"
     },
     {
-      "name": "encoding",
+      "name": "komira-ai/encoding",
       "version": "0.1.0",
       "source": "path",
       "path": "../encoding"
     },
     {
-      "name": "host_probe",
+      "name": "komira-ai/host_probe",
       "version": "0.1.0",
       "source": "path",
       "path": "../host_probe"
     },
     {
-      "name": "libc",
+      "name": "komira-ai/libc",
       "version": "0.1.0",
       "source": "path",
       "path": "../libc"
     },
     {
-      "name": "mail_address",
+      "name": "komira-ai/mail_address",
       "version": "0.1.0",
       "source": "path",
       "path": "../mail_address"
     },
     {
-      "name": "simd_ops",
+      "name": "komira-ai/simd_ops",
       "version": "0.1.0",
       "source": "path",
       "path": "../simd_ops"

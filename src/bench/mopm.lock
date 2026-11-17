@@ -1,5 +1,5 @@
 {
-  "lock_version": 2,
+  "lock_version": 3,
   "mojo": [
     "1.0.0"
   ],
@@ -15,28 +15,28 @@
   ],
   "packages": [
     {
-      "name": "atomic_alias",
+      "name": "komira-ai/atomic_alias",
       "version": "0.1.0",
       "source": "path",
       "path": "../atomic_alias"
     },
     {
-      "name": "containers",
+      "name": "komira-ai/containers",
       "version": "0.1.0",
       "source": "path",
       "path": "../containers",
       "deps": [
-        "atomic_alias"
+        "komira-ai/atomic_alias"
       ]
     },
     {
-      "name": "spsc_ring",
+      "name": "komira-ai/spsc_ring",
       "version": "0.1.0",
       "source": "path",
       "path": "../spsc_ring",
       "deps": [
-        "atomic_alias",
-        "containers"
+        "komira-ai/atomic_alias",
+        "komira-ai/containers"
       ]
     }
   ]

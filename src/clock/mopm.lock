@@ -1,5 +1,5 @@
 {
-  "lock_version": 2,
+  "lock_version": 3,
   "mojo": [
     "1.0.0"
   ],
@@ -15,18 +15,18 @@
   ],
   "packages": [
     {
-      "name": "atomic_alias",
+      "name": "komira-ai/atomic_alias",
       "version": "0.1.0",
       "source": "path",
       "path": "../atomic_alias"
     },
     {
-      "name": "fork_join",
+      "name": "komira-ai/fork_join",
       "version": "0.1.0",
       "source": "path",
       "path": "../fork_join",
       "deps": [
-        "atomic_alias"
+        "komira-ai/atomic_alias"
       ]
     }
   ]

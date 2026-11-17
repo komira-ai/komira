@@ -1,5 +1,5 @@
 {
-  "lock_version": 2,
+  "lock_version": 3,
   "mojo": [
     "1.0.0"
   ],
@@ -15,36 +15,36 @@
   ],
   "packages": [
     {
-      "name": "datetime",
+      "name": "komira-ai/datetime",
       "version": "0.1.0",
       "source": "path",
       "path": "../datetime"
     },
     {
-      "name": "encoding",
+      "name": "komira-ai/encoding",
       "version": "0.1.0",
       "source": "path",
       "path": "../encoding"
     },
     {
-      "name": "json",
+      "name": "komira-ai/json",
       "version": "0.1.0",
       "source": "path",
       "path": "../json"
     },
     {
-      "name": "proto_codec",
+      "name": "komira-ai/proto_codec",
       "version": "0.1.0",
       "source": "path",
       "path": "../proto_codec",
       "deps": [
-        "encoding",
-        "json",
-        "protobuf"
+        "komira-ai/encoding",
+        "komira-ai/json",
+        "komira-ai/protobuf"
       ]
     },
     {
-      "name": "protobuf",
+      "name": "komira-ai/protobuf",
       "version": "0.1.0",
       "source": "path",
       "path": "../protobuf"

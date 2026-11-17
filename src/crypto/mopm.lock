@@ -1,5 +1,5 @@
 {
-  "lock_version": 2,
+  "lock_version": 3,
   "mojo": [
     "1.0.0"
   ],
@@ -15,38 +15,38 @@
   ],
   "packages": [
     {
-      "name": "atomic_alias",
+      "name": "komira-ai/atomic_alias",
       "version": "0.1.0",
       "source": "path",
       "path": "../atomic_alias"
     },
     {
-      "name": "awslc",
+      "name": "komira-ai/awslc",
       "version": "0.1.0",
       "source": "path",
       "path": "../awslc"
     },
     {
-      "name": "clock",
+      "name": "komira-ai/clock",
       "version": "0.1.0",
       "source": "path",
       "path": "../clock"
     },
     {
-      "name": "encoding",
+      "name": "komira-ai/encoding",
       "version": "0.1.0",
       "source": "path",
       "path": "../encoding"
     },
     {
-      "name": "uuid",
+      "name": "komira-ai/uuid",
       "version": "0.1.0",
       "source": "path",
       "path": "../uuid",
       "deps": [
-        "atomic_alias",
-        "awslc",
-        "clock"
+        "komira-ai/atomic_alias",
+        "komira-ai/awslc",
+        "komira-ai/clock"
       ]
     }
   ]

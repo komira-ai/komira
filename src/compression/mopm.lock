@@ -1,5 +1,5 @@
 {
-  "lock_version": 2,
+  "lock_version": 3,
   "mojo": [
     "1.0.0"
   ],
@@ -15,13 +15,13 @@
   ],
   "packages": [
     {
-      "name": "lz4",
+      "name": "komira-ai/lz4",
       "version": "0.1.0",
       "source": "path",
       "path": "../lz4"
     },
     {
-      "name": "zlib",
+      "name": "komira-ai/zlib",
       "version": "0.1.0",
       "source": "path",
       "path": "../zlib"

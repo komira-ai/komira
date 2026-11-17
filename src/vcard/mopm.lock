@@ -1,5 +1,5 @@
 {
-  "lock_version": 2,
+  "lock_version": 3,
   "mojo": [
     "1.0.0"
   ],
@@ -15,7 +15,7 @@
   ],
   "packages": [
     {
-      "name": "content_line",
+      "name": "komira-ai/content_line",
       "version": "0.1.0",
       "source": "path",
       "path": "../content_line"

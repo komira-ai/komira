@@ -1,5 +1,5 @@
 {
-  "lock_version": 2,
+  "lock_version": 3,
   "mojo": [
     "1.0.0"
   ],
@@ -15,64 +15,64 @@
   ],
   "packages": [
     {
-      "name": "atomic_alias",
+      "name": "komira-ai/atomic_alias",
       "version": "0.1.0",
       "source": "path",
       "path": "../atomic_alias"
     },
     {
-      "name": "clock",
+      "name": "komira-ai/clock",
       "version": "0.1.0",
       "source": "path",
       "path": "../clock"
     },
     {
-      "name": "containers",
+      "name": "komira-ai/containers",
       "version": "0.1.0",
       "source": "path",
       "path": "../containers",
       "deps": [
-        "atomic_alias"
+        "komira-ai/atomic_alias"
       ]
     },
     {
-      "name": "fork_join",
+      "name": "komira-ai/fork_join",
       "version": "0.1.0",
       "source": "path",
       "path": "../fork_join",
       "deps": [
-        "atomic_alias"
+        "komira-ai/atomic_alias"
       ]
     },
     {
-      "name": "hashing",
+      "name": "komira-ai/hashing",
       "version": "0.1.0",
       "source": "path",
       "path": "../hashing"
     },
     {
-      "name": "name_registry",
+      "name": "komira-ai/name_registry",
       "version": "0.1.0",
       "source": "path",
       "path": "../name_registry",
       "deps": [
-        "hashing"
+        "komira-ai/hashing"
       ]
     },
     {
-      "name": "runtime_paths",
+      "name": "komira-ai/runtime_paths",
       "version": "0.1.0",
       "source": "path",
       "path": "../runtime_paths"
     },
     {
-      "name": "spsc_ring",
+      "name": "komira-ai/spsc_ring",
       "version": "0.1.0",
       "source": "path",
       "path": "../spsc_ring",
       "deps": [
-        "atomic_alias",
-        "containers"
+        "komira-ai/atomic_alias",
+        "komira-ai/containers"
       ]
     }
   ]

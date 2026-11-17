@@ -1,5 +1,5 @@
 {
-  "lock_version": 2,
+  "lock_version": 3,
   "mojo": [
     "1.0.0"
   ],
@@ -15,7 +15,7 @@
   ],
   "packages": [
     {
-      "name": "kg_mode",
+      "name": "komira-ai/kg_mode",
       "version": "0.1.0",
       "source": "path",
       "path": "../kg_mode"
