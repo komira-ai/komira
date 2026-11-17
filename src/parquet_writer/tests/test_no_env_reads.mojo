@@ -171,6 +171,9 @@ def _import_root(line: String) -> String:
     var s = String(line.lstrip())
     var rest = String("")
     if s.startswith("from "):
+        # `from X import ...`: a docstring line that starts with "from" names no module.
+        if s.find(" import") < 0:
+            return ""
         rest = String(s[byte=5:])
     elif s.startswith("import "):
         rest = String(s[byte=7:])
@@ -217,7 +220,8 @@ def test_imports_only_its_deps() raises:
         var lines = text.split("\n")
         for k in range(len(lines)):
             var root = _import_root(String(lines[k]))
-            if not root.startswith("komira"):
+            # Every import but the standard library is a package, and must be a dep.
+            if root == "" or root == "std":
                 continue
             seen += 1
             var ok = False
@@ -227,7 +231,7 @@ def test_imports_only_its_deps() raises:
             assert_true(ok, files[i] + " imports " + root + ", not a dep")
     # Not vacuous: the statistics and encoders import arrow, the
     # serializer parquet_api, the helpers parquet_codec.
-    assert_true(seen >= 15, "found only " + String(seen) + " komira imports")
+    assert_true(seen >= 15, "found only " + String(seen) + " package imports")
 
 
 def test_the_scan_saw_the_package() raises:
