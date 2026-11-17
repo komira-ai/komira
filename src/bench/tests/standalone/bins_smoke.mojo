@@ -3,7 +3,7 @@
 # =============================================================================
 #
 # The program is this test's data (BUCK: `mojo_test` `bins_smoke`): komira's
-# build of `bins/spsc_ring.mojo`, the file the package ships (`:conda_holds`
+# build of `bins/run_spsc_ring.mojo`, the file the package ships (`:conda_holds`
 # holds the `.conda`'s copy to its bytes). Each run captures everything the
 # program writes, standard error included, and how it ended. Nothing here reads
 # or asserts a time: with `--hide-times` the value of every line is `-`, and a

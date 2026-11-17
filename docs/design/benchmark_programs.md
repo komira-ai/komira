@@ -31,7 +31,7 @@ number for their own CPU, compiler flags and kernel needs the program on their m
    result (`_Run.ops`), and the tests hold it to `--total-ops` for counts below, at and above one round of a
    capacity, so `ns_per_op` divides by the operations that ran.
 5. **The installed source is the tested source.** `:conda_holds` reads the built `.conda` back and requires
-   `lib/mojo/bench.bins/spsc_ring.mojo` to be the bytes of `bins/spsc_ring.mojo`; `:bins_smoke` runs komira's
+   `lib/mojo/bench.bins/spsc_ring.mojo` to be the bytes of `bins/run_spsc_ring.mojo`; `:bins_smoke` runs komira's
    build of that file (`:spsc_ring_bench`) and checks its whole output, its help, its refusals and its exit status.
    `mopm run` itself needs a Mojo environment from the network, so it is not part of a hermetic test.
 6. **What the rest of the repository learns.** Two shared pieces change, each additively. The README e2e reader

@@ -178,7 +178,7 @@ are `tests/test_*.mojo`, and `tests/standalone/bins_smoke.mojo` is the test that
 `spsc_ring`, sibling directories (`[dependencies]` of `mopm.toml`: `{ path = "../atomic_alias", version =
 "0.1" }` and `{ path = "../spsc_ring", version = "0.1" }`). `spsc_ring` depends on `containers`,
 which depends on `atomic_alias`, so the lock holds all three and the `.conda` of this package records
-`mojo-atomic_alias >=0.1,<0.2` and `mojo-spsc_ring >=0.1,<0.2` as dependencies and holds none of their
+`mojo-komira-ai.atomic_alias >=0.1,<0.2` and `mojo-komira-ai.spsc_ring >=0.1,<0.2` as dependencies and holds none of their
 files. The files that are not sources:
 
 | file | what |
@@ -196,13 +196,13 @@ with the packages staged, commit what it writes, and build `komira//src/bench:li
 that the sync has not listed is not run: run the sync after adding one.
 
 `:bins_smoke` (`tests/standalone/bins_smoke.mojo`) is a `mojo_test` (not welded: the program imports `:bench`, which waits for its welded tests):
-it runs `:spsc_ring_bench`, komira's build of `bins/spsc_ring.mojo` (`buck2 run //src/bench:spsc_ring_bench -- --caps=64`), on a few records with `--hide-times` and requires
+it runs `:spsc_ring_bench`, komira's build of `bins/run_spsc_ring.mojo` (`buck2 run //src/bench:spsc_ring_bench -- --caps=64`), on a few records with `--hide-times` and requires
 the whole output, standard error included, to be the three `RESULT` lines of one capacity; then once with real values,
 where it requires the three lines, each value a finite number; then `--help`; and refused arguments, which must exit
 with status 1 (not a signal or a launch failure), print no `RESULT` line and end with the named error. `:conda` is
-buildrules' `mojo_conda` over `:lib` (`mojo-bench-0.1.0-mojo1.0.0_0.conda`), with the program source
+buildrules' `mojo_conda` over `:lib` (`mojo-komira-ai.bench-0.1.0-mojo1.0.0_0.conda`), with the program source
 staged (`bins`); `:conda_holds` reads the built file back and requires its `lib/mojo/bench.bins/spsc_ring.mojo`
-to be the bytes of `bins/spsc_ring.mojo`, the file `:bins_smoke` runs a build of. Publishing it (`mopm publish`)
+to be the bytes of `bins/run_spsc_ring.mojo`, the file `:bins_smoke` runs a build of. Publishing it (`mopm publish`)
 uploads, so it is a step of a CI job that takes that file, not a build action.
 
 `:bench` is `:lib` as komira's Mojo rules take it (`mojo_adopted_library`): its `deps` are the adopted target of

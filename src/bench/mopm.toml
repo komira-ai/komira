@@ -13,5 +13,5 @@ mojo = ["1.0.0"]
 
 [targets]
 lib = { path = "src/bench" }
-bins = [{ name = "spsc_ring", path = "bins/spsc_ring.mojo" }]
+bins = [{ name = "spsc_ring", path = "bins/run_spsc_ring.mojo" }]
 tests = ["tests"]
