@@ -30,7 +30,7 @@ pub const Dep = struct {
     name: []const u8,
     /// `MAJOR.MINOR` of the dependency's version: `version = "0.1"` accepts every 0.1.x.
     short: []const u8,
-    /// The conda requirement: `mojo-<name> >=0.1,<0.2`.
+    /// The conda requirement: `mojo-komira-ai.<name> >=0.1,<0.2`.
     requirement: []const u8,
 };
 
@@ -67,6 +67,10 @@ pub const Model = struct {
     /// C toolchain's link facts.
     link_natives: []const []const u8 = &.{},
 };
+
+/// The namespace of every package of `src/`: a package's full name is `komira-ai/<name>`, its import
+/// name and directory are `<name>`, and its conda package is `mojo-komira-ai.<name>`.
+pub const namespace = "komira-ai";
 
 pub const mojo_version = "1.0.0";
 pub const package_version = "0.1.0";
@@ -129,7 +133,7 @@ pub fn manifest(a: Allocator, m: Model) ![]u8 {
     var b = Buf{ .a = a };
     try b.print(
         \\[package]
-        \\name = "{s}"
+        \\name = "{s}/{s}"
         \\version = "{s}"
         \\description = "{s}"
         \\license = "Apache-2.0"
@@ -137,7 +141,7 @@ pub fn manifest(a: Allocator, m: Model) ![]u8 {
         \\readme = "README.md"
         \\mojo = ["{s}"]
         \\
-    , .{ m.name, package_version, m.description, mojo_version });
+    , .{ namespace, m.name, package_version, m.description, mojo_version });
     const tables = [_]struct { head: []const u8, deps: []const Dep }{
         .{ .head = "[dependencies]", .deps = m.deps },
         .{ .head = "[dev-dependencies]", .deps = m.dev_deps },
@@ -145,7 +149,7 @@ pub fn manifest(a: Allocator, m: Model) ![]u8 {
     for (tables) |t| {
         if (t.deps.len == 0) continue;
         try b.print("\n{s}\n", .{t.head});
-        for (t.deps) |d| try b.print("{s} = {{ path = \"../{s}\", version = \"{s}\" }}\n", .{ d.name, d.name, d.short });
+        for (t.deps) |d| try b.print("\"{s}/{s}\" = {{ path = \"../{s}\", version = \"{s}\" }}\n", .{ namespace, d.name, d.name, d.short });
     }
     try b.print(
         \\
@@ -163,7 +167,7 @@ pub fn toolchain(a: Allocator, mopm: []const u8) ![]u8 {
 
 const lock_head =
     \\{
-    \\  "lock_version": 2,
+    \\  "lock_version": 3,
     \\  "mojo": [
     \\    "1.0.0"
     \\  ],
@@ -192,14 +196,14 @@ pub fn lock(a: Allocator, closure: []const Member) ![]u8 {
     for (closure, 0..) |mem, i| {
         try b.print(
             \\    {{
-            \\      "name": "{s}",
+            \\      "name": "{s}/{s}",
             \\      "version": "{s}",
             \\      "source": "path",
             \\      "path": "../{s}"
-        , .{ mem.name, mem.version, mem.name });
+        , .{ namespace, mem.name, mem.version, mem.name });
         if (mem.deps.len > 0) {
             try b.add(",\n      \"deps\": [\n");
-            for (mem.deps, 0..) |d, j| try b.print("        \"{s}\"{s}\n", .{ d, if (j + 1 < mem.deps.len) "," else "" });
+            for (mem.deps, 0..) |d, j| try b.print("        \"{s}/{s}\"{s}\n", .{ namespace, d, if (j + 1 < mem.deps.len) "," else "" });
             try b.add("      ]");
         }
         try b.print("\n    }}{s}\n", .{if (i + 1 < closure.len) "," else ""});
@@ -303,7 +307,7 @@ pub fn buck(a: Allocator, m: Model) ![]u8 {
 
     // mojo_conda
     prose = Buf{ .a = a };
-    try prose.print("The mopm package: `mopm pack` over `:lib`, the `.conda` a mopm registry serves (`mojo-{s}-{s}-mojo{s}_0.conda`)", .{ m.name, package_version, mojo_version });
+    try prose.print("The mopm package: `mopm pack` over `:lib`, the `.conda` a mopm registry serves (`mojo-{s}.{s}-{s}-mojo{s}_0.conda`)", .{ namespace, m.name, package_version, mojo_version });
     if (has_deps) {
         try prose.print(", which records {s} as {s} ({s}) and holds {s} files nowhere. `members` is the manifests of the path dependencies, staged at their repository paths, because `mopm pack` reads the manifest of each beside the one it is given.", .{
             dep_list,
@@ -329,13 +333,13 @@ pub fn buck(a: Allocator, m: Model) ![]u8 {
     try b.print(
         \\    mojo = "{s}",
         \\    mopm = "toolchains//:mopm_{s}",
-        \\    package = "{s}",
+        \\    package = "{s}/{s}",
         \\    version = "{s}",
         \\    visibility = ["PUBLIC"],
         \\)
         \\
         \\
-    , .{ mojo_version, try std.mem.replaceOwned(u8, a, m.mopm, ".", "_"), m.name, package_version });
+    , .{ mojo_version, try std.mem.replaceOwned(u8, a, m.mopm, ".", "_"), namespace, m.name, package_version });
 
     // mojo_conda_holds
     if (has_deps) {
@@ -382,8 +386,8 @@ pub fn readmeSection(a: Allocator, m: Model) ![]u8 {
     var b = Buf{ .a = a };
     const has_deps = m.deps.len > 0;
     const one = m.n_tests == 1;
-    try b.print("## Build files\n\nThis package is built with buildrules' `mojo_package` and packaged for mopm as `{s}`, version {s} (`mopm.toml`). The library is `src/{s}/`, its {s} {s} `tests/`.", .{
-        m.name, package_version, m.name, if (one) "test" else "tests", if (one) "is" else "are",
+    try b.print("## Build files\n\nThis package is built with buildrules' `mojo_package` and packaged for mopm as `{s}/{s}`, version {s} (`mopm.toml`). The library is `src/{s}/`, its {s} {s} `tests/`.", .{
+        namespace, m.name, package_version, m.name, if (one) "test" else "tests", if (one) "is" else "are",
     });
     if (has_deps) {
         const dep_list = try andList(a, try depNames(a, m.deps));
@@ -410,8 +414,8 @@ pub fn readmeSection(a: Allocator, m: Model) ![]u8 {
         if (has_deps) " or of a dependency" else "",
         m.name,
     });
-    try b.print("`:conda` is buildrules' `mojo_conda` over `:lib`: the `.conda` of the mopm package (`mojo-{s}-{s}-mojo{s}_0.conda`), which therefore exists only once {s} passed. Publishing it (`mopm publish`) uploads, so it is a step of a CI job that takes that file, not a build action.\n\n", .{
-        m.name, package_version, mojo_version, if (one) "the test has" else "the tests have",
+    try b.print("`:conda` is buildrules' `mojo_conda` over `:lib`: the `.conda` of the mopm package (`mojo-{s}.{s}-{s}-mojo{s}_0.conda`), which therefore exists only once {s} passed. Publishing it (`mopm publish`) uploads, so it is a step of a CI job that takes that file, not a build action.\n\n", .{
+        namespace, m.name, package_version, mojo_version, if (one) "the test has" else "the tests have",
     });
     try b.print("`:{s}` is `:lib` as komira's Mojo rules take it (`mojo_adopted_library`).{s} It also compiles and runs the README's examples above (`[tests][readme]`) against `:lib`; {s} not run again.\n", .{
         m.name,

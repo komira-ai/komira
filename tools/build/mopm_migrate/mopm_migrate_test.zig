@@ -295,7 +295,7 @@ test "golden: the README keeps its text and gains the Build files section" {
     try t.expect(std.mem.startsWith(u8, readme, fx.old_readme));
     const tail = readme[fx.old_readme.len..];
     try t.expect(std.mem.startsWith(u8, tail, "\n## Build files\n"));
-    try t.expect(std.mem.indexOf(u8, tail, "`mojo-runtime_paths >=0.1,<0.2`") != null);
+    try t.expect(std.mem.indexOf(u8, tail, "`mojo-komira-ai.runtime_paths >=0.1,<0.2`") != null);
     try t.expect(std.mem.indexOf(u8, tail, "| `mopm.lock` |") != null);
 }
 
@@ -400,8 +400,8 @@ test "golden collections: the BUCK file is the hand migration's in code and in c
     const hand_words = "exists only once the tests of tests/ have passed.";
     try t.expect(std.mem.indexOf(u8, got, tool_words) != null);
     // Third: the tool's comment on `conda_holds` adds a clause the hand comment does not have.
-    const holds_tool = "under `lib/mojo/` (atomic_alias is not in it), and exactly one dependency, `mojo-atomic_alias >=0.1,<0.2`, which is what installing the package pulls in.";
-    const holds_hand = "under `lib/mojo/`, and exactly one dependency, `mojo-atomic_alias >=0.1,<0.2`.";
+    const holds_tool = "under `lib/mojo/` (atomic_alias is not in it), and exactly one dependency, `mojo-komira-ai.atomic_alias >=0.1,<0.2`, which is what installing the package pulls in.";
+    const holds_hand = "under `lib/mojo/`, and exactly one dependency, `mojo-komira-ai.atomic_alias >=0.1,<0.2`.";
     try t.expect(std.mem.indexOf(u8, got, holds_tool) != null);
     var fixed = try std.mem.replaceOwned(u8, a, got, old_words, new_words);
     fixed = try std.mem.replaceOwned(u8, a, fixed, tool_words, hand_words);
@@ -524,8 +524,8 @@ test "golden bump_arena: the BUCK file is the hand migration's, with the C link 
         // the package is in no file of release/ in the fixture, as in the tree before the hand migration: the
         // tool says only that the label stays valid
         .{ "Kept for the release machine, which still builds it (release/BUCK, release/artifacts.textproto): komira's", "Kept so the label `:bump_arena_conda` stays valid: komira's" },
-        .{ "    depends = [\n        \"mojo-byte_buffer >=0.1,<0.2\",\n    ],\n", "    depends = [\"mojo-byte_buffer >=0.1,<0.2\"],\n" },
-        .{ "nothing else under `lib/mojo/`, and exactly one dependency, which is what installing the package pulls in. Red when the manifest drops the dependency, names another range, or the file carries a sibling.", "nothing else under `lib/mojo/` (byte_buffer is not in it), and exactly one dependency, `mojo-byte_buffer >=0.1,<0.2`, which is what installing the package pulls in. Red when the manifest drops the dependency, names another range, or the file carries the sibling." },
+        .{ "    depends = [\n        \"mojo-komira-ai.byte_buffer >=0.1,<0.2\",\n    ],\n", "    depends = [\"mojo-komira-ai.byte_buffer >=0.1,<0.2\"],\n" },
+        .{ "nothing else under `lib/mojo/`, and exactly one dependency, which is what installing the package pulls in. Red when the manifest drops the dependency, names another range, or the file carries a sibling.", "nothing else under `lib/mojo/` (byte_buffer is not in it), and exactly one dependency, `mojo-komira-ai.byte_buffer >=0.1,<0.2`, which is what installing the package pulls in. Red when the manifest drops the dependency, names another range, or the file carries the sibling." },
         // a one-item list: the hand file kept the old file's three lines, the tool writes one line (as the hand
         // file of counters does)
         .{ "    deps = [\n        \"//src/byte_buffer:byte_buffer\",\n    ],\n", "    deps = [\"//src/byte_buffer:byte_buffer\"],\n" },
@@ -538,7 +538,7 @@ test "bump_arena: a closure with no native gets no cxx_toolchain" {
     var ar = arena();
     defer ar.deinit();
     const a = ar.allocator();
-    const clean_libc = "[package]\nname = \"libc\"\nversion = \"0.1.0\"\n\n[targets]\nlib = { path = \"src/libc\" }\n";
+    const clean_libc = "[package]\nname = \"komira-ai/libc\"\nversion = \"0.1.0\"\n\n[targets]\nlib = { path = \"src/libc\" }\n";
     var files = std.ArrayList(plan.File).empty;
     for (bumpTree()) |f| try files.append(a, if (std.mem.eql(u8, f.path, "src/libc/mopm.toml")) .{ .path = f.path, .text = clean_libc } else f);
     const p = try planOf(a, files.items, bump_options);
@@ -578,10 +578,10 @@ test "a static native deep in the closure reaches the BUCK file of a package tha
     var ar = arena();
     defer ar.deinit();
     const a = ar.allocator();
-    const beta_toml = beta_toml_text ++ "\n[dependencies]\ngamma = { path = \"../gamma\", version = \"0.1\" }\n";
+    const beta_toml = beta_toml_text ++ "\n[dependencies]\n\"komira-ai/gamma\" = { path = \"../gamma\", version = \"0.1\" }\n";
     const extra = [_]plan.File{
         .{ .path = "src/gamma/BUCK", .text = migrated_buck },
-        .{ .path = "src/gamma/mopm.toml", .text = "[package]\nname = \"gamma\"\nversion = \"0.1.4\"\n\n[native.g]\nkind = \"static\"\nsrcs = [\"native/g.c\"]\n" },
+        .{ .path = "src/gamma/mopm.toml", .text = "[package]\nname = \"komira-ai/gamma\"\nversion = \"0.1.4\"\n\n[native.g]\nkind = \"static\"\nsrcs = [\"native/g.c\"]\n" },
     };
     const p = try planOf(a, try mini(a, .{ .beta_toml = beta_toml, .extra = &extra }), mini_options);
     const buck = try writeOf(p, "src/alpha/BUCK");
@@ -608,7 +608,7 @@ const mini_buck =
 
 const beta_toml_text =
     \\[package]
-    \\name = "beta"
+    \\name = "komira-ai/beta"
     \\version = "0.1.0"
     \\
     \\[targets]
@@ -673,7 +673,7 @@ test "the mini repository migrates: dependency, rows in order, moves" {
     defer ar.deinit();
     const a = ar.allocator();
     const p = try planOf(a, try mini(a, .{}), mini_options);
-    try t.expect(std.mem.indexOf(u8, try writeOf(p, "src/alpha/mopm.toml"), "beta = { path = \"../beta\", version = \"0.1\" }") != null);
+    try t.expect(std.mem.indexOf(u8, try writeOf(p, "src/alpha/mopm.toml"), "\"komira-ai/beta\" = { path = \"../beta\", version = \"0.1\" }") != null);
     try expectSameBytes("packages", "PACKAGES = {\n    \"alpha\": \"0.1.0\",\n    \"beta\": \"0.1.0\",\n    \"zeta\": \"0.1.0\",\n}\n", try writeOf(p, "release/readme_e2e/packages.bzl"));
     try expectSameBytes("ids", "load(\"//src/alpha:buildrules.mojo.lock.bzl\", alpha = \"GRAPH\")\nload(\"//src/beta:buildrules.mojo.lock.bzl\", beta = \"GRAPH\")\nload(\"//src/zeta:buildrules.mojo.lock.bzl\", zeta = \"GRAPH\")\n\n_GRAPHS = {\n    \"alpha\": alpha,\n    \"beta\": beta,\n    \"zeta\": zeta,\n}\n", try writeOf(p, "release/mopm_native_ids.bzl"));
     try t.expectEqual(@as(usize, 1), p.moves.len);
@@ -695,17 +695,67 @@ test "a chain: the closure is locked and its manifests are members, and the hold
     var ar = arena();
     defer ar.deinit();
     const a = ar.allocator();
-    const beta_toml = beta_toml_text ++ "\n[dependencies]\ngamma = { path = \"../gamma\", version = \"0.1\" }\n";
+    const beta_toml = beta_toml_text ++ "\n[dependencies]\n\"komira-ai/gamma\" = { path = \"../gamma\", version = \"0.1\" }\n";
     const extra = [_]plan.File{
         .{ .path = "src/gamma/BUCK", .text = migrated_buck },
-        .{ .path = "src/gamma/mopm.toml", .text = "[package]\nname = \"gamma\"\nversion = \"0.1.4\"\n" },
+        .{ .path = "src/gamma/mopm.toml", .text = "[package]\nname = \"komira-ai/gamma\"\nversion = \"0.1.4\"\n" },
     };
     const p = try planOf(a, try mini(a, .{ .beta_toml = beta_toml, .extra = &extra }), mini_options);
     const lock = try writeOf(p, "src/alpha/mopm.lock");
-    try t.expect(std.mem.indexOf(u8, lock, "\"name\": \"beta\",\n      \"version\": \"0.1.0\",\n      \"source\": \"path\",\n      \"path\": \"../beta\",\n      \"deps\": [\n        \"gamma\"\n      ]\n    },\n    {\n      \"name\": \"gamma\",\n      \"version\": \"0.1.4\"") != null);
+    try t.expect(std.mem.indexOf(u8, lock, "\"name\": \"komira-ai/beta\",\n      \"version\": \"0.1.0\",\n      \"source\": \"path\",\n      \"path\": \"../beta\",\n      \"deps\": [\n        \"komira-ai/gamma\"\n      ]\n    },\n    {\n      \"name\": \"komira-ai/gamma\",\n      \"version\": \"0.1.4\"") != null);
     const buck = try writeOf(p, "src/alpha/BUCK");
     try t.expect(std.mem.indexOf(u8, buck, "        \"../beta\": \"//src/beta:mopm.toml\",\n        \"../gamma\": \"//src/gamma:mopm.toml\",\n") != null);
-    try t.expect(std.mem.indexOf(u8, buck, "depends = [\"mojo-beta >=0.1,<0.2\"]") != null);
+    try t.expect(std.mem.indexOf(u8, buck, "depends = [\"mojo-komira-ai.beta >=0.1,<0.2\"]") != null);
+}
+
+fn expectRefusalText(a: std.mem.Allocator, files: []const plan.File, o: plan.Options, want: []const u8) !void {
+    var c = plan.Ctx{ .a = a };
+    if (plan.plan(&c, files, o)) |_| return error.TestExpectedRefusal else |e| try t.expect(e == error.Refused);
+    try t.expectEqualStrings(want, c.why);
+}
+
+test "a quoted namespaced key under [dependencies] is read as the src directory of that name" {
+    var ar = arena();
+    defer ar.deinit();
+    const a = ar.allocator();
+    const beta_toml = beta_toml_text ++ "\n[dependencies]\n\"komira-ai/gamma\" = { path = \"../gamma\", version = \"0.1\" }\n";
+    const extra = [_]plan.File{
+        .{ .path = "src/gamma/BUCK", .text = migrated_buck },
+        .{ .path = "src/gamma/mopm.toml", .text = "[package]\nname = \"komira-ai/gamma\"\nversion = \"0.1.4\"\n" },
+    };
+    const p = try planOf(a, try mini(a, .{ .beta_toml = beta_toml, .extra = &extra }), mini_options);
+    const buck = try writeOf(p, "src/alpha/BUCK");
+    try t.expect(std.mem.indexOf(u8, buck, "\"../gamma\": \"//src/gamma:mopm.toml\"") != null);
+    try t.expect(std.mem.indexOf(u8, try writeOf(p, "src/alpha/mopm.lock"), "\"path\": \"../gamma\"") != null);
+}
+
+test "a namespaced [dependencies.<key>] table is read as the src directory of that name" {
+    var ar = arena();
+    defer ar.deinit();
+    const a = ar.allocator();
+    const beta_toml = beta_toml_text ++ "\n[dependencies.\"komira-ai/gamma\"]\npath = \"../gamma\"\nversion = \"0.1\"\n";
+    const extra = [_]plan.File{
+        .{ .path = "src/gamma/BUCK", .text = migrated_buck },
+        .{ .path = "src/gamma/mopm.toml", .text = "[package]\nname = \"komira-ai/gamma\"\nversion = \"0.1.4\"\n" },
+    };
+    const p = try planOf(a, try mini(a, .{ .beta_toml = beta_toml, .extra = &extra }), mini_options);
+    try t.expect(std.mem.indexOf(u8, try writeOf(p, "src/alpha/BUCK"), "\"../gamma\": \"//src/gamma:mopm.toml\"") != null);
+}
+
+test "a dependency in another namespace is refused, naming the manifest and the key" {
+    var ar = arena();
+    defer ar.deinit();
+    const a = ar.allocator();
+    const beta_toml = beta_toml_text ++ "\n[dependencies]\n\"acme/gamma\" = { path = \"../gamma\", version = \"0.1\" }\n";
+    try expectRefusalText(a, try mini(a, .{ .beta_toml = beta_toml }), mini_options, "src/beta/mopm.toml: the dependency 'acme/gamma' is in the namespace 'acme'; src/ holds only packages of 'komira-ai'");
+}
+
+test "a dependency key with no namespace is refused, naming the manifest and the key" {
+    var ar = arena();
+    defer ar.deinit();
+    const a = ar.allocator();
+    const beta_toml = beta_toml_text ++ "\n[dependencies]\ngamma = { path = \"../gamma\", version = \"0.1\" }\n";
+    try expectRefusalText(a, try mini(a, .{ .beta_toml = beta_toml }), mini_options, "src/beta/mopm.toml: the dependency 'gamma' has no namespace; mopm 0.0.113 names a package '<namespace>/<name>', and src/ holds only 'komira-ai/<name>'");
 }
 
 test "refuses an import that maps to no known package" {
@@ -795,7 +845,7 @@ test "refuses test_data with no stated layout, and a test-only dependency withou
     const dev_test = "from alpha import x\nfrom gamma import y\n";
     try expectRefusal(a, try mini(a, .{ .buck = dev_buck, .test_src = dev_test, .extra = &extra }), mini_options, "[dev-dependencies] entry");
     const q = try planOf(a, try mini(a, .{ .buck = dev_buck, .test_src = dev_test, .extra = &extra }), .{ .package = "alpha", .description = "A library.", .mopm = repo_mopm, .dev_dependencies = true });
-    try t.expect(std.mem.indexOf(u8, try writeOf(q, "src/alpha/mopm.toml"), "[dev-dependencies]\ngamma = { path = \"../gamma\", version = \"0.1\" }\n") != null);
+    try t.expect(std.mem.indexOf(u8, try writeOf(q, "src/alpha/mopm.toml"), "[dev-dependencies]\n\"komira-ai/gamma\" = { path = \"../gamma\", version = \"0.1\" }\n") != null);
 }
 
 test "refuses what is already done or in the way: migrated, src/ present, generated/, a row already listed, no description" {
@@ -1060,7 +1110,7 @@ test "a real run moves the library, writes the files and a second run refuses" {
     try tmp.dir.access("src/alpha/src/alpha/__init__.mojo", .{});
     try tmp.dir.access("src/alpha/tests/test_alpha.mojo", .{});
     const toml = try tmp.dir.readFileAlloc(a, "src/alpha/mopm.toml", 1 << 20);
-    try t.expect(std.mem.startsWith(u8, toml, "[package]\nname = \"alpha\"\n"));
+    try t.expect(std.mem.startsWith(u8, toml, "[package]\nname = \"komira-ai/alpha\"\n"));
     const buck = try tmp.dir.readFileAlloc(a, "src/alpha/BUCK", 1 << 20);
     try t.expect(std.mem.indexOf(u8, buck, "mojo_package(path = \".\")") != null);
     try t.expect(std.mem.indexOf(u8, buck, "mojo_library") == null);
@@ -1127,7 +1177,7 @@ test "the command line: the migrated output names the version --mopm gives" {
 
 const native_gamma = [_]plan.File{
     .{ .path = "src/gamma/BUCK", .text = migrated_buck },
-    .{ .path = "src/gamma/mopm.toml", .text = "[package]\nname = \"gamma\"\nversion = \"0.1.4\"\n\n[native.g]\nkind = \"static\"\nsrcs = [\"native/g.c\"]\n" },
+    .{ .path = "src/gamma/mopm.toml", .text = "[package]\nname = \"komira-ai/gamma\"\nversion = \"0.1.4\"\n\n[native.g]\nkind = \"static\"\nsrcs = [\"native/g.c\"]\n" },
 };
 const dev_options = plan.Options{ .package = "alpha", .description = "A library.", .mopm = repo_mopm, .dev_dependencies = true };
 
@@ -1144,7 +1194,7 @@ test "a native reached through both the library and the test-only dependencies g
     var ar = arena();
     defer ar.deinit();
     const a = ar.allocator();
-    const beta_toml = beta_toml_text ++ "\n[dependencies]\ngamma = { path = \"../gamma\", version = \"0.1\" }\n";
+    const beta_toml = beta_toml_text ++ "\n[dependencies]\n\"komira-ai/gamma\" = { path = \"../gamma\", version = \"0.1\" }\n";
     const dev_buck = try buckWith(a, "    visibility", "    test_deps = [\"//src/gamma:gamma\"],\n    visibility");
     const dev_test = "from alpha import x\nfrom gamma import y\n";
     const p = try planOf(a, try mini(a, .{ .beta_toml = beta_toml, .buck = dev_buck, .test_src = dev_test, .extra = &native_gamma }), dev_options);
@@ -1157,12 +1207,12 @@ test "two natives in the closure are named in the plural" {
     var ar = arena();
     defer ar.deinit();
     const a = ar.allocator();
-    const beta_toml = beta_toml_text ++ "\n[dependencies]\ndelta = { path = \"../delta\", version = \"0.1\" }\ngamma = { path = \"../gamma\", version = \"0.1\" }\n";
+    const beta_toml = beta_toml_text ++ "\n[dependencies]\n\"komira-ai/delta\" = { path = \"../delta\", version = \"0.1\" }\n\"komira-ai/gamma\" = { path = \"../gamma\", version = \"0.1\" }\n";
     const extra = [_]plan.File{
         native_gamma[0],
         native_gamma[1],
         .{ .path = "src/delta/BUCK", .text = migrated_buck },
-        .{ .path = "src/delta/mopm.toml", .text = "[package]\nname = \"delta\"\nversion = \"0.1.0\"\n\n[native.d]\nkind = \"static\"\n" },
+        .{ .path = "src/delta/mopm.toml", .text = "[package]\nname = \"komira-ai/delta\"\nversion = \"0.1.0\"\n\n[native.d]\nkind = \"static\"\n" },
     };
     const p = try planOf(a, try mini(a, .{ .beta_toml = beta_toml, .extra = &extra }), mini_options);
     const buck = try writeOf(p, "src/alpha/BUCK");
