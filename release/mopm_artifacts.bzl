@@ -95,3 +95,10 @@ def mopm_artifacts(name, packages, natives = {}, **kwargs):
         natives = natives,
         **kwargs
     )
+
+def _native_ids_json_impl(ctx):
+    return [DefaultInfo(default_output = ctx.actions.write_json("native_ids.json", NATIVE_IDS))]
+
+# `NATIVE_IDS` (mopm_native_ids.bzl) as JSON, `{package: [id, ...]}`: what //release:native_ids_cases
+# holds to the `[native.<id>]` tables of each package's `mopm.toml`.
+native_ids_json = rule(impl = _native_ids_json_impl, attrs = {})

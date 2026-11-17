@@ -9,7 +9,7 @@
 load("@komira//tools/build/mojo:toolchain.bzl", "zig_test")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load(":darwin_libs.bzl", "DARWIN_PACKAGES", "mopm_darwin_libs")
-load(":mopm_artifacts.bzl", "mopm_artifacts")
+load(":mopm_artifacts.bzl", "mopm_artifacts", "native_ids_json")
 load(":release_set.bzl", "release_set")
 load("//release/readme_e2e:packages.bzl", README_E2E_PACKAGES = "PACKAGES")
 
@@ -159,6 +159,25 @@ zig_test(
     data = {
         "packages.bzl": "//release/readme_e2e:packages.bzl",
         "prod_claimed_names.txt": "prod_claimed_names.txt",
+    },
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
+    visibility = ["PUBLIC"],
+)
+
+# The native ids the release reads from each package's unit graph (mopm_native_ids.bzl) are the
+# `[native.<id>]` tables of that package's mopm.toml, for every member, with nothing more or less
+# (native_ids_test.zig says what each case catches). A unit's id is `native:<package>/<id>`, and in a
+# graph of mopm 0.0.113 `<package>` is a full name `<namespace>/<name>`.
+native_ids_json(name = "native_ids_json")
+
+zig_test(
+    name = "native_ids_cases",
+    exec_compatible_with = LINUX_X86_64,
+    src = "native_ids_test.zig",
+    data = {"native_ids.json": ":native_ids_json"} | {
+        "manifests/{}/mopm.toml".format(p): "//src/{}:mopm.toml".format(p)
+        for p in README_E2E_PACKAGES
     },
     busybox = "komira//tools/build/toolchains:busybox",
     zig = "komira//tools/build/toolchains:zig_next",

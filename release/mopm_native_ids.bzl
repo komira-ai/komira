@@ -77,12 +77,18 @@ load("//src/xml:buildrules.mojo.lock.bzl", xml = "GRAPH")
 load("//src/zlib:buildrules.mojo.lock.bzl", zlib = "GRAPH")
 
 def declared_natives(graph):
-    """The ids of the `[native.<id>]` of the package whose unit graph is `graph`, sorted."""
+    """The ids of the `[native.<id>]` of the package whose unit graph is `graph`, sorted.
+
+    A native unit's id is `native:<package>/<id>`, `<package>` being the name the graph gives the
+    package: its full name `<namespace>/<name>` in a graph of format 6 (mopm 0.0.113), which itself
+    holds a `/`. So the id is what follows that whole prefix, never what follows the first `/`.
+    """
     package = graph["package"].partition("@")[0]
+    prefix = "native:" + package + "/"
     ids = []
     for unit in graph["units"]:
-        if unit["kind"] == "native" and unit["package"] == package:
-            ids.append(unit["id"].partition("/")[2])
+        if unit["kind"] == "native" and unit["package"] == package and unit["id"].startswith(prefix):
+            ids.append(unit["id"][len(prefix):])
     return sorted(ids)
 
 _GRAPHS = {
