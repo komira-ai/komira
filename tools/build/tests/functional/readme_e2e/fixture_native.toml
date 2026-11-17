@@ -1,5 +1,5 @@
 [package]
-name = "fixture_native"
+name = "example/fixture_native"
 version = "0.1.0"
 description = "A Mojo package of the README e2e's tests that ships a static native library."
 license = "Apache-2.0"

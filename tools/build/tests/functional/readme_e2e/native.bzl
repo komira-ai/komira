@@ -4,6 +4,7 @@ load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 
 def _impl(ctx):
     package = ctx.attrs.package
+    namespace, name = package.split("/")
     channel = ctx.actions.declare_output("channel", dir = True)
     mojoc = ctx.attrs.lib[DefaultInfo].default_outputs[0]
 
@@ -24,12 +25,12 @@ def _impl(ctx):
         channel.as_output(),
     )
     ctx.actions.run(cmd, category = "mopm_pack", identifier = package)
-    conda = channel.project("linux-64/mojo-{}-{}-mojo{}_0.conda".format(package, ctx.attrs.version, ctx.attrs.mojo))
+    conda = channel.project("linux-64/mojo-{}.{}-{}-mojo{}_0.conda".format(namespace, name, ctx.attrs.version, ctx.attrs.mojo))
     return [DefaultInfo(default_output = conda)]
 
 _native_conda = rule(
     impl = _impl,
-    doc = "`mojo-<package>-<version>-mojo<mojo>_0.conda`, as `mopm pack` writes it for a package that ships a static native library: `lib` is the Mojo package (`<package>.mojoc`), `archive` the static archive of `[native.<native_id>]` in `manifest`, packed as `lib<native_id>.a`.",
+    doc = "`mojo-<namespace>.<name>-<version>-mojo<mojo>_0.conda`, as `mopm pack` writes it for a package that ships a static native library: `package` is the full name `<namespace>/<name>`, `lib` the Mojo package (`<name>.mojoc`), `archive` the static archive of `[native.<native_id>]` in `manifest`, packed as `lib<native_id>.a`.",
     attrs = {
         "archive": attrs.dep(),
         "lib": attrs.dep(),

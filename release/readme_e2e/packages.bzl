@@ -6,13 +6,17 @@ version is the one in the package's `mopm.toml`; `//release/readme_e2e:staged` f
 built says another.
 """
 
+# The namespace of every package: a package `<name>` here is `komira-ai/<name>` to mopm (its full name),
+# and its file is `mojo-komira-ai.<name>-<version>-<build>.conda`. Its import name is `<name>`.
+NAMESPACE = "komira-ai"
+
 # The compiler the packages are built for (`mojo` of each package's `mojo_conda`).
 MOJO = "1.0.0"
 
 # The pinned mopm the e2e installs with. It must have `mopm add --overlay`; one that lacks it fails every
 # target of //release/readme_e2e/verify at its install step, naming the option. It is the mopm every package
 # of the repository builds with (`mopm-toolchain.toml`), which buildrules pins for all three hosts.
-MOPM = "toolchains//:mopm_0_0_101"
+MOPM = "toolchains//:mopm_0_0_113"
 
 # The first mopm that has `mopm add --overlay`, as a label like MOPM, or None while no release
 # has it. `readme_e2e_complete` (root BUCK) compares it with MOPM: the row of EXCLUDED in

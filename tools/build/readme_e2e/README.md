@@ -20,7 +20,7 @@ One build action per package, on the farm, hermetic and offline
 | phase | what it does | what fails it |
 |---|---|---|
 | `staged` | reads the staged set's `plan.json`: the package is an `upload` member at the release's version and names its README, which is there | a package the set lacks, a `skip` or `refuse` member, another version, no README |
-| `install` | a fresh project (a `mopm.toml` of its own, nothing else) runs `mopm add <package>@=<version> --overlay <staged set>`. The lock it writes names the closure; each locked file must be the staged file byte for byte (sha256 and size, and the plan's) and is unpacked into the project's prefix, `lib/mojo/<name>.mojoc` | mopm refusing the command, a closure the set does not hold, a file that is not the pinned one, a package built for another compiler |
+| `install` | a fresh project (a `mopm.toml` of its own, nothing else) runs `mopm add <namespace>/<name>@=<version> --overlay <staged set>`. The lock it writes (version 3) names the closure by full name; each locked file (the build for the release's compiler) must be the staged file byte for byte (sha256 and size, and the plan's) and is unpacked into the project's prefix, `lib/mojo/<name>.mojoc` (`<name>`, the import name, is the part of the full name after the slash) | mopm refusing the command, a closure the set does not hold, a file that is not the pinned one, a package built for another compiler, a lock that is not version 3 or names a package without a namespace |
 | `link` | only when a package of the closure declares a native library (in its `.mopm.json` or its lock entry): `mopm build --print-cmd --prefix <the unpacked closure>` prints the `mojo build` command mopm would run, and the linker words between `build` and `-o` are added to every compile below, less the `--push-state` and `--pop-state` pairs that bracket mopm's `--no-as-needed` (the toolchain's linker driver is zig's, which refuses them; a stock `mojo build` links through the system C driver). The e2e decides nothing about which library is linked or how: that is mopm's link plan. It only checks that the plan names every library the packages declare | mopm refusing the closure (a library the metadata names is not on disk: `refused (missing_file)`; two owners of one library), a command that is not a `mojo build ... -o` line, a declared library the command leaves out |
 | `readme` | the README *the staged set holds* is cut into one program per example by the README examples tool ([`readme_examples`](../readme_examples/BUCK)), with relative links refused as for a README that ships in its package | a refused README, a README with no ```` ```mojo ```` example (it would test nothing) |
 | `compile` | each program is built by the pinned Mojo compiler against the prefix's `lib/mojo` and nothing else (and, for a closure with native libraries, linked with the words of `link`) | an example that does not compile or link (an undefined native symbol) |
@@ -28,7 +28,7 @@ One build action per package, on the farm, hermetic and offline
 
 The target's output is a marker, written only after every phase passed, so a package
 that did not pass has no output and fails the build. The last line printed is the
-verdict: `PASS <package> <version>: N README example(s) ...` or `FAIL <phase>: ...`.
+verdict: `PASS <namespace>/<name> <version>: N README example(s) ...` or `FAIL <phase>: ...`.
 
 Nothing of the package's source tree is an input: the packages, the README and the
 lock all come from the staged set. A defect that only the packaged artifact has (a
@@ -42,8 +42,15 @@ and passes the build's own README gate.
 network, so it cannot run in an offline action. The e2e takes the part that is a
 user's resolution from mopm, and does the unpacking itself:
 
-* **`mopm add <package>@=<version> --overlay <staged set>`** resolves the closure
-  from the staged set and writes `mopm.lock`. `--overlay` is a read-only local
+* **Names.** A package is named by its full name, `<namespace>/<name>` (`komira-ai/json`), as
+  mopm 0.0.113 requires; the e2e takes the full name as `--package` and everywhere a name goes to
+  mopm, the plan or the lock. The import name, the part after the slash, names what is inside
+  the package (`lib/mojo/<name>.mojoc`, `<name>.mopm.json`, `<name>.bins/`) and the programs and
+  reports the examples tool makes. The file is `mojo-<namespace>.<name>-<version>-<build>.conda`.
+  `release/readme_e2e/packages.bzl` lists the import names and gives the one `NAMESPACE`
+  (`komira-ai`) that the release's targets put before them.
+* **`mopm add <namespace>/<name>@=<version> --overlay <staged set>`** resolves the closure
+  from the staged set and writes `mopm.lock`, of `lock_version` 3 (`spec/lock.md` of mopm: a package row has `name`, `version`, `subdir`, `channel` and `artifacts`, one `build`, `url`, `sha256` and `size` per Mojo version; the url ends in the package's file name, which the e2e checks). Any other `lock_version` is refused, naming 3. `--overlay` is a read-only local
   channel that has priority over the registry for the packages it holds; with a
   fully staged closure it needs no request for an index, repodata or package.
   The command also gets **`--registry <a loopback registry of the e2e's own>`**
@@ -63,7 +70,7 @@ lacks it would fetch that member from the network, silently on a machine that ha
 one. So `verify` runs mopm with `--registry` set to a loopback server of its own
 ([`offline.zig`](offline.zig)) that answers the one thing mopm asks of a registry that
 is not the production one (`GET /index/config.json`, which names the channel the lock
-records) and refuses every other request with HTTP 403 (`the README e2e is offline`),
+records and lists index version 2) and refuses every other request with HTTP 403 (`the README e2e is offline`),
 remembering it. A package outside the set makes mopm ask for its index, so mopm fails
 with the refusal; and `verify` fails on any remembered refusal (phase `install`,
 naming each `GET <path>`) even when mopm exited 0, so a mopm that ignored the refusal
@@ -108,12 +115,12 @@ and a real compiler together, and can be deleted with `standin_mopm` without los
 ## The staged set
 
 The directory `verify` installs from is the layout of mopm's staged set
-(`spec/staged-set.md` of mopm): `plan.json`, `<subdir>/<file>.conda`, and each
-member's README at the path `plan.json` names.
+(`spec/staged-set.md` of mopm): `plan.json` (version 2: members are named by full name; version 1 is refused), `<subdir>/<file>.conda`, and each
+member's README at the path `plan.json` names (`<namespace>/<name>/README.md`).
 
 `readme_e2e_staged` writes it from the packages the build made
 ([`assemble.zig`](assemble.zig)): every member an `upload` with the sha256 and size of
-its file, `manifest_sha256` (the sha256 of the `<name>.mopm.json` inside it, which
+its file, `manifest_sha256` (the sha256 of the `<import name>.mopm.json` inside it, which
 `mopm pack` prints), its README, in dependency order. A package whose name, version
 or file name disagrees with the metadata inside it, or that needs a package the set
 lacks, fails the build: the e2e installs offline, so the set holds the whole closure.
@@ -176,7 +183,7 @@ Every one is a build action; the tool (`:readme_e2e`) is built only when they pa
 [`unit_test.zig`](unit_test.zig) (`:unit`) holds the package reader (a package is
 read; a link, a path outside `lib/`, a name twice, a deflated member, a missing or
 truncated payload and garbage are each refused), the plan and lock readers and writers
-(round trip; version, duplicate, action and url refusals), the command line, the
+(round trip; plan version, duplicate, action, namespace and url refusals; lock version and un-namespaced row refusals with their exact messages; a namespaced row's file name and import name), the command line, the
 source root the compile gets, and the offline registry (it serves its configuration,
 refuses and remembers every other request, and answers for no other host), and the native-library helpers
 ([`native.zig`](native.zig)): the shell words of mopm's printed command, the linker words in it, and the check that a plan
@@ -199,10 +206,11 @@ line and what was and was not written.
 | `missing_file` | a member whose file is in the plan and not in the set (a lock made from the plan names it) fails `install` with verify's own message, before anything is unpacked |
 | `tampered_file` | a file that is not the one a lock pins (lock from the plan's hashes) is refused before it is unpacked |
 | `changed_file` | a file changed after staging (lock from the file) is not a file of the plan: refused |
-| `closure_member_missing` | a closure member the staged set lacks (a plan with a hole) is asked of the offline registry, which refuses: `install` fails naming the refused `GET /index/...` and mopm's own "HTTP 403"; nothing is unpacked, no marker |
+| `closure_member_missing` | a closure member the staged set lacks (a plan with a hole) is asked of the offline registry, which refuses: `install` fails naming the refused `GET /index/v2/...` and mopm's own "HTTP 403"; nothing is unpacked, no marker |
 | `swallowed_refusal` | a mopm that ignores the refusal and exits 0 with a lock that leaves the member out still fails `install`: the registry remembered the request |
 | `old_mopm`, `old_mopm_usage` | a mopm without `--overlay` (unknown option; the pinned release's usage text) fails `install` loudly, quoting mopm and naming `--overlay`; no marker |
 | `wrong_compiler` | a package built for another Mojo than the release's fails `install` |
+| `lock_without_compiler_build` | a lock whose package has builds only for another compiler than the project's (the lock keys them by the file's build) fails `install`: no build for the release's compiler; nothing is unpacked |
 | `wrong_version` | a release version the set does not hold fails `staged` |
 | `skipped_member` | a `skip` member (its bytes are not in the set) fails `staged` (policy: "Members the plan marks `skip`") |
 | `no_example` | a README with no example fails `readme` (it would test nothing) |
@@ -220,7 +228,7 @@ compiler takes `-Xlinker <archive>` and refuses a `# NATIVE_CALL <symbol>` no li
 stand-ins of the printing, not of the plan: the plan is mopm's, and the target below runs it.
 
 The tests cell's `//functional/readme_e2e:fixture_native_e2e` runs the whole path with the real things: a
-Mojo package that calls a C function (`fixture_native`), the static archive of that function built by the
+Mojo package that calls a C function (`example/fixture_native`, in a test namespace: the fixture is never published and an overlay takes any namespace), the static archive of that function built by the
 C toolchain, both packed by the pinned `mopm pack --native`,
 installed by the pinned mopm, linked with the command that mopm's
 `build --print-cmd` prints, compiled by the pinned compiler and run by the gate. The example calls the C

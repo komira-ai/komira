@@ -4,7 +4,7 @@
 # check builds `:all` against the assembled set; the release workflow builds it against the
 # set `mopm stage` wrote (below).
 load("@komira//tools/build/readme_e2e:defs.bzl", "readme_e2e", "readme_e2e_all")
-load("//release/readme_e2e:packages.bzl", "MOJO", "MOPM", "PACKAGES")
+load("//release/readme_e2e:packages.bzl", "MOJO", "MOPM", "NAMESPACE", "PACKAGES")
 load("//release/readme_e2e:staged_choice.bzl", "staged_label", "staged_version")
 
 # The staged set the targets install from is `-c komira_release.staged=<which>`
@@ -15,7 +15,7 @@ load("//release/readme_e2e:staged_choice.bzl", "staged_label", "staged_version")
         name = name,
         mojo = MOJO,
         mopm = MOPM,
-        package = name,
+        package = NAMESPACE + "/" + name,
         staged = staged_label(),
         version = staged_version(version),
         visibility = ["PUBLIC"],

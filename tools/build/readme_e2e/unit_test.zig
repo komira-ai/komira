@@ -28,11 +28,11 @@ fn expectCorrupt(bytes: []const u8, want: []const u8) !void {
 
 // ---- conda.zig ----------------------------------------------------------------
 
-test "a package is read: its files, with their bytes, in archive order" {
+test "a package named <namespace>/<name> is read: its files under the import name, with their bytes, in archive order" {
     var ar = arena();
     defer ar.deinit();
     const a = ar.allocator();
-    const bytes = try fix.package(a, "good", "1.2.3", "mojo1.0.0_0", "the mojoc", &.{});
+    const bytes = try fix.package(a, "example/good", "1.2.3", "mojo1.0.0_0", "the mojoc", &.{});
     var why: []const u8 = "";
     const files = try conda.read(a, bytes, &why);
     try std.testing.expectEqual(@as(usize, 2), files.len);
@@ -90,7 +90,7 @@ test "a symbolic link, a name twice, a deflated member, a missing payload and ga
     try expectCorrupt(try fix.condaDeflated(a, "s"), "only stored (0) is supported");
     try expectCorrupt("", "no pkg-*.tar.zst member");
     try expectCorrupt("not a zip at all, but long enough to hold a header", "no pkg-*.tar.zst member");
-    const whole = try fix.package(a, "good", "1.2.3", "mojo1.0.0_0", "m", &.{});
+    const whole = try fix.package(a, "example/good", "1.2.3", "mojo1.0.0_0", "m", &.{});
     try expectCorrupt(whole[0 .. whole.len - 40], "runs past the end");
     try expectCorrupt(try fix.condaOf(a, "s", "this is not a zstd frame"), "payload");
 }
@@ -102,7 +102,7 @@ test "a package is unpacked below a directory, and not over a file that is there
     defer ar.deinit();
     const a = ar.allocator();
     var why: []const u8 = "";
-    const files = try conda.read(a, try fix.package(a, "good", "1.2.3", "mojo1.0.0_0", "bytes", &.{}), &why);
+    const files = try conda.read(a, try fix.package(a, "example/good", "1.2.3", "mojo1.0.0_0", "bytes", &.{}), &why);
     try conda.extract(tmp.dir, files);
     const got = try tmp.dir.readFileAlloc(a, "lib/mojo/good.mojoc", 100);
     try std.testing.expectEqualStrings("bytes", got);
@@ -112,12 +112,12 @@ test "a package is unpacked below a directory, and not over a file that is there
 // ---- plan.zig -----------------------------------------------------------------
 
 const plan_text =
-    \\{ "version": 1, "members": [
-    \\  { "name": "http_core", "version": "0.4.0", "action": "upload",
+    \\{ "version": 2, "members": [
+    \\  { "name": "acme/http_core", "version": "0.4.0", "action": "upload",
     \\    "manifest_sha256": "aa", "future_key": 7,
-    \\    "files": [ { "subdir": "noarch", "filename": "mojo-http_core-0.4.0-mojo1.0.0_0.conda", "sha256": "bb", "size": 12345 } ],
-    \\    "readme": "http_core/README.md" },
-    \\  { "name": "http_client", "version": "0.4.0", "action": "skip", "reason": "already published with these bytes" } ] }
+    \\    "files": [ { "subdir": "noarch", "filename": "mojo-acme.http_core-0.4.0-mojo1.0.0_0.conda", "sha256": "bb", "size": 12345 } ],
+    \\    "readme": "acme/http_core/README.md" },
+    \\  { "name": "acme/http_client", "version": "0.4.0", "action": "skip", "reason": "already published with these bytes" } ] }
 ;
 
 test "a plan is read, its unknown keys ignored, and written the same way twice" {
@@ -127,9 +127,9 @@ test "a plan is read, its unknown keys ignored, and written the same way twice" 
     var why: []const u8 = "";
     const p = try plan.parsePlan(a, plan_text, &why);
     try std.testing.expectEqual(@as(usize, 2), p.members.len);
-    try std.testing.expectEqualStrings("http_core/README.md", p.member("http_core").?.readme.?);
+    try std.testing.expectEqualStrings("acme/http_core/README.md", p.member("acme/http_core").?.readme.?);
     try std.testing.expectEqual(@as(u64, 12345), p.members[0].files[0].size);
-    try std.testing.expect(p.member("nobody") == null);
+    try std.testing.expect(p.member("acme/nobody") == null);
     const once = try plan.renderPlan(a, p);
     const again = try plan.renderPlan(a, try plan.parsePlan(a, once, &why));
     try std.testing.expectEqualStrings(once, again);
@@ -142,10 +142,12 @@ test "a plan that is not one the reader takes is refused with the reason" {
     defer ar.deinit();
     const a = ar.allocator();
     const cases = [_]struct { text: []const u8, why: []const u8 }{
-        .{ .text = "{\"version\": 2, \"members\": []}", .why = "version 2" },
-        .{ .text = "{\"version\": 1, \"members\": [{\"name\":\"a\",\"version\":\"1.0.0\",\"action\":\"upload\"},{\"name\":\"a\",\"version\":\"1.0.0\",\"action\":\"upload\"}]}", .why = "a is a member twice" },
-        .{ .text = "{\"version\": 1, \"members\": [{\"name\":\"a\",\"version\":\"1.0.0\",\"action\":\"publish\"}]}", .why = "action publish" },
-        .{ .text = "{\"version\": 1, \"members\": [{\"name\":\"\",\"version\":\"1.0.0\",\"action\":\"upload\"}]}", .why = "no name or version" },
+        .{ .text = "{\"version\": 1, \"members\": []}", .why = "plan.json: version 1, and only 2 is read" },
+        .{ .text = "{\"version\": 3, \"members\": []}", .why = "plan.json: version 3, and only 2 is read" },
+        .{ .text = "{\"version\": 2, \"members\": [{\"name\":\"x/a\",\"version\":\"1.0.0\",\"action\":\"upload\"},{\"name\":\"x/a\",\"version\":\"1.0.0\",\"action\":\"upload\"}]}", .why = "x/a is a member twice" },
+        .{ .text = "{\"version\": 2, \"members\": [{\"name\":\"x/a\",\"version\":\"1.0.0\",\"action\":\"publish\"}]}", .why = "action publish" },
+        .{ .text = "{\"version\": 2, \"members\": [{\"name\":\"\",\"version\":\"1.0.0\",\"action\":\"upload\"}]}", .why = "no name or version" },
+        .{ .text = "{\"version\": 2, \"members\": [{\"name\":\"a\",\"version\":\"1.0.0\",\"action\":\"upload\"}]}", .why = "plan.json: member a has no namespace: a name is <namespace>/<name>" },
         .{ .text = "not json", .why = "plan.json" },
     };
     for (cases) |c| {
@@ -156,37 +158,69 @@ test "a plan that is not one the reader takes is refused with the reason" {
 }
 
 const lock_text =
-    \\{ "lock_version": 1, "toolchain": { "mojo": "1.0.0" }, "channels": ["https://conda.mopm.dev/"],
+    \\{ "lock_version": 3, "mojo": ["1.0.0"], "toolchain": {}, "channels": ["https://conda.mopm.dev/"],
     \\  "packages": [
-    \\    { "name": "app", "version": "1.0.0", "build": "mojo1.0.0_0", "subdir": "linux-64", "channel": "https://conda.mopm.dev/",
-    \\      "url": "https://conda.mopm.dev/linux-64/mojo-app-1.0.0-mojo1.0.0_0.conda", "sha256": "cc", "size": 9, "mojo": "1.0.0", "deps": ["lib"] },
-    \\    { "name": "local", "version": "0.0.1", "source": "path" } ] }
+    \\    { "name": "komira-ai/app", "version": "1.0.0", "subdir": "linux-64", "channel": "https://conda.mopm.dev/komira-ai/",
+    \\      "artifacts": { "1.0.0": { "build": "mojo1.0.0_0", "url": "https://conda.mopm.dev/komira-ai/linux-64/mojo-komira-ai.app-1.0.0-mojo1.0.0_0.conda", "sha256": "cc", "size": 9 } },
+    \\      "deps": ["komira-ai/lib"] },
+    \\    { "name": "komira-ai/local", "version": "0.0.1", "source": "path" } ] }
 ;
 
-test "a version 1 lock is read, a path package has no file" {
+fn lockRefusal(a: std.mem.Allocator, text: []const u8) ![]const u8 {
+    var why: []const u8 = "";
+    try std.testing.expectError(error.Invalid, plan.parseLock(a, text, &why));
+    return why;
+}
+
+test "a version 3 lock row of a namespaced package gives the .conda file name and the import name" {
     var ar = arena();
     defer ar.deinit();
     const a = ar.allocator();
     var why: []const u8 = "";
     const l = try plan.parseLock(a, lock_text, &why);
     try std.testing.expectEqual(@as(usize, 2), l.packages.len);
-    const app = l.find("app").?;
-    try std.testing.expectEqualStrings("mojo-app-1.0.0-mojo1.0.0_0.conda", app.filename());
+    const app = l.find("komira-ai/app").?;
+    const art = app.artifact("1.0.0").?;
+    try std.testing.expectEqualStrings("mojo-komira-ai.app-1.0.0-mojo1.0.0_0.conda", art.filename());
+    try std.testing.expectEqualStrings("mojo1.0.0_0", art.build);
+    try std.testing.expectEqualStrings("app", plan.importName(app.name));
+    try std.testing.expect(app.artifact("1.1.0") == null);
     try std.testing.expect(!app.isPath());
-    try std.testing.expect(l.find("local").?.isPath());
-    try std.testing.expectEqualStrings("lib", app.deps[0]);
+    try std.testing.expectEqualStrings("komira-ai/lib", app.deps[0]);
+    // A path package has no file, and a bare name is not found by its import name.
+    try std.testing.expect(l.find("komira-ai/local").?.isPath());
+    try std.testing.expect(l.find("app") == null);
 }
 
-test "a lock of version 2, or whose url is not the package's file, is refused" {
+test "a lock of version 1 or 2 is refused naming the version it reads" {
     var ar = arena();
     defer ar.deinit();
     const a = ar.allocator();
-    var why: []const u8 = "";
-    try std.testing.expectError(error.Invalid, plan.parseLock(a, "{\"lock_version\": 2, \"packages\": []}", &why));
-    try std.testing.expect(std.mem.indexOf(u8, why, "lock_version 2") != null);
-    const wrong = try std.mem.replaceOwned(u8, a, lock_text, "mojo-app-1.0.0-mojo1.0.0_0.conda", "mojo-app-9.9.9-mojo1.0.0_0.conda");
-    try std.testing.expectError(error.Invalid, plan.parseLock(a, wrong, &why));
-    try std.testing.expect(std.mem.indexOf(u8, why, "does not end in mojo-app-1.0.0-mojo1.0.0_0.conda") != null);
+    const want = "mopm.lock: lock_version {d}; mopm writes 3 for the e2e's project (a lock before namespaces is 1 or 2), and only 3 is read";
+    for ([_]u32{ 1, 2 }) |v| {
+        const text = try std.fmt.allocPrint(a, "{{\"lock_version\": {d}, \"packages\": []}}", .{v});
+        try std.testing.expectEqualStrings(try std.fmt.allocPrint(a, want, .{v}), try lockRefusal(a, text));
+    }
+    try std.testing.expectEqualStrings(try std.fmt.allocPrint(a, want, .{4}), try lockRefusal(a, "{\"lock_version\": 4, \"packages\": []}"));
+}
+
+test "a lock row of a package without a namespace is refused naming it" {
+    var ar = arena();
+    defer ar.deinit();
+    const a = ar.allocator();
+    const bare = try std.mem.replaceOwned(u8, a, lock_text, "\"komira-ai/local\"", "\"local\"");
+    try std.testing.expectEqualStrings("mopm.lock: package local has no namespace: every name of a version 3 lock is <namespace>/<name>", try lockRefusal(a, bare));
+}
+
+test "a lock row whose url is not the namespaced package file is refused" {
+    var ar = arena();
+    defer ar.deinit();
+    const a = ar.allocator();
+    // The version of another file, and the file name of a lock before namespaces (no `komira-ai.`).
+    const wrong = try std.mem.replaceOwned(u8, a, lock_text, "mojo-komira-ai.app-1.0.0-mojo1.0.0_0.conda", "mojo-komira-ai.app-9.9.9-mojo1.0.0_0.conda");
+    try std.testing.expectEqualStrings("mopm.lock: komira-ai/app 1.0.0: the url https://conda.mopm.dev/komira-ai/linux-64/mojo-komira-ai.app-9.9.9-mojo1.0.0_0.conda does not end in mojo-komira-ai.app-1.0.0-mojo1.0.0_0.conda", try lockRefusal(a, wrong));
+    const old = try std.mem.replaceOwned(u8, a, lock_text, "mojo-komira-ai.app-1.0.0", "mojo-app-1.0.0");
+    try std.testing.expectEqualStrings("mopm.lock: komira-ai/app 1.0.0: the url https://conda.mopm.dev/komira-ai/linux-64/mojo-app-1.0.0-mojo1.0.0_0.conda does not end in mojo-komira-ai.app-1.0.0-mojo1.0.0_0.conda", try lockRefusal(a, old));
 }
 
 test "a lock is written in the order given, and read back" {
@@ -194,10 +228,32 @@ test "a lock is written in the order given, and read back" {
     defer ar.deinit();
     const a = ar.allocator();
     var why: []const u8 = "";
-    const text = try plan.renderLock(a, "1.0.0", &.{.{ .name = "app", .version = "1.0.0", .build = "mojo1.0.0_0", .subdir = "linux-64", .url = "https://conda.mopm.dev/linux-64/mojo-app-1.0.0-mojo1.0.0_0.conda", .sha256 = "dd", .size = 5, .mojo = "1.0.0" }});
+    var arts: std.json.ArrayHashMap(plan.Artifact) = .{};
+    try arts.map.put(a, "1.0.0", .{ .build = "mojo1.0.0_0", .url = "https://conda.mopm.dev/komira-ai/linux-64/mojo-komira-ai.app-1.0.0-mojo1.0.0_0.conda", .sha256 = "dd", .size = 5 });
+    const text = try plan.renderLock(a, "1.0.0", &.{.{ .name = "komira-ai/app", .version = "1.0.0", .subdir = "linux-64", .artifacts = arts }});
     const l = try plan.parseLock(a, text, &why);
-    try std.testing.expectEqualStrings("dd", l.packages[0].sha256);
-    try std.testing.expectEqual(@as(u64, 5), l.packages[0].size);
+    const art = l.packages[0].artifact("1.0.0").?;
+    try std.testing.expectEqualStrings("dd", art.sha256);
+    try std.testing.expectEqual(@as(u64, 5), art.size);
+    try std.testing.expect(std.mem.indexOf(u8, text, "\"lock_version\": 3") != null);
+}
+
+test "a package file is mojo-<namespace>.<name>-<version>-<build>.conda, and a name without a namespace has none" {
+    var ar = arena();
+    defer ar.deinit();
+    const a = ar.allocator();
+    try std.testing.expectEqualStrings("mojo-komira-ai.http_core-0.4.0-mojo1.0.0_0.conda", (try plan.packageFile(a, "komira-ai/http_core", "0.4.0", "mojo1.0.0_0")).?);
+    for ([_][]const u8{ "http_core", "/http_core", "komira-ai/", "a/b/c" }) |bad| {
+        try std.testing.expect((try plan.packageFile(a, bad, "0.4.0", "mojo1.0.0_0")) == null);
+    }
+}
+
+test "the import name of a full name is the part after the slash" {
+    try std.testing.expectEqualStrings("http_core", plan.importName("komira-ai/http_core"));
+    const n = plan.splitName("komira-ai/http_core").?;
+    try std.testing.expectEqualStrings("komira-ai", n.namespace);
+    try std.testing.expectEqualStrings("http_core", n.name);
+    try std.testing.expect(plan.splitName("http_core") == null);
 }
 
 test "a file name and a relative path are told from a path that leaves its directory" {
@@ -279,12 +335,14 @@ test "the offline registry serves its configuration and refuses and remembers ev
     const parsed = try std.json.parseFromSlice(std.json.Value, a, config.body, .{});
     const o = parsed.value.object;
     try std.testing.expectEqual(@as(i64, 1), o.get("index_version").?.integer);
+    try std.testing.expectEqual(@as(usize, 2), o.get("index_versions").?.array.items.len);
     // Every URL the configuration names is this server, so mopm's other requests come back here.
     const own = try std.fmt.allocPrint(a, "http://127.0.0.1:{d}/", .{reg.port});
     try std.testing.expect(std.mem.startsWith(u8, o.get("api_url").?.string, own));
+    try std.testing.expect(std.mem.startsWith(u8, o.get("api_v2_url").?.string, own));
     try std.testing.expect(std.mem.startsWith(u8, o.get("channel_url").?.string, own));
 
-    for ([_][]const u8{ "/index/gh/os/ghost", "/channel/linux-64/repodata.json", "/index/config.json/", "/" }) |target| {
+    for ([_][]const u8{ "/index/v2/ko/mi/komira-ai/ghost", "/channel/linux-64/repodata.json", "/index/config.json/", "/" }) |target| {
         const r = try offline.get(a, base, target);
         try std.testing.expectEqual(@as(u16, 403), r.status);
         try std.testing.expect(std.mem.indexOf(u8, r.body, "\"code\":\"offline\"") != null);
@@ -292,7 +350,7 @@ test "the offline registry serves its configuration and refuses and remembers ev
     reg.stop();
     const refused = try reg.refused(a);
     try std.testing.expectEqual(@as(usize, 4), refused.len);
-    try std.testing.expectEqualStrings("GET /index/gh/os/ghost", refused[0]);
+    try std.testing.expectEqualStrings("GET /index/v2/ko/mi/komira-ai/ghost", refused[0]);
     try std.testing.expectEqualStrings("GET /channel/linux-64/repodata.json", refused[1]);
     try std.testing.expectEqualStrings("GET /index/config.json/", refused[2]);
     try std.testing.expectEqualStrings("GET /", refused[3]);
@@ -307,11 +365,11 @@ test "the configuration request alone is not a refusal" {
     try std.testing.expectEqual(@as(usize, 0), (try reg.refused(a)).len);
 }
 
-test "a package's index is asked for at <aa>/<bb>/<name>, short names padded with underscores" {
+test "a package's index is asked for at v2/<aa>/<bb>/<namespace>/<name>, from the namespace, short ones padded with underscores" {
     const a = std.heap.page_allocator;
-    try std.testing.expectEqualStrings("/index/gh/os/ghost", try offline.indexTarget(a, "ghost"));
-    try std.testing.expectEqualStrings("/index/ap/p_/app", try offline.indexTarget(a, "app"));
-    try std.testing.expectEqualStrings("/index/__/__/", try offline.indexTarget(a, ""));
+    try std.testing.expectEqualStrings("/index/v2/ko/mi/komira-ai/json", try offline.indexTarget(a, "komira-ai/json"));
+    try std.testing.expectEqualStrings("/index/v2/ab/__/ab/x1", try offline.indexTarget(a, "ab/x1"));
+    try std.testing.expectEqualStrings("/index/v2/ex/am/example/ghost", try offline.indexTarget(a, "example/ghost"));
 }
 
 test "a registry that is not a loopback URL is not asked" {
@@ -394,14 +452,14 @@ test "a package with a static native holds its archive at lib/<soname>, declared
     var ar = arena();
     defer ar.deinit();
     const a = ar.allocator();
-    const bytes = try fix.packageWith(a, "nat", "1.0.0", "mojo1.0.0_0", "mojoc", &.{}, &.{.{ .soname = "libnat_c.a", .bytes = "archive" }});
+    const bytes = try fix.packageWith(a, "example/nat", "1.0.0", "mojo1.0.0_0", "mojoc", &.{}, &.{.{ .soname = "libnat_c.a", .bytes = "archive" }});
     var why: []const u8 = "";
     const files = try conda.read(a, bytes, &why);
     try std.testing.expectEqualStrings("archive", conda.find(files, "lib/libnat_c.a").?);
     const meta = try plan.parseMetadata(a, conda.find(files, "lib/mojo/nat.mopm.json").?, &why);
     try std.testing.expectEqual(@as(usize, 1), meta.native.len);
     // declared and not shipped: the metadata names it, the package lacks the file
-    const bare = try fix.packageWith(a, "nat", "1.0.0", "mojo1.0.0_0", "mojoc", &.{}, &.{.{ .soname = "libnat_c.a", .bytes = "archive", .ship = false }});
+    const bare = try fix.packageWith(a, "example/nat", "1.0.0", "mojo1.0.0_0", "mojoc", &.{}, &.{.{ .soname = "libnat_c.a", .bytes = "archive", .ship = false }});
     const bare_files = try conda.read(a, bare, &why);
     try std.testing.expect(conda.find(bare_files, "lib/libnat_c.a") == null);
     try std.testing.expect(conda.find(bare_files, "lib/mojo/nat.mopm.json") != null);

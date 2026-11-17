@@ -13,7 +13,7 @@ load(":native.bzl", "native_conda")
 readme_e2e_staged(
     name = "staged",
     members = {
-        "hashing": (
+        "komira-ai/hashing": (
             "0.1.0",
             "komira//src/hashing:conda",
             "komira//src/hashing:hashing[tests][readme][file]",
@@ -24,14 +24,14 @@ readme_e2e_staged(
 readme_e2e(
     name = "hashing",
     mopm = "komira//tools/build/readme_e2e:standin_mopm",
-    package = "hashing",
+    package = "komira-ai/hashing",
     staged = ":staged",
     version = "0.1.0",
 )
 
 # ---- a package that ships a native library -------------------------------------
 #
-# `fixture_native` is a real Mojo package that calls a C function, and `native_add` the real static
+# `example/fixture_native` (a test namespace: the fixture is never published, and an overlay takes any namespace) is a real Mojo package that calls a C function, and `native_add` the real static
 # archive of it; `fixture_native_pack` packs both with the pinned `mopm pack --native`, which lays
 # the archive out as `lib/libkomira_fixture_native.a` and declares it in the package's metadata. The e2e below installs it with the
 # pinned mopm, asks that mopm for the link command (`mopm build --print-cmd`), and compiles, links and
@@ -65,16 +65,16 @@ native_conda(
     archive = ":native_add[static-pic]",
     lib = ":fixture_native",
     manifest = "fixture_native.toml",
-    mopm = "toolchains//:mopm_0_0_101",
+    mopm = "toolchains//:mopm_0_0_113",
     native_id = "komira_fixture_native",
-    package = "fixture_native",
+    package = "example/fixture_native",
     version = "0.1.0",
 )
 
 readme_e2e_staged(
     name = "staged_native",
     members = {
-        "fixture_native": (
+        "example/fixture_native": (
             "0.1.0",
             ":fixture_native_pack",
             ":fixture_native_readme",
@@ -84,8 +84,8 @@ readme_e2e_staged(
 
 readme_e2e(
     name = "fixture_native_e2e",
-    mopm = "toolchains//:mopm_0_0_101",
-    package = "fixture_native",
+    mopm = "toolchains//:mopm_0_0_113",
+    package = "example/fixture_native",
     staged = ":staged_native",
     version = "0.1.0",
 )

@@ -106,7 +106,7 @@ fn answer(self: *Registry, stream: std.net.Stream) void {
     const target = words.next() orelse return;
     var out: [2048]u8 = undefined;
     if (std.mem.eql(u8, method, "GET") and std.mem.eql(u8, target, config_target)) {
-        const body = std.fmt.bufPrint(&out, "{{\"index_version\":1,\"stage\":\"readme_e2e\",\"api_url\":\"http://127.0.0.1:{d}/api/v1\",\"channel_url\":\"http://127.0.0.1:{d}/channel/\",\"min_cli_version\":\"0.0.1\",\"read_only\":true}}", .{ self.port, self.port }) catch return;
+        const body = std.fmt.bufPrint(&out, "{{\"index_version\":1,\"index_versions\":[1,2],\"stage\":\"readme_e2e\",\"api_url\":\"http://127.0.0.1:{d}/api/v1\",\"api_v2_url\":\"http://127.0.0.1:{d}/api/v2\",\"channel_url\":\"http://127.0.0.1:{d}/channel/\",\"min_cli_version\":\"0.0.1\",\"read_only\":true}}", .{ self.port, self.port, self.port }) catch return;
         reply(stream, "200 OK", body);
         return;
     }
@@ -147,11 +147,13 @@ pub fn get(a: Allocator, base: []const u8, target: []const u8) !Answer {
     return .{ .status = status, .body = text[body_at + 4 ..] };
 }
 
-/// `/index/<aa>/<bb>/<name>`: where mopm asks a registry for a package's records (the first
-/// four letters of the name, `_`-padded, as two directories).
-pub fn indexTarget(a: Allocator, name: []const u8) ![]u8 {
+/// `/index/v2/<aa>/<bb>/<namespace>/<name>`: where mopm asks a registry for a package's records
+/// (spec/index.md of mopm: `aa` and `bb` are the first and the next two characters of the
+/// namespace, `_`-padded on the right, as two directories). `full` is `<namespace>/<name>`.
+pub fn indexTarget(a: Allocator, full: []const u8) ![]u8 {
+    const namespace = full[0 .. std.mem.indexOfScalar(u8, full, '/') orelse full.len];
     var pad: [4]u8 = .{ '_', '_', '_', '_' };
-    const n = @min(name.len, 4);
-    @memcpy(pad[0..n], name[0..n]);
-    return std.fmt.allocPrint(a, "/index/{s}/{s}/{s}", .{ pad[0..2], pad[2..4], name });
+    const n = @min(namespace.len, 4);
+    @memcpy(pad[0..n], namespace[0..n]);
+    return std.fmt.allocPrint(a, "/index/v2/{s}/{s}/{s}", .{ pad[0..2], pad[2..4], full });
 }
