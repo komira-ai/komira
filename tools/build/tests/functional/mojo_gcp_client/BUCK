@@ -199,10 +199,12 @@ mojo_gcp_client(
     deps = ["//functional/proto:proto_codec"],
 )
 
+# `from grpc` and not `grpc`: the package's own name, komira_gcp_shop_grpc_messages, holds "grpc", and an
+# import of the gRPC package (`from grpc import ...`, `from grpc.retry import ...`) starts with `from grpc`.
 gen_check(
     name = "komira_gcp_shop_grpc_messages_scoped",
     absent = [
-        "grpc",
+        "from grpc",
         "GrpcClient",
         "ShopService",
     ],
