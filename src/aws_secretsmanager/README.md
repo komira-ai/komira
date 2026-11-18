@@ -15,7 +15,7 @@ and RestoreSecret:
   `from_aws_json`;
 - an endpoint resolver `resolve_<operation>_endpoint`, which runs the
   service's published endpoint ruleset
-  (`komira_aws_secretsmanager_endpoint_rules()`) over a
+  (`aws_secretsmanager_endpoint_rules()`) over a
   `SecretsManagerEndpointConfig`;
 - `SecretsManagerClient`, which resolves each call's endpoint, signs it with
   SigV4 (signing name `secretsmanager`) and sends it over the
@@ -136,11 +136,11 @@ Resolve the endpoint a call goes to:
 ```mojo
 from aws_secretsmanager.aws_secretsmanager import SecretsManagerEndpointConfig
 from aws_secretsmanager.aws_secretsmanager import SecretsManagerGetSecretValueRequest
-from aws_secretsmanager.aws_secretsmanager import komira_aws_secretsmanager_endpoint_rules
+from aws_secretsmanager.aws_secretsmanager import aws_secretsmanager_endpoint_rules
 from aws_secretsmanager.aws_secretsmanager import resolve_get_secret_value_endpoint
 
 var resolved = resolve_get_secret_value_endpoint(
-    komira_aws_secretsmanager_endpoint_rules(),
+    aws_secretsmanager_endpoint_rules(),
     SecretsManagerEndpointConfig(String("us-west-2")),
     SecretsManagerGetSecretValueRequest(String("app/db")),
 )

@@ -15,7 +15,7 @@ DeleteConfigurationSet and SendEmail:
 - a response parser `parse_<operation>_response` over a aws_core
   `AwsResponse`;
 - an endpoint resolver `resolve_<operation>_endpoint`, which runs the
-  service's published endpoint ruleset (`komira_aws_sesv2_endpoint_rules()`)
+  service's published endpoint ruleset (`aws_sesv2_endpoint_rules()`)
   over an `SESv2EndpointConfig` (the host is `email.<region>`);
 - `SESv2Client`, which resolves each call's endpoint, signs it with SigV4
   (signing name `ses`) and sends it over the http_core `Connector` it
@@ -108,10 +108,10 @@ from std.testing import assert_equal
 from aws_sesv2.aws_sesv2 import SESv2GetEmailIdentityRequest
 -->
 ```mojo
-from aws_sesv2.aws_sesv2 import SESv2EndpointConfig, komira_aws_sesv2_endpoint_rules
+from aws_sesv2.aws_sesv2 import SESv2EndpointConfig, aws_sesv2_endpoint_rules
 from aws_sesv2.aws_sesv2 import resolve_get_email_identity_endpoint
 
-var rules = komira_aws_sesv2_endpoint_rules()
+var rules = aws_sesv2_endpoint_rules()
 var lookup = SESv2GetEmailIdentityRequest(String("mail.example.com"))
 assert_equal(
     resolve_get_email_identity_endpoint(rules, SESv2EndpointConfig(String("us-west-2")), lookup).url,

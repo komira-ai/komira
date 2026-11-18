@@ -23,7 +23,7 @@ from aws_dynamodbstreams.aws_dynamodbstreams import (
     DynamoDBStreamsEndpointConfig,
     DynamoDBStreamsGetRecordsInput,
     DynamoDBStreamsGetShardIteratorInput,
-    komira_aws_dynamodbstreams_endpoint_rules,
+    aws_dynamodbstreams_endpoint_rules,
     resolve_describe_stream_endpoint,
     resolve_get_records_endpoint,
     resolve_get_shard_iterator_endpoint,
@@ -208,7 +208,7 @@ def _check_case(rules: EndpointRuleSet, tc: JsonValue, mut why: String) raises -
 
 
 def test_botocore_endpoint_cases() raises:
-    var rules = komira_aws_dynamodbstreams_endpoint_rules()
+    var rules = aws_dynamodbstreams_endpoint_rules()
     var doc = parse_json_value(_read(_CASES))
     ref cases = doc.children[_find(doc, "testCases")]
     var n = len(cases.children)
@@ -237,7 +237,7 @@ def test_botocore_endpoint_cases() raises:
 
 
 def _resolve(config: DynamoDBStreamsEndpointConfig) raises -> ResolvedEndpoint:
-    return _resolve_all(komira_aws_dynamodbstreams_endpoint_rules(), config)
+    return _resolve_all(aws_dynamodbstreams_endpoint_rules(), config)
 
 
 def test_regional_default() raises:

@@ -36,7 +36,7 @@ from aws_ecs.aws_ecs import (
     ECSRunTaskRequest,
     ECSStopTaskRequest,
     ECS_SERVICE,
-    komira_aws_ecs_endpoint_rules,
+    aws_ecs_endpoint_rules,
     resolve_create_cluster_endpoint,
     resolve_deregister_task_definition_endpoint,
     resolve_describe_clusters_endpoint,
@@ -273,7 +273,7 @@ def _check_case(rules: EndpointRuleSet, tc: JsonValue, mut why: String) raises -
 
 
 def test_botocore_endpoint_cases() raises:
-    var rules = komira_aws_ecs_endpoint_rules()
+    var rules = aws_ecs_endpoint_rules()
     var doc = parse_json_value(_read(_CASES))
     ref cases = doc.children[_find(doc, "testCases")]
     var n = len(cases.children)
@@ -302,7 +302,7 @@ def test_botocore_endpoint_cases() raises:
 
 
 def _resolve(config: ECSEndpointConfig) raises -> ResolvedEndpoint:
-    return _resolve_all(komira_aws_ecs_endpoint_rules(), config)
+    return _resolve_all(aws_ecs_endpoint_rules(), config)
 
 
 def test_regional_default() raises:

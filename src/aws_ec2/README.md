@@ -66,9 +66,9 @@ Where a call goes, from the endpoint ruleset:
 
 <!-- mojo-hidden from std.testing import assert_equal -->
 ```mojo
-from aws_ec2.aws_ec2 import EC2DescribeInstancesRequest, EC2EndpointConfig, komira_aws_ec2_endpoint_rules, resolve_describe_instances_endpoint
+from aws_ec2.aws_ec2 import EC2DescribeInstancesRequest, EC2EndpointConfig, aws_ec2_endpoint_rules, resolve_describe_instances_endpoint
 
-var rules = komira_aws_ec2_endpoint_rules()
+var rules = aws_ec2_endpoint_rules()
 var input = EC2DescribeInstancesRequest()
 assert_equal(
     resolve_describe_instances_endpoint(rules, EC2EndpointConfig(String("us-west-2")), input).url,

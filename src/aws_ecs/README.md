@@ -63,10 +63,10 @@ Where a call goes, from the endpoint ruleset:
 
 <!-- mojo-hidden from std.testing import assert_equal -->
 ```mojo
-from aws_ecs.aws_ecs import ECSEndpointConfig, ECSListClustersRequest, komira_aws_ecs_endpoint_rules, resolve_list_clusters_endpoint
+from aws_ecs.aws_ecs import ECSEndpointConfig, ECSListClustersRequest, aws_ecs_endpoint_rules, resolve_list_clusters_endpoint
 
 var got = resolve_list_clusters_endpoint(
-    komira_aws_ecs_endpoint_rules(), ECSEndpointConfig(String("us-west-2")), ECSListClustersRequest()
+    aws_ecs_endpoint_rules(), ECSEndpointConfig(String("us-west-2")), ECSListClustersRequest()
 )
 assert_equal(got.url, "https://ecs.us-west-2.amazonaws.com")
 ```

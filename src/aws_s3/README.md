@@ -14,7 +14,7 @@ UploadPart, CompleteMultipartUpload, AbortMultipartUpload):
   `AwsResponse` (and `parse_get_object_head`, which reads a GetObject's
   headers without its body);
 - an endpoint resolver `resolve_<operation>_endpoint`, which runs S3's
-  published endpoint ruleset (`komira_aws_s3_endpoint_rules()`) over an
+  published endpoint ruleset (`aws_s3_endpoint_rules()`) over an
   `S3EndpointConfig` and puts the bucket in the host (virtual host) or in the
   path (when the bucket cannot be a host name, or `force_path_style` is set,
   as a custom endpoint such as MinIO or LocalStack needs);
@@ -133,10 +133,10 @@ from aws_s3.aws_s3 import S3GetObjectRequest, build_get_object_request
 -->
 ```mojo
 from aws_core import aws_signing_target
-from aws_s3.aws_s3 import S3EndpointConfig, komira_aws_s3_endpoint_rules
+from aws_s3.aws_s3 import S3EndpointConfig, aws_s3_endpoint_rules
 from aws_s3.aws_s3 import resolve_get_object_endpoint
 
-var rules = komira_aws_s3_endpoint_rules()
+var rules = aws_s3_endpoint_rules()
 var input = S3GetObjectRequest(String("lake"), String("data/a.parquet"))
 var virtual = resolve_get_object_endpoint(rules, S3EndpointConfig(String("us-west-2")), input)
 assert_equal(virtual.url, "https://lake.s3.us-west-2.amazonaws.com")

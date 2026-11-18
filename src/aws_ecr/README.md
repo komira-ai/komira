@@ -63,9 +63,9 @@ Where a call goes, from the endpoint ruleset:
 
 <!-- mojo-hidden from std.testing import assert_equal -->
 ```mojo
-from aws_ecr.aws_ecr import ECRDescribeRepositoriesRequest, ECREndpointConfig, komira_aws_ecr_endpoint_rules, resolve_describe_repositories_endpoint
+from aws_ecr.aws_ecr import ECRDescribeRepositoriesRequest, ECREndpointConfig, aws_ecr_endpoint_rules, resolve_describe_repositories_endpoint
 
-var rules = komira_aws_ecr_endpoint_rules()
+var rules = aws_ecr_endpoint_rules()
 var input = ECRDescribeRepositoriesRequest()
 assert_equal(
     resolve_describe_repositories_endpoint(rules, ECREndpointConfig(String("us-west-2")), input).url,

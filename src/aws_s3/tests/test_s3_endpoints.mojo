@@ -39,7 +39,7 @@ from aws_s3.aws_s3 import (
     build_list_objects_request,
     build_list_objects_v2_request,
     build_put_object_request,
-    komira_aws_s3_endpoint_rules,
+    aws_s3_endpoint_rules,
     resolve_create_multipart_upload_endpoint,
     resolve_delete_object_endpoint,
     resolve_delete_objects_endpoint,
@@ -93,7 +93,7 @@ def _url(resolved: ResolvedEndpoint, req: AwsRequest) raises -> String:
 
 
 def test_virtual_host_by_default() raises:
-    var rules = komira_aws_s3_endpoint_rules()
+    var rules = aws_s3_endpoint_rules()
     var config = _config(String("us-west-2"))
     var input = S3GetObjectRequest(String("lake"), String("data/a.parquet"))
     var resolved = resolve_get_object_endpoint(rules, config, input)
@@ -110,7 +110,7 @@ def test_virtual_host_by_default() raises:
 
 
 def test_force_path_style() raises:
-    var rules = komira_aws_s3_endpoint_rules()
+    var rules = aws_s3_endpoint_rules()
     var config = _config(String("us-west-2"))
     config.force_path_style = Optional[Bool](True)
     var input = S3GetObjectRequest(String("lake"), String("data/a.parquet"))
@@ -132,7 +132,7 @@ def test_force_path_style() raises:
 
 
 def test_a_bucket_that_cannot_be_a_host_name_is_path_style() raises:
-    var rules = komira_aws_s3_endpoint_rules()
+    var rules = aws_s3_endpoint_rules()
     var config = _config(String("us-west-2"))
     # Dots would not match the wildcard TLS certificate.
     assert_equal(
@@ -147,7 +147,7 @@ def test_a_bucket_that_cannot_be_a_host_name_is_path_style() raises:
 
 
 def test_us_east_1_global_endpoint() raises:
-    var rules = komira_aws_s3_endpoint_rules()
+    var rules = aws_s3_endpoint_rules()
     var config = _config(String("us-east-1"))
     assert_equal(
         _get(rules, config, String("lake")), "https://lake.s3.us-east-1.amazonaws.com"
@@ -157,7 +157,7 @@ def test_us_east_1_global_endpoint() raises:
 
 
 def test_an_operation_without_a_bucket() raises:
-    var rules = komira_aws_s3_endpoint_rules()
+    var rules = aws_s3_endpoint_rules()
     var input = S3ListBucketsRequest()
     var resolved = resolve_list_buckets_endpoint(
         rules, _config(String("us-west-2")), input
@@ -173,7 +173,7 @@ def test_an_operation_without_a_bucket() raises:
 
 
 def test_localstack_path_style() raises:
-    var rules = komira_aws_s3_endpoint_rules()
+    var rules = aws_s3_endpoint_rules()
     var config = _config(String("us-east-1"))
     config.endpoint = Optional[String](String("http://localhost:4566"))
     config.force_path_style = Optional[Bool](True)
@@ -198,7 +198,7 @@ def test_custom_endpoint_keeps_the_rulesets_addressing() raises:
     # With `force_path_style` unset, a bucket that can be a host name is
     # addressed by virtual host on a custom endpoint too: a caller of an
     # endpoint that serves only path style sets it.
-    var rules = komira_aws_s3_endpoint_rules()
+    var rules = aws_s3_endpoint_rules()
     var config = _config(String("us-east-1"))
     config.endpoint = Optional[String](String("http://localhost:4566"))
     assert_equal(_get(rules, config, String("lake")), "http://lake.localhost:4566")
@@ -210,7 +210,7 @@ def test_custom_endpoint_keeps_the_rulesets_addressing() raises:
 
 def test_minio_ip_endpoint_is_path_style() raises:
     # An IP-literal endpoint cannot take the bucket as a host label.
-    var rules = komira_aws_s3_endpoint_rules()
+    var rules = aws_s3_endpoint_rules()
     var config = _config(String("us-east-1"))
     config.endpoint = Optional[String](String("http://127.0.0.1:9000"))
     var input = S3GetObjectRequest(String("lake"), String("x.bin"))
@@ -223,7 +223,7 @@ def test_minio_ip_endpoint_is_path_style() raises:
 
 
 def test_custom_endpoint_with_a_path() raises:
-    var rules = komira_aws_s3_endpoint_rules()
+    var rules = aws_s3_endpoint_rules()
     var config = _config(String("us-east-1"))
     config.endpoint = Optional[String](String("https://objects.example.com/s3"))
     config.force_path_style = Optional[Bool](True)
@@ -237,7 +237,7 @@ def test_custom_endpoint_with_a_path() raises:
 
 
 def test_ruleset_refusals_are_raised() raises:
-    var rules = komira_aws_s3_endpoint_rules()
+    var rules = aws_s3_endpoint_rules()
     var config = _config(String("us-east-1"))
     config.endpoint = Optional[String](String("http://localhost:4566"))
     config.use_fips = Optional[Bool](True)
@@ -310,7 +310,7 @@ def test_signed_get_object_example() raises:
     var input = S3GetObjectRequest(String("examplebucket"), String("test.txt"))
     input.set_range_(String("bytes=0-9"))
     var resolved = resolve_get_object_endpoint(
-        komira_aws_s3_endpoint_rules(), _example_config(), input
+        aws_s3_endpoint_rules(), _example_config(), input
     )
     assert_equal(resolved.url, "https://examplebucket.s3.amazonaws.com")
     var req = _signed(build_get_object_request(input), resolved)
@@ -338,7 +338,7 @@ def test_signed_list_objects_example() raises:
     input.set_max_keys(Int32(2))
     input.set_prefix(String("J"))
     var resolved = resolve_list_objects_endpoint(
-        komira_aws_s3_endpoint_rules(), _example_config(), input
+        aws_s3_endpoint_rules(), _example_config(), input
     )
     var req = _signed(build_list_objects_request(input), resolved)
     assert_equal(req.target, "/?max-keys=2&prefix=J")
@@ -362,7 +362,7 @@ def test_signed_put_object_example() raises:
     input.set_body(_bytes(String("Welcome to Amazon S3.")))
     input.set_storage_class(String(S3_STORAGE_CLASS_REDUCED_REDUNDANCY))
     var resolved = resolve_put_object_endpoint(
-        komira_aws_s3_endpoint_rules(), _example_config(), input
+        aws_s3_endpoint_rules(), _example_config(), input
     )
     var built = build_put_object_request(input)
     var req = AwsRequest(built.method, built.uri)
@@ -412,7 +412,7 @@ def test_signed_put_object_as_sent() raises:
     input.set_body(_bytes(String("Welcome to Amazon S3.")))
     input.set_storage_class(String(S3_STORAGE_CLASS_REDUCED_REDUNDANCY))
     var resolved = resolve_put_object_endpoint(
-        komira_aws_s3_endpoint_rules(), _example_config(), input
+        aws_s3_endpoint_rules(), _example_config(), input
     )
     var req = _signed(build_put_object_request(input), resolved)
     assert_equal(req.header("x-amz-checksum-crc32"), "Ox7nCg==")
@@ -433,7 +433,7 @@ def test_signed_get_bucket_lifecycle_example() raises:
     # client does not build GetBucketLifecycleConfiguration; the request is
     # written out, and resolved as a bucket-level operation is.
     var resolved = resolve_list_objects_endpoint(
-        komira_aws_s3_endpoint_rules(),
+        aws_s3_endpoint_rules(),
         _example_config(),
         S3ListObjectsRequest(String("examplebucket")),
     )
@@ -465,7 +465,7 @@ def test_signed_path_style() raises:
     var config = _example_config()
     config.force_path_style = Optional[Bool](True)
     var resolved = resolve_get_object_endpoint(
-        komira_aws_s3_endpoint_rules(), config, input
+        aws_s3_endpoint_rules(), config, input
     )
     var req = _signed(build_get_object_request(input), resolved)
     assert_equal(req.host, "s3.amazonaws.com")
@@ -496,7 +496,7 @@ def test_signed_head_object() raises:
     # HEAD, /test.txt, no query.
     var input = S3HeadObjectRequest(String("examplebucket"), String("test.txt"))
     var resolved = resolve_head_object_endpoint(
-        komira_aws_s3_endpoint_rules(), _example_config(), input
+        aws_s3_endpoint_rules(), _example_config(), input
     )
     var req = _signed(build_head_object_request(input), resolved)
     assert_equal(req.method, "HEAD")
@@ -513,7 +513,7 @@ def test_signed_delete_object() raises:
     # DELETE, /test.txt, no query.
     var input = S3DeleteObjectRequest(String("examplebucket"), String("test.txt"))
     var resolved = resolve_delete_object_endpoint(
-        komira_aws_s3_endpoint_rules(), _example_config(), input
+        aws_s3_endpoint_rules(), _example_config(), input
     )
     var req = _signed(build_delete_object_request(input), resolved)
     assert_equal(req.method, "DELETE")
@@ -532,7 +532,7 @@ def test_signed_create_multipart_upload() raises:
         String("examplebucket"), String("big.bin")
     )
     var resolved = resolve_create_multipart_upload_endpoint(
-        komira_aws_s3_endpoint_rules(), _example_config(), input
+        aws_s3_endpoint_rules(), _example_config(), input
     )
     var req = _signed(build_create_multipart_upload_request(input), resolved)
     assert_equal(req.method, "POST")
@@ -567,7 +567,7 @@ def test_signed_delete_objects() raises:
     delete.set_quiet(True)
     var input = S3DeleteObjectsRequest(String("examplebucket"), delete^)
     var resolved = resolve_delete_objects_endpoint(
-        komira_aws_s3_endpoint_rules(), _example_config(), input
+        aws_s3_endpoint_rules(), _example_config(), input
     )
     assert_equal(resolved.url, "https://examplebucket.s3.amazonaws.com")
     var req = _signed(build_delete_objects_request(input), resolved)

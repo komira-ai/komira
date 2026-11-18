@@ -61,11 +61,11 @@ Where a call goes, and what it is signed as, from the endpoint ruleset:
 
 <!-- mojo-hidden from std.testing import assert_equal -->
 ```mojo
-from aws_apigatewayv2.aws_apigatewayv2 import ApiGatewayV2EndpointConfig, ApiGatewayV2GetApisRequest, komira_aws_apigatewayv2_endpoint_rules, resolve_get_apis_endpoint
+from aws_apigatewayv2.aws_apigatewayv2 import ApiGatewayV2EndpointConfig, ApiGatewayV2GetApisRequest, aws_apigatewayv2_endpoint_rules, resolve_get_apis_endpoint
 from aws_core import aws_signing_target
 
 var got = resolve_get_apis_endpoint(
-    komira_aws_apigatewayv2_endpoint_rules(),
+    aws_apigatewayv2_endpoint_rules(),
     ApiGatewayV2EndpointConfig(String("us-west-2")),
     ApiGatewayV2GetApisRequest(),
 )

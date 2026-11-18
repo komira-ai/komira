@@ -50,7 +50,7 @@ from aws_ses.aws_ses import (
     SESSetActiveReceiptRuleSetRequest,
     build_create_receipt_rule_set_request,
     build_describe_active_receipt_rule_set_request,
-    komira_aws_ses_endpoint_rules,
+    aws_ses_endpoint_rules,
     resolve_create_receipt_rule_endpoint,
     resolve_create_receipt_rule_set_endpoint,
     resolve_delete_receipt_rule_endpoint,
@@ -235,7 +235,7 @@ def _check_case(rules: EndpointRuleSet, tc: JsonValue, mut why: String) raises -
 
 
 def test_botocore_endpoint_cases() raises:
-    var rules = komira_aws_ses_endpoint_rules()
+    var rules = aws_ses_endpoint_rules()
     var doc = parse_json_value(_read(_CASES))
     ref cases = doc.children[_find(doc, "testCases")]
     var n = len(cases.children)
@@ -262,7 +262,7 @@ def test_botocore_endpoint_cases() raises:
 
 
 def _resolve(config: SESEndpointConfig) raises -> ResolvedEndpoint:
-    return _resolve_all(komira_aws_ses_endpoint_rules(), config)
+    return _resolve_all(aws_ses_endpoint_rules(), config)
 
 
 def test_regional_default() raises:

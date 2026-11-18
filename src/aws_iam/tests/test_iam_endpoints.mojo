@@ -64,7 +64,7 @@ from aws_iam.aws_iam import (
     IAMUpdateAssumeRolePolicyRequest,
     build_create_user_request,
     build_get_role_request,
-    komira_aws_iam_endpoint_rules,
+    aws_iam_endpoint_rules,
     resolve_add_client_id_to_open_id_connect_provider_endpoint,
     resolve_create_access_key_endpoint,
     resolve_create_role_endpoint,
@@ -297,7 +297,7 @@ def _check_case(rules: EndpointRuleSet, tc: JsonValue, mut why: String) raises -
 
 
 def test_botocore_endpoint_cases() raises:
-    var rules = komira_aws_iam_endpoint_rules()
+    var rules = aws_iam_endpoint_rules()
     var doc = parse_json_value(_read(_CASES))
     ref cases = doc.children[_find(doc, "testCases")]
     var n = len(cases.children)
@@ -324,7 +324,7 @@ def test_botocore_endpoint_cases() raises:
 
 
 def _resolve(config: IAMEndpointConfig) raises -> ResolvedEndpoint:
-    return _resolve_all(komira_aws_iam_endpoint_rules(), config)
+    return _resolve_all(aws_iam_endpoint_rules(), config)
 
 
 def test_a_regional_caller_signs_for_us_east_1() raises:

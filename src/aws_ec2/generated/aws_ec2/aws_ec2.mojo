@@ -60,8 +60,8 @@
 
 # Every declaration of `aws_ec2` is in a part under `_parts/`; this module
 # re-exports each, so an import from this module names what it always did.
-from ._parts.komira_aws_ec2_p01 import (
-    EC2_SERVICE, EC2_ENDPOINT_PREFIX, EC2_API_VERSION, komira_aws_ec2_host,
+from ._parts.aws_ec2_p01 import (
+    EC2_SERVICE, EC2_ENDPOINT_PREFIX, EC2_API_VERSION, aws_ec2_host,
     EC2_AMD_SEV_SNP_SPECIFICATION_ENABLED, EC2_AMD_SEV_SNP_SPECIFICATION_DISABLED,
     EC2_ARCHITECTURE_VALUES_I386, EC2_ARCHITECTURE_VALUES_X86_64, EC2_ARCHITECTURE_VALUES_ARM64,
     EC2_ARCHITECTURE_VALUES_X86_64_MAC, EC2_ARCHITECTURE_VALUES_ARM64_MAC,
@@ -356,7 +356,7 @@ from ._parts.komira_aws_ec2_p01 import (
     EC2_INSTANCE_TYPE_C7I_4XLARGE, EC2_INSTANCE_TYPE_C7I_8XLARGE, EC2_INSTANCE_TYPE_C7I_12XLARGE,
     EC2_INSTANCE_TYPE_C7I_16XLARGE, EC2_INSTANCE_TYPE_C7I_24XLARGE, EC2_INSTANCE_TYPE_C7I_48XLARGE,
 )
-from ._parts.komira_aws_ec2_p02 import (
+from ._parts.aws_ec2_p02 import (
     EC2_INSTANCE_TYPE_MAC2_M2PRO_METAL, EC2_INSTANCE_TYPE_R7IZ_LARGE, EC2_INSTANCE_TYPE_R7IZ_XLARGE,
     EC2_INSTANCE_TYPE_R7IZ_2XLARGE, EC2_INSTANCE_TYPE_R7IZ_4XLARGE, EC2_INSTANCE_TYPE_R7IZ_8XLARGE,
     EC2_INSTANCE_TYPE_R7IZ_12XLARGE, EC2_INSTANCE_TYPE_R7IZ_16XLARGE,
@@ -714,7 +714,7 @@ from ._parts.komira_aws_ec2_p02 import (
     EC2_VOLUME_TYPE_STANDARD, EC2_VOLUME_TYPE_IO1, EC2_VOLUME_TYPE_IO2, EC2_VOLUME_TYPE_GP2,
     EC2_VOLUME_TYPE_SC1, EC2_VOLUME_TYPE_ST1, EC2_VOLUME_TYPE_GP3,
 )
-from ._parts.komira_aws_ec2_p03 import (
+from ._parts.aws_ec2_p03 import (
     EC2_VPC_CIDR_BLOCK_STATE_CODE_ASSOCIATING, EC2_VPC_CIDR_BLOCK_STATE_CODE_ASSOCIATED,
     EC2_VPC_CIDR_BLOCK_STATE_CODE_DISASSOCIATING, EC2_VPC_CIDR_BLOCK_STATE_CODE_DISASSOCIATED,
     EC2_VPC_CIDR_BLOCK_STATE_CODE_FAILING, EC2_VPC_CIDR_BLOCK_STATE_CODE_FAILED,
@@ -735,80 +735,80 @@ from ._parts.komira_aws_ec2_p03 import (
     EC2CapacityReservationSpecificationResponse, EC2CapacityReservationTarget,
     EC2CapacityReservationTargetResponse,
 )
-from ._parts.komira_aws_ec2_p04 import (
+from ._parts.aws_ec2_p04 import (
     EC2ConnectionTrackingSpecificationRequest, EC2ConnectionTrackingSpecificationResponse,
     EC2CpuOptions, EC2CpuOptionsRequest, EC2CreateSecurityGroupRequest,
     EC2CreateSecurityGroupResult, EC2CreditSpecificationRequest, EC2DeleteSecurityGroupRequest,
     EC2DeleteSecurityGroupResult, EC2DescribeInstancesRequest,
 )
-from ._parts.komira_aws_ec2_p05 import (
+from ._parts.aws_ec2_p05 import (
     EC2DescribeInstancesResult, EC2DescribeSecurityGroupsRequest, EC2DescribeSecurityGroupsResult,
     EC2DescribeSpotInstanceRequestsRequest, EC2DescribeSpotInstanceRequestsResult,
     EC2DescribeSubnetsRequest, EC2DescribeSubnetsResult, EC2DescribeVpcsRequest,
     EC2DescribeVpcsResult,
 )
-from ._parts.komira_aws_ec2_p06 import (
+from ._parts.aws_ec2_p06 import (
     EC2EbsBlockDevice, EC2EbsInstanceBlockDevice, EC2ElasticGpuAssociation,
     EC2ElasticGpuSpecification, EC2ElasticInferenceAccelerator,
     EC2ElasticInferenceAcceleratorAssociation, EC2EnaSrdSpecificationRequest,
     EC2EnaSrdUdpSpecificationRequest, EC2EnclaveOptions, EC2EnclaveOptionsRequest,
 )
-from ._parts.komira_aws_ec2_p07 import (
+from ._parts.aws_ec2_p07 import (
     EC2Filter, EC2GroupIdentifier, EC2HibernationOptions, EC2HibernationOptionsRequest,
     EC2IamInstanceProfile, EC2IamInstanceProfileSpecification,
 )
-from ._parts.komira_aws_ec2_p08 import EC2Instance
-from ._parts.komira_aws_ec2_p09 import (
+from ._parts.aws_ec2_p08 import EC2Instance
+from ._parts.aws_ec2_p09 import (
     EC2InstanceAttachmentEnaSrdSpecification, EC2InstanceAttachmentEnaSrdUdpSpecification,
     EC2InstanceBlockDeviceMapping, EC2InstanceIpv4Prefix, EC2InstanceIpv6Address,
     EC2InstanceIpv6Prefix, EC2InstanceMaintenanceOptions, EC2InstanceMaintenanceOptionsRequest,
     EC2InstanceMarketOptionsRequest, EC2InstanceMetadataOptionsRequest,
     EC2InstanceMetadataOptionsResponse,
 )
-from ._parts.komira_aws_ec2_p10 import (
+from ._parts.aws_ec2_p10 import (
     EC2InstanceNetworkInterface, EC2InstanceNetworkInterfaceAssociation,
     EC2InstanceNetworkInterfaceAttachment,
 )
-from ._parts.komira_aws_ec2_p11 import (
+from ._parts.aws_ec2_p11 import (
     EC2InstanceNetworkInterfaceSpecification, EC2InstanceNetworkPerformanceOptions,
     EC2InstanceNetworkPerformanceOptionsRequest, EC2InstancePrivateIpAddress,
     EC2InstanceSecondaryInterface, EC2InstanceSecondaryInterfaceAttachment,
     EC2InstanceSecondaryInterfacePrivateIpAddress,
 )
-from ._parts.komira_aws_ec2_p12 import (
+from ._parts.aws_ec2_p12 import (
     EC2InstanceSecondaryInterfacePrivateIpAddressRequest,
     EC2InstanceSecondaryInterfaceSpecificationRequest, EC2InstanceState, EC2InstanceStateChange,
     EC2IpPermission, EC2IpRange, EC2Ipv4PrefixSpecificationRequest,
     EC2Ipv6PrefixSpecificationRequest, EC2Ipv6Range,
 )
-from ._parts.komira_aws_ec2_p13 import (
+from ._parts.aws_ec2_p13 import (
     EC2LaunchSpecification, EC2LaunchTemplateSpecification, EC2LicenseConfiguration,
     EC2LicenseConfigurationRequest, EC2Monitoring, EC2OperatorRequest, EC2OperatorResponse,
     EC2Placement, EC2PrefixListId,
 )
-from ._parts.komira_aws_ec2_p14 import (
+from ._parts.aws_ec2_p14 import (
     EC2PrivateDnsNameOptionsOnLaunch, EC2PrivateDnsNameOptionsRequest,
     EC2PrivateDnsNameOptionsResponse, EC2PrivateIpAddressSpecification, EC2ProductCode,
     EC2ReferencedSecurityGroup, EC2Reservation, EC2RevokeSecurityGroupIngressRequest,
     EC2RevokeSecurityGroupIngressResult,
 )
-from ._parts.komira_aws_ec2_p15 import (
+from ._parts.aws_ec2_p15 import (
     EC2RevokedSecurityGroupRule, EC2RunInstancesMonitoringEnabled, EC2RunInstancesRequest,
 )
-from ._parts.komira_aws_ec2_p16 import (
+from ._parts.aws_ec2_p16 import (
     EC2SecurityGroup, EC2SecurityGroupRule, EC2SpotInstanceRequest, EC2SpotInstanceStateFault,
     EC2SpotInstanceStatus,
 )
-from ._parts.komira_aws_ec2_p17 import (
+from ._parts.aws_ec2_p17 import (
     EC2SpotMarketOptions, EC2SpotPlacement, EC2StateReason, EC2Subnet, EC2SubnetCidrBlockState,
     EC2SubnetIpv6CidrBlockAssociation, EC2Tag, EC2TagSpecification,
 )
-from ._parts.komira_aws_ec2_p18 import (
+from ._parts.aws_ec2_p18 import (
     EC2TerminateInstancesRequest, EC2TerminateInstancesResult, EC2UserIdGroupPair, EC2Vpc,
     EC2VpcCidrBlockAssociation, EC2VpcCidrBlockState, EC2VpcEncryptionControl,
     EC2VpcEncryptionControlExclusion,
 )
-from ._parts.komira_aws_ec2_p19 import (
+from ._parts.aws_ec2_p19 import (
     EC2VpcEncryptionControlExclusions, EC2VpcIpv6CidrBlockAssociation,
     build_authorize_security_group_ingress_request, parse_authorize_security_group_ingress_response,
     build_cancel_spot_instance_requests_request, parse_cancel_spot_instance_requests_response,
@@ -822,8 +822,7 @@ from ._parts.komira_aws_ec2_p19 import (
     parse_revoke_security_group_ingress_response, build_run_instances_request,
     parse_run_instances_response, build_terminate_instances_request,
     parse_terminate_instances_response, EC2_ENDPOINT_RULESET, EC2_PARTITIONS,
-    komira_aws_ec2_endpoint_rules, EC2EndpointConfig,
-    resolve_authorize_security_group_ingress_endpoint,
+    aws_ec2_endpoint_rules, EC2EndpointConfig, resolve_authorize_security_group_ingress_endpoint,
     resolve_cancel_spot_instance_requests_endpoint, resolve_create_security_group_endpoint,
     resolve_delete_security_group_endpoint, resolve_describe_instances_endpoint,
     resolve_describe_security_groups_endpoint, resolve_describe_spot_instance_requests_endpoint,
@@ -831,6 +830,6 @@ from ._parts.komira_aws_ec2_p19 import (
     resolve_revoke_security_group_ingress_endpoint, resolve_run_instances_endpoint,
     resolve_terminate_instances_endpoint,
 )
-from ._parts.komira_aws_ec2_p20 import EC2Client, _komira_aws_ec2_error
+from ._parts.aws_ec2_p20 import EC2Client, _aws_ec2_error
 
 # End of aws_ec2, generated by aws-client-gen.

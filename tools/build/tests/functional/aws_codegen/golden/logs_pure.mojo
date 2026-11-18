@@ -87,7 +87,7 @@ comptime CLOUDWATCHLOGS_ENDPOINT_PREFIX: String = "logs"
 comptime CLOUDWATCHLOGS_CONTENT_TYPE: String = "application/x-amz-json-1.1"
 comptime CLOUDWATCHLOGS_TARGET_PREFIX: String = "Logs_20140328"
 
-def komira_aws_logs_host(region: String) raises -> String:
+def aws_logs_host(region: String) raises -> String:
     """`logs.<region>.amazonaws.com`.
 
         ⚠ REGIONAL. An empty region here would sign against a host with a
@@ -95,7 +95,7 @@ def komira_aws_logs_host(region: String) raises -> String:
         composition that left the region unset. So it is refused by name."""
     if region.byte_length() == 0:
         raise Error(
-            "komira_aws_logs_host: REFUSED an EMPTY region — this is a REGIONAL"
+            "aws_logs_host: REFUSED an EMPTY region — this is a REGIONAL"
             " service and there is no global endpoint to fall back to."
         )
     return String("logs.") + region + String(".amazonaws.com")

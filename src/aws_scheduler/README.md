@@ -14,7 +14,7 @@ GetSchedule, UpdateSchedule and DeleteSchedule:
   and the others), each read with `from_aws_json`;
 - an endpoint resolver `resolve_<operation>_endpoint`, which runs the
   service's published endpoint ruleset
-  (`komira_aws_scheduler_endpoint_rules()`) over a `SchedulerEndpointConfig`;
+  (`aws_scheduler_endpoint_rules()`) over a `SchedulerEndpointConfig`;
 - `SchedulerClient`, which resolves each call's endpoint, signs it with SigV4
   (signing name `scheduler`) and sends it over the http_core
   `Connector` it is given, retried as the AWS SDKs' standard mode retries.
@@ -122,10 +122,10 @@ from aws_scheduler.aws_scheduler import SchedulerGetScheduleInput
 -->
 ```mojo
 from aws_scheduler.aws_scheduler import SchedulerEndpointConfig
-from aws_scheduler.aws_scheduler import komira_aws_scheduler_endpoint_rules
+from aws_scheduler.aws_scheduler import aws_scheduler_endpoint_rules
 from aws_scheduler.aws_scheduler import resolve_get_schedule_endpoint
 
-var rules = komira_aws_scheduler_endpoint_rules()
+var rules = aws_scheduler_endpoint_rules()
 var input = SchedulerGetScheduleInput(String("nightly-reap"))
 assert_equal(
     resolve_get_schedule_endpoint(rules, SchedulerEndpointConfig(String("us-west-2")), input).url,

@@ -46,7 +46,7 @@ from aws_sqs.aws_sqs import (
     SQSSetQueueAttributesRequest,
     build_delete_message_request,
     build_receive_message_request,
-    komira_aws_sqs_endpoint_rules,
+    aws_sqs_endpoint_rules,
     resolve_create_queue_endpoint,
     resolve_delete_message_endpoint,
     resolve_delete_queue_endpoint,
@@ -214,7 +214,7 @@ def _check_case(rules: EndpointRuleSet, tc: JsonValue, mut why: String) raises -
 
 
 def test_botocore_endpoint_cases() raises:
-    var rules = komira_aws_sqs_endpoint_rules()
+    var rules = aws_sqs_endpoint_rules()
     var doc = parse_json_value(_read(_CASES))
     ref cases = doc.children[_find(doc, "testCases")]
     var n = len(cases.children)
@@ -241,7 +241,7 @@ def test_botocore_endpoint_cases() raises:
 
 
 def _resolve(config: SQSEndpointConfig) raises -> ResolvedEndpoint:
-    return _resolve_all(komira_aws_sqs_endpoint_rules(), config)
+    return _resolve_all(aws_sqs_endpoint_rules(), config)
 
 
 def test_regional_default() raises:

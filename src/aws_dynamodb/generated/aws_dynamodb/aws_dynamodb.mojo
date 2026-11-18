@@ -56,9 +56,9 @@
 
 # Every declaration of `aws_dynamodb` is in a part under `_parts/`; this module
 # re-exports each, so an import from this module names what it always did.
-from ._parts.komira_aws_dynamodb_p01 import (
+from ._parts.aws_dynamodb_p01 import (
     DYNAMODB_SERVICE, DYNAMODB_ENDPOINT_PREFIX, DYNAMODB_CONTENT_TYPE, DYNAMODB_TARGET_PREFIX,
-    komira_aws_dynamodb_host, DYNAMO_DBATTRIBUTE_ACTION_ADD, DYNAMO_DBATTRIBUTE_ACTION_PUT,
+    aws_dynamodb_host, DYNAMO_DBATTRIBUTE_ACTION_ADD, DYNAMO_DBATTRIBUTE_ACTION_PUT,
     DYNAMO_DBATTRIBUTE_ACTION_DELETE, DYNAMO_DBBILLING_MODE_PROVISIONED,
     DYNAMO_DBBILLING_MODE_PAY_PER_REQUEST, DYNAMO_DBCOMPARISON_OPERATOR_EQ,
     DYNAMO_DBCOMPARISON_OPERATOR_NE, DYNAMO_DBCOMPARISON_OPERATOR_IN,
@@ -110,72 +110,72 @@ from ._parts.komira_aws_dynamodb_p01 import (
     DynamoDBAttributeValue, DynamoDBAttributeValueUpdate, DynamoDBBillingModeSummary,
     DynamoDBCapacity,
 )
-from ._parts.komira_aws_dynamodb_p02 import (
+from ._parts.aws_dynamodb_p02 import (
     DynamoDBCondition, DynamoDBConditionalCheckFailedException, DynamoDBConsumedCapacity,
     DynamoDBContinuousBackupsDescription, DynamoDBContinuousBackupsUnavailableException,
     DynamoDBCreateGlobalSecondaryIndexAction, DynamoDBCreateGlobalTableWitnessGroupMemberAction,
     DynamoDBCreateReplicationGroupMemberAction,
 )
-from ._parts.komira_aws_dynamodb_p03 import (
+from ._parts.aws_dynamodb_p03 import (
     DynamoDBCreateTableInput, DynamoDBCreateTableOutput, DynamoDBCreateVectorIndexAction,
     DynamoDBDeleteGlobalSecondaryIndexAction, DynamoDBDeleteGlobalTableWitnessGroupMemberAction,
     DynamoDBDeleteItemInput,
 )
-from ._parts.komira_aws_dynamodb_p04 import (
+from ._parts.aws_dynamodb_p04 import (
     DynamoDBDeleteItemOutput, DynamoDBDeleteReplicationGroupMemberAction, DynamoDBDeleteTableInput,
     DynamoDBDeleteTableOutput, DynamoDBDeleteVectorIndexAction,
     DynamoDBDescribeContinuousBackupsInput, DynamoDBDescribeContinuousBackupsOutput,
     DynamoDBDescribeTableInput, DynamoDBDescribeTableOutput, DynamoDBDescribeTimeToLiveInput,
     DynamoDBDescribeTimeToLiveOutput, DynamoDBExpectedAttributeValue,
 )
-from ._parts.komira_aws_dynamodb_p05 import (
+from ._parts.aws_dynamodb_p05 import (
     DynamoDBGetItemInput, DynamoDBGetItemOutput, DynamoDBGlobalSecondaryIndex,
     DynamoDBGlobalSecondaryIndexDescription, DynamoDBGlobalSecondaryIndexUpdate,
     DynamoDBGlobalSecondaryIndexWarmThroughputDescription, DynamoDBGlobalTableWitnessDescription,
 )
-from ._parts.komira_aws_dynamodb_p06 import (
+from ._parts.aws_dynamodb_p06 import (
     DynamoDBGlobalTableWitnessGroupUpdate, DynamoDBInternalServerError,
     DynamoDBItemCollectionMetrics, DynamoDBItemCollectionSizeLimitExceededException,
     DynamoDBKeySchemaElement, DynamoDBLimitExceededException, DynamoDBLocalSecondaryIndex,
     DynamoDBLocalSecondaryIndexDescription, DynamoDBOnDemandThroughput,
     DynamoDBOnDemandThroughputOverride,
 )
-from ._parts.komira_aws_dynamodb_p07 import (
+from ._parts.aws_dynamodb_p07 import (
     DynamoDBPointInTimeRecoveryDescription, DynamoDBPointInTimeRecoverySpecification,
     DynamoDBProjection, DynamoDBProvisionedThroughput, DynamoDBProvisionedThroughputDescription,
     DynamoDBProvisionedThroughputExceededException, DynamoDBProvisionedThroughputOverride,
     DynamoDBPutItemInput,
 )
-from ._parts.komira_aws_dynamodb_p08 import (
+from ._parts.aws_dynamodb_p08 import (
     DynamoDBPutItemOutput, DynamoDBQueryInput, DynamoDBQueryOutput, DynamoDBReplicaDescription,
     DynamoDBReplicaGlobalSecondaryIndex,
 )
-from ._parts.komira_aws_dynamodb_p09 import (
+from ._parts.aws_dynamodb_p09 import (
     DynamoDBReplicaGlobalSecondaryIndexDescription, DynamoDBReplicatedWriteConflictException,
     DynamoDBReplicationGroupUpdate, DynamoDBRequestLimitExceeded, DynamoDBResourceInUseException,
     DynamoDBResourceNotFoundException, DynamoDBRestoreSummary, DynamoDBSSEDescription,
     DynamoDBSSESpecification,
 )
-from ._parts.komira_aws_dynamodb_p10 import (
+from ._parts.aws_dynamodb_p10 import (
     DynamoDBScanInput, DynamoDBScanOutput, DynamoDBSearchSchemaElement, DynamoDBStreamSpecification,
     DynamoDBTableClassSummary,
 )
-from ._parts.komira_aws_dynamodb_p11 import (
+from ._parts.aws_dynamodb_p11 import (
     DynamoDBTableDescription, DynamoDBTableNotFoundException,
     DynamoDBTableWarmThroughputDescription, DynamoDBTag, DynamoDBThrottlingException,
 )
-from ._parts.komira_aws_dynamodb_p12 import (
+from ._parts.aws_dynamodb_p12 import (
     DynamoDBThrottlingReason, DynamoDBTimeToLiveDescription, DynamoDBTimeToLiveSpecification,
     DynamoDBTransactionConflictException, DynamoDBUpdateContinuousBackupsInput,
     DynamoDBUpdateContinuousBackupsOutput, DynamoDBUpdateGlobalSecondaryIndexAction,
     DynamoDBUpdateItemInput,
 )
-from ._parts.komira_aws_dynamodb_p13 import (
+from ._parts.aws_dynamodb_p13 import (
     DynamoDBUpdateItemOutput, DynamoDBUpdateReplicationGroupMemberAction, DynamoDBUpdateTableInput,
     DynamoDBUpdateTableOutput, DynamoDBUpdateTimeToLiveInput, DynamoDBUpdateTimeToLiveOutput,
     DynamoDBVectorAttributeDefinition,
 )
-from ._parts.komira_aws_dynamodb_p14 import (
+from ._parts.aws_dynamodb_p14 import (
     DynamoDBVectorCapacity, DynamoDBVectorIndex, DynamoDBVectorIndexDescription,
     DynamoDBVectorIndexUpdate, DynamoDBWarmThroughput, build_create_table_request,
     parse_create_table_response, build_delete_item_request, parse_delete_item_response,
@@ -189,9 +189,9 @@ from ._parts.komira_aws_dynamodb_p14 import (
     parse_update_continuous_backups_response, build_update_item_request, parse_update_item_response,
     build_update_table_request, parse_update_table_response, build_update_time_to_live_request,
     parse_update_time_to_live_response, DYNAMODB_ENDPOINT_RULESET, DYNAMODB_PARTITIONS,
-    komira_aws_dynamodb_endpoint_rules,
+    aws_dynamodb_endpoint_rules,
 )
-from ._parts.komira_aws_dynamodb_p15 import (
+from ._parts.aws_dynamodb_p15 import (
     DynamoDBEndpointConfig, resolve_create_table_endpoint, resolve_delete_item_endpoint,
     resolve_delete_table_endpoint, resolve_describe_continuous_backups_endpoint,
     resolve_describe_table_endpoint, resolve_describe_time_to_live_endpoint,

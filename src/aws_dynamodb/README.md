@@ -54,9 +54,9 @@ the FIPS endpoint. A missing region is refused with the ruleset's own message:
 
 <!-- mojo-hidden from std.testing import assert_equal, assert_raises -->
 ```mojo
-from aws_dynamodb.aws_dynamodb import DynamoDBDescribeTableInput, DynamoDBEndpointConfig, komira_aws_dynamodb_endpoint_rules, resolve_describe_table_endpoint
+from aws_dynamodb.aws_dynamodb import DynamoDBDescribeTableInput, DynamoDBEndpointConfig, aws_dynamodb_endpoint_rules, resolve_describe_table_endpoint
 
-var rules = komira_aws_dynamodb_endpoint_rules()
+var rules = aws_dynamodb_endpoint_rules()
 var table = DynamoDBDescribeTableInput(String("routes"))
 var got = resolve_describe_table_endpoint(rules, DynamoDBEndpointConfig(String("us-west-2")), table)
 assert_equal(got.url, "https://dynamodb.us-west-2.amazonaws.com")
@@ -80,7 +80,7 @@ gives for these exact bytes:
 <!-- mojo-hidden from std.testing import assert_equal -->
 ```mojo
 from aws_core import AwsCredential, FixedClock, Header, aws_signing_target, build_sigv4_signed_request
-from aws_dynamodb.aws_dynamodb import DynamoDBAttributeValue, DynamoDBEndpointConfig, DynamoDBGetItemInput, build_get_item_request, komira_aws_dynamodb_endpoint_rules, resolve_get_item_endpoint
+from aws_dynamodb.aws_dynamodb import DynamoDBAttributeValue, DynamoDBEndpointConfig, DynamoDBGetItemInput, build_get_item_request, aws_dynamodb_endpoint_rules, resolve_get_item_endpoint
 
 var pk = DynamoDBAttributeValue()
 pk.set_s(String("route#1"))
@@ -91,7 +91,7 @@ input.set_consistent_read(True)
 var built = build_get_item_request(input)
 
 var config = DynamoDBEndpointConfig(String("us-east-1"))
-var resolved = resolve_get_item_endpoint(komira_aws_dynamodb_endpoint_rules(), config, input)
+var resolved = resolve_get_item_endpoint(aws_dynamodb_endpoint_rules(), config, input)
 var target = aws_signing_target(resolved, String("us-east-1"), String("dynamodb"))
 
 var extra = List[Header]()

@@ -56,7 +56,7 @@ from aws_ec2.aws_ec2 import (
     EC2TerminateInstancesRequest,
     build_describe_instances_request,
     build_terminate_instances_request,
-    komira_aws_ec2_endpoint_rules,
+    aws_ec2_endpoint_rules,
     resolve_authorize_security_group_ingress_endpoint,
     resolve_cancel_spot_instance_requests_endpoint,
     resolve_create_security_group_endpoint,
@@ -269,7 +269,7 @@ def _check_case(rules: EndpointRuleSet, tc: JsonValue, mut why: String) raises -
 
 
 def test_botocore_endpoint_cases() raises:
-    var rules = komira_aws_ec2_endpoint_rules()
+    var rules = aws_ec2_endpoint_rules()
     var doc = parse_json_value(_read(_CASES))
     ref cases = doc.children[_find(doc, "testCases")]
     var n = len(cases.children)
@@ -296,7 +296,7 @@ def test_botocore_endpoint_cases() raises:
 
 
 def _resolve(config: EC2EndpointConfig) raises -> ResolvedEndpoint:
-    return _resolve_all(komira_aws_ec2_endpoint_rules(), config)
+    return _resolve_all(aws_ec2_endpoint_rules(), config)
 
 
 def test_regional_default() raises:

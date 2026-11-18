@@ -35,7 +35,7 @@ from aws_s3.aws_s3 import (
     build_create_multipart_upload_request,
     build_get_object_request,
     build_put_object_request,
-    komira_aws_s3_endpoint_rules,
+    aws_s3_endpoint_rules,
     parse_complete_multipart_upload_response,
     parse_copy_object_response,
     resolve_complete_multipart_upload_endpoint,
@@ -206,7 +206,7 @@ def test_a_retry_is_signed_again() raises:
     var input = S3PutObjectRequest(String("lake"), String("data/a.parquet"))
     input.set_body(_bytes(String("PAR1")))
     var target = aws_signing_target(
-        resolve_put_object_endpoint(komira_aws_s3_endpoint_rules(), _config(), input),
+        resolve_put_object_endpoint(aws_s3_endpoint_rules(), _config(), input),
         String("us-east-1"),
         String("s3"),
     )
@@ -235,7 +235,7 @@ def test_a_retry_is_signed_again() raises:
 def test_gives_up_after_three_sends() raises:
     var input = S3GetObjectRequest(String("lake"), String("hot.bin"))
     var target = aws_signing_target(
-        resolve_get_object_endpoint(komira_aws_s3_endpoint_rules(), _config(), input),
+        resolve_get_object_endpoint(aws_s3_endpoint_rules(), _config(), input),
         String("us-east-1"),
         String("s3"),
     )
@@ -256,7 +256,7 @@ def test_copy_200_with_error_is_retried() raises:
         String("lake"), s3_copy_source(String("lake"), String("a")), String("b")
     )
     var target = aws_signing_target(
-        resolve_copy_object_endpoint(komira_aws_s3_endpoint_rules(), _config(), input),
+        resolve_copy_object_endpoint(aws_s3_endpoint_rules(), _config(), input),
         String("us-east-1"),
         String("s3"),
     )
@@ -278,7 +278,7 @@ def test_copy_200_with_error_is_retried() raises:
 def _complete_target(input: S3CompleteMultipartUploadRequest) raises -> AwsSigningTarget:
     return aws_signing_target(
         resolve_complete_multipart_upload_endpoint(
-            komira_aws_s3_endpoint_rules(), _config(), input
+            aws_s3_endpoint_rules(), _config(), input
         ),
         String("us-east-1"),
         String("s3"),
@@ -348,7 +348,7 @@ def test_a_500_on_a_post_is_resent() raises:
     var input = S3CreateMultipartUploadRequest(String("lake"), String("big.bin"))
     var target = aws_signing_target(
         resolve_create_multipart_upload_endpoint(
-            komira_aws_s3_endpoint_rules(), _config(), input
+            aws_s3_endpoint_rules(), _config(), input
         ),
         String("us-east-1"),
         String("s3"),
@@ -373,7 +373,7 @@ def _put_if_none_match() raises -> S3PutObjectRequest:
 
 def _put_target(input: S3PutObjectRequest) raises -> AwsSigningTarget:
     return aws_signing_target(
-        resolve_put_object_endpoint(komira_aws_s3_endpoint_rules(), _config(), input),
+        resolve_put_object_endpoint(aws_s3_endpoint_rules(), _config(), input),
         String("us-east-1"),
         String("s3"),
     )

@@ -60,8 +60,8 @@
 
 # Every declaration of `aws_lambda` is in a part under `_parts/`; this module
 # re-exports each, so an import from this module names what it always did.
-from ._parts.komira_aws_lambda_p01 import (
-    LAMBDA_SERVICE, LAMBDA_ENDPOINT_PREFIX, LAMBDA_CONTENT_TYPE, komira_aws_lambda_host,
+from ._parts.aws_lambda_p01 import (
+    LAMBDA_SERVICE, LAMBDA_ENDPOINT_PREFIX, LAMBDA_CONTENT_TYPE, aws_lambda_host,
     LAMBDA_APPLICATION_LOG_LEVEL_TRACE, LAMBDA_APPLICATION_LOG_LEVEL_DEBUG,
     LAMBDA_APPLICATION_LOG_LEVEL_INFO, LAMBDA_APPLICATION_LOG_LEVEL_WARN,
     LAMBDA_APPLICATION_LOG_LEVEL_ERROR, LAMBDA_APPLICATION_LOG_LEVEL_FATAL,
@@ -170,73 +170,71 @@ from ._parts.komira_aws_lambda_p01 import (
     LambdaCapacityProviderConfig, LambdaCodeArtifactUserDeletedException,
     LambdaCodeArtifactUserFailedException, LambdaCodeArtifactUserPendingException,
 )
-from ._parts.komira_aws_lambda_p02 import (
+from ._parts.aws_lambda_p02 import (
     LambdaCodeSigningConfigNotFoundException, LambdaCodeStorageExceededException,
     LambdaCodeVerificationFailedException, LambdaConcurrency, LambdaCors,
 )
-from ._parts.komira_aws_lambda_p03 import (
+from ._parts.aws_lambda_p03 import (
     LambdaCreateFunctionRequest, LambdaCreateFunctionUrlConfigRequest,
     LambdaCreateFunctionUrlConfigResponse, LambdaDeadLetterConfig,
 )
-from ._parts.komira_aws_lambda_p04 import (
+from ._parts.aws_lambda_p04 import (
     LambdaDeleteFunctionRequest, LambdaDeleteFunctionResponse, LambdaDurableConfig,
     LambdaDurableExecutionAlreadyStartedException, LambdaEC2AccessDeniedException,
     LambdaEC2ThrottledException, LambdaEC2UnexpectedException, LambdaEFSIOException,
     LambdaEFSMountConnectivityException, LambdaEFSMountFailureException,
 )
-from ._parts.komira_aws_lambda_p05 import (
+from ._parts.aws_lambda_p05 import (
     LambdaEFSMountTimeoutException, LambdaENILimitReachedException, LambdaENINotReadyException,
     LambdaEnvironment, LambdaEnvironmentError, LambdaEnvironmentResponse, LambdaEphemeralStorage,
     LambdaFileSystemConfig, LambdaFunctionCode,
 )
-from ._parts.komira_aws_lambda_p06 import (
-    LambdaFunctionCodeLocation, LambdaFunctionCodeLocationError,
-)
-from ._parts.komira_aws_lambda_p07 import (
+from ._parts.aws_lambda_p06 import LambdaFunctionCodeLocation, LambdaFunctionCodeLocationError
+from ._parts.aws_lambda_p07 import (
     LambdaFunctionConfiguration, LambdaFunctionVersionsPerCapacityProviderLimitExceededException,
     LambdaGetFunctionRequest,
 )
-from ._parts.komira_aws_lambda_p08 import (
+from ._parts.aws_lambda_p08 import (
     LambdaGetFunctionResponse, LambdaGetFunctionUrlConfigRequest,
     LambdaGetFunctionUrlConfigResponse, LambdaImageConfig, LambdaImageConfigError,
     LambdaImageConfigResponse, LambdaInvalidCodeSignatureException,
     LambdaInvalidParameterValueException, LambdaInvalidRequestContentException,
 )
-from ._parts.komira_aws_lambda_p09 import (
+from ._parts.aws_lambda_p09 import (
     LambdaInvalidRuntimeException, LambdaInvalidSecurityGroupIDException,
     LambdaInvalidSubnetIDException, LambdaInvalidZipFileException, LambdaInvocationRequest,
     LambdaInvocationResponse, LambdaKMSAccessDeniedException, LambdaKMSDisabledException,
     LambdaKMSInvalidStateException,
 )
-from ._parts.komira_aws_lambda_p10 import (
+from ._parts.aws_lambda_p10 import (
     LambdaKMSNotFoundException, LambdaLambdaManagedInstancesCapacityProviderConfig, LambdaLayer,
     LambdaLoggingConfig, LambdaModeNotSupportedException, LambdaNoPublishedVersionException,
     LambdaPolicyLengthExceededException, LambdaPreconditionFailedException,
     LambdaPublicPolicyException,
 )
-from ._parts.komira_aws_lambda_p11 import (
+from ._parts.aws_lambda_p11 import (
     LambdaPutFunctionConcurrencyRequest, LambdaRecursiveInvocationException,
     LambdaRequestTooLargeException, LambdaResolvedS3Object, LambdaResourceConflictException,
     LambdaResourceNotFoundException, LambdaResourceNotReadyException, LambdaRuntimeVersionConfig,
     LambdaRuntimeVersionError, LambdaS3FilesMountConnectivityException,
 )
-from ._parts.komira_aws_lambda_p12 import (
+from ._parts.aws_lambda_p12 import (
     LambdaS3FilesMountFailureException, LambdaS3FilesMountTimeoutException,
     LambdaSerializedRequestEntityTooLargeException, LambdaServiceException,
     LambdaServiceQuotaExceededException, LambdaSnapStart, LambdaSnapStartException,
     LambdaSnapStartNotReadyException, LambdaSnapStartRegenerationFailureException,
     LambdaSnapStartResponse, LambdaSnapStartTimeoutException,
 )
-from ._parts.komira_aws_lambda_p13 import (
+from ._parts.aws_lambda_p13 import (
     LambdaSubnetIPAddressLimitReachedException, LambdaTagsError, LambdaTenancyConfig,
     LambdaTooManyRequestsException, LambdaTracingConfig, LambdaTracingConfigResponse,
     LambdaUnsupportedMediaTypeException, LambdaUpdateFunctionCodeRequest,
 )
-from ._parts.komira_aws_lambda_p14 import (
+from ._parts.aws_lambda_p14 import (
     LambdaUpdateFunctionConfigurationRequest, LambdaUpdateFunctionUrlConfigRequest,
     LambdaUpdateFunctionUrlConfigResponse, LambdaVpcConfig,
 )
-from ._parts.komira_aws_lambda_p15 import (
+from ._parts.aws_lambda_p15 import (
     LambdaVpcConfigResponse, build_add_permission_request, parse_add_permission_response,
     build_create_function_request, parse_create_function_response,
     build_create_function_url_config_request, parse_create_function_url_config_response,
@@ -246,17 +244,17 @@ from ._parts.komira_aws_lambda_p15 import (
     build_put_function_concurrency_request, parse_put_function_concurrency_response,
     build_update_function_code_request, parse_update_function_code_response,
 )
-from ._parts.komira_aws_lambda_p16 import (
+from ._parts.aws_lambda_p16 import (
     build_update_function_configuration_request, parse_update_function_configuration_response,
     build_update_function_url_config_request, parse_update_function_url_config_response,
-    LAMBDA_ENDPOINT_RULESET, LAMBDA_PARTITIONS, komira_aws_lambda_endpoint_rules,
-    LambdaEndpointConfig, resolve_add_permission_endpoint, resolve_create_function_endpoint,
+    LAMBDA_ENDPOINT_RULESET, LAMBDA_PARTITIONS, aws_lambda_endpoint_rules, LambdaEndpointConfig,
+    resolve_add_permission_endpoint, resolve_create_function_endpoint,
     resolve_create_function_url_config_endpoint, resolve_delete_function_endpoint,
     resolve_get_function_endpoint, resolve_get_function_url_config_endpoint,
     resolve_invoke_endpoint, resolve_put_function_concurrency_endpoint,
     resolve_update_function_code_endpoint, resolve_update_function_configuration_endpoint,
     resolve_update_function_url_config_endpoint,
 )
-from ._parts.komira_aws_lambda_p17 import LambdaClient, _komira_aws_lambda_error
+from ._parts.aws_lambda_p17 import LambdaClient, _aws_lambda_error
 
 # End of aws_lambda, generated by aws-client-gen.

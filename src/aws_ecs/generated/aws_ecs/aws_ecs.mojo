@@ -60,8 +60,8 @@
 
 # Every declaration of `aws_ecs` is in a part under `_parts/`; this module
 # re-exports each, so an import from this module names what it always did.
-from ._parts.komira_aws_ecs_p01 import (
-    ECS_SERVICE, ECS_ENDPOINT_PREFIX, ECS_CONTENT_TYPE, ECS_TARGET_PREFIX, komira_aws_ecs_host,
+from ._parts.aws_ecs_p01 import (
+    ECS_SERVICE, ECS_ENDPOINT_PREFIX, ECS_CONTENT_TYPE, ECS_TARGET_PREFIX, aws_ecs_host,
     ECSAPPLICATION_PROTOCOL_HTTP, ECSAPPLICATION_PROTOCOL_HTTP2, ECSAPPLICATION_PROTOCOL_GRPC,
     ECSASSIGN_PUBLIC_IP_ENABLED, ECSASSIGN_PUBLIC_IP_DISABLED, ECSCPUARCHITECTURE_X86_64,
     ECSCPUARCHITECTURE_ARM64, ECSCLUSTER_FIELD_ATTACHMENTS, ECSCLUSTER_FIELD_CONFIGURATIONS,
@@ -114,63 +114,63 @@ from ._parts.komira_aws_ecs_p01 import (
     ECSAttachment, ECSAttribute, ECSAwsVpcConfiguration, ECSBlockedException,
     ECSCapacityProviderStrategyItem, ECSClientException,
 )
-from ._parts.komira_aws_ecs_p02 import (
+from ._parts.aws_ecs_p02 import (
     ECSCluster, ECSClusterConfiguration, ECSClusterNotFoundException,
     ECSClusterServiceConnectDefaults, ECSClusterServiceConnectDefaultsRequest, ECSClusterSetting,
     ECSConflictException,
 )
-from ._parts.komira_aws_ecs_p03 import ECSContainer
-from ._parts.komira_aws_ecs_p04 import ECSContainerDefinition, ECSContainerDependency
-from ._parts.komira_aws_ecs_p05 import (
+from ._parts.aws_ecs_p03 import ECSContainer
+from ._parts.aws_ecs_p04 import ECSContainerDefinition, ECSContainerDependency
+from ._parts.aws_ecs_p05 import (
     ECSContainerOverride, ECSContainerRestartPolicy, ECSCreateClusterRequest,
     ECSCreateClusterResponse, ECSDeregisterTaskDefinitionRequest,
     ECSDeregisterTaskDefinitionResponse, ECSDescribeClustersRequest, ECSDescribeClustersResponse,
 )
-from ._parts.komira_aws_ecs_p06 import (
+from ._parts.aws_ecs_p06 import (
     ECSDescribeTaskDefinitionRequest, ECSDescribeTaskDefinitionResponse, ECSDescribeTasksRequest,
     ECSDescribeTasksResponse, ECSDevice, ECSDockerVolumeConfiguration, ECSEBSTagSpecification,
     ECSEFSAuthorizationConfig, ECSEFSVolumeConfiguration,
 )
-from ._parts.komira_aws_ecs_p07 import (
+from ._parts.aws_ecs_p07 import (
     ECSEnvironmentFile, ECSEphemeralStorage, ECSExecuteCommandConfiguration,
     ECSExecuteCommandLogConfiguration, ECSFSxWindowsFileServerAuthorizationConfig,
     ECSFSxWindowsFileServerVolumeConfiguration, ECSFailure, ECSFirelensConfiguration,
     ECSHealthCheck, ECSHostEntry, ECSHostVolumeProperties,
 )
-from ._parts.komira_aws_ecs_p08 import (
+from ._parts.aws_ecs_p08 import (
     ECSInferenceAccelerator, ECSInferenceAcceleratorOverride, ECSInvalidParameterException,
     ECSKernelCapabilities, ECSKeyValuePair, ECSLimitExceededException, ECSLinuxParameters,
     ECSListClustersRequest, ECSListClustersResponse, ECSListServicesRequest,
 )
-from ._parts.komira_aws_ecs_p09 import (
+from ._parts.aws_ecs_p09 import (
     ECSListServicesResponse, ECSListTaskDefinitionFamiliesRequest,
     ECSListTaskDefinitionFamiliesResponse, ECSListTaskDefinitionsRequest,
     ECSListTaskDefinitionsResponse, ECSListTasksRequest, ECSListTasksResponse, ECSLogConfiguration,
 )
-from ._parts.komira_aws_ecs_p10 import (
+from ._parts.aws_ecs_p10 import (
     ECSManagedAgent, ECSManagedStorageConfiguration, ECSMountPoint, ECSNamespaceNotFoundException,
     ECSNetworkBinding, ECSNetworkConfiguration, ECSNetworkInterface, ECSPlacementConstraint,
     ECSPlacementStrategy, ECSPlatformTaskDefinitionIncompatibilityException,
 )
-from ._parts.komira_aws_ecs_p11 import (
+from ._parts.aws_ecs_p11 import (
     ECSPlatformUnknownException, ECSPortMapping, ECSProxyConfiguration,
     ECSPutClusterCapacityProvidersRequest, ECSPutClusterCapacityProvidersResponse,
     ECSRegisterTaskDefinitionRequest, ECSRegisterTaskDefinitionResponse,
 )
-from ._parts.komira_aws_ecs_p12 import (
+from ._parts.aws_ecs_p12 import (
     ECSRepositoryCredentials, ECSResourceInUseException, ECSResourceRequirement, ECSRunTaskRequest,
     ECSRunTaskResponse, ECSRuntimePlatform, ECSS3FilesVolumeConfiguration, ECSSecret,
 )
-from ._parts.komira_aws_ecs_p13 import (
+from ._parts.aws_ecs_p13 import (
     ECSServerException, ECSServiceNotFoundException, ECSStopTaskRequest, ECSStopTaskResponse,
     ECSSystemControl, ECSTag,
 )
-from ._parts.komira_aws_ecs_p14 import ECSTask
-from ._parts.komira_aws_ecs_p15 import (
+from ._parts.aws_ecs_p14 import ECSTask
+from ._parts.aws_ecs_p15 import (
     ECSTaskDefinition, ECSTaskDefinitionPlacementConstraint, ECSTaskEphemeralStorage,
     ECSTaskManagedEBSVolumeConfiguration, ECSTaskManagedEBSVolumeTerminationPolicy,
 )
-from ._parts.komira_aws_ecs_p16 import (
+from ._parts.aws_ecs_p16 import (
     ECSTaskOverride, ECSTaskVolumeConfiguration, ECSTmpfs, ECSUlimit,
     ECSUnsupportedFeatureException, ECSUpdateInProgressException, ECSVolume, ECSVolumeFrom,
     build_create_cluster_request, parse_create_cluster_response,
@@ -182,19 +182,19 @@ from ._parts.komira_aws_ecs_p16 import (
     build_list_task_definition_families_request, parse_list_task_definition_families_response,
     build_list_task_definitions_request, parse_list_task_definitions_response,
 )
-from ._parts.komira_aws_ecs_p17 import (
+from ._parts.aws_ecs_p17 import (
     build_list_tasks_request, parse_list_tasks_response,
     build_put_cluster_capacity_providers_request, parse_put_cluster_capacity_providers_response,
     build_register_task_definition_request, parse_register_task_definition_response,
     build_run_task_request, parse_run_task_response, build_stop_task_request,
-    parse_stop_task_response, ECS_ENDPOINT_RULESET, ECS_PARTITIONS, komira_aws_ecs_endpoint_rules,
+    parse_stop_task_response, ECS_ENDPOINT_RULESET, ECS_PARTITIONS, aws_ecs_endpoint_rules,
     ECSEndpointConfig, resolve_create_cluster_endpoint, resolve_deregister_task_definition_endpoint,
     resolve_describe_clusters_endpoint, resolve_describe_task_definition_endpoint,
     resolve_describe_tasks_endpoint, resolve_list_clusters_endpoint, resolve_list_services_endpoint,
     resolve_list_task_definition_families_endpoint, resolve_list_task_definitions_endpoint,
     resolve_list_tasks_endpoint, resolve_put_cluster_capacity_providers_endpoint,
     resolve_register_task_definition_endpoint, resolve_run_task_endpoint,
-    resolve_stop_task_endpoint, ECSClient, _komira_aws_ecs_error,
+    resolve_stop_task_endpoint, ECSClient, _aws_ecs_error,
 )
 
 # End of aws_ecs, generated by aws-client-gen.

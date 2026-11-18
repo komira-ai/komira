@@ -110,7 +110,7 @@ comptime CLOUDWATCHLOGS_ENDPOINT_PREFIX: String = "logs"
 comptime CLOUDWATCHLOGS_CONTENT_TYPE: String = "application/x-amz-json-1.1"
 comptime CLOUDWATCHLOGS_TARGET_PREFIX: String = "Logs_20140328"
 
-def komira_aws_logs_host(region: String) raises -> String:
+def aws_logs_host(region: String) raises -> String:
     """`logs.<region>.amazonaws.com`.
 
         ⚠ REGIONAL. An empty region here would sign against a host with a
@@ -118,7 +118,7 @@ def komira_aws_logs_host(region: String) raises -> String:
         composition that left the region unset. So it is refused by name."""
     if region.byte_length() == 0:
         raise Error(
-            "komira_aws_logs_host: REFUSED an EMPTY region — this is a REGIONAL"
+            "aws_logs_host: REFUSED an EMPTY region — this is a REGIONAL"
             " service and there is no global endpoint to fall back to."
         )
     return String("logs.") + region + String(".amazonaws.com")
@@ -835,7 +835,7 @@ struct CloudWatchLogsClient[C: Connector, T: AwsCredsSource](Movable, Deinitable
             cred,
             self._region.copy(),
             String(CLOUDWATCHLOGS_SERVICE),
-            resolve_endpoint(self._endpoint_override, komira_aws_logs_host(self._region.copy())).with_host_prefix(req.host_prefix),
+            resolve_endpoint(self._endpoint_override, aws_logs_host(self._region.copy())).with_host_prefix(req.host_prefix),
             req.uri.copy(),
             content_type^,
             req.body.copy(),
@@ -882,7 +882,7 @@ struct CloudWatchLogsClient[C: Connector, T: AwsCredsSource](Movable, Deinitable
             cred,
             self._region.copy(),
             String(CLOUDWATCHLOGS_SERVICE),
-            resolve_endpoint(self._endpoint_override, komira_aws_logs_host(self._region.copy())).with_host_prefix(req.host_prefix),
+            resolve_endpoint(self._endpoint_override, aws_logs_host(self._region.copy())).with_host_prefix(req.host_prefix),
             req.uri.copy(),
             content_type^,
             req.body.copy(),
@@ -895,7 +895,7 @@ struct CloudWatchLogsClient[C: Connector, T: AwsCredsSource](Movable, Deinitable
         var res = self.send(req^)
         if not aws_is_error_status(res.status):
             return parse_get_log_events_response(res^.into_response())
-        raise _komira_aws_logs_error(String("GetLogEvents"), res)
+        raise _aws_logs_error(String("GetLogEvents"), res)
 
     def get_log_events_with[X: AwsHttpTransport, K: AwsClock, L: MonotonicClock, S: Sleeper, R: RetryRng, B: RetryBudget](mut self, input: CloudWatchLogsGetLogEventsRequest, mut transport: X, mut clock: K, mut retry: RetryLoop[L, S, R], mut budget: B) raises -> HttpResult:
         """`GetLogEvents` over the given seams (`send_with`): the response, successful
@@ -904,7 +904,7 @@ struct CloudWatchLogsClient[C: Connector, T: AwsCredsSource](Movable, Deinitable
         return self.send_with(req^, transport, clock, retry, budget)
 
 
-def _komira_aws_logs_error(op: String, res: HttpResult) -> Error:
+def _aws_logs_error(op: String, res: HttpResult) -> Error:
     """A non-2xx as an `Error`.
 
         ⛔ IT NEVER ECHOES THE RESPONSE BODY. Only the HTTP status plus the

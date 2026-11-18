@@ -51,7 +51,7 @@ from aws_sns.aws_sns import (
     SNSUnsubscribeInput,
     build_create_topic_request,
     build_get_topic_attributes_request,
-    komira_aws_sns_endpoint_rules,
+    aws_sns_endpoint_rules,
     resolve_create_topic_endpoint,
     resolve_delete_topic_endpoint,
     resolve_get_subscription_attributes_endpoint,
@@ -252,7 +252,7 @@ def _check_case(rules: EndpointRuleSet, tc: JsonValue, mut why: String) raises -
 
 
 def test_botocore_endpoint_cases() raises:
-    var rules = komira_aws_sns_endpoint_rules()
+    var rules = aws_sns_endpoint_rules()
     var doc = parse_json_value(_read(_CASES))
     ref cases = doc.children[_find(doc, "testCases")]
     var n = len(cases.children)
@@ -279,7 +279,7 @@ def test_botocore_endpoint_cases() raises:
 
 
 def _resolve(config: SNSEndpointConfig) raises -> ResolvedEndpoint:
-    return _resolve_all(komira_aws_sns_endpoint_rules(), config)
+    return _resolve_all(aws_sns_endpoint_rules(), config)
 
 
 def test_regional_default() raises:

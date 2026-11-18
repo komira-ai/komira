@@ -10,7 +10,7 @@ SetQueueAttributes, ReceiveMessage, DeleteMessage, DeleteQueue):
 - a response parser `parse_<operation>_response` over a aws_core
   `AwsResponse`;
 - an endpoint resolver `resolve_<operation>_endpoint`, which runs the
-  service's published endpoint ruleset (`komira_aws_sqs_endpoint_rules()`)
+  service's published endpoint ruleset (`aws_sqs_endpoint_rules()`)
   over an `SQSEndpointConfig`;
 - `SQSClient`, which resolves each call's endpoint, signs it with SigV4
   (signing name `sqs`) and sends it over the http_core `Connector` it
@@ -95,10 +95,10 @@ Resolve the endpoint a call goes to, through the embedded ruleset:
 
 <!-- mojo-hidden from std.testing import assert_equal -->
 ```mojo
-from aws_sqs.aws_sqs import SQSEndpointConfig, SQSGetQueueUrlRequest, komira_aws_sqs_endpoint_rules
+from aws_sqs.aws_sqs import SQSEndpointConfig, SQSGetQueueUrlRequest, aws_sqs_endpoint_rules
 from aws_sqs.aws_sqs import resolve_get_queue_url_endpoint
 
-var rules = komira_aws_sqs_endpoint_rules()
+var rules = aws_sqs_endpoint_rules()
 var regional = resolve_get_queue_url_endpoint(
     rules, SQSEndpointConfig(String("eu-west-1")), SQSGetQueueUrlRequest(String("jobs"))
 )

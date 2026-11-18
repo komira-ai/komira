@@ -45,7 +45,7 @@ from aws_s3.aws_s3 import (
     S3_SERVICE,
     build_get_object_request,
     build_put_object_request,
-    komira_aws_s3_endpoint_rules,
+    aws_s3_endpoint_rules,
     resolve_get_object_endpoint,
     resolve_put_object_endpoint,
 )
@@ -86,7 +86,7 @@ struct S3PresignSigner[T: AwsCredsSource, K: AwsClock & Movable & Deinitable](Ob
         self._bucket = bucket^
         self._region = config.region.copy()
         self._endpoint_config = config.endpoint_config()
-        self._rules = komira_aws_s3_endpoint_rules()
+        self._rules = aws_s3_endpoint_rules()
         self._creds = creds^
         self._clock = clock^
 

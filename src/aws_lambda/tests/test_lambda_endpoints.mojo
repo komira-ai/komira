@@ -53,7 +53,7 @@ from aws_lambda.aws_lambda import (
     LambdaUpdateFunctionUrlConfigRequest,
     build_get_function_request,
     build_invoke_request,
-    komira_aws_lambda_endpoint_rules,
+    aws_lambda_endpoint_rules,
     resolve_add_permission_endpoint,
     resolve_create_function_endpoint,
     resolve_create_function_url_config_endpoint,
@@ -239,7 +239,7 @@ def _check_case(rules: EndpointRuleSet, tc: JsonValue, mut why: String) raises -
 
 
 def test_botocore_endpoint_cases() raises:
-    var rules = komira_aws_lambda_endpoint_rules()
+    var rules = aws_lambda_endpoint_rules()
     var doc = parse_json_value(_read(_CASES))
     ref cases = doc.children[_find(doc, "testCases")]
     var n = len(cases.children)
@@ -266,7 +266,7 @@ def test_botocore_endpoint_cases() raises:
 
 
 def _resolve(config: LambdaEndpointConfig) raises -> ResolvedEndpoint:
-    return _resolve_all(komira_aws_lambda_endpoint_rules(), config)
+    return _resolve_all(aws_lambda_endpoint_rules(), config)
 
 
 def test_regional_default() raises:

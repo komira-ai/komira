@@ -75,7 +75,7 @@ from aws_dynamodb.aws_dynamodb import (
     build_describe_table_request,
     build_get_item_request,
     build_put_item_request,
-    komira_aws_dynamodb_endpoint_rules,
+    aws_dynamodb_endpoint_rules,
     resolve_create_table_endpoint,
     resolve_delete_item_endpoint,
     resolve_delete_table_endpoint,
@@ -309,7 +309,7 @@ def _check_case(rules: EndpointRuleSet, tc: JsonValue, mut why: String) raises -
 
 
 def test_botocore_endpoint_cases() raises:
-    var rules = komira_aws_dynamodb_endpoint_rules()
+    var rules = aws_dynamodb_endpoint_rules()
     var doc = parse_json_value(_read(_CASES))
     ref cases = doc.children[_find(doc, "testCases")]
     var n = len(cases.children)
@@ -344,7 +344,7 @@ def test_botocore_endpoint_cases() raises:
 
 
 def _resolve(config: DynamoDBEndpointConfig, table: String = String("routes")) raises -> ResolvedEndpoint:
-    return _resolve_all(komira_aws_dynamodb_endpoint_rules(), config, table)
+    return _resolve_all(aws_dynamodb_endpoint_rules(), config, table)
 
 
 def test_regional_default() raises:

@@ -16,7 +16,7 @@ DeleteReceiptRule:
 - a response parser `parse_<operation>_response`, which reads the
   `<OperationResult>` element of a aws_core `AwsResponse`;
 - an endpoint resolver `resolve_<operation>_endpoint`, which runs the
-  service's published endpoint ruleset (`komira_aws_ses_endpoint_rules()`)
+  service's published endpoint ruleset (`aws_ses_endpoint_rules()`)
   over an `SESEndpointConfig` (the host is `email.<region>`);
 - `SESClient`, which resolves each call's endpoint, signs it with SigV4
   (signing name `ses`) and sends it over the http_core `Connector` it
@@ -109,10 +109,10 @@ Resolve the endpoint a call goes to:
 <!-- mojo-hidden from std.testing import assert_equal -->
 ```mojo
 from aws_ses.aws_ses import SESDescribeActiveReceiptRuleSetRequest, SESEndpointConfig
-from aws_ses.aws_ses import komira_aws_ses_endpoint_rules
+from aws_ses.aws_ses import aws_ses_endpoint_rules
 from aws_ses.aws_ses import resolve_describe_active_receipt_rule_set_endpoint
 
-var rules = komira_aws_ses_endpoint_rules()
+var rules = aws_ses_endpoint_rules()
 var describe = SESDescribeActiveReceiptRuleSetRequest()
 assert_equal(
     resolve_describe_active_receipt_rule_set_endpoint(rules, SESEndpointConfig(String("us-west-2")), describe).url,

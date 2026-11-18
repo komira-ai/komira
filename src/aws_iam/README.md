@@ -55,9 +55,9 @@ IAM is global: a caller in any `aws` region reaches one endpoint, signed for
 <!-- mojo-hidden from std.testing import assert_equal -->
 ```mojo
 from aws_core import aws_signing_target
-from aws_iam.aws_iam import IAMEndpointConfig, IAMGetRoleRequest, komira_aws_iam_endpoint_rules, resolve_get_role_endpoint
+from aws_iam.aws_iam import IAMEndpointConfig, IAMGetRoleRequest, aws_iam_endpoint_rules, resolve_get_role_endpoint
 
-var rules = komira_aws_iam_endpoint_rules()
+var rules = aws_iam_endpoint_rules()
 var input = IAMGetRoleRequest(String("deploy"))
 var got = resolve_get_role_endpoint(rules, IAMEndpointConfig(String("eu-west-1")), input)
 assert_equal(got.url, "https://iam.amazonaws.com")

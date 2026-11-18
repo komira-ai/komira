@@ -14,7 +14,7 @@ SetSubscriptionAttributes:
 - a response parser `parse_<operation>_response`, which reads the
   `<OperationResult>` element of a aws_core `AwsResponse`;
 - an endpoint resolver `resolve_<operation>_endpoint`, which runs the
-  service's published endpoint ruleset (`komira_aws_sns_endpoint_rules()`)
+  service's published endpoint ruleset (`aws_sns_endpoint_rules()`)
   over an `SNSEndpointConfig`;
 - `SNSClient`, which resolves each call's endpoint, signs it with SigV4
   (signing name `sns`) and sends it over the http_core `Connector` it
@@ -112,10 +112,10 @@ from std.testing import assert_equal
 from aws_sns.aws_sns import SNSCreateTopicInput
 -->
 ```mojo
-from aws_sns.aws_sns import SNSEndpointConfig, komira_aws_sns_endpoint_rules
+from aws_sns.aws_sns import SNSEndpointConfig, aws_sns_endpoint_rules
 from aws_sns.aws_sns import resolve_create_topic_endpoint
 
-var rules = komira_aws_sns_endpoint_rules()
+var rules = aws_sns_endpoint_rules()
 var create = SNSCreateTopicInput(String("bounces"))
 assert_equal(
     resolve_create_topic_endpoint(rules, SNSEndpointConfig(String("us-west-2")), create).url,

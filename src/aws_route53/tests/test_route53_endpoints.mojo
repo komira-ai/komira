@@ -60,7 +60,7 @@ from aws_route53.aws_route53 import (
     Route53ResourceRecordSet,
     build_change_resource_record_sets_request,
     build_list_resource_record_sets_request,
-    komira_aws_route53_endpoint_rules,
+    aws_route53_endpoint_rules,
     resolve_change_resource_record_sets_endpoint,
     resolve_list_hosted_zones_by_name_endpoint,
     resolve_list_resource_record_sets_endpoint,
@@ -263,7 +263,7 @@ def _check_case(rules: EndpointRuleSet, tc: JsonValue, mut why: String) raises -
 
 
 def test_botocore_endpoint_cases() raises:
-    var rules = komira_aws_route53_endpoint_rules()
+    var rules = aws_route53_endpoint_rules()
     var doc = parse_json_value(_read(_CASES))
     ref cases = doc.children[_find(doc, "testCases")]
     var n = len(cases.children)
@@ -290,7 +290,7 @@ def test_botocore_endpoint_cases() raises:
 
 
 def _resolve(config: Route53EndpointConfig) raises -> ResolvedEndpoint:
-    return _resolve_all(komira_aws_route53_endpoint_rules(), config)
+    return _resolve_all(aws_route53_endpoint_rules(), config)
 
 
 def _check_global(region: String, url: String, signing_region: String) raises:

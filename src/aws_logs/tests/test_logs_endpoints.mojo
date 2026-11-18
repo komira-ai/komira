@@ -38,7 +38,7 @@ from aws_logs.aws_logs import (
     CloudWatchLogsEndpointConfig,
     CloudWatchLogsGetLogEventsRequest,
     build_get_log_events_request,
-    komira_aws_logs_endpoint_rules,
+    aws_logs_endpoint_rules,
     resolve_get_log_events_endpoint,
 )
 from std.testing import assert_equal, assert_raises, assert_true
@@ -177,7 +177,7 @@ def _check_case(rules: EndpointRuleSet, tc: JsonValue, mut why: String) raises -
 
 
 def test_botocore_endpoint_cases() raises:
-    var rules = komira_aws_logs_endpoint_rules()
+    var rules = aws_logs_endpoint_rules()
     var doc = parse_json_value(_read(_CASES))
     ref cases = doc.children[_find(doc, "testCases")]
     var n = len(cases.children)
@@ -205,7 +205,7 @@ def test_botocore_endpoint_cases() raises:
 
 def _resolve(config: CloudWatchLogsEndpointConfig) raises -> ResolvedEndpoint:
     return resolve_get_log_events_endpoint(
-        komira_aws_logs_endpoint_rules(),
+        aws_logs_endpoint_rules(),
         config,
         CloudWatchLogsGetLogEventsRequest(String("s")),
     )

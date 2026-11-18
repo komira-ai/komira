@@ -68,9 +68,9 @@ Where a call goes, from the endpoint ruleset:
 
 <!-- mojo-hidden from std.testing import assert_equal -->
 ```mojo
-from aws_lambda.aws_lambda import LambdaEndpointConfig, LambdaGetFunctionRequest, komira_aws_lambda_endpoint_rules, resolve_get_function_endpoint
+from aws_lambda.aws_lambda import LambdaEndpointConfig, LambdaGetFunctionRequest, aws_lambda_endpoint_rules, resolve_get_function_endpoint
 
-var rules = komira_aws_lambda_endpoint_rules()
+var rules = aws_lambda_endpoint_rules()
 var input = LambdaGetFunctionRequest(String("jobs"))
 assert_equal(
     resolve_get_function_endpoint(rules, LambdaEndpointConfig(String("us-west-2")), input).url,

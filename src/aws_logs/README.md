@@ -11,7 +11,7 @@ pinned `logs` model (awsJson 1.1). The module
 - `parse_get_log_events_response`, which decodes a page of events and its
   forward and backward tokens from a aws_core `AwsResponse`;
 - `resolve_get_log_events_endpoint`, which runs the service's published
-  endpoint ruleset (`komira_aws_logs_endpoint_rules()`) over a
+  endpoint ruleset (`aws_logs_endpoint_rules()`) over a
   `CloudWatchLogsEndpointConfig`.
 
 It is generated in pure mode: there is no client and no transport, and no
@@ -93,7 +93,7 @@ from aws_logs.aws_logs import CloudWatchLogsGetLogEventsRequest, build_get_log_e
 from aws_core import AwsCredential, FixedClock, Header
 from aws_core import aws_signing_target, build_sigv4_signed_request
 from aws_logs.aws_logs import CloudWatchLogsEndpointConfig
-from aws_logs.aws_logs import komira_aws_logs_endpoint_rules
+from aws_logs.aws_logs import aws_logs_endpoint_rules
 from aws_logs.aws_logs import resolve_get_log_events_endpoint
 
 var input = CloudWatchLogsGetLogEventsRequest(String("web/app/0123456789abcdef"))
@@ -103,7 +103,7 @@ input.set_start_from_head(True)
 var built = build_get_log_events_request(input)
 
 var resolved = resolve_get_log_events_endpoint(
-    komira_aws_logs_endpoint_rules(),
+    aws_logs_endpoint_rules(),
     CloudWatchLogsEndpointConfig(String("us-east-1")),
     input,
 )

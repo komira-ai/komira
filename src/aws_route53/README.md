@@ -11,7 +11,7 @@ ListResourceRecordSets and ChangeResourceRecordSets:
 - a response parser `parse_<operation>_response` over a aws_core
   `AwsResponse`;
 - an endpoint resolver `resolve_<operation>_endpoint`, which runs Route 53's
-  published endpoint ruleset (`komira_aws_route53_endpoint_rules()`) over a
+  published endpoint ruleset (`aws_route53_endpoint_rules()`) over a
   `Route53EndpointConfig`;
 - `Route53Client`, which resolves each call's endpoint, signs it with SigV4
   (signing name `route53`) and sends it over the http_core `Connector`
@@ -129,11 +129,11 @@ from aws_route53.aws_route53 import Route53ListHostedZonesByNameRequest
 ```mojo
 from aws_core import aws_signing_target
 from aws_route53.aws_route53 import Route53EndpointConfig
-from aws_route53.aws_route53 import komira_aws_route53_endpoint_rules
+from aws_route53.aws_route53 import aws_route53_endpoint_rules
 from aws_route53.aws_route53 import resolve_list_hosted_zones_by_name_endpoint
 
 var resolved = resolve_list_hosted_zones_by_name_endpoint(
-    komira_aws_route53_endpoint_rules(),
+    aws_route53_endpoint_rules(),
     Route53EndpointConfig(String("eu-west-1")),
     Route53ListHostedZonesByNameRequest(),
 )

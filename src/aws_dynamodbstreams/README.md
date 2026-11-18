@@ -29,7 +29,7 @@ goes:
 
 <!-- mojo-hidden from std.testing import assert_equal -->
 ```mojo
-from aws_dynamodbstreams.aws_dynamodbstreams import DynamoDBStreamsEndpointConfig, DynamoDBStreamsGetShardIteratorInput, build_get_shard_iterator_request, komira_aws_dynamodbstreams_endpoint_rules, resolve_get_shard_iterator_endpoint
+from aws_dynamodbstreams.aws_dynamodbstreams import DynamoDBStreamsEndpointConfig, DynamoDBStreamsGetShardIteratorInput, build_get_shard_iterator_request, aws_dynamodbstreams_endpoint_rules, resolve_get_shard_iterator_endpoint
 
 var stream = String("arn:aws:dynamodb:us-east-1:123456789012:table/jobs/stream/2026-10-01T00:00:00.000")
 var shard = String("shardId-00000001790812800000-0a1b2c3d")
@@ -45,7 +45,7 @@ assert_equal(
 )
 
 var got = resolve_get_shard_iterator_endpoint(
-    komira_aws_dynamodbstreams_endpoint_rules(),
+    aws_dynamodbstreams_endpoint_rules(),
     DynamoDBStreamsEndpointConfig(String("us-west-2")),
     input,
 )
