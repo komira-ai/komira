@@ -1,5 +1,5 @@
 # =============================================================================
-# db_postgres/wire/tests/test_pg_tx_op_sequence.mojo — the reusable poll-shaped
+# db_postgres/tests/test_pg_tx_op_sequence.mojo — the reusable poll-shaped
 # multi-statement TX op: the statement SEQUENCE + the ROLLBACK path.
 # =============================================================================
 # `PgTxAsyncOp` runs an application WRITE as a multi-statement transaction

@@ -1,5 +1,5 @@
 # =============================================================================
-# db_postgres/wire/tests/test_pg_query_op_poll.mojo — the poll-shaped pgwire READ
+# db_postgres/tests/test_pg_query_op_poll.mojo — the poll-shaped pgwire READ
 # =============================================================================
 # The concurrency + framing-cursor evidence for the poll-shaped pgwire READ.
 # Proves the foundation for suspendable handlers: ONE worker holds >1 PG query
