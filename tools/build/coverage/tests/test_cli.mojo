@@ -336,10 +336,10 @@ def test_include_tests_and_strip_prefix_are_read() raises:
     var dir = _tmp(String("usage_flags"))
     var args = _report(dir)
     args.append("--include-tests")
-    var a = parse_args(_with(args^, String("--strip-prefix"), String("/work/root")))
+    var a = parse_args(_with(args^, String("--strip-prefix"), String("/build/root")))
     assert_true(a.include_tests)
     assert_equal(len(a.strip_prefixes), 1)
-    assert_equal(a.strip_prefixes[0], "/work/root")
+    assert_equal(a.strip_prefixes[0], "/build/root")
     assert_true(not parse_args(_report(dir)).include_tests)
 
 
