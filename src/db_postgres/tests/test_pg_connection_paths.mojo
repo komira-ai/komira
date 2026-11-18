@@ -1,9 +1,10 @@
 """db_postgres.wire: the PgConnection and PgReactorStream paths a server
 reply decides, driven with no database server.
 
-A socketpair carries a real TLS 1.3 session: the server end is an in-process
-s2n connection holding http_core's throwaway leaf certificate, the client end
-is the PgReactorStream a PgConnection owns. The server writes a whole reply up
+A loopback TCP connection on a kernel-chosen port (port 0) carries a real
+TLS 1.3 session: the server end is an in-process s2n connection holding
+http_core's throwaway leaf certificate, the client end is the PgReactorStream
+a PgConnection owns. The server writes a whole reply up
 front; the call under test reads it through a BlockingRuntime reactor exactly
 as it would read a real server's reply.
 
@@ -35,17 +36,17 @@ What each test holds:
      forever: send_all whose socket never drains raises "could not flush all
      bytes", and recv_some that never gets a byte raises "spun without
      progress". Each round parks the stream's own fd on the reactor; here that
-     fd is either a socket whose peer is gone (the park returns at once with a
-     hang-up) or -1 (the park returns without waiting), so the loop runs out.
+     fd is either a socket whose peer is gone (the park returns at once: it
+     is readable at EOF and writable) or -1 (the park returns without waiting), so the loop runs out.
 """
 
-from std.ffi import external_call
 from std.pathlib import Path
 from std.testing import assert_equal, assert_true, assert_false
 
 from async_rt.ops.waker_sink import NoopSink
 from async_rt.runtime.blocking_runtime import BlockingRuntime
-from async_rt.runtime.tcp_stream import TcpStream
+from async_rt.reactor.socket_setup import close_fd, set_so_rcvbuf, set_so_sndbuf
+from async_rt.runtime.tcp_stream import TcpListener, TcpStream
 from http_core.tls import (
     TLS_OUTCOME_DONE,
     TLS_OUTCOME_ERROR,
@@ -73,9 +74,6 @@ from db_postgres.wire.pgwire import (
     MSG_ROW_DESC,
 )
 
-comptime _AF_UNIX: Int32 = 1
-comptime _SOCK_STREAM: Int32 = 1
-
 comptime BRT = BlockingRuntime[NoopSink]
 
 
@@ -90,34 +88,27 @@ def _leaf_key() raises -> String:
     return Path("src/http_core/tests/fixtures/tls/leaf_key.pem").read_text()
 
 
-def _socketpair() raises -> Tuple[Int32, Int32]:
-    var sv = Array[Int32, 2](fill=Int32(-1))
-    # SAFETY: `sv` is a live local array of two Int32 for the whole call;
-    # socketpair writes exactly two Int32 into it and keeps no pointer. The
-    # pointer carries `sv`'s own origin, so `sv` stays live across the call.
-    var rc = external_call["socketpair", Int32](
-        _AF_UNIX, _SOCK_STREAM, Int32(0), sv.unsafe_ptr()
+def _tcp_pair() raises -> Tuple[Int32, Int32]:
+    """A connected loopback TCP pair on a kernel-chosen port (port 0), both
+    ends non-blocking: (accepted end, connecting end). The caller owns and
+    closes both fds."""
+    var rt = BRT.new(NoopSink(_placeholder=UInt8(0)))
+    ref reactor = rt.reactor()
+    var listener = TcpListener.bind_loopback(port=UInt16(0), backlog=Int32(1))
+    var client = TcpStream.connect_loopback[NoopSink](
+        reactor, listener.local_port()
     )
-    assert_equal(Int(rc), 0, "socketpair()")
-    return (sv[0], sv[1])
-
-
-def _close_fd(fd: Int32):
-    if fd >= 0:
-        _ = external_call["close", Int32](fd)
-
-
-def _set_nonblock(fd: Int32) raises:
-    var rc = external_call["komira_fcntl_set_nonblock", Int32](fd)
-    assert_true(rc >= Int32(0), "set_nonblock")
+    var server = listener.accept[NoopSink](reactor)
+    var pair = (server.release_fd(), client.release_fd())
+    _ = rt^
+    return pair
 
 
 def _gone_peer_fd() raises -> Int32:
-    """One end of a socketpair whose other end is closed: always readable
-    (EOF) and always reported by epoll (hang-up), so a park on it returns at
-    once."""
-    var p = _socketpair()
-    _close_fd(p[1])
+    """One end of a loopback TCP pair whose other end is closed: always
+    readable (EOF) and writable, so a park on it returns at once."""
+    var p = _tcp_pair()
+    close_fd(p[1])
     return p[0]
 
 
@@ -340,7 +331,7 @@ def _two_params() -> List[PgValue]:
 
 
 # -----------------------------------------------------------------------------
-# Rigs: a handshaken TLS session over a socketpair, the server half kept here
+# Rigs: a handshaken TLS session over loopback TCP, the server half kept here
 # -----------------------------------------------------------------------------
 struct _PgRig(Movable):
     """The server half of one in-process TLS session, and a PgConnection
@@ -353,9 +344,7 @@ struct _PgRig(Movable):
 
     def __init__(out self) raises:
         tls_init()
-        var fds = _socketpair()
-        _set_nonblock(fds[0])
-        _set_nonblock(fds[1])
+        var fds = _tcp_pair()
         var server_config = _server_config()
         var server = TlsConnection(server_config)
         server.bind_fd(fds[0])
@@ -385,9 +374,7 @@ struct _StreamRig(Movable):
 
     def __init__(out self, park_fd: Int32) raises:
         tls_init()
-        var fds = _socketpair()
-        _set_nonblock(fds[0])
-        _set_nonblock(fds[1])
+        var fds = _tcp_pair()
         var server_config = _server_config()
         var server = TlsConnection(server_config)
         server.bind_fd(fds[0])
@@ -409,15 +396,15 @@ def _done(var rig: _PgRig):
     var fd = rig.server_fd
     rig.conn.close()
     _ = rig^
-    _close_fd(fd)
+    close_fd(fd)
 
 
 def _done_stream(var rig: _StreamRig):
     var sfd = rig.server_fd
     var cfd = rig.client_fd
     _ = rig^
-    _close_fd(sfd)
-    _close_fd(cfd)
+    close_fd(sfd)
+    close_fd(cfd)
 
 
 def _raised_by_query(mut rig: _PgRig, mut rt: BRT) -> String:
@@ -868,6 +855,9 @@ def test_send_that_never_flushes_gives_up() raises:
     """The server never reads, so the socket fills and every send blocks on
     write; each park (on a socket whose peer is gone) returns at once."""
     var rig = _StreamRig(_gone_peer_fd())
+    # Small socket buffers, so the 4 MiB cannot all sit in the kernel.
+    set_so_sndbuf(rig.client_fd, Int32(4096))
+    set_so_rcvbuf(rig.server_fd, Int32(4096))
     var rt = _new_rt()
     ref reactor = rt.reactor()
     var data = List[UInt8](length=4 << 20, fill=UInt8(0x5A))

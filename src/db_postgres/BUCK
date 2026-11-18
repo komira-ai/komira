@@ -17,7 +17,7 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # http_core's throwaway test certificate).
 
 # http_core's throwaway leaf certificate and key, for the tests that run a TLS
-# session over a socketpair.
+# session in process.
 _TLS_FIXTURES = {
     "src/http_core/tests/fixtures/tls/leaf_cert.pem": "//src/http_core:tests/fixtures/tls/leaf_cert.pem",
     "src/http_core/tests/fixtures/tls/leaf_key.pem": "//src/http_core:tests/fixtures/tls/leaf_key.pem",
