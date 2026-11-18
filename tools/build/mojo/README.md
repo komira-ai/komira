@@ -378,8 +378,9 @@ of the worker that ran it. Linked binaries carry one run path, DT_RUNPATH
 `$ORIGIN/lib`, and no debug sections, and every compile action fails (exit 4)
 if its output contains the action's working directory as a path
 ([test 6](../tests/README.md#6-outputs)); a longer name that starts with its
-bytes (`runtime/worker.mojo` under the root `/work`) is not it
-([dir_match.zig](tools/dir_match.zig)).
+bytes (`runtime/worker.mojo` under the root `/work`) or the same name under
+another directory (`/home/someone/work`) is not it
+([dir_match.zig](../dir_match/dir_match.zig)).
 The compiler records source file names in a linked program (for error
 locations); they are recorded relative to the package (`hello.mojo`), not as
 paths inside the action. A package (`.mojoc`) records them as
@@ -1195,7 +1196,7 @@ rules, sub-targets, scope and fixtures are in [coverage.md](coverage.md).
 | `<target>: ... env sets <NAME>, which the test runner sets itself` | [`test_runtime.bzl`](test_runtime.bzl) | `test_env`/`env` names a variable the runner owns |
 | `mojo-watchdog: killed deadlocked compiler after <n>s of zero process-tree CPU` (exit 124) | [`mojo_compile.zig`](tools/mojo_compile.zig) | the compile's process tree used no CPU for `watchdog_idle_secs`; retry the action |
 | `mojo_compile: REFUSING: toolchain member '<m>' is missing or empty` (exit 2) | [`mojo_compile.zig`](tools/mojo_compile.zig) | the unpacked toolchain lacks a file its `CLOSURE_MANIFEST` lists; nothing falls back to the worker ([test 4](../tests/README.md#4-closure-refusal)) |
-| `mojo_compile: <output> contains this action's working directory` (exit 4) | [`mojo_compile.zig`](tools/mojo_compile.zig) | a compile output embeds a machine-specific path: the directory itself or a path under it, never a longer name that starts with its bytes |
+| `mojo_compile: <output> contains this action's working directory` (exit 4) | [`mojo_compile.zig`](tools/mojo_compile.zig) | a compile output embeds a machine-specific path: the directory itself or a path under it, never a longer name that starts with its bytes or the same name under another directory ([dir_match.zig](../dir_match/dir_match.zig)) |
 | `mojo_compile: compiler exited 0 but <output> is missing or empty` (exit 3) | [`mojo_compile.zig`](tools/mojo_compile.zig) | the compiler reported success without writing its output |
 | ``[komira] coverage = "<v>": it must be `true` or `false` (default false)`` | [`coverage.bzl`](coverage.bzl) | the coverage switch has another value; it fails at load rather than reading a typo as off |
 | `cov_zig: ... has debug sections but holds the working directory (...) nowhere` | [`cov_zig.zig`](../coverage/kcov/cov_zig.zig) | a coverage link's debug info holds neither spelling of the working directory: zig's C runtime units (the only ones that record a directory) record one the relocation was not given, so the binary would differ by machine, or have no debug info |

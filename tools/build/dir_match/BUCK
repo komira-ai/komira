@@ -1,0 +1,23 @@
+# Whether a build output holds a directory as a path (dir_match.zig): the
+# predicate of the working-directory checks of mojo_compile, rustc_launch and
+# `cov_branch link`. A tool imports it as `@import("dir_match")` by naming
+# `komira//tools/build/dir_match:dir_match` in its `deps`. Welded: nothing
+# imports the module unless its unit tests passed.
+load("@komira//tools/build/mojo:toolchain.bzl", "zig_module", "zig_test")
+load("@komira//tools/build/platforms:defs.bzl", "TOOL_EXEC")
+
+zig_test(
+    name = "dir_match_unit",
+    exec_compatible_with = TOOL_EXEC,
+    imports = ["dir_match.zig"],
+    src = "dir_match_test.zig",
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
+)
+
+zig_module(
+    name = "dir_match",
+    src = "dir_match.zig",
+    unit_tests = [":dir_match_unit", "komira//tools/build/toolchains:zig_next_version"],
+    visibility = ["PUBLIC"],
+)

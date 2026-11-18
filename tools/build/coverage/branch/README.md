@@ -89,7 +89,10 @@ for what the script it replaced took as positions or found beside itself:
    profile runtime, so a Mojo release that links with another library, or
    another flag, is caught there.
 3. The binary must be an ELF file holding no path of the action (its
-   working directory, then its scratch directory, `$BUCK_SCRATCH_PATH/cov_branch_link`).
+   working directory, then its scratch directory, `$BUCK_SCRATCH_PATH/cov_branch_link`),
+   each matched as a path by [dir_match.zig](../../dir_match/dir_match.zig): a longer
+   name that starts with its bytes (`/workspaces/x` under `/work`) or the same name
+   under another directory (`/home/someone/work`) is not it.
 
 When an input has several faults, the first of these checks that refuses it
 is the one named, in the order the script it replaced checked them.

@@ -133,8 +133,9 @@ pinned rustc, the cfg is written in `cfgs`. A proc-macro is an ordinary
 dependency, compiled once for linux x86_64, which is both the execution and
 the target platform. The launcher refuses an output containing the action's
 working directory as a path (exit 4; a longer name that starts with its bytes,
-like `/worker.rs` under `/work`, is not it); rustc's own record of it is
-remapped.
+like `/worker.rs` under `/work`, or the same name under another directory, like
+`/home/someone/work`, is not it: [dir_match.zig](../dir_match/dir_match.zig));
+rustc's own record of it is remapped.
 
 ## Cargo crates
 

@@ -445,8 +445,8 @@ test "an input of one byte is not empty: lld, the runtime, the compiler's librar
     try c.has("BRANCH COVERAGE LINK FAILED: cov/test_one.bc is not LLVM bitcode\n");
 }
 
-test "the working directory anywhere in the binary fails: alone, after other bytes, before other bytes (grep -F)" {
-    for ([_][2][]const u8{ .{ "", "" }, .{ "-I", "/inc" }, .{ "", "X" } }) |around| {
+test "the working directory as a path anywhere in the binary fails: alone, after a flag, with a path under it, quoted" {
+    for ([_][2][]const u8{ .{ "", "" }, .{ "-I", "/inc" }, .{ "", "/X" }, .{ "\"", "\"" } }) |around| {
         var c = try Case.init();
         defer c.deinit();
         var fake = Fake.init(c.a());
@@ -454,6 +454,19 @@ test "the working directory anywhere in the binary fails: alone, after other byt
         fake.zig_out = try std.fmt.allocPrint(c.a(), "{s}\x00{s}\x00", .{ ELF, s });
         try testing.expectEqual(@as(u8, 1), try c.link(&fake));
         try c.has(try std.fmt.allocPrint(c.a(), "BRANCH COVERAGE LINK FAILED: the binary holds this action's directory {s}: {s} \n", .{ c.root, s }));
+    }
+}
+
+test "a longer name that starts with the working directory's bytes, or the same name under another directory, is not it: the link passes" {
+    for ([_][2][]const u8{ .{ "", "X" }, .{ "", "space/x.c" }, .{ "", ".d" }, .{ "/home/someone", "/x.c" } }) |around| {
+        var c = try Case.init();
+        defer c.deinit();
+        var fake = Fake.init(c.a());
+        fake.zig_out = try std.fmt.allocPrint(c.a(), "{s}\x00{s}{s}{s}\x00", .{ ELF, around[0], c.root, around[1] });
+        testing.expectEqual(@as(u8, 0), try c.link(&fake)) catch |e| {
+            std.debug.print("refused: {s}{s}{s}\n", .{ around[0], c.root, around[1] });
+            return e;
+        };
     }
 }
 
@@ -587,20 +600,23 @@ test "the scratch directory follows BUCK_SCRATCH_PATH" {
     try testing.expectEqualStrings("/w/s/cov_branch_link", try l.scratchDir(a, "/w", "s"));
 }
 
-test "stringsWith is strings -n 4 | grep -F | head -n 3 | tr newline space" {
+test "stringsWith is strings -n 4 of the runs that hold the directory as a path, the first 3, each then a space" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     const a = arena.allocator();
     try testing.expectEqualStrings("", try l.stringsWith(a, "abc", "abc"));
     try testing.expectEqualStrings("/w/x\t1 ", try l.stringsWith(a, "\x00/w/x\t1\x01/w", "/w"));
-    try testing.expectEqualStrings("a/w1 b/w2 c/w3 ", try l.stringsWith(a, "a/w1\x00b/w2\x00zzzz\x00c/w3\x00d/w4", "/w"));
+    try testing.expectEqualStrings("a /w b:/w/ c=/w ", try l.stringsWith(a, "a /w\x00b:/w/\x00zzzz\x00c=/w\x00d /w", "/w"));
     try testing.expectEqualStrings("tail/w ", try l.stringsWith(a, "\xfftail/w", "/w"));
     // Printable is 0x20 (space) to 0x7e and tab, as busybox strings: 0x1f,
     // 0x7f and a newline end a run.
     try testing.expectEqualStrings("a /w b ", try l.stringsWith(a, "a /w b", "/w"));
-    try testing.expectEqualStrings("/w12 ", try l.stringsWith(a, "x\x1f/w12", "/w"));
-    try testing.expectEqualStrings("/w12 ", try l.stringsWith(a, "x\x7f/w12", "/w"));
-    try testing.expectEqualStrings("/w12 ", try l.stringsWith(a, "x\n/w12", "/w"));
+    try testing.expectEqualStrings("/w/12 ", try l.stringsWith(a, "x\x1f/w/12", "/w"));
+    try testing.expectEqualStrings("/w/12 ", try l.stringsWith(a, "x\x7f/w/12", "/w"));
+    try testing.expectEqualStrings("/w/12 ", try l.stringsWith(a, "x\n/w/12", "/w"));
+    // Runs that hold the bytes but not the path are not quoted, so a real
+    // one after them is.
+    try testing.expectEqualStrings("/w/real ", try l.stringsWith(a, "/wx/a\x00/home/u/w/b\x00/w1/c\x00/w/real", "/w"));
 }
 
 test "lastLines is tail -n N" {

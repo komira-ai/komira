@@ -60,7 +60,7 @@
 //! watchdog killed it; 129, 130, 143 the wrapper was signalled; 2 a refusal;
 //! 3 the compiler exited 0 but the -o output is missing or empty; 4 the output
 //! holds the working directory ($PWD, or getcwd() when it differs) as a path
-//! (dir_match.zig); 126 or
+//! (tools/build/dir_match); 126 or
 //! 127 the compiler could not be started (127: not found). mutation.bzl's
 //! _INFRA_EXITS reads these numbers. The scratch directory is removed on
 //! every exit the wrapper makes; a SIGKILLed wrapper, or a signal with idle 0,
@@ -70,7 +70,7 @@ const std = @import("std");
 const linux = std.os.linux;
 const posix = std.posix;
 const compile_args = @import("compile_args.zig");
-const dir_match = @import("dir_match.zig");
+const dir_match = @import("dir_match");
 const cc_shim = @import("cc_shim.zig");
 const modular_cfg = @import("modular_cfg.zig");
 const proc_tree = @import("proc_tree.zig");
@@ -78,7 +78,6 @@ const watch_loop = @import("watch_loop.zig");
 
 test {
     _ = @import("compile_args.zig");
-    _ = @import("dir_match.zig");
     _ = @import("cc_shim.zig");
     _ = @import("modular_cfg.zig");
     _ = @import("proc_tree.zig");
@@ -545,10 +544,10 @@ fn printable(c: u8) bool {
 }
 
 /// Exit 3 when the compiler exited 0 but the output is missing or empty; 4
-/// when it holds the working directory as a path (dir_match.zig: a longer
-/// name that starts with its bytes, like `/worker.mojo` under `/work`, is
-/// not it), printing up to five printable runs (4 bytes or longer) that hold
-/// it.
+/// when it holds the working directory as a path (tools/build/dir_match: a
+/// longer name that starts with its bytes, like `/worker.mojo` under `/work`,
+/// or a later component of another path, like `/home/someone/work`, is not
+/// it), printing up to five printable runs (4 bytes or longer) that hold it.
 pub fn postCheck(arena: std.mem.Allocator, rc: u8, out: []const u8, pwd: []const u8) u8 {
     if (rc != 0) return rc;
     if (!nonEmpty(out)) {

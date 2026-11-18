@@ -10,6 +10,7 @@ zig_test(
     exec_compatible_with = LINUX_X86_64,
     src = "rustc_launch_test.zig",
     imports = ["rustc_launch.zig"],
+    deps = ["//tools/build/dir_match:dir_match"],
     busybox = "komira//tools/build/toolchains:busybox",
     zig = "komira//tools/build/toolchains:zig_next",
 )
@@ -18,6 +19,7 @@ zig_exe(
     name = "rustc_launch",
     exec_compatible_with = LINUX_X86_64,
     src = "rustc_launch.zig",
+    deps = ["//tools/build/dir_match:dir_match"],
     unit_tests = [":rustc_launch_unit", "komira//tools/build/toolchains:zig_next_version"],
     busybox = "komira//tools/build/toolchains:busybox",
     zig = "komira//tools/build/toolchains:zig_next",

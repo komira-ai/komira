@@ -39,7 +39,8 @@
 //!      tests//functional/coverage:link_line records both lines and fails
 //!      when they differ by more than the profile runtime.
 //!   3. The binary must be an ELF file and hold no path of this action (its
-//!      working directory, then its scratch directory).
+//!      working directory, then its scratch directory), each matched as a
+//!      path by tools/build/dir_match.
 //!
 //! When one input has several faults, the first check above that refuses
 //! it is the one named.
@@ -68,6 +69,7 @@
 
 const std = @import("std");
 const br = @import("bounded_run.zig");
+const dir_match = @import("dir_match");
 const run_cmd = @import("cov_branch_run.zig");
 
 pub const USAGE = "usage: cov_branch link --busybox B --compiler DIR --zig DIR --target T --lld F --runtime F --bitcode F --out F [-- <link tail>...]";
@@ -205,9 +207,10 @@ pub fn head4(path: []const u8, buf: *[4]u8) []const u8 {
     return buf[0..n];
 }
 
-/// `strings -n 4 | grep -F needle | head -n 3 | tr '\n' ' '`: the first
-/// three runs of at least 4 printable bytes (0x20 to 0x7e, or a tab) that
-/// hold `needle`, each followed by a space.
+/// `strings -n 4 | head -n 3 | tr '\n' ' '` of the runs that hold the
+/// directory `needle` as a path (tools/build/dir_match, the check's own
+/// predicate): the first three runs of at least 4 printable bytes (0x20 to
+/// 0x7e, or a tab) that hold it, each followed by a space.
 pub fn stringsWith(alloc: std.mem.Allocator, bytes: []const u8, needle: []const u8) ![]const u8 {
     var out = std.ArrayList(u8).empty;
     var found: usize = 0;
@@ -217,7 +220,7 @@ pub fn stringsWith(alloc: std.mem.Allocator, bytes: []const u8, needle: []const 
         const printable = i < bytes.len and ((bytes[i] >= 0x20 and bytes[i] < 0x7f) or bytes[i] == '\t');
         if (printable) continue;
         const run = bytes[start..i];
-        if (run.len >= 4 and std.mem.indexOf(u8, run, needle) != null) {
+        if (run.len >= 4 and dir_match.holdsDir(run, needle)) {
             try out.appendSlice(alloc, run);
             try out.append(alloc, ' ');
             found += 1;
@@ -332,12 +335,14 @@ pub fn linkAll(alloc: std.mem.Allocator, a: Args, where: run_cmd.Where, runner: 
         return red(alloc, err, k, "the link wrote no ELF file");
     }
 
-    // 3b. Holding no path of this action: the working directory first.
+    // 3b. Holding no path of this action: the working directory first. A
+    // directory counts as a path (tools/build/dir_match): `/work` is held by
+    // `/work/x.c`, not by `/workspaces/x` or `/home/someone/work/x`.
     const bytes = std.fs.cwd().readFileAlloc(alloc, out, 1 << 32) catch |e| {
         return red(alloc, err, k, try std.fmt.allocPrint(alloc, "cannot read the binary {s}: {s}", .{ out, @errorName(e) }));
     };
     for ([_][]const u8{ cwd, k }) |d| {
-        if (std.mem.indexOf(u8, bytes, d) != null) {
+        if (dir_match.holdsDir(bytes, d)) {
             return red(alloc, err, k, try std.fmt.allocPrint(alloc, "the binary holds this action's directory {s}: {s}", .{ d, try stringsWith(alloc, bytes, d) }));
         }
     }

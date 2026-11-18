@@ -156,14 +156,15 @@ Every item is something the shell does today, with the test (see "Tests") that p
     `_INFRA_EXITS` (2, 3, 4, 124, 129, 130, 143) reads these numbers: they are a contract, not a detail.
 31. The exit-4 search uses the shell's `$PWD`. The port searches both `$PWD` and `getcwd()` when they
     differ (the spelling question `cov_zig` already handles), so it can only refuse more, never less.
-32. The exit-4 search matches the working directory as a path, not as bytes (`dir_match.zig`): a match
-    counts where its last name ends, at the end of the output or before a byte that cannot continue a
-    file name (`/`, NUL, a quote, a space, `=`, `:`). A longer name that starts with the directory's
-    bytes is another path: with the action root `/work`, the recorded source path
-    `komira_async/runtime/worker.mojo` holds `/work` as bytes and is not refused, while `/work`,
-    `/work/x.mojo`, `"/work"` and `-I/work/inc` are. Only the byte after a match is read, so a relative
-    path with a component of the same name (`pkg/work/x.mojo`) is still refused: no source path in the
-    repository has one. `rustc_launch.zig` matches the same way.
+32. The exit-4 search matches the working directory as a path, not as bytes
+    ([`tools/build/dir_match`](../../tools/build/dir_match/dir_match.zig), which `rustc_launch` and
+    `cov_branch link` use too). A match is part of another name, and does not count, when the byte after
+    it continues a file name (a letter, a digit, `.`, `_`, `-`, `+`, `~`, `@`, a UTF-8 byte), or when
+    the bytes before it are a name that follows a `/` (a later component of another path). With the
+    action root `/work`: the recorded source path `komira_async/runtime/worker.mojo` and the string
+    `/home/someone/work/buck-out` are not refused; `/work`, `/work/x.mojo`, `"/work"`, `-I/work/inc`,
+    `PWD=/work` and `file:///work` are. A relative path with a component of the same name
+    (`pkg/work/x.mojo`) is still refused: nothing before `pkg` says it is a path.
 
 ## Deliberate differences
 
@@ -211,7 +212,6 @@ Every item is something the shell does today, with the test (see "Tests") that p
 | Module | Holds | Pure? |
 |---|---|---|
 | `compile_args.zig` | option parsing, `-o` discovery, `-strip-file-prefix` insertion, `shared-lib` refusal | yes |
-| `dir_match.zig` | whether an output holds a directory as a path (item 32) | yes |
 | `cc_shim.zig` | the two rewrite tables, the exec line, `shim.cfg` read and write | yes, except the exec |
 | `modular_cfg.zig` | render, token check, macOS `shared_libs` check and rewrite | yes |
 | `proc_tree.zig` | `/proc` parse (Linux), `libproc` read (macOS), tree selection, idle arithmetic, kill | parse and selection pure; read and kill not |
