@@ -26,8 +26,10 @@ What each test holds:
   6. A server that sends half a message and then close_notify makes the call
      raise "connection closed by peer (EOF)".
   7. An ErrorResponse while draining to ReadyForQuery raises the second
-     error; 4096 messages with no ReadyForQuery raise "did not reach
-     ReadyForQuery".
+     error. The drain reads at most 4096 messages: a ReadyForQuery as the
+     4096th ends it (the call raises the server's error and the connection
+     reads its next result); one after 4096 notices is never read, and the
+     call raises "did not reach ReadyForQuery".
   8. PgReactorStream: send_all after close() raises the TLS error. The
      bounded retry loops give up with their named errors instead of spinning
      forever: send_all whose socket never drains raises "could not flush all
@@ -786,15 +788,48 @@ def test_error_while_draining_raises_the_second_error() raises:
     print("  ok: an error while draining raises that error")
 
 
-def test_drain_without_ready_gives_up_after_4096_messages() raises:
-    var rig = _PgRig()
+def _error_notices_ready(n_notices: Int) -> List[UInt8]:
+    """ErrorResponse "first", `n_notices` NoticeResponses, then ReadyForQuery,
+    then a well-formed result whose one row is "next"."""
     var r = List[UInt8]()
     _put_msg(
         r, MSG_ERROR, _error_response(String("42P01"), String("first"))
     )
-    for _ in range(4096):
+    for _ in range(n_notices):
         _put_msg(r, MSG_NOTICE, _notice())
-    _server_send(rig.server, r)
+    _put_msg(r, MSG_READY, _ready())
+    _put_msg(r, MSG_ROW_DESC, _row_desc_one_text(String("a")))
+    _put_msg(r, MSG_DATA_ROW, _data_row_text(String("next")))
+    _put_msg(r, MSG_CMD_COMPLETE, _cmd_complete(String("SELECT 1")))
+    _put_msg(r, MSG_READY, _ready())
+    return r^
+
+
+def test_drain_reaches_ready_after_4095_messages() raises:
+    """The drain reads at most 4096 messages: a ReadyForQuery that is the
+    4096th still ends it, the call raises the server's error, and the
+    connection reads its next result."""
+    var rig = _PgRig()
+    _server_send(rig.server, _error_notices_ready(4095))
+    var rt = _new_rt()
+    assert_equal(
+        _raised_by_prepare(rig, rt), String("PgError[ERROR 42P01]: first")
+    )
+    assert_false(rig.conn.closed())
+    ref reactor = rt.reactor()
+    var rows = rig.conn.query[BRT](reactor, String("SELECT a"))
+    assert_equal(rows.__len__(), 1)
+    assert_equal(rows.row(0).get_text(0), String("next"))
+    _done(rig^)
+    _ = rt^
+    print("  ok: a drain reaches ReadyForQuery as its 4096th message")
+
+
+def test_drain_gives_up_before_a_4097th_message() raises:
+    """4096 notices before the ReadyForQuery: the drain gives up rather than
+    reading the 4097th message."""
+    var rig = _PgRig()
+    _server_send(rig.server, _error_notices_ready(4096))
     var rt = _new_rt()
     assert_equal(
         _raised_by_prepare(rig, rt),
@@ -802,7 +837,7 @@ def test_drain_without_ready_gives_up_after_4096_messages() raises:
     )
     _done(rig^)
     _ = rt^
-    print("  ok: a drain with no ReadyForQuery gives up")
+    print("  ok: a drain gives up after 4096 messages")
 
 
 # =============================================================================
@@ -881,7 +916,8 @@ def main() raises:
     test_large_reply_arrives_intact()
     test_close_notify_mid_message_raises_eof()
     test_error_while_draining_raises_the_second_error()
-    test_drain_without_ready_gives_up_after_4096_messages()
+    test_drain_reaches_ready_after_4095_messages()
+    test_drain_gives_up_before_a_4097th_message()
     test_send_after_close_raises_tls_error()
     test_send_that_never_flushes_gives_up()
     test_recv_with_nothing_sent_gives_up()
