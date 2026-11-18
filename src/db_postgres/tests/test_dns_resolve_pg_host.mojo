@@ -1,5 +1,5 @@
 # =============================================================================
-# db_postgres/wire/tests/test_dns_resolve_pg_host.mojo
+# db_postgres/tests/test_dns_resolve_pg_host.mojo
 # =============================================================================
 # Host resolution on the pg connect path: pg_tls._resolve_host_be takes the
 # IP-literal fast path for "localhost" / "" / dotted quads and falls through

@@ -191,8 +191,8 @@ Each library lists its test files in `test_srcs` in its `BUCK` file, so building
 | Test | Covers |
 |---|---|
 | `src/db/tests/test_generic_pool_non_pg`, `test_h1_keepalive_pooled_conn` | `Pool` over a mock resource and over HTTP/1 keep-alive connections: eager connect, no resource held across an idle park, no reconnect on reuse, an abandoned frame returning its resource, and a dead connection discarded and redialed |
-| `src/db_postgres/wire/tests/test_scram_and_pgwire`, `test_binary_codec`, `test_pgrow_accumulation` | the RFC 7677 SCRAM vector, PBKDF2, the CSPRNG nonce, message framing and parsing, the binary codec, row accumulation |
-| `src/db_postgres/wire/tests/test_pg_query_op_poll`, `test_pg_tx_op_sequence`, `test_dns_resolve_pg_host` | the poll-shaped query and transaction operations, host name resolution |
+| `src/db_postgres/tests/test_scram_and_pgwire`, `test_binary_codec`, `test_pgrow_accumulation` | the RFC 7677 SCRAM vector, PBKDF2, the CSPRNG nonce, message framing and parsing, the binary codec, row accumulation |
+| `src/db_postgres/tests/test_pg_query_op_poll`, `test_pg_tx_op_sequence`, `test_dns_resolve_pg_host` | the poll-shaped query and transaction operations, host name resolution |
 | `src/db_sqlite/tests/test_dbstorable_sqlite_crud` (a standalone `mojo_test`, `:test_dbstorable_sqlite_crud`) | a `.proto` through `mojo_db_proto_library` to a generated `DbStorable`, stored through `Store[SqliteDatabase]` on an in-memory database: the generated `column_types()`, DDL, INSERT, `to_row` and `from_row` for each column kind except float, nested message, repeated enum or message, and serial (`tests/records.proto` says why), NULL and present optional columns, a renamed column, the DEFAULT, UNIQUE, PRIMARY KEY and NOT NULL constraints, get by key, update, list and delete; and `put`, `create_if_absent`, `conditional_update`, `query_rows` and `delete_where` against SQLite. It also links the static SQLite |
 
 Run: `./buck2 build //src/db:db //src/db_postgres:db_postgres //src/db_sqlite:db_sqlite` and `./buck2 test //src/db_sqlite:test_dbstorable_sqlite_crud`.
