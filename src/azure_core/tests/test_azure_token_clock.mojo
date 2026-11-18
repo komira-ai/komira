@@ -201,7 +201,14 @@ def test_the_providers_read_no_wall_clock() raises:
     for i in range(len(files)):
         var text = _read(files[i])
         assert_equal(_count(text, "now_unix_ms"), 0, files[i] + " reads the wall clock")
-        assert_equal(_count(text, "clock"), 0, files[i] + " imports clock")
+        # The clock package by its import statements: its bare name is also
+        # in the providers' own `self._clock` fields.
+        var imports = (
+            _count(text, "from clock ")
+            + _count(text, "from clock.")
+            + _count(text, "import clock")
+        )
+        assert_equal(imports, 0, files[i] + " imports clock")
         # Not vacuous: the file is the provider, and reads its injected
         # clock at the refresh and at the check.
         assert_equal(
