@@ -350,7 +350,7 @@ def _tile_rows(total_rows: Int, num_workers: Int) -> Int:
     var want = (total_rows + (num_workers * 4) - 1) // (num_workers * 4)
     if want < _PN_MIN_TILE_ROWS:
         want = _PN_MIN_TILE_ROWS
-    return want if want > 0 else 1  # cov: unreachable want is at least _PN_MIN_TILE_ROWS here
+    return want if want > 0 else 1  # want is at least _PN_MIN_TILE_ROWS here
 
 
 # =============================================================================
@@ -546,7 +546,7 @@ struct _PnNarrowTask(Segment):
         # (_PnNarrowState, _PnNarrowTask), so the bitcast resolves to the
         # concrete state at the call site.
         var sp = UnsafePointer(to=state).bitcast[_PnNarrowState]()
-        if sp[].err_flag[].load() != Int8(0):  # cov: unreachable no narrow task raises: _pn_narrow_range raises nothing
+        if sp[].err_flag[].load() != Int8(0):  # no narrow task raises: _pn_narrow_range raises nothing
             return  # cov: unreachable see the line above
         try:
             ref w = sp[].work[Int(task_id)]
@@ -567,7 +567,7 @@ struct _PnNarrowTask(Segment):
             if not ok:
                 var expected = Int8(0)
                 _ = sp[].bad[].compare_exchange(expected, Int8(1))
-        except e:  # cov: unreachable no narrow task raises: _pn_narrow_range raises nothing
+        except e:  # no narrow task raises: _pn_narrow_range raises nothing
             var expected2 = Int8(0)  # cov: unreachable see the line above
             if sp[].err_flag[].compare_exchange(expected2, Int8(1)):  # cov: unreachable see the line above
                 sp[].err_msg[] = String(e)  # cov: unreachable see the line above
@@ -680,7 +680,7 @@ def narrow_build_batch[
             plan.col_codes.append(PN_BAD_WIDTH)
             plan.col_bytes.append(sp.target_bytes)
             continue
-        if Int(sp.target_bytes) >= 8:  # cov: unreachable the rung above admits only 1, 2 and 4
+        if Int(sp.target_bytes) >= 8:  # the rung above admits only 1, 2 and 4
             plan.col_codes.append(PN_NOT_NARROWER)  # cov: unreachable see the line above
             plan.col_bytes.append(sp.target_bytes)  # cov: unreachable see the line above
             continue  # cov: unreachable see the line above
@@ -736,7 +736,7 @@ def narrow_build_batch[
     if (
         num_workers < 2
         or rows < _PN_MIN_PARALLEL_ROWS
-        or n_tasks < 2  # cov: unreachable with 2+ workers and 65536+ rows, _tile_rows cuts 4+ tiles
+        or n_tasks < 2  # with 2+ workers and 65536+ rows, _tile_rows cuts 4+ tiles
     ):
         # SERIAL ARM -- the SAME kernel, so it cannot diverge from the forked
         # one. Reached by every small fixture (and by every unit test), which
@@ -779,7 +779,7 @@ def narrow_build_batch[
         )
         var raised = state.err_flag[].load() != Int8(0)
         var raised_msg = String("")
-        if raised:  # cov: unreachable no narrow task raises: _pn_narrow_range raises nothing
+        if raised:  # no narrow task raises: _pn_narrow_range raises nothing
             raised_msg = String(state.err_msg[])  # cov: unreachable see the line above
         bad = state.bad[].load() != Int8(0)
 
@@ -790,7 +790,7 @@ def narrow_build_batch[
         out_bufs = Slab[OwnedAlignedBuffer]()
         swap(out_bufs, state.out[])
         _ = state^
-        if raised:  # cov: unreachable no narrow task raises: _pn_narrow_range raises nothing
+        if raised:  # no narrow task raises: _pn_narrow_range raises nothing
             raise Error("narrow_build_batch: " + raised_msg)  # cov: unreachable see the line above
 
     if bad:

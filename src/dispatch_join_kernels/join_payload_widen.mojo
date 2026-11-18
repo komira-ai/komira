@@ -157,7 +157,7 @@ struct _PnWidenTask(Segment):
             )
         except e:
             var expected = Int8(0)
-            if sp[].err_flag[].compare_exchange(expected, Int8(1)):  # cov: unreachable False only when two tasks fail at once, a race no test can force
+            if sp[].err_flag[].compare_exchange(expected, Int8(1)):  # False only when two tasks fail at once, a race no test can force
                 sp[].err_msg[] = String(e)
 
 
@@ -299,7 +299,7 @@ def widen_payload_table_parallel[
     if (
         num_workers < 2
         or total_rows < _PN_MIN_PARALLEL_ROWS
-        or n_tasks < 2  # cov: unreachable with 2+ workers and 65536+ rows, _tile_rows cuts 4+ tiles
+        or n_tasks < 2  # with 2+ workers and 65536+ rows, _tile_rows cuts 4+ tiles
     ):
         # SERIAL ARM -- the SAME kernel, so the two arms cannot diverge.
         _ = cancel_token^
