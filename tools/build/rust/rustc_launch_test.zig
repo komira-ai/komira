@@ -1,6 +1,7 @@
 //! Unit tests of rustc_launch.zig: the command line, the scratch directory, the
-//! arguments rustc is run with, and the checks on its output. The process
-//! behaviour (the environment, the exit statuses, the linker shim) is held by
+//! arguments rustc is run with, and the checks on its output (what counts as a
+//! path is held by tools/build/dir_match's tests). The process behaviour (the
+//! environment, the exit statuses, the linker shim) is held by
 //! tests//functional/rustc_launch, which runs the launcher over a stand-in
 //! rustc, and by every Rust target of the repository, which compiles through it.
 const std = @import("std");
@@ -83,55 +84,49 @@ fn put(dir: std.fs.Dir, name: []const u8, data: []const u8) !void {
     try f.writeAll(data);
 }
 
-test "fileContains: a match anywhere, across reads, and not a near miss" {
+test "checkOutput: missing, empty, clean, near misses, and outputs holding the working directory" {
     var tmp = t.tmpDir(.{});
     defer tmp.cleanup();
-    // The needle (9 bytes) straddles the first read of a 20-byte buffer.
-    try put(tmp.dir, "f", "aaaaaaaaaaaaaaa/work/dir/bbbbbbbbbbbbbbbbbb");
-    var small: [20]u8 = undefined;
-    const f = try tmp.dir.openFile("f", .{});
-    defer f.close();
-    try t.expect(try L.fileContains(f, "/work/dir", &small));
-    try f.seekTo(0);
-    try t.expect(!try L.fileContains(f, "/work/dix", &small));
-    try f.seekTo(0);
-    try t.expect(try L.fileContains(f, "aaaa", &small));
-    try f.seekTo(0);
-    try t.expect(try L.fileContains(f, "bbbbbbbbbbbbbbbbbb", &small));
-    try f.seekTo(0);
-    try t.expect(!try L.fileContains(f, "bbbbbbbbbbbbbbbbbbb", &small));
-}
-
-test "checkOutput: missing, empty, clean, and one holding the working directory" {
-    var tmp = t.tmpDir(.{});
-    defer tmp.cleanup();
-    var buf: [64]u8 = undefined;
-    const root = try tmp.dir.realpathAlloc(t.allocator, ".");
-    defer t.allocator.free(root);
+    const a = t.allocator;
+    const root = try tmp.dir.realpathAlloc(a, ".");
+    defer a.free(root);
     const at = struct {
         fn p(r: []const u8, name: []const u8) ![]u8 {
             return std.fs.path.join(t.allocator, &.{ r, name });
         }
     }.p;
     const missing = try at(root, "missing");
-    defer t.allocator.free(missing);
-    try t.expectEqual(L.OutputCheck.missing_or_empty, try L.checkOutput(missing, "/work", &buf));
+    defer a.free(missing);
+    try t.expectEqual(L.OutputCheck.missing_or_empty, try L.checkOutput(a, missing, "/work"));
     try put(tmp.dir, "empty", "");
     const empty = try at(root, "empty");
-    defer t.allocator.free(empty);
-    try t.expectEqual(L.OutputCheck.missing_or_empty, try L.checkOutput(empty, "/work", &buf));
-    try put(tmp.dir, "clean", "an rlib with ./src/lib.rs only");
-    const clean = try at(root, "clean");
-    defer t.allocator.free(clean);
-    try t.expectEqual(L.OutputCheck.ok, try L.checkOutput(clean, "/work", &buf));
-    try put(tmp.dir, "dirty", "debug info: /work/crate/src/lib.rs");
-    const dirty = try at(root, "dirty");
-    defer t.allocator.free(dirty);
-    try t.expectEqual(L.OutputCheck.has_cwd, try L.checkOutput(dirty, "/work", &buf));
+    defer a.free(empty);
+    try t.expectEqual(L.OutputCheck.missing_or_empty, try L.checkOutput(a, empty, "/work"));
+    const outputs = [_]struct { data: []const u8, want: L.OutputCheck }{
+        .{ .data = "an rlib with ./src/lib.rs only", .want = .ok },
+        // A longer name that starts with the working directory's bytes.
+        .{ .data = "src/runtime/worker.rs", .want = .ok },
+        .{ .data = ".../actions/workflows/ci.yml", .want = .ok },
+        // The same name as a later component of another absolute path.
+        .{ .data = "openapi_files(\"/home/someone/work/buck-out/v2/gen\")", .want = .ok },
+        .{ .data = "debug info: /work/crate/src/lib.rs", .want = .has_cwd },
+        .{ .data = "x\x00/work\x00", .want = .has_cwd },
+        .{ .data = "-I/work/inc", .want = .has_cwd },
+        .{ .data = "/home/someone/work /work", .want = .has_cwd },
+    };
+    for (outputs) |o| {
+        try put(tmp.dir, "out", o.data);
+        const out = try at(root, "out");
+        defer a.free(out);
+        t.expectEqual(o.want, try L.checkOutput(a, out, "/work")) catch |e| {
+            std.debug.print("output: {s}\n", .{o.data});
+            return e;
+        };
+    }
     // A directory is neither empty nor read.
     try tmp.dir.makeDir("adir");
     try put(tmp.dir, "adir/f", "/work");
     const adir = try at(root, "adir");
-    defer t.allocator.free(adir);
-    try t.expectEqual(L.OutputCheck.ok, try L.checkOutput(adir, "/work", &buf));
+    defer a.free(adir);
+    try t.expectEqual(L.OutputCheck.ok, try L.checkOutput(a, adir, "/work"));
 }

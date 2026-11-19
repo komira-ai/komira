@@ -59,7 +59,8 @@
 //! Exit status: the compiler's (128+N when signal N killed it); 124 the
 //! watchdog killed it; 129, 130, 143 the wrapper was signalled; 2 a refusal;
 //! 3 the compiler exited 0 but the -o output is missing or empty; 4 the output
-//! holds the working directory ($PWD, or getcwd() when it differs); 126 or
+//! holds the working directory ($PWD, or getcwd() when it differs) as a path
+//! (tools/build/dir_match); 126 or
 //! 127 the compiler could not be started (127: not found). mutation.bzl's
 //! _INFRA_EXITS reads these numbers. The scratch directory is removed on
 //! every exit the wrapper makes; a SIGKILLed wrapper, or a signal with idle 0,
@@ -69,6 +70,7 @@ const std = @import("std");
 const linux = std.os.linux;
 const posix = std.posix;
 const compile_args = @import("compile_args.zig");
+const dir_match = @import("dir_match");
 const cc_shim = @import("cc_shim.zig");
 const modular_cfg = @import("modular_cfg.zig");
 const proc_tree = @import("proc_tree.zig");
@@ -541,16 +543,11 @@ fn printable(c: u8) bool {
     return c == '\t' or (c >= 0x20 and c <= 0x7e);
 }
 
-fn holdsAny(hay: []const u8, needles: []const []const u8) bool {
-    for (needles) |n| {
-        if (n.len > 0 and std.mem.indexOf(u8, hay, n) != null) return true;
-    }
-    return false;
-}
-
 /// Exit 3 when the compiler exited 0 but the output is missing or empty; 4
-/// when it holds the working directory, printing up to five printable runs
-/// (4 bytes or longer) that hold it.
+/// when it holds the working directory as a path (tools/build/dir_match: a
+/// longer name that starts with its bytes, like `/worker.mojo` under `/work`,
+/// or a later component of another path, like `/home/someone/work`, is not
+/// it), printing up to five printable runs (4 bytes or longer) that hold it.
 pub fn postCheck(arena: std.mem.Allocator, rc: u8, out: []const u8, pwd: []const u8) u8 {
     if (rc != 0) return rc;
     if (!nonEmpty(out)) {
@@ -562,7 +559,7 @@ pub fn postCheck(arena: std.mem.Allocator, rc: u8, out: []const u8, pwd: []const
     needles.append(arena, pwd) catch oom();
     const cwd = std.process.getCwdAlloc(arena) catch pwd;
     if (!std.mem.eql(u8, cwd, pwd)) needles.append(arena, cwd) catch oom();
-    if (!holdsAny(data, needles.items)) return 0;
+    if (!dir_match.holdsAnyDir(data, needles.items)) return 0;
     say("{s} contains this action's working directory ({s}):", .{ out, pwd });
     var shown: usize = 0;
     var start: usize = 0;
@@ -570,7 +567,7 @@ pub fn postCheck(arena: std.mem.Allocator, rc: u8, out: []const u8, pwd: []const
     while (i <= data.len and shown < 5) : (i += 1) {
         if (i < data.len and printable(data[i])) continue;
         const run = data[start..i];
-        if (run.len >= 4 and holdsAny(run, needles.items)) {
+        if (run.len >= 4 and dir_match.holdsAnyDir(run, needles.items)) {
             std.debug.print("{s}\n", .{run});
             shown += 1;
         }

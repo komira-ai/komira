@@ -731,6 +731,10 @@ pub fn main() void {
     // Output checks and refusals, each with the scratch directory gone.
     expect(.{ .name = "empty", .flags = knobs, .mojo = &([_][]const u8{"empty"} ++ o) }, 3, "is missing or empty");
     expect(.{ .name = "cwd", .flags = knobs, .mojo = &([_][]const u8{"cwd"} ++ o) }, 4, "contains this action's working directory");
+    // A longer name that starts with the working directory's bytes (with
+    // the action root `/work`, the source path `runtime/worker.mojo`) is
+    // not the working directory: the output passes.
+    expect(.{ .name = "cwdname", .flags = knobs, .mojo = &([_][]const u8{"cwdname"} ++ o) }, 0, null);
     expect(.{ .name = "noout", .flags = knobs, .mojo = &.{"nap2"} }, 2, "no -o <output>");
     expect(.{ .name = "manifest", .tc = "tc_missing", .flags = knobs, .mojo = &([_][]const u8{"nap2"} ++ o) }, 2, "toolchain member 'lib/libmissing.so' is missing or empty");
     expect(.{ .name = "noexec", .tc = "tc_noexec", .flags = knobs, .mojo = &([_][]const u8{"nap2"} ++ o) }, 127, "cannot run");
@@ -755,7 +759,7 @@ pub fn main() void {
     // The floor: a run that wrote fewer ok cases than this (a case deleted,
     // a case that never says ok) is refused here in the action, so the
     // report cannot pass with less in it. Raise it when a case is added.
-    const floor = if (macos) 34 else 29;
+    const floor = if (macos) 35 else 30;
     var ok_lines: usize = 0;
     var report_lines = std.mem.splitScalar(u8, report.items, '\n');
     while (report_lines.next()) |l| {

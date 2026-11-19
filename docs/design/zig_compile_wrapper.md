@@ -156,6 +156,15 @@ Every item is something the shell does today, with the test (see "Tests") that p
     `_INFRA_EXITS` (2, 3, 4, 124, 129, 130, 143) reads these numbers: they are a contract, not a detail.
 31. The exit-4 search uses the shell's `$PWD`. The port searches both `$PWD` and `getcwd()` when they
     differ (the spelling question `cov_zig` already handles), so it can only refuse more, never less.
+32. The exit-4 search matches the working directory as a path, not as bytes
+    ([`tools/build/dir_match`](../../tools/build/dir_match/dir_match.zig), which `rustc_launch` and
+    `cov_branch link` use too). A match is part of another name, and does not count, when the byte after
+    it continues a file name (a letter, a digit, `.`, `_`, `-`, `+`, `~`, `@`, a UTF-8 byte), or when
+    the bytes before it are a name that follows a `/` (a later component of another path). With the
+    action root `/work`: the recorded source path `komira_async/runtime/worker.mojo` and the string
+    `/home/someone/work/buck-out` are not refused; `/work`, `/work/x.mojo`, `"/work"`, `-I/work/inc`,
+    `PWD=/work` and `file:///work` are. A relative path with a component of the same name
+    (`pkg/work/x.mojo`) is still refused: nothing before `pkg` says it is a path.
 
 ## Deliberate differences
 
@@ -341,7 +350,8 @@ case, never a hung action:
 - `sigstate`: with idle > 0 the stand-in reports stdin is `/dev/null`, SIGINT and SIGQUIT ignored, and its
   pid equal to its session id; with idle 0 it reports the runner's stdin and dispositions (items 28, 29);
 - `selfkill` (the stand-in dies of SIGUSR1): 138, with idle > 0 and with idle 0 (item 30's `128+N`);
-- `empty` 3, `cwd` 4 (output holds the working directory), no `-o` 2, a manifest member missing 2, a
+- `empty` 3, `cwd` 4 (output holds the working directory), `cwdname` 0 (output holds a longer name that
+  starts with the working directory's bytes, item 32), no `-o` 2, a manifest member missing 2, a
   compiler that cannot be started 127 (with idle > 0 and with idle 0), each with the scratch directory
   gone afterwards.
 

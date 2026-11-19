@@ -26,10 +26,12 @@
 //!
 //! Exit status: rustc's (128 + N when a signal N ended it); 2 for a toolchain
 //! or usage refusal; 3 when rustc exits 0 but <output> is missing or empty; 4
-//! when <output> contains this action's working directory (it would differ on
-//! every run). The scratch directory is removed whatever the status.
+//! when <output> contains this action's working directory as a path (it would
+//! differ on every run; tools/build/dir_match says what a path is). The
+//! scratch directory is removed whatever the status.
 
 const std = @import("std");
+const dir_match = @import("dir_match");
 
 pub const Plan = struct {
     busybox: []const u8,
@@ -98,31 +100,18 @@ pub fn exitCodeOf(term: std.process.Child.Term) u8 {
 
 pub const OutputCheck = enum { ok, missing_or_empty, has_cwd };
 
-/// Whether `f` holds `needle` anywhere; `buf` is the read buffer (longer than
-/// `needle`). A match across two reads is found.
-pub fn fileContains(f: std.fs.File, needle: []const u8, buf: []u8) !bool {
-    std.debug.assert(needle.len > 0 and buf.len > needle.len);
-    var have: usize = 0;
-    while (true) {
-        const n = try f.read(buf[have..]);
-        if (n == 0) return false;
-        const end = have + n;
-        if (std.mem.indexOf(u8, buf[0..end], needle) != null) return true;
-        const keep = @min(needle.len - 1, end);
-        std.mem.copyForwards(u8, buf[0..keep], buf[end - keep .. end]);
-        have = keep;
-    }
-}
-
 /// The checks on rustc's output after an exit 0: it exists and is not empty,
-/// and it does not hold the working directory `cwd`. A directory is not read.
-pub fn checkOutput(path: []const u8, cwd: []const u8, buf: []u8) !OutputCheck {
+/// and it does not hold the working directory `cwd` as a path
+/// (tools/build/dir_match: a longer name that starts with its bytes, like
+/// `/worker.rs` under `/work`, or a later component of another path, like
+/// `/home/someone/work`, is not it). A directory is not read.
+pub fn checkOutput(a: std.mem.Allocator, path: []const u8, cwd: []const u8) !OutputCheck {
     const st = std.fs.cwd().statFile(path) catch return .missing_or_empty;
     if (st.size == 0) return .missing_or_empty;
     if (st.kind == .directory) return .ok;
-    const f = try std.fs.cwd().openFile(path, .{});
-    defer f.close();
-    return if (try fileContains(f, cwd, buf)) .has_cwd else .ok;
+    const bytes = try std.fs.cwd().readFileAlloc(a, path, std.math.maxInt(usize));
+    defer a.free(bytes);
+    return if (dir_match.holdsDir(bytes, cwd)) .has_cwd else .ok;
 }
 
 fn die(code: u8, comptime fmt: []const u8, args: anytype) noreturn {
@@ -221,8 +210,7 @@ pub fn main() !void {
     var rc = exitCodeOf(term);
 
     if (rc == 0) {
-        var buf: [1 << 16]u8 = undefined;
-        switch (try checkOutput(plan.output, cwd, &buf)) {
+        switch (try checkOutput(a, plan.output, cwd)) {
             .ok => {},
             .missing_or_empty => {
                 std.debug.print("rustc_launch: rustc exited 0 but {s} is missing or empty\n", .{plan.output});

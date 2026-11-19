@@ -672,9 +672,9 @@ def test_the_spill_directory_is_set_before_anything_runs() raises:
     var manifest = tpch_manifest(1)
     var sent = ArcPointer[List[String]](List[String]())
     var s = _session(sent, StageFake(sent))
-    _ = generate_tpch(s, manifest, 1, d, String("/ext/e"), 4 * _GIB, String(_VERSION), String("/work/spill"))
+    _ = generate_tpch(s, manifest, 1, d, String("/ext/e"), 4 * _GIB, String(_VERSION), String("/scratch/spill"))
     var text = _sent_text(sent)
-    var at_spill = text.find(String("SET temp_directory='/work/spill'"))
+    var at_spill = text.find(String("SET temp_directory='/scratch/spill'"))
     assert_true(at_spill >= 0)
     assert_true(text.find(String("LOAD '/ext/e'")) > at_spill)
 
