@@ -5,7 +5,7 @@
 # run() loads a UDF runtime library, loads one UDF and drives it on N engine
 # threads (pthreads started in C, on which no Mojo code runs), and returns
 # the C side's report, one JSON object, as a String; the tests and the bench
-# read it with komira_json.
+# read it with json.
 #
 # Who owns and frees each pointer:
 #   - the C strings passed in (the library path, the entry, the format):

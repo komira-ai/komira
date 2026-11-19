@@ -157,9 +157,9 @@ test "a name dropped from the list is refused" {
     const ar = arena.allocator();
     const bzl = try read(ar, "packages.bzl");
     const list = try read(ar, "prod_claimed_names.txt");
-    const dropped = try std.mem.replaceOwned(u8, ar, list, "komira_json\n", "");
+    const dropped = try std.mem.replaceOwned(u8, ar, list, "json\n", "");
     try t.expect(!std.mem.eql(u8, dropped, list));
-    try expectRefused(ar, bzl, dropped, "komira_json is a member of the release and is not in");
+    try expectRefused(ar, bzl, dropped, "json is a member of the release and is not in");
 }
 
 test "a list that is unsorted, repeats a name, or holds junk is refused" {

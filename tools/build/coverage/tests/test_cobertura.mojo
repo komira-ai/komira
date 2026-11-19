@@ -66,7 +66,7 @@ def test_kcov_shape_reads_classes_and_lines() raises:
     assert_equal(fs[0].path, "tests/test_refusals.mojo")
     assert_equal(fs[0].line_found(), 3)
     assert_equal(fs[0].line_hit(), 2)
-    assert_equal(fs[1].path, "buck-out/v2/art/komira/src/komira_retry/__komira_retry__/fedcba9876543210/src/komira_retry/budget.mojo")
+    assert_equal(fs[1].path, "buck-out/v2/art/komira/src/retry/__komira_retry__/fedcba9876543210/src/retry/budget.mojo")
     assert_equal(fs[1].line_hit(), 3)
     assert_equal(fs[2].hits[143], 0)
 

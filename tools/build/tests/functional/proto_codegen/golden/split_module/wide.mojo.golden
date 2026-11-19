@@ -5,7 +5,7 @@
 # proto package: komira.split.v1
 # Mojo package:  komira_split_fixture
 #
-# Generated message structs conform to the komira_proto_codec
+# Generated message structs conform to the proto_codec
 # `Serializable` trait: encode[E: WireEncoder] / decode[D: WireDecoder].
 
 

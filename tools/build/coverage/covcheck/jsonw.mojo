@@ -1,8 +1,8 @@
-"""A small JSON writer over komira_json's byte writers (which do the string
+"""A small JSON writer over json's byte writers (which do the string
 escaping): the caller opens containers, names each object member with
 `key` and each array element with `item`, and the commas are placed here."""
 
-from komira_json import write_i64_dec, write_json_bool, write_json_null, write_json_string
+from json import write_i64_dec, write_json_bool, write_json_null, write_json_string
 
 
 struct JsonOut(Movable):

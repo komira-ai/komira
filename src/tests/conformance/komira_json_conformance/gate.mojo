@@ -9,7 +9,7 @@
 #   BOUNDARY  the file is not UTF-8 and the entry point takes a String, so
 #             the harness refused it before the parser ran (testees.mojo);
 #   MISREAD   the parser returned, but its output does not represent the
-#             text (komira_jsonl: rows dropped or made up).
+#             text (jsonl: rows dropped or made up).
 # A y_ file is handled right only by ACCEPT; an n_ file by REJECT or
 # BOUNDARY. A file that kills the process (an abort, not a raised error) has
 # no verdict: see ABORTS: below.
@@ -29,7 +29,7 @@
 #     VERDICT, so a list entry excuses one wrong verdict, not any;
 #   - an i_ file with the verdict the parser gives it: a reason starting
 #     ACCEPTS:, REJECTS:, BOUNDARY: or MISREADS:. The suite allows either
-#     answer on an i_ file, but each is a choice the parser made (komira_json
+#     answer on an i_ file, but each is a choice the parser made (json
 #     refuses a lone surrogate escape, for instance), so a change must be a
 #     reviewed edit of the line. A REJECTS: record starts with the error's
 #     class (its text up to the first ": "), so a change of the layer that

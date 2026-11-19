@@ -4,7 +4,7 @@
 # Part 1 of 2 of `wide`: declarations of `wide.mojo`, which is split so
 # that no generated file reaches 1000 lines. Import them from `wide`; it re-exports all.
 
-from komira_proto_codec import ProtoEnum, Serializable, WireEncoder, WireDecoder
+from proto_codec import ProtoEnum, Serializable, WireEncoder, WireDecoder
 from std.memory import bitcast
 from .wide_p02 import Wide10
 

@@ -1,0 +1,96 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The network half of the model seams of kg (docs/design/knowledge_graph_port.md): HTTP
+# transports for a chat-completions wire and an embeddings wire, an Embedder and an LlmClient over
+# them, the prompts as values the caller passes in, and the choice between extracting by rules and
+# extracting by a model. No vendor, product or model is named; the address, path, credential
+# header, model id, dimension and prompts are arguments with no default. No environment variable
+# and no clock is read, and a call is made once (no retry).
+#
+# The welded tests: test_auth_header pins the credential header's checks (token name, no control
+# byte, not a header the transport writes) on both sides of each limit; test_wire_endpoint the
+# endpoint's rules; test_prompt the templates (one-pass substitution, the refusals, the neutral
+# values); test_wire_json the request bodies (any text reaches the wire unchanged) and the
+# response readers (the envelope, the row count, the dimension, finite numbers, the index);
+# test_embedder and test_chat_client the embedder and the client over a scripted transport
+# (extraction in a fenced block, skipped entries, the yes or no reading, the schema attached only
+# when the prompt has one); test_extract_client the routing by mode and its refusals;
+# test_http_transport the HTTP transports against a loopback server in this process (request
+# shape, the configured path and credential header, a non-success status, a truncated body, the
+# size bound, a body that is not UTF-8, no retry, the time bound reaching the connector factory,
+# the https scheme); test_http_clients the embedder and the chat client over that server (a
+# response of the wrong width refused, two different prompts reaching the wire unchanged, malformed
+# JSON refused). The README's examples run as tests too.
+mojo_library(
+    name = "kg_llm",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    # The full transitive closure of the Mojo libraries this package and its tests
+    # build on: kg and kg_format, kg_mode, json, and the
+    # HTTP client with the async runtime under it.
+    deps = [
+        "//src/arrow:arrow",
+        "//src/arrow_ipc:arrow_ipc",
+        "//src/async_rt:async_rt",
+        "//src/async_api:async_api",
+        "//src/atomic_alias:atomic_alias",
+        "//src/byte_buffer:byte_buffer",
+        "//src/clock:clock",
+        "//src/containers:containers",
+        "//src/column_kernels:column_kernels",
+        "//src/compression:compression",
+        "//src/counters:counters",
+        "//src/crypto:crypto",
+        "//src/dynamic_filter:dynamic_filter",
+        "//src/encoding:encoding",
+        "//src/fork_join:fork_join",
+        "//src/fs:fs",
+        "//src/hashing:hashing",
+        "//src/host_probe:host_probe",
+        "//src/http_client:http_client",
+        "//src/http_core:http_core",
+        "//src/join_assembly:join_assembly",
+        "//src/json:json",
+        "//src/kg:kg",
+        "//src/kg_format:kg_format",
+        "//src/kg_mode:kg_mode",
+        "//src/libc:libc",
+        "//src/log:log",
+        "//src/lz4:lz4",
+        "//src/metrics:metrics",
+        "//src/name_registry:name_registry",
+        "//src/net:net",
+        "//src/objectstore:objectstore",
+        "//src/objectstore:komira_objectstore_posix",
+        "//src/parquet:parquet",
+        "//src/parquet_api:parquet_api",
+        "//src/parquet_codec:parquet_codec",
+        "//src/parquet_writer:parquet_writer",
+        "//src/plan_expr:plan_expr",
+        "//src/plan_ir:plan_ir",
+        "//src/plan_stats:plan_stats",
+        "//src/scalar_arithmetic:scalar_arithmetic",
+        "//src/scan_source:scan_source",
+        "//src/simd_ops:simd_ops",
+        "//src/spsc_ring:spsc_ring",
+        "//src/sync:sync",
+        "//src/trace:trace",
+        "//src/zlib:zlib",
+        "//third_party/aws-lc:crypto",
+        "//third_party/brotli:brotlidec",
+        "//third_party/s2n-tls:s2n",
+        "//third_party/snappy:snappy",
+        "//tools/build/mojo/runtime_paths:runtime_paths",
+    ],
+    test_srcs = [
+        "tests/test_auth_header.mojo",
+        "tests/test_chat_client.mojo",
+        "tests/test_embedder.mojo",
+        "tests/test_extract_client.mojo",
+        "tests/test_http_clients.mojo",
+        "tests/test_http_transport.mojo",
+        "tests/test_prompt.mojo",
+        "tests/test_wire_endpoint.mojo",
+        "tests/test_wire_json.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)

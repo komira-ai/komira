@@ -1,0 +1,16 @@
+@@ -23,6 +23,7 @@ load("//src/lz4:buildrules.mojo.lock.bzl", lz4 = "GRAPH")
+ load("//src/mail_address:buildrules.mojo.lock.bzl", mail_address = "GRAPH")
+ load("//src/parquet_api:buildrules.mojo.lock.bzl", parquet_api = "GRAPH")
+ load("//src/protobuf:buildrules.mojo.lock.bzl", protobuf = "GRAPH")
++load("//src/resources:buildrules.mojo.lock.bzl", resources = "GRAPH")
+ load("//src/retry:buildrules.mojo.lock.bzl", retry = "GRAPH")
+ load("//src/rowcell:buildrules.mojo.lock.bzl", rowcell = "GRAPH")
+ load("//src/runtime_paths:buildrules.mojo.lock.bzl", runtime_paths = "GRAPH")
+@@ -58,6 +59,7 @@ _GRAPHS = {
+     "mail_address": mail_address,
+     "parquet_api": parquet_api,
+     "protobuf": protobuf,
++    "resources": resources,
+     "retry": retry,
+     "rowcell": rowcell,
+     "runtime_paths": runtime_paths,

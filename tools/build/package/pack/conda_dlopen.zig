@@ -318,7 +318,7 @@ fn refusal(why: ?[]const u8) ![]const u8 {
 const zlib = Dlopen{ .soname = "libz.so.1", .requirement = "libzlib >=1.2.13,<2" };
 const lz4 = Dlopen{ .soname = "liblz4.so.1", .requirement = "lz4-c >=1.9.3,<2" };
 
-// The opening source of komira_zlib, reduced: the soname sits in a comptime
+// The opening source of zlib, reduced: the soname sits in a comptime
 // constant beside a macOS name that is not a soname, and the call names the
 // constant, not the literal.
 const zlib_src =
@@ -685,7 +685,7 @@ test "dlopenReason: as many sonames declared as opened, but other names, is refu
     var arena = testAlloc();
     defer arena.deinit();
     const a = arena.allocator();
-    // komira_lz4 declaring zlib's soname: one opened, one declared, the
+    // lz4 declaring zlib's soname: one opened, one declared, the
     // names differ. Accepted, its package would require libzlib and not
     // lz4-c, the package slice 3 must refuse.
     const lz4_src = "def _open() raises -> OwnedDLHandle:\n    return OwnedDLHandle(\"liblz4.so.1\")\n";

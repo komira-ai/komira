@@ -31,13 +31,13 @@ from std.os import remove
 from std.pathlib import Path
 from std.time import sleep
 
-from komira_http_core.codec import HttpMethod
-from komira_proto_codec import encode_proto
-from komira_runtime_paths import test_tmpdir
-from komira_supervisor import ChildSpec, Supervisor
-from komira_supervisor.proc_ffi import proc_kill, proc_probe_children
+from http_core.codec import HttpMethod
+from proto_codec import encode_proto
+from runtime_paths import test_tmpdir
+from supervisor import ChildSpec, Supervisor
+from supervisor.proc_ffi import proc_kill, proc_probe_children
 
-from komira_job_report_proto.job_report import (
+from job_report_proto.job_report import (
     JobDirective,
     JobFailure,
     JobHeartbeat,
@@ -341,7 +341,7 @@ def test_the_first_beat_probe_fires_when_a_child_already_exists() raises:
 
 
 def _await_exited_unreaped(pid: Int32) raises:
-    """Poll komira_supervisor's non-reaping child probe 5 ms apart, up to 1000
+    """Poll supervisor's non-reaping child probe 5 ms apart, up to 1000
     times, until it names `pid` as an exited, unreaped child. (An exit
     notification is not enough: on XNU EVFILT_PROC NOTE_EXIT may fire before
     the child is a waitable zombie.)"""

@@ -1,0 +1,7 @@
+# What the coverage census measured of this package's libraries (tools/build/coverage/census.md).
+census	2026-10-10	27a2541169cb979fa9c82a032eea24919b727121	-
+komira//src/plan_proto:plan_proto	src/plan_proto	library	OK	0	0	-	-	no	release	-	-
+generated	src/plan_proto/generated/plan_proto/__init__.mojo
+generated	src/plan_proto/generated/plan_proto/optimized_plan.mojo
+generated	src/plan_proto/generated/plan_proto/plan.mojo
+generated	src/plan_proto/generated/plan_proto/plan_vocabulary.mojo

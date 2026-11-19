@@ -805,14 +805,14 @@ is not a one-line change today:
   in a library whose gate reads branch records.** Those runs give line
   coverage only, so such a file has line records and no branch record:
   `BranchUnmeasuredFile` (listed in census mode, failing in enforce mode).
-  `komira_scalar_arithmetic` has four such files (its README reaches them,
+  `scalar_arithmetic` has four such files (its README reaches them,
   its one test does not). Before enforce, decide between branch records for
   those runs, a test that reaches the files, or accepting the finding; the
   gate does not change this today.
 
 **The ledger** (`COVERAGE_NO_GATE` in `policy.bzl`): the gate
 runs `covcheck_bin`, so the Mojo libraries `covcheck_bin` depends on
-(`covcheck` and `komira_json`; the tool that runs the examples of their
+(`covcheck` and `json`; the tool that runs the examples of their
 README is Zig) cannot have the gate as an action of their own:
 the library would depend on the gate's directory, which depends on
 `covcheck_bin`, which depends on the library. That is a cycle of configured
@@ -836,15 +836,15 @@ rdep of the library in its own package), which wait for every gate,
 `<name>_cov_gate` included:
 
 ```sh
-./buck2 build komira//src/komira_retry:komira_retry_conda -c komira.coverage=true
+./buck2 build komira//src/retry:retry_conda -c komira.coverage=true
 ```
 
 **Branch coverage**: kcov reports none; the branch records of `branch/`
 are the source, read by the gate of a library of `COVERAGE_BRANCH_GATE`
 (`policy.bzl`, each row with its evidence: every library whose tests'
 branches all classify and hold an arm, as the sweep of every library found
-them, among them `komira_retry`, whose census gate reads 73 of 74 arms,
-and `komira_json`, whose `komira_json_cov_gate` reads them) and of every
+them, among them `retry`, whose census gate reads 73 of 74 arms,
+and `json`, whose `json_cov_gate` reads them) and of every
 fixture of the tests cell
 but those passing `coverage_branch_gate = False` (test 46's
 `covfull_unread`).
@@ -864,7 +864,7 @@ shows the branch number the gate measures (unless the records or the gate
 failed to build: then it lists the library as branch not measured).
 
 ```sh
-./buck2 build 'komira//src/komira_retry:komira_retry[coverage][gate]' -c komira.coverage=true
+./buck2 build 'komira//src/retry:retry[coverage][gate]' -c komira.coverage=true
 ```
 
 ## The 99% threshold and holds

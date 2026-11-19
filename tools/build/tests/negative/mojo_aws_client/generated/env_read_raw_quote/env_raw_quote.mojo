@@ -9,7 +9,7 @@ inside the standard library. The generated environment scan (_no_env_reads)
 reads the pair and refuses std.pathlib, which is not on its allow-list.
 """
 
-from komira_aws_core import AwsRequest
+from aws_core import AwsRequest
 comptime _BACKSLASH_QUOTE = r"\""; from std.pathlib import Path
 
 from .env_read_raw_quote import (

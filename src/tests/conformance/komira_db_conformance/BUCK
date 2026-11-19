@@ -1,9 +1,9 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
-# Test-only: the komira_db contract, written once, generic over the
+# Test-only: the db contract, written once, generic over the
 # `Database` / `SqlDatabase` traits, and run against every implementation
 # that can run in a build action. The library (the checks, the target traits
-# and the gate) imports komira_db and komira_async only; each implementation
+# and the gate) imports db and async_rt only; each implementation
 # is imported by its own welded test:
 #
 #   tests/test_sqlite.mojo          SqliteDatabase, both suites, a new
@@ -20,19 +20,19 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # The suites run here, not in each implementation's test_srcs: a welded test
 # sees only its library's `deps`, so running them there would put this
 # test-only package in the closure of every consumer of the driver (the same
-# reason komira_db_sqlite keeps its CRUD test standalone). Nothing depends on
+# reason db_sqlite keeps its CRUD test standalone). Nothing depends on
 # this package.
 mojo_library(
     name = "komira_db_conformance",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
-        "//src/komira_async:komira_async",
-        "//src/komira_db:komira_db",
+        "//src/async_rt:async_rt",
+        "//src/db:db",
         # Imported only by the tests (the implementations under test).
-        "//src/komira_db_postgres:komira_db_postgres",
-        "//src/komira_db_sqlite:komira_db_sqlite",
-        "//src/komira_gcp_firestore:komira_gcp_firestore",
-        "//src/komira_gcp_firestore_db:komira_gcp_firestore_db",
+        "//src/db_postgres:db_postgres",
+        "//src/db_sqlite:db_sqlite",
+        "//src/gcp_firestore:gcp_firestore",
+        "//src/gcp_firestore_db:gcp_firestore_db",
     ],
     conda = False,
     test_srcs = [

@@ -153,7 +153,7 @@ struct ConformanceReport(Movable):
             )
         if len(problems) > 0:
             var msg = (
-                String("komira_db conformance: ")
+                String("db conformance: ")
                 + self.target
                 + String(": ")
                 + String(len(problems))

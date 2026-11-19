@@ -2,8 +2,8 @@
 # komira_plan_harness/check.mojo -- one call from an expected file to a verdict.
 # =============================================================================
 
-from komira_arrow.record_batch import RecordBatch
-from komira_arrow.table import Table
+from arrow.record_batch import RecordBatch
+from arrow.table import Table
 
 from .compare import CompareReport, compare_canon
 from .parse import parse_canon

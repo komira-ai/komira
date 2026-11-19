@@ -84,19 +84,19 @@
 #     column's stats become min -1.0, max 1.0 and a non-NaN sum.
 # =============================================================================
 
-from komira_avro import (
+from avro import (
     AvroWriterOptions,
     decode_ocf_header,
     read_avro_bytes,
     scan_ocf_blocks,
     write_avro_bytes,
 )
-from komira_arrow.arrow_types import ArrowType
-from komira_arrow.column import Column
-from komira_arrow.primitive_array import PrimitiveArray
-from komira_arrow.record_batch import RecordBatch, RecordBatchBuilder
-from komira_arrow.schema import SchemaBuilder, Field
-from komira_orc import (
+from arrow.arrow_types import ArrowType
+from arrow.column import Column
+from arrow.primitive_array import PrimitiveArray
+from arrow.record_batch import RecordBatch, RecordBatchBuilder
+from arrow.schema import SchemaBuilder, Field
+from orc import (
     ORC_COMPRESSION_NONE,
     OrcFileTail,
     OrcWriterOptions,

@@ -1,7 +1,7 @@
 # komira_secrets_e2e: the generated secret-store clients against stateful
 # fakes of their services, over a real socket on 127.0.0.1, in one process:
-# AWS Secrets Manager (komira_aws_secretsmanager) over plaintext HTTP, and
-# GCP Secret Manager v1 (komira_gcp_secretmanager) over TLS.
+# AWS Secrets Manager (aws_secretsmanager) over plaintext HTTP, and
+# GCP Secret Manager v1 (gcp_secretmanager) over TLS.
 #
 # A test-only package: its welded tests are the point. The library holds
 # what they share: the AWS fake (fake_store.mojo, fake_service.mojo), its

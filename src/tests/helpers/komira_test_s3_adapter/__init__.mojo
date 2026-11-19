@@ -2,9 +2,9 @@
 and komira_test_minio's seams.
 
 `MinioObjectStore` is komira_test_bucket's `ObjectStoreClient` over
-komira_objectstore_s3's `S3Store` (path-style, plaintext, credential from
+objectstore_s3's `S3Store` (path-style, plaintext, credential from
 the target's shared-credentials file). `SpawnedProcessRunner` is
-komira_test_minio's `ProcessRunner` over komira_supervisor's
+komira_test_minio's `ProcessRunner` over supervisor's
 `spawn_detached` (Linux, PR_SET_PDEATHSIG through setpriv, readiness from
 MinIO's health endpoint). `open_embedded_minio_test_bucket` opens a run's
 bucket on an embedded MinIO from the test binary's flags with both.

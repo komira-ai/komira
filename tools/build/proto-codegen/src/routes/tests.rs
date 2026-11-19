@@ -256,7 +256,7 @@ fn a_wrong_method_on_a_known_path_is_405() {
 fn a_dispatcher_says_which_routes_it_has() {
     // What ComposedRoutes asks a service before dispatching to it.
     let text = emit_one(vec![service("S", vec![get("Get", "/v1/a")])]).unwrap();
-    assert!(text.contains("from komira_http_server.routing.compose import RoutedDispatcher\n"), "{text}");
+    assert!(text.contains("from http_server.routing.compose import RoutedDispatcher\n"), "{text}");
     for line in [
         "    def has_route(self, method: HttpMethod, path: String) -> Bool:\n        var params = Dict[String, String]()\n        return Bool(self._router.match_route(method, path, params))\n",
         "    def allowed_methods(self, path: String, mut methods: List[HttpMethod]):\n        methods.extend(self._router.allowed_methods(path))\n",
@@ -278,12 +278,12 @@ fn types_are_imported_from_their_modules() {
         }],
     )]);
     f.imports.push(IrImport {
-        module: "komira_wkt".into(),
+        module: "wkt".into(),
         symbol: "Empty".into(),
     });
     let text = emit_model(vec![f]).unwrap().remove(0).1;
     assert!(text.contains("from komira_things.things import Req\n"), "{text}");
-    assert!(text.contains("from komira_wkt import Empty\n"), "{text}");
+    assert!(text.contains("from wkt import Empty\n"), "{text}");
 }
 
 #[test]

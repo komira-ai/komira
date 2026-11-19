@@ -60,9 +60,9 @@ What it does not compare, and why:
 whitespace ignored).
 """
 
-from komira_arrow.schema import Field, Schema
-from komira_plan_expr.agg_expr import AggExpr
-from komira_plan_expr.expr import (
+from arrow.schema import Field, Schema
+from plan_expr.agg_expr import AggExpr
+from plan_expr.expr import (
     Expr,
     EXPR_ALIAS,
     EXPR_BINARY_OP,
@@ -71,9 +71,9 @@ from komira_plan_expr.expr import (
     EXPR_UNARY_OP,
     EXPR_WHEN,
 )
-from komira_plan_expr.partition_expr import PartitionExpr
-from komira_plan_expr.scalar_value import ScalarValue
-from komira_plan_ir.logical_plan import (
+from plan_expr.partition_expr import PartitionExpr
+from plan_expr.scalar_value import ScalarValue
+from plan_ir.logical_plan import (
     LogicalPlan,
     PLAN_AGGREGATE,
     PLAN_FILTER,
@@ -84,9 +84,9 @@ from komira_plan_ir.logical_plan import (
     PLAN_SCAN,
     PLAN_SORT,
 )
-from komira_scan_source.scan_binding import ScanBinding
-from komira_scan_source.scan_params import PARAM_BYTES, PARAM_F64, PARAM_STR
-from komira_scan_source.source_variant import SourceVariant
+from scan_source.scan_binding import ScanBinding
+from scan_source.scan_params import PARAM_BYTES, PARAM_F64, PARAM_STR
+from scan_source.source_variant import SourceVariant
 
 
 def _b(v: Bool) -> String:

@@ -1,9 +1,9 @@
 # =============================================================================
-# test_firestore_mock.mojo -- komira_gcp_firestore_db's FirestoreDatabase,
+# test_firestore_mock.mojo -- gcp_firestore_db's FirestoreDatabase,
 #   over its in-process MockFirestore, against the neutral `Database` suite.
 # =============================================================================
 #
-# komira has no in-memory `komira_db` fake; MockFirestore is the in-memory
+# komira has no in-memory `db` fake; MockFirestore is the in-memory
 # store a `Database` runs on here (the real generated Firestore client end to
 # end, answered at the HTTP boundary, no network). Every check gets a new
 # mock. FirestoreDatabase is a `Database` only (no SQL string surface), so
@@ -16,8 +16,8 @@
 #                  in a conditional_update guard.
 # =============================================================================
 
-from komira_gcp_firestore.firestore_client import FirestoreClient
-from komira_gcp_firestore_db import (
+from gcp_firestore.firestore_client import FirestoreClient
+from gcp_firestore_db import (
     DeclaredIndexSet,
     FirestoreDatabase,
     MockFirestore,
@@ -41,7 +41,7 @@ struct FirestoreMockNeutral(NeutralTarget):
         pass
 
     def name(self) -> String:
-        return String("komira_gcp_firestore_db over MockFirestore")
+        return String("gcp_firestore_db over MockFirestore")
 
     def fresh(mut self) raises -> _FsDb:
         var transport = MockFirestore()
@@ -67,4 +67,4 @@ def main() raises:
     )
     var target = FirestoreMockNeutral()
     run_neutral_suite(target, gaps)
-    print("PASS komira_db_conformance komira_gcp_firestore_db")
+    print("PASS komira_db_conformance gcp_firestore_db")

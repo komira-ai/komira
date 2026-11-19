@@ -20,7 +20,7 @@
 
 from std.testing import assert_equal, assert_true
 
-from komira_vcard import Contact, emit_contacts, parse_contacts
+from vcard import Contact, emit_contacts, parse_contacts
 from komira_vcard_conformance import (
     apple_shaped_3_0,
     google_shaped_3_0,

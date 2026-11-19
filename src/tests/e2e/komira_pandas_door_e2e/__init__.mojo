@@ -16,7 +16,7 @@ one pipeline; `is_in`; an aggregate `.over(...)`; `sum_horizontal`; the four
 null-order cells of `sort`; `select(col.sum())`; and `group_by.agg`.
 
 `tests/test_pandas_door_wire.mojo` and `tests/test_polars_door_wire.mojo`
-decode each encoding with `komira_plan_wire`, hold it to the structural and
+decode each encoding with `plan_wire`, hold it to the structural and
 value admission gates, assert the fields the fixture exists for, and compare
 it with the same plan built here in Mojo (`door_plans`, `polars_plans`) field
 by field (`plan_shape`). The polars test also holds the two doors to each

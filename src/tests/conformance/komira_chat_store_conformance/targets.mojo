@@ -17,12 +17,12 @@
 
 from std.testing import assert_equal, assert_true
 
-from komira_async.ops.waker_sink import NoopSink
-from komira_async.runtime.blocking_runtime import BlockingRuntime
+from async_rt.ops.waker_sink import NoopSink
+from async_rt.runtime.blocking_runtime import BlockingRuntime
 
-from komira_db import Database
+from db import Database
 
-from komira_chat_store import ChatEvent, EventPage
+from chat_store import ChatEvent, EventPage
 
 comptime Rt = BlockingRuntime[NoopSink]
 

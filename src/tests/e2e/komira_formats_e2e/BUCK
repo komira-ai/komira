@@ -9,13 +9,13 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #
 # The tests, each run as a build action:
 #   test_formats_arrow_ipc -- the dataset (two RecordBatches) as an Arrow IPC
-#     File and Stream assembled from komira_arrow_ipc's message encoders,
+#     File and Stream assembled from arrow_ipc's message encoders,
 #     written and read through LocalFs, decoded by the copy decoder (and the
 #     mmap decoder for the File): every value and NULL exact, the edge
 #     numerics bit-exact; and the bytes against the Arrow spec (ARROW1 magic
 #     and padding, footer size, continuation markers, 8-byte alignment, EOS,
 #     Footer Blocks, schema, FieldNodes, LSB-first validity, value bytes,
-#     Utf8 offsets and slots). The Parquet leg is pending the komira_parquet
+#     Utf8 offsets and slots). The Parquet leg is pending the parquet
 #     reader and writer port; it lands as soon as that port does.
 #   test_formats_hive_discovery -- EagerGlobDiscovery (directory and glob,
 #     including a glob whose static prefix is the non-ASCII directory) and
@@ -50,31 +50,31 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # Mutants planted in the readers, seen red in the foreign tests (when the
 # reader package's own tests catch a mutant, its test_srcs were emptied for
 # that build so this package could build at all):
-#   * komira_orc reads column c's ColumnEncoding from entry c-1, so `id`
+#   * orc reads column c's ColumnEncoding from entry c-1, so `id`
 #     gets the root STRUCT's DIRECT: every foreign ORC test red
-#     ("OrcRleError.TRUNCATED: vulong overrun"); komira_orc's own tests
+#     ("OrcRleError.TRUNCATED: vulong overrun"); orc's own tests
 #     also catch it.
-#   * komira_avro reads the snappy block's CRC32 trailer little-endian:
+#   * avro reads the snappy block's CRC32 trailer little-endian:
 #     test_weather_snappy red ("SNAPPY_CRC32_MISMATCH"), the only test in
-#     this package to catch it; komira_avro's own snappy tests also do.
+#     this package to catch it; avro's own snappy tests also do.
 #   * The ORC reader before the error-path fix (double free): the
 #     serial failed-read test died with SIGSEGV (exit 139). With the slab
 #     marked empty after the re-raise instead of before, both tests in one
 #     run gave exit 139; the column-parallel test alone gave exit 132
 #     ("index 800 is out of bounds, valid range is 0 to 799").
-#     komira_orc's own tests stayed green.
+#     orc's own tests stayed green.
 #   * Now that each accumulator slot is an Optional: a column-parallel
 #     worker moves its accumulator out through a raw pointer, leaving the
-#     slot Some: test_formats_foreign_orc exit 139 (komira_orc's own tests
+#     slot Some: test_formats_foreign_orc exit 139 (orc's own tests
 #     stay green, since none of them reads through a dispatcher). The same
-#     move in the serial loop: 13 komira_orc tests red (exit 139/132/1).
+#     move in the serial loop: 13 orc tests red (exit 139/132/1).
 #
 # Planted against test_formats_arrow_ipc:
 #   * the copy decoder reads each validity bitmap one byte late
-#     (_maybe_decode_validity_bitmap): komira_arrow_ipc's own tests red
+#     (_maybe_decode_validity_bitmap): arrow_ipc's own tests red
 #     (test_ipc_file_e2e_write, test_ipc_file_e2e_pyarrow_batches,
 #     test_ipc_file_e2e_pyarrow_nullable, test_ipc_field_node_flat) and so
-#     does komira_orc's test_orc_arrow_write_primitive_null_drop, so this
+#     does orc's test_orc_arrow_write_primitive_null_drop, so this
 #     package does not build under it at all.
 #   * the assembly records Block.metaDataLength without the 8-byte prefix:
 #     red ("Footer Block 0 (264, 296, 192) is not the RecordBatch message at
@@ -91,30 +91,30 @@ mojo_library(
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     conda = False,
     deps = [
-        "//src/komira_arrow:komira_arrow",
-        "//src/komira_arrow_ipc:komira_arrow_ipc",
-        "//src/komira_async:komira_async",
-        "//src/komira_atomic_alias:komira_atomic_alias",
-        "//src/komira_avro:komira_avro",
-        "//src/komira_buffer:komira_buffer",
-        "//src/komira_clock:komira_clock",
-        "//src/komira_collections:komira_collections",
-        "//src/komira_csv:komira_csv",
-        "//src/komira_fork_join:komira_fork_join",
-        "//src/komira_fs:komira_fs",
-        "//src/komira_hash:komira_hash",
-        "//src/komira_json_index:komira_json_index",
-        "//src/komira_jsonl:komira_jsonl",
-        "//src/komira_log:komira_log",
-        "//src/komira_metrics:komira_metrics",
-        "//src/komira_name_registry:komira_name_registry",
-        "//src/komira_orc:komira_orc",
-        "//src/komira_protobuf:komira_protobuf",
-        "//src/komira_row_format:komira_row_format",
-        "//src/komira_spsc_ring:komira_spsc_ring",
-        "//src/komira_trace:komira_trace",
-        "//src/komira_udf:komira_udf",
-        "//tools/build/mojo/runtime_paths:komira_runtime_paths",
+        "//src/arrow:arrow",
+        "//src/arrow_ipc:arrow_ipc",
+        "//src/async_rt:async_rt",
+        "//src/atomic_alias:atomic_alias",
+        "//src/avro:avro",
+        "//src/byte_buffer:byte_buffer",
+        "//src/clock:clock",
+        "//src/containers:containers",
+        "//src/csv:csv",
+        "//src/fork_join:fork_join",
+        "//src/fs:fs",
+        "//src/hashing:hashing",
+        "//src/json_index:json_index",
+        "//src/jsonl:jsonl",
+        "//src/log:log",
+        "//src/metrics:metrics",
+        "//src/name_registry:name_registry",
+        "//src/orc:orc",
+        "//src/protobuf:protobuf",
+        "//src/row_format:row_format",
+        "//src/spsc_ring:spsc_ring",
+        "//src/trace:trace",
+        "//src/udf:udf",
+        "//tools/build/mojo/runtime_paths:runtime_paths",
     ],
     test_data = {
         "tests/test_formats_foreign_avro.mojo": {

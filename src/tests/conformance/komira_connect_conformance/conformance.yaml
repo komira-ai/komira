@@ -1,9 +1,9 @@
 # The features of the server under test: the conformance_server binary
-# (server/), a komira_connect ConnectService behind a komira_http_server
+# (server/), a connect ConnectService behind a http_server
 # HttpServer. The runner computes the cases to run from them
 # (docs/configuring_and_running_tests.md of the pinned suite).
 #
-# The subset is what komira_connect serves today:
+# The subset is what connect serves today:
 #   - HTTP/2 over TLS only: the HttpServer routes RPCs to a ConnectService
 #     only on its h2 path, reached through ALPN; it has no h2c.
 #   - all three protocols (Connect, gRPC, gRPC-Web): ConnectService accepts

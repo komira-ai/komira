@@ -1,13 +1,13 @@
 # shared_lib_native: a C-ABI library linking an owner's shared library
 
-`spike_native` is a `mojo_shared_lib` whose Mojo closure reaches `komira_libc`,
+`spike_native` is a `mojo_shared_lib` whose Mojo closure reaches `libc`,
 a library that owns C (`komira_openat_creat`, `komira_write_bytes`,
 `komira_lseek_end`) and ships it as its own shared library,
-`libkomira_libc_native.so.1` (`//src/komira_libc:komira_libc_native`, see
+`libkomira_libc_native.so.1` (`//src/libc:komira_libc_native`, see
 [native packaging](../../../../docs/design/native_packaging.md)). Without
 `native_owners` the owner's static archive is linked into the library, which
 is what every other `mojo_shared_lib` does with a C dependency. With
-`native_owners = ["//src/komira_libc:komira_libc_native"]` the library is
+`native_owners = ["//src/libc:komira_libc_native"]` the library is
 NEEDED on the owner's SONAME and the archive is not pulled in.
 
 The one export, `native_owner_write_probe`, writes bytes to a file and returns

@@ -166,6 +166,19 @@ const Manifest = struct {
 };
 const OtherNative = struct { section: []const u8, kind: []const u8 };
 
+/// The `src/` directory a dependency key of a manifest names. mopm 0.0.113 keys are full names, quoted
+/// in TOML (`"komira-ai/runtime_paths"`), and komira's `src/` holds only the `komira-ai` namespace, so
+/// the directory is the part after the slash. A key in another namespace, and a bare key (which
+/// mopm 0.0.113 refuses itself), are refused by name.
+fn depDirectory(c: *Ctx, who: []const u8, raw_key: []const u8) Error![]const u8 {
+    const key = std.mem.trim(u8, raw_key, " \t\"'");
+    const slash = std.mem.indexOfScalar(u8, key, '/') orelse
+        return c.refuse("{s}/mopm.toml: the dependency '{s}' has no namespace; mopm 0.0.113 names a package '<namespace>/<name>', and src/ holds only '{s}/<name>'", .{ who, key, emit.namespace });
+    if (!std.mem.eql(u8, key[0..slash], emit.namespace))
+        return c.refuse("{s}/mopm.toml: the dependency '{s}' is in the namespace '{s}'; src/ holds only packages of '{s}'", .{ who, key, key[0..slash], emit.namespace });
+    return key[slash + 1 ..];
+}
+
 /// What the migration needs from another package's `mopm.toml`: its version, the names under
 /// `[dependencies]` and the natives it declares.
 fn readManifest(c: *Ctx, who: []const u8, toml: []const u8) Error!Manifest {
@@ -185,7 +198,7 @@ fn readManifest(c: *Ctx, who: []const u8, toml: []const u8) Error!Manifest {
             } else if (std.mem.startsWith(u8, section, "native")) {
                 if (other_native == null) other_native = .{ .section = section, .kind = "" };
             }
-            if (std.mem.startsWith(u8, section, "dependencies.")) try deps.append(c.a, section["dependencies.".len..]);
+            if (std.mem.startsWith(u8, section, "dependencies.")) try deps.append(c.a, try depDirectory(c, who, section["dependencies.".len..]));
             continue;
         }
         const eq = std.mem.indexOfScalar(u8, line, '=') orelse continue;
@@ -198,7 +211,7 @@ fn readManifest(c: *Ctx, who: []const u8, toml: []const u8) Error!Manifest {
             const val = std.mem.trim(u8, line[eq + 1 ..], " \t\"");
             version = val;
         } else if (std.mem.eql(u8, section, "dependencies")) {
-            try deps.append(c.a, key);
+            try deps.append(c.a, try depDirectory(c, who, key));
         }
     }
     const sorted = try uniqueSorted(c.a, deps.items);
@@ -214,7 +227,7 @@ fn makeDep(c: *Ctx, name: []const u8, version: []const u8) Error!emit.Dep {
     return .{
         .name = name,
         .short = try fmt(c, "{s}.{s}", .{ maj, min }),
-        .requirement = try fmt(c, "mojo-{s} >={s}.{s},<{s}.{d}", .{ name, maj, min, maj, minor + 1 }),
+        .requirement = try fmt(c, "mojo-{s}.{s} >={s}.{s},<{s}.{d}", .{ emit.namespace, name, maj, min, maj, minor + 1 }),
     };
 }
 
@@ -293,7 +306,7 @@ fn requireText(c: *Ctx, repo: Repo, path: []const u8) Error![]const u8 {
     return repo.text(path) orelse c.refuse("{s} was not read: the shared rows cannot be updated", .{path});
 }
 
-/// A BUCK dep label's alias form (`//tools/build/mojo/runtime_paths:komira_runtime_paths`) is
+/// A BUCK dep label's alias form (`//tools/build/mojo/runtime_paths:runtime_paths`) is
 /// written as the package's own label in a binary kept from the old file.
 fn fixBinary(c: *Ctx, repo: Repo, buck: []const u8, st: sl.Stmt) Error![]const u8 {
     const deps = st.call.kwarg("deps") orelse return buck[st.start..st.end];

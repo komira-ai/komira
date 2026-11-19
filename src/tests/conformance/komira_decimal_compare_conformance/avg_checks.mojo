@@ -7,17 +7,17 @@ significant digits, which read back to the same double)."""
 from std.memory import bitcast
 from std.testing import assert_equal, assert_true
 
-from komira_arrow.arrow_types import ArrowType
+from arrow.arrow_types import ArrowType
 from komira_decimal_compare_conformance.checks import (
     _assert_no_problems,
     _rows,
 )
-from komira_jsonl.value_parsers.parse_float import parse_float_f64
-from komira_runtime_paths import data_path
-from komira_sdk_exec.engine_catalog import register_parquet
-from komira_sdk_exec.engine_context import EngineContext
-from komira_sdk_exec.engine_options import EngineOptions
-from komira_sdk_exec.engine_sql import run_sql
+from jsonl.value_parsers.parse_float import parse_float_f64
+from runtime_paths import data_path
+from sdk_exec.engine_catalog import register_parquet
+from sdk_exec.engine_context import EngineContext
+from sdk_exec.engine_options import EngineOptions
+from sdk_exec.engine_sql import run_sql
 
 
 def _new_avg_context() raises -> EngineContext:

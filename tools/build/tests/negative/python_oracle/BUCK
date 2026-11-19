@@ -35,7 +35,7 @@ python_dist(
 python_oracle(
     name = "komira_data",
     src = "oracle.py",
-    data = {"encoding.mojoc": "komira//src/komira_encoding:komira_encoding"},
+    data = {"encoding.mojoc": "komira//src/encoding:encoding"},
     python = ":stand_in_python",
     tzdata = ":tzdata",
 )

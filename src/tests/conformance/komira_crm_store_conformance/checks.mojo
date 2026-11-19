@@ -3,7 +3,7 @@
 # =============================================================================
 #
 # Each check states the behaviour it holds the store to and the defect it
-# catches. Refusals are compared by their exact text (komira_crm.ERR_*).
+# catches. Refusals are compared by their exact text (crm.ERR_*).
 #
 #   dataset_init        init creates the counter and the six-stage default
 #                       pipeline once; a second init finds them.
@@ -47,11 +47,11 @@
 
 from std.testing import assert_equal, assert_false, assert_true
 
-from komira_async.reactor.reactor import Reactor
-from komira_db import DbValue, Filter, Order
-from komira_proto_codec import decode_json, encode_json
-from komira_wkt import Timestamp
-from komira_crm_proto.crm import (
+from async_rt.reactor.reactor import Reactor
+from db import DbValue, Filter, Order
+from proto_codec import decode_json, encode_json
+from wkt import Timestamp
+from crm_proto.crm import (
     Account,
     ActivityKind,
     Activity,
@@ -61,7 +61,7 @@ from komira_crm_proto.crm import (
     Principal,
 )
 
-from komira_crm import (
+from crm import (
     ACCOUNTS,
     ACTIVITIES,
     CrmStore,
@@ -73,8 +73,8 @@ from komira_crm import (
     ERR_UNKNOWN_CURRENCY,
     ERR_VERSION_CONFLICT,
 )
-from komira_crm.rows import account_row
-from komira_crm.schema import account_cols, strs
+from crm.rows import account_row
+from crm.schema import account_cols, strs
 
 from komira_crm_store_conformance.targets import CrmTarget, Rt, new_rt
 

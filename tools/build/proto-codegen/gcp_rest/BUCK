@@ -24,10 +24,10 @@ mojo_gcp_client(
     test_srcs = ["test_nohost_rest.mojo"],
     visibility = ["PUBLIC"],
     deps = [
-        "//src/komira_async:komira_async",
-        "//src/komira_gcp_core:komira_gcp_core",
-        "//src/komira_http_client:komira_http_client",
-        "//src/komira_http_core:komira_http_core",
-        "//src/komira_proto_codec:komira_proto_codec",
+        "//src/async_rt:async_rt",
+        "//src/gcp_core:gcp_core",
+        "//src/http_client:http_client",
+        "//src/http_core:http_core",
+        "//src/proto_codec:proto_codec",
     ],
 )

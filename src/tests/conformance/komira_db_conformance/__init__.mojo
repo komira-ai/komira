@@ -1,4 +1,4 @@
-"""`komira_db_conformance` -- the `komira_db` contract, written once and run
+"""`komira_db_conformance` -- the `db` contract, written once and run
 against every implementation.
 
 Two suites, generic over two target traits (targets.mojo):
@@ -12,7 +12,7 @@ Two suites, generic over two target traits (targets.mojo):
 
 Each run records every check and is gated on the target's list of known
 gaps, each pinned to the text its failure must carry (report.mojo). The
-library imports komira_db and komira_async only; the implementations are
+library imports db and async_rt only; the implementations are
 imported by the tests that run the suites against them.
 
 The Firestore target runs on `MockFirestore`, so it proves conformance to the

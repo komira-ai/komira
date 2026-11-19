@@ -1,0 +1,202 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The ONE hand-written AWS core under the generated komira_aws_<svc> clients,
+# in the order of __init__.mojo's module doc:
+#
+#   - the AwsCredential value, and SigV4 header and query signing over
+#     crypto
+#   - the AWS SDK default credential provider chain and region resolution,
+#     with the shared config parser and the network-backed providers as
+#     request builders and response parsers
+#   - AwsRequest / AwsResponse / HttpResult (bodies as bytes) and
+#     AwsErrorInfo
+#   - the awsJson scalar codec and error shape, and its JsonValue-typed names
+#   - the REST binding runtime a restJson1 / restXml client calls: scalar
+#     text and the timestamp formats, URI labels and query, list and prefix
+#     headers, restJson1 errors
+#   - the restXml body codec over xml (aws_xml.mojo): scalars,
+#     wrapped and flattened lists and maps, xmlAttribute and xmlNamespace,
+#     the restXml error forms, and S3's 200-with-<Error> check
+#   - endpoint and partition resolution (AWS_ENDPOINT_URL[_<SERVICE>], FIPS,
+#     dual-stack), the AwsCredsSource trait, and the SigV4-signed request
+#     builder, the socket-free half of a generated client's send
+#   - aws_send.mojo, the transport half: send_sigv4_signed_request signs
+#     each attempt at the wall clock's time, sends it over
+#     http_client through the client's Connector, and retries with
+#     retry under aws_retry.mojo's classifier and the client's retry
+#     quota (botocore's standard mode: every operation retried alike,
+#     whatever its method, but a conditional write the service may have
+#     acted on, which is not resent)
+#   - the interpreter of the endpoint rulesets AWS publishes as data
+#     (endpoint_rules.mojo, over partitions.json), which reads no
+#     environment: every input is a parameter
+#   - endpoint_signing.mojo, which turns an endpoint the ruleset chose into
+#     what the signer takes, refusing an auth scheme it cannot sign
+#   - s3_wire.mojo: the S3 header values no model states, and the CRC32
+#     request checksum
+#
+# The chain reads only the STANDARD AWS SDK environment variables and shared
+# files, through the EnvSource / FileSource / AwsClock seams of sources.mojo,
+# and reaches STS, the container endpoint and instance metadata only through
+# the CredentialTransport trait. The only connections it opens are a
+# generated client's sends, through the Connector that client is given.
+#
+# test_sigv4_test_suite runs every case of the official AWS SigV4 signing test
+# suite byte for byte. The suite is not copied here: it is read from the
+# aws-c-auth archive //third_party/aws_c_auth pins by sha256, and staged at
+# aws_c_auth/.
+# test_credential_wire checks each credential request builder byte for byte
+# against tests/fixtures/*.request, and test_signed_request each signed
+# service request against one recorded from an independent SigV4
+# implementation (fake keys, fixed clock), each payload-signing arm against
+# AWS's published S3 example, and the suite's get-vanilla-query* cases
+# through the request builder (the suite staged as for
+# test_sigv4_test_suite). The suite's post-x-www-form-urlencoded cases are
+# not put through the builder: they sign Content-Length, which the builder
+# never signs, so test_sigv4_test_suite alone covers them.
+# test_aws_xml_codec and test_aws_rest_xml_errors check the restXml body
+# codec and error readers (aws_xml.mojo) row by row against the Smithy
+# restXml protocol and the AWS docs. xml's canonical form is checked
+# against the conformance harness's XML equivalence by the test-only package
+# //src/tests/conformance/komira_xml_conformance, not here: welded here, it
+# made this library's build depend on the xml-equiv-verdicts Rust tool.
+# test_aws_retry checks the retry classifier, policy, attempt limit and
+# quota against botocore's standard retry mode, reading
+# botocore/retries/standard.py, quota.py and special.py from the botocore
+# archive //third_party/botocore pins (`:retries`) and checking each of
+# their lists and constants, and the transport errors http_client,
+# its kernel and TLS dials and name resolution raise (all retried but a
+# body over the client's cap, the timeouts at their own cost; for a
+# conditional write only those raised before the request was sent).
+# test_aws_send sends over http_client and a scripted connector (no
+# socket): retries, a POST resent after a 5xx and a dropped response, a
+# conditional write not resent after a 5xx or a dropped response but
+# resent after a throttle or a failed dial, re-signing at a later date,
+# the attempt limit and its backoff (three sends), the quota,
+# S3's 200-with-<Error>, the request on the wire (AwsEchoConnector), and
+# the connector-factory entry point; and one dial to a closed loopback
+# port through the kernel connector, so the classifier reads the text the
+# production dial raises.
+# test_idempotency_token checks the token a generated client fills an
+# unset idempotencyToken member with: a version 4 UUID as Python's
+# str(uuid.uuid4()) writes it, fresh on each call.
+# test_s3_endpoint_rules runs every case of botocore's S3 endpoint tests
+# through the ruleset interpreter (endpoint_rules.mojo) over S3's published
+# ruleset, and requires each to pass. test_env_source_only scans the
+# package's own sources, staged as its data, for any environment read
+# outside sources.mojo.
+# shared_creds.mojo is the one Copyable credential source over a refreshing
+# chain (sync's SpinMutex behind an ArcPointer), and
+# process_creds.mojo the default chain of a process in that type. Its test,
+# test_shared_creds, runs the real chain over a scripted container endpoint
+# and a clock it advances, with clones of the source and real threads
+# (fork_join, a dependency for that test): rotation, one refresh for
+# all clones, single flight, a failed refresh, the named error with canary
+# secrets kept out of it, and a source that never expires; test_shared_creds_clone
+# checks, over a provider that caches by value, that clones read the one
+# provider's cache; test_http_credential_transport checks the scheme-split
+# transport's routing (http, https, any other refused) over scripted
+# transports.
+_FIXTURES = glob(["tests/fixtures/*"])
+
+# botocore's S3 endpoint ruleset, partition table and endpoint test cases,
+# read from the botocore archive //third_party/botocore pins by sha256, each
+# staged at its path in that archive.
+_ENDPOINT_RULES = {
+    path: "//third_party/botocore:endpoint_rules[{}]".format(path)
+    for path in [
+        "botocore/data/partitions.json",
+        "botocore/data/s3/2006-03-01/endpoint-rule-set-1.json",
+        "tests/functional/endpoint-rules/s3/endpoint-tests-1.json",
+    ]
+}
+
+# botocore's standard retry mode, read as text by test_aws_retry from the
+# same archive, each staged at its path in it.
+_RETRIES = {
+    path: "//third_party/botocore:retries[{}]".format(path)
+    for path in [
+        "botocore/retries/quota.py",
+        "botocore/retries/special.py",
+        "botocore/retries/standard.py",
+    ]
+}
+
+mojo_library(
+    name = "aws_core",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/async_rt:async_rt",
+        "//src/clock:clock",
+        "//src/crypto:crypto",
+        "//src/encoding:encoding",
+        "//src/fork_join:fork_join",
+        "//src/http_client:http_client",
+        "//src/http_core:http_core",
+        "//src/json:json",
+        "//src/libc:libc",
+        "//src/retry:retry",
+        "//src/sync:sync",
+        "//src/xml:xml",
+    ],
+    test_srcs = [
+        "tests/test_aws_codec.mojo",
+        "tests/test_aws_json.mojo",
+        "tests/test_aws_query.mojo",
+        "tests/test_aws_response.mojo",
+        "tests/test_aws_rest_headers.mojo",
+        "tests/test_aws_rest_uri.mojo",
+        "tests/test_aws_rest_xml_errors.mojo",
+        "tests/test_aws_retry.mojo",
+        "tests/test_aws_send.mojo",
+        "tests/test_aws_send_unsigned.mojo",
+        "tests/test_aws_text.mojo",
+        "tests/test_aws_xml_codec.mojo",
+        "tests/test_credential_chain.mojo",
+        "tests/test_credential_chain_refusals.mojo",
+        "tests/test_credential_provider_refusals.mojo",
+        "tests/test_credential_wire.mojo",
+        "tests/test_creds_source.mojo",
+        "tests/test_endpoint_refusals.mojo",
+        "tests/test_endpoint_resolution.mojo",
+        "tests/test_endpoint_rules_faults.mojo",
+        "tests/test_endpoint_rules_library.mojo",
+        "tests/test_endpoint_signing.mojo",
+        "tests/test_env_source_only.mojo",
+        "tests/test_http_credential_transport.mojo",
+        "tests/test_idempotency_token.mojo",
+        "tests/test_process_creds.mojo",
+        "tests/test_regex_syntax.mojo",
+        "tests/test_s3_endpoint_rules.mojo",
+        "tests/test_s3_wire.mojo",
+        "tests/test_send_wire_edges.mojo",
+        "tests/test_shared_config.mojo",
+        "tests/test_shared_creds.mojo",
+        "tests/test_shared_creds_clone.mojo",
+        "tests/test_signed_request.mojo",
+        "tests/test_sigv4_refusals.mojo",
+        "tests/test_sigv4_test_suite.mojo",
+        "tests/test_text_codec_edges.mojo",
+    ],
+    test_data = {
+        "tests/test_credential_chain.mojo": _FIXTURES,
+        "tests/test_credential_wire.mojo": _FIXTURES,
+        "tests/test_process_creds.mojo": _FIXTURES,
+        # The fixtures at the path the list form stages them at (the
+        # test's _FIX), so they can sit beside the aws_c_auth mapping.
+        "tests/test_signed_request.mojo": {
+            package_name() + "/" + f: f
+            for f in _FIXTURES
+        } | {"aws_c_auth": "//third_party/aws_c_auth:files"},
+        "tests/test_env_source_only.mojo": glob(["*.mojo"]),
+        "tests/test_sigv4_test_suite.mojo": {
+            "aws_c_auth": "//third_party/aws_c_auth:files",
+        },
+        "tests/test_s3_endpoint_rules.mojo": _ENDPOINT_RULES,
+        "tests/test_aws_retry.mojo": _RETRIES,
+        "tests/test_endpoint_rules_library.mojo": {
+            "botocore/data/partitions.json": _ENDPOINT_RULES["botocore/data/partitions.json"],
+        },
+    },
+    visibility = ["PUBLIC"],
+)

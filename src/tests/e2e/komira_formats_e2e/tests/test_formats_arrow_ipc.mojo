@@ -2,11 +2,11 @@
 # The dataset and the numeric edges through Arrow IPC File and Stream, on disk.
 # =============================================================================
 #
-# Writer: komira_arrow_ipc's message encoders strung into a File or a Stream
+# Writer: arrow_ipc's message encoders strung into a File or a Stream
 # by `IpcAssembly` (the package's fixture; komira ships no IPC file or stream
 # writer, only the encoders and framing pieces), written through LocalFs.
 # Reader: LocalFs (`file_size`, `read_footer`, `read_whole`, `read_range`),
-# komira_arrow_ipc's flatbuffer readers (`read_message`, `read_footer`,
+# arrow_ipc's flatbuffer readers (`read_message`, `read_footer`,
 # `read_schema`, `read_record_batch`) and its RecordBatch decoders: the copy
 # decoder `decode_record_batch_message` on every batch and, for the File, the
 # mmap decoder `decode_record_batch_message_mmap` too. No file or stream
@@ -46,7 +46,7 @@
 #      Blocks (equal to the walked messages, metaDataLength counting the
 #      8-byte prefix); the schema (names, Int 64/32 signed, FloatingPoint
 #      DOUBLE, Utf8, Bool, nullability). A defect in those readers that
-#      agreed with the encoder would pass here; komira_arrow_ipc's own
+#      agreed with the encoder would pass here; arrow_ipc's own
 #      tests read pyarrow-written files through them.
 #
 # Defects this reds on (each planted alone and seen red on the farm): the
@@ -54,26 +54,26 @@
 # Block 0 (264, 296, 192) is not the RecordBatch message at (264, 304,
 # 192)"); a validity bit flipped in the written bytes (the bit pin and the
 # copy and mmap read-backs all name the row). A copy decoder reading each
-# validity bitmap one byte late is caught first by komira_arrow_ipc's own
+# validity bitmap one byte late is caught first by arrow_ipc's own
 # tests, so this package does not build under it.
 #
 # What this cannot see: no IPC bytes written by another implementation are
-# read here (komira_arrow_ipc's own tests read pyarrow's files); NULL slots'
+# read here (arrow_ipc's own tests read pyarrow's files); NULL slots'
 # value bytes are not pinned (the spec leaves them undefined).
 # =============================================================================
 
 from std.memory import ArcPointer, bitcast
 from std.os import makedirs
 
-from komira_arrow.arrow_types import ArrowType
-from komira_arrow.column import Column
-from komira_arrow.record_batch import RecordBatch, RecordBatchBuilder
-from komira_arrow.schema import Schema, SchemaBuilder, Field
-from komira_arrow_ipc.ipc_decoder_dispatch import (
+from arrow.arrow_types import ArrowType
+from arrow.column import Column
+from arrow.record_batch import RecordBatch, RecordBatchBuilder
+from arrow.schema import Schema, SchemaBuilder, Field
+from arrow_ipc.ipc_decoder_dispatch import (
     decode_record_batch_message,
     decode_record_batch_message_mmap,
 )
-from komira_arrow_ipc.ipc_flatbuf import (
+from arrow_ipc.ipc_flatbuf import (
     Block,
     FieldDescriptor,
     FlatbufReader,
@@ -93,13 +93,13 @@ from komira_arrow_ipc.ipc_flatbuf import (
     TYPE_INT,
     TYPE_UTF8,
 )
-from komira_async.ops.waker_sink import NoopSink
-from komira_buffer.heap_region import HeapRegion
-from komira_buffer.mmap_region import MmapRegion
-from komira_buffer.shared_aligned_buffer import SharedAlignedBuffer
-from komira_collections.slab import Slab
-from komira_fs.local_fs import LocalFs
-from komira_runtime_paths import test_tmpdir
+from async_rt.ops.waker_sink import NoopSink
+from byte_buffer.heap_region import HeapRegion
+from byte_buffer.mmap_region import MmapRegion
+from byte_buffer.shared_aligned_buffer import SharedAlignedBuffer
+from containers.slab import Slab
+from fs.local_fs import LocalFs
+from runtime_paths import test_tmpdir
 
 from komira_formats_e2e import (
     IpcAssembly,

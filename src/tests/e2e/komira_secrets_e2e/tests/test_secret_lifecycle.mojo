@@ -30,7 +30,7 @@
 #   * custody: no error text the client raised holds either secret value,
 #     while the fake's error bodies DID carry the value on the wire (the
 #     positive control, so the check can see a leak). The leg answers no
-#     5xx, so komira_http_server wrote no line carrying a response body
+#     5xx, so http_server wrote no line carrying a response body
 #     (`server_log` is empty). The process's stdout itself is not captured,
 #     and the fake's own request log is not a custody check: it has no field
 #     a value could be in.
@@ -38,7 +38,7 @@
 
 from std.testing import assert_equal, assert_false, assert_true
 
-from komira_aws_secretsmanager.komira_aws_secretsmanager import (
+from aws_secretsmanager.aws_secretsmanager import (
     SecretsManagerCreateSecretRequest,
     SecretsManagerDeleteSecretRequest,
     SecretsManagerDescribeSecretRequest,
@@ -46,7 +46,7 @@ from komira_aws_secretsmanager.komira_aws_secretsmanager import (
     SecretsManagerPutSecretValueRequest,
     SecretsManagerRestoreSecretRequest,
 )
-from komira_aws_secretsmanager.secretsmanager_overrides import (
+from aws_secretsmanager.secretsmanager_overrides import (
     delete_secret,
     secret_name_is_scheduled_for_deletion,
 )

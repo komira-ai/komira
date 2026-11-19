@@ -39,7 +39,7 @@
 #     hasNull; each column has a PRESENT stream; the `score` DATA stream is
 #     8 bytes x 4 non-null values = 32 (the ORC spec omits NULL slots from
 #     DATA; a writer that writes a value per slot gives 40). The tail is
-#     parsed with komira_orc's protobuf structures (not the column decoder),
+#     parsed with orc's protobuf structures (not the column decoder),
 #     so this pins the writer's metadata, not a foreign reader's view.
 #
 # Planted mutants seen red here: CsvSink with the delimiter, quote, LF or CR
@@ -51,12 +51,12 @@
 
 from std.testing import assert_equal, assert_true
 
-from komira_async.ops.waker_sink import NoopSink
-from komira_arrow.arrow_types import ArrowType
-from komira_arrow.schema import Field, SchemaBuilder
-from komira_fs.local_fs import LocalFs
-from komira_jsonl.columnar_materializer import materialize_jsonl_to_batch
-from komira_orc import (
+from async_rt.ops.waker_sink import NoopSink
+from arrow.arrow_types import ArrowType
+from arrow.schema import Field, SchemaBuilder
+from fs.local_fs import LocalFs
+from jsonl.columnar_materializer import materialize_jsonl_to_batch
+from orc import (
     Metadata,
     ORC_COMPRESSION_NONE,
     ORC_STREAM_DATA,
@@ -66,7 +66,7 @@ from komira_orc import (
     StripeFooter,
     write_orc_bytes,
 )
-from komira_runtime_paths import test_tmpdir
+from runtime_paths import test_tmpdir
 
 from komira_formats_e2e import (
     batch_for_city,

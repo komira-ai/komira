@@ -2,7 +2,7 @@
 # komira_test_s3_adapter/tests/test_spawned_process_runner.mojo
 #   The runner's pure pieces as values, its health probe over a recording
 #   transport, its handle and argv refusals, and (ARM 6) the runner itself
-#   over short /bin/sh children, as komira_supervisor's welded scenarios
+#   over short /bin/sh children, as supervisor's welded scenarios
 #   start them. No server is started; the only socket is a dial to
 #   127.0.0.1 port 1, which nothing serves, made by `wait_port`'s probe.
 # =============================================================================
@@ -32,10 +32,10 @@
 from std.os.path import exists
 from std.testing import assert_equal, assert_false, assert_true
 
-from komira_aws_core import AwsHttpTransport, HttpResult
-from komira_aws_core.credential_transport import CredentialHttpRequest
-from komira_libc.posix import _read_env
-from komira_supervisor.supervisor import DetachedExit
+from aws_core import AwsHttpTransport, HttpResult
+from aws_core.credential_transport import CredentialHttpRequest
+from libc.posix import _read_env
+from supervisor.supervisor import DetachedExit
 from komira_test_minio import EnvEntry, ProcessSpec, READINESS_EXITED, READINESS_TIMEOUT
 
 from komira_test_s3_adapter import (

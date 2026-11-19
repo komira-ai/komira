@@ -1,0 +1,38 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The sources of the engine's pipelines: the Arrow IPC stream and file readers
+# with their dictionary cache (including the memory-mapped file path), the source that streams one or several
+# in-memory record batches as morsels with the shared claim cursor and its
+# work-stealing claim, and the source that serves a registered intermediate
+# result to a later stage. Anything that turns bytes or batches into morsels
+# lives here; the operators that consume them are in the packages above.
+mojo_library(
+    name = "op_sources",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/arrow:arrow",
+        "//src/arrow_ipc:arrow_ipc",
+        "//src/async_rt:async_rt",
+        "//src/async_api:async_api",
+        "//src/atomic_alias:atomic_alias",
+        "//src/byte_buffer:byte_buffer",
+        "//src/containers:containers",
+        "//src/column_kernels:column_kernels",
+        "//src/compression:compression",
+        "//src/counters:counters",
+        "//src/fork_join:fork_join",
+        "//src/host_probe:host_probe",
+        "//src/morsel:morsel",
+        "//src/plan_stats:plan_stats",
+        "//src/scan_source:scan_source",
+    ],
+    test_srcs = [
+        "tests/test_arrow_readers_round_trip.mojo",
+        "tests/test_batch_morsel_options.mojo",
+        "tests/test_batch_morsel_source.mojo",
+        "tests/test_batch_morsel_source_dict_roundtrip.mojo",
+        "tests/test_batch_morsel_source_raise_double_free.mojo",
+        "tests/test_cte_morsel_source.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)

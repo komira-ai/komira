@@ -1,0 +1,8 @@
+@@ -36,6 +36,7 @@ PACKAGES = {
+     "mail_address": "0.1.0",
+     "parquet_api": "0.1.0",
+     "protobuf": "0.1.0",
++    "resources": "0.1.0",
+     "retry": "0.1.0",
+     "rowcell": "0.1.0",
+     "runtime_paths": "0.1.0",

@@ -1,6 +1,6 @@
 # =============================================================================
-# komira_crm_store_conformance -- komira_crm's store, checked once against
-#   every komira_db backend that runs in a build action.
+# komira_crm_store_conformance -- crm's store, checked once against
+#   every db backend that runs in a build action.
 # =============================================================================
 #
 #   targets.mojo   CrmTarget: a backend's factory of fresh databases

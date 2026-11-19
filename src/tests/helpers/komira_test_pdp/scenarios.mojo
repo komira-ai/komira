@@ -29,7 +29,7 @@
 # token is `tok.<name>`) and runs one scenario on it.
 # =============================================================================
 
-from komira_json import write_json_string
+from json import write_json_string
 
 from komira_test_pdp.pdp import PATH_EVALUATION, PolicyRule
 from komira_test_pdp.reasons import REASON_DECIDED

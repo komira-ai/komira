@@ -86,7 +86,7 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
 
 /// The protocol `--protocol <p>` drives, refused unless the driver can run it.
 ///
-/// ⚠ THE DRIVER RECORDS EVERY ACTUAL AS A `JsonValue` (komira_json), whatever
+/// ⚠ THE DRIVER RECORDS EVERY ACTUAL AS A `JsonValue` (json), whatever
 /// the suites are, so it needs the JSON runtime in its preamble: the JSON-body
 /// protocols import it, and the MODEL-convention rows import it for restXml.
 /// An error case reads the code and message as its protocol's client does:
@@ -523,7 +523,7 @@ fn driver_header(
     o.line("# Runs botocore's protocol conformance corpus against the GENERATED");
     o.line("# serializers and parsers, and prints the actuals file on stdout, in the");
     o.line("# format `aws_conformance::ActualsFile::parse` reads. Each request is");
-    o.line("# signed by komira_aws_core's build_sigv4_signed_request (static");
+    o.line("# signed by aws_core's build_sigv4_signed_request (static");
     o.line("# credentials, fixed clock), the path a client sends through.");
     o.line("#");
     o.line("# A case the generated code raises on has a `raised` record holding the");
@@ -543,7 +543,7 @@ fn driver_header(
     }
     o.line("# ==========================================================================");
     o.line("");
-    o.line("from komira_aws_core import (");
+    o.line("from aws_core import (");
     o.line("    AwsCredential,");
     o.line("    AwsEndpoint,");
     o.line("    AwsResponse,");

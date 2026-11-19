@@ -37,11 +37,11 @@
 
 from std.testing import TestSuite, assert_equal, assert_true
 
-from komira_objectstore import LocalFsConditionalStore, RetryPolicy
+from objectstore import LocalFsConditionalStore, RetryPolicy
 
-from komira_search_scan.search_scan_kind import SearchScanResolver
+from search_scan.search_scan_kind import SearchScanResolver
 
-from komira_runtime_paths import test_tmpdir
+from runtime_paths import test_tmpdir
 
 from komira_search_e2e.corpus import (
     INDEX_NAME,

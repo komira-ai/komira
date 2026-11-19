@@ -1,5 +1,5 @@
 # =============================================================================
-# test_sqlite.mojo -- komira_chat_store over komira_db_sqlite's SqliteDatabase.
+# test_sqlite.mojo -- chat_store over db_sqlite's SqliteDatabase.
 # =============================================================================
 #
 # Each check gets a new database file under the test's temporary directory,
@@ -15,11 +15,11 @@
 from std.os import getenv
 from std.testing import assert_equal
 
-from komira_db import DbValue, MigrationRunner
-from komira_db.blocking import db_blocking_query
-from komira_db_sqlite import SqliteDatabase
+from db import DbValue, MigrationRunner
+from db.blocking import db_blocking_query
+from db_sqlite import SqliteDatabase
 
-from komira_chat_store import (
+from chat_store import (
     CHAT_MIGRATION_LEDGER,
     chat_migrations,
     prepare_sql_connection,
@@ -53,7 +53,7 @@ struct SqliteChat(ChatTarget):
         self._path = String()
 
     def name(self) -> String:
-        return String("komira_chat_store over komira_db_sqlite")
+        return String("chat_store over db_sqlite")
 
     def fresh(mut self) raises -> SqliteDatabase:
         self._n += 1
@@ -81,4 +81,4 @@ struct SqliteChat(ChatTarget):
 def main() raises:
     var t = SqliteChat()
     run_chat_suite(t)
-    print("PASS komira_chat_store_conformance komira_db_sqlite")
+    print("PASS komira_chat_store_conformance db_sqlite")

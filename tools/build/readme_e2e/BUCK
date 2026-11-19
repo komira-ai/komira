@@ -75,6 +75,7 @@ _SCENARIOS = [
     "compile_error",
     "dependency",
     "import_outside_closure",
+    "lock_without_compiler_build",
     "missing_file",
     "missing_package",
     "native",

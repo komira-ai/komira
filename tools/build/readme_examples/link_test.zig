@@ -8,7 +8,7 @@ const t = std.testing;
 const Arena = std.heap.ArenaAllocator;
 
 /// The section the packer appends (tools/build/package/pack/readme_link.zig),
-/// for a closure of two owners and komira_log's holder.
+/// for a closure of two owners and log's holder.
 const PACKED = "# X\n\n## Linking\n\n<!-- Written by the packer -->\ntext\n\n```sh komira-link\n" ++
     "mojo run -Xlinker -L$CONDA_PREFIX/lib -Xlinker -lkomira_http_core_native -Xlinker -lkomira_crypto_native prog.mojo\n" ++
     "mojo build -Xlinker -L$CONDA_PREFIX/lib -Xlinker -lkomira_http_core_native -Xlinker -lkomira_crypto_native" ++

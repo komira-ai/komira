@@ -9,10 +9,10 @@
 
 from std.testing import assert_equal, assert_false, assert_true
 
-from komira_async.reactor.reactor import Reactor
-from komira_db import Database, Filter, Pred, DbValue
+from async_rt.reactor.reactor import Reactor
+from db import Database, Filter, Pred, DbValue
 
-from komira_chat_store import (
+from chat_store import (
     CHANNEL_PUBLIC,
     EVENT_DELETE,
     EVENT_EDIT,
@@ -279,7 +279,7 @@ def check_threads[T: ChatTarget](mut t: T) raises:
         err = String(e)
     assert_err(
         err,
-        String("komira_chat_store: thread root 6 is not a top-level message of channel c-general"),
+        String("chat_store: thread root 6 is not a top-level message of channel c-general"),
         "a reply cannot start a thread",
     )
     err = returned()
@@ -292,7 +292,7 @@ def check_threads[T: ChatTarget](mut t: T) raises:
         err = String(e)
     assert_err(
         err,
-        String("komira_chat_store: thread root 1 is not a top-level message of channel c-general"),
+        String("chat_store: thread root 1 is not a top-level message of channel c-general"),
         "a JOIN event is not a thread root",
     )
 
@@ -308,7 +308,7 @@ def check_edit_and_delete[T: ChatTarget](mut t: T) raises:
         _ = s.edit_message[Rt](reactor, String(GENERAL), m.seq, String("u-carol"), String("x"), T0 + 200)
     except e:
         err = String(e)
-    assert_err(err, String("komira_chat_store: u-carol did not send message 4"), "edit of another's message")
+    assert_err(err, String("chat_store: u-carol did not send message 4"), "edit of another's message")
     var e1 = s.edit_message[Rt](reactor, String(GENERAL), m.seq, String("u-bob"), String("second words"), T0 + 200)
     assert_equal(e1.kind, EVENT_EDIT)
     assert_equal(e1.target_seq, m.seq)
@@ -321,7 +321,7 @@ def check_edit_and_delete[T: ChatTarget](mut t: T) raises:
         _ = s.delete_message[Rt](reactor, String(GENERAL), m.seq, String("u-carol"), False, T0 + 300)
     except e:
         err = String(e)
-    assert_err(err, String("komira_chat_store: u-carol did not send message 4"), "delete of another's message")
+    assert_err(err, String("chat_store: u-carol did not send message 4"), "delete of another's message")
     var d = s.delete_message[Rt](reactor, String(GENERAL), m.seq, String("u-bob"), False, T0 + 300)
     assert_equal(d.kind, EVENT_DELETE)
     assert_equal(d.seq, Int64(6))
@@ -339,13 +339,13 @@ def check_edit_and_delete[T: ChatTarget](mut t: T) raises:
         _ = s.edit_message[Rt](reactor, String(GENERAL), m.seq, String("u-bob"), String("y"), T0 + 500)
     except e:
         err = String(e)
-    assert_err(err, String("komira_chat_store: message 4 is deleted"), "edit after delete")
+    assert_err(err, String("chat_store: message 4 is deleted"), "edit after delete")
     err = returned()
     try:
         _ = s.edit_message[Rt](reactor, String(GENERAL), Int64(1), String("u-alice"), String("y"), T0 + 500)
     except e:
         err = String(e)
-    assert_err(err, String("komira_chat_store: channel c-general has no message at seq 1"), "a JOIN is not a message")
+    assert_err(err, String("chat_store: channel c-general has no message at seq 1"), "a JOIN is not a message")
     # An admin may delete anyone's message.
     var c = _send(s, reactor, "u-carol", "carol's")
     var by_admin = s.delete_message[Rt](reactor, String(GENERAL), c.seq, String("u-admin"), True, T0 + 600)
@@ -439,7 +439,7 @@ def check_page_size_refused[T: ChatTarget](mut t: T) raises:
         for n in range(-1, 1):
             assert_err(
                 _pager_err(s, reactor, which, n),
-                String("komira_chat_store: ") + names[which] + String(" must be at least 1, got ") + String(n),
+                String("chat_store: ") + names[which] + String(" must be at least 1, got ") + String(n),
                 String("pager ") + String(which) + String(", size ") + String(n),
             )
         # Above the cap: a pager reads one more row than its page through a
@@ -453,7 +453,7 @@ def check_page_size_refused[T: ChatTarget](mut t: T) raises:
         for k in range(len(big)):
             assert_err(
                 _pager_err(s, reactor, which, big[k]),
-                String("komira_chat_store: ") + names[which] + String(" must be at most ") + String(MAX_PAGE_SIZE) + String(", got ") + String(big[k]),
+                String("chat_store: ") + names[which] + String(" must be at most ") + String(MAX_PAGE_SIZE) + String(", got ") + String(big[k]),
                 String("pager ") + String(which) + String(", size ") + String(big[k]),
             )
         assert_equal(

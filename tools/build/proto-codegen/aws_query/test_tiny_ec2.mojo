@@ -2,7 +2,7 @@
 # (tiny_ec2.json): the requests it builds (method, target, Content-Type and
 # the form body) and the responses it reads (the members of the root
 # element), each compared exactly, and the error document a client reads
-# through komira_aws_core. The parameter names follow botocore's
+# through aws_core. The parameter names follow botocore's
 # EC2Serializer (botocore/serialize.py): a member's queryName, else its
 # locationName with the first letter capitalized, else its member name as
 # declared; a list is `<name>.<i>` from 1, never wrapped, whatever its
@@ -16,7 +16,7 @@ from komira_aws_tiny_ec2.komira_aws_tiny_ec2 import (
     parse_describe_things_response,
     parse_ping_response,
 )
-from komira_aws_core import AwsResponse, aws_query_error
+from aws_core import AwsResponse, aws_query_error
 from std.testing import assert_equal, assert_false, assert_true
 
 

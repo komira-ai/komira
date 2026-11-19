@@ -1,4 +1,4 @@
-# komira_tls_interop_e2e: komira's TLS (s2n-tls under komira_http_core.tls)
+# komira_tls_interop_e2e: komira's TLS (s2n-tls under http_core.tls)
 # against real TLS peers, each a child process of the test: aws-lc's bssl
 # tool built from the pinned archive, as `bssl s_server` and `bssl s_client`,
 # and CPython's `ssl` module (OpenSSL) in the pinned interpreter, as

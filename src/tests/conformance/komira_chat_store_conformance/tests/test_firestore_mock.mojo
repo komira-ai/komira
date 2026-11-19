@@ -1,5 +1,5 @@
 # =============================================================================
-# test_firestore_mock.mojo -- komira_chat_store over komira_gcp_firestore_db's
+# test_firestore_mock.mojo -- chat_store over gcp_firestore_db's
 #   FirestoreDatabase and its in-process MockFirestore.
 # =============================================================================
 #
@@ -14,8 +14,8 @@
 # Firestore itself.
 # =============================================================================
 
-from komira_gcp_firestore.firestore_client import FirestoreClient
-from komira_gcp_firestore_db import (
+from gcp_firestore.firestore_client import FirestoreClient
+from gcp_firestore_db import (
     DeclaredIndexSet,
     FirestoreDatabase,
     MockFirestore,
@@ -23,7 +23,7 @@ from komira_gcp_firestore_db import (
     TableKeys,
 )
 
-from komira_chat_store import CHAT_DOCUMENT_INDEXES, CHAT_DOCUMENT_KEYS
+from chat_store import CHAT_DOCUMENT_INDEXES, CHAT_DOCUMENT_KEYS
 from komira_chat_store_conformance import ChatTarget, run_chat_suite
 
 comptime _FsDb = FirestoreDatabase[MockFirestoreConnector]
@@ -64,7 +64,7 @@ struct FirestoreMockChat(ChatTarget):
         self._transport = Optional[MockFirestore]()
 
     def name(self) -> String:
-        return String("komira_chat_store over komira_gcp_firestore_db (mock)")
+        return String("chat_store over gcp_firestore_db (mock)")
 
     def fresh(mut self) raises -> _FsDb:
         self._transport = Optional[MockFirestore](MockFirestore())
@@ -77,4 +77,4 @@ struct FirestoreMockChat(ChatTarget):
 def main() raises:
     var t = FirestoreMockChat()
     run_chat_suite(t)
-    print("PASS komira_chat_store_conformance komira_gcp_firestore_db")
+    print("PASS komira_chat_store_conformance gcp_firestore_db")

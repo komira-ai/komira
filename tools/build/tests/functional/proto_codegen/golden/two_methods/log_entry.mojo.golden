@@ -5,19 +5,19 @@
 # proto package: example.logging.v1
 # Mojo package:  komira_example_logging
 #
-# Generated message structs conform to the komira_proto_codec
+# Generated message structs conform to the proto_codec
 # `Serializable` trait: encode[E: WireEncoder] / decode[D: WireDecoder].
 
-from komira_proto_codec import (
+from proto_codec import (
     ProtoEnum,
     Serializable,
     WireEncoder,
     WireDecoder,
 )
 from komira_example_logging.monitored_resource import MonitoredResource
-from komira_wkt import Any
-from komira_wkt import Struct
-from komira_wkt import Timestamp
+from wkt import Any
+from wkt import Struct
+from wkt import Timestamp
 
 
 # proto enum LogSeverity (.example.logging.v1.LogSeverity)

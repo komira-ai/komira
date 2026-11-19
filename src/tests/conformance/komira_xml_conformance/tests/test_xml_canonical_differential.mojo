@@ -1,4 +1,4 @@
-# komira_xml's canonical form against the conformance harness (a
+# xml's canonical form against the conformance harness (a
 # differential test): canonical_xml, the comparison a restXml client's
 # bodies are judged by, against the harness's independent XML equivalence
 # (komira//tools/build/proto-codegen, `xml_equiv`), over every XML body of
@@ -8,9 +8,9 @@
 # of the cases botocore's ignore list does not skip, whether it parses as
 # XML, and for each unordered pair of them whether the two are the same
 # document (`rest_xml_verdicts.tsv`). This test reads the same bodies out of
-# the corpus by case key and requires komira_xml to agree on every one:
+# the corpus by case key and requires xml to agree on every one:
 #
-#   a body:  komira_xml parses it  <=>  the verdict is `parses`
+#   a body:  xml parses it  <=>  the verdict is `parses`
 #   a pair:  canonical_xml(a) == canonical_xml(b) when both parse, else
 #            a == b byte for byte  <=>  the verdict is `equal`
 #
@@ -23,14 +23,14 @@
 
 from std.collections import Dict
 
-from komira_json import (
+from json import (
     JSON_ARRAY,
     JSON_OBJECT,
     JSON_STRING,
     JsonValue,
     parse_json_value,
 )
-from komira_xml import canonical_xml
+from xml import canonical_xml
 
 
 comptime _VERDICTS = "rest_xml_verdicts.tsv"
@@ -146,7 +146,7 @@ def test_canonical_agrees_with_harness() raises:
                 raise Error("verdict kind " + f[2] + " for " + key)
             if ok != want:
                 failures.append(
-                    key + ": harness says " + f[2] + ", komira_xml "
+                    key + ": harness says " + f[2] + ", xml "
                     + ("parses" if ok else "refuses")
                 )
             keys.append(key)
@@ -178,7 +178,7 @@ def test_canonical_agrees_with_harness() raises:
             if same != (f[3] == "equal"):
                 failures.append(
                     f[1] + " ~ " + f[2] + ": harness says " + f[3]
-                    + ", komira_xml " + ("equal" if same else "differ")
+                    + ", xml " + ("equal" if same else "differ")
                 )
             checked_pairs += 1
         else:

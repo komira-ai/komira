@@ -1,0 +1,49 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The full-text search engine core: the per-field analyzer, the in-memory
+# inverted index builder, the two-stage term dictionary, the immutable split
+# file (postings, doc store, fast fields), BM25 scoring, multi-split merge, and
+# the read-side search core that answers match queries with top-k hits, sorts
+# and aggregations.
+mojo_library(
+    name = "search",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/arrow:arrow",
+        "//src/byte_buffer:byte_buffer",
+        "//src/containers:containers",
+        "//src/compression:compression",
+        "//src/hashing:hashing",
+        "//src/plan_expr:plan_expr",
+        "//src/scan_source:scan_source",
+    ],
+    test_srcs = [
+        "tests/test_multi_split_merge.mojo",
+        "tests/test_search_analyzer.mojo",
+        "tests/test_search_analyzer_alloc_perf.mojo",
+        "tests/test_search_analyzer_simd_classify.mojo",
+        "tests/test_search_bm25.mojo",
+        "tests/test_search_cov_analyzer.mojo",
+        "tests/test_search_cov_ff_corrupt.mojo",
+        "tests/test_search_cov_ff_types.mojo",
+        "tests/test_search_cov_index_dict.mojo",
+        "tests/test_search_cov_merge.mojo",
+        "tests/test_search_cov_sink.mojo",
+        "tests/test_search_cov_split_codec.mojo",
+        "tests/test_search_cov_split_parse.mojo",
+        "tests/test_search_cov_source_e2e.mojo",
+        "tests/test_search_cov_source_units.mojo",
+        "tests/test_search_cov_source_wand.mojo",
+        "tests/test_search_fast_fields.mojo",
+        "tests/test_search_field_mismatch.mojo",
+        "tests/test_search_ff_preresolve.mojo",
+        "tests/test_search_ff_wide_min.mojo",
+        "tests/test_search_inverted.mojo",
+        "tests/test_search_l0_split_refused.mojo",
+        "tests/test_search_source_core.mojo",
+        "tests/test_search_split.mojo",
+        "tests/test_search_term_dict.mojo",
+        "tests/test_search_wand_phase0_equivalence.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)

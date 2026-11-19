@@ -1,11 +1,11 @@
 # =============================================================================
-# test_issuer.mojo: `TestIssuer` (issuer.mojo) against komira_jose's verify
+# test_issuer.mojo: `TestIssuer` (issuer.mojo) against jose's verify
 #   half, the way a relying party uses it.
 # =============================================================================
 #
 # An issuer has max lifetime 300 s, leeway 30 s and publish lead 600 s, and
 # starts at T0 = 1000000. Every token is checked by `_check`: the document
-# the issuer served is parsed with komira_jwks, a `JwsVerifier` pinned to the
+# the issuer served is parsed with jwks, a `JwsVerifier` pinned to the
 # issuer's algorithm is built from it, and `verify_jwt` applies a
 # `ClaimPolicy` of the issuer, audience "service-a", the issuer's `typ`, the
 # leeway and the max lifetime at the time given. This file does not use the
@@ -15,7 +15,7 @@
 # The rotation tests name the plan's defect: a rotation that drops the former
 # key before the max lifetime plus the leeway have passed makes a token
 # signed before the switch fail while it is still in flight. The former key
-# leaves at the switch plus the max lifetime plus 60 s (komira_jose's
+# leaves at the switch plus the max lifetime plus 60 s (jose's
 # `JOSE_MAX_LEEWAY_S`, written out here as RETIRE_LEEWAY so a change to it
 # is seen), whatever the issuer's own leeway.
 #
@@ -24,10 +24,10 @@
 
 from std.testing import assert_equal, assert_true
 
-from komira_encoding import base64_url_decode_nopad
-from komira_jose import ClaimPolicy, JwsVerifier, VerifiedJwt, verify_jwt
-from komira_json import JSON_STRING, JsonValue
-from komira_jwks import parse_jwk_set
+from encoding import base64_url_decode_nopad
+from jose import ClaimPolicy, JwsVerifier, VerifiedJwt, verify_jwt
+from json import JSON_STRING, JsonValue
+from jwks import parse_jwk_set
 from komira_test_issuer import TestIssuer, derived_key, user_token_claims
 
 
@@ -35,7 +35,7 @@ comptime T0: Int64 = 1000000
 comptime TTL: Int64 = 300
 comptime LEEWAY: Int64 = 30
 comptime LEAD: Int64 = 600
-# komira_jose's JOSE_MAX_LEEWAY_S: the keyring retires a former key this
+# jose's JOSE_MAX_LEEWAY_S: the keyring retires a former key this
 # long after the max lifetime, whatever leeway the issuer's relying parties
 # use.
 comptime RETIRE_LEEWAY: Int64 = 60
@@ -144,7 +144,7 @@ def _to(mut iss: TestIssuer, at: Int64) raises:
 
 
 def test_minted_token_verifies() raises:
-    # The plan's test: a token the issuer mints verifies under komira_jose's
+    # The plan's test: a token the issuer mints verifies under jose's
     # verifier with the document it serves, for each algorithm and type.
     # Catches: a token signed by a key the document lacks; the wrong typ,
     # iss, sub, aud or lifetime; claims written from the wrong input.

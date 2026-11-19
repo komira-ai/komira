@@ -21,7 +21,7 @@ library-only package for lz4 (`liblz4`), zstd (`libzstd`) or bzip2
 (`libbzip2`), so those rows keep `lz4-c`, `zstd` and `bzip2`, which also
 install command-line tools. For `liblzma.so.5` it publishes the library-only
 `liblzma` (from 5.6.3 on linux-64), which `xz` itself now requires; the row
-still says `xz` until its library (komira_compression) declares it.
+still says `xz` until its library (compression) declares it.
 """
 
 SYSTEM_LIBS = {

@@ -6,7 +6,7 @@ line; Path.home reads HOME inside the standard library. The generated
 environment scan (_no_env_reads) refuses a file with a carriage return.
 """
 
-from komira_aws_core import AwsRequest
+from aws_core import AwsRequest
 comptime _ZERO = 0from std.pathlib import Path
 
 from .env_read_cr import (

@@ -1,0 +1,41 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The stage hash aggregation: HashAggTable, the HASH_AGG breaker state, over a
+# growable GROUP BY key block and a pack of aggregate columns.
+mojo_library(
+    name = "op_agg_stage",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/agg:agg",
+        "//src/agg_api:agg_api",
+        "//src/arrow:arrow",
+        "//src/async_rt:async_rt",
+        "//src/async_api:async_api",
+        "//src/atomic_alias:atomic_alias",
+        "//src/batch_eval:batch_eval",
+        "//src/byte_buffer:byte_buffer",
+        "//src/containers:containers",
+        "//src/column_kernels:column_kernels",
+        "//src/compression:compression",
+        "//src/counters:counters",
+        "//src/dynamic_filter:dynamic_filter",
+        "//src/engine_runtime:engine_runtime",
+        "//src/expr:expr",
+        "//src/libc:libc",
+        "//src/op_agg_distinct:op_agg_distinct",
+        "//src/op_agg_state:op_agg_state",
+        "//src/operator_api:operator_api",
+        "//src/physical_plan:physical_plan",
+        "//src/plan_expr:plan_expr",
+        "//src/simd_ops:simd_ops",
+        "//src/udf:udf",
+    ],
+    test_srcs = [
+        "tests/test_agg_fn_slot.mojo",
+        "tests/test_hash_agg.mojo",
+        "tests/test_hash_agg_combine.mojo",
+        "tests/test_hash_agg_consume_band.mojo",
+        "tests/test_hash_agg_sql_semantics.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)

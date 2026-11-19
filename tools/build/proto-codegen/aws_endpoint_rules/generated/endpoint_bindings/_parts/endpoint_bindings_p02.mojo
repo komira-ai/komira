@@ -6,7 +6,7 @@
 # Part 2 of 2 of `endpoint_bindings`: declarations of `endpoint_bindings.mojo`, which is split so
 # that no generated file reaches 1000 lines. Import them from `endpoint_bindings`; it re-exports all.
 
-from komira_aws_core import EndpointRuleSet, ResolvedEndpoint
+from aws_core import EndpointRuleSet, ResolvedEndpoint
 from .endpoint_bindings_p01 import (
     EndpointBindingsCopyObjectRequest, EndpointBindingsCreateBucketRequest,
     EndpointBindingsGetObjectRequest, EndpointBindingsListBucketsRequest,

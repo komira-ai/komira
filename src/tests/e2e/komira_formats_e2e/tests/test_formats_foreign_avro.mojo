@@ -2,7 +2,7 @@
 # Avro Object Container Files another implementation wrote, read by value.
 # =============================================================================
 #
-# Every other OCF test in this repo reads bytes komira_avro's own writer
+# Every other OCF test in this repo reads bytes avro's own writer
 # produced. These are Apache Avro's shared interop files (provenance, pins
 # and license: //third_party/apache-avro), staged under avro/. The expected
 # records are upstream's: lang/c++/test/DataFileTests.cc (testCompatibility)
@@ -36,14 +36,14 @@
 from std.pathlib import Path
 from std.testing import TestSuite, assert_equal, assert_true
 
-from komira_avro import (
+from avro import (
     decode_ocf_header,
     read_avro_bytes,
     read_avro_bytes_parallel,
     read_avro_bytes_resolved,
 )
-from komira_arrow.arrow_types import ArrowType
-from komira_arrow.record_batch import RecordBatch
+from arrow.arrow_types import ArrowType
+from arrow.record_batch import RecordBatch
 
 from komira_formats_e2e import Mismatches
 

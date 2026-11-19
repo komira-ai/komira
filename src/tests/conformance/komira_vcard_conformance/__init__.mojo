@@ -1,5 +1,5 @@
 # =============================================================================
-# komira_vcard_conformance -- komira_vcard (and the komira_content_line layer
+# komira_vcard_conformance -- vcard (and the content_line layer
 # under it) against the RFC 6350, RFC 2426 and RFC 9555 examples and
 # vendor-shaped exports. Test-only: nothing ships from here.
 # =============================================================================

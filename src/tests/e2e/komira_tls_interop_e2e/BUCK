@@ -4,13 +4,13 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library", "mojo_test")
 # `bssl s_client`, aws-lc's tool built from the pinned archive
 # (//third_party/aws-lc:bssl), and a CPython `ssl` server and client (below,
 # _CPYTHON_DATA). Each bssl mojo_test below starts bssl as a child
-# process (komira_supervisor) and drives komira's side of the connection
+# process (supervisor) and drives komira's side of the connection
 # itself. komira listens and connects on 127.0.0.1 only; s_server listens on
 # the dual-stack wildcard ([::], aws-lc's choice), komira connects to
 # 127.0.0.1, so the tests need IPv6 with dual-stack sockets. The tests get
 # the binary through `args`
 # ($(exe_target)) and run under `./buck2 test`, not as part of this library's
-# build. The certificates are komira_http_core's test fixtures, staged at
+# build. The certificates are http_core's test fixtures, staged at
 # their source paths.
 #
 # test_komira_client_vs_bssl_server: komira's production client config
@@ -32,11 +32,11 @@ mojo_library(
     name = "komira_tls_interop_e2e",
     srcs = glob(["*.mojo"]),
     deps = [
-        "//src/komira_async:komira_async",
-        "//src/komira_http_client:komira_http_client",
-        "//src/komira_http_core:komira_http_core",
-        "//src/komira_supervisor:komira_supervisor",
-        "//tools/build/mojo/runtime_paths:komira_runtime_paths",
+        "//src/async_rt:async_rt",
+        "//src/http_client:http_client",
+        "//src/http_core:http_core",
+        "//src/supervisor:supervisor",
+        "//tools/build/mojo/runtime_paths:runtime_paths",
     ],
     test_srcs = [
         "tests/test_bssl_report.mojo",
@@ -47,18 +47,18 @@ mojo_library(
 
 _DEPS = [
     ":komira_tls_interop_e2e",
-    "//src/komira_async:komira_async",
-    "//src/komira_http_client:komira_http_client",
-    "//src/komira_http_core:komira_http_core",
-    "//src/komira_supervisor:komira_supervisor",
-    "//tools/build/mojo/runtime_paths:komira_runtime_paths",
+    "//src/async_rt:async_rt",
+    "//src/http_client:http_client",
+    "//src/http_core:http_core",
+    "//src/supervisor:supervisor",
+    "//tools/build/mojo/runtime_paths:runtime_paths",
 ]
 
 _TLS_FIXTURES = {
-    "src/komira_http_core/tests/fixtures/smoke_cert.pem": "//src/komira_http_core:tests/fixtures/smoke_cert.pem",
-    "src/komira_http_core/tests/fixtures/tls/leaf_cert.pem": "//src/komira_http_core:tests/fixtures/tls/leaf_cert.pem",
-    "src/komira_http_core/tests/fixtures/tls/leaf_key.pem": "//src/komira_http_core:tests/fixtures/tls/leaf_key.pem",
-    "src/komira_http_core/tests/fixtures/tls/root_ca.pem": "//src/komira_http_core:tests/fixtures/tls/root_ca.pem",
+    "src/http_core/tests/fixtures/smoke_cert.pem": "//src/http_core:tests/fixtures/smoke_cert.pem",
+    "src/http_core/tests/fixtures/tls/leaf_cert.pem": "//src/http_core:tests/fixtures/tls/leaf_cert.pem",
+    "src/http_core/tests/fixtures/tls/leaf_key.pem": "//src/http_core:tests/fixtures/tls/leaf_key.pem",
+    "src/http_core/tests/fixtures/tls/root_ca.pem": "//src/http_core:tests/fixtures/tls/root_ca.pem",
 }
 
 _BSSL = "--bssl=$(exe_target //third_party/aws-lc:bssl)"

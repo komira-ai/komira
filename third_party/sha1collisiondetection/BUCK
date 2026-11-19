@@ -6,7 +6,7 @@ load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 # sha1collisiondetection stable-v1.0.3 (cr-marcstevens/sha1collisiondetection),
 # MIT (LICENSE.txt in the archive): SHA-1 with counter-cryptanalysis, the
 # collision detection git hashes with. Test input only: it is the oracle of
-# komira_git's pure-Mojo port (komira_git/sha1dc.mojo), linked into the
+# git's pure-Mojo port (git/sha1dc.mojo), linked into the
 # welded tests of //src/tests/conformance/komira_git_conformance and into
 # nothing that ships. Nothing of it is committed here: the archive is fetched
 # at build time and checked against its sha256.
@@ -31,7 +31,7 @@ archive_files(
     strip_prefix = "sha1collisiondetection-stable-v1.0.3",
 )
 
-# Test data of //src/komira_git (tests/test_sha1dc.mojo) and of
+# Test data of //src/git (tests/test_sha1dc.mojo) and of
 # //src/tests/conformance/komira_git_conformance: upstream's own test files,
 # the two SHAttered PDFs (one SHA-1 collision, shattered.io) and a collision
 # of reduced-step SHA-1, staged as test/<name>.
@@ -48,7 +48,7 @@ archive_files(
     ],
     strip_prefix = "sha1collisiondetection-stable-v1.0.3",
     visibility = [
-        "//src/komira_git/...",
+        "//src/git/...",
         "//src/tests/conformance/komira_git_conformance/...",
     ],
 )

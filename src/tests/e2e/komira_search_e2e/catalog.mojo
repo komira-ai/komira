@@ -30,7 +30,7 @@
 # record is refused by name (`SEARCH_GENERATION_NOT_AVAILABLE`).
 #
 # The live set is paired with a generation the way the metastore's ordering
-# argument expects (komira_search_catalog/generation.mojo): read the
+# argument expects (search_catalog/generation.mojo): read the
 # generation, the live set, the generation again, and record only when the
 # two reads agree. A retire or reap bumps the generation before its change
 # and again after it, so when the first read comes before the first bump, a
@@ -46,22 +46,22 @@
 # No pointers: every value is owned data or a store handle held by value.
 # =============================================================================
 
-from komira_objectstore import (
+from objectstore import (
     AppendResult,
     CasManifestStore,
     RetryPolicy,
     WritePrecondition,
 )
-from komira_objectstore.cas_manifest import is_not_found, is_precondition
-from komira_objectstore.path import Path
-from komira_objectstore.store import CloneableConditionalWriteStore
+from objectstore.cas_manifest import is_not_found, is_precondition
+from objectstore.path import Path
+from objectstore.store import CloneableConditionalWriteStore
 
-from komira_search.analyzer import AnalyzerConfig
+from search.analyzer import AnalyzerConfig
 
-from komira_search_catalog.metastore import SearchMetastore
-from komira_search_catalog.split_summary import SplitSummary, make_split_summary
+from search_catalog.metastore import SearchMetastore
+from search_catalog.split_summary import SplitSummary, make_split_summary
 
-from komira_search_scan.search_scan_kind import (
+from search_scan.search_scan_kind import (
     SEARCH_GENERATION_NOT_AVAILABLE,
     SEARCH_INDEX_UNKNOWN,
     SEARCH_SPLIT_KEY_INVALID,

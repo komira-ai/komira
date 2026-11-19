@@ -21,12 +21,22 @@ fn die(comptime fmt: []const u8, args: anytype) noreturn {
 
 const Result = struct { code: u8, out: []const u8 };
 
+/// The namespace of every package of the scenarios (a test namespace: the staged set is an overlay,
+/// which takes any namespace). A `Pkg.name` is the import name; the full name is `example/<name>`.
+const namespace = "example";
+
+fn fullName(a: Allocator, name: []const u8) []const u8 {
+    return std.fmt.allocPrint(a, namespace ++ "/{s}", .{name}) catch die("out of memory", .{});
+}
+
 const Pkg = struct {
+    /// The import name.
     name: []const u8,
     version: []const u8 = "1.2.3",
+    /// The import names of the packages it needs.
     deps: []const []const u8 = &.{},
     readme: []const u8,
-    /// The package's payload, for a scenario that needs another one.
+    /// The import name of the package the file holds, for a scenario that needs another one.
     payload_name: ?[]const u8 = null,
     /// Static native libraries the package declares (and, unless `ship` is false, holds).
     natives: []const fix.Static = &.{},
@@ -92,22 +102,25 @@ const Env = struct {
         for (pkgs) |p| {
             const inside = p.payload_name orelse p.name;
             const mojoc = std.fmt.allocPrint(self.a, "mojoc of {s}", .{inside}) catch die("out of memory", .{});
-            const bytes = fix.packageWith(self.a, inside, p.version, build, mojoc, p.deps, p.natives) catch die("cannot build the fixture {s}", .{p.name});
-            const file = std.fmt.allocPrint(self.a, "in/{s}/linux-64/mojo-{s}-{s}-{s}.conda", .{ p.name, p.name, p.version, build }) catch die("out of memory", .{});
+            const deps = self.a.alloc([]const u8, p.deps.len) catch die("out of memory", .{});
+            for (p.deps, deps) |d, *out| out.* = fullName(self.a, d);
+            const bytes = fix.packageWith(self.a, fullName(self.a, inside), p.version, build, mojoc, deps, p.natives) catch die("cannot build the fixture {s}", .{p.name});
+            const file = std.fmt.allocPrint(self.a, "in/{s}/linux-64/mojo-" ++ namespace ++ ".{s}-{s}-{s}.conda", .{ p.name, p.name, p.version, build }) catch die("out of memory", .{});
             self.put(file, bytes);
             const readme = std.fmt.allocPrint(self.a, "in/{s}/README.md", .{p.name}) catch die("out of memory", .{});
             self.put(readme, p.readme);
-            argv.appendSlice(self.a, &.{ "--member", p.name, p.version, self.join(&.{file}), self.join(&.{readme}) }) catch die("out of memory", .{});
+            argv.appendSlice(self.a, &.{ "--member", fullName(self.a, p.name), p.version, self.join(&.{file}), self.join(&.{readme}) }) catch die("out of memory", .{});
         }
         return self.exec(argv.items);
     }
 
-    /// `readme_e2e verify` of `package` over `set`, with `mopm` as the stand-in's name.
+    /// `readme_e2e verify` of `package` (an import name) over `set`, with `mopm` as the stand-in's name.
     fn verify(self: Env, package: []const u8, version: []const u8, mojo: []const u8, mopm: []const u8) Result {
         const fake = self.fake;
+        const full = fullName(self.a, package);
         const argv = [_][]const u8{
             self.tool,                                              "verify",
-            "--package",                                            package,
+            "--package",                                            full,
             "--version",                                            version,
             "--mojo",                                               mojo,
             "--staged",                                             self.join(&.{"set"}),
@@ -179,9 +192,9 @@ fn passes(env: Env) void {
     expectCode(env.stage(&.{pkg}, "1.0.0"), 0, "stage");
     const r = env.verify("good", "1.2.3", "1.0.0", "mopm");
     expectCode(r, 0, "verify");
-    expectText(r, "PASS good 1.2.3: 2 README example(s) compiled and ran against the installed package");
+    expectText(r, "PASS example/good 1.2.3: 2 README example(s) compiled and ran against the installed package");
     const marker = env.get("run.marker") orelse die("no marker written", .{});
-    if (std.mem.indexOf(u8, marker, "PASS good 1.2.3") == null) die("the marker is `{s}`", .{marker});
+    if (std.mem.indexOf(u8, marker, "PASS example/good 1.2.3") == null) die("the marker is `{s}`", .{marker});
     // What the user has: the package unpacked in a prefix, a lock, a manifest.
     for ([_][]const u8{ "run/prefix/lib/mojo/good.mojoc", "run/prefix/lib/mojo/good.mopm.json", "run/project/mopm.lock", "run/project/mopm.toml" }) |f| {
         if (!env.exists(f)) die("{s} was not made", .{f});
@@ -198,7 +211,7 @@ fn dependency(env: Env) void {
     expectCode(env.stage(&.{ app, z }, "1.0.0"), 0, "stage");
     var why: []const u8 = "";
     const plan = plan_mod.parsePlan(env.a, env.get("set/plan.json").?, &why) catch die("plan.json: {s}", .{why});
-    if (plan.members.len != 2 or !std.mem.eql(u8, plan.members[0].name, "zlib") or !std.mem.eql(u8, plan.members[1].name, "app")) die("the plan is not in dependency order", .{});
+    if (plan.members.len != 2 or !std.mem.eql(u8, plan.members[0].name, "example/zlib") or !std.mem.eql(u8, plan.members[1].name, "example/app")) die("the plan is not in dependency order", .{});
     for (plan.members) |m| {
         if (!std.mem.eql(u8, m.action, "upload") or m.files.len != 1 or (m.manifest_sha256 orelse "").len != 64) die("{s}: not a complete upload member", .{m.name});
         const staged = env.get(lineText(env, "set/{s}/{s}", .{ m.files[0].subdir, m.files[0].filename })).?;
@@ -219,11 +232,11 @@ fn compileError(env: Env) void {
     const r = env.verify("good", "1.2.3", "1.0.0", "mopm");
     expectCode(r, 1, "verify");
     expectText(r, lineText(env, "example README.md:{d}: compiled and passed", .{fenceLine(pkg.readme, 1)}));
-    expectText(r, lineText(env, "FAIL compile: good: README.md:{d} does not compile against the installed package", .{fenceLine(pkg.readme, 2)}));
+    expectText(r, lineText(env, "FAIL compile: example/good: README.md:{d} does not compile against the installed package", .{fenceLine(pkg.readme, 2)}));
     // The compiler's message names the README, not the generated program.
-    expectText(r, "good/README.md:1:1: error: use of unknown declaration 'COMPILE_ERROR'");
+    expectText(r, "example/good/README.md:1:1: error: use of unknown declaration 'COMPILE_ERROR'");
     expectNoText(r, "readme_good_");
-    expectNoText(r, "PASS good");
+    expectNoText(r, "PASS example/good");
     if (env.exists("run.marker")) die("a marker was written for a package that did not pass", .{});
 }
 
@@ -240,9 +253,9 @@ fn importOutsideClosure(env: Env) void {
     const r = env.verify("good", "1.2.3", "1.0.0", "mopm");
     expectCode(r, 1, "verify");
     expectText(r, lineText(env, "example README.md:{d}: compiled and passed", .{fenceLine(pkg.readme, 1)}));
-    expectText(r, lineText(env, "FAIL compile: good: README.md:{d} does not compile against the installed package", .{fenceLine(pkg.readme, 2)}));
+    expectText(r, lineText(env, "FAIL compile: example/good: README.md:{d} does not compile against the installed package", .{fenceLine(pkg.readme, 2)}));
     expectText(r, "unable to locate module 'outside'");
-    expectNoText(r, "PASS good");
+    expectNoText(r, "PASS example/good");
     if (env.exists("run.marker")) die("a marker was written for a package that did not pass", .{});
 }
 
@@ -251,9 +264,9 @@ fn runError(env: Env) void {
     expectCode(env.stage(&.{pkg}, "1.0.0"), 0, "stage");
     const r = env.verify("good", "1.2.3", "1.0.0", "mopm");
     expectCode(r, 1, "verify");
-    expectText(r, lineText(env, "FAIL run: good: README.md:{d} fails when run", .{fenceLine(pkg.readme, 2)}));
+    expectText(r, lineText(env, "FAIL run: example/good: README.md:{d} fails when run", .{fenceLine(pkg.readme, 2)}));
     expectNoText(r, "FAIL compile");
-    expectNoText(r, "PASS good");
+    expectNoText(r, "PASS example/good");
     if (env.exists("run.marker")) die("a marker was written for a package that did not pass", .{});
 }
 
@@ -261,19 +274,19 @@ fn missingPackage(env: Env) void {
     expectCode(env.stage(&.{goodReadme(env, &.{good_use})}, "1.0.0"), 0, "stage");
     const r = env.verify("absent", "1.2.3", "1.0.0", "mopm");
     expectCode(r, 1, "verify");
-    expectText(r, "FAIL staged: absent: the staged set has no member absent");
+    expectText(r, "FAIL staged: example/absent: the staged set has no member example/absent");
     if (env.exists("run/prefix")) die("something was installed for a package the set lacks", .{});
 }
 
 fn missingFile(env: Env) void {
     expectCode(env.stage(&.{goodReadme(env, &.{good_use})}, "1.0.0"), 0, "stage");
-    std.fs.cwd().deleteFile(env.join(&.{"set/linux-64/mojo-good-1.2.3-mojo1.0.0_0.conda"})) catch |e| die("cannot delete the staged file: {s}", .{@errorName(e)});
+    std.fs.cwd().deleteFile(env.join(&.{"set/linux-64/mojo-example.good-1.2.3-mojo1.0.0_0.conda"})) catch |e| die("cannot delete the staged file: {s}", .{@errorName(e)});
     // A lock made from the plan names the file the set lacks, so the mopm does not die
     // first: it is verify's own check that refuses.
     const r = env.verify("good", "1.2.3", "1.0.0", "mopm_plan");
     expectCode(r, 1, "verify");
-    expectText(r, "FAIL install: good: linux-64/mojo-good-1.2.3-mojo1.0.0_0.conda is in the plan and not in the staged set");
-    expectNoText(r, "PASS good");
+    expectText(r, "FAIL install: example/good: linux-64/mojo-example.good-1.2.3-mojo1.0.0_0.conda is in the plan and not in the staged set");
+    expectNoText(r, "PASS example/good");
     if (env.exists("run/prefix/lib/mojo/good.mojoc")) die("something was unpacked for a file the set lacks", .{});
     if (env.exists("run.marker")) die("a marker was written for a package that did not install", .{});
 }
@@ -282,19 +295,19 @@ fn tamperedFile(env: Env) void {
     // The file in the set is another valid package's: a lock made from the
     // registry's index pins the plan's hash, and the file is not that.
     expectCode(env.stage(&.{goodReadme(env, &.{good_use})}, "1.0.0"), 0, "stage");
-    const other = fix.package(env.a, "good", "1.2.3", "mojo1.0.0_0", "mojoc of something else", &.{}) catch die("fixture", .{});
-    env.put("set/linux-64/mojo-good-1.2.3-mojo1.0.0_0.conda", other);
+    const other = fix.package(env.a, "example/good", "1.2.3", "mojo1.0.0_0", "mojoc of something else", &.{}) catch die("fixture", .{});
+    env.put("set/linux-64/mojo-example.good-1.2.3-mojo1.0.0_0.conda", other);
     const r = env.verify("good", "1.2.3", "1.0.0", "mopm_registry");
     expectCode(r, 1, "verify");
-    expectText(r, "FAIL install: good: linux-64/mojo-good-1.2.3-mojo1.0.0_0.conda is not the file the lock pins");
+    expectText(r, "FAIL install: example/good: linux-64/mojo-example.good-1.2.3-mojo1.0.0_0.conda is not the file the lock pins");
     if (env.exists("run/prefix/lib/mojo/good.mojoc")) die("a file that is not the pinned one was unpacked", .{});
 }
 
 fn changedFile(env: Env) void {
     // The same, with a lock made from the file in the set: the plan disagrees.
     expectCode(env.stage(&.{goodReadme(env, &.{good_use})}, "1.0.0"), 0, "stage");
-    const other = fix.package(env.a, "good", "1.2.3", "mojo1.0.0_0", "mojoc of something else", &.{}) catch die("fixture", .{});
-    env.put("set/linux-64/mojo-good-1.2.3-mojo1.0.0_0.conda", other);
+    const other = fix.package(env.a, "example/good", "1.2.3", "mojo1.0.0_0", "mojoc of something else", &.{}) catch die("fixture", .{});
+    env.put("set/linux-64/mojo-example.good-1.2.3-mojo1.0.0_0.conda", other);
     const r = env.verify("good", "1.2.3", "1.0.0", "mopm");
     expectCode(r, 1, "verify");
     expectText(r, "is not a file of the staged plan");
@@ -311,12 +324,12 @@ fn stageWithHole(env: Env) void {
     const plan = plan_mod.parsePlan(env.a, env.get("set/plan.json").?, &why) catch die("plan.json: {s}", .{why});
     var kept: std.ArrayList(plan_mod.Member) = .empty;
     for (plan.members) |m| {
-        if (!std.mem.eql(u8, m.name, "ghost")) kept.append(env.a, m) catch die("out of memory", .{});
+        if (!std.mem.eql(u8, m.name, "example/ghost")) kept.append(env.a, m) catch die("out of memory", .{});
     }
     if (kept.items.len != 1) die("the plan held {d} member(s) besides ghost, want 1", .{kept.items.len});
     const text = plan_mod.renderPlan(env.a, .{ .version = plan.version, .members = kept.items }) catch die("cannot write the plan", .{});
     env.put("set/plan.json", text);
-    std.fs.cwd().deleteFile(env.join(&.{"set/linux-64/mojo-ghost-1.2.3-mojo1.0.0_0.conda"})) catch |e| die("cannot delete the staged file: {s}", .{@errorName(e)});
+    std.fs.cwd().deleteFile(env.join(&.{"set/linux-64/mojo-example.ghost-1.2.3-mojo1.0.0_0.conda"})) catch |e| die("cannot delete the staged file: {s}", .{@errorName(e)});
 }
 
 fn closureMemberMissing(env: Env) void {
@@ -325,12 +338,12 @@ fn closureMemberMissing(env: Env) void {
     stageWithHole(env);
     const r = env.verify("app", "1.2.3", "1.0.0", "mopm");
     expectCode(r, 1, "verify");
-    expectText(r, "FAIL install: app: ");
-    expectText(r, "the offline registry refused 1 request(s) beyond its configuration (GET /index/gh/os/ghost)");
+    expectText(r, "FAIL install: example/app: ");
+    expectText(r, "the offline registry refused 1 request(s) beyond its configuration (GET /index/v2/ex/am/example/ghost)");
     // mopm's own message carries the registry's refusal.
     expectText(r, "answered HTTP 403");
     expectText(r, "the README e2e is offline");
-    expectNoText(r, "PASS app");
+    expectNoText(r, "PASS example/app");
     if (env.exists("run/prefix/lib/mojo/app.mojoc")) die("a package was unpacked from a closure the set does not hold", .{});
     if (env.exists("run.marker")) die("a marker was written for a package that did not install", .{});
 }
@@ -342,8 +355,8 @@ fn swallowedRefusal(env: Env) void {
     stageWithHole(env);
     const r = env.verify("app", "1.2.3", "1.0.0", "mopm_swallow");
     expectCode(r, 1, "verify");
-    expectText(r, "FAIL install: app: `mopm add app@=1.2.3` exited 0, and the offline registry refused 1 request(s) beyond its configuration (GET /index/gh/os/ghost)");
-    expectNoText(r, "PASS app");
+    expectText(r, "FAIL install: example/app: `mopm add example/app@=1.2.3` exited 0, and the offline registry refused 1 request(s) beyond its configuration (GET /index/v2/ex/am/example/ghost)");
+    expectNoText(r, "PASS example/app");
     if (env.exists("run/prefix/lib/mojo/app.mojoc")) die("a package was unpacked although mopm asked the registry for more than the set", .{});
     if (env.exists("run.marker")) die("a marker was written for a package that did not install", .{});
 }
@@ -352,7 +365,7 @@ fn oldMopm(env: Env) void {
     expectCode(env.stage(&.{goodReadme(env, &.{good_use})}, "1.0.0"), 0, "stage");
     const r = env.verify("good", "1.2.3", "1.0.0", "mopm_old");
     expectCode(r, 1, "verify");
-    expectText(r, "FAIL install: good: `mopm add good@=1.2.3 --overlay <staged set>` exited 1");
+    expectText(r, "FAIL install: example/good: `mopm add example/good@=1.2.3 --overlay <staged set>` exited 1");
     expectText(r, "the pinned mopm may predate `--overlay`");
     if (env.exists("run.marker")) die("a marker was written although nothing was installed", .{});
 }
@@ -362,7 +375,7 @@ fn oldMopmUsage(env: Env) void {
     expectCode(env.stage(&.{goodReadme(env, &.{good_use})}, "1.0.0"), 0, "stage");
     const r = env.verify("good", "1.2.3", "1.0.0", "mopm_usage");
     expectCode(r, 1, "verify");
-    expectText(r, "FAIL install: good: `mopm add good@=1.2.3 --overlay <staged set>` exited 2");
+    expectText(r, "FAIL install: example/good: `mopm add example/good@=1.2.3 --overlay <staged set>` exited 2");
     expectText(r, "usage: mopm lock");
     expectText(r, "the pinned mopm may predate `--overlay`");
     if (env.exists("run.marker")) die("a marker was written although nothing was installed", .{});
@@ -372,14 +385,24 @@ fn wrongCompiler(env: Env) void {
     expectCode(env.stage(&.{goodReadme(env, &.{good_use})}, "1.1.0"), 0, "stage");
     const r = env.verify("good", "1.2.3", "1.0.0", "mopm");
     expectCode(r, 1, "verify");
-    expectText(r, "FAIL install: good: good 1.2.3 is built as mojo1.1.0_0, and the release's compiler is 1.0.0");
+    expectText(r, "FAIL install: example/good: example/good 1.2.3 is built as mojo1.1.0_0, and the release's compiler is 1.0.0");
+}
+
+fn lockWithoutCompilerBuild(env: Env) void {
+    // A lock that keys the package's build by the compiler the file names (1.1.0), not the project's
+    // (1.0.0): it has no build for the release's compiler.
+    expectCode(env.stage(&.{goodReadme(env, &.{good_use})}, "1.1.0"), 0, "stage");
+    const r = env.verify("good", "1.2.3", "1.0.0", "mopm_keyed_by_build");
+    expectCode(r, 1, "verify");
+    expectText(r, "FAIL install: example/good: example/good 1.2.3 has no build for the release's compiler 1.0.0");
+    if (env.exists("run/prefix/lib/mojo/good.mojoc")) die("a package without a build for the compiler was unpacked", .{});
 }
 
 fn wrongVersion(env: Env) void {
     expectCode(env.stage(&.{goodReadme(env, &.{good_use})}, "1.0.0"), 0, "stage");
     const r = env.verify("good", "9.9.9", "1.0.0", "mopm");
     expectCode(r, 1, "verify");
-    expectText(r, "FAIL staged: good: the staged set holds good 1.2.3, and the release is 9.9.9");
+    expectText(r, "FAIL staged: example/good: the staged set holds example/good 1.2.3, and the release is 9.9.9");
 }
 
 fn skippedMember(env: Env) void {
@@ -390,14 +413,14 @@ fn skippedMember(env: Env) void {
     env.put("set/plan.json", edited);
     const r = env.verify("good", "1.2.3", "1.0.0", "mopm");
     expectCode(r, 1, "verify");
-    expectText(r, "FAIL staged: good: the staged set's member is `skip`, not `upload`");
+    expectText(r, "FAIL staged: example/good: the staged set's member is `skip`, not `upload`");
 }
 
 fn noExample(env: Env) void {
     expectCode(env.stage(&.{goodReadme(env, &.{})}, "1.0.0"), 0, "stage");
     const r = env.verify("good", "1.2.3", "1.0.0", "mopm");
     expectCode(r, 1, "verify");
-    expectText(r, "FAIL readme: good: the README holds no ```mojo example, so nothing would be compiled or run");
+    expectText(r, "FAIL readme: example/good: the README holds no ```mojo example, so nothing would be compiled or run");
 }
 
 fn refusedReadme(env: Env) void {
@@ -405,8 +428,8 @@ fn refusedReadme(env: Env) void {
     expectCode(env.stage(&.{pkg}, "1.0.0"), 0, "stage");
     const r = env.verify("good", "1.2.3", "1.0.0", "mopm");
     expectCode(r, 1, "verify");
-    expectText(r, "FAIL readme: good: the README is refused");
-    expectText(r, "good/README.md:3");
+    expectText(r, "FAIL readme: example/good: the README is refused");
+    expectText(r, "example/good/README.md:3");
 }
 
 fn relativeLink(env: Env) void {
@@ -414,15 +437,15 @@ fn relativeLink(env: Env) void {
     expectCode(env.stage(&.{pkg}, "1.0.0"), 0, "stage");
     const r = env.verify("good", "1.2.3", "1.0.0", "mopm");
     expectCode(r, 1, "verify");
-    expectText(r, "FAIL readme: good: the README is refused");
-    expectText(r, "good/README.md:3");
+    expectText(r, "FAIL readme: example/good: the README is refused");
+    expectText(r, "example/good/README.md:3");
 }
 
 fn assembleMissingDependency(env: Env) void {
     const app = Pkg{ .name = "app", .deps = &.{"ghost"}, .readme = readmeOf(env, "app", &.{"from app import run"}) };
     const r = env.stage(&.{app}, "1.0.0");
     expectCode(r, 1, "stage");
-    expectText(r, "app needs ghost, which is not in the set");
+    expectText(r, "example/app needs example/ghost, which is not in the set");
     if (env.exists("set/plan.json")) die("a plan was written for a set that was refused", .{});
 }
 
@@ -440,7 +463,7 @@ fn assembleWrongPackage(env: Env) void {
     const pkg = Pkg{ .name = "good", .payload_name = "other", .readme = readmeOf(env, "good", &.{good_use}) };
     const r = env.stage(&.{pkg}, "1.0.0");
     expectCode(r, 1, "stage");
-    expectText(r, "readme_e2e assemble: good: ");
+    expectText(r, "readme_e2e assemble: example/good: ");
     expectText(r, "holds no lib/mojo/good.mopm.json");
 }
 
@@ -448,14 +471,14 @@ fn assembleLink(env: Env) void {
     // A package whose payload is a symbolic link is refused.
     const tar = fix.tarWithLink(env.a, "lib/mojo/good.mojoc", "/etc/passwd") catch die("fixture", .{});
     const bytes = fix.condaOf(env.a, "mojo-good-1.2.3-mojo1.0.0_0", tar) catch die("fixture", .{});
-    env.put("in/good/linux-64/mojo-good-1.2.3-mojo1.0.0_0.conda", bytes);
+    env.put("in/good/linux-64/mojo-example.good-1.2.3-mojo1.0.0_0.conda", bytes);
     env.put("in/good/README.md", "# good\n");
     const r = env.exec(&.{
         env.tool,                                           "assemble",
         "--out",                                            env.join(&.{"set"}),
         "--mojo",                                           "1.0.0",
-        "--member",                                         "good",
-        "1.2.3",                                            env.join(&.{"in/good/linux-64/mojo-good-1.2.3-mojo1.0.0_0.conda"}),
+        "--member",                                         "example/good",
+        "1.2.3",                                            env.join(&.{"in/good/linux-64/mojo-example.good-1.2.3-mojo1.0.0_0.conda"}),
         env.join(&.{"in/good/README.md"}),
     });
     expectCode(r, 1, "assemble");
@@ -493,7 +516,7 @@ fn native(env: Env) void {
     const r = env.verify("good", "1.2.3", "1.0.0", "mopm");
     expectCode(r, 0, "verify");
     expectText(r, "link: mopm links 1 native librar(ies)");
-    expectText(r, "PASS good 1.2.3: 1 README example(s) compiled and ran against the installed package");
+    expectText(r, "PASS example/good 1.2.3: 1 README example(s) compiled and ran against the installed package");
     if (!env.exists("run/prefix/lib/libgood_native.a")) die("the archive was not unpacked into the prefix", .{});
 }
 
@@ -510,7 +533,7 @@ fn nativeDependency(env: Env) void {
     expectCode(r, 0, "verify");
     expectText(r, "install: 2 package(s) locked and unpacked");
     expectText(r, "link: mopm links 1 native librar(ies)");
-    expectText(r, "PASS app 1.2.3");
+    expectText(r, "PASS example/app 1.2.3");
 }
 
 fn nativeMissingArchive(env: Env) void {
@@ -518,11 +541,11 @@ fn nativeMissingArchive(env: Env) void {
     expectCode(env.stage(&.{nativePkg(env, native_use, false)}, "1.0.0"), 0, "stage");
     const r = env.verify("good", "1.2.3", "1.0.0", "mopm");
     expectCode(r, 1, "verify");
-    expectText(r, "FAIL link: good: `mopm build --print-cmd --prefix <installed closure>` exited 1");
+    expectText(r, "FAIL link: example/good: `mopm build --print-cmd --prefix <installed closure>` exited 1");
     expectText(r, "refused (missing_file)");
     expectText(r, "libgood_native.a is named by the installed metadata but is not on disk");
     expectNoText(r, "compiled and passed");
-    expectNoText(r, "PASS good");
+    expectNoText(r, "PASS example/good");
     if (env.exists("run.marker")) die("a marker was written for a package that did not pass", .{});
 }
 
@@ -532,9 +555,9 @@ fn nativeUnlinked(env: Env) void {
     expectCode(env.stage(&.{nativePkg(env, native_use, true)}, "1.0.0"), 0, "stage");
     const r = env.verify("good", "1.2.3", "1.0.0", "mopm_nolink");
     expectCode(r, 1, "verify");
-    expectText(r, "FAIL link: good: good ships the native library libgood_native.a (static) and mopm's link command does not link it");
+    expectText(r, "FAIL link: example/good: example/good ships the native library libgood_native.a (static) and mopm's link command does not link it");
     expectNoText(r, "compiled and passed");
-    expectNoText(r, "PASS good");
+    expectNoText(r, "PASS example/good");
     if (env.exists("run.marker")) die("a marker was written for a package that did not pass", .{});
 }
 
@@ -546,9 +569,9 @@ fn nativeUndefinedSymbol(env: Env) void {
     const r = env.verify("good", "1.2.3", "1.0.0", "mopm");
     expectCode(r, 1, "verify");
     expectText(r, "link: mopm links 1 native librar(ies)");
-    expectText(r, "FAIL compile: good: README.md:");
+    expectText(r, "FAIL compile: example/good: README.md:");
     expectText(r, "undefined symbol: other_symbol");
-    expectNoText(r, "PASS good");
+    expectNoText(r, "PASS example/good");
 }
 
 const Scenario = struct { name: []const u8, run: *const fn (Env) void };
@@ -568,6 +591,7 @@ const table = [_]Scenario{
     .{ .name = "old_mopm", .run = oldMopm },
     .{ .name = "old_mopm_usage", .run = oldMopmUsage },
     .{ .name = "wrong_compiler", .run = wrongCompiler },
+    .{ .name = "lock_without_compiler_build", .run = lockWithoutCompilerBuild },
     .{ .name = "wrong_version", .run = wrongVersion },
     .{ .name = "skipped_member", .run = skippedMember },
     .{ .name = "no_example", .run = noExample },

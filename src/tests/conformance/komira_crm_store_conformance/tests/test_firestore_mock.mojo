@@ -1,5 +1,5 @@
 # =============================================================================
-# test_firestore_mock.mojo -- komira_crm's store on FirestoreDatabase over
+# test_firestore_mock.mojo -- crm's store on FirestoreDatabase over
 #   MockFirestore.
 # =============================================================================
 #
@@ -11,8 +11,8 @@
 # Each operation commits alone there, so the change feed is not checked.
 # =============================================================================
 
-from komira_gcp_firestore.firestore_client import FirestoreClient
-from komira_gcp_firestore_db import DeclaredIndexSet, FirestoreDatabase, MockFirestore, MockFirestoreConnector
+from gcp_firestore.firestore_client import FirestoreClient
+from gcp_firestore_db import DeclaredIndexSet, FirestoreDatabase, MockFirestore, MockFirestoreConnector
 
 from komira_crm_store_conformance import CrmTarget, run_crm_suite
 
@@ -26,7 +26,7 @@ struct FirestoreMockCrm(CrmTarget):
         pass
 
     def name(self) -> String:
-        return String("komira_gcp_firestore_db over MockFirestore")
+        return String("gcp_firestore_db over MockFirestore")
 
     def transactional(self) -> Bool:
         return False
@@ -45,4 +45,4 @@ struct FirestoreMockCrm(CrmTarget):
 def main() raises:
     var target = FirestoreMockCrm()
     run_crm_suite(target)
-    print("PASS komira_crm_store_conformance komira_gcp_firestore_db")
+    print("PASS komira_crm_store_conformance gcp_firestore_db")

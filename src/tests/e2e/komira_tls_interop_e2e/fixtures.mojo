@@ -3,7 +3,7 @@
 # configurations, and the flags a test is given
 # =============================================================================
 #
-# The certificates are komira_http_core's throwaway test fixtures, staged into
+# The certificates are http_core's throwaway test fixtures, staged into
 # each test's working directory at their source paths by `data` (see BUCK),
 # so komira and bssl open them by the same relative path. The leaf names
 # `localhost` and `127.0.0.1` and is signed by `root_ca.pem`;
@@ -13,7 +13,7 @@
 # komira's server is configured as an HTTPS server with HTTP/2 deploys: the
 # leaf, the "default_tls13" policy (TLS 1.3 and 1.2), ALPN `h2` then
 # `http/1.1`. komira's client is the production one,
-# `komira_http_client.default_client_tls_config` (the same policy, ALPN
+# `http_client.default_client_tls_config` (the same policy, ALPN
 # `http/1.1` preceded by `h2` when asked, verification on), with its trust
 # store narrowed to one anchor.
 # =============================================================================
@@ -21,15 +21,15 @@
 from std.pathlib import Path
 from std.sys import argv
 
-from komira_http_client.tls_connector import default_client_tls_config
-from komira_http_core.tls import TlsConfig
-from komira_runtime_paths import test_tmpdir
+from http_client.tls_connector import default_client_tls_config
+from http_core.tls import TlsConfig
+from runtime_paths import test_tmpdir
 
 
-comptime LEAF_CERT_PATH = "src/komira_http_core/tests/fixtures/tls/leaf_cert.pem"
-comptime LEAF_KEY_PATH = "src/komira_http_core/tests/fixtures/tls/leaf_key.pem"
-comptime ROOT_CA_PATH = "src/komira_http_core/tests/fixtures/tls/root_ca.pem"
-comptime OTHER_CA_PATH = "src/komira_http_core/tests/fixtures/smoke_cert.pem"
+comptime LEAF_CERT_PATH = "src/http_core/tests/fixtures/tls/leaf_cert.pem"
+comptime LEAF_KEY_PATH = "src/http_core/tests/fixtures/tls/leaf_key.pem"
+comptime ROOT_CA_PATH = "src/http_core/tests/fixtures/tls/root_ca.pem"
+comptime OTHER_CA_PATH = "src/http_core/tests/fixtures/smoke_cert.pem"
 
 # The name the leaf certifies, sent as SNI and verified by both clients.
 comptime SERVER_NAME = "localhost"

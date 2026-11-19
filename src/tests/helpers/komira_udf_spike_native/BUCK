@@ -76,7 +76,7 @@ mojo_library(
     conda = False,
     deps = [
         ":komira_udf_spike_native_c",
-        "//src/komira_crypto:komira_crypto",
+        "//src/crypto:crypto",
         "//src/tests/helpers/komira_udf_spike_abi:komira_udf_spike_abi",
     ],
     test_srcs = [
@@ -161,7 +161,7 @@ mojo_test(
     },
     deps = [
         ":komira_udf_spike_native",
-        "//src/komira_crypto:komira_crypto",
+        "//src/crypto:crypto",
         "//src/tests/helpers/komira_udf_spike_abi:komira_udf_spike_abi",
     ],
     visibility = ["PUBLIC"],

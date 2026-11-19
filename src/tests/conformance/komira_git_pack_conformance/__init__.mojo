@@ -1,4 +1,4 @@
-"""`komira_git_pack_conformance` -- test-only: komira_git's pack reader
+"""`komira_git_pack_conformance` -- test-only: git's pack reader
 against packs the pinned git writes (gen_packs.zig).
 
 `read_fixture`, `parse_batch`, `parse_verify`, `parse_ids`, and

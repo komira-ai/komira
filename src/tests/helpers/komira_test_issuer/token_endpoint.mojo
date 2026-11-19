@@ -4,12 +4,12 @@
 #   signs an access token (issuer.mojo, `TestIssuer.token_request`).
 # =============================================================================
 #
-# `ClientRegistry` holds one komira_oauth `ClientMetadata` record per client,
+# `ClientRegistry` holds one oauth `ClientMetadata` record per client,
 # with the resources (audiences) the client may ask for, and the `jti`s of
 # the client assertions it has accepted.
 #
 # `ClientRegistry.authenticate(request, ...)` answers a parsed
-# `client_credentials` request (komira_oauth `ClientCredentialsRequest`) with
+# `client_credentials` request (oauth `ClientCredentialsRequest`) with
 # an `EndpointDecision`: the RFC 6749 error code to answer with, or the
 # client id and the scope to put in the token. In this order:
 #   1. the client: the request's `client_id` when sent, else the `iss` of the
@@ -18,7 +18,7 @@
 #      payload cannot be read, or a client with no record     invalid_client
 #   2. a record with a `jwks_uri` and no `jwks` (this issuer fetches no key
 #      set)                                                    invalid_client
-#   3. the assertion, through komira_jose `verify_client_assertion` with a
+#   3. the assertion, through jose `verify_client_assertion` with a
 #      verifier pinned to the record's signing algorithm over the record's
 #      keys, read on every request, and a policy pinning `iss` to the client,
 #      `typ` `JWT`, the issuer's time and leeway and a lifetime of at most
@@ -42,8 +42,8 @@
 # API.
 # =============================================================================
 
-from komira_encoding import base64_url_decode_nopad
-from komira_jose import (
+from encoding import base64_url_decode_nopad
+from jose import (
     JOSE_ASSERTION_MAX_TTL_S,
     JWT_TYP_JWT,
     ClaimPolicy,
@@ -51,8 +51,8 @@ from komira_jose import (
     VerifiedAssertion,
     verify_client_assertion,
 )
-from komira_json import JsonValue, parse_json_bytes
-from komira_oauth import (
+from json import JsonValue, parse_json_bytes
+from oauth import (
     OAUTH_ERROR_INVALID_CLIENT,
     OAUTH_ERROR_INVALID_SCOPE,
     OAUTH_ERROR_INVALID_TARGET,

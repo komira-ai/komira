@@ -1,0 +1,244 @@
+# =============================================================================
+# test_proc_probe.mojo — the memory-basis probe and its text primitives.
+# =============================================================================
+#
+# The primitives (`_parse_decimal_int`, `_find_substring_bytes`,
+# `_parent_cgroup_path`) are pure and are asserted from literals. The reader is
+# asserted against files written under a fresh temporary directory: missing, empty, a lone
+# newline, the trailing-newline strip, both sides of the 4 KiB cap, and bytes >= 0x80 coming
+# back unchanged. The
+# basis rule (`_min_of_readable`) is pure and asserted from literals. The probe
+# itself reads this host's `/proc/meminfo` and cgroup files, whose
+# MemAvailable moves between reads, so it is asserted only by bounds that hold
+# on every read: never above the cgroup cap, positive on Linux.
+# =============================================================================
+
+from std.tempfile import mkdtemp
+from std.sys.info import CompilationTarget
+from std.testing import TestSuite, assert_equal, assert_true
+
+from host_probe.proc_probe import (
+    _cgroup_v2_rel_path_of,
+    _cgroup_v2_self_rel_path,
+    _find_substring_bytes,
+    _linux_read_cgroup_v2_mem_max_bytes,
+    _linux_read_meminfo_available_bytes,
+    _min_of_readable,
+    _parent_cgroup_path,
+    _parse_decimal_int,
+    _read_small_file_to_string,
+    detect_scan_cache_ram_basis_bytes,
+    read_small_file_to_string,
+)
+
+
+def _scratch(name: String) raises -> String:
+    # A fresh directory of this call's own (`mkdtemp`: under `TMPDIR`, else `/tmp`), so no runner has to
+    # name a scratch directory and two runs of this test never share a path.
+    return mkdtemp(prefix="komira_host_") + String("/") + name
+
+
+def _write(path: String, text: String) raises:
+    with open(path, "w") as f:
+        f.write_bytes(text.as_bytes())
+
+
+def _repeat(c: String, n: Int) -> String:
+    var out = String()
+    for _ in range(n):
+        out += c
+    return out^
+
+
+# -----------------------------------------------------------------------------
+# Pure primitives
+# -----------------------------------------------------------------------------
+
+
+def test_parse_decimal_int_reads_the_leading_digits() raises:
+    assert_equal(_parse_decimal_int(""), 0)
+    assert_equal(_parse_decimal_int("max"), 0)
+    assert_equal(_parse_decimal_int("x12"), 0)
+    assert_equal(_parse_decimal_int("0"), 0)
+    assert_equal(_parse_decimal_int("17179869184"), 17179869184)
+    assert_equal(_parse_decimal_int("4096 kB"), 4096)
+    assert_equal(_parse_decimal_int("90/"), 90)
+
+
+def test_find_substring_bytes() raises:
+    var s = String("MemTotal: 1 kB\nMemAvailable: 2 kB\n")
+    var bs = s.as_bytes()
+    assert_equal(_find_substring_bytes(bs, ""), 0)
+    assert_equal(_find_substring_bytes(bs, "MemTotal:"), 0)
+    # "Mem" matches at 0 and 15 before "MemAvailable:" matches whole at 15.
+    assert_equal(_find_substring_bytes(bs, "MemAvailable:"), 15)
+    assert_equal(_find_substring_bytes(bs, "kB\n"), 12)
+    # The last possible start (stop = h_len - n_len) is searched.
+    assert_equal(_find_substring_bytes(bs, "2 kB\n"), s.byte_length() - 5)
+    assert_equal(_find_substring_bytes(bs, "MemFree:"), -1)
+    var short = String("0:")
+    assert_equal(_find_substring_bytes(short.as_bytes(), "0::"), -1)
+    var exact = String("0::")
+    assert_equal(_find_substring_bytes(exact.as_bytes(), "0::"), 0)
+
+
+def test_parent_cgroup_path() raises:
+    assert_equal(_parent_cgroup_path(""), "/")
+    assert_equal(_parent_cgroup_path("/"), "/")
+    assert_equal(_parent_cgroup_path("/a"), "/")
+    assert_equal(_parent_cgroup_path("/a/b"), "/a")
+    assert_equal(_parent_cgroup_path("/user.slice/u.slice/s.scope"), "/user.slice/u.slice")
+    # No slash at all: the walk goes straight to the root.
+    assert_equal(_parent_cgroup_path("ab"), "/")
+
+
+def test_parent_cgroup_path_keeps_bytes_above_0x7f() raises:
+    # "/a/é" is 5 bytes (é is C3 A9). Copying with `chr(byte)` would give 7.
+    var parent = _parent_cgroup_path("/a/é/b")
+    assert_equal(parent.byte_length(), 5, "one byte out per byte in")
+    assert_equal(parent, "/a/é")
+
+
+def test_cgroup_rel_path_of_the_unified_line() raises:
+    assert_equal(_cgroup_v2_rel_path_of(""), "")
+    assert_equal(_cgroup_v2_rel_path_of("1:cpu:/x\n"), "", "no 0:: line")
+    assert_equal(_cgroup_v2_rel_path_of("0::/a/b\n"), "/a/b")
+    assert_equal(_cgroup_v2_rel_path_of("0::/a/b"), "/a/b", "no newline")
+    assert_equal(_cgroup_v2_rel_path_of("0::/a\r\n"), "/a", "stops at CR")
+    assert_equal(
+        _cgroup_v2_rel_path_of("1:cpu:/x\n0::/user.slice/s.scope\n"),
+        "/user.slice/s.scope",
+        "hybrid file",
+    )
+    # "/é" is 3 bytes (é is C3 A9); `chr(byte)` per byte would give 5.
+    var got = _cgroup_v2_rel_path_of("0::/é\n")
+    assert_equal(got.byte_length(), 3, "one byte out per byte in")
+    assert_equal(got, "/é")
+
+
+# -----------------------------------------------------------------------------
+# _read_small_file_to_string
+# -----------------------------------------------------------------------------
+
+
+def test_reader_missing_empty_and_newline_files() raises:
+    var empty = _scratch("pp_empty")
+    var newline = _scratch("pp_newline")
+    var one = _scratch("pp_one")
+    var bare = _scratch("pp_bare")
+    var inner = _scratch("pp_inner")
+    _write(empty, "")
+    _write(newline, "\n")
+    _write(one, "max\n")
+    _write(bare, "123")
+    _write(inner, "a\nb\n")
+    assert_equal(_read_small_file_to_string(_scratch("pp_missing")), "")
+    assert_equal(_read_small_file_to_string(empty), "")
+    assert_equal(_read_small_file_to_string(newline), "")
+    comptime if CompilationTarget.is_linux():
+        assert_equal(_read_small_file_to_string(one), "max")
+        assert_equal(_read_small_file_to_string(bare), "123")
+        # Only the LAST newline is stripped.
+        assert_equal(_read_small_file_to_string(inner), "a\nb")
+    else:
+        assert_equal(_read_small_file_to_string(one), "")
+
+
+def test_reader_caps_at_4_kib() raises:
+    var at_cap = _scratch("pp_4096")
+    var over = _scratch("pp_5000")
+    var nl_at_cap = _scratch("pp_nl_at_cap")
+    _write(at_cap, _repeat("a", 4096))
+    _write(over, _repeat("b", 5000))
+    # Byte 4096 (the last one read) is a newline; byte 4097 is not read.
+    _write(nl_at_cap, _repeat("c", 4095) + "\nd")
+    comptime if CompilationTarget.is_linux():
+        assert_equal(_read_small_file_to_string(at_cap).byte_length(), 4096)
+        assert_equal(_read_small_file_to_string(over).byte_length(), 4096)
+        assert_equal(_read_small_file_to_string(nl_at_cap), _repeat("c", 4095))
+    else:
+        assert_equal(_read_small_file_to_string(at_cap), "")
+
+
+def test_reader_keeps_bytes_above_0x7f() raises:
+    # "/é\n" is the 4 bytes 2F C3 A9 0A; the trailing newline is stripped.
+    # A reader that appends `chr(byte)` returns 2F C3 83 C2 A9 (5 bytes), so
+    # `/sys/fs/cgroup<path>/memory.max` names a directory that does not exist.
+    var path = _scratch("pp_non_ascii")
+    _write(path, "/é\n")
+    comptime if CompilationTarget.is_linux():
+        var got = _read_small_file_to_string(path)
+        assert_equal(got.byte_length(), 3, "one byte out per byte in")
+        assert_equal(got, "/é")
+    else:
+        assert_equal(_read_small_file_to_string(path), "")
+
+
+# -----------------------------------------------------------------------------
+# The memory basis on this host
+# -----------------------------------------------------------------------------
+
+
+def test_min_of_readable_takes_the_smaller_readable_signal() raises:
+    # 0 means unreadable. Both readable: the smaller one, either order.
+    assert_equal(_min_of_readable(5 << 30, 7 << 30), 5 << 30)
+    assert_equal(_min_of_readable(7 << 30, 5 << 30), 5 << 30)
+    assert_equal(_min_of_readable(4096, 4096), 4096)
+    # Only one readable: that one, whichever side it is on.
+    assert_equal(_min_of_readable(5 << 30, 0), 5 << 30)
+    assert_equal(_min_of_readable(0, 7 << 30), 7 << 30)
+    # Neither readable: 0, so the caller falls back to its fixed default.
+    assert_equal(_min_of_readable(0, 0), 0)
+
+
+def test_basis_on_this_host_is_bounded_by_the_signals() raises:
+    # MemAvailable moves between any two reads on a busy host, so the live
+    # basis is not compared with a second reading here (the rule itself is
+    # pinned above from literals). What must hold on every read: the basis
+    # never exceeds a cgroup cap, and on Linux it is a positive byte count.
+    var cg = _linux_read_cgroup_v2_mem_max_bytes()
+    var basis = detect_scan_cache_ram_basis_bytes()
+    assert_true(cg >= 0)
+    if cg > 0:
+        assert_true(basis <= cg, "the basis never exceeds the cgroup cap")
+    comptime if CompilationTarget.is_linux():
+        var avail = _linux_read_meminfo_available_bytes()
+        assert_true(avail > 0, "/proc/meminfo has MemAvailable on Linux")
+        assert_equal(avail % 1024, 0, "kibibytes are scaled to bytes")
+        assert_true(basis > 0, "MemAvailable is readable, so the basis is")
+
+
+def test_cgroup_path_is_the_unified_line() raises:
+    var rel = _cgroup_v2_self_rel_path()
+    var raw = _read_small_file_to_string("/proc/self/cgroup")
+    var at = raw.find("0::")
+    if at < 0:
+        assert_equal(rel, "")
+    else:
+        var rest = String(raw[byte = at + 3 :])
+        var nl = rest.find("\n")
+        var want = rest if nl < 0 else String(rest[byte = 0:nl])
+        assert_equal(rel, want)
+
+
+def test_public_reader_matches_the_private_one() raises:
+    # The public `read_small_file_to_string` is the reader outside packages use: a missing file is
+    # empty, the last newline is stripped and the 4 KiB cap holds, exactly as for the private reader.
+    var text = _scratch("pp_public")
+    var big = _scratch("pp_public_big")
+    _write(text, "max\n")
+    _write(big, _repeat("z", 5000))
+    assert_equal(read_small_file_to_string(_scratch("pp_public_missing")), "")
+    comptime if CompilationTarget.is_linux():
+        assert_equal(read_small_file_to_string(text), "max")
+        assert_equal(read_small_file_to_string(big).byte_length(), 4096)
+        assert_equal(
+            read_small_file_to_string("/proc/self/cgroup"),
+            _read_small_file_to_string("/proc/self/cgroup"),
+        )
+    else:
+        assert_equal(read_small_file_to_string(text), "")
+
+
+def main() raises:
+    TestSuite.discover_tests[__functions_in_module()]().run()

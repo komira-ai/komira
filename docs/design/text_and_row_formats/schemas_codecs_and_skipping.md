@@ -10,7 +10,7 @@ Out of scope: the compression libraries the codecs call, and JSON, which is not 
 
 ### Which strings does the CSV reader treat as null, true or false?
 
-`CsvReadOptions` (`src/komira_csv/csv_options.mojo`) holds three token lists, with pandas-style defaults:
+`CsvReadOptions` (`src/csv/csv_options.mojo`) holds three token lists, with pandas-style defaults:
 
 | List | Default tokens |
 |---|---|
@@ -22,7 +22,7 @@ Out of scope: the compression libraries the codecs call, and JSON, which is not 
 
 ### How do Arrow types without an Avro counterpart survive a round trip?
 
-Through `arrow.<name>` logical-type annotations (`src/komira_avro/avro_logical_arrow.mojo`). The writer's schema builder `from_arrow_schema_json` stamps them when `emit_arrow_logicals` is true, the default in `AvroWriterOptions`. Each annotation has one required Avro backing type (`int`, `long`, a `fixed` of set size, or a union); `arrow.uint64` is backed by `fixed(8)` and `arrow.float16` by `fixed(2)`. On read, `avro_node_to_arrow_with_override` honours an annotation only when the node's physical type matches the table entry (`_physical_matches`); on a mismatch, or an `arrow.*` name it does not know, it falls back silently to the standard Avro mapping.
+Through `arrow.<name>` logical-type annotations (`src/avro/avro_logical_arrow.mojo`). The writer's schema builder `from_arrow_schema_json` stamps them when `emit_arrow_logicals` is true, the default in `AvroWriterOptions`. Each annotation has one required Avro backing type (`int`, `long`, a `fixed` of set size, or a union); `arrow.uint64` is backed by `fixed(8)` and `arrow.float16` by `fixed(2)`. On read, `avro_node_to_arrow_with_override` honours an annotation only when the node's physical type matches the table entry (`_physical_matches`); on a mismatch, or an `arrow.*` name it does not know, it falls back silently to the standard Avro mapping.
 
 ### How are Avro compressed blocks checked?
 
@@ -30,7 +30,7 @@ A snappy block is the raw snappy bytes followed by a big-endian CRC32 of the unc
 
 ### How does the ORC reader skip data?
 
-`src/komira_orc/orc_stride_skip.mojo` has a four-level cascade, with predicates expressed as `komira_plan_expr` `Expr` values, reached through two entry points:
+`src/orc/orc_stride_skip.mojo` has a four-level cascade, with predicates expressed as `plan_expr` `Expr` values, reached through two entry points:
 
 1. Column projection: `read_orc_bytes_pruned` takes a list of output-column indices and decodes only those columns.
 2. Stripe statistics: also `read_orc_bytes_pruned`. A stripe whose min and max are disjoint from the predicate is never decoded.
@@ -70,27 +70,27 @@ Only a range-predicate subset is understood (a column against an integer literal
 
 | File | Holds | Key types and functions |
 |---|---|---|
-| `src/komira_csv/csv_options.mojo` | CSV options and token lists | `CsvReadOptions` |
-| `src/komira_csv/null_detection.mojo` | token matching | `is_null_cell`, `is_true_cell`, `is_false_cell` |
-| `src/komira_avro/avro_logical_arrow.mojo` | `arrow.*` annotations | `from_arrow_schema_json`, `avro_node_to_arrow_with_override` |
-| `src/komira_avro/avro_codec.mojo` | block codecs | `crc32_ieee`, `decompress_block` |
-| `src/komira_orc/orc_stride_skip.mojo`, `bloom_filter.mojo` | the skip cascade | `read_orc_bytes_pruned`, `read_orc_bytes_filtered` |
-| `src/komira_orc/orc_logical_arrow.mojo` | ACID unwrapping | `is_acid_schema`, `acid_output_columns` |
+| `src/csv/csv_options.mojo` | CSV options and token lists | `CsvReadOptions` |
+| `src/csv/null_detection.mojo` | token matching | `is_null_cell`, `is_true_cell`, `is_false_cell` |
+| `src/avro/avro_logical_arrow.mojo` | `arrow.*` annotations | `from_arrow_schema_json`, `avro_node_to_arrow_with_override` |
+| `src/avro/avro_codec.mojo` | block codecs | `crc32_ieee`, `decompress_block` |
+| `src/orc/orc_stride_skip.mojo`, `bloom_filter.mojo` | the skip cascade | `read_orc_bytes_pruned`, `read_orc_bytes_filtered` |
+| `src/orc/orc_logical_arrow.mojo` | ACID unwrapping | `is_acid_schema`, `acid_output_columns` |
 
 ## How is it tested?
 
-These tests are in the `test_srcs` of their libraries; run `./buck2 build //src/komira_avro:komira_avro` or `//src/komira_orc:komira_orc`.
+These tests are in the `test_srcs` of their libraries; run `./buck2 build //src/avro:avro` or `//src/orc:orc`.
 
 | Test | Covers |
 |---|---|
-| `komira_avro/tests/test_avro_arrow_logical_round_trip.mojo` | `arrow.*` write and read |
-| `komira_avro/tests/test_avro_snappy_codec_decode.mojo` | snappy blocks and their CRC |
-| `komira_orc/tests/test_orc_projection_stripe_prune.mojo` | projection and stripe pruning |
-| `komira_orc/tests/test_orc_stride_skip.mojo` | stride statistics skipping |
-| `komira_orc/tests/test_orc_bloom_filter.mojo` | stride bloom filters |
-| `komira_orc/tests/test_orc_acid_default_suppress.mojo` | ACID metadata columns hidden by default |
+| `avro/tests/test_avro_arrow_logical_round_trip.mojo` | `arrow.*` write and read |
+| `avro/tests/test_avro_snappy_codec_decode.mojo` | snappy blocks and their CRC |
+| `orc/tests/test_orc_projection_stripe_prune.mojo` | projection and stripe pruning |
+| `orc/tests/test_orc_stride_skip.mojo` | stride statistics skipping |
+| `orc/tests/test_orc_bloom_filter.mojo` | stride bloom filters |
+| `orc/tests/test_orc_acid_default_suppress.mojo` | ACID metadata columns hidden by default |
 
-`test_csv_simd_int_column.mojo` in `komira_csv/tests/` reads an empty cell as null through the default list.
+`test_csv_simd_int_column.mojo` in `csv/tests/` reads an empty cell as null through the default list.
 
 ## What are its limits and open questions?
 

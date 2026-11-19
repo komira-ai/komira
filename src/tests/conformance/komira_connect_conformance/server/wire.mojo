@@ -5,14 +5,14 @@
 # The protobuf binary form of the fields of the suite's protocol
 # (third_party/connect-conformance: server_compat.proto, service.proto and
 # config.proto at the pinned commit) that this server-under-test reads or
-# writes, through komira_protobuf's cursor and writers. Field numbers are the
+# writes, through protobuf's cursor and writers. Field numbers are the
 # .proto files'; a field this file does not name is skipped, as protobuf
 # requires.
 #
 # It is written by hand because the generated form does not compile:
 # protoc-gen-mojo emits `write_bytes_element` / `read_into_repeated_bytes`
 # for a `repeated bytes` field (StreamResponseDefinition.response_data), and
-# komira_proto_codec's WireEncoder / WireDecoder have neither.
+# proto_codec's WireEncoder / WireDecoder have neither.
 #
 # Read: ServerCompatRequest (and its TLSCreds), the request messages of the
 # ConformanceService methods (UnaryRequest, IdempotentUnaryRequest,
@@ -22,13 +22,13 @@
 # ConformancePayload and the one-field response messages that carry it.
 # =============================================================================
 
-from komira_protobuf import (
+from protobuf import (
     pb_write_bytes_field,
     pb_write_message_field,
     pb_write_string_field,
     pb_write_varint_field,
 )
-from komira_protobuf.reader import PbFieldCursor
+from protobuf.reader import PbFieldCursor
 
 comptime TYPE_URL_PREFIX = "type.googleapis.com/connectrpc.conformance.v1."
 
@@ -121,7 +121,7 @@ struct ResponseDef(Movable):
     var error: Optional[ErrorDef]
     var delay_ms: Int  # response_delay_ms
     # Response headers / trailers or a raw HTTP response were asked for. The
-    # komira_connect handler API cannot set either, so they are not served.
+    # connect handler API cannot set either, so they are not served.
     var wants_metadata: Bool
     var wants_raw_response: Bool
 
@@ -232,7 +232,7 @@ def encode_any(message_name: String, value: List[UInt8]) -> List[UInt8]:
 def encode_request_info(message_name: String, requests: List[List[UInt8]]) -> List[UInt8]:
     """ConformancePayload.RequestInfo with `requests` (3) only: every request
     message, in the order received, as an Any. request_headers (1) and
-    timeout_ms (2) are not echoed: a komira_connect handler sees neither."""
+    timeout_ms (2) are not echoed: a connect handler sees neither."""
     var out = List[UInt8]()
     for ref r in requests:
         pb_write_message_field(out, 3, encode_any(message_name, r))

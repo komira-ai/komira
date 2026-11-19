@@ -3,8 +3,8 @@
 # only by `runner`.
 # =============================================================================
 #
-# A binary that links komira_async (every user of this package does, through
-# komira_supervisor and the HTTP client) gets the reactor's own `nanosleep`
+# A binary that links async_rt (every user of this package does, through
+# supervisor and the HTTP client) gets the reactor's own `nanosleep`
 # declaration, so std's `time.sleep` would not legalize there; `usleep` is
 # what the job supervisor and the table store call for the same reason. The
 # call takes a plain integer, so no pointer crosses this boundary.

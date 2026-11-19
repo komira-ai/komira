@@ -24,15 +24,15 @@
 # NOT planted here, because each needs a broken codec rather than a broken
 # case: plan_to_bytes refusing a plan, plan_wire_check_values refusing one,
 # and a round trip that changes the structural hash or the root schema. Those
-# legs only report what komira_plan_wire's own tests already prove it raises.
+# legs only report what plan_wire's own tests already prove it raises.
 # =============================================================================
 
 from std.testing import TestSuite, assert_equal, assert_raises, assert_true
 
-from komira_plan_expr.expr import BIN_EQ, Expr
-from komira_plan_expr.scalar_value import ScalarValue
+from plan_expr.expr import BIN_EQ, Expr
+from plan_expr.scalar_value import ScalarValue
 from komira_plan_harness import CanonPolicy, parse_canon
-from komira_plan_ir.logical_plan import LogicalPlan
+from plan_ir.logical_plan import LogicalPlan
 from komira_plan_conformance import (
     Case,
     Registered,

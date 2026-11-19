@@ -8,7 +8,7 @@
 #
 #   1. read one size-delimited ServerCompatRequest from stdin (a 4-byte
 #      big-endian length, then the message; the runner then closes stdin);
-#   2. start a komira_http_server HttpServer[ConnectService] serving the
+#   2. start a http_server HttpServer[ConnectService] serving the
 #      ConformanceService (service.mojo) on 127.0.0.1, an ephemeral port,
 #      over TLS with the certificate and key the request carries, ALPN `h2`
 #      then `http/1.1`;
@@ -17,7 +17,7 @@
 #      reference client then trusts);
 #   4. step the serve loop until the runner stops it (SIGTERM).
 #
-# The server serves HTTP/2 over TLS only (komira_http_server routes RPCs to a
+# The server serves HTTP/2 over TLS only (http_server routes RPCs to a
 # ConnectService on that path alone; it has no cleartext h2), so a request
 # without TLS is refused on stderr and the program exits non-zero; the suite
 # config asks for none. Diagnostics go to stderr, which the runner relays; stdout carries the
@@ -26,10 +26,10 @@
 
 from std.io import FileDescriptor
 
-from komira_connect import ConnectService
-from komira_http_core.tls import TlsConfig, tls_init
-from komira_http_server.routing import Router
-from komira_http_server.server import HttpServer, HttpServerConfig
+from connect import ConnectService
+from http_core.tls import TlsConfig, tls_init
+from http_server.routing import Router
+from http_server.server import HttpServer, HttpServerConfig
 
 from service import conformance_service
 from wire import decode_compat_request, encode_compat_response

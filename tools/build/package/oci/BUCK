@@ -8,9 +8,9 @@ load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 _ZIG = "komira//tools/build/toolchains:zig_next"
 _ZIG_VERSION = "komira//tools/build/toolchains:zig_next_version"
 
-# The image tool (README.md): oci_tree runs `komira_oci tree`, oci_image of a
-# tree `komira_oci image`, every oci_image `komira_oci layers`, and
-# oci_image_check `komira_oci check`. Zig, as every build tool under
+# The image tool (README.md): oci_tree runs `oci tree`, oci_image of a
+# tree `oci image`, every oci_image `oci layers`, and
+# oci_image_check `oci check`. Zig, as every build tool under
 # tools/build is (komira#956).
 
 _SRCS = glob(["src/*.zig"])
@@ -29,7 +29,7 @@ zig_test(
 
 # Published behind its unit tests: no tree or image builds unless they pass.
 zig_exe(
-    name = "komira_oci",
+    name = "oci",
     exec_compatible_with = LINUX_X86_64,
     imports = _SRCS,
     src = "src/main.zig",

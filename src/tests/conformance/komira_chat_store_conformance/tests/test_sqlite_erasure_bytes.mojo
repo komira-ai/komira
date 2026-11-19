@@ -22,10 +22,10 @@ from std.os import getenv
 from std.os.path import exists
 from std.testing import assert_equal, assert_true
 
-from komira_db import MigrationRunner
-from komira_db_sqlite import SqliteDatabase
+from db import MigrationRunner
+from db_sqlite import SqliteDatabase
 
-from komira_chat_store import (
+from chat_store import (
     CHANNEL_PUBLIC,
     CHAT_MIGRATION_LEDGER,
     ChatStore,

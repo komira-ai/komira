@@ -3,7 +3,7 @@
 # =============================================================================
 #
 # Each check states the behaviour it holds the store to and the defect it
-# catches. Refusals are compared by their exact text (komira_contacts.ERR_*).
+# catches. Refusals are compared by their exact text (contacts.ERR_*).
 #
 #   uid_unique_per_book   one uid in two books succeeds, twice in one book is
 #                         refused, and a delete releases it in its own book
@@ -63,12 +63,12 @@
 
 from std.testing import assert_equal, assert_false, assert_true
 
-from komira_async.reactor.reactor import Reactor
-from komira_db import DbValue
-from komira_proto_codec import decode_json, encode_json
-from komira_contacts_proto.contacts import BookKind, Card, CardKind
+from async_rt.reactor.reactor import Reactor
+from db import DbValue
+from proto_codec import decode_json, encode_json
+from contacts_proto.contacts import BookKind, Card, CardKind
 
-from komira_contacts import (
+from contacts import (
     CARD_UIDS,
     Caller,
     ContactsStore,

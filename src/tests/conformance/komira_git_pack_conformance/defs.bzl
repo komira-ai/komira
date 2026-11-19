@@ -1,5 +1,5 @@
 """The pinned git's packs that komira_git_pack_conformance reads, the oracle
-of komira_git's pack reader.
+of git's pack reader.
 
 `git_packs` runs gen_packs (gen_packs.zig) in one build action with the pinned git
 (gen_packs.zig says what each file is). The git distribution is an `exec_dep`,

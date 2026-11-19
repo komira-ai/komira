@@ -19,7 +19,7 @@
 # 2100. footer.txt: every zone of the list, every change in UT years 2037 to
 # 2040, which zic's slim files leave to the footer's POSIX TZ string. The
 # epoch seconds are computed here from zdump's UT date (days_from_civil, the
-# same algorithm as komira_datetime's civil.mojo); no timestamp is parsed by
+# same algorithm as datetime's civil.mojo); no timestamp is parsed by
 # the code under test.
 set -eu
 ZI="$1"; ZONES="$2"; OUT="$3"

@@ -3,7 +3,7 @@ load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_test")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load(":defs.bzl", "git_packs")
 
-# Test-only: komira_git's pack reader against packs the pinned git
+# Test-only: git's pack reader against packs the pinned git
 # (//third_party/git) writes. Nothing depends on this package.
 #
 # gen_packs (gen_packs.zig; the :packs target below) builds two repositories (sha1 and
@@ -12,7 +12,7 @@ load(":defs.bzl", "git_packs")
 # delta windows, with stored (uncompressed) zlib blocks, and a thin pack; with
 # each, git's own index (`git index-pack`), its `git verify-pack -v` listing,
 # and every object of the repository as `git cat-file --batch` prints it. The
-# tests (test_git_packs, test_git_thin_sha256) read each pack with komira_git
+# tests (test_git_packs, test_git_thin_sha256) read each pack with git
 # and require: the index it writes byte-equal to git's, entry by entry the
 # offset, size in the pack, type, delta depth and base that verify-pack lists,
 # and every object equal to cat-file's. tests/test_git_packs.mojo says what
@@ -34,11 +34,11 @@ mojo_library(
     name = "komira_git_pack_conformance",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
-        "//src/komira_crypto:komira_crypto",
-        "//src/komira_encoding:komira_encoding",
-        "//src/komira_git:komira_git",
-        "//src/komira_zlib:komira_zlib",
-        "//tools/build/mojo/runtime_paths:komira_runtime_paths",
+        "//src/crypto:crypto",
+        "//src/encoding:encoding",
+        "//src/git:git",
+        "//src/zlib:zlib",
+        "//tools/build/mojo/runtime_paths:runtime_paths",
     ],
     conda = False,
     # The packs come from the pinned git, built for linux-x86_64 only.

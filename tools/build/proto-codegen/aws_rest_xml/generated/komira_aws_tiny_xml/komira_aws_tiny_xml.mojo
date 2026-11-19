@@ -23,7 +23,7 @@
 # HAND-OVERRIDE SEAM: no overrides are declared for this service.
 # ===========================================================================
 
-from komira_aws_core import (
+from aws_core import (
     AWS_TS_ISO8601,
     AWS_TS_RFC822,
     AWS_TS_UNIX,
@@ -80,7 +80,7 @@ from komira_aws_core import (
     aws_xml_body_is_error,
     s3_apply_request_checksum,
 )
-from komira_xml import (
+from xml import (
     XmlNode,
     XmlWriter,
 )

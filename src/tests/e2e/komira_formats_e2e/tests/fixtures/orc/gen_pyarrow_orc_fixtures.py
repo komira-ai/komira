@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 gen_pyarrow_orc_fixtures.py: ORC files written by pyarrow (its bundled ORC
-C++ writer), not by komira_orc. Provenance of the six .orc files beside it;
+C++ writer), not by orc. Provenance of the six .orc files beside it;
 tests/test_formats_foreign_orc.mojo reads them and checks every value against
 the rules spelled below.
 

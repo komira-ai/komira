@@ -1,0 +1,3 @@
+# What the coverage census measured of this package's libraries (tools/build/coverage/census.md).
+census	2026-10-10	27a2541169cb979fa9c82a032eea24919b727121	-
+komira//src/arrow:arrow	src/arrow	library	OK	4772	7042	-	-	no	conda	src/arrow/band_view.mojo,src/arrow/chunk_typed.mojo,src/arrow/copy_column_ref.mojo,src/arrow/decimal256_array.mojo,src/arrow/interval_mdn_array.mojo,src/arrow/parallel_work.mojo,src/arrow/quote_styles.mojo,src/arrow/schema_identity.mojo,src/arrow/selection_column.mojo,src/arrow/selection_vector.mojo,src/arrow/selection_vector_row.mojo,src/arrow/serde_format.mojo,src/arrow/write_target.mojo	-

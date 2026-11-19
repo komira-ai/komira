@@ -30,7 +30,7 @@
 
 from std.testing import assert_equal
 
-from komira_git import ObjectFormat, ObjectId, ObjectKind, PackIndex, hash_object
+from git import ObjectFormat, ObjectId, ObjectKind, PackIndex, hash_object
 
 from komira_git_pack_conformance import (
     GitObjects,

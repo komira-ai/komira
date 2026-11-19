@@ -21,8 +21,8 @@
 
 from std.testing import assert_equal
 
-from komira_calendar_ics import IcsImport, read_ics, write_ics
-from komira_datetime import seconds_from_fields
+from calendar_ics import IcsImport, read_ics, write_ics
+from datetime import seconds_from_fields
 from komira_calendar_ics_conformance import client_zones, crlf, events_text, report_text
 
 

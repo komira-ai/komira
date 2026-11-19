@@ -236,7 +236,7 @@ def run_neutral_suite[T: NeutralTarget](mut t: T, gaps: List[KnownGap]) raises:
         r.ok(String("tx_commit_keeps"))
     except e:
         r.fail(String("tx_commit_keeps"), String(e))
-    print(String("komira_db conformance: ") + r.target + String(": ") + String(r.count()) + String(" checks run"))
+    print(String("db conformance: ") + r.target + String(": ") + String(r.count()) + String(" checks run"))
     r.gate(gaps)
 
 
@@ -323,5 +323,5 @@ def run_sql_suite[T: SqlTarget](mut t: T, gaps: List[KnownGap]) raises:
         r.ok(String("sql_getter_type_mismatch"))
     except e:
         r.fail(String("sql_getter_type_mismatch"), String(e))
-    print(String("komira_db conformance: ") + r.target + String(": ") + String(r.count()) + String(" checks run"))
+    print(String("db conformance: ") + r.target + String(": ") + String(r.count()) + String(" checks run"))
     r.gate(gaps)

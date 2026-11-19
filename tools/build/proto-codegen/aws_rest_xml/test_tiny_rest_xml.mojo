@@ -20,7 +20,7 @@ from komira_aws_tiny_xml.komira_aws_tiny_xml import (
     parse_put_thing_response,
     parse_set_config_response,
 )
-from komira_aws_core import AwsResponse
+from aws_core import AwsResponse
 from std.testing import assert_equal, assert_false, assert_raises, assert_true
 
 

@@ -3,7 +3,7 @@
 # =============================================================================
 #
 # Every row of golden/payload_narrow.txt names a fixture; the first block is
-# the 83-row parity table of komira_optimizer's payload-narrowing pass (the
+# the 83-row parity table of optimizer's payload-narrowing pass (the
 # rule the host rule replaced, now deleted), verbatim, over its own fixtures
 # (fixtures.mojo), the rest are this package's (extra_fixtures.mojo). For
 # every row, the host rule `derive_payload_narrow`, given each scan's
@@ -14,13 +14,13 @@
 
 from std.testing import TestSuite, assert_equal, assert_true
 
-from komira_plan_ir.logical_plan import (
+from plan_ir.logical_plan import (
     SOURCE_CSV,
     SOURCE_JSON,
     SOURCE_ORC,
     SOURCE_IN_MEMORY,
 )
-from komira_lowering_rules.payload_narrow import derive_payload_narrow
+from lowering_rules.payload_narrow import derive_payload_narrow
 
 from komira_lowering_rules_conformance.extra_fixtures import build, extra_names
 from komira_lowering_rules_conformance.golden import GoldenRow, parse_golden, read_golden
@@ -28,7 +28,7 @@ from komira_lowering_rules_conformance.render import case_footers, render, row
 
 comptime GOLDEN = "golden/payload_narrow.txt"
 comptime OPTIMIZER_TABLE_ROWS = 83
-"""The rows of komira_optimizer's parity table, the golden file's first block."""
+"""The rows of optimizer's parity table, the golden file's first block."""
 
 
 def test_host_rule_matches_every_golden_row() raises:

@@ -20,7 +20,7 @@
 #
 from std.testing import assert_equal, assert_false, assert_true
 
-from komira_json import JsonValue, parse_json_value
+from json import JsonValue, parse_json_value
 
 from komira_udf_spike_abi.contract import SHAPE_SCALAR
 from komira_udf_spike_node_worker.engine import CHECK_AFFINE, CHECK_ROWS, Workload, run

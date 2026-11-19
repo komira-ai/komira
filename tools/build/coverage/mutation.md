@@ -9,7 +9,7 @@ decision untested. Report-only: nothing runs it by default, and no build
 action passes its mutants file to covcheck.
 
 ```sh
-./buck2 build -c komira.mutation=true '//src/komira_retry:komira_retry[mutation]'
+./buck2 build -c komira.mutation=true '//src/retry:retry[mutation]'
 ```
 
 `-c komira.mutation=true` gives every `mojo_library` on linux-x86_64 the

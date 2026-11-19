@@ -2,7 +2,7 @@
 # child.mojo -- run one child process to completion, bounded by a deadline
 # =============================================================================
 #
-# komira_supervisor spawns the child with two capture pipes. Both are read
+# supervisor spawns the child with two capture pipes. Both are read
 # without blocking, in turns, so neither pipe can fill and wedge the child
 # (Supervisor.drain_both does the same, but has no deadline). When the
 # deadline passes first, the child gets SIGTERM, then SIGKILL after a grace
@@ -10,16 +10,16 @@
 # after both pipes reach EOF the exit is polled (a WNOHANG reap), so a child
 # that closes its output and keeps running is stopped the same way.
 #
-# A turn with nothing to read waits 10 ms on an empty komira_async reactor
-# (an epoll_wait with a timeout). Not std's time.sleep: komira_async declares
+# A turn with nothing to read waits 10 ms on an empty async_rt reactor
+# (an epoll_wait with a timeout). Not std's time.sleep: async_rt declares
 # its own `nanosleep`, and a second declaration with another signature fails
 # to legalize in any program that links both.
 # =============================================================================
 
-from komira_async.ops.waker_sink import NoopSink
-from komira_async.runtime.blocking_runtime import BlockingRuntime
-from komira_clock import now_ns
-from komira_supervisor import ChildSpec, ExitInfo, Supervisor
+from async_rt.ops.waker_sink import NoopSink
+from async_rt.runtime.blocking_runtime import BlockingRuntime
+from clock import now_ns
+from supervisor import ChildSpec, ExitInfo, Supervisor
 
 
 @fieldwise_init

@@ -1,13 +1,13 @@
-//! komira_oci: lays out an image's tree, writes the image, and reads an OCI
+//! oci: lays out an image's tree, writes the image, and reads an OCI
 //! image layout back (README.md).
 //!
-//!   komira_oci tree --out <dir> [--bundle <path/>=<dir>]... [--file <path>=<src>]...
-//!   komira_oci image --tree <dir> --entrypoint </path> --name <n> --version <v>
+//!   oci tree --out <dir> [--bundle <path/>=<dir>]... [--file <path>=<src>]...
+//!   oci image --tree <dir> --entrypoint </path> --name <n> --version <v>
 //!       --repo <r> --manifest <base manifest> --manifest-digest sha256:<hex>
 //!       --config <base config> [--layer <base layer blob>]... --busybox <exe>
 //!       --out <dir> --archive <file> --digest <file>
-//!   komira_oci layers --layout <dir> --busybox <exe> --out <file>
-//!   komira_oci check --layout <dir> --busybox <exe> --layers <file>
+//!   oci layers --layout <dir> --busybox <exe> --out <file>
+//!   oci check --layout <dir> --busybox <exe> --layers <file>
 //!       --entrypoint </path> [--exec <path>]... [--file <path>]...
 //!       --out <file> [--expect-red <text>]
 //!

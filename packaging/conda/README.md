@@ -39,13 +39,13 @@ The `mojo_library` macro declares a package target for every library, named
 `<name>_conda`. Nobody writes one:
 
 ```python
-mojo_library(name = "komira_json", ...)           # also declares :komira_json_conda
+mojo_library(name = "json", ...)           # also declares :json_conda
 mojo_library(name = "x", conda = False, ...)      # opts out: no package target
 mojo_library(name = "x", conda_name = "other")    # published as `other`; the import
                                                   # name stays `x`
 ```
 
-`./buck2 build //src/komira_json:komira_json_conda` writes a directory (below).
+`./buck2 build //src/json:json_conda` writes a directory (below).
 Everything about the package is derived from the library, so the package cannot
 disagree with it ([`conda.bzl`](../../tools/build/package/conda.bzl) lists each):
 
@@ -74,7 +74,7 @@ metadata.json              everything else the build knows
 one trailing newline.
 
 ```json
-{"format":"kci.artifact_manifest","schema_version":1,"artifact_type":"CONDA","name":"komira_json","version":"1.0.0","platform":"linux-x86_64","subdir":"linux-64","file":"komira_json-1.0.0-h0123abcd_57.conda","sha256":"<64 hex>","metadata":"metadata.json"}
+{"format":"kci.artifact_manifest","schema_version":1,"artifact_type":"CONDA","name":"json","version":"1.0.0","platform":"linux-x86_64","subdir":"linux-64","file":"json-1.0.0-h0123abcd_57.conda","sha256":"<64 hex>","metadata":"metadata.json"}
 ```
 
 `format` and `schema_version` are the format name (kept from the retired kci) and its
@@ -107,7 +107,7 @@ packer and to its check, and `conda-check` holds the package to exactly the
 `.mojoc` and the declared doc files, byte-equal, so a README missing, placed
 elsewhere or changed by one byte is refused. The build gate
 `//tools/build/package/manifest_probe:conda_ships_readme` checks
-komira_encoding's package against the README read from the library rather than
+encoding's package against the README read from the library rather than
 from the package rule, so a package rule that stopped passing it is red. A
 README that ships refuses relative links (`readme_examples generate --links
 refuse`): the installed copy has no neighbours. A metapackage ships no doc.
@@ -116,7 +116,7 @@ refuse`): the installed copy has no neighbours. A metapackage ships no doc.
 
 A `.mojoc` holds no machine code, so a program using a library links every
 native library of the library's closure. When the closure ships any (a
-`lib<owner>_native.so.1`, or komira_log's holder archive), the installed
+`libkomira_<owner>_native.so.1`, or log's holder archive), the installed
 README is the library's README.md byte for byte, then a section `## Linking`
 that `komira_pack readme-link`
 ([`readme_link.zig`](../../tools/build/package/pack/readme_link.zig)) appends,
@@ -136,7 +136,7 @@ repository's README; the source never carries the section (the packer refuses
 one holding a fence that names the marker), since it follows from the build graph. Before the
 packer reads the file, the README examples tool's `link-check` must parse the
 block back to exactly the arguments the packer wrote. `conda_ships_readme` checks
-komira_encoding, whose closure ships no native file, so its README is the
+encoding, whose closure ships no native file, so its README is the
 source byte for byte.
 
 ### A library's native code in its package
@@ -145,8 +145,8 @@ A library that owns C ships it in its own package
 (docs/design/native_packaging.md): `mojo_library(native = ":<name>_native")`
 names its shared library (tools/build/native/shared.bzl), which must link
 exactly the library's C `deps`, and the package holds it at
-`lib/lib<name>_native.so.1` (mode 0755) with the link name
-`lib/lib<name>_native.so`, a symbolic link to it. komira_log's holder is
+`lib/libkomira_<name>_native.so.1` (mode 0755) with the link name
+`lib/libkomira_<name>_native.so`, a symbolic link to it. log's holder is
 per-library state, so `native_static = True` ships it as
 `lib/libkomira_log_holder.a`. Each file has one `info/paths.json` row (the
 link a `softlink` with the sha256 and size of what it resolves to) and one
@@ -161,7 +161,7 @@ A shared library's `NEEDED` may name another komira library's shared library
 only when that library is in the packed library's Mojo deps closure: its
 requirements are its Mojo deps, so an owner outside the closure would not be
 installed with it. `komira_pack conda` refuses such a package
-(komira_http_core depends on komira_crypto for this). The tests:
+(http_core depends on crypto for this). The tests:
 `//tools/build/package:komira_pack_unit` (pack/conda_lib.zig) and
 `//tools/build/native/fixtures`.
 
@@ -356,10 +356,10 @@ channels = ["<the komira channel>", "https://conda.modular.com/max", "conda-forg
 platforms = ["linux-64"]
 
 [dependencies]
-komira_encoding = "==<compiler version>"   # or: komira = "==<compiler version>" for every library
+encoding = "==<compiler version>"   # or: komira = "==<compiler version>" for every library
 ```
 
-`import komira_encoding` then compiles with no `-I` and no activation script.
+`import encoding` then compiles with no `-I` and no activation script.
 `tools/build/tests/functional/conda.sh` and `conda_set.sh` do exactly this from
 a `file://` channel.
 

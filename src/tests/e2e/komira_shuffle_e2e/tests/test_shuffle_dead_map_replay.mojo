@@ -17,7 +17,7 @@
 #                once. `_entries` must still hold 4 chunks (the sink's
 #                idempotent append is the map-replay dedup), the seal lists each
 #                producer once, and no partition reads a row twice.
-from komira_runtime_paths import test_tmpdir
+from runtime_paths import test_tmpdir
 
 from komira_shuffle_e2e.harness import ShuffleRun, fail, require_ok, task_bin_from_args
 

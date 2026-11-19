@@ -11,10 +11,10 @@ def _repo() -> RepoFiles:
     var l = List[String]()
     l.append("BUCK")
     l.append("README.md")
-    l.append("src/komira_retry/BUCK")
-    l.append("src/komira_retry/policy.mojo")
-    l.append("src/komira_retry/tests/test_decide.mojo")
-    l.append("src/komira_retry/inner/deep/x.mojo")
+    l.append("src/retry/BUCK")
+    l.append("src/retry/policy.mojo")
+    l.append("src/retry/tests/test_decide.mojo")
+    l.append("src/retry/inner/deep/x.mojo")
     l.append("src/other/BUCK")
     l.append("src/other/sub/BUCK")
     l.append("src/other/sub/y.mojo")
@@ -35,7 +35,7 @@ def _check(raw: String, pkgdir: String, prefixes: List[String], kind: Int, path:
 def test_strip_prefix() raises:
     var p = List[String]()
     p.append("/worker/build/0123456789abcdef/root")
-    _check(String("/worker/build/0123456789abcdef/root/src/komira_retry/policy.mojo"), String(""), p, MAPPED, String("src/komira_retry/policy.mojo"))
+    _check(String("/worker/build/0123456789abcdef/root/src/retry/policy.mojo"), String(""), p, MAPPED, String("src/retry/policy.mojo"))
 
 
 def test_longest_prefix_wins() raises:
@@ -44,28 +44,28 @@ def test_longest_prefix_wins() raises:
     var q = List[String]()
     q.append("/w")
     q.append("/w/checkout")
-    _check(String("/w/checkout/src/komira_retry/policy.mojo"), String(""), q, MAPPED, String("src/komira_retry/policy.mojo"))
+    _check(String("/w/checkout/src/retry/policy.mojo"), String(""), q, MAPPED, String("src/retry/policy.mojo"))
     var r = List[String]()
     r.append("/w/checkout/")
     r.append("/w")
-    _check(String("/w/checkout/src/komira_retry/policy.mojo"), String(""), r, MAPPED, String("src/komira_retry/policy.mojo"))
+    _check(String("/w/checkout/src/retry/policy.mojo"), String(""), r, MAPPED, String("src/retry/policy.mojo"))
 
 
 def test_prefix_matches_only_at_a_segment_boundary() raises:
     var p = List[String]()
     p.append("/w/check")
-    _check(String("/w/checkout/src/komira_retry/policy.mojo"), String(""), p, OUTSIDE, String("/w/checkout/src/komira_retry/policy.mojo"))
+    _check(String("/w/checkout/src/retry/policy.mojo"), String(""), p, OUTSIDE, String("/w/checkout/src/retry/policy.mojo"))
 
 
 def test_buck_out_rewrite_real_kcov_form() raises:
     _check(
-        String("buck-out/v2/art/komira/src/komira_retry/__komira_retry__/fedcba9876543210/src/komira_retry/policy.mojo"),
-        String(""), _no_prefixes(), MAPPED, String("src/komira_retry/policy.mojo"),
+        String("buck-out/v2/art/komira/src/retry/__komira_retry__/fedcba9876543210/src/retry/policy.mojo"),
+        String(""), _no_prefixes(), MAPPED, String("src/retry/policy.mojo"),
     )
     # Absolute, under the sandbox root, with no strip prefix given.
     _check(
-        String("/worker/build/0123456789abcdef/root/buck-out/v2/art/komira/src/komira_retry/__komira_retry__/fedcba9876543210/src/komira_retry/policy.mojo"),
-        String(""), _no_prefixes(), MAPPED, String("src/komira_retry/policy.mojo"),
+        String("/worker/build/0123456789abcdef/root/buck-out/v2/art/komira/src/retry/__komira_retry__/fedcba9876543210/src/retry/policy.mojo"),
+        String(""), _no_prefixes(), MAPPED, String("src/retry/policy.mojo"),
     )
 
 
@@ -73,30 +73,30 @@ def test_buck_out_needs_sixteen_hex_digits() raises:
     # 15 hex digits is not a content hash: no rewrite, and buck-out is not a
     # repository directory, so the path is outside.
     _check(
-        String("buck-out/v2/art/komira/src/komira_retry/__komira_retry__/fedcba987654321/src/komira_retry/policy.mojo"),
+        String("buck-out/v2/art/komira/src/retry/__komira_retry__/fedcba987654321/src/retry/policy.mojo"),
         String(""), _no_prefixes(), OUTSIDE,
-        String("buck-out/v2/art/komira/src/komira_retry/__komira_retry__/fedcba987654321/src/komira_retry/policy.mojo"),
+        String("buck-out/v2/art/komira/src/retry/__komira_retry__/fedcba987654321/src/retry/policy.mojo"),
     )
 
 
 def test_relative_repo_path() raises:
-    _check(String("src/komira_retry/policy.mojo"), String(""), _no_prefixes(), MAPPED, String("src/komira_retry/policy.mojo"))
+    _check(String("src/retry/policy.mojo"), String(""), _no_prefixes(), MAPPED, String("src/retry/policy.mojo"))
     _check(String("./tools/script.mojo"), String(""), _no_prefixes(), MAPPED, String("tools/script.mojo"))
 
 
 def test_pkgdir_resolves_kcov_test_paths() raises:
-    _check(String("tests/test_decide.mojo"), String("src/komira_retry"), _no_prefixes(), MAPPED, String("src/komira_retry/tests/test_decide.mojo"))
+    _check(String("tests/test_decide.mojo"), String("src/retry"), _no_prefixes(), MAPPED, String("src/retry/tests/test_decide.mojo"))
 
 
 def test_pkgdir_missing_file_is_unmapped() raises:
-    _check(String("tests/test_gone.mojo"), String("src/komira_retry"), _no_prefixes(), UNMAPPED, String("src/komira_retry/tests/test_gone.mojo"))
+    _check(String("tests/test_gone.mojo"), String("src/retry"), _no_prefixes(), UNMAPPED, String("src/retry/tests/test_gone.mojo"))
 
 
 def test_pkgdir_missing_one_segment_file_is_unmapped() raises:
     # A source directly in the package (no `/`) that is not a repository
     # file: unmapped, never set aside as outside.
-    _check(String("gone.mojo"), String("src/komira_retry"), _no_prefixes(), UNMAPPED, String("src/komira_retry/gone.mojo"))
-    _check(String("policy.mojo"), String("src/komira_retry"), _no_prefixes(), MAPPED, String("src/komira_retry/policy.mojo"))
+    _check(String("gone.mojo"), String("src/retry"), _no_prefixes(), UNMAPPED, String("src/retry/gone.mojo"))
+    _check(String("policy.mojo"), String("src/retry"), _no_prefixes(), MAPPED, String("src/retry/policy.mojo"))
     # Without PKGDIR a bare name names no repository directory: outside.
     _check(String("gone.mojo"), String(""), _no_prefixes(), OUTSIDE, String("gone.mojo"))
 
@@ -107,16 +107,16 @@ def test_without_pkgdir_a_package_relative_path_is_outside() raises:
 
 
 def test_repo_directory_but_no_file_is_unmapped() raises:
-    _check(String("src/komira_retry/gone.mojo"), String(""), _no_prefixes(), UNMAPPED, String("src/komira_retry/gone.mojo"))
+    _check(String("src/retry/gone.mojo"), String(""), _no_prefixes(), UNMAPPED, String("src/retry/gone.mojo"))
     _check(
-        String("buck-out/v2/art/komira/src/komira_retry/__komira_retry__/fedcba9876543210/src/komira_retry/gone.mojo"),
-        String(""), _no_prefixes(), UNMAPPED, String("src/komira_retry/gone.mojo"),
+        String("buck-out/v2/art/komira/src/retry/__komira_retry__/fedcba9876543210/src/retry/gone.mojo"),
+        String(""), _no_prefixes(), UNMAPPED, String("src/retry/gone.mojo"),
     )
 
 
 def test_stdlib_relative_is_outside() raises:
     _check(String("oss/modular/mojo/stdlib/std/collections/list.mojo"), String(""), _no_prefixes(), OUTSIDE, String("oss/modular/mojo/stdlib/std/collections/list.mojo"))
-    _check(String("oss/modular/mojo/stdlib/std/collections/list.mojo"), String("src/komira_retry"), _no_prefixes(), OUTSIDE, String("oss/modular/mojo/stdlib/std/collections/list.mojo"))
+    _check(String("oss/modular/mojo/stdlib/std/collections/list.mojo"), String("src/retry"), _no_prefixes(), OUTSIDE, String("oss/modular/mojo/stdlib/std/collections/list.mojo"))
 
 
 def test_absolute_without_prefix_is_outside() raises:
@@ -125,8 +125,8 @@ def test_absolute_without_prefix_is_outside() raises:
 
 def test_package_is_nearest_buck() raises:
     var r = _repo()
-    assert_equal(package_of(String("src/komira_retry/policy.mojo"), r), "src/komira_retry")
-    assert_equal(package_of(String("src/komira_retry/inner/deep/x.mojo"), r), "src/komira_retry")
+    assert_equal(package_of(String("src/retry/policy.mojo"), r), "src/retry")
+    assert_equal(package_of(String("src/retry/inner/deep/x.mojo"), r), "src/retry")
     assert_equal(package_of(String("src/other/sub/y.mojo"), r), "src/other/sub")
     assert_equal(package_of(String("tools/script.mojo"), r), "(root)")
 
@@ -144,9 +144,9 @@ def test_no_buck_anywhere_is_an_error() raises:
 
 
 def test_test_sources() raises:
-    assert_true(is_test_source(String("src/komira_retry/tests/test_decide.mojo"), String("src/komira_retry")))
-    assert_true(not is_test_source(String("src/komira_retry/policy.mojo"), String("src/komira_retry")))
-    assert_true(not is_test_source(String("src/komira_retry/inner/tests/x.mojo"), String("src/komira_retry")))
+    assert_true(is_test_source(String("src/retry/tests/test_decide.mojo"), String("src/retry")))
+    assert_true(not is_test_source(String("src/retry/policy.mojo"), String("src/retry")))
+    assert_true(not is_test_source(String("src/retry/inner/tests/x.mojo"), String("src/retry")))
 
 
 def _bytes(s: String) -> List[UInt8]:
@@ -178,12 +178,12 @@ def test_prefixes_that_do_not_match_are_passed_over() raises:
     p.append("")
     p.append("/zzz")
     p.append("/w")
-    _check(String("/w/src/komira_retry/policy.mojo"), String(""), p, MAPPED, String("src/komira_retry/policy.mojo"))
+    _check(String("/w/src/retry/policy.mojo"), String(""), p, MAPPED, String("src/retry/policy.mojo"))
 
 
 def test_buck_out_hash_must_be_all_hex() raises:
     # 16 characters, but `g` is not a hex digit: no rewrite.
-    var raw = String("buck-out/v2/art/komira/src/komira_retry/__komira_retry__/fedcba987654321g/src/komira_retry/policy.mojo")
+    var raw = String("buck-out/v2/art/komira/src/retry/__komira_retry__/fedcba987654321g/src/retry/policy.mojo")
     _check(raw, String(""), _no_prefixes(), OUTSIDE, raw)
 
 

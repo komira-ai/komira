@@ -5,10 +5,10 @@
 # proto package: example.library.v1
 # Mojo package:  komira_routes_fixture_messages
 #
-# Generated message structs conform to the komira_proto_codec
+# Generated message structs conform to the proto_codec
 # `Serializable` trait: encode[E: WireEncoder] / decode[D: WireDecoder].
 
-from komira_proto_codec import Serializable, WireEncoder, WireDecoder
+from proto_codec import Serializable, WireEncoder, WireDecoder
 
 
 # proto message Book (.example.library.v1.Book)

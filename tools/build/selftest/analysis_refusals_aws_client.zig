@@ -24,7 +24,7 @@ const ROWS = [_]lib.Row{
     .{
         .name = "aws_client_no_runtime",
         .target = "tests//negative/mojo_aws_client:no_runtime",
-        .text = "`deps` is empty. The generated code imports its runtime (komira_aws_core; komira_json for a JSON protocol, komira_xml for restXml, awsQuery and ec2Query; and in client mode komira_http_core, komira_http_client and komira_retry); name it, as komira// labels. No runtime is added by default.",
+        .text = "`deps` is empty. The generated code imports its runtime (aws_core; json for a JSON protocol, xml for restXml, awsQuery and ec2Query; and in client mode http_core, http_client and retry); name it, as komira// labels. No runtime is added by default.",
         .also = &.{ "tests//negative/mojo_aws_client:no_runtime_gen (" },
     },
     .{

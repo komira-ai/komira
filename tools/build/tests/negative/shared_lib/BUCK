@@ -138,5 +138,5 @@ mojo_shared_lib(
     exports = ["native_owner_write_probe"],
     exports_exact = True,
     gate_srcs = ["owner_embedded_driver.mojo"],
-    deps = ["komira//src/komira_libc:komira_libc"],
+    deps = ["komira//src/libc:libc"],
 )

@@ -31,7 +31,7 @@
 
 from std.testing import TestSuite, assert_equal, assert_raises, assert_true
 
-from komira_objectstore import (
+from objectstore import (
     CoalescePolicy,
     ListResult,
     LocalFsConditionalStore,
@@ -39,22 +39,22 @@ from komira_objectstore import (
     RetryPolicy,
     WritePrecondition,
 )
-from komira_objectstore.cas_manifest import is_not_found
-from komira_objectstore.path import Path
-from komira_objectstore.store import (
+from objectstore.cas_manifest import is_not_found
+from objectstore.path import Path
+from objectstore.store import (
     CloneableConditionalWriteStore,
     ConditionalWriteStore,
     ObjectStore,
 )
 
-from komira_search_catalog.generation import (
+from search_catalog.generation import (
     bump_generation,
     generation_bumps_key,
 )
 
-from komira_search_scan.search_scan_kind import SearchScanResolver
+from search_scan.search_scan_kind import SearchScanResolver
 
-from komira_runtime_paths import test_tmpdir
+from runtime_paths import test_tmpdir
 
 from komira_search_e2e.corpus import (
     INDEX_NAME,

@@ -4,13 +4,13 @@
 # =============================================================================
 #
 # Each expected instant is written from the published rule it tests and built
-# with seconds_from_fields (komira_datetime), so a reader can check it
+# with seconds_from_fields (datetime), so a reader can check it
 # without zdump: test_named_zones holds the same zones to zdump wholesale.
 # =============================================================================
 
 from std.testing import assert_equal, assert_false, assert_true
 
-from komira_datetime import (
+from datetime import (
     FoldPolicy,
     GapPolicy,
     LocalKind,

@@ -57,7 +57,7 @@ proto_codegen_golden(
 
 # TWO roots, messages only: the closure of the two messages of the read,
 # through LogEntry into MonitoredResource and the Any, Struct and Timestamp
-# of komira_wkt. No service, nothing of _UNUSED.
+# of wkt. No service, nothing of _UNUSED.
 proto_codegen_golden(
     name = "two_roots",
     srcs = _SRCS,
@@ -440,7 +440,7 @@ _GOOGLEAPIS = ["komira//tools/vendor/googleapis:api_client[tree]"]
 
 # The Cloud Logging calls a log reader makes: a custom-verb literal path
 # (POST /v2/entries:list), a `{parent=projects/*}` capture and a repeated
-# query field. The REST client imports komira_gcp_core (its token source and
+# query field. The REST client imports gcp_core (its token source and
 # its google.rpc.Status error mapper).
 # The service declares `(google.api.default_host)`, so the client starts at
 # logging.googleapis.com.
@@ -450,7 +450,7 @@ proto_codegen_golden(
     import_roots = _GOOGLEAPIS,
     generate = ["google/logging/v2/logging.proto"],
     golden = ["golden/logging_rest/logging.mojo.golden"],
-    options = "default_protocol=rest,package_prefix=komira_gcp_logging",
+    options = "default_protocol=rest,package_prefix=gcp_logging",
     absent = ["localhost"],
     present = ["self._rest_host = String(\"logging.googleapis.com\")"],
 )
@@ -500,7 +500,7 @@ proto_codegen_golden(
 
 # Well-known types as a GET response (Struct), a PUT response (Timestamp) and
 # a `body:` field (Struct): the client reads and writes them through
-# komira_proto_codec's codec, whose comptime branch gives a WKT its canonical
+# proto_codec's codec, whose comptime branch gives a WKT its canonical
 # JSON form. A direct `T.decode(JsonDecoder)` / `.encode(JsonEncoder)` would
 # read and write the binary-shaped message instead.
 proto_codegen_golden(
@@ -523,7 +523,7 @@ proto_codegen_golden(
 
 # Well-known types in the query, and messages holding them: a Timestamp or
 # Duration query field is one parameter, its proto3 JSON string through
-# komira_wkt's `to_proto3_json()` (the codec's own formatter); a message is
+# wkt's `to_proto3_json()` (the codec's own formatter); a message is
 # flattened, to any depth, to dotted lowerCamelCase keys
 # (`interval.startTime`, `window.bounds.endTime`), each level sent only when
 # it is set.
@@ -555,19 +555,19 @@ proto_codegen_golden(
     import_roots = _GOOGLEAPIS,
     generate = ["google/logging/v2/logging.proto"],
     golden = ["golden/logging_rest/logging.mojo.golden"],
-    options = "default_protocol=rest,package_prefix=komira_gcp_logging,gcp=true",
+    options = "default_protocol=rest,package_prefix=gcp_logging,gcp=true",
 )
 
 # ---- Google Cloud gRPC clients (`gcp=true`) ---------------------------------
 #
 # corpus/example/tiny/v1/tiny.proto is the API of
 # komira//tools/build/proto-codegen/gcp_grpc, one method of each streaming
-# shape; that package compiles the same module against komira_grpc and
-# komira_gcp_core and tests it over a scripted connector, and
+# shape; that package compiles the same module against grpc and
+# gcp_core and tests it over a scripted connector, and
 # ../mojo_gcp_client holds its generated tiny.mojo to this golden byte for
 # byte. The client takes a GcpTokenSource, fixes classic gRPC, runs the token
 # hook (`authorization: Bearer <token>` on the call's CallOptions) first in
-# every method, and raises a gRPC status through komira_gcp_core's
+# every method, and raises a gRPC status through gcp_core's
 # gcp_grpc_status_error, outside the response decode.
 proto_codegen_golden(
     name = "tiny_grpc_gcp",
@@ -580,7 +580,7 @@ proto_codegen_golden(
         ", opts: CallOptions",
     ],
     present = [
-        "from komira_gcp_core import GcpTokenSource, gcp_grpc_status_error",
+        "from gcp_core import GcpTokenSource, gcp_grpc_status_error",
         "struct TinyServiceClient[C: Connector, T: GcpTokenSource](Movable, Deinitable):",
         "comptime P = ProtocolGrpcProto",
         "self._authorize(opts)",

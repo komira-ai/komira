@@ -9,7 +9,7 @@ const ROWS = [_]lib.Row{
     .{
         .name = "python_oracle_komira_data",
         .target = "tests//negative/python_oracle:komira_data",
-        .text = "tests//negative/python_oracle:komira_data: the oracle's data \"encoding.mojoc\" is built by komira//src/komira_encoding:komira_encoding, which is not under third_party/; an oracle reads checked-in files and third_party/ outputs only, so that its answer cannot come from komira (tools/build/python/README.md, Oracles)",
+        .text = "tests//negative/python_oracle:komira_data: the oracle's data \"encoding.mojoc\" is built by komira//src/encoding:encoding, which is not under third_party/; an oracle reads checked-in files and third_party/ outputs only, so that its answer cannot come from komira (tools/build/python/README.md, Oracles)",
     },
     .{
         .name = "python_oracle_komira_srcs",

@@ -5,10 +5,10 @@
 # proto package: example.shop.v1
 # Mojo package:  komira_gcp_shop_renamed
 #
-# Generated message structs conform to the komira_proto_codec
+# Generated message structs conform to the proto_codec
 # `Serializable` trait: encode[E: WireEncoder] / decode[D: WireDecoder].
 
-from komira_proto_codec import Serializable, WireEncoder, WireDecoder
+from proto_codec import Serializable, WireEncoder, WireDecoder
 
 
 # proto message Item (.example.shop.v1.Item)

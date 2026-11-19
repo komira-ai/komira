@@ -24,7 +24,7 @@ _LICENSE_SIZE = 1072
 # TPC-H staging, which starts this binary), and the fixtures of the rule's own
 # tests in the `tests` cell. That cell exists only in komira's own checkout; a label naming it would fail to load in a
 # repository that uses komira as a cell, so it is named only when it exists.
-_USERS = ["komira//src/tests/...", "komira//src/komira_bench_q6_phases:"] + ([
+_USERS = ["komira//src/tests/...", "komira//src/bench_q6_phases:"] + ([
     "tests//functional/sql_oracle:",
     "tests//negative/sql_oracle:",
 ] if read_root_config("cells", "tests") else [])
@@ -85,12 +85,12 @@ pinned_file(
 
 # The tpch extension of this DuckDB release for linux amd64, gzip as the
 # extension repository serves it, which the benchmark's staging
-# (komira_bench_data, `tpch_extension_pins`) unpacks and loads to generate TPC-H.
+# (bench_data, `tpch_extension_pins`) unpacks and loads to generate TPC-H.
 # The sha256 and size are that pin; the staging refuses any other file.
 pinned_file(
     name = "tpch.duckdb_extension.gz",
     url = "https://extensions.duckdb.org/v{}/linux_amd64/tpch.duckdb_extension.gz".format(_VERSION),
     sha256 = "51959cc795f6ea8c95cf8cc6cc4065358998ce959bf863e21ff1aa471c06bc41",
     size_bytes = 5649100,
-    visibility = ["komira//src/komira_bench_q6_phases:"],
+    visibility = ["komira//src/bench_q6_phases:"],
 )

@@ -23,18 +23,18 @@
 
 from std.testing import assert_equal, assert_true
 
-from komira_async.reactor.reactor import Reactor
-from komira_async.runtime.runtime_trait import Runtime
-from komira_db import Database, DbColVal, DbRow, DbRows, DbValue, Filter, Order, PodNameMinter
-from komira_gcp_firestore.firestore_client import FirestoreClient
-from komira_gcp_firestore_db import DeclaredIndexSet, FirestoreDatabase, MockFirestore, MockFirestoreConnector
-from komira_proto_codec import decode_json
-from komira_wkt import Timestamp
-from komira_crm_proto.crm import Account
+from async_rt.reactor.reactor import Reactor
+from async_rt.runtime.runtime_trait import Runtime
+from db import Database, DbColVal, DbRow, DbRows, DbValue, Filter, Order, PodNameMinter
+from gcp_firestore.firestore_client import FirestoreClient
+from gcp_firestore_db import DeclaredIndexSet, FirestoreDatabase, MockFirestore, MockFirestoreConnector
+from proto_codec import decode_json
+from wkt import Timestamp
+from crm_proto.crm import Account
 
-from komira_crm import ACCOUNTS, CrmStore, ERR_EXTERNAL_ID_TAKEN, ERR_NOT_FOUND, EXTERNAL_IDS
-from komira_crm.rows import account_row
-from komira_crm.schema import account_cols, strs
+from crm import ACCOUNTS, CrmStore, ERR_EXTERNAL_ID_TAKEN, ERR_NOT_FOUND, EXTERNAL_IDS
+from crm.rows import account_row
+from crm.schema import account_cols, strs
 
 from komira_crm_store_conformance import Rt, new_rt
 
@@ -275,4 +275,4 @@ def check_killed() raises:
 def main() raises:
     check_paused()
     check_killed()
-    print("PASS komira_crm_store_conformance write order on komira_gcp_firestore_db")
+    print("PASS komira_crm_store_conformance write order on gcp_firestore_db")

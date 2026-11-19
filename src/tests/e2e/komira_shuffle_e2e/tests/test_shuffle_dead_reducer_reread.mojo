@@ -23,7 +23,7 @@
 #                  the baseline's bytes exactly; then every partition is read
 #                  again and must equal the baseline; the store must equal S0,
 #                  with one seal chunk and one `_entries` chunk per producer.
-from komira_runtime_paths import test_tmpdir
+from runtime_paths import test_tmpdir
 
 from komira_shuffle_e2e.harness import ShuffleRun, fail, require_ok, snapshot_diff, task_bin_from_args
 

@@ -1,0 +1,60 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# Lowering: a bound LogicalPlan, a HostProfile and the resolved inputs to the
+# PhysicalPlan IR (version 14) and the ParamTable its segments index. Pure: the
+# entry opens no file, reads no clock and no environment variable and touches
+# no global (README.md).
+#
+# test_lower_plans       the rendered physical plan of small plans: one segment
+#                        for a filtered aggregate, two for an aggregate and a
+#                        sort, the fused operators, the sink row each group key
+#                        picks, in-memory scans, the estimates, dense
+#                        parameter indices, equal arguments rendering equal
+#                        and a different host changing only the morsel size.
+# test_lower_refusals    every refusal token, raised by the plan that should
+#                        raise it with the text that names why, and a plan
+#                        beside each that lowers.
+# test_lower_sum_fuse    SUM(CAST(<signed integer> AS DECIMAL(38, 0))), the SQL
+#                        integer sum, is lowered to SUM(<integer>) with its
+#                        declared DECIMAL(38, 0) output kept; every other shape
+#                        of cast, argument type and aggregate is left alone.
+# test_sink_capability   the capability table's rows, which triples are not
+#                        served, and admission of hand-built segments.
+#
+# NO IMPURE PACKAGE IN THE CLOSURE. A lowering step must not reach a package
+# that opens files, talks to an object store, runs a worker pool, measures the
+# host or produces a plan. `closure_excludes` is checked at analysis against
+# the whole closure of `deps`, direct and transitive, by exact import name
+# (`async_api`, a trait surface the closure needs, is not refused).
+# tests//negative/closure_excludes plants each of the seven and
+# //tools/build/selftest:analysis_refusals_mojo requires the refusal.
+mojo_library(
+    name = "lowering",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/arrow:arrow",
+        "//src/containers:containers",
+        "//src/host_profile:host_profile",
+        "//src/physical_plan:physical_plan",
+        "//src/plan_expr:plan_expr",
+        "//src/plan_ir:plan_ir",
+        "//src/plan_stats:plan_stats",
+        "//src/scan_source:scan_source",
+    ],
+    closure_excludes = [
+        "async_rt",
+        "engine_runtime",
+        "fs",
+        "objectstore",
+        "optimizer",
+        "shuffle",
+        "sql",
+    ],
+    test_srcs = [
+        "tests/test_lower_plans.mojo",
+        "tests/test_lower_refusals.mojo",
+        "tests/test_lower_sum_fuse.mojo",
+        "tests/test_sink_capability.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)

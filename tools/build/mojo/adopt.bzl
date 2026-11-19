@@ -1,16 +1,16 @@
 """`mojo_adopted_library`: a library built by another set of rules, as komira's own rules see it.
 
-A library built with buildrules' `mojo_package` (src/komira_json is the first) makes a gated `.mojoc`
+A library built with buildrules' `mojo_package` (src/json is the first) makes a gated `.mojoc`
 file and no `MojoInfo`. The packages that list it in `deps` are `mojo_library`, `mojo_binary` and
 `mojo_test` targets, which accept only a dependency with `MojoInfo`. This rule is that bridge, and
 nothing more: it compiles nothing and runs no test. Its inputs are two targets of the package it
 adopts, and it hands on what they made.
 
     mojo_adopted_library(
-        name = "komira_json",                      # the target the dependents name; the import name
+        name = "json",                      # the target the dependents name; the import name
         lib = ":lib",                              # the package's `:lib`: the `.mojoc`, behind the run of every test
         test_runs = ":test",                       # the package's `:test`: the marker of each test run
-        srcs = glob(["src/komira_json/**/*.mojo"]),  # the library's sources (what a conda package ships)
+        srcs = glob(["src/json/**/*.mojo"]),  # the library's sources (what a conda package ships)
         test_srcs = glob(["tests/test_*.mojo"]),   # the test files `test_runs` runs (the weld lint reads them)
         readme = "README.md",
     )
@@ -47,16 +47,16 @@ each soname, and the packer holds the declaration to the sources.
 
 A library with Mojo dependencies lists them in `deps`, as a `mojo_library` does: the adopted (or `mojo_library`)
 targets of the packages its `mopm.toml` names under `[dependencies]`. The package's own `:lib` is built from the
-dependency packages' `:lib` (a path dependency, `{ path = "../komira_runtime_paths", version = "0.1" }`), so the
+dependency packages' `:lib` (a path dependency, `{ path = "../runtime_paths", version = "0.1" }`), so the
 closure of `lib` and the closure of `deps` are one set, and the rule refuses a BUCK file where they differ, in
 either direction, naming the packages: a dependency the manifest lacks would be built into the file and left out of
 the `-I` of every dependent, and one the BUCK file lacks would be a dependency the published package records and no
 dependent of the old label sees.
 
     mojo_adopted_library(
-        name = "komira_resources",
+        name = "resources",
         lib = ":lib",
-        deps = ["//src/komira_runtime_paths:komira_runtime_paths"],   # `[dependencies]` of mopm.toml
+        deps = ["//src/runtime_paths:runtime_paths"],   # `[dependencies]` of mopm.toml
         ...
     )
 
@@ -101,7 +101,7 @@ checks read the same facts) finds the owner. Without it the adopted label links 
 every package that depends on it has no conda package. `native` and `native_static` are exclusive.
 
     mojo_adopted_library(
-        name = "komira_log",
+        name = "log",
         c_deps = [":komira_log_holder"],   # the cxx_library the archive is built from
         native_static = True,
         ...

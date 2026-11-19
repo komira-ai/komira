@@ -1,5 +1,5 @@
 # =============================================================================
-# test_capability_truth.mojo -- every capability komira_git's servers
+# test_capability_truth.mojo -- every capability git's servers
 # advertise is one the pinned git client used in some transcript, so each
 # promise is exercised against git and not only advertised.
 # =============================================================================
@@ -27,7 +27,7 @@
 
 from std.testing import assert_equal, assert_true
 
-from komira_git import (
+from git import (
     V2_END,
     V2_FETCH,
     V2_LS_REFS,
@@ -162,4 +162,4 @@ def test_receive_pack() raises:
 def main() raises:
     test_upload_pack_v2()
     test_receive_pack()
-    print("komira_git conformance: capability truth passed")
+    print("git conformance: capability truth passed")

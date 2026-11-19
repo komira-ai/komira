@@ -9,7 +9,7 @@ open a string over the import. The generated environment scan
 (_no_env_reads) refuses the file: it does not read t-strings.
 """
 
-from komira_aws_core import AwsRequest
+from aws_core import AwsRequest
 
 from .env_read_t_rt import (
     CloudWatchLogsGetLogEventsRequest,

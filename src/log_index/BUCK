@@ -1,0 +1,137 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The native log index: log records are transposed to a typed columnar batch
+# (the frozen log-index schema), an L0 index is built over them (an unsorted
+# term-hash posting beside the doc store and fast-field region of an ordinary
+# split), and L0 splits are read and searched. The idle hook drains a worker's
+# log ring when the worker is idle, builds an L0 split and publishes it: the
+# split object is written to the store first and its summary is appended to the
+# metastore (search_catalog) second. The store is a type parameter over
+# objectstore's conditional-write traits; no cloud client is named here.
+# Metric points are transposed to the `metrics` fact batch and stored by
+# ObjectStoreMetricSink through telemetry_store's metric writer (object
+# first, catalog entry second). SplitIndexLogSearch answers the log_query
+# search seam over the L0 splits.
+#
+# The welded tests (each file's header says which defect it catches):
+# - test_log_native_indexing_idle_hook_e2e: the idle hook installed on a real
+#   per-core runtime drains a real engine's ring when its worker fires the hook,
+#   publishes L0 splits that an immediate query finds (against an oracle), drains
+#   at most DRAIN_CAP records per fire, and loses nothing on a graceful final
+#   flush.
+# - test_log_native_indexing_l05: the off-core flush pipeline (handoff, consumer,
+#   in-flight gate) end to end: drained logs are searchable after the publish,
+#   the byte and time flush ceilings fire, an un-flushed window is the only loss
+#   on a crash, and the in-flight cap bounds memory under a stalled consumer.
+# - test_log_index_offcore_failure_paths: the consumer writes the split object
+#   before it publishes, a failed put or publish publishes nothing and releases
+#   the gate, a transient put failure is retried under the same key, a restarted
+#   consumer does not reuse split keys, the handoff rejects (never blocks) at
+#   its depth and byte bounds, and the flush thread's shutdown publishes the
+#   last partial segment.
+# - test_log_native_indexing_l0: the log seam and the transpose (message bytes
+#   identical to the text drain, scalars survive the seam, the frozen eight
+#   column schema with unsigned columns widened to Int64, schema invariance
+#   across windows), the shard role axis, and drained logs searched end to end
+#   (full text, a numeric filter, a date sort, the metastore publish).
+# - test_log_native_indexing_l1: the L0 split parses as a SPLIT_VERSION=1
+#   container, the posting query equals a brute-force oracle, the fast-field and
+#   doc-store regions are byte-identical to the optimized writer's for one
+#   batch, and the build task publishes a queryable split.
+# - test_log_native_indexing_lread: reading an L0 split against an oracle, the
+#   per-split format dispatch, a mixed L0 and optimized merge with no lost or
+#   duplicated documents, and paging with the true total.
+# - test_telemetry_log_base_artifact: the batch the real transpose produces
+#   publishes through telemetry_store as time-partitioned Parquet, and a
+#   time-range read resolves to it.
+# - test_object_store_metric_sink: metric points published through the telemetry
+#   store's metric writer come back out of the Parquet bytes sorted
+#   (series_id, ts) with a catalog entry whose bounds are true and tight; an
+#   empty drain touches the store zero times; the object is written before its
+#   entry is appended (recording store), and a failed write or append keeps the
+#   points pending.
+# - test_object_store_metric_sink_days: a flush spanning UTC days that fails on a
+#   later day retries only the uncommitted days (no duplicated rows).
+# - test_split_log_search_faults: the scan keeps a zero-timestamp hit through a
+#   window that excludes zero, and raises on a missing or corrupt split.
+# - test_split_log_search_route: splits published by the real build task are
+#   read back through the log-query seam and route: newest first with the
+#   publish sequence breaking a millisecond tie, a true total, a window filter,
+#   a term-free window refused, the caller's (meta_root, index) honoured, and
+#   L0 and optimized splits merged.
+# - test_telemetry_codec_agreement: the write and read packages reach one
+#   segment-entry codec, the golden envelope bytes are pinned, and both
+#   historical version-1 layouts are refused by name.
+mojo_library(
+    name = "log_index",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    # The full transitive closure of the Mojo libraries this package builds on.
+    deps = [
+        "//src/arrow:arrow",
+        "//src/arrow_ipc:arrow_ipc",
+        "//src/async_rt:async_rt",
+        "//src/async_api:async_api",
+        "//src/atomic_alias:atomic_alias",
+        "//src/byte_buffer:byte_buffer",
+        "//src/clock:clock",
+        "//src/containers:containers",
+        "//src/column_kernels:column_kernels",
+        "//src/compression:compression",
+        "//src/counters:counters",
+        "//src/crypto:crypto",
+        "//src/dynamic_filter:dynamic_filter",
+        "//src/fork_join:fork_join",
+        "//src/fs:fs",
+        "//src/hashing:hashing",
+        "//src/host_probe:host_probe",
+        "//src/http_core:http_core",
+        "//src/join_assembly:join_assembly",
+        "//src/libc:libc",
+        "//src/log:log",
+        "//src/log_query:log_query",
+        "//src/lz4:lz4",
+        "//src/metrics:metrics",
+        "//src/name_registry:name_registry",
+        "//src/objectstore:objectstore",
+        "//src/objectstore:komira_objectstore_posix",
+        "//src/parquet_api:parquet_api",
+        "//src/parquet_codec:parquet_codec",
+        "//src/parquet_writer:parquet_writer",
+        "//src/plan_expr:plan_expr",
+        "//src/plan_ir:plan_ir",
+        "//src/plan_stats:plan_stats",
+        "//src/scalar_arithmetic:scalar_arithmetic",
+        "//src/scan_source:scan_source",
+        "//src/search:search",
+        "//src/search_catalog:search_catalog",
+        "//src/simd_ops:simd_ops",
+        "//src/spsc_ring:spsc_ring",
+        "//src/telemetry_store:telemetry_store",
+        "//src/trace:trace",
+        "//src/zlib:zlib",
+        "//tools/build/mojo/runtime_paths:runtime_paths",
+    ],
+    # Test-only: the Parquet reader decodes the metric sink's published objects,
+    # and the telemetry read package is the other half of the codec agreement
+    # test. Neither is a dependency of the library.
+    test_deps = [
+        "//src/parquet:parquet",
+        "//src/telemetry_read:telemetry_read",
+    ],
+    test_srcs = [
+        "tests/test_log_index_failure_paths.mojo",
+        "tests/test_log_index_offcore_failure_paths.mojo",
+        "tests/test_log_native_indexing_idle_hook_e2e.mojo",
+        "tests/test_log_native_indexing_l0.mojo",
+        "tests/test_log_native_indexing_l05.mojo",
+        "tests/test_log_native_indexing_l1.mojo",
+        "tests/test_log_native_indexing_lread.mojo",
+        "tests/test_object_store_metric_sink.mojo",
+        "tests/test_object_store_metric_sink_days.mojo",
+        "tests/test_split_log_search_faults.mojo",
+        "tests/test_split_log_search_route.mojo",
+        "tests/test_telemetry_codec_agreement.mojo",
+        "tests/test_telemetry_log_base_artifact.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)

@@ -2,7 +2,7 @@
 # Arrow IPC File and Stream bytes, assembled from komira's message encoders.
 # =============================================================================
 #
-# komira_arrow_ipc ships the per-message encoders and the framing pieces, not a
+# arrow_ipc ships the per-message encoders and the framing pieces, not a
 # file or stream writer: `encode_schema_message`, `encode_record_batch_message`,
 # `arrow_ipc_eos_bytes`, `arrow_ipc_file_magic_header` and
 # `encode_footer_message` (Footer flatbuffer + int32 length + "ARROW1"). This
@@ -21,9 +21,9 @@
 # spec.
 # =============================================================================
 
-from komira_arrow.record_batch import RecordBatch
-from komira_arrow.schema import Schema
-from komira_arrow_ipc.ipc_encoder_dispatch import (
+from arrow.record_batch import RecordBatch
+from arrow.schema import Schema
+from arrow_ipc.ipc_encoder_dispatch import (
     arrow_ipc_eos_bytes,
     arrow_ipc_file_magic_header,
     arrow_ipc_message_metadata_length,
@@ -31,9 +31,9 @@ from komira_arrow_ipc.ipc_encoder_dispatch import (
     encode_record_batch_message,
     encode_schema_message,
 )
-from komira_arrow_ipc.ipc_flatbuf import Block
-from komira_buffer.heap_region import HeapRegion
-from komira_buffer.shared_aligned_buffer import SharedAlignedBuffer
+from arrow_ipc.ipc_flatbuf import Block
+from byte_buffer.heap_region import HeapRegion
+from byte_buffer.shared_aligned_buffer import SharedAlignedBuffer
 
 from .hive_tree import write_file_bytes
 

@@ -2,7 +2,7 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 load(":runner_cases.bzl", "mojo_test_command_case")
 
 # The tests of the test runtime contract. They use only the standard library:
-# komira_runtime_paths is exercised by its own gate test in the komira cell,
+# runtime_paths is exercised by its own gate test in the komira cell,
 # because a tests-cell target cannot depend on a komira-cell mojo_library
 # (Buck2 gives the MojoPkgTSet a distinct identity per loading cell).
 # The contract is in tools/build/mojo/README.md ("Test data, environment and

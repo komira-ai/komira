@@ -21,11 +21,11 @@
 //!   default) or `flattened` (one element per item, each named for the
 //!   member). An item carries the `xmlNamespace` of the list's member
 //!   reference, else of the item shape. A list nested in a list is wrapped.
-//! - A scalar is `komira_aws_core`'s XML scalar text; a timestamp is in the
+//! - A scalar is `aws_core`'s XML scalar text; a timestamp is in the
 //!   member's resolved format (date-time in a body by default).
 //! - Reading matches elements by local name, takes the last occurrence of a
 //!   non-list member and ignores elements the shape does not name
-//!   (`komira_aws_core.aws_xml`).
+//!   (`aws_core.aws_xml`).
 //! - A map is read, never written: wrapped (an element named for the member
 //!   holding one `<entry>` per entry) or `flattened` (one element per entry,
 //!   each named for the member), each entry holding the key and value
@@ -1162,7 +1162,7 @@ mod tests {
     #[test]
     fn an_s3_client_tells_the_send_which_operations_answer_a_200_error() {
         let src = emit_s3_in("S3", false).unwrap();
-        // The send takes the flag and hands it to komira_aws_core.
+        // The send takes the flag and hands it to aws_core.
         assert!(
             src.contains(
                 "    def send(mut self, var req: AwsRequest, s3_200_error: Bool = False) raises -> HttpResult:\n"

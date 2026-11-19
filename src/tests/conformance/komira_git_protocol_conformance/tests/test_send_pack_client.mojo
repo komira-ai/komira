@@ -1,5 +1,5 @@
 # =============================================================================
-# test_send_pack_client.mojo -- komira_git's push client writes the
+# test_send_pack_client.mojo -- git's push client writes the
 # commands the pinned git client wrote, byte for byte, and reads the pinned
 # git server's advertisement and report-status.
 # =============================================================================
@@ -21,7 +21,7 @@
 
 from std.testing import assert_equal, assert_true
 
-from komira_git import (
+from git import (
     ObjectFormat,
     ReceivePackConfig,
     ReceivePackServer,
@@ -112,4 +112,4 @@ def main() raises:
     test_delete_only()
     test_empty_repository()
     test_fast_forward_under_deny()
-    print("komira_git conformance: send-pack client passed")
+    print("git conformance: send-pack client passed")

@@ -81,9 +81,9 @@ pub struct PluginParameters {
     /// `size_of` per emitted struct.
     pub layout_probe: bool,
     /// `gcp=true`: a Google Cloud client. Its gRPC service clients take a
-    /// `komira_gcp_core` token source, set its token as each call's
+    /// `gcp_core` token source, set its token as each call's
     /// `authorization` metadata, speak classic gRPC only, and raise a non-OK
-    /// status through `komira_gcp_core` (`emit::Emitter::with_options`).
+    /// status through `gcp_core` (`emit::Emitter::with_options`).
     /// Refused with `default_protocol=connect`; REST clients are Google Cloud
     /// clients either way.
     pub gcp: bool,

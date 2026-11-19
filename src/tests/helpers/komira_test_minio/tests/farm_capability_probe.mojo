@@ -12,9 +12,9 @@
 #
 # REQUIRED (the test fails, naming the capability, when one is missing):
 #   child_reap      spawn a long-lived child, stop it with SIGTERM, reap it,
-#                   and find no child left to reap (komira_supervisor).
+#                   and find no child left to reap (supervisor).
 #   loopback        bind 127.0.0.1:0, connect to it, accept, and move one byte
-#                   across (komira_async's socket setup and try_io calls).
+#                   across (async_rt's socket setup and try_io calls).
 #   pdeathsig       /usr/bin/setpriv --pdeathsig KILL: the child dies when its
 #                   parent is SIGKILLed; and, as the control, the same child
 #                   without setpriv SURVIVES its parent (else the check could
@@ -44,21 +44,21 @@
 #
 # The runner keeps a passing test's output to itself (the gate prints
 # the log only on failure); the lines are read from a failing run.
-# No FFI is declared here: processes are komira_supervisor's, sockets
-# komira_async's, the environment komira_libc's.
+# No FFI is declared here: processes are supervisor's, sockets
+# async_rt's, the environment libc's.
 # =============================================================================
 
 from std.os import remove
 from std.os.path import exists, getsize, realpath
 from std.time import perf_counter_ns, sleep
 
-from komira_async.reactor.socket_io import (
+from async_rt.reactor.socket_io import (
     try_io_accept,
     try_io_connect,
     try_io_read,
     try_io_write,
 )
-from komira_async.reactor.socket_setup import (
+from async_rt.reactor.socket_setup import (
     bind_inet,
     close_fd,
     get_so_error,
@@ -68,8 +68,8 @@ from komira_async.reactor.socket_setup import (
     sockaddr_in_bytes,
     socket_tcp_nonblocking,
 )
-from komira_libc.posix import _read_env
-from komira_supervisor import ChildSpec, DetachedChild, SIGKILL, Supervisor
+from libc.posix import _read_env
+from supervisor import ChildSpec, DetachedChild, SIGKILL, Supervisor
 
 comptime _SETPRIV = "/usr/bin/setpriv"
 comptime _EGRESS_HOST = "conda.modular.com"

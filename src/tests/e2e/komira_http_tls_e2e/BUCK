@@ -1,8 +1,8 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
 # Test-only: end-to-end tests of the HTTP stack over loopback, a real
-# komira_http_server HttpServer against a real komira_http_client HttpClient in
-# one process, on two threads (komira_fork_join). The library holds what the
+# http_server HttpServer against a real http_client HttpClient in
+# one process, on two threads (fork_join). The library holds what the
 # tests share: the TLS fixtures and configurations, and the runner that steps
 # the server on one thread while the client runs on the other.
 #
@@ -10,27 +10,27 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # pivot to h2 on both sides; a 4 MiB plaintext response flushed through the
 # server's buffered-write path; and a client refusing an untrusted root and a
 # wrong server name while the server goes on serving. The certificates are
-# komira_http_core's test fixtures, staged at their source paths.
+# http_core's test fixtures, staged at their source paths.
 
 _TLS_FIXTURES = {
-    "src/komira_http_core/tests/fixtures/smoke_cert.pem": "//src/komira_http_core:tests/fixtures/smoke_cert.pem",
-    "src/komira_http_core/tests/fixtures/tls/leaf_cert.pem": "//src/komira_http_core:tests/fixtures/tls/leaf_cert.pem",
-    "src/komira_http_core/tests/fixtures/tls/leaf_key.pem": "//src/komira_http_core:tests/fixtures/tls/leaf_key.pem",
-    "src/komira_http_core/tests/fixtures/tls/root_ca.pem": "//src/komira_http_core:tests/fixtures/tls/root_ca.pem",
+    "src/http_core/tests/fixtures/smoke_cert.pem": "//src/http_core:tests/fixtures/smoke_cert.pem",
+    "src/http_core/tests/fixtures/tls/leaf_cert.pem": "//src/http_core:tests/fixtures/tls/leaf_cert.pem",
+    "src/http_core/tests/fixtures/tls/leaf_key.pem": "//src/http_core:tests/fixtures/tls/leaf_key.pem",
+    "src/http_core/tests/fixtures/tls/root_ca.pem": "//src/http_core:tests/fixtures/tls/root_ca.pem",
 }
 
 mojo_library(
     name = "komira_http_tls_e2e",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
-        "//src/komira_async:komira_async",
-        "//src/komira_atomic_alias:komira_atomic_alias",
-        "//src/komira_clock:komira_clock",
-        "//src/komira_fork_join:komira_fork_join",
-        "//src/komira_http_client:komira_http_client",
-        "//src/komira_http_core:komira_http_core",
-        "//src/komira_http_server:komira_http_server",
-        "//src/komira_net:komira_net",
+        "//src/async_rt:async_rt",
+        "//src/atomic_alias:atomic_alias",
+        "//src/clock:clock",
+        "//src/fork_join:fork_join",
+        "//src/http_client:http_client",
+        "//src/http_core:http_core",
+        "//src/http_server:http_server",
+        "//src/net:net",
     ],
     test_srcs = [
         "tests/test_large_response_flush.mojo",

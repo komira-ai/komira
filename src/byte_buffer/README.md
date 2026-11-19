@@ -1,0 +1,174 @@
+# byte_buffer
+
+Aligned, shared and memory-mapped byte buffers and the region trait that columns sit on.
+
+The package root re-exports nothing; import each name from its module:
+
+- `byte_buffer.owned_aligned_buffer`: `OwnedAlignedBuffer`, a single-owner
+  heap buffer whose start is 64-byte aligned and whose capacity is rounded up
+  to a multiple of 64 bytes, so a SIMD load at the tail stays inside the
+  allocation. A buffer from the constructor has length equal to the capacity
+  it was asked for; one from `with_capacity` has length 0.
+- `byte_buffer.shared_aligned_buffer`: `SharedAlignedBuffer[K]`, the
+  reference-counted buffer over a region `K` (`HeapRegion` by default,
+  `MmapRegion` for a mapped file). `from_owned` promotes an
+  `OwnedAlignedBuffer` without copying; `share` and `share_range_as` hand out
+  more owners of the same bytes, the latter of a checked sub-range.
+- `byte_buffer.copyable_shared_aligned_buffer`:
+  `CopyableSharedAlignedBuffer[K]`, the same buffer made `Copyable` (a copy
+  is a reference-count increment).
+- `byte_buffer.memory_region`, `heap_region`, `mmap_region`: the
+  `MemoryRegion` trait (what keeps a buffer's bytes alive) and its two
+  conformers: `HeapRegion` owns a `List[UInt8]`; `MmapRegion.open_readonly`
+  maps a file read-only and private and unmaps it when dropped.
+- `byte_buffer.byte_view`: `ByteView[origin]`, a borrowed byte range tied to
+  its owner's lifetime, with little-endian reads (and, on a mutable view,
+  writes), `sub` and `split_at`.
+- `byte_buffer.byte_buffer`: `ByteBuffer`, an owned byte list with a read
+  cursor (fixed-width little-endian, ULEB128 and zigzag reads), and
+  `write_uleb128` (its encoder for a non-negative `Int`; raises on a negative
+  one) and `write_uleb128_u64` (the total encoder for a `UInt64`, at most 10
+  bytes).
+- `byte_buffer.aligned_buffer_trait`: `AlignedBufferTrait`, the read, write
+  and view methods both aligned buffers share.
+- `byte_buffer.file_identity`: `FileIdentity`, what `stat(2)` says about
+  a path (size, mtime, inode, device), to tell whether a cached file changed.
+- `byte_buffer.hugepage_span`: the opt-in transparent-hugepage advice for
+  large allocations; `byte_buffer.constants`: SIMD widths and cache-line
+  size.
+
+## Examples
+
+Write little-endian values into an aligned buffer, read them back through a
+view, then share an 8-byte window of it without copying. A range outside the
+buffer is refused:
+
+<!-- mojo-hidden from std.testing import assert_equal, assert_true -->
+```mojo
+from byte_buffer.heap_region import HeapRegion
+from byte_buffer.owned_aligned_buffer import OwnedAlignedBuffer
+from byte_buffer.shared_aligned_buffer import SharedAlignedBuffer
+
+var buf = OwnedAlignedBuffer(100)
+assert_equal(buf.len(), 100)
+assert_equal(buf.capacity(), 128)  # rounded up to a multiple of 64
+assert_true(buf.is_aligned())
+buf.set_length(16)
+buf.write_u32_le_at(0, 0x04030201)
+buf.write_i64_le_at(8, -2)
+assert_equal(buf.read_u8_at(0), 0x01)  # little-endian: low byte first
+
+var view = buf.view_ro()
+assert_equal(view.len(), 16)
+assert_equal(view.sub(0, 4).read_u32_le_at(0), 0x04030201)
+assert_equal(view.read_i64_le_at(8), -2)
+
+var shared = SharedAlignedBuffer[HeapRegion].from_owned(buf^)
+var window = shared.share_range_as[HeapRegion](8, 8)
+assert_equal(window.len(), 8)
+assert_equal(window.read_i64_le_at(0), -2)  # the same bytes, no copy
+
+var message = String()
+try:
+    _ = shared.share_range_as[HeapRegion](12, 8)
+except e:
+    message = String(e)
+assert_equal(message, "SharedAlignedBuffer.share_range_as: range [12, 20) exceeds buffer length 16")
+```
+
+Encode varints and read them back with a cursor:
+
+<!-- mojo-hidden from std.testing import assert_equal, assert_true -->
+```mojo
+from byte_buffer.byte_buffer import ByteBuffer, write_uleb128
+
+var bytes = List[UInt8]()
+write_uleb128(300, bytes)
+assert_equal(bytes, [UInt8(0xAC), UInt8(0x02)])
+write_uleb128(5, bytes)  # zigzag of -3
+bytes.append(0x2A)
+
+var cursor = ByteBuffer(bytes^)
+assert_equal(cursor.read_uleb128(), 300)
+assert_equal(cursor.read_zigzag_varint(), -3)
+assert_equal(cursor.remaining(), 1)
+assert_equal(cursor.read_byte(), 0x2A)
+assert_true(cursor.is_empty())
+
+var message = String()
+try:
+    _ = cursor.read_byte()
+except e:
+    message = String(e)
+assert_equal(message, "ByteBuffer: read_byte past end of buffer")
+```
+
+Map a file read-only and read it in place; then `FileIdentity` tells that a
+rewrite changed the file. The example works in a temporary directory it
+removes even if a step fails:
+
+<!-- mojo-hidden from std.testing import assert_equal, assert_false, assert_true -->
+```mojo
+from std.os import remove, rmdir
+from std.os.path import exists
+from std.tempfile import mkdtemp
+from byte_buffer.file_identity import FileIdentity
+from byte_buffer.mmap_region import MmapRegion
+
+var dir = mkdtemp()
+var path = dir + "/mapped.txt"
+try:
+    with open(path, "w") as f:
+        f.write("komira!")
+
+    var region = MmapRegion.open_readonly(path)
+    var view = region.data()
+    assert_equal(view.len(), 7)
+    assert_equal(view.read_u8_at(0), UInt8(ord("k")))
+    assert_equal(String(from_utf8=view.into_span()), "komira!")
+    _ = region^  # unmapped here
+
+    var before = FileIdentity.stat_path(path)
+    assert_true(before.same_file_as(FileIdentity.stat_path(path)))
+    with open(path, "w") as f:
+        f.write("komira, rewritten")
+    assert_false(before.same_file_as(FileIdentity.stat_path(path)))  # the size changed
+    remove(path)
+    assert_false(FileIdentity.stat_path(path).valid)  # gone
+finally:
+    if exists(path):
+        remove(path)
+    rmdir(dir)
+```
+
+## Build files
+
+This package is built with buildrules' `mojo_package` and packaged for mopm as `byte_buffer`, version 0.1.0
+(`mopm.toml`). The library is `src/byte_buffer/`, its tests are `tests/`. It depends on three packages, sibling
+directories (`[dependencies]` of `mopm.toml`): `host_probe`, `libc` and `simd_ops`, each as `{ path =
+"../<name>", version = "0.1" }`. The `.conda` of this package records `mojo-komira-ai.host_probe >=0.1,<0.2`,
+`mojo-komira-ai.libc >=0.1,<0.2` and `mojo-komira-ai.simd_ops >=0.1,<0.2` as dependencies and holds none of their files:
+installing `byte_buffer` installs them with it. `libc` links a C shim of its own, and a dependent's link
+takes it from the closure; this package owns no C. The files that are not sources:
+
+| file | what |
+|---|---|
+| `mopm.toml` | the mopm manifest: name, version, the Mojo version, the dependencies and where the library and its tests are |
+| `mopm.lock` | the toolchain pins and the path dependencies, as `mopm lock` writes them (no registry is reached: every dependency is a sibling) |
+| `mopm-toolchain.toml` | the exact mopm and Mojo versions the build uses (written by hand) |
+| `buildrules.mojo.lock.bzl`, `buildrules.mojo.bzl` | written by `buildrules mojo sync` from the files above and from the manifests of the siblings; `buildrules mojo check` fails when they are stale |
+
+`:lib` is the library file, built from the `:lib` of the three siblings, and exists only once every test of `tests/`
+has passed. After any change to a source, a test, a manifest of this package or of a sibling, run
+`buildrules mojo sync` with all four packages staged, commit what it writes, and build
+`komira//src/byte_buffer:lib` on the farm.
+
+`:conda` is buildrules' `mojo_conda` over `:lib`: the `.conda` of the mopm package
+(`mojo-komira-ai.byte_buffer-0.1.0-mojo1.0.0_0.conda`), packed with the siblings' manifests beside its own (`members`),
+which therefore exists only once the tests have passed. Publishing it (`mopm publish`) uploads, so it is a step of a
+CI job that takes that file, not a build action.
+
+`:byte_buffer` is `:lib` as komira's Mojo rules take it (`mojo_adopted_library`): its `deps` are the adopted
+target of each package in `[dependencies]`, and the rule refuses a list that is not the closure `:lib` was built
+from. It also compiles and runs the README's examples above (`[tests][readme]`) against `:lib`; the tests are not
+run again.

@@ -64,17 +64,17 @@
 # Planted mutants seen red here on the farm (product code, reverted):
 #   * JSONL write_f64_dtoa dropping the last digit of a 17-digit mantissa:
 #     lines 5, 6, 7, 13, 14 differ and rows 13, 14 read back as 0.3 and
-#     1.0. komira_jsonl's own test_dtoa_parity also catches it; it was
-#     taken out of komira_jsonl's test_srcs for that one run only.
+#     1.0. jsonl's own test_dtoa_parity also catches it; it was
+#     taken out of jsonl's test_srcs for that one run only.
 #   * CsvSink (FLOAT64, no NULLs) dropping the same digit: CSV lines 6, 7,
 #     8, 14, 15 differ and rows 13, 14 read back as 0.3 and 1.0; no
-#     komira_csv test caught it.
+#     csv test caught it.
 #   * line_check _scalar_end accepting a leading `+`: `+1`, `+1.5` (FLOAT64)
-#     and `+1` (INT64) are accepted (1 row each). komira_jsonl's own
+#     and `+1` (INT64) are accepted (1 row each). jsonl's own
 #     test_jsonl_line_check_branches also catches it; it was taken out of
-#     komira_jsonl's test_srcs for that one run only.
+#     jsonl's test_srcs for that one run only.
 #   * CSV reader storing 0.0 instead of NULL for an unparsable FLOAT64
-#     cell: rows 8..12 read back 0x0 where NULL is pinned; no komira_csv
+#     cell: rows 8..12 read back 0x0 where NULL is pinned; no csv
 #     test caught it.
 #
 # KNOWN DEFECTS. The spec-correct expectation stays in `float_edge_text` /
@@ -98,19 +98,19 @@
 #     (asserted) and type inference makes the column STRING (not asserted).
 # =============================================================================
 
-from komira_async.ops.waker_sink import NoopSink
-from komira_arrow.arrow_types import ArrowType
-from komira_arrow.column import Column
-from komira_arrow.primitive_array import PrimitiveArray
-from komira_arrow.record_batch import RecordBatch, RecordBatchBuilder
-from komira_arrow.schema import Field, SchemaBuilder
-from komira_csv import CsvReadOptions, Rfc4180
-from komira_csv.csv_sink import CsvSink
-from komira_csv.reader import read_csv_bytes_to_batch
-from komira_fs.local_fs import LocalFs
-from komira_jsonl.columnar_materializer import materialize_jsonl_to_batch
-from komira_jsonl.json_writer import write_batch_jsonl_direct
-from komira_runtime_paths import test_tmpdir
+from async_rt.ops.waker_sink import NoopSink
+from arrow.arrow_types import ArrowType
+from arrow.column import Column
+from arrow.primitive_array import PrimitiveArray
+from arrow.record_batch import RecordBatch, RecordBatchBuilder
+from arrow.schema import Field, SchemaBuilder
+from csv import CsvReadOptions, Rfc4180
+from csv.csv_sink import CsvSink
+from csv.reader import read_csv_bytes_to_batch
+from fs.local_fs import LocalFs
+from jsonl.columnar_materializer import materialize_jsonl_to_batch
+from jsonl.json_writer import write_batch_jsonl_direct
+from runtime_paths import test_tmpdir
 
 from komira_formats_e2e import (
     F_NAN,
@@ -277,7 +277,7 @@ comptime _NOT_NULL_WRITE_ERR = (
     " null"
 )
 comptime _NOT_NULL_READ_ERR = (
-    "komira_jsonl: line 9: NOT NULL field 'f64' holds JSON null"
+    "jsonl: line 9: NOT NULL field 'f64' holds JSON null"
 )
 
 

@@ -1,9 +1,9 @@
 # The search index format: what a graph store needs from it
 
 Status: proposed, not built. Nothing in this document is in the code yet except what "The format
-today" describes. It records four decisions about `komira_search`'s split format (multi-field
+today" describes. It records four decisions about `search`'s split format (multi-field
 documents, per-document deletes with compaction, a vector region, and adjacency) so that the
-maintainers of `komira_search` can accept, change or refuse each one before any code changes the
+maintainers of `search` can accept, change or refuse each one before any code changes the
 format. Each decision gives the options, a recommendation, and the proof its change must ship with.
 
 ## What is it for, and what is out of scope?
@@ -11,7 +11,7 @@ format. Each decision gives the options, a recommendation, and the proof its cha
 A graph over data is planned for komira: a labelled property graph of nodes, edges and episodes,
 queried by typed primitives (`search`, `knn`, `neighbors`, `k_hop`, `as_of`, and rank fusion of
 their results). This document says what the split format and its catalog must hold if that graph is
-kept as `komira_search` splits, measured against the code as it is. Whether it is kept that way is
+kept as `search` splits, measured against the code as it is. Whether it is kept that way is
 decided in [data_graph_storage.md](data_graph_storage.md), which recommends Iceberg tables with a
 delta tail and derived indexes instead, and says which of the decisions below the graph then
 depends on. The correctness fixes below (the summary version check, the L0
@@ -49,8 +49,8 @@ It does not wait on these decisions.
 
 ## The format today
 
-Three libraries: `komira_search` (analysis, the in-memory index, the split file and the searcher),
-`komira_search_catalog` (which splits are live, on an object store) and `komira_search_scan` (an index
+Three libraries: `search` (analysis, the in-memory index, the split file and the searcher),
+`search_catalog` (which splits are live, on an object store) and `search_scan` (an index
 read as the `komira.search.index` scan kind).
 
 **The split file** (`split.mojo`) is one immutable byte image:
@@ -93,8 +93,8 @@ read as the `komira.search.index` scan kind).
 - **Fast-field filters** accept conjunctions of comparisons and `IN` lists; a null cell fails every
   comparison; there is no `OR` and no null test.
 
-**The catalog** (`komira_search_catalog`) is an append-only manifest lineage per index (or per
-writer shard) on `komira_objectstore`'s CAS manifest. Each chunk is one encoded `SplitSummary`; an
+**The catalog** (`search_catalog`) is an append-only manifest lineage per index (or per
+writer shard) on `objectstore`'s CAS manifest. Each chunk is one encoded `SplitSummary`; an
 empty chunk is a seal and a one-byte zero chunk is a reaped stub. `retire` tombstones a chunk and
 `reap_chunk` removes it after a grace period. A merged split's summary lists the splits it absorbed,
 and readers hide those while it is live. `generation()` changes on every catalog change and never
@@ -222,7 +222,7 @@ input is allowed: it rewrites that split without its deleted documents. Without 
 size-tiered policy may never merge a large split again, and a delete that committed after that
 split's own merge snapshot would leave the document's bytes in it with no deadline.
 
-`komira_objectstore`'s `compact_once` envelope is not used. It folds a contiguous range of chunks
+`objectstore`'s `compact_once` envelope is not used. It folds a contiguous range of chunks
 and advances a watermark past it, and it treats the output of a pass that loses the watermark race
 as a harmless redundant object. A search merge picks a subset of live splits, so advancing the log
 start past it would drop unmerged splits and delete sets from replay; and its output is a visible
@@ -354,7 +354,7 @@ and deletes as text search, merged across splits like text hits.
 **Size.** 1,536 dimensions take 6 KiB per document: a million documents take about 6.1 GB. Today a
 scan fetches and parses a whole split, so a text query would also fetch every vector. The reader has
 to fetch regions by byte range after reading the footer (the footer-first layout already allows it,
-and `komira_objectstore` has ranged reads), reading the vector region only for `knn`.
+and `objectstore` has ranged reads), reading the vector region only for `knn`.
 
 **Proof.** `knn` equals a brute-force oracle over the same corpus: the same documents in the same
 order. The fixtures use vectors that are not normalized and differ in norm, so the mutant that drops
@@ -409,9 +409,9 @@ them before the run. If (a) misses a row, (b) is built and measured against the 
 
 | decision | libraries |
 |---|---|
-| 1 | `komira_search` (the L0 refusal first; directory, builders, writer, reader, `SearchCore`), `komira_search_scan` (field binding) |
-| 2 | `komira_search_catalog` (version check first, then the delete-set chunk, delete sets resolved through a merged split's input map, a live delete set keeps a shard from being drained), `komira_search` (the deleted set in `SearchCore`; the split merger and its run-length input map), the ported compactor (its merge policy selects every split a live delete set resolves to), `komira_search_scan` (`split_at`) |
-| 3 | `komira_search` (region, kernel, `knn`, sink), `komira_search_scan` (ranged region reads) |
+| 1 | `search` (the L0 refusal first; directory, builders, writer, reader, `SearchCore`), `search_scan` (field binding) |
+| 2 | `search_catalog` (version check first, then the delete-set chunk, delete sets resolved through a merged split's input map, a live delete set keeps a shard from being drained), `search` (the deleted set in `SearchCore`; the split merger and its run-length input map), the ported compactor (its merge policy selects every split a live delete set resolves to), `search_scan` (`split_at`) |
+| 3 | `search` (region, kernel, `knn`, sink), `search_scan` (ranged region reads) |
 | 4 | none for (a) beyond decision 1; a benchmark target |
 
 `split.mojo`, `fast_fields.mojo` and `source.mojo` are each over 1,000 lines; each is split by
