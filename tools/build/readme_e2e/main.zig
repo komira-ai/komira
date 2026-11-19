@@ -1,5 +1,5 @@
 //! readme_e2e: a package of a release tried as the user of what was staged
-//! (cli.zig says the commands; verify.zig and assemble.zig do them).
+//! (cli.zig says the commands; verify.zig, assemble.zig and take.zig do them).
 
 const std = @import("std");
 const cli = @import("cli.zig");

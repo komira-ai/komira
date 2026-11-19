@@ -9,6 +9,7 @@ const cli = @import("cli.zig");
 const verify = @import("verify.zig");
 const offline = @import("offline.zig");
 const native = @import("native.zig");
+const take = @import("take.zig");
 const fix = @import("fixture.zig");
 
 fn arena() std.heap.ArenaAllocator {
@@ -300,6 +301,13 @@ test "a command line that is not one is refused with exit 2 and the usage" {
     try expectUsage(&.{ "assemble", "--out", "o", "--member", "a", "1.0.0", "c", "r" }, "--mojo is required");
     try expectUsage(&.{ "assemble", "--out", "o", "--out", "p" }, "--out is given twice");
     try expectUsage(&.{ "assemble", "--bogus", "x" }, "unknown argument --bogus");
+    try expectUsage(&.{"take"}, "--staged is required");
+    try expectUsage(&.{ "take", "--staged", "s" }, "--out is required");
+    try expectUsage(&.{ "take", "--out", "o" }, "--staged is required");
+    try expectUsage(&.{ "take", "--staged" }, "--staged takes a value");
+    try expectUsage(&.{ "take", "--staged", "s", "--staged", "t" }, "--staged is given twice");
+    try expectUsage(&.{ "take", "--staged", "", "--out", "o" }, "--staged is required");
+    try expectUsage(&.{ "take", "--staged", "s", "--wat", "o" }, "unknown argument --wat");
 }
 
 test "a failure shows the end of a program's output, not all of it" {
@@ -476,4 +484,173 @@ test "for the toolchain's linker: the push-state and pop-state pairs go, every o
     // an archive that happens to be named like the option is not dropped
     const kept = try native.forZigLinker(a, &.{ "/p/lib/--pop-state", "-Xlinker" });
     try std.testing.expectEqual(@as(usize, 2), kept.len);
+}
+
+// ---- take.zig -----------------------------------------------------------------
+
+/// `readme_e2e take --staged <tmp>/staged --out <tmp>/out`, run in `tmp`.
+fn runTake(a: std.mem.Allocator, tmp: std.fs.Dir) !struct { code: u8, out: []const u8, staged: []const u8, dest: []const u8 } {
+    const root = try tmp.realpathAlloc(a, ".");
+    const staged = try std.fs.path.join(a, &.{ root, "staged" });
+    const dest = try std.fs.path.join(a, &.{ root, "out" });
+    var out: std.ArrayList(u8) = .empty;
+    const code = try cli.execute(a, &.{ "take", "--staged", staged, "--out", dest }, &out);
+    return .{ .code = code, .out = out.items, .staged = staged, .dest = dest };
+}
+
+/// Every entry below `dir`, `<path> <kind> <bytes of a file>`, sorted.
+fn listing(a: std.mem.Allocator, dir: std.fs.Dir) ![]const u8 {
+    var lines: std.ArrayList([]const u8) = .empty;
+    var w = try dir.walk(a);
+    defer w.deinit();
+    while (try w.next()) |e| {
+        const bytes = if (e.kind == .file) try dir.readFileAlloc(a, e.path, 1 << 20) else "";
+        try lines.append(a, try std.fmt.allocPrint(a, "{s} {s} {s}", .{ e.path, @tagName(e.kind), bytes }));
+    }
+    std.mem.sort([]const u8, lines.items, {}, struct {
+        fn lt(_: void, l: []const u8, r: []const u8) bool {
+            return std.mem.lessThan(u8, l, r);
+        }
+    }.lt);
+    return std.mem.join(a, "\n", lines.items);
+}
+
+test "take copies every file of the set to the same path with the same bytes, and nothing else" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var ar = arena();
+    defer ar.deinit();
+    const a = ar.allocator();
+    try tmp.dir.makePath("staged/linux-64");
+    try tmp.dir.makePath("staged/acme/http/empty");
+    try tmp.dir.writeFile(.{ .sub_path = "staged/plan.json", .data = "{\"version\": 2}" });
+    try tmp.dir.writeFile(.{ .sub_path = "staged/linux-64/mojo-acme.http-0.1.7-mojo1.0.0_0.conda", .data = "PK\x00\x01\xff" });
+    try tmp.dir.writeFile(.{ .sub_path = "staged/acme/http/README.md", .data = "# http\n" });
+    const r = try runTake(a, tmp.dir);
+    try std.testing.expectEqual(@as(u8, 0), r.code);
+    try std.testing.expectEqualStrings(try std.fmt.allocPrint(a, "readme_e2e take: 3 file(s), 26 bytes, from {s}\n", .{r.staged}), r.out);
+    var out = try tmp.dir.openDir("out", .{ .iterate = true });
+    defer out.close();
+    try std.testing.expectEqualStrings(
+        "acme directory \nacme/http directory \nacme/http/README.md file # http\n\nacme/http/empty directory \nlinux-64 directory \nlinux-64/mojo-acme.http-0.1.7-mojo1.0.0_0.conda file PK\x00\x01\xff\nplan.json file {\"version\": 2}",
+        try listing(a, out),
+    );
+}
+
+test "take of an empty set writes an empty directory, so verify fails it at phase staged as before" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var ar = arena();
+    defer ar.deinit();
+    const a = ar.allocator();
+    try tmp.dir.makePath("staged");
+    const r = try runTake(a, tmp.dir);
+    try std.testing.expectEqual(@as(u8, 0), r.code);
+    try std.testing.expectEqualStrings(try std.fmt.allocPrint(a, "readme_e2e take: 0 file(s), 0 bytes, from {s}\n", .{r.staged}), r.out);
+    var out = try tmp.dir.openDir("out", .{ .iterate = true });
+    defer out.close();
+    try std.testing.expectEqualStrings("", try listing(a, out));
+}
+
+test "take follows a symbolic link to a file or a directory and writes what it points at" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var ar = arena();
+    defer ar.deinit();
+    const a = ar.allocator();
+    try tmp.dir.makePath("real/dir");
+    try tmp.dir.writeFile(.{ .sub_path = "real/file", .data = "linked" });
+    try tmp.dir.writeFile(.{ .sub_path = "real/dir/inner", .data = "inside" });
+    try tmp.dir.makePath("staged");
+    try tmp.dir.symLink("../real/file", "staged/plan.json", .{});
+    try tmp.dir.symLink("../real/dir", "staged/linux-64", .{ .is_directory = true });
+    const r = try runTake(a, tmp.dir);
+    try std.testing.expectEqual(@as(u8, 0), r.code);
+    try std.testing.expectEqualStrings(try std.fmt.allocPrint(a, "readme_e2e take: 2 file(s), 12 bytes, from {s}\n", .{r.staged}), r.out);
+    var out = try tmp.dir.openDir("out", .{ .iterate = true });
+    defer out.close();
+    // Regular files and a directory, not links: the copy holds no path outside it.
+    try std.testing.expectEqualStrings("linux-64 directory \nlinux-64/inner file inside\nplan.json file linked", try listing(a, out));
+}
+
+fn expectTakeRefused(a: std.mem.Allocator, tmp: std.fs.Dir, want: []const u8) !void {
+    const r = try runTake(a, tmp);
+    try std.testing.expectEqual(@as(u8, 1), r.code);
+    try std.testing.expectEqualStrings(want, r.out);
+}
+
+test "take refuses a link to nothing, naming its path below the set" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var ar = arena();
+    defer ar.deinit();
+    const a = ar.allocator();
+    try tmp.dir.makePath("staged/linux-64");
+    try tmp.dir.writeFile(.{ .sub_path = "staged/plan.json", .data = "{}" });
+    try tmp.dir.symLink("../../gone", "staged/linux-64/x.conda", .{});
+    try expectTakeRefused(a, tmp.dir, "readme_e2e take: linux-64/x.conda: FileNotFound\n");
+}
+
+test "take refuses a link back to a directory above it once directories nest deeper than max_depth" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var ar = arena();
+    defer ar.deinit();
+    const a = ar.allocator();
+    try tmp.dir.makePath("staged");
+    try tmp.dir.symLink(".", "staged/loop", .{ .is_directory = true });
+    var path: std.ArrayList(u8) = .empty;
+    for (0..take.max_depth + 1) |i| {
+        if (i > 0) try path.append(a, '/');
+        try path.appendSlice(a, "loop");
+    }
+    try expectTakeRefused(a, tmp.dir, try std.fmt.allocPrint(a, "readme_e2e take: {s}: directories nested deeper than 16 (a link back to a directory above it?)\n", .{path.items}));
+}
+
+test "take copies directories nested exactly max_depth deep" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var ar = arena();
+    defer ar.deinit();
+    const a = ar.allocator();
+    var path: std.ArrayList(u8) = .empty;
+    try path.appendSlice(a, "staged");
+    for (0..take.max_depth) |_| try path.appendSlice(a, "/d");
+    try tmp.dir.makePath(path.items);
+    try path.appendSlice(a, "/f");
+    try tmp.dir.writeFile(.{ .sub_path = path.items, .data = "deep" });
+    const r = try runTake(a, tmp.dir);
+    try std.testing.expectEqual(@as(u8, 0), r.code);
+    try std.testing.expectEqualStrings(try std.fmt.allocPrint(a, "readme_e2e take: 1 file(s), 4 bytes, from {s}\n", .{r.staged}), r.out);
+    const got = try tmp.dir.readFileAlloc(a, try std.fmt.allocPrint(a, "out{s}", .{path.items["staged".len..]}), 100);
+    try std.testing.expectEqualStrings("deep", got);
+}
+
+test "take refuses an entry that is neither a file nor a directory, naming its kind" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var ar = arena();
+    defer ar.deinit();
+    const a = ar.allocator();
+    try tmp.dir.makePath("staged");
+    // A Unix socket bound in the set's directory: a file system entry, no network.
+    const root = try tmp.dir.realpathAlloc(a, "staged");
+    const addr = try std.net.Address.initUnix(try std.fs.path.join(a, &.{ root, "sock" }));
+    const fd = try std.posix.socket(std.posix.AF.UNIX, std.posix.SOCK.STREAM, 0);
+    defer std.posix.close(fd);
+    try std.posix.bind(fd, &addr.any, addr.getOsSockLen());
+    try expectTakeRefused(a, tmp.dir, "readme_e2e take: sock is a unix_domain_socket, not a file or a directory\n");
+}
+
+test "take refuses a staged set that is not there, and an output it cannot write" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var ar = arena();
+    defer ar.deinit();
+    const a = ar.allocator();
+    const root = try tmp.dir.realpathAlloc(a, ".");
+    try expectTakeRefused(a, tmp.dir, try std.fmt.allocPrint(a, "readme_e2e take: cannot open the staged set {s}/staged: FileNotFound\n", .{root}));
+    try tmp.dir.makePath("staged");
+    try tmp.dir.writeFile(.{ .sub_path = "out", .data = "a file where the output goes" });
+    try expectTakeRefused(a, tmp.dir, try std.fmt.allocPrint(a, "readme_e2e take: cannot write {s}/out: NotDir\n", .{root}));
 }

@@ -3,15 +3,28 @@
 # `mopm-stage` of .github/workflows/release.yml writes it here (`mopm stage --out
 # release/staged_set`: plan.json, `<subdir>/<file>.conda`, `<namespace>/<name>/README.md`) and then
 # builds //release/readme_e2e/verify:all with `-c komira_release.staged=stage`, which
-# installs from this target. The files are not in the repository (.gitignore), so the
+# installs from `:taken`, the copy of `:set`. The files are not in the repository (.gitignore), so the
 # target is empty in a checkout, and the e2e against it fails on the missing plan.json:
 # a release that did not stage fails.
 #
 # `mopm stage` asks the registry which versions it already holds, so it cannot run as a
 # build action (an action is offline): the farm gets the set it wrote as an input, and
 # the README e2e runs on the farm against those bytes.
+load("@komira//tools/build/readme_e2e:defs.bzl", "readme_e2e_take")
+
 filegroup(
     name = "set",
     srcs = glob(["**"], exclude = ["BUCK"]),
-    visibility = ["//release/readme_e2e/verify:"],
+)
+
+# The set, copied unchanged by one action (readme_e2e take). An action uploads the
+# files of the checkout it takes, and buck2 shares no upload among actions: when every
+# verify target took `:set` itself, each uploaded the whole set, all at once, and over a
+# slow link to the farm the uploads starved each other until the farm ended them. This
+# action uploads the set once; the verify targets take its output, which the farm holds.
+readme_e2e_take(
+    name = "taken",
+    staged = ":set",
+    # The pull request check builds it too (//ci:pr): in a checkout the set is empty, and so is the copy.
+    visibility = ["//ci:", "//release/readme_e2e/verify:"],
 )

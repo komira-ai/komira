@@ -136,13 +136,19 @@ that set, the one it publishes, and nothing else changes. There are three source
   the e2e with it. It is the one that can be a build action: `mopm stage` asks the
   registry which versions exist (a request, with no token), and a build action is
   offline, so the real stage cannot run inside the build.
-* **`stage`**: `//release/staged_set:set`, the files of the directory of that package,
+* **`stage`**: `//release/staged_set:taken`, the files of the directory of that package,
   where the release workflow's job `mopm-stage` has had `mopm stage --out` write the set
   that `publish --staged` will publish, or where `prod-test` has written the files it checked
   against the plan (the ones the registry holds in quarantine). The files are an input of the build (uploaded to
   the farm) and are not in the repository, so the target is empty in a checkout. The e2e
   then runs on the farm against the real set; against the empty target it fails at
   phase `staged` (no `plan.json`), so a release that did not stage fails.
+  The targets do not take the files (`:set`) themselves: an action uploads the files of the
+  checkout it takes, and buck2 shares no upload among actions, so every target uploaded the
+  whole set, all at once, and over a slow link to the farm the uploads starved each other
+  until the farm ended them. `:taken` is `readme_e2e_take` of `:set`: one action,
+  `readme_e2e take` ([`take.zig`](take.zig)), copies every file unchanged into its output, so
+  the set is uploaded once, and the targets take that output, which the farm already holds.
   The release workflow gives every package the version of its run before it stages, so it
   passes `-c komira_release.beta_version=0.1.<n>` with this set too (optional here: without it
   the e2e expects the version of `packages.bzl`).
@@ -174,7 +180,9 @@ read from the root `doc_tree`, which holds every file of the checkout). A new mo
 package needs its line in `packages.bzl` and nothing else. `mopm stage --workspace-root src` packs every `src/<name>/mopm.toml`, so a package that is not a release member has no `mopm.toml`.
 The guard's cases
 ([`cases.bxl`](cases.bxl)) run in the pull request check:
-`./buck2 bxl komira//tools/build/readme_e2e/cases.bxl:run`.
+`./buck2 bxl komira//tools/build/readme_e2e/cases.bxl:run`. They also hold how the staged set
+reaches the farm: `stage` names `//release/staged_set:taken`, whose only action is one
+`readme_e2e take` run over `:set`, and whose output is that action's.
 
 ## Tests
 
@@ -187,7 +195,12 @@ truncated payload and garbage are each refused), the plan and lock readers and w
 source root the compile gets, and the offline registry (it serves its configuration,
 refuses and remembers every other request, and answers for no other host), and the native-library helpers
 ([`native.zig`](native.zig)): the shell words of mopm's printed command, the linker words in it, and the check that a plan
-names every library the packages declare (a longer name that merely ends the same way is not the library).
+names every library the packages declare (a longer name that merely ends the same way is not the library). It also holds `take`
+([`take.zig`](take.zig)): every file and directory of a set copied at its path with its bytes and
+nothing else, an empty set copied empty, a link to a file or a directory written as what it
+points at, and each refusal by its exact message (a link to nothing, a link back up past
+`max_depth` while a set exactly that deep is copied, an entry that is neither a file nor a
+directory, a set that is not there, an output it cannot write).
 
 [`scenario.zig`](scenario.zig) runs one scenario per target (`:passes`, ...): it builds
 made-up packages ([`fixture.zig`](fixture.zig)), stages them with the real `assemble`,

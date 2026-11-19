@@ -1,6 +1,7 @@
 """The rules of the README e2e (README.md): a package of a release, tried as its user.
 
 `readme_e2e_staged` writes a release's staged set from the packages the build made.
+`readme_e2e_take` copies a staged set the build did not make into one action's output.
 `readme_e2e` installs one package from a staged set into a fresh project and runs
 its README examples against the installed copy, as one build action.
 `readme_e2e_scenario` is one scenario of the tool's own tests.
@@ -44,6 +45,30 @@ def readme_e2e_staged(**kwargs):
     _readme_e2e_staged(exec_compatible_with = LINUX_X86_64, **kwargs)
 
 readme_e2e_staged = declares_docs(readme_e2e_staged)
+
+# ---- a staged set the build did not make -------------------------------------
+
+def _take_impl(ctx):
+    out = ctx.actions.declare_output("staged", dir = True)
+    ctx.actions.run(
+        cmd_args(ctx.attrs._tool[RunInfo], "take", "--staged", _out(ctx.attrs.staged), "--out", out.as_output()),
+        category = "readme_e2e_take",
+    )
+    return [DefaultInfo(default_output = out)]
+
+_readme_e2e_take = rule(
+    impl = _take_impl,
+    doc = "A staged set that is files of the checkout (`staged`, a filegroup of the directory `mopm stage` wrote), copied unchanged by one action into its output (take.zig). An action uploads the files of the checkout it takes as inputs, and buck2 shares no upload among actions: each `readme_e2e` that took the files themselves uploaded the whole set, every one at once. Through this target the set is uploaded once, by this action, and every `readme_e2e` takes its output, which the farm already holds.",
+    attrs = {
+        "staged": attrs.dep(doc = "A target whose output is the directory of a staged set."),
+        "_tool": attrs.exec_dep(providers = [RunInfo], default = _TOOL),
+    },
+)
+
+def readme_e2e_take(**kwargs):
+    _readme_e2e_take(exec_compatible_with = LINUX_X86_64, **kwargs)
+
+readme_e2e_take = declares_docs(readme_e2e_take)
 
 # ---- one package ------------------------------------------------------------
 

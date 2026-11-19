@@ -18,6 +18,7 @@ _SRCS = [
     "native.zig",
     "offline.zig",
     "plan.zig",
+    "take.zig",
     "verify.zig",
 ]
 

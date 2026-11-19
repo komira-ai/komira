@@ -1,4 +1,5 @@
-# The cases of the README e2e's completeness guard (guard.bzl).
+# The cases of the README e2e's completeness guard (guard.bzl), and of the way the
+# release's staged set reaches the farm (staged_choice.bzl, //release/staged_set).
 #
 #   ./buck2 bxl komira//tools/build/readme_e2e/cases.bxl:run
 #
@@ -6,7 +7,10 @@
 # guard (`readme_e2e_complete`, defs.bzl) is built by the pull request check over the
 # real files; these are the shapes it must tell apart.
 
+load("@komira//release/readme_e2e:staged_choice.bzl", "STAGED")
 load(":guard.bzl", "EXCLUDED_PATTERN", "findings", "moved_packages", "mopm_findings")
+
+_TAKEN = "komira//release/staged_set:taken"
 
 _PATHS = [
     "src/a/mopm.toml",
@@ -74,8 +78,30 @@ def _cases():
     expect_in("older than the first with --overlay and the row is missing", mopm_findings(old, "toolchains//:mopm_0_0_33", other), "has no --overlay", "Restore the row")
     return out
 
+def _staged_cases(ctx):
+    """The set `mopm stage` wrote reaches the e2e through one action: `stage` names the
+    copy, the copy is one `readme_e2e take` run action over `:set`, and its output is
+    that action's (an e2e target that took the checkout's files would upload them
+    itself, every target at once)."""
+    out = []
+    if STAGED["stage"] != "//release/staged_set:taken":
+        out.append("`stage` names {}, not //release/staged_set:taken: each e2e target would upload the files mopm stage wrote itself".format(repr(STAGED["stage"])))
+    if STAGED["assembled"] != "//release/readme_e2e:staged":
+        out.append("`assembled` names {}, not //release/readme_e2e:staged".format(repr(STAGED["assembled"])))
+    actions = [str(n.attrs.kind) + " " + str(n.attrs.category) for n in ctx.aquery().all_actions(_TAKEN)]
+    if actions != ["run readme_e2e_take"]:
+        out.append("{} has the actions {}, not one run action of category readme_e2e_take".format(_TAKEN, actions))
+    deps = [str(d.label.raw_target()) for d in ctx.cquery().deps(ctx.configured_targets(_TAKEN), 1)]
+    if "komira//release/staged_set:set" not in deps:
+        out.append("{} does not take komira//release/staged_set:set (its direct deps: {})".format(_TAKEN, deps))
+    target = ctx.configured_targets(_TAKEN)
+    output = ctx.analysis(target).providers()[DefaultInfo].default_outputs
+    if len(output) != 1 or output[0].is_source or str(output[0].owner.raw_target()) != _TAKEN:
+        out.append("the output of {} is {}, not one artifact its own action writes".format(_TAKEN, output))
+    return out
+
 def _run(ctx):
-    failures = _cases()
+    failures = _cases() + _staged_cases(ctx)
     if failures:
         fail("{} case(s) failed:\n  ".format(len(failures)) + "\n  ".join(failures))
     ctx.output.print("readme_e2e cases: all passed")
