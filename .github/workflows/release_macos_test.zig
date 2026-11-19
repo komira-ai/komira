@@ -595,7 +595,7 @@ test "the macOS set is the packages of packages.bzl minus the excluded ones, in 
     // each member is a `:lib` of src/ built for the platform the workflow names, and the output
     // layout is the macOS one (never the linux one the Linux release stages)
     try t.expect(std.mem.indexOf(u8, bzl, "\"komira//src/{}:lib\".format(p)") != null);
-    try t.expect(std.mem.indexOf(u8, bzl, "\"osx-arm64/\" + name") != null);
+    try t.expect(std.mem.indexOf(u8, bzl, "mojoc_path(\"osx-arm64\", name)") != null);
     try t.expect(std.mem.indexOf(u8, bzl, "linux-64") == null or std.mem.indexOf(u8, bzl, "\"linux-64/") == null);
     // an excluded package that is no package is refused at load
     try t.expect(std.mem.indexOf(u8, bzl, "which is not a package of release/readme_e2e/packages.bzl") != null);
