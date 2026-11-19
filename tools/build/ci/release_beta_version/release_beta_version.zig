@@ -16,7 +16,8 @@
 //!  - `[package] version` of each member (the members are found the way `mopm stage` finds
 //!    them: every directory holding a `mopm.toml`, below the root, not below another member,
 //!    skipping hidden directories and buck-out, node_modules, zig-out, zig-cache);
-//!  - in `[dependencies]` and `[dev-dependencies]`, a requirement on another member that has an
+//!  - in `[dependencies]` and `[dev-dependencies]` (keyed by a member's full `[package] name`, the
+//!    quoted `"<namespace>/<name>"` mopm writes, or a bare name), a requirement on another member that has an
 //!    exact comparator `=MAJOR.MINOR.PATCH`: that number becomes the new version, because
 //!    `mopm stage` checks each such requirement against the member's version. Every other
 //!    comparator (`^0.1`, `>=0.1, <0.2`, `~0.1.0`, `0.1`, `*`, `=0.1`) accepts every 0.1.x and is
@@ -26,6 +27,7 @@
 //! leading zeros); a member's version is not in 0.1.x; a member's name or version is missing
 //! or not a plain one-line string; two members share a name; a requirement on a member is not
 //! comparators it can read, or its exact comparator is not the member's current version; a
+//! dependency key is neither a bare name nor a quoted bare or `<namespace>/<name>` name; a
 //! manifest holds a multi-line string or a dependency line it cannot read. Running it again
 //! with the same version changes nothing.
 const std = @import("std");
@@ -81,14 +83,47 @@ fn isBareKey(s: []const u8) bool {
     return true;
 }
 
+/// mopm's namespace, `^[a-z0-9]+(-[a-z0-9]+)*$`, at most 39 characters (a GitHub login in lower case).
+fn isNamespace(s: []const u8) bool {
+    if (s.len == 0 or s.len > 39 or s[0] == '-' or s[s.len - 1] == '-') return false;
+    var prev: u8 = 0;
+    for (s) |c| {
+        if (!(std.ascii.isLower(c) or std.ascii.isDigit(c) or c == '-')) return false;
+        if (c == '-' and prev == '-') return false;
+        prev = c;
+    }
+    return true;
+}
+
+/// mopm's full name `<namespace>/<name>`, the name `^[a-z][a-z0-9_]{1,63}$` (src/core/names.zig of mopm
+/// 0.0.113): the form of every `[package] name` and dependency key since namespaced packages.
+fn isFullName(s: []const u8) bool {
+    const slash = std.mem.indexOfScalar(u8, s, '/') orelse return false;
+    const name = s[slash + 1 ..];
+    if (!isNamespace(s[0..slash]) or name.len < 2 or name.len > 64 or !std.ascii.isLower(name[0])) return false;
+    for (name) |c| if (!(std.ascii.isLower(c) or std.ascii.isDigit(c) or c == '_')) return false;
+    return true;
+}
+
+/// The package a dependency key names, or null when the key is not a form this tool reads: a bare
+/// key (`json`), or a one-line basic string without escapes holding a bare key or a full name
+/// (`"komira-ai/json"`, as mopm writes it). A key in any other spelling could name a member under a
+/// spelling the match below would miss, so it is refused rather than passed over.
+fn depKey(s: []const u8) ?[]const u8 {
+    if (isBareKey(s)) return s;
+    if (s.len < 2 or s[0] != '"' or s[s.len - 1] != '"') return null;
+    const inner = s[1 .. s.len - 1];
+    if (isBareKey(inner) or isFullName(inner)) return inner;
+    return null;
+}
+
 fn header(a: Allocator, why: *[]const u8, where: []const u8, line_no: usize, inner_raw: []const u8) Error!Header {
     const inner = std.mem.trim(u8, inner_raw, " \t");
     if (std.mem.eql(u8, inner, "package")) return .{ .section = .package };
     if (std.mem.eql(u8, inner, "dependencies") or std.mem.eql(u8, inner, "dev-dependencies")) return .{ .section = .deps };
     inline for (.{ "dependencies.", "dev-dependencies." }) |p| {
         if (std.mem.startsWith(u8, inner, p)) {
-            const name = inner[p.len..];
-            if (!isBareKey(name)) return refuse(a, why, "{s}:{d}: the table '[{s}]' is a form this tool does not read", .{ where, line_no, inner });
+            const name = depKey(inner[p.len..]) orelse return refuse(a, why, "{s}:{d}: the table '[{s}]' is a form this tool does not read", .{ where, line_no, inner });
             return .{ .section = .dep_table, .dep = name };
         }
     }
@@ -300,20 +335,20 @@ pub fn rewriteManifest(a: Allocator, why: *[]const u8, where: []const u8, text: 
                 },
                 .deps => {
                     const p = pair(line) orelse return refuse(a, why, "{s}:{d}: a dependency line this tool does not read", .{ where, line_no });
-                    if (!isBareKey(p.key)) return refuse(a, why, "{s}:{d}: the dependency name '{s}' is not a plain name", .{ where, line_no, p.key });
+                    const dep = depKey(p.key) orelse return refuse(a, why, "{s}:{d}: the dependency key {s} is neither a plain name nor a quoted \"<namespace>/<name>\"", .{ where, line_no, p.key });
                     const value = line[p.value_at..];
                     if (value.len == 0 or (value[0] != '"' and value[0] != '{'))
-                        return refuse(a, why, "{s}:{d}: the dependency '{s}' is not a string or a one-line table", .{ where, line_no, p.key });
-                    if (memberVersion(members, p.key)) |current| {
+                        return refuse(a, why, "{s}:{d}: the dependency '{s}' is not a string or a one-line table", .{ where, line_no, dep });
+                    if (memberVersion(members, dep)) |current| {
                         if (value[0] == '"') {
-                            const q = quoted(value) orelse return refuse(a, why, "{s}:{d}: the requirement on {s} is not a plain one-line string", .{ where, line_no, p.key });
-                            const r = try rewriteRequirement(a, why, where, p.key, value[q.start..q.end], current, new, &pins);
+                            const q = quoted(value) orelse return refuse(a, why, "{s}:{d}: the requirement on {s} is not a plain one-line string", .{ where, line_no, dep });
+                            const r = try rewriteRequirement(a, why, where, dep, value[q.start..q.end], current, new, &pins);
                             edited = try std.mem.concat(a, u8, &.{ line[0 .. p.value_at + q.start], r, line[p.value_at + q.end ..] });
                         } else {
-                            edited = try rewriteInline(a, why, where, line_no, line, p, current, new, &pins);
+                            edited = try rewriteInline(a, why, where, line_no, line, p.value_at, dep, current, new, &pins);
                         }
                     } else if (value[0] == '{' and std.mem.indexOfScalar(u8, value, '}') == null) {
-                        return refuse(a, why, "{s}:{d}: the dependency '{s}' is not a one-line table", .{ where, line_no, p.key });
+                        return refuse(a, why, "{s}:{d}: the dependency '{s}' is not a one-line table", .{ where, line_no, dep });
                     }
                 },
                 .dep_table => if (memberVersion(members, dep_table)) |current| {
@@ -335,8 +370,8 @@ pub fn rewriteManifest(a: Allocator, why: *[]const u8, where: []const u8, text: 
 }
 
 /// `name = { version = "req", path = "../x" }` with the requirement rewritten.
-fn rewriteInline(a: Allocator, why: *[]const u8, where: []const u8, line_no: usize, line: []const u8, p: Pair, current: []const u8, new: []const u8, pins: *usize) Error![]u8 {
-    const value = line[p.value_at..];
+fn rewriteInline(a: Allocator, why: *[]const u8, where: []const u8, line_no: usize, line: []const u8, value_at: usize, dep: []const u8, current: []const u8, new: []const u8, pins: *usize) Error![]u8 {
+    const value = line[value_at..];
     // The table ends at the first '}' outside a string; only a comment may follow it.
     var in_str = false;
     var close: ?usize = null;
@@ -347,9 +382,9 @@ fn rewriteInline(a: Allocator, why: *[]const u8, where: []const u8, line_no: usi
             break;
         }
     }
-    const end = close orelse return refuse(a, why, "{s}:{d}: the dependency '{s}' is not a one-line table", .{ where, line_no, p.key });
+    const end = close orelse return refuse(a, why, "{s}:{d}: the dependency '{s}' is not a one-line table", .{ where, line_no, dep });
     const rest = std.mem.trim(u8, value[end + 1 ..], " \t");
-    if (rest.len != 0 and rest[0] != '#') return refuse(a, why, "{s}:{d}: the dependency '{s}' has text after its table", .{ where, line_no, p.key });
+    if (rest.len != 0 and rest[0] != '#') return refuse(a, why, "{s}:{d}: the dependency '{s}' has text after its table", .{ where, line_no, dep });
     var seg_start: usize = 1;
     var i: usize = 1;
     in_str = false;
@@ -362,18 +397,18 @@ fn rewriteInline(a: Allocator, why: *[]const u8, where: []const u8, line_no: usi
         const seg = value[seg_start..i];
         if (pair(seg)) |sp| {
             if (std.mem.eql(u8, sp.key, "version")) {
-                if (found) return refuse(a, why, "{s}:{d}: '{s}' sets version twice", .{ where, line_no, p.key });
+                if (found) return refuse(a, why, "{s}:{d}: '{s}' sets version twice", .{ where, line_no, dep });
                 found = true;
                 const sv = seg[sp.value_at..];
                 const trimmed = std.mem.trimRight(u8, sv, " \t");
-                const q = quoted(trimmed) orelse return refuse(a, why, "{s}:{d}: the requirement on {s} is not a plain string", .{ where, line_no, p.key });
-                if (q.end + 1 != trimmed.len) return refuse(a, why, "{s}:{d}: the requirement on {s} is not a plain string", .{ where, line_no, p.key });
-                const r = try rewriteRequirement(a, why, where, p.key, trimmed[q.start..q.end], current, new, pins);
-                const at = p.value_at + seg_start + sp.value_at + q.start;
+                const q = quoted(trimmed) orelse return refuse(a, why, "{s}:{d}: the requirement on {s} is not a plain string", .{ where, line_no, dep });
+                if (q.end + 1 != trimmed.len) return refuse(a, why, "{s}:{d}: the requirement on {s} is not a plain string", .{ where, line_no, dep });
+                const r = try rewriteRequirement(a, why, where, dep, trimmed[q.start..q.end], current, new, pins);
+                const at = value_at + seg_start + sp.value_at + q.start;
                 result = try std.mem.concat(a, u8, &.{ line[0..at], r, line[at + (q.end - q.start) ..] });
             }
         } else if (std.mem.trim(u8, seg, " \t").len != 0) {
-            return refuse(a, why, "{s}:{d}: the table of '{s}' holds text this tool does not read", .{ where, line_no, p.key });
+            return refuse(a, why, "{s}:{d}: the table of '{s}' holds text this tool does not read", .{ where, line_no, dep });
         }
         seg_start = i + 1;
     }
