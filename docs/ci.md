@@ -112,7 +112,7 @@ It does three things, in this order:
    10 s to answer a PING drops a connection whose PING waits behind upload
    data, with every stream on it; and `max_concurrent_uploads_per_action = 4`,
    so fewer streams share the connection and each blob finishes sooner.
-   Developers put the same keys in their own gitignored
+   Developers put the addresses, instance name, `tls` and properties in their own gitignored
    `.buckconfig.local` ([DEVELOPMENT.md](../DEVELOPMENT.md)). Optional
    inputs add the rest: `darwin-properties` with `darwin-macos-hosts` (both or
    neither) write `darwin_arm64_properties` and `darwin_macos_hosts`;
