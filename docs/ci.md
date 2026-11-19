@@ -530,11 +530,12 @@ would be handed two files for one name.
    nothing to end. A group that was already committed is not ended: mopm refuses and says to yank it.
 5. **`prod-smoke`** runs once the group is visible. `release_staged_verify smoke` reads the prod index
    (`https://api.mopm.dev/index/config.json`, whose `stage` must be `prod` and whose `channel_url` must be
-   exactly `https://conda.mopm.dev/`), downloads `<channel_url><subdir>/<filename>` for every file of the
-   plan (https, no redirect followed) and compares each file's sha256 and size with the plan, trying up to
-   five times 30 seconds apart because the channel's cache can lag a commit by a minute. On failure it
-   prints the exact `mopm yank --group <id> --registry prod --reason ...` for the group in `state.json`;
-   a person decides whether to run it.
+   exactly `https://conda.mopm.dev/`), downloads `<channel_url><namespace>/<subdir>/<filename>` (each
+   namespace, `komira-ai` here, is its own channel) for every file of the plan (https, no redirect
+   followed) and compares each file's sha256 and size with the plan, trying up to five times 30 seconds
+   apart because the channel's cache can lag a commit by a minute. On failure it prints the exact
+   `mopm yank --group <id> --registry prod --reason ...` for the group in `state.json`; a person decides
+   whether to run it.
 
 **The identity.** No job holds a registry token and the environment `prod` holds no secret. The three jobs
 that talk to the registry run in the environment `prod` and exchange the job's GitHub OIDC token; the

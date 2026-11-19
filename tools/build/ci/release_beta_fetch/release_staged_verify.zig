@@ -22,12 +22,12 @@
 //!
 //! `smoke` is what `prod-smoke` runs after `prod-commit`, when the group is visible. It reads the prod
 //! index (`--config-url`, whose `stage` must be `prod` and whose `channel_url` must be exactly
-//! `prod_channel`), downloads `<channel_url><subdir>/<filename>` for every file of the plan, as a user's
-//! install would fetch them (no redirect followed, https only), and compares each file's sha256 and size
-//! with the plan. A run that finds a difference is repeated `--attempts` times (default 3) with `--delay`
-//! seconds between (default 20: the channel's cache can lag a commit by a minute); it fails when the last
-//! attempt does. On failure it prints the yank command for the group `state.json` names, for a human to run:
-//! it never sends one.
+//! `prod_channel`), downloads `<channel_url><namespace>/<subdir>/<filename>` (the member's namespace is its
+//! channel) for every file of the plan, as a user's install would fetch them (no redirect followed, https
+//! only), and compares each file's sha256 and size with the plan. A run that finds a difference is
+//! repeated `--attempts` times (default 3) with `--delay` seconds between (default 20: the channel's cache
+//! can lag a commit by a minute); it fails when the last attempt does. On failure it prints the yank command
+//! for the group `state.json` names, for a human to run: it never sends one.
 const std = @import("std");
 const rbf = @import("release_beta_fetch.zig");
 

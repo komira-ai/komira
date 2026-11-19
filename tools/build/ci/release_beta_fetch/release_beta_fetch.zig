@@ -3,21 +3,24 @@
 //!   release_beta_fetch --staged <dir> --config-url <url> --stage <name> --out <dir>
 //!
 //! `--staged` is a staged set as `mopm stage` wrote it (spec/staged-set.md of mopm): `plan.json`
-//! and each member's README. Its `.conda` files, if the directory holds them, are never read: the
-//! bytes under test are the ones the registry serves. It was the program of a beta job of release.yml,
+//! and each member's README; every member is named by its full name, `<namespace>/<name>`. Its
+//! `.conda` files, if the directory holds them, are never read: the bytes under test are the ones
+//! the registry serves. It was the program of a beta job of release.yml,
 //! which no longer exists; release_staged_verify.zig (beside this file) imports its plan reader and
 //! client for the prod publish, and the program itself is no longer built.
 //!
 //! What it does, in order:
-//!  1. reads `plan.json` and refuses a plan it cannot check: no member, a member that is not an
-//!     `upload` (its bytes are not in the set), a member without a file or a README, a file or
-//!     README path that leaves its directory, a malformed sha256, a file larger than the cap
-//!     (`max_file_bytes`), a name listed twice, and two paths of the set that collide (the same, one
-//!     inside the other, or the same in another letter case);
+//!  1. reads `plan.json` and refuses a plan it cannot check: no member, a member whose name is not
+//!     a full name (`<namespace>/<name>`), a member that is not an `upload` (its bytes are not in
+//!     the set), a member without a file or a README, a file or README path that leaves its
+//!     directory, a malformed sha256, a file larger than the cap (`max_file_bytes`), a name listed
+//!     twice, and two paths of the set that collide (the same, one inside the other, or the same in
+//!     another letter case);
 //!  2. fetches `--config-url` (the registry's `index/config.json`) over https, requires its
 //!     `stage` to be `--stage` (so a beta check cannot read prod by a wrong URL) and takes its
 //!     `channel_url`, which must be exactly `beta_channel` (the pinned beta channel);
-//!  3. fetches `<channel_url><subdir>/<filename>` for every file of the plan, with no redirect
+//!  3. fetches `<channel_url><namespace>/<subdir>/<filename>` (each namespace is its own channel under
+//!     `channel_url`, spec/index.md of mopm) for every file of the plan, with no redirect
 //!     followed, and compares the sha256 and the size with the plan; every file is checked and
 //!     every mismatch (a missing file, another size, another hash) is reported;
 //!  4. only when every file matched, writes `--out`: `plan.json` as it was, each README, and the
@@ -99,7 +102,15 @@ fn safeSegment(s: []const u8) bool {
     return true;
 }
 
-/// A relative path of safe segments (`name/README.md`).
+/// The namespace of a full name `<namespace>/<name>` (two safe segments), or null for any other name.
+pub fn namespaceOf(full: []const u8) ?[]const u8 {
+    const slash = std.mem.indexOfScalar(u8, full, '/') orelse return null;
+    const ns = full[0..slash];
+    if (!safeSegment(ns) or !safeSegment(full[slash + 1 ..])) return null;
+    return ns;
+}
+
+/// A relative path of safe segments (`namespace/name/README.md`).
 fn safeRelative(s: []const u8) bool {
     var it = std.mem.splitScalar(u8, s, '/');
     while (it.next()) |seg| if (!safeSegment(seg)) return false;
@@ -118,7 +129,7 @@ pub fn parsePlan(a: Allocator, why: *[]const u8, text: []const u8) Error!Plan {
         return refuse(a, why, "plan.json does not parse: {s}", .{@errorName(e)});
     if (plan.members.len == 0) return refuse(a, why, "plan.json has no member: there is nothing to check", .{});
     for (plan.members, 0..) |m, i| {
-        if (!safeSegment(m.name)) return refuse(a, why, "member {d}: name '{s}' is not a plain name", .{ i, m.name });
+        if (namespaceOf(m.name) == null) return refuse(a, why, "member {d}: name '{s}' is not a full name <namespace>/<name>", .{ i, m.name });
         if (!std.mem.eql(u8, m.action, "upload"))
             return refuse(a, why, "member {s}: action is '{s}', not 'upload': its bytes are not in the set, so what the registry serves cannot be checked against it", .{ m.name, m.action });
         if (m.version.len == 0) return refuse(a, why, "member {s}: no version", .{m.name});
@@ -236,13 +247,18 @@ pub fn checkFiles(a: Allocator, plan: Plan, fetcher: Fetcher, channel: []const u
     var bad = std.ArrayList([]const u8).empty;
     var failed: usize = 0;
     for (plan.members) |m| for (m.files) |f| {
-        const url = try std.fmt.allocPrint(a, "{s}{s}/{s}", .{ channel, f.subdir, f.filename });
         const label = try std.fmt.allocPrint(a, "{s} {s} {s}/{s}", .{ m.name, m.version, f.subdir, f.filename });
         const max: usize = std.math.cast(usize, f.size +| 1) orelse std.math.maxInt(usize);
         const before = bad.items.len;
         defer if (bad.items.len > before) {
             failed += 1;
         };
+        // A plan from parsePlan has only full names; any other has no channel to fetch from.
+        const ns = namespaceOf(m.name) orelse {
+            try bad.append(a, try std.fmt.allocPrint(a, "{s}: '{s}' is not a full name <namespace>/<name>, so it has no channel", .{ label, m.name }));
+            continue;
+        };
+        const url = try std.fmt.allocPrint(a, "{s}{s}/{s}/{s}", .{ channel, ns, f.subdir, f.filename });
         const body = switch (fetcher.get(a, url, max)) {
             .body => |b| b,
             .status => |s| {
