@@ -165,9 +165,7 @@ test "a manifest the edit cannot follow is refused rather than guessed at" {
         .{ .extra = "[dependencies]\nsib = { version = \"=0.1.0\" } junk\n", .needle = "text after its table" },
         .{ .extra = "[dependencies]\nsib = { version = \"=0.1.0\", version = \"=0.1.0\" }\n", .needle = "version twice" },
         .{ .extra = "[dependencies]\nsib = { version = 3 }\n", .needle = "not a plain string" },
-        .{ .extra = "[dependencies]\n\"sib\" = \"=0.1.0\"\n", .needle = "not a plain name" },
         .{ .extra = "[dependencies]\njust text\n", .needle = "dependency line" },
-        .{ .extra = "[dependencies.\"sib\"]\nversion = \"=0.1.0\"\n", .needle = "form this tool does not read" },
         .{ .extra = "[ dependencies . sib ]\nversion = \"=0.1.0\"\n", .needle = "form this tool does not read" },
         .{ .extra = "[dependencies.sib.x]\nversion = \"=0.1.0\"\n", .needle = "form this tool does not read" },
         .{ .extra = "[native]\nx = \"\"\"a\nb\"\"\"\n", .needle = "multi-line string" },
@@ -184,6 +182,114 @@ test "a manifest the edit cannot follow is refused rather than guessed at" {
     try refusedWith(&why, rbv.readIdentity(a, &why, "m.toml", "[package]\nversion = \"0.1.0\"\n"), "has no name");
     why = "";
     try refusedWith(&why, rbv.readIdentity(a, &why, "m.toml", "[package]\nname = \"x\"\nname = \"y\"\nversion = \"0.1.0\"\n"), "set twice");
+}
+
+const NS_SIBLING = [_]rbv.Member{.{ .name = "komira-ai/sib", .version = "0.1.0" }};
+
+test "a dependency keyed by its quoted namespaced name, in each spelling mopm reads, takes the new number" {
+    var ar = arena();
+    defer ar.deinit();
+    const a = ar.allocator();
+    const deps =
+        \\[dependencies]
+        \\"komira-ai/sib" = "=0.1.0"
+        \\"komira-ai/other" = { path = "../other", version = "=0.1.0" }
+        \\
+        \\[dev-dependencies]
+        \\"komira-ai/sib"   =   { path = "../sib", version = "0.1, =0.1.0" }   # the sibling
+        \\
+        \\[dependencies."komira-ai/sib"]
+        \\path = "../sib"
+        \\version = "=0.1.0"
+        \\
+    ;
+    const want =
+        \\[dependencies]
+        \\"komira-ai/sib" = "=0.1.999"
+        \\"komira-ai/other" = { path = "../other", version = "=0.1.0" }
+        \\
+        \\[dev-dependencies]
+        \\"komira-ai/sib"   =   { path = "../sib", version = "0.1, =0.1.999" }   # the sibling
+        \\
+        \\[dependencies."komira-ai/sib"]
+        \\path = "../sib"
+        \\version = "=0.1.999"
+        \\
+    ;
+    const r = try rewrite(a, try manifest(a, "komira-ai/x", "0.1.0", deps), &NS_SIBLING);
+    try t.expectEqual(@as(usize, 3), r.pins_changed);
+    try t.expectEqualStrings(try manifest(a, "komira-ai/x", "0.1.999", want), r.text);
+}
+
+test "a quoted bare key is the same key as the bare one, and both still match a member" {
+    var ar = arena();
+    defer ar.deinit();
+    const a = ar.allocator();
+    const r = try rewrite(a, try manifest(a, "x", "0.1.0", "[dependencies]\n\"sib\" = \"=0.1.0\"\n[dev-dependencies]\nsib = { version = \"=0.1.0\" }\n[dependencies.\"sib\"]\nversion = \"=0.1.0\"\n"), &SIBLING);
+    try t.expectEqual(@as(usize, 3), r.pins_changed);
+    try t.expectEqualStrings(try manifest(a, "x", "0.1.999", "[dependencies]\n\"sib\" = \"=0.1.999\"\n[dev-dependencies]\nsib = { version = \"=0.1.999\" }\n[dependencies.\"sib\"]\nversion = \"=0.1.999\"\n"), r.text);
+}
+
+test "a namespaced key at the bounds of mopm's name grammar is read" {
+    var ar = arena();
+    defer ar.deinit();
+    const a = ar.allocator();
+    const ns39 = "a" ** 38 ++ "b";
+    const name64 = "n" ** 63 ++ "_";
+    for ([_][]const u8{ ns39 ++ "/ab", "k/" ++ name64, "a-b-c/a9_", "0/zz", "komira-ai/s1" }) |key| {
+        const members = [_]rbv.Member{.{ .name = key, .version = "0.1.0" }};
+        const line = try std.fmt.allocPrint(a, "[dependencies]\n\"{s}\" = \"=0.1.0\"\n", .{key});
+        const r = try rewrite(a, try manifest(a, "komira-ai/x", "0.1.0", line), &members);
+        try t.expectEqual(@as(usize, 1), r.pins_changed);
+        try t.expect(std.mem.indexOf(u8, r.text, try std.fmt.allocPrint(a, "\"{s}\" = \"=0.1.999\"\n", .{key})) != null);
+    }
+}
+
+test "a dependency key that is not a bare name or a quoted bare or namespaced name is refused, naming the key" {
+    var ar = arena();
+    defer ar.deinit();
+    const a = ar.allocator();
+    const ns40 = "a" ** 40;
+    const name65 = "n" ** 65;
+    const keys = [_][]const u8{
+        "komira-ai/sib", // unquoted: not a TOML bare key
+        "komira-ai.sib", // a dotted key
+        "\"komira-ai/\"", // no name
+        "\"/sib\"", // no namespace
+        "\"komira-ai/sib/x\"", // two slashes
+        "\"Komira-ai/sib\"", // upper case namespace
+        "\"komira-ai/Sib\"", // upper case name
+        "\"komira--ai/sib\"", // a doubled hyphen
+        "\"-komira/sib\"", // a leading hyphen
+        "\"komira-/sib\"", // a trailing hyphen
+        "\"komira_ai/sib\"", // an underscore in the namespace
+        "\"komira-ai/s\"", // a one-letter name
+        "\"komira-ai/1sib\"", // a name that does not start with a letter
+        "\"komira-ai/si-b\"", // a hyphen in the name
+        "\"komira-ai/si b\"", // a space in the name
+        "\"" ++ ns40 ++ "/sib\"", // a namespace of 40
+        "\"komira-ai/" ++ name65 ++ "\"", // a name of 65
+        "\"komira-ai\\u002fsib\"", // an escape
+        "'komira-ai/sib'", // a literal string
+        "\"komira-ai/sib", // no closing quote
+        "komira-ai/sib\"", // no opening quote
+        "\"\"", // empty
+        "\"", // one quote
+        "\"si b\"", // a quoted key that is no name at all
+    };
+    for (keys) |key| {
+        const deps = try std.fmt.allocPrint(a, "[dependencies]\n{s} = \"=0.1.0\"\n", .{key});
+        var why: []const u8 = "";
+        try refusedWith(&why, rbv.rewriteManifest(a, &why, "m.toml", try manifest(a, "x", "0.1.0", deps), &NS_SIBLING, NEW), "");
+        // `manifest` holds 8 lines before `extra`: [dependencies] is line 9, the entry line 10
+        try t.expectEqualStrings(try std.fmt.allocPrint(a, "m.toml:10: the dependency key {s} is neither a plain name nor a quoted \"<namespace>/<name>\"", .{key}), why);
+    }
+    for ([_][]const u8{ "dependencies.\"komira-ai/\"", "dev-dependencies.'komira-ai/sib'", "dependencies.\"komira-ai/sib\".x", "dependencies.\"Komira-ai/sib\"", "dependencies.komira-ai/sib" }) |inner| {
+        const extra = try std.fmt.allocPrint(a, "[{s}]\nversion = \"=0.1.0\"\n", .{inner});
+        var why: []const u8 = "";
+        try refusedWith(&why, rbv.rewriteManifest(a, &why, "m.toml", try manifest(a, "x", "0.1.0", extra), &NS_SIBLING, NEW), "");
+        try t.expectEqualStrings(try std.fmt.allocPrint(a, "m.toml:9: the table '[{s}]' is a form this tool does not read", .{inner}), why);
+    }
 }
 
 /// A workspace of members in a scratch directory: (relative dir, name, version, extra lines).
@@ -234,6 +340,26 @@ test "every member of a workspace gets the version and the pins between them fol
     }
     const c = try read(a, tmp.dir, "deep/er/c/mopm.toml");
     try t.expect(std.mem.indexOf(u8, c, "alpha = \"=0.1.999\"\nbeta = \"^0.1\"\n") != null);
+}
+
+test "a workspace of namespaced members, as mopm 0.0.113 writes it, is given the version" {
+    var ar = arena();
+    defer ar.deinit();
+    const a = ar.allocator();
+    var tmp = t.tmpDir(.{ .iterate = true });
+    defer tmp.cleanup();
+    try lay(a, tmp.dir, &.{
+        .{ .dir = "atomic_alias", .name = "komira-ai/atomic_alias", .version = "0.1.0" },
+        .{ .dir = "async_api", .name = "komira-ai/async_api", .version = "0.1.0", .extra = "[dependencies]\n\"komira-ai/atomic_alias\" = { path = \"../atomic_alias\", version = \"0.1\" }\n" },
+        .{ .dir = "bench", .name = "komira-ai/bench", .version = "0.1.0", .extra = "[dependencies]\n\"komira-ai/async_api\" = { path = \"../async_api\", version = \"=0.1.0\" }\n\n[dev-dependencies]\n\"komira-ai/atomic_alias\" = \"=0.1.0\"\n" },
+    });
+    var why: []const u8 = "";
+    const out = try runIn(a, tmp.dir, NEW, &why);
+    try t.expectEqual(@as(usize, 3), out.rep.members);
+    try t.expectEqual(@as(usize, 3), out.rep.versions_changed);
+    try t.expectEqual(@as(usize, 2), out.rep.pins_changed);
+    try t.expectEqualStrings(try manifest(a, "komira-ai/async_api", NEW, "[dependencies]\n\"komira-ai/atomic_alias\" = { path = \"../atomic_alias\", version = \"0.1\" }\n"), try read(a, tmp.dir, "async_api/mopm.toml"));
+    try t.expectEqualStrings(try manifest(a, "komira-ai/bench", NEW, "[dependencies]\n\"komira-ai/async_api\" = { path = \"../async_api\", version = \"=0.1.999\" }\n\n[dev-dependencies]\n\"komira-ai/atomic_alias\" = \"=0.1.999\"\n"), try read(a, tmp.dir, "bench/mopm.toml"));
 }
 
 test "a second run with the same version changes nothing and writes nothing" {

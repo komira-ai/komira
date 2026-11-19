@@ -620,15 +620,17 @@ rewrite before the stage is all the packages need: the artifacts are not rebuilt
 each member's manifest (found the way `mopm stage` finds them) and keeps every other byte:
 
 - `[package] version` becomes the new version;
-- in `[dependencies]` and `[dev-dependencies]`, a requirement on another member with an exact
-  comparator `=X.Y.Z` (a string, an inline table's `version`, or `[dependencies.<name>]`'s `version`)
+- in `[dependencies]` and `[dev-dependencies]`, keyed by the member's full name as mopm writes it
+  (`"komira-ai/json"`) or by a bare or quoted bare name, a requirement on another member with an exact
+  comparator `=X.Y.Z` (a string, an inline table's `version`, or `[dependencies."<name>"]`'s `version`)
   gets the new number, because `mopm stage` checks each requirement against the member's version.
   Every other comparator (`^0.1`, `>=0.1, <0.2`, `~0.1.0`, `0.1`, `*`, `=0.1`) accepts every `0.1.x`
   and is kept; `mopm stage` itself refuses a range that does not accept the new version.
 
 It writes nothing and fails when the version is not `0.1.<PATCH>` (digits, no leading zeros, no
 suffix), a member's version is not in `0.1.x`, two members share a name, a requirement on a member is
-not comparators it can read or pins a number the member does not have, or a manifest holds a
+not comparators it can read or pins a number the member does not have, a dependency key is neither a
+bare name nor a quoted bare or `"<namespace>/<name>"` name (mopm's grammar), or a manifest holds a
 multi-line string or a dependency line it cannot read. Running it again with the same version changes
 nothing. Its cases (`//tools/build/ci:release_beta_version_unit`) run on scratch workspaces, and
 `//:release_workflow_cases` holds the placement: the rewrite is in `mopm-stage`,
