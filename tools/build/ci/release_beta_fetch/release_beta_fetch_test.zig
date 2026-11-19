@@ -23,11 +23,11 @@ fn sha(a: std.mem.Allocator, bytes: []const u8) ![]u8 {
 
 fn planText(a: std.mem.Allocator, a_bytes: []const u8, b_bytes: []const u8) ![]u8 {
     return std.fmt.allocPrint(a,
-        \\{{"version":1,"members":[
-        \\ {{"name":"pa","version":"0.1.9","action":"upload","manifest_sha256":"x","readme":"pa/README.md",
-        \\   "files":[{{"subdir":"linux-64","filename":"mojo-pa-0.1.9-mojo1.0.0_0.conda","sha256":"{s}","size":{d}}}]}},
-        \\ {{"name":"pb","version":"0.1.9","action":"upload","readme":"pb/README.md",
-        \\   "files":[{{"subdir":"linux-64","filename":"mojo-pb-0.1.9-mojo1.0.0_0.conda","sha256":"{s}","size":{d}}}]}}
+        \\{{"version":2,"members":[
+        \\ {{"name":"ns/pa","version":"0.1.9","action":"upload","manifest_sha256":"x","readme":"ns/pa/README.md",
+        \\   "files":[{{"subdir":"linux-64","filename":"mojo-ns.pa-0.1.9-mojo1.0.0_0.conda","sha256":"{s}","size":{d}}}]}},
+        \\ {{"name":"ns/pb","version":"0.1.9","action":"upload","readme":"ns/pb/README.md",
+        \\   "files":[{{"subdir":"linux-64","filename":"mojo-ns.pb-0.1.9-mojo1.0.0_0.conda","sha256":"{s}","size":{d}}}]}}
         \\]}}
     , .{ try sha(a, a_bytes), a_bytes.len, try sha(a, b_bytes), b_bytes.len });
 }
@@ -51,8 +51,8 @@ const Fake = struct {
     }
 };
 
-const URL_A = CHANNEL ++ "linux-64/mojo-pa-0.1.9-mojo1.0.0_0.conda";
-const URL_B = CHANNEL ++ "linux-64/mojo-pb-0.1.9-mojo1.0.0_0.conda";
+const URL_A = CHANNEL ++ "ns/linux-64/mojo-ns.pa-0.1.9-mojo1.0.0_0.conda";
+const URL_B = CHANNEL ++ "ns/linux-64/mojo-ns.pb-0.1.9-mojo1.0.0_0.conda";
 
 fn arena() std.heap.ArenaAllocator {
     return std.heap.ArenaAllocator.init(t.allocator);
@@ -95,20 +95,51 @@ test "a plan that cannot be checked is refused, naming why" {
     const f = "\"files\":[{\"subdir\":\"linux-64\",\"filename\":\"f.conda\",\"sha256\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"size\":1}]";
     try parseRefused("not json", "does not parse");
     try parseRefused("{\"members\":[]}", "no member");
-    try parseRefused("{\"members\":[{\"name\":\"p\",\"version\":\"0.1.1\",\"action\":\"skip\",\"readme\":\"p/README.md\"," ++ f ++ "}]}", "not 'upload'");
-    try parseRefused("{\"members\":[{\"name\":\"p\",\"version\":\"0.1.1\",\"action\":\"refuse\",\"readme\":\"p/README.md\"," ++ f ++ "}]}", "not 'upload'");
-    try parseRefused("{\"members\":[{\"name\":\"p\",\"version\":\"0.1.1\",\"action\":\"upload\",\"readme\":\"p/README.md\"}]}", "no file");
-    try parseRefused("{\"members\":[{\"name\":\"p\",\"version\":\"0.1.1\",\"action\":\"upload\"," ++ f ++ "}]}", "no readme");
-    try parseRefused("{\"members\":[{\"name\":\"p\",\"version\":\"\",\"action\":\"upload\",\"readme\":\"p/README.md\"," ++ f ++ "}]}", "no version");
-    try parseRefused("{\"members\":[{\"name\":\"p\",\"version\":\"0.1.1\",\"action\":\"upload\",\"readme\":\"../README.md\"," ++ f ++ "}]}", "leaves the set");
-    try parseRefused("{\"members\":[{\"name\":\"p\",\"version\":\"0.1.1\",\"action\":\"upload\",\"readme\":\"/etc/passwd\"," ++ f ++ "}]}", "leaves the set");
-    try parseRefused("{\"members\":[{\"name\":\"..\",\"version\":\"0.1.1\",\"action\":\"upload\",\"readme\":\"p/README.md\"," ++ f ++ "}]}", "plain name");
-    try parseRefused("{\"members\":[{\"name\":\"p\",\"version\":\"0.1.1\",\"action\":\"upload\",\"readme\":\"p/README.md\",\"files\":[{\"subdir\":\"linux-64\",\"filename\":\"../x.conda\",\"sha256\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"size\":1}]}]}", "plain subdir");
-    try parseRefused("{\"members\":[{\"name\":\"p\",\"version\":\"0.1.1\",\"action\":\"upload\",\"readme\":\"p/README.md\",\"files\":[{\"subdir\":\"linux-64\",\"filename\":\"f.conda\",\"sha256\":\"ABC\",\"size\":1}]}]}", "64 lowercase hex");
-    try parseRefused("{\"members\":[{\"name\":\"p\",\"version\":\"0.1.1\",\"action\":\"upload\",\"readme\":\"p/README.md\",\"files\":[{\"subdir\":\"linux-64\",\"filename\":\"f.conda\",\"sha256\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"size\":1},{\"subdir\":\"linux-64\",\"filename\":\"f.conda\",\"sha256\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"size\":1}]}]}", "listed twice");
-    const m = "{\"name\":\"p\",\"version\":\"0.1.1\",\"action\":\"upload\",\"readme\":\"p/README.md\"," ++ f ++ "}";
+    try parseRefused("{\"members\":[{\"name\":\"ns/p\",\"version\":\"0.1.1\",\"action\":\"skip\",\"readme\":\"ns/p/README.md\"," ++ f ++ "}]}", "not 'upload'");
+    try parseRefused("{\"members\":[{\"name\":\"ns/p\",\"version\":\"0.1.1\",\"action\":\"refuse\",\"readme\":\"ns/p/README.md\"," ++ f ++ "}]}", "not 'upload'");
+    try parseRefused("{\"members\":[{\"name\":\"ns/p\",\"version\":\"0.1.1\",\"action\":\"upload\",\"readme\":\"ns/p/README.md\"}]}", "no file");
+    try parseRefused("{\"members\":[{\"name\":\"ns/p\",\"version\":\"0.1.1\",\"action\":\"upload\"," ++ f ++ "}]}", "no readme");
+    try parseRefused("{\"members\":[{\"name\":\"ns/p\",\"version\":\"\",\"action\":\"upload\",\"readme\":\"ns/p/README.md\"," ++ f ++ "}]}", "no version");
+    try parseRefused("{\"members\":[{\"name\":\"ns/p\",\"version\":\"0.1.1\",\"action\":\"upload\",\"readme\":\"../README.md\"," ++ f ++ "}]}", "leaves the set");
+    try parseRefused("{\"members\":[{\"name\":\"ns/p\",\"version\":\"0.1.1\",\"action\":\"upload\",\"readme\":\"/etc/passwd\"," ++ f ++ "}]}", "leaves the set");
+    try parseRefused("{\"members\":[{\"name\":\"..\",\"version\":\"0.1.1\",\"action\":\"upload\",\"readme\":\"p/README.md\"," ++ f ++ "}]}", "not a full name");
+    try parseRefused("{\"members\":[{\"name\":\"ns/p\",\"version\":\"0.1.1\",\"action\":\"upload\",\"readme\":\"ns/p/README.md\",\"files\":[{\"subdir\":\"linux-64\",\"filename\":\"../x.conda\",\"sha256\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"size\":1}]}]}", "plain subdir");
+    try parseRefused("{\"members\":[{\"name\":\"ns/p\",\"version\":\"0.1.1\",\"action\":\"upload\",\"readme\":\"ns/p/README.md\",\"files\":[{\"subdir\":\"linux-64\",\"filename\":\"f.conda\",\"sha256\":\"ABC\",\"size\":1}]}]}", "64 lowercase hex");
+    try parseRefused("{\"members\":[{\"name\":\"ns/p\",\"version\":\"0.1.1\",\"action\":\"upload\",\"readme\":\"ns/p/README.md\",\"files\":[{\"subdir\":\"linux-64\",\"filename\":\"f.conda\",\"sha256\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"size\":1},{\"subdir\":\"linux-64\",\"filename\":\"f.conda\",\"sha256\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"size\":1}]}]}", "listed twice");
+    const m = "{\"name\":\"ns/p\",\"version\":\"0.1.1\",\"action\":\"upload\",\"readme\":\"ns/p/README.md\"," ++ f ++ "}";
     try parseRefused("{\"members\":[" ++ m ++ "," ++ m ++ "]}", "listed twice");
-    try parseRefused("{\"members\":[" ++ m ++ ",{\"name\":\"q\",\"version\":\"0.1.1\",\"action\":\"upload\",\"readme\":\"q/README.md\"," ++ f ++ "}]}", "is a file of");
+    try parseRefused("{\"members\":[" ++ m ++ ",{\"name\":\"ns/q\",\"version\":\"0.1.1\",\"action\":\"upload\",\"readme\":\"ns/q/README.md\"," ++ f ++ "}]}", "is a file of");
+}
+
+fn nameRefused(name: []const u8) !void {
+    var ar = arena();
+    defer ar.deinit();
+    const a = ar.allocator();
+    var why: []const u8 = "";
+    const plan = try planOf(a, &.{try memberJson(a, name, "p/README.md", "linux-64", "a.conda", 1)});
+    try t.expectError(error.Refused, rbf.parsePlan(a, &why, plan));
+    try t.expectEqualStrings(try std.fmt.allocPrint(a, "member 0: name '{s}' is not a full name <namespace>/<name>", .{name}), why);
+}
+
+test "a member name that is not a full name <namespace>/<name> is refused, naming it" {
+    try nameRefused("p"); // the name of a plan from before namespaces
+    try nameRefused("komira_json");
+    try nameRefused("");
+    try nameRefused("/p");
+    try nameRefused("ns/");
+    try nameRefused("a/b/c");
+    try nameRefused("../p");
+    try nameRefused("ns/..");
+    try nameRefused("./p");
+}
+
+test "a full name gives its namespace, and nothing else does" {
+    try t.expectEqualStrings("komira-ai", rbf.namespaceOf("komira-ai/json").?);
+    try t.expectEqualStrings("n", rbf.namespaceOf("n/x").?);
+    try t.expectEqual(@as(?[]const u8, null), rbf.namespaceOf("json"));
+    try t.expectEqual(@as(?[]const u8, null), rbf.namespaceOf("a/b/c"));
+    try t.expectEqual(@as(?[]const u8, null), rbf.namespaceOf("/json"));
+    try t.expectEqual(@as(?[]const u8, null), rbf.namespaceOf("komira-ai/"));
 }
 
 // ---- the channel ------------------------------------------------------------------------
@@ -197,7 +228,7 @@ test "one altered byte of the same size is a sha256 mismatch, and only that file
     defer ar.deinit();
     const o = try check(ar.allocator(), &.{ .{ .url = URL_A, .got = .{ .body = @constCast("package a bytez") } }, .{ .url = URL_B, .got = .{ .body = @constCast(BYTES_B) } } }, BYTES_A, BYTES_B);
     try t.expectEqual(@as(usize, 1), o.failures.len);
-    try mentionsOne(o.failures, "pa 0.1.9 linux-64/mojo-pa-0.1.9-mojo1.0.0_0.conda: sha256");
+    try mentionsOne(o.failures, "ns/pa 0.1.9 linux-64/mojo-ns.pa-0.1.9-mojo1.0.0_0.conda: sha256");
     try t.expectEqual(@as(usize, 1), o.checked.len);
 }
 
@@ -240,6 +271,51 @@ test "every failure is reported, not the first" {
     try t.expectEqual(@as(usize, 0), o.checked.len);
 }
 
+test "a file is fetched from its namespace's channel, not from the channel root" {
+    var ar = arena();
+    defer ar.deinit();
+    // The root serves the bytes at the flat path; a namespaced package is not there.
+    const o = try check(ar.allocator(), &.{
+        .{ .url = CHANNEL ++ "linux-64/mojo-ns.pa-0.1.9-mojo1.0.0_0.conda", .got = .{ .body = @constCast(BYTES_A) } },
+        .{ .url = URL_B, .got = .{ .body = @constCast(BYTES_B) } },
+    }, BYTES_A, BYTES_B);
+    try t.expectEqual(@as(usize, 1), o.failures.len);
+    try t.expectEqualStrings("ns/pa 0.1.9 linux-64/mojo-ns.pa-0.1.9-mojo1.0.0_0.conda: GET https://conda.example.test/ns/linux-64/mojo-ns.pa-0.1.9-mojo1.0.0_0.conda: HTTP 404 (not published)", o.failures[0]);
+}
+
+test "members of two namespaces are each fetched from their own channel" {
+    var ar = arena();
+    defer ar.deinit();
+    const a = ar.allocator();
+    var why: []const u8 = "";
+    const text = try std.mem.replaceOwned(u8, a, try planText(a, BYTES_A, BYTES_B), "\"name\":\"ns/pb\"", "\"name\":\"other/pb\"");
+    const plan = try rbf.parsePlan(a, &why, text);
+    var fake = Fake{ .routes = &.{
+        .{ .url = URL_A, .got = .{ .body = @constCast(BYTES_A) } },
+        .{ .url = CHANNEL ++ "other/linux-64/mojo-ns.pb-0.1.9-mojo1.0.0_0.conda", .got = .{ .body = @constCast(BYTES_B) } },
+    } };
+    var sink = std.Io.Writer.Allocating.init(a);
+    const o = try rbf.checkFiles(a, plan, fake.fetcher(), CHANNEL, &sink.writer);
+    try t.expectEqual(@as(usize, 0), o.failures.len);
+    try t.expectEqual(@as(usize, 2), o.checked.len);
+    try t.expectEqualStrings("other/pb", o.checked[1].member);
+}
+
+test "a plan that did not come through parsePlan with a flat name fails that file without a request" {
+    var ar = arena();
+    defer ar.deinit();
+    const a = ar.allocator();
+    const files = [_]rbf.File{.{ .subdir = "linux-64", .filename = "mojo-pa-0.1.9-mojo1.0.0_0.conda", .sha256 = "0" ** 64, .size = 1 }};
+    const members = [_]rbf.Member{.{ .name = "pa", .version = "0.1.9", .action = "upload", .files = &files, .readme = "pa/README.md" }};
+    var fake = Fake{ .routes = &.{} };
+    var sink = std.Io.Writer.Allocating.init(a);
+    const o = try rbf.checkFiles(a, .{ .members = &members }, fake.fetcher(), CHANNEL, &sink.writer);
+    try t.expectEqual(@as(usize, 0), fake.hits);
+    try t.expectEqual(@as(usize, 1), o.failed_files);
+    try t.expectEqual(@as(usize, 1), o.failures.len);
+    try t.expectEqualStrings("pa 0.1.9 linux-64/mojo-pa-0.1.9-mojo1.0.0_0.conda: 'pa' is not a full name <namespace>/<name>, so it has no channel", o.failures[0]);
+}
+
 // ---- the whole job, on disk -------------------------------------------------------------
 
 const Scene = struct {
@@ -250,11 +326,11 @@ const Scene = struct {
     fn init(a: std.mem.Allocator, plan: []const u8) !Scene {
         var tmp = std.testing.tmpDir(.{});
         const root = try tmp.dir.realpathAlloc(a, ".");
-        try tmp.dir.makePath("staged/pa");
-        try tmp.dir.makePath("staged/pb");
+        try tmp.dir.makePath("staged/ns/pa");
+        try tmp.dir.makePath("staged/ns/pb");
         try tmp.dir.writeFile(.{ .sub_path = "staged/plan.json", .data = plan });
-        try tmp.dir.writeFile(.{ .sub_path = "staged/pa/README.md", .data = "readme a\n" });
-        try tmp.dir.writeFile(.{ .sub_path = "staged/pb/README.md", .data = "readme b\n" });
+        try tmp.dir.writeFile(.{ .sub_path = "staged/ns/pa/README.md", .data = "readme a\n" });
+        try tmp.dir.writeFile(.{ .sub_path = "staged/ns/pb/README.md", .data = "readme b\n" });
         return .{ .tmp = tmp, .staged = try std.fs.path.join(a, &.{ root, "staged" }), .out = try std.fs.path.join(a, &.{ root, "out" }) };
     }
 
@@ -290,7 +366,7 @@ test "the set written is the plan, the READMEs and the published bytes" {
     defer s.tmp.cleanup();
     // a staged .conda is in the staged directory and is never what is written
     try s.tmp.dir.makePath("staged/linux-64");
-    try s.tmp.dir.writeFile(.{ .sub_path = "staged/linux-64/mojo-pa-0.1.9-mojo1.0.0_0.conda", .data = "STAGED COPY, NOT PUBLISHED" });
+    try s.tmp.dir.writeFile(.{ .sub_path = "staged/linux-64/mojo-ns.pa-0.1.9-mojo1.0.0_0.conda", .data = "STAGED COPY, NOT PUBLISHED" });
     const routes = goodRoutes();
     var fake = Fake{ .routes = &routes };
     var why: []const u8 = "";
@@ -298,10 +374,10 @@ test "the set written is the plan, the READMEs and the published bytes" {
     try t.expectEqual(@as(usize, 2), rep.members);
     try t.expectEqual(@as(usize, 2), rep.files);
     try t.expectEqualStrings(plan, try s.read(a, "out/plan.json"));
-    try t.expectEqualStrings("readme a\n", try s.read(a, "out/pa/README.md"));
-    try t.expectEqualStrings("readme b\n", try s.read(a, "out/pb/README.md"));
-    try t.expectEqualStrings(BYTES_A, try s.read(a, "out/linux-64/mojo-pa-0.1.9-mojo1.0.0_0.conda"));
-    try t.expectEqualStrings(BYTES_B, try s.read(a, "out/linux-64/mojo-pb-0.1.9-mojo1.0.0_0.conda"));
+    try t.expectEqualStrings("readme a\n", try s.read(a, "out/ns/pa/README.md"));
+    try t.expectEqualStrings("readme b\n", try s.read(a, "out/ns/pb/README.md"));
+    try t.expectEqualStrings(BYTES_A, try s.read(a, "out/linux-64/mojo-ns.pa-0.1.9-mojo1.0.0_0.conda"));
+    try t.expectEqualStrings(BYTES_B, try s.read(a, "out/linux-64/mojo-ns.pb-0.1.9-mojo1.0.0_0.conda"));
 }
 
 test "a mismatch fails the run, names the file and writes nothing" {
@@ -323,7 +399,7 @@ test "a plan a member of which was skipped is refused before any request is made
     var ar = arena();
     defer ar.deinit();
     const a = ar.allocator();
-    const plan = try std.mem.replaceOwned(u8, a, try planText(a, BYTES_A, BYTES_B), "\"upload\",\"readme\":\"pb", "\"skip\",\"readme\":\"pb");
+    const plan = try std.mem.replaceOwned(u8, a, try planText(a, BYTES_A, BYTES_B), "\"upload\",\"readme\":\"ns/pb", "\"skip\",\"readme\":\"ns/pb");
     var s = try Scene.init(a, plan);
     defer s.tmp.cleanup();
     const routes = goodRoutes();
@@ -339,11 +415,11 @@ test "a missing README or plan fails the run and writes nothing" {
     const a = ar.allocator();
     var s = try Scene.init(a, try planText(a, BYTES_A, BYTES_B));
     defer s.tmp.cleanup();
-    try s.tmp.dir.deleteFile("staged/pb/README.md");
+    try s.tmp.dir.deleteFile("staged/ns/pb/README.md");
     const routes = goodRoutes();
     var fake = Fake{ .routes = &routes };
     var why: []const u8 = "";
-    try refusedWith(&why, runScene(a, &s, &fake, &why), "pb/README.md");
+    try refusedWith(&why, runScene(a, &s, &fake, &why), "ns/pb/README.md");
     try t.expect(!s.outExists());
     try s.tmp.dir.deleteFile("staged/plan.json");
     try refusedWith(&why, runScene(a, &s, &fake, &why), "plan.json");
@@ -505,8 +581,8 @@ test "the job over the real client: published bytes pass, one altered byte fails
     const a = ar.allocator();
     var served = [_]Served{
         .{ .path = "/index/config.json", .body = "" },
-        .{ .path = "/linux-64/mojo-pa-0.1.9-mojo1.0.0_0.conda", .body = BYTES_A },
-        .{ .path = "/linux-64/mojo-pb-0.1.9-mojo1.0.0_0.conda", .body = BYTES_B },
+        .{ .path = "/ns/linux-64/mojo-ns.pa-0.1.9-mojo1.0.0_0.conda", .body = BYTES_A },
+        .{ .path = "/ns/linux-64/mojo-ns.pb-0.1.9-mojo1.0.0_0.conda", .body = BYTES_B },
     };
     const srv = try Loopback.start(a, &served);
     defer srv.stop();
@@ -519,7 +595,7 @@ test "the job over the real client: published bytes pass, one altered byte fails
     var sink = std.Io.Writer.Allocating.init(a);
     const refused = try rbf.checkFiles(a, plan, strict.fetcher(), try std.fmt.allocPrint(a, "http://127.0.0.1:{d}/", .{srv.port}), &sink.writer);
     try t.expectEqual(@as(usize, 2), refused.failures.len);
-    try mentionsOne(refused.failures, "mojo-pa-0.1.9-mojo1.0.0_0.conda: http://127.0.0.1");
+    try mentionsOne(refused.failures, "mojo-ns.pa-0.1.9-mojo1.0.0_0.conda: http://127.0.0.1");
 
     var http = rbf.Http{ .allow_loopback = true };
     const channel_url = try rbf.channelOf(a, &why, http.fetcher(), try srv.url(a, "/index/config.json"), "beta", null);
@@ -564,21 +640,21 @@ test "paths of the set that collide are refused: a README on a subdir, on plan.j
     const a = ar.allocator();
     const f = "x.conda";
     // a README whose path is the directory of the packages
-    try parseRefused(try planOf(a, &.{try memberJson(a, "p", "linux-64", "linux-64", f, 1)}), "collide");
+    try parseRefused(try planOf(a, &.{try memberJson(a, "ns/p", "linux-64", "linux-64", f, 1)}), "collide");
     // a README under a name that is a file
-    try parseRefused(try planOf(a, &.{try memberJson(a, "p", "linux-64/x.conda/README.md", "linux-64", f, 1)}), "collide");
+    try parseRefused(try planOf(a, &.{try memberJson(a, "ns/p", "linux-64/x.conda/README.md", "linux-64", f, 1)}), "collide");
     // a README that is plan.json
-    try parseRefused(try planOf(a, &.{try memberJson(a, "p", "plan.json", "linux-64", f, 1)}), "collide");
-    try parseRefused(try planOf(a, &.{try memberJson(a, "p", "PLAN.json", "linux-64", f, 1)}), "collide");
+    try parseRefused(try planOf(a, &.{try memberJson(a, "ns/p", "plan.json", "linux-64", f, 1)}), "collide");
+    try parseRefused(try planOf(a, &.{try memberJson(a, "ns/p", "PLAN.json", "linux-64", f, 1)}), "collide");
     // two members, one README
-    try parseRefused(try planOf(a, &.{ try memberJson(a, "p", "r/README.md", "linux-64", "a.conda", 1), try memberJson(a, "q", "r/README.md", "linux-64", "b.conda", 1) }), "collide");
+    try parseRefused(try planOf(a, &.{ try memberJson(a, "ns/p", "r/README.md", "linux-64", "a.conda", 1), try memberJson(a, "ns/q", "r/README.md", "linux-64", "b.conda", 1) }), "collide");
     // case variants of one file, of one README, of one member
-    try parseRefused(try planOf(a, &.{ try memberJson(a, "p", "p/README.md", "linux-64", "a.conda", 1), try memberJson(a, "q", "q/README.md", "linux-64", "A.CONDA", 1) }), "collide");
-    try parseRefused(try planOf(a, &.{ try memberJson(a, "p", "p/README.md", "linux-64", "a.conda", 1), try memberJson(a, "q", "P/readme.md", "linux-64", "b.conda", 1) }), "collide");
-    try parseRefused(try planOf(a, &.{ try memberJson(a, "p", "p/README.md", "linux-64", "a.conda", 1), try memberJson(a, "P", "r/README.md", "linux-64", "b.conda", 1) }), "listed twice");
+    try parseRefused(try planOf(a, &.{ try memberJson(a, "ns/p", "ns/p/README.md", "linux-64", "a.conda", 1), try memberJson(a, "ns/q", "ns/q/README.md", "linux-64", "A.CONDA", 1) }), "collide");
+    try parseRefused(try planOf(a, &.{ try memberJson(a, "ns/p", "ns/p/README.md", "linux-64", "a.conda", 1), try memberJson(a, "ns/q", "NS/P/readme.md", "linux-64", "b.conda", 1) }), "collide");
+    try parseRefused(try planOf(a, &.{ try memberJson(a, "ns/p", "ns/p/README.md", "linux-64", "a.conda", 1), try memberJson(a, "ns/P", "r/README.md", "linux-64", "b.conda", 1) }), "listed twice");
     // a directory named like a file of another subdir is fine
     var why: []const u8 = "";
-    _ = try rbf.parsePlan(a, &why, try planOf(a, &.{ try memberJson(a, "p", "p/README.md", "linux-64", "a.conda", 1), try memberJson(a, "q", "q/README.md", "noarch", "a.conda", 1) }));
+    _ = try rbf.parsePlan(a, &why, try planOf(a, &.{ try memberJson(a, "ns/p", "ns/p/README.md", "linux-64", "a.conda", 1), try memberJson(a, "ns/q", "ns/q/README.md", "noarch", "a.conda", 1) }));
 }
 
 test "a file size above the cap is refused before any request" {
@@ -586,9 +662,9 @@ test "a file size above the cap is refused before any request" {
     defer ar.deinit();
     const a = ar.allocator();
     var why: []const u8 = "";
-    _ = try rbf.parsePlan(a, &why, try planOf(a, &.{try memberJson(a, "p", "p/README.md", "linux-64", "a.conda", rbf.max_file_bytes)}));
-    try parseRefused(try planOf(a, &.{try memberJson(a, "p", "p/README.md", "linux-64", "a.conda", rbf.max_file_bytes + 1)}), "cap");
-    try parseRefused(try planOf(a, &.{try memberJson(a, "p", "p/README.md", "linux-64", "a.conda", 1099511627776)}), "cap");
+    _ = try rbf.parsePlan(a, &why, try planOf(a, &.{try memberJson(a, "ns/p", "ns/p/README.md", "linux-64", "a.conda", rbf.max_file_bytes)}));
+    try parseRefused(try planOf(a, &.{try memberJson(a, "ns/p", "ns/p/README.md", "linux-64", "a.conda", rbf.max_file_bytes + 1)}), "cap");
+    try parseRefused(try planOf(a, &.{try memberJson(a, "ns/p", "ns/p/README.md", "linux-64", "a.conda", 1099511627776)}), "cap");
 }
 
 test "the beta channel is pinned to one URL: another host or path is refused, the exact one is used" {
@@ -682,8 +758,8 @@ test "an --out that holds only its BUCK is written beside it, and the BUCK is ke
     var why: []const u8 = "";
     _ = try runScene(a, &s, &fake, &why);
     try t.expectEqualStrings("filegroup()\n", try s.read(a, "out/BUCK"));
-    try t.expectEqualStrings(BYTES_A, try s.read(a, "out/linux-64/mojo-pa-0.1.9-mojo1.0.0_0.conda"));
-    try t.expectEqualStrings("readme b\n", try s.read(a, "out/pb/README.md"));
+    try t.expectEqualStrings(BYTES_A, try s.read(a, "out/linux-64/mojo-ns.pa-0.1.9-mojo1.0.0_0.conda"));
+    try t.expectEqualStrings("readme b\n", try s.read(a, "out/ns/pb/README.md"));
     try t.expect((try s.read(a, "out/plan.json")).len > 0);
     s.tmp.dir.access("out.partial", .{}) catch return;
     return error.PartialLeft;
@@ -739,7 +815,7 @@ test "a move into an --out with its BUCK that fails midway takes back what it mo
     const entries = [_]rbf.Entry{
         .{ .rel = "plan.json", .data = "{}" },
         .{ .rel = "linux-64/a.conda", .data = "bytes" },
-        .{ .rel = "pa/README.md", .data = "r" },
+        .{ .rel = "ns/pa/README.md", .data = "r" },
     };
     try refusedWith(&why, rbf.writeSet(a, &why, out, &entries), "nothing was written");
     try t.expectEqualStrings("keep", try tmp.dir.readFileAlloc(a, "out/BUCK", 100));
@@ -752,7 +828,7 @@ test "a path of the set named BUCK is refused: it would replace the kept file" {
     var ar = arena();
     defer ar.deinit();
     const a = ar.allocator();
-    try parseRefused(try planOf(a, &.{try memberJson(a, "p", "BUCK", "linux-64", "a.conda", 1)}), "collide");
-    try parseRefused(try planOf(a, &.{try memberJson(a, "p", "buck/README.md", "linux-64", "a.conda", 1)}), "collide");
-    try parseRefused(try planOf(a, &.{try memberJson(a, "p", "p/README.md", "BUCK", "a.conda", 1)}), "collide");
+    try parseRefused(try planOf(a, &.{try memberJson(a, "ns/p", "BUCK", "linux-64", "a.conda", 1)}), "collide");
+    try parseRefused(try planOf(a, &.{try memberJson(a, "ns/p", "buck/README.md", "linux-64", "a.conda", 1)}), "collide");
+    try parseRefused(try planOf(a, &.{try memberJson(a, "ns/p", "ns/p/README.md", "BUCK", "a.conda", 1)}), "collide");
 }

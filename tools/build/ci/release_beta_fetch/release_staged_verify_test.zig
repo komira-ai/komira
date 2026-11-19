@@ -11,10 +11,10 @@ const CONFIG_URL = "https://api.mopm.dev/index/config.json";
 const CONFIG_OK = "{\"channel_url\":\"https://conda.mopm.dev/\",\"stage\":\"prod\"}";
 const BYTES_A = "package a bytes";
 const BYTES_B = "package b bytes, a little longer";
-const FILE_A = "mojo-pa-0.1.9-mojo1.0.0_0.conda";
-const FILE_B = "mojo-pb-0.1.9-mojo1.0.0_0.conda";
-const URL_A = "https://conda.mopm.dev/linux-64/" ++ FILE_A;
-const URL_B = "https://conda.mopm.dev/linux-64/" ++ FILE_B;
+const FILE_A = "mojo-ns.pa-0.1.9-mojo1.0.0_0.conda";
+const FILE_B = "mojo-ns.pb-0.1.9-mojo1.0.0_0.conda";
+const URL_A = "https://conda.mopm.dev/ns/linux-64/" ++ FILE_A;
+const URL_B = "https://conda.mopm.dev/ns/linux-64/" ++ FILE_B;
 
 fn sha(a: std.mem.Allocator, bytes: []const u8) ![]u8 {
     var d: [32]u8 = undefined;
@@ -25,10 +25,10 @@ fn sha(a: std.mem.Allocator, bytes: []const u8) ![]u8 {
 
 fn planText(a: std.mem.Allocator) ![]u8 {
     return std.fmt.allocPrint(a,
-        \\{{"version":1,"members":[
-        \\ {{"name":"pa","version":"0.1.9","action":"upload","readme":"pa/README.md",
+        \\{{"version":2,"members":[
+        \\ {{"name":"ns/pa","version":"0.1.9","action":"upload","readme":"ns/pa/README.md",
         \\   "files":[{{"subdir":"linux-64","filename":"{s}","sha256":"{s}","size":{d}}}]}},
-        \\ {{"name":"pb","version":"0.1.9","action":"upload","readme":"pb/README.md",
+        \\ {{"name":"ns/pb","version":"0.1.9","action":"upload","readme":"ns/pb/README.md",
         \\   "files":[{{"subdir":"linux-64","filename":"{s}","sha256":"{s}","size":{d}}}]}}
         \\]}}
     , .{ FILE_A, try sha(a, BYTES_A), BYTES_A.len, FILE_B, try sha(a, BYTES_B), BYTES_B.len });
@@ -37,13 +37,13 @@ fn planText(a: std.mem.Allocator) ![]u8 {
 /// A staged directory as `mopm publish --staged --no-commit` leaves it, in `tmp`.
 fn stage(a: std.mem.Allocator, tmp: *t.TmpDir) !void {
     try tmp.dir.makePath("staged/linux-64");
-    try tmp.dir.makePath("staged/pa");
-    try tmp.dir.makePath("staged/pb");
+    try tmp.dir.makePath("staged/ns/pa");
+    try tmp.dir.makePath("staged/ns/pb");
     try tmp.dir.writeFile(.{ .sub_path = "staged/plan.json", .data = try planText(a) });
     try tmp.dir.writeFile(.{ .sub_path = "staged/linux-64/" ++ FILE_A, .data = BYTES_A });
     try tmp.dir.writeFile(.{ .sub_path = "staged/linux-64/" ++ FILE_B, .data = BYTES_B });
-    try tmp.dir.writeFile(.{ .sub_path = "staged/pa/README.md", .data = "# pa\n" });
-    try tmp.dir.writeFile(.{ .sub_path = "staged/pb/README.md", .data = "# pb\n" });
+    try tmp.dir.writeFile(.{ .sub_path = "staged/ns/pa/README.md", .data = "# pa\n" });
+    try tmp.dir.writeFile(.{ .sub_path = "staged/ns/pb/README.md", .data = "# pb\n" });
     try tmp.dir.writeFile(.{ .sub_path = "staged/state.json", .data = "{\"group_id\":\"grp_abc-123\",\"staged\":true}" });
     try tmp.dir.writeFile(.{ .sub_path = "staged/report.json", .data = "{\"outcome\":\"staged\"}" });
 }
@@ -89,7 +89,7 @@ test "verify writes the plan, the READMEs and the verified files, and leaves sta
     try t.expectEqual(@as(usize, 2), rep.members);
     try t.expectEqual(@as(usize, 2), rep.files);
     try t.expect(exists(&tmp, "out/plan.json"));
-    try t.expect(exists(&tmp, "out/pa/README.md"));
+    try t.expect(exists(&tmp, "out/ns/pa/README.md"));
     try t.expect(exists(&tmp, "out/linux-64/" ++ FILE_B));
     const got = try tmp.dir.readFileAlloc(a, "out/linux-64/" ++ FILE_A, 1024);
     try t.expectEqualStrings(BYTES_A, got);
@@ -143,10 +143,10 @@ test "verify: a plan with a skip member is refused before any file is read, and 
     var log = sink();
     defer log.deinit();
     var why: []const u8 = "";
-    try tmp.dir.deleteFile("staged/pb/README.md");
+    try tmp.dir.deleteFile("staged/ns/pb/README.md");
     try refusedWith(&why, rsv.verify(a, &why, try path(a, &tmp, "staged"), try path(a, &tmp, "out"), &log.writer), "README.md");
     try t.expect(!exists(&tmp, "out"));
-    const skip = "{\"members\":[{\"name\":\"pa\",\"version\":\"0.1.9\",\"action\":\"skip\",\"reason\":\"held\"}]}";
+    const skip = "{\"members\":[{\"name\":\"ns/pa\",\"version\":\"0.1.9\",\"action\":\"skip\",\"reason\":\"held\"}]}";
     try tmp.dir.writeFile(.{ .sub_path = "staged/plan.json", .data = skip });
     try refusedWith(&why, rsv.verify(a, &why, try path(a, &tmp, "staged"), try path(a, &tmp, "out"), &log.writer), "not 'upload'");
 }
