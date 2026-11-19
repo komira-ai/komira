@@ -24,13 +24,13 @@
 # bytes anywhere.
 # =============================================================================
 
-from komira_aws_core import AwsCredential, StaticCredsSource
-from komira_aws_secretsmanager.komira_aws_secretsmanager import (
+from aws_core import AwsCredential, StaticCredsSource
+from aws_secretsmanager.aws_secretsmanager import (
     SecretsManagerClient,
     SecretsManagerEndpointConfig,
 )
-from komira_http_client.client import HttpClientConfig
-from komira_http_core.transport.kernel_tcp import KernelTcpConnector
+from http_client.client import HttpClientConfig
+from http_core.transport.kernel_tcp import KernelTcpConnector
 
 from .sigv4_check import CannedCredential
 

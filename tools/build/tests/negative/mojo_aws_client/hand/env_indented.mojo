@@ -6,7 +6,7 @@ environment scan (_no_env_reads) reads an import at any indent and refuses
 std.pathlib, which is not on its allow-list.
 """
 
-from komira_aws_core import AwsRequest
+from aws_core import AwsRequest
 
 from .env_read_indented import (
     CloudWatchLogsGetLogEventsRequest,

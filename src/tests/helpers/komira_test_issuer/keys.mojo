@@ -10,7 +10,7 @@
 #
 # used as the P-256 scalar (ES256) or the Ed25519 seed (EdDSA). The same
 # inputs give the same key and so the same `kid` (the RFC 7638 thumbprint,
-# komira_jose); another seed, index or algorithm gives another key. A digest
+# jose); another seed, index or algorithm gives another key. A digest
 # that is not a P-256 scalar from 1 to n - 1 (a chance of about 2^-32) is
 # refused by `JwsSigner.es256`, and the refusal reaches the caller: choose
 # another seed. RS256 keys are not derived (an RSA key is not a hash
@@ -22,9 +22,9 @@
 # this file's API.
 # =============================================================================
 
-from komira_crypto import sha256
-from komira_jose import JWS_ALG_EDDSA, JWS_ALG_ES256, JwsSigner
-from komira_secret_store import SecretValue
+from crypto import sha256
+from jose import JWS_ALG_EDDSA, JWS_ALG_ES256, JwsSigner
+from secret_store import SecretValue
 
 
 def derived_key(alg: String, seed: String, index: Int) raises -> JwsSigner:

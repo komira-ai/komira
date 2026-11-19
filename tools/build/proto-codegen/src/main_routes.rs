@@ -1,5 +1,5 @@
 //! `protoc-gen-mojo-routes`: a protoc plugin that writes `<stem>_routes.mojo`
-//! (per service: a handler trait, a komira_http_server route table built from
+//! (per service: a handler trait, a http_server route table built from
 //! the RPCs' `(google.api.http)` rules, and a dispatcher) for each input
 //! `.proto` that declares a service. Its one option, `package_prefix`, is
 //! the Mojo package the message modules were generated in.

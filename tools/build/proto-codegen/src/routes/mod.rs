@@ -2,8 +2,8 @@
 //!
 //! For each `.proto` to generate that declares a service, it writes
 //! `<stem>_routes.mojo`: per service, a handler trait (one method per RPC), a
-//! function building komira_http_server's `Router` from the RPCs'
-//! `(google.api.http)` rules, and a dispatcher (a komira_http_server
+//! function building http_server's `Router` from the RPCs'
+//! `(google.api.http)` rules, and a dispatcher (a http_server
 //! `RoutedDispatcher`, so `ComposedRoutes` can serve several services from one
 //! server) that matches a request through that router, binds the
 //! request message from the path, the query and the body, calls the handler
@@ -346,7 +346,7 @@ fn header(s: &mut String, file: &IrFile) {
 # Messages: the Mojo package {pkg}
 #
 # For each service: a handler trait with one method per RPC, `<service>_router()`
-# (komira_http_server's `Router`, one entry per HTTP binding of each RPC's
+# (http_server's `Router`, one entry per HTTP binding of each RPC's
 # `(google.api.http)` rule), and `<Service>Routes[H]`, a `RoutedDispatcher`
 # (`ComposedRoutes` serves several from one server) that answers:
 #   no route matches the path                     404
@@ -360,12 +360,12 @@ fn header(s: &mut String, file: &IrFile) {
 
 from std.collections.dict import Dict
 
-from komira_async.reactor.reactor import Reactor
-from komira_async.runtime.runtime_trait import Runtime
-from komira_http_core.codec import HttpMethod, HttpRequest, HttpResponse
-from komira_http_server.routing.compose import RoutedDispatcher
-from komira_http_server.routing.router import Router
-from komira_proto_codec import decode_json, encode_json
+from async_rt.reactor.reactor import Reactor
+from async_rt.runtime.runtime_trait import Runtime
+from http_core.codec import HttpMethod, HttpRequest, HttpResponse
+from http_server.routing.compose import RoutedDispatcher
+from http_server.routing.router import Router
+from proto_codec import decode_json, encode_json
 ",
         src = file.proto_path,
         pkg = file.mojo_package

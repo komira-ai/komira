@@ -4,7 +4,7 @@
 #
 # The generated client blocks its thread until its call completes, and
 # `HttpServer` only makes progress when something steps it, so the two run
-# on two `komira_fork_join` threads (the shape of komira_http_tls_e2e's
+# on two `fork_join` threads (the shape of komira_http_tls_e2e's
 # duet). The server side is any `ServeStep`: `FakeServer` here, a plaintext
 # server whose requests reach `FakeSecretsManager`, or `GcpFakeServer`
 # (gcp_server.mojo), the GCP fake behind its TLS front.
@@ -31,15 +31,15 @@
 
 from std.memory import Pointer
 
-from komira_async.ops.waker_sink import NoopSink
-from komira_async.runtime.blocking_runtime import BlockingRuntime
-from komira_atomic_alias import AtomicI64
-from komira_clock import now_ns
-from komira_fork_join import ForkJoinBody, fork_join
-from komira_http_core.codec import HttpMethod
-from komira_http_core.transport.grpc_emit import NoopGrpcDispatch
-from komira_http_server.routing import Router
-from komira_http_server.server import HttpServer, HttpServerConfig
+from async_rt.ops.waker_sink import NoopSink
+from async_rt.runtime.blocking_runtime import BlockingRuntime
+from atomic_alias import AtomicI64
+from clock import now_ns
+from fork_join import ForkJoinBody, fork_join
+from http_core.codec import HttpMethod
+from http_core.transport.grpc_emit import NoopGrpcDispatch
+from http_server.routing import Router
+from http_server.server import HttpServer, HttpServerConfig
 
 from .fake_service import FakeSecretsManager
 

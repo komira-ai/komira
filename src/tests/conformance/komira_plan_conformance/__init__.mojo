@@ -1,7 +1,7 @@
 """`komira_plan_conformance`: the logical-plan conformance corpus.
 
 Test-only; nothing depends on it. Each case is a plan built with
-komira_plan_ir's factories plus an expected answer derived by hand from the
+plan_ir's factories plus an expected answer derived by hand from the
 query-semantics document (or, later, by an independent oracle). Nothing here
 executes a plan yet; test_corpus checks every case through the plan wire and
 against its expectation's schema. Modules:

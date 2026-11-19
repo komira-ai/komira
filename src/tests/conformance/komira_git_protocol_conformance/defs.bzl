@@ -1,5 +1,5 @@
 """The pinned git's transcripts that komira_git_protocol_conformance reads,
-the oracle of komira_git's protocol code.
+the oracle of git's protocol code.
 
 `git_transcripts` runs capture (capture.zig) in one build action with the git
 distribution of //third_party/git. The output is a directory, one subdirectory

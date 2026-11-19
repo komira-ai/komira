@@ -6,7 +6,7 @@ their own, which the generated environment scan (_no_env_reads) does not
 lex, so it cannot say where the t-string ends; it refuses the file.
 """
 
-from komira_aws_core import AwsRequest
+from aws_core import AwsRequest
 
 from .env_read_t_string import (
     CloudWatchLogsGetLogEventsRequest,

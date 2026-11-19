@@ -1,5 +1,5 @@
 # git 2.56.0 built from source with the pinned zig (README.md): the oracle of
-# komira_git's conformance tests, with the pinned git-lfs
+# git's conformance tests, with the pinned git-lfs
 # (//third_party/git-lfs). linux-x86_64 only
 # (limits.tsv `git-oracle-linux-x86-64`).
 load("@komira//tools/build/lint:defs.bzl", "shell_lint")

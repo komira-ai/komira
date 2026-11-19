@@ -3,7 +3,7 @@
 # that none outlives it.
 # =============================================================================
 #
-# `TaskGroup` starts each task through `komira_supervisor.Supervisor` (stdout
+# `TaskGroup` starts each task through `supervisor.Supervisor` (stdout
 # and stderr captured on two pipes, read without blocking) and keeps it until
 # it is reaped:
 #
@@ -23,7 +23,7 @@
 from std.os.path import exists
 from std.time import perf_counter_ns, sleep
 
-from komira_supervisor import ChildSpec, SIGKILL, Supervisor
+from supervisor import ChildSpec, SIGKILL, Supervisor
 
 comptime _SETPRIV = "/usr/bin/setpriv"
 comptime _TERM_GRACE_MS = 500

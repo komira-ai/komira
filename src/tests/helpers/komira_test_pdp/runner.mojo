@@ -13,7 +13,7 @@
 # Per request step it checks, and reports every mismatch:
 #   - the status;
 #   - on a 200: `Cache-Control: no-store`, and the decisions read from the
-#     body with komira_json (a top-level JSON boolean `decision`; for the
+#     body with json (a top-level JSON boolean `decision`; for the
 #     batch, a top-level `evaluations` array of objects with one each), in
 #     order and of the stated count;
 #   - that neither the body nor a header holds any token the step sent;
@@ -25,8 +25,8 @@
 # fresh one.
 # =============================================================================
 
-from komira_json import JSON_ARRAY, JSON_BOOL, JSON_OBJECT, JsonValue
-from komira_json import parse_json_value
+from json import JSON_ARRAY, JSON_BOOL, JSON_OBJECT, JsonValue
+from json import parse_json_value
 
 from komira_test_pdp.pdp import PdpEndpoint, PdpReply, TestPdp
 from komira_test_pdp.scenarios import (

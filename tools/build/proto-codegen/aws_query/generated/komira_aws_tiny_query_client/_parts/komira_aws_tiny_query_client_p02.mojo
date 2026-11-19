@@ -4,16 +4,16 @@
 # Part 2 of 2 of `komira_aws_tiny_query_client`: declarations of `komira_aws_tiny_query_client.mojo`, which is split so
 # that no generated file reaches 1000 lines. Import them from `komira_aws_tiny_query_client`; it re-exports all.
 
-from komira_aws_core import (
+from aws_core import (
     AwsRequest, AwsResponse, aws_is_error_status, AwsClock, AwsCredsSource, AwsEndpoint,
     AwsHttpTransport, AwsRetryQuota, Header, HttpResult, resolve_endpoint,
     send_sigv4_signed_request, send_sigv4_signed_request_with, AWS_QUERY_CONTENT_TYPE,
     AwsQueryWriter, aws_query_result, aws_query_set_body, aws_query_error,
 )
-from komira_http_client.client import HttpClientConfig
-from komira_http_core.transport.io_stream import Connector
-from komira_retry import MonotonicClock, RetryBudget, RetryLoop, RetryRng, Sleeper
-from komira_aws_core import send_unsigned_request, send_unsigned_request_with
+from http_client.client import HttpClientConfig
+from http_core.transport.io_stream import Connector
+from retry import MonotonicClock, RetryBudget, RetryLoop, RetryRng, Sleeper
+from aws_core import send_unsigned_request, send_unsigned_request_with
 from .komira_aws_tiny_query_client_p01 import (
     TINYQUERY_SERVICE, TINYQUERY_API_VERSION, komira_aws_tiny_query_client_host,
     TinyQueryPingAnonymousRequest, TinyQueryPingAnonymousResponse, TinyQueryPingNoAuthRequest,
@@ -67,7 +67,7 @@ struct TinyQueryClient[C: Connector, T: AwsCredsSource](Movable, Deinitable):
     var _retry_quota: AwsRetryQuota
     # WHERE this client sends. `None` = real AWS (the host derived from
     # the region). A VALUE, never an ambient env var — see
-    # `komira_aws_core.AwsEndpoint`. This is what makes every verb this
+    # `aws_core.AwsEndpoint`. This is what makes every verb this
     # generator emits exercisable against a local emulator.
     var _endpoint_override: Optional[AwsEndpoint]
 
@@ -97,7 +97,7 @@ struct TinyQueryClient[C: Connector, T: AwsCredsSource](Movable, Deinitable):
 
     def send(mut self, var req: AwsRequest) raises -> HttpResult:
         """Sign and send `req`. THE SIGNER IS NOT GENERATED — this is a call
-            into the hand-written `komira_aws_core.send_sigv4_signed_request`, which is
+            into the hand-written `aws_core.send_sigv4_signed_request`, which is
             tested against the AWS SigV4 test vectors.
 
             The request is a form body (`Action`, `Version` and the input's
@@ -135,7 +135,7 @@ struct TinyQueryClient[C: Connector, T: AwsCredsSource](Movable, Deinitable):
 
     def send_with[X: AwsHttpTransport, K: AwsClock, L: MonotonicClock, S: Sleeper, R: RetryRng, B: RetryBudget](mut self, var req: AwsRequest, mut transport: X, mut clock: K, mut retry: RetryLoop[L, S, R], mut budget: B) raises -> HttpResult:
         """`send`, over the transport, signing clock, retry loop and budget
-            given (`komira_aws_core.send_sigv4_signed_request_with`) instead of a
+            given (`aws_core.send_sigv4_signed_request_with`) instead of a
             connector from this client's factory, the wall clock and the
             standard retry loop. It returns the response, successful or not.
 
@@ -184,7 +184,7 @@ struct TinyQueryClient[C: Connector, T: AwsCredsSource](Movable, Deinitable):
         """Send `req` UNSIGNED: no signature and no access key, as botocore
             sends an operation the model marks anonymous (`authtype` `none`,
             `auth` `smithy.api#noAuth`). A call into the hand-written
-            `komira_aws_core.send_unsigned_request`, retried as `send` is."""
+            `aws_core.send_unsigned_request`, retried as `send` is."""
         var extra = List[Header]()
         var content_type = String(String(
             AWS_QUERY_CONTENT_TYPE
@@ -214,7 +214,7 @@ struct TinyQueryClient[C: Connector, T: AwsCredsSource](Movable, Deinitable):
 
     def send_unsigned_with[X: AwsHttpTransport, L: MonotonicClock, S: Sleeper, R: RetryRng, B: RetryBudget](mut self, var req: AwsRequest, mut transport: X, mut retry: RetryLoop[L, S, R], mut budget: B) raises -> HttpResult:
         """`send_unsigned`, over the transport, retry loop and budget given
-            (`komira_aws_core.send_unsigned_request_with`), as `send_with` is."""
+            (`aws_core.send_unsigned_request_with`), as `send_with` is."""
         var extra = List[Header]()
         var content_type = String(String(
             AWS_QUERY_CONTENT_TYPE

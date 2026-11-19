@@ -5,12 +5,12 @@
 # proto package: example.tiny.v1
 # Mojo package:  komira_gcp_tiny_grpc
 #
-# Generated message structs conform to the komira_proto_codec
+# Generated message structs conform to the proto_codec
 # `Serializable` trait: encode[E: WireEncoder] / decode[D: WireDecoder].
 
-from komira_proto_codec import Serializable, WireEncoder, WireDecoder
-from komira_gcp_core import GcpTokenSource, gcp_grpc_status_error
-from komira_grpc import (
+from proto_codec import Serializable, WireEncoder, WireDecoder
+from gcp_core import GcpTokenSource, gcp_grpc_status_error
+from grpc import (
     CallOptions,
     GrpcClient,
     ProtocolGrpcProto,
@@ -21,11 +21,11 @@ from komira_grpc import (
     BidiStreamCodec,
     parse_grpc_status_code,
 )
-from komira_proto_codec.proto_binary import PbEncoder, PbDecoder
-from komira_http_core.transport.io_stream import Connector
-from komira_async.reactor.reactor import Reactor
-from komira_async.runtime.runtime_trait import Runtime
-from komira_async.cancellation.token import CancellationToken
+from proto_codec.proto_binary import PbEncoder, PbDecoder
+from http_core.transport.io_stream import Connector
+from async_rt.reactor.reactor import Reactor
+from async_rt.runtime.runtime_trait import Runtime
+from async_rt.cancellation.token import CancellationToken
 
 
 # proto message GetThingRequest (.example.tiny.v1.GetThingRequest)
@@ -209,9 +209,9 @@ struct UploadThingsResponse(Serializable, Copyable, Movable):
 def _gcp_grpc_error(rpc: String, text: String) -> Error:
     """The error a call to `rpc` raises when the transport raised `text`.
 
-        komira_grpc raises every gRPC status as `[grpc:N] <grpc-message>`, also
+        grpc raises every gRPC status as `[grpc:N] <grpc-message>`, also
         inside its retry-exhaustion error. Such a status becomes
-        `komira_gcp_core.gcp_grpc_status_error`, which keeps a `[grpc:<code>]` anchor,
+        `gcp_core.gcp_grpc_status_error`, which keeps a `[grpc:<code>]` anchor,
         the attempt count and the length of the status text, never the text:
         the message is the server's. An error without a status (a transport
         fault before any status arrived) is returned unchanged."""
@@ -221,18 +221,18 @@ def _gcp_grpc_error(rpc: String, text: String) -> Error:
     return gcp_grpc_status_error(rpc, status, text)
 
 
-# gRPC client for `example.tiny.v1.TinyService`, authorized by a komira_gcp_core token source.
+# gRPC client for `example.tiny.v1.TinyService`, authorized by a gcp_core token source.
 struct TinyServiceClient[C: Connector, T: GcpTokenSource](Movable, Deinitable):
     """The generated gRPC client for the Google Cloud service `TinyService`,
         parametric over the HTTP connector `C` and the access-token source `T`.
 
         Classic gRPC (`ProtocolGrpcProto`) through `GrpcClient[C]`. Every call
         carries `authorization: Bearer <token>`, a token `T` (a
-        `komira_gcp_core.GcpTokenSource`) returns for that call, set on the call's
+        `gcp_core.GcpTokenSource`) returns for that call, set on the call's
         `CallOptions.raw_metadata`: the client reads no environment and holds
         no credential of its own. A call that ends in a gRPC status raises
-        `komira_gcp_core.gcp_grpc_status_error`, whose text starts with a
-        `[grpc:<google.rpc.Code>]` anchor that komira_grpc's
+        `gcp_core.gcp_grpc_status_error`, whose text starts with a
+        `[grpc:<google.rpc.Code>]` anchor that grpc's
         `parse_grpc_status_code` reads.
 
         The full path for each method is `/example.tiny.v1.TinyService/<MethodName>`."""
@@ -257,7 +257,7 @@ struct TinyServiceClient[C: Connector, T: GcpTokenSource](Movable, Deinitable):
 
     def _authorize(mut self, mut opts: CallOptions) raises:
         """The token hook: one token per call, set as the `authorization` entry
-            of `opts.raw_metadata`. komira_grpc sends that entry verbatim and once,
+            of `opts.raw_metadata`. grpc sends that entry verbatim and once,
             so a replayed attempt carries the same header, not a second one. An
             empty token is refused rather than sent as `Bearer `."""
         var bearer = self._token_source.access_token()

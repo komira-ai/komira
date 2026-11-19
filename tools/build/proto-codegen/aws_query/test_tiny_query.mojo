@@ -3,7 +3,7 @@
 # and the form body) and the responses it reads (the members of the
 # <SendThingResult> element, and a 200 with no body as an empty result),
 # each compared exactly, and the error document
-# a client reads through komira_aws_core.
+# a client reads through aws_core.
 from komira_aws_tiny_query.komira_aws_tiny_query import (
     TinyQueryDetail,
     TinyQueryPart,
@@ -14,7 +14,7 @@ from komira_aws_tiny_query.komira_aws_tiny_query import (
     parse_ping_response,
     parse_send_thing_response,
 )
-from komira_aws_core import AwsResponse, aws_query_error
+from aws_core import AwsResponse, aws_query_error
 from std.testing import assert_equal, assert_false, assert_raises, assert_true
 
 

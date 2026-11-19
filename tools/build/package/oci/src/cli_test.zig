@@ -48,7 +48,7 @@ test "main: a_place_splits_at_the_first_equals" {
 
 fn argv(v: []const []const u8) []const []const u8 {
     var out = C.list([]const u8);
-    C.push([]const u8, &out, "komira_oci");
+    C.push([]const u8, &out, "oci");
     C.add2([]const u8, &out, v);
     return out.items;
 }
@@ -178,8 +178,8 @@ fn outcome(want_code: u8, want_stderr: []const u8, o: M.Outcome) !void {
 // A refusal must exit 1: Buck2 takes an action that exits 0 as done, with a
 // `--out` that a late refusal may have left half written.
 test "main: a_refusal_exits_one_with_one_line_and_success_exits_zero" {
-    try outcome(1, "komira_oci: unknown command `bogus` (tree, image, layers, check)\n", M.outcome(argv(&.{"bogus"})));
-    try outcome(1, "komira_oci: the tree is refused:\n  file path `/abs` must be a plain relative path\n", M.outcome(argv(&.{ "tree", "--out", "o", "--file", "/abs=src" })));
+    try outcome(1, "oci: unknown command `bogus` (tree, image, layers, check)\n", M.outcome(argv(&.{"bogus"})));
+    try outcome(1, "oci: the tree is refused:\n  file path `/abs` must be a plain relative path\n", M.outcome(argv(&.{ "tree", "--out", "o", "--file", "/abs=src" })));
     const d = scratch("outcome");
     D.write(D.path(d, "src"), "s");
     const file = C.fmt("bin/sh={s}", .{D.path(d, "src")});
@@ -190,8 +190,8 @@ test "main: a_refusal_exits_one_with_one_line_and_success_exits_zero" {
 // Refused before any command runs, naming the first such argument by its
 // index in argv: without the refusal these would be other refusals.
 test "main: an_argument_that_is_not_utf8_is_refused_first" {
-    try outcome(1, "komira_oci: argument 1 is not UTF-8: \"bogus\\xFF\"\n", M.outcome(argv(&.{"bogus\xff"})));
-    try outcome(1, "komira_oci: argument 3 is not UTF-8: \"a\\xFEb\"\n", M.outcome(argv(&.{ "check", "--out", "a\xfeb", "--x", "\xff" })));
+    try outcome(1, "oci: argument 1 is not UTF-8: \"bogus\\xFF\"\n", M.outcome(argv(&.{"bogus\xff"})));
+    try outcome(1, "oci: argument 3 is not UTF-8: \"a\\xFEb\"\n", M.outcome(argv(&.{ "check", "--out", "a\xfeb", "--x", "\xff" })));
 }
 
 /// A program standing in for busybox: busybox's own `false` or `true`

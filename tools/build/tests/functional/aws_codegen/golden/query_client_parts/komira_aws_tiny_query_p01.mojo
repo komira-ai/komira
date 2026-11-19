@@ -4,14 +4,14 @@
 # Part 1 of 2 of `komira_aws_tiny_query`: declarations of `komira_aws_tiny_query.mojo`, which is split so
 # that no generated file reaches 1000 lines. Import them from `komira_aws_tiny_query`; it re-exports all.
 
-from komira_aws_core import (
+from aws_core import (
     AWS_TS_ISO8601, AwsRequest, AwsResponse, AwsQueryWriter, aws_query_key, aws_query_rename_last,
     aws_query_set_body, aws_text_blob, aws_text_bool, aws_text_f64, aws_text_int, aws_text_ts,
     aws_xml_blob_of, aws_xml_bool_of, aws_xml_child, aws_xml_entry_key, aws_xml_entry_value,
     aws_xml_f64_of, aws_xml_int_of, aws_xml_list_items, aws_xml_map_entries, aws_xml_string_of,
     aws_xml_ts_of,
 )
-from komira_xml import XmlNode
+from xml import XmlNode
 
 
 # ---------------------------------------------------------------------------

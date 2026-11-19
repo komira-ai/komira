@@ -1,6 +1,6 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
-# Test-only: komira_chat_store's behaviour, written once, generic over the
+# Test-only: chat_store's behaviour, written once, generic over the
 # backend (a `ChatTarget`: a fresh chat database and a second connection to
 # it), and run against each backend a build action can run:
 #
@@ -20,15 +20,15 @@ mojo_library(
     name = "komira_chat_store_conformance",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
-        "//src/komira_async:komira_async",
-        "//src/komira_chat_store:komira_chat_store",
-        "//src/komira_db:komira_db",
+        "//src/async_rt:async_rt",
+        "//src/chat_store:chat_store",
+        "//src/db:db",
     ],
     conda = False,
     test_deps = [
-        "//src/komira_db_sqlite:komira_db_sqlite",
-        "//src/komira_gcp_firestore:komira_gcp_firestore",
-        "//src/komira_gcp_firestore_db:komira_gcp_firestore_db",
+        "//src/db_sqlite:db_sqlite",
+        "//src/gcp_firestore:gcp_firestore",
+        "//src/gcp_firestore_db:gcp_firestore_db",
     ],
     test_srcs = [
         "tests/test_firestore_mock.mojo",

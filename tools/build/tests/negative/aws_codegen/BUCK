@@ -21,7 +21,7 @@ aws_codegen_golden(
     gen_args = _LOGS + ["--pure-only"],
     golden = "//functional/aws_codegen:logs_client_golden",
     model = _LOGS_MODEL.model,
-    module = "komira_aws_logs",
+    module = "aws_logs",
 )
 
 # The client module and its probe are generated exactly as
@@ -29,7 +29,7 @@ aws_codegen_golden(
 # their goldens and the only red is the must_contain one.
 _LOGS_CLIENT = _LOGS + [
     "--probe-import",
-    "komira_aws_logs.komira_aws_logs",
+    "aws_logs.aws_logs",
 ]
 
 # Every line of this must_contain is in the module, in this order, but the
@@ -43,7 +43,7 @@ aws_codegen_golden(
     golden = "//functional/aws_codegen:logs_client_golden",
     golden_probe = "//functional/aws_codegen:logs_client_probe_golden",
     model = _LOGS_MODEL.model,
-    module = "komira_aws_logs",
+    module = "aws_logs",
     must_contain = ["return send_sigv4_signed_request[Self.C](\nself._mk_connector,\nself._http_config.copy\n(),"],
 )
 
@@ -57,7 +57,7 @@ aws_codegen_golden(
     golden = "//functional/aws_codegen:logs_client_golden",
     golden_probe = "//functional/aws_codegen:logs_client_probe_golden",
     model = _LOGS_MODEL.model,
-    module = "komira_aws_logs",
+    module = "aws_logs",
     must_contain = ["config: HttpClientConfig,"],
 )
 

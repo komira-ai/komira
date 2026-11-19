@@ -16,7 +16,7 @@ deletes its entries here, and a new violator has no entry to land with.
 
 PYTHON_SURFACE = [
     # The hello test of python_binding_test, and the home of the binding tests
-    # of the shared library (komira_so).
+    # of the shared library (so).
     "tools/build/examples/python_binding",
 ]
 
@@ -115,8 +115,8 @@ PYTHON_CEILING = [
     "target komira//src/tests/e2e/komira_tls_interop_e2e:test_komira_client_vs_cpython_server",
 
     # The fixture generators of a foreign (pyarrow) writer.
-    "file src/komira_arrow_ipc/tests/fixtures/arrow_ipc/gen_fixtures.py",
-    "file src/komira_arrow_ipc/tests/fixtures/arrow_ipc/gen_pyarrow_interop_fixtures.py",
-    "file src/komira_parquet_codec/tests/fixtures/parquet/gen_pyarrow_fixtures.py",
+    "file src/arrow_ipc/tests/fixtures/arrow_ipc/gen_fixtures.py",
+    "file src/arrow_ipc/tests/fixtures/arrow_ipc/gen_pyarrow_interop_fixtures.py",
+    "file src/parquet_codec/tests/fixtures/parquet/gen_pyarrow_fixtures.py",
     "file src/tests/e2e/komira_formats_e2e/tests/fixtures/orc/gen_pyarrow_orc_fixtures.py",
 ]

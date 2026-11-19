@@ -2,7 +2,7 @@
 # fake_blob_service.mojo -- a Blob service on loopback, from the REST docs
 # =============================================================================
 #
-# `FakeBlobService` is a `komira_http_server` `RequestDispatcher` that answers
+# `FakeBlobService` is a `http_server` `RequestDispatcher` that answers
 # the Blob REST operations AzureFs issues, path-style, for one account and one
 # container, the way the service documents them:
 #
@@ -39,15 +39,15 @@
 # ASCII; XML text is escaped (`&`, `<`, `>`).
 # =============================================================================
 
-from komira_async.reactor.reactor import Reactor
-from komira_async.runtime.runtime_trait import Runtime
-from komira_http_core.codec.types import (
+from async_rt.reactor.reactor import Reactor
+from async_rt.runtime.runtime_trait import Runtime
+from http_core.codec.types import (
     HTTP_METHOD_GET,
     HTTP_METHOD_HEAD,
     HttpRequest,
     HttpResponse,
 )
-from komira_http_server.dispatch import RequestDispatcher
+from http_server.dispatch import RequestDispatcher
 
 from .shared_key_oracle import (
     parse_query,

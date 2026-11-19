@@ -6,20 +6,20 @@ These libraries give a Mojo process one way to write diagnostics. A call site wr
 
 | Library | Role |
 |---|---|
-| `komira_log` (`src/komira_log`) | The facade, the typed `Logger` and `Tracer`, `SharedEngine`, its rings, drains and output sinks |
-| `komira_metrics` (`src/komira_metrics`) | `MetricsSet` and EXPLAIN ANALYZE rendering, the metric series table and sweep, histograms, attribute-set interning |
-| `komira_trace` (`src/komira_trace`) | The span tracer, its per-worker span rings and the JSONL span exporter |
-| `komira_clock` (`src/komira_clock`) | The clock reads: `now_ns`, `now_unix_ms`, `now_unix_us`, `thread_cpu_ns` |
-| `komira_name_registry` (`src/komira_name_registry`) | `NameRegistry` and `name_id`, the compile-time name to 32-bit id mapping the metric and span libraries share |
-| `komira_spsc_ring` (`src/komira_spsc_ring`) | The generic single-producer single-consumer ring `SpscRing[T]` under both the log record ring and the span rings |
-| `komira_log_query` (`src/komira_log_query`) | The `ServiceLogSearch` trait, its erased facade, the `LogReadAccess` hook, and the `GET <path>` route |
-| `komira_metrics_reader` (`src/komira_metrics_reader`) | The `MetricsReader` trait, its erased facade and scripted double, the `MetricsReadAccess` hook, and the `GET <path>` metrics route |
+| `log` (`src/log`) | The facade, the typed `Logger` and `Tracer`, `SharedEngine`, its rings, drains and output sinks |
+| `metrics` (`src/metrics`) | `MetricsSet` and EXPLAIN ANALYZE rendering, the metric series table and sweep, histograms, attribute-set interning |
+| `trace` (`src/trace`) | The span tracer, its per-worker span rings and the JSONL span exporter |
+| `clock` (`src/clock`) | The clock reads: `now_ns`, `now_unix_ms`, `now_unix_us`, `thread_cpu_ns` |
+| `name_registry` (`src/name_registry`) | `NameRegistry` and `name_id`, the compile-time name to 32-bit id mapping the metric and span libraries share |
+| `spsc_ring` (`src/spsc_ring`) | The generic single-producer single-consumer ring `SpscRing[T]` under both the log record ring and the span rings |
+| `log_query` (`src/log_query`) | The `ServiceLogSearch` trait, its erased facade, the `LogReadAccess` hook, and the `GET <path>` route |
+| `metrics_reader` (`src/metrics_reader`) | The `MetricsReader` trait, its erased facade and scripted double, the `MetricsReadAccess` hook, and the `GET <path>` metrics route |
 
 Out of scope:
 
 - Where a drained record goes next, and what answers a read query. These libraries stop at the drain and at the read seam: the `ServiceLogSearch` trait takes any conformer, and no conformer ships here.
 - Threshold detection over metric series, and the readers of a cloud's own container logs. A reader of a cloud's metrics, or of metric files in an object store, conforms to `MetricsReader` in a package of its own.
-- Worker threads and their idle hooks: the async runtime lives in `komira_async`.
+- Worker threads and their idle hooks: the async runtime lives in `async_rt`.
 - Export over OTLP: not built; see the limits.
 
 ## How does it work?
@@ -38,11 +38,11 @@ drain_worker_unified(w)    -> log lines and completed OTLP-shaped spans
 
 ### How does log.info reach the engine?
 
-The five level functions in `src/komira_log/src/komira_log/facade.mojo` (`trace`, `debug`, `info`, `warn`, `error`) forward to `_emit[level, fmt, module]`. It runs `comptime if level < MIN_COMPILED_LEVEL: return`, then resolves the process-global engine with `LogManager._resolve()`. With an engine installed, it returns early if the engine is not `enabled()`, and `SharedEngine.admits(level, module)` decides after that. `site_id = fnv1a_32(fmt)` and `module_id = fnv1a_32(module)` are compile-time values, and the timestamp is a raw counter tick from `read_raw_ticks()`.
+The five level functions in `src/log/src/log/facade.mojo` (`trace`, `debug`, `info`, `warn`, `error`) forward to `_emit[level, fmt, module]`. It runs `comptime if level < MIN_COMPILED_LEVEL: return`, then resolves the process-global engine with `LogManager._resolve()`. With an engine installed, it returns early if the engine is not `enabled()`, and `SharedEngine.admits(level, module)` decides after that. `site_id = fnv1a_32(fmt)` and `module_id = fnv1a_32(module)` are compile-time values, and the timestamp is a raw counter tick from `read_raw_ticks()`.
 
 On a thread bound to a worker id, `_emit` registers the site in the `SiteDictionary`, fills a `LogEventRecord` of kind `REC_LOG`, and writes the argument tags and bytes with an `ArgBlobWriter`. Arguments that fit in `ARG_INLINE_BYTES` (48) stay in the record; longer ones spill to the ring's arena. It then calls `try_push` on that worker's `LogRecordRing`. On a thread with no worker id, `_emit` renders the line at once and calls `emit_fallback_line`. With no engine installed, `_ensure_config()` builds a default `LogConfig` on first use and the line goes to stderr.
 
-Three other surfaces share this path. `get_logger[module]()` returns a `GlobalLogger` that calls the same `_emit`. `Logger[origin]` in `logger.mojo` borrows one engine through a concrete origin and uses the same `admits` and escalation. `emit_erased` in `logger_erased.mojo` takes the format and arguments at run time and keeps only the level and module as compile-time parameters, so call sites that share both share one compiled body. A `Tracer[origin]` in `src/komira_log/src/komira_log/tracer.mojo` is the span twin of `Logger[origin]`: `start_span[name](worker_id)` and `end_span(span_id, worker_id)` push span records onto the same ring.
+Three other surfaces share this path. `get_logger[module]()` returns a `GlobalLogger` that calls the same `_emit`. `Logger[origin]` in `logger.mojo` borrows one engine through a concrete origin and uses the same `admits` and escalation. `emit_erased` in `logger_erased.mojo` takes the format and arguments at run time and keeps only the level and module as compile-time parameters, so call sites that share both share one compiled body. A `Tracer[origin]` in `src/log/src/log/tracer.mojo` is the span twin of `Logger[origin]`: `start_span[name](worker_id)` and `end_span(span_id, worker_id)` push span records onto the same ring.
 
 ### How is a log level decided?
 
@@ -52,11 +52,11 @@ Levels are `LEVEL_TRACE` (0) to `LEVEL_ERROR` (4), with `LEVEL_OFF` (5), in `lev
 
 Configuration arrives as arguments, not from the environment. A binary parses its own `--log-level` and `--log-format` flags and calls `init_logging_from_spec(spec, source, log_format, on_deployed_platform)`; `LOG_SPEC_SOURCE_FLAG` is `"--log-level"`, the `source` to pass for the flag. `init_logging()` and the lazy `_ensure_config()` install the built-in default (global level INFO, no rules), and `LOG_SPEC_SOURCE_DEFAULT` names it as "built-in default (no --log-level given)". Each of the three prints `log_config_banner_lines`, which name the level and where it came from. `init_logging_with(filter)` installs an explicit `EnvFilter` and prints nothing. No code in these libraries reads an environment variable.
 
-`render_line` in `pattern_layout.mojo` writes `{ts} {LEVEL} [{module}] {message} {k=v ...}`, or a JSON line when the selected layout is JSON. `select_log_layout` stores the choice in a C cell, and `init_logging_from_spec` calls it on every call. `log_format_is_json` in `komira_log/structured_log.mojo` decides: `json` or `text` (any case) wins; any other value, empty or malformed, falls back to the `on_deployed_platform` argument.
+`render_line` in `pattern_layout.mojo` writes `{ts} {LEVEL} [{module}] {message} {k=v ...}`, or a JSON line when the selected layout is JSON. `select_log_layout` stores the choice in a C cell, and `init_logging_from_spec` calls it on every call. `log_format_is_json` in `log/structured_log.mojo` decides: `json` or `text` (any case) wins; any other value, empty or malformed, falls back to the `on_deployed_platform` argument.
 
 ### What does the engine hold?
 
-`SharedEngine(num_workers, filter)` allocates `num_workers + 1` rings of `DEFAULT_RING_CAPACITY` (4,096, defined in `komira_spsc_ring/spsc_ring.mojo`) records. Worker rings use `OVERFLOW_DROP`; the last ring, the fallback slot, uses `OVERFLOW_BLOCK`. It also holds the `SiteDictionary` (`site_id` to format, `module_id` to module), a `CalibrationAnchor` that converts ticks to wall time at drain time (`refresh_anchor`), the global level and the `EnvFilter`, one `LogSink`, and a pthread TLS key for the worker id (`worker_id_tls.mojo`). Logs, span opens, span closes and metric points share one ring; `LogEventRecord.kind` is `REC_LOG`, `REC_SPAN_OPEN`, `REC_SPAN_CLOSE` or `REC_METRIC`.
+`SharedEngine(num_workers, filter)` allocates `num_workers + 1` rings of `DEFAULT_RING_CAPACITY` (4,096, defined in `spsc_ring/spsc_ring.mojo`) records. Worker rings use `OVERFLOW_DROP`; the last ring, the fallback slot, uses `OVERFLOW_BLOCK`. It also holds the `SiteDictionary` (`site_id` to format, `module_id` to module), a `CalibrationAnchor` that converts ticks to wall time at drain time (`refresh_anchor`), the global level and the `EnvFilter`, one `LogSink`, and a pthread TLS key for the worker id (`worker_id_tls.mojo`). Logs, span opens, span closes and metric points share one ring; `LogEventRecord.kind` is `REC_LOG`, `REC_SPAN_OPEN`, `REC_SPAN_CLOSE` or `REC_METRIC`.
 
 `LogManager.install(engine)` moves an engine to the heap, leaks it, and parks its address in a C static (`native/komira_log_holder.c`). The first install wins and later ones are no-ops.
 
@@ -66,29 +66,29 @@ A drain pops records and decodes them against the site dictionary (`engine/drain
 
 Span records are paired by span id in `engine/span_drain.mojo` into one OTLP-shaped JSON object. With `set_capture_spans(True)` they are kept per worker for `take_span_lines` or `drain_captured_spans`. Metric records decode to `MetricPoint`s and, with `set_capture_metrics(True)`, are kept for `take_metric_points`. Each retained buffer is capped at four ring capacities (`_SPAN_BUF_MAX`, `_METRIC_BUF_MAX`); overflow is counted by `spans_dropped_count` and `metrics_dropped_count`.
 
-`LogSink` (`engine/output_sink.mojo`) has three modes: `SINK_STDERR`, `SINK_FILE` and `SINK_PER_CORE_SEGMENTS`, with one segment per core plus a fallback segment. The engine starts on stderr; `set_sink_stderr`, `set_sink_single_file` and `set_sink_per_core_segments` switch it. A segment rotates under its own `RotationPolicy` (none, size, time or both, with a retained-archive count, `RETAIN_ALL` keeping every archive). Output goes through `write_log_line` in `komira_log/log_write.mojo`, which retries transient errors, and a line the sink could not write is counted rather than silently dropped.
+`LogSink` (`engine/output_sink.mojo`) has three modes: `SINK_STDERR`, `SINK_FILE` and `SINK_PER_CORE_SEGMENTS`, with one segment per core plus a fallback segment. The engine starts on stderr; `set_sink_stderr`, `set_sink_single_file` and `set_sink_per_core_segments` switch it. A segment rotates under its own `RotationPolicy` (none, size, time or both, with a retained-archive count, `RETAIN_ALL` keeping every archive). Output goes through `write_log_line` in `log/log_write.mojo`, which retries transient errors, and a line the sink could not write is counted rather than silently dropped.
 
 ### How are metrics recorded?
 
-There are two instruments. `MetricsSet` (`komira_metrics/metrics_set.mojo`) is a per-operator registry of at most 8 counters, 4 times and 4 gauges, with one slot per worker for up to 64 workers. `inc_in_pipeline(n, worker_id)` writes only that worker's slot, and `reduce()` sums the slots. A lookup of an unregistered name lands in a quarantine slot that no read path reports. `format_execution_report` in `explain_analyze.mojo` renders the per-operator blocks for EXPLAIN ANALYZE, and `explain_analyze_collect.mojo` is the collector, armed only for the scope of one explicit EXPLAIN ANALYZE call.
+There are two instruments. `MetricsSet` (`metrics/metrics_set.mojo`) is a per-operator registry of at most 8 counters, 4 times and 4 gauges, with one slot per worker for up to 64 workers. `inc_in_pipeline(n, worker_id)` writes only that worker's slot, and `reduce()` sums the slots. A lookup of an unregistered name lands in a quarantine slot that no read path reports. `format_execution_report` in `explain_analyze.mojo` renders the per-operator blocks for EXPLAIN ANALYZE, and `explain_analyze_collect.mojo` is the collector, armed only for the scope of one explicit EXPLAIN ANALYZE call.
 
-The second instrument is shaped after OpenTelemetry. `SeriesTable` (`series_table.mojo`) is one table that maps a series key, built from `(name_id, attrset_id)`, to a value; `SeriesTables` in the same file holds the per-worker tables. Attribute sets are interned by `attr_set.mojo`. `MetricSweep` (`metric_sweep.mojo`) reduces those tables and hands one `MetricPoint` per series per interval to a `MetricPointSink`. `RingMetricSink` (`komira_log/engine/metric_sink.mojo`) is one such sink: it encodes each point as a `REC_METRIC` record with `build_metric_record` and pushes it onto the engine's ring. Histograms live in `histogram.mojo` as their own tables.
+The second instrument is shaped after OpenTelemetry. `SeriesTable` (`series_table.mojo`) is one table that maps a series key, built from `(name_id, attrset_id)`, to a value; `SeriesTables` in the same file holds the per-worker tables. Attribute sets are interned by `attr_set.mojo`. `MetricSweep` (`metric_sweep.mojo`) reduces those tables and hands one `MetricPoint` per series per interval to a `MetricPointSink`. `RingMetricSink` (`log/engine/metric_sink.mojo`) is one such sink: it encodes each point as a `REC_METRIC` record with `build_metric_record` and pushes it onto the engine's ring. Histograms live in `histogram.mojo` as their own tables.
 
 ### How are spans recorded?
 
-`komira_trace` has its own span path: a `Tracer` with per-worker context slots and `start_span[name](worker_id, parent_id)` / `end_span(span_id, worker_id)`, a `SpanRecord`, one `SpscRing[SpanPacket]` per worker (`SpanPacketRing` in `span_ring.mojo`), and two exporters in `exporter.mojo` (`JsonlFileExporter`, `CapturingExporter`). A `TRACES_ENABLED` comptime flag removes every method body when it is false. The engine's span path in `komira_log` is the second one: it carries the same start and end calls as records on the log ring, so logs and spans share one drain.
+`trace` has its own span path: a `Tracer` with per-worker context slots and `start_span[name](worker_id, parent_id)` / `end_span(span_id, worker_id)`, a `SpanRecord`, one `SpscRing[SpanPacket]` per worker (`SpanPacketRing` in `span_ring.mojo`), and two exporters in `exporter.mojo` (`JsonlFileExporter`, `CapturingExporter`). A `TRACES_ENABLED` comptime flag removes every method body when it is false. The engine's span path in `log` is the second one: it carries the same start and end calls as records on the log ring, so logs and spans share one drain.
 
 ### How does a service read its own log?
 
-`ServiceLogSearch` (`komira_log_query/search_seam.mojo`) is the read trait, with one method, `scan(q: ServiceLogQuery) raises -> ServiceLogPage`. A `ServiceLogQuery` carries a nanosecond window, a term and a limit; a `ServiceLogPage` carries `ServiceLogHit`s. `ErasedServiceLogSearch` holds one conformer behind function pointers so a dispatcher holds a single non-generic field and the conformer's storage type instantiates only at `erase[S]`. The package depends on `komira_http_core` and nothing else. No conformer ships in this tree.
+`ServiceLogSearch` (`log_query/search_seam.mojo`) is the read trait, with one method, `scan(q: ServiceLogQuery) raises -> ServiceLogPage`. A `ServiceLogQuery` carries a nanosecond window, a term and a limit; a `ServiceLogPage` carries `ServiceLogHit`s. `ErasedServiceLogSearch` holds one conformer behind function pointers so a dispatcher holds a single non-generic field and the conformer's storage type instantiates only at `erase[S]`. The package depends on `http_core` and nothing else. No conformer ships in this tree.
 
 `service_log_response(search, req, access, now_ns)` in `route.mojo` serves the route; `is_service_log_request(req, path)` matches `GET` at the exact path the service mounted it on. It asks the `access` hook first (`LogReadAccess.allows(req)` in `access.mojo`), then reads `q`, `since_ms`, `until_ms` and `limit`. The window ends at `now_ns` by default and starts 2,592,000,000 ms (30 days) before its end. `since_ms` after `until_ms` is a 400. The limit defaults to 50, is raised to 1 if lower, and is capped at 500. The function never raises. When `scan` raises, a query with no term (`q` empty) becomes a 400 that carries the conformer's own message, because the conformer could not answer a time-range query by itself; a query with a term becomes a 500, `log index read failed`, that names the fault.
 
 ### How does a service read its metrics?
 
-`MetricsReader` (`komira_metrics_reader/reader.mojo`) is the read trait, with two methods. `refusal(q: MetricsQuery) -> String` returns "" when the reader can answer, else a sentence naming what its store cannot do (a step finer than it keeps, an aggregation it cannot compute, grouping it cannot express); it reads nothing. `read(q) raises -> MetricsPage` answers. A `MetricsQuery` carries an inclusive nanosecond window, a metric name, equality and inequality label matchers, an aggregation (`raw`, `sum`, `rate`, `mean`, `min`, `max`, `count`) over a step, group-by keys, and a series and a point limit. A `MetricsPage` carries `MetricsSeriesData` (metric, labels, samples oldest first, each a nanosecond time and a Float64), `truncated` when a limit cut the answer (a series cut at the point limit keeps its newest samples), and `sources_scanned`. `ErasedMetricsReader` is the non-generic facade, as `ErasedServiceLogSearch` is for logs, and `ScriptedMetricsReader` is the double. The package depends on `komira_http_core` and nothing else; no reader ships in it.
+`MetricsReader` (`metrics_reader/reader.mojo`) is the read trait, with two methods. `refusal(q: MetricsQuery) -> String` returns "" when the reader can answer, else a sentence naming what its store cannot do (a step finer than it keeps, an aggregation it cannot compute, grouping it cannot express); it reads nothing. `read(q) raises -> MetricsPage` answers. A `MetricsQuery` carries an inclusive nanosecond window, a metric name, equality and inequality label matchers, an aggregation (`raw`, `sum`, `rate`, `mean`, `min`, `max`, `count`) over a step, group-by keys, and a series and a point limit. A `MetricsPage` carries `MetricsSeriesData` (metric, labels, samples oldest first, each a nanosecond time and a Float64), `truncated` when a limit cut the answer (a series cut at the point limit keeps its newest samples), and `sources_scanned`. `ErasedMetricsReader` is the non-generic facade, as `ErasedServiceLogSearch` is for logs, and `ScriptedMetricsReader` is the double. The package depends on `http_core` and nothing else; no reader ships in it.
 
-`metrics_response(reader, req, access, now_ns)` in `route.mojo` serves `GET` at the exact path `is_metrics_request` matches. It asks the `MetricsReadAccess` hook first; a refusal, a raising hook and an unwired reader are one byte-identical 404. It then reads `metric` (required), `since_ms`, `until_ms`, `step_ms`, `agg`, `group_by`, `label.<k>`, `not_label.<k>`, `series_limit` and `point_limit`. The window ends at `now_ns` by default and starts one hour before its end; the step defaults to 60,000 ms; the limits default to 100 series and 1,440 points and are clamped to 1,000 and 100,000. A present but malformed number, an inverted window and an unknown aggregation are each a 400, never a default. So is any other parameter: a key that is not one of those names, or not `label.` or `not_label.` followed by a non-empty key, is a 400 that names it, and so is a key given more than once, so a misspelled bound is never read as an absent one. A segment with an empty name (`=v`) is a 400 quoting it, and so is a parameter name holding a `%` not followed by two hex digits. A label name is what the writer allows: `komira_metrics` keeps label keys as an OTel attribute set, a map from non-empty keys with no character rule, so the route asks only that `<k>` be non-empty UTF-8; a store's narrower rule is its reader's refusal. The reader's refusal is a 400 carrying its sentence, and the read is not made; a raise from the read is a 500, `metrics read failed`, that names it.
+`metrics_response(reader, req, access, now_ns)` in `route.mojo` serves `GET` at the exact path `is_metrics_request` matches. It asks the `MetricsReadAccess` hook first; a refusal, a raising hook and an unwired reader are one byte-identical 404. It then reads `metric` (required), `since_ms`, `until_ms`, `step_ms`, `agg`, `group_by`, `label.<k>`, `not_label.<k>`, `series_limit` and `point_limit`. The window ends at `now_ns` by default and starts one hour before its end; the step defaults to 60,000 ms; the limits default to 100 series and 1,440 points and are clamped to 1,000 and 100,000. A present but malformed number, an inverted window and an unknown aggregation are each a 400, never a default. So is any other parameter: a key that is not one of those names, or not `label.` or `not_label.` followed by a non-empty key, is a 400 that names it, and so is a key given more than once, so a misspelled bound is never read as an absent one. A segment with an empty name (`=v`) is a 400 quoting it, and so is a parameter name holding a `%` not followed by two hex digits. A label name is what the writer allows: `metrics` keeps label keys as an OTel attribute set, a map from non-empty keys with no character rule, so the route asks only that `<k>` be non-empty UTF-8; a store's narrower rule is its reader's refusal. The reader's refusal is a 400 carrying its sentence, and the read is not made; a raise from the read is a 500, `metrics read failed`, that names it.
 
 ## Why is it built this way?
 
@@ -103,7 +103,7 @@ The second instrument is shaped after OpenTelemetry. `SeriesTable` (`series_tabl
 - Format and write on the caller's thread: kept only for threads with no worker id and for processes with no engine, where no drain would ever run.
 - Move the whole emit out of line to cut compile cost: not done. Only the cold render is out of line (`_write_rendered`), so the hot path stays inlined at the call site.
 
-**Revisit if.** Records wait in worker rings long enough to be dropped. Nothing in `komira_async` drains a log ring; the embedder calls a drain, through the drains above or an idle hook it installs.
+**Revisit if.** Records wait in worker rings long enough to be dropped. Nothing in `async_rt` drains a log ring; the embedder calls a drain, through the drains above or an idle hook it installs.
 
 ### Why is a WARN never dropped when a ring is full?
 
@@ -174,23 +174,23 @@ An allowed caller can still see a 400: an inverted window (`since_ms` after `unt
 
 | File | Holds | Key types and functions |
 |---|---|---|
-| `src/komira_log/src/komira_log/facade.mojo` | The ambient call surface | `info`, `warn`, `_emit`, `get_logger`, `span_open` |
-| `src/komira_log/src/komira_log/logger.mojo`, `logger_erased.mojo`, `tracer.mojo` | Typed and erased surfaces | `Logger`, `emit_erased`, `Tracer` |
-| `src/komira_log/src/komira_log/config.mojo`, `env_filter.mojo`, `levels.mojo` | Levels, directives, the no-engine config | `LogConfig`, `init_logging_from_spec`, `EnvFilter`, `MIN_COMPILED_LEVEL` |
-| `src/komira_log/src/komira_log/pattern_layout.mojo` | Text and JSON line layout | `render_line`, `render_json_line`, `select_log_layout` |
-| `src/komira_log/src/komira_log/engine/shared_engine.mojo` | The engine | `SharedEngine`, `admits`, `drain_worker`, `drain_worker_to_records` |
-| `src/komira_log/src/komira_log/engine/log_manager.mojo` | The process-global engine | `LogManager` |
-| `src/komira_log/src/komira_log/engine/record_ring.mojo`, `log_event_record.mojo` | Ring and record | `LogRecordRing`, `LogEventRecord`, `ArgBlobWriter` |
-| `src/komira_log/src/komira_log/engine/drain.mojo`, `span_drain.mojo` | Decode and span pairing | `render_record_view`, `drain_unified` |
-| `src/komira_log/src/komira_log/engine/output_sink.mojo`, `rotation.mojo` | Output modes and rotation | `LogSink`, `SegmentFile`, `RotationPolicy` |
-| `src/komira_log/src/komira_log/engine/metric_emit.mojo`, `metric_sink.mojo` | Metric records on the ring | `build_metric_record`, `RingMetricSink` |
-| `src/komira_metrics/src/komira_metrics/metrics_set.mojo`, `explain_analyze.mojo` | Per-operator metrics | `MetricsSet`, `format_execution_report` |
-| `src/komira_metrics/src/komira_metrics/series_table.mojo`, `metric_sweep.mojo`, `histogram.mojo` | Series metrics | `SeriesTable`, `MetricSweep`, `HistogramTable` |
-| `src/komira_trace/src/komira_trace/tracer.mojo`, `exporter.mojo`, `span_ring.mojo` | Spans | `Tracer`, `JsonlFileExporter`, `SpanPacketRing` |
-| `src/komira_log/src/komira_log/log_write.mojo`, `structured_log.mojo` | Writes, JSON selection | `write_log_line`, `log_format_is_json` |
-| `src/komira_clock/src/komira_clock/clock.mojo`, `src/komira_spsc_ring/src/komira_spsc_ring/spsc_ring.mojo` | Clocks, the generic ring | `now_ns`, `SpscRing` |
-| `src/komira_log_query/route.mojo`, `access.mojo`, `search_seam.mojo`, `hit.mojo` | Read route, access hook, trait and values | `service_log_response`, `LogReadAccess`, `ServiceLogSearch`, `ServiceLogQuery` |
-| `src/komira_metrics_reader/route.mojo`, `access.mojo`, `reader.mojo`, `query.mojo`, `series.mojo` | Metrics read route, access hook, trait and values | `metrics_response`, `MetricsReadAccess`, `MetricsReader`, `MetricsQuery` |
+| `src/log/src/log/facade.mojo` | The ambient call surface | `info`, `warn`, `_emit`, `get_logger`, `span_open` |
+| `src/log/src/log/logger.mojo`, `logger_erased.mojo`, `tracer.mojo` | Typed and erased surfaces | `Logger`, `emit_erased`, `Tracer` |
+| `src/log/src/log/config.mojo`, `env_filter.mojo`, `levels.mojo` | Levels, directives, the no-engine config | `LogConfig`, `init_logging_from_spec`, `EnvFilter`, `MIN_COMPILED_LEVEL` |
+| `src/log/src/log/pattern_layout.mojo` | Text and JSON line layout | `render_line`, `render_json_line`, `select_log_layout` |
+| `src/log/src/log/engine/shared_engine.mojo` | The engine | `SharedEngine`, `admits`, `drain_worker`, `drain_worker_to_records` |
+| `src/log/src/log/engine/log_manager.mojo` | The process-global engine | `LogManager` |
+| `src/log/src/log/engine/record_ring.mojo`, `log_event_record.mojo` | Ring and record | `LogRecordRing`, `LogEventRecord`, `ArgBlobWriter` |
+| `src/log/src/log/engine/drain.mojo`, `span_drain.mojo` | Decode and span pairing | `render_record_view`, `drain_unified` |
+| `src/log/src/log/engine/output_sink.mojo`, `rotation.mojo` | Output modes and rotation | `LogSink`, `SegmentFile`, `RotationPolicy` |
+| `src/log/src/log/engine/metric_emit.mojo`, `metric_sink.mojo` | Metric records on the ring | `build_metric_record`, `RingMetricSink` |
+| `src/metrics/src/metrics/metrics_set.mojo`, `explain_analyze.mojo` | Per-operator metrics | `MetricsSet`, `format_execution_report` |
+| `src/metrics/src/metrics/series_table.mojo`, `metric_sweep.mojo`, `histogram.mojo` | Series metrics | `SeriesTable`, `MetricSweep`, `HistogramTable` |
+| `src/trace/src/trace/tracer.mojo`, `exporter.mojo`, `span_ring.mojo` | Spans | `Tracer`, `JsonlFileExporter`, `SpanPacketRing` |
+| `src/log/src/log/log_write.mojo`, `structured_log.mojo` | Writes, JSON selection | `write_log_line`, `log_format_is_json` |
+| `src/clock/src/clock/clock.mojo`, `src/spsc_ring/src/spsc_ring/spsc_ring.mojo` | Clocks, the generic ring | `now_ns`, `SpscRing` |
+| `src/log_query/route.mojo`, `access.mojo`, `search_seam.mojo`, `hit.mojo` | Read route, access hook, trait and values | `service_log_response`, `LogReadAccess`, `ServiceLogSearch`, `ServiceLogQuery` |
+| `src/metrics_reader/route.mojo`, `access.mojo`, `reader.mojo`, `query.mojo`, `series.mojo` | Metrics read route, access hook, trait and values | `metrics_response`, `MetricsReadAccess`, `MetricsReader`, `MetricsQuery` |
 
 Entry points:
 
@@ -203,16 +203,16 @@ Each library below welds its tests with `test_srcs`, so building it runs them.
 
 | Library | Welded tests | Covers |
 |---|---|---|
-| `komira_log` | 30, all of `src/komira_log/tests/` | levels and filters, facade, engine, drains, spans, metrics on the ring, sinks and rotation, escalation, JSON layout, write retry and loss accounting, TLS key reuse |
-| `komira_metrics` | 9, all of `src/komira_metrics/tests/` | `MetricsSet`, EXPLAIN ANALYZE, histograms, series table, sweep, attribute sets |
-| `komira_trace` | 7, all of `src/komira_trace/tests/` | tracer, JSONL exporter, span records, drain throughput |
-| `komira_spsc_ring` | 2, `test_spsc_ring` and `test_ring_variants` | the generic ring: order, wrap, block and drop policies |
-| `komira_clock` | 1, `test_clock` | clock reads |
-| `komira_log_query` | 1, `test_service_log_route` | path match, the access hook and the one 404, window and limit, term decoding, the conformer-raise split, page rendering, the erased facade |
-| `komira_metrics_reader` | 3, `test_metrics_query`, `test_metrics_reader` and `test_metrics_route` | the value types, the erased facade and the double against the trait, and the route: path match, the one 404, arguments and their 400s, the refusal and fault split, page rendering |
-| `komira_name_registry` | 1, `test_name_registry` | name registry |
+| `log` | 30, all of `src/log/tests/` | levels and filters, facade, engine, drains, spans, metrics on the ring, sinks and rotation, escalation, JSON layout, write retry and loss accounting, TLS key reuse |
+| `metrics` | 9, all of `src/metrics/tests/` | `MetricsSet`, EXPLAIN ANALYZE, histograms, series table, sweep, attribute sets |
+| `trace` | 7, all of `src/trace/tests/` | tracer, JSONL exporter, span records, drain throughput |
+| `spsc_ring` | 2, `test_spsc_ring` and `test_ring_variants` | the generic ring: order, wrap, block and drop policies |
+| `clock` | 1, `test_clock` | clock reads |
+| `log_query` | 1, `test_service_log_route` | path match, the access hook and the one 404, window and limit, term decoding, the conformer-raise split, page rendering, the erased facade |
+| `metrics_reader` | 3, `test_metrics_query`, `test_metrics_reader` and `test_metrics_route` | the value types, the erased facade and the double against the trait, and the route: path match, the one 404, arguments and their 400s, the refusal and fault split, page rendering |
+| `name_registry` | 1, `test_name_registry` | name registry |
 
-Run: `./buck2 build //src/komira_log:komira_log //src/komira_trace:komira_trace //src/komira_metrics:komira_metrics //src/komira_spsc_ring:komira_spsc_ring //src/komira_clock:komira_clock //src/komira_name_registry:komira_name_registry //src/komira_log_query:komira_log_query //src/komira_metrics_reader:komira_metrics_reader`.
+Run: `./buck2 build //src/log:log //src/trace:trace //src/metrics:metrics //src/spsc_ring:spsc_ring //src/clock:clock //src/name_registry:name_registry //src/log_query:log_query //src/metrics_reader:metrics_reader`.
 
 `test_log_p2c_aot_perf` compares the typed and ambient reaches and only reports. Not tested: `emit_erased` has tests and no caller in these libraries.
 

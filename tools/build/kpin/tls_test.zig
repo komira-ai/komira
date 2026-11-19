@@ -1,6 +1,6 @@
 //! The https client against a real TLS server on loopback: aws-lc's
 //! `bssl s_server` (the zig_test's `exec_tools`, BSSL), pinned to one protocol
-//! version, with the throwaway certificates of komira_http_core's tests (the
+//! version, with the throwaway certificates of http_core's tests (the
 //! zig_test's `data`, under KOMIRA_TEST_WORK). `s_server -www` answers a GET
 //! with the facts of the connection, `Version: TLSv1.2` among them, so what
 //! the server negotiated is read from what kpin downloaded.

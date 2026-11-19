@@ -228,7 +228,7 @@ def test_held_not_measured_fails_unless_nothing_to_cover() raises:
     assert_equal(g.conclusion, "failure")
     # The gate of src/gen, held on both, whose one source has no executable
     # line: nothing to cover, so no Regression (NotMeasured alone, which
-    # fails nothing). Defect: the exemption dropped (komira_wkt's generated
+    # fails nothing). Defect: the exemption dropped (wkt's generated
     # library would fail).
     o.only_package = String("src/gen")
     var n = analyze(List[Input](), List[Input](), _repo(), _held(String("src/gen"), String("line\nbranch\n")), _sources(), o)

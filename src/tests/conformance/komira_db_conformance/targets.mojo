@@ -22,7 +22,7 @@
 #   conf_items  id TEXT primary key, owner TEXT, phase TEXT, version INT8,
 #               note TEXT NULL, created_at INT8,
 #               updated_at TIMESTAMPTZ NULL (the now column: `now_expr()` writes
-#               it, and komira_db/migration.mojo types such a column
+#               it, and db/migration.mojo types such a column
 #               TIMESTAMPTZ so pg's NOW() and sqlite's µs INTEGER both fit)
 #   conf_types  id TEXT primary key, then one NULL-able column per logical
 #               type: t_text TEXT, t_int4 INT4, t_int8 INT8, t_float8 FLOAT8,
@@ -38,7 +38,7 @@
 # bypasses the guard; on real Firestore it needs an index too.
 # =============================================================================
 
-from komira_db import Database, SqlDatabase
+from db import Database, SqlDatabase
 
 comptime ITEMS: StaticString = "conf_items"
 comptime TYPES: StaticString = "conf_types"

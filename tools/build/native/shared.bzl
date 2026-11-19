@@ -1,7 +1,7 @@
 """A komira library's own shared library of C (README.md, "Each library's shared library").
 
 `native_shared_library` links the C archives one Mojo library owns into
-`lib<library>_native.so.1`, exporting exactly the names its callers pass to
+`libkomira_<library>_native.so.1`, exporting exactly the names its callers pass to
 `external_call`, and the names its dependent owners' archives reference,
 that those archives define, and checks the result. A library whose archives
 need another owner's C links against that owner's shared library
@@ -16,13 +16,14 @@ is linked", is the design; the checks are its "Checks, per library".
 """
 
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
+load("@komira//tools/build/mojo:native_facts.bzl", "native_soname")
 load("@komira//tools/build/mojo:providers.bzl", "MojoInfo", "MojoToolchainInfo")
 load("@komira//tools/build/platforms:table.bzl", "os_floor_version", "row")
 load("@komira//tools/build/bench_salt:bench_salt.bzl", "salted")
 
 NativeSharedInfo = provider(
     doc = "A komira library's own shared library, for the libraries that declare it a NEEDED owner and for its library's conda package.",
-    # so: the shared library, lib<library>_native.so.1; soname: its SONAME;
+    # so: the shared library, libkomira_<library>_native.so.1; soname: its SONAME;
     # library: the Mojo library's import name; archives: the labels of the
     # archives linked whole, sorted; glibc_floor: the floor check 5 held it to;
     # closure: {SONAME: shared library} of this one and every owner it NEEDs,
@@ -74,7 +75,7 @@ def _native_shared_library_impl(ctx):
         fail("{}: a library's shared library is ELF only (a version script, SONAME and DT_FLAGS); Mach-O is a later design".format(ctx.label))
     if not ctx.attrs.archives or not ctx.attrs.callers:
         fail("{}: needs `archives` and `callers`".format(ctx.label))
-    soname = "lib{}_native.so.1".format(ctx.attrs.library)
+    soname = native_soname(ctx.attrs.library)
     tool = ctx.attrs._native_so[RunInfo]
     archives = [cmd_args("--archive", str(d.label.raw_target()), _static_pic(ctx, d)) for d in ctx.attrs.archives]
     callers = [cmd_args("--caller", str(d.label.raw_target()), _caller_src(ctx, d)) for d in ctx.attrs.callers]
@@ -208,14 +209,14 @@ def _native_shared_library_impl(ctx):
 
 _native_shared_library = rule(
     impl = _native_shared_library_impl,
-    doc = "lib<library>_native.so.1, the shared library of the C `archives` a Mojo library owns, and its link name `[link]`: every archive linked whole, exporting exactly the `external_call` names of the `callers`' sources, and the names the `caller_archives` reference, that those archives define; NEEDED on each of `needed_owners`, with RUNPATH $ORIGIN (`[exports]`, `[version_script]`, `[report]`; `[dynsym]` reads the result). Checks 1 to 7 of docs/design/native_packaging.md are validations of this target, one action each (`[check_<n>_<name>]`), and so is the README check (`[readme_calls]`): some program of the library's welded README gate, compiled to an object, references one of the exports.",
+    doc = "libkomira_<library>_native.so.1, the shared library of the C `archives` a Mojo library owns, and its link name `[link]`: every archive linked whole, exporting exactly the `external_call` names of the `callers`' sources, and the names the `caller_archives` reference, that those archives define; NEEDED on each of `needed_owners`, with RUNPATH $ORIGIN (`[exports]`, `[version_script]`, `[report]`; `[dynsym]` reads the result). Checks 1 to 7 of docs/design/native_packaging.md are validations of this target, one action each (`[check_<n>_<name>]`), and so is the README check (`[readme_calls]`): some program of the library's welded README gate, compiled to an object, references one of the exports.",
     attrs = {
         "archives": attrs.list(attrs.dep(), doc = "The C libraries (cxx_library targets) the library owns; each one's `[static-pic]` archive is linked whole."),
         "caller_archives": attrs.list(attrs.dep(), default = [], doc = "Dependent owners' C archives (cxx_library targets, each `[static-pic]`): every name one references and does not define is exported when this library's archives define it (s2n-tls's needs from aws-lc)."),
         "callers": attrs.list(attrs.dep(), doc = "The mojo_library targets whose `external_call` names the library answers, read from their `[src]` (library sources, never tests)."),
         "cxx_runtime": attrs.bool(default = False, doc = "An archive is C++: link zig's libc++ and libc++abi statically (`-lc++`); the version script keeps their symbols local."),
         "glibc_floor": attrs.string(doc = "The highest glibc version the library may need: the platform row's `os_floor` (check 5)."),
-        "library": attrs.string(doc = "The Mojo library's import name; the SONAME is lib<library>_native.so.1."),
+        "library": attrs.string(doc = "The Mojo library's import name; the SONAME is libkomira_<library>_native.so.1."),
         "needed_owners": attrs.list(attrs.dep(providers = [NativeSharedInfo]), default = [], doc = "The native_shared_library targets of the owners whose C this library's archives call: linked, NEEDED, and found through RUNPATH $ORIGIN (checks 3 and 4)."),
         "weak_undefined": attrs.list(attrs.string(), doc = "Every weak undefined symbol the library has, each with its reason in the BUCK file (checks 3 and 7: the list must be exact)."),
         "_launcher": attrs.exec_dep(default = "komira//tools/build/toolchains:zig_cc_launcher", providers = [RunInfo]),

@@ -60,12 +60,12 @@
 
 from std.testing import assert_equal, assert_true
 
-from komira_crypto.ecdsa_p256 import ecdsa_p256_sign_deterministic
-from komira_encoding import base64_url_encode_nopad
-from komira_jose import JwsSigner
-from komira_json import write_json_string
-from komira_jwks import Jwk, parse_jwk_set, render_jwk_set
-from komira_secret_store import SecretValue
+from crypto.ecdsa_p256 import ecdsa_p256_sign_deterministic
+from encoding import base64_url_encode_nopad
+from jose import JwsSigner
+from json import write_json_string
+from jwks import Jwk, parse_jwk_set, render_jwk_set
+from secret_store import SecretValue
 from komira_test_issuer import (
     SCENARIO_CLAIMS,
     SCENARIO_IN_FLIGHT,
@@ -180,8 +180,8 @@ def _odd_jwk(kid: String) raises -> Jwk:
 
 def _odd_sign(kid: String, payload: String, typ: Optional[String]) raises -> String:
     """The compact ES256 JWS of `payload` by the odd key, its header naming
-    `kid`. A komira_jose `JwsSigner` always names its own key's thumbprint,
-    so this signs with komira_crypto directly, writing the header the way
+    `kid`. A jose `JwsSigner` always names its own key's thumbprint,
+    so this signs with crypto directly, writing the header the way
     `JwsSigner.sign` does (test_kid_not_thumbprint checks the bytes agree
     when `kid` is the thumbprint)."""
     var h = List[UInt8]()
@@ -546,7 +546,7 @@ def _repeat_of(mut misses: String, a: Int, b: Int) raises:
 
 def test_kid_not_thumbprint() raises:
     # Every near miss of the odd key's real thumbprint (the empty kid is
-    # refused by komira_jwks before any token exists).
+    # refused by jwks before any token exists).
     var odd = JwsSigner.es256(SecretValue(Span(_odd_scalar())))
     var real = odd.kid()
     # The hand-made signer is the library's, byte for byte, when it names

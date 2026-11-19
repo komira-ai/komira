@@ -25,7 +25,7 @@
 from std.os import listdir
 from std.pathlib import Path
 
-from komira_runtime_paths import data_path
+from runtime_paths import data_path
 
 # Where the test declares the extracted tree (its test_data destination).
 comptime SUITE_DATA_DIR = "jsontestsuite/test_parsing"

@@ -15,11 +15,11 @@
 
 from std.sys import argv
 
-from komira_objectstore.cas_manifest import CasManifestStore, RetryPolicy
-from komira_objectstore.local_fs_conditional_store import LocalFsConditionalStore
-from komira_objectstore.path import Path
-from komira_shuffle.claim import claim_key, claims_prefix
-from komira_shuffle.seal_driver import entries_prefix, seal_prefix
+from objectstore.cas_manifest import CasManifestStore, RetryPolicy
+from objectstore.local_fs_conditional_store import LocalFsConditionalStore
+from objectstore.path import Path
+from shuffle.claim import claim_key, claims_prefix
+from shuffle.seal_driver import entries_prefix, seal_prefix
 from komira_shuffle_e2e.children import TaskGroup, TaskOutcome, line_field
 from komira_shuffle_e2e.rows import expected_partition_hex
 

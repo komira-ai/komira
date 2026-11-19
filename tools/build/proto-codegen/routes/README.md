@@ -10,13 +10,13 @@ import_prefix, test_srcs, test_data)` runs protoc with
 their RPCs' `(google.api.http)` rules. For each `.proto` declaring a service
 it writes `<stem>_routes.mojo` (stated in `outs`): per service a handler trait
 with one method per RPC, `<service>_router()` building
-`komira_http_server`'s `Router` (one route per HTTP binding), and
+`http_server`'s `Router` (one route per HTTP binding), and
 `<Service>Routes[H]`, a `RequestDispatcher` that binds the request message from
 path variables, query parameters and a `body: "*"` JSON body (unknown fields
 and parameters are refused with 400), answers 405 for a known path under
 another method (its `Allow` header names the path's methods), and writes the
 response as proto3 JSON. `<Service>Routes` is a `RoutedDispatcher`, so one
-server serves several services through `komira_http_server`'s
+server serves several services through `http_server`'s
 `ComposedRoutes[*Services]`. `messages` is the Mojo
 proto library of the request and response messages (its import name is where
 the routes module imports them from; it is added to `deps`); `proto_deps` lets

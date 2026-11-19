@@ -1,10 +1,10 @@
 # =============================================================================
 # tests/kafka_produce_error_tokens/test_kafka_produce_error_tokens.mojo
-#   komira_kafka_server's copies of komira_objectstore's append-error tokens
+#   kafka_server's copies of objectstore's append-error tokens
 #   cannot drift from the store's.
 # =============================================================================
 #
-# `komira_kafka_server.produce_error` classifies an append error by its own
+# `kafka_server.produce_error` classifies an append error by its own
 # copies of the store's tokens (BUCK says why). Two checks hold them together:
 #
 #   1. EQUALITY. Each copy equals the store's constant where the store names
@@ -24,12 +24,12 @@
 
 from std.testing import assert_equal
 
-from komira_objectstore.cas_manifest import (
+from objectstore.cas_manifest import (
     _LEASE_FENCED_MARKER,
     is_lease_fenced,
     is_retryable_contention,
 )
-from komira_objectstore.manifest_slot_guard import (
+from objectstore.manifest_slot_guard import (
     LOG_START_UNREAD_MARKER,
     SLOT_REAPED_MARKER,
     is_log_start_unread,
@@ -38,7 +38,7 @@ from komira_objectstore.manifest_slot_guard import (
     slot_reaped_error,
 )
 
-from komira_kafka_server.produce_error import (
+from kafka_server.produce_error import (
     CONTENTION_EXHAUSTED_MARKER,
     CONTENTION_RETRYABLE_MARKER,
     LEASE_FENCED_MARKER,
@@ -50,7 +50,7 @@ from komira_kafka_server.produce_error import (
     is_slot_reaped_text,
     produce_error_for,
 )
-from komira_kafka_server.wire.produce_fetch import (
+from kafka_server.wire.produce_fetch import (
     ERROR_NOT_LEADER_OR_FOLLOWER,
     ERROR_REQUEST_TIMED_OUT,
 )

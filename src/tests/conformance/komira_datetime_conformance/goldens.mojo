@@ -15,8 +15,8 @@
 
 from std.pathlib import Path
 
-from komira_runtime_paths import data_path
-from komira_datetime import Transition, ZoneOffset
+from runtime_paths import data_path
+from datetime import Transition, ZoneOffset
 
 comptime ZONEINFO_DATA_DIR = "tzdata/src/tzdata/zoneinfo"
 comptime ZONES_LIST = "tzdata/src/tzdata/zones"

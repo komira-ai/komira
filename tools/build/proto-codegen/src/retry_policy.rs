@@ -4,7 +4,7 @@
 use crate::ir::IrMethod;
 
 /// The retry policy a generated method carries — the codegen half of
-/// `komira_grpc.retry.RetryPolicy`.
+/// `grpc.retry.RetryPolicy`.
 ///
 /// Deliberately only TWO variants. A richer lattice (per-code sets, per-service
 /// budgets) is expressible in the runtime type, but nothing in the proto model

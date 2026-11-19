@@ -1,7 +1,7 @@
 # =============================================================================
 # komira_search_e2e/corpus.mojo
 #   The deterministic corpus the end-to-end tests index: three splits of short
-#   documents, ASCII and non-ASCII, each serialized by komira_search's
+#   documents, ASCII and non-ASCII, each serialized by search's
 #   production `SearchSink`, plus the whole corpus as one split (the oracle
 #   that does not depend on where the split boundaries fall).
 # =============================================================================
@@ -28,15 +28,15 @@
 # the split bodies and in `_source`.
 # =============================================================================
 
-from komira_arrow.arrow_types import ArrowType
-from komira_arrow.column import Column
-from komira_arrow.record_batch import RecordBatchBuilder
-from komira_arrow.schema import Field, Schema, SchemaBuilder
-from komira_arrow.string_array import StringArray
-from komira_buffer.heap_region import HeapRegion
+from arrow.arrow_types import ArrowType
+from arrow.column import Column
+from arrow.record_batch import RecordBatchBuilder
+from arrow.schema import Field, Schema, SchemaBuilder
+from arrow.string_array import StringArray
+from byte_buffer.heap_region import HeapRegion
 
-from komira_search.analyzer import AnalyzerConfig
-from komira_search.sink import SearchSink
+from search.analyzer import AnalyzerConfig
+from search.sink import SearchSink
 
 
 comptime INDEX_NAME: String = "e2e_logs"

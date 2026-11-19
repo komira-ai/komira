@@ -1,6 +1,6 @@
-# komira_oci
+# oci
 
-`komira_oci` lays out the tree an image adds, writes that image, and reads an
+`oci` lays out the tree an image adds, writes that image, and reads an
 OCI image layout back. It is a Zig program, as every build tool under
 `tools/build` is (komira#956), built with the pinned zig and using only Zig's
 standard library:
@@ -19,10 +19,10 @@ then zeroed); nothing else runs, and nothing uses the network.
 
 | command | run by | what |
 |---|---|---|
-| `komira_oci tree --out <dir> [--bundle <path/>=<dir>]... [--file <path>=<src>]...` | every `oci_tree` ([`../defs.bzl`](../defs.bzl)) | lays each bundle and file at its path; refused, naming each reason, unless every path is plain (no empty, `.` or `..` part), a bundle's ends in /, and no path is inside another (a file at `app/bin/x` beside a bundle at `app/` would replace the bundle's program). Modes are 0755 for directories and files with an exec bit, else 0644 |
-| `komira_oci image --tree <dir> --entrypoint </path> --name <n> --version <v> --repo <r> --manifest <m> --manifest-digest <d> --config <c> [--layer <blob>]... --busybox <exe> --out <dir> --archive <file> --digest <file>` | `oci_image(tree = ...)` | an OCI image layout of the pinned base plus one layer, the tree at /, with Entrypoint `[<entrypoint>]`; refused unless the base manifest hashes to its pin and names exactly the given config and layers. `--archive` is the layout as one tar plus a Docker `manifest.json`; `--digest` the manifest digest |
-| `komira_oci layers --layout <dir> --busybox <exe> --out <file>` | every `oci_image`, for its default output and `[layers]` | writes the manifest's layer digests, one per line, in order; refuses an image whose Entrypoint is not one absolute path naming a regular file with mode 0755 in the added (last) layer |
-| `komira_oci check --layout <dir> --busybox <exe> --layers <file> --entrypoint </path> [--exec <path>]... [--file <path>]... --out <file> [--expect-red <text>]` | `oci_image_check` ([`../oci_check.bzl`](../oci_check.bzl)) | red, naming each failure, unless the layer list is the manifest's layers in order; the Entrypoint is exactly `[<entrypoint>]` (one element, spelled the same); the entrypoint and every `--exec` path is a regular file with mode 0755 and every `--file` path a regular file of one byte or more in the image's filesystem; and no entry of the added layer changes the type of a path below it |
+| `oci tree --out <dir> [--bundle <path/>=<dir>]... [--file <path>=<src>]...` | every `oci_tree` ([`../defs.bzl`](../defs.bzl)) | lays each bundle and file at its path; refused, naming each reason, unless every path is plain (no empty, `.` or `..` part), a bundle's ends in /, and no path is inside another (a file at `app/bin/x` beside a bundle at `app/` would replace the bundle's program). Modes are 0755 for directories and files with an exec bit, else 0644 |
+| `oci image --tree <dir> --entrypoint </path> --name <n> --version <v> --repo <r> --manifest <m> --manifest-digest <d> --config <c> [--layer <blob>]... --busybox <exe> --out <dir> --archive <file> --digest <file>` | `oci_image(tree = ...)` | an OCI image layout of the pinned base plus one layer, the tree at /, with Entrypoint `[<entrypoint>]`; refused unless the base manifest hashes to its pin and names exactly the given config and layers. `--archive` is the layout as one tar plus a Docker `manifest.json`; `--digest` the manifest digest |
+| `oci layers --layout <dir> --busybox <exe> --out <file>` | every `oci_image`, for its default output and `[layers]` | writes the manifest's layer digests, one per line, in order; refuses an image whose Entrypoint is not one absolute path naming a regular file with mode 0755 in the added (last) layer |
+| `oci check --layout <dir> --busybox <exe> --layers <file> --entrypoint </path> [--exec <path>]... [--file <path>]... --out <file> [--expect-red <text>]` | `oci_image_check` ([`../oci_check.bzl`](../oci_check.bzl)) | red, naming each failure, unless the layer list is the manifest's layers in order; the Entrypoint is exactly `[<entrypoint>]` (one element, spelled the same); the entrypoint and every `--exec` path is a regular file with mode 0755 and every `--file` path a regular file of one byte or more in the image's filesystem; and no entry of the added layer changes the type of a path below it |
 
 An image's bytes depend only on the tree and the base: tar entries are
 sorted, mtime, uid and gid are 0, JSON keys are sorted, and every timestamp

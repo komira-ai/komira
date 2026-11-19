@@ -8,8 +8,8 @@
 #   * hex round-trips bytes.
 from std.testing import assert_equal, assert_true
 
-from komira_shuffle.partitioner import HashPartitioner
-from komira_shuffle.source import decode_partition_payloads
+from shuffle.partitioner import HashPartitioner
+from shuffle.source import decode_partition_payloads
 from komira_shuffle_e2e.rows import (
     expected_partition_body,
     from_hex,

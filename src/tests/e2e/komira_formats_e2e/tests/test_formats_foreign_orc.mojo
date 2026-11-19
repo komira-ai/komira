@@ -2,7 +2,7 @@
 # ORC files another implementation wrote, read by value.
 # =============================================================================
 #
-# Every other ORC test in this repo reads bytes komira_orc's own writer
+# Every other ORC test in this repo reads bytes orc's own writer
 # produced, so a writer and reader that agree on a wrong layout pass. These
 # six files were written by pyarrow's bundled ORC C++ writer (provenance and
 # the data rules: tests/fixtures/orc/gen_pyarrow_orc_fixtures.py). Expected
@@ -48,13 +48,13 @@
 from std.pathlib import Path
 from std.testing import TestSuite, assert_equal, assert_true
 
-from komira_async.cancellation.token import CancellationToken
-from komira_async.ops.waker_sink import NoopSink
-from komira_async.reactor.reactor import BACKEND_MOCK
-from komira_async.runtime.runtime import PerCoreAsyncRuntime, PLACEMENT_FIXED
-from komira_arrow.arrow_types import ArrowType
-from komira_arrow.record_batch import RecordBatch
-from komira_orc import (
+from async_rt.cancellation.token import CancellationToken
+from async_rt.ops.waker_sink import NoopSink
+from async_rt.reactor.reactor import BACKEND_MOCK
+from async_rt.runtime.runtime import PerCoreAsyncRuntime, PLACEMENT_FIXED
+from arrow.arrow_types import ArrowType
+from arrow.record_batch import RecordBatch
+from orc import (
     OrcFileTail,
     read_orc_bytes,
     read_orc_bytes_projected,
@@ -114,7 +114,7 @@ struct _Col(Movable):
             )
 
 
-# ---- the PostScript and footer bytes, walked without komira_orc ----------
+# ---- the PostScript and footer bytes, walked without orc ----------
 
 
 def _varint(b: Span[UInt8, _], mut pos: Int) raises -> UInt64:

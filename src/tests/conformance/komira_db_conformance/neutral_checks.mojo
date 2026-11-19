@@ -1,6 +1,6 @@
 # =============================================================================
 # komira_db_conformance/neutral_checks.mojo -- the backend-neutral `Database`
-#   operations, as komira_db/database.mojo documents them.
+#   operations, as db/database.mojo documents them.
 # =============================================================================
 #
 # Each check states the documented behaviour it holds the target to. Result
@@ -10,9 +10,9 @@
 
 from std.testing import assert_equal, assert_false, assert_true
 
-from komira_async.reactor.reactor import Reactor
+from async_rt.reactor.reactor import Reactor
 
-from komira_db import (
+from db import (
     DbColVal,
     DbRows,
     DbValue,
@@ -210,7 +210,7 @@ def check_query_rows_in[T: NeutralTarget](mut t: T) raises:
 
 def check_query_rows_ne[T: NeutralTarget](mut t: T) raises:
     """PRED_NE is IS DISTINCT FROM: a NULL column is distinct from any value
-    (komira_db/neutral_ops.mojo)."""
+    (db/neutral_ops.mojo)."""
     var db = t.fresh()
     var rt = new_rt()
     ref reactor = rt.reactor()

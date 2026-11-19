@@ -10,7 +10,7 @@ body:
     id: where
     attributes:
       label: Library or tool
-      description: The package under src/ (e.g. komira_json), or the tool or rule under tools/.
+      description: The package under src/ (e.g. json), or the tool or rule under tools/.
     validations:
       required: true
   - type: input

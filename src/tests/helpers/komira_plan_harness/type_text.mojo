@@ -24,16 +24,16 @@
 # of the data actually rendered. Child nullability is NOT spelled: komira's
 # Field carries it one level deep only and a Column not at all.
 #
-# One limit is komira_arrow's, not canon's: a zero-row nested column built
+# One limit is arrow's, not canon's: a zero-row nested column built
 # from a schema has no child columns. Its children are then spelled from the
 # Field's one level (names and type names); a pyarrow spelling of a deeper
 # type will differ there, and the compare reports it as a schema mismatch.
 # =============================================================================
 
-from komira_arrow.arrow_types import ArrowType
-from komira_arrow.column import Column
-from komira_arrow.schema import Field
-from komira_buffer.heap_region import HeapRegion
+from arrow.arrow_types import ArrowType
+from arrow.column import Column
+from arrow.schema import Field
+from byte_buffer.heap_region import HeapRegion
 
 from .escape import escape_name
 

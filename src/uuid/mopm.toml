@@ -1,0 +1,17 @@
+[package]
+name = "komira-ai/uuid"
+version = "0.1.0"
+description = "UUIDv7 (RFC 9562): the Uuid value type, a stateless generator and a monotonic one, with its CSPRNG declaration over aws-lc's RAND_bytes."
+license = "Apache-2.0"
+repository = "https://github.com/komira-ai/komira"
+readme = "README.md"
+mojo = ["1.0.0"]
+
+[dependencies]
+"komira-ai/atomic_alias" = { path = "../atomic_alias", version = "0.1" }
+"komira-ai/awslc" = { path = "../awslc", version = "0.1" }
+"komira-ai/clock" = { path = "../clock", version = "0.1" }
+
+[targets]
+lib = { path = "src/uuid" }
+tests = ["tests"]

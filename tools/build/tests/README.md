@@ -429,7 +429,7 @@ selection outside the closure is refused (`roster_bad_selection`, the
 scenario [`analysis_refusals_proto`](../selftest/analysis_refusals_proto.zig)).
 `mojo_db_proto_library`: the DbStorable code generated for the table of
 `db/tasks.proto` passes `tests//functional/proto:test_tasks_db` against a minimal
-`komira_db`, and a declared `outs` file the plugin does not write (a `.proto`
+`db`, and a declared `outs` file the plugin does not write (a `.proto`
 without a table) fails the generation (`tasks_db_wrong_outs`).
 
 [`proto_fixture_check`](../mojo/README.md#wire-fixtures-proto_fixture_check):
@@ -583,7 +583,7 @@ by the runner's own unit tests (below); mapping the runner's status to a
 verdict is Buck2's. The `bad_*` targets and the `test_deps` refusals at
 analysis are the scenario
 [`analysis_refusals_mojo`](../selftest/analysis_refusals_mojo.zig). The gate test
-of `komira//src/komira_runtime_paths:komira_runtime_paths` (built with
+of `komira//src/runtime_paths:runtime_paths` (built with
 the examples) covers the executable-relative helpers.
 The runner's unit tests ([`tools/build/run/mojo_test.zig`](../run/mojo_test.zig),
 welded to the runner, so a pull request that builds any test runs them) run
@@ -655,7 +655,7 @@ tools/build/tests/functional/bootstrap.sh "$(mktemp -d)/bootstrap"
 
 ## 33a. Conda packages
 
-The conda package of `//src/komira_encoding:komira_encoding_conda` and of the
+The conda package of `//src/encoding:encoding_conda` and of the
 fixture libraries of [`negative/conda`](negative/conda/BUCK) ([`conda.sh`](functional/conda.sh)):
 a package is a directory (the `.conda`, `manifest.json`, `metadata.json`), read
 back with `unzip`, `zstd`, `tar` and `jq`, not the tool that wrote it (three
@@ -790,7 +790,7 @@ likewise for `logs_pure`):
 
 ```sh
 out=$(buck2 build 'tests//functional/aws_codegen:logs_client[gen]' --show-full-simple-output)
-cp "$out/komira_aws_logs.mojo" tools/build/tests/functional/aws_codegen/golden/logs_client.mojo
+cp "$out/aws_logs.mojo" tools/build/tests/functional/aws_codegen/golden/logs_client.mojo
 cp "$out/_layout_probe.mojo" tools/build/tests/functional/aws_codegen/golden/logs_client_probe.mojo
 ```
 

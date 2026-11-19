@@ -1,19 +1,19 @@
 """A mid-size closure re-exported through one @export file: the core packages
-(Arrow batch builder, snappy C lib), komira_json, komira_encoding,
-komira_crypto (aws-lc), komira_protobuf and komira_gcp_core."""
+(Arrow batch builder, snappy C lib), json, encoding,
+crypto (aws-lc), protobuf and gcp_core."""
 
-from komira_arrow.arrow_types import ArrowType
-from komira_arrow.column import Column
-from komira_arrow.schema import Field, SchemaBuilder
-from komira_arrow.string_array import StringArray
-from komira_arrow.schema import RecordBatchBuilder
-from komira_buffer.owned_aligned_buffer import OwnedAlignedBuffer
-from komira_crypto.sha256 import sha256
-from komira_encoding import base64_encode
-from komira_gcp_core.status import code_from_http_status
-from komira_json.parse import parse_json_value
-from komira_protobuf.reader import pb_read_varint
-from komira_protobuf.writer import pb_write_varint
+from arrow.arrow_types import ArrowType
+from arrow.column import Column
+from arrow.schema import Field, SchemaBuilder
+from arrow.string_array import StringArray
+from arrow.schema import RecordBatchBuilder
+from byte_buffer.owned_aligned_buffer import OwnedAlignedBuffer
+from crypto.sha256 import sha256
+from encoding import base64_encode
+from gcp_core.status import code_from_http_status
+from json.parse import parse_json_value
+from protobuf.reader import pb_read_varint
+from protobuf.writer import pb_write_varint
 
 
 @export

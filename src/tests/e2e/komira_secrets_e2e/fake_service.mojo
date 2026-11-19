@@ -2,11 +2,11 @@
 # fake_service.mojo -- a stateful AWS Secrets Manager over awsJson 1.1
 # =============================================================================
 #
-# `FakeSecretsManager` is a komira_http_server `RequestDispatcher`: each
+# `FakeSecretsManager` is a http_server `RequestDispatcher`: each
 # request the server parses is checked and answered as the service answers
 # it, against the state in fake_store.mojo.
 #
-#   1. The signature (sigv4_check.mojo, independent of komira_aws_core),
+#   1. The signature (sigv4_check.mojo, independent of aws_core),
 #      over the request's own method, scoped to the fake's region and the
 #      service signing name `secretsmanager`. A refused request is answered
 #      with the service's error shape and never reaches the state.
@@ -37,7 +37,7 @@
 # member): a client that put an error body into its error text would leak the
 # value, and the custody checks look for exactly that. `error_bodies` keeps
 # every error body sent, so a test can see that the leak was on the wire.
-# A 5xx body never carries it: komira_http_server logs the body of every 5xx
+# A 5xx body never carries it: http_server logs the body of every 5xx
 # a handler returns (middleware/fault_report.mojo, `observe_error_response`),
 # and its contract is that a handler's 5xx body holds no customer content.
 #
@@ -45,7 +45,7 @@
 # operation, its ClientRequestToken, the answer's status and code), and
 # `log` one line per request (operation, status, code: by construction it
 # has no field a value could be in). `server_log` holds, for every 5xx the
-# fake returns, the exact line komira_http_server writes to stdout for it
+# fake returns, the exact line http_server writes to stdout for it
 # (`error_response_log_line`, the line `observe_error_response` emits), so a
 # test can check the one server log line that carries a response body
 # without capturing the process's stdout. The server's other log line, for a
@@ -56,15 +56,15 @@
 # duet runs (duet.mojo); the test reads it after the join.
 # =============================================================================
 
-from komira_async.reactor.reactor import Reactor
-from komira_async.runtime.runtime_trait import Runtime
-from komira_http_core.codec import HttpMethod, HttpRequest, HttpResponse
-from komira_http_server.dispatch import RequestDispatcher
-from komira_http_server.middleware import (
+from async_rt.reactor.reactor import Reactor
+from async_rt.runtime.runtime_trait import Runtime
+from http_core.codec import HttpMethod, HttpRequest, HttpResponse
+from http_server.dispatch import RequestDispatcher
+from http_server.middleware import (
     error_response_log_line,
     trace_header_of,
 )
-from komira_json import JsonValue, parse_json_bytes
+from json import JsonValue, parse_json_bytes
 
 from .fake_store import (
     STAGE_CURRENT,
@@ -371,7 +371,7 @@ struct FakeSecretsManager(RequestDispatcher):
                 return self._restore_secret(body)
         except:
             # A member of the wrong JSON type; the message names the
-            # komira_json accessor, never a value.
+            # json accessor, never a value.
             return _error(400, String("SerializationException"), String("A member has the wrong type."))
         return _error(400, String("UnknownOperationException"), String(""))
 

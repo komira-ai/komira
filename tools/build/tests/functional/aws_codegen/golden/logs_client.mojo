@@ -19,7 +19,7 @@
 #   mode         : client
 #
 # THE SIGNER AND THE CREDENTIAL CHAIN ARE NOT GENERATED. The transport
-# call below goes to the hand-written `komira_aws_core.send_sigv4_signed_request`,
+# call below goes to the hand-written `aws_core.send_sigv4_signed_request`,
 # which is tested against the AWS SigV4 test vectors. Nothing here signs.
 #
 # ── §CONSTRAINTS — the model's `min` / `max`, checked ─────────────
@@ -53,7 +53,7 @@
 # HAND-OVERRIDE SEAM: no overrides are declared for this service.
 # ===========================================================================
 
-from komira_aws_core import (
+from aws_core import (
     AWS_TS_ISO8601,
     AWS_TS_RFC822,
     AWS_TS_UNIX,
@@ -86,14 +86,14 @@ from komira_aws_core import (
     send_sigv4_signed_request,
     send_sigv4_signed_request_with,
 )
-from komira_json import (
+from json import (
     JsonValue,
     parse_json_bytes,
     parse_json_value,
 )
-from komira_http_client.client import HttpClientConfig
-from komira_http_core.transport.io_stream import Connector
-from komira_retry import (
+from http_client.client import HttpClientConfig
+from http_core.transport.io_stream import Connector
+from retry import (
     MonotonicClock,
     RetryBudget,
     RetryLoop,
@@ -110,7 +110,7 @@ comptime CLOUDWATCHLOGS_ENDPOINT_PREFIX: String = "logs"
 comptime CLOUDWATCHLOGS_CONTENT_TYPE: String = "application/x-amz-json-1.1"
 comptime CLOUDWATCHLOGS_TARGET_PREFIX: String = "Logs_20140328"
 
-def komira_aws_logs_host(region: String) raises -> String:
+def aws_logs_host(region: String) raises -> String:
     """`logs.<region>.amazonaws.com`.
 
         ⚠ REGIONAL. An empty region here would sign against a host with a
@@ -118,7 +118,7 @@ def komira_aws_logs_host(region: String) raises -> String:
         composition that left the region unset. So it is refused by name."""
     if region.byte_length() == 0:
         raise Error(
-            "komira_aws_logs_host: REFUSED an EMPTY region — this is a REGIONAL"
+            "aws_logs_host: REFUSED an EMPTY region — this is a REGIONAL"
             " service and there is no global endpoint to fall back to."
         )
     return String("logs.") + region + String(".amazonaws.com")
@@ -773,7 +773,7 @@ struct CloudWatchLogsClient[C: Connector, T: AwsCredsSource](Movable, Deinitable
     var _retry_quota: AwsRetryQuota
     # WHERE this client sends. `None` = real AWS (the host derived from
     # the region). A VALUE, never an ambient env var — see
-    # `komira_aws_core.AwsEndpoint`. This is what makes every verb this
+    # `aws_core.AwsEndpoint`. This is what makes every verb this
     # generator emits exercisable against a local emulator.
     var _endpoint_override: Optional[AwsEndpoint]
 
@@ -803,7 +803,7 @@ struct CloudWatchLogsClient[C: Connector, T: AwsCredsSource](Movable, Deinitable
 
     def send(mut self, var req: AwsRequest) raises -> HttpResult:
         """Sign and send `req`. THE SIGNER IS NOT GENERATED — this is a call
-            into the hand-written `komira_aws_core.send_sigv4_signed_request`, which is
+            into the hand-written `aws_core.send_sigv4_signed_request`, which is
             tested against the AWS SigV4 test vectors.
 
             ⛔ `X-Amz-Target` MUST RIDE IN THE **SIGNED** SET, not merely on the
@@ -835,7 +835,7 @@ struct CloudWatchLogsClient[C: Connector, T: AwsCredsSource](Movable, Deinitable
             cred,
             self._region.copy(),
             String(CLOUDWATCHLOGS_SERVICE),
-            resolve_endpoint(self._endpoint_override, komira_aws_logs_host(self._region.copy())).with_host_prefix(req.host_prefix),
+            resolve_endpoint(self._endpoint_override, aws_logs_host(self._region.copy())).with_host_prefix(req.host_prefix),
             req.uri.copy(),
             content_type^,
             req.body.copy(),
@@ -844,7 +844,7 @@ struct CloudWatchLogsClient[C: Connector, T: AwsCredsSource](Movable, Deinitable
 
     def send_with[X: AwsHttpTransport, K: AwsClock, L: MonotonicClock, S: Sleeper, R: RetryRng, B: RetryBudget](mut self, var req: AwsRequest, mut transport: X, mut clock: K, mut retry: RetryLoop[L, S, R], mut budget: B) raises -> HttpResult:
         """`send`, over the transport, signing clock, retry loop and budget
-            given (`komira_aws_core.send_sigv4_signed_request_with`) instead of a
+            given (`aws_core.send_sigv4_signed_request_with`) instead of a
             connector from this client's factory, the wall clock and the
             standard retry loop. It returns the response, successful or not.
 
@@ -882,7 +882,7 @@ struct CloudWatchLogsClient[C: Connector, T: AwsCredsSource](Movable, Deinitable
             cred,
             self._region.copy(),
             String(CLOUDWATCHLOGS_SERVICE),
-            resolve_endpoint(self._endpoint_override, komira_aws_logs_host(self._region.copy())).with_host_prefix(req.host_prefix),
+            resolve_endpoint(self._endpoint_override, aws_logs_host(self._region.copy())).with_host_prefix(req.host_prefix),
             req.uri.copy(),
             content_type^,
             req.body.copy(),
@@ -895,7 +895,7 @@ struct CloudWatchLogsClient[C: Connector, T: AwsCredsSource](Movable, Deinitable
         var res = self.send(req^)
         if not aws_is_error_status(res.status):
             return parse_get_log_events_response(res^.into_response())
-        raise _komira_aws_logs_error(String("GetLogEvents"), res)
+        raise _aws_logs_error(String("GetLogEvents"), res)
 
     def get_log_events_with[X: AwsHttpTransport, K: AwsClock, L: MonotonicClock, S: Sleeper, R: RetryRng, B: RetryBudget](mut self, input: CloudWatchLogsGetLogEventsRequest, mut transport: X, mut clock: K, mut retry: RetryLoop[L, S, R], mut budget: B) raises -> HttpResult:
         """`GetLogEvents` over the given seams (`send_with`): the response, successful
@@ -904,7 +904,7 @@ struct CloudWatchLogsClient[C: Connector, T: AwsCredsSource](Movable, Deinitable
         return self.send_with(req^, transport, clock, retry, budget)
 
 
-def _komira_aws_logs_error(op: String, res: HttpResult) -> Error:
+def _aws_logs_error(op: String, res: HttpResult) -> Error:
     """A non-2xx as an `Error`.
 
         ⛔ IT NEVER ECHOES THE RESPONSE BODY. Only the HTTP status plus the
@@ -926,4 +926,4 @@ def _komira_aws_logs_error(op: String, res: HttpResult) -> Error:
         + msg
     )
 
-# End of komira_aws_logs, generated by aws-client-gen.
+# End of aws_logs, generated by aws-client-gen.

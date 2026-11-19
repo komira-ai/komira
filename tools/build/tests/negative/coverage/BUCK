@@ -544,8 +544,8 @@ _RESULTS = {
 ]
 
 # Test 46. A library whose welded tests are outside its package's tests/:
-# one in another tests/ directory (elsewhere/tests/, as komira_db_postgres's
-# wire/tests/) and one at the package's top (as a cloud SDK client's). With
+# one in another tests/ directory (elsewhere/tests/, as a wire/tests/
+# would be) and one at the package's top (as a cloud SDK client's). With
 # coverage it analyzes, and its gate names both tests to covcheck
 # (--test-source), so they are left out of covtop's numbers. GREEN:
 # tests//negative/coverage:covtop_census_result.

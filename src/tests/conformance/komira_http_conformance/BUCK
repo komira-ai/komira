@@ -1,9 +1,9 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
-# Test-only: komira_http_server against h2spec, an external HTTP/2 conformance
+# Test-only: http_server against h2spec, an external HTTP/2 conformance
 # suite (pinned in //third_party/h2spec). The suite supplies every case; this
 # package starts a real HttpServer on 127.0.0.1, runs h2spec against it as a
-# child process (komira_supervisor), reads h2spec's JUnit report, and gates
+# child process (supervisor), reads h2spec's JUnit report, and gates
 # the result on a reviewed allowlist, h2spec_allowlist.txt: every failing case
 # must be listed with a reason, and every listed case must still fail.
 #
@@ -16,28 +16,28 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #
 # test_report_and_gate checks the report reader and the gate alone, on a
 # report in h2spec's exact shape. test_h2spec_conformance is the run itself;
-# the certificates are komira_http_core's test fixtures, staged at their
+# the certificates are http_core's test fixtures, staged at their
 # source paths, and h2spec is staged as `h2spec` in the test's share/.
 
 _TLS_FIXTURES = {
-    "src/komira_http_core/tests/fixtures/tls/leaf_cert.pem": "//src/komira_http_core:tests/fixtures/tls/leaf_cert.pem",
-    "src/komira_http_core/tests/fixtures/tls/leaf_key.pem": "//src/komira_http_core:tests/fixtures/tls/leaf_key.pem",
-    "src/komira_http_core/tests/fixtures/tls/root_ca.pem": "//src/komira_http_core:tests/fixtures/tls/root_ca.pem",
+    "src/http_core/tests/fixtures/tls/leaf_cert.pem": "//src/http_core:tests/fixtures/tls/leaf_cert.pem",
+    "src/http_core/tests/fixtures/tls/leaf_key.pem": "//src/http_core:tests/fixtures/tls/leaf_key.pem",
+    "src/http_core/tests/fixtures/tls/root_ca.pem": "//src/http_core:tests/fixtures/tls/root_ca.pem",
 }
 
 mojo_library(
     name = "komira_http_conformance",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
-        "//src/komira_async:komira_async",
-        "//src/komira_atomic_alias:komira_atomic_alias",
-        "//src/komira_clock:komira_clock",
-        "//src/komira_fork_join:komira_fork_join",
-        "//src/komira_http_client:komira_http_client",
-        "//src/komira_http_core:komira_http_core",
-        "//src/komira_http_server:komira_http_server",
-        "//src/komira_supervisor:komira_supervisor",
-        "//tools/build/mojo/runtime_paths:komira_runtime_paths",
+        "//src/async_rt:async_rt",
+        "//src/atomic_alias:atomic_alias",
+        "//src/clock:clock",
+        "//src/fork_join:fork_join",
+        "//src/http_client:http_client",
+        "//src/http_core:http_core",
+        "//src/http_server:http_server",
+        "//src/supervisor:supervisor",
+        "//tools/build/mojo/runtime_paths:runtime_paths",
     ],
     # h2spec publishes Linux and macOS builds for amd64 only, and the welded
     # test runs it as a child process: no darwin-arm64 build of it exists.

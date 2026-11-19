@@ -24,7 +24,7 @@ partition value with the dataset above, and pin the writers' bytes against
 literals spelled from the format specs (the oracle a writer/reader
 self-round-trip lacks). Nothing here is shipped (`conda = False`).
 
-`ipc_assembly.mojo` strings komira_arrow_ipc's message encoders into an
+`ipc_assembly.mojo` strings arrow_ipc's message encoders into an
 Arrow IPC File or Stream (`IpcAssembly`, `write_ipc`): komira ships the
 encoders and framing pieces, not a file or stream writer.
 

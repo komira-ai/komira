@@ -2,7 +2,7 @@
 
 ## What is it for, and what is out of scope?
 
-`komira_async` gives Mojo code non-blocking I/O and multi-threaded execution without compiler coroutines. It has three parts:
+`async_rt` gives Mojo code non-blocking I/O and multi-threaded execution without compiler coroutines. It has three parts:
 
 - A **reactor** (`Reactor`) waits on many operations at once and reports each finished one as a **completion**, identified by an integer op id. Its **backend** is epoll on Linux, kqueue on macOS, or `BACKEND_MOCK`, which opens no kernel descriptor and reports no completions.
 - A **worker runtime** (`PerCoreAsyncRuntime`) starts N threads called **workers**. Each worker is an event loop that owns one reactor and one inbound task queue. A task that starts on a worker finishes there, and work crosses threads only through explicit queues.
@@ -10,9 +10,9 @@
 
 The design idea is **share-nothing per worker, and suspension as data**. No scheduler moves a task between workers, and a computation that must wait is a value naming the operation it waits on. Load is balanced by moving data, never a task with state.
 
-Terms: a **segment** is a `Segment` (a `komira_async_api` trait) whose `execute(state, worker_id, task_id)` does one unit of work, and a **task id** is an integer in `[0, n)`. A **shard** is one worker's share of one dispatch. A **morsel** is a chunk of input handed to one task. The **I/O lane** is an optional second set of workers that dispatch does not target.
+Terms: a **segment** is a `Segment` (a `async_api` trait) whose `execute(state, worker_id, task_id)` does one unit of work, and a **task id** is an integer in `[0, n)`. A **shard** is one worker's share of one dispatch. A **morsel** is a chunk of input handed to one task. The **I/O lane** is an optional second set of workers that dispatch does not target.
 
-Out of scope: object-store file systems, HTTP framing, and what a segment computes. Those live in the libraries that sit on top of this one. `Segment`, `KeepAlive`, `CancellationToken` and the CPU lists live in `komira_async_api` and `komira_host` (`src/komira_async_api/src/komira_async_api/worker_pool_traits.mojo`, `src/komira_async_api/src/komira_async_api/token.mojo`, `src/komira_host/src/komira_host/cpu_topology.mojo`) so that lower libraries can name them without depending on the runtime.
+Out of scope: object-store file systems, HTTP framing, and what a segment computes. Those live in the libraries that sit on top of this one. `Segment`, `KeepAlive`, `CancellationToken` and the CPU lists live in `async_api` and `host_probe` (`src/async_api/src/async_api/worker_pool_traits.mojo`, `src/async_api/src/async_api/token.mojo`, `src/host_probe/src/host_probe/cpu_topology.mojo`) so that lower libraries can name them without depending on the runtime.
 
 ## How does it work?
 
@@ -25,15 +25,15 @@ run_with_state / spawn / SpillPrefetcher ──push──► worker i's queue
 
 ### How is a runtime built and torn down?
 
-`PerCoreAsyncRuntime[S]` (`src/komira_async/runtime/runtime.mojo`) is built in one call, or empty and then filled by `attach_workers`, optionally `attach_io_workers`, and `start()`. `start()` raises with no worker attached or on a second call; otherwise it launches one thread per worker (`launch_worker_pthread`). Each `Worker` sits behind an `OwnedPointer` in a `Slab`, so its address is fixed while its thread runs. `shutdown()`, and dropping a started runtime (`_runtime_teardown_join`, called from `__deinit__`), signal every worker and join every thread before any field is destroyed.
+`PerCoreAsyncRuntime[S]` (`src/async_rt/runtime/runtime.mojo`) is built in one call, or empty and then filled by `attach_workers`, optionally `attach_io_workers`, and `start()`. `start()` raises with no worker attached or on a second call; otherwise it launches one thread per worker (`launch_worker_pthread`). Each `Worker` sits behind an `OwnedPointer` in a `Slab`, so its address is fixed while its thread runs. `shutdown()`, and dropping a started runtime (`_runtime_teardown_join`, called from `__deinit__`), signal every worker and join every thread before any field is destroyed.
 
-`attach_io_workers` appends the I/O lane, so `worker_count()`, the number of dispatch shards, does not change. Its producer is `SpillPrefetcher` (`src/komira_async/runtime/spill_prefetch.mojo`), which `LocalDispatcher.make_spill_prefetcher()` hands out holding clones of the I/O lane's senders; it primes the OS page cache with a file's bytes. With no I/O lane attached the prefetcher is empty and does nothing.
+`attach_io_workers` appends the I/O lane, so `worker_count()`, the number of dispatch shards, does not change. Its producer is `SpillPrefetcher` (`src/async_rt/runtime/spill_prefetch.mojo`), which `LocalDispatcher.make_spill_prefetcher()` hands out holding clones of the I/O lane's senders; it primes the OS page cache with a file's bytes. With no I/O lane attached the prefetcher is empty and does nothing.
 
-Worker placement is a value, `EnginePlacement` (`src/komira_host/src/komira_host/engine_placement.mojo`), passed to the constructor or to `set_engine_placement` before `start()`. Every policy in it (`pin_workers`, `io_lane`, `numa_local`, `reserve_driver_cpu`) defaults to off, so by default the OS places and may migrate worker threads. `derive_io_placement` (`src/komira_host/src/komira_host/cpu_topology.mojo`) picks the I/O lane's CPUs: hyperthread siblings if the machine has them, else the last of at least 17 compute CPUs, else a reserved driver CPU.
+Worker placement is a value, `EnginePlacement` (`src/host_probe/src/host_probe/engine_placement.mojo`), passed to the constructor or to `set_engine_placement` before `start()`. Every policy in it (`pin_workers`, `io_lane`, `numa_local`, `reserve_driver_cpu`) defaults to off, so by default the OS places and may migrate worker threads. `derive_io_placement` (`src/host_probe/src/host_probe/cpu_topology.mojo`) picks the I/O lane's CPUs: hyperthread siblings if the machine has them, else the last of at least 17 compute CPUs, else a reserved driver CPU.
 
 ### How does a worker loop?
 
-`Worker.run_until_shutdown` (`src/komira_async/runtime/worker.mojo`) repeats four steps until `signal_shutdown`.
+`Worker.run_until_shutdown` (`src/async_rt/runtime/worker.mojo`) repeats four steps until `signal_shutdown`.
 
 1. **Spin.** Each turn drains up to 16 handles (`MAX_DRAIN_PER_ITER`) and runs them. A turn that found none polls the reactor with timeout 0 if the turn count is a multiple of 64, then runs `pause_intrinsic()`: the x86 `pause` instruction, a `sched_yield` system call elsewhere. Work found ends the window, and the next starts at turn 0.
 2. **Idle.** After an empty window the worker fires the idle hook once, if `install_idle_hook` set one. The hook is how a higher layer drains per-core state, such as the log ring, while the worker has nothing else to do.
@@ -44,13 +44,13 @@ The spin limit starts at 8,192 turns. `_tier_for_spin` maps a moving average of 
 
 ### How is a worker woken from another thread?
 
-A producer calls the worker's `WorkerWakeHandle` (`src/komira_async/runtime/wake_primitives.mojo`). On a kernel backend each reactor owns a wake channel, an eventfd on Linux or an `EVFILT_USER` event on macOS. `wake()` always writes it. `wake_with_elision()` issues a full memory fence, reads the sleeping flag, and writes only if it is set; with the re-check in loop step 3, either the worker sees the new entry or the producer sees the flag. On the mock backend there is no channel, both calls do nothing, and the worker finds the entry after its park sleep.
+A producer calls the worker's `WorkerWakeHandle` (`src/async_rt/runtime/wake_primitives.mojo`). On a kernel backend each reactor owns a wake channel, an eventfd on Linux or an `EVFILT_USER` event on macOS. `wake()` always writes it. `wake_with_elision()` issues a full memory fence, reads the sleeping flag, and writes only if it is set; with the re-check in loop step 3, either the worker sees the new entry or the producer sees the flag. On the mock backend there is no channel, both calls do nothing, and the worker finds the entry after its park sleep.
 
-Threads that wait outside a reactor (`JoinHandle.join()`, the dispatch barrier, the locks in `src/komira_async/sync/`) wait on a 32-bit word through `wait_on_address`: `futex` on Linux, `__ulock_wait` on macOS.
+Threads that wait outside a reactor (`JoinHandle.join()`, the dispatch barrier, the locks in `src/async_rt/sync/`) wait on a 32-bit word through `wait_on_address`: `futex` on Linux, `__ulock_wait` on macOS.
 
 ### How does fork-join dispatch work?
 
-`LocalDispatcher.run_with_state(state, seg, n, cancel_token)` (`src/komira_async/runtime/local_dispatcher.mojo`) runs `seg.execute` for every task id in `[0, n)` and returns `seg` when all have finished.
+`LocalDispatcher.run_with_state(state, seg, n, cancel_token)` (`src/async_rt/runtime/local_dispatcher.mojo`) runs `seg.execute` for every task id in `[0, n)` and returns `seg` when all have finished.
 
 1. It raises before posting anything on a nested dispatch, a negative `n`, no workers, or an already cancelled token. An `n` of zero returns `seg` at once.
 2. It moves `seg` into a buffer it owns and builds a `_DispatchCtx` on the caller's stack that borrows the state, segment, counters, error slot and token.
@@ -61,15 +61,15 @@ Threads that wait outside a reactor (`JoinHandle.join()`, the dispatch barrier, 
 
 Each shard carries its dispatch's generation and refuses to run once the dispatcher has moved on. Since the barrier and per-shard heap homes already prevent that, a refusal is a defect: after the barrier, `run_with_state` raises an error containing `Result is INCOMPLETE`. If a shard also recorded an error, that error is raised instead.
 
-`_OnPoolDispatchGuard` raises a process-wide depth counter for the length of each dispatch. `fork_join_shared` (`src/komira_async_api/src/komira_async_api/fork_join_shared.mojo`) reads it through `fork_join_pool_depth()`: while a dispatch is live, a wave runs its chunks inline on the calling thread instead of calling `run_with_state`. The counter is per process, not per dispatcher, so a wave on one runtime also runs inline while another runtime dispatches. `_on_pool_dispatch_active` (`src/komira_column_kernels/compiler_helpers.mojo`) reads the same counter.
+`_OnPoolDispatchGuard` raises a process-wide depth counter for the length of each dispatch. `fork_join_shared` (`src/async_api/src/async_api/fork_join_shared.mojo`) reads it through `fork_join_pool_depth()`: while a dispatch is live, a wave runs its chunks inline on the calling thread instead of calling `run_with_state`. The counter is per process, not per dispatcher, so a wave on one runtime also runs inline while another runtime dispatches. `_on_pool_dispatch_active` (`src/column_kernels/compiler_helpers.mojo`) reads the same counter.
 
-Shapes built on it: `for_each_morsel` (one task per morsel, or a `MorselPool` when morsels outnumber workers), `parallel_fork_join`, `parallel_steal`, `parallel_multiphase` and `parallel_fork_join_shared`. The last forwards to `fork_join_shared` in `komira_async_api`.
+Shapes built on it: `for_each_morsel` (one task per morsel, or a `MorselPool` when morsels outnumber workers), `parallel_fork_join`, `parallel_steal`, `parallel_multiphase` and `parallel_fork_join_shared`. The last forwards to `fork_join_shared` in `async_api`.
 
 ### How do I spawn a task and get its result?
 
-A task conforms to `SpawnableTask` (`src/komira_async/spawner/spawner.mojo`): `comptime T` and `run(mut self) raises -> Self.T`. `LocalSpawner.spawn(task)` pushes an owning `ErasedHandle` onto the next worker in round-robin order, wakes it, and returns a `JoinHandle[T]`. A full queue is retried with `cpu_pause()`, and `spawn` raises after 1,000,000 attempts. `spawn_with_token(task, tok^)` consumes the token and moves it into the task; the returned `JoinHandle` holds a clone that shares its flags, so `JoinHandle.cancel()` cancels the task's token. Pass `tok.clone()` to keep a token that shares those flags, or `tok.child()` for a token with its own flag that still sees `tok`'s cancellation.
+A task conforms to `SpawnableTask` (`src/async_rt/spawner/spawner.mojo`): `comptime T` and `run(mut self) raises -> Self.T`. `LocalSpawner.spawn(task)` pushes an owning `ErasedHandle` onto the next worker in round-robin order, wakes it, and returns a `JoinHandle[T]`. A full queue is retried with `cpu_pause()`, and `spawn` raises after 1,000,000 attempts. `spawn_with_token(task, tok^)` consumes the token and moves it into the task; the returned `JoinHandle` holds a clone that shares its flags, so `JoinHandle.cancel()` cancels the task's token. Pass `tok.clone()` to keep a token that shares those flags, or `tok.child()` for a token with its own flag that still sees `tok`'s cancellation.
 
-A worker that finds the token already cancelled publishes a cancellation and never runs the body; otherwise it publishes the result or error. Then (`src/komira_async/spawner/join_handle.mojo`):
+A worker that finds the token already cancelled publishes a cancellation and never runs the body; otherwise it publishes the result or error. Then (`src/async_rt/spawner/join_handle.mojo`):
 
 - `join()` spins 64 times, then waits in 1 ms slices. It returns the value, re-raises the task's error, or raises `CancelledError` once the token is cancelled while the result is pending. `join_with_token` discards its token.
 - `cancel()` cancels the token and marks the slot cancelled even if the task had finished. A completion that lands later overwrites the mark.
@@ -78,31 +78,31 @@ A worker that finds the token already cancelled publishes a cancellation and nev
 
 ### How does a handler wait for I/O without async/await?
 
-A computation that waits is an explicit state machine. `SuspendableHandler.step` (`src/komira_async/runtime/suspendable_handler.mojo`) takes the reactor, resumes where the struct left off, and returns `HANDLER_PARKED` with the op id it now waits on, `HANDLER_DONE` with a response, or `HANDLER_ERR`. The reactor is passed in rather than stored, so a handler holds no borrow between steps and can be moved and type-erased. `SuspendableHandlerDriver` keeps parked handlers keyed by op id. The morsel-step form of the same pattern is `StepResult[T]` (`src/komira_async/runtime/step_result.mojo`): `MorselStepDriver` consumes it, and `prefetch_ring_park_step_result` returns the parked form for a `PrefetchRing`.
+A computation that waits is an explicit state machine. `SuspendableHandler.step` (`src/async_rt/runtime/suspendable_handler.mojo`) takes the reactor, resumes where the struct left off, and returns `HANDLER_PARKED` with the op id it now waits on, `HANDLER_DONE` with a response, or `HANDLER_ERR`. The reactor is passed in rather than stored, so a handler holds no borrow between steps and can be moved and type-erased. `SuspendableHandlerDriver` keeps parked handlers keyed by op id. The morsel-step form of the same pattern is `StepResult[T]` (`src/async_rt/runtime/step_result.mojo`): `MorselStepDriver` consumes it, and `prefetch_ring_park_step_result` returns the parked form for a `PrefetchRing`.
 
-In `Reactor` (`src/komira_async/reactor/reactor.mojo`), `register_read(fd, op_id, consumer_id)` and `register_write(fd, op_id, consumer_id)` watch a descriptor under an op id the caller supplies, normally from `alloc_op_id()`, and return nothing. `register_timer(deadline_ns)` allocates and returns an op id. `poll_completions(timeout_us)` returns what finished. Each timer is its own kernel object: a `timerfd` on Linux, a one-shot `EVFILT_TIMER` on macOS.
+In `Reactor` (`src/async_rt/reactor/reactor.mojo`), `register_read(fd, op_id, consumer_id)` and `register_write(fd, op_id, consumer_id)` watch a descriptor under an op id the caller supplies, normally from `alloc_op_id()`, and return nothing. `register_timer(deadline_ns)` allocates and returns an op id. `poll_completions(timeout_us)` returns what finished. Each timer is its own kernel object: a `timerfd` on Linux, a one-shot `EVFILT_TIMER` on macOS.
 
 ### Which runtimes implement the `Runtime` trait?
 
-`trait Runtime` (`src/komira_async/runtime/runtime_trait.mojo`) is the seam that protocol code is generic over: a method generic over `RT: Runtime` takes a `Reactor[RT.Sink]` and works with any conformer. A conformer names its waker-sink type `Sink`, reports `worker_count()`, and drives its reactors through `poll_completions`. It also declares two compile-time values for generic code to branch on: `RUNTIME_MODEL`, one of the `MODEL_*` constants in the same file, and `TASKS_ARE_THREAD_PINNED`. Four types conform:
+`trait Runtime` (`src/async_rt/runtime/runtime_trait.mojo`) is the seam that protocol code is generic over: a method generic over `RT: Runtime` takes a `Reactor[RT.Sink]` and works with any conformer. A conformer names its waker-sink type `Sink`, reports `worker_count()`, and drives its reactors through `poll_completions`. It also declares two compile-time values for generic code to branch on: `RUNTIME_MODEL`, one of the `MODEL_*` constants in the same file, and `TASKS_ARE_THREAD_PINNED`. Four types conform:
 
 | Runtime | `RUNTIME_MODEL` | For |
 |---|---|---|
-| `PerCoreAsyncRuntime` (`src/komira_async/runtime/runtime.mojo`) | `MODEL_SHARE_NOTHING_PER_CORE` | N worker threads, each with its own reactor and queue; the rest of this document |
-| `BlockingRuntime` (`src/komira_async/runtime/blocking_runtime.mojo`) | `MODEL_CURRENT_THREAD_BLOCKING` | synchronous callers: `block_on(rt, work)` runs one reactor-driving function to completion |
-| `GcpCloudRunRuntime` (`src/komira_async/runtime/gcp_cloud_run_runtime.mojo`) | `MODEL_CLOUD_RUN` | a server on Cloud Run that handles one request at a time per instance and scales by instances |
-| `AwsLambdaRuntime` (`src/komira_async/runtime/aws_lambda_runtime.mojo`) | `MODEL_AWS_LAMBDA` | a server on AWS Lambda |
+| `PerCoreAsyncRuntime` (`src/async_rt/runtime/runtime.mojo`) | `MODEL_SHARE_NOTHING_PER_CORE` | N worker threads, each with its own reactor and queue; the rest of this document |
+| `BlockingRuntime` (`src/async_rt/runtime/blocking_runtime.mojo`) | `MODEL_CURRENT_THREAD_BLOCKING` | synchronous callers: `block_on(rt, work)` runs one reactor-driving function to completion |
+| `GcpCloudRunRuntime` (`src/async_rt/runtime/gcp_cloud_run_runtime.mojo`) | `MODEL_CLOUD_RUN` | a server on Cloud Run that handles one request at a time per instance and scales by instances |
+| `AwsLambdaRuntime` (`src/async_rt/runtime/aws_lambda_runtime.mojo`) | `MODEL_AWS_LAMBDA` | a server on AWS Lambda |
 
 The last three each own one `Reactor` by value, drive it on the calling thread, start no thread, and return 1 from `worker_count()`. The two cloud runtimes are separate models because their platforms take the CPU away differently: Cloud Run throttles a running process between requests, and Lambda freezes the whole environment between invocations. `MODEL_WORK_STEALING` is reserved, and no type declares it.
 
 ### How does the runtime read files?
 
-`FileSystem` (`src/komira_fs/file_system.mojo`) is a synchronous trait; `read_at(file, offset, length)` returns a `SharedAlignedBuffer[HeapRegion]`. `LocalFs` maps a file on its first read and returns buffers that borrow the mapping (`borrow_mmap_erased`), so a local read copies nothing. Overlap with compute comes from where the call runs: the I/O lane, or a `PrefetchRing` (`src/komira_async/sources/prefetch_source.mojo`).
+`FileSystem` (`src/fs/file_system.mojo`) is a synchronous trait; `read_at(file, offset, length)` returns a `SharedAlignedBuffer[HeapRegion]`. `LocalFs` maps a file on its first read and returns buffers that borrow the mapping (`borrow_mmap_erased`), so a local read copies nothing. Overlap with compute comes from where the call runs: the I/O lane, or a `PrefetchRing` (`src/async_rt/sources/prefetch_source.mojo`).
 
 ### How do threads exchange data and cancel work?
 
-- **Channels** (`src/komira_async/channel/`): `mpsc`, `spsc`, `oneshot`, `broadcast`. An `mpsc` ring's capacity must be a power of two; `unbounded()` is a 4,096-slot ring.
-- **Locks** (`src/komira_async/sync/`) block the calling thread on a wake word.
+- **Channels** (`src/async_rt/channel/`): `mpsc`, `spsc`, `oneshot`, `broadcast`. An `mpsc` ring's capacity must be a power of two; `unbounded()` is a 4,096-slot ring.
+- **Locks** (`src/async_rt/sync/`) block the calling thread on a wake word.
 - **Cancellation.** A `CancellationToken` is a chain of shared atomic flags. `child()` extends the chain, and `is_cancelled()` reads all of it, so a parent's cancellation reaches its descendants and not the reverse. It is cooperative: a shard checks before each task id, a spawned task once before it runs. `ExecutionBudget.check()` cancels its token and raises `CancelledError` when its work units run out.
 
 ## Why is it built this way?
@@ -123,7 +123,7 @@ The last three each own one `Reactor` by value, drive it on the calling thread, 
 
 **Decision.** Each worker drains one bounded multi-producer queue of type-erased handles.
 
-**Because.** A worker then waits on one queue and one wake channel, and producers on any thread push without a lock. `ErasedHandleBase` (`src/komira_async/runtime/shared_erasure.mojo`) is a hand-written vtable, a heap blob plus `run`, `step` and `drop` function pointers bound where the producer knows the concrete type, so the worker runs any entry blind.
+**Because.** A worker then waits on one queue and one wake channel, and producers on any thread push without a lock. `ErasedHandleBase` (`src/async_rt/runtime/shared_erasure.mojo`) is a hand-written vtable, a heap blob plus `run`, `step` and `drop` function pointers bound where the producer knows the concrete type, so the worker runs any entry blind.
 
 **Alternatives weighed.**
 
@@ -145,7 +145,7 @@ The cost is an indirect call and a heap allocation per entry, which a shard pays
 - A fixed limit: too short for bursts, or wasteful when idle.
 - A short-timeout poll instead of a full park: adds latency and wakes idle workers. The mock backend's park behaves this way.
 
-**Revisit if.** Idle CPU matters more than dispatch latency. The knobs are the tier constants in `src/komira_async/runtime/worker.mojo`.
+**Revisit if.** Idle CPU matters more than dispatch latency. The knobs are the tier constants in `src/async_rt/runtime/worker.mojo`.
 
 ### Why are suspensions explicit state machines?
 
@@ -182,20 +182,20 @@ The cost is an indirect call and a heap allocation per entry, which a shard pays
 - **A wake handle must not outlive its runtime.** It is copyable and holds the wake descriptor as a plain `Int32`, so a late `wake()` writes to a closed, possibly reused descriptor. Not enforced.
 - **A task's error does not escape the worker.** The run functions catch it and publish it. If one escapes `run_until_shutdown`, the thread prints a warning and exits, its queue stays open, and a dispatch waiting on that worker hangs. Not tested.
 - **A queue has one consumer.** `MpscReceiver` is movable, not copyable.
-- **Public signatures carry no `UnsafePointer`, with a few exceptions** at the type-erasure and hook seams: the idle hook's `HookCtxPtr`, `ErasedHook` and `installable_hook_home` (`src/komira_async/runtime/installable_hook.mojo`); `single_consume_drop` and `make_borrowed_erased` (`src/komira_async/runtime/shared_erasure.mojo`); and `NestedBorrowBundle.new` and `__init__` (`src/komira_async/runtime/nested_borrow_bundle.mojo`).
+- **Public signatures carry no `UnsafePointer`, with a few exceptions** at the type-erasure and hook seams: the idle hook's `HookCtxPtr`, `ErasedHook` and `installable_hook_home` (`src/async_rt/runtime/installable_hook.mojo`); `single_consume_drop` and `make_borrowed_erased` (`src/async_rt/runtime/shared_erasure.mojo`); and `NestedBorrowBundle.new` and `__init__` (`src/async_rt/runtime/nested_borrow_bundle.mojo`).
 
 ## Where is the code?
 
-The library is the `komira_async` target in `src/komira_async/BUCK`: every `.mojo` file under `src/komira_async/` except `src/komira_async/tests/`, plus the C shim `src/komira_async/reactor/_posix_shim.c`, built as the `:komira_async_posix` `cxx_library` that the library depends on. Its other dependencies are the first-party packages it imports (`src/komira_async/BUCK` lists them): `komira_async_api` and the other core packages, `komira_atomic_alias`, `komira_log` and `komira_runtime_paths` (tests take their scratch directory from it); the worker loop's idle hook is how a higher layer drains the per-core log ring. Start with these files:
+The library is the `async_rt` target in `src/async_rt/BUCK`: every `.mojo` file under `src/async_rt/` except `src/async_rt/tests/`, plus the C shim `src/async_rt/reactor/_posix_shim.c`, built as the `:komira_async_posix` `cxx_library` that the library depends on. Its other dependencies are the first-party packages it imports (`src/async_rt/BUCK` lists them): `async_api` and the other core packages, `atomic_alias`, `log` and `runtime_paths` (tests take their scratch directory from it); the worker loop's idle hook is how a higher layer drains the per-core log ring. Start with these files:
 
 | File | Holds |
 |---|---|
-| `src/komira_async/runtime/runtime.mojo` | `PerCoreAsyncRuntime`: lanes and lifecycle |
-| `src/komira_async/runtime/worker.mojo` | `Worker.run_until_shutdown` and the spin policy |
-| `src/komira_async/runtime/local_dispatcher.mojo` | `LocalDispatcher.run_with_state`, the barrier, the I/O lane |
-| `src/komira_async/runtime/wake_primitives.mojo` | `WorkerWakeHandle`, `wait_on_address` |
-| `src/komira_async/runtime/shared_erasure.mojo` | `ErasedHandleBase`, `make_erased` |
-| `src/komira_async/runtime/runtime_trait.mojo` | `trait Runtime`, the `MODEL_*` constants |
+| `src/async_rt/runtime/runtime.mojo` | `PerCoreAsyncRuntime`: lanes and lifecycle |
+| `src/async_rt/runtime/worker.mojo` | `Worker.run_until_shutdown` and the spin policy |
+| `src/async_rt/runtime/local_dispatcher.mojo` | `LocalDispatcher.run_with_state`, the barrier, the I/O lane |
+| `src/async_rt/runtime/wake_primitives.mojo` | `WorkerWakeHandle`, `wait_on_address` |
+| `src/async_rt/runtime/shared_erasure.mojo` | `ErasedHandleBase`, `make_erased` |
+| `src/async_rt/runtime/runtime_trait.mojo` | `trait Runtime`, the `MODEL_*` constants |
 
 Entry points:
 
@@ -204,7 +204,7 @@ Entry points:
 
 ## How is it tested?
 
-`komira_async` lists the files in `src/komira_async/tests/` in `test_srcs` in `src/komira_async/BUCK`, so building the library runs them all and it cannot build while any fails (see [the `test_srcs` gate](../../tools/build/mojo/README.md#libraries-and-the-test_srcs-gate)). Run: `./buck2 build //src/komira_async:komira_async`.
+`async_rt` lists the files in `src/async_rt/tests/` in `test_srcs` in `src/async_rt/BUCK`, so building the library runs them all and it cannot build while any fails (see [the `test_srcs` gate](../../tools/build/mojo/README.md#libraries-and-the-test_srcs-gate)). Run: `./buck2 build //src/async_rt:async_rt`.
 
 Beyond the tests named in the invariants: `test_fj_claim_dispatch` (claimed task ids), `test_reactor_park_no_lost_wakeup` (a reactor park does not miss descriptor readiness), `test_worker_adaptive_spin_tuning` (the spin tiers), `test_spill_prefetch_producer` (the I/O lane's producer) and `test_erased_handle_borrowed_probe` (borrowed erased handles).
 
@@ -226,5 +226,5 @@ Not tested:
 - **Limit: declared but inert.** `shutdown_token()` raises; the `placement` constructor argument is never read (worker CPU placement comes from `EnginePlacement`); `MAX_LOG_DRAIN_PER_IDLE` and `SPIN_LIMIT_FLOOR` have no effect; `ExecutionBudget` ignores its `deadline_ns`; the reactor raises `Unknown backend kind` for `BACKEND_IO_URING` and `BACKEND_DPDK`.
 - **Limit: one kernel timer per deadline.** The loop does not drive `TimerWheel`, so on Linux every pending deadline holds a `timerfd`.
 - **Open question: the backend for run-to-completion work.** A worker whose shards never park on its reactor uses the backend only to decide how an idle worker waits. `BACKEND_MOCK` costs idle CPU, and a shard posted to a parked worker waits out the rest of the park sleep ([loop step 4](#how-does-a-worker-loop)) plus the kernel's timer slack. A kernel backend costs a wake write per parked worker and makes the sleeping-flag handshake load-bearing for every dispatch. Deciding it takes measuring dispatch latency and idle CPU under both.
-- **Open question: field destruction order.** The field comment in `src/komira_async/runtime/runtime.mojo` says Mojo drops fields in reverse declaration order, while the `__deinit__` docstring in the same file says declaration order. Threads are joined first, but no test pins the order.
-- **Open question: stale headers.** The module list in the header of `src/komira_async/__init__.mojo` omits the `fs`, `net` and `observability` directories; this document follows the code.
+- **Open question: field destruction order.** The field comment in `src/async_rt/runtime/runtime.mojo` says Mojo drops fields in reverse declaration order, while the `__deinit__` docstring in the same file says declaration order. Threads are joined first, but no test pins the order.
+- **Open question: stale headers.** The module list in the header of `src/async_rt/__init__.mojo` omits the `fs`, `net` and `observability` directories; this document follows the code.

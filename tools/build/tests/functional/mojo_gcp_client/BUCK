@@ -3,7 +3,7 @@ load("@komira//tools/build/mojo:proto.bzl", "proto_srcs")
 load(":defs.bzl", "gen_check", "tests_check")
 
 # mojo_gcp_client (tools/build/cloud/gcp.bzl) over a fixture API, with the stub
-# komira_proto_codec of ../proto as the runtime. `buck2 build
+# proto_codec of ../proto as the runtime. `buck2 build
 # tests//functional/mojo_gcp_client:` builds each library, which runs its welded
 # tests (the generated layout probe first), each gen_check and each
 # tests_check. proto_tests.sh (sourced by run_tests.sh) builds this package
@@ -32,7 +32,7 @@ mojo_gcp_client(
     proto_deps = [":shop_deps"],
     protos = ["example/shop/v1/shop.proto"],
     test_srcs = ["test_shop.mojo"],
-    deps = ["//functional/proto:komira_proto_codec"],
+    deps = ["//functional/proto:proto_codec"],
 )
 
 # The absence check: DeleteItem and what only it reaches are not emitted,
@@ -75,7 +75,7 @@ mojo_gcp_client(
         "GetItemRequest",
         ".example.shop.v1.Item",
     ],
-    deps = ["//functional/proto:komira_proto_codec"],
+    deps = ["//functional/proto:proto_codec"],
 )
 
 gen_check(
@@ -112,7 +112,7 @@ mojo_gcp_client(
     module_names = {"example/shop/v1/item.proto": "shop_item"},
     proto_deps = [":shop_deps"],
     protos = ["example/shop/v1/shop.proto"],
-    deps = ["//functional/proto:komira_proto_codec"],
+    deps = ["//functional/proto:proto_codec"],
 )
 
 gen_check(
@@ -146,7 +146,7 @@ mojo_gcp_client(
     module_names = {"fixture/example/shop/v1/shop.proto": "shop_api"},
     proto_deps = [":shop_deps"],
     protos = ["example/shop/v1/shop.proto"],
-    deps = ["//functional/proto:komira_proto_codec"],
+    deps = ["//functional/proto:proto_codec"],
 )
 
 gen_check(
@@ -196,13 +196,15 @@ mojo_gcp_client(
     proto_deps = [":shop_deps"],
     protocol = "grpc",
     protos = ["example/shop/v1/shop.proto"],
-    deps = ["//functional/proto:komira_proto_codec"],
+    deps = ["//functional/proto:proto_codec"],
 )
 
+# `from grpc` and not `grpc`: the package's own name, komira_gcp_shop_grpc_messages, holds "grpc", and an
+# import of the gRPC package (`from grpc import ...`, `from grpc.retry import ...`) starts with `from grpc`.
 gen_check(
     name = "komira_gcp_shop_grpc_messages_scoped",
     absent = [
-        "komira_grpc",
+        "from grpc",
         "GrpcClient",
         "ShopService",
     ],
@@ -223,10 +225,10 @@ gen_check(
 
 # `protocol = "grpc"` with a service: the client of
 # komira//tools/build/proto-codegen/gcp_grpc, compiled there against the real
-# komira_grpc and komira_gcp_core (which only the komira cell can depend on),
+# grpc and gcp_core (which only the komira cell can depend on),
 # one method of each streaming shape. Exactly the package's files were
 # generated; the client takes a GcpTokenSource, runs the token hook in every
-# method and raises a gRPC status through komira_gcp_core. Its tiny.mojo is
+# method and raises a gRPC status through gcp_core. Its tiny.mojo is
 # byte for byte the golden of ../proto_codegen (tiny_grpc_gcp), which is
 # generated from a second copy of the proto in the tests cell; this check is
 # what keeps the two copies the same API.
@@ -247,7 +249,7 @@ gen_check(
     gen = _TINY_GRPC + "_gen",
     identical = {"tiny.mojo": "//functional/proto_codegen:tiny_grpc_gcp_golden"},
     present = [
-        "from komira_gcp_core import GcpTokenSource, gcp_grpc_status_error",
+        "from gcp_core import GcpTokenSource, gcp_grpc_status_error",
         "struct TinyServiceClient[C: Connector, T: GcpTokenSource](Movable, Deinitable):",
         "def get_thing[RT: Runtime]",
         "def watch_things[RT: Runtime]",
@@ -271,7 +273,7 @@ tests_check(
 # `protocol = "rest"` with a service that declares no
 # `(google.api.default_host)`: the client of
 # komira//tools/build/proto-codegen/gcp_rest, compiled there against the real
-# komira_http_client and komira_gcp_core. Exactly the package's files were
+# http_client and gcp_core. Exactly the package's files were
 # generated; the client starts with no host (never a placeholder one) and
 # every method raises the named refusal until `set_rest_host` names one.
 _NOHOST_REST = "komira//tools/build/proto-codegen/gcp_rest:komira_gcp_nohost_rest"
@@ -290,7 +292,7 @@ gen_check(
     ],
     gen = _NOHOST_REST + "_gen",
     present = [
-        "from komira_gcp_core import GcpTokenSource, gcp_status_error",
+        "from gcp_core import GcpTokenSource, gcp_status_error",
         "struct NoHostServiceClient[C: Connector, T: GcpTokenSource](Movable, Deinitable):",
         "self._rest_host = String(\"\")",
         ": no REST host: example.nohost.v1.NoHostService declares no google.api.default_host; call set_rest_host(host) before sending",

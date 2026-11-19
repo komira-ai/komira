@@ -22,9 +22,9 @@
 # A teardown's re-list is this same check (`_leak_check_prefix`).
 # =============================================================================
 
-from komira_validation_run.validation_run_tag import is_valid_validation_run_id
+from validation_run.validation_run_tag import is_valid_validation_run_id
 
-from komira_test_verdict import Verdict
+from test_verdict import Verdict
 
 from ._redact import _Redactor
 from .store import RUN_PREFIX, ObjectStoreClient, StoreTarget

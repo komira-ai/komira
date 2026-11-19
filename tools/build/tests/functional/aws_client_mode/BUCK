@@ -9,10 +9,10 @@ load("//functional/mojo_gcp_client:defs.bzl", "gen_check", "tests_check")
 #
 # The runtime is ../mojo_aws_client's stubs (a library of this cell cannot
 # depend on a mojo_library of the komira cell; see that BUCK):
-# komira_aws_core with its client half, whose `send_sigv4_signed_request`
+# aws_core with its client half, whose `send_sigv4_signed_request`
 # and `send_sigv4_signed_request_with` are test doubles that answer with the
-# arguments they were given, komira_http_core's Connector trait,
-# komira_http_client's HttpClientConfig, and komira_retry's seams and loop.
+# arguments they were given, http_core's Connector trait,
+# http_client's HttpClientConfig, and retry's seams and loop.
 # Compiling the generated module against
 # them is what keeps the stubs in step with the import block the generator
 # writes from emit_aws/mod.rs AWS_IMPORTS, for the rows that apply to an
@@ -23,10 +23,10 @@ load("//functional/mojo_gcp_client:defs.bzl", "gen_check", "tests_check")
 #
 # What is pinned besides: `mode = "client"` reaches the generator without
 # `--pure-only`, so the generated module carries the signed-send surface, its
-# komira_http_core and komira_http_client imports, the constructor's
+# http_core and http_client imports, the constructor's
 # HttpClientConfig argument, the send over injected seams (`send_with`) with
-# its komira_retry import, and the error builder that reads an error's code
-# and message through komira_aws_core. (Pure mode leaving all of that out is
+# its retry import, and the error builder that reads an error's code
+# and message through aws_core. (Pure mode leaving all of that out is
 # the `absent` of ../mojo_aws_client's gen_check.)
 
 _LOGS = botocore_model("logs")
@@ -39,11 +39,11 @@ mojo_aws_client(
     operations = ["GetLogEvents"],
     test_srcs = ["test_logs_client_send.mojo"],
     deps = [
-        "//functional/mojo_aws_client:komira_aws_core",
-        "//functional/mojo_aws_client:komira_http_client",
-        "//functional/mojo_aws_client:komira_http_core",
-        "//functional/mojo_aws_client:komira_json",
-        "//functional/mojo_aws_client:komira_retry",
+        "//functional/mojo_aws_client:aws_core",
+        "//functional/mojo_aws_client:http_client",
+        "//functional/mojo_aws_client:http_core",
+        "//functional/mojo_aws_client:json",
+        "//functional/mojo_aws_client:retry",
     ],
 )
 
@@ -59,15 +59,15 @@ gen_check(
     gen = ":komira_aws_logs_client_gen",
     present = [
         "mode         : client",
-        "from komira_http_client.client import HttpClientConfig",
-        "from komira_http_core.transport.io_stream import Connector",
+        "from http_client.client import HttpClientConfig",
+        "from http_core.transport.io_stream import Connector",
         "send_sigv4_signed_request,",
         "http_config: HttpClientConfig,",
         "[C: Connector, T: AwsCredsSource](Movable, Deinitable):",
         "var info = aws_json_error_info(res.to_response())",
         "var code = info.code.copy()",
         "var msg = info.message.copy()",
-        "from komira_retry import (",
+        "from retry import (",
         "    RetryLoop,",
         "def send_with[",
         "return send_sigv4_signed_request_with(",

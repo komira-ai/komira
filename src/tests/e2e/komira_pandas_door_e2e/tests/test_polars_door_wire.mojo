@@ -32,7 +32,7 @@
 # the two doors' Mojo builders make on separate paths.
 #
 # Mutants run against this file (each planted, built red, reverted; the
-# decoder mutants with komira_plan_wire's own welded tests set aside, so the
+# decoder mutants with plan_wire's own welded tests set aside, so the
 # red is this file's):
 #   M1 the pandas sort=True fixture loses its SORT node;
 #   M2 `door_plans.groupby_sum_plan(True)` loses its SORT node;
@@ -48,7 +48,7 @@
 
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
-from komira_arrow.arrow_types import ArrowType
+from arrow.arrow_types import ArrowType
 from komira_pandas_door_e2e import (
     bytes_hex,
     dropped_sum_plan,
@@ -67,9 +67,9 @@ from komira_pandas_door_e2e import (
     schema_shape,
     wire_bytes_from_hex,
 )
-from komira_plan_expr.agg_expr import AGG_SUM
-from komira_plan_expr.col_expr import col
-from komira_plan_expr.expr import (
+from plan_expr.agg_expr import AGG_SUM
+from plan_expr.col_expr import col
+from plan_expr.expr import (
     BIN_ADD,
     BIN_AND,
     BIN_EQ,
@@ -86,14 +86,14 @@ from komira_plan_expr.expr import (
     UN_IS_NOT_NULL,
     UN_IS_NULL,
 )
-from komira_plan_expr.partition_expr import PartitionExpr, PF_SUM
-from komira_plan_expr.partition_frame import (
+from plan_expr.partition_expr import PartitionExpr, PF_SUM
+from plan_expr.partition_frame import (
     FRAME_BOUND_UNBOUNDED_FOLLOWING,
     FRAME_BOUND_UNBOUNDED_PRECEDING,
     FRAME_UNITS_ROWS,
     PartitionFrame,
 )
-from komira_plan_ir.logical_plan import (
+from plan_ir.logical_plan import (
     LogicalPlan,
     PLAN_AGGREGATE,
     PLAN_FILTER,
@@ -103,7 +103,7 @@ from komira_plan_ir.logical_plan import (
     PLAN_SCAN,
     PLAN_SORT,
 )
-from komira_plan_wire import (
+from plan_wire import (
     plan_from_bytes,
     plan_to_bytes,
     plan_wire_admit,

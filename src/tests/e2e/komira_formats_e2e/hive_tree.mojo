@@ -16,13 +16,13 @@
 
 from std.os import makedirs
 
-from komira_async.ops.waker_sink import NoopSink
-from komira_avro import AvroWriterOptions, write_avro_file
-from komira_csv.csv_sink import CsvSink
-from komira_fs.file_system import WriteMode
-from komira_fs.local_fs import LocalFs
-from komira_jsonl.json_writer import write_batch_jsonl_direct
-from komira_orc import OrcWriterOptions, write_orc_file
+from async_rt.ops.waker_sink import NoopSink
+from avro import AvroWriterOptions, write_avro_file
+from csv.csv_sink import CsvSink
+from fs.file_system import WriteMode
+from fs.local_fs import LocalFs
+from jsonl.json_writer import write_batch_jsonl_direct
+from orc import OrcWriterOptions, write_orc_file
 
 from .dataset import batch_for_city, cities
 

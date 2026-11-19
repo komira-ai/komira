@@ -17,7 +17,7 @@ load(":zones.bzl", "ZONES")
 # checked against its sha256 (the digest PyPI publishes for the file).
 #
 # Test data of //src/tests/conformance/komira_datetime_conformance only.
-# komira_datetime itself reads TZif bytes or a zoneinfo directory its caller
+# datetime itself reads TZif bytes or a zoneinfo directory its caller
 # names; no library or binary depends on this target.
 #
 # A newer pin is `_VERSION`, `_URL`, `_SHA256` and `_SIZE` here, the IANA

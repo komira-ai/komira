@@ -15,14 +15,14 @@ load(":ipc_fuzz_files.bzl", "IPC_FUZZ_FILES")
 # and the listed files extracted from it. The sha256 and size are of the
 # archive as downloaded, twice, from the URL below; the two downloads agreed.
 #
-# Test data of //src/komira_arrow_ipc only, whose corpus test feeds every file
+# Test data of //src/arrow_ipc only, whose corpus test feeds every file
 # to the IPC stream or file decode path. No library or binary depends on it.
 # The integration directories beside the corpus (data/arrow-ipc-stream/
 # integration/) hold valid files and are not extracted.
 #
 # A newer pin is `_COMMIT`, `_SHA256` and `_SIZE` here, the list (names and
 # counts) in ipc_fuzz_files.bzl, the counts and the accepted-file list in
-# src/komira_arrow_ipc/tests/test_ipc_fuzz_corpus.mojo, and a re-read of
+# src/arrow_ipc/tests/test_ipc_fuzz_corpus.mojo, and a re-read of
 # that test's verdicts against the new files.
 _COMMIT = "9ff285c88565f0f6abc855918c6a342e70e4909c"
 _SHA256 = "507609ccd0912a111f2ee89d108176baded8c8f22fd845c1686d7ddd462c3510"
@@ -45,5 +45,5 @@ archive_files(
     one_tree = True,
     files = ["LICENSE.txt"] + ["data/" + f for f in IPC_FUZZ_FILES],
     strip_prefix = "arrow-testing-" + _COMMIT,
-    visibility = ["//src/komira_arrow_ipc/..."],
+    visibility = ["//src/arrow_ipc/..."],
 )

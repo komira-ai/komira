@@ -1,6 +1,6 @@
 from std.os import getenv, makedirs
 
-from komira_json import parse_json_value
+from json import parse_json_value
 from std.testing import assert_equal, assert_true
 
 from covcheck.analyze import FORMAT_BRANCH_LCOV, FORMAT_COBERTURA, FORMAT_LCOV, Analysis, Input, Options, Sources, analyze

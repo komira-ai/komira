@@ -1,0 +1,69 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The gRPC and Connect-RPC client runtime: the comptime wire-protocol axis
+# (classic gRPC, Connect proto, Connect JSON), the transport-free unary and
+# streaming wire codecs, request header construction (deadlines, metadata,
+# `x-goog-request-params` routing), typed `[grpc:N]` errors, the AIP-194
+# status-code retry policy, and `GrpcClient`, which drives all of it over a
+# komira_http HttpClient with a bounded re-issue on a peer's not-processed
+# proof. The envelope, status and codec primitives come from connect,
+# the server side; clock supplies the monotonic clock behind the re-issue
+# wall budget.
+#
+# Every test is hermetic. Most use a scripted connector in place of the
+# network; tests/test_e2e_live_socket.mojo runs a real http_server
+# HttpServer with a ConnectService over TLS + h2 on 127.0.0.1 against a real
+# GrpcClient, server and client on two fork_join threads, reading
+# http_core's exported TLS fixtures. Welded tests get no test-only deps,
+# so the packages that test imports are listed here. fork_join and
+# atomic_alias are TEST-ONLY deps: no source outside tests/ imports
+# them, only tests/test_e2e_live_socket.mojo does. http_server is
+# already in the closure through connect.
+
+_TLS_FIXTURES = {
+    "src/http_core/tests/fixtures/tls/leaf_cert.pem": "//src/http_core:tests/fixtures/tls/leaf_cert.pem",
+    "src/http_core/tests/fixtures/tls/leaf_key.pem": "//src/http_core:tests/fixtures/tls/leaf_key.pem",
+    "src/http_core/tests/fixtures/tls/root_ca.pem": "//src/http_core:tests/fixtures/tls/root_ca.pem",
+}
+
+mojo_library(
+    name = "grpc",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/async_rt:async_rt",
+        "//src/atomic_alias:atomic_alias",
+        "//src/clock:clock",
+        "//src/connect:connect",
+        "//src/fork_join:fork_join",
+        "//src/http_client:http_client",
+        "//src/http_core:http_core",
+        "//src/http_server:http_server",
+    ],
+    test_srcs = [
+        "tests/test_L5_error.mojo",
+        "tests/test_L5_framing.mojo",
+        "tests/test_L5_headers.mojo",
+        "tests/test_L5_metadata.mojo",
+        "tests/test_L5_routing.mojo",
+        "tests/test_L5_stream.mojo",
+        "tests/test_L5_unary_wire.mojo",
+        "tests/test_client_stream_goaway_reissue.mojo",
+        "tests/test_e2e_full_loop.mojo",
+        "tests/test_e2e_grpc_client.mojo",
+        "tests/test_e2e_live_socket.mojo",
+        "tests/test_goaway_unprocessed_retry.mojo",
+        "tests/test_grpc_client_trailers_only_and_streams.mojo",
+        "tests/test_grpc_http_non_200_status.mojo",
+        "tests/test_grpc_header_nonascii.mojo",
+        "tests/test_grpc_missing_status.mojo",
+        "tests/test_grpc_nonascii_error_message.mojo",
+        "tests/test_grpc_status_metadata_conformance.mojo",
+        "tests/test_grpc_truncation_and_terminal.mojo",
+        "tests/test_retryable_transport_reissue.mojo",
+        "tests/test_unary_status_retry.mojo",
+    ],
+    test_data = {
+        "tests/test_e2e_live_socket.mojo": _TLS_FIXTURES,
+    },
+    visibility = ["PUBLIC"],
+)

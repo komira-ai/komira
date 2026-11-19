@@ -9,10 +9,10 @@
 
 from std.testing import assert_equal, assert_true
 
-from komira_async.ops.waker_sink import NoopSink
-from komira_async.runtime.blocking_runtime import BlockingRuntime
+from async_rt.ops.waker_sink import NoopSink
+from async_rt.runtime.blocking_runtime import BlockingRuntime
 
-from komira_db import DbRow, DbRows, DbValue, LOGICAL_TEXT, LOGICAL_TIMESTAMPTZ
+from db import DbRow, DbRows, DbValue, LOGICAL_TEXT, LOGICAL_TIMESTAMPTZ
 
 comptime Rt = BlockingRuntime[NoopSink]
 

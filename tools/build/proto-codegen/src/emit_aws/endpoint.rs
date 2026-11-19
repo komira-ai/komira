@@ -2,7 +2,7 @@
 //! ruleset (`endpoint-rule-set-1.json`) and the partition table
 //! (`partitions.json`) are embedded in the module, and each operation gets a
 //! `resolve_<op>_endpoint` that binds the ruleset's parameters and asks
-//! `komira_aws_core.EndpointRuleSet` for the endpoint.
+//! `aws_core.EndpointRuleSet` for the endpoint.
 //!
 //! The parameters a call resolves with, from the lowest precedence to the
 //! highest (Smithy's endpoint parameter binding order; a later binding
@@ -479,7 +479,7 @@ impl<'a> AwsEmitter<'a> {
         self.line("#");
         self.line("# The ruleset and the partition table are botocore's published data,");
         self.line("# embedded from the pinned archive when this module was generated (their");
-        self.line("# sha256 are in the header). `komira_aws_core.EndpointRuleSet` evaluates");
+        self.line("# sha256 are in the header). `aws_core.EndpointRuleSet` evaluates");
         self.line("# them: nothing below chooses a host, an addressing style or a signer.");
         self.line("#");
         self.line("# A call's parameters, lowest precedence first: the client's endpoint");

@@ -11,11 +11,11 @@
 # a `BlockingRuntime[NoopSink]` of its own.
 # =============================================================================
 
-from komira_async.ops.waker_sink import NoopSink
-from komira_async.runtime.blocking_runtime import BlockingRuntime
-from komira_calendar_ics import ZoneTable
-from komira_datetime import posix_zone
-from komira_db import Database
+from async_rt.ops.waker_sink import NoopSink
+from async_rt.runtime.blocking_runtime import BlockingRuntime
+from calendar_ics import ZoneTable
+from datetime import posix_zone
+from db import Database
 
 comptime Rt = BlockingRuntime[NoopSink]
 

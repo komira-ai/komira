@@ -3,8 +3,9 @@
 `mojo_aws_client`, `mojo_gcp_client`, `mojo_proto_library` and
 `mojo_db_proto_library` (tools/build/cloud/{aws,gcp}.bzl, tools/build/mojo/proto.bzl)
 generate Mojo from a model or from `.proto` files. A library `<name>` of one of them
-is built from the directory `generated/<name>/` of its package, committed to the
-repository, and from nothing else:
+is built from the directory `generated/<name>/` of its package (for a
+`mojo_proto_library` with `dir_is_import_name`, `generated/<import name>/`),
+committed to the repository, and from nothing else:
 
     <name>_gen      the generator's output for the current inputs (nothing is
                     compiled from it)
@@ -141,8 +142,12 @@ def _in_transition(target):
         return False
     return target in (read_root_config("komira", "generated_unmigrated", "") or "").split()
 
-def generated_state(name):
+def generated_state(name, dir_name = None):
     """What a generated library `name` of this package is built from.
+
+    Its committed directory is `generated/<dir_name>/`, `dir_name` being
+    `name` unless given (`mojo_proto_library`'s `dir_is_import_name` gives the
+    import name).
 
     A struct of: `legacy` (it is in the transition ledger: built from the
     generator, as before), `dir` (the package-relative committed directory),
@@ -153,7 +158,7 @@ def generated_state(name):
     """
     target = _label(name)
     legacy = _in_transition(target)
-    directory = GENERATED_DIR + "/" + name
+    directory = GENERATED_DIR + "/" + (dir_name or name)
     files = sorted(glob([directory + "/**"]))
     if legacy and files:
         fail("{}: `{}/` is committed, so the library is no longer in the transition: delete its line from tools/build/gen/transition.bzl".format(target, directory))

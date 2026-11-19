@@ -14,9 +14,9 @@
 #
 #   buck2 build -c komira.package_stamp=<N> -c komira.package_commit=<C> \
 #     -c komira.package_timestamp_ms=<T> \
-#     //src/komira_encoding:komira_encoding_conda[release] --out R/komira_encoding
+#     //src/encoding:encoding_conda[release] --out R/encoding
 #   buck2 run //tools/build/package:komira_pack -- conda-meta --name komira_all \
-#     --member-manifest R/komira_encoding/manifest.json ... --out-dir R/komira_all
+#     --member-manifest R/encoding/manifest.json ... --out-dir R/komira_all
 #
 # THE STAMP is never typed here: `{build_number}`, `{source_commit}` and
 # `{timestamp_ms}` are placeholders filled from git. A library built
@@ -65,777 +65,777 @@ build_systems {
 }
 
 artifacts {
-  name: "komira_encoding"
+  name: "encoding"
   build_system: "buck2"
-  args: "//src/komira_encoding:komira_encoding_conda[release]"
+  args: "//src/encoding:encoding_conda[release]"
   args: "--out"
   args: "{out_dir}"
-  targets: "//src/komira_encoding:komira_encoding_conda"
+  targets: "//src/encoding:encoding_conda"
 }
 
 artifacts {
-  name: "komira_json"
+  name: "json"
   build_system: "buck2"
-  args: "//src/komira_json:komira_json_conda[release]"
+  args: "//src/json:json_conda[release]"
   args: "--out"
   args: "{out_dir}"
-  targets: "//src/komira_json:komira_json_conda"
+  targets: "//src/json:json_conda"
 }
 
 artifacts {
-  name: "komira_protobuf"
+  name: "protobuf"
   build_system: "buck2"
-  args: "//src/komira_protobuf:komira_protobuf_conda[release]"
+  args: "//src/protobuf:protobuf_conda[release]"
   args: "--out"
   args: "{out_dir}"
-  targets: "//src/komira_protobuf:komira_protobuf_conda"
+  targets: "//src/protobuf:protobuf_conda"
 }
 
 artifacts {
-  name: "komira_xml"
+  name: "xml"
   build_system: "buck2"
-  args: "//src/komira_xml:komira_xml_conda[release]"
+  args: "//src/xml:xml_conda[release]"
   args: "--out"
   args: "{out_dir}"
-  targets: "//src/komira_xml:komira_xml_conda"
+  targets: "//src/xml:xml_conda"
 }
 
 artifacts {
-  name: "komira_retry"
+  name: "retry"
   build_system: "buck2"
-  args: "//src/komira_retry:komira_retry_conda[release]"
+  args: "//src/retry:retry_conda[release]"
   args: "--out"
   args: "{out_dir}"
-  targets: "//src/komira_retry:komira_retry_conda"
+  targets: "//src/retry:retry_conda"
 }
 
 artifacts {
-  name: "komira_datetime"
+  name: "datetime"
   build_system: "buck2"
-  args: "//src/komira_datetime:komira_datetime_conda[release]"
+  args: "//src/datetime:datetime_conda[release]"
   args: "--out"
   args: "{out_dir}"
-  targets: "//src/komira_datetime:komira_datetime_conda"
+  targets: "//src/datetime:datetime_conda"
 }
 
 artifacts {
-  name: "komira_textproto"
+  name: "textproto"
   build_system: "buck2"
-  args: "//src/komira_textproto:komira_textproto_conda[release]"
+  args: "//src/textproto:textproto_conda[release]"
   args: "--out"
   args: "{out_dir}"
-  targets: "//src/komira_textproto:komira_textproto_conda"
+  targets: "//src/textproto:textproto_conda"
 }
 
 artifacts {
-  name: "komira_hash"
+  name: "hashing"
   build_system: "buck2"
-  args: "//src/komira_hash:komira_hash_conda[release]"
+  args: "//src/hashing:hashing_conda[release]"
   args: "--out"
   args: "{out_dir}"
-  targets: "//src/komira_hash:komira_hash_conda"
+  targets: "//src/hashing:hashing_conda"
 }
 
 artifacts {
-  name: "komira_atomic_alias"
+  name: "atomic_alias"
   build_system: "buck2"
-  args: "//src/komira_atomic_alias:komira_atomic_alias_conda[release]"
+  args: "//src/atomic_alias:atomic_alias_conda[release]"
   args: "--out"
   args: "{out_dir}"
-  targets: "//src/komira_atomic_alias:komira_atomic_alias_conda"
+  targets: "//src/atomic_alias:atomic_alias_conda"
 }
 
 artifacts {
-  name: "komira_proto_codec"
+  name: "proto_codec"
   build_system: "buck2"
-  args: "//src/komira_proto_codec:komira_proto_codec_conda[release]"
+  args: "//src/proto_codec:proto_codec_conda[release]"
   args: "--out"
   args: "{out_dir}"
-  targets: "//src/komira_proto_codec:komira_proto_codec_conda"
+  targets: "//src/proto_codec:proto_codec_conda"
 }
 
 artifacts {
-  name: "komira_wkt"
+  name: "wkt"
   build_system: "buck2"
-  args: "//src/komira_wkt:komira_wkt_conda[release]"
+  args: "//src/wkt:wkt_conda[release]"
   args: "--out"
   args: "{out_dir}"
-  targets: "//src/komira_wkt:komira_wkt_conda"
+  targets: "//src/wkt:wkt_conda"
 }
 
 artifacts {
-  name: "komira_anomaly"
+  name: "anomaly"
   build_system: "buck2"
-  args: "//src/komira_anomaly:komira_anomaly_conda[release]"
+  args: "//src/anomaly:anomaly_conda[release]"
   args: "--out"
   args: "{out_dir}"
-  targets: "//src/komira_anomaly:komira_anomaly_conda"
+  targets: "//src/anomaly:anomaly_conda"
 }
 
 artifacts {
-  name: "komira_clock"
+  name: "clock"
   build_system: "buck2"
-  args: "//src/komira_clock:komira_clock_conda[release]"
+  args: "//src/clock:clock_conda[release]"
   args: "--out"
   args: "{out_dir}"
-  targets: "//src/komira_clock:komira_clock_conda"
+  targets: "//src/clock:clock_conda"
 }
 
 artifacts {
-  name: "komira_counters"
+  name: "counters"
   build_system: "buck2"
-  args: "//src/komira_counters:komira_counters_conda[release]"
+  args: "//src/counters:counters_conda[release]"
   args: "--out"
   args: "{out_dir}"
-  targets: "//src/komira_counters:komira_counters_conda"
+  targets: "//src/counters:counters_conda"
 }
 
 artifacts {
-  name: "komira_fork_join"
+  name: "fork_join"
   build_system: "buck2"
-  args: "//src/komira_fork_join:komira_fork_join_conda[release]"
+  args: "//src/fork_join:fork_join_conda[release]"
   args: "--out"
   args: "{out_dir}"
-  targets: "//src/komira_fork_join:komira_fork_join_conda"
+  targets: "//src/fork_join:fork_join_conda"
 }
 
 artifacts {
-  name: "komira_host"
+  name: "host_probe"
   build_system: "buck2"
-  args: "//src/komira_host:komira_host_conda[release]"
+  args: "//src/host_probe:host_probe_conda[release]"
   args: "--out"
   args: "{out_dir}"
-  targets: "//src/komira_host:komira_host_conda"
+  targets: "//src/host_probe:host_probe_conda"
 }
 
 artifacts {
-  name: "komira_job_report_proto"
+  name: "job_report_proto"
   build_system: "buck2"
-  args: "//src/komira_job_report_proto:komira_job_report_proto_conda[release]"
+  args: "//src/job_report_proto:job_report_proto_conda[release]"
   args: "--out"
   args: "{out_dir}"
-  targets: "//src/komira_job_report_proto:komira_job_report_proto_conda"
+  targets: "//src/job_report_proto:job_report_proto_conda"
 }
 
 artifacts {
-  name: "komira_name_registry"
+  name: "name_registry"
   build_system: "buck2"
-  args: "//src/komira_name_registry:komira_name_registry_conda[release]"
+  args: "//src/name_registry:name_registry_conda[release]"
   args: "--out"
   args: "{out_dir}"
-  targets: "//src/komira_name_registry:komira_name_registry_conda"
+  targets: "//src/name_registry:name_registry_conda"
 }
 
 artifacts {
-  name: "komira_parquet_api"
+  name: "parquet_api"
   build_system: "buck2"
-  args: "//src/komira_parquet_api:komira_parquet_api_conda[release]"
+  args: "//src/parquet_api:parquet_api_conda[release]"
   args: "--out"
   args: "{out_dir}"
-  targets: "//src/komira_parquet_api:komira_parquet_api_conda"
+  targets: "//src/parquet_api:parquet_api_conda"
 }
 
 artifacts {
-  name: "komira_runtime_paths"
+  name: "runtime_paths"
   build_system: "buck2"
-  args: "//tools/build/mojo/runtime_paths:komira_runtime_paths_conda[release]"
+  args: "//tools/build/mojo/runtime_paths:runtime_paths_conda[release]"
   args: "--out"
   args: "{out_dir}"
-  targets: "//tools/build/mojo/runtime_paths:komira_runtime_paths_conda"
+  targets: "//tools/build/mojo/runtime_paths:runtime_paths_conda"
 }
 
 artifacts {
-  name: "komira_resources"
+  name: "resources"
   build_system: "buck2"
-  args: "//src/komira_resources:komira_resources_conda[release]"
+  args: "//src/resources:resources_conda[release]"
   args: "--out"
   args: "{out_dir}"
-  targets: "//src/komira_resources:komira_resources_conda"
+  targets: "//src/resources:resources_conda"
 }
 
 artifacts {
-  name: "komira_scalar_arithmetic"
+  name: "scalar_arithmetic"
   build_system: "buck2"
-  args: "//src/komira_scalar_arithmetic:komira_scalar_arithmetic_conda[release]"
+  args: "//src/scalar_arithmetic:scalar_arithmetic_conda[release]"
   args: "--out"
   args: "{out_dir}"
-  targets: "//src/komira_scalar_arithmetic:komira_scalar_arithmetic_conda"
+  targets: "//src/scalar_arithmetic:scalar_arithmetic_conda"
 }
 
 artifacts {
-  name: "komira_simd"
+  name: "simd_ops"
   build_system: "buck2"
-  args: "//src/komira_simd:komira_simd_conda[release]"
+  args: "//src/simd_ops:simd_ops_conda[release]"
   args: "--out"
   args: "{out_dir}"
-  targets: "//src/komira_simd:komira_simd_conda"
+  targets: "//src/simd_ops:simd_ops_conda"
 }
 
 artifacts {
-  name: "komira_validation_run"
+  name: "validation_run"
   build_system: "buck2"
-  args: "//src/komira_validation_run:komira_validation_run_conda[release]"
+  args: "//src/validation_run:validation_run_conda[release]"
   args: "--out"
   args: "{out_dir}"
-  targets: "//src/komira_validation_run:komira_validation_run_conda"
+  targets: "//src/validation_run:validation_run_conda"
 }
 
 artifacts {
-  name: "komira_test_run_id"
+  name: "test_run_id"
   build_system: "buck2"
-  args: "//src/komira_test_run_id:komira_test_run_id_conda[release]"
+  args: "//src/test_run_id:test_run_id_conda[release]"
   args: "--out"
   args: "{out_dir}"
-  targets: "//src/komira_test_run_id:komira_test_run_id_conda"
+  targets: "//src/test_run_id:test_run_id_conda"
 }
 
 artifacts {
-  name: "komira_test_verdict"
+  name: "test_verdict"
   build_system: "buck2"
-  args: "//src/komira_test_verdict:komira_test_verdict_conda[release]"
+  args: "//src/test_verdict:test_verdict_conda[release]"
   args: "--out"
   args: "{out_dir}"
-  targets: "//src/komira_test_verdict:komira_test_verdict_conda"
+  targets: "//src/test_verdict:test_verdict_conda"
 }
 
 artifacts {
-  name: "komira_kafka_server"
+  name: "kafka_server"
   build_system: "buck2"
-  args: "//src/komira_kafka_server:komira_kafka_server_conda[release]"
+  args: "//src/kafka_server:kafka_server_conda[release]"
   args: "--out"
   args: "{out_dir}"
-  targets: "//src/komira_kafka_server:komira_kafka_server_conda"
+  targets: "//src/kafka_server:kafka_server_conda"
 }
 
 artifacts {
-  name: "komira_collections"
+  name: "containers"
   build_system: "buck2"
-  args: "//src/komira_collections:komira_collections_conda[release]"
+  args: "//src/containers:containers_conda[release]"
   args: "--out"
   args: "{out_dir}"
-  targets: "//src/komira_collections:komira_collections_conda"
+  targets: "//src/containers:containers_conda"
 }
 
 artifacts {
-  name: "komira_broker_proto"
+  name: "broker_proto"
   build_system: "buck2"
-  args: "//src/komira_broker_proto:komira_broker_proto_conda[release]"
+  args: "//src/broker_proto:broker_proto_conda[release]"
   args: "--out"
   args: "{out_dir}"
-  targets: "//src/komira_broker_proto:komira_broker_proto_conda"
+  targets: "//src/broker_proto:broker_proto_conda"
 }
 
 artifacts {
-  name: "komira_supervisor_proto"
+  name: "supervisor_proto"
   build_system: "buck2"
-  args: "//src/komira_supervisor_proto:komira_supervisor_proto_conda[release]"
+  args: "//src/supervisor_proto:supervisor_proto_conda[release]"
   args: "--out"
   args: "{out_dir}"
-  targets: "//src/komira_supervisor_proto:komira_supervisor_proto_conda"
+  targets: "//src/supervisor_proto:supervisor_proto_conda"
 }
 
 artifacts {
-  name: "komira_plan_proto"
+  name: "plan_proto"
   build_system: "buck2"
-  args: "//src/komira_plan_proto:komira_plan_proto_conda[release]"
+  args: "//src/plan_proto:plan_proto_conda[release]"
   args: "--out"
   args: "{out_dir}"
-  targets: "//src/komira_plan_proto:komira_plan_proto_conda"
+  targets: "//src/plan_proto:plan_proto_conda"
 }
 
 artifacts {
-  name: "komira_rowcell"
+  name: "rowcell"
   build_system: "buck2"
-  args: "//src/komira_rowcell:komira_rowcell_conda[release]"
+  args: "//src/rowcell:rowcell_conda[release]"
   args: "--out"
   args: "{out_dir}"
-  targets: "//src/komira_rowcell:komira_rowcell_conda"
+  targets: "//src/rowcell:rowcell_conda"
 }
 
 artifacts {
-  name: "komira_mail_address"
+  name: "mail_address"
   build_system: "buck2"
-  args: "//src/komira_mail_address:komira_mail_address_conda[release]"
+  args: "//src/mail_address:mail_address_conda[release]"
   args: "--out"
   args: "{out_dir}"
-  targets: "//src/komira_mail_address:komira_mail_address_conda"
+  targets: "//src/mail_address:mail_address_conda"
 }
 
 artifacts {
-  name: "komira_content_line"
+  name: "content_line"
   build_system: "buck2"
-  args: "//src/komira_content_line:komira_content_line_conda[release]"
+  args: "//src/content_line:content_line_conda[release]"
   args: "--out"
   args: "{out_dir}"
-  targets: "//src/komira_content_line:komira_content_line_conda"
+  targets: "//src/content_line:content_line_conda"
 }
 
 artifacts {
-  name: "komira_spsc_ring"
+  name: "spsc_ring"
   build_system: "buck2"
-  args: "//src/komira_spsc_ring:komira_spsc_ring_conda[release]"
+  args: "//src/spsc_ring:spsc_ring_conda[release]"
   args: "--out"
   args: "{out_dir}"
-  targets: "//src/komira_spsc_ring:komira_spsc_ring_conda"
+  targets: "//src/spsc_ring:spsc_ring_conda"
 }
 
 artifacts {
-  name: "komira_sync"
+  name: "sync"
   build_system: "buck2"
-  args: "//src/komira_sync:komira_sync_conda[release]"
+  args: "//src/sync:sync_conda[release]"
   args: "--out"
   args: "{out_dir}"
-  targets: "//src/komira_sync:komira_sync_conda"
+  targets: "//src/sync:sync_conda"
 }
 
 artifacts {
-  name: "komira_mcp_server"
+  name: "mcp_server"
   build_system: "buck2"
-  args: "//src/komira_mcp_server:komira_mcp_server_conda[release]"
+  args: "//src/mcp_server:mcp_server_conda[release]"
   args: "--out"
   args: "{out_dir}"
-  targets: "//src/komira_mcp_server:komira_mcp_server_conda"
+  targets: "//src/mcp_server:mcp_server_conda"
 }
 
 artifacts {
-  name: "komira_chat_proto"
+  name: "chat_proto"
   build_system: "buck2"
-  args: "//src/komira_chat_proto:komira_chat_proto_conda[release]"
+  args: "//src/chat_proto:chat_proto_conda[release]"
   args: "--out"
   args: "{out_dir}"
-  targets: "//src/komira_chat_proto:komira_chat_proto_conda"
+  targets: "//src/chat_proto:chat_proto_conda"
 }
 
 artifacts {
-  name: "komira_contacts_proto"
+  name: "contacts_proto"
   build_system: "buck2"
-  args: "//src/komira_contacts_proto:komira_contacts_proto_conda[release]"
+  args: "//src/contacts_proto:contacts_proto_conda[release]"
   args: "--out"
   args: "{out_dir}"
-  targets: "//src/komira_contacts_proto:komira_contacts_proto_conda"
+  targets: "//src/contacts_proto:contacts_proto_conda"
 }
 
 artifacts {
-  name: "komira_managed_mail_proto"
+  name: "managed_mail_proto"
   build_system: "buck2"
-  args: "//src/komira_managed_mail_proto:komira_managed_mail_proto_conda[release]"
+  args: "//src/managed_mail_proto:managed_mail_proto_conda[release]"
   args: "--out"
   args: "{out_dir}"
-  targets: "//src/komira_managed_mail_proto:komira_managed_mail_proto_conda"
+  targets: "//src/managed_mail_proto:managed_mail_proto_conda"
 }
 
 artifacts {
-  name: "komira_calendar_proto"
+  name: "calendar_proto"
   build_system: "buck2"
-  args: "//src/komira_calendar_proto:komira_calendar_proto_conda[release]"
+  args: "//src/calendar_proto:calendar_proto_conda[release]"
   args: "--out"
   args: "{out_dir}"
-  targets: "//src/komira_calendar_proto:komira_calendar_proto_conda"
+  targets: "//src/calendar_proto:calendar_proto_conda"
 }
 
 artifacts {
-  name: "komira_snapshotter"
+  name: "snapshotter"
   build_system: "buck2"
-  args: "//src/komira_snapshotter:komira_snapshotter_conda[release]"
+  args: "//src/snapshotter:snapshotter_conda[release]"
   args: "--out"
   args: "{out_dir}"
-  targets: "//src/komira_snapshotter:komira_snapshotter_conda"
+  targets: "//src/snapshotter:snapshotter_conda"
 }
 
 artifacts {
-  name: "komira_vcard"
+  name: "vcard"
   build_system: "buck2"
-  args: "//src/komira_vcard:komira_vcard_conda[release]"
+  args: "//src/vcard:vcard_conda[release]"
   args: "--out"
   args: "{out_dir}"
-  targets: "//src/komira_vcard:komira_vcard_conda"
+  targets: "//src/vcard:vcard_conda"
 }
 
 artifacts {
-  name: "komira_trace"
+  name: "trace"
   build_system: "buck2"
-  args: "//src/komira_trace:komira_trace_conda[release]"
+  args: "//src/trace:trace_conda[release]"
   args: "--out"
   args: "{out_dir}"
-  targets: "//src/komira_trace:komira_trace_conda"
+  targets: "//src/trace:trace_conda"
 }
 
 artifacts {
-  name: "komira_calendar"
+  name: "calendar"
   build_system: "buck2"
-  args: "//src/komira_calendar:komira_calendar_conda[release]"
+  args: "//src/calendar:calendar_conda[release]"
   args: "--out"
   args: "{out_dir}"
-  targets: "//src/komira_calendar:komira_calendar_conda"
+  targets: "//src/calendar:calendar_conda"
 }
 
 artifacts {
-  name: "komira_calendar_ics"
+  name: "calendar_ics"
   build_system: "buck2"
-  args: "//src/komira_calendar_ics:komira_calendar_ics_conda[release]"
+  args: "//src/calendar_ics:calendar_ics_conda[release]"
   args: "--out"
   args: "{out_dir}"
-  targets: "//src/komira_calendar_ics:komira_calendar_ics_conda"
+  targets: "//src/calendar_ics:calendar_ics_conda"
 }
 
 artifacts {
-  name: "komira_libc"
+  name: "libc"
   build_system: "buck2"
-  args: "//src/komira_libc:komira_libc_conda[release]"
+  args: "//src/libc:libc_conda[release]"
   args: "--out"
   args: "{out_dir}"
-  targets: "//src/komira_libc:komira_libc_conda"
+  targets: "//src/libc:libc_conda"
 }
 
 artifacts {
-  name: "komira_lz4"
+  name: "lz4"
   build_system: "buck2"
-  args: "//src/komira_lz4:komira_lz4_conda[release]"
+  args: "//src/lz4:lz4_conda[release]"
   args: "--out"
   args: "{out_dir}"
-  targets: "//src/komira_lz4:komira_lz4_conda"
+  targets: "//src/lz4:lz4_conda"
 }
 
 artifacts {
-  name: "komira_zlib"
+  name: "zlib"
   build_system: "buck2"
-  args: "//src/komira_zlib:komira_zlib_conda[release]"
+  args: "//src/zlib:zlib_conda[release]"
   args: "--out"
   args: "{out_dir}"
-  targets: "//src/komira_zlib:komira_zlib_conda"
+  targets: "//src/zlib:zlib_conda"
 }
 
 artifacts {
-  name: "komira_async_api"
+  name: "async_api"
   build_system: "buck2"
-  args: "//src/komira_async_api:komira_async_api_conda[release]"
+  args: "//src/async_api:async_api_conda[release]"
   args: "--out"
   args: "{out_dir}"
-  targets: "//src/komira_async_api:komira_async_api_conda"
+  targets: "//src/async_api:async_api_conda"
 }
 
 artifacts {
-  name: "komira_buffer"
+  name: "byte_buffer"
   build_system: "buck2"
-  args: "//src/komira_buffer:komira_buffer_conda[release]"
+  args: "//src/byte_buffer:byte_buffer_conda[release]"
   args: "--out"
   args: "{out_dir}"
-  targets: "//src/komira_buffer:komira_buffer_conda"
+  targets: "//src/byte_buffer:byte_buffer_conda"
 }
 
 artifacts {
-  name: "komira_mail_message"
+  name: "mail_message"
   build_system: "buck2"
-  args: "//src/komira_mail_message:komira_mail_message_conda[release]"
+  args: "//src/mail_message:mail_message_conda[release]"
   args: "--out"
   args: "{out_dir}"
-  targets: "//src/komira_mail_message:komira_mail_message_conda"
+  targets: "//src/mail_message:mail_message_conda"
 }
 
 artifacts {
-  name: "komira_compression"
+  name: "compression"
   build_system: "buck2"
-  args: "//src/komira_compression:komira_compression_conda[release]"
+  args: "//src/compression:compression_conda[release]"
   args: "--out"
   args: "{out_dir}"
-  targets: "//src/komira_compression:komira_compression_conda"
+  targets: "//src/compression:compression_conda"
 }
 
 artifacts {
-  name: "komira_crypto"
+  name: "crypto"
   build_system: "buck2"
-  args: "//src/komira_crypto:komira_crypto_conda[release]"
+  args: "//src/crypto:crypto_conda[release]"
   args: "--out"
   args: "{out_dir}"
-  targets: "//src/komira_crypto:komira_crypto_conda"
+  targets: "//src/crypto:crypto_conda"
 }
 
 artifacts {
-  name: "komira_arrow"
+  name: "arrow"
   build_system: "buck2"
-  args: "//src/komira_arrow:komira_arrow_conda[release]"
+  args: "//src/arrow:arrow_conda[release]"
   args: "--out"
   args: "{out_dir}"
-  targets: "//src/komira_arrow:komira_arrow_conda"
+  targets: "//src/arrow:arrow_conda"
 }
 
 artifacts {
-  name: "komira_dynamic_filter"
+  name: "dynamic_filter"
   build_system: "buck2"
-  args: "//src/komira_dynamic_filter:komira_dynamic_filter_conda[release]"
+  args: "//src/dynamic_filter:dynamic_filter_conda[release]"
   args: "--out"
   args: "{out_dir}"
-  targets: "//src/komira_dynamic_filter:komira_dynamic_filter_conda"
+  targets: "//src/dynamic_filter:dynamic_filter_conda"
 }
 
 artifacts {
-  name: "komira_metrics"
+  name: "metrics"
   build_system: "buck2"
-  args: "//src/komira_metrics:komira_metrics_conda[release]"
+  args: "//src/metrics:metrics_conda[release]"
   args: "--out"
   args: "{out_dir}"
-  targets: "//src/komira_metrics:komira_metrics_conda"
+  targets: "//src/metrics:metrics_conda"
 }
 
 artifacts {
-  name: "komira_secret_store"
+  name: "secret_store"
   build_system: "buck2"
-  args: "//src/komira_secret_store:komira_secret_store_conda[release]"
+  args: "//src/secret_store:secret_store_conda[release]"
   args: "--out"
   args: "{out_dir}"
-  targets: "//src/komira_secret_store:komira_secret_store_conda"
+  targets: "//src/secret_store:secret_store_conda"
 }
 
 artifacts {
-  name: "komira_arrow_ipc"
+  name: "arrow_ipc"
   build_system: "buck2"
-  args: "//src/komira_arrow_ipc:komira_arrow_ipc_conda[release]"
+  args: "//src/arrow_ipc:arrow_ipc_conda[release]"
   args: "--out"
   args: "{out_dir}"
-  targets: "//src/komira_arrow_ipc:komira_arrow_ipc_conda"
+  targets: "//src/arrow_ipc:arrow_ipc_conda"
 }
 
 artifacts {
-  name: "komira_plan_expr"
+  name: "plan_expr"
   build_system: "buck2"
-  args: "//src/komira_plan_expr:komira_plan_expr_conda[release]"
+  args: "//src/plan_expr:plan_expr_conda[release]"
   args: "--out"
   args: "{out_dir}"
-  targets: "//src/komira_plan_expr:komira_plan_expr_conda"
+  targets: "//src/plan_expr:plan_expr_conda"
 }
 
 artifacts {
-  name: "komira_secret_env"
+  name: "secret_env"
   build_system: "buck2"
-  args: "//src/komira_secret_env:komira_secret_env_conda[release]"
+  args: "//src/secret_env:secret_env_conda[release]"
   args: "--out"
   args: "{out_dir}"
-  targets: "//src/komira_secret_env:komira_secret_env_conda"
+  targets: "//src/secret_env:secret_env_conda"
 }
 
 artifacts {
-  name: "komira_column_kernels"
+  name: "column_kernels"
   build_system: "buck2"
-  args: "//src/komira_column_kernels:komira_column_kernels_conda[release]"
+  args: "//src/column_kernels:column_kernels_conda[release]"
   args: "--out"
   args: "{out_dir}"
-  targets: "//src/komira_column_kernels:komira_column_kernels_conda"
+  targets: "//src/column_kernels:column_kernels_conda"
 }
 
 artifacts {
-  name: "komira_log"
+  name: "log"
   build_system: "buck2"
-  args: "//src/komira_log:komira_log_conda[release]"
+  args: "//src/log:log_conda[release]"
   args: "--out"
   args: "{out_dir}"
-  targets: "//src/komira_log:komira_log_conda"
+  targets: "//src/log:log_conda"
 }
 
 artifacts {
-  name: "komira_plan_stats"
+  name: "plan_stats"
   build_system: "buck2"
-  args: "//src/komira_plan_stats:komira_plan_stats_conda[release]"
+  args: "//src/plan_stats:plan_stats_conda[release]"
   args: "--out"
   args: "{out_dir}"
-  targets: "//src/komira_plan_stats:komira_plan_stats_conda"
+  targets: "//src/plan_stats:plan_stats_conda"
 }
 
 artifacts {
-  name: "komira_scan_source"
+  name: "scan_source"
   build_system: "buck2"
-  args: "//src/komira_scan_source:komira_scan_source_conda[release]"
+  args: "//src/scan_source:scan_source_conda[release]"
   args: "--out"
   args: "{out_dir}"
-  targets: "//src/komira_scan_source:komira_scan_source_conda"
+  targets: "//src/scan_source:scan_source_conda"
 }
 
 artifacts {
-  name: "komira_plan_ir"
+  name: "plan_ir"
   build_system: "buck2"
-  args: "//src/komira_plan_ir:komira_plan_ir_conda[release]"
+  args: "//src/plan_ir:plan_ir_conda[release]"
   args: "--out"
   args: "{out_dir}"
-  targets: "//src/komira_plan_ir:komira_plan_ir_conda"
+  targets: "//src/plan_ir:plan_ir_conda"
 }
 
 artifacts {
-  name: "komira_join_assembly"
+  name: "join_assembly"
   build_system: "buck2"
-  args: "//src/komira_join_assembly:komira_join_assembly_conda[release]"
+  args: "//src/join_assembly:join_assembly_conda[release]"
   args: "--out"
   args: "{out_dir}"
-  targets: "//src/komira_join_assembly:komira_join_assembly_conda"
+  targets: "//src/join_assembly:join_assembly_conda"
 }
 
 artifacts {
-  name: "komira_async"
+  name: "async_rt"
   build_system: "buck2"
-  args: "//src/komira_async:komira_async_conda[release]"
+  args: "//src/async_rt:async_rt_conda[release]"
   args: "--out"
   args: "{out_dir}"
-  targets: "//src/komira_async:komira_async_conda"
+  targets: "//src/async_rt:async_rt_conda"
 }
 
 artifacts {
-  name: "komira_fs"
+  name: "fs"
   build_system: "buck2"
-  args: "//src/komira_fs:komira_fs_conda[release]"
+  args: "//src/fs:fs_conda[release]"
   args: "--out"
   args: "{out_dir}"
-  targets: "//src/komira_fs:komira_fs_conda"
+  targets: "//src/fs:fs_conda"
 }
 
 artifacts {
-  name: "komira_http_core"
+  name: "http_core"
   build_system: "buck2"
-  args: "//src/komira_http_core:komira_http_core_conda[release]"
+  args: "//src/http_core:http_core_conda[release]"
   args: "--out"
   args: "{out_dir}"
-  targets: "//src/komira_http_core:komira_http_core_conda"
+  targets: "//src/http_core:http_core_conda"
 }
 
 artifacts {
-  name: "komira_net"
+  name: "net"
   build_system: "buck2"
-  args: "//src/komira_net:komira_net_conda[release]"
+  args: "//src/net:net_conda[release]"
   args: "--out"
   args: "{out_dir}"
-  targets: "//src/komira_net:komira_net_conda"
+  targets: "//src/net:net_conda"
 }
 
 artifacts {
-  name: "komira_supervisor"
+  name: "supervisor"
   build_system: "buck2"
-  args: "//src/komira_supervisor:komira_supervisor_conda[release]"
+  args: "//src/supervisor:supervisor_conda[release]"
   args: "--out"
   args: "{out_dir}"
-  targets: "//src/komira_supervisor:komira_supervisor_conda"
+  targets: "//src/supervisor:supervisor_conda"
 }
 
 artifacts {
-  name: "komira_http_client"
+  name: "http_client"
   build_system: "buck2"
-  args: "//src/komira_http_client:komira_http_client_conda[release]"
+  args: "//src/http_client:http_client_conda[release]"
   args: "--out"
   args: "{out_dir}"
-  targets: "//src/komira_http_client:komira_http_client_conda"
+  targets: "//src/http_client:http_client_conda"
 }
 
 artifacts {
-  name: "komira_objectstore"
+  name: "objectstore"
   build_system: "buck2"
-  args: "//src/komira_objectstore:komira_objectstore_conda[release]"
+  args: "//src/objectstore:objectstore_conda[release]"
   args: "--out"
   args: "{out_dir}"
-  targets: "//src/komira_objectstore:komira_objectstore_conda"
+  targets: "//src/objectstore:objectstore_conda"
 }
 
 artifacts {
-  name: "komira_aws_core"
+  name: "aws_core"
   build_system: "buck2"
-  args: "//src/komira_aws_core:komira_aws_core_conda[release]"
+  args: "//src/aws_core:aws_core_conda[release]"
   args: "--out"
   args: "{out_dir}"
-  targets: "//src/komira_aws_core:komira_aws_core_conda"
+  targets: "//src/aws_core:aws_core_conda"
 }
 
 artifacts {
-  name: "komira_gcp_core"
+  name: "gcp_core"
   build_system: "buck2"
-  args: "//src/komira_gcp_core:komira_gcp_core_conda[release]"
+  args: "//src/gcp_core:gcp_core_conda[release]"
   args: "--out"
   args: "{out_dir}"
-  targets: "//src/komira_gcp_core:komira_gcp_core_conda"
+  targets: "//src/gcp_core:gcp_core_conda"
 }
 
 artifacts {
-  name: "komira_oci"
+  name: "oci"
   build_system: "buck2"
-  args: "//src/komira_oci:komira_oci_conda[release]"
+  args: "//src/oci:oci_conda[release]"
   args: "--out"
   args: "{out_dir}"
-  targets: "//src/komira_oci:komira_oci_conda"
+  targets: "//src/oci:oci_conda"
 }
 
 artifacts {
-  name: "komira_gcp_cloudresourcemanager"
+  name: "gcp_cloudresourcemanager"
   build_system: "buck2"
-  args: "//src/komira_gcp_cloudresourcemanager:komira_gcp_cloudresourcemanager_conda[release]"
+  args: "//src/gcp_cloudresourcemanager:gcp_cloudresourcemanager_conda[release]"
   args: "--out"
   args: "{out_dir}"
-  targets: "//src/komira_gcp_cloudresourcemanager:komira_gcp_cloudresourcemanager_conda"
+  targets: "//src/gcp_cloudresourcemanager:gcp_cloudresourcemanager_conda"
 }
 
 artifacts {
-  name: "komira_gcp_iam"
+  name: "gcp_iam"
   build_system: "buck2"
-  args: "//src/komira_gcp_iam:komira_gcp_iam_conda[release]"
+  args: "//src/gcp_iam:gcp_iam_conda[release]"
   args: "--out"
   args: "{out_dir}"
-  targets: "//src/komira_gcp_iam:komira_gcp_iam_conda"
+  targets: "//src/gcp_iam:gcp_iam_conda"
 }
 
 artifacts {
-  name: "komira_gcp_run"
+  name: "gcp_run"
   build_system: "buck2"
-  args: "//src/komira_gcp_run:komira_gcp_run_conda[release]"
+  args: "//src/gcp_run:gcp_run_conda[release]"
   args: "--out"
   args: "{out_dir}"
-  targets: "//src/komira_gcp_run:komira_gcp_run_conda"
+  targets: "//src/gcp_run:gcp_run_conda"
 }
 
 artifacts {
-  name: "komira_gcp_wif"
+  name: "gcp_wif"
   build_system: "buck2"
-  args: "//src/komira_gcp_wif:komira_gcp_wif_conda[release]"
+  args: "//src/gcp_wif:gcp_wif_conda[release]"
   args: "--out"
   args: "{out_dir}"
-  targets: "//src/komira_gcp_wif:komira_gcp_wif_conda"
+  targets: "//src/gcp_wif:gcp_wif_conda"
 }
 
 artifacts {
-  name: "komira_kafka_broker"
+  name: "kafka_broker"
   build_system: "buck2"
-  args: "//src/komira_kafka_broker:komira_kafka_broker_conda[release]"
+  args: "//src/kafka_broker:kafka_broker_conda[release]"
   args: "--out"
   args: "{out_dir}"
-  targets: "//src/komira_kafka_broker:komira_kafka_broker_conda"
+  targets: "//src/kafka_broker:kafka_broker_conda"
 }
 
 artifacts {
-  name: "komira_bench_duckdb"
+  name: "bench_duckdb"
   build_system: "buck2"
-  args: "//src/komira_bench_duckdb:komira_bench_duckdb_conda[release]"
+  args: "//src/bench_duckdb:bench_duckdb_conda[release]"
   args: "--out"
   args: "{out_dir}"
-  targets: "//src/komira_bench_duckdb:komira_bench_duckdb_conda"
+  targets: "//src/bench_duckdb:bench_duckdb_conda"
 }
 
 artifacts {
-  name: "komira_bench_data"
+  name: "bench_data"
   build_system: "buck2"
-  args: "//src/komira_bench_data:komira_bench_data_conda[release]"
+  args: "//src/bench_data:bench_data_conda[release]"
   args: "--out"
   args: "{out_dir}"
-  targets: "//src/komira_bench_data:komira_bench_data_conda"
+  targets: "//src/bench_data:bench_data_conda"
 }
 
 artifacts {
-  name: "komira_bench_report"
+  name: "bench_report"
   build_system: "buck2"
-  args: "//src/komira_bench_report:komira_bench_report_conda[release]"
+  args: "//src/bench_report:bench_report_conda[release]"
   args: "--out"
   args: "{out_dir}"
-  targets: "//src/komira_bench_report:komira_bench_report_conda"
+  targets: "//src/bench_report:bench_report_conda"
 }
 
 artifacts {
-  name: "komira_bench_corpus"
+  name: "bench_corpus"
   build_system: "buck2"
-  args: "//src/komira_bench_corpus:komira_bench_corpus_conda[release]"
+  args: "//src/bench_corpus:bench_corpus_conda[release]"
   args: "--out"
   args: "{out_dir}"
-  targets: "//src/komira_bench_corpus:komira_bench_corpus_conda"
+  targets: "//src/bench_corpus:bench_corpus_conda"
 }
 
 artifacts {
@@ -845,177 +845,177 @@ artifacts {
   args: "--name"
   args: "komira_all"
   args: "--member-manifest"
-  args: "{release_dir}/komira_encoding/manifest.json"
+  args: "{release_dir}/encoding/manifest.json"
   args: "--member-manifest"
-  args: "{release_dir}/komira_json/manifest.json"
+  args: "{release_dir}/json/manifest.json"
   args: "--member-manifest"
-  args: "{release_dir}/komira_protobuf/manifest.json"
+  args: "{release_dir}/protobuf/manifest.json"
   args: "--member-manifest"
-  args: "{release_dir}/komira_xml/manifest.json"
+  args: "{release_dir}/xml/manifest.json"
   args: "--member-manifest"
-  args: "{release_dir}/komira_retry/manifest.json"
+  args: "{release_dir}/retry/manifest.json"
   args: "--member-manifest"
-  args: "{release_dir}/komira_datetime/manifest.json"
+  args: "{release_dir}/datetime/manifest.json"
   args: "--member-manifest"
-  args: "{release_dir}/komira_textproto/manifest.json"
+  args: "{release_dir}/textproto/manifest.json"
   args: "--member-manifest"
-  args: "{release_dir}/komira_hash/manifest.json"
+  args: "{release_dir}/hashing/manifest.json"
   args: "--member-manifest"
-  args: "{release_dir}/komira_atomic_alias/manifest.json"
+  args: "{release_dir}/atomic_alias/manifest.json"
   args: "--member-manifest"
-  args: "{release_dir}/komira_proto_codec/manifest.json"
+  args: "{release_dir}/proto_codec/manifest.json"
   args: "--member-manifest"
-  args: "{release_dir}/komira_wkt/manifest.json"
+  args: "{release_dir}/wkt/manifest.json"
   args: "--member-manifest"
-  args: "{release_dir}/komira_anomaly/manifest.json"
+  args: "{release_dir}/anomaly/manifest.json"
   args: "--member-manifest"
-  args: "{release_dir}/komira_clock/manifest.json"
+  args: "{release_dir}/clock/manifest.json"
   args: "--member-manifest"
-  args: "{release_dir}/komira_counters/manifest.json"
+  args: "{release_dir}/counters/manifest.json"
   args: "--member-manifest"
-  args: "{release_dir}/komira_fork_join/manifest.json"
+  args: "{release_dir}/fork_join/manifest.json"
   args: "--member-manifest"
-  args: "{release_dir}/komira_host/manifest.json"
+  args: "{release_dir}/host_probe/manifest.json"
   args: "--member-manifest"
-  args: "{release_dir}/komira_job_report_proto/manifest.json"
+  args: "{release_dir}/job_report_proto/manifest.json"
   args: "--member-manifest"
-  args: "{release_dir}/komira_name_registry/manifest.json"
+  args: "{release_dir}/name_registry/manifest.json"
   args: "--member-manifest"
-  args: "{release_dir}/komira_parquet_api/manifest.json"
+  args: "{release_dir}/parquet_api/manifest.json"
   args: "--member-manifest"
-  args: "{release_dir}/komira_runtime_paths/manifest.json"
+  args: "{release_dir}/runtime_paths/manifest.json"
   args: "--member-manifest"
-  args: "{release_dir}/komira_resources/manifest.json"
+  args: "{release_dir}/resources/manifest.json"
   args: "--member-manifest"
-  args: "{release_dir}/komira_scalar_arithmetic/manifest.json"
+  args: "{release_dir}/scalar_arithmetic/manifest.json"
   args: "--member-manifest"
-  args: "{release_dir}/komira_simd/manifest.json"
+  args: "{release_dir}/simd_ops/manifest.json"
   args: "--member-manifest"
-  args: "{release_dir}/komira_validation_run/manifest.json"
+  args: "{release_dir}/validation_run/manifest.json"
   args: "--member-manifest"
-  args: "{release_dir}/komira_test_run_id/manifest.json"
+  args: "{release_dir}/test_run_id/manifest.json"
   args: "--member-manifest"
-  args: "{release_dir}/komira_test_verdict/manifest.json"
+  args: "{release_dir}/test_verdict/manifest.json"
   args: "--member-manifest"
-  args: "{release_dir}/komira_kafka_server/manifest.json"
+  args: "{release_dir}/kafka_server/manifest.json"
   args: "--member-manifest"
-  args: "{release_dir}/komira_collections/manifest.json"
+  args: "{release_dir}/containers/manifest.json"
   args: "--member-manifest"
-  args: "{release_dir}/komira_broker_proto/manifest.json"
+  args: "{release_dir}/broker_proto/manifest.json"
   args: "--member-manifest"
-  args: "{release_dir}/komira_supervisor_proto/manifest.json"
+  args: "{release_dir}/supervisor_proto/manifest.json"
   args: "--member-manifest"
-  args: "{release_dir}/komira_plan_proto/manifest.json"
+  args: "{release_dir}/plan_proto/manifest.json"
   args: "--member-manifest"
-  args: "{release_dir}/komira_rowcell/manifest.json"
+  args: "{release_dir}/rowcell/manifest.json"
   args: "--member-manifest"
-  args: "{release_dir}/komira_mail_address/manifest.json"
+  args: "{release_dir}/mail_address/manifest.json"
   args: "--member-manifest"
-  args: "{release_dir}/komira_content_line/manifest.json"
+  args: "{release_dir}/content_line/manifest.json"
   args: "--member-manifest"
-  args: "{release_dir}/komira_spsc_ring/manifest.json"
+  args: "{release_dir}/spsc_ring/manifest.json"
   args: "--member-manifest"
-  args: "{release_dir}/komira_sync/manifest.json"
+  args: "{release_dir}/sync/manifest.json"
   args: "--member-manifest"
-  args: "{release_dir}/komira_mcp_server/manifest.json"
+  args: "{release_dir}/mcp_server/manifest.json"
   args: "--member-manifest"
-  args: "{release_dir}/komira_chat_proto/manifest.json"
+  args: "{release_dir}/chat_proto/manifest.json"
   args: "--member-manifest"
-  args: "{release_dir}/komira_contacts_proto/manifest.json"
+  args: "{release_dir}/contacts_proto/manifest.json"
   args: "--member-manifest"
-  args: "{release_dir}/komira_managed_mail_proto/manifest.json"
+  args: "{release_dir}/managed_mail_proto/manifest.json"
   args: "--member-manifest"
-  args: "{release_dir}/komira_calendar_proto/manifest.json"
+  args: "{release_dir}/calendar_proto/manifest.json"
   args: "--member-manifest"
-  args: "{release_dir}/komira_snapshotter/manifest.json"
+  args: "{release_dir}/snapshotter/manifest.json"
   args: "--member-manifest"
-  args: "{release_dir}/komira_vcard/manifest.json"
+  args: "{release_dir}/vcard/manifest.json"
   args: "--member-manifest"
-  args: "{release_dir}/komira_trace/manifest.json"
+  args: "{release_dir}/trace/manifest.json"
   args: "--member-manifest"
-  args: "{release_dir}/komira_calendar/manifest.json"
+  args: "{release_dir}/calendar/manifest.json"
   args: "--member-manifest"
-  args: "{release_dir}/komira_calendar_ics/manifest.json"
+  args: "{release_dir}/calendar_ics/manifest.json"
   args: "--member-manifest"
-  args: "{release_dir}/komira_libc/manifest.json"
+  args: "{release_dir}/libc/manifest.json"
   args: "--member-manifest"
-  args: "{release_dir}/komira_lz4/manifest.json"
+  args: "{release_dir}/lz4/manifest.json"
   args: "--member-manifest"
-  args: "{release_dir}/komira_zlib/manifest.json"
+  args: "{release_dir}/zlib/manifest.json"
   args: "--member-manifest"
-  args: "{release_dir}/komira_async_api/manifest.json"
+  args: "{release_dir}/async_api/manifest.json"
   args: "--member-manifest"
-  args: "{release_dir}/komira_buffer/manifest.json"
+  args: "{release_dir}/byte_buffer/manifest.json"
   args: "--member-manifest"
-  args: "{release_dir}/komira_mail_message/manifest.json"
+  args: "{release_dir}/mail_message/manifest.json"
   args: "--member-manifest"
-  args: "{release_dir}/komira_compression/manifest.json"
+  args: "{release_dir}/compression/manifest.json"
   args: "--member-manifest"
-  args: "{release_dir}/komira_crypto/manifest.json"
+  args: "{release_dir}/crypto/manifest.json"
   args: "--member-manifest"
-  args: "{release_dir}/komira_arrow/manifest.json"
+  args: "{release_dir}/arrow/manifest.json"
   args: "--member-manifest"
-  args: "{release_dir}/komira_dynamic_filter/manifest.json"
+  args: "{release_dir}/dynamic_filter/manifest.json"
   args: "--member-manifest"
-  args: "{release_dir}/komira_metrics/manifest.json"
+  args: "{release_dir}/metrics/manifest.json"
   args: "--member-manifest"
-  args: "{release_dir}/komira_secret_store/manifest.json"
+  args: "{release_dir}/secret_store/manifest.json"
   args: "--member-manifest"
-  args: "{release_dir}/komira_arrow_ipc/manifest.json"
+  args: "{release_dir}/arrow_ipc/manifest.json"
   args: "--member-manifest"
-  args: "{release_dir}/komira_plan_expr/manifest.json"
+  args: "{release_dir}/plan_expr/manifest.json"
   args: "--member-manifest"
-  args: "{release_dir}/komira_secret_env/manifest.json"
+  args: "{release_dir}/secret_env/manifest.json"
   args: "--member-manifest"
-  args: "{release_dir}/komira_column_kernels/manifest.json"
+  args: "{release_dir}/column_kernels/manifest.json"
   args: "--member-manifest"
-  args: "{release_dir}/komira_log/manifest.json"
+  args: "{release_dir}/log/manifest.json"
   args: "--member-manifest"
-  args: "{release_dir}/komira_plan_stats/manifest.json"
+  args: "{release_dir}/plan_stats/manifest.json"
   args: "--member-manifest"
-  args: "{release_dir}/komira_scan_source/manifest.json"
+  args: "{release_dir}/scan_source/manifest.json"
   args: "--member-manifest"
-  args: "{release_dir}/komira_plan_ir/manifest.json"
+  args: "{release_dir}/plan_ir/manifest.json"
   args: "--member-manifest"
-  args: "{release_dir}/komira_join_assembly/manifest.json"
+  args: "{release_dir}/join_assembly/manifest.json"
   args: "--member-manifest"
-  args: "{release_dir}/komira_async/manifest.json"
+  args: "{release_dir}/async_rt/manifest.json"
   args: "--member-manifest"
-  args: "{release_dir}/komira_fs/manifest.json"
+  args: "{release_dir}/fs/manifest.json"
   args: "--member-manifest"
-  args: "{release_dir}/komira_http_core/manifest.json"
+  args: "{release_dir}/http_core/manifest.json"
   args: "--member-manifest"
-  args: "{release_dir}/komira_net/manifest.json"
+  args: "{release_dir}/net/manifest.json"
   args: "--member-manifest"
-  args: "{release_dir}/komira_supervisor/manifest.json"
+  args: "{release_dir}/supervisor/manifest.json"
   args: "--member-manifest"
-  args: "{release_dir}/komira_http_client/manifest.json"
+  args: "{release_dir}/http_client/manifest.json"
   args: "--member-manifest"
-  args: "{release_dir}/komira_objectstore/manifest.json"
+  args: "{release_dir}/objectstore/manifest.json"
   args: "--member-manifest"
-  args: "{release_dir}/komira_aws_core/manifest.json"
+  args: "{release_dir}/aws_core/manifest.json"
   args: "--member-manifest"
-  args: "{release_dir}/komira_gcp_core/manifest.json"
+  args: "{release_dir}/gcp_core/manifest.json"
   args: "--member-manifest"
-  args: "{release_dir}/komira_oci/manifest.json"
+  args: "{release_dir}/oci/manifest.json"
   args: "--member-manifest"
-  args: "{release_dir}/komira_gcp_cloudresourcemanager/manifest.json"
+  args: "{release_dir}/gcp_cloudresourcemanager/manifest.json"
   args: "--member-manifest"
-  args: "{release_dir}/komira_gcp_iam/manifest.json"
+  args: "{release_dir}/gcp_iam/manifest.json"
   args: "--member-manifest"
-  args: "{release_dir}/komira_gcp_run/manifest.json"
+  args: "{release_dir}/gcp_run/manifest.json"
   args: "--member-manifest"
-  args: "{release_dir}/komira_gcp_wif/manifest.json"
+  args: "{release_dir}/gcp_wif/manifest.json"
   args: "--member-manifest"
-  args: "{release_dir}/komira_kafka_broker/manifest.json"
+  args: "{release_dir}/kafka_broker/manifest.json"
   args: "--member-manifest"
-  args: "{release_dir}/komira_bench_duckdb/manifest.json"
+  args: "{release_dir}/bench_duckdb/manifest.json"
   args: "--member-manifest"
-  args: "{release_dir}/komira_bench_data/manifest.json"
+  args: "{release_dir}/bench_data/manifest.json"
   args: "--member-manifest"
-  args: "{release_dir}/komira_bench_report/manifest.json"
+  args: "{release_dir}/bench_report/manifest.json"
   args: "--member-manifest"
-  args: "{release_dir}/komira_bench_corpus/manifest.json"
+  args: "{release_dir}/bench_corpus/manifest.json"
   args: "--license"
   args: "Apache-2.0"
   args: "--summary"

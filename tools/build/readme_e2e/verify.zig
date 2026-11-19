@@ -5,13 +5,14 @@
 //!   staged    the staged set's plan.json holds the package at the version
 //!             (an `upload` member), names its README, and the README is there
 //!   install   a fresh project (a mopm.toml of its own, nothing else) runs
-//!             `mopm add <package>@=<version> --overlay <staged set> --registry
+//!             `mopm add <namespace>/<name>@=<version> --overlay <staged set> --registry
 //!             <a loopback registry that refuses every request but its own
 //!             configuration>` (offline.zig), so a closure member the set lacks
 //!             is a refusal and not a fetch; the lock
 //!             it writes names the closure, each locked file is the staged
 //!             file byte for byte (sha256 and size) and the plan's, and each is
-//!             unpacked into the project's prefix, `lib/mojo/<name>.mojoc`
+//!             unpacked into the project's prefix, `lib/mojo/<import name>.mojoc`
+//!             (the import name is the part of the full name after the slash)
 //!   readme    the README the set holds is cut into one program per example
 //!             (tools/build/readme_examples, as the README gate of
 //!             tools/build/mojo does), with no relative link
@@ -34,6 +35,7 @@ const offline = @import("offline.zig");
 const native = @import("native.zig");
 
 pub const Options = struct {
+    /// The full name, `<namespace>/<name>`.
     package: []const u8,
     version: []const u8,
     /// The compiler version the packages must be built for (`1.0.0`).
@@ -150,7 +152,7 @@ pub fn withSourceRoot(a: Allocator, words: []const []const u8, root: []const u8)
 fn mapped(c: *Ctx, output: []const u8, display: []const u8, report: []const u8) []const u8 {
     std.fs.cwd().makePath(std.fs.path.dirname(report) orelse ".") catch return output;
     std.fs.cwd().writeFile(.{ .sub_path = report, .data = output }) catch return output;
-    const argv = concatArgs(c.a, c.opts.readme_tool, &.{ "map", "--package", c.opts.package, "--display", display, "--report", report }) catch return output;
+    const argv = concatArgs(c.a, c.opts.readme_tool, &.{ "map", "--package", plan_mod.importName(c.opts.package), "--display", display, "--report", report }) catch return output;
     const r = runProcess(c, argv, null, null) catch return output;
     if (r.code != 0) return output;
     return r.output;
@@ -185,7 +187,7 @@ fn linkPlan(c: *Ctx, natives: []const native.Native, project_abs: []const u8, pr
 
 const project_manifest =
     \\[package]
-    \\name = "readme_e2e_user"
+    \\name = "example/readme_e2e_user"
     \\version = "0.0.0"
     \\
     \\[toolchain]
@@ -305,30 +307,33 @@ fn run(c: *Ctx) !void {
     var natives: std.ArrayList(native.Native) = .empty;
     for (lock.packages) |p| {
         if (p.isPath()) return c.fail("install", "the lock holds the path dependency {s}, which no staged file carries", .{p.name});
-        if (!std.mem.eql(u8, p.build, want_build)) {
-            return c.fail("install", "{s} {s} is built as {s}, and the release's compiler is {s}", .{ p.name, p.version, p.build, opts.mojo });
+        const art = p.artifact(opts.mojo) orelse
+            return c.fail("install", "{s} {s} has no build for the release's compiler {s}", .{ p.name, p.version, opts.mojo });
+        if (!std.mem.eql(u8, art.build, want_build)) {
+            return c.fail("install", "{s} {s} is built as {s}, and the release's compiler is {s}", .{ p.name, p.version, art.build, opts.mojo });
         }
         const staged_member = plan.member(p.name) orelse
             return c.fail("install", "the lock needs {s} {s}, which the staged set does not hold", .{ p.name, p.version });
         var planned = false;
         for (staged_member.files) |f| {
-            if (std.mem.eql(u8, f.filename, p.filename()) and std.mem.eql(u8, f.subdir, p.subdir) and std.mem.eql(u8, f.sha256, p.sha256) and f.size == p.size) planned = true;
+            if (std.mem.eql(u8, f.filename, art.filename()) and std.mem.eql(u8, f.subdir, p.subdir) and std.mem.eql(u8, f.sha256, art.sha256) and f.size == art.size) planned = true;
         }
         if (!planned) {
-            return c.fail("install", "the lock's {s} ({s} in {s}, sha256 {s}) is not a file of the staged plan", .{ p.name, p.filename(), p.subdir, p.sha256 });
+            return c.fail("install", "the lock's {s} ({s} in {s}, sha256 {s}) is not a file of the staged plan", .{ p.name, art.filename(), p.subdir, art.sha256 });
         }
-        const rel = try c.path(&.{ p.subdir, p.filename() });
+        const rel = try c.path(&.{ p.subdir, art.filename() });
         const bytes = readFile(c, opts.staged, rel, 1 << 29) catch |e|
             return c.fail("install", "{s} is in the plan and not in the staged set: {s}", .{ rel, @errorName(e) });
         const got = plan_mod.sha256Hex(bytes);
-        if (!std.mem.eql(u8, &got, p.sha256) or bytes.len != p.size) {
-            return c.fail("install", "{s} is not the file the lock pins (sha256 {s}, {d} bytes; the lock says {s}, {d})", .{ rel, &got, bytes.len, p.sha256, p.size });
+        if (!std.mem.eql(u8, &got, art.sha256) or bytes.len != art.size) {
+            return c.fail("install", "{s} is not the file the lock pins (sha256 {s}, {d} bytes; the lock says {s}, {d})", .{ rel, &got, bytes.len, art.sha256, art.size });
         }
         const files = conda.read(c.a, bytes, &why) catch |e| switch (e) {
             error.OutOfMemory => return error.OutOfMemory,
             error.Corrupt => return c.fail("install", "{s}: {s}", .{ rel, why }),
         };
-        const mojoc = try std.fmt.allocPrint(c.a, "lib/mojo/{s}.mojoc", .{p.name});
+        const import = plan_mod.importName(p.name);
+        const mojoc = try std.fmt.allocPrint(c.a, "lib/mojo/{s}.mojoc", .{import});
         const lib = conda.find(files, mojoc) orelse return c.fail("install", "{s} holds no {s}", .{ rel, mojoc });
         if (lib.len == 0) return c.fail("install", "{s}: {s} is empty", .{ rel, mojoc });
         // What the package says it ships: its metadata (what `mopm build` plans from) and its lock entry.
@@ -337,7 +342,7 @@ fn run(c: *Ctx) !void {
             error.OutOfMemory => return error.OutOfMemory,
             error.Invalid => return c.fail("install", "mopm.lock: {s}", .{native_why}),
         };
-        const meta_path = try std.fmt.allocPrint(c.a, "lib/mojo/{s}.mopm.json", .{p.name});
+        const meta_path = try std.fmt.allocPrint(c.a, "lib/mojo/{s}.mopm.json", .{import});
         if (conda.find(files, meta_path)) |meta_bytes| {
             const meta = plan_mod.parseMetadata(c.a, meta_bytes, &native_why) catch |e| switch (e) {
                 error.OutOfMemory => return error.OutOfMemory,
@@ -367,11 +372,13 @@ fn run(c: *Ctx) !void {
     try cwd.makePath(try c.path(&.{ opts.work, "examples" }));
     const programs = try c.path(&.{ opts.work, "examples", "src" });
     const examples_file = try c.path(&.{ opts.work, "examples", "list" });
+    // The programs are named by the import name, the README by the full name.
+    const import_name = plan_mod.importName(opts.package);
     const display = try std.fmt.allocPrint(c.a, "{s}/README.md", .{opts.package});
     const gen = try concatArgs(c.a, opts.readme_tool, &.{
         "generate",  "--readme",    readme_file,
         "--display", display,       "--package",
-        opts.package, "--links",    "refuse",
+        import_name, "--links",    "refuse",
         "--out-dir", programs,      "--examples",
         examples_file,
     });
@@ -396,7 +403,7 @@ fn run(c: *Ctx) !void {
     const bin_dir = try c.path(&.{ opts.work, "bin" });
     try cwd.makePath(bin_dir);
     for (lines.items) |line| {
-        const stem = try std.fmt.allocPrint(c.a, "readme_{s}_{s}", .{ opts.package, line });
+        const stem = try std.fmt.allocPrint(c.a, "readme_{s}_{s}", .{ import_name, line });
         const program = try c.path(&.{ programs, try std.fmt.allocPrint(c.a, "{s}.mojo", .{stem}) });
         const exe = try c.path(&.{ bin_dir, stem });
         const build = try concatArgs(c.a, try withSourceRoot(c.a, opts.compile, programs), try std.mem.concat(c.a, []const u8, &.{ &.{include}, link_words, &.{ program, "-o", exe } }));

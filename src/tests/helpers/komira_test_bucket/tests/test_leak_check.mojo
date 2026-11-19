@@ -5,7 +5,7 @@
 from std.testing import assert_equal, assert_true
 
 from komira_test_bucket import FakeObjectStore, StoreTarget, leak_check
-from komira_test_verdict import VERDICT_CANNOT_TELL, VERDICT_CLEAN, VERDICT_LEAK
+from test_verdict import VERDICT_CANNOT_TELL, VERDICT_CLEAN, VERDICT_LEAK
 
 
 def _target() -> StoreTarget:

@@ -214,8 +214,8 @@ src_layout(
     # The test libraries komira ships, directly under src/ (the harnesses
     # under src/tests/helpers build on them).
     shipped = [
-        "komira_test_run_id",
-        "komira_test_verdict",
+        "test_run_id",
+        "test_verdict",
     ],
 )
 
@@ -360,11 +360,11 @@ _TESTS_LINTS = [
     capabilities = CAPABILITIES,
     floor = 0,
     grounding = {
-        "src/komira_arrow/write_target.mojo": ["WFMT_"],
-        "src/komira_plan_expr/expr.mojo": ["EXPR_"],
-        "src/komira_plan_expr/fs_descriptor_pod.mojo": ["FS_SCHEME_"],
-        "src/komira_plan_expr/udf_data.mojo": ["UDF_KIND_"],
-        "src/komira_plan_ir/logical_plan.mojo": ["PLAN_", "SOURCE_", "JOIN_"],
+        "src/arrow/write_target.mojo": ["WFMT_"],
+        "src/plan_expr/expr.mojo": ["EXPR_"],
+        "src/plan_expr/fs_descriptor_pod.mojo": ["FS_SCHEME_"],
+        "src/plan_expr/udf_data.mojo": ["UDF_KIND_"],
+        "src/plan_ir/logical_plan.mojo": ["PLAN_", "SOURCE_", "JOIN_"],
     },
     not_capabilities = NOT_CAPABILITIES,
     rows = MATRIX,

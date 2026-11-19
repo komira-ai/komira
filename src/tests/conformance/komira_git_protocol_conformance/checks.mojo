@@ -4,8 +4,8 @@
 # verdicts a scenario's server gave each push command.
 # =============================================================================
 
-from komira_crypto import sha1
-from komira_git import (
+from crypto import sha1
+from git import (
     PKT_DATA,
     PKT_FLUSH,
     PushReport,

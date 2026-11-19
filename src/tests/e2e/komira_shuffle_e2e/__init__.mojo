@@ -1,4 +1,4 @@
-"""`komira_shuffle_e2e` -- test-only: `komira_shuffle` across processes.
+"""`komira_shuffle_e2e` -- test-only: `shuffle` across processes.
 
   * rows      the deterministic rows a map task writes, and the bytes each
               partition must then hold (the tests' oracle)

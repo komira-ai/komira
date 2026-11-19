@@ -95,14 +95,14 @@ The command line is in [`src/cli.zig`](src/cli.zig); the cases are in
 ## Each library's shared library
 
 A Mojo library that owns C ships it as its own shared library,
-`lib<library>_native.so.1`
+`libkomira_<library>_native.so.1`
 ([the design](../../../docs/design/native_packaging.md)).
 `native_shared_library` ([`shared.bzl`](shared.bzl)) builds one from the
 C archives the library owns (`archives`), the Mojo libraries that call
 them (`callers`), the dependent owners' archives that call them
-(`caller_archives`: komira_crypto's lists s2n-tls, whose needs from aws-lc no
+(`caller_archives`: crypto's lists s2n-tls, whose needs from aws-lc no
 Mojo library calls) and the owners whose C its own archives call
-(`needed_owners`: komira_http_core's lists komira_crypto's library). Every action runs a Zig-built tool: `native_so`
+(`needed_owners`: http_core's lists crypto's library). Every action runs a Zig-built tool: `native_so`
 ([`native_so.zig`](native_so.zig)), or the Mojo toolchain's zig through
 `zig_cc_launcher` for the link.
 
@@ -120,7 +120,7 @@ Mojo library calls) and the owners whose C its own archives call
    none of the exports.
 2. The link: every archive whole, `-Bsymbolic`, `--gc-sections`,
    `-z defs`, the version script, `--strip-debug`, SONAME
-   `lib<library>_native.so.1`, for the toolchain's target (the platform
+   `libkomira_<library>_native.so.1`, for the toolchain's target (the platform
    row's `zig_triple`). Then `-lc++` when `cxx_runtime` is set (snappy is
    C++: zig's libc++ and libc++abi, static, made local by the version
    script), and each of `needed_owners`' shared libraries, with
@@ -159,23 +159,23 @@ Mojo library calls) and the owners whose C its own archives call
 and every dynamic symbol with its version. The unit tests
 ([`native_so_test.zig`](native_so_test.zig), `:native_so_unit`, which
 `:native_so` waits for) show each check green on a library shaped as
-komira_crypto's is and red on its defect;
+crypto's is and red on its defect;
 [`native_elf_test.zig`](native_elf_test.zig) builds a small shared object
 byte by byte, with every dynamic tag and version section the reader keeps
 (several NEEDED and run path entries among them), and checks what the
 reader reads from it.
 
 Each owner of the design's table has its `<library>_native` target in its
-own BUCK file: komira_crypto, komira_http_core (`NEEDED` komira_crypto's),
-komira_compression, komira_parquet_codec (brotli's decoder),
-komira_db_sqlite (SQLite) and the first-party shims' owners (komira_libc,
-komira_async, komira_async_api, komira_fs, komira_objectstore,
-komira_metrics, komira_scan_source, komira_supervisor). komira_log has none:
+own BUCK file: crypto, http_core (`NEEDED` crypto's),
+compression, parquet_codec (brotli's decoder),
+db_sqlite (SQLite) and the first-party shims' owners (libc,
+async_rt, async_api, fs, objectstore,
+metrics, scan_source, supervisor). log has none:
 its holder's accessors are hidden by design, one copy per image (the design's
 question 2), so its holder ships as a static archive. Every owner's
-`mojo_library` except komira_parquet_codec's and komira_db_sqlite's names its
+`mojo_library` except parquet_codec's and db_sqlite's names its
 target (`native = ":<library>_native"`;
-komira_log's says `native_static = True`), and its conda package holds the
+log's says `native_static = True`), and its conda package holds the
 file at lib/ with a `lib_files` row
 ([packaging/conda/README.md](../../../packaging/conda/README.md), "A library's
 native code in its package"). Those two libraries are built and checked, but

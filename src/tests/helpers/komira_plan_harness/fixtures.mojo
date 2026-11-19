@@ -6,16 +6,16 @@
 # over, for every type canon renders. A slot marked invalid still holds the
 # value given for it, so a renderer that ignores validity renders that value
 # and a test sees it. Not for production: these build columns field by field
-# (children, decimal scale, union type ids), as komira_arrow_ipc does.
+# (children, decimal scale, union type ids), as arrow_ipc does.
 # =============================================================================
 
-from komira_arrow.arrow_types import ArrowType
-from komira_arrow.bitmap import Bitmap
-from komira_arrow.column import Column
-from komira_arrow.record_batch import RecordBatch, RecordBatchBuilder
-from komira_arrow.schema import Field, SchemaBuilder
-from komira_buffer.heap_region import HeapRegion
-from komira_buffer.owned_aligned_buffer import OwnedAlignedBuffer
+from arrow.arrow_types import ArrowType
+from arrow.bitmap import Bitmap
+from arrow.column import Column
+from arrow.record_batch import RecordBatch, RecordBatchBuilder
+from arrow.schema import Field, SchemaBuilder
+from byte_buffer.heap_region import HeapRegion
+from byte_buffer.owned_aligned_buffer import OwnedAlignedBuffer
 
 
 def all_valid(n: Int) -> List[Bool]:

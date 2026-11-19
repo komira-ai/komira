@@ -2,28 +2,28 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
 # An in-process token issuer for tests, in the shape the HTTP auth design
 # describes (docs/design/http_auth.md): `TestIssuer` serves a JWK Set
-# document and mints user access tokens over komira_jose's `Keyring`, with a
+# document and mints user access tokens over jose's `Keyring`, with a
 # key rotation that publishes a key before it signs and keeps a former key
-# published until the max token lifetime plus komira_jose's largest leeway
+# published until the max token lifetime plus jose's largest leeway
 # (60 s, `JOSE_MAX_LEEWAY_S`) have passed. Beside
 # it, the scenario table every issuer in the design must pass, and a runner
 # that drives any issuer through the `IssuerUnderTest` trait. It also serves
 # the RFC 8414 metadata document and a token endpoint for OAuth clients
-# authenticating with a signed assertion (komira_oauth's wire), with a client
+# authenticating with a signed assertion (oauth's wire), with a client
 # registry, `jti` replay refusal and an in-process transport for
-# komira_oauth's `ClientCredentialSource`. Test-only, so
+# oauth's `ClientCredentialSource`. Test-only, so
 # no conda package: a library names it in `test_deps`, which reaches that
 # library's welded tests and nothing it ships (tools/build/mojo/test_deps.bzl).
 #
-# Deps: komira_jose (the keyring, the signer and the verify half the
-# scenarios check with), komira_oauth (the token endpoint's wire and the
-# client registration record) and their closure: komira_crypto,
-# komira_encoding, komira_json, komira_jwks, komira_secret_store.
+# Deps: jose (the keyring, the signer and the verify half the
+# scenarios check with), oauth (the token endpoint's wire and the
+# client registration record) and their closure: crypto,
+# encoding, json, jwks, secret_store.
 #
 # The welded tests:
 # - test_user_token: the exact claims bytes and every refusal at its
 #   boundary; the derived keys (the exact digest, determinism, refusals).
-# - test_issuer: a minted token verifies under komira_jose's verifier with
+# - test_issuer: a minted token verifies under jose's verifier with
 #   the document the issuer serves; the rotation (publish before sign, a
 #   token in flight across a rotation verifies until its exp plus the leeway,
 #   the former key leaves the document at exactly the switch plus the max
@@ -36,7 +36,7 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #   verifies under the issuer's key set, a replayed jti refused until the
 #   assertion's exp plus the leeway, every assertion and request refusal with
 #   its error code, the metadata document.
-# - test_client_roundtrip: komira_oauth's ClientCredentialSource against the
+# - test_client_roundtrip: oauth's ClientCredentialSource against the
 #   endpoint: verifiable tokens refreshed 60 s before they expire across a key
 #   rotation, a failed refresh that serves nothing, a removed client.
 # - test_no_product_vocabulary: the sources name no product concept and hold
@@ -46,13 +46,13 @@ mojo_library(
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     conda = False,
     deps = [
-        "//src/komira_crypto:komira_crypto",
-        "//src/komira_encoding:komira_encoding",
-        "//src/komira_jose:komira_jose",
-        "//src/komira_json:komira_json",
-        "//src/komira_jwks:komira_jwks",
-        "//src/komira_oauth:komira_oauth",
-        "//src/komira_secret_store:komira_secret_store",
+        "//src/crypto:crypto",
+        "//src/encoding:encoding",
+        "//src/jose:jose",
+        "//src/json:json",
+        "//src/jwks:jwks",
+        "//src/oauth:oauth",
+        "//src/secret_store:secret_store",
     ],
     test_srcs = [
         "tests/test_client_roundtrip.mojo",

@@ -1,6 +1,6 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_shared_lib")
 
-# One C-ABI export whose Mojo closure reaches komira_libc, a library that owns
+# One C-ABI export whose Mojo closure reaches libc, a library that owns
 # C and ships it as its own shared library. `native_owners` links that shared
 # library (NEEDED) instead of the owner's static archive; the gate stages it
 # in lib/ beside the library and checks it is mapped.
@@ -10,6 +10,6 @@ mojo_shared_lib(
     exports = ["native_owner_write_probe"],
     exports_exact = True,
     gate_srcs = ["call_driver.mojo"],
-    deps = ["//src/komira_libc:komira_libc"],
-    native_owners = ["//src/komira_libc:komira_libc_native"],
+    deps = ["//src/libc:libc"],
+    native_owners = ["//src/libc:komira_libc_native"],
 )

@@ -1,0 +1,107 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# An OpenSearch/Elasticsearch compatible search shim over the Arrow-native
+# engine. Wire translators: the `_bulk` NDJSON parser (`ndjson_bulk_to_docbatch`:
+# a document batch with dynamic field mapping and a per-item outcome list), the
+# `_search` request translator (`search_json_to_queryir`: match, term and range
+# filters, sort, from/size and aggregations into a QueryIR) with the gates that
+# check a parsed request against a split's fast-field meta, the response
+# envelopes, and the JSON `HttpResponse` builders. Dispatcher
+# (`SearchHttpDispatcher[Storage]`): the `_bulk` and `_search` routes of a
+# `http_server` `RequestDispatcher`, writing split objects and the
+# `search_catalog` catalog through a `objectstore` store the caller
+# supplies. The package depends on `search` (the engine's batch, query and
+# result types), `json`, `http_core` and `http_server`,
+# `objectstore`, `search_catalog` and `log_index`; the
+# engine itself sees no wire byte.
+#
+# The welded tests run in memory, with no network. They build splits with the
+# search sink and read them with `SearchCore`. The aggregation, filter,
+# keyword-alias and sort suites drive request JSON through the translator and
+# the gates against those splits; the two bulk suites check dynamic mapping,
+# type conflicts and per-item partial success and index the committed batch;
+# the multi-split suites merge several splits and check the rendered envelope;
+# one feeds the parsers hostile bodies (an overflowing from/size, a long
+# bool clause list, nested bool and aggregation queries, a field named twice,
+# numbers out of range, too many fields, ill-formed UTF-8).
+#
+# Part 2 adds the dispatcher (`SearchHttpDispatcher[Storage]`, generic over a
+# `objectstore` conditional-write store) and its plain config. Its suites
+# run over the in-memory store: routing, error statuses, the body and
+# live-split limits and the `_bulk` then `_search` round trip; a recording store
+# that checks the split object is put before the catalog is written and that a
+# failed put or a failed publish leaves nothing searchable; split keys across a
+# restart and across workers; an L0 split searched alone and next to a written
+# one; the config and uuid layout; and the request-path helpers.
+mojo_library(
+    name = "search_http",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/arrow:arrow",
+        "//src/arrow_ipc:arrow_ipc",
+        "//src/async_rt:async_rt",
+        "//src/async_api:async_api",
+        "//src/atomic_alias:atomic_alias",
+        "//src/byte_buffer:byte_buffer",
+        "//src/clock:clock",
+        "//src/containers:containers",
+        "//src/column_kernels:column_kernels",
+        "//src/compression:compression",
+        "//src/counters:counters",
+        "//src/crypto:crypto",
+        "//src/dynamic_filter:dynamic_filter",
+        "//src/encoding:encoding",
+        "//src/fork_join:fork_join",
+        "//src/fs:fs",
+        "//src/hashing:hashing",
+        "//src/host_probe:host_probe",
+        "//src/http_core:http_core",
+        "//src/http_server:http_server",
+        "//src/join_assembly:join_assembly",
+        "//src/json:json",
+        "//src/libc:libc",
+        "//src/log:log",
+        "//src/log_index:log_index",
+        "//src/log_query:log_query",
+        "//src/lz4:lz4",
+        "//src/metrics:metrics",
+        "//src/name_registry:name_registry",
+        "//src/objectstore:objectstore",
+        "//src/parquet:parquet",
+        "//src/parquet_api:parquet_api",
+        "//src/parquet_codec:parquet_codec",
+        "//src/parquet_writer:parquet_writer",
+        "//src/plan_expr:plan_expr",
+        "//src/plan_ir:plan_ir",
+        "//src/plan_stats:plan_stats",
+        "//src/scalar_arithmetic:scalar_arithmetic",
+        "//src/scan_source:scan_source",
+        "//src/search:search",
+        "//src/search_catalog:search_catalog",
+        "//src/simd_ops:simd_ops",
+        "//src/spsc_ring:spsc_ring",
+        "//src/telemetry_read:telemetry_read",
+        "//src/telemetry_store:telemetry_store",
+        "//src/trace:trace",
+        "//src/uuid:uuid",
+        "//src/zlib:zlib",
+        "//tools/build/mojo/runtime_paths:runtime_paths",
+    ],
+    test_srcs = [
+        "tests/test_search_aggregations.mojo",
+        "tests/test_search_bulk_dynamic_mapping.mojo",
+        "tests/test_search_bulk_partial_success.mojo",
+        "tests/test_search_dispatch.mojo",
+        "tests/test_search_dispatch_publish.mojo",
+        "tests/test_search_filter_pushdown.mojo",
+        "tests/test_search_http_config.mojo",
+        "tests/test_search_http_multi_split.mojo",
+        "tests/test_search_keyword_alias.mojo",
+        "tests/test_search_multi_reader_stateless.mojo",
+        "tests/test_search_opensearch_shim.mojo",
+        "tests/test_search_request_paths.mojo",
+        "tests/test_search_sort_pagination.mojo",
+        "tests/test_search_untrusted_input.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)

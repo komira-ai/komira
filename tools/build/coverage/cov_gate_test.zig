@@ -7,7 +7,7 @@ const G = @import("cov_gate.zig");
 const t = std.testing;
 
 test "validPackage: a repository directory, or (root)" {
-    try t.expect(G.validPackage("src/komira_json"));
+    try t.expect(G.validPackage("src/json"));
     try t.expect(G.validPackage("(root)"));
     try t.expect(G.validPackage("a"));
     try t.expect(!G.validPackage(""));

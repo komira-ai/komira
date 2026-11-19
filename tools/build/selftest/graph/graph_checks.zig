@@ -117,10 +117,10 @@ test "a closure with no label under src/ holds" {
 test "a library under src/ in the closure is a finding" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
-    const o = try selftestClosure(arena.allocator(), "komira", "komira//tools/build/selftest:lib\nkomira//src/komira_clock:komira_clock\nkomira//src:x\n");
+    const o = try selftestClosure(arena.allocator(), "komira", "komira//tools/build/selftest:lib\nkomira//src/clock:clock\nkomira//src:x\n");
     try std.testing.expectEqual(@as(usize, 3), o.facts);
     try std.testing.expectEqual(@as(usize, 2), o.findings.len);
-    try std.testing.expectEqualStrings("komira//src/komira_clock:komira_clock", o.findings[0]);
+    try std.testing.expectEqualStrings("komira//src/clock:clock", o.findings[0]);
 }
 
 test "only the check's own cell counts, and only a src/ segment" {

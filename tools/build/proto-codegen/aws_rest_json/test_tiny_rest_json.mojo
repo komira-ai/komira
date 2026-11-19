@@ -15,7 +15,7 @@ from komira_aws_tiny_rest.komira_aws_tiny_rest import (
     parse_get_thing_response,
     parse_put_thing_response,
 )
-from komira_aws_core import AwsResponse
+from aws_core import AwsResponse
 from std.testing import assert_equal, assert_false, assert_raises, assert_true
 
 

@@ -1,5 +1,5 @@
 # =============================================================================
-# test_h2spec_conformance.mojo -- komira_http_server against h2spec
+# test_h2spec_conformance.mojo -- http_server against h2spec
 # =============================================================================
 #
 # One real `HttpServer` on 127.0.0.1 (an ephemeral port), holding the fixture
@@ -8,7 +8,7 @@
 # staged as this test's data) runs its whole suite, strict cases included
 # (`-S`), against it over TLS (`-t -k`: the server's HTTP/2 is reached only
 # through ALPN h2, it has no cleartext h2), writing a JUnit report into
-# TEST_TMPDIR. Then one h2 GET through komira_http_client, verifying the
+# TEST_TMPDIR. Then one h2 GET through http_client, verifying the
 # certificate, on a fresh connection.
 #
 # The suite supplies every case; this file only starts the server, runs the
@@ -38,20 +38,20 @@
 from std.pathlib import Path
 from std.testing import assert_equal, assert_true
 
-from komira_async.ops.waker_sink import NoopSink
-from komira_async.runtime.blocking_runtime import BlockingRuntime
-from komira_http_client.body import EmptyBody
-from komira_http_client.client import HttpClient, build_get_request
-from komira_http_client.header_map import HeaderMap
-from komira_http_client.tls_connector import TlsConnector
-from komira_http_client.url import Url
-from komira_http_core.codec import HttpMethod
-from komira_http_core.tls import tls_init
-from komira_http_core.transport.kernel_tcp import KernelTcpConnector
-from komira_http_server.routing import Router
-from komira_http_server.server import HttpServer, HttpServerConfig
-from komira_runtime_paths import data_path, test_tmpdir
-from komira_supervisor import ChildSpec
+from async_rt.ops.waker_sink import NoopSink
+from async_rt.runtime.blocking_runtime import BlockingRuntime
+from http_client.body import EmptyBody
+from http_client.client import HttpClient, build_get_request
+from http_client.header_map import HeaderMap
+from http_client.tls_connector import TlsConnector
+from http_client.url import Url
+from http_core.codec import HttpMethod
+from http_core.tls import tls_init
+from http_core.transport.kernel_tcp import KernelTcpConnector
+from http_server.routing import Router
+from http_server.server import HttpServer, HttpServerConfig
+from runtime_paths import data_path, test_tmpdir
+from supervisor import ChildSpec
 
 from komira_http_conformance import (
     CASE_FAILED,

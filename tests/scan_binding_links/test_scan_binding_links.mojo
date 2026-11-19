@@ -1,9 +1,9 @@
 # =============================================================================
 # test_scan_binding_links.mojo: each scan kind's SHIPPING binding, encoded,
-# equals the wire bytes komira_plan_wire froze for it.
+# equals the wire bytes plan_wire froze for it.
 # =============================================================================
 #
-# komira_plan_wire's `test_plan_wire_golden_bytes.mojo` freezes `topic_live`
+# plan_wire's `test_plan_wire_golden_bytes.mojo` freezes `topic_live`
 # and `index_pinned` from bindings it RESTATES out of the core packages primitives:
 # the codec may not import a scan kind. So nothing there can notice a kind
 # drifting away from the restatement. A changed identity fold, param set or
@@ -14,9 +14,9 @@
 # kind's own constructor, encodes it with the real codec (`plan_to_bytes`),
 # and requires the checked-in `.hex`, byte for byte:
 #
-#   komira.broker.topic   `BrokerScanRuntime.build_binding` (komira_broker)
+#   komira.broker.topic   `BrokerScanRuntime.build_binding` (broker)
 #                         == `topic_live.hex`
-#   komira.search.index   `search_scan_binding` (komira_search_scan)
+#   komira.search.index   `search_scan_binding` (search_scan)
 #                         == `index_pinned.hex`
 #
 # The inputs are the published values the golden test documents next to its
@@ -25,17 +25,17 @@
 
 from std.testing import TestSuite, assert_equal, assert_true
 
-from komira_arrow.arrow_types import ArrowType
-from komira_arrow.schema import Field, Schema, SchemaBuilder
-from komira_plan_ir.logical_plan import LogicalPlan
-from komira_scan_source.scan_binding import ScanBinding
-from komira_scan_source.scan_params import ScanParams
-from komira_scan_source.source_variant import SourceVariant
+from arrow.arrow_types import ArrowType
+from arrow.schema import Field, Schema, SchemaBuilder
+from plan_ir.logical_plan import LogicalPlan
+from scan_source.scan_binding import ScanBinding
+from scan_source.scan_params import ScanParams
+from scan_source.source_variant import SourceVariant
 
-from komira_plan_wire import plan_to_bytes
+from plan_wire import plan_to_bytes
 
-from komira_broker.broker_core import BrokerTopicConfig, _topic_config_key
-from komira_broker.broker_scan_binding import (
+from broker.broker_core import BrokerTopicConfig, _topic_config_key
+from broker.broker_scan_binding import (
     BROKER_PARAM_PARTITIONS,
     BROKER_PARAM_START_OFFSET,
     BROKER_PARAM_TOPIC,
@@ -43,14 +43,14 @@ from komira_broker.broker_scan_binding import (
     BROKER_SCAN_KIND_NAME,
     broker_topic_binding,
 )
-from komira_broker.broker_scan_kind import BrokerScanRuntime
+from broker.broker_scan_kind import BrokerScanRuntime
 
-from komira_objectstore.path import Path
-from komira_objectstore.shared_in_memory_conditional_store import (
+from objectstore.path import Path
+from objectstore.shared_in_memory_conditional_store import (
     SharedInMemoryConditionalStore,
 )
 
-from komira_search_scan.search_scan_kind import (
+from search_scan.search_scan_kind import (
     SEARCH_SCAN_KIND_NAME,
     search_scan_binding,
 )
@@ -59,10 +59,10 @@ from komira_search_scan.search_scan_kind import (
 comptime _Store = SharedInMemoryConditionalStore
 comptime _CLUSTER = "links"
 # Where the goldens are staged: their repository path (BUCK `data`).
-comptime _GOLDEN_DIR = "src/komira_plan_wire/tests/fixtures/golden/"
+comptime _GOLDEN_DIR = "src/plan_wire/tests/fixtures/golden/"
 comptime _REGOLD = (
     " If the kind changed on purpose, update its restatement in"
-    + " komira_plan_wire's test_plan_wire_golden_bytes.mojo to match and"
+    + " plan_wire's test_plan_wire_golden_bytes.mojo to match and"
     + " regold per that file's HOW TO REGOLD; if not, this diff IS the bug."
 )
 

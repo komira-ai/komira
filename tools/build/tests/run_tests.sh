@@ -224,29 +224,29 @@
 #      response. GetLogEvents' error shapes have no members in that model, so
 #      the error-shape check pins only that the generated shape is memberless
 #      (it decodes nothing); an error's code and message are read by
-#      komira_aws_core, stubbed here, and are tested in
-#      komira//src/komira_aws_core. Generated code compiled against the
-#      real komira_aws_core and komira_json: the AWS conformance driver, and
+#      aws_core, stubbed here, and are tested in
+#      komira//src/aws_core. Generated code compiled against the
+#      real aws_core and json: the AWS conformance driver, and
 #      a pure-mode restJson1 client of a tiny model
 #      (komira//tools/build/proto-codegen/aws_rest_json), which builds only
 #      once its layout probe and a caller test of the requests it builds and
 #      the responses it reads pass; and a pure-mode restXml client of a tiny
 #      S3-shaped model with the `s3` customization
 #      (komira//tools/build/proto-codegen/aws_rest_xml), likewise, against
-#      komira_aws_core and komira_xml; and in
+#      aws_core and xml; and in
 #      komira//tools/build/proto-codegen/aws_query, a pure-mode awsQuery and
 #      a pure-mode ec2Query client of two tiny models, likewise, against
-#      komira_aws_core and komira_xml, and a client-mode awsQuery client,
+#      aws_core and xml, and a client-mode awsQuery client,
 #      which builds only once its layout probe and a caller test over a
-#      scripted connector and komira_aws_core's echo connector pass. For
+#      scripted connector and aws_core's echo connector pass. For
 #      each, exactly its files are generated, nothing of an operation not
 #      named, and exactly its welded tests ran (the layout probe, the
 #      environment scan mojo_aws_client writes, the caller's). A second
 #      client adds a hand_srcs module and the overrides manifest naming it:
 #      the module is copied into the package, the header names its owner,
 #      and a caller test imports it. A client-mode client (tests//functional/aws_client_mode)
-#      carries the signed-send surface, the komira_http_core and
-#      komira_http_client imports, the constructor's HttpClientConfig and
+#      carries the signed-send surface, the http_core and
+#      http_client imports, the constructor's HttpClientConfig and
 #      the error builder, and builds against the same stubs with their client
 #      half, once its layout probe and a caller test of what its send hands
 #      the transport (the caller's HttpClientConfig included) and of its
@@ -470,7 +470,7 @@ EXAMPLES=(
     //tools/build/examples:hello //tools/build/examples:hellopkg //tools/build/examples:hello_pkg_user
     //tools/build/examples/libgate_ok:libgate_ok //tools/build/examples:test_hellopkg
     //tools/build/examples:hellopkg_doc
-    //tools/build/mojo/runtime_paths:komira_runtime_paths
+    //tools/build/mojo/runtime_paths:runtime_paths
     //tools/build/examples:hello_bundle //tools/build/package:level_test
     //tools/build/examples/cshim:add //tools/build/examples/cshim:cadd
     //tools/build/examples/cshim:cadd_user //tools/build/examples/cshim:test_add_direct
@@ -569,7 +569,7 @@ SCAN_TARGETS=(//tools/build/examples/rust:prost_roundtrip
 SCAN=("${EXAMPLES[@]}" "${RUN_CHECKS[@]}" "${SCAN_TARGETS[@]}")
 query="deps(set($(printf '"%s" ' "${SCAN[@]}")))"
 abs_path_re="[\"' =:]/[A-Za-z][A-Za-z0-9_.-]*"
-# The closure holds libraries with a README (komira_runtime_paths among
+# The closure holds libraries with a README (runtime_paths among
 # them, and komira libraries the examples import). aquery cannot run a
 # README's generate step (a local-only dynamic action) and fails on it unless
 # this daemon has already built it, so the scan builds what it reads first

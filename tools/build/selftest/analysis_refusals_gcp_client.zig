@@ -22,7 +22,7 @@ const ROWS = [_]lib.Row{
     .{
         .name = "gcp_client_no_runtime",
         .target = "tests//negative/mojo_gcp_client:no_runtime",
-        .text = "`deps` is empty. The generated code imports its runtime (komira_proto_codec, komira_wkt, ...); name it, as komira// labels. No runtime is added by default.",
+        .text = "`deps` is empty. The generated code imports its runtime (proto_codec, wkt, ...); name it, as komira// labels. No runtime is added by default.",
         .also = &.{ "tests//negative/mojo_gcp_client:no_runtime_gen (" },
     },
     .{

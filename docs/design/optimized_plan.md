@@ -8,8 +8,8 @@ and sources, index access paths and graph operators (§15, specified in
 
 Pinned state: komira `main` as merged by komira-ai/komira#967. Paths are cited as `path:line`; the line numbers were
 read at `main` as merged by komira-ai/komira#931, and nothing changed from there through komira-ai/komira#977 in
-`src/komira_plan_proto`, `komira_plan_wire`, `komira_plan_ir`, `komira_optimizer`, `komira_plan_stats`,
-`komira_join_assembly`, `komira_shuffle`, `komira_shuffle_streaming` and `src/komira_morsel/streaming_source.mojo`.
+`src/plan_proto`, `plan_wire`, `plan_ir`, `optimizer`, `plan_stats`,
+`join_assembly`, `shuffle`, `shuffle_streaming` and `src/morsel/streaming_source.mojo`.
 Statements marked *(inferred)* are my reading, not facts taken from the code. Nothing was built or run to write this
 document.
 
@@ -17,9 +17,9 @@ document.
 
 ## 1. Problem
 
-A query plan reaches an executor today as a `WirePlanEnvelope` (`src/komira_plan_proto/plan.proto:1615`). That
+A query plan reaches an executor today as a `WirePlanEnvelope` (`src/plan_proto/plan.proto:1615`). That
 format was built for plans taken **before** the optimizer runs. It refuses optimizer output by name:
-`estimated_groups` (`src/komira_plan_wire/plan_wire_codec.mojo:3285`) and `TableStats`
+`estimated_groups` (`src/plan_wire/plan_wire_codec.mojo:3285`) and `TableStats`
 (`plan_wire_codec.mojo:337`, `:2990`). It also has no field for several decisions the optimizer makes, such as the
 build side of a join or the PARTIAL/FINAL split of an aggregate.
 
@@ -55,7 +55,7 @@ one host, it is cut into **optimized segments**, a second defined type built fro
 
 - A second node vocabulary. The body reuses `WirePlan` (§3).
 - Shipping physical plans now. Physical choices depend on the host, which is picked after submission, and the
-  physical IR (`src/komira_plan_ir/physical_plan.mojo`) is tied to a single engine build. It has no producer or
+  physical IR (`src/plan_ir/physical_plan.mojo`) is tied to a single engine build. It has no producer or
   consumer in this tree yet (`physical_plan.mojo:5-6`).
 - Trusting producer statistics for correctness or for resource reservation (§6).
 - Forward compatibility. An older engine need not accept a newer plan. A scheduler routes by version, or, where the
@@ -85,7 +85,7 @@ change.
 ## 3. Why the body reuses `WirePlan`
 
 `WirePlan` has 16 node arms in fields 4-19 (`plan.proto:1524`), mirroring `PLAN_TAG_COUNT = 16`
-(`src/komira_plan_ir/logical_plan.mojo:174`). The format already carries much of what an optimized plan contains:
+(`src/plan_ir/logical_plan.mojo:174`). The format already carries much of what an optimized plan contains:
 
 - equi-keys, `residual` and `algo_hint` on joins (`plan.proto:1252`);
 - pushed `filter` and `projection` on scans (`plan.proto:1133`);
@@ -94,8 +94,8 @@ change.
 - `cse_ref` with a `canonical_hash` (`WireCseRefNode`, field 18, arm 15; field number is not arm ordinal,
   `plan.proto:1563-1565`).
 
-An optimized logical plan is still a `LogicalPlan`. A parallel node set would double `komira_plan_wire`, which is
-12,861 source lines in five files (`wc -l src/komira_plan_wire/*.mojo`; the codec alone is 4,310), and the two sets
+An optimized logical plan is still a `LogicalPlan`. A parallel node set would double `plan_wire`, which is
+12,861 source lines in five files (`wc -l src/plan_wire/*.mojo`; the codec alone is 4,310), and the two sets
 would drift apart.
 
 **The codec gets a decode context instead:** `WireContext { RAW, OPTIMIZED }`.
@@ -113,7 +113,7 @@ flag inside `WirePlan`, which a producer could set wrongly.
 
 ## 4. Messages
 
-There is one new file, `src/komira_plan_proto/optimized_plan.proto`, in package `komira.plan.v1`. It imports
+There is one new file, `src/plan_proto/optimized_plan.proto`, in package `komira.plan.v1`. It imports
 `plan.proto` and is commented in that file's house style. New enums go in `plan_vocabulary.proto` with a
 `*_WIRE_UNSPECIFIED = 0` entry, a "Derived from" line and an engine prefix, as `JoinAlgo` does
 (`plan_vocabulary.proto:225-234`).
@@ -161,8 +161,8 @@ message PlanAdvice {
 ```
 
 **The header is separate from the body on purpose.** `body` is `bytes`, so a reader of the header does not need
-`komira_plan_wire`. The header codec and its checks (§7.2 steps 1-3) live in their own library target,
-`komira_optimized_plan_header`, whose dependency closure must exclude `komira_plan_wire`. A Buck2 closure assertion
+`plan_wire`. The header codec and its checks (§7.2 steps 1-3) live in their own library target,
+`optimized_plan_header`, whose dependency closure must exclude `plan_wire`. A Buck2 closure assertion
 checks it, proven by planting the dependency and watching the build go red. "A scheduler never decodes the body"
 is then a property of what a scheduler links, not only a policy.
 
@@ -197,7 +197,7 @@ message SharedSubplan {
 
 Every `cse_ref` must resolve to exactly one entry, and every entry must be referenced. The host materializes each
 entry once and fans it out. Aggregate CSE today substitutes a materialized `InMemorySource` leaf
-(`src/komira_optimizer/optimizer_agg_cse.mojo:33`, `:426`); that stays refused on the wire, and the producer emits
+(`src/optimizer/optimizer_agg_cse.mojo:33`, `:426`); that stays refused on the wire, and the producer emits
 `cse_ref` plus a `shared` entry instead. Scan dedup takes the same form. The producer owns the decision; the host
 only materializes.
 
@@ -213,7 +213,7 @@ A decision that the lowering must obey is a typed field on the node it governs, 
    need ids plus uniqueness, dangling-key and orphan checks, each a new way to fail silently.
 2. The lowering already reads `left_on`, `right_on` and `residual` from the node. Reading `build_side` there is one
    field access, and it cannot fall out of step after a rewrite.
-3. A typed field appears in the text goldens (`src/komira_plan_wire/tests/fixtures/golden/*.txtpb`), so a named
+3. A typed field appears in the text goldens (`src/plan_wire/tests/fixtures/golden/*.txtpb`), so a named
    mutant can target it.
 
 Estimates are the exception. They are numerous, nothing obeys them, and they must stay out of the digest. They go
@@ -225,7 +225,7 @@ Field numbers are the next free numbers at the pinned commit.
 
 | Message | Change | Meaning |
 |---|---|---|
-| `WireJoinNode` | `JoinBuildSide build_side = 9` (`LEFT`, `RIGHT`) | Required. The side the host builds its hash table on. **Child order still fixes the output schema** (column order and the `_right` collision names, `src/komira_join_assembly/compiler_join_assembly.mojo:81-83`); `build_side` chooses only the hash-table side. Today's convention is probe = left, build = right. |
+| `WireJoinNode` | `JoinBuildSide build_side = 9` (`LEFT`, `RIGHT`) | Required. The side the host builds its hash table on. **Child order still fixes the output schema** (column order and the `_right` collision names, `src/join_assembly/compiler_join_assembly.mojo:81-83`); `build_side` chooses only the hash-table side. Today's convention is probe = left, build = right. |
 | `WireJoinNode` | `bool adaptive_allowed = 10` | The host may switch this join between broadcast and partitioned at runtime (§8.3). |
 | `WireJoinNode` | `algo_hint` (existing field 6) | OPTIMIZED requires a decided algorithm; `JOIN_ALGO_AUTO` and unspecified are refused (`OPTIMIZED_JOIN_ALGO_UNDECIDED`). |
 | `WireAggregateNode` | `AggMode mode = 8` (`SINGLE`, `PARTIAL`, `FINAL`) | Required. The producer records the mode only; the host derives the partial-state layout from the aggregate expressions, because that layout belongs to the engine build, not to the optimizer. |
@@ -258,7 +258,7 @@ run-kind field and no image compiled per pipeline; the scan's mark is the only s
 - **It is checked against the source.** A source that can only be read to its end marked `UNBOUNDED`, or a source
   that never ends marked `BOUNDED`, is refused (`OPTIMIZED_SCAN_BOUNDEDNESS_UNSUPPORTED`). The engine's streaming
   source contract, which tells "no data now" (`Idle`) from "no more data" (`Closed`), is `StreamingMorselSource`
-  (`src/komira_morsel/streaming_source.mojo:321`), and its read position is an opaque, checkpointable value (`:70`).
+  (`src/morsel/streaming_source.mojo:321`), and its read position is an opaque, checkpointable value (`:70`).
 - **Every other node's boundedness is derived:** a node's output is unbounded if any of its inputs is. An operator
   that must read all of an unbounded input before it emits (a sort, an aggregate with no streaming form, the build
   side of a hash join, a grouped `MAP_BATCHES_FRAME`) is refused (`OPTIMIZED_UNBOUNDED_INPUT_UNSUPPORTED`) unless the plan's
@@ -287,7 +287,7 @@ ADDED TAKES 18" (`logical_plan.mojo:170-180`; `plan_vocabulary.proto:56-57` rese
 `PLAN_MAP_BATCHES = 19` and `PLAN_STEP = 20` (`PlanTag` 20 and 21; WirePlan fields 21 and 22), and
 `PLAN_TAG_COUNT` becomes 21. On the expression side, engine tag `EXPR_UDF_APPLY = 27` (`ExprTag` 28; WireExpr field
 27), and `EXPR_TAG_COUNT` becomes 28. Every consumer sized from those constants, the vocabulary census and the
-enum-number tests (`src/komira_plan_proto/tests/test_plan_enum_numbers_nodes.mojo`,
+enum-number tests (`src/plan_proto/tests/test_plan_enum_numbers_nodes.mojo`,
 `test_plan_enum_numbers_functions.mojo` and `test_plan_census_complete.mojo`; `git grep -l ExprTag`) change in the
 same stage.
 
@@ -300,7 +300,7 @@ Some of today's optimizer passes are local to one process or need to execute par
 point takes a **portable profile** as a required argument. It turns those passes off and hands their work to the
 host as **named host-local rules**. The profile is an argument rather than a non-defaulted `OptimizerConfig` field
 because `OptimizerConfig()` is constructed with no arguments in 20 places across 3 files today
-(`git grep -c "OptimizerConfig()"`; the docstring at `src/komira_optimizer/optimizer_config.mojo:23` says to), and
+(`git grep -c "OptimizerConfig()"`; the docstring at `src/optimizer/optimizer_config.mojo:23` says to), and
 in-process use keeps that default.
 
 | Output | Producer, portable profile | Host |
@@ -318,7 +318,7 @@ in-process use keeps that default.
 | UDF context count, threads, batch slicing | Records the bounds (`UdfResources`) and every return type (§10.5) | Chooses within the bounds |
 | Batch or streaming execution | Marks each scan's boundedness (§5.2) | Runs a plan with an `UNBOUNDED` scan under the streaming driver; this follows from the plan and is not a host choice |
 
-All paths in this table are under `src/komira_optimizer/` at the pinned commit.
+All paths in this table are under `src/optimizer/` at the pinned commit.
 
 The **complete list of host-local rules**:
 
@@ -352,9 +352,9 @@ should is question 2 in §14, decided for `SCALAR_FOLD`.
 
 ### 5.4 Fields that are silently dropped today
 
-`LogicalPlan` scan data carries `payload_narrow` (`src/komira_plan_ir/logical_plan_variants.mojo:193`); aggregate
+`LogicalPlan` scan data carries `payload_narrow` (`src/plan_ir/logical_plan_variants.mojo:193`); aggregate
 data carries `group_topk` (`logical_plan_variants.mojo:661`). Neither name appears anywhere in
-`src/komira_plan_wire/` (`git grep`, 0 matches). *(Inferred)* Both are therefore lost on encode without a refusal.
+`src/plan_wire/` (`git grep`, 0 matches). *(Inferred)* Both are therefore lost on encode without a refusal.
 
 This defect is independent of this design. In both contexts the encoder must refuse a plan that carries either
 field. It ships first, with a test that fails before the fix (§12, stage 1).
@@ -448,7 +448,7 @@ message ScanStats {
 }
 ```
 
-`ScanStats` mirrors `TableStats` and `ColumnStats` (`src/komira_plan_stats/table_stats.mojo:154`, `:57`). It records
+`ScanStats` mirrors `TableStats` and `ColumnStats` (`src/plan_stats/table_stats.mojo:154`, `:57`). It records
 what the optimizer saw, for reproduction and diagnosis. Advice is advisory everywhere:
 
 - A scheduler places by `needs`, capped by its own limits. It does not reserve resources or set limits from
@@ -521,7 +521,7 @@ The host, or the coordinator before a cut, runs steps 1-12:
 4. **Contract.** `OPTIMIZED_PLAN_CONTRACT_UNSUPPORTED`: `optimizer_contract_version` newer than the host knows (an
    older released version is always known, §9.3). The refusal carries the accepted set, so a scheduler can route or ask for a rebuild (§9.5).
 5. **Limits.** `plan_wire_admit`'s limits over the plan and `shared` together: depth 64, nodes 65,536
-   (`src/komira_plan_wire/plan_wire_admit.mojo:197`, `:228`). `OPTIMIZED_PLAN_LIMIT_EXCEEDED`.
+   (`src/plan_wire/plan_wire_admit.mojo:197`, `:228`). `OPTIMIZED_PLAN_LIMIT_EXCEEDED`.
 6. **Decode** in the OPTIMIZED context; the value checks in `plan_wire_values.mojo` still run.
 7. **Canonical, digest, upgrade.** `OPTIMIZED_PLAN_NOT_CANONICAL` (against the canonical form of the plan's own
    version), then `OPTIMIZED_PLAN_DIGEST_MISMATCH` (over the bytes as produced). Then, for a plan whose contract
@@ -568,10 +568,10 @@ Refusal names are permanent. A retired check keeps its name reserved.
 
 A flag cannot be checked, so the rule is backed by two checks that can each be made to fail.
 
-1. **Build graph.** The host lowering target's closure must not contain `komira_optimizer`. Three host-local rules
+1. **Build graph.** The host lowering target's closure must not contain `optimizer`. Three host-local rules
    live in that package today (payload narrowing, scan sharing and the scalar-subquery passes), and it is one
-   library (`srcs = glob(["**/*.mojo"])`, `src/komira_optimizer/BUCK`). So those passes move first into a new
-   package, `komira_lowering_rules`, whose closure also must not contain `komira_optimizer` (§12, stage 6). A
+   library (`srcs = glob(["**/*.mojo"])`, `src/optimizer/BUCK`). So those passes move first into a new
+   package, `lowering_rules`, whose closure also must not contain `optimizer` (§12, stage 6). A
    Buck2 closure assertion checks both, proven by planting the dependency and watching the build go red.
 2. **Post-condition** (step 11). The physical plan's join tree, build sides, algorithms, aggregate modes,
    exchanges and UDF evaluation sites (each UDF evaluated at the node that carries it, and a non-`VOLATILE` CSE'd call
@@ -643,7 +643,7 @@ exchange elided, so hosts admit one form.
    - each exchange becomes an edge;
    - below it, a sink leaf is added (a new `WireSinkBinding`, which does not exist yet);
    - above it, a scan of the shuffle partition is added (a new scan source over the reader in
-     `src/komira_shuffle/source.mojo`);
+     `src/shuffle/source.mojo`);
    - `partitions` is filled in;
    - with one host, every exchange is elided, including one placed for keyed state (§8.4).
 
@@ -926,20 +926,20 @@ Each stage is independently reviewable and leaves `main` green. Every stage ship
 
 | Stage | Package(s) | Change | Proving test and mutant |
 |---|---|---|---|
-| 1 | `komira_plan_wire` | Refuse `payload_narrow` and `group_topk` on encode (§5.4). | A plan carrying each is refused by name. Mutant: remove the refusal; the round-trip test sees an unequal plan. |
-| 2 | `komira_plan_ir`, `komira_join_assembly`, `komira_optimizer` | Add `build_side`, aggregate `mode`, `adaptive_allowed` and the exchange variant (tag 18) to `LogicalPlan`. Join assembly honours `build_side` while output order still follows child order. The optimizer records each decision it makes. | Mutant: a join assembly that ignores `build_side` and always builds right; a test on a `build_side = LEFT` inner join sees the wrong physical build side. |
-| 3 | `komira_plan_proto`, `komira_plan_wire` | The §5.2 fields and enums, the `exchange` arm and its `PlanTag` entry, `WireScanNode.boundedness`; the `WireContext` decode parameter; RAW keeps every refusal; OPTIMIZED refuses scan statistics. New goldens. | Every new field refused in RAW and required in OPTIMIZED, except `boundedness`, which RAW reads unset as `BOUNDED`; protoc text goldens round-trip; the enum-number tests cover tag 19. |
-| 4 | `komira_plan_proto` | `optimized_plan.proto` (§4, §6, §8). | protoc golden fixtures for each message. |
-| 5 | new `komira_optimized_plan_header`, new `komira_optimized_plan` | Header codec and steps 1-3 in the first; body and segment codecs, canonical encoder, both digests and steps 4-9 in the second. Each file under 1,000 lines. | Canonical bytes cross-checked against protoc for every golden without NaN. Mutant: perturb field order; the digest test goes red. One hostile test per refusal token. The header target's closure must exclude `komira_plan_wire`; planting it goes red. |
-| 6 | new `komira_lowering_rules`, `komira_optimizer` | Move payload narrowing, scan sharing and the scalar-subquery passes out of `komira_optimizer`. Scan sharing reads `build_side` and takes row counts from an argument. | Closure lint excludes `komira_optimizer`; planting it goes red. Mutant: scan sharing that ignores `build_side`. |
-| 7 | `komira_optimizer`, new `komira_plan_producer` | The portable profile (§5.3) and the producer library over SQL parsing, bind, the optimizer driver and the statistics readers, linked by every SDK and by a service re-optimizing a stored query. Cost comparisons break ties on a total integer order. | For the same bound plan, statistics and build, every producer platform yields the same `plan_digest`. Mutant: a producer that reads its config from the environment instead of its argument (`optimizer_config.mojo` reads none today). |
-| 8 | `komira_optimized_plan`, `komira_shuffle` | `WireSinkBinding`, the shuffle-partition scan source, and the cutter (§8) with its "no decision changed" assertion. | Mutants: a cutter that reorders a join; one that flips a build side. |
-| 9 | the host lowering target | The post-condition (§7.3) and the closure lint excluding `komira_optimizer`. | A planted dependency goes red; each §7.3 mutant is refused. |
+| 1 | `plan_wire` | Refuse `payload_narrow` and `group_topk` on encode (§5.4). | A plan carrying each is refused by name. Mutant: remove the refusal; the round-trip test sees an unequal plan. |
+| 2 | `plan_ir`, `join_assembly`, `optimizer` | Add `build_side`, aggregate `mode`, `adaptive_allowed` and the exchange variant (tag 18) to `LogicalPlan`. Join assembly honours `build_side` while output order still follows child order. The optimizer records each decision it makes. | Mutant: a join assembly that ignores `build_side` and always builds right; a test on a `build_side = LEFT` inner join sees the wrong physical build side. |
+| 3 | `plan_proto`, `plan_wire` | The §5.2 fields and enums, the `exchange` arm and its `PlanTag` entry, `WireScanNode.boundedness`; the `WireContext` decode parameter; RAW keeps every refusal; OPTIMIZED refuses scan statistics. New goldens. | Every new field refused in RAW and required in OPTIMIZED, except `boundedness`, which RAW reads unset as `BOUNDED`; protoc text goldens round-trip; the enum-number tests cover tag 19. |
+| 4 | `plan_proto` | `optimized_plan.proto` (§4, §6, §8). | protoc golden fixtures for each message. |
+| 5 | new `optimized_plan_header`, new `komira_optimized_plan` | Header codec and steps 1-3 in the first; body and segment codecs, canonical encoder, both digests and steps 4-9 in the second. Each file under 1,000 lines. | Canonical bytes cross-checked against protoc for every golden without NaN. Mutant: perturb field order; the digest test goes red. One hostile test per refusal token. The header target's closure must exclude `plan_wire`; planting it goes red. |
+| 6 | new `lowering_rules`, `optimizer` | Move payload narrowing, scan sharing and the scalar-subquery passes out of `optimizer`. Scan sharing reads `build_side` and takes row counts from an argument. | Closure lint excludes `optimizer`; planting it goes red. Mutant: scan sharing that ignores `build_side`. |
+| 7 | `optimizer`, new `komira_plan_producer` | The portable profile (§5.3) and the producer library over SQL parsing, bind, the optimizer driver and the statistics readers, linked by every SDK and by a service re-optimizing a stored query. Cost comparisons break ties on a total integer order. | For the same bound plan, statistics and build, every producer platform yields the same `plan_digest`. Mutant: a producer that reads its config from the environment instead of its argument (`optimizer_config.mojo` reads none today). |
+| 8 | `komira_optimized_plan`, `shuffle` | `WireSinkBinding`, the shuffle-partition scan source, and the cutter (§8) with its "no decision changed" assertion. | Mutants: a cutter that reorders a join; one that flips a build side. |
+| 9 | the host lowering target | The post-condition (§7.3) and the closure lint excluding `optimizer`. | A planted dependency goes red; each §7.3 mutant is refused. |
 | 10 | `komira_optimized_plan`, the host lowering target, the release machine | The golden corpus (§9.4): emitted at each release that ships this type, append-only, welded into the header, admission and lowering targets, with the coverage assertion and the stored-cut key test (§9.6). | Each §9.4 mutant goes red; editing or deleting a corpus file is refused by the CI check. |
-| 11 | `komira_plan_proto`, `komira_plan_wire`, `komira_plan_ir`, `komira_plan_expr` | `UdfRef` (with `read_set`), `UdfReadSet`, `UdfCode`, `CodeDigest`, `UdfKind` (with `ROW`), `CodeForm`, `RuntimeNeed`; `RecordedFields`, beside `WireField`, the runtime descriptors' recorded-fields schema; `WireUdfApply`, `WireMapBatchesNode`, `WireStepNode`, `AggFn.AGG_UDF`, `WireField.children`, `WirePlanEnvelope.udfs`; engine tags 19, 20, expression tag 27 and aggregate tag 37; the OPTIMIZED refusal of the legacy forms. The IR holds the read set as an optional value, never as a list whose emptiness means "unset". | Every §10.4 refusal by name, the read-set refusals included. Mutants: a decoder that accepts `WireUdfCall` in OPTIMIZED; a `udf_index` off by one; a `WireField` that drops a grandchild; an admission that accepts a `UdfRef` with no `return_type`; one that accepts a `PARTIAL` node with a plain-form aggregate; one that accepts a `ROW` under `PROPAGATE`; one that accepts a read set with a repeated, empty or unsorted name; one that accepts a read set on a `SCALAR` or a `STEP`; one that accepts `arg_types` names that differ from the read set's; one that accepts a grouped frame whose read set omits a `group_by` column; one that accepts an unset read set on a `MAP_BATCHES_FRAME` whose `arg_types` lists fewer columns than its child outputs (unset read as "whatever `arg_types` says"). Presence: a `UdfRef` with an empty `read_set` and one without it decode to different IR values and encode to different canonical bytes (mutants: a decoder that maps empty to unset; an encoder that drops an empty `read_set`, so two plans hash the same); the same for an empty `RecordedFields`. |
-| 12 | `komira_optimized_plan_header`, `komira_optimized_plan` | §10.11 checks 1-3 in the header library (the release record and the manifest bytes are arguments, never fetched), checks 4-7 and step 9's code load in the host. | One hostile test per `OPTIMIZED_ENV_*` token. Mutants: a prefix check that compares layer sets instead of an ordered prefix; a path check that ignores whiteouts; a manifest whose sha256 is not the digest. Read set at admission (check 7): a `ROW` `UdfRef` with `read_set` `{a}` against a descriptor that records `{a, b}`, one with `read_set` `{}` against `{a}`, and one with `read_set` `{a}` against a recorded, empty `{}` each refuse with `OPTIMIZED_UDF_READ_SET_DESCRIPTOR_MISMATCH` naming both lists; a `ROW` `UdfRef` with `read_set` unset over a child whose output is `(b, a)`, so `arg_types` lists `(b, a)`, against a descriptor that records `{a, b}` is admitted, because the names are compared as sorted sets; a descriptor whose `RecordedFields.fields` records `{b, a}` out of order is not canonical and is refused with `OPTIMIZED_UDF_DESCRIPTOR_INVALID` (`ERR_DESCRIPTOR`), never admitted. Mutants: a host that maps `ERR_READ_SET_MISMATCH` to `OPTIMIZED_UDF_DESCRIPTOR_INVALID`; a `validate` that compares the names as an ordered list rather than a sorted set (the unset-read-set case over the `(b, a)` child goes red); a `validate` that accepts an out-of-order `RecordedFields` (the recorded `{b, a}` case goes red); one that treats a recorded, empty field list as absent and skips the comparison (the `{a}`-against-`{}` case goes red). The runtime side of the same comparison is `udf_runtime_conformance.md` (the native read-set cases). |
+| 11 | `plan_proto`, `plan_wire`, `plan_ir`, `plan_expr` | `UdfRef` (with `read_set`), `UdfReadSet`, `UdfCode`, `CodeDigest`, `UdfKind` (with `ROW`), `CodeForm`, `RuntimeNeed`; `RecordedFields`, beside `WireField`, the runtime descriptors' recorded-fields schema; `WireUdfApply`, `WireMapBatchesNode`, `WireStepNode`, `AggFn.AGG_UDF`, `WireField.children`, `WirePlanEnvelope.udfs`; engine tags 19, 20, expression tag 27 and aggregate tag 37; the OPTIMIZED refusal of the legacy forms. The IR holds the read set as an optional value, never as a list whose emptiness means "unset". | Every §10.4 refusal by name, the read-set refusals included. Mutants: a decoder that accepts `WireUdfCall` in OPTIMIZED; a `udf_index` off by one; a `WireField` that drops a grandchild; an admission that accepts a `UdfRef` with no `return_type`; one that accepts a `PARTIAL` node with a plain-form aggregate; one that accepts a `ROW` under `PROPAGATE`; one that accepts a read set with a repeated, empty or unsorted name; one that accepts a read set on a `SCALAR` or a `STEP`; one that accepts `arg_types` names that differ from the read set's; one that accepts a grouped frame whose read set omits a `group_by` column; one that accepts an unset read set on a `MAP_BATCHES_FRAME` whose `arg_types` lists fewer columns than its child outputs (unset read as "whatever `arg_types` says"). Presence: a `UdfRef` with an empty `read_set` and one without it decode to different IR values and encode to different canonical bytes (mutants: a decoder that maps empty to unset; an encoder that drops an empty `read_set`, so two plans hash the same); the same for an empty `RecordedFields`. |
+| 12 | `optimized_plan_header`, `komira_optimized_plan` | §10.11 checks 1-3 in the header library (the release record and the manifest bytes are arguments, never fetched), checks 4-7 and step 9's code load in the host. | One hostile test per `OPTIMIZED_ENV_*` token. Mutants: a prefix check that compares layer sets instead of an ordered prefix; a path check that ignores whiteouts; a manifest whose sha256 is not the digest. Read set at admission (check 7): a `ROW` `UdfRef` with `read_set` `{a}` against a descriptor that records `{a, b}`, one with `read_set` `{}` against `{a}`, and one with `read_set` `{a}` against a recorded, empty `{}` each refuse with `OPTIMIZED_UDF_READ_SET_DESCRIPTOR_MISMATCH` naming both lists; a `ROW` `UdfRef` with `read_set` unset over a child whose output is `(b, a)`, so `arg_types` lists `(b, a)`, against a descriptor that records `{a, b}` is admitted, because the names are compared as sorted sets; a descriptor whose `RecordedFields.fields` records `{b, a}` out of order is not canonical and is refused with `OPTIMIZED_UDF_DESCRIPTOR_INVALID` (`ERR_DESCRIPTOR`), never admitted. Mutants: a host that maps `ERR_READ_SET_MISMATCH` to `OPTIMIZED_UDF_DESCRIPTOR_INVALID`; a `validate` that compares the names as an ordered list rather than a sorted set (the unset-read-set case over the `(b, a)` child goes red); a `validate` that accepts an out-of-order `RecordedFields` (the recorded `{b, a}` case goes red); one that treats a recorded, empty field list as absent and skips the comparison (the `{a}`-against-`{}` case goes red). The runtime side of the same comparison is `udf_runtime_conformance.md` (the native read-set cases). |
 | 13 | the host lowering target, the `komira/native`, `komira/python` and `komira/node` runtime packages | Every runtime loaded in-process and called through the C ABI, with no engine-side transport (`udf_runtime_interface.md` §1.2); native UDFs in-process; the supervisor's heartbeat token kept out of the engine; the Python and Node runtimes' worker processes under the engine's user id (`udf_runtime_interface.md` §1.3, §5, §7); load-once caching per context, thread limits, the §10.10 errors, the per-batch return-type check, both aggregate forms, and the §10.9 optimizer rules in the portable profile. | Mutants: a context that reloads the payload per batch (a load counter goes red); a host that retries a batch, of any stability, after `ERR_WORKER_CRASHED` or `ERR_INSTANCE_LOST` (the run must fail with `UDF_WORKER_CRASHED` naming the UDF, and a call counter must show no second call); a float batch accepted into an int64 return type; a Node worker that accepts an unsafe integer into int64; a mergeable aggregate whose partial state is dropped at the exchange; a group state over 64 MiB that does not fail `UDF_STATE_TOO_LARGE`; a supervisor that passes its heartbeat token to the engine (a native fixture that searches its own process's arguments, environment, readable files and descriptors finds it). Read set (§9.4): a planner that treats an unset read set as empty (a `MAP_BATCHES_FRAME` with no `read_set` over a 5-column child must keep all 5, and its output must equal the unpruned run); one that treats an empty read set as unset (a row-count frame with an empty `read_set` over a 100-column scan must project the scan to no column); one that ignores a present read set (read set `{a}` over a 100-column scan must leave the scan's projection `{a}`); one that prunes a grouped frame's key (`group_by k`, read set `{k, v}`: the scan keeps `{k, v}`); a host that passes a frame the whole child when a read set is set (the runtime returns `ERR_HOST_CONTRACT`). Nesting: a frame whose input comes from a scalar UDF of the same runtime in the same pipeline runs on one context with no pipeline break (mutant: a host that refuses the nested call or deadlocks waiting for it). |
-| 14 | the host lowering target, `komira_shuffle_streaming` | The streaming driver: a plan with an `UNBOUNDED` scan runs over `StreamingMorselSource`, with the §5.2 boundedness checks and the §10.10 streaming rules for UDFs. | Mutants: a host that runs an `UNBOUNDED` plan under the batch driver (an `Idle` fixture is taken for end of input and the output is short); an admission that takes the mode from `needs.unbounded` instead of the body; a plain aggregate admitted over an unbounded input. |
+| 14 | the host lowering target, `shuffle_streaming` | The streaming driver: a plan with an `UNBOUNDED` scan runs over `StreamingMorselSource`, with the §5.2 boundedness checks and the §10.10 streaming rules for UDFs. | Mutants: a host that runs an `UNBOUNDED` plan under the batch driver (an `Idle` fixture is taken for end of input and the output is short); an admission that takes the mode from `needs.unbounded` instead of the body; a plain aggregate admitted over an unbounded input. |
 
 **Critical path.** komira has no optimizer driver at the pinned commit: no `def optimize` exists under `src/`, and
 there is no `select_join_build_side` (`git grep`). It also has no lowering target: the physical IR has no producer
@@ -954,13 +954,13 @@ UDFs and streaming add three items to the critical path:
   (`packaging/images/base/README.md` in komira-ai/komira#1070).
 - The engine's UDF executor: one in-process path that calls every runtime through the C ABI (`udf_runtime_interface.md`
   §1.2, §4); the engine has no worker transport.
-- The streaming driver. The streaming source contract exists (`src/komira_morsel/streaming_source.mojo`), but
+- The streaming driver. The streaming source contract exists (`src/morsel/streaming_source.mojo`), but
   `git grep -l StreamingMorselSource` finds only the contract, its tests and the streaming shuffle
-  (`src/komira_shuffle_streaming`); no driver runs a plan over it.
+  (`src/shuffle_streaming`); no driver runs a plan over it.
 
 Stages 11 and 12 can proceed now. Stage 13 depends on the first two items, and stage 14 on the third.
 
-**Size, inferred from current sizes.** `komira_plan_wire` is 12,861 source lines in five files and `plan.proto` is
+**Size, inferred from current sizes.** `plan_wire` is 12,861 source lines in five files and `plan.proto` is
 1,646 lines. I expect stages 3-9 to add roughly 5,500-8,000 source lines and 11,000-14,000 test lines across 12-14
 files, excluding the driver and the lowering. That is an estimate, not a measurement.
 

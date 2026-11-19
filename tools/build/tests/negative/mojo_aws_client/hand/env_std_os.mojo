@@ -8,7 +8,7 @@ HOME inside the standard library. The generated environment scan
 
 from std import os
 
-from komira_aws_core import AwsRequest
+from aws_core import AwsRequest
 
 from .env_read_std_os import (
     CloudWatchLogsGetLogEventsRequest,

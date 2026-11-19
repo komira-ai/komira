@@ -1,7 +1,7 @@
 # =============================================================================
 # komira_test_s3_adapter/tests/test_minio_object_store.mojo
 #   `MinioObjectStore`'s verbs over two connectors with no socket:
-#   komira_http_core's `ScriptedConnector`, which replays one scripted
+#   http_core's `ScriptedConnector`, which replays one scripted
 #   answer, and `RecordingConnector` (below), which also appends every byte
 #   the store writes to a log in TEST_TMPDIR, so a test reads back the
 #   request as it reached the wire. No object service; the credentials file
@@ -32,17 +32,17 @@
 
 from std.testing import assert_equal, assert_false, assert_true
 
-from komira_async.reactor.reactor import Reactor
-from komira_async.runtime.runtime_trait import Runtime
-from komira_libc.posix import _read_env
-from komira_http_core.transport.io_stream import (
+from async_rt.reactor.reactor import Reactor
+from async_rt.runtime.runtime_trait import Runtime
+from libc.posix import _read_env
+from http_core.transport.io_stream import (
     Connector,
     IoStream,
     NEGOTIATED_HTTP_1_1,
     StreamIo,
     TRANSPORT_KIND_KERNEL_TCP,
 )
-from komira_http_core.transport.scripted import ScriptedConnector, ScriptedStream
+from http_core.transport.scripted import ScriptedConnector, ScriptedStream
 from komira_test_bucket import StoreTarget
 
 from komira_test_s3_adapter import (

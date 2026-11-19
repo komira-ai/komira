@@ -3,7 +3,7 @@
 # =============================================================================
 #
 # The fixture the HTTP legs share. It mounts a `SearchHttpDispatcher` over a
-# `LocalFsConditionalStore` behind a real `komira_http_server` `HttpServer` on
+# `LocalFsConditionalStore` behind a real `http_server` `HttpServer` on
 # 127.0.0.1 port 0, and talks to it with raw HTTP/1.1 bytes written to a real
 # TCP socket.
 #
@@ -23,13 +23,13 @@ from std.ffi import external_call
 from std.memory import UnsafePointer
 from std.sys.info import CompilationTarget
 
-from komira_async.reactor.socket_io import errno_get, msg_nosignal, set_nosigpipe
-from komira_clock import now_ns
-from komira_http_core.transport.grpc_emit import NoopGrpcDispatch
-from komira_http_server.routing import Router
-from komira_http_server.server import HttpServer, HttpServerConfig
-from komira_objectstore import LocalFsConditionalStore
-from komira_search_http import SearchHttpConfig, SearchHttpDispatcher
+from async_rt.reactor.socket_io import errno_get, msg_nosignal, set_nosigpipe
+from clock import now_ns
+from http_core.transport.grpc_emit import NoopGrpcDispatch
+from http_server.routing import Router
+from http_server.server import HttpServer, HttpServerConfig
+from objectstore import LocalFsConditionalStore
+from search_http import SearchHttpConfig, SearchHttpDispatcher
 
 from komira_http_tls_e2e import ClientLeg, DispatchServeLoop, serve_while
 

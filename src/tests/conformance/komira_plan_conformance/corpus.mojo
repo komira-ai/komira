@@ -36,13 +36,13 @@ from std.os import listdir
 from std.os.path import exists, isdir
 from std.pathlib import Path
 
-from komira_arrow.arrow_types import ArrowType
-from komira_arrow.schema import Schema
-from komira_json import parse_json_value
+from arrow.arrow_types import ArrowType
+from arrow.schema import Schema
+from json import parse_json_value
 from komira_plan_harness import CanonText, parse_canon
 from komira_plan_harness.type_text import arrow_type_name, schema_entry_of_field
-from komira_plan_ir.logical_plan import LogicalPlan
-from komira_plan_wire import (
+from plan_ir.logical_plan import LogicalPlan
+from plan_wire import (
     plan_from_bytes,
     plan_to_bytes,
     plan_wire_admit,

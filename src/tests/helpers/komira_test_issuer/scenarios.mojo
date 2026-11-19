@@ -5,7 +5,7 @@
 # =============================================================================
 #
 # Every token is checked the way a relying party checks it: the document the
-# issuer served is parsed with komira_jwks, a komira_jose `JwsVerifier` pinned
+# issuer served is parsed with jwks, a jose `JwsVerifier` pinned
 # to the profile's `alg` is built from it, and `verify_jwt` applies a
 # `ClaimPolicy` of the profile's issuer, audience, `typ`, leeway and max
 # lifetime at the issuer's time. The scenarios, in table order:
@@ -34,9 +34,9 @@
 # pointer crosses this file's API.
 # =============================================================================
 
-from komira_jose import ClaimPolicy, JwsVerifier, VerifiedJwt, jwk_thumbprint, verify_jwt
-from komira_json import JSON_STRING, JsonValue
-from komira_jwks import parse_jwk_set
+from jose import ClaimPolicy, JwsVerifier, VerifiedJwt, jwk_thumbprint, verify_jwt
+from json import JSON_STRING, JsonValue
+from jwks import parse_jwk_set
 
 from komira_test_issuer.issuer import TestIssuer
 from komira_test_issuer.under_test import IssuerProfile, IssuerUnderTest
@@ -89,7 +89,7 @@ def verify_as_relying_party(
 ) raises -> VerifiedJwt:
     """`token` checked under the served `document` the way the scenarios
     check it (see the file header). Raises `JwksError: ...` or
-    `JoseError: ...` as komira_jwks and komira_jose do."""
+    `JoseError: ...` as jwks and jose do."""
     var keys = parse_jwk_set(document)
     var verifier = JwsVerifier(profile.alg, keys)
     var policy = ClaimPolicy(

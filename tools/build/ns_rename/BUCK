@@ -1,0 +1,33 @@
+load("@komira//tools/build/rust:defs.bzl", "rust_binary", "rust_library", "rust_test")
+
+# ns-rename: renames the komira_* packages to their namespaced names from the
+# mapping (namespaces-komira-map.tsv, README.md). Standard library only.
+
+_LIB_SRCS = glob(["src/**/*.rs"], exclude = ["src/main.rs"])
+
+# The library is published behind its inline #[test]s: it, and the binary
+# that links it, cannot build unless they pass.
+rust_library(
+    name = "komira_ns_rename",
+    srcs = _LIB_SRCS,
+    crate_root = "src/lib.rs",
+    tests = [":komira_ns_rename_unit"],
+)
+
+# The crate's inline #[test]s, among them the check of the checked-in mapping
+# (src/map.rs reads ../namespaces-komira-map.tsv with include_str!).
+rust_test(
+    name = "komira_ns_rename_unit",
+    srcs = _LIB_SRCS + ["namespaces-komira-map.tsv"],
+    crate_root = "src/lib.rs",
+    crate_name = "komira_ns_rename",
+)
+
+# `ns-rename --repo <checkout> --map <mapping.tsv> [--dry-run]`.
+rust_binary(
+    name = "ns-rename",
+    srcs = ["src/main.rs"],
+    crate_root = "src/main.rs",
+    deps = [":komira_ns_rename"],
+    visibility = ["PUBLIC"],
+)

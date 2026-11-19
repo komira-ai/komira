@@ -74,7 +74,7 @@ _ZIG_VERSION = "komira//tools/build/toolchains:zig_next_version"
 
 # The https client against a real TLS server on loopback (tls_test.zig): aws-lc's
 # `bssl s_server` pinned to TLS 1.2 and to TLS 1.3, with the throwaway
-# certificates of komira_http_core's tests. A validation, as it runs a built
+# certificates of http_core's tests. A validation, as it runs a built
 # tool; kpin is built behind it.
 zig_test(
     name = "tls_unit",
@@ -82,10 +82,10 @@ zig_test(
     src = "tls_test.zig",
     imports = ["fetch.zig"],
     data = {
-        "fixtures/leaf_cert.pem": "//src/komira_http_core:tests/fixtures/tls/leaf_cert.pem",
-        "fixtures/leaf_key.pem": "//src/komira_http_core:tests/fixtures/tls/leaf_key.pem",
-        "fixtures/root_ca.pem": "//src/komira_http_core:tests/fixtures/tls/root_ca.pem",
-        "fixtures/smoke_cert.pem": "//src/komira_http_core:tests/fixtures/smoke_cert.pem",
+        "fixtures/leaf_cert.pem": "//src/http_core:tests/fixtures/tls/leaf_cert.pem",
+        "fixtures/leaf_key.pem": "//src/http_core:tests/fixtures/tls/leaf_key.pem",
+        "fixtures/root_ca.pem": "//src/http_core:tests/fixtures/tls/root_ca.pem",
+        "fixtures/smoke_cert.pem": "//src/http_core:tests/fixtures/smoke_cert.pem",
     },
     exec_tools = {"BSSL": "//third_party/aws-lc:bssl"},
     busybox = "komira//tools/build/toolchains:busybox",

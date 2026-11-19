@@ -5,10 +5,10 @@
 
 from std.testing import assert_equal, assert_false, assert_true
 
-from komira_async.reactor.reactor import Reactor
-from komira_db import Database, DbValue, Filter, Pred
+from async_rt.reactor.reactor import Reactor
+from db import Database, DbValue, Filter, Pred
 
-from komira_chat_store import (
+from chat_store import (
     CHANNEL_DM,
     CHANNEL_PRIVATE,
     CHANNEL_PUBLIC,
@@ -86,7 +86,7 @@ def check_users[T: ChatTarget](mut t: T) raises:
         )
     except e:
         err = String(e)
-    assert_err(err, String('komira_chat_store: invalid user id "u/4"'), "a malformed id")
+    assert_err(err, String('chat_store: invalid user id "u/4"'), "a malformed id")
 
 
 def check_channels_and_members[T: ChatTarget](mut t: T) raises:
@@ -106,7 +106,7 @@ def check_channels_and_members[T: ChatTarget](mut t: T) raises:
         )
     except e:
         err = String(e)
-    assert_err(err, String("komira_chat_store: channel c-eng already exists"), "a taken id")
+    assert_err(err, String("chat_store: channel c-eng already exists"), "a taken id")
     assert_true(s.is_member[Rt](reactor, String("c-eng"), String("u-bob")))
     assert_false(s.is_member[Rt](reactor, String("c-eng"), String("u-carol")))
     assert_true(s.add_member[Rt](reactor, String("c-eng"), String("u-carol"), T0 + 1))
@@ -131,7 +131,7 @@ def check_channels_and_members[T: ChatTarget](mut t: T) raises:
         )
     except e:
         err = String(e)
-    assert_err(err, String("komira_chat_store: u-bob is not a member of channel c-eng"), "a former member")
+    assert_err(err, String("chat_store: u-bob is not a member of channel c-eng"), "a former member")
     var m = s.members[Rt](reactor, String("c-eng"), String(""), 10)
     assert_equal(joined(m.ids), String("[u-alice,u-carol]"))
     # Lists of channels.
@@ -170,13 +170,13 @@ def check_channels_and_members[T: ChatTarget](mut t: T) raises:
         )
     except e:
         err = String(e)
-    assert_err(err, String("komira_chat_store: channel c-old is archived"), "send to an archived channel")
+    assert_err(err, String("chat_store: channel c-old is archived"), "send to an archived channel")
     err = returned()
     try:
         _ = s.add_member[Rt](reactor, String("c-old"), String("u-bob"), T0 + 5)
     except e:
         err = String(e)
-    assert_err(err, String("komira_chat_store: channel c-old is archived"), "join an archived channel")
+    assert_err(err, String("chat_store: channel c-old is archived"), "join an archived channel")
 
 
 def check_dms[T: ChatTarget](mut t: T) raises:
@@ -195,13 +195,13 @@ def check_dms[T: ChatTarget](mut t: T) raises:
         _ = s.add_member[Rt](reactor, dm.channel_id, String("u-carol"), T0)
     except e:
         err = String(e)
-    assert_err(err, String("komira_chat_store: a DM's members are fixed"), "add to a DM")
+    assert_err(err, String("chat_store: a DM's members are fixed"), "add to a DM")
     err = returned()
     try:
         _ = s.remove_member[Rt](reactor, dm.channel_id, String("u-bob"), T0)
     except e:
         err = String(e)
-    assert_err(err, String("komira_chat_store: a DM's members are fixed"), "remove from a DM")
+    assert_err(err, String("chat_store: a DM's members are fixed"), "remove from a DM")
     assert_true(s.is_member[Rt](reactor, dm.channel_id, String("u-bob")), "still a member")
     assert_equal(s.head_seq[Rt](reactor, dm.channel_id), Int64(2), "no LEAVE appended")
     err = returned()
@@ -214,7 +214,7 @@ def check_dms[T: ChatTarget](mut t: T) raises:
         err = String(e)
     assert_err(
         err,
-        String("komira_chat_store: invalid channel id \"dm-u-alice.u-bob\""),
+        String("chat_store: invalid channel id \"dm-u-alice.u-bob\""),
         "no channel takes a DM's id",
     )
     err = returned()
@@ -225,7 +225,7 @@ def check_dms[T: ChatTarget](mut t: T) raises:
         )
     except e:
         err = String(e)
-    assert_err(err, String("komira_chat_store: a DM has no name, topic or archive state"), "rename a DM")
+    assert_err(err, String("chat_store: a DM has no name, topic or archive state"), "rename a DM")
     var group = s.open_dm[Rt](reactor, String("u-carol"), ids("u-alice", "u-bob"), T0)
     assert_true(group.channel_id != dm.channel_id, "another set, another DM")
     assert_true(s.is_member[Rt](reactor, group.channel_id, String("u-carol")))
@@ -413,7 +413,7 @@ def check_files[T: ChatTarget](mut t: T) raises:
         )
     except e:
         err = String(e)
-    assert_err(err, String("komira_chat_store: file f-1 is not a complete file of channel c-f"), "a pending file")
+    assert_err(err, String("chat_store: file f-1 is not a complete file of channel c-f"), "a pending file")
     var done = s.complete_file[Rt](reactor, String("f-1"), Int64(98))
     assert_equal(done.state, FILE_COMPLETE)
     assert_equal(done.size_bytes, Int64(98))
@@ -427,7 +427,7 @@ def check_files[T: ChatTarget](mut t: T) raises:
         )
     except e:
         err = String(e)
-    assert_err(err, String("komira_chat_store: file f-1 is not a complete file of channel c-g"), "another channel's file")
+    assert_err(err, String("chat_store: file f-1 is not a complete file of channel c-g"), "another channel's file")
     var m = s.send_message[Rt](
         reactor, String("c-f"), String("u-alice"), String("see"), Int64(0),
         String(), no_ids(), False, ids("f-1"), T0,

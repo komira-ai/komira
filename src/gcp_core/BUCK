@@ -1,0 +1,96 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The one hand-written core of the Google Cloud SDK, GCP-specific code only:
+#   token      - the `GcpTokenSource` contract the generated
+#                `komira_gcp_<service>` clients call, and a token cache on
+#                retry's injected `MonotonicClock`;
+#   status     - the google.rpc.Status error envelope, and the gRPC status
+#                of a call over gRPC (never echoes a body or a grpc-message);
+#   pagination - the PURE paging pieces (`PageCursor`, `next_page_token`);
+#   retry      - `GcpRetryClassifier` and `gcp_retry_policy` for retry;
+#   v4_sign    - Cloud Storage V4 signing: GOOG4-RSA-SHA256
+#                canonicalization, string to sign, RSA signature and signed
+#                URL; the signing time is a parameter;
+# and the production token sources:
+#   token_wire    - pure: the metadata request and probe, the
+#                   service-account key and authorized_user files, the RS256
+#                   JWTs, the grant requests and the token response;
+#   token_http    - the fetchers' one exchange (`GcpHttpTransport`) and its
+#                   http_client implementation over a caller's
+#                   Connector and HttpClientConfig;
+#   token_sources - the metadata-server, service-account key, self-signed
+#                   JWT and authorized_user fetchers;
+#   adc           - Application Default Credentials in Google's order;
+#   sources       - the env, file and wall-clock seams. The ONLY file that
+#                   reads the environment, and only Google's variables.
+# Generic pieces come from dependencies: the UTC calendar and the
+# YYYYMMDDTHHMMSSZ / YYYYMMDD stamps from datetime; JSON (and its
+# UTF-8 validation) from json; retry policy, backoff, loop and the
+# clock seam from retry; SHA-256, RSA and the PEM-to-PKCS#8 step for a
+# key file's `private_key` from crypto (AWS-LC; the PEM armor under it
+# is encoding's, as is base64url); the HTTP client, its runtime and
+# the Connector seam from http_client, async_rt and
+# http_core. It never imports a generated module.
+#
+# test_v4_sign_conformance runs Google's published V4 signing vectors and
+# signs with their published dummy key. Neither is copied here: both are read
+# from the conformance-tests archive //third_party/googleapis_conformance_tests
+# pins by sha256, and staged at conformance/. test_token_wire signs its JWTs
+# with the same dummy key, staged the same way, and checks one against a JWT
+# an independent implementation signed.
+#
+# test_token_sources sends each fetcher's request through http_client
+# over a ScriptedConnector (no socket) and checks the bytes on the wire, the
+# reading of the answer (expires_in to expiry) and the error mapping.
+# test_adc runs every branch of the Application Default Credentials search
+# over a MapEnv, MapFiles and a scripted probe, its refusal texts, and that
+# every variable read is one of Google's.
+#
+# test_env_source_only scans the package's own sources, staged as its data:
+# only sources.mojo may read the environment, and no source may name a
+# variable to it that Google's auth libraries do not read.
+mojo_library(
+    name = "gcp_core",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/async_rt:async_rt",
+        "//src/clock:clock",
+        "//src/crypto:crypto",
+        "//src/datetime:datetime",
+        "//src/encoding:encoding",
+        "//src/http_client:http_client",
+        "//src/http_core:http_core",
+        "//src/json:json",
+        "//src/libc:libc",
+        "//src/retry:retry",
+    ],
+    test_srcs = [
+        "tests/test_gcp_status.mojo",
+        "tests/test_gcp_pagination.mojo",
+        "tests/test_gcp_retry.mojo",
+        "tests/test_gcp_token.mojo",
+        "tests/test_v4_sign_conformance.mojo",
+        "tests/test_env_source_only.mojo",
+        "tests/test_token_wire.mojo",
+        "tests/test_token_sources.mojo",
+        "tests/test_token_info.mojo",
+        "tests/test_adc.mojo",
+        "tests/test_rest_stream.mojo",
+    ],
+    test_data = {
+        "tests/test_env_source_only.mojo": glob(["*.mojo"]),
+        "tests/test_v4_sign_conformance.mojo": {
+            "conformance": "//third_party/googleapis_conformance_tests:files",
+        },
+        "tests/test_token_wire.mojo": {
+            "conformance": "//third_party/googleapis_conformance_tests:files",
+        },
+        "tests/test_token_sources.mojo": {
+            "conformance": "//third_party/googleapis_conformance_tests:files",
+        },
+        "tests/test_adc.mojo": {
+            "conformance": "//third_party/googleapis_conformance_tests:files",
+        },
+    },
+    visibility = ["PUBLIC"],
+)

@@ -2,7 +2,7 @@
 # gcp_fake.mojo -- a stateful GCP Secret Manager v1 over REST/JSON
 # =============================================================================
 #
-# `FakeSecretManager` is a komira_http_server `RequestDispatcher` answering
+# `FakeSecretManager` is a http_server `RequestDispatcher` answering
 # the six methods the generated client sends, at their REST paths
 # (google/cloud/secretmanager/v1/service.proto, global and regional
 # bindings), against the state in gcp_store.mojo:
@@ -52,12 +52,12 @@
 # runs; the test reads it after the join.
 # =============================================================================
 
-from komira_async.reactor.reactor import Reactor
-from komira_async.runtime.runtime_trait import Runtime
-from komira_encoding import base64_decode
-from komira_http_core.codec import HttpMethod, HttpRequest, HttpResponse
-from komira_http_server.dispatch import RequestDispatcher
-from komira_json import JsonValue, parse_json_bytes
+from async_rt.reactor.reactor import Reactor
+from async_rt.runtime.runtime_trait import Runtime
+from encoding import base64_decode
+from http_core.codec import HttpMethod, HttpRequest, HttpResponse
+from http_server.dispatch import RequestDispatcher
+from json import JsonValue, parse_json_bytes
 
 from .gcp_store import (
     GCP_PROJECT_ID,

@@ -15,9 +15,9 @@
 #                    process that dies before its insert.
 # =============================================================================
 
-from komira_db import Database
+from db import Database
 
-from komira_chat_store import ChatEvent, ChatStore, NoSendProbe, SendProbe
+from chat_store import ChatEvent, ChatStore, NoSendProbe, SendProbe
 
 from .targets import Rt, T0, new_rt, no_ids
 

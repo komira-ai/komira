@@ -18,7 +18,7 @@ This package exists for its tests. Its sources are the shared fixture:
 The tests (`tests/`) run over `LocalFsConditionalStore` rooted in the run's
 `TEST_TMPDIR`: two handles with stale cached heads interleaving their
 publishes (each loss is the store's 412 from its existence probe; the
-`O_EXCL` loss of a truly simultaneous create is left to komira_objectstore's
+`O_EXCL` loss of a truly simultaneous create is left to objectstore's
 own tests), a cold reader of the published lineage, the scan compared with
 `SearchCore` and with a hand-written match table for several queries, and
 retires and reaps read back cold. Nothing here is

@@ -8,7 +8,7 @@
 
 from std.testing import assert_equal, assert_false, assert_true
 
-from komira_libc.posix import _read_env
+from libc.posix import _read_env
 from komira_test_bucket import (
     BACKEND_CHOICE_CANNOT_TELL,
     BACKEND_CHOICE_EMBEDDED_MINIO,
@@ -24,8 +24,8 @@ from komira_test_bucket import (
     select_backend,
 )
 from komira_test_minio import Readiness, ScriptedProcessRunner
-from komira_test_run_id import FixedWallClock, RunId, ScriptedEntropy
-from komira_test_verdict import VERDICT_CLEAN
+from test_run_id import FixedWallClock, RunId, ScriptedEntropy
+from test_verdict import VERDICT_CLEAN
 
 comptime _ENDPOINT: String = "https://cfg-sentinel.invalid:9443"
 comptime _BUCKET: String = "cfg-bucket-sentinel"

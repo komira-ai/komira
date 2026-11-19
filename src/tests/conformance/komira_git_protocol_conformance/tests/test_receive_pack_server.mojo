@@ -1,5 +1,5 @@
 # =============================================================================
-# test_receive_pack_server.mojo -- komira_git's receive-pack server answers
+# test_receive_pack_server.mojo -- git's receive-pack server answers
 # every push the pinned git client made, byte for byte as the pinned git
 # server answered it.
 # =============================================================================
@@ -10,7 +10,7 @@
 # follows them must be a whole pack exactly when a command creates or
 # updates a ref; the verdicts are the scenario server's (push_verdicts:
 # receive.denyNonFastForwards), and the messages and report-status
-# komira_git writes must equal the rest of git's response.
+# git writes must equal the rest of git's response.
 #
 # The scenarios: an atomic push with push options that updates, creates and
 # deletes (all ok); an atomic push where one non-fast-forward update is
@@ -20,7 +20,7 @@
 # denyNonFastForwards, a fast-forward of a branch and a forced update
 # outside refs/heads/, both accepted.
 #
-# A defect this catches: a capability git advertises and komira_git does
+# A defect this catches: a capability git advertises and git does
 # not (or the reverse), an atomic push that lets one ref through, a pack
 # expected after a delete-only push, a report-status git's client would
 # read differently (the side-band framing, the closing flush), and in the
@@ -30,7 +30,7 @@
 
 from std.testing import assert_equal, assert_true
 
-from komira_git import (
+from git import (
     ObjectFormat,
     ReceivePackConfig,
     ReceivePackServer,
@@ -122,4 +122,4 @@ def main() raises:
     test_delete_only()
     test_empty_repository()
     test_fast_forward_under_deny()
-    print("komira_git conformance: receive-pack server passed")
+    print("git conformance: receive-pack server passed")

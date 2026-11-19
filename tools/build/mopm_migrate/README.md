@@ -1,22 +1,22 @@
 # mopm_migrate
 
 Moves one komira Mojo library (`src/<name>`, built by `mojo_library`) onto buildrules'
-`mojo_package` and a mopm package, the way the hand migrations did (`komira_resources` is the worked
+`mojo_package` and a mopm package, the way the hand migrations did (`resources` is the worked
 example: a library with a dependency). It derives what the old files state, writes what the
 migration needs and refuses, with a message that names the file and the fact, whatever it would have
 to guess.
 
 ```sh
 ./buck2 build komira//tools/build/mopm_migrate:mopm_migrate --show-output
-mopm_migrate --package komira_example --description "One sentence for mopm." --mopm 0.0.101 --dry-run
-mopm_migrate --package komira_example --description "One sentence for mopm." --mopm 0.0.101
+mopm_migrate --package example --description "One sentence for mopm." --mopm 0.0.113 --dry-run
+mopm_migrate --package example --description "One sentence for mopm." --mopm 0.0.113
 ```
 
 Run it from the repository root (or pass `--repo <dir>`). The flags:
 
 | flag | meaning |
 |---|---|
-| `--package <name>` | the directory name under `src/` (also the import name and the target name) |
+| `--package <name>` | the directory name under `src/` (also the import name and the target name); the mopm package is `komira-ai/<name>` (the one namespace, `emit.namespace`) |
 | `--description <text>` | the sentence in `mopm.toml`; required, because no old file states it |
 | `--dry-run` | print the whole plan and write nothing |
 | `--mopm <version>` | required, no default: the mopm of `mopm-toolchain.toml` and of `mojo_conda`. Pass the version the repository builds with, the `MOPM` of `release/readme_e2e/packages.bzl` without its `toolchains//:mopm_` prefix and with dots (`//tools/build/lint:one_mopm` refuses a package that names another) |
@@ -33,19 +33,21 @@ commits nothing and never rewrites history. The plan:
    `coverage_held` and fixtures stay. For each moved file it then prints the lines of the repository
    that still name the old path (`git grep`): those are edits for the author, because the right
    edit depends on the file (a hold table, a doc link, a BXL case).
-2. **`mopm.toml`**: `[package]` as the recipe has it (version `0.1.0`); `[dependencies]` are the
-   packages the library sources **import**, as sibling path dependencies with the range
+2. **`mopm.toml`**: `[package]` as the recipe has it (`name = "komira-ai/<name>"`, version `0.1.0`); `[dependencies]` are the
+   packages the library sources **import**, as sibling path dependencies, keyed by full name (`"komira-ai/<dep>" = { path = "../<dep>", ... }`), with the range
    `MAJOR.MINOR` of the dependency's own version (`version = "0.1"`: any 0.1.x, never an exact pin);
    `[dev-dependencies]` the packages only the tests import; `[targets]` is `src/<name>` and `tests`.
    The BUCK `deps` are checked against the imports and must agree in both directions. An import
    counts for every module of an `import a, b` list; a name after `from m import` is not a module.
-3. **`mopm-toolchain.toml`** and **`mopm.lock`** (the toolchain pins and one `path` row per package
-   of the dependency closure, with `deps` for a package that has some).
+3. **`mopm-toolchain.toml`** and **`mopm.lock`** (`lock_version` 3: the toolchain pins and one `path` row
+   per package of the dependency closure, with `deps` for a package that has some; `name` and `deps` are
+   full names, `komira-ai/<dep>`, and `path` is `../<dir>`).
 4. **`BUCK`**: `mojo_package` (with `test_data`, `test_env` and the stated `test_layout` carried from the
    old file as written), `mojo_adopted_library(deps = ...)`, the helper `mojo_binary` targets kept (a
    dependency label that is an alias of a migrated package is written as `//src/<dep>:<dep>`),
-   `mojo_conda` (`dir` and `members` when there are dependencies), `mojo_conda_holds` (the direct
-   dependencies, `>=MAJOR.MINOR,<MAJOR.MINOR+1`) and the old `conda_package`. The comment above the old
+   `mojo_conda` (`package = "komira-ai/<name>"`; `dir` and `members` when there are dependencies),
+   `mojo_conda_holds` (`package` is the import name; `depends` are the direct dependencies in conda
+   spelling, `mojo-komira-ai.<dep> >=MAJOR.MINOR,<MAJOR.MINOR+1`) and the old `conda_package`. The comment above the old
    `mojo_library` is kept above `mojo_package`; the other comments are written by the tool.
 5. **`README.md`**: a `## Build files` section is appended.
 6. **Shared rows**, each inserted at its sorted place: `release/readme_e2e/packages.bzl` and
@@ -63,6 +65,7 @@ for the sharded layout (`ci/targets/shard_<n>.bzl`; the form refuses an empty or
 
 | class | the refusal names |
 |---|---|
+| a dependency key in another namespace, or with none | the manifest and the key: `src/<dep>/mopm.toml` is read by `[dependencies]` key, which is `komira-ai/<dir>` (quoted, or in a `[dependencies."komira-ai/<dir>"]` table); any other namespace, and a bare key (which mopm 0.0.113 refuses), is refused |
 | an import that maps to no package | the file and the module (`there is no src/<module>/BUCK`) |
 | a dependency still on `mojo_library` | the module: migrate it first |
 | native code | a C or archive file in the package, a `native*`/`dlopen`/`c_deps` attribute, a `native*` rule, a `DLHandle` or `OwnedDLHandle` in code of any `.mojo` file of the package (a library loaded at run time; comments and docstrings do not count) |
@@ -77,8 +80,8 @@ for the sharded layout (`ci/targets/shard_<n>.bzl`; the form refuses an empty or
 ## Dependencies that link C
 
 A package whose own sources have no native code but whose dependency closure holds a package with a
-static `[native.<id>]` (`komira_libc`, `komira_log`, `komira_metrics`, `komira_async_api`) is migrated as the hand
-migrations did it (`komira_buffer`, `komira_bump_arena`, `komira_dynamic_filter`, `komira_mail_message`): the manifest,
+static `[native.<id>]` (`libc`, `log`, `metrics`, `async_api`) is migrated as the hand
+migrations did it (`byte_buffer`, `bump_arena`, `dynamic_filter`, `mail_message`): the manifest,
 lock and `conda` are those of any package with dependencies (the native belongs to the dependency, and
 `mopm pack` records the dependency, not its archive), and `mojo_adopted_library` gets
 `cxx_toolchain = "komira//tools/build/mojo:adopt_cxx_link_facts"`, with a comment naming the packages that declare the C,
@@ -98,27 +101,27 @@ tool keeps the comment as written, so the author edits it.
 
 `mopm_migrate_test.zig` (welded into the tool: it is built only when they pass):
 
-- **golden** (`fixtures/komira_resources`): the tool runs on the tree `komira_resources` had before its
+- **golden** (`fixtures/resources`): the tool runs on the tree `resources` had before its
   hand migration, and the output must be the hand migration's: `mopm.toml`, `mopm-toolchain.toml` and
   `mopm.lock` byte for byte; the two shared rows files as the line-for-line diff the hand
   migration made (`rows/*.diff`: the output minus the added lines is the old file, in order, and each
   hunk with its context is one run of lines); the `BUCK` file with its code byte for byte and its
   comments word for word.
-- **golden** (`fixtures/komira_collections`): the same for a library with a `[dependencies]` entry
-  (`komira_atomic_alias`) and seven tests, from the tree before its hand migration. Three differences
+- **golden** (`fixtures/containers`): the same for a library with a `[dependencies]` entry
+  (`atomic_alias`) and seven tests, from the tree before its hand migration. Three differences
   in comment words are asserted where they are tested (the old header said "no dependencies"; two
   sentences the hand file worded differently). The library sources are stored as `*.mojo.fixture`, so
   the Mojo lints do not read them.
 - the documented differences of the golden: the hand migration wrapped comments by eye (the test
   compares paragraphs, not lines); it edited one path in the carried header comment (`see resources.mojo`
-  became `see src/komira_resources/resources.mojo`; the tool carries the comment as written); it added a
+  became `see src/resources/resources.mojo`; the tool carries the comment as written); it added a
   comment above the helper binary that the old file did not have; the rows diffs keep
   only the package's rows (the same pull request added unrelated rows); `release/BUCK` and
   `release/artifacts.textproto` are the lines that name the label, not the whole files.
 - each class of refusal above, and that a refused run writes nothing (a file git does not track
   refuses before the first move: the test passes the tracked list in, the workers have no git).
-- a dependency with a static native: the golden of `komira_bump_arena` (`fixtures/komira_bump_arena`: the tree before
-  its hand migration, with the manifests of its closure, `komira_libc` among them) requires the hand migration's manifest,
+- a dependency with a static native: the golden of `bump_arena` (`fixtures/bump_arena`: the tree before
+  its hand migration, with the manifests of its closure, `libc` among them) requires the hand migration's manifest,
   toolchain file and lock byte for byte, its rows, and its BUCK file, where the one difference is the wording of the comment
   above `cxx_toolchain`; a native deep in the closure adds the attribute; none in the closure adds nothing; a package that
   owns C, a dependency with `[native-dependencies]` or a shared `[native.<id>]`, and a static native only the test-only

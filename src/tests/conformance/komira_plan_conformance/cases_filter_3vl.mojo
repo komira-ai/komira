@@ -23,7 +23,7 @@
 #   filter_ne_drops_null    x <> 2 keeping the NULL row
 # =============================================================================
 
-from komira_plan_expr.expr import (
+from plan_expr.expr import (
     BIN_AND,
     BIN_EQ,
     BIN_GT,
@@ -33,9 +33,9 @@ from komira_plan_expr.expr import (
     UN_NOT,
     Expr,
 )
-from komira_plan_expr.scalar_value import ScalarValue
+from plan_expr.scalar_value import ScalarValue
 from komira_plan_harness import CanonPolicy
-from komira_plan_ir.logical_plan import ExprArray, LogicalPlan
+from plan_ir.logical_plan import ExprArray, LogicalPlan
 
 from .plan_case import Case
 from .datasets import bool_pairs, ints_nullable, scan

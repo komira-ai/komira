@@ -1,0 +1,52 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The spill of the engine's two row-format breakers: a hash aggregate's partial
+# tables written to disk over a memory budget and folded back by key (with a
+# hash repartition when the fold itself would pass the budget), and a sort's
+# sorted runs written to disk and k-way merged back in the run sort's order.
+mojo_library(
+    name = "op_spill_rows",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/arrow:arrow",
+        "//src/arrow_ipc:arrow_ipc",
+        "//src/async_rt:async_rt",
+        "//src/async_api:async_api",
+        "//src/atomic_alias:atomic_alias",
+        "//src/byte_buffer:byte_buffer",
+        "//src/containers:containers",
+        "//src/column_format:column_format",
+        "//src/column_kernels:column_kernels",
+        "//src/compression:compression",
+        "//src/counters:counters",
+        "//src/dynamic_filter:dynamic_filter",
+        "//src/engine_runtime:engine_runtime",
+        "//src/exec_types:exec_types",
+        "//src/expr:expr",
+        "//src/fs:fs",
+        "//src/host_probe:host_probe",
+        "//src/join_assembly:join_assembly",
+        "//src/libc:libc",
+        "//src/log:log",
+        "//src/metrics:metrics",
+        "//src/morsel:morsel",
+        "//src/objectstore:objectstore",
+        "//src/op_sort:op_sort",
+        "//src/operator_api:operator_api",
+        "//src/physical_plan:physical_plan",
+        "//src/row_format:row_format",
+        "//src/scan_source:scan_source",
+        "//src/shuffle:shuffle",
+        "//src/simd_ops:simd_ops",
+        "//src/udf:udf",
+    ],
+    test_srcs = [
+        "tests/test_agg_spill_files.mojo",
+        "tests/test_agg_spill_refusals.mojo",
+        "tests/test_agg_spill_round_trip.mojo",
+        "tests/test_sort_spill_files.mojo",
+        "tests/test_sort_spill_merge_order.mojo",
+        "tests/test_spill_root.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)

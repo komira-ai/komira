@@ -12,13 +12,13 @@
 
 from std.testing import TestSuite, assert_equal, assert_true
 
-from komira_arrow.arrow_types import ArrowType
-from komira_arrow.column import Column
-from komira_arrow.primitive_array import PrimitiveArray
-from komira_arrow.record_batch import RecordBatch
-from komira_arrow.schema import Field
-from komira_buffer.heap_region import HeapRegion
-from komira_buffer.owned_aligned_buffer import OwnedAlignedBuffer
+from arrow.arrow_types import ArrowType
+from arrow.column import Column
+from arrow.primitive_array import PrimitiveArray
+from arrow.record_batch import RecordBatch
+from arrow.schema import Field
+from byte_buffer.heap_region import HeapRegion
+from byte_buffer.owned_aligned_buffer import OwnedAlignedBuffer
 
 from komira_plan_harness import CanonPolicy, check_batch, parse_canon, render_batch
 from komira_plan_harness.fixtures import (

@@ -20,7 +20,7 @@
 #     thread's summed call time), per thread, efficiency (rows/s at N over N
 #     times rows/s at 1, from the calls alone), the process's CPU time over
 #     the wall time, and `noisy` when that is below 0.8 of N;
-#   - for each native library: its size, its sha256 time (komira_crypto),
+#   - for each native library: its size, its sha256 time (crypto),
 #     and one dlopen of its staged copy by path (RTLD_NOW | RTLD_LOCAL),
 #     apart from the native runtime's load, which does both and more.
 # The runtimes: the reference runtime echo.so called directly (the floor: the

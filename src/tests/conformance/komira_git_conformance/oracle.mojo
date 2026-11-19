@@ -1,6 +1,6 @@
 # =============================================================================
 # komira_git_conformance/oracle.mojo -- sha1collisiondetection, the C library,
-# as the oracle of komira_git's sha1dc.
+# as the oracle of git's sha1dc.
 # =============================================================================
 #
 # FFI-BOUNDARY: //third_party/sha1collisiondetection:sha1dc, upstream's

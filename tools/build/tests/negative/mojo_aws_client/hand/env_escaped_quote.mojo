@@ -8,7 +8,7 @@ library. The generated environment scan (_no_env_reads) reads the escape
 and refuses std.pathlib, which is not on its allow-list.
 """
 
-from komira_aws_core import AwsRequest
+from aws_core import AwsRequest
 comptime _QUOTE = "\""; from std.pathlib import Path
 
 from .env_read_escaped_quote import (

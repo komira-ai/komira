@@ -8,11 +8,12 @@
 //!
 //!     <out>/plan.json                    members in dependency order
 //!     <out>/<subdir>/<file>.conda        each package, as mopm pack wrote it
-//!     <out>/<name>/README.md             each package's README
+//!     <out>/<namespace>/<name>/README.md each package's README
 //!
-//! plan.json is that of mopm's spec/staged-set.md: every member is an `upload`
+//! plan.json is that of mopm's spec/staged-set.md (version 2: members are named by full name,
+//! `<namespace>/<name>`, and a file is `mojo-<namespace>.<name>-...`): every member is an `upload`
 //! with its files' sha256 and size, `manifest_sha256` (the sha256 of the
-//! `<name>.mopm.json` inside the package, which is what `mopm pack` prints) and
+//! `<import name>.mopm.json` inside the package, which is what `mopm pack` prints) and
 //! the README's path. A package whose name, version or file name disagree with
 //! the metadata inside it, or that needs a package the set does not hold, is
 //! refused: the e2e installs offline, so the set must hold the whole closure.
@@ -71,14 +72,15 @@ pub fn assemble(a: Allocator, opts: Options, log: *std.ArrayList(u8)) !bool {
         for (subdirs) |s| known = known or std.mem.eql(u8, s, subdir);
         if (!known) return refuse(a, log, "{s}: {s} is not in a directory named for a subdir (noarch, linux-64, linux-aarch64, osx-arm64)", .{ m.name, m.conda });
         const filename = std.fs.path.basename(m.conda);
-        const want = try plan_mod.packageFile(a, m.name, m.version, try std.fmt.allocPrint(a, "mojo{s}_0", .{opts.mojo}));
+        const want = (try plan_mod.packageFile(a, m.name, m.version, try std.fmt.allocPrint(a, "mojo{s}_0", .{opts.mojo}))) orelse
+            return refuse(a, log, "{s} has no namespace: a member is named <namespace>/<name>", .{m.name});
         if (!std.mem.eql(u8, filename, want)) return refuse(a, log, "{s}: the file is {s}, and a package {s} {s} for Mojo {s} is {s}", .{ m.name, filename, m.name, m.version, opts.mojo, want });
         var why: []const u8 = "";
         const files = conda.read(a, bytes, &why) catch |e| switch (e) {
             error.OutOfMemory => return error.OutOfMemory,
             error.Corrupt => return refuse(a, log, "{s}: {s}: {s}", .{ m.name, m.conda, why }),
         };
-        const meta_name = try std.fmt.allocPrint(a, "lib/mojo/{s}.mopm.json", .{m.name});
+        const meta_name = try std.fmt.allocPrint(a, "lib/mojo/{s}.mopm.json", .{plan_mod.importName(m.name)});
         const metadata = conda.find(files, meta_name) orelse return refuse(a, log, "{s}: {s} holds no {s}", .{ m.name, m.conda, meta_name });
         const meta = plan_mod.parseMetadata(a, metadata, &why) catch |e| switch (e) {
             error.OutOfMemory => return error.OutOfMemory,
@@ -151,7 +153,7 @@ pub fn assemble(a: Allocator, opts: Options, log: *std.ArrayList(u8)) !bool {
         });
     }
     // The plan is written last: a set with a plan is a complete one.
-    const text = try plan_mod.renderPlan(a, .{ .version = 1, .members = members.items });
+    const text = try plan_mod.renderPlan(a, .{ .version = plan_mod.plan_version, .members = members.items });
     try out.writeFile(.{ .sub_path = "plan.json", .data = text });
     const line = try std.fmt.allocPrint(a, "readme_e2e assemble: {d} member(s) staged in {s}\n", .{ members.items.len, opts.out });
     try log.appendSlice(a, line);

@@ -25,16 +25,16 @@ This module loads nothing, so includes.bzl can load it.
 """
 
 SRC_C_LIBRARIES = [
-    "//src/komira_async:komira_async_posix",
-    "//src/komira_async_api:komira_concurrency_pool_depth",
-    "//src/komira_crypto:komira_crypto_sha256_hw",
-    "//src/komira_fs:komira_fs_posix",
-    "//src/komira_libc:komira_libc_posix",
-    "//src/komira_log:komira_log_holder",
-    "//src/komira_metrics:komira_metrics_ea_flag",
-    "//src/komira_objectstore:komira_objectstore_posix",
-    "//src/komira_scan_source:komira_scan_source_inmem_id",
-    "//src/komira_supervisor:komira_supervisor_proc",
+    "//src/async_rt:komira_async_posix",
+    "//src/async_api:komira_concurrency_pool_depth",
+    "//src/crypto:komira_crypto_sha256_hw",
+    "//src/fs:komira_fs_posix",
+    "//src/libc:komira_libc_posix",
+    "//src/log:komira_log_holder",
+    "//src/metrics:komira_metrics_ea_flag",
+    "//src/objectstore:komira_objectstore_posix",
+    "//src/scan_source:komira_scan_source_inmem_id",
+    "//src/supervisor:komira_supervisor_proc",
     "//src/tests/helpers/komira_udf_spike_abi:komira_udf_spike_c",
     "//src/tests/helpers/komira_udf_spike_abi:komira_udf_echo",
     "//src/tests/helpers/komira_udf_spike_abi:komira_udf_echo_broken",
@@ -81,10 +81,10 @@ def one_definition_listed(name):
 # `prefix` here, so the prefix refused is the one every symbol is proved to
 # carry.
 THIRD_PARTY_OWNERS = {
-    "third_party/aws-lc": struct(owner = "//src/komira_awslc:komira_awslc", prefix = "komira_awslc_"),
-    "third_party/brotli": struct(owner = "//src/komira_parquet_codec:komira_parquet_codec", prefix = "komira_brotli_"),
-    "third_party/s2n-tls": struct(owner = "//src/komira_http_core:komira_http_core", prefix = "komira_s2n_"),
+    "third_party/aws-lc": struct(owner = "//src/awslc:awslc", prefix = "komira_awslc_"),
+    "third_party/brotli": struct(owner = "//src/parquet_codec:parquet_codec", prefix = "komira_brotli_"),
+    "third_party/s2n-tls": struct(owner = "//src/http_core:http_core", prefix = "komira_s2n_"),
     "third_party/sha1collisiondetection": struct(owner = None, prefix = ""),
-    "third_party/snappy": struct(owner = "//src/komira_compression:komira_compression", prefix = "komira_snappy_"),
-    "third_party/sqlite": struct(owner = "//src/komira_db_sqlite:komira_db_sqlite", prefix = "komira_sqlite3_"),
+    "third_party/snappy": struct(owner = "//src/compression:compression", prefix = "komira_snappy_"),
+    "third_party/sqlite": struct(owner = "//src/db_sqlite:db_sqlite", prefix = "komira_sqlite3_"),
 }

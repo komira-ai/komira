@@ -6,7 +6,7 @@
 # Arrow IPC stream: `[Schema][RecordBatch]*[EOS]`, every message framed with
 # the continuation marker (Arrow columnar format, "Encapsulated message
 # format" and "IPC Streaming Format"). This file turns those bytes into a
-# komira_arrow Table, one chunk per RecordBatch message, with the schema the
+# arrow Table, one chunk per RecordBatch message, with the schema the
 # Schema message declares (names, nullability, types), so canon renders the
 # result of both doors from the same kind of value.
 #
@@ -21,16 +21,16 @@
 #   - a stream that does not start with a Schema message, a frame without
 #     the continuation marker, a frame past the end, a missing EOS or bytes
 #     after it are PLAN_DOOR_IPC_MALFORMED, naming the byte offset.
-# The record batch bodies are decoded by komira_arrow_ipc's
+# The record batch bodies are decoded by arrow_ipc's
 # decode_record_batch_message, which checks every buffer against the frame.
 # =============================================================================
 
-from komira_arrow.arrow_types import ArrowType
-from komira_arrow.record_batch import RecordBatchBuilder
-from komira_arrow.schema import Field, RecordBatch, Schema, SchemaBuilder
-from komira_arrow.table import Table
-from komira_arrow_ipc.ipc_decoder_dispatch import decode_record_batch_message
-from komira_arrow_ipc.ipc_flatbuf import (
+from arrow.arrow_types import ArrowType
+from arrow.record_batch import RecordBatchBuilder
+from arrow.schema import Field, RecordBatch, Schema, SchemaBuilder
+from arrow.table import Table
+from arrow_ipc.ipc_decoder_dispatch import decode_record_batch_message
+from arrow_ipc.ipc_flatbuf import (
     DATE_UNIT_DAY,
     DATE_UNIT_MILLISECOND,
     IPC_CONTINUATION_MARKER,
@@ -56,9 +56,9 @@ from komira_arrow_ipc.ipc_flatbuf import (
     read_type_floating_point,
     read_type_int,
 )
-from komira_buffer.heap_region import HeapRegion
-from komira_buffer.shared_aligned_buffer import SharedAlignedBuffer
-from komira_collections.slab import Slab
+from byte_buffer.heap_region import HeapRegion
+from byte_buffer.shared_aligned_buffer import SharedAlignedBuffer
+from containers.slab import Slab
 
 
 def _malformed(at: Int, what: String) -> Error:
