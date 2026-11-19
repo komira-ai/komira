@@ -136,11 +136,12 @@ that set, the one it publishes, and nothing else changes. There are three source
   the e2e with it. It is the one that can be a build action: `mopm stage` asks the
   registry which versions exist (a request, with no token), and a build action is
   offline, so the real stage cannot run inside the build.
-* **`stage`**: `//release/staged_set:taken`, the files of the directory of that package,
+* **`stage`**: `//release/staged_set:taken`, one action's copy of `//release/staged_set:set`.
+  `:set` is the files of the directory of that package,
   where the release workflow's job `mopm-stage` has had `mopm stage --out` write the set
   that `publish --staged` will publish, or where `prod-test` has written the files it checked
-  against the plan (the ones the registry holds in quarantine). The files are an input of the build (uploaded to
-  the farm) and are not in the repository, so the target is empty in a checkout. The e2e
+  against the plan (the ones the registry holds in quarantine). Those files are an input of the build (uploaded to
+  the farm) and are not in the repository, so `:set`, and its copy, are empty in a checkout. The e2e
   then runs on the farm against the real set; against the empty target it fails at
   phase `staged` (no `plan.json`), so a release that did not stage fails.
   The targets do not take the files (`:set`) themselves: an action uploads the files of the
@@ -182,7 +183,9 @@ The guard's cases
 ([`cases.bxl`](cases.bxl)) run in the pull request check:
 `./buck2 bxl komira//tools/build/readme_e2e/cases.bxl:run`. They also hold how the staged set
 reaches the farm: `stage` names `//release/staged_set:taken`, whose only action is one
-`readme_e2e take` run over `:set`, and whose output is that action's.
+`readme_e2e take` run over `:set`, and whose output is that action's; the same check runs
+over made-up wirings first (`stage` naming `:set`, a second action, a copy buck2 makes itself,
+the source passed through), each of which it must refuse.
 
 ## Tests
 
