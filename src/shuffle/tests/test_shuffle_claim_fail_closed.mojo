@@ -31,6 +31,9 @@
 # asserts:
 #   1. `conditional_put(create)` RAISES a NON-precondition Error (not a fake-412).
 #   2. `claim_partition` RE-RAISES (does NOT return False = silent skip).
+# Both are read with the canonical `is_precondition` (the `status=412` /
+# `precondition` tokens), never a bare `412`: the raised message names the
+# root and the key, and either can spell `412`.
 # A store that fake-412s violates both #1 and #2 (the store fake-412s, the
 # claim returns False).
 #
@@ -63,6 +66,7 @@ from std.time import perf_counter_ns
 
 from std.testing import assert_false, assert_true
 
+from objectstore.cas_manifest import is_precondition
 from objectstore.local_fs_conditional_store import (
     LocalFsConditionalStore,
 )
@@ -86,8 +90,8 @@ def _scratch_dir() raises -> String:
 
 
 # -----------------------------------------------------------------------------
-# A per-process-unique scratch root under /tmp (the existing local-fs-store
-# harness shape). Each test gets a distinct subdir so they never collide.
+# A per-process-unique scratch root under the test tmpdir. Each test gets a
+# distinct subdir so they never collide.
 # -----------------------------------------------------------------------------
 def _scratch_root(tag: String) raises -> String:
     var t = UInt64(perf_counter_ns())
@@ -176,13 +180,10 @@ def test_store_conditional_create_non_eexist_failure_is_not_precondition() raise
         )
     except e:
         raised = True
-        var msg = String(e)
-        if (
-            (msg.find(String("precondition")) >= 0)
-            or (msg.find(String("Precondition")) >= 0)
-            or (msg.find(String("412")) >= 0)
-        ):
-            was_precondition = True
+        # Classified by the store's status token, never by a bare `412`: the
+        # message names the root, whose `perf_counter_ns()` suffix can spell
+        # `412` (see `test_a_non_eexist_failure_whose_message_spells_412_...`).
+        was_precondition = is_precondition(String(e))
 
     # The create MUST raise (it could not succeed — the root is a FILE).
     assert_true(raised)
@@ -220,13 +221,7 @@ def test_claim_partition_reraises_on_non_eexist_failure() raises:
         returned_false = not won
     except e:
         reraised = True
-        var msg = String(e)
-        if not (
-            (msg.find(String("precondition")) >= 0)
-            or (msg.find(String("Precondition")) >= 0)
-            or (msg.find(String("412")) >= 0)
-        ):
-            reraised_non_precondition = True
+        reraised_non_precondition = not is_precondition(String(e))
 
     # The claim MUST re-raise (fail closed), NOT return a value.
     assert_true(reraised)
@@ -259,6 +254,82 @@ def test_claim_partition_true_eexist_loss_still_returns_false() raises:
     _cleanup(root)
 
 
+# -----------------------------------------------------------------------------
+# A MESSAGE THAT SPELLS `412` IS NOT A PRECONDITION. The ENOTDIR create failure
+# raises from the store's presence probe (`stat`), and that message names the
+# full path: the root (whose tag here is `p412`, and whose `perf_counter_ns()`
+# suffix spells `412` on some runs anyway) and the key. Its status is an I/O
+# error, not a 412. The tag makes the message spell `412` on every run, so a
+# classifier that reads a bare `412` anywhere in the message fails the store
+# half every time; a `claim_partition` that did the same would return False (a
+# silent skip) instead of re-raising and fail the claim half. The key and the
+# ids are 412 as well, so the message does not depend on the root alone.
+# -----------------------------------------------------------------------------
+def test_a_non_eexist_failure_whose_message_spells_412_is_not_a_precondition() raises:
+    var root = _scratch_root(String("p412"))
+    var store = LocalFsConditionalStore(root.copy())
+    _make_root_a_regular_file(root)
+
+    var store_msg = String("")
+    try:
+        var _m = store.conditional_put(
+            Path.parse(String("412/412.claim")),
+            _bytes_from(String("x")),
+            WritePrecondition.if_none_match_star(),
+        )
+    except e:
+        store_msg = String(e)
+    assert_true(store_msg.byte_length() > 0, msg="the create must raise")
+    # The boundary under test is present: the message spells `412`.
+    assert_true(store_msg.find(String("412")) >= 0, msg=store_msg)
+    assert_false(is_precondition(store_msg), msg=store_msg)
+
+    var claim_msg = String("")
+    var claim_returned = False
+    try:
+        var won = claim_partition(store, Int64(412), Int64(412), Int64(412))
+        # Neither answer is right: the create failed, nobody holds the claim.
+        _ = won
+        claim_returned = True
+    except e:
+        claim_msg = String(e)
+    assert_false(claim_returned, msg="claim_partition must re-raise")
+    assert_true(claim_msg.find(String("412")) >= 0, msg=claim_msg)
+    assert_false(is_precondition(claim_msg), msg=claim_msg)
+
+    _ = store^
+    _cleanup(root)
+
+
+# -----------------------------------------------------------------------------
+# CONTROL FOR THE CLASSIFIER — the message the store raises for a TRUE create
+# loss (the key already exists) IS a precondition. Without this the cases above
+# would also pass against a classifier that answers False for everything.
+# -----------------------------------------------------------------------------
+def test_a_true_eexist_loss_message_is_a_precondition() raises:
+    var root = _scratch_root(String("eexist_msg"))
+    var store = LocalFsConditionalStore(root.copy())
+    var key = Path.parse(String("taken.claim"))
+    var _first = store.conditional_put(
+        key, _bytes_from(String("a")), WritePrecondition.if_none_match_star()
+    )
+
+    var msg = String("")
+    try:
+        var _second = store.conditional_put(
+            key,
+            _bytes_from(String("b")),
+            WritePrecondition.if_none_match_star(),
+        )
+    except e:
+        msg = String(e)
+    assert_true(msg.byte_length() > 0, msg="the second create must raise")
+    assert_true(is_precondition(msg), msg=msg)
+
+    _ = store^
+    _cleanup(root)
+
+
 def _cleanup(root: String):
     """Best-effort cleanup of the scratch root. After an ENOTDIR-injecting test
     the root is a REGULAR FILE, so `unlink` is the removal; after a normal test
@@ -282,4 +353,6 @@ def main() raises:
     test_store_conditional_create_non_eexist_failure_is_not_precondition()
     test_claim_partition_reraises_on_non_eexist_failure()
     test_claim_partition_true_eexist_loss_still_returns_false()
-    print("[test_shuffle_claim_fail_closed] all 3 tests PASS")
+    test_a_non_eexist_failure_whose_message_spells_412_is_not_a_precondition()
+    test_a_true_eexist_loss_message_is_a_precondition()
+    print("[test_shuffle_claim_fail_closed] all 5 tests PASS")
