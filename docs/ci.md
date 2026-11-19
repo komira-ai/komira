@@ -469,9 +469,10 @@ steps (a documentation-only push does not start the workflow, so it publishes no
 registry which versions exist, and an action is offline. So the farm takes the
 set it wrote as an input: `//release/staged_set:set` is the files
 of the directory `release/staged_set/` (`mopm stage --out` writes them there; they
-are not in the repository, `.gitignore`), and
+are not in the repository, `.gitignore`), `//release/staged_set:taken` is that set
+copied by one action, so the farm gets the files once and not once per target, and
 [`//release/readme_e2e/verify`](../release/readme_e2e/verify/BUCK) installs from
-it only under `-c komira_release.staged=stage`. Without that flag the targets
+the copy only under `-c komira_release.staged=stage`. Without that flag the targets
 install from `//release/readme_e2e:staged`, the set the build assembles from the
 packages it made (same layout, `skip` and `refuse` members aside): hermetic, so
 the pull request check builds it, on every change, with no network. The release

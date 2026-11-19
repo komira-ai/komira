@@ -1,4 +1,5 @@
-# The cases of the README e2e's completeness guard (guard.bzl).
+# The cases of the README e2e's completeness guard (guard.bzl), and of the way the
+# release's staged set reaches the farm (staged_choice.bzl, //release/staged_set).
 #
 #   ./buck2 bxl komira//tools/build/readme_e2e/cases.bxl:run
 #
@@ -6,7 +7,10 @@
 # guard (`readme_e2e_complete`, defs.bzl) is built by the pull request check over the
 # real files; these are the shapes it must tell apart.
 
+load("@komira//release/readme_e2e:staged_choice.bzl", "STAGED")
 load(":guard.bzl", "EXCLUDED_PATTERN", "findings", "moved_packages", "mopm_findings")
+
+_TAKEN = "komira//release/staged_set:taken"
 
 _PATHS = [
     "src/a/mopm.toml",
@@ -74,8 +78,73 @@ def _cases():
     expect_in("older than the first with --overlay and the row is missing", mopm_findings(old, "toolchains//:mopm_0_0_33", other), "has no --overlay", "Restore the row")
     return out
 
+def _staged_findings(staged, actions, deps, output):
+    """What is wrong with the way the set `mopm stage` wrote reaches the e2e, or [].
+    `staged` is staged_choice.bzl's STAGED; `actions` the `<kind> <category>` of each
+    action of :taken; `deps` its direct deps; `output` its default outputs, each a
+    struct(is_source, owner). The set must reach the e2e through one action: `stage`
+    names the copy, the copy is one `readme_e2e take` run action over `:set`, and its
+    output is that action's (an e2e target that took the checkout's files would
+    upload them itself, every target at once)."""
+    out = []
+    if staged.get("stage") != "//release/staged_set:taken":
+        out.append("`stage` names {}, not //release/staged_set:taken: each e2e target would upload the files mopm stage wrote itself".format(repr(staged.get("stage"))))
+    if staged.get("assembled") != "//release/readme_e2e:staged":
+        out.append("`assembled` names {}, not //release/readme_e2e:staged".format(repr(staged.get("assembled"))))
+    if actions != ["run readme_e2e_take"]:
+        out.append("{} has the actions {}, not one run action of category readme_e2e_take".format(_TAKEN, actions))
+    if "komira//release/staged_set:set" not in deps:
+        out.append("{} does not take komira//release/staged_set:set (its direct deps: {})".format(_TAKEN, deps))
+    if len(output) != 1 or output[0].is_source or output[0].owner != _TAKEN:
+        out.append("the output of {} is not one artifact its own action writes".format(_TAKEN))
+    return out
+
+def _staged_fixture_cases():
+    out = []
+    good = {"assembled": "//release/readme_e2e:staged", "stage": "//release/staged_set:taken"}
+    actions = ["run readme_e2e_take"]
+    deps = ["komira//release/staged_set:set", "komira//tools/build/readme_e2e:readme_e2e"]
+    output = [struct(is_source = False, owner = _TAKEN)]
+
+    def expect(what, got, *needles):
+        if not needles:
+            if got != []:
+                out.append("staged: {}: got {}, want none".format(what, got))
+            return
+        text = " | ".join(got)
+        if len(got) != len(needles):
+            out.append("staged: {}: got {} finding(s) {}, want {}".format(what, len(got), repr(text), len(needles)))
+        for n in needles:
+            if n not in text:
+                out.append("staged: {}: `{}` is not in {}".format(what, n, repr(text)))
+
+    expect("the wiring of this change", _staged_findings(good, actions, deps, output))
+    expect("`stage` names the checkout's files", _staged_findings(dict(good, stage = "//release/staged_set:set"), actions, deps, output), "`stage` names \"//release/staged_set:set\"")
+    expect("`assembled` moved", _staged_findings(dict(good, assembled = "//x:y"), actions, deps, output), "`assembled` names \"//x:y\"")
+    expect("a second action", _staged_findings(good, actions + ["copy "], deps, output), "has the actions")
+    expect("a copy buck2 makes itself, not a run", _staged_findings(good, ["copy "], deps, output), "not one run action")
+    expect("a run of another category", _staged_findings(good, ["run readme_e2e"], deps, output), "has the actions")
+    expect("no action at all", _staged_findings(good, [], deps, output), "has the actions []")
+    expect("not over :set", _staged_findings(good, actions, ["komira//tools/build/readme_e2e:readme_e2e"], output), "does not take komira//release/staged_set:set")
+    expect("the source passed through", _staged_findings(good, actions, deps, [struct(is_source = True, owner = None)]), "not one artifact its own action writes")
+    expect("another target's output", _staged_findings(good, actions, deps, [struct(is_source = False, owner = "komira//release/staged_set:set")]), "not one artifact its own action writes")
+    expect("two outputs", _staged_findings(good, actions, deps, output + output), "not one artifact its own action writes")
+    expect("everything wrong at once", _staged_findings({}, [], [], []), "`stage` names None", "`assembled` names None", "has the actions []", "does not take", "not one artifact")
+    return out
+
+def _staged_cases(ctx):
+    """_staged_findings over the real STAGED table and the real :taken target."""
+    target = ctx.configured_targets(_TAKEN)
+    actions = [str(n.attrs.kind) + " " + str(n.attrs.category) for n in ctx.aquery().all_actions(_TAKEN)]
+    deps = [str(d.label.raw_target()) for d in ctx.cquery().deps(target, 1)]
+    output = [
+        struct(is_source = o.is_source, owner = None if o.is_source else str(o.owner.raw_target()))
+        for o in ctx.analysis(target).providers()[DefaultInfo].default_outputs
+    ]
+    return _staged_findings(STAGED, actions, deps, output)
+
 def _run(ctx):
-    failures = _cases()
+    failures = _cases() + _staged_fixture_cases() + _staged_cases(ctx)
     if failures:
         fail("{} case(s) failed:\n  ".format(len(failures)) + "\n  ".join(failures))
     ctx.output.print("readme_e2e cases: all passed")

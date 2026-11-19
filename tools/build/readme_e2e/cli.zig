@@ -10,6 +10,10 @@
 //!     readme_e2e assemble --out DIR --mojo M (--member NAME VERSION CONDA README)...
 //!         Writes the staged set of the packages (assemble.zig). Exit 0, or 1
 //!         when a member is refused (nothing is written then).
+//!     readme_e2e take --staged DIR --out DIR
+//!         Copies every file of the staged set DIR to the same path below --out,
+//!         unchanged (take.zig): the one action that uploads a set the build did
+//!         not make. Exit 0, or 1 when an entry is refused or cannot be copied.
 //!
 //! A flag is `--name value`. Everything goes to stdout. Exit 2: bad usage, or a
 //! file that cannot be read or written.
@@ -18,10 +22,12 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const verify = @import("verify.zig");
 const assemble = @import("assemble.zig");
+const take = @import("take.zig");
 
 const USAGE =
     "usage: readme_e2e verify --package P --version V --mojo M --staged DIR --work DIR --marker FILE --mopm CMD --readme-tool CMD --compile CMD --run CMD\n" ++
-    "       readme_e2e assemble --out DIR --mojo M (--member NAME VERSION CONDA README)...\n";
+    "       readme_e2e assemble --out DIR --mojo M (--member NAME VERSION CONDA README)...\n" ++
+    "       readme_e2e take --staged DIR --out DIR\n";
 
 fn usage(a: Allocator, out: *std.ArrayList(u8), comptime fmt: []const u8, args: anytype) !u8 {
     const text = try std.fmt.allocPrint(a, "readme_e2e: " ++ fmt ++ "\n" ++ USAGE, args);
@@ -46,6 +52,7 @@ pub fn execute(a: Allocator, args: []const []const u8, out: *std.ArrayList(u8)) 
     if (args.len == 0) return usage(a, out, "no command", .{});
     if (std.mem.eql(u8, args[0], "verify")) return verifyCommand(a, args[1..], out);
     if (std.mem.eql(u8, args[0], "assemble")) return assembleCommand(a, args[1..], out);
+    if (std.mem.eql(u8, args[0], "take")) return takeCommand(a, args[1..], out);
     return usage(a, out, "unknown command {s}", .{args[0]});
 }
 
@@ -126,5 +133,23 @@ fn assembleCommand(a: Allocator, args: []const []const u8, out: *std.ArrayList(u
     const m = mojo orelse return usage(a, out, "--mojo is required", .{});
     if (members.items.len == 0) return usage(a, out, "at least one --member is required", .{});
     const ok = try assemble.assemble(a, .{ .out = dir, .mojo = m, .members = members.items }, out);
+    return if (ok) 0 else 1;
+}
+
+fn takeCommand(a: Allocator, args: []const []const u8, out: *std.ArrayList(u8)) !u8 {
+    var staged: ?[]const u8 = null;
+    var out_dir: ?[]const u8 = null;
+    var i: usize = 0;
+    while (i < args.len) : (i += 2) {
+        const flag = args[i];
+        const slot = if (std.mem.eql(u8, flag, "--staged")) &staged else if (std.mem.eql(u8, flag, "--out")) &out_dir else return usage(a, out, "unknown argument {s}", .{flag});
+        if (i + 1 >= args.len) return usage(a, out, "{s} takes a value", .{flag});
+        if (slot.* != null) return usage(a, out, "{s} is given twice", .{flag});
+        if (args[i + 1].len == 0) return usage(a, out, "{s} is required", .{flag});
+        slot.* = args[i + 1];
+    }
+    const s = staged orelse return usage(a, out, "--staged is required", .{});
+    const o = out_dir orelse return usage(a, out, "--out is required", .{});
+    const ok = try take.take(a, .{ .staged = s, .out = o }, out);
     return if (ok) 0 else 1;
 }
