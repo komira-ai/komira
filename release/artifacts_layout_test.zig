@@ -7,9 +7,9 @@
 //! and the paths //release:mopm_darwin_libs (osx-arm64, not built here) lists in its sub-target
 //! `[layout]`, to the package list (release/readme_e2e/packages.bzl: `NAMESPACE`, `PACKAGES`) and the
 //! declared natives (`native_ids.json`):
-//!  - the real linux-64 layout is exactly one library per package and one archive per declared native,
-//!    under the namespace; the real osx-arm64 layout is one library per package it builds, under the
-//!    namespace, and not empty;
+//!  - the built linux-64 directory is exactly one library per package and one archive per declared
+//!    native, under the namespace; the osx-arm64 layout is exactly one library per package not in
+//!    `DARWIN_EXCLUDED` (darwin_libs.bzl), under the namespace;
 //!  - a library or archive without the namespace directory, under another namespace or another subdir,
 //!    a missing member, a missing archive, a path for no package, and an empty layout are each refused,
 //!    naming the path.
@@ -21,8 +21,10 @@ const t = std.testing;
 const Release = struct {
     namespace: []const u8,
     packages: []const []const u8,
-    /// `{package: [id, ...]}`, the packages with a native only.
+    /// `{package: [id, ...]}` of native_ids.json; a package with no entry, or an empty list, has no native.
     natives: std.json.ObjectMap,
+    /// The packages darwin_libs.bzl leaves out of the macOS build (`DARWIN_EXCLUDED`).
+    darwin_excluded: []const []const u8 = &.{},
 };
 
 /// `NAMESPACE` and the keys of `PACKAGES` of packages.bzl.
@@ -45,6 +47,29 @@ fn parsePackages(ar: std.mem.Allocator, bzl: []const u8) !struct { namespace: []
         }
     }
     return .{ .namespace = namespace orelse return error.NoNamespace, .packages = packages.items };
+}
+
+/// The keys of `DARWIN_EXCLUDED` of darwin_libs.bzl: `DARWIN_EXCLUDED = {}`, or one `    "<name>": ...` line per entry.
+fn parseDarwinExcluded(ar: std.mem.Allocator, bzl: []const u8) ![]const []const u8 {
+    var out = std.ArrayList([]const u8){};
+    var seen = false;
+    var inside = false;
+    var lines = std.mem.splitScalar(u8, bzl, '\n');
+    while (lines.next()) |line| {
+        if (std.mem.eql(u8, line, "DARWIN_EXCLUDED = {}")) {
+            seen = true;
+        } else if (std.mem.eql(u8, line, "DARWIN_EXCLUDED = {")) {
+            seen = true;
+            inside = true;
+        } else if (inside and std.mem.eql(u8, line, "}")) {
+            inside = false;
+        } else if (inside and std.mem.startsWith(u8, line, "    \"")) {
+            const rest = line[5..];
+            try out.append(ar, rest[0 .. std.mem.indexOfScalar(u8, rest, '"') orelse return error.BadExcludedLine]);
+        }
+    }
+    if (!seen or inside) return error.NoDarwinExcluded;
+    return out.items;
 }
 
 fn parseList(ar: std.mem.Allocator, json: []const u8) ![]const []const u8 {
@@ -82,16 +107,20 @@ fn checkLinux(ar: std.mem.Allocator, got: []const []const u8, r: Release) !?[]co
     return null;
 }
 
-/// Null when `layout` holds at least one path and each is `osx-arm64/<namespace>/<package>.mojoc` of a package; otherwise the reason.
+/// Null when `layout` (a JSON list of paths) is exactly `osx-arm64/<namespace>/<package>.mojoc` for every
+/// package not in `darwin_excluded`; otherwise the reason.
 fn checkDarwin(ar: std.mem.Allocator, layout: []const u8, r: Release) !?[]const u8 {
     const got = try parseList(ar, layout);
     if (got.len == 0) return "the osx-arm64 layout lists no path: the check would be vacuous";
-    for (got) |path| {
-        const prefix = try std.fmt.allocPrint(ar, "osx-arm64/{s}/", .{r.namespace});
-        const ok = std.mem.startsWith(u8, path, prefix) and std.mem.endsWith(u8, path, ".mojoc") and
-            contains(r.packages, path[prefix.len .. path.len - ".mojoc".len]);
-        if (!ok) return try std.fmt.allocPrint(ar, "{s} is not osx-arm64/{s}/<name>.mojoc for a package of packages.bzl", .{ path, r.namespace });
-    }
+    var want = std.ArrayList([]const u8){};
+    for (r.packages) |p| if (!contains(r.darwin_excluded, p))
+        try want.append(ar, try std.fmt.allocPrint(ar, "osx-arm64/{s}/{s}.mojoc", .{ r.namespace, p }));
+    for (got) |path| if (!contains(want.items, path)) return try std.fmt.allocPrint(
+        ar,
+        "{s} is not osx-arm64/{s}/<name>.mojoc for a package of packages.bzl built for macOS",
+        .{ path, r.namespace },
+    );
+    for (want.items) |path| if (!contains(got, path)) return try std.fmt.allocPrint(ar, "{s} is missing from the osx-arm64 layout", .{path});
     return null;
 }
 
@@ -120,7 +149,8 @@ fn listFiles(ar: std.mem.Allocator, name: []const u8) ![]const []const u8 {
 fn realRelease(ar: std.mem.Allocator) !Release {
     const p = try parsePackages(ar, try read(ar, "packages.bzl"));
     const natives = (try std.json.parseFromSlice(std.json.Value, ar, try read(ar, "native_ids.json"), .{})).value.object;
-    return .{ .namespace = p.namespace, .packages = p.packages, .natives = natives };
+    const excluded = try parseDarwinExcluded(ar, try read(ar, "darwin_libs.bzl"));
+    return .{ .namespace = p.namespace, .packages = p.packages, .natives = natives, .darwin_excluded = excluded };
 }
 
 /// A two-package release with one native, for the refusal cases.
@@ -152,7 +182,7 @@ test "the built linux-64 directory is every package's library and every declared
     }
 }
 
-test "the real osx-arm64 layout is libraries of packages, under the namespace" {
+test "the real osx-arm64 layout is the library of every package built for macOS, under the namespace" {
     var arena = std.heap.ArenaAllocator.init(t.allocator);
     defer arena.deinit();
     const ar = arena.allocator();
@@ -223,16 +253,35 @@ test "an empty layout is refused, not passed vacuously" {
     try expectRefused(try checkDarwin(ar, "[]", try fixture(ar)), "the osx-arm64 layout lists no path: the check would be vacuous");
 }
 
-test "an osx-arm64 library without the namespace, of no package, or not a library is refused, naming it" {
+test "an osx-arm64 library without the namespace, of no package, not a library, missing or excluded is refused, naming it" {
     var arena = std.heap.ArenaAllocator.init(t.allocator);
     defer arena.deinit();
     const ar = arena.allocator();
-    const want_tail = " is not osx-arm64/komira-ai/<name>.mojoc for a package of packages.bzl";
-    try t.expectEqual(@as(?[]const u8, null), try checkDarwin(ar, "[\"osx-arm64/komira-ai/json.mojoc\"]", try fixture(ar)));
-    try expectRefused(try checkDarwin(ar, "[\"osx-arm64/json.mojoc\"]", try fixture(ar)), "osx-arm64/json.mojoc" ++ want_tail);
+    const ok = "[\"osx-arm64/komira-ai/json.mojoc\", \"osx-arm64/komira-ai/libc.mojoc\"]";
+    try t.expectEqual(@as(?[]const u8, null), try checkDarwin(ar, ok, try fixture(ar)));
+    const want_tail = " is not osx-arm64/komira-ai/<name>.mojoc for a package of packages.bzl built for macOS";
+    try expectRefused(try checkDarwin(ar, "[\"osx-arm64/json.mojoc\", \"osx-arm64/komira-ai/libc.mojoc\"]", try fixture(ar)), "osx-arm64/json.mojoc" ++ want_tail);
     try expectRefused(try checkDarwin(ar, "[\"osx-arm64/komira-ai/ghost.mojoc\"]", try fixture(ar)), "osx-arm64/komira-ai/ghost.mojoc" ++ want_tail);
     try expectRefused(try checkDarwin(ar, "[\"osx-arm64/komira-ai/json.a\"]", try fixture(ar)), "osx-arm64/komira-ai/json.a" ++ want_tail);
     try expectRefused(try checkDarwin(ar, "[\"linux-64/komira-ai/json.mojoc\"]", try fixture(ar)), "linux-64/komira-ai/json.mojoc" ++ want_tail);
+    try expectRefused(try checkDarwin(ar, "[\"osx-arm64/komira-ai/json.mojoc\"]", try fixture(ar)), "osx-arm64/komira-ai/libc.mojoc is missing from the osx-arm64 layout");
+    var excluding = try fixture(ar);
+    excluding.darwin_excluded = &.{"libc"};
+    try t.expectEqual(@as(?[]const u8, null), try checkDarwin(ar, "[\"osx-arm64/komira-ai/json.mojoc\"]", excluding));
+    try expectRefused(try checkDarwin(ar, ok, excluding), "osx-arm64/komira-ai/libc.mojoc" ++ want_tail);
+}
+
+test "DARWIN_EXCLUDED is read empty, with entries, and refused when absent" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const ar = arena.allocator();
+    try t.expectEqual(@as(usize, 0), (try parseDarwinExcluded(ar, "DARWIN_EXCLUDED = {}\n")).len);
+    const two = try parseDarwinExcluded(ar, "DARWIN_EXCLUDED = {\n    \"awslc\": \"vendored C\",\n    \"zlib\": \"vendored C\",\n}\n");
+    try t.expectEqual(@as(usize, 2), two.len);
+    try t.expectEqualStrings("awslc", two[0]);
+    try t.expectEqualStrings("zlib", two[1]);
+    try t.expectError(error.NoDarwinExcluded, parseDarwinExcluded(ar, "PACKAGES = {}\n"));
+    try t.expectError(error.NoDarwinExcluded, parseDarwinExcluded(ar, "DARWIN_EXCLUDED = {\n    \"awslc\": \"x\",\n"));
 }
 
 test "packages.bzl without NAMESPACE is refused, so the real cases cannot pass on an empty namespace" {

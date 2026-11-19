@@ -194,6 +194,7 @@ zig_test(
     src = "artifacts_layout_test.zig",
     data = {
         "darwin_layout.json": ":mopm_darwin_libs[layout]",
+        "darwin_libs.bzl": ":darwin_libs.bzl",
         "linux_artifacts": ":mopm_artifacts",
         "native_ids.json": ":native_ids_json",
         "packages.bzl": "//release/readme_e2e:packages.bzl",
