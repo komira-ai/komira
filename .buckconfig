@@ -39,7 +39,7 @@
   # `mojo-<namespace>.<name>`; it pins mopm 0.0.113 for every host. A bump is one change: this line, then
   # `buildrules mojo sync` (the pins in the directory `[cells] toolchains` names, and each package's
   # buildrules.mojo.lock.bzl) when the release pins another mopm.
-  commit_hash = 2391d315edae55a122a4e424527cbf273a56d4d6
+  commit_hash = 76cc62003d7e5d960f4bf4c7cebe1ca476d668d4
 
 # buildrules reads every `[buildrules_re]` key from the root cell's configuration, whichever cell evaluates its
 # rules. Komira is the root cell when it is built standalone, so this section is the one read; a repository that
