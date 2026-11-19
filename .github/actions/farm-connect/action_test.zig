@@ -15,7 +15,11 @@
 //!  - the buckconfig written is compared whole, so a key dropped, renamed,
 //!    added or given the wrong value (`tls = false` written whatever `tls`
 //!    says, `tls_ca_certs`, `macos_library_dirs` or the macOS keys written when
-//!    not asked for, or not written when asked for) fails a case;
+//!    not asked for, or not written when asked for) fails a case; every case's
+//!    buckconfig holds `grpc_keepalive_timeout_secs = 60` and
+//!    `max_concurrent_uploads_per_action = 4`, whatever the inputs, so a writer
+//!    that drops either (and leaves buck2's 10 s PING answer and unbounded
+//!    uploads per action) fails every case;
 //!  - each refusal (macOS set without hosts and the reverse, a macOS set equal
 //!    to the linux one, macOS library directories without a macOS set, a
 //!    relative one, one holding `$`, or none at all, `tls` neither true nor false, a CA file with TLS off,
@@ -248,6 +252,8 @@ const LINUX_ONLY =
     \\  instance_name = main
     \\  tls = false
     \\  execution_concurrency_limit = 256
+    \\  grpc_keepalive_timeout_secs = 60
+    \\  max_concurrent_uploads_per_action = 4
     \\[komira_re]
     \\  linux_x86_64_properties = OSFamily=Linux,pool=linux
     \\
@@ -272,6 +278,8 @@ test "macOS properties and hosts: both keys under [komira_re], after the linux s
         \\  instance_name = main
         \\  tls = false
         \\  execution_concurrency_limit = 64
+        \\  grpc_keepalive_timeout_secs = 60
+        \\  max_concurrent_uploads_per_action = 4
         \\[komira_re]
         \\  linux_x86_64_properties = OSFamily=Linux,pool=linux
         \\  darwin_arm64_properties = OSFamily=Darwin,label.pool=mac
@@ -293,6 +301,8 @@ test "macOS library directories: written verbatim after the hosts, spaces and co
         \\  instance_name = main
         \\  tls = false
         \\  execution_concurrency_limit = 256
+        \\  grpc_keepalive_timeout_secs = 60
+        \\  max_concurrent_uploads_per_action = 4
         \\[komira_re]
         \\  linux_x86_64_properties = OSFamily=Linux,pool=linux
         \\  darwin_arm64_properties = OSFamily=Darwin,label.pool=mac
@@ -315,6 +325,8 @@ test "macOS properties and hosts without library directories write no macos_libr
         \\  instance_name = main
         \\  tls = false
         \\  execution_concurrency_limit = 256
+        \\  grpc_keepalive_timeout_secs = 60
+        \\  max_concurrent_uploads_per_action = 4
         \\[komira_re]
         \\  linux_x86_64_properties = OSFamily=Linux,pool=linux
         \\  darwin_arm64_properties = OSFamily=Darwin,label.pool=mac
@@ -332,6 +344,8 @@ test "tls true with no CA file: tls = true and no tls_ca_certs (the system's roo
         \\  instance_name = main
         \\  tls = true
         \\  execution_concurrency_limit = 256
+        \\  grpc_keepalive_timeout_secs = 60
+        \\  max_concurrent_uploads_per_action = 4
         \\[komira_re]
         \\  linux_x86_64_properties = OSFamily=Linux,pool=linux
         \\
@@ -350,6 +364,8 @@ const WITH_BATCH =
     \\  instance_name = main
     \\  tls = false
     \\  execution_concurrency_limit = 256
+    \\  grpc_keepalive_timeout_secs = 60
+    \\  max_concurrent_uploads_per_action = 4
     \\  http_headers = x-kbf-qos:batch
     \\[komira_re]
     \\  linux_x86_64_properties = OSFamily=Linux,pool=linux
@@ -391,6 +407,8 @@ test "tls true with a CA file: tls_ca_certs names that path" {
         \\  tls = true
         \\  tls_ca_certs = {s}
         \\  execution_concurrency_limit = 256
+        \\  grpc_keepalive_timeout_secs = 60
+        \\  max_concurrent_uploads_per_action = 4
         \\[komira_re]
         \\  linux_x86_64_properties = OSFamily=Linux,pool=linux
         \\

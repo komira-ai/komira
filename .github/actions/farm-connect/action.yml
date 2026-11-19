@@ -234,6 +234,21 @@ runs:
             echo "  tls_ca_certs = $TLS_CA_CERTS"
           fi
           echo "  execution_concurrency_limit = $CONCURRENCY"
+          # The connection to the farm can be slow: through a tailnet relay it
+          # carries a few MB/s for all of a job's uploads together. buck2 PINGs a
+          # connection that has read nothing for 30 s, and that PING is queued
+          # behind the upload data the client already wrote to the connection.
+          # With buck2's default 10 s to answer, a slow but working connection is
+          # dropped with every stream on it (KeepAliveTimedOut), and each retry
+          # resends its file from the start. 60 s lets the PING through that
+          # queue; a connection that is really gone is still dropped, 90 s after
+          # its last read.
+          echo "  grpc_keepalive_timeout_secs = 60"
+          # At most 4 blobs of one action in flight at once (buck2 sends them all
+          # at once by default). Fewer streams share the connection, so each blob
+          # finishes sooner, and the answers the client reads keep it from
+          # needing a PING at all.
+          echo "  max_concurrent_uploads_per_action = 4"
           if [ -n "$FARM_QOS" ]; then
             echo "  http_headers = x-kbf-qos:$FARM_QOS"
           fi
