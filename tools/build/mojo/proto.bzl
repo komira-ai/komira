@@ -6,7 +6,7 @@ protoc-gen-mojo plugin, writing one `<stem>.mojo` per `.proto` plus an
 a mojo_library: other Mojo targets name it in `deps`, and it provides the
 same MojoInfo.
 
-  * The generated code imports its runtime (for example `komira_proto_codec`), a
+  * The generated code imports its runtime (for example `proto_codec`), a
     Mojo library like any other: list it in `deps`.
   * A `.proto` is found by protoc at its import path, `import_prefix`
     joined with its path in the package. Each library's `.proto` files are
@@ -27,9 +27,14 @@ A library of this package that has a committed directory `generated/<name>/`
 (tools/build/gen/README.md) is built from those files and nothing else:
 `<name>_gen` generates, `<name>_fresh` compares it with the committed files and
 is the library's first gate, and `<name>` is a `mojo_library` over the committed
-files. That form is the welded one below, and takes bundling too. The rules
-described in the rest of this docstring are those of a library still in the
-transition ledger (tools/build/gen/transition.bzl).
+files. That form is the welded one below, and takes bundling too. With
+`dir_is_import_name = True` the committed directory is `generated/<import
+name>/` instead: the library of a mopm package (`[targets] lib`) is a directory
+named like the module Mojo imports, which the target cannot be when the
+package's own adopted library already has that name. The rules described in
+the rest of this docstring are those of a library still in the transition
+ledger (tools/build/gen/transition.bzl), which has no committed directory and
+does not take `dir_is_import_name`.
 
 Output layout of a target `L` with import name `I`:
 
@@ -497,8 +502,13 @@ def _mojo_proto_library(
         test_data = None,
         test_env = None,
         **kwargs):
-    state = generated_state(name)
+    # The committed directory is named like the module when the library is a mopm package's
+    # `[targets] lib` (see the docstring). A library of the transition keeps the keyword in
+    # `kwargs`, where its own forms refuse it as a keyword they do not take.
+    by_import = kwargs.get("dir_is_import_name", False)
+    state = generated_state(name, (kwargs.get("import_name") or name) if by_import else name)
     if not state.legacy:
+        kwargs.pop("dir_is_import_name", None)
         _committed_proto_library(name, srcs, state, test_srcs, test_data, test_env, kwargs)
         return
 
@@ -677,7 +687,7 @@ def _mojo_db_proto_library(name, srcs, outs, **kwargs):
 # side of the services `srcs` declare, from their RPCs' `(google.api.http)`
 # rules. protoc-gen-mojo-routes (tools/build/proto-codegen/src/routes/) writes
 # `<stem>_routes.mojo` for each `.proto` of `srcs` that declares a service: per
-# service a handler trait, a komira_http_server `Router` table and a
+# service a handler trait, a http_server `Router` table and a
 # `RequestDispatcher`. `outs` states those files, as mojo_db_proto_library's
 # does. The request and response messages come from `messages`, the Mojo
 # proto library generated from the same `.proto` files or from the files they

@@ -5,7 +5,7 @@
 #
 # `PeerGroup` starts each peer (a `bssl` subcommand, or the CPython peer
 # script, cpython.mojo) through
-# `komira_supervisor.Supervisor`, which captures stdout and stderr on two
+# `supervisor.Supervisor`, which captures stdout and stderr on two
 # pipes, read here without blocking, and keeps the peer until it is reaped:
 #
 #   * every wait is bounded: past its deadline the peer is stopped (SIGTERM,
@@ -32,7 +32,7 @@
 from std.os.path import exists
 from std.time import perf_counter_ns, sleep
 
-from komira_supervisor import ChildSpec, SIGKILL, Supervisor
+from supervisor import ChildSpec, SIGKILL, Supervisor
 
 comptime _SETPRIV = "/usr/bin/setpriv"
 comptime _TERM_GRACE_MS = 500

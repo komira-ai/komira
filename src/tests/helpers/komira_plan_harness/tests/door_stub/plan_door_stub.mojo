@@ -43,7 +43,7 @@
 # Every plan holds a NUL byte, so a door that measured the plan with strlen
 # would send the wrong bytes and get the MALFORMED refusal.
 #
-# THE ASYNC RUNTIME. komira_ctx_new starts a komira_async
+# THE ASYNC RUNTIME. komira_ctx_new starts a async_rt
 # PerCoreAsyncRuntime (four epoll workers, pthreads) inside this library and
 # komira_ctx_free shuts it down and joins them. The `id` column of the table
 # is computed by a fork-join wave on that runtime (fork_join_shared over the
@@ -53,7 +53,7 @@
 # process dlopened a Mojo library whose own runtime ran work on its own
 # threads, and came back.
 #
-# THE RELEASE COUNT. Door A's stream is komira_arrow_ipc's exported stream
+# THE RELEASE COUNT. Door A's stream is arrow_ipc's exported stream
 # (build_record_batch_stream) wrapped in one of this file's: the outer
 # stream's callbacks forward to the inner stream's, and its release callback
 # counts one release on the session, releases the inner stream and frees
@@ -77,34 +77,34 @@
 from std.ffi import external_call
 from std.memory import alloc, unsafe_memcpy
 
-from komira_arrow.arrow_types import ArrowType
-from komira_arrow.column import Column
-from komira_arrow.primitive_array import PrimitiveArray
-from komira_arrow.record_batch import RecordBatchBuilder
-from komira_arrow.schema import Field, RecordBatch, Schema, SchemaBuilder
-from komira_arrow.string_array import StringArray
-from komira_arrow_ipc.c_data_interface import CArrowArray, CArrowSchema
-from komira_arrow_ipc.c_data_stream import (
+from arrow.arrow_types import ArrowType
+from arrow.column import Column
+from arrow.primitive_array import PrimitiveArray
+from arrow.record_batch import RecordBatchBuilder
+from arrow.schema import Field, RecordBatch, Schema, SchemaBuilder
+from arrow.string_array import StringArray
+from arrow_ipc.c_data_interface import CArrowArray, CArrowSchema
+from arrow_ipc.c_data_stream import (
     CArrowArrayStream,
     build_record_batch_stream,
     release_c_stream,
 )
-from komira_arrow_ipc.ipc_encoder_dispatch import (
+from arrow_ipc.ipc_encoder_dispatch import (
     arrow_ipc_eos_bytes,
     encode_record_batch_message,
     encode_schema_message,
 )
-from komira_async.ops.waker_sink import NoopSink
-from komira_async.reactor.reactor import BACKEND_EPOLL
-from komira_async.runtime.local_dispatcher import LocalDispatcher
-from komira_async.runtime.runtime import PLACEMENT_FIXED, PerCoreAsyncRuntime
-from komira_async.runtime.sched_trace import SITE_GENERIC_FORK_JOIN
-from komira_async_api.fork_join_shared import fork_join_shared
-from komira_async_api.shared_chunk_work import SharedChunkWork
-from komira_async_api.token import CancellationToken
-from komira_buffer.heap_region import HeapRegion
-from komira_buffer.shared_aligned_buffer import SharedAlignedBuffer
-from komira_collections.slab import Slab
+from async_rt.ops.waker_sink import NoopSink
+from async_rt.reactor.reactor import BACKEND_EPOLL
+from async_rt.runtime.local_dispatcher import LocalDispatcher
+from async_rt.runtime.runtime import PLACEMENT_FIXED, PerCoreAsyncRuntime
+from async_rt.runtime.sched_trace import SITE_GENERIC_FORK_JOIN
+from async_api.fork_join_shared import fork_join_shared
+from async_api.shared_chunk_work import SharedChunkWork
+from async_api.token import CancellationToken
+from byte_buffer.heap_region import HeapRegion
+from byte_buffer.shared_aligned_buffer import SharedAlignedBuffer
+from containers.slab import Slab
 
 comptime _VoidPtr = UnsafePointer[NoneType, MutUntrackedOrigin]
 comptime _BytesPtr = UnsafePointer[UInt8, MutUntrackedOrigin]
@@ -353,7 +353,7 @@ def _table_ipc(mut sess: _Session) raises -> List[UInt8]:
 
 
 struct _CountedStream(Movable):
-    """Behind the exported stream's private_data: the inner stream komira_arrow_ipc
+    """Behind the exported stream's private_data: the inner stream arrow_ipc
     built, and the session whose release count it bumps.
 
     # SAFETY: `inner` is this library's heap box, freed by `_counted_release`;
@@ -383,7 +383,7 @@ def _counted(stream: _VoidPtr) -> UnsafePointer[_CountedStream, MutUntrackedOrig
 
 # SAFETY (the three forwarding callbacks below): the consumer calls them only
 # on a live stream of this library, so `_counted(stream)` is the live
-# `_CountedStream` and its `inner` the live stream komira_arrow_ipc built; the
+# `_CountedStream` and its `inner` the live stream arrow_ipc built; the
 # inner callbacks get the inner stream as their self, and the consumer's out
 # struct passes through unread.
 def _counted_get_schema(stream: _VoidPtr, out_schema: _SchemaPtr) abi("C") -> Int32:
@@ -403,7 +403,7 @@ def _counted_get_last_error(stream: _VoidPtr) abi("C") -> UnsafePointer[Int8, Mu
 
 def _release_inner(cs: UnsafePointer[_CountedStream, MutUntrackedOrigin]):
     """One release of the stream's state: counted, then the inner stream's
-    batches freed (release_c_stream is the producer half, and komira_arrow_ipc
+    batches freed (release_c_stream is the producer half, and arrow_ipc
     produced the inner stream)."""
     # SAFETY: `cs` is the live `_CountedStream` of a stream being released;
     # its session outlives the stream (the caller releases before
@@ -468,7 +468,7 @@ def _export_counted(
     var f: _ReleaseFn = _counted_release
     # SAFETY: a thin fn-ptr and the struct's `void*` release slot are both one
     # machine word; the consumer reads the slot back as this function type
-    # (komira_arrow_ipc's _set_stream_release does the same).
+    # (arrow_ipc's _set_stream_release does the same).
     outer.release = UnsafePointer(to=f).bitcast[_VoidPtr]()[]
     outer.private_data = cs.bitcast[NoneType]()
     # SAFETY: the caller's struct, written once, on success only.

@@ -1,0 +1,70 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The at-rest format of telemetry in an object store: the object-key layout
+# (the UTC day partition is the index), the manifest body that carries a time
+# range, discovery by manifest replay with exact GETs (the one LIST is writer
+# shard enumeration), and the log and metric segment writers, which write
+# time-sorted Parquet and then append the manifest entry. The store is a trait
+# parameter; the tests run on the in-memory conditional-write store.
+#
+# The welded tests (each file's header says which defect it catches):
+# - test_telemetry_keys: the day partition function (leap day, pre-epoch
+#   floor, the closed day bounds), key depth held constant, segment hygiene,
+#   and the sidecar key derived from the data key.
+# - test_telemetry_segment_entry: the manifest body round-trips every field,
+#   a truncated, empty, unknown or reserved-version body is refused, the
+#   inclusive time and series prunes, and the envelope's field order pinned at
+#   byte offsets.
+# - test_telemetry_manifest_replay: a replay over a store whose LIST raises
+#   still finds every segment (the forward probe past a deferred `_HEAD`), a
+#   reaped chunk below the head is a hole, the merge-input skip, and the
+#   time-range plan prunes.
+# - test_telemetry_log_segment_writer: published bytes decoded by
+#   parquet: time-sorted, one object per UTC day, PUT before the
+#   manifest append, sidecar key derived, the codec and row-group knobs reach
+#   the encoder, two writer lifetimes never share a segment uuid.
+# - test_telemetry_metric_segment_writer: the same for metrics, sorted
+#   `(series_id, ts)`, with entry bounds re-derived from the decoded file.
+mojo_library(
+    name = "telemetry_store",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    # The full transitive closure of the Mojo libraries this package builds on.
+    deps = [
+        "//src/arrow:arrow",
+        "//src/async_rt:async_rt",
+        "//src/async_api:async_api",
+        "//src/atomic_alias:atomic_alias",
+        "//src/byte_buffer:byte_buffer",
+        "//src/clock:clock",
+        "//src/containers:containers",
+        "//src/column_kernels:column_kernels",
+        "//src/compression:compression",
+        "//src/counters:counters",
+        "//src/dynamic_filter:dynamic_filter",
+        "//src/fs:fs",
+        "//src/libc:libc",
+        "//src/metrics:metrics",
+        "//src/objectstore:objectstore",
+        "//src/objectstore:komira_objectstore_posix",
+        "//src/parquet_api:parquet_api",
+        "//src/parquet_codec:parquet_codec",
+        "//src/parquet_writer:parquet_writer",
+        "//src/plan_expr:plan_expr",
+        "//src/scalar_arithmetic:scalar_arithmetic",
+        "//src/simd_ops:simd_ops",
+        "//src/zlib:zlib",
+        "//tools/build/mojo/runtime_paths:runtime_paths",
+    ],
+    # The reader decodes the writers' files in the writer tests. It is not a
+    # dependency of the library: a test-only package, never shipped.
+    test_deps = ["//src/parquet:parquet"],
+    test_srcs = [
+        "tests/test_telemetry_keys.mojo",
+        "tests/test_telemetry_log_segment_uuid.mojo",
+        "tests/test_telemetry_log_segment_writer.mojo",
+        "tests/test_telemetry_manifest_replay.mojo",
+        "tests/test_telemetry_metric_segment_writer.mojo",
+        "tests/test_telemetry_segment_entry.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)

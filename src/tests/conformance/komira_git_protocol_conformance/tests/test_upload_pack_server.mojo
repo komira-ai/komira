@@ -1,5 +1,5 @@
 # =============================================================================
-# test_upload_pack_server.mojo -- komira_git's protocol v2 server answers
+# test_upload_pack_server.mojo -- git's protocol v2 server answers
 # every request the pinned git client sent, byte for byte as the pinned git
 # server answered it.
 # =============================================================================
@@ -9,7 +9,7 @@
 # request read is answered from the scenario's repository
 # (append_ls_refs_response; negotiate over TranscriptGraph, FetchResponder)
 # and compared with git's answer at the same offset. The pack itself is
-# git's to make (pack writing is not part of komira_git's protocol layer):
+# git's to make (pack writing is not part of git's protocol layer):
 # its section is read with read_git_packfile, which checks that it is a
 # whole pack, and the comparison resumes after it. Every byte git sent is
 # accounted for.
@@ -35,7 +35,7 @@
 
 from std.testing import assert_equal, assert_true
 
-from komira_git import (
+from git import (
     V2_END,
     V2_LS_REFS,
     V2_NEED_MORE,
@@ -112,7 +112,7 @@ def _serve(name: String) raises -> Int:
         if at != len(conn.response):
             raise Error(
                 what + ": git sent " + String(len(conn.response) - at)
-                + " bytes komira_git did not"
+                + " bytes git did not"
             )
     return answered
 
@@ -165,4 +165,4 @@ def main() raises:
     test_since()
     test_unborn()
     test_negotiate_only()
-    print("komira_git conformance: upload-pack v2 server passed")
+    print("git conformance: upload-pack v2 server passed")

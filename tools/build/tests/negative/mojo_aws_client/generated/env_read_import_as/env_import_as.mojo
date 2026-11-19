@@ -6,7 +6,7 @@ generated environment scan (_no_env_reads) reads each name of the list and
 refuses std.pathlib, which is not on its allow-list.
 """
 
-import komira_aws_core, std.pathlib as pl
+import aws_core, std.pathlib as pl
 
 from .env_read_import_as import (
     CloudWatchLogsGetLogEventsRequest,
@@ -16,7 +16,7 @@ from .env_read_import_as import (
 
 def get_log_events(
     input: CloudWatchLogsGetLogEventsRequest,
-) raises -> komira_aws_core.AwsRequest:
+) raises -> aws_core.AwsRequest:
     """The GetLogEvents request, refused unless the home directory is known."""
     if String(pl.Path.home()) == "":
         raise Error("no home directory")

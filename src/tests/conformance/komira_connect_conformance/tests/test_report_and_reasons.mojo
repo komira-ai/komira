@@ -104,7 +104,7 @@ def test_every_pattern_needs_its_reason() raises:
     var good = (
         String("## prose about the file\n")
         + "\n"
-        + "# komira_connect returns NOT_FOUND for an unregistered method,\n"
+        + "# connect returns NOT_FOUND for an unregistered method,\n"
         + "# not UNIMPLEMENTED.\n"
         + "**/unimplemented\n"
         + "**/unary/unimplemented\n"
@@ -117,7 +117,7 @@ def test_every_pattern_needs_its_reason() raises:
     assert_equal(len(parsed[0]), 3, "three patterns")
     assert_equal(
         parsed[0][1].reason,
-        String("komira_connect returns NOT_FOUND for an unregistered method, not UNIMPLEMENTED."),
+        String("connect returns NOT_FOUND for an unregistered method, not UNIMPLEMENTED."),
         "a reason spans its comment lines",
     )
     assert_equal(parsed[0][2].reason, String("no error details"), "each block its own reason")

@@ -46,24 +46,24 @@
 from std.memory import ArcPointer
 from std.testing import assert_equal, assert_true
 
-from komira_atomic_alias import AtomicI64
-from komira_clock import now_ns
-from komira_async.ops.waker_sink import NoopSink
-from komira_async.reactor.reactor import Reactor
-from komira_async.reactor.socket_setup import set_so_rcvbuf, set_so_sndbuf
-from komira_async.runtime.blocking_runtime import BlockingRuntime
-from komira_async.runtime.runtime_trait import Runtime
-from komira_http_client.body import EmptyBody
-from komira_http_client.client import HttpClient, build_get_request
-from komira_http_client.header_map import HeaderMap
-from komira_http_client.url import Url
-from komira_http_core.codec import HttpMethod, HttpRequest, HttpResponse
-from komira_http_core.transport import StreamIo
-from komira_http_core.transport.io_stream import Connector, IoStream
-from komira_http_core.transport.kernel_tcp import KernelTcpConnector, TcpIoStream
-from komira_http_server.dispatch import RequestDispatcher
-from komira_http_server.routing import Router
-from komira_http_server.server import HttpServer, HttpServerConfig
+from atomic_alias import AtomicI64
+from clock import now_ns
+from async_rt.ops.waker_sink import NoopSink
+from async_rt.reactor.reactor import Reactor
+from async_rt.reactor.socket_setup import set_so_rcvbuf, set_so_sndbuf
+from async_rt.runtime.blocking_runtime import BlockingRuntime
+from async_rt.runtime.runtime_trait import Runtime
+from http_client.body import EmptyBody
+from http_client.client import HttpClient, build_get_request
+from http_client.header_map import HeaderMap
+from http_client.url import Url
+from http_core.codec import HttpMethod, HttpRequest, HttpResponse
+from http_core.transport import StreamIo
+from http_core.transport.io_stream import Connector, IoStream
+from http_core.transport.kernel_tcp import KernelTcpConnector, TcpIoStream
+from http_server.dispatch import RequestDispatcher
+from http_server.routing import Router
+from http_server.server import HttpServer, HttpServerConfig
 
 from komira_http_tls_e2e import ClientLeg, DispatchServeLoop, serve_while
 
@@ -86,7 +86,7 @@ def _pattern(i: Int) -> UInt8:
 
 def _spin_until(deadline_ns: UInt64):
     """Busy-wait on the monotonic clock. Not `std.time.sleep`: its
-    `nanosleep` declaration conflicts with the komira_async reactor's in one
+    `nanosleep` declaration conflicts with the async_rt reactor's in one
     binary."""
     while now_ns() < deadline_ns:
         pass

@@ -33,7 +33,7 @@
 from std.os import mkdir
 from std.testing import assert_equal, assert_raises, assert_true
 
-from komira_runtime_paths import test_tmpdir
+from runtime_paths import test_tmpdir
 
 from komira_json_conformance import (
     KIND_I,

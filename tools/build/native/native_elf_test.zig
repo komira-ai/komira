@@ -3,7 +3,7 @@
 //! `Shared` values; these build a small 64-bit little-endian shared object
 //! byte by byte (`fixture`) and read it, so a dynamic tag, a needed or
 //! defined version, or a symbol attribute the reader drops is red here even
-//! when komira_crypto's green library carries none of it (it has no run
+//! when crypto's green library carries none of it (it has no run
 //! path). The object has every dynamic tag the reader keeps (NEEDED and
 //! RUNPATH more than once, a non-glibc NEEDED before the last), an entry after
 //! DT_NULL (which must not be read), version-needed and version-definition

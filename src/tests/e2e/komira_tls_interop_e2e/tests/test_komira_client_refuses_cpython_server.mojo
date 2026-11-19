@@ -17,7 +17,7 @@
 
 from std.testing import assert_equal, assert_true
 
-from komira_http_core.tls import TlsConnection, tls_init
+from http_core.tls import TlsConnection, tls_init
 from komira_tls_interop_e2e import (
     LEAF_CERT_PATH,
     LEAF_KEY_PATH,

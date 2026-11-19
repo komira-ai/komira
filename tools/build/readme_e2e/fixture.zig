@@ -4,6 +4,7 @@
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
+const plan_mod = @import("plan.zig");
 
 pub const Entry = struct { name: []const u8, bytes: []const u8 };
 
@@ -86,8 +87,10 @@ pub fn condaDeflated(a: Allocator, stem: []const u8) ![]u8 {
 /// and leaves the file out, a package that cannot be linked.
 pub const Static = struct { soname: []const u8, bytes: []const u8, ship: bool = true };
 
-/// A package as `mopm pack` makes it: `lib/mojo/<name>.mojoc` (the bytes given)
-/// and `lib/mojo/<name>.mopm.json` naming `deps`.
+/// A package as `mopm pack` makes it: `lib/mojo/<import name>.mojoc` (the bytes given)
+/// and `lib/mojo/<import name>.mopm.json` naming `deps`. `name` and `deps` are full names,
+/// `<namespace>/<name>`; the import name is the part after the slash, and the file is
+/// `mojo-<namespace>.<name>-<version>-<build>.conda`.
 pub fn package(a: Allocator, name: []const u8, version: []const u8, build: []const u8, mojoc: []const u8, deps: []const []const u8) ![]u8 {
     return packageWith(a, name, version, build, mojoc, deps, &.{});
 }
@@ -112,13 +115,15 @@ pub fn packageWith(a: Allocator, name: []const u8, version: []const u8, build: [
         }
         try meta.append(a, ']');
     }
-    try meta.appendSlice(a, try std.fmt.allocPrint(a, ",\"schema\":1,\"version\":\"{s}\"}}", .{version}));
+    try meta.appendSlice(a, try std.fmt.allocPrint(a, ",\"schema\":2,\"version\":\"{s}\"}}", .{version}));
     var entries: std.ArrayList(Entry) = .empty;
-    try entries.append(a, .{ .name = try std.fmt.allocPrint(a, "lib/mojo/{s}.mojoc", .{name}), .bytes = mojoc });
-    try entries.append(a, .{ .name = try std.fmt.allocPrint(a, "lib/mojo/{s}.mopm.json", .{name}), .bytes = meta.items });
+    const import = plan_mod.importName(name);
+    try entries.append(a, .{ .name = try std.fmt.allocPrint(a, "lib/mojo/{s}.mojoc", .{import}), .bytes = mojoc });
+    try entries.append(a, .{ .name = try std.fmt.allocPrint(a, "lib/mojo/{s}.mopm.json", .{import}), .bytes = meta.items });
     for (natives) |n| {
         if (n.ship) try entries.append(a, .{ .name = try std.fmt.allocPrint(a, "lib/{s}", .{n.soname}), .bytes = n.bytes });
     }
     const tar = try tarOf(a, entries.items);
-    return condaOf(a, try std.fmt.allocPrint(a, "mojo-{s}-{s}-{s}", .{ name, version, build }), tar);
+    const file = (try plan_mod.packageFile(a, name, version, build)) orelse return error.NoNamespace;
+    return condaOf(a, file[0 .. file.len - ".conda".len], tar);
 }

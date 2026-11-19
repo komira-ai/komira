@@ -1,4 +1,4 @@
-//! What every module of komira_oci shares: one arena (the tool runs once and
+//! What every module of oci shares: one arena (the tool runs once and
 //! exits, so nothing is freed), the refusal message, file helpers, and the
 //! spellings the messages use (an OS error as `<text> (os error <n>)`, a
 //! value's debug form) so a refusal reads the same on every path.

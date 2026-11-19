@@ -7,7 +7,7 @@ load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 # sha256 below is the one the release notes list for that archive, and the
 # archive downloaded from the release URL hashes to it. Nothing of it is
 # committed here, and nothing ships it: it is the git-lfs half of the git
-# oracle (//third_party/git, README.md), test input of komira_git's
+# oracle (//third_party/git, README.md), test input of git's
 # conformance tests, run there as a child process of the pinned git. No
 # library or binary depends on it.
 #

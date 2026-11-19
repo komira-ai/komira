@@ -109,7 +109,7 @@ pub const Given = struct { name: []const u8, data: []const u8 };
 /// then each static archive, sorted by path.
 pub fn libFilesOf(alloc: Alloc, shared: []const Given, statics: []const Given) Error![]LibFile {
     var list = std.ArrayList(LibFile).empty;
-    if (shared.len > 1) return refuse(alloc, "{d} shared libraries given; a library ships one, lib<library>_native.so.1", .{shared.len});
+    if (shared.len > 1) return refuse(alloc, "{d} shared libraries given; a library ships one, libkomira_<library>_native.so.1", .{shared.len});
     for (shared) |s| {
         // A versioned SONAME (an owner's) has its unversioned link name; an
         // unversioned one (`lib<name>.so`, a C ABI library) is its own name
@@ -532,10 +532,10 @@ test "a NEEDED owner missing from the Mojo closure is refused" {
     const alloc = arena.allocator();
     const needs = try needed(alloc, try testElf(alloc, &.{ "libkomira_crypto_native.so.1", "libc.so.6" }));
     const lib = "lib/libkomira_http_core_native.so.1";
-    // komira_http_core with komira_crypto in its closure: accepted.
-    try checkNeededOwners(alloc, "komira_http_core", lib, needs, &.{ "libkomira_crypto_native.so.1", "libkomira_http_core_native.so.1" });
-    // komira_http_core packed with its crypto dependency removed: refused.
-    try testing.expectError(error.Refused, checkNeededOwners(alloc, "komira_http_core", lib, needs, &.{"libkomira_http_core_native.so.1"}));
+    // http_core with crypto in its closure: accepted.
+    try checkNeededOwners(alloc, "http_core", lib, needs, &.{ "libkomira_crypto_native.so.1", "libkomira_http_core_native.so.1" });
+    // http_core packed with its crypto dependency removed: refused.
+    try testing.expectError(error.Refused, checkNeededOwners(alloc, "http_core", lib, needs, &.{"libkomira_http_core_native.so.1"}));
     try testing.expect(std.mem.indexOf(u8, why, "NEEDED libkomira_crypto_native.so.1") != null);
 }
 
@@ -545,8 +545,8 @@ test "the packer's __glibc comes only after the NEEDED check" {
     const alloc = arena.allocator();
     const elf = try testElf(alloc, &.{ "libkomira_crypto_native.so.1", "libc.so.6" });
     const files = try libFilesOf(alloc, &.{.{ .name = "libkomira_http_core_native.so.1", .data = elf }}, &.{});
-    try testing.expectEqualStrings("__glibc >=2.17", try checkedGlibc(alloc, "komira_http_core", files, "2.17", &.{"libkomira_crypto_native.so.1"}));
-    try testing.expectError(error.Refused, checkedGlibc(alloc, "komira_http_core", files, "2.17", &.{"libkomira_http_core_native.so.1"}));
+    try testing.expectEqualStrings("__glibc >=2.17", try checkedGlibc(alloc, "http_core", files, "2.17", &.{"libkomira_crypto_native.so.1"}));
+    try testing.expectError(error.Refused, checkedGlibc(alloc, "http_core", files, "2.17", &.{"libkomira_http_core_native.so.1"}));
     try testing.expect(std.mem.indexOf(u8, why, "NEEDED libkomira_crypto_native.so.1") != null);
 }
 

@@ -1,7 +1,7 @@
 from std.os import getenv, listdir, makedirs
 from std.testing import assert_equal, assert_true
 
-from komira_json import JsonValue, parse_json_value
+from json import JsonValue, parse_json_value
 
 from covcheck.cli import USAGE_MARK, EXIT_GATE, EXIT_INPUT, EXIT_OK, EXIT_USAGE, max_annotations, parse_args, run
 from covcheck.text import read_text, sort_strings, write_text

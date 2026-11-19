@@ -3,7 +3,7 @@
 # against the fake, over TLS on loopback
 # =============================================================================
 #
-# The generated SecretManagerServiceClient (komira_gcp_secretmanager), over
+# The generated SecretManagerServiceClient (gcp_secretmanager), over
 # a verifying TlsConnector that trusts only the fixture root, with a static
 # GcpTokenSource, drives the fake (gcp_fake.mojo) through its TLS front:
 #
@@ -45,12 +45,12 @@
 
 from std.testing import assert_equal, assert_false, assert_true
 
-from komira_async.ops.waker_sink import NoopSink
-from komira_async.runtime.blocking_runtime import BlockingRuntime
-from komira_encoding import base64_encode
-from komira_gcp_core import StaticTokenSource
-from komira_gcp_secretmanager.resources import SecretVersion_State
-from komira_gcp_secretmanager.service import (
+from async_rt.ops.waker_sink import NoopSink
+from async_rt.runtime.blocking_runtime import BlockingRuntime
+from encoding import base64_encode
+from gcp_core import StaticTokenSource
+from gcp_secretmanager.resources import SecretVersion_State
+from gcp_secretmanager.service import (
     AccessSecretVersionRequest,
     AddSecretVersionRequest,
     CreateSecretRequest,
@@ -58,8 +58,8 @@ from komira_gcp_secretmanager.service import (
     ListSecretVersionsRequest,
     ListSecretsRequest,
 )
-from komira_http_core.tls import tls_init
-from komira_proto_codec.codec import decode_json
+from http_core.tls import tls_init
+from proto_codec.codec import decode_json
 
 from komira_secrets_e2e import (
     GLOBAL_HOST,
@@ -227,7 +227,7 @@ struct _Lifecycle(ClientLeg):
 
 def test_crc32c_matches_published_values() raises:
     # RFC 3720 appendix B.4 (32 zero bytes) and the CRC-32C check value of
-    # "123456789"; "hunter2" is komira_gcp_secretmanager's own test vector.
+    # "123456789"; "hunter2" is gcp_secretmanager's own test vector.
     var zeros = List[UInt8]()
     zeros.resize(32, UInt8(0))
     assert_equal(Int(crc32c(Span(zeros))), 0x8A9136AA)
@@ -268,7 +268,7 @@ def test_gcp_secret_lifecycle_over_tls() raises:
     for i in range(len(fake.authorizations)):
         assert_equal(fake.authorizations[i], String("Bearer ") + TEST_ACCESS_TOKEN)
     assert_equal(len(fake.error_bodies), 0)
-    # komira_http_client keeps no HTTP/1.1-over-TLS connection alive
+    # http_client keeps no HTTP/1.1-over-TLS connection alive
     # (`_dispatch_pooled_buffered` pools h1 over plaintext only), so today
     # each request is a connection of its own; at least one per client,
     # at most one per request, every one presenting `localhost`.

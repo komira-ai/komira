@@ -1,4 +1,4 @@
-from komira_db import DbRow, DbStorable, LOGICAL_UUID, SqlDatabase, Uuid
+from db import DbRow, DbStorable, LOGICAL_UUID, SqlDatabase, Uuid
 from std.testing import assert_equal, assert_true
 from tasks_db.tasks_db import Task
 

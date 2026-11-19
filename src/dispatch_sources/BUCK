@@ -1,0 +1,43 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# Source support for the engine dispatcher: the typed in-memory source and its scan plan builders, the bare multi-batch in-memory scan fold, the row gate of the resident-filter fan-out, the leaf-servability pre-gates, and the column-parallel concat re-exported.
+mojo_library(
+    name = "dispatch_sources",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/arrow:arrow",
+        "//src/async_rt:async_rt",
+        "//src/async_api:async_api",
+        "//src/containers:containers",
+        "//src/column_format:column_format",
+        "//src/column_kernels:column_kernels",
+        "//src/engine_runtime:engine_runtime",
+        "//src/fs:fs",
+        "//src/host_profile:host_profile",
+        "//src/morsel:morsel",
+        "//src/op_agg_row_api:op_agg_row_api",
+        "//src/op_typed_source_api:op_typed_source_api",
+        "//src/parquet:parquet",
+        "//src/physical_plan:physical_plan",
+        "//src/plan_expr:plan_expr",
+        "//src/plan_ir:plan_ir",
+        "//src/scan_source:scan_source",
+    ],
+    test_srcs = [
+        # the resident-filter fan-out's row gate: a STRING predicate is
+        # admitted from 65,536 rows, a fixed-width one keeps its floor, the
+        # band edges, and varlen_on=False restores the row-only gate
+        "tests/test_inmem_filter_varlen_gate.mojo",
+        # InMemSource, the in-memory scan plan builders and the multi-batch
+        # fold
+        "tests/test_inmem_source.mojo",
+        # the bare multi-batch scan fold: the zero-copy gate and the chunks a
+        # fold leaves in place
+        "tests/test_materialize_zerocopy_gate.mojo",
+        # the leaf-servability pre-gates and the pushed-filter walker
+        "tests/test_plan_leaf_servable.mojo",
+        # the varlen gate over the columns a predicate reads
+        "tests/test_varlen_gate_columns.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)

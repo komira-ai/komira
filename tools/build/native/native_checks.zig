@@ -321,7 +321,7 @@ pub fn check3(alloc: Alloc, so: Shared, weak: []const []const u8, owners: []cons
 }
 
 /// Whether the library calls outside komira at all: a strong undefined symbol
-/// without the komira_ prefix. A shim of atomics alone (komira_async_api's
+/// without the komira_ prefix. A shim of atomics alone (async_api's
 /// pool depth) needs nothing of glibc, so the link records no libc.so.6 and
 /// no GLIBC_ version, and that is green.
 pub fn callsGlibc(so: Shared) bool {

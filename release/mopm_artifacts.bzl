@@ -2,8 +2,8 @@
 
     mopm_artifacts(
         name = "mopm_artifacts",
-        packages = ["komira_encoding", "komira_json"],
-        natives = {"komira_libc": {"komira_libc_posix": "//src/komira_libc:native_komira_libc_posix"}},
+        packages = ["encoding", "json"],
+        natives = {"libc": {"komira_libc_posix": "//src/libc:native_komira_libc_posix"}},
     )
 
 A package is a library built with buildrules' `mojo_package` (its BUCK file has
@@ -95,3 +95,10 @@ def mopm_artifacts(name, packages, natives = {}, **kwargs):
         natives = natives,
         **kwargs
     )
+
+def _native_ids_json_impl(ctx):
+    return [DefaultInfo(default_output = ctx.actions.write_json("native_ids.json", NATIVE_IDS))]
+
+# `NATIVE_IDS` (mopm_native_ids.bzl) as JSON, `{package: [id, ...]}`: what //release:native_ids_cases
+# holds to the `[native.<id>]` tables of each package's `mopm.toml`.
+native_ids_json = rule(impl = _native_ids_json_impl, attrs = {})

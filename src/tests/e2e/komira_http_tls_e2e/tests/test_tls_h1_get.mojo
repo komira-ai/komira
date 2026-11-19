@@ -23,18 +23,18 @@
 
 from std.testing import assert_equal
 
-from komira_async.ops.waker_sink import NoopSink
-from komira_async.runtime.blocking_runtime import BlockingRuntime
-from komira_http_client.body import EmptyBody
-from komira_http_client.client import HttpClient, build_get_request
-from komira_http_client.header_map import HeaderMap
-from komira_http_client.tls_connector import TlsConnector
-from komira_http_client.url import Url
-from komira_http_core.codec import HttpMethod
-from komira_http_core.tls import tls_init
-from komira_http_core.transport.kernel_tcp import KernelTcpConnector
-from komira_http_server.routing import Router
-from komira_http_server.server import HttpServer, HttpServerConfig
+from async_rt.ops.waker_sink import NoopSink
+from async_rt.runtime.blocking_runtime import BlockingRuntime
+from http_client.body import EmptyBody
+from http_client.client import HttpClient, build_get_request
+from http_client.header_map import HeaderMap
+from http_client.tls_connector import TlsConnector
+from http_client.url import Url
+from http_core.codec import HttpMethod
+from http_core.tls import tls_init
+from http_core.transport.kernel_tcp import KernelTcpConnector
+from http_server.routing import Router
+from http_server.server import HttpServer, HttpServerConfig
 
 from komira_http_tls_e2e import (
     ClientLeg,

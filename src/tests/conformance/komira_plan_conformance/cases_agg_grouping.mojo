@@ -19,11 +19,11 @@
 #   empty_input_with_keys        one all-NULL row instead of none
 # =============================================================================
 
-from komira_plan_expr.agg_expr import AGG_COUNT, AGG_MAX, AGG_MIN, AGG_SUM, AggExpr
-from komira_plan_expr.expr import BIN_LT, Expr
-from komira_plan_expr.scalar_value import ScalarValue
+from plan_expr.agg_expr import AGG_COUNT, AGG_MAX, AGG_MIN, AGG_SUM, AggExpr
+from plan_expr.expr import BIN_LT, Expr
+from plan_expr.scalar_value import ScalarValue
 from komira_plan_harness import CanonPolicy
-from komira_plan_ir.logical_plan import AggExprArray, ExprArray, LogicalPlan
+from plan_ir.logical_plan import AggExprArray, ExprArray, LogicalPlan
 
 from .plan_case import Case
 from .datasets import groups, scan

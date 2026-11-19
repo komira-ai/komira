@@ -1,7 +1,7 @@
 # =============================================================================
 # test_token_endpoint.mojo: the test issuer's `client_credentials` token
 #   endpoint (`TestIssuer.token_request`, token_endpoint.mojo), driven with
-#   request bodies built by komira_oauth and assertions signed by komira_jose.
+#   request bodies built by oauth and assertions signed by jose.
 # =============================================================================
 #
 # What each test proves:
@@ -32,7 +32,7 @@
 #   resource and its scope is 400 invalid_target; a first use refused for
 #   its resource, its scope or both still spends the jti.
 # - test_metadata_document: the RFC 8414 document's exact bytes, read back
-#   by komira_oauth for the issuer.
+#   by oauth for the issuer.
 # - test_register_refusals: each refusal of register and remove.
 #
 # main runs every test and reports every failure.
@@ -40,16 +40,16 @@
 
 from std.testing import assert_equal, assert_false, assert_true
 
-from komira_jose import (
+from jose import (
     ClaimPolicy,
     JwsSigner,
     JwsVerifier,
     mint_client_assertion,
     verify_jwt,
 )
-from komira_json import write_i64_dec, write_json_string
-from komira_jwks import Jwk, parse_jwk_set, render_jwk_set
-from komira_oauth import (
+from json import write_i64_dec, write_json_string
+from jwks import Jwk, parse_jwk_set, render_jwk_set
+from oauth import (
     ClientCredentialsRequest,
     ClientMetadata,
     oauth_error_code,
@@ -125,7 +125,7 @@ def _claims(
     jti: String,
 ) -> String:
     """An assertion's claims with a chosen `jti`, in the member order
-    komira_jose's `mint_assertion` writes (its claims writer is private:
+    jose's `mint_assertion` writes (its claims writer is private:
     a caller of the package cannot choose a `jti`, a test of replay must)."""
     var buf = List[UInt8]()
     buf.extend(Span(String('{"iss":').as_bytes()))

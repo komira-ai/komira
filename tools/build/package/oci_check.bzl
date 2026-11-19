@@ -2,7 +2,7 @@
 
     oci_image_check(name, image, entrypoint, executables = [], files = [], expect_red = None)
 
-runs `komira_oci check` ([oci/](oci/README.md), a Zig tool) over
+runs `oci check` ([oci/](oci/README.md), a Zig tool) over
 the OCI layout of `image` (an `oci_image`) in a build action, and is that
 image with the check's output added to its default output and to each
 sub-target (`[digest]`, `[docker_archive]`, `[layers]`, `[release]`) and each
@@ -92,7 +92,7 @@ _oci_image_check = rule(
         "files": attrs.list(attrs.string(), default = []),
         "image": attrs.dep(providers = [OciImageInfo]),
         "_busybox": attrs.exec_dep(default = "komira//tools/build/toolchains:busybox"),
-        "_tool": attrs.exec_dep(default = "komira//tools/build/package/oci:komira_oci", providers = [RunInfo]),
+        "_tool": attrs.exec_dep(default = "komira//tools/build/package/oci:oci", providers = [RunInfo]),
     },
 )
 

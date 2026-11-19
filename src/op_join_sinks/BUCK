@@ -1,0 +1,47 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The per-worker operators a join pipeline constructs over the join probe:
+# `JoinProbeOpAdapter`, the single-key probe a driver allocates per worker
+# (it forwards to `JoinProbeOp`); the probe cascades `MultiProbeOpAdapter`
+# (single-key `JoinProbeOp`s) and `MultiKeyProbeCascadeAdapter` (composite
+# `MultiKeyJoinProbeOp`s), which run several joins over one morsel in turn;
+# and the LEFT-built SEMI / ANTI join's marking pass, `MarkSemiAntiProbeOp`,
+# over `FinalizedHashIndex` (a finished single-INT64-key table with a matched
+# flag per build row).
+mojo_library(
+    name = "op_join_sinks",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/arrow:arrow",
+        "//src/async_rt:async_rt",
+        "//src/async_api:async_api",
+        "//src/atomic_alias:atomic_alias",
+        "//src/batch_eval:batch_eval",
+        "//src/byte_buffer:byte_buffer",
+        "//src/containers:containers",
+        "//src/column_kernels:column_kernels",
+        "//src/counters:counters",
+        "//src/dynamic_filter:dynamic_filter",
+        "//src/engine_runtime:engine_runtime",
+        "//src/exec_types:exec_types",
+        "//src/join_assembly:join_assembly",
+        "//src/metrics:metrics",
+        "//src/morsel:morsel",
+        "//src/op_fused_kernels:op_fused_kernels",
+        "//src/op_join_build:op_join_build",
+        "//src/op_join_probe:op_join_probe",
+        "//src/op_sort:op_sort",
+        "//src/operator_api:operator_api",
+        "//src/physical_plan:physical_plan",
+        "//src/plan_expr:plan_expr",
+        "//src/plan_ir:plan_ir",
+        "//src/simd_ops:simd_ops",
+        "//src/udf:udf",
+    ],
+    test_srcs = [
+        "tests/test_join_probe_op_adapter.mojo",
+        "tests/test_mark_semi_anti.mojo",
+        "tests/test_multi_probe_op_adapter.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)

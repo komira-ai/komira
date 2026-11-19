@@ -2,7 +2,7 @@
 
 ## What is it for, and what is out of scope?
 
-Three libraries read and write the file formats other than Parquet. `komira_csv` parses and writes CSV. `komira_avro` reads and writes [Avro](https://avro.apache.org/docs/1.11.1/specification/) object container files (OCF). `komira_orc` reads and writes [ORC](https://orc.apache.org/specification/ORCv1/). A fourth library, `komira_xml`, is a general XML codec that this doc covers because it is the other small format codec in the tree. Each reader turns a whole file, held in memory, into one Arrow `RecordBatch`, and each writer turns a batch into a file.
+Three libraries read and write the file formats other than Parquet. `csv` parses and writes CSV. `avro` reads and writes [Avro](https://avro.apache.org/docs/1.11.1/specification/) object container files (OCF). `orc` reads and writes [ORC](https://orc.apache.org/specification/ORCv1/). A fourth library, `xml`, is a general XML codec that this doc covers because it is the other small format codec in the tree. Each reader turns a whole file, held in memory, into one Arrow `RecordBatch`, and each writer turns a batch into a file.
 
 One idea runs through the readers: **a text file has no footer, so its schema is either inferred from a bounded prefix or declared by the caller, and the file is then decoded at those types, in parallel when it is large.** Avro and ORC carry their schema in the file, so they read it from there.
 
@@ -10,7 +10,7 @@ Out of scope:
 
 - JSON and JSON lines, which are not described here yet; see [held sections](#what-is-not-here-yet).
 - How a query plan names a file and reaches these readers, and the engine's file-write sinks. They belong to the SDK and the execution engine, which are not in the tree yet.
-- The compression libraries the codecs call (`komira_zlib`, `komira_lz4` and the system libraries for Snappy, Zstandard, bzip2 and xz), and Parquet.
+- The compression libraries the codecs call (`zlib`, `lz4` and the system libraries for Snappy, Zstandard, bzip2 and xz), and Parquet.
 - The per-format rules (null tokens, Avro type annotations, block checks, ORC skipping) are in the sub-doc [schemas, codecs and skipping](text_and_row_formats/schemas_codecs_and_skipping.md).
 
 ## How does it work?
@@ -25,7 +25,7 @@ write: RecordBatch ─► CsvSink | write_avro_file | write_orc_file
 
 ### How is a CSV file parsed?
 
-`read_csv_bytes_to_batch[Q, SCANNER_VARIANT]` in `src/komira_csv/reader.mojo` is the serial reader. `Q` is the dialect, a `QuoteStyle` conformer: `Rfc4180`, `Excel` or `Posix` (defined in `src/komira_arrow/quote_styles.mojo`, re-exported from `src/komira_csv/quote_styles/`), which differ in compile-time constants such as `DOUBLE_QUOTE_ESCAPES` and `ESCAPE_BYTE`. `read_csv_bytes_to_batch_dynamic` picks `Q` from `CsvReadOptions.quote_style_tag` at run time (0 is `Rfc4180`, 1 `Excel`, 2 `Posix`). The reader:
+`read_csv_bytes_to_batch[Q, SCANNER_VARIANT]` in `src/csv/reader.mojo` is the serial reader. `Q` is the dialect, a `QuoteStyle` conformer: `Rfc4180`, `Excel` or `Posix` (defined in `src/arrow/quote_styles.mojo`, re-exported from `src/csv/quote_styles/`), which differ in compile-time constants such as `DOUBLE_QUOTE_ESCAPES` and `ESCAPE_BYTE`. `read_csv_bytes_to_batch_dynamic` picks `Q` from `CsvReadOptions.quote_style_tag` at run time (0 is `Rfc4180`, 1 `Excel`, 2 `Posix`). The reader:
 
 1. Skips a UTF-8 byte-order mark when `strip_utf8_bom` is set, as it is by default.
 2. Scans the bytes into a `ScannedCells` buffer: flat lists of cell starts, cell ends, cell flags and row starts (`scanned_cells.mojo`). `_dispatch_scan` (`reader.mojo`) selects one of three scanners, `scan_csv_phase1_into_cells`, `scan_csv_phase2_movemask_into_cells` and `scan_csv_phase3_pclmulqdq_into_cells`, all of which live in `csv_scanner_phase1.mojo` and are chosen by `SCANNER_VARIANT_PHASE_2` or `SCANNER_VARIANT_PHASE_3`; the default, `DEFAULT_SCANNER_VARIANT = 2`, is `scan_csv_phase2_movemask_into_cells`.
@@ -47,13 +47,13 @@ Worker 0 infers the shared schema from a 256 KiB prefix (`_INFER_PREFIX_BYTES`),
 
 ### How is an Avro file decoded?
 
-`read_avro_bytes_parallel_with_dispatcher` (`src/komira_avro/parallel_driver.mojo`) decodes the header (`decode_ocf_header` in `ocf_header.mojo`), finds the blocks by walking their sync markers (`scan_ocf_blocks_after_header`), and splits the blocks into contiguous ranges (`_partition_blocks`). A file with fewer than `_MIN_PARALLEL_BLOCKS` (2) blocks, or a run with one worker, decodes serially through `decode_avro_bytes_comptime`. Each worker decompresses its blocks with `decompress_block` (`avro_codec.mojo`: null, deflate, snappy, zstandard, bzip2 and xz) and decodes them. `_reassemble_in_order` concatenates the worker batches in block order.
+`read_avro_bytes_parallel_with_dispatcher` (`src/avro/parallel_driver.mojo`) decodes the header (`decode_ocf_header` in `ocf_header.mojo`), finds the blocks by walking their sync markers (`scan_ocf_blocks_after_header`), and splits the blocks into contiguous ranges (`_partition_blocks`). A file with fewer than `_MIN_PARALLEL_BLOCKS` (2) blocks, or a run with one worker, decodes serially through `decode_avro_bytes_comptime`. Each worker decompresses its blocks with `decompress_block` (`avro_codec.mojo`: null, deflate, snappy, zstandard, bzip2 and xz) and decodes them. `_reassemble_in_order` concatenates the worker batches in block order.
 
 Decoding takes one of two paths, chosen by `classify_avro_shape` in `comptime_decoder.mojo`. A record whose fields are all non-null, or all nullable (`union[null, T]`), boolean, int, long, float, double, string or bytes, and none of which carries a logical type, is a "hot" shape (`is_hot_shape`) and runs `decode_block_comptime[SHAPE_KIND]`, a loop specialised at compile time. Every other schema runs `ActionTableInterpreter` (`action_table.mojo`), which walks a per-field action list. Both paths fill the same `ColumnAccVariant` accumulators. A union other than null plus one type raises `AvroDecodeError.UNSUPPORTED_UNION`; an Arrow type with no accumulator raises `UNSUPPORTED_COLUMN_TYPE`; and a record, enum, array or map field raises `UNSUPPORTED_FIELD_KIND` when a block decodes. `avro_schema.mojo` parses the schema JSON, maps Avro types to Arrow, and rejects recursive schemas.
 
 ### How is an ORC file read?
 
-`read_orc_file` (`src/komira_orc/orc_reader.mojo`) maps the whole file (`komira_arrow_ipc.chunked_read.read_chunked`, mmap-backed) and hands the bytes to `read_orc_bytes` (`read_orc_file_opts` goes through `read_orc_bytes_opts`), which parses the tail: the PostScript, footer and stripe footers, which are Protocol Buffers messages decoded by `footer.mojo`. For each stripe it locates the streams of each column (`_locate_streams`) and decodes column by column through `decode_stripe_column` (`column_decoder.mojo`), the RLE decoders in `rle_decode.mojo` and `decompress_stream` (`orc_codec.mojo`: none, zlib, snappy, LZO, LZ4 and zstd). `read_orc_file_with_dispatcher` decodes the columns in parallel (`_decode_orc_columns_parallel_with_dispatcher`). A schema with nested types, or with Hive ACID columns, goes to the recursive decoder in `nested_decoder.mojo` (`_read_orc_nested`).
+`read_orc_file` (`src/orc/orc_reader.mojo`) maps the whole file (`arrow_ipc.chunked_read.read_chunked`, mmap-backed) and hands the bytes to `read_orc_bytes` (`read_orc_file_opts` goes through `read_orc_bytes_opts`), which parses the tail: the PostScript, footer and stripe footers, which are Protocol Buffers messages decoded by `footer.mojo`. For each stripe it locates the streams of each column (`_locate_streams`) and decodes column by column through `decode_stripe_column` (`column_decoder.mojo`), the RLE decoders in `rle_decode.mojo` and `decompress_stream` (`orc_codec.mojo`: none, zlib, snappy, LZO, LZ4 and zstd). `read_orc_file_with_dispatcher` decodes the columns in parallel (`_decode_orc_columns_parallel_with_dispatcher`). A schema with nested types, or with Hive ACID columns, goes to the recursive decoder in `nested_decoder.mojo` (`_read_orc_nested`).
 
 ### How is an ORC file written?
 
@@ -61,7 +61,7 @@ Decoding takes one of two paths, chosen by `classify_avro_shape` in `comptime_de
 
 ### How is a CSV file written?
 
-`CsvSink` (`src/komira_csv/csv_sink.mojo`) writes a header row on `init_sink` unless `header=False`, then one line per row for each batch it accepts. It formats cells column by column (`_format_column_cells`), and in parallel above `_CSV_WRITE_MIN_PARALLEL_ROWS` (16 Ki rows) with at most `_CSV_WRITE_MAX_WORKERS` (32) workers. If the writer is destroyed before `finish()` and it created the file, it unlinks the partial file.
+`CsvSink` (`src/csv/csv_sink.mojo`) writes a header row on `init_sink` unless `header=False`, then one line per row for each batch it accepts. It formats cells column by column (`_format_column_cells`), and in parallel above `_CSV_WRITE_MIN_PARALLEL_ROWS` (16 Ki rows) with at most `_CSV_WRITE_MAX_WORKERS` (32) workers. If the writer is destroyed before `finish()` and it created the file, it unlinks the partial file.
 
 ### How is an Avro file written?
 
@@ -69,7 +69,7 @@ Decoding takes one of two paths, chosen by `classify_avro_shape` in `comptime_de
 
 ### What does the XML codec accept?
 
-Well-formed XML, leniently. `XmlReader` (`src/komira_xml/xml_reader.mojo`) is a forward-only pull parser. It owns the input, yields `XmlEvent` values holding byte ranges, and copies only when a caller asks for text, a name or an attribute value. It accepts elements, attributes, self-closing tags, text, CDATA sections, comments and the XML declaration, and skips a DOCTYPE. `parse_xml` (`xml_tree.mojo`) builds an owned `XmlNode` tree, resolves namespace prefixes to URIs, and refuses a second root. `canonical_xml` writes a namespace-resolved canonical form for comparing documents and refuses nesting deeper than 512. `append_unescaped` (`xml_escape.mojo`) decodes the five predefined entities and numeric character references. `XmlWriter` (`xml_writer.mojo`) writes into one buffer, escaping text and attributes.
+Well-formed XML, leniently. `XmlReader` (`src/xml/xml_reader.mojo`) is a forward-only pull parser. It owns the input, yields `XmlEvent` values holding byte ranges, and copies only when a caller asks for text, a name or an attribute value. It accepts elements, attributes, self-closing tags, text, CDATA sections, comments and the XML declaration, and skips a DOCTYPE. `parse_xml` (`xml_tree.mojo`) builds an owned `XmlNode` tree, resolves namespace prefixes to URIs, and refuses a second root. `canonical_xml` writes a namespace-resolved canonical form for comparing documents and refuses nesting deeper than 512. `append_unescaped` (`xml_escape.mojo`) decodes the five predefined entities and numeric character references. `XmlWriter` (`xml_writer.mojo`) writes into one buffer, escaping text and attributes.
 
 ## Why is it built this way?
 
@@ -111,13 +111,13 @@ Well-formed XML, leniently. `XmlReader` (`src/komira_xml/xml_reader.mojo`) is a 
 
 **Because.** The interpreter pays, per field and per row, several branch cascades and copies to pick the read and the accumulator. Resolving the binding of each output column once, at the start of the decode, removes that dispatch, and both paths fill the same accumulators, so the output is the same.
 
-**Alternatives weighed.** A SIMD varint decoder: the header of `src/komira_avro/__init__.mojo` records it as a negative result, about 0.39 times the scalar decoder.
+**Alternatives weighed.** A SIMD varint decoder: the header of `src/avro/__init__.mojo` records it as a negative result, about 0.39 times the scalar decoder.
 
 **Revisit if** a common schema shape falls outside the specialised set.
 
 ### Why is LZO read but never written?
 
-**Decision.** `komira_orc` decodes LZO with its own `lzo1x_decompress.mojo`, and `compress_stream` refuses to write it.
+**Decision.** `orc` decodes LZO with its own `lzo1x_decompress.mojo`, and `compress_stream` refuses to write it.
 
 **Because.** The only available LZO1X encoder is GPL-licensed and the ORC specification deprecates the codec; the refusal message `OrcCodecError.LZO_WRITE_UNSUPPORTED` in `orc_codec.mojo` says so.
 
@@ -135,7 +135,7 @@ Well-formed XML, leniently. `XmlReader` (`src/komira_xml/xml_reader.mojo`) is a 
 
 ## What must always hold?
 
-- **A declared CSV schema is positional.** Column `i` of the file parses at declared type `i`, and a width mismatch raises rather than truncating, padding or re-inferring. Enforced by `check_declared_column_types` (`csv_options.mojo`), which the readers call; no `komira_csv` test imports it or is named for a mismatched width.
+- **A declared CSV schema is positional.** Column `i` of the file parses at declared type `i`, and a width mismatch raises rather than truncating, padding or re-inferring. Enforced by `check_declared_column_types` (`csv_options.mojo`), which the readers call; no `csv` test imports it or is named for a mismatched width.
 - **A CSV record has exactly the header's field count, and nothing follows a closing quote but the delimiter, a line end or the end of input.** Under every dialect (Rfc4180, Excel, Posix) the readers refuse a record with more fields than the header, one with fewer, and a byte after a closing quote; the error names the record number (the header is record 1), its physical line, its byte offset, the field and the problem. No dialect or option tolerates these: before the check the extra cells were dropped, short records were padded with nulls and a stray byte split the field, all in silence. Enforced by `check_csv_record_shape` (`record_shape.mojo`), called by `read_csv_bytes_to_batch`, `read_csv_bytes_to_schema` and every worker of the parallel reader; pinned by `test_csv_record_shape` and `test_csv_record_shape_parallel`.
 - **Blank lines (policy).** A fully blank line (zero bytes between two line terminators; `""` is not blank) in a file with two or more columns is skipped, anywhere in the file, as pandas does by default: it holds no data. It is not counted as a record but is counted as a line in error messages. In a one-column file a blank line is a record with one empty field, read as NULL, except before the header or the first record: blank lines there are skipped whatever the column count (a header cannot be blank, and the field count is not known yet). Same paths as above; pinned by `test_csv_blank_lines`, `test_csv_record_shape_edges` and `test_csv_record_shape_parallel`.
 - **A CSV split starts every range at a row start.** Pinned by `test_csv_quote_safe_chunk_split`, including a stray-quote fixture.
@@ -147,19 +147,19 @@ Well-formed XML, leniently. `XmlReader` (`src/komira_xml/xml_reader.mojo`) is a 
 
 | File | Holds | Key types and functions |
 |---|---|---|
-| `src/komira_csv/reader.mojo` | serial CSV reader, schema-only inference | `read_csv_bytes_to_batch`, `read_csv_bytes_to_batch_dynamic`, `read_csv_bytes_to_schema_dynamic` |
-| `src/komira_csv/parallel_reader.mojo` | parallel CSV reader | `read_csv_bytes_to_batch_parallel_dynamic_with_dispatcher`, `_concat_csv_batches_column_parallel` |
-| `src/komira_csv/csv_chunk_split.mojo` | quote-safe split | `compute_csv_quote_safe_row_ranges` |
-| `src/komira_csv/csv_scanner_phase1.mojo`, `csv_state_machine.mojo`, `scanned_cells.mojo` | scanners | `scan_csv_phase2_movemask_into_cells`, `scan_csv_phase3_pclmulqdq_into_cells`, `ScannedCells` |
-| `src/komira_csv/type_inference.mojo`, `cell_parsers*.mojo`, `temporal_parsers.mojo`, `temporal_range.mojo`, `typed_column_builders.mojo` | types and cells | `infer_column_types`, `dispatch_typed_builder` |
-| `src/komira_csv/csv_options.mojo`, `null_detection.mojo`, `input_limits.mojo` | options, tokens, ceilings | `CsvReadOptions`, `check_declared_column_types` |
-| `src/komira_csv/csv_sink.mojo` | CSV writer | `CsvSink`, `_format_column_cells` |
-| `src/komira_avro/parallel_driver.mojo`, `comptime_decoder.mojo`, `action_table.mojo` | Avro decode | `read_avro_bytes_parallel_with_dispatcher`, `decode_block_comptime`, `ActionTableInterpreter`, `ResolutionTable` |
-| `src/komira_avro/avro_schema.mojo`, `ocf_header.mojo`, `ocf_block_scan.mojo`, `avro_codec.mojo` | schema, container, codecs | `AvroSchema`, `decode_ocf_header`, `scan_ocf_blocks`, `decompress_block` |
-| `src/komira_avro/avro_ocf_writer.mojo`, `ocf_block_emit.mojo`, `varint_encode.mojo` | Avro writer | `write_avro_file`, `AvroWriterOptions` |
-| `src/komira_orc/orc_reader.mojo`, `footer.mojo`, `column_decoder.mojo`, `rle_decode.mojo`, `orc_codec.mojo` | ORC reader | `read_orc_file`, `OrcFileTail`, `decode_stripe_column`, `decompress_stream` |
-| `src/komira_orc/orc_writer.mojo`, `stripe_emit.mojo`, `protobuf_writer.mojo` | ORC writer | `write_orc_file`, `OrcWriterOptions` |
-| `src/komira_xml/xml_reader.mojo`, `xml_tree.mojo`, `xml_escape.mojo`, `xml_writer.mojo` | XML codec | `XmlReader`, `parse_xml`, `XmlNode`, `XmlWriter` |
+| `src/csv/reader.mojo` | serial CSV reader, schema-only inference | `read_csv_bytes_to_batch`, `read_csv_bytes_to_batch_dynamic`, `read_csv_bytes_to_schema_dynamic` |
+| `src/csv/parallel_reader.mojo` | parallel CSV reader | `read_csv_bytes_to_batch_parallel_dynamic_with_dispatcher`, `_concat_csv_batches_column_parallel` |
+| `src/csv/csv_chunk_split.mojo` | quote-safe split | `compute_csv_quote_safe_row_ranges` |
+| `src/csv/csv_scanner_phase1.mojo`, `csv_state_machine.mojo`, `scanned_cells.mojo` | scanners | `scan_csv_phase2_movemask_into_cells`, `scan_csv_phase3_pclmulqdq_into_cells`, `ScannedCells` |
+| `src/csv/type_inference.mojo`, `cell_parsers*.mojo`, `temporal_parsers.mojo`, `temporal_range.mojo`, `typed_column_builders.mojo` | types and cells | `infer_column_types`, `dispatch_typed_builder` |
+| `src/csv/csv_options.mojo`, `null_detection.mojo`, `input_limits.mojo` | options, tokens, ceilings | `CsvReadOptions`, `check_declared_column_types` |
+| `src/csv/csv_sink.mojo` | CSV writer | `CsvSink`, `_format_column_cells` |
+| `src/avro/parallel_driver.mojo`, `comptime_decoder.mojo`, `action_table.mojo` | Avro decode | `read_avro_bytes_parallel_with_dispatcher`, `decode_block_comptime`, `ActionTableInterpreter`, `ResolutionTable` |
+| `src/avro/avro_schema.mojo`, `ocf_header.mojo`, `ocf_block_scan.mojo`, `avro_codec.mojo` | schema, container, codecs | `AvroSchema`, `decode_ocf_header`, `scan_ocf_blocks`, `decompress_block` |
+| `src/avro/avro_ocf_writer.mojo`, `ocf_block_emit.mojo`, `varint_encode.mojo` | Avro writer | `write_avro_file`, `AvroWriterOptions` |
+| `src/orc/orc_reader.mojo`, `footer.mojo`, `column_decoder.mojo`, `rle_decode.mojo`, `orc_codec.mojo` | ORC reader | `read_orc_file`, `OrcFileTail`, `decode_stripe_column`, `decompress_stream` |
+| `src/orc/orc_writer.mojo`, `stripe_emit.mojo`, `protobuf_writer.mojo` | ORC writer | `write_orc_file`, `OrcWriterOptions` |
+| `src/xml/xml_reader.mojo`, `xml_tree.mojo`, `xml_escape.mojo`, `xml_writer.mojo` | XML codec | `XmlReader`, `parse_xml`, `XmlNode`, `XmlWriter` |
 
 Entry points are the functions and types in the last column.
 
@@ -177,7 +177,7 @@ Entry points are the functions and types in the last column.
 
 ## How is it tested?
 
-Each library lists its tests in `test_srcs` in its `BUCK` file: 41 for `komira_csv`, 32 for `komira_avro`, 37 for `komira_orc` and four for `komira_xml`. Each test is built against the library and run, and the package is published only if every one passes, unless the BUCK file holds a test in its known-failing ledger (see [the Mojo rules](../../tools/build/mojo/README.md), "The gate"). Run: `./buck2 build //src/komira_csv:komira_csv` (likewise for the other three).
+Each library lists its tests in `test_srcs` in its `BUCK` file: 41 for `csv`, 32 for `avro`, 37 for `orc` and four for `xml`. Each test is built against the library and run, and the package is published only if every one passes, unless the BUCK file holds a test in its known-failing ledger (see [the Mojo rules](../../tools/build/mojo/README.md), "The gate"). Run: `./buck2 build //src/csv:csv` (likewise for the other three).
 
 | Test | Covers |
 |---|---|
@@ -199,7 +199,7 @@ Each library lists its tests in `test_srcs` in its `BUCK` file: 41 for `komira_c
 - **Limit: the parallel CSV reader ignores three options when it splits.** `parallel_reader.mojo` never reads `strip_utf8_bom` or `infer_temporal_types`; only its serial fallbacks honour them. (`projection_columns` is honoured by the serial reader through `CsvReadOptions.is_projected`, and the parallel reader does not read it either.) So with the RFC 4180 dialect, a file of 1 MiB or more that starts with a byte-order mark can get a different first column name. `Posix` never splits, and the `Excel` scanners skip the mark themselves (`ACCEPTS_BOM`, tested in `scan_csv_phase3_pclmulqdq_into_cells`, the scanner the parallel workers run).
 - **Limit: the parallel CSV scanner mis-tokenizes a stray quote.** The header of `csv_chunk_split.mojo` records that `scan_csv_phase3_pclmulqdq`, which the parallel reader and its serial fallback use, mis-tokenizes a file with a quote inside an unquoted field. The serial default is the phase-2 scanner.
 - **Limit: inference sees a prefix only.** A CSV schema comes from the first `infer_rows` data rows (100 by default); in the serial builders a later cell that does not parse becomes null.
-- **Limit: Avro schema resolution is not used by the readers here.** The parallel driver decodes with `ResolutionTable.identity`. `ResolutionTable.resolve` and `read_avro_bytes_resolved`, which apply a reader schema with aliases, defaults and promotions, are called only by tests inside `komira_avro`.
+- **Limit: Avro schema resolution is not used by the readers here.** The parallel driver decodes with `ResolutionTable.identity`. `ResolutionTable.resolve` and `read_avro_bytes_resolved`, which apply a reader schema with aliases, defaults and promotions, are called only by tests inside `avro`.
 - **Limit: the Avro decoder cannot read nested fields.** Records, arrays, maps and enums raise (see above); only flat records of scalars, with the logical types the accumulators cover, decode.
 - **Limit: writer coverage.** The Avro writer takes a flat record of Bool, Int8 to Int64, UInt8 to UInt32, Float32, Float64, strings, binary, Date64, second and nanosecond timestamps, and the time and duration types listed in `_resolve_write_tag`; UInt64, Float16, decimals and nested types raise. The ORC writer takes Bool, Int8 to Int64, Float32, Float64, strings and Date32, with direct encodings and no dictionary.
 - **Limit: ORC skipping is a library API only.** The projection, stripe and stride skip cascade is described in the [sub-doc](text_and_row_formats/schemas_codecs_and_skipping.md#how-does-the-orc-reader-skip-data); nothing in this tree calls it outside tests.

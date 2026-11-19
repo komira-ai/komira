@@ -1,0 +1,58 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The ASOF join: the two-cursor merge walker over sorted sides, its search
+# kernels and equi-key comparison, the AsofJoinSink over two materialised
+# sides, and the stage pipelines' ASOF build table with its ASOF_JOIN_BUILD
+# and ASOF_JOIN breaker states. NULL keys and NULL ASOF values match nothing;
+# float keys compare in the sort's DuckDB order (NaN above +inf).
+mojo_library(
+    name = "op_asof",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/arrow:arrow",
+        "//src/arrow_ipc:arrow_ipc",
+        "//src/async_rt:async_rt",
+        "//src/async_api:async_api",
+        "//src/atomic_alias:atomic_alias",
+        "//src/batch_eval:batch_eval",
+        "//src/byte_buffer:byte_buffer",
+        "//src/containers:containers",
+        "//src/column_format:column_format",
+        "//src/column_kernels:column_kernels",
+        "//src/compression:compression",
+        "//src/counters:counters",
+        "//src/dynamic_filter:dynamic_filter",
+        "//src/engine_runtime:engine_runtime",
+        "//src/exec_types:exec_types",
+        "//src/expr:expr",
+        "//src/fs:fs",
+        "//src/host_probe:host_probe",
+        "//src/join_assembly:join_assembly",
+        "//src/kernels:kernels",
+        "//src/libc:libc",
+        "//src/metrics:metrics",
+        "//src/morsel:morsel",
+        "//src/name_registry:name_registry",
+        "//src/objectstore:objectstore",
+        "//src/op_sort:op_sort",
+        "//src/operator_api:operator_api",
+        "//src/physical_plan:physical_plan",
+        "//src/plan_expr:plan_expr",
+        "//src/plan_ir:plan_ir",
+        "//src/plan_stats:plan_stats",
+        "//src/scalar_arithmetic:scalar_arithmetic",
+        "//src/scan_source:scan_source",
+        "//src/shuffle:shuffle",
+        "//src/simd_ops:simd_ops",
+        "//src/udf:udf",
+    ],
+    test_srcs = [
+        "tests/test_asof_join_build.mojo",
+        "tests/test_asof_join_sink.mojo",
+        "tests/test_asof_join_states.mojo",
+        "tests/test_asof_kernel.mojo",
+        "tests/test_asof_walker.mojo",
+        "tests/test_asof_walker_keys.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)

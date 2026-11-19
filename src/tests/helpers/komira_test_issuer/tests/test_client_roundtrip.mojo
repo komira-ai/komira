@@ -1,5 +1,5 @@
 # =============================================================================
-# test_client_roundtrip.mojo: komira_oauth's `ClientCredentialSource` against
+# test_client_roundtrip.mojo: oauth's `ClientCredentialSource` against
 #   the test issuer's token endpoint, in process (`IssuerTokenTransport`).
 # =============================================================================
 #
@@ -11,7 +11,7 @@
 #   rotation between fetches is followed (the new token names the new kid).
 #   A client that sends an assertion without a jti, or the same jti twice,
 #   gets no token: this is the end-to-end form of the two defects the
-#   komira_oauth tests and test_token_endpoint pin.
+#   oauth tests and test_token_endpoint pin.
 # - test_failed_refresh_raises: a refresh over a failing connection raises,
 #   and the former, unexpired token is not served; once the connection is
 #   back a new token is.
@@ -25,9 +25,9 @@
 
 from std.testing import assert_equal, assert_false, assert_true
 
-from komira_jose import ClaimPolicy, JwsVerifier, verify_jwt
-from komira_jwks import Jwk, parse_jwk_set, render_jwk_set
-from komira_oauth import ClientCredentialSource, ClientMetadata
+from jose import ClaimPolicy, JwsVerifier, verify_jwt
+from jwks import Jwk, parse_jwk_set, render_jwk_set
+from oauth import ClientCredentialSource, ClientMetadata
 from komira_test_issuer import IssuerTokenTransport, TestIssuer, derived_key
 
 

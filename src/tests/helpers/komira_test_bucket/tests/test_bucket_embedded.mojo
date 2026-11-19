@@ -8,7 +8,7 @@
 from std.os.path import exists
 from std.testing import assert_equal, assert_false, assert_true
 
-from komira_libc.posix import _read_env
+from libc.posix import _read_env
 from komira_test_bucket import (
     BACKEND_EMBEDDED_MINIO,
     EMBEDDED_BUCKET,
@@ -27,8 +27,8 @@ from komira_test_minio import (
     current_minio_platform,
     start_embedded_minio_with_pins,
 )
-from komira_test_run_id import FixedWallClock, RunId, ScriptedEntropy
-from komira_test_verdict import VERDICT_CANNOT_TELL, VERDICT_CLEAN
+from test_run_id import FixedWallClock, RunId, ScriptedEntropy
+from test_verdict import VERDICT_CANNOT_TELL, VERDICT_CLEAN
 
 
 struct _DirWatchingStore(ObjectStoreClient):

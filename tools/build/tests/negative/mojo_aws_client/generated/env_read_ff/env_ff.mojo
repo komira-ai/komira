@@ -6,7 +6,7 @@ Path.home reads HOME inside the standard library. The generated
 environment scan (_no_env_reads) refuses a file with a form feed.
 """
 
-from komira_aws_core import AwsRequestfrom std.pathlib import Path
+from aws_core import AwsRequestfrom std.pathlib import Path
 
 from .env_read_ff import (
     CloudWatchLogsGetLogEventsRequest,

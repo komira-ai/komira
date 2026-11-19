@@ -64,23 +64,23 @@
 
 from std.testing import assert_equal, assert_false, assert_true
 
-from komira_arrow.arrow_types import ArrowType
-from komira_arrow.column import Column
-from komira_arrow_ipc.ipc_decoder_dispatch import decode_record_batch_message
-from komira_arrow_ipc.ipc_flatbuf import (
+from arrow.arrow_types import ArrowType
+from arrow.column import Column
+from arrow_ipc.ipc_decoder_dispatch import decode_record_batch_message
+from arrow_ipc.ipc_flatbuf import (
     flatbuf_reader_over,
     read_message,
     MESSAGE_HEADER_RECORD_BATCH,
     MESSAGE_HEADER_SCHEMA,
 )
-from komira_arrow.record_batch import RecordBatch, RecordBatchBuilder
-from komira_arrow.schema import Schema
-from komira_buffer.shared_aligned_buffer import SharedAlignedBuffer
-from komira_arrow.string_array import StringArray
-from komira_collections.slab import Slab
-from komira_buffer.heap_region import HeapRegion
+from arrow.record_batch import RecordBatch, RecordBatchBuilder
+from arrow.schema import Schema
+from byte_buffer.shared_aligned_buffer import SharedAlignedBuffer
+from arrow.string_array import StringArray
+from containers.slab import Slab
+from byte_buffer.heap_region import HeapRegion
 
-from komira_broker import (
+from broker import (
     Assignment,
     BrokerCore,
     BrokerNodeState,
@@ -93,22 +93,22 @@ from komira_broker import (
     RetentionPolicy,
     decode_compacted_survivor_offsets,
 )
-from komira_broker_coordinator import BrokerHeartbeatCoordinator
-from komira_broker_proto.broker import NodeLoad as PbNodeLoad
-from komira_objectstore.cas_manifest import (
+from broker_coordinator import BrokerHeartbeatCoordinator
+from broker_proto.broker import NodeLoad as PbNodeLoad
+from objectstore.cas_manifest import (
     CasManifestStore,
     RetryPolicy,
     is_lease_fenced,
 )
-from komira_objectstore.local_fs_conditional_store import (
+from objectstore.local_fs_conditional_store import (
     LocalFsConditionalStore,
 )
-from komira_objectstore.path import Path
-from komira_supervisor_proto.supervisor import (
+from objectstore.path import Path
+from supervisor_proto.supervisor import (
     JobPhase as PbJobPhase,
     SupervisorHeartbeat as PbSupervisorHeartbeat,
 )
-from komira_runtime_paths import test_tmpdir
+from runtime_paths import test_tmpdir
 
 
 comptime _Store = LocalFsConditionalStore
@@ -373,7 +373,7 @@ def _assert_matches_nodes(
 
 
 # =============================================================================
-# Reading a segment back: the Arrow IPC stream decoded with komira_arrow_ipc.
+# Reading a segment back: the Arrow IPC stream decoded with arrow_ipc.
 # =============================================================================
 
 

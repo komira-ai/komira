@@ -14,7 +14,7 @@
 # `LocalFsConditionalStore.conditional_put` raises from its existence probe
 # when the slot file is already there. The `O_EXCL` create that decides a
 # truly simultaneous create (both probes pass, one `open` gets EEXIST) is NOT
-# reached by this file; komira_objectstore's own tests own that branch.
+# reached by this file; objectstore's own tests own that branch.
 #
 #   1. test_create_if_absent_has_one_winner: two store objects create the same
 #      key; the first wins, the second gets the precondition failure (the 412
@@ -45,7 +45,7 @@ from std.testing import (
     assert_true,
 )
 
-from komira_objectstore import (
+from objectstore import (
     LocalFsConditionalStore,
     RetryPolicy,
     WritePrecondition,
@@ -54,16 +54,16 @@ from komira_objectstore import (
     decode_head,
     head_key,
 )
-from komira_objectstore.cas_manifest import (
+from objectstore.cas_manifest import (
     is_not_found,
     is_precondition,
     is_retryable_contention,
 )
-from komira_objectstore.path import Path
+from objectstore.path import Path
 
-from komira_search_catalog.split_summary import decode_split_summary
+from search_catalog.split_summary import decode_split_summary
 
-from komira_runtime_paths import test_tmpdir
+from runtime_paths import test_tmpdir
 
 from komira_search_e2e.corpus import (
     INDEX_NAME,

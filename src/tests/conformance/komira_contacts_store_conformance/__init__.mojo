@@ -1,6 +1,6 @@
 # =============================================================================
-# komira_contacts_store_conformance -- komira_contacts' store, checked once
-#   against every komira_db backend that runs in a build action.
+# komira_contacts_store_conformance -- contacts' store, checked once
+#   against every db backend that runs in a build action.
 # =============================================================================
 #
 #   targets.mojo   ContactsTarget: a backend's factory of fresh databases

@@ -1,4 +1,4 @@
-"""The pandas door's plans, built in Mojo with `komira_plan_ir`.
+"""The pandas door's plans, built in Mojo with `plan_ir`.
 
 Each function here builds the `LogicalPlan` that one committed fixture
 (`fixtures/<stem>.txtpb`) describes, through the same factories the decoder
@@ -31,11 +31,11 @@ schema, mtime and row count, on the local filesystem.
 
 from std.memory import OwnedPointer
 
-from komira_arrow.arrow_types import ArrowType
-from komira_arrow.schema import Field, Schema, SchemaBuilder
-from komira_plan_expr.agg_expr import AggExpr, AGG_COUNT, AGG_SUM
-from komira_plan_expr.expr import Expr
-from komira_plan_ir.logical_plan import (
+from arrow.arrow_types import ArrowType
+from arrow.schema import Field, Schema, SchemaBuilder
+from plan_expr.agg_expr import AggExpr, AGG_COUNT, AGG_SUM
+from plan_expr.expr import Expr
+from plan_ir.logical_plan import (
     AggExprArray,
     ExprArray,
     JOIN_ALGO_AUTO,
@@ -43,9 +43,9 @@ from komira_plan_ir.logical_plan import (
     SOURCE_KIND_COLUMNAR,
     SOURCE_KIND_UNSET,
 )
-from komira_scan_source.csv_source import CsvSource
-from komira_scan_source.parquet_source import ParquetSource
-from komira_scan_source.source_variant import SourceVariant
+from scan_source.csv_source import CsvSource
+from scan_source.parquet_source import ParquetSource
+from scan_source.source_variant import SourceVariant
 
 comptime DOOR_MTIME_NS: UInt64 = 1234567890
 """The mtime every fixture's leaf carries (the parquet `mtime_ns` and the CSV
@@ -53,7 +53,7 @@ snapshot token)."""
 
 comptime DOOR_CSV_PATH: String = "/tmp/golden_csv_fp.csv"
 """The CSV fixture's path. With `DOOR_MTIME_NS` and the default dialect it is
-the input `komira_plan_ir`'s CSV arm test pins `CsvSource.fingerprint()` for,
+the input `plan_ir`'s CSV arm test pins `CsvSource.fingerprint()` for,
 so the fixture's fingerprint is that independently derived literal, not this
 package's output."""
 

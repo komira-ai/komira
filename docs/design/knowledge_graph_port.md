@@ -3,7 +3,7 @@
 Status: design. It decides how the existing data-graph library (a property graph built from
 documents and records, with a bi-temporal store and a read path) comes into komira as small, separately
 tested packages. [architecture.md](../architecture.md) is the record of which of these packages are in the tree. The code graph
-[`komira_kg_code`](../../src/komira_kg_code/) is a different thing and is untouched (see
+[`kg_code`](../../src/kg_code/) is a different thing and is untouched (see
 [knowledge_graph.md](../knowledge_graph.md)).
 
 Related, and authoritative where they overlap:
@@ -64,38 +64,38 @@ every package. Every file over 1000 lines is split during the port, because the 
 
 | package | what it is | lines (estimate after the changes below) | engine |
 |---|---|---:|---|
-| `komira_kg_format` | everything below the engine line that the writer and the reader share: the values and on-disk formats (embedding, triples, schemas, manifest, delta codec, fingerprints, query result, cosine), the snapshot lineage store, and the exact-scan searches and rank fusion over a snapshot | about 4,700 | none |
-| `komira_kg` | the mutable store and ingest: bi-temporal edges, alias map, dedup, working set, compaction, ingest, the rule-driven extractor, cursor store, the `Embedder`, `LlmClient`, `Extractor` and `SurfaceAdapter` seams | about 6,700 | none |
-| `komira_kg_mode` | the extraction-mode vocabulary the spec and the extractor selection share | about 140 | none |
-| `komira_kg_spec` | the graph spec and its validation (scopes, modes) | about 540 | none |
-| `komira_kg_llm` | HTTP transports for a chat-completions wire and an embeddings wire, a client and an embedder over them, extraction-mode selection | about 1,700 | none |
-| `komira_kg_capture` | the capture server with its query surface, extra routes through `CaptureRoutes` | about 2,000 | none |
-| `komira_kg_enrich` | the enrichment queue (item, queue, compare-and-set queue), drain lease, retry scheduler, drain worker and the `EnrichmentSender` trait | about 1,150 | none |
-| `komira_kg_sources` | the host-neutral half of source handling: the raw record store, the partition binding store, an adapter registry and the brute-force index over registered adapters | about 1,300 | none |
+| `kg_format` | everything below the engine line that the writer and the reader share: the values and on-disk formats (embedding, triples, schemas, manifest, delta codec, fingerprints, query result, cosine), the snapshot lineage store, and the exact-scan searches and rank fusion over a snapshot | about 4,700 | none |
+| `kg` | the mutable store and ingest: bi-temporal edges, alias map, dedup, working set, compaction, ingest, the rule-driven extractor, cursor store, the `Embedder`, `LlmClient`, `Extractor` and `SurfaceAdapter` seams | about 6,700 | none |
+| `kg_mode` | the extraction-mode vocabulary the spec and the extractor selection share | about 140 | none |
+| `kg_spec` | the graph spec and its validation (scopes, modes) | about 540 | none |
+| `kg_llm` | HTTP transports for a chat-completions wire and an embeddings wire, a client and an embedder over them, extraction-mode selection | about 1,700 | none |
+| `kg_capture` | the capture server with its query surface, extra routes through `CaptureRoutes` | about 2,000 | none |
+| `kg_enrich` | the enrichment queue (item, queue, compare-and-set queue), drain lease, retry scheduler, drain worker and the `EnrichmentSender` trait | about 1,150 | none |
+| `kg_sources` | the host-neutral half of source handling: the raw record store, the partition binding store, an adapter registry and the brute-force index over registered adapters | about 1,300 | none |
 | `komira_kg_read` | the three engine-run reads over a snapshot: neighbourhood, between nodes, time slice | about 400 | `sdk_exec` and `sdk` |
 
 Line figures are for the generalised packages. Where a module is rewritten rather than copied (the
 rule-driven extractor, the registry-based index, the server without its domain routes) the figure is an
 estimate and is re-measured in the PR that brings it.
 
-The rule that places a function: it is in `komira_kg_format` if it needs no engine and both the writer and a
+The rule that places a function: it is in `kg_format` if it needs no engine and both the writer and a
 reader use it (or it is a pure scan of a snapshot); it is in `komira_kg_read` only if it runs a plan through
-`EngineContext`. The name `komira_kg_format` is kept for the lineage store it contains because the store is
+`EngineContext`. The name `kg_format` is kept for the lineage store it contains because the store is
 the format's reader and writer; the source's name for it was worse.
 
-### What does komira_kg_format export?
+### What does kg_format export?
 
 The source implementation keeps these in a package named `komira_kg_read` and re-exports each from a
 second package through 12 shim files. The port drops the shims and splits by engine dependency instead.
 Only three functions of the source `read` file run a plan through the engine; the rest of it (the two
 exact scans, the out-degree count and rank fusion) read parquet bytes and score them in Mojo. Those move to
-`komira_kg_format` as a `search` module; only the three engine functions stay in `komira_kg_read`.
+`kg_format` as a `search` module; only the three engine functions stay in `komira_kg_read`.
 
 - `embedding`: `pack_embedding`, `pack_embedding_f32`, `unpack_embedding`, `unpack_embedding_bytes`,
   `unpack_embedding_checked`.
 - `cosine`: `Hit`, `cosine`, `cosine_topk`.
 - `ingest_types`: `Triple`, `EntityMention`, `Extraction`. The entity type and the predicate are free strings.
-- JSON payloads use `komira_json`; this package has no JSON reader of its own.
+- JSON payloads use `json`; this package has no JSON reader of its own.
 - `schemas`: `episodes_schema`, `entities_schema`, `edges_schema`, `edges_tombstone_schema`,
   `entities_embedding_schema`, `communities_schema`, the community-report schema and the schema-version
   constants. There is no fixed embedding dimension and it is not a schema argument: an embedding is a
@@ -123,12 +123,12 @@ exact scans, the out-degree count and rank fusion) read parquet bytes and score 
   snapshot table through the from-bytes reader of PR 0 (bytes in, batch out) and rank in Mojo; the source's
   temp-file materialisation and its clock-based temp-name nonce are not ported.
 
-Dependencies, derived from the imports of the files named here: `komira_arrow`, `komira_buffer`,
-`komira_collections`, `komira_json`, `komira_hash`, `komira_objectstore` (CAS manifest, path, store),
-`komira_parquet` and `komira_parquet_writer`. Each package's `deps` is the full transitive closure, as the
+Dependencies, derived from the imports of the files named here: `arrow`, `byte_buffer`,
+`containers`, `json`, `hashing`, `objectstore` (CAS manifest, path, store),
+`parquet` and `parquet_writer`. Each package's `deps` is the full transitive closure, as the
 build rules require, and is re-derived from the imports in its first PR.
 
-### What does komira_kg export?
+### What does kg export?
 
 - Bi-temporal edges: `WorkingEdge`, `open_edge`, `overlapping_contradiction_candidates`,
   `apply_invalidation`.
@@ -148,10 +148,10 @@ build rules require, and is re-derived from the imports in its first PR.
 - Sync state: `CursorStore[Store]`, `SurfaceCursor` (the key is an opaque caller string; no per-service
   constants); the source-facet helpers and the tombstone set, keyed by source and facet.
 
-Dependencies: `komira_kg_format`, `komira_arrow`, `komira_collections`, `komira_objectstore`,
-`komira_parquet`, `komira_parquet_writer`, `komira_fs`. The source `snapshot_mut` imports the async local
+Dependencies: `kg_format`, `arrow`, `containers`, `objectstore`,
+`parquet`, `parquet_writer`, `fs`. The source `snapshot_mut` imports the async local
 file system and a wall-clock nonce only for its temp-file dance; with the from-bytes reader of PR 0 both
-go, so `komira_async` and `komira_clock` are not dependencies (re-checked from the imports in PR 9). The
+go, so `async_rt` and `clock` are not dependencies (re-checked from the imports in PR 9). The
 store never reads a wall clock itself; see the testing plan.
 
 ### Decided during the port
@@ -172,20 +172,20 @@ What the ports decided that the design above did not say:
 
 ### What do the other packages export?
 
-- `komira_kg_mode`: the extraction-mode vocabulary (`extract_mode_vocab`), zero dependencies. Two modes:
+- `kg_mode`: the extraction-mode vocabulary (`extract_mode_vocab`), zero dependencies. Two modes:
   rules (no inference, the default) and model. The parse takes a string the host got from a flag and falls
   back to rules on anything unknown; a normalisation step never resolves to model unless the host asked for
   it. The integer values are stored in the spec, so they are fixed in PR 13.
-- `komira_kg_spec`: the graph spec value (`graph_spec` only), its validation, the scope and mode types, and
+- `kg_spec`: the graph spec value (`graph_spec` only), its validation, the scope and mode types, and
   a scope reference. The source spec takes the host's resource reference, which carries an organisation id
-  and an owner and is compared field by field; `komira_authz_api`'s `AuthzResource` has only a kind, an
+  and an owner and is compared field by field; `authz_api`'s `AuthzResource` has only a kind, an
   opaque id and attributes, so it cannot stand in. The port defines its own small `GraphScopeRef` (a scope
   id and an optional owner id, plain strings) with two ranks, shared and owner, described as scope
   containment and not as authorization. Inference bindings keep the transport label, endpoint and model id
   as opaque values; the rule that an endpoint must belong to the graph's organisation becomes an injected
   `EndpointPolicy` that allows everything by default. A source binding names an opaque source id, and an injected `SourcePolicy` (beside `EndpointPolicy`, allowing everything by default) decides which sources a graph may be built from. The
-  host's resource-type registration is not ported. Depends on `komira_kg_mode`.
-- `komira_kg_llm`: `ChatTransport` and `EmbedTransport` (post a body, return the body; the address, the
+  host's resource-type registration is not ported. Depends on `kg_mode`.
+- `kg_llm`: `ChatTransport` and `EmbedTransport` (post a body, return the body; the address, the
   request path, the timeout value and an optional `AuthHeaderProvider` are configuration values),
   `EmbeddingsWireEmbedder` (an `Embedder`; model id and dimension are constructor arguments and the
   response is checked against the dimension), `ChatCompletionsLlmClient` (an `LlmClient`),
@@ -193,27 +193,27 @@ What the ports decided that the design above did not say:
   schema, all passed in by the caller; there is no built-in domain prompt, only a neutral default that asks
   for named entities and the relations between them), `KgExtractClient` (routes a call by mode between any
   `Extractor` and any `LlmClient`; it imports neither concrete type) and the `AuthHeaderProvider` trait.
-  The judgment prompts are domain-neutral and stay. Depends on `komira_kg`, `komira_kg_mode`,
-  `komira_async`, `komira_http_client`, `komira_http_core`.
-- `komira_kg_capture`: the capture server and its query surface. Routes: capture (dispatched to a registered
+  The judgment prompts are domain-neutral and stay. Depends on `kg`, `kg_mode`,
+  `async_rt`, `http_client`, `http_core`.
+- `kg_capture`: the capture server and its query surface. Routes: capture (dispatched to a registered
   `SurfaceAdapter` by a surface tag in the request), structured ingest, query, federated query and health.
   Everything a host would add (routes over a loaded working set) goes through `CaptureRoutes`. The
   synthesis prompt (a neutral text by default) and the default partition are constructor arguments; the facet filter is a plain
-  string compared for equality. Depends on `komira_kg`, `komira_kg_format`, `komira_kg_sources`, `komira_objectstore`,
-  `komira_async`, `komira_http_server`.
-- `komira_kg_enrich`: `EnrichmentItem` (a partition id, an opaque source key and an opaque body),
+  string compared for equality. Depends on `kg`, `kg_format`, `kg_sources`, `objectstore`,
+  `async_rt`, `http_server`.
+- `kg_enrich`: `EnrichmentItem` (a partition id, an opaque source key and an opaque body),
   `EnrichmentQueue` (trait), `CasEnrichmentQueue`, `DrainLease`, `RetryScheduler`, the drain worker, the
   `EnrichmentSender` trait and an in-memory `FakeEnrichmentSender`. A sender that talks to a particular
-  network or identity service is the host's. Depends on `komira_objectstore`.
-- `komira_kg_sources`: `RawStore[Store]` (a content-hash-keyed record store over the conditional-write
+  network or identity service is the host's. Depends on `objectstore`.
+- `kg_sources`: `RawStore[Store]` (a content-hash-keyed record store over the conditional-write
   store trait, with the surface as an opaque tag on each record), `PartitionBindingStore` (a partition binds
   one raw store and one lineage; source system, source kind and facet are opaque strings, validated against
   a set the host passes in), `AdapterRegistry` (a surface tag to a `SurfaceAdapter`) and `BIndex` (cosine
   over embeddings, top-k, raw key to episode, through the registry). No adapter for a particular document
-  kind or service ships; those are conformers of `SurfaceAdapter` outside komira. Depends on `komira_kg`
-  and `komira_objectstore`.
+  kind or service ships; those are conformers of `SurfaceAdapter` outside komira. Depends on `kg`
+  and `objectstore`.
 - `komira_kg_read`: `get_between_nodes`, `Neighborhood`, `neighborhood`, `edges_as_of`. Depends on
-  `komira_kg_format`, `komira_sdk`, `komira_sdk_exec`.
+  `kg_format`, `sdk`, `sdk_exec`.
 
 ## What is not ported?
 
@@ -237,10 +237,10 @@ derivations that live outside komira".
 | inference-backend re-exports and process-spawning backends for particular servers | dropped; a host supplies an `LlmClient` or an `Embedder`. A generic start/stop/base-address backend trait is a later question | `LlmClient`, `Embedder` |
 | the hard-wired extraction prompt | replaced by a caller-supplied `ExtractionPrompt` | `ExtractionPrompt` |
 | the "comms-only" third extraction mode | dropped from the vocabulary; a host that wants a metadata-only path registers its own `Extractor` | `Extractor` |
-| the graph's resource-type registration | outside komira; it binds the spec to a host's resource catalog | `komira_kg_spec` exposes the spec only |
+| the graph's resource-type registration | outside komira; it binds the spec to a host's resource catalog | `kg_spec` exposes the spec only |
 | reads of an environment variable (extraction mode, mail hook) | dropped; configuration is flags | a constructor argument or a string parsed from a flag |
 | vendor-specific types pulled into generic modules (the raw store imports one adapter, the binding store another) | replaced by opaque strings and a registry | `AdapterRegistry` |
-| a production call into a parquet test helper (in the store and the read path), and the temp files it forces | replaced by a public from-bytes reader in `komira_parquet` (PR 0 below) | none |
+| a production call into a parquet test helper (in the store and the read path), and the temp files it forces | replaced by a public from-bytes reader in `parquet` (PR 0 below) | none |
 | spike, live and end-to-end tests that need a network, a credential or a local model | not ported; a test that needs a network or a credential does not belong in the build | none |
 
 The seams, with the shape each has today in the source implementation (names in the first column are the
@@ -248,16 +248,16 @@ ported names):
 
 | seam | kind | who implements it |
 |---|---|---|
-| `Embedder` | trait: embed a batch of strings, report its dimension | `StubEmbedder` (tests), `EmbeddingsWireEmbedder` (`komira_kg_llm`), a host |
+| `Embedder` | trait: embed a batch of strings, report its dimension | `StubEmbedder` (tests), `EmbeddingsWireEmbedder` (`kg_llm`), a host |
 | `LlmClient` | trait: extraction, contradiction and same-entity judgment, optional synthesis | `StubLlmClient` (tests), `ChatCompletionsLlmClient`, a host |
 | `Extractor` | trait: text to an `Extraction` without inference | `RuleExtractor`, a host |
 | `ExtractionPrompt` | value: system text, user template, optional type list, response schema | the caller |
-| `ChatTransport`, `EmbedTransport` | traits: post a JSON body, return the body | scripted doubles (tests), the HTTP conformers in `komira_kg_llm`, a host |
+| `ChatTransport`, `EmbedTransport` | traits: post a JSON body, return the body | scripted doubles (tests), the HTTP conformers in `kg_llm`, a host |
 | `AuthHeaderProvider` | trait: the authorization header for one outbound request | a host |
 | `SurfaceAdapter` | trait: one source record to a list of `EpisodeInput`, carrying verbatim source text | a host; selected by an opaque surface tag through `AdapterRegistry` |
 | `CaptureRoutes` | trait: register extra routes on the capture server over a loaded working set | a host |
-| `CloneableConditionalWriteStore` | the object-store trait the lineage is written through | `komira_objectstore` (the in-memory and local-file stores in tests) |
-| time | an `Int64` milliseconds argument, or the module's existing clock parameter | the caller; `komira_clock` in production, a constant in tests |
+| `CloneableConditionalWriteStore` | the object-store trait the lineage is written through | `objectstore` (the in-memory and local-file stores in tests) |
+| time | an `Int64` milliseconds argument, or the module's existing clock parameter | the caller; `clock` in production, a constant in tests |
 | `EnrichmentSender` | trait: deliver one enrichment item | `FakeEnrichmentSender` (tests), a host |
 | `EndpointPolicy` | trait: may this inference endpoint be bound; allows everything by default | a host |
 | `SourcePolicy` | trait: may a graph in this scope be built from this source; allows everything by default | a host |
@@ -267,7 +267,7 @@ ported names):
 Three functions of the source `read` file touch the engine: `get_between_nodes`, `neighborhood` and
 `edges_as_of` read tables through `EngineContext` (`read_parquet`, `materialize_plan`) and build plans with
 the plan carrier. The other four (the two exact scans, the out-degree count, rank fusion) read parquet
-bytes and rank in Mojo; they are in `komira_kg_format` and need no engine. A search of the source library
+bytes and rank in Mojo; they are in `kg_format` and need no engine. A search of the source library
 for `engine_dispatch`, the operator packages, the compiler and `fs_registry` finds no import of any of
 them; five of its tests construct an `EngineContext`. The states are those of the main branch when this was
 written; re-check them before each PR.
@@ -275,8 +275,8 @@ written; re-check them before each PR.
 | dependency | needed by | state on main |
 |---|---|---|
 | `sdk_exec` (`EngineContext`) | `komira_kg_read`; five of the library's tests | missing: no package, no open PR |
-| `sdk` plan carrier (`PlanCarrier`) | `komira_kg_read` | missing: `komira_sdk` has `ParquetReadOptions`, but the carrier type is only named in comments; no open PR |
-| plan expression and IR (`komira_plan_expr`, `komira_plan_ir`) | `komira_kg_read` | exist |
+| `sdk` plan carrier (`PlanCarrier`) | `komira_kg_read` | missing: `sdk` has `ParquetReadOptions`, but the carrier type is only named in comments; no open PR |
+| plan expression and IR (`plan_expr`, `plan_ir`) | `komira_kg_read` | exist |
 
 `komira_kg_read` is therefore blocked on two absent types, `EngineContext` and `PlanCarrier`, with no open
 PR for either; they need an owner and an issue before PR 19. The engine dispatch, operator, compiler and
@@ -284,7 +284,7 @@ PR for either; they need an owner and an issue before PR 19. The engine dispatch
 to whatever `EngineContext` runs. A second question is for the `sdk_exec` design: the source reads
 through a path (`ctx.read_parquet(path)`), so it writes snapshot bytes to a temp file first. The port does
 not carry that. `komira_kg_read` needs either a bytes or store-backed source in `sdk_exec`, or an explicit
-decision to write through `komira_fs`; it is settled in `sdk_exec`, not here.
+decision to write through `fs`; it is settled in `sdk_exec`, not here.
 
 Consequences: every package except `komira_kg_read` needs no engine and can land today. `komira_kg_read`
 blocks nothing else.
@@ -305,25 +305,25 @@ that brings it, at the seams named. A package's `deps` is stated in its first PR
 
 | PR | contents | lines | deps | tests that come with it |
 |---|---|---:|---|---|
-| 0 | `komira_parquet`: a public from-bytes function that decodes a whole in-memory Parquet file to one batch (the footer, each row group, concatenated in file order; it refuses malformed input cleanly). The reader returns STRING for a LARGE_STRING column, and the writer writes every column type the graph uses (STRING, LARGE_STRING, INT64, FLOAT64) but no BINARY or nested types, which is why embeddings are packed bytes in LARGE_STRING cells. It only adds the API; three private test copies of the same function (two in `komira_telemetry_store` tests, one in `komira_log_index` tests) may be migrated to it later | 150 | `komira_parquet` | round trip through the writer for every column type the graph schemas use; truncated file; empty file; a bad magic |
-| 1 | `komira_kg_format` part 1: `embedding`, `ingest_types`, `manifest_body` | 1,100 | none (standard library only) | pack and unpack are inverses for f32 and f64; a corrupt manifest is refused; manifest encode and decode round trip with the format version (2, the only layout) and carry the embedding dimension |
-| 2 | `komira_kg_format` part 2: `schemas`, `cosine`, `query_result` | 1,030 | part 1, `komira_arrow` and `komira_json` with their closure | every schema field and version is pinned by name; embeddings are variable-length packed f32 bytes in LARGE_STRING cells, checked on read against the manifest dimension (two dimensions tested); the facet column holds any string; cosine of equal, orthogonal and zero vectors; top-k ties are ordered; result round trip with an arbitrary annotation kind and anchor |
-| 3 | `komira_kg_format` part 3: `delta_body`, `delta_codec`, `source_fingerprint` | 1,280 | parts 1-2, parquet writer, objectstore | framed and parquet delta objects both decode; a fingerprint changes when one byte of content changes |
-| 4 | `komira_kg_format` part 4: `snapshot_store` (974 lines; split into store, view and chain) | 980 | parts 1-3, objectstore | base then delta chain read back; a lost compare-and-set race is retried and reported; compaction folds and keeps the reader's pinned snapshot readable |
-| 5 | `komira_kg_format` part 5: `search` (the two exact scans, `edge_out_degree`, `rrf_fuse`) | 350 | parts 2 and 4, PR 0 | similarity top-k equals `cosine_topk` over the same rows; full-text counts on stated rows; `rrf_fuse` on stated ranks; an empty table |
-| 6 | `komira_kg` part 1: `bitemporal`, `alias_map`, `dedup`, source-facet helpers | 1,300 | `komira_kg_format` | an invalidation closes the overlapping edge and keeps the old system-time row; dedup matches, creates, or asks for judgment on stated inputs; alias resolution is stable under reordering; a tombstone for one source and facet leaves other facets of that source alone |
-| 7 | `komira_kg` part 2: `Embedder`, `LlmClient`, `Extractor`, the stubs | 700 | part 1 | the stubs are deterministic and report their dimension; the stub extractor satisfies the trait |
-| 8 | `komira_kg` part 3: `RuleExtractor`, `CursorStore` | 1,000 | PRs 6 and 7 | a rule set on fixed text yields fixed triples; a rule set is data (two sets give two vocabularies from the same code); a cursor survives a write-read and a conflicting writer. `RuleExtractor` rules are caller data, and `CursorStore` is written over a `ConditionalWriteStore`, so the package needs `komira_objectstore` |
-| 9 | `komira_kg` part 4: `snapshot_mut` values and working set (the 2,045-line file is split here and in PR 10: values plus the working set, then erase, warm cache, compaction and embedding top-k) | 1,300 | PRs 4 and 6, PR 0 | a mutation reads back identically; a snapshot read sees one consistent set of tables |
-| 10 | `komira_kg` part 5: erase, warm cache, compaction, embedding top-k | 620 | PR 9 | a mutation then compaction reads back identically before and after; compaction never deletes an object a pinned snapshot names; erasure of a partition removes it from the head (repeated until a racing writer's rows are gone) while the old chunks and objects stay until retire and the change gate's fingerprints are kept |
-| 11 | `komira_kg` part 6: `ingest` episode path, entity resolution, gleaning and edge application (the 1,717-line file is split here and in PR 12) | 900 | PRs 8 and 10 | one episode produces the expected nodes, edges and provenance; a write with the wrong embedding dimension is refused |
-| 12 | `komira_kg` part 7: `ingest` structured path, the source removal-supersede, the incremental diff, and the `SurfaceAdapter` trait | 900 | PR 11 | re-ingest of an unchanged source is a no-op by fingerprint; a contradiction supersedes; a test adapter for a made-up record type lowers to the expected episodes |
-| 13 | `komira_kg_mode` | 140 | none | each mode name round trips; an unknown name falls back to rules; normalisation never yields model unless asked |
-| 14 | `komira_kg_spec` (`graph_spec` and `GraphScopeRef`; the host resource-type registration is not ported) | 540 | PR 13 | each invalid spec is refused with its own message; a valid spec round trips; a scope of another owner is refused; the default endpoint policy allows and an injected one refuses |
-| 15 | `komira_kg_llm`: transports, `EmbeddingsWireEmbedder`, `ChatCompletionsLlmClient` with `ExtractionPrompt`, `KgExtractClient` | 1,700 | PRs 7, 12 and 13, async, http client | against an in-process server: request shape, a non-200, a truncated body, the configured path and auth header; a response of the wrong dimension is refused; two different prompts reach the wire unchanged; the request-timeout value reaches the connector (the transport takes a timeout value, not a clock, so no test waits) |
-| 16 | `komira_kg_sources`: `RawStore`, `PartitionBindingStore`, `AdapterRegistry`, `BIndex` | 1,300 | PR 12 | a raw record is stored once per content hash whatever its surface tag; a partition binds one store and one lineage; an unknown source system is refused against the host's set; the index returns the same top-k as a plain scan through two registered test adapters |
-| 17 | `komira_kg_capture`: server and `CaptureRoutes` (the domain routes are split out of the server first) | 2,000 (two PRs) | PR 12 and PR 16, http server | a push to a registered surface becomes an episode and an unregistered surface is refused; the query surface answers from the warm cache and from the snapshot alike; extra routes are only reachable if registered; the server takes its clock as an argument |
-| 18 | `komira_kg_enrich` with the `EnrichmentSender` trait | 1,150 | objectstore | an item is delivered at least once, and by one worker at a time only while that worker's lease holds; a failed delivery is retried by the scheduler's stated schedule; a second worker cannot drain while a lease is held |
+| 0 | `parquet`: a public from-bytes function that decodes a whole in-memory Parquet file to one batch (the footer, each row group, concatenated in file order; it refuses malformed input cleanly). The reader returns STRING for a LARGE_STRING column, and the writer writes every column type the graph uses (STRING, LARGE_STRING, INT64, FLOAT64) but no BINARY or nested types, which is why embeddings are packed bytes in LARGE_STRING cells. It only adds the API; three private test copies of the same function (two in `telemetry_store` tests, one in `log_index` tests) may be migrated to it later | 150 | `parquet` | round trip through the writer for every column type the graph schemas use; truncated file; empty file; a bad magic |
+| 1 | `kg_format` part 1: `embedding`, `ingest_types`, `manifest_body` | 1,100 | none (standard library only) | pack and unpack are inverses for f32 and f64; a corrupt manifest is refused; manifest encode and decode round trip with the format version (2, the only layout) and carry the embedding dimension |
+| 2 | `kg_format` part 2: `schemas`, `cosine`, `query_result` | 1,030 | part 1, `arrow` and `json` with their closure | every schema field and version is pinned by name; embeddings are variable-length packed f32 bytes in LARGE_STRING cells, checked on read against the manifest dimension (two dimensions tested); the facet column holds any string; cosine of equal, orthogonal and zero vectors; top-k ties are ordered; result round trip with an arbitrary annotation kind and anchor |
+| 3 | `kg_format` part 3: `delta_body`, `delta_codec`, `source_fingerprint` | 1,280 | parts 1-2, parquet writer, objectstore | framed and parquet delta objects both decode; a fingerprint changes when one byte of content changes |
+| 4 | `kg_format` part 4: `snapshot_store` (974 lines; split into store, view and chain) | 980 | parts 1-3, objectstore | base then delta chain read back; a lost compare-and-set race is retried and reported; compaction folds and keeps the reader's pinned snapshot readable |
+| 5 | `kg_format` part 5: `search` (the two exact scans, `edge_out_degree`, `rrf_fuse`) | 350 | parts 2 and 4, PR 0 | similarity top-k equals `cosine_topk` over the same rows; full-text counts on stated rows; `rrf_fuse` on stated ranks; an empty table |
+| 6 | `kg` part 1: `bitemporal`, `alias_map`, `dedup`, source-facet helpers | 1,300 | `kg_format` | an invalidation closes the overlapping edge and keeps the old system-time row; dedup matches, creates, or asks for judgment on stated inputs; alias resolution is stable under reordering; a tombstone for one source and facet leaves other facets of that source alone |
+| 7 | `kg` part 2: `Embedder`, `LlmClient`, `Extractor`, the stubs | 700 | part 1 | the stubs are deterministic and report their dimension; the stub extractor satisfies the trait |
+| 8 | `kg` part 3: `RuleExtractor`, `CursorStore` | 1,000 | PRs 6 and 7 | a rule set on fixed text yields fixed triples; a rule set is data (two sets give two vocabularies from the same code); a cursor survives a write-read and a conflicting writer. `RuleExtractor` rules are caller data, and `CursorStore` is written over a `ConditionalWriteStore`, so the package needs `objectstore` |
+| 9 | `kg` part 4: `snapshot_mut` values and working set (the 2,045-line file is split here and in PR 10: values plus the working set, then erase, warm cache, compaction and embedding top-k) | 1,300 | PRs 4 and 6, PR 0 | a mutation reads back identically; a snapshot read sees one consistent set of tables |
+| 10 | `kg` part 5: erase, warm cache, compaction, embedding top-k | 620 | PR 9 | a mutation then compaction reads back identically before and after; compaction never deletes an object a pinned snapshot names; erasure of a partition removes it from the head (repeated until a racing writer's rows are gone) while the old chunks and objects stay until retire and the change gate's fingerprints are kept |
+| 11 | `kg` part 6: `ingest` episode path, entity resolution, gleaning and edge application (the 1,717-line file is split here and in PR 12) | 900 | PRs 8 and 10 | one episode produces the expected nodes, edges and provenance; a write with the wrong embedding dimension is refused |
+| 12 | `kg` part 7: `ingest` structured path, the source removal-supersede, the incremental diff, and the `SurfaceAdapter` trait | 900 | PR 11 | re-ingest of an unchanged source is a no-op by fingerprint; a contradiction supersedes; a test adapter for a made-up record type lowers to the expected episodes |
+| 13 | `kg_mode` | 140 | none | each mode name round trips; an unknown name falls back to rules; normalisation never yields model unless asked |
+| 14 | `kg_spec` (`graph_spec` and `GraphScopeRef`; the host resource-type registration is not ported) | 540 | PR 13 | each invalid spec is refused with its own message; a valid spec round trips; a scope of another owner is refused; the default endpoint policy allows and an injected one refuses |
+| 15 | `kg_llm`: transports, `EmbeddingsWireEmbedder`, `ChatCompletionsLlmClient` with `ExtractionPrompt`, `KgExtractClient` | 1,700 | PRs 7, 12 and 13, async, http client | against an in-process server: request shape, a non-200, a truncated body, the configured path and auth header; a response of the wrong dimension is refused; two different prompts reach the wire unchanged; the request-timeout value reaches the connector (the transport takes a timeout value, not a clock, so no test waits) |
+| 16 | `kg_sources`: `RawStore`, `PartitionBindingStore`, `AdapterRegistry`, `BIndex` | 1,300 | PR 12 | a raw record is stored once per content hash whatever its surface tag; a partition binds one store and one lineage; an unknown source system is refused against the host's set; the index returns the same top-k as a plain scan through two registered test adapters |
+| 17 | `kg_capture`: server and `CaptureRoutes` (the domain routes are split out of the server first) | 2,000 (two PRs) | PR 12 and PR 16, http server | a push to a registered surface becomes an episode and an unregistered surface is refused; the query surface answers from the warm cache and from the snapshot alike; extra routes are only reachable if registered; the server takes its clock as an argument |
+| 18 | `kg_enrich` with the `EnrichmentSender` trait | 1,150 | objectstore | an item is delivered at least once, and by one worker at a time only while that worker's lease holds; a failed delivery is retried by the scheduler's stated schedule; a second worker cannot drain while a lease is held |
 
 That is 19 PRs for about 18,500 lines in this wave. PRs 1 to 4 are a chain; 5 needs PRs 2 and 4; 6 needs
 PR 2; 13 needs nothing. After PR 2 the chain from 6 to 12 and the branches 13 and 18 run in parallel. The
@@ -335,7 +335,7 @@ why PR 17 is two PRs); the file split is real work inside the PR and is the reas
 
 | PR | contents | lines | waits for | tests that come with it |
 |---|---|---:|---|---|
-| 19 | `komira_kg_read`: `get_between_nodes`, `neighborhood`, `edges_as_of` | 400 | `EngineContext` in `sdk_exec`; `PlanCarrier` in `komira_sdk`; PR 5 | `neighborhood` and `get_between_nodes` on a fixed snapshot, including a node with no edges and a leaf guard; `edges_as_of` at an open interval's boundaries |
+| 19 | `komira_kg_read`: `get_between_nodes`, `neighborhood`, `edges_as_of` | 400 | `EngineContext` in `sdk_exec`; `PlanCarrier` in `sdk`; PR 5 | `neighborhood` and `get_between_nodes` on a fixed snapshot, including a node with no edges and a leaf guard; `edges_as_of` at an open interval's boundaries |
 | 20 | the five engine tests of the source library, rewritten against package imports: CSR adjacency, between-nodes leaf guard, query surface, read off a snapshot, storage integration | tests only | PR 19 | these are the end-to-end checks of write then read |
 
 ### Not scheduled: connectors and adapters
@@ -351,11 +351,11 @@ What each package's tests must prove, and the rules that apply to all of them:
 
 | package | what the tests prove | defect each would catch |
 |---|---|---|
-| `komira_kg_format` | every encoding round trips; every version constant and schema is pinned; a corrupt or truncated input is refused with an error, never a partial value; the lineage survives a lost compare-and-set race | a format change that strands existing data; a reader that accepts garbage; a compaction that loses a delta |
-| `komira_kg` | bi-temporal invariants (a superseded fact keeps its system-time row; no two open edges with the same key); ingest is idempotent per source fingerprint; erasure removes the partition's rows and embeddings from the head, repeating until a racing writer's rows are gone, while old chunks and objects stay until retire and fingerprints are kept | a double-ingest; a contradiction that overwrites history; an erasure that leaves a copy |
-| `komira_kg_mode`, `komira_kg_spec` | each validation rule has a test that fails alone; an unknown mode falls back to rules | a rule silently dropped; a mode that turns inference on by accident |
-| `komira_kg_llm` | request and response shape against an in-process server; the prompt reaches the wire as given; failure paths | an unhandled non-200; a retry loop with no bound; a prompt baked into the client |
-| `komira_kg_capture`, `komira_kg_sources`, `komira_kg_enrich` | output of test adapters for made-up record types; routes reachable only when registered; a queue item delivered and acked, a lease held by one worker, a pass that loses its lease stopping before the next delivery | an adapter that drops a field; an unauthenticated route; a surface tag that dispatches to the wrong adapter |
+| `kg_format` | every encoding round trips; every version constant and schema is pinned; a corrupt or truncated input is refused with an error, never a partial value; the lineage survives a lost compare-and-set race | a format change that strands existing data; a reader that accepts garbage; a compaction that loses a delta |
+| `kg` | bi-temporal invariants (a superseded fact keeps its system-time row; no two open edges with the same key); ingest is idempotent per source fingerprint; erasure removes the partition's rows and embeddings from the head, repeating until a racing writer's rows are gone, while old chunks and objects stay until retire and fingerprints are kept | a double-ingest; a contradiction that overwrites history; an erasure that leaves a copy |
+| `kg_mode`, `kg_spec` | each validation rule has a test that fails alone; an unknown mode falls back to rules | a rule silently dropped; a mode that turns inference on by accident |
+| `kg_llm` | request and response shape against an in-process server; the prompt reaches the wire as given; failure paths | an unhandled non-200; a retry loop with no bound; a prompt baked into the client |
+| `kg_capture`, `kg_sources`, `kg_enrich` | output of test adapters for made-up record types; routes reachable only when registered; a queue item delivered and acked, a lease held by one worker, a pass that loses its lease stopping before the next delivery | an adapter that drops a field; an unauthenticated route; a surface tag that dispatches to the wrong adapter |
 | `komira_kg_read` | each engine-run operation on a fixed snapshot; end-to-end write then read | a read that disagrees with what the writer stored |
 
 Rules:
@@ -388,7 +388,7 @@ Rules:
 
 ## What must always hold?
 
-- `komira_kg_format` imports no engine package and no network package; `komira_kg` imports no HTTP package.
+- `kg_format` imports no engine package and no network package; `kg` imports no HTTP package.
   Each package's `deps` list in its first PR is the check: a forbidden dependency is a build error.
 - No komira package imports an application package; application adapters import komira, never the reverse.
 - No public knowledge-graph package names a vendor, a product, a model or a domain vocabulary in its code,
@@ -411,12 +411,12 @@ Each question carries the recommended answer; the maintainers decide.
    tables with a delta tail, and withdraws the sentinel for an open interval (`TS_OPEN_SENTINEL` today, a
    null there). Recommended: port the working lineage unchanged as the delta-tail layer (it is the part
    that document keeps), keep the open-interval sentinel, `TS_OPEN_SENTINEL` (`Int64.MAX`, compared only through the constant and never as a literal), and add the Iceberg table writer and the
-   null-bound schema as a later schema version in a later series, once `komira_iceberg` lands. Do not rewrite
+   null-bound schema as a later schema version in a later series, once `iceberg` lands. Do not rewrite
    storage and port in one step.
-2. **One package or two for the read side?** Recommended: two. `komira_kg_format` (no engine) and
+2. **One package or two for the read side?** Recommended: two. `kg_format` (no engine) and
    `komira_kg_read` (engine), because only three functions of the source read file run a plan on the engine and the rest is shared with the writer.
 3. **Does `snapshot_mut` need a new parquet API or a private helper?** Recommended: a public from-bytes
-   reader in `komira_parquet` (PR 0); two other libraries already carry private copies of it in their tests.
+   reader in `parquet` (PR 0); two other libraries already carry private copies of it in their tests.
 4. **Fixed embedding dimension.** The source schemas fix one dimension. Recommended: no default; the writer
    takes the dimension, the manifest records it, and tests cover two dimensions.
 5. **Are connectors and document adapters public?** No: they are application code and live outside komira.
@@ -424,11 +424,11 @@ Each question carries the recommended answer; the maintainers decide.
    `SurfaceAdapter` if the maintainers want one.
 6. **Task-tracker adapter.** Not ported: a ticket field set is a domain model. A host lowers its tasks to
    `EpisodeInput`.
-7. **Is the resource reference in `komira_authz_api`?** No: `AuthzResource` has no organisation or owner,
+7. **Is the resource reference in `authz_api`?** No: `AuthzResource` has no organisation or owner,
    which the spec compares. Decided here, not left to PR 14: the spec defines `GraphScopeRef` and the
    binding to authorization is added with the authorization resource work.
-8. **Naming against the code graph.** `komira_kg_code` and `komira_kg` read alike. Recommended: keep both,
-   have each README link the other, and describe `komira_kg_code` as the "code graph" everywhere.
+8. **Naming against the code graph.** `kg_code` and `kg` read alike. Recommended: keep both,
+   have each README link the other, and describe `kg_code` as the "code graph" everywhere.
 9. **Hooks into servers.** Recommended: leave hook traits to the server packages; adapters for them live
    outside komira.
 10. **Welding order and the coverage policy.** Recommended: no PR lands untested code; where a source test

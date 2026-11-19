@@ -1,12 +1,12 @@
 # =============================================================================
 # komira_git_protocol_conformance/graph.mojo -- a scenario's server repository
-# as a komira_git CommitGraph, from what git listed (objects.txt, parents.txt,
+# as a git CommitGraph, from what git listed (objects.txt, parents.txt,
 # tags.txt).
 # =============================================================================
 
 from std.collections import Dict
 
-from komira_git import CommitGraph, ObjectFormat, ObjectId
+from git import CommitGraph, ObjectFormat, ObjectId
 
 
 struct TranscriptGraph(CommitGraph, Movable):

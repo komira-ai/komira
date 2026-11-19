@@ -6,7 +6,7 @@
 #
 # A `TestIssuer` is one issuer URL, one algorithm (ES256 or EdDSA), one
 # header `typ` (`at+jwt` or `JWT`), a max token lifetime, a leeway, a
-# publish lead and a clock of its own, over a komira_jose `Keyring`. Its keys
+# publish lead and a clock of its own, over a jose `Keyring`. Its keys
 # are derived from a seed (keys.mojo): key 0 signs first, then 1, 2, ...
 #
 #   * `jwks()` is the document to serve: the signing key, the staged key and
@@ -14,7 +14,7 @@
 #     publishing the staged key, so a rotation cannot finish unless the
 #     test has asked for the document after `begin_rotation`.
 #   * `mint_user_token(subject, audience, client_id, scope)` signs the claims
-#     of user_token.mojo with a fresh random `jti` (komira_jose `new_jti`),
+#     of user_token.mojo with a fresh random `jti` (jose `new_jti`),
 #     `iat` now and the max lifetime; `mint` takes the lifetime. `sign_claims`
 #     signs any claims object and header `typ`, for tests that need a token
 #     this issuer would never mint (the keyring still refuses claims without
@@ -23,14 +23,14 @@
 #     the signing key once it has been in a served document for the publish
 #     lead (the keyring refuses earlier). The former key is kept in the
 #     document and leaves it when the clock reaches the switch time plus the
-#     max lifetime plus komira_jose's `JOSE_MAX_LEEWAY_S` (60 s, the largest
+#     max lifetime plus jose's `JOSE_MAX_LEEWAY_S` (60 s, the largest
 #     leeway a `ClaimPolicy` accepts; the keyring refuses an earlier
 #     retirement): by then every token it signed has expired for every
 #     verifier, whatever its leeway.
 #   * `advance(seconds)` moves the clock forward and removes every former key
 #     whose time has come. The clock never moves back.
 #   * The token endpoint (token_endpoint.mojo): `register_client(record,
-#     resources)` adds a komira_oauth `ClientMetadata` record and the
+#     resources)` adds a oauth `ClientMetadata` record and the
 #     audiences the client may ask for; `remove_client` deletes it.
 #     `token_request(form)` answers a `client_credentials` request with
 #     `private_key_jwt` as an RFC 6749 token endpoint does: 200 with
@@ -58,7 +58,7 @@
 # pointer crosses this file's API.
 # =============================================================================
 
-from komira_jose import (
+from jose import (
     JOSE_MAX_LEEWAY_S,
     JWS_ALG_EDDSA,
     JWS_ALG_ES256,
@@ -68,7 +68,7 @@ from komira_jose import (
     new_jti,
 )
 
-from komira_oauth import (
+from oauth import (
     OAUTH_ERROR_INVALID_CLIENT,
     AuthorizationServerMetadata,
     ClientMetadata,
@@ -310,7 +310,7 @@ struct TestIssuer(IssuerUnderTest, Movable, Deinitable):
         return self._issuer + "/jwks"
 
     def metadata_document(self) raises -> String:
-        """The RFC 8414 metadata document (komira_oauth): the issuer, the
+        """The RFC 8414 metadata document (oauth): the issuer, the
         token endpoint, the JWK Set URL, `private_key_jwt` with ES256 and
         EdDSA assertions."""
         var algs = List[String]()

@@ -27,7 +27,7 @@ physical level must become before it can carry streaming, and proposes three ame
 
 | Level | What it is | Who produces it | Who consumes it | On the wire? |
 |---|---|---|---|---|
-| **Logical** (RAW) | The bound relational algebra: what to compute, with no execution decisions. It is `WirePlan` decoded in the RAW context, wrapped in `WirePlanEnvelope` (`src/komira_plan_proto/plan.proto:1534`, `:1625`). | An SDK (dataframe or SQL front end), after binding. | The producer's optimizer; local runs; tools (render, diff, lint); a service that stores a bound query and re-optimizes it on each run (`optimized_plan.md` §2). | Yes, for local runs and tools. Never accepted by a scheduler. |
+| **Logical** (RAW) | The bound relational algebra: what to compute, with no execution decisions. It is `WirePlan` decoded in the RAW context, wrapped in `WirePlanEnvelope` (`src/plan_proto/plan.proto:1534`, `:1625`). | An SDK (dataframe or SQL front end), after binding. | The producer's optimizer; local runs; tools (render, diff, lint); a service that stores a bound query and re-optimizes it on each run (`optimized_plan.md` §2). | Yes, for local runs and tools. Never accepted by a scheduler. |
 | **Optimized logical** (OPTIMIZED) | The same algebra with every optimizer decision pinned as a node field: join order and build side, algorithm, aggregate mode, exchanges, access paths, snapshot pins, and (this document) the streaming decisions of §3. An `OptimizedPlan` with an `OptimizedPlanBody` (`optimized_plan.md` §4.1). | The producer: the SDK, once, on the user's machine. A service that re-optimizes stamps `komira/server`. | A scheduler (header only), a coordinator (verifies and cuts), the executor hosts (admit and lower). | **Yes. It is the only plan form a scheduler accepts**, together with its environment image. |
 | **Physical** | The host's executable form: pipelines between breakers, exchanges with partition counts, morsel sizes, memory budgets and spill; in streaming, also the epoch lifecycle, state bindings and sink commit protocols. | The executor host, by deterministic lowering of an `OptimizedSegment` (§4.2). | The same host process. | **No.** `OptimizedSegment` field 11 is reserved for a later self-contained physical form (`optimized_plan.md` §11). |
 
@@ -60,7 +60,7 @@ The producer optimizes, the scheduler places, the coordinator cuts and the host 
 | Logical (RAW) | `WirePlanEnvelope.format_version` (`plan.proto:1651`) is a minimum reader capability, checked by set membership and never by `>=` (the comment from `plan.proto:1626`). A bound plan that a service stores to re-optimize later has the same no-window promise as the optimized plan. | `optimized_plan.md` §9.1 |
 | Optimized | **Backward compatible forever, with no window**: every later reader accepts and executes every plan that any released producer emitted, with the result it first produced. Every new body field bumps `format_version`; the meaning of each decision is frozen per `optimizer_contract_version`; the golden corpus checks it. Only a revoked producer build is refused. | `optimized_plan.md` §9.1-§9.7 |
 | Segments | No promise across builds. After an upgrade a stored cut is re-derived from the stored `OptimizedPlan`. | `optimized_plan.md` §9.6 |
-| Physical | No wire form and no promise across builds. Within one build an exact-match canary checks it today (`PHYSICAL_PLAN_IR_VERSION = 13`, `src/komira_plan_ir/physical_plan.mojo:62`). §4.6 proposes keying the check to the engine build. | §4.6 |
+| Physical | No wire form and no promise across builds. Within one build an exact-match canary checks it today (`PHYSICAL_PLAN_IR_VERSION = 13`, `src/plan_ir/physical_plan.mojo:62`). §4.6 proposes keying the check to the engine build. | §4.6 |
 | **Streaming state** (new) | A **savepoint** can be read by every later build, and by a later plan that maps its state ids (§5.3). A **checkpoint** is readable only by the build that wrote it. | §3.5, §4.4 |
 
 `optimized_plan.md` §9.6 leaves the last row explicitly open: "Whether operator state written by one build can be
@@ -86,7 +86,7 @@ the first before `storage_stack.md` lands, because that property name ends up in
 
 ### 2.1 What exists (RAW, `main`)
 
-**Relations.** `LogicalPlan` has 16 tags (`PLAN_TAG_COUNT = 16`, `src/komira_plan_ir/logical_plan.mojo:174`): SCAN,
+**Relations.** `LogicalPlan` has 16 tags (`PLAN_TAG_COUNT = 16`, `src/plan_ir/logical_plan.mojo:174`): SCAN,
 FILTER, PROJECT, AGGREGATE, JOIN, SORT, LIMIT, DISTINCT, TOPN, PARTITION_BY and PARTITION_TOPN (SQL `OVER()`),
 ASOF_JOIN, UNION, VIEW_REF, CSE_REF, CAST_TO_VARCHAR. `WirePlan` has one arm per node in fields 4-19
 (`plan.proto:1558-1583`). Join types are INNER, LEFT, RIGHT, FULL, SEMI, ANTI and CROSS. A write is the envelope field
@@ -164,7 +164,7 @@ enum WatermarkStrategy {
 
 - **The column's Arrow type gives the unit and timezone of the data.** A column that is not temporal is refused
   (`PLAN_EVENT_TIME_NOT_TEMPORAL`). Watermarks themselves are UTC microseconds; the source contract's
-  `watermark_ts: Int64` (`src/komira_morsel/streaming_source.mojo:147`, `:203`) has no unit today, and §7 fixes it.
+  `watermark_ts: Int64` (`src/morsel/streaming_source.mojo:147`, `:203`) has no unit today, and §7 fixes it.
 - **The source contract already carries watermarks.** `StreamPoll` has the states Item, Idle, Watermark(ts) and
   Closed (`streaming_source.mojo:127`). `StreamSourceCaps.emits_watermark` says whether a source can honour
   `SOURCE_PROVIDED`; if it cannot, the producer refuses the plan (`PLAN_WATERMARK_SOURCE_UNSUPPORTED`).
@@ -518,8 +518,8 @@ addresses the same state.
 ### 4.1 What exists
 
 - **On `main`:** a copy of an earlier engine's physical IR at `PHYSICAL_PLAN_IR_VERSION = 13`, whose emitter and
-  consumer are, in the file's words, "neither ... in this tree" (`src/komira_plan_ir/physical_plan.mojo:5-6`, `:62`);
-  `komira_pplan_wire`, a deterministic byte format for one shape (`PROJECT? -> FILTER* -> SCAN(parquet)`);
+  consumer are, in the file's words, "neither ... in this tree" (`src/plan_ir/physical_plan.mojo:5-6`, `:62`);
+  `pplan_wire`, a deterministic byte format for one shape (`PROJECT? -> FILTER* -> SCAN(parquet)`);
   `komira_pplan` and `komira_pplan_chain`, compiled verb chains for a grouped aggregate over a filtered Parquet scan;
   and the streaming source, sink and exchange contracts (§4.3).
 - **The IR's shape:** a segment is a source, morsel operators, then a sink. Sources: PARQUET, BATCH, SINK_OUTPUT,
@@ -579,14 +579,14 @@ in **epochs**, coordinated per plan. One epoch:
    per-epoch setup does not dominate). Stateless operators run unchanged; each stateful breaker's `Sink` updates
    thread-local state.
 3. **Barrier.** Each source records its end position for `E` and emits the end of the epoch. Downstream of an
-   exchange, a reader sees epoch `E` only once every producer has sealed it: `komira_shuffle_streaming` already works
+   exchange, a reader sees epoch `E` only once every producer has sealed it: `shuffle_streaming` already works
    this way (a write sink seals an epoch; a read source returns Idle until it is sealed; `EpochCursor`,
-   `src/komira_shuffle_streaming/shuffle_streaming_source.mojo:98`). The seal is the barrier, so alignment happens per
+   `src/shuffle_streaming/shuffle_streaming_source.mojo:98`). The seal is the barrier, so alignment happens per
    exchange with no in-band marker.
 4. **Log.** The coordinator writes the epoch's **offset-log entry** durably, before any output of `E` is committed:
    each split's `[lo, hi)`, each split's idle decision, the early-firing decisions, the processing-time clock reading
    used by TTL and early firings, and each source's watermark, from which `W_E` at every node follows by §3.2. This is
-   the "offset-log-ahead-of-commit-log" invariant the sink contract already names (`src/komira_morsel/streaming_sink.mojo:31-41`).
+   the "offset-log-ahead-of-commit-log" invariant the sink contract already names (`src/morsel/streaming_sink.mojo:31-41`).
 5. **Combine, fire, evict.** Each stateful breaker runs `Combine(E)` (merging every thread's local state for `E`;
    without it a window fires with part of its rows), then `Fire/Evict(W_E)`: emit every window with
    `W_E ≥ window_end`, re-fire windows revised within lateness, evict state past its retention, and consolidate the
@@ -612,7 +612,7 @@ the epoch budget unless the input meets the order condition of §2.2.5. Not dete
 **Limit.** The barrier is global per plan, so one slow partition holds back every epoch. That is a latency limit of
 this design, not a correctness one.
 
-**The exchange today.** `komira_shuffle_streaming` carries Int64 `(key, value)` rows only, and its exactly-once
+**The exchange today.** `shuffle_streaming` carries Int64 `(key, value)` rows only, and its exactly-once
 relies on byte-identical rewrites. Before it can carry these plans it needs Arrow bodies (including `_change`) and
 attempt-scoped epoch segments: one object per producer, epoch and attempt, the reader taking the committed attempt.
 
@@ -865,7 +865,7 @@ open windows it discards.
 
 | Piece | Exists | Must be built |
 |---|---|---|
-| Logical relations, expressions, Arrow types | `komira_plan_ir`, `komira_plan_proto`, `komira_plan_wire` | Recursive `children`; the fix for `payload_narrow` and `group_topk`, dropped silently today (`optimized_plan.md` §5.4) |
+| Logical relations, expressions, Arrow types | `plan_ir`, `plan_proto`, `plan_wire` | Recursive `children`; the fix for `payload_narrow` and `group_topk`, dropped silently today (`optimized_plan.md` §5.4) |
 | RAW / OPTIMIZED contexts, `OptimizedPlan`, pins, admission, cut | Specified (#1094) | `optimized_plan.md` §12 |
 | UDF arms, one mode per language, runtime ABI | Specified (#1094, #1132) | Their stages; ABI 1.1 `snapshot`/`restore` |
 | Topic tail plus Iceberg history as one scan; Iceberg commits; upsert tails | Specified (#1094 §15.4.3; #1134) | The reader, the commit client, the tail |
@@ -873,7 +873,7 @@ open windows it discards.
 | Event time, watermark, window assign, emit policy, typed sinks, `delivery` | **This document** | Proto fields, codec, SDK verbs, SQL `WATERMARK FOR` and window TVFs |
 | Watermark propagation, changelog derivation, `StreamForm`, `NORMALIZE`, materializer, `StateSpec`, `needs.state`, key groups | **This document** | The optimizer's streaming phase, the host checks, the corpus |
 | Streaming source and sink contracts | `streaming_source.mojo`, `streaming_sink.mojo` (contracts only) | Implementations; a unit for `watermark_ts`; a staged-list token |
-| Streaming exchange with epochs and seal | `komira_shuffle_streaming` (Int64 pairs; byte-identical rewrites) | Arrow bodies with `_change`; attempt-scoped segments; a namespace per generation |
+| Streaming exchange with epochs and seal | `shuffle_streaming` (Int64 pairs; byte-identical rewrites) | Arrow bodies with `_change`; attempt-scoped segments; a namespace per generation |
 | Watermark tracker, window aggregate, single-node streaming driver | Prototypes in the earlier engine: row-at-a-time, Int64 columns, wired by hand | A plan-driven driver (§4.3) over the physical IR; vectorized stateful forms with the per-epoch lifecycle |
 | Physical IR | A v13 copy that is not self-contained and has no producer or consumer | The self-contained IR (§4.2); lowering with no optimizer passes; a build-keyed boundary check (§4.6) |
 | Offset and commit logs, state backend, checkpoints, savepoints, manifests | None | §4.3, §4.4 |

@@ -6,7 +6,7 @@ this file as part of the package and fails on the read below.
 
 from std.os import getenv
 
-from komira_aws_core import AwsRequest
+from aws_core import AwsRequest
 
 from .env_read_hand import (
     CloudWatchLogsGetLogEventsRequest,

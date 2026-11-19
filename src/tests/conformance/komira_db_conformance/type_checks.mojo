@@ -3,7 +3,7 @@
 #   through `put` and `get_by_key`.
 # =============================================================================
 #
-# What a value reads back as is the DbRow contract (komira_db/db_row.mojo):
+# What a value reads back as is the DbRow contract (db/db_row.mojo):
 # each cell is the canonical text the matching typed getter decodes, so the
 # check reads each type through its getter (get_text, get_int4, get_int8,
 # get_uuid, get_timestamptz_micros, get_bytes, get_jsonb, get_text_array).
@@ -17,9 +17,9 @@
 
 from std.testing import assert_equal, assert_true
 
-from komira_async.reactor.reactor import Reactor
+from async_rt.reactor.reactor import Reactor
 
-from komira_db import (
+from db import (
     Database,
     DbRow,
     DbValue,

@@ -106,7 +106,7 @@ fn mapRow(line: []const u8) ?Row {
 /// or a test-only package <root>/tests/<kind>/<name> with <kind> e2e (a
 /// <name> ending _e2e or _loopback), conformance (ending _conformance) or
 /// helpers (neither). So a *_e2e, *_loopback or *_conformance package
-/// anywhere else under <root> is a finding, and so is a komira_test_* package
+/// anywhere else under <root> is a finding, and so is a test_* package
 /// directly under <root> that <shipped> (`-` or a comma-separated list of
 /// names) does not name: a test harness komira does not ship is under
 /// <root>/tests/helpers. A <shipped> name that is no package directly under
@@ -154,7 +154,7 @@ pub fn srcLayout(c: *Ctx, args: []const []const u8) !void {
         try top.put(ps[0], {});
         if (!std.mem.eql(u8, kindOf(ps[0]), "helpers")) {
             try c.finding("{s}: a test-only package directly under {s}/, which holds what komira ships; move it to {s}/tests/{s}/{s}", .{ at, root, root, kindOf(ps[0]), ps[0] });
-        } else if (std.mem.startsWith(u8, ps[0], "komira_test_") and !ship.contains(ps[0])) {
+        } else if (std.mem.startsWith(u8, ps[0], "test_") and !ship.contains(ps[0])) {
             try c.finding("{s}: a test library directly under {s}/ that `shipped` does not name; a harness komira does not ship is {s}/tests/helpers/{s}", .{ at, root, root, ps[0] });
         }
     }

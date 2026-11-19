@@ -1,6 +1,6 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
-# Test-only: komira_vcard and komira_content_line against the examples of RFC
+# Test-only: vcard and content_line against the examples of RFC
 # 6350 (vCard 4.0), RFC 2426 (vCard 3.0) and RFC 9555 (the vCard to JSContact
 # conversion), and against vCard 4.0, 3.0 and 2.1 inputs written in the shape
 # Apple, Outlook and Google exports take (vectors.mojo says which is which
@@ -11,8 +11,8 @@ mojo_library(
     name = "komira_vcard_conformance",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
-        "//src/komira_content_line:komira_content_line",
-        "//src/komira_vcard:komira_vcard",
+        "//src/content_line:content_line",
+        "//src/vcard:vcard",
     ],
     conda = False,
     test_srcs = [

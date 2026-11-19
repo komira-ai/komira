@@ -2,7 +2,7 @@
 # service.mojo -- connectrpc.conformance.v1.ConformanceService on ConnectService
 # =============================================================================
 #
-# The methods the suite calls, registered on a komira_connect ConnectService
+# The methods the suite calls, registered on a connect ConnectService
 # through its public registration API, and answered as the suite's
 # testing_servers.md says, as far as that API lets a handler:
 #
@@ -30,10 +30,10 @@
 # the code to the wire status of the request's protocol.
 # =============================================================================
 
-from komira_async.ops.waker_sink import NoopSink
-from komira_async.runtime.blocking_runtime import BlockingRuntime
-from komira_clock import now_ns
-from komira_connect import ConnectService, format_connect_error
+from async_rt.ops.waker_sink import NoopSink
+from async_rt.runtime.blocking_runtime import BlockingRuntime
+from clock import now_ns
+from connect import ConnectService, format_connect_error
 
 from wire import (
     ResponseDef,
@@ -48,7 +48,7 @@ comptime SERVICE_PATH = "/connectrpc.conformance.v1.ConformanceService/"
 def _sleep_ms(ms: Int) raises:
     """Wait `ms` milliseconds on an empty reactor (an epoll_wait with a
     timeout): std's sleep would declare a second `nanosleep` beside
-    komira_async's, which does not legalize in one program."""
+    async_rt's, which does not legalize in one program."""
     if ms <= 0:
         return
     var until = now_ns() + UInt64(ms) * 1_000_000

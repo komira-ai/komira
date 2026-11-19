@@ -132,7 +132,7 @@ supported Node major. Remote runs follow the client's version: a Python producer
 of its CPython minor, and a TypeScript producer's FROM the base of its Node major. Each base contains:
 
 - the engine and the producer library;
-- the job supervisor (`src/komira_job_supervisor`);
+- the job supervisor (`src/job_supervisor`);
 - the runtime registry: `komira/native`, and the one managed runtime the base is for (`komira/python` with its one
   CPython minor, or `komira/node` with its one Node major), each with its library, and the
   serializers and capture formats each accepts.

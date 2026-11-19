@@ -19,8 +19,8 @@
 # an IPv4-mapped one.
 # =============================================================================
 
-from komira_async.reactor.socket_io import try_io_accept, try_io_connect
-from komira_async.reactor.socket_setup import (
+from async_rt.reactor.socket_io import try_io_accept, try_io_connect
+from async_rt.reactor.socket_setup import (
     bind_inet,
     close_fd,
     getsockname_port,
@@ -29,7 +29,7 @@ from komira_async.reactor.socket_setup import (
     sockaddr_in_bytes,
     socket_tcp_nonblocking,
 )
-from komira_http_core.tls import (
+from http_core.tls import (
     TLS_OUTCOME_BLOCKED_ON_READ,
     TLS_OUTCOME_BLOCKED_ON_WRITE,
     TLS_OUTCOME_DONE,

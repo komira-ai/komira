@@ -3,17 +3,21 @@
 //! real package before the pinned mopm has `--overlay` (tools/build/tests,
 //! functional/readme_e2e).
 //!
-//!     fake mopm add NAME@=VERSION --overlay DIR --registry URL
+//!     fake mopm add NAMESPACE/NAME@=VERSION --overlay DIR --registry URL
 //!         What `mopm add --overlay` does for a staged set that holds the whole
 //!         closure: reads the registry's configuration (URL must be a loopback
 //!         one, offline.zig), reads DIR/plan.json and the packages it names, and
-//!         writes `mopm.lock` (version 1) in the current directory, one entry per
-//!         package of the closure. A package the set lacks is asked of the
+//!         writes `mopm.lock` (version 3) in the current directory, one entry per
+//!         package of the closure, named by its full name. A name without a namespace is
+//!         refused, as mopm 0.0.113 refuses it. A package the set lacks is asked of the
 //!         registry, as the real one does, and the registry's refusal fails the
 //!         command. Both options are required: the e2e names its registry itself.
 //!     fake mopm_swallow add ...
 //!         The same, but a refusal of the registry is ignored: the package is left
 //!         out of the lock and the command exits 0.
+//!     fake mopm_keyed_by_build add ...
+//!         The same, but a build is keyed in the lock by the Mojo version its file names and not by
+//!         the project's, as a lock does that holds only builds for another compiler.
 //!     fake mopm_registry add ...
 //!         The same, but the lock holds the sha256 and size the plan gives, as a
 //!         lock made from a registry's index would: the file is not read for them.
@@ -64,13 +68,14 @@ fn fileOrDie(a: Allocator, dir: std.fs.Dir, path: []const u8) []u8 {
     return dir.readFileAlloc(a, path, 1 << 29) catch |e| die("mopm: cannot read {s}: {s}", .{ path, @errorName(e) });
 }
 
-/// `mojo<version>_0` out of `mojo-<name>-<version>-<build>.conda`.
-fn buildOf(filename: []const u8, name: []const u8, version: []const u8) []const u8 {
-    const head_len = "mojo-".len + name.len + 1 + version.len + 1;
+/// `mojo<version>_0` out of `mojo-<namespace>.<name>-<version>-<build>.conda`, for the full name `full`.
+fn buildOf(filename: []const u8, full: []const u8, version: []const u8) []const u8 {
+    const n = plan_mod.splitName(full) orelse die("mopm: {s} has no namespace", .{full});
+    const head_len = "mojo-".len + n.namespace.len + 1 + n.name.len + 1 + version.len + 1;
     return filename[head_len .. filename.len - ".conda".len];
 }
 
-const Mode = enum { read_files, plan_hashes, plan_only, swallow };
+const Mode = enum { read_files, plan_hashes, plan_only, swallow, keyed_by_build };
 
 /// What mopm does for a package the overlay lacks: asks the registry for its index. A refusal
 /// (any answer but 200 and 404) is mopm's error, as the real one reports it; `swallow` mode
@@ -95,6 +100,7 @@ fn mopmAdd(a: Allocator, args: []const []const u8, mode: Mode) void {
     if (!std.mem.startsWith(u8, registry, "http://127.0.0.1:")) die("mopm: the registry {s} is not a loopback URL: the e2e must be offline", .{registry});
     const at = std.mem.indexOf(u8, args[1], "@=") orelse die("mopm: {s} is not name@=version", .{args[1]});
     const want_name = args[1][0..at];
+    if (plan_mod.splitName(want_name) == null) die("mopm: package name '{s}' has no namespace: write <namespace>/{s}", .{ want_name, want_name });
     const want_version = args[1][at + 2 ..];
     var why: []const u8 = "";
     var staged = std.fs.cwd().openDir(args[3], .{}) catch |e| die("mopm: cannot open the overlay {s}: {s}", .{ args[3], @errorName(e) });
@@ -106,6 +112,7 @@ fn mopmAdd(a: Allocator, args: []const []const u8, mode: Mode) void {
     const plan = plan_mod.parsePlan(a, fileOrDie(a, staged, "plan.json"), &why) catch die("mopm: {s}", .{why});
     const manifest = fileOrDie(a, std.fs.cwd(), "mopm.toml");
     if (std.mem.indexOf(u8, manifest, "[toolchain]") == null) die("mopm: mopm.toml has no [toolchain] mojo", .{});
+    const project_mojo = projectMojo(manifest) orelse die("mopm: mopm.toml has no [toolchain] mojo", .{});
 
     var locked: std.ArrayList(plan_mod.Locked) = .empty;
     var todo: std.ArrayList([]const u8) = .empty;
@@ -129,7 +136,7 @@ fn mopmAdd(a: Allocator, args: []const []const u8, mode: Mode) void {
         var native: []const std.json.Value = &.{};
         if (mode != .plan_only) {
             const files = conda.read(a, bytes, &why) catch die("mopm: {s}: {s}", .{ rel, why });
-            const meta_path = std.fmt.allocPrint(a, "lib/mojo/{s}.mopm.json", .{name}) catch die("mopm: out of memory", .{});
+            const meta_path = std.fmt.allocPrint(a, "lib/mojo/{s}.mopm.json", .{plan_mod.importName(name)}) catch die("mopm: out of memory", .{});
             const meta_bytes = conda.find(files, meta_path) orelse die("mopm: {s} holds no {s}", .{ rel, meta_path });
             const meta = plan_mod.parseMetadata(a, meta_bytes, &why) catch die("mopm: {s}", .{why});
             native = meta.native;
@@ -139,15 +146,23 @@ fn mopmAdd(a: Allocator, args: []const []const u8, mode: Mode) void {
             }
         }
         const build = buildOf(f.filename, name, m.version);
+        const mojo_of = if (std.mem.startsWith(u8, build, "mojo") and build.len > "mojo_0".len) build["mojo".len .. build.len - "_0".len] else "";
+        const namespace = plan_mod.splitName(name).?.namespace;
+        var artifacts: std.json.ArrayHashMap(plan_mod.Artifact) = .{};
+        // A lock keys a build by the Mojo version of the project; `keyed_by_build` is a lock that keys it by
+        // the version the file's build names, which is another compiler's when the staged set was built for one.
+        artifacts.map.put(a, if (mode == .keyed_by_build) mojo_of else project_mojo, .{
+            .build = build,
+            .url = std.fmt.allocPrint(a, "https://conda.mopm.dev/{s}/{s}/{s}", .{ namespace, f.subdir, f.filename }) catch die("mopm: out of memory", .{}),
+            .sha256 = if (from_plan) f.sha256 else a.dupe(u8, &plan_mod.sha256Hex(bytes)) catch die("mopm: out of memory", .{}),
+            .size = if (from_plan) f.size else bytes.len,
+        }) catch die("mopm: out of memory", .{});
         locked.append(a, .{
             .name = name,
             .version = m.version,
-            .build = build,
             .subdir = f.subdir,
-            .url = std.fmt.allocPrint(a, "https://conda.mopm.dev/{s}/{s}", .{ f.subdir, f.filename }) catch die("mopm: out of memory", .{}),
-            .sha256 = if (from_plan) f.sha256 else a.dupe(u8, &plan_mod.sha256Hex(bytes)) catch die("mopm: out of memory", .{}),
-            .size = if (from_plan) f.size else bytes.len,
-            .mojo = if (std.mem.startsWith(u8, build, "mojo") and build.len > "mojo_0".len) build["mojo".len .. build.len - "_0".len] else "",
+            .channel = std.fmt.allocPrint(a, "https://conda.mopm.dev/{s}/", .{namespace}) catch die("mopm: out of memory", .{}),
+            .artifacts = artifacts,
             .deps = deps.items,
             .native = native,
         }) catch die("mopm: out of memory", .{});
@@ -157,9 +172,18 @@ fn mopmAdd(a: Allocator, args: []const []const u8, mode: Mode) void {
             return std.mem.lessThan(u8, x.name, y.name);
         }
     }.less);
-    const mojo = if (locked.items.len > 0) locked.items[0].mojo else "";
+    const mojo = if (locked.items.len > 0 and locked.items[0].artifacts.map.count() > 0) locked.items[0].artifacts.map.keys()[0] else "";
     const text = plan_mod.renderLock(a, mojo, locked.items) catch die("mopm: cannot write the lock", .{});
     std.fs.cwd().writeFile(.{ .sub_path = "mopm.lock", .data = text }) catch |e| die("mopm: cannot write mopm.lock: {s}", .{@errorName(e)});
+}
+
+/// The `mojo = "<version>"` of a manifest's `[toolchain]`.
+fn projectMojo(manifest: []const u8) ?[]const u8 {
+    const key = "mojo = \"";
+    const at = std.mem.indexOf(u8, manifest, key) orelse return null;
+    const rest = manifest[at + key.len ..];
+    const end = std.mem.indexOfScalar(u8, rest, '"') orelse return null;
+    return rest[0..end];
 }
 
 const MetaFile = struct {
@@ -324,6 +348,7 @@ pub fn main() !void {
     if (std.mem.eql(u8, argv[1], "mopm_registry")) return mopmAdd(a, rest, .plan_hashes);
     if (std.mem.eql(u8, argv[1], "mopm_plan")) return mopmAdd(a, rest, .plan_only);
     if (std.mem.eql(u8, argv[1], "mopm_swallow")) return mopmAdd(a, rest, .swallow);
+    if (std.mem.eql(u8, argv[1], "mopm_keyed_by_build")) return mopmAdd(a, rest, .keyed_by_build);
     if (std.mem.eql(u8, argv[1], "mopm_old")) die("mopm: unknown option '--overlay'", .{});
     if (std.mem.eql(u8, argv[1], "mopm_usage")) {
         std.fs.File.stderr().writeAll("usage: mopm lock   [--registry <prod|gamma|beta|url>]\n       mopm update [<package>...] [--registry <prod|gamma|beta|url>]\n       mopm tree\n       mopm sync   [--locked] [--registry <prod|gamma|beta|url>] [--pixi <path>]\n       mopm add    <package>[@<requirement>] [--dev] [--path <dir>] [--registry <prod|gamma|beta|url>]\n") catch {};

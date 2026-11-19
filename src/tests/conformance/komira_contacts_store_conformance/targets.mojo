@@ -4,16 +4,16 @@
 # =============================================================================
 #
 # `fresh()` hands back an empty `Database` the store's tables can be written
-# to: a SQL backend creates them (komira_contacts.sqlite_schema), a document
+# to: a SQL backend creates them (contacts.sqlite_schema), a document
 # backend declares the composite index the store needs
-# (komira_contacts.composite_indexes). Every check calls `fresh()` itself, so
+# (contacts.composite_indexes). Every check calls `fresh()` itself, so
 # no check sees another's rows.
 # =============================================================================
 
-from komira_async.ops.waker_sink import NoopSink
-from komira_async.runtime.blocking_runtime import BlockingRuntime
+from async_rt.ops.waker_sink import NoopSink
+from async_rt.runtime.blocking_runtime import BlockingRuntime
 
-from komira_db import Database
+from db import Database
 
 comptime Rt = BlockingRuntime[NoopSink]
 

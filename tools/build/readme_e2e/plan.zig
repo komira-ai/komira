@@ -1,7 +1,8 @@
 //! The two files of mopm the e2e reads and writes: a staged set's `plan.json`
 //! (spec/staged-set.md of mopm: the members of a release in dependency order,
 //! each with the files and hashes that will be published) and the `mopm.lock`
-//! a project gets from `mopm add` (spec/lock.md, version 1).
+//! a project gets from `mopm add` (spec/lock.md, version 3). Packages are named by their full
+//! name, `<namespace>/<name>`: the part after the slash is the import name.
 //!
 //! Only the keys the e2e uses are read; others are ignored, as mopm's own
 //! readers ignore the keys they do not know within a version.
@@ -39,7 +40,30 @@ pub fn relativePath(s: []const u8) bool {
     return true;
 }
 
+// ---- names ------------------------------------------------------------------
+
+pub const Name = struct { namespace: []const u8, name: []const u8 };
+
+/// A full name `<namespace>/<name>` split at its one slash; null when it has none, or when either
+/// side is empty or holds another slash.
+pub fn splitName(full: []const u8) ?Name {
+    const slash = std.mem.indexOfScalar(u8, full, '/') orelse return null;
+    const ns = full[0..slash];
+    const name = full[slash + 1 ..];
+    if (ns.len == 0 or name.len == 0 or std.mem.indexOfScalar(u8, name, '/') != null) return null;
+    return .{ .namespace = ns, .name = name };
+}
+
+/// The name Mojo code imports, and that `lib/mojo/<name>.mojoc`, `<name>.mopm.json` and `<name>.bins/`
+/// are named by: the part of a full name after the slash. A name without one is its own import name.
+pub fn importName(full: []const u8) []const u8 {
+    return if (splitName(full)) |n| n.name else full;
+}
+
 // ---- plan.json --------------------------------------------------------------
+
+/// The version of `plan.json` that names its members by full name (spec/staged-set.md).
+pub const plan_version: u32 = 2;
 
 pub const PlanFile = struct {
     subdir: []const u8,
@@ -75,9 +99,10 @@ pub fn parsePlan(a: Allocator, text: []const u8, why: *[]const u8) Error!Plan {
         error.OutOfMemory => return error.OutOfMemory,
         else => return invalid(a, why, "plan.json: {s}", .{@errorName(e)}),
     };
-    if (plan.version != 1) return invalid(a, why, "plan.json: version {d}, and only 1 is read", .{plan.version});
+    if (plan.version != plan_version) return invalid(a, why, "plan.json: version {d}, and only {d} is read", .{ plan.version, plan_version });
     for (plan.members, 0..) |m, i| {
         if (m.name.len == 0 or m.version.len == 0) return invalid(a, why, "plan.json: member {d} has no name or version", .{i});
+        if (splitName(m.name) == null) return invalid(a, why, "plan.json: member {s} has no namespace: a name is <namespace>/<name>", .{m.name});
         for (plan.members[0..i]) |p| {
             if (std.mem.eql(u8, p.name, m.name)) return invalid(a, why, "plan.json: {s} is a member twice", .{m.name});
         }
@@ -98,15 +123,31 @@ pub fn renderPlan(a: Allocator, plan: Plan) Error![]u8 {
 
 // ---- mopm.lock --------------------------------------------------------------
 
-pub const Locked = struct {
-    name: []const u8,
-    version: []const u8,
+/// The one `lock_version` mopm 0.0.113 writes (spec/lock.md). Version 1 and 2 locks predate
+/// namespaces: their names are bare and their files `mojo-<name>-...`.
+pub const lock_version: u32 = 3;
+
+/// One build of a package, for one Mojo version.
+pub const Artifact = struct {
     build: []const u8 = "",
-    subdir: []const u8 = "",
     url: []const u8 = "",
     sha256: []const u8 = "",
     size: u64 = 0,
-    mojo: []const u8 = "",
+
+    /// The file name the artifact's `url` ends in.
+    pub fn filename(self: Artifact) []const u8 {
+        return std.fs.path.basename(self.url);
+    }
+};
+
+pub const Locked = struct {
+    /// The full name, `<namespace>/<name>`.
+    name: []const u8,
+    version: []const u8,
+    subdir: []const u8 = "",
+    channel: []const u8 = "",
+    /// The builds, keyed by the Mojo version each was built with.
+    artifacts: std.json.ArrayHashMap(Artifact) = .{},
     /// `path` for a path dependency, which has no file.
     source: ?[]const u8 = null,
     deps: []const []const u8 = &.{},
@@ -116,9 +157,9 @@ pub const Locked = struct {
         return self.source != null;
     }
 
-    /// The file name the entry's `url` ends in.
-    pub fn filename(self: Locked) []const u8 {
-        return std.fs.path.basename(self.url);
+    /// The build for Mojo `mojo`, if the lock has one.
+    pub fn artifact(self: Locked, mojo: []const u8) ?Artifact {
+        return self.artifacts.map.get(mojo);
     }
 };
 
@@ -134,9 +175,11 @@ pub const Lock = struct {
     }
 };
 
-/// The file name mopm gives a package: `mojo-<name>-<version>-<build>.conda`.
-pub fn packageFile(a: Allocator, name: []const u8, version: []const u8, build: []const u8) ![]u8 {
-    return std.fmt.allocPrint(a, "mojo-{s}-{s}-{s}.conda", .{ name, version, build });
+/// The file name mopm gives a package: `mojo-<namespace>.<name>-<version>-<build>.conda`, for the full
+/// name `<namespace>/<name>`. Null for a name without a namespace.
+pub fn packageFile(a: Allocator, full: []const u8, version: []const u8, build: []const u8) !?[]u8 {
+    const n = splitName(full) orelse return null;
+    return try std.fmt.allocPrint(a, "mojo-{s}.{s}-{s}-{s}.conda", .{ n.namespace, n.name, version, build });
 }
 
 pub fn parseLock(a: Allocator, text: []const u8, why: *[]const u8) Error!Lock {
@@ -144,30 +187,40 @@ pub fn parseLock(a: Allocator, text: []const u8, why: *[]const u8) Error!Lock {
         error.OutOfMemory => return error.OutOfMemory,
         else => return invalid(a, why, "mopm.lock: {s}", .{@errorName(e)}),
     };
-    if (lock.lock_version != 1) {
-        return invalid(a, why, "mopm.lock: lock_version {d}; the e2e's project names its compiler under [toolchain], which gives a version 1 lock", .{lock.lock_version});
+    if (lock.lock_version != lock_version) {
+        return invalid(a, why, "mopm.lock: lock_version {d}; mopm writes {d} for the e2e's project (a lock before namespaces is 1 or 2), and only {d} is read", .{ lock.lock_version, lock_version, lock_version });
     }
     for (lock.packages) |p| {
+        if (splitName(p.name) == null) {
+            return invalid(a, why, "mopm.lock: package {s} has no namespace: every name of a version {d} lock is <namespace>/<name>", .{ p.name, lock_version });
+        }
         if (p.isPath()) continue;
-        const want = try packageFile(a, p.name, p.version, p.build);
-        if (!plainName(p.subdir) or !std.mem.eql(u8, p.filename(), want)) {
-            return invalid(a, why, "mopm.lock: {s} {s}: the url {s} does not end in {s}", .{ p.name, p.version, p.url, want });
+        if (!plainName(p.subdir)) return invalid(a, why, "mopm.lock: {s} {s}: the subdir {s} is not a plain name", .{ p.name, p.version, p.subdir });
+        var it = p.artifacts.map.iterator();
+        while (it.next()) |e| {
+            const art = e.value_ptr.*;
+            const want = (try packageFile(a, p.name, p.version, art.build)).?;
+            if (!std.mem.eql(u8, art.filename(), want)) {
+                return invalid(a, why, "mopm.lock: {s} {s}: the url {s} does not end in {s}", .{ p.name, p.version, art.url, want });
+            }
         }
     }
     return lock;
 }
 
-/// A version 1 lock of `packages`, in the form mopm writes: sorted by name.
+/// A version 3 lock of `packages`, in the form mopm writes: sorted by name.
 pub fn renderLock(a: Allocator, mojo: []const u8, packages: []const Locked) Error![]u8 {
     const Out = struct {
         lock_version: u32,
-        toolchain: struct { mojo: []const u8 },
+        mojo: []const []const u8,
+        toolchain: struct {},
         channels: []const []const u8,
         packages: []const Locked,
     };
     const body = try std.json.Stringify.valueAlloc(a, Out{
-        .lock_version = 1,
-        .toolchain = .{ .mojo = mojo },
+        .lock_version = lock_version,
+        .mojo = &.{mojo},
+        .toolchain = .{},
         .channels = &.{"https://conda.mopm.dev/"},
         .packages = packages,
     }, .{ .whitespace = .indent_2, .emit_null_optional_fields = false });

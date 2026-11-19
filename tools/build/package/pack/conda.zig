@@ -256,7 +256,7 @@ pub fn findTar(files: []const TarFile, name: []const u8) ?TarFile {
 // ---- names, versions, requirements ---------------------------------------
 
 /// A conda name this repository writes: a lowercase letter, then lowercase
-/// letters, digits and `_`. Compared exactly, never folded (`komira_json` and
+/// letters, digits and `_`. Compared exactly, never folded (`json` and
 /// `komira-json` are two names in a channel). Which names are PUBLISHED is not
 /// decided here: the artifact declarations of the release tool say so.
 pub fn validName(n: []const u8) bool {

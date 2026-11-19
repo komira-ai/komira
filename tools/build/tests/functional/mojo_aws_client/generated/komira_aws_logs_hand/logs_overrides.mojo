@@ -11,7 +11,7 @@ its allow-list, where it would read an import if they were code:
 from std.pathlib import Path
 """
 
-from komira_aws_core import AwsRequest
+from aws_core import AwsRequest
 
 # Not code: import std.pathlib
 comptime _NOT_AN_IMPORT = "a string; import std.pathlib: from std.pathlib import Path"

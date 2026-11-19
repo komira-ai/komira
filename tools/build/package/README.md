@@ -113,7 +113,7 @@ oci_image(name = "hello_image", bundle = ":hello_bundle", repository = "komira/h
 
 `[layers]` is the digest of each layer of the image manifest, one per line,
 in order: the base's layers, then the one the build adds. It is read from the
-manifest by [`komira_oci layers`](oci/README.md), which also refuses an
+manifest by [`oci layers`](oci/README.md), which also refuses an
 image whose Entrypoint is not a regular file with mode 0755 in the added
 layer; it is part of every image's default output.
 
@@ -146,12 +146,12 @@ No path of an `oci_tree` may be inside another (a file at `app/bin/tool`
 would replace the bundle's program), and modes are 0755 for directories and
 files with an exec bit, else 0644; the kcov guard reads the whole tree before
 it is packed. The tree is laid out by the Zig tool
-[`komira_oci tree`](oci/README.md), which refuses the paths (naming each
+[`oci tree`](oci/README.md), which refuses the paths (naming each
 reason) and so fails the build; its unit tests, welded to it, hold the
-refusals to known paths. The image of a tree is written by `komira_oci
+refusals to known paths. The image of a tree is written by `oci
 image`. `oci_image_check`
 ([`oci_check.bzl`](oci_check.bzl), running
-[`komira_oci check`](oci/README.md)) reads the
+[`oci check`](oci/README.md)) reads the
 built image back in a build action and is that image with the check's output
 added to its default output, each sub-target and each sub-target of those
 (`[release][manifest]`), so the image cannot be built
@@ -218,7 +218,7 @@ refuses kcov by its usage line alone.
 | format | what the guard reads | what waits for it |
 |---|---|---|
 | `mojo_bundle` | every file of the bundle | the bundle target (`[kcov_guard]` is built with it) |
-| `bundle_tarball`, `oci_image` | the bundle, through the bundle's guard; a tree (`oci_tree`), through the tree's guard | the `komira_pack tar`, `komira_pack oci` and `komira_oci image` actions |
+| `bundle_tarball`, `oci_image` | the bundle, through the bundle's guard; a tree (`oci_tree`), through the tree's guard | the `komira_pack tar`, `komira_pack oci` and `oci image` actions |
 | `conda_package` | every file `komira_pack conda` copies in: the `.mojoc`, the README, the licence files | the copies behind `[default]` and `[release]` (`[kcov_guard]` is the marker) |
 
 The image's base layers (the pinned distroless blobs) and the files the
@@ -268,7 +268,7 @@ bin/kcov (sha256 57243a23...)`, and neither the tarball nor the image is
 packed; a data file holding the usage line fails `share/marker.txt holds
 kcov's usage line`, while one holding only near misses of it builds; a conda
 package given `bin/kcov` as a licence file and a README holding the line
-fails naming `info/licenses/KCOV` and `share/doc/komira_encoding/README.md`.
+fails naming `info/licenses/KCOV` and `share/doc/encoding/README.md`.
 
 ## Conda packages
 

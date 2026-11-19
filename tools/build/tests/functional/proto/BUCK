@@ -5,13 +5,13 @@ load("@komira//tools/build/mojo:proto.bzl", "mojo_db_proto_library", "mojo_proto
 # komira//tools/build/proto-codegen; exercised by run_tests.sh (test 23).
 
 mojo_library(
-    name = "komira_proto_codec",
+    name = "proto_codec",
     visibility = [
         "//functional/mojo_gcp_client:",
         "//negative/mojo_gcp_client:",
         "//negative/proto:",
     ],
-    srcs = ["komira_proto_codec/__init__.mojo"],
+    srcs = ["proto_codec/__init__.mojo"],
 )
 
 mojo_proto_library(
@@ -19,14 +19,14 @@ mojo_proto_library(
     visibility = ["//negative/proto:"],
     srcs = ["v1/person.proto"],
     import_prefix = "example",
-    deps = [":komira_proto_codec"],
+    deps = [":proto_codec"],
 )
 
 mojo_test(
     name = "test_person",
     srcs = ["test_person.mojo"],
     deps = [
-        ":komira_proto_codec",
+        ":proto_codec",
         ":person_proto",
     ],
 )
@@ -40,25 +40,25 @@ mojo_proto_library(
     bundle_proto_deps = True,
     import_prefix = "example",
     proto_deps = [":person_proto_gen"],
-    deps = [":komira_proto_codec"],
+    deps = [":proto_codec"],
 )
 
 mojo_test(
     name = "test_team",
     srcs = ["test_team.mojo"],
     deps = [
-        ":komira_proto_codec",
+        ":proto_codec",
         ":team_proto",
     ],
 )
 
 # ---- mojo_db_proto_library ----
 
-# A minimal `komira_db`, the runtime the generated DbStorable code imports.
+# A minimal `db`, the runtime the generated DbStorable code imports.
 mojo_library(
-    name = "komira_db",
+    name = "db",
     visibility = ["//negative/proto:"],
-    srcs = ["db/komira_db/__init__.mojo"],
+    srcs = ["db/db/__init__.mojo"],
 )
 
 # tasks.proto declares a table and note.proto none: the plugin writes only
@@ -72,14 +72,14 @@ mojo_db_proto_library(
     outs = ["tasks_db.mojo"],
     import_prefix = "example",
     proto_deps = ["komira//tools/build/proto-codegen:db_options"],
-    deps = [":komira_db"],
+    deps = [":db"],
 )
 
 mojo_test(
     name = "test_tasks_db",
     srcs = ["test_tasks_db.mojo"],
     deps = [
-        ":komira_db",
+        ":db",
         ":tasks_db",
     ],
 )
@@ -99,5 +99,5 @@ mojo_proto_library(
         ":person_proto_gen",
         "komira//tools/build/proto-codegen:db_options",
     ],
-    deps = [":komira_proto_codec"],
+    deps = [":proto_codec"],
 )

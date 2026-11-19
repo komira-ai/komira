@@ -6,11 +6,11 @@ directory `generated/<name>/` of its package, committed to the repository.
 Nothing else is a source of the library. The generator still runs, in a check.
 
 ```text
-src/komira_aws_sqs/
+src/aws_sqs/
   BUCK
-  generated/komira_aws_sqs/      what the generator wrote; the library's sources
+  generated/aws_sqs/      what the generator wrote; the library's sources
     __init__.mojo
-    komira_aws_sqs.mojo
+    aws_sqs.mojo
     _layout_probe.mojo           (aws and gcp clients) the library's first test
 ```
 
@@ -21,6 +21,13 @@ For a library `<name>` the rule declares three targets:
 | `<name>_gen` | the generator's output for the current inputs. Nothing is compiled from it. |
 | `<name>_fresh` | regenerates, compares with `generated/<name>/`, file by file and byte by byte, and fails with the command that regenerates. |
 | `<name>` | a `mojo_library` over `generated/<name>/`. `<name>_fresh` is its first gate: a hidden input of the compile, so no `.mojoc` exists and no test of the library is built while the committed files are not what the generator writes now. |
+
+A `mojo_proto_library` with `dir_is_import_name = True` keeps its committed
+sources in `generated/<import name>/` instead of `generated/<name>/`: that
+directory is the `[targets] lib` of a mopm package, and mopm requires a
+library directory to be named like the module Mojo imports. The targets keep
+their names (`src/plan_proto`: `komira_plan_proto_generated` over
+`generated/plan_proto/`), and regen reads the directory from `<name>_fresh`.
 
 `<name>_fresh` is the only reader of `<name>_gen`. A package of the library's
 `test_data` that reads the generated files (the environment scans) reads the
@@ -41,7 +48,7 @@ The check fails for each of these, and its message says which:
 The message ends with the command:
 
 ```text
-./buck2 run komira//tools/build/gen:regen -- komira//src/komira_aws_sqs:komira_aws_sqs
+./buck2 run komira//tools/build/gen:regen -- komira//src/aws_sqs:aws_sqs
 ```
 
 ## Regenerating

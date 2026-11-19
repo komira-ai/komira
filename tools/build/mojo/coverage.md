@@ -80,7 +80,7 @@ nothing else. A library with no test still has a gate (`NotMeasured`: it
 fails in enforce mode), which its conda package waits for, as does a
 library whose sources are all generated (a cloud SDK client). The libraries
 the gate's own tool depends on are the ledger `COVERAGE_NO_GATE` of
-`policy.bzl` (`covcheck`, `komira_json`): they have no
+`policy.bzl` (`covcheck`, `json`): they have no
 gate of their own (the library would depend on the gate's tool, which
 depends on it), and their gate is `<name>_cov_gate`, which their conda
 package waits for too. `[coverage]` is the binaries, the reports and the
@@ -88,8 +88,8 @@ gate's outputs; the branch coverage files are only its sub-targets `[bc]`,
 `[pgo_bin]`, `[branch]`, `[branch_ir]` and `[branch_info]`.
 
 ```sh
-./buck2 build 'komira//src/komira_retry:komira_retry[coverage]' -c komira.coverage=true
-./buck2 build 'komira//src/komira_retry:komira_retry[coverage][gate][summary]' -c komira.coverage=true --show-full-output
+./buck2 build 'komira//src/retry:retry[coverage]' -c komira.coverage=true
+./buck2 build 'komira//src/retry:retry[coverage][gate][summary]' -c komira.coverage=true --show-full-output
 ```
 
 The switch is read in the `mojo_library` macro ([`coverage.bzl`](coverage.bzl))
@@ -193,7 +193,7 @@ workflow (`.github/ci/coverage_measure.sh`) selects `mojo_library` targets
 only, so a shared library's `[coverage]` is built by name. For a shared
 library over an engine, the report covers its own C-ABI sources only, not
 the engine code compiled in from its dependencies. A source under the package's `tests/` (a
-probe library such as `komira_arrow_ipc`'s `arrow_c_abi_probe`) is set aside
+probe library such as `arrow_ipc`'s `arrow_c_abi_probe`) is set aside
 by covcheck like a test, so such a library's gate is `NotMeasured`.
 
 A library in the `tests` cell may pass `coverage_debug` itself (a

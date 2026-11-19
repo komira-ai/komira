@@ -1,11 +1,11 @@
-from komira_libc.posix_io import RawWriteFd
+from libc.posix_io import RawWriteFd
 
 
 @export
 def native_owner_write_probe(n: Int32) abi("C") -> Int64:
     """Writes `n` bytes to a file in the working directory and returns the
     file's size, or -1 on any error. Every step goes through C that
-    komira_libc owns: komira_openat_creat, komira_write_bytes and
+    libc owns: komira_openat_creat, komira_write_bytes and
     komira_lseek_end."""
     try:
         var fd = RawWriteFd.open_truncate("native_owner_probe.bin")

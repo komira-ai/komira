@@ -13,8 +13,8 @@
 from std.os.path import exists
 from std.pathlib import Path
 
-from komira_git import AdvertisedRef, ObjectFormat, ObjectId
-from komira_runtime_paths import data_path
+from git import AdvertisedRef, ObjectFormat, ObjectId
+from runtime_paths import data_path
 
 
 struct Connection(Copyable, Movable):
@@ -164,7 +164,7 @@ def expect_bytes(
             var w_start = at + i if at + i < len(want) else len(want)
             raise Error(
                 what + ": differs from git at byte " + String(at + i)
-                + "\n  komira_git: " + show(Span(got)[i:end_got])
+                + "\n  git: " + show(Span(got)[i:end_got])
                 + "\n  git:        " + show(want[w_start:end_want])
             )
     return at + n

@@ -1,0 +1,56 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# Bearer-JWT authentication for http_server: BearerJwtMiddleware[V] in
+# the server's auth slot, and Rs256JwksVerifier, which checks RS256 tokens of
+# one issuer against that issuer's JWK Set (fetched over HTTPS, cached) with
+# jose's JwsVerifier pinned to RS256. Configured by flags (flags.mojo).
+#
+# The tests that sign tokens read jose's RSA test key
+# (tests/fixtures/rsa_test_key.pem there); the vocabulary test reads the
+# library's own sources.
+
+_KEY = {
+    "src/jose/tests/fixtures/rsa_test_key.pem": "//src/jose:tests/fixtures/rsa_test_key.pem",
+}
+
+mojo_library(
+    name = "http_auth",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/async_rt:async_rt",
+        "//src/clock:clock",
+        "//src/crypto:crypto",
+        "//src/encoding:encoding",
+        "//src/http_client:http_client",
+        "//src/http_core:http_core",
+        "//src/http_server:http_server",
+        "//src/jose:jose",
+        "//src/json:json",
+        "//src/jwks:jwks",
+        "//src/secret_store:secret_store",
+    ],
+    test_srcs = [
+        "tests/test_claims.mojo",
+        "tests/test_flags.mojo",
+        "tests/test_header_gate.mojo",
+        "tests/test_https_fetcher.mojo",
+        "tests/test_jwks_cache.mojo",
+        "tests/test_middleware.mojo",
+        "tests/test_no_product_vocabulary.mojo",
+        "tests/test_signature_check.mojo",
+    ],
+    test_deps = ["//src/tests/helpers/komira_test_vocabulary:komira_test_vocabulary"],
+    test_data = {
+        "tests/test_claims.mojo": _KEY,
+        "tests/test_flags.mojo": _KEY,
+        "tests/test_header_gate.mojo": _KEY,
+        "tests/test_jwks_cache.mojo": _KEY,
+        "tests/test_middleware.mojo": _KEY,
+        "tests/test_signature_check.mojo": _KEY,
+        "tests/test_no_product_vocabulary.mojo": glob(
+            ["**/*.mojo"],
+            exclude = ["tests/**/*.mojo"],
+        ),
+    },
+    visibility = ["PUBLIC"],
+)

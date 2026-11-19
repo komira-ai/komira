@@ -1,5 +1,5 @@
-# komira_http_tls_e2e: a real komira_http_server `HttpServer` against a real
-# komira_http_client `HttpClient` in one process: an HTTP/1.1 GET over TLS
+# komira_http_tls_e2e: a real http_server `HttpServer` against a real
+# http_client `HttpClient` in one process: an HTTP/1.1 GET over TLS
 # checked byte for byte, the ALPN pivot to h2 on both sides, a 4 MiB response
 # flushed through the server's buffered-write path, and the client refusing an
 # untrusted root and a wrong server name while the server goes on serving.

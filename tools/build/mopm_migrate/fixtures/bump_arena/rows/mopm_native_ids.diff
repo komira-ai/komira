@@ -1,0 +1,8 @@
+@@ -15,2 +15,3 @@
+ load("//src/bench_report:buildrules.mojo.lock.bzl", bench_report = "GRAPH")
++load("//src/bump_arena:buildrules.mojo.lock.bzl", bump_arena = "GRAPH")
+ load("//src/byte_buffer:buildrules.mojo.lock.bzl", byte_buffer = "GRAPH")
+@@ -74,2 +75,3 @@
+     "bench_report": bench_report,
++    "bump_arena": bump_arena,
+     "byte_buffer": byte_buffer,

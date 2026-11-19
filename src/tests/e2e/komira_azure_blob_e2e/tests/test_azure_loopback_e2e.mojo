@@ -6,7 +6,7 @@
 # `AzureFs[KernelTcpConnector]` (and `AzureClient` directly) with path-style
 # (emulator) addressing, the Azurite development account and its published
 # key, against `FakeBlobService` on 127.0.0.1:0 stepped by a real
-# `komira_http_server` on a second thread. Nothing is scripted: every request
+# `http_server` on a second thread. Nothing is scripted: every request
 # is serialized by `HttpClient`, crosses the kernel's loopback, is parsed by
 # the server, and is answered from the fake's blobs.
 #
@@ -64,20 +64,20 @@
 
 from std.testing import assert_equal, assert_false, assert_true
 
-from komira_azure_blob import AzureClient, AzureConfig, AzureFs
-from komira_azure_blob.azure import (
+from azure_blob import AzureClient, AzureConfig, AzureFs
+from azure_blob.azure import (
     AZURE_ERR_MALFORMED,
     AZURE_ERR_NOT_FOUND,
     AZURE_ERR_PERMISSION_DENIED,
     azure_store_error_kind_from_message,
 )
-from komira_async.ops.waker_sink import NoopSink
-from komira_async.runtime.runtime import PerCoreAsyncRuntime
-from komira_buffer.shared_aligned_buffer import SharedAlignedBuffer
-from komira_buffer.heap_region import HeapRegion
-from komira_encoding import base64_encode
-from komira_fs.shallow_dir_entry import ShallowDirEntry
-from komira_http_core.transport.kernel_tcp import KernelTcpConnector
+from async_rt.ops.waker_sink import NoopSink
+from async_rt.runtime.runtime import PerCoreAsyncRuntime
+from byte_buffer.shared_aligned_buffer import SharedAlignedBuffer
+from byte_buffer.heap_region import HeapRegion
+from encoding import base64_encode
+from fs.shallow_dir_entry import ShallowDirEntry
+from http_core.transport.kernel_tcp import KernelTcpConnector
 
 from komira_azure_blob_e2e import (
     AZURITE_ACCOUNT,
@@ -87,8 +87,8 @@ from komira_azure_blob_e2e import (
     FakeBlobService,
     serve_while,
 )
-from komira_azure_blob import AzureClientSpec, AzureCredential
-from komira_azure_core import AzureSharedKey
+from azure_blob import AzureClientSpec, AzureCredential
+from azure_core import AzureSharedKey
 
 
 comptime _Fs = AzureFs[KernelTcpConnector]

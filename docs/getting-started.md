@@ -53,7 +53,7 @@ Every Mojo module is a `mojo_library` named after its directory under
 `src/`. Building it runs its tests:
 
 ```sh
-./buck2 build //src/komira_atomic_alias:komira_atomic_alias
+./buck2 build //src/atomic_alias:atomic_alias
 ```
 
 The library's BUCK file names its tests in `test_srcs`. Each one is compiled
@@ -66,7 +66,7 @@ Two things that are easy to get wrong:
 
 - `./buck2 test` on a `mojo_library` runs nothing. Its tests run when the
   library, or anything depending on it, is built.
-- `//src/komira_atomic_alias:komira_atomic_alias[ungated]` is the package before its tests.
+- `//src/atomic_alias:atomic_alias[ungated]` is the package before its tests.
   It builds even when a test fails, which helps when you are reading a
   compile error, but it cannot be named in `deps`.
 
@@ -79,10 +79,10 @@ Wider builds:
 
 ## 5. Edit a library
 
-Open `src/komira_atomic_alias/src/komira_atomic_alias/atypes.mojo`, change something, and build the
+Open `src/atomic_alias/src/atomic_alias/atypes.mojo`, change something, and build the
 same target again: only what the change affects is rebuilt, and its tests run
 again. To see a failing test, break an assertion in
-`src/komira_atomic_alias/tests/test_atomic_alias_widths.mojo`; the build stops
+`src/atomic_alias/tests/test_atomic_alias_widths.mojo`; the build stops
 with `GATED TEST FAILED`. Undo the edit and the build is green again.
 
 ## 6. Add a library
@@ -98,7 +98,7 @@ mojo_library(
     name = "komira_example",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
-        "//src/komira_arrow:komira_arrow",
+        "//src/arrow:arrow",
     ],
     test_srcs = ["tests/test_example.mojo"],
     visibility = ["PUBLIC"],

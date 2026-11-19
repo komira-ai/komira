@@ -20,8 +20,8 @@ const OUT = "out.xml";
 
 const D = "/worker/build/0123456789abcdef/root";
 const P = "/__________________________________";
-const ART = "buck-out/v2/art/komira/src/komira_retry/__komira_retry__/fedcba9876543210/src/komira_retry/";
-const PKG = "src/komira_retry/";
+const ART = "buck-out/v2/art/komira/src/retry/__komira_retry__/fedcba9876543210/src/retry/";
+const PKG = "src/retry/";
 
 // The command line of cov_normalize_test.zig's golden case.
 const MAPS = [_][]const u8{

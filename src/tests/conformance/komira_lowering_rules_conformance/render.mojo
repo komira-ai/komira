@@ -9,8 +9,8 @@
 # rendering is empty.
 # =============================================================================
 
-from komira_plan_expr.payload_narrow import PayloadNarrowSpec
-from komira_plan_ir.logical_plan import (
+from plan_expr.payload_narrow import PayloadNarrowSpec
+from plan_ir.logical_plan import (
     LogicalPlan,
     PLAN_SCAN,
     PLAN_FILTER,
@@ -27,7 +27,7 @@ from komira_plan_ir.logical_plan import (
     PLAN_UNION,
     PLAN_CAST_TO_VARCHAR,
 )
-from komira_plan_stats.table_stats import TableStats
+from plan_stats.table_stats import TableStats
 
 
 def _collect_stats(node: LogicalPlan, mut out: List[Optional[TableStats]]) raises:

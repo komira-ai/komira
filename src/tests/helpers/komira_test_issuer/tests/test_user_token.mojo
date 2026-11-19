@@ -19,9 +19,9 @@
 
 from std.testing import assert_equal, assert_true
 
-from komira_crypto import sha256
-from komira_jose import JwsSigner
-from komira_secret_store import SecretValue
+from crypto import sha256
+from jose import JwsSigner
+from secret_store import SecretValue
 from komira_test_issuer import derived_key, user_token_claims
 
 

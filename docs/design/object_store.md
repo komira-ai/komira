@@ -2,9 +2,9 @@
 
 ## What is it for, and what is out of scope?
 
-`komira_objectstore` (`src/komira_objectstore`) gives stateful code a durable place to keep state in a bucket without a lock service. Its traits describe an object store whose conditional write (create-if-absent, or replace-if-version-matches) lets concurrent writers coordinate: a manifest chunk, a claim or a dedup record is an object whose creation exactly one writer wins. Around those traits the library ships local and in-memory conformers, the append-only CAS manifest, batching, compaction and sharding primitives built on the manifest, a presigned-URL seam, and a readiness probe. The distributed shuffle is built on top of it, in its own package, `komira_shuffle`.
+`objectstore` (`src/objectstore`) gives stateful code a durable place to keep state in a bucket without a lock service. Its traits describe an object store whose conditional write (create-if-absent, or replace-if-version-matches) lets concurrent writers coordinate: a manifest chunk, a claim or a dedup record is an object whose creation exactly one writer wins. Around those traits the library ships local and in-memory conformers, the append-only CAS manifest, batching, compaction and sharding primitives built on the manifest, a presigned-URL seam, and a readiness probe. The distributed shuffle is built on top of it, in its own package, `shuffle`.
 
-The library imports `komira_buffer`, `komira_collections`, `komira_libc`, `komira_async` (the reactor, and the C shim that carries the manifest's process-wide lock), `komira_atomic_alias` and `komira_obs` (the metrics sink for list escalations).
+The library imports `byte_buffer`, `containers`, `libc`, `async_rt` (the reactor, and the C shim that carries the manifest's process-wide lock), `atomic_alias` and `komira_obs` (the metrics sink for list escalations).
 
 Out of scope:
 
@@ -18,7 +18,7 @@ Out of scope:
 stateful services (a log, a catalog, a table store, a search index)
         |
    CasManifestStore, CoalescingWindow, compact_once, ShardedLineage,
-   the shuffle (komira_shuffle: sink, seal, claim, source)
+   the shuffle (shuffle: sink, seal, claim, source)
         |
    ConditionalWriteStore conformers
    LocalFsConditionalStore | the in-memory twins | a cloud store's conformer
@@ -85,7 +85,7 @@ The handle keeps its own last tail in `_LocalHeadCache`, so the next append skip
 
 `schedule_for_delete` writes a tombstone and `reap` deletes the chunk. `schedule_moved_for_delete_at` writes a MOVED marker instead, at `<prefix>/moved_tombstones/<chunk_seq>.tomb`: another manifest now references the objects the chunk body names, so a reaper deletes only the chunk. The broker's sub-lineage migration and segment fold write it. It is a separate key so that a plain tombstone written later for the same chunk cannot overwrite it. Both bodies are the 8-byte schedule timestamp. `tombstone_seqs` lists the chunks with either marker; `moved_tombstone_seqs` and `moved_tombstone_ts` read the MOVED ones. `reap` and `purge_all` delete both kinds. `_LOG_START` and `_CATALOG` are single objects: the first write uses `If-None-Match: *` and later writes use `If-Match`.
 
-A process-wide reader-writer lock in `komira_async`'s reactor C shim (`src/komira_async/reactor/_posix_shim.c`) wraps the manifest's composite operations. The read verbs (`read_head` and its variants, `read_chunk`, `read_dedup_sentinel`, the tombstone reads (`tombstone_seqs`, `tombstone_schedule_ts`, `moved_tombstone_seqs`, `moved_tombstone_ts`), `read_log_start`, `read_catalog_sidecar`) take it shared. `rewrite_chunk_body`, `schedule_for_delete_at`, `schedule_moved_for_delete_at`, `reap`, `purge_all`, `advance_log_start` and `cas_catalog_sidecar` take it exclusive. `append` and `append_idempotent` take neither. A test can switch the lock off with `komira_cas_gate_set_disabled`; production never does.
+A process-wide reader-writer lock in `async_rt`'s reactor C shim (`src/async_rt/reactor/_posix_shim.c`) wraps the manifest's composite operations. The read verbs (`read_head` and its variants, `read_chunk`, `read_dedup_sentinel`, the tombstone reads (`tombstone_seqs`, `tombstone_schedule_ts`, `moved_tombstone_seqs`, `moved_tombstone_ts`), `read_log_start`, `read_catalog_sidecar`) take it shared. `rewrite_chunk_body`, `schedule_for_delete_at`, `schedule_moved_for_delete_at`, `reap`, `purge_all`, `advance_log_start` and `cas_catalog_sidecar` take it exclusive. `append` and `append_idempotent` take neither. A test can switch the lock off with `komira_cas_gate_set_disabled`; production never does.
 
 ### How is an append made exactly-once?
 
@@ -105,7 +105,7 @@ Marking the sentinel committed after a win is off by default (`_FINALIZE_ON_HOT_
 
 ### Where is the shuffle?
 
-The object-store shuffle (map, seal, claim, reduce, retire) is the package `komira_shuffle`, which depends on this one and is not depended on by it. It uses only this library's public surface: `CasManifestStore` and its `RetryPolicy`, the `ConditionalWriteStore` conformers, `Path`, `WritePrecondition`, and `is_precondition` in `cas_manifest.mojo`, the public spelling of the lost-write check.
+The object-store shuffle (map, seal, claim, reduce, retire) is the package `shuffle`, which depends on this one and is not depended on by it. It uses only this library's public surface: `CasManifestStore` and its `RetryPolicy`, the `ConditionalWriteStore` conformers, `Path`, `WritePrecondition`, and `is_precondition` in `cas_manifest.mojo`, the public spelling of the lost-write check.
 
 ## Why is it built this way?
 
@@ -180,14 +180,14 @@ The object-store shuffle (map, seal, claim, reduce, retire) is the package `komi
 
 | File | Holds | Key types and functions |
 |---|---|---|
-| `src/komira_objectstore/store.mojo` | the store traits | `ObjectStore`, `ConditionalWriteStore`, `CloneableConditionalWriteStore`, `AsyncCasStore`, `RangeFetchStore` |
-| `src/komira_objectstore/types.mojo` | value types and error classes | `ObjectMeta`, `WritePrecondition`, `StoreError`, `CoalescePolicy` |
-| `src/komira_objectstore/path.mojo`, `objectstore_uri.mojo` | key normalization, URI parsing | `Path`, `parse` |
-| `src/komira_objectstore/cas_manifest.mojo` | the CAS manifest | `MetadataStore`, `CasManifestStore`, `RetryPolicy`, `AsyncManifestAppendOp` |
-| `src/komira_objectstore/*_conditional_store.mojo`, `shared_in_memory_*_store.mojo` | local and in-memory conformers | `LocalFsConditionalStore`, `DelimiterFaithfulConditionalStore` |
-| `src/komira_objectstore/coalescing_window.mojo`, `compact_window.mojo` | batching and compaction | `CoalescingWindow`, `compact_once` |
-| `src/komira_objectstore/sharded_lineage.mojo`, `sublineage_*.mojo` | sharded lineages | `ShardedLineage`, `SubLineageBaseFold` |
-| `src/komira_objectstore/presign.mojo`, `store_readiness.mojo` | presign trait, readiness | `ObjectUrlSigner`, `object_store_reachable` |
+| `src/objectstore/store.mojo` | the store traits | `ObjectStore`, `ConditionalWriteStore`, `CloneableConditionalWriteStore`, `AsyncCasStore`, `RangeFetchStore` |
+| `src/objectstore/types.mojo` | value types and error classes | `ObjectMeta`, `WritePrecondition`, `StoreError`, `CoalescePolicy` |
+| `src/objectstore/path.mojo`, `objectstore_uri.mojo` | key normalization, URI parsing | `Path`, `parse` |
+| `src/objectstore/cas_manifest.mojo` | the CAS manifest | `MetadataStore`, `CasManifestStore`, `RetryPolicy`, `AsyncManifestAppendOp` |
+| `src/objectstore/*_conditional_store.mojo`, `shared_in_memory_*_store.mojo` | local and in-memory conformers | `LocalFsConditionalStore`, `DelimiterFaithfulConditionalStore` |
+| `src/objectstore/coalescing_window.mojo`, `compact_window.mojo` | batching and compaction | `CoalescingWindow`, `compact_once` |
+| `src/objectstore/sharded_lineage.mojo`, `sublineage_*.mojo` | sharded lineages | `ShardedLineage`, `SubLineageBaseFold` |
+| `src/objectstore/presign.mojo`, `store_readiness.mojo` | presign trait, readiness | `ObjectUrlSigner`, `object_store_reachable` |
 
 Entry points:
 
@@ -196,7 +196,7 @@ Entry points:
 
 ## How is it tested?
 
-The library welds all 16 files in `src/komira_objectstore/tests/` through `test_srcs`, so building it runs them. Run: `./buck2 build //src/komira_objectstore:komira_objectstore`.
+The library welds all 16 files in `src/objectstore/tests/` through `test_srcs`, so building it runs them. Run: `./buck2 build //src/objectstore:objectstore`.
 
 | Tests | Cover |
 |---|---|
@@ -210,9 +210,9 @@ Not tested here: the cloud conformers of `ConditionalWriteStore`, which belong t
 
 ## What are its limits and open questions?
 
-- **Limit: the precondition check can misread a key.** `_is_precondition` in `cas_manifest.mojo` still matches a bare `412`, so an unrelated error about a key containing `412` reads as a lost race. Its neighbour `_is_not_found`'s docstring records this as deliberately left for a separate change. The manifest uses it, and so does the shuffle's claim in `komira_shuffle` (through the public `is_precondition`).
+- **Limit: the precondition check can misread a key.** `_is_precondition` in `cas_manifest.mojo` still matches a bare `412`, so an unrelated error about a key containing `412` reads as a lost race. Its neighbour `_is_not_found`'s docstring records this as deliberately left for a separate change. The manifest uses it, and so does the shuffle's claim in `shuffle` (through the public `is_precondition`).
 - **Limit: a local-directory `If-Match` is not atomic across processes.** It reads, compares and renames; the shuffle's claim uses create-only writes to avoid that window.
 - **Limit: listing semantics differ by conformer** (see [which conformer to use](#which-object-store-conformer-should-a-test-use)).
 - **Limit: unused surface.** `RangeFetchStore` and `ObjectStoreHttpStub` have no conformer in this library, `plan_coalesce` has no caller outside its test, and `RequestCore` has no user inside the library.
-- **Limit: stale header comments.** The `komira_objectstore` package docstring says the byte-fetch methods live with the HTTP-backed conformers, and the retry comment on `RetryPolicy.broker_contention` says 28 retries where the code uses 40.
+- **Limit: stale header comments.** The `objectstore` package docstring says the byte-fetch methods live with the HTTP-backed conformers, and the retry comment on `RetryPolicy.broker_contention` says 28 retries where the code uses 40.
 - **Open question:** whether the process-wide manifest lock is still needed: the header of `cas_manifest.mojo` ties it to an allocator corruption under contended appends, and `append` already runs without it.

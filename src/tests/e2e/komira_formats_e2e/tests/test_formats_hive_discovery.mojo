@@ -54,16 +54,16 @@
 from std.os import makedirs
 from std.testing import assert_equal, assert_true
 
-from komira_async.ops.waker_sink import NoopSink
-from komira_arrow.arrow_types import ArrowType
-from komira_fs.file_discovery import EagerGlobDiscovery, GlobDiscoveryOptions
-from komira_fs.local_fs import LocalFs
-from komira_fs.pruned_hive_discovery import (
+from async_rt.ops.waker_sink import NoopSink
+from arrow.arrow_types import ArrowType
+from fs.file_discovery import EagerGlobDiscovery, GlobDiscoveryOptions
+from fs.local_fs import LocalFs
+from fs.pruned_hive_discovery import (
     PartitionConstraint,
     PartitionPredicate,
     PrunedHiveDiscovery,
 )
-from komira_runtime_paths import test_tmpdir
+from runtime_paths import test_tmpdir
 
 from komira_formats_e2e import (
     city_oslo,

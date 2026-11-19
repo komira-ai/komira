@@ -12,7 +12,7 @@
 # nothing), and read each back with cat-file's kind and payload. Catches a
 # REF_DELTA base looked up only in the pack, and a thin pack accepted as
 # complete. The depth of a delta on an outside base is checked by
-# komira_git's test_pack_reader, not here.
+# git's test_pack_reader, not here.
 #
 # test_sha256: the same history in a sha256 repository: `check_git_pack`
 # with 32-byte ids in REF bases, the index and the trailer. Catches an id or
@@ -21,7 +21,7 @@
 
 from std.testing import assert_equal, assert_true
 
-from komira_git import (
+from git import (
     ExternalBases,
     ObjectFormat,
     PackLimits,
@@ -52,7 +52,7 @@ def test_thin() raises:
         _ = index_pack(f, Span(pack), limits)
     except e:
         refused = String(e)
-    assert_true(refused.startswith("komira_git: pack: "))
+    assert_true(refused.startswith("git: pack: "))
     assert_true(refused.endswith(" deltas have no base in the pack"))
     var bases = ExternalBases(f)
     for i in range(objects.count()):
@@ -88,7 +88,7 @@ def test_thin() raises:
                 if got.entries[j].offset == at:
                     cur = got.entries[j].copy()
                     break
-    assert_equal(refused, "komira_git: pack: " + String(unresolvable) + " deltas have no base in the pack")
+    assert_equal(refused, "git: pack: " + String(unresolvable) + " deltas have no base in the pack")
     print("komira_git_pack_conformance: thin pack, " + String(len(want)) + " objects, " + String(outside) + " deltas on outside bases")
 
 

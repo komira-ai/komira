@@ -17,9 +17,9 @@
 
 from std.testing import assert_equal, assert_false, assert_true
 
-from komira_async.reactor.reactor import Reactor
+from async_rt.reactor.reactor import Reactor
 
-from komira_db import (
+from db import (
     DbRows,
     DbValue,
     LOGICAL_INT4,
@@ -402,7 +402,7 @@ def check_error_missing_table[T: SqlTarget](mut t: T) raises:
 
 def check_getter_type_mismatch[T: SqlTarget](mut t: T) raises:
     """A cell read through the getter of another type raises (DbRow parses the
-    canonical text; komira_db/db_row.mojo)."""
+    canonical text; db/db_row.mojo)."""
     var db = t.fresh()
     var rt = new_rt()
     ref reactor = rt.reactor()

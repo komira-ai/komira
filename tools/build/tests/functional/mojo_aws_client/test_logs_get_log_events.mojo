@@ -12,17 +12,17 @@
 # reads nothing from an error body: test_error_shape only pins that it is
 # memberless (it re-encodes as `{}` after decoding a body that carries a
 # message). Reading the error code and message (`__type`, `message`) is
-# komira_aws_core's (aws_error_code_from_body, aws_error_message_from_body),
+# aws_core's (aws_error_code_from_body, aws_error_message_from_body),
 # which pure-mode code imports and never calls; it is stubbed here and
-# tested in komira//src/komira_aws_core.
-from komira_aws_logs.komira_aws_logs import (
+# tested in komira//src/aws_core.
+from aws_logs.aws_logs import (
     CloudWatchLogsGetLogEventsRequest,
     CloudWatchLogsResourceNotFoundException,
     build_get_log_events_request,
     parse_get_log_events_response,
 )
-from komira_aws_core import AwsResponse
-from komira_json import JsonValue, parse_json_value
+from aws_core import AwsResponse
+from json import JsonValue, parse_json_value
 from std.testing import assert_equal, assert_false, assert_raises, assert_true
 
 
@@ -128,7 +128,7 @@ def test_error_shape() raises:
 
 
 def main() raises:
-    # The stub's copy constructor must stay non-trivial, as komira_json's:
+    # The stub's copy constructor must stay non-trivial, as json's:
     # a trivial one lets List.copy() memcpy elements and share their heap
     # buffers.
     comptime assert not JsonValue.__copy_ctor_is_trivial, (

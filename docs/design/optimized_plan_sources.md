@@ -24,19 +24,19 @@ pins and one admission.
 **What exists.**
 
 - A scan source is a `oneof` of `WireParquetSource parquet = 1` and `WireScanBinding binding = 2`
-  (`src/komira_plan_proto/plan.proto:456-461`). Every other source is a binding: a kind name, its FNV-1a/32 hash
-  (`src/komira_scan_source/scan_binding.mojo:166-186`), typed `WireParam`s and a schema (`plan.proto:372-416`).
-- Two product kinds live outside core, `komira.broker.topic` (`src/komira_broker/broker_scan_binding.mojo:77`) and
-  `komira.search.index` (`src/komira_search_scan/search_scan_kind.mojo:128`). Both are `SNAPSHOT_LIVE`: the token is
+  (`src/plan_proto/plan.proto:456-461`). Every other source is a binding: a kind name, its FNV-1a/32 hash
+  (`src/scan_source/scan_binding.mojo:166-186`), typed `WireParam`s and a schema (`plan.proto:372-416`).
+- Two product kinds live outside core, `komira.broker.topic` (`src/broker/broker_scan_binding.mojo:77`) and
+  `komira.search.index` (`src/search_scan/search_scan_kind.mojo:128`). Both are `SNAPSHOT_LIVE`: the token is
   excluded from identity and re-resolved when execution starts. A pinned search read is a `generation` **param**,
   because `ScanKindRegistry.validate` allows one policy per kind (`scan_kind_registry.mojo:202`); the golden
-  `src/komira_plan_wire/tests/fixtures/golden/index_pinned.txtpb` freezes that spelling.
+  `src/plan_wire/tests/fixtures/golden/index_pinned.txtpb` freezes that spelling.
 - The search kind returns `_score, _id, _source`; `_id` is **split-local** (`search_scan_kind.mojo:63-64`), and the
   kind has no `k`.
-- There is no Iceberg, Delta, row-store, vector or graph kind (`komira_iceberg_catalog` registers none), no search,
+- There is no Iceberg, Delta, row-store, vector or graph kind (`iceberg_catalog` registers none), no search,
   vector or graph operator among `WirePlan`'s 16 arms (`plan.proto:1558-1582`), and no distance function among
   `WireExpr`'s (`plan.proto:1063-1110`). The only SDK in `src/` is the plan-building half of the Mojo SDK, with no
-  search, topic or graph verb (`src/komira_sdk/README.md`).
+  search, topic or graph verb (`src/sdk/README.md`).
 - `WireScalar` cannot hold a list (`plan.proto:285-334`), though a schema can declare `ARROW_TYPE_FIXED_SIZE_LIST`
   (`plan_vocabulary.proto:618`): a query vector has no typed spelling.
 - `PARAM_BYTES` travels in `WireParam`'s `string s = 3` (`plan_wire_codec.mojo:2487`, `:2524`). A proto3 `string`
@@ -82,7 +82,7 @@ each is added under a new `format_version` (§9.2).
 
 Arms admitted in both contexts follow §5.2's rule for UDF arms: a stored bound plan holds them too. The two new
 `WirePlan` arms are arms 20 and 21 if the §5.2 and §10.4 arms land first (field number is not arm ordinal,
-`plan.proto:1569-1570`); the enum-number tests and the census (`src/komira_plan_proto/tests/`) change in the same
+`plan.proto:1569-1570`); the enum-number tests and the census (`src/plan_proto/tests/`) change in the same
 stage. New enums go in `plan_vocabulary.proto` with `*_WIRE_UNSPECIFIED = 0`, refused wherever a value is required.
 
 ## 15.3 Typed snapshot pins

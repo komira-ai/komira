@@ -8,7 +8,7 @@ allow-list.
 
 from std.pathlib import Path
 
-from komira_aws_core import AwsRequest
+from aws_core import AwsRequest
 
 from .env_read_home import (
     CloudWatchLogsGetLogEventsRequest,

@@ -1,18 +1,18 @@
 # =============================================================================
-# test_sqlite.mojo -- komira_crm's store on komira_db_sqlite.
+# test_sqlite.mojo -- crm's store on db_sqlite.
 # =============================================================================
 #
 # Every check gets a new in-memory database (":memory:") with the store's
-# tables created by komira_crm.sqlite_schema(), so no check sees another's
+# tables created by crm.sqlite_schema(), so no check sees another's
 # rows and nothing touches the filesystem. Each write runs in a real SQLite
 # transaction (BEGIN IMMEDIATE), so the change feed is checked here.
 # =============================================================================
 
-from komira_db import DbValue
-from komira_db.blocking import db_blocking_execute
-from komira_db_sqlite import SqliteDatabase
+from db import DbValue
+from db.blocking import db_blocking_execute
+from db_sqlite import SqliteDatabase
 
-from komira_crm import sqlite_schema
+from crm import sqlite_schema
 
 from komira_crm_store_conformance import CrmTarget, run_crm_suite
 
@@ -24,7 +24,7 @@ struct SqliteCrm(CrmTarget):
         pass
 
     def name(self) -> String:
-        return String("komira_db_sqlite")
+        return String("db_sqlite")
 
     def transactional(self) -> Bool:
         return True
@@ -40,4 +40,4 @@ struct SqliteCrm(CrmTarget):
 def main() raises:
     var target = SqliteCrm()
     run_crm_suite(target)
-    print("PASS komira_crm_store_conformance komira_db_sqlite")
+    print("PASS komira_crm_store_conformance db_sqlite")

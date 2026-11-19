@@ -2,7 +2,7 @@
 # fixtures.mojo -- the TLS material and configurations the e2e legs share
 # =============================================================================
 #
-# The certificates are komira_http_core's throwaway test fixtures, staged into
+# The certificates are http_core's throwaway test fixtures, staged into
 # each welded test's working directory at their source paths by `test_data`
 # (see BUCK). The leaf names `localhost` and `127.0.0.1` and is signed by
 # `root_ca.pem`; `smoke_cert.pem` is an unrelated self-signed CA, the trust
@@ -17,16 +17,16 @@
 
 from std.pathlib import Path
 
-from komira_http_core.tls import TlsConfig
-from komira_http_core.transport.kernel_tcp import KernelTcpConnector
-from komira_http_client.pool import VERIFY_PEER
-from komira_http_client.tls_connector import TlsConnector
+from http_core.tls import TlsConfig
+from http_core.transport.kernel_tcp import KernelTcpConnector
+from http_client.pool import VERIFY_PEER
+from http_client.tls_connector import TlsConnector
 
 
-comptime LEAF_CERT_PATH = "src/komira_http_core/tests/fixtures/tls/leaf_cert.pem"
-comptime LEAF_KEY_PATH = "src/komira_http_core/tests/fixtures/tls/leaf_key.pem"
-comptime ROOT_CA_PATH = "src/komira_http_core/tests/fixtures/tls/root_ca.pem"
-comptime OTHER_CA_PATH = "src/komira_http_core/tests/fixtures/smoke_cert.pem"
+comptime LEAF_CERT_PATH = "src/http_core/tests/fixtures/tls/leaf_cert.pem"
+comptime LEAF_KEY_PATH = "src/http_core/tests/fixtures/tls/leaf_key.pem"
+comptime ROOT_CA_PATH = "src/http_core/tests/fixtures/tls/root_ca.pem"
+comptime OTHER_CA_PATH = "src/http_core/tests/fixtures/smoke_cert.pem"
 
 # The handshake budget of every client connector here. Far above a loopback
 # handshake (milliseconds) and far below the build action's patience, so a

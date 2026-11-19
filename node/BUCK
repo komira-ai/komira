@@ -10,7 +10,7 @@ node_addon(
 
 # libkomira with the Mojo runtime and its native owners in lib/ beside it: the
 # directory the tests hand to load().
-LIBKOMIRA = "komira//src/komira_so:libkomira[runnable]"
+LIBKOMIRA = "komira//src/so:libkomira[runnable]"
 
 # Stand-ins for libkomira that the addon must refuse: a library of ABI major 2,
 # one of major 0 (version 0.999), and one without komira_plan_render.
@@ -73,6 +73,6 @@ node_binding_test(
         "komira_addon.node": ":komira_addon",
         "libkomira": LIBKOMIRA,
         "foreign_external.node": ":foreign_external",
-        "two_columns.parquet": "komira//src/komira_so:tests/fixtures/two_columns.parquet",
+        "two_columns.parquet": "komira//src/so:tests/fixtures/two_columns.parquet",
     },
 )

@@ -5,7 +5,7 @@
 # The libraries the ledger lists are those with no coverage gate of their
 # own, because the gate's directory (`:cov_gate`, which holds covcheck_bin)
 # depends on them. Queries that dependency closure
-# (configured, so covcheck_bin and, through komira_json's README, the README
+# (configured, so covcheck_bin and, through json's README, the README
 # tool are in it) for every mojo_library, and fails unless the ledger names
 # exactly those: a row whose library left the closure is stale (delete it),
 # and a library that joined it needs a row (without one, with coverage on,
@@ -25,7 +25,7 @@ load("@komira//tools/build/coverage:policy.bzl", "COVERAGE_NO_GATE")
 _GATE_DIR = "komira//tools/build/coverage:cov_gate"
 
 _CEILING = [
-    "komira//src/komira_json:komira_json",
+    "komira//src/json:json",
     "komira//tools/build/coverage:covcheck",
 ]
 

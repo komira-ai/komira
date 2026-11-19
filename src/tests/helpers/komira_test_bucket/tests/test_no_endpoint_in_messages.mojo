@@ -14,7 +14,7 @@ from komira_test_bucket import (
     open_test_bucket,
     select_backend,
 )
-from komira_test_run_id import FixedWallClock, RunId
+from test_run_id import FixedWallClock, RunId
 
 comptime _HOST: String = "endpoint-sentinel.invalid"
 comptime _BUCKET: String = "bucket-sentinel"

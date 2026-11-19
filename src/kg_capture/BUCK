@@ -1,0 +1,101 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The capture server of the knowledge-graph port (docs/design/knowledge_graph_port.md), core
+# half: a http_server dispatcher over a snapshot store with a health route, a capture
+# route that hands a pushed record to the adapter registered under its surface tag and ingests
+# the episodes, a structured-ingest route, and a CaptureRoutes seam for a host's own routes.
+# Every route but health needs a bearer token the host passes in, bodies are limited, and the
+# server takes its clock as an argument; it reads no environment. The query half adds a query
+# route and a federated query route over the same warm merged graph, with the host's synthesis
+# prompt and limits in a QueryConfig. No kind of record, service or vocabulary is named here.
+#
+# The welded tests: test_http_util pins the query-string, bearer-token and label checks and the
+# JSON writers (multi-byte text and control bytes unchanged); test_structured the structured
+# body (required and defaulted fields, a wrong type refused); test_config_clock the
+# configuration's refusals and the clocks; test_capture_route the capture route over two
+# made-up adapters (the episode a push becomes, the tag choosing the adapter, an unregistered
+# tag refused, the clock stamping, folding the chain); test_structured_route the structured
+# route; test_auth_limits an unauthenticated request to every route but health refused, the
+# body limit and the methods; test_extra_routes a host route reachable only when registered;
+# test_loopback the same server on a loopback port; test_query_build the subgraph a query
+# matches (ranking, partition scope, the exact facet filter, as-of, the caps, an embedder that
+# fails); test_query_parts the query configuration, request and evidence pack; test_query_route
+# the query routes (the warm set and a cold server answering alike, federated merge order,
+# synthesis prompt delivery, a model error, the limits); test_query_loopback the same over a
+# loopback port.
+mojo_library(
+    name = "kg_capture",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    # The full transitive closure of the Mojo libraries this package and its tests build on.
+    deps = [
+        "//src/arrow:arrow",
+        "//src/arrow_ipc:arrow_ipc",
+        "//src/async_rt:async_rt",
+        "//src/async_api:async_api",
+        "//src/atomic_alias:atomic_alias",
+        "//src/byte_buffer:byte_buffer",
+        "//src/clock:clock",
+        "//src/containers:containers",
+        "//src/column_kernels:column_kernels",
+        "//src/compression:compression",
+        "//src/counters:counters",
+        "//src/crypto:crypto",
+        "//src/dynamic_filter:dynamic_filter",
+        "//src/encoding:encoding",
+        "//src/fork_join:fork_join",
+        "//src/fs:fs",
+        "//src/hashing:hashing",
+        "//src/host_probe:host_probe",
+        "//src/http_client:http_client",
+        "//src/http_core:http_core",
+        "//src/http_server:http_server",
+        "//src/join_assembly:join_assembly",
+        "//src/json:json",
+        "//src/kg:kg",
+        "//src/kg_format:kg_format",
+        "//src/kg_sources:kg_sources",
+        "//src/libc:libc",
+        "//src/log:log",
+        "//src/lz4:lz4",
+        "//src/metrics:metrics",
+        "//src/name_registry:name_registry",
+        "//src/net:net",
+        "//src/objectstore:objectstore",
+        "//src/objectstore:komira_objectstore_posix",
+        "//src/parquet:parquet",
+        "//src/parquet_api:parquet_api",
+        "//src/parquet_codec:parquet_codec",
+        "//src/parquet_writer:parquet_writer",
+        "//src/plan_expr:plan_expr",
+        "//src/plan_ir:plan_ir",
+        "//src/plan_stats:plan_stats",
+        "//src/scalar_arithmetic:scalar_arithmetic",
+        "//src/scan_source:scan_source",
+        "//src/simd_ops:simd_ops",
+        "//src/spsc_ring:spsc_ring",
+        "//src/sync:sync",
+        "//src/trace:trace",
+        "//src/uuid:uuid",
+        "//src/zlib:zlib",
+        "//third_party/aws-lc:crypto",
+        "//third_party/brotli:brotlidec",
+        "//third_party/s2n-tls:s2n",
+        "//third_party/snappy:snappy",
+        "//tools/build/mojo/runtime_paths:runtime_paths",
+    ],
+    test_srcs = [
+        "tests/test_auth_limits.mojo",
+        "tests/test_capture_route.mojo",
+        "tests/test_config_clock.mojo",
+        "tests/test_extra_routes.mojo",
+        "tests/test_http_util.mojo",
+        "tests/test_loopback.mojo",
+        "tests/test_query_build.mojo",
+        "tests/test_query_loopback.mojo",
+        "tests/test_query_parts.mojo",
+        "tests/test_query_route.mojo",
+        "tests/test_structured.mojo",
+        "tests/test_structured_route.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)

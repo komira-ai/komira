@@ -1,0 +1,58 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# An SMTP client for submitting mail (RFC 5321 with STARTTLS, AUTH and the
+# size and 8-bit extensions): a session over any IoStream, a one-call send over
+# TCP with STARTTLS or implicit TLS, a hook for driving a peer in the same
+# thread, and a clock seam for the budgets. See __init__.mojo.
+#
+# The welded tests (each file's header says which defects it catches):
+# - test_reply_wire: reply and capability parsing, enhanced status codes,
+#   CRLF normalisation and dot-stuffing byte for byte, envelope validation.
+# - test_session: ScriptedStream conversations for every path of one message:
+#   greeting, EHLO, AUTH, MAIL, RCPT, DATA, SIZE, 8BITMIME, SMTPUTF8, RSET
+#   between messages, reply caps, budgets on a manual clock, the password.
+# - test_edges: DATA answered 2xx, a 421 mid-RCPT, the duplicate warning at the
+#   end of DATA, QUIT after a refused SIZE, all_accepted, the README settings.
+# - test_policy: the STARTTLS and implicit-TLS policy of `send_via_session`.
+# - test_loopback: a message over STARTTLS with AUTH PLAIN, plus the failure
+#   paths, to smtp_server on 127.0.0.1 with the real s2n handshake. The
+#   server has no implicit-TLS listener: that path is in test_policy, on
+#   ScriptedStream.
+mojo_library(
+    name = "smtp_client",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    # Direct dependencies: the rule adds each one's own closure to the compiler.
+    deps = [
+        "//src/async_rt:async_rt",
+        "//src/clock:clock",
+        "//src/encoding:encoding",
+        "//src/http_client:http_client",
+        "//src/http_core:http_core",
+        "//src/mail_address:mail_address",
+        "//src/mail_message:mail_message",
+        "//src/net:net",
+    ],
+    test_srcs = [
+        "tests/test_edges.mojo",
+        "tests/test_loopback.mojo",
+        "tests/test_policy.mojo",
+        "tests/test_reply_wire.mojo",
+        "tests/test_session.mojo",
+    ],
+    test_deps = [
+        "//src/mail_auth:mail_auth",
+        "//src/mail_store:mail_store",
+        "//src/mail_tls:mail_tls",
+        "//src/objectstore:objectstore",
+        "//src/smtp_server:smtp_server",
+        "//src/tests/helpers/komira_mail_test_support:komira_mail_test_support",
+    ],
+    test_data = {
+        "tests/test_loopback.mojo": {
+            "src/http_core/tests/fixtures/tls/leaf_cert.pem": "//src/http_core:tests/fixtures/tls/leaf_cert.pem",
+            "src/http_core/tests/fixtures/tls/leaf_key.pem": "//src/http_core:tests/fixtures/tls/leaf_key.pem",
+            "src/http_core/tests/fixtures/tls/root_ca.pem": "//src/http_core:tests/fixtures/tls/root_ca.pem",
+        },
+    },
+    visibility = ["PUBLIC"],
+)

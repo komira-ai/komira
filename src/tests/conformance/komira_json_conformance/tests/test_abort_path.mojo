@@ -30,7 +30,7 @@
 from std.sys import argv, exit
 from std.testing import assert_equal, assert_false, assert_true
 
-from komira_runtime_paths import executable_path
+from runtime_paths import executable_path
 
 from komira_json_conformance import (
     ABORT_PROBE_FILE,

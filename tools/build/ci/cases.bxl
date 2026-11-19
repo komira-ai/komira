@@ -441,8 +441,8 @@ _MUST_WIDEN = [
 ]
 
 _ORDINARY = [
-    "src/komira_collections/BUCK",
-    "src/komira_collections/src/komira_collections/slab.mojo",
+    "src/containers/BUCK",
+    "src/containers/src/containers/slab.mojo",
     "docs/ci.md",
     "release/artifacts.textproto",
     ".github/workflows/pr.yml",
@@ -529,14 +529,14 @@ def _cxx_toolchain_cases(ctx):
 # registers no macOS execution platform, so no adopted library can be configured there):
 #   - the declared graph: every adopted library's `cxx_toolchain` is a `cxx_link_facts`
 #     target, never a toolchain rule; and the library files of the package that links C
-#     (komira_libc) and the one that does not (komira_lz4) configure for darwin-arm64;
+#     (libc) and the one that does not (lz4) configure for darwin-arm64;
 #   - when the macOS execution platform is registered (the farm's checkouts), every
 #     adopted library is configured for darwin-arm64, which resolves its execution
 #     platform and its exec dependencies.
 
 _DARWIN = "komira//tools/build/platforms:darwin-arm64"
-_ADOPTED_LIBS = ["komira//src/komira_libc:lib", "komira//src/komira_lz4:lib"]
-_ADOPTED_WITH_C = "komira//src/komira_libc:komira_libc"
+_ADOPTED_LIBS = ["komira//src/libc:lib", "komira//src/lz4:lib"]
+_ADOPTED_WITH_C = "komira//src/libc:libc"
 
 def _adopted_darwin_cases(ctx):
     out = []

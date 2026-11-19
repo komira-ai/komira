@@ -14,7 +14,7 @@
 //! library of the closure (`lib<NAME>.so`, the `link` row of its package's
 //! `lib_files`), given in the order the commands name them: dependents first
 //! (conda.bzl orders them). `--static NAME` is a static archive of the
-//! closure (`lib<NAME>.a`, komira_log's holder), named on the `mojo build`
+//! closure (`lib<NAME>.a`, log's holder), named on the `mojo build`
 //! line only: no shared copy of it exists, and the JIT of `mojo run` has no
 //! holder object yet (the design's question 2, option A).
 //!

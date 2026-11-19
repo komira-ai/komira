@@ -1,13 +1,13 @@
-# komira_runtime_paths moved to src/komira_runtime_paths (a mopm package built with buildrules'
+# runtime_paths moved to src/runtime_paths (a mopm package built with buildrules'
 # `mojo_package`). These labels stay for the packages that still name the old path.
 alias(
-    name = "komira_runtime_paths",
-    actual = "//src/komira_runtime_paths:komira_runtime_paths",
+    name = "runtime_paths",
+    actual = "//src/runtime_paths:runtime_paths",
     visibility = ["PUBLIC"],
 )
 
 alias(
-    name = "komira_runtime_paths_conda",
-    actual = "//src/komira_runtime_paths:komira_runtime_paths_conda",
+    name = "runtime_paths_conda",
+    actual = "//src/runtime_paths:runtime_paths_conda",
     visibility = ["PUBLIC"],
 )

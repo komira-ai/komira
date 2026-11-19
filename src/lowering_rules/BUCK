@@ -1,0 +1,46 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# Host lowering rules: pure functions of an admitted plan and the facts the
+# host verified against the plan's pins (footer statistics), applied while the
+# plan is lowered. The first rule is payload narrowing (payload_narrow.mojo).
+#
+# test_payload_narrow_columns  each per-column condition and each join-level
+#                              condition, as a case that changes the decision,
+#                              against a sibling that still narrows; the width
+#                              ladder through the rule; footers, never the
+#                              plan's statistics, drive it.
+# test_payload_narrow_walk     the side shapes, the walk under every node
+#                              kind, the scan pre-order (unions, as-of joins,
+#                              leaves, tags without a payload) and the two
+#                              refusals.
+# README.md's example runs as one more welded test. The parity test against
+# the optimizer rule this replaces is in
+# //src/tests/conformance/komira_lowering_rules_conformance.
+#
+# NO PRODUCER IN THE CLOSURE. A host never re-optimizes, so a lowering rule
+# may not reach the optimizer, the SQL front end or a plan producer.
+# `closure_excludes` is checked at analysis against the whole closure of
+# `deps`, direct and transitive, by exact import name (the same check
+# lowering and host_profile hold; tests//negative/closure_excludes
+# plants a refused package and //tools/build/selftest:analysis_refusals_mojo
+# requires the refusal).
+deps = [
+    "//src/arrow:arrow",
+    "//src/plan_expr:plan_expr",
+    "//src/plan_ir:plan_ir",
+    "//src/plan_stats:plan_stats",
+]
+
+mojo_library(
+    name = "lowering_rules",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = deps,
+    closure_excludes = ["optimizer", "komira_plan_producer", "sql"],
+    # The walk test builds an ORC scan from its source variant.
+    test_deps = ["//src/scan_source:scan_source"],
+    test_srcs = [
+        "tests/test_payload_narrow_columns.mojo",
+        "tests/test_payload_narrow_walk.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)

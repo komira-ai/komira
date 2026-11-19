@@ -1,0 +1,16 @@
+[package]
+name = "komira-ai/spsc_ring"
+version = "0.1.0"
+description = "One bounded single-producer / single-consumer ring, SpscRing[T], with a blocking or a dropping overflow policy."
+license = "Apache-2.0"
+repository = "https://github.com/komira-ai/komira"
+readme = "README.md"
+mojo = ["1.0.0"]
+
+[dependencies]
+"komira-ai/atomic_alias" = { path = "../atomic_alias", version = "0.1" }
+"komira-ai/containers" = { path = "../containers", version = "0.1" }
+
+[targets]
+lib = { path = "src/spsc_ring" }
+tests = ["tests"]

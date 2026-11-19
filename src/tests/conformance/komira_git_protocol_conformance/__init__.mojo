@@ -1,9 +1,9 @@
-"""`komira_git_protocol_conformance` -- test-only: komira_git's protocol
+"""`komira_git_protocol_conformance` -- test-only: git's protocol
 state machines against the pinned git's transcripts (capture.zig; the BUCK
 file says how they are made).
 
 `Scenario` loads one scenario; `TranscriptGraph` is its server repository as
-a `CommitGraph`; `expect_bytes` compares komira_git's bytes with git's and
+a `CommitGraph`; `expect_bytes` compares git's bytes with git's and
 shows where they differ. `check_pack` is the protocol tests' check of a pack
 received in a transcript.
 """

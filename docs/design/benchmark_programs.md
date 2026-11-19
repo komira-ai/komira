@@ -1,23 +1,23 @@
 # Benchmark programs as a mopm package
 
-Status: decided and built. Reference: [src/komira_bench/README.md](../../src/komira_bench/README.md).
+Status: decided and built. Reference: [src/bench/README.md](../../src/bench/README.md).
 
 ## What problem does this solve?
 
 komira's microbenchmarks lived under the `tests/` of the library they measure (`bench_spsc_ring.mojo` in
-`komira_spsc_ring`). They ran only from this repository, each read its own command line, and each spelled its
-result line its own way (the `komira_op_agg_state` benchmark's header documents `ns_per_unit=<x>` while its code
+`spsc_ring`). They ran only from this repository, each read its own command line, and each spelled its
+result line its own way (the `op_agg_state` benchmark's header documents `ns_per_unit=<x>` while its code
 prints `ns_per_unit= <x>`). A number measured on one machine is a statement about that machine; a user who wants the
 number for their own CPU, compiler flags and kernel needs the program on their machine.
 
 ## The decisions
 
-1. **Benchmarks are programs of one mopm package, `komira_bench`, shipped as source.** mopm ships a program of
-   `[targets] bins` as its source (`lib/mojo/komira_bench.bins/<program>.mojo`) and builds it on the user's machine
-   (`mopm run --bin komira_bench:<program>`), so the numbers are the user's. Each program's `main` is one call into
+1. **Benchmarks are programs of one mopm package, `bench`, shipped as source.** mopm ships a program of
+   `[targets] bins` as its source (`lib/mojo/bench.bins/<program>.mojo`) and builds it on the user's machine
+   (`mopm run --bin bench:<program>`), so the numbers are the user's. Each program's `main` is one call into
    the library (`run_program`), so its logic is library code the welded tests measure, and the program file is
    program source to the coverage census ([coverage_program_sources.md](coverage_program_sources.md)).
-2. **One result line, spelled in one place.** `komira_bench.harness.result_line` is the only writer of
+2. **One result line, spelled in one place.** `bench.harness.result_line` is the only writer of
    `RESULT <op> [<name>=<int> ...] <metric>=<value>`. Its contract keeps the line one shape for any reader: the op,
    parameter names and metric are tokens (`a`-`z`, `0`-`9`, `_`), a parameter name appears once, and a shown value
    is finite; anything else is refused by name rather than printed. `--hide-times` prints `-` for every value, so a
@@ -31,7 +31,7 @@ number for their own CPU, compiler flags and kernel needs the program on their m
    result (`_Run.ops`), and the tests hold it to `--total-ops` for counts below, at and above one round of a
    capacity, so `ns_per_op` divides by the operations that ran.
 5. **The installed source is the tested source.** `:conda_holds` reads the built `.conda` back and requires
-   `lib/mojo/komira_bench.bins/spsc_ring.mojo` to be the bytes of `bins/spsc_ring.mojo`; `:bins_smoke` runs komira's
+   `lib/mojo/bench.bins/spsc_ring.mojo` to be the bytes of `bins/run_spsc_ring.mojo`; `:bins_smoke` runs komira's
    build of that file (`:spsc_ring_bench`) and checks its whole output, its help, its refusals and its exit status.
    `mopm run` itself needs a Mojo environment from the network, so it is not part of a hermetic test.
 6. **What the rest of the repository learns.** Two shared pieces change, each additively. The README e2e reader
@@ -43,5 +43,5 @@ number for their own CPU, compiler flags and kernel needs the program on their m
 ## Compatibility
 
 A new package and a new accepted path: no format is renumbered, renamed or removed, and no other package's lock,
-table or output changes. `komira_spsc_ring` ships its library as before; its benchmark (`tests/bench_spsc_ring.mojo`) moved here and is no longer among its tests. The result line and the flags are
+table or output changes. `spsc_ring` ships its library as before; its benchmark (`tests/bench_spsc_ring.mojo`) moved here and is no longer among its tests. The result line and the flags are
 new public surface; a later change to them is additive (a new parameter, a new flag), as for any format.

@@ -3,24 +3,24 @@
 # =============================================================================
 #
 # The server's HTTP/2 runs only over TLS, chosen by ALPN (RFC 9113 section
-# 3.2); it has no cleartext h2. The certificates are komira_http_core's
+# 3.2); it has no cleartext h2. The certificates are http_core's
 # throwaway test fixtures, staged into the test's working directory at their
 # source paths (see BUCK). The leaf names `localhost` and `127.0.0.1` and is
 # signed by `root_ca.pem`. h2spec does not verify it (`-k`); the
-# komira_http_client request after the suite does, against that root alone.
+# http_client request after the suite does, against that root alone.
 # =============================================================================
 
 from std.pathlib import Path
 
-from komira_http_client.pool import VERIFY_PEER
-from komira_http_client.tls_connector import TlsConnector
-from komira_http_core.tls import TlsConfig
-from komira_http_core.transport.kernel_tcp import KernelTcpConnector
+from http_client.pool import VERIFY_PEER
+from http_client.tls_connector import TlsConnector
+from http_core.tls import TlsConfig
+from http_core.transport.kernel_tcp import KernelTcpConnector
 
 
-comptime LEAF_CERT_PATH = "src/komira_http_core/tests/fixtures/tls/leaf_cert.pem"
-comptime LEAF_KEY_PATH = "src/komira_http_core/tests/fixtures/tls/leaf_key.pem"
-comptime ROOT_CA_PATH = "src/komira_http_core/tests/fixtures/tls/root_ca.pem"
+comptime LEAF_CERT_PATH = "src/http_core/tests/fixtures/tls/leaf_cert.pem"
+comptime LEAF_KEY_PATH = "src/http_core/tests/fixtures/tls/leaf_key.pem"
+comptime ROOT_CA_PATH = "src/http_core/tests/fixtures/tls/root_ca.pem"
 
 # The client's handshake budget: far above a loopback handshake and far below
 # the build action's patience.

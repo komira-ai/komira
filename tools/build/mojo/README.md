@@ -21,7 +21,7 @@ where to read the environment the compiler sees) and
 | `mojo_test(srcs, deps, main, optimization_level, data, env, args, labels)` | a test executable for `buck2 test`; `buck2 run` and `[runnable]` as for `mojo_binary`. | [`test_hellopkg`](../examples/BUCK) |
 | `mojo_shared_lib(srcs, main, deps, out_name, exports, c_exports, unlisted_exports, exports_exact, gate_srcs, force_load, native_owners, optimization_level)` | `<out_name>.so` (Linux) or `<out_name>.dylib` (macOS arm64): a C-ABI shared library via `mojo build --emit shared-lib` from one file of `@export` functions, published only if its gate passes (see [C-ABI shared libraries](#c-abi-shared-libraries)). | [`spike`](../examples/shared_lib/BUCK), [`mid`](../examples/shared_lib_mid/BUCK), [`spike_native`](../examples/shared_lib_native/README.md) |
 | `komira_abi_golden(src, golden, header_name, constants_src)` ([`abi_golden.bzl`](abi_golden.bzl)) | `<header_name>` (default `<name>.h`): the C header of a golden list of C-ABI symbols and constants, built only if the `@export abi("C")` functions of `src` are exactly its rows, with the same types, and the constants match `constants_src` (see [The ABI golden and the C header](#the-abi-golden-and-the-c-header)). | [`abi_header`](../examples/abi_golden/BUCK) |
-| `komira_c_abi_check(driver, lib, native_owners)` ([`c_abi_check.bzl`](c_abi_check.bzl)) | `<name>.passed`: the marker of a C program (`driver`, a `cxx_binary` that includes the generated header) run against the `mojo_shared_lib` `lib` from a staged tree; it exists only if the program exited 0. | [`c_abi_check`](../../../src/komira_so/BUCK) |
+| `komira_c_abi_check(driver, lib, native_owners)` ([`c_abi_check.bzl`](c_abi_check.bzl)) | `<name>.passed`: the marker of a C program (`driver`, a `cxx_binary` that includes the generated header) run against the `mojo_shared_lib` `lib` from a staged tree; it exists only if the program exited 0. | [`c_abi_check`](../../../src/so/BUCK) |
 | `mojo_doc_json(lib, golden, symbols)` ([`doc.bzl`](doc.bzl)) | `<name>.json`: the `mojo doc` JSON of the `mojo_library` `lib`, optionally checked against a golden file and for named declarations (see [API JSON](doc.md)). | [`hellopkg_doc`](../examples/BUCK) |
 
 ## Libraries and the `test_srcs` gate
@@ -58,7 +58,7 @@ mojo_library(
   must not be in the closure of `deps`, directly or through another
   package. Analysis fails when one is, so neither the library nor anything
   depending on it builds: a boundary the build graph holds, such as
-  `komira_optimized_plan_header`'s exclusion of `komira_plan_wire`
+  `optimized_plan_header`'s exclusion of `plan_wire`
   (docs/design/optimized_plan.md §4.1). It reads `deps` only; `test_deps`
   reach the welded tests, not consumers.
 - **The gate.** Each file in `test_srcs` is built from that one file against
@@ -230,7 +230,7 @@ no longer counts there, since macOS keeps no CPU time of reaped children
 
 ## Libraries built with buildrules
 
-[`src/komira_json`](../../../src/komira_json/) is built with buildrules' `mojo_package`, from a `mopm.toml`, and
+[`src/json`](../../../src/json/) is built with buildrules' `mojo_package`, from a `mopm.toml`, and
 not with `mojo_library`. The `buildrules` cell is a git external cell pinned in
 [`.buckconfig`](../../../.buckconfig) to a release commit; the `toolchains` cell holds its pinned mopm and Mojo
 toolchains (`tools/build/cells/toolchains/mopm_pins.bzl`, `mojo_pins.bzl`, written by `buildrules mojo sync`),
@@ -238,7 +238,7 @@ and `tools/build/platforms/default` registers the one execution platform its rul
 ([`with_buildrules.bzl`](../platforms/with_buildrules.bzl)). Its rules are loaded from that cell only.
 
 The package's `:lib` is the library file, made only after every test run passed. `mojo_adopted_library`
-([`adopt.bzl`](adopt.bzl)) is the target the dependents name (`//src/komira_json:komira_json`): it gives komira's own rules the
+([`adopt.bzl`](adopt.bzl)) is the target the dependents name (`//src/json:json`): it gives komira's own rules the
 `MojoInfo` they require of a dependency over that same file, and runs and compiles nothing. A dependent therefore
 builds only once the library's tests have passed. With a `readme` it carries the README-example gate of a `mojo_library`
 (`[tests][readme]`, with `[file]`, `[generated]` and `[objects]`; the same `readme_gate`, compiled against `:lib`, so the
@@ -254,14 +254,14 @@ package's `coverage_held` is checked against those branch records. `conda_packag
 the library's `:conda` (buildrules' `mojo_conda` over `:lib`), so it too exists only after the tests passed.
 
 A package with Mojo dependencies is a `mojo_package` whose `mopm.toml` names each one under `[dependencies]` as a sibling
-path dependency with a version (`komira_runtime_paths = { path = "../komira_runtime_paths", version = "0.1" }`, the form
+path dependency with a version (`runtime_paths = { path = "../runtime_paths", version = "0.1" }`, the form
 that survives the beta stage's per-run version), and the adopted label lists the adopted targets of those packages in
 `deps`. `buildrules mojo sync` is run with the package and its siblings staged; its `:lib` is then built from the
 siblings' `:lib`, and the adopted rule refuses a `deps` list that is not that closure, in either direction, naming the
 packages. A dependent of the label gets the closure on its `-I`, and `conda_package` requires the dependencies' packages.
 `:conda` is `mojo_conda` with `dir` and `members` (the siblings' manifests, staged at their repository paths), so the
 `.conda` records `mojo-<dependency> >=0.1,<0.2` and holds none of the dependency's files; `mojo_conda_holds` over it
-(`sole = True`, `depends = [...]`) reads that back from the built file. `src/komira_resources` is the example.
+(`sole = True`, `depends = [...]`) reads that back from the built file. `src/resources` is the example.
 
 A package that opens a library by its bare name (`mode = "load"` in `[native-dependencies]`, `dlopen("libsnappy.so.1")`) has the file pinned in
 its unit graph (`system_libs`), and buildrules gives its own tests the pinned files on their library path. Its `:lib` also hands the
@@ -594,8 +594,8 @@ mojo_test(
   directories the runner makes for this run inside the action's working
   directory, so no two runs share them, and they are removed afterwards.
 - **Finding data from the executable.**
-  [`komira//src/komira_runtime_paths:komira_runtime_paths`](../../../src/komira_runtime_paths/src/komira_runtime_paths/__init__.mojo)
-  (the old label `komira//tools/build/mojo/runtime_paths:komira_runtime_paths` is an alias of it)
+  [`komira//src/runtime_paths:runtime_paths`](../../../src/runtime_paths/src/runtime_paths/__init__.mojo)
+  (the old label `komira//tools/build/mojo/runtime_paths:runtime_paths` is an alias of it)
   gives `executable_path()`, `install_root()` (the parent of the binary's
   directory), `share_dir()`, `data_path(rel)`, `read_data(rel)` and
   `test_tmpdir()` (which raises rather than fall back to `/tmp`). A bundle
@@ -603,7 +603,7 @@ mojo_test(
   bundle's `data` and a test's declared data; nothing reads a runfiles tree
   or an environment variable.
 - **Reading a resource.** Library code uses
-  [`komira_resources`](../../../src/komira_resources/src/komira_resources/resources.mojo):
+  [`resources`](../../../src/resources/src/resources/resources.mojo):
   `read_resource(name)` and `resource_path(name)`, where `name` is the file's
   path under `share/` (its repository path, for a list entry). A test declares
   the file in `test_data` / `data`; a shipped program's `mojo_bundle` lists it
@@ -637,6 +637,11 @@ compares with the committed directory and fails with
 `./buck2 run komira//tools/build/gen:regen -- <target>`, the command that
 rewrites it; `<name>_fresh` is the library's first gate, whatever `test_srcs`
 say. The welded form then also takes `bundle_proto_deps` and `bundle_only`.
+A `mojo_proto_library` of committed sources also takes
+`dir_is_import_name = True`, which moves its committed directory to
+`generated/<import_name>/`: the `[targets] lib` of a mopm package must be a
+directory named like the module Mojo imports, and the target cannot always
+have that name. A library of the transition ledger refuses the keyword.
 Reference: [`../gen/README.md`](../gen/README.md). Other Mojo targets name it in `deps`
 like a `mojo_library`. `deps` are the Mojo libraries the generated code
 imports (its runtime). A `.proto` is imported by other `.proto` files at
@@ -667,7 +672,7 @@ load("@komira//tools/build/mojo:proto.bzl", "mojo_db_proto_library", "proto_srcs
 `mojo_db_proto_library(name, srcs, outs, deps, proto_deps, import_prefix)`
 runs protoc with `protoc-gen-mojo-db` instead, and precompiles its output the
 same way. For each message of `srcs` annotated `(komira.db.table)` the plugin
-writes a struct implementing `komira_db.DbStorable` (column names and
+writes a struct implementing `db.DbStorable` (column names and
 logical types, `to_row`/`from_row`, `insert_sql`, CREATE TABLE statements)
 into `<stem>_db.mojo`; a `.proto` with no table gets no file, so `outs` states
 the files, and a stated file the plugin does not write fails the generation.
@@ -676,7 +681,7 @@ The options are defined in `proto-codegen/db/options.proto`, imported as
 `komira//tools/build/proto-codegen:db_options` in `proto_deps`. protoc hands
 a plugin the descriptors of the whole import closure with their custom
 options, which the plugin decodes from the raw request bytes; no
-descriptor-set flag is passed. `deps` holds the `komira_db` runtime the
+descriptor-set flag is passed. `deps` holds the `db` runtime the
 generated code imports. `proto_srcs(name, srcs, import_prefix, proto_deps)`
 names `.proto` files that others import but no Mojo is generated from. `mojo_routes_proto_library` (HTTP routes from `google.api.http`): [its README](../proto-codegen/routes/README.md).
 
@@ -817,10 +822,10 @@ closure of `roots` (messages) and `methods` (`Service.Method`), at least one
 of them required; `messages_only` emits no service. `protocol` is "rest"
 (the default) or "grpc", and `messages_only` output is the same under both.
 Either service client is `<Service>Client[C: Connector, T: GcpTokenSource]`:
-the token source (komira_gcp_core) supplies each request's bearer token. A
-"grpc" client calls komira_grpc's `GrpcClient` with classic gRPC, sets
+the token source (gcp_core) supplies each request's bearer token. A
+"grpc" client calls grpc's `GrpcClient` with classic gRPC, sets
 `authorization: Bearer <token>` on each call's `CallOptions` (the token
-hook), and raises a non-OK gRPC status through komira_gcp_core's
+hook), and raises a non-OK gRPC status through gcp_core's
 `gcp_grpc_status_error`.
 `protos` takes source paths of `.proto` files only, never a label. The
 referenced googleapis files (monitored_resource, logging/type, rpc/status,
@@ -910,7 +915,7 @@ adds the signed-send surface. `endpoint_rules` and `partitions` (the
 service's botocore endpoint ruleset and the partition table,
 `botocore_model("<service>").endpoint_rules` and `.partitions`) are set
 together or not at all; with them the module embeds both and resolves each
-operation's endpoint through `komira_aws_core.EndpointRuleSet`
+operation's endpoint through `aws_core.EndpointRuleSet`
 (`<Prefix>EndpointConfig` and `resolve_<op>_endpoint`), and in client mode
 each verb sends to the endpoint it resolves; without them the
 module's header lists the endpoint bindings of the model it does not apply.
@@ -1030,7 +1035,7 @@ abi_touch	Int32	OpaquePointer	1.1
   opens `./<library file>`, binds each function with `__typeof__` of the header's prototype and calls it. It is staged
   like a Mojo gate driver, with the library and the `native_owners` it needs beside it, and its marker exists only if
   it exited 0, so a header that disagrees with the binary (version, a status code, an argument type that changes a
-  call) is red there. The example is [`src/komira_so`](../../../src/komira_so/README.md#the-header-and-the-golden).
+  call) is red there. The example is [`src/so`](../../../src/so/README.md#the-header-and-the-golden).
 - **Not checked here:** that the golden version was raised when a row changed. That compares with the previous
   release, and one build holds only the current tree; a release check must supply the previous golden.
 
@@ -1134,8 +1139,8 @@ that library in its Mojo deps closure. Each C archive has one owner, the
 `THIRD_PARTY_OWNERS` row of its package
 ([`one_definition/libraries.bzl`](../one_definition/libraries.bzl)) for a
 vendored one, with the symbol prefix of its renamed build (`komira_awslc_`
-for aws-lc, whose owner is `komira_awslc`, the package that builds the archive that
-komira_crypto and komira_uuid link). A package built with `mojo_package`
+for aws-lc, whose owner is `awslc`, the package that builds the archive that
+crypto and uuid link). A package built with `mojo_package`
 is named by its adopted label (`//src/<name>:<name>`, adopt.bzl), though the
 file its dependents import is the package's `:lib`; the closure holds that
 label. Every `mojo_library` outside
@@ -1146,14 +1151,14 @@ of every target holding it:
 - `native_reach_archives`, decided at analysis: each archive its own C/C++
   `deps` link, with every archive those need, has its owner in the closure
   or is its own. A third_party archive with no owner row, or a row with no
-  owner, is refused. So `komira_http_core`, whose `//third_party/s2n-tls:s2n`
-  needs aws-lc, depends on `komira_crypto` (which depends on `komira_awslc`), and a library calling
-  `komira_fs`'s shim depends on `komira_fs`, never on `:komira_fs_posix`.
+  owner, is refused. So `http_core`, whose `//third_party/s2n-tls:s2n`
+  needs aws-lc, depends on `crypto` (which depends on `awslc`), and a library calling
+  `fs`'s shim depends on `fs`, never on `:komira_fs_posix`.
 - `native_reach_calls`, a run of the Zig tool
   [`native_reach/`](native_reach/README.md): no string literal in its
   sources (not its tests) starts with the prefix of an owner outside the
   closure, as `external_call["komira_awslc_RAND_bytes", ...]` does in
-  `komira_uuid`. On a target platform other than linux-x86_64, it is not run.
+  `uuid`. On a target platform other than linux-x86_64, it is not run.
 
 `<library>[native_reach]` builds the two results without the library's
 tests.

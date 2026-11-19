@@ -1,36 +1,36 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_test")
 
 # The link from each registered scan kind's SHIPPING binding constructor to
-# the wire bytes `komira_plan_wire` froze for it.
+# the wire bytes `plan_wire` froze for it.
 #
-# komira_plan_wire's golden test freezes `topic_live` and `index_pinned` from
+# plan_wire's golden test freezes `topic_live` and `index_pinned` from
 # bindings it RESTATES out of the core packages primitives, because the codec may not
 # import the kinds. Nothing there notices a kind drifting away from that
 # restatement. This test encodes what the kinds themselves build, through the
 # real codec, and requires the checked-in bytes.
 #
 # A package of its own so that no library gains a dependency for a test:
-# komira_plan_wire keeps no broker or search dependency, komira_search_scan
-# none on the broker, and komira_broker none on search or the codec. It is a
+# plan_wire keeps no broker or search dependency, search_scan
+# none on the broker, and broker none on search or the codec. It is a
 # `mojo_test`, so `./buck2 test //...` runs it; no library's build waits on it.
-_GOLDEN = "src/komira_plan_wire/tests/fixtures/golden/"
+_GOLDEN = "src/plan_wire/tests/fixtures/golden/"
 
 mojo_test(
     name = "test_scan_binding_links",
     srcs = ["test_scan_binding_links.mojo"],
     deps = [
-        "//src/komira_arrow:komira_arrow",
-        "//src/komira_broker:komira_broker",
-        "//src/komira_objectstore:komira_objectstore",
-        "//src/komira_plan_ir:komira_plan_ir",
-        "//src/komira_plan_wire:komira_plan_wire",
-        "//src/komira_scan_source:komira_scan_source",
-        "//src/komira_search_scan:komira_search_scan",
+        "//src/arrow:arrow",
+        "//src/broker:broker",
+        "//src/objectstore:objectstore",
+        "//src/plan_ir:plan_ir",
+        "//src/plan_wire:plan_wire",
+        "//src/scan_source:scan_source",
+        "//src/search_scan:search_scan",
     ],
-    # Staged at their repository paths, the same paths komira_plan_wire's own
+    # Staged at their repository paths, the same paths plan_wire's own
     # golden test opens.
     data = {
-        _GOLDEN + name + ".hex": "//src/komira_plan_wire:tests/fixtures/golden/" + name + ".hex"
+        _GOLDEN + name + ".hex": "//src/plan_wire:tests/fixtures/golden/" + name + ".hex"
         for name in ["index_pinned", "topic_live"]
     },
 )

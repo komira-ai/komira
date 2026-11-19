@@ -1,4 +1,4 @@
-//! `komira_oci image`: an OCI image layout of the pinned base plus one
+//! `oci image`: an OCI image layout of the pinned base plus one
 //! layer, a tree (tree.zig) laid at /, with the entrypoint named.
 //!
 //! The base is exactly the pinned blobs: the manifest must hash to its pin

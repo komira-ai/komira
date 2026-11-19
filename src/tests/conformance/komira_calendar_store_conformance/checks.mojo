@@ -27,12 +27,12 @@
 
 from std.testing import assert_equal
 
-from komira_calendar_proto.calendar import Calendar, Event, OccurrenceOverride
-from komira_datetime import seconds_from_fields
-from komira_db import DbValue, Filter, Order, Pred
-from komira_proto_codec import decode_json
+from calendar_proto.calendar import Calendar, Event, OccurrenceOverride
+from datetime import seconds_from_fields
+from db import DbValue, Filter, Order, Pred
+from proto_codec import decode_json
 
-from komira_calendar_store import (
+from calendar_store import (
     CalendarStore,
     ERR_UID_TAKEN,
     ERR_VERSION_CONFLICT,

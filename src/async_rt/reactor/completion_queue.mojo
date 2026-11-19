@@ -1,0 +1,231 @@
+# =============================================================================
+# async_rt.reactor.completion_queue — POD types for Reactor[S]'s NIC-style
+# completion-queue API
+# =============================================================================
+# The completion-queue surface exposes six public methods on Reactor[S]:
+#
+#   submit(op_kind, fd, buf) -> OpHandle
+#   register_long_lived(fd, interest_set) -> RegistrationHandle
+#   modify(reg_handle, new_interest_set)
+#   interest_set(reg_handle) -> UInt8
+#   poll_completions(timeout_us) -> List[Completion]
+#   wake_self()
+#
+# These return / accept the POD types declared here. Per: the public
+# Reactor surface is `Int / Int32 / Int64 / OpHandle / Completion /
+# RegistrationHandle / List[Completion] / void / boxed Error` — NO
+# UnsafePointer in any signature.
+#
+# =============================================================================
+
+
+# -----------------------------------------------------------------------------
+# OpKind sentinels — discriminator passed to Reactor.submit.
+# -----------------------------------------------------------------------------
+# Values are stable UInt8 sentinels; no enum syntax in Mojo 0.26.3 for
+# UInt-payloaded discriminated tags. Match the prose in (the four
+# values plus a future-reserved OP_TIMER for's TimerAwaitable).
+
+comptime OP_READ: UInt8 = 0
+comptime OP_WRITE: UInt8 = 1
+comptime OP_CONNECT: UInt8 = 2
+comptime OP_ACCEPT: UInt8 = 3
+# OP_TIMER reserved for sleep_async / TimerAwaitable; not implemented in
+#
+comptime OP_TIMER: UInt8 = 4
+
+
+# -----------------------------------------------------------------------------
+# OpHandle._state sentinels — three-state result discriminator.
+# -----------------------------------------------------------------------------
+# OP_PENDING: submit returned without resolving; caller must park on
+#             poll_completions (or invoke the wait() loop) until a Completion
+#             matching this op_id arrives.
+# OP_READY:   submit's try_io fast path succeeded (or poll_completions saw the
+#             matching Completion). `_result` carries the typed result
+#             (bytes-read / bytes-written / 0 / etc.).
+# OP_ERR:     submit / poll_completions saw a non-recoverable error.
+#             `_result` carries the errno (positive); caller raises.
+
+comptime OP_PENDING: UInt8 = 0
+comptime OP_READY: UInt8 = 1
+comptime OP_ERR: UInt8 = 2
+
+
+# -----------------------------------------------------------------------------
+# InterestSet bitmask — for register_long_lived / modify.
+# -----------------------------------------------------------------------------
+# Per: register_long_lived takes a bitmask `INTEREST_READ |
+# INTEREST_WRITE`. modify takes a new bitmask to switch the registration's
+# armed interests. Same shape on both backends:
+#   epoll: EPOLLIN <-> INTEREST_READ; EPOLLOUT <-> INTEREST_WRITE.
+#   kqueue: EVFILT_READ EV_ENABLE/EV_DISABLE under INTEREST_READ;
+#           EVFILT_WRITE EV_ENABLE/EV_DISABLE under INTEREST_WRITE.
+
+comptime INTEREST_READ: UInt8 = 1
+comptime INTEREST_WRITE: UInt8 = 2
+
+
+# -----------------------------------------------------------------------------
+# OpHandle — track-agnostic IO operation handle.
+# -----------------------------------------------------------------------------
+# Per (header doc):
+#   "POD — no UnsafePointer in fields. Just an op_id (Int64) + a tag
+#   discriminating Ready/Pending/Err + an inline result for the Ready case.
+#   The OpHandle does NOT carry a reactor pointer. The owning IoOp /
+#   Awaitable wraps the OpHandle and threads ctx.reactor through for
+#   poll_completions / deregister calls."
+#
+# Movability: per "Movable but NOT Copyable — single-ownership;
+# wraps a slot in the reactor's pending-ops table; the slot is freed on
+# completion or cancellation."
+#
+# NOTE: the Movable+NOT-Copyable invariant for OpHandle is the intended
+# contract; the type ships Copyable because the wrapping `IoOp[T]` is the
+# layer that enforces single-ownership. The bare OpHandle returned by
+# submit() is transient and consumed by the IoOp/Awaitable wrapper on the
+# same line. Tightening OpHandle to NOT-Copyable (along with IoOp[T]) is a
+# possible later step. ------------------------------------------------------
+
+@fieldwise_init
+struct OpHandle(
+    Copyable, ImplicitlyCopyable, Movable, Deinitable,
+):
+    """Track-agnostic IO operation handle. Returned by `Reactor.submit`.
+
+    Three-state result discriminator (`_state`):
+      - OP_PENDING: caller must park on `Reactor.poll_completions` until the
+        matching `Completion` arrives. State-machine track wraps in IoOp[T]
+        whose `wait()` body drives the spin-then-park dance;
+        async/await track wraps in `ReadAwaitable / WriteAwaitable / ...`
+        whose `__await__` body suspends via `_suspend_async`.
+      - OP_READY: `submit`'s try_io fast path succeeded (`_result` = bytes).
+      - OP_ERR: non-recoverable error (`_result` = errno).
+
+    POD: only Int64 / UInt8 / Int64 fields. Trivially Movable; trivially
+    Copyable (see module-level note above).
+    """
+
+    var _op_id: Int64
+    var _state: UInt8
+    var _result: Int64
+
+    @always_inline
+    def op_id(self) -> Int64:
+        """Public accessor for the underlying op_id. Used by IoOp/Awaitable
+        wrappers and by tests inspecting the OpHandle's identity."""
+        return self._op_id
+
+    @always_inline
+    def state(self) -> UInt8:
+        """Public accessor for the result discriminator. Returns one of
+        OP_PENDING / OP_READY / OP_ERR."""
+        return self._state
+
+    @always_inline
+    def result(self) -> Int64:
+        """Public accessor for the inline result (bytes / errno).
+
+        Caller must check `state()` first — for OP_PENDING the result is
+        the sentinel 0 (not yet resolved); for OP_READY it's the typed
+        result (bytes-read / bytes-written / 0); for OP_ERR it's the errno
+        (positive integer).
+        """
+        return self._result
+
+
+# -----------------------------------------------------------------------------
+# Completion — one IO completion drained from poll_completions.
+# -----------------------------------------------------------------------------
+# Per: returned by `Reactor.poll_completions` (one Completion per
+# epoll/kqueue event that maps to an in-flight op_id). Wake-channel
+# completions (eventfd_write / EVFILT_USER) are decoded internally and
+# never appear in the returned list.
+#
+# POD: trivially Movable + Copyable.
+
+@fieldwise_init
+struct Completion(
+    Copyable, ImplicitlyCopyable, Movable, Deinitable,
+):
+    """One IO completion drained from `Reactor.poll_completions`.
+
+    Fields:
+      - op_id: the operation identifier (matches the OpHandle returned by
+        the prior `Reactor.submit` for this op).
+      - bytes: bytes-read / bytes-written on success; 0 on error.
+      - err_code: 0 on success; errno on error.
+      - hangup: True on EPOLLHUP / EV_EOF (peer closed the connection;
+        further reads will return 0 immediately).
+    """
+
+    var op_id: Int64
+    var bytes: Int64
+    var err_code: Int32
+    var hangup: Bool
+
+
+# -----------------------------------------------------------------------------
+# RegistrationHandle: names one long-lived multiplexer registration.
+# -----------------------------------------------------------------------------
+# A copyable value carrying only the fd. What the registration is armed for
+# lives in the Reactor that owns it (`ArmedInterest`), so a copy of a handle
+# carries no state that can go stale (komira-ai/komira#1406: a mask recorded
+# on one copy left another copy saying the old mask, and the switch back to it
+# was skipped as unchanged).
+
+@fieldwise_init
+struct RegistrationHandle(
+    Copyable, ImplicitlyCopyable, Movable, Deinitable,
+):
+    """Long-lived multiplexer registration handle. Returned by
+    `Reactor.register_long_lived`; `Reactor.modify` and
+    `Reactor.interest_set` take it to name the registration.
+
+    Fields:
+      - _fd: the registered file descriptor (the epoll fd key and cookie;
+        the kqueue ident).
+
+    Dropping a handle does not deregister. `TcpStream`'s drop removes the fd
+    from the multiplexer and closes it through `_tcp_close_helper`, without
+    calling `Reactor._deregister_long_lived`, so the reactor keeps the fd's
+    armed-interest record; `register_long_lived` overwrites that record when
+    the fd number is registered again. Only `_deregister_long_lived` clears
+    it.
+    """
+
+    var _fd: Int32
+
+    @always_inline
+    def fd(self) -> Int32:
+        """Public accessor for the registered fd."""
+        return self._fd
+
+
+struct ArmedInterest(Movable):
+    """The interest mask each long-lived registration is armed for, indexed
+    by fd. One per Reactor; the only record of it, so `Reactor.modify`
+    compares against and updates this, never a field of a handle.
+
+    0 means nothing recorded (never registered, deregistered, or a negative
+    fd). An entry left by an fd closed without deregistering is overwritten
+    when the fd number is registered again.
+    """
+
+    var _masks: List[UInt8]
+
+    def __init__(out self):
+        self._masks = List[UInt8]()
+
+    @always_inline
+    def get(self, fd: Int32) -> UInt8:
+        if fd < 0 or Int(fd) >= len(self._masks):
+            return UInt8(0)
+        return self._masks[Int(fd)]
+
+    def set(mut self, fd: Int32, mask: UInt8):
+        if fd < 0:
+            return
+        if Int(fd) >= len(self._masks):
+            self._masks.resize(Int(fd) + 1, UInt8(0))
+        self._masks[Int(fd)] = mask

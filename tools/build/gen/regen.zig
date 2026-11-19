@@ -4,8 +4,8 @@
 //!
 //!   buck2 run komira//tools/build/gen:regen -- [--buck2 <path>] <target>...
 //!
-//! A <target> is a generated library (`komira//src/komira_aws_sqs:komira_aws_sqs`),
-//! a package (`komira//src/komira_gcp_firestore:`, every generated library of it),
+//! A <target> is a generated library (`komira//src/aws_sqs:aws_sqs`),
+//! a package (`komira//src/gcp_firestore:`, every generated library of it),
 //! or `all` (every one in the cell `komira`; the cell `tests` and the libraries still
 //! in the transition ledger have to be named, and a ledger library has to leave the
 //! ledger first). For each library regen

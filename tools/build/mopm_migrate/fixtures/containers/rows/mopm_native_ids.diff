@@ -1,0 +1,16 @@
+@@ -11,6 +11,7 @@ A package of the list needs its `load` below and its row; `mopm_artifacts` refus
+ 
+ load("//src/anomaly:buildrules.mojo.lock.bzl", anomaly = "GRAPH")
+ load("//src/atomic_alias:buildrules.mojo.lock.bzl", atomic_alias = "GRAPH")
++load("//src/containers:buildrules.mojo.lock.bzl", containers = "GRAPH")
+ load("//src/content_line:buildrules.mojo.lock.bzl", content_line = "GRAPH")
+ load("//src/datetime:buildrules.mojo.lock.bzl", datetime = "GRAPH")
+ load("//src/encoding:buildrules.mojo.lock.bzl", encoding = "GRAPH")
+@@ -47,6 +48,7 @@ def declared_natives(graph):
+ _GRAPHS = {
+     "anomaly": anomaly,
+     "atomic_alias": atomic_alias,
++    "containers": containers,
+     "content_line": content_line,
+     "datetime": datetime,
+     "encoding": encoding,

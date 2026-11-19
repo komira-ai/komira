@@ -9,16 +9,16 @@ The design rests on one idea: **a generated message is written once against two 
 | Library | Role |
 |---|---|
 | `tools/build/proto-codegen` | A Rust crate (`komira_proto_codegen`, 39 `.rs` files) holding the protoc plugins that write Mojo, and the `(komira.db.*)` options proto |
-| `komira_protobuf` | Wire primitives: varints, zigzag, fixed and length-delimited fields, `PbFieldCursor` |
-| `komira_proto_codec` | The `Serializable`, `WireEncoder` and `WireDecoder` traits and their protobuf and proto3-JSON backends |
-| `komira_wkt` | The `google.protobuf` well-known types |
-| `komira_grpc` | An RPC client for classic gRPC and Connect |
-| `komira_connect` | A Connect-RPC server, and the envelope, status and codec code the client also uses |
+| `protobuf` | Wire primitives: varints, zigzag, fixed and length-delimited fields, `PbFieldCursor` |
+| `proto_codec` | The `Serializable`, `WireEncoder` and `WireDecoder` traits and their protobuf and proto3-JSON backends |
+| `wkt` | The `google.protobuf` well-known types |
+| `grpc` | An RPC client for classic gRPC and Connect |
+| `connect` | A Connect-RPC server, and the envelope, status and codec code the client also uses |
 
 Out of scope:
 
 - The Buck2 rules that run the generators (`mojo_proto_library`, `mojo_db_proto_library`): see [the Mojo rules](../../tools/build/mojo/README.md). This doc describes what those rules produce.
-- The HTTP/2 transport, TLS, and the `GrpcDispatch` seam in `komira_http_core/transport/grpc_emit.mojo`. This doc takes the HTTP packages (`komira_http_core`, `komira_http_client`, `komira_http_server`) as given.
+- The HTTP/2 transport, TLS, and the `GrpcDispatch` seam in `http_core/transport/grpc_emit.mojo`. This doc takes the HTTP packages (`http_core`, `http_client`, `http_server`) as given.
 - The generated AWS clients, which `aws-client-gen` writes from botocore models.
 - The database layer that the `DbStorable` output compiles against.
 
@@ -29,9 +29,9 @@ Out of scope:
                                              lower.rs -> IR (ir.rs) -> emit.rs / emit_rest.rs
                                              --> one <stem>.mojo per .proto
 generated struct: Serializable.encode[E] / decode[D]
-  E, D = PbEncoder, PbDecoder (komira_proto_codec -> komira_protobuf)  or  JsonEncoder, JsonDecoder
-generated <Svc>Client[C, P] --> GrpcClient[C] (komira_grpc) --> komira_http_client HttpClient
-server side: ConnectService (komira_connect) conforms to komira_http_core's GrpcDispatch
+  E, D = PbEncoder, PbDecoder (proto_codec -> protobuf)  or  JsonEncoder, JsonDecoder
+generated <Svc>Client[C, P] --> GrpcClient[C] (grpc) --> http_client HttpClient
+server side: ConnectService (connect) conforms to http_core's GrpcDispatch
 ```
 
 ### How does a .proto file become Mojo code?
@@ -44,7 +44,7 @@ The request is decoded with `prost`, which drops extension options on a typed de
 
 `lower.rs` builds the protocol-neutral IR in `ir.rs` (`IrModel`, `IrFile`, `IrMessage`, `IrField`, `IrEnum`, `IrOneof`, `IrService`, `IrMethod`). `emit.rs` writes it with one `Emitter`. `proto_to_mojo_path` maps each input file to one flat `<stem>.mojo`. The emitter iterates in declaration order, and the recursion analysis keeps its edges in a `BTreeSet`, so the output does not depend on hash order.
 
-A reference to one of the 18 types in `wkt_symbol` (`lower.rs`), such as `google.protobuf.Timestamp`, becomes an import from `komira_wkt`. Any other imported type must be generated into the same package. `komira_wkt` defines all 18, including an opaque `Any`.
+A reference to one of the 18 types in `wkt_symbol` (`lower.rs`), such as `google.protobuf.Timestamp`, becomes an import from `wkt`. Any other imported type must be generated into the same package. `wkt` defines all 18, including an opaque `Any`.
 
 `mojo_proto_library` runs this plugin in the build: it runs protoc over its `srcs` and precompiles the generated directory. Generated modules import each other through their package name, so a `.proto` that imports another is compiled only with the imported file generated into the same package (`bundle_proto_deps`); `tools/build/tests/functional/proto` holds worked examples.
 
@@ -58,7 +58,7 @@ A proto enum becomes a struct holding `value: Int` that conforms to `ProtoEnum`:
 
 ### How is a message encoded as protobuf or JSON?
 
-Through `komira_proto_codec`. `Serializable` declares `encode[E: WireEncoder](self, mut enc: E)` and `decode[D: WireDecoder](mut dec: D) -> Self`, both `raises` (`wire_format.mojo`). Each field primitive takes both the field number and the JSON name, and each backend uses one of them. `codec.mojo` wraps the two backends: `encode_proto`, `decode_proto`, `encode_json`, `decode_json` and `decode_json_lenient`.
+Through `proto_codec`. `Serializable` declares `encode[E: WireEncoder](self, mut enc: E)` and `decode[D: WireDecoder](mut dec: D) -> Self`, both `raises` (`wire_format.mojo`). Each field primitive takes both the field number and the JSON name, and each backend uses one of them. `codec.mojo` wraps the two backends: `encode_proto`, `decode_proto`, `encode_json`, `decode_json` and `decode_json_lenient`.
 
 The protobuf backend is `proto_binary.mojo`:
 
@@ -69,14 +69,14 @@ The protobuf backend is `proto_binary.mojo`:
 
 The JSON backend is `proto3_json.mojo`:
 
-- `JsonEncoder` writes 64-bit integers as JSON strings, `bytes` as base64 (`base64_encode` and `base64_decode` from `komira_encoding`) and field names as the proto3 `jsonName`.
-- `JsonDecoder` parses the document into a `JsonValue` tree (`komira_json`). It treats a `null` member as absent and accepts both the `jsonName` and the `.proto` field name.
+- `JsonEncoder` writes 64-bit integers as JSON strings, `bytes` as base64 (`base64_encode` and `base64_decode` from `encoding`) and field names as the proto3 `jsonName`.
+- `JsonDecoder` parses the document into a `JsonValue` tree (`json`). It treats a `null` member as absent and accepts both the `jsonName` and the `.proto` field name.
 - `decode_json` is strict. It raises `JsonError: unknown field`, `JsonError: unknown enum value` or, when one document spells a field both ways, `JsonError: duplicate field`.
 - `decode_json_lenient` drops unknown keys and folds an unknown enum name to the zero value.
 
 ### What do the wire primitives check?
 
-`komira_protobuf` has three modules, and its source imports only the standard library. `wire_types.mojo` holds the four wire types (`PB_WIRE_VARINT`, `PB_WIRE_FIXED64`, `PB_WIRE_LEN`, `PB_WIRE_FIXED32`) and the zigzag transforms. `writer.mojo` holds the `pb_write_*` encoders. `reader.mojo` holds the decoders, which raise errors starting `ProtobufError.MALFORMED`:
+`protobuf` has three modules, and its source imports only the standard library. `wire_types.mojo` holds the four wire types (`PB_WIRE_VARINT`, `PB_WIRE_FIXED64`, `PB_WIRE_LEN`, `PB_WIRE_FIXED32`) and the zigzag transforms. `writer.mojo` holds the `pb_write_*` encoders. `reader.mojo` holds the decoders, which raise errors starting `ProtobufError.MALFORMED`:
 
 - `pb_read_varint` refuses a varint longer than 10 bytes or one that runs past the buffer.
 - `pb_read_tag` refuses field number 0.
@@ -87,11 +87,11 @@ The JSON backend is `proto3_json.mojo`:
 
 ### How are well-known types encoded?
 
-`komira_wkt` holds `Any`, `Timestamp`, `Duration`, `Empty`, `FieldMask`, `Struct`, `Value`, `ListValue`, `NullValue` and the nine scalar wrappers (`DoubleValue`, `FloatValue`, `Int64Value`, `UInt64Value`, `Int32Value`, `UInt32Value`, `BoolValue`, `StringValue`, `BytesValue`). Each message type conforms to `Proto3JsonWkt`, a refinement of `Serializable`. Its `encode` and `decode` give the ordinary field form: `Timestamp.encode` writes `seconds` and `nanos`. Its `write_proto3_json` and `read_proto3_json` give the special JSON form, which the JSON backend and `encode_json` and `decode_json` select at compile time for a well-known type; most types also have the string forms `to_proto3_json()` and `from_proto3_json()`. The special forms are: an RFC 3339 string for `Timestamp`, `"<seconds>[.<nanos>]s"` for `Duration`, the bare scalar for a wrapper, a comma-joined path string for `FieldMask`. `Any` is opaque: it has no type registry, keeps whichever form it was given, and refuses a transcode between the two. `NullValue` is a plain enum-like struct without `Serializable`. The library depends on `komira_proto_codec`, `komira_json`, `komira_encoding` and `komira_datetime`.
+`wkt` holds `Any`, `Timestamp`, `Duration`, `Empty`, `FieldMask`, `Struct`, `Value`, `ListValue`, `NullValue` and the nine scalar wrappers (`DoubleValue`, `FloatValue`, `Int64Value`, `UInt64Value`, `Int32Value`, `UInt32Value`, `BoolValue`, `StringValue`, `BytesValue`). Each message type conforms to `Proto3JsonWkt`, a refinement of `Serializable`. Its `encode` and `decode` give the ordinary field form: `Timestamp.encode` writes `seconds` and `nanos`. Its `write_proto3_json` and `read_proto3_json` give the special JSON form, which the JSON backend and `encode_json` and `decode_json` select at compile time for a well-known type; most types also have the string forms `to_proto3_json()` and `from_proto3_json()`. The special forms are: an RFC 3339 string for `Timestamp`, `"<seconds>[.<nanos>]s"` for `Duration`, the bare scalar for a wrapper, a comma-joined path string for `FieldMask`. `Any` is opaque: it has no type registry, keeps whichever form it was given, and refuses a transcode between the two. `NullValue` is a plain enum-like struct without `Serializable`. The library depends on `proto_codec`, `json`, `encoding` and `datetime`.
 
 ### How does a generated client make a gRPC call?
 
-`emit_service` writes `struct <Svc>Client[C: Connector, P: Protocol]` holding one `GrpcClient[C]`. A unary method encodes the request with `PbEncoder` and calls `GrpcClient.unary_call_retrying` with the path `/<package>.<Service>/<Method>`, the per-call `reactor`, `token` and `now_us`, and the method's `RetryPolicy`. It then decodes the reply with `PbDecoder`. `GrpcClient` (`komira_grpc/client.mojo`) holds its `HttpClient[C]` in an `OwnedPointer` and has five call methods: `unary_call`, `unary_call_retrying`, `server_stream`, `client_stream` and `bidi_stream`. It moves opaque message bytes; its source imports neither `komira_proto_codec` nor `komira_protobuf`.
+`emit_service` writes `struct <Svc>Client[C: Connector, P: Protocol]` holding one `GrpcClient[C]`. A unary method encodes the request with `PbEncoder` and calls `GrpcClient.unary_call_retrying` with the path `/<package>.<Service>/<Method>`, the per-call `reactor`, `token` and `now_us`, and the method's `RetryPolicy`. It then decodes the reply with `PbDecoder`. `GrpcClient` (`grpc/client.mojo`) holds its `HttpClient[C]` in an `OwnedPointer` and has five call methods: `unary_call`, `unary_call_retrying`, `server_stream`, `client_stream` and `bidi_stream`. It moves opaque message bytes; its source imports neither `proto_codec` nor `protobuf`.
 
 `P` is one of three `Protocol` conformers (`protocol.mojo`), which differ as follows:
 
@@ -101,7 +101,7 @@ The JSON backend is `proto3_json.mojo`:
 | `ProtocolConnectProto` | `application/proto` | bare | end-stream envelope |
 | `ProtocolConnectJson` | `application/json` | bare | end-stream envelope |
 
-The 5-byte envelope is one flags byte and a big-endian length (`komira_connect/envelope.mojo`). `ClientFramer` (`framing.mojo`) reassembles streamed envelopes from response frames and refuses one declaring more than `MAX_RECV_MESSAGE_SIZE` (4 MiB), naming `RESOURCE_EXHAUSTED`. The client sends `Grpc-Accept-Encoding: identity` and supports no compression: a compressed envelope is refused with `UNIMPLEMENTED` in a unary body (`grpc_decode_unary`) and ends a stream with `UNKNOWN`.
+The 5-byte envelope is one flags byte and a big-endian length (`connect/envelope.mojo`). `ClientFramer` (`framing.mojo`) reassembles streamed envelopes from response frames and refuses one declaring more than `MAX_RECV_MESSAGE_SIZE` (4 MiB), naming `RESOURCE_EXHAUSTED`. The client sends `Grpc-Accept-Encoding: identity` and supports no compression: a compressed envelope is refused with `UNIMPLEMENTED` in a unary body (`grpc_decode_unary`) and ends a stream with `UNKNOWN`.
 
 A failure is raised as an `Error` whose text starts `[grpc:<code>]` (`format_grpc_error_message`). The status comes from trailers, from a trailers-only header block, from a Connect error envelope, or from the HTTP status (`grpc_error_from_http_non_200`).
 
@@ -111,11 +111,11 @@ A failure is raised as an `Error` whose text starts `[grpc:<code>]` (`format_grp
 
 Two mechanisms, each bounded:
 
-- **A connection-level fault.** The unary, server-streaming and client-streaming paths of `GrpcClient` re-issue a request when their shared gate, `_not_processed_retry_or_raise` (`komira_grpc/client.mojo`), accepts one of two errors:
+- **A connection-level fault.** The unary, server-streaming and client-streaming paths of `GrpcClient` re-issue a request when their shared gate, `_not_processed_retry_or_raise` (`grpc/client.mojo`), accepts one of two errors:
   - a GOAWAY for a stream above the peer's last-processed stream id (`is_h2_goaway_unprocessed`), which proves the peer did not process the request;
   - any error whose message contains `HttpError[RETRYABLE_TRANSPORT]` (`is_h2_retryable_transport`, a substring test).
 
-  The HTTP/2 driver raises `HttpError[RETRYABLE_TRANSPORT]` for an attempt that failed before any response byte arrived, such as a failed socket write or read, for an HTTP/2 REFUSED_STREAM reset, and for a connection that has spent its stream-id space (`komira_http_client/h2_client.mojo`); the HTTP/1.1 state machine raises it for the same zero-byte cases. REFUSED_STREAM and an exhausted stream-id space prove the peer did not process the request; zero response bytes alone does not (see limits). The gate ignores the method and its retry policy, and every `GrpcClient` request is a POST.
+  The HTTP/2 driver raises `HttpError[RETRYABLE_TRANSPORT]` for an attempt that failed before any response byte arrived, such as a failed socket write or read, for an HTTP/2 REFUSED_STREAM reset, and for a connection that has spent its stream-id space (`http_client/h2_client.mojo`); the HTTP/1.1 state machine raises it for the same zero-byte cases. REFUSED_STREAM and an exhausted stream-id space prove the peer did not process the request; zero response bytes alone does not (see limits). The gate ignores the method and its retry policy, and every `GrpcClient` request is a POST.
 
   Both kinds share one bound: at most 4 attempts (`_GOAWAY_RETRY_MAX_ATTEMPTS`) within a 90-second wall budget. A caller may state another budget with `GrpcClient.with_retry_budget_ms`; a value that is empty, not a number, zero or above 24 hours falls back to the default, so the budget can be stated but never removed. The module reads no environment. Any other error, including a GOAWAY at or below that id, is raised unchanged.
 - **A status code, per method.** For a generated client, `derive_retry_class` (`tools/build/proto-codegen/src/retry_policy.rs`) decides at generation time. A streaming method is classed `None`, and the generated streaming path takes no status-code policy: only the unary arm of `emit_service` passes a `RetryPolicy` to `unary_call_retrying`. A unary method with `idempotency_level = IDEMPOTENT`, or with a `(google.api.http)` verb of `get`, `head`, `put` or `delete`, gets `RetryPolicy.idempotent()`, and every other unary method gets `none()`. `idempotent()` means 5 attempts, backoff from 1 s to 10 s at a factor of 1.3, on `UNAVAILABLE` only (`RETRY_CODES_AIP194`). A hand-written caller of `GrpcClient.unary_call_retrying` passes its own policy; `RetryPolicy.internal_on_alreadyexists_guarded()` is the opt-in policy that also retries `INTERNAL`, for a create whose caller tolerates `ALREADY_EXISTS`, and the generator never selects it.
@@ -124,7 +124,7 @@ Two mechanisms, each bounded:
 
 ### How does the Connect server dispatch a call?
 
-`ConnectService` (`komira_connect/service.mojo`) holds a list of unary methods, keyed by full path, and a list of streaming methods (server-streaming and client-streaming). The server has no bidirectional registration: `register_method`, `register_server_stream` and `register_client_stream` are the only three. A handler is a `ConnectHandlerFn`: a function from `(codec_id, request bytes)` to response bytes. `handle_request` picks the codec with `codec_id_for_content_type`, and `dispatch` (`dispatch.mojo`) runs one call:
+`ConnectService` (`connect/service.mojo`) holds a list of unary methods, keyed by full path, and a list of streaming methods (server-streaming and client-streaming). The server has no bidirectional registration: `register_method`, `register_server_stream` and `register_client_stream` are the only three. A handler is a `ConnectHandlerFn`: a function from `(codec_id, request bytes)` to response bytes. `handle_request` picks the codec with `codec_id_for_content_type`, and `dispatch` (`dispatch.mojo`) runs one call:
 
 1. Unwrap the request: a gRPC envelope, a gRPC-Web body, or the Connect body as is.
 2. Call the handler, and map a raised error to a status with `parse_connect_error`.
@@ -134,9 +134,9 @@ An unregistered path gets `NOT_FOUND`, and an unknown content type `UNIMPLEMENTE
 
 The server speaks three codecs. `application/grpc` and `application/grpc+proto` select gRPC. `application/grpc-web` and `application/grpc-web+proto` select gRPC-Web. `application/json`, `application/connect+json`, `application/proto` and `application/connect+proto` all select `CODEC_ID_CONNECT_JSON`, because their framing and error envelope are the same.
 
-`ConnectService` mounts on `komira_http_server` in two ways. It conforms to `GrpcDispatch` and `GrpcStreamDispatch`, so `HttpServer[ConnectService]` serves it on the HTTP/2 path, and `register_connect_wildcard` plus `dispatch_connect_request` route a `POST /*` through a `Router`.
+`ConnectService` mounts on `http_server` in two ways. It conforms to `GrpcDispatch` and `GrpcStreamDispatch`, so `HttpServer[ConnectService]` serves it on the HTTP/2 path, and `register_connect_wildcard` plus `dispatch_connect_request` route a `POST /*` through a `Router`.
 
-Within komira only tests construct `ConnectService`. `komira_grpc` takes the envelope, status, deadline-encoding and error-envelope code from `komira_connect`.
+Within komira only tests construct `ConnectService`. `grpc` takes the envelope, status, deadline-encoding and error-envelope code from `connect`.
 
 ### What do the other generators produce?
 
@@ -154,7 +154,7 @@ Every Mojo file a generator writes starts with the same header (`src/header.rs`)
 
 The `DbStorable` output is a struct per `(komira.db.table)` message with `column_names`, `column_types`, `to_row`, `from_row`, `insert_sql[D: SqlDatabase]` and `create_table_ddl` (with `_pg` and `_sqlite` variants). `aws-client-gen` refuses an empty `--operations` list and emits only the named operations. `emit_aws/` covers the `awsJson1_0`, `awsJson1_1`, `restJson1`, `restXml`, `awsQuery` and `ec2Query` protocols and refuses the others by name.
 
-A `default_protocol = "rest"` target gets a different client from `emit_rest.rs`: `<Svc>Client[C: Connector]` over `HttpClient[C]`, with no `Protocol` parameter. A unary method with a `(google.api.http)` rule fills the path template from request fields and sends the body as proto3 JSON. A server-streaming method returns a `List` of its responses: over REST the whole stream is one HTTP response, a JSON array, which `komira_gcp_core.gcp_rest_stream_items` splits (raising an `{"error": ...}` element as a failed status). A client-streaming or bidirectional method has no REST mapping, and a rest target that names one is refused by name (generate it with `protocol = "grpc"`). It decodes each reply with `decode_json_lenient`, which skips a field the server added after the protos were pinned.
+A `default_protocol = "rest"` target gets a different client from `emit_rest.rs`: `<Svc>Client[C: Connector]` over `HttpClient[C]`, with no `Protocol` parameter. A unary method with a `(google.api.http)` rule fills the path template from request fields and sends the body as proto3 JSON. A server-streaming method returns a `List` of its responses: over REST the whole stream is one HTTP response, a JSON array, which `gcp_core.gcp_rest_stream_items` splits (raising an `{"error": ...}` element as a failed status). A client-streaming or bidirectional method has no REST mapping, and a rest target that names one is refused by name (generate it with `protocol = "grpc"`). It decodes each reply with `decode_json_lenient`, which skips a field the server added after the protos were pinned.
 
 ## Why is it built this way?
 
@@ -213,7 +213,7 @@ A `default_protocol = "rest"` target gets a different client from `emit_rest.rs`
 
 **Decision.** The generator derives each method's `RetryPolicy` from a declared idempotency level or the `(google.api.http)` verb, and retries only `UNAVAILABLE` by default.
 
-**Because.** Replaying a call that may already have run can create a second resource, so the question is whether replaying the verb is safe (the `komira_grpc/retry.mojo` header). RFC 9110 defines GET, HEAD, PUT and DELETE as idempotent and POST and PATCH as not. AIP-194 names `UNAVAILABLE` as the one retryable code, and `INTERNAL` gives no guarantee that the call did not happen.
+**Because.** Replaying a call that may already have run can create a second resource, so the question is whether replaying the verb is safe (the `grpc/retry.mojo` header). RFC 9110 defines GET, HEAD, PUT and DELETE as idempotent and POST and PATCH as not. AIP-194 names `UNAVAILABLE` as the one retryable code, and `INTERNAL` gives no guarantee that the call did not happen.
 
 **Alternatives weighed.**
 
@@ -223,11 +223,11 @@ A `default_protocol = "rest"` target gets a different client from `emit_rest.rs`
 
 **Revisit if.** Services you generate for routinely declare `idempotency_level`, or a service documents that `INTERNAL` means the call was not processed.
 
-### Why do the client and the server share komira_connect?
+### Why do the client and the server share connect?
 
-**Decision.** The envelope, status codes, deadline encoding and Connect error envelope live in `komira_connect`, and `komira_grpc` imports them.
+**Decision.** The envelope, status codes, deadline encoding and Connect error envelope live in `connect`, and `grpc` imports them.
 
-**Because.** The client and server use the same framing and status model, and one definition cannot drift from a copy. The dependency runs from `komira_grpc` to `komira_connect`, so the `[grpc:N]` error format is defined once, in `komira_connect.status.format_grpc_status_error`.
+**Because.** The client and server use the same framing and status model, and one definition cannot drift from a copy. The dependency runs from `grpc` to `connect`, so the `[grpc:N]` error format is defined once, in `connect.status.format_grpc_status_error`.
 
 **Alternatives weighed.**
 
@@ -257,28 +257,28 @@ A `default_protocol = "rest"` target gets a different client from `emit_rest.rs`
 | `tools/build/proto-codegen/src/retry_policy.rs` | Per-method retry class | `derive_retry_class`, `RetryClass` |
 | `tools/build/proto-codegen/src/emit_dbstorable.rs`, `emit_index.rs`, `openapi_emit.rs`, `openapi_in.rs`, `emit_aws/` | The other emitters and front-ends | |
 | `tools/build/proto-codegen/BUCK`, `db/options.proto` | The built binaries; the `(komira.db.*)` options | `protoc-gen-mojo`, `protoc-gen-mojo-db`, `aws-client-gen`, `db_options` |
-| `src/komira_protobuf/reader.mojo`, `writer.mojo`, `wire_types.mojo` | Wire primitives | `pb_read_varint`, `pb_skip_field`, `PbFieldCursor`, `pb_write_message_field` |
-| `src/komira_proto_codec/wire_format.mojo` | The traits | `Serializable`, `WireEncoder`, `WireDecoder`, `ProtoEnum`, `FieldKey` |
-| `src/komira_proto_codec/proto_binary.mojo`, `proto3_json.mojo`, `codec.mojo` | The backends and entry points | `PbEncoder`, `PbDecoder`, `JsonEncoder`, `JsonDecoder`, `encode_proto`, `decode_json` |
-| `src/komira_wkt/*.mojo` | Well-known types | `Timestamp`, `Duration`, `Struct`, `FieldMask` |
-| `src/komira_grpc/client.mojo`, `protocol.mojo`, `framing.mojo`, `retry.mojo` | The client | `GrpcClient`, `Protocol`, `ClientFramer`, `RetryPolicy` |
-| `src/komira_grpc/error.mojo`, `metadata.mojo`, `call_options.mojo`, `routing.mojo` | Status, metadata, options, routing header | `GrpcError`, `RpcMetadata`, `CallOptions`, `match_path_template` |
-| `src/komira_connect/service.mojo`, `dispatch.mojo`, `server_integration.mojo` | The server | `ConnectService`, `dispatch`, `codec_id_for_content_type` |
-| `src/komira_connect/envelope.mojo`, `status.mojo`, `codec_*.mojo`, `deadline.mojo` | Shared framing and status | `split_envelopes`, `grpc_encode_unary`, `parse_grpc_timeout` |
+| `src/protobuf/reader.mojo`, `writer.mojo`, `wire_types.mojo` | Wire primitives | `pb_read_varint`, `pb_skip_field`, `PbFieldCursor`, `pb_write_message_field` |
+| `src/proto_codec/wire_format.mojo` | The traits | `Serializable`, `WireEncoder`, `WireDecoder`, `ProtoEnum`, `FieldKey` |
+| `src/proto_codec/proto_binary.mojo`, `proto3_json.mojo`, `codec.mojo` | The backends and entry points | `PbEncoder`, `PbDecoder`, `JsonEncoder`, `JsonDecoder`, `encode_proto`, `decode_json` |
+| `src/wkt/*.mojo` | Well-known types | `Timestamp`, `Duration`, `Struct`, `FieldMask` |
+| `src/grpc/client.mojo`, `protocol.mojo`, `framing.mojo`, `retry.mojo` | The client | `GrpcClient`, `Protocol`, `ClientFramer`, `RetryPolicy` |
+| `src/grpc/error.mojo`, `metadata.mojo`, `call_options.mojo`, `routing.mojo` | Status, metadata, options, routing header | `GrpcError`, `RpcMetadata`, `CallOptions`, `match_path_template` |
+| `src/connect/service.mojo`, `dispatch.mojo`, `server_integration.mojo` | The server | `ConnectService`, `dispatch`, `codec_id_for_content_type` |
+| `src/connect/envelope.mojo`, `status.mojo`, `codec_*.mojo`, `deadline.mojo` | Shared framing and status | `split_envelopes`, `grpc_encode_unary`, `parse_grpc_timeout` |
 
 Entry points:
 
-- **Public API:** `encode_proto`, `decode_proto`, `encode_json`, `decode_json` in `src/komira_proto_codec/codec.mojo`: serialize a generated or hand-written `Serializable`.
-- **Public API:** a generated `<Svc>Client[C, P]` over `GrpcClient` in `src/komira_grpc/client.mojo`: call a service.
-- **Execution starts at:** `main` in `tools/build/proto-codegen/src/main.rs` for generation; `GrpcClient.unary_call` for a call; `dispatch` in `src/komira_connect/dispatch.mojo` for a served call.
+- **Public API:** `encode_proto`, `decode_proto`, `encode_json`, `decode_json` in `src/proto_codec/codec.mojo`: serialize a generated or hand-written `Serializable`.
+- **Public API:** a generated `<Svc>Client[C, P]` over `GrpcClient` in `src/grpc/client.mojo`: call a service.
+- **Execution starts at:** `main` in `tools/build/proto-codegen/src/main.rs` for generation; `GrpcClient.unary_call` for a call; `dispatch` in `src/connect/dispatch.mojo` for a served call.
 
 ## How is it tested?
 
 Each library lists its tests in `test_srcs` (files in `src/<library>/tests/`), and they run when the library is built (see [the Mojo rules](../../tools/build/mojo/README.md)):
 
 ```sh
-./buck2 build //src/komira_protobuf:komira_protobuf //src/komira_proto_codec:komira_proto_codec \
-  //src/komira_wkt:komira_wkt //src/komira_grpc:komira_grpc //src/komira_connect:komira_connect
+./buck2 build //src/protobuf:protobuf //src/proto_codec:proto_codec \
+  //src/wkt:wkt //src/grpc:grpc //src/connect:connect
 ```
 
 The tests include:
@@ -288,8 +288,8 @@ The tests include:
 | `test_protobuf_roundtrip.mojo`, `test_protobuf_prost_crosscheck.mojo` | Primitives; decoding `prost` output |
 | `test_proto_codec_roundtrip.mojo`, `test_proto_codec_proto3_json_conformance.mojo`, `test_proto_codec_proto3_json_strictness.mojo`, `test_proto_codec_json_nonascii_roundtrip.mojo`, `test_copy_hazard.mojo` | Both backends; the JSON mapping and its refusals; a generated message copied as a list element |
 | `test_wkt_runtime.mojo`, `test_wkt_json_codec_path.mojo`, `test_wkt_plain_arms.mojo`, `test_wkt_list_copy.mojo`, `test_wkt_timestamp_text.mojo` | Well-known types in both forms, and through the codec's message arms |
-| `komira_grpc`'s `test_L5_*.mojo`, `test_unary_status_retry.mojo`, `test_goaway_unprocessed_retry.mojo`, `test_retryable_transport_reissue.mojo`, `test_client_stream_goaway_reissue.mojo`, `test_e2e_*.mojo` | Client framing, headers, metadata, routing, streams, retries, a full loop against `ConnectService` |
-| `komira_connect`'s `test_L5_*.mojo`, `test_e2e_*.mojo`, `test_server_integration.mojo`, `test_grpc_timeout_conformance.mojo`, `test_grpc_timeout_enforced.mojo` | The three server codecs, unary, server-streaming and client-streaming calls, the router mount, `grpc-timeout` enforcement on the HTTP/2 serve loop. Bidirectional streaming is covered at the framing level only (`test_e2e_bidi.mojo` simulates framing and never touches `ConnectService`) |
+| `grpc`'s `test_L5_*.mojo`, `test_unary_status_retry.mojo`, `test_goaway_unprocessed_retry.mojo`, `test_retryable_transport_reissue.mojo`, `test_client_stream_goaway_reissue.mojo`, `test_e2e_*.mojo` | Client framing, headers, metadata, routing, streams, retries, a full loop against `ConnectService` |
+| `connect`'s `test_L5_*.mojo`, `test_e2e_*.mojo`, `test_server_integration.mojo`, `test_grpc_timeout_conformance.mojo`, `test_grpc_timeout_enforced.mojo` | The three server codecs, unary, server-streaming and client-streaming calls, the router mount, `grpc-timeout` enforcement on the HTTP/2 serve loop. Bidirectional streaming is covered at the framing level only (`test_e2e_bidi.mojo` simulates framing and never touches `ConnectService`) |
 
 The code generator is exercised by the build tooling's end-to-end tests (`tools/build/tests/run_tests.sh`, test 23, from `proto_tests.sh`): generated packages compile and pass `test_person`, `test_team` and `test_tasks_db`, the generated struct follows the `.proto`, `bundle_only` selects only the named files, and two uncached builds produce the same bytes. The AWS generator has its own golden checks in `tools/build/tests/functional/aws_codegen`. The unit tests inside the Rust sources (for example in `retry_policy.rs`) run as `komira_proto_codegen_unit`, and the codegen library and the generator binaries cannot build unless they pass.
 
@@ -299,17 +299,17 @@ Not tested: no test sends a generated client's call with `ProtocolConnectJson`, 
 
 - **Limit:** a generated client encodes with `PbEncoder` whatever `P` is. Instantiated with `ProtocolConnectJson`, it would send protobuf bytes labelled `application/json`.
 - **Limit:** the `default_wire` plugin parameter is parsed but no emitter reads it. The wire follows the protocol mode: protobuf for `grpc` and `connect`, JSON for `rest`.
-- **Limit:** `komira_wkt.Any` is opaque. With no type registry it cannot transcode its payload between the protobuf and JSON forms, and refuses to, naming the type.
-- **Limit:** JSON decoding's nesting bound is the parser's, not the decoder's. `komira_json.parse_json_value` refuses nesting beyond `JSON_DEFAULT_MAX_DEPTH` (128) with a non-recursive parser, and `JsonDecoder.read_message` makes a sub-decoder with no counter of its own. No test feeds `JsonDecoder` deeply nested input.
+- **Limit:** `wkt.Any` is opaque. With no type registry it cannot transcode its payload between the protobuf and JSON forms, and refuses to, naming the type.
+- **Limit:** JSON decoding's nesting bound is the parser's, not the decoder's. `json.parse_json_value` refuses nesting beyond `JSON_DEFAULT_MAX_DEPTH` (128) with a non-recursive parser, and `JsonDecoder.read_message` makes a sub-decoder with no counter of its own. No test feeds `JsonDecoder` deeply nested input.
 - **Limit:** a generated message has no member for unknown fields. Decoding skips them, so decoding and re-encoding drops them.
 - **Limit:** a `Proto3JsonWkt` type reaches its special JSON form only through the codec's message arms and the top-level `encode_json` and `decode_json`; a hand-written `encode[JsonEncoder]` body that bypasses them writes the ordinary field form.
-- **Limit:** `GrpcClient`'s re-issue on `HttpError[RETRYABLE_TRANSPORT]` can run a non-idempotent call twice. The HTTP/2 read branch raises it when a read fails before any response byte, even after the whole request was written, and the POST goes out again. `komira_http_client`'s HTTP/1.1 replay rule, `_h1_pooled_retry_is_safe` (`komira_http_client/client.mojo`), would refuse it: after a retryable-transport check, it requires that nothing was written, OR a safe verb, OR an idempotency key.
+- **Limit:** `GrpcClient`'s re-issue on `HttpError[RETRYABLE_TRANSPORT]` can run a non-idempotent call twice. The HTTP/2 read branch raises it when a read fails before any response byte, even after the whole request was written, and the POST goes out again. `http_client`'s HTTP/1.1 replay rule, `_h1_pooled_retry_is_safe` (`http_client/client.mojo`), would refuse it: after a retryable-transport check, it requires that nothing was written, OR a safe verb, OR an idempotency key.
 - **Limit:** compressed gRPC messages are refused; only `identity` encoding is supported.
-- **Limit:** `MAX_RECV_MESSAGE_SIZE` guards streamed envelopes only: `ClientFramer` is the only code that applies it, and `komira_connect` declares no size limit of its own.
-- **Limit:** the server enforces `grpc-timeout` only for `application/grpc` and `application/grpc+*` calls on the HTTP/2 serve loop (`komira_http_core/transport/grpc_timeout.mojo`). The deadline is fixed when the request's HEADERS block arrives. A malformed value is answered `:status 400`, `grpc-status 13`, `malformed grpc-timeout: <reason>`, and a deadline already past when the HEADERS block completes (a zero value) `:status 200`, `grpc-status 4`, `context deadline exceeded`, both without running the handler (grpc-go's server behaviour; its early abort for the second). A deadline that runs out while the body arrives, or while the handler runs, gets the same `grpc-status 4` answer; that is komira's choice, since grpc-go's timer resets the stream with `RST_STREAM(CANCEL)`. The handler runs synchronously and cannot be interrupted: if the deadline passes while it runs, its response is dropped for `DEADLINE_EXCEEDED`, but its side effects stand, and the handler never sees its deadline. The loop has no per-stream timer, so a request whose body is still arriving is answered only when the body ends. gRPC-Web calls are not enforced, and `Connect-Timeout-Ms` is parsed (`parse_connect_timeout_ms`) but not enforced. The client sends `grpc-timeout` on Connect calls too, where the Connect protocol names `Connect-Timeout-Ms`.
+- **Limit:** `MAX_RECV_MESSAGE_SIZE` guards streamed envelopes only: `ClientFramer` is the only code that applies it, and `connect` declares no size limit of its own.
+- **Limit:** the server enforces `grpc-timeout` only for `application/grpc` and `application/grpc+*` calls on the HTTP/2 serve loop (`http_core/transport/grpc_timeout.mojo`). The deadline is fixed when the request's HEADERS block arrives. A malformed value is answered `:status 400`, `grpc-status 13`, `malformed grpc-timeout: <reason>`, and a deadline already past when the HEADERS block completes (a zero value) `:status 200`, `grpc-status 4`, `context deadline exceeded`, both without running the handler (grpc-go's server behaviour; its early abort for the second). A deadline that runs out while the body arrives, or while the handler runs, gets the same `grpc-status 4` answer; that is komira's choice, since grpc-go's timer resets the stream with `RST_STREAM(CANCEL)`. The handler runs synchronously and cannot be interrupted: if the deadline passes while it runs, its response is dropped for `DEADLINE_EXCEEDED`, but its side effects stand, and the handler never sees its deadline. The loop has no per-stream timer, so a request whose body is still arriving is answered only when the body ends. gRPC-Web calls are not enforced, and `Connect-Timeout-Ms` is parsed (`parse_connect_timeout_ms`) but not enforced. The client sends `grpc-timeout` on Connect calls too, where the Connect protocol names `Connect-Timeout-Ms`.
 - **Limit:** a Connect handler receives `CODEC_ID_CONNECT_JSON` for both `application/json` and `application/proto` bodies, so the codec id does not tell it the payload format.
 - **Limit:** the `WireEncoder` and `WireDecoder` traits cannot express REST-XML, which needs attributes, a name for each repeated item and more than one name per field, so an XML binding has to be a separate model-driven one (`emit_aws/xml_codec.rs` is that binding for the AWS generator).
-- **Limit:** the `DbStorable` output imports `komira_db`. No library in this tree provides it, so the `mojo_db_proto_library` example in the build tests is the only place it is compiled.
-- **Limit:** the packed readers do not check their elements against the block. `PbFieldCursor.read_packed_varints` and `read_packed_sint64` bound the block, then call `pb_read_packed_varints` and `pb_read_packed_sint64`, which loop `pb_read_varint` while the position is below the block end; `pb_read_varint` is bounded only by the whole buffer, so a last varint that straddles the block end reads the bytes after it and does not raise. `pb_read_packed_fixed32` and `pb_read_packed_fixed64` drop a trailing partial element instead of raising. All four are public exports, and only tests call them. `komira_proto_codec`'s `PbDecoder` bounds its own packed reads (`_packed_bound`).
-- **Limit:** several module headers disagree with the code. `komira_proto_codec`'s names a backend `ProtoBinaryWire` and a test header names `Proto3JsonWire`, neither of which exists; `komira_grpc`'s protocol header and `komira_connect`'s JSON codec header name `Proto3JsonWire` too. `komira_grpc`'s and `komira_connect`'s sources import nothing from `komira_proto_codec`.
+- **Limit:** the `DbStorable` output imports `db`. No library in this tree provides it, so the `mojo_db_proto_library` example in the build tests is the only place it is compiled.
+- **Limit:** the packed readers do not check their elements against the block. `PbFieldCursor.read_packed_varints` and `read_packed_sint64` bound the block, then call `pb_read_packed_varints` and `pb_read_packed_sint64`, which loop `pb_read_varint` while the position is below the block end; `pb_read_varint` is bounded only by the whole buffer, so a last varint that straddles the block end reads the bytes after it and does not raise. `pb_read_packed_fixed32` and `pb_read_packed_fixed64` drop a trailing partial element instead of raising. All four are public exports, and only tests call them. `proto_codec`'s `PbDecoder` bounds its own packed reads (`_packed_bound`).
+- **Limit:** several module headers disagree with the code. `proto_codec`'s names a backend `ProtoBinaryWire` and a test header names `Proto3JsonWire`, neither of which exists; `grpc`'s protocol header and `connect`'s JSON codec header name `Proto3JsonWire` too. `grpc`'s and `connect`'s sources import nothing from `proto_codec`.
 - **Open question:** whether to keep the Connect server surface (`ConnectService`, the gRPC-Web codec), which only tests use, or replace it with direct `GrpcDispatch` implementations. A production service built on it would decide.

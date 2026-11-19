@@ -32,7 +32,7 @@
 # Planted mutant (reverted): `Predicate.eval`'s default body, the in-bounds
 # guard `if i + lane < n:` -> `if True:`. Only
 # `test_past_the_end_lanes_are_never_evaluated` went red (12 rows kept
-# instead of 10); komira_udf's own welded tests stayed green.
+# instead of 10); udf's own welded tests stayed green.
 #
 # Planted mutant (reverted; in this file, since the refusal is the
 # conformer's own code): `BigLine.eval_scalar`'s NULL check
@@ -46,27 +46,27 @@
 
 from std.testing import TestSuite, assert_equal, assert_true
 
-from komira_arrow.record_batch import RecordBatch
-from komira_arrow.schema import Field, SchemaBuilder
-from komira_arrow.batch_view import BatchView, batch_view_over
-from komira_arrow.multi_column_builder import (
+from arrow.record_batch import RecordBatch
+from arrow.schema import Field, SchemaBuilder
+from arrow.batch_view import BatchView, batch_view_over
+from arrow.multi_column_builder import (
     ColumnSlot,
     MultiColumnBuilder,
     column_slot,
 )
 
-from komira_udf.auto_komira_schema import AutoKomiraSchema
-from komira_udf.column_resolver import ColumnResolver
-from komira_udf.filter_fn import FilterFn
-from komira_udf.map_fn_rt import MapFnRT
-from komira_udf.schema_descriptor import (
+from udf.auto_komira_schema import AutoKomiraSchema
+from udf.column_resolver import ColumnResolver
+from udf.filter_fn import FilterFn
+from udf.map_fn_rt import MapFnRT
+from udf.schema_descriptor import (
     DT_F32,
     DT_F64,
     DT_I32,
     DT_I64,
 )
-from komira_expr.typed_projects import ProjectList
-from komira_expr.typed_udf_sugar import Map1, Map2, Row2
+from expr.typed_projects import ProjectList
+from expr.typed_udf_sugar import Map1, Map2, Row2
 
 from komira_udf_e2e.columns import (
     f32_column,

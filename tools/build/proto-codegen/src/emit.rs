@@ -19,7 +19,7 @@ const TRIVIAL_REGISTER_STORAGE_TYPES: &[&str] = &[
 /// message (`map<string, M>` — common in googleapis surfaces, e.g. GCS
 /// `ObjectCustomContextPayload`). The suffix names the typed
 /// `write_*`/`read_into_*` primitive the generated map body routes through
-/// (see `komira_proto_codec` `WireEncoder`/`WireDecoder`). A message value routes
+/// (see `proto_codec` `WireEncoder`/`WireDecoder`). A message value routes
 /// through `write_message_field[V]` / `read_into_*_message_map[V]`, which are
 /// PARAMETRIC on the value type — `map_scalar_write_suffix` is only called for
 /// the suffix-keyed scalar/enum primitives, so a message value returns the
@@ -137,7 +137,7 @@ fn mojo_str_lit(s: &str) -> String {
     out
 }
 
-/// The error mapper of `komira_gcp_core` ([`crate::emit_rest::GCP_CORE`]) a
+/// The error mapper of `gcp_core` ([`crate::emit_rest::GCP_CORE`]) a
 /// generated Google Cloud gRPC client raises through. Its contract:
 /// `def gcp_grpc_status_error(rpc: String, grpc_status: Int, text: String) -> Error`
 /// maps the gRPC status to its `google.rpc.Code` and returns an `Error` that
@@ -155,7 +155,7 @@ pub struct Emitter<'a> {
     boxed: BTreeSet<(String, String)>,
     protocol: ProtocolMode,
     /// A Google Cloud client (the plugin's `gcp=true`): gRPC service clients
-    /// take a `komira_gcp_core` token source, set its token as each call's
+    /// take a `gcp_core` token source, set its token as each call's
     /// `authorization` metadata, speak classic gRPC only, and raise a non-OK
     /// status through [`GCP_GRPC_STATUS_ERROR`]. REST clients are Google
     /// Cloud clients either way.
@@ -284,7 +284,7 @@ impl<'a> Emitter<'a> {
 
     // -- file header ----------------------------------------------------
 
-    /// The file header and imports; `base64` adds `komira_encoding`'s
+    /// The file header and imports; `base64` adds `encoding`'s
     /// `base64_encode`, which a REST client sending a `bytes` query value
     /// calls.
     fn emit_header(&mut self, base64: bool) {
@@ -302,7 +302,7 @@ impl<'a> Emitter<'a> {
         self.line(&format!("# Mojo package:  {}", self.file.mojo_package));
         self.line("#");
         self.line(
-            "# Generated message structs conform to the komira_proto_codec",
+            "# Generated message structs conform to the proto_codec",
         );
         self.line(
             "# `Serializable` trait: encode[E: WireEncoder] / decode[D: WireDecoder].",
@@ -310,11 +310,11 @@ impl<'a> Emitter<'a> {
         self.blank();
         if self.file.enums.is_empty() {
             self.line(
-                "from komira_proto_codec import Serializable, WireEncoder, WireDecoder",
+                "from proto_codec import Serializable, WireEncoder, WireDecoder",
             );
         } else {
             self.line(
-                "from komira_proto_codec import (",
+                "from proto_codec import (",
             );
             self.line("    ProtoEnum,");
             self.line("    Serializable,");
@@ -334,7 +334,7 @@ impl<'a> Emitter<'a> {
                     self.line(&imp);
                 }
                 if base64 {
-                    self.line("from komira_encoding import base64_encode");
+                    self.line("from encoding import base64_encode");
                 }
             } else if self.gcp {
                 self.line(&format!(
@@ -342,7 +342,7 @@ impl<'a> Emitter<'a> {
                     crate::emit_rest::GCP_CORE,
                     crate::emit_rest::GCP_TOKEN_SOURCE,
                 ));
-                self.line("from komira_grpc import (");
+                self.line("from grpc import (");
                 self.line("    CallOptions,");
                 self.line("    GrpcClient,");
                 self.line("    ProtocolGrpcProto,");
@@ -356,7 +356,7 @@ impl<'a> Emitter<'a> {
                 self.emit_grpc_runtime_imports();
             } else {
                 self.line(
-                    "from komira_grpc import (",
+                    "from grpc import (",
                 );
                 self.line("    Protocol,");
                 self.line("    CallOptions,");
@@ -380,26 +380,26 @@ impl<'a> Emitter<'a> {
         self.blank();
     }
 
-    /// The imports every gRPC service file takes after its `komira_grpc`
+    /// The imports every gRPC service file takes after its `grpc`
     /// block: the binary codec, the connector, the async runtime and, when a
     /// method carries a `(google.api.routing)` rule, the routing helpers.
     fn emit_grpc_runtime_imports(&mut self) {
         self.line(
-            "from komira_proto_codec.proto_binary import PbEncoder, PbDecoder",
+            "from proto_codec.proto_binary import PbEncoder, PbDecoder",
         );
         self.line(
-            "from komira_http_core.transport.io_stream import Connector",
+            "from http_core.transport.io_stream import Connector",
         );
-        self.line("from komira_async.reactor.reactor import Reactor");
+        self.line("from async_rt.reactor.reactor import Reactor");
         self.line(
-            "from komira_async.runtime.runtime_trait import Runtime",
+            "from async_rt.runtime.runtime_trait import Runtime",
         );
         self.line(
-            "from komira_async.cancellation.token import CancellationToken",
+            "from async_rt.cancellation.token import CancellationToken",
         );
         if self.file_has_routing_rule() {
             self.line(
-                "from komira_grpc import build_routing_params, match_path_template",
+                "from grpc import build_routing_params, match_path_template",
             );
         }
     }
@@ -1564,7 +1564,7 @@ impl<'a> Emitter<'a> {
     }
 
     /// The module-level mapper every method of a Google Cloud gRPC client
-    /// raises through: komira_grpc raises a status as `[grpc:N] <text>`, and
+    /// raises through: grpc raises a status as `[grpc:N] <text>`, and
     /// the client hands `N` and that error to [`GCP_GRPC_STATUS_ERROR`].
     fn emit_gcp_grpc_error_helper(&mut self) {
         self.blank();
@@ -1573,7 +1573,7 @@ impl<'a> Emitter<'a> {
         self.push_indent();
         self.line("\"\"\"The error a call to `rpc` raises when the transport raised `text`.");
         self.blank();
-        self.line("    komira_grpc raises every gRPC status as `[grpc:N] <grpc-message>`, also");
+        self.line("    grpc raises every gRPC status as `[grpc:N] <grpc-message>`, also");
         self.line("    inside its retry-exhaustion error. Such a status becomes");
         self.line(&format!(
             "    `{}.{GCP_GRPC_STATUS_ERROR}`, which keeps a `[grpc:<code>]` anchor,",
@@ -1623,7 +1623,7 @@ impl<'a> Emitter<'a> {
         self.line("    `CallOptions.raw_metadata`: the client reads no environment and holds");
         self.line("    no credential of its own. A call that ends in a gRPC status raises");
         self.line(&format!("    `{core}.{GCP_GRPC_STATUS_ERROR}`, whose text starts with a"));
-        self.line("    `[grpc:<google.rpc.Code>]` anchor that komira_grpc's");
+        self.line("    `[grpc:<google.rpc.Code>]` anchor that grpc's");
         self.line("    `parse_grpc_status_code` reads.");
         self.blank();
         self.line(&format!(
@@ -1658,7 +1658,7 @@ impl<'a> Emitter<'a> {
         self.line("def _authorize(mut self, mut opts: CallOptions) raises:");
         self.push_indent();
         self.line("\"\"\"The token hook: one token per call, set as the `authorization` entry");
-        self.line("    of `opts.raw_metadata`. komira_grpc sends that entry verbatim and once,");
+        self.line("    of `opts.raw_metadata`. grpc sends that entry verbatim and once,");
         self.line("    so a replayed attempt carries the same header, not a second one. An");
         self.line("    empty token is refused rather than sent as `Bearer `.\"\"\"");
         self.line("var bearer = self._token_source.access_token()");
@@ -2490,7 +2490,7 @@ mod gcp_grpc_client_tests {
         assert!(out.contains("    comptime P = ProtocolGrpcProto\n"), "got:\n{out}");
         assert!(!out.contains("P: Protocol"), "the protocol is not a parameter; got:\n{out}");
         assert!(
-            out.contains("from komira_gcp_core import GcpTokenSource, gcp_grpc_status_error\n"),
+            out.contains("from gcp_core import GcpTokenSource, gcp_grpc_status_error\n"),
             "got:\n{out}"
         );
         assert!(
@@ -2547,7 +2547,7 @@ mod gcp_grpc_client_tests {
         let f = file_with_every_shape();
         let out = Emitter::with_options(&f, ProtocolMode::Grpc, false).emit();
         assert_eq!(out, Emitter::with_protocol(&f, ProtocolMode::Grpc).emit());
-        for absent in ["komira_gcp_core", "_authorize", "_gcp_grpc_error", "        try:\n", "ProtocolGrpcProto"] {
+        for absent in ["gcp_core", "_authorize", "_gcp_grpc_error", "        try:\n", "ProtocolGrpcProto"] {
             assert!(!out.contains(absent), "{absent}; got:\n{out}");
         }
         assert!(out.contains("struct ThingClient[C: Connector, P: Protocol]("), "got:\n{out}");
@@ -2572,7 +2572,7 @@ mod gcp_grpc_client_tests {
         });
         let out = Emitter::with_options(&f, ProtocolMode::Grpc, true).emit();
         assert!(
-            out.contains("from komira_grpc import build_routing_params, match_path_template"),
+            out.contains("from grpc import build_routing_params, match_path_template"),
             "got:\n{out}"
         );
         let get = out.find("def get[RT: Runtime]").expect("get");
@@ -2593,7 +2593,7 @@ mod gcp_grpc_client_tests {
         f.services.clear();
         let out = Emitter::with_options(&f, ProtocolMode::Grpc, true).emit();
         assert_eq!(out, Emitter::with_protocol(&f, ProtocolMode::Grpc).emit());
-        assert!(!out.contains("komira_gcp_core"), "got:\n{out}");
+        assert!(!out.contains("gcp_core"), "got:\n{out}");
     }
 }
 

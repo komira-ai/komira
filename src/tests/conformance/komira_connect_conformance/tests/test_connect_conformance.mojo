@@ -1,15 +1,15 @@
 # =============================================================================
-# test_connect_conformance.mojo -- komira_connect against the Connect suite
+# test_connect_conformance.mojo -- connect against the Connect suite
 # =============================================================================
 #
 # The pinned `connectconformance` runner (third_party/connect-conformance,
 # v1.0.5, staged as `connectconformance`) runs in server mode with
-# conformance.yaml (the feature subset komira_connect serves) and the
+# conformance.yaml (the feature subset connect serves) and the
 # runner's own `--known-failing @known_failing.txt`. For each server
 # configuration it computes (HTTP/2 over TLS, per protocol) it starts
 # `conformance_server` (the server/ binary, staged under `server/`), which
-# serves the ConformanceService on a komira_connect ConnectService behind a
-# komira_http_server HttpServer on 127.0.0.1, and drives it with the suite's
+# serves the ConformanceService on a connect ConnectService behind a
+# http_server HttpServer on 127.0.0.1, and drives it with the suite's
 # Connect-Go and grpc-go reference clients, in-process in the runner. The
 # suite supplies every case; nothing here decides what a case expects.
 #
@@ -30,7 +30,7 @@
 #      least _MIN_PASSED cases passed, so a vacuous or truncated run fails;
 #   3. every pattern in known_failing.txt has its reason (known_failing.mojo).
 #
-# Defects it catches: any komira_connect / komira_http_server behavior on the
+# Defects it catches: any connect / http_server behavior on the
 # RPC path that the suite checks and that passes at this pin (framing, status
 # and trailer emission, error-code mapping, content-type handling, routing of
 # unknown methods); a fix nobody recorded (the case passes, so its
@@ -43,8 +43,8 @@
 from std.pathlib import Path
 
 from komira_http_conformance import run_child
-from komira_runtime_paths import data_path
-from komira_supervisor import ChildSpec
+from runtime_paths import data_path
+from supervisor import ChildSpec
 
 from komira_connect_conformance import (
     parse_known_failing,

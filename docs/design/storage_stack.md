@@ -40,8 +40,8 @@ The first revision's model was "our manifest is authoritative, Iceberg is an exp
 
 The snippets below use a Python SDK that does not exist yet. What exists today:
 
-- `komira_sdk` is the plan-building half of a Mojo SDK. It has no sinks (`src/komira_sdk/README.md`).
-- `komira_iceberg_catalog` resolves a table name to its metadata location and per-table `config`, and does nothing else: no create, no commit (`src/komira_iceberg_catalog/README.md`).
+- `sdk` is the plan-building half of a Mojo SDK. It has no sinks (`src/sdk/README.md`).
+- `iceberg_catalog` resolves a table name to its metadata location and per-table `config`, and does nothing else: no create, no commit (`src/iceberg_catalog/README.md`).
 
 The snippets fix the shape of the product, not an API.
 
@@ -49,7 +49,7 @@ The snippets fix the shape of the product, not an API.
 
 Before any journey, komira needs a principal and credentials. It gets them in one of three ways, chosen per catalog:
 
-- **Vended by the catalog.** A REST catalog returns per-table credentials or remote signing when asked (`X-Iceberg-Access-Delegation`); they arrive in `load_table`'s `config`, which `komira_iceberg_catalog` already returns. Unity, Polaris, S3 Tables and BigLake work this way *(to confirm per catalog)*.
+- **Vended by the catalog.** A REST catalog returns per-table credentials or remote signing when asked (`X-Iceberg-Access-Delegation`); they arrive in `load_table`'s `config`, which `iceberg_catalog` already returns. Unity, Polaris, S3 Tables and BigLake work this way *(to confirm per catalog)*.
 - **An assumed role** (or a service account on GCP, a managed identity on Azure) with read and write access to the table locations and the catalog API.
 - **Ambient credentials** where komira runs, for local and test use.
 
@@ -218,7 +218,7 @@ As a capability stack, the graph consumes what L4 provides: it finds entities by
 
 ## L0 and L1: unchanged, now with a narrower scope
 
-L0 (`ConditionalWriteStore`, `object_store.md:29-37`) and L1 (`CasManifestStore`, `src/komira_objectstore/cas_manifest.mojo`) stay as the first revision described them:
+L0 (`ConditionalWriteStore`, `object_store.md:29-37`) and L1 (`CasManifestStore`, `src/objectstore/cas_manifest.mojo`) stay as the first revision described them:
 
 - one creator per key;
 - append by create-if-absent of the next slot;
@@ -233,11 +233,11 @@ The L1 work the first revision proposed still applies to those artifacts:
    - Every chunk body starts with `[kind u16][version u16]`.
    - A decoder rejects an unknown kind or version.
    - Existing bodies are grandfathered by kind.
-   - This includes the search summary version check that PR #833 lists as a correctness fix (`src/komira_search_catalog/split_summary.mojo:309` reads the version byte without checking it).
+   - This includes the search summary version check that PR #833 lists as a correctness fix (`src/search_catalog/split_summary.mojo:309` reads the version byte without checking it).
 2. **One snapshot type for komira lineages.** `SnapshotRef = (lineage key, chunk_seq)`, plus a shard vector when the lineage is sharded. Offsets are a view of it. **Pins are leases**, and a read under an erased lease fails with a distinct "snapshot erased" error.
 3. **Known gaps:**
    - orphaned broker segments (komira#488);
-   - the table store deletes log chunks but never advances `_LOG_START`: nothing under `src/komira_table_store` calls `advance_log_start` (`git grep advance_log_start -- src/komira_table_store` is empty);
+   - the table store deletes log chunks but never advances `_LOG_START`: nothing under `src/table_store` calls `advance_log_start` (`git grep advance_log_start -- src/table_store` is empty);
    - `cas_manifest.mojo` is 4,148 lines and needs to be split.
 
 **Can conditional writes alone serve as an Iceberg catalog for other engines?** No:
@@ -251,7 +251,7 @@ Conditional writes are the right storage *under* komira's REST catalog, and that
 
 ### The catalog seam
 
-`komira_iceberg_catalog` has one seam today: `IcebergCatalog.load_table(namespace, table) -> ResolvedTable`, with a storage-based implementation and a REST implementation. It grows to these verbs:
+`iceberg_catalog` has one seam today: `IcebergCatalog.load_table(namespace, table) -> ResolvedTable`, with a storage-based implementation and a REST implementation. It grows to these verbs:
 
 | verb | what it does |
 |---|---|
@@ -350,8 +350,8 @@ On a table komira did not create, komira writes data and delete files and snapsh
 
 **Parquet pieces that exist already:**
 
-- `komira_parquet` reads files: `file_reader.mojo` (`ParquetFileReader`), `nested.mojo` (Dremel reconstruction), and INT96 to nanoseconds (`decode_plain_int96_to_int64`, `plain.mojo:929`).
-- `komira_sdk`'s `ParquetReadOptions` carries Hive partitioning and a partition filter.
+- `parquet` reads files: `file_reader.mojo` (`ParquetFileReader`), `nested.mojo` (Dremel reconstruction), and INT96 to nanoseconds (`decode_plain_int96_to_int64`, `plain.mojo:929`).
+- `sdk`'s `ParquetReadOptions` carries Hive partitioning and a partition filter.
 
 What does not exist yet: a Parquet file writer, the Iceberg metadata parser and writer, and a Delta reader.
 
@@ -515,8 +515,8 @@ A tail exists where data must be visible faster than Iceberg can commit. There a
 
 | tail | format | rolls into |
 |---|---|---|
-| topic partition | Arrow IPC stream `.seg` with a `TSG1` footer (`src/komira_broker/broker_core.mojo:66-90`); one PUT plus one append per acknowledgement | the topic's Iceberg table |
-| row store | commit chunks of `WriteOp[]` PUT and TOMBSTONE (`src/komira_table_store/table_store_codec.mojo:153-166`) | the row store's Iceberg base table |
+| topic partition | Arrow IPC stream `.seg` with a `TSG1` footer (`src/broker/broker_core.mojo:66-90`); one PUT plus one append per acknowledgement | the topic's Iceberg table |
+| row store | commit chunks of `WriteOp[]` PUT and TOMBSTONE (`src/table_store/table_store_codec.mojo:153-166`) | the row store's Iceberg base table |
 | graph deltas | IPC delta objects (PR #833, `data_graph_storage.md`, "What changed from the first revision") | the graph's Iceberg tables |
 
 ### The roll
@@ -557,7 +557,7 @@ Pinning the tail first means that any tail chunk reaped after the pin is covered
 
 An analytic table keyed by business data is a separate table materialized from the topic. It never shares bytes with the log: a zero-copy log-as-table forces one sort order on both, and puts Parquet encoding on the produce path.
 
-**Key-compacted ranges** still cannot roll through today's `append_compacted` check, which requires `last == base + record_count - 1` (`src/komira_broker/compacted_index.mojo:337`). The fix: the roll records a span and a row count, and checks the span. Until that lands, key compaction runs on the tail only.
+**Key-compacted ranges** still cannot roll through today's `append_compacted` check, which requires `last == base + record_count - 1` (`src/broker/compacted_index.mojo:337`). The fix: the roll records a span and a row count, and checks the span. Until that lands, key compaction runs on the tail only.
 
 **The row store:**
 
@@ -657,7 +657,7 @@ A roll transfers ownership; it does not derive.
 | re-partition | topic tails | on request; renumbers offsets into child lineages, so indexes over the parent are rebuilt | reap |
 | merge index | index generations | always | a visible new generation, then reap of its inputs |
 
-- **komira-lineage operations** run through the `compact_once` envelope (`src/komira_objectstore/compact_window.mojo`, which has no caller outside its own test today). The envelope gains a second mode for operations whose output is visible (merge index), and the ported split merger gets its own name.
+- **komira-lineage operations** run through the `compact_once` envelope (`src/objectstore/compact_window.mojo`, which has no caller outside its own test today). The envelope gains a second mode for operations whose output is visible (merge index), and the ported split merger gets its own name.
 - **Iceberg operations** follow Iceberg's procedures and conflict rules, not `compact_once`.
 - **One maintenance service runs all of them** as typed jobs, outside the broker and the query paths, with one erasure deadline per dataset.
 
@@ -709,7 +709,7 @@ A roll transfers ownership; it does not derive.
    - the content cache;
    - snapshot detection, including equality deletes;
    - the read rule and its consistency modes;
-   - the CAS split catalog wired into `komira_search_scan` (whose `BUCK` does not depend on `komira_search_catalog` today).
+   - the CAS split catalog wired into `search_scan` (whose `BUCK` does not depend on `search_catalog` today).
 8. **The maintenance service** for Iceberg tables komira maintains (fold, manifest rewrite, expiry, orphans), maintainer detection, and erasure with its per-owner report. Journey 5.
 9. **The deletion-vector writer**, which unlocks the `format_version=3` opt-in and row-level writes to other owners' v3 tables.
 10. **The blob store**, before any table references blobs.
@@ -742,7 +742,7 @@ The prototype is proposed and has not been run. It tests interop: komira writes 
 **Setup:**
 
 - It builds as Buck2 targets with welded tests on the farm.
-- It uses the local-filesystem store, a REST catalog served inside the test, the Parquet and Iceberg writers, and `komira_search`.
+- It uses the local-filesystem store, a REST catalog served inside the test, the Parquet and Iceberg writers, and `search`.
 - The outside engines are DuckDB (1.5.3 or later, with its Iceberg extension), Spark with the Iceberg runtime, and PyIceberg, all as pinned build tools. If Spark is too heavy for the farm, PyIceberg replaces it as a reader; it stays as the second, non-Java writer either way.
 
 **Steps:**
@@ -874,20 +874,20 @@ Decisions 2, 3, 7, 8 and 9 are kept, revised as noted below.
 - In-place adoption no longer lets maintenance delete the source files.
 - Exporting from komira's catalog leaves a redirect, not a second live pointer.
 - komira writes rows to existing tables the user names; ownership gates maintenance and properties, not writes.
-- The Parquet reader exists in `komira_parquet`; the gap is the writer. The `table_store.mojo:52` citation was a to-do comment; the claim now cites the missing `advance_log_start` call.
+- The Parquet reader exists in `parquet`; the gap is the writer. The `table_store.mojo:52` citation was a to-do comment; the claim now cites the missing `advance_log_start` call.
 
 ## Where is the code?
 
 | area | paths |
 |---|---|
-| L0, L1 | `src/komira_objectstore/` (`store.mojo`, `cas_manifest.mojo`, `compact_window.mojo`, `sharded_lineage.mojo`, `sublineage_base_fold.mojo`) |
-| Iceberg catalog (read-only today) | `src/komira_iceberg_catalog/` |
-| Parquet | `src/komira_parquet/` (`file_reader.mojo`, `nested.mojo`, `plain.mojo`), `src/komira_parquet_api/`, `src/komira_parquet_codec/` |
-| SDK (plan building) | `src/komira_sdk/` (`parquet_read_options.mojo` for Hive partitioning) |
-| topic tail | `src/komira_broker/` (`broker_core.mojo`, `compacted_index.mojo`, `log_compaction.mojo`, `partition_compaction.mojo`, `retention.mojo`) |
-| row store | `src/komira_table_store/` |
-| search | `src/komira_search/`, `src/komira_search_catalog/`, `src/komira_search_scan/` |
-| IPC | `src/komira_arrow_ipc/`, `src/komira_scan_source/arrow_source.mojo` |
+| L0, L1 | `src/objectstore/` (`store.mojo`, `cas_manifest.mojo`, `compact_window.mojo`, `sharded_lineage.mojo`, `sublineage_base_fold.mojo`) |
+| Iceberg catalog (read-only today) | `src/iceberg_catalog/` |
+| Parquet | `src/parquet/` (`file_reader.mojo`, `nested.mojo`, `plain.mojo`), `src/parquet_api/`, `src/parquet_codec/` |
+| SDK (plan building) | `src/sdk/` (`parquet_read_options.mojo` for Hive partitioning) |
+| topic tail | `src/broker/` (`broker_core.mojo`, `compacted_index.mojo`, `log_compaction.mojo`, `partition_compaction.mojo`, `retention.mojo`) |
+| row store | `src/table_store/` |
+| search | `src/search/`, `src/search_catalog/`, `src/search_scan/` |
+| IPC | `src/arrow_ipc/`, `src/scan_source/arrow_source.mojo` |
 | graph | proposal on branch `docs/search-format-kg` |
 | Rust toolchain (for the Delta kernel) | `tools/build/rust/` |
 

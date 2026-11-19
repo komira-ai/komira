@@ -1,0 +1,107 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# Google Cloud Storage over the objectstore traits: the narrow
+# object-verb seam (`GcsStorageBackend`), an in-memory conformer of it for
+# hermetic tests (`FakeGcsStorageBackend`), the `ConditionalWriteStore`
+# conformer over the seam (`GcsConditionalStore`), the `FileSystem` read
+# conformer over the seam (`GcsFs`), and the StoreError kind reader; the
+# production conformer of the seam (`StorageGrpcBackend`), google.storage.v2
+# over gRPC through the generated gcp_storage client, with the bearer
+# token from a gcp_core `GcpTokenSource` and its deadlines on a
+# retry `MonotonicClock`; and the `ObjectUrlSigner` conformer
+# (`GcsV4Signer`) over gcp_core's V4 signing, on a caller-supplied
+# clock (the production one, `SystemSigningClock`, is clock's wall
+# clock).
+#
+# test_gcs_grpc_backend drives StorageGrpcBackend over a scripted HTTP/2
+# connector (no socket, no credential, no service): each verb's request
+# messages, routing header and bearer token on the wire, the chunked
+# WriteObject with its CRC-32Cs, the range read and its length and CRC-32C
+# checks (a cut-off message, a stream with no status), the response mapping,
+# and every gRPC status onto its StoreError kind. test_gcs_grpc_token_refresh checks that each call
+# takes its token from the source (a CachingTokenSource on a ManualClock
+# refetches a token near expiry, and again after `invalidate`).
+# test_gcs_grpc_unit_budget checks that the transport's request_timeout_us
+# reaches the HttpClient inside the generated client.
+#
+# test_gcs_presign_portability signs with Google's published inactive dummy
+# service account and checks the signer against Google's published V4 URLs,
+# both read from the archive //third_party/googleapis_conformance_tests pins
+# by sha256 and staged at conformance/. test_system_signing_clock signs with
+# the same account over a fixed clock and the wall clock. Both parse the
+# account with json and load its PEM key with crypto, declared
+# below for those tests alone (the library itself imports neither).
+#
+# test_gcs_grpc_trust runs a real http_server HttpServer with a
+# connect ConnectService stub of GetObject over TLS + h2 on 127.0.0.1
+# (http_core's exported fixture leaf), server and client on two
+# fork_join threads: the default connector (`build_gcs_tls_connector`)
+# refuses the fixture root, `build_gcs_tls_connector_trusting(root_ca.pem,
+# "localhost")` completes the handshake and one GetObject, and the same root
+# under a name the leaf does not carry is refused. atomic_alias, connect, fork_join and
+# http_server are declared below for that test alone (the library
+# imports none of them).
+# test_env_source_only scans the package's own sources, staged as its data,
+# for any environment read; nothing here is exempt.
+_TLS_FIXTURES = {
+    "src/http_core/tests/fixtures/tls/leaf_cert.pem": "//src/http_core:tests/fixtures/tls/leaf_cert.pem",
+    "src/http_core/tests/fixtures/tls/leaf_key.pem": "//src/http_core:tests/fixtures/tls/leaf_key.pem",
+    "src/http_core/tests/fixtures/tls/root_ca.pem": "//src/http_core:tests/fixtures/tls/root_ca.pem",
+}
+
+mojo_library(
+    name = "objectstore_gcs",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/async_rt:async_rt",
+        # For test_gcs_grpc_trust only: its two-thread server/client harness.
+        "//src/atomic_alias:atomic_alias",
+        "//src/byte_buffer:byte_buffer",
+        "//src/clock:clock",
+        # For the tests only: mojo_library has no test-only deps, and they
+        # load the dummy account's PEM key with crypto's
+        # `rsa_pkcs8_der_from_pem`.
+        "//src/containers:containers",
+        # For test_gcs_grpc_trust only: the in-process gRPC server.
+        "//src/connect:connect",
+        "//src/crypto:crypto",
+        # For test_gcs_grpc_trust only (see atomic_alias).
+        "//src/fork_join:fork_join",
+        "//src/fs:fs",
+        "//src/gcp_core:gcp_core",
+        "//src/gcp_storage:gcp_storage",
+        "//src/grpc:grpc",
+        "//src/http_client:http_client",
+        "//src/http_core:http_core",
+        # For test_gcs_grpc_trust only (see connect).
+        "//src/http_server:http_server",
+        # For the tests only: they parse the conformance JSON with it.
+        "//src/json:json",
+        "//src/objectstore:objectstore",
+        "//src/plan_expr:plan_expr",
+        "//src/proto_codec:proto_codec",
+        "//src/retry:retry",
+    ],
+    test_srcs = [
+        "tests/test_gcs_conditional_store.mojo",
+        "tests/test_gcs_fs_backend.mojo",
+        "tests/test_gcs_presign_portability.mojo",
+        "tests/test_system_signing_clock.mojo",
+        "tests/test_env_source_only.mojo",
+        "tests/test_gcs_grpc_backend.mojo",
+        "tests/test_gcs_grpc_token_refresh.mojo",
+        "tests/test_gcs_grpc_unit_budget.mojo",
+        "tests/test_gcs_grpc_trust.mojo",
+    ],
+    test_data = {
+        "tests/test_gcs_grpc_trust.mojo": _TLS_FIXTURES,
+        "tests/test_env_source_only.mojo": glob(["*.mojo"]),
+        "tests/test_gcs_presign_portability.mojo": {
+            "conformance": "//third_party/googleapis_conformance_tests:files",
+        },
+        "tests/test_system_signing_clock.mojo": {
+            "conformance": "//third_party/googleapis_conformance_tests:files",
+        },
+    },
+    visibility = ["PUBLIC"],
+)

@@ -13,19 +13,19 @@
 #
 # The parsers, by the name their test and allowlist carry:
 #
-#   komira_json         parse_json_bytes: the strict RFC 8259 parser most of
+#   json         parse_json_bytes: the strict RFC 8259 parser most of
 #                       komira's JSON readers sit on (release
 #                       sets and API documents, the cloud SDKs, proto3-JSON).
-#                       komira_avro, komira_log_query and
-#                       komira_connect have scanners of their own, below.
+#                       avro, log_query and
+#                       connect have scanners of their own, below.
 #                       Takes bytes.
-#   komira_proto_codec  decode_json[komira_wkt.Value]: proto3-JSON decode of
+#   proto_codec  decode_json[wkt.Value]: proto3-JSON decode of
 #                       google.protobuf.Value, the message type whose JSON form
 #                       is any JSON value, so every y_ text is a valid input.
 #                       Takes a String.
-#   komira_jsonl        infer_jsonl_schema, then materialize_jsonl_to_batch
+#   jsonl        infer_jsonl_schema, then materialize_jsonl_to_batch
 #                       with the inferred schema: the engine's JSONL reader,
-#                       on the text as one line. Takes bytes. komira_jsonl
+#                       on the text as one line. Takes bytes. jsonl
 #                       reads one object per line (its own rule: JSONL allows
 #                       any value, but a record becomes a row), so the text
 #                       is read right when its top level is an object and
@@ -34,7 +34,7 @@
 #                       reader refuses such a line; only a text of nothing
 #                       but whitespace comes back as zero rows and no error)
 #                       or when an object is not one row.
-#   komira_json_index   CRASH-ONLY. extract_column over a one-row STRING
+#   json_index   CRASH-ONLY. extract_column over a one-row STRING
 #                       column holding the file's bytes verbatim, with `->`
 #                       and with `->>`, on the path of the text's first key
 #                       when it starts with an object (`a` otherwise); then
@@ -42,7 +42,7 @@
 #                       string token. The kernel is lenient by contract: a
 #                       malformed row is NULL, never an error, so its
 #                       verdicts mean nothing and only a crash is gated.
-#   komira_avro         The Avro reader's path for untrusted schema text: the
+#   avro         The Avro reader's path for untrusted schema text: the
 #                       file's bytes as the `avro.schema` value of an OCF
 #                       header (magic, a one-entry metadata map, the end of
 #                       the map, a sync marker), through decode_ocf_header and
@@ -52,12 +52,12 @@
 #                       means the text was accepted as JSON and is not a
 #                       schema: acceptance here. Every other error is a
 #                       rejection.
-#   komira_log_query    is_json_object_text: the grammar check the log route
+#   log_query    is_json_object_text: the grammar check the log route
 #                       makes before it embeds a stored blob verbatim. Its
 #                       contract is exactly one object, so a y_ text whose top
 #                       level is not an object is rightly refused (listed).
 #                       Takes a String.
-#   komira_connect      CRASH-ONLY. parse_connect_error_json on the raw bytes:
+#   connect      CRASH-ONLY. parse_connect_error_json on the raw bytes:
 #                       a tolerant scan for two keys, not a JSON parser.
 #
 # One testee is not a parser: `abort_probe` (CRASH-ONLY, test_abort_path.mojo)
@@ -73,27 +73,27 @@
 
 from std.os import abort
 
-from komira_avro import decode_ocf_header
-from komira_connect import parse_connect_error_json
-from komira_arrow.arrow_types import ArrowType
-from komira_arrow.column import Column
-from komira_arrow.string_array import StringArray
-from komira_json import parse_json_bytes
-from komira_json_index.json_extract_kernel import extract_column
-from komira_json_index.parse_string import parse_string
-from komira_jsonl import infer_jsonl_schema
-from komira_jsonl.columnar_materializer import materialize_jsonl_to_batch
-from komira_log_query import is_json_object_text
-from komira_proto_codec import decode_json
-from komira_wkt import Value
+from avro import decode_ocf_header
+from connect import parse_connect_error_json
+from arrow.arrow_types import ArrowType
+from arrow.column import Column
+from arrow.string_array import StringArray
+from json import parse_json_bytes
+from json_index.json_extract_kernel import extract_column
+from json_index.parse_string import parse_string
+from jsonl import infer_jsonl_schema
+from jsonl.columnar_materializer import materialize_jsonl_to_batch
+from log_query import is_json_object_text
+from proto_codec import decode_json
+from wkt import Value
 
-comptime PARSER_JSON = "komira_json"
-comptime PARSER_PROTO_CODEC = "komira_proto_codec"
-comptime PARSER_JSONL = "komira_jsonl"
-comptime PARSER_JSON_INDEX = "komira_json_index"
-comptime PARSER_AVRO = "komira_avro"
-comptime PARSER_LOG_QUERY = "komira_log_query"
-comptime PARSER_CONNECT = "komira_connect"
+comptime PARSER_JSON = "json"
+comptime PARSER_PROTO_CODEC = "proto_codec"
+comptime PARSER_JSONL = "jsonl"
+comptime PARSER_JSON_INDEX = "json_index"
+comptime PARSER_AVRO = "avro"
+comptime PARSER_LOG_QUERY = "log_query"
+comptime PARSER_CONNECT = "connect"
 # Not a parser: a testee that aborts on one suite file (module header).
 comptime PARSER_ABORT_PROBE = "abort_probe"
 # The file abort_probe aborts on, and the text its abort prints.
@@ -175,12 +175,12 @@ def jsonl_testee(b: List[UInt8]) raises:
     var i = _first_byte(b)
     if i >= len(b) or b[i] != UInt8(ord("{")):
         raise Error(
-            String(MISREAD) + ": komira_jsonl returned " + String(rows)
+            String(MISREAD) + ": jsonl returned " + String(rows)
             + " row(s) for a text whose top level is not an object, without an error"
         )
     if rows != 1:
         raise Error(
-            String(MISREAD) + ": komira_jsonl returned " + String(rows)
+            String(MISREAD) + ": jsonl returned " + String(rows)
             + " rows for a text whose top level is one object"
         )
 

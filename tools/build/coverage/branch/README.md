@@ -27,8 +27,8 @@ coverage build that fails, so for them nothing waits for these actions,
 and they are built when asked for:
 
 ```sh
-./buck2 build 'komira//src/komira_retry:komira_retry[coverage][branch_info]' -c komira.coverage=true
-./buck2 build 'komira//src/komira_retry:komira_retry[coverage][branch_info][test_decide]' -c komira.coverage=true --show-output
+./buck2 build 'komira//src/retry:retry[coverage][branch_info]' -c komira.coverage=true
+./buck2 build 'komira//src/retry:retry[coverage][branch_info][test_decide]' -c komira.coverage=true --show-output
 ```
 
 | target | what |
@@ -343,13 +343,13 @@ refusal class), e.g. `exit_codes.mojo` 101:17 of a sampled library (`if error_id
 ERROR_INTERNAL:`, the temporary's destroy at `==`, the `if` a branch of its
 own at 101:5 on `String.__eq__`'s result), `result.mojo` 481:9 of the same library (two
 owned arguments destroyed on the `if`'s return path: eight branches at the
-`if`), `komira_eval/expression_executor.mojo` 3979:13 (the capacity select
-at a `while`), `komira_parquet/delta.mojo` 329:54 (the phi web, an inlined
+`if`), `eval/expression_executor.mojo` 3979:13 (the capacity select
+at a `while`), `parquet/delta.mojo` 329:54 (the phi web, an inlined
 `read_uleb128`'s error String). Before this rule a destroy at a decision's
-token was recorded as more decisions: `komira_parquet_codec`'s
+token was recorded as more decisions: `parquet_codec`'s
 `lz4_ffi.mojo` 227:9 (`if Int(is_err) != 0:`) held five records `br:0/5`
 to `4/5`, one of them the `if`; its library's arms went from 469 of 590 to
-404 of 438, `komira_name_registry`'s from 25/40 to 24/32 (`komira_retry`'s
+404 of 438, `name_registry`'s from 25/40 to 24/32 (`retry`'s
 74 had none). Of the sweep's 41,730 refusal messages, 33,736 were this
 shape at a token the classifier did not know.
 
@@ -362,7 +362,7 @@ decision also takes kinds it has not shown where its meaning allows them (an
 safe because a decision is recorded, never dropped, so a wrong guess shows
 as a record, not as a branch missing from the count:
 
-| class | tokens | kinds | evidence (`komira_retry`'s six tests, test 47's `branchlib`, the sweep) |
+| class | tokens | kinds | evidence (`retry`'s six tests, test 47's `branchlib`, the sweep) |
 |---|---|---|---|
 | source decision | `if` (statement or ternary) | br, select, switch | `policy.mojo` 117:9 and every `if` statement; the ternaries 291:40 (`String("throttled") if verdict.throttled else ...`, a br) and `branchlib/shapes.mojo`'s `1 if flag else 2` (a select); the `if` of a plain `@always_inline` helper, a select at its own line with `inlinedAt` (`shapes.mojo`'s `pick`); `budget.mojo` 63:9 is both branched on and selected on (one decision, below). No switch has been seen; it is a decision by its meaning |
 | source decision | `elif` | br, select, switch | Mojo gives an `elif`'s branch its `if`'s location (`branchlib/score.mojo`: three branches at 4:5), so none has shown at an `elif` column yet; allowed as a decision by its meaning |
@@ -542,10 +542,10 @@ an and/or that is no short-circuit one's (14, 8, 4: a reload of the left
 operand after String destructor code, `expr_interpreter.mojo` 368:51,
 `supervisor_runner.mojo` 111:28); copies computing a condition in different
 headers (8, 2, 2, above); zero branches parsed in a file with code on a
-decision line (6, 1, 1: `komira_async`'s `wake_primitives.mojo` 236, not
+decision line (6, 1, 1: `async_rt`'s `wake_primitives.mojo` 236, not
 explained yet). 23 of the 98 still refuse; 69 classify every test, and 5
 more every test whose run and annotation pass (a sixth,
-`komira_objectstore_s3`, has an annotation the census did not see finish
+`objectstore_s3`, has an annotation the census did not see finish
 and refused no test it saw). No and/or was refused for an odd phi at its
 token.
 
@@ -572,12 +572,12 @@ ones (each folded away another) look the same to it and are summed
 crosswise: like `<n>/<N>` within one test (Known shapes), a limit, not a
 check.
 
-`komira//src/komira_retry`, `test_decide` and `test_budget` (excerpts;
+`komira//src/retry`, `test_decide` and `test_budget` (excerpts;
 `budget.mojo` 63 is `if cost < 0 or cost > self._available:`, a
 short-circuit `or` whose right operand decided true 7 times and false 26):
 
 ```
-SF:src/komira_retry/policy.mojo
+SF:src/retry/policy.mojo
 BRDA:65,9:br:0/1,0,0
 BRDA:65,9:br:0/1,1,6
 BRDA:65,20:rhs:0/1,0,0
@@ -587,7 +587,7 @@ BRDA:65,20:select:0/1,1,6
 BRDA:117,9:br:0/1,0,0
 BRDA:117,9:br:0/1,1,16
 end_of_record
-SF:src/komira_retry/budget.mojo
+SF:src/retry/budget.mojo
 BRDA:63,9:br:0/1,0,8
 BRDA:63,9:br:0/1,1,26
 BRDA:63,21:br:0/1,0,1
@@ -641,7 +641,7 @@ the scope is read from the source, and the shape from the IR:
   test 47's `inl(x)`; `Int(s)`, a phi of `String.__int__`'s flag; the
   raising right operand of an `and`, a phi of its flag and `false` at
   the `and`), with one such value at least, or one constant arriving from
-  a block of the inlined callee's code (`komira_parquet`'s `rle.mojo`
+  a block of the inlined callee's code (`parquet`'s `rle.mojo`
   226:54, `read_uleb128` inlined: `phi i1 [ false, <its return> ], [
   true, <its raise> ]`). A phi of constants alone says which arm is which
   by its constants only, so each one from the callee's code must match its
@@ -674,7 +674,7 @@ library's locations, inlined at the `try`).
 
 Refused in a `try:` body, by the shape rule: the destructor of an inlined
 callee's error String whose flags word reaches the call through a `select`
-(not a phi web the String rule reads): `komira_parquet`'s
+(not a phi web the String rule reads): `parquet`'s
 `def_level_bitmap.mojo` 99:40 (`read_byte(`) and `footer_header.mojo`
 325:31 (`byte_at(`), two branches per call beside the accepted error
 check; outside a `try:` body they were dropped as the call's, and the
@@ -692,17 +692,17 @@ destructor), three refusals.
 ## Cost
 
 Remote worker time (`buck2 log show`,
-`execution_time_us`) for the six tests of `komira//src/komira_retry`:
+`execution_time_us`) for the six tests of `komira//src/retry`:
 `mojo_emit_cov_bc` 6.2 to 11.3 s, `mojo_cov_pgo_link` 6.9 to 8.4 s,
 `mojo_cov_branch_run` 0.1 to 0.3 s per test; `mojo_cov_branch_annotate` 13
 to 19 s (`buck2 log what-ran` durations, its IR text 9.8 to 12.4 MB). The
 LLVM pieces are unpacked and checked once, by `toolchains/llvm_branch`.
 
 Atomic counters cost run time where a test spends it in instrumented loops.
-`mojo_cov_branch_run` worker time for the 62 tests of `komira_plan_ir`,
-`komira_json`, `komira_row_format`, `komira_wkt` and `komira_fork_join`:
+`mojo_cov_branch_run` worker time for the 62 tests of `plan_ir`,
+`json`, `row_format`, `wkt` and `fork_join`:
 24.1 s in all without them, 38.3 s with them. Nearly all of it is one test,
-`komira_row_format`'s `test_xxh3` (7.7 and 10.5 s without, 24.7 and 25.2 s
+`row_format`'s `test_xxh3` (7.7 and 10.5 s without, 24.7 and 25.2 s
 with, two runs each); every other test stays under 2 s, and its changes are
 within what two runs of the same binary differ by.
 

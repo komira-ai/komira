@@ -1,5 +1,5 @@
 ## The cases of the Connect conformance run (conformance.yaml, the suite
-## pinned in third_party/connect-conformance) that komira_connect fails, as
+## pinned in third_party/connect-conformance) that connect fails, as
 ## the runner's `--known-failing` patterns: `*` is one name component, `**`
 ## any number. The runner fails the run when a listed case passes or a
 ## pattern matches no case, so the list only shrinks. Each block is one
@@ -10,7 +10,7 @@
 ## suite that applies to more than one of them.
 
 # Streaming over Connect and gRPC-Web: ConnectService.dispatch_grpc_stream
-# (komira_connect service.mojo) answers every client- and server-streaming
+# (connect service.mojo) answers every client- and server-streaming
 # call as gRPC, Content-Type application/grpc+proto with the status in HTTP/2
 # trailers, whatever the request's protocol; the Connect and gRPC-Web
 # clients refuse that response ("invalid content-type").
@@ -43,7 +43,7 @@ gRPC-Web Unexpected Requests/**/server-stream/**
 # Connect unary in the proto codec: a request with Content-Type
 # application/proto is answered Content-Type application/json, because
 # ConnectService.dispatch_grpc sets CONNECT_JSON_CONTENT_TYPE_UNARY for every
-# Connect request (komira_connect service.mojo); the client refuses the
+# Connect request (connect service.mojo); the client refuses the
 # response ("invalid content-type").
 Basic/**/Protocol:PROTOCOL_CONNECT/**/unary/success
 Connect Unexpected Requests/**/unexpected-compression
@@ -52,7 +52,7 @@ Deadline Propagation/**/Protocol:PROTOCOL_CONNECT/**/unary/success
 Duplicate Metadata/**/Protocol:PROTOCOL_CONNECT/**/unary/success
 Server Empty Requests/**/Protocol:PROTOCOL_CONNECT/**/unary/empty-request
 
-# No error details: a komira_connect error is a code and a message only
+# No error details: a connect error is a code and a message only
 # (a handler raises `[connect:N] message`); it cannot carry details (gRPC's
 # grpc-status-details-bin trailer, gRPC-Web's trailer frame, Connect's JSON
 # "details"), and every error the suite has the server define expects the
@@ -120,7 +120,7 @@ Errors/**/Protocol:PROTOCOL_GRPC/**/server-stream/error-with-responses
 
 # An unknown method is NOT_FOUND, not UNIMPLEMENTED: a path no method is
 # registered under is answered NOT_FOUND ("method ... not registered",
-# komira_connect service.mojo `_make_not_found_result`); gRPC and Connect
+# connect service.mojo `_make_not_found_result`); gRPC and Connect
 # require UNIMPLEMENTED.
 Basic/**/unimplemented
 Connect Unexpected Requests/**/unexpected-uri
@@ -135,7 +135,7 @@ Connect Unexpected Requests/**/unexpected-codec
 Unexpected Requests/**/unexpected-content-type
 
 # A malformed request body is always UNKNOWN: when decoding the request
-# fails, komira_connect's dispatch (dispatch.mojo, the decode `except`) and
+# fails, connect's dispatch (dispatch.mojo, the decode `except`) and
 # its streaming path (service.mojo, dispatch_grpc_stream's decode `except`)
 # return GRPC_STATUS_UNKNOWN with the decoder's text as the message, so the
 # `[grpc:13]` / `[grpc:12]` code the gRPC decoder names is dropped (and

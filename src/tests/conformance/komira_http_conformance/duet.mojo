@@ -3,8 +3,8 @@
 # =============================================================================
 #
 # `HttpServer` only makes progress when something calls its serve loop, and
-# the client side here (h2spec, then a komira_http_client request) blocks its
-# thread, so the two run on two `komira_fork_join` threads:
+# the client side here (h2spec, then a http_client request) blocks its
+# thread, so the two run on two `fork_join` threads:
 #
 #   thread 0  steps the server (`serve_one_iteration`) until the leg is done;
 #   thread 1  runs the leg (`ClientLeg.run`) once, then raises the stop flag,
@@ -22,12 +22,12 @@
 
 from std.memory import Pointer
 
-from komira_atomic_alias import AtomicI64
-from komira_clock import now_ns
-from komira_fork_join import ForkJoinBody, fork_join
+from atomic_alias import AtomicI64
+from clock import now_ns
+from fork_join import ForkJoinBody, fork_join
 
-from komira_http_core.transport.grpc_emit import NoopGrpcDispatch
-from komira_http_server.server import HttpServer
+from http_core.transport.grpc_emit import NoopGrpcDispatch
+from http_server.server import HttpServer
 
 
 # One server poll waits at most this long, so the stop flag is seen within it.

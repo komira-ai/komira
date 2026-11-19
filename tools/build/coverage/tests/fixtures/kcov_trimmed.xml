@@ -14,14 +14,14 @@
 						<line number="22" hits="0"/>
 					</lines>
 				</class>
-				<class name="budget_mojo" filename="buck-out/v2/art/komira/src/komira_retry/__komira_retry__/fedcba9876543210/src/komira_retry/budget.mojo" branch-rate="1.0" complexity="1.0" line-rate="1.000">
+				<class name="budget_mojo" filename="buck-out/v2/art/komira/src/retry/__komira_retry__/fedcba9876543210/src/retry/budget.mojo" branch-rate="1.0" complexity="1.0" line-rate="1.000">
 					<lines>
 						<line number="33" hits="1"/>
 						<line number="37" hits="1"/>
 						<line number="39" hits="1"/>
 					</lines>
 				</class>
-				<class name="policy_mojo" filename="buck-out/v2/art/komira/src/komira_retry/__komira_retry__/fedcba9876543210/src/komira_retry/policy.mojo" branch-rate="1.0" complexity="1.0" line-rate="0.991">
+				<class name="policy_mojo" filename="buck-out/v2/art/komira/src/retry/__komira_retry__/fedcba9876543210/src/retry/policy.mojo" branch-rate="1.0" complexity="1.0" line-rate="0.991">
 					<lines>
 						<line number="55" hits="1"/>
 						<line number="56" hits="1"/>

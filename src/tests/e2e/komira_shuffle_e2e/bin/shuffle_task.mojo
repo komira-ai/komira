@@ -23,7 +23,7 @@
 # the first `.seg` slice of K are read and before the rest are), `read`
 # (reduce: `read_shuffle_partition` returned, nothing is reported).
 #
-# The `first-slice` stop is made by the store, not by komira_shuffle: the
+# The `first-slice` stop is made by the store, not by shuffle: the
 # reduce runs the production `read_shuffle_partition` over `_StopAtFirstSlice`,
 # a store that passes every call through to `LocalFsConditionalStore` and,
 # right after returning the bytes of the first range read of a `.seg` object
@@ -44,21 +44,21 @@
 from std.sys import argv, exit
 from std.time import perf_counter_ns, sleep
 
-from komira_objectstore.local_fs_conditional_store import LocalFsConditionalStore
-from komira_objectstore.path import Path
-from komira_objectstore.store import CloneableConditionalWriteStore, ConditionalWriteStore, ObjectStore
-from komira_objectstore.types import CoalescePolicy, ListResult, ObjectMeta, WritePrecondition
-from komira_shuffle.claim import claim_partition
-from komira_shuffle.partitioner import HashPartitioner
-from komira_shuffle.seal_driver import seal_step
-from komira_shuffle.segment import SegWriter, write_segment
-from komira_shuffle.sink import (
+from objectstore.local_fs_conditional_store import LocalFsConditionalStore
+from objectstore.path import Path
+from objectstore.store import CloneableConditionalWriteStore, ConditionalWriteStore, ObjectStore
+from objectstore.types import CoalescePolicy, ListResult, ObjectMeta, WritePrecondition
+from shuffle.claim import claim_partition
+from shuffle.partitioner import HashPartitioner
+from shuffle.seal_driver import seal_step
+from shuffle.segment import SegWriter, write_segment
+from shuffle.sink import (
     ShuffleRow,
     encode_partition_body,
     shuffle_segment_key,
     sink_shuffle_write,
 )
-from komira_shuffle.source import decode_partition_payloads, read_shuffle_partition
+from shuffle.source import decode_partition_payloads, read_shuffle_partition
 from komira_shuffle_e2e.rows import producer_rows, to_hex
 
 comptime _PARK_LIMIT_NS = 120 * 1_000_000_000

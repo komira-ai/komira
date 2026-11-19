@@ -20,7 +20,7 @@
 #
 # The SQL door refuses `avg(...) OVER (...)` and an avg() beside a
 # count(DISTINCT ...) today; the finalizers behind those two are held to the same
-# values by the unit tests of komira_op_window and komira_op_agg_distinct.
+# values by the unit tests of op_window and op_agg_distinct.
 
 from std.testing import TestSuite
 

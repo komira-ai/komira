@@ -1,7 +1,7 @@
 # Code objects for the native runtime's tests: a shared library staged under
 # a code root as the host's code layer holds it (docs/design/udf_runtime_interface.md
 # section 6.1, "The code layer": named by its hex sha256), and the code set
-# a spec names it by. The digests are computed with komira_crypto (AWS-LC),
+# a spec names it by. The digests are computed with crypto (AWS-LC),
 # not with the native runtime's own SHA-256, so a wrong hash there fails a
 # load instead of agreeing with itself.
 
@@ -10,7 +10,7 @@ from std.os import makedirs
 from std.os.path import exists
 from std.sys import CompilationTarget
 
-from komira_crypto import sha256
+from crypto import sha256
 from komira_udf_spike_abi.cases import Case
 from komira_udf_spike_abi.runtime import CodeObject, CodeSet
 
@@ -56,7 +56,7 @@ def bytes_of(path: String) raises -> List[UInt8]:
 
 
 def sha256_of(data: List[UInt8]) -> List[UInt8]:
-    """The sha256 of `data`, by komira_crypto."""
+    """The sha256 of `data`, by crypto."""
     var d = sha256(Span(data))
     var out = List[UInt8]()
     for i in range(32):
