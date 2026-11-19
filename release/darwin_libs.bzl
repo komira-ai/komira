@@ -10,8 +10,9 @@ go stale.
 
 What it builds: each package's `:lib` for `--target-platforms komira//tools/build/platforms:darwin-arm64`
 (release.yml's job `release-macos`), so a library's welded tests run inside its build, on the macOS
-workers of the farm. The output is one directory, `osx-arm64/<name>.mojoc`, the layout `mopm stage
---artifacts` reads for that platform. Nothing is staged or published from it.
+workers of the farm. The output is one directory, `osx-arm64/<namespace>/<name>.mojoc`, the layout
+`mopm stage --artifacts` reads for that platform (mopm_artifacts.bzl's `mojoc_path`). Nothing is
+staged or published from it. Its sub-target `[layout]` lists the paths (//release:artifacts_layout_cases).
 
 DARWIN_EXCLUDED is the packages left out of that build: a package whose closure cannot build for
 darwin-arm64, each with the reason. It is empty: the C a package owns (a `[native.<id>]` archive such as
@@ -27,6 +28,7 @@ block, release.yml says why) until it is added here.
 """
 
 load("//release/readme_e2e:packages.bzl", README_E2E_PACKAGES = "PACKAGES")
+load(":mopm_artifacts.bzl", "mojoc_path")
 
 # package -> why it cannot build for macOS (none today)
 DARWIN_EXCLUDED = {}
@@ -44,8 +46,13 @@ DARWIN_PACKAGES = darwin_packages()
 def _impl(ctx):
     tree = {}
     for name, lib in zip(ctx.attrs.names, ctx.attrs.libs):
-        tree["osx-arm64/" + name + ".mojoc"] = lib[DefaultInfo].default_outputs[0]
-    return [DefaultInfo(default_output = ctx.actions.copied_dir("mopm_darwin_libs", tree))]
+        tree[mojoc_path("osx-arm64", name)] = lib[DefaultInfo].default_outputs[0]
+    # The paths, written at analysis: a Linux check reads them without building for macOS.
+    layout = ctx.actions.write_json("mopm_darwin_libs.layout.json", sorted(tree.keys()))
+    return [DefaultInfo(
+        default_output = ctx.actions.copied_dir("mopm_darwin_libs", tree),
+        sub_targets = {"layout": [DefaultInfo(default_output = layout)]},
+    )]
 
 _mopm_darwin_libs = rule(
     impl = _impl,

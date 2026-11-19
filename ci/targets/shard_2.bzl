@@ -4,7 +4,7 @@
 
 TARGETS = [
     "komira//packaging/images/base:komira_base",
-    "komira//release:mopm_artifacts",
+    "komira//release:artifacts_layout_cases",
     "komira//release:native_ids_cases",
     "komira//release:prod_claimed_names_cases",
     "komira//release:release_checks_cases",

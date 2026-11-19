@@ -445,7 +445,7 @@ variable that switches the publish on or off. The list is
 `//:readme_e2e_complete` holds to the `src/` directories that have a
 `mopm.toml`, in both directions; [`//release:mopm_artifacts`](../release/mopm_artifacts.bzl)
 builds each package's `:lib` (the `.mojoc`, which exists only once the tests
-passed) into `linux-64/<name>.mojoc`. Six jobs of `release.yml` carry the
+passed) into `linux-64/komira-ai/<name>.mojoc`, the layout mopm reads (the namespace directory is required). Six jobs of `release.yml` carry the
 steps (a documentation-only push does not start the workflow, so it publishes nothing):
 
 | job | when | what it does |

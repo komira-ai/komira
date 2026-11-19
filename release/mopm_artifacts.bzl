@@ -8,12 +8,15 @@
 
 A package is a library built with buildrules' `mojo_package` (its BUCK file has
 `:lib`, the `.mojoc` that exists only once its tests passed). The output is one
-directory in the layout `mopm stage --artifacts` reads, `linux-64/<name>.mojoc`
-(the farm builds for linux-64), so what is packed and published is the library
-the tests passed, not a rebuild.
+directory in the layout `mopm stage --artifacts` reads,
+`linux-64/<namespace>/<name>.mojoc` with the namespace of
+//release/readme_e2e:packages.bzl (`komira-ai`; the farm builds for linux-64), so
+what is packed and published is the library the tests passed, not a rebuild. mopm
+reads no other layout: a `.mojoc` without the namespace directory is a member with
+"no build artifact".
 
 A package with a `[native.<id>] kind = "static"` in its mopm.toml also has `natives = {"<package>":
-{"<id>": "<archive target>"}}`: the archive is `linux-64/<package>.native/lib<id>.a`, the file
+{"<id>": "<archive target>"}}`: the archive is `linux-64/<namespace>/<package>.native/lib<id>.a`, the file
 `mopm stage` packs as the package's native. The target is the one the package's `mojo_conda` passes
 to `--native`, so the archive staged is the one that was linked into the tests and packed into the
 `.conda`. `mopm stage` refuses a package whose manifest names a native that this directory does not
@@ -29,18 +32,30 @@ that has a `mopm.toml`), which //:readme_e2e_complete holds to the files of the
 checkout in both directions. `mopm stage` itself refuses a member of the
 workspace that has no `.mojoc` here, so the two cannot disagree unseen.
 
+//release:artifacts_layout_cases lists the files of the built directory and holds them to the
+package list and the declared natives.
+
 Nothing here runs buck2 or sends anything: the targets are dependencies.
 """
 
+load("//release/readme_e2e:packages.bzl", "NAMESPACE")
 load(":mopm_native_ids.bzl", "NATIVE_IDS")
+
+def mojoc_path(subdir, name):
+    """The path of package `name`'s library in the `mopm stage --artifacts` directory for `subdir`."""
+    return "{}/{}/{}.mojoc".format(subdir, NAMESPACE, name)
+
+def native_path(subdir, package, native_id):
+    """The path of `package`'s `[native.<native_id>]` archive in the `mopm stage --artifacts` directory for `subdir`."""
+    return "{}/{}/{}.native/lib{}.a".format(subdir, NAMESPACE, package, native_id)
 
 def _impl(ctx):
     tree = {}
     for name, lib in zip(ctx.attrs.names, ctx.attrs.libs):
-        tree["linux-64/" + name + ".mojoc"] = lib[DefaultInfo].default_outputs[0]
+        tree[mojoc_path("linux-64", name)] = lib[DefaultInfo].default_outputs[0]
     for package, archives in ctx.attrs.natives.items():
         for native_id, archive in archives.items():
-            tree["linux-64/{}.native/lib{}.a".format(package, native_id)] = archive[DefaultInfo].default_outputs[0]
+            tree[native_path("linux-64", package, native_id)] = archive[DefaultInfo].default_outputs[0]
     return [DefaultInfo(default_output = ctx.actions.copied_dir("mopm_artifacts", tree))]
 
 _mopm_artifacts = rule(

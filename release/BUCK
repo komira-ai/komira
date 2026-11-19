@@ -14,8 +14,8 @@ load(":release_set.bzl", "release_set")
 load("//release/readme_e2e:packages.bzl", README_E2E_PACKAGES = "PACKAGES")
 
 # The build artifacts of the libraries moved to mopm (mopm_artifacts.bzl): each
-# package's `:lib`, as `linux-64/<name>.mojoc`, and each package's native archive as
-# `linux-64/<name>.native/lib<id>.a`, the directory `mopm stage
+# package's `:lib`, as `linux-64/komira-ai/<name>.mojoc`, and each package's native archive as
+# `linux-64/komira-ai/<name>.native/lib<id>.a`, the directory `mopm stage
 # --artifacts` packs. The list is //release/readme_e2e:packages.bzl's, which
 # //:readme_e2e_complete holds to the src/ packages that have a mopm.toml.
 # release.yml's `mopm-stage` job builds it, stages it, tries the README
@@ -178,6 +178,25 @@ zig_test(
     data = {"native_ids.json": ":native_ids_json"} | {
         "manifests/{}/mopm.toml".format(p): "//src/{}:mopm.toml".format(p)
         for p in README_E2E_PACKAGES
+    },
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
+    visibility = ["PUBLIC"],
+)
+
+# The directories `mopm stage --artifacts` reads are in mopm's layout, `<subdir>/<namespace>/<name>.mojoc`
+# (artifacts_layout_test.zig says what each case catches): the files of the built :mopm_artifacts, and
+# the paths :mopm_darwin_libs lists in `[layout]` (written at analysis: nothing is built for macOS
+# here), are held to packages.bzl and to the declared natives.
+zig_test(
+    name = "artifacts_layout_cases",
+    exec_compatible_with = LINUX_X86_64,
+    src = "artifacts_layout_test.zig",
+    data = {
+        "darwin_layout.json": ":mopm_darwin_libs[layout]",
+        "linux_artifacts": ":mopm_artifacts",
+        "native_ids.json": ":native_ids_json",
+        "packages.bzl": "//release/readme_e2e:packages.bzl",
     },
     busybox = "komira//tools/build/toolchains:busybox",
     zig = "komira//tools/build/toolchains:zig_next",
