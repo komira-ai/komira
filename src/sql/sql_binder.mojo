@@ -489,7 +489,14 @@ def _bind_select(stmt: SelectStmt, catalog: SqlCatalog, cte_scope: CteScope, pre
     elif has_agg or group_present:
         plan = _bind_aggregate(stmt, schema, scope, plan^, catalog, cte_scope, prebound, order_names, order_carry, order_expr_idx, order_expr_names)
     else:
-        plan = _bind_projection(stmt, schema, scope, plan^, catalog, cte_scope, prebound, order_names, order_carry, order_expr_idx, order_expr_names)
+        # The result's bare integer literals are INT32 as in DuckDB. Not under
+        # a UNION ALL: its branches bind without `result_names`, and every
+        # branch must have the leading branch's types.
+        plan = _bind_projection(
+            stmt, schema, scope, plan^, catalog, cte_scope, prebound,
+            order_names, order_carry, order_expr_idx, order_expr_names,
+            result_int_literals=result_names and stmt.union_all_idx < 0,
+        )
 
     # 3a. The result's names (top-level query only; see
     # `_result_display_names`), computed here where the select list and the
