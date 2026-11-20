@@ -273,8 +273,8 @@ const SHAS = [_]ShaFile{
         "\"\"\"",
         "x = pin(1a2b3c~4d)",
     }, .want = &.{ null, null, "1a2b3c~4d", null, null } },
-    .{ .path = "python/dist/komira_ai.dist-info/METADATA", .lines = &.{
-        "Name: komira-ai",
+    .{ .path = "python/dist/komira.dist-info/METADATA", .lines = &.{
+        "Name: komira",
         "See the fix in 1a2b3c~4d.",
     }, .want = &.{ null, "1a2b3c~4d" } },
     .{ .path = "python/PKG-INFO", .lines = &.{"See the fix in 1a2b3c~4d."}, .want = &.{"1a2b3c~4d"} },
