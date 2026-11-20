@@ -1,0 +1,40 @@
+load("@komira//tools/build/python:defs.bzl", "python_proto")
+
+# Defects python_proto refuses at analysis, each with the message
+# tools/build/selftest/analysis_refusals_python_proto.zig requires. Nothing here
+# runs protoc: analysis refuses each target first.
+
+# RED: no files.
+python_proto(
+    name = "empty_srcs",
+    srcs = [],
+)
+
+# RED: a file that is not a .proto.
+python_proto(
+    name = "not_a_proto",
+    srcs = ["a.txt"],
+)
+
+# RED: two files with one name, which would be staged at one path.
+python_proto(
+    name = "duplicate_name",
+    srcs = [
+        "a.proto",
+        "dup/a.proto",
+    ],
+)
+
+# RED: an import_prefix that climbs out of the staged directory.
+python_proto(
+    name = "prefix_dot_dot",
+    srcs = ["a.proto"],
+    import_prefix = "komira/../plan",
+)
+
+# RED: an import_prefix with an empty segment.
+python_proto(
+    name = "prefix_empty_segment",
+    srcs = ["a.proto"],
+    import_prefix = "komira/",
+)
