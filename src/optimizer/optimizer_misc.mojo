@@ -89,8 +89,8 @@ def push_limit_down_inplace(mut plan: LogicalPlan) raises:
         # in this tree); pushing it under Project would move it off the root.
         # offset == 0 keeps the exact pre-range pushdown behavior.
         # A UDF Project stays below the Limit: pushing the Limit under it
-        # changes the rows the UDF sees (the same barrier
-        # `push_predicates_down` keeps for a Filter).
+        # changes the rows the UDF sees (`push_predicates_down` lets a Filter
+        # through only for a stateless MAP UDF, `optimizer_udf_opacity`).
         if (
             plan._limit.value()[].child[].tag == PLAN_PROJECT
             and plan._limit.value()[].offset == 0

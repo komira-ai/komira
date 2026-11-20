@@ -104,7 +104,6 @@ TARGETS = [
     "komira//tools/build/selftest/graph:selftest_closure",
     "komira//tools/build/toolchains/darwin:lz4-c_1.10.0_osx-arm64.conda",
     "komira//tools/build/toolchains/darwin:mojo_compiler_1.0.0_osx-arm64.conda",
-    "komira//tools/build/toolchains/proto:protoc",
     "tests//functional/driver_kit:doc_tree",
     "tests//functional/location_path:doc_tree",
     "tests//functional/location_path:main",

@@ -1,6 +1,6 @@
 # =============================================================================
-# test_optimizer_udf_node_opacity.mojo — A UDF NODE IS OPAQUE TO PREDICATE
-#                                        PUSHDOWN, AND WAS NOT.
+# test_optimizer_udf_node_opacity.mojo — PREDICATE PUSHDOWN NEVER DROPS A UDF
+#                                        NODE, AND ONCE DID.
 # =============================================================================
 #
 # The UDF design notes
@@ -41,12 +41,12 @@
 # the one outcome that must never happen.
 #
 # ── THE FIX, AND WHY IT IS THE CONSERVATIVE DIRECTION ───────────────────────
-# A UDF-carrying Filter or Project is OPAQUE: pushdown recurses INTO its child
-# and leaves the node itself alone. No-pushdown over a UDF node is correct and
-# slower; pushdown over one is wrong. There is no third option that is fast and
-# correct without teaching pushdown what each UDF's parallelism contract
-# permits, which is a much larger design and buys nothing until a UDF plan can
-# execute at all.
+# A UDF-carrying Filter or Project is OPAQUE: pushdown leaves the node itself
+# alone. The one exception is `optimizer_udf_opacity`: a Filter above a
+# stateless, non-volatile MAP UDF Project whose columns it reads all pass
+# through unchanged moves below the Project, which is rebuilt WITH its UDF
+# (`project_like`). Test 1 below takes that path; the opacity rules themselves
+# are pinned by `test_optimizer_udf_opacity.mojo`.
 # =============================================================================
 
 from std.memory import OwnedPointer
@@ -131,8 +131,9 @@ def _count_udfs(plan: LogicalPlan) raises -> Int:
 def test_a_filter_pushed_through_a_udf_project_does_not_drop_the_udf() raises:
     """`Filter(a > 3) over Project[udf](Scan)`.
 
-    `a` IS in the under-Project schema, so the pushdown arm fires and rebuilds
-    the Project — with the NON-UDF factory. That rebuild is the defect."""
+    `a` IS in the under-Project schema and the stateless MAP UDF passes it
+    through, so the pushdown arm fires and rebuilds the Project. Rebuilding it
+    with the NON-UDF factory is the defect this catches."""
     var plan = LogicalPlan.filter(
         Expr.binary(
             BIN_GT,
