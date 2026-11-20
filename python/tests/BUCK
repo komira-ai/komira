@@ -86,8 +86,9 @@ c_shared_lib(
 
 # The runtime preload on stand-in directories: a library missing (none, two
 # of three, the .dylib names on macOS, sys.path when no search path is given),
-# another mojo-compiler version, a library that is not one, and the three
-# present, opened in order so a library needing them loads; then the same
+# another mojo-compiler version, a library that is not one (the first, and
+# the third after two opened, then retried), and the three present, opened in
+# order so a library needing them loads; then the same
 # directory again, and another one refused. A plain py_test: no
 # LD_LIBRARY_PATH, so only the preload makes the stand-ins' symbols visible.
 py_test(

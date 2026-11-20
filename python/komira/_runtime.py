@@ -26,8 +26,10 @@ What it refuses, before any library is opened:
 
 A library that is found but cannot be opened is a `LibraryLoadError` with the
 loader's reason. The process holds one runtime, as it holds one libkomira: once
-a library of a directory is open, the hook does nothing for that directory
-and refuses another one.
+a library of a directory is open, another directory is refused. Once all
+three are open, the hook does nothing for that directory; after a failure
+part way, it opens the three again (opening an open library again is a
+no-op).
 """
 
 from __future__ import annotations
@@ -40,9 +42,9 @@ from importlib import metadata
 
 from ._errors import LibraryLoadError, RuntimeNotFoundError
 
-# The version of Modular's `mojo-compiler` this package was built with. The
-# wheel's `Requires-Dist` pins it, and the wheel's install test holds the two
-# equal.
+# The version of Modular's `mojo-compiler` this package is built with
+# (docs/design/mojo_runtime_pypi_vs_conda.md); the wheel's `Requires-Dist`
+# must pin the same version.
 _MOJO_RUNTIME_VERSION = "1.0.0"
 
 # The distribution that installs the libraries, as `importlib.metadata` names it.
@@ -56,8 +58,10 @@ _SUBDIR = os.path.join("modular", "lib")
 # needs both.
 _STEMS = ("libMSupportGlobals", "libAsyncRTRuntimeGlobals", "libKGENCompilerRTShared")
 
-# The `<dir>/modular/lib` the runtime was opened from, once one library of it is.
+# The `<dir>/modular/lib` the runtime is opened from, set once one library of
+# it is open, and whether all three are.
 _loaded_from: str | None = None
+_loaded_all = False
 
 
 def _library_names(platform: str) -> tuple[str, ...]:
@@ -131,15 +135,18 @@ def _preload_runtime_libraries(
     `.so` otherwise). An error it raises stops the load. `_native.load` calls
     it under its lock.
     """
-    global _loaded_from
+    global _loaded_from, _loaded_all
     names = _library_names(platform)
     site, libdir = _find(names, _candidates(sys.path if search_path is None else search_path))
     if _loaded_from is not None:
-        if _loaded_from == libdir:
+        if _loaded_from == libdir and _loaded_all:
             return
-        raise LibraryLoadError(
-            "the Mojo runtime is already loaded from {}; it cannot also be loaded from {}".format(_loaded_from, libdir)
-        )
+        if _loaded_from != libdir:
+            raise LibraryLoadError(
+                "the Mojo runtime is already loaded from {}; it cannot also be loaded from {}".format(
+                    _loaded_from, libdir
+                )
+            )
     _check_version(site, libdir)
     for name in names:
         path = os.path.join(libdir, name)
@@ -148,3 +155,4 @@ def _preload_runtime_libraries(
         except OSError as e:
             raise LibraryLoadError("cannot load the Mojo runtime library {}: {}".format(path, e)) from None
         _loaded_from = libdir
+    _loaded_all = True

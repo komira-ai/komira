@@ -1,7 +1,7 @@
 """The Mojo runtime preload, `_runtime._preload_runtime_libraries`, on
 stand-in directories: a missing library, another `mojo-compiler` version, a
 library that cannot be opened, and the three libraries present, opened in
-dependency order with RTLD_GLOBAL.
+dependency order with RTLD_GLOBAL, after a failure part way as well.
 
     test_runtime.py --msupport <so> --asyncrt <so> --kgen <so> --consumer <so>
 
@@ -160,11 +160,31 @@ def main(args):
     assert str(e) == "cannot load the Mojo runtime library {0}: {0}: invalid ELF header".format(path), str(e)
     assert _runtime._loaded_from is None
 
+    # A failure after the first library opened: the directory is held, so
+    # another one is refused, and a retry opens the three again rather than
+    # reporting a runtime it never finished loading.
+    kgen = os.path.join(lib(present), NAMES[2])
+    with open(kgen, "wb") as f:
+        f.write(b"this is not a shared library\n" * 4)
+    e = raised(lambda: preload([none, partial, present]))
+    assert type(e) is LibraryLoadError, repr(e)
+    assert str(e) == "cannot load the Mojo runtime library {0}: {0}: invalid ELF header".format(kgen), str(e)
+    assert _runtime._loaded_from == lib(present) and not _runtime._loaded_all
+    e = raised(lambda: preload([unversioned]))
+    want = "the Mojo runtime is already loaded from {}; it cannot also be loaded from {}".format(
+        lib(present), lib(unversioned)
+    )
+    assert type(e) is LibraryLoadError and str(e) == want, repr(e)
+    e = raised(lambda: preload([present]))
+    assert type(e) is LibraryLoadError, repr(e)
+    assert str(e) == "cannot load the Mojo runtime library {0}: {0}: invalid ELF header".format(kgen), str(e)
+    shutil.copyfile(fakes[NAMES[2]], kgen)
+
     # Present: the three open in dependency order (any other order is refused
     # by the stand-ins, above) and with RTLD_GLOBAL, so the consumer, opened
     # with ctypes' default RTLD_LOCAL, finds libKGENCompilerRTShared's symbol.
     assert preload([none, partial, present]) is None
-    assert _runtime._loaded_from == lib(present), _runtime._loaded_from
+    assert _runtime._loaded_from == lib(present) and _runtime._loaded_all, _runtime._loaded_from
     ctypes.CDLL(consumer)
 
     # The same directory again opens nothing new; another one is refused.
