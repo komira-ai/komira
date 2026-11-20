@@ -28,3 +28,9 @@ class LibraryLoadError(KomiraError):
     """libkomira, or a library it needs, could not be loaded; or its ABI major
     version is not the one this package was written for; or it lacks a
     function this package calls."""
+
+
+class UnsupportedCpuError(LibraryLoadError):
+    """The CPU lacks an instruction set extension libkomira was compiled to
+    use, so the library is not opened: on Linux x86_64 it is built for
+    x86-64-v3. The message names the missing flags."""
