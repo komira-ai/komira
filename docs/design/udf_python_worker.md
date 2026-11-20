@@ -10,8 +10,8 @@ Citations are to komira `main` as of 2026-11-20. Section numbers without a file 
 `udf_runtime_interface.md`; as in the interface document, `§7.x` is `optimized_plan.md`, `§10.1` to `§10.9` are
 `optimized_plan_udfs.md`, and `§10.10` to `§10.14` are `optimized_plan_udf_runtime.md`. Statements marked *(inferred)* are a reading, not a fact taken from the code.
 
-It replaces thorium's in-process trampoline, in which engine threads called Python callables through
-`ctypes.CFUNCTYPE` pointers and took the user's interpreter lock once per batch. That shape is not carried: Python
+It replaces an in-process trampoline, in which engine threads would call Python callables through
+`ctypes.CFUNCTYPE` pointers and take the user's interpreter lock once per batch. That shape is not used: Python
 UDFs run in worker processes forked from a zygote, the one Python mode (`AGENTS.md` B21; IF §1.2).
 
 ---
