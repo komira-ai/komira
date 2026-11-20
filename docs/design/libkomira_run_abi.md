@@ -9,7 +9,7 @@ renders a plan. None of its calls runs a query. This doc decides the calls that
 do: run SQL text, run a serialized plan, hand the result out as an Arrow C
 stream, set session options, and, later, cancel, progress and credentials. It
 also decides what happens at the boundary when the engine fails or aborts. The
-Python package (`pip install komira`) and the Node addon are the first two
+Python package (`pip install komira-ai`) and the Node addon are the first two
 callers. Both are thin bindings over these calls.
 
 ## 1. Decision summary
