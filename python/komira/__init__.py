@@ -10,7 +10,7 @@ does.
 from importlib import metadata as _metadata
 
 from . import _native
-from ._errors import KomiraError, LibraryLoadError
+from ._errors import KomiraError, LibraryLoadError, RuntimeNotFoundError
 from ._session import Session
 
 try:
@@ -27,4 +27,4 @@ def abi_version() -> int:
     return _native.load().abi_version
 
 
-__all__ = ["KomiraError", "LibraryLoadError", "Session", "__version__", "abi_version"]
+__all__ = ["KomiraError", "LibraryLoadError", "RuntimeNotFoundError", "Session", "__version__", "abi_version"]

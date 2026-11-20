@@ -144,6 +144,7 @@ The whole public surface of the first release is these names in `komira.__all__`
 | `KomiraError` | the base class of every error the package raises on purpose (decision 9) |
 | `UnsupportedOperation` | a `KomiraError`: komira refused a construct by name (an SQL feature the engine does not run yet, an option it does not take) |
 | `LibraryLoadError` | a `KomiraError`: `libkomira` or a library it needs could not be loaded, or its ABI major version is not the one this package was written for |
+| `RuntimeNotFoundError` | a `LibraryLoadError`: the Mojo runtime libraries are not installed, or are another `mojo-compiler` version than the one the package was built with (decision 6) |
 | `__version__` | the installed distribution's version, read with `importlib.metadata.version("komira")` (the distribution's name) |
 
 Behaviour each later pull request implements, fixed here so they agree:
@@ -238,9 +239,12 @@ visible from every thread, as a module-level name would be.
   wheel carries beside its own `lib/` directory of native owners, which is the library's run path
   (`$ORIGIN/lib:$ORIGIN`, [tools/build/mojo/README.md](../../tools/build/mojo/README.md)). It is the
   layout of `//src/so:libkomira[runnable]`, so the wheel rule copies that directory.
-- The Mojo runtime libraries are not in the wheel. Where the loader finds them is the runtime route's
-  decision; whatever it is, a missing or wrong runtime raises `LibraryLoadError` naming the library and
-  the version it needed.
+- The Mojo runtime libraries are not in the wheel. They come from Modular's `mojo-compiler`, which installs
+  them in `<site-packages>/modular/lib/` ([mojo_runtime_pypi_vs_conda.md](mojo_runtime_pypi_vs_conda.md)).
+  Before libkomira is opened, the loader opens them by absolute path with `RTLD_GLOBAL`, in dependency
+  order, from the first absolute directory of `sys.path` whose `modular/lib/` holds all three. A missing
+  runtime, or a `mojo-compiler` of another version, raises `RuntimeNotFoundError` (a `LibraryLoadError`)
+  naming the libraries or the versions, the directories searched, and `pip install mojo-compiler==1.0.0`.
 - Tests load the library their target staged: the private `_native.load(lib_dir)` takes the directory a
   `python_binding_test` passes as `--lib-dir`. It is an argument of a private function, not a user setting.
 - There is no lookup by environment variable (`KOMIRA_NATIVE_LIB`, `KOMIRA_NATIVE_LIBDIR` and the

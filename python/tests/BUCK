@@ -74,6 +74,38 @@ c_shared_lib(
     out = "libkomira_fake_modes.so",
 )
 
+# Stand-ins for the three Mojo runtime libraries and for a library that needs
+# them (fake_mojo_runtime.c): each needs a symbol of the ones before it, so
+# they open only in dependency order with RTLD_GLOBAL.
+[c_shared_lib(
+    name = "fake_runtime_" + name,
+    srcs = ["fake_mojo_runtime.c"],
+    copts = ["-DFAKE_LIB={}".format(n)],
+    out = "libfake_runtime_{}.so".format(name),
+) for name, n in [("msupport", 1), ("asyncrt", 2), ("kgen", 3), ("consumer", 4)]]
+
+# The runtime preload on stand-in directories: a library missing (none, two
+# of three, the .dylib names on macOS, sys.path when no search path is given),
+# another mojo-compiler version, a library that is not one, and the three
+# present, opened in order so a library needing them loads; then the same
+# directory again, and another one refused. A plain py_test: no
+# LD_LIBRARY_PATH, so only the preload makes the stand-ins' symbols visible.
+py_test(
+    name = "runtime_test",
+    src = "test_runtime.py",
+    args = [
+        "--msupport",
+        "$(location :fake_runtime_msupport)",
+        "--asyncrt",
+        "$(location :fake_runtime_asyncrt)",
+        "--kgen",
+        "$(location :fake_runtime_kgen)",
+        "--consumer",
+        "$(location :fake_runtime_consumer)",
+    ],
+    deps = ["//python:komira"],
+)
+
 # Importing loads nothing; the hooks run before the library is opened; the
 # refusals of load (no library, another ABI major, a missing symbol, another
 # file once loaded); then the real library: its version and each of its nine
@@ -81,6 +113,7 @@ c_shared_lib(
 python_binding_test(
     name = "load_test",
     src = "test_load.py",
+    srcs = ["runtime_site.py"],
     data = {
         "fake_negative/libkomira.so": ":fake_negative",
         "fake_no_abi_version/libkomira.so": ":fake_no_abi_version",
@@ -98,6 +131,7 @@ python_binding_test(
 python_binding_test(
     name = "session_test",
     src = "test_session.py",
+    srcs = ["runtime_site.py"],
     data = {
         "libkomira": LIBKOMIRA,
         "two_columns.parquet": PARQUET,
@@ -109,6 +143,7 @@ python_binding_test(
 python_binding_test(
     name = "minor0_test",
     src = "test_minor.py",
+    srcs = ["runtime_site.py"],
     args = [
         "--fake",
         "fake_v1_0",
@@ -122,6 +157,7 @@ python_binding_test(
 python_binding_test(
     name = "minor3_test",
     src = "test_minor.py",
+    srcs = ["runtime_site.py"],
     args = [
         "--fake",
         "fake_v1_3",
@@ -140,6 +176,7 @@ python_binding_test(
 python_binding_test(
     name = "two_call_test",
     src = "test_two_call.py",
+    srcs = ["runtime_site.py"],
     data = {"fake_modes/libkomira.so": ":fake_modes"},
     deps = ["//python:komira"],
 )

@@ -8,7 +8,9 @@ its nine calls.
 
 `<dir>/libkomira/` is `//src/so:libkomira[runnable]` (the library with its
 lib/ beside it), `<dir>/fake_<case>/libkomira.so` the stand-ins of
-fake_libkomira.c, and `<dir>/two_columns.parquet` a Parquet file. A process
+fake_libkomira.c, and `<dir>/two_columns.parquet` a Parquet file. The
+runtime preload is pointed at a scratch directory whose modular/lib links to
+the Mojo runtime libraries of `--runtime-dir`. A process
 holds one library, so the refusals come first (each leaves nothing loaded)
 and the real library last.
 """
@@ -21,6 +23,7 @@ import tempfile
 import komira
 from komira import KomiraError, LibraryLoadError
 from komira import _native, _runtime
+from runtime_site import runtime_site
 
 
 def refused(call):
@@ -53,7 +56,7 @@ def main(args):
     # action started.
     lib_dir = os.path.abspath(args[args.index("--lib-dir") + 1])
     runtime_dir = os.path.abspath(args[args.index("--runtime-dir") + 1])
-    search = [runtime_dir]
+    search = [runtime_site(runtime_dir)]
 
     def fake(case):
         return os.path.join(lib_dir, "fake_" + case)
@@ -65,31 +68,36 @@ def main(args):
         return _native.load(directory, search_path=search)
 
     # The public names, and importing the package loaded no library.
-    assert komira.__all__ == ["KomiraError", "LibraryLoadError", "Session", "__version__", "abi_version"], komira.__all__
+    want = ["KomiraError", "LibraryLoadError", "RuntimeNotFoundError", "Session", "__version__", "abi_version"]
+    assert komira.__all__ == want, komira.__all__
     assert issubclass(LibraryLoadError, KomiraError) and issubclass(KomiraError, Exception)
     assert komira.__version__ == "0.0.0", komira.__version__
     assert _native._loaded is None
 
     # The hooks run before the library is opened, CPU check first, and an
     # error either raises stops the load: the real library is not mapped.
+    # The real preload loads the runtime from the search path; it runs again
+    # for the real library's load below.
     calls = []
+    real_preload = _runtime._preload_runtime_libraries
     real_dir = os.path.join(lib_dir, "libkomira")
 
     def cpu_refuses():
         calls.append("cpu")
         raise LibraryLoadError("this CPU is refused")
 
-    def preload_refuses(search_path):
+    def preload_refuses(*, search_path):
         calls.append(("preload", search_path))
         raise LibraryLoadError("no runtime")
 
     def cpu_ok():
         calls.append("cpu")
 
-    def preload_ok(search_path):
+    def preload_ok(*, search_path):
         calls.append(("preload", search_path))
 
-    assert _native._check_cpu() is None and _runtime._preload_runtime_libraries(search) is None
+    assert _native._check_cpu() is None and real_preload(search_path=search) is None
+    assert _runtime._loaded_from == os.path.join(search[0], "modular", "lib"), _runtime._loaded_from
     _native._check_cpu = cpu_refuses
     assert refused(lambda: load(real_dir)) == "this CPU is refused"
     assert calls == ["cpu"], calls
@@ -136,8 +144,13 @@ def main(args):
     assert got == want, got
 
     # None of the refusals left a library loaded: the real one loads now, the
-    # search path reaching the preload hook. Loading the same file again, by
-    # a str or a path, or with no directory, is the same library.
+    # search path reaching the real preload hook. Loading the same file again,
+    # by a str or a path, or with no directory, is the same library.
+    def preload_real(*, search_path):
+        calls.append(("preload", search_path))
+        real_preload(search_path=search_path)
+
+    _runtime._preload_runtime_libraries = preload_real
     calls.clear()
     native = load(real_dir)
     assert calls == ["cpu", ("preload", search)], calls

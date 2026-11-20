@@ -57,6 +57,11 @@ with komira.Session() as s:
 - `komira.LibraryLoadError` is raised when the engine cannot be loaded. Its
   message names the library and the reason. For example, a library built for
   a different ABI major version is refused.
+- `komira.RuntimeNotFoundError`, a `LibraryLoadError`, is raised when the Mojo
+  runtime libraries are not installed, or are another version than the one
+  komira was built with. Its message names the missing libraries (or both
+  versions), the directories searched, and the fix:
+  `pip install mojo-compiler==1.0.0`.
 
 The engine is loaded on the first `Session()` or `abi_version()` call, not on
 `import komira`.
@@ -81,13 +86,13 @@ The package's layout and API are designed in
 | path | what it is |
 |---|---|
 | `komira/__init__.py` | the public names, exactly `__all__` |
-| `komira/_errors.py` | `KomiraError` and `LibraryLoadError` |
+| `komira/_errors.py` | `KomiraError`, `LibraryLoadError` and `RuntimeNotFoundError` |
 | `komira/_native.py` | the `ctypes` loader: `load(lib_dir=None, *, search_path=None)` and the `Native` it returns, with the nine calls of ABI 1.1 |
-| `komira/_runtime.py` | `_preload_runtime_libraries(search_path)`, called before libkomira is opened; it loads nothing yet |
+| `komira/_runtime.py` | `_preload_runtime_libraries(*, search_path=None)`, called before libkomira is opened: it opens the three Mojo runtime libraries of `mojo-compiler` |
 | `komira/_session.py` | `Session` |
 | `komira/py.typed` | the PEP 561 marker |
 | `BUCK` | `:komira`, the package's files as the directory its tests import from |
-| `tests/` | the tests (`python_binding_test`) and `fake_libkomira.c`, the stand-in libraries they load |
+| `tests/` | the tests (`python_binding_test`, and the `py_test` of the runtime preload), `fake_libkomira.c` and `fake_mojo_runtime.c`, the stand-in libraries they load, and `runtime_site.py`, the runtime laid out as `mojo-compiler` installs it |
 
 How the loader behaves:
 
@@ -95,8 +100,25 @@ How the loader behaves:
   directory, it opens the package's own `_lib/libkomira.so`. No environment
   variable and no search of the working directory picks the library.
 - **What runs before the library opens.** `load` first calls
-  `_native._check_cpu()`, then `_runtime._preload_runtime_libraries(search_path)`.
-  Both do nothing yet. An error raised by either stops the load.
+  `_native._check_cpu()`, which checks nothing yet, then
+  `_runtime._preload_runtime_libraries(search_path=search_path)`. An error
+  raised by either stops the load.
+- **The Mojo runtime.** `mojo-compiler` installs the three runtime libraries
+  in `<site-packages>/modular/lib/`, which libkomira's run path does not reach.
+  The preload looks in `modular/lib/` of each absolute directory of
+  `search_path` (`sys.path` when it is None), in order, and takes the first
+  that holds all three. It opens them by absolute path with `RTLD_GLOBAL`, in
+  dependency order: `libMSupportGlobals`, `libAsyncRTRuntimeGlobals`,
+  `libKGENCompilerRTShared` (`.so` on Linux, `.dylib` on macOS). libkomira's
+  NEEDED names then resolve to the libraries already loaded.
+  - No directory holds all three: `RuntimeNotFoundError`.
+  - The `mojo-compiler` installed there is not `_MOJO_RUNTIME_VERSION`
+    (1.0.0): `RuntimeNotFoundError`. With no `mojo-compiler` metadata there,
+    the version is not checked.
+  - A library that cannot be opened: `LibraryLoadError` with the reason.
+  - A relative entry of the search path is skipped, and no environment
+    variable or flag picks the directory. Once the runtime is loaded, another
+    directory is refused.
 - **The version check.** `komira_abi_version()` is read before any other
   symbol is looked up.
   - A major version other than 1 is refused with `LibraryLoadError`.
@@ -116,7 +138,8 @@ How the loader behaves:
 The tests run on Linux x86_64 as build actions, with
 `./buck2 build //python/tests:load_test` and the same for
 `//python/tests:session_test`, `//python/tests:minor0_test`,
-`//python/tests:minor3_test` and `//python/tests:two_call_test`:
+`//python/tests:minor3_test`, `//python/tests:two_call_test` and
+`//python/tests:runtime_test`:
 
 | test | what it covers |
 |---|---|
@@ -124,3 +147,4 @@ The tests run on Linux x86_64 as build actions, with
 | `session_test` | the public surface on the real library |
 | `minor0_test`, `minor3_test` | stand-ins of ABI 1.0 and 1.3 |
 | `two_call_test` | the error path, the two-call protocol and the arguments of each call, on a stand-in |
+| `runtime_test` | the runtime preload on stand-in directories: missing, wrong version, not loadable, present |

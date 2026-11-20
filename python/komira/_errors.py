@@ -28,3 +28,10 @@ class LibraryLoadError(KomiraError):
     """libkomira, or a library it needs, could not be loaded; or its ABI major
     version is not the one this package was written for; or it lacks a
     function this package calls."""
+
+
+class RuntimeNotFoundError(LibraryLoadError):
+    """The Mojo runtime libraries libkomira needs are not installed where the
+    package looks for them, or are another version than the one it was built
+    with. The message names the missing libraries or both versions, the
+    directories searched, and the `pip install` line that fixes it."""
