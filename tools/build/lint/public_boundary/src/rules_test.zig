@@ -260,6 +260,24 @@ const SHAS = [_]ShaFile{
         "1a2b3c4d5e6f7a8b9c, /commit/1a2b3c~4d5e, checkout@1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a~0b",
         "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b~855.",
     }, .want = &.{ null, null, null, null } },
+    // Python: a stub's docstring and a wheel's metadata are prose; a string in code is not.
+    .{ .path = "python/komira/_core.pyi", .lines = &.{
+        "def run() -> None:",
+        "    \"\"\"Fixed in 1a2b3c~4d.\"\"\"",
+        "PIN = \"1a2b3c~4d\"",
+    }, .want = &.{ null, "1a2b3c~4d", null } },
+    .{ .path = "python/komira/api.py", .lines = &.{
+        "\"\"\"Runs a query.",
+        "",
+        "Fixed in 1a2b3c~4d.",
+        "\"\"\"",
+        "x = pin(1a2b3c~4d)",
+    }, .want = &.{ null, null, "1a2b3c~4d", null, null } },
+    .{ .path = "python/dist/komira.dist-info/METADATA", .lines = &.{
+        "Name: komira",
+        "See the fix in 1a2b3c~4d.",
+    }, .want = &.{ null, "1a2b3c~4d" } },
+    .{ .path = "python/PKG-INFO", .lines = &.{"See the fix in 1a2b3c~4d."}, .want = &.{"1a2b3c~4d"} },
     // Code is not prose.
     .{ .path = "a/near.mojo", .lines = &.{
         "comptime PIN = pin_of(9f8e7d~6c5b)",
@@ -297,6 +315,13 @@ test "kind: the prose of each file kind" {
         .{ ".buckconfig", .hash },
         .{ "tools/build/tests/.buckconfig.local", .hash },
         .{ "a/x.mojo", .hash },
+        .{ "python/komira/x.py", .hash },
+        .{ "python/komira/x.pyi", .hash },
+        .{ "python/pyproject.toml", .hash },
+        .{ "python/MANIFEST.in", .hash },
+        .{ "python/x.dist-info/METADATA", .text },
+        .{ "python/PKG-INFO", .text },
+        .{ "python/x.dist-info/RECORD", .none },
         .{ "a/x.tsv", .hash },
         .{ "a/x.zig", .slash },
         .{ "a/x.S", .slash },
