@@ -9,9 +9,9 @@
 # leaves `*out` untouched on failure) runs `check_record_batch_stream` first.
 #
 # The check builds what the stream's callbacks would build, through the same
-# builders, and releases it at once: the schema `get_schema` returns
-# (`_build_stream_schema`), then each column array of each batch, after the
-# dictionary check `get_next` makes. Nothing built here leaves this module;
+# builders, and releases it at once: each column array of each batch, after the
+# dictionary check `get_next` makes, then the schema `get_schema` returns
+# (`_build_stream_schema`). Nothing built here leaves this module;
 # each struct is a local released with `_release_unexported_*`, which frees the
 # heap it owns (format and name strings, buffer and child slot arrays) and drops
 # its share of the column bytes. The batches are only read.
@@ -80,8 +80,6 @@ def check_record_batch_stream(schema: Schema, batches: Slab[RecordBatch]) raises
                 + " columns and the schema "
                 + String(schema.num_columns())
             )
-    var root = _build_stream_schema(schema, batches)
-    _release_unexported_schema(root)
     for b in range(len(batches)):
         ref batch = batches[b]
         for i in range(schema.num_columns()):
@@ -98,3 +96,8 @@ def check_record_batch_stream(schema: Schema, batches: Slab[RecordBatch]) raises
                     + ": "
                     + String(e)
                 )
+    # After the batches: the schema is built from batch 0, whose dictionary
+    # check above names the column and the batch; what is left to refuse here
+    # is an empty stream with a nested column.
+    var root = _build_stream_schema(schema, batches)
+    _release_unexported_schema(root)

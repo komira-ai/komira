@@ -124,6 +124,8 @@ def test_a_stream_that_exports_passes_and_leaves_nothing_held() raises:
     _assert_held_by_batches_alone(probes)
     check_record_batch_stream(_schema(), batches)
     _assert_held_by_batches_alone(probes)
+    # The batches live to here, so the counts above include their own share.
+    _ = batches^
 
 
 def test_a_column_type_outside_the_interface_is_refused_by_name() raises:
@@ -197,6 +199,7 @@ def test_a_sliced_string_column_is_refused_and_nothing_is_held() raises:
     )
     assert_true(msg.startswith(head), msg)
     _assert_held_by_batches_alone(probes)
+    _ = batches^
 
 
 def test_a_dictionary_whose_index_width_is_not_the_fields_is_refused() raises:
