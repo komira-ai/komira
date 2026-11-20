@@ -190,7 +190,8 @@ wheel_file_test_stamped(
 
 # The tag of each release platform's row, written out: the glibc floor and
 # the macOS floor of tools/build/platforms/table.bzl. A fixture row at
-# another glibc floor shows the floor is read from the row.
+# another glibc floor shows the floor is read from the row. A member path
+# holding either brace is refused by its exact message; a plain path is not.
 wheel_tag_cases(
     name = "wheel_tag_cases",
     cases = {
@@ -199,6 +200,11 @@ wheel_tag_cases(
         "darwin-arm64": "py3-none-macosx_11_0_arm64",
     },
     linux_floors = {"glibc-2.28": "py3-none-manylinux_2_28_x86_64"},
+    path_refusals = {
+        "komira/lib{x}.so": "fixture: the path komira/lib{x}.so holds a brace, which a command-line format would misread",
+        "komira/}.txt": "fixture: the path komira/}.txt holds a brace, which a command-line format would misread",
+        "komira/plain.txt": "",
+    },
 )
 
 # pkg_act (act/pkg_act.zig): the small actions of the package rules, in place

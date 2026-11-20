@@ -77,6 +77,15 @@ def wheel_version(stamp):
     """The version a wheel of build number `stamp` (a string) carries."""
     return "0.0.0" if stamp in ("", "0") else "0.1.{}".format(stamp)
 
+def brace_refusal(owner, paths):
+    """The refusal of the first of `paths` (wheel member paths of target
+    `owner`) that holds a brace, which the `{}` of a `cmd_args` format would
+    misread; None when no path holds one."""
+    for p in paths:
+        if "{" in p or "}" in p:
+            return "{}: the path {} holds a brace, which a command-line format would misread".format(owner, p)
+    return None
+
 def _flags(ctx, tag, files, readme, licenses):
     out = [
         "--name",
@@ -113,9 +122,9 @@ def _flags(ctx, tag, files, readme, licenses):
     return out
 
 def _wheel_file_impl(ctx):
-    for p in list(ctx.attrs.files.keys()) + list(ctx.attrs.license_files.keys()):
-        if "{" in p or "}" in p:
-            fail("{}: the path {} holds a brace, which a command-line format would misread".format(ctx.label, p))
+    refusal = brace_refusal(str(ctx.label), list(ctx.attrs.files.keys()) + list(ctx.attrs.license_files.keys()))
+    if refusal:
+        fail(refusal)
     for p in ctx.attrs.executable:
         if p not in ctx.attrs.files:
             fail("{}: executable names {}, which is not a key of files".format(ctx.label, p))
@@ -269,15 +278,20 @@ def _wheel_tag_cases_impl(ctx):
         got = wheel_tag({"cpu": "x86_64", "name": "fixture", "os": "linux", "os_floor": os_floor})
         if got != want:
             fail("{}: wheel_tag of a linux x86_64 row at {} is {}, not {}".format(ctx.label, os_floor, got, want))
+    for path, want in ctx.attrs.path_refusals.items():
+        got = brace_refusal("fixture", [path])
+        if got != (want or None):
+            fail("{}: brace_refusal of path {} is {}, not {}".format(ctx.label, path, got, want or None))
     out = ctx.actions.write(ctx.label.name + ".ok", "ok\n")
     return [DefaultInfo(default_output = out)]
 
 _wheel_tag_cases = rule(
     impl = _wheel_tag_cases_impl,
-    doc = "Holds `wheel_tag` of each platform row in `cases` (row name: tag) and of a linux x86_64 fixture row at each glibc floor in `linux_floors` (os_floor: tag) to the tag written out; analysis fails on the first that differs.",
+    doc = "Holds `wheel_tag` of each platform row in `cases` (row name: tag) and of a linux x86_64 fixture row at each glibc floor in `linux_floors` (os_floor: tag) to the tag written out, and `brace_refusal` of target `fixture` with each path in `path_refusals` to the refusal written out (empty: none); analysis fails on the first that differs.",
     attrs = {
         "cases": attrs.dict(attrs.string(), attrs.string()),
         "linux_floors": attrs.dict(attrs.string(), attrs.string(), default = {}),
+        "path_refusals": attrs.dict(attrs.string(), attrs.string(), default = {}),
     },
 )
 

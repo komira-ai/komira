@@ -434,4 +434,5 @@ The tests: the Zig scenarios `:wheel_zip_unit`, `:wheel_elf_unit`,
 (a linux-x86_64 wheel holding the example Mojo shared library `plain`, with the
 Mojo runtime as `external_needed`), `:wheel_fixture_aarch64_tag` and
 `:wheel_fixture_macosx_tag` (the linux-arm64 and darwin-arm64 rows' tags; built on
-linux like every target). `:wheel_tag_cases` holds each release row's tag.
+linux like every target). `:wheel_tag_cases` holds each release row's tag
+and the refusal of a member path holding a brace.
