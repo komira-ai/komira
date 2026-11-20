@@ -1,0 +1,93 @@
+load("@komira//tools/build/ci:aggregate.bzl", "ci_aggregate")
+load("@komira//tools/build/sql:defs.bzl", "sql_oracle")
+
+# The SQL conformance corpus (README.md): cases, each one SELECT over the
+# tables its corpus builds, with the answer the pinned DuckDB gives committed
+# beside it. Every case is run again by the pinned DuckDB as a sql_oracle
+# build action, and the action fails unless the answer it writes equals the
+# committed one byte for byte. Test-only data; nothing here is Mojo, Python
+# or anything komira builds.
+#
+#   cases/<corpus>/tables.sql   the corpus's tables (CREATE TABLE and rows)
+#   cases/<corpus>/<case>.sql   the case: its row order line, comments, one SELECT
+#   cases/<corpus>/<case>.tsv   the committed answer
+#
+# `:<corpus>/<case>` runs one case (sql/answer.sql writes its answer.tsv,
+# sql/check.sql holds it to the committed <case>.tsv);
+# `:<corpus>` is every case of a corpus and `:corpus` every case;
+# `:<corpus>_answers` a corpus's answers as one directory.
+# `:compare_check` holds the comparison (sql/compare.sql) to planted pairs.
+
+_CASES = [
+    p[len("cases/"):-len(".sql")]
+    for p in glob(["cases/*/*.sql"], exclude = ["cases/*/tables.sql"])
+]
+
+_CORPORA = sorted({c.split("/")[0]: None for c in _CASES}.keys())
+
+# `-c komira_sql_conformance.write=true` writes the answers without holding them
+# to the committed ones, to regenerate them (README.md, "Regenerating").
+_WRITE = read_config("komira_sql_conformance", "write", "false") == "true"
+
+[sql_oracle(
+    name = case,
+    srcs = [
+        "sql/compare.sql",
+        "cases/" + case.split("/")[0] + "/tables.sql",
+        "sql/answer.sql",
+    ] + ([] if _WRITE else ["sql/check.sql"]),
+    inputs = dict(
+        {"case.sql": "cases/" + case + ".sql"},
+        **({} if _WRITE else {"expected.tsv": "cases/" + case + ".tsv"})
+    ),
+    outputs = ["answer.tsv"],
+    visibility = ["//src/tests/..."],
+) for case in _CASES]
+
+# Each corpus's answers as one directory, <case>.tsv each: what
+# "Regenerating" (README.md) copies over the committed answers.
+[filegroup(
+    name = corpus + "_answers",
+    srcs = {
+        c[len(corpus) + 1:] + ".tsv": ":" + c
+        for c in _CASES
+        if c.split("/")[0] == corpus
+    },
+    visibility = ["//src/tests/..."],
+) for corpus in _CORPORA]
+
+# `:<corpus>` builds every case of a corpus, `:corpus` every case. A
+# filegroup is a source to the check set's roots (tools/build/ci), so the
+# aggregates are ci_aggregate targets: the pull request check builds
+# `:corpus` and with it each case.
+[ci_aggregate(
+    name = corpus,
+    deps = [":" + c for c in _CASES if c.split("/")[0] == corpus],
+    visibility = ["//src/tests/..."],
+) for corpus in _CORPORA]
+
+ci_aggregate(
+    name = "corpus",
+    deps = [":" + corpus for corpus in _CORPORA],
+)
+
+sql_oracle(
+    name = "compare_check",
+    srcs = [
+        "sql/compare.sql",
+        "sql/compare_check.sql",
+    ],
+    outputs = ["compare_check.tsv"],
+)
+
+# The comparison and the case runner, for the planted cases in
+# tests//negative/sql_oracle (the self-test scenario sql_oracle builds them
+# and requires each to fail with the runner's message).
+[export_file(
+    name = f,
+    visibility = ["PUBLIC"],
+) for f in [
+    "sql/answer.sql",
+    "sql/check.sql",
+    "sql/compare.sql",
+]]

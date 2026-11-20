@@ -1,0 +1,14 @@
+k	translate(s, 'abc', 'xyz')
+0	""
+1	xyz
+10	Ünïzodé
+11	xyzde
+12	xyzdefgh
+2	  Hello 
+3	Ünïzodé
+4	
+5	kitten
+6	flxw
+7	x
+8	xy
+9	x,y
