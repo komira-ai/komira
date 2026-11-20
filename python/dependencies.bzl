@@ -1,6 +1,8 @@
-"""The version ranges of the distributions the Python package (pip install
-komira-ai) imports: the `Requires-Dist` lines its wheel will declare. Nothing
-packages the wheel yet; the tests of python/tests read these ranges today.
+"""The version ranges of the distributions the Python package's plan modules
+import. Only the tests of python/tests read them. The package's first release
+does not ship the plan modules and declares no protobuf dependency; the wheel
+of the release that first ships them declares `PROTOBUF_REQUIREMENT` as its
+protobuf `Requires-Dist`.
 
 `PROTOBUF_REQUIREMENT` is the protobuf runtime the generated plan modules
 (`komira.plan.v1`, python/BUCK) load under:
