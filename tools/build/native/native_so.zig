@@ -1,25 +1,33 @@
 //! native_so: the reader, export generator and checks of a komira library's
 //! own shared library (`native_shared_library`, shared.bzl; README.md, "Each
-//! library's shared library"). Every mode is one build action:
+//! library's shared library"). Every input may be ELF or Mach-O (a `.dylib`,
+//! Mach-O objects and their archives): the readers tell them apart by magic
+//! (native_elf.zig, native_macho.zig). Every mode is one build action:
 //!
 //!   native_so dynsym <lib.so> <out.txt>
 //!       the shared object's dynamic section and dynamic symbols, with each
-//!       symbol's version (native_elf.zig, `writeShared`): the `[dynsym]`
-//!       sub-target, for reading;
+//!       symbol's version (native_elf.zig, `writeShared`), or a Mach-O
+//!       library's load commands and symbols: the `[dynsym]` sub-target, for
+//!       reading;
 //!   native_so exports --soname <s> --list <out> --script <out> --report <out>
+//!                     [--format elf|macho]
 //!                     (--archive <label> <lib.a>)... (--caller <label> <src dir>)...
 //!                     (--caller-archive <label> <lib.a>)...
-//!       the export list, its version script and a report (native_checks.zig,
-//!       `exportList`); a caller archive is a dependent owner's archive, which
-//!       calls every name it references and does not define
-//!       (`archiveCalls`); exit 1 on a finding;
+//!       the export list, its version script (with --format macho, the
+//!       exported symbols list ld64 takes instead; elf when absent) and a
+//!       report (native_checks.zig, `exportList`); a caller archive is a
+//!       dependent owner's archive, which calls every name it references and
+//!       does not define (`archiveCalls`); exit 1 on a finding;
 //!   native_so check <1-7> --result <out.json> --so <lib.so> [options]
 //!       one of the checks of native_checks.zig; options as each needs:
 //!       1 --list --script; 2 --archive... --caller... --caller-archive...;
 //!       3 --weak... --owner <owner.so>...; 4 --soname --owner <owner.so>...;
-//!       5 --floor <glibc version>; 6 none; 7 --weak...
+//!       5 --floor <glibc version, or macOS version for a Mach-O library>;
+//!       6 none; 7 --weak...
 //!       An --owner is a declared NEEDED owner's shared library, read for its
-//!       SONAME and exports.
+//!       SONAME (a Mach-O owner's install name) and exports. Check 1 reads
+//!       --script as the format of the library wrote it: a version script
+//!       for ELF, an exported symbols list for Mach-O.
 //!       Writes the validation result and exits 0 when green; prints every
 //!       finding and exits 1 when red.
 //!
@@ -58,7 +66,7 @@ fn writeFile(path: []const u8, data: []const u8) void {
 
 fn readShared(alloc: Alloc, path: []const u8) elf.Shared {
     return elf.readShared(alloc, readFile(alloc, path)) catch |err| switch (err) {
-        error.BadElf => usage("{s}: {s}", .{ path, elf.why }),
+        error.BadObject => usage("{s}: {s}", .{ path, elf.why }),
         else => usage("{s}: {s}", .{ path, @errorName(err) }),
     };
 }
@@ -72,6 +80,7 @@ const Opts = struct {
     so: ?[]const u8 = null,
     floor: ?[]const u8 = null,
     objects: ?[]const u8 = null,
+    format: ?[]const u8 = null,
     weak: std.ArrayList([]const u8),
     owners: std.ArrayList(checks.Owner),
     archives: std.ArrayList(checks.Archive),
@@ -92,7 +101,7 @@ fn parse(alloc: Alloc, argv: []const []const u8) !Opts {
     var i: usize = 0;
     while (i < argv.len) {
         const a = argv[i];
-        const one = [_][]const u8{ "--soname", "--list", "--script", "--report", "--result", "--so", "--floor", "--weak", "--objects" };
+        const one = [_][]const u8{ "--soname", "--list", "--script", "--report", "--result", "--so", "--floor", "--weak", "--objects", "--format" };
         var matched = false;
         for (one) |flag| {
             if (!std.mem.eql(u8, a, flag)) continue;
@@ -106,6 +115,7 @@ fn parse(alloc: Alloc, argv: []const []const u8) !Opts {
             if (std.mem.eql(u8, flag, "--so")) o.so = v;
             if (std.mem.eql(u8, flag, "--floor")) o.floor = v;
             if (std.mem.eql(u8, flag, "--objects")) o.objects = v;
+            if (std.mem.eql(u8, flag, "--format")) o.format = v;
             if (std.mem.eql(u8, flag, "--weak")) try o.weak.append(alloc, v);
             i += 2;
             matched = true;
@@ -128,7 +138,7 @@ fn parse(alloc: Alloc, argv: []const []const u8) !Opts {
                 try o.callers.append(alloc, .{ .label = label, .calls = try calls.scanDir(alloc, path) });
             } else {
                 const syms = elf.readArchive(alloc, readFile(alloc, path)) catch |err| switch (err) {
-                    error.BadElf => usage("{s} ({s}): {s}", .{ path, label, elf.why }),
+                    error.BadObject => usage("{s} ({s}): {s}", .{ path, label, elf.why }),
                     else => usage("{s}: {s}", .{ path, @errorName(err) }),
                 };
                 if (std.mem.eql(u8, a, "--archive")) {
@@ -160,6 +170,26 @@ const titles = [_][]const u8{
     "check 7 (undefined symbols: GLIBC_, komira_ or the weak list)",
 };
 
+/// The titles of checks 4 to 7 for a Mach-O library (1 to 3 are the same).
+const macho_titles = [_][]const u8{
+    "check 4 (install name, loaded system dylibs and the declared owners, LC_RPATH)",
+    "check 5 (minimum macOS version floor)",
+    "check 6 (two-level namespace, no exported weak definition)",
+    "check 7 (undefined symbols: bound to a system dylib, komira_ or the weak list)",
+};
+
+fn checkTitle(so: elf.Shared, n: u8) []const u8 {
+    return if (so.format == .macho and n >= 4) macho_titles[n - 4] else titles[n - 1];
+}
+
+/// What `exports --format` names: the file --script holds.
+fn scriptFormat(v: ?[]const u8) elf.Format {
+    const f = v orelse return .elf;
+    if (std.mem.eql(u8, f, "elf")) return .elf;
+    if (std.mem.eql(u8, f, "macho")) return .macho;
+    usage("--format {s} is not elf or macho", .{f});
+}
+
 const readme_title = "README check (a README program calls the library's C)";
 
 fn writeResult(alloc: Alloc, path: []const u8, soname: []const u8, title: []const u8, msg: []const u8) !void {
@@ -188,7 +218,7 @@ fn readPrograms(alloc: Alloc, dir_path: []const u8) ![]checks.Program {
     for (names.items) |n| {
         const path = try std.fs.path.join(alloc, &.{ dir_path, n });
         const syms = elf.readProgram(alloc, readFile(alloc, path)) catch |err| switch (err) {
-            error.BadElf => usage("{s}: {s}", .{ path, elf.why }),
+            error.BadObject => usage("{s}: {s}", .{ path, elf.why }),
             else => usage("{s}: {s}", .{ path, @errorName(err) }),
         };
         try out.append(alloc, .{ .name = n, .syms = syms });
@@ -222,7 +252,10 @@ pub fn main() !void {
         var list = std.ArrayList(u8).empty;
         for (e.names) |n| try list.writer(alloc).print("{s}\n", .{n});
         writeFile(need(o.list, "--list"), list.items);
-        writeFile(need(o.script, "--script"), try checks.versionScript(alloc, soname, e.names));
+        writeFile(need(o.script, "--script"), switch (scriptFormat(o.format)) {
+            .elf => try checks.versionScript(alloc, soname, e.names),
+            .macho => try checks.exportedSymbolsList(alloc, e.names),
+        });
         writeFile(need(o.report, "--report"), e.report);
         return;
     }
@@ -252,7 +285,10 @@ pub fn main() !void {
             alloc,
             so,
             try checks.lines(alloc, readFile(alloc, need(o.list, "--list"))),
-            try checks.scriptGlobals(alloc, readFile(alloc, need(o.script, "--script"))),
+            switch (so.format) {
+                .elf => try checks.scriptGlobals(alloc, readFile(alloc, need(o.script, "--script"))),
+                .macho => try checks.symbolsListNames(alloc, readFile(alloc, need(o.script, "--script"))),
+            },
             &red,
         ),
         2 => blk: {
@@ -269,11 +305,27 @@ pub fn main() !void {
         6 => try checks.check6(alloc, so, &red),
         else => try checks.check7(alloc, so, o.weak.items, &red),
     };
-    finish(titles[n - 1], soname, red);
-    try writeResult(alloc, need(o.result, "--result"), soname, titles[n - 1], msg);
+    finish(checkTitle(so, n), soname, red);
+    try writeResult(alloc, need(o.result, "--result"), soname, checkTitle(so, n), msg);
+}
+
+test "a Mach-O library's checks 4 to 7 carry their Mach-O titles; 1 to 3 and an ELF library's keep theirs" {
+    const mac = elf.Shared{ .format = .macho };
+    try std.testing.expectEqualStrings(titles[0], checkTitle(mac, 1));
+    try std.testing.expectEqualStrings(titles[2], checkTitle(mac, 3));
+    try std.testing.expectEqualStrings("check 4 (install name, loaded system dylibs and the declared owners, LC_RPATH)", checkTitle(mac, 4));
+    try std.testing.expectEqualStrings("check 7 (undefined symbols: bound to a system dylib, komira_ or the weak list)", checkTitle(mac, 7));
+    try std.testing.expectEqualStrings(titles[3], checkTitle(.{}, 4));
+}
+
+test "exports --format: absent and elf write a version script, macho an exported symbols list" {
+    try std.testing.expectEqual(elf.Format.elf, scriptFormat(null));
+    try std.testing.expectEqual(elf.Format.elf, scriptFormat("elf"));
+    try std.testing.expectEqual(elf.Format.macho, scriptFormat("macho"));
 }
 
 test {
     _ = @import("native_so_test.zig");
     _ = @import("native_elf_test.zig");
+    _ = @import("native_macho_test.zig");
 }

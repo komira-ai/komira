@@ -5,7 +5,9 @@
 Status: plan, built in part (part of slice 9, #1391; slice 11, the beta wiring). Each item is marked **EXISTS** (with the
 path on `main` that does it) or **PROPOSED**. "On #NNN" means the code is on that open pull request and not on `main`. Scope:
 linux-64 (ELF) only; Mach-O (osx-arm64: install names, `@rpath`, exported-symbol lists, the two-level
-namespace) is a later design. Related: the staged pipeline (build once, then
+namespace) is a later design, except the checks: `native_so` reads a Mach-O library, its archives and
+objects, and holds it to the Mach-O form of checks 1 to 7 (**EXISTS:** `tools/build/native/native_macho.zig`;
+"Checks, per library" below), so the macOS link that follows is checked from its first build. Related: the staged pipeline (build once, then
 beta, gamma and prod), gamma validation (its native rows point to this
 doc's checks), continuous publish (its slice S12 also plans an
 installed `.so` check in beta's install job; slice 11 below wires this doc's install checks into
@@ -210,6 +212,21 @@ slice 6):
    `GLIBC_`, linked without `-z defs`; in slice 6, the real case: snappy's `.so` linked without its
    static, local C++ runtime and without `-z defs`, leaving `_Znwm` undefined with `NEEDED` on glibc
    only, which checks 1 to 6 pass and the load fails at run time).
+
+**The same checks on a Mach-O library** (**EXISTS:** `native_macho.zig` and the `*MachO` functions of
+`native_checks.zig`; nothing links one yet). Checks 1 to 3 and the README check read the same names: Mach-O's
+leading `_` is dropped, the exported symbols list (`native_so exports --format macho`) stands for the
+version script, and an owner is named by its install name. Checks 4 to 7 hold the same properties
+through the load commands: 4, the install name (`LC_ID_DYLIB`) is the expected one, the loaded dylibs
+are `/usr/lib/libSystem.B.dylib` (required when the library calls outside komira),
+`/usr/lib/libc++.1.dylib` and exactly the declared owners, each by a plain `LC_LOAD_DYLIB` (no
+re-export, which would pass a library's API on as this one's), and `LC_RPATH` is `@loader_path` alone when
+an owner is declared and absent otherwise; 5, `LC_BUILD_VERSION` says macOS with a minimum version at
+or below the row's `os_floor` version (`11.0`); 6, ld64 has no `-Bsymbolic`, so the library is
+two-level (`MH_TWOLEVEL` set, `MH_FORCE_FLAT` clear) and exports no weak definition (dyld would
+coalesce one with another image's copy); 7, every strong undefined symbol is `komira_` or bound, by its
+two-level ordinal, to a system dylib, no undefined symbol (`komira_` ones included) is left to flat
+lookup, the main executable or the library itself, and the weak undefined ones are exactly the list.
 
 `elfsyms` (**EXISTS:** `tools/build/native/elfsyms.c`, modes `armap` and `symtab`) gains a `dynsym`
 mode, as on #681, which also prints the dynamic section's `NEEDED`, SONAME, `RUNPATH`, `FLAGS` and
