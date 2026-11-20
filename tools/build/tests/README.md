@@ -880,21 +880,23 @@ table ([`table.bzl`](../platforms/table.bzl), one row per (os, cpu)) and the
 default target platform. Loading the package runs the load-time cases of
 [`cases.bzl`](functional/platform_table/cases.bzl): the committed table is
 complete, and a copy with one defect (a pin missing from a registered, a
-macOS or the reserved row, a pending pin in a registered row, a sha256 that
+macOS, linux arm64 or a reserved row, a pending pin in a registered row, a sha256 that
 is not 64 lowercase hex digits, a url that is not https, `none` for a pin that
 must be real, a missing or unknown field, a cache line or page that is not a
 power of two, an undefined or unsorted feature, a golden hash that is not 16
 hex digits or is recorded for a row with no platform, a pool that is not
 `pool=<name>`, two rows sharing a key, a host or a pool) is refused with a
 sentence naming the row and the field; each `host_info()` selects its row, or
-is refused with a reason (a Linux arm64 host: the row is reserved). The
+is refused with a reason (a macOS x86_64 host: no row). The
 scenario
 [`analysis_refusals_platform_table`](../selftest/analysis_refusals_platform_table.zig)
 loads the package, holds `komira//tools/build/platforms:` to `darwin-arm64`,
-`linux-x86_64` and `host` (nothing for the reserved `linux-arm64`), `host` to
-this client's own platform, and refuses `[komira_re] linux_arm64_properties`;
+`linux-arm64`, `linux-x86_64` and `host`, and `host` to this client's own
+platform;
 [`exec_platforms`](../selftest/exec_platforms.zig) checks that the host
-platform's own `[komira_re]` key decides remote execution.
+platform's own `[komira_re]` key decides remote execution, that
+`linux_arm64_properties` registers the arm64 execution platform, and that it is
+refused when it names the linux x86_64 workers.
 [`check.sh`](functional/platform_table/check.sh) checks, on the client:
 
 - the limits ([`limits.tsv`](../platforms/limits.tsv)): no row's retiring

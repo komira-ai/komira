@@ -7,7 +7,7 @@ and the rest of this page follows.
 |---|---|---|
 | What is this target **built for**? | the **target platform** | the client's own platform (`host`, below), or any registered row with `--target-platforms` |
 | **Which tools** build it? | the **toolchain**, chosen by the target platform | `toolchains//:mojo` picks the linux or the macOS Mojo toolchain from the target platform's OS; a package's own static C builds for darwin-arm64 through buildrules; vendored third_party C/C++ is not yet supported in `mojo_package`, and the old rules' C/C++, Rust and protobuf toolchains remain linux x86_64 |
-| **Where do its actions run?** | the **execution platform**, chosen by what the toolchain says it runs on | one per (os, cpu): `linux-x86_64`, and `darwin-arm64` when macOS workers are configured |
+| **Where do its actions run?** | the **execution platform**, chosen by what the toolchain says it runs on | one per (os, cpu): `linux-x86_64`, `linux-arm64` when Linux arm64 workers are configured, and `darwin-arm64` when macOS workers are configured |
 
 ## The platform table
 
@@ -82,7 +82,7 @@ Rows today:
 |---|---|---|---|
 | `linux-x86_64` | registered | `x86-64-v3` | the pinned configuration every cached action is keyed by; served by `pool=mojo-sized` |
 | `darwin-arm64` | registered | `apple-m1` | served by `pool=darwin-sized`; links through the host's `cc` for now (see the toolchain README); its zig, rustc, protoc and linter pins are recorded for the unpack tier |
-| `linux-arm64` | **reserved** | `generic` ARMv8-A with outline atomics | Ampere Altra servers (Neoverse N1) are the main build machines and a Raspberry Pi must run what they build, so the floor is generic ARMv8-A, chosen at run time (outline atomics and dispatch) for anything wider. A tuned `neoverse-n1` build is a later, opt-in variant, not this row. Declared and pinned, not a build key: no `platform()` target, no execution platform, and `[komira_re] linux_arm64_properties` is refused |
+| `linux-arm64` | registered | `generic` ARMv8-A with outline atomics | Ampere Altra servers (Neoverse N1) are the main build machines and a Raspberry Pi must run what they build, so the floor is generic ARMv8-A, chosen at run time (outline atomics and dispatch) for anything wider. A tuned `neoverse-n1` build is a later, opt-in variant, not this row. A build key: it has a `platform()` target, and an execution platform when `[komira_re] linux_arm64_properties` names workers (served by `pool=linux-arm64-sized`). No toolchain states it as a target or an execution platform yet, so a target built for it is incompatible: the Mojo, C/C++, Rust and protobuf toolchains, and a carrier of the applets (no upstream static aarch64 busybox exists), come with the toolchain PRs that follow |
 
 ## Target platforms
 
@@ -93,12 +93,13 @@ CPU and nothing else, and `host`:
 |---|---|---|
 | `host` | an alias of the row `host_info()` selects | the default target platform of every target (`[parser]` in `.buckconfig`): the client's own |
 | `linux-x86_64` | `prelude//os/constraints:linux`, `prelude//cpu/constraints:x86_64` | on a Linux x86_64 client, by default; anywhere with `--target-platforms komira//tools/build/platforms:linux-x86_64` |
+| `linux-arm64` | `prelude//os/constraints:linux`, `prelude//cpu/constraints:arm64` | on a Linux arm64 client, by default; anywhere with `--target-platforms komira//tools/build/platforms:linux-arm64` |
 | `darwin-arm64` | `prelude//os/constraints:macos`, `prelude//cpu/constraints:arm64` | on a macOS arm64 client, by default; anywhere with `--target-platforms komira//tools/build/platforms:darwin-arm64` |
 
 `host` is an alias, so the label, configuration and output paths of a Linux
 x86_64 client's build are `linux-x86_64`'s own, unchanged. It supplies no tool,
 path or flag: a machine is only ever used to pick a row. On a machine no
-registered row matches (a Linux arm64 machine, for now), analysing `host`
+registered row matches (a macOS x86_64 machine, for example), analysing `host`
 fails naming why, and stating `--target-platforms` still works from it.
 Building for another OS or CPU stays explicit.
 
@@ -222,7 +223,7 @@ A standalone checkout reads those sets from `[komira_re]` in
 |---|---|---|
 | `linux_x86_64_properties` | `linux-x86_64` | one of the two, for remote execution |
 | `darwin_arm64_properties` | `darwin-arm64` | one of the two; needs `darwin_macos_hosts` as well |
-| `linux_arm64_properties` | `linux-arm64` | **reserved**: refused if set, until that row is registered |
+| `linux_arm64_properties` | `linux-arm64` | optional: the workers of Linux arm64 actions; must differ from the linux x86_64 set |
 | `darwin_macos_hosts` | (the macOS hosts a compile may run on) | with `darwin_arm64_properties` |
 | `macos_library_dirs` | (not komira's: buildrules' macOS test runs) | optional, only with `darwin_arm64_properties`: absolute directories, separated by `:` or spaces, a macOS test run searches for a library it opens by its bare name |
 
