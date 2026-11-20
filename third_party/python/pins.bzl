@@ -1,7 +1,8 @@
 """The hermetic Python of the tests: the interpreter and the wheels, each pinned by sha256 and size.
 
 Read by this package's BUCK, which declares the downloads and the installed
-targets. Every wheel of WHEELS is a binary
+targets, except those of PROTOBUF_EDGES, which python/tests/BUCK declares.
+Every wheel of WHEELS and PROTOBUF_EDGES is a binary
 wheel for CPython 3.13 on manylinux x86_64 (glibc 2.28 or older) or a
 pure-Python one, and every wheel of WHEELS_314 one for CPython 3.14 (`cp314`)
 or free-threaded 3.14 (`cp314t`), or a pure-Python one; there is no source
@@ -246,3 +247,30 @@ WHEELS_314 = {
         ("1a/5a/4cb6c85160af4a639e87a3b7bf8b1c25cfc3b504c5af710ca416a6dcfc5f/scikit_learn-1.9.1-cp314-cp314t-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", "748bcb0a4cc04aec470652c9e5ec68450948e867387e7dfade647107ade68d25", 9131227),
     ) + _PURE_314,
 }
+
+# The other runtimes of the protobuf range the Python package declares
+# (`PROTOBUF_REQUIREMENT`, python/dependencies.bzl), each for the 3.13 pin:
+# 5.29.1 is the range's lower edge, the version of the gencode protoc 29.1
+# writes and the oldest runtime that loads it; 5.28.3 is the release below it,
+# which must refuse that gencode. The upper edge is WHEELS' 7.36.2. They are not
+# in WHEELS, whose targets are named by distribution alone: python/tests/BUCK
+# declares their downloads and installed targets (`:protobuf-<version>`), for
+# the tests there only.
+PROTOBUF_EDGES = [
+    _wheel(
+        "protobuf",
+        "5.29.1",
+        _PYPI + "04/52/c97c58a33b3d6c89a8138788576d372a90a6556f354799971c6b4d16d871/protobuf-5.29.1-cp38-abi3-manylinux2014_x86_64.whl",
+        "8ee1461b3af56145aca2800e6a3e2f928108c749ba8feccc6f5dd0062c410c0d",
+        319671,
+        "BSD-3-Clause",
+    ),
+    _wheel(
+        "protobuf",
+        "5.28.3",
+        _PYPI + "5d/ae/3257b09328c0b4e59535e497b0c7537d4954038bdd53a2f0d2f49d15a7c4/protobuf-5.28.3-cp38-abi3-manylinux2014_x86_64.whl",
+        "712319fbdddb46f21abb66cd33cb9e491a5763b2febd8f228251add221981135",
+        316624,
+        "BSD-3-Clause",
+    ),
+]
