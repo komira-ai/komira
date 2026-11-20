@@ -453,17 +453,18 @@ variable that switches the publish on or off. The list is
 builds each package's `:lib` (the `.mojoc`, which exists only once the tests
 passed) into `linux-64/komira-ai/<name>.mojoc`, and each declared native's
 archive into `linux-64/komira-ai/<name>.native/lib<id>.a`: the layout mopm
-reads, which requires the namespace directory. Six jobs of `release.yml` carry the
+reads, which requires the namespace directory. Seven jobs of `release.yml` carry the
 steps (a documentation-only push does not start the workflow, so it publishes nothing):
 
 | job | when | what it does |
 |---|---|---|
 | `mopm-stage` | every push to `main`, and a manual run (which sends nothing either) | on the farm (environment `build`, the farm's tailnet token only; it reads no registry token). **Build:** the one mopm the README e2e installs with (`toolchains//:mopm_0_0_113`, `MOPM` of `packages.bzl`) and `//release:mopm_artifacts`. **Version:** `release_beta_version --workspace-root src --version 0.1.<run number>` gives every member the version of this run (below, "The version of every release"). **Stage:** `mopm stage --workspace-root src --artifacts <built> --compiler 1.0.0 --out release/staged_set --registry prod` packs every member from its built `.mojoc`, asks the registry (a read, no token) which versions it holds and writes the staged set S (`plan.json`, each `.conda`, each README: mopm's `spec/staged-set.md`). A version the registry holds with other bytes, or has yanked, fails the step. **Try:** `./buck2 build -c komira_release.staged=stage -c komira_release.beta_version=0.1.<run number> //release/readme_e2e/verify:all` on the farm: every package's README examples are compiled and run as a user of the `.conda` files of S (see the e2e's [README](../tools/build/readme_e2e/README.md)). Then `mopm publish --staged S --registry prod --dry-run`: the plan is validated and every file hashed against it, nothing is sent and no token is read. It uploads S and that mopm as a workflow artifact (a day) for the next job. |
-| `prod-stage` | after `release` and `mopm-stage`, **only on a push to `main`** (a manual run skips all five prod jobs before they start; there is no other switch) | in the environment `prod`, with `contents: read` and `id-token: write`, no farm and no secret. It downloads the set `mopm-stage` kept and runs `mopm publish --staged S --registry prod --oidc --no-commit`: the registry opens a group, holds every file in quarantine, and nothing is visible. It keeps the directory, now with `state.json` (the group), as the artifact `mopm-prod-staged-<sha>`, even when the step failed. |
+| `prod-stage` | after `release` and `mopm-stage`, **only on a push to `main`** (a manual run skips all six prod jobs before they start; there is no other switch) | in the environment `prod`, with `contents: read` and `id-token: write`, no farm and no secret. It downloads the set `mopm-stage` kept and runs `mopm publish --staged S --registry prod --oidc --no-commit`: the registry opens a group, holds every file in quarantine, and nothing is visible. It keeps the directory, now with `state.json` (the group), as the artifact `mopm-prod-staged-<sha>`, even when the step failed. |
 | `prod-test` | after `prod-stage`, on a push to `main` | in the environment `build` (the farm's; `id-token: write` for the tailnet join only), with **no registry identity and no secret**. It downloads the directory `prod-stage` kept, checks every file against `plan.json` (`release_staged_verify verify`: sha256 and size), writes `release/staged_set` from the files that matched and from nothing else, and runs `-c komira_release.staged=stage -c komira_release.beta_version=0.1.<run number> //release/readme_e2e/verify:all` on the farm. |
 | `prod-commit` | after `prod-test`, on a push to `main` | in the environment `prod`, with `contents: read` and `id-token: write`. The same command without `--no-commit`, on the same directory with its `state.json`, after a fresh OIDC exchange: the same group is committed and the job waits until it is visible. It keeps `plan.json`, `state.json` and `report.json` as `mopm-prod-committed-<sha>`. |
 | `prod-abort` | after `prod-stage`, `prod-test` and `prod-commit`, when one of them failed or the run was cancelled, on a push to `main` and with a `prod-stage` that was not skipped | in the environment `prod`, same permissions: `mopm publish --staged S --registry prod --oidc --abort` ends the open group and gives its place back. |
 | `prod-smoke` | after `prod-commit`, on a push to `main` | no environment, no identity, no secret, no farm: `release_staged_verify smoke` downloads the published files from the prod channel and compares each with the plan. On a difference it prints the `mopm yank --group <id> ...` command for a human and fails; it yanks nothing. |
+| `prod-add` | after `prod-commit` and `prod-smoke`, on a push to `main` | no environment, no identity, no secret, no farm (a farm action has no network): `release_staged_verify add` makes a fresh project with the mopm `mopm-stage` built, runs `mopm add komira-ai/<name> --registry prod` for `json`, `uuid` and `libc` and then `mopm sync`, and checks the lock and the installed files against the plan. It yanks nothing. |
 
 **Why `mopm stage` is a step of the job and not a build action.** It asks the
 registry which versions exist, and an action is offline. So the farm takes the
@@ -485,7 +486,8 @@ completeness of the list.
 
 #### The prod publish
 
-The five `prod-*` jobs publish the set `mopm-stage` tried to the prod registry as one group, on every push to
+Five of the six `prod-*` jobs publish the set `mopm-stage` tried to the prod registry as one group (the sixth,
+`prod-add`, installs from it after the commit), on every push to
 `main` and with no switch, in three steps that the registry keeps apart: **stage** (upload, nothing visible), **test** (on the bytes the registry holds),
 **commit** (visible all at once). `prod-stage` needs `release` and `mopm-stage`: the set it stages is the one
 the README e2e of `mopm-stage` passed on, at the version of this run (below), so a release build or an e2e
@@ -545,6 +547,24 @@ would be handed two files for one name.
    apart because the channel's cache can lag a commit by a minute. On failure it prints the exact
    `mopm yank --group <id> --registry prod --reason ...` for the group in `state.json`; a person decides
    whether to run it.
+6. **`prod-add`** runs after the smoke, so the channel already serves every file. `release_staged_verify add`
+   ([source](../tools/build/ci/release_beta_fetch/prod_add.zig)) does what a user does, with the mopm that
+   staged and committed the set (`toolchains//:mopm_0_0_113`), in a directory it makes on the runner (both
+   paths absolute):
+   `mopm init --name release-check/prod_add`, then `mopm add komira-ai/<name> --registry prod` for three
+   packages of [`packages.bzl`](../release/readme_e2e/packages.bzl), a library with no dependency (`json`),
+   one with dependencies (`uuid`: `atomic_alias`, `awslc`, `clock`) and one that ships a native library
+   (`libc`), then `mopm sync --registry prod --cache <its own directory>`. A command that exits other than 0
+   fails the job with that command and the first line of its stderr. Then it reads `mopm.lock` and refuses,
+   listing every difference: a `lock_version` other than 3, a `channels` other than exactly
+   `https://conda.mopm.dev/`, an entry with a flat name, with a channel other than its namespace's
+   (`https://conda.mopm.dev/komira-ai/`), that is not a member of the plan or is at another version than
+   this run's, an artifact whose URL, sha256 or size is not the plan's file, and an added package the lock
+   does not hold. For each locked file of the runner's subdir it checks what `sync` installed: the file
+   kept in `.mopm/pkgs` has the plan's sha256 and size, the environment's `conda-meta` record names that
+   sha256, and the package's `lib/mojo/<name>.mopm.json` is there. It yanks nothing; a failure says what a
+   user would get, and a person decides what to do. Its cases (`//tools/build/ci:release_staged_verify_unit`)
+   run a registry and a mopm in memory.
 
 **The identity.** No job holds a registry token and the environment `prod` holds no secret. The three jobs
 that talk to the registry run in the environment `prod` and exchange the job's GitHub OIDC token; the
@@ -557,16 +577,18 @@ and runs nothing that reads a token.
 committed, are the files of S: the registry pinned each sha256 when it opened the group, and `prod-test`
 hashed the same directory against the same plan. The README examples of every package ran on exactly those
 bytes before anything was committed, and after the commit the channel serves bytes whose sha256 and size
-are the plan's.
+are the plan's. A user's `mopm add komira-ai/<name> --registry prod` and `mopm sync` on a clean runner lock
+the full names under the namespace's channel at this run's version and install exactly those bytes.
 
 **What it does not prove.**
 - The registry's own verdict: a group can still end `rejected` after the tests passed (the commit job
   fails and the group frees its versions); the tests do not read what the registry stored.
-- The registry's derived outputs (repodata, the sparse index) are not read: `prod-smoke` compares the
-  files themselves. `mopm add <package> --registry prod` from a clean machine is not exercised.
+- The registry's derived outputs (repodata, the sparse index) are read only for the three packages
+  `prod-add` adds and their dependencies; the other members are checked as files by `prod-smoke`, not
+  resolved from the index.
 - A package's own unit tests are not in the `.conda`: they ran when its `.mojoc` was built.
-- Native libraries are loaded as the packages say; no job installs a package from the registry and
-  loads its native dependencies.
+- Native libraries are loaded as the packages say: `prod-add` installs `libc` and its static library from
+  the registry, but no job builds or runs a program against what it installed.
 - A plan member that is not an `upload` (a version the registry already holds) makes the README e2e and
   `release_staged_verify` refuse the set; a release publishes only a set of new versions, which is why every
   run gives the members the version `0.1.<run number>` (below).

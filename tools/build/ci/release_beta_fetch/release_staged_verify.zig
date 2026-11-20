@@ -1,7 +1,8 @@
-//! release_staged_verify: the two checks of the prod publish of release.yml that make no write to a registry.
+//! release_staged_verify: the three checks of the prod publish of release.yml that make no write to a registry.
 //!
 //!   release_staged_verify verify --staged <dir> --out <dir>
 //!   release_staged_verify smoke  --staged <dir> --config-url <https url> [--attempts <n>] [--delay <seconds>]
+//!   release_staged_verify add    --staged <dir> --mopm <file> --work <dir>
 //!
 //! It shares the plan reader and the client of release_beta_fetch.zig (the file beside this one) and
 //! holds no credential.
@@ -28,13 +29,19 @@
 //! repeated `--attempts` times (default 3) with `--delay` seconds between (default 20: the channel's cache
 //! can lag a commit by a minute); it fails when the last attempt does. On failure it prints the yank command
 //! for the group `state.json` names, for a human to run: it never sends one.
+//!
+//! `add` is what `prod-add` runs after `prod-smoke`: a user's `mopm add komira-ai/<name>` and `mopm sync` against
+//! prod, in a directory it makes, with the pinned mopm; it checks the lock they write and the files they install
+//! against the plan. prod_add.zig (beside this file) says what it runs and refuses.
 const std = @import("std");
+const builtin = @import("builtin");
 const rbf = @import("release_beta_fetch.zig");
+const prod_add = @import("prod_add.zig");
 
 const Allocator = std.mem.Allocator;
 
 /// The one channel the prod index may name, so a changed index cannot send the smoke check elsewhere.
-pub const prod_channel = "https://conda.mopm.dev/";
+pub const prod_channel = prod_add.prod_channel;
 
 pub const Report = struct { members: usize, files: usize };
 
@@ -155,12 +162,58 @@ pub fn yankCommand(a: Allocator, state_text: []const u8, stage: []const u8) !?[]
 const usage =
     \\usage: release_staged_verify verify --staged <dir> --out <dir>
     \\       release_staged_verify smoke --staged <dir> --config-url <https url> [--attempts <n>] [--delay <seconds>]
+    \\       release_staged_verify add --staged <dir> --mopm <file> --work <dir>
     \\
 ;
 
 fn parseNumber(s: []const u8, max: u64) ?u64 {
     const v = std.fmt.parseInt(u64, s, 10) catch return null;
     return if (v <= max) v else null;
+}
+
+/// `add` on the command line: its three flags, each given once, then prod_add.add with the host's subdir.
+fn mainAdd(a: Allocator, args: []const [:0]u8, out: *std.Io.Writer, err: *std.Io.Writer) !u8 {
+    var staged: ?[]const u8 = null;
+    var mopm: ?[]const u8 = null;
+    var work: ?[]const u8 = null;
+    var i: usize = 0;
+    while (i < args.len) : (i += 1) {
+        const flag = args[i];
+        const slot: *?[]const u8 = if (std.mem.eql(u8, flag, "--staged")) &staged else if (std.mem.eql(u8, flag, "--mopm")) &mopm else if (std.mem.eql(u8, flag, "--work")) &work else {
+            try err.print("release_staged_verify: unknown argument {s}\n{s}", .{ flag, usage });
+            try err.flush();
+            return 2;
+        };
+        i += 1;
+        if (i >= args.len or slot.* != null) {
+            try err.print("release_staged_verify: {s} needs one value, given once\n", .{flag});
+            try err.flush();
+            return 2;
+        }
+        slot.* = args[i];
+    }
+    if (staged == null or mopm == null or work == null) {
+        try err.writeAll(usage);
+        try err.flush();
+        return 2;
+    }
+    const subdir = prod_add.subdirOf(builtin.os.tag, builtin.cpu.arch) orelse {
+        try err.writeAll("release_staged_verify: mopm installs no Mojo toolchain on this host, so add cannot run here\n");
+        try err.flush();
+        return 2;
+    };
+    var why: []const u8 = "";
+    var proc = prod_add.Process{};
+    const rep = prod_add.add(a, &why, staged.?, mopm.?, work.?, &prod_add.add_set, subdir, proc.runner(), out) catch |e| {
+        const msg = if (e == error.Refused) why else @errorName(e);
+        try out.flush();
+        try err.print("release_staged_verify: ADD FAILED: {s}\n", .{msg});
+        try err.flush();
+        return 1;
+    };
+    try out.print("release_staged_verify: `mopm add` of {d} package(s) from {s} locked {d} package(s) of this release and installed the published bytes (sha256 and size)\n", .{ rep.members, prod_channel, rep.entries });
+    try out.flush();
+    return 0;
 }
 
 pub fn main() !u8 {
@@ -174,6 +227,7 @@ pub fn main() !u8 {
     var obuf: [1024]u8 = undefined;
     var out = std.fs.File.stdout().writer(&obuf);
     const args = try std.process.argsAlloc(a);
+    if (args.len >= 2 and std.mem.eql(u8, args[1], "add")) return mainAdd(a, args[2..], &out.interface, &err.interface);
     if (args.len < 2 or !(std.mem.eql(u8, args[1], "verify") or std.mem.eql(u8, args[1], "smoke"))) {
         try err.interface.writeAll(usage);
         try err.interface.flush();
