@@ -26,11 +26,16 @@ takes) is `komira`, the same as the import package (`komira-ai` is the organisat
 organisation, the PyPI organisation account and the mopm namespace; PyPI has one flat namespace); it is
 published by the top-level workflow
 `.github/workflows/pypi.yml` through the GitHub environments `testpypi` and `pypi`, by trusted
-publishing with no token, and nothing is uploaded before the first real release. The name is registered on PyPI by the first release from
-that workflow, and nobody uploads or registers anything there before the owner says go; the package lives in `python/` in this repository; it is published as a wheel first; the wheel
+publishing with no token, and nothing is uploaded or registered by hand. The owner has given the go to release `komira` from that workflow
+before the DataFrame surfaces exist, so the name is registered on PyPI by the first release the workflow
+makes, and no one registers or uploads it any other way; the package lives in `python/` in this repository; it is published as a wheel first; the wheel
 carries `libkomira` and never the Mojo runtime (if the library needs runtime libraries at load time, the
 wheel depends on Modular's own published package for them); the release platforms are linux-x86_64,
-linux-arm64 and macos-arm64; the first public release is SQL-first and the DataFrame surface follows;
+linux-arm64 and macos-arm64; the first public release is SQL-first and the DataFrame surfaces follow. The design of the SDK is settled
+and is a port of the earlier one: two DataFrame surfaces, one shaped like pandas and one shaped like polars,
+each only building a logical plan and submitting it through the plan entry of `libkomira`
+(`komira_plan_stream`), never rendering it to SQL text; SQL text is a different entry
+(`komira_sql_stream`), where the library converts it to a logical plan;
 Python UDFs run in zygote worker processes ([udf_runtime_interface.md](udf_runtime_interface.md)).
 
 ## The decisions
@@ -92,9 +97,11 @@ python/
   `__version__` and these hints read the distribution's name, which equals the import package's.
 - Every module other than `komira/__init__.py` starts with an underscore and is private. A user imports
   public names from `komira` only; a private module may be split, merged or renamed in any release.
-- No public submodule ships in the first release. The earlier SDK's polars-shaped submodule `komira.pl`
-  is not carried in it; whether the DataFrame surface has one skin or two, and their module names, is the
-  DataFrame surface's design. The names that design must keep are the ones the design docs already use
+- No public submodule ships in the first release. The DataFrame surfaces are two, as in the earlier SDK:
+  the pandas-shaped one at the top level of `komira`, and the polars-shaped one as the submodule
+  `komira.pl`, which is the one public submodule the package will have. Both arrive with the DataFrame
+  surface (decision 4), not in the first release. Their verbs and refusal policy are the DataFrame
+  surface's design. The names that design must keep are the ones the design docs already use
   at the top level: `read_parquet`, `read_table`, `col`, `catalog` (verb names are the same words in every
   language, [optimized_plan_sources.md](optimized_plan_sources.md) §15.9). This design reserves them by
   not using them for anything else.
@@ -107,7 +114,7 @@ The whole public surface of the first release is these names in `komira.__all__`
 |---|---|
 | `Session(*, threads=None, memory_limit=None)` | one engine context (`komira_ctx_new`) and its registered tables. `threads` is the worker count and `memory_limit` the engine's memory budget in bytes; `None` takes the engine's default. Options are arguments, never environment variables (rule S2). A context manager: `with komira.Session() as s:`; `close()` frees the context and is idempotent |
 | `Session.register_parquet(name, path)` | registers a local Parquet file as the table `name` (`komira_register_parquet`). `path` is a `str` or `os.PathLike`; a relative path is resolved against the working directory when the call is made, `~` is expanded. Registering a name again replaces it |
-| `Session.sql(query) -> Result` | runs one SQL statement over the session's tables. **This is the official door of the first release**, not an escape hatch |
+| `Session.sql(query) -> Result` | runs one SQL statement over the session's tables through the SQL entry of the library (`komira_sql_stream`), which parses and binds the text to a logical plan. **This is the official door of the first release**, not an escape hatch |
 | `Result` | the answer of one `sql` call: `to_arrow() -> pyarrow.Table`, `to_reader() -> pyarrow.RecordBatchReader`, `to_pandas()`, `to_polars()`, and `__arrow_c_stream__(requested_schema=None)` (the Arrow PyCapsule interface, so `pyarrow.table(r)`, `polars.from_arrow(r)` and DuckDB take the stream itself; no batch is converted in Python) |
 | `sql(query) -> Result`, `register_parquet(name, path)` | the same two calls on the process's default session (decision 5) |
 | `KomiraError` | the base class of every error the package raises on purpose (decision 9) |
@@ -158,13 +165,40 @@ a pandas-shaped and a polars-shaped DataFrame surface. What happens to each part
 | table registration | `register_parquet(name, path)`, with the name required | CSV and NDJSON registration, from the engine's own schema | automatic names (`t1`, `t2`, ...): SQL needs the name the user wrote |
 | `KomiraError` with the engine's status and message | yes, with the fields of decision 9 | | the `PLAN_ENDPOINT_<NAME>(<code>):` message prefix and its generated code table: libkomira's status codes and error text replace them |
 | `UnsupportedOperation` | yes, now a `KomiraError` (it was a `TypeError`) | | |
-| pandas-shaped `DataFrame`, `Column`, `Expr`, `GroupBy`, `MaterializedFrame`; the shared builder `Query`; the protobuf plan encoder | | with the DataFrame surface, through the plan door (`komira_plan_stream`) | |
-| polars-shaped `komira.pl` | | if the DataFrame surface keeps two skins | |
+| pandas-shaped `DataFrame`, `Column`, `Expr`, `GroupBy`, `MaterializedFrame`; the shared plan builder `Query`; the protobuf plan encoder | | with the DataFrame surface, through the plan door (`komira_plan_stream`) | |
+| polars-shaped `komira.pl` (`col`, `lit`, lazy frames over the same plan builder) | | with the DataFrame surface, on the same plan builder and door as the pandas-shaped one | |
 | **the SQL-text route** (`_sql.py`: DataFrame operations rendered to SQL text and re-parsed) | | | dropped. A DataFrame becomes a plan, never SQL text; `sql()` is SQL the user wrote, and is not that route |
 | **the route switch**: `Session(plan_wire=...)` and the environment variable that chose the SQL-text route | | | dropped. There is one route per kind of input, so there is nothing to switch; and configuration is never an environment variable (rule S2) |
 | `@komira.udf` and `Session.declare_sql_udf` | | Python UDFs in zygote worker processes | the in-process `ctypes` callback the engine called per batch: Python UDFs run in worker processes |
 | Excel calls (`xl_*`), the second result door (`plan_bytes`), `sql_render` | | | not in the first release's ABI; a text rendering of a plan is a later, separate decision |
 | warming pyarrow before opening the library | | | the Arrow import goes through the PyCapsule interface or pyarrow's public C stream import; the load-order case it worked around is a test of the Arrow terminals pull request |
+
+#### The DataFrame surfaces, and where the port differs
+
+The DataFrame surfaces are carried, not redesigned. Each frame holds a logical plan that a shared plan
+builder grows one verb at a time; a terminal encodes the plan as `komira.plan.v1` protobuf bytes and
+submits them to `komira_plan_stream`, which answers an Arrow stream, so a `Result` (decision 3) is what a
+terminal returns. The pandas-shaped and the polars-shaped surface differ in spelling only; neither has
+a path of its own to the engine. `Session.sql` is the separate entry for SQL the user wrote. The port
+differs from the earlier SDK in these points, each for the reason given:
+
+- **No SQL-text route and no switch between routes.** The earlier SDK could render a frame to SQL and
+  re-parse it, chosen by `plan_wire` and an environment variable. Here the plan door is the only route
+  for a frame, so a frame's answer never depends on SQL rendering, and rule S2 holds.
+- **The plan builder targets the current plan format.** It is written against
+  [src/plan_proto/plan.proto](../../src/plan_proto/plan.proto) and its generated `komira.plan.v1` modules,
+  not the earlier tree's encoder, so a plan from the Python package is one every engine accepts (rule
+  B21), and the protobuf dependency enters with this surface (decision 7).
+- **Libraries' status codes, not `PLAN_ENDPOINT_*` prefixes.** A refusal of the plan door raises the
+  `KomiraError` of decision 9, with the library's `status`, `code` and `step`.
+- **Tables are registered by name.** A frame's plan scans tables the session has under a name the user
+  gave (`register_parquet`); the earlier automatic `t1`, `t2` names are dropped (decision 4's table).
+- **Errors and reads follow the first release's rules.** `UnsupportedOperation` is a `KomiraError`;
+  a terminal reads once, as a `Result` does; a frame is bound to its session's lock and fork rules
+  (decision 3).
+- **No in-process UDF callback and no Excel calls.** Python UDFs run in worker processes
+  ([udf_runtime_interface.md](udf_runtime_interface.md)); a frame that names one refuses by name until
+  that lands.
 
 ### 5. The default session
 
@@ -293,7 +327,7 @@ checks the annotations; the wheel rule's read-back check holds that `py.typed` i
 | the SQL and plan doors of the C ABI, the Arrow C stream export, session options, status codes, abort containment | the ABI design for running a query (`src/so`) |
 | wheel tags, the supported CPython range, `Requires-Dist` ranges, RUNPATH, sdist, release member, PyPI stages | the wheel and release design |
 | where the Mojo runtime comes from | the runtime route decision |
-| the DataFrame skins, their verbs and module names, the refusal policy for verbs | the DataFrame surface design |
+| the verbs of the two DataFrame surfaces, the refusal policy for verbs | the DataFrame surface design |
 | Python UDFs in worker processes | [udf_runtime_interface.md](udf_runtime_interface.md) and its Python design |
 
 ## What must always hold?
