@@ -7,7 +7,7 @@ the first files.
 
 ## What problem does this solve?
 
-People should be able to `pip install komira` and run SQL over their local files from Python. komira has
+People should be able to `pip install komira-ai` and run SQL over their local files from Python. komira has
 no Python package today: Python in this repository is test-only, and the one Python surface is the hello
 test of `python_binding_test` ([tools/build/python/README.md](../../tools/build/python/README.md)). The
 shared library `libkomira` ([src/so/README.md](../../src/so/README.md)) is what the package will load,
@@ -21,8 +21,9 @@ answers. It does not decide the C ABI (symbols and status codes), the wheel's pl
 range, the Mojo runtime route, or the DataFrame surface; each has its own design, named under
 [What is decided elsewhere](#what-is-decided-elsewhere).
 
-Fixed before this design and not reopened here: the distribution and the import package are both named
-`komira`; the package lives in `python/` in this repository; it is published as a wheel first; the wheel
+Fixed before this design and not reopened here: the distribution (the name on PyPI, the name `pip install`
+takes) is `komira-ai`, the name of the GitHub organisation, and it is published from this repository
+by trusted publishing; the package lives in `python/` in this repository; it is published as a wheel first; the wheel
 carries `libkomira` and never the Mojo runtime (if the library needs runtime libraries at load time, the
 wheel depends on Modular's own published package for them); the release platforms are linux-x86_64,
 linux-arm64 and macos-arm64; the first public release is SQL-first and the DataFrame surface follows;
@@ -74,8 +75,18 @@ python/
 
 ### 2. Module names
 
-- The import package is `komira`. Users write `import komira` (the design docs write `import komira as km`;
+- The distribution is `komira-ai` and the import package is `komira`: users run `pip install komira-ai`
+  and write `import komira` (the design docs write `import komira as km`;
   [storage_stack.md](storage_stack.md), [optimized_plan_sources.md](optimized_plan_sources.md) §15.9).
+  The two names differ on purpose, as `scikit-learn` and `sklearn` do:
+  - the import name is the product's name, the one every design doc and every other SDK (`km.` in Mojo
+    and TypeScript) already uses;
+  - the generated protobuf modules must import as `komira.plan.v1` (decision 1), so any other import
+    name would put a second top-level package, `komira`, into the user's environment anyway;
+  - the distribution name follows the organisation, and the wheel's file name (`komira_ai-<version>-...`)
+    and `.dist-info` directory are spelt from it by the normalisation of PEP 427 and PEP 503.
+  Messages that tell a user what to install name the distribution (`pip install komira-ai[pandas]`);
+  messages about the code name the import package.
 - Every module other than `komira/__init__.py` starts with an underscore and is private. A user imports
   public names from `komira` only; a private module may be split, merged or renamed in any release.
 - No public submodule ships in the first release. The earlier SDK's polars-shaped submodule `komira.pl`
@@ -99,7 +110,7 @@ The whole public surface of the first release is these names in `komira.__all__`
 | `KomiraError` | the base class of every error the package raises on purpose (decision 9) |
 | `UnsupportedOperation` | a `KomiraError`: komira refused a construct by name (an SQL feature the engine does not run yet, an option it does not take) |
 | `LibraryLoadError` | a `KomiraError`: `libkomira` or a library it needs could not be loaded, or its ABI major version is not the one this package was written for |
-| `__version__` | the installed distribution's version, read with `importlib.metadata.version("komira")` |
+| `__version__` | the installed distribution's version, read with `importlib.metadata.version("komira-ai")` (the distribution's name, not the import package's) |
 
 Behaviour each later pull request implements, fixed here so they agree:
 
@@ -114,7 +125,7 @@ Behaviour each later pull request implements, fixed here so they agree:
   on, whether or not its consumer reads it. A `requested_schema` other than `None` raises
   `UnsupportedOperation`; casting on request is a later, additive decision.
 - **pandas and polars are optional.** `to_pandas` and `to_polars` import them when called; when one is
-  missing, the `ImportError` names the extra that installs it (`pip install komira[pandas]`).
+  missing, the `ImportError` names the extra that installs it (`pip install komira-ai[pandas]`).
 - **A closed session refuses every call** with `KomiraError`, and closing a session while a `Result` of
   it is unread never crashes the interpreter. Whether that unread result then still reads, or refuses, is
   the session pull request's choice, held by a test of each case it allows.
@@ -187,7 +198,7 @@ later designs fill marked:
 
 ```toml
 [project]
-name = "komira"
+name = "komira-ai"
 dynamic = ["version"]   # stamped by the wheel rule
 description = "SQL over local files, with libkomira, the komira query engine, in process"
 readme = "README.md"

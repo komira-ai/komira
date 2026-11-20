@@ -20,7 +20,8 @@ PYTHON_SURFACE = [
     # The hello test of python_binding_test, and the home of the binding tests
     # of the shared library (so).
     "tools/build/examples/python_binding",
-    # The Python package komira and its tests (docs/design/python_package.md).
+    # The Python package (pip install komira-ai, import komira) and its tests
+    # (docs/design/python_package.md).
     "python",
 ]
 
