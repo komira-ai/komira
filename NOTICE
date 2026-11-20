@@ -2,10 +2,12 @@ komira
 Licensed under the Apache License, Version 2.0 (see LICENSE).
 
 This file records third-party material that text committed to this repository
-is derived from. Material that is only built or tested against (the C and C++
-libraries of third_party/, the toolchains) is fetched from pinned archives at
-build time and is not committed; each is under its own license, which its
-archive carries.
+is derived from and, in its last section, the third-party runtime that the
+Python wheel and the conda packages built from this repository depend on but
+do not carry. Material that
+is only built or tested against (the C and C++ libraries of third_party/, the
+toolchains) is fetched from pinned archives at build time and is not
+committed; each is under its own license, which its archive carries.
 
 Generated clients: text derived from Apache-2.0 inputs
 ------------------------------------------------------
@@ -51,3 +53,28 @@ The Apache License, Version 2.0 is at http://www.apache.org/licenses/LICENSE-2.0
 and in the LICENSE file of this repository. The generated files are modified
 forms of the inputs' definitions (their structure re-expressed as Mojo); they
 are distributed here under the same license as the rest of komira.
+
+The Mojo runtime: a dependency, not distributed
+-----------------------------------------------
+
+komira's libraries, the shared library libkomira among them, are compiled
+by Modular's Mojo compiler and need the Mojo runtime libraries when they are
+loaded (libKGENCompilerRTShared, libAsyncRTRuntimeGlobals and
+libMSupportGlobals; .so on Linux, .dylib on macOS). These libraries are
+Modular's, are not part of this repository, and are not covered by its
+Apache License grant.
+
+The Python package `komira` and komira's conda packages are built to carry
+none of these libraries and no other file of Modular's. Each declares a
+dependency on Modular's own `mojo-compiler` package at the compiler version
+the libraries were built with, and the user's package installer fetches that
+package from Modular's publication (PyPI for the wheel, Modular's conda
+channel for the conda packages) under the license that package declares. On
+PyPI, `mojo-compiler` 1.0.0 declares `LicenseRef-MAX-Platform-Software-License`.
+docs/design/mojo_runtime_pypi_vs_conda.md records what that package holds.
+The wheel carries this file as one of its two license files; a conda package
+carries only LICENSE.
+
+This section does not cover `mojo_bundle` outputs (tools/build/package), such
+as the base image under packaging/images: a bundle does carry the Mojo runtime
+libraries in its `lib/`.
