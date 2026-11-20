@@ -41,10 +41,20 @@ def main(args):
         # (resolved against the working directory) and a path under `~`.
         assert s.register_parquet("t", parquet) is None
         assert s.register_parquet("t", pathlib.Path(parquet)) is None
-        os.chdir(lib_dir)
-        assert s.register_parquet("rel", "two_columns.parquet") is None
-        os.environ["HOME"] = lib_dir
-        assert s.register_parquet("home", "~/two_columns.parquet") is None
+        # The working directory and HOME are put back afterwards: the runner
+        # writes its result to a path relative to where the action started.
+        cwd, home = os.getcwd(), os.environ.get("HOME")
+        try:
+            os.chdir(lib_dir)
+            assert s.register_parquet("rel", "two_columns.parquet") is None
+            os.environ["HOME"] = lib_dir
+            assert s.register_parquet("home", "~/two_columns.parquet") is None
+        finally:
+            os.chdir(cwd)
+            if home is None:
+                os.environ.pop("HOME", None)
+            else:
+                os.environ["HOME"] = home
 
         # A file the engine cannot read: its message, status -3.
         e = raised(lambda: s.register_parquet("gone", "no_such_file.parquet"))
