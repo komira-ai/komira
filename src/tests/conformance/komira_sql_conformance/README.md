@@ -25,7 +25,8 @@ input, and nothing runs komira on these cases yet.
 | `cases/<corpus>/tables.sql` | the corpus's tables: `CREATE TABLE` with every column's type, then its rows |
 | `cases/<corpus>/<case>.sql` | one case: its row order line, comment lines, one SELECT (no `;`) |
 | `cases/<corpus>/<case>.tsv` | the committed answer |
-| `sql/run.sql` | the case runner |
+| `sql/answer.sql` | runs a case and writes its answer, `answer.tsv` |
+| `sql/check.sql` | holds `answer.tsv` to the committed answer |
 | `sql/compare.sql` | `first_difference(got, want)`: where two answers first differ |
 | `sql/compare_check.sql` | `first_difference` over planted pairs |
 
@@ -54,7 +55,7 @@ which has no sign of zero.
 
 ## The answers
 
-`sql/run.sql` writes a case's answer with
+`sql/answer.sql` writes a case's answer with
 
 ```sql
 COPY (FROM query(<the case, ordered as its first line says>))
@@ -70,7 +71,7 @@ quoted; a float is its shortest round-trip decimal, `nan`, `inf` or `-inf`.
 COPY writes a column name the answer repeats with a suffix: `SELECT * FROM K
 JOIN M ON K.k = M.k` has the header `k a k_1 b`.
 
-Then `answer.tsv` must equal the committed `<case>.tsv` byte for byte, or the
+Then (`sql/check.sql`) `answer.tsv` must equal the committed `<case>.tsv` byte for byte, or the
 action fails with where they first differ:
 
 ```
@@ -108,18 +109,15 @@ Counts are of the case files (`ls cases/<corpus>/*.sql`, less
 | `cross_<type>` (18 corpora) | 1488 | one query shape per operator (filter, project, aggregate, group, sort, distinct, join) over a column of each type an Arrow file carries: integers, floats, DECIMAL(12,2), strings, dictionary strings, BOOLEAN, BLOB, DATE and the timestamp units |
 | `surface_limits`, `ops_controls`, `bind_controls` | 27, 32, 35 | queries at the limits of the SQL surface (repeated runs, an aggregate over an aggregate, NaN and infinity, a reserved word as a column); small controls of common operations; the repaired twin of each query DuckDB refuses at bind time |
 
-Dates: the repository holds no recent dates (the public boundary lint,
-whose window starts in 2025), so a case built on a date from 2025 on had it
-moved to the same day of another year (2024, 2028 and 2029, or 2015), and a
+Dates: no table holds a date from 2025 or 2026; where a case needed one, it
+was moved to the same day of 2024, 2028 or 2029, or 2015, and a
 year-valued answer reads that year.
 
-What was not brought over, and why: cases whose DuckDB answer is an error
-(an overflow, a domain error, a bind or parse error: about 300) are not
-here, since a case's answer is a table; a case for each is a follow-up
-that needs an error answer in this format. Nor are queries whose rows
-depend on how DuckDB breaks a tie (ROWS frames over tied keys), queries that
-call functions DuckDB does not have, and records that were not DuckDB's
-answers (another engine's refusals, Excel's rules).
+Not here: a case whose DuckDB answer is an error (an overflow, a domain
+error, a bind or parse error), since a case's answer is a table; a case
+whose rows depend on how DuckDB breaks a tie or the order it scans rows (a
+ROWS frame orders by a key and then `k`, a LIMIT has an ORDER BY); and a
+query calling a function DuckDB does not have.
 
 ## Tests
 

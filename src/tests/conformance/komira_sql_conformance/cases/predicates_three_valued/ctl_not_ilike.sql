@@ -1,3 +1,3 @@
 -- order: rows
--- the same shape as an unported grammar case, without that grammar
+-- a control: the query shape of the feature its name gives, written without that feature
 SELECT k FROM T WHERE s NOT LIKE 'a%'

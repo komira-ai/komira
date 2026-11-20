@@ -1,3 +1,3 @@
 -- order: rows
--- Repaired form of a query that is wrong as first written: the aggregate moved out of WHERE into the SELECT list
+-- A control of a bind-error shape, with the faulty part repaired: the aggregate moved out of WHERE into the SELECT list
 SELECT median(v) AS z FROM T

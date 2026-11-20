@@ -1,3 +1,3 @@
 -- order: rows
--- Repaired form of a query that is wrong as first written: mad replaced by a statistical aggregate this engine serves
+-- A control of a bind-error shape, with the faulty part repaired: mad replaced by another statistical aggregate
 SELECT stddev(v) AS z FROM T

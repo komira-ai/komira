@@ -1,3 +1,3 @@
 -- order: rows
--- Repaired form of a query that is wrong as first written: the second argument removed
+-- A control of a bind-error shape, with the faulty part repaired: the second argument removed
 SELECT median(v) AS z FROM T

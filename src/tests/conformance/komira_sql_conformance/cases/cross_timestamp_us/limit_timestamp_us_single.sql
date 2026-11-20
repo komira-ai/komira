@@ -1,3 +1,3 @@
--- order: rows
+-- order: query
 -- limit over a TIMESTAMP column, single rows
-SELECT k, g, v FROM t_single LIMIT 3
+SELECT k, g, v FROM t_single ORDER BY k ASC NULLS LAST LIMIT 3

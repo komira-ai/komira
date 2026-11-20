@@ -1,3 +1,3 @@
--- order: rows
+-- order: query
 -- limit over a BOOLEAN column, full rows
-SELECT k, g, v FROM t_full LIMIT 3
+SELECT k, g, v FROM t_full ORDER BY k ASC NULLS LAST LIMIT 3

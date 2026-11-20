@@ -1,3 +1,3 @@
--- order: rows
+-- order: query
 -- limit over a DECIMAL(12,2) column, allnull rows
-SELECT k, g, v FROM t_allnull LIMIT 3
+SELECT k, g, v FROM t_allnull ORDER BY k ASC NULLS LAST LIMIT 3

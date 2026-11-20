@@ -1,3 +1,3 @@
 -- order: rows
--- Repaired form of a query that is wrong as first written: the DISTINCT removed from COUNT(*)
+-- A control of a bind-error shape, with the faulty part repaired: the DISTINCT removed from COUNT(*)
 SELECT count(*) AS z FROM T

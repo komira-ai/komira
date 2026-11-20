@@ -1,3 +1,3 @@
 -- order: rows
--- Repaired form of a query that is wrong as first written: one argument removed
+-- A control of a bind-error shape, with the faulty part repaired: one argument removed
 SELECT pi() AS z FROM T

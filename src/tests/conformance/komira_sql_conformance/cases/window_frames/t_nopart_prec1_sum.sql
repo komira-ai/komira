@@ -1,3 +1,3 @@
 -- order: rows
--- a ROWS frame over a key with ties; only the multiset of answers is fixed
-SELECT y FROM (SELECT k, sum(v) OVER (ORDER BY o ROWS BETWEEN 1 PRECEDING AND CURRENT ROW) AS y FROM T)
+-- a ROWS frame over a key with ties, broken by k so each row's frame is fixed
+SELECT y FROM (SELECT k, sum(v) OVER (ORDER BY o ASC NULLS LAST, k ASC NULLS LAST ROWS BETWEEN 1 PRECEDING AND CURRENT ROW) AS y FROM T)

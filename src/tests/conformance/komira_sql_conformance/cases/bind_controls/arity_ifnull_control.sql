@@ -1,3 +1,3 @@
 -- order: rows
--- Repaired form of a query that is wrong as first written: the second (default) argument supplied
+-- A control of a bind-error shape, with the faulty part repaired: the second (default) argument supplied
 SELECT ifnull(n, 0) AS z FROM T
