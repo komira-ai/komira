@@ -12,7 +12,7 @@ from plan_ir.logical_plan import LogicalPlan
 from physical_plan.physical_plan import MorselOp
 
 
-def filter_op(node: LogicalPlan) raises -> MorselOp:
+def _filter_op(node: LogicalPlan) raises -> MorselOp:
     """The operator a PLAN_FILTER node fuses, or its refusal. Called before
     the child is walked."""
     ref fd = node.filter_data_ref()
@@ -21,6 +21,6 @@ def filter_op(node: LogicalPlan) raises -> MorselOp:
     return MorselOp.filter(fd.predicate.copy())
 
 
-def fuse_filter(mut pipe: _Pipe, var op: MorselOp):
+def _fuse_filter(mut pipe: _Pipe, var op: MorselOp):
     """Fuse the filter's operator onto its child's pipeline."""
     pipe.append_op(op^)

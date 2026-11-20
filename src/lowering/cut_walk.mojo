@@ -29,12 +29,12 @@
 # collect.
 # =============================================================================
 
-from lowering.cut_aggregate import aggregate_exprs, close_aggregate
-from lowering.cut_filter import filter_op, fuse_filter
-from lowering.cut_limit import limit_op, fuse_limit
-from lowering.cut_project import project_op, fuse_project
-from lowering.cut_scan import open_scan
-from lowering.cut_sort import close_sort
+from lowering.cut_aggregate import _aggregate_exprs, _close_aggregate
+from lowering.cut_filter import _filter_op, _fuse_filter
+from lowering.cut_limit import _limit_op, _fuse_limit
+from lowering.cut_project import _project_op, _fuse_project
+from lowering.cut_scan import _open_scan
+from lowering.cut_sort import _close_sort
 from lowering.cut_state import CutResult, _Cutter, _Pipe, _uncuttable
 from lowering.lowered_plan import LoweringInputs, LOWERING_INPUTS_SCAN_COUNT
 from plan_ir.logical_plan import (
@@ -58,29 +58,29 @@ def _walk(
 ) raises -> _Pipe:
     var tag = node.tag
     if tag == PLAN_SCAN:
-        return open_scan(cutter, node, inputs)
+        return _open_scan(cutter, node, inputs)
     if tag == PLAN_FILTER:
-        var op = filter_op(node)
+        var op = _filter_op(node)
         var pipe = _walk(cutter, node.filter_data_ref().child[], inputs)
-        fuse_filter(pipe, op^)
+        _fuse_filter(pipe, op^)
         return pipe^
     if tag == PLAN_PROJECT:
-        var op = project_op(node)
+        var op = _project_op(node)
         var pipe = _walk(cutter, node.project_data_ref().child[], inputs)
-        fuse_project(pipe, node, op^)
+        _fuse_project(pipe, node, op^)
         return pipe^
     if tag == PLAN_LIMIT:
-        var op = limit_op(node)
+        var op = _limit_op(node)
         var pipe = _walk(cutter, node.limit_data_ref().child[], inputs)
-        fuse_limit(pipe, node, op^)
+        _fuse_limit(pipe, node, op^)
         return pipe^
     if tag == PLAN_AGGREGATE:
-        var aggs = aggregate_exprs(node)
+        var aggs = _aggregate_exprs(node)
         var pipe = _walk(cutter, node.aggregate_data_ref().child[], inputs)
-        return close_aggregate(cutter, node, pipe^, aggs^, inputs)
+        return _close_aggregate(cutter, node, pipe^, aggs^, inputs)
     if tag == PLAN_SORT:
         var pipe = _walk(cutter, node.sort_data_ref().child[], inputs)
-        return close_sort(cutter, node, pipe^, inputs)
+        return _close_sort(cutter, node, pipe^, inputs)
     raise _uncuttable(node, "no cutter arm for this node")
 
 

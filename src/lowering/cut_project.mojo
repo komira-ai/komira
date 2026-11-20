@@ -14,7 +14,7 @@ from plan_ir.logical_plan import LogicalPlan, copy_expr_array
 from physical_plan.physical_plan import MorselOp
 
 
-def project_op(node: LogicalPlan) raises -> MorselOp:
+def _project_op(node: LogicalPlan) raises -> MorselOp:
     """The operator a PLAN_PROJECT node fuses, or its refusal. Called before
     the child is walked."""
     ref pd = node.project_data_ref()
@@ -26,7 +26,7 @@ def project_op(node: LogicalPlan) raises -> MorselOp:
     return MorselOp.project(copy_expr_array(pd.exprs), names^)
 
 
-def fuse_project(mut pipe: _Pipe, node: LogicalPlan, var op: MorselOp):
+def _fuse_project(mut pipe: _Pipe, node: LogicalPlan, var op: MorselOp):
     """Fuse the projection's operator onto its child's pipeline."""
     pipe.append_op(op^)
     pipe.has_project = True

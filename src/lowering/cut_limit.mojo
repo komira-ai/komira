@@ -14,7 +14,7 @@ from plan_ir.logical_plan import LogicalPlan
 from physical_plan.physical_plan import MorselOp
 
 
-def limit_op(node: LogicalPlan) raises -> MorselOp:
+def _limit_op(node: LogicalPlan) raises -> MorselOp:
     """The operator a PLAN_LIMIT node fuses, or its refusal. Called before
     the child is walked."""
     ref ld = node.limit_data_ref()
@@ -25,7 +25,7 @@ def limit_op(node: LogicalPlan) raises -> MorselOp:
     return MorselOp.limit(ld.n)
 
 
-def fuse_limit(mut pipe: _Pipe, node: LogicalPlan, var op: MorselOp) raises:
+def _fuse_limit(mut pipe: _Pipe, node: LogicalPlan, var op: MorselOp) raises:
     """Fuse the limit's operator onto its child's pipeline, or refuse a limit
     over a sorted stream."""
     if pipe.sorted_input:

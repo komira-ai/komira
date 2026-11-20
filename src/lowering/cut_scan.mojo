@@ -36,7 +36,7 @@ from scan_source.source_variant import (
 )
 
 
-def open_scan(
+def _open_scan(
     mut cutter: _Cutter, node: LogicalPlan, inputs: LoweringInputs
 ) raises -> _Pipe:
     """The pipeline a PLAN_SCAN node opens."""

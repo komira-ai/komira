@@ -136,7 +136,7 @@ def _agg_triple(
     return _Triple(UInt8(first), SINK_ORIENT_COLUMNAR)
 
 
-def aggregate_exprs(node: LogicalPlan) raises -> AggExprArray:
+def _aggregate_exprs(node: LogicalPlan) raises -> AggExprArray:
     """The aggregate expressions a PLAN_AGGREGATE node's sink computes, or its
     refusal. Called before the child is walked."""
     ref ad = node.aggregate_data_ref()
@@ -157,7 +157,7 @@ def aggregate_exprs(node: LogicalPlan) raises -> AggExprArray:
     return aggs^
 
 
-def close_aggregate(
+def _close_aggregate(
     mut cutter: _Cutter,
     node: LogicalPlan,
     var pipe: _Pipe,

@@ -18,7 +18,7 @@ from physical_plan.physical_plan import (
 )
 
 
-def close_sort(
+def _close_sort(
     mut cutter: _Cutter,
     node: LogicalPlan,
     var pipe: _Pipe,
