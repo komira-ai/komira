@@ -31,6 +31,35 @@ change that lands it on `main`, because releases come from `main` automatically.
 the 1.2 change lands only `komira_sql_stream`, then `komira_plan_stream` takes the
 next minor. The golden (`src/so/abi/komira.tsv`) holds whichever version is true.
 
+**Who calls which entry.** The Python package ports the settled shape of the
+earlier SDK. It has two DataFrame surfaces: one shaped like a pandas
+`DataFrame` and one shaped like the polars module. It also has a plan builder
+over the plan protobuf, and a SQL call.
+
+- **The DataFrame surfaces.** Both build a logical plan, serialize it as a
+  `WirePlanEnvelope`, and submit it through `komira_plan_stream`. A frame is
+  never rendered to SQL text.
+- **SQL text.** It goes through its own entry, `komira_sql_stream`, where
+  libkomira parses and binds it into a logical plan.
+- **The shared route.** From the optimizer down, both entries run the same
+  route in `sdk_exec` (§3).
+
+The port differs from the earlier SDK in these places, each for the reason
+given:
+
+- **No switch that sends frames as SQL.** The earlier SDK had one, both as an
+  environment variable and as a session argument. Neither is carried. A frame
+  always travels as a plan, and configuration is never read from the
+  environment (rule S2).
+- **Python UDFs.** The earlier SDK reached them only through SQL text, as
+  in-process callbacks. Rule B21 requires Python UDFs to run in zygote-forked
+  workers, so neither entry carries them until that design lands. The plan door
+  refuses an envelope with UDFs by name (§3).
+- **One engine per session.** The earlier SDK built a fresh engine context for
+  every call. Here the session keeps one `EngineContext` (§5).
+- **The SQL entry is not scaffolding.** It is an entry of its own, beside the
+  plan door, for users who write SQL (§9).
+
 ## 2. What exists today
 
 - **EXISTS** ABI 1.1: nine exports, six status codes and `KOMIRA_MAX_INPUT_BYTES`
@@ -419,7 +448,7 @@ table names its calls only to say what each becomes.
 | prototype | in libkomira |
 |---|---|
 | plan endpoint: one call that admitted, decoded, validated and executed a plan | `komira_plan_stream`: `plan_wire` admission and decode, then the shared `sdk_exec` route (§3). There is no separate endpoint package. It built a fresh engine context per call, and here the session's `EngineContext` is reused |
-| `komira_plan_stream`, `komira_sql_stream` (Arrow C stream out) | the same names and shapes, with the 1.1 conventions (two-call `komira_last_error`, -5 bound, `*out` untouched on refusal). The SQL door is the primary door of a SQL-first release, not scaffolding |
+| `komira_plan_stream`, `komira_sql_stream` (Arrow C stream out) | the same names and shapes, with the 1.1 conventions (two-call `komira_last_error`, -5 bound, `*out` untouched on refusal). The SQL door is an entry of its own beside the plan door, not scaffolding. The DataFrame surfaces never use it |
 | result IPC egress: Arrow IPC stream bytes, through `komira_plan_bytes` and a CLI | **not carried.** The result is the Arrow C stream, and IPC bytes are a binding's own business. The Node addon is the one caller without a C stream importer. It drains the stream in C, and how it hands batches to JavaScript is decided when it gains a run call. That may add a two-call IPC export then |
 | `PLAN_ENDPOINT_<NAME>(<code>): ` prefix on the error text, parsed by a regex against a frozen code table | **not carried.** The status code is the machine-readable part, and the text is for people (§6) |
 | `komira_last_error(ctx) -> const char *` | the 1.1 two-call form stays. The plan harness's door (`door.mojo`) still describes the `const char *` form. It is moved to the 1.1 form when the harness is pointed at libkomira |
@@ -427,7 +456,7 @@ table names its calls only to say what each becomes.
 | `komira_register_python_udf`, `komira_declare_sql_udf` | **not carried.** They took a host code pointer and ran Python on engine threads, which conflicts with rule B21: Python UDFs run in zygote-forked workers. UDF registration is designed with those workers, and it will describe a worker, not hand over a code pointer |
 | `komira_register_builtin_mojo_udf` | not carried. It selected from a closed set compiled into the library |
 | `komira_xl_bind`, `xl_bind_value`, `xl_bind_cell`, `xl_render`, `xl_eval`, `xl_functions`, `xl_stream` (Excel formulas) | **not carried, recommended.** The Excel libraries are not ported, and a SQL-first release does not need them. This is a scope call for the product owner. If it is reversed, the calls come back as new rows in a later minor |
-| knobs read from environment variables (feature gates, library paths) | none. Options are setter calls (§5), and a binding finds the library from its own install location |
+| knobs read from environment variables (feature gates, library paths, the plan-wire-or-SQL switch for frames) | none. Options are setter calls (§5), and a binding finds the library from its own install location |
 
 ## 10. Versioning and bindings
 
