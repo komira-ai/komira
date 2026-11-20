@@ -1,0 +1,3 @@
+-- order: rows
+-- join inner on v over a TIMESTAMP column, nulls rows
+SELECT a.k AS k, a.v AS v, b.k AS k_right FROM t_nulls a JOIN t_nulls b ON a.v = b.v

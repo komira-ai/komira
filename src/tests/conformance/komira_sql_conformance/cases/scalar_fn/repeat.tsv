@@ -1,0 +1,14 @@
+k	repeat(s, 3)
+0	""
+1	abcabcabc
+10	ÜnïcodéÜnïcodéÜnïcodé
+11	abcdeabcdeabcde
+12	abcdefghabcdefghabcdefgh
+2	  Hello   Hello   Hello 
+3	ÜnïcodéÜnïcodéÜnïcodé
+4	
+5	kittenkittenkitten
+6	flawflawflaw
+7	aaa
+8	ababab
+9	a,ba,ba,b

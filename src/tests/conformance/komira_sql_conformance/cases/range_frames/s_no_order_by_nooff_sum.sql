@@ -1,0 +1,3 @@
+-- order: rows
+-- RANGE with no ORDER BY and no offset bound
+SELECT k, sum(v) OVER (PARTITION BY g RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS y FROM R

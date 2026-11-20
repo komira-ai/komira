@@ -29,6 +29,11 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #   INT64 range (MAX and MIN rows, partials that each pass INT64, {MAX, MAX, MIN,
 #   MIN} = -2, per-group totals), an empty or all-NULL sum is NULL, and
 #   expressions, CASE and HAVING over the sum run.
+# - test_run_sql_no_from: SELECT 1 AS n is one INT32 row holding 1, as in
+#   DuckDB; a result literal is INT32 from -2147483647 to 2147483647 and
+#   INT64 otherwise, as DuckDB types it, while a literal a derived table or a UNION ALL branch holds stays
+#   INT64; FROM-less expressions, count(*) and a false WHERE run; a literal
+#   over a Parquet table; in-memory sources of several batches and of none.
 # - test_run_sql_timers_off: Q6 through run_sql on four workers in the default
 #   build gives the oracle's answer and leaves every phase timer
 #   (phase_timers) unregistered and at zero.
@@ -121,6 +126,7 @@ mojo_library(
         "tests/test_resolved_cache_lru_eviction_stress.mojo",
         "tests/test_resolved_cache_pin_count.mojo",
         "tests/test_run_sql_int_sum.mojo",
+        "tests/test_run_sql_no_from.mojo",
         "tests/test_run_sql_q6.mojo",
         "tests/test_run_sql_timers_off.mojo",
         "tests/test_secret_capability_reveal.mojo",
