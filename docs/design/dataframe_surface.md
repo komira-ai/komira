@@ -16,10 +16,9 @@ pull requests needs the same answers first:
 - what a skin does with a pandas or polars name it does not support;
 - where pandas and polars answer differently from the plan, which answer each skin gives.
 
-This document answers them. The Python package design (`docs/design/python_package.md`, proposed in
-komira-ai/komira#2098 and not merged yet) fixes the rest, and this document uses its names: the package
+This document answers them. The [Python package design](python_package.md) fixes the rest, and this document uses its names: the package
 layout; the two skins and their modules; `Session` and `Result`; and `KomiraError`,
-`UnsupportedOperation` and their fields. If that design changes before it merges, this one follows it.
+`UnsupportedOperation` and their fields.
 
 The evidence that the surface is missing today:
 
@@ -527,7 +526,7 @@ plan builder and the plan protobuf. They differ from it only in these points, ea
 
 | question | where |
 |---|---|
-| the package layout, module names, `Session`, `Result`, the error classes and their fields | the Python package design (`docs/design/python_package.md`) |
+| the package layout, module names, `Session`, `Result`, the error classes and their fields | [the Python package design](python_package.md) |
 | the plan entry's C ABI, the schema calls and the Arrow C stream export | the ABI design for running a query (`src/so`) |
 | which plans the engine runs today | [src/lowering/README.md](../../src/lowering/README.md), [src/sdk_exec/README.md](../../src/sdk_exec/README.md) |
 | the UDF verbs' `return_dtype`, null mode, code capture and workers | [optimized_plan_udfs.md](optimized_plan_udfs.md), [udf_runtime_interface.md](udf_runtime_interface.md) |
