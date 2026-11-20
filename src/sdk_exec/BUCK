@@ -16,6 +16,10 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # - test_plan_validation_gate_direct: the gate's outcome for a scan, a union
 #   under a join, and a filter on a missing column; the ledger check on the
 #   entry token; the tag names; the glob-options mapping; the switch default.
+# - test_arrow_result: run_sql answers (ints, strings, NULLs, decimals, an
+#   empty answer) read back value for value by the C consumer of
+#   komira_test_arrow_c_consumer after the context is dropped, every buffer
+#   released afterwards; refusals, a selection mask and batch order.
 # - test_secret_capability_reveal: a capability reveals exactly the secret bound
 #   to its own node id, once, and an unbound node or a removed ref raises before
 #   the consumer is called.

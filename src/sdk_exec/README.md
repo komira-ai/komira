@@ -4,7 +4,8 @@ The engine-execution layer of the SDK: twelve modules, ten leaves that need
 nothing from the rest of the package except each other, and the plan gates
 (`plan_validation_gate`, `parquet_glob_options`), which build on `sdk`;
 and the engine context with its SQL door (`engine_*` below), which runs a SQL
-query over Parquet files from text to record batches. Views, writes, the plan
+query over Parquet files from text to record batches, and `arrow_result`,
+which readies those batches for the Arrow C stream. Views, writes, the plan
 cache and the plan gates' call sites are not wired into the context yet.
 
 | module | does |
@@ -35,6 +36,7 @@ do is a free function in a module of its own.
 | `engine_lower` | `lowering_inputs` (the facts of each scan, from `ctx.footers`, in the cutter's scan order; a registered table's scan is checked against its registered schema) and `lower_for_context` |
 | `engine_execute` | `run_lowered_plan(ctx, lowered)`: a `RealBuilder` over a per-run metadata cache and expression pool, the segment pool sized from the memory budget, each in-memory source of the plan (`params.batches`) as one resident batch in plan order, `run_plan` on `ctx.runtime` with the host profile's thread count; returns the result segment's batch |
 | `engine_sql` | `run_sql(ctx, text) -> SqlOutcome`: tokenize and parse, `bind_statement`, `optimize`, lower, run. Nothing raises: `SqlOutcome.refusal` holds the step (`parse`, `bind`, `optimize`, `lower`, `execute`) and that step's own message |
+| `arrow_result` | `arrow_result(outcome) -> ArrowResult`: the batches of a `SqlOutcome` and their schema, each batch's selection mask applied, checked to cross the Arrow C Stream Interface whole (`arrow_ipc.c_data_stream_check`). Raises with the step and message of a refusal, for an outcome with no batch, and naming a column the export cannot carry |
 
 **The footer cache is pinned to a query.** `parquet_footers.FooterCache`
 has no cap, so the context does not keep it: `run_sql` starts by replacing it
@@ -74,6 +76,51 @@ other node by name before it asks for the scans below it. `worker_count` and
 cancellation token is local to a call, so cancel is not reachable from
 `run_sql`. After a refusal the context is unchanged and runs the next query.
 
+**The answer as an Arrow C stream.** A C entry point that fills a caller's
+`struct ArrowArrayStream` calls `arrow_result` first, so every way the export
+can fail is a raise before the caller's struct is touched, never an EIO from
+the consumer's `get_schema` or `get_next`. It then hands
+`result.take_batches()` and `result.take_schema()` to
+`arrow_ipc.c_data_stream.build_record_batch_stream` with the caller's
+pointer, in the module that owns that entry point. An `ArrowResult` owns its
+batches and holds nothing of the `EngineContext`, which may be dropped
+before the stream is read.
+
+```mojo
+from arrow.arrow_types import ArrowType
+from arrow.column import Column
+from arrow.primitive_array import PrimitiveArray
+from arrow.schema import Field, RecordBatchBuilder, SchemaBuilder
+from sdk_exec.arrow_result import arrow_result
+from sdk_exec.engine_sql import SqlOutcome
+from std.testing import assert_equal
+
+var fields = SchemaBuilder()
+fields.add_field(Field("n", ArrowType.INT32, nullable=False))
+var builder = RecordBatchBuilder.with_capacity(1)
+builder.add_column(
+    Column.from_primitive[DType.int32](
+        PrimitiveArray[DType.int32].from_list([Int32(1)])
+    )
+)
+var answer = SqlOutcome()
+answer.batches.append(builder.build(fields.build()))
+
+var result = arrow_result(answer^)
+var batches = result.take_batches()
+assert_equal(len(batches), 1)
+assert_equal(batches[0].num_rows(), 1)
+assert_equal(result.take_schema().field_name(0), "n")
+
+# A refusal is a raise, with its step and message.
+var refusal = String()
+try:
+    _ = arrow_result(SqlOutcome(String("bind"), String("no column nope")))
+except e:
+    refusal = String(e)
+assert_equal(refusal, "run_sql refused at step bind: no column nope")
+```
+
 ## Tests
 
 The tests run when the package is built.
@@ -109,6 +156,15 @@ The tests run when the package is built.
   the INT64 5000000001); `7 / 2`, `count(*)` and a false WHERE with no FROM;
   `SELECT 1 FROM` a Parquet table; an in-memory source of two batches is read
   whole and one of none gives no rows with its schema.
+- `test_arrow_result`: `run_sql` answers over a Parquet table with NULLs
+  (a projection of INT64, INT32, VARCHAR and DECIMAL(10, 2) columns, count
+  and sums, a filter that keeps no row) read back value for value by a
+  consumer written in C (`src/tests/helpers/komira_test_arrow_c_consumer`)
+  after the context is dropped, which releases the stream before it reads
+  the chunks and calls every release twice; afterwards each result buffer is
+  held by nothing else. A refusal raises with its step, an outcome with no
+  batch is refused, a selection mask is applied, batches keep their order,
+  and a column the export cannot carry is refused naming it.
 - `test_secret_capability_reveal`: a capability reveals exactly the secret
   bound to its own node id, once and after one store resolve; two capabilities
   over one bindings table each reveal their own value; an unbound node or a

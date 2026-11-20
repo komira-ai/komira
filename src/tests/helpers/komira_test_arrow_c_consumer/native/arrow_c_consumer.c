@@ -192,7 +192,9 @@ static void put_decimal128(text *t, const uint8_t *bytes, int scale) {
 static int decimal_scale(const char *format, int *scale) {
   int precision = 0, s = 0, width = 128;
   int got = sscanf(format, "d:%d,%d,%d", &precision, &s, &width);
-  if (got < 2 || width != 128 || precision < 1 || s < 0) return 1;
+  /* precision <= 38 and scale <= precision bound the digits at 39. */
+  if (got < 2 || width != 128 || precision < 1 || precision > 38 || s < 0 || s > precision)
+    return 1;
   *scale = s;
   return 0;
 }
