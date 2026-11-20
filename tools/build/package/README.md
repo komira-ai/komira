@@ -352,56 +352,85 @@ a release carries comes from [`release_version.sh`](release_version.sh).
 
 ## The Python wheel
 
-`wheel_package` ([`wheel.bzl`](wheel.bzl)) writes the wheel of the Python
-package (docs/design/python_package.md): the import package's files, the
-library it loads with its native owners beside it (a `mojo_shared_lib`'s
-`[runnable]` directory, copied to `<import>/_lib/` without the Mojo runtime
-libraries of the platform row's `runtime_libs`), the licence files the
-pyproject's `license-files` names (the root's `LICENSE` and `NOTICE`), and
-METADATA from the pyproject's `[project]`. It is explicit: a target asks for it,
-and nothing in Buck lists it as published.
+`wheel_file` ([`wheel.bzl`](wheel.bzl)) writes a Python wheel of the files it is
+given, with METADATA made from its attributes, and refuses to write one that
+would be wrong for the platform it is tagged for. `komira_wheel`
+([`wheel/main.zig`](wheel/main.zig)) is the writer and its read-back check, a
+static executable run as build actions: no shell, no Python, nothing from
+`third_party/python`. It is generic: the package's own wheel target is declared
+with the package, not here; the targets here are fixtures.
 
-`komira_wheel` ([`komira_wheel.zig`](pack/komira_wheel.zig)) writes the wheel,
-its METADATA and `manifest.json` (the release's artifact manifest of a `PYTHON`
-artifact, whose `metadata` names the METADATA beside it) into a directory, and
-`komira_wheel check` reads that directory back. What the rule fixes, so no BUCK
-file states it:
+| attribute | METADATA, or what it does |
+|---|---|
+| `distribution` | `Name` (normalised: lowercase letters, digits, single `-`), and the file name `<dist>-<version>-<tag>.whl` |
+| `summary`, `readme` | `Summary`, and the body (the README, Markdown: `Description-Content-Type: text/markdown`) |
+| `requires_python`, `requires_dist`, `classifiers`, `project_urls` | `Requires-Python`, `Requires-Dist` (in order), `Classifier`, `Project-URL` |
+| `license_expression`, `license_files` | `License-Expression` and a `License-File` per file, the files at `.dist-info/licenses/<name>` (PEP 639); default the root's `LICENSE` and `NOTICE`. A `License ::` classifier beside the expression is refused (PEP 639 forbids the pair) |
+| `files`, `executable` | `{path in the wheel: file or directory}` (a directory adds every file under it), written 0644, or 0755 for the paths `executable` names (shared libraries) |
+| `platform` | the row of [tools/build/platforms/table.bzl](../platforms/table.bzl) the wheel is for (default `linux-x86_64`); the tag is `wheel_tag` of it |
+| `max_glibcxx`, `max_cxxabi`, `external_needed` | the bounds and the outside libraries of the library checks below |
 
-- the version, `<compiler version>.post<N>` with `N` from
-  `-c komira.package_stamp` (0, an unstamped development output, by default), and
-  the source commit from `-c komira.package_commit`;
-- the tag, `py3-none-manylinux_<glibc floor>_x86_64`: the package uses ctypes,
-  not the CPython ABI, and the floor is the platform table's. Other platforms
-  are not built yet (libkomira is linked for linux-x86_64 only);
-- the requirement `mojo-compiler==<compiler version>` after the pyproject's
-  `dependencies`, which is where the left-out runtime libraries come from.
+What the rule fixes, so no BUCK file states it:
 
-The pyproject is read with a TOML subset (basic strings, arrays of them, inline
-tables of them, three tables); any other key, table or form is refused with its
-line, so the file never says something the wheel does not carry. The bytes are
-reproducible: members sorted bytewise (RECORD last), every date 1980-01-01,
-mode 0755 for every file of the native directory and for a package file with
-an exec bit, 0644 otherwise, each member deflated by
-the packer's own deflate when that is smaller. A second action builds the same
-wheel from the same inputs staged at other paths (`[twin]`), and the check
-refuses the wheel unless the two are the same bytes.
+- **The tag** comes from the platform row: `py3-none-manylinux_<glibc floor>_<arch>`
+  for a Linux row (`x86_64`, or `aarch64` for `arm64`) and
+  `py3-none-macosx_<major>_<minor>_arm64` for macOS, with the row's `os_floor`.
+  linux-x86_64 gives `py3-none-manylinux_2_34_x86_64`. The package loads its
+  library with ctypes, so it is `py3-none`. A wheel with a native library is
+  never `any`. Root-Is-Purelib is false, Wheel-Version 1.0, Metadata-Version 2.4.
+- **The version** is the stamp's, the one the release set uses:
+  `-c komira.package_stamp=<N> -c komira.package_commit=<sha> -c komira.package_timestamp_ms=<ms>`
+  gives `0.1.<N>`, a PEP 440 final release. N is the first-parent commit count
+  (`release_version.sh`): the same on every runner for one commit, and a
+  documentation-only commit does not raise it. With none of the three, the wheel
+  is `0.0.0`, an unstamped development wheel. Any other mix fails the build,
+  naming what is missing. This is not the `<compiler version>.post<N>` of
+  [packaging/conda/README.md](../../../packaging/conda/README.md), which would
+  call komira 1.0 and tie its version to the Mojo compiler's: the wheel is
+  komira's own release, and its Mojo pin is a `Requires-Dist`.
+- **Reproducible bytes**: members sorted bytewise, then the dist-info's METADATA,
+  WHEEL, licences and RECORD (sha256 in urlsafe base64 without padding, RECORD
+  last); every member dated with the commit time (1980-01-01 unstamped); modes
+  0644 and 0755 only; no extra fields; each member deflated by the packer's
+  `deflate.zig` when that is smaller. A second action writes the wheel again
+  from the same inputs staged at another path (`[twin]`), and the check refuses
+  the wheel unless the two are the same bytes.
 
-Sub-targets: `[whl]`, `[manifest]`, `[metadata]`; `[check]` (the directory read
-back: RECORD hashes and sizes, WHEEL's tag, METADATA, the licence files byte for
-byte, `py.typed`, the library executable, no Mojo runtime library, the twin);
-`[release]` (with `[release][whl]`, `[release][manifest]`,
-`[release][metadata]`), a copy made only after `[release_check]` passed, the same
-check with a positive stamp and a source commit required. An uploader reads
-`[release]` and nothing else.
+The library checks ([`wheel/policy.zig`](wheel/policy.zig)) read every ELF
+member ([`wheel/elf.zig`](wheel/elf.zig), through its program headers, so a
+stripped library reads the same). A refusal names its check:
 
-The check also refuses a member outside the import package and the dist-info,
-and a dist-info member other than METADATA, WHEEL, RECORD and the licences. `wheel_package_test_stamped` gives conda.bzl's test
-stamp instead of the configuration's.
+- `glibc`: the highest `GLIBC_` version it needs is at most the tag's glibc
+  (`GLIBC_PRIVATE` is refused);
+- `glibcxx`, `cxxabi`: the highest `GLIBCXX_` and `CXXABI_` versions are at most
+  `max_glibcxx` and `max_cxxabi`, and with one unset, none may be needed. The
+  package's own target sets them from the measured needs of libkomira;
+- `runpath`: every `DT_RUNPATH` and `DT_RPATH` entry is `$ORIGIN` or under it;
+- `needed`: every `DT_NEEDED` is a member of the wheel (by file name), a system
+  library of the manylinux list (libc, libm, libdl, libpthread, librt, libstdc++,
+  libgcc_s, the dynamic loader), or in `external_needed`;
+- `external`: no member is a library of `external_needed`. The Mojo runtime
+  (libMSupportGlobals, libAsyncRTRuntimeGlobals, libKGENCompilerRTShared) comes
+  from Modular's package, never from the wheel;
+- `platform`: an ELF member only in a manylinux wheel;
+- `size`: no member over 90 MB (90,000,000 bytes; PyPI takes 100 MB a file).
 
-The tests: the Zig scenarios `:wheel_project_unit`, `:wheel_zip_unit`,
-`:wheel_build_unit` and `:wheel_check_unit` in [`BUCK`](BUCK), and the
-standard-library reader of a built wheel,
-[`python/tests/wheel`](../../../python/tests/wheel/BUCK). Not done yet: wheels for
-linux-arm64 and macos-arm64, the release's PYTHON member (the release set reads
-CONDA members only), and the package's own wheel target, which comes with
-`python/komira`.
+Mach-O libraries of a macOS wheel are not read yet: they come with the macOS
+wheel.
+
+Sub-targets: `[default]` is the wheel, copied only after `[check]` passed;
+`[check]` reads it back ([`wheel/check.zig`](wheel/check.zig)). That covers the
+name, every member's date, the members exactly (bytes and modes), RECORD's hashes
+and sizes, WHEEL's tag, METADATA and its Requires-Dist, the licences, the library
+checks again, and the twin. `[release]` is the wheel copied only after
+`[release_check]` passed: the same check, refusing an unstamped wheel. A
+publisher reads `[release]` and nothing else. `wheel_file_test_stamped` gives
+conda.bzl's test stamp (and its default output waits for `[release]` too).
+
+The tests: the Zig scenarios `:wheel_zip_unit`, `:wheel_elf_unit`,
+`:wheel_policy_unit`, `:wheel_build_unit`, `:wheel_check_unit` and
+`:wheel_cli_unit` in [`BUCK`](BUCK), on synthetic files and ELF libraries
+([`wheel/testing.zig`](wheel/testing.zig)). The rule on fixtures: `:wheel_fixture`
+(a linux-x86_64 wheel holding the example Mojo shared library `plain`, with the
+Mojo runtime as `external_needed`), `:wheel_fixture_linux_arm64` and
+`:wheel_fixture_darwin_arm64`. `:wheel_tag_cases` holds each release row's tag.

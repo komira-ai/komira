@@ -21,9 +21,32 @@ uses `python_oracle` or `python_proto`.
 Python here is test-only: live oracles (pyarrow and DuckDB computing the
 answer a Mojo test compares against) and drivers of komira's Python-facing
 surfaces, the Python package's tests among them. Nothing built with these
-rules is shipped (the package's wheel, when there is one, is built by a rule
-of its own)
+rules is shipped
 ([third_party/python](../../../third_party/python/README.md#never-shipped)).
+
+The repository's own wheel is not built here: `wheel_file`
+([package/README.md](../package/README.md#the-python-wheel)) writes it with
+the Zig tool `komira_wheel`. Its rule and writer sit outside this package, and
+no rule kind of it names Python, so `//:python_closure` and the pull request's
+Python guard see no Python in it. What is fixed for it, and not reopened per
+wheel:
+
+- one rule, `wheel_file` (tools/build/package/wheel.bzl), and a Zig writer run as
+  a build action, with no shell, no Python and nothing from `third_party/python`;
+- METADATA from the rule's attributes (name, summary, a Markdown README,
+  Requires-Python, Requires-Dist, classifiers, project URLs, and a PEP 639
+  licence expression with its licence files), and the files it names, a shared
+  library marked executable;
+- the tag from a platform row: `py3-none-manylinux_2_34_x86_64` for
+  linux-x86_64 (the row's glibc floor), `aarch64` and `macosx_<floor>_arm64` the
+  same way. Never `py3-none-any`, never a local version;
+- the version `0.1.<N>` from the release set's stamp (all three `-c
+  komira.package_*` values or the build fails), `0.0.0` unstamped, and an
+  unstamped wheel is never a release;
+- reproducible bytes, and a wheel the rule refuses to write when a library in
+  it needs a newer glibc, GLIBCXX or CXXABI than allowed, has a run path that is
+  not `$ORIGIN`-relative, needs a library nobody provides, bundles the Mojo
+  runtime, or is over 90 MB.
 
 ## Rules
 
