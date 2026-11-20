@@ -423,10 +423,12 @@ Nothing writes a wheel yet.
 
 ## A Python wheel rule (design only; no code)
 
-The conda rules do not cover the Python front end. A wheel is a different
-artifact with a different licence question: a self-contained wheel would carry
-the Modular Mojo runtime, where a conda package only depends on it. So the
-rule, when it is written:
+The conda rules do not cover the Python front end. The wheel is the
+distribution `komira`; like a conda package it carries `libkomira` and no
+file of the Modular Mojo runtime, and depends on Modular's `mojo-compiler`
+package for it (on PyPI rather than Modular's conda channel; see
+[docs/design/mojo_runtime_pypi_vs_conda.md](../../docs/design/mojo_runtime_pypi_vs_conda.md)).
+So the rule, when it is written:
 
 - **explicit, and off by default.** Unlike the conda package, a library does not
   get a wheel unless it asks (`wheel = True`, or a `python_wheel` target for the
@@ -440,6 +442,25 @@ rule, when it is written:
   reproducibly, read back by an independent check.
 - **declared in the release's artifact list** like every other artifact (a `PYTHON_WHEEL` artifact
   whose build rule is that target); nothing in Buck lists it as published.
+- **licence metadata (PEP 639)**: the wheel's `METADATA` carries
+
+  ```
+  License-Expression: Apache-2.0
+  License-File: LICENSE
+  License-File: NOTICE
+  Requires-Dist: mojo-compiler==<compiler version>
+  ```
+
+  and the two files are the repository root's `LICENSE` and `NOTICE`, byte for
+  byte, at `komira-<version>.dist-info/licenses/LICENSE` and
+  `.../licenses/NOTICE`. There is no `License ::` classifier (PEP 639
+  deprecates it beside an expression). `NOTICE`'s last section is what tells a
+  user that the Mojo runtime comes from `mojo-compiler` under Modular's
+  licence, so the read-back check refuses a wheel that lacks either file, has a
+  copy that differs from the root's, carries any of the three runtime
+  libraries (`libKGENCompilerRTShared`, `libAsyncRTRuntimeGlobals`,
+  `libMSupportGlobals`), or has no `mojo-compiler` requirement at the
+  compiler version.
 
 ## Not done yet
 
