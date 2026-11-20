@@ -67,9 +67,10 @@
 //!               `-` after it: a UUID's group is not one), not followed by
 //!               `...` or an ellipsis (a digest abbreviated), not quoted, not a
 //!               binary (0b...) or float (1e30) literal. Prose (`prose`) is a
-//!               whole line of a Markdown or text file, the comment of a line
-//!               of a `#` language with a Mojo or Python docstring, and the
-//!               comment of a line of a `//` language. Code is not prose: a
+//!               whole line of a Markdown or text file or of a wheel's or
+//!               sdist's METADATA or PKG-INFO, the comment of a line of a `#`
+//!               language with a Mojo or Python (`.py`, `.pyi`) docstring, and
+//!               the comment of a line of a `//` language. Code is not prose: a
 //!               40-hex pin in code names an upstream commit.
 //!
 //! Limits (a text reader's):
@@ -665,10 +666,12 @@ pub fn kindOf(path: []const u8) Kind {
     const ext = if (std.mem.lastIndexOfScalar(u8, base, '.')) |i| base[i + 1 ..] else "";
     const has_ext = std.mem.indexOfScalar(u8, base, '.') != null;
     for ([_][]const u8{ "md", "txt", "rst" }) |x| if (has_ext and std.mem.eql(u8, ext, x)) return .text;
-    for ([_][]const u8{ "BUCK", "BUILD", "Makefile", "Dockerfile" }) |x| if (std.mem.eql(u8, base, x)) return .hash;
+    for ([_][]const u8{ "BUCK", "BUILD", "Makefile", "Dockerfile", "MANIFEST.in" }) |x| if (std.mem.eql(u8, base, x)) return .hash;
+    // A wheel's or sdist's core metadata: headers, then the long description.
+    for ([_][]const u8{ "METADATA", "PKG-INFO" }) |x| if (std.mem.eql(u8, base, x)) return .text;
     if (dotfile(base)) return .hash;
     if (has_ext) {
-        for ([_][]const u8{ "mojo", "py", "sh", "bash", "bzl", "bxl", "yml", "yaml", "toml", "tsv", "txtpb", "textproto", "buckconfig", "cfg", "ini", "flags", "awk", "example", "cmake" }) |x|
+        for ([_][]const u8{ "mojo", "py", "pyi", "sh", "bash", "bzl", "bxl", "yml", "yaml", "toml", "tsv", "txtpb", "textproto", "buckconfig", "cfg", "ini", "flags", "awk", "example", "cmake" }) |x|
             if (std.mem.eql(u8, ext, x)) return .hash;
         for ([_][]const u8{ "c", "h", "cc", "cpp", "hpp", "rs", "zig", "proto", "go", "js", "ts", "java", "S", "s", "inc" }) |x|
             if (std.mem.eql(u8, ext, x)) return .slash;
@@ -699,7 +702,7 @@ pub const Prose = struct {
     pub fn init(alloc: std.mem.Allocator, path: []const u8) Prose {
         return .{
             .kind = kindOf(path),
-            .docstrings = std.mem.endsWith(u8, path, ".mojo") or std.mem.endsWith(u8, path, ".py"),
+            .docstrings = std.mem.endsWith(u8, path, ".mojo") or std.mem.endsWith(u8, path, ".py") or std.mem.endsWith(u8, path, ".pyi"),
             .buf = std.ArrayList(u8).empty,
             .alloc = alloc,
         };
