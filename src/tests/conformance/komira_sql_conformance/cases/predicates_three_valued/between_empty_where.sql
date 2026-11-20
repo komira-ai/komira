@@ -1,0 +1,2 @@
+-- order: rows
+SELECT k FROM T WHERE i BETWEEN 5 AND 2

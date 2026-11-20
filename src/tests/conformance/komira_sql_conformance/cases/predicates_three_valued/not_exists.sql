@@ -1,0 +1,2 @@
+-- order: rows
+SELECT k FROM T WHERE NOT EXISTS (SELECT v FROM S WHERE S.v = T.i)
