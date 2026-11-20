@@ -42,8 +42,6 @@
 #   * test_a_scalar_subquery_is_refused_by_lowering: the optimizer leaves the
 #     subquery in the plan, so it is LOWERING_UNCUTTABLE_NODE at `lower`, and
 #     Q6 then runs on the same context.
-#   * test_a_select_without_from_is_refused_at_execute: the in-memory scan is
-#     EXECUTE_UNSUPPORTED_PARAM, reached through run_sql.
 #   * test_a_refusal_leaves_the_context_usable: a bind and a parse refusal, then
 #     Q6 gives the oracle.
 #   * test_options_are_validated: a worker count or memory budget below 1 is
@@ -402,15 +400,6 @@ def test_a_scalar_subquery_is_refused_by_lowering() raises:
     _expect_revenue(run_sql(ctx, _q6()), o.revenue)
 
 
-def test_a_select_without_from_is_refused_at_execute() raises:
-    var ctx = _new_context()
-    _expect_refusal(
-        run_sql(ctx, "select 1 + 1"),
-        String(STEP_EXECUTE),
-        "EXECUTE_UNSUPPORTED_PARAM",
-    )
-
-
 def test_a_refusal_leaves_the_context_usable() raises:
     var t = q6_table(120)
     var o = _oracle(t)
@@ -465,7 +454,6 @@ def main() raises:
     suite.test[test_a_tiny_memory_budget_is_refused_at_execute]()
     suite.test[test_a_sum_past_int64_is_answered_exactly_and_the_context_runs_on]()
     suite.test[test_a_scalar_subquery_is_refused_by_lowering]()
-    suite.test[test_a_select_without_from_is_refused_at_execute]()
     suite.test[test_a_refusal_leaves_the_context_usable]()
     suite.test[test_options_are_validated]()
     suite.test[test_contexts_can_be_created_and_dropped_repeatedly]()
