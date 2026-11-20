@@ -50,7 +50,7 @@ no per-library hash is recorded in the repository, so the per-library hashes bel
   separate ruling this note does not make.
 - (INDEX) No smaller runtime-only package exists on PyPI under the names tried (`mojo-runtime`,
   `mojo-libs`, `mojo_runtime`, `modular-runtime` are all absent). The `mojo` package is larger
-  (it adds `mblack` and `mojo-lldb-libs`), and `komira` is not registered on PyPI.
+  (it adds `mblack` and `mojo-lldb-libs`).
 - Install weight of route A is the compiler wheel plus the libs wheel: about 82 MB on
   linux-x86_64, 79.5 MB on linux-arm64, 74 MB on macos-arm64. The three runtime libraries are
   1.96 MB, 1.87 MB and 1.57 MB of that.
