@@ -228,6 +228,6 @@ packaging change that lists it.
 
 No release-over-release version check and no packaged header yet; no plan execution, query
 or UDF call; no engine in the session; the one language binding is the Node addon ([`node/`](https://github.com/komira-ai/komira/blob/main/node/README.md)).
-The calls that run a query, their result as an Arrow C stream, session options,
-cancel and progress, and what an abort does at the boundary are designed in
+The calls that run a query, ported from the earlier SDK, their result as an Arrow
+C stream, and what an abort does at the boundary are described in
 [docs/design/libkomira_run_abi.md](https://github.com/komira-ai/komira/blob/main/docs/design/libkomira_run_abi.md).
