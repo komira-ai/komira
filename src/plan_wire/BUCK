@@ -62,6 +62,18 @@ mojo_library(
     visibility = ["PUBLIC"],
 )
 
+# The goldens, for the Python package's test of its generated plan modules
+# (python/tests): one directory holding each `<stem>.hex`, `<stem>.canonical.hex`
+# and `<stem>.txtpb` by its file name.
+filegroup(
+    name = "golden_fixtures",
+    srcs = {
+        f.removeprefix("tests/fixtures/golden/"): f
+        for f in glob(["tests/fixtures/golden/*"])
+    },
+    visibility = ["komira//python/tests:"],
+)
+
 # The scan-kind goldens, for the test that links each kind's shipping binding
 # constructor to these bytes (tests/scan_binding_links). It lives outside this
 # package so that plan_wire depends on no scan kind.
