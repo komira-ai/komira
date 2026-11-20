@@ -32,7 +32,7 @@ def parse_answer_args(args: List[String]) raises -> AnswerSettings:
             with no value, a missing required flag, or a memory limit that is
             not a positive whole number of GiB.
     """
-    var allowed = [String("duckdb"), String("cache-dir"), String("out-dir"), String("memory-limit-gib")]
+    var allowed: List[String] = [String("duckdb"), String("cache-dir"), String("out-dir"), String("memory-limit-gib")]
     var flags = parse_flags(args, 0, allowed)
     var gib: Int = DEFAULT_MEMORY_GIB
     if flags.has(String("memory-limit-gib")):
