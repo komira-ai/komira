@@ -1,6 +1,6 @@
 # Design: one UDF runtime interface for every language
 
-Status: proposed, not built. Nothing was built or run for this revision; earlier prototypes informed it (§9). Citations are to komira `main` as of 2026-10-09, except those to the optimized-plan design, which are to `main` after komira-ai/komira#1094 merged it: `docs/design/optimized_plan.md`, `docs/design/optimized_plan_udfs.md` and `docs/design/optimized_plan_udf_runtime.md` (split from `optimized_plan_udfs.md` by komira-ai/komira#1507).
+Status: proposed, not built. Nothing was built or run for this revision; earlier prototypes informed it (§9). Citations are to komira `main` as of 2026-11-20, except those to the optimized-plan design, which are to `main` after komira-ai/komira#1094 merged it: `docs/design/optimized_plan.md`, `docs/design/optimized_plan_udfs.md` and `docs/design/optimized_plan_udf_runtime.md` (split from `optimized_plan_udfs.md` by komira-ai/komira#1507).
 
 Section numbers:
 - `§10.1` to `§10.9` refer to `optimized_plan_udfs.md`; `§10.10` to `§10.14` refer to `optimized_plan_udf_runtime.md`.
@@ -99,34 +99,35 @@ Decisions this document makes that go beyond the language rulings it implements:
 - A read-set mismatch found by `validate` has its own status, `ERR_READ_SET_MISMATCH` (§4.5).
 - An unknown status from a newer minor is treated as `ERR_INTERNAL` (§4.4), and `ERR_FIELD_NOT_DECLARED` is not bisected (§4.5).
 - Go is managed; its runtime chooses how it executes (§1.2).
+- Runtime options reach a runtime as flags in `komira_udf_host`, passed through the engine unread, and a bad one is `ERR_BAD_OPTION` (§4.3, §4.5). The `komira/python` runtime's own decisions are listed in `udf_python_worker.md` §9.
 
 ## 2. What exists today, and why the shape must change now
 
 **The logical plan names a function, and the receiving process resolves the name.**
-- `WireUdfCall` carries `name=1`, `in_arrow_type_id=2`, `out_arrow_type_id=3` and a single `child=4`. That child "MAY NOT BECOME `repeated`" (`src/plan_proto/plan.proto:791-824`).
-- The node form, `WireUdf` (`plan.proto:1186`), mirrors `UdfData` (`src/plan_expr/udf_data.mojo:216-293`). The `UdfData` field `operator_factory_id` only means something for a Mojo function known at compile time.
+- `WireUdfCall` carries `name=1`, `in_arrow_type_id=2`, `out_arrow_type_id=3` and a single `child=4`. That child "MAY NOT BECOME `repeated`" (`src/plan_proto/plan.proto:820-854`).
+- The node form, `WireUdf` (`plan.proto:1237`), mirrors `UdfData` (`src/plan_expr/udf_data.mojo:216-293`). The `UdfData` field `operator_factory_id` only means something for a Mojo function known at compile time.
 - A UDF whose name cannot be resolved is refused (`plan.proto:88-94`).
 - No field names a language.
 
 **The engine's vocabulary is already language-neutral.**
 - Kinds: `UDF_KIND_MAP/FILTER/AGG` (`udf_data.mojo:143-145`).
 - Null modes (`:154-156`) and stability (`:165-167`).
-- Parallelism contracts: `STATELESS`, `SERIAL_ORDERED`, `MERGEABLE`, `PARTITION_LOCAL` (`:186-189`), carried on the wire as `WireUdf.parallelism_tag` (`plan.proto:1204`). The optimized-plan `UdfRef` has no parallelism field; §3.4 states the rule that replaces it.
+- Parallelism contracts: `STATELESS`, `SERIAL_ORDERED`, `MERGEABLE`, `PARTITION_LOCAL` (`:186-189`), carried on the wire as `WireUdf.parallelism_tag` (`plan.proto:1255`). The optimized-plan `UdfRef` has no parallelism field; §3.4 states the rule that replaces it.
 - The Mojo aggregate trait already has the lifecycle every language needs: `init`, `update`, `merge`, `finalize` (`src/udf/agg_fn.mojo:67-140`).
 
 **Part of the data plane exists.**
 
 - Arrow C Data structs with release callbacks: `CArrowSchema` and `CArrowArray` (`src/arrow_ipc/c_data_interface.mojo:136`, `:234`), under an `FFI-BOUNDARY` header (`:1-25`). That exporter *borrows*: "Caller promises the Mojo-owned backing buffers outlive the consumer's reads", and its release never frees the buffer bytes (`:17-20`). It cannot back an array whose release runs after the call returns.
-- The C Stream interface, `CArrowArrayStream` (`src/arrow_ipc/c_data_stream.mojo:232`).
-  - Export makes no copy, and each exported column holds a shared reference on its buffer (`c_data_stream.mojo:385-395`). This is the model the UDF exporter reuses (§4.4).
-  - Import copies: "buffers are COPIED" (`drain_record_batch_stream`, `:3083-3087`; `drain_c_abi_record_batch_stream`, `:3264-3278`).
+- The C Stream interface, `CArrowArrayStream` (`src/arrow_ipc/c_data_stream.mojo:247`).
+  - Export makes no copy, and each exported column holds a shared reference on its buffer (`c_data_stream.mojo:402-424`). This is the model the UDF exporter reuses (§4.4).
+  - Import copies: "buffers are COPIED" (`drain_record_batch_stream`, `:3007-3012`; `drain_c_abi_record_batch_stream`, `:3188-3205`).
 - Arrow IPC can decode from mapped memory without copying: `decode_record_batch_message_mmap` (`src/arrow_ipc/ipc_decoder_dispatch.mojo:4088`) and `borrow_from_mmap` (`src/byte_buffer/src/byte_buffer/shared_aligned_buffer.mojo:467`).
 - Missing:
   - import of a foreign array without a copy, with validation of its layout;
   - the Arrow C Device structs;
-  - any shared-memory channel (`git grep -E 'memfd|shm_open' origin/main -- src` finds nothing);
+  - any shared-memory channel (`git grep -E 'memfd|shm_open' origin/main -- src` finds only the prototypes' memory files: the native prototype's verified library, `src/tests/helpers/komira_udf_spike_native/`, and the Node worker prototype's cancel word, `src/tests/helpers/komira_udf_spike_node_worker/proxy/channel.c:395`);
   - a UDF executor;
-  - a UDF operator in the physical plan. `src/plan_ir/physical_plan.mojo:206-209` lists only `OP_FILTER/PROJECT/LIMIT/JOIN_PROBE`. Today the SDK walks the expression and evaluates UDF calls itself, because of a package cycle (`src/plan_ir/expr_udf_sites.mojo:1-30`).
+  - a UDF operator in the physical plan. `src/physical_plan/physical_plan.mojo:209-212` lists only `OP_FILTER/PROJECT/LIMIT/JOIN_PROBE`. Today the SDK walks the expression and evaluates UDF calls itself, because of a package cycle (`src/plan_ir/expr_udf_sites.mojo:1-30`).
 
 **Why the plan format must not name languages.** A plan format with a per-language shape hard-codes its languages in at least six places. This design keeps the plan language-neutral in each of them, and the optimized-plan UDF section follows it:
 
@@ -280,7 +281,7 @@ Every digest the runtime will read is listed in `code.code` with a role. So admi
 - **the shapes** the entry supports, as `UdfKind` values (`MAP_BATCHES_FRAME` grouped or not, `AGGREGATE` plain or mergeable, as the capability bits of §4.2 distinguish them);
 - **the signature**: the argument types in call order (for `ROW` and `MAP_BATCHES_FRAME`, the field list, when the producer knows it: a native library's export helper, or a Python `TypedDict` or dataclass annotation; otherwise the list is absent. A present, empty list means the function reads no column), the return type and, for a mergeable aggregate, the state type, each as a `WireField` (an Arrow type, nested to any depth).
 
-The field list is a message, so that absent and empty differ, as for `UdfRef.read_set` (field 19, §3.1); each runtime's descriptor carries it as a field of this type, emitted whenever it is set, even when empty. `RecordedFields` is added to `src/plan_proto/plan.proto`, beside `WireField`, in stage 11 of `optimized_plan.md` §12, and every runtime's descriptor schema imports both from there rather than copying them. `validate` refuses a `RecordedFields` that breaks its order, its uniqueness or the disjointness of its two lists with `ERR_DESCRIPTOR`; that `key_fields` holds only `group_by` columns is the producer's rule, which `validate` cannot check because the spec carries no `group_by`:
+The field list is a message, so that absent and empty differ, as for `UdfRef.read_set` (field 19, §3.1); each runtime's descriptor carries it as a field of this type, emitted whenever it is set, even when empty. `RecordedFields` is in `src/plan_proto/plan.proto` (`:238`), beside `WireField`, and every runtime's descriptor schema imports both from there rather than copying them. `validate` refuses a `RecordedFields` that breaks its order, its uniqueness or the disjointness of its two lists with `ERR_DESCRIPTOR`; that `key_fields` holds only `group_by` columns is the producer's rule, which `validate` cannot check because the spec carries no `group_by`:
 
 ```proto
 message RecordedFields {            // in a runtime's descriptor, for ROW and MAP_BATCHES_FRAME entries
@@ -346,7 +347,7 @@ message RuntimeNeed {            // in DeclaredNeeds (optimized_plan.md §6.1)
   - Plan every query in the UDF corpus twice. The second time, replace every `code` with `{runtime: "komira-test/null"}` and empty fields, and every `needs.runtimes` entry likewise.
   - After applying the same substitution to the first result, the two optimized plans must be equal.
   - A third planning replaces every runtime with `komira/native`, and the result must again be equal. This holds the optimizer to the rule that the class and mode of a UDF (§1.2) do not change the plan.
-  - Mutants: an optimizer rule that skips CSE when `runtime == "komira/python"`; a rule that pushes calls below a filter only when the runtime is native. The test must go red for each.
+  - Negative cases: an optimizer rule that skips CSE when `runtime == "komira/python"`; a rule that pushes calls below a filter only when the runtime is native. The test must fail on each.
 
 ### 3.3 Physical plan: what the host binds
 
@@ -375,7 +376,7 @@ These rules are part of the plan's meaning, so they hold on every host and for e
 
 1. **Conditional evaluation.** A UDF call is evaluated only on rows for which every enclosing conditional selects its branch (`CASE`, `coalesce`, the right-hand side of `AND`/`OR`), and only on rows that survive earlier conjuncts of the same filter. So `CASE WHEN x > 0 THEN f(x) END` never calls `f` on a row with `x <= 0`. The ordering of UDF conjuncts last (`optimized_plan_udfs.md` §10.9, the conjunct-order row) depends on this rule.
 2. **Compaction.** The host compacts the selected rows (a `take`) before the call and scatters the result after it. Under `PROPAGATE` it also removes rows with a null argument. The arrays a runtime receives contain only rows it must compute.
-3. **Independence from instances and batch boundaries.** The result of a `SCALAR`, `ROW` or `MAP_BATCHES_COLUMN` call on a row does not depend on which instance serves it or on where batches were split. A function may cache (a loaded model, a memo table); a function whose per-row result depends on earlier calls (a row counter) is not expressible at the first format version. This replaces the `SERIAL_ORDERED` parallelism contract, which `UdfRef` does not carry. A frame-form function already sees batch boundaries; #1094 states its rule in §10.8 ("Declared resources"): a `MAP_BATCHES_FRAME` function must not depend on batch boundaries unless the node is grouped.
+3. **Independence from instances and batch boundaries.** The result of a `SCALAR`, `ROW` or `MAP_BATCHES_COLUMN` call on a row does not depend on which instance serves it or on where batches were split. A function may cache (a loaded model, a memo table); a function whose per-row result depends on earlier calls (a row counter) is not expressible at the first format version. This replaces the `SERIAL_ORDERED` parallelism contract, which `UdfRef` does not carry. A frame-form function already sees batch boundaries; komira-ai/komira#1094 states its rule in §10.8 ("Declared resources"): a `MAP_BATCHES_FRAME` function must not depend on batch boundaries unless the node is grouped.
 4. **Exact argument encoding.** The host hands the runtime arrays in exactly the `arg_types` encoding: no dictionary or view encoding unless the declared type is one; the host casts first. Arrays may have a non-zero `offset`, including bit offsets that are not multiples of 8.
 5. **The argument struct.** Arguments arrive as one struct array, one child per `arg_types` entry (after the group ordinal, for a grouped frame or plain aggregate), with no validity buffer and offset 0. For a `ROW`, the children are exactly the columns `arg_types` lists, named as there: the read set when one is set, otherwise every input column; the host passes no other column. A `MAP_BATCHES_FRAME`'s input batches carry the same columns. Its `length` is the row count and is authoritative: a zero-argument `SCALAR` such as `uuid()`, and a `ROW` or frame whose read set is empty, receive a struct with no children and `length` rows.
 6. **Delivery.** Within one run, user code never runs a `VOLATILE` batch twice, and nothing is retried after a loss (§4.5); a run restarted from a checkpoint delivers again the batches after that checkpoint. A non-`VOLATILE` `call_batch` batch may run more than once only through bisection after `ERR_RAISED` (§4.5, §10.7).
@@ -442,7 +443,8 @@ typedef enum {                        /* 0 is success; values are never reused *
   KOMIRA_UDF_ERR_WORKER_CRASHED = 17, /* the process running user code died, not by the runtime's own stop; context lost */
   KOMIRA_UDF_ERR_HOST_CONTRACT = 18,  /* the host broke this ABI (§4.5); message names the rule */
   KOMIRA_UDF_ERR_KILLED = 19,         /* user code ignored a cancel or deadline and was stopped by force; context lost */
-  KOMIRA_UDF_ERR_READ_SET_MISMATCH = 20 /* validate: ROW/FRAME arg_types names differ from the descriptor's fields */
+  KOMIRA_UDF_ERR_READ_SET_MISMATCH = 20, /* validate: ROW/FRAME arg_types names differ from the descriptor's fields */
+  KOMIRA_UDF_ERR_BAD_OPTION = 21      /* init: an unknown, missing or unparsable runtime option; message names it */
 } komira_udf_status;
 
 /* capabilities.udf_class (0 reserved, refused) */
@@ -483,6 +485,8 @@ typedef struct komira_udf_host {      /* provided by the engine; valid until shu
   void     (*mem_release)(void* host_data, int64_t bytes);
   int64_t  (*now_ns)(void* host_data);                      /* monotonic clock deadlines are read against */
   void     (*log)(void* host_data, int32_t level, const char* utf8);
+  size_t             n_options;      /* runtime options, "key=value": flags for this runtime, opaque to the engine */
+  const char* const* options;        /* borrowed for the init call; a bad key or value is ERR_BAD_OPTION */
 } komira_udf_host;
 
 typedef struct komira_udf_capabilities {
@@ -601,7 +605,7 @@ Every pointer that crosses the ABI has exactly one named owner. The Mojo binding
 
 | Object | Owner | Rule |
 |---|---|---|
-| `args`, `states`, `group_ids` of every call | **Moved to the runtime on entry, whatever status it returns** | The struct itself belongs to the host (often on its stack). Before returning, the runtime moves it into its own storage (`*mine = *args; args->array.release = NULL;`) and later calls `release` only on its own copy, exactly once. It may release after returning, when user code kept a view. The host exports without copying: each buffer is kept alive by a shared reference that the release drops, as the stream exporter already does (`c_data_stream.mojo:385-395`), not with the borrowing exporter of `c_data_interface.mojo:17-20`. |
+| `args`, `states`, `group_ids` of every call | **Moved to the runtime on entry, whatever status it returns** | The struct itself belongs to the host (often on its stack). Before returning, the runtime moves it into its own storage (`*mine = *args; args->array.release = NULL;`) and later calls `release` only on its own copy, exactly once. It may release after returning, when user code kept a view. The host exports without copying: each buffer is kept alive by a shared reference that the release drops, as the stream exporter already does (`c_data_stream.mojo:402-424`), not with the borrowing exporter of `c_data_interface.mojo:17-20`. |
 | `out` of every call | **Moved to the host on success** | The runtime produces it with its own release callback. On any status other than OK, `out->array.release == NULL` and the host never calls it. The host imports it **without copying**, after validating it (below), and calls release when its last reference goes away. A runtime may return its input buffers in its output. Its buffers must not change while the host holds them: a runtime whose user code produced them in another process copies them out of any memory that process can still write before it returns. |
 | `in` stream of `frame_open` | **Moved to the runtime** | Same move rule as `args`. The runtime releases it after the end of the stream, at `frame_close`, or on failure. |
 | `komira_udf_spec`, with its strings and schemas | Borrowed for the call | `validate` and `load` copy whatever they keep. |
@@ -617,12 +621,12 @@ A runtime therefore implements release with an atomic reference count and a defe
 **The host validates every imported array.** The runtime returns exactly the bound result or state schema and does any cast itself (`ERR_RETURN_TYPE` is the runtime's report). Because no schema travels with `out`, a wrong layout would be read through the declared type, and int64 and float64 have identical layouts. So on import the host checks the layout against the bound schema before any kernel reads it: `n_buffers` and `n_children` per format, each buffer's size against `length + offset`, offsets monotonic and within the data, a dictionary exactly where the type has one, and device CPU. A failure is `UDF_RUNTIME_FAULT`, naming the runtime. It guards against runtime bugs, and against a runtime that hands on a layout its user code chose.
 
 - **One batch at a time; schemas once.** Schemas are bound at `load` and never sent per call; `args` carries only arrays.
-- **Importing without a copy is new work.** Today's importers copy (`c_data_stream.mojo:3083-3087`, `:3264-3278`). The C ABI needs an importer that validates foreign buffers and wraps them in reference-counted storage whose last reference calls the producer's `release`.
+- **Importing without a copy is new work.** Today's importers copy (`c_data_stream.mojo:3007-3012`, `:3188-3205`). The C ABI needs an importer that validates foreign buffers and wraps them in reference-counted storage whose last reference calls the producer's `release`.
 - **Device arrays.** At the first release, `device_type` is CPU, `device_id` is -1 and `sync_event` is NULL. A runtime that receives any other device returns `ERR_HOST_CONTRACT` (§4.5).
 
 ### 4.5 Errors
 
-Every entry returns a `komira_udf_status` and on failure fills the host's `komira_udf_error`. Each status says what failed: user code (`ERR_RAISED`, `ERR_RETURN_TYPE`, `ERR_LENGTH`, `ERR_FIELD_NOT_DECLARED`, the size limits), the code or the plan (`ERR_LOAD`, `ERR_CODE_DIGEST`, `ERR_DESCRIPTOR`, `ERR_READ_SET_MISMATCH`, `ERR_UNSUPPORTED`), a stop (`ERR_CANCELLED`, `ERR_DEADLINE`, `ERR_KILLED`), the process running user code (`ERR_WORKER_CRASHED`, `ERR_OUT_OF_MEMORY`), the host (`ERR_HOST_CONTRACT`) or the runtime itself (`ERR_ABI`, `ERR_INTERNAL`). The host maps status codes to the run's named errors through one table, so every language reports a failure the same way. A runtime returns the user's message and trace, not only a code.
+Every entry returns a `komira_udf_status` and on failure fills the host's `komira_udf_error`. Each status says what failed: user code (`ERR_RAISED`, `ERR_RETURN_TYPE`, `ERR_LENGTH`, `ERR_FIELD_NOT_DECLARED`, the size limits), the code or the plan (`ERR_LOAD`, `ERR_CODE_DIGEST`, `ERR_DESCRIPTOR`, `ERR_READ_SET_MISMATCH`, `ERR_UNSUPPORTED`), a stop (`ERR_CANCELLED`, `ERR_DEADLINE`, `ERR_KILLED`), the process running user code (`ERR_WORKER_CRASHED`, `ERR_OUT_OF_MEMORY`), the host (`ERR_HOST_CONTRACT`) or the runtime itself (`ERR_ABI`, `ERR_BAD_OPTION`, `ERR_INTERNAL`). The host maps status codes to the run's named errors through one table, so every language reports a failure the same way. A runtime returns the user's message and trace, not only a code.
 
 | `komira_udf_status` | Run error |
 |---|---|
@@ -634,6 +638,7 @@ Every entry returns a `komira_udf_status` and on failure fills the host's `komir
 | `ERR_READ_SET_MISMATCH` | `OPTIMIZED_UDF_READ_SET_DESCRIPTOR_MISMATCH`, naming the fields the descriptor records and the `arg_types` names (§3.1): the plan disagrees with what the code was built or captured against, and the user rebuilds. At admission. (`OPTIMIZED_UDF_READ_SET_ARG_MISMATCH` is plan validation's error for `arg_types` that disagree with `read_set` inside the plan) |
 | `ERR_UNSUPPORTED` from `validate` or `load` | `OPTIMIZED_UDF_UNSUPPORTED`, naming the runtime and carrying its message, which says what is unsupported: no library for the host's platform (`komira/native`, §1.2) or a type the language cannot represent (§6.2). A shape the runtime lacks is refused earlier, from `describe`, as `OPTIMIZED_UDF_KIND_UNSUPPORTED` (§4.2), and a shape the entry lacks is `ERR_DESCRIPTOR` (§3.1). One status serves both remaining uses because the host does the same thing for each: it refuses the plan at admission |
 | `ERR_ABI` | `UDF_RUNTIME_ABI_MISMATCH`, naming the runtime and both versions (§8.1) |
+| `ERR_BAD_OPTION` | `UDF_RUNTIME_OPTION_INVALID`, naming the runtime and the option key: the runtime's configuration is wrong, at `init`, before any plan is admitted |
 | `ERR_CANCELLED` | The run's cancel |
 | `ERR_DEADLINE` | `UDF_DEADLINE_EXCEEDED` (`UDF_STEP_TIMED_OUT` for a step) |
 | `ERR_KILLED` | The run's cancel when the host had set the call's cancel flag; otherwise `UDF_DEADLINE_EXCEEDED` (`UDF_STEP_TIMED_OUT`), saying that user code was stopped by force. The context is lost, and the host closes it once no call on the context is in progress (§4.3, §4.7) |
@@ -678,7 +683,7 @@ The same library holds compaction and scatter (§3.4 rules 1-2) and the error ta
 
 ## 5. How the Python and Node runtimes execute user code (informative)
 
-This section is not part of the contract. It records how komira's two managed runtimes are built behind the C ABI. Either may change in any release without a change to the engine, the plan or the ABI, and nothing in the engine depends on it. Their conformance is the shared corpus plus the managed cases, through the C ABI (§6.3).
+This section is not part of the contract. It records how komira's two managed runtimes are built behind the C ABI. The build design of `komira/python` is [udf_python_worker.md](udf_python_worker.md); where it differs from this section, it holds. Either may change in any release without a change to the engine, the plan or the ABI, and nothing in the engine depends on it. Their conformance is the shared corpus plus the managed cases, through the C ABI (§6.3).
 
 ### 5.1 Why workers
 
@@ -691,9 +696,9 @@ Both runtimes run user code in worker processes, one per context, because that i
 
 - **The library the engine loads is thin.** Per context it owns one worker process and forwards each call to it over a protocol private to that runtime. The two runtimes may share one private C library for this (`komira_udf_worker`); the engine does not link it.
 - **Starting workers.** The library starts processes with `posix_spawn`, never `fork`, because the engine is multi-threaded.
-  - `komira/python` spawns one *zygote* per runtime: a single-threaded process that initializes the interpreter, limits native thread pools (BLAS, OpenMP) to one thread, and loads user code at `load`. It then forks one worker per context, so the loaded code and captured values are shared copy-on-write.
+  - `komira/python` spawns one *zygote* per runtime: a single-threaded Python interpreter executable that limits native thread pools (BLAS, OpenMP) to one thread and loads user code at `load`. It then forks one worker per context, so the loaded code and captured values are shared copy-on-write (`udf_python_worker.md` §3).
   - `komira/node` spawns one `node` process per context, running a small script that loads the runtime as an addon; a `node` process cannot fork safely.
-- **Channels.** A Unix socket pair per worker for control messages, and a shared-memory region per worker for payloads, which are Arrow IPC encapsulated messages with 64-byte aligned bodies (`ipc_decoder_dispatch.mojo:4088`).
+- **Channels.** (`komira/python` starts with payloads inline on the socket and adds the slot heaps later, `udf_python_worker.md` §4.4.) A Unix socket pair per worker for control messages, and a shared-memory region per worker for payloads, which are Arrow IPC encapsulated messages with 64-byte aligned bodies (`ipc_decoder_dispatch.mojo:4088`).
   - **Slots, not rings.** Either side may hold a payload for an arbitrary time (user code may keep a view of its input, §4.4), so payloads free out of order, and a ring would fill and deadlock. Each direction is a slot heap with a bound on the bytes pinned; when the bound is reached, the runtime copies the inputs it still holds out of the slot heap.
   - **Into the worker: no copy beyond serialization;** the worker decodes in place.
   - **Out of the worker: one copy.** The worker can still write its half of the region, so the library copies each result out before it returns it to the engine (§4.4, the `out` rule).
@@ -705,8 +710,8 @@ Both runtimes run user code in worker processes, one per context, because that i
 ### 5.3 Language notes
 
 **Python** (the `komira/python` runtime, stage S4):
-- **Embedding.** The worker embeds CPython. Extension modules built to the manylinux policy do not link `libpython`, so the worker loads `libpython` with `RTLD_GLOBAL` (or `dlopen(..., RTLD_NOLOAD | RTLD_GLOBAL)` once loaded), so `import numpy` finds the `Py*` symbols. This is the worker's own loading of its interpreter; user libraries loaded by `komira/native` are never loaded `RTLD_GLOBAL`.
-- **ABI tag.** The runtime reports the CPython tag of its worker interpreter as `runtime_abi`, matched against `needs.runtimes`.
+- **No embedding.** The zygote is an interpreter executable started with `-I`: the user's own interpreter in the pip package, `/opt/env/komira/python/bin/python3` in an image. An executable gives extension modules the `Py*` symbols, and a statically linked CPython has no `libpython` to embed (`udf_python_worker.md` §2.1). User libraries loaded by `komira/native` are never loaded `RTLD_GLOBAL`.
+- **ABI tag.** The runtime reports the CPython tag it was given as an option, which the zygote checks against its interpreter, as `runtime_abi`, matched against `needs.runtimes` (`udf_python_worker.md` §2.2, §3.1).
 - **Finalization.** A worker drains its release queues before it finalizes the interpreter.
 
 **Node** (the `komira/node` runtime, stage S5):
@@ -797,18 +802,18 @@ A new runtime is done when it passes the **shared conformance corpus** as welded
   - **Plan cases** (stage S6): small optimized plans that run through lowering and the engine's UDF operators.
   - Each runtime adds a *fixture* for each case: the function, in its language, that the case expects. Examples: `double(x)`, `raise_on_row(3)`, `p95(v)`, a mergeable `sum`, a generator that yields three tables.
   - Every case runs through the C ABI against each runtime, whatever it does behind the table. There is no transport harness: the harness loads the runtime library and calls it, as the engine does.
-- **The harness and the operators share the host library** (`komira_udf_host`, §4.6): post-conditions, compaction, import validation and the error table. A test asserts that the S6 operators link that library; its mutant is an operator with its own length check that skips the shared one. So a runtime cannot pass by special-casing the harness.
-- **Each case names the defect it catches, and the planted mutant that proves the case can fail.**
+- **The harness and the operators share the host library** (`komira_udf_host`, §4.6): post-conditions, compaction, import validation and the error table. A test asserts that the S6 operators link that library; its negative case is an operator with its own length check that skips the shared one. So a runtime cannot pass by special-casing the harness.
+- **Each case names the defect it catches, and the broken implementation it must fail on, which shows the case can fail.**
 
 The shared cases are listed in [the conformance corpus](udf_runtime_conformance.md#shared-cases).
 
 - **Reference runtimes ship with the harness.**
-  - `komira-test/echo`, written in C, implements every entry trivially, in the calling thread, with no user code and no code objects. It proves the harness and the host library independently of any language, and it is the template a new runtime copies: the C table it implements is the part every runtime writes around its interpreter or its workers. A test-only setting makes it report `MANAGED` or any feature bit, return `ERR_INSTANCE_LOST`, `ERR_WORKER_CRASHED`, `ERR_KILLED` or `ERR_OUT_OF_MEMORY` on a chosen call, refuse or block a call made while a frame on the same context waits on its input, or take one process-wide mutex around every call, so the host's handling of each status and the class cases ([the conformance corpus](udf_runtime_conformance.md#cases-per-class)) can plant their mutants without a language.
-  - `komira/native` with fixture libraries next to echo, one per native language: C (`komira-test/native-c`) and Mojo (`komira-test/native-mojo`) at the first release, then Rust (`komira-test/native-rust`), C++ (`komira-test/native-cpp`) and Zig (`komira-test/native-zig`). Each implements the corpus fixtures as exported native UDFs. The C library is the template a new native language's SDK copies; the Mojo library proves that a Mojo package can export the table. It builds with the existing `mojo_shared_lib` rule, which emits a C-ABI shared library from `@export` functions and can check that the library exports exactly the named symbols (`tools/build/mojo/README.md:20`, `:704-722`).
+  - `komira-test/echo`, written in C, implements every entry trivially, in the calling thread, with no user code and no code objects. It proves the harness and the host library independently of any language, and it is the template a new runtime copies: the C table it implements is the part every runtime writes around its interpreter or its workers. A test-only setting makes it report `MANAGED` or any feature bit, return `ERR_INSTANCE_LOST`, `ERR_WORKER_CRASHED`, `ERR_KILLED` or `ERR_OUT_OF_MEMORY` on a chosen call, refuse or block a call made while a frame on the same context waits on its input, or take one process-wide mutex around every call, so the host's handling of each status and the class cases ([the conformance corpus](udf_runtime_conformance.md#cases-per-class)) can be shown failing on a broken host without a language.
+  - `komira/native` with fixture libraries next to echo, one per native language: C (`komira-test/native-c`) and Mojo (`komira-test/native-mojo`) at the first release, then Rust (`komira-test/native-rust`), C++ (`komira-test/native-cpp`) and Zig (`komira-test/native-zig`). Each implements the corpus fixtures as exported native UDFs. The C library is the template a new native language's SDK copies; the Mojo library proves that a Mojo package can export the table. It builds with the existing `mojo_shared_lib` rule, which emits a C-ABI shared library from `@export` functions and can check that the library exports exactly the named symbols (`tools/build/mojo/README.md:22`, `:939-966`).
 - **Cases per class** run in addition to the shared cases, chosen by class and features; they are listed in [the conformance corpus](udf_runtime_conformance.md#cases-per-class).
 
 - **The coverage assertion** covers each native language's fixture library, every value of `UdfKind`, `CodeForm`, `UdfStability`, `UdfNullMode`, each capability bit, each class, a set, an unset and an empty `read_set`, and each `komira_udf_status`.
-- **A runtime's own tests** cover what it does behind the table (§5): for `komira/python`, that forked workers share what the zygote loaded and that the zygote is single-threaded when it forks; for `komira/node`, the forced copy path. They are welded to the runtime's package like the corpus, and are not part of it.
+- **A runtime's own tests** cover what it does behind the table (§5): for `komira/python`, the cases listed in [the conformance corpus](udf_runtime_conformance.md#cases-of-the-komirapython-runtime) (among them, that forked workers share what the zygote loaded and that the zygote is single-threaded when it forks); for `komira/node`, the forced copy path. They are welded to the runtime's package like the corpus, and are not part of it.
 
 ## 7. Security, isolation, resource limits, crash containment
 
@@ -876,17 +881,17 @@ This follows two precedents: DuckDB's C extension API, whose function struct is 
 
 ## 9. Implementation stages
 
-Each stage lands with its tests welded and its testing plan stated: what each test proves, and the mutant that turns it red.
+Each stage lands with its tests welded and its testing plan stated: what each test proves, and the broken implementation it fails on.
 
 | Stage | Work | Owner area | Done when |
 |---|---|---|---|
-| S0 | This document, and the optimized-plan UDF section aligned to it before any `format_version` ships: open runtime ids, `CodeForm`, `needs.runtimes`, `STEP`, the two `MAP_BATCHES` kinds and the `ROW` kind (`DataFrame.apply(f, axis=1)` and `map_rows` map to `ROW`), and the optional read set on `ROW` and `MAP_BATCHES_FRAME`; one mode per language in place of #1094's three modes (§1.3); a review rule, or a lint if one is written, that no runtime's descriptor schema declares its own copy of `RecordedFields` (§3.1; the message itself is added to `plan.proto` in stage 11 of `optimized_plan.md` §12) | design | Both merged, and the review rule written down |
-| S1 | `komira_udf_runtime.h`; a Mojo binding package, with private pointers behind a safe API; the Arrow C Device structs; an args exporter on the stream path's shared-reference model, and C Data import without copying, with layout validation and release ownership, in `arrow_ipc`; the host library `komira_udf_host` (post-conditions, compaction and scatter, error table); the reference runtime `komira-test/echo`, in C | engine, Arrow | Echo passes every ABI case, and the host maps each status echo can be set to return; the leak, double-release and skip-validation mutants go red |
-| S2 | The conformance corpus package (ABI cases), the harness and the coverage assertion; the runtime-swap invariance test for the optimizer (§3.2) | tests, optimizer | The corpus runs against echo; the invariance mutant goes red |
-| S3 | `komira_udf_worker`: a private C library the Python and Node runtimes link to run user code in worker processes (§5, informative): spawning, slot heaps, copy-out, frame credits, cancel and forced stop, crash and memory reporting. The engine does not link it | engine | A test runtime built on it passes the corpus through the C ABI, with the forced-stop, crash, out-of-memory, held-views and cancel cases |
-| S3b | The `komira/native` runtime (§1.2): `validate` against the descriptor, digest check before `dlopen`, library choice per platform, `komira_udf_native_init_v1`, the library's own `validate` at `load`, forwarding; the fixture libraries `komira-test/native-c` and `komira-test/native-mojo`; export helpers for C and Mojo that record each entry's shapes and signature; the native cases (§6.3); the supervisor's crash reporter that names a faulting native library (§7) | engine, Mojo | Both fixture libraries pass the corpus and the native cases; the digest-after-`dlopen`, unchecked-capabilities and missing-catch mutants go red (the catch case uses the Mojo fixture's raising function; C cannot raise); **the three launch gates pass: the run-token case, the `RTLD_GLOBAL` case and the NULL-dereference case**, with the supervisor's crash reporter that names the faulting library. Native UDFs do not ship before they are green |
+| S0 | This document, and the optimized-plan UDF section aligned to it before any `format_version` ships: open runtime ids, `CodeForm`, `needs.runtimes`, `STEP`, the two `MAP_BATCHES` kinds and the `ROW` kind (`DataFrame.apply(f, axis=1)` and `map_rows` map to `ROW`), and the optional read set on `ROW` and `MAP_BATCHES_FRAME`; one mode per language in place of komira-ai/komira#1094's three modes (§1.3); a review rule, or a lint if one is written, that no runtime's descriptor schema declares its own copy of `RecordedFields` (§3.1; the message itself is in `plan.proto`) | design | Both merged, and the review rule written down |
+| S1 | `komira_udf_runtime.h`; a Mojo binding package, with private pointers behind a safe API; the Arrow C Device structs; an args exporter on the stream path's shared-reference model, and C Data import without copying, with layout validation and release ownership, in `arrow_ipc`; the host library `komira_udf_host` (post-conditions, compaction and scatter, error table); the reference runtime `komira-test/echo`, in C | engine, Arrow | Echo passes every ABI case, and the host maps each status echo can be set to return; the leak, double-release and skip-validation cases each fail on a host with that defect |
+| S2 | The conformance corpus package (ABI cases), the harness and the coverage assertion; the runtime-swap invariance test for the optimizer (§3.2) | tests, optimizer | The corpus runs against echo; the invariance test fails on an optimizer rule that reads the runtime |
+| S3 | `komira_udf_worker`: a private C library the Node runtime, and later any managed runtime, links to run user code in worker processes (§5, informative); `komira/python` does not wait for it and is built standalone (`udf_python_worker.md` §1), and the library may be factored out of it: spawning, slot heaps, copy-out, frame credits, cancel and forced stop, crash and memory reporting. The engine does not link it | engine | A test runtime built on it passes the corpus through the C ABI, with the forced-stop, crash, out-of-memory, held-views and cancel cases |
+| S3b | The `komira/native` runtime (§1.2): `validate` against the descriptor, digest check before `dlopen`, library choice per platform, `komira_udf_native_init_v1`, the library's own `validate` at `load`, forwarding; the fixture libraries `komira-test/native-c` and `komira-test/native-mojo`; export helpers for C and Mojo that record each entry's shapes and signature; the native cases (§6.3); the supervisor's crash reporter that names a faulting native library (§7) | engine, Mojo | Both fixture libraries pass the corpus and the native cases; the digest-after-`dlopen`, unchecked-capabilities and missing-catch cases each fail on a runtime with that defect (the catch case uses the Mojo fixture's raising function; C cannot raise); **the three launch gates pass: the run-token case, the `RTLD_GLOBAL` case and the NULL-dereference case**, with the supervisor's crash reporter that names the faulting library. Native UDFs do not ship before they are green |
 | S3c | Native SDKs for Rust, C++ and Zig, after the first release: export helpers (Rust catches panics, C++ is `noexcept`, §5.3), typed views of Arrow C Data, capture of the library into the code layer; fixture libraries `komira-test/native-rust`, `komira-test/native-cpp`, `komira-test/native-zig` | engine, SDKs | Each fixture library passes the corpus and the native cases; the C++ throw and Rust panic cases go red without the catch |
-| S4 | The `komira/python` runtime: a C-ABI library that runs user code in workers forked from a zygote (§5); batch formats, entry, shapes and signature in the descriptor; the `ROW` proxy; the producer's read-set declaration, scan and refusals for `ROW` and `MAP_BATCHES_FRAME` (§6.1) | Python | Python fixtures pass the corpus, `ROW`, read-set, crash, forced-stop and managed cases included, through the C ABI |
+| S4 | The `komira/python` runtime: a C-ABI library that runs user code in workers forked from a zygote (§5; its stages P0-P4 are `udf_python_worker.md` §1); batch formats, entry, shapes and signature in the descriptor; the `ROW` proxy; the producer's read-set declaration, scan and refusals for `ROW` and `MAP_BATCHES_FRAME` (§6.1) | Python | Python fixtures pass the corpus, `ROW`, read-set, crash, forced-stop and managed cases included, through the C ABI |
 | S5 | The `komira/node` runtime: a C-ABI library that runs user code in `node` worker processes (§5); external `ArrayBuffer`s with a copy fallback; entry, shapes and signature in the descriptor | Node | Node fixtures pass the corpus, crash, forced-stop and managed cases included, through the C ABI |
 | S6 | Physical operators (`UdfProject`, `UdfFrame`, `UdfAggregate`, the groups accumulator, `UdfStep`) in lowering, linking `komira_udf_host`; the plan cases. They replace the SDK-side walk that works around the package cycle (`expr_udf_sites.mojo:1-30`) | engine | UDF plan cases run through lowering, not through the SDK |
 | Later | ABI 1.1 candidates (§8.1); third-party runtime layers (§8.3); further native languages (each adds an SDK and fixtures, no runtime id); a tunable per-group state cap (komira-ai/komira#1148); managed runtimes for JVM, .NET and Go; WASM, with its one mode chosen when it is added; GPU devices; a remote runtime | — | Each native SDK adds corpus fixtures; each managed runtime adds a runtime id and fixtures; neither changes the format |
