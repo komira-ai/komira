@@ -1,0 +1,2 @@
+-- order: rows
+SELECT k FROM T WHERE i NOT BETWEEN 2 AND 5
