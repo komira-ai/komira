@@ -142,7 +142,9 @@ DuckDB's parse of each case (`json_serialize_sql`) before the case runs
   package file that is not an input, a read of an absolute path, a read by
   glob pattern, a changed setting, each dot command listed above, and two
   cases the oracle discipline of komira_test_oracle refuses when its case
-  runner calls it (a key with no NULL placement, no outer ORDER BY). The
+  runner calls it (a key with no NULL placement, no outer ORDER BY), and
+  two cases komira_sql_corpus's case runner refuses (an answer that differs
+  from the committed one, a case with no row order line). The
   version and environment checks are pinned in the invocation from
   `SELECT` to `END`, and so is what stands between the pinned pieces (the
   version `buck2 uquery` reads from the dist, itself required to be digits

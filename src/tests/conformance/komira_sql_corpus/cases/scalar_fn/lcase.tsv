@@ -1,0 +1,14 @@
+k	lcase(s)
+0	""
+1	abc
+10	ünïcodé
+11	abcde
+12	abcdefgh
+2	  hello 
+3	ünïcodé
+4	
+5	kitten
+6	flaw
+7	a
+8	ab
+9	a,b

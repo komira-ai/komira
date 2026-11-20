@@ -1,0 +1,2 @@
+-- order: rows
+SELECT k FROM T WHERE CAST(i32 AS BIGINT) > 0

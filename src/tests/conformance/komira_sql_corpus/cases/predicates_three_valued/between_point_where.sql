@@ -1,0 +1,2 @@
+-- order: rows
+SELECT k FROM T WHERE i BETWEEN 3 AND 3

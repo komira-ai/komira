@@ -1,0 +1,3 @@
+-- order: query
+-- sort desc over a BIGINT column, empty rows
+SELECT k, g, v FROM t_empty ORDER BY v DESC
