@@ -68,6 +68,8 @@ TARGETS = [
     "komira//src/tests/conformance/komira_git_conformance:komira_git_conformance",
     "komira//src/tests/helpers/komira_mail_test_support:komira_mail_test_support_conda",
     "komira//src/tests/helpers/komira_udf_spike_node_worker:bench",
+    "komira//src/tpch_answers:tpch_answers_conda",
+    "komira//src/tpch_answers:tpch_sf1",
     "komira//src/uuid:ci",
     "komira//src/uuid:conda_holds",
     "komira//src/uuid:coverage_floor",

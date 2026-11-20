@@ -1,0 +1,60 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
+load(":tpch_data.bzl", "tpch_sf1_data")
+
+# DuckDB's answers to the TPC-H corpus queries over staged scale factor 1, as
+# recorded signatures, and the farm target that stages the data and records
+# them (`tpch_sf1`). The library verifies and locks the staged files, runs the
+# 22 queries in the pinned DuckDB through bench_duckdb's session, checks each
+# result against the query's ORDER BY keys and writes the answers and the lock.
+# See __init__.mojo and README.md.
+#
+# The welded tests (each file's header says what each case proves):
+# - test_keys: the key table covers q1 .. q22 and refuses any other id.
+# - test_record: over a fake DuckDB, the answers of the whole corpus round-trip
+#   through the reference reader with their row counts, keys and types; a
+#   refused query, an out-of-order result and a column with no recordable form
+#   each fail naming the query; the views and the header; the whole run writes
+#   the answers file and the lock and names the one in the other, unusable data
+#   stops before DuckDB is asked anything and an existing answers file is kept.
+# - test_cli: the flags, the default and every refusal.
+mojo_library(
+    name = "tpch_answers",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo", "main/**/*.mojo"]),
+    deps = [
+        "//src/bench_corpus:bench_corpus",
+        "//src/bench_data:bench_data",
+        "//src/bench_duckdb:bench_duckdb",
+    ],
+    test_deps = [
+        "//tools/build/mojo/runtime_paths:runtime_paths",
+    ],
+    test_srcs = [
+        "tests/test_cli.mojo",
+        "tests/test_keys.mojo",
+        "tests/test_record.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)
+
+# The answers program: `answers --duckdb FILE --cache-dir DIR --out-dir DIR`.
+mojo_binary(
+    name = "komira_tpch_answers_main",
+    srcs = ["main/answers_main.mojo"],
+    main = "main/answers_main.mojo",
+    deps = [":tpch_answers"],
+    visibility = ["PUBLIC"],
+)
+
+# TPC-H scale factor 1 and its recorded answers, built once on the farm and
+# cached. Consumers name `:tpch_sf1[data]`, `:tpch_sf1[answers.txt]` and
+# `:tpch_sf1[lock]`:
+#
+#   ./buck2 build komira//src/tpch_answers:tpch_sf1
+#   ./buck2 build komira//src/tpch_answers:tpch_sf1[answers.txt] --show-output
+tpch_sf1_data(
+    name = "tpch_sf1",
+    answers = ":komira_tpch_answers_main",
+    stage = "//src/bench_q6_phases:komira_bench_q6_stage_main",
+    tpch_extension = "//third_party/duckdb:tpch.duckdb_extension.gz",
+    visibility = ["PUBLIC"],
+)
