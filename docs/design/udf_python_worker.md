@@ -23,9 +23,9 @@ The runtime has two halves, joined by a protocol private to them (IF §8.1, last
 | Half | Language | Where it runs | Where it lives |
 |---|---|---|---|
 | The runtime library, `libkomira_udf_python` | C, no Mojo | Inside the engine's process, loaded through `komira_udf_runtime_init_v1` like any runtime (IF §4.1) | `src/udf_python/` |
-| The zygote and its workers | Python | Separate processes the library starts | `python/komira/_udf/` in the `komira-ai` wheel (import name `komira`) |
+| The zygote and its workers | Python | Separate processes the library starts | `python/komira/_udf/` in the `komira` wheel |
 
-Both halves ship in the `komira-ai` wheel, beside `libkomira` (§7). Nothing in the engine, the plan or the C ABI names
+Both halves ship in the `komira` wheel, beside `libkomira` (§7). Nothing in the engine, the plan or the C ABI names
 them, and a change to either never changes those.
 
 **Why the library is C.** It is a process, socket and Arrow-buffer manager with no Python in it. Written in C it needs
