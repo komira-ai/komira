@@ -73,7 +73,10 @@ def main(args):
     real_dir = os.path.join(lib_dir, "libkomira")
     native = _native.load(real_dir)
     assert native.path == so(real_dir), native.path
-    assert native.abi_version == 1001, native.abi_version
+    # Major 1, and a minor of at least 1, the version that added
+    # komira_register_parquet; a later minor is as good.
+    assert native.abi_version // 1000 == _native.ABI_MAJOR, native.abi_version
+    assert native.abi_version % 1000 >= 1, native.abi_version
     assert _native.load(real_dir) is native
     assert _native.load(pathlib.Path(real_dir)) is native
 

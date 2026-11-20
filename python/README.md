@@ -60,8 +60,8 @@ environment variable, no search of the working directory.
 - `load_test` loads, in one process: the package's own `_lib/` (absent, so
   refused), a directory with no library, stand-ins of ABI version 2.0, 0.999
   and -1, and one without `komira_register_parquet`, each refused with its exact
-  message; then `//src/so:libkomira[runnable]`, which loads with version 1001,
-  is the same library when loaded again by a `str` or a `pathlib.Path`, and makes
+  message; then `//src/so:libkomira[runnable]`, which loads with ABI major 1 and
+  a minor of at least 1, is the same library when loaded again by a `str` or a `pathlib.Path`, and makes
   another file's load refused. On it two contexts are distinct, a missing
   Parquet file is a `KomiraError` of status -3 whose message is the last error,
   that error is the first context's only, and registering a Parquet file clears

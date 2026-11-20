@@ -64,7 +64,8 @@ python_binding_test(
 # The error path on the stand-in: the second call's capacity is the first
 # call's length, a length that grows or shrinks between the calls, a second
 # call that fails, a last error that cannot be read or is empty or not UTF-8,
-# the call's own status, the argument checks, and a NULL context.
+# the call's own status, the argument checks, and a komira_ctx_new that
+# returns NULL.
 python_binding_test(
     name = "two_call_test",
     src = "test_two_call.py",

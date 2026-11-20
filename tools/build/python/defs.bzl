@@ -10,8 +10,8 @@ one sha256-pinned wheel into a directory of its own, with that interpreter
 and `wheel_install.py` (no pip): it fails unless the wheel's `.dist-info` names
 the pinned distribution and version. `python_source_package` stages the files
 of an import package of this repository at their paths in a directory of its
-own, which a test imports from as it does a wheel's. `py_test` runs one Python script with that
-interpreter as a build action, through `pyrun.py`; its output exists only if
+own, which a test imports from as it does a wheel's. `py_test` runs one Python
+script with that interpreter as a build action, through `pyrun.py`; its output exists only if
 the script passed, so building the target is running the test.
 `python_oracle` runs one script twice, through `oracle_run.py`, and outputs
 the directory it wrote, which other targets take as test data; it fails
