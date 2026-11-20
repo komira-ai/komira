@@ -1,6 +1,6 @@
 # =============================================================================
-# FFI-BOUNDARY: check, before a stream is handed out, that every batch
-# crosses the Arrow C Stream Interface.
+# check_record_batch_stream: check, before a stream is handed out, that every
+# batch crosses the Arrow C Stream Interface.
 # =============================================================================
 # `build_record_batch_stream` (c_data_stream.mojo) fills a caller's
 # `ArrowArrayStream`, and a batch that cannot be exported is found only later,

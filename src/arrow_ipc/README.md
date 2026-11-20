@@ -94,8 +94,9 @@ point that leaves `*out` untouched on failure) first calls
 `arrow_ipc.c_data_stream_check.check_record_batch_stream(schema, batches)`. It
 builds, and releases at once, everything the stream's callbacks would build,
 so when it returns they do not fail. It raises naming the column and its type
-(and the batch, for a refusal of a batch's data), and it refuses a batch that
-still carries a selection mask, whose dropped rows the export would carry.
+(and the batch, for a refusal of a batch's data). It also refuses a batch that
+still carries a selection mask, whose dropped rows the export would carry,
+and a batch whose column count is not the schema's.
 
 ```mojo
 from arrow.arrow_types import ArrowType

@@ -333,6 +333,7 @@ static int consume(text *t, struct ArrowArrayStream *stream, int32_t mode) {
   }
   if (n == MAX_CHUNKS) {
     release_rest(chunks, 0, n, &schema);
+    release_stream(t, stream);
     return fail(t, "more chunks than this consumer holds", NULL);
   }
 

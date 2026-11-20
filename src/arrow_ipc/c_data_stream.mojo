@@ -1174,8 +1174,7 @@ def _attach_nested_child_schemas(
 def _build_record_batch_schema_no_data(schema: Schema) raises -> CArrowSchema:
     """Build the root struct CArrowSchema (`+s` format) WITHOUT a sample
     RecordBatch (used only for empty streams with no nested columns).
-    Fall-back for `_exported_get_schema`
-    when `state.batches` is empty.
+    `_build_stream_schema` calls it when the stream holds no batch.
     """
     var ncols = schema.num_columns()
     var root = CArrowSchema()

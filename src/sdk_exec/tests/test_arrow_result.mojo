@@ -18,7 +18,7 @@
 #     column the export misreads, and a result that needs the context it came
 #     from (the context is dropped before the read).
 #   * test_aggregates_read_back_in_c: count(*), sum(d) and sum(i) read back as
-#     an INT64 and DECIMAL(38, 2) and DECIMAL(38, 0) values.
+#     a non-nullable INT64 and nullable DECIMAL(38, 2) and DECIMAL(38, 0).
 #   * test_an_empty_answer_reads_back_as_its_schema: a filter that keeps no
 #     row gives the schema and one chunk of zero rows.
 #   * test_every_buffer_is_released_after_the_read: after the C consumer is
@@ -97,11 +97,11 @@ def _table() raises -> RecordBatch:
     return rbb.build(sb.build())
 
 
-def _answer(sql: String) raises -> ArrowResult:
-    """Run `sql` over t on a context of its own, which is dropped before the
-    result is returned."""
+def _answer(name: String, sql: String) raises -> ArrowResult:
+    """Run `sql` over t, written to a file of its own named after `name`, on a
+    context of its own, which is dropped before the result is returned."""
     var ctx = EngineContext(EngineOptions(worker_count=2))
-    var path = test_tmpdir() + "/arrow_result_t.parquet"
+    var path = test_tmpdir() + "/arrow_result_" + name + ".parquet"
     var bytes = write_record_batch_to_parquet_bytes(_table())
     var fh = open(path, "w")
     fh.write_bytes(Span(bytes))
@@ -142,8 +142,8 @@ def _refusal(var outcome: SqlOutcome) raises -> String:
 
 def test_a_projection_reads_back_in_c() raises:
     assert_equal(
-        _read(_answer("SELECT k, i, s, d FROM t")),
-        "field k l nullable\n"
+        _read(_answer("projection", "SELECT k, i, s, d FROM t")),
+        "field k l required\n"
         "field i i nullable\n"
         "field s u nullable\n"
         "field d d:10,2 nullable\n"
@@ -158,9 +158,12 @@ def test_a_projection_reads_back_in_c() raises:
 def test_aggregates_read_back_in_c() raises:
     assert_equal(
         _read(
-            _answer("SELECT count(*) AS n, sum(d) AS total, sum(i) AS si FROM t")
+            _answer(
+                "aggregates",
+                "SELECT count(*) AS n, sum(d) AS total, sum(i) AS si FROM t",
+            )
         ),
-        "field n l nullable\n"
+        "field n l required\n"
         "field total d:38,2 nullable\n"
         "field si d:38,0 nullable\n"
         "chunk 0 rows 1\n"
@@ -172,13 +175,13 @@ def test_aggregates_read_back_in_c() raises:
 
 def test_an_empty_answer_reads_back_as_its_schema() raises:
     assert_equal(
-        _read(_answer("SELECT k, s FROM t WHERE k > 100")),
-        "field k l nullable\nfield s u nullable\nchunk 0 rows 0\nk:\ns:\n",
+        _read(_answer("empty", "SELECT k, s FROM t WHERE k > 100")),
+        "field k l required\nfield s u nullable\nchunk 0 rows 0\nk:\ns:\n",
     )
 
 
 def test_every_buffer_is_released_after_the_read() raises:
-    var result = _answer("SELECT k, i, s, d FROM t")
+    var result = _answer("released", "SELECT k, i, s, d FROM t")
     var probes = List[SharedAlignedBuffer[HeapRegion]]()
     for b in range(len(result.batches)):
         for c in range(result.batches[b].num_columns()):
@@ -196,7 +199,7 @@ def test_every_buffer_is_released_after_the_read() raises:
 def test_a_refusal_raises_with_its_step() raises:
     var msg: String
     try:
-        _ = _answer("SELECT nope FROM t")
+        _ = _answer("refusal", "SELECT nope FROM t")
         msg = String()
     except e:
         msg = String(e)
