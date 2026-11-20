@@ -171,8 +171,10 @@ fn parseNumber(s: []const u8, max: u64) ?u64 {
     return if (v <= max) v else null;
 }
 
-/// `add` on the command line: its three flags, each given once, then prod_add.add with the host's subdir.
-fn mainAdd(a: Allocator, args: []const [:0]u8, out: *std.Io.Writer, err: *std.Io.Writer) !u8 {
+/// `add` on the command line, after the verb: its three flags, each given once, then prod_add.add with `subdir`
+/// (the host's; null where mopm installs no toolchain) and `runner`. Returns the exit status: 0 when every check
+/// passed, 1 with `ADD FAILED: <why>` on `err` when one did not, 2 on a usage error.
+pub fn cliAdd(a: Allocator, args: []const []const u8, subdir: ?[]const u8, runner: prod_add.Runner, out: *std.Io.Writer, err: *std.Io.Writer) !u8 {
     var staged: ?[]const u8 = null;
     var mopm: ?[]const u8 = null;
     var work: ?[]const u8 = null;
@@ -197,14 +199,13 @@ fn mainAdd(a: Allocator, args: []const [:0]u8, out: *std.Io.Writer, err: *std.Io
         try err.flush();
         return 2;
     }
-    const subdir = prod_add.subdirOf(builtin.os.tag, builtin.cpu.arch) orelse {
+    const host = subdir orelse {
         try err.writeAll("release_staged_verify: mopm installs no Mojo toolchain on this host, so add cannot run here\n");
         try err.flush();
         return 2;
     };
     var why: []const u8 = "";
-    var proc = prod_add.Process{};
-    const rep = prod_add.add(a, &why, staged.?, mopm.?, work.?, &prod_add.add_set, subdir, proc.runner(), out) catch |e| {
+    const rep = prod_add.add(a, &why, staged.?, mopm.?, work.?, &prod_add.add_set, host, runner, out) catch |e| {
         const msg = if (e == error.Refused) why else @errorName(e);
         try out.flush();
         try err.print("release_staged_verify: ADD FAILED: {s}\n", .{msg});
@@ -227,7 +228,12 @@ pub fn main() !u8 {
     var obuf: [1024]u8 = undefined;
     var out = std.fs.File.stdout().writer(&obuf);
     const args = try std.process.argsAlloc(a);
-    if (args.len >= 2 and std.mem.eql(u8, args[1], "add")) return mainAdd(a, args[2..], &out.interface, &err.interface);
+    if (args.len >= 2 and std.mem.eql(u8, args[1], "add")) {
+        const rest = try a.alloc([]const u8, args.len - 2);
+        for (rest, args[2..]) |*r, arg| r.* = arg;
+        var proc = prod_add.Process{};
+        return cliAdd(a, rest, prod_add.subdirOf(builtin.os.tag, builtin.cpu.arch), proc.runner(), &out.interface, &err.interface);
+    }
     if (args.len < 2 or !(std.mem.eql(u8, args[1], "verify") or std.mem.eql(u8, args[1], "smoke"))) {
         try err.interface.writeAll(usage);
         try err.interface.flush();

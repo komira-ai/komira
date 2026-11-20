@@ -32,8 +32,9 @@
 //!    stage with `--oidc --no-commit`, the commit with `--oidc` and neither `--no-commit`
 //!    nor `--abort`, the abort with `--abort`, the verify and the e2e on the verified
 //!    set in the test, the smoke, the add with the mopm of mopm-stage on the committed
-//!    directory), the order of the test's steps, and that the test, the smoke and the add
-//!    never name a registry-writing verb or the OIDC exchange, and never join the farm.
+//!    directory), the order of the test's steps, that the test, the smoke and the add
+//!    never name a registry-writing verb or the OIDC exchange, and that the smoke and the
+//!    add never join the farm (the test joins it for the README e2e).
 //!  - one mopm: every `build toolchains//:mopm_*` label of release.yml and every such label of
 //!    docs/ci.md equals `MOPM` of release/readme_e2e/packages.bzl (the mopm the README e2e installs
 //!    with is the one the release stages and publishes with), so a bump of one that forgets

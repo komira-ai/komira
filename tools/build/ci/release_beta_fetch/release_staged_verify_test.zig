@@ -785,3 +785,59 @@ test "add: a locked dependency this release did not publish fails, naming it" {
     try t.expectError(error.Refused, runAdd(a, &tmp, &fake, &why, &log.writer));
     try t.expectEqualStrings("1 problem(s) with what `mopm add` installed from prod:\n  komira-ai/stray 0.1.9: not a member of this release's plan.json", why);
 }
+
+test "add on the command line: exit 0 and the summary when the checks pass, 1 and ADD FAILED when one does not" {
+    var ar = std.heap.ArenaAllocator.init(t.allocator);
+    defer ar.deinit();
+    const a = ar.allocator();
+    var tmp = t.tmpDir(.{});
+    defer tmp.cleanup();
+    try stageAdd(a, &tmp);
+    const args = [_][]const u8{ "--staged", try path(a, &tmp, "committed"), "--mopm", "/pinned/mopm", "--work", try path(a, &tmp, "work") };
+    var fake = FakeMopm{};
+    var out = sink();
+    defer out.deinit();
+    var err = sink();
+    defer err.deinit();
+    try t.expectEqual(@as(u8, 0), try rsv.cliAdd(a, &args, "linux-64", fake.runner(), &out.writer, &err.writer));
+    try t.expect(std.mem.endsWith(u8, out.written(), "release_staged_verify: `mopm add` of 3 package(s) from https://conda.mopm.dev/ locked 4 package(s) of this release and installed the published bytes (sha256 and size)\n"));
+    try t.expectEqualStrings("", err.written());
+    try t.expectEqual(@as(usize, 5), fake.calls.items.len);
+
+    var tmp2 = t.tmpDir(.{});
+    defer tmp2.cleanup();
+    try stageAdd(a, &tmp2);
+    const args2 = [_][]const u8{ "--work", try path(a, &tmp2, "work"), "--mopm", "/pinned/mopm", "--staged", try path(a, &tmp2, "committed") };
+    var failing = FakeMopm{ .fail = "init", .code = 3, .stderr = "mopm init: refused\n" };
+    var err2 = sink();
+    defer err2.deinit();
+    try t.expectEqual(@as(u8, 1), try rsv.cliAdd(a, &args2, "linux-64", failing.runner(), &out.writer, &err2.writer));
+    try t.expectEqualStrings("release_staged_verify: ADD FAILED: `mopm init --name release-check/prod_add` exited with 3: mopm init: refused\n", err2.written());
+}
+
+test "add on the command line: a usage error or a host with no toolchain is exit 2, and mopm never runs" {
+    var ar = std.heap.ArenaAllocator.init(t.allocator);
+    defer ar.deinit();
+    const a = ar.allocator();
+    const Case = struct { args: []const []const u8, subdir: ?[]const u8 = "linux-64", want: []const u8 };
+    const usage_text = "usage: release_staged_verify verify --staged <dir> --out <dir>\n";
+    const cases = [_]Case{
+        .{ .args = &.{ "--staged", "/s", "--mopm", "/m", "--work", "/w", "--out", "/o" }, .want = "release_staged_verify: unknown argument --out\n" ++ usage_text },
+        .{ .args = &.{ "--staged", "/s", "--mopm", "/m", "--work" }, .want = "release_staged_verify: --work needs one value, given once\n" },
+        .{ .args = &.{ "--staged", "/s", "--staged", "/t", "--mopm", "/m", "--work", "/w" }, .want = "release_staged_verify: --staged needs one value, given once\n" },
+        .{ .args = &.{ "--staged", "/s", "--work", "/w" }, .want = usage_text },
+        .{ .args = &.{}, .want = usage_text },
+        .{ .args = &.{ "--staged", "/s", "--mopm", "/m", "--work", "/w" }, .subdir = null, .want = "release_staged_verify: mopm installs no Mojo toolchain on this host, so add cannot run here\n" },
+    };
+    for (cases) |c| {
+        var fake = FakeMopm{};
+        var out = sink();
+        defer out.deinit();
+        var err = sink();
+        defer err.deinit();
+        try t.expectEqual(@as(u8, 2), try rsv.cliAdd(a, c.args, c.subdir, fake.runner(), &out.writer, &err.writer));
+        try t.expect(std.mem.startsWith(u8, err.written(), c.want));
+        try t.expectEqual(@as(usize, 0), fake.calls.items.len);
+        try t.expectEqualStrings("", out.written());
+    }
+}
