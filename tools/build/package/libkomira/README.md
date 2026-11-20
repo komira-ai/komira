@@ -19,4 +19,15 @@ C API (`src/so`), and the check that installs it.
 ./buck2 build komira//tools/build/package/libkomira:libkomira_install
 ```
 
+- `libkomira_elf_report` writes a markdown table read from the built files: size,
+  SONAME, RUNPATH and `DT_NEEDED` of libkomira, of each native owner and of the Mojo
+  runtime libraries, the highest `GLIBC_`, `GLIBCXX_` and `CXXABI_` version each
+  needs, which owners libkomira reaches, and the `manylinux_2_<N>` tag the glibc floor
+  allows (it says so on its first line if the floor promised by the platform row is
+  exceeded). The table in [`src/so/README.md`](../../../../src/so/README.md) is its output.
+
+```sh
+./buck2 build komira//tools/build/package/libkomira:libkomira_elf_report
+```
+
 Nothing here publishes anything.
