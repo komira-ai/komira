@@ -1,5 +1,6 @@
-"""Hermetic Python for tests: `python_dist`, `python_wheel`, `py_test`,
-`python_binding_test`, `python_oracle` and `python_proto`.
+"""Hermetic Python for tests: `python_dist`, `python_wheel`,
+`python_source_package`, `py_test`, `python_binding_test`, `python_oracle` and
+`python_proto`.
 
 `python_dist` unpacks a sha256-pinned CPython archive (an `install_only`
 archive of python-build-standalone) into a directory and fails unless the
@@ -7,7 +8,9 @@ interpreter in it runs and reports the pinned version, and is free-threaded
 exactly when the target says so. `python_wheel` installs
 one sha256-pinned wheel into a directory of its own, with that interpreter
 and `wheel_install.py` (no pip): it fails unless the wheel's `.dist-info` names
-the pinned distribution and version. `py_test` runs one Python script with that
+the pinned distribution and version. `python_source_package` stages the files
+of an import package of this repository at their paths in a directory of its
+own, which a test imports from as it does a wheel's. `py_test` runs one Python script with that
 interpreter as a build action, through `pyrun.py`; its output exists only if
 the script passed, so building the target is running the test.
 `python_oracle` runs one script twice, through `oracle_run.py`, and outputs
@@ -271,17 +274,20 @@ _py_test = rule(
 # and never on the worker. The script learns the first directory from
 # `--lib-dir <dir>`, its first two arguments (a flag, not an environment
 # variable); `ctypes.CDLL(os.path.join(libdir, "<out_name>.so"))` loads a
-# library by path.
+# library by path. `data` ({dest: source}) is staged in the same directory at
+# `dest`: a library's runnable directory (`libkomira[runnable]`, the library
+# with its lib/ beside it) or a stand-in library under a path of its own.
 
 def _python_binding_test_impl(ctx):
-    libs = {}
+    libs = data_map(ctx, str(ctx.label.raw_target()), ctx.attrs.data)
+    tops = {dest.split("/")[0]: True for dest in libs}
     for l in ctx.attrs.libs:
         out = l[DefaultInfo].default_outputs
         if len(out) != 1:
             fail("{}: lib {} has {} outputs, a shared library has one".format(ctx.label, l.label, len(out)))
         name = out[0].basename
-        if name in libs:
-            fail("{}: two libs are named {}".format(ctx.label, name))
+        if name in libs or name in tops:
+            fail("{}: two libs (or a lib and data) are named {}".format(ctx.label, name))
         libs[name] = out[0]
     libdir = ctx.actions.copied_dir("libs", libs)
     runtime = ctx.attrs.runtime[DefaultInfo].default_outputs[0]
@@ -293,11 +299,40 @@ def _python_binding_test_impl(ctx):
 
 _python_binding_test = rule(
     impl = _python_binding_test_impl,
-    doc = "A `py_test` that loads shared libraries: `libs` (`mojo_shared_lib` targets) are staged by file name in one directory, passed to the script as `--lib-dir <dir>`; the action's LD_LIBRARY_PATH is that directory and the Mojo runtime libraries (`runtime`), and nothing else.",
+    doc = "A `py_test` that loads shared libraries: `libs` (`mojo_shared_lib` targets) are staged by file name in one directory, and `data` ({dest: source}, a build output allowed) at `dest` in it; the directory is passed to the script as `--lib-dir <dir>`; the action's LD_LIBRARY_PATH is that directory and the Mojo runtime libraries (`runtime`), and nothing else.",
     attrs = _PY_TEST_ATTRS | {
-        "libs": attrs.list(attrs.dep()),
+        "data": attrs.dict(attrs.string(), attrs.source(), default = {}),
+        "libs": attrs.list(attrs.dep(), default = []),
         "runtime": attrs.exec_dep(default = "komira//tools/build/toolchains:mojo_runtime"),
         "_category": attrs.string(default = "python_binding_test"),
+    },
+)
+
+# ---- python_source_package ---------------------------------------------------
+#
+# The files of an import package of this repository (`python/komira`) staged at
+# their paths from the package in one directory, the site directory a test puts
+# on sys.path with `--site`, as it does a wheel's: a test lists the target in
+# `deps` and imports the package by its name. The closure's key is the target's
+# name and its version is "source", so a wheel of the same distribution in the
+# same closure fails analysis like any version clash.
+
+def _python_source_package_impl(ctx):
+    files = {}
+    for s in ctx.attrs.srcs:
+        files[s.short_path] = s
+    site = ctx.actions.copied_dir("site", files)
+    name = normalize(ctx.label.name)
+    return [
+        DefaultInfo(default_output = site),
+        PythonWheelInfo(name = name, version = "source", closure = {name: ("source", site)}),
+    ]
+
+_python_source_package = rule(
+    impl = _python_source_package_impl,
+    doc = "The files `srcs` of an import package of this repository, staged at their paths from the package in one directory; a `py_test` or `python_binding_test` that lists the target in `deps` imports from it. The distribution's name is the target's name and its version is `source`.",
+    attrs = {
+        "srcs": attrs.list(attrs.source()),
     },
 )
 
@@ -443,6 +478,9 @@ def _dist_macro(**kwargs):
 def _wheel_macro(**kwargs):
     _python_wheel(**_linux(kwargs))
 
+def _source_package_macro(**kwargs):
+    _python_source_package(**kwargs)
+
 def _py_test_macro(**kwargs):
     _py_test(**_linux(kwargs))
 
@@ -459,6 +497,7 @@ def _proto_macro(**kwargs):
 # (tools/build/lint/doc_tree.bzl), so no BUCK file names one.
 python_dist = declares_docs(_dist_macro)
 python_wheel = declares_docs(_wheel_macro)
+python_source_package = declares_docs(_source_package_macro)
 py_test = declares_docs(_py_test_macro)
 python_binding_test = declares_docs(_binding_test_macro)
 python_oracle = declares_docs(_oracle_macro)

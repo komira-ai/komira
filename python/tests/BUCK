@@ -1,0 +1,73 @@
+load("@komira//tools/build/node:defs.bzl", "c_shared_lib")
+load("@komira//tools/build/python:defs.bzl", "python_binding_test")
+
+# libkomira with the Mojo runtime and its native owners in lib/ beside it: the
+# directory the loader is given.
+LIBKOMIRA = "komira//src/so:libkomira[runnable]"
+
+# Stand-ins for libkomira (fake_libkomira.c). The loader must refuse a library
+# of ABI major 2, of major 0 (version 0.999), one reporting -1, and one without
+# komira_register_parquet; `fake_modes` (version 1.1) answers each call by the
+# mode its register_parquet name set, for the error path and the two-call
+# protocol.
+c_shared_lib(
+    name = "fake_v2",
+    srcs = ["fake_libkomira.c"],
+    copts = ["-DFAKE_VERSION=2000"],
+    out = "libkomira_fake_v2.so",
+)
+
+c_shared_lib(
+    name = "fake_v0",
+    srcs = ["fake_libkomira.c"],
+    copts = ["-DFAKE_VERSION=999"],
+    out = "libkomira_fake_v0.so",
+)
+
+c_shared_lib(
+    name = "fake_negative",
+    srcs = ["fake_libkomira.c"],
+    copts = ["-DFAKE_VERSION=-1"],
+    out = "libkomira_fake_negative.so",
+)
+
+c_shared_lib(
+    name = "fake_no_register",
+    srcs = ["fake_libkomira.c"],
+    copts = ["-DFAKE_OMIT_REGISTER"],
+    out = "libkomira_fake_no_register.so",
+)
+
+c_shared_lib(
+    name = "fake_modes",
+    srcs = ["fake_libkomira.c"],
+    out = "libkomira_fake_modes.so",
+)
+
+# The refusals of load (no library, another ABI major, a missing symbol,
+# another file once loaded), then the real library: its version, two contexts,
+# an engine refusal with its last error, and a registered Parquet file.
+python_binding_test(
+    name = "load_test",
+    src = "test_load.py",
+    data = {
+        "fake_negative/libkomira.so": ":fake_negative",
+        "fake_no_register/libkomira.so": ":fake_no_register",
+        "fake_v0/libkomira.so": ":fake_v0",
+        "fake_v2/libkomira.so": ":fake_v2",
+        "libkomira": LIBKOMIRA,
+        "two_columns.parquet": "komira//src/so:tests/fixtures/two_columns.parquet",
+    },
+    deps = ["//python:komira"],
+)
+
+# The error path on the stand-in: the second call's capacity is the first
+# call's length, a length that grows or shrinks between the calls, a second
+# call that fails, a last error that cannot be read or is empty or not UTF-8,
+# the call's own status, the argument checks, and a NULL context.
+python_binding_test(
+    name = "two_call_test",
+    src = "test_two_call.py",
+    data = {"fake_modes/libkomira.so": ":fake_modes"},
+    deps = ["//python:komira"],
+)

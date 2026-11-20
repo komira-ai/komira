@@ -9,6 +9,11 @@
 .github/ci/coverage_measure.sh	coverage and mutation tooling: to port to Zig
 .github/ci/tests/coverage_ci_cases.sh	coverage and mutation tooling: to port to Zig
 buck2	a thin wrapper: runs the pinned buck2 release
+python/komira/__init__.py	the Python package: its sources are Python (docs/design/python_package.md)
+python/komira/_errors.py	the Python package: its sources are Python (docs/design/python_package.md)
+python/komira/_native.py	the Python package: its sources are Python (docs/design/python_package.md)
+python/tests/test_load.py	the Python package's tests: the SDK surface is tested in Python
+python/tests/test_two_call.py	the Python package's tests: the SDK surface is tested in Python
 src/arrow_ipc/tests/fixtures/arrow_ipc/gen_fixtures.py	fixture provenance: the pyarrow program that wrote the Arrow IPC fixtures beside it (a third-party writer is the point)
 src/arrow_ipc/tests/fixtures/arrow_ipc/gen_pyarrow_interop_fixtures.py	fixture provenance: the pyarrow program that wrote the Arrow IPC fixtures beside it (a third-party writer is the point)
 src/parquet_codec/tests/fixtures/parquet/gen_pyarrow_fixtures.py	fixture provenance: the pyarrow program that wrote the Parquet fixtures beside it (a third-party writer is the point)

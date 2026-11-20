@@ -1,9 +1,9 @@
 # The Python package: layout, names and first API
 
-Status: design, not built. The allowlist entry that admits the package (`python` in `PYTHON_SURFACE`,
-[tests/python_closure_allowlist.bzl](../../tests/python_closure_allowlist.bzl)) lands with this document;
-`python/` itself does not exist yet, so the entry matches nothing until the loader's pull request adds
-the first files.
+Status: design, partly built. The allowlist entry that admits the package (`python` in `PYTHON_SURFACE`,
+[tests/python_closure_allowlist.bzl](../../tests/python_closure_allowlist.bzl)) landed with this document.
+The loader is built ([python/README.md](../../python/README.md)): `komira/_native.py`, `komira/_errors.py`
+with `KomiraError` and `LibraryLoadError`, and their tests; the rest of the first release's API is not.
 
 ## What problem does this solve?
 
@@ -354,7 +354,7 @@ closing a session with an unread result does not crash.
 
 - The interpreter list ([tools/build/lint/interpreter_allowlist.tsv](../../tools/build/lint/interpreter_allowlist.tsv))
   needs a row for each `.py` file today, and `third_party/python`'s `_TEST_ONLY` and `src/so`'s visibility
-  each need a line for `python/`. The loader pull request adds them; whether the interpreter list should
+  each need a line for `python/tests`; the loader added them. Whether the interpreter list should
   read `PYTHON_SURFACE` instead of a row per file is a question for that lint.
 - Free-threaded CPython (3.14t): the package is not claimed for it in the first release. ctypes works
   there, but no test runs the package on it.
@@ -363,5 +363,5 @@ closing a session with an unread result does not crash.
 
 ## Where is the code?
 
-`python/` (not yet built), the allowlist [tests/python_closure_allowlist.bzl](../../tests/python_closure_allowlist.bzl),
+`python/` (the loader so far, [python/README.md](../../python/README.md)), the allowlist [tests/python_closure_allowlist.bzl](../../tests/python_closure_allowlist.bzl),
 the check [tools/build/selftest/graph/python_closure.zig](../../tools/build/selftest/graph/python_closure.zig).

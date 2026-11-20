@@ -5,6 +5,8 @@
 TARGETS = [
     "komira//node:load_test",
     "komira//node:session_test",
+    "komira//python/tests:load_test",
+    "komira//python/tests:two_call_test",
     "komira//release/readme_e2e/verify:all",
     "komira//src/agg:agg_conda",
     "komira//src/authz_api:authz_api_conda",
