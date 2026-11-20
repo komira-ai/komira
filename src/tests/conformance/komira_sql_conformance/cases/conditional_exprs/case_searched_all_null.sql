@@ -1,0 +1,2 @@
+-- order: rows
+SELECT k, CASE WHEN a > 3 THEN NULL ELSE NULL END AS z FROM T

@@ -1,0 +1,2 @@
+-- order: rows
+SELECT k FROM ta INTERSECT ALL SELECT k FROM tb
