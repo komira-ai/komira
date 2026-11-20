@@ -189,7 +189,7 @@ the client's own.** With `execution = auto` (the default):
 | `[komira_re]` names | a build with no `--target-platforms` runs |
 |---|---|
 | nothing | on this machine, for this machine's platform |
-| this machine's platform's key (`linux_x86_64_properties` on Linux x86_64, `darwin_arm64_properties` on a Mac) | on that platform's remote pool |
+| this machine's platform's key (`linux_x86_64_properties` on Linux x86_64, `linux_arm64_properties` on Linux arm64, `darwin_arm64_properties` on a Mac) | on that platform's remote pool |
 | only ANOTHER platform's key | on this machine; the other key is read only by a build that states that platform with `--target-platforms`. It never sends host-platform work to the wrong pool, and never fails |
 
 So a Mac with the Mac pool configured builds on the Mac farm, a Linux x86_64
@@ -241,9 +241,9 @@ the same macro with its own sets, written inline or read the same way
 Two details keep action digests portable:
 
 - **Registration order.** A target that states no execution constraint gets
-  the first platform, so `linux-x86_64` comes first, and `darwin-arm64`
-  last: a platform added later must never become the first match of an
-  action that states no OS.
+  the first platform, so `linux-x86_64` comes first, then `linux-arm64`,
+  and `darwin-arm64` last: a platform added later must never become the
+  first match of an action that states no OS or CPU.
 - **Platform names.** Each registered platform is named after the target
   platform whose configuration it uses (`komira//tools/build/platforms:linux-x86_64`),
   not after the target that registers it. The name keys the configuration of
