@@ -5,8 +5,10 @@ Python serves only komira's Python surface: its SDK or bindings and their own
 tests. No other target depends on it and no other file is Python; CI runs it
 only through those tests, in the pull-request sets.
 
-PYTHON_SURFACE: package paths (`src/<pkg>`) where Python is allowed.
-Adding one is a ruling, not a review; the shared library's bindings are one.
+PYTHON_SURFACE: paths of the cell where Python is allowed: a finding of a
+target whose package is the path or under it, or of a file under it. Adding
+one is a ruling, not a review; the shared library's bindings are one, and the
+Python package (python/, docs/design/python_package.md) is another.
 
 PYTHON_CEILING: the findings allowed today, exactly as the check spells them
 (`target <label>`, `file <path>`, `exec <path>`). It only shrinks: the check
@@ -18,6 +20,8 @@ PYTHON_SURFACE = [
     # The hello test of python_binding_test, and the home of the binding tests
     # of the shared library (so).
     "tools/build/examples/python_binding",
+    # The Python package komira and its tests (docs/design/python_package.md).
+    "python",
 ]
 
 PYTHON_CEILING = [
