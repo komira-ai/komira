@@ -24,7 +24,7 @@ callers. Both are thin bindings over these calls.
 | cancel, progress | `komira_cancel(ctx)` and `komira_progress(ctx, ...)`. These two calls are the exception to the one-thread rule: another thread may call them while a run is in flight. Target 1.4 |
 | credentials | settled by their own design. The constraints are in §7. No row is reserved |
 | aborts | every raise becomes a status, and nothing raises across the boundary. Known abort sites on the run path are turned into raises, or refused before the run. Anything left is fail-fast: it ends the process. No signal handler is installed and no `longjmp` is used. An out-of-process engine stays possible behind the same calls |
-| not carried | Python UDF registration by code pointer, the Excel (`xl_*`) calls, IPC-bytes output, SQL render, and the prototype's text error codes (§9) |
+| not carried | Python UDF registration by code pointer, the Excel (`xl_*`) calls (Excel is a TypeScript SDK over the plan door), IPC-bytes output, SQL render, and the prototype's text error codes (§9) |
 
 The minor versions above are targets. A row's `since` is the version of the first
 change that lands it on `main`, because releases come from `main` automatically. If
@@ -41,6 +41,9 @@ over the plan protobuf, and a SQL call.
   never rendered to SQL text.
 - **SQL text.** It goes through its own entry, `komira_sql_stream`, where
   libkomira parses and binds it into a logical plan.
+- **Excel.** It is a separate TypeScript SDK. It takes Excel formulas, builds a
+  logical plan, and submits it through `komira_plan_stream`, exactly as the
+  Python frames do. libkomira has no Excel-specific call.
 - **The shared route.** From the optimizer down, both entries run the same
   route in `sdk_exec` (§3).
 
@@ -59,6 +62,30 @@ given:
   every call. Here the session keeps one `EngineContext` (§5).
 - **The SQL entry is not scaffolding.** It is an entry of its own, beside the
   plan door, for users who write SQL (§9).
+
+The Excel port differs from the earlier code in these places, each for the
+reason given:
+
+- **The plan is built in the SDK, and only submitted to the library.** The
+  earlier formula parser and plan builder were Mojo inside the library. Seven
+  `xl_*` calls bound names, rendered, evaluated and streamed formulas, and a
+  scalar evaluator ran formulas with no plan at all. Here the TypeScript SDK
+  holds the parser and the plan builder, and the library only sees plan bytes.
+- **Every formula becomes a plan.** That includes scalar formulas such as
+  `=1+1`, which the earlier builder refused and evaluated directly. A
+  formula's cell values and named ranges ride in the plan as literals, or as
+  tables the host registers. They never go through bind calls.
+- **Excel semantics are engine work, not C ABI surface.** Functions whose
+  correct answer differs from SQL's become plan expressions with Excel
+  behaviour. Excel `UPPER` does full case folding where DuckDB maps one code
+  point to one, and Excel has error values such as `#DIV/0!`. They are never a
+  SQL kernel reused, because the two surfaces have different oracles.
+  - New expression arms on the plan wire are additive (rule B8).
+  - How a result column carries an Excel error value is decided with those
+    expressions. It is data inside the Arrow stream. It is never a status
+    code of the run call, so this ABI does not change for it.
+- **The Node binding carries it.** The TypeScript SDK reaches libkomira through
+  the Node addon. Its run call drains the stream in C (§9).
 
 ## 2. What exists today
 
@@ -455,7 +482,7 @@ table names its calls only to say what each becomes.
 | `komira_sql_render` | not in 1.2. An `EXPLAIN` surface can add it later as a two-call row |
 | `komira_register_python_udf`, `komira_declare_sql_udf` | **not carried.** They took a host code pointer and ran Python on engine threads, which conflicts with rule B21: Python UDFs run in zygote-forked workers. UDF registration is designed with those workers, and it will describe a worker, not hand over a code pointer |
 | `komira_register_builtin_mojo_udf` | not carried. It selected from a closed set compiled into the library |
-| `komira_xl_bind`, `xl_bind_value`, `xl_bind_cell`, `xl_render`, `xl_eval`, `xl_functions`, `xl_stream` (Excel formulas) | **not carried, recommended.** The Excel libraries are not ported, and a SQL-first release does not need them. This is a scope call for the product owner. If it is reversed, the calls come back as new rows in a later minor |
+| `komira_xl_bind`, `xl_bind_value`, `xl_bind_cell`, `xl_render`, `xl_eval`, `xl_functions`, `xl_stream` (Excel formulas) | **not carried.** Excel is a separate TypeScript SDK that builds a logical plan and submits it through `komira_plan_stream` (§1). Excel function semantics become plan expressions in the engine |
 | knobs read from environment variables (feature gates, library paths, the plan-wire-or-SQL switch for frames) | none. Options are setter calls (§5), and a binding finds the library from its own install location |
 
 ## 10. Versioning and bindings
