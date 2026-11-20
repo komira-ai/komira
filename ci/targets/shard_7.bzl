@@ -14,6 +14,7 @@ TARGETS = [
     "komira//python/tests:refuses_lower_bound_not_gencode",
     "komira//python/tests:refuses_other_runtime",
     "komira//python/tests:refuses_runtime_outside_range",
+    "komira//python/tests:runtime_test",
     "komira//python/tests:session_test",
     "komira//python/tests:two_call_test",
     "komira//release/readme_e2e/verify:all",
