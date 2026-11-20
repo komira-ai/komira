@@ -1,0 +1,2 @@
+-- order: rows
+SELECT k, CASE WHEN k > 2 THEN 10 ELSE 20 END AS c FROM T

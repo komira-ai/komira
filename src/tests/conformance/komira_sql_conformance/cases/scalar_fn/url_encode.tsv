@@ -1,0 +1,14 @@
+k	url_encode(s)
+0	""
+1	abc
+10	%C3%9Cn%C3%AFcod%C3%A9
+11	abcde
+12	abcdefgh
+2	%20%20Hello%20
+3	%C3%9Cn%C3%AFcod%C3%A9
+4	
+5	kitten
+6	flaw
+7	a
+8	ab
+9	a%2Cb
