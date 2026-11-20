@@ -46,6 +46,9 @@
 //! `.`/`..` arms are covered by the name pattern too.)
 //! Also: komira_test_oracle's case runner no longer calling its oracle
 //! discipline (discipline_unplaced and discipline_unordered build green).
+//! And: komira_sql_conformance's case runner no longer comparing its answer
+//! with the committed one (corpus_answer_differs builds green), or running
+//! a case whose first line names no row order (corpus_unordered).
 const std = @import("std");
 const lib = @import("lib/lib.zig");
 
@@ -233,6 +236,8 @@ const REDS = [_]Red{
     .{ .name = "dot_import", .text = ".import cannot be used in -safe mode" },
     .{ .name = "discipline_unplaced", .text = "Invalid Input Error: oracle discipline: case.sql the ORDER BY key at byte 67 states no NULLS FIRST or NULLS LAST" },
     .{ .name = "discipline_unordered", .text = "Invalid Input Error: oracle discipline: case.sql its outermost query has no ORDER BY" },
+    .{ .name = "corpus_answer_differs", .text = "Invalid Input Error: corpus case: answer.tsv differs from the committed expected.tsv, line 2: got \"1\", want \"2\"" },
+    .{ .name = "corpus_unordered", .text = "Invalid Input Error: corpus case: case.sql must start with \"-- order: query\" or \"-- order: rows\" on a line of its own" },
 };
 
 /// The pieces of the sql_oracle action's argv, as `buck2 aquery` prints it

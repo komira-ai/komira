@@ -1,0 +1,2 @@
+-- order: rows
+SELECT k, a FROM T ORDER BY CASE WHEN a > 3 THEN 0 ELSE 1 END

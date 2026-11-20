@@ -1,0 +1,14 @@
+k	concat_ws('-', s, u)
+0	-
+1	abc-abd
+10	Ünïcodé-Unicode
+11	abcde-abzzzzzzz
+12	abcdefgh-abcdeXXX
+2	  Hello -  Hello 
+3	Ünïcodé-Ünïcodé
+4	abc
+5	kitten-sittin
+6	flaw-lawn
+7	a-b
+8	ab-ba
+9	a,b-a,c
