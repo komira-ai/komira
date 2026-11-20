@@ -2,7 +2,8 @@
 
 Status: design, not built. The allowlist entry that admits the package (`python` in `PYTHON_SURFACE`,
 [tests/python_closure_allowlist.bzl](../../tests/python_closure_allowlist.bzl)) lands with this document;
-nothing else under `python/` exists yet.
+`python/` itself does not exist yet, so the entry matches nothing until the loader's pull request adds
+the first files.
 
 ## What problem does this solve?
 
@@ -93,7 +94,7 @@ The whole public surface of the first release is these names in `komira.__all__`
 | `Session(*, threads=None, memory_limit=None)` | one engine context (`komira_ctx_new`) and its registered tables. `threads` is the worker count and `memory_limit` the engine's memory budget in bytes; `None` takes the engine's default. Options are arguments, never environment variables (rule S2). A context manager: `with komira.Session() as s:`; `close()` frees the context and is idempotent |
 | `Session.register_parquet(name, path)` | registers a local Parquet file as the table `name` (`komira_register_parquet`). `path` is a `str` or `os.PathLike`; a relative path is resolved against the working directory when the call is made, `~` is expanded. Registering a name again replaces it |
 | `Session.sql(query) -> Result` | runs one SQL statement over the session's tables. **This is the official door of the first release**, not an escape hatch |
-| `Result` | the answer of one `sql` call: `to_arrow() -> pyarrow.Table`, `to_reader() -> pyarrow.RecordBatchReader`, `to_pandas()`, `to_polars()`, and `__arrow_c_stream__` (the Arrow PyCapsule interface, so `pyarrow.table(r)`, `polars.from_arrow(r)` and DuckDB read it with no copy through Python) |
+| `Result` | the answer of one `sql` call: `to_arrow() -> pyarrow.Table`, `to_reader() -> pyarrow.RecordBatchReader`, `to_pandas()`, `to_polars()`, and `__arrow_c_stream__(requested_schema=None)` (the Arrow PyCapsule interface, so `pyarrow.table(r)`, `polars.from_arrow(r)` and DuckDB take the stream itself; no batch is converted in Python) |
 | `sql(query) -> Result`, `register_parquet(name, path)` | the same two calls on the process's default session (decision 5) |
 | `KomiraError` | the base class of every error the package raises on purpose (decision 9) |
 | `UnsupportedOperation` | a `KomiraError`: komira refused a construct by name (an SQL feature the engine does not run yet, an option it does not take) |
@@ -108,15 +109,24 @@ Behaviour each later pull request implements, fixed here so they agree:
 - **A `Result` is read once.** Its stream is consumed by the first terminal (`to_arrow`, `to_reader`,
   `to_pandas`, `to_polars`, `__arrow_c_stream__`); a second one raises `KomiraError` saying the result was
   already read. Running `sql` again is how to read it again. Hiding a second read behind a cached table
-  would make a large result's memory use depend on which terminal was called first.
+  would make a large result's memory use depend on which terminal was called first. Calling
+  `__arrow_c_stream__` counts as reading: the capsule is made on the call and owns the stream from then
+  on, whether or not its consumer reads it. A `requested_schema` other than `None` raises
+  `UnsupportedOperation`; casting on request is a later, additive decision.
 - **pandas and polars are optional.** `to_pandas` and `to_polars` import them when called; when one is
   missing, the `ImportError` names the extra that installs it (`pip install komira[pandas]`).
 - **A closed session refuses every call** with `KomiraError`, and closing a session while a `Result` of
   it is unread never crashes the interpreter. Whether that unread result then still reads, or refuses, is
   the session pull request's choice, held by a test of each case it allows.
 - **One session, any thread.** A `Session` may be used from several threads; it holds a lock around each
-  call into the library, so one context never runs two calls at once. Sessions are independent of one
-  another. The lock goes when the ABI design states that a context is safe to share.
+  call into the library, its `Result`s' batch reads included, so one context never runs two calls at
+  once (a thread reading a large result holds up a `sql` call on the same session between batches, not
+  for the whole read). Sessions are independent of one another. The lock goes when the ABI design states
+  that a context is safe to share.
+- **Fork.** A child process made by `os.fork` must not use a session of its parent: the package
+  registers an `os.register_at_fork` hook that marks every session of the parent closed in the child, so
+  a call there raises `KomiraError` instead of running on a copied context. The package never forks;
+  UDF workers are the engine's, not this package's.
 - **Ctrl-C during a query** is delivered when the query returns; the session stays usable. The first
   release has no cancel and its docs say so.
 
@@ -145,7 +155,8 @@ a pandas-shaped and a polars-shaped DataFrame surface. What happens to each part
 ### 5. The default session
 
 `komira.sql` and `komira.register_parquet` use one `Session` per process, created with default options on
-the first call and never closed by the package. A user who wants options or a second set of tables
+the first call. The package does not close it; the operating system reclaims it at exit, as it does the
+library, which is never unloaded (decision 6). A user who wants options or a second set of tables
 creates a `Session`. There is one default per process, not per thread: a table registered on it is
 visible from every thread, as a module-level name would be.
 
@@ -193,7 +204,6 @@ classifiers = [
   "Operating System :: POSIX :: Linux",
   "Programming Language :: Python :: 3 :: Only",
   "Programming Language :: Python :: 3.13",
-  "Programming Language :: Python :: 3.14",
   "Topic :: Database",
   "Typing :: Typed",
 ]
@@ -221,10 +231,18 @@ Issues = "https://github.com/komira-ai/komira/issues"
 - **No internal names.** Authors are "The komira authors", not a person; the URLs name only this
   repository; no internal host, no private repository, no address. The public-boundary lint reads
   `python/` like every file of the cell.
-- **Only what is true.** The classifiers name the platforms and CPython versions the package is tested
-  on, and `Typing :: Typed` because the package ships `py.typed` (decision 8). `requires-python` starts
-  at the oldest interpreter the tests run (3.13, [third_party/python](../../third_party/python/README.md));
-  claiming older versions waits for a test on them.
+- **Only what is true.** The `Operating System` classifiers name the release platforms, each of which
+  gets its wheel only after that wheel's install test passes on that platform (in the release workflow
+  for macOS, never in a pull request's check). The CPython classifiers name the interpreters the
+  package's tests run: 3.13 today ([third_party/python](../../third_party/python/README.md)), and 3.14
+  when a test of the package runs the pinned 3.14. `requires-python` starts at the oldest of them;
+  claiming older versions waits for a test on them. `Typing :: Typed` because the package ships
+  `py.typed` (decision 8).
+- **The file is the wheel rule's data, not an installable project.** With no `[build-system]` table,
+  `pip install ./python` would fall back to setuptools and fail (there is no library to build), and
+  `license-files` names files the wheel rule stages from the repository root, which `python/` does not
+  hold. Both are expected: the package is installed from its wheel, and the wheel rule refuses a key of
+  `[project]` it does not read, so the file never says something the wheel does not carry.
 - **protobuf is not a dependency of the first release.** Only the DataFrame plan encoder needs it; it is
   added, with its range, when that lands.
 - **The version** is stamped by the wheel rule. Its scheme is in
@@ -240,9 +258,13 @@ checks the annotations; the wheel rule's read-back check holds that `py.typed` i
 
 ### 9. Errors
 
-- Every error the package raises on purpose is a `KomiraError` (a subclass of `Exception`), so
-  `except komira.KomiraError` catches komira's errors and nothing else. Wrong argument types raise
-  Python's own `TypeError`, as any Python function does.
+- Every error from the library or from a session's state (closed, already read) is a `KomiraError` (a
+  subclass of `Exception`), so `except komira.KomiraError` catches komira's errors and nothing else.
+  Arguments are Python's: a wrong type raises `TypeError` and a wrong value of the right type (a
+  `threads` of 0, a negative `memory_limit`, an empty table name) `ValueError`, before the library is
+  called; a missing optional dependency raises `ImportError` (decision 3).
+- `UnsupportedOperation` was a `TypeError` in the earlier SDK and is a `KomiraError` here. That SDK was
+  never published, so no user's `except TypeError` depends on it.
 - A `KomiraError` from the library carries `status` (the ABI's status number), `code` (the engine's
   named code, `ENGINE_OPTIONS_INVALID` for example, or `None`), `step` (the step that refused it:
   `parse`, `bind`, `optimize`, `lower`, `execute`, or `None`) and the library's message as `str(e)`.
@@ -266,8 +288,8 @@ checks the annotations; the wheel rule's read-back check holds that `py.typed` i
   refuses one, and the package adds nothing to its ceiling.
 - No public name of the package is configured by an environment variable.
 - The public names are exactly `komira.__all__`; a private module's name is never in user documentation.
-- The wheel carries `libkomira` and its native owners, its licence files and `py.typed`, and never a
-  Modular-authored file.
+- The wheel carries `libkomira` and its native owners, its licence files and `py.typed`, and no file of
+  Modular's runtime distribution.
 - A query answers what DuckDB answers for the same SQL, or refuses by name.
 
 ## How is it tested?
