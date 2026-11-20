@@ -51,8 +51,8 @@ from plan_ir.logical_plan import (
 )
 from plan_stats.table_stats import TableStats
 from .optimizer_project_merge_guard import predicate_below_project
-# The UdfData import was removed — Filter/Project
-# rewriter rules no longer thread UDF snapshots.
+from .optimizer_udf_carry import project_like
+from .optimizer_udf_opacity import udf_project_passes_predicate
 from std.memory import OwnedPointer
 from plan_ir.plan_helpers import (
     _copy_schema,
@@ -248,7 +248,8 @@ def push_predicates_down(var plan: LogicalPlan) raises -> LogicalPlan:
     """
     # ★★ A UDF-CARRYING NODE IS OPAQUE TO THIS PASS. Pinned by
     # `test_optimizer_udf_node_opacity.mojo`, which fails on BOTH halves
-    # without it.
+    # without it. (A Filter ABOVE a UDF Project may still move below it; see
+    # the Project arm and `optimizer_udf_opacity`.)
     #
     # This node's `predicate` is a PLACEHOLDER — the UDF path stamps `lit(true)`
     # because the customer's predicate IS the UDF — and `lit(true)` is the most
@@ -273,42 +274,26 @@ def push_predicates_down(var plan: LogicalPlan) raises -> LogicalPlan:
 
         # Push through Project if predicate only references columns below
         if child.tag == PLAN_PROJECT:
-            # Projection guard: a Project
-            # whose `udf` is populated is opaque to predicate pushdown.
-            # The UDF's output column(s) may be in scope of `pred` (e.g.
-            # `df.map[F]().filter(col(F.out) > 0)`), so pushing the filter
-            # below the Project would reference a column that does not
-            # yet exist in the under-Project schema. Even when `pred`
-            # references only pass-through columns, pushing changes the
-            # cardinality the UDF sees, which is illegal for non-stateless
-            # UDFs (e.g. partition-local with order keys). Mirror DuckDB
-            # `src/optimizer/pushdown/pushdown_projection.cpp:51-55` —
-            # volatile-projection expressions force the filter to remain
-            # ABOVE the Project. Leave `pred` parked above the Project and
-            # recurse into the Project's child untouched.
-            #
-            # CSE barrier: a Project
-            # flagged `is_cse_introduced=True` is similarly opaque. It
-            # materializes `_cse_*` synthetic columns that exist ONLY
-            # above the Project; the predicate may reference these
-            # (Axis 2 rewrites Filter predicates to ColRef synthetics),
-            # so pushing the Filter below would dangle the ColRef. The
-            # barrier mirrors the UDF-Project handling.
-            # UDF-Project barrier removed —
-            # ProjectData no longer carries `udf`. The CSE-introduced barrier
-            # still holds: a `_cse_*` synthetic column materialized above the
-            # Project must NOT be referenced from a predicate pushed below it.
-            # ★ THE BARRIER THE COMMENT ABOVE DESCRIBES, RESTORED. Its
-            # rationale ("pushing changes the cardinality the UDF sees, which
-            # is illegal for non-stateless UDFs") outlived the guard by fifteen
-            # months: a change removed it on day one because `ProjectData`
-            # had lost its `udf` field, and a later change PUT THE FIELD BACK ON
-            # day two. Without this, a Filter pushed
-            # through a UDF-Project rebuilds it via `LogicalPlan.project(...)`
-            # — the NON-UDF factory — and the customer's function is simply
-            # GONE, leaving the placeholder col-refs to execute in its place.
+            # A UDF-carrying Project passes `pred` down only when the UDF
+            # passes every column `pred` reads through unchanged
+            # (`optimizer_udf_opacity`); otherwise it is a barrier. Rebuilt
+            # with `project_like`: the non-UDF factory deletes the UDF.
             if child.has_udf():
-                return LogicalPlan.filter(pred^, child^)
+                if not udf_project_passes_predicate(child, pred):
+                    return LogicalPlan.filter(pred^, child^)
+                var udf_in = _take_project_child(child)
+                var udf_exprs = _copy_expr_array(child._project.value()[].exprs)
+                var udf_below = push_predicates_down(
+                    LogicalPlan.filter(pred^, udf_in^)
+                )
+                return project_like(
+                    child._project.value()[], udf_exprs^, udf_below^
+                )
+            # CSE barrier: a Project flagged `is_cse_introduced=True`
+            # materializes `_cse_*` synthetic columns that exist ONLY above
+            # it; the predicate may reference them (Axis 2 rewrites Filter
+            # predicates to ColRef synthetics), so pushing the Filter below
+            # would dangle the ColRef.
             if child._project.value()[].is_cse_introduced:
                 var proj_child_keep = _take_project_child(child)
                 var proj_exprs_keep = _copy_expr_array(child._project.value()[].exprs)
