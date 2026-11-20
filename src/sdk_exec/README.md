@@ -33,7 +33,7 @@ do is a free function in a module of its own.
 | `engine_context` | `EngineContext(options)`: probes the host once, applies the options over the profile, starts the worker runtime. Holds the catalog, the registered tables, `footers` (a `ParquetFooters`), `host_profile` and `runtime`. A count or budget below 1 is refused with `ENGINE_OPTIONS_INVALID`. `begin_query` drops the footer cache |
 | `engine_catalog` | `register_parquet(ctx, name, path)`: the table's schema is its file's footer |
 | `engine_lower` | `lowering_inputs` (the facts of each scan, from `ctx.footers`, in the cutter's scan order; a registered table's scan is checked against its registered schema) and `lower_for_context` |
-| `engine_execute` | `run_lowered_plan(ctx, lowered)`: a `RealBuilder` over a per-run metadata cache and expression pool, the segment pool sized from the memory budget, `run_plan` on `ctx.runtime` with the host profile's thread count; returns the result segment's batch |
+| `engine_execute` | `run_lowered_plan(ctx, lowered)`: a `RealBuilder` over a per-run metadata cache and expression pool, the segment pool sized from the memory budget, each in-memory source of the plan (`params.batches`) as one resident batch in plan order, `run_plan` on `ctx.runtime` with the host profile's thread count; returns the result segment's batch |
 | `engine_sql` | `run_sql(ctx, text) -> SqlOutcome`: tokenize and parse, `bind_statement`, `optimize`, lower, run. Nothing raises: `SqlOutcome.refusal` holds the step (`parse`, `bind`, `optimize`, `lower`, `execute`) and that step's own message |
 
 **The footer cache is pinned to a query.** `parquet_footers.FooterCache`
@@ -61,9 +61,7 @@ more by the scan.
 (`STATEMENT_NOT_A_QUERY`, step `bind`); a scalar subquery (the optimizer keeps
 it in the plan and lowering refuses the node, `LOWERING_UNCUTTABLE_NODE`; the
 door also refuses with `OPTIMIZE_UNRESOLVED_SCALAR` a plan whose optimization
-asks for a scalar to be executed first, a guard no query tested here reaches); a plan that
-scans an in-memory batch, such as a SELECT with no FROM
-(`EXECUTE_UNSUPPORTED_PARAM`, step `execute`); a sink denied its memory by the
+asks for a scalar to be executed first, a guard no query tested here reaches); a sink denied its memory by the
 budget, a sum outside its declared type and a pool not whole after a run (step
 `execute`); and whatever lowering, the binder or the parser refuses (a join is
 `LOWERING_UNCUTTABLE_NODE` at `lower`). A glob path and a table of several
@@ -98,11 +96,19 @@ The tests run when the package is built.
   Parquet file gives the integer oracle's DECIMAL(38,4); a join, a syntax error,
   an unknown table, a missing file, CREATE TABLE AS and a replaced file are named
   refusals, as are a tiny memory budget, an INT64 sum out of range, a scalar
-  subquery (refused by lowering) and a SELECT with no FROM; the context runs on after a refusal; the
+  subquery (refused by lowering); the context runs on after a refusal; the
   footer cache reads each file once per query and shares it between bind and
   lower; a file replaced between queries is read again; options are validated;
   contexts are created and dropped repeatedly, the segment pool whole after
   each run.
+- `test_run_sql_no_from`: `SELECT 1 AS n` is one row, an INT32 column `n`
+  holding 1, DuckDB's answer; a result literal is INT32 from -2147483647 to
+  2147483647 and INT64 past either bound and at -2147483648 (as in DuckDB);
+  one past BIGINT is refused at bind; a literal a derived table or a UNION
+  ALL branch holds stays INT64 (`n + 5000000000` over a derived `1 AS n` is
+  the INT64 5000000001); `7 / 2`, `count(*)` and a false WHERE with no FROM;
+  `SELECT 1 FROM` a Parquet table; an in-memory source of two batches is read
+  whole and one of none gives no rows with its schema.
 - `test_secret_capability_reveal`: a capability reveals exactly the secret
   bound to its own node id, once and after one store resolve; two capabilities
   over one bindings table each reveal their own value; an unbound node or a
@@ -112,7 +118,9 @@ The tests run when the package is built.
 
 The context does not yet hold a source registry, a plan cache, spill options or
 the plan validation switch. `run_sql` serves one result segment of Parquet
-scans; Q1 waits for the grouped sinks and the sort. The post-rewrite gate and
+scans or of the one-row relation a SELECT with no FROM reads (an integer
+literal of the result's SELECT list is INT32 when it fits, as in DuckDB; an
+integer literal anywhere else, `1 + 1` included, is still INT64); Q1 waits for the grouped sinks and the sort. The post-rewrite gate and
 the plan validation gate are not called from `run_sql`.
 
 `post_rewrite_gate` is a free-standing check; its call sites belong to the
