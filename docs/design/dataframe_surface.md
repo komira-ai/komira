@@ -122,6 +122,8 @@ The frames are immutable, except for one pandas idiom:
 
 - A frame's plan is a tree of the private node classes. Each verb appends nodes, and nothing renders SQL
   text.
+- SQL the user writes is a different entry of `libkomira`, `komira_sql_stream`, where the library turns
+  the text into a logical plan. A frame never goes through it.
 - At a terminal, the encoder writes the tree as a `komira.plan.v1.WirePlanEnvelope`
   ([src/plan_proto/plan.proto](../../src/plan_proto/plan.proto)), using the generated protobuf modules
   under `komira/plan/v1/`. The session sends the bytes through the plan entry, `komira_plan_stream`.
@@ -490,6 +492,23 @@ no timing assertion and no shell test.
    - A departure of sections 7 and 8 is tested to give the departure, and only that.
    - The library is the independent oracle the matrix requires, because the surface promises its
      library's answer, not DuckDB's.
+
+### 12. Where this port differs from the earlier SDK
+
+The two surfaces are a port of the earlier SDK's pandas-shaped frame and polars-shaped module, over its
+plan builder and the plan protobuf. They differ from it only in these points, each for the reason given:
+
+| point | earlier SDK | here | why |
+|---|---|---|---|
+| unknown attributes | `DataFrame.__getattr__` made any name a column reference | no attribute is a column; `__getattr__` only raises `AttributeError` (section 5) | `hasattr` raised, and a verb added later could change what an attribute meant |
+| engine limits | some checked in Python (NULL placement, `head(0)`) | refused by the engine at the terminal (section 6) | the Python checks went stale when the engine moved |
+| SQL text | a frame could be rendered to SQL and re-parsed | a frame is only ever a plan for `komira_plan_stream` | one route per kind of input; SQL text has its own entry |
+| missing values in pandas | `isna` refused | NaN is missing in float columns, as pandas answers (section 8, ruling 6) | users had no way to ask pandas' own question |
+| pandas `groupby(dropna=True)` | the NULL group was returned | the NULL group is filtered out (ruling 3) | pandas drops it by default; returning it was a silent difference |
+| join output names | the plan's `_right` names | each library's own names (ruling 8) | the plan's names match neither library |
+| invented verbs | `merge(how="semi")` | refused; `isin` is the pandas spelling (ruling 16) | pandas has no such `how` |
+| `groupby().count()` | refused | pandas' count of non-missing values per column | it is well defined; refusing it hid a pandas answer |
+| verbs the Mojo surface had | absent | `with_columns`, `rename`, `drop_nulls`, `concat` carried (section 9) | the Python skins lacked them |
 
 ## What must always hold?
 
