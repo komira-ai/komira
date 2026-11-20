@@ -1,0 +1,14 @@
+k	lpad(s, 6, 'xy')
+0	xyxyxy
+1	xyxabc
+10	Ünïcod
+11	xabcde
+12	abcdef
+2	  Hell
+3	Ünïcod
+4	
+5	kitten
+6	xyflaw
+7	xyxyxa
+8	xyxyab
+9	xyxa,b

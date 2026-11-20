@@ -66,6 +66,8 @@ TARGETS = [
     "komira//src/spsc_ring:table",
     "komira//src/sql:sql_conda",
     "komira//src/tests/conformance/komira_git_conformance:komira_git_conformance",
+    "komira//src/tests/conformance/komira_sql_conformance:compare_check",
+    "komira//src/tests/conformance/komira_sql_conformance:corpus",
     "komira//src/tests/helpers/komira_mail_test_support:komira_mail_test_support_conda",
     "komira//src/tests/helpers/komira_udf_spike_node_worker:bench",
     "komira//src/uuid:ci",

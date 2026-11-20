@@ -1,0 +1,14 @@
+k	regexp_extract(s, '[a-z]+')
+0	""
+1	abc
+10	n
+11	abcde
+12	abcdefgh
+2	ello
+3	n
+4	
+5	kitten
+6	flaw
+7	a
+8	ab
+9	a

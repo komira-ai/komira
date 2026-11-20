@@ -1,0 +1,2 @@
+sum(CAST(i32 AS BIGINT))
+0

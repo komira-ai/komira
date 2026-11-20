@@ -1,0 +1,2 @@
+-- order: rows
+SELECT k FROM ta UNION SELECT k FROM tb INTERSECT SELECT k FROM tn

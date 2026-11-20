@@ -1,0 +1,3 @@
+-- order: query
+-- FETCH FIRST ... ROWS ONLY as LIMIT
+SELECT a, b, k FROM T ORDER BY a, b, k FETCH FIRST 3 ROWS ONLY
