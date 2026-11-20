@@ -49,8 +49,9 @@ with komira.Session() as s:
   - A missing or unreadable file raises `komira.KomiraError` with the engine's
     message.
   - Nothing can query the table yet.
-- A session is a context manager. `close()` frees it and can be called again.
-  Any other call on a closed session raises `KomiraError`.
+- A session is a context manager. `close()` frees it and can be called again,
+  and `closed` says whether it was. Any other call on a closed session raises
+  `KomiraError`.
 - `komira.KomiraError` is the base class of every error komira raises on
   purpose. Its `status` attribute is the engine's status code, or `None`.
 - `komira.LibraryLoadError` is raised when the engine cannot be loaded. Its

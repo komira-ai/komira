@@ -34,8 +34,10 @@ def expect_error(call, message, status):
 
 
 def main(args):
-    lib_dir = args[args.index("--lib-dir") + 1]
-    runtime_dir = args[args.index("--runtime-dir") + 1]
+    # Absolute, since the paths the rule passes are relative to where the
+    # action started.
+    lib_dir = os.path.abspath(args[args.index("--lib-dir") + 1])
+    runtime_dir = os.path.abspath(args[args.index("--runtime-dir") + 1])
     native = _native.load(os.path.join(lib_dir, "fake_modes"), search_path=[runtime_dir])
     ctx = native.ctx_new()
 

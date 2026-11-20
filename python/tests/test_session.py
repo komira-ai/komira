@@ -27,8 +27,10 @@ def raised(call):
 
 
 def main(args):
-    lib_dir = args[args.index("--lib-dir") + 1]
-    runtime_dir = args[args.index("--runtime-dir") + 1]
+    # Absolute, since the paths the rule passes are relative to where the
+    # action started.
+    lib_dir = os.path.abspath(args[args.index("--lib-dir") + 1])
+    runtime_dir = os.path.abspath(args[args.index("--runtime-dir") + 1])
     _native.load(os.path.join(lib_dir, "libkomira"), search_path=[runtime_dir])
     assert komira.abi_version() // 1000 == 1, komira.abi_version()
     parquet = os.path.join(lib_dir, "two_columns.parquet")

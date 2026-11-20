@@ -14,8 +14,10 @@ library's run call does not exist yet.
 
 - Its public names are `__version__`, `abi_version()` (the library's `komira_abi_version()`, loading the
   library if needed), `KomiraError`, `LibraryLoadError` and `Session`. `Session()` takes no argument and
-  has `register_parquet(name, path)`, `close()` and the context-manager methods. `Session.sql`, `Result`,
+  has `register_parquet(name, path)`, `close()`, `closed` and the context-manager methods. `Session.sql`, `Result`,
   the module-level `sql` and `register_parquet`, and `UnsupportedOperation` arrive with the run call.
+- The per-session lock and the `os.register_at_fork` hook of decision 3's behaviour list are not built
+  yet; they come with `Session.sql`, the first call that runs long enough to need them.
 - It has no dependency on pyarrow: no call returns Arrow data until `Session.sql`. pyarrow becomes a
   dependency with the Arrow terminals, as decision 7 lists.
 - It depends on Modular's `mojo-compiler` for the Mojo runtime libraries (decision 6).

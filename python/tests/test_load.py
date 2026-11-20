@@ -49,8 +49,10 @@ def engine_error(call, ctx, native):
 
 
 def main(args):
-    lib_dir = args[args.index("--lib-dir") + 1]
-    runtime_dir = args[args.index("--runtime-dir") + 1]
+    # Absolute, since the paths the rule passes are relative to where the
+    # action started.
+    lib_dir = os.path.abspath(args[args.index("--lib-dir") + 1])
+    runtime_dir = os.path.abspath(args[args.index("--runtime-dir") + 1])
     search = [runtime_dir]
 
     def fake(case):

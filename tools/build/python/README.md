@@ -69,7 +69,7 @@ exists only if the script passed.
 - `expect_error` is as for `py_test`: the script passes only if it raises
   that exact last traceback line.
 
-The tests of the Python package ([`python/tests`](../../../python/README.md#tests))
+The tests of the Python package ([`python/tests`](../../../python/README.md#working-on-the-package))
 take `libkomira[runnable]` and C stand-ins of it as `data`, and the package
 itself as a `python_source_package` in `deps`.
 

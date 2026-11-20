@@ -21,9 +21,11 @@ def main(args):
     def arg(name):
         return args[args.index(name) + 1]
 
-    directory = os.path.join(arg("--lib-dir"), arg("--fake"))
+    # Absolute, since the paths the rule passes are relative to where the
+    # action started, and the loader reports the absolute path.
+    directory = os.path.abspath(os.path.join(arg("--lib-dir"), arg("--fake")))
     version = int(arg("--version"))
-    native = _native.load(directory, search_path=[arg("--runtime-dir")])
+    native = _native.load(directory, search_path=[os.path.abspath(arg("--runtime-dir"))])
     assert native.abi_version == version, native.abi_version
     assert komira.abi_version() == version
     assert "komira_sql_stream" not in _native._FUNCTIONS
