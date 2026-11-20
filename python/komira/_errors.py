@@ -28,3 +28,8 @@ class LibraryLoadError(KomiraError):
     """libkomira, or a library it needs, could not be loaded; or its ABI major
     version is not the one this package was written for; or it lacks a
     function this package calls."""
+
+
+class UnsupportedOperation(KomiraError):
+    """komira refused a construct by name: the message names it, says why, and
+    gives a spelling that works if there is one."""
