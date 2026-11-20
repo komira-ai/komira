@@ -1,9 +1,33 @@
 # The Python package: layout, names and first API
 
-Status: design, not built. The allowlist entry that admits the package (`python` in `PYTHON_SURFACE`,
-[tests/python_closure_allowlist.bzl](../../tests/python_closure_allowlist.bzl)) lands with this document;
-`python/` itself does not exist yet, so the entry matches nothing until the loader's pull request adds
-the first files.
+Status: design, partly built. The allowlist entry that admits the package (`python` in `PYTHON_SURFACE`,
+[tests/python_closure_allowlist.bzl](../../tests/python_closure_allowlist.bzl)) landed with this document.
+Release 1's surface is built ([python/README.md](../../python/README.md)): the loader, `Session` with
+`register_parquet` and `close`, `abi_version()`, `__version__`, `KomiraError` and `LibraryLoadError`,
+and their tests. `Session.sql`, `Result` and the default session are not.
+
+## Release 1
+
+The first release on PyPI is smaller than the first public API of [decision 3](#3-the-first-releases-public-api):
+it installs, imports and loads `libkomira` at ABI 1.1, and nothing in it runs a query, because the
+library's run call does not exist yet.
+
+- Its public names are `__version__`, `abi_version()` (the library's `komira_abi_version()`, loading the
+  library if needed), `KomiraError`, `LibraryLoadError` and `Session`. `Session()` takes no argument and
+  has `register_parquet(name, path)`, `close()`, `closed` and the context-manager methods. `Session.sql`, `Result`,
+  the module-level `sql` and `register_parquet`, and `UnsupportedOperation` arrive with the run call.
+- The per-session lock and the `os.register_at_fork` hook of decision 3's behaviour list are not built
+  yet; they come with `Session.sql`, the first call that runs long enough to need them.
+- It has no dependency on pyarrow: no call returns Arrow data until `Session.sql`. pyarrow becomes a
+  dependency with the Arrow terminals, as decision 7 lists.
+- It depends on Modular's `mojo-compiler` for the Mojo runtime libraries (decision 6).
+- The calls of ABI 1.1 that return protobuf bytes or plan text (`komira_parquet_schema`,
+  `komira_csv_binding`, `komira_json_binding`, `komira_plan_render`) are bound only as private methods of
+  `komira._native.Native`: they have no Python type yet and no public API.
+- The loader accepts any minor of ABI major 1. A call added in a later minor than the library's is
+  missing, and raises `KomiraError` when it is used, so one wheel loads on 1.1 and on later minors.
+- There is no `python/pyproject.toml`: the wheel rule takes the metadata of decision 7 from its BUCK
+  attributes.
 
 ## What problem does this solve?
 
@@ -31,7 +55,8 @@ before the DataFrame surfaces exist, so the name is registered on PyPI by the fi
 makes, and no one registers or uploads it any other way; the package lives in `python/` in this repository; it is published as a wheel first; the wheel
 carries `libkomira` and never the Mojo runtime (if the library needs runtime libraries at load time, the
 wheel depends on Modular's own published package for them); the release platforms are linux-x86_64,
-linux-arm64 and macos-arm64; the first public release is SQL-first and the DataFrame surfaces follow. The design of the SDK is settled
+linux-arm64 and macos-arm64; the first public API is SQL-first and the DataFrame surfaces follow (the first
+release on PyPI comes before it, with no query call and no pyarrow: [Release 1](#release-1)). The design of the SDK is settled
 and is a port of the earlier one: two DataFrame surfaces, one shaped like pandas and one shaped like polars,
 each only building a logical plan and submitting it through the plan entry of `libkomira`
 (`komira_plan_stream`), never rendering it to SQL text; SQL text is a different entry
@@ -46,7 +71,6 @@ Python UDFs run in zygote worker processes ([udf_runtime_interface.md](udf_runti
 python/
   BUCK              the package's sources as one target, its tests' targets, later the wheel target
   README.md         what the package is, how it is built and tested (the package doc, like node/README.md)
-  pyproject.toml    the [project] metadata (decision 7)
   komira/           the import package
     __init__.py     the public names, and nothing else (decision 3)
     py.typed        the PEP 561 marker (decision 8)
@@ -228,9 +252,9 @@ visible from every thread, as a module-level name would be.
 
 ### 7. Metadata
 
-The `[project]` table of `python/pyproject.toml` is the one source of the wheel's `METADATA`. The wheel
-is written by a Buck2 rule, not by a PEP 517 build backend: an sdist cannot build `libkomira`, so none is
-published, and the file has no `[build-system]` table to imply otherwise. The table, with the values the
+The `[project]` table below is the one source of the wheel's `METADATA`; it is written as TOML here, and the wheel rule takes it as BUCK
+attributes, with no `python/pyproject.toml` ([Release 1](#release-1)). The wheel is written by a Buck2
+rule, not by a PEP 517 build backend: an sdist cannot build `libkomira`, so none is published. The table, with the values the
 later designs fill marked:
 
 ```toml
@@ -286,11 +310,10 @@ Issues = "https://github.com/komira-ai/komira/issues"
   when a test of the package runs the pinned 3.14. `requires-python` starts at the oldest of them;
   claiming older versions waits for a test on them. `Typing :: Typed` because the package ships
   `py.typed` (decision 8).
-- **The file is the wheel rule's data, not an installable project.** With no `[build-system]` table,
-  `pip install ./python` would fall back to setuptools and fail (there is no library to build), and
-  `license-files` names files the wheel rule stages from the repository root, which `python/` does not
-  hold. Both are expected: the package is installed from its wheel, and the wheel rule refuses a key of
-  `[project]` it does not read, so the file never says something the wheel does not carry.
+- **`python/` is not an installable project.** It has no `pyproject.toml` and no `[build-system]`
+  table, so `pip install ./python` fails, as expected: the package is installed from its wheel. The
+  wheel rule's attributes are the metadata, and `license-files` names files the rule stages from the
+  repository root, which `python/` does not hold.
 - **protobuf is not a dependency of the first release.** Only the DataFrame plan encoder needs it; it is
   added, with its range, when that lands.
 - **The version** is stamped by the wheel rule. Its scheme is in
@@ -360,7 +383,7 @@ closing a session with an unread result does not crash.
 
 - The interpreter list ([tools/build/lint/interpreter_allowlist.tsv](../../tools/build/lint/interpreter_allowlist.tsv))
   needs a row for each `.py` file today, and `third_party/python`'s `_TEST_ONLY` and `src/so`'s visibility
-  each need a line for `python/`. The loader pull request adds them; whether the interpreter list should
+  each need a line for `python/`; the loader added them. Whether the interpreter list should
   read `PYTHON_SURFACE` instead of a row per file is a question for that lint.
 - Free-threaded CPython (3.14t): the package is not claimed for it in the first release. ctypes works
   there, but no test runs the package on it.
@@ -369,5 +392,5 @@ closing a session with an unread result does not crash.
 
 ## Where is the code?
 
-`python/` (not yet built), the allowlist [tests/python_closure_allowlist.bzl](../../tests/python_closure_allowlist.bzl),
+`python/` (release 1, [python/README.md](../../python/README.md)), the allowlist [tests/python_closure_allowlist.bzl](../../tests/python_closure_allowlist.bzl),
 the check [tools/build/selftest/graph/python_closure.zig](../../tools/build/selftest/graph/python_closure.zig).
