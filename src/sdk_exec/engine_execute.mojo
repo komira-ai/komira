@@ -9,9 +9,17 @@
 # reads the footer a second time and nothing checks it against the footer
 # lowering read: komira#2024). The
 # builder's segment pool is sized from the host profile's memory budget.
+#
+# A plan that scans an in-memory batch (a SELECT with no FROM reads the
+# binder's one-row relation) names it by its index in `params.batches`; each
+# source is handed to the builder as one resident batch, in that order, so
+# the builder's handle is the plan's index. A source of several batches is
+# concatenated into one, and a source of none is an empty batch of its schema.
 
+from arrow.concat import concat_record_batches_nway_ref
 from arrow.schema import RecordBatch
 from async_api.token import CancellationToken
+from column_kernels.compiler_helpers import empty_batch_like_schema
 from lowering.lowered_plan import LoweredPlan
 from parquet.runtime_footer_cache import ParquetMetadataCache
 from phase_timers.phase_timers import (
@@ -24,16 +32,22 @@ from physical_plan.physical_plan import AggSinkData
 from pipeline_exec.real_builder import RealBuilder
 from pipeline_exec.run_plan import run_plan
 from plan_expr.expr_pool import ExprPool
+from scan_source.in_memory_source import InMemorySource
 
 from .engine_context import EngineContext
-
-comptime EXECUTE_UNSUPPORTED_PARAM = "EXECUTE_UNSUPPORTED_PARAM"
-"""Refusal: the lowered plan carries a parameter kind this door does not run."""
-
 
 comptime EXECUTE_POOL_NOT_RELEASED = "EXECUTE_POOL_NOT_RELEASED"
 """Refusal: a run ended with the segment pool not whole (a sink kept its
 reservation)."""
+
+
+def _resident_batch(src: InMemorySource) raises -> RecordBatch:
+    """The rows of `src` as one batch the builder owns: its batches
+    concatenated (a copy; the source's payload is shared with the plan), or
+    an empty batch of its schema when it holds none."""
+    if len(src.data[]) == 0:
+        return empty_batch_like_schema(src.schema())
+    return concat_record_batches_nway_ref(src.data[])
 
 
 def run_lowered_plan(
@@ -43,16 +57,9 @@ def run_lowered_plan(
     workers and return the result segment's batch.
 
     Raises:
-        Error starting with `EXECUTE_UNSUPPORTED_PARAM` for a plan that scans
-        an in-memory batch, `EXECUTE_POOL_NOT_RELEASED` when a run leaves bytes granted,
-        and the driver's or a member's error otherwise.
+        Error starting with `EXECUTE_POOL_NOT_RELEASED` when a run leaves
+        bytes granted, and the driver's or a member's error otherwise.
     """
-    if len(lowered.params.batches) > 0:
-        raise Error(
-            String(EXECUTE_UNSUPPORTED_PARAM)
-            + ": the plan scans an in-memory batch; this door runs Parquet"
-            " scans only"
-        )
     var t_setup = pt_now()
     var cache = ParquetMetadataCache()
     var pool = ExprPool()
@@ -61,6 +68,10 @@ def run_lowered_plan(
         origin_of(cache), origin_of(pool), origin_of(placeholder)
     ](cache, pool)
     builder.set_memory_budget(ctx.host_profile.memory_budget_bytes)
+    # A fresh builder holds no resident batch, so the i-th `add_resident` is
+    # handle i, the index the plan's SOURCE_BATCH specs name.
+    for i in range(len(lowered.params.batches)):
+        _ = builder.add_resident(_resident_batch(lowered.params.batches[i]))
     # The descriptors index the sink data by position, and `pop` takes from the
     # end: reverse once, then add in the plan's order.
     var reversed_sinks = List[AggSinkData]()

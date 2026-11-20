@@ -5,11 +5,14 @@
 
 from arrow.schema import Schema
 from plan_expr.expr import Expr
+from plan_expr.literal_domain import int_literal_fits
+from plan_expr.scalar_value import ScalarValue
 from plan_ir.logical_plan import (
     AggExprArray, ExprArray, LogicalPlan,
 )
 from sql.sql_ast import (
-    SX_CALL, SX_COLUMN, SX_INT, SX_WINDOW, SelectStmt, sql_call_is_aggregate,
+    SX_CALL, SX_COLUMN, SX_INT, SX_WINDOW, SelectStmt, SqlExpr,
+    sql_call_is_aggregate,
 )
 from sql.sql_bind_agg_expr import (
     _bind_agg_from_sx, _bind_agg_from_sx_call, _extract_and_bind_post_agg,
@@ -400,9 +403,36 @@ def _bind_aggregate(stmt: SelectStmt, schema: Schema, scope: BindScope, var chil
     return LogicalPlan.project(proj^, after_having^)
 
 
-def _bind_projection(stmt: SelectStmt, schema: Schema, scope: BindScope, var child: LogicalPlan, catalog: SqlCatalog, cte_scope: CteScope, prebound: List[Expr], order_names: List[String], mut order_carry: List[String], order_expr_idx: List[Int], order_expr_names: List[String]) raises -> LogicalPlan:
+def _result_int_literal(sx: SqlExpr) -> Optional[Expr]:
+    """A bare integer literal SELECT item of a query's result, typed the way
+    DuckDB types it: INTEGER (INT32) when the value fits, so
+    `SELECT 1 AS n` is an INT32 column. None for anything else, which binds as
+    before (a literal past INT32 stays BIGINT, as in DuckDB). `-2147483648` is
+    BIGINT too: DuckDB applies the minus to the BIGINT 2147483648, and the
+    parser has folded the minus into the literal, so the value is the test.
+
+    Only the result's own SELECT list takes this type. Every other integer
+    literal of the binder is INT64, and a binary operator takes its left
+    operand's type, so an INT32 literal inside an expression, a CTE or a
+    derived table would change the type of whatever reads it."""
+    if sx.tag != SX_INT or _sx_is_big_int(sx):
+        return None
+    if sx.int_val == Int64(-2147483648) or not int_literal_fits[DType.int32](
+        sx.int_val
+    ):
+        return None
+    return Optional(
+        Expr.literal(ScalarValue.from_int32(sx.int_val.cast[DType.int32]()))
+    )
+
+
+def _bind_projection(stmt: SelectStmt, schema: Schema, scope: BindScope, var child: LogicalPlan, catalog: SqlCatalog, cte_scope: CteScope, prebound: List[Expr], order_names: List[String], mut order_carry: List[String], order_expr_idx: List[Int], order_expr_names: List[String], result_int_literals: Bool = False) raises -> LogicalPlan:
     """The SELECT list as a Project, WIDENED by any ORDER BY column the list
     does not already produce.
+
+    With `result_int_literals` (the list is the query's result: not a CTE, a
+    subquery or a UNION ALL branch) a bare integer literal item that fits
+    INT32 is an INT32 column, as in DuckDB (`_result_int_literal`).
 
     Widen, sort, prune (the SELECT binder prunes): `LogicalPlan.sort`
     takes key names, so a key must be a column of the sort's input, which
@@ -435,7 +465,14 @@ def _bind_projection(stmt: SelectStmt, schema: Schema, scope: BindScope, var chi
         ref item = stmt.select_items[i]
         if item.is_star:
             raise Error("SQL not supported: '*' mixed with other SELECT items")
-        var e = _bind_scalar(item.expr, schema, scope, catalog, cte_scope, prebound)
+        var narrowed = Optional[Expr](None)
+        if result_int_literals:
+            narrowed = _result_int_literal(item.expr)
+        var e: Expr
+        if narrowed:
+            e = narrowed.take()
+        else:
+            e = _bind_scalar(item.expr, schema, scope, catalog, cte_scope, prebound)
         if item.out_alias:
             out_names.append(String(item.out_alias.value()))
             e = Expr.alias(e^, item.out_alias.value())
