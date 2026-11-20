@@ -273,7 +273,8 @@ _py_test = rule(
 # else, so the loader finds the library and the runtime in the action's inputs
 # and never on the worker. The script learns the first directory from
 # `--lib-dir <dir>`, its first two arguments (a flag, not an environment
-# variable); `ctypes.CDLL(os.path.join(libdir, "<out_name>.so"))` loads a
+# variable), and the second from `--runtime-dir <dir>`, the next two (the
+# directory a loader's runtime preload is pointed at); `ctypes.CDLL(os.path.join(libdir, "<out_name>.so"))` loads a
 # library by path. `data` ({dest: source}) is staged in the same directory at
 # `dest`: a library's runnable directory (`libkomira[runnable]`, the library
 # with its lib/ beside it) or a stand-in library under a path of its own.
@@ -293,13 +294,13 @@ def _python_binding_test_impl(ctx):
     runtime = ctx.attrs.runtime[DefaultInfo].default_outputs[0]
     return _run_py_test(
         ctx,
-        lib_args = ["--lib-dir", libdir],
+        lib_args = ["--lib-dir", libdir, "--runtime-dir", runtime],
         env_extra = {"LD_LIBRARY_PATH": cmd_args(libdir, runtime, delimiter = ":")},
     )
 
 _python_binding_test = rule(
     impl = _python_binding_test_impl,
-    doc = "A `py_test` that loads shared libraries: `libs` (`mojo_shared_lib` targets) are staged by file name in one directory, and `data` ({dest: source}, a build output allowed) at `dest` in it; the directory is passed to the script as `--lib-dir <dir>`; the action's LD_LIBRARY_PATH is that directory and the Mojo runtime libraries (`runtime`), and nothing else.",
+    doc = "A `py_test` that loads shared libraries: `libs` (`mojo_shared_lib` targets) are staged by file name in one directory, and `data` ({dest: source}, a build output allowed) at `dest` in it; the directory is passed to the script as `--lib-dir <dir>` and the runtime directory as `--runtime-dir <dir>`; the action's LD_LIBRARY_PATH is that directory and the Mojo runtime libraries (`runtime`), and nothing else.",
     attrs = _PY_TEST_ATTRS | {
         "data": attrs.dict(attrs.string(), attrs.source(), default = {}),
         "libs": attrs.list(attrs.dep(), default = []),
