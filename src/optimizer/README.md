@@ -10,6 +10,7 @@ here executes a plan.
 | module | what it holds |
 |---|---|
 | `optimizer_filter` | filter fusion, filter decomposition, predicate pushdown, cross-join elimination and equi-filter folding, join residual to side |
+| `optimizer_udf_opacity` | whether a Filter may move below a UDF-carrying Project: the columns a typed UDF writes (`udf_modified_columns`), whether it is opaque to pushdown, whether it passes a column through, and the plan-level check `push_predicates_down` calls (`udf_project_passes_predicate`) |
 | `optimizer_filter_selectivity` | predicate-aware filter selectivity estimates and the scaling of table stats by a selectivity |
 | `optimizer_or_factoring` | hoisting conjuncts common to every branch of an OR above the OR |
 | `optimizer_symmetric_or` | inferring single-column IN predicates from a symmetric swap OR (`(A=x AND B=y) OR (A=y AND B=x)`) |
