@@ -36,7 +36,7 @@ pub const Load = struct { cmd: u32 = macho.LC_LOAD_DYLIB, name: []const u8 };
 /// One nlist_64: its name (with Mach-O's `_`), n_type, n_desc and n_value.
 pub const NSym = struct { name: []const u8, ty: u8, desc: u16 = 0, value: u64 = 0 };
 
-const N_SECT_EXT: u8 = 0x0f;
+pub const N_SECT_EXT: u8 = 0x0f;
 const N_UNDF_EXT: u8 = 0x01;
 
 /// The owner-shaped library: one export, memcpy from libSystem, a call into
