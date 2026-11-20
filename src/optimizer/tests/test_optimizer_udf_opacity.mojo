@@ -113,24 +113,24 @@ def _count_udfs(plan: LogicalPlan) raises -> Int:
     return n
 
 
-def _assert_stays_above(out: LogicalPlan, why: String) raises:
-    """`out` is the Filter, still directly over the UDF Project."""
-    assert_equal(Int(out.tag), Int(PLAN_FILTER), why)
-    ref below = out._filter.value()[].child[]
+def _assert_stays_above(plan: LogicalPlan, why: String) raises:
+    """`plan` is the Filter, still directly over the UDF Project."""
+    assert_equal(Int(plan.tag), Int(PLAN_FILTER), why)
+    ref below = plan._filter.value()[].child[]
     assert_equal(Int(below.tag), Int(PLAN_PROJECT), why)
     assert_true(below.has_udf(), why + " (and the Project lost its UDF)")
 
 
-def _assert_moved_below(out: LogicalPlan, why: String) raises:
-    """`out` is the UDF Project, the same UDF, with the predicate under it: a
+def _assert_moved_below(plan: LogicalPlan, why: String) raises:
+    """`plan` is the UDF Project, the same UDF, with the predicate under it: a
     Filter, or folded into the scan's filter."""
-    assert_equal(Int(out.tag), Int(PLAN_PROJECT), why)
-    assert_true(out.has_udf(), why + " (and the Project lost its UDF)")
-    ref udf = out._project.value()[].udf.value()[]
+    assert_equal(Int(plan.tag), Int(PLAN_PROJECT), why)
+    assert_true(plan.has_udf(), why + " (and the Project lost its UDF)")
+    ref udf = plan._project.value()[].udf.value()[]
     assert_equal(udf.name, String("margin"))
-    assert_equal(udf.registered_handle_id.value(), 8)
-    assert_equal(len(out._project.value()[].exprs), 3)
-    ref below = out._project.value()[].child[]
+    assert_equal(udf.registered_handle_id.value(), Int(8))
+    assert_equal(len(plan._project.value()[].exprs), 3)
+    ref below = plan._project.value()[].child[]
     var has_pred = below.tag == PLAN_FILTER
     if below.tag == PLAN_SCAN and below._scan.value()[].filter:
         has_pred = True
