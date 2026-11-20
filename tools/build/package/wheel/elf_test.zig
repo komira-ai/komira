@@ -31,6 +31,27 @@ test "needed names, run path entries and symbol versions read back" {
     try t.expect(!elf.isElf("#!/bin/sh\n"));
 }
 
+test "addresses are mapped through the PT_LOAD that holds them, not read as offsets" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var d = diag.Diag{};
+    // The string table and DT_VERNEED in the second of two PT_LOADs, mapped
+    // 0x1000 above their file offsets, as a real library's data segment is.
+    const lib = try fixture.elf(a, .{
+        .needed = &.{ "libc.so.6", "libm.so.6" },
+        .runpath = "$ORIGIN",
+        .verneed = &.{.{ .file = "libc.so.6", .versions = &.{"GLIBC_2.34"} }},
+        .bias = 0x1000,
+        .machine = 183,
+    });
+    const info = try elf.read(a, &d, "lib.so", lib);
+    try t.expectEqual(@as(u16, 183), info.machine);
+    try expectStrings(&.{ "libc.so.6", "libm.so.6" }, info.needed);
+    try expectStrings(&.{"$ORIGIN"}, info.runpath);
+    try expectStrings(&.{"GLIBC_2.34"}, info.versions);
+}
+
 test "an ELF file without a dynamic segment needs nothing" {
     var arena = std.heap.ArenaAllocator.init(t.allocator);
     defer arena.deinit();
@@ -40,6 +61,7 @@ test "an ELF file without a dynamic segment needs nothing" {
     std.mem.writeInt(u16, lib[0x38..][0..2], 1, .little); // the PT_LOAD only
     const info = try elf.read(a, &d, "static", lib);
     try t.expectEqual(@as(usize, 0), info.needed.len);
+    try t.expectEqual(@as(u16, 62), info.machine);
 }
 
 fn refusal(a: std.mem.Allocator, data: []const u8) ![]const u8 {

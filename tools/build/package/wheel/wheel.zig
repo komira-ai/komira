@@ -112,6 +112,7 @@ pub fn checkMetadata(alloc: Alloc, d: *Diag, in: Input) Refused!void {
         try oneLine(alloc, d, "a project URL label", u.label);
         try oneLine(alloc, d, "a project URL", u.url);
         if (std.mem.indexOfScalar(u8, u.label, ',') != null) return refuse(d, alloc, "metadata: the project URL label `{s}` holds `,`, which ends the label in METADATA", .{u.label});
+        if (u.label.len > 32) return refuse(d, alloc, "metadata: the project URL label `{s}` is over 32 characters, which the core metadata spec allows", .{u.label});
     }
     if (in.licenses.len == 0) return refuse(d, alloc, "metadata: no licence file: a wheel carries its licence text (PEP 639)", .{});
     for (in.licenses, 0..) |l, i| {
@@ -197,7 +198,7 @@ pub fn checkPath(alloc: Alloc, d: *Diag, path: []const u8) Refused!void {
 
 /// The policy of `in`, for its files (policy.zig).
 pub fn policyOf(t: tag_mod.Tag, in: Input) policy.Policy {
-    return .{ .glibc = t.glibc, .max_glibcxx = in.max_glibcxx, .max_cxxabi = in.max_cxxabi, .external_needed = in.external_needed };
+    return .{ .glibc = t.glibc, .arch = t.arch, .max_glibcxx = in.max_glibcxx, .max_cxxabi = in.max_cxxabi, .external_needed = in.external_needed };
 }
 
 /// The wheel of `in`, dated `stamp`.

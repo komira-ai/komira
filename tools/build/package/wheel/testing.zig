@@ -13,6 +13,13 @@ pub const Elf = struct {
     runpath: ?[]const u8 = null,
     rpath: ?[]const u8 = null,
     verneed: []const Verneed = &.{},
+    /// e_machine: 62 x86-64, 183 AArch64.
+    machine: u16 = 62,
+    /// Non-zero: the file is two PT_LOAD segments, the header at address 0
+    /// and the rest at its file offset plus `bias`, as a real library maps
+    /// its data above its text; every address in the dynamic section is
+    /// then an address, not an offset.
+    bias: u64 = 0,
 };
 
 fn put(alloc: Alloc, out: *std.ArrayList(u8), comptime T: type, v: T) !void {
@@ -25,9 +32,10 @@ fn pad(alloc: Alloc, out: *std.ArrayList(u8), to: usize) !void {
     while (out.items.len % to != 0) try out.append(alloc, 0);
 }
 
-/// A 64-bit little-endian ELF shared library: a header, a PT_LOAD mapping the
-/// whole file at address 0, a PT_DYNAMIC, then the string table, the
-/// DT_VERNEED entries and the dynamic section.
+/// A 64-bit little-endian ELF shared library: a header, PT_LOAD segments
+/// (one mapping the whole file at address 0, or two with `bias`), a
+/// PT_DYNAMIC, then the string table, the DT_VERNEED entries and the dynamic
+/// section.
 pub fn elf(alloc: Alloc, e: Elf) ![]u8 {
     var strtab = std.ArrayList(u8).empty;
     try strtab.append(alloc, 0);
@@ -51,7 +59,8 @@ pub fn elf(alloc: Alloc, e: Elf) ![]u8 {
         for (vn.versions) |v| try names.append(alloc, try Str.add(alloc, &strtab, v));
     }
 
-    const header_len = 64 + 2 * 56;
+    const phnum: u16 = if (e.bias != 0) 3 else 2;
+    const header_len = 64 + @as(usize, phnum) * 56;
     const strtab_at = header_len;
     var body = std.ArrayList(u8).empty;
     try body.appendNTimes(alloc, 0, header_len);
@@ -87,10 +96,10 @@ pub fn elf(alloc: Alloc, e: Elf) ![]u8 {
     for (needed.items) |n| try Dyn.entry(alloc, &body, 1, n);
     if (runpath) |r| try Dyn.entry(alloc, &body, 29, r);
     if (rpath) |r| try Dyn.entry(alloc, &body, 15, r);
-    try Dyn.entry(alloc, &body, 5, strtab_at);
+    try Dyn.entry(alloc, &body, 5, strtab_at + e.bias);
     try Dyn.entry(alloc, &body, 10, strtab.items.len);
     if (e.verneed.len != 0) {
-        try Dyn.entry(alloc, &body, 0x6ffffffe, vn_at);
+        try Dyn.entry(alloc, &body, 0x6ffffffe, vn_at + e.bias);
         try Dyn.entry(alloc, &body, 0x6fffffff, e.verneed.len);
     }
     try Dyn.entry(alloc, &body, 0, 0);
@@ -101,7 +110,7 @@ pub fn elf(alloc: Alloc, e: Elf) ![]u8 {
     try h.appendSlice(alloc, "\x7fELF\x02\x01\x01");
     try h.appendNTimes(alloc, 0, 9);
     try put(alloc, &h, u16, 3); // ET_DYN
-    try put(alloc, &h, u16, 62); // x86-64
+    try put(alloc, &h, u16, e.machine);
     try put(alloc, &h, u32, 1);
     try put(alloc, &h, u64, 0); // entry
     try put(alloc, &h, u64, 64); // phoff
@@ -109,19 +118,23 @@ pub fn elf(alloc: Alloc, e: Elf) ![]u8 {
     try put(alloc, &h, u32, 0);
     try put(alloc, &h, u16, 64);
     try put(alloc, &h, u16, 56);
-    try put(alloc, &h, u16, 2);
+    try put(alloc, &h, u16, phnum);
     try put(alloc, &h, u16, 64);
     try put(alloc, &h, u16, 0);
     try put(alloc, &h, u16, 0);
-    // PT_LOAD of the whole file at address 0, then PT_DYNAMIC.
-    for ([_][3]u64{ .{ 1, 0, total }, .{ 2, dyn_at, dyn_len } }) |ph| {
+    // {type, offset, address, size}: PT_LOAD of the whole file at address 0,
+    // or of the header at 0 and the rest at offset + bias; then PT_DYNAMIC.
+    const one = [_][4]u64{ .{ 1, 0, 0, total }, .{ 2, dyn_at, dyn_at, dyn_len } };
+    const two = [_][4]u64{ .{ 1, 0, 0, header_len }, .{ 1, header_len, header_len + e.bias, total - header_len }, .{ 2, dyn_at, dyn_at + e.bias, dyn_len } };
+    const phs: []const [4]u64 = if (e.bias != 0) &two else &one;
+    for (phs) |ph| {
         try put(alloc, &h, u32, @intCast(ph[0]));
         try put(alloc, &h, u32, 4);
         try put(alloc, &h, u64, ph[1]);
-        try put(alloc, &h, u64, ph[1]);
-        try put(alloc, &h, u64, ph[1]);
         try put(alloc, &h, u64, ph[2]);
         try put(alloc, &h, u64, ph[2]);
+        try put(alloc, &h, u64, ph[3]);
+        try put(alloc, &h, u64, ph[3]);
         try put(alloc, &h, u64, 8);
     }
     @memcpy(body.items[0..header_len], h.items);

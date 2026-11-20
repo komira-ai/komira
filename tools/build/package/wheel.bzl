@@ -113,6 +113,9 @@ def _flags(ctx, tag, files, readme, licenses):
     return out
 
 def _wheel_file_impl(ctx):
+    for p in list(ctx.attrs.files.keys()) + list(ctx.attrs.license_files.keys()):
+        if "{" in p or "}" in p:
+            fail("{}: the path {} holds a brace, which a command-line format would misread".format(ctx.label, p))
     for p in ctx.attrs.executable:
         if p not in ctx.attrs.files:
             fail("{}: executable names {}, which is not a key of files".format(ctx.label, p))

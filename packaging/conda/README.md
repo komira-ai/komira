@@ -455,10 +455,10 @@ The rule is `wheel_file`
   user that the Mojo runtime comes from `mojo-compiler` under Modular's
   licence. The read-back check refuses a wheel whose licence members differ
   from the files given (the root's two by default), that carries a library of
-  `external_needed` (the package's target names the three runtime libraries,
+  `external_needed` (the package's target, when it is added, names the three runtime libraries,
   `libKGENCompilerRTShared`, `libAsyncRTRuntimeGlobals` and
   `libMSupportGlobals`), or whose Requires-Dist is not the target's (which
-  names `mojo-compiler` at the compiler version).
+  will name `mojo-compiler` at the compiler version).
 
 ## Not done yet
 

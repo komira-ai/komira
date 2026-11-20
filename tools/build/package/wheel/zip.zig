@@ -37,10 +37,11 @@ pub const Stamp = struct {
 /// 1980-01-01 too (a zip cannot say earlier); one after 2107 is refused.
 pub fn stampOf(alloc: Alloc, d: *Diag, ms: i64) Refused!Stamp {
     if (ms < 0) return refuse(d, alloc, "the commit time {d} ms is before the epoch", .{ms});
+    // 2108-01-01 00:00:00 UTC: the first time a DOS date cannot say.
+    if (ms >= 4354819200_000) return refuse(d, alloc, "the commit time {d} ms is after 2107, which a zip cannot date", .{ms});
     const es = std.time.epoch.EpochSeconds{ .secs = @intCast(@divFloor(ms, 1000)) };
     const yd = es.getEpochDay().calculateYearDay();
     if (yd.year < 1980) return .{};
-    if (yd.year > 2107) return refuse(d, alloc, "the commit time {d} ms is after 2107, which a zip cannot date", .{ms});
     const md = yd.calculateMonthDay();
     const ds = es.getDaySeconds();
     return .{

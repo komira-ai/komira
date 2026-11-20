@@ -128,6 +128,7 @@ test "tags: manylinux x86_64 and aarch64 and macosx arm64 are taken, any and a C
     const x86 = try tag.parse(a, &d, "py3-none-manylinux_2_34_x86_64");
     try t.expectEqualStrings("2.34", x86.glibc.?);
     try t.expect(x86.linux);
+    try t.expectEqualStrings("x86_64", x86.arch);
     try t.expectEqualStrings("2.34", (try tag.parse(a, &d, "py3-none-manylinux_2_34_aarch64")).glibc.?);
     const mac = try tag.parse(a, &d, "py3-none-macosx_11_0_arm64");
     try t.expect(mac.glibc == null);
@@ -177,6 +178,9 @@ test "metadata the wheel cannot carry is refused, a License classifier beside th
     in = try fixture.input(a);
     in.project_urls = &.{.{ .label = "a,b", .url = "https://example.com" }};
     try t.expectEqualStrings("metadata: the project URL label `a,b` holds `,`, which ends the label in METADATA", try refusal(a, in));
+    in = try fixture.input(a);
+    in.project_urls = &.{.{ .label = "abcdefghijklmnopqrstuvwxyz0123456", .url = "https://example.com" }};
+    try t.expectEqualStrings("metadata: the project URL label `abcdefghijklmnopqrstuvwxyz0123456` is over 32 characters, which the core metadata spec allows", try refusal(a, in));
     in = try fixture.input(a);
     in.licenses = &.{};
     try t.expectEqualStrings("metadata: no licence file: a wheel carries its licence text (PEP 639)", try refusal(a, in));

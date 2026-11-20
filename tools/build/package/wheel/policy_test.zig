@@ -106,6 +106,19 @@ test "external: a bundled Mojo runtime library is refused" {
     try t.expectEqualStrings("external: the wheel carries komira/_lib/lib/libKGENCompilerRTShared.so, which external_needed says comes from another package and never from this wheel", try refusal(a, lib_policy, bundled));
 }
 
+test "arch: an ELF file for another machine than the tag's is refused" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const arm = try fixture.elf(a, .{ .machine = 183 });
+    try t.expectEqualStrings("arch: komira/_lib/libkomira.so is an ELF file for machine 183, not the tag's x86_64 (62)", try refusal(a, lib_policy, try members(a, arm)));
+    var aarch64 = lib_policy;
+    aarch64.arch = "aarch64";
+    var d = diag.Diag{};
+    try policy.check(a, &d, aarch64, &.{.{ .name = "komira/_lib/libkomira.so", .data = arm }});
+    try t.expectEqualStrings("arch: komira/_lib/libkomira.so is an ELF file for machine 62, not the tag's aarch64 (183)", try refusal(a, aarch64, &.{.{ .name = "komira/_lib/libkomira.so", .data = try fixture.elf(a, .{}) }}));
+}
+
 test "platform: an ELF file in a macOS wheel is refused" {
     var arena = std.heap.ArenaAllocator.init(t.allocator);
     defer arena.deinit();

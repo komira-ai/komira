@@ -172,9 +172,11 @@ wheel_file_test_stamped(
     ],
 )
 
+# Named by the tag they test: each is built on linux like every other
+# target; only its tag is another platform's.
 [
     wheel_file_test_stamped(
-        name = "wheel_fixture_{}".format(platform.replace("-", "_")),
+        name = "wheel_fixture_{}_tag".format(tag),
         distribution = "komira-wheel-fixture",
         summary = "The wheel rule's fixture",
         readme = "wheel/fixtures/readme.md",
@@ -183,7 +185,7 @@ wheel_file_test_stamped(
         files = {"komira_wheel_fixture/data.txt": "wheel/fixtures/data.txt"},
         platform = platform,
     )
-    for platform in ["linux-arm64", "darwin-arm64"]
+    for tag, platform in [("aarch64", "linux-arm64"), ("macosx", "darwin-arm64")]
 ]
 
 # The tag of each release platform's row, written out: the glibc floor and

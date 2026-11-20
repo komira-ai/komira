@@ -21,6 +21,8 @@ pub const Tag = struct {
     glibc: ?[]const u8,
     /// Whether the wheel's libraries are ELF (Linux) or Mach-O (macOS).
     linux: bool,
+    /// The architecture the tag names: `x86_64`, `aarch64` or `arm64`.
+    arch: []const u8,
 };
 
 fn number(s: []const u8) bool {
@@ -45,12 +47,12 @@ pub fn parse(alloc: Alloc, d: *Diag, tag: []const u8) Refused!Tag {
     if (std.mem.eql(u8, family, "manylinux")) {
         if (!std.mem.eql(u8, arch, "x86_64") and !std.mem.eql(u8, arch, "aarch64"))
             return refuse(d, alloc, "the manylinux tag `{s}` names the architecture `{s}`, not x86_64 or aarch64", .{ plat, arch });
-        return .{ .text = tag, .glibc = try std.fmt.allocPrint(alloc, "{s}.{s}", .{ major, minor }), .linux = true };
+        return .{ .text = tag, .glibc = try std.fmt.allocPrint(alloc, "{s}.{s}", .{ major, minor }), .linux = true, .arch = arch };
     }
     if (std.mem.eql(u8, family, "macosx")) {
         if (!std.mem.eql(u8, arch, "arm64"))
             return refuse(d, alloc, "the macosx tag `{s}` names the architecture `{s}`, not arm64", .{ plat, arch });
-        return .{ .text = tag, .glibc = null, .linux = false };
+        return .{ .text = tag, .glibc = null, .linux = false, .arch = arch };
     }
     return refuse(d, alloc, "the platform tag `{s}` is neither manylinux nor macosx", .{plat});
 }

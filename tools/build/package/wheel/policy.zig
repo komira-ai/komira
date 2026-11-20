@@ -6,6 +6,7 @@
 //!             from another package (the Mojo runtime from Modular's), never
 //!             from this wheel;
 //!   platform  an ELF member only in a manylinux wheel;
+//!   arch      an ELF member's machine is the tag's (x86-64 or AArch64);
 //!   glibc     the highest GLIBC_ version an ELF member needs is at most the
 //!             tag's glibc (`GLIBC_PRIVATE` is refused: no glibc promises it);
 //!   glibcxx   the highest GLIBCXX_ version at most `max_glibcxx`, and none
@@ -47,6 +48,9 @@ pub const system_libs = [_][]const u8{
 pub const Policy = struct {
     /// The glibc the tag promises; null for a macOS wheel (no ELF allowed).
     glibc: ?[]const u8,
+    /// The tag's architecture (`x86_64` or `aarch64`), which every ELF
+    /// member's e_machine must be.
+    arch: []const u8 = "x86_64",
     max_glibcxx: ?[]const u8 = null,
     max_cxxabi: ?[]const u8 = null,
     external_needed: []const []const u8 = &.{},
@@ -89,6 +93,8 @@ pub fn check(alloc: Alloc, d: *Diag, p: Policy, members: []const Member) Refused
         if (!elf.isElf(m.data)) continue;
         const glibc = p.glibc orelse return refuse(d, alloc, "platform: {s} is an ELF file, and a macOS wheel holds none", .{m.name});
         const info = try elf.read(alloc, d, m.name, m.data);
+        const want: u16 = if (std.mem.eql(u8, p.arch, "aarch64")) 183 else 62;
+        if (info.machine != want) return refuse(d, alloc, "arch: {s} is an ELF file for machine {d}, not the tag's {s} ({d})", .{ m.name, info.machine, p.arch, want });
         for (info.versions) |v| {
             if (std.mem.startsWith(u8, v, "GLIBCXX_")) {
                 try bounded(alloc, d, m.name, v, "GLIBCXX_", p.max_glibcxx, "glibcxx", "max_glibcxx");

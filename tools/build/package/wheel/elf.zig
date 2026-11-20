@@ -17,6 +17,8 @@ const Refused = diag.Refused;
 const refuse = diag.refuse;
 
 pub const Info = struct {
+    /// e_machine: 62 x86-64, 183 AArch64.
+    machine: u16 = 0,
     needed: []const []const u8 = &.{},
     runpath: []const []const u8 = &.{},
     versions: []const []const u8 = &.{},
@@ -77,6 +79,7 @@ pub fn read(alloc: Alloc, d: *Diag, name: []const u8, data: []const u8) Refused!
     if (!isElf(data)) return r.bad("no ELF magic");
     if (data.len < 64) return r.bad("a header shorter than 64 bytes");
     if (data[4] != 2 or data[5] != 1) return refuse(d, alloc, "{s}: not a 64-bit little-endian ELF file (class {d}, data {d}); the release platforms are x86-64 and AArch64", .{ name, data[4], data[5] });
+    const machine = try r.int(u16, 0x12);
     const phoff = try r.int(u64, 0x20);
     const phentsize = try r.int(u16, 0x36);
     const phnum = try r.int(u16, 0x38);
@@ -97,7 +100,7 @@ pub fn read(alloc: Alloc, d: *Diag, name: []const u8, data: []const u8) Refused!
             dyn = .{ .offset = offset, .size = filesz };
         }
     }
-    const dy = dyn orelse return .{};
+    const dy = dyn orelse return .{ .machine = machine };
 
     var needed_at = std.ArrayList(u64).empty;
     var paths_at = std.ArrayList(u64).empty;
@@ -121,7 +124,7 @@ pub fn read(alloc: Alloc, d: *Diag, name: []const u8, data: []const u8) Refused!
             else => {},
         }
     }
-    if (needed_at.items.len == 0 and paths_at.items.len == 0 and verneed == null) return .{};
+    if (needed_at.items.len == 0 and paths_at.items.len == 0 and verneed == null) return .{ .machine = machine };
     const tab = try fileOffset(r, loads.items, strtab orelse return r.bad("no DT_STRTAB"));
     const size = strsz orelse return r.bad("no DT_STRSZ");
 
@@ -152,6 +155,7 @@ pub fn read(alloc: Alloc, d: *Diag, name: []const u8, data: []const u8) Refused!
         }
     }
     return .{
+        .machine = machine,
         .needed = try needed.toOwnedSlice(alloc),
         .runpath = try runpath.toOwnedSlice(alloc),
         .versions = try versions.toOwnedSlice(alloc),
