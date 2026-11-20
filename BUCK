@@ -472,8 +472,8 @@ limits(
 # as it does for every graph_check.
 #
 # The allowlist, tests/python_closure_allowlist.bzl: the Python surface
-# (empty today) and the ceiling, every finding allowed today, which only
-# shrinks.
+# (the binding tests and the Python package, python/) and the ceiling,
+# every finding allowed today, which only shrinks.
 [graph_check(
     name = "python_closure",
     check = "python_closure",

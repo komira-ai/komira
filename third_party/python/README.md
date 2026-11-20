@@ -7,7 +7,8 @@ pinned download (`pinned_file`): on a remote-cache hit, nothing is fetched.
 No source distribution is built and pip never runs.
 
 The Python surface is the shared library's bindings and their tests
-(`python_binding_test`, [tools/build/python](../../tools/build/python/README.md#binding-tests)).
+(`python_binding_test`, [tools/build/python](../../tools/build/python/README.md#binding-tests)),
+and the Python package `python/` ([design](../../docs/design/python_package.md)).
 The package that tested the pins (the pinned versions, the
 licences, the protobuf gencode, the 3.14 interpreters) is already gone:
 apart from the protobuf runtimes ([protobuf](#protobuf)), no test holds what

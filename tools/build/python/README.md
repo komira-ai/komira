@@ -8,8 +8,9 @@ run: [`pyrun.py`](pyrun.py), the runner of every `py_test`, and
 `python_oracle`. The interpreter and the wheels are pinned in
 [`third_party/python`](../../../third_party/python/README.md).
 
-The Python surface is the shared library's bindings and their tests, and the
-Python package [`python/`](../../../python/BUCK) and its tests
+The Python surface is the shared library's bindings and their tests, and
+the Python package [`python/`](../../../python/BUCK) and its tests
+([design](../../../docs/design/python_package.md))
 (`PYTHON_SURFACE` in [`tests/python_closure_allowlist.bzl`](../../../tests/python_closure_allowlist.bzl)).
 The package that tested the rules other than `python_binding_test` (the runner's verdicts, isolation, time zones, oracles
 built twice, the pins and licences) is already gone: apart from the
@@ -23,7 +24,9 @@ edge of the protobuf range the package declares.
 
 Python here is test-only: live oracles (pyarrow and DuckDB computing the
 answer a Mojo test compares against) and drivers of komira's Python-facing
-surfaces. Nothing built with these rules is shipped
+surfaces, the Python package's tests among them. Nothing built with these
+rules is shipped (the package's wheel, when there is one, is built by a rule
+of its own)
 ([third_party/python](../../../third_party/python/README.md#never-shipped)):
 the modules `python_proto` generates are the Python package's source, and
 nothing packages them yet.
