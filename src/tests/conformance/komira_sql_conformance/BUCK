@@ -69,7 +69,6 @@ _WRITE = read_config("komira_sql_conformance", "write", "false") == "true"
 ci_aggregate(
     name = "corpus",
     deps = [":" + corpus for corpus in _CORPORA],
-    visibility = ["//src/tests/..."],
 )
 
 sql_oracle(
