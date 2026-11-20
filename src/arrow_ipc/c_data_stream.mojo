@@ -1032,8 +1032,9 @@ def _release_unexported_array(mut a: CArrowArray):
     """Release an array this module built and has not handed to anyone,
     from a builder's error path. See `_release_unexported_schema`.
 
-    # SAFETY: as `_release_unexported_schema`. `a.private_data` is NULL on
-    # every array this is called on (only a delivered root carries state).
+    # SAFETY: as `_release_unexported_schema`. A column array's
+    # `private_data` is NULL; a root built by `_build_record_batch_array`
+    # carries its `_CArrayState`, which `_release_array` destroys and frees.
     """
     _release_array(UnsafePointer(to=a).unsafe_origin_cast[MutUntrackedOrigin]())
 
@@ -2872,6 +2873,37 @@ def _import_record_batch(
 # Exported-stream callbacks (Mojo-side; bound onto the CArrowArrayStream).
 # =============================================================================
 
+def _build_stream_schema(
+    schema: Schema, batches: Slab[RecordBatch]
+) raises -> CArrowSchema:
+    """The schema `get_schema` hands out for a stream of `batches`.
+
+    Nested child format strings come from a Column's actual child types, so
+    the first batch is the sample. With no batch, a schema without nested
+    columns is built from the Fields alone, and a nested column is refused:
+    its child types cannot be derived from the Field.
+    """
+    if len(batches) > 0:
+        return _build_record_batch_schema(schema, batches[0])
+    for i in range(schema.num_columns()):
+        var t = schema.field_arrow_type(i)
+        if (
+            t == ArrowType.LIST
+            or t == ArrowType.STRUCT
+            or t == ArrowType.MAP
+            or t == ArrowType.UNION_SPARSE
+            or t == ArrowType.UNION_DENSE
+        ):
+            raise Error(
+                "ArrowCStream: empty stream with nested column '"
+                + schema.field_name(i)
+                + "' — cannot synthesize child schema without a"
+                " sample RecordBatch (child types are not derived"
+                " from Field._child_types)."
+            )
+    return _build_record_batch_schema_no_data(schema)
+
+
 def _exported_get_schema(stream: OpaquePtr, out_schema: _SchemaPtr) abi("C") -> Int32:
     """get_schema: fill `out_schema` with the (constant) stream schema."""
     if _is_null(stream) or _is_null(out_schema):
@@ -2883,38 +2915,8 @@ def _exported_get_schema(stream: OpaquePtr, out_schema: _SchemaPtr) abi("C") -> 
     var state_ptr = st.private_data.bitcast[_CStreamState]()
     ref state = state_ptr[]
     try:
-        # Schema build needs a RecordBatch to
-        # drive nested-type child format strings from the Column's actual
-        # child arrow_types.  Use the first batch in the stream as the
-        # sample; if the stream is empty AND the schema contains no nested
-        # columns, fall back to the Field-only path (no Column needed).
-        if len(state.batches) > 0:
-            ref sample = state.batches[0]
-            var built = _build_record_batch_schema(state.schema, sample)
-            out_schema.unsafe_write(built^)
-        else:
-            # Empty stream — verify no nested columns (we can't synthesize a
-            # nested Column's child types from Field alone).  Raise
-            # rather than emit a schema with
-            # missing child types.
-            for i in range(state.schema.num_columns()):
-                var t = state.schema.field_arrow_type(i)
-                if (
-                    t == ArrowType.LIST
-                    or t == ArrowType.STRUCT
-                    or t == ArrowType.MAP
-                    or t == ArrowType.UNION_SPARSE
-                    or t == ArrowType.UNION_DENSE
-                ):
-                    raise Error(
-                        "ArrowCStream: empty stream with nested column '"
-                        + state.schema.field_name(i)
-                        + "' — cannot synthesize child schema without a"
-                        " sample RecordBatch (child types are not derived"
-                        " from Field._child_types)."
-                    )
-            var built = _build_record_batch_schema_no_data(state.schema)
-            out_schema.unsafe_write(built^)
+        var built = _build_stream_schema(state.schema, state.batches)
+        out_schema.unsafe_write(built^)
     except e:
         state.set_error(String(e))
         return Int32(5)  # EIO

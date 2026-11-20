@@ -120,6 +120,7 @@ mojo_library(
         "//tools/build/mojo/runtime_paths:runtime_paths",
     ],
     test_srcs = [
+        "tests/test_arrow_result.mojo",
         "tests/test_plan_cache_full_sink_hash.mojo",
         "tests/test_plan_validation_gate_direct.mojo",
         "tests/test_plan_validation_routes_ledger.mojo",
@@ -134,6 +135,7 @@ mojo_library(
     test_deps = [
         "//src/bench_corpus:bench_corpus",
         "//src/parquet_writer:parquet_writer",
+        "//src/tests/helpers/komira_test_arrow_c_consumer:komira_test_arrow_c_consumer",
     ],
     visibility = ["PUBLIC"],
 )

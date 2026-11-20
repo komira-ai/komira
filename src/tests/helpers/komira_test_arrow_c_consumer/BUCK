@@ -1,0 +1,45 @@
+load("@komira//tools/build/mojo:cxx.bzl", "staged_files")
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# Test-only: a consumer of the Arrow C Stream Interface written in C
+# (native/arrow_c_consumer.c, the specification's structs and nothing of
+# komira's), and `read_in_c`, which exports batches as a stream with
+# arrow_ipc's build_record_batch_stream and returns the text the C read. A
+# library names it in `test_deps` to have its exports read by a foreign host.
+#
+# The welded test, test_c_consumer, holds the consumer's reading of every
+# format it renders against values written out by hand, and its refusals: a
+# format it does not read, a get_schema and a get_next that fail (with the
+# stream's error text, and the stream released after a failed get_next).
+mojo_library(
+    name = "komira_test_arrow_c_consumer",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    conda = False,
+    deps = [
+        ":komira_test_arrow_c_consumer_c",
+        "//src/arrow:arrow",
+        "//src/arrow_ipc:arrow_ipc",
+        "//src/async_api:async_api",
+        "//src/byte_buffer:byte_buffer",
+        "//src/compression:compression",
+        "//src/containers:containers",
+        "//src/counters:counters",
+        "//src/libc:libc",
+    ],
+    test_srcs = ["tests/test_c_consumer.mojo"],
+    visibility = [
+        "//src/sdk_exec:",
+    ],
+)
+
+staged_files(
+    name = "c_files",
+    srcs = ["native/arrow_c_consumer.c"],
+)
+
+cxx_library(
+    name = "komira_test_arrow_c_consumer_c",
+    compiler_flags = ["-O2", "-Wall", "-Werror"],
+    srcs = [":c_files[native/arrow_c_consumer.c]"],
+    visibility = ["PUBLIC"],
+)
