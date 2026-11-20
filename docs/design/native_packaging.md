@@ -634,11 +634,12 @@ declares one of the two. The package's requirements are the usual ones: the plat
 at the table's floor, `mojo-compiler` at the pin, and the Mojo dependencies of the library. The Mojo
 runtime the library is `NEEDED` on (`libKGENCompilerRTShared.so`, and what it loads) is not bundled: it
 comes from the `mojo-compiler` requirement, which installs it in `lib/` beside the library. The Python
-wheel does not carry it either: it depends on the `mojo-compiler` package of PyPI, which installs it in
-`site-packages/modular/lib/` ([mojo_runtime_pypi_vs_conda.md](mojo_runtime_pypi_vs_conda.md)), and the
-repository's `NOTICE`, one of the wheel's two licence files, says so (see
-[packaging/conda/README.md](../../packaging/conda/README.md), "A Python wheel rule"). Whether an npm tarball carries it is not
-decided. For that layout the library's run path is `$ORIGIN/lib:$ORIGIN` (the gate stages the runtime
+wheel, when it is built, does not carry it either: it depends on the `mojo-compiler` package of PyPI,
+which installs it in `site-packages/modular/lib/`
+([mojo_runtime_pypi_vs_conda.md](mojo_runtime_pypi_vs_conda.md)), and the repository's `NOTICE`, one
+of the wheel's two licence files, says so (see
+[packaging/conda/README.md](../../packaging/conda/README.md), "A Python wheel rule"). Whether an npm
+tarball carries it is not decided. For that layout the library's run path is `$ORIGIN/lib:$ORIGIN` (the gate stages the runtime
 in a `lib/` beside it, an install has it beside the library). `conda_install_check`
 (`tools/build/package/install_check`) installs the built package into an empty prefix with the
 runtime libraries of the toolchain's `runtime_libs` beside it, loads the library from there with
