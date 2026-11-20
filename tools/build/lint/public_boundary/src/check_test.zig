@@ -82,6 +82,16 @@ const CASES = [_]Case{
     .{ .name = "host", .plant = &.{.{ .path = "docs/plant.md", .text = "See https:~//build.corp.zz/x.\n" }}, .want = "tests//neg/docs/plant.md:1: host: build.corp.zz -- a URL host that is neither a reserved example name nor under a domain of tests//neg/hosts.tsv" },
     .{ .name = "email", .plant = &.{.{ .path = "docs/plant.md", .text = "Ask jdoe~@corp.zz.\n" }}, .want = "tests//neg/docs/plant.md:1: email: jdoe~@corp.zz -- an email address outside the reserved example domains" },
     .{ .name = "sha_md", .plant = &.{.{ .path = "docs/plant.md", .text = "Fixed in 1a2b3c~4d.\n" }}, .want = "tests//neg/docs/plant.md:1: commit_sha: 1a2b3c~4d -- a commit id in prose: name the change by its pull request or release" },
+    // The Python package and its wheel metadata are read like any other path of the tree.
+    .{ .name = "python_date", .plant = &.{.{ .path = "python/src/komira/__init__.py", .text = "\"\"\"The SDK.\"\"\"\n# Added 2031-08-31.\n" }}, .want = "tests//neg/python/src/komira/__init__.py:2: date: 2031-08-31 -- a date before 2031-09-01, when the public history starts" },
+    .{ .name = "python_email", .plant = &.{.{ .path = "python/src/komira/__init__.py", .text = "__author__ = \"jdoe~@corp.zz\"\n" }}, .want = "tests//neg/python/src/komira/__init__.py:1: email: jdoe~@corp.zz -- an email address outside the reserved example domains" },
+    .{ .name = "python_home", .plant = &.{.{ .path = "python/tests/test_paths.py", .text = "ROOT = \"/ho~me/jdoe/work\"\n" }}, .want = "tests//neg/python/tests/test_paths.py:1: home_path: /ho~me/jdoe -- a home directory names a person: use a placeholder such as /home/user" },
+    .{ .name = "pyproject_email", .plant = &.{.{ .path = "python/pyproject.toml", .text = "[project]\nauthors = [{ name = \"A\", email = \"jdoe~@corp.zz\" }]\n" }}, .want = "tests//neg/python/pyproject.toml:2: email: jdoe~@corp.zz --" },
+    .{ .name = "pyproject_host", .plant = &.{.{ .path = "python/pyproject.toml", .text = "[project.urls]\nHomepage = \"https:~//build.corp.zz/komira\"\n" }}, .want = "tests//neg/python/pyproject.toml:2: host: build.corp.zz --" },
+    .{ .name = "stub_docstring_sha", .plant = &.{.{ .path = "python/src/komira/_core.pyi", .text = "def run() -> None:\n    \"\"\"Fixed in 1a2b3c~4d.\"\"\"\n" }}, .want = "tests//neg/python/src/komira/_core.pyi:2: commit_sha: 1a2b3c~4d --" },
+    .{ .name = "metadata_sha", .plant = &.{.{ .path = "python/build/komira.dist-info/METADATA", .text = "Name: komira\n\nFixed in 1a2b3c~4d.\n" }}, .want = "tests//neg/python/build/komira.dist-info/METADATA:3: commit_sha: 1a2b3c~4d --" },
+    .{ .name = "metadata_email", .plant = &.{.{ .path = "python/build/komira.dist-info/METADATA", .text = "Name: komira\nAuthor-email: jdoe~@corp.zz\n" }}, .want = "tests//neg/python/build/komira.dist-info/METADATA:2: email: jdoe~@corp.zz --" },
+    .{ .name = "path_bytecode", .plant = &.{.{ .path = "python/src/komira/__pycache__/mod_2031-08-31.cpython-314.pyc", .text = "unreadable" }}, .want = "tests//neg/python/src/komira/__pycache__/mod_2031-08-31.cpython-314.pyc:0: date: 2031-08-31 (in the path) --" },
     // third_party/ is read whole, its BUCK files and C headers too.
     .{ .name = "third_party_buck", .plant = &.{.{ .path = "third_party/up/BUCK", .text = "# Read.\n# Source: https:~//github.com/upstream/project\n# Built on 2031-08-31.\n" }}, .want = "tests//neg/third_party/up/BUCK:3: date: 2031-08-31 --" },
     .{ .name = "third_party_c", .plant = &.{.{ .path = "third_party/up/config.h", .text = "/* Built on 2031-08-31. */\n" }}, .want = "tests//neg/third_party/up/config.h:1: date: 2031-08-31 --" },
@@ -205,6 +215,12 @@ test "a failing report is a failure result of at most 200 lines" {
 test "binary data is known by its suffix" {
     try std.testing.expect(check.binary("a/b/data.arrow"));
     try std.testing.expect(check.binary("x.tar"));
+    try std.testing.expect(check.binary("a/__pycache__/m.cpython-314.pyc"));
+    try std.testing.expect(check.binary("a/m.pyd"));
+    try std.testing.expect(check.binary("dist/komira-0.1.0-py3-none-any.whl"));
+    try std.testing.expect(check.binary("dist/komira.egg"));
+    try std.testing.expect(!check.binary("a/m.pyi"));
+    try std.testing.expect(!check.binary("a/m.py"));
     try std.testing.expect(!check.binary("a/data_arrow.txt"));
     try std.testing.expect(!check.binary("a.arrow/notes.md"));
     try std.testing.expect(!check.binary("Makefile"));

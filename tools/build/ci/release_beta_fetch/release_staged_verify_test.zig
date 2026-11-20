@@ -1,10 +1,13 @@
-//! The cases of release_staged_verify (release_staged_verify.zig). Each test is a defect the prod publish of
-//! release.yml would otherwise let through: tests that ran on other bytes than the registry will publish, a
-//! staged directory with a file that was changed, lost or never listed, a smoke check that reads the wrong
-//! channel or stops at the first lagging answer, a yank hint that names something that is not a group.
+//! The cases of release_staged_verify (release_staged_verify.zig, prod_add.zig). Each test is a defect the prod
+//! publish of release.yml would otherwise let through: tests that ran on other bytes than the registry will
+//! publish, a staged directory with a file that was changed, lost or never listed, a smoke check that reads the
+//! wrong channel or stops at the first lagging answer, a yank hint that names something that is not a group, and
+//! a user's `mopm add` from prod that fails, locks another version, a flat name or the global channel, or
+//! installs other bytes than the plan's.
 const std = @import("std");
 const rsv = @import("release_staged_verify.zig");
 const rbf = @import("release_beta_fetch.zig");
+const pa = @import("prod_add.zig");
 const t = std.testing;
 
 const CONFIG_URL = "https://api.mopm.dev/index/config.json";
@@ -312,4 +315,529 @@ test "the yank hint names the group of state.json, and only a plain group id" {
     try t.expect((try rsv.yankCommand(a, "not json", "prod")) == null);
     try t.expect((try rsv.yankCommand(a, "{\"group_id\":\"g; rm -rf ~\"}", "prod")) == null);
     try t.expect((try rsv.yankCommand(a, "{\"group_id\":\"$(id)\"}", "prod")) == null);
+}
+
+// ---- add --------------------------------------------------------------------------------
+
+const RUN = "0.1.9";
+const PROD_NS = "https://conda.mopm.dev/komira-ai/";
+
+/// A package a channel serves: its full name, version and the bytes of its one linux-64 file.
+const Pkg = struct {
+    name: []const u8,
+    version: []const u8 = RUN,
+    bytes: []const u8,
+    deps: []const []const u8 = &.{},
+};
+
+/// The prod channel of this release in memory: the three names of `add_set`, and uuid's dependency.
+const SERVED = [_]Pkg{
+    .{ .name = "komira-ai/clock", .bytes = "clock bytes" },
+    .{ .name = "komira-ai/json", .bytes = "json bytes, no dependency" },
+    .{ .name = "komira-ai/libc", .bytes = "libc bytes and its archive" },
+    .{ .name = "komira-ai/uuid", .bytes = "uuid bytes", .deps = &.{"komira-ai/clock"} },
+};
+
+fn fileName(a: std.mem.Allocator, name: []const u8, version: []const u8) ![]u8 {
+    const slash = std.mem.indexOfScalar(u8, name, '/').?;
+    return std.fmt.allocPrint(a, "mojo-{s}.{s}-{s}-mojo1.0.0_0.conda", .{ name[0..slash], name[slash + 1 ..], version });
+}
+
+/// The committed set of this release (plan.json and the READMEs) for `SERVED`, at version RUN.
+fn stageAdd(a: std.mem.Allocator, tmp: *t.TmpDir) !void {
+    var plan = std.Io.Writer.Allocating.init(a);
+    try plan.writer.writeAll("{\"version\":2,\"members\":[");
+    for (SERVED, 0..) |p, i| {
+        try plan.writer.print("{s}{{\"name\":\"{s}\",\"version\":\"{s}\",\"action\":\"upload\",\"readme\":\"{s}/README.md\",", .{ if (i == 0) "" else ",", p.name, RUN, p.name });
+        try plan.writer.print("\"files\":[{{\"subdir\":\"linux-64\",\"filename\":\"{s}\",\"sha256\":\"{s}\",\"size\":{d}}}]}}", .{ try fileName(a, p.name, RUN), try sha(a, p.bytes), p.bytes.len });
+        try tmp.dir.makePath(try std.fmt.allocPrint(a, "committed/{s}", .{p.name}));
+        try tmp.dir.writeFile(.{ .sub_path = try std.fmt.allocPrint(a, "committed/{s}/README.md", .{p.name}), .data = "# readme\n" });
+    }
+    try plan.writer.writeAll("]}");
+    try tmp.dir.writeFile(.{ .sub_path = "committed/plan.json", .data = plan.written() });
+}
+
+/// mopm in memory, against a channel of `served`. `init`, `add` and `sync` do what mopm does to the project
+/// directory: `add` exits 1 for a name the channel lacks, `sync` writes mopm.lock (lock 3) for the closure of the
+/// added names, keeps each file in `.mopm/pkgs` and installs its record and metadata into `.mopm/env`. The
+/// other fields make it a mopm, or a registry, that does something else.
+const FakeMopm = struct {
+    served: []const Pkg = &SERVED,
+    /// Every command line, joined by spaces, without the binary.
+    calls: std.ArrayList([]const u8) = .empty,
+    added: std.ArrayList([]const u8) = .empty,
+    /// The command (`argv[1]`) that exits `code` with `stderr` instead of running.
+    fail: ?[]const u8 = null,
+    code: ?u8 = 1,
+    stderr: []const u8 = "",
+    /// The runner's error: mopm cannot be started.
+    spawn: ?anyerror = null,
+    /// The lock records this full name flat (its name part only).
+    flat: ?[]const u8 = null,
+    /// The lock records this full name under the channel root, not its namespace's channel.
+    global: ?[]const u8 = null,
+    /// The lock's `channels` and `lock_version`.
+    roots: []const u8 = "\"https://conda.mopm.dev/\"",
+    lock_version: u32 = 3,
+    /// An added name `sync` leaves out of the lock.
+    drop: ?[]const u8 = null,
+    /// This full name's file in `.mopm/pkgs` holds other bytes than the lock pins.
+    kept_other: ?[]const u8 = null,
+    /// This full name's record in `.mopm/env/conda-meta` names another sha256.
+    record_other: ?[]const u8 = null,
+    /// This full name's `lib/mojo/<import name>.mopm.json` is not installed.
+    no_meta: ?[]const u8 = null,
+
+    fn is(field: ?[]const u8, name: []const u8) bool {
+        return field != null and std.mem.eql(u8, field.?, name);
+    }
+
+    fn runner(self: *FakeMopm) pa.Runner {
+        return .{ .ctx = self, .runFn = run };
+    }
+
+    fn lookup(self: *FakeMopm, name: []const u8) ?Pkg {
+        for (self.served) |p| if (std.mem.eql(u8, p.name, name)) return p;
+        return null;
+    }
+
+    fn run(ctx: *anyopaque, a: std.mem.Allocator, argv: []const []const u8, cwd: []const u8) anyerror!pa.Ran {
+        const self: *FakeMopm = @ptrCast(@alignCast(ctx));
+        try t.expectEqualStrings("/pinned/mopm", argv[0]);
+        try self.calls.append(a, try std.mem.join(a, " ", argv[1..]));
+        if (self.spawn) |e| return e;
+        if (self.fail) |f| if (std.mem.eql(u8, f, argv[1])) return .{ .code = self.code, .stderr = self.stderr };
+        var dir = try std.fs.cwd().openDir(cwd, .{});
+        defer dir.close();
+        if (std.mem.eql(u8, argv[1], "init")) {
+            try dir.writeFile(.{ .sub_path = "mopm.toml", .data = "[package]\nname = \"release-check/prod_add\"\n" });
+        } else if (std.mem.eql(u8, argv[1], "add")) {
+            if (self.lookup(argv[2]) == null) return .{ .code = 1, .stderr = try std.fmt.allocPrint(a, "mopm add: {s} (required by mopm.toml) is not in the registry's index\n", .{argv[2]}) };
+            try self.added.append(a, argv[2]);
+        } else if (std.mem.eql(u8, argv[1], "sync")) {
+            try self.sync(a, dir);
+        } else return .{ .code = 2, .stderr = "usage" };
+        return .{ .code = 0, .stdout = "done\n" };
+    }
+
+    fn sync(self: *FakeMopm, a: std.mem.Allocator, dir: std.fs.Dir) !void {
+        var closure = std.ArrayList(Pkg).empty;
+        var todo = std.ArrayList([]const u8).empty;
+        for (self.added.items) |n| if (self.drop == null or !std.mem.eql(u8, n, self.drop.?)) try todo.append(a, n);
+        while (todo.pop()) |n| {
+            var seen = false;
+            for (closure.items) |p| seen = seen or std.mem.eql(u8, p.name, n);
+            if (seen) continue;
+            const p = self.lookup(n).?;
+            try closure.append(a, p);
+            for (p.deps) |d| try todo.append(a, d);
+        }
+        // the lock's order: by full name
+        std.mem.sort(Pkg, closure.items, {}, struct {
+            fn lt(_: void, x: Pkg, y: Pkg) bool {
+                return std.mem.lessThan(u8, x.name, y.name);
+            }
+        }.lt);
+        var lock = std.Io.Writer.Allocating.init(a);
+        try lock.writer.print("{{\"lock_version\":{d},\"mojo\":[\"1.0.0\"],\"channels\":[{s}],\"packages\":[", .{ self.lock_version, self.roots });
+        try dir.makePath(".mopm/pkgs");
+        try dir.makePath(".mopm/env/conda-meta");
+        try dir.makePath(".mopm/env/lib/mojo");
+        for (closure.items, 0..) |p, i| {
+            const file = try fileName(a, p.name, p.version);
+            const slash = std.mem.indexOfScalar(u8, p.name, '/').?;
+            const is_flat = self.flat != null and std.mem.eql(u8, self.flat.?, p.name);
+            const is_global = self.global != null and std.mem.eql(u8, self.global.?, p.name);
+            const channel = if (is_global) "https://conda.mopm.dev/" else PROD_NS;
+            try lock.writer.print("{s}{{\"name\":\"{s}\",\"version\":\"{s}\",\"subdir\":\"linux-64\",\"channel\":\"{s}\",", .{ if (i == 0) "" else ",", if (is_flat) p.name[slash + 1 ..] else p.name, p.version, channel });
+            try lock.writer.print("\"artifacts\":{{\"1.0.0\":{{\"build\":\"mojo1.0.0_0\",\"url\":\"{s}linux-64/{s}\",\"sha256\":\"{s}\",\"size\":{d}}}}}}}", .{ channel, file, try sha(a, p.bytes), p.bytes.len });
+            const other = self.kept_other != null and std.mem.eql(u8, self.kept_other.?, p.name);
+            try dir.writeFile(.{ .sub_path = try std.fmt.allocPrint(a, ".mopm/pkgs/{s}", .{file}), .data = if (other) "other bytes" else p.bytes });
+            const stem = file[0 .. file.len - ".conda".len];
+            const recorded = if (is(self.record_other, p.name)) "0" ** 64 else try sha(a, p.bytes);
+            try dir.writeFile(.{ .sub_path = try std.fmt.allocPrint(a, ".mopm/env/conda-meta/{s}.json", .{stem}), .data = try std.fmt.allocPrint(a, "{{\"sha256\":\"{s}\"}}", .{recorded}) });
+            if (!is(self.no_meta, p.name)) try dir.writeFile(.{ .sub_path = try std.fmt.allocPrint(a, ".mopm/env/lib/mojo/{s}.mopm.json", .{p.name[slash + 1 ..]}), .data = "{}" });
+        }
+        try lock.writer.writeAll("]}");
+        try dir.writeFile(.{ .sub_path = "mopm.lock", .data = lock.written() });
+    }
+};
+
+/// Runs `add` for `add_set` with `fake` in a fresh `tmp` holding the committed set; `work` is `<tmp>/work`.
+fn runAdd(a: std.mem.Allocator, tmp: *t.TmpDir, fake: *FakeMopm, why: *[]const u8, log: *std.Io.Writer) !pa.Report {
+    return pa.add(a, why, try path(a, tmp, "committed"), "/pinned/mopm", try path(a, tmp, "work"), &pa.add_set, "linux-64", fake.runner(), log);
+}
+
+test "add: prod serves the set; init, an add per package, then sync, and the lock and installed files are the plan's" {
+    var ar = std.heap.ArenaAllocator.init(t.allocator);
+    defer ar.deinit();
+    const a = ar.allocator();
+    var tmp = t.tmpDir(.{});
+    defer tmp.cleanup();
+    try stageAdd(a, &tmp);
+    var fake = FakeMopm{};
+    var log = sink();
+    defer log.deinit();
+    var why: []const u8 = "";
+    const rep = try runAdd(a, &tmp, &fake, &why, &log.writer);
+    try t.expectEqual(@as(usize, 3), rep.members);
+    try t.expectEqual(@as(usize, 4), rep.entries);
+    const cache = try path(a, &tmp, "work/cache");
+    const want = [_][]const u8{
+        "init --name release-check/prod_add",
+        "add komira-ai/json --registry prod",
+        "add komira-ai/uuid --registry prod",
+        "add komira-ai/libc --registry prod",
+        try std.fmt.allocPrint(a, "sync --registry prod --cache {s}", .{cache}),
+    };
+    try t.expectEqual(want.len, fake.calls.items.len);
+    for (want, fake.calls.items) |w, got| try t.expectEqualStrings(w, got);
+    // uuid's dependency clock is installed and checked too
+    const clock = try std.fmt.allocPrint(a, "installed {s} komira-ai/clock 0.1.9 mojo-komira-ai.clock-0.1.9-mojo1.0.0_0.conda\n", .{try sha(a, "clock bytes")});
+    try t.expect(std.mem.indexOf(u8, log.written(), clock) != null);
+    try t.expect(exists(&tmp, "work/project/mopm.toml"));
+}
+
+test "add: a channel that lacks a member fails at its `mopm add`, naming it, and nothing is synced" {
+    var ar = std.heap.ArenaAllocator.init(t.allocator);
+    defer ar.deinit();
+    const a = ar.allocator();
+    var tmp = t.tmpDir(.{});
+    defer tmp.cleanup();
+    try stageAdd(a, &tmp);
+    const lacking = [_]Pkg{ SERVED[0], SERVED[1], SERVED[3] };
+    var fake = FakeMopm{ .served = &lacking };
+    var log = sink();
+    defer log.deinit();
+    var why: []const u8 = "";
+    try t.expectError(error.Refused, runAdd(a, &tmp, &fake, &why, &log.writer));
+    try t.expectEqualStrings("`mopm add komira-ai/libc --registry prod` exited with 1: mopm add: komira-ai/libc (required by mopm.toml) is not in the registry's index", why);
+    try t.expectEqual(@as(usize, 4), fake.calls.items.len);
+}
+
+test "add: a channel that serves a member at another version fails, naming the member and both versions" {
+    var ar = std.heap.ArenaAllocator.init(t.allocator);
+    defer ar.deinit();
+    const a = ar.allocator();
+    var tmp = t.tmpDir(.{});
+    defer tmp.cleanup();
+    try stageAdd(a, &tmp);
+    const older = [_]Pkg{ SERVED[0], SERVED[1], .{ .name = "komira-ai/libc", .version = "0.1.8", .bytes = "libc of the release before" }, SERVED[3] };
+    var fake = FakeMopm{ .served = &older };
+    var log = sink();
+    defer log.deinit();
+    var why: []const u8 = "";
+    try t.expectError(error.Refused, runAdd(a, &tmp, &fake, &why, &log.writer));
+    try t.expectEqualStrings("1 problem(s) with what `mopm add` installed from prod:\n  komira-ai/libc: the lock records version 0.1.8; this release published 0.1.9", why);
+}
+
+test "add: an added name the lock leaves out fails, naming it" {
+    var ar = std.heap.ArenaAllocator.init(t.allocator);
+    defer ar.deinit();
+    const a = ar.allocator();
+    var tmp = t.tmpDir(.{});
+    defer tmp.cleanup();
+    try stageAdd(a, &tmp);
+    var fake = FakeMopm{ .drop = "komira-ai/json" };
+    var log = sink();
+    defer log.deinit();
+    var why: []const u8 = "";
+    try t.expectError(error.Refused, runAdd(a, &tmp, &fake, &why, &log.writer));
+    try t.expectEqualStrings("1 problem(s) with what `mopm add` installed from prod:\n  komira-ai/json: `mopm add komira-ai/json` left it out of mopm.lock", why);
+}
+
+test "add: a lock that records a flat name fails" {
+    var ar = std.heap.ArenaAllocator.init(t.allocator);
+    defer ar.deinit();
+    const a = ar.allocator();
+    var tmp = t.tmpDir(.{});
+    defer tmp.cleanup();
+    try stageAdd(a, &tmp);
+    var fake = FakeMopm{ .flat = "komira-ai/clock" };
+    var log = sink();
+    defer log.deinit();
+    var why: []const u8 = "";
+    try t.expectError(error.Refused, runAdd(a, &tmp, &fake, &why, &log.writer));
+    try t.expectEqualStrings("1 problem(s) with what `mopm add` installed from prod:\n  clock: a flat name; lock 3 records the full name <namespace>/<name>", why);
+}
+
+test "add: a lock that records the global channel for an entry, or another channel root, fails" {
+    var ar = std.heap.ArenaAllocator.init(t.allocator);
+    defer ar.deinit();
+    const a = ar.allocator();
+    var tmp = t.tmpDir(.{});
+    defer tmp.cleanup();
+    try stageAdd(a, &tmp);
+    var fake = FakeMopm{ .global = "komira-ai/json" };
+    var log = sink();
+    defer log.deinit();
+    var why: []const u8 = "";
+    try t.expectError(error.Refused, runAdd(a, &tmp, &fake, &why, &log.writer));
+    try t.expectEqualStrings("1 problem(s) with what `mopm add` installed from prod:\n  komira-ai/json: channel 'https://conda.mopm.dev/'; wanted 'https://conda.mopm.dev/komira-ai/', the channel of its namespace", why);
+
+    var tmp2 = t.tmpDir(.{});
+    defer tmp2.cleanup();
+    try stageAdd(a, &tmp2);
+    var roots = FakeMopm{ .roots = "\"https://conda.mopm.dev/\",\"https://conda.beta.mopm.dev/\"", .lock_version = 2 };
+    try t.expectError(error.Refused, runAdd(a, &tmp2, &roots, &why, &log.writer));
+    try t.expectEqualStrings("2 problem(s) with what `mopm add` installed from prod:\n" ++
+        "  mopm.lock has lock_version 2; lock 3 (full names, a channel per namespace) is the one wanted\n" ++
+        "  mopm.lock lists the channel roots [https://conda.mopm.dev/, https://conda.beta.mopm.dev/]; wanted exactly [https://conda.mopm.dev/]", why);
+}
+
+test "add: a mopm that exits non-zero fails with the command and the first line of its stderr" {
+    var ar = std.heap.ArenaAllocator.init(t.allocator);
+    defer ar.deinit();
+    const a = ar.allocator();
+    var tmp = t.tmpDir(.{});
+    defer tmp.cleanup();
+    try stageAdd(a, &tmp);
+    var fake = FakeMopm{ .fail = "sync", .code = 1, .stderr = "\n  \r\nmopm sync: https://conda.mopm.dev/komira-ai/linux-64/repodata.json answered HTTP 503\nsecond line\n" };
+    var log = sink();
+    defer log.deinit();
+    var why: []const u8 = "";
+    try t.expectError(error.Refused, runAdd(a, &tmp, &fake, &why, &log.writer));
+    const want = try std.fmt.allocPrint(a, "`mopm sync --registry prod --cache {s}` exited with 1: mopm sync: https://conda.mopm.dev/komira-ai/linux-64/repodata.json answered HTTP 503", .{try path(a, &tmp, "work/cache")});
+    try t.expectEqualStrings(want, why);
+    try t.expect(std.mem.indexOf(u8, log.written(), "second line") != null);
+}
+
+test "add: a mopm that fails at init, is killed, writes nothing on stderr, or cannot start fails, naming the command" {
+    var ar = std.heap.ArenaAllocator.init(t.allocator);
+    defer ar.deinit();
+    const a = ar.allocator();
+    var log = sink();
+    defer log.deinit();
+    var why: []const u8 = "";
+    const Case = struct { fake: FakeMopm, want: []const u8, calls: usize };
+    const cases = [_]Case{
+        .{ .fake = .{ .fail = "init", .code = 2, .stderr = "mopm init: a mopm.toml exists\n" }, .want = "`mopm init --name release-check/prod_add` exited with 2: mopm init: a mopm.toml exists", .calls = 1 },
+        .{ .fake = .{ .fail = "add", .code = null, .stderr = "" }, .want = "`mopm add komira-ai/json --registry prod` did not exit (killed by a signal): (nothing on stderr)", .calls = 2 },
+        .{ .fake = .{ .fail = "add", .code = 1, .stderr = "" }, .want = "`mopm add komira-ai/json --registry prod` exited with 1: (nothing on stderr)", .calls = 2 },
+        .{ .fake = .{ .spawn = error.FileNotFound }, .want = "`mopm init --name release-check/prod_add` could not run /pinned/mopm: FileNotFound", .calls = 1 },
+    };
+    for (cases) |c| {
+        var tmp = t.tmpDir(.{});
+        defer tmp.cleanup();
+        try stageAdd(a, &tmp);
+        var fake = c.fake;
+        try t.expectError(error.Refused, runAdd(a, &tmp, &fake, &why, &log.writer));
+        try t.expectEqualStrings(c.want, why);
+        try t.expectEqual(c.calls, fake.calls.items.len);
+    }
+}
+
+test "add: an installed file with other bytes than the plan's fails, naming the file" {
+    var ar = std.heap.ArenaAllocator.init(t.allocator);
+    defer ar.deinit();
+    const a = ar.allocator();
+    var tmp = t.tmpDir(.{});
+    defer tmp.cleanup();
+    try stageAdd(a, &tmp);
+    var fake = FakeMopm{ .kept_other = "komira-ai/uuid" };
+    var log = sink();
+    defer log.deinit();
+    var why: []const u8 = "";
+    try t.expectError(error.Refused, runAdd(a, &tmp, &fake, &why, &log.writer));
+    const want = try std.fmt.allocPrint(a, "2 problem(s) with what `mopm add` installed from prod:\n" ++
+        "  komira-ai/uuid 0.1.9: .mopm/pkgs/mojo-komira-ai.uuid-0.1.9-mojo1.0.0_0.conda has size 11, the plan says 10\n" ++
+        "  komira-ai/uuid 0.1.9: .mopm/pkgs/mojo-komira-ai.uuid-0.1.9-mojo1.0.0_0.conda has sha256 {s}, the plan says {s}", .{ try sha(a, "other bytes"), try sha(a, "uuid bytes") });
+    try t.expectEqualStrings(want, why);
+}
+
+test "add: an environment whose record names another sha256, or that lacks a package's metadata, fails" {
+    var ar = std.heap.ArenaAllocator.init(t.allocator);
+    defer ar.deinit();
+    const a = ar.allocator();
+    var tmp = t.tmpDir(.{});
+    defer tmp.cleanup();
+    try stageAdd(a, &tmp);
+    var fake = FakeMopm{ .record_other = "komira-ai/json", .no_meta = "komira-ai/libc" };
+    var log = sink();
+    defer log.deinit();
+    var why: []const u8 = "";
+    try t.expectError(error.Refused, runAdd(a, &tmp, &fake, &why, &log.writer));
+    const want = try std.fmt.allocPrint(a, "2 problem(s) with what `mopm add` installed from prod:\n" ++
+        "  komira-ai/json 0.1.9: .mopm/env/conda-meta/mojo-komira-ai.json-0.1.9-mojo1.0.0_0.json records sha256 '{s}', the plan says {s}\n" ++
+        "  komira-ai/libc 0.1.9: .mopm/env/lib/mojo/libc.mopm.json FileNotFound", .{ "0" ** 64, try sha(a, "json bytes, no dependency") });
+    try t.expectEqualStrings(want, why);
+}
+
+test "add: a lock that pins other bytes than the plan's fails, naming the file and both hashes" {
+    var ar = std.heap.ArenaAllocator.init(t.allocator);
+    defer ar.deinit();
+    const a = ar.allocator();
+    var tmp = t.tmpDir(.{});
+    defer tmp.cleanup();
+    try stageAdd(a, &tmp);
+    const other = [_]Pkg{ SERVED[0], .{ .name = "komira-ai/json", .bytes = "json bytes, but othe" }, SERVED[2], SERVED[3] };
+    var fake = FakeMopm{ .served = &other };
+    var log = sink();
+    defer log.deinit();
+    var why: []const u8 = "";
+    try t.expectError(error.Refused, runAdd(a, &tmp, &fake, &why, &log.writer));
+    const label = "komira-ai/json 0.1.9 linux-64/mojo-komira-ai.json-0.1.9-mojo1.0.0_0.conda";
+    const want = try std.fmt.allocPrint(a, "2 problem(s) with what `mopm add` installed from prod:\n" ++
+        "  " ++ label ++ ": the lock pins sha256 {s}, the plan says {s}\n" ++
+        "  " ++ label ++ ": the lock pins size 20, the plan says 25", .{ try sha(a, "json bytes, but othe"), try sha(a, "json bytes, no dependency") });
+    try t.expectEqualStrings(want, why);
+}
+
+test "add: a package the plan does not hold, or a --work that exists, is refused before mopm runs" {
+    var ar = std.heap.ArenaAllocator.init(t.allocator);
+    defer ar.deinit();
+    const a = ar.allocator();
+    var tmp = t.tmpDir(.{});
+    defer tmp.cleanup();
+    try stageAdd(a, &tmp);
+    var fake = FakeMopm{};
+    var log = sink();
+    defer log.deinit();
+    var why: []const u8 = "";
+    const names = [_][]const u8{ "komira-ai/json", "komira-ai/gone" };
+    try t.expectError(error.Refused, pa.add(a, &why, try path(a, &tmp, "committed"), "/pinned/mopm", try path(a, &tmp, "work"), &names, "linux-64", fake.runner(), &log.writer));
+    try t.expectEqualStrings("komira-ai/gone is not a member of plan.json: this release did not publish it, so it cannot be added from prod", why);
+    try t.expect(!exists(&tmp, "work"));
+    try tmp.dir.makePath("work");
+    try t.expectError(error.Refused, runAdd(a, &tmp, &fake, &why, &log.writer));
+    try t.expect(std.mem.endsWith(u8, why, "/work exists; add runs in a directory it makes"));
+    try t.expectEqual(@as(usize, 0), fake.calls.items.len);
+}
+
+test "add: the lock's files are checked for every subdir, and only the host's are read from the environment" {
+    var ar = std.heap.ArenaAllocator.init(t.allocator);
+    defer ar.deinit();
+    const a = ar.allocator();
+    var tmp = t.tmpDir(.{});
+    defer tmp.cleanup();
+    try stageAdd(a, &tmp);
+    var fake = FakeMopm{};
+    var log = sink();
+    defer log.deinit();
+    var why: []const u8 = "";
+    // linux-aarch64: the lock's linux-64 entries are checked against the plan, nothing is installed for this host
+    try t.expectError(error.Refused, pa.add(a, &why, try path(a, &tmp, "committed"), "/pinned/mopm", try path(a, &tmp, "work"), &pa.add_set, "linux-aarch64", fake.runner(), &log.writer));
+    try t.expectEqualStrings("1 problem(s) with what `mopm add` installed from prod:\n  mopm.lock pins no file for linux-aarch64: nothing was installed", why);
+}
+
+test "add: the first line of stderr and the host's subdir" {
+    try t.expectEqualStrings("mopm: no", pa.firstLine(" \r\n\t\n  mopm: no \r\nyes"));
+    try t.expectEqualStrings("(nothing on stderr)", pa.firstLine(""));
+    try t.expectEqualStrings("(nothing on stderr)", pa.firstLine("\n \n"));
+    try t.expectEqualStrings("linux-64", pa.subdirOf(.linux, .x86_64).?);
+    try t.expectEqualStrings("linux-aarch64", pa.subdirOf(.linux, .aarch64).?);
+    try t.expectEqualStrings("osx-arm64", pa.subdirOf(.macos, .aarch64).?);
+    try t.expect(pa.subdirOf(.macos, .x86_64) == null);
+    try t.expect(pa.subdirOf(.linux, .riscv64) == null);
+    try t.expect(pa.subdirOf(.windows, .x86_64) == null);
+}
+
+test "add: the process runner reports a mopm that is not there as an error, which add names with the binary" {
+    var ar = std.heap.ArenaAllocator.init(t.allocator);
+    defer ar.deinit();
+    const a = ar.allocator();
+    var tmp = t.tmpDir(.{});
+    defer tmp.cleanup();
+    try stageAdd(a, &tmp);
+    const missing = try path(a, &tmp, "no-such-mopm");
+    var proc = pa.Process{};
+    try t.expectError(error.FileNotFound, proc.runner().run(a, &.{ missing, "init" }, try path(a, &tmp, ".")));
+    var log = sink();
+    defer log.deinit();
+    var why: []const u8 = "";
+    try t.expectError(error.Refused, pa.add(a, &why, try path(a, &tmp, "committed"), missing, try path(a, &tmp, "work"), &pa.add_set, "linux-64", proc.runner(), &log.writer));
+    const want = try std.fmt.allocPrint(a, "`mopm init --name release-check/prod_add` could not run {s}: FileNotFound", .{missing});
+    try t.expectEqualStrings(want, why);
+}
+
+test "add: a relative --mopm or --work is refused before anything is made or run" {
+    var ar = std.heap.ArenaAllocator.init(t.allocator);
+    defer ar.deinit();
+    const a = ar.allocator();
+    var tmp = t.tmpDir(.{});
+    defer tmp.cleanup();
+    try stageAdd(a, &tmp);
+    var fake = FakeMopm{};
+    var log = sink();
+    defer log.deinit();
+    var why: []const u8 = "";
+    const staged = try path(a, &tmp, "committed");
+    try t.expectError(error.Refused, pa.add(a, &why, staged, "bin/mopm", try path(a, &tmp, "work"), &pa.add_set, "linux-64", fake.runner(), &log.writer));
+    try t.expectEqualStrings("--mopm bin/mopm is not an absolute path", why);
+    try t.expectError(error.Refused, pa.add(a, &why, staged, "/pinned/mopm", "work", &pa.add_set, "linux-64", fake.runner(), &log.writer));
+    try t.expectEqualStrings("--work work is not an absolute path", why);
+    try t.expectEqual(@as(usize, 0), fake.calls.items.len);
+    try t.expect(!exists(&tmp, "work"));
+}
+
+test "add: a locked dependency this release did not publish fails, naming it" {
+    var ar = std.heap.ArenaAllocator.init(t.allocator);
+    defer ar.deinit();
+    const a = ar.allocator();
+    var tmp = t.tmpDir(.{});
+    defer tmp.cleanup();
+    try stageAdd(a, &tmp);
+    const stray = [_]Pkg{ SERVED[0], SERVED[1], SERVED[2], .{ .name = "komira-ai/uuid", .bytes = "uuid bytes", .deps = &.{ "komira-ai/clock", "komira-ai/stray" } }, .{ .name = "komira-ai/stray", .bytes = "not in the plan" } };
+    var fake = FakeMopm{ .served = &stray };
+    var log = sink();
+    defer log.deinit();
+    var why: []const u8 = "";
+    try t.expectError(error.Refused, runAdd(a, &tmp, &fake, &why, &log.writer));
+    try t.expectEqualStrings("1 problem(s) with what `mopm add` installed from prod:\n  komira-ai/stray 0.1.9: not a member of this release's plan.json", why);
+}
+
+test "add on the command line: exit 0 and the summary when the checks pass, 1 and ADD FAILED when one does not" {
+    var ar = std.heap.ArenaAllocator.init(t.allocator);
+    defer ar.deinit();
+    const a = ar.allocator();
+    var tmp = t.tmpDir(.{});
+    defer tmp.cleanup();
+    try stageAdd(a, &tmp);
+    const args = [_][]const u8{ "--staged", try path(a, &tmp, "committed"), "--mopm", "/pinned/mopm", "--work", try path(a, &tmp, "work") };
+    var fake = FakeMopm{};
+    var out = sink();
+    defer out.deinit();
+    var err = sink();
+    defer err.deinit();
+    try t.expectEqual(@as(u8, 0), try rsv.cliAdd(a, &args, "linux-64", fake.runner(), &out.writer, &err.writer));
+    try t.expect(std.mem.endsWith(u8, out.written(), "release_staged_verify: `mopm add` of 3 package(s) from https://conda.mopm.dev/ locked 4 package(s) of this release and installed the published bytes (sha256 and size)\n"));
+    try t.expectEqualStrings("", err.written());
+    try t.expectEqual(@as(usize, 5), fake.calls.items.len);
+
+    var tmp2 = t.tmpDir(.{});
+    defer tmp2.cleanup();
+    try stageAdd(a, &tmp2);
+    const args2 = [_][]const u8{ "--work", try path(a, &tmp2, "work"), "--mopm", "/pinned/mopm", "--staged", try path(a, &tmp2, "committed") };
+    var failing = FakeMopm{ .fail = "init", .code = 3, .stderr = "mopm init: refused\n" };
+    var err2 = sink();
+    defer err2.deinit();
+    try t.expectEqual(@as(u8, 1), try rsv.cliAdd(a, &args2, "linux-64", failing.runner(), &out.writer, &err2.writer));
+    try t.expectEqualStrings("release_staged_verify: ADD FAILED: `mopm init --name release-check/prod_add` exited with 3: mopm init: refused\n", err2.written());
+}
+
+test "add on the command line: a usage error or a host with no toolchain is exit 2, and mopm never runs" {
+    var ar = std.heap.ArenaAllocator.init(t.allocator);
+    defer ar.deinit();
+    const a = ar.allocator();
+    const Case = struct { args: []const []const u8, subdir: ?[]const u8 = "linux-64", want: []const u8 };
+    const usage_text = "usage: release_staged_verify verify --staged <dir> --out <dir>\n";
+    const cases = [_]Case{
+        .{ .args = &.{ "--staged", "/s", "--mopm", "/m", "--work", "/w", "--out", "/o" }, .want = "release_staged_verify: unknown argument --out\n" ++ usage_text },
+        .{ .args = &.{ "--staged", "/s", "--mopm", "/m", "--work" }, .want = "release_staged_verify: --work needs one value, given once\n" },
+        .{ .args = &.{ "--staged", "/s", "--staged", "/t", "--mopm", "/m", "--work", "/w" }, .want = "release_staged_verify: --staged needs one value, given once\n" },
+        .{ .args = &.{ "--staged", "/s", "--work", "/w" }, .want = usage_text },
+        .{ .args = &.{}, .want = usage_text },
+        .{ .args = &.{ "--staged", "/s", "--mopm", "/m", "--work", "/w" }, .subdir = null, .want = "release_staged_verify: mopm installs no Mojo toolchain on this host, so add cannot run here\n" },
+    };
+    for (cases) |c| {
+        var fake = FakeMopm{};
+        var out = sink();
+        defer out.deinit();
+        var err = sink();
+        defer err.deinit();
+        try t.expectEqual(@as(u8, 2), try rsv.cliAdd(a, c.args, c.subdir, fake.runner(), &out.writer, &err.writer));
+        try t.expect(std.mem.startsWith(u8, err.written(), c.want));
+        try t.expectEqual(@as(usize, 0), fake.calls.items.len);
+        try t.expectEqualStrings("", out.written());
+    }
 }
