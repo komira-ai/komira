@@ -1,4 +1,4 @@
-# komira_sql_corpus
+# komira_sql_conformance
 
 The SQL conformance corpus: cases, each one SELECT over tables its corpus
 builds in SQL, with the answer the pinned DuckDB
@@ -12,10 +12,10 @@ Test-only data: nothing here is Mojo or Python, nothing komira builds is an
 input, and nothing runs komira on these cases yet.
 
 ```sh
-./buck2 build //src/tests/conformance/komira_sql_corpus:corpus
-./buck2 build //src/tests/conformance/komira_sql_corpus:join_shapes
-./buck2 build //src/tests/conformance/komira_sql_corpus:join_shapes/inner_basic
-./buck2 build //src/tests/conformance/komira_sql_corpus:compare_check
+./buck2 build //src/tests/conformance/komira_sql_conformance:corpus
+./buck2 build //src/tests/conformance/komira_sql_conformance:join_shapes
+./buck2 build //src/tests/conformance/komira_sql_conformance:join_shapes/inner_basic
+./buck2 build //src/tests/conformance/komira_sql_conformance:compare_check
 ```
 
 ## Layout
@@ -29,8 +29,9 @@ input, and nothing runs komira on these cases yet.
 | `sql/compare.sql` | `first_difference(got, want)`: where two answers first differ |
 | `sql/compare_check.sql` | `first_difference` over planted pairs |
 
-`:<corpus>/<case>` runs one case, `:<corpus>` every case of a corpus (its
-answers, as `<case>.tsv`), `:corpus` every case.
+`:<corpus>/<case>` runs one case, `:<corpus>` every case of a corpus,
+`:corpus` every case; `:<corpus>_answers` is a corpus's answers as one
+directory, `<case>.tsv` each.
 
 ## A case
 
@@ -82,7 +83,7 @@ After a DuckDB bump, or to add a case, write the answers without comparing
 them, then copy them over the committed ones and review the diff:
 
 ```sh
-./buck2 build //src/tests/conformance/komira_sql_corpus:<corpus> -c komira_sql_corpus.write=true --show-output
+./buck2 build //src/tests/conformance/komira_sql_conformance:<corpus>_answers -c komira_sql_conformance.write=true --show-output
 ```
 
 ## The corpora
@@ -107,9 +108,10 @@ Counts are of the case files (`ls cases/<corpus>/*.sql`, less
 | `cross_<type>` (18 corpora) | 1488 | one query shape per operator (filter, project, aggregate, group, sort, distinct, join) over a column of each type an Arrow file carries: integers, floats, DECIMAL(12,2), strings, dictionary strings, BOOLEAN, BLOB, DATE and the timestamp units |
 | `surface_limits`, `ops_controls`, `bind_controls` | 27, 32, 35 | queries at the limits of the SQL surface (repeated runs, an aggregate over an aggregate, NaN and infinity, a reserved word as a column); small controls of common operations; the repaired twin of each query DuckDB refuses at bind time |
 
-Dates: no table holds a date from 2025 up to 2026-08-31; the cases built
-on dates in that window had them moved to the same day of another year
-(2024, 2028 and 2029, or 2015), so a year-valued answer reads that year.
+Dates: the repository holds no recent dates (the public boundary lint,
+whose window starts in 2025), so a case built on a date from 2025 on had it
+moved to the same day of another year (2024, 2028 and 2029, or 2015), and a
+year-valued answer reads that year.
 
 What was not brought over, and why: cases whose DuckDB answer is an error
 (an overflow, a domain error, a bind or parse error: about 300) are not

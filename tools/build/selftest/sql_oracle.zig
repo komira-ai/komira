@@ -46,7 +46,7 @@
 //! `.`/`..` arms are covered by the name pattern too.)
 //! Also: komira_test_oracle's case runner no longer calling its oracle
 //! discipline (discipline_unplaced and discipline_unordered build green).
-//! And: komira_sql_corpus's case runner no longer comparing its answer
+//! And: komira_sql_conformance's case runner no longer comparing its answer
 //! with the committed one (corpus_answer_differs builds green), or running
 //! a case whose first line names no row order (corpus_unordered).
 const std = @import("std");

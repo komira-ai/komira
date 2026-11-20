@@ -93,7 +93,7 @@ sql_oracle(
     outputs = ["expected.tsv"],
 ) for case in ["unplaced", "unordered"]]
 
-# RED: the case runner of komira_sql_corpus (its sql/answer.sql and
+# RED: the case runner of komira_sql_conformance (its sql/answer.sql and
 # sql/check.sql, with the comparison sql/compare.sql) on a planted case
 # whose committed answer is wrong (`corpus case: answer.tsv differs from
 # the committed expected.tsv, line 2: ...`), and on one with no row order
@@ -103,9 +103,9 @@ sql_oracle(
 [sql_oracle(
     name = "corpus_" + case,
     srcs = [
-        "komira//src/tests/conformance/komira_sql_corpus:sql/compare.sql",
-        "komira//src/tests/conformance/komira_sql_corpus:sql/answer.sql",
-        "komira//src/tests/conformance/komira_sql_corpus:sql/check.sql",
+        "komira//src/tests/conformance/komira_sql_conformance:sql/compare.sql",
+        "komira//src/tests/conformance/komira_sql_conformance:sql/answer.sql",
+        "komira//src/tests/conformance/komira_sql_conformance:sql/check.sql",
     ],
     inputs = {
         "case.sql": "corpus_" + case + ".sql",

@@ -1,3 +1,4 @@
+load("@komira//tools/build/ci:aggregate.bzl", "ci_aggregate")
 load("@komira//tools/build/sql:defs.bzl", "sql_oracle")
 
 # The SQL conformance corpus (README.md): cases, each one SELECT over the
@@ -13,7 +14,8 @@ load("@komira//tools/build/sql:defs.bzl", "sql_oracle")
 #
 # `:<corpus>/<case>` runs one case (sql/answer.sql writes its answer.tsv,
 # sql/check.sql holds it to the committed <case>.tsv);
-# `:<corpus>` is every case of a corpus and `:corpus` every case.
+# `:<corpus>` is every case of a corpus and `:corpus` every case;
+# `:<corpus>_answers` a corpus's answers as one directory.
 # `:compare_check` holds the comparison (sql/compare.sql) to planted pairs.
 
 _CASES = [
@@ -23,9 +25,9 @@ _CASES = [
 
 _CORPORA = sorted({c.split("/")[0]: None for c in _CASES}.keys())
 
-# `-c komira_sql_corpus.write=true` writes the answers without holding them
+# `-c komira_sql_conformance.write=true` writes the answers without holding them
 # to the committed ones, to regenerate them (README.md, "Regenerating").
-_WRITE = read_config("komira_sql_corpus", "write", "false") == "true"
+_WRITE = read_config("komira_sql_conformance", "write", "false") == "true"
 
 [sql_oracle(
     name = case,
@@ -42,8 +44,10 @@ _WRITE = read_config("komira_sql_corpus", "write", "false") == "true"
     visibility = ["//src/tests/..."],
 ) for case in _CASES]
 
+# Each corpus's answers as one directory, <case>.tsv each: what
+# "Regenerating" (README.md) copies over the committed answers.
 [filegroup(
-    name = corpus,
+    name = corpus + "_answers",
     srcs = {
         c[len(corpus) + 1:] + ".tsv": ":" + c
         for c in _CASES
@@ -52,9 +56,19 @@ _WRITE = read_config("komira_sql_corpus", "write", "false") == "true"
     visibility = ["//src/tests/..."],
 ) for corpus in _CORPORA]
 
-filegroup(
+# `:<corpus>` builds every case of a corpus, `:corpus` every case. A
+# filegroup is a source to the check set's roots (tools/build/ci), so the
+# aggregates are ci_aggregate targets: the pull request check builds
+# `:corpus` and with it each case.
+[ci_aggregate(
+    name = corpus,
+    deps = [":" + c for c in _CASES if c.split("/")[0] == corpus],
+    visibility = ["//src/tests/..."],
+) for corpus in _CORPORA]
+
+ci_aggregate(
     name = "corpus",
-    srcs = {corpus: ":" + corpus for corpus in _CORPORA},
+    deps = [":" + corpus for corpus in _CORPORA],
     visibility = ["//src/tests/..."],
 )
 
