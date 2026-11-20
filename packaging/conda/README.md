@@ -26,7 +26,7 @@ separate, gated step that belongs to the release (`release.yml`).
 | layer | what it is | where |
 |---|---|---|
 | 1. Mojo packages | `mojo_library`: built, and consumed by other libraries through `deps`. Unchanged by anything here | `src/*/BUCK` |
-| 2. packaging rules | `conda_package`: turns one library into a `.conda` directory (this page). The Python wheel: `wheel_package`, see below | `tools/build/package/conda.bzl`, `komira_pack` |
+| 2. packaging rules | `conda_package`: turns one library into a `.conda` directory (this page). A Python wheel rule is a design only, see below | `tools/build/package/conda.bzl`, `komira_pack` |
 | 3. the release | declares **which artifacts exist and how to build them**, builds them through the rules above, and publishes the BUILT files | `release/artifacts.textproto`: a reviewed list of artifacts |
 
 So there is **one list of published packages, and it is the release's artifacts**,
@@ -412,27 +412,27 @@ Two builds with the same name, version and build string but different bytes are
 a stop for the release tool; a new release is a new `N` (which gives a new build
 string).
 
-## Wheels: versioning
+## Wheels: versioning (design only; no code)
 
 A wheel is versioned the same way: **`<compiler version>.post<N>`**, the PEP 440
 post-release of the compiler version, with `N` the same number as the conda build
 number, and it depends on `mojo-compiler==<compiler version>` (PyPI has no build
 strings, so the post-release is what tells two releases of one compiler version
 apart). A compiler bump gives a new base version and every wheel is rebuilt.
-`wheel_package` writes it so ([tools/build/package/README.md](../../tools/build/package/README.md#the-python-wheel)).
+Nothing writes a wheel yet.
 
-## The Python wheel rule
+## A Python wheel rule (design only; no code)
 
 The conda rules do not cover the Python front end. The wheel is the
 distribution `komira`; like a conda package it carries `libkomira` and no
 file of the Modular Mojo runtime, and depends on Modular's `mojo-compiler`
 package for it (on PyPI rather than Modular's conda channel; see
 [docs/design/mojo_runtime_pypi_vs_conda.md](../../docs/design/mojo_runtime_pypi_vs_conda.md)).
-So the rule, `wheel_package` ([`wheel.bzl`](../../tools/build/package/wheel.bzl)):
+So the rule, when it is written:
 
 - **explicit, and off by default.** Unlike the conda package, a library does not
-  get a wheel unless it asks (a `wheel_package` target for the front end); there
-  are few wheels, and each is a reviewed decision.
+  get a wheel unless it asks (`wheel = True`, or a `python_wheel` target for the
+  front end); there are few wheels, and each is a reviewed decision.
 - **front end only.** The wheel is the Python package that drives komira, not a
   per-library artifact.
 - **same rules as the conda rule**: `[release]` is a directory holding the
@@ -440,9 +440,8 @@ So the rule, `wheel_package` ([`wheel.bzl`](../../tools/build/package/wheel.bzl)
   artifact (`artifact_type`, `name`, `version`, `file`, `sha256`, `metadata`,
   where `metadata` is the wheel's `METADATA`), gated on a stamp tied to git, built
   reproducibly, read back by an independent check.
-- **declared in the release's artifact list** like every other artifact, with that
-  target as its build rule; nothing in Buck lists it as published. Not declared
-  yet: the release set reads CONDA members only.
+- **declared in the release's artifact list** like every other artifact (a `PYTHON_WHEEL` artifact
+  whose build rule is that target); nothing in Buck lists it as published.
 - **licence metadata (PEP 639)**: the wheel's `METADATA` carries
 
   ```
@@ -470,8 +469,7 @@ So the rule, `wheel_package` ([`wheel.bzl`](../../tools/build/package/wheel.bzl)
 - libraries that link native code (refused by name rather than published
   incompletely);
 - the upload step;
-- the Python wheel for linux-aarch64 and osx-arm64, and its member in the
-  release (the release set reads CONDA members only);
+- the Python wheel rule (design above);
 - **a `.mojoc` that does not record the isolation directory** (follow-up):
   compile `precompile` from a private working directory with the sources staged
   at a fixed relative path (the wrapper must then absolutize every `-I` and the
