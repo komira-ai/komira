@@ -13,7 +13,7 @@ the script passed, so building the target is running the test.
 `python_oracle` runs one script twice, through `oracle_run.py`, and outputs
 the directory it wrote, which other targets take as test data; it fails
 unless both runs wrote the same tree. `python_proto` runs the pinned protoc
-to generate one `_pb2.py` module.
+to generate the `_pb2.py` modules of a set of `.proto` files.
 
 Every action runs `bin/python3.<minor>` (`bin/python3.<minor>t` for a
 free-threaded build) of the unpacked archive with `-I -S`:
@@ -405,29 +405,54 @@ _python_oracle = rule(
 # ---- python_proto ------------------------------------------------------------
 
 def _python_proto_impl(ctx):
-    src = ctx.attrs.src
-    if not src.basename.endswith(".proto"):
-        fail("{}: src {} is not a .proto file".format(ctx.label.raw_target(), src.basename))
-    stem = src.basename[:-len(".proto")]
+    where = ctx.label.raw_target()
+    prefix = ctx.attrs.import_prefix
+    if prefix:
+        for part in prefix.split("/"):
+            if part in ("", ".", ".."):
+                fail("{}: import_prefix {} holds an empty, `.` or `..` segment".format(where, repr(prefix)))
+    if not ctx.attrs.srcs:
+        fail("{}: srcs is empty".format(where))
+    staged = {}
+    outs = {}
+    for src in ctx.attrs.srcs:
+        if not src.basename.endswith(".proto"):
+            fail("{}: src {} is not a .proto file".format(where, src.basename))
+        path = prefix + "/" + src.basename if prefix else src.basename
+        if path in staged:
+            fail("{}: two srcs are named {}".format(where, src.basename))
+        staged[path] = src
+        module = src.basename[:-len(".proto")] + "_pb2"
+        outs[module] = ctx.actions.declare_output(path[:-len(".proto")] + "_pb2.py")
     protoc = ctx.attrs._protoc[DefaultInfo].default_outputs[0]
-    proto_path = ctx.actions.copied_dir(ctx.label.name + ".proto_path", {src.basename: src})
-    out = ctx.actions.declare_output(stem + "_pb2.py")
+    proto_path = ctx.actions.copied_dir(ctx.label.name + ".proto_path", staged)
+    modules = sorted(outs.keys())
+    # protoc writes `<import_prefix>/<stem>_pb2.py` under --python_out, so the
+    # root is the first module's directory, one level up per prefix segment.
+    depth = 1 + (len(prefix.split("/")) if prefix else 0)
     ctx.actions.run(
         cmd_args(
             cmd_args(protoc, format = "{}/bin/protoc"),
             cmd_args(proto_path, format = "--proto_path={}"),
-            cmd_args(out.as_output(), parent = 1, format = "--python_out={}"),
-            cmd_args(proto_path, format = "{}/" + src.basename),
+            cmd_args(outs[modules[0]].as_output(), parent = depth, format = "--python_out={}"),
+            [cmd_args(proto_path, format = "{}/" + p) for p in sorted(staged.keys())],
+            hidden = [outs[m].as_output() for m in modules[1:]],
         ),
         category = "python_proto",
     )
-    return [DefaultInfo(default_output = out)]
+    return [DefaultInfo(
+        default_outputs = [outs[m] for m in modules],
+        sub_targets = {m: [DefaultInfo(default_output = outs[m])] for m in modules},
+    )]
 
 _python_proto = rule(
     impl = _python_proto_impl,
-    doc = "The Python module (`<stem>_pb2.py`) the pinned protoc (`komira//tools/build/toolchains/proto:protoc`) generates for one `.proto` with no imports, for a `py_test`'s `srcs`.",
+    doc = "The Python modules the pinned protoc (`komira//tools/build/toolchains/proto:protoc`) generates for `srcs`, each `.proto` at `<import_prefix>/<name>.proto`, so the imports between them resolve: one `<import_prefix>/<stem>_pb2.py` per file, each the sub-target `[<stem>_pb2]`, for a `py_test`'s `srcs`.",
     attrs = {
-        "src": attrs.source(),
+        # The directory the files are imported from (`import "<import_prefix>/<name>.proto"`),
+        # and so the Python package the modules import each other as; empty: the top level.
+        "import_prefix": attrs.string(default = ""),
+        "srcs": attrs.list(attrs.source()),
         "_protoc": attrs.exec_dep(default = "komira//tools/build/toolchains/proto:protoc"),
     },
 )
