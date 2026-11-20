@@ -142,9 +142,8 @@ def test_a_cast_lower_in_the_plan_is_not_the_root() raises:
 
 
 def test_a_plan_with_no_column() raises:
-    var empty = LogicalPlan.scan(
-        "e.parquet", SOURCE_PARQUET, SchemaBuilder().build()
-    )
+    var none = SchemaBuilder()
+    var empty = LogicalPlan.scan("e.parquet", SOURCE_PARQUET, none.build())
     var plan = insert_cast_if_text_output(empty^, True)
     assert_equal(Int(plan.tag), Int(PLAN_CAST_TO_VARCHAR))
     assert_equal(plan.output_schema.num_columns(), 0)
