@@ -9,21 +9,27 @@ run: [`pyrun.py`](pyrun.py), the runner of every `py_test`, and
 [`third_party/python`](../../../third_party/python/README.md).
 
 The Python surface is the shared library's bindings and their tests, and
-the Python package `python/` ([design](../../../docs/design/python_package.md))
+the Python package [`python/`](../../../python/BUCK) and its tests
+([design](../../../docs/design/python_package.md))
 (`PYTHON_SURFACE` in [`tests/python_closure_allowlist.bzl`](../../../tests/python_closure_allowlist.bzl)).
 The package that tested the rules other than `python_binding_test` (the runner's verdicts, isolation, time zones, oracles
 built twice, the pins and licences) is already gone: apart from the
-analysis refusals of [Test 51](#test-51-python-oracles), no test holds what
+analysis refusals of [Test 51](#test-51-python-oracles) and
+[Test 51a](#test-51a-python-proto-refusals), no test holds what
 this page says the rules do, and no target outside
 [`tools/build/tests/negative/python_oracle`](../tests/negative/python_oracle/BUCK)
-uses `python_oracle` or `python_proto`.
+uses `python_oracle`. `python_proto` generates the Python package's plan
+modules, which [`python/tests`](../../../python/tests/BUCK) loads under each
+edge of the protobuf range the package declares.
 
 Python here is test-only: live oracles (pyarrow and DuckDB computing the
 answer a Mojo test compares against) and drivers of komira's Python-facing
 surfaces, the Python package's tests among them. Nothing built with these
 rules is shipped (the package's wheel, when there is one, is built by a rule
 of its own)
-([third_party/python](../../../third_party/python/README.md#never-shipped)).
+([third_party/python](../../../third_party/python/README.md#never-shipped)):
+the modules `python_proto` generates are the Python package's source, and
+nothing packages them yet.
 
 ## Rules
 
@@ -31,10 +37,11 @@ of its own)
 |---|---|
 | `python_dist(name, archive, version, freethreaded, native_libs, preload)` | a CPython `install_only` archive (python-build-standalone) unpacked into one directory by `python_act dist` (no shell), with the packages of its `site-packages` (pip) removed. Fails unless `bin/python<major>.<minor>` (`bin/python<major>.<minor>t` with `freethreaded = True`) runs and prints `version`, followed by `t` exactly when the interpreter is a free-threaded build (`Py_GIL_DISABLED`) (`python_dist: the interpreter in <archive> is <got>, the pin says <version>[t]`): a free-threaded archive pinned without `freethreaded`, or the reverse, fails. `native_libs` is a directory of shared libraries, `preload` the paths in it a `py_test` loads before its script. |
 | `python_wheel(name, distribution, version, wheel, python, deps)` | one wheel installed into a directory of its own by `wheel_install.py`, run with `python`: every member at its path, a `<name>-<version>.data/` directory's `purelib/` and `platlib/` merged in, its `scripts/`, `headers/` and `data/` left out. Fails unless the wheel holds exactly one `.dist-info` and that directory's name and its METADATA `Name` and `Version` are `distribution` and `version`. `deps` are the wheels it imports; a closure holding one distribution at two versions fails analysis. |
-| `py_test(name, src, srcs, deps, args, expect_error, python, tzdata)` | runs `src` with the interpreter as a build action; its output (`<name>.pass`) exists only if the script passed, so building the target is running the test. `srcs` are staged next to `src` and importable from it, `deps` are `python_wheel` targets (each with its deps), `args` the script's arguments (`$(location ...)` expands). With `expect_error`, the script passes only if it raises an exception whose last traceback line (`Type: message`) is exactly that string. `python` defaults to `komira//third_party/python:cpython`; `tzdata` (default `komira//third_party/python:tzdata`) is the wheel whose `tzdata/zoneinfo` directory is the action's time-zone database ([Time zones](#time-zones)), and is in the closure whether or not `deps` names it. |
-| `python_binding_test(name, src, srcs, libs, deps, args, expect_error, python, tzdata, runtime)` | a `py_test` that also loads shared libraries ([Binding tests](#binding-tests)). `libs` are `mojo_shared_lib` targets; the script gets `--lib-dir <dir>` as its first two arguments. |
+| `python_source_package(name, srcs)` | the files `srcs` of an import package of this repository (`python/komira`), staged at their paths from the package in one directory. A `py_test` or `python_binding_test` that lists it in `deps` gets that directory as a `--site`, as it does a wheel's, and imports the package by its name. Its distribution name is the target's name and its version `source`, so a wheel of the same distribution in one closure fails analysis. |
+| `py_test(name, src, srcs, deps, args, expect_error, python, tzdata)` | runs `src` with the interpreter as a build action; its output (`<name>.pass`) exists only if the script passed, so building the target is running the test. `srcs` are staged next to `src` and importable from it, `deps` are `python_wheel` or `python_source_package` targets (each with its deps), `args` the script's arguments (`$(location ...)` expands). With `expect_error`, the script passes only if it raises an exception whose last traceback line (`Type: message`) is exactly that string. `python` defaults to `komira//third_party/python:cpython`; `tzdata` (default `komira//third_party/python:tzdata`) is the wheel whose `tzdata/zoneinfo` directory is the action's time-zone database ([Time zones](#time-zones)), and is in the closure whether or not `deps` names it. |
+| `python_binding_test(name, src, srcs, libs, data, deps, args, expect_error, python, tzdata, runtime)` | a `py_test` that also loads shared libraries ([Binding tests](#binding-tests)). `libs` are `mojo_shared_lib` targets and `data` is `{dest: source}` staged beside them; the script gets `--lib-dir <dir> --runtime-dir <dir>` as its first four arguments. |
 | `python_oracle(name, src, srcs, data, deps, args, outs, python, tzdata)` | runs `src` twice ([Oracles](#oracles)) and outputs the directory the first run wrote (`<name>/`), only if both runs wrote the same tree. Other targets take it as test data: the directory as `:<name>`, each `outs` path as the sub-target `:<name>[<path>]` (a Mojo library's `test_data`, a `py_test`'s `args` through `$(location ...)`). `data` is `{dest: source}` (or sources, each staged at its path from the cell root), staged in the data directory; `srcs` are staged next to `src`; `deps` are `python_wheel` targets; `args` are plain strings. Analysis fails if `src`, a `srcs` entry, a `data` source, a wheel of `deps` or the `python` dist was built by a target not under `third_party/`. `tzdata` is as in `py_test` (in the closure, so its wheel is checked too). |
-| `python_proto(name, src)` | the module `<stem>_pb2.py` that the pinned protoc (`komira//tools/build/toolchains/proto:protoc`, 29.1) generates for one `.proto` with no imports, for a `py_test`'s `srcs` (staged next to its script, so `import <stem>_pb2`). protoc 29.1 writes Python gencode 5.29.1, which the pinned protobuf runtime loads. |
+| `python_proto(name, srcs, import_prefix)` | the modules that the pinned protoc (`komira//tools/build/toolchains/proto:protoc`, 29.1) generates for `srcs`, a set of `.proto` files each staged at `<import_prefix>/<name>.proto`, so an `import "<import_prefix>/<other>.proto"` between them resolves (a file importing one outside `srcs` fails): one `<import_prefix>/<stem>_pb2.py` per file, the sub-target `[<stem>_pb2]`, for a `py_test`'s `srcs` (staged at that path next to its script, so `import <import_prefix as a package>.<stem>_pb2`; the generated modules import each other the same way). Two `srcs` with one file name, a file not named `.proto`, an empty `srcs` and an `import_prefix` with an empty, `.` or `..` segment fail analysis ([Test 51a](#test-51a-python-proto-refusals)). protoc 29.1 writes Python gencode 5.29.1, which a protobuf runtime of 5.29.1 or later loads and an older one refuses. |
 
 The macros set `exec_compatible_with` to the linux x86_64 execution
 platform: every action runs the linux interpreter.
@@ -47,19 +54,30 @@ exists only if the script passed.
 
 - Each `libs` target (a `mojo_shared_lib`, so already gated by its exports
   check and drivers) is copied by file name into one directory of the
-  action. The script is run with `--lib-dir <that directory>` before its
-  own `args` (a flag, not an environment variable) and loads a library by
+  action. The script is run with `--lib-dir <that directory>` and
+  `--runtime-dir <the mojo_runtime directory>` before its own `args` (flags,
+  not environment variables) and loads a library by
   path: `ctypes.CDLL(os.path.join(libdir, "<out_name>.so"))`. Two libs with
   one file name fail analysis.
+- `data` (`{dest: source}`, a build output allowed) is staged in the same
+  directory at `dest`: a library's runnable directory
+  (`"libkomira": "komira//src/so:libkomira[runnable]"`, the library with its
+  `lib/` beside it) or a stand-in library under a directory of its own
+  (`"fake_v2/libkomira.so": ":fake_v2"`). A `dest` whose first part is the
+  name of a lib fails analysis, as two libs of one name do.
 - `LD_LIBRARY_PATH` is that directory, then the toolchain's `mojo_runtime`
   directory (`libKGENCompilerRTShared.so` and the other libraries a Mojo
   library is linked against), and nothing else. The C++ runtime and zlib
   are already loaded by path (`--preload`) before the script runs. The
   worker supplies none of these.
-- `deps` are `python_wheel` targets, as for `py_test`; `komira//third_party/python:pyarrow`
-  is the Arrow binding's.
+- `deps` are `python_wheel` or `python_source_package` targets, as for
+  `py_test`; `komira//third_party/python:pyarrow` is the Arrow binding's.
 - `expect_error` is as for `py_test`: the script passes only if it raises
   that exact last traceback line.
+
+The tests of the Python package ([`python/tests`](../../../python/README.md#working-on-the-package))
+take `libkomira[runnable]` and C stand-ins of it as `data`, and the package
+itself as a `python_source_package` in `deps`.
 
 [`examples/python_binding`](../examples/python_binding/BUCK) is the hello test:
 `hello` imports pyarrow, builds a table, and loads `examples/shared_lib:plain`
@@ -182,6 +200,19 @@ unpacked outside it. No test builds an oracle that works.
 
 ```sh
 ./buck2 test //tools/build/selftest:analysis_refusals_python_oracle
+```
+
+### Test 51a: Python proto refusals
+
+The self-test scenario
+[`analysis_refusals_python_proto`](../selftest/analysis_refusals_python_proto.zig)
+checks that each target of
+[`negative/python_proto`](../tests/negative/python_proto/BUCK) is refused at
+analysis with its message: an empty `srcs`, a file not named `.proto`, two
+files with one name, and an `import_prefix` holding a `..` or an empty segment.
+
+```sh
+./buck2 test //tools/build/selftest:analysis_refusals_python_proto
 ```
 
 ## Host floor

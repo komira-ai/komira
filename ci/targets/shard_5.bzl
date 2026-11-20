@@ -87,6 +87,7 @@ TARGETS = [
     "komira//tools/build/selftest:analysis_refusals_platform_table",
     "komira//tools/build/selftest:analysis_refusals_proto",
     "komira//tools/build/selftest:analysis_refusals_python_oracle",
+    "komira//tools/build/selftest:analysis_refusals_python_proto",
     "komira//tools/build/selftest:analysis_refusals_readme",
     "komira//tools/build/selftest:analysis_refusals_rust",
     "komira//tools/build/selftest:analysis_refusals_zig_rules",
