@@ -17,11 +17,12 @@
 //!                   interpreter, or a GitHub workflow or action with a
 //!                   `run:` line that runs one or a `setup-python` step.
 //!
-//! The allowlist is the graph_check's two lists. `surface` holds package
-//! paths (`src/<pkg>`): a finding of a target or path inside one is
-//! allowed. `ceiling` holds findings exactly as this checker spells them;
-//! each must still be found, so the list only shrinks: removing a violator
-//! without its entry fails the check, as adding one without an entry does.
+//! The allowlist is the graph_check's two lists. `surface` holds paths of
+//! the cell (`python`, `tools/build/examples/python_binding`): a finding of
+//! a target or path inside one is allowed. `ceiling` holds findings exactly
+//! as this checker spells them; each must still be found, so the list only
+//! shrinks: removing a violator without its entry fails the check, as adding
+//! one without an entry does.
 //!
 //! The facts (checks.bxl) are tab-separated lines:
 //!
@@ -395,6 +396,30 @@ test "a surface package allows its own targets, not a library outside it that de
     try t.expect(holds(o, "target komira//src/b:b: its closure holds komira//src/komira_py:komira_py: it is a Python rule (py_test)"));
     // The surface is a path of the check's cell: another cell's package of the same path is not in it.
     try t.expect(holds(o, "target tests//src/komira_py:x:"));
+}
+
+test "the surface entry python allows python/ and nothing whose path only starts with python" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const facts =
+        "node\tkomira//python/tests:session (cfg)\tkomira//python/tests:session\tkomira//tools/build/python/defs.bzl:_python_binding_test\n" ++
+        "node\tkomira//python:komira (cfg)\tkomira//python:komira\tprelude//rules.bzl:filegroup\n" ++
+        "node\tkomira//third_party/python:cpython (exec)\tkomira//third_party/python:cpython\tkomira//tools/build/mojo/download.bzl:pinned_file\n" ++
+        "node\tkomira//pythonic:gen (cfg)\tkomira//pythonic:gen\tprelude//rules.bzl:genrule\n" ++
+        "dep\tkomira//python/tests:session (cfg)\tkomira//python:komira (cfg)\n" ++
+        "dep\tkomira//python/tests:session (cfg)\tkomira//third_party/python:cpython (exec)\n" ++
+        "src\tkomira//python:komira (cfg)\tpython/komira/__init__.py\n" ++
+        "src\tkomira//pythonic:gen (cfg)\tpythonic/gen.py\n" ++
+        "file\tpython/komira/__init__.py\nfile\tpython/tests/test_session.py\nfile\tpythonic/gen.py\nfile\tsrc/python/x.py\n" ++
+        "surface\tpython\n";
+    const o = try run(arena.allocator(), facts, &.{});
+    // Allowed: the two python/ targets and the two python/ files.
+    try t.expectEqual(@as(usize, 4), o.allowed);
+    try t.expectEqual(@as(usize, 4), o.refused.len);
+    try t.expect(holds(o, "target komira//third_party/python:cpython: it is under third_party/python/"));
+    try t.expect(holds(o, "target komira//pythonic:gen: it has the Python source pythonic/gen.py"));
+    try t.expect(holds(o, "file pythonic/gen.py: a Python file"));
+    try t.expect(holds(o, "file src/python/x.py: a Python file"));
 }
 
 test "a stray .py file is refused; .pyx, .py.txt and a directory named .py are not Python files" {
