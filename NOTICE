@@ -64,7 +64,7 @@ libMSupportGlobals; .so on Linux, .dylib on macOS). These libraries are
 Modular's, are not part of this repository, and are not covered by its
 Apache License grant.
 
-The Python package `komira-ai` and komira's conda packages are built to carry
+The Python package `komira` and komira's conda packages are built to carry
 none of these libraries and no other file of Modular's. Each declares a
 dependency on Modular's own `mojo-compiler` package at the compiler version
 the libraries were built with, and the user's package installer fetches that

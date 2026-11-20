@@ -424,7 +424,7 @@ Nothing writes a wheel yet.
 ## A Python wheel rule (design only; no code)
 
 The conda rules do not cover the Python front end. The wheel is the
-distribution `komira-ai`; like a conda package it carries `libkomira` and no
+distribution `komira`; like a conda package it carries `libkomira` and no
 file of the Modular Mojo runtime, and depends on Modular's `mojo-compiler`
 package for it (on PyPI rather than Modular's conda channel; see
 [docs/design/mojo_runtime_pypi_vs_conda.md](../../docs/design/mojo_runtime_pypi_vs_conda.md)).
@@ -452,7 +452,7 @@ So the rule, when it is written:
   ```
 
   and the two files are the repository root's `LICENSE` and `NOTICE`, byte for
-  byte, at `komira_ai-<version>.dist-info/licenses/LICENSE` and
+  byte, at `komira-<version>.dist-info/licenses/LICENSE` and
   `.../licenses/NOTICE`. There is no `License ::` classifier (PEP 639
   deprecates it beside an expression). `NOTICE`'s last section is what tells a
   user that the Mojo runtime comes from `mojo-compiler` under Modular's
