@@ -189,6 +189,52 @@ Like every Mojo library, `libkomira` has `DT_NEEDED libKGENCompilerRTShared.so`
 and finds the Mojo runtime in `lib/` beside it
 (see "C-ABI shared libraries" in `tools/build/mojo/README.md`).
 
+## What the library links and weighs
+
+Read with `readelf` (`-d`, `--dyn-syms`, `-V`) from the farm-built
+`komira//src/so:libkomira` and from each owner's `.so.1` build output (linux-x86_64;
+`./buck2 build` of it and of `komira//tools/build/package/libkomira:libkomira_install`
+both green, every command cached or remote, `local: 0`). This is the library as
+it is while `so` depends on `sdk` and not on `sdk_exec`. The sizes, the
+undefined-symbol count and the `GLIBC_` floor are a record, not a gate; the gates
+above and `libkomira_install` hold the exports, the owner SONAMEs, a version of
+at least 1000 and that every library is mapped from the prefix.
+
+| property | value |
+|---|---|
+| file size | 3,524,608 bytes |
+| `DT_SONAME` | `libkomira.so` |
+| `DT_RUNPATH` (no `DT_RPATH`) | `$ORIGIN/lib:$ORIGIN` |
+| defined dynamic symbols | the nine exports of `abi/komira.tsv`, all `FUNC GLOBAL`, and nothing else |
+| undefined dynamic symbols (`--dyn-syms`, `UND` rows, version suffix dropped) | 34: five `KGEN_CompilerRT_*` (the Mojo runtime), eight `komira_*` (the C owners), and glibc and libdl calls |
+| highest glibc symbol version | `GLIBC_2.34` (`dlopen`, `dlsym`, `dlerror`), the platform table's `glibc-2.34` floor |
+
+`DT_NEEDED`, in order:
+
+| library | provided by | size (bytes) | itself NEEDED |
+|---|---|---|---|
+| `libKGENCompilerRTShared.so` | the Mojo runtime; never shipped with libkomira | n/a | |
+| `libkomira_async_rt_native.so.1` | `//src/async_rt` | 43,992 | `libpthread.so.0`, `libc.so.6`, `ld-linux-x86-64.so.2` |
+| `libkomira_async_api_native.so.1` | `//src/async_api` | 2,760 | none |
+| `libkomira_compression_native.so.1` | `//src/compression` | 244,856 | `libpthread.so.0`, `libc.so.6` |
+| `libkomira_fs_native.so.1` | `//src/fs` | 9,344 | `libpthread.so.0`, `libc.so.6` |
+| `libkomira_libc_native.so.1` | `//src/libc` | 11,080 | `libpthread.so.0`, `libc.so.6` |
+| `libkomira_metrics_native.so.1` | `//src/metrics` | 2,600 | none |
+| `libkomira_parquet_codec_native.so.1` | `//src/parquet_codec` | 173,736 | `libc.so.6` |
+| `libkomira_scan_source_native.so.1` | `//src/scan_source` | 2,488 | none |
+| `libpthread.so.0`, `libc.so.6` | the host's glibc | n/a | |
+
+All eight native owners are needed: each is a `DT_NEEDED` of libkomira, and
+none is embedded. Together they weigh 490,856 bytes. The `libkomira_install`
+check loads libkomira from an empty prefix with `RTLD_NOW` and the probe
+measured `komira_abi_version` 1001; the libraries the loader mapped there, all from the
+prefix's `lib/`, are the eight owners, `libKGENCompilerRTShared.so`, and the
+runtime's own dependencies of it (`libAsyncRTRuntimeGlobals.so`,
+`libMSupportGlobals.so`, `libgcc_s.so.1`, `libstdc++.so.6`). So a package that
+carries libkomira and the eight owners needs the Mojo runtime's `lib/`
+beside it (or on the loader's path) and a host glibc of at least 2.34; it needs
+nothing else from the host.
+
 ## The header and the golden
 
 `abi/komira.tsv` is the golden of the ABI: the version (1.1), one row per export
