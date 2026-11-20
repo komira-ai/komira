@@ -140,10 +140,14 @@ test "paths RECORD could not carry unquoted, or that leave the wheel, are refuse
     const a = arena.allocator();
     var d = project.Diag{};
     try wheel.checkPath(a, &d, "komira/_lib/lib/libx.so.1");
-    for ([_][]const u8{ "", "/abs", "a,b", "a\"b", "a\\b", "a\nb", "a//b", "a/./b", "../a", "a/" }) |p| {
+    for ([_][]const u8{ "", "/abs", "a,b", "a\"b", "a\\b", "a\nb", "a//b", "a/./b", "../a", "a/", "caf\xc3\xa9.py", "a\tb" }) |p| {
         try t.expectError(error.Refused, wheel.checkPath(a, &d, p));
     }
+    try t.expectEqualStrings("`a\tb` holds a byte outside printable ASCII", d.msg);
+    try t.expectError(error.Refused, wheel.checkPath(a, &d, "a/"));
     try t.expectEqualStrings("`a/` has an empty, `.` or `..` part", d.msg);
+    try t.expectError(error.Refused, wheel.checkPath(a, &d, "caf\xc3\xa9.py"));
+    try t.expectEqualStrings("`caf\xc3\xa9.py` holds a byte outside printable ASCII", d.msg);
 }
 
 fn refusal(a: std.mem.Allocator, in: wheel.Input) ![]const u8 {

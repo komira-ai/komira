@@ -1,5 +1,6 @@
 load("@komira//tools/build/package:conda.bzl", "MOJO_COMPILER_VERSION", "TEST_STAMP")
 load("@komira//tools/build/package:wheel.bzl", "wheel_package_test_stamped")
+load("@komira//tools/build/platforms:table.bzl", "row")
 load("@komira//tools/build/python:defs.bzl", "py_test")
 
 # The wheel of the fixture package (fixture/): the layout of komira, with
@@ -38,7 +39,7 @@ _ARGS = [
     # glibc floor (2.34) on x86-64.
     "--tag",
     "py3-none-manylinux_2_34_x86_64",
-]
+] + [a for lib in row("linux-x86_64")["runtime_libs"] for a in ["--runtime-lib", lib]]
 
 # The release directory and the twin read with the standard library: tag,
 # version, manifest, RECORD hashes and sizes, Requires-Dist, licence members,

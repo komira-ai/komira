@@ -163,11 +163,15 @@ pub fn renderRecord(alloc: Alloc, members: []const zip.Member, record_path: []co
     return out.toOwnedSlice(alloc);
 }
 
-/// A member path the wheel can carry: relative, `/`-separated, no empty, `.`
-/// or `..` part, and nothing RECORD's CSV would have to quote.
+/// A member path the wheel can carry: relative, `/`-separated, printable
+/// ASCII, no empty, `.` or `..` part, and nothing RECORD's CSV would have to
+/// quote.
 pub fn checkPath(alloc: Alloc, d: *Diag, path: []const u8) Refused!void {
     if (path.len == 0 or path[0] == '/') return refuse(d, alloc, "`{s}` is not a relative path", .{path});
     if (std.mem.indexOfAny(u8, path, ",\"\r\n\\") != null) return refuse(d, alloc, "`{s}` holds a comma, a quote, a backslash or a line break", .{path});
+    // The zip names no encoding (no UTF-8 flag), so only ASCII reads back the
+    // same in every installer.
+    for (path) |c| if (c >= 0x80 or c < 0x20) return refuse(d, alloc, "`{s}` holds a byte outside printable ASCII", .{path});
     var parts = std.mem.splitScalar(u8, path, '/');
     while (parts.next()) |p| {
         if (p.len == 0 or std.mem.eql(u8, p, ".") or std.mem.eql(u8, p, ".."))

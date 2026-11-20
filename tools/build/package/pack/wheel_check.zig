@@ -13,7 +13,9 @@
 //!   * METADATA is the one the pyproject, version and runtime requirements
 //!     give, and the METADATA beside the manifest is the same bytes;
 //!   * each licence file is at `.dist-info/licenses/<name>`, byte-equal to the
-//!     file given, and no other licence member is there;
+//!     file given, and no other licence member is there; the dist-info holds
+//!     nothing but METADATA, WHEEL, RECORD and the licences, and no member is
+//!     outside it and the import package;
 //!   * `<import>/__init__.py`, `<import>/py.typed` and the native library are
 //!     there, the library executable, and no member is one of the runtime
 //!     libraries the wheel must not carry;
@@ -157,6 +159,21 @@ pub fn checkMembers(alloc: Alloc, d: *Diag, e: Expect, ver: []const u8, members:
         var known = false;
         for (e.licenses) |l| known = known or std.mem.eql(u8, m.name[lic_prefix.len..], l.path);
         if (!known) return refuse(d, alloc, "the wheel carries the licence member {s}, which no licence file given is", .{m.name});
+    }
+
+    // The dist-info holds METADATA, WHEEL, RECORD and the licences, and
+    // nothing else (no entry points, no stray file the rule did not write).
+    const info_prefix = try std.fmt.allocPrint(alloc, "{s}/", .{info});
+    for (members) |m| {
+        if (!std.mem.startsWith(u8, m.name, info_prefix) or std.mem.startsWith(u8, m.name, lic_prefix)) continue;
+        const rest = m.name[info_prefix.len..];
+        if (!std.mem.eql(u8, rest, "METADATA") and !std.mem.eql(u8, rest, "WHEEL") and !std.mem.eql(u8, rest, "RECORD"))
+            return refuse(d, alloc, "the wheel carries {s}, which the wheel rule does not write", .{m.name});
+    }
+    const pkg_prefix = try std.fmt.allocPrint(alloc, "{s}/", .{e.import_name});
+    for (members) |m| {
+        if (!std.mem.startsWith(u8, m.name, info_prefix) and !std.mem.startsWith(u8, m.name, pkg_prefix))
+            return refuse(d, alloc, "the wheel carries {s}, outside {s} and {s}", .{ m.name, pkg_prefix, info_prefix });
     }
 
     const init = try std.fmt.allocPrint(alloc, "{s}/__init__.py", .{e.import_name});

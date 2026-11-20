@@ -53,6 +53,7 @@ fn rd32(b: []const u8, at: usize) u32 {
 /// The zip of `members`, in their order. A member or archive of 4 GiB or more
 /// (zip64) is refused, as is a mode other than 0644 and 0755.
 pub fn write(alloc: Alloc, d: *Diag, members: []const Member) Refused![]u8 {
+    if (members.len > 0xffff) return refuse(d, alloc, "{d} members: a wheel of more than 65535 needs zip64, which this tool does not write", .{members.len});
     var out = std.ArrayList(u8).empty;
     const offsets = try alloc.alloc(u32, members.len);
     const methods = try alloc.alloc(u16, members.len);

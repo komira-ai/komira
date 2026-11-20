@@ -86,12 +86,16 @@ zig_exe(
 #   wheel_check_unit    the read-back check: the builder's directory passes,
 #                       and each defect (files, manifest, RECORD, tag,
 #                       METADATA, licences, layout, a runtime library, the
-#                       stamp, a twin of other bytes) is refused by name.
+#                       stamp, a twin of other bytes) is refused by name;
+#   wheel_fs_unit       what the command reads: a directory's files and modes
+#                       (a symbolic link refused), an output directory's one
+#                       wheel, and the flag values held against the pyproject.
 _WHEEL_IMPORTS = [
     "pack/common.zig",
     "pack/deflate.zig",
     "pack/wheel.zig",
     "pack/wheel_check.zig",
+    "pack/wheel_fs.zig",
     "pack/wheel_project.zig",
     "pack/wheel_testing.zig",
     "pack/wheel_zip.zig",
@@ -106,7 +110,7 @@ _WHEEL_IMPORTS = [
         busybox = "komira//tools/build/toolchains:busybox",
         zig = "komira//tools/build/toolchains:zig_next",
     )
-    for scenario in ["project", "zip", "build", "check"]
+    for scenario in ["project", "zip", "build", "check", "fs"]
 ]
 
 zig_exe(
@@ -116,6 +120,7 @@ zig_exe(
     unit_tests = [
         ":wheel_build_unit",
         ":wheel_check_unit",
+        ":wheel_fs_unit",
         ":wheel_project_unit",
         ":wheel_zip_unit",
         "komira//tools/build/toolchains:zig_next_version",
@@ -125,6 +130,7 @@ zig_exe(
         "pack/deflate.zig",
         "pack/wheel.zig",
         "pack/wheel_check.zig",
+        "pack/wheel_fs.zig",
         "pack/wheel_project.zig",
         "pack/wheel_zip.zig",
     ],

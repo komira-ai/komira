@@ -380,7 +380,8 @@ The pyproject is read with a TOML subset (basic strings, arrays of them, inline
 tables of them, three tables); any other key, table or form is refused with its
 line, so the file never says something the wheel does not carry. The bytes are
 reproducible: members sorted bytewise (RECORD last), every date 1980-01-01,
-mode 0755 for the native libraries and 0644 otherwise, each member deflated by
+mode 0755 for every file of the native directory and for a package file with
+an exec bit, 0644 otherwise, each member deflated by
 the packer's own deflate when that is smaller. A second action builds the same
 wheel from the same inputs staged at other paths (`[twin]`), and the check
 refuses the wheel unless the two are the same bytes.
@@ -391,7 +392,10 @@ byte, `py.typed`, the library executable, no Mojo runtime library, the twin);
 `[release]` (with `[release][whl]`, `[release][manifest]`,
 `[release][metadata]`), a copy made only after `[release_check]` passed, the same
 check with a positive stamp and a source commit required. An uploader reads
-`[release]` and nothing else. `wheel_package_test_stamped` gives conda.bzl's test
+`[release]` and nothing else.
+
+The check also refuses a member outside the import package and the dist-info,
+and a dist-info member other than METADATA, WHEEL, RECORD and the licences. `wheel_package_test_stamped` gives conda.bzl's test
 stamp instead of the configuration's.
 
 The tests: the Zig scenarios `:wheel_project_unit`, `:wheel_zip_unit`,

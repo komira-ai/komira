@@ -2,9 +2,10 @@
 //! defect of the module doc of wheel_check.zig is refused by name: an extra
 //! or missing file, a manifest of other bytes, a RECORD hash, size, row or
 //! member that disagrees, another tag, other METADATA, a missing or changed
-//! licence, a missing py.typed or library, a library not executable, a Mojo
-//! runtime library carried, an unstamped or commit-less release, and a twin
-//! of other bytes.
+//! licence, a stray dist-info member or a member outside the package, a
+//! missing py.typed or library, a library not executable, a Mojo runtime
+//! library carried, an unstamped or commit-less release, and a twin of other
+//! bytes.
 
 const std = @import("std");
 const project = @import("wheel_project.zig");
@@ -242,6 +243,12 @@ test "the package's files and library must be there, the library executable, and
     const i = index(good, "/libkomira.so");
     const runtime = try std.mem.concat(a, zip.Member, &.{ good[0..i], &.{.{ .name = "komira/_lib/lib/libKGENCompilerRTShared.so", .data = "runtime", .mode = 0o755 }}, good[i..] });
     try t.expectEqualStrings("the wheel carries `komira/_lib/lib/libKGENCompilerRTShared.so`, a library of the Mojo runtime, which comes from its own package and never from this wheel", try refusal(a, e, try dirOf(a, runtime, false), null));
+
+    const stray = try std.mem.concat(a, zip.Member, &.{ good[0..i], &.{.{ .name = "komira-1.0.0.post57.dist-info/entry_points.txt", .data = "" }}, good[i..] });
+    try t.expectEqualStrings("the wheel carries komira-1.0.0.post57.dist-info/entry_points.txt, which the wheel rule does not write", try refusal(a, e, try dirOf(a, stray, false), null));
+
+    const outside = try std.mem.concat(a, zip.Member, &.{ &.{.{ .name = "other/__init__.py", .data = "" }}, good });
+    try t.expectEqualStrings("the wheel carries other/__init__.py, outside komira/ and komira-1.0.0.post57.dist-info/", try refusal(a, e, try dirOf(a, outside, false), null));
 
     const twice = try std.mem.concat(a, zip.Member, &.{ good[0..1], good });
     try t.expectEqualStrings("`komira/__init__.py` is in the wheel twice", try refusal(a, e, try dirOf(a, twice, false), null));

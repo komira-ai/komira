@@ -28,12 +28,12 @@ import os
 import sys
 import zipfile
 
-RUNTIME_LIBS = {
+# Always refused, whatever the platform table lists: the Mojo runtime's three
+# libraries. The table's `runtime_libs` are passed as --runtime-lib as well.
+MOJO_RUNTIME = {
     "libAsyncRTRuntimeGlobals.so",
     "libKGENCompilerRTShared.so",
     "libMSupportGlobals.so",
-    "libgcc_s.so.1",
-    "libstdc++.so.6",
 }
 
 
@@ -135,7 +135,8 @@ def main(argv: list[str]) -> None:
     assert modes.get("komira/_lib/libkomira.so") == 0o755, f"komira/_lib/libkomira.so mode {modes.get('komira/_lib/libkomira.so')}"
     owners = [n for n in names if n.startswith("komira/_lib/lib/libkomira_") and n.endswith("_native.so.1")]
     assert owners, "the wheel carries no native owner beside libkomira"
-    carried = [n for n in names if n.rsplit("/", 1)[-1] in RUNTIME_LIBS]
+    runtime = MOJO_RUNTIME | {argv[i + 1] for i, a in enumerate(argv) if a == "--runtime-lib"}
+    carried = [n for n in names if n.rsplit("/", 1)[-1] in runtime]
     assert not carried, f"the wheel carries runtime libraries {carried}"
 
 

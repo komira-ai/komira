@@ -294,8 +294,7 @@ fn wantString(d: *Diag, alloc: Alloc, pr: Pair) Refused![]const u8 {
 fn wantStrings(d: *Diag, alloc: Alloc, pr: Pair) Refused![]const []const u8 {
     return switch (pr.value) {
         .strings => |s| s,
-        .tables => |tb| if (tb.len == 0) @as([]const []const u8, &.{}) else refuse(d, alloc, "pyproject line {d}: `{s}` must be an array of strings", .{ pr.line, pr.key }),
-        .string => refuse(d, alloc, "pyproject line {d}: `{s}` must be an array of strings", .{ pr.line, pr.key }),
+        .tables, .string => refuse(d, alloc, "pyproject line {d}: `{s}` must be an array of strings", .{ pr.line, pr.key }),
     };
 }
 

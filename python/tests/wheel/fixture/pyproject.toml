@@ -1,5 +1,6 @@
 # The wheel rule's fixture: the [project] table of the package's design
-# (docs/design/python_package.md, decision 7), the one source of METADATA.
+# (docs/design/python_package.md, decision 7), the one source of METADATA,
+# without the macOS classifier: only a linux-x86_64 wheel is built.
 [project]
 name = "komira"
 dynamic = ["version"]   # stamped by the wheel rule
@@ -14,7 +15,6 @@ classifiers = [
   "Development Status :: 3 - Alpha",
   "Intended Audience :: Developers",
   "Intended Audience :: Science/Research",
-  "Operating System :: MacOS",
   "Operating System :: POSIX :: Linux",
   "Programming Language :: Python :: 3 :: Only",
   "Programming Language :: Python :: 3.13",

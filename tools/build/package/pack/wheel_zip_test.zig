@@ -67,6 +67,17 @@ test "a mode other than 0644 and 0755 is refused when writing" {
     try t.expectEqualStrings("x: mode 600 is neither 0644 nor 0755", d.msg);
 }
 
+test "more members than a zip32 directory counts is refused when writing" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const many = try a.alloc(zip.Member, 0x10000);
+    for (many) |*m| m.* = .{ .name = "x", .data = "" };
+    var d = project.Diag{};
+    try t.expectError(error.Refused, zip.write(a, &d, many));
+    try t.expectEqualStrings("65536 members: a wheel of more than 65535 needs zip64, which this tool does not write", d.msg);
+}
+
 fn readRefusal(a: std.mem.Allocator, z: []const u8) ![]const u8 {
     var d = project.Diag{};
     try t.expectError(error.Refused, zip.read(a, &d, z));

@@ -325,7 +325,7 @@ checks the annotations; the wheel rule's read-back check holds that `py.typed` i
 | question | where |
 |---|---|
 | the SQL and plan doors of the C ABI, the Arrow C stream export, session options, status codes, abort containment | the ABI design for running a query (`src/so`) |
-| wheel tags, the supported CPython range, `Requires-Dist` ranges, RUNPATH, sdist, release member, PyPI stages | the wheel and release design |
+| wheel tags, the supported CPython range, `Requires-Dist` ranges, RUNPATH, sdist, release member, PyPI stages | the wheel and release design; until it lands, the wheel rule writes `py3-none-manylinux_<glibc floor>_x86_64` and `mojo-compiler==<compiler version>` ([tools/build/package/README.md](../../tools/build/package/README.md#the-python-wheel)) |
 | where the Mojo runtime comes from | the runtime route decision |
 | the verbs of the two DataFrame surfaces, the refusal policy for verbs | the DataFrame surface design |
 | Python UDFs in worker processes | [udf_runtime_interface.md](udf_runtime_interface.md) and its Python design |
