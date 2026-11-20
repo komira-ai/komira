@@ -16,7 +16,11 @@ pull requests needs the same answers first:
 - what a skin does with a pandas or polars name it does not support;
 - where pandas and polars answer differently from the plan, which answer each skin gives.
 
-This document answers them. The [Python package design](python_package.md) fixes the rest, and this document uses its names: the package
+This document answers them by porting the earlier, never-published SDK's DataFrame surface design and
+mapping it to the matrix rows. Where the port keeps that design's answer, this document states it once.
+Every point where the port differs from the earlier SDK is listed, with its reason, in
+[section 12](#12-rulings-that-differ-from-the-earlier-sdk). The [Python package design](python_package.md) fixes
+the rest, and this document uses its names: the package
 layout; the two skins and their modules; `Session` and `Result`; and `KomiraError`,
 `UnsupportedOperation` and their fields.
 
@@ -299,7 +303,10 @@ Where a library's answer can be built from plan nodes, the skin builds it. Where
 either refuses the call or gives the plan's answer. The second case is a **departure**, listed in the
 ruling. Section 7's departures belong to this list as well.
 
-1. **There is no index.**
+Each ruling is marked **carried** (the earlier SDK's answer) or **differs** (a ruling of section 12, by
+its number).
+
+1. **There is no index.** Carried, except the integer subscript (D9) and `value_counts` (D16).
    - `loc`, `iloc`, `at`, `iat`, `index`, `set_index`, `reset_index`, `sort_index`, `reindex`, and
      pandas' index `join` are refused (use `merge`).
    - A slice subscript `df[0:5]` raises `UnsupportedOperation`.
@@ -317,23 +324,23 @@ ruling. Section 7's departures belong to this list as well.
        `Series` named `count` indexed by value.
      - `s.sum()` and the other `Series` reductions are lazy aggregates (section 2), where pandas gives
        a number.
-2. **pandas sorts its groups; polars does not.**
+2. **pandas sorts its groups; polars does not.** Carried; the NULL placement of the sort differs (D4).
    - pandas `groupby(sort=True)`, the default, puts a sort on the group keys above the aggregate, with
      missing keys last.
    - `groupby(sort=False)` and polars `group_by` add no sort.
    - [komira_pandas_door_e2e](../../src/tests/e2e/komira_pandas_door_e2e/) pins this sort-above-
      aggregate structure, over a key with no NULLs. Its fixtures write `nulls_first: true`. The skin
      writes `nulls_first: false` (ruling 5), and the bytes test pins that.
-3. **pandas drops missing group keys by default.** `groupby(dropna=True)`, the default, filters out the
+3. **pandas drops missing group keys by default.** Differs (D5). `groupby(dropna=True)`, the default, filters out the
    rows whose key is missing, below the aggregate. `dropna=False`, and polars, keep the NULL group. The
    earlier SDK returned the NULL group under pandas' default, which was a silent difference.
-4. **Per-column group reductions need a type that reduction is defined for.**
+4. **Per-column group reductions need a type that reduction is defined for.** Differs (D6).
    - `groupby().sum()`, `mean()`, `median()`, `std()` and `var()`, and the polars `group_by().sum()` and
      its siblings, reduce every non-key column. They need every one of those columns to be numeric or
      boolean. Otherwise they raise `UnsupportedOperation`, naming the first column that is not. pandas
      would concatenate strings for `sum`, or raise for `mean`.
    - `count()`, `size()`, `min()`, `max()` and `nunique()` take every type.
-5. **NULL placement in a sort is always written down.**
+5. **NULL placement in a sort is always written down.** Differs (D4).
    - Each sort key carries an explicit `nulls_first` ([query_semantics.md](query_semantics.md) §4.2),
      set to the library's default. pandas puts missing values last in both directions
      (`na_position="last"`). polars puts nulls first in both directions (`nulls_last=False`).
@@ -342,7 +349,7 @@ ruling. Section 7's departures belong to this list as well.
    - A window's ORDER BY cannot carry a placement yet
      ([komira-ai/komira#1227](https://github.com/komira-ai/komira/issues/1227)). So a window whose
      library default differs from the plan's raises at the terminal until that lands.
-6. **Missing values.**
+6. **Missing values.** Differs (D7).
    - polars keeps NULL and NaN apart, as the plan does: `is_null` and `drop_nulls` test NULL only, and
      `is_nan` and `fill_nan` test NaN only.
    - pandas with NumPy dtypes treats NaN as missing. So the pandas skin reads a float column as "NULL
@@ -354,13 +361,13 @@ ruling. Section 7's departures belong to this list as well.
      `drop_nulls_predicate`'s plan plus the `isnan` test.
    - The earlier SDK refused `isna` instead. That left pandas users no way to ask pandas' own question,
      which pandas answers without ambiguity.
-7. **NULL keys match nothing**, in both skins ([query_semantics.md](query_semantics.md) §3.1).
+7. **NULL keys match nothing**, in both skins ([query_semantics.md](query_semantics.md) §3.1). Carried.
    - polars agrees by default. `join(nulls_equal=True)` is refused until the plan has null-safe
      equality ([komira-ai/komira#1218](https://github.com/komira-ai/komira/issues/1218)).
    - pandas `merge` matches missing keys to each other, and `isin` finds a NaN in a column holding a
      NaN. Both are departures: in the pandas skin, a row with a missing key finds no partner. The tests
      of `merge` and `isin` hold this.
-8. **Join output columns are each library's own.** The plan's join keeps the left names, and suffixes
+8. **Join output columns are each library's own.** Differs (D8). The plan's join keeps the left names, and suffixes
    a colliding right name with `_right` ([query_semantics.md](query_semantics.md) §3.14). Each skin
    adds a projection over the join, so that the output columns are its library's:
    - pandas: `on=` keys appear once (coalesced for an outer join), and other collisions get
@@ -371,7 +378,7 @@ ruling. Section 7's departures belong to this list as well.
    The merge and polars join tasks pin each `how` against the pinned libraries. The plan design asks
    for this ("a frontend renames or projects first"). The earlier SDK showed the plan's names instead,
    which match neither library.
-9. **Arithmetic is Python's.** In both skins:
+9. **Arithmetic is Python's.** Carried, except `//` and `%` (D10). In both skins:
    - `/` is true division: the left operand is cast to DOUBLE ([query_semantics.md](query_semantics.md)
      §5.1).
    - `//` floors and `%` takes the sign of the divisor, as Python, pandas and polars do.
@@ -386,31 +393,31 @@ ruling. Section 7's departures belong to this list as well.
      inf or NaN.
    - Integer overflow raises an error naming the operation (§5.5). Both libraries wrap, so both skins
      depart: an error is safer than a wrapped value.
-10. **A sum of nothing is 0.** pandas (`min_count=0`) and polars both answer 0 for the sum of an empty
+10. **A sum of nothing is 0.** Differs (D11). pandas (`min_count=0`) and polars both answer 0 for the sum of an empty
     or all-missing group, where the plan answers NULL (§2.2). So both skins build `coalesce(sum(x), 0)`.
     - `mean`, `min` and `max` of nothing stay NULL, which `to_pandas` shows as NaN.
     - The integer sum type is INT64 (UINT64 for unsigned) through the DataFrame doors. A total outside
       it is an error naming the column ([query_semantics_rulings.md](query_semantics_rulings.md) §8.1,
       §8.2).
-11. **Counting rows and counting values are different verbs.**
+11. **Counting rows and counting values are different verbs.** Carried, except `groupby().count()` (D6).
     - `count(*)` is polars `kpl.len()` and `group_by(k).len()`, and pandas `size()` and
       `agg(n=("c", "size"))`.
     - Counting non-missing values is polars `col("c").count()`, and pandas `count()` and
       `agg(n=("c", "count"))`. pandas counts NaN as missing (ruling 6).
     - polars' deprecated `pl.count()` is refused, because it names both questions.
-12. **Unaliased outputs take the library's name.**
+12. **Unaliased outputs take the library's name.** Carried.
     - polars names `col("a") * 2` after its leftmost column (`a`), and an unaliased aggregate after its
       input column. That is the rule `select_aggregates.name_unaliased` and `agg_output_naming` apply on
       the Mojo side.
     - Two outputs with one name are refused at the verb.
-13. **Float aggregates are not bit-reproducible** across runs and worker counts (§2.10). Tests compare
+13. **Float aggregates are not bit-reproducible** (carried) across runs and worker counts (§2.10). Tests compare
     float sums and means with a stated tolerance. Neither library promises more for parallel input.
-14. **Types.**
+14. **Types.** New with the verbs that take a dtype (D17).
     - A dtype argument (`astype`, `cast`, `return_dtype`) is a `pyarrow.DataType`, or a name from the
       fixed table in the verbs document. komira adds no dtype classes of its own.
     - pyarrow and protobuf are the package's required dependencies, and pandas and polars are optional.
     - Results arrive as Arrow and convert through the `Result` terminals.
-15. **`concat` matches columns by name, and needs one type per column.**
+15. **`concat` matches columns by name, and needs one type per column.** New with the verb (D17).
     - The Mojo builder matches by position and takes the first input's names.
     - polars `how="vertical"` needs equal names in equal order, so the polars skin refuses anything
       else.
@@ -420,7 +427,7 @@ ruling. Section 7's departures belong to this list as well.
     - Types must be equal in both skins. pandas would upcast a mismatch, so that refusal is a pandas
       departure.
     - With equal names in equal order, the plan is the Mojo builder's.
-16. **`isin` with another frame's column is a semi join.** `df[df["k"].isin(o["k"])]` builds a
+16. **`isin` with another frame's column is a semi join.** Carried, except `isin` with a list (D12). `df[df["k"].isin(o["k"])]` builds a
     `JOIN_SEMI`, and `df[~df["k"].isin(o["k"])]` builds a `JOIN_ANTI`. Each returns `df`'s columns. That
     form is accepted only as the whole predicate of a subscript. Anywhere else, `isin` with another
     frame's column raises `UnsupportedOperation`: inside `&` or `|`, in `assign`, or as a value. Placed
@@ -492,22 +499,36 @@ no timing assertion and no shell test.
    - The library is the independent oracle the matrix requires, because the surface promises its
      library's answer, not DuckDB's.
 
-### 12. Where this port differs from the earlier SDK
+### 12. Rulings that differ from the earlier SDK
 
 The two surfaces are a port of the earlier SDK's pandas-shaped frame and polars-shaped module, over its
-plan builder and the plan protobuf. They differ from it only in these points, each for the reason given:
+plan builder and the plan protobuf, and of its DataFrame surface design. Everything this document does
+not list here is carried from that design. These are the points where the port answers differently,
+each with the earlier answer and the reason.
 
-| point | earlier SDK | here | why |
-|---|---|---|---|
-| unknown attributes | `DataFrame.__getattr__` made any name a column reference | no attribute is a column; `__getattr__` only raises `AttributeError` (section 5) | `hasattr` raised, and a verb added later could change what an attribute meant |
-| engine limits | some checked in Python (NULL placement, `head(0)`) | refused by the engine at the terminal (section 6) | the Python checks went stale when the engine moved |
-| SQL text | a frame could be rendered to SQL and re-parsed | a frame is only ever a plan for `komira_plan_stream` | one route per kind of input; SQL text has its own entry |
-| missing values in pandas | `isna` refused | NaN is missing in float columns, as pandas answers (section 8, ruling 6) | users had no way to ask pandas' own question |
-| pandas `groupby(dropna=True)` | the NULL group was returned | the NULL group is filtered out (ruling 3) | pandas drops it by default; returning it was a silent difference |
-| join output names | the plan's `_right` names | each library's own names (ruling 8) | the plan's names match neither library |
-| invented verbs | `merge(how="semi")` | refused; `isin` is the pandas spelling (ruling 16) | pandas has no such `how` |
-| `groupby().count()` | refused | pandas' count of non-missing values per column | it is well defined; refusing it hid a pandas answer |
-| verbs the Mojo surface had | absent | `with_columns`, `rename`, `drop_nulls`, `concat` carried (section 9) | the Python skins lacked them |
+The first three follow from decisions made before this design (the plan entry, rule S2, the Python
+package design). D4 to D18 are this design's own.
+
+| | point | earlier SDK | here | why |
+|---|---|---|---|---|
+| D1 | the route | a frame could be rendered to SQL text and re-parsed, chosen by a switch | a frame is only a plan for `komira_plan_stream`; `explain()` renders the plan, not SQL | the SDK builds logical plans; SQL text has its own entry, `komira_sql_stream` |
+| D2 | the executed frame | `materialize()` gave a `MaterializedFrame`, `collect()` a polars-shaped `DataFrame` | both give the first release's `Result`, read once (section 2) | one result class for every query, as the Python package design fixes |
+| D3 | table names | readers registered each file under an automatic name (`t1`, `t2`) and a public `session()` accessor reached the default session | a reader's scan carries its file and registers no name; readers take `session=` (section 4) | the package design drops automatic names and the accessor |
+| D4 | NULL placement in a sort | a sort the engine could not place as the library does was refused, on a column holding NULLs | every sort key carries the library's placement explicitly, and nothing is refused for it (section 8, ruling 5) | the plan honours an explicit placement per key; the refusal answered an engine limit that no longer holds |
+| D5 | pandas `groupby(dropna=True)` | the NULL group was returned | it is filtered out below the aggregate (ruling 3) | pandas drops it by default; returning it was a silent difference |
+| D6 | per-column group reductions | `groupby().sum()` and `groupby().count()` were refused | supported when the column types allow, and `count()` is pandas' count of non-missing values (rulings 4 and 11) | both are well defined; refusing them hid pandas' answers |
+| D7 | missing values | pandas `isna` was refused, and polars `is_null` and `is_nan` were refused | pandas: NaN is missing in float columns; polars: `is_null` and `is_nan` are answered (ruling 6) | users had no way to ask either library's own question |
+| D8 | join output names | the plan's names: both keys, `_right` on collisions; `suffix`/`suffixes` refused | each library's own names and suffixes, through a projection (ruling 8) | the plan's names match neither library |
+| D9 | an integer subscript `df[0]` | refused as positional | a column label, as in pandas (ruling 1) | in pandas `df[0]` is the column `0` |
+| D10 | `//` and `%` | `//` built true division (a known defect), `%` the plan's truncated remainder | Python's floor division and modulo, by a correction over the plan's node (ruling 9) | Python, pandas and polars all floor |
+| D11 | the sum of an empty or all-missing group | the plan's NULL | 0 (ruling 10) | both libraries answer 0 |
+| D12 | `isin` and `is_in` with a list | refused | an expression, the OR of `=` the Mojo surface builds (ruling 16; the `in_list` row) | the Mojo surface and SQL already build and run it |
+| D13 | attributes | `DataFrame.__getattr__` made any unknown name a column; `df.x` was the column `x` | no attribute is a column; `__getattr__` only raises `AttributeError` (section 5) | `hasattr` raised, a column hid behind a verb of its name, and a verb added later would change what an attribute meant |
+| D14 | engine limits | some were checked in Python (NULL placement, `head(0)`) | refused by the engine at the terminal, with its step and code (section 6) | the Python checks went stale when the engine moved |
+| D15 | `len(df)` and `bool(df)` | ran the query | raise `UnsupportedOperation` naming the terminal (section 2) | no dunder runs a query |
+| D16 | ties chosen by row order | `drop_duplicates(subset=...)` was refused | the library's default is accepted and returns any tied row; an explicit order-dependent choice is refused (section 7) | the default asks a question the plan can answer, with a listed departure |
+| D17 | verbs the earlier SDK lacked | absent: `with_columns`/`assign` over the Mojo builder's rules, `rename`, `dropna`/`drop_nulls`, `concat`, `fillna`, `astype`/`cast`, `value_counts`, `nlargest`/`top_k`, `tail`, `merge_asof`/`join_asof`, `from_arrow`, `register_view` | carried from the Mojo builders where one exists (section 9), with rulings 14 and 15 | the Python skins lacked the verbs the Mojo surface has |
+| D18 | where the matrix tests live | no matrix | `src/tests/e2e/pandas_e2e` and `polars_e2e` (section 10) | the matrix lint's package rule |
 
 ## What must always hold?
 
