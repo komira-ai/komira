@@ -86,7 +86,7 @@ def main(args):
     assert x86(real) is None
     assert set(V3) <= _native._cpu_flags(text)
     # The words of the vmx flags and bugs lines are not flags.
-    assert "ept" not in _native._cpu_flags(text) and "spectre_v1" not in _native._cpu_flags(text)
+    assert "preemption_timer" not in _native._cpu_flags(text) and "spectre_v1" not in _native._cpu_flags(text)
 
     # Without avx2, the refusal names avx2 alone, and the file it read.
     no_avx2 = planted("no_avx2", without(text, {"avx2"}))
