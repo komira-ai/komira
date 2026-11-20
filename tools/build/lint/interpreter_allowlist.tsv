@@ -9,6 +9,8 @@
 .github/ci/coverage_measure.sh	coverage and mutation tooling: to port to Zig
 .github/ci/tests/coverage_ci_cases.sh	coverage and mutation tooling: to port to Zig
 buck2	a thin wrapper: runs the pinned buck2 release
+python/tests/wheel/fixture/komira/__init__.py	Python SDK: the fixture package the wheel rule packs in its read-back test
+python/tests/wheel/test_wheel_contents.py	Python SDK test: reads the built wheel with the standard library (zipfile, csv, email), independently of the Zig writer
 src/arrow_ipc/tests/fixtures/arrow_ipc/gen_fixtures.py	fixture provenance: the pyarrow program that wrote the Arrow IPC fixtures beside it (a third-party writer is the point)
 src/arrow_ipc/tests/fixtures/arrow_ipc/gen_pyarrow_interop_fixtures.py	fixture provenance: the pyarrow program that wrote the Arrow IPC fixtures beside it (a third-party writer is the point)
 src/parquet_codec/tests/fixtures/parquet/gen_pyarrow_fixtures.py	fixture provenance: the pyarrow program that wrote the Parquet fixtures beside it (a third-party writer is the point)

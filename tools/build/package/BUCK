@@ -70,6 +70,69 @@ zig_exe(
     visibility = ["PUBLIC"],
 )
 
+# The wheel writer and its read-back check (pack/komira_wheel.zig; the rule is
+# wheel.bzl). Each scenario is its own test, and the tool is built only
+# behind all of them:
+#   wheel_project_unit  the pyproject's [project] read field by field, and each
+#                       key, table and TOML form the rule does not read refused
+#                       with its line;
+#   wheel_zip_unit      the zip: members, modes and order read back, deflated
+#                       or stored by size, the same bytes twice, and a damaged
+#                       or foreign zip refused by defect;
+#   wheel_build_unit    the wheel of an input: name, member order, METADATA,
+#                       WHEEL, RECORD, the runtime libraries left out, the
+#                       same bytes from inputs in another order, the version
+#                       and tag, and each input it cannot carry refused;
+#   wheel_check_unit    the read-back check: the builder's directory passes,
+#                       and each defect (files, manifest, RECORD, tag,
+#                       METADATA, licences, layout, a runtime library, the
+#                       stamp, a twin of other bytes) is refused by name.
+_WHEEL_IMPORTS = [
+    "pack/common.zig",
+    "pack/deflate.zig",
+    "pack/wheel.zig",
+    "pack/wheel_check.zig",
+    "pack/wheel_project.zig",
+    "pack/wheel_testing.zig",
+    "pack/wheel_zip.zig",
+]
+
+[
+    zig_test(
+        name = "wheel_{}_unit".format(scenario),
+        exec_compatible_with = LINUX_X86_64,
+        src = "pack/wheel_{}_test.zig".format(scenario),
+        imports = _WHEEL_IMPORTS,
+        busybox = "komira//tools/build/toolchains:busybox",
+        zig = "komira//tools/build/toolchains:zig_next",
+    )
+    for scenario in ["project", "zip", "build", "check"]
+]
+
+zig_exe(
+    name = "komira_wheel",
+    exec_compatible_with = LINUX_X86_64,
+    src = "pack/komira_wheel.zig",
+    unit_tests = [
+        ":wheel_build_unit",
+        ":wheel_check_unit",
+        ":wheel_project_unit",
+        ":wheel_zip_unit",
+        "komira//tools/build/toolchains:zig_next_version",
+    ],
+    imports = [
+        "pack/common.zig",
+        "pack/deflate.zig",
+        "pack/wheel.zig",
+        "pack/wheel_check.zig",
+        "pack/wheel_project.zig",
+        "pack/wheel_zip.zig",
+    ],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
+    visibility = ["PUBLIC"],
+)
+
 # pkg_act (act/pkg_act.zig): the small actions of the package rules, in place
 # of their busybox scripts: the bundle assembly (bundle.zig), the kcov guard and
 # its cases (kcov_guard.zig), the release-set checks (release.zig), the OCI

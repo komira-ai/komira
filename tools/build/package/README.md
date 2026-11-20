@@ -349,3 +349,55 @@ are), and agreement across members beyond the stamp.
 [`list_conda_targets.sh`](list_conda_targets.sh) prints the package targets. The layout,
 the version scheme and the metapackage: [packaging/conda](../../../packaging/conda/README.md). The version
 a release carries comes from [`release_version.sh`](release_version.sh).
+
+## The Python wheel
+
+`wheel_package` ([`wheel.bzl`](wheel.bzl)) writes the wheel of the Python
+package (docs/design/python_package.md): the import package's files, the
+library it loads with its native owners beside it (a `mojo_shared_lib`'s
+`[runnable]` directory, copied to `<import>/_lib/` without the Mojo runtime
+libraries of the platform row's `runtime_libs`), the licence files the
+pyproject's `license-files` names (the root's `LICENSE` and `NOTICE`), and
+METADATA from the pyproject's `[project]`. It is explicit: a target asks for it,
+and nothing in Buck lists it as published.
+
+`komira_wheel` ([`komira_wheel.zig`](pack/komira_wheel.zig)) writes the wheel,
+its METADATA and `manifest.json` (the release's artifact manifest of a `PYTHON`
+artifact, whose `metadata` names the METADATA beside it) into a directory, and
+`komira_wheel check` reads that directory back. What the rule fixes, so no BUCK
+file states it:
+
+- the version, `<compiler version>.post<N>` with `N` from
+  `-c komira.package_stamp` (0, an unstamped development output, by default), and
+  the source commit from `-c komira.package_commit`;
+- the tag, `py3-none-manylinux_<glibc floor>_x86_64`: the package uses ctypes,
+  not the CPython ABI, and the floor is the platform table's. Other platforms
+  are not built yet (libkomira is linked for linux-x86_64 only);
+- the requirement `mojo-compiler==<compiler version>` after the pyproject's
+  `dependencies`, which is where the left-out runtime libraries come from.
+
+The pyproject is read with a TOML subset (basic strings, arrays of them, inline
+tables of them, three tables); any other key, table or form is refused with its
+line, so the file never says something the wheel does not carry. The bytes are
+reproducible: members sorted bytewise (RECORD last), every date 1980-01-01,
+mode 0755 for the native libraries and 0644 otherwise, each member deflated by
+the packer's own deflate when that is smaller. A second action builds the same
+wheel from the same inputs staged at other paths (`[twin]`), and the check
+refuses the wheel unless the two are the same bytes.
+
+Sub-targets: `[whl]`, `[manifest]`, `[metadata]`; `[check]` (the directory read
+back: RECORD hashes and sizes, WHEEL's tag, METADATA, the licence files byte for
+byte, `py.typed`, the library executable, no Mojo runtime library, the twin);
+`[release]` (with `[release][whl]`, `[release][manifest]`,
+`[release][metadata]`), a copy made only after `[release_check]` passed, the same
+check with a positive stamp and a source commit required. An uploader reads
+`[release]` and nothing else. `wheel_package_test_stamped` gives conda.bzl's test
+stamp instead of the configuration's.
+
+The tests: the Zig scenarios `:wheel_project_unit`, `:wheel_zip_unit`,
+`:wheel_build_unit` and `:wheel_check_unit` in [`BUCK`](BUCK), and the
+standard-library reader of a built wheel,
+[`python/tests/wheel`](../../../python/tests/wheel/BUCK). Not done yet: wheels for
+linux-arm64 and macos-arm64, the release's PYTHON member (the release set reads
+CONDA members only), and the package's own wheel target, which comes with
+`python/komira`.

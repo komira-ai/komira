@@ -1,0 +1,59 @@
+load("@komira//tools/build/package:conda.bzl", "MOJO_COMPILER_VERSION", "TEST_STAMP")
+load("@komira//tools/build/package:wheel.bzl", "wheel_package_test_stamped")
+load("@komira//tools/build/python:defs.bzl", "py_test")
+
+# The wheel of the fixture package (fixture/): the layout of komira, with
+# libkomira and its native owners, the repository's LICENSE and NOTICE, and the
+# design's pyproject. Stamped with the test stamp, so its [release] builds
+# (and is checked) without a release's -c komira.package_stamp.
+wheel_package_test_stamped(
+    name = "fixture_wheel",
+    distribution = "komira",
+    import_name = "komira",
+    native = "komira//src/so:libkomira[runnable]",
+    pyproject = "fixture/pyproject.toml",
+    readme = "fixture/README.md",
+    srcs = {
+        "komira/__init__.py": "fixture/komira/__init__.py",
+        "komira/py.typed": "fixture/komira/py.typed",
+    },
+)
+
+_ARGS = [
+    "--release",
+    "$(location :fixture_wheel[release])",
+    "--twin",
+    "$(location :fixture_wheel[twin])",
+    "--license",
+    "$(location komira//:LICENSE)",
+    "--notice",
+    "$(location komira//:NOTICE)",
+    "--compiler-version",
+    MOJO_COMPILER_VERSION,
+    "--stamp",
+    TEST_STAMP,
+    "--platform",
+    "linux-x86_64",
+    # Written out, not derived as the rule derives it: the platform table's
+    # glibc floor (2.34) on x86-64.
+    "--tag",
+    "py3-none-manylinux_2_34_x86_64",
+]
+
+# The release directory and the twin read with the standard library: tag,
+# version, manifest, RECORD hashes and sizes, Requires-Dist, licence members,
+# the package's layout and no Mojo runtime library (test_wheel_contents.py).
+py_test(
+    name = "test_wheel_contents",
+    src = "test_wheel_contents.py",
+    args = _ARGS + ["--runtime-pin", MOJO_COMPILER_VERSION],
+)
+
+# The same reader expecting another mojo-compiler pin: Requires-Dist is read,
+# not assumed, so the script fails naming both lists.
+py_test(
+    name = "test_wheel_contents_other_pin",
+    src = "test_wheel_contents.py",
+    args = _ARGS + ["--runtime-pin", "0.0.1"],
+    expect_error = "AssertionError: Requires-Dist is ['pyarrow', 'mojo-compiler=={v}', 'pandas; extra == \"pandas\"', 'polars; extra == \"polars\"'], want ['pyarrow', 'mojo-compiler==0.0.1', 'pandas; extra == \"pandas\"', 'polars; extra == \"polars\"']".format(v = MOJO_COMPILER_VERSION),
+)
