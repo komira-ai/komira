@@ -22,8 +22,9 @@ range, the Mojo runtime route, or the DataFrame surface; each has its own design
 [What is decided elsewhere](#what-is-decided-elsewhere).
 
 Fixed before this design and not reopened here: the distribution (the name on PyPI, the name `pip install`
-takes) is `komira-ai`, the name of the GitHub organisation, and it is published from this repository
-by trusted publishing; the package lives in `python/` in this repository; it is published as a wheel first; the wheel
+takes) is `komira-ai`, the name of the GitHub organisation; it is published by the top-level workflow
+`.github/workflows/pypi.yml` through the GitHub environments `testpypi` and `pypi`, by trusted
+publishing with no token, and nothing is uploaded before the first real release; the package lives in `python/` in this repository; it is published as a wheel first; the wheel
 carries `libkomira` and never the Mojo runtime (if the library needs runtime libraries at load time, the
 wheel depends on Modular's own published package for them); the release platforms are linux-x86_64,
 linux-arm64 and macos-arm64; the first public release is SQL-first and the DataFrame surface follows;
@@ -314,6 +315,12 @@ construct raise from `sql` with their step and code; a `Result` read twice refus
 closing a session with an unread result does not crash.
 
 ## What are the limits and open questions?
+
+- **Question for the owner: distribution `komira-ai`, import package `komira`?** This design takes
+  `komira` as the import name for the reasons in decision 2. The alternative, `import komira_ai`, would
+  match the distribution and the import name, but the generated `komira.plan.v1` modules would still
+  add a `komira` package beside it. The import name is the one name a user types in every program, so
+  it is the owner's to confirm before the loader's pull request lands its first `.py` file.
 
 - The interpreter list ([tools/build/lint/interpreter_allowlist.tsv](../../tools/build/lint/interpreter_allowlist.tsv))
   needs a row for each `.py` file today, and `third_party/python`'s `_TEST_ONLY` and `src/so`'s visibility
