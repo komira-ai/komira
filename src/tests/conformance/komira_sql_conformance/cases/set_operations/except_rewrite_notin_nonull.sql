@@ -1,0 +1,2 @@
+-- order: rows
+SELECT DISTINCT k FROM ta WHERE k NOT IN (SELECT k FROM tb WHERE k IS NOT NULL)
