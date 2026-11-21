@@ -348,7 +348,7 @@ fn runsOnPullRequest(text: []const u8) bool {
 }
 
 const MACOS_JOBS = [_][]const u8{ "build-macos-arm64", "testpypi-macos-arm64", "testpypi-smoke-macos-arm64", "pypi-macos-arm64", "pypi-smoke-macos-arm64", "result-macos-arm64" };
-const LINUX_JOBS = [_][]const u8{ "build", "testpypi", "testpypi-smoke", "pypi", "pypi-smoke", "result" };
+const LINUX_JOBS = [_][]const u8{ "build", "wheel-user-test", "testpypi", "testpypi-smoke", "pypi", "pypi-smoke", "result" };
 const PYPI_MACOS_BUILD = "build-macos-arm64";
 /// The macOS build runs on main alone, on every run.
 const PYPI_MACOS_BUILD_GATE = "    if: github.ref == 'refs/heads/main'";
@@ -834,8 +834,10 @@ test "an edit of the real pypi.yml that joins the Linux chain and the macOS chai
     const ar = arena.allocator();
     const text = try readData(ar, &.{ "workflows", "pypi.yml" });
     // a Linux job that waits on the macOS build, or on a macOS job in a list
-    try expectRefusedPypi(ar, try inJob(ar, text, "testpypi", "    needs: build\n", "    needs: [build, build-macos-arm64]\n"), "testpypi needs build-macos-arm64");
-    try expectRefusedPypi(ar, try inJob(ar, text, "result", "    needs: [build, testpypi, testpypi-smoke, pypi, pypi-smoke]\n", "    needs: [build, testpypi, testpypi-smoke, pypi, pypi-smoke, result-macos-arm64]\n"), "result needs result-macos-arm64");
+    try expectRefusedPypi(ar, try inJob(ar, text, "testpypi", "    needs: [build, wheel-user-test]\n", "    needs: [build, wheel-user-test, build-macos-arm64]\n"), "testpypi needs build-macos-arm64");
+    try expectRefusedPypi(ar, try inJob(ar, text, "result", "    needs: [build, wheel-user-test, testpypi, testpypi-smoke, pypi, pypi-smoke]\n", "    needs: [build, wheel-user-test, testpypi, testpypi-smoke, pypi, pypi-smoke, result-macos-arm64]\n"), "result needs result-macos-arm64");
+    // the Linux user test of the wheel file is a Linux job: the macOS chain does not wait on it
+    try expectRefusedPypi(ar, try inJob(ar, text, "testpypi-macos-arm64", "    needs: build-macos-arm64\n", "    needs: [build-macos-arm64, wheel-user-test]\n"), "testpypi-macos-arm64 needs wheel-user-test");
     // a Linux job that reads a macOS job's output or result
     try expectRefusedPypi(ar, try inJob(ar, text, "result", "    steps:\n", "    steps:\n      - run: echo \"$X\"\n        env:\n          X: ${{ needs.build-macos-arm64.outputs.version }}\n"), "result reads the result of build-macos-arm64");
     // a macOS job that waits on the Linux build, on a Linux upload, or reads one's output

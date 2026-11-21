@@ -29,6 +29,13 @@ PYTHON_SURFACE = [
     # Its only python_closure finding is the setup-python `uses:` line (the run
     # lines start with the driver).
     ".github/workflows/pypi.yml",
+    # The release workflow's user test of the Python wheel on every merge
+    # (wheel-user-test): it sets up each supported Python a user has
+    # (actions/setup-python) and pip-installs the wheel file, as pypi.yml's
+    # job of the same name does before any upload (docs/ci.md, "The user test
+    # of the wheel"). Its only python_closure finding is that `uses:` line (the
+    # run line starts with the driver).
+    ".github/workflows/release.yml",
 ]
 
 PYTHON_CEILING = [

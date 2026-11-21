@@ -1,10 +1,14 @@
-//! pypi_smoke: what a user does with the published wheel, in an empty environment of the Python they have.
+//! pypi_smoke: what a user does with the wheel, in an empty environment of the Python they have: the published
+//! wheel from TestPyPI or PyPI, or the wheel a build made, before any upload, from its dist directory.
 //!
 //! In `<work>/venv`, made by `<python> -m venv`, with pip's isolated mode and no cache:
 //!  1. from TestPyPI: the wheel's `Requires-Dist` requirements from the real index
 //!     (`--only-binary=:all:`), so that nothing but komira comes from TestPyPI, then
-//!     `komira==<version>` from TestPyPI with `--no-deps`; from PyPI: `komira==<version>` plainly. The komira
-//!     install is repeated like `verify` (an index lags an upload); the requirements are not.
+//!     `komira==<version>` from TestPyPI with `--no-deps`; from PyPI: `komira==<version>` plainly; from a dist
+//!     directory: the requirements from the real index as for TestPyPI, then `komira==<version>` with `--no-deps`,
+//!     `--no-index` and `--find-links <dist>`, so pip reads no index for komira and finds the one wheel of the
+//!     directory. The komira install from an index is repeated like `verify` (an index lags an upload); the
+//!     requirements are not, and the command line gives a dist directory one attempt.
 //!  2. `pip check` must exit 0, `pip show komira` must report the version that was published, and the
 //!     environment must hold nothing else: `pip freeze` lists komira alone (no `mojo-compiler`, no other
 //!     distribution) and no `modular` package is importable (the wheel carries the Mojo
@@ -67,8 +71,17 @@ pub const Process = struct {
     }
 };
 
-pub const Options = struct {
+/// Where pip takes komira from.
+pub const Source = union(enum) {
+    /// TestPyPI or PyPI.
     index: common.Index,
+    /// The absolute path of a dist directory (meta.zig `loadDist`: the one wheel and nothing else), read with no
+    /// index at all.
+    dist: []const u8,
+};
+
+pub const Options = struct {
+    source: Source,
     python: []const u8,
     example: []const u8,
     expect: []const u8,
@@ -173,16 +186,21 @@ pub fn run(a: Allocator, why: *[]const u8, runner: Runner, opts: Options, wheel:
     const install = try join(a, &pip, &install_flags);
 
     const pin = try std.fmt.allocPrint(a, "{s}=={s}", .{ wheel.name, wheel.version });
-    var komira_args: []const []const u8 = undefined;
-    if (std.mem.eql(u8, opts.index.simple, common.dependency_index)) {
-        komira_args = try join(a, install, &.{ "--index-url", opts.index.simple, pin });
-    } else {
-        if (wheel.requires_dist.len != 0) {
-            const deps = try join(a, install, &.{ "--index-url", common.dependency_index });
-            _ = try step(a, why, runner, "install the requirements from PyPI", try join(a, deps, wheel.requires_dist), opts.work, log);
-        }
-        komira_args = try join(a, install, &.{ "--no-deps", "--index-url", opts.index.simple, pin });
+    const from_pypi = switch (opts.source) {
+        .index => |idx| std.mem.eql(u8, idx.simple, common.dependency_index),
+        .dist => false,
+    };
+    if (!from_pypi and wheel.requires_dist.len != 0) {
+        const deps = try join(a, install, &.{ "--index-url", common.dependency_index });
+        _ = try step(a, why, runner, "install the requirements from PyPI", try join(a, deps, wheel.requires_dist), opts.work, log);
     }
+    const komira_args = switch (opts.source) {
+        .index => |idx| if (from_pypi)
+            try join(a, install, &.{ "--index-url", idx.simple, pin })
+        else
+            try join(a, install, &.{ "--no-deps", "--index-url", idx.simple, pin }),
+        .dist => |dir| try join(a, install, &.{ "--no-deps", "--no-index", "--find-links", dir, pin }),
+    };
     var n: u32 = 0;
     while (true) {
         n += 1;
