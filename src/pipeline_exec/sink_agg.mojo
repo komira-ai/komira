@@ -11,13 +11,27 @@
 # the morsel.
 #
 # The state of a worker is one `AggCell` per aggregate (`agg_fold`), kept in
-# the worker's own slot of a slab; `consume` writes only the caller's slot.
-# `combine`, which runs once after the workers joined, merges the slots in
-# worker order. A fold over integers, DECIMAL128 or DATE32 is exact, and so is
-# a MIN or MAX of floats, so their answer does not depend on which worker took
-# which morsel; a float SUM or AVG is a double sum, whose last bits do
-# (`agg_fold`; the tolerance rule is in the package README). `agg_output`
-# builds the one output row in the schema the plan declared.
+# the worker's own slot; `consume` writes only the caller's slot. `combine`,
+# which runs once after the workers joined, merges the slots in worker order.
+# A fold over integers, DECIMAL128 or DATE32 is exact, and so is a MIN or MAX
+# of floats, so their answer does not depend on which worker took which
+# morsel. A float SUM or AVG is a double sum, whose last bits depend on the
+# order of the additions. `agg_output` builds the one output row in the
+# schema the plan declared.
+#
+# By position (the segment's order key is ORDER_ROW_RANGE, `by_position`): a
+# worker keeps one set of cells per source position instead, a position being
+# the (`partition_id`, `origin_hint`) its source stamped on the morsel
+# (`position_order`). Each position's cells fold its rows from +0.0 in row
+# order; the chunks of one morsel an operator cut (they carry its position
+# and reach the sink one after the other on one worker) fold into the same
+# cells. `combine` sorts every worker's positions into source order and merges
+# them in that order. Which worker held a position no longer matters, so a
+# float SUM or AVG is the same bits on every worker count and schedule, given
+# the same morsels: the sources cut a morsel from the input and the segment's
+# morsel size alone. Two morsels at one position (a source that stamps no
+# position) are refused by name at `combine`. Each position's cells are drawn
+# from the segment pool when the position is first seen.
 #
 # COUNT(DISTINCT x) keeps the distinct non-NULL values of x a worker saw
 # (`count_distinct`, all under group 0) instead of a cell; `combine` merges
@@ -66,6 +80,7 @@ from plan_expr.expr_pool import ExprPool
 
 from .agg_fold import AggCell, agg_name, fold_column, merge_cell
 from .agg_output import agg_result_column, check_declared_type
+from .position_order import position_order
 from .count_distinct import (
     DistinctMerge,
     DistinctSlot,
@@ -75,21 +90,87 @@ from .count_distinct import (
 from .segment_pool import SegmentPool, WorkerReservation
 
 
+def _fresh_cells(n_aggs: Int) -> List[AggCell]:
+    var cells = List[AggCell](capacity=n_aggs)
+    for _ in range(n_aggs):
+        cells.append(AggCell())
+    return cells^
+
+
+struct _Grain(Movable):
+    """The cells of the morsels of one source position."""
+
+    var partition_id: Int
+    var origin_hint: Int
+    var cells: List[AggCell]
+
+    def __init__(out self, partition_id: Int, origin_hint: Int, n_aggs: Int):
+        self.partition_id = partition_id
+        self.origin_hint = origin_hint
+        self.cells = _fresh_cells(n_aggs)
+
+
 struct _AggSlot(Movable):
     var cells: List[AggCell]
+    # By position: one entry per position this worker folded, in the order
+    # it met them.
+    var grains: List[_Grain]
     var map: Optional[MapOp]
     var reservation: WorkerReservation
     var distinct: DistinctSlot
     var started: Bool
 
     def __init__(out self, n_aggs: Int, var reservation: WorkerReservation):
-        self.cells = List[AggCell]()
-        for _ in range(n_aggs):
-            self.cells.append(AggCell())
+        self.cells = _fresh_cells(n_aggs)
+        self.grains = List[_Grain]()
         self.map = None
         self.reservation = reservation^
         self.distinct = DistinctSlot(n_aggs)
         self.started = False
+
+
+def _draw(
+    mut slot: _AggSlot, bytes: Int, seg_id: Int, ref pool: SegmentPool
+) raises:
+    """Draw one set of cells (`bytes`) from the segment pool for `slot`, or
+    fail the query by name."""
+    if not slot.reservation.try_grow(bytes):
+        raise Error(
+            "pipeline_exec: the aggregation sink of segment "
+            + String(seg_id)
+            + " was denied "
+            + String(bytes)
+            + " bytes of the segment's memory pool (budget "
+            + String(pool.budget())
+            + ", granted "
+            + String(pool.granted())
+            + ")"
+        )
+
+
+def _grain_for(
+    mut slot: _AggSlot,
+    partition_id: Int,
+    origin_hint: Int,
+    n_aggs: Int,
+    bytes: Int,
+    seg_id: Int,
+    ref pool: SegmentPool,
+) raises -> Int:
+    """The index in `slot.grains` of the cells of position (`partition_id`,
+    `origin_hint`): the last entry when the worker's previous morsel had this
+    position (a chunk of the same morsel), else a new entry, drawn from the
+    pool."""
+    var n = len(slot.grains)
+    if n > 0:
+        if (
+            slot.grains[n - 1].partition_id == partition_id
+            and slot.grains[n - 1].origin_hint == origin_hint
+        ):
+            return n - 1
+    _draw(slot, bytes, seg_id, pool)
+    slot.grains.append(_Grain(partition_id, origin_hint, n_aggs))
+    return n
 
 
 struct AggSink(MorselSinkImpl):
@@ -112,13 +193,20 @@ struct AggSink(MorselSinkImpl):
     var _slots: List[ArcPointer[_AggSlot]]
     var _merged: List[AggCell]
     var _combined: Bool
+    var _by_position: Bool
 
     def __init__(
         out self,
         ref data: AggSinkData,
         var pool: SegmentPool,
         seg_id: Int,
+        by_position: Bool = False,
     ) raises:
+        """The sink of segment `seg_id` for `data`, drawing its state from
+        `pool`. `by_position` folds each source position on its own and merges
+        them in position order (the segment is ORDER_ROW_RANGE); otherwise
+        each worker folds what it was handed and the workers merge in worker
+        order."""
         var where_ = (
             "pipeline_exec: the aggregation sink of segment "
             + String(seg_id)
@@ -188,6 +276,7 @@ struct AggSink(MorselSinkImpl):
         self._slots = List[ArcPointer[_AggSlot]]()
         self._merged = List[AggCell]()
         self._combined = False
+        self._by_position = by_position
 
     def resize_worker_state(mut self, num_workers: Int) -> None:
         self._slots = List[ArcPointer[_AggSlot]](capacity=num_workers)
@@ -211,18 +300,7 @@ struct AggSink(MorselSinkImpl):
             )
         ref slot = self._slots[worker_id][]
         if not slot.started:
-            if not slot.reservation.try_grow(self._state_bytes):
-                raise Error(
-                    "pipeline_exec: the aggregation sink of segment "
-                    + String(self._seg_id)
-                    + " was denied "
-                    + String(self._state_bytes)
-                    + " bytes of the segment's memory pool (budget "
-                    + String(self._pool.budget())
-                    + ", granted "
-                    + String(self._pool.granted())
-                    + ")"
-                )
+            _draw(slot, self._state_bytes, self._seg_id, self._pool)
             if len(self._expr_ids) > 0:
                 slot.map = Optional(
                     MapOp(
@@ -237,9 +315,25 @@ struct AggSink(MorselSinkImpl):
             selected = morsel.batch.selection_mask_true_count()
         if selected == 0:
             return
+        # The cells this morsel folds into: its position's (g >= 0) or the
+        # worker's.
+        var g = -1
+        if self._by_position:
+            g = _grain_for(
+                slot,
+                morsel.partition_id,
+                morsel.origin_hint,
+                len(self._funcs),
+                self._state_bytes,
+                self._seg_id,
+                self._pool,
+            )
         if len(self._expr_ids) == 0:
             for i in range(len(self._funcs)):
-                slot.cells[i].count += selected
+                if g >= 0:
+                    slot.grains[g].cells[i].count += selected
+                else:
+                    slot.cells[i].count += selected
             return
         var t_map = pt_now()
         _ = slot.map.value().execute(morsel)
@@ -248,7 +342,10 @@ struct AggSink(MorselSinkImpl):
         var t_fold = pt_now()
         for i in range(len(self._funcs)):
             if self._arg_col[i] < 0:
-                slot.cells[i].count += selected
+                if g >= 0:
+                    slot.grains[g].cells[i].count += selected
+                else:
+                    slot.cells[i].count += selected
             elif self._funcs[i] == AGG_COUNT_DISTINCT:
                 var col = read_distinct_column(
                     slot.distinct,
@@ -272,6 +369,15 @@ struct AggSink(MorselSinkImpl):
                         self._pool,
                         slot.reservation,
                     )
+            elif g >= 0:
+                fold_column(
+                    slot.grains[g].cells[i],
+                    self._funcs[i],
+                    dense,
+                    self._arg_col[i],
+                    selected,
+                    self._labels[i],
+                )
             else:
                 fold_column(
                     slot.cells[i],
@@ -291,6 +397,8 @@ struct AggSink(MorselSinkImpl):
         var distinct = DistinctMerge(n, WorkerReservation(self._pool.share()))
         var only_group = List[Int]()
         only_group.append(0)
+        if self._by_position:
+            self._merge_positions(merged)
         for w in range(len(self._slots)):
             ref slot = self._slots[w][]
             for i in range(n):
@@ -312,10 +420,48 @@ struct AggSink(MorselSinkImpl):
             # This worker is merged: free its distinct values and return its
             # memory.
             slot.distinct = DistinctSlot(n)
+            slot.grains = List[_Grain]()
             slot.reservation.give_back_all()
         distinct.finish()
         self._merged = merged^
         self._combined = True
+
+    def _merge_positions(self, mut merged: List[AggCell]) raises:
+        """Merge the cells of every worker's positions into `merged`, in
+        source position order. Raises, naming the position, when two morsels
+        carried one position."""
+        var parts = List[Int]()
+        var hints = List[Int]()
+        var at_worker = List[Int]()
+        var at_index = List[Int]()
+        for w in range(len(self._slots)):
+            ref slot = self._slots[w][]
+            for k in range(len(slot.grains)):
+                parts.append(slot.grains[k].partition_id)
+                hints.append(slot.grains[k].origin_hint)
+                at_worker.append(w)
+                at_index.append(k)
+        var order = position_order(parts, hints)
+        for k in range(len(order)):
+            var at = order[k]
+            if k > 0:
+                var before = order[k - 1]
+                if parts[before] == parts[at] and hints[before] == hints[at]:
+                    raise Error(
+                        self._where
+                        + " folds by source position, and two morsels carried"
+                        " position (partition "
+                        + String(parts[at])
+                        + ", origin "
+                        + String(hints[at])
+                        + "); its source does not stamp one position per"
+                        " morsel"
+                    )
+            ref grain = self._slots[at_worker[at]][].grains[at_index[at]]
+            for i in range(len(self._funcs)):
+                merge_cell(
+                    merged[i], grain.cells[i], self._funcs[i], self._labels[i]
+                )
 
     def finalize(mut self) raises:
         pass

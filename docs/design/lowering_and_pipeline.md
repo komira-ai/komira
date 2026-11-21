@@ -23,7 +23,9 @@ Two claims of the traits are not what the code does today (§3.3): `Morsel` carr
 every source on `main` assigns the id from an arrival counter (`fetch_add` on `morsel_counter` at eight sites in four files of
 `parquet_scan`, in `morsel.vtable_source`, and in `op_sources.batch_morsel_source`), so the id is claim order, not source position; and
 `MorselSourceImpl.next_morsel` claims one morsel at a time, not a group. Both matter only for reproducible float sums,
-which no MVP query needs (§7.1), so both are built with the first float sink (step 9 of §7.3), not before.
+which no MVP query needs (§7.1), so both are built with the first float sink (step 9 of §7.3), not before. Step 9 found
+that neither is needed for the ungrouped sink: the sources already stamp each morsel's partition id and origin hint from
+its position, and the sink keys its float state by those (what step 9 built, after the table of §7.3).
 
 ## 1. Overview and scope
 
@@ -218,7 +220,8 @@ sums, §7.1) and for every segment of the MVP: the merge order cannot change a b
 states in source row-range order and is set on a segment whose sink folds floats into grain state (a float `SUM` or
 `AVG`, ungrouped or dense; step 9 of §7.3). `ORDER_PARTITION_ID` emits the partitions of a partitioned sink in
 partition id order: it fixes the output order and says nothing about the float reduction inside a partition (§4.3). The
-first slices set `ORDER_NONE` only. What `ORDER_ROW_RANGE` asks of the driver is in §3.3 and open point O1.
+first slices set `ORDER_NONE` only; step 9 sets `ORDER_ROW_RANGE` on the ungrouped float case. What `ORDER_ROW_RANGE`
+asks of the driver is in §3.3 and open point O1, and what step 9 built is after the table of §7.3.
 
 **What the cutter refuses.** An `ASOF` join (`SINK_ASOF_JOIN`), a union, a sort-merge join (`SINK_SMJ_BUILD`), the IR's `SOURCE_CONCAT` and
 `SINK_JOIN_PROBE` (a second, sink-form probe the cutter does not emit; the probe is `OP_JOIN_PROBE`, §3.6), a view reference, a shared-subplan reference (`PLAN_CSE_REF`) and
@@ -231,8 +234,8 @@ host: the cutter elides the exchange ([the optimized plan](optimized_plan.md) §
 slice 1b has no arm for `EXCHANGE` and refuses it by name, which is safe and is the only divergence from this
 paragraph. A plan with a `STEP` or `MAP_BATCHES` (a UDF) is refused until the UDF slice exists. A limit above a sort is
 refused too (`LOWERING_UNCUTTABLE_NODE`): no segment records an order before the order slice, so the rows such a limit
-keeps are not defined. A float `SUM` or `AVG` is cut with `ORDER_NONE`, as §2.3 allows for the first slices, and is not
-bit-reproducible across worker counts until `ORDER_ROW_RANGE` exists (step 9 of §7.3).
+keeps are not defined. An ungrouped float `SUM` or `AVG` is cut with `ORDER_ROW_RANGE` since step 9 of §7.3, and is
+bit-reproducible across worker counts; a grouped one is not served yet.
 
 ### 2.4 What lowering may and may not do
 
@@ -921,6 +924,26 @@ Each step adds a sink, an edge or an operator, and none changes the cutter's thr
 | 7. Writes, ASOF | COPY and CREATE TABLE AS; the ASOF cut | komira#1487 |
 | 8. Composite group key | the row that serves what §4.2 refuses: a group key of 2 to 4 mixed-type columns, compared by row, over the partitioned sink of slice 5 (D8); 2.5 to 3.5k lines | slice 5 |
 | 9. Reproducible float sinks | 9a: position-derived morsel ids in `parquet_scan` (§3.3), 1.0 to 1.6k lines. 9b: `GrainSourceImpl`, `ORDER_ROW_RANGE`, grain state in the ungrouped and dense sinks and the determinism tests (D7), 2.0 to 3.0k lines | the first float sink; slices 3 and 5 |
+
+**What step 9 built, against the row above.** The ungrouped sink, the only one that folds a float argument, is
+reproducible; neither 9a nor `GrainSourceImpl` was built, because the sources already stamp a position on every morsel:
+the Parquet source's partition id is its flat row group times 2^20 plus the morsel's index in that row group (the
+origin hint is the index), and a resident batch's or producer output's is the index of its slot, which is what
+`sink_collect` already orders by. The grain is therefore one morsel as the source cut it (O1's alternative of a grain
+independent of the row group, with the morsel as the unit). `lowering.cut_aggregate` sets `ORDER_ROW_RANGE` on an
+aggregation with no group key and a `SUM` or `AVG` whose argument is `FLOAT32` or `FLOAT64`; `plan_check` accepts
+`ORDER_ROW_RANGE` on `(SINK_AGG, KEY_DTYPE_NONE)` only; `RealBuilder` builds that `AggSink` `by_position`: a worker keeps
+one set of cells per position it met (the chunks an operator cut from one morsel fold into one), each from +0.0 in row
+order, and `combine` sorts all positions into source order and adds them in that order. Two morsels at one position are
+refused by name. The morsels are the same on every worker count because a resident batch and a producer's output are cut
+by the morsel size alone, and each Parquet row group is cut by the morsel size alone with the scan options `RealBuilder`
+passes (no row-range split, whose coarse emit concatenates whatever units a worker claimed); the Parquet cursor-grain
+route sizes its grains from the worker count, is off unless a caller turns its process-wide switch on, and an
+`ORDER_ROW_RANGE` Parquet segment is refused by name while it is on. The morsel size comes from the host's cache sizes,
+not its worker count, so the promise is one lowered plan, any number of workers. The state is one `AggCell` per
+aggregate per morsel, drawn from the segment pool, so it grows with the morsels read (a 10^9-row scan at 65,536-row
+morsels is about 15,000 cell sets). Not built: morsel ids from positions (the ids stay arrival stamps, which nothing
+reads for order), the dense grouped sink of slice 5b and its float fold, and a byte cap the cutter holds.
 
 Some pull requests of the list are stacked on others; their order is theirs. A step lists only what it needs. Joins are
 step 3 and 20 of the 22 TPC-H queries need one, so the board covers two TPC-H queries until step 3; the post-MVP order

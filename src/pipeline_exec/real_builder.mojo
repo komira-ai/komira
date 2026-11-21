@@ -15,7 +15,9 @@
 #            OP_LIMIT             `LimitOp`   (`op_limit`)
 #   sink     SINK_COLLECT         `CollectSink` (`sink_collect`)
 #            SINK_AGG, key NONE   `AggSink` (`sink_agg`), from the `AggSinkData`
-#                                 the descriptor's `sink_param_id` names
+#                                 the descriptor's `sink_param_id` names; it
+#                                 folds by source position when the segment
+#                                 is ORDER_ROW_RANGE
 #            SINK_AGG, key I64,   `GroupAggSink` (`sink_group_agg`), from the
 #            I32, F64 or F32      same kind of data; both behind `AnyAggSink`
 #            SINK_AGG, key STRING `StringGroupAggSink` (`sink_string_group_agg`)
@@ -27,6 +29,15 @@
 #
 # Anything else (SOURCE_CONCAT, OP_JOIN_PROBE and the other sinks) is refused
 # by name, because no member serves it yet.
+#
+# An ORDER_ROW_RANGE segment is the same bits on every worker count only when
+# its source cuts the same morsels on every worker count. The three sources
+# do: a resident batch and a producer's output are cut by the morsel size
+# alone, and the Parquet source, with the scan options this builder gives it
+# (no row-range split), cuts each row group by the morsel size alone. Its
+# cursor-grain route, a process-wide switch that is off unless a caller turns
+# it on, sizes its grains from the worker count, so an ORDER_ROW_RANGE
+# segment over Parquet is refused by name while that switch is on.
 #
 # The workers of a segment each get their own operator instances, built from
 # one set of shared parts the builder keeps per operator (the predicate, the
@@ -55,6 +66,7 @@ from column_kernels.compiler_helpers import (
 from morsel.morsel import Morsel
 from operator_api.map_op import MapOp
 from parquet.runtime_footer_cache import ParquetMetadataCache
+from parquet_scan.cursor_grain_feed import cursor_grain_enabled
 from physical_plan.physical_plan import (
     KEY_DTYPE_F32,
     KEY_DTYPE_F64,
@@ -64,6 +76,7 @@ from physical_plan.physical_plan import (
     KEY_DTYPE_STRING,
     OP_FILTER,
     OP_LIMIT,
+    ORDER_ROW_RANGE,
     OP_PROJECT,
     AggSinkData,
     SegmentDescPod,
@@ -241,6 +254,15 @@ struct RealBuilder[
         ref spec = desc.source_spec
         var morsel_rows = desc.morsel_rows
         if desc.source_kind == SOURCE_PARQUET:
+            if desc.order_key_kind == ORDER_ROW_RANGE and cursor_grain_enabled():
+                raise Error(
+                    "pipeline_exec: segment "
+                    + String(desc.seg_id)
+                    + " is ORDER_ROW_RANGE over Parquet while the scan's"
+                    " cursor-grain route is on; that route cuts morsels by the"
+                    " worker count, so the float sums would not be the same"
+                    " bits on every worker count"
+                )
             return Self.Source.first(
                 build_parquet_source[
                     Self.cache_o, Self.pool_o, Self.filter_o
@@ -394,6 +416,9 @@ struct RealBuilder[
                             self._agg_sinks[id],
                             self._segment_pool.share(),
                             desc.seg_id,
+                            by_position=(
+                                desc.order_key_kind == ORDER_ROW_RANGE
+                            ),
                         )
                     )
                 )
