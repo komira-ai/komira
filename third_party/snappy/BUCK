@@ -80,8 +80,9 @@ archive_files(
 # per cpu, each staged by a target of its own so that a platform's graph holds
 # only the one it compiles with. Each is what CMake writes for the CPU the
 # platform compiles for, and each assumes that CPU:
-#   config_x86_64.h  x86-64-v3 (SSSE3, SSE4.2 CRC32, BMI2; no NEON): the
-#                    target_cpu of the linux-x86_64 row of the platform table;
+#   config_x86_64.h  x86-64-v2 (SSSE3, SSE4.2 CRC32; no BMI2, no NEON): the
+#                    floor of the linux-x86_64 row's isa_variants in the
+#                    platform table, the CPU its C is compiled for;
 #   config_arm64.h   zig's generic arm64 CPU (NEON; no CRC32 extension; no x86
 #                    intrinsic header): the linux-arm64 row (target_cpu
 #                    generic) and macOS arm64. The darwin-arm64 row names
@@ -298,9 +299,9 @@ native_library(
         "-D_LIBCPP_VERBOSE_ABORT(...)=__builtin_trap()",
     ] + by_os_cpu({
         "linux_aarch64": [],
-        # config_x86_64.h is what CMake writes at x86-64-v3, the target_cpu of the linux-x86_64 row of the
-        # platform table (the zig spelling of ISA_LEVELS["x86-64-v3"]).
-        "linux_x86_64": ["-mcpu=x86_64_v3"],
+        # config_x86_64.h is what CMake writes at x86-64-v2, the floor of the linux-x86_64 row's
+        # isa_variants in the platform table and the CPU of the row's C toolchain (zig's spelling).
+        "linux_x86_64": ["-mcpu=x86_64_v2"],
         "macos_aarch64": [],
     }),
     cxx_runtime = True,
