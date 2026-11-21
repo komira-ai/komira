@@ -9,7 +9,7 @@ left out. A path the directory does not hold fails the action that reads it;
 two paths with one file name fail analysis.
 
 `wheel_install_test(name, python, wheels, script, args, files,
-skip_requirements, expect_failure)` installs `wheels` into an empty virtual
+skip_requirements, expect_failure, exec_compatible_with)` installs `wheels` into an empty virtual
 environment of the interpreter `python` (a `python_dist`), the way
 `python_wheel` installs a wheel and with no pip and no network, then runs
 `script` with that environment's interpreter in isolated mode, from an empty
@@ -21,8 +21,10 @@ passed to the script as `--host-lib` paths, `args` as they are, and `files`
 ({flag: source}) as `<flag> <absolute path>`. The output, `<name>.pass`, exists
 only if the run passed: with `expect_failure`, only if it failed with exactly
 that line (`<site>` and `<python>` standing for the site directory and the
-interpreter's prefix). Building the target is running the test. Linux
-x86_64 only, like the interpreter.
+interpreter's prefix). Building the target is running the test. It runs on
+`exec_compatible_with`, Linux x86_64 unless given (python/BUCK passes the
+macOS arm64 platform for the macOS wheel's test, with the interpreter built
+for it).
 """
 
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
@@ -104,8 +106,8 @@ _wheel_install_test = rule(
 def _picked_files_macro(**kwargs):
     _picked_files(**kwargs)
 
-def _wheel_install_test_macro(**kwargs):
-    _wheel_install_test(exec_compatible_with = LINUX_X86_64, **kwargs)
+def _wheel_install_test_macro(exec_compatible_with = LINUX_X86_64, **kwargs):
+    _wheel_install_test(exec_compatible_with = exec_compatible_with, **kwargs)
 
 picked_files = declares_docs(_picked_files_macro)
 wheel_install_test = declares_docs(_wheel_install_test_macro)

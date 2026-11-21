@@ -83,6 +83,37 @@ fn checkToken(a: Allocator, why: *[]const u8, what: []const u8, value: []const u
     if (!ok) return refuse(a, why, "{s} '{s}' is empty or has a character a wheel file name cannot hold", .{ what, value });
 }
 
+/// The three parts of a wheel's file name.
+pub const FileName = struct { name: []const u8, version: []const u8, tag: []const u8 };
+
+/// The content of a name file: one line, `<name>-<version>-<python>-<abi>-<platform>.whl` (the tag is the last
+/// three parts) and a line feed (which may be missing). A name with a build tag (six parts) or fewer than
+/// five parts is not a name this tool's wheels have, and is refused; so is any part that fails the check a
+/// wheel's own Name, Version and Tag pass.
+pub fn parseFileName(a: Allocator, why: *[]const u8, text: []const u8) Error!FileName {
+    const line = if (std.mem.endsWith(u8, text, "\n")) text[0 .. text.len - 1] else text;
+    if (std.mem.indexOfAny(u8, line, "\r\n") != null)
+        return refuse(a, why, "the name file holds more than one line; exactly one file name is wanted", .{});
+    const suffix = ".whl";
+    if (!std.mem.endsWith(u8, line, suffix))
+        return refuse(a, why, "the name file's line '{s}' is not a wheel file name: it does not end in {s}", .{ line, suffix });
+    const stem = line[0 .. line.len - suffix.len];
+    const want_parts = 5;
+    var parts: [want_parts][]const u8 = undefined;
+    var it = std.mem.splitScalar(u8, stem, '-');
+    var n: usize = 0;
+    while (it.next()) |part| : (n += 1) {
+        if (n < want_parts) parts[n] = part;
+    }
+    if (n != want_parts)
+        return refuse(a, why, "the name file's line '{s}' has {d} '-' separated parts before {s}; <name>-<version>-<python>-<abi>-<platform> has {d}", .{ line, n, suffix, @as(usize, want_parts) });
+    try checkToken(a, why, "Name", parts[0], "._");
+    try checkToken(a, why, "Version", parts[1], ".+!_");
+    for (parts[2..]) |tag_part| try checkToken(a, why, "Tag", tag_part, "._");
+    const tag_at = parts[0].len + 1 + parts[1].len + 1;
+    return .{ .name = parts[0], .version = parts[1], .tag = stem[tag_at..] };
+}
+
 fn find(members: []const zip.Read, name: []const u8) ?[]const u8 {
     for (members) |m| if (std.mem.eql(u8, m.name, name)) return m.data;
     return null;
