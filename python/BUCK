@@ -32,26 +32,146 @@ python_proto(
 
 # ---- The wheel ----------------------------------------------------------------
 #
-# `pip install komira`: the import package, libkomira at komira/_lib/libkomira.so
-# (where _native.load opens it with no directory given) and its native owner
-# libraries at komira/_lib/lib/ (libkomira's run path, `$ORIGIN/lib`), with
-# README.md as the description and LICENSE and NOTICE in
-# `.dist-info/licenses/` (the rule's default). Written by `wheel_file`
-# (tools/build/package/README.md, "The Python wheel"), which refuses a library
-# that needs a newer glibc than the tag's 2.34, any GLIBCXX_ or CXXABI_
-# version (none is allowed: libkomira and its owners need none, src/so/README.md),
-# a run path not under `$ORIGIN`, a NEEDED library nobody provides, or one of
-# the Mojo runtime libraries in the wheel: those come from Modular's
-# `mojo-compiler` (docs/design/python_package.md, decision 6), the one
-# Requires-Dist. The C++ runtime libraries of `[runnable]` are left out too:
-# only the Mojo runtime needs them, and a manylinux host provides them.
-# Release 1 returns no Arrow and encodes no plan, so neither pyarrow nor
-# protobuf is required, and the generated plan modules are not in the wheel.
-# Unstamped the version is 0.0.0; the release set's stamp gives 0.1.<N>.
+# `pip install komira`: the import package, and `//src/so:libkomira[dist]` as it
+# is at komira/_lib/: libkomira.so (where _native.load opens it with no
+# directory given), and in komira/_lib/lib/ (its run path, `$ORIGIN/lib`) its
+# native owner libraries and the three Mojo runtime libraries of the pinned
+# compiler that built it (tools/build/mojo/README.md, `[dist]`). The wheel
+# stages no native file of its own: another language package copies the same
+# directory. It requires no other distribution: nothing of Modular's is
+# installed with it (docs/design/python_package.md, decisions 6 and 7).
+#
+# Written by `wheel_file` (tools/build/package/README.md, "The Python wheel"),
+# which refuses a library that needs a newer glibc than the tag's, a GLIBCXX_
+# or CXXABI_ version above the bounds below, a run path not under `$ORIGIN`, or
+# a NEEDED library that is neither in the wheel nor a manylinux system library
+# (the C++ runtime, libstdc++ and libgcc_s, is one: the host provides it). The
+# description is README.md; `.dist-info/licenses/` holds LICENSE and NOTICE,
+# and the licence texts of the Mojo runtime libraries as their pinned package
+# carries them (third_party/modular/BUCK; NOTICE says which files each
+# covers). Release 1 returns no Arrow and encodes no plan, so neither pyarrow
+# nor protobuf is required, and the generated plan modules are not in the
+# wheel. Unstamped the version is 0.0.0; the release set's stamp gives
+# 0.1.<N>.
 
-# The libraries //src/so:libkomira links as NEEDED besides the Mojo runtime
-# (src/so/BUCK, NATIVE_OWNERS; their file names are the table of
-# src/so/README.md). One left out of the wheel fails the wheel's `needed` check.
+_PLATFORM = "linux-x86_64"
+
+# What the Mojo runtime libraries the wheel carries need, per platform, above
+# what komira's own files need (the platform row's `os_floor` is the floor of
+# what the repository links): libAsyncRTRuntimeGlobals.so needs GLIBC_2.35,
+# libKGENCompilerRTShared.so GLIBCXX_3.4.30 and CXXABI_1.3.11 (src/so/README.md,
+# the table of libkomira_elf_report), within what manylinux_2_35 lets a wheel
+# need from the host. A platform that joins names its own row here; the wheel
+# rule refuses a wheel whose files need more.
+_NATIVE_NEEDS = {
+    "linux-x86_64": {
+        "max_cxxabi": "1.3.11",
+        "max_glibcxx": "3.4.30",
+        "os_floor": "glibc-2.35",
+    },
+}
+
+_PY_FILES = {f: f for f in glob(["komira/**/*.py"]) + ["komira/py.typed"]}
+
+_DIST = "//src/so:libkomira[dist]"
+
+_NATIVE_FILES = {"komira/_lib": _DIST}
+
+# komira's licence, and the licence texts of the pinned Mojo compiler package
+# the runtime libraries come from, unmodified (third_party/modular/BUCK).
+_LICENSE_FILES = {
+    "LICENSE": "komira//:LICENSE",
+    "NOTICE": "komira//:NOTICE",
+    "MODULAR_LICENSE": "komira//third_party/modular:mojo_compiler_licenses[info/licenses/LICENSE]",
+    "MODULAR_THIRD_PARTY_NOTICES": "komira//third_party/modular:mojo_compiler_licenses[info/licenses/Third-Party-Notices]",
+}
+
+# komira's own files are Apache-2.0; the Mojo runtime libraries are Modular's,
+# under the licence their package declares (`LicenseRef-Modular-Proprietary`,
+# the Modular Community License Terms in MODULAR_LICENSE).
+_LICENSE_EXPRESSION = "Apache-2.0 AND LicenseRef-Modular-Proprietary"
+
+_WHEEL = {
+    "classifiers": ["Development Status :: 2 - Pre-Alpha"],
+    "distribution": "komira",
+    "license_expression": _LICENSE_EXPRESSION,
+    "license_files": _LICENSE_FILES,
+    "platform": _PLATFORM,
+    "project_urls": {
+        "Issues": "https://github.com/komira-ai/komira/issues",
+        "Source": "https://github.com/komira-ai/komira",
+    },
+    "readme": "README.md",
+    "requires_python": ">=3.13",
+    "summary": "SQL over local files, with the komira query engine in process",
+} | _NATIVE_NEEDS[_PLATFORM]
+
+wheel_file(
+    name = "komira_wheel",
+    files = _PY_FILES | _NATIVE_FILES,
+    executable = sorted(_NATIVE_FILES.keys()),
+    **_WHEEL
+)
+
+# ---- The clean-environment install test --------------------------------------
+#
+# The wheel alone installed into an empty virtual environment of the hermetic
+# interpreter, with no pip, no index, no network and no library path, and
+# python/tests/test_installed.py run there in isolated mode from an empty
+# directory (python/install_test.bzl): the environment holds komira and
+# nothing else, no `modular/` directory and no distribution of Modular's; the
+# package imports from the prefix at the wheel's version, with its licences
+# and the runtime's licence texts and no Requires-Dist; libkomira loads at the
+# ABI version of src/so/abi/komira.tsv, a Parquet file registers and a missing
+# one raises KomiraError, a serialized plan renders, and libkomira, its native
+# owners and the three Mojo runtime libraries are mapped from
+# <site>/komira/_lib and nothing else of theirs is. On CPython 3.13 and 3.14,
+# the edges of Requires-Python that are pinned (third_party/python).
+
+_TEST_FILES = {
+    "--abi-table": "komira//src/so:abi/komira.tsv",
+    "--license": "komira//:LICENSE",
+    "--modular-license": _LICENSE_FILES["MODULAR_LICENSE"],
+    "--modular-notices": _LICENSE_FILES["MODULAR_THIRD_PARTY_NOTICES"],
+    "--notice": "komira//:NOTICE",
+    "--parquet": "komira//src/so:tests/fixtures/two_columns.parquet",
+    "--plan-hex": "komira//python/tests:fixtures/scan_plan.hex",
+}
+
+# The version the wheel is stamped with: the stamp wheel_file reads.
+_VERSION = wheel_version(read_config("komira", "package_stamp", "0"))
+
+_INSTALLED_ARGS = [
+    "--version",
+    _VERSION,
+    "--license-expression",
+    _LICENSE_EXPRESSION,
+]
+
+[wheel_install_test(
+    name = name,
+    python = python,
+    wheels = [":komira_wheel"],
+    script = "komira//python/tests:test_installed.py",
+    args = _INSTALLED_ARGS,
+    files = _TEST_FILES,
+) for name, python in [
+    ("wheel_install_test", "komira//third_party/python:cpython"),
+    ("wheel_install_test_py314", "komira//third_party/python:cpython314"),
+]]
+
+# The same test on installs that must fail, each with the line it fails with
+# (on CPython 3.13). Each wheel below is the package's wheel with one thing
+# wrong that the wheel rule does not refuse: its native files are picked one
+# by one out of the same `[dist]` directory.
+_RUNTIME = [
+    "libAsyncRTRuntimeGlobals.so",
+    "libKGENCompilerRTShared.so",
+    "libMSupportGlobals.so",
+]
+
+# The native owners of //src/so:libkomira (src/so/BUCK, NATIVE_OWNERS; their
+# file names are the table of src/so/README.md).
 _OWNERS = [
     "libkomira_async_api_native.so.1",
     "libkomira_async_rt_native.so.1",
@@ -64,100 +184,13 @@ _OWNERS = [
 ]
 
 picked_files(
-    name = "libkomira_files",
-    dir = "//src/so:libkomira[runnable]",
-    paths = ["libkomira.so"] + ["lib/" + o for o in _OWNERS],
+    name = "dist_files",
+    dir = _DIST,
+    paths = ["libkomira.so"] + ["lib/" + n for n in _OWNERS + _RUNTIME],
 )
 
-_PY_FILES = {f: f for f in glob(["komira/**/*.py"]) + ["komira/py.typed"]}
+_LIBKOMIRA = {"komira/_lib/libkomira.so": ":dist_files[libkomira.so]"}
 
-_LIBKOMIRA = {"komira/_lib/libkomira.so": ":libkomira_files[libkomira.so]"}
-
-_NATIVE_FILES = _LIBKOMIRA | {"komira/_lib/lib/" + o: ":libkomira_files[" + o + "]" for o in _OWNERS}
-
-# The Mojo of the toolchain: the version of its conda pin
-# (`mojo_compiler_<version>_linux-64.conda`).
-_TOOLCHAIN_MOJO = asset("linux-x86_64", "mojo_compiler")["name"].split("_")[2]
-
-_MOJO_PIN = "1.0.0"
-
-_WHEEL = {
-    "classifiers": ["Development Status :: 2 - Pre-Alpha"],
-    "distribution": "komira",
-    "external_needed": [
-        "libAsyncRTRuntimeGlobals.so",
-        "libKGENCompilerRTShared.so",
-        "libMSupportGlobals.so",
-    ],
-    "license_expression": "Apache-2.0",
-    "platform": "linux-x86_64",
-    "project_urls": {
-        "Issues": "https://github.com/komira-ai/komira/issues",
-        "Source": "https://github.com/komira-ai/komira",
-    },
-    "readme": "README.md",
-    "requires_dist": ["mojo-compiler==" + _MOJO_PIN],
-    "requires_python": ">=3.13",
-    "summary": "SQL over local files, with the komira query engine in process",
-}
-
-wheel_file(
-    name = "komira_wheel",
-    files = _PY_FILES | _NATIVE_FILES,
-    executable = sorted(_NATIVE_FILES.keys()),
-    **_WHEEL
-)
-
-# ---- The clean-environment install test --------------------------------------
-#
-# The wheel and Modular's two (third_party/modular) installed into an empty
-# virtual environment of the hermetic interpreter, with no pip, no network and
-# no library path, and python/tests/test_installed.py run there in isolated
-# mode from an empty directory (python/install_test.bzl): the package imports
-# from the prefix at the wheel's version with its licences, its one
-# requirement pins the Mojo that komira._runtime loads and the toolchain
-# builds with, libkomira loads at the ABI version of src/so/abi/komira.tsv, a
-# Parquet file registers and a missing one raises KomiraError, a serialized
-# plan renders, and the Mojo runtime libraries are mapped from
-# <site-packages>/modular/lib, put there by mojo-compiler, through the
-# runtime preload of komira/_runtime.py. On CPython 3.13 and 3.14, the edges
-# of Requires-Python that are pinned (third_party/python).
-_MODULAR = [
-    "komira//third_party/modular:mojo_compiler-1.0.0-py3-none-manylinux_2_34_x86_64.whl",
-    "komira//third_party/modular:mojo_compiler_mojo_libs-1.0.0-py3-none-any.whl",
-]
-
-_TEST_FILES = {
-    "--abi-table": "komira//src/so:abi/komira.tsv",
-    "--license": "komira//:LICENSE",
-    "--notice": "komira//:NOTICE",
-    "--parquet": "komira//src/so:tests/fixtures/two_columns.parquet",
-    "--plan-hex": "komira//python/tests:fixtures/scan_plan.hex",
-}
-
-# The version the wheel is stamped with: the stamp wheel_file reads.
-_VERSION = wheel_version(read_config("komira", "package_stamp", "0"))
-
-[wheel_install_test(
-    name = name,
-    python = python,
-    wheels = [":komira_wheel"] + _MODULAR,
-    script = "komira//python/tests:test_installed.py",
-    args = [
-        "--version",
-        _VERSION,
-        "--toolchain-mojo-version",
-        _TOOLCHAIN_MOJO,
-    ],
-    files = _TEST_FILES,
-) for name, python in [
-    ("wheel_install_test", "komira//third_party/python:cpython"),
-    ("wheel_install_test_py314", "komira//third_party/python:cpython314"),
-]]
-
-# The same test on installs that must fail, each with the line it fails with
-# (on CPython 3.13). Each wheel below is the package's wheel with one thing
-# wrong that the wheel rule does not refuse.
 wheel_file(
     name = "komira_wheel_without_libkomira",
     files = _PY_FILES,
@@ -166,14 +199,33 @@ wheel_file(
 
 # The owner libraries beside libkomira's run path instead of on it: every
 # NEEDED name is a member of the wheel, so the rule writes it, and the loader
-# finds none of them.
-_MISPLACED = _LIBKOMIRA | {"komira/_lib/misplaced/" + o: ":libkomira_files[" + o + "]" for o in _OWNERS}
+# finds none of the owners.
+_MISPLACED = _LIBKOMIRA | {"komira/_lib/lib/" + n: ":dist_files[" + n + "]" for n in _RUNTIME} | {
+    "komira/_lib/misplaced/" + n: ":dist_files[" + n + "]"
+    for n in _OWNERS
+}
 
 wheel_file(
     name = "komira_wheel_misplaced_owners",
     files = _PY_FILES | _MISPLACED,
     executable = sorted(_MISPLACED.keys()),
     **_WHEEL
+)
+
+# A damaged install: one of the three Mojo runtime libraries left out. The
+# rule writes it only because `external_needed` says another package provides
+# the file; nothing does, and the loader's error names it.
+_WITHOUT_MSUPPORT = _LIBKOMIRA | {
+    "komira/_lib/lib/" + n: ":dist_files[" + n + "]"
+    for n in _OWNERS + _RUNTIME
+    if n != "libMSupportGlobals.so"
+}
+
+wheel_file(
+    name = "komira_wheel_without_runtime_library",
+    files = _PY_FILES | _WITHOUT_MSUPPORT,
+    executable = sorted(_WITHOUT_MSUPPORT.keys()),
+    **(_WHEEL | {"external_needed": ["libMSupportGlobals.so"]})
 )
 
 wheel_file(
@@ -190,82 +242,145 @@ wheel_file(
 
 _LOAD_ERROR = "komira._errors.LibraryLoadError: cannot load libkomira from <site>/komira/_lib/libkomira.so: "
 
+# Modular's wheels of the Mojo compiler (third_party/modular/BUCK): 1.0.0, the
+# toolchain's version, with the wheel it requires, and 1.2.0.
+_MODULAR = [
+    "komira//third_party/modular:mojo_compiler-1.0.0-py3-none-manylinux_2_34_x86_64.whl",
+    "komira//third_party/modular:mojo_compiler_mojo_libs-1.0.0-py3-none-any.whl",
+]
+
+_MODULAR_OTHER = ["komira//third_party/modular:mojo_compiler-1.2.0-py3-none-manylinux_2_34_x86_64.whl"]
+
 [wheel_install_test(
     name = name,
     python = "komira//third_party/python:cpython",
     wheels = wheels,
     script = "komira//python/tests:test_installed.py",
-    args = [
-        "--version",
-        _VERSION,
-        "--toolchain-mojo-version",
-        toolchain_mojo,
-    ],
+    args = _INSTALLED_ARGS,
     files = _TEST_FILES,
-    skip_requirements = skip,
     expect_failure = expect,
-) for name, wheels, toolchain_mojo, skip, expect in [
+) for name, wheels, expect in [
     # The wheel without libkomira.so.
     (
         "refuses_missing_libkomira",
-        [":komira_wheel_without_libkomira"] + _MODULAR,
-        _TOOLCHAIN_MOJO,
-        False,
+        [":komira_wheel_without_libkomira"],
         _LOAD_ERROR + "<site>/komira/_lib/libkomira.so: cannot open shared object file: No such file or directory",
     ),
     # A wheel whose owner libraries libkomira's run path does not reach: the
-    # first NEEDED one after the preloaded runtime is the loader's error.
+    # first NEEDED one after the Mojo runtime (found in lib/) is the loader's
+    # error.
     (
         "refuses_owners_off_run_path",
-        [":komira_wheel_misplaced_owners"] + _MODULAR,
-        _TOOLCHAIN_MOJO,
-        False,
+        [":komira_wheel_misplaced_owners"],
         _LOAD_ERROR + "libkomira_async_rt_native.so.1: cannot open shared object file: No such file or directory",
     ),
-    # No mojo-compiler, so no modular/lib (installed as with --no-deps): the
-    # runtime preload's named error, every directory of sys.path searched.
+    # A wheel without libMSupportGlobals.so: libKGENCompilerRTShared.so, found
+    # in lib/, needs it, and the error names the missing file.
     (
-        "refuses_missing_mojo_runtime",
-        [":komira_wheel"],
-        _TOOLCHAIN_MOJO,
-        True,
-        "komira._errors.RuntimeNotFoundError: the Mojo runtime 1.0.0 is not installed: " +
-        "libMSupportGlobals.so, libAsyncRTRuntimeGlobals.so, libKGENCompilerRTShared.so not found (searched " +
-        "<python>/lib/python313.zip/modular/lib, <python>/lib/python3.13/modular/lib, " +
-        "<python>/lib/python3.13/lib-dynload/modular/lib, <site>/modular/lib); " +
-        "install it with: pip install mojo-compiler==1.0.0",
+        "refuses_missing_runtime_library",
+        [":komira_wheel_without_runtime_library"],
+        _LOAD_ERROR + "libMSupportGlobals.so: cannot open shared object file: No such file or directory",
     ),
     # A wheel tagged for another platform is not installed.
     (
         "refuses_wheel_of_another_platform",
-        [":komira_wheel_arm64_tag"] + _MODULAR,
-        _TOOLCHAIN_MOJO,
-        False,
-        "install: the wheel of komira is tagged py3-none-manylinux_2_34_aarch64, which this interpreter (CPython 3.13 on x86_64) does not install",
+        [":komira_wheel_arm64_tag"],
+        "install: the wheel of komira is tagged py3-none-manylinux_2_35_aarch64, which this interpreter (CPython 3.13 on x86_64) does not install",
     ),
-    # mojo-compiler without the wheel it requires.
+    # Another distribution beside komira is refused by the test: the
+    # environment of `pip install komira` holds komira and nothing else.
+    (
+        "refuses_other_distribution",
+        [":komira_wheel"] + _MODULAR,
+        "AssertionError: the environment holds komira and also mojo-compiler, mojo-compiler-mojo-libs",
+    ),
+    # mojo-compiler without the wheel it requires: the installer's own check.
     (
         "refuses_unmet_requirement",
         [":komira_wheel", _MODULAR[0]],
-        _TOOLCHAIN_MOJO,
-        False,
         "install: mojo-compiler 1.0.0 requires mojo-compiler-mojo-libs==1.0.0, which is not installed",
     ),
     # A Requires-Python the interpreter is outside of.
     (
         "refuses_python_outside_requires_python",
-        [":komira_wheel_requires_python_315"] + _MODULAR,
-        _TOOLCHAIN_MOJO,
-        False,
+        [":komira_wheel_requires_python_315"],
         "install: komira requires Python >=3.15; this interpreter is 3.13.16",
     ),
-    # A toolchain Mojo other than the wheel's pin and komira._runtime's.
+]]
+
+# ---- Beside Modular's own runtime ------------------------------------------
+#
+# The wheel installed with Modular's mojo-compiler in the same environment,
+# and Modular's runtime (<site>/modular/lib/libKGENCompilerRTShared.so, opened
+# by path with ctypes, as a Mojo extension module's NEEDED entry opens it)
+# loaded in the same process before or after komira's library
+# (python/tests/test_beside_modular.py; docs/design/python_package.md,
+# decision 6, says why each order does what it does):
+#
+# - the toolchain's version, Modular's first: libkomira binds to Modular's
+#   runtime (the loader matches NEEDED names against what is loaded), which
+#   the runtime check accepts (the same build ids), and komira's copy is not
+#   mapped;
+# - the toolchain's version, komira's first: Modular's libKGENCompilerRTShared.so
+#   is a second copy, bound to komira's two other libraries; both work;
+# - 1.2.0, Modular's first: the runtime check refuses it by name;
+# - 1.2.0, komira's first: Modular's library fails to load, with the loader's
+#   `undefined symbol` (its 1.2.0 code needs symbols komira's 1.0.0
+#   libraries lack), and komira keeps working.
+#
+# 1.2.0's mojo-compiler-mojo-libs is not installed (`skip_requirements`, pip's
+# --no-deps): the compiler wheel's runtime is all the test loads.
+_BESIDE_FILES = {"--parquet": "komira//src/so:tests/fixtures/two_columns.parquet"}
+
+# The Mojo of the toolchain: the version of its conda pin
+# (`mojo_compiler_<version>_linux-64.conda`).
+_TOOLCHAIN_MOJO = asset("linux-x86_64", "mojo_compiler")["name"].split("_")[2]
+
+[wheel_install_test(
+    name = name,
+    python = "komira//third_party/python:cpython",
+    wheels = [":komira_wheel"] + modular,
+    script = "komira//python/tests:test_beside_modular.py",
+    args = [
+        "--order",
+        order,
+        "--runtime",
+        runtime,
+        "--modular-version",
+        version,
+        "--toolchain-mojo-version",
+        toolchain,
+    ],
+    files = _BESIDE_FILES,
+    skip_requirements = modular == _MODULAR_OTHER,
+    expect_failure = expect,
+) for name, modular, order, runtime, version, toolchain, expect in [
+    ("beside_modular_loaded_first", _MODULAR, "modular-first", "same", "1.0.0", _TOOLCHAIN_MOJO, None),
+    ("beside_modular_loaded_after", _MODULAR, "komira-first", "same", "1.0.0", _TOOLCHAIN_MOJO, None),
     (
-        "refuses_mojo_pin_unlike_toolchain",
-        [":komira_wheel"] + _MODULAR,
+        "beside_other_mojo_loaded_first",
+        _MODULAR_OTHER,
+        "modular-first",
+        "other",
+        "1.2.0",
+        _TOOLCHAIN_MOJO,
+        "komira._errors.LibraryLoadError: the Mojo runtime library libKGENCompilerRTShared.so is already loaded " +
+        "from <site>/modular/lib, and it is another build than komira's " +
+        "(<site>/komira/_lib/lib/libKGENCompilerRTShared.so): a process holds one Mojo runtime, so komira " +
+        "cannot be loaded beside Mojo code built with another Mojo version",
+    ),
+    ("beside_other_mojo_loaded_after", _MODULAR_OTHER, "komira-first", "other", "1.2.0", _TOOLCHAIN_MOJO, None),
+    # The same-version cases hold the installed mojo-compiler to the
+    # toolchain's Mojo: a toolchain pin moved without third_party/modular
+    # fails here.
+    (
+        "refuses_modular_unlike_toolchain",
+        _MODULAR,
+        "modular-first",
+        "same",
+        "1.0.0",
         "0.0.1",
-        False,
-        "AssertionError: the Mojo runtime versions differ: 1.0.0 (the wheel's Requires-Dist), 1.0.0 (komira._runtime) and 0.0.1 (the toolchain's pin)",
+        "AssertionError: the same-version cases need Modular's runtime at the toolchain's Mojo: mojo-compiler 1.0.0 is installed, the toolchain's is 0.0.1",
     ),
 ]]
 

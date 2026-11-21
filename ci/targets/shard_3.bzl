@@ -3,9 +3,14 @@
 # `guard.bxl:check` fails the pull request check when this file is out of date.
 
 TARGETS = [
+    "komira//python:beside_modular_loaded_after",
+    "komira//python:beside_modular_loaded_first",
+    "komira//python:beside_other_mojo_loaded_after",
+    "komira//python:beside_other_mojo_loaded_first",
     "komira//python:refuses_missing_libkomira",
-    "komira//python:refuses_missing_mojo_runtime",
-    "komira//python:refuses_mojo_pin_unlike_toolchain",
+    "komira//python:refuses_missing_runtime_library",
+    "komira//python:refuses_modular_unlike_toolchain",
+    "komira//python:refuses_other_distribution",
     "komira//python:refuses_owners_off_run_path",
     "komira//python:refuses_python_outside_requires_python",
     "komira//python:refuses_unmet_requirement",
@@ -105,6 +110,8 @@ TARGETS = [
     "komira//tools/build/examples/shared_lib:spike_exact",
     "komira//tools/build/gen:command_agreement",
     "komira//tools/build/gen:transition_lint",
+    "komira//tools/build/package/libkomira:libkomira_dist_load",
+    "komira//tools/build/package/libkomira:libkomira_dist_load_refuses_missing_runtime",
     "komira//tools/build/package/libkomira:libkomira_elf_report",
     "komira//tools/build/package/libkomira:libkomira_install",
     "komira//tools/build/package/libkomira:libkomira_install_unpinned",
