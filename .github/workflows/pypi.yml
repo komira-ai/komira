@@ -1,8 +1,9 @@
 # The publish of komira's Python package, the wheel `komira` on PyPI (docs/ci.md, "pypi.yml:
 # publishing the Python package"; the package is python/, docs/design/python_package.md).
 #
-# It builds the wheel on the farm, uploads it to TestPyPI, proves on a fresh runner that `pip install`
-# gets it and that the quickstart (python/examples/quickstart.py) prints what
+# It builds the wheel on the farm, proves on fresh runners that the wheel file installs and runs the
+# quickstart on every supported Python (`wheel-user-test`), uploads it to TestPyPI, proves on a fresh
+# runner that `pip install` gets it and that the quickstart (python/examples/quickstart.py) prints what
 # python/examples/quickstart.expected says, and only then uploads the same bytes to PyPI and proves the
 # same there. The version is 0.1.<N>, N the build number of `release_json stamp`, so a code commit is a
 # new version; the Linux wheel is komira-0.1.<N>-py3-none-manylinux_2_35_x86_64.whl.

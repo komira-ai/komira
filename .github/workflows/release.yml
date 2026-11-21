@@ -75,7 +75,8 @@
 #                      checkout: `pypi_smoke install --index dist` installs the wheel file into
 #                      an empty environment and runs the quickstart the README and the install
 #                      page show, held to python/examples/quickstart.expected.
-#   ORDER: neither job needs another job, and no job needs either: the release set and the
+#   ORDER: neither job needs a job of the release or of the mopm publish (the test job needs
+#   only `wheel`), and no job needs either: the release set and the
 #   mopm packages hold no wheel, so a red user test turns the run (and so main) red without
 #   holding back `release`, `mopm-stage` or the prod publish, and they do not hold it back.
 #

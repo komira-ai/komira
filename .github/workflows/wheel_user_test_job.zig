@@ -191,7 +191,27 @@ test "each defect of the user test job is refused with its message" {
     try expectRefused(ar, "        id: python\n        with:\n          python-version: ${{ matrix.python }}\n", "        id: python\n        with:\n          python-version: ${{ matrix.python }}\n" ++ SETUP_PYTHON ++ "\n", "set up Python exactly once");
     // a third run step, and the install before the Python is set up
     try expectRefused(ar, "      - name: the driver is executable\n", "      - name: list\n        run: ls\n      - name: the driver is executable\n", "it runs more than the chmod and the install");
+    // a second matrix, a third download
+    try expectRefused(ar, "      fail-fast: false\n", "      fail-fast: false\n      matrix: ${{ fromJSON(needs.wheel.outputs.matrix) }}\n", "it has more than one strategy or matrix");
+    try expectRefused(ar, "      - name: the driver is executable\n", DOWNLOAD ++ "\n        with:\n          name: wheel-${{ github.sha }}-extra\n          path: ${{ runner.temp }}/wheel/extra\n      - name: the driver is executable\n", "it does not download exactly the dist and the smoke artifacts");
     const install_block = INSTALL_STEP ++ "\n        env:\n" ++ PYTHON_ENV ++ "\n" ++ INSTALL_RUN;
     const setup_block = SETUP_PYTHON ++ "\n        id: python\n        with:\n" ++ PYTHON_VERSION ++ "\n";
     try expectRefused(ar, setup_block ++ install_block, install_block ++ "\n" ++ setup_block, "the steps are not the downloads, the chmod, set up Python, then install");
+}
+
+test "a gated spec wants its gate exactly once" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const ar = arena.allocator();
+    const gate = "    if: github.ref == 'refs/heads/main'";
+    const gated = Spec{ .build_job = "wheel", .artifact = "wheel-${{ github.sha }}", .gate = gate };
+    const with_gate = try std.mem.replaceOwned(u8, ar, GOOD, "    needs: wheel\n", "    needs: wheel\n" ++ gate ++ "\n");
+    try std.testing.expect((try check(ar, try linesOf(ar, with_gate), gated)) == null);
+    // no gate, another gate, the gate twice
+    const want = "wheel-user-test: its if: is not exactly `if: github.ref == 'refs/heads/main'`";
+    try std.testing.expectEqualStrings(want, (try check(ar, try linesOf(ar, GOOD), gated)).?);
+    const other = try std.mem.replaceOwned(u8, ar, GOOD, "    needs: wheel\n", "    needs: wheel\n    if: always()\n");
+    try std.testing.expectEqualStrings(want, (try check(ar, try linesOf(ar, other), gated)).?);
+    const twice = try std.mem.replaceOwned(u8, ar, GOOD, "    needs: wheel\n", "    needs: wheel\n" ++ gate ++ "\n" ++ gate ++ "\n");
+    try std.testing.expectEqualStrings(want, (try check(ar, try linesOf(ar, twice), gated)).?);
 }
