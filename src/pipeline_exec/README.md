@@ -295,3 +295,49 @@ assert_false(out.has(0))  # the consumer took it
 var counted = batch_values(out.take(1))
 assert_equal(counted[0], Int64(12))
 ```
+
+A SOURCE_CSV spec through `source_csv` and `plan_harness`; reading a file is
+in the welded tests (`test_source_csv`):
+
+```mojo
+from std.testing import assert_equal, assert_true
+
+from arrow.arrow_types import ArrowType
+from physical_plan.csv_source_spec import CsvSourceSpec
+from physical_plan.physical_plan import SOURCE_CSV, SourceSpecPod
+from pipeline_exec.plan_harness import csv_segment
+from pipeline_exec.source_csv import (
+    build_csv_source,
+    csv_read_options,
+    read_csv_spec,
+)
+
+var names = List[String]()
+names.append("code")
+var types = List[ArrowType]()
+types.append(ArrowType.STRING)
+var spec = SourceSpecPod.csv(
+    CsvSourceSpec("codes.csv", UInt8(ord(";")), True, 0, names^, types^)
+)
+# The reader gets the spec's dialect and parses each column at its bound
+# type, so a cell `0001` of this column stays the string `0001`.
+var options = csv_read_options(spec)
+assert_equal(Int(options.delimiter), ord(";"))
+assert_true(options.declared_column_types[0] == ArrowType.STRING)
+# A segment that reads the file and collects (plan_harness).
+var seg = csv_segment(0, spec^)
+assert_equal(seg.source_kind, SOURCE_CSV)
+# A spec that names no file is refused before anything is read.
+var refused = String("")
+try:
+    _ = read_csv_spec(SourceSpecPod())
+except e:
+    refused = String(e)
+assert_equal(refused, "pipeline_exec: a SOURCE_CSV spec names no file")
+refused = String("")
+try:
+    _ = build_csv_source(SourceSpecPod(), 1024)
+except e:
+    refused = String(e)
+assert_equal(refused, "pipeline_exec: a SOURCE_CSV spec names no file")
+```
