@@ -422,7 +422,7 @@ def _corpus_fields() raises -> List[List[UInt8]]:
 
 
 def _check[
-    T: Serializable & ImplicitlyDestructible
+    T: Serializable & Deinitable
 ](
     leg: Int,
     k: Int,
