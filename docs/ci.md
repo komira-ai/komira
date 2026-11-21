@@ -394,9 +394,10 @@ instead.
   `release-macos-result` (`needs: release-macos`, `if: always()`), fails with "the macOS build
   did not run" when the build job was skipped, and with "did not pass" when it failed, so the
   run list, the commit status and the badge never read green for a Mac build that did not
-  pass. Its message says what happened rather than guessing: when the build of the set failed,
-  `//release/ci:buck2_failure` (built before the build) reads that step's buck2 output and the
-  message is buck2's own lines after `BUILD FAILED` (also written to the run's summary);
+  pass. Its message says what happened rather than guessing: when a buck2 step failed (the build
+  of the set, or of the Python harness tests), `//release/ci:buck2_failure` (built before them)
+  reads that step's buck2 output and the message is buck2's own lines after `BUILD FAILED`
+  (also written to the run's summary);
   when an earlier step failed, the message names it. The farm connection refuses when a
   repository variable is empty (for the macOS set, `FARM_DARWIN_ARM64_PROPERTIES` and
   `FARM_DARWIN_MACOS_HOSTS` go together), and that is a failed run too. The set has not yet been measured on the macOS workers, and the publish must

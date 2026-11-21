@@ -4,7 +4,7 @@
 # komira//tools/build/platforms:darwin-arm64`: the compiles and the tests run on the farm's macOS
 # workers through the farm connection, never on a GitHub-hosted macOS runner (the job runs on an ubuntu
 # runner and only asks the farm). The macOS workers are few and the Linux ones many, so this build is in
-# the release and never in a pull request's check: this workflow has no pull_request,
+# the release and never in a pull request's check (the macOS Python harness tests are in it too): this workflow has no pull_request,
 # pull_request_target or merge_group trigger, and pr.yml and every workflow that runs on a pull request
 # hold no macOS worker set and build nothing for macOS (//:release_macos_cases says so). The one
 # exception is analysis, not a build: pr.yml's last step configures and analyses the same set for
@@ -27,7 +27,7 @@
 # the publish must not wait on a platform the release does not ship yet. Bounded: 90 minutes.
 # The last job, release-macos-result, makes a build that never ran (its job skipped) end the run
 # failed too, with "the macOS build did not run", and for a failed build says which step failed and,
-# when it was the build of the set, what buck2 said (release/ci:buck2_failure reads the step's log).
+# when it was a buck2 step, what buck2 said (release/ci:buck2_failure reads the step's log).
 #
 # It needs the repository variables FARM_DARWIN_ARM64_PROPERTIES and FARM_DARWIN_MACOS_HOSTS (and may
 # take FARM_MACOS_LIBRARY_DIRS), docs/ci.md; without them the step after the connection fails the job
@@ -63,9 +63,9 @@ jobs:
       id-token: write
     # What release-macos-result reports for a failed build: the first named step of this job that
     # failed (empty when none did: the checkout or farm-connect failed), and what buck2 said when it
-    # was the build of the set (one line, escaped for a workflow command by buck2_failure).
+    # was a buck2 step (one line, escaped for a workflow command by buck2_failure).
     outputs:
-      failed-step: ${{ steps.config.outcome == 'failure' && 'the buckconfig names the farm and its macOS workers' || steps.assert.outcome == 'failure' && 'build the farm assertion' || steps.reader.outcome == 'failure' && 'build the failure reader' || steps.build.outcome == 'failure' && 'build the macOS set' || '' }}
+      failed-step: ${{ steps.config.outcome == 'failure' && 'the buckconfig names the farm and its macOS workers' || steps.assert.outcome == 'failure' && 'build the farm assertion' || steps.reader.outcome == 'failure' && 'build the failure reader' || steps.build.outcome == 'failure' && 'build the macOS set' || steps.python.outcome == 'failure' && 'build the macOS Python harness tests' || '' }}
       said: ${{ steps.said.outputs.message }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -110,16 +110,29 @@ jobs:
         with:
           args: build --target-platforms komira//tools/build/platforms:darwin-arm64 --keep-going //release:mopm_darwin_libs
           assert-remote: ${{ steps.assert.outputs.path }}
+      # The Python test harness on macOS arm64: the macOS CPython and macOS wheels install on a macOS
+      # worker and the hello binding test (pyarrow, and a Mojo shared library loaded by path) runs
+      # there, with its three twins that must fail the way they name. Release only: no pull request
+      # runs a macOS action.
+      - name: build the macOS Python harness tests
+        id: python
+        uses: ./.github/actions/buck2-farm
+        with:
+          args: build --target-platforms komira//tools/build/platforms:darwin-arm64 --keep-going komira//tools/build/examples/python_binding:hello komira//tools/build/examples/python_binding:refuses_missing_lib komira//tools/build/examples/python_binding:refuses_wrong_add komira//tools/build/examples/python_binding:refuses_wrong_sum
+          assert-remote: ${{ steps.assert.outputs.path }}
       - name: the macOS build failed
         if: failure()
         run: |
           echo "release-macos FAILED on ${GITHUB_SHA}. The macOS arm64 build of //release:mopm_darwin_libs on the farm macOS workers did not pass. It does not block the release or the publish." >> "$GITHUB_STEP_SUMMARY"
-      # What buck2 said, from the log the buck2-farm action tees: to the summary, and as the output
-      # `message` that release-macos-result prints.
+      # What buck2 said, from the log the buck2-farm action tees (each buck2 step overwrites it, and a
+      # failed step skips the ones after it, so it is the failed step's): to the summary, and as the
+      # output `message` that release-macos-result prints.
       - name: what the build said
         id: said
-        if: failure() && steps.build.outcome == 'failure' && steps.reader.outcome == 'success'
-        run: '"$RUNNER_TEMP/buck2_failure" --log "$RUNNER_TEMP/buck2-farm.log" --step "build the macOS set" --github-output "$GITHUB_OUTPUT" --summary-file "$GITHUB_STEP_SUMMARY"'
+        if: failure() && steps.reader.outcome == 'success' && (steps.build.outcome == 'failure' || steps.python.outcome == 'failure')
+        env:
+          FAILED_STEP: ${{ steps.build.outcome == 'failure' && 'build the macOS set' || 'build the macOS Python harness tests' }}
+        run: '"$RUNNER_TEMP/buck2_failure" --log "$RUNNER_TEMP/buck2-farm.log" --step "$FAILED_STEP" --github-output "$GITHUB_OUTPUT" --summary-file "$GITHUB_STEP_SUMMARY"'
       - name: Stop buck2
         if: always()
         run: ./buck2 kill || true

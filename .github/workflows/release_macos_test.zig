@@ -50,8 +50,8 @@ const BOUND = "    timeout-minutes: 90";
 const CONTINUE_ON_ERROR = "    continue-on-error: true";
 const RESULT_JOB = "release-macos-result";
 const RESULT_REASON = "the macOS build did not run";
-const SAID_RUN = "        run: '\"$RUNNER_TEMP/buck2_failure\" --log \"$RUNNER_TEMP/buck2-farm.log\" --step \"build the macOS set\" --github-output \"$GITHUB_OUTPUT\" --summary-file \"$GITHUB_STEP_SUMMARY\"'";
-const SAID_IF = "        if: failure() && steps.build.outcome == 'failure' && steps.reader.outcome == 'success'";
+const SAID_RUN = "        run: '\"$RUNNER_TEMP/buck2_failure\" --log \"$RUNNER_TEMP/buck2-farm.log\" --step \"$FAILED_STEP\" --github-output \"$GITHUB_OUTPUT\" --summary-file \"$GITHUB_STEP_SUMMARY\"'";
+const SAID_IF = "        if: failure() && steps.reader.outcome == 'success' && (steps.build.outcome == 'failure' || steps.python.outcome == 'failure')";
 const SAID_OUTPUT = "      said: ${{ steps.said.outputs.message }}";
 const SAID_ENV = "          SAID: ${{ needs.release-macos.outputs.said }}";
 const GUESS = "farm-connect refuses when a repository variable is empty";
@@ -259,7 +259,7 @@ fn checkMacos(ar: std.mem.Allocator, text: []const u8) !?[]const u8 {
     // a failed build is reported with what the failed step said, never with a guess at the cause
     if (!has(job, SAID_RUN)) return "release-macos does not read the build's log with buck2_failure (what buck2 said would be lost)";
     if (!has(job, "        id: said") or !has(job, SAID_OUTPUT)) return "release-macos does not pass what buck2 said to release-macos-result (outputs: said)";
-    if (!has(job, SAID_IF)) return "release-macos does not read the build's log exactly when the build step failed and the reader was built";
+    if (!has(job, SAID_IF)) return "release-macos does not read the build's log exactly when a buck2 step failed and the reader was built";
     if (!has(res, SAID_ENV)) return "release-macos-result does not report what buck2 said (needs.release-macos.outputs.said)";
     if (!mentions(res, "needs.release-macos.outputs.failed-step")) return "release-macos-result does not name the step that failed";
     if (mentions(res, GUESS)) return "release-macos-result guesses at the cause of a failed build instead of reporting what the step said";
@@ -511,7 +511,7 @@ test "each edit of the real release-macos.yml that breaks the macOS build's cont
     // the report of a failed build: what buck2 said, the failed step, and no guess
     try expectRefused(ar, try replaced(ar, text, SAID_RUN ++ "\n", ""), "does not read the build's log with buck2_failure");
     try expectRefused(ar, try replaced(ar, text, SAID_OUTPUT ++ "\n", ""), "does not pass what buck2 said");
-    try expectRefused(ar, try replaced(ar, text, SAID_IF, "        if: failure()"), "exactly when the build step failed");
+    try expectRefused(ar, try replaced(ar, text, SAID_IF, "        if: failure()"), "exactly when a buck2 step failed");
     try expectRefused(ar, try replaced(ar, text, SAID_ENV ++ "\n", ""), "does not report what buck2 said");
     try expectRefused(ar, try replaced(ar, text, "          FAILED_STEP: ${{ needs.release-macos.outputs.failed-step }}\n", ""), "does not name the step that failed");
     try expectRefused(ar, try replaced(ar, text, "(that step's log says why)", "(" ++ GUESS ++ ")"), "guesses at the cause");
@@ -522,7 +522,7 @@ test "each edit of the real release-macos.yml that breaks the macOS build's cont
     try expectRefused(ar, try replaced(ar, text, BUILD_ARGS, "          args: build --target-platforms komira//tools/build/platforms:linux-x86_64 --keep-going //release:mopm_darwin_libs"), "for --target-platforms komira//tools/build/platforms:darwin-arm64");
     try expectRefused(ar, try replaced(ar, text, BUILD_ARGS, "          args: build --target-platforms komira//tools/build/platforms:darwin-arm64 --keep-going //release:mopm_artifacts"), "exactly one buck2 step");
     try expectRefused(ar, try replaced(ar, text, BUILD_ARGS, BUILD_ARGS ++ " --no-remote-cache"), "does not build //release:mopm_darwin_libs for");
-    try expectRefused(ar, try replaced(ar, text, BUILD_ARGS ++ "\n" ++ ASSERT ++ "\n      - name: the macOS build failed", BUILD_ARGS ++ "\n      - name: the macOS build failed"), "does not assert the build remote");
+    try expectRefused(ar, try replaced(ar, text, BUILD_ARGS ++ "\n" ++ ASSERT ++ "\n      # The Python test harness on macOS arm64", BUILD_ARGS ++ "\n      # The Python test harness on macOS arm64"), "does not assert the build remote");
     try expectRefused(ar, try replaced(ar, text, "      - name: build the macOS set\n        id: build\n        uses: ./.github/actions/buck2-farm\n", "      - name: build the macOS set\n        id: build\n        uses: ./.github/actions/other\n"), "outside the buck2-farm action");
 
     // the run ends failed when the build did not run
