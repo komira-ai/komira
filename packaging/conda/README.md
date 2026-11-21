@@ -439,26 +439,29 @@ The rule is `wheel_file`
   check that reads it back and refuses an unstamped one; built reproducibly.
 - **not a member of the release set.** The wheel is published by the PyPI
   workflow from its own target; the release set stays CONDA only.
-- **licence metadata (PEP 639)**: the wheel's `METADATA` carries
+- **licence metadata (PEP 639)**: the bundled wheel's `METADATA` carries
 
   ```
-  License-Expression: Apache-2.0
+  License-Expression: Apache-2.0 AND LicenseRef-Modular-Proprietary
   License-File: LICENSE
+  License-File: MODULAR_LICENSE
+  License-File: MODULAR_THIRD_PARTY_NOTICES
   License-File: NOTICE
-  Requires-Dist: mojo-compiler==<compiler version>
   ```
 
-  and the two files are the repository root's `LICENSE` and `NOTICE`, byte for
-  byte, at `komira-<version>.dist-info/licenses/LICENSE` and
-  `.../licenses/NOTICE`. There is no `License ::` classifier (PEP 639
-  deprecates it beside an expression). `NOTICE`'s last section is what tells a
-  user that the Mojo runtime comes from `mojo-compiler` under Modular's
-  licence. The read-back check refuses a wheel whose licence members differ
-  from the files given (the root's two by default), that carries a library of
-  `external_needed` (the package's target, when it is added, names the three runtime libraries,
-  `libKGENCompilerRTShared`, `libAsyncRTRuntimeGlobals` and
-  `libMSupportGlobals`), or whose Requires-Dist is not the target's (which
-  will name `mojo-compiler` at the compiler version).
+  and no `Requires-Dist`: the wheel carries the three Mojo runtime libraries
+  itself (`//src/so:libkomira[dist]`, python/BUCK). The external wheel
+  (python/flavour.bzl) carries `License-Expression: Apache-2.0`, `LICENSE` and
+  `NOTICE` only, and `Requires-Dist: mojo-compiler==<the toolchain's Mojo>`:
+  it carries none of Modular's files. `LICENSE` and `NOTICE` are
+  the repository root's, byte for byte; `MODULAR_LICENSE` and
+  `MODULAR_THIRD_PARTY_NOTICES` are the pinned `mojo-compiler` conda package's
+  `info/licenses/LICENSE` and `info/licenses/Third-Party-Notices`, unmodified
+  (third_party/modular/BUCK). There is no `License ::` classifier (PEP 639
+  deprecates it beside an expression). `NOTICE`'s last section says which
+  files are Modular's and under which text. The read-back check refuses a
+  wheel whose licence members differ from the files given, or whose
+  Requires-Dist is not the target's.
 
 ## Not done yet
 

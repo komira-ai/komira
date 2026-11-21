@@ -1,0 +1,128 @@
+load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_module", "zig_test")
+load("@komira//tools/build/platforms:defs.bzl", "DARWIN_ARM64", "LINUX_X86_64")
+
+# pypi_smoke: the driver of .github/workflows/pypi.yml (docs/ci.md, "pypi.yml: publishing the Python
+# package"). It names the wheel the build made as an index will (`dist`), says whether TestPyPI or PyPI
+# already holds it (`state`), says before anything is built whether a release lists a file of a given name
+# (`present`), and after an upload checks what the index serves (`verify`) and what
+# `pip install` makes of it in an empty environment (`install`). src/cli.zig says what each command does;
+# src/main.zig only forwards to the library (pypi_smoke_lib).
+#
+# Each scenario of its cases is its own test, on wheels made in memory, an index and a file host in memory
+# and a command runner in memory (src/testing.zig), and the tool is built only behind all of them:
+#   meta_unit      the name file of the present step (one wheel file name with a three-part tag; two lines, no
+#                  .whl suffix, a build tag, a missing part or a character a file name cannot hold refused) and
+#                  the dist step: a wheel with one dist-info, one Name, one Version and one Tag is named as the
+#                  index names it (a name normalised, a requirement list kept in order), and a wheel with two
+#                  dist-info directories, no or two Tag lines, a dist-info directory its metadata does not
+#                  make, a version or tag a file name cannot hold, or bytes that are no zip is refused by
+#                  defect; the dist directory holds that one file alone, and a non-empty --out is refused;
+#   index_unit     the state step: absent (no release, or other files only), the same bytes, other bytes, and
+#                  an HTTP 500, a transport error or an answer that is no release's JSON refused; the present
+#                  step: a file name is absent on a 404 and when the release lists another platform's file
+#                  only, present when the release lists it, and the same index errors are refused; the verify
+#                  step: served bytes that are not the built ones (sha256 and size), a listed sha256 or size
+#                  that differs, a file host that is not the index's, METADATA Name, Version,
+#                  Requires-Python and the ordered Requires-Dist that differ, all reported together, an index
+#                  that lags (passes on the second attempt, the log says so) and one that never has the file
+#                  (refused after the last attempt);
+#   install_unit   the install step: the exact commands for TestPyPI (requirements from PyPI first, then
+#                  komira alone with --no-deps) and for PyPI, each failing step named with its command, status
+#                  and stderr, only the komira install tried again, `pip check` and the installed version held,
+#                  the example's output held to the expected file with the version and the ABI version put in,
+#                  a malformed ABI table or a work directory that is not empty refused before any command;
+#   cli_unit       the command line: exit 0, 1 and 2, the output file appended to (`present` appends one line,
+#                  and none when the name file or the index is refused), the failure line and the
+#                  one-line error annotation, and each flag refused by name (unknown, valueless, repeated, out
+#                  of range) without reaching the index or a command;
+#   readme_unit    the README check: a python block equal to the example passes; one that differs by a line,
+#                  CRLF line ends, added or missing lines, no block, or a block that is not closed is refused
+#                  naming the line.
+# readme_shows_quickstart runs that check on the real files: the "What works" block of python/README.md is
+# python/examples/quickstart.py byte for byte.
+_ZIG = "komira//tools/build/toolchains:zig_next"
+_BUSYBOX = "komira//tools/build/toolchains:busybox"
+
+_SRCS = [
+    "src/cli.zig",
+    "src/common.zig",
+    "src/index.zig",
+    "src/install.zig",
+    "src/meta.zig",
+    "src/readme.zig",
+]
+
+# What the driver does, as a module its command and its cases import. It reads the same client as
+# release_staged_verify and the wheel zip of komira_wheel, through their modules.
+zig_module(
+    name = "pypi_smoke_lib",
+    src = "src/lib.zig",
+    imports = _SRCS,
+    deps = [
+        "//tools/build/ci:release_beta_fetch",
+        "//tools/build/package:wheel_zip",
+    ],
+)
+
+_SCENARIOS = ["meta", "index", "install", "cli", "readme"]
+
+[
+    zig_test(
+        name = "{}_unit".format(scenario),
+        exec_compatible_with = LINUX_X86_64,
+        src = "src/{}_test.zig".format(scenario),
+        imports = [] if scenario == "readme" else ["src/testing.zig"],
+        deps = [":pypi_smoke_lib"],
+        busybox = _BUSYBOX,
+        zig = _ZIG,
+    )
+    for scenario in _SCENARIOS
+]
+
+# The README's block and the quickstart, read from the two files themselves (exported by python/BUCK).
+zig_test(
+    name = "readme_shows_quickstart",
+    exec_compatible_with = LINUX_X86_64,
+    src = "src/readme_shows_quickstart_test.zig",
+    data = {
+        "README.md": "//python:README.md",
+        "quickstart.py": "//python:examples/quickstart.py",
+    },
+    deps = [":pypi_smoke_lib"],
+    busybox = _BUSYBOX,
+    zig = _ZIG,
+)
+
+zig_exe(
+    name = "pypi_smoke",
+    exec_compatible_with = LINUX_X86_64,
+    src = "src/main.zig",
+    deps = [":pypi_smoke_lib"],
+    unit_tests = [":{}_unit".format(s) for s in _SCENARIOS] + [
+        ":readme_shows_quickstart",
+        "komira//tools/build/toolchains:zig_next_version",
+    ],
+    busybox = _BUSYBOX,
+    zig = _ZIG,
+    visibility = ["PUBLIC"],
+)
+
+# The same driver for the hosted macOS runner of pypi.yml's macOS smoke jobs (`verify` and `install` run on
+# the Apple silicon runner, where the macOS wheel can be installed), cross-built by the Linux zig. pypi.yml's
+# build-macos-arm64 builds it with --target-platforms darwin-arm64; no pull request builds it
+# (tools/build/ci/rules.bzl EXCLUDED).
+zig_exe(
+    name = "pypi_smoke_macos_arm64",
+    exec_compatible_with = LINUX_X86_64,
+    target_compatible_with = DARWIN_ARM64,  # komira-limit:pypi-wheel-macos-arm64
+    src = "src/main.zig",
+    target = "aarch64-macos",
+    deps = [":pypi_smoke_lib"],
+    unit_tests = [":{}_unit".format(s) for s in _SCENARIOS] + [
+        ":readme_shows_quickstart",
+        "komira//tools/build/toolchains:zig_next_version",
+    ],
+    busybox = _BUSYBOX,
+    zig = _ZIG,
+    visibility = ["PUBLIC"],
+)

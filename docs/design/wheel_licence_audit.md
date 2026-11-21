@@ -1,8 +1,14 @@
 # Licence audit of the files the Python wheel carries
 
-The wheel carries `libkomira` and the native owner libraries `libkomira` links
-as `DT_NEEDED`, plus the Python package, `py.typed` and two licence files
-(`LICENSE`, `NOTICE`). This page lists every native file, the third-party code
+The bundled wheel carries `libkomira`, the native owner libraries `libkomira`
+links as `DT_NEEDED`, the three Mojo runtime libraries it needs, the Python
+package, `py.typed` and four licence files (`LICENSE`, `NOTICE`,
+`MODULAR_LICENSE`, `MODULAR_THIRD_PARTY_NOTICES`). The external wheel
+([python_package.md](python_package.md#the-two-flavours)) carries the same
+files but the three Mojo runtime libraries and the two `MODULAR_*` licence
+files, and adds `komira/_lib/mojo_runtime.tsv`, komira's own text record of
+the runtime's build ids; the three rows of Modular's libraries below are the
+bundled wheel's alone. This page lists every native file, the third-party code
 inside each, its licence, and where `NOTICE` reproduces the notice that
 licence requires. The file list is the measured table in
 [src/so/README.md](../../src/so/README.md) ("What the library links and
@@ -22,6 +28,9 @@ the built files; this page adds what each file contains.
 | `libkomira_scan_source_native.so.1` | none: komira's C | Apache-2.0 | none | (LICENSE) |
 | `libkomira_compression_native.so.1` | snappy 1.3.1 (static); LLVM libc++ and libc++abi from the Zig toolchain (static, symbols local) | BSD-3-Clause; Apache-2.0 with LLVM exceptions | snappy: copyright notice, conditions and disclaimer reproduced for binary redistribution; libc++: none for object code (LLVM exception), recorded anyway | "Third-party code inside the native files" 1 and 3 |
 | `libkomira_parquet_codec_native.so.1` | Brotli decoder 1.1.0 (static, names prefixed `komira_brotli_`) | MIT | copyright notice and permission notice reproduced | same section, 2 |
+| `libKGENCompilerRTShared.so` | Modular's Mojo runtime: binary, unmodified from the pinned `mojo-compiler` conda package | Modular Community License Terms (`LicenseRef-Modular-Proprietary`) | the licence text displayed with the copies, which the wheel carries as `.dist-info/licenses/MODULAR_LICENSE`, and the package's `Third-Party-Notices` (`.dist-info/licenses/MODULAR_THIRD_PARTY_NOTICES`) | "The Mojo runtime: Modular's libraries, carried in the bundled wheel" |
+| `libAsyncRTRuntimeGlobals.so` | same | same | same | same |
+| `libMSupportGlobals.so` | same | same | same | same |
 
 Sources and pins: snappy `//third_party/snappy` (version and archive sha256
 there), Brotli `//third_party/brotli` (same). The archive's `COPYING` and
@@ -29,16 +38,15 @@ there), Brotli `//third_party/brotli` (same). The archive's `COPYING` and
 
 ## What the wheel does not carry
 
-- **Mojo runtime** (`libKGENCompilerRTShared`, `libAsyncRTRuntimeGlobals`,
-  `libMSupportGlobals`) and the C++ runtime they need (`libstdc++.so.6`,
-  `libgcc_s.so.1`): not in the wheel. The wheel depends on Modular's
-  `mojo-compiler` package; `NOTICE` ("The Mojo runtime: a dependency, not
-  distributed") says so. The `libkomira` target's `DT_NEEDED` entries name
-  one runtime library, `libKGENCompilerRTShared.so`, and the README table lists
-  no runtime file among the files the package carries.
+- **The C++ runtime** the Mojo runtime libraries need (`libstdc++.so.6`,
+  `libgcc_s.so.1`): not in the wheel, taken from the host. `NOTICE` says so.
+  The wheel is tagged `manylinux_2_35` and the library checks bound the
+  `GLIBCXX_` and `CXXABI_` versions the carried files need (3.4.30 and
+  1.3.11).
 - **System libraries** the loader takes from the host: `libc.so.6`,
-  `libpthread.so.0`, `ld-linux-x86-64.so.2` (glibc, the wheel tag
-  `manylinux_2_34` is its floor).
+  `libpthread.so.0`, `ld-linux-x86-64.so.2` (glibc; the wheel tag
+  `manylinux_2_35` is its floor: `libAsyncRTRuntimeGlobals.so` needs
+  `GLIBC_2.35`, one above the floor of komira's own files).
 - **Codec libraries opened at run time**: `libz`, `liblz4`, `libzstd`,
   `libbz2`, `liblzma` are opened with `dlopen` by soname on first use of
   their codec (`src/compression/src/compression/codec_libraries.mojo` and the
@@ -83,7 +91,8 @@ Verified by reading, not by running anything on a developer machine:
   libraries above, by soname, through the system loader.
 
 Offline behaviour follows: installing needs the network once, for `pip` to fetch
-the wheel and `mojo-compiler`; running needs none.
+the komira wheel (the bundled flavour depends on no other distribution; the
+external flavour makes `pip` fetch Modular's `mojo-compiler` too); running needs none.
 
 ## Keeping this page true
 

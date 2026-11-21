@@ -1,0 +1,700 @@
+# The publish of komira's Python package, the wheel `komira` on PyPI (docs/ci.md, "pypi.yml:
+# publishing the Python package"; the package is python/, docs/design/python_package.md).
+#
+# It builds the wheel on the farm, uploads it to TestPyPI, proves on a fresh runner that `pip install`
+# gets it and that the quickstart (python/examples/quickstart.py) prints what
+# python/examples/quickstart.expected says, and only then uploads the same bytes to PyPI and proves the
+# same there. The version is 0.1.<N>, N the build number of `release_json stamp`, so a code commit is a
+# new version; the Linux wheel is komira-0.1.<N>-py3-none-manylinux_2_35_x86_64.whl.
+#
+# THE FLAVOUR: the input `flavour` picks which of the wheel's two flavours (python/flavour.bzl,
+# docs/design/python_package.md "The two flavours") the run builds, tests and publishes; a run publishes
+# exactly one. `external` carries no file of Modular's and requires Modular's `mojo-compiler`, which pip
+# installs from PyPI beside it; `bundled` carries the Mojo runtime libraries and requires nothing. The
+# default is `external`; changing it is the one line `default:` below. The run's summary names the
+# flavour, and so does the first paragraph of the wheel's description on the index. The macOS arm64
+# wheel is the bundled flavour only (no external flavour exists for macOS yet), so the macOS jobs run
+# for a `bundled` run and a default run publishes no macOS wheel.
+#
+# THE JOBS of the Linux wheel, in order (a job that fails stops every job after it):
+#   `build`           on the farm: builds the stamped wheel of the flavour (//python:komira_wheel_<flavour>),
+#                     runs its install test on those bytes (//python:wheel_install_test_<flavour>), builds
+#                     the smoke driver
+#                     (//python/smoke:pypi_smoke) and names the dist directory; keeps the dist directory
+#                     and the driver as two workflow artifacts, and writes the flavour and the version to
+#                     the run's summary. It holds no upload step.
+#   `testpypi`        asks TestPyPI which state the version is in (below) and, for `absent`, uploads
+#                     the dist directory with trusted publishing.
+#   `testpypi-smoke`  (not for `differs`) on a fresh runner: the driver `verify`s that TestPyPI serves
+#                     the wheel as built (sha256, size, METADATA), then `install`s it with pip from
+#                     TestPyPI into an empty environment on the Python a user has (actions/setup-python
+#                     3.13) and runs the quickstart.
+#   `pypi`            the same as `testpypi` for PyPI; it needs `testpypi-smoke`, so a wheel that did not
+#                     install from TestPyPI is never sent to PyPI.
+#   `pypi-smoke`      (not for `differs`) the same as `testpypi-smoke` against PyPI.
+#   `result`          makes a skipped or failed job end the run red, and says why in the log.
+#
+# THE MACOS ARM64 WHEEL, six more jobs, published under the same name and version as the Linux wheel
+# of the run (komira-0.1.<N>-py3-none-macosx_11_0_arm64.whl), by a chain of its own: no Linux job
+# needs a macOS job or reads its result, and no macOS job needs a Linux job. It is the bundled flavour
+# (//python:komira_wheel_macos_arm64 carries the Mojo runtime libraries): the chain runs only when the
+# run's flavour is `bundled`, so a run still publishes exactly one flavour on every platform it
+# publishes, and an `external` run publishes no macOS wheel and no Modular binary.
+#   `build-macos-arm64`          only for the bundled flavour. On the farm (the job runs on an ubuntu
+#                                runner and only asks the farm; the Macs are farm workers): builds the file name of the wheel,
+#                                asks TestPyPI and PyPI whether each lists that file (`pypi_smoke
+#                                present`), and only when one does not builds the wheel, its install
+#                                test and the macOS driver on the Macs, and keeps the dist directory
+#                                and the drivers as two artifacts. A daily run with no new code builds
+#                                nothing on the Macs; its output `version` is then empty.
+#   `testpypi-macos-arm64`       like `testpypi`, for the macOS dist; it runs only when the build made a
+#                                wheel.
+#   `testpypi-smoke-macos-arm64` like `testpypi-smoke`, on the GitHub-hosted runner macos-15 (Apple
+#                                silicon) with the macOS driver.
+#   `pypi-macos-arm64`           like `pypi`, after the macOS smoke on TestPyPI.
+#   `pypi-smoke-macos-arm64`     like `pypi-smoke`, on macos-15.
+#   `result-macos-arm64`         the verdict of the macOS chain, as `result` is the Linux chain's; for an
+#                                `external` run it is a notice that the flavour has no macOS wheel yet.
+#
+# THE THREE STATES of the version on an index, asked before any upload (`pypi_smoke state`): `absent`
+# (no file of that name: upload, then the smoke), `same` (the file is there with the same sha256: no
+# upload, the smoke runs, so a re-run after a failed smoke is the smoke again) and `differs` (the file is
+# there with other bytes: a commit that changed only documentation, which the stamp ignores, built a
+# wheel whose description differs; nothing is uploaded, there is no smoke, the run is green with a
+# notice, and the next code commit ships the fix). A release is never deleted and never overwritten; a
+# bad one is yanked by the PyPI owner (docs/ci.md).
+#
+# ITS OWN FILE: trusted publishing binds an index's publisher to the workflow file name and the
+# environment, so this file is the only one that can upload, and release.yml holds no publishing
+# credential. The identities: only `build`, `testpypi`, `pypi`, `build-macos-arm64`,
+# `testpypi-macos-arm64` and `pypi-macos-arm64` hold `id-token: write`. `build` and `build-macos-arm64`
+# hold it for farm-connect alone, in the environment `build`, which no PyPI publisher trusts, and have
+# no upload step. `testpypi`, `pypi` and their macOS twins hold it for the upload alone, each in the
+# environment of its index, and none joins the farm or builds anything. The smoke jobs hold `contents: read`.
+# No secret and no API token: nothing is stored.
+#
+# TRIGGERS: a manual run on main (`workflow_dispatch`) and nothing else (never a pull request: a macOS
+# build is only in a release workflow); the daily schedule comes
+# after the first release is verified. Every job runs on main only. One run at a time (the group
+# `pypi`), and a running one is never cancelled.
+#
+# WHAT THE SMOKE PROVES: the index serves the bytes that were built, with the METADATA that was
+# built, and `pip install komira==<version>` into an empty environment (the dependencies from the
+# real PyPI, komira from the index under test, nothing else) gives a package that imports, reports its
+# version and the engine's ABI version, and registers a Parquet file in a session and closes it: on
+# Linux x86_64 on CPython 3.13, and, in the macOS smoke jobs, on macOS arm64 on CPython 3.13 on a
+# hosted macOS runner.
+# WHAT IT DOES NOT PROVE: any query result (the call that runs a query has not landed), a platform
+# other than Linux x86_64 and macOS arm64, a macOS older than the runner's, or a Python other than 3.13.
+name: pypi
+
+on:
+  workflow_dispatch:
+    inputs:
+      flavour:
+        description: the wheel's flavour (python/flavour.bzl); a run publishes exactly one
+        type: choice
+        options:
+          - external
+          - bundled
+        default: external
+        required: true
+
+permissions: {}
+
+concurrency:
+  group: pypi
+  cancel-in-progress: false
+
+jobs:
+  # Builds on the farm and keeps the bytes that every later job uploads and checks. The job holds
+  # `contents: read` and the `id-token: write` that the farm connection exchanges for the tailnet,
+  # nothing else, in the environment `build`. It has no upload step.
+  build:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    environment: build
+    timeout-minutes: 120
+    permissions:
+      contents: read
+      # for farm-connect only: the token Tailscale trusts
+      id-token: write
+    outputs:
+      version: ${{ steps.dist.outputs.version }}
+    steps:
+      # The commit the run started on, with the full history: the stamp is
+      # derived from git and refuses a shallow clone.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      # The farm connection: tailnet join, refusal unless the farm answers, and
+      # the machine buckconfig, from repository variables (docs/ci.md).
+      - uses: ./.github/actions/farm-connect
+        with:
+          ts-client-id: ${{ vars.TS_CLIENT_ID }}
+          ts-audience: ${{ vars.TS_AUDIENCE }}
+          farm-address: ${{ vars.FARM_ADDRESS }}
+          farm-instance: ${{ vars.FARM_INSTANCE }}
+          farm-properties: ${{ vars.FARM_LINUX_X86_64_PROPERTIES }}
+          tls: ${{ vars.FARM_TLS || 'false' }}
+          # the publish queues behind the pull-request checks when the farm is full
+          farm-qos: batch
+      # A guard on the file farm-connect wrote: without the linux property set
+      # a build would run on this runner.
+      - name: the buckconfig names the farm
+        run: |
+          ./buck2 audit config komira_re.linux_x86_64_properties --style json | grep -q '": *"[^"]'
+      # The tool the buck2-farm action runs over each step's output; its path
+      # is the step's output.
+      - name: build the farm assertion
+        id: assert
+        run: echo "path=$(./buck2 build komira//tools/build/ci:assert_remote --show-full-simple-output)" >> "$GITHUB_OUTPUT"
+      - name: build the release tool
+        uses: ./.github/actions/buck2-farm
+        with:
+          args: build //release/ci:release_json --out ${{ runner.temp }}/pypi/release_json
+          assert-remote: ${{ steps.assert.outputs.path }}
+      # The stamp the wheel carries: the build number, the commit it counts and its commit time,
+      # from git.
+      - name: the stamp
+        id: stamp
+        run: '"$RUNNER_TEMP/pypi/release_json" stamp --revision "$GITHUB_SHA" --github-output "$GITHUB_OUTPUT"'
+      # The wheel of the flavour the run was given, stamped: its version is 0.1.<build number>. The
+      # input is one of the choice's options, so the target is one of the two wheels.
+      - name: build the wheel
+        uses: ./.github/actions/buck2-farm
+        with:
+          args: build -c komira.package_stamp=${{ steps.stamp.outputs.build_number }} -c komira.package_commit=${{ steps.stamp.outputs.source_commit }} -c komira.package_timestamp_ms=${{ steps.stamp.outputs.timestamp_ms }} //python:komira_wheel_${{ inputs.flavour }}[release] --out ${{ runner.temp }}/pypi/built/komira.whl
+          assert-remote: ${{ steps.assert.outputs.path }}
+      # The install test of the same wheel (built from the same stamp and flavour, so the same bytes):
+      # installs it into an empty environment (the external flavour with Modular's package it
+      # requires) and loads the library, on the farm, before anything is uploaded.
+      - name: the install test on the wheel
+        uses: ./.github/actions/buck2-farm
+        with:
+          args: build -c komira.package_stamp=${{ steps.stamp.outputs.build_number }} -c komira.package_commit=${{ steps.stamp.outputs.source_commit }} -c komira.package_timestamp_ms=${{ steps.stamp.outputs.timestamp_ms }} //python:wheel_install_test_${{ inputs.flavour }}
+          assert-remote: ${{ steps.assert.outputs.path }}
+      # The driver every later job runs: the state of the version, the verify and the install smoke.
+      - name: build the smoke driver
+        uses: ./.github/actions/buck2-farm
+        with:
+          args: build -c komira.package_stamp=${{ steps.stamp.outputs.build_number }} -c komira.package_commit=${{ steps.stamp.outputs.source_commit }} -c komira.package_timestamp_ms=${{ steps.stamp.outputs.timestamp_ms }} //python/smoke:pypi_smoke --out ${{ runner.temp }}/pypi/smoke/pypi_smoke
+          assert-remote: ${{ steps.assert.outputs.path }}
+      # The directory the upload sends: the wheel under its file name, read from the wheel itself. The
+      # version is the output the later jobs name their artifacts with.
+      - name: the dist directory
+        id: dist
+        run: '"$RUNNER_TEMP/pypi/smoke/pypi_smoke" dist --wheel "$RUNNER_TEMP/pypi/built/komira.whl" --out "$RUNNER_TEMP/pypi/dist" --github-output "$GITHUB_OUTPUT"'
+      # The run's summary says which flavour and version this run publishes.
+      - name: the flavour in the run's summary
+        env:
+          FLAVOUR: ${{ inputs.flavour }}
+          VERSION: ${{ steps.dist.outputs.version }}
+        run: 'echo "komira $VERSION, the $FLAVOUR flavour of the wheel (python/flavour.bzl)" >> "$GITHUB_STEP_SUMMARY"'
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: pypi-${{ steps.dist.outputs.version }}-dist
+          path: ${{ runner.temp }}/pypi/dist
+          if-no-files-found: error
+          retention-days: 14
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: pypi-${{ steps.dist.outputs.version }}-smoke
+          path: ${{ runner.temp }}/pypi/smoke
+          if-no-files-found: error
+          retention-days: 14
+      - name: Stop buck2
+        if: always()
+        run: ./buck2 kill || true
+
+  # TestPyPI: asks which state the version is in and uploads for `absent`. The job holds the
+  # `id-token: write` that TestPyPI exchanges for an upload (trusted publishing, the environment
+  # `testpypi`), and nothing else: no checkout, no farm, no build. The upload action keeps its defaults
+  # (no skipping of an existing file, attestations on). The dist directory is downloaded into the
+  # workspace, `dist`, holding the wheel alone: the action runs in a container that sees the workspace
+  # and not the runner's temporary directory, and it uploads every file of its packages directory.
+  testpypi:
+    needs: build
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    environment: testpypi
+    timeout-minutes: 30
+    permissions:
+      # trusted publishing: the token TestPyPI exchanges for an upload
+      id-token: write
+    outputs:
+      state: ${{ steps.state.outputs.state }}
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: pypi-${{ needs.build.outputs.version }}-dist
+          path: dist
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: pypi-${{ needs.build.outputs.version }}-smoke
+          path: ${{ runner.temp }}/pypi/smoke
+      - name: the driver is executable
+        run: chmod +x "$RUNNER_TEMP/pypi/smoke/pypi_smoke"
+      # absent, same or differs: asked of the index, before any upload
+      - name: the wheel on TestPyPI
+        id: state
+        run: '"$RUNNER_TEMP/pypi/smoke/pypi_smoke" state --index testpypi --dist dist --github-output "$GITHUB_OUTPUT"'
+      - name: upload to TestPyPI
+        if: steps.state.outputs.state == 'absent'
+        uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          packages-dir: dist
+
+  # The smoke on TestPyPI, on a fresh runner with the Python a user has. It reads python/examples and
+  # the ABI table from the checkout; the wheel it installs comes from the index, never from the
+  # artifact. The job holds `contents: read` and no identity.
+  testpypi-smoke:
+    needs: [build, testpypi]
+    if: github.ref == 'refs/heads/main' && needs.testpypi.outputs.state != 'differs'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      # the example, its expected output and the ABI table
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: pypi-${{ needs.build.outputs.version }}-dist
+          path: dist
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: pypi-${{ needs.build.outputs.version }}-smoke
+          path: ${{ runner.temp }}/pypi/smoke
+      - name: the driver is executable
+        run: chmod +x "$RUNNER_TEMP/pypi/smoke/pypi_smoke"
+      - name: TestPyPI serves the wheel as built
+        run: '"$RUNNER_TEMP/pypi/smoke/pypi_smoke" verify --index testpypi --dist dist --attempts 5 --delay 30'
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        id: python
+        with:
+          python-version: '3.13'
+      - name: pip installs komira from TestPyPI and the quickstart prints what it should
+        env:
+          PYTHON: ${{ steps.python.outputs.python-path }}
+        run: '"$RUNNER_TEMP/pypi/smoke/pypi_smoke" install --index testpypi --dist dist --python "$PYTHON" --example python/examples/quickstart.py --expect python/examples/quickstart.expected --data python/examples/readings.parquet --abi-table src/so/abi/komira.tsv --work "$RUNNER_TEMP/pypi/install" --attempts 5 --delay 30'
+
+  # PyPI: the same as testpypi, for the real index (the environment `pypi`), after the smoke on
+  # TestPyPI. The upload action's default repository is PyPI, so no repository-url.
+  pypi:
+    needs: [build, testpypi-smoke]
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    environment: pypi
+    timeout-minutes: 30
+    permissions:
+      # trusted publishing: the token PyPI exchanges for an upload
+      id-token: write
+    outputs:
+      state: ${{ steps.state.outputs.state }}
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: pypi-${{ needs.build.outputs.version }}-dist
+          path: dist
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: pypi-${{ needs.build.outputs.version }}-smoke
+          path: ${{ runner.temp }}/pypi/smoke
+      - name: the driver is executable
+        run: chmod +x "$RUNNER_TEMP/pypi/smoke/pypi_smoke"
+      # absent, same or differs: asked of the index, before any upload
+      - name: the wheel on PyPI
+        id: state
+        run: '"$RUNNER_TEMP/pypi/smoke/pypi_smoke" state --index pypi --dist dist --github-output "$GITHUB_OUTPUT"'
+      - name: upload to PyPI
+        if: steps.state.outputs.state == 'absent'
+        uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
+        with:
+          packages-dir: dist
+
+  # The smoke on PyPI: the same as testpypi-smoke, against the real index. It is the last proof that
+  # a user's `pip install komira` works.
+  pypi-smoke:
+    needs: [build, pypi]
+    if: github.ref == 'refs/heads/main' && needs.pypi.outputs.state != 'differs'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      # the example, its expected output and the ABI table
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: pypi-${{ needs.build.outputs.version }}-dist
+          path: dist
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: pypi-${{ needs.build.outputs.version }}-smoke
+          path: ${{ runner.temp }}/pypi/smoke
+      - name: the driver is executable
+        run: chmod +x "$RUNNER_TEMP/pypi/smoke/pypi_smoke"
+      - name: PyPI serves the wheel as built
+        run: '"$RUNNER_TEMP/pypi/smoke/pypi_smoke" verify --index pypi --dist dist --attempts 5 --delay 30'
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        id: python
+        with:
+          python-version: '3.13'
+      - name: pip installs komira from PyPI and the quickstart prints what it should
+        env:
+          PYTHON: ${{ steps.python.outputs.python-path }}
+        run: '"$RUNNER_TEMP/pypi/smoke/pypi_smoke" install --index pypi --dist dist --python "$PYTHON" --example python/examples/quickstart.py --expect python/examples/quickstart.expected --data python/examples/readings.parquet --abi-table src/so/abi/komira.tsv --work "$RUNNER_TEMP/pypi/install" --attempts 5 --delay 30'
+
+  # The run's verdict. A job that was skipped because one before it failed would otherwise leave the
+  # run looking finished: this job fails the run, naming the stage that did not succeed, and holds no
+  # permission. The job results reach the steps through `env:`, never inside a `run:`.
+  result:
+    needs: [build, testpypi, testpypi-smoke, pypi, pypi-smoke]
+    if: always() && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: the build and the TestPyPI upload succeeded
+        if: needs.build.result != 'success' || needs.testpypi.result != 'success'
+        env:
+          BUILD: ${{ needs.build.result }}
+          TESTPYPI: ${{ needs.testpypi.result }}
+        run: 'echo "::error title=pypi::the build or the TestPyPI upload job did not succeed (build $BUILD, testpypi $TESTPYPI)" && exit 1'
+      - name: the bytes differ at the same version
+        if: needs.testpypi.outputs.state == 'differs' || needs.pypi.outputs.state == 'differs'
+        run: 'echo "::notice title=pypi::bytes differ at the same version: a commit that changed only documentation, which the stamp ignores; a code commit raises the version"'
+      - name: the TestPyPI smoke and the PyPI upload succeeded
+        if: needs.testpypi.outputs.state != 'differs' && (needs.testpypi-smoke.result != 'success' || needs.pypi.result != 'success')
+        env:
+          TESTPYPI_SMOKE: ${{ needs.testpypi-smoke.result }}
+          PYPI: ${{ needs.pypi.result }}
+        run: 'echo "::error title=pypi::the TestPyPI smoke or the PyPI upload job did not succeed (testpypi-smoke $TESTPYPI_SMOKE, pypi $PYPI)" && exit 1'
+      - name: the PyPI smoke succeeded
+        if: needs.testpypi.outputs.state != 'differs' && needs.pypi.outputs.state != 'differs' && needs.pypi-smoke.result != 'success'
+        env:
+          PYPI_SMOKE: ${{ needs.pypi-smoke.result }}
+        run: 'echo "::error title=pypi::the PyPI smoke job did not succeed (pypi-smoke $PYPI_SMOKE)" && exit 1'
+
+  # ---- the macOS arm64 wheel: its own chain, never needing the Linux jobs and never needed by them ----
+
+  # Asks which of the two indexes lack this version's macOS wheel and builds it on the farm's macOS
+  # workers only when one does. The job runs on an ubuntu runner and only asks the farm (the Macs are
+  # farm workers). The first build steps run on Linux workers: the release tool, the stamp, the Linux
+  # smoke driver (which asks the indexes) and the wheel's file name. A Mac build starts only after
+  # both indexes were asked, so a daily run with no new code builds nothing on the Macs. The job holds
+  # `contents: read` and the `id-token: write` that the farm connection exchanges for the tailnet,
+  # nothing else, in the environment `build`. It has no upload step. Its output `version` is empty
+  # when nothing was built. It runs only for the bundled flavour: the macOS wheel
+  # (//python:komira_wheel_macos_arm64) carries the Mojo runtime, and the external flavour has no macOS
+  # runtime record, loader branch or Modular wheel yet.
+  build-macos-arm64:
+    if: github.ref == 'refs/heads/main' && inputs.flavour == 'bundled'
+    runs-on: ubuntu-24.04
+    environment: build
+    timeout-minutes: 120
+    permissions:
+      contents: read
+      # for farm-connect only: the token Tailscale trusts
+      id-token: write
+    outputs:
+      version: ${{ steps.dist.outputs.version }}
+    steps:
+      # The commit the run started on, with the full history: the stamp is
+      # derived from git and refuses a shallow clone.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      # The farm connection with the macOS worker set, as release-macos.yml makes it.
+      - uses: ./.github/actions/farm-connect
+        with:
+          ts-client-id: ${{ vars.TS_CLIENT_ID }}
+          ts-audience: ${{ vars.TS_AUDIENCE }}
+          farm-address: ${{ vars.FARM_ADDRESS }}
+          farm-instance: ${{ vars.FARM_INSTANCE }}
+          farm-properties: ${{ vars.FARM_LINUX_X86_64_PROPERTIES }}
+          darwin-properties: ${{ vars.FARM_DARWIN_ARM64_PROPERTIES }}
+          darwin-macos-hosts: ${{ vars.FARM_DARWIN_MACOS_HOSTS }}
+          macos-library-dirs: ${{ vars.FARM_MACOS_LIBRARY_DIRS }}
+          tls: ${{ vars.FARM_TLS || 'false' }}
+          # the publish queues behind the pull-request checks when the farm is full
+          farm-qos: batch
+      # No guard step of its own: without the linux set farm-connect refuses, and every build
+      # below is the buck2-farm action, which fails a step that ran anything on this runner;
+      # without the macOS worker set or hosts the first darwin build (the wheel's file name)
+      # fails analysis, naming the `[komira_re]` key that is not set.
+      - name: build the farm assertion
+        id: assert
+        run: echo "path=$(./buck2 build komira//tools/build/ci:assert_remote --show-full-simple-output)" >> "$GITHUB_OUTPUT"
+      - name: build the release tool
+        uses: ./.github/actions/buck2-farm
+        with:
+          args: build //release/ci:release_json --out ${{ runner.temp }}/pypi-macos-arm64/release_json
+          assert-remote: ${{ steps.assert.outputs.path }}
+      # The stamp the wheel carries: the build number, the commit it counts and its commit time,
+      # from git. It is the same one the Linux `build` of this run computes.
+      - name: the stamp
+        id: stamp
+        run: '"$RUNNER_TEMP/pypi-macos-arm64/release_json" stamp --revision "$GITHUB_SHA" --github-output "$GITHUB_OUTPUT"'
+      # The Linux build of the driver: it asks the indexes below and, in the upload jobs, the state.
+      - name: build the smoke driver
+        uses: ./.github/actions/buck2-farm
+        with:
+          args: build -c komira.package_stamp=${{ steps.stamp.outputs.build_number }} -c komira.package_commit=${{ steps.stamp.outputs.source_commit }} -c komira.package_timestamp_ms=${{ steps.stamp.outputs.timestamp_ms }} //python/smoke:pypi_smoke --out ${{ runner.temp }}/pypi-macos-arm64/smoke/pypi_smoke
+          assert-remote: ${{ steps.assert.outputs.path }}
+      # The wheel's file name, written at analysis, without building the wheel.
+      - name: build the file name of the macOS wheel
+        uses: ./.github/actions/buck2-farm
+        with:
+          args: build --target-platforms komira//tools/build/platforms:darwin-arm64 -c komira.package_stamp=${{ steps.stamp.outputs.build_number }} -c komira.package_commit=${{ steps.stamp.outputs.source_commit }} -c komira.package_timestamp_ms=${{ steps.stamp.outputs.timestamp_ms }} //python:komira_wheel_macos_arm64[file_name] --out ${{ runner.temp }}/pypi-macos-arm64/file_name
+          assert-remote: ${{ steps.assert.outputs.path }}
+      # present or not: asked of each index for this file name, before anything is built on a Mac
+      - name: the macOS wheel on TestPyPI
+        id: testpypi_file
+        run: '"$RUNNER_TEMP/pypi-macos-arm64/smoke/pypi_smoke" present --index testpypi --name-file "$RUNNER_TEMP/pypi-macos-arm64/file_name" --github-output "$GITHUB_OUTPUT"'
+      - name: the macOS wheel on PyPI
+        id: pypi_file
+        run: '"$RUNNER_TEMP/pypi-macos-arm64/smoke/pypi_smoke" present --index pypi --name-file "$RUNNER_TEMP/pypi-macos-arm64/file_name" --github-output "$GITHUB_OUTPUT"'
+      # Every step from here on runs only when an index lacks the file.
+      - name: build the macOS wheel
+        if: steps.testpypi_file.outputs.present != 'true' || steps.pypi_file.outputs.present != 'true'
+        uses: ./.github/actions/buck2-farm
+        with:
+          args: build --target-platforms komira//tools/build/platforms:darwin-arm64 -c komira.package_stamp=${{ steps.stamp.outputs.build_number }} -c komira.package_commit=${{ steps.stamp.outputs.source_commit }} -c komira.package_timestamp_ms=${{ steps.stamp.outputs.timestamp_ms }} //python:komira_wheel_macos_arm64[release] --out ${{ runner.temp }}/pypi-macos-arm64/built/komira.whl
+          assert-remote: ${{ steps.assert.outputs.path }}
+      # The install test of the same wheel (the same stamp, so the same bytes), on a macOS worker.
+      - name: the install test on the macOS wheel
+        if: steps.testpypi_file.outputs.present != 'true' || steps.pypi_file.outputs.present != 'true'
+        uses: ./.github/actions/buck2-farm
+        with:
+          args: build --target-platforms komira//tools/build/platforms:darwin-arm64 -c komira.package_stamp=${{ steps.stamp.outputs.build_number }} -c komira.package_commit=${{ steps.stamp.outputs.source_commit }} -c komira.package_timestamp_ms=${{ steps.stamp.outputs.timestamp_ms }} //python:wheel_install_test_macos_arm64
+          assert-remote: ${{ steps.assert.outputs.path }}
+      # The driver the macOS smoke jobs run: cross-compiled on the farm, run on a hosted macOS runner.
+      - name: build the macOS smoke driver
+        if: steps.testpypi_file.outputs.present != 'true' || steps.pypi_file.outputs.present != 'true'
+        uses: ./.github/actions/buck2-farm
+        with:
+          args: build --target-platforms komira//tools/build/platforms:darwin-arm64 -c komira.package_stamp=${{ steps.stamp.outputs.build_number }} -c komira.package_commit=${{ steps.stamp.outputs.source_commit }} -c komira.package_timestamp_ms=${{ steps.stamp.outputs.timestamp_ms }} //python/smoke:pypi_smoke_macos_arm64 --out ${{ runner.temp }}/pypi-macos-arm64/smoke/pypi_smoke_macos_arm64
+          assert-remote: ${{ steps.assert.outputs.path }}
+      # The directory the upload sends: the wheel under its file name, read from the wheel itself.
+      - name: the dist directory
+        id: dist
+        if: steps.testpypi_file.outputs.present != 'true' || steps.pypi_file.outputs.present != 'true'
+        run: '"$RUNNER_TEMP/pypi-macos-arm64/smoke/pypi_smoke" dist --wheel "$RUNNER_TEMP/pypi-macos-arm64/built/komira.whl" --out "$RUNNER_TEMP/pypi-macos-arm64/dist" --github-output "$GITHUB_OUTPUT"'
+      - name: keep the dist directory
+        if: steps.testpypi_file.outputs.present != 'true' || steps.pypi_file.outputs.present != 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: pypi-${{ steps.dist.outputs.version }}-macos-arm64-dist
+          path: ${{ runner.temp }}/pypi-macos-arm64/dist
+          if-no-files-found: error
+          retention-days: 14
+      - name: keep the drivers
+        if: steps.testpypi_file.outputs.present != 'true' || steps.pypi_file.outputs.present != 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: pypi-${{ steps.dist.outputs.version }}-macos-arm64-smoke
+          path: ${{ runner.temp }}/pypi-macos-arm64/smoke
+          if-no-files-found: error
+          retention-days: 14
+      - name: Stop buck2
+        if: always()
+        run: ./buck2 kill || true
+
+  # TestPyPI for the macOS wheel: the same as `testpypi`, on the macOS dist. It runs only when the
+  # build made a wheel.
+  testpypi-macos-arm64:
+    needs: build-macos-arm64
+    if: github.ref == 'refs/heads/main' && needs.build-macos-arm64.outputs.version != ''
+    runs-on: ubuntu-24.04
+    environment: testpypi
+    timeout-minutes: 30
+    permissions:
+      # trusted publishing: the token TestPyPI exchanges for an upload
+      id-token: write
+    outputs:
+      state: ${{ steps.state.outputs.state }}
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: pypi-${{ needs.build-macos-arm64.outputs.version }}-macos-arm64-dist
+          path: dist
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: pypi-${{ needs.build-macos-arm64.outputs.version }}-macos-arm64-smoke
+          path: ${{ runner.temp }}/pypi-macos-arm64/smoke
+      # the Linux driver: this job runs on Linux and only asks the index
+      - name: the driver is executable
+        run: chmod +x "$RUNNER_TEMP/pypi-macos-arm64/smoke/pypi_smoke"
+      # absent, same or differs: asked of the index, before any upload
+      - name: the macOS wheel on TestPyPI
+        id: state
+        run: '"$RUNNER_TEMP/pypi-macos-arm64/smoke/pypi_smoke" state --index testpypi --dist dist --github-output "$GITHUB_OUTPUT"'
+      - name: upload the macOS wheel to TestPyPI
+        if: steps.state.outputs.state == 'absent'
+        uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          packages-dir: dist
+
+  # The smoke on TestPyPI for the macOS wheel, on a hosted Apple-silicon runner with the Python a user
+  # has. The driver is the macOS build. The wheel it installs comes from the index, never from the
+  # artifact.
+  testpypi-smoke-macos-arm64:
+    needs: [build-macos-arm64, testpypi-macos-arm64]
+    if: github.ref == 'refs/heads/main' && needs.testpypi-macos-arm64.outputs.state != 'differs'
+    runs-on: macos-15
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      # the example, its expected output and the ABI table
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: pypi-${{ needs.build-macos-arm64.outputs.version }}-macos-arm64-dist
+          path: dist
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: pypi-${{ needs.build-macos-arm64.outputs.version }}-macos-arm64-smoke
+          path: ${{ runner.temp }}/pypi-macos-arm64/smoke
+      - name: the driver is executable
+        run: chmod +x "$RUNNER_TEMP/pypi-macos-arm64/smoke/pypi_smoke_macos_arm64"
+      - name: TestPyPI serves the macOS wheel as built
+        run: '"$RUNNER_TEMP/pypi-macos-arm64/smoke/pypi_smoke_macos_arm64" verify --index testpypi --dist dist --attempts 5 --delay 30'
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        id: python
+        with:
+          python-version: '3.13'
+      - name: pip installs komira from TestPyPI on macOS and the quickstart prints what it should
+        env:
+          PYTHON: ${{ steps.python.outputs.python-path }}
+        run: '"$RUNNER_TEMP/pypi-macos-arm64/smoke/pypi_smoke_macos_arm64" install --index testpypi --dist dist --python "$PYTHON" --example python/examples/quickstart.py --expect python/examples/quickstart.expected --data python/examples/readings.parquet --abi-table src/so/abi/komira.tsv --work "$RUNNER_TEMP/pypi-macos-arm64/install" --attempts 5 --delay 30'
+
+  # PyPI for the macOS wheel: the same as testpypi-macos-arm64, for the real index (the environment
+  # `pypi`), after the smoke on TestPyPI. The upload action's default repository is PyPI.
+  pypi-macos-arm64:
+    needs: [build-macos-arm64, testpypi-smoke-macos-arm64]
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    environment: pypi
+    timeout-minutes: 30
+    permissions:
+      # trusted publishing: the token PyPI exchanges for an upload
+      id-token: write
+    outputs:
+      state: ${{ steps.state.outputs.state }}
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: pypi-${{ needs.build-macos-arm64.outputs.version }}-macos-arm64-dist
+          path: dist
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: pypi-${{ needs.build-macos-arm64.outputs.version }}-macos-arm64-smoke
+          path: ${{ runner.temp }}/pypi-macos-arm64/smoke
+      - name: the driver is executable
+        run: chmod +x "$RUNNER_TEMP/pypi-macos-arm64/smoke/pypi_smoke"
+      # absent, same or differs: asked of the index, before any upload
+      - name: the macOS wheel on PyPI
+        id: state
+        run: '"$RUNNER_TEMP/pypi-macos-arm64/smoke/pypi_smoke" state --index pypi --dist dist --github-output "$GITHUB_OUTPUT"'
+      - name: upload the macOS wheel to PyPI
+        if: steps.state.outputs.state == 'absent'
+        uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
+        with:
+          packages-dir: dist
+
+  # The smoke on PyPI for the macOS wheel: the same as testpypi-smoke-macos-arm64, against the real
+  # index. It is the last proof that a macOS user's `pip install komira` works.
+  pypi-smoke-macos-arm64:
+    needs: [build-macos-arm64, pypi-macos-arm64]
+    if: github.ref == 'refs/heads/main' && needs.pypi-macos-arm64.outputs.state != 'differs'
+    runs-on: macos-15
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      # the example, its expected output and the ABI table
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: pypi-${{ needs.build-macos-arm64.outputs.version }}-macos-arm64-dist
+          path: dist
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: pypi-${{ needs.build-macos-arm64.outputs.version }}-macos-arm64-smoke
+          path: ${{ runner.temp }}/pypi-macos-arm64/smoke
+      - name: the driver is executable
+        run: chmod +x "$RUNNER_TEMP/pypi-macos-arm64/smoke/pypi_smoke_macos_arm64"
+      - name: PyPI serves the macOS wheel as built
+        run: '"$RUNNER_TEMP/pypi-macos-arm64/smoke/pypi_smoke_macos_arm64" verify --index pypi --dist dist --attempts 5 --delay 30'
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        id: python
+        with:
+          python-version: '3.13'
+      - name: pip installs komira from PyPI on macOS and the quickstart prints what it should
+        env:
+          PYTHON: ${{ steps.python.outputs.python-path }}
+        run: '"$RUNNER_TEMP/pypi-macos-arm64/smoke/pypi_smoke_macos_arm64" install --index pypi --dist dist --python "$PYTHON" --example python/examples/quickstart.py --expect python/examples/quickstart.expected --data python/examples/readings.parquet --abi-table src/so/abi/komira.tsv --work "$RUNNER_TEMP/pypi-macos-arm64/install" --attempts 5 --delay 30'
+
+  # The macOS chain's verdict, as `result` is the Linux chain's: no Linux job needs it or is read here.
+  # It fails the run when the build did not succeed, or when it built a wheel and an upload or a smoke
+  # did not succeed. A build that found the file on both indexes built nothing and is a notice, and so
+  # is an external run, whose build was skipped and which fails nothing. The job results reach the steps
+  # through `env:`, never inside a `run:`.
+  result-macos-arm64:
+    needs: [build-macos-arm64, testpypi-macos-arm64, testpypi-smoke-macos-arm64, pypi-macos-arm64, pypi-smoke-macos-arm64]
+    if: always() && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: the external flavour has no macOS wheel yet
+        if: inputs.flavour != 'bundled'
+        run: 'echo "::notice title=pypi-macos-arm64::the external flavour has no macOS wheel yet: no macOS job ran; the bundled flavour publishes it"'
+      - name: the macOS build succeeded
+        if: inputs.flavour == 'bundled' && needs.build-macos-arm64.result != 'success'
+        env:
+          BUILD: ${{ needs.build-macos-arm64.result }}
+        run: 'echo "::error title=pypi-macos-arm64::the macOS build job did not succeed (build-macos-arm64 $BUILD)" && exit 1'
+      - name: the macOS wheel is on both indexes already
+        if: needs.build-macos-arm64.result == 'success' && needs.build-macos-arm64.outputs.version == ''
+        run: 'echo "::notice title=pypi-macos-arm64::the macOS wheel of this version is on both indexes already: nothing was built on the Macs"'
+      - name: the TestPyPI upload of the macOS wheel succeeded
+        if: needs.build-macos-arm64.result == 'success' && needs.build-macos-arm64.outputs.version != '' && needs.testpypi-macos-arm64.result != 'success'
+        env:
+          TESTPYPI: ${{ needs.testpypi-macos-arm64.result }}
+        run: 'echo "::error title=pypi-macos-arm64::the macOS TestPyPI upload job did not succeed (testpypi-macos-arm64 $TESTPYPI)" && exit 1'
+      - name: the bytes differ at the same version
+        if: needs.testpypi-macos-arm64.outputs.state == 'differs' || needs.pypi-macos-arm64.outputs.state == 'differs'
+        run: 'echo "::notice title=pypi-macos-arm64::bytes differ at the same version: a commit that changed only documentation, which the stamp ignores; a code commit raises the version"'
+      - name: the macOS TestPyPI smoke and the PyPI upload succeeded
+        if: needs.build-macos-arm64.result == 'success' && needs.build-macos-arm64.outputs.version != '' && needs.testpypi-macos-arm64.outputs.state != 'differs' && (needs.testpypi-smoke-macos-arm64.result != 'success' || needs.pypi-macos-arm64.result != 'success')
+        env:
+          TESTPYPI_SMOKE: ${{ needs.testpypi-smoke-macos-arm64.result }}
+          PYPI: ${{ needs.pypi-macos-arm64.result }}
+        run: 'echo "::error title=pypi-macos-arm64::the macOS TestPyPI smoke or the PyPI upload job did not succeed (testpypi-smoke-macos-arm64 $TESTPYPI_SMOKE, pypi-macos-arm64 $PYPI)" && exit 1'
+      - name: the macOS PyPI smoke succeeded
+        if: needs.build-macos-arm64.result == 'success' && needs.build-macos-arm64.outputs.version != '' && needs.testpypi-macos-arm64.outputs.state != 'differs' && needs.pypi-macos-arm64.outputs.state != 'differs' && needs.pypi-smoke-macos-arm64.result != 'success'
+        env:
+          PYPI_SMOKE: ${{ needs.pypi-smoke-macos-arm64.result }}
+        run: 'echo "::error title=pypi-macos-arm64::the macOS PyPI smoke job did not succeed (pypi-smoke-macos-arm64 $PYPI_SMOKE)" && exit 1'

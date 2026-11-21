@@ -3,15 +3,15 @@ test (python/BUCK): `picked_files` and `wheel_install_test`.
 
 `picked_files(name, dir, paths)` names files of a directory another target
 builds, one sub-target each, by file name: `:<name>[libkomira.so]`. The wheel
-takes libkomira and its native owner libraries one by one from
-`//src/so:libkomira[runnable]`, so that each is a key `wheel_file` can mark
-executable, and leaves the runtime libraries of that directory out. A path
-the directory does not hold fails the action that reads it; two paths with one
-file name fail analysis.
+itself copies `//src/so:libkomira[dist]` whole; the wheels of the refusing
+cases take its files one by one, so that each can be put somewhere else or
+left out. A path the directory does not hold fails the action that reads it;
+two paths with one file name fail analysis.
 
 `wheel_install_test(name, python, wheels, script, args, files,
-skip_requirements, expect_failure)` installs `wheels` into an empty virtual
-environment of the interpreter `python` (a `python_dist`), the way
+skip_requirements, upgrade, expect_failure, exec_compatible_with)` installs
+`wheels` into an empty virtual environment of the interpreter `python` (a
+`python_dist`), the way
 `python_wheel` installs a wheel and with no pip and no network, then runs
 `script` with that environment's interpreter in isolated mode, from an empty
 directory: python/tests/wheel_install_run.py says each step and what it
@@ -22,8 +22,14 @@ passed to the script as `--host-lib` paths, `args` as they are, and `files`
 ({flag: source}) as `<flag> <absolute path>`. The output, `<name>.pass`, exists
 only if the run passed: with `expect_failure`, only if it failed with exactly
 that line (`<site>` and `<python>` standing for the site directory and the
-interpreter's prefix). Building the target is running the test. Linux
-x86_64 only, like the interpreter.
+interpreter's prefix). With `upgrade`, `wheels` are the releases of one
+distribution, oldest first, and each is installed the way `pip install` of a
+newer version installs it: the release before it is uninstalled first (its
+RECORD's files deleted), and the script is given `--removed <path>` for each
+file the replaced release had that the new one lacks. Building the target is
+running the test. It runs on `exec_compatible_with`, Linux x86_64 unless given
+(python/BUCK passes the macOS arm64 platform for the macOS wheel's test, with
+the interpreter built for it).
 """
 
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
@@ -72,6 +78,8 @@ def _wheel_install_test_impl(ctx):
         cmd.add("--wheel", w)
     if ctx.attrs.skip_requirements:
         cmd.add("--skip-requirements")
+    if ctx.attrs.upgrade:
+        cmd.add("--upgrade")
     for lib in dist.preload:
         cmd.add("--host-lib", cmd_args(dist.native_libs, format = "{}/" + lib))
     for a in ctx.attrs.args:
@@ -96,6 +104,7 @@ _wheel_install_test = rule(
         "python": attrs.exec_dep(providers = [PythonDistInfo]),
         "script": attrs.source(),
         "skip_requirements": attrs.bool(default = False),
+        "upgrade": attrs.bool(default = False),
         "wheels": attrs.list(attrs.source()),
         "_driver": attrs.source(default = "komira//python/tests:wheel_install_run.py"),
         "_installer": attrs.source(default = "komira//tools/build/python:wheel_install.py"),
@@ -105,8 +114,8 @@ _wheel_install_test = rule(
 def _picked_files_macro(**kwargs):
     _picked_files(**kwargs)
 
-def _wheel_install_test_macro(**kwargs):
-    _wheel_install_test(exec_compatible_with = LINUX_X86_64, **kwargs)
+def _wheel_install_test_macro(exec_compatible_with = LINUX_X86_64, **kwargs):
+    _wheel_install_test(exec_compatible_with = exec_compatible_with, **kwargs)
 
 picked_files = declares_docs(_picked_files_macro)
 wheel_install_test = declares_docs(_wheel_install_test_macro)

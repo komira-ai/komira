@@ -8,19 +8,29 @@ into `KomiraError`, with the context's last error, read with the two-call
 protocol, as the message.
 
 Before the library is opened, `load` calls two hooks: `_check_cpu()` here and
-`_runtime._preload_runtime_libraries(search_path=...)`; an error either raises
-stops the load before the library is mapped. `_check_cpu` refuses, on Linux
-x86_64, a CPU without the flags of x86-64-v3, the level libkomira is compiled
-for there, with `UnsupportedCpuError`: an older CPU would otherwise die of an
-illegal instruction inside the library. The preload hook opens the Mojo
-runtime libraries libkomira needs.
+`_runtime.prepare(<directory>)` (Linux only; it does nothing on macOS); an error
+either raises stops the load before the library is mapped. `_check_cpu` refuses, on Linux x86_64, a CPU without
+the flags of x86-64-v3, the level libkomira is compiled for there, with
+`UnsupportedCpuError`: an older CPU would otherwise die of an illegal
+instruction inside the library. The runtime hook readies the Mojo runtime of
+the wheel's flavour: with the runtime in `lib/` beside the library (the
+bundled wheel), it refuses a Mojo runtime already in the process that is
+another build; without it (the external wheel), it opens Modular's installed
+runtime, refusing one of another build than the wheel's record names.
 
 The library is found only where `load` is told: the directory a test passes
 (`--lib-dir` of a `python_binding_test`), or, with no directory, the
-package's own `_lib/`, where a wheel stages it. No environment variable and no
-search of the working directory picks it (docs/design/python_package.md,
-decision 6). The library is never closed: the Mojo runtime does not support
-unloading, so a refused library stays mapped too, and ctypes never closes one.
+package's own `_lib/`, where a wheel stages it (`libkomira.so`, or
+`libkomira.dylib` on macOS) with its native owners (Linux only) in `_lib/lib/`,
+and, in the bundled wheel, the Mojo runtime there too. The library's own run
+path (`$ORIGIN/lib` on Linux, `@loader_path/lib` on macOS) finds those. No
+environment variable and no search of the working directory picks it
+(docs/design/python_package.md, decision 6).
+It is opened with `RTLD_LOCAL`, so neither it nor the runtime it brings joins
+the process's global symbol scope, where it would take the place of another
+Mojo library's own definitions. The library is never closed: the Mojo runtime
+does not support unloading, so a refused library stays mapped too, and ctypes
+never closes one.
 
 The calls that return protobuf bytes or plan text (`parquet_schema`,
 `csv_binding`, `json_binding`, `plan_render`) are private: they have no
@@ -34,7 +44,7 @@ import os
 import platform
 import sys
 import threading
-from collections.abc import Callable, Sequence
+from collections.abc import Callable
 
 from . import _runtime
 from ._errors import KomiraError, LibraryLoadError, UnsupportedCpuError
@@ -354,18 +364,16 @@ def _bind(lib: ctypes.CDLL, path: str) -> Native:
     return Native(path, version, functions)
 
 
-def load(
-    lib_dir: str | os.PathLike[str] | None = None, *, search_path: Sequence[str | os.PathLike[str]] | None = None
-) -> Native:
+def load(lib_dir: str | os.PathLike[str] | None = None) -> Native:
     """The process's libkomira.
 
-    With `lib_dir`, the library is `<lib_dir>/libkomira.so`; with None, it is
-    the one already loaded, or else the package's `_lib/libkomira.so`. The
+    With `lib_dir`, the library is `<lib_dir>/libkomira.so` (`libkomira.dylib`
+    on macOS); with None, it is the one already loaded, or else the package's
+    `_lib/` copy. The
     first load that succeeds is kept: a later call naming the same file
     returns the same `Native`, and one naming another file is refused, since a
-    process holds one library. A refused load leaves nothing loaded.
-    `search_path` is handed to the runtime preload hook: the directories it
-    looks in for `modular/lib/`, `sys.path` when None; tests pass their own.
+    process holds one library. A refused load leaves nothing loaded. A file
+    missing from the directory is a `LibraryLoadError` that names it.
     """
     global _loaded
     with _lock:
@@ -380,9 +388,9 @@ def load(
                 "libkomira is already loaded from {}; it cannot also be loaded from {}".format(_loaded.path, path)
             )
         _check_cpu()
-        _runtime._preload_runtime_libraries(search_path=search_path)
+        _runtime.prepare(os.path.dirname(path))
         try:
-            lib = ctypes.CDLL(path)
+            lib = ctypes.CDLL(path, mode=ctypes.RTLD_LOCAL)
         except OSError as e:
             raise LibraryLoadError("cannot load libkomira from {}: {}".format(path, e)) from None
         _loaded = _bind(lib, path)

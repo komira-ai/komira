@@ -2,28 +2,35 @@
 # sink_agg -- (SINK_AGG, KEY_DTYPE_NONE, SINK_ORIENT_COLUMNAR)
 # =============================================================================
 #
-# The ungrouped aggregation sink: SUM, COUNT, COUNT(*), MIN, MAX and AVG over a
-# morsel stream, one output row. The plan's aggregate arguments are expressions
-# (`AggSinkData.agg_exprs`); the sink registers them once and each worker runs
-# them as a projection (`MapOp`) over every morsel it is handed, under the
+# The ungrouped aggregation sink: SUM, COUNT, COUNT(*), COUNT(DISTINCT), MIN,
+# MAX and AVG over a morsel stream, one output row. The plan's aggregate
+# arguments are expressions (`AggSinkData.agg_exprs`); the sink registers them
+# once and each worker runs them as a projection (`MapOp`) over every morsel it is handed, under the
 # morsel's selection mask: a projection of expressions that can raise sees only
 # the selected rows. COUNT(*) needs no argument and counts the selected rows of
 # the morsel.
 #
 # The state of a worker is one `AggCell` per aggregate (`agg_fold`), kept in
 # the worker's own slot of a slab; `consume` writes only the caller's slot.
-# Every fold is an exact integer fold, so `combine`, which runs once after the
-# workers joined, merges the slots in worker order and the answer does not
-# depend on which worker took which morsel. `agg_output` builds the one output
-# row in the schema the plan declared.
+# `combine`, which runs once after the workers joined, merges the slots in
+# worker order. A fold over integers, DECIMAL128 or DATE32 is exact, and so is
+# a MIN or MAX of floats, so their answer does not depend on which worker took
+# which morsel; a float SUM or AVG is a double sum, whose last bits do
+# (`agg_fold`; the tolerance rule is in the package README). `agg_output`
+# builds the one output row in the schema the plan declared.
 #
-# The state is fixed in size, so a worker draws it from the segment pool once
-# (`segment_pool`), when it takes its first morsel, and gives it back at
-# `combine`; a denied draw fails the query by name.
+# COUNT(DISTINCT x) keeps the distinct non-NULL values of x a worker saw
+# (`count_distinct`, all under group 0) instead of a cell; `combine` merges
+# them and the merged cell's count is the number of distinct values.
+#
+# The cells are fixed in size, so a worker draws them from the segment pool
+# once (`segment_pool`), when it takes its first morsel, and gives them back at
+# `combine`; a denied draw fails the query by name. The distinct values of a
+# COUNT(DISTINCT) are charged to the same reservation as they grow.
 #
 # Refused when the sink is built: group-by expressions (this is the sink of
 # the key-less row), an aggregate this sink does not serve (anything but SUM,
-# COUNT, MIN, MAX and AVG), an aggregate without the argument it needs, an
+# COUNT, COUNT(DISTINCT), MIN, MAX and AVG), an aggregate without the argument it needs, an
 # output schema that does not list one column per aggregate, and an output
 # column of a type the aggregate cannot produce. `AggSinkData.presorted` and
 # `estimated_groups` are for grouped sinks and are ignored.
@@ -48,6 +55,7 @@ from phase_timers.phase_timers import (
 from physical_plan.physical_plan import AggSinkData
 from plan_expr.agg_expr import (
     AGG_COUNT,
+    AGG_COUNT_DISTINCT,
     AGG_MAX,
     AGG_MEAN,
     AGG_MIN,
@@ -58,6 +66,12 @@ from plan_expr.expr_pool import ExprPool
 
 from .agg_fold import AggCell, agg_name, fold_column, merge_cell
 from .agg_output import agg_result_column, check_declared_type
+from .count_distinct import (
+    DistinctMerge,
+    DistinctSlot,
+    admit_distinct,
+    read_distinct_column,
+)
 from .segment_pool import SegmentPool, WorkerReservation
 
 
@@ -65,6 +79,7 @@ struct _AggSlot(Movable):
     var cells: List[AggCell]
     var map: Optional[MapOp]
     var reservation: WorkerReservation
+    var distinct: DistinctSlot
     var started: Bool
 
     def __init__(out self, n_aggs: Int, var reservation: WorkerReservation):
@@ -73,6 +88,7 @@ struct _AggSlot(Movable):
             self.cells.append(AggCell())
         self.map = None
         self.reservation = reservation^
+        self.distinct = DistinctSlot(n_aggs)
         self.started = False
 
 
@@ -80,6 +96,7 @@ struct AggSink(MorselSinkImpl):
     """Folds the morsels of a segment into one row of aggregates."""
 
     var _seg_id: Int
+    var _where: String
     var _funcs: List[UInt8]
     var _arg_col: List[Int]
     var _labels: List[String]
@@ -124,6 +141,7 @@ struct AggSink(MorselSinkImpl):
                 + " aggregates"
             )
         self._seg_id = seg_id
+        self._where = where_
         self._funcs = List[UInt8]()
         self._arg_col = List[Int]()
         self._labels = List[String]()
@@ -136,6 +154,7 @@ struct AggSink(MorselSinkImpl):
             if (
                 func != AGG_SUM
                 and func != AGG_COUNT
+                and func != AGG_COUNT_DISTINCT
                 and func != AGG_MIN
                 and func != AGG_MAX
                 and func != AGG_MEAN
@@ -144,7 +163,7 @@ struct AggSink(MorselSinkImpl):
                     where_
                     + " does not serve aggregate tag "
                     + String(Int(func))
-                    + " (SUM, COUNT, MIN, MAX and AVG are)"
+                    + " (SUM, COUNT, COUNT(DISTINCT), MIN, MAX and AVG are)"
                 )
             var label = agg_name(func) + " (output column " + String(i) + ")"
             if agg.num_children() > 1:
@@ -230,6 +249,29 @@ struct AggSink(MorselSinkImpl):
         for i in range(len(self._funcs)):
             if self._arg_col[i] < 0:
                 slot.cells[i].count += selected
+            elif self._funcs[i] == AGG_COUNT_DISTINCT:
+                var col = read_distinct_column(
+                    slot.distinct,
+                    i,
+                    dense,
+                    self._arg_col[i],
+                    selected,
+                    self._where,
+                    self._labels[i],
+                    self._pool,
+                    slot.reservation,
+                )
+                for r in range(selected):
+                    admit_distinct(
+                        slot.distinct,
+                        i,
+                        0,
+                        col,
+                        r,
+                        self._where,
+                        self._pool,
+                        slot.reservation,
+                    )
             else:
                 fold_column(
                     slot.cells[i],
@@ -242,19 +284,36 @@ struct AggSink(MorselSinkImpl):
         pt_record[PH_SINK_FOLD](t_fold)
 
     def combine(mut self, mut pipeline: PipelineExecution) raises -> None:
+        var n = len(self._funcs)
         var merged = List[AggCell]()
-        for _ in range(len(self._funcs)):
+        for _ in range(n):
             merged.append(AggCell())
+        var distinct = DistinctMerge(n, WorkerReservation(self._pool.share()))
+        var only_group = List[Int]()
+        only_group.append(0)
         for w in range(len(self._slots)):
             ref slot = self._slots[w][]
-            for i in range(len(self._funcs)):
+            for i in range(n):
                 merge_cell(
                     merged[i],
                     slot.cells[i],
                     self._funcs[i],
                     self._labels[i],
                 )
+            distinct.merge_worker(
+                slot.distinct,
+                only_group,
+                merged,
+                n,
+                self._where,
+                self._labels,
+                self._pool,
+            )
+            # This worker is merged: free its distinct values and return its
+            # memory.
+            slot.distinct = DistinctSlot(n)
             slot.reservation.give_back_all()
+        distinct.finish()
         self._merged = merged^
         self._combined = True
 

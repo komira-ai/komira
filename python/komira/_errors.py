@@ -25,16 +25,14 @@ class KomiraError(Exception):
 
 
 class LibraryLoadError(KomiraError):
-    """libkomira, or a library it needs, could not be loaded; or its ABI major
-    version is not the one this package was written for; or it lacks a
-    function this package calls."""
-
-
-class RuntimeNotFoundError(LibraryLoadError):
-    """The Mojo runtime libraries libkomira needs are not installed where the
-    package looks for them, or are another version than the one it was built
-    with. The message names the missing libraries or both versions, the
-    directories searched, and the `pip install` line that fixes it."""
+    """libkomira, or a library it needs, could not be loaded (the message names
+    the file: a file missing from the package names the missing file); or a
+    Mojo runtime of another build is already in the process; or, for the
+    external flavour of the wheel, the Mojo runtime it loads from Modular's
+    package is not installed or is another build (the message names the
+    libraries and the `pip install` line that provides the right ones); or
+    its ABI major version is not the one this package was written for; or it
+    lacks a function this package calls."""
 
 
 class UnsupportedCpuError(LibraryLoadError):

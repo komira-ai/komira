@@ -1,6 +1,8 @@
 # Continuous integration
 
 A pull request from a branch of this repository runs ONE check: `pr / check`,
+and the same check runs again on each pull request in [the merge queue](#the-merge-queue),
+on top of the ones ahead of it, before it reaches `main`. The check is
 the one job `check` of [`.github/workflows/pr.yml`](#pryml-the-pull-requests-check),
 a workflow of its own, on a GitHub-hosted runner that reaches the build farm
 over a tailnet. The runner is
@@ -12,8 +14,10 @@ Nothing is compiled on the runner.
 |---|---|
 | push to `main` | [`release.yml`](#releaseyml-the-release): builds the release set and publishes the mopm packages to the prod registry, on every push (no schedule, no switch); when that run ends, [`main_red.yml`](#main_redyml-the-main-red-alert) |
 | pull request from a branch of this repository | `pr / check`; and `coverage`, informational, not required ([below](#coverageyml-the-pull-requests-coverage-not-a-gate)) |
+| merge group of the [merge queue](#the-merge-queue) (`merge_group`) | `pr / check` on the group's head commit, which is what `main` becomes; `coverage` does not run |
 | pull request from a fork | nothing: no farm job runs ([below](#pull-requests-from-forks)) |
 | manual (`workflow_dispatch`) | [`release.yml`](#releaseyml-the-release), on the chosen ref, with a reason |
+| manual (`workflow_dispatch`), on `main` | [`pypi.yml`](#pypiyml-publishing-the-python-package): builds the `komira` wheel on the farm, uploads it to TestPyPI, installs it from there and runs the quickstart, then does the same on PyPI; the macOS arm64 wheel of the same version is a second chain of jobs in the same file, built on the farm's Macs only when an index lacks it and smoked on a hosted macOS runner |
 | weekly (schedule) and manual | [`kpin-update.yml`](../tools/build/kpin/README.md#the-weekly-update): updates the pins and opens one pull request; no farm, and its pull request does not start `pr / check` by itself. A manual run with `real_hosts` instead checks kpin against the real registries |
 
 There is no separate static or lint job, and no other pull request check
@@ -133,7 +137,7 @@ buckconfig written whole. It also reads every workflow and holds each step
 that uses the action to `tls: ${{ vars.FARM_TLS || 'false' }}` under its
 `with:`: a caller that dropped `tls` would connect in plain text whatever
 `FARM_TLS` says.
-It holds `farm-qos` to `batch` on every step of `release.yml` and to
+It holds `farm-qos` to `batch` on every step of `release.yml` and `pypi.yml` and to
 absent on every step of any other workflow.
 
 A job that calls it needs `permissions: id-token: write` (to ask GitHub for the
@@ -150,7 +154,7 @@ repository variables (Settings > Secrets and variables > Actions > Variables):
 | `FARM_ADDRESS` | the remote-execution service as a URL with its port |
 | `FARM_INSTANCE` | its instance name |
 | `FARM_LINUX_X86_64_PROPERTIES` | the worker property set of the linux x86_64 actions |
-| `FARM_DARWIN_ARM64_PROPERTIES`, `FARM_DARWIN_MACOS_HOSTS`, `FARM_MACOS_LIBRARY_DIRS` | the macOS arm64 worker property set, the host identities of those workers, and the directories a macOS test run searches for a library (the last is optional): the `darwin-properties`, `darwin-macos-hosts` and `macos-library-dirs` inputs, passed by the job `release-macos` of `release-macos.yml` only |
+| `FARM_DARWIN_ARM64_PROPERTIES`, `FARM_DARWIN_MACOS_HOSTS`, `FARM_MACOS_LIBRARY_DIRS` | the macOS arm64 worker property set, the host identities of those workers, and the directories a macOS test run searches for a library (the last is optional): the `darwin-properties`, `darwin-macos-hosts` and `macos-library-dirs` inputs, passed by the job `release-macos` of `release-macos.yml` and by the job `build-macos-arm64` of `pypi.yml`, and by no other job |
 | `FARM_TLS` | `true` when the service serves REAPI over TLS; unset or empty means `false`. Each workflow passes it as farm-connect's `tls`, so the address and its transport change together |
 
 Variables are not masked, and a job's logs are public. The action masks the
@@ -165,7 +169,7 @@ farm's port does not answer.
 **Priority.** A farm that queues by priority class runs a `ci` action before a
 `batch` one. The action takes an optional `farm-qos` (`ci` or `batch`) and, when
 it is set, writes the request header `x-kbf-qos` as buck2's `http_headers`.
-Every job of `release.yml` passes `batch`, so the release work that a push to
+Every job of `release.yml` passes `batch`, and so do the jobs `build` and `build-macos-arm64` of `pypi.yml` and the job `release-macos` of `release-macos.yml`, so the release work that a push to
 `main` starts waits behind the pull-request checks when the farm is full; no
 other workflow passes it, so they stay at `ci`. The class is not a platform
 property: it is not part of an action's digest, so a release build and a pull
@@ -206,7 +210,8 @@ build describes, so running a stranger's build would be running its code on the
 farm's workers. Therefore:
 
 - The job `check` of `pr.yml` is **skipped** for a fork's pull request:
-  `if: github.event.pull_request.head.repo.full_name == github.repository`.
+  `if: github.event_name == 'merge_group' || github.event.pull_request.head.repo.full_name == github.repository`
+  (the first term is for the [merge queue](#the-merge-queue), whose groups always run).
   No other job or workflow runs for it, so a fork's pull request has no check at all; the
   repository's only merger reads the change and runs the farm build from a
   branch of this repository.
@@ -217,7 +222,8 @@ farm's workers. Therefore:
   `tools/` and every `BUCK` and `.bzl` file included, before pushing it to a
   branch: the workflow, the rules and the lint scripts all run from that
   branch's tree, and anyone who can push a branch can run code on the farm.
-- The workflows use `pull_request` only. There is no `pull_request_target`
+- The workflows use `pull_request` (and `pr.yml` also `merge_group`, which runs
+  only what a maintainer queued). There is no `pull_request_target`
   workflow here, on purpose: it runs with the base repository's token, and
   checking the fork's code out under it, then joining the tailnet, would hand
   the farm to the code.
@@ -329,21 +335,47 @@ unconfigured query through the prelude's select moved there.
 
 ## The macOS build of the release
 
-The macOS (darwin-arm64) build is its own workflow,
-[`release-macos.yml`](../.github/workflows/release-macos.yml) (one job, `release-macos`),
-and no pull request builds it. `release.yml` holds no macOS job. The farm has far more Linux cores than
+macOS builds run only in release workflows, never in a pull request. There are two. The macOS
+(darwin-arm64) set of the mopm packages is its own workflow,
+[`release-macos.yml`](../.github/workflows/release-macos.yml) (one job, `release-macos`), once per release.
+The other is the macOS arm64 wheel of the Python package: the job `build-macos-arm64` of
+[`pypi.yml`](../.github/workflows/pypi.yml), at most once per version and only when that version's macOS file is
+missing from an index
+([below](#pypiyml-publishing-the-python-package)). `release.yml` holds no macOS job. The farm has far more Linux cores than
 Mac ones, so a macOS leg in the pull request check would queue every change
-behind the scarcest machines; the macOS platform is built once per release run
-instead.
+behind the scarcest machines; the macOS platform is built in the release workflows
+instead. The rest of this section is about `release-macos.yml`.
 
 - **Not in a pull request.** `pr.yml` (and `coverage.yml`, the other workflow that
   runs on a pull request) pass no macOS worker set to the farm connection and name
-  no darwin platform or runner, and `//ci:pr` is built for the client's own platform
+  no darwin platform or runner (beyond the analysis below, which builds nothing), and
+  `//ci:pr` is built for the client's own platform
   only: none of the targets it reaches has a macOS execution platform. A
   `cquery` of `attrregexfilter(exec_compatible_with, "macos", deps(//ci:pr))` is
   empty, and the same query for `--target-platforms
   komira//tools/build/platforms:darwin-arm64` over a library is not.
-  `//:release_macos_cases` holds the workflows and the shards of `ci/targets/` to it.
+  `//:release_macos_cases` holds the workflows and the shards of `ci/targets/` to it, and holds
+  `pypi.yml` to not running on a pull request or a merge group. The three targets of the macOS wheel
+  (`//python:komira_wheel_macos_arm64`, `//python:wheel_install_test_macos_arm64`,
+  `//python/smoke:pypi_smoke_macos_arm64`) stay out of the check twice: each has an `EXCLUDED` row in
+  `tools/build/ci/rules.bzl`, so the pull-request selector never picks it, and each has
+  `target_compatible_with = DARWIN_ARM64` (limit `pypi-wheel-macos-arm64` in
+  `tools/build/platforms/limits.tsv`), so it builds only with `--target-platforms
+  komira//tools/build/platforms:darwin-arm64`, which only `pypi.yml` passes.
+- **Analysed in every pull request, built in none.** What fails before anything is built
+  (a target of the set's closure incompatible with darwin-arm64, a toolchain with no
+  execution platform, a rule that fails at analysis) is found in the pull request that
+  causes it: the last buck2 step of `pr.yml` runs
+  `bxl --config-file release/darwin_analysis.buckconfig komira//release/darwin_analysis.bxl:check`,
+  which configures `//release:mopm_darwin_libs` for darwin-arm64 and analyses it, with its
+  whole closure, as the release's build would. Configuring and analysing run no action, so
+  nothing is built for macOS and no macOS worker is asked for anything; the config file
+  registers the macOS execution platform with a property set that names no worker, which
+  configuration needs and nothing uses. The step fails with buck2's own message, naming the
+  target and the dependency. A failure that only a build shows (a compile, a welded test)
+  is still seen first by `release-macos.yml`. `//:release_macos_cases` holds that this
+  step is in `pr.yml` once, through the `buck2-farm` action with its assertion, and that it
+  is the only line of a pull request workflow that names the macOS set.
 - **On the farm's Macs, not a hosted runner.** The job runs on the same ubuntu
   runner as the others and asks the farm: `farm-connect` with the macOS worker set
   and hosts (the repository variables above), then
@@ -379,9 +411,13 @@ instead.
   `release-macos-result` (`needs: release-macos`, `if: always()`), fails with "the macOS build
   did not run" when the build job was skipped, and with "did not pass" when it failed, so the
   run list, the commit status and the badge never read green for a Mac build that did not
-  pass. The farm connection refuses when a repository variable is empty (for the macOS
-  set, `FARM_DARWIN_ARM64_PROPERTIES` and `FARM_DARWIN_MACOS_HOSTS` go together), and that is a
-  failed run too. The set has not yet been measured on the macOS workers, and the publish must
+  pass. Its message says what happened rather than guessing: when a buck2 step failed (the build
+  of the set, or of the Python harness tests), `//release/ci:buck2_failure` (built before them)
+  reads that step's buck2 output and the message is buck2's own lines after `BUILD FAILED`
+  (also written to the run's summary);
+  when an earlier step failed, the message names it. The farm connection refuses when a
+  repository variable is empty (for the macOS set, `FARM_DARWIN_ARM64_PROPERTIES` and
+  `FARM_DARWIN_MACOS_HOSTS` go together), and that is a failed run too. The set has not yet been measured on the macOS workers, and the publish must
   not wait on a platform the release does not ship. When the set is green over several runs,
   move the job back into `release.yml` as a `needs` of `prod-commit` (or keep the workflow
   and have the publish wait on it).
@@ -680,6 +716,172 @@ built as a program of its own (the beta job that ran it is gone); its cases
 loopback, and cover a changed byte, another size, a missing package, an index of another stage, and
 a redirect.
 
+## pypi.yml: publishing the Python package
+
+[`.github/workflows/pypi.yml`](../.github/workflows/pypi.yml) builds the `komira` wheel
+([python/README.md](../python/README.md)), uploads it to TestPyPI, installs it from there on a fresh runner
+and runs the quickstart, and only then does the same on PyPI. The macOS arm64 wheel of the same name
+and version is published by six more jobs of the same file, a chain of their own (below), for the `bundled` flavour only: the macOS wheel carries the Mojo runtime, and the `external` flavour has no macOS runtime record, loader branch or Modular wheel yet, so an `external` run (the default) publishes no macOS wheel and a run publishes exactly one flavour on every platform it publishes. It is written by hand. It is run by hand:
+the only trigger is `workflow_dispatch`, on `main` (every job has
+`if: github.ref == 'refs/heads/main'`). A daily schedule is added after the first release is verified. A
+pull request never starts it.
+
+| job | environment | permissions | what it does |
+|---|---|---|---|
+| `build` | `build` | `contents: read`, `id-token: write` (the tailnet only) | on the farm ([farm-connect](#how-it-reaches-the-farm), `farm-qos: batch`): builds `//release/ci:release_json` and takes the stamp (`release_json stamp`); builds the wheel and the install test of the run's `flavour` input (`//python:komira_wheel_<flavour>[release]` and `//python:wheel_install_test_<flavour>`; `external` by default, `bundled` the other choice, docs/design/python_package.md "The two flavours") with the three stamp flags (`-c komira.package_stamp`, `komira.package_commit`, `komira.package_timestamp_ms`) and `//python/smoke:pypi_smoke`; runs `pypi_smoke dist`, which makes the dist directory, and writes the flavour and the version to the run's summary. It keeps two workflow artifacts, `pypi-<version>-dist` (the wheel) and `pypi-<version>-smoke` (the driver), for 14 days. It has no upload step and holds no index identity. |
+| `testpypi` | `testpypi` | `id-token: write` | no farm, no checkout, no buck2. Downloads the two artifacts, runs `pypi_smoke state --index testpypi`, and uploads the wheel to TestPyPI only when the state is `absent`. |
+| `testpypi-smoke` | none | `contents: read` | `pypi_smoke verify --index testpypi`, then `pypi_smoke install --index testpypi`, on a runner with the Python `actions/setup-python` gives (3.13). Skipped when the state is `differs`. |
+| `pypi` | `pypi` | `id-token: write` | after `testpypi-smoke`: the same as `testpypi` for PyPI. |
+| `pypi-smoke` | none | `contents: read` | the same as `testpypi-smoke` for PyPI. Skipped when the state is `differs`. |
+| `result` | none | none | fails the run, naming the job, when `build`, `testpypi`, `testpypi-smoke`, `pypi` or `pypi-smoke` did not succeed, and prints a notice when the bytes differ at the same version (below). |
+| `build-macos-arm64` | `build` | `contents: read`, `id-token: write` (the tailnet only) | only when the run's `flavour` is `bundled` (`if: github.ref == 'refs/heads/main' && inputs.flavour == 'bundled'`), on an ubuntu runner that only asks the farm, whose Macs are the workers (`farm-connect` with the macOS worker set and hosts, `farm-qos: batch`): takes the stamp, builds the Linux driver, builds `//python:komira_wheel_macos_arm64[file_name]` (the wheel's file name, written at analysis) and asks both indexes whether each lists that file (`pypi_smoke present`). Only if one does not, it builds `//python:komira_wheel_macos_arm64[release]`, `//python:wheel_install_test_macos_arm64` and `//python/smoke:pypi_smoke_macos_arm64` for `--target-platforms komira//tools/build/platforms:darwin-arm64`, runs `pypi_smoke dist`, and keeps `pypi-<version>-macos-arm64-dist` (the macOS wheel alone) and `pypi-<version>-macos-arm64-smoke` (the Linux driver and the macOS driver). Its output `version` is empty when nothing was built. No upload step. |
+| `testpypi-macos-arm64` | `testpypi` | `id-token: write` | `needs` the macOS build and runs only when it built a wheel. The same as `testpypi`, on the macOS dist, with the Linux driver. |
+| `testpypi-smoke-macos-arm64` | none | `contents: read` | on the hosted runner `macos-15` (Apple silicon): `verify`, then `install` with the macOS driver on CPython 3.13. Skipped when the state is `differs`. |
+| `pypi-macos-arm64` | `pypi` | `id-token: write` | after `testpypi-smoke-macos-arm64`: the same as `pypi`, for the macOS dist. |
+| `pypi-smoke-macos-arm64` | none | `contents: read` | the same as `testpypi-smoke-macos-arm64` for PyPI. Skipped when the state is `differs`. |
+| `result-macos-arm64` | none | none | the macOS chain's verdict: fails the run when `build-macos-arm64` did not succeed, and, when it built a wheel, when an upload or a smoke of the macOS chain did not succeed; a notice when the bytes differ at the same version, a notice that the `external` flavour has no macOS wheel yet when the run's flavour is not `bundled` (nothing fails), and a notice that this version's macOS wheel is on both indexes already when the build found it and built nothing. |
+
+**Why its own file.** PyPI's trusted publishing binds a publisher to a workflow file name and an
+environment. `release.yml` holds no publishing credential, and this file is the one that does, so the
+credential is reachable from this file only. A job's index identity is the OIDC token of its environment:
+only `testpypi`, `pypi`, `testpypi-macos-arm64` and `pypi-macos-arm64` hold a token an index trusts, and only for
+their own index. `build` and `build-macos-arm64` name the environment `build`, which no index trusts, and have no
+upload step. `//:pypi_workflow_cases` pins the twelve jobs, each job's `if:`, runner, `needs`, environment and
+permissions (the two macOS smoke jobs run on `macos-15`, every other job on `ubuntu-24.04`), that `id-token` is on no
+other job, that `farm-connect` and buck2 are in the two build jobs alone, that the publish action appears only in
+the four upload jobs (`testpypi`, `pypi` and their macOS twins), that `setup-python` appears only in the four smoke jobs,
+that every action is pinned to a commit, and that no secret, `curl`, `jq`, `twine` or `continue-on-error`
+is anywhere in the file. `//:release_macos_cases` pins the macOS chain beyond that (below). `//:farm_connect_cases`
+holds `build` and `build-macos-arm64` to `farm-qos: batch`.
+
+**The macOS wheel's chain is independent of the Linux one.** No Linux job `needs` a macOS job or reads its
+result, no macOS job `needs` a Linux job or reads its result, and no Linux job names macOS: a red macOS chain
+never holds the Linux release, and a red Linux chain never holds the macOS wheel. Both chains build the same
+commit, so they carry the same stamp and the same version (`0.1.<N>`); the Linux file is
+`komira-0.1.<N>-py3-none-manylinux_2_35_x86_64.whl` and the macOS file
+`komira-0.1.<N>-py3-none-macosx_11_0_arm64.whl` (the platform `darwin-arm64`, whose floor is macOS 11.0), two files
+of one release. The macOS chain has its own artifacts (`pypi-<version>-macos-arm64-dist` and
+`...-macos-arm64-smoke`), so the two dist directories never mix and each upload sends one wheel. A Mac
+build is the scarce resource, so it is asked for only when needed: `build-macos-arm64` builds the file name first
+(no compile) and runs `pypi_smoke present` against TestPyPI and PyPI, and every Mac build after those two
+steps, and every step after them but the one that stops buck2, carries
+`if: steps.testpypi_file.outputs.present != 'true' || steps.pypi_file.outputs.present != 'true'`. A daily run with no
+new code finds the file on both indexes and builds nothing on the Macs. `//:release_macos_cases` holds
+the order (the file name, the two `present` steps, then the Mac builds), the exact gate on each Mac build, that the
+file-name build alone is ungated, that `build-macos-arm64` runs on the ubuntu runner (a hosted macOS runner is
+refused there) with the macOS worker set, hosts and the `tls` literal, and that the macOS smoke jobs run the macOS driver.
+
+**One run at a time.** The workflow is in the concurrency group `pypi` with `cancel-in-progress: false`: a
+running publish is never cancelled, and a second run waits.
+
+**The driver.** Every step that does more than start a program is
+`//python/smoke:pypi_smoke`, a Zig program built by `build` and carried to the later
+jobs as an artifact, so no workflow step holds shell logic. It takes flags only. `--index` is `testpypi`
+(TestPyPI) or `pypi` (PyPI); any other value is a usage error. The exit status is 0 for success, 1 for a
+refusal or a failure (the last line printed is `pypi_smoke: FAILED: <why>`, and an `::error` line for the
+log) and 2 for a usage error.
+
+| subcommand | flags | what it does |
+|---|---|---|
+| `dist` | `--wheel <file.whl> --out <dir> --github-output <file>` | reads the wheel: exactly one `*.dist-info` directory holding `METADATA` and `WHEEL`, one `Name` and one `Version` in `METADATA`, one `Tag` in `WHEEL`. The file name is `<name>-<version>-<tag>.whl` with the name normalized (each run of `-`, `_` or `.` becomes `_`, lowercase), and the dist-info directory must agree. Writes the same bytes under that name into `--out` (which must not exist or be empty) and appends `version`, `filename` and `sha256` to the GitHub output file. |
+| `state` | `--index <testpypi\|pypi> --dist <dir> --github-output <file>` | `--dist` holds exactly one wheel and nothing else. One request for the version's JSON on the index, no retry. Appends `state=absent`, `same` or `differs` (below). Any other answer than a 404 or a 200 with the expected shape fails. |
+| `present` | `--index <testpypi\|pypi> --name-file <file> --github-output <file>` | reads the one-line file name (`komira-<version>-<tag>.whl`) from `--name-file`, asks the index's JSON for that release (as `state` does) and appends `present=true` (the release lists a file of exactly that name) or `present=false` (no such release, or the release without that file) to the GitHub output file. It needs no wheel, so it runs before anything is built. An index error (HTTP 5xx, transport, a body that is not JSON) is a refusal and appends nothing. |
+| `verify` | `--index <testpypi\|pypi> --dist <dir> [--attempts <1..20>] [--delay <0..300>]` | asks the index for the file it serves and compares it with the built one (below). A refused attempt is tried again up to `--attempts` times (default 5), `--delay` seconds apart (default 30), because an index can lag an upload. |
+| `install` | `--index <testpypi\|pypi> --dist <dir> --python <exe> --example <quickstart.py> --expect <quickstart.expected> --data <file>... --abi-table <komira.tsv> --work <dir> [--attempts <n>] [--delay <s>]` | installs the published wheel into an empty environment and runs the example (below). `--attempts` and `--delay` as for `verify`, for the install of `komira` only. |
+
+**The three index states.** `state` asks the index about the one file of the build, `komira-0.1.<N>-py3-none-manylinux_2_35_x86_64.whl`
+(`<N>` is the stamp's build number), or `komira-0.1.<N>-py3-none-macosx_11_0_arm64.whl` in the macOS chain:
+
+- `absent`: the index has no such file (the version may exist with another file, another platform's wheel).
+  The job uploads it, by trusted publishing, with the publish action's defaults
+  (`skip-existing` off, attestations on). `testpypi` sets the action's `repository-url` to TestPyPI's upload
+  endpoint; `pypi` sets none, the action's default being PyPI.
+- `same`: the index has the file with the same sha256. Nothing is uploaded, a notice says so, and the smoke
+  runs: a run that was cut short after the upload finishes the checks.
+- `differs`: the index has the file with another sha256. Nothing is uploaded and the smoke does not run; the
+  run ends green with a notice ([below](#the-version-and-documentation-only-commits)).
+
+**What the smoke proves.** Two checks per index, on a runner that is not the farm, after the upload:
+
+1. `verify`: the file the index serves is the file that was built. The index's JSON for the version names the
+   file with its sha256, its size and its URL. The sha256 and size must be the built wheel's, the URL must
+   be on the index's file host (`test-files.pythonhosted.org` or `files.pythonhosted.org`), and the bytes
+   that URL serves are downloaded and hashed again, so a wheel changed after the index recorded it fails.
+   Then the `METADATA` of the served bytes and of the built wheel are compared on `Name`, `Version`,
+   `Requires-Python` and the full ordered list of `Requires-Dist`, and `Name` and `Version` must agree with
+   the file name. Every difference of an attempt is listed, not only the first.
+2. `install`: a user's install works. `actions/setup-python` gives CPython 3.13 and `pypi_smoke` makes an empty
+   virtual environment with it. For TestPyPI, the wheel's `Requires-Dist` requirements are installed first from
+   the real PyPI (`--only-binary=:all:`), then `komira==<version>` with `--no-deps` from TestPyPI alone, so
+   nothing but `komira` comes from TestPyPI. For PyPI, `komira==<version>` is one install from PyPI. Every pip
+   runs `--isolated`, without a cache. Then `pip check` must pass, `pip show komira` must report the version,
+   and the quickstart runs with `python -I` in a directory holding only the example and its data file: it
+   must exit 0 and print what `python/examples/quickstart.expected` says, compared exactly, with `<version>`
+   replaced by the version and `<abi_version>` by the ABI version of the `--abi-table` file
+   (`src/so/abi/komira.tsv`: `major * 1000 + minor`, so `1.1` is 1001). A failed step names the command, its exit
+   status and the last lines of its stderr.
+
+The smoke of TestPyPI is the release gate: the `pypi` job `needs` `testpypi-smoke`, so a wheel that does
+not install and run from TestPyPI is never uploaded to PyPI.
+
+The quickstart is [`python/examples/quickstart.py`](../python/examples/README.md). Today it asserts the
+version, the engine's C ABI version, and that a `Session` registers `readings.parquet` and closes. It
+asserts no query result: the call that runs a query has not landed. The README's block under "What works"
+is the same text, held byte for byte by `//python/smoke:readme_shows_quickstart`.
+
+**What the macOS smokes prove.** The same two checks, `verify` and `install`, on the macOS wheel: on the
+GitHub-hosted runner `macos-15` (Apple silicon, free for public repositories) with CPython 3.13 from
+`actions/setup-python`, the macOS driver (`//python/smoke:pypi_smoke_macos_arm64`, cross-compiled on the farm for
+`aarch64-macos`) checks that the index serves the bytes that were built and that `pip install komira==<version>` into an
+empty environment gives a package that imports, reports the version and the ABI version, and runs the quickstart.
+The wheel is self-contained: `komira/_lib/libkomira.dylib` and, in `komira/_lib/lib/`, the three Mojo runtime
+libraries (`libAsyncRTRuntimeGlobals.dylib`, `libKGENCompilerRTShared.dylib`, `libMSupportGlobals.dylib`); it depends on
+no package of Modular's.
+
+**What ran where.** The build, the stamp and the wheel's own install test
+(`//python:wheel_install_test_<flavour>`, which installs the wheel, and for `external` Modular's `mojo-compiler` it requires, into an empty environment and loads `libkomira`) run on the
+farm, in `build`, before any upload, on the same bytes that are uploaded. The macOS wheel's build and its install test
+(`//python:wheel_install_test_macos_arm64`, the bundled flavour) run on the farm's Macs, in `build-macos-arm64`. `state`, the upload, `verify` and
+`install` run on GitHub-hosted runners, in the later jobs. The index checks and the install from an index
+run on a runner only, because a farm action has no network.
+
+**What it does not prove.** It does not run a query (none exists yet). It tests two wheels, linux x86_64 and macOS
+arm64, one CPython (3.13) and one install route (`pip`), and the macOS wheel only on the macOS version of the hosted
+runner, not on the oldest macOS it claims (11.0). Wheels for arm64 Linux and for other platforms come later,
+each with its own smoke. A change to the driver is tested by `//python/smoke:pypi_smoke`'s cases, which
+use a fake index and a fake runner and make no network request; the live indexes are reached only by a run
+of this workflow.
+
+### Owner steps before the first run
+
+These are done once, in GitHub and on the indexes, outside this repository:
+
+1. In the repository's Settings > Environments, create `testpypi` and `pypi`, each restricted to the
+   branch `main` (deployment branches: selected branches, `main` only). Required reviewers on `pypi` are
+   optional: they hold the run before the PyPI upload. The environment `build` already exists.
+2. On test.pypi.org and on pypi.org, add a pending trusted publisher (Your account > Publishing): project
+   `komira`, owner `komira-ai`, repository `komira`, workflow `pypi.yml`, environment `testpypi` on
+   TestPyPI and `pypi` on PyPI.
+3. Run the workflow on `main` (Actions > pypi > Run workflow). The first run creates the project on each
+   index.
+
+### Yanking a bad release
+
+A release is never deleted, by the workflow or by hand: an index does not let a file name be uploaded again,
+even after its file is deleted, so a deleted release leaves a version that can never be fixed in place. A bad
+release is yanked by the PyPI project's owner: in the project's release settings on pypi.org, on the version,
+Yank, with a reason. A yanked version stays installable by `==` and is skipped by a plain
+`pip install komira`. The next version is the next run on a commit that changes code.
+
+### The version and documentation-only commits
+
+The version is `0.1.<N>`, with `<N>` from `release_json stamp`, which does not count commits that touch only
+documentation (`docs`, `*.md`, `.github`). A change to `python/README.md`, which is the package's description and
+so is in the wheel's `METADATA`, therefore builds a wheel with the same version and different bytes. When the
+index already holds the version's file, `state` says `differs` on it: nothing is uploaded, the smoke does not
+run, and the run is green with a notice that says the version's bytes differ. The fix reaches the index with
+the next commit that changes code, which has the next version.
+
 ## pr.yml: the pull request's check
 
 [`.github/workflows/pr.yml`](../.github/workflows/pr.yml) is workflow `pr` with
@@ -690,14 +892,89 @@ not run kci (retired).
 
 | | |
 |---|---|
-| trigger | `pull_request` alone: no push, manual run, `pull_request_target`, `workflow_run` or any other event |
-| job | the one job `check`, only for a pull request from a branch of this repository (`github.event.pull_request.head.repo.full_name == github.repository`; a fork's run gets no tailnet credential, and a maintainer reads the change and pushes it to a branch here), written bare or as exactly `${{ <condition> }}` (a block scalar or whitespace inside quotes makes GitHub read the `if:` as a format string, which is always true) |
+| trigger | `pull_request` into `main` and `merge_group` (`checks_requested`, into `main`) alone: no push, manual run, `pull_request_target`, `workflow_run` or any other event |
+| concurrency | one group per pull request, `pr-<number>`, where a newer push cancels the older check; a merge group has no number and takes its ref (`refs/heads/gh-readonly-queue/main/…`), which is its own, so merge groups never cancel each other |
+| job | the one job `check`, for every merge group and for a pull request only from a branch of this repository (`github.event_name == 'merge_group' \|\| github.event.pull_request.head.repo.full_name == github.repository`; a fork's run gets no tailnet credential, and a maintainer reads the change and pushes it to a branch here; a merge group's event has no `pull_request`, and without its own term the job would be skipped there, which counts as passed), written bare or as exactly `${{ <condition> }}` (a block scalar or whitespace inside quotes makes GitHub read the `if:` as a format string, which is always true) |
 | runner | `runs-on: ubuntu-24.04`, written as that plain scalar: a GitHub-hosted machine, fresh per job. A self-hosted label, label list, runner group, expression (`${{ vars.X }}`) or quoted value is refused, so a pull request's code never reaches a runner that keeps state between jobs |
 | permissions | its own `permissions:` mapping, `contents: read` and `id-token: write` (for the farm connection, [farm-connect](#how-it-reaches-the-farm), only); no environment, no secret (no value of the job, nor of the workflow-level `env:`, names `secrets` other than `secrets.GITHUB_TOKEN`), no publish step |
-| steps | the pinned full-history checkout of the merge commit, `farm-connect`, and the farm assertion (`//tools/build/ci:assert_remote`). Then the change: `git diff --name-only HEAD^1...HEAD` and the coverage holds of both sides, where HEAD^1 is the merge commit's first parent (the `main` the pull request is merged into; the step stops when HEAD has no second parent). Never the event's `github.event.pull_request.base.sha`: that is `main` when the event fired, and once `main` moves every change merged to it since then would count as the pull request's own and widen the check. Then, each as the `buck2-farm` action (so each fails unless no action ran on the runner): the BXL selector `tools/build/ci/affected.bxl:affected` (the owners of the changed files and everything that depends on them, or `//ci:pr`, the whole check set, when a file cannot be mapped or touches the build system; the heavy checks of `HEAVY` in `tools/build/ci/rules.bzl`, today none since only `komira_base` reaches them, only when the change touches paths that row owns, so a change that owns none builds `//ci:pr_default` in place of `//ci:pr`), `build --keep-going` of its list, the checks only BXL can make over the whole graph (`test_weld.bxl:check` for each test_weld lint, `graph/checks.bxl:check` for each graph_check, `guard.bxl:check` that `//ci:pr` holds every check target, `python_guard.bxl:check` that it reaches no Python outside the SDK, `default_guard.bxl:check` that `//ci:pr_default` is `//ci:pr` without the roots of `HEAVY` and nothing else, `lock_graphs.bxl:check` that each package's `buildrules.mojo.lock.bzl` holds a unit graph for every platform subdir its `mopm.lock` records and that a package which loads a native shared library pins it in `system_libs` of that lock, `cases.bxl:run`, and `readme_e2e/cases.bxl:run`, the cases of the README e2e's completeness guard), and `test` of the list's targets that are not of the tests cell. A pull request that adds or deletes a package needs no edit to any release file; adding a target to the check set means regenerating `ci/targets.bzl` and its shards `ci/targets/shard_<n>.bzl` in one step (the guard fails, naming the command, when they are out of date or a shard nears the 1000-line limit). Nothing ships. |
+| steps | the pinned full-history checkout of the merge commit (a merge group: its head commit), `farm-connect`, and the farm assertion (`//tools/build/ci:assert_remote`). Then the change, written by `//tools/build/ci:change` (built on the farm like the assertion, run on the runner in the checkout, with the event, the merge group's `base_sha` and the output directory as flags; `tools/build/ci/change/change.zig` says what it runs and refuses, and its cases run its choice of base against a fake git): `git diff --name-only <base>...HEAD` and the coverage holds of both sides. A pull request's base is HEAD^1, the merge commit's first parent (the `main` the pull request is merged into; the step stops when HEAD has no second parent). Never the event's `github.event.pull_request.base.sha`: that is `main` when the event fired, and once `main` moves every change merged to it since then would count as the pull request's own and widen the check. A merge group's base is its `merge_group.base_sha`, the commit the group's head was built on (the step stops when it is not an ancestor of HEAD); the head is a squash commit on top of it, not a merge commit. Any other event stops the step. Then, each as the `buck2-farm` action (so each fails unless no action ran on the runner): the BXL selector `tools/build/ci/affected.bxl:affected` (the owners of the changed files and everything that depends on them, or `//ci:pr`, the whole check set, when a file cannot be mapped or touches the build system; the heavy checks of `HEAVY` in `tools/build/ci/rules.bzl`, today none since only `komira_base` reaches them, only when the change touches paths that row owns, so a change that owns none builds `//ci:pr_default` in place of `//ci:pr`), `build --keep-going` of its list, the checks only BXL can make over the whole graph (`test_weld.bxl:check` for each test_weld lint, `graph/checks.bxl:check` for each graph_check, `guard.bxl:check` that `//ci:pr` holds every check target, `python_guard.bxl:check` that it reaches no Python outside the SDK, `default_guard.bxl:check` that `//ci:pr_default` is `//ci:pr` without the roots of `HEAVY` and nothing else, `lock_graphs.bxl:check` that each package's `buildrules.mojo.lock.bzl` holds a unit graph for every platform subdir its `mopm.lock` records and that a package which loads a native shared library pins it in `system_libs` of that lock, `cases.bxl:run`, and `readme_e2e/cases.bxl:run`, the cases of the README e2e's completeness guard), and `test` of the list's targets that are not of the tests cell. A pull request that adds or deletes a package needs no edit to any release file; adding a target to the check set means regenerating `ci/targets.bzl` and its shards `ci/targets/shard_<n>.bzl` in one step (the guard fails, naming the command, when they are out of date or a shard nears the 1000-line limit). Nothing ships. |
 | every `uses:` | pinned to a full commit id (the local farm-connect action excepted) |
 
 The repository's branch settings require the check **`pr / check`**.
+`//:pr_workflow_cases` (`.github/workflows/pr_workflow_test.zig`) holds the
+trigger, the job's condition, the concurrency group, that the change step runs
+the change tool with the event and the group base, and the job's bound below the
+queue's check timeout, and that no other workflow has a job `check`.
+
+## The merge queue
+
+`main` takes a pull request only through GitHub's merge queue. A pull request
+whose review passed and whose `pr / check` is green is added to the queue; the
+queue makes a branch `gh-readonly-queue/main/pr-<n>-<sha>` holding `main`, the
+pull requests ahead of it and its own squash commit, runs `pr / check` there
+(event `merge_group`), and moves `main` to that commit when the check is green.
+A pull request is no longer brought up to date with `main` and checked again
+every time `main` moves: it is checked once more, on top of exactly what will be
+ahead of it, and `main` moves only to commits a check built.
+
+The queue is a rule of the repository's ruleset for `main`:
+
+```json
+{
+  "type": "merge_queue",
+  "parameters": {
+    "merge_method": "SQUASH",
+    "grouping_strategy": "ALLGREEN",
+    "max_entries_to_build": 5,
+    "min_entries_to_merge": 1,
+    "max_entries_to_merge": 5,
+    "min_entries_to_merge_wait_minutes": 5,
+    "check_response_timeout_minutes": 360
+  }
+}
+```
+
+and the repository's squash message settings are `squash_merge_commit_title:
+PR_TITLE` and `squash_merge_commit_message: BLANK`. Why each:
+
+- **Squash, as before.** `main` gets one commit per pull request.
+- **The message is the title alone.** The queue writes the squash message from
+  the repository's default settings; nobody passes one when queueing. The title
+  gives `<title> (#<n>)`, the subject merges had before. The body is left blank:
+  the repository is public, and neither the pull request's description nor its
+  branch commits (the `COMMIT_MESSAGES` default) are held to the rules of a
+  public commit message, so neither is copied into `main`'s history.
+- **Each pull request is checked on its own (`ALLGREEN`).** Every queued pull
+  request's own commit must pass `pr / check` before it merges, so a red commit
+  never reaches `main`, not even inside a group whose last commit is green. The
+  check of a merge group builds what is affected between its `base_sha` and its
+  head: at least that pull request's own change, built on top of the ones ahead.
+- **Five build at once, up to five merge together.** A check takes tens of
+  minutes. Five queued pull requests building at once give up to five merges per
+  check duration instead of one, while leaving most of the farm to the checks of
+  pull requests that are still being written. When the first ones of the queue are green
+  together they reach `main` in one push, so `release.yml` runs once for them.
+  `min_entries_to_merge: 1` means a pull request never waits for others to make a
+  group (so the wait minutes never apply).
+- **A pull request whose check fails leaves the queue.** The queue removes it
+  and rebuilds the ones behind it without it; it comes back only when it is queued
+  again, after a fix. A check that has not reported after
+  `check_response_timeout_minutes` (360, the most GitHub allows) counts as
+  failed; `pr / check` ends at its `timeout-minutes` of 330 first, so the queue
+  sees a red check, not a silence.
+- **The macOS build stays in the release workflows.** A merge group runs
+  `pr.yml` alone, which builds no macOS target; the macOS set builds in
+  `release-macos.yml` on the push to `main`, as before
+  ([The macOS build of the release](#the-macos-build-of-the-release)).
+- **`coverage` does not run on a merge group.** It reports on a pull request's
+  "Files changed" view and is not required, so the queue does not wait for it.
+
+A merge group runs the queued change's code on the farm with the farm
+credential, as a push to `main` does. Queue only pull requests from branches of
+this repository: a fork's change is read and pushed to a branch here first, as in
+[Pull requests from forks](#pull-requests-from-forks). The farm's trust
+credential accepts the tokens of this repository's runs; a merge group's token
+names the queue's branch, not `main`.
 
 ## coverage.yml: the pull request's coverage (not a gate)
 
@@ -740,9 +1017,10 @@ shipping, never the library or its dependents) and is the CEO's decision. Detail
 
 ## main_red.yml: the main red alert
 
-There is no merge queue: pull requests are checked one at a time and merged
-into `main`, and the release run of `release.yml` builds each push to `main`. Two
-changes that are each green can still break `main` together. The rule is
+Pull requests reach `main` through the [merge queue](#the-merge-queue), which
+checks each one on top of the ones ahead of it, and the release run of
+`release.yml` builds each push to `main`. The queue's check builds what the
+change affects, not the release set, so `main` can still go red. The rule is
 **fix forward or revert within the hour**: when the release run of `main`
 fails, the author of a culprit pull request lands a fix, or reverts the
 pull request, within an hour of the alert, before anything else merges on

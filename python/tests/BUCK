@@ -74,36 +74,65 @@ c_shared_lib(
     out = "libkomira_fake_modes.so",
 )
 
-# Stand-ins for the three Mojo runtime libraries and for a library that needs
-# them (fake_mojo_runtime.c): each needs a symbol of the ones before it, so
-# they open only in dependency order with RTLD_GLOBAL.
-[c_shared_lib(
-    name = "fake_runtime_" + name,
-    srcs = ["fake_mojo_runtime.c"],
-    copts = ["-DFAKE_LIB={}".format(n)],
-    out = "libfake_runtime_{}.so".format(name),
-) for name, n in [("msupport", 1), ("asyncrt", 2), ("kgen", 3), ("consumer", 4)]]
+# Stand-ins for a Mojo runtime library (fake_runtime_lib.c), for the runtime
+# hook (komira/_runtime.py): each case's copies at `<case>/ours/` (komira's
+# `_lib/lib`), `<case>/other/` (someone else's, loaded first) and
+# `<case>/site/modular/lib/` (where Modular's package installs the runtime the
+# external flavour loads), with the SONAME `libfake_rt_<case>.so` and the
+# build id bytes given here (fake_runtime_lib.c writes the note), None for no
+# build id note.
+_FAKE_RUNTIME = [
+    # (case, where, build id)
+    ("a", "ours", "0x0a,0x0a,0x0a,0x0a"),
+    ("b", "ours", "0x0b,0x0b,0x0b,0x0b"),
+    ("b", "other", "0x0b,0x0b,0x0b,0x0b"),
+    ("c", "ours", "0x0c,0x0c,0x0c,0x0c"),
+    ("c", "other", "0x0d,0x0d,0x0d,0x0d"),
+    ("d", "ours", "0x0e,0x0e,0x0e,0x0e"),
+    ("d", "other", None),
+    ("e", "other", "0x0f,0x0f,0x0f,0x0f"),
+    ("f", "site/modular/lib", "0x1f,0x1f,0x1f,0x1f"),
+    ("g", "other", "0x20,0x20,0x20,0x20"),
+    ("h", "other", "0x21,0x21,0x21,0x21"),
+]
 
-# The runtime preload on stand-in directories: a library missing (none, two
-# of three, the .dylib names on macOS, sys.path when no search path is given),
-# another mojo-compiler version, a library that is not one (the first, and
-# the third after two opened, then retried), and the three present, opened in
-# order so a library needing them loads; then the same
-# directory again, and another one refused. A plain py_test: no
-# LD_LIBRARY_PATH, so only the preload makes the stand-ins' symbols visible.
-py_test(
+[c_shared_lib(
+    name = "fake_rt_{}_{}".format(case, where.split("/")[0]),
+    srcs = ["fake_runtime_lib.c"],
+    copts = [
+        "-DFAKE_MARKER={}".format(i),
+        "-Wl,-soname,libfake_rt_{}.so".format(case),
+        "-Wl,--build-id=none",
+    ] + (["-DFAKE_BUILD_ID={}".format(build_id)] if build_id else []),
+    out = "libfake_rt_{}.so".format(case),
+) for i, (case, where, build_id) in enumerate(_FAKE_RUNTIME)]
+
+# The runtime hook on the stand-ins. The bundled flavour's check: nothing
+# loaded by a name, komira's own copy loaded, another copy of the same build
+# (accepted), another build and a copy without a build id (refused, naming the
+# library and both files), komira's copy missing while another is loaded
+# (refused, naming the missing file), a loaded copy that cannot be read back,
+# and nothing checked off Linux; the build id reader on the stand-ins and on
+# hand-written ELF headers (no note, other notes, a cut program header table,
+# not ELF64). The external flavour: its record read, and refused unreadable,
+# not text, malformed line by line, or without a requirement or a library;
+# Modular's runtime not installed (every absolute directory searched, a
+# relative one or a repeat skipped, the missing libraries and the install line
+# named), installed at another build or without a build id (refused by name
+# with the install line, nothing opened), installed at the record's build
+# (opened by path with RTLD_LOCAL, the needed library first, one already
+# loaded not opened again; a stand-in opened from a site directory), one that
+# cannot be opened, and one already loaded of the record's build (nothing
+# searched) or of another (refused). And which of the two `prepare` runs: the
+# check when the runtime is inside or there is no record, the external load
+# otherwise, nothing off Linux.
+python_binding_test(
     name = "runtime_test",
     src = "test_runtime.py",
-    args = [
-        "--msupport",
-        "$(location :fake_runtime_msupport)",
-        "--asyncrt",
-        "$(location :fake_runtime_asyncrt)",
-        "--kgen",
-        "$(location :fake_runtime_kgen)",
-        "--consumer",
-        "$(location :fake_runtime_consumer)",
-    ],
+    data = {
+        "{}/{}/libfake_rt_{}.so".format(case, where, case): ":fake_rt_{}_{}".format(case, where.split("/")[0])
+        for case, where, _ in _FAKE_RUNTIME
+    },
     deps = ["//python:komira"],
 )
 
@@ -114,7 +143,6 @@ py_test(
 python_binding_test(
     name = "load_test",
     src = "test_load.py",
-    srcs = ["runtime_site.py"],
     data = {
         "fake_negative/libkomira.so": ":fake_negative",
         "fake_no_abi_version/libkomira.so": ":fake_no_abi_version",
@@ -135,7 +163,6 @@ python_binding_test(
 python_binding_test(
     name = "cpu_test",
     src = "test_cpu.py",
-    srcs = ["runtime_site.py"],
     data = {
         "cpuinfo_x86_64_v3.txt": "fixtures/cpuinfo_x86_64_v3.txt",
         "fake_v1_3/libkomira.so": ":fake_v1_3",
@@ -148,7 +175,6 @@ python_binding_test(
 python_binding_test(
     name = "session_test",
     src = "test_session.py",
-    srcs = ["runtime_site.py"],
     data = {
         "libkomira": LIBKOMIRA,
         "two_columns.parquet": PARQUET,
@@ -160,7 +186,6 @@ python_binding_test(
 python_binding_test(
     name = "minor0_test",
     src = "test_minor.py",
-    srcs = ["runtime_site.py"],
     args = [
         "--fake",
         "fake_v1_0",
@@ -174,7 +199,6 @@ python_binding_test(
 python_binding_test(
     name = "minor3_test",
     src = "test_minor.py",
-    srcs = ["runtime_site.py"],
     args = [
         "--fake",
         "fake_v1_3",
@@ -193,7 +217,6 @@ python_binding_test(
 python_binding_test(
     name = "two_call_test",
     src = "test_two_call.py",
-    srcs = ["runtime_site.py"],
     data = {"fake_modes/libkomira.so": ":fake_modes"},
     deps = ["//python:komira"],
 )
@@ -310,16 +333,20 @@ _CASES = [
     "no_sql",
 ]]
 
-# The clean-environment install test of the wheel (python/BUCK,
+# The clean-environment install tests of the wheel (python/BUCK,
 # wheel_install_test): the driver that installs the wheels into an empty
-# prefix and runs the test there, the test the installed interpreter runs, and
-# the serialized plan it renders (the scan plan of
-# src/so/tests/gate/gate_plan_render.mojo, as hex).
+# prefix and runs a test there, the three tests the installed interpreter runs
+# (the wheel alone, the wheel beside Modular's runtime, and the wheel after an
+# upgrade from the previous release), and the serialized plan the first renders
+# (the scan plan of src/so/tests/gate/gate_plan_render.mojo, as hex).
 [export_file(
     name = f,
     visibility = ["komira//python:"],
 ) for f in [
     "wheel_install_run.py",
     "test_installed.py",
+    "test_beside_modular.py",
+    "test_upgrade.py",
     "fixtures/scan_plan.hex",
+    "fixtures/previous_release_only.txt",
 ]]
