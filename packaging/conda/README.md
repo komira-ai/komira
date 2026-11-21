@@ -26,7 +26,7 @@ separate, gated step that belongs to the release (`release.yml`).
 | layer | what it is | where |
 |---|---|---|
 | 1. Mojo packages | `mojo_library`: built, and consumed by other libraries through `deps`. Unchanged by anything here | `src/*/BUCK` |
-| 2. packaging rules | `conda_package`: turns one library into a `.conda` directory (this page). A Python wheel rule is a design only, see below | `tools/build/package/conda.bzl`, `komira_pack` |
+| 2. packaging rules | `conda_package`: turns one library into a `.conda` directory (this page). The Python wheel: `wheel_file`, see below | `tools/build/package/conda.bzl`, `komira_pack` |
 | 3. the release | declares **which artifacts exist and how to build them**, builds them through the rules above, and publishes the BUILT files | `release/artifacts.textproto`: a reviewed list of artifacts |
 
 So there is **one list of published packages, and it is the release's artifacts**,
@@ -412,36 +412,33 @@ Two builds with the same name, version and build string but different bytes are
 a stop for the release tool; a new release is a new `N` (which gives a new build
 string).
 
-## Wheels: versioning (design only; no code)
+## Wheels: versioning
 
-A wheel is versioned the same way: **`<compiler version>.post<N>`**, the PEP 440
-post-release of the compiler version, with `N` the same number as the conda build
-number, and it depends on `mojo-compiler==<compiler version>` (PyPI has no build
-strings, so the post-release is what tells two releases of one compiler version
-apart). A compiler bump gives a new base version and every wheel is rebuilt.
-Nothing writes a wheel yet.
+This section was a sketch, and the wheel does not follow it: the sketch had the
+wheel versioned **`<compiler version>.post<N>`**, which would call komira 1.0 and
+tie its version to the Mojo compiler's. The wheel the repository writes
+(`wheel_file`, [tools/build/package/README.md](../../tools/build/package/README.md#the-python-wheel))
+is versioned `0.1.<N>`, with `N` the same number as the conda build number,
+and states its Mojo pin as a `Requires-Dist`.
 
-## A Python wheel rule (design only; no code)
+## A Python wheel rule
 
 The conda rules do not cover the Python front end. The wheel is the
 distribution `komira`; like a conda package it carries `libkomira` and no
 file of the Modular Mojo runtime, and depends on Modular's `mojo-compiler`
 package for it (on PyPI rather than Modular's conda channel; see
 [docs/design/mojo_runtime_pypi_vs_conda.md](../../docs/design/mojo_runtime_pypi_vs_conda.md)).
-So the rule, when it is written:
+The rule is `wheel_file`
+([tools/build/package/README.md](../../tools/build/package/README.md#the-python-wheel)):
 
-- **explicit, and off by default.** Unlike the conda package, a library does not
-  get a wheel unless it asks (`wheel = True`, or a `python_wheel` target for the
-  front end); there are few wheels, and each is a reviewed decision.
+- **explicit.** A library does not get a wheel; a `wheel_file` target names the
+  files of one, and there are few wheels.
 - **front end only.** The wheel is the Python package that drives komira, not a
   per-library artifact.
-- **same rules as the conda rule**: `[release]` is a directory holding the
-  `.whl`, `manifest.json` in the artifact-manifest format for a PYTHON
-  artifact (`artifact_type`, `name`, `version`, `file`, `sha256`, `metadata`,
-  where `metadata` is the wheel's `METADATA`), gated on a stamp tied to git, built
-  reproducibly, read back by an independent check.
-- **declared in the release's artifact list** like every other artifact (a `PYTHON_WHEEL` artifact
-  whose build rule is that target); nothing in Buck lists it as published.
+- **gated like the conda rule**: `[release]` is the wheel, copied only after a
+  check that reads it back and refuses an unstamped one; built reproducibly.
+- **not a member of the release set.** The wheel is published by the PyPI
+  workflow from its own target; the release set stays CONDA only.
 - **licence metadata (PEP 639)**: the wheel's `METADATA` carries
 
   ```
@@ -456,11 +453,12 @@ So the rule, when it is written:
   `.../licenses/NOTICE`. There is no `License ::` classifier (PEP 639
   deprecates it beside an expression). `NOTICE`'s last section is what tells a
   user that the Mojo runtime comes from `mojo-compiler` under Modular's
-  licence, so the read-back check refuses a wheel that lacks either file, has a
-  copy that differs from the root's, carries any of the three runtime
-  libraries (`libKGENCompilerRTShared`, `libAsyncRTRuntimeGlobals`,
-  `libMSupportGlobals`), or has no `mojo-compiler` requirement at the
-  compiler version.
+  licence. The read-back check refuses a wheel whose licence members differ
+  from the files given (the root's two by default), that carries a library of
+  `external_needed` (the package's target, when it is added, names the three runtime libraries,
+  `libKGENCompilerRTShared`, `libAsyncRTRuntimeGlobals` and
+  `libMSupportGlobals`), or whose Requires-Dist is not the target's (which
+  will name `mojo-compiler` at the compiler version).
 
 ## Not done yet
 
@@ -469,7 +467,8 @@ So the rule, when it is written:
 - libraries that link native code (refused by name rather than published
   incompletely);
 - the upload step;
-- the Python wheel rule (design above);
+- the Python wheel for linux-aarch64 and osx-arm64 (the rule derives their tags;
+  their libraries are not built yet);
 - **a `.mojoc` that does not record the isolation directory** (follow-up):
   compile `precompile` from a private working directory with the sources staged
   at a fixed relative path (the wrapper must then absolutize every `-I` and the
