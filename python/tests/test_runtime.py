@@ -77,8 +77,10 @@ def main(args):
     # little-endian ELF, a program header table past the end of the file, and
     # notes that are not a GNU build id; the build id after another note; an
     # unreadable file raises.
-    assert _runtime.build_id(os.path.join(ours("b"), name("b"))) == bytes.fromhex("0b0b0b0b"), "the build id of b"
-    assert _runtime.build_id(os.path.join(other("d"), name("d"))) is None, "d/other has no build id"
+    got = _runtime.build_id(os.path.join(ours("b"), name("b")))
+    assert got == bytes.fromhex("0b0b0b0b"), "the build id of b/ours is {!r}".format(got)
+    got = _runtime.build_id(os.path.join(other("d"), name("d")))
+    assert got is None, "d/other has the build id {!r}".format(got)
     assert _runtime.build_id(write(scratch, "text", b"not an ELF file at all, but long enough" * 4)) is None
     assert _runtime.build_id(write(scratch, "elf32", b"\x7fELF\x01\x01" + b"\0" * 58)) is None
     assert _runtime.build_id(write(scratch, "short", b"\x7fELF\x02\x01")) is None

@@ -13,8 +13,9 @@
 
 #ifdef FAKE_BUILD_ID
 // Owner "GNU" (namesz 4), a 4-byte descriptor, type NT_GNU_BUILD_ID (3), in
-// an allocated SHT_NOTE section, which the linker puts in a PT_NOTE segment.
-__asm__(".section .note.gnu.build-id,\"a\",@note\n"
+// an allocated SHT_NOTE section, which the linker keeps and puts in a PT_NOTE
+// segment. Not named `.note.gnu.build-id`: the linker owns that name.
+__asm__(".section .note.komira.fake-build-id,\"a\",@note\n"
         ".balign 4\n"
         ".long 4\n"
         ".long 4\n"
