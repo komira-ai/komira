@@ -4,9 +4,18 @@
 # release is .github/workflows/release.yml, which has no `pull_request`
 # trigger.
 #
+# The same job is the check of a merge group (docs/ci.md, "The merge queue"):
+# main takes pull requests only through GitHub's merge queue, which builds each
+# queued pull request on top of the ones ahead of it on a branch of its own and
+# merges it when this job is green there. The job reports under the same name
+# for both events; a required check that never reported on a merge group would
+# hold the queue until its timeout (//:pr_workflow_cases holds the trigger, the
+# job's condition, the concurrency group and the step that writes the change;
+# //tools/build/ci:change chooses the change base of each event).
+#
 # The job runs named Buck2 targets on the farm and nothing else:
-#   1. the files the change touches (`git diff` of the merge commit against its
-#      first parent) and the coverage holds of both sides, into $RUNNER_TEMP;
+#   1. the files the change touches (`git diff` of the commit checked out against
+#      the change base) and the coverage holds of both sides, into $RUNNER_TEMP;
 #   2. the BXL selector (tools/build/ci/affected.bxl) turns them into the
 #      targets to build: the owners of the files and everything that depends
 #      on them, or the aggregate //ci:pr (the whole check set) when a file
@@ -18,19 +27,27 @@
 #      test_weld and graph_check lints, the completeness guard of //ci:pr, the
 #      guard that it reaches no Python, and the cases of the selector and the
 #      guard;
-#   5. `test` of the list's standalone tests.
+#   5. `test` of the list's standalone tests;
+#   6. the configuration and analysis of the release's macOS set, for its
+#      platform, on this runner: no action runs, so nothing is built for macOS
+#      and no macOS worker is asked for anything (release/darwin_analysis.bxl).
 # Every Buck2 step is the buck2-farm action (.github/actions/buck2-farm), which
 # fails the step unless buck2 succeeded and no action ran on the runner. The
-# one other `./buck2 build` is that action's own tool.
+# two other `./buck2 build`s are that action's own tool and the tool that
+# writes the change.
 #
-# The change base is the first parent of the merge commit checked out: exactly
-# the main the pull request is merged into, so the change is the pull request's
-# alone. Never the event's base.sha: that is main when the event fired, and once
-# main moves every change merged since then would count as this pull request's.
+# The change base of a pull request is the first parent of the merge commit
+# checked out: exactly the main the pull request is merged into, so the change
+# is the pull request's alone. Never the event's base.sha: that is main when the
+# event fired, and once main moves every change merged since then would count as
+# this pull request's. The change base of a merge group is its `base_sha`, the
+# commit the group's head was built on, which does not move: the group's head
+# is the pull request's squash commit on top of it, not a merge commit.
 #
 # Only for a pull request from a branch of this repository (a fork's run gets no
 # tailnet credential; a maintainer reads the change and pushes it to a branch
-# here); a GitHub-hosted runner; no environment and no secret; `contents: read`
+# here), and for a merge group, which GitHub makes from a pull request a
+# maintainer queued; a GitHub-hosted runner; no environment and no secret; `contents: read`
 # and the `id-token: write` the farm connection exchanges, nothing else; every
 # action pinned; no publish step.
 name: pr
@@ -38,23 +55,33 @@ name: pr
 on:
   pull_request:
     branches: [main]
+  merge_group:
+    types: [checks_requested]
+    branches: [main]
 
 permissions: {}
 
 concurrency:
-  # One group per pull request: a newer push to it cancels the older check.
-  group: pr-${{ github.event.pull_request.number }}
+  # One group per pull request: a newer push to it cancels the older check. A
+  # merge group has no pull request number; its ref
+  # (refs/heads/gh-readonly-queue/main/pr-<n>-<base>) is its own, so merge
+  # groups never cancel each other or a pull request's check.
+  group: pr-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 env:
-  # The pull request's merge commit, which the job checks out.
+  # The pull request's merge commit, or the merge group's head commit, which the
+  # job checks out.
   REVISION: ${{ github.sha }}
 
 jobs:
   check:
-    # A pull request from a branch of this repository, and nothing else: a
-    # fork's pull request runs nothing.
-    if: github.event.pull_request.head.repo.full_name == github.repository
+    # A merge group, or a pull request from a branch of this repository, and
+    # nothing else: a fork's pull request runs nothing. A merge group has no
+    # `pull_request` in its event, so without its own term here the job would
+    # be skipped, and a skipped job counts as passed: the queue would merge
+    # what nothing built.
+    if: github.event_name == 'merge_group' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-24.04
     timeout-minutes: 330
     # No environment: no approval, and no environment secret reaches a pull
@@ -64,7 +91,8 @@ jobs:
       # for farm-connect only: the token Tailscale trusts
       id-token: write
     steps:
-      # The merge commit, with the full history: the change is read from git.
+      # The merge commit (a merge group: its head), with the full history: the
+      # change is read from git.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ env.REVISION }}
@@ -89,14 +117,22 @@ jobs:
       - name: build the farm assertion
         id: assert
         run: echo "path=$(./buck2 build komira//tools/build/ci:assert_remote --show-full-simple-output)" >> "$GITHUB_OUTPUT"
-      # The change: the files the pull request touches (renames as a delete and
-      # an add) and the coverage holds of the base and of the head. HEAD must be
-      # the merge commit.
+      # The tool that writes the change (tools/build/ci/change), built on the
+      # farm like the assertion; its path is the step's output.
+      - name: build the change tool
+        id: change
+        run: echo "path=$(./buck2 build komira//tools/build/ci:change --show-full-simple-output)" >> "$GITHUB_OUTPUT"
+      # The change: the files the pull request (or the merge group) touches
+      # (renames as a delete and an add) and the coverage holds of the base and
+      # of the head, into changed.txt and held.txt. The base: a pull request's
+      # is HEAD^1, and HEAD must be the merge commit; a merge group's is its
+      # base_sha, which must be an ancestor of HEAD. Any other event stops here
+      # (change.zig).
       - name: the change
-        run: |
-          git rev-parse --verify --quiet HEAD^2 > /dev/null || { echo "::error::the change base is the merge commit's first parent, and HEAD is not a merge commit"; exit 1; }
-          git diff --no-renames --name-only HEAD^1...HEAD > "$RUNNER_TEMP/changed.txt"
-          git grep -n '' HEAD^1 HEAD -- '*coverage_held' > "$RUNNER_TEMP/held.txt"
+        env:
+          CHANGE: ${{ steps.change.outputs.path }}
+          GROUP_BASE: ${{ github.event.merge_group.base_sha }}
+        run: '"$CHANGE" --event "$GITHUB_EVENT_NAME" --group-base "$GROUP_BASE" --out "$RUNNER_TEMP"'
       - name: select the affected targets
         uses: ./.github/actions/buck2-farm
         with:
@@ -201,6 +237,21 @@ jobs:
         uses: ./.github/actions/buck2-farm
         with:
           args: test @${{ runner.temp }}/test_targets.txt
+          assert-remote: ${{ steps.assert.outputs.path }}
+      # The release's macOS set (//release:mopm_darwin_libs, built only by
+      # release-macos.yml on the farm's macOS workers) configured for darwin-arm64
+      # and analysed, with its whole closure: a change that makes it fail before
+      # anything is built fails here, in its own pull request. Configuring and
+      # analysing run no action, so nothing is built for macOS; the config file
+      # registers the macOS execution platform with a property set that names no
+      # worker (release/darwin_analysis.buckconfig). Last, because the config file
+      # changes the daemon's configuration; it runs whenever the farm assertion
+      # was built, so a red build above does not hide its answer.
+      - name: the Mac release set configures and analyses
+        if: ${{ !cancelled() && steps.assert.outcome == 'success' }}
+        uses: ./.github/actions/buck2-farm
+        with:
+          args: bxl --config-file release/darwin_analysis.buckconfig komira//release/darwin_analysis.bxl:check
           assert-remote: ${{ steps.assert.outputs.path }}
       - name: Stop buck2
         if: always()
