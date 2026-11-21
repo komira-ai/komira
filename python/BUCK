@@ -383,3 +383,17 @@ _TOOLCHAIN_MOJO = asset("linux-x86_64", "mojo_compiler")["name"].split("_")[2]
         "AssertionError: the same-version cases need Modular's runtime at the toolchain's Mojo: mojo-compiler 1.0.0 is installed, the toolchain's is 0.0.1",
     ),
 ]]
+
+# The files the smoke driver's `readme_shows_quickstart` test reads
+# (python/smoke/BUCK): the README and the quickstart it shows.
+export_file(
+    name = "README.md",
+    src = "README.md",
+    visibility = ["//python/smoke:"],
+)
+
+export_file(
+    name = "examples/quickstart.py",
+    src = "examples/quickstart.py",
+    visibility = ["//python/smoke:"],
+)

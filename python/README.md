@@ -38,8 +38,14 @@ print(komira.__version__)     # the installed version
 print(komira.abi_version())   # the engine's C ABI version: 1001 is 1.1
 
 with komira.Session() as s:
-    s.register_parquet("trips", "trips.parquet")
+    s.register_parquet("readings", "readings.parquet")
+    print("registered readings")
+print(s.closed)               # True: the session is freed
 ```
+
+This block is the file `python/examples/quickstart.py` of the source tree
+(next to the `readings.parquet` it registers), which the release checks run
+against the published package.
 
 - `komira.__version__` is the installed distribution's version.
 - `komira.abi_version()` loads the engine and returns its C ABI version as
