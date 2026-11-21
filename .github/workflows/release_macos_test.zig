@@ -522,7 +522,7 @@ test "each edit of the real release-macos.yml that breaks the macOS build's cont
     try expectRefused(ar, try replaced(ar, text, REPORT_ENV ++ "\n", ""), "does not print the build job's report");
     try expectRefused(ar, try replaced(ar, text, REPORT_ECHO, "              echo \"::error title=release-macos::the macOS build did not pass: ${BUILD_RESULT:-"), "does not print the build job's report");
     try expectRefused(ar, try replaced(ar, text, REPORT_ECHO, "              if [ -n \"$REPORT\" ]; then :; fi\n" ++ REPORT_ECHO), "branches in shell");
-    try expectRefused(ar, try replaced(ar, text, "(the checkout or farm-connect failed; the job's log says why)", "(" ++ GUESS ++ ")"), "guesses at the cause");
+    try expectRefused(ar, try replaced(ar, text, "(the checkout or farm-connect failed; the log of the job says why)", "(" ++ GUESS ++ ")"), "guesses at the cause");
     try expectRefused(ar, try replaced(ar, text, "      - name: the buckconfig names the farm and its macOS workers\n", "      - name: no check\n"), "names the macOS workers");
 
     // the build: the platform, the target, the farm action, asserted

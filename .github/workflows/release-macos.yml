@@ -159,6 +159,6 @@ jobs:
             cancelled)
               echo "::warning title=release-macos::the macOS build was cancelled (a newer push replaces a running build)" ;;
             *)
-              echo "::error title=release-macos::the macOS build did not pass: ${REPORT:-its job ended $BUILD_RESULT before the buckconfig check (the checkout or farm-connect failed; the job's log says why)}"
+              echo "::error title=release-macos::the macOS build did not pass: ${REPORT:-its job ended $BUILD_RESULT before the buckconfig check (the checkout or farm-connect failed; the log of the job says why)}"
               exit 1 ;;
           esac
