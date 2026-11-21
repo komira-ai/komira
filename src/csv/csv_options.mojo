@@ -193,7 +193,7 @@ struct CsvReadOptions(Copyable, Movable, Deinitable):
         self.has_header = True
         self.decimal_separator = UInt8(ord("."))
 
-        # Initialize InlineArrays (Mojo 1.0.0b1 requires explicit fill_value
+        # Initialize Arrays (Mojo 1.0.0b1 requires explicit fill_value
         # for non-trivially-default-constructible inner types; String is
         # default-constructible to "" so we can use a sentinel-fill pattern).
         self.null_strings = Array[String, MAX_NULL_STRINGS](fill=String(""))
@@ -322,7 +322,7 @@ struct CsvReadOptions(Copyable, Movable, Deinitable):
     @staticmethod
     def __new_uninitialized__() -> Self:
         """Internal helper for `copy()`. Constructs a Self with placeholder
-        InlineArrays; the caller MUST overwrite every used slot before reading.
+        Arrays; the caller MUST overwrite every used slot before reading.
         """
         var s = Self.__placeholder__()
         return s^

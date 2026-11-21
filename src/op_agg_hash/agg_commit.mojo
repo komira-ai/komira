@@ -188,7 +188,7 @@ struct AggCommitPlan[batch_origin: ImmOrigin](Movable):
     # savings. Instead each slot's tag is resolved to a row thunk at plan
     # time (`bind_layout`), with the byte offset of the slot
     # within an entry (`aggs_offset + layout.offsets[agg_idx]`), both in
-    # parallel per-bucket InlineArrays; `commit_row` then calls the
+    # parallel per-bucket Arrays; `commit_row` then calls the
     # pre-bound thunk with no per-row tag work.
     #
     # Per-bucket parallel arrays (same ordering as `*_agg_idxs`):

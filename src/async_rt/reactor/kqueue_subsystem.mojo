@@ -318,7 +318,7 @@ def kevent_register(
             _null_ptr[UInt8, MutUntrackedOrigin](),
         )
         # Anchor lifetimes past the syscall (MutExternalOrigin defeats
-        # the lifetime tracker; without these reads the InlineArrays
+        # the lifetime tracker; without these reads the Arrays
         # could be freed before the kernel reads/writes them).
         _ = change[0]
         _ = ack_buf[0]
@@ -367,7 +367,7 @@ def kevent_register_proc_exit(
             _null_ptr[UInt8, MutUntrackedOrigin](),
         )
         # Anchor lifetimes past the syscall (MutExternalOrigin defeats the
-        # lifetime tracker; without these reads the InlineArrays could be
+        # lifetime tracker; without these reads the Arrays could be
         # freed before the kernel reads/writes them).
         _ = change[0]
         _ = ack_buf[0]
@@ -425,7 +425,7 @@ def kevent_register_timer(
             _null_ptr[UInt8, MutUntrackedOrigin](),
         )
         # Anchor lifetimes past the syscall (MutExternalOrigin defeats the
-        # lifetime tracker; without these reads the InlineArrays could be
+        # lifetime tracker; without these reads the Arrays could be
         # freed before the kernel reads/writes them).
         _ = change[0]
         _ = ack_buf[0]
@@ -698,7 +698,7 @@ def kevent_register_user_wake(
         var change = Array[UInt8, 32](fill=UInt8(0))
         # SAFETY: stack-local. keep buffers alive across
         # the syscall by keeping all uses in this scope and anchoring
-        # the InlineArrays after the call (MutExternalOrigin defeats
+        # the Arrays after the call (MutExternalOrigin defeats
         # the lifetime tracker).
         _encode_kevent(
             change, ident, EVFILT_USER, EV_ADD | EV_CLEAR | EV_RECEIPT,
