@@ -364,6 +364,7 @@ with the package, not here; the targets here are fixtures.
 |---|---|
 | `distribution` | `Name` (normalised: lowercase letters, digits, single `-`), and the file name `<dist>-<version>-<tag>.whl` |
 | `summary`, `readme` | `Summary`, and the body (the README, Markdown: `Description-Content-Type: text/markdown`) |
+| `readme_preface` | a paragraph put before the README in the body, with a blank line after it (komira's wheel names its flavour there) |
 | `requires_python`, `requires_dist`, `classifiers`, `project_urls` | `Requires-Python`, `Requires-Dist` (in order), `Classifier`, `Project-URL` |
 | `license_expression`, `license_files` | `License-Expression` and a `License-File` per file, the files at `.dist-info/licenses/<name>` (PEP 639); default the root's `LICENSE` and `NOTICE`. A `License ::` classifier beside the expression is refused (PEP 639 forbids the pair) |
 | `files`, `executable` | `{path in the wheel: file or directory}` (a directory adds every file under it), written 0644, or 0755 for the paths `executable` names (shared libraries) |
@@ -390,8 +391,9 @@ What the rule fixes, so no BUCK file states it:
   naming what is missing. This is not the `<compiler version>.post<N>` of
   [packaging/conda/README.md](../../../packaging/conda/README.md), which would
   call komira 1.0 and tie its version to the Mojo compiler's: the wheel is
-  komira's own release, and it carries the Mojo runtime it was built with instead
-  of requiring one (it has no `Requires-Dist`).
+  komira's own release: its bundled flavour carries the Mojo runtime it was
+  built with instead of requiring one, and its external flavour requires
+  `mojo-compiler` at that version (python/flavour.bzl).
 - **Reproducible bytes**: members sorted bytewise, then the dist-info's METADATA,
   WHEEL, licences and RECORD (sha256 in urlsafe base64 without padding, RECORD
   last); every member dated with the commit time (1980-01-01 unstamped); modes
@@ -414,8 +416,10 @@ stripped library reads the same). A refusal names its check:
   library of the manylinux list (libc, libm, libdl, libpthread, librt, libstdc++,
   libgcc_s, the dynamic loader), or in `external_needed`;
 - `external`: no member is a library of `external_needed`, the sonames another
-  package provides. komira's wheel names none: it carries the Mojo runtime
-  (libMSupportGlobals, libAsyncRTRuntimeGlobals, libKGENCompilerRTShared);
+  package provides. komira's bundled wheel names none: it carries the Mojo
+  runtime (libMSupportGlobals, libAsyncRTRuntimeGlobals,
+  libKGENCompilerRTShared); its external wheel names those three, which
+  Modular's `mojo-compiler` provides;
 - `platform`: an ELF member only in a manylinux wheel;
 - `size`: no member over 90 MB (90,000,000 bytes; PyPI takes 100 MB a file).
 
@@ -431,12 +435,20 @@ checks again, and the twin. `[release]` is the wheel copied only after
 publisher reads `[release]` and nothing else. `wheel_file_test_stamped` gives
 conda.bzl's test stamp (and its default output waits for `[release]` too).
 
+`komira_wheel runtime-record --requirement <r> --library <file>... --out <record>`
+([`wheel/record.zig`](wheel/record.zig)) writes the record a wheel carries of a
+runtime it does not carry: a `requirement` line, then each library's file name
+and GNU build id in hex, tab-separated, in the order given. A library without
+a build id is refused. komira's external wheel carries it
+(`runtime_record`, python/flavour.bzl), and its loader holds the installed
+runtime to it.
+
 The tests: the Zig scenarios `:wheel_zip_unit`, `:wheel_elf_unit`,
-`:wheel_policy_unit`, `:wheel_build_unit`, `:wheel_check_unit` and
-`:wheel_cli_unit` in [`BUCK`](BUCK), on synthetic files and ELF libraries
+`:wheel_policy_unit`, `:wheel_build_unit`, `:wheel_check_unit`,
+`:wheel_cli_unit` and `:wheel_record_unit` in [`BUCK`](BUCK), on synthetic files and ELF libraries
 ([`wheel/testing.zig`](wheel/testing.zig)). The rule on fixtures: `:wheel_fixture`
 (a linux-x86_64 wheel holding the example Mojo shared library `plain`, with the
-Mojo runtime as `external_needed`), `:wheel_fixture_aarch64_tag` and
+Mojo runtime as `external_needed` and a readme preface), `:wheel_fixture_aarch64_tag` and
 `:wheel_fixture_macosx_tag` (the linux-arm64 and darwin-arm64 rows' tags; built on
 linux like every target). `:wheel_tag_cases` holds each release row's tag
 and the refusal of a member path holding a brace.

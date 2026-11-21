@@ -5,13 +5,22 @@
 # gets it and that the quickstart (python/examples/quickstart.py) prints what
 # python/examples/quickstart.expected says, and only then uploads the same bytes to PyPI and proves the
 # same there. The version is 0.1.<N>, N the build number of `release_json stamp`, so a code commit is a
-# new version; the wheel is komira-0.1.<N>-py3-none-manylinux_2_34_x86_64.whl.
+# new version; the wheel is komira-0.1.<N>-py3-none-manylinux_2_35_x86_64.whl.
+#
+# THE FLAVOUR: the input `flavour` picks which of the wheel's two flavours (python/flavour.bzl,
+# docs/design/python_package.md "The two flavours") the run builds, tests and publishes; a run publishes
+# exactly one. `external` carries no file of Modular's and requires Modular's `mojo-compiler`, which pip
+# installs from PyPI beside it; `bundled` carries the Mojo runtime libraries and requires nothing. The
+# default is `external`; changing it is the one line `default:` below. The run's summary names the
+# flavour, and so does the first paragraph of the wheel's description on the index.
 #
 # THE JOBS, in order (a job that fails stops every job after it):
-#   `build`           on the farm: builds the stamped wheel (//python:komira_wheel), runs the install
-#                     test on those bytes (//python:wheel_install_test), builds the smoke driver
+#   `build`           on the farm: builds the stamped wheel of the flavour (//python:komira_wheel_<flavour>),
+#                     runs its install test on those bytes (//python:wheel_install_test_<flavour>), builds
+#                     the smoke driver
 #                     (//python/smoke:pypi_smoke) and names the dist directory; keeps the dist directory
-#                     and the driver as two workflow artifacts. It holds no upload step.
+#                     and the driver as two workflow artifacts, and writes the flavour and the version to
+#                     the run's summary. It holds no upload step.
 #   `testpypi`        asks TestPyPI which state the version is in (below) and, for `absent`, uploads
 #                     the dist directory with trusted publishing.
 #   `testpypi-smoke`  (not for `differs`) on a fresh runner: the driver `verify`s that TestPyPI serves
@@ -53,6 +62,15 @@ name: pypi
 
 on:
   workflow_dispatch:
+    inputs:
+      flavour:
+        description: the wheel's flavour (python/flavour.bzl); a run publishes exactly one
+        type: choice
+        options:
+          - external
+          - bundled
+        default: external
+        required: true
 
 permissions: {}
 
@@ -115,18 +133,20 @@ jobs:
       - name: the stamp
         id: stamp
         run: '"$RUNNER_TEMP/pypi/release_json" stamp --revision "$GITHUB_SHA" --github-output "$GITHUB_OUTPUT"'
-      # The wheel, stamped: its version is 0.1.<build number>.
+      # The wheel of the flavour the run was given, stamped: its version is 0.1.<build number>. The
+      # input is one of the choice's options, so the target is one of the two wheels.
       - name: build the wheel
         uses: ./.github/actions/buck2-farm
         with:
-          args: build -c komira.package_stamp=${{ steps.stamp.outputs.build_number }} -c komira.package_commit=${{ steps.stamp.outputs.source_commit }} -c komira.package_timestamp_ms=${{ steps.stamp.outputs.timestamp_ms }} //python:komira_wheel[release] --out ${{ runner.temp }}/pypi/built/komira.whl
+          args: build -c komira.package_stamp=${{ steps.stamp.outputs.build_number }} -c komira.package_commit=${{ steps.stamp.outputs.source_commit }} -c komira.package_timestamp_ms=${{ steps.stamp.outputs.timestamp_ms }} //python:komira_wheel_${{ inputs.flavour }}[release] --out ${{ runner.temp }}/pypi/built/komira.whl
           assert-remote: ${{ steps.assert.outputs.path }}
-      # The install test of the same wheel (built from the same stamp, so the same bytes): installs it
-      # into an empty environment and loads the library, on the farm, before anything is uploaded.
+      # The install test of the same wheel (built from the same stamp and flavour, so the same bytes):
+      # installs it into an empty environment (the external flavour with Modular's package it
+      # requires) and loads the library, on the farm, before anything is uploaded.
       - name: the install test on the wheel
         uses: ./.github/actions/buck2-farm
         with:
-          args: build -c komira.package_stamp=${{ steps.stamp.outputs.build_number }} -c komira.package_commit=${{ steps.stamp.outputs.source_commit }} -c komira.package_timestamp_ms=${{ steps.stamp.outputs.timestamp_ms }} //python:wheel_install_test
+          args: build -c komira.package_stamp=${{ steps.stamp.outputs.build_number }} -c komira.package_commit=${{ steps.stamp.outputs.source_commit }} -c komira.package_timestamp_ms=${{ steps.stamp.outputs.timestamp_ms }} //python:wheel_install_test_${{ inputs.flavour }}
           assert-remote: ${{ steps.assert.outputs.path }}
       # The driver every later job runs: the state of the version, the verify and the install smoke.
       - name: build the smoke driver
@@ -139,6 +159,12 @@ jobs:
       - name: the dist directory
         id: dist
         run: '"$RUNNER_TEMP/pypi/smoke/pypi_smoke" dist --wheel "$RUNNER_TEMP/pypi/built/komira.whl" --out "$RUNNER_TEMP/pypi/dist" --github-output "$GITHUB_OUTPUT"'
+      # The run's summary says which flavour and version this run publishes.
+      - name: the flavour in the run's summary
+        env:
+          FLAVOUR: ${{ inputs.flavour }}
+          VERSION: ${{ steps.dist.outputs.version }}
+        run: 'echo "komira $VERSION, the $FLAVOUR flavour of the wheel (python/flavour.bzl)" >> "$GITHUB_STEP_SUMMARY"'
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: pypi-${{ steps.dist.outputs.version }}-dist
