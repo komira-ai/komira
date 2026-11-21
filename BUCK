@@ -24,6 +24,14 @@ export_file(name = "LICENSE", visibility = ["PUBLIC"])
 # The notices the wheel carries beside LICENSE (tools/build/package/wheel.bzl).
 export_file(name = "NOTICE", visibility = ["PUBLIC"])
 
+# The install page, whose python and text blocks the smoke driver's
+# install_page_shows_quickstart test holds to the quickstart (python/smoke/BUCK).
+export_file(
+    name = "docs/install.md",
+    src = "docs/install.md",
+    visibility = ["//python/smoke:"],
+)
+
 # The files under .github/, which the root doc_tree's glob skips, at their
 # paths, for the interpreter list (//tools/build/lint:interpreter_budget).
 doc_tree(
@@ -136,16 +144,23 @@ zig_test(
 )
 
 # The cases of pypi.yml, the publish of the Python package (.github/workflows/pypi_workflow_test.zig
-# says what each catches): a manual trigger alone, no secret and no token, no upload step in the
-# build job, the identity (`id-token`) in the build jobs and the upload jobs alone, the twelve
+# says what each catches): one daily schedule and a manual run, every read of the flavour with the
+# fallback a scheduled run takes, no secret and no token, no upload step in the build job, the identity (`id-token`) in the build jobs and the upload jobs alone, the twelve
 # jobs of the Linux and the macOS wheel with the exact runner, gate, needs and environment of
 # each, the upload only for the state `absent` on a pinned action with its defaults, Python 3.13
-# set up in the smoke jobs alone, every action pinned to a commit, and the Linux result job. The
-# macOS jobs' further contract is in //:release_macos_cases. A build action.
+# set up in the smoke jobs alone, every action pinned to a commit, and the Linux result job; and
+# a run played from the file's text for each state of the indexes (pypi_workflow_run.zig: an
+# unchanged main is green with the notice `already published`, a documentation-only commit green
+# with the notice of differing bytes). The macOS jobs' further contract is in
+# //:release_macos_cases. A build action.
 zig_test(
     name = "pypi_workflow_cases",
     exec_compatible_with = LINUX_X86_64,
     src = ".github/workflows/pypi_workflow_test.zig",
+    imports = [
+        ".github/workflows/pypi_workflow_run.zig",
+        ".github/workflows/pypi_workflow_text.zig",
+    ],
     data = {
         "workflows/pypi.yml": ".github/workflows/pypi.yml",
     },
@@ -178,7 +193,8 @@ zig_test(
 
 # The cases of the buck2-farm action (.github/actions/buck2-farm/action_test.zig
 # says what each catches): action.yml's shape, and its two run lines run
-# end to end over recorded buck2 output with the real //tools/build/ci:assert_remote.
+# end to end over recorded buck2 output with the real //tools/build/ci:assert_remote,
+# a cut connection to the farm run once more and every other failure not.
 zig_test(
     name = "buck2_farm_cases",
     exec_compatible_with = LINUX_X86_64,

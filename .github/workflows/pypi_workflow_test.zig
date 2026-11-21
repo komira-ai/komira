@@ -3,15 +3,15 @@
 //! KOMIRA_TEST_WORK/workflows/pypi.yml). `check` reads the text and says why it breaks the
 //! contract, or null; the cases write each defect into the real text and want it refused with its
 //! message. What the contract holds:
-//!  - the triggers: `on:` is `workflow_dispatch:` alone (no schedule, cron, push or pull request
-//!    outside a comment), with one required input, `flavour`, a choice of exactly `external` and
-//!    `bundled` whose default is `bundled`; top-level `permissions` is `{}` exactly once, and the
-//!    concurrency is the group `pypi` with no run cancelled;
+//!  - the triggers: `on:` is one `schedule:` of exactly one cron entry at a fixed minute and hour of
+//!    every day, then `workflow_dispatch:` with no input (no push or pull request, and no other
+//!    schedule or cron outside a comment), and no line outside a comment reads a run input
+//!    (`inputs.`); top-level `permissions` is `{}` exactly once, and the concurrency is the group
+//!    `pypi` with no run cancelled;
 //!  - the jobs are exactly build, testpypi, testpypi-smoke, pypi, pypi-smoke and result (the Linux
 //!    wheel), then build-macos-arm64, testpypi-macos-arm64, testpypi-smoke-macos-arm64,
-//!    pypi-macos-arm64, pypi-smoke-macos-arm64 and result-macos-arm64 (the macOS wheel, the bundled
-//!    flavour only), each once, and each holds its exact `if:` (main only; build-macos-arm64 also only
-//!    for the bundled flavour), runner, `needs:`, environment and permissions: the two smoke jobs of
+//!    pypi-macos-arm64, pypi-smoke-macos-arm64 and result-macos-arm64 (the macOS wheel), each once, and each holds
+//!    its exact `if:` (main only), runner, `needs:`, environment and permissions: the two smoke jobs of
 //!    the macOS wheel run on macos-15 and every other job on ubuntu-24.04;
 //!    `id-token: write` is held by build and build-macos-arm64 (for the farm only), testpypi, pypi,
 //!    testpypi-macos-arm64 and pypi-macos-arm64 (for the upload only) and by no other job;
@@ -22,9 +22,8 @@
 //!    the smoke steps, the result steps); what the macOS jobs hold beyond the job set is in
 //!    release_macos_test.zig (//:release_macos_cases);
 //!  - build has no upload step (no publish action, no legacy upload address, no twine); it builds the
-//!    wheel and the install test of the input's flavour and the driver, each with the three stamp
-//!    flags, writes the flavour and the version to the run's summary, and keeps exactly the dist and
-//!    the smoke artifacts;
+//!    wheel (//python:komira_wheel), the install test (//python:wheel_install_test) and the driver,
+//!    each with the three stamp flags, and keeps exactly the dist and the smoke artifacts;
 //!  - testpypi and pypi ask the state before the upload step, which runs for `absent` alone, with the
 //!    pinned publish action and the dist directory; testpypi names the TestPyPI upload address, pypi
 //!    none; neither skips an existing file or turns attestations off;
@@ -34,10 +33,24 @@
 //!  - no line outside a comment holds a secret, a password, an API token, curl, wget, jq, twine,
 //!    continue-on-error or pull_request_target, and no `run:` line holds a `${{ }}` expression;
 //!  - result runs always on main, needs the five jobs, holds no permission, prints the notice for the
-//!    `differs` state and fails the run in three steps with their exact conditions.
+//!    `differs` state, fails the run in three steps with their exact conditions and, last, prints the
+//!    notice `already published` when both indexes say `same`.
+//! What a run of the file does, for each state of the indexes, is played in pypi_workflow_run.zig.
 
 const std = @import("std");
 const t = std.testing;
+const reader = @import("pypi_workflow_text.zig");
+const jobLines = reader.jobLines;
+const jobNames = reader.jobNames;
+const topLines = reader.topLines;
+const has = reader.has;
+const lineAt = reader.lineAt;
+const mentions = reader.mentions;
+const countMentions = reader.countMentions;
+const countPrefix = reader.countPrefix;
+const replaced = reader.replaced;
+const inJob = reader.inJob;
+const readWorkflow = reader.readWorkflow;
 
 const JOBS = [_][]const u8{
     "build",
@@ -54,8 +67,6 @@ const JOBS = [_][]const u8{
     "result-macos-arm64",
 };
 const MAIN_ONLY = "    if: github.ref == 'refs/heads/main'";
-/// The macOS wheel is the bundled flavour: its build runs for a bundled run alone.
-const MACOS_BUILD_GATE = "    if: github.ref == 'refs/heads/main' && inputs.flavour == 'bundled'";
 
 const JobSpec = struct {
     name: []const u8,
@@ -87,7 +98,7 @@ const SPECS = [_]JobSpec{
     .{ .name = "pypi-smoke", .runs_on = UBUNTU, .gate = SMOKE_GATE_MAIN ++ "needs.pypi.outputs.state != 'differs'", .needs = "    needs: [build, pypi]", .environment = null, .perms = &SMOKE_PERMS },
     .{ .name = "result", .runs_on = UBUNTU, .gate = RESULT_GATE, .needs = "    needs: [build, testpypi, testpypi-smoke, pypi, pypi-smoke]", .environment = null, .perms = &NO_PERMS },
     // the macOS wheel: the build only asks the farm (an ubuntu runner), the smokes run on a hosted Mac
-    .{ .name = "build-macos-arm64", .runs_on = UBUNTU, .gate = MACOS_BUILD_GATE, .needs = null, .environment = "    environment: build", .perms = &BUILD_PERMS },
+    .{ .name = "build-macos-arm64", .runs_on = UBUNTU, .gate = MAIN_ONLY, .needs = null, .environment = "    environment: build", .perms = &BUILD_PERMS },
     .{ .name = "testpypi-macos-arm64", .runs_on = UBUNTU, .gate = SMOKE_GATE_MAIN ++ "needs.build-macos-arm64.outputs.version != ''", .needs = "    needs: build-macos-arm64", .environment = "    environment: testpypi", .perms = &UPLOAD_PERMS },
     .{ .name = "testpypi-smoke-macos-arm64", .runs_on = MACOS, .gate = SMOKE_GATE_MAIN ++ "needs.testpypi-macos-arm64.outputs.state != 'differs'", .needs = "    needs: [build-macos-arm64, testpypi-macos-arm64]", .environment = null, .perms = &SMOKE_PERMS },
     .{ .name = "pypi-macos-arm64", .runs_on = UBUNTU, .gate = MAIN_ONLY, .needs = "    needs: [build-macos-arm64, testpypi-smoke-macos-arm64]", .environment = "    environment: pypi", .perms = &UPLOAD_PERMS },
@@ -120,12 +131,8 @@ const DOWNLOAD_NAMES = [_][]const u8{
 
 // ---- the build job ------------------------------------------------------------------------------
 const STAMP_FLAGS = "-c komira.package_stamp=${{ steps.stamp.outputs.build_number }} -c komira.package_commit=${{ steps.stamp.outputs.source_commit }} -c komira.package_timestamp_ms=${{ steps.stamp.outputs.timestamp_ms }}";
-const BUILD_WHEEL = "          args: build " ++ STAMP_FLAGS ++ " //python:komira_wheel_${{ inputs.flavour }}[release] --out ${{ runner.temp }}/pypi/built/komira.whl";
-const BUILD_INSTALL_TEST = "          args: build " ++ STAMP_FLAGS ++ " //python:wheel_install_test_${{ inputs.flavour }}";
-const SUMMARY_STEP = "      - name: the flavour in the run's summary";
-const SUMMARY_FLAVOUR = "          FLAVOUR: ${{ inputs.flavour }}";
-const SUMMARY_VERSION = "          VERSION: ${{ steps.dist.outputs.version }}";
-const SUMMARY_RUN = "        run: 'echo \"komira $VERSION, the $FLAVOUR flavour of the wheel (python/flavour.bzl)\" >> \"$GITHUB_STEP_SUMMARY\"'";
+const BUILD_WHEEL = "          args: build " ++ STAMP_FLAGS ++ " //python:komira_wheel[release] --out ${{ runner.temp }}/pypi/built/komira.whl";
+const BUILD_INSTALL_TEST = "          args: build " ++ STAMP_FLAGS ++ " //python:wheel_install_test";
 const BUILD_DRIVER = "          args: build " ++ STAMP_FLAGS ++ " //python/smoke:pypi_smoke --out ${{ runner.temp }}/pypi/smoke/pypi_smoke";
 const BUILD_LINES = [_][]const u8{
     "      version: ${{ steps.dist.outputs.version }}",
@@ -145,10 +152,6 @@ const BUILD_LINES = [_][]const u8{
     "          path: ${{ runner.temp }}/pypi/dist",
     "          name: pypi-${{ steps.dist.outputs.version }}-smoke",
     "          path: ${{ runner.temp }}/pypi/smoke",
-    SUMMARY_STEP,
-    SUMMARY_FLAVOUR,
-    SUMMARY_VERSION,
-    SUMMARY_RUN,
 };
 const BUILD_UPLOAD_FORBIDDEN = [_][]const u8{ "pypa/gh-action-pypi-publish", "legacy/", "twine", "repository-url", "packages-dir" };
 
@@ -191,6 +194,9 @@ const RESULT_UPLOAD_IF = "        if: needs.testpypi.outputs.state != 'differs' 
 const RESULT_SMOKE_IF = "        if: needs.testpypi.outputs.state != 'differs' && needs.pypi.outputs.state != 'differs' && needs.pypi-smoke.result != 'success'";
 const RESULT_DIFFERS_IF = "        if: needs.testpypi.outputs.state == 'differs' || needs.pypi.outputs.state == 'differs'";
 const RESULT_NOTICE = "        run: 'echo \"::notice title=pypi::bytes differ at the same version: a commit that changed only documentation, which the stamp ignores; a code commit raises the version\"'";
+const RESULT_SAME_STEP = "      - name: the version is on both indexes already";
+const RESULT_SAME_IF = "        if: needs.testpypi.outputs.state == 'same' && needs.pypi.outputs.state == 'same'";
+const RESULT_SAME_NOTICE = "        run: 'echo \"::notice title=pypi::already published: komira $VERSION is on TestPyPI and PyPI with the bytes built; nothing was uploaded, and the smoke passed on both\"'";
 const RESULT_LINES = [_][]const u8{
     "      - name: the build and the TestPyPI upload succeeded",
     RESULT_BUILD_IF,
@@ -209,135 +215,27 @@ const RESULT_LINES = [_][]const u8{
     RESULT_SMOKE_IF,
     "          PYPI_SMOKE: ${{ needs.pypi-smoke.result }}",
     "        run: 'echo \"::error title=pypi::the PyPI smoke job did not succeed (pypi-smoke $PYPI_SMOKE)\" && exit 1'",
+    RESULT_SAME_STEP,
+    RESULT_SAME_IF,
+    "          VERSION: ${{ needs.build.outputs.version }}",
+    RESULT_SAME_NOTICE,
 };
 
 // ---- the trigger ---------------------------------------------------------------------------------
-/// The lines of `on:`: the manual run and its one input. The default is `bundled`, the flavour a scheduled
-/// run publishes: flipping it is that one line here and in the workflow.
+/// The first two lines of `on:`: one schedule of one cron entry, whose line `dailyCron` reads.
+const SCHEDULE = "  schedule:";
+const CRON_PREFIX = "    - cron: '";
+/// The rest of `on:`: the manual run, which takes no input.
 const ON_LINES = [_][]const u8{
     "  workflow_dispatch:",
-    "    inputs:",
-    "      flavour:",
-    "        description: the wheel's flavour (python/flavour.bzl); a run publishes exactly one",
-    "        type: choice",
-    "        options:",
-    "          - external",
-    "          - bundled",
-    "        default: bundled",
-    "        required: true",
 };
 
 /// What no line outside a comment may contain, whatever the case.
 const FORBIDDEN = [_][]const u8{ "secrets", "password", "api-token", "pypi_token", "curl", "wget", "jq ", "twine", "continue-on-error", "pull_request_target" };
 /// What the triggers may not name outside a comment.
-const TRIGGER_WORDS = [_][]const u8{ "schedule", "cron", "push:", "pull_request" };
+const TRIGGER_WORDS = [_][]const u8{ "push:", "pull_request" };
 
-// ---- the reader ---------------------------------------------------------------------------------
-
-/// The lines of the job `name` of the `jobs:` map (a key at two spaces of
-/// indent), without comment lines and blank lines, or null if there is no such
-/// job. Counts the jobs of that name in `count`.
-fn jobLines(ar: std.mem.Allocator, text: []const u8, name: []const u8, count: *usize) !?[]const []const u8 {
-    var out = std.ArrayList([]const u8).empty;
-    var inside = false;
-    var found = false;
-    var in_jobs = false;
-    var it = std.mem.splitScalar(u8, text, '\n');
-    while (it.next()) |line| {
-        if (std.mem.eql(u8, line, "jobs:")) {
-            in_jobs = true;
-            continue;
-        }
-        if (!in_jobs) continue;
-        const trimmed = std.mem.trim(u8, line, " ");
-        if (trimmed.len == 0 or trimmed[0] == '#') continue;
-        const indent = line.len - std.mem.trimLeft(u8, line, " ").len;
-        if (indent == 2 and std.mem.endsWith(u8, trimmed, ":")) {
-            inside = std.mem.eql(u8, trimmed[0 .. trimmed.len - 1], name);
-            if (inside) {
-                count.* += 1;
-                found = true;
-                out.clearRetainingCapacity();
-            }
-            continue;
-        }
-        if (inside) try out.append(ar, line);
-    }
-    if (!found) return null;
-    return try out.toOwnedSlice(ar);
-}
-
-/// The names of the jobs of the `jobs:` map, in file order.
-fn jobNames(ar: std.mem.Allocator, text: []const u8) ![]const []const u8 {
-    var out = std.ArrayList([]const u8).empty;
-    var in_jobs = false;
-    var it = std.mem.splitScalar(u8, text, '\n');
-    while (it.next()) |line| {
-        if (std.mem.eql(u8, line, "jobs:")) {
-            in_jobs = true;
-            continue;
-        }
-        if (!in_jobs) continue;
-        const trimmed = std.mem.trim(u8, line, " ");
-        if (trimmed.len == 0 or trimmed[0] == '#') continue;
-        const indent = line.len - std.mem.trimLeft(u8, line, " ").len;
-        if (indent == 2 and std.mem.endsWith(u8, trimmed, ":")) try out.append(ar, trimmed[0 .. trimmed.len - 1]);
-    }
-    return try out.toOwnedSlice(ar);
-}
-
-/// The lines of the top-level key `key` (a line at column 0, e.g. `on:`), up to the next
-/// top-level line, without comment and blank lines.
-fn topLines(ar: std.mem.Allocator, text: []const u8, key: []const u8, count: *usize) !?[]const []const u8 {
-    var out = std.ArrayList([]const u8).empty;
-    var inside = false;
-    var found = false;
-    var it = std.mem.splitScalar(u8, text, '\n');
-    while (it.next()) |line| {
-        if (line.len == 0 or line[0] == '#') continue;
-        if (line[0] != ' ') {
-            inside = std.mem.eql(u8, line, key);
-            if (inside) {
-                count.* += 1;
-                found = true;
-            }
-            continue;
-        }
-        if (inside) try out.append(ar, line);
-    }
-    if (!found) return null;
-    return try out.toOwnedSlice(ar);
-}
-
-fn has(lines: []const []const u8, exact: []const u8) bool {
-    for (lines) |l| if (std.mem.eql(u8, l, exact)) return true;
-    return false;
-}
-
-fn lineAt(lines: []const []const u8, exact: []const u8) ?usize {
-    for (lines, 0..) |l, i| if (std.mem.eql(u8, l, exact)) return i;
-    return null;
-}
-
-fn mentions(lines: []const []const u8, needle: []const u8) bool {
-    return countMentions(lines, needle) > 0;
-}
-
-fn countMentions(lines: []const []const u8, needle: []const u8) usize {
-    var n: usize = 0;
-    for (lines) |l| {
-        if (std.mem.indexOf(u8, l, needle) != null) n += 1;
-    }
-    return n;
-}
-
-fn countPrefix(lines: []const []const u8, prefix: []const u8) usize {
-    var n: usize = 0;
-    for (lines) |l| {
-        if (std.mem.startsWith(u8, l, prefix)) n += 1;
-    }
-    return n;
-}
+// ---- the reader: pypi_workflow_text.zig ----------------------------------------------------------
 
 /// The lines under the job's `    permissions:` key (indented deeper than the key), or null if the
 /// job has no such key.
@@ -374,9 +272,26 @@ fn isHex40(s: []const u8) bool {
 
 // ---- the checks ---------------------------------------------------------------------------------
 
+/// Whether `n` is a plain decimal number (no `*`, list, range or step) of at most `max`.
+fn cronField(n: []const u8, max: u8) bool {
+    if (n.len == 0 or n.len > 2) return false;
+    for (n) |c| if (c < '0' or c > '9') return false;
+    return (std.fmt.parseInt(u8, n, 10) catch return false) <= max;
+}
+
+/// Whether `line` is the one cron entry of a run once a day at a fixed time: `'<minute> <hour> * * *'`.
+fn dailyCron(line: []const u8) bool {
+    if (!std.mem.startsWith(u8, line, CRON_PREFIX) or !std.mem.endsWith(u8, line, "'")) return false;
+    var f = std.mem.splitScalar(u8, line[CRON_PREFIX.len .. line.len - 1], ' ');
+    const minute = f.next() orelse return false;
+    const hour = f.next() orelse return false;
+    for (0..3) |_| if (!std.mem.eql(u8, f.next() orelse return false, "*")) return false;
+    return f.next() == null and cronField(minute, 59) and cronField(hour, 23);
+}
+
 fn onLinesHold(lines: []const []const u8) bool {
-    if (lines.len != ON_LINES.len) return false;
-    for (ON_LINES, lines) |want, got| {
+    if (lines.len != ON_LINES.len + 2 or !std.mem.eql(u8, lines[0], SCHEDULE) or !dailyCron(lines[1])) return false;
+    for (ON_LINES, lines[2..]) |want, got| {
         if (!std.mem.eql(u8, want, got)) return false;
     }
     return true;
@@ -386,6 +301,8 @@ fn onLinesHold(lines: []const []const u8) bool {
 /// the triggers, the permissions and concurrency of the workflow, the job set and the pins.
 fn checkFile(ar: std.mem.Allocator, text: []const u8) !?[]const u8 {
     var run_indent: ?usize = null;
+    var schedule_n: usize = 0;
+    var cron_n: usize = 0;
     var it = std.mem.splitScalar(u8, text, '\n');
     while (it.next()) |line| {
         const trimmed = std.mem.trim(u8, line, " ");
@@ -395,8 +312,11 @@ fn checkFile(ar: std.mem.Allocator, text: []const u8) !?[]const u8 {
             if (std.ascii.indexOfIgnoreCase(line, w) != null) return try std.fmt.allocPrint(ar, "a line outside a comment contains \"{s}\": {s}", .{ w, trimmed });
         }
         for (TRIGGER_WORDS) |w| {
-            if (std.mem.indexOf(u8, line, w) != null) return try std.fmt.allocPrint(ar, "a line outside a comment names a schedule, a cron, a push or a pull request trigger (\"{s}\"): {s}", .{ w, trimmed });
+            if (std.mem.indexOf(u8, line, w) != null) return try std.fmt.allocPrint(ar, "a line outside a comment names a push or a pull request trigger (\"{s}\"): {s}", .{ w, trimmed });
         }
+        if (std.mem.indexOf(u8, line, "schedule") != null) schedule_n += 1;
+        if (std.mem.indexOf(u8, line, "cron") != null) cron_n += 1;
+        if (std.mem.indexOf(u8, line, "inputs.") != null) return try std.fmt.allocPrint(ar, "a line outside a comment reads a run input (the workflow takes no input): {s}", .{trimmed});
         const in_block = if (run_indent) |ri| indent > ri else false;
         if (in_block) {
             if (std.mem.indexOf(u8, line, "${{") != null) return try std.fmt.allocPrint(ar, "a run: line holds a ${{{{ }}}} expression (pass it through env:): {s}", .{trimmed});
@@ -412,7 +332,8 @@ fn checkFile(ar: std.mem.Allocator, text: []const u8) !?[]const u8 {
 
     var on_n: usize = 0;
     const on_lines = (try topLines(ar, text, "on:", &on_n)) orelse empty;
-    if (on_n != 1 or !onLinesHold(on_lines)) return "on: is not exactly workflow_dispatch: with the input flavour, a required choice of external and bundled whose default is bundled";
+    if (on_n != 1 or !onLinesHold(on_lines)) return "on: is not exactly one schedule: of one cron entry at a fixed minute and hour of every day, then workflow_dispatch: with no input";
+    if (schedule_n != 1 or cron_n != 1) return "a line outside a comment and outside the one cron entry of on: names a schedule or a cron";
 
     var perm_n: usize = 0;
     _ = try topLines(ar, text, "permissions: {}", &perm_n);
@@ -539,7 +460,9 @@ fn checkResult(ar: std.mem.Allocator, job: []const []const u8) !?[]const u8 {
     for (RESULT_LINES) |l| {
         if (!has(job, l)) return try missingLine(ar, "result", "its steps", l);
     }
-    if (countPrefix(job, "      - name:") != 4 or countPrefix(job, "        run:") != 4 or mentions(job, "uses:")) return "result: it is not exactly the four steps that print";
+    if (countPrefix(job, "      - name:") != 5 or countPrefix(job, "        run:") != 5 or mentions(job, "uses:")) return "result: it is not exactly the five steps that print";
+    // the notice of a run that uploaded nothing prints only when no step before it failed
+    if (lineAt(job, RESULT_SAME_STEP).? + 5 != job.len) return "result: the notice already published is not its last step";
     return null;
 }
 
@@ -573,12 +496,6 @@ fn check(ar: std.mem.Allocator, text: []const u8) !?[]const u8 {
 
 // ---- the tests ----------------------------------------------------------------------------------
 
-fn readWorkflow(ar: std.mem.Allocator) ![]const u8 {
-    const work = try std.process.getEnvVarOwned(ar, "KOMIRA_TEST_WORK");
-    const path = try std.fs.path.join(ar, &.{ work, "workflows", "pypi.yml" });
-    return std.fs.cwd().readFileAlloc(ar, path, 1 << 20);
-}
-
 fn expectRefused(ar: std.mem.Allocator, text: []const u8, want: []const u8) !void {
     const got = (try check(ar, text)) orelse {
         std.debug.print("accepted a workflow that must be refused with: {s}\n", .{want});
@@ -588,29 +505,6 @@ fn expectRefused(ar: std.mem.Allocator, text: []const u8, want: []const u8) !voi
         std.debug.print("refused with \"{s}\", wanted \"{s}\"\n", .{ got, want });
         return error.WrongRefusal;
     }
-}
-
-/// `text` with every `from` replaced by `to`; the anchor must be there.
-fn replaced(ar: std.mem.Allocator, text: []const u8, from: []const u8, to: []const u8) ![]const u8 {
-    if (std.mem.indexOf(u8, text, from) == null) {
-        std.debug.print("the case's anchor is not in pypi.yml: {s}\n", .{from});
-        return error.NoAnchor;
-    }
-    return std.mem.replaceOwned(u8, ar, text, from, to);
-}
-
-/// `text` with the first `from` at or after the header of the job `job` replaced by `to`.
-fn inJob(ar: std.mem.Allocator, text: []const u8, job: []const u8, from: []const u8, to: []const u8) ![]const u8 {
-    const header = try std.fmt.allocPrint(ar, "\n  {s}:\n", .{job});
-    const start = std.mem.indexOf(u8, text, header) orelse {
-        std.debug.print("the case's job is not in pypi.yml: {s}\n", .{job});
-        return error.NoAnchor;
-    };
-    const at = std.mem.indexOfPos(u8, text, start, from) orelse {
-        std.debug.print("the case's anchor is not in job {s} of pypi.yml: {s}\n", .{ job, from });
-        return error.NoAnchor;
-    };
-    return try std.mem.concat(ar, u8, &.{ text[0..at], to, text[at + from.len ..] });
 }
 
 fn realText(ar: std.mem.Allocator) ![]const u8 {
@@ -655,46 +549,57 @@ test "an expression inside a run line, one line or a block, is refused" {
     try expectRefused(ar, try replaced(ar, text, "          ./buck2 audit config komira_re.linux_x86_64_properties", "          echo ${{ github.actor }}\n          ./buck2 audit config komira_re.linux_x86_64_properties"), "expression");
 }
 
-test "the triggers are a manual run alone: a schedule, a push or a pull request is refused" {
+test "the triggers are one daily schedule and a manual run: no schedule, a second one, or a push or pull request is refused" {
     var arena = std.heap.ArenaAllocator.init(t.allocator);
     defer arena.deinit();
     const ar = arena.allocator();
     const text = try realText(ar);
-    try expectRefused(ar, try replaced(ar, text, "\n  workflow_dispatch:\n", "\n  schedule:\n    - cron: '17 3 * * *'\n  workflow_dispatch:\n"), "schedule, a cron, a push or a pull request");
-    try expectRefused(ar, try replaced(ar, text, "\n  workflow_dispatch:\n", "\n  push:\n    branches: [main]\n  workflow_dispatch:\n"), "schedule, a cron, a push or a pull request");
-    try expectRefused(ar, try replaced(ar, text, "\n  workflow_dispatch:\n", "\n  pull_request:\n  workflow_dispatch:\n"), "schedule, a cron, a push or a pull request");
+    const sched = "  schedule:\n    - cron: '17 5 * * *'\n";
+    // the schedule missing, a second cron entry, a second schedule key
+    try expectRefused(ar, try replaced(ar, text, sched, ""), "on: is not exactly one schedule:");
+    try expectRefused(ar, try replaced(ar, text, sched, sched ++ "    - cron: '17 17 * * *'\n"), "on: is not exactly one schedule:");
+    try expectRefused(ar, try replaced(ar, text, sched, sched ++ sched), "on: is not exactly one schedule:");
+    // a cron that is not one fixed time of every day: every few minutes, every few hours, two hours,
+    // a weekday, a day of the month, a range, a minute or an hour out of range, a field missing
+    for ([_][]const u8{ "*/30 * * * *", "0 */6 * * *", "17 5,17 * * *", "17 5 * * 1", "17 5 1 * *", "17 4-6 * * *", "60 5 * * *", "17 24 * * *", "17 5 * *", "17 5 * * * *", "* 5 * * *", "017 5 * * *" }) |cron| {
+        try expectRefused(ar, try replaced(ar, text, "'17 5 * * *'", try std.fmt.allocPrint(ar, "'{s}'", .{cron})), "on: is not exactly one schedule:");
+    }
+    // any other fixed time of the day holds, the first and the last minute of it included
+    for ([_][]const u8{ "0 0 * * *", "59 23 * * *", "5 17 * * *" }) |cron| {
+        try t.expect((try check(ar, try replaced(ar, text, "'17 5 * * *'", try std.fmt.allocPrint(ar, "'{s}'", .{cron})))) == null);
+    }
+    // the schedule after the manual run, or a cron named outside on:
+    try expectRefused(ar, try replaced(ar, try replaced(ar, text, sched, ""), "  workflow_dispatch:\n", "  workflow_dispatch:\n" ++ sched), "on: is not exactly one schedule:");
+    try expectRefused(ar, try inJob(ar, text, "result", "    steps:\n", "    steps:\n      - name: the cron\n        run: echo x\n"), "names a schedule or a cron");
+    try expectRefused(ar, try replaced(ar, text, "\n  workflow_dispatch:\n", "\n  push:\n    branches: [main]\n  workflow_dispatch:\n"), "a push or a pull request");
+    try expectRefused(ar, try replaced(ar, text, "\n  workflow_dispatch:\n", "\n  pull_request:\n  workflow_dispatch:\n"), "a push or a pull request");
     try expectRefused(ar, try replaced(ar, text, "\n  workflow_dispatch:\n", "\n  workflow_dispatch:\n  workflow_call:\n"), "on: is not exactly");
     try expectRefused(ar, try replaced(ar, text, "\n  workflow_dispatch:\n", "\n  workflow_dispatch:\n    inputs: {}\n"), "on: is not exactly");
 }
 
-test "the flavour: a required choice of the two, bundled the default, and the build and summary follow it" {
+test "the run takes no input: a flavour input, any input, a read of one, or a build of another wheel is refused" {
     var arena = std.heap.ArenaAllocator.init(t.allocator);
     defer arena.deinit();
     const ar = arena.allocator();
     const text = try realText(ar);
-    // bundled is the default: the other choice as the default is refused
     try t.expect((try check(ar, text)) == null);
-    try expectRefused(ar, try replaced(ar, text, "        default: bundled\n", "        default: external\n"), "on: is not exactly");
-    // the input missing, not a choice, not required, without a default, or with another default
-    try expectRefused(ar, try replaced(ar, text, "  workflow_dispatch:\n    inputs:\n", "  workflow_dispatch:\n    unused:\n"), "on: is not exactly");
-    try expectRefused(ar, try replaced(ar, text, "        type: choice\n", "        type: string\n"), "on: is not exactly");
-    try expectRefused(ar, try replaced(ar, text, "        required: true\n", "        required: false\n"), "on: is not exactly");
-    try expectRefused(ar, try replaced(ar, text, "        default: bundled\n", ""), "on: is not exactly");
-    try expectRefused(ar, try replaced(ar, text, "        default: bundled\n", "        default: both\n"), "on: is not exactly");
-    // an option added, dropped or renamed
-    try expectRefused(ar, try replaced(ar, text, "          - bundled\n", "          - bundled\n          - both\n"), "on: is not exactly");
-    try expectRefused(ar, try replaced(ar, text, "          - bundled\n", ""), "on: is not exactly");
-    try expectRefused(ar, try replaced(ar, text, "          - external\n", "          - vendored\n"), "on: is not exactly");
-    // a second input
-    try expectRefused(ar, try replaced(ar, text, "        required: true\n", "        required: true\n      index:\n        type: string\n"), "on: is not exactly");
-    // the wheel or its install test of a fixed flavour, or of none: not the input's
-    try expectRefused(ar, try replaced(ar, text, "//python:komira_wheel_${{ inputs.flavour }}[release]", "//python:komira_wheel_bundled[release]"), "build: build, stamp, dist and artifacts");
-    try expectRefused(ar, try replaced(ar, text, "//python:wheel_install_test_${{ inputs.flavour }}", "//python:wheel_install_test_external"), "build: build, stamp, dist and artifacts");
-    try expectRefused(ar, try replaced(ar, text, "//python:komira_wheel_${{ inputs.flavour }}[release]", "//python:komira_wheel[release]"), "build: build, stamp, dist and artifacts");
-    // the summary step dropped, or naming something else
-    try expectRefused(ar, try replaced(ar, text, SUMMARY_STEP ++ "\n", "      - name: a summary\n"), "build: build, stamp, dist and artifacts");
-    try expectRefused(ar, try replaced(ar, text, SUMMARY_FLAVOUR ++ "\n", "          FLAVOUR: external\n"), "build: build, stamp, dist and artifacts");
-    try expectRefused(ar, try replaced(ar, text, SUMMARY_RUN ++ "\n", "        run: 'echo komira >> \"$GITHUB_STEP_SUMMARY\"'\n"), "build: build, stamp, dist and artifacts");
+    const no_input = "then workflow_dispatch: with no input";
+    // the old flavour input, with its choice and default, is refused
+    const flavour_input = "  workflow_dispatch:\n    inputs:\n      flavour:\n        description: the wheel's flavour (python/flavour.bzl); a run publishes exactly one\n        type: choice\n        options:\n          - external\n          - bundled\n        default: bundled\n        required: true\n";
+    try expectRefused(ar, try replaced(ar, text, "  workflow_dispatch:\n", flavour_input), no_input);
+    // any other single input
+    try expectRefused(ar, try replaced(ar, text, "  workflow_dispatch:\n", "  workflow_dispatch:\n    inputs:\n      index:\n        type: string\n"), no_input);
+    // the wheel or its install test of a fixed flavour: not the one wheel
+    try expectRefused(ar, try replaced(ar, text, "//python:komira_wheel[release]", "//python:komira_wheel_bundled[release]"), "build: build, stamp, dist and artifacts");
+    try expectRefused(ar, try replaced(ar, text, "//python:wheel_install_test\n", "//python:wheel_install_test_external\n"), "build: build, stamp, dist and artifacts");
+    // a read of an input anywhere outside a comment, with or without a fallback
+    const reads = "reads a run input";
+    try expectRefused(ar, try replaced(ar, text, "//python:komira_wheel[release]", "//python:komira_wheel_${{ inputs.flavour }}[release]"), reads);
+    try expectRefused(ar, try replaced(ar, text, "//python:wheel_install_test\n", "//python:wheel_install_test_${{ inputs.flavour || 'bundled' }}\n"), reads);
+    try expectRefused(ar, try inJob(ar, text, "build-macos-arm64", MAIN_ONLY ++ "\n", MAIN_ONLY ++ " && (inputs.flavour || 'bundled') == 'bundled'\n"), reads);
+    try expectRefused(ar, try replaced(ar, text, "        if: needs.build-macos-arm64.result != 'success'\n", "        if: inputs.flavour == 'bundled' && needs.build-macos-arm64.result != 'success'\n"), reads);
+    // a comment may name an input
+    try t.expect((try check(ar, try replaced(ar, text, "name: pypi\n", "name: pypi\n# no inputs.flavour: one wheel\n"))) == null);
 }
 
 test "the workflow permissions are empty and the concurrency is one group that cancels nothing" {
@@ -759,6 +664,7 @@ test "each job's gate, needs, environment and runner are exact" {
     // the macOS gates and needs
     try expectRefused(ar, try inJob(ar, text, "testpypi-macos-arm64", "    if: github.ref == 'refs/heads/main' && needs.build-macos-arm64.outputs.version != ''\n", MAIN_ONLY ++ "\n"), "testpypi-macos-arm64: its if:");
     try expectRefused(ar, try replaced(ar, text, "    if: github.ref == 'refs/heads/main' && needs.pypi-macos-arm64.outputs.state != 'differs'\n", "    if: needs.pypi-macos-arm64.outputs.state != 'differs'\n"), "pypi-smoke-macos-arm64: its if:");
+    try expectRefused(ar, try inJob(ar, text, "build-macos-arm64", MAIN_ONLY ++ "\n", "    if: always()\n"), "build-macos-arm64: its if:");
     try expectRefused(ar, try replaced(ar, text, "    needs: [build-macos-arm64, testpypi-smoke-macos-arm64]\n", "    needs: [build-macos-arm64, testpypi-macos-arm64]\n"), "pypi-macos-arm64: its needs:");
     try expectRefused(ar, try replaced(ar, text, "    needs: [build-macos-arm64, testpypi-macos-arm64, testpypi-smoke-macos-arm64, pypi-macos-arm64, pypi-smoke-macos-arm64]\n", "    needs: [build-macos-arm64, testpypi-macos-arm64]\n"), "result-macos-arm64: its needs:");
     try expectRefused(ar, try inJob(ar, text, "pypi-macos-arm64", "    environment: pypi\n", "    environment: testpypi\n"), "pypi-macos-arm64: its environment");
@@ -926,7 +832,7 @@ test "an action that is not pinned to a 40-hex commit is refused" {
     try t.expect((try check(ar, text)) == null);
 }
 
-test "the result job fails the run in three steps and prints the notice for differing bytes" {
+test "the result job fails the run in three steps, prints the notice for differing bytes and, last, the notice already published" {
     var arena = std.heap.ArenaAllocator.init(t.allocator);
     defer arena.deinit();
     const ar = arena.allocator();
@@ -938,6 +844,17 @@ test "the result job fails the run in three steps and prints the notice for diff
     try expectRefused(ar, try replaced(ar, text, RESULT_NOTICE, "        run: 'echo \"::notice title=pypi::bytes differ\"'"), "result: its steps");
     // a step that ends the run green instead of red
     try expectRefused(ar, try replaced(ar, text, " && exit 1'\n      - name: the bytes differ", "'\n      - name: the bytes differ"), "result: its steps");
-    // a fifth step
-    try expectRefused(ar, try replaced(ar, text, "          PYPI_SMOKE: ${{ needs.pypi-smoke.result }}\n", "          PYPI_SMOKE: ${{ needs.pypi-smoke.result }}\n      - name: one more\n        run: echo done\n"), "result: it is not exactly the four steps");
+    // a sixth step
+    try expectRefused(ar, try replaced(ar, text, "          PYPI_SMOKE: ${{ needs.pypi-smoke.result }}\n", "          PYPI_SMOKE: ${{ needs.pypi-smoke.result }}\n      - name: one more\n        run: echo done\n"), "result: it is not exactly the five steps");
+    // the notice already published: for one index alone, another text, without its version, or before a failing step
+    try expectRefused(ar, try replaced(ar, text, RESULT_SAME_IF, "        if: needs.pypi.outputs.state == 'same'"), "result: its steps");
+    try expectRefused(ar, try replaced(ar, text, RESULT_SAME_NOTICE, "        run: 'echo \"::notice title=pypi::nothing to do\"'"), "result: its steps");
+    try expectRefused(ar, try replaced(ar, text, "          VERSION: ${{ needs.build.outputs.version }}\n", ""), "result: its steps");
+    const same_step = RESULT_SAME_STEP ++ "\n" ++ RESULT_SAME_IF ++ "\n        env:\n          VERSION: ${{ needs.build.outputs.version }}\n" ++ RESULT_SAME_NOTICE ++ "\n";
+    try expectRefused(ar, try replaced(ar, try replaced(ar, text, same_step, ""), "      - name: the PyPI smoke succeeded\n", same_step ++ "      - name: the PyPI smoke succeeded\n"), "result: the notice already published is not its last step");
+}
+
+test {
+    // the cases that play a run of the file, in their own file
+    _ = @import("pypi_workflow_run.zig");
 }

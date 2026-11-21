@@ -31,6 +31,9 @@ from physical_plan.physical_plan import (
     KEY_DTYPE_F64,
     KEY_DTYPE_F32,
     KEY_DTYPE_STRING,
+    KEY_DTYPE_DATE32,
+    KEY_DTYPE_BOOL,
+    KEY_DTYPE_DECIMAL128,
 )
 from lowering.lowered_plan import LOWERING_SINK_UNSERVED
 
@@ -59,6 +62,9 @@ def sink_capability() -> List[SinkRow]:
     rows.append(_row(SINK_AGG, KEY_DTYPE_F32, SINK_ORIENT_COLUMNAR))
     rows.append(_row(SINK_AGG, KEY_DTYPE_STRING, SINK_ORIENT_DICT_ENCODED))
     rows.append(_row(SINK_AGG, KEY_DTYPE_STRING, SINK_ORIENT_COLUMNAR))
+    rows.append(_row(SINK_AGG, KEY_DTYPE_DATE32, SINK_ORIENT_COLUMNAR))
+    rows.append(_row(SINK_AGG, KEY_DTYPE_BOOL, SINK_ORIENT_COLUMNAR))
+    rows.append(_row(SINK_AGG, KEY_DTYPE_DECIMAL128, SINK_ORIENT_COLUMNAR))
     rows.append(_row(SINK_SORT, KEY_DTYPE_NONE, SINK_ORIENT_COLUMNAR))
     rows.append(_row(SINK_COLLECT, KEY_DTYPE_NONE, SINK_ORIENT_COLUMNAR))
     return rows^
@@ -116,6 +122,12 @@ def key_dtype_name(key_dtype: UInt8) -> String:
         return "F32"
     if key_dtype == KEY_DTYPE_STRING:
         return "STRING"
+    if key_dtype == KEY_DTYPE_DATE32:
+        return "DATE32"
+    if key_dtype == KEY_DTYPE_BOOL:
+        return "BOOL"
+    if key_dtype == KEY_DTYPE_DECIMAL128:
+        return "DECIMAL128"
     return "KEY_" + String(Int(key_dtype))
 
 

@@ -12,8 +12,7 @@ the current one into `--site`, uninstalling the first as pip does, and gives
 Then, in order:
 
 - the site directory holds the dist-info of the current release (`--version`)
-  and none of any other release of komira (other distributions, such as the
-  external flavour's Modular wheels, are not looked at here);
+  and none of any other release of komira;
 - the upgrade removed at least the files `--expect-removed` names, so the
   previous release did carry files the current one does not (an upgrade that
   has nothing to remove proves nothing about removal), and every file it

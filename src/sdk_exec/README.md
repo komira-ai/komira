@@ -109,6 +109,14 @@ The tests run when the package is built.
   lower; a file replaced between queries is read again; options are validated;
   contexts are created and dropped repeatedly, the segment pool whole after
   each run.
+- `test_run_sql_group_keys`: GROUP BY one DATE32, BOOL, DECIMAL(12, 2) or
+  DECIMAL(30, 4) column over a Parquet table of six row groups equals an oracle
+  computed in the test, the NULL key being one group (count(*), count(v) and
+  sum(v) per group; the key keeps its type, precision and scale; decimal keys
+  past INT64 are exact); min and max of dates and the sum of decimals run under
+  a BOOL key; a WHERE before the grouping keeps only the passing rows; an
+  all-NULL key is one group; `group by d, b` is refused at `lower` with
+  LOWERING_SINK_UNSERVED.
 - `test_run_sql_no_from`: `SELECT 1 AS n` is one row, an INT32 column `n`
   holding 1, DuckDB's answer; a result literal is INT32 from -2147483647 to
   2147483647 and INT64 past either bound and at -2147483648 (as in DuckDB);
