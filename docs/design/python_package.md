@@ -3,8 +3,8 @@
 Status: design, partly built. The allowlist entry that admits the package (`python` in `PYTHON_SURFACE`,
 [tests/python_closure_allowlist.bzl](../../tests/python_closure_allowlist.bzl)) landed with this document.
 Release 1's surface is built ([python/README.md](../../python/README.md)): the loader, `Session` with
-`register_parquet` and `close`, `abi_version()`, `__version__`, `KomiraError`, `LibraryLoadError` and
-`UnsupportedCpuError`, and their tests. `Session.sql`, `Result` and the default session are not.
+`register_parquet` and `close`, `abi_version()`, `__version__`, `KomiraError`, `LibraryLoadError`,
+`RuntimeNotFoundError` and `UnsupportedCpuError`, and their tests. `Session.sql`, `Result` and the default session are not.
 
 ## Release 1
 
@@ -13,8 +13,8 @@ it installs, imports and loads `libkomira` at ABI 1.1, and nothing in it runs a 
 library's run call does not exist yet.
 
 - Its public names are `__version__`, `abi_version()` (the library's `komira_abi_version()`, loading the
-  library if needed), `KomiraError`, `LibraryLoadError`, `UnsupportedCpuError` and `Session`. `Session()` takes no argument and
-  has `register_parquet(name, path)`, `close()`, `closed` and the context-manager methods. `Session.sql`, `Result`,
+  library if needed), `KomiraError`, `LibraryLoadError`, `RuntimeNotFoundError`, `UnsupportedCpuError`
+  and `Session`. `Session()` takes no argument and has `register_parquet(name, path)`, `close()`, `closed` and the context-manager methods. `Session.sql`, `Result`,
   the module-level `sql` and `register_parquet`, and `UnsupportedOperation` arrive with the run call.
 - The per-session lock and the `os.register_at_fork` hook of decision 3's behaviour list are not built
   yet; they come with `Session.sql`, the first call that runs long enough to need them.
@@ -144,6 +144,7 @@ The whole public surface of the first release is these names in `komira.__all__`
 | `KomiraError` | the base class of every error the package raises on purpose (decision 9) |
 | `UnsupportedOperation` | a `KomiraError`: komira refused a construct by name (an SQL feature the engine does not run yet, an option it does not take) |
 | `LibraryLoadError` | a `KomiraError`: `libkomira` or a library it needs could not be loaded, or its ABI major version is not the one this package was written for |
+| `RuntimeNotFoundError` | a `LibraryLoadError`: the Mojo runtime libraries are not installed, or are another `mojo-compiler` version than the one the package was built with (decision 6) |
 | `UnsupportedCpuError` | a `LibraryLoadError`: on Linux x86_64 the CPU lacks a flag of x86-64-v3, the level `libkomira` is compiled for there, so the library is not opened; the message names the missing flags |
 | `__version__` | the installed distribution's version, read with `importlib.metadata.version("komira")` (the distribution's name) |
 
@@ -239,9 +240,12 @@ visible from every thread, as a module-level name would be.
   wheel carries beside its own `lib/` directory of native owners, which is the library's run path
   (`$ORIGIN/lib:$ORIGIN`, [tools/build/mojo/README.md](../../tools/build/mojo/README.md)). It is the
   layout of `//src/so:libkomira[runnable]`, so the wheel rule copies that directory.
-- The Mojo runtime libraries are not in the wheel. Where the loader finds them is the runtime route's
-  decision; whatever it is, a missing or wrong runtime raises `LibraryLoadError` naming the library and
-  the version it needed.
+- The Mojo runtime libraries are not in the wheel. They come from Modular's `mojo-compiler`, which installs
+  them in `<site-packages>/modular/lib/` ([mojo_runtime_pypi_vs_conda.md](mojo_runtime_pypi_vs_conda.md)).
+  Before libkomira is opened, the loader opens them by absolute path with `RTLD_GLOBAL`, in dependency
+  order, from the first absolute directory of `sys.path` whose `modular/lib/` holds all three. A missing
+  runtime, or a `mojo-compiler` of another version, raises `RuntimeNotFoundError` (a `LibraryLoadError`)
+  naming the libraries or the versions, the directories searched, and `pip install mojo-compiler==1.0.0`.
 - Tests load the library their target staged: the private `_native.load(lib_dir)` takes the directory a
   `python_binding_test` passes as `--lib-dir`. It is an argument of a private function, not a user setting.
 - There is no lookup by environment variable (`KOMIRA_NATIVE_LIB`, `KOMIRA_NATIVE_LIBDIR` and the
