@@ -316,8 +316,23 @@ def _wheel_file_test_stamped_macro(**kwargs):
         **kwargs
     )
 
+def _wheel_file_at_stamp_macro(stamp, **kwargs):
+    # The test commit and commit time with the build number `stamp`, so one
+    # build holds wheels of several versions (an upgrade test's previous and
+    # current release). The stamp is a positive number without leading zeros,
+    # which the tool checks. Not a release: no -c komira.package_* reaches it.
+    _wheel_file(
+        stamp = stamp,
+        commit = TEST_COMMIT,
+        timestamp_ms = TEST_TIMESTAMP_MS,
+        check_release = True,
+        exec_compatible_with = LINUX_X86_64,
+        **kwargs
+    )
+
 wheel_file = declares_docs(_wheel_file_macro)
 wheel_file_test_stamped = declares_docs(_wheel_file_test_stamped_macro)
+wheel_file_at_stamp = declares_docs(_wheel_file_at_stamp_macro)
 
 def _wheel_tag_cases_impl(ctx):
     # Each row's tag, against the tag written out (not derived) in `cases`.

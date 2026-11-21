@@ -607,6 +607,118 @@ wheel_file(
     ),
 ]]
 
+# ---- Upgrading from the previous release ----------------------------------
+#
+# `pip install --upgrade komira`, of each flavour: two releases of the wheel,
+# the previous (build number 999999998) and the current (999999999), installed
+# in that order into one empty environment, the first uninstalled before the
+# second as pip does (wheel_install_test `upgrade`; the external flavour's
+# Modular wheels beside them), and python/tests/test_upgrade.py run there: the
+# environment holds the current release's dist-info and no other, every file
+# only the previous release had is gone, and everything the clean-environment
+# test holds of a fresh install of that flavour holds. The previous release is
+# the package's files plus two it dropped since: a module and a file in
+# `_lib/lib/`, where a Mojo pin bump drops and renames libraries. The current
+# release is the package's files as they are. Fixed build numbers, so the
+# versions do not depend on the build's stamp.
+#
+# A Mojo runtime of another build is not part of an upgrade: the bundled wheel
+# carries the runtime libkomira was built with, both from one directory, and
+# the external wheel holds the installed runtime to the build ids it records.
+# A runtime of another build that is already in the process is refused by
+# name: `beside_other_mojo_loaded_first`, `refuses_external_beside_other_mojo`.
+
+_PREVIOUS_ONLY = {
+    "komira/_lib/lib/previous_release_only.txt": "komira//python/tests:fixtures/previous_release_only.txt",
+    "komira/_previous_release_only.txt": "komira//python/tests:fixtures/previous_release_only.txt",
+}
+
+[komira_wheel(
+    name = "komira_wheel_{}_{}".format(flavour, release),
+    flavour = flavour,
+    dist_files = ":dist_files",
+    record = ":mojo_runtime_record",
+    files = _PY_FILES | (_PREVIOUS_ONLY if release == "previous" else {}),
+    stamp = stamp,
+    **_WHEEL
+) for flavour in FLAVOURS for release, stamp in [("previous", "999999998"), ("current", "999999999")]]
+
+_UPGRADE_VERSION = wheel_version("999999999")
+
+_UPGRADE_FILES = _TEST_FILES | {"--installed-script": "komira//python/tests:test_installed.py"}
+
+_UPGRADE_ARGS = {
+    flavour: [
+        "--version",
+        _UPGRADE_VERSION,
+        "--flavour",
+        flavour,
+        "--license-expression",
+        LICENSE_EXPRESSIONS[flavour],
+        "--toolchain-mojo-version",
+        _TOOLCHAIN_MOJO,
+    ] + [a for p in sorted(_PREVIOUS_ONLY.keys()) for a in ["--expect-removed", p]]
+    for flavour in FLAVOURS
+}
+
+# The releases of `flavour` in the order given, with what its install brings.
+_RELEASES = {
+    (flavour, order): [":komira_wheel_{}_{}".format(flavour, r) for r in order.split(",")] + _BESIDE[flavour]
+    for flavour in FLAVOURS
+    for order in ["previous,current", "current,previous", "current"]
+}
+
+[wheel_install_test(
+    name = "upgrade_test_" + flavour + suffix,
+    python = python,
+    wheels = _RELEASES[(flavour, "previous,current")],
+    script = "komira//python/tests:test_upgrade.py",
+    args = _UPGRADE_ARGS[flavour],
+    files = _UPGRADE_FILES,
+    upgrade = True,
+) for flavour in FLAVOURS for suffix, python in [
+    ("", "komira//third_party/python:cpython"),
+    ("_py314", "komira//third_party/python:cpython314"),
+]]
+
+[wheel_install_test(
+    name = name,
+    python = "komira//third_party/python:cpython",
+    wheels = wheels,
+    script = "komira//python/tests:test_upgrade.py",
+    args = _UPGRADE_ARGS["bundled"],
+    files = _UPGRADE_FILES,
+    upgrade = upgrade,
+    expect_failure = expect,
+) for name, wheels, upgrade, expect in [
+    # The releases in the other order: the environment ends on the older one.
+    (
+        "refuses_downgrade",
+        _RELEASES[("bundled", "current,previous")],
+        True,
+        "AssertionError: the site holds komira-0.1.999999998.dist-info, the upgrade should leave only komira-0.1.999999999.dist-info",
+    ),
+    # Nothing to upgrade from: the previous release's files are not there to be
+    # removed, which the test names, so an upgrade that removes nothing is not
+    # a pass.
+    (
+        "refuses_upgrade_from_nothing",
+        _RELEASES[("bundled", "current")],
+        True,
+        "AssertionError: the upgrade did not remove komira/_lib/lib/previous_release_only.txt, " +
+        "komira/_previous_release_only.txt: the previous release does not carry it",
+    ),
+    # A second release of an installed distribution is not an upgrade unless
+    # the installer uninstalls the first: without it, the files of both would
+    # be mixed.
+    (
+        "refuses_second_release_without_uninstall",
+        _RELEASES[("bundled", "previous,current")],
+        False,
+        "install: komira is already installed, and a second wheel of it is installed only with --upgrade",
+    ),
+]]
+
 # ---- Beside Modular's own runtime ------------------------------------------
 #
 # The bundled wheel installed with Modular's mojo-compiler in the same environment,

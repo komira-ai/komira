@@ -498,7 +498,10 @@ and sizes, WHEEL's tag, METADATA and its Requires-Dist, the licences, the librar
 checks again, and the twin. `[release]` is the wheel copied only after
 `[release_check]` passed: the same check, refusing an unstamped wheel. A
 publisher reads `[release]` and nothing else. `wheel_file_test_stamped` gives
-conda.bzl's test stamp (and its default output waits for `[release]` too).
+conda.bzl's test stamp (and its default output waits for `[release]` too). 
+`wheel_file_at_stamp(stamp = "<N>")` is the same with the build
+number `<N>` (version `0.1.<N>`) and the same test commit and commit time, for a
+build that needs wheels of two versions of one package, such as an upgrade test.
 
 `komira_wheel runtime-record --requirement <r> --library <file>... --out <record>`
 ([`wheel/record.zig`](wheel/record.zig)) writes the record a wheel carries of a

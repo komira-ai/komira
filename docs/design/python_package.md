@@ -332,6 +332,22 @@ publishes exactly one flavour on every platform it publishes.
     renaming the sonames: it means modifying Modular's binaries, and two copies of the Globals libraries
     would mean two allocators, two CPU-device tables and two fault handlers, the state those libraries
     exist to prevent.
+- **Upgrading, and moving the Mojo pin.** `pip install --upgrade komira` uninstalls the old release's files
+  (its `RECORD`) and installs the new one, so a file the new release no longer carries (a runtime library a
+  new Mojo renamed, for example) is gone and `_lib/` is whole again. `//python:upgrade_test_bundled` and
+  `//python:upgrade_test_external` install two releases of that flavour's wheel one after the other into
+  one environment the way pip does (the external flavour with Modular's wheels beside them) and hold the
+  result to everything `//python:wheel_install_test_<flavour>` holds of a fresh install, plus that every file
+  only the older release had is gone. A libkomira beside another build's runtime is not made by an upgrade:
+  the bundled wheel carries the runtime that built its libkomira, both out of one `[dist]` directory, and
+  the external wheel holds the installed runtime to the build ids it records. The mixed case is in a
+  process: another Mojo build's runtime already loaded when libkomira opens is refused by name
+  (`//python:beside_other_mojo_loaded_first`, the runtime check above). To move the Mojo pin: change
+  `mojo_compiler` in `tools/build/platforms/table.bzl` for every platform row, and the `third_party/modular`
+  wheels of the same version in the same commit; `//python:refuses_modular_unlike_toolchain` fails when the
+  two differ, and the wheel rule refuses a wheel whose runtime needs more glibc or C++ runtime than the
+  limits in `_NATIVE_NEEDS` (`python/BUCK`). The external wheel's `Requires-Dist` and its runtime record are
+  derived from the same pin, so they move with it; no workflow edits a pin that way.
 - Tests load the library their target staged: the private `_native.load(lib_dir)` takes the directory a
   `python_binding_test` passes as `--lib-dir`. It is an argument of a private function, not a user setting.
 - There is no lookup by environment variable (`KOMIRA_NATIVE_LIB`, `KOMIRA_NATIVE_LIBDIR` and the
