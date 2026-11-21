@@ -4,7 +4,13 @@
 //! no bound set, an absolute or relative-to-the-working-directory run path,
 //! a DT_NEEDED nobody provides, a bundled Mojo runtime library, an ELF file
 //! in a macOS wheel and a member over 90 MB are each refused by the message
-//! that names its check.
+//! that names its check. A macOS wheel of a dylib and the three Mojo runtime
+//! dylibs passes; a dylib whose minimum macOS is over the tag's (and 11.0.1
+//! under 11.0), one with no version command, for another CPU, with an
+//! absolute install name, with an absolute or @executable_path run path, or
+//! loading a library nobody provides, and a Mach-O file in a manylinux wheel
+//! are each refused; an @rpath library in external_needed and the operating
+//! system's own libraries are accepted.
 
 const std = @import("std");
 const diag = @import("diag.zig");
@@ -140,4 +146,137 @@ test "size: a member over 90 MB is refused, one of exactly 90 MB passes" {
     var d = diag.Diag{};
     try policy.check(a, &d, lib_policy, &.{.{ .name = "komira/data.bin", .data = big[0..policy.max_member] }});
     try t.expectEqualStrings("size: komira/data.bin is 90000001 bytes, over the 90000000 a wheel member may be (PyPI takes 100 MB a file)", try refusal(a, lib_policy, &.{.{ .name = "komira/data.bin", .data = big }}));
+}
+
+const mac_policy = policy.Policy{ .glibc = null, .macos = "11.0", .arch = "arm64" };
+
+fn macMembers(a: std.mem.Allocator, lib: []const u8) ![]policy.Member {
+    var out = std.ArrayList(policy.Member).empty;
+    try out.append(a, .{ .name = "komira/__init__.py", .data = "" });
+    try out.append(a, .{ .name = "komira/_lib/libkomira.dylib", .data = lib });
+    for (fixture.runtime_dylibs) |n| {
+        try out.append(a, .{ .name = try std.fmt.allocPrint(a, "komira/_lib/lib/{s}", .{n}), .data = try fixture.runtimeDylib(a, n) });
+    }
+    return out.toOwnedSlice(a);
+}
+
+/// The refusal of a libkomira.dylib of `m` in the macOS wheel.
+fn macRefusal(a: std.mem.Allocator, m: fixture.MachO) ![]const u8 {
+    return refusal(a, mac_policy, try macMembers(a, try fixture.machO(a, m)));
+}
+
+test "macOS: the good dylib, the runtime dylibs and a Python file pass" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var d = diag.Diag{};
+    try policy.check(a, &d, mac_policy, try macMembers(a, try fixture.goodDylib(a)));
+}
+
+test "minos: a dylib needing macOS 13.0 under the 11.0 tag is refused" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const lib = try fixture.machO(a, .{ .install_name = "@rpath/libkomira.dylib", .minos = fixture.macosVersion(13, 0, 0) });
+    try t.expectEqualStrings("minos: komira/_lib/libkomira.dylib needs macOS 13.0, newer than the tag's macOS 11.0", try refusal(a, mac_policy, try macMembers(a, lib)));
+}
+
+test "minos: exactly the tag's macOS and anything older pass, 11.0.1 is refused, LC_VERSION_MIN_MACOSX counts" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var d = diag.Diag{};
+    for ([_]u32{ fixture.macosVersion(11, 0, 0), fixture.macosVersion(10, 15, 0), fixture.macosVersion(10, 9, 0) }) |v| {
+        try policy.check(a, &d, mac_policy, try macMembers(a, try fixture.machO(a, .{ .minos = v })));
+        try policy.check(a, &d, mac_policy, try macMembers(a, try fixture.machO(a, .{ .minos = v, .version_min = true })));
+    }
+    try t.expectEqualStrings("minos: komira/_lib/libkomira.dylib needs macOS 11.0.1, newer than the tag's macOS 11.0", try macRefusal(a, .{ .minos = fixture.macosVersion(11, 0, 1) }));
+    try t.expectEqualStrings("minos: komira/_lib/libkomira.dylib needs macOS 11.1, newer than the tag's macOS 11.0", try macRefusal(a, .{ .minos = fixture.macosVersion(11, 1, 0), .version_min = true }));
+}
+
+test "minos: a dylib stating no minimum macOS is refused" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    try t.expectEqualStrings("minos: komira/_lib/libkomira.dylib states no minimum macOS version (no LC_BUILD_VERSION or LC_VERSION_MIN_MACOSX)", try macRefusal(a, .{ .no_version = true }));
+}
+
+test "arch: a Mach-O file for x86_64 is refused" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    try t.expectEqualStrings("arch: komira/_lib/libkomira.dylib is a Mach-O file for CPU type 1000007, not arm64", try macRefusal(a, .{ .cputype = 0x01000007 }));
+}
+
+test "installname: an absolute, directory-bearing or non-@rpath install name is refused" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var d = diag.Diag{};
+    try policy.check(a, &d, mac_policy, try macMembers(a, try fixture.machO(a, .{})));
+    for ([_][]const u8{ "/opt/build/out/libkomira.dylib", "@rpath/lib/libkomira.dylib", "@loader_path/libkomira.dylib", "libkomira.dylib", "@rpath/" }) |n| {
+        const want = try std.fmt.allocPrint(a, "installname: komira/_lib/libkomira.dylib has the install name `{s}`, which is not @rpath/<file>", .{n});
+        try t.expectEqualStrings(want, try macRefusal(a, .{ .install_name = n }));
+    }
+}
+
+test "runpath: an absolute, @executable_path or relative run path entry is refused, @loader_path and under it pass" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var d = diag.Diag{};
+    try policy.check(a, &d, mac_policy, try macMembers(a, try fixture.machO(a, .{ .rpaths = &.{ "@loader_path", "@loader_path/lib" } })));
+    for ([_][]const u8{ "/opt/build/out/lib", "@executable_path/../lib", "lib", "@loader_pathology" }) |r| {
+        const want = try std.fmt.allocPrint(a, "runpath: komira/_lib/libkomira.dylib has the run path entry `{s}`, which is not @loader_path-relative", .{r});
+        try t.expectEqualStrings(want, try macRefusal(a, .{ .rpaths = &.{ "@loader_path/lib", r } }));
+    }
+}
+
+test "needed: a load nobody provides is refused, an external_needed @rpath name and the system's libraries are accepted" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var d = diag.Diag{};
+    const refused = [_][]const u8{
+        "/opt/homebrew/lib/libz.dylib",
+        "@rpath/libMissing.dylib",
+        "@executable_path/libz.dylib",
+        "/usr/local/lib/libz.dylib",
+        "/usr/lib/../../opt/libz.dylib",
+        "/System/Library/../../opt/libz.dylib",
+        "libz.dylib",
+        "/libMSupportGlobals.dylib",
+    };
+    for (refused) |n| {
+        const want = try std.fmt.allocPrint(a, "needed: komira/_lib/libkomira.dylib loads `{s}`, which is not in the wheel, not an operating system library under /usr/lib or /System/Library, and not in external_needed", .{n});
+        try t.expectEqualStrings(want, try macRefusal(a, .{ .loads = &.{ "/usr/lib/libSystem.B.dylib", n } }));
+    }
+    try policy.check(a, &d, mac_policy, try macMembers(a, try fixture.machO(a, .{ .loads = &.{
+        "/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation",
+        "/usr/lib/libSystem.B.dylib",
+        "@loader_path/lib/libMSupportGlobals.dylib",
+        "@rpath/libMSupportGlobals.dylib",
+    } })));
+    var ext = mac_policy;
+    ext.external_needed = &.{"libzstd.1.dylib"};
+    try policy.check(a, &d, ext, try macMembers(a, try fixture.machO(a, .{ .loads = &.{"@rpath/libzstd.1.dylib"} })));
+    // external_needed names a library another package provides, never one
+    // loaded by an absolute path outside the system's.
+    try t.expectEqualStrings("needed: komira/_lib/libkomira.dylib loads `/opt/lib/libzstd.1.dylib`, which is not in the wheel, not an operating system library under /usr/lib or /System/Library, and not in external_needed", try refusal(a, ext, try macMembers(a, try fixture.machO(a, .{ .loads = &.{"/opt/lib/libzstd.1.dylib"} }))));
+}
+
+test "platform: a Mach-O file in a manylinux wheel is refused" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    try t.expectEqualStrings("platform: komira/_lib/libkomira.so is a Mach-O file, and a manylinux wheel holds none", try refusal(a, lib_policy, try members(a, try fixture.goodDylib(a))));
+}
+
+test "external: a bundled library named in external_needed is refused in a macOS wheel too" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var ext = mac_policy;
+    ext.external_needed = &.{"libMSupportGlobals.dylib"};
+    try t.expectEqualStrings("external: the wheel carries komira/_lib/lib/libMSupportGlobals.dylib, which external_needed says comes from another package and never from this wheel", try refusal(a, ext, try macMembers(a, try fixture.goodDylib(a))));
 }
