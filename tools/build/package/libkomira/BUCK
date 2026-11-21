@@ -1,6 +1,10 @@
+load("@komira//tools/build/mojo:cxx.bzl", "staged_files")
 load("@komira//tools/build/package:conda.bzl", "conda_package")
+load("@komira//tools/build/platforms:isa_variants.bzl", "variant_label_name")
+load("@komira//tools/build/platforms:table.bzl", "row")
 load(":dist.bzl", "libkomira_dist_load", "picked_dir")
 load(":elf_report.bzl", "libkomira_elf_report")
+load(":variants.bzl", "libkomira_variants", "libkomira_variants_load")
 load("@komira//tools/build/package/install_check:install_check.bzl", "conda_install_check")
 
 # libkomira as a conda package. The package is so's own: the library's
@@ -145,3 +149,109 @@ libkomira_dist_load(
     header = "//src/so:komira_abi",
     expect_failure = "dist_load: cannot load <dir>/libkomira.so: libMSupportGlobals.so: cannot open shared object file: No such file or directory",
 )
+
+# ---- The CPU-level variants -----------------------------------------------------
+#
+# libkomira at every level of the linux-x86_64 row's `isa_variants`
+# (tools/build/platforms/isa_variants.bzl), in one native directory with its
+# VARIANTS manifest (variants.bzl): the floor, x86-64-v2, at libkomira.so, and
+# x86-64-v3 at variants/x86-64-v3/libkomira.so, both over one lib/.
+
+_ROW = row("linux-x86_64")
+
+# The `native_owners` of //src/so:libkomira, which every variant links: one copy
+# of each, in lib/.
+_NATIVE_OWNERS = [
+    "//src/async_rt:komira_async_native",
+    "//src/async_api:komira_async_api_native",
+    "//src/compression:komira_compression_native",
+    "//src/fs:komira_fs_native",
+    "//src/libc:komira_libc_native",
+    "//src/metrics:komira_metrics_native",
+    "//src/parquet_codec:komira_parquet_codec_native",
+    "//src/scan_source:komira_scan_source_native",
+]
+
+_LIBS = {v["name"]: "//src/so:libkomira_" + variant_label_name(v) for v in _ROW["isa_variants"]}
+
+libkomira_variants(
+    name = "libkomira_variants",
+    libs = _LIBS,
+    native_owners = _NATIVE_OWNERS,
+    visibility = ["PUBLIC"],
+)
+
+staged_files(
+    name = "variants_load_files",
+    srcs = ["variants_load.c"],
+)
+
+cxx_binary(
+    name = "variants_load_driver",
+    srcs = [":variants_load_files[variants_load.c]"],
+    headers = {"komira.h": "//src/so:komira_abi"},
+    header_namespace = "",
+)
+
+# Each variant loaded from a copy of the directory with no library path, by the
+# path its VARIANTS line names: `:libkomira_variants_load_x86_64_v2` and
+# `:libkomira_variants_load_x86_64_v3`. A worker implements x86-64-v3, so both
+# run on hardware that has every feature their line lists.
+[
+    libkomira_variants_load(
+        name = "libkomira_variants_load_" + variant_label_name(v),
+        dir = ":libkomira_variants",
+        driver = ":variants_load_driver",
+        variant = v["name"],
+    )
+    for v in _ROW["isa_variants"]
+]
+
+# x86-64-v3 is two directories below lib/ and finds the Mojo runtime only
+# there (`$ORIGIN/../../lib`): with libMSupportGlobals.so left out of lib/, its
+# load fails and the loader names the missing file, so no other copy of the
+# runtime stands in for the directory's.
+libkomira_variants(
+    name = "variants_without_msupport",
+    libs = _LIBS,
+    native_owners = _NATIVE_OWNERS,
+    omit = ["lib/libMSupportGlobals.so"],
+)
+
+libkomira_variants_load(
+    name = "libkomira_variants_load_refuses_missing_runtime",
+    dir = ":variants_without_msupport",
+    driver = ":variants_load_driver",
+    variant = "x86-64-v3",
+    expect_failure = "variants_load: cannot load <dir>/variants/x86-64-v3/libkomira.so: libMSupportGlobals.so: cannot open shared object file: No such file or directory",
+)
+
+# A manifest line whose file is not in the directory: the load of that variant
+# fails naming it, and never falls back to another variant.
+libkomira_variants(
+    name = "variants_without_v3",
+    libs = _LIBS,
+    native_owners = _NATIVE_OWNERS,
+    omit = ["variants/x86-64-v3/libkomira.so"],
+)
+
+libkomira_variants_load(
+    name = "libkomira_variants_load_refuses_missing_variant",
+    dir = ":variants_without_v3",
+    driver = ":variants_load_driver",
+    variant = "x86-64-v3",
+    expect_failure = "variants_load: cannot load <dir>/variants/x86-64-v3/libkomira.so: <dir>/variants/x86-64-v3/libkomira.so: cannot open shared object file: No such file or directory",
+)
+
+# What each variant links and weighs, as `libkomira_elf_report` above records
+# `:libkomira`: `:libkomira_elf_report_x86_64_v2` and
+# `:libkomira_elf_report_x86_64_v3`. The variants table of src/so/README.md
+# is their output.
+[
+    libkomira_elf_report(
+        name = "libkomira_elf_report_" + variant_label_name(v),
+        lib = _LIBS[v["name"]],
+        native_owners = _NATIVE_OWNERS,
+    )
+    for v in _ROW["isa_variants"]
+]

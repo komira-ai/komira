@@ -26,7 +26,8 @@ A row states, all required:
 | `host` | what `host_info()` reports on a machine of this platform; it only SELECTS the row |
 | `re_key`, `pool` | the `[komira_re]` key of this platform's worker property set (the value is the client's, never committed), and the pool a client sets it to (`pool=mojo-sized`); every key and every pool is unique to its row |
 | `zig_triple`, `unpack_triple` | the zig target of its links (`<arch>-<os>-<abi>.<os floor>`) and of the static tools that unpack archives |
-| `target_cpu`, `target_features` | the CPU floor every compile targets, whatever worker runs it |
+| `target_cpu`, `target_features` | the CPU every Mojo compile targets, whatever worker runs it |
+| `isa_variants` | the CPU levels libkomira ships at, lowest first: each `isa_variant(name, target_cpu, requires, target_features = [])` with the `/proc/cpuinfo` flags a CPU needs to run it ([`isa_variants.bzl`](isa_variants.bzl)). The first is the floor, the CPU every C object of the row is compiled for; one of them is the row's own `target_cpu` |
 | `cache_line_bytes`, `page_bytes`, `features`, `applets` | the cache line and page size of the platform, what it has that tests select on (`epoll`, `erms`, `futex`, `kqueue`, `neon`, `thp`, `ulock`, `x86_simd`), and the utilities a wrapper script may call (a list, or `none(reason)` where a pinned busybox carries them) |
 | `golden_config_hash`, `zig_exe_sha256` | the configuration hash of the row's platform (what every output path and action key carries; `pending` for a row with no platform), and the sha256 of the `zig` executable inside the zig archive, which the bootstrap checks after unpacking |
 | `object_format`, `runtime_libs`, `os_floor` | `elf` or `macho`; what a built binary loads from the toolchain's `lib/`; the oldest OS it runs on |
@@ -38,7 +39,13 @@ A row states, all required:
 pin that is not an https URL with a 64-digit lowercase sha256 and a positive
 `size`, a `pending` pin
 in a registered row, two rows sharing a key or a host, an executable pin (`busybox`, `pixi`)
-not pinned `executable = True`, or `pixi` pinned at two releases across rows, fail every package that
+not pinned `executable = True`, `pixi` pinned at two releases across rows, or an `isa_variants` list
+that is empty or holds an entry that is not an `isa_variant(...)`, names a variant twice or with a
+name that is not a plain path segment, has an empty `target_cpu`, `target_features` that are not
+strings, a `requires` that is not sorted, holds a word twice or a word that is not a `/proc/cpuinfo`
+flag, has a variant that does not require every feature of the one below and more, has no variant or
+more than one variant that is the row's own build, or has a variant other than the row's own build
+that sets `target_features` (no variant toolchain passes them yet), fail every package that
 reads the table, naming the row and the pin. [`tests//functional/platform_table`](../tests/functional/platform_table/BUCK)
 holds the cases, each a table with one defect (the self-test scenario
 [`analysis_refusals_platform_table`](../selftest/analysis_refusals_platform_table.zig)

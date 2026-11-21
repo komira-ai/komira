@@ -13,7 +13,9 @@
 //!  - config_arm64.h with an x86 feature on (SSSE3, X86_CRC32, BMI2), or without NEON; the arm64 compile
 //!    is zig's generic CPU (cxx.bzl forces -mcpu=generic for macOS, whose platform row names apple-m1),
 //!    which has no CRC32 extension, so NEON_CRC32 must be 0;
-//!  - config_x86_64.h with a NEON feature on, or an x86 feature off (it is the x86-64-v3 compile);
+//!  - config_x86_64.h with a NEON feature on, SSSE3 or X86_CRC32 off, or BMI2 on: it is the x86-64-v2
+//!    compile (the C floor of the linux-x86_64 row), which has SSSE3 and SSE4.2 but not BMI2, and
+//!    BMI2 on there is a compile error (`_bzhi_u32` requires target feature 'bmi2');
 //!  - either config with a RISC-V vector feature on (SNAPPY_RVV_1, SNAPPY_RVV_0_7): snappy-internal.h
 //!    then includes <riscv_vector.h>, which neither cpu has;
 //!  - the two configs differing in a macro that does not depend on the cpu (the sys/ headers, builtins,
@@ -149,11 +151,13 @@ test "config_arm64.h: NEON on, no x86 or RISC-V vector feature, no CRC32 extensi
     try expectValue(s.arm, "config_arm64.h", "SNAPPY_IS_BIG_ENDIAN", "0");
 }
 
-test "config_x86_64.h: the x86-64-v3 features on, no NEON or RISC-V vector feature" {
+test "config_x86_64.h: the x86-64-v2 features on, no BMI2, NEON or RISC-V vector feature" {
     var arena = std.heap.ArenaAllocator.init(t.allocator);
     defer arena.deinit();
     const s = try subjects(arena.allocator());
-    for (x86_features) |name| try expectValue(s.x86, "config_x86_64.h", name, "1");
+    try expectValue(s.x86, "config_x86_64.h", "SNAPPY_HAVE_SSSE3", "1");
+    try expectValue(s.x86, "config_x86_64.h", "SNAPPY_HAVE_X86_CRC32", "1");
+    try expectValue(s.x86, "config_x86_64.h", "SNAPPY_HAVE_BMI2", "0");
     for (arm_features) |name| try expectValue(s.x86, "config_x86_64.h", name, "0");
     for (riscv_features) |name| try expectValue(s.x86, "config_x86_64.h", name, "0");
     try expectValue(s.x86, "config_x86_64.h", "SNAPPY_IS_BIG_ENDIAN", "0");

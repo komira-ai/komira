@@ -290,6 +290,25 @@ prefix's `lib/`: the eight owners, `libKGENCompilerRTShared.so`, and the runtime
 own dependencies of it (`libAsyncRTRuntimeGlobals.so`, `libMSupportGlobals.so`,
 `libgcc_s.so.1`, `libstdc++.so.6`).
 
+### The CPU-level variants
+
+`:libkomira_x86_64_v2` and `:libkomira_x86_64_v3` are the same library linked once per
+level of the linux-x86_64 row's `isa_variants` (`tools/build/platforms/table.bzl`;
+`docs/design/isa_variants.md`), and
+`komira//tools/build/package/libkomira:libkomira_elf_report_x86_64_v2` and
+`:libkomira_elf_report_x86_64_v3` write the table above for each. They differ from it
+only in the `libkomira.so` row; the owners and runtime rows are the same files:
+
+| variant | size of `libkomira.so` (bytes) | RUNPATH | highest GLIBC |
+|---|---|---|---|
+| `x86-64-v2` (the floor) | 3543840 | `$ORIGIN/lib:$ORIGIN` | `GLIBC_2.34` |
+| `x86-64-v3` | 3524608 | `$ORIGIN/lib:$ORIGIN:$ORIGIN/../../lib` | `GLIBC_2.34` |
+
+x86-64-v3 is built with the toolchain and CPU of `:libkomira` (the row's `target_cpu`);
+the extra `$ORIGIN/../../lib` finds the one `lib/` of the variants directory from
+`variants/x86-64-v3/`. A second level adds one more `libkomira.so` to a native directory, about
+3.4 MiB (derived from the table: 3524608 bytes is 3.36 MiB); the owners and the runtime are shared.
+
 ## The header and the golden
 
 `abi/komira.tsv` is the golden of the ABI: the version (1.1), one row per export
