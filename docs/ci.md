@@ -757,7 +757,9 @@ log) and 2 for a usage error.
    the real PyPI (`--only-binary=:all:`), then `komira==<version>` with `--no-deps` from TestPyPI alone, so
    nothing but `komira` comes from TestPyPI. For PyPI, `komira==<version>` is one install from PyPI. Every pip
    runs `--isolated`, without a cache. Then `pip check` must pass, `pip show komira` must report the version,
-   and the quickstart runs with `python -I` in a directory holding only the example and its data file: it
+   `pip freeze` must list `komira==<version>` and nothing else (the wheel carries the Mojo runtime, so no
+   `mojo-compiler` and no other distribution is installed), no package named `modular` may be importable, and
+   the quickstart runs with `python -I` in a directory holding only the example and its data file: it
    must exit 0 and print what `python/examples/quickstart.expected` says, compared exactly, with `<version>`
    replaced by the version and `<abi_version>` by the ABI version of the `--abi-table` file
    (`src/so/abi/komira.tsv`: `major * 1000 + minor`, so `1.1` is 1001). A failed step names the command, its exit
