@@ -16,18 +16,20 @@ pip install komira
 What it needs:
 
 - **Linux on x86_64**, with glibc 2.35 or newer and an x86-64-v3 CPU (AVX2,
-  BMI2, FMA: Intel Haswell, AMD Excavator or newer). Wheels for Linux on arm64
-  and macOS on Apple silicon come in later releases.
+  BMI2, FMA: Intel Haswell, AMD Excavator or newer), or **macOS 11 or newer
+  on Apple silicon** (arm64). A wheel for Linux on arm64 comes in a later
+  release.
 - **Python 3.13 or newer.**
-- **The system C++ runtime, `libstdc++`.** Most systems have it. A minimal
-  container image may need the `libstdc++6` package (Debian, Ubuntu) or
-  `libstdc++` (Fedora, RHEL).
+- **On Linux, the system C++ runtime, `libstdc++`.** Most systems have it. A
+  minimal container image may need the `libstdc++6` package (Debian, Ubuntu)
+  or `libstdc++` (Fedora, RHEL). macOS has its own C++ runtime.
 
 Nothing else is installed with it: the wheel declares no dependencies. It
-carries libkomira, its native owner libraries and the three Mojo runtime
-libraries libkomira needs, in `komira/_lib/`. The runtime libraries add about
+carries libkomira, the three Mojo runtime libraries libkomira needs and, on
+Linux, its native owner libraries, in `komira/_lib/`. On Linux the runtime libraries add about
 2 MB uncompressed to the wheel, and they replace the 79 MB `mojo-compiler`
-wheel that earlier builds required.
+wheel that earlier builds required. The Linux and macOS wheels are one
+distribution, `komira`, with one version.
 
 ## What works
 
@@ -74,7 +76,7 @@ against the published package.
   message names the library, the directory it was loaded from and both build
   ids.
 - `komira.UnsupportedCpuError`, a `LibraryLoadError`, is raised on Linux
-  x86_64 when the CPU lacks a flag of x86-64-v3, before the engine is loaded.
+  x86_64 only (the CPU guard does nothing on macOS) when the CPU lacks a flag of x86-64-v3, before the engine is loaded.
   Its message lists the missing flags as `/proc/cpuinfo` spells them.
 
 The engine is loaded on the first `Session()` or `abi_version()` call, not on
@@ -105,18 +107,20 @@ The package's layout and API are designed in
 | `komira/_runtime.py` | `check_loaded_runtime(lib_dir)`, called before libkomira is opened: it compares the Mojo runtime libraries already loaded in the process with komira's copies by build id, and the GNU build id reader it uses |
 | `komira/_session.py` | `Session` |
 | `komira/py.typed` | the PEP 561 marker |
-| `BUCK` | `:komira`, the package's files as the directory its tests import from; `:komira_wheel`, the wheel; `:wheel_install_test`, the wheel installed into an empty environment; and the `refuses_*` and `beside_*` targets |
+| `BUCK` | `:komira`, the package's files as the directory its tests import from; `:komira_wheel` and `:komira_wheel_macos_arm64`, the wheels; `:wheel_install_test` and `:wheel_install_test_macos_arm64`, a wheel installed into an empty environment; and the `refuses_*` and `beside_*` targets |
 | `install_test.bzl` | the rules of the wheel's files and of the install test |
 | `tests/` | the tests (`python_binding_test`), `fake_libkomira.c` and `fake_runtime_lib.c`, the stand-in libraries they load, `test_installed.py` and `wheel_install_run.py`, the install test and its driver, and `test_beside_modular.py`, the tests of komira loaded beside Modular's runtime |
 
 How the loader behaves:
 
-- **Where it looks.** `_native.load` opens `<lib_dir>/libkomira.so`. With no
-  directory, it opens the package's own `_lib/libkomira.so`. No environment
+- **Where it looks.** `_native.load` opens `<lib_dir>/libkomira.so`
+  (`libkomira.dylib` on macOS). With no directory, it opens the package's own
+  `_lib/` copy. No environment
   variable and no search of the working directory picks the library. It opens
-  the file with `RTLD_LOCAL`. libkomira's run path, `$ORIGIN/lib:$ORIGIN`,
-  finds the native owner libraries and the three Mojo runtime libraries in
-  `_lib/lib/`, so nothing is searched on `sys.path` and no other package is
+  the file with `RTLD_LOCAL`. libkomira's run path (`$ORIGIN/lib:$ORIGIN` on Linux,
+  `@loader_path/lib` on macOS) finds the native owner libraries (Linux only:
+  on macOS they are linked into the dylib) and the three Mojo runtime
+  libraries in `_lib/lib/`, so nothing is searched on `sys.path` and no other package is
   needed. A file of the package that is missing is a `LibraryLoadError` with
   the loader's message, which names the file.
 - **What runs before the library opens.** `load` first calls
@@ -130,7 +134,7 @@ How the loader behaves:
     `fma`, `abm` (LZCNT) and `movbe`. A missing one raises
     `UnsupportedCpuError` naming it, instead of an illegal instruction inside
     the library; a file it cannot read raises `LibraryLoadError`. On other
-    platforms it reads nothing.
+    platforms, macOS among them, it reads nothing.
 - **The runtime check.** libkomira's NEEDED names for the Mojo runtime
   (`libMSupportGlobals`, `libAsyncRTRuntimeGlobals`, `libKGENCompilerRTShared`;
   `.so` on Linux) resolve to a library already loaded under the same name
@@ -145,7 +149,7 @@ How the loader behaves:
   - Another build id, or none: `LibraryLoadError` naming the library, the
     directory and both build ids.
   - Komira's copy cannot be read while another is loaded: `LibraryLoadError`.
-  - On other platforms it does nothing.
+  - On other platforms, macOS among them, it does nothing.
   - The runtime libraries are not opened with `RTLD_GLOBAL`: that would put
     komira's copy in the global scope, ahead of the definitions of other Mojo
     libraries. A process holds one Mojo runtime version, so Mojo code built
@@ -167,7 +171,7 @@ How the loader behaves:
   `plan_render` exist only on `_native.Native`. They have no public API and no
   stability promise.
 
-The tests run on Linux x86_64 as build actions, with
+The tests below run on Linux x86_64 as build actions, with
 `./buck2 build //python/tests:load_test` and the same for
 `//python/tests:session_test`, `//python/tests:minor0_test`,
 `//python/tests:minor3_test`, `//python/tests:two_call_test`,
@@ -182,24 +186,38 @@ The tests run on Linux x86_64 as build actions, with
 | `runtime_test` | the runtime check on stand-in runtime libraries: not loaded, same build id, another build id, no build id, komira's copy unreadable, and the build id reader |
 | `cpu_test` | the CPU check on cpuinfo files written from `tests/fixtures/cpuinfo_x86_64_v3.txt`, and that a refused CPU never opens the library |
 
-The wheel is `./buck2 build //python:komira_wheel`: the package and, in
+The Linux wheel is `./buck2 build //python:komira_wheel`: the package and, in
 `komira/_lib/`, `libkomira[dist]` whole: `libkomira.so`, and in `lib/` its
 native owner libraries and the three Mojo runtime libraries, taken from the
 toolchain's Mojo package so that runtime and compiler are one build. It is
 tagged `py3-none-manylinux_2_35_x86_64`, declares no `Requires-Dist`, and
 carries Modular's licence and third-party notices beside komira's own.
+
+The macOS wheel is `//python:komira_wheel_macos_arm64`, built with
+`--target-platforms komira//tools/build/platforms:darwin-arm64`: the same
+package and metadata, and `libkomira[dist]` for macOS arm64, which is
+`libkomira.dylib` and, in `lib/`, the three Mojo runtime libraries
+(`libAsyncRTRuntimeGlobals.dylib`, `libKGENCompilerRTShared.dylib`,
+`libMSupportGlobals.dylib`) and no native owner libraries. It is tagged
+`py3-none-macosx_11_0_arm64`, and it carries the licence texts of the pinned
+Linux package, the runtime libraries being under the same Modular licence.
+It is built and tested only in the release workflow
+(`.github/workflows/pypi.yml`), never in a pull request. After the upload, a
+GitHub-hosted macOS runner installs it from the index and runs the smoke test.
 `./buck2 build //python:wheel_install_test` (and `:wheel_install_test_py314`
 on CPython 3.14) installs it alone into an empty virtual environment, the way
 a wheel is installed for the other tests (no pip, no network), and runs
 `tests/test_installed.py` there in isolated mode, from an empty directory, with
-no library path set. That test holds:
+no library path set. `//python:wheel_install_test_macos_arm64` runs the same
+test on the macOS wheel on the farm's macOS workers (CPython 3.13, the one
+macOS interpreter pinned), from the release workflow only. That test holds:
 
 | what | how |
 |---|---|
 | the installed package | `komira` imports from the environment, at the wheel's version, with `LICENSE`, `NOTICE` and Modular's `LICENSE` and `Third-Party-Notices` in `.dist-info/licenses/`, byte-equal to their sources |
 | nothing else | no `modular/` directory and no other distribution in the environment, no `Requires-Dist`, and the `License-Expression` of the metadata |
 | the library | `abi_version()` is the version of `src/so/abi/komira.tsv`; a Parquet file registers, a missing one raises `KomiraError`; a serialized plan renders |
-| where it loaded from | `/proc/self/maps` lists libkomira, its owners and the three Mojo runtime libraries all from `komira/_lib` |
+| where it loaded from | `/proc/self/maps` (on macOS, the images dyld has loaded) lists libkomira, its owners (none on macOS, where `lib/` holds exactly the three runtime `.dylib` files) and the three Mojo runtime libraries all from `komira/_lib` |
 
 Each `//python:refuses_*` target runs the same install and test on one broken
 case and passes only if it fails with the line it names: no `libkomira.so` in

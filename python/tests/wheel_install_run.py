@@ -17,7 +17,9 @@ prefix. In order:
 2. Each wheel's tag must be one this interpreter installs: a Python tag `py3`,
    `py3<minor>` or `cp3<minor>`, the ABI tag `none`, and the platform `any`
    or `manylinux_2_<n>_<machine>` (or `manylinux2014_<machine>`) with this
-   machine and <n> at most the C library's minor version.
+   machine and <n> at most the C library's minor version, or, on macOS,
+   `macosx_<major>_<minor>_<machine>` with this machine (`arm64`) and a
+   version at most the macOS version this runs on.
 3. Each wheel is installed into the site directory by `install` of
    `--installer` (tools/build/python/wheel_install.py, what `python_wheel`
    runs): every member at its path, a `.data/` directory's `purelib/` and
@@ -156,10 +158,13 @@ def parse_requirement(line):
     return normalize(m.group(1)), m.group(3).strip()
 
 
-def supported(tag, minor, machine, glibc):
+def supported(tag, minor, machine, glibc, system="linux", macos=(0, 0)):
     """Whether this interpreter installs a wheel tagged `tag`
-    (`py3-none-manylinux_2_34_x86_64`; each part may be a `.`-joined set):
-    CPython 3.<minor> on `machine` with glibc `glibc` ((major, minor))."""
+    (`py3-none-manylinux_2_34_x86_64`, `py3-none-macosx_11_0_arm64`; each part
+    may be a `.`-joined set): CPython 3.<minor> on `machine` with glibc
+    `glibc` ((major, minor)) when `system` is "linux", or on macOS version
+    `macos` ((major, minor)) when it is "darwin". A `manylinux` platform
+    needs Linux and a `macosx` one needs macOS."""
     parts = tag.split("-")
     if len(parts) != 3:
         return False
@@ -171,6 +176,13 @@ def supported(tag, minor, machine, glibc):
     for plat in plats:
         if plat == "any":
             return True
+        if system == "darwin":
+            m = re.fullmatch(r"macosx_(\d+)_(\d+)_(.+)", plat)
+            if m and m.group(3) == machine and (int(m.group(1)), int(m.group(2))) <= macos:
+                return True
+            continue
+        if system != "linux":
+            continue
         m = re.fullmatch(r"manylinux_(\d+)_(\d+)_(.+)", plat) or re.fullmatch(r"manylinux2014_()()(.+)", plat)
         if not m or m.group(3) != machine:
             continue
@@ -200,6 +212,14 @@ def glibc_version():
         return (0, 0)
     m = re.fullmatch(r"glibc (\d+)\.(\d+).*", text)
     return (int(m.group(1)), int(m.group(2))) if m else (0, 0)
+
+
+def macos_version():
+    """The macOS (major, minor) this runs on (platform.mac_ver()), or (0, 0)
+    when it is not macOS."""
+    text = platform.mac_ver()[0]
+    m = re.match(r"(\d+)\.(\d+)", text) or re.fullmatch(r"(\d+)()", text)
+    return (int(m.group(1)), int(m.group(2) or 0)) if m else (0, 0)
 
 
 def installed(site):
@@ -265,13 +285,15 @@ def _load_installer(path):
 def install_all(installer, wheels, site, minor):
     """Installs each of `wheels` into `site` after checking its tag."""
     machine = platform.machine()
+    system = "darwin" if sys.platform == "darwin" else "linux"
     glibc = glibc_version()
+    macos = macos_version()
     for wheel in wheels:
         name, version, tag = wheel_name_version_tag(wheel)
-        if not supported(tag, minor, machine, glibc):
+        if not supported(tag, minor, machine, glibc, system, macos):
             raise Refused(
-                "the wheel of {} is tagged {}, which this interpreter (CPython 3.{} on {}) does not install".format(
-                    normalize(name), tag, minor, machine
+                "the wheel of {} is tagged {}, which this interpreter (CPython 3.{} on {}{}) does not install".format(
+                    normalize(name), tag, minor, "macOS " + platform.mac_ver()[0] + " " if system == "darwin" else "", machine
                 )
             )
         installer.install(os.path.abspath(wheel), name, version, site)

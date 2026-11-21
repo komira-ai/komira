@@ -6,11 +6,18 @@
 //!  - the triggers: `on:` is `workflow_dispatch:` alone (no schedule, cron, push or pull request
 //!    outside a comment), top-level `permissions` is `{}` exactly once, and the concurrency is the
 //!    group `pypi` with no run cancelled;
-//!  - the jobs are exactly build, testpypi, testpypi-smoke, pypi, pypi-smoke and result, each once, and
-//!    each holds its exact `if:` (main only), `needs:`, environment and permissions: `id-token: write`
-//!    is held by build (for the farm only), testpypi and pypi (for the upload only) and by no other job;
-//!  - the farm: farm-connect is in build alone, with `farm-qos: batch`; testpypi and pypi join no farm,
-//!    check out nothing and run no buck2;
+//!  - the jobs are exactly build, testpypi, testpypi-smoke, pypi, pypi-smoke and result (the Linux
+//!    wheel), then build-macos-arm64, testpypi-macos-arm64, testpypi-smoke-macos-arm64,
+//!    pypi-macos-arm64, pypi-smoke-macos-arm64 and result-macos-arm64 (the macOS wheel), each once,
+//!    and each holds its exact `if:` (main only), runner, `needs:`, environment and permissions: the
+//!    two smoke jobs of the macOS wheel run on macos-15 and every other job on ubuntu-24.04;
+//!    `id-token: write` is held by build and build-macos-arm64 (for the farm only), testpypi, pypi,
+//!    testpypi-macos-arm64 and pypi-macos-arm64 (for the upload only) and by no other job;
+//!  - the farm: farm-connect is in build and build-macos-arm64 alone, buck2 runs in those two jobs
+//!    alone, and testpypi and pypi join no farm, check out nothing and run no buck2;
+//!  - the Linux jobs' own contract is held here (`farm-qos: batch`, the stamp, the artifacts, the
+//!    state and the upload, the smoke steps, the result steps); what the macOS jobs hold beyond the
+//!    job set is in release_macos_test.zig (//:release_macos_cases);
 //!  - build has no upload step (no publish action, no legacy upload address, no twine); it builds the
 //!    wheel, the install test and the driver each with the three stamp flags, and keeps exactly the
 //!    dist and the smoke artifacts;
@@ -18,7 +25,7 @@
 //!    pinned publish action and the dist directory; testpypi names the TestPyPI upload address, pypi
 //!    none; neither skips an existing file or turns attestations off;
 //!  - the smoke jobs verify, then install, each with 5 attempts 30 seconds apart, on the pinned
-//!    setup-python with Python 3.13; setup-python is in no other job;
+//!    setup-python with Python 3.13; setup-python is in the four smoke jobs alone;
 //!  - every `uses:` that is not local names a commit: owner/repo@<40 lowercase hex>;
 //!  - no line outside a comment holds a secret, a password, an API token, curl, wget, jq, twine,
 //!    continue-on-error or pull_request_target, and no `run:` line holds a `${{ }}` expression;
@@ -28,11 +35,26 @@
 const std = @import("std");
 const t = std.testing;
 
-const JOBS = [_][]const u8{ "build", "testpypi", "testpypi-smoke", "pypi", "pypi-smoke", "result" };
+const JOBS = [_][]const u8{
+    "build",
+    "testpypi",
+    "testpypi-smoke",
+    "pypi",
+    "pypi-smoke",
+    "result",
+    "build-macos-arm64",
+    "testpypi-macos-arm64",
+    "testpypi-smoke-macos-arm64",
+    "pypi-macos-arm64",
+    "pypi-smoke-macos-arm64",
+    "result-macos-arm64",
+};
 const MAIN_ONLY = "    if: github.ref == 'refs/heads/main'";
 
 const JobSpec = struct {
     name: []const u8,
+    /// The whole `runs-on:` line.
+    runs_on: []const u8,
     gate: []const u8,
     needs: ?[]const u8,
     environment: ?[]const u8,
@@ -46,14 +68,30 @@ const SMOKE_PERMS = [_][]const u8{"      contents: read"};
 const NO_PERMS = [_][]const u8{};
 const empty: []const []const u8 = &.{};
 
+const UBUNTU = "    runs-on: ubuntu-24.04";
+const MACOS = "    runs-on: macos-15";
+const SMOKE_GATE_MAIN = "    if: github.ref == 'refs/heads/main' && ";
+const RESULT_GATE = "    if: always() && github.ref == 'refs/heads/main'";
+
 const SPECS = [_]JobSpec{
-    .{ .name = "build", .gate = MAIN_ONLY, .needs = null, .environment = "    environment: build", .perms = &BUILD_PERMS },
-    .{ .name = "testpypi", .gate = MAIN_ONLY, .needs = "    needs: build", .environment = "    environment: testpypi", .perms = &UPLOAD_PERMS },
-    .{ .name = "testpypi-smoke", .gate = "    if: github.ref == 'refs/heads/main' && needs.testpypi.outputs.state != 'differs'", .needs = "    needs: [build, testpypi]", .environment = null, .perms = &SMOKE_PERMS },
-    .{ .name = "pypi", .gate = MAIN_ONLY, .needs = "    needs: [build, testpypi-smoke]", .environment = "    environment: pypi", .perms = &UPLOAD_PERMS },
-    .{ .name = "pypi-smoke", .gate = "    if: github.ref == 'refs/heads/main' && needs.pypi.outputs.state != 'differs'", .needs = "    needs: [build, pypi]", .environment = null, .perms = &SMOKE_PERMS },
-    .{ .name = "result", .gate = "    if: always() && github.ref == 'refs/heads/main'", .needs = "    needs: [build, testpypi, testpypi-smoke, pypi, pypi-smoke]", .environment = null, .perms = &NO_PERMS },
+    .{ .name = "build", .runs_on = UBUNTU, .gate = MAIN_ONLY, .needs = null, .environment = "    environment: build", .perms = &BUILD_PERMS },
+    .{ .name = "testpypi", .runs_on = UBUNTU, .gate = MAIN_ONLY, .needs = "    needs: build", .environment = "    environment: testpypi", .perms = &UPLOAD_PERMS },
+    .{ .name = "testpypi-smoke", .runs_on = UBUNTU, .gate = SMOKE_GATE_MAIN ++ "needs.testpypi.outputs.state != 'differs'", .needs = "    needs: [build, testpypi]", .environment = null, .perms = &SMOKE_PERMS },
+    .{ .name = "pypi", .runs_on = UBUNTU, .gate = MAIN_ONLY, .needs = "    needs: [build, testpypi-smoke]", .environment = "    environment: pypi", .perms = &UPLOAD_PERMS },
+    .{ .name = "pypi-smoke", .runs_on = UBUNTU, .gate = SMOKE_GATE_MAIN ++ "needs.pypi.outputs.state != 'differs'", .needs = "    needs: [build, pypi]", .environment = null, .perms = &SMOKE_PERMS },
+    .{ .name = "result", .runs_on = UBUNTU, .gate = RESULT_GATE, .needs = "    needs: [build, testpypi, testpypi-smoke, pypi, pypi-smoke]", .environment = null, .perms = &NO_PERMS },
+    // the macOS wheel: the build only asks the farm (an ubuntu runner), the smokes run on a hosted Mac
+    .{ .name = "build-macos-arm64", .runs_on = UBUNTU, .gate = MAIN_ONLY, .needs = null, .environment = "    environment: build", .perms = &BUILD_PERMS },
+    .{ .name = "testpypi-macos-arm64", .runs_on = UBUNTU, .gate = SMOKE_GATE_MAIN ++ "needs.build-macos-arm64.outputs.version != ''", .needs = "    needs: build-macos-arm64", .environment = "    environment: testpypi", .perms = &UPLOAD_PERMS },
+    .{ .name = "testpypi-smoke-macos-arm64", .runs_on = MACOS, .gate = SMOKE_GATE_MAIN ++ "needs.testpypi-macos-arm64.outputs.state != 'differs'", .needs = "    needs: [build-macos-arm64, testpypi-macos-arm64]", .environment = null, .perms = &SMOKE_PERMS },
+    .{ .name = "pypi-macos-arm64", .runs_on = UBUNTU, .gate = MAIN_ONLY, .needs = "    needs: [build-macos-arm64, testpypi-smoke-macos-arm64]", .environment = "    environment: pypi", .perms = &UPLOAD_PERMS },
+    .{ .name = "pypi-smoke-macos-arm64", .runs_on = MACOS, .gate = SMOKE_GATE_MAIN ++ "needs.pypi-macos-arm64.outputs.state != 'differs'", .needs = "    needs: [build-macos-arm64, pypi-macos-arm64]", .environment = null, .perms = &SMOKE_PERMS },
+    .{ .name = "result-macos-arm64", .runs_on = UBUNTU, .gate = RESULT_GATE, .needs = "    needs: [build-macos-arm64, testpypi-macos-arm64, testpypi-smoke-macos-arm64, pypi-macos-arm64, pypi-smoke-macos-arm64]", .environment = null, .perms = &NO_PERMS },
 };
+
+fn isMacosJob(name: []const u8) bool {
+    return std.mem.endsWith(u8, name, "-macos-arm64");
+}
 
 // ---- the pinned actions and the shared lines ---------------------------------------------------
 const CHECKOUT = "      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1";
@@ -355,7 +393,7 @@ fn checkFile(ar: std.mem.Allocator, text: []const u8) !?[]const u8 {
             if (!std.mem.eql(u8, n, JOBS[i])) same_jobs = false;
         }
     }
-    if (!same_jobs) return "the jobs are not exactly build, testpypi, testpypi-smoke, pypi, pypi-smoke and result, each once";
+    if (!same_jobs) return "the jobs are not exactly the twelve of the Linux and the macOS wheel (build, testpypi, testpypi-smoke, pypi, pypi-smoke, result, and the same six with the suffix -macos-arm64), each once";
 
     var pit = std.mem.splitScalar(u8, text, '\n');
     while (pit.next()) |line| {
@@ -375,7 +413,7 @@ fn checkFile(ar: std.mem.Allocator, text: []const u8) !?[]const u8 {
 /// Null if the job holds what every job holds: its runner, gate, needs, environment and permissions.
 fn checkJob(ar: std.mem.Allocator, job: []const []const u8, spec: JobSpec) !?[]const u8 {
     const n = spec.name;
-    if (!has(job, "    runs-on: ubuntu-24.04")) return try std.fmt.allocPrint(ar, "{s}: runs-on is not the hosted runner ubuntu-24.04", .{n});
+    if (!has(job, spec.runs_on) or countPrefix(job, "    runs-on:") != 1) return try std.fmt.allocPrint(ar, "{s}: runs-on is not exactly `{s}`", .{ n, std.mem.trim(u8, spec.runs_on, " ") });
     if (!has(job, spec.gate) or countPrefix(job, "    if:") != 1) return try std.fmt.allocPrint(ar, "{s}: its if: is not exactly `{s}`", .{ n, std.mem.trim(u8, spec.gate, " ") });
     if (spec.needs) |want| {
         if (!has(job, want) or countPrefix(job, "    needs:") != 1) return try std.fmt.allocPrint(ar, "{s}: its needs: is not exactly `{s}`", .{ n, std.mem.trim(u8, want, " ") });
@@ -398,10 +436,10 @@ fn checkJob(ar: std.mem.Allocator, job: []const []const u8, spec: JobSpec) !?[]c
     }
     const wants_id_token = spec.perms.len > 0 and has(spec.perms, "      id-token: write");
     if (mentions(job, "id-token") != wants_id_token) return try std.fmt.allocPrint(ar, "{s}: id-token is named where the job does not hold it", .{n});
-    const is_build = std.mem.eql(u8, n, "build");
-    if (mentions(job, "farm-connect") != is_build) return try std.fmt.allocPrint(ar, "{s}: farm-connect is used outside build, or missing from it", .{n});
-    if (!is_build and mentions(job, "buck2")) return try std.fmt.allocPrint(ar, "{s}: runs buck2: only build builds", .{n});
-    if (!std.mem.endsWith(u8, n, "-smoke") and mentions(job, "setup-python")) return try std.fmt.allocPrint(ar, "{s}: sets up Python: only the smoke jobs do", .{n});
+    const is_build = std.mem.eql(u8, n, "build") or std.mem.eql(u8, n, "build-macos-arm64");
+    if (mentions(job, "farm-connect") != is_build) return try std.fmt.allocPrint(ar, "{s}: farm-connect is used outside the two build jobs, or missing from them", .{n});
+    if (!is_build and mentions(job, "buck2")) return try std.fmt.allocPrint(ar, "{s}: runs buck2: only the two build jobs build", .{n});
+    if (std.mem.indexOf(u8, n, "-smoke") == null and mentions(job, "setup-python")) return try std.fmt.allocPrint(ar, "{s}: sets up Python: only the smoke jobs do", .{n});
     return null;
 }
 
@@ -474,7 +512,11 @@ fn check(ar: std.mem.Allocator, text: []const u8) !?[]const u8 {
         var n: usize = 0;
         const job = (try jobLines(ar, text, spec.name, &n)) orelse return try std.fmt.allocPrint(ar, "the job {s} is missing", .{spec.name});
         if (try checkJob(ar, job, spec)) |why| return why;
-        const verdict = if (std.mem.eql(u8, spec.name, "build"))
+        // the macOS jobs hold their contract in release_macos_test.zig; here the job set and the
+        // exact gate, runner, needs, environment and permissions of each
+        const verdict = if (isMacosJob(spec.name))
+            null
+        else if (std.mem.eql(u8, spec.name, "build"))
             try checkBuild(ar, job)
         else if (std.mem.eql(u8, spec.name, "testpypi"))
             try checkUpload(ar, job, TESTPYPI)
@@ -602,7 +644,7 @@ test "the workflow permissions are empty and the concurrency is one group that c
     try expectRefused(ar, try replaced(ar, text, "  group: pypi\n", ""), "concurrency");
 }
 
-test "the job set is exactly the six jobs, each once" {
+test "the job set is exactly the twelve jobs, each once" {
     var arena = std.heap.ArenaAllocator.init(t.allocator);
     defer arena.deinit();
     const ar = arena.allocator();
@@ -611,6 +653,9 @@ test "the job set is exactly the six jobs, each once" {
     try expectRefused(ar, try replaced(ar, text, "\n  result:\n", "\n  pypi:\n    runs-on: ubuntu-24.04\n\n  result:\n"), "the jobs are not exactly");
     try expectRefused(ar, try replaced(ar, text, "\n  pypi-smoke:\n", "\n  pypi-check:\n"), "the jobs are not exactly");
     try expectRefused(ar, try replaced(ar, text, "\n  testpypi-smoke:\n", "\n  smoke-first:\n"), "the jobs are not exactly");
+    try expectRefused(ar, try replaced(ar, text, "\n  result-macos-arm64:\n", "\n  extra-macos-arm64:\n    runs-on: ubuntu-24.04\n\n  result-macos-arm64:\n"), "the jobs are not exactly");
+    try expectRefused(ar, try replaced(ar, text, "\n  pypi-smoke-macos-arm64:\n", "\n  pypi-smoke-macos:\n"), "the jobs are not exactly");
+    try expectRefused(ar, try replaced(ar, text, "\n  build-macos-arm64:\n", "\n  build-macos-arm64:\n    runs-on: ubuntu-24.04\n\n  build-macos-arm64:\n"), "the jobs are not exactly");
 }
 
 test "each job's gate, needs, environment and runner are exact" {
@@ -637,6 +682,18 @@ test "each job's gate, needs, environment and runner are exact" {
     try expectRefused(ar, try inJob(ar, text, "build", "    environment: build\n", "    environment: pypi\n"), "build: its environment");
     // a hosted runner
     try expectRefused(ar, try inJob(ar, text, "pypi", "    runs-on: ubuntu-24.04\n", "    runs-on: self-hosted\n"), "pypi: runs-on");
+    // the macOS jobs: the smokes on macos-15, every other job on ubuntu-24.04
+    try expectRefused(ar, try inJob(ar, text, "testpypi-smoke-macos-arm64", "    runs-on: macos-15\n", "    runs-on: ubuntu-24.04\n"), "testpypi-smoke-macos-arm64: runs-on");
+    try expectRefused(ar, try inJob(ar, text, "pypi-smoke-macos-arm64", "    runs-on: macos-15\n", "    runs-on: macos-latest\n"), "pypi-smoke-macos-arm64: runs-on");
+    try expectRefused(ar, try inJob(ar, text, "build-macos-arm64", "    runs-on: ubuntu-24.04\n", "    runs-on: macos-15\n"), "build-macos-arm64: runs-on");
+    try expectRefused(ar, try inJob(ar, text, "pypi-macos-arm64", "    runs-on: ubuntu-24.04\n", "    runs-on: macos-15\n"), "pypi-macos-arm64: runs-on");
+    try expectRefused(ar, try inJob(ar, text, "result-macos-arm64", "    runs-on: ubuntu-24.04\n", "    runs-on: macos-15\n"), "result-macos-arm64: runs-on");
+    // the macOS gates and needs
+    try expectRefused(ar, try inJob(ar, text, "testpypi-macos-arm64", "    if: github.ref == 'refs/heads/main' && needs.build-macos-arm64.outputs.version != ''\n", MAIN_ONLY ++ "\n"), "testpypi-macos-arm64: its if:");
+    try expectRefused(ar, try replaced(ar, text, "    if: github.ref == 'refs/heads/main' && needs.pypi-macos-arm64.outputs.state != 'differs'\n", "    if: needs.pypi-macos-arm64.outputs.state != 'differs'\n"), "pypi-smoke-macos-arm64: its if:");
+    try expectRefused(ar, try replaced(ar, text, "    needs: [build-macos-arm64, testpypi-smoke-macos-arm64]\n", "    needs: [build-macos-arm64, testpypi-macos-arm64]\n"), "pypi-macos-arm64: its needs:");
+    try expectRefused(ar, try replaced(ar, text, "    needs: [build-macos-arm64, testpypi-macos-arm64, testpypi-smoke-macos-arm64, pypi-macos-arm64, pypi-smoke-macos-arm64]\n", "    needs: [build-macos-arm64, testpypi-macos-arm64]\n"), "result-macos-arm64: its needs:");
+    try expectRefused(ar, try inJob(ar, text, "pypi-macos-arm64", "    environment: pypi\n", "    environment: testpypi\n"), "pypi-macos-arm64: its environment");
 }
 
 test "id-token is held by build, testpypi and pypi alone, and each holds exactly what it needs" {
@@ -649,6 +706,12 @@ test "id-token is held by build, testpypi and pypi alone, and each holds exactly
     try expectRefused(ar, try inJob(ar, text, "pypi-smoke", "      contents: read\n", "      contents: read\n      id-token: write\n"), "pypi-smoke: permissions");
     // the result job gains a permission
     try expectRefused(ar, try replaced(ar, text, "    timeout-minutes: 5\n    permissions: {}\n", "    timeout-minutes: 5\n    permissions:\n      id-token: write\n"), "result: permissions");
+    // the macOS smoke jobs and the macOS result job hold no identity, the macOS build holds it for the farm
+    try expectRefused(ar, try inJob(ar, text, "testpypi-smoke-macos-arm64", "      contents: read\n", "      contents: read\n      id-token: write\n"), "testpypi-smoke-macos-arm64: permissions");
+    try expectRefused(ar, try inJob(ar, text, "pypi-smoke-macos-arm64", "      contents: read\n", "      contents: read\n      id-token: write\n"), "pypi-smoke-macos-arm64: permissions");
+    try expectRefused(ar, try replaced(ar, text, "    needs: [build-macos-arm64, testpypi-macos-arm64, testpypi-smoke-macos-arm64, pypi-macos-arm64, pypi-smoke-macos-arm64]\n    if: always() && github.ref == 'refs/heads/main'\n    runs-on: ubuntu-24.04\n    timeout-minutes: 5\n    permissions: {}\n", "    needs: [build-macos-arm64, testpypi-macos-arm64, testpypi-smoke-macos-arm64, pypi-macos-arm64, pypi-smoke-macos-arm64]\n    if: always() && github.ref == 'refs/heads/main'\n    runs-on: ubuntu-24.04\n    timeout-minutes: 5\n    permissions:\n      id-token: write\n"), "result-macos-arm64: permissions");
+    try expectRefused(ar, try inJob(ar, text, "testpypi-macos-arm64", "      id-token: write\n", "      contents: read\n"), "testpypi-macos-arm64: permissions");
+    try expectRefused(ar, try inJob(ar, text, "build-macos-arm64", "      id-token: write\n", "      contents: read\n"), "build-macos-arm64: permissions");
     // an upload job without its identity, or with more than it needs
     try expectRefused(ar, try inJob(ar, text, "testpypi", "      id-token: write\n", "      contents: read\n"), "testpypi: permissions");
     try expectRefused(ar, try inJob(ar, text, "pypi", "      id-token: write\n", "      id-token: write\n      contents: write\n"), "pypi: permissions");
@@ -675,6 +738,9 @@ test "farm-connect is in build alone and build is at the batch class; the upload
     try expectRefused(ar, try replaced(ar, text, FARM_TLS ++ "\n", ""), "build: build, stamp, dist and artifacts");
     try expectRefused(ar, try inJob(ar, text, "testpypi", "      - name: the driver is executable\n", FARM_CONNECT ++ "\n      - name: the driver is executable\n"), "testpypi: farm-connect");
     try expectRefused(ar, try inJob(ar, text, "pypi-smoke", "      - name: the driver is executable\n", FARM_CONNECT ++ "\n      - name: the driver is executable\n"), "pypi-smoke: farm-connect");
+    try expectRefused(ar, try inJob(ar, text, "pypi-smoke-macos-arm64", "      - name: the driver is executable\n", FARM_CONNECT ++ "\n      - name: the driver is executable\n"), "pypi-smoke-macos-arm64: farm-connect");
+    try expectRefused(ar, try inJob(ar, text, "testpypi-macos-arm64", "      - name: the driver is executable\n", "      - run: ./buck2 build //python:komira_wheel_macos_arm64\n      - name: the driver is executable\n"), "testpypi-macos-arm64: runs buck2");
+    try expectRefused(ar, try inJob(ar, text, "result-macos-arm64", "    steps:\n", "    steps:\n" ++ FARM_CONNECT ++ "\n"), "result-macos-arm64: farm-connect");
     try expectRefused(ar, try inJob(ar, text, "pypi", "    steps:\n", "    steps:\n" ++ CHECKOUT ++ "\n"), "pypi: checks out");
     try expectRefused(ar, try inJob(ar, text, "testpypi", "      - name: the driver is executable\n", "      - run: ./buck2 build //python:komira_wheel\n      - name: the driver is executable\n"), "testpypi: runs buck2");
 }
@@ -770,6 +836,8 @@ test "setup-python outside the smoke jobs is refused" {
     try expectRefused(ar, try inJob(ar, text, "testpypi", "      - name: the driver is executable\n", step ++ "      - name: the driver is executable\n"), "testpypi: sets up Python");
     try expectRefused(ar, try inJob(ar, text, "pypi", "      - name: the driver is executable\n", step ++ "      - name: the driver is executable\n"), "pypi: sets up Python");
     try expectRefused(ar, try inJob(ar, text, "result", "    steps:\n", "    steps:\n" ++ step), "result: sets up Python");
+    try expectRefused(ar, try inJob(ar, text, "build-macos-arm64", "      - name: Stop buck2\n", step ++ "      - name: Stop buck2\n"), "build-macos-arm64: sets up Python");
+    try expectRefused(ar, try inJob(ar, text, "pypi-macos-arm64", "      - name: the driver is executable\n", step ++ "      - name: the driver is executable\n"), "pypi-macos-arm64: sets up Python");
 }
 
 test "an action that is not pinned to a 40-hex commit is refused" {

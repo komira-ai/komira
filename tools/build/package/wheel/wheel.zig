@@ -198,7 +198,7 @@ pub fn checkPath(alloc: Alloc, d: *Diag, path: []const u8) Refused!void {
 
 /// The policy of `in`, for its files (policy.zig).
 pub fn policyOf(t: tag_mod.Tag, in: Input) policy.Policy {
-    return .{ .glibc = t.glibc, .arch = t.arch, .max_glibcxx = in.max_glibcxx, .max_cxxabi = in.max_cxxabi, .external_needed = in.external_needed };
+    return .{ .glibc = t.glibc, .macos = t.macos, .arch = t.arch, .max_glibcxx = in.max_glibcxx, .max_cxxabi = in.max_cxxabi, .external_needed = in.external_needed };
 }
 
 /// The wheel of `in`, dated `stamp`.

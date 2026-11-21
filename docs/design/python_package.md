@@ -244,8 +244,10 @@ visible from every thread, as a module-level name would be.
   libraries (`libKGENCompilerRTShared.so`, `libAsyncRTRuntimeGlobals.so`, `libMSupportGlobals.so`). The
   runtime libraries are the ones of the toolchain's pinned `mojo-compiler` package that compiled
   libkomira, so runtime and compiler match by construction. `[dist]` is `[runnable]` without the C++
-  runtime (`libstdc++.so.6`, `libgcc_s.so.1`); `[runnable]` keeps it, because build workers have none. The
-  directory is built for Linux only; the macOS arm of `[dist]` is not built.
+  runtime (`libstdc++.so.6`, `libgcc_s.so.1`); `[runnable]` keeps it, because build workers have none. On
+  macOS arm64 `[dist]` is `libkomira.dylib` and, in `lib/`, the three runtime `.dylib` files, with no
+  owners (the C archives are linked into the dylib) and no C++ runtime; its run path is
+  `@loader_path/lib`.
 - The library's run path (`$ORIGIN/lib:$ORIGIN`,
   [tools/build/mojo/README.md](../../tools/build/mojo/README.md)) resolves the owners and the runtime in
   `_lib/lib/`, so the loader sets no search path and preloads nothing. It opens

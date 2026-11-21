@@ -1,5 +1,6 @@
 """The installed komira wheel, run from an empty prefix: what `pip install
-komira` into a new environment gives a user (python/BUCK, wheel_install_test).
+komira` into a new environment gives a user (python/BUCK, wheel_install_test,
+on Linux x86_64 and, for the macOS wheel, on macOS arm64).
 
     <prefix>/bin/python3.<minor> -I test_installed.py --site <dir>
         [--host-lib <lib>]... --version <v> --license-expression <expr>
@@ -14,7 +15,9 @@ that the Mojo runtime libraries need and a user's system provides; the build
 workers provide none, so the hermetic interpreter's copies stand in for it.
 Then, in order:
 
-- no library path is set: LD_LIBRARY_PATH and LD_PRELOAD are empty;
+- no library path is set: LD_LIBRARY_PATH and LD_PRELOAD are empty (on
+  macOS, DYLD_LIBRARY_PATH, DYLD_FALLBACK_LIBRARY_PATH and
+  DYLD_INSERT_LIBRARIES);
 - the environment holds the distribution komira and no other, and no
   `modular/` directory: nothing of Modular's;
 - `import komira` is the package installed in `--site`, not a source tree;
@@ -27,9 +30,12 @@ Then, in order:
 - `Session().register_parquet` registers the Parquet fixture, and a missing
   file raises `KomiraError` with the engine's status;
 - `komira._native.plan_render` of the serialized plan returns its text;
-- the process maps libkomira from `<site>/komira/_lib`, and its native owner
-  libraries and the three Mojo runtime libraries from `<site>/komira/_lib/lib`,
-  and none of them from elsewhere.
+- the process maps libkomira (`libkomira.so`, `libkomira.dylib` on macOS) from
+  `<site>/komira/_lib`, and its native owner libraries and the three Mojo
+  runtime libraries from `<site>/komira/_lib/lib`, and none of them from
+  elsewhere. On macOS libkomira has no native owner libraries, and `lib/`
+  holds exactly the three runtime libraries (`.dylib`). The mapped files are
+  /proc/self/maps on Linux and the images dyld has loaded on macOS.
 
 Any failure raises; its last traceback line is what a refusing case of
 wheel_install_test names.
@@ -41,8 +47,23 @@ import re
 import sys
 from importlib import metadata
 
+_DARWIN = sys.platform == "darwin"
+
 # The Mojo runtime libraries the wheel carries.
-_RUNTIME = ("libMSupportGlobals.so", "libAsyncRTRuntimeGlobals.so", "libKGENCompilerRTShared.so")
+_RUNTIME = (
+    ("libMSupportGlobals.dylib", "libAsyncRTRuntimeGlobals.dylib", "libKGENCompilerRTShared.dylib")
+    if _DARWIN
+    else ("libMSupportGlobals.so", "libAsyncRTRuntimeGlobals.so", "libKGENCompilerRTShared.so")
+)
+
+_LIBKOMIRA = "libkomira.dylib" if _DARWIN else "libkomira.so"
+
+# The environment variables that would change which library a process loads.
+_LIBRARY_PATH_VARIABLES = (
+    ("DYLD_LIBRARY_PATH", "DYLD_FALLBACK_LIBRARY_PATH", "DYLD_INSERT_LIBRARIES")
+    if _DARWIN
+    else ("LD_LIBRARY_PATH", "LD_PRELOAD")
+)
 
 _VALUED = (
     "--site",
@@ -90,8 +111,26 @@ def abi_version_of(table):
     raise AssertionError("{} has no version line".format(table))
 
 
+def _dyld_images():
+    """The real path of every image dyld has loaded into the process."""
+    libsystem = ctypes.CDLL("/usr/lib/libSystem.B.dylib")
+    libsystem._dyld_image_count.restype = ctypes.c_uint32
+    libsystem._dyld_image_count.argtypes = []
+    libsystem._dyld_get_image_name.restype = ctypes.c_char_p
+    libsystem._dyld_get_image_name.argtypes = [ctypes.c_uint32]
+    out = set()
+    for i in range(libsystem._dyld_image_count()):
+        name = libsystem._dyld_get_image_name(i)
+        if name:
+            out.add(os.path.realpath(os.fsdecode(name)))
+    return out
+
+
 def mapped_files():
-    """The path of every file the process maps (/proc/self/maps)."""
+    """The path of every file the process maps: the images dyld has loaded on
+    macOS, /proc/self/maps elsewhere."""
+    if _DARWIN:
+        return _dyld_images()
     out = set()
     with open("/proc/self/maps", encoding="utf-8") as f:
         for line in f:
@@ -110,7 +149,7 @@ def main(argv):
     for lib in opts["host_lib"]:
         ctypes.CDLL(lib, mode=ctypes.RTLD_GLOBAL)
 
-    for name in ("LD_LIBRARY_PATH", "LD_PRELOAD"):
+    for name in _LIBRARY_PATH_VARIABLES:
         assert os.environ.get(name, "") == "", "{} is set: {}".format(name, os.environ[name])
     assert os.listdir(os.getcwd()) == [], "the working directory is not empty: {}".format(os.listdir(os.getcwd()))
 
@@ -184,9 +223,16 @@ def main(argv):
         paths = sorted(p for p in maps if os.path.basename(p) == name)
         assert paths and all(under(p, runtime_dir) for p in paths), "{} is mapped from {}, not from {}".format(name, paths, runtime_dir)
     komira_libs = sorted(p for p in maps if os.path.basename(p).startswith("libkomira"))
-    assert os.path.join(lib_dir, "libkomira.so") in komira_libs, "libkomira.so is not mapped from {}: {}".format(lib_dir, komira_libs)
-    owners = [p for p in komira_libs if os.path.basename(p) != "libkomira.so"]
-    assert owners and all(under(p, runtime_dir) for p in owners), "the native owners are mapped from {}".format(owners)
+    assert os.path.join(lib_dir, _LIBKOMIRA) in komira_libs, "{} is not mapped from {}: {}".format(_LIBKOMIRA, lib_dir, komira_libs)
+    owners = [p for p in komira_libs if os.path.basename(p) != _LIBKOMIRA]
+    if _DARWIN:
+        # The C archives are linked into libkomira.dylib: no owner libraries,
+        # and the lib directory holds the three runtime libraries and nothing else.
+        assert not owners, "libkomira has no native owners on macOS, and {} are mapped".format(owners)
+        held = sorted(os.listdir(runtime_dir))
+        assert held == sorted(_RUNTIME), "{} holds {}, not exactly {}".format(runtime_dir, held, sorted(_RUNTIME))
+    else:
+        assert owners and all(under(p, runtime_dir) for p in owners), "the native owners are mapped from {}".format(owners)
 
     print("installed: komira {} in {}, libkomira ABI {}, runtime from {}".format(komira.__version__, site, want_abi, runtime_dir))
 

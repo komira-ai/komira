@@ -92,11 +92,20 @@ zig_module(
 #   wheel_elf_unit     DT_NEEDED, run path and symbol versions read back, and a
 #                      file that is not a 64-bit little-endian ELF or reads
 #                      outside itself refused;
+#   wheel_macho_unit   the Mach-O reader: install name, loads in command
+#                      order, run paths and the minimum macOS (from either
+#                      version command) read back, and a universal file, a
+#                      file that is not Mach-O or reads outside itself refused;
 #   wheel_policy_unit  the library checks: GLIBC_2.38 under a 2.34 tag, a
 #                      GLIBCXX_ or CXXABI_ version over or without its bound,
 #                      an absolute run path, an unlisted DT_NEEDED, a bundled
-#                      Mojo runtime library, an ELF file in a macOS wheel and a
-#                      member over 90 MB, each refused by its check's name;
+#                      Mojo runtime library, an ELF file in a macOS wheel, a
+#                      Mach-O file in a manylinux wheel and a member over
+#                      90 MB, each refused by its check's name; and for a macOS
+#                      wheel, a dylib needing a newer macOS than the tag (and
+#                      one with no minimum), another CPU, an install name that
+#                      is not @rpath/<file>, a run path that is not
+#                      @loader_path-relative and a load nobody provides;
 #   wheel_build_unit   the wheel: the same bytes twice and from inputs in
 #                      another order, the members, METADATA, WHEEL and RECORD,
 #                      the stamp's version (a half stamp refused), the tags
@@ -110,6 +119,7 @@ _WHEEL_SRCS = [
     "wheel/cli.zig",
     "wheel/diag.zig",
     "wheel/elf.zig",
+    "wheel/macho.zig",
     "wheel/policy.zig",
     "wheel/stamp.zig",
     "wheel/tag.zig",
@@ -117,7 +127,7 @@ _WHEEL_SRCS = [
     "wheel/zip.zig",
 ]
 
-_WHEEL_SCENARIOS = ["build", "check", "cli", "elf", "policy", "zip"]
+_WHEEL_SCENARIOS = ["build", "check", "cli", "elf", "macho", "policy", "zip"]
 
 [
     zig_test(

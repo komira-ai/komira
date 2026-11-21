@@ -1,7 +1,7 @@
 """The Mojo runtime libkomira binds to, when another one is already loaded.
 
 The wheel carries the three Mojo runtime libraries in `komira/_lib/lib/`, where
-libkomira's run path (`$ORIGIN/lib`) finds them (docs/design/python_package.md,
+libkomira's run path (`$ORIGIN/lib`; `@loader_path/lib` in the macOS wheel) finds them (docs/design/python_package.md,
 decision 6). The dynamic loader matches a NEEDED name against every library
 already loaded in the process, by file name or SONAME, before it reads any run
 path. So when another Mojo runtime is already loaded (Modular's `mojo-compiler`
@@ -18,8 +18,8 @@ library with another build id, or with none, is a `LibraryLoadError` naming
 the library and both files; a library missing from komira's copy is a
 `LibraryLoadError` naming that file. Nothing is opened.
 
-Linux only, like the run-path layout the check is about: on another platform
-it does nothing.
+Linux only, because it reads ELF build ids and asks glibc's dlinfo where a
+library came from: on another platform (macOS among them) it does nothing.
 """
 
 from __future__ import annotations

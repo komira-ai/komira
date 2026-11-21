@@ -175,9 +175,10 @@ NULL context (-1), a NULL input (-2 with a last error), a bad file or plan (-3
 with the message as the last error) and, for the four calls with an output, the
 two-call protocol; a good call after a refusal leaves no error.
 `exports_exact` makes the nine names above the whole dynamic symbol table.
-The eight C owners in the library's closure (async, async_api, compression, fs,
+On Linux the eight C owners in the library's closure (async, async_api, compression, fs,
 libc, metrics, parquet_codec, scan_source) are linked as their own shared libraries
-(`native_owners`), not embedded. The thirteenth driver, `gate_native_owners`,
+(`native_owners`), not embedded; on macOS arm64 there are none, and the C archives are linked
+statically into `libkomira.dylib`. On Linux the thirteenth driver, `gate_native_owners`,
 reads the `DT_NEEDED` entries of the library's ELF dynamic section and requires
 the SONAME of each of the eight (`libkomira_<owner>_native.so.1`); an owner
 dropped from `native_owners` leaves its C embedded, and that driver fails.
