@@ -32,6 +32,12 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #                        beside each that lowers (a distinct over a column
 #                        list, a repeated name, no column or a column no sink
 #                        row serves included).
+# test_lower_union       a UNION ALL: one segment per branch (a collect, or the
+#                        branch's own breaker segment) and a SOURCE_CONCAT
+#                        segment over them in branch order with an E3 edge to
+#                        each; operators and breakers above it; nested unions;
+#                        and the refusal of a branch of another layout, of a
+#                        union with no branch and of a refused node in a branch.
 # test_lower_sum_fuse    SUM(CAST(<signed integer> AS DECIMAL(38, 0))), the SQL
 #                        integer sum, is lowered to SUM(<integer>) with its
 #                        declared DECIMAL(38, 0) output kept; every other shape
@@ -75,6 +81,7 @@ mojo_library(
         "tests/test_lower_plans.mojo",
         "tests/test_lower_refusals.mojo",
         "tests/test_lower_sum_fuse.mojo",
+        "tests/test_lower_union.mojo",
         "tests/test_sink_capability.mojo",
     ],
     visibility = ["PUBLIC"],

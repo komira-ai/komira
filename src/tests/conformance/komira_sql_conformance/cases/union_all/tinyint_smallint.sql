@@ -1,0 +1,3 @@
+-- order: rows
+-- TINYINT UNION ALL SMALLINT is SMALLINT
+SELECT typeof(v) AS t, v FROM (SELECT ti AS v FROM A UNION ALL SELECT si FROM B) u

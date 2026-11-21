@@ -38,6 +38,106 @@ from .eval_column import _eval_column_expr
 from .string_bytes import string_array_of
 
 
+def _widen[
+    src: DType, dst: DType
+](col: Column[HeapRegion]) raises -> Column[HeapRegion]:
+    """One exact widening cast; `eval_cast` keeps the input null mask."""
+    var arr = col.as_primitive[src]()
+    var result = eval_cast[src, dst](arr)
+    return Column.from_primitive[dst](result)
+
+
+def _is_small_int_widening(src_at: ArrowType, target: DType) -> Bool:
+    """True for the small-integer widenings `_widen_small_int` serves."""
+    var is_float = target == DType.float32 or target == DType.float64
+    if src_at == ArrowType.INT8:
+        return is_float or target == DType.int16 or target == DType.int32 or target == DType.int64
+    if src_at == ArrowType.INT16:
+        return is_float or target == DType.int32 or target == DType.int64
+    if src_at == ArrowType.UINT8:
+        return (
+            is_float
+            or target == DType.int16
+            or target == DType.int32
+            or target == DType.int64
+            or target == DType.uint16
+            or target == DType.uint32
+            or target == DType.uint64
+        )
+    if src_at == ArrowType.UINT16:
+        return (
+            is_float
+            or target == DType.int32
+            or target == DType.int64
+            or target == DType.uint32
+            or target == DType.uint64
+        )
+    if src_at == ArrowType.UINT32:
+        return is_float or target == DType.int64 or target == DType.uint64
+    if src_at == ArrowType.UINT64:
+        return is_float
+    return False
+
+
+def _widen_float[
+    src: DType
+](col: Column[HeapRegion], target: DType) raises -> Column[HeapRegion]:
+    if target == DType.float32:
+        return _widen[src, DType.float32](col)
+    return _widen[src, DType.float64](col)
+
+
+def _widen_small_int(
+    col: Column[HeapRegion], src_at: ArrowType, target: DType
+) raises -> Column[HeapRegion]:
+    """The cast arms for the pairs `_is_small_int_widening` accepts."""
+    if src_at == ArrowType.INT8:
+        if target == DType.int16:
+            return _widen[DType.int8, DType.int16](col)
+        if target == DType.int32:
+            return _widen[DType.int8, DType.int32](col)
+        if target == DType.int64:
+            return _widen[DType.int8, DType.int64](col)
+        return _widen_float[DType.int8](col, target)
+    if src_at == ArrowType.INT16:
+        if target == DType.int32:
+            return _widen[DType.int16, DType.int32](col)
+        if target == DType.int64:
+            return _widen[DType.int16, DType.int64](col)
+        return _widen_float[DType.int16](col, target)
+    if src_at == ArrowType.UINT8:
+        if target == DType.int16:
+            return _widen[DType.uint8, DType.int16](col)
+        if target == DType.int32:
+            return _widen[DType.uint8, DType.int32](col)
+        if target == DType.int64:
+            return _widen[DType.uint8, DType.int64](col)
+        if target == DType.uint16:
+            return _widen[DType.uint8, DType.uint16](col)
+        if target == DType.uint32:
+            return _widen[DType.uint8, DType.uint32](col)
+        if target == DType.uint64:
+            return _widen[DType.uint8, DType.uint64](col)
+        return _widen_float[DType.uint8](col, target)
+    if src_at == ArrowType.UINT16:
+        if target == DType.int32:
+            return _widen[DType.uint16, DType.int32](col)
+        if target == DType.int64:
+            return _widen[DType.uint16, DType.int64](col)
+        if target == DType.uint32:
+            return _widen[DType.uint16, DType.uint32](col)
+        if target == DType.uint64:
+            return _widen[DType.uint16, DType.uint64](col)
+        return _widen_float[DType.uint16](col, target)
+    if src_at == ArrowType.UINT32:
+        if target == DType.int64:
+            return _widen[DType.uint32, DType.int64](col)
+        if target == DType.uint64:
+            return _widen[DType.uint32, DType.uint64](col)
+        return _widen_float[DType.uint32](col, target)
+    return _widen_float[DType.uint64](col, target)
+
+
 def _project_cast(expr: Expr, batch: RecordBatch) raises -> Column[HeapRegion]:
     """The `EXPR_CAST` arm of `_eval_column_expr`."""
     var child_col = _eval_column_expr(expr.cast_child_ref(), batch)
@@ -98,14 +198,23 @@ def _project_cast(expr: Expr, batch: RecordBatch) raises -> Column[HeapRegion]:
     # `Conversion Error ... destination type FLOAT` (TRY: NULL) instead of
     # answering inf. `eval_cast_f64_to_f32_checked` in `cast_null.mojo`.
     #
+    # The small integers (INT8, INT16, UINT8, UINT16, UINT32, UINT64) are
+    # served only as the SOURCE of an exact widening (to a wider integer of
+    # either sign that holds every value, or to a float); they go through
+    # `_widen_small_int` below, which keeps validity. Narrowing and
+    # same-width sign changes among them stay unserved and raise.
+    #
     #          target ->    I32        I64        F32        F64
     #   source I32          no-op      eval_cast  eval_cast  eval_cast
     #          I64          eval_cast  no-op      eval_cast  int64_to_float64
     #          F32          ROUND      ROUND      no-op      eval_cast
     #          F64          ROUND      ROUND      CHECKED    no-op
     #
+    # --- Small-integer widenings (exact, validity kept) ---
+    if target_arrow == ArrowType.from_dtype(target) and _is_small_int_widening(src_at, target):
+        return _widen_small_int(child_col, src_at, target)
     # --- INT64 source ---
-    if src_at == ArrowType.INT64 and target == DType.float64:
+    elif src_at == ArrowType.INT64 and target == DType.float64:
         var arr = child_col.as_primitive[DType.int64]()
         var result = int64_to_float64(arr)
         return Column.from_primitive[DType.float64](result)

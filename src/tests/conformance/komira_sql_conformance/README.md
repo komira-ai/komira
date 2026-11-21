@@ -92,12 +92,13 @@ them, then copy them over the committed ones and review the diff:
 ## The corpora
 
 Counts are of the case files (`ls cases/<corpus>/*.sql`, less
-`tables.sql`); 6219 in all, 2255 of them `order: query`.
+`tables.sql`); 6247 in all, 2257 of them `order: query`.
 
 | corpus | cases | what it probes |
 |---|---|---|
 | `join_shapes` | 57 | INNER, LEFT, RIGHT, FULL, CROSS and NATURAL joins, ON and USING: keys with orphans, duplicates and a NULL on both sides, an empty side, DOUBLE keys with NaN and -0.0, string keys, a two-column key, a repeated column name |
 | `set_operations` | 45 | UNION, INTERSECT, EXCEPT, each with and without ALL, over duplicates and NULLs, widened key types |
+| `union_all` | 28 | UNION ALL: the common type of two or three branches (integers of each width signed and unsigned, FLOAT, DOUBLE, DECIMAL, timestamp units), recorded with `typeof`; NULLs in one branch, an empty branch, a second branch with other column names, ORDER BY and LIMIT after the last branch, aggregates under and over a union, integer literals |
 | `subquery_cte` | 45 | scalar, IN, EXISTS and correlated subqueries, CTEs (with and without reuse) |
 | `window_frames`, `range_frames` | 91, 119 | window aggregates over ROWS frames, and RANGE frames by offset over integers, floats, NULL and tied keys, both directions |
 | `order_by_limit` | 49 | ORDER BY direction and NULL placement, several keys, LIMIT and OFFSET (zero, past the end), ties in a group |

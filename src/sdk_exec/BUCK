@@ -76,9 +76,16 @@ _CSV_TEST_DATA.update({c + ".tsv": ":csv_oracle[" + c + ".tsv]" for c in _CSV_CA
 #   expressions, CASE and HAVING over the sum run.
 # - test_run_sql_no_from: SELECT 1 AS n is one INT32 row holding 1, as in
 #   DuckDB; a result literal is INT32 from -2147483647 to 2147483647 and
-#   INT64 otherwise, as DuckDB types it, while a literal a derived table or a UNION ALL branch holds stays
-#   INT64; FROM-less expressions, count(*) and a false WHERE run; a literal
-#   over a Parquet table; in-memory sources of several batches and of none.
+#   INT64 otherwise, as DuckDB types it, while a literal a derived table holds
+#   stays INT64 and a UNION ALL of literals is INT32; FROM-less expressions,
+#   count(*) and a false WHERE run; a literal over a Parquet table; in-memory
+#   sources of several batches and of none.
+# - test_run_sql_union_all: UNION ALL over Parquet tables equals DuckDB:
+#   INTEGER/BIGINT/FLOAT/DOUBLE/DECIMAL branches widened to DuckDB's common
+#   type, three branches, a literal branch, aggregates, GROUP BY and WHERE over
+#   a derived union, an empty branch, the first branch's names, LIMIT, and the
+#   refusals of a union with no common type and of an ORDER BY before UNION ALL;
+#   and an ORDER BY with no union (the sort sinks' data reaches the builder).
 # - test_run_sql_csv: read_csv through run_sql answers what the pinned DuckDB
 #   answers (the :csv_oracle action below) for each case of tests/csv/cases.sql:
 #   typed columns and their inferred types, quoted cells, NULL-bearing cells, a
@@ -181,6 +188,7 @@ mojo_library(
         "tests/test_run_sql_no_from.mojo",
         "tests/test_run_sql_q6.mojo",
         "tests/test_run_sql_timers_off.mojo",
+        "tests/test_run_sql_union_all.mojo",
         "tests/test_secret_capability_reveal.mojo",
     ],
     test_deps = [

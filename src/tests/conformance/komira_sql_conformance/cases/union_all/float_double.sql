@@ -1,0 +1,3 @@
+-- order: rows
+-- FLOAT UNION ALL DOUBLE is DOUBLE
+SELECT typeof(v) AS t, v FROM (SELECT f AS v FROM A UNION ALL SELECT d FROM B) u
