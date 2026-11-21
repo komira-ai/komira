@@ -136,6 +136,8 @@ _SHARED_METADATA = {
     "classifiers": ["Development Status :: 2 - Pre-Alpha"],
     "distribution": "komira",
     "project_urls": {
+        "Changelog": "https://github.com/komira-ai/komira/blob/main/python/CHANGELOG.md",
+        "Documentation": "https://github.com/komira-ai/komira/blob/main/docs/install.md",
         "Issues": "https://github.com/komira-ai/komira/issues",
         "Source": "https://github.com/komira-ai/komira",
     },
@@ -817,8 +819,9 @@ _BESIDE_FILES = {"--parquet": "komira//src/so:tests/fixtures/two_columns.parquet
     ),
 ]]
 
-# The files the smoke driver's `readme_shows_quickstart` test reads
-# (python/smoke/BUCK): the README and the quickstart it shows.
+# The files the smoke driver's `readme_shows_quickstart` and
+# `install_page_shows_quickstart` tests read (python/smoke/BUCK): the README,
+# the quickstart it shows, what the quickstart prints and the changelog.
 export_file(
     name = "README.md",
     src = "README.md",
@@ -828,5 +831,17 @@ export_file(
 export_file(
     name = "examples/quickstart.py",
     src = "examples/quickstart.py",
+    visibility = ["//python/smoke:"],
+)
+
+export_file(
+    name = "examples/quickstart.expected",
+    src = "examples/quickstart.expected",
+    visibility = ["//python/smoke:"],
+)
+
+export_file(
+    name = "CHANGELOG.md",
+    src = "CHANGELOG.md",
     visibility = ["//python/smoke:"],
 )

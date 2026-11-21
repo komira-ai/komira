@@ -178,11 +178,13 @@ export_file(
 
 # The ABI golden, read by the Python package's install test (python/BUCK,
 # wheel_install_test), which holds komira.abi_version() of the installed
-# library to its `version` line.
+# library to its `version` line, and by the install page's check
+# (python/smoke/BUCK, install_page_shows_quickstart), which holds the
+# output the page shows to it.
 export_file(
     name = "abi/komira.tsv",
     src = "abi/komira.tsv",
-    visibility = ["//python:"],
+    visibility = ["//python:", "//python/smoke:"],
 )
 
 # The C header of libkomira, komira.h, made from abi/komira.tsv (the golden:

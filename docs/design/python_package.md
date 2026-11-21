@@ -398,9 +398,10 @@ pandas = ["pandas"]   # range: as for pyarrow
 polars = ["polars"]
 
 [project.urls]
-Homepage = "https://github.com/komira-ai/komira"
 Source = "https://github.com/komira-ai/komira"
 Issues = "https://github.com/komira-ai/komira/issues"
+Documentation = "https://github.com/komira-ai/komira/blob/main/docs/install.md"
+Changelog = "https://github.com/komira-ai/komira/blob/main/python/CHANGELOG.md"
 ```
 
 - **PEP 639 licence metadata.** The table above is the bundled flavour's; the external flavour's `license`

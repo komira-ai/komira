@@ -875,7 +875,10 @@ not install and run from TestPyPI is never uploaded to PyPI.
 The quickstart is [`python/examples/quickstart.py`](../python/examples/README.md). Today it asserts the
 version, the engine's C ABI version, and that a `Session` registers `readings.parquet` and closes. It
 asserts no query result: the call that runs a query has not landed. The README's block under "What works"
-is the same text, held byte for byte by `//python/smoke:readme_shows_quickstart`.
+is the same text, held byte for byte by `//python/smoke:readme_shows_quickstart`. The install page,
+[docs/install.md](install.md), shows the same program and what it prints, `quickstart.expected` with the
+newest release of [python/CHANGELOG.md](../python/CHANGELOG.md) and the ABI version put in, held by
+`//python/smoke:install_page_shows_quickstart`.
 
 **What the macOS smokes prove.** The same two checks, `verify` and `install`, on the macOS wheel: on the
 GitHub-hosted runner `macos-15` (Apple silicon, free for public repositories) with CPython 3.13 from
