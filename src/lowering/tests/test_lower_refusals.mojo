@@ -74,6 +74,8 @@ def _schema() -> Schema:
     sb.add_field(Field("s", ArrowType.STRING, False))
     sb.add_field(Field("d", ArrowType.DATE32, False))
     sb.add_field(Field("b", ArrowType.BOOL, False))
+    sb.add_field(Field("i16", ArrowType.INT16, False))
+    sb.add_field(Field("bin", ArrowType.BINARY, False))
     return sb.build()
 
 
@@ -216,8 +218,12 @@ def _two_string_scan() -> LogicalPlan:
 
 
 def test_a_group_key_no_sink_row_serves_is_refused() raises:
-    _refused_with(_message(_count_by(_scan(), _names("d")), _inputs()), LOWERING_SINK_UNSERVED, "no sink row")
-    _refused_with(_message(_count_by(_scan(), _names("b")), _inputs()), LOWERING_SINK_UNSERVED, "no sink row")
+    _refused_with(_message(_count_by(_scan(), _names("i16")), _inputs()), LOWERING_SINK_UNSERVED, "no sink row")
+    _refused_with(_message(_count_by(_scan(), _names("bin")), _inputs()), LOWERING_SINK_UNSERVED, "no sink row")
+    _refused_with(_message(_count_by(_scan(), _names("k", "i16")), _inputs()), LOWERING_SINK_UNSERVED, "no sink row")
+    # Several columns that are not all dictionary strings stay unserved, even
+    # when each column alone has a row.
+    _refused_with(_message(_count_by(_scan(), _names("d", "b")), _inputs()), LOWERING_SINK_UNSERVED, "2 columns")
     _refused_with(_message(_count_by(_scan(), _names("k", "v")), _inputs()), LOWERING_SINK_UNSERVED, "2 columns")
     # Two strings are served only when both are dictionary encoded.
     var one_dictionary = LoweringInputs()
@@ -225,8 +231,10 @@ def test_a_group_key_no_sink_row_serves_is_refused() raises:
     var strings = _two_string_scan()
     _refused_with(_message(_count_by(strings^, _names("s", "t")), one_dictionary), LOWERING_SINK_UNSERVED, "dictionary")
     _refused_with(_message(_count_by(_scan(), _names("s", "k")), _inputs()), LOWERING_SINK_UNSERVED, "2 columns")
-    # An integer key lowers.
+    # An integer, a date and a bool key each lower.
     assert_equal(_message(_count_by(_scan(), _names("k")), _inputs()), "")
+    assert_equal(_message(_count_by(_scan(), _names("d")), _inputs()), "")
+    assert_equal(_message(_count_by(_scan(), _names("b")), _inputs()), "")
 
 
 def _udf(kind: UInt8) -> OwnedPointer[UdfData]:

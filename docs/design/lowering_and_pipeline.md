@@ -560,7 +560,8 @@ encodes the keys, commits, and merges per-worker tables at the end.
 **What the table serves and refuses.** The MVP rows are the four of the list above plus the fixed-width key rows of
 §4.3. Rows that do not exist yet are refused as `LOWERING_SINK_UNSERVED`: a group key mixing types or with more than
 one column of a non-string type (ClickBench `GROUP BY UserID, SearchPhrase`; most h2o `id1, id2` and `id4, id5`
-queries), a `DECIMAL`, `DATE` or `BOOL` key, and a composite key wider than 8 bytes. Which ClickBench and h2o queries
+queries), and a composite key wider than 8 bytes. A single `DATE`, `BOOL` or `DECIMAL` key has its own fixed-width row
+(`KEY_DTYPE_DATE32`, `KEY_DTYPE_BOOL`, `KEY_DTYPE_DECIMAL128`, the decimal in two 64-bit cells). Which ClickBench and h2o queries
 the board therefore skips is listed in the board plan (§7.4), so "no erased box for every sink the suites need" is
 bounded by that list and not claimed for the suites as a whole. D8 names the row that closes the gap (a composite
 row-layout key); step 8 of §7.3 builds it.

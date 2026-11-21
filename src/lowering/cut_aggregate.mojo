@@ -5,8 +5,9 @@
 # An aggregation ends the open pipeline in a SINK_AGG segment whose AggSinkData
 # is the next row of the ParamTable's `agg`, and opens a pipeline that reads
 # that segment's output. The sink's `(key_dtype, orientation)` comes from the
-# group key: none is KEY_DTYPE_NONE; one INT64, INT32, FLOAT64, FLOAT32 or
-# STRING column picks that key dtype, COLUMNAR, except that a string column of
+# group key: none is KEY_DTYPE_NONE; one INT64, INT32, FLOAT64, FLOAT32,
+# DATE32, BOOL, DECIMAL128 or STRING column picks that key dtype, COLUMNAR,
+# except that a string column of
 # the pipeline's Parquet scan that every row group stores dictionary encoded is
 # DICT_ENCODED; several columns are served only when every one is such a
 # dictionary string. Any other key is LOWERING_SINK_UNSERVED.
@@ -42,6 +43,9 @@ from physical_plan.physical_plan import (
     KEY_DTYPE_F64,
     KEY_DTYPE_F32,
     KEY_DTYPE_STRING,
+    KEY_DTYPE_DATE32,
+    KEY_DTYPE_BOOL,
+    KEY_DTYPE_DECIMAL128,
 )
 
 
@@ -57,6 +61,12 @@ def _key_dtype_of(arrow_type: ArrowType) -> Int:
         return Int(KEY_DTYPE_F32)
     if arrow_type == ArrowType.STRING:
         return Int(KEY_DTYPE_STRING)
+    if arrow_type == ArrowType.DATE32:
+        return Int(KEY_DTYPE_DATE32)
+    if arrow_type == ArrowType.BOOL:
+        return Int(KEY_DTYPE_BOOL)
+    if arrow_type == ArrowType.DECIMAL128:
+        return Int(KEY_DTYPE_DECIMAL128)
     return -1
 
 

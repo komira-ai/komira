@@ -63,6 +63,9 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
 #                                 128-bit decimal sums, refusals by name.
 # test_sink_agg_partials          non-empty partials merged: dealing, the merge's
 #                                 overflow refusal, pool return on failure.
+# test_sink_group_agg_keys        the grouped sink over DATE32, BOOL and DECIMAL128
+#                                 keys against a dict oracle, empty input, the
+#                                 refusals by name, decimal scale and precision.
 # test_sink_int_sum_decimal       SUM over an integer column declared DECIMAL(38, 0):
 #                                 exact past INT64 in both signs, equal to the
 #                                 DECIMAL fold of the cast form, NULL and empty,
@@ -151,6 +154,7 @@ mojo_library(
         "tests/test_sink_agg_partials.mojo",
         "tests/test_sink_collect.mojo",
         "tests/test_sink_group_agg.mojo",
+        "tests/test_sink_group_agg_keys.mojo",
         "tests/test_sink_int_sum_decimal.mojo",
         "tests/test_sink_sort.mojo",
         "tests/test_sink_string_group_agg.mojo",

@@ -86,14 +86,15 @@ Import each module by name; the package root exports nothing.
   the declared schema. `AggSinkData.presorted` and `estimated_groups` belong to
   grouped sinks and are ignored.
 - `sink_group_agg`, `group_table`, `group_keys`, `sink_agg_any`: the grouped
-  aggregation sinks `(SINK_AGG, KEY_DTYPE_I64 | I32 | F64 | F32,
-  SINK_ORIENT_COLUMNAR)`, over one or more keys that are integer columns (the
-  I64 and I32 rows) or float columns (F64 and F32), with the aggregates and the
+  aggregation sinks `(SINK_AGG, KEY_DTYPE_I64 | I32 | F64 | F32 | DATE32 |
+  BOOL | DECIMAL128, SINK_ORIENT_COLUMNAR)`, over one or more keys that are
+  integer columns (the I64 and I32 rows), float columns (F64 and F32), DATE32,
+  BOOL or DECIMAL128 columns (one row each), with the aggregates and the
   exact folds of the ungrouped sink (`agg_fold`, `agg_output`). The output
   schema lists the key columns, in the input's types, then the aggregates. Each
   worker folds into a hash table of its own (`group_table`: a 64-bit cell and a
-  NULL flag per key, a count and a 128-bit integer per aggregate); a NULL key is
-  a group of its own, and 0.0 and -0.0, and all NaNs, are one group each
+  NULL flag per key, two cells for a decimal key at its declared scale, a
+  count and a 128-bit integer per aggregate); a NULL key is a group of its own, and 0.0 and -0.0, and all NaNs, are one group each
   (`group_keys`). `combine` merges the tables in worker order with the same
   overflow rule, per group, so a sum that overflows only when the workers'
   partials are added is refused; the order of the output groups is not
@@ -178,7 +179,7 @@ Import each module by name; the package root exports nothing.
   serves SOURCE_PARQUET, SOURCE_BATCH, SOURCE_SINK_OUTPUT, OP_FILTER,
   OP_PROJECT, OP_LIMIT and the sinks `(SINK_COLLECT, KEY_DTYPE_NONE,
   SINK_ORIENT_COLUMNAR)`, `(SINK_AGG, KEY_DTYPE_NONE, SINK_ORIENT_COLUMNAR)`,
-  the grouped rows I64, I32, F64 and F32, `(SINK_AGG, KEY_DTYPE_STRING,
+  the grouped rows I64, I32, F64, F32, DATE32, BOOL and DECIMAL128, `(SINK_AGG, KEY_DTYPE_STRING,
   SINK_ORIENT_DICT_ENCODED)` and `(SINK_AGG, KEY_DTYPE_STRING,
   SINK_ORIENT_COLUMNAR)`, and `(SINK_SORT, KEY_DTYPE_NONE,
   SINK_ORIENT_COLUMNAR)`, and refuses every other kind by name. It keeps the

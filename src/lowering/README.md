@@ -28,7 +28,8 @@ and no environment variable and touches no global, so equal arguments give a
   SQL integer sum, is put into a sink's data as SUM(e); the node's declared
   output stays DECIMAL(38, 0) and the sink writes its 128-bit total there.
 - `sink_capability`: the table of `(sink_kind, key_dtype, orientation)` rows a
-  host serves, and admission. A group key picks its row from its column type;
+  host serves, and admission. A group key picks its row from its column type
+  (INT64, INT32, FLOAT64, FLOAT32, DATE32, BOOL, DECIMAL128 or STRING);
   a string key is `DICT_ENCODED` only when the scan's footers say every row
   group stores it dictionary encoded and no projection stands between the scan
   and the aggregation, and otherwise `COLUMNAR`.
@@ -48,8 +49,9 @@ shape:
   aggregation; an aggregation with a group top-k; a source other than Parquet
   or in memory.
 - `LOWERING_SINK_UNSERVED`, naming the triple or the key: a group key of a
-  type with no row (date, decimal, bool, ...), a key of several columns that
-  are not all dictionary encoded strings, or a segment whose triple has no row.
+  type with no row (an 8- or 16-bit integer, a timestamp, a binary, ...), a
+  key of several columns that are not all dictionary encoded strings, or a
+  segment whose triple has no row.
 - `LOWERING_SCAN_NOT_TOTAL`: a Parquet scan of several files, a Hive
   partitioned scan (partition columns or values, a directory scan or a
   partition predicate), a scan on a file system other than the local one, or a

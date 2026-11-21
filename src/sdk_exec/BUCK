@@ -24,6 +24,13 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #   oracle's DECIMAL(38,4); a join, a syntax error, an unknown table, a COPY or
 #   CTAS and a replaced file are named refusals; the footer is read once per
 #   query; contexts are created and dropped repeatedly.
+# - test_run_sql_group_keys: run_sql over a Parquet table of DATE32, BOOL,
+#   DECIMAL(12, 2), DECIMAL(30, 4) and INT64 columns in several row groups:
+#   GROUP BY one DATE32, BOOL or DECIMAL column equals an oracle computed in
+#   the test (the NULL key is one group; count(*), count(v), sum(v); decimal
+#   keys past INT64 exact), min/max of dates and sum of decimals run under a
+#   BOOL key, a filter before the grouping, an all-NULL key is one group, and a
+#   multi-column key that is not all strings is refused at `lower`.
 # - test_run_sql_int_sum: run_sql over INT64 and INT32 Parquet columns in several
 #   row groups: an integer sum() is declared DECIMAL(38, 0) and exact past the
 #   INT64 range (MAX and MIN rows, partials that each pass INT64, {MAX, MAX, MIN,
@@ -125,6 +132,7 @@ mojo_library(
         "tests/test_plan_validation_routes_ledger.mojo",
         "tests/test_resolved_cache_lru_eviction_stress.mojo",
         "tests/test_resolved_cache_pin_count.mojo",
+        "tests/test_run_sql_group_keys.mojo",
         "tests/test_run_sql_int_sum.mojo",
         "tests/test_run_sql_no_from.mojo",
         "tests/test_run_sql_q6.mojo",

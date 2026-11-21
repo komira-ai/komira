@@ -1113,6 +1113,12 @@ comptime KEY_DTYPE_I32: UInt8 = 2
 comptime KEY_DTYPE_F64: UInt8 = 3
 comptime KEY_DTYPE_F32: UInt8 = 4
 comptime KEY_DTYPE_STRING: UInt8 = 5
+# A DATE32 key (the day number), a BOOL key, and a DECIMAL128 key (its 128-bit
+# unscaled value at the declared scale). Added after 5 without renumbering; an
+# engine that predates a tag refuses its triple by name when it builds the sink.
+comptime KEY_DTYPE_DATE32: UInt8 = 6
+comptime KEY_DTYPE_BOOL: UInt8 = 7
+comptime KEY_DTYPE_DECIMAL128: UInt8 = 8
 
 
 struct SourceSpecPod(Movable):
