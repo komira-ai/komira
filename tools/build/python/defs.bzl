@@ -280,8 +280,8 @@ _py_test = rule(
 # else, so the loader finds the library and the runtime in the action's inputs
 # and never on the worker. The script learns the first directory from
 # `--lib-dir <dir>`, its first two arguments (a flag, not an environment
-# variable), and the second from `--runtime-dir <dir>`, the next two (the
-# directory a loader's runtime preload is pointed at); `ctypes.CDLL(os.path.join(libdir, "<out_name>.so"))` loads a
+# variable), and the second from `--runtime-dir <dir>`, the next two (for a
+# script that opens a runtime library by path); `ctypes.CDLL(os.path.join(libdir, "<out_name>.so"))` loads a
 # library by path. `data` ({dest: source}) is staged in the same directory at
 # `dest`: a library's runnable directory (`libkomira[runnable]`, the library
 # with its lib/ beside it) or a stand-in library under a path of its own.

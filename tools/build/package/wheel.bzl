@@ -27,12 +27,16 @@ Attributes:
     platform            the platform row the wheel is for (tools/build/
                         platforms/table.bzl), default linux-x86_64; its tag
                         is `wheel_tag` of the row
+    os_floor            the floor the tag promises, when it is above the
+                        row's `os_floor` (the floor of what the repository
+                        links): a wheel carrying a vendor's library that needs
+                        a newer glibc names it (`glibc-2.35`); unset, the
+                        row's
     max_glibcxx, max_cxxabi
                         the highest GLIBCXX_ and CXXABI_ versions a library
                         may need (unset: none may)
     external_needed     sonames a library may need that another package
-                        provides (the Mojo runtime's, from Modular's); none
-                        of them may be in the wheel
+                        provides; none of them may be in the wheel
 
 The VERSION is the stamp's (wheel/stamp.zig): `-c komira.package_stamp=<N>`
 with `-c komira.package_commit` and `-c komira.package_timestamp_ms` gives
@@ -128,7 +132,10 @@ def _wheel_file_impl(ctx):
     for p in ctx.attrs.executable:
         if p not in ctx.attrs.files:
             fail("{}: executable names {}, which is not a key of files".format(ctx.label, p))
-    tag = wheel_tag(row(ctx.attrs.platform))
+    r = row(ctx.attrs.platform)
+    if ctx.attrs.os_floor != None:
+        r = r | {"os_floor": ctx.attrs.os_floor}
+    tag = wheel_tag(r)
     tool = ctx.attrs._wheel[RunInfo]
     name = "{}-{}-{}.whl".format(ctx.attrs.distribution.replace("-", "_"), wheel_version(ctx.attrs.stamp), tag)
     files = sorted(ctx.attrs.files.items())
@@ -229,6 +236,7 @@ _wheel_file = rule(
         }),
         "max_cxxabi": attrs.option(attrs.string(), default = None),
         "max_glibcxx": attrs.option(attrs.string(), default = None),
+        "os_floor": attrs.option(attrs.string(), default = None),
         "platform": attrs.string(default = "linux-x86_64"),
         "project_urls": attrs.dict(attrs.string(), attrs.string(), default = {}),
         "readme": attrs.source(),
