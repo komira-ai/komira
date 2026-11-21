@@ -37,7 +37,7 @@ fn find(members: []const zip.Read, name: []const u8) ?zip.Read {
 }
 
 /// The values of every `<key>: ` header line of `text` before its body.
-fn headerValues(alloc: Alloc, text: []const u8, key: []const u8) ![]const []const u8 {
+pub fn headerValues(alloc: Alloc, text: []const u8, key: []const u8) ![]const []const u8 {
     var out = std.ArrayList([]const u8).empty;
     var lines = std.mem.splitScalar(u8, text, '\n');
     while (lines.next()) |l| {
