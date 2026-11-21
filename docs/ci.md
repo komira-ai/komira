@@ -723,26 +723,24 @@ a redirect.
 [`.github/workflows/pypi.yml`](../.github/workflows/pypi.yml) builds the `komira` wheel
 ([python/README.md](../python/README.md)), uploads it to TestPyPI, installs it from there on a fresh runner
 and runs the quickstart, and only then does the same on PyPI. The macOS arm64 wheel of the same name
-and version is published by six more jobs of the same file, a chain of their own (below), for the `bundled` flavour only: the macOS wheel carries the Mojo runtime, and the `external` flavour has no macOS runtime record, loader branch or Modular wheel yet, so an `external` run publishes no macOS wheel (the default is `bundled`) and a run publishes exactly one flavour on every platform it publishes. It is written by hand. It runs once a day on `main`
-(`schedule`, one cron entry, `17 5 * * *`: 05:17 UTC) and when started by hand (`workflow_dispatch`), and
-on nothing else; every job has `if: github.ref == 'refs/heads/main'`. A pull request never starts it. A
-scheduled run has no inputs, so it publishes the default flavour, `bundled`: every read of the input is
-`inputs.flavour || 'bundled'` ([below](#the-daily-run)).
+and version is published by six more jobs of the same file, a chain of their own (below), on every run; both wheels carry the Mojo runtime libraries and require no other distribution. It is written by hand. It runs once a day on `main`
+(`schedule`, one cron entry, `17 5 * * *`: 05:17 UTC) and when started by hand (`workflow_dispatch`, which takes no
+input), and on nothing else; every job has `if: github.ref == 'refs/heads/main'`. A pull request never starts it.
 
 | job | environment | permissions | what it does |
 |---|---|---|---|
-| `build` | `build` | `contents: read`, `id-token: write` (the tailnet only) | on the farm ([farm-connect](#how-it-reaches-the-farm), `farm-qos: batch`): builds `//release/ci:release_json` and takes the stamp (`release_json stamp`); builds the wheel and the install test of the run's `flavour` input (`//python:komira_wheel_<flavour>[release]` and `//python:wheel_install_test_<flavour>`; `bundled` by default, `external` the other choice, docs/design/python_package.md "The two flavours") with the three stamp flags (`-c komira.package_stamp`, `komira.package_commit`, `komira.package_timestamp_ms`) and `//python/smoke:pypi_smoke`; runs `pypi_smoke dist`, which makes the dist directory, and writes the flavour and the version to the run's summary. It keeps two workflow artifacts, `pypi-<version>-dist` (the wheel) and `pypi-<version>-smoke` (the driver), for 14 days. It has no upload step and holds no index identity. |
+| `build` | `build` | `contents: read`, `id-token: write` (the tailnet only) | on the farm ([farm-connect](#how-it-reaches-the-farm), `farm-qos: batch`): builds `//release/ci:release_json` and takes the stamp (`release_json stamp`); builds the wheel and its install test (`//python:komira_wheel[release]` and `//python:wheel_install_test`) with the three stamp flags (`-c komira.package_stamp`, `komira.package_commit`, `komira.package_timestamp_ms`) and `//python/smoke:pypi_smoke`; runs `pypi_smoke dist`, which makes the dist directory. It keeps two workflow artifacts, `pypi-<version>-dist` (the wheel) and `pypi-<version>-smoke` (the driver), for 14 days. It has no upload step and holds no index identity. |
 | `testpypi` | `testpypi` | `id-token: write` | no farm, no checkout, no buck2. Downloads the two artifacts, runs `pypi_smoke state --index testpypi`, and uploads the wheel to TestPyPI only when the state is `absent`. |
 | `testpypi-smoke` | none | `contents: read` | `pypi_smoke verify --index testpypi`, then `pypi_smoke install --index testpypi`, on a runner with the Python `actions/setup-python` gives (3.13). Skipped when the state is `differs`. |
 | `pypi` | `pypi` | `id-token: write` | after `testpypi-smoke`: the same as `testpypi` for PyPI. |
 | `pypi-smoke` | none | `contents: read` | the same as `testpypi-smoke` for PyPI. Skipped when the state is `differs`. |
 | `result` | none | none | fails the run, naming the job, when `build`, `testpypi`, `testpypi-smoke`, `pypi` or `pypi-smoke` did not succeed, and prints a notice when the bytes differ at the same version (below). Its last step prints the notice `already published: komira <version> is on TestPyPI and PyPI with the bytes built; nothing was uploaded, and the smoke passed on both` when both indexes said `same`; being last, it prints only when no step above it failed. |
-| `build-macos-arm64` | `build` | `contents: read`, `id-token: write` (the tailnet only) | only when the run's `flavour` is `bundled`, a scheduled run included (`if: github.ref == 'refs/heads/main' && (inputs.flavour || 'bundled') == 'bundled'`), on an ubuntu runner that only asks the farm, whose Macs are the workers (`farm-connect` with the macOS worker set and hosts, `farm-qos: batch`): takes the stamp, builds the Linux driver, builds `//python:komira_wheel_macos_arm64[file_name]` (the wheel's file name, written at analysis) and asks both indexes whether each lists that file (`pypi_smoke present`). Only if one does not, it builds `//python:komira_wheel_macos_arm64[release]`, `//python:wheel_install_test_macos_arm64` and `//python/smoke:pypi_smoke_macos_arm64` for `--target-platforms komira//tools/build/platforms:darwin-arm64`, runs `pypi_smoke dist`, and keeps `pypi-<version>-macos-arm64-dist` (the macOS wheel alone) and `pypi-<version>-macos-arm64-smoke` (the Linux driver and the macOS driver). Its output `version` is empty when nothing was built. No upload step. |
+| `build-macos-arm64` | `build` | `contents: read`, `id-token: write` (the tailnet only) | on every run (`if: github.ref == 'refs/heads/main'`), on an ubuntu runner that only asks the farm, whose Macs are the workers (`farm-connect` with the macOS worker set and hosts, `farm-qos: batch`): takes the stamp, builds the Linux driver, builds `//python:komira_wheel_macos_arm64[file_name]` (the wheel's file name, written at analysis) and asks both indexes whether each lists that file (`pypi_smoke present`). Only if one does not, it builds `//python:komira_wheel_macos_arm64[release]`, `//python:wheel_install_test_macos_arm64` and `//python/smoke:pypi_smoke_macos_arm64` for `--target-platforms komira//tools/build/platforms:darwin-arm64`, runs `pypi_smoke dist`, and keeps `pypi-<version>-macos-arm64-dist` (the macOS wheel alone) and `pypi-<version>-macos-arm64-smoke` (the Linux driver and the macOS driver). Its output `version` is empty when nothing was built. No upload step. |
 | `testpypi-macos-arm64` | `testpypi` | `id-token: write` | `needs` the macOS build and runs only when it built a wheel. The same as `testpypi`, on the macOS dist, with the Linux driver. |
 | `testpypi-smoke-macos-arm64` | none | `contents: read` | on the hosted runner `macos-15` (Apple silicon): `verify`, then `install` with the macOS driver on CPython 3.13. Skipped when the state is `differs`. |
 | `pypi-macos-arm64` | `pypi` | `id-token: write` | after `testpypi-smoke-macos-arm64`: the same as `pypi`, for the macOS dist. |
 | `pypi-smoke-macos-arm64` | none | `contents: read` | the same as `testpypi-smoke-macos-arm64` for PyPI. Skipped when the state is `differs`. |
-| `result-macos-arm64` | none | none | the macOS chain's verdict: fails the run when `build-macos-arm64` did not succeed, and, when it built a wheel, when an upload or a smoke of the macOS chain did not succeed; a notice when the bytes differ at the same version, a notice that the `external` flavour has no macOS wheel yet when the run's flavour is not `bundled` (nothing fails), and a notice that this version's macOS wheel is on both indexes already when the build found it and built nothing. |
+| `result-macos-arm64` | none | none | the macOS chain's verdict: fails the run when `build-macos-arm64` did not succeed, and, when it built a wheel, when an upload or a smoke of the macOS chain did not succeed; a notice when the bytes differ at the same version, and a notice that this version's macOS wheel is on both indexes already when the build found it and built nothing. |
 
 **Why its own file.** PyPI's trusted publishing binds a publisher to a workflow file name and an
 environment. `release.yml` holds no publishing credential, and this file is the one that does, so the
@@ -750,8 +748,8 @@ credential is reachable from this file only. A job's index identity is the OIDC 
 only `testpypi`, `pypi`, `testpypi-macos-arm64` and `pypi-macos-arm64` hold a token an index trusts, and only for
 their own index. `build` and `build-macos-arm64` name the environment `build`, which no index trusts, and have no
 upload step. `//:pypi_workflow_cases` pins the triggers (exactly one `schedule:` of one cron entry at a fixed
-minute and hour of every day, then `workflow_dispatch` with its one input), that every read of `inputs.flavour`
-carries the fallback `|| 'bundled'`, the twelve jobs, each job's `if:`, runner, `needs`, environment and
+minute and hour of every day, then `workflow_dispatch` with no input), that no line reads a run input, the
+twelve jobs, each job's `if:`, runner, `needs`, environment and
 permissions (the two macOS smoke jobs run on `macos-15`, every other job on `ubuntu-24.04`), that `id-token` is on no
 other job, that `farm-connect` and buck2 are in the two build jobs alone, that the publish action appears only in
 the four upload jobs (`testpypi`, `pypi` and their macOS twins), that `setup-python` appears only in the four smoke jobs,
@@ -890,9 +888,9 @@ libraries (`libAsyncRTRuntimeGlobals.dylib`, `libKGENCompilerRTShared.dylib`, `l
 no package of Modular's.
 
 **What ran where.** The build, the stamp and the wheel's own install test
-(`//python:wheel_install_test_<flavour>`, which installs the wheel, and for `external` Modular's `mojo-compiler` it requires, into an empty environment and loads `libkomira`) run on the
+(`//python:wheel_install_test`, which installs the wheel into an empty environment and loads `libkomira`) run on the
 farm, in `build`, before any upload, on the same bytes that are uploaded. The macOS wheel's build and its install test
-(`//python:wheel_install_test_macos_arm64`, the bundled flavour) run on the farm's Macs, in `build-macos-arm64`. `state`, the upload, `verify` and
+(`//python:wheel_install_test_macos_arm64`) run on the farm's Macs, in `build-macos-arm64`. `state`, the upload, `verify` and
 `install` run on GitHub-hosted runners, in the later jobs. The index checks and the install from an index
 run on a runner only, because a farm action has no network.
 

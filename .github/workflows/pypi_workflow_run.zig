@@ -9,8 +9,8 @@
 //!  - a job whose `if:` has no `always()` runs only when every job it needs succeeded, else it is
 //!    skipped; then its `if:` decides; a skipped job's outputs are empty;
 //!  - an expression is a string literal, `github.ref` (a run of this file is on main), `github.event_name`,
-//!    `inputs.<name>` (empty in a scheduled run, which has no inputs), `needs.<job>.result` and
-//!    `needs.<job>.outputs.<name>` of a job the reading job needs, `always()`, `!`, `==`, `!=`, `&&`,
+//!    `needs.<job>.result` and `needs.<job>.outputs.<name>` of a job the reading job needs (the
+//!    workflow takes no input, so `inputs.<name>` is refused like any other unknown name), `always()`, `!`, `==`, `!=`, `&&`,
 //!    `||` and parentheses, with GitHub's values: `||` and `&&` give one of their operands, an empty
 //!    string is false, and strings compare without regard to case;
 //!  - a job that runs, other than the two verdict jobs, ends as the case says (`success` unless the
@@ -36,10 +36,9 @@ const End = struct {
     outputs: []const [2][]const u8 = &.{},
 };
 
-/// The event of the run, its input (none in a scheduled run) and how each job that runs ends.
+/// The event of the run and how each job that runs ends.
 const Case = struct {
     event: []const u8 = "schedule",
-    flavour: ?[]const u8 = null,
     ends: []const End = &.{},
 };
 
@@ -110,7 +109,6 @@ const Scope = struct {
     fn lookup(self: Scope, ar: std.mem.Allocator, name: []const u8) !Value {
         if (std.mem.eql(u8, name, "github.ref")) return .{ .str = "refs/heads/main" };
         if (std.mem.eql(u8, name, "github.event_name")) return .{ .str = self.case.event };
-        if (std.mem.eql(u8, name, "inputs.flavour")) return .{ .str = self.case.flavour orelse "" };
         if (self.step_state) |s| if (std.mem.eql(u8, name, "steps.state.outputs.state")) return .{ .str = s };
         if (std.mem.startsWith(u8, name, "needs.")) {
             const rest = name["needs.".len..];
@@ -345,7 +343,6 @@ fn isVerdict(name: []const u8) bool {
 }
 
 fn play(ar: std.mem.Allocator, text: []const u8, case: Case) !Played {
-    if (std.mem.eql(u8, case.event, "schedule") and case.flavour != null) return unreadable("a case of a scheduled run gives an input", .{});
     var done = std.ArrayList(Done).empty;
     var messages = std.ArrayList(Message).empty;
     var uploads = std.ArrayList([]const u8).empty;
@@ -423,7 +420,6 @@ fn state(comptime job: []const u8, comptime s: []const u8) End {
 const ALREADY = Message{ .kind = "notice", .title = "pypi", .text = "already published: komira " ++ V ++ " is on TestPyPI and PyPI with the bytes built; nothing was uploaded, and the smoke passed on both" };
 const DIFFERS = Message{ .kind = "notice", .title = "pypi", .text = "bytes differ at the same version: a commit that changed only documentation, which the stamp ignores; a code commit raises the version" };
 const MAC_ON_BOTH = Message{ .kind = "notice", .title = "pypi-macos-arm64", .text = "the macOS wheel of this version is on both indexes already: nothing was built on the Macs" };
-const MAC_EXTERNAL = Message{ .kind = "notice", .title = "pypi-macos-arm64", .text = "the external flavour has no macOS wheel yet: no macOS job ran; the bundled flavour publishes it" };
 
 fn linuxError(comptime text: []const u8) Message {
     return .{ .kind = "error", .title = "pypi", .text = text };
@@ -546,28 +542,23 @@ test "a failed macOS build ends the run red and leaves the Linux chain green wit
     try expectPlayed(p, false, &.{ .{ "result", "success" }, .{ "result-macos-arm64", "failure" } }, &.{ ALREADY, .{ .kind = "error", .title = "pypi-macos-arm64", .text = "the macOS build job did not succeed (build-macos-arm64 failure)" } });
 }
 
-test "the flavour: a scheduled run builds the bundled wheel and runs the macOS chain; a manual run builds the flavour it was given" {
+test "a scheduled run and a manual run build the one wheel and run the macOS chain; a read of an input is refused" {
     var arena = std.heap.ArenaAllocator.init(t.allocator);
     defer arena.deinit();
     const ar = arena.allocator();
     const text = try reader.readWorkflow(ar);
     const stamp = "-c komira.package_stamp=<steps.stamp.outputs.build_number> -c komira.package_commit=<steps.stamp.outputs.source_commit> -c komira.package_timestamp_ms=<steps.stamp.outputs.timestamp_ms>";
-    inline for (.{ .{ "schedule", null, "bundled" }, .{ "workflow_dispatch", "bundled", "bundled" }, .{ "workflow_dispatch", "external", "external" } }) |c| {
-        const lines = try expanded(ar, text, .{ .event = c[0], .flavour = c[1] }, "build");
-        try t.expect(reader.has(lines, "          args: build " ++ stamp ++ " //python:komira_wheel_" ++ c[2] ++ "[release] --out <runner.temp>/pypi/built/komira.whl"));
-        try t.expect(reader.has(lines, "          args: build " ++ stamp ++ " //python:wheel_install_test_" ++ c[2]));
-        try t.expect(reader.has(lines, "          FLAVOUR: " ++ c[2]));
-    }
-    const ends = [_]End{ BUILT, state("testpypi", "same"), state("pypi", "same") };
     const ends_mac = [_]End{ BUILT, state("testpypi", "same"), state("pypi", "same"), MAC_NOTHING };
-    // a scheduled run asks for the macOS wheel; an external run runs no macOS job and says why
-    try expectPlayed(try play(ar, text, .{ .ends = &ends_mac }), true, &.{.{ "build-macos-arm64", "success" }}, &.{ ALREADY, MAC_ON_BOTH });
-    try expectPlayed(try play(ar, text, .{ .event = "workflow_dispatch", .flavour = "external", .ends = &ends }), true, &.{.{ "build-macos-arm64", "skipped" }}, &.{ ALREADY, MAC_EXTERNAL });
-    // without the fallback a scheduled run builds a target that does not exist, and skips the macOS build
-    const bare = try reader.replaced(ar, text, "${{ inputs.flavour || 'bundled' }}[release]", "${{ inputs.flavour }}[release]");
-    try t.expect(reader.has(try expanded(ar, bare, .{}, "build"), "          args: build " ++ stamp ++ " //python:komira_wheel_[release] --out <runner.temp>/pypi/built/komira.whl"));
-    const bare_gate = try reader.replaced(ar, text, "&& (inputs.flavour || 'bundled') == 'bundled'\n", "&& inputs.flavour == 'bundled'\n");
-    try expectPlayed(try play(ar, bare_gate, .{ .ends = &ends }), false, &.{.{ "build-macos-arm64", "skipped" }}, &.{ ALREADY, .{ .kind = "error", .title = "pypi-macos-arm64", .text = "the macOS build job did not succeed (build-macos-arm64 skipped)" } });
+    inline for (.{ "schedule", "workflow_dispatch" }) |event| {
+        const lines = try expanded(ar, text, .{ .event = event }, "build");
+        try t.expect(reader.has(lines, "          args: build " ++ stamp ++ " //python:komira_wheel[release] --out <runner.temp>/pypi/built/komira.whl"));
+        try t.expect(reader.has(lines, "          args: build " ++ stamp ++ " //python:wheel_install_test"));
+        try expectPlayed(try play(ar, text, .{ .event = event, .ends = &ends_mac }), true, &.{.{ "build-macos-arm64", "success" }}, &.{ ALREADY, MAC_ON_BOTH });
+    }
+    // a flavour read back in, in the build's target, the macOS gate or a verdict step: the run takes no input
+    try t.expectError(error.Unreadable, expanded(ar, try reader.replaced(ar, text, "//python:komira_wheel[release]", "//python:komira_wheel_${{ inputs.flavour || 'bundled' }}[release]"), .{}, "build"));
+    try t.expectError(error.Unreadable, play(ar, try reader.inJob(ar, text, "build-macos-arm64", "    if: github.ref == 'refs/heads/main'\n", "    if: github.ref == 'refs/heads/main' && (inputs.flavour || 'bundled') == 'bundled'\n"), .{ .ends = &ends_mac }));
+    try t.expectError(error.Unreadable, play(ar, try reader.replaced(ar, text, "        if: needs.build-macos-arm64.result != 'success'\n", "        if: (inputs.flavour || 'bundled') == 'bundled' && needs.build-macos-arm64.result != 'success'\n"), .{ .ends = &ends_mac }));
 }
 
 test "the play refuses a workflow or a case it cannot read" {
@@ -583,8 +574,7 @@ test "the play refuses a workflow or a case it cannot read" {
     // a verdict step that is not one echo, and an echo of a name the step's env does not hold
     try t.expectError(error.Unreadable, play(ar, try reader.replaced(ar, text, "(pypi-smoke $PYPI_SMOKE)\" && exit 1'", "(pypi-smoke $PYPI_SMOKE)\"; exit 1'"), .{ .ends = &.{ BUILT, state("testpypi", "same"), state("pypi", "same"), .{ .job = "pypi-smoke", .result = "failure" }, MAC_NOTHING } }));
     try t.expectError(error.Unreadable, play(ar, try reader.replaced(ar, text, "komira $VERSION is on", "komira $RELEASE is on"), ok));
-    // a case for a scheduled run with an input, for a job the file lacks, or for a job that was skipped
-    try t.expectError(error.Unreadable, play(ar, text, .{ .flavour = "bundled" }));
+    // a case for a job the file lacks, or for a job that was skipped
     try t.expectError(error.Unreadable, play(ar, text, .{ .ends = &.{.{ .job = "publish" }} }));
     try t.expectError(error.Unreadable, play(ar, text, .{ .ends = &.{ BUILT, state("testpypi", "differs"), state("pypi", "same") } }));
 }
