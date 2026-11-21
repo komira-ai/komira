@@ -7,10 +7,12 @@ pinned download (`pinned_file`): on a remote-cache hit, nothing is fetched.
 No source distribution is built and pip never runs.
 
 The Python surface is the shared library's bindings and their tests
-(`python_binding_test`, [tools/build/python](../../tools/build/python/README.md#binding-tests)).
+(`python_binding_test`, [tools/build/python](../../tools/build/python/README.md#binding-tests)),
+and the Python package `python/` ([design](../../docs/design/python_package.md)).
 The package that tested the pins (the pinned versions, the
 licences, the protobuf gencode, the 3.14 interpreters) is already gone:
-no test holds what this page says about the pins.
+apart from the protobuf runtimes ([protobuf](#protobuf)), no test holds what
+this page says about the pins.
 
 | target | what |
 |---|---|
@@ -46,15 +48,31 @@ its `deps` name it: its `tzdata/zoneinfo` directory is the action's `TZDIR`
 and Python's only zone path ([tools/build/python](../../tools/build/python/README.md#time-zones)),
 so a zone is never read from the worker.
 
-protobuf 7.36.2 loads the Python gencode of the repository's protoc (29.1,
-which writes gencode 5.29.1): its runtime check refuses only gencode newer
-than the runtime (or of another domain), not an older major. With protobuf
-5.28.3 pinned instead, loading that gencode fails with `VersionError:
-Detected incompatible Protobuf Gencode/Runtime versions`.
-
 Not in the closure yet, each for the change that brings its consumer: the
 Google Cloud Storage testbench, kafka-python and opensearch-py (service
 drivers), and anything they require.
+
+## protobuf
+
+The repository's protoc (29.1) writes Python gencode 5.29.1, and the gencode
+checks the runtime when it is imported: protobuf 5.29.1 and later load it
+(7.36.2's check refuses only gencode newer than the runtime, or of another
+domain, not an older major), and an older runtime refuses it with
+`VersionError: Detected incompatible Protobuf Gencode/Runtime versions`. The
+Python package declares the range its plan modules load under,
+`protobuf>=5.29.1,<8` ([python/dependencies.bzl](../../python/dependencies.bzl)),
+and [python/tests](../../python/tests/BUCK) loads them under each edge:
+
+| version | in `pins.bzl` | target | for |
+|---|---|---|---|
+| 7.36.2 | `WHEELS` | `:protobuf` (this package) | the range's upper edge, the newest release of major 7 |
+| 5.29.1 | `PROTOBUF_EDGES` | `komira//python/tests:protobuf-5.29.1` | the range's lower edge |
+| 5.28.3 | `PROTOBUF_EDGES` | `komira//python/tests:protobuf-5.28.3` | the release below the range, which must refuse the gencode |
+
+`PROTOBUF_EDGES` holds the binary wheels (`cp38-abi3`, manylinux x86_64) of
+the two older releases, BSD-3-Clause like 7.36.2. python/tests/BUCK declares
+their downloads and installed targets, so that they are inside the Python
+surface, and only its tests depend on them.
 
 ## CPython 3.14
 
@@ -129,7 +147,9 @@ package:
   and every wheel are visible only to the
   packages `_TEST_ONLY` in [`BUCK`](BUCK) lists, all test-only: packages under
   `src/tests` (`//:src_layout` holds that directory to test-only packages),
-  and `release/ci/tests`, which holds only the `py_test` of the CI scripts. A
+  `release/ci/tests`, which holds only the `py_test` of the CI scripts,
+  `tools/build/examples/python_binding` and `python/tests`, which hold only
+  tests and, in `python/tests`, the protobuf wheels only they use. A
   `mojo_bundle`, `conda_package` or any other target elsewhere that names one
   fails analysis with a visibility error.
 - **What a test hands on.** A `py_test`'s only output is its pass marker:

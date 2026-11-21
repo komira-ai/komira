@@ -33,7 +33,7 @@ const rules = @import("rules.zig");
 pub const BINARY = [_][]const u8{
     "arrow", "orc", "parquet", "avro", "tensor", "frame", "request", "whl", "conda", "gz",  "tgz",   "xz",   "zst",   "bz2",
     "tar",   "zip", "jar",     "png",  "jpg",    "jpeg",  "gif",     "ico", "pdf",   "der", "so", "a",    "o",     "dylib",
-    "wasm",  "mojoc", "mojopkg",
+    "wasm",  "mojoc", "mojopkg", "pyc", "pyd", "egg",
 };
 
 pub fn binary(path: []const u8) bool {

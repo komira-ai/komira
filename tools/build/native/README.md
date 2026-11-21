@@ -180,3 +180,11 @@ file at lib/ with a `lib_files` row
 ([packaging/conda/README.md](../../../packaging/conda/README.md), "A library's
 native code in its package"). Those two libraries are built and checked, but
 no package ships them yet.
+
+## so_report
+
+`so_report` (`so_report.zig`, tests in `so_report_test.zig`) reads a library's ELF
+file and the libraries it needs and writes a markdown table: size, SONAME, RUNPATH, RPATH
+and `DT_NEEDED` of each, the highest `GLIBC_`, `GLIBCXX_` and `CXXABI_` version each
+requires, and which native owners the target reaches. It is built behind its unit tests and
+run by `komira//tools/build/package/libkomira:libkomira_elf_report`.
