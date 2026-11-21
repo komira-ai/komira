@@ -1,7 +1,8 @@
 //! prefix_tool: the prefix header of a vendored C library and the symbol
 //! check of its prefixed archive (README.md). The commands are in cli.zig,
-//! what they compute in prefix.zig. It reads archives through `elfsyms`
-//! (elfsyms.c) and runs nothing else.
+//! what they compute in prefix.zig. It reads archives itself, ELF or
+//! Mach-O, with the object reader of native_so (`native_objects`,
+//! ../native_elf.zig), and runs no other program.
 
 const std = @import("std");
 const P = @import("prefix.zig");

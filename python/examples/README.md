@@ -5,6 +5,11 @@ package: it prints the installed version and the engine's C ABI version,
 opens a session, registers `readings.parquet` as the table `readings`, and
 closes the session. It runs from this directory.
 
+- The user test of the wheel runs it on every merge to main. The job
+  `wheel-user-test` of `.github/workflows/release.yml` (and of `pypi.yml`,
+  before any upload) `pip install`s the wheel file the build made into an
+  empty virtual environment on a fresh runner, once per supported Python
+  (`python/pythons.bzl`), and runs `quickstart.py` there as below.
 - The release smoke runs it. The jobs `testpypi-smoke` and `pypi-smoke` of
   `.github/workflows/pypi.yml` `pip install` the published wheel into an empty
   virtual environment, run `quickstart.py` there with `readings.parquet` beside

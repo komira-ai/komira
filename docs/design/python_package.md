@@ -320,7 +320,7 @@ name = "komira"
 dynamic = ["version"]   # stamped by the wheel rule
 description = "SQL over local files, with libkomira, the komira query engine, in process"
 readme = "README.md"
-requires-python = ">=3.13"   # the oldest CPython the package's tests run; the wheel design may widen it
+requires-python = ">=3.11"   # the oldest CPython the package's tests run (python/pythons.bzl)
 license = "Apache-2.0 AND LicenseRef-Modular-Proprietary"
 license-files = ["LICENSE", "NOTICE", "MODULAR_LICENSE", "MODULAR_THIRD_PARTY_NOTICES"]
 authors = [{ name = "The komira authors" }]
@@ -332,7 +332,10 @@ classifiers = [
   "Operating System :: MacOS",
   "Operating System :: POSIX :: Linux",
   "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
   "Topic :: Database",
   "Typing :: Typed",
 ]
@@ -377,9 +380,12 @@ Changelog = "https://github.com/komira-ai/komira/blob/main/python/CHANGELOG.md"
 - **Only what is true.** The `Operating System` classifiers name the release platforms, each of which
   gets its wheel only after that wheel's install test passes on that platform (in the release workflow
   for macOS, never in a pull request's check). The CPython classifiers name the interpreters the
-  package's tests run: 3.13 today ([third_party/python](../../third_party/python/README.md)), and 3.14
-  when a test of the package runs the pinned 3.14. `requires-python` starts at the oldest of them;
-  claiming older versions waits for a test on them. `Typing :: Typed` because the package ships
+  package's tests run: 3.11, 3.12, 3.13 and 3.14, each pinned in
+  [third_party/python](../../third_party/python/README.md) and listed once in
+  [python/pythons.bzl](../../python/pythons.bzl), which the wheel's metadata, the tests and the release
+  workflow's smoke jobs all read. `requires-python` starts at the oldest of them; claiming an older
+  version waits for a test on it. 3.10, which reached its end of life in October 2026, is outside, and
+  an install test holds that it is refused. `Typing :: Typed` because the package ships
   `py.typed` (decision 8).
 - **`python/` is not an installable project.** It has no `pyproject.toml` and no `[build-system]`
   table, so `pip install ./python` fails, as expected: the package is installed from its wheel. The
@@ -444,8 +450,8 @@ checked-in Parquet fixture answer as DuckDB does; an unknown table, a syntax err
 construct raise from `sql` with their step and code; a `Result` read twice refuses the second read;
 closing a session with an unread result does not crash.
 
-The wheel is installed into an empty environment and run there (`//python:wheel_install_test`, on CPython 3.13
-and 3.14), alone: the environment holds komira and no other distribution, and the runtime is mapped from
+The wheel is installed into an empty environment and run there (`//python:wheel_install_test` on CPython 3.13,
+and `_py311`, `_py312` and `_py314` on the other supported minors), alone: the environment holds komira and no other distribution, and the runtime is mapped from
 `<site-packages>/komira/_lib/lib`. `//python/tests:runtime_test` holds the runtime check on stand-in libraries.
 
 ## What are the limits and open questions?

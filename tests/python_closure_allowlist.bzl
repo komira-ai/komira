@@ -29,6 +29,13 @@ PYTHON_SURFACE = [
     # Its only python_closure finding is the setup-python `uses:` line (the run
     # lines start with the driver).
     ".github/workflows/pypi.yml",
+    # The release workflow's user test of the Python wheel on every merge
+    # (wheel-user-test): it sets up each supported Python a user has
+    # (actions/setup-python) and pip-installs the wheel file, as pypi.yml's
+    # job of the same name does before any upload (docs/ci.md, "The user test
+    # of the wheel"). Its only python_closure finding is that `uses:` line (the
+    # run line starts with the driver).
+    ".github/workflows/release.yml",
 ]
 
 PYTHON_CEILING = [
@@ -50,10 +57,16 @@ PYTHON_CEILING = [
     "target komira//third_party/python:cloudpickle-cp314",
     "target komira//third_party/python:cloudpickle-cp314t",
     "target komira//third_party/python:cpython",
+    "target komira//third_party/python:cpython-3.10.22-20261003-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz",
+    "target komira//third_party/python:cpython-3.11.17-20261003-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz",
+    "target komira//third_party/python:cpython-3.12.15-20261003-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz",
     "target komira//third_party/python:cpython-3.13.16-20261003-aarch64-apple-darwin-install_only_stripped.tar.gz",
     "target komira//third_party/python:cpython-3.13.16-20261003-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz",
     "target komira//third_party/python:cpython-3.14.8-20261003-x86_64-unknown-linux-gnu-freethreaded-install_only_stripped.tar.gz",
     "target komira//third_party/python:cpython-3.14.8-20261003-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz",
+    "target komira//third_party/python:cpython310",
+    "target komira//third_party/python:cpython311",
+    "target komira//third_party/python:cpython312",
     "target komira//third_party/python:cpython314",
     "target komira//third_party/python:cpython314t",
     "target komira//third_party/python:duckdb",

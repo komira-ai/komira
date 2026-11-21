@@ -1,5 +1,5 @@
-# The release build of komira's conda packages, and the continuous prod publish of its mopm
-# packages (docs/ci.md, "release.yml").
+# The release build of komira's conda packages, the continuous prod publish of its mopm
+# packages, and the user test of its Python wheel on every merge (docs/ci.md, "release.yml").
 #
 # komira publishes its conda release set to NO channel for now, and publishing will move to mopm
 # (docs/releases.md). This workflow builds the release set, so a push to main
@@ -64,6 +64,23 @@
 #                   (0.0.66 and later) and a registry whose prod CI identity may
 #                   act for the package owner; docs/ci.md, "The prod publish".
 #
+# THE WHEEL JOBS. The Python wheel pypi.yml publishes is built and installed as a user installs
+# it on EVERY run of this workflow, in two jobs, and uploaded to no index (docs/ci.md, "The
+# user test of the wheel"):
+#   `wheel`            on the farm: the stamped wheel exactly as pypi.yml's `build` builds it
+#                      (//python:komira_wheel[release], the same stamp), its install test and
+#                      the smoke driver; keeps the wheel and the driver as artifacts and writes
+#                      the test job's matrix from //python:supported_pythons[linux-x86_64]
+#                      (python/pythons.bzl).
+#   `wheel-user-test`  one job per Python of the list, each on a fresh hosted runner with no
+#                      checkout: `pypi_smoke install --index dist` installs the wheel file into
+#                      an empty environment and runs the quickstart the README and the install
+#                      page show, held to python/examples/quickstart.expected.
+#   ORDER: neither job needs a job of the release or of the mopm publish (the test job needs
+#   only `wheel`), and no job needs either: the release set and the
+#   mopm packages hold no wheel, so a red user test turns the run (and so main) red without
+#   holding back `release`, `mopm-stage` or the prod publish, and they do not hold it back.
+#
 # It runs named Buck2 targets on the farm, through the buck2-farm action
 # (.github/actions/buck2-farm), which fails a step unless buck2 succeeded and
 # no action ran on the runner, and then runs the programs those builds made, as
@@ -90,7 +107,7 @@
 #
 # Triggers: a push to main (not one that touches only documentation:
 # `paths-ignore`, the same documentation the stamp does not count, so a
-# documentation-only push publishes nothing) and a manual run, and nothing else
+# documentation-only push publishes nothing and builds no wheel) and a manual run, and nothing else
 # (no schedule). A pull request never starts this workflow (pr.yml
 # answers it), so no environment or release job is reached from a pull
 # request's code.
@@ -577,3 +594,144 @@ jobs:
         run: chmod +x "$RUNNER_TEMP/mopm-publish/mopm" "$RUNNER_TEMP/mopm-publish/release_staged_verify"
       - name: mopm add from prod installs the published files
         run: '"$RUNNER_TEMP/mopm-publish/release_staged_verify" add --staged "$RUNNER_TEMP/prod-add/committed" --mopm "$RUNNER_TEMP/mopm-publish/mopm" --work "$RUNNER_TEMP/prod-add/work"'
+
+  # THE USER TEST OF THE PYTHON WHEEL, in two jobs (see the header). Neither needs a job above
+  # and no job needs either, so a red user test is a red run without holding back the release
+  # set or the prod publish, which hold no wheel.
+  #
+  # BUILD. On the farm, the wheel pypi.yml publishes, built as pypi.yml's `build` builds it:
+  # //python:komira_wheel[release] with the stamp of `release_json stamp` (the same three
+  # flags, so the same bytes for the same commit), its install test, and the smoke driver. It
+  # keeps the dist directory (the wheel under its index file name) and the driver with the
+  # quickstart, its expected output, its data and the ABI table, as two artifacts for the test
+  # job, and writes the test job's matrix (`pypi_smoke matrix`: one entry per supported Python)
+  # from //python:supported_pythons[linux-x86_64], the exact versions python/pythons.bzl gives for
+  # the platform this job builds. It uploads to no index and
+  # holds no publishing identity: `id-token: write` is for farm-connect only, in the
+  # environment `build`.
+  wheel:
+    runs-on: ubuntu-24.04
+    environment: build
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      # for farm-connect only: the token Tailscale trusts
+      id-token: write
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+    steps:
+      # The commit the run started on, with the full history: the stamp is
+      # derived from git and refuses a shallow clone.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: ./.github/actions/farm-connect
+        with:
+          ts-client-id: ${{ vars.TS_CLIENT_ID }}
+          ts-audience: ${{ vars.TS_AUDIENCE }}
+          farm-address: ${{ vars.FARM_ADDRESS }}
+          farm-instance: ${{ vars.FARM_INSTANCE }}
+          farm-properties: ${{ vars.FARM_LINUX_X86_64_PROPERTIES }}
+          tls: ${{ vars.FARM_TLS || 'false' }}
+          # main's release work queues behind the pull-request checks when the farm is full
+          farm-qos: batch
+      - name: the buckconfig names the farm
+        run: |
+          ./buck2 audit config komira_re.linux_x86_64_properties --style json | grep -q '": *"[^"]'
+      - name: build the farm assertion
+        id: assert
+        run: echo "path=$(./buck2 build komira//tools/build/ci:assert_remote --show-full-simple-output)" >> "$GITHUB_OUTPUT"
+      - name: build the release tool
+        uses: ./.github/actions/buck2-farm
+        with:
+          args: build //release/ci:release_json --out ${{ runner.temp }}/wheel/release_json
+          assert-remote: ${{ steps.assert.outputs.path }}
+      # The stamp the wheel carries: the build number, the commit it counts and its commit time,
+      # from git. pypi.yml's `build` computes the same one for the same commit.
+      - name: the stamp
+        id: stamp
+        run: '"$RUNNER_TEMP/wheel/release_json" stamp --revision "$GITHUB_SHA" --github-output "$GITHUB_OUTPUT"'
+      - name: build the wheel
+        uses: ./.github/actions/buck2-farm
+        with:
+          args: build -c komira.package_stamp=${{ steps.stamp.outputs.build_number }} -c komira.package_commit=${{ steps.stamp.outputs.source_commit }} -c komira.package_timestamp_ms=${{ steps.stamp.outputs.timestamp_ms }} //python:komira_wheel[release] --out ${{ runner.temp }}/wheel/built/komira.whl
+          assert-remote: ${{ steps.assert.outputs.path }}
+      - name: the install test on the wheel
+        uses: ./.github/actions/buck2-farm
+        with:
+          args: build -c komira.package_stamp=${{ steps.stamp.outputs.build_number }} -c komira.package_commit=${{ steps.stamp.outputs.source_commit }} -c komira.package_timestamp_ms=${{ steps.stamp.outputs.timestamp_ms }} //python:wheel_install_test
+          assert-remote: ${{ steps.assert.outputs.path }}
+      - name: build the smoke driver
+        uses: ./.github/actions/buck2-farm
+        with:
+          args: build -c komira.package_stamp=${{ steps.stamp.outputs.build_number }} -c komira.package_commit=${{ steps.stamp.outputs.source_commit }} -c komira.package_timestamp_ms=${{ steps.stamp.outputs.timestamp_ms }} //python/smoke:pypi_smoke --out ${{ runner.temp }}/wheel/smoke/pypi_smoke
+          assert-remote: ${{ steps.assert.outputs.path }}
+      # The wheel under its file name, read from the wheel itself, alone in the directory pip reads.
+      - name: the dist directory
+        run: '"$RUNNER_TEMP/wheel/smoke/pypi_smoke" dist --wheel "$RUNNER_TEMP/wheel/built/komira.whl" --out "$RUNNER_TEMP/wheel/dist" --github-output "$GITHUB_OUTPUT"'
+      # What the test job runs and holds the output to, beside the driver: the test job has no checkout.
+      - name: the quickstart, its expected output, its data and the ABI table
+        run: cp python/examples/quickstart.py python/examples/quickstart.expected python/examples/readings.parquet src/so/abi/komira.tsv "$RUNNER_TEMP/wheel/smoke/"
+      # The supported Pythons for Linux x86_64 (python/pythons.bzl) as a JSON list, and one entry of
+      # the test job per Python of it.
+      - name: build the list of the supported Pythons
+        uses: ./.github/actions/buck2-farm
+        with:
+          args: build //python:supported_pythons[linux-x86_64] --out ${{ runner.temp }}/wheel/pythons.json
+          assert-remote: ${{ steps.assert.outputs.path }}
+      - name: the Pythons of the user test
+        id: matrix
+        run: '"$RUNNER_TEMP/wheel/smoke/pypi_smoke" matrix --pythons "$RUNNER_TEMP/wheel/pythons.json" --platform linux-x86_64 --github-output "$GITHUB_OUTPUT"'
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: wheel-${{ github.sha }}-dist
+          path: ${{ runner.temp }}/wheel/dist
+          if-no-files-found: error
+          retention-days: 7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: wheel-${{ github.sha }}-smoke
+          path: ${{ runner.temp }}/wheel/smoke
+          if-no-files-found: error
+          retention-days: 7
+      - name: Stop buck2
+        if: always()
+        run: ./buck2 kill || true
+
+  # TEST. What a user does with the wheel file, once per Python of the list: on a fresh hosted
+  # runner that never checks out the repository, setup-python's interpreter makes an empty
+  # environment, pip installs the wheel from the dist directory alone (no index for komira;
+  # `pypi_smoke install --index dist`), `pip check`, `pip show` and `pip freeze` hold the
+  # environment to komira at the built version, and the quickstart runs there and must print
+  # exactly what python/examples/quickstart.expected says. A failing entry fails the job and the
+  # run, with the failing step and the driver's `::error` naming the pip or example command;
+  # `fail-fast: false` lets every other Python finish. No identity, no permission, no upload.
+  wheel-user-test:
+    needs: wheel
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    permissions: {}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.wheel.outputs.matrix) }}
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: wheel-${{ github.sha }}-dist
+          path: ${{ runner.temp }}/wheel/dist
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: wheel-${{ github.sha }}-smoke
+          path: ${{ runner.temp }}/wheel/smoke
+      - name: the driver is executable
+        run: chmod +x "$RUNNER_TEMP/wheel/smoke/pypi_smoke"
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        id: python
+        with:
+          python-version: ${{ matrix.python }}
+      - name: pip installs the wheel file into an empty environment and the quickstart prints what it should
+        env:
+          PYTHON: ${{ steps.python.outputs.python-path }}
+        run: '"$RUNNER_TEMP/wheel/smoke/pypi_smoke" install --index dist --dist "$RUNNER_TEMP/wheel/dist" --python "$PYTHON" --example "$RUNNER_TEMP/wheel/smoke/quickstart.py" --expect "$RUNNER_TEMP/wheel/smoke/quickstart.expected" --data "$RUNNER_TEMP/wheel/smoke/readings.parquet" --abi-table "$RUNNER_TEMP/wheel/smoke/komira.tsv" --work "$RUNNER_TEMP/wheel/install"'

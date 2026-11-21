@@ -1,4 +1,5 @@
-load("@komira//python:install_test.bzl", "picked_files", "wheel_install_test")
+load("@komira//python:install_test.bzl", "picked_files", "python_versions", "wheel_install_test")
+load("@komira//python:pythons.bzl", "CLASSIFIERS", "HOSTED", "PYTHONS", "REQUIRES_PYTHON")
 load("@komira//tools/build/package:wheel.bzl", "wheel_file", "wheel_file_at_stamp", "wheel_libs_check", "wheel_version")
 load("@komira//tools/build/platforms:defs.bzl", "DARWIN_ARM64")
 load("@komira//tools/build/platforms:table.bzl", "asset")
@@ -29,6 +30,20 @@ python_proto(
     ],
     import_prefix = "komira/plan/v1",
     visibility = ["komira//python/tests:"],
+)
+
+# ---- The supported Pythons ---------------------------------------------------
+#
+# The exact versions the hosted-runner jobs of the workflows install with
+# `actions/setup-python`, one job per version: `[linux-x86_64]` and
+# `[macos-arm64]`, each a JSON list, oldest first, from pythons.bzl (HOSTED),
+# the one list of the supported minors. A workflow builds the sub-target and
+# hands its text to a job matrix (`fromJSON`).
+python_versions(
+    name = "supported_pythons",
+    versions = HOSTED,
+    # its test reads it (smoke/BUCK, supported_pythons_lists)
+    visibility = ["komira//python/smoke:"],
 )
 
 # ---- The wheel ---------------------------------------------------------------
@@ -137,7 +152,7 @@ _LICENSE_EXPRESSION = "Apache-2.0 AND LicenseRef-Modular-Proprietary"
 # Every field of the wheel on every platform; each platform adds its row of
 # _NATIVE_NEEDS.
 _SHARED_METADATA = {
-    "classifiers": ["Development Status :: 2 - Pre-Alpha"],
+    "classifiers": ["Development Status :: 2 - Pre-Alpha"] + CLASSIFIERS,
     "distribution": "komira",
     "license_expression": _LICENSE_EXPRESSION,
     "license_files": _LICENSE_FILES,
@@ -148,7 +163,7 @@ _SHARED_METADATA = {
         "Source": "https://github.com/komira-ai/komira",
     },
     "readme": "README.md",
-    "requires_python": ">=3.13",
+    "requires_python": REQUIRES_PYTHON,
     "summary": "SQL over local files, with the komira query engine in process",
 }
 
@@ -187,10 +202,13 @@ wheel_file(
 # ABI version of src/so/abi/komira.tsv, a Parquet file registers and a missing
 # one raises KomiraError, a serialized plan renders, and libkomira, its native
 # owners and the three Mojo runtime libraries are mapped from
-# <site>/komira/_lib and nothing else of theirs is. On CPython 3.13 and 3.14,
-# the edges of Requires-Python that are pinned (third_party/python). The
-# release workflow runs the 3.13 test, `:wheel_install_test`. On macOS there
-# are no native owners to map.
+# <site>/komira/_lib and nothing else of theirs is. One test per supported
+# minor (pythons.bzl), on its pinned interpreter: `:wheel_install_test` on
+# CPython 3.13, `:wheel_install_test_py311`, `_py312` and `_py314` on the
+# others; 3.11 is the lower edge of Requires-Python, and 3.10, below it, is
+# refused (`refuses_python_outside_requires_python`). The release workflow
+# runs the 3.13 test, `:wheel_install_test`. On macOS there are no native
+# owners to map.
 
 _TEST_FILES = {
     "--abi-table": "komira//src/so:abi/komira.tsv",
@@ -209,12 +227,34 @@ _VERSION = wheel_version(read_config("komira", "package_stamp", "0"))
 # (`mojo_compiler_<version>_<subdir>.conda`).
 _TOOLCHAIN_MOJO = asset(_PLATFORM, "mojo_compiler")["name"].split("_")[2]
 
+# What the wheel's metadata says of the Pythons it installs on, written out
+# here rather than read from pythons.bzl: test_installed.py holds the installed
+# metadata to exactly these lines, so a change to the supported list changes
+# this too.
+_PYTHON_METADATA = {
+    "classifiers": [
+        "Development Status :: 2 - Pre-Alpha",
+        "Programming Language :: Python :: 3 :: Only",
+        "Programming Language :: Python :: 3.11",
+        "Programming Language :: Python :: 3.12",
+        "Programming Language :: Python :: 3.13",
+        "Programming Language :: Python :: 3.14",
+    ],
+    "requires_python": ">=3.11",
+}
+
+_PYTHON_METADATA_ARGS = ["--requires-python", _PYTHON_METADATA["requires_python"]] + [
+    a
+    for c in _PYTHON_METADATA["classifiers"]
+    for a in ["--classifier", c]
+]
+
 _INSTALLED_ARGS = [
     "--version",
     _VERSION,
     "--license-expression",
     _LICENSE_EXPRESSION,
-]
+] + _PYTHON_METADATA_ARGS
 
 # Modular's wheels of the Mojo compiler (third_party/modular/BUCK): 1.0.0, the
 # toolchain's version, with the wheel it requires, and 1.2.0.
@@ -226,16 +266,13 @@ _MODULAR = [
 _MODULAR_OTHER = ["komira//third_party/modular:mojo_compiler-1.2.0-py3-none-manylinux_2_34_x86_64.whl"]
 
 [wheel_install_test(
-    name = name,
-    python = python,
+    name = "wheel_install_test" + p["suffix"],
+    python = p["python"],
     wheels = [":komira_wheel"],
     script = "komira//python/tests:test_installed.py",
     args = _INSTALLED_ARGS,
     files = _TEST_FILES,
-) for name, python in [
-    ("wheel_install_test", "komira//third_party/python:cpython"),
-    ("wheel_install_test_py314", "komira//third_party/python:cpython314"),
-]]
+) for p in PYTHONS]
 
 # The same test on the macOS wheel, on the farm's macOS workers: run from
 # pypi.yml's build-macos-arm64 only, never in a pull request
@@ -253,7 +290,8 @@ wheel_install_test(
 )
 
 # The same test on installs that must fail, each with the line it fails with
-# (on CPython 3.13). The first wheels below are the wheel with one thing wrong
+# (on CPython 3.13; `refuses_python_outside_requires_python`, after them, on
+# CPython 3.10). The first wheels below are the wheel with one thing wrong
 # that the wheel rule does not refuse: its native files are picked one by one
 # out of the same `[dist]` directory.
 
@@ -296,18 +334,39 @@ wheel_file(
     **(_WHEEL | {"external_needed": ["libMSupportGlobals.so"]})
 )
 
+# The wheel with metadata that does not say what the supported list says: one
+# that leaves out a supported minor's classifier, and one whose Requires-Python
+# starts a minor later. Each installs, and the test refuses it.
+wheel_file(
+    name = "komira_wheel_without_py311_classifier",
+    files = _PY_FILES | _NATIVE_FILES,
+    executable = sorted(_NATIVE_FILES.keys()),
+    **(_WHEEL | {"classifiers": [c for c in _WHEEL["classifiers"] if c != "Programming Language :: Python :: 3.11"]})
+)
+
+wheel_file(
+    name = "komira_wheel_requires_python_312",
+    files = _PY_FILES | _NATIVE_FILES,
+    executable = sorted(_NATIVE_FILES.keys()),
+    **(_WHEEL | {"requires_python": ">=3.12"})
+)
+
 wheel_file(
     name = "komira_wheel_arm64_tag",
     files = _PY_FILES,
     **(_WHEEL | {"platform": "linux-arm64"})
 )
 
-wheel_file(
-    name = "komira_wheel_requires_python_315",
-    files = _PY_FILES,
-    **(_WHEEL | {"requires_python": ">=3.15"})
-)
 
+# The classifiers, and those without 3.11, as Python's repr writes a list of
+# strings (`['a', 'b']`): the two sides of the refusal below.
+_CLASSIFIERS_REPR = "[" + ", ".join(["'" + c + "'" for c in _PYTHON_METADATA["classifiers"]]) + "]"
+
+_CLASSIFIERS_WITHOUT_311_REPR = "[" + ", ".join([
+    "'" + c + "'"
+    for c in _PYTHON_METADATA["classifiers"]
+    if c != "Programming Language :: Python :: 3.11"
+]) + "]"
 
 _LOAD_ERROR = "komira._errors.LibraryLoadError: cannot load libkomira from <site>/komira/_lib/libkomira.so: "
 
@@ -354,19 +413,37 @@ _LOAD_ERROR = "komira._errors.LibraryLoadError: cannot load libkomira from <site
         [":komira_wheel"] + _MODULAR,
         "AssertionError: the environment holds komira and also mojo-compiler, mojo-compiler-mojo-libs",
     ),
+    # The metadata of the Pythons, held to the supported list: a classifier
+    # left out, and a Requires-Python that starts a minor later.
+    (
+        "refuses_classifiers_not_the_supported_pythons",
+        [":komira_wheel_without_py311_classifier"],
+        "AssertionError: the wheel's Classifier lines are {}, not {}".format(_CLASSIFIERS_WITHOUT_311_REPR, _CLASSIFIERS_REPR),
+    ),
+    (
+        "refuses_requires_python_not_the_oldest_supported",
+        [":komira_wheel_requires_python_312"],
+        "AssertionError: the wheel's Requires-Python is >=3.12, not >=3.11",
+    ),
     # mojo-compiler without the wheel it requires: the installer's own check.
     (
         "refuses_unmet_requirement",
         [":komira_wheel", _MODULAR[0]],
         "install: mojo-compiler 1.0.0 requires mojo-compiler-mojo-libs==1.0.0, which is not installed",
     ),
-    # A Requires-Python the interpreter is outside of.
-    (
-        "refuses_python_outside_requires_python",
-        [":komira_wheel_requires_python_315"],
-        "install: komira requires Python >=3.15; this interpreter is 3.13.16",
-    ),
 ]]
+
+# The wheel on CPython 3.10, the minor below the oldest supported one: its
+# Requires-Python refuses it, naming the interpreter's version.
+wheel_install_test(
+    name = "refuses_python_outside_requires_python",
+    python = "komira//third_party/python:cpython310",
+    wheels = [":komira_wheel"],
+    script = "komira//python/tests:test_installed.py",
+    args = _INSTALLED_ARGS,
+    files = _TEST_FILES,
+    expect_failure = "install: komira requires Python >=3.11; this interpreter is 3.10.22",
+)
 
 # ---- The libraries of the finished wheel -------------------------------------
 #
@@ -478,7 +555,7 @@ _UPGRADE_ARGS = [
     _UPGRADE_VERSION,
     "--license-expression",
     _LICENSE_EXPRESSION,
-] + [a for p in sorted(_PREVIOUS_ONLY.keys()) for a in ["--expect-removed", p]]
+] + _PYTHON_METADATA_ARGS + [a for p in sorted(_PREVIOUS_ONLY.keys()) for a in ["--expect-removed", p]]
 
 # The releases in the order given.
 _RELEASES = {
@@ -487,17 +564,14 @@ _RELEASES = {
 }
 
 [wheel_install_test(
-    name = "upgrade_test" + suffix,
-    python = python,
+    name = "upgrade_test" + p["suffix"],
+    python = p["python"],
     wheels = _RELEASES["previous,current"],
     script = "komira//python/tests:test_upgrade.py",
     args = _UPGRADE_ARGS,
     files = _UPGRADE_FILES,
     upgrade = True,
-) for suffix, python in [
-    ("", "komira//third_party/python:cpython"),
-    ("_py314", "komira//third_party/python:cpython314"),
-]]
+) for p in PYTHONS]
 
 [wheel_install_test(
     name = name,
