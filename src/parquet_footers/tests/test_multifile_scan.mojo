@@ -382,6 +382,16 @@ def test_hive_column_types_follow_the_first_value_and_fall_back_to_varchar() rai
         == ArrowType.INT64
     )
     assert_true(_single_type("str", _dirs("k=abc", "k=1")) == ArrowType.STRING)
+    # A letter where a date or a time holds a digit: neither a date, a
+    # timestamp nor a number, and nothing DuckDB's cast reads otherwise.
+    assert_true(
+        _single_type("letter_in_date", _dirs("k=2028-0a-01"))
+        == ArrowType.STRING
+    )
+    assert_true(
+        _single_type("letter_in_time", _dirs("k=2028-01-01 aa:00:00"))
+        == ArrowType.STRING
+    )
     assert_true(_single_type("int_then_text", _dirs("k=1", "k=x")) == ArrowType.STRING)
     assert_true(
         _single_type("date_then_int", _dirs("k=2028-01-02", "k=5"))
@@ -436,8 +446,6 @@ def test_hive_values_that_may_be_cast_differently_are_refused() raises:
     bad.append("k=1:2")
     bad.append("a=1/a=2")
     bad.append("k=2028-13-01")
-    bad.append("k=2028-0a-01")
-    bad.append("k=2028-01-01 aa:00:00")
     bad.append("k=2028-01-01 00-00-00")
     for i in range(len(bad)):
         var root = _root("bad_" + String(i))
