@@ -3,6 +3,15 @@
 # `guard.bxl:check` fails the pull request check when this file is out of date.
 
 TARGETS = [
+    "komira//python:refuses_missing_libkomira",
+    "komira//python:refuses_missing_mojo_runtime",
+    "komira//python:refuses_mojo_pin_unlike_toolchain",
+    "komira//python:refuses_owners_off_run_path",
+    "komira//python:refuses_python_outside_requires_python",
+    "komira//python:refuses_unmet_requirement",
+    "komira//python:refuses_wheel_of_another_platform",
+    "komira//python:wheel_install_test",
+    "komira//python:wheel_install_test_py314",
     "komira//src/async_api:ci",
     "komira//src/async_api:conda_holds",
     "komira//src/async_api:coverage_floor",

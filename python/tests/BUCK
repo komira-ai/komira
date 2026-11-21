@@ -309,3 +309,17 @@ _CASES = [
     "verbs",
     "no_sql",
 ]]
+
+# The clean-environment install test of the wheel (python/BUCK,
+# wheel_install_test): the driver that installs the wheels into an empty
+# prefix and runs the test there, the test the installed interpreter runs, and
+# the serialized plan it renders (the scan plan of
+# src/so/tests/gate/gate_plan_render.mojo, as hex).
+[export_file(
+    name = f,
+    visibility = ["komira//python:"],
+) for f in [
+    "wheel_install_run.py",
+    "test_installed.py",
+    "fixtures/scan_plan.hex",
+]]
