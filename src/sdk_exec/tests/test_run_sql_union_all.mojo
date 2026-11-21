@@ -61,6 +61,7 @@ from arrow.column_builder import ColumnBuilder
 from arrow.decimal_array import Decimal128Array
 from arrow.schema import Field, RecordBatch, RecordBatchBuilder, SchemaBuilder
 from arrow.string_array import StringArray
+from byte_buffer.heap_region import HeapRegion
 from parquet_writer.record_batch_writer import (
     write_record_batch_to_parquet_bytes,
 )
@@ -85,7 +86,7 @@ def _write(name: String, var batch: RecordBatch) raises -> String:
     return path^
 
 
-def _strings(a: String, b: String, c: String = "") -> Column:
+def _strings(a: String, b: String, c: String = "") raises -> Column[HeapRegion]:
     var out = List[String]()
     out.append(a)
     out.append(b)
@@ -426,7 +427,7 @@ def test_unions_with_no_common_type_or_misplaced_clauses_are_refused() raises:
     var ctx = _context()
     var mixed = run_sql(ctx, "select s from t_i32 union all select a from t_i32")
     assert_true(Bool(mixed.refusal))
-    assert_equal(mixed.refusal.value().step, STEP_BIND)
+    assert_equal(mixed.refusal.value().step, String(STEP_BIND))
     assert_true(
         "UNION ALL column 1" in mixed.refusal.value().reason,
         mixed.refusal.value().reason,
@@ -435,7 +436,7 @@ def test_unions_with_no_common_type_or_misplaced_clauses_are_refused() raises:
         ctx, "select a from t_i32 order by a union all select b from t_i64"
     )
     assert_true(Bool(early.refusal))
-    assert_equal(early.refusal.value().step, STEP_PARSE)
+    assert_equal(early.refusal.value().step, String(STEP_PARSE))
     assert_true(
         "ORDER BY" in early.refusal.value().reason, early.refusal.value().reason
     )
