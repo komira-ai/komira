@@ -24,8 +24,12 @@
 //!    `release-macos-result` (`needs: release-macos`, `if: always()`) fails with "the macOS build did not run"
 //!    when the build's result is skipped, so a run whose build never ran is not green;
 //!  - it is not triggered on a pull request: neither macOS-naming workflow's `on:` names one, and no
-//!    workflow that runs on a pull request (pr.yml, coverage.yml) has a line, comment or not,
-//!    naming darwin, macOS, osx or `--target-platforms`, and none passes the macOS worker set to farm-connect;
+//!    workflow that runs on a pull request (pr.yml, coverage.yml) has a non-comment line naming darwin,
+//!    macOS, osx or `--target-platforms`, and none passes the macOS worker set to farm-connect, with ONE
+//!    exception: the line of pr.yml that analyses the macOS set (ANALYSIS_ARGS, a `bxl` of
+//!    release/darwin_analysis.bxl, which configures and analyses and runs no action), exactly as written;
+//!  - pr.yml does analyse the macOS set: that line is there once, in a buck2-farm step with its remote
+//!    assertion, so a change that makes the set unanalysable fails its own pull request;
 //!  - the pull request's check set (ci/targets shards) names neither the macOS set nor a macOS runner;
 //!  - the macOS set is the packages of packages.bzl without the excluded ones, in one place: the
 //!    set's definition builds each member's `:lib`, and each excluded package is a package.
@@ -46,6 +50,11 @@ const BOUND = "    timeout-minutes: 90";
 const CONTINUE_ON_ERROR = "    continue-on-error: true";
 const RESULT_JOB = "release-macos-result";
 const RESULT_REASON = "the macOS build did not run";
+const SAID_RUN = "        run: '\"$RUNNER_TEMP/buck2_failure\" --log \"$RUNNER_TEMP/buck2-farm.log\" --step \"build the macOS set\" --github-output \"$GITHUB_OUTPUT\" --summary-file \"$GITHUB_STEP_SUMMARY\"'";
+const SAID_IF = "        if: failure() && steps.build.outcome == 'failure' && steps.reader.outcome == 'success'";
+const SAID_OUTPUT = "      said: ${{ steps.said.outputs.message }}";
+const SAID_ENV = "          SAID: ${{ needs.release-macos.outputs.said }}";
+const GUESS = "farm-connect refuses when a repository variable is empty";
 const MAX_MINUTES = 120;
 
 fn isComment(line: []const u8) bool {
@@ -247,6 +256,13 @@ fn checkMacos(ar: std.mem.Allocator, text: []const u8) !?[]const u8 {
     if (!mentions(res, "exit 1")) return "release-macos-result never fails";
     if (!mentions(res, "::error")) return "release-macos-result writes no ::error annotation";
     if (mentions(res, "uses:")) return "release-macos-result uses an action: it only reads a result";
+    // a failed build is reported with what the failed step said, never with a guess at the cause
+    if (!has(job, SAID_RUN)) return "release-macos does not read the build's log with buck2_failure (what buck2 said would be lost)";
+    if (!has(job, "        id: said") or !has(job, SAID_OUTPUT)) return "release-macos does not pass what buck2 said to release-macos-result (outputs: said)";
+    if (!has(job, SAID_IF)) return "release-macos does not read the build's log exactly when the build step failed and the reader was built";
+    if (!has(res, SAID_ENV)) return "release-macos-result does not report what buck2 said (needs.release-macos.outputs.said)";
+    if (!mentions(res, "needs.release-macos.outputs.failed-step")) return "release-macos-result does not name the step that failed";
+    if (mentions(res, GUESS)) return "release-macos-result guesses at the cause of a failed build instead of reporting what the step said";
 
     // not on a pull request, and nothing publishes from it
     if (mentions(job, "pull_request")) return "release-macos names pull_request";
@@ -261,8 +277,39 @@ fn checkPullRequestWorkflow(text: []const u8) ?[]const u8 {
     var it = std.mem.splitScalar(u8, text, '\n');
     while (it.next()) |line| {
         if (isComment(line)) continue;
+        // the analysis of the macOS set runs no action: the one line that may name it, as written
+        if (std.mem.eql(u8, line, ANALYSIS_ARGS)) continue;
         if (namesMacos(line)) return "a workflow that runs on a pull request names a macOS platform, worker set or runner (the macOS build is the workflow release-macos.yml)";
     }
+    return null;
+}
+
+/// The args line of pr.yml's step that configures and analyses the release's macOS set for its platform
+/// (release/darwin_analysis.bxl): a `bxl` script that asks for no build, so no action runs and no macOS
+/// worker is asked for anything. The one non-comment line of a pull request workflow that may name the
+/// macOS set; a `build` or `test` of it, or another spelling, names a macOS platform and is refused.
+const ANALYSIS_ARGS = "          args: bxl --config-file release/darwin_analysis.buckconfig komira//release/darwin_analysis.bxl:check";
+
+/// Null if pr.yml analyses the macOS set exactly once, in a buck2-farm step that asserts the run was
+/// remote, else the refusal.
+fn checkAnalysisStep(ar: std.mem.Allocator, text: []const u8) !?[]const u8 {
+    var lines = std.ArrayList([]const u8).empty;
+    var it = std.mem.splitScalar(u8, text, '\n');
+    while (it.next()) |l| try lines.append(ar, l);
+    const ls = lines.items;
+    var at: usize = 0;
+    var n: usize = 0;
+    for (ls, 0..) |l, i| {
+        if (std.mem.eql(u8, l, ANALYSIS_ARGS)) {
+            n += 1;
+            at = i;
+        }
+    }
+    if (n == 0) return "pr.yml does not analyse the release's macOS set (release/darwin_analysis.bxl): a change that makes it unanalysable would pass its pull request";
+    if (n > 1) return "pr.yml analyses the release's macOS set more than once";
+    if (at < 2 or !std.mem.eql(u8, ls[at - 1], "        with:") or !std.mem.eql(u8, ls[at - 2], BUCK2_FARM))
+        return "pr.yml analyses the macOS set outside the buck2-farm action (a step that ran an action locally would pass)";
+    if (at + 1 >= ls.len or !std.mem.eql(u8, ls[at + 1], ASSERT)) return "pr.yml does not assert the analysis of the macOS set remote";
     return null;
 }
 
@@ -461,6 +508,13 @@ test "each edit of the real release-macos.yml that breaks the macOS build's cont
     try expectRefused(ar, try replaced(ar, text, "          macos-library-dirs: ${{ vars.FARM_MACOS_LIBRARY_DIRS }}\n          tls: ${{ vars.FARM_TLS || 'false' }}\n          # main's release work queues behind the pull-request checks when the farm is full\n          farm-qos: batch\n      # Without", "          macos-library-dirs: ${{ vars.FARM_MACOS_LIBRARY_DIRS }}\n          tls: ${{ vars.FARM_TLS || 'false' }}\n      # Without"), "farm-qos: batch");
     try expectRefused(ar, try replaced(ar, text, "          darwin-macos-hosts: ${{ vars.FARM_DARWIN_MACOS_HOSTS }}\n          macos-library-dirs: ${{ vars.FARM_MACOS_LIBRARY_DIRS }}\n          tls: ${{ vars.FARM_TLS || 'false' }}\n", "          darwin-macos-hosts: ${{ vars.FARM_DARWIN_MACOS_HOSTS }}\n          macos-library-dirs: ${{ vars.FARM_MACOS_LIBRARY_DIRS }}\n"), "tls from FARM_TLS");
     try expectRefused(ar, try replaced(ar, text, "linux_x86_64_properties darwin_arm64_properties darwin_macos_hosts", "linux_x86_64_properties"), "macOS set and the macOS hosts");
+    // the report of a failed build: what buck2 said, the failed step, and no guess
+    try expectRefused(ar, try replaced(ar, text, SAID_RUN ++ "\n", ""), "does not read the build's log with buck2_failure");
+    try expectRefused(ar, try replaced(ar, text, SAID_OUTPUT ++ "\n", ""), "does not pass what buck2 said");
+    try expectRefused(ar, try replaced(ar, text, SAID_IF, "        if: failure()"), "exactly when the build step failed");
+    try expectRefused(ar, try replaced(ar, text, SAID_ENV ++ "\n", ""), "does not report what buck2 said");
+    try expectRefused(ar, try replaced(ar, text, "          FAILED_STEP: ${{ needs.release-macos.outputs.failed-step }}\n", ""), "does not name the step that failed");
+    try expectRefused(ar, try replaced(ar, text, "(that step's log says why)", "(" ++ GUESS ++ ")"), "guesses at the cause");
     try expectRefused(ar, try replaced(ar, text, "      - name: the buckconfig names the farm and its macOS workers\n", "      - name: no check\n"), "names the macOS workers");
 
     // the build: the platform, the target, the farm action, asserted
@@ -521,6 +575,12 @@ test "the reader of pull request workflows sees each macOS defect planted in the
         "    runs-on: macos-15",
         "          args: build komira//tools/build/mojo:act_darwin",
         "          args: build toolchains//:mojo_compiler_1.0.0_osx-arm64",
+        // the analysis line's exception is that line only: a build of the set, or a target platform
+        // added to it, is a macOS build
+        "          args: build --config-file release/darwin_analysis.buckconfig //release:mopm_darwin_libs",
+        "          args: bxl --config-file release/darwin_analysis.buckconfig --target-platforms komira//tools/build/platforms:darwin-arm64 komira//release/darwin_analysis.bxl:check",
+        "          args: test --config-file release/darwin_analysis.buckconfig komira//release/darwin_analysis.bxl:check",
+        ANALYSIS_ARGS ++ " //release:mopm_darwin_libs",
     };
     for (planted) |line| {
         const bad = try std.fmt.allocPrint(ar, "{s}\n{s}\n", .{ pr, line });
@@ -539,6 +599,39 @@ test "the reader of pull request workflows sees each macOS defect planted in the
     try t.expect(runsOnPullRequest("name: x\non:\n  merge_group:\njobs:\n"));
     try t.expect(runsOnPullRequest("name: x\non:\n  pull_request_target:\n    branches: [main]\njobs:\n"));
     try t.expect(!runsOnPullRequest("name: x\non:\n  push:\n    branches: [main]\n  # pull_request\njobs:\n  a:\n    steps:\n      - run: echo pull_request\n"));
+}
+
+test "pr.yml analyses the macOS set once, through the buck2-farm action, and each edit that loses it is refused" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const ar = arena.allocator();
+    const pr = try readData(ar, &.{ "workflows", "pr.yml" });
+    try t.expect((try checkAnalysisStep(ar, pr)) == null);
+    const step = BUCK2_FARM ++ "\n        with:\n" ++ ANALYSIS_ARGS ++ "\n" ++ ASSERT ++ "\n";
+    const cases = [_]struct { from: []const u8, to: []const u8, want: []const u8 }{
+        // the step deleted: the set is no longer analysed
+        .{ .from = step, .to = "", .want = "does not analyse the release's macOS set" },
+        // the line commented out
+        .{ .from = ANALYSIS_ARGS, .to = "          # args: bxl komira//release/darwin_analysis.bxl:check", .want = "does not analyse the release's macOS set" },
+        // twice
+        .{ .from = step, .to = step ++ step, .want = "more than once" },
+        // run directly, where a local action would not be caught
+        .{ .from = BUCK2_FARM ++ "\n        with:\n" ++ ANALYSIS_ARGS, .to = "        run: ./buck2 bxl komira//release/darwin_analysis.bxl:check\n        with:\n" ++ ANALYSIS_ARGS, .want = "outside the buck2-farm action" },
+        .{ .from = "        with:\n" ++ ANALYSIS_ARGS, .to = "        env:\n" ++ ANALYSIS_ARGS, .want = "outside the buck2-farm action" },
+        // the remote assertion dropped
+        .{ .from = ANALYSIS_ARGS ++ "\n" ++ ASSERT, .to = ANALYSIS_ARGS, .want = "does not assert the analysis" },
+    };
+    for (cases) |c| {
+        const bad = try replaced(ar, pr, c.from, c.to);
+        const got = (try checkAnalysisStep(ar, bad)) orelse {
+            std.debug.print("accepted a pr.yml that must be refused with: {s}\n", .{c.want});
+            return error.Accepted;
+        };
+        if (std.mem.indexOf(u8, got, c.want) == null) {
+            std.debug.print("refused with \"{s}\", wanted \"{s}\"\n", .{ got, c.want });
+            return error.WrongRefusal;
+        }
+    }
 }
 
 test "the pull request's check set names neither the macOS set nor a macOS runner" {

@@ -6,7 +6,9 @@
 # runner and only asks the farm). The macOS workers are few and the Linux ones many, so this build is in
 # the release and never in a pull request's check: this workflow has no pull_request,
 # pull_request_target or merge_group trigger, and pr.yml and every workflow that runs on a pull request
-# hold no macOS platform and no macOS worker set (//:release_macos_cases says so).
+# hold no macOS platform and no macOS worker set (//:release_macos_cases says so). What fails before
+# anything is built is found earlier: pr.yml's last step configures and analyses the same set for
+# darwin-arm64 on its Linux runner, running no action (release/darwin_analysis.bxl).
 #
 # ITS OWN WORKFLOW, so it cannot slow a release. release.yml is one concurrency group in which a running
 # release is never cancelled; a macOS job inside it that stalled for 90 minutes would hold the next
@@ -23,7 +25,8 @@
 # end a failed build green. Why not blocking: the set has never been measured on the macOS workers, and
 # the publish must not wait on a platform the release does not ship yet. Bounded: 90 minutes.
 # The last job, release-macos-result, makes a build that never ran (its job skipped) end the run
-# failed too, with "the macOS build did not run".
+# failed too, with "the macOS build did not run", and for a failed build says which step failed and,
+# when it was the build of the set, what buck2 said (release/ci:buck2_failure reads the step's log).
 #
 # It needs the repository variables FARM_DARWIN_ARM64_PROPERTIES and FARM_DARWIN_MACOS_HOSTS (and may
 # take FARM_MACOS_LIBRARY_DIRS), docs/ci.md; without them the step after the connection fails the job
@@ -57,6 +60,12 @@ jobs:
       contents: read
       # for farm-connect only: the token Tailscale trusts
       id-token: write
+    # What release-macos-result reports for a failed build: the first named step of this job that
+    # failed (empty when none did: the checkout or farm-connect failed), and what buck2 said when it
+    # was the build of the set (one line, escaped for a workflow command by buck2_failure).
+    outputs:
+      failed-step: ${{ steps.config.outcome == 'failure' && 'the buckconfig names the farm and its macOS workers' || steps.assert.outcome == 'failure' && 'build the farm assertion' || steps.reader.outcome == 'failure' && 'build the failure reader' || steps.build.outcome == 'failure' && 'build the macOS set' || '' }}
+      said: ${{ steps.said.outputs.message }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -78,6 +87,7 @@ jobs:
       # Without the macOS worker set the build would fail analysis, and without the linux set
       # (the toolchain unpack runs on a linux worker of the farm) it would run on this runner.
       - name: the buckconfig names the farm and its macOS workers
+        id: config
         run: |
           for key in linux_x86_64_properties darwin_arm64_properties darwin_macos_hosts; do
             ./buck2 audit config "komira_re.$key" --style json | grep -q '": *"[^"]' ||
@@ -86,9 +96,15 @@ jobs:
       - name: build the farm assertion
         id: assert
         run: echo "path=$(./buck2 build komira//tools/build/ci:assert_remote --show-full-simple-output)" >> "$GITHUB_OUTPUT"
+      # The reader of a failed build's log (release/ci/buck2_failure.zig), built before the build so
+      # that a failed build can still say what buck2 said.
+      - name: build the failure reader
+        id: reader
+        run: ./buck2 build //release/ci:buck2_failure --out "$RUNNER_TEMP/buck2_failure"
       # The library of every package that builds for macOS, its welded tests run on the macOS
       # workers. `--keep-going`: one package's failure does not hide the others'.
       - name: build the macOS set
+        id: build
         uses: ./.github/actions/buck2-farm
         with:
           args: build --target-platforms komira//tools/build/platforms:darwin-arm64 --keep-going //release:mopm_darwin_libs
@@ -97,6 +113,12 @@ jobs:
         if: failure()
         run: |
           echo "release-macos FAILED on ${GITHUB_SHA}. The macOS arm64 build of //release:mopm_darwin_libs on the farm macOS workers did not pass. It does not block the release or the publish." >> "$GITHUB_STEP_SUMMARY"
+      # What buck2 said, from the log the buck2-farm action tees: to the summary, and as the output
+      # `message` that release-macos-result prints.
+      - name: what the build said
+        id: said
+        if: failure() && steps.build.outcome == 'failure' && steps.reader.outcome == 'success'
+        run: '"$RUNNER_TEMP/buck2_failure" --log "$RUNNER_TEMP/buck2-farm.log" --step "build the macOS set" --github-output "$GITHUB_OUTPUT" --summary-file "$GITHUB_STEP_SUMMARY"'
       - name: Stop buck2
         if: always()
         run: ./buck2 kill || true
@@ -114,6 +136,8 @@ jobs:
       - name: the macOS build ran and passed
         env:
           BUILD_RESULT: ${{ needs.release-macos.result }}
+          FAILED_STEP: ${{ needs.release-macos.outputs.failed-step }}
+          SAID: ${{ needs.release-macos.outputs.said }}
         run: |
           case "$BUILD_RESULT" in
             success) ;;
@@ -123,6 +147,12 @@ jobs:
             cancelled)
               echo "::warning title=release-macos::the macOS build was cancelled (a newer push replaces a running build)" ;;
             *)
-              echo "::error title=release-macos::the macOS build did not pass: its job ended $BUILD_RESULT (a step failed; farm-connect refuses when a repository variable is empty, docs/ci.md)"
+              if [ -n "$SAID" ]; then
+                echo "::error title=release-macos::the macOS build did not pass: $SAID"
+              elif [ -n "$FAILED_STEP" ]; then
+                echo "::error title=release-macos::the macOS build did not pass: its job ended $BUILD_RESULT at the step '$FAILED_STEP' (that step's log says why)"
+              else
+                echo "::error title=release-macos::the macOS build did not pass: its job ended $BUILD_RESULT before the buckconfig check (the checkout or farm-connect failed; the job's log says why)"
+              fi
               exit 1 ;;
           esac

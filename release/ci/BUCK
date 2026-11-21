@@ -4,7 +4,8 @@
 # by the workflow as the binary this target builds. check_release_ref and
 # release_json are the release workflow's (.github/workflows/release.yml,
 # docs/ci.md, "release.yml"), built behind //release/ci/tests:test_release the
-# same way.
+# same way. buck2_failure is release-macos.yml's: it reads a failed buck2
+# step's log and says what buck2 said.
 load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_module")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 
@@ -77,6 +78,25 @@ zig_exe(
     src = "release_json.zig",
     deps = [":release_lib"],
     unit_tests = ["//release/ci/tests:test_release", _ZIG_VERSION],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = _ZIG,
+    visibility = ["PUBLIC"],
+)
+
+# What buck2_failure does, as a module the program and its cases both import.
+zig_module(
+    name = "buck2_failure_lib",
+    src = "buck2_failure/lib.zig",
+    deps = [":main_red_lib"],
+    visibility = ["//release/ci/tests:"],
+)
+
+zig_exe(
+    name = "buck2_failure",
+    exec_compatible_with = LINUX_X86_64,
+    src = "buck2_failure.zig",
+    deps = [":buck2_failure_lib"],
+    unit_tests = ["//release/ci/tests:test_buck2_failure", _ZIG_VERSION],
     busybox = "komira//tools/build/toolchains:busybox",
     zig = _ZIG,
     visibility = ["PUBLIC"],
