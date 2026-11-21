@@ -12,7 +12,8 @@ the current one into `--site`, uninstalling the first as pip does, and gives
 Then, in order:
 
 - the site directory holds the dist-info of the current release (`--version`)
-  and none of any other release;
+  and none of any other release of komira (other distributions, such as the
+  external flavour's Modular wheels, are not looked at here);
 - the upgrade removed at least the files `--expect-removed` names, so the
   previous release did carry files the current one does not (an upgrade that
   has nothing to remove proves nothing about removal), and every file it
@@ -72,7 +73,7 @@ def main(argv):
     site = os.path.realpath(value_of(rest, "--site"))
     version = value_of(rest, "--version")
 
-    infos = sorted(e for e in os.listdir(site) if e.endswith(".dist-info"))
+    infos = sorted(e for e in os.listdir(site) if e.endswith(".dist-info") and e.startswith("komira-"))
     want = ["komira-{}.dist-info".format(version)]
     assert infos == want, "the site holds {}, the upgrade should leave only {}".format(", ".join(infos) or "no dist-info", want[0])
 
