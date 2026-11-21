@@ -150,3 +150,58 @@ test "archive: what cannot be read is refused by name, never skipped" {
     try expectFail(M.archiveSymbols(macho_archive[0 .. macho_archive.len - 1], "/w/l.a"), "prefix_tool: /w/l.a: a member lies outside the archive");
     try expectFail(M.archiveSymbols(elf_archive[0 .. elf_archive.len - 1], "/w/l.a"), "prefix_tool: /w/l.a: a member lies outside the archive");
 }
+
+/// The absolute path of `name` in the test's scratch directory.
+fn scratch(tmp: std.testing.TmpDir, name: []const u8) ![]const u8 {
+    const dir = try tmp.dir.realpathAlloc(P.a(), ".");
+    return std.fs.path.join(P.a(), &.{ dir, name });
+}
+
+test "outcome: header on each archive writes the header and the names; check is green on them" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    for ([_][]const u8{ elf_archive, macho_archive }) |bytes| {
+        try tmp.dir.writeFile(.{ .sub_path = "l.a", .data = bytes });
+        const lib = try scratch(tmp, "l.a");
+        const hdr = try scratch(tmp, "h.h");
+        const names = try scratch(tmp, "s.txt");
+        const h = M.outcome(&.{ "prefix_tool", "header", "--archive", lib, "--header", hdr, "--symbols", names, "--style", "strip", "--prefix", "komira_fx_", "--strip", "fx_", "--min", "6", "--extra", "fx_extra" }, "/w");
+        try eqs("", h.stderr);
+        try expect(h.code == 0);
+        try eqs("fx_common_data\nfx_data\nfx_extra\nfx_global\nfx_hidden\nfx_second\nfx_weak_def\n", try tmp.dir.readFileAlloc(P.a(), "s.txt", 1 << 20));
+        const text = try tmp.dir.readFileAlloc(P.a(), "h.h", 1 << 20);
+        try expect(std.mem.indexOf(u8, text, "#define fx_extra komira_fx_extra\n") != null);
+        try expect(std.mem.indexOf(u8, text, "#define fx_second komira_fx_second\n") != null);
+
+        const result = try scratch(tmp, "r.json");
+        const c = M.outcome(&.{ "prefix_tool", "check", "--archive", lib, "--result", result, "--prefix", "fx_", "--min", "6" }, "/w");
+        try eqs("", c.stderr);
+        try expect(c.code == 0);
+        try expect(std.mem.startsWith(u8, c.stdout, "archive_check GREEN: 6 defined symbols start with fx_"));
+        try expect(std.mem.startsWith(u8, try tmp.dir.readFileAlloc(P.a(), "r.json", 1 << 20), "{\"version\": 1, \"data\": {\"status\": \"success\""));
+
+        // Red: exit 1, the finding on stderr, and no result written.
+        try tmp.dir.deleteFile("r.json");
+        try tmp.dir.writeFile(.{ .sub_path = "names.txt", .data = "fx_undefined\n" });
+        const r = M.outcome(&.{ "prefix_tool", "check", "--archive", lib, "--result", result, "--prefix", "fx_", "--min", "6", "--names", try scratch(tmp, "names.txt") }, "/w");
+        try expect(r.code == 1);
+        try eqs(P.fmt("archive_check RED: 1 undefined references to the library's own unprefixed names in {s}:\n  fx_undefined\n", .{lib}), r.stderr);
+        try expect(tmp.dir.access("r.json", .{}) == error.FileNotFound);
+    }
+}
+
+test "outcome: header on an archive it cannot read exits 1 and writes nothing" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const hdr = try scratch(tmp, "h.h");
+    const m = M.outcome(&.{ "prefix_tool", "header", "--archive", "./no-such-archive.a", "--header", hdr, "--symbols", hdr, "--style", "strip", "--prefix", "k_", "--strip", "s_", "--min", "1" }, "/w");
+    try expect(m.code == 1);
+    try eqs("prefix_tool: cannot read ./no-such-archive.a: FileNotFound\n", m.stderr);
+    // A file that is not an archive names the archive by its absolute path.
+    try tmp.dir.writeFile(.{ .sub_path = "bad.a", .data = "!<arch>\n" });
+    const bad = try scratch(tmp, "bad.a");
+    const b = M.outcome(&.{ "prefix_tool", "header", "--archive", bad, "--header", hdr, "--symbols", hdr, "--style", "strip", "--prefix", "k_", "--strip", "s_", "--min", "1" }, "/w");
+    try expect(b.code == 1);
+    try eqs(P.fmt("prefix_tool: {s}: an archive with no members\n", .{bad}), b.stderr);
+    try expect(tmp.dir.access("h.h", .{}) == error.FileNotFound);
+}

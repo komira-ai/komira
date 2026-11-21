@@ -25,8 +25,9 @@ Each library's BUCK file builds it three times over the same arguments:
    links;
 2. `prefix_symbols`, a `prefix_header` ([`defs.bzl`](defs.bzl),
    `prefix_tool header`): the defined non-local symbols of every member of
-   the unprefixed archive (the names its symbol table lists) are read, aws-lc's `util/read_symbols.go` skip
-   list (and the compiler builtin `__umodti3`) is applied, and the header
+   the unprefixed archive (the names its symbol table lists) are read;
+   aws-lc's `util/read_symbols.go` skip list (and the compiler builtin
+   `__umodti3`) is applied, and the header
    says `#define X <prefixed X>` for each name left, plus the
    `extra_symbols` (names the library references but never defines, such as
    aws-lc's four weak `OPENSSL_memory_*` allocator hooks). Its `[symbols]`
