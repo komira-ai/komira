@@ -13,6 +13,7 @@ TARGETS = [
     "komira//:limits",
     "komira//:no_endpoint",
     "komira//:pointer_lint",
+    "komira//:pr_workflow_cases",
     "komira//:public_boundary",
     "komira//:pypi_workflow_cases",
     "komira//:python_closure",

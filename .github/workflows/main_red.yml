@@ -1,8 +1,9 @@
 # main-red: when a push run of main fails, find the pull requests that
 # could have broken it and open an issue `main red: <target>`; when a later
-# run of main is green, close it (docs/ci.md, "main_red.yml"). There is no
-# merge queue: a red main is fixed forward or the culprit reverted within
-# the hour, and this issue is what starts that clock.
+# run of main is green, close it (docs/ci.md, "main_red.yml"). The merge
+# queue checks each pull request before main moves, and main can still go red
+# (the release builds more than the check): a red main is fixed forward or
+# the culprit reverted within the hour, and this issue is what starts that clock.
 #
 # It runs on `workflow_run` of the workflows named below completing on main,
 # so it runs once per run that ends, whatever its conclusion; the program

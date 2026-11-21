@@ -118,6 +118,23 @@ zig_test(
     zig = "komira//tools/build/toolchains:zig_next",
 )
 
+# The cases of the pull request's check on its two events (.github/workflows/pr_workflow_test.zig
+# says what each catches): pr.yml runs the job `check`, the one required status check, on a pull
+# request and on a merge group of the merge queue, with a concurrency group per merge group, the
+# change base of each event and a bound below the queue's check timeout that docs/ci.md sets; and no
+# other workflow has a job `check`. A build action.
+zig_test(
+    name = "pr_workflow_cases",
+    exec_compatible_with = LINUX_X86_64,
+    src = ".github/workflows/pr_workflow_test.zig",
+    data = dict(
+        {"ci.md": "docs/ci.md"},
+        **{"workflows/" + w.removeprefix(".github/workflows/"): w for w in WORKFLOWS}
+    ),
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
+)
+
 # The cases of pypi.yml, the publish of the Python package (.github/workflows/pypi_workflow_test.zig
 # says what each catches): a manual trigger alone, no secret and no token, no upload step in the
 # build job, the identity (`id-token`) in build, testpypi and pypi alone, the order build,
