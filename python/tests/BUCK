@@ -280,3 +280,32 @@ _CASES = [
     ],
     expect_error = expect_error,
 ) for name, protobuf, version, edge, requirement, expect_error in _CASES]
+
+# The private plan node tree both DataFrame skins build (komira._ops), with no
+# library: each verb's tree equals a hand-written one, and each refusal raises
+# its class with its full message.
+#
+# - ops_expr_test: the expression nodes, their vocabularies and refusals, and
+#   the and/or chains, is_in and between they are built from.
+# - ops_walk_test: the walkers over expressions (children, column references,
+#   substitution, the leftmost column).
+# - ops_rel_test: the support types and the single-input relational nodes, and
+#   the columns each one outputs.
+# - ops_rel_join_test: the join, union and write nodes, the join output names,
+#   and the columns of whole plans.
+# - ops_verbs_test: the verbs the skins call, one per verb, including the
+#   cases that add no node.
+# - ops_no_sql_test: no node, verb or module of komira._ops renders SQL text,
+#   with cases that show each check fails when one does.
+[py_test(
+    name = "ops_{}_test".format(area),
+    src = "test_ops_{}.py".format(area),
+    deps = ["//python:komira"],
+) for area in [
+    "expr",
+    "walk",
+    "rel",
+    "rel_join",
+    "verbs",
+    "no_sql",
+]]
