@@ -8,11 +8,11 @@
  * komira_test_arrow_c_consume(stream, mode, out, cap, out_len) -> int32
  *
  *   mode 0, drain: get_schema; get_next until the end of the stream; release
- *     the schema and then the stream; read every chunk after the stream is
- *     gone; release each chunk.
+ *     the stream; then, with the stream gone, read each chunk and release it;
+ *     release the schema last.
  *   mode 1, unread: release the stream without calling anything else.
- *   mode 2, first chunk: get_schema; one get_next; release the schema and the
- *     stream; read that chunk; release it.
+ *   mode 2, first chunk: get_schema; one get_next; release the stream; read
+ *     that chunk and release it; release the schema last.
  *
  * Every release is checked: the callback must set the struct's `release` to
  * NULL, and calling the same callback again on the released struct must leave

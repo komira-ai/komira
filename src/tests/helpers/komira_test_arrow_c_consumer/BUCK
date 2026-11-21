@@ -17,14 +17,20 @@ mojo_library(
     conda = False,
     deps = [
         ":komira_test_arrow_c_consumer_c",
+        # The full transitive closure of the Mojo libraries it builds on.
         "//src/arrow:arrow",
         "//src/arrow_ipc:arrow_ipc",
         "//src/async_api:async_api",
+        "//src/atomic_alias:atomic_alias",
         "//src/byte_buffer:byte_buffer",
         "//src/compression:compression",
         "//src/containers:containers",
         "//src/counters:counters",
+        "//src/host_probe:host_probe",
         "//src/libc:libc",
+        "//src/lz4:lz4",
+        "//src/simd_ops:simd_ops",
+        "//src/zlib:zlib",
     ],
     test_srcs = ["tests/test_c_consumer.mojo"],
     visibility = [
