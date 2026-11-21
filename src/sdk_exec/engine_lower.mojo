@@ -8,9 +8,10 @@
 # version of each file. A scan of a file registered on the context is checked
 # against its registered schema (`add_catalog_scan`). A join is descended
 # into left child first, then right, as the cutter walks it whichever side
-# builds. A node the cutter has no arm for is not descended into: the cutter
-# refuses it by name before it asks for any scan below, so no facts are read
-# for it.
+# builds; every join is, the ones the cutter then refuses included, so the
+# facts of a refused join's scans are read before the refusal. Any other node
+# the cutter has no arm for is not descended into: the cutter refuses it by
+# name before it asks for any scan below, so no facts are read for it.
 
 from host_profile.host_profile import HostProfile
 from lowering.lower import lower

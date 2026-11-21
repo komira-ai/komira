@@ -68,8 +68,10 @@ budget, a sum outside its declared type and a pool not whole after a run (step
 files are refused by the footer package. Lowering given fewer scan facts than
 the plan has scans refuses by name (`LOWERING_INPUTS_SCAN_COUNT`);
 `lowering_inputs` descends only scan, filter, project, limit, aggregate, sort
-and join nodes (a join's left child, then its right) and gives a facts entry per scan it reaches, and the cutter refuses any
-other node by name before it asks for the scans below it. `worker_count` and
+and join nodes (a join's left child, then its right, for every join, so a
+join the cutter refuses has its scans' facts read first) and gives a facts
+entry per scan it reaches; the cutter refuses any other node by name before it
+asks for the scans below it. `worker_count` and
 `memory_budget_bytes` have a lower bound of 1 and no upper bound. A
 cancellation token is local to a call, so cancel is not reachable from
 `run_sql`. After a refusal the context is unchanged and runs the next query.

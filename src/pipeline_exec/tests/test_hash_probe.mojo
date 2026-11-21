@@ -118,6 +118,21 @@ def _keys_batch(
     return rb.build(sb.build())
 
 
+def _float_payload_batch() -> RecordBatch:
+    """One row: INT64 key `k` = 1 and a FLOAT64 payload `v` = 0.5."""
+    var k = PrimitiveArray[DType.int64].allocate(1)
+    k.set(0, Int64(1))
+    var v = PrimitiveArray[DType.float64].allocate(1)
+    v.set(0, Float64(0.5))
+    var sb = SchemaBuilder()
+    var rb = RecordBatchBuilder()
+    sb.add_field(Field("k", ArrowType.INT64, False))
+    rb.add_column(Column.from_primitive[DType.int64](k^))
+    sb.add_field(Field("v", ArrowType.FLOAT64, False))
+    rb.add_column(Column.from_primitive[DType.float64](v^))
+    return rb.build(sb.build())
+
+
 def _run(mut op: HashProbeOp, var batch: RecordBatch) raises -> List[String]:
     """The sorted rows `op` gives for one morsel of `batch`; none for a morsel
     it reports FILTERED_EMPTY."""
@@ -578,6 +593,19 @@ def test_a_later_morsel_with_other_columns_gets_its_own_output_schema() raises:
     assert_true(op.execute(third).is_need_more_input())
     assert_equal(len(column_names(third.batch)), 4)
     assert_equal(third.num_rows(), 3)
+    # The same column count under another payload name.
+    var fourth = Morsel(_keys_batch("k", "w", [1], [False]), 3, 0)
+    assert_true(op.execute(fourth).is_need_more_input())
+    var names4 = column_names(fourth.batch)
+    assert_equal(names4[1], "w")
+    assert_equal(fourth.num_rows(), 2)
+    # The same names with the payload as FLOAT64.
+    var fifth = Morsel(_float_payload_batch(), 4, 0)
+    assert_true(op.execute(fifth).is_need_more_input())
+    assert_true(
+        fifth.batch.schema.field_at_unchecked(1).arrow_type == ArrowType.FLOAT64
+    )
+    assert_equal(fifth.num_rows(), 2)
 
 
 def test_an_empty_build_side_joins_nothing() raises:

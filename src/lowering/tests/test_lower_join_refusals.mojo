@@ -130,6 +130,7 @@ def test_a_join_type_other_than_inner_is_refused() raises:
     _refused_with(_message(_join_of_type(JOIN_SEMI), _inputs()), "a SEMI join")
     _refused_with(_message(_join_of_type(JOIN_ANTI), _inputs()), "a ANTI join")
     _refused_with(_message(_join_of_type(JOIN_CROSS), _inputs()), "a CROSS join")
+    _refused_with(_message(_join_of_type(UInt8(9)), _inputs()), "a type 9 join")
     assert_equal(_message(_join_of_type(JOIN_INNER), _inputs()), "")
 
 

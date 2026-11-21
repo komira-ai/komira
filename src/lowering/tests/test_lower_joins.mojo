@@ -19,6 +19,7 @@
 #   test_a_build_child_that_is_an_aggregate_adds_a_segment_before_the_build
 #   test_equal_arguments_render_equal
 #   test_an_int32_key_against_an_int64_key_lowers
+#   test_a_right_build_whose_node_renames_a_column_gains_a_projection
 # =============================================================================
 
 from std.testing import TestSuite, assert_equal, assert_true
@@ -388,6 +389,24 @@ def test_an_int32_key_against_an_int64_key_lowers() raises:
     var plan2 = _join(_left(), swapped^, "k", "k2", JOIN_BUILD_SIDE_RIGHT)
     var text2 = render_lowered_plan(_lowered(plan2, _inputs(111, 222)))
     assert_true("JOIN_PROBE build_seg=0 on=[k=k2]" in text2, text2)
+
+
+def test_a_right_build_whose_node_renames_a_column_gains_a_projection() raises:
+    # The probe emits k, a, k2, a_right; a node that names the last column
+    # `ra` gets a projection after the probe under the node's names, and the
+    # same join under the probe's own names gets none.
+    var plan = _join(_left(), _right(), "k", "k2", JOIN_BUILD_SIDE_RIGHT)
+    var text = render_lowered_plan(_lowered(plan, _inputs(111, 222)))
+    assert_true("PROJECT " not in text, text)
+    var sb = SchemaBuilder()
+    sb.add_field(Field("k", ArrowType.INT64, False))
+    sb.add_field(Field("a", ArrowType.INT64, False))
+    sb.add_field(Field("k2", ArrowType.INT64, False))
+    sb.add_field(Field("ra", ArrowType.STRING, False))
+    plan.output_schema = sb.build()
+    var renamed = render_lowered_plan(_lowered(plan, _inputs(111, 222)))
+    assert_true("PROJECT k := " in renamed, renamed)
+    assert_true(", ra := " in renamed, renamed)
 
 
 def main() raises:

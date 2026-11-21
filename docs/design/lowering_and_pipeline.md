@@ -934,7 +934,9 @@ of its side, a key pair the probe does not compare (INT64 and INT32 in any pairi
 names a column twice. It differs from section 3.6 in one place. The build segment publishes its rows as a batch (a
 `CollectSink`), and the probe segment's builder indexes them once, serially, before its workers start
 (`op_join_probe`'s `MultiKeyHashJoinBuilder`), instead of publishing a built table. `run_segment`, `PublishedOutputs` and
-the morsel sink trait carry only batches, and the index is built once and serially either way. Not built: outer, semi,
+the morsel sink trait carry only batches, and the index is built once and serially either way. One answer departs
+from DuckDB, by name: the kernel stands for a NULL key by the INT64 value 9221120237041090561, so a non-NULL INT64 key
+holding it is refused (`JOIN_KEY_RESERVED`) instead of matching; a validity bit beside the key slot would lift it. Not built: outer, semi,
 anti and cross joins, a parallel build in the build segment's finalize, runtime filters, build-side memory accounting and
 spill, chunking of a large probe output (a morsel gives one batch), and DATE and DECIMAL keys.
 
