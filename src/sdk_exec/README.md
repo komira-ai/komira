@@ -115,8 +115,15 @@ The tests run when the package is built.
   sum(v) per group; the key keeps its type, precision and scale; decimal keys
   past INT64 are exact); min and max of dates and the sum of decimals run under
   a BOOL key; a WHERE before the grouping keeps only the passing rows; an
-  all-NULL key is one group; `group by d, b` is refused at `lower` with
-  LOWERING_SINK_UNSERVED.
+  all-NULL key is one group; `group by d, b` groups by the pair.
+- `test_run_sql_group_keys_mixed`: over a Parquet table the pinned DuckDB
+  writes (`:group_keys_mixed_oracle`, five row groups, NULLs in every column,
+  the empty string), each query of `tests/group_keys_mixed/cases.sql` answers
+  what DuckDB answers, on one and on three workers: GROUP BY an INTEGER, a
+  VARCHAR and a DATE (in both orders, with count, sum, min and max), a BIGINT
+  and an INTEGER, a BOOLEAN, a DECIMAL and a VARCHAR; under a WHERE and a
+  HAVING; count(DISTINCT) per mixed key; SELECT DISTINCT over three columns;
+  an all-NULL key; no row.
 - `test_run_sql_no_from`: `SELECT 1 AS n` is one row, an INT32 column `n`
   holding 1, DuckDB's answer; a result literal is INT32 from -2147483647 to
   2147483647 and INT64 past either bound and at -2147483648 (as in DuckDB);

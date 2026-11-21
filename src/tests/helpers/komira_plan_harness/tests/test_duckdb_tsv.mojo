@@ -10,8 +10,10 @@
 # rounded to the wrong neighbour; -0.0 read as 0.0; a NaN spelling that is
 # not a NaN; an integer out of its type's range, a sign on an unsigned type
 # or `1.0` in an integer column accepted; a decimal whose scale differs;
-# names not held to the schema; a type the reader cannot read compared as
-# text instead of refused.
+# names not held to the schema; a date read off by a day (a leap year, a
+# century, a day before the epoch) or a date that is no day of the calendar
+# accepted; a type the reader cannot read compared as text instead of
+# refused.
 
 from std.memory import bitcast
 from std.testing import TestSuite, assert_equal, assert_raises, assert_true
@@ -212,9 +214,38 @@ def test_policy_is_the_schema_sides() raises:
     assert_true(compare_canon(total, duck2).count() > 0)
 
 
+def test_dates_are_day_numbers_from_the_epoch() raises:
+    var c = _canon(
+        "d:date32?",
+        "d\n1970-01-01\n1969-12-31\n2026-09-01\n2000-02-29\n1900-03-01\n0001-01-01\n\n10000-01-01\n",
+    )
+    assert_equal(c.rows[0][0], "0")
+    assert_equal(c.rows[1][0], "-1")
+    assert_equal(c.rows[2][0], "20697")
+    assert_equal(c.rows[3][0], "11016")
+    assert_equal(c.rows[4][0], "-25508")
+    assert_equal(c.rows[5][0], "-719162")
+    assert_equal(c.rows[6][0], "\\N")
+    assert_equal(c.rows[7][0], "2932897")
+    with assert_raises(contains="row 1 column d: '1900-02-29' is not a day of the calendar"):
+        _ = _canon("d:date32", "d\n1900-02-29\n")
+    with assert_raises(contains="'2026-13-01' is not a day of the calendar"):
+        _ = _canon("d:date32", "d\n2026-13-01\n")
+    with assert_raises(contains="'2026-04-31' is not a day of the calendar"):
+        _ = _canon("d:date32", "d\n2026-04-31\n")
+    with assert_raises(contains="'2026-09-00' is not a day of the calendar"):
+        _ = _canon("d:date32", "d\n2026-09-00\n")
+    with assert_raises(contains="'0044-03-15 (BC)' is not a date YYYY-MM-DD"):
+        _ = _canon("d:date32", "d\n0044-03-15 (BC)\n")
+    with assert_raises(contains="'26-09-01' is not a date YYYY-MM-DD"):
+        _ = _canon("d:date32", "d\n26-09-01\n")
+    with assert_raises(contains="'2026/09/01' is not a date YYYY-MM-DD"):
+        _ = _canon("d:date32", "d\n2026/09/01\n")
+
+
 def test_unread_types_are_refused() raises:
-    with assert_raises(contains="row 1 column d: this reader does not read type date32"):
-        _ = _canon("d:date32", "d\n2026-09-01\n")
+    with assert_raises(contains="row 1 column t: this reader does not read type time32_s"):
+        _ = _canon("t:time32_s", "t\n12:00:00\n")
     with assert_raises(contains="this reader does not read type binary"):
         _ = _canon("b:binary?", "b\n\\xFF\n")
 
