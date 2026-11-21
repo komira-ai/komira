@@ -12,7 +12,7 @@ on [the optimized plan](optimized_plan.md) (§5.3, the closed list of host-local
 them. It does not describe streaming, which [plan models](plan_models.md) §4.3 covers over the same physical plan.
 
 **Where the code and the docs disagree today.**
-[Plan models](plan_models.md) §4.1 describes the physical IR as version 13 in `plan_ir`; the code is version 14
+[Plan models](plan_models.md) §4.1 describes the physical IR as version 13 in `plan_ir`; the code is version 15
 in `physical_plan`. That section is stale on this point and is corrected in the same change as this document's
 slice 1. The same section declares `lower(segment, host_profile, resolved_inputs)`; §2.1 below says how this document's
 entry relates to it. [The architecture](../architecture.md) names the lowering layer `komira_compiler`; no such

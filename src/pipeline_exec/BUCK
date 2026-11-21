@@ -58,8 +58,8 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
 #                                 file, no trailing newline, keys of no column;
 #                                 a bad line, a value of another type, a
 #                                 missing file and no path refused naming the
-#                                 file; through run_plan with a filter, a
-#                                 projection and an aggregation.
+#                                 file; through run_plan with a filter and a
+#                                 projection, on one worker and on three.
 # test_real_plan                  hand-built plans end to end: scan, filter,
 #                                 project and limit; a segment reading another's
 #                                 output; what the builder refuses.

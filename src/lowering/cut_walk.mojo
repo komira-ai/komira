@@ -4,8 +4,8 @@
 #
 # One walk of the plan, bottom up. Every node is one of three roles:
 #
-#   source    PLAN_SCAN: opens a pipeline (SOURCE_PARQUET, or SOURCE_BATCH for
-#             an in-memory scan);
+#   source    PLAN_SCAN: opens a pipeline (SOURCE_PARQUET; SOURCE_BATCH for
+#             an in-memory scan; SOURCE_JSONL for one JSON Lines file);
 #   streaming PLAN_FILTER, PLAN_PROJECT, PLAN_LIMIT: appended to the open
 #             pipeline's `ops`;
 #   breaker   PLAN_AGGREGATE, PLAN_SORT: ends the open pipeline in a sink and
