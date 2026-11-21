@@ -30,4 +30,34 @@ C API (`src/so`), and the check that installs it.
 ./buck2 build komira//tools/build/package/libkomira:libkomira_elf_report
 ```
 
+- `libkomira_variants` is the native directory with libkomira at every CPU level
+  of the linux-x86_64 row (`isa_variants` in
+  [`../../platforms/table.bzl`](../../platforms/table.bzl), and
+  [`docs/design/isa_variants.md`](../../../../docs/design/isa_variants.md)):
+
+  ```text
+  VARIANTS                          one line per level, lowest first: name, path, cpuinfo flags
+  libkomira.so                      x86-64-v2, the floor: run path $ORIGIN/lib:$ORIGIN
+  variants/x86-64-v3/libkomira.so   x86-64-v3, the build the tests run: run path also $ORIGIN/../../lib
+  lib/                              the eight native owners and the three Mojo runtime libraries, one copy
+  ```
+
+  The manifest is written from the platform row ([`variants.bzl`](variants.bzl)). The
+  host's C++ runtime (`libstdc++.so.6`, `libgcc_s.so.1`) is not in it.
+- `libkomira_variants_load_x86_64_v2` and `libkomira_variants_load_x86_64_v3` copy
+  that directory to another path and load the level they name by its VARIANTS line,
+  from a C caller (`variants_load.c`) with no library path: it answers
+  `komira_abi_version()` as `komira.h` states, it is the only libkomira mapped, and
+  the libraries it loads are the copy's `lib/`. Every linux x86_64 worker implements
+  x86-64-v3, so both levels run there. Two checks must refuse, each with the exact
+  line: `libkomira_variants_load_refuses_missing_runtime` (`lib/` without
+  `libMSupportGlobals.so`) and `libkomira_variants_load_refuses_missing_variant`
+  (VARIANTS names a file the directory does not hold; the load fails and does not
+  fall back to the floor).
+
+```sh
+./buck2 build komira//tools/build/package/libkomira:libkomira_variants_load_x86_64_v2 \
+    komira//tools/build/package/libkomira:libkomira_variants_load_x86_64_v3
+```
+
 Nothing here publishes anything.

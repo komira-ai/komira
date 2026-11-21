@@ -19,6 +19,7 @@
 #     the low nibble; high bit acts as zero-mask.
 #   - x86 AVX2: `vpshufb` (32-byte permute, two independent 16-byte
 #     lanes — i.e. the high lane only indexes bytes 16..31 of `table`).
+#     Without AVX2 (x86-64-v2), two SSSE3 `pshufb`, one per lane.
 #   - x86 AVX-512 BW: `vpermb` (true 64-byte permute with linear index
 #     range 0..63).  Not wrapped here yet.
 #
@@ -78,6 +79,23 @@ def _avx2_vpshufb_x32(
     ](table, indices)
 
 
+@always_inline
+def _ssse3_pshufb_x32(
+    table: SIMD[DType.uint8, 32],
+    indices: SIMD[DType.uint8, 32],
+) -> SIMD[DType.uint8, 32]:
+    """`vpshufb ymm` from two SSSE3 `pshufb`: each 16-byte half of `indices`
+    selects from the same half of `table`, as the AVX2 instruction's two lanes
+    do. The form of an x86 target without AVX2 (x86-64-v2)."""
+    var r_lo = _ssse3_pshufb_x16(
+        table.slice[16, offset=0](), indices.slice[16, offset=0]()
+    )
+    var r_hi = _ssse3_pshufb_x16(
+        table.slice[16, offset=16](), indices.slice[16, offset=16]()
+    )
+    return r_lo.join(r_hi)
+
+
 # =============================================================================
 # Public API — multi-arch dispatch.
 # =============================================================================
@@ -106,11 +124,18 @@ def table_lookup_u8x32(
     """32-byte table lookup: per-16-byte-lane permute.
 
     On x86 AVX2: single `vpshufb ymm` (two independent 16-byte halves).
+    On x86 without AVX2: two SSSE3 `pshufb`, one per half.
     On NEON: two `tbl1.v16i8` invocations (low half + high half), then
     concatenated.
     """
-    comptime if CompilationTarget.is_x86():
+    # AVX2 is in x86-64-v3 and above, not in x86-64-v2: the `vpshufb ymm`
+    # intrinsic does not lower for a target without the feature.
+    comptime if CompilationTarget.is_x86() and CompilationTarget._has_feature[
+        "avx2"
+    ]():
         return _avx2_vpshufb_x32(table, indices)
+    elif CompilationTarget.is_x86():
+        return _ssse3_pshufb_x32(table, indices)
     else:
         # NEON: split, lookup, concat.
         var t_lo = table.slice[16, offset=0]()

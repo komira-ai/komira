@@ -51,7 +51,7 @@ GRAPH_JSON = r'''{
         {"path": "src/simd_ops/src/simd_ops/byte_class/movemask.mojo", "sha256": "bd1361561bc1e732ec4b8afcd6938675e8823598ddd76cdee23f72234b0a073b"},
         {"path": "src/simd_ops/src/simd_ops/byte_class/prefix_xor.mojo", "sha256": "ef901c4693542ef13402ba4976d682af7728a65a03b2bf232a52bed2cee4658b"},
         {"path": "src/simd_ops/src/simd_ops/byte_class/quote_region_mask.mojo", "sha256": "a95793ce36d5bdb06f9087cc9c809629c1b34a6a7d12b3884a395270f6880d1a"},
-        {"path": "src/simd_ops/src/simd_ops/byte_class/table_lookup.mojo", "sha256": "cdad0f8fd3d75c5db24dd29d1927fb07356d5a00b603d0bb99f0d119ccbbd736"},
+        {"path": "src/simd_ops/src/simd_ops/byte_class/table_lookup.mojo", "sha256": "68d418fc62952fb2013b5b6e96743247c33162a5ee632411d6200a13fbc5f88c"},
         {"path": "src/simd_ops/src/simd_ops/byte_class/type_cast.mojo", "sha256": "72a923cf823eb449b7094f254be3840b7bed1baba479c8dc388328ee51238fb5"},
         {"path": "src/simd_ops/src/simd_ops/compress.mojo", "sha256": "4a212321b8b19b2014f8f26f9235bef8280bd2ba02844716e6c4651721343091"},
         {"path": "src/simd_ops/src/simd_ops/fast_copy.mojo", "sha256": "4bf7b06091d855eeb7a34b3dcd17c2f7d7b4580bc67f21072b1ab97825402fdf"},
@@ -67,7 +67,7 @@ GRAPH_JSON = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["simd_ops.mojoc"],
-      "key": "884a1bd85d02c6e59de026020813d5bdb4ff38973f3d70603eb2713c09949cab"
+      "key": "0f2bbc6ec5f5f929406a7cc82d5864593325382fe6c3c258a4f91ae5b12540bb"
     },
     {
       "id": "komira-ai/simd_ops@0.1.0#mojo1.0.0/test:src/simd_ops/tests/test_byte_class_compare_reduce.mojo",
@@ -82,7 +82,7 @@ GRAPH_JSON = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_byte_class_compare_reduce.pass"],
-      "key": "a142f5b2668978a28afff406e490109623c2a312f40d69ec62241287da0e722b"
+      "key": "44badc0e0a946399d6b795c4f185eea2c91ec576a83c6d46bcbbeaa8b290d5ce"
     },
     {
       "id": "komira-ai/simd_ops@0.1.0#mojo1.0.0/test:src/simd_ops/tests/test_byte_class_iota_prefix_xor.mojo",
@@ -97,7 +97,7 @@ GRAPH_JSON = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_byte_class_iota_prefix_xor.pass"],
-      "key": "a396c08319921d25b53e5e672c9d6617ca0671abb8bb29f579a20e23fb4ce003"
+      "key": "d020953363a0783e0cc7aae68c415bcac4b3ff147796f4106b5fc7e0f5ece513"
     },
     {
       "id": "komira-ai/simd_ops@0.1.0#mojo1.0.0/test:src/simd_ops/tests/test_byte_class_movemask.mojo",
@@ -112,7 +112,7 @@ GRAPH_JSON = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_byte_class_movemask.pass"],
-      "key": "156ba3504e1a9a91b620ad5e225bd4010ab3e627faf318692ceaca0c6bbaa51b"
+      "key": "7a4a906151fc5e55aad17f76bf4184ba6defba68f8e3762993e0adc360750d0a"
     },
     {
       "id": "komira-ai/simd_ops@0.1.0#mojo1.0.0/test:src/simd_ops/tests/test_byte_class_shuffle_compress.mojo",
@@ -121,13 +121,13 @@ GRAPH_JSON = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/simd_ops/tests/test_byte_class_shuffle_compress.mojo", "sha256": "d884abe178312bee90700e6d24f4c0c60df1b78f051212804e08b355837363ee"}
+        {"path": "src/simd_ops/tests/test_byte_class_shuffle_compress.mojo", "sha256": "8d28a817b67f0879f31586bcce8ca71489130689eb6f3cb968ef6ebbf596a590"}
       ],
       "deps": ["komira-ai/simd_ops@0.1.0#mojo1.0.0/lib"],
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_byte_class_shuffle_compress.pass"],
-      "key": "f42c3083cee3ef97d8793e26db32836b78af63f10f16b02ab6fbc1f00b767b6a"
+      "key": "8b8dda5b1a396d0e217b717dbf5629a023b55f72ad3bfcd4590e21ed285ebee0"
     },
     {
       "id": "komira-ai/simd_ops@0.1.0#mojo1.0.0/test:src/simd_ops/tests/test_byte_class_wide_forms.mojo",
@@ -142,7 +142,7 @@ GRAPH_JSON = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_byte_class_wide_forms.pass"],
-      "key": "d7901db041a8ae15f82ddcba596254c8069bedd72ce70c698dd3ba60abdf0087"
+      "key": "fd1f44da02a79a24d5667451e631461501fc429c3f8d5e2cd9c82033ad700f3c"
     },
     {
       "id": "komira-ai/simd_ops@0.1.0#mojo1.0.0/test:src/simd_ops/tests/test_byte_equal_simd.mojo",
@@ -157,7 +157,7 @@ GRAPH_JSON = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_byte_equal_simd.pass"],
-      "key": "ddcb342e73736d9e9a8978d1a62ce74b6bdcb759a1b4a232da6f55b5ecd34589"
+      "key": "b72d92288181c720c28c322d6e9dc76801e4d97abd3f78bf48969d15a9485550"
     },
     {
       "id": "komira-ai/simd_ops@0.1.0#mojo1.0.0/test:src/simd_ops/tests/test_byte_memmem.mojo",
@@ -172,7 +172,7 @@ GRAPH_JSON = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_byte_memmem.pass"],
-      "key": "c87e62ad08514eb8edccc819696290d827332c7192370a3677140381a99f9fa9"
+      "key": "0ee19377d125c71c840e24ab7720020a91e4138fd5d19cd7f8fb392422cf3f87"
     },
     {
       "id": "komira-ai/simd_ops@0.1.0#mojo1.0.0/test:src/simd_ops/tests/test_byte_set_nibble_luts.mojo",
@@ -187,7 +187,7 @@ GRAPH_JSON = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_byte_set_nibble_luts.pass"],
-      "key": "0d6bb3687939bd8711af8e59360f20a1f2460c02db38c4312e30fed467bd5c12"
+      "key": "d301c90b375b7fad2fc75d007f530c2b8433f491baefe8b92840566710f21b70"
     },
     {
       "id": "komira-ai/simd_ops@0.1.0#mojo1.0.0/test:src/simd_ops/tests/test_fast_copy_byte_oracle.mojo",
@@ -202,7 +202,7 @@ GRAPH_JSON = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_fast_copy_byte_oracle.pass"],
-      "key": "de656df8a8b9e7bf22cbf4b77a7ce28ed6c770a7d4b3153c4dd4d7ebd445b1de"
+      "key": "fc8847227ce2935f6f7f0373dca652eccca507f5cf58a772a41d117a9885e099"
     },
     {
       "id": "komira-ai/simd_ops@0.1.0#mojo1.0.0/test:src/simd_ops/tests/test_fast_copy_edges.mojo",
@@ -217,7 +217,7 @@ GRAPH_JSON = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_fast_copy_edges.pass"],
-      "key": "8e6b18c1df21b218fbe3254b4a8c049b28ff47d7578123782c5980ddf4a3e1cc"
+      "key": "b0b6446d1740f4d5d1e0ee7adb18cc7aaa209476ee91b4aab5ce3ed14a9a69c1"
     },
     {
       "id": "komira-ai/simd_ops@0.1.0#mojo1.0.0/test:src/simd_ops/tests/test_fast_copy_erms_band.mojo",
@@ -232,7 +232,7 @@ GRAPH_JSON = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_fast_copy_erms_band.pass"],
-      "key": "d53b86442d6cb53b8993e755a1ab69d9f514ec81e5574b743d845e0a94bfc73c"
+      "key": "f5fa10abb92e2a9bdba4f840513bfe84bf180aae3cc19df9cb5af7826ddd7bdd"
     },
     {
       "id": "komira-ai/simd_ops@0.1.0#mojo1.0.0/test:src/simd_ops/tests/test_fast_copy_size_ladder.mojo",
@@ -247,7 +247,7 @@ GRAPH_JSON = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_fast_copy_size_ladder.pass"],
-      "key": "fd5d9b207c998b702860e211ee4010c43afb833f62132ac184d2e7c0b9012f9b"
+      "key": "fb148b1ea65d4f8dc028612bf5e6e76b5fa7834cae9d59a88d2e0609a661043e"
     },
     {
       "id": "komira-ai/simd_ops@0.1.0#mojo1.0.0/test:src/simd_ops/tests/test_internal_helpers.mojo",
@@ -262,7 +262,7 @@ GRAPH_JSON = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_internal_helpers.pass"],
-      "key": "ef9fc3473113136ebd85542d146afd0af772437891b323fd5515a0885f25f65b"
+      "key": "162424d799350ce880202f32c887e7b7dfedf471b24bb160343cbeef015f5f3c"
     },
     {
       "id": "komira-ai/simd_ops@0.1.0#mojo1.0.0/test:src/simd_ops/tests/test_simd_bit_unpack.mojo",
@@ -277,7 +277,7 @@ GRAPH_JSON = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_simd_bit_unpack.pass"],
-      "key": "3c489fb6d676ac8f8c8439ff8d845379a1418e2e15addb147bff40cef399f0cb"
+      "key": "62609164b834b2431694ae301afc1786a53a3a617f0f49ee8f1f4fe1bb16e110"
     },
     {
       "id": "komira-ai/simd_ops@0.1.0#mojo1.0.0/test:src/simd_ops/tests/test_simd_blend.mojo",
@@ -292,7 +292,7 @@ GRAPH_JSON = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_simd_blend.pass"],
-      "key": "322d21d8d934e5247a659f0541478d821d5fe9321918df69203fe8b7b5febb78"
+      "key": "9d62dbe5c88ac55fd879187da5579d868857d82f377e2cc40d3f33d91c4f100b"
     },
     {
       "id": "komira-ai/simd_ops@0.1.0#mojo1.0.0/test:src/simd_ops/tests/test_simd_compress.mojo",
@@ -307,7 +307,7 @@ GRAPH_JSON = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_simd_compress.pass"],
-      "key": "60eea2c897981c95b97609a9fb7a83609894387b0048c963abd3f0fc45f0efe7"
+      "key": "b830d9dd647b7389af2abfcce3134087cff8ed8d52367bdc1884d325735deb1e"
     },
     {
       "id": "komira-ai/simd_ops@0.1.0#mojo1.0.0/test:src/simd_ops/tests/test_simd_gather.mojo",
@@ -322,7 +322,7 @@ GRAPH_JSON = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_simd_gather.pass"],
-      "key": "1e6c8ad0bfed6456ad21b88d750ed4e3b38286fbf4ceab8f7ccc91fde56baf64"
+      "key": "7cd2a90006e83d409c0ff284dea6ba26e770a689eb41d05faf02ead7d95f0551"
     },
     {
       "id": "komira-ai/simd_ops@0.1.0#mojo1.0.0/test:src/simd_ops/tests/test_simd_helpers.mojo",
@@ -337,7 +337,7 @@ GRAPH_JSON = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_simd_helpers.pass"],
-      "key": "7defa284d291666f941a2187a2c6be3dbbfda3c59448d2d13fce8406f702861c"
+      "key": "258bd1a6d4665abe286ac45c8a684bfca5ffc62598a64e4ea0302c83dafd9d8c"
     },
     {
       "id": "komira-ai/simd_ops@0.1.0#mojo1.0.0/test:src/simd_ops/tests/test_simd_helpers_edges.mojo",
@@ -352,7 +352,7 @@ GRAPH_JSON = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_simd_helpers_edges.pass"],
-      "key": "76e65a86bacacfe806ab2a857d4704788ac77b64bfe76dfaa0d47d8e9741c131"
+      "key": "5a8d555915e15650c3d3e45c4dccbbe87d588e7636bf4772ed4ba31541a3411c"
     },
     {
       "id": "komira-ai/simd_ops@0.1.0#mojo1.0.0/test:src/simd_ops/tests/test_simd_horizontal_add.mojo",
@@ -367,7 +367,7 @@ GRAPH_JSON = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_simd_horizontal_add.pass"],
-      "key": "edd6a66aee7a387801f66e8e8520e7f101359f84dd7740cfadc62c1c51be08c4"
+      "key": "728c340f5817113ba51e7d57ecfadb80bf7f194f151582bd3d6c4fa520aac411"
     },
     {
       "id": "komira-ai/simd_ops@0.1.0#mojo1.0.0/test:src/simd_ops/tests/test_simd_pattern_copy_extend.mojo",
@@ -382,7 +382,7 @@ GRAPH_JSON = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_simd_pattern_copy_extend.pass"],
-      "key": "b05d91d9b7bc7a62d2787b6f399e089cf201c3f309c8141950c32bb7d19e74fe"
+      "key": "7675d01cf79081e37425e6ddd19d5b2c765f895bc03342329c5a274864752f3e"
     },
     {
       "id": "komira-ai/simd_ops@0.1.0#mojo1.0.0/test:src/simd_ops/tests/test_simd_popcount.mojo",
@@ -397,7 +397,7 @@ GRAPH_JSON = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_simd_popcount.pass"],
-      "key": "6837ad63ba24121eb7184244c90d4de6af37eb500a08c1ddfad200a14d914798"
+      "key": "67332a46e210edd8afda39361746f123889e9c1e164afde209865f54f091e58d"
     },
     {
       "id": "komira-ai/simd_ops@0.1.0#mojo1.0.0/test:src/simd_ops/tests/test_simd_validity_pack.mojo",
@@ -412,7 +412,7 @@ GRAPH_JSON = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_simd_validity_pack.pass"],
-      "key": "6890710fd8e51c9da83d42db04ba4aa25832e91c56d37455f23a40d5e738806f"
+      "key": "3bf1dac374e308e81f6a4531594a4291e6089150badb6463c32c506a49c8cf0d"
     },
     {
       "id": "komira-ai/simd_ops@0.1.0#mojo1.0.0/test:src/simd_ops/tests/test_simd_width_policy.mojo",
@@ -427,7 +427,7 @@ GRAPH_JSON = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_simd_width_policy.pass"],
-      "key": "d42a6512c6fe917327de8d568660752ce744714d1c29b95be49526da83844192"
+      "key": "461ff93c734e775e015ef4a308651566b20fc0688d8cc1d57a41a35d2a3ddec3"
     }
   ]
 }
@@ -475,7 +475,7 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
         {"path": "src/simd_ops/src/simd_ops/byte_class/movemask.mojo", "sha256": "bd1361561bc1e732ec4b8afcd6938675e8823598ddd76cdee23f72234b0a073b"},
         {"path": "src/simd_ops/src/simd_ops/byte_class/prefix_xor.mojo", "sha256": "ef901c4693542ef13402ba4976d682af7728a65a03b2bf232a52bed2cee4658b"},
         {"path": "src/simd_ops/src/simd_ops/byte_class/quote_region_mask.mojo", "sha256": "a95793ce36d5bdb06f9087cc9c809629c1b34a6a7d12b3884a395270f6880d1a"},
-        {"path": "src/simd_ops/src/simd_ops/byte_class/table_lookup.mojo", "sha256": "cdad0f8fd3d75c5db24dd29d1927fb07356d5a00b603d0bb99f0d119ccbbd736"},
+        {"path": "src/simd_ops/src/simd_ops/byte_class/table_lookup.mojo", "sha256": "68d418fc62952fb2013b5b6e96743247c33162a5ee632411d6200a13fbc5f88c"},
         {"path": "src/simd_ops/src/simd_ops/byte_class/type_cast.mojo", "sha256": "72a923cf823eb449b7094f254be3840b7bed1baba479c8dc388328ee51238fb5"},
         {"path": "src/simd_ops/src/simd_ops/compress.mojo", "sha256": "4a212321b8b19b2014f8f26f9235bef8280bd2ba02844716e6c4651721343091"},
         {"path": "src/simd_ops/src/simd_ops/fast_copy.mojo", "sha256": "4bf7b06091d855eeb7a34b3dcd17c2f7d7b4580bc67f21072b1ab97825402fdf"},
@@ -491,7 +491,7 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["simd_ops.mojoc"],
-      "key": "83190965b5b6424d138b211809023c53c089d35abebf08a8554ef1dc297c3c8b"
+      "key": "947cf1f210d6d30d7beec4285bcf9880948492b7a9eac9f92bec7ccf573d942f"
     },
     {
       "id": "komira-ai/simd_ops@0.1.0#mojo1.0.0/test:src/simd_ops/tests/test_byte_class_compare_reduce.mojo",
@@ -506,7 +506,7 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_byte_class_compare_reduce.pass"],
-      "key": "2bd7cbbfb15e17c3b07f3f61d43107facea8ea2b7be39d231dfdc7071c015aad"
+      "key": "953092fb3c47b071dd7f9c08c65854908b48886e00026cffb56e54d681e2d2f5"
     },
     {
       "id": "komira-ai/simd_ops@0.1.0#mojo1.0.0/test:src/simd_ops/tests/test_byte_class_iota_prefix_xor.mojo",
@@ -521,7 +521,7 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_byte_class_iota_prefix_xor.pass"],
-      "key": "c4ee34a298920088b27a0f37bcd82bccd6f490af80dbca3f1601dacf5548cf59"
+      "key": "10e692d102638edd9e3ecff70fe85f4f79bf2e30913b866730141f0974fc2071"
     },
     {
       "id": "komira-ai/simd_ops@0.1.0#mojo1.0.0/test:src/simd_ops/tests/test_byte_class_movemask.mojo",
@@ -536,7 +536,7 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_byte_class_movemask.pass"],
-      "key": "bf9520c2411806b7b7fc6e3b1bd69c226c0e251727bcff3a67f2c4dd52dd0c8c"
+      "key": "fedb81dd1843f898af61b3898d19aa581320cb0c28b299dc0583a1b3c7fac0eb"
     },
     {
       "id": "komira-ai/simd_ops@0.1.0#mojo1.0.0/test:src/simd_ops/tests/test_byte_class_shuffle_compress.mojo",
@@ -545,13 +545,13 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/simd_ops/tests/test_byte_class_shuffle_compress.mojo", "sha256": "d884abe178312bee90700e6d24f4c0c60df1b78f051212804e08b355837363ee"}
+        {"path": "src/simd_ops/tests/test_byte_class_shuffle_compress.mojo", "sha256": "8d28a817b67f0879f31586bcce8ca71489130689eb6f3cb968ef6ebbf596a590"}
       ],
       "deps": ["komira-ai/simd_ops@0.1.0#mojo1.0.0/lib"],
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_byte_class_shuffle_compress.pass"],
-      "key": "cbc721f75bedc2cbb021bcecd0b149dcffbfbce8f812b962b833fd0376b6bf6e"
+      "key": "4f2f1e90e2180a4375649bd6cbfa29a9b99cf950e1f738c8fe25c8edc48dac45"
     },
     {
       "id": "komira-ai/simd_ops@0.1.0#mojo1.0.0/test:src/simd_ops/tests/test_byte_class_wide_forms.mojo",
@@ -566,7 +566,7 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_byte_class_wide_forms.pass"],
-      "key": "1e42e2efb4a1a5ea33943e31a2724418bbf1bb16f6cd0e1f4e07d629a3cc9370"
+      "key": "eaeb17f9896e5b28377b9252e5335f0c12e305598ae5f171ea23c2c2a1c9d330"
     },
     {
       "id": "komira-ai/simd_ops@0.1.0#mojo1.0.0/test:src/simd_ops/tests/test_byte_equal_simd.mojo",
@@ -581,7 +581,7 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_byte_equal_simd.pass"],
-      "key": "e234d7093b372888828e5f6475559115dfc92db870d0a7a1b99a358e7ab1eed7"
+      "key": "c3deff9dfc94b303ab25f48646e21bd91c16d969a06fa29feb6af8900434cc2a"
     },
     {
       "id": "komira-ai/simd_ops@0.1.0#mojo1.0.0/test:src/simd_ops/tests/test_byte_memmem.mojo",
@@ -596,7 +596,7 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_byte_memmem.pass"],
-      "key": "5740fe3c183df355a08b988ca010634dcd2066cabf6a107a190c23abea884459"
+      "key": "4508c364226f7c12e2cb303a7361619da36185818006f1a8474e3f5239411a85"
     },
     {
       "id": "komira-ai/simd_ops@0.1.0#mojo1.0.0/test:src/simd_ops/tests/test_byte_set_nibble_luts.mojo",
@@ -611,7 +611,7 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_byte_set_nibble_luts.pass"],
-      "key": "601184c0c6a218905ff379c600b7f170e99d32ab5d19733a0a9c96066cb0fa36"
+      "key": "5b63c385f7683474f730263380dd34fecf38288db9033554045b7ded516d9c27"
     },
     {
       "id": "komira-ai/simd_ops@0.1.0#mojo1.0.0/test:src/simd_ops/tests/test_fast_copy_byte_oracle.mojo",
@@ -626,7 +626,7 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_fast_copy_byte_oracle.pass"],
-      "key": "fa66e5a4dab10e85873d983f1d7800ac9de5b848a00b45ef824ae1056cb2beee"
+      "key": "b63d28eb0e166ba6b257fac0b44385aa235da023a282221d065d4a6e011a5d14"
     },
     {
       "id": "komira-ai/simd_ops@0.1.0#mojo1.0.0/test:src/simd_ops/tests/test_fast_copy_edges.mojo",
@@ -641,7 +641,7 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_fast_copy_edges.pass"],
-      "key": "a60436fca203d4eec281fac4f6a6f02cb156cf98a401156d368c1ae041610676"
+      "key": "39c2bb39ac4094904f00bea35eb46eee9ba9a222ca6a272ee42956e2a27aa45d"
     },
     {
       "id": "komira-ai/simd_ops@0.1.0#mojo1.0.0/test:src/simd_ops/tests/test_fast_copy_erms_band.mojo",
@@ -656,7 +656,7 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_fast_copy_erms_band.pass"],
-      "key": "5004228ccb06702170168dd2169a29a3c4e28f0d746c7394bf88c4d00134cb87"
+      "key": "fce51c8d894ed028fd1ac5a0302a9c01e3713a4ecfff85b6fcd6258f8fbafed4"
     },
     {
       "id": "komira-ai/simd_ops@0.1.0#mojo1.0.0/test:src/simd_ops/tests/test_fast_copy_size_ladder.mojo",
@@ -671,7 +671,7 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_fast_copy_size_ladder.pass"],
-      "key": "3d00148cb212161ff4dd37484aad757a5e728932fc4e163a0f8770a9f008463a"
+      "key": "537d9146a7c5ac706be514d6916492dd8de8833e9a6b34f3cf1c78ff642af324"
     },
     {
       "id": "komira-ai/simd_ops@0.1.0#mojo1.0.0/test:src/simd_ops/tests/test_internal_helpers.mojo",
@@ -686,7 +686,7 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_internal_helpers.pass"],
-      "key": "9aeb254c66298df4b2263b59fb6c14499d77720df821140ec42a714be68ff2c3"
+      "key": "d99f1a19c9ecb6751fd144592d39ec3e362686a03d95056664ff80331259cc11"
     },
     {
       "id": "komira-ai/simd_ops@0.1.0#mojo1.0.0/test:src/simd_ops/tests/test_simd_bit_unpack.mojo",
@@ -701,7 +701,7 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_simd_bit_unpack.pass"],
-      "key": "dc80851381ddd8efb0dee75f387c7a9890d26d5149e0bad3248b2a8ab881bc35"
+      "key": "24b061a1a8d1678c2ed356c337b29df821fe527bef44387c74ec4018a68f8a23"
     },
     {
       "id": "komira-ai/simd_ops@0.1.0#mojo1.0.0/test:src/simd_ops/tests/test_simd_blend.mojo",
@@ -716,7 +716,7 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_simd_blend.pass"],
-      "key": "5e8083e303ec2c2bbc1921976faad03de5230f33c48fe0d6208b995d6ed9a74d"
+      "key": "f46bbfbfd503b5b966c5db93c9a5fef431d8656b638b0c5fbba2f59fa61cea6e"
     },
     {
       "id": "komira-ai/simd_ops@0.1.0#mojo1.0.0/test:src/simd_ops/tests/test_simd_compress.mojo",
@@ -731,7 +731,7 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_simd_compress.pass"],
-      "key": "9c8fd9677348d92e0344233fffb17f124612262e41919a1d4aa9b940c376b656"
+      "key": "6e178d6de4d1495dc0caebc9e5b9b0dc76fe87098b6dcd229869d4405951f3ea"
     },
     {
       "id": "komira-ai/simd_ops@0.1.0#mojo1.0.0/test:src/simd_ops/tests/test_simd_gather.mojo",
@@ -746,7 +746,7 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_simd_gather.pass"],
-      "key": "f3dfe9849404d14d8a229ea888221f461156cbac6bc7a55da769d456ecfbc184"
+      "key": "cef42f382ae31c5048e449376066aba7016b0a6bd547580a194b835cd6a105a5"
     },
     {
       "id": "komira-ai/simd_ops@0.1.0#mojo1.0.0/test:src/simd_ops/tests/test_simd_helpers.mojo",
@@ -761,7 +761,7 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_simd_helpers.pass"],
-      "key": "d4e775ae76383f6b23bf4b4801b7c265ab1922cfb360076fc3b8adeaa1815faa"
+      "key": "387742faabdc3a6ad5d876cbe578ab095f7a7b600d4e042bce1ace724bf45820"
     },
     {
       "id": "komira-ai/simd_ops@0.1.0#mojo1.0.0/test:src/simd_ops/tests/test_simd_helpers_edges.mojo",
@@ -776,7 +776,7 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_simd_helpers_edges.pass"],
-      "key": "dab6f256a07641648315e33af25e1b83b291c7c82f0e30637027adb992d3afb4"
+      "key": "9c3976f1aa4168ed19007a27beeefd696f4519617ded35cfcb6d1802a61fb1ca"
     },
     {
       "id": "komira-ai/simd_ops@0.1.0#mojo1.0.0/test:src/simd_ops/tests/test_simd_horizontal_add.mojo",
@@ -791,7 +791,7 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_simd_horizontal_add.pass"],
-      "key": "4ee45b1e130cccbc538f5f5acd8d1b22b421d0ab74677704d9a8eec251271fab"
+      "key": "b281d4617e0b92cb0e28b8b6060b7d805067a40731bacdf8945cfc93c04b20f0"
     },
     {
       "id": "komira-ai/simd_ops@0.1.0#mojo1.0.0/test:src/simd_ops/tests/test_simd_pattern_copy_extend.mojo",
@@ -806,7 +806,7 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_simd_pattern_copy_extend.pass"],
-      "key": "f6246ff47fc9155b51b3e4c22b778f62859c0294a158e8e931c1418a9fd3639c"
+      "key": "2349f2e840f1c1caa537771ed4790347087a1807cb95acccbe87db711dc3f4e2"
     },
     {
       "id": "komira-ai/simd_ops@0.1.0#mojo1.0.0/test:src/simd_ops/tests/test_simd_popcount.mojo",
@@ -821,7 +821,7 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_simd_popcount.pass"],
-      "key": "466d056e2245378c3ca4ccff243c0df267379ae69c8ed6b4b1c93d032f207f20"
+      "key": "49e0f73806125db7eec280a9b6f81e65e7ae051c75b9d5db8e395fd67f6acbae"
     },
     {
       "id": "komira-ai/simd_ops@0.1.0#mojo1.0.0/test:src/simd_ops/tests/test_simd_validity_pack.mojo",
@@ -836,7 +836,7 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_simd_validity_pack.pass"],
-      "key": "1a4ba726218466beba03a8763b5fa2fbb274c932caf4ab29ba4e7245baa35db5"
+      "key": "b01f3ef3972a73f952a45918045f10d985995ec48c4fde426162211d4494937c"
     },
     {
       "id": "komira-ai/simd_ops@0.1.0#mojo1.0.0/test:src/simd_ops/tests/test_simd_width_policy.mojo",
@@ -851,7 +851,7 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_simd_width_policy.pass"],
-      "key": "ad8c858541ee29a99aa98b3709936ee7490d54f83ca6904b6d996542be6f5bb6"
+      "key": "ce7c9b6731386b3076a464078663247f3eee11d592b2a59dbbbf19145dd9f084"
     }
   ]
 }
@@ -896,7 +896,7 @@ GRAPH_JSON_OSX_ARM64 = r'''{
         {"path": "src/simd_ops/src/simd_ops/byte_class/movemask.mojo", "sha256": "bd1361561bc1e732ec4b8afcd6938675e8823598ddd76cdee23f72234b0a073b"},
         {"path": "src/simd_ops/src/simd_ops/byte_class/prefix_xor.mojo", "sha256": "ef901c4693542ef13402ba4976d682af7728a65a03b2bf232a52bed2cee4658b"},
         {"path": "src/simd_ops/src/simd_ops/byte_class/quote_region_mask.mojo", "sha256": "a95793ce36d5bdb06f9087cc9c809629c1b34a6a7d12b3884a395270f6880d1a"},
-        {"path": "src/simd_ops/src/simd_ops/byte_class/table_lookup.mojo", "sha256": "cdad0f8fd3d75c5db24dd29d1927fb07356d5a00b603d0bb99f0d119ccbbd736"},
+        {"path": "src/simd_ops/src/simd_ops/byte_class/table_lookup.mojo", "sha256": "68d418fc62952fb2013b5b6e96743247c33162a5ee632411d6200a13fbc5f88c"},
         {"path": "src/simd_ops/src/simd_ops/byte_class/type_cast.mojo", "sha256": "72a923cf823eb449b7094f254be3840b7bed1baba479c8dc388328ee51238fb5"},
         {"path": "src/simd_ops/src/simd_ops/compress.mojo", "sha256": "4a212321b8b19b2014f8f26f9235bef8280bd2ba02844716e6c4651721343091"},
         {"path": "src/simd_ops/src/simd_ops/fast_copy.mojo", "sha256": "4bf7b06091d855eeb7a34b3dcd17c2f7d7b4580bc67f21072b1ab97825402fdf"},
@@ -912,7 +912,7 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["simd_ops.mojoc"],
-      "key": "0dccf79a045f7c90f810dd14865471c6943a15af978ead9f0a0f7df2cf893c76"
+      "key": "564b538fa6115b669bd529fe972df256f98933fb07f9f06389b8068245682f94"
     },
     {
       "id": "komira-ai/simd_ops@0.1.0#mojo1.0.0/test:src/simd_ops/tests/test_byte_class_compare_reduce.mojo",
@@ -927,7 +927,7 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_byte_class_compare_reduce.pass"],
-      "key": "a253192f0042aa1e9169bd4e9de153aff24573a8b2153fc6e04958cca213cff8"
+      "key": "c8695676d71ffb777e9b96c4670076190db8a038c17d0befc758bb6d68045f9a"
     },
     {
       "id": "komira-ai/simd_ops@0.1.0#mojo1.0.0/test:src/simd_ops/tests/test_byte_class_iota_prefix_xor.mojo",
@@ -942,7 +942,7 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_byte_class_iota_prefix_xor.pass"],
-      "key": "1d7c897a59de3e16e29e6f9dfab316e3dbb509f92f6b2bce0b7610126531c37f"
+      "key": "7e183711bc0d0bbfbe068eac6922de6f9fccfff3ef135976217243e4dadaa755"
     },
     {
       "id": "komira-ai/simd_ops@0.1.0#mojo1.0.0/test:src/simd_ops/tests/test_byte_class_movemask.mojo",
@@ -957,7 +957,7 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_byte_class_movemask.pass"],
-      "key": "d0ef9ec8a4ccadff7fbf62ac7b09a7c10c700a70684f0914452e169aabc6db17"
+      "key": "e1e093f1e103e6db68642c5030352af5d38162a129bde3db32622a2c523cb81e"
     },
     {
       "id": "komira-ai/simd_ops@0.1.0#mojo1.0.0/test:src/simd_ops/tests/test_byte_class_shuffle_compress.mojo",
@@ -966,13 +966,13 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/simd_ops/tests/test_byte_class_shuffle_compress.mojo", "sha256": "d884abe178312bee90700e6d24f4c0c60df1b78f051212804e08b355837363ee"}
+        {"path": "src/simd_ops/tests/test_byte_class_shuffle_compress.mojo", "sha256": "8d28a817b67f0879f31586bcce8ca71489130689eb6f3cb968ef6ebbf596a590"}
       ],
       "deps": ["komira-ai/simd_ops@0.1.0#mojo1.0.0/lib"],
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_byte_class_shuffle_compress.pass"],
-      "key": "49cf63cd43a1c62a25a7086b2e2231422e655f29732abd18e5d3c341cd61a313"
+      "key": "1869a478de8013e8cd7178ae5f963f9732bf947093fc8cd71cb1f0f3de8d4765"
     },
     {
       "id": "komira-ai/simd_ops@0.1.0#mojo1.0.0/test:src/simd_ops/tests/test_byte_class_wide_forms.mojo",
@@ -987,7 +987,7 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_byte_class_wide_forms.pass"],
-      "key": "ce4c18d5ebd628efec7a2211fafbc42c0fd2c5d06d2349a97b7287ee12a61e2d"
+      "key": "ad3f01fbc84c7aa3b082ecf9f8c9957c0c4e328f102b7d678e6827afacf7b163"
     },
     {
       "id": "komira-ai/simd_ops@0.1.0#mojo1.0.0/test:src/simd_ops/tests/test_byte_equal_simd.mojo",
@@ -1002,7 +1002,7 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_byte_equal_simd.pass"],
-      "key": "f198e70f3dde535ed1b9ef464f41769cdfc292705180edfefa7d597a770fddc0"
+      "key": "d68a3aa2aa4be5d48748c85ffb21f4efefd4d901c94d1014715c4ec7cffd8527"
     },
     {
       "id": "komira-ai/simd_ops@0.1.0#mojo1.0.0/test:src/simd_ops/tests/test_byte_memmem.mojo",
@@ -1017,7 +1017,7 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_byte_memmem.pass"],
-      "key": "4778e4be4c45c8a7911c35b249e36e82284b0812633f360853fc9c4f611c8e80"
+      "key": "be75e6bf77ce442fa518056471908bfabef06b4f755717567aea51bbece7f062"
     },
     {
       "id": "komira-ai/simd_ops@0.1.0#mojo1.0.0/test:src/simd_ops/tests/test_byte_set_nibble_luts.mojo",
@@ -1032,7 +1032,7 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_byte_set_nibble_luts.pass"],
-      "key": "fe3fb207645f1e120b33b34bd703148fbe94b83d0b87e89eae3dcb57f16b9c95"
+      "key": "237e9504fc4108945ea60c17973a670553b92efd9ae1b58fd84f041a7857cebc"
     },
     {
       "id": "komira-ai/simd_ops@0.1.0#mojo1.0.0/test:src/simd_ops/tests/test_fast_copy_byte_oracle.mojo",
@@ -1047,7 +1047,7 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_fast_copy_byte_oracle.pass"],
-      "key": "fc4d5ff42c5fa26c6475656a49aff8564fd0962f190b118dfc98586ed5e6bdc4"
+      "key": "daba8b138266dde34ecf2b3946f152d34dfb1efdc7ea472dd13119888627eef1"
     },
     {
       "id": "komira-ai/simd_ops@0.1.0#mojo1.0.0/test:src/simd_ops/tests/test_fast_copy_edges.mojo",
@@ -1062,7 +1062,7 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_fast_copy_edges.pass"],
-      "key": "5b54e1ea3bf3d6655551001db9ca91803c3424776373eb236455a3db0c9534ca"
+      "key": "86dd24e80c3e7af348597a8b45157915ee9c9b6db8ccc650df94d0aa7d18c771"
     },
     {
       "id": "komira-ai/simd_ops@0.1.0#mojo1.0.0/test:src/simd_ops/tests/test_fast_copy_erms_band.mojo",
@@ -1077,7 +1077,7 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_fast_copy_erms_band.pass"],
-      "key": "2c4f131478b5c858874abcdd4d8d1bb5147d3bbd46567f463a4106a59cffa3c9"
+      "key": "3e1c3bf383ea1ba718a374b818c2da832242eb8e50bdd82886963d4c60ca2710"
     },
     {
       "id": "komira-ai/simd_ops@0.1.0#mojo1.0.0/test:src/simd_ops/tests/test_fast_copy_size_ladder.mojo",
@@ -1092,7 +1092,7 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_fast_copy_size_ladder.pass"],
-      "key": "46221bb99819134517f403c3d156255071627fb4838361e20e9de637ebeb0da6"
+      "key": "63f7330a9e9c6071478a779d5349ec8230825e2db2b96ad9ce1214a7110179b8"
     },
     {
       "id": "komira-ai/simd_ops@0.1.0#mojo1.0.0/test:src/simd_ops/tests/test_internal_helpers.mojo",
@@ -1107,7 +1107,7 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_internal_helpers.pass"],
-      "key": "281f32d79e0573c3a91de1c02e942a8ea4940086d8fc27939be6852906089386"
+      "key": "5288a5beb1bcdd6ce9f28c521062722410db1aa262561c01baba4abee0910cf9"
     },
     {
       "id": "komira-ai/simd_ops@0.1.0#mojo1.0.0/test:src/simd_ops/tests/test_simd_bit_unpack.mojo",
@@ -1122,7 +1122,7 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_simd_bit_unpack.pass"],
-      "key": "c8800ca504b340fd91aca7d5678ef2d38f91110656ace35d8d5275705bf819a9"
+      "key": "5cf26d1d3592605843c6536244cc49e3ea76c30838641ed393eb0f74089071b8"
     },
     {
       "id": "komira-ai/simd_ops@0.1.0#mojo1.0.0/test:src/simd_ops/tests/test_simd_blend.mojo",
@@ -1137,7 +1137,7 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_simd_blend.pass"],
-      "key": "5badd8f844bd05a4b3dbad9f5842656a30f38515b2554160d60d15ccd34e7715"
+      "key": "cdb5a1b0714fe0f2d4d6081674e2458d8a1ba7bd729e3b6b8c77ac5bfb76fcf1"
     },
     {
       "id": "komira-ai/simd_ops@0.1.0#mojo1.0.0/test:src/simd_ops/tests/test_simd_compress.mojo",
@@ -1152,7 +1152,7 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_simd_compress.pass"],
-      "key": "4e70453e4c80be3f9db663decda86b25ab8b7b769fdbd354c32f533370bf876a"
+      "key": "4de4d3a68ce79368829448a0abf18cb3802d739d90f48ed5e717b4712ab8b974"
     },
     {
       "id": "komira-ai/simd_ops@0.1.0#mojo1.0.0/test:src/simd_ops/tests/test_simd_gather.mojo",
@@ -1167,7 +1167,7 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_simd_gather.pass"],
-      "key": "9a1631546002e452edaa38b1ebda592776ce2ff8d092d85a106e6000b78dec02"
+      "key": "86fe53b5546a9306dc041700de09e0d73b65dcdd549ac3f626fb10d0eedb4944"
     },
     {
       "id": "komira-ai/simd_ops@0.1.0#mojo1.0.0/test:src/simd_ops/tests/test_simd_helpers.mojo",
@@ -1182,7 +1182,7 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_simd_helpers.pass"],
-      "key": "e51b570ef677033800734f7759ed3ece4e4ea3ee0cab1379185f910af48b8ebf"
+      "key": "954db77d061911b01d5774786c619faaf26ea59666421dd86dc4df6419b7f47d"
     },
     {
       "id": "komira-ai/simd_ops@0.1.0#mojo1.0.0/test:src/simd_ops/tests/test_simd_helpers_edges.mojo",
@@ -1197,7 +1197,7 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_simd_helpers_edges.pass"],
-      "key": "cd08bec9834c34536ba6f0da2d5857844bcb0367894d65b07373713cadf5eec5"
+      "key": "0be98ab5d3b51fe705b05149df8b3fa9e34874a4f6898dad05fc537d668ba686"
     },
     {
       "id": "komira-ai/simd_ops@0.1.0#mojo1.0.0/test:src/simd_ops/tests/test_simd_horizontal_add.mojo",
@@ -1212,7 +1212,7 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_simd_horizontal_add.pass"],
-      "key": "b52d4bc009f249983ee4851a4d5e777ae156aba32ba6f01f7709cd98c6f37937"
+      "key": "c0ce72c424d65b73c8bb68ff30df38307acff793f031c1eb2ff9eb0acaa31e2a"
     },
     {
       "id": "komira-ai/simd_ops@0.1.0#mojo1.0.0/test:src/simd_ops/tests/test_simd_pattern_copy_extend.mojo",
@@ -1227,7 +1227,7 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_simd_pattern_copy_extend.pass"],
-      "key": "e6238e6970cb7afb2961e6ff18c2476d28c724d6b4d55ad9d29d8b0d8ea7f08b"
+      "key": "c17a5cd6525d7cc12d22420bea483aeee70997c9180bba7b4754726b22166cce"
     },
     {
       "id": "komira-ai/simd_ops@0.1.0#mojo1.0.0/test:src/simd_ops/tests/test_simd_popcount.mojo",
@@ -1242,7 +1242,7 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_simd_popcount.pass"],
-      "key": "391ba899eab2a055cd52ab10b150617be81c20b21b9cfa7f65866e885aab0d37"
+      "key": "3893e9bb58fcfb7e291c109bd810bfc1b15c1baf194c8383ee9631a78248c4d5"
     },
     {
       "id": "komira-ai/simd_ops@0.1.0#mojo1.0.0/test:src/simd_ops/tests/test_simd_validity_pack.mojo",
@@ -1257,7 +1257,7 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_simd_validity_pack.pass"],
-      "key": "b5eee5d92263376826211417fef2c2a8d593a378af080029065496496354bd18"
+      "key": "bd1bb59dedb52352497a0af8353669d7c9c9e38fab01fecbdc5d822a574805cf"
     },
     {
       "id": "komira-ai/simd_ops@0.1.0#mojo1.0.0/test:src/simd_ops/tests/test_simd_width_policy.mojo",
@@ -1272,7 +1272,7 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_simd_width_policy.pass"],
-      "key": "7dc6a6566da80a2c3f69a4a32a4fdc0854f172392e25ef4c1b7a946a40b3cd5e"
+      "key": "2fca4b9c6451fb467f91ad37d4009f37c8251a524a53a64375c01c20462dc8e3"
     }
   ]
 }

@@ -1,6 +1,14 @@
 """Load-time cases of the platform table (run by tools/build/tests/functional/platform_table/BUCK)."""
 
 load(
+    "@komira//tools/build/platforms:isa_variants.bzl",
+    "extra_variants",
+    "floor_variant",
+    "isa_variant",
+    "variant_path",
+    "variants_manifest",
+)
+load(
     "@komira//tools/build/platforms:table.bzl",
     "PLATFORMS",
     "by_target_os",
@@ -53,8 +61,28 @@ def _oci_with_config_size(z):
     oci["config_size"] = z
     return oci
 
+_V2 = ["cx16", "lahf_lm", "pni", "popcnt", "sse4_1", "sse4_2", "ssse3"]
+_V3 = sorted(_V2 + ["abm", "avx", "avx2", "bmi1", "bmi2", "f16c", "fma", "movbe"])
+
+def _variants(*vs):
+    return list(vs)
+
 # (what the case is, the table it checks, a sentence its refusals must contain; None: no refusal at all)
 _TABLE_CASES = [
+    ("no variant at all", _edit("linux-x86_64", field = "isa_variants", value = []), "row linux-x86_64: `isa_variants` is empty: a row ships at least its floor"),
+    ("a variant that is not an isa_variant", _edit("linux-x86_64", field = "isa_variants", value = ["x86-64-v3"]), "row linux-x86_64: isa_variants[0] is not an isa_variant(...)"),
+    ("two variants with one name", _edit("linux-x86_64", field = "isa_variants", value = _variants(isa_variant("v", "x86-64-v2", _V2), isa_variant("v", "x86-64-v3", _V3))), "row linux-x86_64: two variants are named `v`"),
+    ("a variant name with a slash", _edit("linux-x86_64", field = "isa_variants", value = _variants(isa_variant("x86/v3", "x86-64-v3", _V3))), "row linux-x86_64: isa_variants[0]: name \"x86/v3\" is not a plain path segment of [a-z0-9._-]"),
+    ("a variant named `..`", _edit("linux-x86_64", field = "isa_variants", value = _variants(isa_variant("..", "x86-64-v3", _V3))), "row linux-x86_64: isa_variants[0]: name \"..\" is not a plain path segment"),
+    ("an empty variant CPU", _edit("linux-x86_64", field = "isa_variants", value = _variants(isa_variant("x86-64-v2", "", _V2), isa_variant("x86-64-v3", "x86-64-v3", _V3))), "row linux-x86_64: isa_variants[0]: `target_cpu` is empty"),
+    ("target features that are not a list", _edit("linux-arm64", field = "isa_variants", value = _variants(isa_variant("generic", "generic", ["asimd", "fp"], target_features = "+outline-atomics"))), "row linux-arm64: isa_variants[0]: `target_features` is not a list of strings"),
+    ("unsorted requires", _edit("linux-x86_64", field = "isa_variants", value = _variants(isa_variant("x86-64-v3", "x86-64-v3", ["sse4_2", "avx2"]))), "row linux-x86_64: isa_variants[0]: `requires` must be a sorted list of strings without duplicates"),
+    ("a requires word with a space", _edit("linux-x86_64", field = "isa_variants", value = _variants(isa_variant("x86-64-v3", "x86-64-v3", ["avx2 bmi2"]))), "row linux-x86_64: isa_variants[0]: `requires` word \"avx2 bmi2\" is not a /proc/cpuinfo flag of [a-z0-9_]"),
+    ("a variant that drops a feature of the one below", _edit("linux-x86_64", field = "isa_variants", value = _variants(isa_variant("x86-64-v2", "x86-64-v2", _V2), isa_variant("x86-64-v3", "x86-64-v3", [f for f in _V3 if f != "cx16"]))), "row linux-x86_64: variant `x86-64-v3` does not require every feature of `x86-64-v2` and more (lacks cx16)"),
+    ("a variant that requires no more than the one below", _edit("linux-x86_64", field = "isa_variants", value = _variants(isa_variant("x86-64-v2", "x86-64-v2", _V3), isa_variant("x86-64-v3", "x86-64-v3", _V3))), "row linux-x86_64: variant `x86-64-v3` does not require every feature of `x86-64-v2` and more (lacks nothing, and adds nothing)"),
+    ("no variant that is the row's own build", _edit("linux-x86_64", field = "isa_variants", value = _variants(isa_variant("x86-64-v2", "x86-64-v2", _V2))), "row linux-x86_64: no variant is the row's own build (target_cpu `x86-64-v3`, target_features []): the tested build must ship"),
+    ("the row's CPU without its target features", _edit("linux-arm64", field = "isa_variants", value = _variants(isa_variant("generic", "generic", ["asimd", "fp"]))), "row linux-arm64: no variant is the row's own build (target_cpu `generic`, target_features [\"+outline-atomics\"])"),
+    ("two variants that are the row's own build", _edit("linux-x86_64", field = "isa_variants", value = _variants(isa_variant("a", "x86-64-v3", _V2), isa_variant("b", "x86-64-v3", _V3))), "row linux-x86_64: variants a, b are all the row's own build"),
     ("the table as committed", PLATFORMS, None),
     ("a pin missing from a registered linux row", _edit("linux-x86_64", drop_role = "rustc"), "row linux-x86_64: missing pin `rustc`"),
     ("a pin missing from the macOS row", _edit("darwin-arm64", drop_role = "zig"), "row darwin-arm64: missing pin `zig`"),
@@ -136,6 +164,7 @@ def platform_table_cases():
         refusal = host_refusal(h)
         if (refusal == None) != (why == None) or (why != None and why not in refusal):
             fail("platform table: host {} {}: refusal is {}, expected {}".format(os, arch, refusal, why))
+    _variant_cases()
     if registered_names() != ["linux-x86_64", "darwin-arm64"]:
         fail("platform table: registered rows are {}, expected linux-x86_64 then darwin-arm64 (the first match of an action that states no os is linux)".format(registered_names()))
     if reserved_names() != ["linux-arm64"]:
@@ -158,3 +187,31 @@ def platform_table_cases():
     # action.
     if constraints("linux-x86_64") != ["prelude//os/constraints:linux", "prelude//cpu/constraints:x86_64"]:
         fail("platform table: the constraints of linux-x86_64 changed: {}".format(constraints("linux-x86_64")))
+
+# The native directory's manifest as each registered row writes it, byte for byte: the floor at the
+# plain path, every other variant under variants/<name>/, the cpuinfo flags each needs.
+_MANIFESTS = {
+    "darwin-arm64": ("libkomira.dylib", "apple-m1\tlibkomira.dylib\t\n"),
+    "linux-x86_64": ("libkomira.so", "x86-64-v2\tlibkomira.so\t" + " ".join(_V2) + "\n" +
+                                     "x86-64-v3\tvariants/x86-64-v3/libkomira.so\t" + " ".join(_V3) + "\n"),
+}
+
+def _variant_cases():
+    for n, case in _MANIFESTS.items():
+        file_name, want = case
+        got = variants_manifest(PLATFORMS[n], file_name)
+        if got != want:
+            fail("platform table: the VARIANTS manifest of {} is {}, expected {}".format(n, repr(got), repr(want)))
+
+    # The C floor and the variants that need a toolchain of their own: the row's own build
+    # (`target_cpu`) is never one of them.
+    x86 = PLATFORMS["linux-x86_64"]
+    if floor_variant(x86)["target_cpu"] != "x86-64-v2":
+        fail("platform table: the floor of linux-x86_64 is {}, expected x86-64-v2".format(floor_variant(x86)["target_cpu"]))
+    if [v["name"] for v in extra_variants(x86)] != ["x86-64-v2"]:
+        fail("platform table: the extra variants of linux-x86_64 are {}, expected [x86-64-v2]".format([v["name"] for v in extra_variants(x86)]))
+    for n in ["darwin-arm64", "linux-arm64"]:
+        if extra_variants(PLATFORMS[n]):
+            fail("platform table: row {} has extra variants {}, expected none".format(n, extra_variants(PLATFORMS[n])))
+    if variant_path(x86, x86["isa_variants"][1], "libkomira.so") != "variants/x86-64-v3/libkomira.so":
+        fail("platform table: x86-64-v3 is at {}".format(variant_path(x86, x86["isa_variants"][1], "libkomira.so")))

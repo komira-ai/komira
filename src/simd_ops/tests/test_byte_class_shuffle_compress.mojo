@@ -5,7 +5,8 @@
 #
 # Coverage:
 #   L1  table_lookup_u8x16 — identity / reverse / partial (sequential index).
-#   L2  table_lookup_u8x32 — 32-byte 2-half lookup.
+#   L2  table_lookup_u8x32 — 32-byte 2-half lookup; on x86, the AVX2 form
+#       and the two-pshufb form of a target without AVX2 against one model.
 #   L3  nibble_lut_classify_u8x16 — byte-class detection via nibble LUTs.
 #   F1  byte_find_eq_2/3/4/5 at W=16 — multi-needle find correctness.
 #   F2  byte_find_eq_4 at W=32 — AVX2 width.
@@ -20,10 +21,12 @@
 #   Q1  quote_region_mask_u64 — single quote / paired / multi-region.
 # =============================================================================
 
+from std.sys.info import CompilationTarget
 from std.testing import assert_equal, assert_true, assert_false
 
 from simd_ops.byte_class.table_lookup import (
     table_lookup_u8x16, table_lookup_u8x32, nibble_lut_classify_u8x16,
+    _ssse3_pshufb_x32,
 )
 from simd_ops.byte_class.byte_find_any_of import (
     byte_find_eq_2_u8x16, byte_find_eq_3_u8x16, byte_find_eq_4_u8x16,
@@ -91,6 +94,56 @@ def test_table_lookup_u8x32() raises:
     var out = table_lookup_u8x32(table, indices)
     for k in range(32):
         assert_equal(out[k], UInt8((k % 16) * 2))
+
+
+def _lookup_u8x32_model(
+    table: SIMD[DType.uint8, 32], indices: SIMD[DType.uint8, 32]
+) -> SIMD[DType.uint8, 32]:
+    """What lane k of a 32-byte lookup holds: each half selects from its own
+    half of `table`. x86 `pshufb`: the high index bit gives 0, else the low
+    nibble selects. NEON `tbl`: an index of 16 or more gives 0."""
+    var out = SIMD[DType.uint8, 32](0)
+    for k in range(32):
+        var idx = Int(indices[k])
+        var base = 0 if k < 16 else 16
+        comptime if CompilationTarget.is_x86():
+            if idx < 0x80:
+                out[k] = table[base + (idx & 0x0F)]
+        else:
+            if idx < 16:
+                out[k] = table[base + idx]
+    return out
+
+
+def test_table_lookup_u8x32_halves_and_out_of_range() raises:
+    # Distinct halves (lane k of the table is 100 + k), so a lookup that
+    # read the other half, or one table lane for both, gives a wrong byte.
+    # Indices cover in range, the low nibble of 16..127 (x86 wraps it, NEON
+    # gives 0) and the high bit (0 on both).
+    var table = SIMD[DType.uint8, 32](0)
+    for k in range(32):
+        table[k] = UInt8(100 + k)
+    var patterns = List[SIMD[DType.uint8, 32]]()
+    var a = SIMD[DType.uint8, 32](0)
+    var b = SIMD[DType.uint8, 32](0)
+    var c = SIMD[DType.uint8, 32](0)
+    for k in range(32):
+        a[k] = UInt8(15 - (k % 16))  # reversed within each half
+        b[k] = UInt8((k * 7 + 16) % 128)  # 16..127: past the half
+        c[k] = UInt8(0x80 | k) if k % 3 == 0 else UInt8(k % 16)  # high bit set
+    patterns.append(a)
+    patterns.append(b)
+    patterns.append(c)
+    for p in patterns:
+        var want = _lookup_u8x32_model(table, p)
+        var got = table_lookup_u8x32(table, p)
+        for k in range(32):
+            assert_equal(got[k], want[k])
+        comptime if CompilationTarget.is_x86():
+            # The form an x86-64-v2 build takes, run here on any x86 CPU.
+            var two = _ssse3_pshufb_x32(table, p)
+            for k in range(32):
+                assert_equal(two[k], want[k])
 
 
 # =============================================================================
@@ -426,6 +479,7 @@ def main() raises -> None:
     test_table_lookup_u8x16_identity()
     test_table_lookup_u8x16_reverse()
     test_table_lookup_u8x32()
+    test_table_lookup_u8x32_halves_and_out_of_range()
     test_nibble_lut_classify_simple()
     test_byte_find_eq_2()
     test_byte_find_eq_4_rfc4180()

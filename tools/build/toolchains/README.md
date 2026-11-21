@@ -40,6 +40,12 @@ execution platform ([platforms/README.md](../platforms/README.md#toolchains)).
 `komira_mojo_toolchains` ([`defs.bzl`](defs.bzl)) bundles them into
 `toolchains//:mojo` for `mojo_library`, `mojo_binary` and `mojo_test` (its
 actions run on the linux execution platform). It links for `x86_64-linux-gnu.2.34` and compile for `target_cpu = "x86-64-v3"`.
+It also declares `toolchains//:mojo_linux_x86_64_x86_64_v2`, the same toolchain
+for `x86-64-v2`, the floor of the row's `isa_variants`: only the x86-64-v2 link
+of libkomira names it (`//src/so:libkomira_x86_64_v2`). The C/C++ toolchain
+(`komira_cxx_toolchains`) compiles for that floor, `x86-64-v2`, not for the
+Mojo `target_cpu`: the C every variant of libkomira links, and the native
+owners all of them load, must run on the lowest CPU the row ships for.
 `komira_toolchains` calls it from the `toolchains` cell of the repository at
 the project root (`tools/build/cells/toolchains/BUCK` in a standalone
 checkout), so a repository using komira can pass its own compiler

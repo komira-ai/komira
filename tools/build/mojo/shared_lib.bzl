@@ -44,6 +44,9 @@ load("@komira//tools/build/bench_salt:bench_salt.bzl", "salted")
 #                  @export is MISSING for any driver that calls it.
 #   gate_srcs      linked-run drivers: Mojo mains that dlopen `./<out_name>.so`
 #                  (the gate stages it as their one data file) and call it.
+#   extra_runpath  run path entries after `$ORIGIN/lib` and `$ORIGIN` (Linux
+#                  only), e.g. `$ORIGIN/../../lib` for a library that is
+#                  installed two directories below the lib/ it loads from.
 #   force_load     C/C++ libraries linked whole (--whole-archive): every object
 #                  of their archives is in the library, referenced or not.
 #
@@ -128,6 +131,13 @@ def _shared_lib_impl(ctx):
         # (the `lib/` the gate stages) alone finds nothing there. lld joins
         # the two `-rpath` into one DT_RUNPATH.
         link_extra = cmd_args(link_extra, "-Wl,-rpath,$ORIGIN") if link_extra else cmd_args("-Wl,-rpath,$ORIGIN")
+        # `extra_runpath`, after those two: a variant of libkomira sits two
+        # directories below the native directory's lib/ (`variants/<level>/`),
+        # and reaches it as `$ORIGIN/../../lib`.
+        for p in ctx.attrs.extra_runpath:
+            link_extra = cmd_args(link_extra, "-Wl,-rpath," + p)
+    elif ctx.attrs.extra_runpath:
+        fail("{}: `extra_runpath` is ELF only".format(ctx.label))
 
     # The owners' shared libraries (`native_owners`): linked ahead of the C
     # archives, so the library is NEEDED on each owner's SONAME and the
@@ -255,6 +265,7 @@ mojo_shared_lib_rule = rule(
         "c_exports": attrs.list(attrs.string(), default = []),
         "exports": attrs.list(attrs.string()),
         "exports_exact": attrs.bool(default = False),
+        "extra_runpath": attrs.list(attrs.string(), default = []),
         "force_load": attrs.list(attrs.dep(), default = []),
         "gate_srcs": attrs.list(attrs.source(), default = []),
         "main": attrs.option(attrs.source(), default = None),

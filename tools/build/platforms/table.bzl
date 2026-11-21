@@ -24,6 +24,8 @@ package that reads the table fails to load, naming the row and the pin, the
 moment a row is missing one.
 """
 
+load(":isa_variants.bzl", "isa_variant", "variant_refusals")
+
 # ---- Row vocabulary ----------------------------------------------------------
 
 # `none(reason)`: this platform needs no such pin, stated rather than omitted.
@@ -112,6 +114,7 @@ ROW_FIELDS = [
     "features",  # what the platform has that tests select on (a test needing one is compatible only with rows listing it)
     "golden_config_hash",  # the configuration hash of this row's platform: what output paths and action keys carry; `pending(...)` for a row with no platform
     "host",  # what host_info() reports on a machine of this platform: {"os": ..., "arch": ...}
+    "isa_variants",  # the CPU levels libkomira ships at, lowest first (isa_variants.bzl)
     "object_format",  # `elf` or `macho`
     "oci_base",  # the container base (kwargs of `oci_base`), or `none(...)`
     "os",  # constraint name of the os: `linux`, `macos`
@@ -325,6 +328,15 @@ PLATFORMS = {
         "features": ["epoll", "erms", "futex", "thp", "x86_simd"],
         "golden_config_hash": "03cc1a891c89e4be",
         "host": {"arch": "x86_64", "os": "linux"},
+        # The levels libkomira ships at (isa_variants.bzl), lowest first, each with the
+        # cpuinfo flags a CPU needs to run it. x86-64-v2 is the floor, and the
+        # CPU of every C object of the row; x86-64-v3 is `target_cpu`, the build every
+        # test runs. x86-64-v4 is added once a worker runs it and a measurement shows a
+        # gain (docs/design/isa_variants.md, decision 4).
+        "isa_variants": [
+            isa_variant("x86-64-v2", "x86-64-v2", ["cx16", "lahf_lm", "pni", "popcnt", "sse4_1", "sse4_2", "ssse3"]),
+            isa_variant("x86-64-v3", "x86-64-v3", ["abm", "avx", "avx2", "bmi1", "bmi2", "cx16", "f16c", "fma", "lahf_lm", "movbe", "pni", "popcnt", "sse4_1", "sse4_2", "ssse3"]),
+        ],
         "object_format": "elf",
         # The base of oci_base: distroless base-debian12 (glibc, CA certificates,
         # tzdata, a nonroot user, no shell), tag `nonroot`, its linux/amd64 image
@@ -501,6 +513,9 @@ PLATFORMS = {
         "features": ["kqueue", "neon", "ulock"],
         "golden_config_hash": "7fd7ccfd5d5f8024",
         "host": {"arch": "aarch64", "os": "macos"},
+        # One variant: every Apple silicon Mac implements apple-m1, and no source uses what
+        # later chips add, so no feature needs checking.
+        "isa_variants": [isa_variant("apple-m1", "apple-m1", [])],
         "object_format": "macho",
         "oci_base": none("OCI images are a Linux product"),
         "os": "macos",
@@ -633,6 +648,9 @@ PLATFORMS = {
         "features": ["epoll", "futex", "neon", "thp"],
         "golden_config_hash": pending("the platform exists once the row is registered"),
         "host": {"arch": "aarch64", "os": "linux"},
+        # The generic floor (the `Features` words every ARMv8-A CPU lists). `neoverse-n1`
+        # is added once a worker runs it and a measurement shows a gain.
+        "isa_variants": [isa_variant("generic", "generic", ["asimd", "fp"], target_features = ["+outline-atomics"])],
         "object_format": "elf",
         "oci_base": pending("the distroless base-debian12 linux/arm64 manifest and its blobs are recorded when the platform is brought up"),
         "os": "linux",
@@ -798,6 +816,7 @@ def table_refusals(table):
             out.append("row {}: `registered` is not a bool".format(name))
             continue
         out.extend(_shape_refusals(name, row))
+        out.extend(variant_refusals(name, row))
         oci = row["oci_base"]
         if type(oci) != "dict":
             out.append("row {}: `oci_base` is not a pin, `none(...)` or `pending(...)`".format(name))

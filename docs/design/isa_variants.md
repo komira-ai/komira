@@ -1,7 +1,11 @@
 # Per-ISA variants of libkomira: levels, layout, selector and size
 
-Status: design, not built. What already exists is marked **EXISTS**, with the path on `main` that does
-it; everything else is **PROPOSED**. Scope: the `libkomira` that the Python wheel and the npm platform packages carry
+Status: design, partly built. What already exists is marked **EXISTS**, with the path on `main` that
+does it; everything else is **PROPOSED**. Built: the `isa_variants` field and its checks, the
+x86-64-v2 toolchain, C at the floor, the variant links, the variants directory with its manifest and
+the load of each variant from it (**EXISTS** marks below). Not built yet: the wheel's and the npm
+packages' copy of that directory, the selector, `target_features` in the compile, and the
+generic-arm64 guard of `quote_region_mask_u64`. Scope: the `libkomira` that the Python wheel and the npm platform packages carry
 ([python_package.md](python_package.md), [typescript_package.md](typescript_package.md)). The Mojo
 program bundles of `tools/build/package` already have their own level check and are not changed here
 (see [What is not changed](#what-is-not-changed)).
@@ -96,7 +100,9 @@ npm platform packages copy ([typescript_package.md](typescript_package.md), "The
 self-contained"). That directory is itself not on `main` yet: it lands with the change that makes the
 wheel self-contained, and today's wheel carries `libkomira.so` and the owners in `lib/` and takes the
 Mojo runtime from `mojo-compiler` (**EXISTS:** [python/BUCK](../../python/BUCK)). The variants build on
-that change. **PROPOSED** layout for linux-x86_64:
+that change. The layout for linux-x86_64 (**EXISTS** as a directory of its own:
+`//tools/build/package/libkomira:libkomira_variants`, [variants.bzl](../../tools/build/package/libkomira/variants.bzl);
+no package copies it yet):
 
 ```
 VARIANTS                               the manifest (below)
@@ -138,7 +144,9 @@ lib/...                                native owners and the Mojo runtime librar
 
 ### 3. How the build makes a variant
 
-- **The platform table gains `isa_variants`** (PROPOSED). It is a field of every row: a list of
+- **The platform table gains `isa_variants`** (**EXISTS:**
+  [tools/build/platforms/isa_variants.bzl](../../tools/build/platforms/isa_variants.bzl); the table
+  lists only the variants that are built, so v4 and `neoverse-n1` are not in it). It is a field of every row: a list of
   `isa_variant(name, target_cpu, target_features, requires)`, lowest first. The completeness check
   at the bottom of the table refuses a row in each of these cases:
   - the list is empty;

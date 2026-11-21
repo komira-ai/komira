@@ -14,6 +14,7 @@ runs an action is the service's choice.
 """
 
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
+load("@komira//tools/build/platforms:isa_variants.bzl", "extra_variants", "floor_variant", "variant_label_name")
 load("@komira//tools/build/platforms:table.bzl", "row")
 
 load("@komira//tools/build/mojo:cxx.bzl", "no_python_bootstrap_toolchain", "zig_cxx_toolchain")
@@ -74,13 +75,47 @@ def komira_mojo_toolchains(darwin = "komira//tools/build/toolchains/darwin:mojo"
         **attrs
     )
 
+    # One more linux x86_64 toolchain per CPU level libkomira also ships at
+    # (`isa_variants` of the row, tools/build/platforms/isa_variants.bzl):
+    # `:mojo_linux_x86_64_<level>`, the same toolchain with that level's CPU.
+    # Only a target that names it in `toolchain` builds with it (each variant's
+    # link of libkomira, src/so/BUCK); every other target, and every `.mojoc`
+    # the link reads, stays on `:mojo`.
+    for v in extra_variants(row("linux-x86_64")):
+        if v["target_features"]:
+            fail("komira_mojo_toolchains: variant {} sets target_features {}, which no Mojo compile passes yet".format(v["name"], v["target_features"]))
+        mojo_toolchain(
+            name = "mojo_linux_x86_64_" + variant_label_name(v),
+            target_compatible_with = _LINUX_X86_64,  # komira-limit:mojo-toolchain-x86-64
+            exec_compatible_with = _LINUX_X86_64,
+            visibility = ["PUBLIC"],
+            **(attrs | {"target_cpu": v["target_cpu"]})
+        )
+
+def variant_toolchain(row_name, v):
+    """The Mojo toolchain a link of variant `v` (of row `row_name`'s `isa_variants`) names in `toolchain`.
+
+    The row's own build is `toolchains//:mojo_linux_x86_64`, the toolchain `:mojo`
+    selects there; another level is the toolchain of that level that
+    komira_mojo_toolchains declares. Linux x86_64 is the one row with more than
+    one variant.
+    """
+    if row_name != "linux-x86_64":
+        fail("variant_toolchain: row {} has no variant toolchains; linux-x86_64 is the one row with more than one variant".format(row_name))
+    if v in extra_variants(row(row_name)):
+        return "toolchains//:mojo_linux_x86_64_" + variant_label_name(v)
+    return "toolchains//:mojo_linux_x86_64"
+
 CXX_TOOLCHAIN_ATTRS = dict(
     busybox = _TOOLCHAINS + "busybox",
     launcher = _TOOLCHAINS + "zig_cc_launcher",
-    # The same target and CPU as the Mojo link steps, so C objects link into
-    # Mojo binaries.
+    # The same target as the Mojo link steps, so C objects link into Mojo
+    # binaries. The CPU is the row's floor variant (x86-64-v2), not the Mojo
+    # `target_cpu`: the native owners are shared libraries that every variant
+    # of libkomira loads, and the C a Mojo link embeds is in every variant
+    # too, so C must run on the lowest CPU the row ships for.
     target = MOJO_TOOLCHAIN_ATTRS["cc_target"],
-    target_cpu = MOJO_TOOLCHAIN_ATTRS["target_cpu"],
+    target_cpu = floor_variant(row("linux-x86_64"))["target_cpu"],
     zig = _TOOLCHAINS + "zig",
 )
 
