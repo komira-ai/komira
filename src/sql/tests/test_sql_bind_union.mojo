@@ -29,9 +29,11 @@
 #      names are the first branch's; each column folds on its own.
 #   9. A chain folds left to right into ONE union node with a child per
 #      branch; a refusal in a later branch names the branches before it.
-#  10. A branch with another name or type gets one projection on top; a branch
-#      equal in names and types gets none; a branch that needs the projection
-#      and has two columns of one name is refused, one that does not is bound.
+#  10. A branch with another name or type is cast and renamed in its own
+#      SELECT-list projection, by position (so two columns of one name, two
+#      bare literals included, stay two columns), or under one added
+#      projection when it ends in none; a branch equal in names and types is
+#      left as it is.
 #  11. Bare integer literals of every branch are INT32 when they fit and widen
 #      to INT64 beside a larger literal.
 #  12. ORDER BY / LIMIT / OFFSET after the last branch sort and window the whole
@@ -188,6 +190,16 @@ def _project_depth(p: LogicalPlan) -> Int:
     if p.tag != PLAN_PROJECT:
         return 0
     return 1 + _project_depth(p.project_data_ref().child[])
+
+
+def _conformed_depth(base: Int) -> Int:
+    """The projection depth of a branch that needed a cast or a rename, given
+    the depth `base` of the same branch when it needed none: its own SELECT
+    list is rewritten in place when it ends in one, else one projection is
+    added."""
+    if base > 0:
+        return base
+    return 1
 
 
 def _spine(p: LogicalPlan) -> String:
@@ -431,7 +443,8 @@ def test_a_branch_with_another_name_gets_a_projection() raises:
     )
     assert_equal(_project_depth(renamed.union_data_ref().children[0][]), head_depth)
     assert_equal(
-        _project_depth(renamed.union_data_ref().children[1][]), branch_depth + 1
+        _project_depth(renamed.union_data_ref().children[1][]),
+        _conformed_depth(branch_depth),
     )
     var branch_schema = renamed.union_data_ref().children[1][].output_schema.copy()
     assert_equal(branch_schema.field_name(0), "a")
@@ -444,7 +457,8 @@ def test_a_branch_of_another_type_is_cast_under_one_projection() raises:
     var branch_depth = _project_depth(base.union_data_ref().children[1][])
     var widened = _plan("SELECT x FROM t_i32 UNION ALL SELECT x FROM t_i64")
     assert_equal(
-        _project_depth(widened.union_data_ref().children[0][]), head_depth + 1
+        _project_depth(widened.union_data_ref().children[0][]),
+        _conformed_depth(head_depth),
     )
     var i64_base = _plan("SELECT x FROM t_i64 UNION ALL SELECT x FROM t_i64")
     assert_equal(
@@ -470,27 +484,45 @@ def test_a_branch_of_equal_schema_gets_no_projection() raises:
     var second = _project_depth(plan.union_data_ref().children[1][])
     var mixed = _plan("SELECT x FROM t_i64 UNION ALL SELECT x FROM t_i32")
     assert_equal(_project_depth(mixed.union_data_ref().children[0][]), first)
-    assert_equal(_project_depth(mixed.union_data_ref().children[1][]), second + 1)
-
-
-def test_a_duplicate_named_branch_needing_a_projection_is_refused() raises:
     assert_equal(
-        _err(
-            "SELECT x AS a, x AS a FROM t_i64 UNION ALL SELECT x AS a, x AS a"
-            " FROM t_i32"
-        ),
-        "SQL not supported: UNION ALL branch 2 has two columns named `a` and"
-        " needs its columns renamed or cast to match the other branches."
-        " Columns are matched by name, so the second would read the first's"
-        " values. Give the two columns distinct aliases.",
+        _project_depth(mixed.union_data_ref().children[1][]),
+        _conformed_depth(second),
     )
-    # Equal in names and types, the same branch needs no projection and binds.
+
+
+def test_a_branch_with_two_columns_of_one_name_is_cast_by_position() raises:
+    # Branch 2 has two columns named `a` and both need a cast to BIGINT. Its
+    # own SELECT list is rewritten by position, so it stays two columns, each
+    # still its own expression.
     var plan = _plan(
+        "SELECT x AS a, x + 1 AS a FROM t_i64 UNION ALL SELECT x AS a, x + 2"
+        " AS a FROM t_i32"
+    )
+    assert_equal(Int(plan.tag), Int(PLAN_UNION))
+    ref branch = plan.union_data_ref().children[1][]
+    assert_equal(Int(branch.tag), Int(PLAN_PROJECT))
+    assert_equal(branch.output_schema.num_columns(), 2)
+    for c in range(2):
+        assert_equal(branch.output_schema.field_name(c), "a")
+        assert_true(branch.output_schema.field_arrow_type(c) == ArrowType.INT64)
+    ref exprs = branch.project_data_ref().exprs
+    assert_true(String(exprs[0]) != String(exprs[1]), String(exprs[0]))
+    # Two bare literals are both `literal`; the branch binds as two columns.
+    var lits = _plan("SELECT x AS n, x AS m FROM t_i64 UNION ALL SELECT 9, 10")
+    assert_equal(lits.output_schema.num_columns(), 2)
+    assert_equal(lits.output_schema.field_name(0), "n")
+    assert_equal(lits.output_schema.field_name(1), "m")
+    ref lit_branch = lits.union_data_ref().children[1][]
+    for c in range(2):
+        assert_true(lit_branch.output_schema.field_arrow_type(c) == ArrowType.INT64)
+    assert_equal(lit_branch.output_schema.field_name(1), "m")
+    # Equal in names and types, a branch needs no projection and binds.
+    var same = _plan(
         "SELECT x AS a, x AS a FROM t_i64 UNION ALL SELECT x AS a, x AS a"
         " FROM t_i64"
     )
-    assert_equal(Int(plan.tag), Int(PLAN_UNION))
-    assert_equal(plan.output_schema.num_columns(), 2)
+    assert_equal(Int(same.tag), Int(PLAN_UNION))
+    assert_equal(same.output_schema.num_columns(), 2)
 
 
 def test_int_literals_of_every_branch_are_int32() raises:

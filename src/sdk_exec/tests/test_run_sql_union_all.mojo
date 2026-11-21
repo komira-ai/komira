@@ -36,7 +36,8 @@
 #     is DECIMAL(12,2) (an INTEGER needs ten digits before the point).
 #   * test_decimal_and_double_widen_to_double: DECIMAL with DOUBLE is DOUBLE.
 #   * test_three_branches_and_a_literal_branch: three branches, the last a
-#     FROM-less SELECT, ordered; the result keeps the first branch's names.
+#     FROM-less SELECT of two bare literals (both named `literal`), ordered;
+#     the result keeps the first branch's names.
 #   * test_aggregates_over_a_derived_union: count(*) and sum over
 #     `FROM (... UNION ALL ...) u`.
 #   * test_a_grouped_count_over_a_union_of_three: GROUP BY over three branches,
@@ -49,6 +50,9 @@
 #     `SELECT 1 UNION ALL SELECT 2` is INTEGER, with 5000000000 it is BIGINT.
 #   * test_a_limit_over_a_union_keeps_that_many_rows: LIMIT 2 with no ORDER BY
 #     keeps two rows of the union.
+#   * test_an_order_by_runs_through_run_sql: `ORDER BY` with no union, both
+#     directions. Catches run_lowered_plan not handing the builder the sort
+#     sinks' data (every ORDER BY was refused at execute).
 #   * test_unions_with_no_common_type_or_misplaced_clauses_are_refused: a
 #     VARCHAR with an INTEGER is refused at bind naming the column; an ORDER BY
 #     before UNION ALL is refused at parse; the context runs the next query.
@@ -421,6 +425,16 @@ def test_a_limit_over_a_union_keeps_that_many_rows() raises:
     var batch = _run(ctx, "select a from t_i32 union all select b from t_i64 limit 2")
     assert_equal(batch.num_rows(), 2)
     _expect_column(batch, 0, "a", ArrowType.INT64)
+
+
+def test_an_order_by_runs_through_run_sql() raises:
+    # The sort sink's data reaches the builder (`run_lowered_plan` hands it
+    # `params.sort`), with no union in the plan, descending and ascending.
+    var ctx = _context()
+    _expect_i64(_run(ctx, "select b from t_i64 order by b"), 0, [-7, 5000000000])
+    _expect_i64(
+        _run(ctx, "select b from t_i64 order by b desc"), 0, [5000000000, -7]
+    )
 
 
 def test_unions_with_no_common_type_or_misplaced_clauses_are_refused() raises:

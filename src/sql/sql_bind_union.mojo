@@ -8,7 +8,9 @@
 # column over the branches left to right, and puts one projection on every
 # branch whose names or types differ from the union's, so every child of the
 # node advertises exactly the node's schema (`LogicalPlan.union` does not
-# coerce). A pair of types this engine cannot cast between is refused by name.
+# coerce). The casts and renames go into the branch's own SELECT-list
+# projection, by position, when the branch ends in one. A pair of types this
+# engine cannot cast between is refused by name.
 #
 # Where DuckDB answers and this binder refuses, by name: UBIGINT with a signed
 # integer (DuckDB's HUGEINT; Arrow has no 128-bit integer); a common decimal
@@ -22,7 +24,7 @@
 from arrow.arrow_types import ArrowType
 from arrow.schema import Field, Schema, SchemaBuilder
 from plan_expr.expr import Expr
-from plan_ir.logical_plan import ExprArray, LogicalPlan
+from plan_ir.logical_plan import ExprArray, LogicalPlan, PLAN_PROJECT, PLAN_SCAN
 from sql.sql_ast import SelectStmt
 from sql.sql_bind_scope import CteScope
 from sql.sql_binder import _bind_select
@@ -291,8 +293,11 @@ def _union_conform_branch(
     var plan: LogicalPlan, out_schema: Schema, branch: Int
 ) raises -> LogicalPlan:
     """A branch plan whose column names and types are the union's: `plan`
-    itself when it already is, else `plan` under one projection that casts each
-    column of another type and renames each column to the union's name."""
+    itself when it already is; else, when the branch ends in a projection (its
+    SELECT list), that projection with each expression cast and renamed by
+    position; else `plan` under one projection that casts and renames each
+    column, which names its input columns and so refuses a branch with two
+    columns of one name."""
     var n = plan.output_schema.num_columns()
     var differs = False
     for i in range(n):
@@ -302,6 +307,23 @@ def _union_conform_branch(
             differs = True
     if not differs:
         return plan^
+    if plan.tag == PLAN_PROJECT and not plan.project_data_ref().udf:
+        # The branch ends in its SELECT list: cast and rename that list's
+        # expressions in place, by position, so two items of one name (two
+        # bare literals are both `literal`) stay two columns.
+        var listed = ExprArray()
+        for i in range(n):
+            listed.append(
+                _conform_expr(
+                    plan.project_data_ref().exprs[i].copy(),
+                    plan.output_schema,
+                    out_schema,
+                    i,
+                )
+            )
+        var child = LogicalPlan(PLAN_SCAN, Schema())
+        swap(child, plan._project.value()[].child[])
+        return LogicalPlan.project(listed^, child^)
     for i in range(n):
         for j in range(i + 1, n):
             if plan.output_schema.field_name(i) == plan.output_schema.field_name(j):
@@ -315,17 +337,31 @@ def _union_conform_branch(
                 )
     var exprs = ExprArray()
     for i in range(n):
-        var e = Expr.col_ref(String(plan.output_schema.field_name(i)))
-        if not _same_column_type(plan.output_schema, out_schema, i):
-            if out_schema.field_arrow_type(i) == ArrowType.DECIMAL128:
-                e = Expr.cast_to_decimal(
-                    e^, out_schema.field_decimal_precision(i),
-                    out_schema.field_decimal_scale(i),
-                )
-            else:
-                e = Expr.cast_to_arrow(e^, out_schema.field_arrow_type(i))
-        exprs.append(Expr.alias(e^, String(out_schema.field_name(i))))
+        exprs.append(
+            _conform_expr(
+                Expr.col_ref(String(plan.output_schema.field_name(i))),
+                plan.output_schema,
+                out_schema,
+                i,
+            )
+        )
     return LogicalPlan.project(exprs^, plan^)
+
+
+def _conform_expr(
+    var e: Expr, branch_schema: Schema, out_schema: Schema, i: Int
+) raises -> Expr:
+    """`e`, the branch's column `i`, cast to the union's type when the two
+    differ and named as the union's column `i`."""
+    if not _same_column_type(branch_schema, out_schema, i):
+        if out_schema.field_arrow_type(i) == ArrowType.DECIMAL128:
+            e = Expr.cast_to_decimal(
+                e^, out_schema.field_decimal_precision(i),
+                out_schema.field_decimal_scale(i),
+            )
+        else:
+            e = Expr.cast_to_arrow(e^, out_schema.field_arrow_type(i))
+    return Expr.alias(e^, String(out_schema.field_name(i)))
 
 
 def _bind_select_with_union(

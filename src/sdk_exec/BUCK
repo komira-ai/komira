@@ -39,7 +39,8 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #   INTEGER/BIGINT/FLOAT/DOUBLE/DECIMAL branches widened to DuckDB's common
 #   type, three branches, a literal branch, aggregates, GROUP BY and WHERE over
 #   a derived union, an empty branch, the first branch's names, LIMIT, and the
-#   refusals of a union with no common type and of an ORDER BY before UNION ALL.
+#   refusals of a union with no common type and of an ORDER BY before UNION ALL;
+#   and an ORDER BY with no union (the sort sinks' data reaches the builder).
 # - test_run_sql_timers_off: Q6 through run_sql on four workers in the default
 #   build gives the oracle's answer and leaves every phase timer
 #   (phase_timers) unregistered and at zero.
