@@ -3,10 +3,6 @@ load("@komira//tools/build/package:wheel.bzl", "wheel_file", "wheel_file_at_stam
 load("@komira//tools/build/platforms:defs.bzl", "DARWIN_ARM64")
 load("@komira//tools/build/platforms:table.bzl", "asset")
 load("@komira//tools/build/python:defs.bzl", "python_proto", "python_source_package")
-load("@komira//python:install_test.bzl", "picked_files", "wheel_install_test")
-load("@komira//tools/build/package:wheel.bzl", "wheel_file", "wheel_libs_check", "wheel_version")
-load("@komira//tools/build/platforms:defs.bzl", "DARWIN_ARM64")
-load("@komira//tools/build/python:defs.bzl", "python_proto", "python_source_package")
 
 # The import package `komira` (README.md): its files at their paths, as the site
 # directory the package's tests import it from (tests/BUCK). The wheel rule
