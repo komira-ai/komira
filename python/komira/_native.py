@@ -7,10 +7,13 @@ library and why. `Native` holds the bound calls and turns their status codes
 into `KomiraError`, with the context's last error, read with the two-call
 protocol, as the message.
 
-Before the library is opened, `load` calls two hooks: `_check_cpu()` here,
-which checks nothing yet, and `_runtime._preload_runtime_libraries(search_path=...)`,
-which opens the Mojo runtime libraries libkomira needs. An error either raises
-stops the load before the library is mapped.
+Before the library is opened, `load` calls two hooks: `_check_cpu()` here and
+`_runtime._preload_runtime_libraries(search_path=...)`; an error either raises
+stops the load before the library is mapped. `_check_cpu` refuses, on Linux
+x86_64, a CPU without the flags of x86-64-v3, the level libkomira is compiled
+for there, with `UnsupportedCpuError`: an older CPU would otherwise die of an
+illegal instruction inside the library. The preload hook opens the Mojo
+runtime libraries libkomira needs.
 
 The library is found only where `load` is told: the directory a test passes
 (`--lib-dir` of a `python_binding_test`), or, with no directory, the
@@ -28,12 +31,13 @@ from __future__ import annotations
 
 import ctypes
 import os
+import platform
 import sys
 import threading
 from collections.abc import Callable, Sequence
 
 from . import _runtime
-from ._errors import KomiraError, LibraryLoadError
+from ._errors import KomiraError, LibraryLoadError, UnsupportedCpuError
 
 # The ABI major version this package calls: komira_abi_version() is
 # major * 1000 + minor, and a library of another major is refused. Any minor
@@ -77,9 +81,83 @@ _lock = threading.Lock()
 _loaded: Native | None = None
 
 
-def _check_cpu() -> None:
+# The CPU flags of x86-64-v3, the level linux-x86_64 libkomira is compiled
+# for (`target_cpu` in tools/build/platforms/table.bzl), spelled as the
+# `flags` line of Linux's /proc/cpuinfo spells them: x86-64-v2's SSE3 (`pni`),
+# SSSE3, CMPXCHG16B (`cx16`), SSE4.1, SSE4.2, POPCNT and LAHF/SAHF
+# (`lahf_lm`), then x86-64-v3's own AVX, AVX2, BMI1, BMI2, F16C, FMA, LZCNT
+# (`abm`) and MOVBE. The kernel lists avx, avx2, f16c and fma only when it
+# also saves the AVX registers, so the line answers what the OS supports too.
+# A refusal names the missing flags in this order.
+_X86_64_V3_FLAGS = (
+    "pni",
+    "ssse3",
+    "cx16",
+    "sse4_1",
+    "sse4_2",
+    "popcnt",
+    "lahf_lm",
+    "avx",
+    "avx2",
+    "bmi1",
+    "bmi2",
+    "f16c",
+    "fma",
+    "abm",
+    "movbe",
+)
+
+# Where `_check_cpu` reads the flags unless it is given a file.
+_CPUINFO = "/proc/cpuinfo"
+
+
+def _cpu_flags(text: str) -> set[str]:
+    """The flags every processor of /proc/cpuinfo text lists on its `flags`
+    line: a thread may run on any of them. Other lines, `vmx flags` among
+    them, are not read. No `flags` line is no flags."""
+    common: set[str] | None = None
+    for line in text.splitlines():
+        key, sep, value = line.partition(":")
+        if not sep or key.strip() != "flags":
+            continue
+        flags = set(value.split())
+        common = flags if common is None else common & flags
+    return set() if common is None else common
+
+
+def _check_cpu(
+    cpuinfo: str | os.PathLike[str] | None = None, *, system: str | None = None, machine: str | None = None
+) -> None:
     """Refuses, before the library is opened, a CPU the library was not built
-    for. It checks nothing yet."""
+    for.
+
+    On Linux x86_64 it reads the CPU flags from `cpuinfo` (/proc/cpuinfo when
+    None; tests pass a file) and raises `UnsupportedCpuError` naming the flags
+    of x86-64-v3 the CPU lacks, or `LibraryLoadError` when the file cannot be
+    read. `system` and `machine` are `sys.platform` and `platform.machine()`
+    when None; on any other platform (aarch64 Linux, macOS) nothing is read
+    and nothing is refused.
+    """
+    system = sys.platform if system is None else system
+    machine = platform.machine() if machine is None else machine
+    if system != "linux" or machine != "x86_64":
+        return
+    path = _CPUINFO if cpuinfo is None else os.fspath(cpuinfo)
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            text = f.read()
+    except OSError as e:
+        raise LibraryLoadError(
+            "cannot read the CPU flags from {}, so it is not known whether this CPU implements x86-64-v3, "
+            "which libkomira for Linux x86_64 needs: {}".format(path, e)
+        ) from None
+    flags = _cpu_flags(text)
+    missing = [f for f in _X86_64_V3_FLAGS if f not in flags]
+    if missing:
+        raise UnsupportedCpuError(
+            "libkomira for Linux x86_64 needs an x86-64-v3 CPU (Haswell or newer); "
+            "this CPU lacks {} (the flags {} lists)".format(", ".join(missing), path)
+        )
 
 
 def _two_call(op: str, call: Callable[[object, int, object], int]) -> tuple[int, bytes]:

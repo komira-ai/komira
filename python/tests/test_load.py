@@ -68,7 +68,15 @@ def main(args):
         return _native.load(directory, search_path=search)
 
     # The public names, and importing the package loaded no library.
-    want = ["KomiraError", "LibraryLoadError", "RuntimeNotFoundError", "Session", "__version__", "abi_version"]
+    want = [
+        "KomiraError",
+        "LibraryLoadError",
+        "RuntimeNotFoundError",
+        "Session",
+        "UnsupportedCpuError",
+        "__version__",
+        "abi_version",
+    ]
     assert komira.__all__ == want, komira.__all__
     assert issubclass(LibraryLoadError, KomiraError) and issubclass(KomiraError, Exception)
     assert komira.__version__ == "0.0.0", komira.__version__
@@ -96,7 +104,9 @@ def main(args):
     def preload_ok(*, search_path):
         calls.append(("preload", search_path))
 
-    assert _native._check_cpu() is None and real_preload(search_path=search) is None
+    # The CPU check's own cases are cpu_test's; here it is a stand-in. The
+    # real preload loads the runtime from the search path.
+    assert real_preload(search_path=search) is None
     assert _runtime._loaded_from == os.path.join(search[0], "modular", "lib"), _runtime._loaded_from
     _native._check_cpu = cpu_refuses
     assert refused(lambda: load(real_dir)) == "this CPU is refused"

@@ -15,6 +15,7 @@ python/komira/_native.py	the Python package: its sources are Python (docs/design
 python/komira/_runtime.py	the Python package: its sources are Python (docs/design/python_package.md)
 python/komira/_session.py	the Python package: its sources are Python (docs/design/python_package.md)
 python/tests/runtime_site.py	the Python package's tests: the SDK surface is tested in Python
+python/tests/test_cpu.py	the Python package's tests: the SDK surface is tested in Python
 python/tests/test_load.py	the Python package's tests: the SDK surface is tested in Python
 python/tests/test_minor.py	the Python package's tests: the SDK surface is tested in Python
 python/tests/test_plan_pb2.py	SDK test: the Python package's generated plan modules are tested in Python, under the protobuf runtimes users install

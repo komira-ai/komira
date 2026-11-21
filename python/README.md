@@ -15,8 +15,9 @@ pip install komira
 
 What it needs:
 
-- **Linux on x86_64**, with glibc 2.34 or newer and a CPU with AVX2. Wheels for
-  Linux on arm64 and macOS on Apple silicon come in later releases.
+- **Linux on x86_64**, with glibc 2.34 or newer and an x86-64-v3 CPU (AVX2,
+  BMI2, FMA: Intel Haswell, AMD Excavator or newer). Wheels for Linux on arm64
+  and macOS on Apple silicon come in later releases.
 - **Python 3.13 or newer.**
 - **The system C++ runtime, `libstdc++`.** Most systems have it. A minimal
   container image may need the `libstdc++6` package (Debian, Ubuntu) or
@@ -62,6 +63,9 @@ with komira.Session() as s:
   komira was built with. Its message names the missing libraries (or both
   versions), the directories searched, and the fix:
   `pip install mojo-compiler==1.0.0`.
+- `komira.UnsupportedCpuError`, a `LibraryLoadError`, is raised on Linux
+  x86_64 when the CPU lacks a flag of x86-64-v3, before the engine is loaded.
+  Its message lists the missing flags as `/proc/cpuinfo` spells them.
 
 The engine is loaded on the first `Session()` or `abi_version()` call, not on
 `import komira`.
@@ -86,7 +90,7 @@ The package's layout and API are designed in
 | path | what it is |
 |---|---|
 | `komira/__init__.py` | the public names, exactly `__all__` |
-| `komira/_errors.py` | `KomiraError`, `LibraryLoadError` and `RuntimeNotFoundError` |
+| `komira/_errors.py` | `KomiraError`, `LibraryLoadError`, `RuntimeNotFoundError` and `UnsupportedCpuError` |
 | `komira/_native.py` | the `ctypes` loader: `load(lib_dir=None, *, search_path=None)` and the `Native` it returns, with the nine calls of ABI 1.1 |
 | `komira/_runtime.py` | `_preload_runtime_libraries(*, search_path=None)`, called before libkomira is opened: it opens the three Mojo runtime libraries of `mojo-compiler` |
 | `komira/_session.py` | `Session` |
@@ -100,9 +104,17 @@ How the loader behaves:
   directory, it opens the package's own `_lib/libkomira.so`. No environment
   variable and no search of the working directory picks the library.
 - **What runs before the library opens.** `load` first calls
-  `_native._check_cpu()`, which checks nothing yet, then
+  `_native._check_cpu()`, then
   `_runtime._preload_runtime_libraries(search_path=search_path)`. An error
   raised by either stops the load.
+  - On Linux x86_64, `_check_cpu` reads the `flags` lines of `/proc/cpuinfo`
+    and requires every flag of x86-64-v3, the level the library is compiled
+    for there, on every processor: `pni` (SSE3), `ssse3`, `cx16`, `sse4_1`,
+    `sse4_2`, `popcnt`, `lahf_lm`, `avx`, `avx2`, `bmi1`, `bmi2`, `f16c`,
+    `fma`, `abm` (LZCNT) and `movbe`. A missing one raises
+    `UnsupportedCpuError` naming it, instead of an illegal instruction inside
+    the library; a file it cannot read raises `LibraryLoadError`. On other
+    platforms it reads nothing.
 - **The Mojo runtime.** `mojo-compiler` installs the three runtime libraries
   in `<site-packages>/modular/lib/`, which libkomira's run path does not reach.
   The preload looks in `modular/lib/` of each absolute directory of
@@ -138,8 +150,8 @@ How the loader behaves:
 The tests run on Linux x86_64 as build actions, with
 `./buck2 build //python/tests:load_test` and the same for
 `//python/tests:session_test`, `//python/tests:minor0_test`,
-`//python/tests:minor3_test`, `//python/tests:two_call_test` and
-`//python/tests:runtime_test`:
+`//python/tests:minor3_test`, `//python/tests:two_call_test`,
+`//python/tests:runtime_test` and `//python/tests:cpu_test`:
 
 | test | what it covers |
 |---|---|
@@ -148,3 +160,4 @@ The tests run on Linux x86_64 as build actions, with
 | `minor0_test`, `minor3_test` | stand-ins of ABI 1.0 and 1.3 |
 | `two_call_test` | the error path, the two-call protocol and the arguments of each call, on a stand-in |
 | `runtime_test` | the runtime preload on stand-in directories: missing, wrong version, not loadable, present |
+| `cpu_test` | the CPU check on cpuinfo files written from `tests/fixtures/cpuinfo_x86_64_v3.txt`, and that a refused CPU never opens the library |

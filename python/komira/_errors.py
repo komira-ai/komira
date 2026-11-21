@@ -35,3 +35,9 @@ class RuntimeNotFoundError(LibraryLoadError):
     package looks for them, or are another version than the one it was built
     with. The message names the missing libraries or both versions, the
     directories searched, and the `pip install` line that fixes it."""
+
+
+class UnsupportedCpuError(LibraryLoadError):
+    """The CPU lacks an instruction set extension libkomira was compiled to
+    use, so the library is not opened: on Linux x86_64 it is built for
+    x86-64-v3. The message names the missing flags."""
