@@ -79,7 +79,7 @@ GRAPH_JSON = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/containers/tests/test_dyn_value.mojo", "sha256": "a3e82302c75a529635e40d6e0cb22f4d67ac18424fc59fd67e2a1a929e263c16"}
+        {"path": "src/containers/tests/test_dyn_value.mojo", "sha256": "be8653834b88aeedf7a70d57f4e5480e23dd63a8e6ccb616205e1d82974d881c"}
       ],
       "deps": ["komira-ai/containers@0.1.0#mojo1.1.0/lib"],
       "natives": [],
@@ -135,7 +135,7 @@ GRAPH_JSON = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/containers/tests/test_slab_edges.mojo", "sha256": "d98789ed3f16fe6f4ee8c3e266514aaa2b6867066a77964f682cfa004c89f738"}
+        {"path": "src/containers/tests/test_slab_edges.mojo", "sha256": "5dff05429e496b52d7f86b61d9eb70f3271f704d364672e7993eb8185ec3225b"}
       ],
       "deps": ["komira-ai/containers@0.1.0#mojo1.1.0/lib"],
       "natives": [],
@@ -229,7 +229,7 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/containers/tests/test_dyn_value.mojo", "sha256": "a3e82302c75a529635e40d6e0cb22f4d67ac18424fc59fd67e2a1a929e263c16"}
+        {"path": "src/containers/tests/test_dyn_value.mojo", "sha256": "be8653834b88aeedf7a70d57f4e5480e23dd63a8e6ccb616205e1d82974d881c"}
       ],
       "deps": ["komira-ai/containers@0.1.0#mojo1.1.0/lib"],
       "natives": [],
@@ -285,7 +285,7 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/containers/tests/test_slab_edges.mojo", "sha256": "d98789ed3f16fe6f4ee8c3e266514aaa2b6867066a77964f682cfa004c89f738"}
+        {"path": "src/containers/tests/test_slab_edges.mojo", "sha256": "5dff05429e496b52d7f86b61d9eb70f3271f704d364672e7993eb8185ec3225b"}
       ],
       "deps": ["komira-ai/containers@0.1.0#mojo1.1.0/lib"],
       "natives": [],
@@ -376,7 +376,7 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/containers/tests/test_dyn_value.mojo", "sha256": "a3e82302c75a529635e40d6e0cb22f4d67ac18424fc59fd67e2a1a929e263c16"}
+        {"path": "src/containers/tests/test_dyn_value.mojo", "sha256": "be8653834b88aeedf7a70d57f4e5480e23dd63a8e6ccb616205e1d82974d881c"}
       ],
       "deps": ["komira-ai/containers@0.1.0#mojo1.1.0/lib"],
       "natives": [],
@@ -432,7 +432,7 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/containers/tests/test_slab_edges.mojo", "sha256": "d98789ed3f16fe6f4ee8c3e266514aaa2b6867066a77964f682cfa004c89f738"}
+        {"path": "src/containers/tests/test_slab_edges.mojo", "sha256": "5dff05429e496b52d7f86b61d9eb70f3271f704d364672e7993eb8185ec3225b"}
       ],
       "deps": ["komira-ai/containers@0.1.0#mojo1.1.0/lib"],
       "natives": [],

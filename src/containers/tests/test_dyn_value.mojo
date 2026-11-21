@@ -30,7 +30,7 @@
 # failed to compile with each assert's message.
 # =============================================================================
 
-from std.memory import Pointer, alloc
+from std.memory import Pointer, unsafe_alloc
 from std.testing import assert_equal, assert_false, assert_raises, assert_true
 
 from containers.dyn_value import DynValue, _noop_destroy
@@ -270,10 +270,10 @@ def test_empty_is_refused() raises:
 
 def test_noop_destroy_touches_nothing() raises:
     """T8: _noop_destroy leaves every byte of its argument as it was."""
-    # SAFETY: a 16-byte heap buffer this test owns and frees below. `alloc`
+    # SAFETY: a 16-byte heap buffer this test owns and frees below. `unsafe_alloc`
     # already returns the origin the destructor slot's signature names, so
     # the pointer reaches `_noop_destroy` with no origin cast.
-    var buf = alloc[UInt8](16)
+    var buf = unsafe_alloc[UInt8](16)
     for i in range(16):
         (buf + i).init_pointee_copy(UInt8(0xAB))
     _noop_destroy(buf)

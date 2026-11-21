@@ -41,7 +41,7 @@
 # =============================================================================
 
 from std.ffi import external_call
-from std.memory import alloc
+from std.memory import unsafe_alloc
 from std.sys import size_of
 
 from ._cabi import CArrowDeviceArrayStream, CUdfCall, Void, Word, null_void, read_cstr
@@ -224,7 +224,7 @@ def run_nested_frame(
     var arr = word_array(rt._arena, prepared)
     var c = rt._begin(opts)
     var pipe = _pipe_new(rt._calls + 1)
-    var nest = alloc[_Nest](1).unsafe_origin_cast[MutUntrackedOrigin]()
+    var nest = unsafe_alloc[_Nest](1).unsafe_origin_cast[MutUntrackedOrigin]()
     nest.init_pointee_move(
         _Nest(UnsafePointer(to=rt).unsafe_origin_cast[MutUntrackedOrigin](), s_inst, s_spec, inputs, Word(pipe), c.call)
     )

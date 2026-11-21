@@ -37,7 +37,7 @@
 #      (mutant caught: the pointer offset by one slot)
 # =============================================================================
 
-from std.memory import alloc
+from std.memory import unsafe_alloc
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
 from containers.slab import Slab
@@ -161,10 +161,10 @@ def test_capacity_factories() raises:
 
 
 def test_from_raw_parts() raises:
-    # SAFETY: each buffer comes from `alloc`, whose origin is the one
+    # SAFETY: each buffer comes from `unsafe_alloc`, whose origin is the one
     # `from_raw_parts` names, so it is passed as is (no origin cast); the Slab
     # adopts and frees it.
-    var data = alloc[Item](4)
+    var data = unsafe_alloc[Item](4)
     for i in range(3):
         (data + i).init_pointee_move(Item(i + 1))
     var s = Slab[Item].from_raw_parts[Item](
@@ -177,7 +177,7 @@ def test_from_raw_parts() raises:
     assert_true(s._unsafe_as_pointer() == p)
     _assert_tags(s, 1, 4)
 
-    var one = alloc[Item](2)
+    var one = unsafe_alloc[Item](2)
     one.init_pointee_move(Item(9))
     var t = Slab[Item].from_raw_parts[Item](
         one, 1, 2
@@ -185,7 +185,7 @@ def test_from_raw_parts() raises:
     assert_equal(t.capacity(), 2)
     _assert_tags(t, 9, 1)
 
-    var none = alloc[Item](2)
+    var none = unsafe_alloc[Item](2)
     var u = Slab[Item].from_raw_parts[Item](
         none, 0, 2
     )
