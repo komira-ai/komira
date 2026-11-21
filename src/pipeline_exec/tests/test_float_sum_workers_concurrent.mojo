@@ -16,8 +16,12 @@
 #     several morsels and with one morsel per row group (morsel_rows 0).
 #   * Four row groups of one row each, 1e16, 1, -1e16, 1, give a SUM of
 #     exactly 1.0 and an AVG of 0.25 on 1, 2, 4 and 7 workers, on every run.
-#   * The same plan over a resident batch gives the same bits on 1, 2, 4 and
-#     7 workers.
+#   * The same plan over a resident batch, cut into 37-row morsels, gives the
+#     model's bits on 1, 2, 4 and 7 workers.
+#
+# Real threads pick the schedule, so these tests show the property under the
+# schedules that happen; the dealings that make a worker-order fold differ
+# are forced in tests/test_sink_float_agg_positions.mojo.
 #   * While the scan's cursor-grain route is on, an ORDER_ROW_RANGE segment
 #     over Parquet is refused with the full message, and the same plan in
 #     ORDER_NONE still runs. The switch is turned off again on every path.
@@ -366,7 +370,8 @@ def test_one_row_groups_of_1e16_1_minus_1e16_1_sum_to_exactly_one() raises:
 
 def test_a_resident_batch_gives_the_same_bits_on_every_worker_count() raises:
     var v = _values(ROW_GROUPS * RG_ROWS)
-    var first = Optional[_Answer](None)
+    # A resident batch is one chunk cut into pieces of 37 rows.
+    var want = _model(v, len(v), 37)
     for k in range(4):
         var workers = 1
         if k == 1:
@@ -380,11 +385,7 @@ def test_a_resident_batch_gives_the_same_bits_on_every_worker_count() raises:
         try:
             for _ in range(RUNS):
                 var got = _run_resident(rt, v, 37, workers)
-                if not first:
-                    first = Optional[_Answer](got.copy())
-                _same(
-                    got, first.value(), "resident on " + String(workers) + " workers"
-                )
+                _same(got, want, "resident on " + String(workers) + " workers")
         except e:
             failure = String(e)
         rt.shutdown()

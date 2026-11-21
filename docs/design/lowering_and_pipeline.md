@@ -218,7 +218,8 @@ that starts to emit `E4` cannot be silently serialized.
 **Combine order** (`order_key_kind`): `ORDER_NONE` is for exact folds (integer sums, counts, min, max, `DECIMAL`
 sums, §7.1) and for every segment of the MVP: the merge order cannot change a bit. `ORDER_ROW_RANGE` reduces grain
 states in source row-range order and is set on a segment whose sink folds floats into grain state (a float `SUM` or
-`AVG`, ungrouped or dense; step 9 of §7.3). `ORDER_PARTITION_ID` emits the partitions of a partitioned sink in
+`AVG`, ungrouped or dense; step 9 of §7.3, which built the ungrouped case with one morsel position as the grain).
+`ORDER_PARTITION_ID` emits the partitions of a partitioned sink in
 partition id order: it fixes the output order and says nothing about the float reduction inside a partition (§4.3). The
 first slices set `ORDER_NONE` only; step 9 sets `ORDER_ROW_RANGE` on the ungrouped float case. What `ORDER_ROW_RANGE`
 asks of the driver is in §3.3 and open point O1, and what step 9 built is after the table of §7.3.
@@ -379,7 +380,8 @@ and a plan with a CTE are the first plans that need it. For each segment,
    - claim work from the source with `source.next_morsel(worker_id)`, the trait's one claim and the source's own atomic
      cursor, so there is no driver-side queue; it returns `None` at the end of input and never twice after it. A segment
      whose `order_key_kind` is `ORDER_ROW_RANGE` (step 9 of §7.3; no MVP segment) claims a whole grain with
-     `GrainSourceImpl.next_grain` instead (§3.3) and runs the chain over the grain's morsels in position order;
+     `GrainSourceImpl.next_grain` instead (§3.3) and runs the chain over the grain's morsels in position order (as
+     built in step 9, it claims morsels as any segment does and its sink keys its state by each morsel's position);
    - check the cancel flag, which is read at every morsel boundary;
    - for each morsel: run the operator chain (`execute`), which may shrink or replace the morsel, and stops it when an
      operator reports it finished (a limit reached); then `sink.consume(worker_id, morsel)`.
@@ -440,12 +442,12 @@ and **two of the four are changes to code on `main`**, not something the driver 
 - **The cutter** sets `order_key_kind` from the sink (§2.3).
 - **The sink** folds into state keyed by what the order names. For `ORDER_NONE` the state is per worker and the merge
   is in worker id order; every fold in this class is exact. For `ORDER_ROW_RANGE` the state is per grain and the merge
-  is in grain order.
+  is in grain order (step 9 built this with a grain of one morsel position, for the ungrouped sink).
 
 The reason is that a per-worker state under dynamic claiming holds an arbitrary subset of morsels, so a float sum
 merged in worker order is not reproducible. **The guarantee is scoped, because grain state costs memory** (D7):
 per-grain state is grains times groups, and the grain count grows with the input. Bit-identity across worker counts is
-promised for the ungrouped sinks and for the dense grouped sinks of §4.3, whose state is bounded by facts the footers
+promised for the ungrouped sinks (built in step 9) and for the dense grouped sinks of §4.3 (not built yet), whose state is bounded by facts the footers
 hold (row groups x key domain x state width, under a byte cap the cutter holds). Every other grouped float sum uses the
 partitioned sink of §4.3, whose results are not reproducible bit for bit (§4.3 says why); they hold within the
 tolerance the fixture states and are disclosed as such on the benchmark board. Exact folds (integer, `DECIMAL`) are

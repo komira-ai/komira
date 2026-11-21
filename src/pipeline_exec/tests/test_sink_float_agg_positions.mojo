@@ -17,12 +17,16 @@
 #   * Over a 1000-row table whose sum shows the order of its additions, cut
 #     into 13-row morsels at Parquet-like positions (row group times 2^20
 #     plus the morsel's index, the index again as the origin hint), SUM and
-#     AVG are the position-order fold bit for bit on every dealing; MIN, MAX,
-#     COUNT and COUNT(*) equal the worker fold's.
+#     AVG are the position-order fold bit for bit on every dealing, in FLOAT64
+#     and FLOAT32; MIN, MAX, COUNT and COUNT(*) equal the worker fold's. The
+#     worker fold over seven workers gives other bits: the table's sum
+#     depends on the order.
 #   * The chunks of one morsel (one position, consecutive on one worker) fold
 #     into one position, row after row.
 #   * Two morsels at one position are refused by name at combine, on two
-#     workers and on one worker when another position came between them.
+#     workers and on one worker when another position came between them;
+#     folded by worker (ORDER_NONE) they are summed, not refused.
+#   * Over only NULL rows, by position, SUM and AVG are NULL.
 #   * A morsel of no row draws no position cells; over no morsel SUM and AVG
 #     are NULL and the counts zero.
 #   * Each new position draws its cells from the segment pool: a budget of
@@ -311,6 +315,13 @@ def test_a_table_sums_in_position_order_on_every_dealing() raises:
     var want_d = _position_model(d, rows)
     var want_f = _position_model(_f32_rounded(d), rows)
     var one = _dealt("d", d, rows, 1, _ROUND_ROBIN, False, False)
+    # The table's sum depends on the order: folded by worker over seven
+    # workers it is other bits than the position-order fold.
+    var by_worker = _dealt("d", d, rows, 7, _ROUND_ROBIN, False, False)
+    assert_true(
+        _bits(_f(by_worker, 0)) != _bits(want_d),
+        "the table must be one whose sum depends on the order",
+    )
     var counts = List[Int]()
     counts.append(1)
     counts.append(2)
@@ -341,6 +352,11 @@ def test_a_table_sums_in_position_order_on_every_dealing() raises:
                 assert_equal(_i(b, 5), 1000, label)
                 var bf = _dealt("f", d, rows, workers, dealing, last_first, True)
                 assert_equal(_bits(_f(bf, 0)), _bits(want_f), "f " + label)
+                assert_equal(
+                    _bits(_f(bf, 1)),
+                    _bits(want_f / Float64(_i(one, 4))),
+                    "f " + label,
+                )
 
 
 # -----------------------------------------------------------------------------
@@ -393,6 +409,30 @@ def test_two_morsels_at_one_position_are_refused() raises:
     one.consume(0, Morsel(_batch(d, 1, 2), 1, 9, 0))
     one.consume(0, Morsel(_batch(d, 2, 3), 2, 5, 2))
     _expect_duplicate(one, 1)
+
+
+def test_only_null_rows_by_position_give_null() raises:
+    var d = List[Optional[Float64]]()
+    for _ in range(6):
+        d.append(None)
+    for workers in range(1, 4):
+        var b = _dealt("d", d, 2, workers, _SCRAMBLED, True, True)
+        assert_true(_null(b, 0), "SUM of only NULL is NULL")
+        assert_true(_null(b, 1), "AVG of only NULL is NULL")
+        assert_equal(_i(b, 4), 0)
+        assert_equal(_i(b, 5), 6)
+
+
+def test_a_worker_fold_does_not_refuse_a_repeated_position() raises:
+    # Only the position fold needs one morsel per position; folded by worker
+    # (ORDER_NONE) two morsels at one position are summed.
+    var d = _vals(1.0, 2.0)
+    var sink = _sink("d", False)
+    sink.resize_worker_state(2)
+    sink.consume(0, Morsel(_batch(d, 0, 1), 0, 5, 2))
+    sink.consume(1, Morsel(_batch(d, 1, 2), 1, 5, 2))
+    var b = _take(sink, 2)
+    assert_equal(_f(b, 0), 3.0)
 
 
 def _cell_bytes() -> Int:
