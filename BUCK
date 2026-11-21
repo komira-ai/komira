@@ -193,7 +193,8 @@ zig_test(
 
 # The cases of the buck2-farm action (.github/actions/buck2-farm/action_test.zig
 # says what each catches): action.yml's shape, and its two run lines run
-# end to end over recorded buck2 output with the real //tools/build/ci:assert_remote.
+# end to end over recorded buck2 output with the real //tools/build/ci:assert_remote,
+# a cut connection to the farm run once more and every other failure not.
 zig_test(
     name = "buck2_farm_cases",
     exec_compatible_with = LINUX_X86_64,

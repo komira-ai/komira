@@ -1,0 +1,347 @@
+//! The cases of farm_retry.zig's `classify`, //tools/build/ci:farm_retry_unit:
+//! which failed runs are a cut connection to the farm, run once more, and
+//! which are final. Each case is a log the tool must read right; the ones that
+//! must be final are the ones a wrong reading would pass over.
+//!
+//! The logs in fixtures/ are recorded buck2 output, excerpts of failed runs on
+//! the farm: build_cut.log (a build whose every failure was a cut, whole but
+//! for its progress lines), build_cut_and_compile_error.log (a build with a
+//! compile error and cuts: the first of each, the run's summary and its end)
+//! and test_failed.log (a test run with one failed test). A log buck2 printed
+//! in another run (a cut beside a test failure, a line quoting the phrase) is
+//! a recorded one with lines added or changed, in the case.
+const std = @import("std");
+const fr = @import("farm_retry.zig");
+const t = std.testing;
+
+const build_cut = @embedFile("fixtures/build_cut.log");
+const build_mixed = @embedFile("fixtures/build_cut_and_compile_error.log");
+const test_failed = @embedFile("fixtures/test_failed.log");
+const build_unknown_target = @embedFile("fixtures/build_failed_unknown_target.log");
+
+const cut_error = "Error: (Error was returned on the stream by RE: RE channel error: code: 'Unknown error', message: \"h2 protocol error: error reading a body from connection\", source: None)";
+
+/// One cut block, as buck2 prints it (the lines of fixtures/build_cut.log).
+const cut_block =
+    "[2026-11-21T16:48:35.653+00:00] Action failed: komira//src/a:a (komira//tools/build/platforms:linux-x86_64#03cc1a891c89e4be) (mojo_build)\n" ++
+    "[2026-11-21T16:48:35.653+00:00] Internal error (stage: remote_call_error): Remote Execution Error on Execute with digest 00:141 for ReSession GRPC-SESSION-ID\n" ++
+    "[2026-11-21T16:48:35.653+00:00] " ++ cut_error ++ "\n" ++
+    "[2026-11-21T16:48:35.653+00:00] Remote action digest: '00:141'\n" ++
+    "[2026-11-21T16:48:35.653+00:00] Stdout: <empty>\n" ++
+    "[2026-11-21T16:48:35.653+00:00] Stderr: <empty>\n\n";
+
+fn classify(a: std.mem.Allocator, log: []const u8) !fr.Verdict {
+    return fr.classify(a, log);
+}
+
+fn edit(a: std.mem.Allocator, log: []const u8, from: []const u8, to: []const u8) ![]u8 {
+    try t.expect(std.mem.indexOf(u8, log, from) != null); // the recorded log has the text the case changes
+    return std.mem.replaceOwned(u8, a, log, from, to);
+}
+
+/// `log` without each block whose first line holds `marker`: its lines up to
+/// and with the empty line that ends it.
+fn dropBlocks(a: std.mem.Allocator, log: []const u8, marker: []const u8) ![]u8 {
+    var out = std.ArrayList(u8).empty;
+    var dropping = false;
+    var dropped: usize = 0;
+    var it = std.mem.splitScalar(u8, log, '\n');
+    while (it.next()) |l| {
+        if (std.mem.indexOf(u8, l, marker) != null) {
+            dropping = true;
+            dropped += 1;
+        }
+        if (dropping) {
+            if (l.len == 0) dropping = false;
+            continue;
+        }
+        try out.appendSlice(a, l);
+        try out.append(a, '\n');
+    }
+    try t.expect(dropped > 0);
+    return out.toOwnedSlice(a);
+}
+
+fn expectCut(log: []const u8, blocks: usize) !void {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const v = try classify(arena.allocator(), log);
+    try t.expectEqualDeep(fr.Verdict{ .cut = blocks }, v);
+}
+
+/// The log is final, for the reason `tag`, with `line` the line that says so.
+fn expectFinal(log: []const u8, tag: std.meta.Tag(fr.Verdict), line: []const u8) !void {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const v = try classify(arena.allocator(), log);
+    try t.expectEqual(tag, std.meta.activeTag(v));
+    const got = switch (v) {
+        .failure, .test_status, .unexplained, .unmatched_target => |l| l,
+        .cut, .no_failure => "",
+    };
+    try t.expectEqualStrings(line, got);
+}
+
+// ---- a cut, run again --------------------------------------------------------
+
+test "a recorded build whose every failure is a cut is a cut, counting each block" {
+    // two actions in flight, each printed once as it failed and once under BUILD ERRORS
+    try expectCut(build_cut, 4);
+}
+
+test "buck2's own warning lines beside the cut are not errors" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const warn = "[2026-11-21T15:40:33.203+00:00] \x1b[2m2026-11-21T15:40:33.120769Z\x1b[0m \x1b[33m WARN\x1b[0m \x1b[2mremote_execution::client\x1b[0m\x1b[2m:\x1b[0m Transient error (attempt 1/5), retrying in 120ms\n";
+    try expectCut(try edit(arena.allocator(), build_cut, "[2026-11-21T16:48:35.702+00:00] Cache hits", warn ++ "[2026-11-21T16:48:35.702+00:00] Cache hits"), 4);
+}
+
+test "CRLF line ends read the same" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    try expectCut(try std.mem.replaceOwned(u8, arena.allocator(), build_cut, "\n", "\r\n"), 4);
+}
+
+test "a test run whose only failure is a cut build of a test is a cut" {
+    const log = "[2026-11-21T16:00:00.000+00:00] Build ID: 00000000-0000-0000-0000-000000000000\n" ++ cut_block ++
+        "[2026-11-21T16:00:01.000+00:00] \xe2\x9c\x93 Pass: komira//src/b:test_b (0.4s)\n" ++
+        "[2026-11-21T16:00:01.000+00:00] ---- STDOUT ----\n" ++
+        "[2026-11-21T16:00:01.000+00:00]\n" ++
+        "[2026-11-21T16:00:01.000+00:00] ---- STDERR ----\n" ++
+        "[2026-11-21T16:00:01.000+00:00]\n" ++
+        "Tests finished: \x1b[38;5;10mPass 1\x1b[39m. Fail 0. Timeout 0. Fatal 0. Skip 0. Omit 0. Infra Failure 0. Build failure 1\n" ++
+        "1 BUILDS FAILED\n";
+    try expectCut(log, 1);
+}
+
+test "a failed test whose head, before its output, has buck2's cut line is a cut" {
+    const log = "[2026-11-21T16:00:01.000+00:00] \xe2\x9c\x97 Fail: komira//src/b:test_b (0.4s)\n" ++
+        "[2026-11-21T16:00:01.000+00:00] " ++ cut_error ++ "\n" ++
+        "[2026-11-21T16:00:01.000+00:00] ---- STDOUT ----\n" ++
+        "[2026-11-21T16:00:01.000+00:00]\n" ++
+        "[2026-11-21T16:00:01.000+00:00] ---- STDERR ----\n" ++
+        "[2026-11-21T16:00:01.000+00:00]\n" ++
+        "Tests finished: Pass 0. Fail 1. Timeout 0. Fatal 0. Skip 0. Omit 0. Infra Failure 0. Build failure 0\n" ++
+        "1 TESTS FAILED\n" ++
+        "  \xe2\x9c\x97 komira//src/b:test_b (cfg)\n";
+    try expectCut(log, 1);
+}
+
+// ---- a real failure, final ---------------------------------------------------
+
+const compile_error = "[2026-11-21T13:40:17.627+00:00] Action failed: komira//tools/build/examples/cshim:add (komira//tools/build/platforms:linux-x86_64#03cc1a891c89e4be) (c_compile add_files/add.c (pic))";
+
+test "a recorded build with a compile error beside cuts is final, naming the compile error" {
+    try expectFinal(build_mixed, .failure, compile_error);
+}
+
+test "a recorded test failure is final" {
+    try expectFinal(test_failed, .failure, "[2026-10-25T13:04:11.131+00:00] \xe2\x9c\x97 Fail: komira//src/komira_proto_codec:test_float32_json_binades (9:00.5s)");
+}
+
+test "a test failure beside a cut is final: the cut does not excuse it" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const log = try edit(arena.allocator(), test_failed, "[2026-10-25T13:04:11.131+00:00] \xe2\x9c\x97 Fail:", cut_block ++ "[2026-10-25T13:04:11.131+00:00] \xe2\x9c\x97 Fail:");
+    try expectFinal(log, .failure, "[2026-10-25T13:04:11.131+00:00] \xe2\x9c\x97 Fail: komira//src/komira_proto_codec:test_float32_json_binades (9:00.5s)");
+}
+
+test "a failed test whose own output prints buck2's cut line is final: the line is the test's, after its output marker" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const log = try edit(arena.allocator(), test_failed, "[2026-10-25T13:04:11.131+00:00] The library's package", "[2026-10-25T13:04:11.131+00:00] " ++ cut_error ++ "\n[2026-10-25T13:04:11.131+00:00] The library's package");
+    try expectFinal(log, .failure, "[2026-10-25T13:04:11.131+00:00] \xe2\x9c\x97 Fail: komira//src/komira_proto_codec:test_float32_json_binades (9:00.5s)");
+}
+
+test "a compile error whose output quotes the phrase is final: an action's output is not buck2's line" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    // the compile error alone: the recorded run without its cut blocks
+    const alone = try dropBlocks(a, build_mixed, "Action failed: komira//tools/build/proto-codegen");
+    try t.expect(std.mem.indexOf(u8, alone, "RE channel error") == null);
+    try expectFinal(alone, .failure, compile_error);
+    try expectFinal(try edit(a, alone, "1 error generated.\n", cut_error ++ "\n1 error generated.\n"), .failure, compile_error);
+}
+
+test "an action that failed on its own and quotes the cut line after Stderr is final" {
+    const log = "[2026-11-21T16:00:00.000+00:00] Action failed: komira//src/a:a (cfg) (zig_test)\n" ++
+        "[2026-11-21T16:00:00.000+00:00] Remote command returned non-zero exit code 1\n" ++
+        "[2026-11-21T16:00:00.000+00:00] Stdout: <empty>\n" ++
+        "[2026-11-21T16:00:00.000+00:00] Stderr:\n" ++
+        "[2026-11-21T15:59:59.000+00:00] " ++ cut_error ++ "\n\n" ++
+        "BUILD FAILED\n";
+    try expectFinal(log, .failure, "[2026-11-21T16:00:00.000+00:00] Action failed: komira//src/a:a (cfg) (zig_test)");
+}
+
+test "a cut line without buck2's prefix in a block's head does not make it a cut" {
+    const log = "[2026-11-21T16:00:00.000+00:00] Action failed: komira//src/a:a (cfg) (zig_test)\n" ++ cut_error ++ "\n" ++
+        "[2026-11-21T16:00:00.000+00:00] Stdout: <empty>\n\nBUILD FAILED\n";
+    try expectFinal(log, .failure, "[2026-11-21T16:00:00.000+00:00] Action failed: komira//src/a:a (cfg) (zig_test)");
+}
+
+test "a block whose head has an error other than the channel's is final" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const log = try edit(arena.allocator(), build_cut, "RE channel error: code: 'Unknown error'", "RE upload error: code: 'Unknown error'");
+    try expectFinal(log, .failure, "[2026-11-21T16:48:35.653+00:00] Action failed: komira//src/bench_q6_phases:komira_bench_q6_phases_main (komira//tools/build/platforms:linux-x86_64#03cc1a891c89e4be) (mojo_build)");
+}
+
+test "an error outside every block is final, though every block is a cut" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const other = "[2026-11-21T15:40:34.803+00:00] Error: (Failed to make BatchReadBlobs request: code: 'The operation was cancelled', message: \"operation was canceled\")";
+    const log = try edit(arena.allocator(), build_cut, "[2026-11-21T16:48:35.702+00:00] Cache hits", other ++ "\n[2026-11-21T16:48:35.702+00:00] Cache hits");
+    try expectFinal(log, .unexplained, other);
+}
+
+test "a bare cut line outside every block is not a block: the log is final" {
+    try expectFinal("[2026-11-21T16:00:00.000+00:00] " ++ cut_error ++ "\nBUILD FAILED\n", .unexplained, "[2026-11-21T16:00:00.000+00:00] " ++ cut_error);
+}
+
+test "an error of buck2's own log at ERROR level is not a warning: final" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const line = "[2026-11-21T15:40:33.203+00:00] 2026-11-21T15:40:33.120769Z ERROR buck2_server: the daemon lost its state";
+    try expectFinal(try edit(arena.allocator(), build_cut, "[2026-11-21T16:48:35.702+00:00] Cache hits", line ++ "\n[2026-11-21T16:48:35.702+00:00] Cache hits"), .unexplained, line);
+}
+
+test "an error after a passing test's output is judged outside the block: final, though the test may have printed it" {
+    const log = "[2026-11-21T16:00:01.000+00:00] \xe2\x9c\x93 Pass: komira//src/b:test_b (0.4s)\n" ++
+        "[2026-11-21T16:00:01.000+00:00] ---- STDOUT ----\n" ++
+        "[2026-11-21T16:00:01.000+00:00] checking the error path\n" ++
+        "[2026-11-21T16:00:01.000+00:00] Error: the analysis of komira//src/c:c failed\n" ++ cut_block ++
+        "Tests finished: Pass 1. Fail 0. Timeout 0. Fatal 0. Skip 0. Omit 0. Infra Failure 0. Build failure 1\n";
+    try expectFinal(log, .unexplained, "[2026-11-21T16:00:01.000+00:00] Error: the analysis of komira//src/c:c failed");
+}
+
+test "a passing test's other output stays in its block beside a cut" {
+    const log = "[2026-11-21T16:00:01.000+00:00] \xe2\x9c\x93 Pass: komira//src/b:test_b (0.4s)\n" ++
+        "[2026-11-21T16:00:01.000+00:00] ---- STDOUT ----\n" ++
+        "[2026-11-21T16:00:01.000+00:00] FAIL is what this test checks the parser rejects\n" ++
+        "[2026-11-21T16:00:01.000+00:00]\n" ++ cut_block ++
+        "Tests finished: Pass 1. Fail 0. Timeout 0. Fatal 0. Skip 0. Omit 0. Infra Failure 0. Build failure 1\n";
+    try expectCut(log, 1);
+}
+
+test "a line of buck2's between an action's Stdout and Stderr ends the block" {
+    const line = "[2026-11-21T16:00:00.000+00:00] Error: the daemon went away";
+    const log = "[2026-11-21T16:00:00.000+00:00] Action failed: komira//src/a:a (cfg) (mojo_build)\n" ++
+        "[2026-11-21T16:00:00.000+00:00] " ++ cut_error ++ "\n" ++
+        "[2026-11-21T16:00:00.000+00:00] Stdout:\nsome output\n" ++ line ++ "\nBUILD FAILED\n";
+    try expectFinal(log, .unexplained, line);
+}
+
+test "an error after BUILD FAILED is final: an analysis error is not a cut" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const log = try edit(arena.allocator(), build_cut, "BUILD FAILED\n", "BUILD FAILED\nError running analysis for `komira//src/c:c`\n");
+    try expectFinal(log, .unexplained, "Error running analysis for `komira//src/c:c`");
+}
+
+test "a recorded analysis failure with no block is final" {
+    try expectFinal(build_unknown_target, .unexplained, "Unknown target `nonexistent` from package `komira//tools/build/ci/parity`.");
+}
+
+test "a target buck2 failed to build with no failed action of its own is final" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const line = "Failed to build 'komira//src/other:other (komira//tools/build/platforms:linux-x86_64#03cc1a891c89e4be)'";
+    try expectFinal(try edit(arena.allocator(), build_cut, "BUILD FAILED\n", "BUILD FAILED\n" ++ line ++ "\n"), .unmatched_target, line);
+}
+
+test "a target named by a prefix of a cut block's target is not matched by it" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const line = "Failed to build 'komira//src/bench_q6_phases:komira_bench_q6'";
+    try expectFinal(try edit(arena.allocator(), build_cut, "BUILD FAILED\n", "BUILD FAILED\n" ++ line ++ "\n"), .unmatched_target, line);
+}
+
+test "a fatal test is final, even beside cuts" {
+    const fatal = "[2026-11-21T16:00:02.000+00:00] \xe2\x9a\xa0 Fatal: komira//src/b:test_b";
+    try expectFinal(cut_block ++ fatal ++ "\n", .test_status, fatal);
+}
+
+test "a timed-out, fatal or infrastructure-failed count on the test line is final" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const counts = "Tests finished: Pass 1. Fail 0. Timeout 0. Fatal 0. Skip 0. Omit 0. Infra Failure 0. Build failure 1";
+    try expectCut(cut_block ++ counts ++ "\n", 1);
+    for ([_][]const u8{ "Timeout 0", "Fatal 0", "Infra Failure 0" }) |zero| {
+        const one = try std.mem.replaceOwned(u8, a, zero, "0", "2");
+        const line = try std.mem.replaceOwned(u8, a, counts, zero, one);
+        try expectFinal(try std.mem.concat(a, u8, &.{ cut_block, line, "\n" }), .test_status, line);
+    }
+    // a line without one of the counts cannot show it is zero
+    const short = "Tests finished: Pass 1. Fail 0. Timeout 0. Skip 0. Omit 0. Infra Failure 0. Build failure 1";
+    try expectFinal(cut_block ++ short ++ "\n", .test_status, short);
+    const listing = "Tests finished: Listing failed 1. Pass 1. Fail 0. Timeout 0. Fatal 0. Skip 0. Omit 0. Infra Failure 0. Build failure 1";
+    try expectFinal(cut_block ++ listing ++ "\n", .test_status, listing);
+}
+
+test "a failed run with no failure block is final" {
+    try expectFinal("", .no_failure, "");
+    try expectFinal("[2026-11-21T16:00:00.000+00:00] Build ID: 00000000-0000-0000-0000-000000000000\nBUILD FAILED\n", .no_failure, "");
+    // a buck2 that exited non-zero after it said the build succeeded
+    try expectFinal(@embedFile("fixtures/build_remote.log"), .no_failure, "");
+}
+
+test "the verdict says why, for the job log" {
+    var buf: [256]u8 = undefined;
+    var w = std.Io.Writer.fixed(&buf);
+    try fr.describe(.{ .cut = 4 }, &w);
+    try t.expectEqualStrings("every failure (4 block(s)) is a cut connection to the farm (buck2's `RE channel error`)", w.buffered());
+    w = std.Io.Writer.fixed(&buf);
+    try fr.describe(.{ .failure = "X" }, &w);
+    try t.expectEqualStrings("a failure that is not a cut connection: X", w.buffered());
+    w = std.Io.Writer.fixed(&buf);
+    try fr.describe(.{ .test_status = "X" }, &w);
+    try t.expectEqualStrings("a test result a cut connection does not explain: X", w.buffered());
+    w = std.Io.Writer.fixed(&buf);
+    try fr.describe(.{ .unexplained = "X" }, &w);
+    try t.expectEqualStrings("an error outside the failed actions and tests: X", w.buffered());
+    w = std.Io.Writer.fixed(&buf);
+    try fr.describe(.{ .unmatched_target = "X" }, &w);
+    try t.expectEqualStrings("a target failed with no failed action of its own: X", w.buffered());
+    w = std.Io.Writer.fixed(&buf);
+    try fr.describe(.no_failure, &w);
+    try t.expectEqualStrings("no failed action or test in the log", w.buffered());
+}
+
+// ---- what runs again, and where its first log goes ----------------------------
+
+test "only build, test and bxl run again" {
+    try t.expect(fr.retriable("build"));
+    try t.expect(fr.retriable("test"));
+    try t.expect(fr.retriable("bxl"));
+    for ([_][]const u8{ "run", "install", "uquery", "Build", "" }) |s| try t.expect(!fr.retriable(s));
+}
+
+test "the first log sits beside the log, as <name>.first.log" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    try t.expectEqualStrings("/r/buck2-farm.first.log", try fr.firstLogPath(a, "/r/buck2-farm.log"));
+    try t.expectEqualStrings("/r/out.first", try fr.firstLogPath(a, "/r/out"));
+}
+
+test "a wrong command line prints the usage and exits 2, running nothing" {
+    var buf: [512]u8 = undefined;
+    const cases = [_][]const [:0]const u8{
+        &.{},
+        &.{ "--log", "l.log", "--summary", "s.md" }, // no command
+        &.{ "--log", "l.log", "--summary", "s.md", "--", "./buck2" }, // no subcommand
+        &.{ "--summary", "s.md", "--", "./buck2", "build" }, // no log
+        &.{ "--log", "l.log", "--", "./buck2", "build" }, // no summary
+        &.{ "--log", "", "--summary", "s.md", "--", "./buck2", "build" }, // an empty log path
+        &.{ "--log", "l.log", "--summary", "", "--", "./buck2", "build" }, // an empty summary (unset on the runner)
+        &.{ "--log", "l.log", "--other", "x", "--", "./buck2", "build" },
+        &.{ "--log", "l.log", "--summary" },
+    };
+    for (cases) |args| {
+        var w = std.Io.Writer.fixed(&buf);
+        try t.expectEqual(@as(u8, 2), try fr.main(t.allocator, args, 1 << 20, &w));
+        try t.expectEqualStrings(fr.usage, w.buffered());
+    }
+}
