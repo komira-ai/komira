@@ -60,7 +60,9 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
 #                                 gathered, the output schema of empty input.
 # test_sources                    resident and sink-output sources, the Parquet
 #                                 source built from a spec: projection, glob,
-#                                 pushed filter, morsel size, refusals.
+#                                 pushed filter, morsel size, refusals, a spec
+#                                 that lists its files and their partition
+#                                 constants.
 # test_source_csv                 the CSV source built from a spec: typed, quoted
 #                                 and NULL cells, gzip by extension, a dialect,
 #                                 the declared types over inference, a header

@@ -58,6 +58,7 @@ from plan_stats.table_stats import (
     STATS_SOURCE_PARQUET_METADATA,
 )
 from scan_source.in_memory_source import InMemorySource
+from scan_source.parquet_source import ParquetSource
 from scan_source.source_variant import SourceVariant
 
 
@@ -467,6 +468,137 @@ def test_an_in_memory_scan_is_a_batch_source_with_its_filter_and_projection_as_o
     assert_equal(String(seg.ops[0].filter_predicate.value()), String(pushed))
     assert_equal(seg.ops[1].tag, OP_PROJECT)
     assert_equal(seg.sink_kind, SINK_COLLECT)
+
+
+def _two_files() -> List[String]:
+    var paths = List[String]()
+    paths.append("a/lineitem.parquet")
+    paths.append("b/lineitem.parquet")
+    return paths^
+
+
+def _dated_lineitem() -> Schema:
+    """`_lineitem()` followed by the partition column `dt`."""
+    var sb = SchemaBuilder()
+    sb.add_field(Field("flag", ArrowType.STRING, False))
+    sb.add_field(Field("status", ArrowType.STRING, False))
+    sb.add_field(Field("qty", ArrowType.INT64, False))
+    sb.add_field(Field("price", ArrowType.FLOAT64, False))
+    sb.add_field(Field("disc", ArrowType.FLOAT64, False))
+    sb.add_field(Field("ship", ArrowType.INT64, False))
+    sb.add_field(Field("dt", ArrowType.DATE32, False))
+    return sb.build()
+
+
+def test_a_scan_of_several_files_lowers_to_a_source_that_lists_them_and_pushes_projection_and_filter() raises:
+    var source = ParquetSource.partitioned(
+        _two_files(), _lineitem(), List[Field](), List[List[String]]()
+    )
+    var scan = LogicalPlan.scan_from_source(
+        SourceVariant(source^),
+        _lineitem(),
+        Optional[List[String]](_names("qty", "price")),
+        Optional[Expr](_ship_le(100)),
+    )
+    var lp = _lowered(scan, _one_scan())
+    assert_equal(len(lp.segments), 1)
+    ref seg = lp.segments[0]
+    assert_equal(seg.source_kind, SEG_SOURCE_PARQUET)
+    assert_true(seg.source_spec.parquet_spec_is_total)
+    assert_equal(seg.source_spec.parquet_path, "a/lineitem.parquet")
+    assert_equal(len(seg.source_spec.parquet_paths), 2)
+    assert_equal(seg.source_spec.parquet_paths[1], "b/lineitem.parquet")
+    assert_equal(len(seg.source_spec.parquet_partition_cols), 0)
+    assert_equal(len(seg.source_spec.parquet_projection.value()), 2)
+    assert_equal(String(seg.source_spec.parquet_filter.value()), String(_ship_le(100)))
+    assert_equal(len(seg.ops), 0)
+    var text = render_lowered_plan(lp)
+    var line = "  source: SOURCE_PARQUET path=a/lineitem.parquet total=True files=[a/lineitem.parquet, b/lineitem.parquet] projection=[qty, price] filter="
+    assert_true(line + String(_ship_le(100)) + "\n" in text, text)
+    assert_false(" partitions=[" in text)
+    assert_false(" partition_values=" in text)
+
+
+def test_a_plain_single_file_scan_renders_no_file_list() raises:
+    var text = render_lowered_plan(_lowered(_scan(), _one_scan()))
+    assert_true("files=" not in text, text)
+    assert_true(" partitions=[" not in text, text)
+    assert_true(" partition_values=" not in text, text)
+    assert_equal(len(_lowered(_scan(), _one_scan()).segments[0].source_spec.parquet_paths), 0)
+
+
+def test_a_hive_partitioned_scan_lists_files_and_values_and_runs_filter_and_projection_as_operators() raises:
+    var cols = List[Field]()
+    cols.append(Field("dt", ArrowType.DATE32, False))
+    var values = List[List[String]]()
+    values.append(_names("2026-10-01"))
+    values.append(_names("2026-10-02"))
+    var source = ParquetSource.partitioned(_two_files(), _lineitem(), cols^, values^)
+    var pushed = _ship_le(100)
+    var scan = LogicalPlan.scan_from_source(
+        SourceVariant(source^),
+        _dated_lineitem(),
+        Optional[List[String]](_names("qty", "dt")),
+        Optional[Expr](pushed.copy()),
+    )
+    var lp = _lowered(scan, _one_scan())
+    assert_equal(len(lp.segments), 1)
+    ref seg = lp.segments[0]
+    assert_equal(seg.source_kind, SEG_SOURCE_PARQUET)
+    assert_true(seg.source_spec.parquet_spec_is_total)
+    assert_equal(len(seg.source_spec.parquet_paths), 2)
+    assert_equal(len(seg.source_spec.parquet_partition_cols), 1)
+    assert_equal(seg.source_spec.parquet_partition_cols[0].name, "dt")
+    assert_equal(seg.source_spec.parquet_partition_values[1][0], "2026-10-02")
+    assert_false(Bool(seg.source_spec.parquet_projection))
+    assert_false(Bool(seg.source_spec.parquet_filter))
+    assert_equal(len(seg.ops), 2)
+    assert_equal(seg.ops[0].tag, OP_FILTER)
+    assert_equal(String(seg.ops[0].filter_predicate.value()), String(pushed))
+    assert_equal(seg.ops[1].tag, OP_PROJECT)
+    var text = render_lowered_plan(lp)
+    var line = "  source: SOURCE_PARQUET path=a/lineitem.parquet total=True files=[a/lineitem.parquet, b/lineitem.parquet] partitions=[dt] partition_values=[[2026-10-01], [2026-10-02]]\n"
+    assert_true(line in text, text)
+
+
+def test_a_hive_partitioned_scan_with_no_projection_or_filter_has_no_operators() raises:
+    var cols = List[Field]()
+    cols.append(Field("dt", ArrowType.DATE32, False))
+    var values = List[List[String]]()
+    values.append(_names("2026-10-01"))
+    values.append(_names("2026-10-02"))
+    var source = ParquetSource.partitioned(_two_files(), _lineitem(), cols^, values^)
+    var scan = LogicalPlan.scan_from_source(SourceVariant(source^), _dated_lineitem())
+    var lp = _lowered(scan, _one_scan())
+    assert_equal(len(lp.segments[0].ops), 0)
+    assert_equal(len(lp.segments[0].source_spec.parquet_partition_cols), 1)
+
+
+def test_a_group_key_over_a_hive_partitioned_scan_is_never_dictionary_encoded() raises:
+    var cols = List[Field]()
+    cols.append(Field("dt", ArrowType.DATE32, False))
+    var values = List[List[String]]()
+    values.append(_names("2026-10-01"))
+    values.append(_names("2026-10-02"))
+    var source = ParquetSource.partitioned(_two_files(), _lineitem(), cols^, values^)
+    var scan = LogicalPlan.scan_from_source(
+        SourceVariant(source^),
+        _dated_lineitem(),
+        Optional[List[String]](_names("flag", "qty")),
+    )
+    var aggs = AggExprArray()
+    aggs.append(AggExpr(AGG_COUNT, Optional[Expr](), Optional[String]("n")))
+    var plan = LogicalPlan.aggregate(_keys(_names("flag")), aggs^, scan^)
+    var lp = _lowered(plan, _one_scan(_names("flag")))
+    assert_equal(lp.segments[0].sink_kind, SINK_AGG)
+    assert_equal(
+        triple_name(
+            lp.segments[0].sink_kind,
+            lp.segments[0].sink_key_dtype,
+            lp.segments[0].sink_orientation,
+        ),
+        "(SINK_AGG, STRING, COLUMNAR)",
+    )
 
 
 def test_the_card_estimate_is_the_footer_row_count_or_zero() raises:

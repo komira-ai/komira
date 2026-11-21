@@ -12,6 +12,9 @@
 #                                   `InMemorySource.from_record_batch` is the
 #                                   convenience over `from_record_batches`.
 #   - `add_parquet(name, path, schema)` binds a parquet path as a ParquetSource.
+#   - `add_parquet_source(name, source)` binds a resolved ParquetSource (several
+#                                   files, Hive partition columns after the data
+#                                   columns).
 #   - `schema_of(name)`   resolves a table's schema (for column binding).
 #   - `build_scan(name)`  builds the PLAN_SCAN node (copies the source + schema).
 #
@@ -35,6 +38,20 @@ from plan_ir.logical_plan import LogicalPlan
 from plan_expr.declared_scalar_udf import DeclaredScalarUdf
 
 from sql.sql_udf_catalog import SqlUdfCatalog, SqlUdfEntry
+
+
+def catalog_relation_schema(source: ParquetSource) -> Schema:
+    """The columns a scan of `source` yields: the files' data columns, then the
+    Hive partition columns. `sql_bind_parquet.parquet_relation_schema` is this
+    function (the catalog cannot import that module, which imports the
+    catalog)."""
+    var data = source.schema()
+    var sb = SchemaBuilder()
+    for i in range(data.num_columns()):
+        sb.add_field(data.field_at_unchecked(i))
+    for i in range(len(source.partition_cols)):
+        sb.add_field(source.partition_cols[i].copy())
+    return sb.build()
 
 
 @fieldwise_init
@@ -156,6 +173,15 @@ struct SqlCatalog(Copyable, Movable):
     def add_parquet(mut self, name: String, path: String, var schema: Schema):
         """Register a parquet file under `name` (schema is the footer-read schema)."""
         var src = SourceVariant(ParquetSource(String(path), schema.copy(), None))
+        self._tables.append(CatalogTable(name.lower(), schema^, src^))
+
+    def add_parquet_source(mut self, name: String, var source: ParquetSource):
+        """Register a resolved parquet relation (one or several files, with
+        Hive partition columns) under `name`; its schema is
+        `catalog_relation_schema(source)`: the files' columns, then the
+        partition columns."""
+        var schema = catalog_relation_schema(source)
+        var src = SourceVariant(source^)
         self._tables.append(CatalogTable(name.lower(), schema^, src^))
 
     def _find(self, name: String) -> Int:
