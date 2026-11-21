@@ -42,6 +42,8 @@ from arrow.arrow_types import ArrowType
 from arrow.schema import Field, Schema, SchemaBuilder
 
 from sql.sql_ast import FromRelation, SqlExpr
+from scan_source.parquet_source import ParquetSource
+from sql.sql_ast import HIVE_PARTITIONING_AUTO
 from sql.sql_bind_parquet import ParquetFacts
 from sql.sql_bind_scope import (
     BindScope,
@@ -193,7 +195,10 @@ def test_synthetic_name_collision_is_per_column() raises:
 
 def test_unaliased_table_function_answers_to_its_function_name() raises:
     var facts = ParquetFacts()
-    facts.add_schema("p.parquet", _cols("x", "y"))
+    facts.add_relation(
+        "p.parquet", HIVE_PARTITIONING_AUTO,
+        ParquetSource(String("p.parquet"), _cols("x", "y"), None),
+    )
     var st = parse_sql(tokenize("SELECT * FROM read_parquet('p.parquet')"))
     var s = _build_bind_scope(st.query.from_tables, st.query.joins, _catalog(), CteScope(facts^))
     assert_true(s.answers_to("read_parquet"))
@@ -216,7 +221,10 @@ def test_relation_scan_sources() raises:
     assert_equal(plain.output_schema.num_columns(), 2)
     # A parquet table function scans over its footer schema.
     var facts = ParquetFacts()
-    facts.add_schema("p.parquet", _cols("x", "y"))
+    facts.add_relation(
+        "p.parquet", HIVE_PARTITIONING_AUTO,
+        ParquetSource(String("p.parquet"), _cols("x", "y"), None),
+    )
     var pq = CteScope(facts^)
     var rel = parse_sql(tokenize("SELECT * FROM read_parquet('p.parquet')")).query.from_tables[0].copy()
     var scan = _relation_scan(rel, cat, pq)
