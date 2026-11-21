@@ -666,9 +666,10 @@ def _json_binding(var json: JsonSource) -> ScanBinding:
     (`json.columnar_materializer.materialize_jsonl_to_batch`) is a
     direct byte-level API: `lower_untyped.mojo`, `pipeline_compiler.mojo` and
     the optimizer passes hold no `SOURCE_JSON` / `SOURCE_VARIANT_JSON`
-    references, and the one `EngineContext` caller of the materializer,
-    `_decode_jsonl_path_to_batch`, re-roots at an `InMemorySource` because a
-    JSON scan is not executed columnar.
+    references. Lowering's JSON arm (`lowering.cut_scan_jsonl`) cuts the scan
+    into a SOURCE_JSONL segment, whose source calls the materializer at the
+    plan's schema (`pipeline_exec.source_jsonl`); it reads the binding's
+    `path` and `schema` and does not depend on the orientation.
 
     ⚠ THE CHOICE IS FORCED, NOT PREFERRED. Three sites build
     `SourceVariant(JsonSource(...))`: `read_jsonl_row_streaming` and

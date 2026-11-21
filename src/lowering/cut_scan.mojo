@@ -6,7 +6,8 @@
 # whose spec carries the scan's projection and pushed filter. An in-memory scan
 # opens a SOURCE_BATCH pipeline over a ParamTable batch handle; the batch arm
 # has no pushed filter or projection, so both become operators, the filter
-# first, over the batch's full schema.
+# first, over the batch's full schema. A scan of one newline-delimited JSON
+# file opens a SOURCE_JSONL pipeline (`cut_scan_jsonl`).
 #
 # Refused: an unbounded scan, a Parquet scan of several files, a
 # Hive-partitioned one or one on a file system other than the local one
@@ -15,6 +16,7 @@
 # =============================================================================
 
 from containers.slab import Slab
+from lowering.cut_scan_jsonl import _open_jsonl_scan
 from lowering.cut_state import _Cutter, _Pipe, _uncuttable
 from lowering.lowered_plan import (
     LoweringInputs,
@@ -33,6 +35,7 @@ from physical_plan.physical_plan import (
 from scan_source.source_variant import (
     SOURCE_VARIANT_PARQUET,
     SOURCE_VARIANT_IN_MEMORY,
+    SOURCE_VARIANT_JSON,
 )
 
 
@@ -119,4 +122,6 @@ def _open_scan(
             pipe.has_project = True
             pipe.schema = node.output_schema.copy()
         return pipe^
+    if sd.source.tag == SOURCE_VARIANT_JSON:
+        return _open_jsonl_scan(node, idx, proj^, pushed^)
     raise _uncuttable(node, "a " + sd.source.kind_name() + " source")

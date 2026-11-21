@@ -1,7 +1,7 @@
 # lowering
 
 Lowering: a bound `LogicalPlan`, a `HostProfile` and the resolved inputs go in;
-the physical plan (`physical_plan`, IR version 14) and the `ParamTable`
+the physical plan (`physical_plan`, IR version 15) and the `ParamTable`
 its segments index come out. It is pure. `lower` opens no file, reads no clock
 and no environment variable and touches no global, so equal arguments give a
 `LoweredPlan` that renders byte-equal.
@@ -13,14 +13,16 @@ and no environment variable and touches no global, so equal arguments give a
 - `lowered_plan`: `LoweringInputs` (one `ScanFacts` per scan in scan
   pre-order: the footers' statistics and the columns every row group stores
   dictionary encoded), `ParamTable`, `LoweredPlan` and the four refusal tokens.
-- `cut_walk`: the cutter. A scan opens a pipeline (`SOURCE_PARQUET`, or
+- `cut_walk`: the cutter. A scan opens a pipeline (`SOURCE_PARQUET`;
   `SOURCE_BATCH` for an in-memory scan, whose pushed filter and projection
-  become operators). A filter, a projection and a limit fuse into it. An
+  become operators; `SOURCE_JSONL` for a scan of one newline-delimited JSON
+  file, whose spec names the file and the schema it is read at: the scan's
+  projection, in its order, at the types the plan was bound at). A filter, a projection and a limit fuse into it. An
   aggregation or a sort ends it in a sink and opens a pipeline that reads that
   segment's output over an `E3` edge. The root is a `SINK_COLLECT` segment
   unless the top node is a breaker, which is then the result. `cut_walk` is
-  only the dispatch on the node's tag; each arm is its own module (`cut_scan`,
-  `cut_filter`, `cut_project`, `cut_limit`, `cut_aggregate`, `cut_sort`), and
+  only the dispatch on the node's tag; each arm is its own module (`cut_scan`
+  and its JSON arm `cut_scan_jsonl`, `cut_filter`, `cut_project`, `cut_limit`, `cut_aggregate`, `cut_sort`), and
   `cut_state` holds what they share: the open pipeline, the cutter's segments
   and ParamTable, and the close and reopen of a breaker. A new node kind is a
   new arm module and one branch in `cut_walk`.
@@ -45,8 +47,9 @@ shape:
   than elided on one host); a filter, projection or aggregation that carries a
   UDF, an aggregate function that is a UDF; a limit with an offset or a
   negative count; a limit above a sort (see Order); a partial or final
-  aggregation; an aggregation with a group top-k; a source other than Parquet
-  or in memory.
+  aggregation; an aggregation with a group top-k; a source other than Parquet,
+  in memory or JSON; a JSON scan whose projection names a column its schema
+  does not hold.
 - `LOWERING_SINK_UNSERVED`, naming the triple or the key: a group key of a
   type with no row (date, decimal, bool, ...), a key of several columns that
   are not all dictionary encoded strings, or a segment whose triple has no row.

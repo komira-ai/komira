@@ -52,6 +52,13 @@ Import each module by name; the package root exports nothing.
   footer cache and expression pool. `BatchSource` serves a copy of a resident
   batch and `SinkOutputSource` the batch a finished segment published, each as
   morsels claimed from one shared cursor.
+- `source_jsonl`: `build_jsonl_source` reads the newline-delimited JSON file a
+  SOURCE_JSONL spec names, at the spec's schema (the keys it names, in its
+  order, at its types; a missing key is NULL, a key it does not name is
+  skipped), through `jsonl`: a plain file in chunks of whole lines, one batch
+  each, a `.jsonl.gz`/`.zst`/`.lz4` (and `.ndjson`, `.json`) file decompressed
+  whole. The batches are served as a `BatchSource`; a file of no row is one
+  empty batch at the schema. A read that fails names the file.
 - `op_filter`, `op_project`, `op_limit`: the operators. A filter evaluates its
   predicate and records the rows it keeps as the batch's selection mask instead
   of gathering them; all rows kept leaves no mask, none kept is FILTERED_EMPTY,
@@ -175,7 +182,7 @@ Import each module by name; the package root exports nothing.
   memory on a synthetic workload and checks each layout's counts; its numbers and what
   they decided are in `docs/design/lowering_and_pipeline.md` (section 4.3).
 - `real_builder`: `RealBuilder`, the `SegmentBuilder` over these members. It
-  serves SOURCE_PARQUET, SOURCE_BATCH, SOURCE_SINK_OUTPUT, OP_FILTER,
+  serves SOURCE_PARQUET, SOURCE_BATCH, SOURCE_SINK_OUTPUT, SOURCE_JSONL, OP_FILTER,
   OP_PROJECT, OP_LIMIT and the sinks `(SINK_COLLECT, KEY_DTYPE_NONE,
   SINK_ORIENT_COLUMNAR)`, `(SINK_AGG, KEY_DTYPE_NONE, SINK_ORIENT_COLUMNAR)`,
   the grouped rows I64, I32, F64 and F32, `(SINK_AGG, KEY_DTYPE_STRING,

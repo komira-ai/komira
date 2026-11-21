@@ -16,6 +16,7 @@ from physical_plan.physical_plan import (
     SOURCE_BATCH,
     SOURCE_SINK_OUTPUT,
     SOURCE_CONCAT,
+    SOURCE_JSONL,
     OP_FILTER,
     OP_PROJECT,
     OP_LIMIT,
@@ -40,6 +41,8 @@ def _source_name(kind: UInt8) -> String:
         return "SOURCE_SINK_OUTPUT"
     if kind == SOURCE_CONCAT:
         return "SOURCE_CONCAT"
+    if kind == SOURCE_JSONL:
+        return "SOURCE_JSONL"
     return "SOURCE_" + String(Int(kind))
 
 
@@ -109,6 +112,15 @@ def _segment_text(seg: SegmentDescPod) -> String:
             out += " filter=" + String(s.parquet_filter.value())
     elif seg.source_kind == SOURCE_BATCH:
         out += " batch=" + String(seg.source_spec.batch_handle_id)
+    elif seg.source_kind == SOURCE_JSONL:
+        ref s = seg.source_spec
+        out += " path=" + s.jsonl_path + " columns=["
+        for i in range(s.jsonl_schema.num_columns()):
+            if i > 0:
+                out += ", "
+            out += s.jsonl_schema.field_name(i) + " "
+            out += String(s.jsonl_schema.field_arrow_type(i))
+        out += "]"
     else:
         out += " from="
         for i in range(len(seg.source_spec.dep_seg_ids)):
