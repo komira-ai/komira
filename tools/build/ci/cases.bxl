@@ -516,6 +516,30 @@ def _cxx_toolchain_cases(ctx):
             out.append("cxx toolchain: {} on {}: compatible, but the toolchain admits macOS arm64 and linux x86_64 only".format(_CXX, platform))
     return out
 
+# ---- the protobuf toolchain per target platform --------------------------------
+#
+# `toolchains//:mojo_proto` (komira_proto_toolchains) is compatible with the two platforms the
+# release builds a Mojo package for: its tools are execution dependencies, run on the linux
+# execution platform, and what they write is the same for both, so a macOS arm64 package whose
+# welded tests read a proto_fixture_check report (chat_proto, managed_mail_proto) configures.
+# Any other platform stays incompatible, as for `toolchains//:cxx`.
+
+_PROTO = "toolchains//:mojo_proto"
+_PROTO_ADMITTED = [
+    "komira//tools/build/platforms:darwin-arm64",
+    "komira//tools/build/platforms:linux-x86_64",
+]
+
+def _proto_toolchain_cases(ctx):
+    out = []
+    for platform in _PROTO_ADMITTED:
+        if ctx.configured_targets(_PROTO, target_platform = platform) == None:
+            out.append("proto toolchain: {} on {}: incompatible, but the platform is one it must admit".format(_PROTO, platform))
+    for platform in _CXX_REFUSED:
+        if ctx.configured_targets(_PROTO, target_platform = platform) != None:
+            out.append("proto toolchain: {} on {}: compatible, but the toolchain admits macOS arm64 and linux x86_64 only".format(_PROTO, platform))
+    return out
+
 # ---- adopted libraries on macOS arm64 ------------------------------------------
 #
 # A target configured for darwin-arm64 compiles its Mojo on macOS, and the C toolchain
@@ -631,7 +655,7 @@ def _shard_cases():
     return out
 
 def _run(ctx):
-    table = _shard_cases() + _table_cases() + _held_cases() + _python_cases(ctx) + _roots_cases() + _shipped_rules_cases() + heavy_cases() + _registration_cases(ctx) + _cxx_toolchain_cases(ctx) + _adopted_darwin_cases(ctx)
+    table = _shard_cases() + _table_cases() + _held_cases() + _python_cases(ctx) + _roots_cases() + _shipped_rules_cases() + heavy_cases() + _registration_cases(ctx) + _cxx_toolchain_cases(ctx) + _proto_toolchain_cases(ctx) + _adopted_darwin_cases(ctx)
     real = _real_cases(ctx)
     failures = table + real
     if failures:

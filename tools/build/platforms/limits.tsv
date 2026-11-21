@@ -25,7 +25,7 @@ h2spec-linux-x86-64	native-pr:8b	src/tests/conformance/komira_http_conformance/B
 image-linux-x86-64-only	never	product: OCI images, bundles and the launcher are Linux server products (tools/build/package/defs.bzl); the table's `bundles` field says it per row
 linux-arm64-unregistered	native-pr:14	tools/build/platforms/table.bzl: the linux-arm64 row is declared and pinned but not a build key until the bring-up PR flips it
 mojo-toolchain-x86-64	native-pr:14	tools/build/toolchains/defs.bzl: no Mojo toolchain exists for a row that is not registered; arm64 gets one when it is brought up
-proto-toolchain-x86-64	native-pr:5	tools/build/toolchains/defs.bzl: the protoc toolchain is the linux-x86_64 one; one per row
+proto-toolchain-x86-64	native-pr:5	tools/build/toolchains/defs.bzl: the protoc toolchain runs its tools on linux-x86_64 and serves linux-x86_64 and darwin-arm64 targets (what it writes is the same for both); another row gets it when that row is brought up
 run-tests-linux-x86-64-client	native-pr:11a	tools/build/tests/run_tests.sh: the suite runs Linux x86_64 binaries and ELF tools on the client
 rust-toolchain-x86-64	native-pr:5	tools/build/toolchains/defs.bzl: the Rust toolchain is the linux-x86_64 one; one per row
 s2n-tls-x86-64-linux	native-pr:8b	third_party/s2n-tls/BUCK: depends on aws-lc, which is x86_64 Linux only until PR 8a

@@ -13,7 +13,8 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
 # `source_sink_output` and `source_csv` (a CSV file decoded at its bound column
 # types, served as a resident batch), the operators `op_filter`, `op_project` and `op_limit`,
 # the sinks `sink_collect`, `sink_agg` (the ungrouped aggregation, over
-# `agg_fold` and `agg_output`, drawing memory from `segment_pool`), `sink_group_agg` (the same keyed by
+# `agg_fold` and `agg_output`, drawing memory from `segment_pool`; COUNT(DISTINCT) in
+# every aggregation sink is `count_distinct`), `sink_group_agg` (the same keyed by
 # fixed-width columns, its tables charged as they grow), `sink_string_group_agg` (the same keyed by
 # strings, over `string_keys`' intern table; `string_harness` is its test table), `sink_sort`
 # (the in-memory sort, over `sort_nulls` and `op_sort`; `sort_harness` is its
@@ -22,6 +23,9 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
 # writes descriptors and sample data by hand and `tpch_q6` and `tpch_q1` are Q6 and Q1 as
 # such plans with lineitem-shaped tables.
 #
+# test_count_distinct_state       the COUNT(DISTINCT) state by itself: value cells of
+#                                 every type, entries per aggregate, group and value,
+#                                 the merge, the table limits and a denied pool.
 # test_edge_policy_and_ready_set  the edge tag and order key policies, the plan
 #                                 checks and the ready set.
 # test_variants                   each variant slot forwards to its member.
@@ -70,6 +74,18 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
 #                                 128-bit decimal sums, refusals by name.
 # test_sink_agg_partials          non-empty partials merged: dealing, the merge's
 #                                 overflow refusal, pool return on failure.
+# test_sink_count_distinct        COUNT(DISTINCT x) in the ungrouped sink: every value
+#                                 type, NaN and zero, dictionaries read by value, NULL
+#                                 and empty input, several workers, refusals by exact
+#                                 message, a pool too small.
+# test_sink_count_distinct_grouped
+#                                 COUNT(DISTINCT x) per group and SELECT DISTINCT (keys
+#                                 and no aggregate) in the fixed-width and string-keyed
+#                                 sinks against an oracle.
+# test_sink_count_distinct_grouped_limits
+#                                 the grouped sinks' COUNT(DISTINCT) refusals by exact
+#                                 message and the pool charged and refused in a worker
+#                                 and in the merge.
 # test_sink_int_sum_decimal       SUM over an integer column declared DECIMAL(38, 0):
 #                                 exact past INT64 in both signs, equal to the
 #                                 DECIMAL fold of the cast form, NULL and empty,
@@ -145,6 +161,7 @@ mojo_library(
         "//tools/build/mojo/runtime_paths:runtime_paths",
     ],
     test_srcs = [
+        "tests/test_count_distinct_state.mojo",
         "tests/test_edge_policy_and_ready_set.mojo",
         "tests/test_group_agg_plan.mojo",
         "tests/test_op_filter.mojo",
@@ -160,6 +177,9 @@ mojo_library(
         "tests/test_sink_agg.mojo",
         "tests/test_sink_agg_partials.mojo",
         "tests/test_sink_collect.mojo",
+        "tests/test_sink_count_distinct.mojo",
+        "tests/test_sink_count_distinct_grouped.mojo",
+        "tests/test_sink_count_distinct_grouped_limits.mojo",
         "tests/test_sink_group_agg.mojo",
         "tests/test_sink_int_sum_decimal.mojo",
         "tests/test_sink_sort.mojo",

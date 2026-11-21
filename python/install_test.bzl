@@ -3,11 +3,10 @@ test (python/BUCK): `picked_files` and `wheel_install_test`.
 
 `picked_files(name, dir, paths)` names files of a directory another target
 builds, one sub-target each, by file name: `:<name>[libkomira.so]`. The wheel
-takes libkomira and its native owner libraries one by one from
-`//src/so:libkomira[runnable]`, so that each is a key `wheel_file` can mark
-executable, and leaves the runtime libraries of that directory out. A path
-the directory does not hold fails the action that reads it; two paths with one
-file name fail analysis.
+itself copies `//src/so:libkomira[dist]` whole; the wheels of the refusing
+cases take its files one by one, so that each can be put somewhere else or
+left out. A path the directory does not hold fails the action that reads it;
+two paths with one file name fail analysis.
 
 `wheel_install_test(name, python, wheels, script, args, files,
 skip_requirements, expect_failure)` installs `wheels` into an empty virtual
