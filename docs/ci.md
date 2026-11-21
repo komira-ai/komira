@@ -608,7 +608,7 @@ would be handed two files for one name.
    whether to run it.
 6. **`prod-add`** runs after the smoke, so the channel already serves every file. `release_staged_verify add`
    ([source](../tools/build/ci/release_beta_fetch/prod_add.zig)) does what a user does, with the mopm that
-   staged and committed the set (`toolchains//:mopm_0_0_113`), in a directory it makes on the runner (both
+   staged and committed the set (`toolchains//:mopm_0_0_135`), in a directory it makes on the runner (both
    paths absolute):
    `mopm init --name release-check/prod_add`, then `mopm add komira-ai/<name> --registry prod` for three
    packages of [`packages.bzl`](../release/readme_e2e/packages.bzl), a library with no dependency (`json`),
@@ -653,7 +653,7 @@ the full names under the namespace's channel at this run's version and install e
   run gives the members the version `0.1.<run number>` (below).
 
 **Needs a mopm with `--no-commit` and `--abort`.** The jobs run the mopm that `mopm-stage` built: the pin
-`MOPM` in [`packages.bzl`](../release/readme_e2e/packages.bzl) (`toolchains//:mopm_0_0_113` in the
+`MOPM` in [`packages.bzl`](../release/readme_e2e/packages.bzl) (`toolchains//:mopm_0_0_135` in the
 `mopm-stage` job). The first mopm release with both flags is 0.0.66, so the pin has them; a later move of
 the pin must keep them, in the same change as the toolchain entry the job builds.
 

@@ -46,8 +46,8 @@ archive_files(
 # Python package's install tests that put Modular's runtime in the same
 # process as komira's (python/BUCK, the `beside_modular` targets):
 #
-# - 1.0.0, the version of the toolchain's pin, and the wheel it requires
-#   (`mojo-compiler-mojo-libs==1.0.0`): the same runtime as komira's, in
+# - 1.1.0, the version of the toolchain's pin, and the wheel it requires
+#   (`mojo-compiler-mojo-libs==1.1.0`): the same runtime as komira's, in
 #   `<site-packages>/modular/lib/` (docs/design/mojo_runtime_pypi_vs_conda.md);
 # - 1.2.0, another version, whose runtime is not komira's.
 #
@@ -59,23 +59,23 @@ archive_files(
 # Modular's (`LicenseRef-MAX-Platform-Software-License` in the compiler
 # wheel's METADATA).
 #
-# A newer toolchain pin is a new 1.0.0 pair here at its version: the
+# A newer toolchain pin is a new 1.1.0 pair here at its version: the
 # beside_modular tests fail while the toolchain's Mojo and the installed
 # mojo-compiler differ.
 
 pinned_file(
-    name = "mojo_compiler-1.0.0-py3-none-manylinux_2_34_x86_64.whl",
-    url = "https://files.pythonhosted.org/packages/f0/5f/f38fefe327d1c81e28def69c4a52ae4f75e389cb6e613a2c04ca8d68d582/mojo_compiler-1.0.0-py3-none-manylinux_2_34_x86_64.whl",
-    sha256 = "e9e60f9638e69ca0f4be7292468523fc98a143f58dbf9024f60ed68b874a867e",
-    size_bytes = 79142588,
+    name = "mojo_compiler-1.1.0-py3-none-manylinux_2_34_x86_64.whl",
+    url = "https://files.pythonhosted.org/packages/e8/5e/31522e5336d63ab0fad18980cccf6c5cc2085c1a041ea3723eb916a17c08/mojo_compiler-1.1.0-py3-none-manylinux_2_34_x86_64.whl",
+    sha256 = "b47442278eb39705075f23d058b38a364bd68bdaa542ad514c187cee633beab7",
+    size_bytes = 80657416,
     visibility = ["komira//python:"],
 )
 
 pinned_file(
-    name = "mojo_compiler_mojo_libs-1.0.0-py3-none-any.whl",
-    url = "https://files.pythonhosted.org/packages/54/99/ea401ff1db56a4af8607283b95627e01b986fc67f510715b07f100118105/mojo_compiler_mojo_libs-1.0.0-py3-none-any.whl",
-    sha256 = "20a92e37ecbd19e2dbb1a525612a8de4c9f266f5536def55c5e2b0786320e8b3",
-    size_bytes = 3187048,
+    name = "mojo_compiler_mojo_libs-1.1.0-py3-none-any.whl",
+    url = "https://files.pythonhosted.org/packages/83/8d/4fb2147d140b6ea688f6d256b3119d6554a3d50095d802f01bf24234bd7d/mojo_compiler_mojo_libs-1.1.0-py3-none-any.whl",
+    sha256 = "dd8c5382e27fe5c1ffe0834d267f549abbffee35bf1a8d605cf24252ff95a2e6",
+    size_bytes = 3216162,
     visibility = ["komira//python:"],
 )
 
