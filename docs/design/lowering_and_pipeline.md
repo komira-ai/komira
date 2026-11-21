@@ -189,7 +189,7 @@ join are cut by the same classification of each node into one of three roles:
 |---|---|---|
 | **Source** (a leaf; starts a pipeline) | `PLAN_SCAN` (Parquet, then in-memory) | `SOURCE_PARQUET` or `SOURCE_BATCH` |
 | **Streaming operator** (fused into the pipeline below it) | `PLAN_FILTER`, `PLAN_PROJECT`, `PLAN_LIMIT`, and a join's probe side | `OP_FILTER`, `OP_PROJECT`, `OP_LIMIT`, `OP_JOIN_PROBE` appended to `ops` |
-| **Breaker** (ends a pipeline; its output is the next pipeline's source) | `PLAN_AGGREGATE`, `PLAN_SORT`, `PLAN_TOPN`, `PLAN_DISTINCT`, `PLAN_PARTITION_BY`, `PLAN_PARTITION_TOPN`, a join's build side, the root | `SINK_AGG`, `SINK_SORT`, `SINK_TOPN`, a distinct sink, `SINK_PARTITION_BY`, `SINK_PARTITION_TOPN`, `SINK_HASH_BUILD`, `SINK_COLLECT` (the root) |
+| **Breaker** (ends a pipeline; its output is the next pipeline's source) | `PLAN_AGGREGATE`, `PLAN_SORT`, `PLAN_TOPN`, `PLAN_DISTINCT`, `PLAN_PARTITION_BY`, `PLAN_PARTITION_TOPN`, a join's build side, the root | `SINK_AGG` (also for `PLAN_DISTINCT`, grouped by every column), `SINK_SORT`, `SINK_TOPN`, `SINK_PARTITION_BY`, `SINK_PARTITION_TOPN`, `SINK_HASH_BUILD`, `SINK_COLLECT` (the root) |
 
 A breaker ends the pipeline below it and starts one whose source is `SOURCE_SINK_OUTPUT` over the breaker's segment.
 A join is two edges: the build side is a segment ending in `SINK_HASH_BUILD`, and the probe side's pipeline gains an
@@ -705,7 +705,7 @@ size at which the sink gets its own package.
 | `SINK_COLLECT` | every plan's root; the passthrough | resident batches, concatenated serially in morsel-position order for now (parallel concat is a follow-up) | slice 2b |
 | `SINK_SORT` over a small result (in memory, one batch) | Q1's `ORDER BY` over its grouped output | `op_sort.sort_batch_by_keys` over the collected batch | slice 4 (MVP) |
 | `SINK_SORT`, `SINK_TOPN` in general | `ORDER BY`, `ORDER BY ... LIMIT` | `op_sort` kernels (the top-N indices) and the sinks of komira#1384; parallel sort komira#1420 and komira#1421; external sort komira#1436 | step 1 of §7.3 |
-| distinct sinks | `SELECT DISTINCT`, `COUNT(DISTINCT x)` | `op_agg_distinct` and komira#1385, #1390, #1401, then #1455, #1467, #1474 for string keys | step 2 |
+| `SINK_AGG` (no sink of its own) | `SELECT DISTINCT`, `COUNT(DISTINCT x)` | `SELECT DISTINCT` is a `SINK_AGG` grouped by every column with no aggregate; `COUNT(DISTINCT x)` is an aggregate of the three aggregation sinks (`pipeline_exec.count_distinct`). `op_agg_distinct` is not used: its sinks are `operator_api.MorselSink`s, not the driver's `MorselSinkImpl` | step 2 (built) |
 | `SINK_HASH_BUILD` and `OP_JOIN_PROBE` | joins | `op_join_build` with komira#1396 and #1397; probes komira#1427 to #1431, #1459, #1465; semi and anti marking komira#1485; fused kernels komira#1413 | step 3 |
 | `SINK_PARTITION_BY`, `SINK_PARTITION_TOPN` | window functions | komira#1469 to #1472 | step 4 |
 
@@ -914,7 +914,7 @@ Each step adds a sink, an edge or an operator, and none changes the cutter's thr
 | Step | Adds | Tied to |
 |---|---|---|
 | 1. Sort, top-N, limit | `SINK_SORT` beyond one small batch, `SINK_TOPN` | komira#1384; komira#1420, #1421, #1436 |
-| 2. `COUNT(DISTINCT)`, `SELECT DISTINCT` | distinct sinks; string-key route | komira#1385, #1390, #1401; #1455, #1467, #1474 |
+| 2. `COUNT(DISTINCT)`, `SELECT DISTINCT` | built on `SINK_AGG` (section 4.4): a distinct is grouped by every column; COUNT(DISTINCT) keeps (aggregate, group, value) entries per worker and counts the new ones at the merge | `lowering.cut_distinct`, `pipeline_exec.count_distinct` |
 | 3. Joins (design constraints in §3.6) | the build segment, `OP_JOIN_PROBE`, `E3` edges, outer, semi and anti; the build-side and runtime-filter handling | komira#1396, #1397, #1413, #1427 to #1431, #1459, #1465, #1485; the optimizer records the build side, and which pairs the lowering must accept follows komira#1426 |
 | 4. Window and partition top-N | `SINK_PARTITION_BY`, `SINK_PARTITION_TOPN` | komira#1469 to #1472 |
 | 5. Scalar subqueries | the optimizer's dependency loop in `engine_optimize`, run before lowering | `optimizer` |

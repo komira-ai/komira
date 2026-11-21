@@ -1,5 +1,6 @@
 load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_test")
-load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
+load("@komira//tools/build/platforms:defs.bzl", "DARWIN_ARM64", "LINUX_X86_64", "TOOL_EXEC")
+load("@komira//tools/build/platforms:table.bzl", "row")
 
 # python_act (python_act.zig): the action of `python_dist` (tools/build/python)
 # in place of its busybox script. It lives beside, not in, that package: Python
@@ -21,6 +22,22 @@ zig_exe(
     src = "python_act.zig",
     deps = ["//tools/build/act_util:act_util"],
     unit_tests = [":python_act_unit", "komira//tools/build/toolchains:zig_next_version"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
+    visibility = ["PUBLIC"],
+)
+
+# The same sources built for macOS arm64 by the same zig on the linux execution
+# platform, run on a macOS worker by the macOS `python_dist` (it unpacks the
+# macOS CPython and runs its interpreter, which only a macOS worker can).
+zig_exe(
+    name = "python_act_darwin",
+    exec_compatible_with = TOOL_EXEC,
+    target_compatible_with = DARWIN_ARM64,  # komira-limit:darwin-python-act
+    src = "python_act.zig",
+    deps = ["//tools/build/act_util:act_util"],
+    unit_tests = [":python_act_unit", "komira//tools/build/toolchains:zig_next_version"],
+    target = row("darwin-arm64")["zig_triple"],
     busybox = "komira//tools/build/toolchains:busybox",
     zig = "komira//tools/build/toolchains:zig_next",
     visibility = ["PUBLIC"],

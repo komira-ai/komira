@@ -28,8 +28,12 @@ from lowering.lowered_plan import LoweringInputs, LOWERING_SINK_UNSERVED
 from lowering.sum_fuse import lowered_agg_expr
 from plan_expr.agg_expr import AGG_UDF
 from plan_expr.expr import Expr
-from plan_ir.logical_plan import LogicalPlan, AggExprArray, copy_expr_array
-from plan_ir.logical_plan_variants import AggregateData
+from plan_ir.logical_plan import (
+    LogicalPlan,
+    AggExprArray,
+    ExprArray,
+    copy_expr_array,
+)
 from plan_ir.plan_decisions import AGG_MODE_UNSET, AGG_MODE_SINGLE
 from physical_plan.physical_plan import (
     AggSinkData,
@@ -105,14 +109,15 @@ def _is_dictionary_key(
 
 
 def _agg_triple(
-    ad: AggregateData,
+    group_by: ExprArray,
     out_schema: Schema,
     pipe: _Pipe,
     inputs: LoweringInputs,
 ) raises -> _Triple:
     """The `(key_dtype, orientation)` of an aggregation's sink. The group key
-    columns are the first columns of the node's output schema."""
-    var n = len(ad.group_by)
+    columns are the first columns of the node's output schema. `cut_distinct`
+    asks the same of a distinct, whose keys are every column."""
+    var n = len(group_by)
     if n == 0:
         return _Triple(KEY_DTYPE_NONE, SINK_ORIENT_COLUMNAR)
     var all_dictionary_strings = True
@@ -127,7 +132,7 @@ def _agg_triple(
         if i == 0:
             first = d
         if d != Int(KEY_DTYPE_STRING) or not _is_dictionary_key(
-            ad.group_by[i], pipe, inputs
+            group_by[i], pipe, inputs
         ):
             all_dictionary_strings = False
     if n > 1:
@@ -177,7 +182,7 @@ def _close_aggregate(
     """End the aggregation's child pipeline in its sink and open the pipeline
     that reads the sink's output."""
     ref ad = node.aggregate_data_ref()
-    var triple = _agg_triple(ad, node.output_schema, pipe, inputs)
+    var triple = _agg_triple(ad.group_by, node.output_schema, pipe, inputs)
     var pid = len(cutter.params.agg)
     cutter.params.agg.append(
         AggSinkData(

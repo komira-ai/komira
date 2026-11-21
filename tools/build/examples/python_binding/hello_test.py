@@ -24,9 +24,11 @@ def flag(args, name, default):
 
 def main(args):
     libdir = args[args.index("--lib-dir") + 1]
-    path = os.path.join(libdir, "plain.so")
+    # The library's file is `plain.so` on linux and `plain.dylib` on macOS.
+    name = "plain.dylib" if sys.platform == "darwin" else "plain.so"
+    path = os.path.join(libdir, name)
     if not os.path.exists(path):
-        raise FileNotFoundError("the lib dir has no plain.so: " + ", ".join(sorted(os.listdir(libdir))))
+        raise FileNotFoundError("the lib dir has no " + name + ": " + ", ".join(sorted(os.listdir(libdir))))
     lib = ctypes.CDLL(path)
 
     lib.plain_add.argtypes = [ctypes.c_int32, ctypes.c_int32]
@@ -47,7 +49,7 @@ def main(args):
     got = lib.plain_sum_squares(10)
     want = flag(args, "--sum-expect", 285)
     assert got == want, "plain_sum_squares(10) = %d, want %d" % (got, want)
-    print("hello: pyarrow %s, %d rows, plain.so called" % (pa.__version__, table.num_rows))
+    print("hello: pyarrow %s, %d rows, %s called" % (pa.__version__, table.num_rows, name))
 
 
 if __name__ == "__main__":
