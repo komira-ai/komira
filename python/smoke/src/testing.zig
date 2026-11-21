@@ -146,6 +146,8 @@ pub const FakeRunner = struct {
             return .{ .code = r.code, .stdout = r.stdout, .stderr = r.stderr };
         }
         if (std.mem.endsWith(u8, line, " show komira")) return .{ .code = 0, .stdout = try std.fmt.allocPrint(a, "Name: komira\nVersion: {s}\nSummary: x\n", .{self.shown_version}) };
+        if (std.mem.endsWith(u8, line, " freeze")) return .{ .code = 0, .stdout = try std.fmt.allocPrint(a, "komira=={s}\n", .{self.shown_version}) };
+        if (std.mem.indexOf(u8, line, "find_spec") != null) return .{ .code = 0, .stdout = "none\n" };
         if (std.mem.endsWith(u8, line, " -I quickstart.py")) return .{ .code = 0, .stdout = self.example_output };
         return .{ .code = 0 };
     }

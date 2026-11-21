@@ -334,7 +334,7 @@ test "install prints that pip installed komira and the example printed what the 
     try t.expectEqual(@as(u8, 0), r.code);
     try t.expectEqualStrings("", r.err);
     try t.expect(std.mem.endsWith(u8, r.out, try std.fmt.allocPrint(a, "pypi_smoke: pip installed komira==0.1.7 from testpypi into an empty environment and {s} printed what {s} says\n", .{ example, expect })));
-    try t.expectEqual(@as(usize, 6), runner.calls.items.len);
+    try t.expectEqual(@as(usize, 8), runner.calls.items.len);
 }
 
 test "install fails with exit 1 and the step's failure when a command fails" {

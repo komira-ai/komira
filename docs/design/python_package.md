@@ -263,7 +263,7 @@ exactly one, under the same name, version scheme and tag:
 | `License-Expression` | `Apache-2.0 AND LicenseRef-Modular-Proprietary` | `Apache-2.0` |
 | licence files | LICENSE, NOTICE, MODULAR_LICENSE, MODULAR_THIRD_PARTY_NOTICES | LICENSE, NOTICE |
 
-The release workflow's default is `external`, the flavour no licence forbids; changing it is one line of
+The release workflow's default is `bundled`, the flavour a scheduled run publishes; changing it is one line of
 pypi.yml. Which flavour a release is, is stated three times: in the run's summary of the workflow run that
 published it, in the first paragraph of its description on the index (each flavour's wheel starts its
 description with a sentence naming it), and in its metadata (only `external` has a `Requires-Dist` on
