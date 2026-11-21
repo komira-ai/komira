@@ -344,7 +344,12 @@ fn checkFile(ar: std.mem.Allocator, text: []const u8) !?[]const u8 {
         if (std.mem.indexOf(u8, line, "cron") != null) cron_n += 1;
         var from: usize = 0;
         while (std.mem.indexOfPos(u8, line, from, "inputs.flavour")) |at| : (from = at + 1) {
-            if (!std.mem.startsWith(u8, line[at..], FLAVOUR_READ)) return try std.fmt.allocPrint(ar, "a line reads inputs.flavour without the fallback `|| 'bundled'` (a scheduled run has no inputs): {s}", .{trimmed});
+            // whole, as `${{ <read> }}` or `(<read>)`: a bare `|| 'bundled' == ...` would take the comparison as its fallback
+            const end = at + FLAVOUR_READ.len;
+            const whole = std.mem.startsWith(u8, line[at..], FLAVOUR_READ) and
+                ((std.mem.endsWith(u8, line[0..at], "${{ ") and std.mem.startsWith(u8, line[end..], " }}")) or
+                    (std.mem.endsWith(u8, line[0..at], "(") and std.mem.startsWith(u8, line[end..], ")")));
+            if (!whole) return try std.fmt.allocPrint(ar, "a line reads inputs.flavour without the fallback `|| 'bundled'` (a scheduled run has no inputs): {s}", .{trimmed});
         }
         const in_block = if (run_indent) |ri| indent > ri else false;
         if (in_block) {
@@ -636,6 +641,8 @@ test "the flavour: a required choice of the two, bundled the default, and the bu
     try expectRefused(ar, try replaced(ar, text, SUMMARY_FLAVOUR, "          FLAVOUR: ${{ inputs.flavour }}"), bare);
     try expectRefused(ar, try replaced(ar, text, MACOS_BUILD_GATE, "    if: github.ref == 'refs/heads/main' && inputs.flavour == 'bundled'"), bare);
     try expectRefused(ar, try replaced(ar, text, "        if: (inputs.flavour || 'bundled') != 'bundled'", "        if: inputs.flavour != 'bundled'"), bare);
+    // the fallback without its parentheses, where `==` binds before `||`
+    try expectRefused(ar, try replaced(ar, text, MACOS_BUILD_GATE, "    if: github.ref == 'refs/heads/main' && inputs.flavour || 'bundled' == 'bundled'"), bare);
     // a fallback to the other flavour
     try expectRefused(ar, try replaced(ar, text, "        if: (inputs.flavour || 'bundled') != 'bundled'", "        if: (inputs.flavour || 'external') != 'bundled'"), bare);
     // the summary step dropped, or naming something else

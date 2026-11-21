@@ -11,11 +11,12 @@
 //!  - an expression is a string literal, `github.ref` (a run of this file is on main), `github.event_name`,
 //!    `inputs.<name>` (empty in a scheduled run, which has no inputs), `needs.<job>.result` and
 //!    `needs.<job>.outputs.<name>` of a job the reading job needs, `always()`, `!`, `==`, `!=`, `&&`,
-//!    `||` and parentheses, with GitHub's values: `||` and `&&` give one of their operands, and an
-//!    empty string is false;
+//!    `||` and parentheses, with GitHub's values: `||` and `&&` give one of their operands, an empty
+//!    string is false, and strings compare without regard to case;
 //!  - a job that runs, other than the two verdict jobs, ends as the case says (`success` unless the
 //!    case says otherwise) with the outputs the case gives: the case is what the farm, the index and
-//!    the smoke answered;
+//!    the smoke answered; in a job that succeeds, the step that uses the publish action uploads when
+//!    its `if:` holds, `steps.state.outputs.state` there being the job's output `state`;
 //!  - a verdict job is played step by step: a step runs when no step above it failed and its `if:`
 //!    holds; its `env:` values are expressions; its `run:` is one `echo` of a workflow command
 //!    (`::notice title=<title>::<text>` or `::error ...`), with `&& exit 1` when the step fails the
@@ -57,6 +58,8 @@ const Message = struct {
 const Played = struct {
     jobs: []const Done,
     messages: []const Message,
+    /// the jobs whose publish step ran, in file order
+    uploads: []const []const u8,
 
     fn resultOf(self: Played, name: []const u8) []const u8 {
         for (self.jobs) |d| if (std.mem.eql(u8, d.name, name)) return d.result;
@@ -101,11 +104,14 @@ const Scope = struct {
     done: []const Done,
     /// `steps.*` and `runner.*` read as their own names in `<>`, for `expanded`
     placeholders: bool = false,
+    /// `steps.state.outputs.state`, for the gate of an upload job's publish step
+    step_state: ?[]const u8 = null,
 
     fn lookup(self: Scope, ar: std.mem.Allocator, name: []const u8) !Value {
         if (std.mem.eql(u8, name, "github.ref")) return .{ .str = "refs/heads/main" };
         if (std.mem.eql(u8, name, "github.event_name")) return .{ .str = self.case.event };
         if (std.mem.eql(u8, name, "inputs.flavour")) return .{ .str = self.case.flavour orelse "" };
+        if (self.step_state) |s| if (std.mem.eql(u8, name, "steps.state.outputs.state")) return .{ .str = s };
         if (std.mem.startsWith(u8, name, "needs.")) {
             const rest = name["needs.".len..];
             const dot = std.mem.indexOfScalar(u8, rest, '.') orelse return unreadable("{s}", .{name});
@@ -177,7 +183,7 @@ const Parser = struct {
     }
 
     fn same(p: *Parser, a: Value, b: Value) !bool {
-        if (a == .str and b == .str) return std.mem.eql(u8, a.str, b.str);
+        if (a == .str and b == .str) return std.ascii.eqlIgnoreCase(a.str, b.str);
         if (a == .boolean and b == .boolean) return a.boolean == b.boolean;
         return unreadable("a comparison of a string with a boolean in {s}", .{p.src});
     }
@@ -342,6 +348,7 @@ fn play(ar: std.mem.Allocator, text: []const u8, case: Case) !Played {
     if (std.mem.eql(u8, case.event, "schedule") and case.flavour != null) return unreadable("a case of a scheduled run gives an input", .{});
     var done = std.ArrayList(Done).empty;
     var messages = std.ArrayList(Message).empty;
+    var uploads = std.ArrayList([]const u8).empty;
     for (try reader.jobNames(ar, text)) |name| {
         var n: usize = 0;
         const job = (try reader.jobLines(ar, text, name, &n)).?;
@@ -368,6 +375,18 @@ fn play(ar: std.mem.Allocator, text: []const u8, case: Case) !Played {
             if (std.mem.eql(u8, e.job, name)) break e;
         } else End{ .job = name };
         try done.append(ar, .{ .name = name, .result = end.result, .outputs = end.outputs });
+        if (!std.mem.eql(u8, end.result, "success")) continue;
+        for (try stepsOf(ar, job)) |step| {
+            if (!reader.mentions(step, "uses: pypa/gh-action-pypi-publish@")) continue;
+            const st = for (end.outputs) |o| {
+                if (std.mem.eql(u8, o[0], "state")) break o[1];
+            } else "";
+            const step_scope = Scope{ .case = case, .needs = needs, .done = done.items, .step_state = st };
+            const step_gate = for (step) |l| {
+                if (std.mem.startsWith(u8, l, "        if: ")) break l["        if: ".len..];
+            } else null;
+            if (step_gate == null or truthy(try eval(ar, step_gate.?, step_scope))) try uploads.append(ar, name);
+        }
     }
     // a case that says how a job ends where the job did not run, or names no job, is a wrong case
     for (case.ends) |e| {
@@ -376,7 +395,7 @@ fn play(ar: std.mem.Allocator, text: []const u8, case: Case) !Played {
         } else return unreadable("the case names a job pypi.yml does not have: {s}", .{e.job});
         if (std.mem.eql(u8, d.result, "skipped")) return unreadable("the case says how {s} ends, and it was skipped", .{e.job});
     }
-    return .{ .jobs = try done.toOwnedSlice(ar), .messages = try messages.toOwnedSlice(ar) };
+    return .{ .jobs = try done.toOwnedSlice(ar), .messages = try messages.toOwnedSlice(ar), .uploads = try uploads.toOwnedSlice(ar) };
 }
 
 /// The lines of the job `name`, each `${{ }}` written out for the case (a job that needs nothing).
@@ -429,6 +448,17 @@ fn expectPlayed(p: Played, green: bool, results: []const [2][]const u8, messages
     return error.WrongRun;
 }
 
+fn expectUploads(p: Played, want: []const []const u8) !void {
+    var ok = p.uploads.len == want.len;
+    if (ok) {
+        for (want, p.uploads) |w, g| ok = ok and std.mem.eql(u8, w, g);
+    }
+    if (ok) return;
+    for (p.uploads) |u| std.debug.print("  uploaded in {s}\n", .{u});
+    for (want) |u| std.debug.print("  wanted an upload in {s}\n", .{u});
+    return error.WrongUploads;
+}
+
 /// Each of `names` with the result `result`, for expectPlayed.
 fn all(ar: std.mem.Allocator, names: []const []const u8, result: []const u8) ![]const [2][]const u8 {
     var out = std.ArrayList([2][]const u8).empty;
@@ -445,6 +475,10 @@ test "a scheduled run on an unchanged main: both indexes say same, nothing uploa
     try expectPlayed(p, true, try all(ar, &LINUX, "success"), &.{ ALREADY, MAC_ON_BOTH });
     try expectPlayed(p, true, try all(ar, &MACOS_AFTER_BUILD, "skipped"), &.{ ALREADY, MAC_ON_BOTH });
     try t.expectEqualStrings("success", p.resultOf("result-macos-arm64"));
+    try expectUploads(p, &.{});
+    // an upload gate that lets `same` through would send the bytes again
+    const weak = try reader.inJob(ar, text, "pypi", "        if: steps.state.outputs.state == 'absent'\n", "        if: steps.state.outputs.state != 'differs'\n");
+    try expectUploads(try play(ar, weak, .{ .ends = &.{ BUILT, state("testpypi", "same"), state("pypi", "same"), MAC_NOTHING } }), &.{"pypi"});
 }
 
 test "a scheduled run after a documentation-only commit: the bytes differ, nothing uploads, no smoke runs, green with the notice of differing bytes" {
@@ -458,6 +492,8 @@ test "a scheduled run after a documentation-only commit: the bytes differ, nothi
     // PyPI alone differs: its smoke is skipped, and the notice is the one of differing bytes, not already published
     const q = try play(ar, text, .{ .ends = &.{ BUILT, state("testpypi", "same"), state("pypi", "differs"), MAC_NOTHING } });
     try expectPlayed(q, true, &.{ .{ "testpypi-smoke", "success" }, .{ "pypi-smoke", "skipped" }, .{ "result", "success" } }, &.{ DIFFERS, MAC_ON_BOTH });
+    try expectUploads(p, &.{});
+    try expectUploads(q, &.{});
 }
 
 test "a scheduled run after a code commit: the file is absent on both, both chains upload and smoke, green with no notice" {
@@ -467,6 +503,7 @@ test "a scheduled run after a code commit: the file is absent on both, both chai
     const text = try reader.readWorkflow(ar);
     const p = try play(ar, text, .{ .ends = &.{ BUILT, state("testpypi", "absent"), state("pypi", "absent"), MAC_BUILT, state("testpypi-macos-arm64", "absent"), state("pypi-macos-arm64", "absent") } });
     try expectPlayed(p, true, try all(ar, &(LINUX ++ MACOS_AFTER_BUILD), "success"), &.{});
+    try expectUploads(p, &.{ "testpypi", "pypi", "testpypi-macos-arm64", "pypi-macos-arm64" });
 }
 
 test "a run after one that stopped between the uploads: TestPyPI says same, PyPI absent, PyPI uploads, green without the notice already published" {
@@ -475,7 +512,9 @@ test "a run after one that stopped between the uploads: TestPyPI says same, PyPI
     const ar = arena.allocator();
     const text = try reader.readWorkflow(ar);
     const case = Case{ .ends = &.{ BUILT, state("testpypi", "same"), state("pypi", "absent"), MAC_NOTHING } };
-    try expectPlayed(try play(ar, text, case), true, try all(ar, &LINUX, "success"), &.{MAC_ON_BOTH});
+    const p = try play(ar, text, case);
+    try expectPlayed(p, true, try all(ar, &LINUX, "success"), &.{MAC_ON_BOTH});
+    try expectUploads(p, &.{"pypi"});
     // the notice gated on TestPyPI alone would claim a version PyPI did not have
     const one_index = try reader.replaced(ar, text, "        if: needs.testpypi.outputs.state == 'same' && needs.pypi.outputs.state == 'same'\n", "        if: needs.testpypi.outputs.state == 'same'\n");
     try expectPlayed(try play(ar, one_index, case), true, &.{}, &.{ ALREADY, MAC_ON_BOTH });
