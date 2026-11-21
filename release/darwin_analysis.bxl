@@ -1,0 +1,40 @@
+# The macOS set analyses: //release:mopm_darwin_libs, configured for darwin-arm64 and analysed,
+# with every target of its closure, as release-macos.yml's build would configure and analyse it.
+#
+#   ./buck2 bxl --config-file release/darwin_analysis.buckconfig komira//release/darwin_analysis.bxl:check
+#
+# The macOS set is built only by release-macos.yml, once per release, on the farm's macOS workers
+# (the workers are few, so no pull request builds for macOS). A change that makes the set fail
+# before anything is built (a target of its closure incompatible with darwin-arm64, a toolchain
+# with no execution platform, a rule that fails at analysis) would otherwise be seen first by that
+# workflow, after the merge. This script finds it in the pull request's check: configuring and
+# analysing take seconds on a Linux runner and run no action, so no macOS worker is asked for
+# anything (darwin_analysis.buckconfig registers the macOS execution platform with a property set
+# that names no worker, which configuration needs and nothing uses).
+#
+# It fails, with buck2's own message naming the target and the dependency, when the set cannot be
+# configured or analysed; and it fails, naming the set, when buck2 hands back no configured target
+# or one not configured for darwin-arm64, so the check never passes over a set it did not analyse.
+
+DARWIN_ARM64 = "komira//tools/build/platforms:darwin-arm64"
+DARWIN_SET = "komira//release:mopm_darwin_libs"
+
+def _check(ctx):
+    targets = ctx.configured_targets([DARWIN_SET], target_platform = DARWIN_ARM64)
+    labels = [str(t.label) for t in targets]
+    if len(labels) != 1 or not labels[0].startswith(DARWIN_SET + " (" + DARWIN_ARM64 + "#"):
+        fail("darwin_analysis: {} configured for {} came back as {}, not as the one target: the set was not analysed".format(
+            DARWIN_SET,
+            DARWIN_ARM64,
+            labels,
+        ))
+    analysis = ctx.analysis(list(targets)[0])
+    layout = analysis.providers()[DefaultInfo].sub_targets["layout"][DefaultInfo].default_outputs
+    if len(layout) != 1:
+        fail("darwin_analysis: {} has no `[layout]` output: its rule changed shape".format(DARWIN_SET))
+    ctx.output.print("darwin_analysis: {} configured and analysed".format(labels[0]))
+
+check = bxl_main(
+    impl = _check,
+    cli_args = {},
+)
