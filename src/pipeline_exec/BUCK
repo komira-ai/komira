@@ -50,6 +50,11 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
 # test_sources                    resident and sink-output sources, the Parquet
 #                                 source built from a spec: projection, glob,
 #                                 pushed filter, morsel size, refusals.
+# test_real_concat                SOURCE_CONCAT: the producers' rows in the spec's
+#                                 order, on several workers, producers with no
+#                                 rows, operators on the concatenation, the
+#                                 nullability of any producer kept, and a
+#                                 producer outside the dependencies refused.
 # test_real_plan                  hand-built plans end to end: scan, filter,
 #                                 project and limit; a segment reading another's
 #                                 output; what the builder refuses.
@@ -140,6 +145,7 @@ mojo_library(
         "tests/test_op_filter.mojo",
         "tests/test_op_limit_concurrent.mojo",
         "tests/test_op_project_limit.mojo",
+        "tests/test_real_concat.mojo",
         "tests/test_real_plan.mojo",
         "tests/test_real_plan_concurrent.mojo",
         "tests/test_run_plan.mojo",

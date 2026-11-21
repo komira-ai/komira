@@ -104,6 +104,28 @@ binder's code is split over the `sql_bind_*` modules (the FROM scope,
 operators, functions, casts and timestamps, subqueries, aggregates and
 GROUP BY, output names, windows and ORDER BY, joins, parquet facts).
 
+`UNION ALL` (`sql.sql_bind_union`) binds the chain `a UNION ALL b UNION ALL c`
+to one `PLAN_UNION` node with one child per branch, also as the body of a
+derived table (`FROM (a UNION ALL b) u`). Each column takes DuckDB's common
+type over the branches, folded left to right: the wider of two integers of one
+signedness; a signed with an unsigned integer the signed type of twice the
+unsigned width (an unsigned 64-bit one with a signed integer is refused, since
+DuckDB's HUGEINT has no Arrow type); an integer or decimal with a float the
+float; two decimals the larger scale with the larger integer digits (refused
+above 38 digits); an integer with a decimal the decimal that holds the integer;
+two zone-less timestamps the finer unit. A pair with no such rule (a string with
+a number, a date with a timestamp, ...) raises `SQL not supported: UNION ALL
+column <i> (<name>)` naming both types. The union's names are the first
+branch's, and a column is nullable when any branch's is. A branch whose names or
+types differ from the union's gets one projection that casts and renames its
+columns; a branch needing that projection with two columns of one name is
+refused. Bare integer literals of every branch are INT32 when they fit, so
+`SELECT 1 UNION ALL SELECT 5000000000` is INT64. `ORDER BY`, `LIMIT` and
+`OFFSET` after the last branch apply to the whole union: the parser rewrites the
+query to `SELECT * FROM (<union>) ORDER BY ... LIMIT ...`, so the sort and the
+row window bind above the union node. On any other branch they are a
+`SQL syntax error` naming the clause.
+
 ## INTERVAL literals
 
 `INTERVAL '<n>' <unit>` (also `INTERVAL <n> <unit>`) parses to an `SX_INTERVAL`

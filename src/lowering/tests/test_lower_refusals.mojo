@@ -44,7 +44,6 @@ from plan_ir.logical_plan import (
     SOURCE_KIND_UNSET,
     JOIN_INNER,
     PLAN_JOIN,
-    PLAN_UNION,
     PLAN_DISTINCT,
     PLAN_TOPN,
     PLAN_VIEW_REF,
@@ -128,12 +127,6 @@ def _refused_with(message: String, token: String, why: String) raises:
 def test_nodes_the_cutter_does_not_cut_are_refused_by_tag() raises:
     var join = LogicalPlan.join(_scan(), _scan(), _names("k"), _names("k"), JOIN_INNER)
     _refused_with(_message(join, _inputs(2)), LOWERING_UNCUTTABLE_NODE, plan_tag_name(PLAN_JOIN))
-
-    var children = List[OwnedPointer[LogicalPlan]]()
-    children.append(OwnedPointer(_scan()))
-    children.append(OwnedPointer(_scan()))
-    var union = LogicalPlan.union(children^, _schema())
-    _refused_with(_message(union, _inputs(2)), LOWERING_UNCUTTABLE_NODE, plan_tag_name(PLAN_UNION))
 
     var distinct = LogicalPlan.distinct(None, _scan())
     _refused_with(_message(distinct, _inputs()), LOWERING_UNCUTTABLE_NODE, plan_tag_name(PLAN_DISTINCT))

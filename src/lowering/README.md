@@ -17,10 +17,16 @@ and no environment variable and touches no global, so equal arguments give a
   `SOURCE_BATCH` for an in-memory scan, whose pushed filter and projection
   become operators). A filter, a projection and a limit fuse into it. An
   aggregation or a sort ends it in a sink and opens a pipeline that reads that
-  segment's output over an `E3` edge. The root is a `SINK_COLLECT` segment
+  segment's output over an `E3` edge. A union (`UNION ALL`) ends each branch
+  in a segment of its own (a `SINK_COLLECT` segment, or the branch's
+  aggregation or sort segment when nothing is fused after it) and opens a
+  pipeline whose source is `SOURCE_CONCAT` over those segments in branch
+  order, with an `E3` edge to each; what stands above the union fuses onto or
+  closes that pipeline. The root is a `SINK_COLLECT` segment
   unless the top node is a breaker, which is then the result. `cut_walk` is
   only the dispatch on the node's tag; each arm is its own module (`cut_scan`,
-  `cut_filter`, `cut_project`, `cut_limit`, `cut_aggregate`, `cut_sort`), and
+  `cut_filter`, `cut_project`, `cut_limit`, `cut_aggregate`, `cut_sort`,
+  `cut_union`), and
   `cut_state` holds what they share: the open pipeline, the cutter's segments
   and ParamTable, and the close and reopen of a breaker. A new node kind is a
   new arm module and one branch in `cut_walk`.
@@ -39,14 +45,18 @@ and no environment variable and touches no global, so equal arguments give a
 Lowering refuses by name and never replaces what it cannot lower with another
 shape:
 
-- `LOWERING_UNCUTTABLE_NODE`, naming the node: a join, union, distinct, top-n,
+- `LOWERING_UNCUTTABLE_NODE`, naming the node: a join, distinct, top-n,
   window, view or shared-subplan reference, cast to string or exchange node
   (the cutter has no arm for any of them, so an exchange is refused rather
   than elided on one host); a filter, projection or aggregation that carries a
   UDF, an aggregate function that is a UDF; a limit with an offset or a
   negative count; a limit above a sort (see Order); a partial or final
   aggregation; an aggregation with a group top-k; a source other than Parquet
-  or in memory.
+  or in memory; a union with no branch, or with a branch whose schema is not
+  the union's (column count, and per column the name, Arrow type, decimal
+  precision and scale and timezone; the concatenation reads every branch by
+  position in the union's layout, so the producer casts and renames the
+  branches first).
 - `LOWERING_SINK_UNSERVED`, naming the triple or the key: a group key of a
   type with no row (date, decimal, bool, ...), a key of several columns that
   are not all dictionary encoded strings, or a segment whose triple has no row.

@@ -72,7 +72,7 @@ the surface has no spelling, and the cell stays empty by decision.
 | `topn_per_group` | `df.sort_values(o).groupby(k).head(n)` | `lf.sort(o).group_by(k).head(n)` | PARTITION_TOPN | refused at lower |
 | `limit` | `df.head(n)` | `lf.head(n)`, `lf.limit(n)`; `lf.slice(offset, n)` on an ordered frame | LIMIT, offset 0 unless `slice` | cut, with no offset and not above a sort |
 | `distinct` | `df.drop_duplicates()`, `df.drop_duplicates(subset=...)` | `lf.unique()`, `lf.unique(subset=..., keep="any")` | DISTINCT, of whole rows or of `subset` | refused at lower |
-| `union` | `km.concat(frames)` | `kpl.concat(frames, how="vertical")` | UNION of one schema (`concat_schema_check`; rules section 8, ruling 15) | refused at lower |
+| `union` | `km.concat(frames)` | `kpl.concat(frames, how="vertical")` | UNION of one schema (`concat_schema_check`; rules section 8, ruling 15) | cut |
 | `subquery` | - | - | neither library has a subquery inside an expression; a broadcast aggregate is a window | - |
 | `view` | `km.register_view(name, df)`, then `km.sql(...)` | `km.register_view(name, lf)`, then `km.sql(...)` | VIEW_REF | not wired |
 | `udf_map` | `s.map(f)`, `s.apply(f)`, `df.apply(f, axis=1)` | `expr.map_elements(f, return_dtype=...)`, `expr.map_batches(f, return_dtype=...)` | a `UdfRef` called by `WireUdfApply` | refused at lower; the verbs raise until UDF workers land |

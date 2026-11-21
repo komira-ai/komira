@@ -45,7 +45,7 @@ from .sql_ast import (
     SXUN_NOT, SXUN_IS_NULL, SXUN_IS_NOT_NULL, SXUN_NEGATE, SXUN_ABS, SXLIKE_LIKE, SXLIKE_ILIKE,
     JK_CROSS, JK_LEFT, JK_RIGHT, JK_FULL, JK_SEMI, JK_ANTI,
     SUBQ_SCALAR, SUBQ_EXISTS, SUBQ_NOT_EXISTS, SUBQ_IN, SUBQ_NOT_IN, SUBQ_DERIVED,
-    SUBQ_UNION_ALL,
+    SUBQ_UNION_ALL, _UNION_RESULT_ALIAS,
     STMT_QUERY, STMT_COPY, STMT_CREATE_TABLE_AS,
     SXOP_EQ, SXOP_NE, SXOP_LT, SXOP_LE, SXOP_GT, SXOP_GE,
     SXOP_AND, SXOP_OR, SXOP_ADD, SXOP_SUB, SXOP_MUL, SXOP_DIV, SXOP_IDIV, SXOP_MOD,
@@ -199,6 +199,13 @@ struct _Parser(Movable):
         than a syntax error at the second `UNION`. Each branch is parsed by
         `_parse_select_stmt` — the SAME helper the first branch used — so a
         branch gets the whole SELECT grammar and cannot drift from it.
+
+        ⚠ ORDER BY / LIMIT / OFFSET BELONG TO THE WHOLE UNION, as in DuckDB.
+        On any branch before the last (the head included) they are a syntax
+        error naming the clause. On the last branch they are moved off it by
+        `_wrap_union_in_star_select`, which rewrites the query to
+        `SELECT * FROM (<union>) <wrapper> ORDER BY ... LIMIT ...`, so the sort
+        and the row window bind above the union node.
         """
         var last = -1
         while (
@@ -216,6 +223,20 @@ struct _Parser(Movable):
                     " success code. Express it as a SEMI / ANTI join"
                     " (`WHERE [NOT] EXISTS (...)`), which this engine does"
                     " serve."
+                )
+            # ORDER BY / LIMIT / OFFSET apply to the whole union, so they may
+            # follow only the last branch. DuckDB refuses the same text with
+            # `Parser Error: syntax error at or near "union"`.
+            var before = String("")
+            if last < 0:
+                before = _tail_clause_name(lhs)
+            else:
+                before = _tail_clause_name(self.subqueries[last].body)
+            if before != "":
+                raise Error(
+                    "SQL syntax error: " + before + " before UNION ALL. ORDER BY,"
+                    " LIMIT and OFFSET apply to the whole UNION ALL, so they"
+                    " must follow its last branch."
                 )
             self._advance()  # 'union'
             if not self._is_kw("all"):
@@ -244,6 +265,31 @@ struct _Parser(Movable):
                 # to recurse through a branch body.
                 self.subqueries[last].body.union_all_idx = idx
             last = idx
+        if last >= 0 and _tail_clause_name(self.subqueries[last].body) != "":
+            self._wrap_union_in_star_select(lhs, last)
+
+    def _wrap_union_in_star_select(mut self, mut lhs: SelectStmt, last: Int):
+        """The last branch of the union starting at `lhs` carries ORDER BY /
+        LIMIT / OFFSET, which belong to the whole union. Rewrite the query to
+        `SELECT * FROM (<union>) <wrapper> ORDER BY ... LIMIT ... OFFSET ...`:
+        the union (head `lhs`, which carries the chain's first index) is parked
+        as a derived table AFTER every branch, so its index is higher than
+        theirs, and `lhs` becomes the star select over it with the clauses moved
+        off the last branch. The wrapper's qualifier is `_UNION_RESULT_ALIAS`,
+        which no user query can spell."""
+        var rel_name = String(_UNION_RESULT_ALIAS) + "#" + String(len(self.subqueries))
+        var union_head = SelectStmt()
+        swap(union_head, lhs)
+        self.subqueries.append(
+            SubqueryDef(union_head^, SUBQ_DERIVED, String(""), rel_name, List[String]())
+        )
+        lhs.select_items.append(SelectItem(SqlExpr.star(), Optional[String](), True))
+        lhs.from_tables.append(
+            FromRelation.named(rel_name, String(_UNION_RESULT_ALIAS))
+        )
+        swap(lhs.order_by, self.subqueries[last].body.order_by)
+        swap(lhs.limit, self.subqueries[last].body.limit)
+        swap(lhs.offset, self.subqueries[last].body.offset)
 
     def _parse_copy(mut self) raises -> SqlStatement:
         """Parse `COPY <source> TO '<path>' [ (<opt> [, <opt>]*) ]`.
@@ -1335,6 +1381,7 @@ struct _Parser(Movable):
         if not self._is_kw("select"):
             raise Error("SQL syntax error: expected SELECT in a derived table")
         var body = self._parse_select_stmt()
+        self._parse_set_operator_tail(body)
         self._expect(TK_RPAREN, "')' to close the derived table")
         var d_alias = self._parse_optional_alias()
         # ★ AN UNALIASED DERIVED TABLE. DuckDB v1.5.3
@@ -3279,6 +3326,19 @@ def _and_into(var acc: Optional[SqlExpr], var p: SqlExpr) -> Optional[SqlExpr]:
     if acc:
         return Optional(SqlExpr.binary(SXOP_AND, acc.take(), p^))
     return Optional(p^)
+
+
+def _tail_clause_name(stmt: SelectStmt) -> String:
+    """The first of ORDER BY / LIMIT / OFFSET that `stmt` carries, spelled as
+    the clause is written, or "" when it carries none. (FETCH FIRST parses onto
+    `limit`.)"""
+    if len(stmt.order_by) > 0:
+        return String("ORDER BY")
+    if stmt.limit:
+        return String("LIMIT")
+    if stmt.offset:
+        return String("OFFSET")
+    return String("")
 
 
 def _select_star_from(name: String) raises -> SelectStmt:

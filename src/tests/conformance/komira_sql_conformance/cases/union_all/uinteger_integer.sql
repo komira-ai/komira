@@ -1,0 +1,3 @@
+-- order: rows
+-- UINTEGER UNION ALL INTEGER is BIGINT
+SELECT typeof(v) AS t, v FROM (SELECT ui AS v FROM A UNION ALL SELECT i FROM B) u
