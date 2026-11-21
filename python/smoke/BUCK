@@ -118,6 +118,21 @@ zig_test(
     zig = _ZIG,
 )
 
+# The supported Pythons as pypi.yml's smoke jobs read them: the two JSON lists of //python:supported_pythons
+# are each exactly the versions src/supported_pythons_test.zig writes out, naming the same minors once each, oldest
+# first; and each defect of a list, written into a copy, is refused with its message.
+zig_test(
+    name = "supported_pythons_lists",
+    exec_compatible_with = LINUX_X86_64,
+    src = "src/supported_pythons_test.zig",
+    data = {
+        "linux-x86_64.json": "//python:supported_pythons[linux-x86_64]",
+        "macos-arm64.json": "//python:supported_pythons[macos-arm64]",
+    },
+    busybox = _BUSYBOX,
+    zig = _ZIG,
+)
+
 zig_exe(
     name = "pypi_smoke",
     exec_compatible_with = LINUX_X86_64,
@@ -126,6 +141,7 @@ zig_exe(
     unit_tests = [":{}_unit".format(s) for s in _SCENARIOS] + [
         ":install_page_shows_quickstart",
         ":readme_shows_quickstart",
+        ":supported_pythons_lists",
         "komira//tools/build/toolchains:zig_next_version",
     ],
     busybox = _BUSYBOX,
@@ -147,6 +163,7 @@ zig_exe(
     unit_tests = [":{}_unit".format(s) for s in _SCENARIOS] + [
         ":install_page_shows_quickstart",
         ":readme_shows_quickstart",
+        ":supported_pythons_lists",
         "komira//tools/build/toolchains:zig_next_version",
     ],
     busybox = _BUSYBOX,

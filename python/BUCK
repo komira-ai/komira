@@ -42,6 +42,8 @@ python_proto(
 python_versions(
     name = "supported_pythons",
     versions = HOSTED,
+    # its test reads it (smoke/BUCK, supported_pythons_lists)
+    visibility = ["komira//python/smoke:"],
 )
 
 # ---- The wheel ---------------------------------------------------------------
@@ -225,12 +227,34 @@ _VERSION = wheel_version(read_config("komira", "package_stamp", "0"))
 # (`mojo_compiler_<version>_<subdir>.conda`).
 _TOOLCHAIN_MOJO = asset(_PLATFORM, "mojo_compiler")["name"].split("_")[2]
 
+# What the wheel's metadata says of the Pythons it installs on, written out
+# here rather than read from pythons.bzl: test_installed.py holds the installed
+# metadata to exactly these lines, so a change to the supported list changes
+# this too.
+_PYTHON_METADATA = {
+    "classifiers": [
+        "Development Status :: 2 - Pre-Alpha",
+        "Programming Language :: Python :: 3 :: Only",
+        "Programming Language :: Python :: 3.11",
+        "Programming Language :: Python :: 3.12",
+        "Programming Language :: Python :: 3.13",
+        "Programming Language :: Python :: 3.14",
+    ],
+    "requires_python": ">=3.11",
+}
+
+_PYTHON_METADATA_ARGS = ["--requires-python", _PYTHON_METADATA["requires_python"]] + [
+    a
+    for c in _PYTHON_METADATA["classifiers"]
+    for a in ["--classifier", c]
+]
+
 _INSTALLED_ARGS = [
     "--version",
     _VERSION,
     "--license-expression",
     _LICENSE_EXPRESSION,
-]
+] + _PYTHON_METADATA_ARGS
 
 # Modular's wheels of the Mojo compiler (third_party/modular/BUCK): 1.0.0, the
 # toolchain's version, with the wheel it requires, and 1.2.0.
@@ -310,12 +334,39 @@ wheel_file(
     **(_WHEEL | {"external_needed": ["libMSupportGlobals.so"]})
 )
 
+# The wheel with metadata that does not say what the supported list says: one
+# that leaves out a supported minor's classifier, and one whose Requires-Python
+# starts a minor later. Each installs, and the test refuses it.
+wheel_file(
+    name = "komira_wheel_without_py311_classifier",
+    files = _PY_FILES | _NATIVE_FILES,
+    executable = sorted(_NATIVE_FILES.keys()),
+    **(_WHEEL | {"classifiers": [c for c in _WHEEL["classifiers"] if c != "Programming Language :: Python :: 3.11"]})
+)
+
+wheel_file(
+    name = "komira_wheel_requires_python_312",
+    files = _PY_FILES | _NATIVE_FILES,
+    executable = sorted(_NATIVE_FILES.keys()),
+    **(_WHEEL | {"requires_python": ">=3.12"})
+)
+
 wheel_file(
     name = "komira_wheel_arm64_tag",
     files = _PY_FILES,
     **(_WHEEL | {"platform": "linux-arm64"})
 )
 
+
+# The classifiers, and those without 3.11, as Python's repr writes a list of
+# strings (`['a', 'b']`): the two sides of the refusal below.
+_CLASSIFIERS_REPR = "[" + ", ".join(["'" + c + "'" for c in _PYTHON_METADATA["classifiers"]]) + "]"
+
+_CLASSIFIERS_WITHOUT_311_REPR = "[" + ", ".join([
+    "'" + c + "'"
+    for c in _PYTHON_METADATA["classifiers"]
+    if c != "Programming Language :: Python :: 3.11"
+]) + "]"
 
 _LOAD_ERROR = "komira._errors.LibraryLoadError: cannot load libkomira from <site>/komira/_lib/libkomira.so: "
 
@@ -361,6 +412,18 @@ _LOAD_ERROR = "komira._errors.LibraryLoadError: cannot load libkomira from <site
         "refuses_other_distribution",
         [":komira_wheel"] + _MODULAR,
         "AssertionError: the environment holds komira and also mojo-compiler, mojo-compiler-mojo-libs",
+    ),
+    # The metadata of the Pythons, held to the supported list: a classifier
+    # left out, and a Requires-Python that starts a minor later.
+    (
+        "refuses_classifiers_not_the_supported_pythons",
+        [":komira_wheel_without_py311_classifier"],
+        "AssertionError: the wheel's Classifier lines are {}, not {}".format(_CLASSIFIERS_WITHOUT_311_REPR, _CLASSIFIERS_REPR),
+    ),
+    (
+        "refuses_requires_python_not_the_oldest_supported",
+        [":komira_wheel_requires_python_312"],
+        "AssertionError: the wheel's Requires-Python is >=3.12, not >=3.11",
     ),
     # mojo-compiler without the wheel it requires: the installer's own check.
     (
@@ -492,7 +555,7 @@ _UPGRADE_ARGS = [
     _UPGRADE_VERSION,
     "--license-expression",
     _LICENSE_EXPRESSION,
-] + [a for p in sorted(_PREVIOUS_ONLY.keys()) for a in ["--expect-removed", p]]
+] + _PYTHON_METADATA_ARGS + [a for p in sorted(_PREVIOUS_ONLY.keys()) for a in ["--expect-removed", p]]
 
 # The releases in the order given.
 _RELEASES = {

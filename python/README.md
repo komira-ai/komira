@@ -138,7 +138,8 @@ version) and on macOS arm64. Everything else is read from it:
   `<name>_py312` and `<name>_py314` on the others;
 - `//python:supported_pythons[linux-x86_64]` and `[macos-arm64]`, the exact
   versions as JSON lists, which the release workflow's smoke jobs read to run
-  one job per version.
+  one job per version. `//python/smoke:supported_pythons_lists` holds both
+  lists to the versions it writes out.
 
 Adding a minor is a line in `pythons.bzl` and its interpreter's pin in
 `third_party/python/pins.bzl`. The one wheel, tagged `py3-none`, serves every
@@ -253,7 +254,7 @@ interpreter pinned), from the release workflow only. That test holds:
 | what | how |
 |---|---|
 | the installed package | `komira` imports from the environment, at the wheel's version |
-| its metadata | no `Requires-Dist`; the `License-Expression` given; `.dist-info/licenses/` holding `LICENSE`, `NOTICE`, and Modular's `LICENSE` and `Third-Party-Notices`, each byte-equal to its source, and no other; the description starting with the first line of this README |
+| its metadata | no `Requires-Dist`; `Requires-Python` `>=3.11` and exactly the classifiers `python/BUCK` writes out (`_PYTHON_METADATA`: the four supported minors); the `License-Expression` given; `.dist-info/licenses/` holding `LICENSE`, `NOTICE`, and Modular's `LICENSE` and `Third-Party-Notices`, each byte-equal to its source, and no other; the description starting with the first line of this README |
 | nothing else | no `modular/` directory and no other distribution in the environment |
 | the library | `abi_version()` is the version of `src/so/abi/komira.tsv`; a Parquet file registers, a missing one raises `KomiraError`; a serialized plan renders |
 | where it loaded from | `/proc/self/maps` (on macOS, the images dyld has loaded) lists libkomira and its owners (none on macOS, where `lib/` holds exactly the three runtime `.dylib` files) from `komira/_lib`, and the three Mojo runtime libraries from `komira/_lib/lib` |
@@ -265,7 +266,10 @@ path (`refuses_owners_off_run_path`), a Mojo runtime library missing from the
 wheel (`refuses_missing_runtime_library`), a wheel tagged for another platform
 (`refuses_wheel_of_another_platform`), another distribution installed with the
 wheel (`refuses_other_distribution`), an unmet requirement
-(`refuses_unmet_requirement`), and CPython 3.10, which the wheel's
+(`refuses_unmet_requirement`), a wheel whose classifiers leave out 3.11
+(`refuses_classifiers_not_the_supported_pythons`) or whose `Requires-Python`
+starts at 3.12 (`refuses_requires_python_not_the_oldest_supported`), and
+CPython 3.10, which the wheel's
 `Requires-Python` (`>=3.11`) leaves out
 (`refuses_python_outside_requires_python`).
 
