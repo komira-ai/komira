@@ -1,4 +1,5 @@
 load("@komira//tools/build/package:conda.bzl", "conda_package")
+load(":elf_report.bzl", "libkomira_elf_report")
 load("@komira//tools/build/package/install_check:install_check.bzl", "conda_install_check")
 
 # libkomira as a conda package. The package is so's own: the library's
@@ -72,4 +73,25 @@ conda_install_check(
     expect_red = "does not hold `mojo-compiler ==0.0.0`",
     lib = "libkomira.so",
     package = ":komira_so_libkomira_conda",
+)
+
+# What libkomira links and weighs, read from the built files: size, SONAME,
+# RUNPATH and DT_NEEDED of the library, of each native owner and of the Mojo
+# runtime libraries, the highest GLIBC, GLIBCXX and CXXABI version each needs,
+# which owners the library reaches, and the wheel tag that floor allows. The
+# table in src/so/README.md is this target's output.
+libkomira_elf_report(
+    name = "libkomira_elf_report",
+    lib = "//src/so:libkomira",
+    native_owners = [
+        "//src/async_rt:komira_async_native",
+        "//src/async_api:komira_async_api_native",
+        "//src/compression:komira_compression_native",
+        "//src/fs:komira_fs_native",
+        "//src/libc:komira_libc_native",
+        "//src/metrics:komira_metrics_native",
+        "//src/parquet_codec:komira_parquet_codec_native",
+        "//src/scan_source:komira_scan_source_native",
+    ],
+    visibility = ["PUBLIC"],
 )

@@ -51,6 +51,36 @@ zig_exe(
     visibility = ["PUBLIC"],
 )
 
+# so_report: the ELF record of libkomira and what it loads (so_report.zig),
+# as a markdown table. Its tests read built shared objects and values.
+_SO_REPORT = [
+    "native_elf.zig",
+    "native_elf_test.zig",
+    "native_checks.zig",
+    "so_report_test.zig",
+]
+
+zig_test(
+    name = "so_report_unit",
+    exec_compatible_with = LINUX_X86_64,
+    imports = _SO_REPORT,
+    src = "so_report.zig",
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = _ZIG,
+)
+
+# Built behind its unit tests: no report is written unless they pass.
+zig_exe(
+    name = "so_report",
+    exec_compatible_with = LINUX_X86_64,
+    imports = _SO_REPORT,
+    src = "so_report.zig",
+    unit_tests = [":so_report_unit", _ZIG_VERSION],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = _ZIG,
+    visibility = ["PUBLIC"],
+)
+
 _SRCS = glob(["src/*.zig"])
 
 # The unit tests of prefix_tool: `zig test` of main.zig, whose test block

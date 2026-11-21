@@ -1,4 +1,13 @@
-load("@komira//tools/build/python:defs.bzl", "python_proto")
+load("@komira//tools/build/python:defs.bzl", "python_proto", "python_source_package")
+
+# The import package `komira` (README.md): its files at their paths, as the site
+# directory the package's tests import it from (tests/BUCK). The wheel rule
+# will read the same files.
+python_source_package(
+    name = "komira",
+    srcs = glob(["komira/**/*.py"]) + ["komira/py.typed"],
+    visibility = ["//python/tests:"],
+)
 
 # The Python modules of the plan wire, `komira.plan.v1.plan_pb2` (the messages
 # of src/plan_proto/plan.proto, `WirePlanEnvelope` among them) and
