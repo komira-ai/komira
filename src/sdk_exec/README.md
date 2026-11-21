@@ -57,6 +57,17 @@ across queries only because no plan is cached between them; wiring
 pin is the footer reads: one by the footer cache per file per query, and one
 more by the scan.
 
+**Served: one table, several files.** `register_parquet` takes a file, a
+glob or a directory (every `.parquet` file under it); the files are listed at
+registration and every query re-reads each footer. `read_parquet('<glob>')` in
+SQL expands a glob the same way. Hive `key=value` directories become columns
+after the data columns (DATE, TIMESTAMP, BIGINT or VARCHAR by DuckDB's rule),
+and a filter on one prunes files. Rows come back in no promised order across
+files. Refused by name: no file matches (`PARQUET_GLOB_NO_MATCH`), a directory
+given to SQL `read_parquet` (`PARQUET_PATH_IS_DIRECTORY`), files whose schemas
+differ (`PARQUET_FILES_SCHEMA_MISMATCH`), and the Hive shapes the footer
+package lists (`HIVE_PARTITION_*`).
+
 **Refused here, by name.** A statement that is not a query
 (`STATEMENT_NOT_A_QUERY`, step `bind`); a scalar subquery (the optimizer keeps
 it in the plan and lowering refuses the node, `LOWERING_UNCUTTABLE_NODE`; the
@@ -64,8 +75,7 @@ door also refuses with `OPTIMIZE_UNRESOLVED_SCALAR` a plan whose optimization
 asks for a scalar to be executed first, a guard no query tested here reaches); a sink denied its memory by the
 budget, a sum outside its declared type and a pool not whole after a run (step
 `execute`); and whatever lowering, the binder or the parser refuses (a join is
-`LOWERING_UNCUTTABLE_NODE` at `lower`). A glob path and a table of several
-files are refused by the footer package. Lowering given fewer scan facts than
+`LOWERING_UNCUTTABLE_NODE` at `lower`). Lowering given fewer scan facts than
 the plan has scans refuses by name (`LOWERING_INPUTS_SCAN_COUNT`);
 `lowering_inputs` descends only scan, filter, project, limit, aggregate and sort
 nodes and gives a facts entry per scan it reaches, and the cutter refuses any

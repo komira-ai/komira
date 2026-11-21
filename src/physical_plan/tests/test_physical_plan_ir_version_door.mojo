@@ -207,6 +207,19 @@ def test_door_refuses_an_empty_plan_rather_than_passing_it() raises:
     )
 
 
+def test_door_refuses_a_segment_stamped_by_the_previous_release() raises:
+    """IR version 15 added the Parquet file list; a segment stamped 14 has no
+    such field and is refused by name."""
+    assert_equal(PHYSICAL_PLAN_IR_VERSION, 15)
+    var segs = List[SegmentDescPod]()
+    segs.append(_seg_at_version(0, 14))
+    var msg = _refusal_message(segs^)
+    assert_true(
+        String("PHYSICAL_PLAN_IR_VERSION_MISMATCH") in msg,
+        "a segment stamped 14 must be refused; got: " + msg,
+    )
+
+
 def main() raises:
     var suite = TestSuite()
     suite.test[test_default_stamp_is_the_current_ir_version]()
@@ -215,4 +228,5 @@ def main() raises:
     suite.test[test_door_refuses_a_newer_ir_version]()
     suite.test[test_door_checks_every_segment_not_just_the_first]()
     suite.test[test_door_refuses_an_empty_plan_rather_than_passing_it]()
+    suite.test[test_door_refuses_a_segment_stamped_by_the_previous_release]()
     suite^.run()

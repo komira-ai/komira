@@ -49,7 +49,9 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
 #                                 gathered, the output schema of empty input.
 # test_sources                    resident and sink-output sources, the Parquet
 #                                 source built from a spec: projection, glob,
-#                                 pushed filter, morsel size, refusals.
+#                                 pushed filter, morsel size, refusals, a spec
+#                                 that lists its files and their partition
+#                                 constants.
 # test_real_plan                  hand-built plans end to end: scan, filter,
 #                                 project and limit; a segment reading another's
 #                                 output; what the builder refuses.

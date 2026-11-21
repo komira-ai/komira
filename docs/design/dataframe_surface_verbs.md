@@ -33,7 +33,7 @@ the surface has no spelling, and the cell stays empty by decision.
 
 | capability | pandas-shaped (`km`) | polars-shaped (`kpl`) | plan | engine today |
 |---|---|---|---|---|
-| `scan_parquet` | `km.read_parquet(path)` | `kpl.scan_parquet(path)` | SCAN, `SOURCE_PARQUET`, one local file | cut |
+| `scan_parquet` | `km.read_parquet(path)` | `kpl.scan_parquet(path)` | SCAN, `SOURCE_PARQUET`, local files (one file, a glob or a directory; Hive columns detected) | cut |
 | `scan_csv` | `km.read_csv(path, sep=",", header="infer")` | `kpl.scan_csv(path, separator=",", has_header=True)` | SCAN of the `komira.csv` binding, `source_kind` UNSET (the `read_csv` shape of `komira_pandas_door_e2e`) | refused at lower |
 | `scan_jsonl` | `km.read_json(path, lines=True)`; `lines=False` refused | `kpl.scan_ndjson(path)` | SCAN, `SOURCE_NDJSON` | refused at lower |
 | `scan_orc` | `km.read_orc(path)` | `kpl.scan_orc(path)` (komira's verb; polars has none) | SCAN, `SOURCE_ORC` | refused at lower |

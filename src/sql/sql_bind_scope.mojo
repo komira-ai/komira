@@ -12,7 +12,6 @@ from plan_expr.expr import Expr
 from plan_ir.logical_plan import (
     ExprArray, LogicalPlan,
 )
-from scan_source.parquet_source import ParquetSource
 from scan_source.source_variant import SourceVariant
 from sql.sql_ast import (
     FROM_LESS_RELATION, FromRelation, JK_ANTI, JK_SEMI, JoinClause, SX_COLUMN,
@@ -135,15 +134,18 @@ def _catalog_name(rel: FromRelation) raises -> String:
 
 
 def _relation_schema(rel: FromRelation, catalog: SqlCatalog, cte_scope: CteScope) raises -> Schema:
-    """The schema of one FROM relation: a `read_parquet('path')` TVF's footer
-    schema (read before binding, `cte_scope.parquet`), a `read_csv` /
+    """The schema of one FROM relation: a `read_parquet('path')` TVF's scan
+    schema, the files' columns then the Hive partition columns (resolved before
+    binding, `cte_scope.parquet`), a `read_csv` /
     `read_json` / `read_avro` TVF's inferred or header schema (`sql_tvf_bind`),
     the FROM-less relation's one column, a CTE / derived-relation schema (the
     name shadows the catalog), or a catalog lookup for a named table."""
     if rel.tvf_path:
         if not is_parquet_tvf_kind(rel.tvf_kind):
             return tvf_relation_schema(rel)
-        return cte_scope.parquet.schema_of(rel.tvf_path.value())
+        return cte_scope.parquet.schema_of(
+            rel.tvf_path.value(), rel.tvf_opts.hive_partitioning
+        )
     if rel.name == FROM_LESS_RELATION:
         return from_less_relation_schema()
     var cte_idx = cte_scope.find(rel.name)
@@ -153,8 +155,8 @@ def _relation_schema(rel: FromRelation, catalog: SqlCatalog, cte_scope: CteScope
 
 
 def _relation_scan(rel: FromRelation, catalog: SqlCatalog, cte_scope: CteScope) raises -> LogicalPlan:
-    """The scan node for one FROM relation. A parquet TVF builds a
-    `ParquetSource` scan over its footer schema, the same node
+    """The scan node for one FROM relation. A parquet TVF scans the
+    `ParquetSource` resolved before binding (its files and partition columns), the same node
     `SqlCatalog.build_scan` builds for a registered parquet table; a CSV /
     JSONL / Avro TVF builds the lazy row-oriented leaf of `sql_tvf_bind`; the
     FROM-less relation is its one-row scan; a CTE reference inlines a fresh
@@ -164,8 +166,9 @@ def _relation_scan(rel: FromRelation, catalog: SqlCatalog, cte_scope: CteScope) 
         if not is_parquet_tvf_kind(rel.tvf_kind):
             return tvf_relation_scan(rel)
         var path = rel.tvf_path.value()
-        var schema = cte_scope.parquet.schema_of(path)
-        var src = SourceVariant(ParquetSource(String(path), schema.copy(), None))
+        var mode = rel.tvf_opts.hive_partitioning
+        var schema = cte_scope.parquet.schema_of(path, mode)
+        var src = SourceVariant(cte_scope.parquet.source_of(path, mode))
         return LogicalPlan.scan_from_source(src^, schema^)
     if rel.name == FROM_LESS_RELATION:
         return from_less_relation_scan()

@@ -1,0 +1,170 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+load("@komira//tools/build/sql:defs.bzl", "sql_oracle")
+
+# Test-only: Parquet tables of several files through run_sql (the SQL door of
+# sdk_exec) against the answers of the pinned DuckDB. oracle/ holds the SQL
+# that DuckDB runs: table_dir.sql builds the table `m` (30 rows) and
+# table_hive.sql the table `hl` (16 rows); write.sql writes m as three files
+# (dir3_0 to dir3_2) and hl as four leaf files (hive_0 to hive_3). answers.sql
+# reads the files back at the paths the tests stage them at (a directory of
+# three files, and a Hive tree laid out yr=/tag=/dt=, whose key order differs
+# from the key order of the columns a reader answers) and writes
+# answers.tsv: the result of each query the tests run, the column names and
+# types of SELECT *, and typeof() of the partition columns.
+#
+#   test_directory_scan        a directory registered with register_parquet:
+#                              SELECT *, filters, count(*), GROUP BY, ORDER BY
+#                              and LIMIT answer DuckDB's rows, names and types
+#   test_hive_scan             a glob over a Hive tree registered with
+#                              register_parquet: columns, types and order of
+#                              the partition columns, filters on a partition
+#                              column and on a data column, a partition
+#                              column alone, GROUP BY, ORDER BY
+#   test_sql_globs             read_parquet('<glob>'), FROM '<glob>', a brace
+#                              glob and hive_partitioning = true | false in
+#                              SQL text answer DuckDB's rows
+#
+# The checks are in checks.mojo (library code), so each test is its own action.
+# Nothing depends on this package.
+sql_oracle(
+    name = "files",
+    srcs = ["oracle/table_dir.sql", "oracle/table_hive.sql", "oracle/write.sql"],
+    outputs = [
+        "dir3_0.parquet",
+        "dir3_1.parquet",
+        "dir3_2.parquet",
+        "hive_0.parquet",
+        "hive_1.parquet",
+        "hive_2.parquet",
+        "hive_3.parquet",
+    ],
+)
+
+sql_oracle(
+    name = "answers",
+    srcs = ["oracle/answers.sql"],
+    inputs = {
+        "dir3/part-0.parquet": ":files[dir3_0.parquet]",
+        "dir3/part-1.parquet": ":files[dir3_1.parquet]",
+        "dir3/part-2.parquet": ":files[dir3_2.parquet]",
+        "hive/yr=2024/tag=red/dt=2024-01-01/part-0.parquet": ":files[hive_0.parquet]",
+        "hive/yr=2024/tag=blue/dt=2024-01-02/part-0.parquet": ":files[hive_1.parquet]",
+        "hive/yr=2025/tag=red/dt=2024-01-01/part-0.parquet": ":files[hive_2.parquet]",
+        "hive/yr=2025/tag=blue/dt=2024-03-05/part-0.parquet": ":files[hive_3.parquet]",
+    },
+    outputs = ["answers.tsv"],
+)
+
+mojo_library(
+    name = "komira_multifile_scan_conformance",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/agg:agg",
+        "//src/agg_api:agg_api",
+        "//src/arrow:arrow",
+        "//src/arrow_ipc:arrow_ipc",
+        "//src/async_rt:async_rt",
+        "//src/async_api:async_api",
+        "//src/atomic_alias:atomic_alias",
+        "//src/avro:avro",
+        "//src/batch_eval:batch_eval",
+        "//src/byte_buffer:byte_buffer",
+        "//src/clock:clock",
+        "//src/containers:containers",
+        "//src/column_kernels:column_kernels",
+        "//src/compression:compression",
+        "//src/counters:counters",
+        "//src/crypto:crypto",
+        "//src/csv:csv",
+        "//src/dynamic_filter:dynamic_filter",
+        "//src/encoding:encoding",
+        "//src/engine_runtime:engine_runtime",
+        "//src/exec_types:exec_types",
+        "//src/expr:expr",
+        "//src/fork_join:fork_join",
+        "//src/fs:fs",
+        "//src/hashing:hashing",
+        "//src/host_probe:host_probe",
+        "//src/host_profile:host_profile",
+        "//src/join_assembly:join_assembly",
+        "//src/json:json",
+        "//src/json_index:json_index",
+        "//src/jsonl:jsonl",
+        "//src/kernels:kernels",
+        "//src/libc:libc",
+        "//src/log:log",
+        "//src/lowering:lowering",
+        "//src/lz4:lz4",
+        "//src/metrics:metrics",
+        "//src/morsel:morsel",
+        "//src/name_registry:name_registry",
+        "//src/objectstore:objectstore",
+        "//src/op_agg_state:op_agg_state",
+        "//src/op_sources:op_sources",
+        "//src/operator_api:operator_api",
+        "//src/optimizer:optimizer",
+        "//src/parquet:parquet",
+        "//src/parquet_api:parquet_api",
+        "//src/parquet_codec:parquet_codec",
+        "//src/parquet_footers:parquet_footers",
+        "//src/parquet_scan:parquet_scan",
+        "//src/physical_plan:physical_plan",
+        "//src/pipeline_exec:pipeline_exec",
+        "//src/plan_expr:plan_expr",
+        "//src/plan_ir:plan_ir",
+        "//src/plan_proto:plan_proto",
+        "//src/plan_stats:plan_stats",
+        "//src/plan_wire:plan_wire",
+        "//src/proto_codec:proto_codec",
+        "//src/protobuf:protobuf",
+        "//src/row_format:row_format",
+        "//src/scalar_arithmetic:scalar_arithmetic",
+        "//src/scan_planning:scan_planning",
+        "//src/scan_source:scan_source",
+        "//src/sdk:sdk",
+        "//src/sdk_exec:sdk_exec",
+        "//src/secret_registry:secret_registry",
+        "//src/secret_store:secret_store",
+        "//src/shuffle:shuffle",
+        "//src/simd_ops:simd_ops",
+        "//src/spsc_ring:spsc_ring",
+        "//src/sql:sql",
+        "//src/sync:sync",
+        "//src/trace:trace",
+        "//src/udf:udf",
+        "//src/zlib:zlib",
+        "//tools/build/mojo/runtime_paths:runtime_paths",
+    ],
+    conda = False,
+    test_srcs = [
+        "tests/test_directory_scan.mojo",
+        "tests/test_hive_scan.mojo",
+        "tests/test_sql_globs.mojo",
+    ],
+    test_data = {
+        "tests/test_directory_scan.mojo": {
+            "dir3/part-0.parquet": ":files[dir3_0.parquet]",
+            "dir3/part-1.parquet": ":files[dir3_1.parquet]",
+            "dir3/part-2.parquet": ":files[dir3_2.parquet]",
+            "answers.tsv": ":answers[answers.tsv]",
+        },
+        "tests/test_hive_scan.mojo": {
+            "hive/yr=2024/tag=red/dt=2024-01-01/part-0.parquet": ":files[hive_0.parquet]",
+            "hive/yr=2024/tag=blue/dt=2024-01-02/part-0.parquet": ":files[hive_1.parquet]",
+            "hive/yr=2025/tag=red/dt=2024-01-01/part-0.parquet": ":files[hive_2.parquet]",
+            "hive/yr=2025/tag=blue/dt=2024-03-05/part-0.parquet": ":files[hive_3.parquet]",
+            "answers.tsv": ":answers[answers.tsv]",
+        },
+        "tests/test_sql_globs.mojo": {
+            "dir3/part-0.parquet": ":files[dir3_0.parquet]",
+            "dir3/part-1.parquet": ":files[dir3_1.parquet]",
+            "dir3/part-2.parquet": ":files[dir3_2.parquet]",
+            "hive/yr=2024/tag=red/dt=2024-01-01/part-0.parquet": ":files[hive_0.parquet]",
+            "hive/yr=2024/tag=blue/dt=2024-01-02/part-0.parquet": ":files[hive_1.parquet]",
+            "hive/yr=2025/tag=red/dt=2024-01-01/part-0.parquet": ":files[hive_2.parquet]",
+            "hive/yr=2025/tag=blue/dt=2024-03-05/part-0.parquet": ":files[hive_3.parquet]",
+            "answers.tsv": ":answers[answers.tsv]",
+        },
+    },
+    visibility = ["PUBLIC"],
+)

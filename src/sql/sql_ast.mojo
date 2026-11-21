@@ -1285,6 +1285,13 @@ comptime TVF_JSON: UInt8 = 3
 # logical type raises at bind or decodes wrong, and nothing here would catch it.
 comptime TVF_AVRO: UInt8 = 4
 
+# `read_parquet(..., hive_partitioning = ...)`: AUTO (no option written) reads
+# Hive `key=value` directories when every file of the relation has the same
+# keys; ON is the same but refuses a file whose keys differ; OFF reads none.
+comptime HIVE_PARTITIONING_AUTO: UInt8 = 0
+comptime HIVE_PARTITIONING_ON: UInt8 = 1
+comptime HIVE_PARTITIONING_OFF: UInt8 = 2
+
 
 struct TvfOptions(Copyable, Movable):
     """The SEMANTICS-BEARING options of a `read_csv` / `read_json` TVF call.
@@ -1305,16 +1312,22 @@ struct TvfOptions(Copyable, Movable):
                       `CsvReadOptions`' default, and what every corpus fixture
                       is written with.
         delimiter:    DuckDB `delim=`/`sep=` (CSV), one byte. Default ','.
+        hive_partitioning: DuckDB `hive_partitioning=` (`read_parquet`), one of
+                      `HIVE_PARTITIONING_AUTO` (the default, no option
+                      written), `_ON` or `_OFF`. Honored by the footer reader
+                      that resolves the relation's files.
     """
 
     var all_varchar: Bool
     var has_header: Bool
     var delimiter: UInt8
+    var hive_partitioning: UInt8
 
     def __init__(out self):
         self.all_varchar = False
         self.has_header = True
         self.delimiter = UInt8(ord(","))
+        self.hive_partitioning = HIVE_PARTITIONING_AUTO
 
 
 struct FromRelation(Copyable, Movable):

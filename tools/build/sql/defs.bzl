@@ -85,15 +85,21 @@ _duckdb_dist = rule(
 _NAME = "^[A-Za-z0-9_][A-Za-z0-9_.-]*$"
 _OUTPUT_FORMATS = [".parquet", ".csv", ".tsv"]
 
+# An input path's segment may also hold `=`, after its first character, so an
+# input can sit in a Hive layout (`day=2024-01-01/part-0.parquet`). `=` is no
+# glob character, so DuckDB's allowed_paths and the existence check still match
+# it literally. Outputs keep _NAME.
+_INPUT_SEGMENT = "^[A-Za-z0-9_][A-Za-z0-9_.=-]*$"
+
 def _where(ctx):
     return str(ctx.label.raw_target())
 
-def _check_path(ctx, what, path):
+def _check_path(ctx, what, path, pattern):
     if path == "" or path.startswith("/") or path.endswith("/"):
         fail("{}: {} {} must be a relative file path".format(_where(ctx), what, repr(path)))
     for part in path.split("/"):
-        if part in (".", "..") or not regex_match(_NAME, part):
-            fail("{}: {} {} holds a segment that is not a plain name ({})".format(_where(ctx), what, repr(path), _NAME))
+        if part in (".", "..") or not regex_match(pattern, part):
+            fail("{}: {} {} holds a segment that is not a plain name ({})".format(_where(ctx), what, repr(path), pattern))
 
 def _inputs(ctx):
     """{path in the work directory: artifact}."""
@@ -110,7 +116,7 @@ def _inputs(ctx):
         staged = dict(ctx.attrs.inputs)
     dirs = {}
     for p in staged:
-        _check_path(ctx, "input", p)
+        _check_path(ctx, "input", p, _INPUT_SEGMENT)
         parts = p.split("/")
         for i in range(1, len(parts)):
             dirs["/".join(parts[:i])] = p

@@ -45,7 +45,10 @@ Import each module by name; the package root exports nothing.
   plan. `build_parquet_source` makes a `parquet_scan` `ParquetSource` on
   the local file system from the Parquet arm of a `SourceSpecPod`: it refuses a
   spec that is not total, resolves the projection names through the footer of
-  the first file the path lists (a path may be a file, a directory or a glob),
+  the first file the path lists (a path may be a file, a directory or a glob;
+  a spec that lists its files, `parquet_paths`, reads exactly those files in
+  that order and appends their constant partition columns after the data
+  columns),
   and installs the filter as the decode filter (every conjunct is applied; a row
   whose predicate is UNKNOWN is dropped) and as the pushed predicate that
   row-group statistics are checked against. The source borrows the caller's

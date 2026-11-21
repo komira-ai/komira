@@ -94,11 +94,16 @@ anti), subqueries (scalar, `[NOT] EXISTS`, `[NOT] IN`, the last NULL-aware),
 window functions, ORDER BY, LIMIT / OFFSET, DISTINCT and UNION ALL; and
 raises an `Error` starting `SQL bind error` or `SQL not supported`, naming
 the construct, for what it does not bind. The parquet facts a binding needs
-(the schema of a `read_parquet('path')` relation, and per-column null counts
-that let a NOT IN drop its run-time NULL checks) come from the
-`SqlParquetFooters` the caller passes (`sql.sql_bind_parquet`), so no
+(the `ParquetSource` a `read_parquet('path')` relation scans, which may be
+several files and carry Hive partition columns after the data columns, and
+per-file null counts that let a NOT IN drop its run-time NULL checks) come
+from the `SqlParquetFooters` the caller passes (`sql.sql_bind_parquet`), so no
 parquet file is opened while binding; `NoParquetFooters` serves a statement
-with no `read_parquet` relation. A `read_csv`, `read_json` or `read_avro`
+with no `read_parquet` relation. `read_parquet('path', hive_partitioning =
+true|false)` sets the mode the reader resolves the path under (no option is
+auto-detect); a column counts as NULL-free only when every file of the
+relation records no NULL and it is not a partition column.
+`SqlCatalog.add_parquet_source` registers such a resolved source as a table. A `read_csv`, `read_json` or `read_avro`
 relation gets its schema from `sql_tvf_bind`, which reads the file. The
 binder's code is split over the `sql_bind_*` modules (the FROM scope,
 operators, functions, casts and timestamps, subqueries, aggregates and

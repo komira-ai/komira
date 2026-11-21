@@ -44,9 +44,8 @@ Part of the [port audit](../port_audit.md). Each row is one non-test source file
 
 ### Glob, multi-file and Hive Parquet scans in the SQL path
 - Earlier files: komira_parquet/materialize_parquet.mojo
-- Missing: lowering and run_sql refuse a scan of several files, a glob, or a Hive-partitioned directory (LOWERING_SCAN_NOT_TOTAL; register_parquet takes one file). Discovery and pruning pieces exist in src/scan_planning, src/dispatch_scan/hive_partition_parser.mojo and src/parquet_scan, but the lowered segment and src/pipeline_exec/source_parquet.mojo name one file.
-- Why: reading a directory or glob of Parquet files with partition columns is a stated SDK read mode.
-- Task: pysdk-engine-multifile-scan
+- Served: register_parquet takes a file, a glob or a directory; read_parquet('<glob>') in SQL expands a glob; Hive key=value directories become partition columns (DATE, TIMESTAMP, BIGINT or VARCHAR), and a filter on one prunes files. Row order across files is not promised. Refused by name: PARQUET_GLOB_NO_MATCH, PARQUET_PATH_IS_DIRECTORY, PARQUET_FILES_SCHEMA_MISMATCH, HIVE_PARTITION_LAYOUT_MISMATCH, HIVE_PARTITION_VALUE_UNSUPPORTED (including NULL partitions), HIVE_PARTITION_COLUMN_IN_FILE. Still refused by lowering: the lazy Hive shapes (LOWERING_SCAN_NOT_TOTAL).
+- Task: pysdk-engine-multifile-scan (Parquet part done)
 
 ### CSV and NDJSON sources in the SQL and DataFrame path
 - Earlier files: komira_parquet/csv_reader.mojo

@@ -40,6 +40,7 @@ from .sql_fn_table import POSITION_IN_DESUGAR_NAME as _POSITION_IN_DESUGAR_NAME
 from .sql_ast import (
     SqlExpr, SelectItem, OrderKey, SelectStmt, FromRelation, CteDef, SubqueryDef,
     JoinClause, SqlWindowData, SqlStatement, TvfOptions, FROM_LESS_RELATION,
+    HIVE_PARTITIONING_ON, HIVE_PARTITIONING_OFF,
     TVF_PARQUET, TVF_CSV, TVF_JSON, TVF_AVRO,
     SX_COLUMN, SX_STAR, SX_UNARY, SX_BOOL, SX_AGG, SX_CALL, SX_BINARY,
     SXUN_NOT, SXUN_IS_NULL, SXUN_IS_NOT_NULL, SXUN_NEGATE, SXUN_ABS, SXLIKE_LIKE, SXLIKE_ILIKE,
@@ -1042,10 +1043,11 @@ struct _Parser(Movable):
             # ⛔ EVERY KIND CARRIES ITS `opts`, PARQUET INCLUDED. An early
             # `return FromRelation.tvf(path, tvf_alias)` for parquet would drop
             # the parsed `TvfOptions` on the floor. The per-key kind guards in
-            # `_parse_tvf_options` refuse every such option BY NAME, so a
-            # parquet `opts` is always the default; routing it through
-            # `tvf_of` anyway keeps the next option added without a guard from
-            # being silently dropped instead of merely mis-honored. A DROP is
+            # `_parse_tvf_options` refuse every CSV or JSON option BY NAME, so
+            # a parquet `opts` holds only `hive_partitioning`; routing it
+            # through `tvf_of` keeps that option, and the next one added
+            # without a guard, from being silently dropped instead of merely
+            # mis-honored. A DROP is
             # invisible; a wrong value is findable.
             return FromRelation.tvf_of(path, kind, opts^, tvf_alias)
         self._advance()
@@ -1172,7 +1174,7 @@ struct _Parser(Movable):
         one of them:
 
           1. SEMANTIC — it changes what the result IS (`all_varchar`, `header`,
-             `delim`). Recorded on `TvfOptions`; the binder honors it.
+             `delim`, `hive_partitioning`). Recorded on `TvfOptions`; the binder honors it.
           2. NEUTRAL-BY-VALUE — it changes only HOW the engine gets there
              (`parallel`, `auto_detect=true`), or it restates something our
              reader derives for itself and AGREES with (`compression=` matching
@@ -1302,6 +1304,15 @@ struct _Parser(Movable):
                         + "' — this reader derives the codec from the path"
                         + " extension and handles none / gzip / zstd"
                     )
+            elif key == "hive_partitioning":
+                if kind != TVF_PARQUET:
+                    self._refuse_option_for_kind(
+                        fname, key, kind, "read_parquet"
+                    )
+                if self._tvf_bool_arg(fname, key):
+                    opts.hive_partitioning = HIVE_PARTITIONING_ON
+                else:
+                    opts.hive_partitioning = HIVE_PARTITIONING_OFF
             elif key == "format":
                 if kind != TVF_JSON:
                     raise Error(

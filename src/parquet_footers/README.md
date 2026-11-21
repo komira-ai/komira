@@ -8,8 +8,9 @@ the binder saw and the plan the host lowers are built from that one read
 | module | does |
 |---|---|
 | `footer_cache` | `FooterCache`: a locked cache of parsed footers over `parquet.ParquetMetadataCache`. A copy is another handle on the same cache. Its errors name the file. It stamps each file's identity (size, modification time, inode, device) before reading it, so `changed_since_read` says whether the file at a path is still the one whose footer was cached |
-| `parquet_footers` | `ParquetFooters`: `sql.SqlParquetFooters` over a `FooterCache`, so `bind_statement(stmt, catalog, footers)` binds off real footers. `register_parquet_table` takes a table's schema from the footer; `check_registered_schema` and `check_catalog_table` refuse, by table, file and column, a registered schema that disagrees with the file |
-| `lowering_facts` | `add_parquet_scan`, `add_read_parquet_scan`, `add_catalog_scan`: append one scan's facts to `lowering.LoweringInputs` from the same cache |
+| `parquet_footers` | `ParquetFooters`: `sql.SqlParquetFooters` over a `FooterCache`, so `bind_statement(stmt, catalog, footers)` binds off real footers; `parquet_relation(path, hive_partitioning)` is the source a `read_parquet(path)` scans. `register_parquet_table` registers a file, a glob or a directory; `check_registered_schema` and `check_catalog_table` refuse, by table, file and column, a registered schema that disagrees with any file of the table |
+| `parquet_files` | `resolve_parquet_source`: the files a path names (a file, a glob, or with `allow_directory` every `.parquet` file below a directory), each checked against the first file's schema, with Hive partition columns |
+| `lowering_facts` | `add_parquet_scan`, `add_read_parquet_scan`, `add_parquet_files_scan`, `add_catalog_scan`: append one scan's facts to `lowering.LoweringInputs` from the same cache; over several files the facts are folded |
 
 ```text
 from parquet_footers.parquet_footers import ParquetFooters, register_parquet_table
@@ -33,6 +34,40 @@ def run(path: String) raises:
     # lower(plan, host_profile, inputs): the footer was read once.
 ```
 
+## Several files and Hive partitions
+
+`resolve_parquet_source(footers, path, hive_partitioning, allow_directory)`
+lists the files of `path` with `fs.file_discovery.EagerGlobDiscovery` (glob
+syntax of `fs.glob`: `*`, `?`, `[...]`, `{a,b}`, one `**`), sorted byte-wise.
+A directory is the glob `<dir>/**/*.parquet` and skips a file or directory whose
+name starts with `.`; it is allowed for registration and refused in SQL. A glob
+whose braces have no wildcard (`{a,b}.parquet`) lists nothing, as `fs.glob`
+lists only below a static prefix.
+
+| refusal | when |
+|---|---|
+| `PARQUET_GLOB_NO_MATCH` | no file matches |
+| `PARQUET_PATH_IS_DIRECTORY` | a directory where directories are not allowed |
+| `PARQUET_FILES_SCHEMA_MISMATCH` | a file's names, order, Arrow type, decimal precision and scale, time zone or nullability differ from the first file's |
+| `HIVE_PARTITION_LAYOUT_MISMATCH` | `hive_partitioning = true` and a file's key set differs from the first file's |
+| `HIVE_PARTITION_VALUE_UNSUPPORTED` | a repeated key, a malformed escape, an empty value, `NULL`, `__HIVE_DEFAULT_PARTITION__`, or a value DuckDB's cast might read as a date, timestamp or integer that the strict forms do not |
+| `HIVE_PARTITION_COLUMN_IN_FILE` | a partition key equals, ignoring case, a data column |
+
+Hive detection follows DuckDB over the whole path: a `key=value` component
+ends in `/` (the file name never counts), holds one `=` that is not its first
+byte, and no `?` or newline. AUTO makes partition columns when the first file
+has a key and every file has the same keys; ON also refuses a file with other
+keys; OFF makes none. Columns follow the data columns, ordered by key, not
+nullable. Their type is DATE, TIMESTAMP or BIGINT by the first value and falls
+to VARCHAR at the first later value that does not parse as that type. The
+values kept are the decoded text.
+
+`lowering_facts` folds the statistics of every file: row counts and null counts
+are summed (unknown if any file's is), the minimum is the smallest and the
+maximum the largest (unknown if any file's is), and the distinct count is the
+largest of the files' lower bounds. The file list is fixed when the table is
+registered; each query reads the footers again and checks every file.
+
 ## Why a package of its own
 
 The design puts `ParquetFooters` and the footer cache in `sdk_exec`
@@ -46,10 +81,9 @@ passes `ctx.footers` to `bind_statement` and the same cache to
 
 ## Limits
 
-- A glob path is refused by name (`footer_schema` of `data/*.parquet`): a
-  glob's footers are not unioned yet. A table naming several files is
-  refused by `check_catalog_table` (naming the files), and lowering refuses a
-  scan of several files.
+- `footer_schema` reads one file and refuses a glob path by name;
+  `parquet_relation` reads a glob.
+- Hive NULL partitions (`__HIVE_DEFAULT_PARTITION__`) are refused, not read.
 - `ScanFacts.dict_encoded_columns` is left empty. The footer reader does not
   parse the page encoding statistics that tell a column stored entirely
   dictionary encoded from one that fell back to plain pages, so no column is
@@ -105,4 +139,10 @@ The tests run when the package is built.
 - `test_bind_and_lower`: `bind_statement` and `lower` over a real footer for a
   registered table and for `read_parquet(...)`, one read for both, the
   statistics in the inputs, a registered schema that disagrees refused by
-  name (count, name, type, nullability), a missing or text file named at bind.
+  name (count, name, type, nullability), a two-file table checked file by
+  file, a missing or text file named at bind.
+- `test_multifile_scan`: globs, directories and their hidden and non-Parquet
+  files, the named refusals above, Hive partitions (modes, key order, value
+  types, refused values), a table registered over a directory and over a Hive
+  tree, a disagreeing or replaced second file refused by name, and the facts
+  folded over three files.
