@@ -75,16 +75,22 @@ sink. `card_estimate_rows` is the row count of the scan's footers when the host
 supplied statistics, an upper bound on the rows that reach the sink, and 0
 otherwise. `mem_estimate_bytes` is 0, and `AggSinkData.estimated_groups` is 0:
 no memory decision is recorded, and no statistic a producer recorded in the
-plan is read. Every segment is `ORDER_NONE` with one partition. Whether an integer key's
+plan is read. Every segment has one partition, and its order key is the one
+the Order section names. Whether an integer key's
 aggregation is dense or partitioned is not a field of the IR and is not
 recorded here. The payload narrowing rule of `lowering_rules` has no
 consumer without a join and is not called.
 
 ## Order
 
-No segment records an order. A float `SUM` or `AVG` is cut with `ORDER_NONE`,
-so its result is not bit-reproducible across worker counts until a segment can
-carry `ORDER_ROW_RANGE`. A sort's output keeps the sort's order through filters,
+An aggregation with no group key and a `SUM` or `AVG` whose argument is
+`FLOAT32` or `FLOAT64` in the child's schema is cut with `ORDER_ROW_RANGE`: the
+engine's ungrouped sink then folds each source position on its own and adds
+the positions' sums in position order, so the double sum is the same bits on
+every worker count and schedule of one lowered plan (`pipeline_exec`). Every
+other segment is `ORDER_NONE`: an integer, `DECIMAL`, `COUNT`, `MIN` or `MAX`
+fold is exact in any order, and the grouped sinks fold no float argument. A
+sort's output keeps the sort's order through filters,
 projections and the final collect only as far as the engine's sink-output
 source keeps it; lowering does not state more. A limit above a sort is
 refused, because the rows it keeps would depend on that order, and a limit
