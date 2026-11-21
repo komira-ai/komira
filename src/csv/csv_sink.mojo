@@ -405,7 +405,7 @@ struct _PackedCells(Movable, Copyable):
 #
 # Why:
 #   - it eliminates a per-cell scratch `String` allocation
-#     (`s = String(capacity=32)`), an allocator alloc+free pair per cell —
+#     (`s = String(capacity_bytes=32)`), an allocator alloc+free pair per cell —
 #     96M pairs per pass over TPC-H SF1 lineitem.
 #   - bypasses the `String.write[Writable]` indirection — numeric formatters
 #     emit ASCII digits straight into the column's packed bytes buffer.
