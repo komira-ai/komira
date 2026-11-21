@@ -1,13 +1,15 @@
 //! The supported Pythons as the workflows read them: the two JSON lists of `//python:supported_pythons`
-//! (python/pythons.bzl, HOSTED), `[linux-x86_64]` and `[macos-arm64]`, which pypi.yml's build jobs hand to
-//! the smoke jobs' matrix. The files are the test's data, under KOMIRA_TEST_WORK. `check` holds them:
+//! (python/pythons.bzl, HOSTED), `[linux-x86_64]` and `[macos-arm64]`, from which the build jobs of release.yml
+//! and pypi.yml write the job matrix of every job that installs the wheel once per Python (`pypi_smoke matrix`). The files are the test's data, under KOMIRA_TEST_WORK. `check` holds them:
 //!  - each is a JSON list of `<major>.<minor>.<micro>` strings;
 //!  - each names its minors once each, oldest first;
 //!  - both name the same minors: a platform's jobs are the same supported Pythons at that platform's
 //!    patch releases;
 //!  - each is exactly the versions written out below (LINUX, MACOS), in order.
-//! The real files must pass; each defect, written into a copy of them, is refused with its message.
+//! The real files must pass, and `matrix` (matrix.zig) must take each for its platform, so a list that would fail
+//! the workflow step fails here first; each defect, written into a copy of them, is refused with its message.
 const std = @import("std");
+const lib = @import("pypi_smoke_lib");
 const t = std.testing;
 
 const LINUX = [_][]const u8{ "3.11.17", "3.12.15", "3.13.16", "3.14.8" };
@@ -106,6 +108,21 @@ test "the built lists are the supported Pythons, the same minors on both platfor
     if (try check(a, try readData(a, "linux-x86_64.json"), try readData(a, "macos-arm64.json"))) |why| {
         std.debug.print("{s}\n", .{why});
         return error.Refused;
+    }
+}
+
+test "the matrix step takes each platform's list, and every platform it knows has one" {
+    var ar = std.heap.ArenaAllocator.init(t.allocator);
+    defer ar.deinit();
+    const a = ar.allocator();
+    for (lib.matrix.platforms) |p| {
+        const name = try std.fmt.allocPrint(a, "{s}.json", .{p.name});
+        var why: []const u8 = "";
+        const vs = lib.matrix.parse(a, &why, name, try readData(a, name)) catch |e| {
+            std.debug.print("{s}\n", .{why});
+            return e;
+        };
+        try t.expectEqual(LINUX.len, vs.len);
     }
 }
 

@@ -137,8 +137,9 @@ version) and on macOS arm64. Everything else is read from it:
   (`BUCK`), one target per minor: `<name>` on CPython 3.13, `<name>_py311`,
   `<name>_py312` and `<name>_py314` on the others;
 - `//python:supported_pythons[linux-x86_64]` and `[macos-arm64]`, the exact
-  versions as JSON lists, which the release workflow's smoke jobs read to run
-  one job per version. `//python/smoke:supported_pythons_lists` holds both
+  versions as JSON lists, from which `pypi_smoke matrix` writes the job matrix
+  of the wheel's user test (release.yml and pypi.yml) and of pypi.yml's index
+  smoke: one job per version. `//python/smoke:supported_pythons_lists` holds both
   lists to the versions it writes out.
 
 Adding a minor is a line in `pythons.bzl` and its interpreter's pin in

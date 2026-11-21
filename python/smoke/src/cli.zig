@@ -1,18 +1,24 @@
-//! pypi_smoke: the command line of the PyPI publish workflow (.github/workflows/pypi.yml).
+//! pypi_smoke: the command line of the PyPI publish workflow (.github/workflows/pypi.yml) and of the user test of
+//! the wheel file (`wheel-user-test` in .github/workflows/release.yml on every merge, and in pypi.yml before any
+//! upload).
 //!
 //!   pypi_smoke dist --wheel <file.whl> --out <dir> --github-output <file>
 //!   pypi_smoke state --index <testpypi|pypi> --dist <dir> --github-output <file>
 //!   pypi_smoke present --index <testpypi|pypi> --name-file <path> --github-output <file>
 //!   pypi_smoke verify --index <testpypi|pypi> --dist <dir> [--attempts <n>] [--delay <seconds>]
-//!   pypi_smoke install --index <testpypi|pypi> --dist <dir> --python <exe> --example <file> --expect <file>
+//!   pypi_smoke install --index <testpypi|pypi|dist> --dist <dir> --python <exe> --example <file> --expect <file>
 //!                      --data <file>... --abi-table <file> --work <dir> [--attempts <n>] [--delay <seconds>]
+//!   pypi_smoke matrix --pythons <file> --platform <name> --github-output <file>
 //!
 //! `dist` names the wheel the build made as the index will (meta.zig) and puts it alone in a directory; `state`
 //! says whether an index already holds that file (index.zig `lookup`); `present` says, from a file holding the
 //! one-line name of a wheel (`<name>-<version>-<tag>.whl`) and before anything is built, whether the index's
 //! release lists a file of exactly that name (index.zig `hasFile`) and appends `present=true` or
 //! `present=false`; `verify` and `install` are the smoke
-//! (index.zig `verify`, install.zig). Every step prints `pypi_smoke: ...`; a refusal prints
+//! (index.zig `verify`, install.zig); `install --index dist` installs the wheel of the dist directory itself, with
+//! no index and one attempt (a directory does not lag: `--attempts` and `--delay` are refused with it); `matrix`
+//! reads the list of supported Pythons the build wrote for a platform (`//python:supported_pythons[<platform>]`,
+//! matrix.zig) and appends `matrix=<the job matrix of the platform as JSON>`. Every step prints `pypi_smoke: ...`; a refusal prints
 //! `pypi_smoke: FAILED: <why>` on stderr and `::error title=pypi::<why on one line>` on stdout for the GitHub
 //! log; the exit status is 0 when the step held, 1 when it refused or failed, 2 for a usage error. Outputs for
 //! later steps are appended to the file `--github-output` names. Everything is a flag; no environment is read.
@@ -21,6 +27,7 @@ const common = @import("common.zig");
 const meta = @import("meta.zig");
 const index = @import("index.zig");
 const install = @import("install.zig");
+const matrix = @import("matrix.zig");
 const rbf = @import("release_beta_fetch");
 
 const Allocator = std.mem.Allocator;
@@ -36,8 +43,9 @@ pub const usage =
     \\       pypi_smoke state --index <testpypi|pypi> --dist <dir> --github-output <file>
     \\       pypi_smoke present --index <testpypi|pypi> --name-file <path> --github-output <file>
     \\       pypi_smoke verify --index <testpypi|pypi> --dist <dir> [--attempts <n>] [--delay <seconds>]
-    \\       pypi_smoke install --index <testpypi|pypi> --dist <dir> --python <exe> --example <file> --expect <file>
+    \\       pypi_smoke install --index <testpypi|pypi|dist> --dist <dir> --python <exe> --example <file> --expect <file>
     \\                          --data <file>... --abi-table <file> --work <dir> [--attempts <n>] [--delay <seconds>]
+    \\       pypi_smoke matrix --pythons <file> --platform <name> --github-output <file>
     \\
 ;
 
@@ -214,12 +222,27 @@ fn cmdVerify(a: Allocator, args: []const []const u8, deps: Deps, out: *std.Io.Wr
 fn cmdInstall(a: Allocator, args: []const []const u8, deps: Deps, out: *std.Io.Writer, err: *std.Io.Writer) !u8 {
     const names = [_][]const u8{ "--index", "--dist", "--python", "--example", "--expect", "--abi-table", "--work", "--attempts", "--delay" };
     const p = (try parseFlags(a, args, &names, 7, "--data", err)) orelse return 2;
-    const idx = (try indexOf(err, p.get(0))) orelse return 2;
-    const pace = (try paceOf(err, p.values[7], p.values[8])) orelse return 2;
+    const from_dist = std.mem.eql(u8, p.get(0), "dist");
+    if (!from_dist and common.indexNamed(p.get(0)) == null) {
+        try err.writeAll("pypi_smoke: --index is testpypi, pypi or dist\n");
+        try err.flush();
+        return 2;
+    }
+    if (from_dist and (p.values[7] != null or p.values[8] != null)) {
+        try err.writeAll("pypi_smoke: --attempts and --delay are for an index; --index dist installs once\n");
+        try err.flush();
+        return 2;
+    }
+    const pace = if (from_dist) Pace{ .attempts = 1, .delay_ms = 0 } else (try paceOf(err, p.values[7], p.values[8])) orelse return 2;
     var why: []const u8 = "";
     const wheel = meta.loadDist(a, &why, p.get(1)) catch |e| return failed(a, out, err, e, why);
+    // pip runs in the work directory, so it is given the dist directory's absolute path
+    const source: install.Source = if (from_dist) .{
+        .dist = std.fs.cwd().realpathAlloc(a, p.get(1)) catch |e|
+            return failedText(a, out, err, "cannot resolve --dist {s}: {s}", .{ p.get(1), @errorName(e) }),
+    } else .{ .index = common.indexNamed(p.get(0)).? };
     const opts = install.Options{
-        .index = idx,
+        .source = source,
         .python = p.get(2),
         .example = p.get(3),
         .expect = p.get(4),
@@ -230,7 +253,30 @@ fn cmdInstall(a: Allocator, args: []const []const u8, deps: Deps, out: *std.Io.W
         .delay_ms = pace.delay_ms,
     };
     install.run(a, &why, deps.runner, opts, wheel, out) catch |e| return failed(a, out, err, e, why);
-    try out.print("pypi_smoke: pip installed {s}=={s} from {s} into an empty environment and {s} printed what {s} says\n", .{ wheel.name, wheel.version, idx.name, opts.example, opts.expect });
+    const from = switch (source) {
+        .index => |idx| idx.name,
+        .dist => |dir| try std.fmt.allocPrint(a, "the dist directory {s}", .{dir}),
+    };
+    try out.print("pypi_smoke: pip installed {s}=={s} from {s} into an empty environment and {s} printed what {s} says\n", .{ wheel.name, wheel.version, from, opts.example, opts.expect });
+    try out.flush();
+    return 0;
+}
+
+fn cmdMatrix(a: Allocator, args: []const []const u8, out: *std.Io.Writer, err: *std.Io.Writer) !u8 {
+    const names = [_][]const u8{ "--pythons", "--platform", "--github-output" };
+    const p = (try parseFlags(a, args, &names, 3, null, err)) orelse return 2;
+    const platform = matrix.platformNamed(p.get(1)) orelse {
+        try err.print("pypi_smoke: --platform is one of {s}\n", .{try matrix.platformNames(a)});
+        try err.flush();
+        return 2;
+    };
+    var why: []const u8 = "";
+    const text = meta.readFile(a, &why, p.get(0), 1 << 20) catch |e| return failed(a, out, err, e, why);
+    const versions = matrix.parse(a, &why, p.get(0), text) catch |e| return failed(a, out, err, e, why);
+    const line = try std.fmt.allocPrint(a, "matrix={s}\n", .{try matrix.json(a, platform, versions)});
+    common.appendFile(p.get(2), line) catch |e|
+        return failedText(a, out, err, "cannot write --github-output {s}: {s}", .{ p.get(2), @errorName(e) });
+    try out.print("pypi_smoke: the jobs of the {s} wheel run on {s} with Python {s}\n", .{ platform.name, platform.runner, try std.mem.join(a, ", ", versions) });
     try out.flush();
     return 0;
 }
@@ -244,6 +290,7 @@ pub fn run(a: Allocator, args: []const []const u8, deps: Deps, out: *std.Io.Writ
         if (std.mem.eql(u8, args[0], "present")) return cmdPresent(a, rest, deps, out, err);
         if (std.mem.eql(u8, args[0], "verify")) return cmdVerify(a, rest, deps, out, err);
         if (std.mem.eql(u8, args[0], "install")) return cmdInstall(a, rest, deps, out, err);
+        if (std.mem.eql(u8, args[0], "matrix")) return cmdMatrix(a, rest, out, err);
     }
     try err.writeAll(usage);
     try err.flush();
