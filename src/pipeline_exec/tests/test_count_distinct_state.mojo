@@ -168,7 +168,10 @@ def _str_batch(
     var valid = List[Bool]()
     for i in range(len(vals)):
         valid.append(vals[i] != NULL_STR)
-        values.append(String("") if vals[i] == NULL_STR else vals[i])
+        if vals[i] == NULL_STR:
+            values.append(String(""))
+        else:
+            values.append(vals[i].copy())
     var sb = SchemaBuilder()
     var rb = RecordBatchBuilder()
     if form == FORM_FLAT:
@@ -457,7 +460,8 @@ def test_floats_read_as_equal_cells_exactly_when_duckdb_calls_them_equal() raise
         UInt64(0x3FF8000000000001),  # 7: the double above 1.5
         UInt64(0x7FF0000000000000),  # 8: +inf
         UInt64(0xFFF0000000000000),  # 9: -inf
-        NULL_BITS,  # 10: NULL]
+        NULL_BITS,  # 10: NULL
+        ]
     )
     var col = _read(slot, 0, _f64_batch(bits), pool, res)
     for i in range(1, 4):

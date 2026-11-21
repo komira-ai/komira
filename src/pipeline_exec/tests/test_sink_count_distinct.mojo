@@ -572,7 +572,8 @@ def test_null_is_not_counted_and_no_value_counts_zero() raises:
     var nulls = List[String]([NULL_STR, NULL_STR])
     _feed(strs, 0, 0, _str_batch(nulls))
     _feed(strs, 1, 1, _str_batch(nulls, FORM_SHUFFLED, 1))
-    assert_equal(_count_of(_finish(strs, 2)), 0)
+    var strs_out = _finish(strs, 2)
+    assert_equal(_count_of(strs_out), 0)
     # A NULL beside a value adds nothing to the value's count.
     var mixed = _sink_x()
     mixed.resize_worker_state(1)
@@ -582,7 +583,8 @@ def test_null_is_not_counted_and_no_value_counts_zero() raises:
         0,
         _int_batch[DType.int64](ArrowType.INT64, List[Int]([NUL, 4, NUL])),
     )
-    assert_equal(_count_of(_finish(mixed, 1)), 1)
+    var mixed_out = _finish(mixed, 1)
+    assert_equal(_count_of(mixed_out), 1)
 
 
 def test_no_row_gives_one_row_of_zero() raises:
@@ -853,7 +855,8 @@ def test_a_column_of_other_types_on_different_workers_is_refused_at_combine() ra
     var idle = _sink_x()
     idle.resize_worker_state(2)
     _feed(idle, 1, 0, _f64_batch(List[UInt64]([UInt64(0x3FF8000000000000)])))
-    assert_equal(_count_of(_finish(idle, 2)), 1)
+    var idle_out = _finish(idle, 2)
+    assert_equal(_count_of(idle_out), 1)
 
 
 def test_a_pool_too_small_for_the_distinct_values_is_refused_by_name() raises:
@@ -940,7 +943,8 @@ def test_a_pool_too_small_for_the_merge_is_refused_and_returned() raises:
     # With room for the merge the same morsels merge: 1 to 5.
     var roomy = SegmentPool(held + 65536)
     var ok = _two_workers(roomy)
-    assert_equal(_count_of(_finish(ok, 2)), 5)
+    var ok_out = _finish(ok, 2)
+    assert_equal(_count_of(ok_out), 5)
     assert_equal(roomy.granted(), 0)
 
 

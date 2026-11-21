@@ -429,9 +429,9 @@ def _g3_data() raises -> AggSinkData:
     return grouped_agg_data(_key_exprs("s1"), aggs^, _g3_schema())
 
 
-def _part(null: Bool, value: String) -> String:
+def _part(is_null: Bool, value: String) -> String:
     """A key part as text: NULL and the empty string differ."""
-    if null:
+    if is_null:
         return "NULL"
     return "S:" + value
 
@@ -587,12 +587,15 @@ def test_select_distinct_over_two_fixed_width_keys_is_one_row_per_pair() raises:
         start += n
     var out = _combine_and_take(sink, 4)
     var want = Dict[String, Bool]()
+    var n_want = 0
     for r in range(rows):
         var a = String("N") if k1_null(r) else String(k1_value(r))
         var b = String("N") if k2_null(r) else String(k2_value(r))
+        if (a + "|" + b) not in want:
+            n_want += 1
         want[a + "|" + b] = True
     assert_true("N|N" in want, "the table has no NULL pair")
-    assert_equal(out.num_rows(), len(want))
+    assert_equal(out.num_rows(), n_want)
     var got = Dict[String, Bool]()
     for i in range(out.num_rows()):
         var a = String("N")
@@ -645,12 +648,14 @@ def test_select_distinct_over_two_string_keys_is_one_row_per_pair() raises:
     var types = List[ArrowType]([ArrowType.STRING, ArrowType.STRING])
     var rows = 300
     var want = Dict[String, Bool]()
+    var n_want = 0
     for r in range(rows):
-        want[
-            _part(s1_null(r), s1_value(r))
-            + "|"
-            + _part(s2_null(r), s2_value(r))
-        ] = True
+        var pair = (
+            _part(s1_null(r), s1_value(r)) + "|" + _part(s2_null(r), s2_value(r))
+        )
+        if pair not in want:
+            n_want += 1
+        want[pair] = True
     assert_true("NULL|NULL" in want and "S:|S:" in want)
     var forms = List[Int]([FORM_FLAT, FORM_SHUFFLED])
     for f in range(len(forms)):
@@ -669,7 +674,7 @@ def test_select_distinct_over_two_string_keys_is_one_row_per_pair() raises:
                 m += 1
                 start += n
             var out = _combine_and_take_s(sink, 3)
-            assert_equal(out.num_rows(), len(want))
+            assert_equal(out.num_rows(), n_want)
             var got = Dict[String, Bool]()
             for i in range(out.num_rows()):
                 var key = _out_text(out, 0, i) + "|" + _out_text(out, 1, i)
