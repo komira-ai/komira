@@ -114,6 +114,19 @@ test "a test run whose only failure is a cut build of a test is a cut" {
     try expectCut(log, 1);
 }
 
+test "a failed test whose head, before its output, has buck2's cut line is a cut" {
+    const log = "[2026-11-21T16:00:01.000+00:00] \xe2\x9c\x97 Fail: komira//src/b:test_b (0.4s)\n" ++
+        "[2026-11-21T16:00:01.000+00:00] " ++ cut_error ++ "\n" ++
+        "[2026-11-21T16:00:01.000+00:00] ---- STDOUT ----\n" ++
+        "[2026-11-21T16:00:01.000+00:00]\n" ++
+        "[2026-11-21T16:00:01.000+00:00] ---- STDERR ----\n" ++
+        "[2026-11-21T16:00:01.000+00:00]\n" ++
+        "Tests finished: Pass 0. Fail 1. Timeout 0. Fatal 0. Skip 0. Omit 0. Infra Failure 0. Build failure 0\n" ++
+        "1 TESTS FAILED\n" ++
+        "  \xe2\x9c\x97 komira//src/b:test_b (cfg)\n";
+    try expectCut(log, 1);
+}
+
 // ---- a real failure, final ---------------------------------------------------
 
 const compile_error = "[2026-11-21T13:40:17.627+00:00] Action failed: komira//tools/build/examples/cshim:add (komira//tools/build/platforms:linux-x86_64#03cc1a891c89e4be) (c_compile add_files/add.c (pic))";

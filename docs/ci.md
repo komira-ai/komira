@@ -218,9 +218,9 @@ there is no summary line although the run used the network. A run that executed
 no action (everything cached, or a query-only bxl script) prints no summary line
 at all, only `Network: up 0B  down 0B`, and passes on that line. `build` and
 `bxl` print the same summary. The caller builds the tool first, on the farm, and passes
-its path as `assert-remote`; that build is the one buck2 command of a job that
-does not go through the action (it builds the tool that would run it again), so
-a cut during it still fails its step. The cases are recorded buck2 output
+its path as `assert-remote`. That build, and the few other `./buck2` steps
+that do not go through the action (pr.yml's build of its change tool, for
+one), are not run again: a cut during one of them still fails its step. The cases are recorded buck2 output
 (`//tools/build/ci:assert_remote_unit`, `//tools/build/ci:farm_retry_unit`) and
 the action's own two lines run over it (`//:buck2_farm_cases`).
 

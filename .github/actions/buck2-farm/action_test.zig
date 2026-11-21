@@ -29,7 +29,11 @@
 //!    test failure beside a cut and a test whose output prints the cut line
 //!    are red after one run, with no first log and nothing in the summary; a
 //!    subcommand other than build, test or bxl is never run again; a second
-//!    run that ran an action locally is refused by the tool step.
+//!    run that ran an action locally is refused by the tool step;
+//!  - a buck2 ended by a signal is never run again, and a second run ended by
+//!    one fails saying so; a job summary that cannot be written, a log that
+//!    cannot be written and a buck2 that cannot be run end the step with the
+//!    reason, never with a run passed over.
 
 const std = @import("std");
 const t = std.testing;
@@ -189,6 +193,8 @@ const Run = struct {
         text: []const u8,
     },
     code: u8 = 0,
+    /// The signal that ends the call, in place of the exit code.
+    signal: ?u8 = null,
 };
 
 fn fixture(name: []const u8, code: u8) Run {
@@ -226,16 +232,32 @@ const Case = struct {
 /// and step 2 only if step 1 passed (as a runner skips the later steps of a
 /// failed job).
 fn runCase(ar: std.mem.Allocator, subcommand: []const u8, runs: []const Run) !Case {
+    return runCaseWith(ar, subcommand, runs, .{});
+}
+
+/// What a case breaks around the action, to reach the tool's own errors.
+const Setup = struct {
+    /// GITHUB_STEP_SUMMARY is a directory, which cannot be appended to.
+    summary_is_dir: bool = false,
+    /// BUCK2_LOG is in a directory that does not exist.
+    log_dir_missing: bool = false,
+    /// There is no `./buck2`.
+    no_buck2: bool = false,
+};
+
+fn runCaseWith(ar: std.mem.Allocator, subcommand: []const u8, runs: []const Run, setup: Setup) !Case {
     const steps = try loadSteps(ar);
     const w = try workDir(ar);
     case_no += 1;
     const dir = try std.fmt.allocPrint(ar, "{s}/case{d}", .{ w, case_no });
     try std.fs.cwd().makePath(dir);
-    const buck2 = try std.fs.path.join(ar, &.{ dir, "buck2" });
-    try std.fs.cwd().copyFile(try std.process.getEnvVarOwned(ar, "STAND_IN_BUCK2"), std.fs.cwd(), buck2, .{});
-    var f = try std.fs.cwd().openFile(buck2, .{});
-    try f.chmod(0o755);
-    f.close();
+    if (!setup.no_buck2) {
+        const buck2 = try std.fs.path.join(ar, &.{ dir, "buck2" });
+        try std.fs.cwd().copyFile(try std.process.getEnvVarOwned(ar, "STAND_IN_BUCK2"), std.fs.cwd(), buck2, .{});
+        var f = try std.fs.cwd().openFile(buck2, .{});
+        try f.chmod(0o755);
+        f.close();
+    }
     var args = std.ArrayList(u8).empty;
     try args.appendSlice(ar, subcommand);
     for (runs, 0..) |r, i| {
@@ -247,13 +269,19 @@ fn runCase(ar: std.mem.Allocator, subcommand: []const u8, runs: []const Run) !Ca
                 break :p p;
             },
         };
-        try args.print(ar, " {s}@{d}", .{ path, r.code });
+        if (r.signal) |sig| {
+            try args.print(ar, " {s}@sig{d}", .{ path, sig });
+        } else {
+            try args.print(ar, " {s}@{d}", .{ path, r.code });
+        }
     }
     var env = std.process.EnvMap.init(ar);
     try env.put("PATH", try std.process.getEnvVarOwned(ar, "PATH"));
     try env.put("BUCK2_ARGS", args.items);
-    try env.put("BUCK2_LOG", try std.fs.path.join(ar, &.{ dir, "buck2-farm.log" }));
-    try env.put("GITHUB_STEP_SUMMARY", try std.fs.path.join(ar, &.{ dir, "summary.md" }));
+    try env.put("BUCK2_LOG", try std.fs.path.join(ar, &.{ dir, if (setup.log_dir_missing) "missing/buck2-farm.log" else "buck2-farm.log" }));
+    const summary = try std.fs.path.join(ar, &.{ dir, "summary.md" });
+    if (setup.summary_is_dir) try std.fs.cwd().makePath(summary);
+    try env.put("GITHUB_STEP_SUMMARY", summary);
     try env.put("ASSERT_REMOTE", try std.process.getEnvVarOwned(ar, "ASSERT_REMOTE"));
     const first = try runLine(ar, dir, steps[0].run, &env);
     var c: Case = .{ .code = first.code, .step = 1, .out1 = first.out, .out2 = "", .runs = 0, .dir = dir };
@@ -504,4 +532,70 @@ test "a second run that ran an action locally is refused at the tool step" {
     try t.expectEqual(@as(u8, 2), c.step);
     try t.expectEqual(@as(u8, 1), c.code);
     try t.expect(has(c.out2, "3 action(s) ran locally"));
+}
+
+// ---- a killed buck2, and the tool's own errors ----------------------------------
+
+test "a buck2 ended by a signal is not run again, even when its output reads as a cut" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var killed = fixture("build_cut.log", 0);
+    killed.signal = 9;
+    const c = try runCase(a, "build", &.{ killed, fixture("build_remote.log", 0) });
+    errdefer show(c);
+    try t.expectEqual(@as(u8, 1), c.step);
+    try t.expectEqual(@as(u8, 137), c.code);
+    try t.expectEqual(@as(usize, 1), c.runs);
+    try t.expect(std.mem.endsWith(u8, c.out1, "buck2-farm: not run again: buck2 was ended by signal 9\n"));
+    try t.expect((try c.file(a, "buck2-farm.first.log")) == null);
+    try t.expect((try c.file(a, "summary.md")) == null);
+}
+
+test "a cut, then a second run ended by a signal: red after two runs, saying so" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var killed = fixture("build_remote.log", 0);
+    killed.signal = 9;
+    const c = try runCase(a, "build", &.{ fixture("build_cut.log", 2), killed, fixture("build_remote.log", 0) });
+    errdefer show(c);
+    try t.expectEqual(@as(u8, 1), c.step);
+    try t.expectEqual(@as(u8, 137), c.code);
+    try t.expectEqual(@as(usize, 2), c.runs);
+    try t.expect(std.mem.endsWith(u8, c.out1, "buck2-farm: FAILED: the second run was ended by signal 9\n"));
+}
+
+test "a job summary that cannot be written stops the step before the second run, with exit 2" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const c = try runCaseWith(a, "build", &.{ fixture("build_cut.log", 2), fixture("build_remote.log", 0) }, .{ .summary_is_dir = true });
+    errdefer show(c);
+    try t.expectEqual(@as(u8, 1), c.step);
+    try t.expectEqual(@as(u8, 2), c.code);
+    try t.expectEqual(@as(usize, 1), c.runs);
+    try t.expect(has(c.out1, "buck2-farm: cannot write the job summary "));
+}
+
+test "a log that cannot be written stops the step before buck2 runs, with exit 2" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const c = try runCaseWith(arena.allocator(), "build", &.{fixture("build_remote.log", 0)}, .{ .log_dir_missing = true });
+    errdefer show(c);
+    try t.expectEqual(@as(u8, 1), c.step);
+    try t.expectEqual(@as(u8, 2), c.code);
+    try t.expectEqual(@as(usize, 0), c.runs);
+    try t.expect(has(c.out1, "buck2-farm: cannot run the command or write "));
+}
+
+test "a buck2 that cannot be run fails the step with 127 and is not run again" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const c = try runCaseWith(arena.allocator(), "build", &.{fixture("build_remote.log", 0)}, .{ .no_buck2 = true });
+    errdefer show(c);
+    try t.expectEqual(@as(u8, 1), c.step);
+    try t.expectEqual(@as(u8, 127), c.code);
+    try t.expect(has(c.out1, "assert_remote run: cannot run ./buck2: FileNotFound\n"));
+    try t.expect(std.mem.endsWith(u8, c.out1, "buck2-farm: not run again: an error outside the failed actions and tests: assert_remote run: cannot run ./buck2: FileNotFound\n"));
 }

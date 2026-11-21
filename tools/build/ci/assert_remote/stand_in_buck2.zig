@@ -3,8 +3,9 @@
 //!
 //!     stand_in_buck2 <subcommand> <run>...
 //!
-//! Each `<run>` is a recorded buck2 output, `<log>` (then exit 0) or
-//! `<log>@<code>` (then exit <code>). The n-th call in a directory plays the
+//! Each `<run>` is a recorded buck2 output, `<log>` (then exit 0),
+//! `<log>@<code>` (then exit <code>) or `<log>@sig<n>` (then end by signal
+//! <n>, as a killed buck2 does). The n-th call in a directory plays the
 //! n-th run: it appends `<subcommand>` to `stand_in_buck2.calls` in the
 //! working directory (the case counts its lines), prints the log and exits
 //! as told. A call past the last run prints that and exits 99. It runs
@@ -37,13 +38,24 @@ pub fn main() !u8 {
     const run = runs[n];
     var path: []const u8 = run;
     var code: u8 = 0;
+    var signal: ?u8 = null;
     if (std.mem.lastIndexOfScalar(u8, run, '@')) |at| {
-        if (std.fmt.parseInt(u8, run[at + 1 ..], 10)) |c| {
+        const end = run[at + 1 ..];
+        if (std.mem.startsWith(u8, end, "sig")) {
+            if (std.fmt.parseInt(u8, end[3..], 10)) |sig| {
+                path = run[0..at];
+                signal = sig;
+            } else |_| {}
+        } else if (std.fmt.parseInt(u8, end, 10)) |c| {
             path = run[0..at];
             code = c;
         } else |_| {}
     }
     const log = try std.fs.cwd().readFileAlloc(a, path, 1 << 24);
     try std.fs.File.stdout().writeAll(log);
+    if (signal) |sig| {
+        try std.posix.raise(sig);
+        return 98; // a signal that does not end the process
+    }
     return code;
 }
