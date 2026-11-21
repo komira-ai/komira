@@ -188,7 +188,7 @@ def _encode_string_key[
             var tmp = alloc[UInt8](slen + 1)
             if slen > 0:
                 memcpy(dest=tmp, src=data_ptr + start, count=slen)
-            (tmp + slen).init_pointee_copy(UInt8(0))
+            (tmp + slen).unsafe_write(copy=UInt8(0))
             var s = String(unsafe_from_utf8_ptr=tmp)
             tmp.free()
             if s in collision_dict:
@@ -208,7 +208,7 @@ def _encode_string_key[
             else:
                 var tmp = alloc[UInt8](slen + 1)
                 memcpy(dest=tmp, src=data_ptr + start, count=slen)
-                (tmp + slen).init_pointee_copy(UInt8(0))
+                (tmp + slen).unsafe_write(copy=UInt8(0))
                 distinct.append(String(unsafe_from_utf8_ptr=tmp))
                 tmp.free()
             rev_starts.append(start)
@@ -253,7 +253,7 @@ def _encode_dictionary_key[
         else:
             var tmp = alloc[UInt8](slen + 1)
             memcpy(dest=tmp, src=data_src + s, count=slen)
-            (tmp + slen).init_pointee_copy(UInt8(0))
+            (tmp + slen).unsafe_write(copy=UInt8(0))
             distinct.append(String(unsafe_from_utf8_ptr=tmp))
             tmp.free()
     var perm = _sorted_perm_from_distinct(distinct)

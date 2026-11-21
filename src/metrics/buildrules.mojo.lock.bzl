@@ -107,7 +107,7 @@ GRAPH_JSON = r'''{
         {"path": "src/metrics/src/metrics/histogram.mojo", "sha256": "543c53a1834a8ce1c8b3498afaabfb766fbd6f6ec8e9dffdad7759bef302ee2a"},
         {"path": "src/metrics/src/metrics/metric_point.mojo", "sha256": "76aa9747823ebfed1044f9b29760cbc9f16444e5b11cf2f4a198c385fee3f922"},
         {"path": "src/metrics/src/metrics/metric_sweep.mojo", "sha256": "3af44ae7bc3d582e5ee1a399ff98247b1b0e33a061c3164daa219344a24819cf"},
-        {"path": "src/metrics/src/metrics/metrics_set.mojo", "sha256": "42d5efe3476637bccbc0e776b344c768106c53c3d1f2e2298195bc4d30385951"},
+        {"path": "src/metrics/src/metrics/metrics_set.mojo", "sha256": "4134f2339e7c680e5a734720863330cc582c24acb748a5a4e61684cbab716d4a"},
         {"path": "src/metrics/src/metrics/series_table.mojo", "sha256": "ad7df467e91829d42a0fba50d94767e6b52a7abff2ac625a2f96a2ba02fe9e83"}
       ],
       "deps": ["komira-ai/atomic_alias@0.1.0#mojo1.1.0/lib", "komira-ai/clock@0.1.0#mojo1.1.0/lib", "komira-ai/containers@0.1.0#mojo1.1.0/lib", "komira-ai/hashing@0.1.0#mojo1.1.0/lib", "komira-ai/name_registry@0.1.0#mojo1.1.0/lib"],
@@ -416,7 +416,7 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
         {"path": "src/metrics/src/metrics/histogram.mojo", "sha256": "543c53a1834a8ce1c8b3498afaabfb766fbd6f6ec8e9dffdad7759bef302ee2a"},
         {"path": "src/metrics/src/metrics/metric_point.mojo", "sha256": "76aa9747823ebfed1044f9b29760cbc9f16444e5b11cf2f4a198c385fee3f922"},
         {"path": "src/metrics/src/metrics/metric_sweep.mojo", "sha256": "3af44ae7bc3d582e5ee1a399ff98247b1b0e33a061c3164daa219344a24819cf"},
-        {"path": "src/metrics/src/metrics/metrics_set.mojo", "sha256": "42d5efe3476637bccbc0e776b344c768106c53c3d1f2e2298195bc4d30385951"},
+        {"path": "src/metrics/src/metrics/metrics_set.mojo", "sha256": "4134f2339e7c680e5a734720863330cc582c24acb748a5a4e61684cbab716d4a"},
         {"path": "src/metrics/src/metrics/series_table.mojo", "sha256": "ad7df467e91829d42a0fba50d94767e6b52a7abff2ac625a2f96a2ba02fe9e83"}
       ],
       "deps": ["komira-ai/atomic_alias@0.1.0#mojo1.1.0/lib", "komira-ai/clock@0.1.0#mojo1.1.0/lib", "komira-ai/containers@0.1.0#mojo1.1.0/lib", "komira-ai/hashing@0.1.0#mojo1.1.0/lib", "komira-ai/name_registry@0.1.0#mojo1.1.0/lib"],
@@ -722,7 +722,7 @@ GRAPH_JSON_OSX_ARM64 = r'''{
         {"path": "src/metrics/src/metrics/histogram.mojo", "sha256": "543c53a1834a8ce1c8b3498afaabfb766fbd6f6ec8e9dffdad7759bef302ee2a"},
         {"path": "src/metrics/src/metrics/metric_point.mojo", "sha256": "76aa9747823ebfed1044f9b29760cbc9f16444e5b11cf2f4a198c385fee3f922"},
         {"path": "src/metrics/src/metrics/metric_sweep.mojo", "sha256": "3af44ae7bc3d582e5ee1a399ff98247b1b0e33a061c3164daa219344a24819cf"},
-        {"path": "src/metrics/src/metrics/metrics_set.mojo", "sha256": "42d5efe3476637bccbc0e776b344c768106c53c3d1f2e2298195bc4d30385951"},
+        {"path": "src/metrics/src/metrics/metrics_set.mojo", "sha256": "4134f2339e7c680e5a734720863330cc582c24acb748a5a4e61684cbab716d4a"},
         {"path": "src/metrics/src/metrics/series_table.mojo", "sha256": "ad7df467e91829d42a0fba50d94767e6b52a7abff2ac625a2f96a2ba02fe9e83"}
       ],
       "deps": ["komira-ai/atomic_alias@0.1.0#mojo1.1.0/lib", "komira-ai/clock@0.1.0#mojo1.1.0/lib", "komira-ai/containers@0.1.0#mojo1.1.0/lib", "komira-ai/hashing@0.1.0#mojo1.1.0/lib", "komira-ai/name_registry@0.1.0#mojo1.1.0/lib"],
