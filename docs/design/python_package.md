@@ -3,8 +3,8 @@
 Status: design, partly built. The allowlist entry that admits the package (`python` in `PYTHON_SURFACE`,
 [tests/python_closure_allowlist.bzl](../../tests/python_closure_allowlist.bzl)) landed with this document.
 Release 1's surface is built ([python/README.md](../../python/README.md)): the loader, `Session` with
-`register_parquet` and `close`, `abi_version()`, `__version__`, `KomiraError` and `LibraryLoadError`,
-and their tests. `Session.sql`, `Result` and the default session are not.
+`register_parquet` and `close`, `abi_version()`, `__version__`, `KomiraError`, `LibraryLoadError` and
+`UnsupportedCpuError`, and their tests. `Session.sql`, `Result` and the default session are not.
 
 ## Release 1
 
@@ -13,7 +13,7 @@ it installs, imports and loads `libkomira` at ABI 1.1, and nothing in it runs a 
 library's run call does not exist yet.
 
 - Its public names are `__version__`, `abi_version()` (the library's `komira_abi_version()`, loading the
-  library if needed), `KomiraError`, `LibraryLoadError` and `Session`. `Session()` takes no argument and
+  library if needed), `KomiraError`, `LibraryLoadError`, `UnsupportedCpuError` and `Session`. `Session()` takes no argument and
   has `register_parquet(name, path)`, `close()`, `closed` and the context-manager methods. `Session.sql`, `Result`,
   the module-level `sql` and `register_parquet`, and `UnsupportedOperation` arrive with the run call.
 - The per-session lock and the `os.register_at_fork` hook of decision 3's behaviour list are not built
@@ -144,6 +144,7 @@ The whole public surface of the first release is these names in `komira.__all__`
 | `KomiraError` | the base class of every error the package raises on purpose (decision 9) |
 | `UnsupportedOperation` | a `KomiraError`: komira refused a construct by name (an SQL feature the engine does not run yet, an option it does not take) |
 | `LibraryLoadError` | a `KomiraError`: `libkomira` or a library it needs could not be loaded, or its ABI major version is not the one this package was written for |
+| `UnsupportedCpuError` | a `LibraryLoadError`: on Linux x86_64 the CPU lacks a flag of x86-64-v3, the level `libkomira` is compiled for there, so the library is not opened; the message names the missing flags |
 | `__version__` | the installed distribution's version, read with `importlib.metadata.version("komira")` (the distribution's name) |
 
 Behaviour each later pull request implements, fixed here so they agree:
