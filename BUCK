@@ -137,10 +137,11 @@ zig_test(
 
 # The cases of pypi.yml, the publish of the Python package (.github/workflows/pypi_workflow_test.zig
 # says what each catches): a manual trigger alone, no secret and no token, no upload step in the
-# build job, the identity (`id-token`) in build, testpypi and pypi alone, the order build,
-# testpypi, smoke, pypi, smoke with the exact gate and environment of each, the upload only for
-# the state `absent` on a pinned action with its defaults, Python 3.13 set up in the smoke jobs
-# alone, every action pinned to a commit, and the result job. A build action.
+# build job, the identity (`id-token`) in the build jobs and the upload jobs alone, the twelve
+# jobs of the Linux and the macOS wheel with the exact runner, gate, needs and environment of
+# each, the upload only for the state `absent` on a pinned action with its defaults, Python 3.13
+# set up in the smoke jobs alone, every action pinned to a commit, and the Linux result job. The
+# macOS jobs' further contract is in //:release_macos_cases. A build action.
 zig_test(
     name = "pypi_workflow_cases",
     exec_compatible_with = LINUX_X86_64,
@@ -152,11 +153,12 @@ zig_test(
     zig = "komira//tools/build/toolchains:zig_next",
 )
 
-# The cases of the macOS build of the release (.github/workflows/release_macos_test.zig says
-# what each catches): the workflow release-macos.yml builds the macOS set on the farm, in a
-# concurrency group of its own, and release.yml holds no macOS job; the build
-# holds up nothing, no workflow that runs on a pull request names a macOS platform, the check
-# set holds no macOS build, and the set's definition is one list. A build action.
+# The cases of the macOS builds of the release workflows (.github/workflows/release_macos_test.zig
+# says what each catches): the workflow release-macos.yml builds the macOS set on the farm, in a
+# concurrency group of its own, and release.yml holds no macOS job; the macOS jobs of pypi.yml
+# build the macOS wheel only when an index lacks it and share no needs with the Linux jobs; the
+# builds hold up nothing, no workflow that runs on a pull request names a macOS platform, the check
+# set holds no macOS build or macOS wheel target, and the set's definition is one list. A build action.
 zig_test(
     name = "release_macos_cases",
     exec_compatible_with = LINUX_X86_64,

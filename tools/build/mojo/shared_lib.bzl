@@ -259,6 +259,16 @@ def _shared_lib_impl(ctx):
                 fail("{}: host C++ runtime library {} is not one of the platform row's runtime_libs {}".format(ctx.label, name, runtime_libs))
         dist = {dest: f for dest, f in files.items() if dest not in ["lib/" + n for n in HOST_CXX_RUNTIME]}
         sub_targets["dist"] = [DefaultInfo(default_output = ctx.actions.copied_dir(out_name + ".dist", dist))]
+    else:
+        # macOS arm64: the gated .dylib and, in lib/ (its run path,
+        # `@loader_path/lib`), the three Mojo runtime libraries of the darwin
+        # row. No owner libraries (refused above) and no C++ runtime: libc++
+        # and libSystem are the operating system's. The same directory a
+        # language package copies, as on Linux.
+        dist = {so_file: public}
+        for name in row("darwin-arm64")["runtime_libs"]:
+            dist["lib/" + name] = tc.runtime.project(name)
+        sub_targets["dist"] = [DefaultInfo(default_output = ctx.actions.copied_dir(out_name + ".dist", dist))]
     return [DefaultInfo(
         default_output = public,
         sub_targets = sub_targets | coverage_shared_lib(ctx, tc, _build_executable, srcs, main, _dep_closure(ctx), _c_link(ctx), link_extra, so_file),

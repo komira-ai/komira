@@ -4,6 +4,7 @@ would; the action of `wheel_install_test` (python/install_test.bzl).
 
     python3.<minor> -I -S wheel_install_run.py --installer <wheel_install.py>
         --out <file> --tmpdir <dir> --wheel <file.whl>... [--skip-requirements]
+        [--upgrade]
         [--host-lib <lib>]... [--arg <text>]... [--path-arg <flag>=<path>]...
         [--expect-failure <line>] --script <test.py>
 
@@ -17,12 +18,20 @@ prefix. In order:
 2. Each wheel's tag must be one this interpreter installs: a Python tag `py3`,
    `py3<minor>` or `cp3<minor>`, the ABI tag `none`, and the platform `any`
    or `manylinux_2_<n>_<machine>` (or `manylinux2014_<machine>`) with this
-   machine and <n> at most the C library's minor version.
+   machine and <n> at most the C library's minor version, or, on macOS,
+   `macosx_<major>_<minor>_<machine>` with this machine (`arm64`) and a
+   version at most the macOS version this runs on.
 3. Each wheel is installed into the site directory by `install` of
    `--installer` (tools/build/python/wheel_install.py, what `python_wheel`
    runs): every member at its path, a `.data/` directory's `purelib/` and
    `platlib/` merged in. Its distribution and version are read from its file
-   name, and the installer holds its `.dist-info` to them.
+   name, and the installer holds its `.dist-info` to them. With `--upgrade`,
+   the wheels are the releases of one distribution in the order they are
+   installed, and each replaces the one installed before it as `pip install`
+   of a newer version does: first every file the installed release's RECORD
+   lists is deleted, and the directories that leave empty, then the new
+   release is installed. Without it, an installed distribution is not
+   uninstalled, and a second wheel of it is refused.
 4. Every installed distribution's `Requires-Python` must hold for this
    interpreter, and, unless `--skip-requirements` (pip's `--no-deps`), every
    one of its `Requires-Dist` must be met by an installed distribution. A
@@ -31,8 +40,11 @@ prefix. In order:
 5. `--script` runs as `<prefix>/bin/python3.<minor> -I <script>`, from the
    empty directory `<tmpdir>/run`, with this process's environment unchanged
    (the rule sets no library path), and the arguments `--site <site directory>`,
-   `--host-lib <absolute path>` for each `--host-lib`, each `--arg`, and each
-   `--path-arg` as `<flag> <absolute path>`.
+   `--host-lib <absolute path>` for each `--host-lib`, each `--arg`, each
+   `--path-arg` as `<flag> <absolute path>`, and, after an upgrade, `--removed
+   <path below the site directory>` for each file the replaced release had
+   that the new one does not (its `.dist-info` files left out): what the
+   script holds to be gone.
 
 A refusal of steps 2 to 4 is the line `install: <reason>`; a failure of the
 script is the last line it wrote to stderr (the traceback's `Type: message`).
@@ -42,6 +54,7 @@ site directory is written `<site>` and this interpreter's prefix `<python>`.
 On a pass, `--tmpdir` is emptied and `--out` written; otherwise this exits 1.
 """
 
+import csv
 import email.parser
 import importlib.util
 import os
@@ -70,11 +83,12 @@ def parse(argv):
     command line."""
     opts = {k[2:].replace("-", "_"): [] for k in _REPEATED}
     opts["skip_requirements"] = False
+    opts["upgrade"] = False
     i = 0
     while i < len(argv):
         a = argv[i]
-        if a == "--skip-requirements":
-            opts["skip_requirements"] = True
+        if a in ("--skip-requirements", "--upgrade"):
+            opts[a[2:].replace("-", "_")] = True
             i += 1
             continue
         if a not in _VALUED:
@@ -156,10 +170,13 @@ def parse_requirement(line):
     return normalize(m.group(1)), m.group(3).strip()
 
 
-def supported(tag, minor, machine, glibc):
+def supported(tag, minor, machine, glibc, system="linux", macos=(0, 0)):
     """Whether this interpreter installs a wheel tagged `tag`
-    (`py3-none-manylinux_2_34_x86_64`; each part may be a `.`-joined set):
-    CPython 3.<minor> on `machine` with glibc `glibc` ((major, minor))."""
+    (`py3-none-manylinux_2_34_x86_64`, `py3-none-macosx_11_0_arm64`; each part
+    may be a `.`-joined set): CPython 3.<minor> on `machine` with glibc
+    `glibc` ((major, minor)) when `system` is "linux", or on macOS version
+    `macos` ((major, minor)) when it is "darwin". A `manylinux` platform
+    needs Linux and a `macosx` one needs macOS."""
     parts = tag.split("-")
     if len(parts) != 3:
         return False
@@ -171,6 +188,13 @@ def supported(tag, minor, machine, glibc):
     for plat in plats:
         if plat == "any":
             return True
+        if system == "darwin":
+            m = re.fullmatch(r"macosx_(\d+)_(\d+)_(.+)", plat)
+            if m and m.group(3) == machine and (int(m.group(1)), int(m.group(2))) <= macos:
+                return True
+            continue
+        if system != "linux":
+            continue
         m = re.fullmatch(r"manylinux_(\d+)_(\d+)_(.+)", plat) or re.fullmatch(r"manylinux2014_()()(.+)", plat)
         if not m or m.group(3) != machine:
             continue
@@ -200,6 +224,17 @@ def glibc_version():
         return (0, 0)
     m = re.fullmatch(r"glibc (\d+)\.(\d+).*", text)
     return (int(m.group(1)), int(m.group(2))) if m else (0, 0)
+
+
+def macos_version():
+    """The macOS (major, minor) this runs on (platform.mac_ver()), or (0, 0)
+    when it is not macOS."""
+    text = platform.mac_ver()[0]
+    m = re.match(r"(\d+)\.(\d+)", text) or re.fullmatch(r"(\d+)()", text)
+    version = (int(m.group(1)), int(m.group(2) or 0)) if m else (0, 0)
+    # An interpreter built against an SDK older than macOS 11 is told 10.16
+    # on every macOS 11 or newer: it means at least 11.0.
+    return (11, 0) if version == (10, 16) else version
 
 
 def installed(site):
@@ -262,19 +297,71 @@ def _load_installer(path):
     return module
 
 
-def install_all(installer, wheels, site, minor):
-    """Installs each of `wheels` into `site` after checking its tag."""
+def installed_files(site, name):
+    """The paths (relative to `site`, `/`-separated) of the RECORD of the
+    installed distribution `name`, or None when it is not installed. Raises
+    Refused for a distribution installed more than once or with no RECORD."""
+    dirs = [
+        e
+        for e in sorted(os.listdir(site))
+        if e.endswith(".dist-info") and normalize(e[: -len(".dist-info")].rpartition("-")[0]) == normalize(name)
+    ]
+    if not dirs:
+        return None
+    if len(dirs) > 1:
+        raise Refused("{} is installed more than once: {}".format(normalize(name), ", ".join(dirs)))
+    record = os.path.join(site, dirs[0], "RECORD")
+    if not os.path.isfile(record):
+        raise Refused("{} has no RECORD, so it cannot be uninstalled".format(dirs[0]))
+    with open(record, encoding="utf-8", newline="") as f:
+        return [row[0] for row in csv.reader(f) if row]
+
+
+def uninstall(site, paths):
+    """Deletes the files `paths` (relative to `site`) and the directories that
+    leave empty, never `site` itself; a path that is gone is skipped."""
+    root = os.path.abspath(site)
+    for rel in paths:
+        path = os.path.normpath(os.path.join(root, rel))
+        if os.path.isabs(rel) or not path.startswith(root + os.sep):
+            raise Refused("the RECORD path {} leaves the site directory".format(rel))
+        if os.path.lexists(path):
+            os.unlink(path)
+        parent = os.path.dirname(path)
+        while parent != root and os.path.isdir(parent) and not os.listdir(parent):
+            os.rmdir(parent)
+            parent = os.path.dirname(parent)
+
+
+def install_all(installer, wheels, site, minor, upgrade=False):
+    """Installs each of `wheels` into `site` after checking its tag. With
+    `upgrade`, a wheel replaces the installed release of its distribution
+    (see the module docstring). Returns the files the last replaced release had
+    that its replacement lacks, sorted, `.dist-info` files left out: empty when
+    nothing was replaced."""
     machine = platform.machine()
+    system = "darwin" if sys.platform == "darwin" else "linux"
     glibc = glibc_version()
+    macos = macos_version()
+    removed = []
     for wheel in wheels:
         name, version, tag = wheel_name_version_tag(wheel)
-        if not supported(tag, minor, machine, glibc):
+        if not supported(tag, minor, machine, glibc, system, macos):
             raise Refused(
-                "the wheel of {} is tagged {}, which this interpreter (CPython 3.{} on {}) does not install".format(
-                    normalize(name), tag, minor, machine
+                "the wheel of {} is tagged {}, which this interpreter (CPython 3.{} on {}{}) does not install".format(
+                    normalize(name), tag, minor, "macOS " + platform.mac_ver()[0] + " " if system == "darwin" else "", machine
                 )
             )
+        old = installed_files(site, name)
+        if old is not None and not upgrade:
+            raise Refused("{} is already installed, and a second wheel of it is installed only with --upgrade".format(normalize(name)))
+        if old is not None:
+            uninstall(site, old)
         installer.install(os.path.abspath(wheel), name, version, site)
+        if old is not None:
+            kept = set(installed_files(site, name))
+            removed = sorted(p for p in set(old) - kept if ".dist-info/" not in p)
+    return removed
 
 
 def normalized(line, site, python_prefix):
@@ -301,7 +388,7 @@ def run(opts):
     os.makedirs(workdir)
     venv_exe, site = make_prefix(prefix, minor)
     try:
-        install_all(_load_installer(opts["installer"]), opts["wheel"], site, minor)
+        removed = install_all(_load_installer(opts["installer"]), opts["wheel"], site, minor, opts["upgrade"])
         check_installed(installed(site), platform.python_version(), opts["skip_requirements"])
     except Refused as e:
         return "install: {}".format(e), site
@@ -310,6 +397,8 @@ def run(opts):
         cmd += ["--host-lib", os.path.abspath(lib)]
     for a in opts["arg"]:
         cmd.append(a)
+    for p in removed:
+        cmd += ["--removed", p]
     for p in opts["path_arg"]:
         flag, _, path = p.partition("=")
         cmd += [flag, os.path.abspath(path)]

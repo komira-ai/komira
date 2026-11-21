@@ -338,3 +338,66 @@ test "verify treats a release that lists other files only as absent, and refuses
     const again = try std.fmt.allocPrint(a, "attempt {d} of 3 failed, trying again: {s}\n", .{ 1, try refusal(a, 1, &.{try servedLine(a, tampered, w)}) });
     try t.expect(std.mem.startsWith(u8, log2.written(), again));
 }
+
+// ---- present ----------------------------------------------------------------------------
+
+const MAC_FILE = "komira-0.1.7-py3-none-macosx_11_0_arm64.whl";
+const mac_name = lib.meta.FileName{ .name = "komira", .version = "0.1.7", .tag = "py3-none-macosx_11_0_arm64" };
+
+fn hasFileOf(a: Alloc, why: *[]const u8, fake: *h.Fake) !bool {
+    return lib.index.hasFile(a, why, fake.fetcher(), idx, mac_name, MAC_FILE);
+}
+
+test "a file is not present when the index answers 404 for the release" {
+    var ar = std.heap.ArenaAllocator.init(t.allocator);
+    defer ar.deinit();
+    const a = ar.allocator();
+    var fake = h.Fake{ .alloc = a, .routes = &.{.{ .url = JSON_URL, .got = .{ .status = 404 } }} };
+    var why: []const u8 = "";
+    try t.expect(!try hasFileOf(a, &why, &fake));
+    try t.expectEqual(@as(usize, 1), fake.urls.items.len);
+    try t.expectEqualStrings(JSON_URL, fake.urls.items[0]);
+}
+
+test "a file is not present when the release of that version lists the Linux wheel only" {
+    var ar = std.heap.ArenaAllocator.init(t.allocator);
+    defer ar.deinit();
+    const a = ar.allocator();
+    const json = try h.releaseJson(a, &.{.{ .file = FILE, .sha256 = "ab", .size = 3, .url = FILE_URL }});
+    var fake = h.Fake{ .alloc = a, .routes = try routes(a, json, null) };
+    var why: []const u8 = "";
+    try t.expect(!try hasFileOf(a, &why, &fake));
+}
+
+test "a file is present when the release lists a file of exactly that name, whatever its bytes" {
+    var ar = std.heap.ArenaAllocator.init(t.allocator);
+    defer ar.deinit();
+    const a = ar.allocator();
+    const json = try h.releaseJson(a, &.{
+        .{ .file = FILE, .sha256 = "ab", .size = 3, .url = FILE_URL },
+        .{ .file = MAC_FILE, .sha256 = "cd", .size = 9, .url = FILE_URL },
+    });
+    var fake = h.Fake{ .alloc = a, .routes = try routes(a, json, null) };
+    var why: []const u8 = "";
+    try t.expect(try hasFileOf(a, &why, &fake));
+    try t.expectEqual(@as(usize, 1), fake.urls.items.len);
+}
+
+test "presence is refused on an HTTP 500, a transport error, and an answer that is not a release's JSON" {
+    var ar = std.heap.ArenaAllocator.init(t.allocator);
+    defer ar.deinit();
+    const a = ar.allocator();
+    var why: []const u8 = "";
+
+    var s500 = h.Fake{ .alloc = a, .routes = &.{.{ .url = JSON_URL, .got = .{ .status = 500 } }} };
+    try t.expectError(error.Refused, hasFileOf(a, &why, &s500));
+    try t.expectEqualStrings("GET " ++ JSON_URL ++ ": HTTP 500", why);
+
+    var down = h.Fake{ .alloc = a, .routes = &.{.{ .url = JSON_URL, .got = .{ .transport = error.ConnectionRefused } }} };
+    try t.expectError(error.Refused, hasFileOf(a, &why, &down));
+    try t.expectEqualStrings("GET " ++ JSON_URL ++ ": ConnectionRefused", why);
+
+    var html = h.Fake{ .alloc = a, .routes = &.{.{ .url = JSON_URL, .got = body("<html>maintenance</html>") }} };
+    try t.expectError(error.Refused, hasFileOf(a, &why, &html));
+    try t.expect(std.mem.startsWith(u8, why, "GET " ++ JSON_URL ++ ": the answer is not the JSON of a release ("));
+}
