@@ -635,3 +635,11 @@ export_file(
     src = "CHANGELOG.md",
     visibility = ["//python/smoke:"],
 )
+
+# The list of the Pythons and platforms the wheel's user test runs on (supported_pythons.tsv), read by the
+# smoke driver's `supported_pythons_list` test (python/smoke/BUCK).
+export_file(
+    name = "supported_pythons.tsv",
+    src = "supported_pythons.tsv",
+    visibility = ["//python/smoke:"],
+)

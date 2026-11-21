@@ -425,7 +425,7 @@ fn linuxError(comptime text: []const u8) Message {
     return .{ .kind = "error", .title = "pypi", .text = text };
 }
 
-const LINUX = [_][]const u8{ "build", "testpypi", "testpypi-smoke", "pypi", "pypi-smoke", "result" };
+const LINUX = [_][]const u8{ "build", "wheel-user-test", "testpypi", "testpypi-smoke", "pypi", "pypi-smoke", "result" };
 const MACOS_AFTER_BUILD = [_][]const u8{ "testpypi-macos-arm64", "testpypi-smoke-macos-arm64", "pypi-macos-arm64", "pypi-smoke-macos-arm64" };
 
 fn expectPlayed(p: Played, green: bool, results: []const [2][]const u8, messages: []const Message) !void {
@@ -482,9 +482,9 @@ test "a scheduled run after a documentation-only commit: the bytes differ, nothi
     defer arena.deinit();
     const ar = arena.allocator();
     const text = try reader.readWorkflow(ar);
-    // TestPyPI differs: no smoke, no PyPI job at all
+    // TestPyPI differs: the user test of the wheel file ran and passed; no smoke, no PyPI job at all
     const p = try play(ar, text, .{ .ends = &.{ BUILT, state("testpypi", "differs"), MAC_NOTHING } });
-    try expectPlayed(p, true, &.{ .{ "testpypi", "success" }, .{ "testpypi-smoke", "skipped" }, .{ "pypi", "skipped" }, .{ "pypi-smoke", "skipped" }, .{ "result", "success" } }, &.{ DIFFERS, MAC_ON_BOTH });
+    try expectPlayed(p, true, &.{ .{ "wheel-user-test", "success" }, .{ "testpypi", "success" }, .{ "testpypi-smoke", "skipped" }, .{ "pypi", "skipped" }, .{ "pypi-smoke", "skipped" }, .{ "result", "success" } }, &.{ DIFFERS, MAC_ON_BOTH });
     // PyPI alone differs: its smoke is skipped, and the notice is the one of differing bytes, not already published
     const q = try play(ar, text, .{ .ends = &.{ BUILT, state("testpypi", "same"), state("pypi", "differs"), MAC_NOTHING } });
     try expectPlayed(q, true, &.{ .{ "testpypi-smoke", "success" }, .{ "pypi-smoke", "skipped" }, .{ "result", "success" } }, &.{ DIFFERS, MAC_ON_BOTH });
@@ -528,9 +528,25 @@ test "each failure of the Linux chain ends the run red, names the job, and print
     // the TestPyPI smoke fails: PyPI is never asked
     try expectPlayed(try play(ar, text, .{ .ends = &.{ BUILT, same, .{ .job = "testpypi-smoke", .result = "failure" }, MAC_NOTHING } }), false, &.{ .{ "pypi", "skipped" }, .{ "pypi-smoke", "skipped" } }, &.{ linuxError("the TestPyPI smoke or the PyPI upload job did not succeed (testpypi-smoke failure, pypi skipped)"), MAC_ON_BOTH });
     // the build fails: nothing after it runs
-    try expectPlayed(try play(ar, text, .{ .ends = &.{ .{ .job = "build", .result = "failure" }, MAC_NOTHING } }), false, &.{ .{ "testpypi", "skipped" }, .{ "result", "failure" } }, &.{ linuxError("the build or the TestPyPI upload job did not succeed (build failure, testpypi skipped)"), MAC_ON_BOTH });
+    try expectPlayed(try play(ar, text, .{ .ends = &.{ .{ .job = "build", .result = "failure" }, MAC_NOTHING } }), false, &.{ .{ "wheel-user-test", "skipped" }, .{ "testpypi", "skipped" }, .{ "result", "failure" } }, &.{ linuxError("the build, the user test of the wheel or the TestPyPI upload job did not succeed (build failure, wheel-user-test skipped, testpypi skipped)"), MAC_ON_BOTH });
     // the state of TestPyPI could not be asked (an index error): no state, the job failed
-    try expectPlayed(try play(ar, text, .{ .ends = &.{ BUILT, .{ .job = "testpypi", .result = "failure" }, MAC_NOTHING } }), false, &.{ .{ "testpypi-smoke", "skipped" }, .{ "result", "failure" } }, &.{ linuxError("the build or the TestPyPI upload job did not succeed (build success, testpypi failure)"), MAC_ON_BOTH });
+    try expectPlayed(try play(ar, text, .{ .ends = &.{ BUILT, .{ .job = "testpypi", .result = "failure" }, MAC_NOTHING } }), false, &.{ .{ "testpypi-smoke", "skipped" }, .{ "result", "failure" } }, &.{ linuxError("the build, the user test of the wheel or the TestPyPI upload job did not succeed (build success, wheel-user-test success, testpypi failure)"), MAC_ON_BOTH });
+}
+
+test "a wheel that failed its user test is not uploaded: TestPyPI and PyPI are never asked, red, the job named" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const ar = arena.allocator();
+    const text = try reader.readWorkflow(ar);
+    const failed = End{ .job = "wheel-user-test", .result = "failure" };
+    const p = try play(ar, text, .{ .ends = &.{ BUILT, failed, MAC_NOTHING } });
+    try expectPlayed(p, false, &.{ .{ "build", "success" }, .{ "wheel-user-test", "failure" }, .{ "testpypi", "skipped" }, .{ "testpypi-smoke", "skipped" }, .{ "pypi", "skipped" }, .{ "pypi-smoke", "skipped" }, .{ "result", "failure" } }, &.{ linuxError("the build, the user test of the wheel or the TestPyPI upload job did not succeed (build success, wheel-user-test failure, testpypi skipped)"), MAC_ON_BOTH });
+    try expectUploads(p, &.{});
+    // the macOS chain does not wait on the Linux user test
+    try t.expectEqualStrings("success", p.resultOf("result-macos-arm64"));
+    // an upload that did not wait for the user test would send the failed wheel to TestPyPI
+    const unguarded = try reader.inJob(ar, text, "testpypi", "    needs: [build, wheel-user-test]\n", "    needs: build\n");
+    try expectUploads(try play(ar, unguarded, .{ .ends = &.{ BUILT, failed, state("testpypi", "absent"), MAC_NOTHING } }), &.{"testpypi"});
 }
 
 test "a failed macOS build ends the run red and leaves the Linux chain green with its notice" {
@@ -570,7 +586,7 @@ test "the play refuses a workflow or a case it cannot read" {
     // a context it does not know, a job it does not need, a status function in a verdict step
     try t.expectError(error.Unreadable, play(ar, try reader.inJob(ar, text, "result", "    if: always() && github.ref == 'refs/heads/main'\n", "    if: always() && vars.X == 'y'\n"), ok));
     try t.expectError(error.Unreadable, play(ar, try reader.replaced(ar, text, "needs.testpypi.outputs.state != 'differs' && needs.pypi.outputs.state != 'differs' && needs.pypi-smoke.result", "needs.testpypi.outputs.state != 'differs' && needs.pypi.outputs.state != 'differs' && needs.build-macos-arm64.result"), ok));
-    try t.expectError(error.Unreadable, play(ar, try reader.replaced(ar, text, "        if: needs.build.result != 'success' || needs.testpypi.result != 'success'\n", "        if: failure()\n"), ok));
+    try t.expectError(error.Unreadable, play(ar, try reader.replaced(ar, text, "        if: needs.build.result != 'success' || needs.wheel-user-test.result != 'success' || needs.testpypi.result != 'success'\n", "        if: failure()\n"), ok));
     // a verdict step that is not one echo, and an echo of a name the step's env does not hold
     try t.expectError(error.Unreadable, play(ar, try reader.replaced(ar, text, "(pypi-smoke $PYPI_SMOKE)\" && exit 1'", "(pypi-smoke $PYPI_SMOKE)\"; exit 1'"), .{ .ends = &.{ BUILT, state("testpypi", "same"), state("pypi", "same"), .{ .job = "pypi-smoke", .result = "failure" }, MAC_NOTHING } }));
     try t.expectError(error.Unreadable, play(ar, try reader.replaced(ar, text, "komira $VERSION is on", "komira $RELEASE is on"), ok));

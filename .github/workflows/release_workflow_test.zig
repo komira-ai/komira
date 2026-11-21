@@ -40,7 +40,9 @@
 //!    with is the one the release stages and publishes with), so a bump of one that forgets
 //!    the other, or the prose, is red.
 //! The reader's own cases are workflow texts written here: each defect above
-//! is planted in the real text and must be refused with its message.
+//! is written into the real text and must be refused with its message.
+//! The cases of the user test of the Python wheel (the jobs `wheel` and `wheel-user-test`) are in
+//! release_wheel_test.zig, which this file imports.
 
 const std = @import("std");
 const t = std.testing;
@@ -462,7 +464,7 @@ test "release.yml holds the contract of the continuous prod publish" {
     }
 }
 
-test "each defect planted in the real release.yml (beta, switch, triggers, versions) is refused with its message" {
+test "each defect written into the real release.yml (beta, switch, triggers, versions) is refused with its message" {
     var arena = std.heap.ArenaAllocator.init(t.allocator);
     defer arena.deinit();
     const ar = arena.allocator();
@@ -765,4 +767,9 @@ test "a mopm label that differs from the pin, or none, is refused" {
     try t.expect((try mopmDrift("no label here", pin, "w", &buf)) != null);
     try t.expectEqualStrings("toolchains//:mopm_0_0_101", mopmPin("X = 1\nMOPM = \"toolchains//:mopm_0_0_101\"\n").?);
     try t.expect(mopmPin("# MOPM = \"x\"\n") == null);
+}
+
+test {
+    // the cases of the user test of the Python wheel, in their own file
+    _ = @import("release_wheel_test.zig");
 }

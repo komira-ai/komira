@@ -8,11 +8,12 @@
 //!    schedule or cron outside a comment), and no line outside a comment reads a run input
 //!    (`inputs.`); top-level `permissions` is `{}` exactly once, and the concurrency is the group
 //!    `pypi` with no run cancelled;
-//!  - the jobs are exactly build, testpypi, testpypi-smoke, pypi, pypi-smoke and result (the Linux
-//!    wheel), then build-macos-arm64, testpypi-macos-arm64, testpypi-smoke-macos-arm64,
+//!  - the jobs are exactly build, wheel-user-test, testpypi, testpypi-smoke, pypi, pypi-smoke and result (the
+//!    Linux wheel), then build-macos-arm64, testpypi-macos-arm64, testpypi-smoke-macos-arm64,
 //!    pypi-macos-arm64, pypi-smoke-macos-arm64 and result-macos-arm64 (the macOS wheel), each once, and each holds
 //!    its exact `if:` (main only), runner, `needs:`, environment and permissions: the two smoke jobs of
-//!    the macOS wheel run on macos-15 and every other job on ubuntu-24.04;
+//!    the macOS wheel run on macos-15, wheel-user-test on the runner of its matrix entry and every other job
+//!    on ubuntu-24.04; testpypi needs wheel-user-test, so a wheel that failed its user test is never uploaded;
 //!    `id-token: write` is held by build and build-macos-arm64 (for the farm only), testpypi, pypi,
 //!    testpypi-macos-arm64 and pypi-macos-arm64 (for the upload only) and by no other job;
 //!  - the farm: farm-connect is in build and build-macos-arm64 alone, with `farm-qos: batch`, buck2
@@ -23,16 +24,20 @@
 //!    release_macos_test.zig (//:release_macos_cases);
 //!  - build has no upload step (no publish action, no legacy upload address, no twine); it builds the
 //!    wheel (//python:komira_wheel), the install test (//python:wheel_install_test) and the driver,
-//!    each with the three stamp flags, and keeps exactly the dist and the smoke artifacts;
+//!    each with the three stamp flags, copies the quickstart, its expected output, its data and the ABI
+//!    table beside the driver, writes the user test's matrix from python/supported_pythons.tsv, and keeps
+//!    exactly the dist and the smoke artifacts;
+//!  - wheel-user-test is the job wheel_user_test_job.zig holds (the same as release.yml's), needing build,
+//!    on main only, with the artifacts `pypi-<version>-dist` and `-smoke`;
 //!  - testpypi and pypi ask the state before the upload step, which runs for `absent` alone, with the
 //!    pinned publish action and the dist directory; testpypi names the TestPyPI upload address, pypi
 //!    none; neither skips an existing file or turns attestations off;
 //!  - the smoke jobs verify, then install, each with 5 attempts 30 seconds apart, on the pinned
-//!    setup-python with Python 3.13; setup-python is in the four smoke jobs alone;
+//!    setup-python with Python 3.13; setup-python is in the four smoke jobs and wheel-user-test alone;
 //!  - every `uses:` that is not local names a commit: owner/repo@<40 lowercase hex>;
 //!  - no line outside a comment holds a secret, a password, an API token, curl, wget, jq, twine,
 //!    continue-on-error or pull_request_target, and no `run:` line holds a `${{ }}` expression;
-//!  - result runs always on main, needs the five jobs, holds no permission, prints the notice for the
+//!  - result runs always on main, needs the six jobs, holds no permission, prints the notice for the
 //!    `differs` state, fails the run in three steps with their exact conditions and, last, prints the
 //!    notice `already published` when both indexes say `same`.
 //! What a run of the file does, for each state of the indexes, is played in pypi_workflow_run.zig.
@@ -51,9 +56,11 @@ const countPrefix = reader.countPrefix;
 const replaced = reader.replaced;
 const inJob = reader.inJob;
 const readWorkflow = reader.readWorkflow;
+const user_test = @import("wheel_user_test_job.zig");
 
 const JOBS = [_][]const u8{
     "build",
+    "wheel-user-test",
     "testpypi",
     "testpypi-smoke",
     "pypi",
@@ -92,11 +99,12 @@ const RESULT_GATE = "    if: always() && github.ref == 'refs/heads/main'";
 
 const SPECS = [_]JobSpec{
     .{ .name = "build", .runs_on = UBUNTU, .gate = MAIN_ONLY, .needs = null, .environment = "    environment: build", .perms = &BUILD_PERMS },
-    .{ .name = "testpypi", .runs_on = UBUNTU, .gate = MAIN_ONLY, .needs = "    needs: build", .environment = "    environment: testpypi", .perms = &UPLOAD_PERMS },
+    .{ .name = "wheel-user-test", .runs_on = user_test.RUNS_ON, .gate = MAIN_ONLY, .needs = "    needs: build", .environment = null, .perms = &NO_PERMS },
+    .{ .name = "testpypi", .runs_on = UBUNTU, .gate = MAIN_ONLY, .needs = "    needs: [build, wheel-user-test]", .environment = "    environment: testpypi", .perms = &UPLOAD_PERMS },
     .{ .name = "testpypi-smoke", .runs_on = UBUNTU, .gate = SMOKE_GATE_MAIN ++ "needs.testpypi.outputs.state != 'differs'", .needs = "    needs: [build, testpypi]", .environment = null, .perms = &SMOKE_PERMS },
     .{ .name = "pypi", .runs_on = UBUNTU, .gate = MAIN_ONLY, .needs = "    needs: [build, testpypi-smoke]", .environment = "    environment: pypi", .perms = &UPLOAD_PERMS },
     .{ .name = "pypi-smoke", .runs_on = UBUNTU, .gate = SMOKE_GATE_MAIN ++ "needs.pypi.outputs.state != 'differs'", .needs = "    needs: [build, pypi]", .environment = null, .perms = &SMOKE_PERMS },
-    .{ .name = "result", .runs_on = UBUNTU, .gate = RESULT_GATE, .needs = "    needs: [build, testpypi, testpypi-smoke, pypi, pypi-smoke]", .environment = null, .perms = &NO_PERMS },
+    .{ .name = "result", .runs_on = UBUNTU, .gate = RESULT_GATE, .needs = "    needs: [build, wheel-user-test, testpypi, testpypi-smoke, pypi, pypi-smoke]", .environment = null, .perms = &NO_PERMS },
     // the macOS wheel: the build only asks the farm (an ubuntu runner), the smokes run on a hosted Mac
     .{ .name = "build-macos-arm64", .runs_on = UBUNTU, .gate = MAIN_ONLY, .needs = null, .environment = "    environment: build", .perms = &BUILD_PERMS },
     .{ .name = "testpypi-macos-arm64", .runs_on = UBUNTU, .gate = SMOKE_GATE_MAIN ++ "needs.build-macos-arm64.outputs.version != ''", .needs = "    needs: build-macos-arm64", .environment = "    environment: testpypi", .perms = &UPLOAD_PERMS },
@@ -148,11 +156,19 @@ const BUILD_LINES = [_][]const u8{
     BUILD_DRIVER,
     "        id: dist",
     "        run: '\"$RUNNER_TEMP/pypi/smoke/pypi_smoke\" dist --wheel \"$RUNNER_TEMP/pypi/built/komira.whl\" --out \"$RUNNER_TEMP/pypi/dist\" --github-output \"$GITHUB_OUTPUT\"'",
+    BUILD_MATRIX_OUTPUT,
+    BUILD_COPY,
+    "        id: matrix",
+    BUILD_MATRIX,
     "          name: pypi-${{ steps.dist.outputs.version }}-dist",
     "          path: ${{ runner.temp }}/pypi/dist",
     "          name: pypi-${{ steps.dist.outputs.version }}-smoke",
     "          path: ${{ runner.temp }}/pypi/smoke",
 };
+const BUILD_MATRIX_OUTPUT = "      matrix: ${{ steps.matrix.outputs.matrix }}";
+const BUILD_COPY = "        run: cp python/examples/quickstart.py python/examples/quickstart.expected python/examples/readings.parquet src/so/abi/komira.tsv \"$RUNNER_TEMP/pypi/smoke/\"";
+const BUILD_MATRIX = "        run: '\"$RUNNER_TEMP/pypi/smoke/pypi_smoke\" matrix --supported python/supported_pythons.tsv --platform linux-x86_64 --github-output \"$GITHUB_OUTPUT\"'";
+const USER_TEST = user_test.Spec{ .build_job = "build", .artifact = "pypi-${{ needs.build.outputs.version }}", .gate = MAIN_ONLY };
 const BUILD_UPLOAD_FORBIDDEN = [_][]const u8{ "pypa/gh-action-pypi-publish", "legacy/", "twine", "repository-url", "packages-dir" };
 
 // ---- the index jobs -----------------------------------------------------------------------------
@@ -189,7 +205,7 @@ const PYTHON_VERSION = "          python-version: '3.13'";
 const PYTHON_ENV = "          PYTHON: ${{ steps.python.outputs.python-path }}";
 
 // ---- the result job -----------------------------------------------------------------------------
-const RESULT_BUILD_IF = "        if: needs.build.result != 'success' || needs.testpypi.result != 'success'";
+const RESULT_BUILD_IF = "        if: needs.build.result != 'success' || needs.wheel-user-test.result != 'success' || needs.testpypi.result != 'success'";
 const RESULT_UPLOAD_IF = "        if: needs.testpypi.outputs.state != 'differs' && (needs.testpypi-smoke.result != 'success' || needs.pypi.result != 'success')";
 const RESULT_SMOKE_IF = "        if: needs.testpypi.outputs.state != 'differs' && needs.pypi.outputs.state != 'differs' && needs.pypi-smoke.result != 'success'";
 const RESULT_DIFFERS_IF = "        if: needs.testpypi.outputs.state == 'differs' || needs.pypi.outputs.state == 'differs'";
@@ -198,11 +214,12 @@ const RESULT_SAME_STEP = "      - name: the version is on both indexes already";
 const RESULT_SAME_IF = "        if: needs.testpypi.outputs.state == 'same' && needs.pypi.outputs.state == 'same'";
 const RESULT_SAME_NOTICE = "        run: 'echo \"::notice title=pypi::already published: komira $VERSION is on TestPyPI and PyPI with the bytes built; nothing was uploaded, and the smoke passed on both\"'";
 const RESULT_LINES = [_][]const u8{
-    "      - name: the build and the TestPyPI upload succeeded",
+    "      - name: the build, the user test of the wheel and the TestPyPI upload succeeded",
     RESULT_BUILD_IF,
     "          BUILD: ${{ needs.build.result }}",
+    "          USER_TEST: ${{ needs.wheel-user-test.result }}",
     "          TESTPYPI: ${{ needs.testpypi.result }}",
-    "        run: 'echo \"::error title=pypi::the build or the TestPyPI upload job did not succeed (build $BUILD, testpypi $TESTPYPI)\" && exit 1'",
+    "        run: 'echo \"::error title=pypi::the build, the user test of the wheel or the TestPyPI upload job did not succeed (build $BUILD, wheel-user-test $USER_TEST, testpypi $TESTPYPI)\" && exit 1'",
     "      - name: the bytes differ at the same version",
     RESULT_DIFFERS_IF,
     RESULT_NOTICE,
@@ -352,7 +369,7 @@ fn checkFile(ar: std.mem.Allocator, text: []const u8) !?[]const u8 {
             if (!std.mem.eql(u8, n, JOBS[i])) same_jobs = false;
         }
     }
-    if (!same_jobs) return "the jobs are not exactly the twelve of the Linux and the macOS wheel (build, testpypi, testpypi-smoke, pypi, pypi-smoke, result, and the same six with the suffix -macos-arm64), each once";
+    if (!same_jobs) return "the jobs are not exactly the thirteen of the Linux and the macOS wheel (build, wheel-user-test, testpypi, testpypi-smoke, pypi, pypi-smoke, result, and build to result with the suffix -macos-arm64), each once";
 
     var pit = std.mem.splitScalar(u8, text, '\n');
     while (pit.next()) |line| {
@@ -398,7 +415,7 @@ fn checkJob(ar: std.mem.Allocator, job: []const []const u8, spec: JobSpec) !?[]c
     const is_build = std.mem.eql(u8, n, "build") or std.mem.eql(u8, n, "build-macos-arm64");
     if (mentions(job, "farm-connect") != is_build) return try std.fmt.allocPrint(ar, "{s}: farm-connect is used outside the two build jobs, or missing from them", .{n});
     if (!is_build and mentions(job, "buck2")) return try std.fmt.allocPrint(ar, "{s}: runs buck2: only the two build jobs build", .{n});
-    if (std.mem.indexOf(u8, n, "-smoke") == null and mentions(job, "setup-python")) return try std.fmt.allocPrint(ar, "{s}: sets up Python: only the smoke jobs do", .{n});
+    if (std.mem.indexOf(u8, n, "-smoke") == null and !std.mem.eql(u8, n, user_test.JOB) and mentions(job, "setup-python")) return try std.fmt.allocPrint(ar, "{s}: sets up Python: only the smoke jobs and the user test do", .{n});
     return null;
 }
 
@@ -479,6 +496,8 @@ fn check(ar: std.mem.Allocator, text: []const u8) !?[]const u8 {
             null
         else if (std.mem.eql(u8, spec.name, "build"))
             try checkBuild(ar, job)
+        else if (std.mem.eql(u8, spec.name, user_test.JOB))
+            try user_test.check(ar, job, USER_TEST)
         else if (std.mem.eql(u8, spec.name, "testpypi"))
             try checkUpload(ar, job, TESTPYPI)
         else if (std.mem.eql(u8, spec.name, "pypi"))
@@ -617,7 +636,7 @@ test "the workflow permissions are empty and the concurrency is one group that c
     try expectRefused(ar, try replaced(ar, text, "  group: pypi\n", ""), "concurrency");
 }
 
-test "the job set is exactly the twelve jobs, each once" {
+test "the job set is exactly the thirteen jobs, each once" {
     var arena = std.heap.ArenaAllocator.init(t.allocator);
     defer arena.deinit();
     const ar = arena.allocator();
@@ -626,6 +645,7 @@ test "the job set is exactly the twelve jobs, each once" {
     try expectRefused(ar, try replaced(ar, text, "\n  result:\n", "\n  pypi:\n    runs-on: ubuntu-24.04\n\n  result:\n"), "the jobs are not exactly");
     try expectRefused(ar, try replaced(ar, text, "\n  pypi-smoke:\n", "\n  pypi-check:\n"), "the jobs are not exactly");
     try expectRefused(ar, try replaced(ar, text, "\n  testpypi-smoke:\n", "\n  smoke-first:\n"), "the jobs are not exactly");
+    try expectRefused(ar, try replaced(ar, text, "\n  wheel-user-test:\n", "\n  wheel-test:\n"), "the jobs are not exactly");
     try expectRefused(ar, try replaced(ar, text, "\n  result-macos-arm64:\n", "\n  extra-macos-arm64:\n    runs-on: ubuntu-24.04\n\n  result-macos-arm64:\n"), "the jobs are not exactly");
     try expectRefused(ar, try replaced(ar, text, "\n  pypi-smoke-macos-arm64:\n", "\n  pypi-smoke-macos:\n"), "the jobs are not exactly");
     try expectRefused(ar, try replaced(ar, text, "\n  build-macos-arm64:\n", "\n  build-macos-arm64:\n    runs-on: ubuntu-24.04\n\n  build-macos-arm64:\n"), "the jobs are not exactly");
@@ -646,7 +666,13 @@ test "each job's gate, needs, environment and runner are exact" {
     // the order: pypi waits for the smoke on TestPyPI
     try expectRefused(ar, try replaced(ar, text, "    needs: [build, testpypi-smoke]\n", "    needs: [build, testpypi]\n"), "pypi: its needs:");
     try expectRefused(ar, try replaced(ar, text, "    needs: [build, pypi]\n", "    needs: [build, testpypi-smoke]\n"), "pypi-smoke: its needs:");
-    try expectRefused(ar, try replaced(ar, text, "    needs: [build, testpypi, testpypi-smoke, pypi, pypi-smoke]\n", "    needs: [build, testpypi, testpypi-smoke, pypi]\n"), "result: its needs:");
+    try expectRefused(ar, try replaced(ar, text, "    needs: [build, wheel-user-test, testpypi, testpypi-smoke, pypi, pypi-smoke]\n", "    needs: [build, wheel-user-test, testpypi, testpypi-smoke, pypi]\n"), "result: its needs:");
+    try expectRefused(ar, try replaced(ar, text, "    needs: [build, wheel-user-test, testpypi, testpypi-smoke, pypi, pypi-smoke]\n", "    needs: [build, testpypi, testpypi-smoke, pypi, pypi-smoke]\n"), "result: its needs:");
+    // the first upload waits for the user test of the wheel file: without it, a wheel that fails to install
+    // as a user installs it would reach TestPyPI
+    try expectRefused(ar, try inJob(ar, text, "testpypi", "    needs: [build, wheel-user-test]\n", "    needs: build\n"), "testpypi: its needs:");
+    try expectRefused(ar, try inJob(ar, text, "wheel-user-test", MAIN_ONLY ++ "\n", "    if: always()\n"), "wheel-user-test: its if:");
+    try expectRefused(ar, try inJob(ar, text, "wheel-user-test", "    runs-on: ${{ matrix.runner }}\n", "    runs-on: self-hosted\n"), "wheel-user-test: runs-on");
     try expectRefused(ar, try inJob(ar, text, "build", "    runs-on: ubuntu-24.04\n", "    runs-on: ubuntu-24.04\n    needs: result\n"), "build: needs:");
     // the environment: the one each index trusts, and none where a job has none
     try expectRefused(ar, try replaced(ar, text, "    environment: testpypi\n", "    environment: build\n"), "testpypi: its environment");
@@ -739,6 +765,25 @@ test "build builds the wheel, the install test and the driver from one stamp, an
     try expectRefused(ar, try inJob(ar, text, "build", "          retention-days: 14\n", "          retention-days: 90\n"), "build: it does not keep exactly");
     // an artifact under another name
     try expectRefused(ar, try inJob(ar, text, "build", "          name: pypi-${{ steps.dist.outputs.version }}-smoke\n", "          name: pypi-smoke\n"), "build: build, stamp, dist and artifacts");
+    // the user test's inputs: the quickstart files not beside the driver, the matrix from another list or
+    // platform, or not an output of the job
+    try expectRefused(ar, try replaced(ar, text, BUILD_COPY, "        run: cp python/examples/quickstart.py \"$RUNNER_TEMP/pypi/smoke/\""), "build: build, stamp, dist and artifacts");
+    try expectRefused(ar, try replaced(ar, text, BUILD_MATRIX, "        run: '\"$RUNNER_TEMP/pypi/smoke/pypi_smoke\" matrix --supported python/other.tsv --platform linux-x86_64 --github-output \"$GITHUB_OUTPUT\"'"), "build: build, stamp, dist and artifacts");
+    try expectRefused(ar, try replaced(ar, text, BUILD_MATRIX_OUTPUT ++ "\n", ""), "build: build, stamp, dist and artifacts");
+}
+
+test "wheel-user-test installs the built dist on the matrix's Python with no checkout, as release.yml's does" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const ar = arena.allocator();
+    const text = try realText(ar);
+    // the dist of another run, from an index, a checkout, a fixed Python
+    try expectRefused(ar, try inJob(ar, text, "wheel-user-test", "          name: pypi-${{ needs.build.outputs.version }}-dist\n", "          name: pypi-dist\n"), "wheel-user-test: download, set up the matrix Python and install the dist directory");
+    try expectRefused(ar, try inJob(ar, text, "wheel-user-test", "install --index dist", "install --index testpypi"), "wheel-user-test: download, set up the matrix Python and install the dist directory");
+    try expectRefused(ar, try inJob(ar, text, "wheel-user-test", "    steps:\n", "    steps:\n" ++ CHECKOUT ++ "\n"), "wheel-user-test: a line names \"actions/checkout\"");
+    try expectRefused(ar, try inJob(ar, text, "wheel-user-test", user_test.PYTHON_VERSION, PYTHON_VERSION), "wheel-user-test: download, set up the matrix Python and install the dist directory");
+    // fail-fast would cancel the other Pythons at the first failure
+    try expectRefused(ar, try inJob(ar, text, "wheel-user-test", "      fail-fast: false\n", "      fail-fast: true\n"), "wheel-user-test: the matrix is not the build job's, with fail-fast off");
 }
 
 test "an upload job asks the state first, uploads for absent alone with the pinned action and its defaults" {
@@ -800,7 +845,7 @@ test "a smoke job verifies, then sets up Python 3.13, then installs, five attemp
     try expectRefused(ar, try inJob(ar, text, "pypi-smoke", "      - name: the driver is executable\n", "      - uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3\n      - name: the driver is executable\n"), "pypi-smoke: has an upload step");
 }
 
-test "setup-python outside the smoke jobs is refused" {
+test "setup-python outside the smoke jobs and the user test is refused" {
     var arena = std.heap.ArenaAllocator.init(t.allocator);
     defer arena.deinit();
     const ar = arena.allocator();
@@ -855,6 +900,7 @@ test "the result job fails the run in three steps, prints the notice for differi
 }
 
 test {
-    // the cases that play a run of the file, in their own file
+    // the cases that play a run of the file, in their own file, and the contract of the user test job
     _ = @import("pypi_workflow_run.zig");
+    _ = @import("wheel_user_test_job.zig");
 }

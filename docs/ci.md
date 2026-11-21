@@ -12,7 +12,7 @@ Nothing is compiled on the runner.
 
 | event | runs |
 |---|---|
-| push to `main` | [`release.yml`](#releaseyml-the-release): builds the release set and publishes the mopm packages to the prod registry, on every push (no schedule, no switch); when that run ends, [`main_red.yml`](#main_redyml-the-main-red-alert) |
+| push to `main` | [`release.yml`](#releaseyml-the-release): builds the release set, installs the Python wheel as a user does ([the user test](#the-user-test-of-the-wheel)), and publishes the mopm packages to the prod registry, on every push (no schedule, no switch); when that run ends, [`main_red.yml`](#main_redyml-the-main-red-alert) |
 | pull request from a branch of this repository | `pr / check`; and `coverage`, informational, not required ([below](#coverageyml-the-pull-requests-coverage-not-a-gate)) |
 | merge group of the [merge queue](#the-merge-queue) (`merge_group`) | `pr / check` on the group's head commit, which is what `main` becomes; `coverage` does not run |
 | pull request from a fork | nothing: no farm job runs ([below](#pull-requests-from-forks)) |
@@ -449,7 +449,8 @@ instead. The rest of this section is about `release-macos.yml`.
 
 [`.github/workflows/release.yml`](../.github/workflows/release.yml) builds the
 conda packages that `release/artifacts.textproto` declares, as one release set,
-with Buck2 targets on the farm. It is written by hand.
+with Buck2 targets on the farm, and installs the Python wheel as a user does on every run
+([below](#the-user-test-of-the-wheel)). It is written by hand.
 **The release set itself publishes to no channel**: the job `release` builds the
 set, so a push to `main` still proves the release builds, keeps what it built as
 a workflow artifact, and holds no publishing credential and no channel. The
@@ -462,7 +463,7 @@ push to `main` (this workflow publishes to no beta registry; [below](#the-mopm-j
 `contents: read` and `id-token: write` (for the tailnet only). Triggers: a push
 to `main` that is not documentation only (`docs/**`, `**.md`: the stamp does not
 count them either), and a manual run with a required `reason`, nothing else. A
-pull request never starts it.
+pull request never starts it, and a documentation-only push builds and tests no wheel either.
 
 Two checks of the retired build stage are not made here: that every package's
 requirements are inside the set (requirement closure), and the refusal of a
@@ -739,23 +740,75 @@ built as a program of its own (the beta job that ran it is gone); its cases
 loopback, and cover a changed byte, another size, a missing package, an index of another stage, and
 a redirect.
 
+### The user test of the wheel
+
+Every run of `release.yml`, so every push to `main` that changes more than documentation, builds the Python
+wheel that `pypi.yml` publishes and installs it as a user does, on a machine that has never seen the
+repository. A merge that breaks `pip install komira` or the quickstart turns that run red, and so `main`
+([main_red.yml](#main_redyml-the-main-red-alert) opens its issue when the run ends), instead of the next
+daily publish finding it. Nothing is uploaded to any index: the upload stays in `pypi.yml`, once a day
+([below](#the-daily-run)). Two jobs:
+
+| job | environment | permissions | what it does |
+|---|---|---|---|
+| `wheel` | `build` | `contents: read`, `id-token: write` (the tailnet only) | on the farm (`farm-qos: batch`): takes the stamp (`release_json stamp`) and builds `//python:komira_wheel[release]`, `//python:wheel_install_test` and `//python/smoke:pypi_smoke` with the three stamp flags, the same text as `pypi.yml`'s `build` (`//:release_workflow_cases` compares the two), so the same commit gives the same bytes; runs `pypi_smoke dist`; copies the quickstart, its expected output, its data and the ABI table beside the driver; runs `pypi_smoke matrix` on [`python/supported_pythons.tsv`](../python/supported_pythons.tsv), whose result is the job's output `matrix`. Keeps `wheel-<sha>-dist` (the wheel alone) and `wheel-<sha>-smoke` (the driver and those four files) for 7 days. |
+| `wheel-user-test` | none | none | one job per row of the list for `linux-x86_64` (today CPython 3.13), each on a fresh GitHub-hosted runner (`ubuntu-24.04`) with no checkout: downloads the two artifacts, sets up the row's Python with `actions/setup-python`, and runs `pypi_smoke install --index dist` (below). `fail-fast: false`, so every Python finishes and each failure is its own job. |
+
+**What it runs.** `pypi_smoke install --index dist` is the install of the index smoke with the dist directory
+in place of the index: an empty virtual environment of the runner's Python; the wheel's requirements, if it
+has any, from PyPI; then `komira==<version>` with `--no-deps --no-index --find-links <dist>`, so pip reads no
+index for `komira` and installs the one wheel of the directory; `pip check`, `pip show` and `pip freeze` hold
+the environment to `komira` at the built version and nothing else; no `modular` package is importable; and
+the quickstart, the program the README and the install page show (held byte for byte by
+`//python/smoke:readme_shows_quickstart` and `//python/smoke:install_page_shows_quickstart`), runs and must
+print exactly what `python/examples/quickstart.expected` says. Today that is import, the version, the
+engine's ABI version and a Parquet file registered in a session. When the quickstart grows (a query, say),
+this job runs the new program with no change here. A local directory does not lag, so the install is tried
+once (`--attempts` and `--delay` are refused with `--index dist`).
+
+**The list.** `python/supported_pythons.tsv` holds one row per Python and platform, `<platform><TAB><python>`.
+Adding a Python is adding its row: both `release.yml` and `pypi.yml` read the list through `pypi_smoke matrix`
+and get one more job. A platform a row may name is one whose wheel a workflow builds on every merge
+(`platforms` in `python/smoke/src/matrix.zig`: `linux-x86_64` today, on `ubuntu-24.04`); a row naming another,
+a Python that is not `3.<minor>`, or a row given twice fails the `matrix` step naming the line, and
+`//python/smoke:supported_pythons_list` makes the same check on the real list in the pull request's check.
+The macOS arm64 wheel is not in it: its builds are kept out of `release.yml` (`//:release_macos_cases`), its
+install test runs on the farm's Macs, and its first install as a user's is the macOS TestPyPI smoke of
+`pypi.yml`. A per-merge user test of it belongs with the macOS release build in `release-macos.yml`.
+
+**Order.** Neither job needs a job of the release, and no job needs either or reads their result: the release
+set and the mopm packages hold no wheel, so a red user test makes the run red without holding back
+`release`, `mopm-stage` or the prod publish, and those never hold it back. A failed step is shown in the run
+as the job `wheel-user-test (<platform>, <python>, <runner>)` with the step's name and the driver's
+`::error` line, which names the command that failed, its exit status and its stderr. `//:release_workflow_cases`
+holds the contract and plays the job graph from the file: a failed user test, or a failed wheel build, ends
+the run red and every other job still runs.
+
+**How `pypi.yml` knows.** It does not read this run: a daily run builds `main` as it is then, which may be a
+commit this workflow never ran on (a documentation-only push, or a run replaced while it waited). Instead
+`pypi.yml` runs the same job, `wheel-user-test`, on the bytes it built and will upload, and `testpypi` needs
+it: a wheel that failed it is never uploaded ([below](#pypiyml-publishing-the-python-package)).
+
 ## pypi.yml: publishing the Python package
 
 [`.github/workflows/pypi.yml`](../.github/workflows/pypi.yml) builds the `komira` wheel
-([python/README.md](../python/README.md)), uploads it to TestPyPI, installs it from there on a fresh runner
-and runs the quickstart, and only then does the same on PyPI. The macOS arm64 wheel of the same name
+([python/README.md](../python/README.md)), installs the wheel file on a fresh runner for every Python of the
+list ([the user test](#the-user-test-of-the-wheel), as `release.yml` does on every merge), uploads it to
+TestPyPI, installs it from there on a fresh runner and runs the quickstart, and only then does the same on
+PyPI. The macOS arm64 wheel of the same name
 and version is published by six more jobs of the same file, a chain of their own (below), on every run; both wheels carry the Mojo runtime libraries and require no other distribution. It is written by hand. It runs once a day on `main`
 (`schedule`, one cron entry, `17 5 * * *`: 05:17 UTC) and when started by hand (`workflow_dispatch`, which takes no
 input), and on nothing else; every job has `if: github.ref == 'refs/heads/main'`. A pull request never starts it.
 
 | job | environment | permissions | what it does |
 |---|---|---|---|
-| `build` | `build` | `contents: read`, `id-token: write` (the tailnet only) | on the farm ([farm-connect](#how-it-reaches-the-farm), `farm-qos: batch`): builds `//release/ci:release_json` and takes the stamp (`release_json stamp`); builds the wheel and its install test (`//python:komira_wheel[release]` and `//python:wheel_install_test`) with the three stamp flags (`-c komira.package_stamp`, `komira.package_commit`, `komira.package_timestamp_ms`) and `//python/smoke:pypi_smoke`; runs `pypi_smoke dist`, which makes the dist directory. It keeps two workflow artifacts, `pypi-<version>-dist` (the wheel) and `pypi-<version>-smoke` (the driver), for 14 days. It has no upload step and holds no index identity. |
-| `testpypi` | `testpypi` | `id-token: write` | no farm, no checkout, no buck2. Downloads the two artifacts, runs `pypi_smoke state --index testpypi`, and uploads the wheel to TestPyPI only when the state is `absent`. |
+| `build` | `build` | `contents: read`, `id-token: write` (the tailnet only) | on the farm ([farm-connect](#how-it-reaches-the-farm), `farm-qos: batch`): builds `//release/ci:release_json` and takes the stamp (`release_json stamp`); builds the wheel and its install test (`//python:komira_wheel[release]` and `//python:wheel_install_test`) with the three stamp flags (`-c komira.package_stamp`, `komira.package_commit`, `komira.package_timestamp_ms`) and `//python/smoke:pypi_smoke`; runs `pypi_smoke dist`, which makes the dist directory; copies the quickstart, its expected output, its data and the ABI table beside the driver; runs `pypi_smoke matrix` on `python/supported_pythons.tsv` (the output `matrix`). It keeps two workflow artifacts, `pypi-<version>-dist` (the wheel) and `pypi-<version>-smoke` (the driver and those four files), for 14 days. It has no upload step and holds no index identity. |
+| `wheel-user-test` | none | none | [the user test of the wheel](#the-user-test-of-the-wheel), the same job as `release.yml`'s, on this run's dist: one job per Python of the list, on a fresh runner with no checkout, `pypi_smoke install --index dist`. |
+| `testpypi` | `testpypi` | `id-token: write` | after `wheel-user-test`; no farm, no checkout, no buck2. Downloads the two artifacts, runs `pypi_smoke state --index testpypi`, and uploads the wheel to TestPyPI only when the state is `absent`. |
 | `testpypi-smoke` | none | `contents: read` | `pypi_smoke verify --index testpypi`, then `pypi_smoke install --index testpypi`, on a runner with the Python `actions/setup-python` gives (3.13). Skipped when the state is `differs`. |
 | `pypi` | `pypi` | `id-token: write` | after `testpypi-smoke`: the same as `testpypi` for PyPI. |
 | `pypi-smoke` | none | `contents: read` | the same as `testpypi-smoke` for PyPI. Skipped when the state is `differs`. |
-| `result` | none | none | fails the run, naming the job, when `build`, `testpypi`, `testpypi-smoke`, `pypi` or `pypi-smoke` did not succeed, and prints a notice when the bytes differ at the same version (below). Its last step prints the notice `already published: komira <version> is on TestPyPI and PyPI with the bytes built; nothing was uploaded, and the smoke passed on both` when both indexes said `same`; being last, it prints only when no step above it failed. |
+| `result` | none | none | fails the run, naming the job, when `build`, `wheel-user-test`, `testpypi`, `testpypi-smoke`, `pypi` or `pypi-smoke` did not succeed, and prints a notice when the bytes differ at the same version (below). Its last step prints the notice `already published: komira <version> is on TestPyPI and PyPI with the bytes built; nothing was uploaded, and the smoke passed on both` when both indexes said `same`; being last, it prints only when no step above it failed. |
 | `build-macos-arm64` | `build` | `contents: read`, `id-token: write` (the tailnet only) | on every run (`if: github.ref == 'refs/heads/main'`), on an ubuntu runner that only asks the farm, whose Macs are the workers (`farm-connect` with the macOS worker set and hosts, `farm-qos: batch`): takes the stamp, builds the Linux driver, builds `//python:komira_wheel_macos_arm64[file_name]` (the wheel's file name, written at analysis) and asks both indexes whether each lists that file (`pypi_smoke present`). Only if one does not, it builds `//python:komira_wheel_macos_arm64[release]`, `//python:wheel_install_test_macos_arm64` and `//python/smoke:pypi_smoke_macos_arm64` for `--target-platforms komira//tools/build/platforms:darwin-arm64`, runs `pypi_smoke dist`, and keeps `pypi-<version>-macos-arm64-dist` (the macOS wheel alone) and `pypi-<version>-macos-arm64-smoke` (the Linux driver and the macOS driver). Its output `version` is empty when nothing was built. No upload step. |
 | `testpypi-macos-arm64` | `testpypi` | `id-token: write` | `needs` the macOS build and runs only when it built a wheel. The same as `testpypi`, on the macOS dist, with the Linux driver. |
 | `testpypi-smoke-macos-arm64` | none | `contents: read` | on the hosted runner `macos-15` (Apple silicon): `verify`, then `install` with the macOS driver on CPython 3.13. Skipped when the state is `differs`. |
@@ -770,10 +823,12 @@ only `testpypi`, `pypi`, `testpypi-macos-arm64` and `pypi-macos-arm64` hold a to
 their own index. `build` and `build-macos-arm64` name the environment `build`, which no index trusts, and have no
 upload step. `//:pypi_workflow_cases` pins the triggers (exactly one `schedule:` of one cron entry at a fixed
 minute and hour of every day, then `workflow_dispatch` with no input), that no line reads a run input, the
-twelve jobs, each job's `if:`, runner, `needs`, environment and
-permissions (the two macOS smoke jobs run on `macos-15`, every other job on `ubuntu-24.04`), that `id-token` is on no
+thirteen jobs, each job's `if:`, runner, `needs`, environment and
+permissions (the two macOS smoke jobs run on `macos-15`, `wheel-user-test` on its matrix entry's runner, every other
+job on `ubuntu-24.04`), that `id-token` is on no
 other job, that `farm-connect` and buck2 are in the two build jobs alone, that the publish action appears only in
-the four upload jobs (`testpypi`, `pypi` and their macOS twins), that `setup-python` appears only in the four smoke jobs,
+the four upload jobs (`testpypi`, `pypi` and their macOS twins), that `setup-python` appears only in the four smoke jobs
+and `wheel-user-test`,
 that every action is pinned to a commit, and that no secret, `curl`, `jq`, `twine` or `continue-on-error`
 is anywhere in the file. Its file `pypi_workflow_run.zig` plays a run from the workflow's text for each answer of
 the indexes and each failed job ([below](#the-daily-run)). `//:release_macos_cases` pins the macOS chain beyond that (below). `//:farm_connect_cases`
@@ -813,8 +868,9 @@ workflow's text and holds what the run prints and that it is green:
 | what landed on `main` since the last run | the indexes say | the run |
 |---|---|---|
 | nothing (or a commit the stamp ignores and that leaves the wheel's bytes alone) | `same` on both | nothing uploaded, both smokes run; green with the notice `already published: komira <version> is on TestPyPI and PyPI with the bytes built; nothing was uploaded, and the smoke passed on both` |
-| a documentation-only commit that changes the wheel's description (`python/README.md`) | `differs` | nothing uploaded, no smoke; green with the notice `bytes differ at the same version: ...` ([below](#the-version-and-documentation-only-commits)) |
-| a commit that changes code | `absent` on both | uploaded to TestPyPI, smoked, then to PyPI, smoked; green |
+| a documentation-only commit that changes the wheel's description (`python/README.md`) | `differs` | the user test of the wheel file runs and passes; nothing uploaded, no index smoke; green with the notice `bytes differ at the same version: ...` ([below](#the-version-and-documentation-only-commits)) |
+| a commit that changes code | `absent` on both | the user test passes, then uploaded to TestPyPI, smoked, then to PyPI, smoked; green |
+| any of these, with a wheel that fails its user test | not asked | nothing uploaded, no index is asked; red, naming `wheel-user-test` |
 
 The macOS chain asks for its own file by name (`pypi_smoke present`) and, on a day with no code commit, finds
 it on both indexes and builds nothing on the Macs. A failed job ends the run red and names the job, as for a
@@ -841,7 +897,8 @@ which turns the daily release back into a watched one.
 **The driver.** Every step that does more than start a program is
 `//python/smoke:pypi_smoke`, a Zig program built by `build` and carried to the later
 jobs as an artifact, so no workflow step holds shell logic. It takes flags only. `--index` is `testpypi`
-(TestPyPI) or `pypi` (PyPI); any other value is a usage error. The exit status is 0 for success, 1 for a
+(TestPyPI) or `pypi` (PyPI), and for `install` also `dist` (the dist directory itself, with no index); any other
+value is a usage error. The exit status is 0 for success, 1 for a
 refusal or a failure (the last line printed is `pypi_smoke: FAILED: <why>`, and an `::error` line for the
 log) and 2 for a usage error.
 
@@ -851,7 +908,8 @@ log) and 2 for a usage error.
 | `state` | `--index <testpypi\|pypi> --dist <dir> --github-output <file>` | `--dist` holds exactly one wheel and nothing else. One request for the version's JSON on the index, no retry. Appends `state=absent`, `same` or `differs` (below). Any other answer than a 404 or a 200 with the expected shape fails. |
 | `present` | `--index <testpypi\|pypi> --name-file <file> --github-output <file>` | reads the one-line file name (`komira-<version>-<tag>.whl`) from `--name-file`, asks the index's JSON for that release (as `state` does) and appends `present=true` (the release lists a file of exactly that name) or `present=false` (no such release, or the release without that file) to the GitHub output file. It needs no wheel, so it runs before anything is built. An index error (HTTP 5xx, transport, a body that is not JSON) is a refusal and appends nothing. |
 | `verify` | `--index <testpypi\|pypi> --dist <dir> [--attempts <1..20>] [--delay <0..300>]` | asks the index for the file it serves and compares it with the built one (below). A refused attempt is tried again up to `--attempts` times (default 5), `--delay` seconds apart (default 30), because an index can lag an upload. |
-| `install` | `--index <testpypi\|pypi> --dist <dir> --python <exe> --example <quickstart.py> --expect <quickstart.expected> --data <file>... --abi-table <komira.tsv> --work <dir> [--attempts <n>] [--delay <s>]` | installs the published wheel into an empty environment and runs the example (below). `--attempts` and `--delay` as for `verify`, for the install of `komira` only. |
+| `install` | `--index <testpypi\|pypi\|dist> --dist <dir> --python <exe> --example <quickstart.py> --expect <quickstart.expected> --data <file>... --abi-table <komira.tsv> --work <dir> [--attempts <n>] [--delay <s>]` | installs the published wheel into an empty environment and runs the example (below); with `--index dist`, the wheel of `--dist` itself (`--no-index --find-links <dist>`, [the user test](#the-user-test-of-the-wheel)). `--attempts` and `--delay` as for `verify`, for the install of `komira` only; refused with `--index dist`, which installs once. |
+| `matrix` | `--supported <list> --platform <name> --github-output <file>` | reads the list of supported Pythons ([the user test](#the-user-test-of-the-wheel)) and appends `matrix=<JSON>`, the `include` list of a job matrix with the platform, the Python and the hosted runner of every row of `--platform`. A malformed list, or one with no row for the platform, is a refusal and appends nothing. |
 
 **The three index states.** `state` asks the index about the one file of the build, `komira-0.1.<N>-py3-none-manylinux_2_35_x86_64.whl`
 (`<N>` is the stamp's build number), or `komira-0.1.<N>-py3-none-macosx_11_0_arm64.whl` in the macOS chain:
@@ -888,8 +946,10 @@ log) and 2 for a usage error.
    (`src/so/abi/komira.tsv`: `major * 1000 + minor`, so `1.1` is 1001). A failed step names the command, its exit
    status and the last lines of its stderr.
 
-The smoke of TestPyPI is the release gate: the `pypi` job `needs` `testpypi-smoke`, so a wheel that does
-not install and run from TestPyPI is never uploaded to PyPI.
+The user test of the wheel file is the first gate: `testpypi` `needs` `wheel-user-test`, so a wheel that does
+not install and run from its own file is uploaded nowhere. The smoke of TestPyPI is the release gate: the
+`pypi` job `needs` `testpypi-smoke`, so a wheel that does not install and run from TestPyPI is never uploaded
+to PyPI.
 
 The quickstart is [`python/examples/quickstart.py`](../python/examples/README.md). Today it asserts the
 version, the engine's C ABI version, and that a `Session` registers `readings.parquet` and closes. It
@@ -911,8 +971,8 @@ no package of Modular's.
 **What ran where.** The build, the stamp and the wheel's own install test
 (`//python:wheel_install_test`, which installs the wheel into an empty environment and loads `libkomira`) run on the
 farm, in `build`, before any upload, on the same bytes that are uploaded. The macOS wheel's build and its install test
-(`//python:wheel_install_test_macos_arm64`) run on the farm's Macs, in `build-macos-arm64`. `state`, the upload, `verify` and
-`install` run on GitHub-hosted runners, in the later jobs. The index checks and the install from an index
+(`//python:wheel_install_test_macos_arm64`) run on the farm's Macs, in `build-macos-arm64`. The user test of the wheel
+file, `state`, the upload, `verify` and `install` run on GitHub-hosted runners, in the later jobs. The index checks and the install from an index
 run on a runner only, because a farm action has no network.
 
 **What it does not prove.** It does not run a query (none exists yet). It tests two wheels, linux x86_64 and macOS
@@ -950,8 +1010,9 @@ releases while a fix is made, disable the workflow ([above](#the-daily-run)).
 The version is `0.1.<N>`, with `<N>` from `release_json stamp`, which does not count commits that touch only
 documentation (`docs`, `*.md`, `.github`). A change to `python/README.md`, which is the package's description and
 so is in the wheel's `METADATA`, therefore builds a wheel with the same version and different bytes. When the
-index already holds the version's file, `state` says `differs` on it: nothing is uploaded, the smoke does not
-run, and the run is green with a notice that says the version's bytes differ. The fix reaches the index with
+index already holds the version's file, `state` says `differs` on it: nothing is uploaded, the index smoke does
+not run (the user test of the wheel file ran before the state was asked, on the new bytes), and the run is green
+with a notice that says the version's bytes differ. The fix reaches the index with
 the next commit that changes code, which has the next version.
 
 ## pr.yml: the pull request's check
