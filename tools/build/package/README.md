@@ -446,6 +446,51 @@ out. For a macOS wheel `max_glibcxx` and `max_cxxabi` have nothing to bound and
 
 `size` and `external` apply to a Mach-O member as to any other.
 
+`wheel_libs_check` (also [`wheel.bzl`](wheel.bzl)) is a second reader of a
+finished wheel: `komira_wheel libs` ([`wheel/libs.zig`](wheel/libs.zig)) reads
+the wheel's bytes, a few names (the entry library, the Mojo runtime's file
+names, its licence files and the distributions that carry it) and the
+toolchain's copies of the runtime libraries, and nothing else the rule that
+wrote the wheel was given. It reads the zip as `zip.zig` reads it, so the wheel
+is one this writer wrote: the build's, or the same bytes as an index serves them
+after an upload. Where `needed` above asks only that a name be a member somewhere, this
+check walks the libraries as the loader would load them from an install: from
+the entry library, each DT_NEEDED is a manylinux system library, a library
+already loaded, or the member at one of the needing library's own run path
+entries with `$ORIGIN` its directory. A refusal names its check:
+
+- `path`: every member is a relative path of plain components (no `/` first,
+  no `\`, no empty, `.` or `..` part);
+- `layout`: every member is under the import package (the entry's top
+  directory) or the one `.dist-info`, so no `modular/` beside it;
+- `entry`: the entry is a member and an ELF file;
+- `runtime`: each Mojo runtime library is in the wheel exactly once, with the
+  bytes of the toolchain's runtime: a second copy, one of another build, or none
+  is refused. With `runtime_requirement` (the external flavour) it is the
+  other way round: no member has a runtime library's file name or bytes;
+- `runpath`: every run path entry of a loaded library is `$ORIGIN`-relative and
+  stays inside the import package;
+- `needed`: every DT_NEEDED of a loaded library resolves as above, or, in the
+  external flavour, is a runtime library the requirement installs (a name
+  holding `/`, which the loader opens as a path, is refused), and a refusal
+  says where in the wheel the library is when the run path misses it;
+- `stray`: every ELF member is one the entry loads;
+- `licence`: each runtime licence file is a non-empty `.dist-info/licenses/`
+  member and a `License-File` of METADATA; in the external flavour none of them
+  is a member;
+- `requires`: no Requires-Dist names a distribution that carries the runtime;
+  in the external flavour the requirement is a Requires-Dist and no other line
+  names such a distribution.
+
+The output lists the loaded libraries in load order; with `expect_refusal` the
+target builds only while the wheel is refused with exactly that line.
+python/BUCK runs it on each flavour of komira's wheel (`:wheel_libs_bundled`,
+`:wheel_libs_external`) and on eight wheels it refuses: as bundled, a second
+libKGENCompilerRTShared.so beside libkomira, the owners off libkomira's run
+path, a runtime library missing, libkomira missing and the external wheel; as
+external, an external wheel with libKGENCompilerRTShared.so in it, one without
+its requirement, and the bundled wheel.
+
 Sub-targets: `[default]` is the wheel, copied only after `[check]` passed;
 `[check]` reads it back ([`wheel/check.zig`](wheel/check.zig)). That covers the
 name, every member's date, the members exactly (bytes and modes), RECORD's hashes
@@ -468,7 +513,8 @@ runtime to it.
 
 The tests: the Zig scenarios `:wheel_zip_unit`, `:wheel_elf_unit`,
 `:wheel_policy_unit`, `:wheel_build_unit`, `:wheel_check_unit`,
-`:wheel_cli_unit` and `:wheel_record_unit` in [`BUCK`](BUCK), on synthetic files and ELF libraries
+`:wheel_cli_unit`, `:wheel_record_unit` and `:wheel_libs_unit` in
+[`BUCK`](BUCK), on synthetic files and ELF libraries
 ([`wheel/testing.zig`](wheel/testing.zig)). The rule on fixtures: `:wheel_fixture`
 (a linux-x86_64 wheel holding the example Mojo shared library `plain`, with the
 Mojo runtime as `external_needed` and a readme preface), `:wheel_fixture_aarch64_tag` and
