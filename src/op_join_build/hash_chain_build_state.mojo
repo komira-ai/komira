@@ -11,7 +11,7 @@
 # =============================================================================
 
 from atomic_alias import AtomicI64
-from std.memory import alloc, memset, OwnedPointer, UnsafePointer
+from std.memory import alloc, unsafe_memset, OwnedPointer, UnsafePointer
 
 from arrow.primitive_array import PrimitiveArray
 from join_assembly.join_payload_inline import JOIN_KN_WORDS_PAY
@@ -363,7 +363,7 @@ struct ChainFillTask(Segment):
             # exactly — the identical bytes the driver's single `memset` writes.
             # SAFETY: `[start, end)` is this morsel's disjoint slot range inside
             # the owned, pre-sized table.
-            memset(
+            unsafe_memset(
                 (ht_ptr + start).bitcast[UInt8](),
                 UInt8(0xFF),
                 (end - start) * 8,

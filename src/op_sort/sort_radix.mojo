@@ -22,7 +22,7 @@
 #     top bit would corrupt their order, so they are sorted as they are.
 # =============================================================================
 
-from std.memory import alloc, memcpy
+from std.memory import alloc, unsafe_memcpy
 from std.sys import simd_width_of
 
 from arrow.primitive_array import PrimitiveArray
@@ -76,7 +76,7 @@ def radix_sort_u64_keys(
     var ukeys = alloc[UInt64](n)
     var keys_view = keys.view_ro()
     var key_ptr = keys_view._unsafe_ptr().bitcast[Scalar[DType.uint64]]()
-    memcpy(dest=ukeys, src=key_ptr, count=n)
+    unsafe_memcpy(dest=ukeys, src=key_ptr, count=n)
     var result = _radix_sort_u64(ukeys, n)
     ukeys.free()
     return result^
@@ -112,7 +112,7 @@ def _radix_sort_u64[
             in_tmp = not in_tmp
 
     if in_tmp:
-        memcpy(dest=idx_ptr, src=tmp, count=n)
+        unsafe_memcpy(dest=idx_ptr, src=tmp, count=n)
     counts.free()
     tmp.free()
     return indices^
