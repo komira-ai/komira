@@ -266,9 +266,9 @@ def _deal(
 
 def test_an_int64_key_counts_distinct_values_per_group() raises:
     #            0   1   2    3   4    5    6    7    8    9   10  11
-    var keys = List[Int](1, 2, NUL, 1, 2, NUL, 3, 1, 3, 2, NUL, 1)
-    var vals = List[Int](10, 10, 10, 10, NUL, 20, NUL, 30, NUL, 10, 20, 10)
-    var ws = List[Int](5, 5, 6, 5, 7, 7, NUL, 6, NUL, 5, 6, 5)
+    var keys = List[Int]([1, 2, NUL, 1, 2, NUL, 3, 1, 3, 2, NUL, 1])
+    var vals = List[Int]([10, 10, 10, 10, NUL, 20, NUL, 30, NUL, 10, 20, 10])
+    var ws = List[Int]([5, 5, 6, 5, 7, 7, NUL, 6, NUL, 5, 6, 5])
     var sink = GroupAggSink(_kv_data(), KEY_DTYPE_I64, SegmentPool(), 0)
     sink.resize_worker_state(3)
     var dealt = _Dealt()
@@ -508,7 +508,7 @@ def _check_g3(ref out: RecordBatch, rows: Int) raises:
 
 
 def test_a_string_key_counts_distinct_values_per_group_in_every_form() raises:
-    var forms = List[Int](FORM_FLAT, FORM_DICT, FORM_SHUFFLED)
+    var forms = List[Int]([FORM_FLAT, FORM_DICT, FORM_SHUFFLED])
     for f in range(len(forms)):
         for orient in range(2):
             _check_g3(
@@ -534,10 +534,10 @@ def _key_only_data(
 
 
 def test_select_distinct_over_an_int64_key_is_one_row_per_key() raises:
-    var keys = List[Int](NUL, 1, 2, 1, NUL, 3, 2, NUL, 7, 3)
-    var vals = List[Int](0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
-    var names = List[String]("k")
-    var types = List[ArrowType](ArrowType.INT64)
+    var keys = List[Int]([NUL, 1, 2, 1, NUL, 3, 2, NUL, 7, 3])
+    var vals = List[Int]([0, 0, 0, 0, 0, 0, 0, 0, 0, 0])
+    var names = List[String](["k"])
+    var types = List[ArrowType]([ArrowType.INT64])
     for reverse in range(2):
         var sink = GroupAggSink(
             _key_only_data(names, types), KEY_DTYPE_I64, SegmentPool(), 0
@@ -571,8 +571,8 @@ def test_select_distinct_over_an_int64_key_is_one_row_per_key() raises:
 
 
 def test_select_distinct_over_two_fixed_width_keys_is_one_row_per_pair() raises:
-    var names = List[String]("k1", "k2")
-    var types = List[ArrowType](ArrowType.INT64, ArrowType.INT32)
+    var names = List[String](["k1", "k2"])
+    var types = List[ArrowType]([ArrowType.INT64, ArrowType.INT32])
     var sink = GroupAggSink(
         _key_only_data(names, types), KEY_DTYPE_I64, SegmentPool(), 0
     )
@@ -608,14 +608,14 @@ def test_select_distinct_over_two_fixed_width_keys_is_one_row_per_pair() raises:
 
 
 def test_select_distinct_over_a_string_key_is_one_row_per_string() raises:
-    var values = List[String]("a", "", "a", "", "", "b", "", "a", "")
-    var valid = List[Bool](True, False, True, True, False, True, True, True, False)
+    var values = List[String](["a", "", "a", "", "", "b", "", "a", ""])
+    var valid = List[Bool]([True, False, True, True, False, True, True, True, False])
     # a, NULL, a, "", NULL, b, "", a, NULL: the rows a, NULL, "" and b.
-    var forms = List[Int](FORM_FLAT, FORM_DICT, FORM_SHUFFLED)
+    var forms = List[Int]([FORM_FLAT, FORM_DICT, FORM_SHUFFLED])
     for f in range(len(forms)):
         for orient in range(2):
-            var names = List[String]("s1")
-            var types = List[ArrowType](ArrowType.STRING)
+            var names = List[String](["s1"])
+            var types = List[ArrowType]([ArrowType.STRING])
             var sink = StringGroupAggSink(
                 _key_only_data(names, types), orient == 1, SegmentPool(), 0
             )
@@ -641,8 +641,8 @@ def test_select_distinct_over_a_string_key_is_one_row_per_string() raises:
 
 
 def test_select_distinct_over_two_string_keys_is_one_row_per_pair() raises:
-    var names = List[String]("s1", "s2")
-    var types = List[ArrowType](ArrowType.STRING, ArrowType.STRING)
+    var names = List[String](["s1", "s2"])
+    var types = List[ArrowType]([ArrowType.STRING, ArrowType.STRING])
     var rows = 300
     var want = Dict[String, Bool]()
     for r in range(rows):
@@ -652,7 +652,7 @@ def test_select_distinct_over_two_string_keys_is_one_row_per_pair() raises:
             + _part(s2_null(r), s2_value(r))
         ] = True
     assert_true("NULL|NULL" in want and "S:|S:" in want)
-    var forms = List[Int](FORM_FLAT, FORM_SHUFFLED)
+    var forms = List[Int]([FORM_FLAT, FORM_SHUFFLED])
     for f in range(len(forms)):
         for orient in range(2):
             var sink = StringGroupAggSink(
@@ -679,8 +679,8 @@ def test_select_distinct_over_two_string_keys_is_one_row_per_pair() raises:
 
 
 def test_select_distinct_over_no_row_is_no_row_with_the_declared_columns() raises:
-    var names = List[String]("k")
-    var types = List[ArrowType](ArrowType.INT64)
+    var names = List[String](["k"])
+    var types = List[ArrowType]([ArrowType.INT64])
     var fixed = GroupAggSink(
         _key_only_data(names, types), KEY_DTYPE_I64, SegmentPool(), 0
     )
@@ -689,8 +689,8 @@ def test_select_distinct_over_no_row_is_no_row_with_the_declared_columns() raise
     assert_equal(out.num_rows(), 0)
     assert_equal(out.num_columns(), 1)
     assert_equal(out.schema.field_arrow_type(0), ArrowType.INT64)
-    var snames = List[String]("s1")
-    var stypes = List[ArrowType](ArrowType.STRING)
+    var snames = List[String](["s1"])
+    var stypes = List[ArrowType]([ArrowType.STRING])
     var strs = StringGroupAggSink(
         _key_only_data(snames, stypes), False, SegmentPool(), 0
     )

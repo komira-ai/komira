@@ -427,7 +427,7 @@ def test_an_integer_column_reads_as_its_values_with_a_flag_for_null() raises:
     var pool = SegmentPool()
     var res = WorkerReservation(pool.share())
     var slot = DistinctSlot(1)
-    var col = _read(slot, 0, _int_batch(List[Int](5, NUL, -3)), pool, res)
+    var col = _read(slot, 0, _int_batch(List[Int]([5, NUL, -3])), pool, res)
     assert_equal(len(col.null), 3)
     assert_equal(len(col.cells), 6)
     assert_equal(Int(col.null[0]), 0)
@@ -447,7 +447,7 @@ def test_floats_read_as_equal_cells_exactly_when_duckdb_calls_them_equal() raise
     var res = WorkerReservation(pool.share())
     var slot = DistinctSlot(1)
     var bits = List[UInt64](
-        UInt64(0x7FF8000000000000),  # 0: a quiet NaN
+        [UInt64(0x7FF8000000000000),  # 0: a quiet NaN
         UInt64(0xFFF8000000000000),  # 1: a negative NaN
         UInt64(0x7FF0000000000001),  # 2: a signalling NaN
         UInt64(0x7FF8000000000123),  # 3: a NaN with a payload
@@ -457,14 +457,14 @@ def test_floats_read_as_equal_cells_exactly_when_duckdb_calls_them_equal() raise
         UInt64(0x3FF8000000000001),  # 7: the double above 1.5
         UInt64(0x7FF0000000000000),  # 8: +inf
         UInt64(0xFFF0000000000000),  # 9: -inf
-        NULL_BITS,  # 10: NULL
+        NULL_BITS,  # 10: NULL]
     )
     var col = _read(slot, 0, _f64_batch(bits), pool, res)
     for i in range(1, 4):
         assert_equal(col.cells[2 * i], col.cells[0], "NaN " + String(i))
     assert_equal(col.cells[8], col.cells[10], "-0.0 and 0.0")
     # Every other pair of the values is a pair of different cells.
-    var classes = List[Int](0, 8, 12, 14, 16, 18)
+    var classes = List[Int]([0, 8, 12, 14, 16, 18])
     for i in range(len(classes)):
         for j in range(len(classes)):
             if i != j:
@@ -482,8 +482,8 @@ def test_a_decimal_reads_as_its_low_and_its_high_word() raises:
     var res = WorkerReservation(pool.share())
     var slot = DistinctSlot(1)
     var big = I128(4294967296) * I128(4294967296)
-    var vals = List[I128](big + I128(3), I128(0) - I128(1), I128(7), I128(0))
-    var valid = List[Bool](True, True, True, False)
+    var vals = List[I128]([big + I128(3), I128(0) - I128(1), I128(7), I128(0)])
+    var valid = List[Bool]([True, True, True, False])
     var col = _read(slot, 0, _dec_batch(vals, valid), pool, res)
     assert_equal(len(col.cells), 8)
     # 2^64 + 3: low word 3, high word 1.
@@ -507,7 +507,7 @@ def test_strings_read_by_value_whatever_the_form_of_the_column() raises:
     var flat = _read(
         slot,
         0,
-        _str_batch(List[String]("pear", "apple", "", NULL_STR, "pear")),
+        _str_batch(List[String](["pear", "apple", "", NULL_STR, "pear"])),
         pool,
         res,
     )
@@ -518,14 +518,14 @@ def test_strings_read_by_value_whatever_the_form_of_the_column() raises:
     assert_equal(Int(flat.null[2]), 0)
     assert_equal(Int(flat.cells[8]), Int(flat.cells[0]))
     # Dictionaries that code the strings differently read as the same ids.
-    var forms = List[Int](FORM_DICT, FORM_SHUFFLED)
+    var forms = List[Int]([FORM_DICT, FORM_SHUFFLED])
     for f in range(len(forms)):
         var form = forms[f]
         var dict = _read(
             slot,
             0,
             _str_batch(
-                List[String]("apple", NULL_STR, "", "pear"), form, 1
+                List[String](["apple", NULL_STR, "", "pear"]), form, 1
             ),
             pool,
             res,
@@ -535,7 +535,7 @@ def test_strings_read_by_value_whatever_the_form_of_the_column() raises:
         assert_equal(Int(dict.cells[4]), Int(flat.cells[4]))
         assert_equal(Int(dict.cells[6]), Int(flat.cells[0]))
     # A string that is new takes the next id.
-    var more = _read(slot, 0, _str_batch(List[String]("fig")), pool, res)
+    var more = _read(slot, 0, _str_batch(List[String](["fig"])), pool, res)
     assert_equal(Int(more.cells[0]), 3)
     assert_equal(slot.values.n, 4)
 
@@ -572,7 +572,7 @@ def test_a_column_the_reader_cannot_serve_is_refused_by_exact_message() raises:
     assert_equal(_read_error(slot, 0, _range_batch(3), 3, pool, res), "")
     assert_equal(
         _read_error(
-            slot, 0, _str_batch(List[String]("a")), 1, pool, res
+            slot, 0, _str_batch(List[String](["a"])), 1, pool, res
         ),
         "pipeline_exec: "
         + String(LABEL)
@@ -581,7 +581,7 @@ def test_a_column_the_reader_cannot_serve_is_refused_by_exact_message() raises:
     var strs = DistinctSlot(1)
     assert_equal(
         _read_error(
-            strs, 0, _str_batch(List[String]("a")), 1, pool, res
+            strs, 0, _str_batch(List[String](["a"])), 1, pool, res
         ),
         "",
     )
@@ -589,7 +589,7 @@ def test_a_column_the_reader_cannot_serve_is_refused_by_exact_message() raises:
         _read_error(
             strs,
             0,
-            _str_batch(List[String]("a", "b"), FORM_DICT),
+            _str_batch(List[String](["a", "b"]), FORM_DICT),
             2,
             pool,
             res,
@@ -605,13 +605,13 @@ def test_a_string_table_that_is_full_or_denied_is_refused_by_name() raises:
     var one = DistinctSlot(1, max_strings=1)
     assert_equal(
         _read_error(
-            one, 0, _str_batch(List[String]("a", "a", NULL_STR)), 3, pool, res
+            one, 0, _str_batch(List[String](["a", "a", NULL_STR])), 3, pool, res
         ),
         "",
     )
     assert_equal(
         _read_error(
-            one, 0, _str_batch(List[String]("a", "b")), 2, pool, res
+            one, 0, _str_batch(List[String](["a", "b"])), 2, pool, res
         ),
         _too_many(1),
     )
@@ -621,7 +621,7 @@ def test_a_string_table_that_is_full_or_denied_is_refused_by_name() raises:
     var denied = DistinctSlot(1)
     assert_equal(
         _read_error(
-            denied, 0, _str_batch(List[String]("a")), 1, none, none_res
+            denied, 0, _str_batch(List[String](["a"])), 1, none, none_res
         ),
         _denied(64 * 28, 0, 0),
     )
@@ -631,7 +631,7 @@ def test_a_null_row_admits_nothing_and_an_entry_is_made_once() raises:
     var pool = SegmentPool()
     var res = WorkerReservation(pool.share())
     var slot = DistinctSlot(2)
-    var col = _read(slot, 0, _int_batch(List[Int](NUL, 4, 4)), pool, res)
+    var col = _read(slot, 0, _int_batch(List[Int]([NUL, 4, 4])), pool, res)
     _admit(slot, 0, 0, col, 0, pool, res)
     assert_equal(slot.pairs.n, 0)
     _admit(slot, 0, 0, col, 1, pool, res)
@@ -642,7 +642,7 @@ def test_a_null_row_admits_nothing_and_an_entry_is_made_once() raises:
     # Another group, and another aggregate, are other entries.
     _admit(slot, 0, 1, col, 1, pool, res)
     assert_equal(slot.pairs.n, 2)
-    var other = _read(slot, 1, _int_batch(List[Int](4)), pool, res)
+    var other = _read(slot, 1, _int_batch(List[Int]([4])), pool, res)
     _admit(slot, 1, 0, other, 0, pool, res)
     assert_equal(slot.pairs.n, 3)
 
@@ -683,22 +683,22 @@ def test_a_merge_counts_each_value_once_in_each_merged_group() raises:
     # and 1 hold {1, 2} and {1}; worker B's group 0 holds {2, 3}. Worker B
     # numbers the strings differently: z, w, y against x, y.
     var a = DistinctSlot(2)
-    _fill(a, 0, _int_batch(List[Int](1, 2, 1)), List[Int](0, 0, 1), pool, res_a)
+    _fill(a, 0, _int_batch(List[Int]([1, 2, 1])), List[Int]([0, 0, 1]), pool, res_a)
     _fill(
         a,
         1,
-        _str_batch(List[String]("x", "y", "y")),
-        List[Int](0, 0, 1),
+        _str_batch(List[String](["x", "y", "y"])),
+        List[Int]([0, 0, 1]),
         pool,
         res_a,
     )
     var b = DistinctSlot(2)
-    _fill(b, 0, _int_batch(List[Int](2, 3)), List[Int](0, 0), pool, res_b)
+    _fill(b, 0, _int_batch(List[Int]([2, 3])), List[Int]([0, 0]), pool, res_b)
     _fill(
         b,
         1,
-        _str_batch(List[String]("z", "w", "y", NULL_STR)),
-        List[Int](0, 0, 0, 0),
+        _str_batch(List[String](["z", "w", "y", NULL_STR])),
+        List[Int]([0, 0, 0, 0]),
         pool,
         res_b,
     )
@@ -706,8 +706,8 @@ def test_a_merge_counts_each_value_once_in_each_merged_group() raises:
     # A's groups 0 and 1 are merged groups 0 and 1, B's group 0 is merged
     # group 1.
     var cells = _new_cells(4)
-    _merge(merge, a, List[Int](0, 1), cells, 2, pool)
-    _merge(merge, b, List[Int](1), cells, 2, pool)
+    _merge(merge, a, List[Int]([0, 1]), cells, 2, pool)
+    _merge(merge, b, List[Int]([1]), cells, 2, pool)
     # Merged group 0: integers {1, 2}, strings {x, y}.
     assert_equal(cells[0].count, 2)
     assert_equal(cells[1].count, 2)
@@ -721,22 +721,22 @@ def test_a_merge_refuses_an_aggregate_that_changed_type_between_workers() raises
     var pool = SegmentPool()
     var res_a = WorkerReservation(pool.share())
     var res_b = WorkerReservation(pool.share())
-    var ints = _int_slot(List[Int](1, 2), List[Int](0, 0), pool, res_a, 2)
+    var ints = _int_slot(List[Int]([1, 2]), List[Int]([0, 0]), pool, res_a, 2)
     var strs = DistinctSlot(2)
     _fill(
         strs,
         0,
-        _str_batch(List[String]("a")),
-        List[Int](0),
+        _str_batch(List[String](["a"])),
+        List[Int]([0]),
         pool,
         res_b,
     )
     var merge = DistinctMerge(2, WorkerReservation(pool.share()))
     var cells = _new_cells(2)
-    _merge(merge, ints, List[Int](0), cells, 2, pool)
+    _merge(merge, ints, List[Int]([0]), cells, 2, pool)
     assert_equal(cells[0].count, 2)
     assert_equal(
-        _merge_error(merge, strs, List[Int](0), cells, 2, pool),
+        _merge_error(merge, strs, List[Int]([0]), cells, 2, pool),
         "pipeline_exec: " + String(LABEL)
         + " saw columns of different types on different workers",
     )
@@ -755,13 +755,13 @@ def test_a_merge_table_that_is_full_is_refused_by_name() raises:
     var fits = _int_slot(_range_list(64), _repeat(0, 64), pool, res)
     var merge = DistinctMerge(1, WorkerReservation(pool.share()), 64)
     var cells = _new_cells(1)
-    _merge(merge, fits, List[Int](0), cells, 1, pool)
+    _merge(merge, fits, List[Int]([0]), cells, 1, pool)
     assert_equal(cells[0].count, 64)
     var over = _int_slot(_range_list(65), _repeat(0, 65), pool, res)
     var merge65 = DistinctMerge(1, WorkerReservation(pool.share()), 64)
     var cells65 = _new_cells(1)
     assert_equal(
-        _merge_error(merge65, over, List[Int](0), cells65, 1, pool),
+        _merge_error(merge65, over, List[Int]([0]), cells65, 1, pool),
         _too_many(64),
     )
     # A table of one string: the same string twice is one entry.
@@ -769,8 +769,8 @@ def test_a_merge_table_that_is_full_is_refused_by_name() raises:
     _fill(
         twice,
         0,
-        _str_batch(List[String]("a", "a")),
-        List[Int](0, 1),
+        _str_batch(List[String](["a", "a"])),
+        List[Int]([0, 1]),
         pool,
         res,
     )
@@ -778,15 +778,15 @@ def test_a_merge_table_that_is_full_is_refused_by_name() raises:
         1, WorkerReservation(pool.share()), max_strings=1
     )
     var cells_one = _new_cells(2)
-    _merge(merge_one, twice, List[Int](0, 1), cells_one, 1, pool)
+    _merge(merge_one, twice, List[Int]([0, 1]), cells_one, 1, pool)
     assert_equal(cells_one[0].count, 1)
     assert_equal(cells_one[1].count, 1)
     var two = DistinctSlot(1)
     _fill(
         two,
         0,
-        _str_batch(List[String]("a", "b")),
-        List[Int](0, 0),
+        _str_batch(List[String](["a", "b"])),
+        List[Int]([0, 0]),
         pool,
         res,
     )
@@ -795,7 +795,7 @@ def test_a_merge_table_that_is_full_is_refused_by_name() raises:
     )
     var cells_two = _new_cells(1)
     assert_equal(
-        _merge_error(merge_two, two, List[Int](0), cells_two, 1, pool),
+        _merge_error(merge_two, two, List[Int]([0]), cells_two, 1, pool),
         _too_many(1),
     )
 
@@ -804,11 +804,11 @@ def test_a_merge_the_pool_denies_is_refused_by_exact_message() raises:
     var pool = SegmentPool()
     var res = WorkerReservation(pool.share())
     var none = SegmentPool(0)
-    var ints = _int_slot(List[Int](1, 2), List[Int](0, 0), pool, res)
+    var ints = _int_slot(List[Int]([1, 2]), List[Int]([0, 0]), pool, res)
     var merge = DistinctMerge(1, WorkerReservation(none.share()))
     var cells = _new_cells(1)
     assert_equal(
-        _merge_error(merge, ints, List[Int](0), cells, 1, none),
+        _merge_error(merge, ints, List[Int]([0]), cells, 1, none),
         _denied(_entries_bytes(), 0, 0),
     )
     # The merged strings are drawn first.
@@ -816,15 +816,15 @@ def test_a_merge_the_pool_denies_is_refused_by_exact_message() raises:
     _fill(
         strs,
         0,
-        _str_batch(List[String]("a")),
-        List[Int](0),
+        _str_batch(List[String](["a"])),
+        List[Int]([0]),
         pool,
         res,
     )
     var merge_strs = DistinctMerge(1, WorkerReservation(none.share()))
     var cells_strs = _new_cells(1)
     assert_equal(
-        _merge_error(merge_strs, strs, List[Int](0), cells_strs, 1, none),
+        _merge_error(merge_strs, strs, List[Int]([0]), cells_strs, 1, none),
         _denied(64 * 28, 0, 0),
     )
 
@@ -836,15 +836,15 @@ def test_finish_returns_the_merge_memory_and_empties_its_tables() raises:
     _fill(
         slot,
         0,
-        _str_batch(List[String]("a", "b", "c")),
-        List[Int](0, 0, 1),
+        _str_batch(List[String](["a", "b", "c"])),
+        List[Int]([0, 0, 1]),
         pool,
         res,
     )
     var merge = DistinctMerge(1, WorkerReservation(pool.share()))
     var cells = _new_cells(2)
     var before = pool.granted()
-    _merge(merge, slot, List[Int](0, 1), cells, 1, pool)
+    _merge(merge, slot, List[Int]([0, 1]), cells, 1, pool)
     assert_true(pool.granted() > before, "the merge drew nothing")
     assert_equal(merge.pairs.n, 3)
     assert_equal(merge.values.n, 3)

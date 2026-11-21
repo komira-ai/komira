@@ -254,7 +254,7 @@ def _string_value_batch() raises -> RecordBatch:
     """Key `k` (INT64) and a STRING column `v`."""
     var k = PrimitiveArray[DType.int64].allocate(1)
     k.set(0, Int64(1))
-    var names = List[String]("a")
+    var names = List[String](["a"])
     var sb = SchemaBuilder()
     var rb = RecordBatchBuilder()
     sb.add_field(Field("k", ArrowType.INT64, False))
@@ -315,8 +315,8 @@ def test_what_the_grouped_sinks_refuse_when_they_run() raises:
     except e:
         bad = String(e)
     assert_equal(bad, unserved)
-    var ok = List[String]("a", "b")
-    var ok_valid = List[Bool](True, True)
+    var ok = List[String](["a", "b"])
+    var ok_valid = List[Bool]([True, True])
     strs.consume(1, Morsel(key_batch(ok, ok_valid, FORM_FLAT), 1, 0))
     var changed_to_string = String("")
     try:
@@ -331,7 +331,7 @@ def _s1_u32_batch() raises -> RecordBatch:
     var v = PrimitiveArray[DType.uint32].allocate(2)
     v.set(0, UInt32(1))
     v.set(1, UInt32(2))
-    var values = List[String]("a", "b")
+    var values = List[String](["a", "b"])
     var sb = SchemaBuilder()
     var rb = RecordBatchBuilder()
     sb.add_field(Field("s1", ArrowType.STRING, False))
@@ -343,7 +343,7 @@ def _s1_u32_batch() raises -> RecordBatch:
 
 def _s1_string_value_batch() raises -> RecordBatch:
     """String key `s1` and a STRING column `v`."""
-    var values = List[String]("a", "b")
+    var values = List[String](["a", "b"])
     var sb = SchemaBuilder()
     var rb = RecordBatchBuilder()
     sb.add_field(Field("s1", ArrowType.STRING, False))
@@ -402,8 +402,8 @@ def test_a_pool_too_small_for_the_distinct_entries_is_refused_by_name() raises:
     var spool = SegmentPool(sbudget)
     var strs = _string_budget_sink(spool)
     strs.resize_worker_state(1)
-    var names = List[String]("a", "b")
-    var valid = List[Bool](True, True)
+    var names = List[String](["a", "b"])
+    var valid = List[Bool]([True, True])
     var failure = String("")
     try:
         strs.consume(0, Morsel(key_batch(names, valid, FORM_FLAT), 0, 0))
@@ -423,8 +423,8 @@ def test_a_pool_too_small_for_the_distinct_entries_is_refused_by_name() raises:
 def _fixed_two_workers(ref pool: SegmentPool) raises -> GroupAggSink:
     var sink = _fixed_budget_sink(pool)
     sink.resize_worker_state(2)
-    var keys = List[Int](1, 2, 3, 2, 3, 4)
-    var vals = List[Int](10, 20, 30, 20, 31, 40)
+    var keys = List[Int]([1, 2, 3, 2, 3, 4])
+    var vals = List[Int]([10, 20, 30, 20, 31, 40])
     sink.consume(0, Morsel(_kvw_batch(keys, vals, vals, 0, 3), 0, 0))
     sink.consume(1, Morsel(_kvw_batch(keys, vals, vals, 3, 6), 1, 0))
     return sink^
@@ -433,9 +433,9 @@ def _fixed_two_workers(ref pool: SegmentPool) raises -> GroupAggSink:
 def _string_two_workers(ref pool: SegmentPool) raises -> StringGroupAggSink:
     var sink = _string_budget_sink(pool)
     sink.resize_worker_state(2)
-    var names = List[String]("a", "b", "c")
-    var more = List[String]("b", "c", "d")
-    var valid = List[Bool](True, True, True)
+    var names = List[String](["a", "b", "c"])
+    var more = List[String](["b", "c", "d"])
+    var valid = List[Bool]([True, True, True])
     # key_batch holds the row number plus one as `v`: 1 to 3 on both workers,
     # so `v` repeats across workers and differs inside a group.
     sink.consume(0, Morsel(key_batch(names, valid, FORM_FLAT), 0, 0))

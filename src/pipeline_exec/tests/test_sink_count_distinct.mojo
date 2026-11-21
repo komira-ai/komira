@@ -357,10 +357,10 @@ def _count_ints[
 
 
 def test_ints_are_counted_once_across_repeats_morsels_and_workers() raises:
-    var a = List[Int](5, 5, 7, NUL, 7)
-    var b = List[Int](7, 9, NUL)
-    var c = List[Int](5, 11, 11, 9)
-    var d = List[Int](NUL, 13)
+    var a = List[Int]([5, 5, 7, NUL, 7])
+    var b = List[Int]([7, 9, NUL])
+    var c = List[Int]([5, 11, 11, 9])
+    var d = List[Int]([NUL, 13])
     var sink = _sink_x()
     sink.resize_worker_state(3)
     _feed(sink, 0, 0, _int_batch[DType.int64](ArrowType.INT64, a))
@@ -374,44 +374,44 @@ def test_ints_are_counted_once_across_repeats_morsels_and_workers() raises:
 
 
 def test_every_integer_width_and_a_date_counts_its_distinct_values() raises:
-    var a8 = List[Int](-128, 127, -1, NUL, 127)
-    var b8 = List[Int](0, -1, 1, NUL)
-    var c8 = List[Int](-128, 2, 2, 0)
+    var a8 = List[Int]([-128, 127, -1, NUL, 127])
+    var b8 = List[Int]([0, -1, 1, NUL])
+    var c8 = List[Int]([-128, 2, 2, 0])
     assert_equal(_distinct(_cat3(a8, b8, c8)), 6)
     assert_equal(
         _count_ints[DType.int8](ArrowType.INT8, a8, b8, c8),
         _distinct(_cat3(a8, b8, c8)),
     )
     # 256 and 0 differ only above the low byte.
-    var a16 = List[Int](-32768, 32767, 256, NUL)
-    var b16 = List[Int](256, -256, 0, 0)
-    var c16 = List[Int](32767, 1, NUL)
+    var a16 = List[Int]([-32768, 32767, 256, NUL])
+    var b16 = List[Int]([256, -256, 0, 0])
+    var c16 = List[Int]([32767, 1, NUL])
     assert_equal(_distinct(_cat3(a16, b16, c16)), 6)
     assert_equal(
         _count_ints[DType.int16](ArrowType.INT16, a16, b16, c16),
         _distinct(_cat3(a16, b16, c16)),
     )
-    var a32 = List[Int](-2147483648, 2147483647, 65536, NUL, 65536)
-    var b32 = List[Int](0, 65536, -65536, 7)
-    var c32 = List[Int](2147483647, 7, NUL)
+    var a32 = List[Int]([-2147483648, 2147483647, 65536, NUL, 65536])
+    var b32 = List[Int]([0, 65536, -65536, 7])
+    var c32 = List[Int]([2147483647, 7, NUL])
     assert_equal(_distinct(_cat3(a32, b32, c32)), 6)
     assert_equal(
         _count_ints[DType.int32](ArrowType.INT32, a32, b32, c32),
         _distinct(_cat3(a32, b32, c32)),
     )
     # 2^32 and 0 differ only in the high word.
-    var a64 = List[Int](Int(Int64.MIN), Int(Int64.MAX), 4294967296, 0, NUL)
-    var b64 = List[Int](0, 4294967296, 1, Int(Int64.MAX))
-    var c64 = List[Int](-1, Int(Int64.MIN), NUL, 4294967297)
+    var a64 = List[Int]([Int(Int64.MIN), Int(Int64.MAX), 4294967296, 0, NUL])
+    var b64 = List[Int]([0, 4294967296, 1, Int(Int64.MAX)])
+    var c64 = List[Int]([-1, Int(Int64.MIN), NUL, 4294967297])
     assert_equal(_distinct(_cat3(a64, b64, c64)), 7)
     assert_equal(
         _count_ints[DType.int64](ArrowType.INT64, a64, b64, c64),
         _distinct(_cat3(a64, b64, c64)),
     )
     # DATE32: a column of days, no NULL.
-    var ad = List[Int](0, 19000, 19000, -1)
-    var bd = List[Int](19001, 0)
-    var cd = List[Int](19000, 20000)
+    var ad = List[Int]([0, 19000, 19000, -1])
+    var bd = List[Int]([19001, 0])
+    var cd = List[Int]([19000, 20000])
     var sink = _sink_x()
     sink.resize_worker_state(2)
     _feed(sink, 0, 0, _date_batch(ad))
@@ -425,29 +425,29 @@ def test_every_integer_width_and_a_date_counts_its_distinct_values() raises:
 def test_float64_counts_every_nan_as_one_and_the_zeros_as_one() raises:
     # Worker 0: a quiet NaN, a negative NaN, -0.0, NULL, 1.5.
     var a = List[UInt64](
-        UInt64(0x7FF8000000000000),
+        [UInt64(0x7FF8000000000000),
         UInt64(0xFFF8000000000000),
         UInt64(0x8000000000000000),
         NULL_BITS,
-        UInt64(0x3FF8000000000000),
+        UInt64(0x3FF8000000000000),]
     )
     # Worker 1: a signalling NaN, a NaN with a payload, 0.0, 1.5, 2.5, and
     # the double just above 1.5.
     var b = List[UInt64](
-        UInt64(0x7FF0000000000001),
+        [UInt64(0x7FF0000000000001),
         UInt64(0x7FF8000000000123),
         UInt64(0x0000000000000000),
         UInt64(0x3FF8000000000000),
         UInt64(0x4004000000000000),
-        UInt64(0x3FF8000000000001),
+        UInt64(0x3FF8000000000001),]
     )
     # Worker 2: an all-ones NaN, +inf, -inf, 0.0, NULL.
     var c = List[UInt64](
-        UInt64(0xFFFFFFFFFFFFFFFF),
+        [UInt64(0xFFFFFFFFFFFFFFFF),
         UInt64(0x7FF0000000000000),
         UInt64(0xFFF0000000000000),
         UInt64(0x0000000000000000),
-        NULL_BITS,
+        NULL_BITS,]
     )
     var sink = _sink_x()
     sink.resize_worker_state(3)
@@ -461,13 +461,13 @@ def test_float64_counts_every_nan_as_one_and_the_zeros_as_one() raises:
 
 def test_float32_counts_every_nan_as_one_and_the_zeros_as_one() raises:
     var a = List[UInt32](
-        UInt32(0x7FC00000), UInt32(0xFFC00000), UInt32(0x80000000), UInt32(0x12345678), UInt32(0x3FC00000)
+        [UInt32(0x7FC00000), UInt32(0xFFC00000), UInt32(0x80000000), UInt32(0x12345678), UInt32(0x3FC00000)]
     )
     var b = List[UInt32](
-        UInt32(0x7F800001), UInt32(0x7FC00123), UInt32(0x00000000), UInt32(0x3FC00000), UInt32(0x40200000), UInt32(0x3FC00001)
+        [UInt32(0x7F800001), UInt32(0x7FC00123), UInt32(0x00000000), UInt32(0x3FC00000), UInt32(0x40200000), UInt32(0x3FC00001)]
     )
     var c = List[UInt32](
-        UInt32(0xFFFFFFFF), UInt32(0x7F800000), UInt32(0x00000000), UInt32(0x12345678)
+        [UInt32(0xFFFFFFFF), UInt32(0x7F800000), UInt32(0x00000000), UInt32(0x12345678)]
     )
     var sink = _sink_x()
     sink.resize_worker_state(3)
@@ -486,12 +486,12 @@ def _two_to_the_64() -> I128:
 def test_decimal_values_differing_in_one_word_are_distinct() raises:
     var big = _two_to_the_64()
     var zero = I128(0)
-    var all_valid = List[Bool](True, True, True, True)
-    var a = List[I128](zero, big, zero, I128(0) - I128(1))
-    var a_valid = List[Bool](True, True, False, True)
-    var b = List[I128](big, zero - big, I128(1), zero)
-    var c = List[I128](big + I128(1), zero - I128(1), zero)
-    var c_valid = List[Bool](True, True, False)
+    var all_valid = List[Bool]([True, True, True, True])
+    var a = List[I128]([zero, big, zero, I128(0) - I128(1)])
+    var a_valid = List[Bool]([True, True, False, True])
+    var b = List[I128]([big, zero - big, I128(1), zero])
+    var c = List[I128]([big + I128(1), zero - I128(1), zero])
+    var c_valid = List[Bool]([True, True, False])
     var sink = _sink_x()
     sink.resize_worker_state(2)
     _feed(sink, 0, 0, _dec_batch(a, a_valid))
@@ -505,9 +505,9 @@ def test_decimal_values_differing_in_one_word_are_distinct() raises:
 
 
 def test_strings_count_by_content_and_the_empty_string_is_a_value() raises:
-    var a = List[String]("pear", "apple", "", NULL_STR, "pear")
-    var b = List[String]("apple", "ab", "abc", "a", "")
-    var c = List[String]("abc", "apple", NULL_STR, "pear ")
+    var a = List[String](["pear", "apple", "", NULL_STR, "pear"])
+    var b = List[String](["apple", "ab", "abc", "a", ""])
+    var c = List[String](["abc", "apple", NULL_STR, "pear "])
     var all = List[String]()
     for i in range(len(a)):
         all.append(a[i])
@@ -527,11 +527,11 @@ def test_strings_count_by_content_and_the_empty_string_is_a_value() raises:
 
 
 def test_a_dictionary_is_read_by_value_and_mixes_with_flat_strings() raises:
-    var w0a = List[String]("pear", "apple", "pear", NULL_STR)
-    var w0b = List[String]("apple", "fig", "pear", "fig", NULL_STR)
-    var w1 = List[String]("fig", "kiwi", NULL_STR, "kiwi", "pear")
-    var w2 = List[String]("pear", "zzz")
-    var w0c = List[String]("kiwi")
+    var w0a = List[String](["pear", "apple", "pear", NULL_STR])
+    var w0b = List[String](["apple", "fig", "pear", "fig", NULL_STR])
+    var w1 = List[String](["fig", "kiwi", NULL_STR, "kiwi", "pear"])
+    var w2 = List[String](["pear", "zzz"])
+    var w0c = List[String](["kiwi"])
     var all = List[String]()
     for i in range(len(w0a)):
         all.append(w0a[i])
@@ -559,17 +559,17 @@ def test_a_dictionary_is_read_by_value_and_mixes_with_flat_strings() raises:
 
 
 def test_null_is_not_counted_and_no_value_counts_zero() raises:
-    var only_null = List[Int](NUL, NUL, NUL)
+    var only_null = List[Int]([NUL, NUL, NUL])
     var sink = _sink_x()
     sink.resize_worker_state(2)
     _feed(sink, 0, 0, _int_batch[DType.int64](ArrowType.INT64, only_null))
-    _feed(sink, 1, 1, _int_batch[DType.int64](ArrowType.INT64, List[Int](NUL)))
+    _feed(sink, 1, 1, _int_batch[DType.int64](ArrowType.INT64, List[Int]([NUL])))
     _feed(sink, 1, 2, _int_batch[DType.int64](ArrowType.INT64, List[Int]()))
     var ints = _finish(sink, 2)
     assert_equal(_count_of(ints), 0)
     var strs = _sink_x()
     strs.resize_worker_state(2)
-    var nulls = List[String](NULL_STR, NULL_STR)
+    var nulls = List[String]([NULL_STR, NULL_STR])
     _feed(strs, 0, 0, _str_batch(nulls))
     _feed(strs, 1, 1, _str_batch(nulls, FORM_SHUFFLED, 1))
     assert_equal(_count_of(_finish(strs, 2)), 0)
@@ -580,7 +580,7 @@ def test_null_is_not_counted_and_no_value_counts_zero() raises:
         mixed,
         0,
         0,
-        _int_batch[DType.int64](ArrowType.INT64, List[Int](NUL, 4, NUL)),
+        _int_batch[DType.int64](ArrowType.INT64, List[Int]([NUL, 4, NUL])),
     )
     assert_equal(_count_of(_finish(mixed, 1)), 1)
 
@@ -621,8 +621,8 @@ def test_it_runs_beside_sum_count_and_count_star() raises:
     sink.resize_worker_state(3)
     # Rows 0..29 in three morsels of ten, and rows 0..9 again on worker 2, so
     # ten values are met by two workers.
-    var starts = List[Int](0, 10, 20, 0)
-    var workers = List[Int](0, 1, 2, 2)
+    var starts = List[Int]([0, 10, 20, 0])
+    var workers = List[Int]([0, 1, 2, 2])
     var want_b = List[Int]()
     var want_a = List[Int]()
     var want_s = List[String]()
@@ -680,9 +680,9 @@ def test_two_count_distincts_over_different_columns_keep_their_own_values() rais
         sink,
         0,
         0,
-        _two_column_batch(List[Int](1, 2, 3), List[Int](3, 3, 3)),
+        _two_column_batch(List[Int]([1, 2, 3]), List[Int]([3, 3, 3])),
     )
-    _feed(sink, 1, 1, _two_column_batch(List[Int](2, 3), List[Int](3, 3)))
+    _feed(sink, 1, 1, _two_column_batch(List[Int]([2, 3]), List[Int]([3, 3])))
     var out = _finish(sink, 2)
     # x holds 1, 2 and 3; y holds only 3, a value x holds too.
     assert_equal(_count_of(out, 0), 3)
@@ -817,23 +817,23 @@ def test_a_column_that_changes_type_between_morsels_of_a_worker_is_refused() rai
     sink.resize_worker_state(1)
     assert_equal(
         _failure_of_feed(
-            sink, 0, 0, _int_batch[DType.int64](ArrowType.INT64, List[Int](1))
+            sink, 0, 0, _int_batch[DType.int64](ArrowType.INT64, List[Int]([1]))
         ),
         "",
     )
     assert_equal(
         _failure_of_feed(
-            sink, 0, 1, _int_batch[DType.int32](ArrowType.INT32, List[Int](1))
+            sink, 0, 1, _int_batch[DType.int32](ArrowType.INT32, List[Int]([1]))
         ),
         changed,
     )
     # DATE32 and INT32 are one storage and two types.
     var days = _sink_x()
     days.resize_worker_state(1)
-    assert_equal(_failure_of_feed(days, 0, 0, _date_batch(List[Int](1))), "")
+    assert_equal(_failure_of_feed(days, 0, 0, _date_batch(List[Int]([1]))), "")
     assert_equal(
         _failure_of_feed(
-            days, 0, 1, _int_batch[DType.int32](ArrowType.INT32, List[Int](1))
+            days, 0, 1, _int_batch[DType.int32](ArrowType.INT32, List[Int]([1]))
         ),
         changed,
     )
@@ -842,8 +842,8 @@ def test_a_column_that_changes_type_between_morsels_of_a_worker_is_refused() rai
 def test_a_column_of_other_types_on_different_workers_is_refused_at_combine() raises:
     var sink = _sink_x()
     sink.resize_worker_state(2)
-    _feed(sink, 0, 0, _int_batch[DType.int64](ArrowType.INT64, List[Int](1)))
-    _feed(sink, 1, 1, _f64_batch(List[UInt64](UInt64(0x3FF8000000000000))))
+    _feed(sink, 0, 0, _int_batch[DType.int64](ArrowType.INT64, List[Int]([1])))
+    _feed(sink, 1, 1, _f64_batch(List[UInt64]([UInt64(0x3FF8000000000000)])))
     assert_equal(
         _failure_of_finish(sink, 2),
         "pipeline_exec: COUNT(DISTINCT) (output column 0) saw columns of"
@@ -852,7 +852,7 @@ def test_a_column_of_other_types_on_different_workers_is_refused_at_combine() ra
     # A worker that saw no morsel is no other type.
     var idle = _sink_x()
     idle.resize_worker_state(2)
-    _feed(idle, 1, 0, _f64_batch(List[UInt64](UInt64(0x3FF8000000000000))))
+    _feed(idle, 1, 0, _f64_batch(List[UInt64]([UInt64(0x3FF8000000000000)])))
     assert_equal(_count_of(_finish(idle, 2)), 1)
 
 
@@ -869,7 +869,7 @@ def test_a_pool_too_small_for_the_distinct_values_is_refused_by_name() raises:
             sink,
             0,
             0,
-            _int_batch[DType.int64](ArrowType.INT64, List[Int](1, 2, 3)),
+            _int_batch[DType.int64](ArrowType.INT64, List[Int]([1, 2, 3])),
         ),
         "pipeline_exec: the aggregation sink of segment 0 was denied "
         + String(entries)
@@ -888,7 +888,7 @@ def test_a_pool_too_small_for_the_distinct_values_is_refused_by_name() raises:
     var strs = _sink_x(spool.share())
     strs.resize_worker_state(1)
     var failure = _failure_of_feed(
-        strs, 0, 0, _str_batch(List[String]("a", "b"))
+        strs, 0, 0, _str_batch(List[String](["a", "b"]))
     )
     assert_true(
         "pipeline_exec: the aggregation sink of segment 0 was denied "
@@ -914,10 +914,10 @@ def _two_workers(ref pool: SegmentPool) raises -> AggSink:
     var sink = _sink_x(pool.share())
     sink.resize_worker_state(2)
     _feed(
-        sink, 0, 0, _int_batch[DType.int64](ArrowType.INT64, List[Int](1, 2, 3))
+        sink, 0, 0, _int_batch[DType.int64](ArrowType.INT64, List[Int]([1, 2, 3]))
     )
     _feed(
-        sink, 1, 1, _int_batch[DType.int64](ArrowType.INT64, List[Int](3, 4, 5))
+        sink, 1, 1, _int_batch[DType.int64](ArrowType.INT64, List[Int]([3, 4, 5]))
     )
     return sink^
 
