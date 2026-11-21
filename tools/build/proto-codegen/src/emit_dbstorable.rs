@@ -647,7 +647,7 @@ impl<'a> DbEmitter<'a> {
         let n = field.proto_field_number;
         let json = matches!(logical, Logical::Jsonb | Logical::TextArray);
         // A nullable (optional) SCALAR branches on presence. A UUID carries
-        // its 16 raw bytes — `DbValue.uuid` takes `InlineArray[UInt8, 16]`, so
+        // its 16 raw bytes — `DbValue.uuid` takes `Array[UInt8, 16]`, so
         // the present arm must unwrap the `Optional[Uuid]` AND read `.bytes()`
         // (matching the non-optional UUID path below). Every other scalar
         // passes `.value()` straight to its typed ctor.

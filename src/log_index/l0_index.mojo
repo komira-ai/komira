@@ -685,7 +685,7 @@ struct L0SegmentBuilder(Movable, Deinitable):
     def serialize_split_bytes(
         mut self,
         field_name: String,
-        split_uuid: InlineArray[UInt8, 16],
+        split_uuid: Array[UInt8, 16],
     ) raises -> List[UInt8]:
         """Emit the L0 split: a SPLIT_VERSION=1 additive-footer container with an
         EMPTY term-dict + EMPTY postings region, a POPULATED docstore + THFF, and

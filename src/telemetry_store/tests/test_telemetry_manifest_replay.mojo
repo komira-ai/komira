@@ -166,7 +166,7 @@ struct NoListStore(
 def _entry(
     disc: UInt8, seq: Int, min_ts: Int64, max_ts: Int64
 ) raises -> TelemetrySegmentEntry:
-    var u = InlineArray[UInt8, 16](fill=UInt8(0))
+    var u = Array[UInt8, 16](fill=UInt8(0))
     u[0] = disc
     u[15] = UInt8(seq)
     var key = telemetry_data_key(
@@ -395,7 +395,7 @@ def test_05_a_live_merge_hides_its_still_live_inputs() raises:
     _ = w.publish(b.copy())
 
     # The merge: published, inputs NOT yet tombstoned — the dup window.
-    var mu = InlineArray[UInt8, 16](fill=UInt8(0))
+    var mu = Array[UInt8, 16](fill=UInt8(0))
     mu[0] = UInt8(5)
     mu[15] = UInt8(99)
     var flat = List[UInt8]()
@@ -408,7 +408,7 @@ def test_05_a_live_merge_hides_its_still_live_inputs() raises:
         mu^,
         telemetry_data_key(
             TELEMETRY_ROOT, TELEMETRY_DATASET_LOGS, _DAY, Int64(0),
-            InlineArray[UInt8, 16](fill=UInt8(200)),
+            Array[UInt8, 16](fill=UInt8(200)),
         ),
         a.min_ts_ns, b.max_ts_ns, Int64(0), Int64(0),
         a.row_count + b.row_count, Int64(2048), Int64(1), flat^, False,

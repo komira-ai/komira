@@ -42,7 +42,7 @@
 # ENCAPSULATION: `Span[UInt8, _]` (the caller-owned pubkey) / `String`
 # (the kid + the JSON) in and out — ZERO UnsafePointer crosses any boundary, no
 # wildcard origin. The pubkey is PUBLIC material (not a secret), so it needs no
-# zeroizing handling — it is a plain `InlineArray[UInt8, 32]` in the keyring and a
+# zeroizing handling — it is a plain `Array[UInt8, 32]` in the keyring and a
 # `Span` here.
 # =============================================================================
 

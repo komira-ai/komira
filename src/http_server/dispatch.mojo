@@ -111,7 +111,7 @@ from http_server.connection import (
 # request's `req.body` (a heap-owning `List[UInt8]`) before dispatching.
 #
 # ENCAPSULATION: no UnsafePointer crosses any boundary here. `accumulate_body_
-# remainder` reads into a stack-local `InlineArray` scratch buffer and copies
+# remainder` reads into a stack-local `Array` scratch buffer and copies
 # bytes into the caller's `out_body: List[UInt8]` by value. pointer-free:
 # `out_body` is a stack-local request field, never stored in a byte-slab.
 
@@ -273,7 +273,7 @@ def accumulate_chunked_body(
     caller marks `body_split` so the in-buffer pipelining scan stops.
 
     ENCAPSULATION: `pending` / `out_body` are plain `List[UInt8]` locals owned by
-    this frame and the caller's request; the recv lands in a stack `InlineArray`.
+    this frame and the caller's request; the recv lands in a stack `Array`.
     No UnsafePointer crosses a boundary; nothing here is stored in a byte-slab.
     """
     var dec = ChunkedDecoder.init()

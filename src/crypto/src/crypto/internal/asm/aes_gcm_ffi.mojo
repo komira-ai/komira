@@ -77,7 +77,7 @@
 #     is the FFI-POD opaque-handle carve-out
 #     (`_FfiHandle` holding the EVP_AEAD_CTX*).
 #   * Methods seal_in_place / open_in_place take typed Mojo arguments
-#     (InlineArray + Span); FFI is internal to the method body.
+#     (Array + Span); FFI is internal to the method body.
 #
 # Internal FFI:
 #   * external_call sites use the `MutExternalOrigin` shape via
@@ -106,7 +106,7 @@ from std.memory import UnsafePointer
 # lifetime is not expressible in Mojo's origin system. Opaque AWS-LC heap
 # handles are passed BY VALUE to `external_call` and never written through
 # Mojo-side, so an immutable static origin is sound. Data-buffer pointers
-# (Span/InlineArray/scalar out-params) carry the same origin; the SAFETY
+# (Span/Array/scalar out-params) carry the same origin; the SAFETY
 # contract is that the caller holds the buffer's real origin in scope across
 # the synchronous external_call (AWS-LC retains no pointer past the call).
 # -----------------------------------------------------------------------------

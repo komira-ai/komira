@@ -25,8 +25,8 @@
 # combine_aggregator / finalize_aggregator). The `IS_STRUCT` sentinel is gone.
 #
 # Note on `update_batch`: the design doc §3.1 lines 287-303 sketched a
-# default `update_batch[N](mut states: InlineArray[StateStruct, N], ...)`
-# body that loops scalar update. Mojo's `InlineArray` requires
+# default `update_batch[N](mut states: Array[StateStruct, N], ...)`
+# body that loops scalar update. Mojo's `Array` requires
 # `ElementType: Copyable`, but constraining `StateStruct: Copyable` would
 # preclude impls whose state holds non-Copyable subfields (e.g. side-Slab
 # variant's offset/length pair is Copyable, but a future variant might
@@ -85,7 +85,7 @@ trait AggregatorWithStruct(Movable, Deinitable):
       - Must be Movable + Deinitable (matches trait quartet).
       - Must NOT contain heap-owning fields (no List, String, OwnedPointer,
         ArcPointer, or wildcard-origin pointers) — gap6 hazard.
-        Inline structs with primitive + InlineArray fields only. See
+        Inline structs with primitive + Array fields only. See
         an internal doc §7.11 +
         an internal doc.
 
@@ -111,19 +111,19 @@ trait AggregatorWithStruct(Movable, Deinitable):
     Mojo 1.0.0 MIGRATION: the bound used to also demand
     `ImplicitlyCopyable`, and the round-trip above used to be spelled
     with a bare `=` on both lines. 1.0.0 removed `ImplicitlyCopyable`
-    from `InlineArray[T, N]` and will not synthesize an implicit copy
+    from `Array[T, N]` and will not synthesize an implicit copy
     constructor for any struct holding one -- and there is no
     hand-written escape hatch (`__copyinit__` is not a hook the
     compiler consults, `fn` is gone, `@register_passable("trivial")`
     is gone). `MedianState` (520 B) and `LargestKState` both hold an
-    InlineArray, so keeping the bound would have made them
+    Array, so keeping the bound would have made them
     unconformable. The copy still happens at exactly the same two
     places and costs exactly what it cost under b2; it is now spelled
     out rather than synthesized.
 
     Forbidden field types (gap6 hazard): List, String, OwnedPointer,
     ArcPointer, wildcard-origin pointers. Inline structs with primitive
-    + InlineArray fields only. Reference impls (WelfordState etc.)
+    + Array fields only. Reference impls (WelfordState etc.)
     satisfy this constraint with primitive scalar fields, which Mojo
     auto-derives the triple for.
     """

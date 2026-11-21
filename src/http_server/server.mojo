@@ -267,7 +267,7 @@ def _build_default_health_response_bytes(
     responses go through `serve_read_round_dispatch` which serializes its
     own growable `List[UInt8]` and writes via `_write_all_or_buffer` (no
     cap). The `i < RESP_BUF_CAP` guard below only bounds this small static
-    string into its fixed `_resp_buf` InlineArray; the canned string is
+    string into its fixed `_resp_buf` Array; the canned string is
     a compile-time constant well under 1024 bytes, so no truncation can
     occur. If this canned response ever grows past RESP_BUF_CAP, the
     constant string would need to grow `_resp_buf` too — but that path is

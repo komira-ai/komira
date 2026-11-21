@@ -10,8 +10,8 @@
 # POSITIVE guard (this file, runnable):
 #   - `AggFnAcc[GoodFlatAgg]` (flat PodScalar State: Float64 + Int64) compiles
 #     + constructs — the gate passes, no false rejection.
-#   - `AggFnAcc[GoodHllAgg]` (InlineArray[Int64, 16] State — the HLL workaround
-#     carve-out) compiles + constructs — the InlineArray-of-PodScalar carve-out
+#   - `AggFnAcc[GoodHllAgg]` (Array[Int64, 16] State — the HLL workaround
+#     carve-out) compiles + constructs — the Array-of-PodScalar carve-out
 #     is NOT wrongly rejected.
 #   - `assert_pod_state[...]` called directly on both good states.
 #
@@ -82,7 +82,7 @@ struct GoodFlatAgg(AggFn):
         return s.sum / Float64(s.count) if s.count != 0 else 0.0
 
 
-# --- (b) InlineArray[PodScalar, N] State — the HLL workaround carve-out ---
+# --- (b) Array[PodScalar, N] State — the HLL workaround carve-out ---
 
 @fieldwise_init
 struct GoodHllRow(Copyable, Movable):
@@ -91,7 +91,7 @@ struct GoodHllRow(Copyable, Movable):
 
 @fieldwise_init
 struct GoodHllState(PodState):
-    """An InlineArray[Int64, 16] register array + a scalar — the documented
+    """An Array[Int64, 16] register array + a scalar — the documented
     HLL-style heap-free State. The carve-out the gate must NOT reject."""
     var registers: Array[Int64, 16]
     var n: Int64
@@ -143,7 +143,7 @@ def test_flat_pod_state_passes_gate() raises:
 
 def test_inline_array_pod_state_passes_gate() raises:
     # Constructing AggFnAcc[GoodHllAgg] FORCES assert_pod_state[GoodHllState],
-    # which contains an InlineArray[Int64, 16] field — the HLL carve-out. The
+    # which contains an Array[Int64, 16] field — the HLL carve-out. The
     # gate must NOT reject it (false-positive guard).
     var acc = AggFnAcc[GoodHllAgg](GoodHllAgg())
     assert_equal(acc.num_groups(), 0, "fresh AggFnAcc has 0 groups")
@@ -159,7 +159,7 @@ def test_assert_pod_state_direct() raises:
 
 
 def test_pod_field_predicates() raises:
-    # The leaf predicates discriminate scalar / InlineArray / heap correctly.
+    # The leaf predicates discriminate scalar / Array / heap correctly.
     assert_true(_is_pod_scalar[Float64](), "Float64 is a PodScalar")
     assert_true(_is_pod_scalar[Int64](), "Int64 is a PodScalar")
     assert_true(_is_pod_scalar[Bool](), "Bool is a PodScalar")
@@ -167,26 +167,26 @@ def test_pod_field_predicates() raises:
 
     assert_true(
         _is_pod_inline_array[Array[Int64, 16]](),
-        "InlineArray[Int64, 16] is a pod InlineArray",
+        "Array[Int64, 16] is a pod Array",
     )
     assert_true(
         _is_pod_inline_array[Array[Float64, 8]](),
-        "InlineArray[Float64, 8] is a pod InlineArray",
+        "Array[Float64, 8] is a pod Array",
     )
     assert_true(
         not _is_pod_inline_array[Array[String, 4]](),
-        "InlineArray[String, 4] is NOT a pod InlineArray (String element"
+        "Array[String, 4] is NOT a pod Array (String element"
         " rejected — the carve-out validates the element type)",
     )
     assert_true(
         not _is_pod_inline_array[Int64](),
-        "a flat scalar is not classified as an InlineArray",
+        "a flat scalar is not classified as an Array",
     )
 
     assert_true(_is_pod_field[Float64](), "Float64 field is gap6-safe")
     assert_true(
         _is_pod_field[Array[UInt8, 32]](),
-        "InlineArray[UInt8, 32] field is gap6-safe",
+        "Array[UInt8, 32] field is gap6-safe",
     )
     assert_true(not _is_pod_field[String](), "String field is NOT gap6-safe")
     assert_true(not _is_pod_field[List[Int]](), "List[Int] field is NOT gap6-safe")

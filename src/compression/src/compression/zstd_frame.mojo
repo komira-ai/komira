@@ -62,7 +62,7 @@ def _check_written(what: StaticString, written: Int, cap: Int) raises -> Int:
 
 @always_inline
 def _src_ptr(
-    s: Span[UInt8, _], ref scratch: InlineArray[UInt8, 1]
+    s: Span[UInt8, _], ref scratch: Array[UInt8, 1]
 ) -> UnsafePointer[UInt8, MutUntrackedOrigin]:
     """The address libzstd reads `s` from: the Span's own, or `scratch` when
     `s` is empty (an empty Span may carry a null pointer)."""
@@ -86,7 +86,7 @@ def _src_ptr(
 def _dst_ptr[
     dori: MutOrigin
 ](
-    s: Span[UInt8, dori], ref scratch: InlineArray[UInt8, 1]
+    s: Span[UInt8, dori], ref scratch: Array[UInt8, 1]
 ) -> UnsafePointer[UInt8, MutUntrackedOrigin]:
     """The address libzstd writes `s` at: the Span's own, or `scratch` when
     `s` is empty (libzstd is then told it has 0 bytes, so it writes none)."""
@@ -122,8 +122,8 @@ def zstd_compress_into[
     """
     var src_size = len(src)
     var dst_capacity = len(dst)
-    var src_scratch = InlineArray[UInt8, 1](fill=UInt8(0))
-    var dst_scratch = InlineArray[UInt8, 1](fill=UInt8(0))
+    var src_scratch = Array[UInt8, 1](fill=UInt8(0))
+    var dst_scratch = Array[UInt8, 1](fill=UInt8(0))
     var handle_ptr = _zstd_handle()
     # SAFETY: libzstd reads `src_size` bytes at the source address and writes
     # at most `dst_capacity` (= `len(dst)`) bytes at the destination address;
@@ -159,8 +159,8 @@ def zstd_decompress_into[
     """
     var src_size = len(src)
     var dst_capacity = len(dst)
-    var src_scratch = InlineArray[UInt8, 1](fill=UInt8(0))
-    var dst_scratch = InlineArray[UInt8, 1](fill=UInt8(0))
+    var src_scratch = Array[UInt8, 1](fill=UInt8(0))
+    var dst_scratch = Array[UInt8, 1](fill=UInt8(0))
     var handle_ptr = _zstd_handle()
     # SAFETY: libzstd reads `src_size` bytes at the source address and writes
     # at most `dst_capacity` (= `len(dst)`) bytes at the destination address;
@@ -201,8 +201,8 @@ def zstd_decompress_once[
     written than `len(dst)`."""
     var src_size = len(src)
     var dst_capacity = len(dst)
-    var src_scratch = InlineArray[UInt8, 1](fill=UInt8(0))
-    var dst_scratch = InlineArray[UInt8, 1](fill=UInt8(0))
+    var src_scratch = Array[UInt8, 1](fill=UInt8(0))
+    var dst_scratch = Array[UInt8, 1](fill=UInt8(0))
     var handle_ptr = _zstd_handle()
     # SAFETY: as `zstd_decompress_into`: libzstd reads `src_size` bytes and
     # writes at most `dst_capacity` (= `len(dst)`) bytes; both buffers are
@@ -228,7 +228,7 @@ def zstd_frame_content_size(src: Span[UInt8, _]) raises -> UInt64:
     `ZSTD_CONTENTSIZE_UNKNOWN` (the header omits it) or
     `ZSTD_CONTENTSIZE_ERROR` (no valid header). The claim is the stream's,
     unchecked: a caller that allocates it bounds it first."""
-    var src_scratch = InlineArray[UInt8, 1](fill=UInt8(0))
+    var src_scratch = Array[UInt8, 1](fill=UInt8(0))
     var handle_ptr = _zstd_handle()
     # SAFETY: libzstd reads at most `len(src)` bytes at the source address,
     # alive across this synchronous call, and keeps no pointer.

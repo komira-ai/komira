@@ -44,16 +44,16 @@ GRAPH_JSON = r'''{
       "root": "src/compression/src/compression",
       "srcs": [
         {"path": "src/compression/src/compression/__init__.mojo", "sha256": "1d998f4a5eb72de170aada59404bed9815a32a2279fda2c954e9c8cb43cc0be3"},
-        {"path": "src/compression/src/compression/bzip2_buffer.mojo", "sha256": "f8765fe2775e2ad8d12ab3c8142bbee47f9682ef822fdfda9206d610d4066e3a"},
+        {"path": "src/compression/src/compression/bzip2_buffer.mojo", "sha256": "73329b584862a26d85aafb6494164d15837c551fe153fec6007749ceb27fcc09"},
         {"path": "src/compression/src/compression/codec_libraries.mojo", "sha256": "ba0c966271aa54b030a7db55d33460d3d143460aa30be9ded425ec8d67d20402"},
         {"path": "src/compression/src/compression/compression.mojo", "sha256": "45282e0a07889b28421fac9deaeb66c36d513ebce24afb59ac3854aebc862386"},
         {"path": "src/compression/src/compression/compression_codecs.mojo", "sha256": "c0c9dfcbc589d78f648711c911489b63e6b11229a9d984f4b22febe7808f9d91"},
         {"path": "src/compression/src/compression/lz4.mojo", "sha256": "b9c820b88939315dbe45dce540e932336a0ad7abedab895b9a92e9def1e06744"},
-        {"path": "src/compression/src/compression/snappy_block.mojo", "sha256": "266b60edfd5316a62333a79a5cd5bb71ba476c096c9f81d22190ac5125d5f4b2"},
+        {"path": "src/compression/src/compression/snappy_block.mojo", "sha256": "bbad90d7576c09cd14d26181915a9e157ac3e7fcac3b726aab5f65f1ba3cc200"},
         {"path": "src/compression/src/compression/span_codecs.mojo", "sha256": "f1071994e1d2ef76df90af9c1c0a1b9f0c105d6ee46ff8d58a48dfc59d4da61e"},
-        {"path": "src/compression/src/compression/xz_buffer.mojo", "sha256": "06d1f9ed26d395e859c42a70c1afaf0b6aeebecb82ab58503d63780ad533ebb1"},
+        {"path": "src/compression/src/compression/xz_buffer.mojo", "sha256": "94097f8137b7e8632dedba900c84de204ee079e2342f1ace03d1a1b667eef091"},
         {"path": "src/compression/src/compression/zlib.mojo", "sha256": "7fb3d087fd5d121b942768996a24bc5cd9b657734d6466da99c446cbbfa0c7d1"},
-        {"path": "src/compression/src/compression/zstd_frame.mojo", "sha256": "313d30e855485d21a205031861a9706893a69d165c5d2bead602b783583001cb"}
+        {"path": "src/compression/src/compression/zstd_frame.mojo", "sha256": "1cbd702fba56e907a2bb8e6e1c7ede9fb86fd06f258a40e9ff603ef8fbd9c8ac"}
       ],
       "deps": ["komira-ai/lz4@0.1.0#mojo1.0.0/lib", "komira-ai/zlib@0.1.0#mojo1.0.0/lib"],
       "natives": [
@@ -263,16 +263,16 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "root": "src/compression/src/compression",
       "srcs": [
         {"path": "src/compression/src/compression/__init__.mojo", "sha256": "1d998f4a5eb72de170aada59404bed9815a32a2279fda2c954e9c8cb43cc0be3"},
-        {"path": "src/compression/src/compression/bzip2_buffer.mojo", "sha256": "f8765fe2775e2ad8d12ab3c8142bbee47f9682ef822fdfda9206d610d4066e3a"},
+        {"path": "src/compression/src/compression/bzip2_buffer.mojo", "sha256": "73329b584862a26d85aafb6494164d15837c551fe153fec6007749ceb27fcc09"},
         {"path": "src/compression/src/compression/codec_libraries.mojo", "sha256": "ba0c966271aa54b030a7db55d33460d3d143460aa30be9ded425ec8d67d20402"},
         {"path": "src/compression/src/compression/compression.mojo", "sha256": "45282e0a07889b28421fac9deaeb66c36d513ebce24afb59ac3854aebc862386"},
         {"path": "src/compression/src/compression/compression_codecs.mojo", "sha256": "c0c9dfcbc589d78f648711c911489b63e6b11229a9d984f4b22febe7808f9d91"},
         {"path": "src/compression/src/compression/lz4.mojo", "sha256": "b9c820b88939315dbe45dce540e932336a0ad7abedab895b9a92e9def1e06744"},
-        {"path": "src/compression/src/compression/snappy_block.mojo", "sha256": "266b60edfd5316a62333a79a5cd5bb71ba476c096c9f81d22190ac5125d5f4b2"},
+        {"path": "src/compression/src/compression/snappy_block.mojo", "sha256": "bbad90d7576c09cd14d26181915a9e157ac3e7fcac3b726aab5f65f1ba3cc200"},
         {"path": "src/compression/src/compression/span_codecs.mojo", "sha256": "f1071994e1d2ef76df90af9c1c0a1b9f0c105d6ee46ff8d58a48dfc59d4da61e"},
-        {"path": "src/compression/src/compression/xz_buffer.mojo", "sha256": "06d1f9ed26d395e859c42a70c1afaf0b6aeebecb82ab58503d63780ad533ebb1"},
+        {"path": "src/compression/src/compression/xz_buffer.mojo", "sha256": "94097f8137b7e8632dedba900c84de204ee079e2342f1ace03d1a1b667eef091"},
         {"path": "src/compression/src/compression/zlib.mojo", "sha256": "7fb3d087fd5d121b942768996a24bc5cd9b657734d6466da99c446cbbfa0c7d1"},
-        {"path": "src/compression/src/compression/zstd_frame.mojo", "sha256": "313d30e855485d21a205031861a9706893a69d165c5d2bead602b783583001cb"}
+        {"path": "src/compression/src/compression/zstd_frame.mojo", "sha256": "1cbd702fba56e907a2bb8e6e1c7ede9fb86fd06f258a40e9ff603ef8fbd9c8ac"}
       ],
       "deps": ["komira-ai/lz4@0.1.0#mojo1.0.0/lib", "komira-ai/zlib@0.1.0#mojo1.0.0/lib"],
       "natives": [
@@ -479,16 +479,16 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "root": "src/compression/src/compression",
       "srcs": [
         {"path": "src/compression/src/compression/__init__.mojo", "sha256": "1d998f4a5eb72de170aada59404bed9815a32a2279fda2c954e9c8cb43cc0be3"},
-        {"path": "src/compression/src/compression/bzip2_buffer.mojo", "sha256": "f8765fe2775e2ad8d12ab3c8142bbee47f9682ef822fdfda9206d610d4066e3a"},
+        {"path": "src/compression/src/compression/bzip2_buffer.mojo", "sha256": "73329b584862a26d85aafb6494164d15837c551fe153fec6007749ceb27fcc09"},
         {"path": "src/compression/src/compression/codec_libraries.mojo", "sha256": "ba0c966271aa54b030a7db55d33460d3d143460aa30be9ded425ec8d67d20402"},
         {"path": "src/compression/src/compression/compression.mojo", "sha256": "45282e0a07889b28421fac9deaeb66c36d513ebce24afb59ac3854aebc862386"},
         {"path": "src/compression/src/compression/compression_codecs.mojo", "sha256": "c0c9dfcbc589d78f648711c911489b63e6b11229a9d984f4b22febe7808f9d91"},
         {"path": "src/compression/src/compression/lz4.mojo", "sha256": "b9c820b88939315dbe45dce540e932336a0ad7abedab895b9a92e9def1e06744"},
-        {"path": "src/compression/src/compression/snappy_block.mojo", "sha256": "266b60edfd5316a62333a79a5cd5bb71ba476c096c9f81d22190ac5125d5f4b2"},
+        {"path": "src/compression/src/compression/snappy_block.mojo", "sha256": "bbad90d7576c09cd14d26181915a9e157ac3e7fcac3b726aab5f65f1ba3cc200"},
         {"path": "src/compression/src/compression/span_codecs.mojo", "sha256": "f1071994e1d2ef76df90af9c1c0a1b9f0c105d6ee46ff8d58a48dfc59d4da61e"},
-        {"path": "src/compression/src/compression/xz_buffer.mojo", "sha256": "06d1f9ed26d395e859c42a70c1afaf0b6aeebecb82ab58503d63780ad533ebb1"},
+        {"path": "src/compression/src/compression/xz_buffer.mojo", "sha256": "94097f8137b7e8632dedba900c84de204ee079e2342f1ace03d1a1b667eef091"},
         {"path": "src/compression/src/compression/zlib.mojo", "sha256": "7fb3d087fd5d121b942768996a24bc5cd9b657734d6466da99c446cbbfa0c7d1"},
-        {"path": "src/compression/src/compression/zstd_frame.mojo", "sha256": "313d30e855485d21a205031861a9706893a69d165c5d2bead602b783583001cb"}
+        {"path": "src/compression/src/compression/zstd_frame.mojo", "sha256": "1cbd702fba56e907a2bb8e6e1c7ede9fb86fd06f258a40e9ff603ef8fbd9c8ac"}
       ],
       "deps": ["komira-ai/lz4@0.1.0#mojo1.0.0/lib", "komira-ai/zlib@0.1.0#mojo1.0.0/lib"],
       "natives": [

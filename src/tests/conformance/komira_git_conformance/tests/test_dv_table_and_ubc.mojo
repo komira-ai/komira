@@ -58,7 +58,7 @@ def test_dv_table() raises:
         assert_equal(c_dv_field(dv, 4), 0, "maski of DV " + String(dv))
         assert_equal(c_dv_field(dv, 5), dv, "maskb of DV " + String(dv))
         all_bits |= UInt32(1) << UInt32(c_dv_field(dv, 5))
-        var dm = InlineArray[UInt32, 80](fill=0)
+        var dm = Array[UInt32, 80](fill=0)
         for t in range(16):
             dm[t] = _dv_word(dv, t)
         _expand(dm)
@@ -72,7 +72,7 @@ def test_dv_table() raises:
 
 def test_ubc_random_words() raises:
     var rng = _Rng(0x5DC0FFEE)
-    var w = InlineArray[UInt32, 80](fill=0)
+    var w = Array[UInt32, 80](fill=0)
     for t in range(80):
         w[t] = rng.next()
     var seen: UInt32 = 0
@@ -91,7 +91,7 @@ def test_ubc_random_words() raises:
         )
 
 
-def _check_block(w: InlineArray[UInt32, 80], what: String) raises:
+def _check_block(w: Array[UInt32, 80], what: String) raises:
     var want = c_ubc_check(w)
     var got = _ubc_check(w)
     if got != want:
@@ -100,7 +100,7 @@ def _check_block(w: InlineArray[UInt32, 80], what: String) raises:
 
 def test_ubc_expanded_blocks() raises:
     var rng = _Rng(0x0BADC0DE)
-    var w = InlineArray[UInt32, 80](fill=0)
+    var w = Array[UInt32, 80](fill=0)
     for trial in range(1 << 16):
         for t in range(16):
             w[t] = rng.next()

@@ -4,7 +4,7 @@
 Public surface (consumers: the plan compiler's CSV scan arm,
 sdk `ctx.read_csv`):
   - QuoteStyle trait + 3 conformers (Rfc4180 / Excel / Posix)
-  - CsvReadOptions: options struct with no pointer fields (InlineArray-bounded
+  - CsvReadOptions: options struct with no pointer fields (Array-bounded
     null/true/false token sets)
   - is_null_cell / is_true_cell / is_false_cell: null-detection helpers
   - Row, CellRange, scan_csv_phase1: low-level scanner surface

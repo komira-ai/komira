@@ -12,7 +12,7 @@
 #   }
 #
 # Design notes:
-#   - shape is InlineArray[Int, 8] (bounded, no heap). 8 dims covers
+#   - shape is Array[Int, 8] (bounded, no heap). 8 dims covers
 #     image batches (NCHW=4), video batches (NCTHW=5), and most ML
 #     tensor shapes; raise the constant if it proves too low.
 #   - body is SharedAlignedBuffer[HeapRegion] so the encoder's

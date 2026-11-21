@@ -77,7 +77,7 @@ GRAPH_JSON = r'''{
       "srcs": [
         {"path": "src/uuid/src/uuid/__init__.mojo", "sha256": "10b0c178ed6fdbad397c07bfcf5042111d0a521c78b4e77f6499e32074ddf32f"},
         {"path": "src/uuid/src/uuid/entropy.mojo", "sha256": "659efee85059b9666e5421db5d12d3e44c4d158933838b5f02d19ff247234ec3"},
-        {"path": "src/uuid/src/uuid/uuid.mojo", "sha256": "4514ddc10840ad2c5ee7d6bd6193c6f7aeed448ad3e8bf6c26673c617f30c6ff"}
+        {"path": "src/uuid/src/uuid/uuid.mojo", "sha256": "54b2cc34e886b660d86cb57b227c18fc520982a5f42fa2c4886e07227c70208c"}
       ],
       "deps": ["komira-ai/atomic_alias@0.1.0#mojo1.0.0/lib", "komira-ai/awslc@0.1.0#mojo1.0.0/lib", "komira-ai/clock@0.1.0#mojo1.0.0/lib"],
       "natives": [
@@ -186,7 +186,7 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "srcs": [
         {"path": "src/uuid/src/uuid/__init__.mojo", "sha256": "10b0c178ed6fdbad397c07bfcf5042111d0a521c78b4e77f6499e32074ddf32f"},
         {"path": "src/uuid/src/uuid/entropy.mojo", "sha256": "659efee85059b9666e5421db5d12d3e44c4d158933838b5f02d19ff247234ec3"},
-        {"path": "src/uuid/src/uuid/uuid.mojo", "sha256": "4514ddc10840ad2c5ee7d6bd6193c6f7aeed448ad3e8bf6c26673c617f30c6ff"}
+        {"path": "src/uuid/src/uuid/uuid.mojo", "sha256": "54b2cc34e886b660d86cb57b227c18fc520982a5f42fa2c4886e07227c70208c"}
       ],
       "deps": ["komira-ai/atomic_alias@0.1.0#mojo1.0.0/lib", "komira-ai/awslc@0.1.0#mojo1.0.0/lib", "komira-ai/clock@0.1.0#mojo1.0.0/lib"],
       "natives": [
@@ -292,7 +292,7 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "srcs": [
         {"path": "src/uuid/src/uuid/__init__.mojo", "sha256": "10b0c178ed6fdbad397c07bfcf5042111d0a521c78b4e77f6499e32074ddf32f"},
         {"path": "src/uuid/src/uuid/entropy.mojo", "sha256": "659efee85059b9666e5421db5d12d3e44c4d158933838b5f02d19ff247234ec3"},
-        {"path": "src/uuid/src/uuid/uuid.mojo", "sha256": "4514ddc10840ad2c5ee7d6bd6193c6f7aeed448ad3e8bf6c26673c617f30c6ff"}
+        {"path": "src/uuid/src/uuid/uuid.mojo", "sha256": "54b2cc34e886b660d86cb57b227c18fc520982a5f42fa2c4886e07227c70208c"}
       ],
       "deps": ["komira-ai/atomic_alias@0.1.0#mojo1.0.0/lib", "komira-ai/awslc@0.1.0#mojo1.0.0/lib", "komira-ai/clock@0.1.0#mojo1.0.0/lib"],
       "natives": [

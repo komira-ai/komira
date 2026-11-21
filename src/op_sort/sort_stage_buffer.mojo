@@ -116,7 +116,7 @@ struct SortBuffer[KB: SortKeyBlockTrait, *Payloads: PayloadColumn](
     `Copyable` (Mojo does not synthesize `Copyable` for a `Tuple` over a
     trait-bounded pack).
 
-    Per-key sort direction lives in `directions: InlineArray[UInt8,
+    Per-key sort direction lives in `directions: Array[UInt8,
     MAX_SORT_KEYS]` (runtime UInt8, 0=ASC / 1=DESC) — a fixed-size POD array,
     NOT a heap field.
 
@@ -135,9 +135,9 @@ struct SortBuffer[KB: SortKeyBlockTrait, *Payloads: PayloadColumn](
     var keys: Self.KB
     var payloads: Tuple[*Self.Payloads]
     var order: List[Int]
-    # SAFETY-NOTE: directions is a fixed-size POD InlineArray (no heap); only the
+    # SAFETY-NOTE: directions is a fixed-size POD Array (no heap); only the
     # first key-arity entries are read.
-    var directions: InlineArray[UInt8, MAX_SORT_KEYS]
+    var directions: Array[UInt8, MAX_SORT_KEYS]
     var _row_count: Int
     # --- SPILL metadata (SpillableOp conformance) ---
     var _spill: SortSpillLedger
@@ -149,7 +149,7 @@ struct SortBuffer[KB: SortKeyBlockTrait, *Payloads: PayloadColumn](
         self.keys = Self.KB()
         self.payloads = Tuple[*Self.Payloads]()
         self.order = List[Int]()
-        self.directions = InlineArray[UInt8, MAX_SORT_KEYS](fill=SORT_DIR_ASC_U8)
+        self.directions = Array[UInt8, MAX_SORT_KEYS](fill=SORT_DIR_ASC_U8)
         self._row_count = 0
         self._spill = SortSpillLedger()
         self._age_ticks = UInt64(0)
@@ -163,7 +163,7 @@ struct SortBuffer[KB: SortKeyBlockTrait, *Payloads: PayloadColumn](
         self.keys = keys^
         self.payloads = payloads^
         self.order = List[Int](capacity=initial_capacity)
-        self.directions = InlineArray[UInt8, MAX_SORT_KEYS](fill=SORT_DIR_ASC_U8)
+        self.directions = Array[UInt8, MAX_SORT_KEYS](fill=SORT_DIR_ASC_U8)
         self._row_count = 0
         self._spill = SortSpillLedger()
         self._age_ticks = UInt64(0)

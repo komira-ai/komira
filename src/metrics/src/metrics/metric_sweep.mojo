@@ -259,7 +259,7 @@ struct MetricSweep(Movable, Deinitable):
     var _pending_hist: List[HistogramPoint]
     var _hist_cursor: Int
     # The cross-worker reduction scratch. One `SeriesTable`, heap-owned so a
-    # `MetricSweep` on a stack does not carry 84 KiB of `InlineArray`.
+    # `MetricSweep` on a stack does not carry 84 KiB of `Array`.
     var _reduction: Slab[SeriesTable]
     var _hist_reduction: Slab[HistogramTable]
     var _generations: Int64

@@ -5,7 +5,7 @@ A Megolm-equivalent end-to-end group ratchet, built only on `crypto`.
 - `GroupRatchet` (`ratchet.mojo`): the 4-part 256-bit state, advanced by an
   HMAC-SHA-256 tree that reseeds at the 2^8, 2^16 and 2^24 boundaries, and
   the HKDF-SHA-256 key schedule that derives one message's AEAD key and nonce
-  seed. State is `InlineArray` storage, never copied, zeroized on drop.
+  seed. State is `Array` storage, never copied, zeroized on drop.
 - `MessageEnvelope` (`envelope.mojo`): the wire form of one message
   (version, session id, index, ciphertext and tag, Ed25519 signature) with
   `encode_envelope` and `decode_envelope`, and the one definition of the
