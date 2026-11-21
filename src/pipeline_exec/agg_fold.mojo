@@ -1,21 +1,41 @@
 # =============================================================================
-# agg_fold -- the exact fold of one ungrouped aggregate
+# agg_fold -- the fold of one ungrouped aggregate
 # =============================================================================
 #
 # An `AggCell` is the whole state of one aggregate on one worker: the count of
-# the rows it folded, one 128-bit integer, and the type of the column it saw.
+# the rows it folded, one 128-bit integer, one double, and the type of the
+# column it saw.
 #
 #   COUNT(x)       count of the non-NULL rows of x (COUNT(*) is counted by the
 #                  sink from the morsel, not here)
-#   SUM(x)         the 128-bit sum of the unscaled values of x
+#   SUM(x)         the 128-bit sum of the unscaled values of x, or, over a
+#                  float column, the double sum of its values
 #   AVG(x)         the same sum and the count; the division is at the end
-#   MIN(x), MAX(x) the least or greatest unscaled value of x
+#   MIN(x), MAX(x) the least or greatest unscaled value of x, or float value
 #
 # The unscaled value of an integer column is the integer, of a DECIMAL128
 # column its 128-bit integer (the column's scale is kept beside it), and of a
-# DATE32 column its day number. The sum is an integer fold with no float in it,
-# so any grouping of the rows into workers gives the same cell: the merge adds
-# the sums and the counts, or takes the lesser or greater value.
+# DATE32 column its day number. Their sum is an integer fold with no float in
+# it, so any grouping of the rows into workers gives the same cell: the merge
+# adds the sums and the counts, or takes the lesser or greater value.
+#
+# A FLOAT32 or FLOAT64 column folds into the double (a FLOAT32 value is
+# widened first, which is exact), as DuckDB's sum, avg, min and max do:
+#
+#   SUM, AVG   the sum starts at +0.0 and adds each non-NULL value in row
+#              order with IEEE-754 double addition; the merge adds the
+#              workers' sums in worker order. No overflow is refused: a sum
+#              past the double range is an infinity, +inf plus -inf is NaN,
+#              and a NaN makes the sum NaN (query_semantics 5.7). Rounding
+#              depends on the order of the additions, and which rows a worker
+#              holds depends on the schedule, so the last bits of a float sum
+#              can differ between runs and worker counts (query_semantics
+#              2.10; the tolerance rule is in the package README).
+#   MIN, MAX   DuckDB's order of floats: NaN is above every other value,
+#              +inf included (query_semantics 2.7), so MAX is NaN when a NaN
+#              is present and MIN is NaN only when every value is. A value
+#              replaces the one kept only when it is strictly less (MIN) or
+#              greater (MAX), so -0.0 and 0.0 tie and the one met first stays.
 #
 # What a fold refuses, by name:
 #   * a sum that leaves 128 bits (the check is on the wrapped result, as for
@@ -25,8 +45,10 @@
 #     sum leaves 128 bits while the total does not, and a total that left them
 #     is refused whatever the grouping;
 #   * SUM or AVG over DATE32, and every aggregate over a type that is not a
-#     signed integer, DECIMAL128 or DATE32 (COUNT takes any): floats wait for
-#     the float machinery of the design, which fixes the order of a float fold;
+#     signed integer, DECIMAL128, FLOAT32, FLOAT64 or DATE32 (COUNT takes
+#     any);
+#   * a float argument read for a grouped sink (`widen_column`): the grouped
+#     sinks hold 128-bit values per row and fold no float yet;
 #   * a column whose type or decimal scale differs from the one the cell saw.
 
 from arrow.arrow_types import ArrowType
@@ -46,6 +68,7 @@ comptime IN_NONE: UInt8 = 0
 comptime IN_INT: UInt8 = 1
 comptime IN_DECIMAL: UInt8 = 2
 comptime IN_DATE: UInt8 = 3
+comptime IN_FLOAT: UInt8 = 4
 
 
 struct AggCell(Copyable, Movable):
@@ -57,6 +80,8 @@ struct AggCell(Copyable, Movable):
     var arrow: ArrowType
     var precision: Int
     var scale: Int
+    # The float fold (`IN_FLOAT`): the sum, or the least or greatest value.
+    var fvalue: Float64
 
     def __init__(out self):
         self.count = 0
@@ -65,6 +90,7 @@ struct AggCell(Copyable, Movable):
         self.arrow = ArrowType.NULL
         self.precision = 0
         self.scale = 0
+        self.fvalue = 0.0
 
 
 def agg_name(func: UInt8) -> String:
@@ -102,6 +128,42 @@ def _step(
             )
         cell.value = n
     cell.count += 1
+
+
+@always_inline
+def _float_less(a: Float64, b: Float64) -> Bool:
+    """`a < b` in DuckDB's order of floats: NaN is above every other value,
+    and two NaNs tie."""
+    if a != a:
+        return False
+    if b != b:
+        return True
+    return a < b
+
+
+@always_inline
+def _fstep(mut cell: AggCell, func: UInt8, v: Float64):
+    if func == AGG_MIN:
+        if cell.count == 0 or _float_less(v, cell.fvalue):
+            cell.fvalue = v
+    elif func == AGG_MAX:
+        if cell.count == 0 or _float_less(cell.fvalue, v):
+            cell.fvalue = v
+    else:
+        # From +0.0, so a sum of -0.0 values is +0.0, as DuckDB's is.
+        cell.fvalue += v
+    cell.count += 1
+
+
+def _fold_float[
+    dtype: DType
+](mut cell: AggCell, func: UInt8, ref col: Column[HeapRegion], rows: Int) raises:
+    var arr = col.as_primitive[dtype]()
+    var has_nulls = col.null_count() > 0
+    for r in range(rows):
+        if has_nulls and arr.is_null(r):
+            continue
+        _fstep(cell, func, arr.get(r).cast[DType.float64]())
 
 
 def _fold_signed[
@@ -149,6 +211,8 @@ def _kind_of(ref col: Column[HeapRegion], logical: ArrowType) -> UInt8:
         return IN_INT
     if at == ArrowType.DECIMAL128:
         return IN_DECIMAL
+    if at == ArrowType.FLOAT64 or at == ArrowType.FLOAT32:
+        return IN_FLOAT
     return IN_NONE
 
 
@@ -187,8 +251,8 @@ def bind_column(
             + label
             + " is not served over this column type ("
             + String(col.arrow_type)
-            + "): SUM and AVG take signed integers and DECIMAL128, MIN and"
-            " MAX also DATE32"
+            + "): SUM and AVG take signed integers, DECIMAL128, FLOAT32 and"
+            " FLOAT64, MIN and MAX also DATE32"
         )
     out.kind = kind
     if kind == IN_DECIMAL:
@@ -247,7 +311,12 @@ def fold_column(
     adopt_bind(cell, b, label)
     if rows == 0:
         return
-    if b.kind == IN_DECIMAL:
+    if b.kind == IN_FLOAT:
+        if b.arrow == ArrowType.FLOAT64:
+            _fold_float[DType.float64](cell, func, col, rows)
+        else:
+            _fold_float[DType.float32](cell, func, col, rows)
+    elif b.kind == IN_DECIMAL:
         _fold_decimal(cell, func, col, rows, label)
     elif b.arrow == ArrowType.INT64:
         _fold_signed[DType.int64](cell, func, col, rows, label)
@@ -309,6 +378,15 @@ def widen_column(
             + " selected rows"
         )
     out.bind = bind_column(func, batch, col_idx, label)
+    if out.bind.kind == IN_FLOAT:
+        raise Error(
+            "pipeline_exec: "
+            + label
+            + " over a float column ("
+            + String(col.arrow_type)
+            + ") is served by the ungrouped aggregation sink only; a grouped"
+            " sink folds signed integers, DECIMAL128 and DATE32"
+        )
     var has_nulls = col.null_count() > 0
     if func == AGG_COUNT:
         if has_nulls:
@@ -376,6 +454,18 @@ def merge_cell(
                 + " saw columns of different types on different workers"
             )
     if other.count == 0:
+        return
+    if into.kind == IN_FLOAT:
+        if func == AGG_MIN:
+            if into.count == 0 or _float_less(other.fvalue, into.fvalue):
+                into.fvalue = other.fvalue
+        elif func == AGG_MAX:
+            if into.count == 0 or _float_less(into.fvalue, other.fvalue):
+                into.fvalue = other.fvalue
+        else:
+            # SUM and AVG: `into` holds +0.0 while it is empty.
+            into.fvalue += other.fvalue
+        into.count += other.count
         return
     if into.count == 0:
         into.value = other.value

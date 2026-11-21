@@ -167,7 +167,7 @@ The rulings that settled each item once open or departing, the table of parity g
 
 - **Rule.** NaN is greater than every other float, including +inf: MAX over a set containing NaN is NaN; MIN is NaN only if every input is NaN. The answer does not depend on input order or on how work is split between workers.
 - **DuckDB.** "NaN compares equal to NaN and greater than any other floating point number" (DuckDB documentation, "numeric types").
-- **Current behaviour.** `src/agg/builtin_agg_fns_minmax.mojo:19-37`: the float cells compare through the float model, and the header records the order-dependent answers the bare comparison used to give.
+- **Current behaviour.** `src/agg/builtin_agg_fns_minmax.mojo:19-37`: the float cells compare through the float model, and the header records the order-dependent answers the bare comparison used to give. The ungrouped SQL sink (`src/pipeline_exec/agg_fold.mojo`) folds MIN and MAX of FLOAT and DOUBLE in the same order.
 - **Mark.** MATCHES.
 
 ### 2.8 MEDIAN and quantiles over NaN
@@ -188,7 +188,7 @@ The rulings that settled each item once open or departing, the table of parity g
 
 - **Rule.** SUM and AVG of FLOAT/DOUBLE add in an unspecified order, so the last bits of the answer may differ between runs, worker counts and batch sizes. A test compares them with a tolerance stated in the case (relative or in units in the last place), never bit for bit. An integer SUM is exact (§8.1).
 - **DuckDB.** Also order-dependent: its plain `sum` of DOUBLE is not compensated (`fsum`/`kahan_sum` are the compensated forms), and its parallel aggregation combines partial sums in a non-fixed order.
-- **Current behaviour.** The plain float SUM cells are uncompensated (`src/agg/builtin_agg_fns_states.mojo:123-127`).
+- **Current behaviour.** The plain float SUM cells are uncompensated (`src/agg/builtin_agg_fns_states.mojo:123-127`). The ungrouped SQL sink (`src/pipeline_exec/agg_fold.mojo`) adds from +0.0 in row order within a worker and the workers' sums in worker order, uncompensated; its tolerance against DuckDB is 1e-9 relative for a well-conditioned sum, stated with its bound in `src/pipeline_exec/README.md`.
 - **Mark.** MATCHES.
 
 ### 2.11 Sample statistics of one row

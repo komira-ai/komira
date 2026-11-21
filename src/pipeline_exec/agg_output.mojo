@@ -12,14 +12,17 @@
 #                  128-bit total is written as it is, and one with more than 38
 #                  digits is refused), or DECIMAL128 of the input's scale
 #                  over a DECIMAL128 input (a sum with more digits than the
-#                  declared precision is refused)
+#                  declared precision is refused), or FLOAT64 over a FLOAT32
+#                  or FLOAT64 input (DuckDB's sum of a FLOAT is a DOUBLE)
 #   AVG            FLOAT64 over an integer or DECIMAL128 input. The sum and the
 #                  count are exact, so the answer is DuckDB's: its long-double
 #                  steps on the exact sum, the count and the scale
 #                  (`avg_integer_float64`, `avg_decimal_float64`), the same on
-#                  every schedule
-#   MIN, MAX       the input's own type: its integer type, DATE32, or a
-#                  DECIMAL128 of the input's scale
+#                  every schedule. Over a float input, the double sum divided
+#                  by the count in double, as DuckDB's avg of a DOUBLE: its
+#                  last bits follow the sum's (`agg_fold`)
+#   MIN, MAX       the input's own type: its integer type, DATE32, a
+#                  DECIMAL128 of the input's scale, FLOAT32 or FLOAT64
 #
 # The declared precision is the plan's (DuckDB declares DECIMAL(38,s) for a
 # decimal SUM): the sink takes it as given and checks only that the value has
@@ -51,6 +54,7 @@ from .agg_fold import (
     AggCell,
     IN_DATE,
     IN_DECIMAL,
+    IN_FLOAT,
     IN_INT,
     IN_NONE,
     agg_name,
@@ -105,7 +109,11 @@ def check_declared_type(
     if func == AGG_COUNT:
         ok = t == ArrowType.INT64
     elif func == AGG_SUM:
-        ok = t == ArrowType.INT64 or t == ArrowType.DECIMAL128
+        ok = (
+            t == ArrowType.INT64
+            or t == ArrowType.DECIMAL128
+            or t == ArrowType.FLOAT64
+        )
     elif func == AGG_MEAN:
         ok = t == ArrowType.FLOAT64
     elif func == AGG_MIN or func == AGG_MAX:
@@ -113,6 +121,8 @@ def check_declared_type(
             _is_int_type(t)
             or t == ArrowType.DATE32
             or t == ArrowType.DECIMAL128
+            or t == ArrowType.FLOAT32
+            or t == ArrowType.FLOAT64
         )
     if not ok:
         raise Error(
@@ -154,6 +164,26 @@ def _int_column[
             arr.set(r, values[r].cast[dtype]())
     if arrow == ArrowType.DATE32:
         return Column.from_primitive_with_arrow_type[dtype](arr^, arrow)
+    return Column.from_primitive[dtype](arr^)
+
+
+def _float_column[
+    dtype: DType
+](
+    ref cells: List[AggCell],
+    first: Int,
+    stride: Int,
+    ref nulls: List[Bool],
+) raises -> Column[HeapRegion]:
+    var rows = len(nulls)
+    var arr = PrimitiveArray[dtype].allocate_nullable(rows)
+    for r in range(rows):
+        if nulls[r]:
+            arr._set_null(r)
+        else:
+            # A FLOAT32 output holds a MIN or MAX of FLOAT32 values, each
+            # widened exactly, so the narrowing is exact.
+            arr.set(r, cells[first + r * stride].fvalue.cast[dtype]())
     return Column.from_primitive[dtype](arr^)
 
 
@@ -208,7 +238,9 @@ def agg_result_column_rows(
                 arr._set_null(r)
             else:
                 ref cell = cells[first + r * stride]
-                if cell.kind == IN_DECIMAL:
+                if cell.kind == IN_FLOAT:
+                    arr.set(r, cell.fvalue / Float64(cell.count))
+                elif cell.kind == IN_DECIMAL:
                     arr.set(
                         r,
                         avg_decimal_float64(
@@ -237,6 +269,8 @@ def agg_result_column_rows(
                 )
             elif cell.kind == IN_DATE:
                 same = t == ArrowType.DATE32
+            elif cell.kind == IN_FLOAT:
+                same = t == (ArrowType.FLOAT64 if func == AGG_SUM else cell.arrow)
             elif func == AGG_SUM:
                 # An integer sum is INT64, or DECIMAL(38, 0): the carrier of
                 # the SQL integer sum (DuckDB's HUGEINT), whose total the
@@ -260,6 +294,10 @@ def agg_result_column_rows(
                     + String(idx)
                 )
         values.append(cell.value)
+    if t == ArrowType.FLOAT64:
+        return _float_column[DType.float64](cells, first, stride, nulls)
+    if t == ArrowType.FLOAT32:
+        return _float_column[DType.float32](cells, first, stride, nulls)
     if t == ArrowType.DECIMAL128:
         var p = schema.field_decimal_precision(idx)
         var s = schema.field_decimal_scale(idx)

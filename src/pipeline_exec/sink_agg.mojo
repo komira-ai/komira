@@ -12,10 +12,12 @@
 #
 # The state of a worker is one `AggCell` per aggregate (`agg_fold`), kept in
 # the worker's own slot of a slab; `consume` writes only the caller's slot.
-# Every fold is an exact integer fold, so `combine`, which runs once after the
-# workers joined, merges the slots in worker order and the answer does not
-# depend on which worker took which morsel. `agg_output` builds the one output
-# row in the schema the plan declared.
+# `combine`, which runs once after the workers joined, merges the slots in
+# worker order. A fold over integers, DECIMAL128 or DATE32 is exact, and so is
+# a MIN or MAX of floats, so their answer does not depend on which worker took
+# which morsel; a float SUM or AVG is a double sum, whose last bits do
+# (`agg_fold`; the tolerance rule is in the package README). `agg_output`
+# builds the one output row in the schema the plan declared.
 #
 # The state is fixed in size, so a worker draws it from the segment pool once
 # (`segment_pool`), when it takes its first morsel, and gives it back at
