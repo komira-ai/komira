@@ -89,6 +89,8 @@ def loaded_directory(name: str) -> str | None:
     dlinfo = ctypes.CDLL(None).dlinfo
     dlinfo.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p]
     dlinfo.restype = ctypes.c_int
+    # On a handle dlopen just returned, RTLD_DI_ORIGIN only copies the
+    # directory the loader recorded for it.
     dlinfo(lib._handle, _RTLD_DI_ORIGIN, buf)
     return os.fsdecode(buf.value)
 

@@ -72,7 +72,6 @@ pub fn tar(a: std.mem.Allocator, entries: []const Entry) ![]u8 {
     return out.toOwnedSlice(a);
 }
 
-/// A gzip stream of `bytes` in stored (uncompressed) deflate blocks.
 /// `bytes` as one zstd frame of raw blocks (no compression, the content size
 /// stated, a 128 KiB window): valid zstd with no encoder.
 pub fn zstdRaw(a: std.mem.Allocator, bytes: []const u8) ![]u8 {
@@ -96,6 +95,7 @@ pub fn zstdRaw(a: std.mem.Allocator, bytes: []const u8) ![]u8 {
     return out.toOwnedSlice(a);
 }
 
+/// A gzip stream of `bytes` in stored (uncompressed) deflate blocks.
 pub fn gzip(a: std.mem.Allocator, bytes: []const u8) ![]u8 {
     var out = std.ArrayList(u8).empty;
     try out.appendSlice(a, &.{ 0x1f, 0x8b, 8, 0, 0, 0, 0, 0, 0, 3 });

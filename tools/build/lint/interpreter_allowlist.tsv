@@ -21,7 +21,7 @@ python/komira/_ops/_vocab.py	the Python package: its sources are Python (docs/de
 python/komira/_ops/_walk.py	the Python package: its sources are Python (docs/design/python_package.md)
 python/komira/_runtime.py	the Python package: its sources are Python (docs/design/python_package.md)
 python/komira/_session.py	the Python package: its sources are Python (docs/design/python_package.md)
-python/tests/runtime_site.py	the Python package's tests: the SDK surface is tested in Python
+python/tests/test_beside_modular.py	the Python package's tests: the installed wheel is tested in Python, by the interpreter it is installed for
 python/tests/test_cpu.py	the Python package's tests: the SDK surface is tested in Python
 python/tests/test_installed.py	the Python package's tests: the installed wheel is tested in Python, by the interpreter it is installed for
 python/tests/test_load.py	the Python package's tests: the SDK surface is tested in Python
