@@ -19,17 +19,21 @@ c_exe(
 )
 
 # native_so: a library's shared library, its export list and checks 1 to 7
-# (README.md, "Each library's shared library"; shared.bzl), in Zig.
+# (README.md, "Each library's shared library"; shared.bzl), in Zig. It reads
+# ELF and Mach-O (native_macho.zig) alike.
 _NATIVE_SO = [
     "native_callsites.zig",
     "native_checks.zig",
     "native_elf.zig",
     "native_elf_test.zig",
+    "native_macho.zig",
+    "native_macho_test.zig",
     "native_so_test.zig",
 ]
 
-# The unit tests (native_so_test.zig: each check green, and red on its
-# planted defect), run as a build action.
+# The unit tests (native_so_test.zig: each check green, and red on the
+# defect it exists for; native_macho_test.zig: the Mach-O reader and checks 1 to 7
+# on Mach-O bytes), run as a build action.
 zig_test(
     name = "native_so_unit",
     exec_compatible_with = LINUX_X86_64,
@@ -53,10 +57,13 @@ zig_exe(
 
 # so_report: the ELF record of libkomira and what it loads (so_report.zig),
 # as a markdown table. Its tests read built shared objects and values.
+# native_elf.zig imports native_macho.zig (it hands Mach-O bytes there), so the
+# Mach-O reader is an input here too.
 _SO_REPORT = [
     "native_elf.zig",
     "native_elf_test.zig",
     "native_checks.zig",
+    "native_macho.zig",
     "so_report_test.zig",
 ]
 

@@ -1,25 +1,29 @@
-//! The ELF reading of `native_so` (native_so.zig): the symbols of every
+//! The object reading of `native_so` (native_so.zig): the symbols of every
 //! member of a static archive, and a shared object's dynamic section and
 //! dynamic symbol table with each symbol's version.
 //!
-//! Only 64-bit little-endian ELF is read. Anything else (another class, a
-//! thin archive, a member that is not a relocatable object, a header or a
-//! name pointing outside its file) is an error naming the file, never a
-//! skipped member: a reader that skips what it cannot read cannot fail a
-//! check.
+//! 64-bit little-endian ELF is read here; a Mach-O file (a `.dylib`, an
+//! object, or an archive of Mach-O objects) is read by native_macho.zig into
+//! the same values, chosen by the file's magic, so every entry point below
+//! takes either format. Anything else (another class, a thin archive, a
+//! member that is not a relocatable object, an archive mixing the two
+//! formats, a header or a name pointing outside its file) is an error naming
+//! the file, never a skipped member: a reader that skips what it cannot read
+//! cannot fail a check.
 
 const std = @import("std");
+const macho = @import("native_macho.zig");
 
 pub const Alloc = std.mem.Allocator;
 
-pub const Error = error{BadElf};
+pub const Error = error{BadObject};
 
-/// Why the last `Error.BadElf` was returned (the caller prints it).
+/// Why the last `Error.BadObject` was returned (the caller prints it).
 pub var why: []const u8 = "";
 
-fn bad(msg: []const u8) Error {
+pub fn bad(msg: []const u8) Error {
     why = msg;
-    return Error.BadElf;
+    return Error.BadObject;
 }
 
 pub const Bind = enum { local, global, weak, unique, other };
@@ -34,6 +38,10 @@ pub const Sym = struct {
     /// The version an undefined dynamic symbol needs (`GLIBC_2.14`), or the
     /// version a defined one has; null for none.
     version: ?[]const u8 = null,
+    /// Mach-O: the install name of the library an undefined symbol of a
+    /// dynamic library binds to (its two-level ordinal), or one of
+    /// native_macho.zig's `lib_*` names; null in ELF and in objects.
+    lib: ?[]const u8 = null,
 
     /// A name another object of the process can see: defined, not local,
     /// default or protected visibility.
@@ -45,7 +53,14 @@ pub const Sym = struct {
 /// One version a shared object needs from one of its NEEDED files.
 pub const Need = struct { file: []const u8, version: []const u8 };
 
+pub const Format = enum { elf, macho };
+
+/// What both readers read of a shared library. Mach-O fills `soname` with
+/// the install name (LC_ID_DYLIB), `needed` with the loaded dylibs and
+/// `runpath` with the LC_RPATH entries, and leaves the ELF-only fields
+/// empty; the last three fields are Mach-O's alone.
 pub const Shared = struct {
+    format: Format = .elf,
     soname: ?[]const u8 = null,
     needed: []const []const u8 = &.{},
     runpath: []const []const u8 = &.{},
@@ -58,6 +73,15 @@ pub const Shared = struct {
     symbolic_tag: bool = false,
     syms: []const Sym = &.{},
     verneed: []const Need = &.{},
+    /// Mach-O: the load command of each `needed` entry (LC_LOAD_DYLIB, or a
+    /// weak, re-export, upward or lazy load), in the same order.
+    load_cmds: []const u32 = &.{},
+    /// Mach-O: the header's flags (MH_TWOLEVEL, MH_FORCE_FLAT, ...).
+    mh_flags: u32 = 0,
+    /// Mach-O: LC_BUILD_VERSION's platform (LC_VERSION_MIN_MACOSX: macOS).
+    platform: ?u32 = null,
+    /// Mach-O: the minimum OS version, dotted (`11.0`).
+    minos: ?[]const u8 = null,
 };
 
 pub const DF_SYMBOLIC: u64 = 0x2;
@@ -182,13 +206,27 @@ fn readSyms(alloc: Alloc, e: Elf, s: Section, skip_local: bool) ![]Sym {
     return out.toOwnedSlice(alloc);
 }
 
-/// Every non-local symbol of every member of a static archive (`!<arch>`).
+/// A member's name: the header's, or, for a BSD long name (`#1/<n>`), the
+/// first n bytes of the member, NUL-padded. Returns the name and how many of
+/// the member's bytes it took.
+fn memberName(h: []const u8, body: []const u8) Error!struct { []const u8, usize } {
+    const name = std.mem.trimRight(u8, h[0..16], " ");
+    if (!std.mem.startsWith(u8, name, "#1/")) return .{ name, 0 };
+    const n = std.fmt.parseInt(usize, name[3..], 10) catch return bad("a BSD member name length is not a number");
+    if (n > body.len) return bad("a BSD member name lies outside its member");
+    return .{ std.mem.trimRight(u8, body[0..n], "\x00"), n };
+}
+
+/// Every non-local symbol of every member of a static archive (`!<arch>`),
+/// in the System V layout (ELF members) or the BSD one (`#1/` long names,
+/// `__.SYMDEF` symbol tables; Mach-O members). All members are one format.
 pub fn readArchive(alloc: Alloc, b: []const u8) ![]Sym {
     if (b.len >= 8 and std.mem.eql(u8, b[0..8], "!<thin>\n")) return bad("a thin archive (its members are not in it)");
     if (b.len < 8 or !std.mem.eql(u8, b[0..8], "!<arch>\n")) return bad("not an ar archive");
     var out = std.ArrayList(Sym).empty;
     var at: usize = 8;
     var members: usize = 0;
+    var first: Format = .elf;
     while (at < b.len) {
         if (b.len - at < 60) return bad("a member header lies outside the archive");
         const h = b[at .. at + 60];
@@ -197,11 +235,20 @@ pub fn readArchive(alloc: Alloc, b: []const u8) ![]Sym {
         const size = std.fmt.parseInt(usize, size_txt, 10) catch return bad("a member size is not a number");
         const start = at + 60;
         if (start > b.len or b.len - start < size) return bad("a member lies outside the archive");
-        const name = std.mem.trimRight(u8, h[0..16], " ");
-        const special = std.mem.eql(u8, name, "/") or std.mem.eql(u8, name, "/SYM64/") or std.mem.eql(u8, name, "//");
+        const name, const skip = try memberName(h, b[start .. start + size]);
+        const special = std.mem.eql(u8, name, "/") or std.mem.eql(u8, name, "/SYM64/") or std.mem.eql(u8, name, "//") or
+            std.mem.startsWith(u8, name, "__.SYMDEF");
         if (!special) {
-            const e = try Elf.open(alloc, b[start .. start + size], &.{ET_REL});
-            if (e.find(SHT_SYMTAB)) |s| try out.appendSlice(alloc, try readSyms(alloc, e, s, true));
+            const body = b[start + skip .. start + size];
+            const fmt: Format = if (macho.isMachO(body)) .macho else .elf;
+            if (members > 0 and fmt != first) return bad("an archive mixing ELF and Mach-O members");
+            first = fmt;
+            if (fmt == .macho) {
+                try out.appendSlice(alloc, try macho.readObject(alloc, body));
+            } else {
+                const e = try Elf.open(alloc, body, &.{ET_REL});
+                if (e.find(SHT_SYMTAB)) |s| try out.appendSlice(alloc, try readSyms(alloc, e, s, true));
+            }
             members += 1;
         }
         at = start + size + (size & 1);
@@ -217,6 +264,7 @@ pub fn readArchive(alloc: Alloc, b: []const u8) ![]Sym {
 /// the programs `mojo build` links are) is an error, never an empty list:
 /// a check that reads nothing cannot fail.
 pub fn readProgram(alloc: Alloc, b: []const u8) ![]Sym {
+    if (macho.isMachO(b)) return macho.readProgram(alloc, b);
     const e = try Elf.open(alloc, b, &.{ ET_REL, ET_EXEC, ET_DYN });
     const s = e.find(SHT_SYMTAB) orelse return bad("no .symtab (a stripped program): its symbols cannot be read");
     return readSyms(alloc, e, s, false);
@@ -225,6 +273,7 @@ pub fn readProgram(alloc: Alloc, b: []const u8) ![]Sym {
 /// A shared object's (or a dynamically linked program's) dynamic section,
 /// its .dynsym (local symbols left out), and the versions it needs.
 pub fn readShared(alloc: Alloc, b: []const u8) !Shared {
+    if (macho.isMachO(b)) return macho.readShared(alloc, b);
     const e = try Elf.open(alloc, b, &.{ ET_DYN, ET_EXEC });
     var out = Shared{};
     const dyn = e.find(SHT_DYNAMIC) orelse return bad("no dynamic section");
@@ -327,8 +376,12 @@ pub fn readShared(alloc: Alloc, b: []const u8) !Shared {
 /// `readShared`'s result, one line per entry: the dynamic section (SONAME,
 /// NEEDED, RUNPATH, RPATH, SYMBOLIC, FLAGS, FLAGS_1), every needed version
 /// (`VERNEED <file> <version>`), then every non-local dynamic symbol as
-/// `DEF|UND <bind> <visibility> <name>[@<version>]`.
+/// `DEF|UND <bind> <visibility> <name>[@<version>]`. A Mach-O library's
+/// lines are its own: `INSTALL_NAME`, `LOAD`, `RPATH` (LC_RPATH), `FLAGS`
+/// (the header's), `MINOS <platform> <version>`, then the symbols, each
+/// undefined one with ` from <library>`.
 pub fn writeShared(w: anytype, s: Shared) !void {
+    if (s.format == .macho) return writeMachO(w, s);
     if (s.soname) |n| try w.print("SONAME {s}\n", .{n});
     for (s.needed) |n| try w.print("NEEDED {s}\n", .{n});
     for (s.runpath) |n| try w.print("RUNPATH {s}\n", .{n});
@@ -340,6 +393,23 @@ pub fn writeShared(w: anytype, s: Shared) !void {
     for (s.syms) |y| {
         try w.print("{s} {s} {s} {s}", .{ if (y.defined) "DEF" else "UND", @tagName(y.bind), @tagName(y.vis), y.name });
         if (y.version) |v| try w.print("@{s}", .{v});
+        try w.writeAll("\n");
+    }
+}
+
+fn writeMachO(w: anytype, s: Shared) !void {
+    if (s.soname) |n| try w.print("INSTALL_NAME {s}\n", .{n});
+    for (s.needed, 0..) |n, i| {
+        if (i < s.load_cmds.len and s.load_cmds[i] != macho.LC_LOAD_DYLIB) {
+            try w.print("LOAD {s} ({s})\n", .{ n, macho.loadName(s.load_cmds[i]) });
+        } else try w.print("LOAD {s}\n", .{n});
+    }
+    for (s.runpath) |n| try w.print("RPATH {s}\n", .{n});
+    try w.print("FLAGS 0x{x}\n", .{s.mh_flags});
+    if (s.minos) |v| try w.print("MINOS {d} {s}\n", .{ s.platform orelse 0, v });
+    for (s.syms) |y| {
+        try w.print("{s} {s} {s} {s}", .{ if (y.defined) "DEF" else "UND", @tagName(y.bind), @tagName(y.vis), y.name });
+        if (y.lib) |l| try w.print(" from {s}", .{l});
         try w.writeAll("\n");
     }
 }
