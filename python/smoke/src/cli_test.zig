@@ -128,6 +128,109 @@ test "state appends absent, same or differs, and prints a notice for the last tw
     }
 }
 
+// ---- present ----------------------------------------------------------------------------
+
+const MAC_FILE = "komira-0.1.7-py3-none-macosx_11_0_arm64.whl";
+
+fn presentArgs(a: Alloc, tmp: *t.TmpDir) ![]const []const u8 {
+    return a.dupe([]const u8, &.{ "present", "--index", "testpypi", "--name-file", try h.path(a, tmp, "name.txt"), "--github-output", try h.path(a, tmp, "gh.txt") });
+}
+
+test "present appends one line, true when the release lists the file and false when it does not, and prints a notice" {
+    var ar = std.heap.ArenaAllocator.init(t.allocator);
+    defer ar.deinit();
+    const a = ar.allocator();
+    const linux = h.Listed{ .file = FILE, .sha256 = "ab", .size = 3, .url = FILE_URL };
+    const mac = h.Listed{ .file = MAC_FILE, .sha256 = "cd", .size = 9, .url = FILE_URL };
+    const Case = struct { routes: []const h.Route, line: []const u8, out: []const u8 };
+    const cases = [_]Case{
+        .{ .routes = &.{}, .line = "present=false\n", .out = "::notice title=pypi::" ++ MAC_FILE ++ " is not on testpypi\n" },
+        .{ .routes = try jsonRoutes(a, &.{linux}, null), .line = "present=false\n", .out = "::notice title=pypi::" ++ MAC_FILE ++ " is not on testpypi\n" },
+        .{ .routes = try jsonRoutes(a, &.{ linux, mac }, null), .line = "present=true\n", .out = "::notice title=pypi::" ++ MAC_FILE ++ " is on testpypi already\n" },
+    };
+    for (cases) |c| {
+        var tmp = t.tmpDir(.{});
+        defer tmp.cleanup();
+        try tmp.dir.writeFile(.{ .sub_path = "name.txt", .data = MAC_FILE ++ "\n" });
+        try tmp.dir.writeFile(.{ .sub_path = "gh.txt", .data = "earlier=1\n" });
+        var fake = h.Fake{ .alloc = a, .routes = c.routes };
+        var runner = h.FakeRunner{ .alloc = a, .work = "" };
+        const r = try exec(a, try presentArgs(a, &tmp), &fake, &runner);
+        try t.expectEqual(@as(u8, 0), r.code);
+        try t.expectEqualStrings(c.out, r.out);
+        try t.expectEqualStrings("", r.err);
+        try t.expectEqualStrings(try std.fmt.allocPrint(a, "earlier=1\n{s}", .{c.line}), try h.readAll(a, &tmp, "gh.txt"));
+        try t.expectEqual(@as(usize, 1), fake.urls.items.len);
+        try t.expectEqualStrings(JSON_URL, fake.urls.items[0]);
+        try t.expectEqual(@as(usize, 0), runner.calls.items.len);
+    }
+}
+
+test "present fails on an index error and appends no line" {
+    var ar = std.heap.ArenaAllocator.init(t.allocator);
+    defer ar.deinit();
+    const a = ar.allocator();
+    const bad = [_]h.Route{
+        .{ .url = JSON_URL, .got = .{ .status = 500 } },
+        .{ .url = JSON_URL, .got = .{ .transport = error.ConnectionRefused } },
+        .{ .url = JSON_URL, .got = .{ .body = @constCast("<html>maintenance</html>") } },
+    };
+    const why = [_][]const u8{ "GET " ++ JSON_URL ++ ": HTTP 500", "GET " ++ JSON_URL ++ ": ConnectionRefused", "GET " ++ JSON_URL ++ ": the answer is not the JSON of a release (" };
+    inline for (bad, why) |route, want| {
+        var tmp = t.tmpDir(.{});
+        defer tmp.cleanup();
+        try tmp.dir.writeFile(.{ .sub_path = "name.txt", .data = MAC_FILE ++ "\n" });
+        var fake = h.Fake{ .alloc = a, .routes = &.{route} };
+        var runner = h.FakeRunner{ .alloc = a, .work = "" };
+        const r = try exec(a, try presentArgs(a, &tmp), &fake, &runner);
+        try t.expectEqual(@as(u8, 1), r.code);
+        try t.expect(std.mem.startsWith(u8, r.err, "pypi_smoke: FAILED: " ++ want));
+        try t.expect(std.mem.startsWith(u8, r.out, "::error title=pypi::" ++ want));
+        try t.expectError(error.FileNotFound, tmp.dir.access("gh.txt", .{}));
+    }
+}
+
+test "present refuses a name file that is not one wheel file name, before asking the index, and appends no line" {
+    var ar = std.heap.ArenaAllocator.init(t.allocator);
+    defer ar.deinit();
+    const a = ar.allocator();
+    const Case = struct { text: []const u8, why: []const u8 };
+    const cases = [_]Case{
+        .{ .text = MAC_FILE ++ "\n" ++ FILE ++ "\n", .why = "the name file holds more than one line; exactly one file name is wanted" },
+        .{ .text = "komira-0.1.7-py3-none-macosx_11_0_arm64\n", .why = "the name file's line 'komira-0.1.7-py3-none-macosx_11_0_arm64' is not a wheel file name: it does not end in .whl" },
+        .{ .text = "komira-0.1.7-py3-macosx_11_0_arm64.whl\n", .why = "the name file's line 'komira-0.1.7-py3-macosx_11_0_arm64.whl' has 4 '-' separated parts before .whl; <name>-<version>-<python>-<abi>-<platform> has 5" },
+        .{ .text = "", .why = "the name file's line '' is not a wheel file name: it does not end in .whl" },
+    };
+    for (cases) |c| {
+        var tmp = t.tmpDir(.{});
+        defer tmp.cleanup();
+        try tmp.dir.writeFile(.{ .sub_path = "name.txt", .data = c.text });
+        var fake = h.Fake{ .alloc = a, .routes = &.{} };
+        var runner = h.FakeRunner{ .alloc = a, .work = "" };
+        const r = try exec(a, try presentArgs(a, &tmp), &fake, &runner);
+        try t.expectEqual(@as(u8, 1), r.code);
+        try t.expectEqualStrings(try std.fmt.allocPrint(a, "pypi_smoke: FAILED: {s}\n", .{c.why}), r.err);
+        try t.expectEqualStrings(try std.fmt.allocPrint(a, "::error title=pypi::{s}\n", .{c.why}), r.out);
+        try t.expectEqual(@as(usize, 0), fake.urls.items.len);
+        try t.expectError(error.FileNotFound, tmp.dir.access("gh.txt", .{}));
+    }
+}
+
+test "present refuses a name file that cannot be read" {
+    var ar = std.heap.ArenaAllocator.init(t.allocator);
+    defer ar.deinit();
+    const a = ar.allocator();
+    var tmp = t.tmpDir(.{});
+    defer tmp.cleanup();
+    var fake = h.Fake{ .alloc = a, .routes = &.{} };
+    var runner = h.FakeRunner{ .alloc = a, .work = "" };
+    const args = try presentArgs(a, &tmp);
+    const r = try exec(a, args, &fake, &runner);
+    try t.expectEqual(@as(u8, 1), r.code);
+    try t.expectEqualStrings(try std.fmt.allocPrint(a, "pypi_smoke: FAILED: cannot read --name-file {s}: FileNotFound\n", .{args[4]}), r.err);
+    try t.expectEqual(@as(usize, 0), fake.urls.items.len);
+}
+
 test "state fails on an index error and appends no state" {
     var ar = std.heap.ArenaAllocator.init(t.allocator);
     defer ar.deinit();
@@ -222,10 +325,10 @@ test "install prints that pip installed komira and the example printed what the 
     const data = try h.path(a, &tmp, "in/readings.parquet");
     const table = try h.path(a, &tmp, "in/komira.tsv");
     const r = try exec(a, &.{
-        "install",     "--index",  "testpypi",       "--dist",  dist,
-        "--python",    "/py/python3.13", "--example", example, "--expect",
-        expect,        "--data",   data,             "--abi-table", table,
-        "--work",      work,       "--attempts",     "2",       "--delay",
+        "install",  "--index",        "testpypi",   "--dist",      dist,
+        "--python", "/py/python3.13", "--example",  example,       "--expect",
+        expect,     "--data",         data,         "--abi-table", table,
+        "--work",   work,             "--attempts", "2",           "--delay",
         "0",
     }, &fake, &runner);
     try t.expectEqual(@as(u8, 0), r.code);
@@ -255,10 +358,10 @@ test "install fails with exit 1 and the step's failure when a command fails" {
     const data = try h.path(a, &tmp, "in/readings.parquet");
     const table = try h.path(a, &tmp, "in/komira.tsv");
     const r = try exec(a, &.{
-        "install", "--index",  "pypi",  "--dist",      dist,
-        "--python", "/py/python3.13", "--example", example, "--expect",
-        expect,    "--data",   data,    "--abi-table", table,
-        "--work",  work,
+        "install",  "--index",        "pypi",      "--dist",      dist,
+        "--python", "/py/python3.13", "--example", example,       "--expect",
+        expect,     "--data",         data,        "--abi-table", table,
+        "--work",   work,
     }, &fake, &runner);
     try t.expectEqual(@as(u8, 1), r.code);
     const why = try std.fmt.allocPrint(a, "create the virtual environment: `/py/python3.13 -m venv {s}/venv` exited with 3; last lines of stderr:\nno venv module", .{work});
@@ -282,6 +385,8 @@ test "a usage error is exit 2 with its message, and reaches neither the index no
         .{ .args = &.{ "dist", "--wheel", "a", "--wheel", "b", "--out", "o", "--github-output", "g" }, .want = "pypi_smoke: --wheel needs one value, given once\n" },
         .{ .args = &.{ "dist", "--wheel", "a" }, .want = USAGE },
         .{ .args = &.{ "state", "--index", "testpypi", "--dist", "d" }, .want = USAGE },
+        .{ .args = &.{ "present", "--index", "testpypi", "--name-file", "n" }, .want = USAGE },
+        .{ .args = &.{ "present", "--index", "npm", "--name-file", "n", "--github-output", "g" }, .want = "pypi_smoke: --index is testpypi or pypi\n" },
         .{ .args = &.{ "verify", "--index", "testpypi" }, .want = USAGE },
         .{ .args = &.{ "verify", "--index", "testpypi", "--dist", "d", "--attempts", "0" }, .want = "pypi_smoke: --attempts is a number from 1 to 20\n" },
         .{ .args = &.{ "verify", "--index", "testpypi", "--dist", "d", "--attempts", "21" }, .want = "pypi_smoke: --attempts is a number from 1 to 20\n" },

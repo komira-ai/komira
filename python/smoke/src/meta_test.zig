@@ -248,3 +248,44 @@ test "a dist directory with another file beside the wheel, two wheels, none, or 
     try t.expectError(error.Refused, meta.loadDist(a, &why, missing));
     try t.expectEqualStrings(try std.fmt.allocPrint(a, "cannot open --dist {s}: FileNotFound", .{missing}), why);
 }
+
+test "a name file is one wheel file name of name, version and a three-part tag, a line feed after it allowed" {
+    var ar = std.heap.ArenaAllocator.init(t.allocator);
+    defer ar.deinit();
+    const a = ar.allocator();
+    var why: []const u8 = "";
+    const want = "komira-0.1.7-py3-none-macosx_11_0_arm64.whl";
+    for ([_][]const u8{ want ++ "\n", want }) |text| {
+        const f = try meta.parseFileName(a, &why, text);
+        try t.expectEqualStrings("komira", f.name);
+        try t.expectEqualStrings("0.1.7", f.version);
+        try t.expectEqualStrings("py3-none-macosx_11_0_arm64", f.tag);
+    }
+}
+
+test "a name file with two lines, no .whl suffix, a build tag, an empty part or no content is refused" {
+    var ar = std.heap.ArenaAllocator.init(t.allocator);
+    defer ar.deinit();
+    const a = ar.allocator();
+    const FORM = "<name>-<version>-<python>-<abi>-<platform> has 5";
+    const Case = struct { text: []const u8, why: []const u8 };
+    const cases = [_]Case{
+        .{ .text = "komira-0.1.7-py3-none-any.whl\nkomira-0.1.8-py3-none-any.whl\n", .why = "the name file holds more than one line; exactly one file name is wanted" },
+        .{ .text = "komira-0.1.7-py3-none-any.whl\n\n", .why = "the name file holds more than one line; exactly one file name is wanted" },
+        .{ .text = "komira-0.1.7-py3-none-any.whl\r\n", .why = "the name file holds more than one line; exactly one file name is wanted" },
+        .{ .text = "komira-0.1.7-py3-none-any.tar.gz\n", .why = "the name file's line 'komira-0.1.7-py3-none-any.tar.gz' is not a wheel file name: it does not end in .whl" },
+        .{ .text = "komira-0.1.7-py3-none-any.whl.bak\n", .why = "the name file's line 'komira-0.1.7-py3-none-any.whl.bak' is not a wheel file name: it does not end in .whl" },
+        .{ .text = "komira-0.1.7-1-py3-none-any.whl\n", .why = "the name file's line 'komira-0.1.7-1-py3-none-any.whl' has 6 '-' separated parts before .whl; " ++ FORM },
+        .{ .text = "komira-0.1.7-py3-any.whl\n", .why = "the name file's line 'komira-0.1.7-py3-any.whl' has 4 '-' separated parts before .whl; " ++ FORM },
+        .{ .text = "komira-0.1.7.whl\n", .why = "the name file's line 'komira-0.1.7.whl' has 2 '-' separated parts before .whl; " ++ FORM },
+        .{ .text = "komira--py3-none-any.whl\n", .why = "Version '' is empty or has a character a wheel file name cannot hold" },
+        .{ .text = "komira-0.1.7-py3-none-any x.whl\n", .why = "Tag 'any x' is empty or has a character a wheel file name cannot hold" },
+        .{ .text = "", .why = "the name file's line '' is not a wheel file name: it does not end in .whl" },
+        .{ .text = "\n", .why = "the name file's line '' is not a wheel file name: it does not end in .whl" },
+    };
+    for (cases) |c| {
+        var why: []const u8 = "";
+        try t.expectError(error.Refused, meta.parseFileName(a, &why, c.text));
+        try t.expectEqualStrings(c.why, why);
+    }
+}

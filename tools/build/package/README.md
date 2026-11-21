@@ -423,8 +423,28 @@ stripped library reads the same). A refusal names its check:
 - `platform`: an ELF member only in a manylinux wheel;
 - `size`: no member over 90 MB (90,000,000 bytes; PyPI takes 100 MB a file).
 
-Mach-O libraries of a macOS wheel are not read yet: they come with the macOS
-wheel.
+The same checks read every Mach-O member of a macosx wheel
+([`wheel/macho.zig`](wheel/macho.zig), through its load commands; thin arm64
+files only, a universal file is refused), with the manylinux ones above left
+out. For a macOS wheel `max_glibcxx` and `max_cxxabi` have nothing to bound and
+`os_floor` is the macOS the tag promises:
+
+- `platform`: a Mach-O member only in a macosx wheel (an ELF member in one is
+  refused as above);
+- `arch`: the CPU type is arm64;
+- `minos`: the member states a minimum macOS (`LC_BUILD_VERSION` for macOS, or
+  `LC_VERSION_MIN_MACOSX`), and it is at most the tag's macOS (`macosx_11_0`
+  promises 11.0);
+- `installname`: an `LC_ID_DYLIB` is `@rpath/<file name>`, with no directory;
+- `runpath`: every `LC_RPATH` entry is `@loader_path` or under it, the Mach-O
+  counterpart of `$ORIGIN`;
+- `needed`: every library a load command names is `@rpath/<file>` or
+  `@loader_path/<path>` of a member of the wheel (by file name), an
+  `@rpath/<file>` in `external_needed`, or an operating system library, an
+  absolute path under `/usr/lib/` or `/System/Library/`. Any other absolute
+  path, `@executable_path` and an `@rpath` name nobody provides are refused.
+
+`size` and `external` apply to a Mach-O member as to any other.
 
 Sub-targets: `[default]` is the wheel, copied only after `[check]` passed;
 `[check]` reads it back ([`wheel/check.zig`](wheel/check.zig)). That covers the

@@ -9,8 +9,9 @@ left out. A path the directory does not hold fails the action that reads it;
 two paths with one file name fail analysis.
 
 `wheel_install_test(name, python, wheels, script, args, files,
-skip_requirements, upgrade, expect_failure)` installs `wheels` into an empty
-virtual environment of the interpreter `python` (a `python_dist`), the way
+skip_requirements, upgrade, expect_failure, exec_compatible_with)` installs
+`wheels` into an empty virtual environment of the interpreter `python` (a
+`python_dist`), the way
 `python_wheel` installs a wheel and with no pip and no network, then runs
 `script` with that environment's interpreter in isolated mode, from an empty
 directory: python/tests/wheel_install_run.py says each step and what it
@@ -26,8 +27,9 @@ distribution, oldest first, and each is installed the way `pip install` of a
 newer version installs it: the release before it is uninstalled first (its
 RECORD's files deleted), and the script is given `--removed <path>` for each
 file the replaced release had that the new one lacks. Building the target is
-running the test. Linux
-x86_64 only, like the interpreter.
+running the test. It runs on `exec_compatible_with`, Linux x86_64 unless given
+(python/BUCK passes the macOS arm64 platform for the macOS wheel's test, with
+the interpreter built for it).
 """
 
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
@@ -112,8 +114,8 @@ _wheel_install_test = rule(
 def _picked_files_macro(**kwargs):
     _picked_files(**kwargs)
 
-def _wheel_install_test_macro(**kwargs):
-    _wheel_install_test(exec_compatible_with = LINUX_X86_64, **kwargs)
+def _wheel_install_test_macro(exec_compatible_with = LINUX_X86_64, **kwargs):
+    _wheel_install_test(exec_compatible_with = exec_compatible_with, **kwargs)
 
 picked_files = declares_docs(_picked_files_macro)
 wheel_install_test = declares_docs(_wheel_install_test_macro)

@@ -6,7 +6,7 @@ flavours"). `prepare` runs before libkomira is opened and does what the
 flavour needs; `_native.load` calls it with the directory libkomira is in.
 
 The bundled wheel carries the three Mojo runtime libraries in
-`komira/_lib/lib/`, where libkomira's run path (`$ORIGIN/lib`) finds them. The
+`komira/_lib/lib/`, where libkomira's run path (`$ORIGIN/lib`; `@loader_path/lib` in the macOS wheel) finds them. The
 dynamic loader matches a NEEDED name against every library already loaded in
 the process, by file name or SONAME, before it reads any run path. So when
 another Mojo runtime is already loaded (Modular's `mojo-compiler` or `max`, or
