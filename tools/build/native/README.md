@@ -24,8 +24,8 @@ Each library's BUCK file builds it three times over the same arguments:
 1. `<lib>_unprefixed`, a `cxx_library` with upstream's names, which nothing
    links;
 2. `prefix_symbols`, a `prefix_header` ([`defs.bzl`](defs.bzl),
-   `prefix_tool header`): `elfsyms armap` reads the
-   unprefixed archive's symbol table, aws-lc's `util/read_symbols.go` skip
+   `prefix_tool header`): the defined non-local symbols of every member of
+   the unprefixed archive (the names its symbol table lists) are read, aws-lc's `util/read_symbols.go` skip
    list (and the compiler builtin `__umodti3`) is applied, and the header
    says `#define X <prefixed X>` for each name left, plus the
    `extra_symbols` (names the library references but never defines, such as
@@ -39,8 +39,8 @@ Each library's BUCK file builds it three times over the same arguments:
    its C users.
 
 `prefixed_archive_check` (`prefix_tool check`) then reads
-every member of the prefixed archive (`elfsyms symtab`) and fails its build
-action unless
+every non-local symbol of every member of the prefixed archive and fails its
+build action unless
 
 - every defined symbol starts with the prefix (or matches the target's
   `allow`, each with its reason in the BUCK file: `__umodti3` and
@@ -59,21 +59,28 @@ is a `ValidationInfo`, and Buck2 runs the validations of every target in the
 graph it builds, so no build that links the library succeeds while the
 check is red.
 
-## elfsyms
-
-[`elfsyms.c`](elfsyms.c), built static (musl) with the pinned zig by `c_exe`:
-the C toolchain has no `nm` or `readelf` (an action may not take one from the
-worker), so the build reads ELF itself. `elfsyms armap <lib.a>` prints an
-archive's symbol table; `elfsyms symtab <lib.a>` prints every non-local
-symbol of every member as `DEF|UND <bind> <type> <visibility> <name>`. A
-member it cannot read is an error, never skipped.
-
 ## prefix_tool
 
 Both rules' actions run `prefix_tool`, a Zig program
 ([`src/main.zig`](src/main.zig)), built by `zig_exe` behind its unit tests
-(`:prefix_tool_unit`); no shell runs. It reads the archive by running
-`elfsyms` and nothing else.
+(`:prefix_tool_unit`); no shell runs and no other program. The C toolchain
+has no `nm` or `readelf` (an action may not take one from the worker), so
+the tool reads the archive itself, with the object reader `native_so` uses
+(the module `:native_objects`: [`native_elf.zig`](native_elf.zig), which
+hands Mach-O to [`native_macho.zig`](native_macho.zig)):
+
+- a System V archive (the GNU `/` or `/SYM64/` symbol table, `//` long
+  names) of 64-bit little-endian ELF objects, as the Linux builds make, or
+- a BSD archive (`__.SYMDEF` symbol table, `#1/<n>` long names) of thin
+  arm64 Mach-O objects, as the darwin-arm64 build makes. A Mach-O name loses
+  the one `_` Mach-O prepends to a C name (`_snappy_compress` is
+  `snappy_compress`), so the header renames the names the C sources use and
+  the check holds the same names to the prefix on either platform.
+
+Every member is read, never only the archive's symbol table, so the header
+and the check read the same symbols. A member it cannot read (another
+format, a thin archive, a header or a name pointing outside its file) fails
+the action, naming the archive and what is wrong; nothing is skipped.
 
 - `prefix_tool header` ([`src/prefix.zig`](src/prefix.zig)) sorts the names
   by bytes, each once (as `LC_ALL=C sort -u` does), and writes the header:
@@ -90,7 +97,8 @@ Both rules' actions run `prefix_tool`, a Zig program
 
 The command line is in [`src/cli.zig`](src/cli.zig); the cases are in
 [`src/prefix_test.zig`](src/prefix_test.zig) and
-[`src/cli_test.zig`](src/cli_test.zig).
+[`src/cli_test.zig`](src/cli_test.zig), which reads two committed archives
+of the same C, one of each kind ([`src/testdata`](src/testdata/README.md)).
 
 ## Each library's shared library
 
