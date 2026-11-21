@@ -24,10 +24,10 @@
 #     over a zero-column schema is refused with the exact text; one column
 #     lowers.
 #   test_a_distinct_over_columns_no_sink_row_serves_is_refused: a distinct over
-#     a date, a bool, two integers, an integer and a string, or two strings of
-#     which one is not dictionary encoded is refused as an unserved sink with
-#     the exact text; an integer column, and two dictionary encoded strings,
-#     lower.
+#     a 16-bit integer, a binary, two integers, an integer and a string, or two
+#     strings of which one is not dictionary encoded is refused as an unserved
+#     sink with the exact text; an integer, a date and a bool column, and two
+#     dictionary encoded strings, lower.
 # The remaining tests are named for the refusal they hold.
 # =============================================================================
 
@@ -98,6 +98,8 @@ def _schema() -> Schema:
     sb.add_field(Field("s", ArrowType.STRING, False))
     sb.add_field(Field("d", ArrowType.DATE32, False))
     sb.add_field(Field("b", ArrowType.BOOL, False))
+    sb.add_field(Field("i16", ArrowType.INT16, False))
+    sb.add_field(Field("bin", ArrowType.BINARY, False))
     return sb.build()
 
 
@@ -253,8 +255,12 @@ def _two_string_scan() -> LogicalPlan:
 
 
 def test_a_group_key_no_sink_row_serves_is_refused() raises:
-    _refused_with(_message(_count_by(_scan(), _names("d")), _inputs()), LOWERING_SINK_UNSERVED, "no sink row")
-    _refused_with(_message(_count_by(_scan(), _names("b")), _inputs()), LOWERING_SINK_UNSERVED, "no sink row")
+    _refused_with(_message(_count_by(_scan(), _names("i16")), _inputs()), LOWERING_SINK_UNSERVED, "no sink row")
+    _refused_with(_message(_count_by(_scan(), _names("bin")), _inputs()), LOWERING_SINK_UNSERVED, "no sink row")
+    _refused_with(_message(_count_by(_scan(), _names("k", "i16")), _inputs()), LOWERING_SINK_UNSERVED, "no sink row")
+    # Several columns that are not all dictionary strings stay unserved, even
+    # when each column alone has a row.
+    _refused_with(_message(_count_by(_scan(), _names("d", "b")), _inputs()), LOWERING_SINK_UNSERVED, "2 columns")
     _refused_with(_message(_count_by(_scan(), _names("k", "v")), _inputs()), LOWERING_SINK_UNSERVED, "2 columns")
     # Two strings are served only when both are dictionary encoded.
     var one_dictionary = LoweringInputs()
@@ -262,8 +268,10 @@ def test_a_group_key_no_sink_row_serves_is_refused() raises:
     var strings = _two_string_scan()
     _refused_with(_message(_count_by(strings^, _names("s", "t")), one_dictionary), LOWERING_SINK_UNSERVED, "dictionary")
     _refused_with(_message(_count_by(_scan(), _names("s", "k")), _inputs()), LOWERING_SINK_UNSERVED, "2 columns")
-    # An integer key lowers.
+    # An integer, a date and a bool key each lower.
     assert_equal(_message(_count_by(_scan(), _names("k")), _inputs()), "")
+    assert_equal(_message(_count_by(_scan(), _names("d")), _inputs()), "")
+    assert_equal(_message(_count_by(_scan(), _names("b")), _inputs()), "")
 
 
 def _only(name: String) -> LogicalPlan:
@@ -338,12 +346,12 @@ def test_a_distinct_over_no_column_is_refused_and_one_column_is_cut() raises:
 def test_a_distinct_over_columns_no_sink_row_serves_is_refused() raises:
     var no_row = String(" has no sink row")
     assert_equal(
-        _message(LogicalPlan.distinct(None, _only("d")), _inputs()),
-        _unserved_text("a group key column of type " + String(ArrowType.DATE32) + no_row),
+        _message(LogicalPlan.distinct(None, _only("i16")), _inputs()),
+        _unserved_text("a group key column of type " + String(ArrowType.INT16) + no_row),
     )
     assert_equal(
-        _message(LogicalPlan.distinct(None, _only("b")), _inputs()),
-        _unserved_text("a group key column of type " + String(ArrowType.BOOL) + no_row),
+        _message(LogicalPlan.distinct(None, _only("bin")), _inputs()),
+        _unserved_text("a group key column of type " + String(ArrowType.BINARY) + no_row),
     )
     var two_columns = _unserved_text(
         "a group key of 2 columns is served only when every column is a dictionary encoded string"
@@ -357,8 +365,11 @@ def test_a_distinct_over_columns_no_sink_row_serves_is_refused() raises:
         _message(LogicalPlan.distinct(None, _two_string_scan()), one_dictionary),
         two_columns,
     )
-    # An integer column, and two dictionary encoded strings, lower.
+    # An integer, a date and a bool column, and two dictionary encoded
+    # strings, lower.
     assert_equal(_message(LogicalPlan.distinct(None, _only("k")), _inputs()), "")
+    assert_equal(_message(LogicalPlan.distinct(None, _only("d")), _inputs()), "")
+    assert_equal(_message(LogicalPlan.distinct(None, _only("b")), _inputs()), "")
     var both = LoweringInputs()
     both.add_scan(None, _names("s", "t"))
     assert_equal(_message(LogicalPlan.distinct(None, _two_string_scan()), both), "")

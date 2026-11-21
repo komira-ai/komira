@@ -26,14 +26,16 @@
 # widened first, which is exact), as DuckDB's sum, avg, min and max do:
 #
 #   SUM, AVG   the sum starts at +0.0 and adds each non-NULL value in row
-#              order with IEEE-754 double addition; the merge adds the
-#              workers' sums in worker order. No overflow is refused: a sum
-#              past the double range is an infinity, +inf plus -inf is NaN,
-#              and a NaN makes the sum NaN (query_semantics 5.7). Rounding
-#              depends on the order of the additions, and which rows a worker
-#              holds depends on the schedule, so the last bits of a float sum
-#              can differ between runs and worker counts (query_semantics
-#              2.10; the tolerance rule is in the package README).
+#              order with IEEE-754 double addition; `merge_cell` adds one
+#              cell's sum to another. No overflow is refused: a sum past the
+#              double range is an infinity, +inf plus -inf is NaN, and a NaN
+#              makes the sum NaN (query_semantics 5.7). Rounding depends on
+#              the order of the additions, so the order of the merges decides
+#              the last bits: the sink merges its cells in worker order, or,
+#              for an ORDER_ROW_RANGE segment, one cell per source position
+#              in position order, which is the same on every worker count
+#              (`sink_agg`; the tolerance against DuckDB is in the package
+#              README).
 #   MIN, MAX   DuckDB's order of floats: NaN is above every other value,
 #              +inf included (query_semantics 2.7), so MAX is NaN when a NaN
 #              is present and MIN is NaN only when every value is. A value

@@ -18,9 +18,13 @@
 #            OP_LIMIT             `LimitOp`   (`op_limit`)
 #   sink     SINK_COLLECT         `CollectSink` (`sink_collect`)
 #            SINK_AGG, key NONE   `AggSink` (`sink_agg`), from the `AggSinkData`
-#                                 the descriptor's `sink_param_id` names
+#                                 the descriptor's `sink_param_id` names; it
+#                                 folds by source position when the segment
+#                                 is ORDER_ROW_RANGE
 #            SINK_AGG, key I64,   `GroupAggSink` (`sink_group_agg`), from the
-#            I32, F64 or F32      same kind of data; both behind `AnyAggSink`
+#            I32, F64, F32,       same kind of data; both behind `AnyAggSink`
+#            DATE32, BOOL or
+#            DECIMAL128
 #            SINK_AGG, key STRING `StringGroupAggSink` (`sink_string_group_agg`)
 #            (DICT_ENCODED or     from that data too, behind `AnyAggSink`. A
 #            COLUMNAR)            DICT_ENCODED sink makes its Parquet source
@@ -30,6 +34,15 @@
 #
 # Anything else (SOURCE_CONCAT, OP_JOIN_PROBE and the other sinks) is refused
 # by name, because no member serves it yet.
+#
+# An ORDER_ROW_RANGE segment is the same bits on every worker count only when
+# its source cuts the same morsels on every worker count. The three sources
+# do: a resident batch and a producer's output are cut by the morsel size
+# alone, and the Parquet source, with the scan options this builder gives it
+# (no row-range split), cuts each row group by the morsel size alone. Its
+# cursor-grain route, a process-wide switch that is off unless a caller turns
+# it on, sizes its grains from the worker count, so an ORDER_ROW_RANGE
+# segment over Parquet is refused by name while that switch is on.
 #
 # The workers of a segment each get their own operator instances, built from
 # one set of shared parts the builder keeps per operator (the predicate, the
@@ -58,7 +71,11 @@ from column_kernels.compiler_helpers import (
 from morsel.morsel import Morsel
 from operator_api.map_op import MapOp
 from parquet.runtime_footer_cache import ParquetMetadataCache
+from parquet_scan.cursor_grain_feed import cursor_grain_enabled
 from physical_plan.physical_plan import (
+    KEY_DTYPE_BOOL,
+    KEY_DTYPE_DATE32,
+    KEY_DTYPE_DECIMAL128,
     KEY_DTYPE_F32,
     KEY_DTYPE_F64,
     KEY_DTYPE_I32,
@@ -68,6 +85,7 @@ from physical_plan.physical_plan import (
     OP_FILTER,
     OP_LIMIT,
     OP_PROJECT,
+    ORDER_ROW_RANGE,
     AggSinkData,
     SegmentDescPod,
     SINK_AGG,
@@ -246,6 +264,15 @@ struct RealBuilder[
         ref spec = desc.source_spec
         var morsel_rows = desc.morsel_rows
         if desc.source_kind == SOURCE_PARQUET:
+            if desc.order_key_kind == ORDER_ROW_RANGE and cursor_grain_enabled():
+                raise Error(
+                    "pipeline_exec: segment "
+                    + String(desc.seg_id)
+                    + " is ORDER_ROW_RANGE over Parquet while the scan's"
+                    " cursor-grain route is on; that route cuts morsels by the"
+                    " worker count, so the float sums would not be the same"
+                    " bits on every worker count"
+                )
             return Self.Source.first(
                 build_parquet_source[
                     Self.cache_o, Self.pool_o, Self.filter_o
@@ -372,6 +399,9 @@ struct RealBuilder[
                 or key == KEY_DTYPE_I32
                 or key == KEY_DTYPE_F64
                 or key == KEY_DTYPE_F32
+                or key == KEY_DTYPE_DATE32
+                or key == KEY_DTYPE_BOOL
+                or key == KEY_DTYPE_DECIMAL128
             )
             if desc.sink_kind == SINK_AGG and (key == KEY_DTYPE_NONE or keyed):
                 var id = desc.sink_param_id
@@ -401,6 +431,9 @@ struct RealBuilder[
                             self._agg_sinks[id],
                             self._segment_pool.share(),
                             desc.seg_id,
+                            by_position=(
+                                desc.order_key_kind == ORDER_ROW_RANGE
+                            ),
                         )
                     )
                 )
@@ -429,7 +462,8 @@ struct RealBuilder[
             + String(desc.seg_id)
             + " is not served; only (SINK_COLLECT, KEY_DTYPE_NONE,"
             " SINK_ORIENT_COLUMNAR), (SINK_AGG, KEY_DTYPE_NONE, I64, I32,"
-            " F64 or F32, SINK_ORIENT_COLUMNAR), (SINK_AGG, KEY_DTYPE_STRING,"
+            " F64, F32, DATE32, BOOL or DECIMAL128, SINK_ORIENT_COLUMNAR),"
+            " (SINK_AGG, KEY_DTYPE_STRING,"
             " SINK_ORIENT_COLUMNAR or SINK_ORIENT_DICT_ENCODED) and"
             " (SINK_SORT, KEY_DTYPE_NONE, SINK_ORIENT_COLUMNAR) are"
         )

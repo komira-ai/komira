@@ -126,6 +126,14 @@ The tests run when the package is built.
   key and an all-NULL group included), runs beside SUM and over a STRING;
   SELECT DISTINCT over two INT64 columns is refused at `lower` with
   `LOWERING_SINK_UNSERVED`.
+- `test_run_sql_group_keys`: GROUP BY one DATE32, BOOL, DECIMAL(12, 2) or
+  DECIMAL(30, 4) column over a Parquet table of six row groups equals an oracle
+  computed in the test, the NULL key being one group (count(*), count(v) and
+  sum(v) per group; the key keeps its type, precision and scale; decimal keys
+  past INT64 are exact); min and max of dates and the sum of decimals run under
+  a BOOL key; a WHERE before the grouping keeps only the passing rows; an
+  all-NULL key is one group; `group by d, b` is refused at `lower` with
+  LOWERING_SINK_UNSERVED.
 - `test_run_sql_int_sum`: an integer `sum()` over INT64 and INT32 columns is
   DECIMAL(38, 0) and exact past the INT64 range; an empty or all-NULL sum is
   NULL; expressions, CASE and HAVING over the sum run.
