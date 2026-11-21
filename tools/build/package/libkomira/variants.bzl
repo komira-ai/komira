@@ -34,6 +34,7 @@ tools/build/toolchains/README.md), so each variant of the row runs where it is c
 
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
 load("@komira//tools/build/mojo:providers.bzl", "MojoToolchainInfo")
+load("@komira//tools/build/mojo:shared_lib.bzl", "HOST_CXX_RUNTIME")
 load("@komira//tools/build/native:shared.bzl", "NativeSharedInfo")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load("@komira//tools/build/platforms:isa_variants.bzl", "variant_path", "variants_manifest")
@@ -43,10 +44,6 @@ load("@komira//tools/build/bench_salt:bench_salt.bzl", "salted")
 # The row these rules build for: the one row with more than one variant.
 _ROW = "linux-x86_64"
 
-# The C++ runtime of the row's `runtime_libs` that the host provides (PEP 600 lists both as system
-# libraries, like glibc): not in the directory, and given to the load check from the toolchain.
-_HOST_CXX_RUNTIME = ["libgcc_s.so.1", "libstdc++.so.6"]
-
 _LIB_FILE = "libkomira.so"
 
 def _variants_impl(ctx):
@@ -55,7 +52,7 @@ def _variants_impl(ctx):
     names = [v["name"] for v in r["isa_variants"]]
     if sorted(ctx.attrs.libs.keys()) != sorted(names):
         fail("{}: libs names {}, but row {} ships the variants {}".format(ctx.label, sorted(ctx.attrs.libs.keys()), _ROW, names))
-    for n in _HOST_CXX_RUNTIME:
+    for n in HOST_CXX_RUNTIME:
         if n not in r["runtime_libs"]:
             fail("{}: host C++ runtime library {} is not one of row {}'s runtime_libs {}".format(ctx.label, n, _ROW, r["runtime_libs"]))
     files = {"VARIANTS": ctx.actions.write("VARIANTS", variants_manifest(r, _LIB_FILE))}
@@ -65,7 +62,7 @@ def _variants_impl(ctx):
             fail("{}: libs[{}] is not one {}: {}".format(ctx.label, repr(v["name"]), _LIB_FILE, outs))
         files[variant_path(r, v, _LIB_FILE)] = outs[0]
     for n in r["runtime_libs"]:
-        if n not in _HOST_CXX_RUNTIME:
+        if n not in HOST_CXX_RUNTIME:
             files["lib/" + n] = tc.runtime.project(n)
     for o in ctx.attrs.native_owners:
         for soname, so in o[NativeSharedInfo].closure.items():
@@ -100,7 +97,7 @@ def _load_impl(ctx):
     moved = ctx.actions.copy_file("elsewhere/a/b/native", src)
     out = ctx.actions.declare_output(ctx.label.name + ".pass")
     cmd = cmd_args(exes[0], "--dir", moved, "--variant", ctx.attrs.variant, "--out", out.as_output())
-    for n in _HOST_CXX_RUNTIME:
+    for n in HOST_CXX_RUNTIME:
         cmd.add("--host-lib", tc.runtime.project(n))
     if ctx.attrs.expect_failure != None:
         cmd.add("--expect-failure", ctx.attrs.expect_failure)
