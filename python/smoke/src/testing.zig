@@ -166,3 +166,41 @@ pub fn sink(a: Alloc) std.Io.Writer.Allocating {
 pub fn readAll(a: Alloc, tmp: *t.TmpDir, rel: []const u8) ![]u8 {
     return tmp.dir.readFileAlloc(a, rel, 1 << 28);
 }
+
+/// One release of a project's JSON: its version and the files it lists.
+pub const Rel = struct { version: []const u8, files: []const Listed = &.{} };
+
+/// The JSON of a project as an index answers it (`<json base><name>/json`): `releases` maps each version to its
+/// files, with fields the driver does not read as well.
+pub fn projectJson(a: Alloc, rels: []const Rel) ![]u8 {
+    var w = std.Io.Writer.Allocating.init(a);
+    try w.writer.writeAll("{\"info\":{\"name\":\"komira\"},\"releases\":{");
+    for (rels, 0..) |r, i| {
+        if (i != 0) try w.writer.writeAll(",");
+        try w.writer.print("\"{s}\":[", .{r.version});
+        for (r.files, 0..) |l, j| {
+            if (j != 0) try w.writer.writeAll(",");
+            try w.writer.print("{{\"filename\":\"{s}\",\"size\":{d},\"digests\":{{\"md5\":\"00\",\"sha256\":\"{s}\"}},\"url\":\"{s}\",\"yanked\":false}}", .{ l.file, l.size, l.sha256, l.url });
+        }
+        try w.writer.writeAll("]");
+    }
+    try w.writer.writeAll("},\"urls\":[]}");
+    return w.written();
+}
+
+pub const Result = struct { code: u8, out: []const u8, err: []const u8 };
+
+/// Runs the command line `args` with `fake` as the network and no command runner.
+pub fn exec(a: Alloc, args: []const []const u8, fake: *Fake) !Result {
+    var runner = FakeRunner{ .alloc = a, .work = "" };
+    var out = sink(a);
+    var err = sink(a);
+    const code = try lib.cli.run(a, args, .{ .fetcher = fake.fetcher(), .runner = runner.runner() }, &out.writer, &err.writer);
+    return .{ .code = code, .out = out.written(), .err = err.written() };
+}
+
+/// Whether `rel` exists in the scratch directory.
+pub fn exists(tmp: *t.TmpDir, rel: []const u8) bool {
+    tmp.dir.access(rel, .{}) catch return false;
+    return true;
+}

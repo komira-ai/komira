@@ -1,7 +1,10 @@
-//! A run of pypi.yml played from the workflow's own text, for each answer an index gives (`absent`,
-//! `same`, `differs`) and for the failure of a job: which jobs run and which are skipped, what the
-//! two verdict jobs (`result`, `result-macos-arm64`) print, and whether the run ends green. Part of
-//! //:pypi_workflow_cases (pypi_workflow_test.zig imports this file).
+//! A run of pypi.yml played from the workflow's own text, for each event (a push to main, the daily
+//! schedule, a manual run), each answer an index gives (`absent`, `same`, `differs`) and the failure of a
+//! job: which jobs run and which are skipped, which jobs upload to an index and which save the record of
+//! a version, what the four verdict jobs (`result-...`) print, and whether the run ends green. Two more
+//! plays read the top of the file: whether a push of a set of paths starts a run at all (`on.push`'s
+//! `paths-ignore`), and which runs of a sequence of events start, wait or are replaced (`concurrency:`).
+//! Part of //:pypi_workflow_cases (pypi_workflow_test.zig imports this file).
 //!
 //! The play holds the part of GitHub's rules the file uses and refuses anything else by name, so an
 //! edit the play cannot read fails the cases instead of passing them:
@@ -13,15 +16,22 @@
 //!    workflow takes no input, so `inputs.<name>` is refused like any other unknown name), `always()`, `!`, `==`, `!=`, `&&`,
 //!    `||` and parentheses, with GitHub's values: `||` and `&&` give one of their operands, an empty
 //!    string is false, and strings compare without regard to case;
-//!  - a job that runs, other than the two verdict jobs, ends as the case says (`success` unless the
-//!    case says otherwise) with the outputs the case gives: the case is what the farm, the index and
-//!    the smoke answered; in a job that succeeds, the step that uses the publish action uploads when
-//!    its `if:` holds, `steps.state.outputs.state` there being the job's output `state`;
+//!  - a job that runs, other than the verdict jobs, ends as the case says (`success` unless the case
+//!    says otherwise) with the outputs the case gives: the case is what the farm, the cache, the index and
+//!    the smoke answered; in a job that succeeds, the step that uses the publish action uploads when its
+//!    `if:` holds, `steps.state.outputs.state` there being the job's output `state`, and a step that uses
+//!    `actions/cache/save` saves the record;
 //!  - a verdict job is played step by step: a step runs when no step above it failed and its `if:`
 //!    holds; its `env:` values are expressions; its `run:` is one `echo` of a workflow command
 //!    (`::notice title=<title>::<text>` or `::error ...`), with `&& exit 1` when the step fails the
 //!    job, and each `$NAME` of the text is the step's env value;
-//!  - the run is green when no job failed.
+//!  - the run is green when no job failed;
+//!  - a push starts a run unless every path it changes matches a `paths-ignore` pattern, where `**`
+//!    matches any characters and `*` any but `/`;
+//!  - a run joins the group its `concurrency.group` gives for its event; with `cancel-in-progress: false`
+//!    a run starts when its group runs nothing, else it waits, and a newer run of the group replaces the
+//!    one that waits (that one is cancelled, never started); with `true` it cancels the group's runs and
+//!    starts.
 //! `expanded` writes out each `${{ }}` of a job's lines the same way, with `steps.*` and `runner.*`
 //! as `<steps...>` and `<runner...>`, so a case reads the target a run builds.
 
@@ -38,7 +48,7 @@ const End = struct {
 
 /// The event of the run and how each job that runs ends.
 const Case = struct {
-    event: []const u8 = "schedule",
+    event: []const u8,
     ends: []const End = &.{},
 };
 
@@ -59,6 +69,8 @@ const Played = struct {
     messages: []const Message,
     /// the jobs whose publish step ran, in file order
     uploads: []const []const u8,
+    /// the jobs whose record (actions/cache/save) was saved, in file order
+    records: []const []const u8,
 
     fn resultOf(self: Played, name: []const u8) []const u8 {
         for (self.jobs) |d| if (std.mem.eql(u8, d.name, name)) return d.result;
@@ -71,7 +83,6 @@ const Played = struct {
     }
 };
 
-const VERDICT_JOBS = [_][]const u8{ "result", "result-macos-arm64" };
 
 fn unreadable(comptime fmt: []const u8, args: anytype) error{Unreadable} {
     std.debug.print("the play cannot read pypi.yml: " ++ fmt ++ "\n", args);
@@ -338,14 +349,14 @@ fn playSteps(ar: std.mem.Allocator, job: []const []const u8, scope: Scope, messa
 }
 
 fn isVerdict(name: []const u8) bool {
-    for (VERDICT_JOBS) |v| if (std.mem.eql(u8, v, name)) return true;
-    return false;
+    return std.mem.startsWith(u8, name, "result-");
 }
 
 fn play(ar: std.mem.Allocator, text: []const u8, case: Case) !Played {
     var done = std.ArrayList(Done).empty;
     var messages = std.ArrayList(Message).empty;
     var uploads = std.ArrayList([]const u8).empty;
+    var records = std.ArrayList([]const u8).empty;
     for (try reader.jobNames(ar, text)) |name| {
         var n: usize = 0;
         const job = (try reader.jobLines(ar, text, name, &n)).?;
@@ -374,6 +385,7 @@ fn play(ar: std.mem.Allocator, text: []const u8, case: Case) !Played {
         try done.append(ar, .{ .name = name, .result = end.result, .outputs = end.outputs });
         if (!std.mem.eql(u8, end.result, "success")) continue;
         for (try stepsOf(ar, job)) |step| {
+            if (reader.mentions(step, "uses: actions/cache/save@")) try records.append(ar, name);
             if (!reader.mentions(step, "uses: pypa/gh-action-pypi-publish@")) continue;
             const st = for (end.outputs) |o| {
                 if (std.mem.eql(u8, o[0], "state")) break o[1];
@@ -392,7 +404,7 @@ fn play(ar: std.mem.Allocator, text: []const u8, case: Case) !Played {
         } else return unreadable("the case names a job pypi.yml does not have: {s}", .{e.job});
         if (std.mem.eql(u8, d.result, "skipped")) return unreadable("the case says how {s} ends, and it was skipped", .{e.job});
     }
-    return .{ .jobs = try done.toOwnedSlice(ar), .messages = try messages.toOwnedSlice(ar), .uploads = try uploads.toOwnedSlice(ar) };
+    return .{ .jobs = try done.toOwnedSlice(ar), .messages = try messages.toOwnedSlice(ar), .uploads = try uploads.toOwnedSlice(ar), .records = try records.toOwnedSlice(ar) };
 }
 
 /// The lines of the job `name`, each `${{ }}` written out for the case (a job that needs nothing).
@@ -405,28 +417,165 @@ fn expanded(ar: std.mem.Allocator, text: []const u8, case: Case, name: []const u
     return out.toOwnedSlice(ar);
 }
 
+// ---- the push filter ------------------------------------------------------------------------------
+
+/// Whether `path` matches the filter pattern `pat`: `**` any characters, `*` any but `/`, the rest
+/// itself. A pattern with another special character is one the play cannot read.
+fn globMatch(pat: []const u8, path: []const u8) error{Unreadable}!bool {
+    if (pat.len == 0) return path.len == 0;
+    if (std.mem.indexOfScalar(u8, "?[]!+", pat[0]) != null) return unreadable("the paths-ignore pattern character {c}", .{pat[0]});
+    if (std.mem.startsWith(u8, pat, "**")) {
+        for (0..path.len + 1) |i| if (try globMatch(pat[2..], path[i..])) return true;
+        return false;
+    }
+    if (pat[0] == '*') {
+        var i: usize = 0;
+        while (true) : (i += 1) {
+            if (try globMatch(pat[1..], path[i..])) return true;
+            if (i == path.len or path[i] == '/') return false;
+        }
+    }
+    return path.len > 0 and path[0] == pat[0] and try globMatch(pat[1..], path[1..]);
+}
+
+/// Whether a push to main that changes `paths` starts a run: `on.push` is for main, and a push whose
+/// every path matches one of its `paths-ignore` patterns starts none.
+fn pushStarts(ar: std.mem.Allocator, text: []const u8, paths: []const []const u8) !bool {
+    var n: usize = 0;
+    const on = (try reader.topLines(ar, text, "on:", &n)) orelse return unreadable("no on:", .{});
+    const at = reader.lineAt(on, "  push:") orelse return false;
+    if (at + 1 >= on.len or !std.mem.eql(u8, on[at + 1], "    branches: [main]")) return unreadable("a push trigger that is not `branches: [main]`", .{});
+    var patterns = std.ArrayList([]const u8).empty;
+    var i = at + 2;
+    if (i < on.len and std.mem.eql(u8, on[i], "    paths-ignore:")) {
+        i += 1;
+        while (i < on.len and std.mem.startsWith(u8, on[i], "      - '") and std.mem.endsWith(u8, on[i], "'")) : (i += 1) {
+            try patterns.append(ar, on[i]["      - '".len .. on[i].len - 1]);
+        }
+    }
+    if (i < on.len and std.mem.startsWith(u8, on[i], "    ")) return unreadable("a push trigger line {s}", .{on[i]});
+    for (paths) |p| {
+        var ignored = false;
+        for (patterns.items) |pat| {
+            // every pattern is read, so one the play cannot read is refused whatever the path
+            const matched = try globMatch(pat, p);
+            ignored = ignored or matched;
+        }
+        if (!ignored) return true;
+    }
+    return false;
+}
+
+// ---- the concurrency ------------------------------------------------------------------------------
+
+/// One event of a sequence: a run starting (`event` set), or the run `run` ending.
+const Arrival = struct { run: []const u8, event: ?[]const u8 = null };
+
+fn arrive(run: []const u8, event: []const u8) Arrival {
+    return .{ .run = run, .event = event };
+}
+
+fn leave(run: []const u8) Arrival {
+    return .{ .run = run };
+}
+
+const Queued = struct {
+    /// the runs that started, in order
+    started: []const []const u8,
+    /// the runs cancelled, in order: a waiting run replaced, or a running one
+    cancelled: []const []const u8,
+};
+
+/// The runs of `arrivals` under the workflow's `concurrency:` (the header says how).
+fn queue(ar: std.mem.Allocator, text: []const u8, arrivals: []const Arrival) !Queued {
+    var n: usize = 0;
+    const conc = (try reader.topLines(ar, text, "concurrency:", &n)) orelse return unreadable("no concurrency:", .{});
+    var group: ?[]const u8 = null;
+    var cancel: ?bool = null;
+    for (conc) |l| {
+        if (std.mem.startsWith(u8, l, "  group: ")) {
+            group = l["  group: ".len..];
+        } else if (std.mem.eql(u8, l, "  cancel-in-progress: false")) {
+            cancel = false;
+        } else if (std.mem.eql(u8, l, "  cancel-in-progress: true")) {
+            cancel = true;
+        } else return unreadable("the concurrency line {s}", .{l});
+    }
+    const g = group orelse return unreadable("a concurrency without a group", .{});
+    const cancels = cancel orelse return unreadable("a concurrency without cancel-in-progress", .{});
+    const Slot = struct { name: []const u8, running: ?[]const u8 = null, waiting: ?[]const u8 = null };
+    var slots = std.ArrayList(Slot).empty;
+    var started = std.ArrayList([]const u8).empty;
+    var cancelled = std.ArrayList([]const u8).empty;
+    for (arrivals) |a| {
+        if (a.event) |event| {
+            const name = try expandLine(ar, g, .{ .case = .{ .event = event }, .needs = &.{}, .done = &.{} });
+            const slot = for (slots.items) |*s| {
+                if (std.mem.eql(u8, s.name, name)) break s;
+            } else blk: {
+                try slots.append(ar, .{ .name = name });
+                break :blk &slots.items[slots.items.len - 1];
+            };
+            if (cancels) {
+                if (slot.running) |r| try cancelled.append(ar, r);
+                if (slot.waiting) |w| try cancelled.append(ar, w);
+                slot.waiting = null;
+                slot.running = a.run;
+                try started.append(ar, a.run);
+            } else if (slot.running == null) {
+                slot.running = a.run;
+                try started.append(ar, a.run);
+            } else {
+                if (slot.waiting) |w| try cancelled.append(ar, w);
+                slot.waiting = a.run;
+            }
+            continue;
+        }
+        const slot = for (slots.items) |*s| {
+            if (s.running) |r| if (std.mem.eql(u8, r, a.run)) break s;
+        } else return unreadable("the case ends the run {s}, which is not running", .{a.run});
+        slot.running = slot.waiting;
+        slot.waiting = null;
+        if (slot.running) |r| try started.append(ar, r);
+    }
+    return .{ .started = try started.toOwnedSlice(ar), .cancelled = try cancelled.toOwnedSlice(ar) };
+}
+
 // ---- the cases ----------------------------------------------------------------------------------
 
 const V = "0.1.1513";
+const NEWER = "0.1.1514";
 const BUILT = End{ .job = "build", .outputs = &.{.{ "version", V }} };
-/// the macOS build found its file on both indexes and built nothing
+/// the macOS build found its file on TestPyPI and built nothing
 const MAC_NOTHING = End{ .job = "build-macos-arm64", .outputs = &.{.{ "version", "" }} };
 const MAC_BUILT = End{ .job = "build-macos-arm64", .outputs = &.{.{ "version", V }} };
+const PROMOTED = End{ .job = "promote", .outputs = &.{ .{ "version", V }, .{ "skipped", "" } } };
+const PROMOTED_SKIPPING = End{ .job = "promote", .outputs = &.{ .{ "version", V }, .{ "skipped", NEWER } } };
+const MAC_PROMOTED = End{ .job = "promote-macos-arm64", .outputs = &.{ .{ "version", V }, .{ "skipped", "" } } };
 
 fn state(comptime job: []const u8, comptime s: []const u8) End {
     return .{ .job = job, .outputs = &.{.{ "state", s }} };
 }
 
-const ALREADY = Message{ .kind = "notice", .title = "pypi", .text = "already published: komira " ++ V ++ " is on TestPyPI and PyPI with the bytes built; nothing was uploaded, and the smoke passed on both" };
-const DIFFERS = Message{ .kind = "notice", .title = "pypi", .text = "bytes differ at the same version: a commit that changed only documentation, which the stamp ignores; a code commit raises the version" };
-const MAC_ON_BOTH = Message{ .kind = "notice", .title = "pypi-macos-arm64", .text = "the macOS wheel of this version is on both indexes already: nothing was built on the Macs" };
+fn notice(comptime title: []const u8, comptime text: []const u8) Message {
+    return .{ .kind = "notice", .title = title, .text = text };
+}
 
 fn linuxError(comptime text: []const u8) Message {
     return .{ .kind = "error", .title = "pypi", .text = text };
 }
 
-const LINUX = [_][]const u8{ "build", "wheel-user-test", "testpypi", "testpypi-smoke", "pypi", "pypi-smoke", "result" };
-const MACOS_AFTER_BUILD = [_][]const u8{ "testpypi-macos-arm64", "testpypi-smoke-macos-arm64", "pypi-macos-arm64", "pypi-smoke-macos-arm64" };
+const ON_TESTPYPI = notice("pypi", "already on TestPyPI: komira " ++ V ++ " is on TestPyPI with the bytes built; nothing was uploaded, and the smoke passed");
+const DIFFERS = notice("pypi", "bytes differ at the same version: a commit that changed only what the stamp ignores changed the wheel; a code commit raises the version");
+const MAC_ON_TESTPYPI = notice("pypi-macos-arm64", "the macOS wheel of this version is on TestPyPI already: nothing was built on the Macs");
+const NOT_PROMOTED = notice("pypi", "not promoted: komira " ++ NEWER ++ " on TestPyPI has no record that its TestPyPI smoke passed (the smoke failed, or its run had not ended); komira " ++ V ++ " is the newest version that passed");
+const PUBLISHED = notice("pypi", "already published: komira " ++ V ++ " is on PyPI with the bytes TestPyPI served; nothing was uploaded, and the PyPI smoke passed");
+const MAC_PUBLISHED = notice("pypi-macos-arm64", "already published: the macOS wheel of komira " ++ V ++ " is on PyPI with the bytes TestPyPI served; nothing was uploaded, and the PyPI smoke passed");
+const STORAGE_PUSH = linuxError("an index holds over 80 percent of the size limit of komira (the summary of the job testpypi says which): prune old versions on TestPyPI or ask for a higher limit, docs/ci.md, Storage on the indexes");
+const STORAGE_PROMOTE = linuxError("an index holds over 80 percent of the size limit of komira (the summary of the job promote says which): prune old versions on TestPyPI or ask for a higher limit, docs/ci.md, Storage on the indexes");
+
+const PUSH_JOBS = [_][]const u8{ "build", "wheel-user-test", "testpypi", "testpypi-smoke", "testpypi-passed", "result-testpypi", "build-macos-arm64", "testpypi-macos-arm64", "testpypi-smoke-macos-arm64", "testpypi-passed-macos-arm64", "result-testpypi-macos-arm64" };
+const PROMOTE_JOBS = [_][]const u8{ "promote", "pypi", "pypi-smoke", "result-pypi", "promote-macos-arm64", "pypi-macos-arm64", "pypi-smoke-macos-arm64", "result-pypi-macos-arm64" };
 
 fn expectPlayed(p: Played, green: bool, results: []const [2][]const u8, messages: []const Message) !void {
     var ok = p.green() == green and p.messages.len == messages.len;
@@ -439,20 +588,29 @@ fn expectPlayed(p: Played, green: bool, results: []const [2][]const u8, messages
     if (ok) return;
     std.debug.print("the run ended {s}, wanted {s}\n", .{ if (p.green()) "green" else "red", if (green) "green" else "red" });
     for (p.jobs) |d| std.debug.print("  job {s}: {s}\n", .{ d.name, d.result });
+    for (results) |r| std.debug.print("  wanted job {s}: {s}\n", .{ r[0], r[1] });
     for (p.messages) |m| std.debug.print("  printed {s} {s}: {s}\n", .{ m.kind, m.title, m.text });
     for (messages) |m| std.debug.print("  wanted  {s} {s}: {s}\n", .{ m.kind, m.title, m.text });
     return error.WrongRun;
 }
 
-fn expectUploads(p: Played, want: []const []const u8) !void {
-    var ok = p.uploads.len == want.len;
+fn expectList(what: []const u8, got: []const []const u8, want: []const []const u8) !void {
+    var ok = got.len == want.len;
     if (ok) {
-        for (want, p.uploads) |w, g| ok = ok and std.mem.eql(u8, w, g);
+        for (want, got) |w, g| ok = ok and std.mem.eql(u8, w, g);
     }
     if (ok) return;
-    for (p.uploads) |u| std.debug.print("  uploaded in {s}\n", .{u});
-    for (want) |u| std.debug.print("  wanted an upload in {s}\n", .{u});
-    return error.WrongUploads;
+    for (got) |u| std.debug.print("  {s}: got {s}\n", .{ what, u });
+    for (want) |u| std.debug.print("  {s}: wanted {s}\n", .{ what, u });
+    return error.WrongList;
+}
+
+fn expectUploads(p: Played, want: []const []const u8) !void {
+    return expectList("an upload in", p.uploads, want);
+}
+
+fn expectRecords(p: Played, want: []const []const u8) !void {
+    return expectList("a record saved by", p.records, want);
 }
 
 /// Each of `names` with the result `result`, for expectPlayed.
@@ -462,135 +620,263 @@ fn all(ar: std.mem.Allocator, names: []const []const u8, result: []const u8) ![]
     return out.toOwnedSlice(ar);
 }
 
-test "a scheduled run on an unchanged main: both indexes say same, nothing uploads, both smokes run, green with the notice already published" {
+test "a push with a code change uploads to TestPyPI, smokes it and saves the record, and touches no PyPI job" {
     var arena = std.heap.ArenaAllocator.init(t.allocator);
     defer arena.deinit();
     const ar = arena.allocator();
     const text = try reader.readWorkflow(ar);
-    const p = try play(ar, text, .{ .ends = &.{ BUILT, state("testpypi", "same"), state("pypi", "same"), MAC_NOTHING } });
-    try expectPlayed(p, true, try all(ar, &LINUX, "success"), &.{ ALREADY, MAC_ON_BOTH });
-    try expectPlayed(p, true, try all(ar, &MACOS_AFTER_BUILD, "skipped"), &.{ ALREADY, MAC_ON_BOTH });
-    try t.expectEqualStrings("success", p.resultOf("result-macos-arm64"));
+    const ends = [_]End{ BUILT, state("testpypi", "absent"), MAC_BUILT, state("testpypi-macos-arm64", "absent") };
+    const p = try play(ar, text, .{ .event = "push", .ends = &ends });
+    try expectPlayed(p, true, try all(ar, &PUSH_JOBS, "success"), &.{});
+    try expectPlayed(p, true, try all(ar, &PROMOTE_JOBS, "skipped"), &.{});
+    try expectUploads(p, &.{ "testpypi", "testpypi-macos-arm64" });
+    try expectRecords(p, &.{ "testpypi-passed", "testpypi-passed-macos-arm64" });
+    // the half gates are what keep PyPI out of a push: without them the push would promote too
+    const main_only = "    if: github.ref == 'refs/heads/main'\n";
+    const promote_gate = "    if: github.ref == 'refs/heads/main' && github.event_name != 'push'\n";
+    const open = try reader.inJob(ar, try reader.inJob(ar, text, "promote", promote_gate, main_only), "pypi", promote_gate, main_only);
+    const both = ends ++ [_]End{ PROMOTED, state("pypi", "absent") };
+    try expectUploads(try play(ar, open, .{ .event = "push", .ends = &both }), &.{ "testpypi", "pypi", "testpypi-macos-arm64" });
+}
+
+test "a push that changes no code starts no run, and one that changes only what the stamp ignores uploads nothing" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const ar = arena.allocator();
+    const text = try reader.readWorkflow(ar);
+    // documentation alone, at any depth: no run; one path of code with it: a run
+    try t.expect(!try pushStarts(ar, text, &.{ "docs/ci.md", "docs/design/python_package.md", "python/README.md", "AGENTS.md" }));
+    try t.expect(try pushStarts(ar, text, &.{ "docs/ci.md", "src/engine/plan.mojo" }));
+    try t.expect(try pushStarts(ar, text, &.{"python/examples/quickstart.expected"}));
+    try t.expect(try pushStarts(ar, text, &.{".github/workflows/pypi.yml"}));
+    // without the `**.md` entry a README edit would start a run
+    try t.expect(try pushStarts(ar, try reader.replaced(ar, text, "      - '**.md'\n", ""), &.{"python/README.md"}));
+    // a push the stamp ignores but the filter lets through (a workflow file): the same version, `same`
+    // on TestPyPI, nothing uploaded, the smoke and the record again, green with the notice
+    const p = try play(ar, text, .{ .event = "push", .ends = &.{ BUILT, state("testpypi", "same"), MAC_NOTHING } });
+    try expectPlayed(p, true, &.{ .{ "testpypi-smoke", "success" }, .{ "testpypi-passed", "success" }, .{ "testpypi-macos-arm64", "skipped" } }, &.{ ON_TESTPYPI, MAC_ON_TESTPYPI });
     try expectUploads(p, &.{});
+    try expectRecords(p, &.{"testpypi-passed"});
     // an upload gate that lets `same` through would send the bytes again
-    const weak = try reader.inJob(ar, text, "pypi", "        if: steps.state.outputs.state == 'absent'\n", "        if: steps.state.outputs.state != 'differs'\n");
-    try expectUploads(try play(ar, weak, .{ .ends = &.{ BUILT, state("testpypi", "same"), state("pypi", "same"), MAC_NOTHING } }), &.{"pypi"});
+    const weak = try reader.inJob(ar, text, "testpypi", "        if: steps.state.outputs.state == 'absent'\n", "        if: steps.state.outputs.state != 'differs'\n");
+    try expectUploads(try play(ar, weak, .{ .event = "push", .ends = &.{ BUILT, state("testpypi", "same"), MAC_NOTHING } }), &.{"testpypi"});
 }
 
-test "a scheduled run after a documentation-only commit: the bytes differ, nothing uploads, no smoke runs, green with the notice of differing bytes" {
+test "a push whose wheel differs at the same version uploads nothing, smokes nothing, saves no record, and is green with the notice" {
     var arena = std.heap.ArenaAllocator.init(t.allocator);
     defer arena.deinit();
     const ar = arena.allocator();
     const text = try reader.readWorkflow(ar);
-    // TestPyPI differs: the user test of the wheel file ran and passed; no smoke, no PyPI job at all
-    const p = try play(ar, text, .{ .ends = &.{ BUILT, state("testpypi", "differs"), MAC_NOTHING } });
-    try expectPlayed(p, true, &.{ .{ "wheel-user-test", "success" }, .{ "testpypi", "success" }, .{ "testpypi-smoke", "skipped" }, .{ "pypi", "skipped" }, .{ "pypi-smoke", "skipped" }, .{ "result", "success" } }, &.{ DIFFERS, MAC_ON_BOTH });
-    // PyPI alone differs: its smoke is skipped, and the notice is the one of differing bytes, not already published
-    const q = try play(ar, text, .{ .ends = &.{ BUILT, state("testpypi", "same"), state("pypi", "differs"), MAC_NOTHING } });
-    try expectPlayed(q, true, &.{ .{ "testpypi-smoke", "success" }, .{ "pypi-smoke", "skipped" }, .{ "result", "success" } }, &.{ DIFFERS, MAC_ON_BOTH });
+    const p = try play(ar, text, .{ .event = "push", .ends = &.{ BUILT, state("testpypi", "differs"), MAC_NOTHING } });
+    try expectPlayed(p, true, &.{ .{ "testpypi-smoke", "skipped" }, .{ "testpypi-passed", "skipped" }, .{ "result-testpypi", "success" } }, &.{ DIFFERS, MAC_ON_TESTPYPI });
     try expectUploads(p, &.{});
-    try expectUploads(q, &.{});
+    try expectRecords(p, &.{});
 }
 
-test "a scheduled run after a code commit: the file is absent on both, both chains upload and smoke, green with no notice" {
+test "the daily run promotes the newest version that passed, naming the newer one that did not, and uploads it to PyPI alone" {
     var arena = std.heap.ArenaAllocator.init(t.allocator);
     defer arena.deinit();
     const ar = arena.allocator();
     const text = try reader.readWorkflow(ar);
-    const p = try play(ar, text, .{ .ends = &.{ BUILT, state("testpypi", "absent"), state("pypi", "absent"), MAC_BUILT, state("testpypi-macos-arm64", "absent"), state("pypi-macos-arm64", "absent") } });
-    try expectPlayed(p, true, try all(ar, &(LINUX ++ MACOS_AFTER_BUILD), "success"), &.{});
-    try expectUploads(p, &.{ "testpypi", "pypi", "testpypi-macos-arm64", "pypi-macos-arm64" });
+    const p = try play(ar, text, .{ .event = "schedule", .ends = &.{ PROMOTED_SKIPPING, state("pypi", "absent"), MAC_PROMOTED, state("pypi-macos-arm64", "absent") } });
+    try expectPlayed(p, true, try all(ar, &PROMOTE_JOBS, "success"), &.{NOT_PROMOTED});
+    try expectPlayed(p, true, try all(ar, &PUSH_JOBS, "skipped"), &.{NOT_PROMOTED});
+    try expectUploads(p, &.{ "pypi", "pypi-macos-arm64" });
+    try expectRecords(p, &.{});
+    // with nothing skipped there is no notice at all
+    const q = try play(ar, text, .{ .event = "schedule", .ends = &.{ PROMOTED, state("pypi", "absent"), MAC_PROMOTED, state("pypi-macos-arm64", "absent") } });
+    try expectPlayed(q, true, &.{}, &.{});
 }
 
-test "a run after one that stopped between the uploads: TestPyPI says same, PyPI absent, PyPI uploads, green without the notice already published" {
+test "a day whose newest version did not pass publishes nothing and says why; a version already on PyPI is not uploaded again" {
     var arena = std.heap.ArenaAllocator.init(t.allocator);
     defer arena.deinit();
     const ar = arena.allocator();
     const text = try reader.readWorkflow(ar);
-    const case = Case{ .ends = &.{ BUILT, state("testpypi", "same"), state("pypi", "absent"), MAC_NOTHING } };
-    const p = try play(ar, text, case);
-    try expectPlayed(p, true, try all(ar, &LINUX, "success"), &.{MAC_ON_BOTH});
-    try expectUploads(p, &.{"pypi"});
-    // the notice gated on TestPyPI alone would claim a version PyPI did not have
-    const one_index = try reader.replaced(ar, text, "        if: needs.testpypi.outputs.state == 'same' && needs.pypi.outputs.state == 'same'\n", "        if: needs.testpypi.outputs.state == 'same'\n");
-    try expectPlayed(try play(ar, one_index, case), true, &.{}, &.{ ALREADY, MAC_ON_BOTH });
+    // the newest that passed is on PyPI already (`same`): no upload, the PyPI smoke runs, both notices
+    inline for (.{ "schedule", "workflow_dispatch" }) |event| {
+        const p = try play(ar, text, .{ .event = event, .ends = &.{ PROMOTED_SKIPPING, state("pypi", "same"), MAC_PROMOTED, state("pypi-macos-arm64", "same") } });
+        try expectPlayed(p, true, &.{ .{ "pypi-smoke", "success" }, .{ "pypi-smoke-macos-arm64", "success" } }, &.{ NOT_PROMOTED, PUBLISHED, MAC_PUBLISHED });
+        try expectUploads(p, &.{});
+    }
+    // an upload gate that lets `same` through would upload a version PyPI holds
+    const weak = try reader.inJob(ar, text, "pypi", "        if: steps.state.outputs.state == 'absent'\n", "        if: steps.state.outputs.state != 'differs'\n");
+    try expectUploads(try play(ar, weak, .{ .event = "schedule", .ends = &.{ PROMOTED, state("pypi", "same"), MAC_PROMOTED, state("pypi-macos-arm64", "same") } }), &.{"pypi"});
+    // the notice gated on the promote job alone would claim a version PyPI was not asked about
+    const loose = try reader.replaced(ar, text, "        if: needs.pypi.outputs.state == 'same'\n", "        if: needs.promote.result == 'success'\n");
+    try expectPlayed(try play(ar, loose, .{ .event = "schedule", .ends = &.{ PROMOTED, state("pypi", "absent"), MAC_PROMOTED, state("pypi-macos-arm64", "absent") } }), true, &.{}, &.{PUBLISHED});
 }
 
-test "each failure of the Linux chain ends the run red, names the job, and prints no notice already published" {
+test "a promotion with no record, or one the promote job refused, publishes nothing and is red, naming the job" {
     var arena = std.heap.ArenaAllocator.init(t.allocator);
     defer arena.deinit();
     const ar = arena.allocator();
     const text = try reader.readWorkflow(ar);
-    const same = state("testpypi", "same");
-    const same_pypi = state("pypi", "same");
-    // the PyPI smoke fails on an unchanged main
-    try expectPlayed(try play(ar, text, .{ .ends = &.{ BUILT, same, same_pypi, .{ .job = "pypi-smoke", .result = "failure" }, MAC_NOTHING } }), false, &.{.{ "result", "failure" }}, &.{ linuxError("the PyPI smoke job did not succeed (pypi-smoke failure)"), MAC_ON_BOTH });
-    // the TestPyPI smoke fails: PyPI is never asked
-    try expectPlayed(try play(ar, text, .{ .ends = &.{ BUILT, same, .{ .job = "testpypi-smoke", .result = "failure" }, MAC_NOTHING } }), false, &.{ .{ "pypi", "skipped" }, .{ "pypi-smoke", "skipped" } }, &.{ linuxError("the TestPyPI smoke or the PyPI upload job did not succeed (testpypi-smoke failure, pypi skipped)"), MAC_ON_BOTH });
+    const p = try play(ar, text, .{ .event = "schedule", .ends = &.{ .{ .job = "promote", .result = "failure" }, MAC_PROMOTED, state("pypi-macos-arm64", "same") } });
+    try expectPlayed(p, false, &.{ .{ "pypi", "skipped" }, .{ "pypi-smoke", "skipped" }, .{ "result-pypi", "failure" }, .{ "result-pypi-macos-arm64", "success" } }, &.{ linuxError("the promote job did not succeed (promote failure): nothing was published to PyPI; its log says why"), MAC_PUBLISHED });
+    try expectUploads(p, &.{});
+    // the macOS promotion fails alone (no macOS wheel ever passed): the Linux one publishes and is green
+    const q = try play(ar, text, .{ .event = "schedule", .ends = &.{ PROMOTED, state("pypi", "absent"), .{ .job = "promote-macos-arm64", .result = "failure" } } });
+    try expectPlayed(q, false, &.{ .{ "result-pypi", "success" }, .{ "result-pypi-macos-arm64", "failure" } }, &.{.{ .kind = "error", .title = "pypi-macos-arm64", .text = "the macOS promote job did not succeed (promote-macos-arm64 failure): no macOS wheel was published to PyPI; its log says why" }});
+    try expectUploads(q, &.{"pypi"});
+}
+
+test "each failure of the promotion after the promote job ends the run red, names it, and prints no notice already published" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const ar = arena.allocator();
+    const text = try reader.readWorkflow(ar);
+    const mac = [_]End{ MAC_PROMOTED, state("pypi-macos-arm64", "same") };
+    // the upload job failed (an index error, or the upload refused)
+    try expectPlayed(try play(ar, text, .{ .event = "schedule", .ends = &([_]End{ PROMOTED, .{ .job = "pypi", .result = "failure" } } ++ mac) }), false, &.{.{ "pypi-smoke", "skipped" }}, &.{ linuxError("the PyPI upload job did not succeed (pypi failure)"), MAC_PUBLISHED });
+    // PyPI holds the version with other bytes: nothing uploaded, no smoke, red
+    const d = try play(ar, text, .{ .event = "schedule", .ends = &([_]End{ PROMOTED, state("pypi", "differs") } ++ mac) });
+    try expectPlayed(d, false, &.{.{ "pypi-smoke", "skipped" }}, &.{ linuxError("PyPI holds komira " ++ V ++ " with other bytes than TestPyPI serves: nothing was uploaded and PyPI was not smoked"), MAC_PUBLISHED });
+    try expectUploads(d, &.{});
+    // the PyPI smoke failed after an upload
+    try expectPlayed(try play(ar, text, .{ .event = "schedule", .ends = &([_]End{ PROMOTED, state("pypi", "absent"), .{ .job = "pypi-smoke", .result = "failure" } } ++ mac) }), false, &.{}, &.{ linuxError("the PyPI smoke job did not succeed (pypi-smoke failure)"), MAC_PUBLISHED });
+}
+
+test "two pushes while a run is going leave one waiting run, the newer; a push never replaces a waiting promotion" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const ar = arena.allocator();
+    const text = try reader.readWorkflow(ar);
+    // three merges: the first runs, the second waits and is replaced by the third, which runs next
+    const merges = [_]Arrival{ arrive("push-1", "push"), arrive("push-2", "push"), arrive("push-3", "push"), leave("push-1") };
+    const q = try queue(ar, text, &merges);
+    try expectList("started", q.started, &.{ "push-1", "push-3" });
+    try expectList("cancelled", q.cancelled, &.{"push-2"});
+    // a promotion starts while a push runs, and a push that lands while a manual run waits replaces nothing
+    const mixed = [_]Arrival{ arrive("push-1", "push"), arrive("daily", "schedule"), arrive("manual", "workflow_dispatch"), arrive("push-2", "push"), leave("daily"), leave("push-1") };
+    const m = try queue(ar, text, &mixed);
+    try expectList("started", m.started, &.{ "push-1", "daily", "manual", "push-2" });
+    try expectList("cancelled", m.cancelled, &.{});
+    // one group for both halves: a push that lands while a manual run waits would replace it
+    const waiting = [_]Arrival{ arrive("daily", "schedule"), arrive("manual", "workflow_dispatch"), arrive("push-1", "push") };
+    try expectList("cancelled", (try queue(ar, text, &waiting)).cancelled, &.{});
+    const one = try reader.replaced(ar, text, "  group: pypi-${{ github.event_name == 'push' && 'testpypi' || 'promote' }}\n", "  group: pypi\n");
+    try expectList("cancelled", (try queue(ar, one, &waiting)).cancelled, &.{"manual"});
+    // cancelling in progress: the second merge would cut the first one's upload short
+    const cut = try reader.replaced(ar, text, "  cancel-in-progress: false\n", "  cancel-in-progress: true\n");
+    try expectList("cancelled", (try queue(ar, cut, merges[0..3])).cancelled, &.{ "push-1", "push-2" });
+}
+
+test "each failure of the push chain ends the run red, names the job, saves no record and prints no notice" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const ar = arena.allocator();
+    const text = try reader.readWorkflow(ar);
     // the build fails: nothing after it runs
-    try expectPlayed(try play(ar, text, .{ .ends = &.{ .{ .job = "build", .result = "failure" }, MAC_NOTHING } }), false, &.{ .{ "wheel-user-test", "skipped" }, .{ "testpypi", "skipped" }, .{ "result", "failure" } }, &.{ linuxError("the build, the user test of the wheel or the TestPyPI upload job did not succeed (build failure, wheel-user-test skipped, testpypi skipped)"), MAC_ON_BOTH });
-    // the state of TestPyPI could not be asked (an index error): no state, the job failed
-    try expectPlayed(try play(ar, text, .{ .ends = &.{ BUILT, .{ .job = "testpypi", .result = "failure" }, MAC_NOTHING } }), false, &.{ .{ "testpypi-smoke", "skipped" }, .{ "result", "failure" } }, &.{ linuxError("the build, the user test of the wheel or the TestPyPI upload job did not succeed (build success, wheel-user-test success, testpypi failure)"), MAC_ON_BOTH });
+    try expectPlayed(try play(ar, text, .{ .event = "push", .ends = &.{ .{ .job = "build", .result = "failure" }, MAC_NOTHING } }), false, &.{ .{ "wheel-user-test", "skipped" }, .{ "testpypi", "skipped" }, .{ "result-testpypi", "failure" } }, &.{ linuxError("the build, the user test of the wheel or the TestPyPI upload job did not succeed (build failure, wheel-user-test skipped, testpypi skipped)"), MAC_ON_TESTPYPI });
+    // the state of TestPyPI could not be asked: the job failed, no state
+    try expectPlayed(try play(ar, text, .{ .event = "push", .ends = &.{ BUILT, .{ .job = "testpypi", .result = "failure" }, MAC_NOTHING } }), false, &.{.{ "testpypi-smoke", "skipped" }}, &.{ linuxError("the build, the user test of the wheel or the TestPyPI upload job did not succeed (build success, wheel-user-test success, testpypi failure)"), MAC_ON_TESTPYPI });
+    // the TestPyPI smoke fails on one Python: no record, so the version is never promoted
+    const s = try play(ar, text, .{ .event = "push", .ends = &.{ BUILT, state("testpypi", "absent"), .{ .job = "testpypi-smoke", .result = "failure" }, MAC_NOTHING } });
+    try expectPlayed(s, false, &.{.{ "testpypi-passed", "skipped" }}, &.{ linuxError("the TestPyPI smoke or the record job did not succeed (testpypi-smoke failure, testpypi-passed skipped): this version is never promoted to PyPI"), MAC_ON_TESTPYPI });
+    try expectRecords(s, &.{});
+    try expectUploads(s, &.{"testpypi"});
+    // a record job that did not wait for the smoke would record a version that failed it
+    const early = try reader.inJob(ar, text, "testpypi-passed", "    needs: [build, testpypi-smoke]\n", "    needs: [build, testpypi]\n");
+    try expectRecords(try play(ar, early, .{ .event = "push", .ends = &.{ BUILT, state("testpypi", "absent"), .{ .job = "testpypi-smoke", .result = "failure" }, MAC_NOTHING } }), &.{"testpypi-passed"});
 }
 
-test "a wheel that failed its user test is not uploaded: TestPyPI and PyPI are never asked, red, the job named" {
+test "a wheel that failed its user test is not uploaded: TestPyPI is never asked, red, the job named" {
     var arena = std.heap.ArenaAllocator.init(t.allocator);
     defer arena.deinit();
     const ar = arena.allocator();
     const text = try reader.readWorkflow(ar);
     const failed = End{ .job = "wheel-user-test", .result = "failure" };
-    const p = try play(ar, text, .{ .ends = &.{ BUILT, failed, MAC_NOTHING } });
-    try expectPlayed(p, false, &.{ .{ "build", "success" }, .{ "wheel-user-test", "failure" }, .{ "testpypi", "skipped" }, .{ "testpypi-smoke", "skipped" }, .{ "pypi", "skipped" }, .{ "pypi-smoke", "skipped" }, .{ "result", "failure" } }, &.{ linuxError("the build, the user test of the wheel or the TestPyPI upload job did not succeed (build success, wheel-user-test failure, testpypi skipped)"), MAC_ON_BOTH });
+    const p = try play(ar, text, .{ .event = "push", .ends = &.{ BUILT, failed, MAC_NOTHING } });
+    try expectPlayed(p, false, &.{ .{ "testpypi", "skipped" }, .{ "testpypi-smoke", "skipped" }, .{ "testpypi-passed", "skipped" }, .{ "result-testpypi", "failure" }, .{ "result-testpypi-macos-arm64", "success" } }, &.{ linuxError("the build, the user test of the wheel or the TestPyPI upload job did not succeed (build success, wheel-user-test failure, testpypi skipped)"), MAC_ON_TESTPYPI });
     try expectUploads(p, &.{});
-    // the macOS chain does not wait on the Linux user test
-    try t.expectEqualStrings("success", p.resultOf("result-macos-arm64"));
     // an upload that did not wait for the user test would send the failed wheel to TestPyPI
     const unguarded = try reader.inJob(ar, text, "testpypi", "    needs: [build, wheel-user-test]\n", "    needs: build\n");
-    try expectUploads(try play(ar, unguarded, .{ .ends = &.{ BUILT, failed, state("testpypi", "absent"), MAC_NOTHING } }), &.{"testpypi"});
+    try expectUploads(try play(ar, unguarded, .{ .event = "push", .ends = &.{ BUILT, failed, state("testpypi", "absent"), MAC_NOTHING } }), &.{"testpypi"});
 }
 
-test "a failed macOS build ends the run red and leaves the Linux chain green with its notice" {
+test "an index over 80 percent of its size limit ends a push run and a promotion red, the uploads still made" {
     var arena = std.heap.ArenaAllocator.init(t.allocator);
     defer arena.deinit();
     const ar = arena.allocator();
     const text = try reader.readWorkflow(ar);
-    const p = try play(ar, text, .{ .ends = &.{ BUILT, state("testpypi", "same"), state("pypi", "same"), .{ .job = "build-macos-arm64", .result = "failure" } } });
-    try expectPlayed(p, false, &.{ .{ "result", "success" }, .{ "result-macos-arm64", "failure" } }, &.{ ALREADY, .{ .kind = "error", .title = "pypi-macos-arm64", .text = "the macOS build job did not succeed (build-macos-arm64 failure)" } });
+    const full = End{ .job = "testpypi", .outputs = &.{ .{ "state", "absent" }, .{ "testpypi_storage", "true" }, .{ "pypi_storage", "false" } } };
+    const p = try play(ar, text, .{ .event = "push", .ends = &.{ BUILT, full, MAC_NOTHING } });
+    try expectPlayed(p, false, &.{.{ "result-testpypi", "failure" }}, &.{ STORAGE_PUSH, MAC_ON_TESTPYPI });
+    try expectUploads(p, &.{"testpypi"});
+    try expectRecords(p, &.{"testpypi-passed"});
+    // PyPI over its limit, in the promotion
+    const pfull = End{ .job = "promote", .outputs = &.{ .{ "version", V }, .{ "skipped", "" }, .{ "testpypi_storage", "false" }, .{ "pypi_storage", "true" } } };
+    const q = try play(ar, text, .{ .event = "schedule", .ends = &.{ pfull, state("pypi", "absent"), MAC_PROMOTED, state("pypi-macos-arm64", "same") } });
+    try expectPlayed(q, false, &.{.{ "result-pypi", "failure" }}, &.{ STORAGE_PROMOTE, MAC_PUBLISHED });
+    try expectUploads(q, &.{"pypi"});
+    // under the limit on both: green
+    const ok = End{ .job = "testpypi", .outputs = &.{ .{ "state", "absent" }, .{ "testpypi_storage", "false" }, .{ "pypi_storage", "false" } } };
+    try expectPlayed(try play(ar, text, .{ .event = "push", .ends = &.{ BUILT, ok, MAC_NOTHING } }), true, &.{}, &.{MAC_ON_TESTPYPI});
 }
 
-test "a scheduled run and a manual run build the one wheel and run the macOS chain; a read of an input is refused" {
+test "the macOS chain is its own in both halves: a failed macOS build or smoke is red and leaves the Linux chain green" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const ar = arena.allocator();
+    const text = try reader.readWorkflow(ar);
+    const p = try play(ar, text, .{ .event = "push", .ends = &.{ BUILT, state("testpypi", "same"), .{ .job = "build-macos-arm64", .result = "failure" } } });
+    try expectPlayed(p, false, &.{ .{ "result-testpypi", "success" }, .{ "result-testpypi-macos-arm64", "failure" } }, &.{ ON_TESTPYPI, .{ .kind = "error", .title = "pypi-macos-arm64", .text = "the macOS build job did not succeed (build-macos-arm64 failure)" } });
+    const s = try play(ar, text, .{ .event = "push", .ends = &.{ BUILT, state("testpypi", "same"), MAC_BUILT, state("testpypi-macos-arm64", "absent"), .{ .job = "testpypi-smoke-macos-arm64", .result = "failure" } } });
+    try expectPlayed(s, false, &.{ .{ "result-testpypi", "success" }, .{ "testpypi-passed-macos-arm64", "skipped" } }, &.{ ON_TESTPYPI, .{ .kind = "error", .title = "pypi-macos-arm64", .text = "the macOS TestPyPI smoke or the record job did not succeed (testpypi-smoke-macos-arm64 failure, testpypi-passed-macos-arm64 skipped): this macOS wheel is never promoted to PyPI" } });
+    try expectUploads(s, &.{"testpypi-macos-arm64"});
+    try expectRecords(s, &.{"testpypi-passed"});
+}
+
+test "a push builds the one wheel from the stamp; a read of an input is refused" {
     var arena = std.heap.ArenaAllocator.init(t.allocator);
     defer arena.deinit();
     const ar = arena.allocator();
     const text = try reader.readWorkflow(ar);
     const stamp = "-c komira.package_stamp=<steps.stamp.outputs.build_number> -c komira.package_commit=<steps.stamp.outputs.source_commit> -c komira.package_timestamp_ms=<steps.stamp.outputs.timestamp_ms>";
-    const ends_mac = [_]End{ BUILT, state("testpypi", "same"), state("pypi", "same"), MAC_NOTHING };
-    inline for (.{ "schedule", "workflow_dispatch" }) |event| {
-        const lines = try expanded(ar, text, .{ .event = event }, "build");
-        try t.expect(reader.has(lines, "          args: build " ++ stamp ++ " //python:komira_wheel[release] --out <runner.temp>/pypi/built/komira.whl"));
-        try t.expect(reader.has(lines, "          args: build " ++ stamp ++ " //python:wheel_install_test"));
-        try expectPlayed(try play(ar, text, .{ .event = event, .ends = &ends_mac }), true, &.{.{ "build-macos-arm64", "success" }}, &.{ ALREADY, MAC_ON_BOTH });
-    }
-    // a flavour read back in, in the build's target, the macOS gate or a verdict step: the run takes no input
-    try t.expectError(error.Unreadable, expanded(ar, try reader.replaced(ar, text, "//python:komira_wheel[release]", "//python:komira_wheel_${{ inputs.flavour || 'bundled' }}[release]"), .{}, "build"));
-    try t.expectError(error.Unreadable, play(ar, try reader.inJob(ar, text, "build-macos-arm64", "    if: github.ref == 'refs/heads/main'\n", "    if: github.ref == 'refs/heads/main' && (inputs.flavour || 'bundled') == 'bundled'\n"), .{ .ends = &ends_mac }));
-    try t.expectError(error.Unreadable, play(ar, try reader.replaced(ar, text, "        if: needs.build-macos-arm64.result != 'success'\n", "        if: (inputs.flavour || 'bundled') == 'bundled' && needs.build-macos-arm64.result != 'success'\n"), .{ .ends = &ends_mac }));
+    const lines = try expanded(ar, text, .{ .event = "push" }, "build");
+    try t.expect(reader.has(lines, "          args: build " ++ stamp ++ " //python:komira_wheel[release] --out <runner.temp>/pypi/built/komira.whl"));
+    try t.expect(reader.has(lines, "          args: build " ++ stamp ++ " //python:wheel_install_test"));
+    const ends = [_]End{ BUILT, state("testpypi", "absent"), MAC_NOTHING };
+    try t.expectError(error.Unreadable, expanded(ar, try reader.replaced(ar, text, "//python:komira_wheel[release]", "//python:komira_wheel_${{ inputs.flavour || 'bundled' }}[release]"), .{ .event = "push" }, "build"));
+    try t.expectError(error.Unreadable, play(ar, try reader.inJob(ar, text, "build-macos-arm64", "    if: github.ref == 'refs/heads/main' && github.event_name == 'push'\n", "    if: github.ref == 'refs/heads/main' && (inputs.flavour || 'bundled') == 'bundled'\n"), .{ .event = "push", .ends = &ends }));
 }
 
-test "the play refuses a workflow or a case it cannot read" {
+test "the plays refuse a workflow or a case they cannot read" {
     var arena = std.heap.ArenaAllocator.init(t.allocator);
     defer arena.deinit();
     const ar = arena.allocator();
     const text = try reader.readWorkflow(ar);
-    const ok = Case{ .ends = &.{ BUILT, state("testpypi", "same"), state("pypi", "same"), MAC_NOTHING } };
+    const ok = Case{ .event = "push", .ends = &.{ BUILT, state("testpypi", "same"), MAC_NOTHING } };
     // a context it does not know, a job it does not need, a status function in a verdict step
-    try t.expectError(error.Unreadable, play(ar, try reader.inJob(ar, text, "result", "    if: always() && github.ref == 'refs/heads/main'\n", "    if: always() && vars.X == 'y'\n"), ok));
-    try t.expectError(error.Unreadable, play(ar, try reader.replaced(ar, text, "needs.testpypi.outputs.state != 'differs' && needs.pypi.outputs.state != 'differs' && needs.pypi-smoke.result", "needs.testpypi.outputs.state != 'differs' && needs.pypi.outputs.state != 'differs' && needs.build-macos-arm64.result"), ok));
+    try t.expectError(error.Unreadable, play(ar, try reader.inJob(ar, text, "result-testpypi", "    if: always() && github.ref == 'refs/heads/main' && github.event_name == 'push'\n", "    if: always() && vars.X == 'y'\n"), ok));
+    try t.expectError(error.Unreadable, play(ar, try reader.replaced(ar, text, "        if: needs.testpypi.outputs.state == 'differs'\n", "        if: needs.build-macos-arm64.outputs.version == 'differs'\n"), ok));
     try t.expectError(error.Unreadable, play(ar, try reader.replaced(ar, text, "        if: needs.build.result != 'success' || needs.wheel-user-test.result != 'success' || needs.testpypi.result != 'success'\n", "        if: failure()\n"), ok));
     // a verdict step that is not one echo, and an echo of a name the step's env does not hold
-    try t.expectError(error.Unreadable, play(ar, try reader.replaced(ar, text, "(pypi-smoke $PYPI_SMOKE)\" && exit 1'", "(pypi-smoke $PYPI_SMOKE)\"; exit 1'"), .{ .ends = &.{ BUILT, state("testpypi", "same"), state("pypi", "same"), .{ .job = "pypi-smoke", .result = "failure" }, MAC_NOTHING } }));
-    try t.expectError(error.Unreadable, play(ar, try reader.replaced(ar, text, "komira $VERSION is on", "komira $RELEASE is on"), ok));
-    // a case for a job the file lacks, or for a job that was skipped
-    try t.expectError(error.Unreadable, play(ar, text, .{ .ends = &.{.{ .job = "publish" }} }));
-    try t.expectError(error.Unreadable, play(ar, text, .{ .ends = &.{ BUILT, state("testpypi", "differs"), state("pypi", "same") } }));
+    try t.expectError(error.Unreadable, play(ar, try reader.replaced(ar, text, "(pypi-smoke $PYPI_SMOKE)\" && exit 1'", "(pypi-smoke $PYPI_SMOKE)\"; exit 1'"), .{ .event = "schedule", .ends = &.{ PROMOTED, state("pypi", "absent"), .{ .job = "pypi-smoke", .result = "failure" }, MAC_PROMOTED } }));
+    try t.expectError(error.Unreadable, play(ar, try reader.replaced(ar, text, "komira $VERSION is on TestPyPI with", "komira $RELEASE is on TestPyPI with"), ok));
+    // a case for a job the file lacks, or for a job that was skipped (a PyPI job in a push run)
+    try t.expectError(error.Unreadable, play(ar, text, .{ .event = "push", .ends = &.{.{ .job = "publish" }} }));
+    try t.expectError(error.Unreadable, play(ar, text, .{ .event = "push", .ends = &.{ BUILT, state("testpypi", "absent"), state("pypi", "absent") } }));
+    // a push filter pattern the play does not know, a concurrency line it does not know, a run ended twice
+    try t.expectError(error.Unreadable, pushStarts(ar, try reader.replaced(ar, text, "      - '**.md'\n", "      - '!docs/keep.md'\n"), &.{"docs/x.md"}));
+    try t.expectError(error.Unreadable, queue(ar, try reader.replaced(ar, text, "  cancel-in-progress: false\n", "  cancel-in-progress: ${{ false }}\n"), &.{arrive("a", "push")}));
+    try t.expectError(error.Unreadable, queue(ar, text, &.{ arrive("a", "push"), leave("a"), leave("a") }));
+}
+
+test "the macOS promotion names its skipped versions, refuses other bytes on PyPI, and prints already published only when nothing failed" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const ar = arena.allocator();
+    const text = try reader.readWorkflow(ar);
+    const mac_skipping = End{ .job = "promote-macos-arm64", .outputs = &.{ .{ "version", V }, .{ "skipped", NEWER } } };
+    const skipped = notice("pypi-macos-arm64", "not promoted: the macOS wheel of komira " ++ NEWER ++ " on TestPyPI has no record that its TestPyPI smoke passed (the smoke failed, or its run had not ended); komira " ++ V ++ " is the newest version whose macOS wheel passed");
+    const p = try play(ar, text, .{ .event = "schedule", .ends = &.{ PROMOTED, state("pypi", "same"), mac_skipping, state("pypi-macos-arm64", "absent") } });
+    try expectPlayed(p, true, &.{.{ "result-pypi-macos-arm64", "success" }}, &.{ PUBLISHED, skipped });
+    try expectUploads(p, &.{"pypi-macos-arm64"});
+    const d = try play(ar, text, .{ .event = "schedule", .ends = &.{ PROMOTED, state("pypi", "same"), MAC_PROMOTED, state("pypi-macos-arm64", "differs") } });
+    try expectPlayed(d, false, &.{ .{ "pypi-smoke-macos-arm64", "skipped" }, .{ "result-pypi", "success" } }, &.{ PUBLISHED, .{ .kind = "error", .title = "pypi-macos-arm64", .text = "PyPI holds the macOS wheel of komira " ++ V ++ " with other bytes than TestPyPI serves: nothing was uploaded and PyPI was not smoked" } });
+    try expectUploads(d, &.{});
+    const s = try play(ar, text, .{ .event = "schedule", .ends = &.{ PROMOTED, state("pypi", "same"), MAC_PROMOTED, state("pypi-macos-arm64", "same"), .{ .job = "pypi-smoke-macos-arm64", .result = "failure" } } });
+    try expectPlayed(s, false, &.{}, &.{ PUBLISHED, .{ .kind = "error", .title = "pypi-macos-arm64", .text = "the macOS PyPI smoke job did not succeed (pypi-smoke-macos-arm64 failure)" } });
 }

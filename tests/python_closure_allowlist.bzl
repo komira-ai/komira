@@ -23,19 +23,14 @@ PYTHON_SURFACE = [
     # The Python package (pip install komira, import komira) and its tests
     # (docs/design/python_package.md).
     "python",
-    # The Python package's publish workflow: its smoke jobs set up the Python a
-    # user has (actions/setup-python) and pip-install the published wheel, the
-    # release gate (docs/ci.md, "pypi.yml: publishing the Python package").
-    # Its only python_closure finding is the setup-python `uses:` line (the run
-    # lines start with the driver).
+    # The Python package's publish workflow: its user-test jobs set up the Python
+    # a user has (actions/setup-python) and pip-install the wheel: from the file
+    # and from TestPyPI on every push to main that changes code, and from PyPI
+    # in each promotion (docs/ci.md, "pypi.yml: publishing the Python
+    # package"). It is the one
+    # workflow that runs Python; its only python_closure finding is the
+    # setup-python `uses:` line (the run lines start with the driver).
     ".github/workflows/pypi.yml",
-    # The release workflow's user test of the Python wheel on every merge
-    # (wheel-user-test): it sets up each supported Python a user has
-    # (actions/setup-python) and pip-installs the wheel file, as pypi.yml's
-    # job of the same name does before any upload (docs/ci.md, "The user test
-    # of the wheel"). Its only python_closure finding is that `uses:` line (the
-    # run line starts with the driver).
-    ".github/workflows/release.yml",
 ]
 
 PYTHON_CEILING = [

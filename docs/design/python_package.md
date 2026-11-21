@@ -241,7 +241,7 @@ visible from every thread, as a module-level name would be.
 
 The macOS arm64 wheel (`//python:komira_wheel_macos_arm64`, macOS 11 or later on Apple silicon, tagged
 `py3-none-macosx_11_0_arm64`) is built from its own `[dist]` directory and its own pinned compiler. It is built
-and tested only by the release workflow, never in a pull request (`//python:wheel_install_test_macos_arm64`, on
+and tested only by pypi.yml, never in a pull request (`//python:wheel_install_test_macos_arm64`, on
 the farm's macOS workers), and a run publishes it only from main.
 
 - An installed package loads `komira/_lib/libkomira.so`. The wheel carries
@@ -378,7 +378,7 @@ Changelog = "https://github.com/komira-ai/komira/blob/main/python/CHANGELOG.md"
   repository; no internal host, no private repository, no address. The public-boundary lint reads
   `python/` like every file of the cell.
 - **Only what is true.** The `Operating System` classifiers name the release platforms, each of which
-  gets its wheel only after that wheel's install test passes on that platform (in the release workflow
+  gets its wheel only after that wheel's install test passes on that platform (in pypi.yml
   for macOS, never in a pull request's check). The CPython classifiers name the interpreters the
   package's tests run: 3.11, 3.12, 3.13 and 3.14, each pinned in
   [third_party/python](../../third_party/python/README.md) and listed once in

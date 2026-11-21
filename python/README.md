@@ -138,8 +138,8 @@ version) and on macOS arm64. Everything else is read from it:
   `<name>_py312` and `<name>_py314` on the others;
 - `//python:supported_pythons[linux-x86_64]` and `[macos-arm64]`, the exact
   versions as JSON lists, from which `pypi_smoke matrix` writes the job matrix
-  of the wheel's user test (release.yml and pypi.yml) and of pypi.yml's index
-  smoke: one job per version. `//python/smoke:supported_pythons_lists` holds both
+  of the wheel's user test and of the index smoke (both in pypi.yml): one job
+  per version. `//python/smoke:supported_pythons_lists` holds both
   lists to the versions it writes out.
 
 Adding a minor is a line in `pythons.bzl` and its interpreter's pin in
