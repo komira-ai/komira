@@ -15,6 +15,7 @@ import sys
 import komira
 from komira import KomiraError
 from komira import _native
+from runtime_site import runtime_site
 
 
 def main(args):
@@ -25,7 +26,7 @@ def main(args):
     # action started, and the loader reports the absolute path.
     directory = os.path.abspath(os.path.join(arg("--lib-dir"), arg("--fake")))
     version = int(arg("--version"))
-    native = _native.load(directory, search_path=[os.path.abspath(arg("--runtime-dir"))])
+    native = _native.load(directory, search_path=[runtime_site(os.path.abspath(arg("--runtime-dir")))])
     assert native.abi_version == version, native.abi_version
     assert komira.abi_version() == version
     assert "komira_sql_stream" not in _native._FUNCTIONS
