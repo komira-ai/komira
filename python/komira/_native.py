@@ -8,11 +8,12 @@ into `KomiraError`, with the context's last error, read with the two-call
 protocol, as the message.
 
 Before the library is opened, `load` calls two hooks: `_check_cpu()` here and
-`_runtime._preload_runtime_libraries(search_path)`; an error either raises
+`_runtime._preload_runtime_libraries(search_path=...)`; an error either raises
 stops the load before the library is mapped. `_check_cpu` refuses, on Linux
 x86_64, a CPU without the flags of x86-64-v3, the level libkomira is compiled
 for there, with `UnsupportedCpuError`: an older CPU would otherwise die of an
-illegal instruction inside the library. The preload hook does nothing yet.
+illegal instruction inside the library. The preload hook opens the Mojo
+runtime libraries libkomira needs.
 
 The library is found only where `load` is told: the directory a test passes
 (`--lib-dir` of a `python_binding_test`), or, with no directory, the
@@ -363,8 +364,8 @@ def load(
     first load that succeeds is kept: a later call naming the same file
     returns the same `Native`, and one naming another file is refused, since a
     process holds one library. A refused load leaves nothing loaded.
-    `search_path` is handed to the runtime preload hook; tests pass the
-    directory of the Mojo runtime libraries.
+    `search_path` is handed to the runtime preload hook: the directories it
+    looks in for `modular/lib/`, `sys.path` when None; tests pass their own.
     """
     global _loaded
     with _lock:
@@ -379,7 +380,7 @@ def load(
                 "libkomira is already loaded from {}; it cannot also be loaded from {}".format(_loaded.path, path)
             )
         _check_cpu()
-        _runtime._preload_runtime_libraries(search_path)
+        _runtime._preload_runtime_libraries(search_path=search_path)
         try:
             lib = ctypes.CDLL(path)
         except OSError as e:
