@@ -348,7 +348,8 @@ instead. The rest of this section is about `release-macos.yml`.
 
 - **Not in a pull request.** `pr.yml` (and `coverage.yml`, the other workflow that
   runs on a pull request) pass no macOS worker set to the farm connection and name
-  no darwin platform or runner, and `//ci:pr` is built for the client's own platform
+  no darwin platform or runner (beyond the analysis below, which builds nothing), and
+  `//ci:pr` is built for the client's own platform
   only: none of the targets it reaches has a macOS execution platform. A
   `cquery` of `attrregexfilter(exec_compatible_with, "macos", deps(//ci:pr))` is
   empty, and the same query for `--target-platforms
@@ -361,6 +362,20 @@ instead. The rest of this section is about `release-macos.yml`.
   `target_compatible_with = DARWIN_ARM64` (limit `pypi-wheel-macos-arm64` in
   `tools/build/platforms/limits.tsv`), so it builds only with `--target-platforms
   komira//tools/build/platforms:darwin-arm64`, which only `pypi.yml` passes.
+- **Analysed in every pull request, built in none.** What fails before anything is built
+  (a target of the set's closure incompatible with darwin-arm64, a toolchain with no
+  execution platform, a rule that fails at analysis) is found in the pull request that
+  causes it: the last buck2 step of `pr.yml` runs
+  `bxl --config-file release/darwin_analysis.buckconfig komira//release/darwin_analysis.bxl:check`,
+  which configures `//release:mopm_darwin_libs` for darwin-arm64 and analyses it, with its
+  whole closure, as the release's build would. Configuring and analysing run no action, so
+  nothing is built for macOS and no macOS worker is asked for anything; the config file
+  registers the macOS execution platform with a property set that names no worker, which
+  configuration needs and nothing uses. The step fails with buck2's own message, naming the
+  target and the dependency. A failure that only a build shows (a compile, a welded test)
+  is still seen first by `release-macos.yml`. `//:release_macos_cases` holds that this
+  step is in `pr.yml` once, through the `buck2-farm` action with its assertion, and that it
+  is the only line of a pull request workflow that names the macOS set.
 - **On the farm's Macs, not a hosted runner.** The job runs on the same ubuntu
   runner as the others and asks the farm: `farm-connect` with the macOS worker set
   and hosts (the repository variables above), then
@@ -396,9 +411,13 @@ instead. The rest of this section is about `release-macos.yml`.
   `release-macos-result` (`needs: release-macos`, `if: always()`), fails with "the macOS build
   did not run" when the build job was skipped, and with "did not pass" when it failed, so the
   run list, the commit status and the badge never read green for a Mac build that did not
-  pass. The farm connection refuses when a repository variable is empty (for the macOS
-  set, `FARM_DARWIN_ARM64_PROPERTIES` and `FARM_DARWIN_MACOS_HOSTS` go together), and that is a
-  failed run too. The set has not yet been measured on the macOS workers, and the publish must
+  pass. Its message says what happened rather than guessing: when a buck2 step failed (the build
+  of the set, or of the Python harness tests), `//release/ci:buck2_failure` (built before them)
+  reads that step's buck2 output and the message is buck2's own lines after `BUILD FAILED`
+  (also written to the run's summary);
+  when an earlier step failed, the message names it. The farm connection refuses when a
+  repository variable is empty (for the macOS set, `FARM_DARWIN_ARM64_PROPERTIES` and
+  `FARM_DARWIN_MACOS_HOSTS` go together), and that is a failed run too. The set has not yet been measured on the macOS workers, and the publish must
   not wait on a platform the release does not ship. When the set is green over several runs,
   move the job back into `release.yml` as a `needs` of `prod-commit` (or keep the workflow
   and have the publish wait on it).
