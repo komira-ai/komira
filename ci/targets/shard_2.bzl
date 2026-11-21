@@ -99,6 +99,7 @@ TARGETS = [
     "komira//tools/build/ci/fixture/agg:agg_missing",
     "komira//tools/build/ci/fixture/platforms:linux_arm64",
     "komira//tools/build/ci/fixture/platforms:macos_x86_64",
+    "komira//tools/build/ci:change",
     "komira//tools/build/ci:lock_graphs",
     "komira//tools/build/ci:release_beta_fetch_unit",
     "komira//tools/build/ci:release_beta_version",

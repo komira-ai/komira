@@ -39,6 +39,31 @@ zig_exe(
     visibility = ["PUBLIC"],
 )
 
+# change: writes the change of the pull request's check (pr.yml, step `the change`), the files it
+# touches and the coverage holds of both sides, against the base of its event: HEAD^1 of a pull
+# request's merge commit, a merge group's base_sha (change/change.zig says what it runs and
+# refuses). The pull request's check builds it on the farm and runs it on the runner, in the
+# checkout. Its cases run the whole selection against a fake git in a scratch directory; welded:
+# the tool is built only when they pass.
+zig_test(
+    name = "change_unit",
+    exec_compatible_with = LINUX_X86_64,
+    src = "change/change_test.zig",
+    imports = ["change/change.zig"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
+)
+
+zig_exe(
+    name = "change",
+    exec_compatible_with = LINUX_X86_64,
+    src = "change/change.zig",
+    unit_tests = [":change_unit", "komira//tools/build/toolchains:zig_next_version"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
+    visibility = ["PUBLIC"],
+)
+
 # The recorded buck2 output of assert_remote's cases, as a directory, for the
 # cases of the CI action that runs it (//:buck2_farm_cases).
 export_file(

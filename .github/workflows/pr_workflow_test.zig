@@ -15,9 +15,10 @@
 //!    of one event's run;
 //!  - the concurrency group falls back to the ref when there is no pull request number, so merge groups
 //!    never share one group and cancel each other;
-//!  - the change base is HEAD^1 of a pull request's merge commit and the base_sha of a merge group,
-//!    any other event stops the step, and the diff and the coverage holds read that base; the job
-//!    never reads the moving `pull_request.base.sha`;
+//!  - the change is written by the change tool (tools/build/ci/change, whose own cases run its choice
+//!    of base: HEAD^1 of a pull request's merge commit, the base_sha of a merge group): the job builds
+//!    the tool before the step, and the step runs it alone, with the event, the merge group's
+//!    base_sha and the output directory; the job never reads the moving `pull_request.base.sha`;
 //!  - the job's `timeout-minutes` is below the queue's `check_response_timeout_minutes` that docs/ci.md
 //!    sets, so a stalled check ends red before the queue gives up on it;
 //!  - no other workflow has a job `check`, so the required context has one source.
@@ -37,11 +38,10 @@ const ON = [_][]const u8{
 const CONDITION = "    if: github.event_name == 'merge_group' || github.event.pull_request.head.repo.full_name == github.repository";
 const GROUP = "pr-${{ github.event.pull_request.number || github.ref }}";
 const GROUP_BASE = "          GROUP_BASE: ${{ github.event.merge_group.base_sha }}";
-const CASE_PR = "            pull_request) git rev-parse --verify --quiet HEAD^2 > /dev/null || { echo \"::error::the change base is the merge commit's first parent, and HEAD is not a merge commit\"; exit 1; }; base=HEAD^1 ;;";
-const CASE_GROUP = "            merge_group) git merge-base --is-ancestor \"$GROUP_BASE\" HEAD || { echo \"::error::the change base is the merge group's base_sha, and '$GROUP_BASE' is not an ancestor of HEAD\"; exit 1; }; base=$GROUP_BASE ;;";
-const CASE_OTHER = "            *) echo \"::error::the check runs on a pull request or a merge group, not on $GITHUB_EVENT_NAME\"; exit 1 ;;";
-const DIFF = "          git diff --no-renames --name-only \"$base\"...HEAD > \"$RUNNER_TEMP/changed.txt\"";
-const HELD = "          git grep -n '' \"$base\" HEAD -- '*coverage_held' > \"$RUNNER_TEMP/held.txt\"";
+const BUILD_CHANGE = "        run: echo \"path=$(./buck2 build komira//tools/build/ci:change --show-full-simple-output)\" >> \"$GITHUB_OUTPUT\"";
+const CHANGE_ID = "        id: change";
+const CHANGE_PATH = "          CHANGE: ${{ steps.change.outputs.path }}";
+const RUN_CHANGE = "        run: '\"$CHANGE\" --event \"$GITHUB_EVENT_NAME\" --group-base \"$GROUP_BASE\" --out \"$RUNNER_TEMP\"'";
 const QUEUE_TIMEOUT_KEY = "\"check_response_timeout_minutes\": ";
 
 fn indentOf(line: []const u8) usize {
@@ -178,12 +178,18 @@ fn checkPr(ar: std.mem.Allocator, text: []const u8, doc: []const u8) !?[]const u
     const group = (try concurrencyValue(ar, text, "group")) orelse return "pr.yml has no concurrency group";
     if (!std.mem.eql(u8, group, GROUP)) return "pr.yml's concurrency group is not the pull request number with the ref as fallback: merge groups would share one group and cancel each other";
 
+    const tool = stepLines(job, "name: build the change tool") orelse return "the job check does not build the change tool";
+    if (!has(tool, CHANGE_ID) or !has(tool, BUILD_CHANGE)) return "the job check does not build the change tool";
     const change = stepLines(job, "name: the change") orelse return "the job check has no step the change";
     if (!has(change, GROUP_BASE)) return "the step the change does not read the merge group's base_sha";
-    if (!has(change, CASE_PR)) return "the step the change does not take HEAD^1 of a merge commit as a pull request's base";
-    if (!has(change, CASE_GROUP)) return "the step the change does not take an ancestor base_sha as a merge group's base";
-    if (!has(change, CASE_OTHER)) return "the step the change goes on for an event that is neither a pull request nor a merge group";
-    if (!has(change, DIFF) or !has(change, HELD)) return "the step the change does not read the diff and the coverage holds against the base it chose";
+    // the base of each event is chosen by the tool (tools/build/ci/change, whose cases run it);
+    // the step runs it, and nothing else, with the event, the group base and where to write
+    var runs: usize = 0;
+    for (change) |line| {
+        if (std.mem.startsWith(u8, std.mem.trimLeft(u8, line, " "), "run:")) runs += 1;
+    }
+    if (runs != 1 or !has(change, CHANGE_PATH) or !has(change, RUN_CHANGE)) return "the step the change does not run the change tool, alone, with the event, the group base and the output directory";
+    if (@intFromPtr(tool.ptr) > @intFromPtr(change.ptr)) return "the job check runs the change before it builds the change tool";
     if (mentions(job, "pull_request.base.sha")) return "the job check reads pull_request.base.sha, which is main when the event fired, not the change base";
 
     const minutes = (try jobMinutes(job)) orelse return "the job check has no timeout-minutes";
@@ -213,6 +219,16 @@ fn replaced(ar: std.mem.Allocator, text: []const u8, from: []const u8, to: []con
         return error.NoAnchor;
     }
     return std.mem.replaceOwned(u8, ar, text, from, to);
+}
+
+/// `text` with the step that starts at `step` (up to the next step) moved to just before `before`.
+fn moved(ar: std.mem.Allocator, text: []const u8, step: []const u8, before: []const u8) ![]const u8 {
+    const start = std.mem.indexOf(u8, text, step) orelse return error.NoAnchor;
+    const rest = text[start + step.len ..];
+    const end = start + step.len + (std.mem.indexOf(u8, rest, "\n      - ") orelse return error.NoAnchor) + 1;
+    const block = text[start..end];
+    const without = try std.mem.concat(ar, u8, &.{ text[0..start], text[end..] });
+    return replaced(ar, without, before, try std.mem.concat(ar, u8, &.{ block, before }));
 }
 
 fn expectRefused(ar: std.mem.Allocator, text: []const u8, doc: []const u8, want: []const u8) !void {
@@ -281,11 +297,16 @@ test "each edit of the real pr.yml that leaves a merge group without the check i
     try expectRefused(ar, try replaced(ar, pr, "  group: " ++ GROUP ++ "\n", ""), doc, "has no concurrency group");
     // the change base
     try expectRefused(ar, try replaced(ar, pr, GROUP_BASE ++ "\n", "          GROUP_BASE: ${{ github.event.merge_group.head_sha }}\n"), doc, "does not read the merge group's base_sha");
-    try expectRefused(ar, try replaced(ar, pr, CASE_PR ++ "\n", "            pull_request) base=HEAD^1 ;;\n"), doc, "HEAD^1 of a merge commit");
-    try expectRefused(ar, try replaced(ar, pr, CASE_GROUP ++ "\n", "            merge_group) base=HEAD^1 ;;\n"), doc, "an ancestor base_sha");
-    try expectRefused(ar, try replaced(ar, pr, CASE_OTHER ++ "\n", "            *) base=HEAD^1 ;;\n"), doc, "neither a pull request nor a merge group");
-    try expectRefused(ar, try replaced(ar, pr, DIFF ++ "\n", "          git diff --no-renames --name-only HEAD^1...HEAD > \"$RUNNER_TEMP/changed.txt\"\n"), doc, "against the base it chose");
-    try expectRefused(ar, try replaced(ar, pr, HELD ++ "\n", "          git grep -n '' HEAD^1 HEAD -- '*coverage_held' > \"$RUNNER_TEMP/held.txt\"\n"), doc, "against the base it chose");
+    // the change tool: built, and run alone with the event, the group base and the output directory
+    try expectRefused(ar, try replaced(ar, pr, "      - name: build the change tool\n", "      - name: build the tools\n"), doc, "does not build the change tool");
+    try expectRefused(ar, try replaced(ar, pr, BUILD_CHANGE ++ "\n", "        run: echo \"path=$(./buck2 build komira//tools/build/ci:assert_remote --show-full-simple-output)\" >> \"$GITHUB_OUTPUT\"\n"), doc, "does not build the change tool");
+    try expectRefused(ar, try replaced(ar, pr, CHANGE_ID ++ "\n", "        id: tool\n"), doc, "does not build the change tool");
+    try expectRefused(ar, try replaced(ar, pr, RUN_CHANGE ++ "\n", "        run: '\"$CHANGE\" --event pull_request --group-base \"$GROUP_BASE\" --out \"$RUNNER_TEMP\"'\n"), doc, "does not run the change tool");
+    try expectRefused(ar, try replaced(ar, pr, RUN_CHANGE ++ "\n", "        run: '\"$CHANGE\" --event \"$GITHUB_EVENT_NAME\" --group-base \"\" --out \"$RUNNER_TEMP\"'\n"), doc, "does not run the change tool");
+    try expectRefused(ar, try replaced(ar, pr, RUN_CHANGE ++ "\n", "        run: git diff --name-only HEAD^1...HEAD > \"$RUNNER_TEMP/changed.txt\"\n"), doc, "does not run the change tool");
+    try expectRefused(ar, try replaced(ar, pr, RUN_CHANGE ++ "\n", RUN_CHANGE ++ "\n        run: git diff --name-only HEAD^1...HEAD > \"$RUNNER_TEMP/changed.txt\"\n"), doc, "does not run the change tool");
+    try expectRefused(ar, try replaced(ar, pr, CHANGE_PATH ++ "\n", "          CHANGE: ./change\n"), doc, "does not run the change tool");
+    try expectRefused(ar, try moved(ar, pr, "      - name: build the change tool\n", "      - name: select the affected targets\n"), doc, "before it builds the change tool");
     try expectRefused(ar, try replaced(ar, pr, "      - name: the change\n", "      - name: the files\n"), doc, "has no step the change");
     try expectRefused(ar, try replaced(ar, pr, GROUP_BASE ++ "\n", GROUP_BASE ++ "\n          PR_BASE: ${{ github.event.pull_request.base.sha }}\n"), doc, "reads pull_request.base.sha");
     // the job's bound against the queue's

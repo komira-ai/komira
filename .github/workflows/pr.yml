@@ -10,7 +10,8 @@
 # merges it when this job is green there. The job reports under the same name
 # for both events; a required check that never reported on a merge group would
 # hold the queue until its timeout (//:pr_workflow_cases holds the trigger, the
-# job's condition, the concurrency group and the change base of both events).
+# job's condition, the concurrency group and the step that writes the change;
+# //tools/build/ci:change chooses the change base of each event).
 #
 # The job runs named Buck2 targets on the farm and nothing else:
 #   1. the files the change touches (`git diff` of the commit checked out against
@@ -29,7 +30,8 @@
 #   5. `test` of the list's standalone tests.
 # Every Buck2 step is the buck2-farm action (.github/actions/buck2-farm), which
 # fails the step unless buck2 succeeded and no action ran on the runner. The
-# one other `./buck2 build` is that action's own tool.
+# two other `./buck2 build`s are that action's own tool and the tool that
+# writes the change.
 #
 # The change base of a pull request is the first parent of the merge commit
 # checked out: exactly the main the pull request is merged into, so the change
@@ -112,22 +114,22 @@ jobs:
       - name: build the farm assertion
         id: assert
         run: echo "path=$(./buck2 build komira//tools/build/ci:assert_remote --show-full-simple-output)" >> "$GITHUB_OUTPUT"
+      # The tool that writes the change (tools/build/ci/change), built on the
+      # farm like the assertion; its path is the step's output.
+      - name: build the change tool
+        id: change
+        run: echo "path=$(./buck2 build komira//tools/build/ci:change --show-full-simple-output)" >> "$GITHUB_OUTPUT"
       # The change: the files the pull request (or the merge group) touches
       # (renames as a delete and an add) and the coverage holds of the base and
-      # of the head. The base: a pull request's is HEAD^1, and HEAD must be the
-      # merge commit; a merge group's is its base_sha, which must be an
-      # ancestor of HEAD. Any other event stops here.
+      # of the head, into changed.txt and held.txt. The base: a pull request's
+      # is HEAD^1, and HEAD must be the merge commit; a merge group's is its
+      # base_sha, which must be an ancestor of HEAD. Any other event stops here
+      # (change.zig).
       - name: the change
         env:
+          CHANGE: ${{ steps.change.outputs.path }}
           GROUP_BASE: ${{ github.event.merge_group.base_sha }}
-        run: |
-          case "$GITHUB_EVENT_NAME" in
-            pull_request) git rev-parse --verify --quiet HEAD^2 > /dev/null || { echo "::error::the change base is the merge commit's first parent, and HEAD is not a merge commit"; exit 1; }; base=HEAD^1 ;;
-            merge_group) git merge-base --is-ancestor "$GROUP_BASE" HEAD || { echo "::error::the change base is the merge group's base_sha, and '$GROUP_BASE' is not an ancestor of HEAD"; exit 1; }; base=$GROUP_BASE ;;
-            *) echo "::error::the check runs on a pull request or a merge group, not on $GITHUB_EVENT_NAME"; exit 1 ;;
-          esac
-          git diff --no-renames --name-only "$base"...HEAD > "$RUNNER_TEMP/changed.txt"
-          git grep -n '' "$base" HEAD -- '*coverage_held' > "$RUNNER_TEMP/held.txt"
+        run: '"$CHANGE" --event "$GITHUB_EVENT_NAME" --group-base "$GROUP_BASE" --out "$RUNNER_TEMP"'
       - name: select the affected targets
         uses: ./.github/actions/buck2-farm
         with:
