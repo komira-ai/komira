@@ -27,7 +27,10 @@
 #      test_weld and graph_check lints, the completeness guard of //ci:pr, the
 #      guard that it reaches no Python, and the cases of the selector and the
 #      guard;
-#   5. `test` of the list's standalone tests.
+#   5. `test` of the list's standalone tests;
+#   6. the configuration and analysis of the release's macOS set, for its
+#      platform, on this runner: no action runs, so nothing is built for macOS
+#      and no macOS worker is asked for anything (release/darwin_analysis.bxl).
 # Every Buck2 step is the buck2-farm action (.github/actions/buck2-farm), which
 # fails the step unless buck2 succeeded and no action ran on the runner. The
 # two other `./buck2 build`s are that action's own tool and the tool that
@@ -234,6 +237,21 @@ jobs:
         uses: ./.github/actions/buck2-farm
         with:
           args: test @${{ runner.temp }}/test_targets.txt
+          assert-remote: ${{ steps.assert.outputs.path }}
+      # The release's macOS set (//release:mopm_darwin_libs, built only by
+      # release-macos.yml on the farm's macOS workers) configured for darwin-arm64
+      # and analysed, with its whole closure: a change that makes it fail before
+      # anything is built fails here, in its own pull request. Configuring and
+      # analysing run no action, so nothing is built for macOS; the config file
+      # registers the macOS execution platform with a property set that names no
+      # worker (release/darwin_analysis.buckconfig). Last, because the config file
+      # changes the daemon's configuration; it runs whenever the farm assertion
+      # was built, so a red build above does not hide its answer.
+      - name: the Mac release set configures and analyses
+        if: ${{ !cancelled() && steps.assert.outcome == 'success' }}
+        uses: ./.github/actions/buck2-farm
+        with:
+          args: bxl --config-file release/darwin_analysis.buckconfig komira//release/darwin_analysis.bxl:check
           assert-remote: ${{ steps.assert.outputs.path }}
       - name: Stop buck2
         if: always()
