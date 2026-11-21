@@ -5,7 +5,8 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # and the binder so far: output-column names, operator lowering, parquet facts and name scopes (sql_bind_names, sql_bind_interval, sql_bind_ops, sql_bind_parquet, sql_bind_scope),
 # the expression binder (sql_bind_expr, sql_bind_decimal, sql_bind_call, sql_bind_cast, sql_bind_fn_args, sql_bind_fn_nested, sql_bind_timestamp),
 # the aggregate, window and ORDER BY binders (sql_bind_agg_expr, sql_bind_aggregate, sql_bind_window_order),
-# and the join and subquery binders with the statement entry (sql_bind_join, sql_bind_subquery, sql_binder).
+# and the join and subquery binders with the statement entry (sql_bind_join, sql_bind_subquery, sql_binder),
+# and the text entry over all three (sql_frontend: statement_from_sql, plan_from_sql).
 mojo_library(
     name = "sql",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
@@ -84,6 +85,8 @@ mojo_library(
         "tests/test_sql_fn_table_direct.mojo",
         "tests/test_sql_fn_table_lowering_rows.mojo",
         "tests/test_sql_fn_table_refusal_rows.mojo",
+        "tests/test_sql_frontend_refusals.mojo",
+        "tests/test_sql_frontend_schemas.mojo",
         "tests/test_sql_interval_bind.mojo",
         "tests/test_sql_interval_parse.mojo",
         "tests/test_sql_parser_catalog_direct.mojo",

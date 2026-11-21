@@ -17,11 +17,12 @@
 #   Sort     -> same schema as child
 #   Limit    -> same schema as child
 #   Distinct -> same schema as child
+#   Union    -> the schema stated at construction: the branches' common
+#               schema, so it is not re-derived from one branch
 #
 # It lives in core so callers that cannot reach the SDK layer (notably
 # `parquet`) can consume the canonical helper directly rather than
-# maintaining a divergent local twin. `sdk.schema_propagation`
-# re-exports it.
+# maintaining a divergent local twin.
 # =============================================================================
 
 from arrow.schema import Schema, SchemaBuilder, Field
@@ -39,6 +40,7 @@ from plan_ir.logical_plan import (
     PLAN_TOPN,
     PLAN_PARTITION_BY,
     PLAN_PARTITION_TOPN,
+    PLAN_UNION,
     PLAN_CAST_TO_VARCHAR,
     PLAN_EXCHANGE,
     PLAN_MAP_BATCHES,
@@ -112,6 +114,11 @@ def infer_schema(plan: LogicalPlan) raises -> Schema:
     elif plan.tag == PLAN_PARTITION_TOPN:
         # PartitionTopN preserves the child schema (selects rows, no new cols).
         return _infer_passthrough_schema(plan.partition_topn_data_ref().child[])
+    elif plan.tag == PLAN_UNION:
+        # UNION ALL: the factory is given the branches' common schema (a
+        # column is nullable when it is in any branch), so it is returned as
+        # stated; one branch alone could not re-derive it.
+        return _copy_schema(plan.output_schema)
     elif plan.tag == PLAN_CAST_TO_VARCHAR:
         # cast_to_varchar: the STRING-typed mirror schema is
         # synthesized at factory construction time (per-column rewrite from

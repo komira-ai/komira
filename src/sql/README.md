@@ -109,6 +109,17 @@ binder's code is split over the `sql_bind_*` modules (the FROM scope,
 operators, functions, casts and timestamps, subqueries, aggregates and
 GROUP BY, output names, windows and ORDER BY, joins, parquet facts).
 
+`sql.sql_frontend` is the text entry over the three steps.
+`statement_from_sql(sql, catalog, footers)` tokenizes, parses and binds in one
+call and returns the `BoundStatement` (a query, a COPY or a CREATE TABLE AS).
+`plan_from_sql(sql, catalog, footers)` returns a query's `LogicalPlan`, whose
+`output_schema` is the result's schema (names, Arrow types and nullability, as
+the binder derives them), and refuses a COPY or CREATE TABLE AS with an
+`Error` starting `STATEMENT_NOT_A_QUERY`; `query_plan(bound)` is that refusal
+over a statement already bound, which `sdk_exec`'s `run_sql` uses too. Every
+other failure is the tokenizer's, parser's or binder's own `Error`, unchanged.
+Nothing is optimized, lowered or run.
+
 ## INTERVAL literals
 
 `INTERVAL '<n>' <unit>` (also `INTERVAL <n> <unit>`) parses to an `SX_INTERVAL`
@@ -253,4 +264,31 @@ var bound = bind_statement(
 var plan = bound.take_plan()
 assert_equal(plan.output_schema.field_name(0), "k")
 assert_equal(plan.output_schema.field_name(1), "total")
+```
+
+Text to a plan and its result schema, and the statement kind of a write:
+
+<!-- mojo-hidden from std.testing import assert_equal, assert_true -->
+```mojo
+from arrow.arrow_types import ArrowType
+from arrow.schema import Field, SchemaBuilder
+from sql.sql_ast import STMT_COPY
+from sql.sql_catalog import SqlCatalog
+from sql.sql_bind_parquet import NoParquetFooters
+from sql.sql_frontend import plan_from_sql, statement_from_sql
+
+var fsb = SchemaBuilder()
+fsb.add_field(Field(String("k"), ArrowType.INT64, False))
+fsb.add_field(Field(String("v"), ArrowType.FLOAT64, True))
+var fcat = SqlCatalog()
+fcat.add_parquet(String("t"), String("t.parquet"), fsb.build())
+var plan = plan_from_sql(
+    "SELECT k, avg(v) AS mean_v FROM t GROUP BY k", fcat, NoParquetFooters()
+)
+assert_equal(plan.output_schema.field_name(1), "mean_v")
+assert_true(plan.output_schema.field_arrow_type(1) == ArrowType.FLOAT64)
+var copy = statement_from_sql(
+    "COPY (SELECT k FROM t) TO 'out.csv' (FORMAT csv)", fcat, NoParquetFooters()
+)
+assert_equal(Int(copy.kind), Int(STMT_COPY))
 ```
