@@ -42,7 +42,8 @@ Then, in order:
   libraries from `<site>/komira/_lib/lib`, and the three Mojo runtime
   libraries from `<site>/komira/_lib/lib` (bundled) or `<site>/modular/lib`
   (external), and none of them from elsewhere;
-- external: the installed mojo-compiler is the toolchain's Mojo.
+- external: the installed mojo-compiler is the toolchain's Mojo, and each
+  runtime library it installed has the build id the record names.
 
 Any failure raises; its last traceback line is what a refusing case of
 wheel_install_test names.
@@ -299,6 +300,15 @@ def main(argv):
         installed = metadata.version("mojo-compiler")
         want = opts["toolchain_mojo_version"]
         assert installed == want, "mojo-compiler {} is installed, the toolchain's Mojo is {}".format(installed, want)
+        # The record names the build of each library the loader opened.
+        from komira import _runtime
+
+        with open(os.path.join(site, _RECORD), encoding="utf-8") as f:
+            recorded = dict(line.split("\t") for line in f.read().splitlines()[1:])
+        for name in _RUNTIME:
+            got = _runtime.build_id(os.path.join(runtime_dir, name))
+            got = got.hex() if got is not None else None
+            assert got == recorded[name], "{} in {} has build id {}, the record names {}".format(name, runtime_dir, got, recorded[name])
 
     print(
         "installed: komira {} ({} flavour) in {}, libkomira ABI {}, runtime from {}".format(

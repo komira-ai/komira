@@ -268,7 +268,9 @@ pypi.yml. Which flavour a release is, is stated three times: in the run's summar
 published it, in the first paragraph of its description on the index (each flavour's wheel starts its
 description with a sentence naming it), and in its metadata (only `external` has a `Requires-Dist` on
 `mojo-compiler`). The flavour choice is not tied to a platform: a platform that joins builds both from its
-own `[dist]` directory and its own pinned compiler.
+own `[dist]` directory and its own pinned compiler. The loader's search for Modular's runtime and its
+build-id checks are Linux-only today (ELF build ids, `.so` names); a platform that joins with an external
+wheel extends them, until then an external wheel there fails with the system loader's own message.
 
 - An installed package loads `komira/_lib/libkomira.so`. The bundled wheel carries
   `//src/so:libkomira[dist]` whole at `komira/_lib/`: `libkomira.so`, and in `_lib/lib/` the native owners
@@ -363,7 +365,8 @@ classifiers = [
   "Typing :: Typed",
 ]
 dependencies = [
-  # none in release 1: no Requires-Dist, and none for the Mojo runtime (decision 6)
+  # bundled: none in release 1, and none for the Mojo runtime (decision 6);
+  # external: "mojo-compiler==1.0.0", the toolchain's Mojo (the two flavours)
   # "pyarrow",   # arrives with the Arrow terminals; range from the range they are tested at
 ]
 

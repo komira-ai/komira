@@ -7,6 +7,8 @@ TARGETS = [
     "komira//python:beside_modular_loaded_first",
     "komira//python:beside_other_mojo_loaded_after",
     "komira//python:beside_other_mojo_loaded_first",
+    "komira//python:external_beside_modular_loaded_first",
+    "komira//python:external_beside_other_mojo_loaded_first",
     "komira//python:refuses_bundled_as_external",
     "komira//python:refuses_external_as_bundled",
     "komira//python:refuses_external_beside_other_mojo",

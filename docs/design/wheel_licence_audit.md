@@ -91,7 +91,8 @@ Verified by reading, not by running anything on a developer machine:
   libraries above, by soname, through the system loader.
 
 Offline behaviour follows: installing needs the network once, for `pip` to fetch
-the komira wheel, which depends on no other distribution; running needs none.
+the komira wheel (the bundled flavour depends on no other distribution; the
+external flavour makes `pip` fetch Modular's `mojo-compiler` too); running needs none.
 
 ## Keeping this page true
 

@@ -165,8 +165,8 @@ zig_exe(
 # The rule on fixtures (wheel/fixtures/): a linux-x86_64 wheel holding a real
 # Mojo shared library (the example `plain`, which needs the Mojo runtime:
 # external_needed) at the test stamp, so building it runs [check] and
-# [release_check], the twin's byte equality among them, with a readme
-# preface read back in METADATA's body; and wheels of plain files for the
+# [release_check], the twin's byte equality among them, written with a
+# readme preface; and wheels of plain files for the
 # linux-arm64 and darwin-arm64 (macOS) rows, whose tags are derived the same
 # way.
 wheel_file_test_stamped(

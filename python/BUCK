@@ -437,14 +437,24 @@ _NOT_INSTALLED = (
 #   `undefined symbol` (its 1.2.0 code needs symbols komira's 1.0.0
 #   libraries lack), and komira keeps working.
 #
+# The external wheel in the Modular-first orders, where Modular's runtime is
+# already loaded when komira's first call runs (the loader's already-loaded
+# branch, on the real libraries):
+#
+# - the toolchain's version: the record's build ids match, nothing more is
+#   opened, and every runtime library is mapped from <site>/modular/lib only;
+# - 1.2.0: refused by name against the record's build. The komira-first
+#   orders of the external wheel are wheel_install_test_external itself.
+#
 # 1.2.0's mojo-compiler-mojo-libs is not installed (`skip_requirements`, pip's
-# --no-deps): the compiler wheel's runtime is all the test loads.
+# --no-deps): the compiler wheel's runtime is all the test loads; for the
+# external wheel it also leaves its mojo-compiler==1.0.0 requirement unmet.
 _BESIDE_FILES = {"--parquet": "komira//src/so:tests/fixtures/two_columns.parquet"}
 
 [wheel_install_test(
     name = name,
     python = "komira//third_party/python:cpython",
-    wheels = [":komira_wheel_bundled"] + modular,
+    wheels = [":komira_wheel_" + flavour] + modular,
     script = "komira//python/tests:test_beside_modular.py",
     args = [
         "--order",
@@ -459,11 +469,12 @@ _BESIDE_FILES = {"--parquet": "komira//src/so:tests/fixtures/two_columns.parquet
     files = _BESIDE_FILES,
     skip_requirements = modular == _MODULAR_OTHER,
     expect_failure = expect,
-) for name, modular, order, runtime, version, toolchain, expect in [
-    ("beside_modular_loaded_first", _MODULAR, "modular-first", "same", "1.0.0", _TOOLCHAIN_MOJO, None),
-    ("beside_modular_loaded_after", _MODULAR, "komira-first", "same", "1.0.0", _TOOLCHAIN_MOJO, None),
+) for name, flavour, modular, order, runtime, version, toolchain, expect in [
+    ("beside_modular_loaded_first", "bundled", _MODULAR, "modular-first", "same", "1.0.0", _TOOLCHAIN_MOJO, None),
+    ("beside_modular_loaded_after", "bundled", _MODULAR, "komira-first", "same", "1.0.0", _TOOLCHAIN_MOJO, None),
     (
         "beside_other_mojo_loaded_first",
+        "bundled",
         _MODULAR_OTHER,
         "modular-first",
         "other",
@@ -474,12 +485,27 @@ _BESIDE_FILES = {"--parquet": "komira//src/so:tests/fixtures/two_columns.parquet
         "(<site>/komira/_lib/lib/libKGENCompilerRTShared.so): a process holds one Mojo runtime, so komira " +
         "cannot be loaded beside Mojo code built with another Mojo version",
     ),
-    ("beside_other_mojo_loaded_after", _MODULAR_OTHER, "komira-first", "other", "1.2.0", _TOOLCHAIN_MOJO, None),
+    ("beside_other_mojo_loaded_after", "bundled", _MODULAR_OTHER, "komira-first", "other", "1.2.0", _TOOLCHAIN_MOJO, None),
+    ("external_beside_modular_loaded_first", "external", _MODULAR, "modular-first", "same", "1.0.0", _TOOLCHAIN_MOJO, None),
+    (
+        "external_beside_other_mojo_loaded_first",
+        "external",
+        _MODULAR_OTHER,
+        "modular-first",
+        "other",
+        "1.2.0",
+        _TOOLCHAIN_MOJO,
+        "komira._errors.LibraryLoadError: the Mojo runtime library libKGENCompilerRTShared.so is already loaded " +
+        "from <site>/modular/lib, and it is another build than the one komira was built with " +
+        "(" + requirement(_PLATFORM) + "): a process holds one Mojo runtime, so komira " +
+        "cannot be loaded beside Mojo code built with another Mojo version",
+    ),
     # The same-version cases hold the installed mojo-compiler to the
     # toolchain's Mojo: a toolchain pin moved without third_party/modular
     # fails here.
     (
         "refuses_modular_unlike_toolchain",
+        "bundled",
         _MODULAR,
         "modular-first",
         "same",

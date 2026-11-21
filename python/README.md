@@ -273,7 +273,7 @@ installer's refusal; `refuses_external_without_modular`, installed with
 refusal), and each flavour's wheel held to the other flavour
 (`refuses_bundled_as_external`, `refuses_external_as_bundled`).
 
-The `//python:beside_*` targets load the bundled komira in a process that also holds
+The `//python:beside_*` targets (and the two `external_beside_*` ones) load komira in a process that also holds
 Modular's runtime from the `mojo-compiler` wheel, run by
 `tests/test_beside_modular.py`:
 
@@ -283,6 +283,8 @@ Modular's runtime from the `mojo-compiler` wheel, run by
 | `beside_modular_loaded_after` | komira loaded first, then Modular's `libKGENCompilerRTShared` of the same version: both work |
 | `beside_other_mojo_loaded_first` | another Mojo version loaded first: the load is refused, naming the library |
 | `beside_other_mojo_loaded_after` | komira loaded first, then another Mojo version: Modular's library fails to load with the loader's `undefined symbol`, and komira keeps working |
+| `external_beside_modular_loaded_first` | the external wheel, the same Mojo version loaded first: the loader accepts it by the record's build ids, opens nothing more, and works |
+| `external_beside_other_mojo_loaded_first` | the external wheel, another Mojo version loaded first: refused, naming the library and the build the record names |
 | `refuses_modular_unlike_toolchain` | the `mojo-compiler` wheel handed to the test is not the toolchain's version, and the test refuses it |
 
 `//tools/build/package/libkomira:libkomira_dist_load` loads a copy of the
