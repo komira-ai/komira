@@ -355,10 +355,10 @@ def test_hive_columns_follow_the_data_columns_ordered_by_key() raises:
     assert_equal(src.partition_values[2][1], "2028")
 
 
-def _single_type(case: String, dirs: List[String]) raises -> ArrowType:
+def _single_type(label: String, dirs: List[String]) raises -> ArrowType:
     """The type of the one partition column `k` of a tree whose directories
     are `dirs`."""
-    var src = _one_dir_each(_root("types_" + case), dirs)
+    var src = _one_dir_each(_root("types_" + label), dirs)
     assert_equal(len(src.partition_cols), 1)
     assert_equal(src.partition_cols[0].name, "k")
     return src.partition_cols[0].arrow_type
