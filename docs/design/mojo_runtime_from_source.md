@@ -102,10 +102,10 @@ At the full-tree commit above, the runtime files open with:
 > This file is Modular Inc proprietary.
 
 The Apache header arrives in the commit "[lint] Adjust copyright headers for Mojo OSS files". From
-there on, `Memory.cpp` and the other runtime files open with:
+there on, `Memory.cpp` and the other runtime files open with the line below, followed by the URL
+of the LLVM project's `LICENSE.txt`:
 
 > Licensed under the Apache License v2.0 with LLVM Exceptions:
-> https://llvm.org/LICENSE.txt
 
 Between the 1.0.0 source state and that commit, the non-header changes to `KGEN/lib/CompilerRT`,
 `AsyncRT/lib`, `AsyncRT/include`, `Support/lib` and `Support/include` are these (MEASURED,
