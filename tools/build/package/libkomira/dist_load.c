@@ -136,7 +136,7 @@ static void run(const char *dir, const char *const *host_libs, int n_host) {
         fail(dir, "dist_load: %s is not a directory", dir);
         return;
     }
-    char lib[PATH_MAX];
+    char lib[PATH_MAX + 64];
     snprintf(lib, sizeof lib, "%s/libkomira.so", dir_real);
     void *h = dlopen(lib, RTLD_NOW | RTLD_LOCAL);
     if (h == NULL) {
@@ -156,7 +156,7 @@ static void run(const char *dir, const char *const *host_libs, int n_host) {
         fail(dir, "dist_load: komira_abi_version() is %d, komira.h says %d", (int)got, (int)want);
         return;
     }
-    char lib_dir[PATH_MAX];
+    char lib_dir[PATH_MAX + 64];
     snprintf(lib_dir, sizeof lib_dir, "%s/lib", dir_real);
     check_mapped(dir, "libkomira.so", 0, dir_real);
     check_mapped(dir, "libkomira_", 1, lib_dir);

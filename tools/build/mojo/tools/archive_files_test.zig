@@ -379,3 +379,47 @@ test "extractZip: a bad archive, a wrong checksum and an escaping name are refus
     try t.expectError(error.BadZip, A.extractZip(a, tmp.dir, bad));
     try t.expectError(error.PathEscapes, A.extractZip(a, tmp.dir, try zip(a, &.{.{ .name = "../evil", .data = "x" }})));
 }
+
+test "zip64Sizes: marked sizes and offset come from the zip64 extra field, in order; unmarked ones stay" {
+    // Another field first, then the zip64 field holding the two marked values.
+    var extra: [4 + 2 + 4 + 16]u8 = undefined;
+    std.mem.writeInt(u16, extra[0..2], 0x5455, .little);
+    std.mem.writeInt(u16, extra[2..4], 2, .little);
+    extra[4] = 0;
+    extra[5] = 0;
+    std.mem.writeInt(u16, extra[6..8], 1, .little);
+    std.mem.writeInt(u16, extra[8..10], 16, .little);
+    std.mem.writeInt(u64, extra[10..18], 68494268, .little);
+    std.mem.writeInt(u64, extra[18..26], 1234, .little);
+    var size: usize = 0xffffffff;
+    var csize: usize = 77;
+    var local: usize = 0xffffffff;
+    try A.zip64Sizes(&extra, &size, &csize, &local);
+    try t.expectEqual(@as(usize, 68494268), size);
+    try t.expectEqual(@as(usize, 77), csize);
+    try t.expectEqual(@as(usize, 1234), local);
+
+    // Nothing marked: the field is not read.
+    var s2: usize = 5;
+    var c2: usize = 6;
+    var l2: usize = 7;
+    try A.zip64Sizes("", &s2, &c2, &l2);
+    try t.expectEqual(@as(usize, 5), s2);
+}
+
+test "zip64Sizes: a marked value with no zip64 field, or a field too short for it, is refused" {
+    var size: usize = 0xffffffff;
+    var csize: usize = 0xffffffff;
+    var local: usize = 0;
+    try t.expectError(error.Unsupported, A.zip64Sizes("", &size, &csize, &local));
+    var short: [4 + 8]u8 = undefined;
+    std.mem.writeInt(u16, short[0..2], 1, .little);
+    std.mem.writeInt(u16, short[2..4], 8, .little);
+    std.mem.writeInt(u64, short[4..12], 9, .little);
+    try t.expectError(error.BadZip, A.zip64Sizes(&short, &size, &csize, &local));
+    // A field whose length runs past the extra data.
+    var cut: [4]u8 = undefined;
+    std.mem.writeInt(u16, cut[0..2], 1, .little);
+    std.mem.writeInt(u16, cut[2..4], 16, .little);
+    try t.expectError(error.BadZip, A.zip64Sizes(&cut, &size, &csize, &local));
+}

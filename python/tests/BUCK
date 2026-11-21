@@ -77,18 +77,18 @@ c_shared_lib(
 # Stand-ins for a Mojo runtime library (fake_runtime_lib.c), for the check of
 # a runtime already in the process (komira/_runtime.py): each case's copies at
 # `<case>/ours/` (komira's `_lib/lib`) and `<case>/other/` (someone else's),
-# with the SONAME `libfake_rt_<case>.so` and the build id given here, `none`
-# for no build id note.
+# with the SONAME `libfake_rt_<case>.so` and the build id bytes given here
+# (fake_runtime_lib.c writes the note), None for no build id note.
 _FAKE_RUNTIME = [
     # (case, where, build id)
-    ("a", "ours", "0x0a0a0a0a"),
-    ("b", "ours", "0x0b0b0b0b"),
-    ("b", "other", "0x0b0b0b0b"),
-    ("c", "ours", "0x0c0c0c0c"),
-    ("c", "other", "0x0d0d0d0d"),
-    ("d", "ours", "0x0e0e0e0e"),
-    ("d", "other", "none"),
-    ("e", "other", "0x0f0f0f0f"),
+    ("a", "ours", "0x0a,0x0a,0x0a,0x0a"),
+    ("b", "ours", "0x0b,0x0b,0x0b,0x0b"),
+    ("b", "other", "0x0b,0x0b,0x0b,0x0b"),
+    ("c", "ours", "0x0c,0x0c,0x0c,0x0c"),
+    ("c", "other", "0x0d,0x0d,0x0d,0x0d"),
+    ("d", "ours", "0x0e,0x0e,0x0e,0x0e"),
+    ("d", "other", None),
+    ("e", "other", "0x0f,0x0f,0x0f,0x0f"),
 ]
 
 [c_shared_lib(
@@ -97,8 +97,8 @@ _FAKE_RUNTIME = [
     copts = [
         "-DFAKE_MARKER={}".format(i),
         "-Wl,-soname,libfake_rt_{}.so".format(case),
-        "-Wl,--build-id={}".format(build_id),
-    ],
+        "-Wl,--build-id=none",
+    ] + (["-DFAKE_BUILD_ID={}".format(build_id)] if build_id else []),
     out = "libfake_rt_{}.so".format(case),
 ) for i, (case, where, build_id) in enumerate(_FAKE_RUNTIME)]
 

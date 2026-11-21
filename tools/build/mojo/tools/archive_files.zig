@@ -142,8 +142,38 @@ fn u32at(d: []const u8, off: usize) !u32 {
 
 /// Extracts the zip `data` into `dest`: stored and deflated entries (their
 /// CRC checked), directories, and an entry the archive marks executable (a
-/// unix mode in the high half of its external attributes) made so. Zip64 and
-/// encryption are refused.
+/// unix mode in the high half of its external attributes) made so. A size or
+/// offset the central directory marks 0xffffffff is read from the entry's
+/// zip64 extra field (a `.conda` file's members carry one); encryption is
+/// refused.
+/// Replaces each of `usize_`, `csize` and `local` that is 0xffffffff, in that
+/// order, with the next 8-byte value of the zip64 extra field (id 1) in
+/// `extra`; a marked value with no such field is refused.
+pub fn zip64Sizes(extra: []const u8, usize_: *usize, csize: *usize, local: *usize) !void {
+    const marked = [_]*usize{ usize_, csize, local };
+    var any = false;
+    for (marked) |v| any = any or v.* == 0xffffffff;
+    if (!any) return;
+    var at: usize = 0;
+    while (at + 4 <= extra.len) {
+        const id = try u16at(extra, at);
+        const len = try u16at(extra, at + 2);
+        if (at + 4 + len > extra.len) return error.BadZip;
+        if (id == 1) {
+            var off: usize = at + 4;
+            for (marked) |v| {
+                if (v.* != 0xffffffff) continue;
+                if (off + 8 > at + 4 + len) return error.BadZip;
+                v.* = std.math.cast(usize, std.mem.readInt(u64, extra[off..][0..8], .little)) orelse return error.BadZip;
+                off += 8;
+            }
+            return;
+        }
+        at += 4 + len;
+    }
+    return error.Unsupported;
+}
+
 pub fn extractZip(a: std.mem.Allocator, dest: std.fs.Dir, data: []const u8) !void {
     if (data.len < 22) return error.BadZip;
     var eocd: usize = data.len - 22;
@@ -160,17 +190,18 @@ pub fn extractZip(a: std.mem.Allocator, dest: std.fs.Dir, data: []const u8) !voi
         const flags = try u16at(data, cd + 8);
         const method = try u16at(data, cd + 10);
         const crc = try u32at(data, cd + 16);
-        const csize = try u32at(data, cd + 20);
-        const usize_ = try u32at(data, cd + 24);
+        var csize: usize = try u32at(data, cd + 20);
+        var usize_: usize = try u32at(data, cd + 24);
         const name_len = try u16at(data, cd + 28);
         const extra_len = try u16at(data, cd + 30);
         const comment_len = try u16at(data, cd + 32);
         const attrs = try u32at(data, cd + 38);
-        const local = try u32at(data, cd + 42);
-        if (cd + 46 + name_len > data.len) return error.BadZip;
+        var local: usize = try u32at(data, cd + 42);
+        if (cd + 46 + name_len + extra_len > data.len) return error.BadZip;
         const name = data[cd + 46 .. cd + 46 + name_len];
+        try zip64Sizes(data[cd + 46 + name_len .. cd + 46 + name_len + extra_len], &usize_, &csize, &local);
         cd += 46 + name_len + extra_len + comment_len;
-        if (flags & 1 != 0 or csize == 0xffffffff or usize_ == 0xffffffff) return error.Unsupported;
+        if (flags & 1 != 0) return error.Unsupported;
         if (!contained(name)) return error.PathEscapes;
         if (name.len > 0 and name[name.len - 1] == '/') {
             try dest.makePath(std.mem.trimRight(u8, name, "/"));

@@ -9,11 +9,13 @@ directory: `dir` with everything else left out. The negative fixtures take
 `[dist]` with one library left out this way. A path the directory does not
 hold fails the action that reads it.
 
-    libkomira_dist_load(name, dir, driver, expect_failure = None)
+    libkomira_dist_load(name, dir, src, header, expect_failure = None)
 
-Copies `dir` (a `[dist]` directory, or a `picked_dir` of one) to another path
-of buck-out and runs the C program `driver` (dist_load.c, a `cxx_binary`) on
-the copy as a build action, with an environment of `LC_ALL=C` and nothing else:
+Compiles the C program `src` (dist_load.c) against `header` (komira.h, from
+`//src/so:komira_abi`) with the pinned zig, for glibc 2.34 (`zig cc`, as the
+bundle launcher is built), copies `dir` (a `[dist]` directory, or a
+`picked_dir` of one) to another path of buck-out, and runs the program on the
+copy as a build action, with an environment of `LC_ALL=C` and nothing else:
 no library path, no Python, nothing of Modular's. The driver opens the C++
 runtime the host provides (the toolchain's `libstdc++.so.6` and
 `libgcc_s.so.1`, standing in for the system's: a build worker has none), then
@@ -50,14 +52,43 @@ _picked_dir = rule(
 def _dist_load_impl(ctx):
     tc = ctx.attrs.toolchain[MojoToolchainInfo]
     src = ctx.attrs.dir[DefaultInfo].default_outputs[0]
-    exes = ctx.attrs.driver[DefaultInfo].default_outputs
-    if len(exes) != 1:
-        fail("{}: driver {} has {} outputs, want its one executable".format(ctx.label, ctx.attrs.driver.label, len(exes)))
+    header = ctx.attrs.header[DefaultInfo].default_outputs[0]
+    staged = ctx.actions.copied_dir("driver_src", {"dist_load.c": ctx.attrs.src, "komira.h": header})
+    exe = ctx.actions.declare_output("dist_load")
+
+    # zig_launch (no shell) gives zig a scratch directory for its caches and
+    # HOME, and the busybox applets as PATH.
+    ctx.actions.run(
+        cmd_args(
+            ctx.attrs._zig_launch[RunInfo],
+            "zig",
+            "--busybox",
+            ctx.attrs._busybox[DefaultInfo].default_outputs[0],
+            "--zig",
+            ctx.attrs._zig[DefaultInfo].default_outputs[0],
+            "--",
+            "cc",
+            "-target",
+            "x86_64-linux-gnu.2.34",
+            "-mcpu=baseline",
+            "-O2",
+            "-Wall",
+            "-Wextra",
+            "-Werror",
+            cmd_args(staged, format = "-I{}"),
+            "-Wl,--build-id=none",
+            "-o",
+            exe.as_output(),
+            cmd_args(staged, format = "{}/dist_load.c"),
+        ),
+        env = salted(),
+        category = "libkomira_dist_load_build",
+    )
 
     # Another path than the one the library target built it at.
     moved = ctx.actions.copy_file("elsewhere/a/b/native", src)
     out = ctx.actions.declare_output(ctx.label.name + ".pass")
-    cmd = cmd_args(exes[0], "--dir", moved, "--out", out.as_output())
+    cmd = cmd_args(exe, "--dir", moved, "--out", out.as_output())
     for name in HOST_CXX_RUNTIME:
         cmd.add("--host-lib", tc.runtime.project(name))
     if ctx.attrs.expect_failure != None:
@@ -67,12 +98,16 @@ def _dist_load_impl(ctx):
 
 _libkomira_dist_load = rule(
     impl = _dist_load_impl,
-    doc = "Copies the native directory `dir` elsewhere and loads libkomira from the copy with the C program `driver`, with no library path; the output exists only if it loaded and answered the header's ABI version from the copy (or, with `expect_failure`, failed with exactly that line). See dist.bzl.",
+    doc = "Builds the C program `src` against `header` with the pinned zig, copies the native directory `dir` elsewhere and loads libkomira from the copy with that program, with no library path; the output exists only if it loaded and answered the header's ABI version from the copy (or, with `expect_failure`, failed with exactly that line). See dist.bzl.",
     attrs = {
         "dir": attrs.dep(),
-        "driver": attrs.dep(),
         "expect_failure": attrs.option(attrs.string(), default = None),
+        "header": attrs.dep(),
+        "src": attrs.source(),
         "toolchain": attrs.toolchain_dep(default = "toolchains//:mojo", providers = [MojoToolchainInfo]),
+        "_busybox": attrs.exec_dep(default = "komira//tools/build/toolchains:busybox"),
+        "_zig": attrs.exec_dep(default = "komira//tools/build/toolchains:zig"),
+        "_zig_launch": attrs.exec_dep(default = "komira//tools/build/mojo:zig_launch", providers = [RunInfo]),
     },
 )
 
