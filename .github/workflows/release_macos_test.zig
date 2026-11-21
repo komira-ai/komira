@@ -442,9 +442,11 @@ fn checkPypiMacos(ar: std.mem.Allocator, text: []const u8) !?[]const u8 {
     if (!has(job, DARWIN_PROPS)) return "build-macos-arm64 does not pass the macOS worker properties to farm-connect (darwin-properties)";
     if (!has(job, DARWIN_HOSTS)) return "build-macos-arm64 does not pass the macOS worker hosts to farm-connect (darwin-macos-hosts)";
     if (!has(job, "          tls: ${{ vars.FARM_TLS || 'false' }}")) return "build-macos-arm64 does not pass tls from FARM_TLS";
-    const guard_at = lineAt(job, "      - name: the buckconfig names the farm and its macOS workers") orelse return "build-macos-arm64 does not check that the buckconfig names the macOS workers";
-    if (!mentions(job, "linux_x86_64_properties darwin_arm64_properties darwin_macos_hosts")) return "build-macos-arm64 does not check the linux set, the macOS set and the macOS hosts";
-    if (!(connect_at < guard_at)) return "build-macos-arm64 checks the buckconfig before it joins the farm";
+    for (job, 0..) |line, i| {
+        if (std.mem.startsWith(u8, line, "          args: ") and i < connect_at) return "build-macos-arm64 builds before it joins the farm";
+    }
+    // every step is one command: a check of the buckconfig is the first darwin build's analysis
+    if (mentions(job, "run: |") or mentions(job, "run: >")) return "build-macos-arm64 has a multi-line run step: every step is one command";
     if (mentions(job, "--no-remote-cache") or mentions(job, "--isolation-dir")) return "build-macos-arm64 builds with --no-remote-cache or --isolation-dir";
 
     // every buck2 step is the farm action, asserted remote
@@ -856,8 +858,10 @@ test "an edit of the real pypi.yml that moves the macOS build off the farm's con
     try expectRefusedPypi(ar, try inJob(ar, text, "build-macos-arm64", DARWIN_HOSTS ++ "\n", ""), "darwin-macos-hosts");
     try expectRefusedPypi(ar, try inJob(ar, text, "build-macos-arm64", QOS ++ "\n", ""), "farm-qos: batch");
     try expectRefusedPypi(ar, try inJob(ar, text, "build-macos-arm64", "          tls: ${{ vars.FARM_TLS || 'false' }}\n", ""), "tls from FARM_TLS");
-    try expectRefusedPypi(ar, try inJob(ar, text, "build-macos-arm64", "      - name: the buckconfig names the farm and its macOS workers\n", "      - name: no check\n"), "names the macOS workers");
-    try expectRefusedPypi(ar, try inJob(ar, text, "build-macos-arm64", "linux_x86_64_properties darwin_arm64_properties darwin_macos_hosts", "linux_x86_64_properties"), "the linux set, the macOS set and the macOS hosts");
+    // a build before the farm is joined
+    try expectRefusedPypi(ar, try inJob(ar, text, "build-macos-arm64", FARM_CONNECT ++ "\n", "      - name: an early build\n" ++ BUCK2_FARM ++ "\n        with:\n          args: build //python:komira\n" ++ ASSERT ++ "\n" ++ FARM_CONNECT ++ "\n"), "builds before it joins the farm");
+    // a multi-line run step
+    try expectRefusedPypi(ar, try inJob(ar, text, "build-macos-arm64", "      - name: build the farm assertion\n", "      - name: a check\n        run: |\n          true\n      - name: build the farm assertion\n"), "multi-line run step");
     // a buck2 step outside the farm action
     try expectRefusedPypi(ar, try inJob(ar, text, "build-macos-arm64", "      - name: build the macOS smoke driver\n        if: steps.testpypi_file.outputs.present != 'true' || steps.pypi_file.outputs.present != 'true'\n        uses: ./.github/actions/buck2-farm\n", "      - name: build the macOS smoke driver\n        if: steps.testpypi_file.outputs.present != 'true' || steps.pypi_file.outputs.present != 'true'\n        uses: ./.github/actions/other\n"), "outside the buck2-farm action");
     // the smoke jobs run on a Mac with the macOS driver, the upload jobs on Linux with the Linux one

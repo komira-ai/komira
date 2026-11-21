@@ -397,14 +397,10 @@ jobs:
           tls: ${{ vars.FARM_TLS || 'false' }}
           # the publish queues behind the pull-request checks when the farm is full
           farm-qos: batch
-      # Without the macOS worker set the build would fail analysis, and without the linux set
-      # (the toolchain unpack runs on a linux worker of the farm) it would run on this runner.
-      - name: the buckconfig names the farm and its macOS workers
-        run: |
-          for key in linux_x86_64_properties darwin_arm64_properties darwin_macos_hosts; do
-            ./buck2 audit config "komira_re.$key" --style json | grep -q '": *"[^"]' ||
-              { echo "::error::the machine buckconfig sets no [komira_re] $key: the macOS build has no farm worker to run on (docs/ci.md, repository variables)"; exit 1; }
-          done
+      # No guard step of its own: without the linux set farm-connect refuses, and every build
+      # below is the buck2-farm action, which fails a step that ran anything on this runner;
+      # without the macOS worker set or hosts the first darwin build (the wheel's file name)
+      # fails analysis, naming the `[komira_re]` key that is not set.
       - name: build the farm assertion
         id: assert
         run: echo "path=$(./buck2 build komira//tools/build/ci:assert_remote --show-full-simple-output)" >> "$GITHUB_OUTPUT"
