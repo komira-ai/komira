@@ -263,22 +263,28 @@ exactly one, under the same name, version scheme and tag:
 | `License-Expression` | `Apache-2.0 AND LicenseRef-Modular-Proprietary` | `Apache-2.0` |
 | licence files | LICENSE, NOTICE, MODULAR_LICENSE, MODULAR_THIRD_PARTY_NOTICES | LICENSE, NOTICE |
 
-The release workflow's default is `external`, the flavour no licence forbids; changing it is one line of
+The release workflow's default is `bundled`, the flavour a scheduled run publishes; changing it is one line of
 pypi.yml. Which flavour a release is, is stated three times: in the run's summary of the workflow run that
 published it, in the first paragraph of its description on the index (each flavour's wheel starts its
 description with a sentence naming it), and in its metadata (only `external` has a `Requires-Dist` on
 `mojo-compiler`). The flavour choice is not tied to a platform: a platform that joins builds both from its
 own `[dist]` directory and its own pinned compiler. The loader's search for Modular's runtime and its
-build-id checks are Linux-only today (ELF build ids, `.so` names); a platform that joins with an external
-wheel extends them, until then an external wheel there fails with the system loader's own message.
+build-id checks are Linux-only today (ELF build ids, `.so` names), so the macOS arm64 wheel
+(`//python:komira_wheel_macos_arm64`, macOS 11 or later on Apple silicon, tagged `py3-none-macosx_11_0_arm64`) is
+the bundled flavour only: an external one there needs a Mach-O runtime record, a macOS branch of the loader and
+Modular's macOS wheel. The macOS wheel is built and tested only by the release workflow, never in a pull request
+(`//python:wheel_install_test_macos_arm64`, on the farm's macOS workers), and a run publishes it only when
+the run's flavour is `bundled`; a run of the external flavour publishes no macOS wheel, so a run still
+publishes exactly one flavour on every platform it publishes.
 
 - An installed package loads `komira/_lib/libkomira.so`. The bundled wheel carries
   `//src/so:libkomira[dist]` whole at `komira/_lib/`: `libkomira.so`, and in `_lib/lib/` the native owners
   and the three Mojo runtime libraries. The runtime libraries are the ones of the toolchain's pinned
   `mojo-compiler` package that compiled libkomira, so runtime and compiler match by construction. `[dist]`
   is `[runnable]` without the C++ runtime (`libstdc++.so.6`, `libgcc_s.so.1`); `[runnable]` keeps it,
-  because build workers have none. The directory is built for Linux only; the macOS arm of `[dist]` is not
-  built. The external wheel carries `libkomira.so` and `_lib/lib/` with the owners alone, and
+  because build workers have none. On macOS arm64 `[dist]` is `libkomira.dylib` and, in `lib/`, the three
+  runtime `.dylib` files, with no owners (the C archives are linked into the dylib) and no C++ runtime; its
+  run path is `@loader_path/lib`. The external wheel (Linux only) carries `libkomira.so` and `_lib/lib/` with the owners alone, and
   `_lib/mojo_runtime.tsv`.
 - The library's run path (`$ORIGIN/lib:$ORIGIN`,
   [tools/build/mojo/README.md](../../tools/build/mojo/README.md)) resolves the owners, and in the bundled

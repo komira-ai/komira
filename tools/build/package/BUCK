@@ -92,11 +92,20 @@ zig_module(
 #   wheel_elf_unit     DT_NEEDED, run path and symbol versions read back, and a
 #                      file that is not a 64-bit little-endian ELF or reads
 #                      outside itself refused;
+#   wheel_macho_unit   the Mach-O reader: install name, loads in command
+#                      order, run paths and the minimum macOS (from either
+#                      version command) read back, and a universal file, a
+#                      file that is not Mach-O or reads outside itself refused;
 #   wheel_policy_unit  the library checks: GLIBC_2.38 under a 2.34 tag, a
 #                      GLIBCXX_ or CXXABI_ version over or without its bound,
 #                      an absolute run path, an unlisted DT_NEEDED, a bundled
-#                      Mojo runtime library, an ELF file in a macOS wheel and a
-#                      member over 90 MB, each refused by its check's name;
+#                      Mojo runtime library, an ELF file in a macOS wheel, a
+#                      Mach-O file in a manylinux wheel and a member over
+#                      90 MB, each refused by its check's name; and for a macOS
+#                      wheel, a dylib needing a newer macOS than the tag (and
+#                      one with no minimum), another CPU, an install name that
+#                      is not @rpath/<file>, a run path that is not
+#                      @loader_path-relative and a load nobody provides;
 #   wheel_build_unit   the wheel: the same bytes twice and from inputs in
 #                      another order, the members, METADATA, WHEEL and RECORD,
 #                      the stamp's version (a half stamp refused), the tags
@@ -115,6 +124,7 @@ _WHEEL_SRCS = [
     "wheel/cli.zig",
     "wheel/diag.zig",
     "wheel/elf.zig",
+    "wheel/macho.zig",
     "wheel/policy.zig",
     "wheel/record.zig",
     "wheel/stamp.zig",
@@ -123,7 +133,7 @@ _WHEEL_SRCS = [
     "wheel/zip.zig",
 ]
 
-_WHEEL_SCENARIOS = ["build", "check", "cli", "elf", "policy", "record", "zip"]
+_WHEEL_SCENARIOS = ["build", "check", "cli", "elf", "macho", "policy", "record", "zip"]
 
 [
     zig_test(
@@ -207,6 +217,26 @@ wheel_file_test_stamped(
     )
     for tag, platform in [("aarch64", "linux-arm64"), ("macosx", "darwin-arm64")]
 ]
+
+# The `[file_name]` of two fixtures read back (wheel/file_name_test.zig): each is the one line
+# of its distribution, the stamp's version and its row's tag, and agrees with the wheel the same
+# target wrote (its dist-info directory, METADATA's Version, WHEEL's Tag); a name that does not
+# agree is refused. pypi.yml asks the indexes for the macOS wheel's `[file_name]` before building it.
+zig_test(
+    name = "wheel_file_name_cases",
+    exec_compatible_with = LINUX_X86_64,
+    src = "wheel/file_name_test.zig",
+    imports = ["wheel/diag.zig", "wheel/zip.zig"],
+    deps = [":pack_deflate"],
+    data = {
+        "linux.file_name": ":wheel_fixture[file_name]",
+        "linux.whl": ":wheel_fixture[release]",
+        "macosx.file_name": ":wheel_fixture_macosx_tag[file_name]",
+        "macosx.whl": ":wheel_fixture_macosx_tag[release]",
+    },
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
+)
 
 # The tag of each release platform's row, written out: the glibc floor and
 # the macOS floor of tools/build/platforms/table.bzl. A fixture row at

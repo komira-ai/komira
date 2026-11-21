@@ -4,7 +4,9 @@
 //! version, a member dated otherwise, a member missing, extra, out of order,
 //! of other bytes or another mode, RECORD that disagrees each way, another
 //! tag or WHEEL, other Requires-Dist or METADATA, a changed licence, a member
-//! the policy refuses, and a twin of other bytes.
+//! the policy refuses, and a twin of other bytes. A macOS wheel of a dylib and
+//! the runtime dylibs passes, and the same wheel with a dylib needing a newer
+//! macOS than its tag is refused by the minos check.
 
 const std = @import("std");
 const diag = @import("diag.zig");
@@ -220,4 +222,33 @@ test "licence, policy and twin: a changed licence, a member the policy refuses, 
     var d = diag.Diag{};
     try t.expectError(error.Refused, check.check(a, &d, try fixture.input(a), try stamped(a), name, bytes, true, other));
     try t.expect(std.mem.startsWith(u8, d.msg, "twin: the wheel built twice from the same inputs, staged at two paths, is not the same bytes"));
+}
+
+test "a macOS wheel passes, and with a dylib needing a newer macOS than its tag it is refused" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var d = diag.Diag{};
+    const mac_name = "komira-0.1.57-py3-none-macosx_11_0_arm64.whl";
+    const in = try fixture.macosInput(a);
+    const bytes = try wheel.build(a, &d, in, try dateOf(a));
+    try check.check(a, &d, in, try stamped(a), mac_name, bytes, true, bytes);
+    const read = try zip.read(a, &d, bytes);
+    const ms = try a.alloc(zip.Member, read.len);
+    for (read, ms) |m, *o| o.* = .{ .name = m.name, .data = m.data, .mode = m.mode };
+    const w = index(ms, "/WHEEL");
+    try t.expectEqualStrings("Wheel-Version: 1.0\nGenerator: komira_wheel\nRoot-Is-Purelib: false\nTag: py3-none-macosx_11_0_arm64\n", ms[w].data);
+
+    // The input still says what the good dylib is; the wheel holds one that
+    // needs macOS 13.0, as if the writer had not held it.
+    const swapped = try a.dupe(zip.Member, ms);
+    swapped[index(ms, "/libkomira.dylib")].data = try fixture.machO(a, .{ .install_name = "@rpath/libkomira.dylib", .minos = fixture.macosVersion(13, 0, 0) });
+    var in_new = in;
+    const files = try a.dupe(wheel.File, in.files);
+    for (files) |*f| {
+        if (std.mem.endsWith(u8, f.path, "/libkomira.dylib")) f.data = swapped[index(ms, "/libkomira.dylib")].data;
+    }
+    in_new.files = files;
+    try t.expectError(error.Refused, check.check(a, &d, in_new, try stamped(a), mac_name, try zipOf(a, swapped, false), true, null));
+    try t.expectEqualStrings("minos: komira/_lib/libkomira.dylib needs macOS 13.0, newer than the tag's macOS 11.0", d.msg);
 }

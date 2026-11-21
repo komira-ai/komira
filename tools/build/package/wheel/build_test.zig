@@ -127,11 +127,15 @@ test "tags: manylinux x86_64 and aarch64 and macosx arm64 are taken, any and a C
     var d = diag.Diag{};
     const x86 = try tag.parse(a, &d, "py3-none-manylinux_2_34_x86_64");
     try t.expectEqualStrings("2.34", x86.glibc.?);
+    try t.expect(x86.macos == null);
     try t.expect(x86.linux);
     try t.expectEqualStrings("x86_64", x86.arch);
     try t.expectEqualStrings("2.34", (try tag.parse(a, &d, "py3-none-manylinux_2_34_aarch64")).glibc.?);
+    try t.expect((try tag.parse(a, &d, "py3-none-manylinux_2_34_aarch64")).macos == null);
     const mac = try tag.parse(a, &d, "py3-none-macosx_11_0_arm64");
     try t.expect(mac.glibc == null);
+    try t.expectEqualStrings("11.0", mac.macos.?);
+    try t.expectEqualStrings("14.2", (try tag.parse(a, &d, "py3-none-macosx_14_2_arm64")).macos.?);
     try t.expect(!mac.linux);
     const Case = struct { tag: []const u8, want: []const u8 };
     for ([_]Case{
@@ -222,4 +226,39 @@ test "files the wheel cannot carry are refused, and a wheel of no files" {
     in = try fixture.input(a);
     in.tag = "py3-none-any";
     try t.expectEqualStrings("the tag `py3-none-any` says any platform, but a wheel holding a native library is built for one", try refusal(a, in));
+}
+
+test "a macOS wheel of the dylib and the runtime dylibs is written under the macosx tag" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var d = diag.Diag{};
+    const in = try fixture.macosInput(a);
+    try t.expectEqualStrings("komira-0.1.57-py3-none-macosx_11_0_arm64.whl", try wheel.fileName(a, in.name, in.version, in.tag));
+    const ms = try zip.read(a, &d, try wheel.build(a, &d, in, .{}));
+    const names = [_][]const u8{
+        "komira/__init__.py",
+        "komira/_lib/lib/libAsyncRTRuntimeGlobals.dylib",
+        "komira/_lib/lib/libKGENCompilerRTShared.dylib",
+        "komira/_lib/lib/libMSupportGlobals.dylib",
+        "komira/_lib/libkomira.dylib",
+        "komira-0.1.57.dist-info/METADATA",
+        "komira-0.1.57.dist-info/WHEEL",
+        "komira-0.1.57.dist-info/licenses/LICENSE",
+        "komira-0.1.57.dist-info/licenses/NOTICE",
+        "komira-0.1.57.dist-info/RECORD",
+    };
+    try t.expectEqual(names.len, ms.len);
+    for (names, ms) |n, m| try t.expectEqualStrings(n, m.name);
+    try t.expectEqualStrings("Wheel-Version: 1.0\nGenerator: komira_wheel\nRoot-Is-Purelib: false\nTag: py3-none-macosx_11_0_arm64\n", ms[6].data);
+}
+
+test "a macOS wheel whose dylib needs a newer macOS than the tag is refused by the build" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var d = diag.Diag{};
+    const lib = try fixture.machO(a, .{ .install_name = "@rpath/libkomira.dylib", .minos = fixture.macosVersion(13, 0, 0) });
+    try t.expectError(error.Refused, wheel.build(a, &d, try fixture.macosInputOf(a, lib), .{}));
+    try t.expectEqualStrings("minos: komira/_lib/libkomira.dylib needs macOS 13.0, newer than the tag's macOS 11.0", d.msg);
 }

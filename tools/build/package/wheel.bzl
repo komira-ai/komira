@@ -33,12 +33,19 @@ Attributes:
                         row's `os_floor` (the floor of what the repository
                         links): a wheel carrying a vendor's library that needs
                         a newer glibc names it (`glibc-2.35`); unset, the
-                        row's
+                        row's. For a macOS wheel it is the macOS the tag
+                        promises (`macos-11.0` is `macosx_11_0`), the most a
+                        Mach-O member's minimum macOS may be
     max_glibcxx, max_cxxabi
                         the highest GLIBCXX_ and CXXABI_ versions a library
-                        may need (unset: none may)
+                        may need (unset: none may); they bound ELF libraries
+                        only, a macOS wheel's Mach-O libraries have no such
+                        versions and the attributes stay unset
     external_needed     sonames a library may need that another package
-                        provides; none of them may be in the wheel
+                        provides; none of them may be in the wheel. For a
+                        macOS wheel, the file names of libraries a Mach-O
+                        library may load as `@rpath/<file>` from another
+                        package
 
 The VERSION is the stamp's (wheel/stamp.zig): `-c komira.package_stamp=<N>`
 with `-c komira.package_commit` and `-c komira.package_timestamp_ms` gives
@@ -50,6 +57,9 @@ Sub-targets:
     [default]        the wheel, copied only after [check] passed
     [check]          the marker of `komira_wheel check`: the wheel read back
                      (wheel/check.zig), and byte-equal to [twin]
+    [file_name]      one line, the wheel's file name
+                     (`<dist>-<version>-<tag>.whl`), written at analysis: no
+                     input of the wheel is built for it
     [twin]           the same wheel written by a second action, from the same
                      inputs staged at another path
     [release]        the wheel, copied only after [release_check] passed: what
@@ -209,11 +219,17 @@ def _wheel_file_impl(ctx):
 
     whl = gated_copy("out", checked)
     rel = gated_copy("release", release_checked)
+
+    # The file name alone, written at analysis: what an index lists the wheel
+    # as, known before anything is built (pypi.yml asks the index for it
+    # before building a wheel whose build is costly).
+    file_name = ctx.actions.write(ctx.label.name + ".file_name", name + "\n")
     return [DefaultInfo(
         default_output = whl,
         other_outputs = [rel] if ctx.attrs.check_release else [],
         sub_targets = {
             "check": [DefaultInfo(default_output = checked)],
+            "file_name": [DefaultInfo(default_output = file_name)],
             "release": [DefaultInfo(default_output = rel)],
             "release_check": [DefaultInfo(default_output = release_checked)],
             "twin": [DefaultInfo(default_output = twin.project(name))],
