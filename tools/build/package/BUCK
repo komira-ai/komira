@@ -104,20 +104,26 @@ zig_module(
 #   wheel_check_unit   the read-back check: the builder's wheel passes, and
 #                      each defect is refused by its check's name;
 #   wheel_cli_unit     the command line: flags, <name>=<value>, files and
-#                      directories staged with their modes, a link refused.
+#                      directories staged with their modes, a link refused,
+#                      and a readme preface before the README;
+#   wheel_record_unit  the runtime record (`runtime-record`): the GNU build id
+#                      read from a note segment, a library without one or
+#                      that reads outside itself refused, and the record's
+#                      lines in the order given.
 _WHEEL_SRCS = [
     "wheel/check.zig",
     "wheel/cli.zig",
     "wheel/diag.zig",
     "wheel/elf.zig",
     "wheel/policy.zig",
+    "wheel/record.zig",
     "wheel/stamp.zig",
     "wheel/tag.zig",
     "wheel/wheel.zig",
     "wheel/zip.zig",
 ]
 
-_WHEEL_SCENARIOS = ["build", "check", "cli", "elf", "policy", "zip"]
+_WHEEL_SCENARIOS = ["build", "check", "cli", "elf", "policy", "record", "zip"]
 
 [
     zig_test(
@@ -159,14 +165,16 @@ zig_exe(
 # The rule on fixtures (wheel/fixtures/): a linux-x86_64 wheel holding a real
 # Mojo shared library (the example `plain`, which needs the Mojo runtime:
 # external_needed) at the test stamp, so building it runs [check] and
-# [release_check], the twin's byte equality among them; and wheels of plain
-# files for the linux-arm64 and darwin-arm64 (macOS) rows, whose tags are derived the
-# same way.
+# [release_check], the twin's byte equality among them, with a readme
+# preface read back in METADATA's body; and wheels of plain files for the
+# linux-arm64 and darwin-arm64 (macOS) rows, whose tags are derived the same
+# way.
 wheel_file_test_stamped(
     name = "wheel_fixture",
     distribution = "komira-wheel-fixture",
     summary = "The wheel rule's fixture",
     readme = "wheel/fixtures/readme.md",
+    readme_preface = "This is the fixture's preface.",
     requires_python = ">=3.13",
     requires_dist = ["mojo-compiler==1.0.0"],
     classifiers = ["Programming Language :: Python :: 3 :: Only"],
