@@ -10,6 +10,9 @@
 #            SOURCE_SINK_OUTPUT   the output of the producer the spec names,
 #                                 moved out of `PublishedOutputs`
 #                                 (`source_sink_output`)
+#            SOURCE_CSV           the CSV file the spec names, decoded at its
+#                                 bound column types and served as a resident
+#                                 batch (`source_csv`)
 #            SOURCE_CONCAT        the outputs of the producers the spec names,
 #                                 moved out of `PublishedOutputs` and
 #                                 concatenated in the spec's order into one
@@ -80,6 +83,7 @@ from physical_plan.physical_plan import (
     SINK_ORIENT_DICT_ENCODED,
     SOURCE_BATCH,
     SOURCE_CONCAT,
+    SOURCE_CSV,
     SOURCE_PARQUET,
     SOURCE_SINK_OUTPUT,
 )
@@ -101,6 +105,7 @@ from .sink_group_agg import GroupAggSink
 from .sink_sort import SortSink
 from .sink_string_group_agg import StringGroupAggSink
 from .source_batch import BatchSource
+from .source_csv import build_csv_source
 from .source_parquet import LocalParquetSource, build_parquet_source
 from .source_sink_output import SinkOutputSource
 from .source_variant import SourceVariant
@@ -155,8 +160,8 @@ struct RealBuilder[
     pool_o: Origin[mut=True],
     filter_o: Origin[mut=True],
 ](SegmentBuilder):
-    """Builds the real members of a segment: Parquet, batch and sink-output
-    sources; filter, project and limit operators; the collect sink."""
+    """Builds the real members of a segment: Parquet, batch, sink-output and
+    CSV sources; filter, project and limit operators; the collect sink."""
 
     comptime Source = SourceVariant[
         LocalParquetSource[Self.cache_o, Self.pool_o, Self.filter_o],
@@ -307,6 +312,8 @@ struct RealBuilder[
             return Self.Source.second(
                 BatchSource(copy_batch(self._resident[handle]), morsel_rows)
             )
+        if desc.source_kind == SOURCE_CSV:
+            return Self.Source.second(build_csv_source(spec, morsel_rows))
         if desc.source_kind == SOURCE_SINK_OUTPUT:
             if len(spec.dep_seg_ids) != 1:
                 raise Error(
@@ -355,7 +362,7 @@ struct RealBuilder[
             + " of segment "
             + String(desc.seg_id)
             + " is not served (SOURCE_PARQUET, SOURCE_BATCH,"
-            " SOURCE_SINK_OUTPUT and SOURCE_CONCAT are)"
+            " SOURCE_SINK_OUTPUT, SOURCE_CSV and SOURCE_CONCAT are)"
         )
 
     def build_op(

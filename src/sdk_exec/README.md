@@ -4,7 +4,8 @@ The engine-execution layer of the SDK: twelve modules, ten leaves that need
 nothing from the rest of the package except each other, and the plan gates
 (`plan_validation_gate`, `parquet_glob_options`), which build on `sdk`;
 and the engine context with its SQL door (`engine_*` below), which runs a SQL
-query over Parquet files from text to record batches. Views, writes, the plan
+query over Parquet files, and over CSV files named by `read_csv` (plain or
+`.gz`, `.zst`, `.lz4`), from text to record batches. Views, writes, the plan
 cache and the plan gates' call sites are not wired into the context yet.
 
 | module | does |
@@ -93,6 +94,13 @@ The tests run when the package is built.
 - `test_plan_validation_routes_ledger`: the ledger's self check and lookups,
   and the wiring's refusal of an unregistered token and of a handle from
   another epoch.
+- `test_run_sql_csv`: `read_csv` through `run_sql` answers what the pinned
+  DuckDB answers (the `:csv_oracle` build action) for every case of
+  `tests/csv/cases.sql`: the inferred types and the rows of typed, quoted,
+  NULL-bearing and `|`-delimited files and of a header with no row, filters,
+  grouped and ungrouped aggregates and `all_varchar`, each over the committed
+  file and over a gzip copy; a missing file is refused at bind and
+  `header=false` at lowering.
 - `test_run_sql_q6`: TPC-H Q6's text from `bench_corpus` over a lineitem-shaped
   Parquet file gives the integer oracle's DECIMAL(38,4); a join, a syntax error,
   an unknown table, a missing file, CREATE TABLE AS and a replaced file are named
@@ -128,8 +136,11 @@ The tests run when the package is built.
 
 The context does not yet hold a source registry, a plan cache, spill options or
 the plan validation switch. `run_sql` serves one result segment of Parquet
-scans or of the one-row relation a SELECT with no FROM reads, and the
-concatenation of several such inputs a UNION ALL is (an integer
+scans, of `read_csv` scans of one local file with a header row (decoded whole
+before the first morsel; `header=false` is refused at lowering, because the
+reader would name the columns `col_0`, `col_1`, ... where DuckDB names them
+`column0`, `column1`, ...), or of the one-row relation a SELECT with no FROM
+reads, and the concatenation of several such inputs a UNION ALL is (an integer
 literal of the result's SELECT list or of a UNION ALL branch's is INT32 when
 it fits, as in DuckDB; an integer literal anywhere else, `1 + 1` included, is
 still INT64); Q1 waits for the grouped sinks and the sort. The post-rewrite gate and

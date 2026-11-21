@@ -11,10 +11,11 @@
 # docs/design/python_package.md "The two flavours") the run builds, tests and publishes; a run publishes
 # exactly one. `external` carries no file of Modular's and requires Modular's `mojo-compiler`, which pip
 # installs from PyPI beside it; `bundled` carries the Mojo runtime libraries and requires nothing. The
-# default is `external`; changing it is the one line `default:` below. The run's summary names the
-# flavour, and so does the first paragraph of the wheel's description on the index. The macOS arm64
-# wheel is the bundled flavour only (no external flavour exists for macOS yet), so the macOS jobs run
-# for a `bundled` run and a default run publishes no macOS wheel.
+# default is `bundled`, the flavour a scheduled run publishes; changing it is the one line `default:` below.
+# The run's summary names the flavour, and so does the first paragraph of the wheel's description on the
+# index. The macOS arm64 wheel is the bundled flavour only (no external flavour exists for macOS yet), so
+# the macOS jobs run for a `bundled` run, which a default run is, and an `external` run publishes no macOS
+# wheel.
 #
 # THE JOBS of the Linux wheel, in order (a job that fails stops every job after it):
 #   `build`           on the farm: builds the stamped wheel of the flavour (//python:komira_wheel_<flavour>),
@@ -97,7 +98,7 @@ on:
         options:
           - external
           - bundled
-        default: external
+        default: bundled
         required: true
 
 permissions: {}

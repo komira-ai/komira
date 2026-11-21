@@ -1,4 +1,42 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+load("@komira//tools/build/sql:defs.bzl", "sql_oracle")
+
+# DuckDB's answers for test_run_sql_csv: each line of tests/csv/cases.sql runs
+# one query over the committed CSV files and writes its answer.
+_CSV_CASES = [
+    "typed_types",
+    "typed_rows",
+    "typed_filter",
+    "typed_group",
+    "typed_agg",
+    "typed_varchar",
+    "quoted_types",
+    "quoted_rows",
+    "nulls_types",
+    "nulls_rows",
+    "nulls_counts",
+    "nulls_filter",
+    "nulls_group",
+    "pipe_types",
+    "pipe_rows",
+    "header_only_types",
+    "header_only_count",
+]
+
+_CSV_FILES = ["typed", "quoted", "nulls", "pipe", "header_only"]
+
+sql_oracle(
+    name = "csv_oracle",
+    srcs = ["tests/csv/cases.sql"],
+    inputs = {f + ".csv": "tests/csv/" + f + ".csv" for f in _CSV_FILES},
+    outputs = [c + ".tsv" for c in _CSV_CASES],
+)
+
+_CSV_TEST_DATA = {"cases.sql": "tests/csv/cases.sql"}
+
+_CSV_TEST_DATA.update({f + ".csv": "tests/csv/" + f + ".csv" for f in _CSV_FILES})
+
+_CSV_TEST_DATA.update({c + ".tsv": ":csv_oracle[" + c + ".tsv]" for c in _CSV_CASES})
 
 # The engine-execution layer of the SDK: twelve modules (ten leaves plus the
 # plan gate modules) and the engine context with its SQL door (see README.md). Each module's header says what it is for.
@@ -48,6 +86,11 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #   a derived union, an empty branch, the first branch's names, LIMIT, and the
 #   refusals of a union with no common type and of an ORDER BY before UNION ALL;
 #   and an ORDER BY with no union (the sort sinks' data reaches the builder).
+# - test_run_sql_csv: read_csv through run_sql answers what the pinned DuckDB
+#   answers (the :csv_oracle action below) for each case of tests/csv/cases.sql:
+#   typed columns and their inferred types, quoted cells, NULL-bearing cells, a
+#   `|` dialect and a header with no row, each over the committed file and over
+#   a gzip copy; every case is run; a missing file is refused at bind.
 # - test_run_sql_timers_off: Q6 through run_sql on four workers in the default
 #   build gives the oracle's answer and leaves every phase timer
 #   (phase_timers) unregistered and at zero.
@@ -139,6 +182,7 @@ mojo_library(
         "tests/test_plan_validation_routes_ledger.mojo",
         "tests/test_resolved_cache_lru_eviction_stress.mojo",
         "tests/test_resolved_cache_pin_count.mojo",
+        "tests/test_run_sql_csv.mojo",
         "tests/test_run_sql_distinct.mojo",
         "tests/test_run_sql_int_sum.mojo",
         "tests/test_run_sql_no_from.mojo",
@@ -150,6 +194,10 @@ mojo_library(
     test_deps = [
         "//src/bench_corpus:bench_corpus",
         "//src/parquet_writer:parquet_writer",
+        "//src/tests/helpers/komira_plan_harness:komira_plan_harness",
     ],
+    test_data = {
+        "tests/test_run_sql_csv.mojo": _CSV_TEST_DATA,
+    },
     visibility = ["PUBLIC"],
 )

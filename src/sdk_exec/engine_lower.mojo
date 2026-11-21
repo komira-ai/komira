@@ -52,8 +52,8 @@ def _add_scan_facts(
                     return
             add_parquet_scan(inputs, ctx.footers, path, node.output_schema)
             return
-    # An in-memory scan, or a Parquet scan of several files: no facts here;
-    # the cutter serves the first and refuses the second by name.
+    # An in-memory or CSV scan, or a Parquet scan of several files: no facts
+    # here; the cutter serves the first two and refuses the third by name.
     inputs.add_scan()
 
 

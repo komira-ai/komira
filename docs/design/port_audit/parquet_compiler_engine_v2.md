@@ -50,7 +50,7 @@ Part of the [port audit](../port_audit.md). Each row is one non-test source file
 
 ### CSV and NDJSON sources in the SQL and DataFrame path
 - Earlier files: komira_parquet/csv_reader.mojo
-- Missing: src/csv/reader.mojo reads a file to a RecordBatch, but src/sdk_exec only has register_parquet, run_sql refuses in-memory scans (EXECUTE_UNSUPPORTED_PARAM) and src/pipeline_exec has only Parquet and batch source variants. Closest code: src/scan_source/csv_source.mojo, json_source.mojo and src/pipeline_exec/source_batch.mojo.
+- Done for one local CSV file with a header row: read_csv lowers to a SOURCE_CSV segment and src/pipeline_exec/source_csv.mojo decodes it at the bound types (plain or .gz, .zst, .lz4); src/sdk_exec/tests/test_run_sql_csv.mojo holds it to DuckDB. Missing: NDJSON, a CSV glob or several files, header=false (refused by name), and a CSV registered as a table (src/sdk_exec only has register_parquet). Closest code: src/scan_source/csv_source.mojo, json_source.mojo and src/pipeline_exec/source_batch.mojo.
 - Why: the SDK must run SQL over CSV and NDJSON files, not only Parquet.
 - Task: pysdk-engine-csv-source
 

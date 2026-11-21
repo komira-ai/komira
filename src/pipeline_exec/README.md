@@ -41,8 +41,8 @@ Import each module by name; the package root exports nothing.
   holds one of three member types, fixed where the variant is named, and a tag;
   its trait methods test the tag and call the member. `unused_members` fills
   the slots a list leaves empty with members that refuse to run.
-- `source_parquet`, `source_batch`, `source_sink_output`: the sources of a
-  plan. `build_parquet_source` makes a `parquet_scan` `ParquetSource` on
+- `source_parquet`, `source_batch`, `source_sink_output`, `source_csv`: the
+  sources of a plan. `build_parquet_source` makes a `parquet_scan` `ParquetSource` on
   the local file system from the Parquet arm of a `SourceSpecPod`: it refuses a
   spec that is not total, resolves the projection names through the footer of
   the first file the path lists (a path may be a file, a directory or a glob),
@@ -51,7 +51,13 @@ Import each module by name; the package root exports nothing.
   row-group statistics are checked against. The source borrows the caller's
   footer cache and expression pool. `BatchSource` serves a copy of a resident
   batch and `SinkOutputSource` the batch a finished segment published, each as
-  morsels claimed from one shared cursor.
+  morsels claimed from one shared cursor. `build_csv_source` reads the file
+  of the CSV arm of a `SourceSpecPod` (a `.csv.gz`, `.csv.zst` or `.csv.lz4`
+  decompressed by its extension), decodes it with the spec's dialect at the
+  column types the plan bound it at (no second inference), refuses a file whose
+  column names are not the bound ones (`CSV_SOURCE_SCHEMA_MISMATCH`) and serves
+  the decoded file as a `BatchSource`; the whole file is decoded before the
+  first morsel.
 - `op_filter`, `op_project`, `op_limit`: the operators. A filter evaluates its
   predicate and records the rows it keeps as the batch's selection mask instead
   of gathering them; all rows kept leaves no mask, none kept is FILTERED_EMPTY,
@@ -225,11 +231,12 @@ Import each module by name; the package root exports nothing.
   memory on a synthetic workload and checks each layout's counts; its numbers and what
   they decided are in `docs/design/lowering_and_pipeline.md` (section 4.3).
 - `real_builder`: `RealBuilder`, the `SegmentBuilder` over these members. It
-  serves SOURCE_PARQUET, SOURCE_BATCH, SOURCE_SINK_OUTPUT, SOURCE_CONCAT (a
-  UNION ALL: it takes the output of every producer the spec names, after
-  checking each is a dependency, and concatenates them in the spec's order
-  into one batch it serves as a `SinkOutputSource`, with each column
-  nullable when any producer's is; a concatenation of no segment is refused), OP_FILTER,
+  serves SOURCE_PARQUET, SOURCE_BATCH, SOURCE_SINK_OUTPUT, SOURCE_CSV,
+  SOURCE_CONCAT (a UNION ALL: it takes the output of every producer the spec
+  names, after checking each is a dependency, and concatenates them in the
+  spec's order into one batch it serves as a `SinkOutputSource`, with each
+  column nullable when any producer's is; a concatenation of no segment is
+  refused), OP_FILTER,
   OP_PROJECT, OP_LIMIT and the sinks `(SINK_COLLECT, KEY_DTYPE_NONE,
   SINK_ORIENT_COLUMNAR)`, `(SINK_AGG, KEY_DTYPE_NONE, SINK_ORIENT_COLUMNAR)`,
   the grouped rows I64, I32, F64 and F32, `(SINK_AGG, KEY_DTYPE_STRING,
@@ -243,7 +250,7 @@ Import each module by name; the package root exports nothing.
   chain's projections over a batch of no rows. Three origins name the borrows of
   the Parquet source (the footer cache, the expression pool, an absent dynamic
   filter).
-- `plan_harness`: segment descriptors for the three sources with an operator
+- `plan_harness`: segment descriptors for the four sources with an operator
   chain and a collect sink (`with_agg_sink` turns one into an aggregation),
   `project_columns`, and a sample table with readers, for plans written by hand
   (`with_group_sink`, `with_string_group_sink` and `grouped_agg_data` for the
@@ -347,4 +354,50 @@ var out = run_plan(descs, builder, dispatch, 2, CancellationToken.new())
 assert_false(out.has(0))  # the consumer took it
 var counted = batch_values(out.take(1))
 assert_equal(counted[0], Int64(12))
+```
+
+A SOURCE_CSV spec through `source_csv` and `plan_harness`; reading a file is
+in the welded tests (`test_source_csv`):
+
+```mojo
+from std.testing import assert_equal, assert_true
+
+from arrow.arrow_types import ArrowType
+from physical_plan.csv_source_spec import CsvSourceSpec
+from physical_plan.physical_plan import SOURCE_CSV, SourceSpecPod
+from pipeline_exec.plan_harness import csv_segment
+from pipeline_exec.source_csv import (
+    build_csv_source,
+    csv_read_options,
+    read_csv_spec,
+)
+
+var names = List[String]()
+names.append("code")
+var types = List[ArrowType]()
+types.append(ArrowType.STRING)
+var spec = SourceSpecPod.csv(
+    CsvSourceSpec("codes.csv", UInt8(ord(";")), True, 0, names^, types^)
+)
+# The reader gets the spec's dialect and parses each column at its bound
+# type, so a cell `0001` of this column stays the string `0001`.
+var options = csv_read_options(spec)
+assert_equal(Int(options.delimiter), ord(";"))
+assert_true(options.declared_column_types[0] == ArrowType.STRING)
+# A segment that reads the file and collects (plan_harness).
+var seg = csv_segment(0, spec^)
+assert_equal(seg.source_kind, SOURCE_CSV)
+# A spec that names no file is refused before anything is read.
+var refused = String("")
+try:
+    _ = read_csv_spec(SourceSpecPod())
+except e:
+    refused = String(e)
+assert_equal(refused, "pipeline_exec: a SOURCE_CSV spec names no file")
+refused = String("")
+try:
+    _ = build_csv_source(SourceSpecPod(), 1024)
+except e:
+    refused = String(e)
+assert_equal(refused, "pipeline_exec: a SOURCE_CSV spec names no file")
 ```

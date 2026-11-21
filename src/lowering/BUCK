@@ -1,10 +1,16 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
 # Lowering: a bound LogicalPlan, a HostProfile and the resolved inputs to the
-# PhysicalPlan IR (version 14) and the ParamTable its segments index. Pure: the
+# PhysicalPlan IR (version 15) and the ParamTable its segments index. Pure: the
 # entry opens no file, reads no clock and no environment variable and touches
 # no global (README.md).
 #
+# test_lower_csv         a CSV scan as a SOURCE_CSV segment: the path, the
+#                        dialect and every bound column in its spec, the
+#                        render line, its filter and projection as operators
+#                        over the full schema, the positional factory's
+#                        default dialect, a string key served COLUMNAR, a
+#                        scan with header=false refused by name.
 # test_lower_distinct    SELECT DISTINCT cut to a SINK_AGG grouped by every
 #                        column with no aggregate: the sink row by column
 #                        type and dictionary footer, the group keys in column
@@ -69,6 +75,7 @@ mojo_library(
         "sql",
     ],
     test_srcs = [
+        "tests/test_lower_csv.mojo",
         "tests/test_lower_distinct.mojo",
         "tests/test_lower_names.mojo",
         "tests/test_lower_plans.mojo",
