@@ -18,7 +18,8 @@
 # column, an aggregate with two same-named outputs, and the tags with no arm).
 #
 # Test groups:
-#   1. infer_schema per node kind, and the refusal of a tag with no arm.
+#   1. infer_schema per node kind (a UNION ALL returns its stated schema),
+#      and the refusal of a tag with no arm.
 #   2. The column accessors.
 #   3. schema_from_project_exprs: inference, and the top-level missing
 #      column refusal (direct and through one alias).
@@ -229,6 +230,18 @@ def test_partition_by_and_cast_to_varchar_return_their_stored_schema() raises:
     assert_equal(_fields(infer_schema(cv)), _fields(cv.output_schema))
     assert_equal(infer_schema(cv).num_columns(), 2)
     assert_equal(infer_schema(cv).field_arrow_type(0), ArrowType.STRING)
+
+
+def test_union_returns_its_stated_schema() raises:
+    # A UNION ALL's schema is the one its producer states (the branches'
+    # common schema); before this arm, every UNION ALL the SQL binder builds
+    # was refused as an unknown tag.
+    var children = List[OwnedPointer[LogicalPlan]]()
+    children.append(OwnedPointer(_scan()))
+    children.append(OwnedPointer(_scan()))
+    var u = LogicalPlan.union(children^, _schema())
+    assert_equal(_fields(infer_schema(u)), AT)
+    assert_equal(_fields(infer_schema(u)), _fields(u.output_schema))
 
 
 def test_a_tag_with_no_arm_is_refused() raises:
