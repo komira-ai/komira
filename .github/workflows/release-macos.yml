@@ -4,7 +4,7 @@
 # komira//tools/build/platforms:darwin-arm64`: the compiles and the tests run on the farm's macOS
 # workers through the farm connection, never on a GitHub-hosted macOS runner (the job runs on an ubuntu
 # runner and only asks the farm). The macOS workers are few and the Linux ones many, so this build is in
-# the release and never in a pull request's check: this workflow has no pull_request,
+# the release and never in a pull request's check (the macOS Python harness tests are in it too): this workflow has no pull_request,
 # pull_request_target or merge_group trigger, and pr.yml and every workflow that runs on a pull request
 # hold no macOS platform and no macOS worker set (//:release_macos_cases says so).
 #
@@ -92,6 +92,15 @@ jobs:
         uses: ./.github/actions/buck2-farm
         with:
           args: build --target-platforms komira//tools/build/platforms:darwin-arm64 --keep-going //release:mopm_darwin_libs
+          assert-remote: ${{ steps.assert.outputs.path }}
+      # The Python test harness on macOS arm64: the macOS CPython and macOS wheels install on a macOS
+      # worker and the hello binding test (pyarrow, and a Mojo shared library loaded by path) runs
+      # there, with its three twins that must fail the way they name. Release only: no pull request
+      # runs a macOS action.
+      - name: build the macOS Python harness tests
+        uses: ./.github/actions/buck2-farm
+        with:
+          args: build --target-platforms komira//tools/build/platforms:darwin-arm64 --keep-going komira//tools/build/examples/python_binding:hello komira//tools/build/examples/python_binding:refuses_missing_lib komira//tools/build/examples/python_binding:refuses_wrong_add komira//tools/build/examples/python_binding:refuses_wrong_sum
           assert-remote: ${{ steps.assert.outputs.path }}
       - name: the macOS build failed
         if: failure()
