@@ -44,9 +44,10 @@ load("@komira//tools/build/bench_salt:bench_salt.bzl", "salted")
 #                  @export is MISSING for any driver that calls it.
 #   gate_srcs      linked-run drivers: Mojo mains that dlopen `./<out_name>.so`
 #                  (the gate stages it as their one data file) and call it.
-#   extra_runpath  run path entries after `$ORIGIN/lib` and `$ORIGIN` (Linux
-#                  only), e.g. `$ORIGIN/../../lib` for a library that is
-#                  installed two directories below the lib/ it loads from.
+#   extra_runpath  run path entries after the rule's own (`$ORIGIN/lib` and
+#                  `$ORIGIN` on Linux), in the platform's spelling, e.g.
+#                  `$ORIGIN/../../lib` for a library that is installed two
+#                  directories below the lib/ it loads from.
 #   force_load     C/C++ libraries linked whole (--whole-archive): every object
 #                  of their archives is in the library, referenced or not.
 #
@@ -137,13 +138,14 @@ def _shared_lib_impl(ctx):
         # (the `lib/` the gate stages) alone finds nothing there. lld joins
         # the two `-rpath` into one DT_RUNPATH.
         link_extra = cmd_args(link_extra, "-Wl,-rpath,$ORIGIN") if link_extra else cmd_args("-Wl,-rpath,$ORIGIN")
-        # `extra_runpath`, after those two: a variant of libkomira sits two
-        # directories below the native directory's lib/ (`variants/<level>/`),
-        # and reaches it as `$ORIGIN/../../lib`.
-        for p in ctx.attrs.extra_runpath:
-            link_extra = cmd_args(link_extra, "-Wl,-rpath," + p)
-    elif ctx.attrs.extra_runpath:
-        fail("{}: `extra_runpath` is ELF only".format(ctx.label))
+
+    # `extra_runpath`, after any run path above: a variant of libkomira sits two
+    # directories below the native directory's lib/ (`variants/<level>/`), and
+    # reaches it as `$ORIGIN/../../lib`. Each entry is the platform's own
+    # spelling (`$ORIGIN` on ELF, `@loader_path` on Mach-O); both linkers take
+    # `-rpath`.
+    for p in ctx.attrs.extra_runpath:
+        link_extra = cmd_args(link_extra, "-Wl,-rpath," + p) if link_extra else cmd_args("-Wl,-rpath," + p)
 
     # The owners' shared libraries (`native_owners`): linked ahead of the C
     # archives, so the library is NEEDED on each owner's SONAME and the

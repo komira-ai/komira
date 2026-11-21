@@ -57,6 +57,18 @@ static int fail_line(const char *fmt, const char *a, const char *b) {
     return 1;
 }
 
+/* Does the relative path `rel` have a segment `..`? */
+static int has_dotdot_segment(const char *rel) {
+    for (const char *p = rel; *p != '\0';) {
+        const char *end = strchr(p, '/');
+        size_t len = end ? (size_t)(end - p) : strlen(p);
+        if (len == 2 && p[0] == '.' && p[1] == '.') return 1;
+        if (end == NULL) break;
+        p = end + 1;
+    }
+    return 0;
+}
+
 static const char *base_name(const char *path) {
     const char *slash = strrchr(path, '/');
     return slash ? slash + 1 : path;
@@ -87,7 +99,7 @@ static int find_variant(const char *want, char *path, size_t cap) {
         *tab1 = '\0';
         *tab2 = '\0';
         const char *rel = tab1 + 1;
-        if (rel[0] == '/' || strstr(rel, "..") != NULL) {
+        if (rel[0] == '/' || has_dotdot_segment(rel)) {
             fclose(f);
             return fail_line("variants_load: <dir>/VARIANTS: variant %s has a path outside the directory: %s", name, rel);
         }
@@ -187,7 +199,13 @@ int main(int argc, char **argv) {
     const char *host_libs[8];
     int n_host = 0;
     for (int i = 1; i + 1 < argc; i += 2) {
-        if (strcmp(argv[i], "--host-lib") == 0 && n_host < 8) host_libs[n_host++] = argv[i + 1];
+        if (strcmp(argv[i], "--host-lib") == 0) {
+            if (n_host == 8) {
+                fprintf(stderr, "variants_load: more than 8 --host-lib\n");
+                return 2;
+            }
+            host_libs[n_host++] = argv[i + 1];
+        }
         else if (strcmp(argv[i], "--dir") == 0) g_dir = argv[i + 1];
         else if (strcmp(argv[i], "--variant") == 0) variant = argv[i + 1];
         else if (strcmp(argv[i], "--out") == 0) out = argv[i + 1];
@@ -198,7 +216,7 @@ int main(int argc, char **argv) {
         }
     }
     if (g_dir == NULL || variant == NULL || out == NULL || argc % 2 != 1) {
-        fprintf(stderr, "variants_load: usage: variants_load --dir <dir> --variant <name> --out <file> [--expect-failure <line>]\n");
+        fprintf(stderr, "variants_load: usage: variants_load --dir <dir> --variant <name> --out <file> [--host-lib <file>]... [--expect-failure <line>]\n");
         return 2;
     }
     static char abs_dir[PATH_MAX];

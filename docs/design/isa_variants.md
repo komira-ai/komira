@@ -147,7 +147,7 @@ lib/...                                native owners and the Mojo runtime librar
 - **The platform table gains `isa_variants`** (**EXISTS:**
   [tools/build/platforms/isa_variants.bzl](../../tools/build/platforms/isa_variants.bzl); the table
   lists only the variants that are built, so v4 and `neoverse-n1` are not in it). It is a field of every row: a list of
-  `isa_variant(name, target_cpu, target_features, requires)`, lowest first. The completeness check
+  `isa_variant(name, target_cpu, requires, target_features = [])`, lowest first. The completeness check
   at the bottom of the table refuses a row in each of these cases:
   - the list is empty;
   - two variants share a name;
@@ -199,10 +199,11 @@ lib/...                                native owners and the Mojo runtime librar
     The build task measures the owners with hot loops (`compression`, `parquet_codec`) at both
     levels. If one is slower at v2, that owner gets one build per variant in the variant's own
     `lib/`, instead of moving the whole directory's C to v3.
-- **`target_features` is wired into the compile.** No rule reads it today
-  (`grep -rn target_features tools/build` finds only the table and its README), so the generic
-  arm64 row's `+outline-atomics` is not applied yet. The build task passes the field to `mojo build`
-  and to zig's `-mcpu` suffixes.
+- **`target_features` is wired into the compile.** No rule passes it to a compile today: only the
+  table, its checks and its README read it, so the generic arm64 row's `+outline-atomics` is not
+  applied yet, and the table refuses a variant other than the row's own build that sets it
+  (**EXISTS**, `variant_refusals` in `tools/build/platforms/isa_variants.bzl`). A later task passes
+  the field to `mojo build` and to zig's `-mcpu` suffixes.
 
 ### 4. When a higher variant is added
 

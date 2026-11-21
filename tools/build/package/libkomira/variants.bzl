@@ -30,6 +30,10 @@ copy's lib/. The output `<name>.pass` exists only if that passed or, with `expec
 if the first failure was exactly that line (the copy written `<dir>`). Building the target is
 running the check. Every linux x86_64 worker implements x86-64-v3 (the host floor,
 tools/build/toolchains/README.md), so each variant of the row runs where it is checked.
+
+It is `libkomira_dist_load` (dist.bzl) for a directory of more than one library: the same copy,
+environment, host C++ runtime and `expect_failure` contract, with the library chosen by its
+manifest line and the check that no other variant is mapped.
 """
 
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
@@ -37,7 +41,7 @@ load("@komira//tools/build/mojo:providers.bzl", "MojoToolchainInfo")
 load("@komira//tools/build/mojo:shared_lib.bzl", "HOST_CXX_RUNTIME")
 load("@komira//tools/build/native:shared.bzl", "NativeSharedInfo")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
-load("@komira//tools/build/platforms:isa_variants.bzl", "variant_path", "variants_manifest")
+load("@komira//tools/build/platforms:isa_variants.bzl", "variant_libs_refusals", "variant_path", "variants_manifest")
 load("@komira//tools/build/platforms:table.bzl", "row")
 load("@komira//tools/build/bench_salt:bench_salt.bzl", "salted")
 
@@ -49,9 +53,9 @@ _LIB_FILE = "libkomira.so"
 def _variants_impl(ctx):
     tc = ctx.attrs.toolchain[MojoToolchainInfo]
     r = row(_ROW)
-    names = [v["name"] for v in r["isa_variants"]]
-    if sorted(ctx.attrs.libs.keys()) != sorted(names):
-        fail("{}: libs names {}, but row {} ships the variants {}".format(ctx.label, sorted(ctx.attrs.libs.keys()), _ROW, names))
+    refusals = variant_libs_refusals(_ROW, r, ctx.attrs.libs.keys())
+    if refusals:
+        fail("{}: {}".format(ctx.label, "; ".join(refusals)))
     for n in HOST_CXX_RUNTIME:
         if n not in r["runtime_libs"]:
             fail("{}: host C++ runtime library {} is not one of row {}'s runtime_libs {}".format(ctx.label, n, _ROW, r["runtime_libs"]))
@@ -70,8 +74,7 @@ def _variants_impl(ctx):
                 fail("{}: two libraries are named lib/{}".format(ctx.label, soname))
             files["lib/" + soname] = so
     for p in ctx.attrs.omit:
-        if p not in files:
-            fail("{}: omit names {}, which the directory does not hold ({})".format(ctx.label, p, ", ".join(sorted(files))))
+        # A path the directory does not hold fails here: pop has no default.
         files.pop(p)
     return [DefaultInfo(default_output = ctx.actions.copied_dir(ctx.label.name, files))]
 

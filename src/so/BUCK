@@ -189,7 +189,7 @@ mojo_shared_lib(
 [
     mojo_shared_lib(
         name = "libkomira_" + variant_label_name(v),
-        toolchain = variant_toolchain("linux-x86_64", v),
+        toolchain = variant_toolchain(v),
         extra_runpath = [] if v == floor_variant(row("linux-x86_64")) else ["$ORIGIN/../../lib"],
         visibility = ["komira//tools/build/package/libkomira:"],
         **_LIBKOMIRA

@@ -306,8 +306,8 @@ only in the `libkomira.so` row; the owners and runtime rows are the same files:
 
 x86-64-v3 is built with the toolchain and CPU of `:libkomira` (the row's `target_cpu`);
 the extra `$ORIGIN/../../lib` finds the one `lib/` of the variants directory from
-`variants/x86-64-v3/`. A second level adds one more `libkomira.so`, about 3.4 MiB, to a
-native directory; the owners and the runtime are shared.
+`variants/x86-64-v3/`. A second level adds one more `libkomira.so` to a native directory, about
+3.4 MiB (derived from the table: 3524608 bytes is 3.36 MiB); the owners and the runtime are shared.
 
 ## The header and the golden
 

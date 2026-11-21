@@ -5,6 +5,7 @@ load(
     "extra_variants",
     "floor_variant",
     "isa_variant",
+    "variant_libs_refusals",
     "variant_path",
     "variants_manifest",
 )
@@ -83,6 +84,7 @@ _TABLE_CASES = [
     ("no variant that is the row's own build", _edit("linux-x86_64", field = "isa_variants", value = _variants(isa_variant("x86-64-v2", "x86-64-v2", _V2))), "row linux-x86_64: no variant is the row's own build (target_cpu `x86-64-v3`, target_features []): the tested build must ship"),
     ("the row's CPU without its target features", _edit("linux-arm64", field = "isa_variants", value = _variants(isa_variant("generic", "generic", ["asimd", "fp"]))), "row linux-arm64: no variant is the row's own build (target_cpu `generic`, target_features [\"+outline-atomics\"])"),
     ("two variants that are the row's own build", _edit("linux-x86_64", field = "isa_variants", value = _variants(isa_variant("a", "x86-64-v3", _V2), isa_variant("b", "x86-64-v3", _V3))), "row linux-x86_64: variants a, b are all the row's own build"),
+    ("an extra variant with target features", _edit("linux-x86_64", field = "isa_variants", value = _variants(isa_variant("x86-64-v2", "x86-64-v2", _V2, target_features = ["+avx"]), isa_variant("x86-64-v3", "x86-64-v3", _V3))), "row linux-x86_64: variant `x86-64-v2` sets target_features [\"+avx\"], which no variant toolchain passes to the compile yet"),
     ("the table as committed", PLATFORMS, None),
     ("a pin missing from a registered linux row", _edit("linux-x86_64", drop_role = "rustc"), "row linux-x86_64: missing pin `rustc`"),
     ("a pin missing from the macOS row", _edit("darwin-arm64", drop_role = "zig"), "row darwin-arm64: missing pin `zig`"),
@@ -196,6 +198,14 @@ _MANIFESTS = {
                                      "x86-64-v3\tvariants/x86-64-v3/libkomira.so\t" + " ".join(_V3) + "\n"),
 }
 
+_LIBS_CASES = [
+    (["x86-64-v2", "x86-64-v3"], []),
+    (["x86-64-v3", "x86-64-v2"], []),
+    (["x86-64-v3"], ["the links are for the variants [\"x86-64-v3\"], but row linux-x86_64 ships [\"x86-64-v2\", \"x86-64-v3\"]"]),
+    (["x86-64-v2", "x86-64-v3", "x86-64-v4"], ["the links are for the variants [\"x86-64-v2\", \"x86-64-v3\", \"x86-64-v4\"], but row linux-x86_64 ships [\"x86-64-v2\", \"x86-64-v3\"]"]),
+    ([], ["the links are for the variants [], but row linux-x86_64 ships [\"x86-64-v2\", \"x86-64-v3\"]"]),
+]
+
 def _variant_cases():
     for n, case in _MANIFESTS.items():
         file_name, want = case
@@ -215,3 +225,10 @@ def _variant_cases():
             fail("platform table: row {} has extra variants {}, expected none".format(n, extra_variants(PLATFORMS[n])))
     if variant_path(x86, x86["isa_variants"][1], "libkomira.so") != "variants/x86-64-v3/libkomira.so":
         fail("platform table: x86-64-v3 is at {}".format(variant_path(x86, x86["isa_variants"][1], "libkomira.so")))
+
+    # The links a variants directory is built from (libkomira_variants) are keyed by exactly the
+    # row's variant names, in any order; one missing or one more is refused, naming both sets.
+    for names, want in _LIBS_CASES:
+        got = variant_libs_refusals("linux-x86_64", x86, names)
+        if got != want:
+            fail("platform table: links for {} are refused with {}, expected {}".format(names, got, want))

@@ -81,9 +81,9 @@ def komira_mojo_toolchains(darwin = "komira//tools/build/toolchains/darwin:mojo"
     # Only a target that names it in `toolchain` builds with it (each variant's
     # link of libkomira, src/so/BUCK); every other target, and every `.mojoc`
     # the link reads, stays on `:mojo`.
+    # The table refuses an extra variant with `target_features` (variant_refusals), so its CPU is
+    # all a level's toolchain sets.
     for v in extra_variants(row("linux-x86_64")):
-        if v["target_features"]:
-            fail("komira_mojo_toolchains: variant {} sets target_features {}, which no Mojo compile passes yet".format(v["name"], v["target_features"]))
         mojo_toolchain(
             name = "mojo_linux_x86_64_" + variant_label_name(v),
             target_compatible_with = _LINUX_X86_64,  # komira-limit:mojo-toolchain-x86-64
@@ -92,17 +92,15 @@ def komira_mojo_toolchains(darwin = "komira//tools/build/toolchains/darwin:mojo"
             **(attrs | {"target_cpu": v["target_cpu"]})
         )
 
-def variant_toolchain(row_name, v):
-    """The Mojo toolchain a link of variant `v` (of row `row_name`'s `isa_variants`) names in `toolchain`.
+def variant_toolchain(v):
+    """The Mojo toolchain a link of variant `v` of the linux-x86_64 row's `isa_variants` names in `toolchain`.
 
     The row's own build is `toolchains//:mojo_linux_x86_64`, the toolchain `:mojo`
     selects there; another level is the toolchain of that level that
     komira_mojo_toolchains declares. Linux x86_64 is the one row with more than
-    one variant.
+    one variant, and the only one komira_mojo_toolchains declares levels for.
     """
-    if row_name != "linux-x86_64":
-        fail("variant_toolchain: row {} has no variant toolchains; linux-x86_64 is the one row with more than one variant".format(row_name))
-    if v in extra_variants(row(row_name)):
+    if v in extra_variants(row("linux-x86_64")):
         return "toolchains//:mojo_linux_x86_64_" + variant_label_name(v)
     return "toolchains//:mojo_linux_x86_64"
 

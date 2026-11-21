@@ -95,7 +95,25 @@ def variant_refusals(row_name, row):
             row["target_cpu"],
             row["target_features"],
         ))
+
+    # A variant other than the row's own build gets a toolchain of its own that sets only its
+    # `target_cpu` (tools/build/toolchains/defs.bzl): no Mojo compile passes features yet, so a
+    # variant that needs them would silently be built without.
+    for v in extra_variants(row):
+        if v["target_features"]:
+            out.append("row {}: variant `{}` sets target_features {}, which no variant toolchain passes to the compile yet".format(
+                row_name,
+                v["name"],
+                v["target_features"],
+            ))
     return out
+
+def variant_libs_refusals(row_name, row, names):
+    """[] if `names` (the variant names a set of links is keyed by) are exactly the variants of `row`; else the sentence saying how they differ."""
+    want = sorted([v["name"] for v in row["isa_variants"]])
+    if sorted(names) == want:
+        return []
+    return ["the links are for the variants {}, but row {} ships {}".format(sorted(names), row_name, want)]
 
 def floor_variant(row):
     """The lowest variant of `row`: the one at the plain path, and the CPU every C object of the row is compiled for."""
