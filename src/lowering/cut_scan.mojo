@@ -15,7 +15,9 @@
 # Refused: an unbounded scan, a Parquet scan of several files, a
 # Hive-partitioned one or one on a file system other than the local one
 # (LOWERING_SCAN_NOT_TOTAL); a scan beyond the inputs' count
-# (LOWERING_INPUTS_SCAN_COUNT); any other source (LOWERING_UNCUTTABLE_NODE).
+# (LOWERING_INPUTS_SCAN_COUNT); a CSV scan with header=false, whose columns
+# the reader would not name as DuckDB does, and any other source
+# (LOWERING_UNCUTTABLE_NODE).
 # =============================================================================
 
 from containers.slab import Slab
@@ -29,6 +31,7 @@ from plan_expr.expr import Expr
 from plan_ir.logical_plan import LogicalPlan
 from scan_source.source_variant import SourceVariant
 from plan_ir.plan_decisions import SCAN_BOUNDED
+from physical_plan.csv_source_spec import CsvSourceSpec
 from physical_plan.physical_plan import (
     SourceSpecPod,
     MorselOp,
@@ -117,7 +120,17 @@ def _open_scan(
         return pipe^
     if sd.source.tag == SOURCE_VARIANT_CSV:
         var full = sd.source.schema()
-        var pipe = _Pipe(SOURCE_CSV, _csv_spec(sd.source, full), full.copy(), idx)
+        var spec = _csv_spec(sd.source, full)
+        if not spec.csv_spec.has_header:
+            # The reader names such a file's columns col_0, col_1, ...;
+            # DuckDB names them column0, column1, ..., so the answer would
+            # not be DuckDB's. Refused until the names agree.
+            raise _uncuttable(
+                node,
+                "a CSV scan with header=false (its columns would be named"
+                " col_0, col_1, ..., not DuckDB's column0, column1, ...)",
+            )
+        var pipe = _Pipe(SOURCE_CSV, spec^, full.copy(), idx)
         _scan_ops(pipe, node, pushed^, proj^)
         return pipe^
     raise _uncuttable(node, "a " + sd.source.kind_name() + " source")
@@ -161,7 +174,7 @@ def _csv_spec(source: SourceVariant, full: Schema) -> SourceSpecPod:
     for i in range(full.num_columns()):
         names.append(full.field_name(i))
         types.append(full.field_arrow_type(i))
-    return SourceSpecPod.csv(
+    return SourceSpecPod.csv(CsvSourceSpec(
         params.get_str(String("path")),
         UInt8(
             Int(
@@ -178,4 +191,4 @@ def _csv_spec(source: SourceVariant, full: Schema) -> SourceSpecPod:
         Int(params.get_i64(String("quote_style_tag"), Int64(0))),
         names^,
         types^,
-    )
+    ))

@@ -8,16 +8,22 @@
 # operators over that full schema. Each test builds the scan the way
 # `read_csv` does (`scan_from_source` over a `CsvSource`) or the way the
 # positional factory does (`LogicalPlan.scan(path, SOURCE_CSV, schema)`), lowers
-# it under the reference host profile and asserts the segment.
+# it under the reference host profile and asserts the segment. A scan with no
+# header row is refused by name: the reader's column names would not be
+# DuckDB's.
 # =============================================================================
 
-from std.testing import TestSuite, assert_equal, assert_false, assert_true
+from std.testing import TestSuite, assert_equal, assert_true
 
 from arrow.arrow_types import ArrowType
 from arrow.schema import Field, Schema, SchemaBuilder
 from host_profile.host_profile import reference_host_profile
 from lowering.lower import lower
-from lowering.lowered_plan import LoweredPlan, LoweringInputs
+from lowering.lowered_plan import (
+    LoweredPlan,
+    LoweringInputs,
+    LOWERING_UNCUTTABLE_NODE,
+)
 from lowering.render import render_lowered_plan
 from lowering.sink_capability import triple_name
 from physical_plan.physical_plan import (
@@ -92,29 +98,42 @@ def _id_gt(v: Int64) -> Expr:
 
 
 def test_a_csv_scan_is_a_csv_source_with_its_dialect_and_bound_columns() raises:
-    var lp = _lowered(_csv_scan(UInt8(ord("|")), False))
+    var lp = _lowered(_csv_scan(UInt8(ord("|")), True))
     assert_equal(len(lp.segments), 1)
     ref seg = lp.segments[0]
     assert_equal(seg.source_kind, SEG_SOURCE_CSV)
     ref s = seg.source_spec
-    assert_equal(s.csv_path, "data/t.csv.gz")
-    assert_equal(Int(s.csv_delimiter), ord("|"))
-    assert_false(s.csv_has_header)
-    assert_equal(s.csv_quote_style_tag, 0)
-    assert_equal(len(s.csv_column_names), 4)
-    assert_equal(len(s.csv_column_types), 4)
-    assert_equal(s.csv_column_names[0], "id")
-    assert_equal(s.csv_column_names[3], "name")
-    assert_true(s.csv_column_types[0] == ArrowType.INT64)
-    assert_true(s.csv_column_types[1] == ArrowType.FLOAT64)
-    assert_true(s.csv_column_types[2] == ArrowType.DATE32)
-    assert_true(s.csv_column_types[3] == ArrowType.STRING)
+    assert_equal(s.csv_spec.path, "data/t.csv.gz")
+    assert_equal(Int(s.csv_spec.delimiter), ord("|"))
+    assert_true(s.csv_spec.has_header)
+    assert_equal(s.csv_spec.quote_style_tag, 0)
+    assert_equal(len(s.csv_spec.column_names), 4)
+    assert_equal(len(s.csv_spec.column_types), 4)
+    assert_equal(s.csv_spec.column_names[0], "id")
+    assert_equal(s.csv_spec.column_names[3], "name")
+    assert_true(s.csv_spec.column_types[0] == ArrowType.INT64)
+    assert_true(s.csv_spec.column_types[1] == ArrowType.FLOAT64)
+    assert_true(s.csv_spec.column_types[2] == ArrowType.DATE32)
+    assert_true(s.csv_spec.column_types[3] == ArrowType.STRING)
     # The CSV arm carries no Parquet fields and no batch handle.
     assert_equal(s.parquet_path, "")
     assert_equal(s.batch_handle_id, -1)
     assert_equal(len(seg.ops), 0)
     assert_equal(seg.sink_kind, SINK_COLLECT)
     assert_equal(seg.card_estimate_rows, 0)
+
+
+def test_a_csv_scan_with_no_header_row_is_refused_by_name() raises:
+    # The reader would name the columns col_0, col_1, ...; DuckDB names them
+    # column0, column1, ..., so the scan is refused rather than answered.
+    var msg = String("")
+    try:
+        _ = _lowered(_csv_scan(UInt8(ord(",")), False))
+    except e:
+        msg = String(e)
+    assert_true(msg.startswith(String(LOWERING_UNCUTTABLE_NODE) + ": "), msg)
+    assert_true("a CSV scan with header=false" in msg, msg)
+    assert_true("column0, column1" in msg, msg)
 
 
 def test_the_csv_segment_renders_its_path_dialect_and_columns() raises:
@@ -144,7 +163,7 @@ def test_a_csv_scan_projection_and_filter_are_operators_over_the_full_schema() r
     ref seg = lp.segments[0]
     assert_equal(seg.source_kind, SEG_SOURCE_CSV)
     # The spec names every column of the file, not the projection.
-    assert_equal(len(seg.source_spec.csv_column_names), 4)
+    assert_equal(len(seg.source_spec.csv_spec.column_names), 4)
     assert_equal(len(seg.ops), 2)
     assert_equal(seg.ops[0].tag, OP_FILTER)
     assert_equal(String(seg.ops[0].filter_predicate.value()), String(_id_gt(3)))
@@ -160,10 +179,10 @@ def test_the_positional_csv_factory_lowers_with_the_default_dialect() raises:
     var lp = _lowered(scan)
     ref s = lp.segments[0].source_spec
     assert_equal(lp.segments[0].source_kind, SEG_SOURCE_CSV)
-    assert_equal(s.csv_path, "plain.csv")
-    assert_equal(Int(s.csv_delimiter), ord(","))
-    assert_true(s.csv_has_header)
-    assert_equal(s.csv_quote_style_tag, 0)
+    assert_equal(s.csv_spec.path, "plain.csv")
+    assert_equal(Int(s.csv_spec.delimiter), ord(","))
+    assert_true(s.csv_spec.has_header)
+    assert_equal(s.csv_spec.quote_style_tag, 0)
 
 
 def test_a_string_key_over_a_csv_scan_is_columnar_never_dictionary() raises:

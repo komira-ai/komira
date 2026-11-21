@@ -40,10 +40,10 @@ def csv_read_options(ref spec: SourceSpecPod) -> CsvReadOptions:
     types, every other option at the reader's default (the binder inferred
     the schema under the same defaults)."""
     var o = CsvReadOptions()
-    o.delimiter = spec.csv_delimiter
-    o.has_header = spec.csv_has_header
-    o.quote_style_tag = spec.csv_quote_style_tag
-    o.declared_column_types = spec.csv_column_types.copy()
+    o.delimiter = spec.csv_spec.delimiter
+    o.has_header = spec.csv_spec.has_header
+    o.quote_style_tag = spec.csv_spec.quote_style_tag
+    o.declared_column_types = spec.csv_spec.column_types.copy()
     return o^
 
 
@@ -51,21 +51,21 @@ def read_csv_spec(ref spec: SourceSpecPod) raises -> RecordBatch:
     """Every row of the file `spec` names, decoded at its bound types; raises
     by name when the spec names no file or the file's columns are not the
     bound ones."""
-    if spec.csv_path.byte_length() == 0:
+    if spec.csv_spec.path.byte_length() == 0:
         raise Error("pipeline_exec: a SOURCE_CSV spec names no file")
-    var ncols = len(spec.csv_column_names)
-    if ncols == 0 or ncols != len(spec.csv_column_types):
+    var ncols = len(spec.csv_spec.column_names)
+    if ncols == 0 or ncols != len(spec.csv_spec.column_types):
         raise Error(
             String(CSV_SOURCE_SCHEMA_MISMATCH)
             + ": the spec of "
-            + spec.csv_path
+            + spec.csv_spec.path
             + " names "
             + String(ncols)
             + " columns and "
-            + String(len(spec.csv_column_types))
+            + String(len(spec.csv_spec.column_types))
             + " types"
         )
-    var buf = read_text_source_to_heap_buffer(spec.csv_path)
+    var buf = read_text_source_to_heap_buffer(spec.csv_spec.path)
     var batch = read_csv_bytes_to_batch_dynamic(
         buf.view_range_ro(0, buf.len()).into_span(), csv_read_options(spec)
     )
@@ -75,17 +75,17 @@ def read_csv_spec(ref spec: SourceSpecPod) raises -> RecordBatch:
         var name = String("")
         if i < got:
             name = batch.schema.field_name(i)
-        if name != spec.csv_column_names[i]:
+        if name != spec.csv_spec.column_names[i]:
             raise Error(
                 String(CSV_SOURCE_SCHEMA_MISMATCH)
                 + ": column "
                 + String(i + 1)
                 + " of "
-                + spec.csv_path
+                + spec.csv_spec.path
                 + " is '"
                 + name
                 + "', the plan bound '"
-                + spec.csv_column_names[i]
+                + spec.csv_spec.column_names[i]
                 + "'"
             )
     return batch^

@@ -98,7 +98,8 @@ The tests run when the package is built.
   `tests/csv/cases.sql`: the inferred types and the rows of typed, quoted,
   NULL-bearing and `|`-delimited files and of a header with no row, filters,
   grouped and ungrouped aggregates and `all_varchar`, each over the committed
-  file and over a gzip copy; a missing file is refused at bind.
+  file and over a gzip copy; a missing file is refused at bind and
+  `header=false` at lowering.
 - `test_run_sql_q6`: TPC-H Q6's text from `bench_corpus` over a lineitem-shaped
   Parquet file gives the integer oracle's DECIMAL(38,4); a join, a syntax error,
   an unknown table, a missing file, CREATE TABLE AS and a replaced file are named
@@ -125,9 +126,10 @@ The tests run when the package is built.
 
 The context does not yet hold a source registry, a plan cache, spill options or
 the plan validation switch. `run_sql` serves one result segment of Parquet
-scans, of `read_csv` scans of one local file (decoded whole before the first
-morsel; a header-less file's columns are named `col_0`, `col_1`, ... where
-DuckDB names them `column0`, `column1`, ...), or of the one-row relation a SELECT with no FROM reads (an integer
+scans, of `read_csv` scans of one local file with a header row (decoded whole
+before the first morsel; `header=false` is refused at lowering, because the
+reader would name the columns `col_0`, `col_1`, ... where DuckDB names them
+`column0`, `column1`, ...), or of the one-row relation a SELECT with no FROM reads (an integer
 literal of the result's SELECT list is INT32 when it fits, as in DuckDB; an
 integer literal anywhere else, `1 + 1` included, is still INT64); Q1 waits for the grouped sinks and the sort. The post-rewrite gate and
 the plan validation gate are not called from `run_sql`.

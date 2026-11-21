@@ -43,6 +43,7 @@ from async_api.token import CancellationToken
 from compression.compression_codecs import Gzip
 from containers.slab import Slab
 from parquet.runtime_footer_cache import ParquetMetadataCache
+from physical_plan.csv_source_spec import CsvSourceSpec
 from physical_plan.physical_plan import (
     MorselOp,
     SegmentDescPod,
@@ -104,14 +105,14 @@ def _sample_types() -> List[ArrowType]:
 
 
 def _sample_spec(path: String) -> SourceSpecPod:
-    return SourceSpecPod.csv(
+    return SourceSpecPod.csv(CsvSourceSpec(
         path,
         UInt8(ord(",")),
         True,
         0,
         _names("id", "qty", "price", "day", "name"),
         _sample_types(),
-    )
+    ))
 
 
 def _write_text(name: String, text: String) raises -> String:
@@ -194,9 +195,9 @@ def test_the_spec_dialect_is_the_one_the_file_is_read_with() raises:
     var types = List[ArrowType]()
     types.append(ArrowType.INT64)
     types.append(ArrowType.STRING)
-    var spec = SourceSpecPod.csv(
+    var spec = SourceSpecPod.csv(CsvSourceSpec(
         path, UInt8(ord("|")), False, 0, _names("col_0", "col_1"), types^
-    )
+    ))
     var batch = read_csv_spec(spec)
     # Without a header row the first line is data.
     assert_equal(batch.num_rows(), 2)
@@ -212,9 +213,9 @@ def test_a_cell_is_parsed_at_the_declared_type_not_an_inferred_one() raises:
     var path = _write_text("codes.csv", "code\n0001\n0020\n")
     var types = List[ArrowType]()
     types.append(ArrowType.STRING)
-    var spec = SourceSpecPod.csv(
+    var spec = SourceSpecPod.csv(CsvSourceSpec(
         path, UInt8(ord(",")), True, 0, _names("code"), types^
-    )
+    ))
     var batch = read_csv_spec(spec)
     assert_true(batch.column_at(0).arrow_type == ArrowType.STRING)
     var codes = string_column(batch, 0)
@@ -236,16 +237,16 @@ def test_a_spec_with_no_file_or_unpaired_columns_is_refused() raises:
     var path = _write_text("unpaired.csv", _SAMPLE)
     var one_type = List[ArrowType]()
     one_type.append(ArrowType.INT64)
-    var unpaired = SourceSpecPod.csv(
+    var unpaired = SourceSpecPod.csv(CsvSourceSpec(
         path, UInt8(ord(",")), True, 0, _names("id", "qty"), one_type^
-    )
+    ))
     with assert_raises(
         contains=String(CSV_SOURCE_SCHEMA_MISMATCH) + ": the spec of "
     ):
         _ = read_csv_spec(unpaired)
-    var none = SourceSpecPod.csv(
+    var none = SourceSpecPod.csv(CsvSourceSpec(
         path, UInt8(ord(",")), True, 0, List[String](), List[ArrowType]()
-    )
+    ))
     with assert_raises(contains="names 0 columns and 0 types"):
         _ = read_csv_spec(none)
 

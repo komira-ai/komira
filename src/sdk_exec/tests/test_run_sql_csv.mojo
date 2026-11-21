@@ -35,6 +35,10 @@
 #   test_a_missing_csv_is_refused_at_bind
 #                                       a path with no file is refused before
 #                                       anything runs.
+#   test_a_csv_with_no_header_row_is_refused_at_lower
+#                                       header=false is refused by name, not
+#                                       answered with column names DuckDB
+#                                       does not give.
 # =============================================================================
 
 from std.testing import TestSuite, assert_equal, assert_true
@@ -52,7 +56,7 @@ from komira_plan_harness import (
 from runtime_paths import data_path, read_data, test_tmpdir
 from sdk_exec.engine_context import EngineContext
 from sdk_exec.engine_options import EngineOptions
-from sdk_exec.engine_sql import STEP_BIND, run_sql
+from sdk_exec.engine_sql import STEP_BIND, STEP_LOWER, run_sql
 
 
 def _files() -> List[String]:
@@ -89,7 +93,8 @@ struct _Case(Copyable, Movable):
 def _cases() raises -> List[_Case]:
     """Every `COPY (<query>) TO '<name>.tsv' ...;` line of cases.sql."""
     var out = List[_Case]()
-    for line in read_data("cases.sql").split("\n"):
+    var text = read_data("cases.sql")
+    for line in text.split("\n"):
         var l = String(line)
         if not l.startswith("COPY ("):
             continue
@@ -273,6 +278,25 @@ def test_a_missing_csv_is_refused_at_bind() raises:
     assert_true(Bool(out.refusal))
     assert_equal(out.refusal.value().step, String(STEP_BIND))
     assert_equal(len(out.batches), 0)
+
+
+def test_a_csv_with_no_header_row_is_refused_at_lower() raises:
+    var ctx = EngineContext(EngineOptions(worker_count=1))
+    var out = run_sql(
+        ctx,
+        "SELECT * FROM read_csv('" + data_path("pipe.csv")
+        + "', delim = '|', header = false)",
+    )
+    assert_true(Bool(out.refusal))
+    assert_equal(out.refusal.value().step, String(STEP_LOWER))
+    assert_true(
+        "LOWERING_UNCUTTABLE_NODE" in out.refusal.value().reason,
+        out.refusal.value().reason,
+    )
+    assert_true(
+        "header=false" in out.refusal.value().reason,
+        out.refusal.value().reason,
+    )
 
 
 def main() raises:

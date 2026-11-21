@@ -114,15 +114,15 @@ def _segment_text(seg: SegmentDescPod) -> String:
         out += " batch=" + String(seg.source_spec.batch_handle_id)
     elif seg.source_kind == SOURCE_CSV:
         ref s = seg.source_spec
-        out += " path=" + s.csv_path
-        out += " delimiter=" + String(Int(s.csv_delimiter))
-        out += " header=" + String(s.csv_has_header)
-        out += " quote_style=" + String(s.csv_quote_style_tag)
+        out += " path=" + s.csv_spec.path
+        out += " delimiter=" + String(Int(s.csv_spec.delimiter))
+        out += " header=" + String(s.csv_spec.has_header)
+        out += " quote_style=" + String(s.csv_spec.quote_style_tag)
         out += " columns=["
-        for i in range(len(s.csv_column_names)):
+        for i in range(len(s.csv_spec.column_names)):
             if i > 0:
                 out += ", "
-            out += s.csv_column_names[i] + ":" + String(s.csv_column_types[i])
+            out += s.csv_spec.column_names[i] + ":" + String(s.csv_spec.column_types[i])
         out += "]"
     else:
         out += " from="

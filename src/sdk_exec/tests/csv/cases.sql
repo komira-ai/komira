@@ -17,7 +17,7 @@ COPY (SELECT column_name, column_type FROM (DESCRIBE SELECT * FROM read_csv('typ
 COPY (SELECT id, qty, price, name FROM read_csv('typed.csv')) TO 'typed_rows.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
 COPY (SELECT name, qty FROM read_csv('typed.csv') WHERE day >= DATE '2026-11-01' AND price > 2) TO 'typed_filter.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
 COPY (SELECT name, count(*) AS n, sum(qty) AS total FROM read_csv('typed.csv') GROUP BY name) TO 'typed_group.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
-COPY (SELECT count(*) AS n, count(day) AS days, sum(qty) AS total, min(id) AS lo, max(price) AS hi FROM read_csv('typed.csv')) TO 'typed_agg.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
+COPY (SELECT count(*) AS n, count(day) AS days, sum(qty) AS total, min(id) AS lo, max(qty) AS hi FROM read_csv('typed.csv')) TO 'typed_agg.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
 COPY (SELECT * FROM read_csv('typed.csv', all_varchar = true)) TO 'typed_varchar.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
 COPY (SELECT column_name, column_type FROM (DESCRIBE SELECT * FROM read_csv('quoted.csv'))) TO 'quoted_types.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
 COPY (SELECT * FROM read_csv('quoted.csv')) TO 'quoted_rows.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);

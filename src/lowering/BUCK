@@ -9,7 +9,8 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #                        dialect and every bound column in its spec, the
 #                        render line, its filter and projection as operators
 #                        over the full schema, the positional factory's
-#                        default dialect, a string key served COLUMNAR.
+#                        default dialect, a string key served COLUMNAR, a
+#                        scan with header=false refused by name.
 # test_lower_plans       the rendered physical plan of small plans: one segment
 #                        for a filtered aggregate, two for an aggregate and a
 #                        sort, the fused operators, the sink row each group key

@@ -48,7 +48,9 @@ shape:
   UDF, an aggregate function that is a UDF; a limit with an offset or a
   negative count; a limit above a sort (see Order); a partial or final
   aggregation; an aggregation with a group top-k; a source other than Parquet,
-  in memory or CSV.
+  in memory or CSV; a CSV scan with `header=false` (the reader would name its
+  columns `col_0`, `col_1`, ..., where DuckDB names them `column0`,
+  `column1`, ...).
 - `LOWERING_SINK_UNSERVED`, naming the triple or the key: a group key of a
   type with no row (date, decimal, bool, ...), a key of several columns that
   are not all dictionary encoded strings, or a segment whose triple has no row.

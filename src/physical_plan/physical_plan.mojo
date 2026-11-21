@@ -23,9 +23,10 @@ from plan_expr.partition_pred_pod import PartitionPredicatePod
 from plan_expr.fs_descriptor_pod import FsDescriptorPod
 from plan_expr.payload_narrow import PayloadNarrowSpec
 from plan_expr.null_order_policy import derived_nulls_first
-from arrow.arrow_types import ArrowType
 from arrow.schema import RecordBatch, Schema, Field
 from containers.slab import Slab
+
+from physical_plan.csv_source_spec import CsvSourceSpec
 
 
 # =============================================================================
@@ -61,9 +62,8 @@ from containers.slab import Slab
 #   14: `SegmentDescPod.morsel_rows` — the rows per morsel the HOST chose when it
 #       lowered the segment (`host_profile.morsel_sizing_policy`),
 #       recorded so nothing downstream re-derives it. 0 = not yet lowered.
-#   15: `SOURCE_CSV` and its `SourceSpecPod.csv_*` fields — one local CSV
-#       file (or its `.gz` / `.zst` / `.lz4` form), its dialect and the column
-#       names and types the plan bound it at.
+#   15: `SOURCE_CSV` and `SourceSpecPod.csv_spec` (`csv_source_spec`) — one
+#       local CSV file, its dialect and the columns the plan bound it at.
 #   Retired `MorselOp` tag values (4-13) are not reused.
 
 comptime PHYSICAL_PLAN_IR_VERSION: Int = 15
@@ -1133,15 +1133,12 @@ struct SourceSpecPod(Movable):
         this reads.
       * SOURCE_CONCAT: `dep_seg_ids` = the N producer segments, concat order.
       * SOURCE_BATCH: `batch_handle_id` = index into the driver's batch table.
-      * SOURCE_CSV: `csv_path` + the dialect (`csv_delimiter`,
-        `csv_has_header`, `csv_quote_style_tag`) + the file's columns as the
-        plan bound them (`csv_column_names`, `csv_column_types`, every column
-        of the file in file order). No projection and no filter: a CSV
-        segment's projection and filter are operators.
+      * SOURCE_CSV: `csv_spec`, the file, its dialect and its bound columns
+        (`csv_source_spec`).
 
     Every field is inert: `String`, `Optional[List[String]]`, `Optional[Expr]`,
-    `List[String]`, `List[ArrowType]`, `List[Int]`, `Int`, `UInt8`, `Bool`.
-    Passes the inert-IR lint.
+    `List[Int]`, `Int`, `Bool`, and `CsvSourceSpec` of the same kinds. Passes
+    the inert-IR lint.
 
     ⛔ THE PARQUET ARM IS LOSSY, AND `parquet_spec_is_total` IS HOW A CONSUMER
     FINDS OUT. It carries THREE of `ParquetSourceData`'s ELEVEN fields. Read that
@@ -1189,12 +1186,7 @@ struct SourceSpecPod(Movable):
     without changing this field's meaning."""
     var dep_seg_ids: List[Int]                   # SOURCE_SINK_OUTPUT (len 1) / SOURCE_CONCAT (len N)
     var batch_handle_id: Int                     # SOURCE_BATCH (-1 unused)
-    var csv_path: String                         # SOURCE_CSV
-    var csv_delimiter: UInt8                     # SOURCE_CSV (default `,`)
-    var csv_has_header: Bool                     # SOURCE_CSV (default True)
-    var csv_quote_style_tag: Int                 # SOURCE_CSV (0 RFC 4180, 1 Excel, 2 POSIX)
-    var csv_column_names: List[String]           # SOURCE_CSV, file order
-    var csv_column_types: List[ArrowType]        # SOURCE_CSV, one per name
+    var csv_spec: CsvSourceSpec                  # SOURCE_CSV (empty = the CSV defaults)
 
     def __init__(out self):
         """Empty spec (SOURCE_SINK_OUTPUT/CONCAT default: fill dep_seg_ids)."""
@@ -1204,12 +1196,7 @@ struct SourceSpecPod(Movable):
         self.parquet_spec_is_total = False
         self.dep_seg_ids = List[Int]()
         self.batch_handle_id = -1
-        self.csv_path = String("")
-        self.csv_delimiter = UInt8(ord(","))
-        self.csv_has_header = True
-        self.csv_quote_style_tag = 0
-        self.csv_column_names = List[String]()
-        self.csv_column_types = List[ArrowType]()
+        self.csv_spec = CsvSourceSpec()
 
     @staticmethod
     def parquet(
@@ -1249,23 +1236,10 @@ struct SourceSpecPod(Movable):
         return s^
 
     @staticmethod
-    def csv(
-        var path: String,
-        delimiter: UInt8,
-        has_header: Bool,
-        quote_style_tag: Int,
-        var column_names: List[String],
-        var column_types: List[ArrowType],
-    ) -> SourceSpecPod:
-        """Mint the SOURCE_CSV arm: the file, its dialect, and every column
-        of the file in file order with the type the plan bound it at."""
+    def csv(var spec: CsvSourceSpec) -> SourceSpecPod:
+        """Mint the SOURCE_CSV arm."""
         var s = SourceSpecPod()
-        s.csv_path = path^
-        s.csv_delimiter = delimiter
-        s.csv_has_header = has_header
-        s.csv_quote_style_tag = quote_style_tag
-        s.csv_column_names = column_names^
-        s.csv_column_types = column_types^
+        s.csv_spec = spec^
         return s^
 
     # PORT(1.0.0): explicit destructor breaks the non-co-inductive
