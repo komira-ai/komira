@@ -16,6 +16,7 @@ import sys
 
 from komira import KomiraError, LibraryLoadError
 from komira import _native
+from runtime_site import runtime_site
 
 
 def raised(call):
@@ -38,7 +39,7 @@ def main(args):
     # action started.
     lib_dir = os.path.abspath(args[args.index("--lib-dir") + 1])
     runtime_dir = os.path.abspath(args[args.index("--runtime-dir") + 1])
-    native = _native.load(os.path.join(lib_dir, "fake_modes"), search_path=[runtime_dir])
+    native = _native.load(os.path.join(lib_dir, "fake_modes"), search_path=[runtime_site(runtime_dir)])
     ctx = native.ctx_new()
 
     # The second call gets exactly the length the first reported: the text
