@@ -194,8 +194,9 @@ def with_group_sink(
     var desc: SegmentDescPod, param_id: Int, key_dtype: UInt8
 ) -> SegmentDescPod:
     """`desc` with its sink changed to the grouped aggregation of key row
-    `key_dtype` (`KEY_DTYPE_I64`, `I32`, `F64`, `F32`, `DATE32`, `BOOL` or
-    `DECIMAL128`) whose data the builder holds as `param_id`."""
+    `key_dtype` (`KEY_DTYPE_I64`, `I32`, `F64`, `F32`, `DATE32`, `BOOL`,
+    `DECIMAL128` or `COMPOSITE`) whose data the builder holds as
+    `param_id`."""
     desc.sink_kind = SINK_AGG
     desc.sink_key_dtype = key_dtype
     desc.sink_orientation = SINK_ORIENT_COLUMNAR

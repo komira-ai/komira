@@ -13,8 +13,10 @@
 # the COMPOSITE row, run on the pipeline) over the same Parquet file, and
 # compares the answer with DuckDB's by value, rows as a multiset
 # (komira_plan_harness): the same groups, the NULL of each key column a value
-# of its own and the empty string another, the same aggregates and the same
-# column types.
+# of its own and the empty string another, the same aggregates. Each key
+# column of the answer also keeps the type the table declares for it (i
+# INT32, big INT64, s STRING, d DATE32, m DECIMAL128 (12, 2), b BOOL), which
+# the comparison by value alone would not see.
 #
 #   test_int_string_date_keys_equal_duckdb   GROUP BY i, s, d with count(*),
 #                                            count(v), sum(v), min(v), max(v),
@@ -41,6 +43,8 @@
 
 from std.testing import TestSuite, assert_equal, assert_true
 
+from arrow.arrow_types import ArrowType
+from arrow.schema import RecordBatch
 from komira_plan_harness import (
     CanonPolicy,
     compare_canon,
@@ -80,6 +84,36 @@ def _cases() raises -> List[_Case]:
     return out^
 
 
+def _key_type_problem(ref batch: RecordBatch) -> String:
+    """The first key column whose type is not the table's, or ""."""
+    for c in range(batch.schema.num_columns()):
+        var n = batch.schema.field_name(c)
+        var t = batch.schema.field_arrow_type(c)
+        var want = ArrowType.NULL
+        if n == "i":
+            want = ArrowType.INT32
+        elif n == "big":
+            want = ArrowType.INT64
+        elif n == "s":
+            want = ArrowType.STRING
+        elif n == "d":
+            want = ArrowType.DATE32
+        elif n == "m":
+            want = ArrowType.DECIMAL128
+        elif n == "b":
+            want = ArrowType.BOOL
+        else:
+            continue
+        if t != want:
+            return "key " + n + " is " + String(t) + ", the table's " + String(want)
+        if n == "m" and (
+            batch.schema.field_decimal_precision(c) != 12
+            or batch.schema.field_decimal_scale(c) != 2
+        ):
+            return "key m is not DECIMAL(12, 2)"
+    return ""
+
+
 def _check(name: String, workers: Int, mut problems: List[String]) raises:
     var label = name + " on " + String(workers) + " workers"
     var query = String("")
@@ -104,6 +138,9 @@ def _check(name: String, workers: Int, mut problems: List[String]) raises:
     if len(out.batches) != 1:
         problems.append(label + ": " + String(len(out.batches)) + " batches")
         return
+    var typed = _key_type_problem(out.batches[0])
+    if typed != "":
+        problems.append(label + ": " + typed)
     var actual = render_batch(out.batches[0], CanonPolicy.unordered())
     try:
         var expected = duckdb_tsv_canon(

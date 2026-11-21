@@ -228,7 +228,7 @@ def _name(col: Int) -> String:
     return "f"
 
 
-def _field(col: Int) -> Field:
+def _field(col: Int) raises -> Field:
     if col == COL_I:
         return Field("i", ArrowType.INT32, True)
     if col == COL_S:
