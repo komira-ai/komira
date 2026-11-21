@@ -122,10 +122,13 @@ nothing. What the files support (INFERRED), per platform:
   `libKGENCompilerRTShared`), so that the later `NEEDED` names match libraries already loaded.
   Neither was tried.
 
-Follow-up check, for whoever builds the wheel (not done here): extend the install check
-(`tools/build/package/install_check`) with a variant whose runtime libraries are the PyPI wheel's
-files at `modular/lib`, and run it for each release platform. It would settle load-time
-compatibility and the run path in one farm action.
+The check of this on linux-x86_64 is `//python:wheel_install_test` (python/BUCK): it installs the
+komira wheel, `mojo_compiler-1.0.0-py3-none-manylinux_2_34_x86_64.whl` and
+`mojo_compiler_mojo_libs-1.0.0-py3-none-any.whl` (pinned in `third_party/modular`) into an empty
+virtual environment, loads libkomira there with no library path, and requires the three runtime
+libraries to be mapped from `<site-packages>/modular/lib`. The run path route was not taken:
+libkomira keeps `$ORIGIN/lib:$ORIGIN`, and the package's loader opens the three libraries first
+(`komira/_runtime.py`). linux-arm64 and macos-arm64 have no such check yet.
 
 ## Version coupling (INDEX)
 
