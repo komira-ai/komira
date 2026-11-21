@@ -50,13 +50,13 @@ GRAPH_JSON = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/atomic_alias/tests/test_atomic_alias_widths.mojo", "sha256": "13d74d45c111ccb0a7948cb4d02f92ef9c3d941e1ae76ce6e99ff37d4ada74ba"}
+        {"path": "src/atomic_alias/tests/test_atomic_alias_widths.mojo", "sha256": "e50ca102c26f6ffe656ab536ef411a0a4d9827f0a56dcc65c9de06cf6f9a1850"}
       ],
       "deps": ["komira-ai/atomic_alias@0.1.0#mojo1.1.0/lib"],
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_atomic_alias_widths.pass"],
-      "key": "00a575feb568b3e4a7c58583e739dd3d22860b8aff448aeecdfb0e897a1ddcf7"
+      "key": "2265395c8ada3dbb67d4f028561561804e4d6c0cea3356c2446ae4dcdf3e8a57"
     }
   ]
 }
@@ -103,13 +103,13 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/atomic_alias/tests/test_atomic_alias_widths.mojo", "sha256": "13d74d45c111ccb0a7948cb4d02f92ef9c3d941e1ae76ce6e99ff37d4ada74ba"}
+        {"path": "src/atomic_alias/tests/test_atomic_alias_widths.mojo", "sha256": "e50ca102c26f6ffe656ab536ef411a0a4d9827f0a56dcc65c9de06cf6f9a1850"}
       ],
       "deps": ["komira-ai/atomic_alias@0.1.0#mojo1.1.0/lib"],
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_atomic_alias_widths.pass"],
-      "key": "e6429efecf69150e103a2cecb0f9fd2ac9c48a8b166fadeecda2eba4834df939"
+      "key": "136229fd2ae50eb3957de8b663fc310e269f011ff1d43a9cac6fbc6e8fb7d67b"
     }
   ]
 }
@@ -153,13 +153,13 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/atomic_alias/tests/test_atomic_alias_widths.mojo", "sha256": "13d74d45c111ccb0a7948cb4d02f92ef9c3d941e1ae76ce6e99ff37d4ada74ba"}
+        {"path": "src/atomic_alias/tests/test_atomic_alias_widths.mojo", "sha256": "e50ca102c26f6ffe656ab536ef411a0a4d9827f0a56dcc65c9de06cf6f9a1850"}
       ],
       "deps": ["komira-ai/atomic_alias@0.1.0#mojo1.1.0/lib"],
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_atomic_alias_widths.pass"],
-      "key": "42db4e4bd90d2da5be1365edbb61a94f9e63b18138e4c023f99e37454fe713c8"
+      "key": "4715fc290c7e41a7096b7a7f11e0ce6790b18d79960694d558e1cde475bf9d6c"
     }
   ]
 }

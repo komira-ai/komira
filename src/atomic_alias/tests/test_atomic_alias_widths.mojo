@@ -1,6 +1,6 @@
 # =============================================================================
 # atomic_alias/tests/test_atomic_alias_widths.mojo
-#   — the falsifier for the Mojo 1.1 `Atomic` cutover file.
+#   — the falsifier for the `Atomic` rows of atomic_alias.
 # =============================================================================
 #
 # `atomic_alias/atypes.mojo` is six `comptime` rows and NOTHING ELSE, so
@@ -17,14 +17,13 @@
 #      NEGATIVE one for the signed rows, and the unsigned MAXIMUM (which reads
 #      back negative through a signed alias) for the unsigned ones. Those
 #      round trips go through `Int`, which is 64 bits wide, so at 64 bits a
-#      sign swap wraps in and wraps back out unseen: the bound dtype is
-#      therefore also compared exactly, and the two 64-bit rows compare
+#      sign swap wraps in and wraps back out unseen: the dtype of the scalar
+#      each row loads is therefore also compared exactly, and the two 64-bit rows compare
 #      against zero in their own scalar type after a `fetch_sub` below zero.
 #
-# ⛔ This test must stay green ACROSS the cutover edit. If it goes red after
-# `Atomic[Int64]` becomes `Atomic[Int64]`, the cutover is wrong — the two
-# spellings are the SAME TYPE (measured: identical `size_of`/`align_of` on both
-# compilers), so nothing here should move.
+# A change of the rows' spelling (the type parameter of `Atomic` differs
+# between compiler generations) must keep this test green: the type a row
+# names, its width, its signedness and its round trips do not move.
 # =============================================================================
 
 from std.sys import align_of, size_of
@@ -85,21 +84,26 @@ def test_unsigned_rows_hold_the_unsigned_maximum() raises:
     assert_equal(Int(u64.load()), 9_223_372_036_854_775_807)
 
 
+def _dtype_of[dtype: DType](value: Scalar[dtype]) -> DType:
+    """The dtype of a scalar, inferred from its type."""
+    return dtype
+
+
 def test_dtype_is_pinned_exactly() raises:
     """Each row is bound to EXACTLY the dtype its name claims.
 
     The round trips above go through `Int`, which is 64 bits wide: a 64-bit
     row bound to the wrong signedness wraps on the way in and wraps back on
-    the way out, so `AtomicI64` on `DType.uint64` (or `AtomicU64` on
-    `DType.int64`) passes them unchanged. Comparing the bound dtype itself
+    the way out, so `AtomicI64` over `UInt64` (or `AtomicU64` over `Int64`)
+    passes them unchanged. Comparing the dtype of the scalar each row loads
     sees the swap at every width.
     """
-    assert_true(AtomicI8.dtype == DType.int8)
-    assert_true(AtomicI32.dtype == DType.int32)
-    assert_true(AtomicI64.dtype == DType.int64)
-    assert_true(AtomicU8.dtype == DType.uint8)
-    assert_true(AtomicU32.dtype == DType.uint32)
-    assert_true(AtomicU64.dtype == DType.uint64)
+    assert_true(_dtype_of(AtomicI8(0).load()) == DType.int8)
+    assert_true(_dtype_of(AtomicI32(0).load()) == DType.int32)
+    assert_true(_dtype_of(AtomicI64(0).load()) == DType.int64)
+    assert_true(_dtype_of(AtomicU8(0).load()) == DType.uint8)
+    assert_true(_dtype_of(AtomicU32(0).load()) == DType.uint32)
+    assert_true(_dtype_of(AtomicU64(0).load()) == DType.uint64)
 
 
 def test_64_bit_rows_compare_with_their_own_sign() raises:
