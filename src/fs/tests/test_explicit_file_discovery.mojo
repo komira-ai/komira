@@ -9,7 +9,9 @@
 #   * `from_files` refuses an empty file list, a value row count that is not
 #     the file count, and a row that is not one value per column, each by name.
 #   * `open` lists a file, a glob and a directory as `EagerGlobDiscovery` does
-#     (sorted, no partition columns) and refuses a glob that matches nothing.
+#     (sorted, no partition columns) and refuses a glob that matches nothing;
+#     a brace glob that leaves no wildcard (`part-{0,2}.parquet`) gives the
+#     named files that exist, and a directory or a missing name is none.
 #   * It binds as a `FileDiscovery`.
 # Files live under `test_tmpdir()`; no test shares a path with another.
 
@@ -189,6 +191,30 @@ def test_open_expands_a_glob_sorted() raises:
     assert_equal(deep.num_paths(), 3)
     assert_equal(deep.path_at(2), dir + "/sub/c.parquet")
     assert_equal(deep.partition_values_at(0).num_pairs(), 0)
+
+
+def test_open_expands_a_brace_glob_with_no_wildcard_to_the_files_that_exist() raises:
+    # `{0,2}` expands to two literal names: each is kept when its file exists
+    # and dropped when it does not; an alternative that is a directory is no
+    # file.
+    var dir = _fresh_dir("brace")
+    _touch(dir + "/part-0.parquet")
+    _touch(dir + "/part-1.parquet")
+    _touch(dir + "/part-2.parquet")
+    makedirs(dir + "/part-3", exist_ok=True)
+    _touch(dir + "/part-3/x.parquet")
+    var fs = _Fs.new()
+    var d = ExplicitFileDiscovery.open(fs, dir + "/part-{2,0}.parquet")
+    assert_equal(d.num_paths(), 2)
+    assert_equal(d.path_at(0), dir + "/part-0.parquet")
+    assert_equal(d.path_at(1), dir + "/part-2.parquet")
+    var some = ExplicitFileDiscovery.open(fs, dir + "/part-{1,9}.parquet")
+    assert_equal(some.num_paths(), 1)
+    assert_equal(some.path_at(0), dir + "/part-1.parquet")
+    var mixed = ExplicitFileDiscovery.open(fs, dir + "/{part-0.parquet,part-*.parquet}")
+    assert_equal(mixed.num_paths(), 3)
+    with assert_raises(contains="no files matched glob pattern"):
+        _ = ExplicitFileDiscovery.open(fs, dir + "/{part-9.parquet,part-3}")
 
 
 def test_open_refuses_a_glob_that_matches_nothing() raises:

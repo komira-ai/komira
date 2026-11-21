@@ -41,8 +41,8 @@ lists the files of `path` with `fs.file_discovery.EagerGlobDiscovery` (glob
 syntax of `fs.glob`: `*`, `?`, `[...]`, `{a,b}`, one `**`), sorted byte-wise.
 A directory is the glob `<dir>/**/*.parquet` and skips a file or directory whose
 name starts with `.`; it is allowed for registration and refused in SQL. A glob
-whose braces have no wildcard (`{a,b}.parquet`) lists nothing, as `fs.glob`
-lists only below a static prefix.
+whose braces leave no wildcard (`part-{0,2}.parquet`) names those files, each
+kept when it exists.
 
 | refusal | when |
 |---|---|
