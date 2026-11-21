@@ -6,6 +6,29 @@
 # other: each case checks the exact token that starts the message and the text
 # that says why, and a neighbouring plan that differs only in the refused
 # detail lowers. A refused plan never produces a LoweredPlan.
+#
+# Tests, and the behaviour each asserts:
+#   test_nodes_the_cutter_does_not_cut_are_refused_by_tag: a join, union,
+#     top-n, view reference, shared-subplan reference and cast to string are
+#     each refused by their tag name.
+#   test_a_refused_node_below_a_breaker_refuses_the_whole_plan: a join under an
+#     aggregate refuses the plan; the aggregate over a scan lowers.
+#   test_a_distinct_over_a_column_list_is_refused_and_one_over_the_row_is_cut:
+#     a distinct that names columns is refused with the exact text; the same
+#     distinct over the whole row lowers.
+#   test_a_distinct_over_two_columns_of_one_name_is_refused_and_distinct_names_are_cut:
+#     a distinct whose child repeats a column name is refused with the exact
+#     text, also when the repeat is not adjacent; two differently named integer
+#     columns are not this refusal but the unserved-sink one.
+#   test_a_distinct_over_no_column_is_refused_and_one_column_is_cut: a distinct
+#     over a zero-column schema is refused with the exact text; one column
+#     lowers.
+#   test_a_distinct_over_columns_no_sink_row_serves_is_refused: a distinct over
+#     a date, a bool, two integers, an integer and a string, or two strings of
+#     which one is not dictionary encoded is refused as an unserved sink with
+#     the exact text; an integer column, and two dictionary encoded strings,
+#     lower.
+# The remaining tests are named for the refusal they hold.
 # =============================================================================
 
 from std.memory import OwnedPointer
@@ -128,8 +151,6 @@ def test_nodes_the_cutter_does_not_cut_are_refused_by_tag() raises:
     var join = LogicalPlan.join(_scan(), _scan(), _names("k"), _names("k"), JOIN_INNER)
     _refused_with(_message(join, _inputs(2)), LOWERING_UNCUTTABLE_NODE, plan_tag_name(PLAN_JOIN))
 
-    var distinct = LogicalPlan.distinct(None, _scan())
-    _refused_with(_message(distinct, _inputs()), LOWERING_UNCUTTABLE_NODE, plan_tag_name(PLAN_DISTINCT))
 
     var topn = LogicalPlan.topn(_names("k"), _bools(False), 5, _scan())
     _refused_with(_message(topn, _inputs()), LOWERING_UNCUTTABLE_NODE, plan_tag_name(PLAN_TOPN))
@@ -220,6 +241,104 @@ def test_a_group_key_no_sink_row_serves_is_refused() raises:
     _refused_with(_message(_count_by(_scan(), _names("s", "k")), _inputs()), LOWERING_SINK_UNSERVED, "2 columns")
     # An integer key lowers.
     assert_equal(_message(_count_by(_scan(), _names("k")), _inputs()), "")
+
+
+def _only(name: String) -> LogicalPlan:
+    var exprs = ExprArray()
+    exprs.append(Expr.col_ref(name))
+    return LogicalPlan.project(exprs^, _scan())
+
+
+def _pair(a: String, b: String) -> LogicalPlan:
+    var exprs = ExprArray()
+    exprs.append(Expr.col_ref(a))
+    exprs.append(Expr.col_ref(b))
+    return LogicalPlan.project(exprs^, _scan())
+
+
+def _uncuttable_text(why: String) -> String:
+    return String(LOWERING_UNCUTTABLE_NODE) + ": " + plan_tag_name(PLAN_DISTINCT) + " (" + why + ") is not cut"
+
+
+def _unserved_text(why: String) -> String:
+    return String(LOWERING_SINK_UNSERVED) + ": " + why
+
+
+def test_a_distinct_over_a_column_list_is_refused_and_one_over_the_row_is_cut() raises:
+    var listed = LogicalPlan.distinct(Optional[List[String]](_names("k")), _scan())
+    assert_equal(_message(listed, _inputs()), _uncuttable_text("a distinct over a column list"))
+    assert_equal(_message(LogicalPlan.distinct(None, _only("k")), _inputs()), "")
+
+
+def test_a_distinct_over_two_columns_of_one_name_is_refused_and_distinct_names_are_cut() raises:
+    var exprs = ExprArray()
+    exprs.append(Expr.alias(Expr.col_ref("k"), "x"))
+    exprs.append(Expr.alias(Expr.col_ref("v"), "x"))
+    var repeated = LogicalPlan.distinct(None, LogicalPlan.project(exprs^, _scan()))
+    assert_equal(
+        _message(repeated, _inputs()),
+        _uncuttable_text("a distinct over two columns both named `x`"),
+    )
+    # The repeat need not be adjacent.
+    var spread = ExprArray()
+    spread.append(Expr.alias(Expr.col_ref("k"), "x"))
+    spread.append(Expr.alias(Expr.col_ref("v"), "y"))
+    spread.append(Expr.alias(Expr.col_ref("k"), "x"))
+    var far = LogicalPlan.distinct(None, LogicalPlan.project(spread^, _scan()))
+    assert_equal(
+        _message(far, _inputs()),
+        _uncuttable_text("a distinct over two columns both named `x`"),
+    )
+    var named = ExprArray()
+    named.append(Expr.alias(Expr.col_ref("k"), "x"))
+    named.append(Expr.alias(Expr.col_ref("v"), "y"))
+    var other = LogicalPlan.distinct(None, LogicalPlan.project(named^, _scan()))
+    # Two differently named integer columns are the unserved-sink refusal, not this one.
+    assert_equal(
+        _message(other, _inputs()),
+        _unserved_text(
+            "a group key of 2 columns is served only when every column is a dictionary encoded string"
+        ),
+    )
+
+
+def test_a_distinct_over_no_column_is_refused_and_one_column_is_cut() raises:
+    var sb = SchemaBuilder()
+    var empty = LogicalPlan.scan(String("e.parquet"), SOURCE_PARQUET, sb.build())
+    assert_equal(
+        _message(LogicalPlan.distinct(None, empty^), _inputs()),
+        _uncuttable_text("a distinct over no column"),
+    )
+    assert_equal(_message(LogicalPlan.distinct(None, _only("k")), _inputs()), "")
+
+
+def test_a_distinct_over_columns_no_sink_row_serves_is_refused() raises:
+    var no_row = String(" has no sink row")
+    assert_equal(
+        _message(LogicalPlan.distinct(None, _only("d")), _inputs()),
+        _unserved_text("a group key column of type " + String(ArrowType.DATE32) + no_row),
+    )
+    assert_equal(
+        _message(LogicalPlan.distinct(None, _only("b")), _inputs()),
+        _unserved_text("a group key column of type " + String(ArrowType.BOOL) + no_row),
+    )
+    var two_columns = _unserved_text(
+        "a group key of 2 columns is served only when every column is a dictionary encoded string"
+    )
+    assert_equal(_message(LogicalPlan.distinct(None, _pair("k", "v")), _inputs()), two_columns)
+    assert_equal(_message(LogicalPlan.distinct(None, _pair("s", "k")), _inputs()), two_columns)
+    # Two strings are served only when both are dictionary encoded.
+    var one_dictionary = LoweringInputs()
+    one_dictionary.add_scan(None, _names("s"))
+    assert_equal(
+        _message(LogicalPlan.distinct(None, _two_string_scan()), one_dictionary),
+        two_columns,
+    )
+    # An integer column, and two dictionary encoded strings, lower.
+    assert_equal(_message(LogicalPlan.distinct(None, _only("k")), _inputs()), "")
+    var both = LoweringInputs()
+    both.add_scan(None, _names("s", "t"))
+    assert_equal(_message(LogicalPlan.distinct(None, _two_string_scan()), both), "")
 
 
 def _udf(kind: UInt8) -> OwnedPointer[UdfData]:

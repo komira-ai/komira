@@ -185,13 +185,25 @@ def komira_proto_toolchains(**overrides):
     generation runs where the Mojo toolchain puts that target (the linux
     execution platform). Each keyword in `overrides` replaces the `mojo_proto_toolchain`
     attribute of that name (see PROTO_TOOLCHAIN_ATTRS).
+
+    Every tool it carries is an execution dependency, and what those tools write
+    (Mojo source, a descriptor set, a fixture check's report) is the same for any
+    target platform, so it is compatible with every target platform komira builds
+    for: linux x86_64 and macOS arm64. A macOS arm64 target that reaches it, such as
+    a package whose welded tests read a proto_fixture_check report, runs protoc on
+    the linux execution platform; a mojo_proto_library's precompile takes its
+    platform from the Mojo toolchain.
     """
     attrs = dict(PROTO_TOOLCHAIN_ATTRS)
     attrs.update(overrides)
     mojo_proto_toolchain(
         name = "mojo_proto",
-        # It builds for linux x86_64 only (see _LINUX_X86_64).
-        target_compatible_with = _LINUX_X86_64,  # komira-limit:proto-toolchain-x86-64
+        # macOS arm64 (`is_macos_arm64`, as for `:cxx`) and linux x86_64; any other
+        # platform stays incompatible (see _LINUX_X86_64).
+        target_compatible_with = select({  # komira-limit:proto-toolchain-x86-64
+            _TOOLCHAINS + "is_macos_arm64": [],
+            "DEFAULT": _LINUX_X86_64,
+        }),
         visibility = ["PUBLIC"],
         **attrs
     )

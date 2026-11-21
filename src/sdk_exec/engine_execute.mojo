@@ -79,8 +79,9 @@ def run_lowered_plan(
         reversed_sinks.append(lowered.params.agg.pop())
     while len(reversed_sinks) > 0:
         _ = builder.add_agg_sink(reversed_sinks.pop())
-    # The sort sinks' data, in the plan's order the same way (a SINK_SORT
-    # segment's `sink_param_id` indexes `params.sort`).
+    # The same for the sort sinks, which SINK_SORT segments index apart from
+    # the aggregation sinks: without them a plan with an ORDER BY names sort
+    # sink data the builder does not hold.
     var reversed_sorts = List[SortSinkData]()
     while len(lowered.params.sort) > 0:
         reversed_sorts.append(lowered.params.sort.pop())

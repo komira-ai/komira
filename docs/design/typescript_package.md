@@ -2,8 +2,9 @@
 
 Status: design, not built. **EXISTS** names code on `main`. **PROPOSED** is new. Statements the
 author deduced rather than read are marked *(inferred)*. The choices only the owner can make are
-collected under [Decisions for the owner](#decisions-for-the-owner). Until the owner answers them,
-the npm names below are the recommended ones, not settled ones.
+collected under [Decisions for the owner](#decisions-for-the-owner). D2, where the Mojo runtime
+comes from, is ruled. D1, D3 and D4 are open, so until the owner answers them, the npm names below
+are the recommended ones, not settled ones.
 
 ## What problem does this solve?
 
@@ -15,7 +16,7 @@ The Python package ([python_package.md](python_package.md)) is the sibling. Both
 library through the same C calls ([libkomira_run_abi.md](libkomira_run_abi.md)). This document
 covers the parts that are Node's own:
 - the first release's surface and how an Arrow C stream reaches JavaScript;
-- the npm packages and how they find `libkomira`, while carrying no Mojo runtime;
+- the npm packages, the self-contained native directory they carry, and how they load it;
 - how they plug into the release machine;
 - the tests that run from the installed package;
 - where the Excel SDK and the later surfaces sit.
@@ -24,8 +25,17 @@ Fixed before this design, and not reopened here:
 - **One C ABI.** The run calls are `komira_sql_stream` and `komira_plan_stream`, with an Arrow C
   stream as the result ([libkomira_run_abi.md](libkomira_run_abi.md)). This design adds no
   libkomira call.
-- **No Mojo runtime in the package.** The package carries `libkomira` and never the Mojo runtime,
-  the same rule as the wheel.
+- **The package is self-contained.** The owner ruled that every language package carries one
+  self-contained native directory: `libkomira`, its native owners and the three Mojo runtime
+  libraries (`libKGENCompilerRTShared`, `libAsyncRTRuntimeGlobals`, `libMSupportGlobals`), which
+  loads from any location with nothing installed beyond the host's system C and C++ libraries.
+  The owner also ruled that komira may redistribute those libraries. Their licence files and
+  notice are the wheel's (§3).
+  - The directory is one build output, the self-contained directory of the libkomira target. The
+    change that makes the wheel self-contained builds it, and the wheel is its first user.
+  - That change is not on `main` yet. The wheel on `main` still takes the runtime from Modular's
+    `mojo-compiler` (komira-ai/komira#2122).
+  - The npm platform packages copy the same directory (§3).
 - **Release platforms.** linux-x86_64, linux-arm64 and macos-arm64 (rule B11).
 - **One UDF mode per language.** UDFs written in TypeScript run in Node worker processes (rule B21,
   [udf_runtime_interface.md](udf_runtime_interface.md)).
@@ -124,7 +134,8 @@ Fixed before this design, and not reopened here:
     sit in `lib/` beside it ([src/so/README.md](../../src/so/README.md)).
   - It needs the three Mojo runtime libraries at load time: `libKGENCompilerRTShared`,
     `libAsyncRTRuntimeGlobals` and `libMSupportGlobals`
-    ([mojo_runtime_pypi_vs_conda.md](mojo_runtime_pypi_vs_conda.md)).
+    ([mojo_runtime_pypi_vs_conda.md](mojo_runtime_pypi_vs_conda.md)). The self-contained directory
+    puts them beside it, and that directory is not built on `main` yet.
 - **No TypeScript or Node SDK existed in the earlier code base.** Its one engine binding was the
   Python ctypes SDK ([python_package.md](python_package.md) decision 4).
 
@@ -160,8 +171,9 @@ The package exports these names and nothing else. The test `exports_test` holds 
 | `sql(query)`, `registerParquet(name, path)` | the same calls on a default session (below) |
 | `abiVersion(): number` | `komira_abi_version()`, `major * 1000 + minor` |
 | `version: string` | the package's version |
-| `KomiraError`, `LibraryLoadError`, `UnsupportedCpuError`, `RuntimeNotFoundError`, `UnsupportedOperation` | the errors (below) |
-| the command `komira install-runtime` (the package's `bin`, run as `npx @komira-ai/komira install-runtime`) | fetches the Mojo runtime, under the route of decision D2. It is public surface like the names above, and it goes if D2 picks a route without it |
+| `KomiraError`, `LibraryLoadError`, `UnsupportedCpuError`, `UnsupportedOperation` | the errors (below) |
+
+The package has no `bin` and no command: `npm install` is the only step (decision D2).
 
 ### Behaviour
 
@@ -263,13 +275,14 @@ every buffer, and it would put an IPC writer in C beside the engine's own.
     (with the loader's message), its ABI major is not 1, or a symbol its minor promises is
     missing. A call that a newer minor added fails when it is used, with a message naming both
     versions.
+    - The Mojo runtime libraries are files of the platform package, so a missing one is a damaged
+      install. It is the loader's failure to open `libkomira`, reported as this error with the
+      loader's message. There is no error of its own for the runtime, and no message that points
+      at something to install.
   - `UnsupportedCpuError extends LibraryLoadError`: on linux-x64 the CPU lacks a flag of
     x86-64-v3. The package reads `/proc/cpuinfo` before it loads the addon, so the process never
     dies on an illegal instruction. The flags and the message are the Python check's
     (komira-ai/komira#2121).
-  - `RuntimeNotFoundError extends LibraryLoadError`: the Mojo runtime is missing or of the wrong
-    version, with the fix in the message. This is the Python package's name for the same error
-    (komira-ai/komira#2122). Its route is decision D2.
 - Arguments are JavaScript's own. A wrong type is a `TypeError`, and a wrong value of the right
   type is a `RangeError` (`threads: 0`, an empty table name, a NUL byte in a path). Both are raised
   before the library is called.
@@ -315,9 +328,15 @@ the host.
 | package (decision D1) | holds | `os` / `cpu` / `libc` |
 |---|---|---|
 | `@komira-ai/komira` | the compiled JavaScript, `.d.ts` types, `README.md`, `LICENSE`, `NOTICE` | none |
-| `@komira-ai/komira-linux-x64-gnu` | `komira_addon.node`, `libkomira.so`, `lib/` (the eight native owners), `LICENSE`, `NOTICE` | `linux` / `x64` / `glibc` |
+| `@komira-ai/komira-linux-x64-gnu` | `komira_addon.node` and the self-contained native directory: `libkomira.so`, the eight native owners and the three Mojo runtime libraries, laid out as the directory lays them out; the licence files | `linux` / `x64` / `glibc` |
 | `@komira-ai/komira-linux-arm64-gnu` | the same, for aarch64 | `linux` / `arm64` / `glibc` |
-| `@komira-ai/komira-darwin-arm64` | `komira_addon.node`, `libkomira.dylib`, `lib/` | `darwin` / `arm64` |
+| `@komira-ai/komira-darwin-arm64` | `komira_addon.node` and the directory, with `libkomira.dylib`; the licence files | `darwin` / `arm64` |
+
+- **One step.** `npm install @komira-ai/komira` is all a user runs. It installs the main package and
+  the one platform package that matches the host, and that platform package holds every native file
+  a query loads. Nothing is fetched after install and nothing is fetched at run time, so an install
+  from a registry mirror or an offline cache works with no network. The package needs no Python, no
+  `pip` or conda, and no `mojo-compiler`.
 
 - **Versions.** Every package has one version, `0.1.<N>`, the wheel's scheme. `N` is the same
   stamp the wheel and the conda packages take (`komira.package_stamp`,
@@ -328,8 +347,10 @@ the host.
 - **Rejected: an install script that downloads the binaries.** pnpm and Bun do not run dependency
   install scripts by default, `--ignore-scripts` skips them, and the files would come from
   somewhere no test of the package ran.
-- **Size.** A platform package is about 4 MB on linux-x64: the library is 3.5 MB and the owners
-  0.5 MB *(inferred from the linux-x86_64 table of [src/so/README.md](../../src/so/README.md))*.
+- **Size.** A platform package is about 6 MB unpacked on linux-x64: the library is 3.5 MB, the
+  owners 0.5 MB and the three runtime libraries about 2 MB *(inferred: the first two from the
+  linux-x86_64 table of [src/so/README.md](../../src/so/README.md), the third from the sizes in
+  [mojo_runtime_pypi_vs_conda.md](mojo_runtime_pypi_vs_conda.md); nothing has been packed)*.
 
 ### Node versions and N-API
 
@@ -370,63 +391,63 @@ the host.
   and `process.arch`. Then:
   1. on linux-x64, it runs the CPU check;
   2. it loads `komira_addon.node` from that directory;
-  3. it calls the addon's `load` with the path of `libkomira` in the same directory.
-- The library's run path (`$ORIGIN/lib:$ORIGIN`, `@loader_path/lib` on macOS) finds the owners in
-  `lib/`.
-  - That is the layout of `//src/so:libkomira[runnable]`. But `[runnable]`'s `lib/` also holds the
-    Mojo runtime libraries ([tools/build/mojo/README.md](../../tools/build/mojo/README.md)), so the
-    package rule copies the library and its owners out of it, never the runtime libraries.
-  - The policy check refuses a runtime member.
+  3. it calls the addon's `load` with the path of `libkomira` in the copied directory.
+- The directory loads from any location with nothing else installed: the library's run path
+  (`$ORIGIN/lib:$ORIGIN`, `@loader_path/lib` on macOS) finds its owners and the three runtime
+  libraries inside it. That is the directory's own property, and its own test in the change that
+  builds it holds it. The npm package adds no preload, no search for a runtime, and no second
+  directory.
+  - The package rule copies the directory as it is, file for file. It does not pick members out of
+    it and adds none.
+  - The directory is the wheel change's output. The npm rule takes no other target in its place,
+    `//src/so:libkomira[runnable]` included.
 - There is no environment variable, no search of the working directory, and no global install
   path. That is Python's decision 6, for the same reason: a package must load the library its own
   tests ran.
 - Tests call the private `load(dir)` with the directory their target staged, as the addon tests
   do now.
 
-### The Mojo runtime (decision D2)
+### The Mojo runtime (decision D2, ruled)
 
-The wheel gets the runtime from Modular's own published package: it declares `mojo-compiler` as a
-dependency, and its loader preloads the three libraries from `<site>/modular/lib`
-(`python/komira/_runtime.py`, komira-ai/komira#2122). npm has no such package. Modular publishes the runtime on PyPI and conda,
-not on npm *(inferred: no Modular runtime package was found on npm; the repository names none)*.
-Under the rule that the package carries `libkomira` and never the runtime, the package must reach a
-runtime Modular publishes. The routes are compared in [D2](#d2-where-the-mojo-runtime-comes-from).
-
-The recommended route is one explicit command and no install script:
-- `npx @komira-ai/komira install-runtime` downloads Modular's `mojo-compiler` wheel for the host
-  platform from PyPI.
-  - The wheel's version, URL and SHA-256, and each of the three libraries' SHA-256, are new pins,
-    one set per platform.
-    - The repository pins the conda runtime, not the PyPI wheels: `mojo_compiler` in
-      `tools/build/platforms/table.bzl` is a `.conda` package.
-    - The PyPI hashes are measured in [mojo_runtime_pypi_vs_conda.md](mojo_runtime_pypi_vs_conda.md),
-      and two of the three libraries differ from the conda pins in their bytes.
-  - It checks the hash and extracts only the three runtime libraries from `modular/lib/`.
-  - It writes them into a `runtime/` directory of the platform package.
-- At load, the addon opens the three by absolute path with `RTLD_GLOBAL`, in Python's order
-  (`libMSupportGlobals`, `libAsyncRTRuntimeGlobals`, `libKGENCompilerRTShared`), and then opens
-  `libkomira`.
-  - A missing or wrong library is a `RuntimeNotFoundError` whose message is the command.
-  - The libraries' SHA-256 values are checked against the pins, so the version is checked by
-    bytes, not by metadata.
-- Network is used by that command and by nothing else. A query never fetches anything.
-- **What the route depends on.** It holds only if `libkomira`, built against the conda runtime,
-  loads against the PyPI runtime's libraries. That check is marked NOT RUN in
-  [mojo_runtime_pypi_vs_conda.md](mojo_runtime_pypi_vs_conda.md). The wheel route depends on it
-  too, and the wheel's install test runs it.
-- **What the host provides.** The host provides `libstdc++.so.6` and `libgcc_s.so.1`, which the
-  runtime needs, as for the wheel ([mojo_runtime_pypi_vs_conda.md](mojo_runtime_pypi_vs_conda.md),
-  [wheel_licence_audit.md](wheel_licence_audit.md), [python/README.md](../../python/README.md)).
-  The npm README says so.
+The platform packages carry the Mojo runtime: the three libraries are members of the self-contained
+native directory, and each platform package copies that directory (above). The comparison of routes
+is under [D2](#d2-where-the-mojo-runtime-comes-from). What follows from the ruling:
+- **No second step.** There is no `install-runtime` command, no `bin`, no install script, and no
+  download of a runtime, at install time or at run time. `npm install` is the only step, and it
+  works offline.
+- **No runtime pins in the npm packages.** The runtime's bytes are the directory's, chosen by the
+  change that builds the directory. The npm build adds no pin of its own for the runtime, and no
+  URL or hash of a Modular package.
+- **No runtime check at load.** The addon opens `libkomira` and nothing else, and the loader finds
+  the runtime libraries through the run path. A platform package whose runtime library is missing
+  fails as any unloadable library does (§2, `LibraryLoadError`). The fix is to reinstall the
+  package, never to install a Mojo runtime.
+- **The bytes a test ran.** Each platform package's runtime libraries are the bytes its install test
+  loaded (§5), because the package is the test's input. The open question of whether `libkomira`
+  built against the conda runtime loads against the PyPI runtime's libraries
+  ([mojo_runtime_pypi_vs_conda.md](mojo_runtime_pypi_vs_conda.md)) is the wheel change's to settle
+  when it picks the directory's runtime. The npm packages fetch no runtime, so whatever it picks is
+  what the npm install test loads.
+- **What the host provides.** On Linux the host provides `libstdc++.so.6` and `libgcc_s.so.1`,
+  which the runtime needs, as for the wheel today
+  ([mojo_runtime_pypi_vs_conda.md](mojo_runtime_pypi_vs_conda.md),
+  [wheel_licence_audit.md](wheel_licence_audit.md), [python/README.md](../../python/README.md)). If
+  the self-contained directory changes that set, the npm package follows the directory. The npm
+  README states the set the directory needs.
 
 ### Licence files
 
-- Each tarball carries the repository's `LICENSE` and `NOTICE` (`"license": "Apache-2.0"`).
-- `NOTICE` already reproduces the notices of snappy, Brotli and libc++, which are inside the native
-  owners. Each platform package carries those same files
-  ([wheel_licence_audit.md](wheel_licence_audit.md)).
-- `NOTICE`'s section on the Mojo runtime ("a dependency, not distributed") gains the npm route's
-  sentence in the change that implements D2.
+- The main package holds only komira's own JavaScript and types. It carries the repository's
+  `LICENSE` and `NOTICE` as they stand when it is built (`"license": "Apache-2.0"`).
+- The platform packages carry the same native files as the wheel, the Mojo runtime libraries among
+  them, so they carry the same licence files and the same notice as the wheel, and their
+  `"license"` field follows the wheel's licence metadata. This design does not write that text. The
+  change that makes the wheel self-contained settles it, and the npm package rule copies the
+  wheel's licence files rather than keeping a second set.
+- Today's `NOTICE` reproduces the notices of snappy, Brotli and libc++, which are inside the native
+  owners ([wheel_licence_audit.md](wheel_licence_audit.md)). Its section on the Mojo runtime
+  ("a dependency, not distributed") describes the wheel as it is on `main`. Whatever the wheel's
+  change makes of it, the npm packages copy. No npm change edits `NOTICE`.
 
 ### macOS
 
@@ -454,9 +475,13 @@ top-level `pypi.yml` through the environments `testpypi` and `pypi`
     elsewhere, and the check refuses it unless the bytes are equal.
   - It stamps `version` from `komira.package_stamp` and writes `package.json` from the rule's
     attributes. There is no `package.json` in the repository that could drift.
-  - It reads the tarball back. The ELF policy of `wheel_file` applies to the platform packages: the
-    glibc floor; every run path at `$ORIGIN` or under it; every NEEDED a member or a system
-    library; the Mojo runtime named as external and never a member; a size cap.
+  - Its native input is the self-contained directory of the libkomira target, built by the change
+    that makes the wheel self-contained. The rule takes the directory as one input and copies it
+    whole; it never assembles the library, owners and runtime from separate targets.
+  - It reads the tarball back. The ELF policy of `wheel_file`, as the wheel's change sets it for the
+    self-contained directory, applies to the platform packages: the glibc floor; every run path at
+    `$ORIGIN` or under it; every NEEDED a member or a system library, so the three runtime
+    libraries are members; no other file of Modular's distribution; a size cap.
   - The rule refuses a package whose `repository.url` is not `https://github.com/komira-ai/komira`,
     because trusted publishing requires that it match.
   - The policy code moves into a module both tools import, in a refactor of its own before the npm
@@ -503,8 +528,9 @@ top. Its jobs:
 4. **smoke** (no identity): one named Zig tool, `//release/ci:npm_smoke`, run as one step (rule
    B4).
    - It installs the exact version from the registry into an empty directory, compares each
-     package's `integrity` with `npm_set.json`, runs `install-runtime`, and runs `SELECT 1`.
-   - This job is the one place a test reaches the network: the registry and Modular's runtime.
+     package's `integrity` with `npm_set.json`, and runs `SELECT 1`. There is no step between the
+     install and the query.
+   - This job is the one place a test reaches the network, and it reaches only the npm registry.
 
 How it holds the rules:
 - Hosted runners only, every action pinned by SHA, no `pull_request_target`, actionlint clean
@@ -562,7 +588,11 @@ linux-x86_64.
   - `exports_test` holds the exact public names.
   - The loader's refusals: a missing platform package, ABI 2.0 and 0.999, a symbol missing for the
     library's minor, a call of a newer minor, and a CPU without x86-64-v3, from a cpuinfo fixture.
-  - The runtime's refusals. Each asserts the full message by equality (rule T13).
+  - A staged directory with one of the three runtime libraries removed rejects with
+    `LibraryLoadError` and no other class, with a message that names the missing library's file.
+    The loader's text varies by platform, so this test checks the class and the file name. The
+    other refusals assert the full message by equality (rule T13). This test needs the directory,
+    so it lands with the package rule (item 6 of the plan) or after it.
   - `SELECT 1 AS n` and a `GROUP BY` over the checked-in Parquet fixture answer as DuckDB does.
   - An unknown table, a syntax error and an unsupported construct reject from `sql` with their
     class, `step` and `code`.
@@ -590,15 +620,16 @@ the one build action that runs npm.
   the repository:
   - the version;
   - the public names;
-  - the runtime refusal without the runtime, and the load with it;
+  - the load of `libkomira` from the installed platform package alone, with no Mojo toolchain, no
+    `mojo-compiler` and no library path in the test's environment, which is what a user's machine
+    has;
   - `SELECT 1`;
   - a `GROUP BY` over Parquet, CSV and NDJSON fixtures, once those registrations exist;
   - an `apache-arrow` `instanceof` check on the result;
   - a `require()` of the package from CommonJS.
 - It runs once per pinned Node: 22, 24 and 26 on linux-x64.
-- The runtime comes from the toolchain's pinned runtime, staged where `install-runtime` would put
-  it. The command's own download is tested on a local archive passed to a private parameter, never
-  over the network.
+- The test stages no runtime of its own: the runtime is whatever the platform tarball holds, so the
+  test runs the bytes that are published.
 - On macos-arm64 and linux-arm64 the same target runs in the release workflows only, never in a
   pull request (rule B9). The published package names a platform only after that platform's
   install test passed.
@@ -700,15 +731,19 @@ Recommendation: **A**.
 
 ### D2. Where the Mojo runtime comes from
 
+**Ruled: D.** The owner ruled that the native library is self-contained, and that komira may
+redistribute the Mojo runtime libraries. One self-contained directory is the unit every language
+package copies, which also makes the library easier to ship to languages beyond Python and Node.
+This section records the routes that were compared and why they lost.
+
 | option | what the user runs | for | against |
 |---|---|---|---|
-| **A (recommended)** an explicit command fetches Modular's PyPI wheel | `npm install @komira-ai/komira`, then `npx @komira-ai/komira install-runtime` once | keeps the rule (the package carries no runtime file); pinned by version and SHA-256; no install script; no network at query time | two steps; downloads Modular's whole compiler wheel (71 to 79 MB) for about 2 MB of libraries; it writes into `node_modules`, which under pnpm is a store shared by projects, so the runtime lands in the store's copy; it depends on the load check that has not run yet |
-| B the same fetch, in a `postinstall` script | `npm install` | one step where scripts run | pnpm and Bun skip it by default, and `--ignore-scripts` skips it everywhere. So a second path, A's command, is needed anyway. Install scripts are also a supply-chain warning sign |
-| C the user installs the runtime with pip or conda, and the package finds it | `pip install mojo-compiler==<pin>`, then `npm install` | no download code of ours | Node has no `sys.path`. Finding the runtime needs either a search or a setting, and a setting would be an environment variable (rule S2) or an option on every session |
-| D the platform packages carry the three libraries | `npm install` | one step, and it works offline | breaks the ruling that no package carries the runtime. `NOTICE` records the libraries as Modular's and outside this repository's Apache grant. Their licence is `LicenseRef-MAX-Platform-Software-License`, and whether komira may carry them is unruled ([mojo_runtime_pypi_vs_conda.md](mojo_runtime_pypi_vs_conda.md)) |
+| A an explicit command fetches Modular's PyPI wheel | `npm install @komira-ai/komira`, then `npx @komira-ai/komira install-runtime` once | no install script; pinned by version and SHA-256; no network at query time | **a second step for the user**, and a download that needs network after install; downloads Modular's whole compiler wheel (71 to 79 MB) for about 2 MB of libraries; it writes into `node_modules`, which under pnpm is a store shared by projects; it adds a command, its pins and a runtime-not-found error to the public surface; and it would load libraries other than the ones the package's tests ran |
+| B the same fetch, in a `postinstall` script | `npm install` | one step where scripts run | **a download at install time**, which pnpm and Bun skip by default and `--ignore-scripts` skips everywhere, so A's command is needed anyway; install scripts are also a supply-chain warning sign |
+| C the user installs the runtime with pip or conda, and the package finds it | `pip install mojo-compiler==<pin>`, then `npm install` | no download code of ours | **a second step, in another language's installer**; Node has no `sys.path`, so finding the runtime needs a search or a setting, and a setting would be an environment variable (rule S2) or an option on every session |
+| **D (ruled)** the platform packages carry the three libraries, as members of the self-contained directory | `npm install` | one step; works offline; no download code, no command, no runtime pins of the package's own, no runtime error path; the installed bytes are the tested bytes; the same directory serves every language package | the platform package is about 2 MB larger; a fix to the runtime reaches users only in a new komira release; the package carries Modular's files, so its licence files and notice follow the wheel's, whose text is not decided here (§3) |
 
-Recommendation: **A**, and D if the owner rules that komira may carry the libraries. A's command and its
-error message are the only things a user learns.
+What a user learns: `npm install @komira-ai/komira`, and nothing else.
 
 ### D3. The public API of the first release
 
@@ -736,9 +771,10 @@ that runs no query would be a release with nothing in it.
 
 ## What must always hold?
 
-- The packages carry `libkomira`, its native owners, the addon, the licence files and the compiled
-  JavaScript, and no file of Modular's runtime distribution. Under D2 option D they carry the three
-  libraries only.
+- The packages carry the self-contained native directory (`libkomira`, its native owners and the
+  three Mojo runtime libraries), the addon, the licence files and the compiled JavaScript, and no
+  other file of Modular's distribution.
+- `npm install` is the only step. Nothing is downloaded after it, at install time or at run time.
 - No public behaviour is configured by an environment variable.
 - The public names are exactly the list `exports_test` holds.
 - Each platform package's native files are the bytes its install test ran.
@@ -747,8 +783,8 @@ that runs no query would be a release with nothing in it.
 
 ## What are the limits and open questions?
 
-- The runtime route (D2) is open. Its download is the one network use of the package. Whether
-  `libkomira` loads against the PyPI runtime's libraries has not been run (both routes need it).
+- The npm platform packages wait for the self-contained directory, which does not exist on `main`
+  yet; its change also settles the licence files and notice the platform packages copy.
 - Tests in `.ts` run with type stripping on the pinned 24, and on a Node 22 pin only from 22.18,
   so the Node 22 pin is 22.18 or later.
 - linux-arm64 waits for its build platform, and macos-arm64 for `libkomira`'s macOS build and
@@ -767,12 +803,12 @@ Each part is its own change, with its tests:
 3. the TypeScript package with its loader and public names;
 4. `sql` and `Result`, once `komira_sql_stream` exists;
 5. errors, session options, and CSV and NDJSON registration, each after its library change;
-6. the package rule and the release set;
-7. the runtime route;
-8. the macOS and linux-arm64 builds;
-9. the install tests;
-10. `npm.yml`;
-11. the SQL conformance runner.
+6. the package rule and the release set, consuming the self-contained directory of the libkomira
+   target, after the change that makes the wheel self-contained has landed;
+7. the macOS and linux-arm64 builds;
+8. the install tests;
+9. `npm.yml`;
+10. the SQL conformance runner.
 
 The change that first ships the addon also updates
 [third_party/node/README.md](../../third_party/node/README.md) ("Never shipped") and its

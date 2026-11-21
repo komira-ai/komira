@@ -67,10 +67,10 @@ budget, a sum outside its declared type and a pool not whole after a run (step
 `LOWERING_UNCUTTABLE_NODE` at `lower`). A glob path and a table of several
 files are refused by the footer package. Lowering given fewer scan facts than
 the plan has scans refuses by name (`LOWERING_INPUTS_SCAN_COUNT`);
-`lowering_inputs` descends only scan, filter, project, limit, aggregate, sort
-and union nodes (a union's branches in order) and gives a facts entry per scan
-it reaches, and the cutter refuses any other node by name before it asks for
-the scans below it. `worker_count` and
+`lowering_inputs` descends only scan, filter, project, limit, aggregate,
+distinct, sort and union nodes (a union's branches in order) and gives a facts
+entry per scan it reaches, and the cutter refuses any other node by name
+before it asks for the scans below it. `worker_count` and
 `memory_budget_bytes` have a lower bound of 1 and no upper bound. A
 cancellation token is local to a call, so cancel is not reachable from
 `run_sql`. After a refusal the context is unchanged and runs the next query.

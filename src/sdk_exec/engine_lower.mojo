@@ -20,6 +20,7 @@ from parquet_footers.lowering_facts import (
 from plan_ir.logical_plan import (
     LogicalPlan,
     PLAN_AGGREGATE,
+    PLAN_DISTINCT,
     PLAN_FILTER,
     PLAN_LIMIT,
     PLAN_PROJECT,
@@ -70,6 +71,8 @@ def _collect(
         _collect(inputs, node.limit_data_ref().child[], ctx)
     elif tag == PLAN_AGGREGATE:
         _collect(inputs, node.aggregate_data_ref().child[], ctx)
+    elif tag == PLAN_DISTINCT:
+        _collect(inputs, node.distinct_data_ref().child[], ctx)
     elif tag == PLAN_SORT:
         _collect(inputs, node.sort_data_ref().child[], ctx)
     elif tag == PLAN_UNION:

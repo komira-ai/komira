@@ -30,4 +30,20 @@ C API (`src/so`), and the check that installs it.
 ./buck2 build komira//tools/build/package/libkomira:libkomira_elf_report
 ```
 
+- `libkomira_dist_load` is the proof that the native directory a language package
+  carries, `//src/so:libkomira[dist]` (libkomira, its native owners and the three Mojo
+  runtime libraries in `lib/`), loads as it is from wherever it is copied
+  ([`dist.bzl`](dist.bzl)). It copies the directory to another path and runs
+  [`dist_load.c`](dist_load.c) there with no library path, no Python package and nothing
+  of Modular's: the C caller opens the host's C++ runtime, then `libkomira.so` with
+  `RTLD_NOW | RTLD_LOCAL`, requires `komira_abi_version()` to be the version of
+  `komira.h`, and requires libkomira, every owner and each runtime library to be mapped
+  from the copy. `libkomira_dist_load_refuses_missing_runtime` is the same check on the
+  directory with `libMSupportGlobals.so` left out (`picked_dir`): it passes only if the
+  load fails with the loader's error naming that file.
+
+```sh
+./buck2 build komira//tools/build/package/libkomira:libkomira_dist_load
+```
+
 Nothing here publishes anything.

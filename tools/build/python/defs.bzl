@@ -41,13 +41,18 @@ environment `LC_ALL=C PYTHONHASHSEED=0 TZ=UTC0 TZDIR=<absolute>` and nothing
 else, so that string hashes are the same in every run; `-I` would ignore
 `PYTHONHASHSEED`.
 
-The rules are linux x86_64 only: the macros set `exec_compatible_with` to
-the linux x86_64 execution platform.
+The rules run on linux x86_64 and on macOS arm64. The macros choose the
+execution platform from the target platform's operating system:
+`exec_compatible_with` is the linux x86_64 platform, or the darwin arm64 one
+for a target configured for macOS, and `python` (and, for `python_binding_test`,
+`runtime`) default to the interpreter and Mojo runtime of that platform. The
+macOS interpreter is unpacked, and its version checked, by a macOS build of
+`python_act` that a macOS worker runs.
 """
 
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
 load("@komira//tools/build/mojo:test_runtime.bzl", "data_map")
-load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
+load("@komira//tools/build/platforms:defs.bzl", "DARWIN_ARM64", "LINUX_X86_64")
 load("@komira//tools/build/rerun:rerun.bzl", "RERUN_ATTRS", "rerun_env", "rerun_info")
 
 PythonDistInfo = provider(
@@ -107,7 +112,7 @@ def _python_dist_impl(ctx):
         fail("{}: preload names libraries but native_libs is not set".format(ctx.label))
     ctx.actions.run(
         cmd_args(
-            ctx.attrs._python_act[RunInfo],
+            ctx.attrs.act[RunInfo],
             "dist",
             "--archive",
             archive,
@@ -145,7 +150,9 @@ _python_dist = rule(
         "native_libs": attrs.option(attrs.dep(), default = None),
         "preload": attrs.list(attrs.string(), default = []),
         "version": attrs.string(),
-        "_python_act": attrs.exec_dep(default = "komira//tools/build/python_act:python_act", providers = [RunInfo]),
+        # The unpacker and version check: python_act built for the platform
+        # that runs the interpreter.
+        "act": attrs.exec_dep(default = "komira//tools/build/python_act:python_act", providers = [RunInfo]),
     },
 )
 
@@ -269,12 +276,12 @@ _py_test = rule(
 # A `py_test` that also loads shared libraries: the `mojo_shared_lib` targets
 # of `libs` are copied, by file name, into one directory of the action, and the
 # Mojo runtime libraries they link (the toolchain's `mojo_runtime`) are a
-# second. The action's LD_LIBRARY_PATH is those two directories and nothing
+# second. The action's LD_LIBRARY_PATH and DYLD_LIBRARY_PATH are those two directories and nothing
 # else, so the loader finds the library and the runtime in the action's inputs
 # and never on the worker. The script learns the first directory from
 # `--lib-dir <dir>`, its first two arguments (a flag, not an environment
-# variable), and the second from `--runtime-dir <dir>`, the next two (the
-# directory a loader's runtime preload is pointed at); `ctypes.CDLL(os.path.join(libdir, "<out_name>.so"))` loads a
+# variable), and the second from `--runtime-dir <dir>`, the next two (for a
+# script that opens a runtime library by path); `ctypes.CDLL(os.path.join(libdir, "<out_name>.so"))` loads a
 # library by path. `data` ({dest: source}) is staged in the same directory at
 # `dest`: a library's runnable directory (`libkomira[runnable]`, the library
 # with its lib/ beside it) or a stand-in library under a path of its own.
@@ -295,12 +302,15 @@ def _python_binding_test_impl(ctx):
     return _run_py_test(
         ctx,
         lib_args = ["--lib-dir", libdir, "--runtime-dir", runtime],
-        env_extra = {"LD_LIBRARY_PATH": cmd_args(libdir, runtime, delimiter = ":")},
+        env_extra = {
+            "DYLD_LIBRARY_PATH": cmd_args(libdir, runtime, delimiter = ":"),
+            "LD_LIBRARY_PATH": cmd_args(libdir, runtime, delimiter = ":"),
+        },
     )
 
 _python_binding_test = rule(
     impl = _python_binding_test_impl,
-    doc = "A `py_test` that loads shared libraries: `libs` (`mojo_shared_lib` targets) are staged by file name in one directory, and `data` ({dest: source}, a build output allowed) at `dest` in it; the directory is passed to the script as `--lib-dir <dir>` and the runtime directory as `--runtime-dir <dir>`; the action's LD_LIBRARY_PATH is that directory and the Mojo runtime libraries (`runtime`), and nothing else.",
+    doc = "A `py_test` that loads shared libraries: `libs` (`mojo_shared_lib` targets) are staged by file name in one directory, and `data` ({dest: source}, a build output allowed) at `dest` in it; the directory is passed to the script as `--lib-dir <dir>` and the runtime directory as `--runtime-dir <dir>`; the action's LD_LIBRARY_PATH and DYLD_LIBRARY_PATH are that directory and the Mojo runtime libraries (`runtime`), and nothing else.",
     attrs = _PY_TEST_ATTRS | {
         "data": attrs.dict(attrs.string(), attrs.source(), default = {}),
         "libs": attrs.list(attrs.dep(), default = []),
@@ -493,31 +503,52 @@ _python_proto = rule(
     },
 )
 
-def _linux(kwargs):
+_MACOS = "prelude//os/constraints:macos"
+
+def _by_os(linux, macos):
+    return select({_MACOS: macos, "DEFAULT": linux})
+
+def _platform(kwargs):
+    """Defaults a rule's execution platform to that of its target platform's OS, and `python` to that platform's interpreter."""
     if "exec_compatible_with" not in kwargs:
-        kwargs["exec_compatible_with"] = LINUX_X86_64
+        kwargs["exec_compatible_with"] = _by_os(LINUX_X86_64, DARWIN_ARM64)
+    return kwargs
+
+def _interpreter(kwargs):
+    if "python" not in kwargs:
+        kwargs["python"] = _by_os("komira//third_party/python:cpython", "komira//third_party/python:cpython_macos")
     return kwargs
 
 def _dist_macro(**kwargs):
-    _python_dist(**_linux(kwargs))
+    # A dist is for one platform, named by its exec_compatible_with and `act`.
+    if "exec_compatible_with" not in kwargs:
+        kwargs["exec_compatible_with"] = LINUX_X86_64
+    _python_dist(**kwargs)
 
 def _wheel_macro(**kwargs):
-    _python_wheel(**_linux(kwargs))
+    _python_wheel(**_platform(kwargs))
 
 def _source_package_macro(**kwargs):
     _python_source_package(**kwargs)
 
 def _py_test_macro(**kwargs):
-    _py_test(**_linux(kwargs))
+    _py_test(**_interpreter(_platform(kwargs)))
 
 def _binding_test_macro(**kwargs):
-    _python_binding_test(**_linux(kwargs))
+    if "runtime" not in kwargs:
+        kwargs["runtime"] = _by_os("komira//tools/build/toolchains:mojo_runtime", "komira//tools/build/toolchains/darwin:mojo_runtime")
+    _python_binding_test(**_interpreter(_platform(kwargs)))
 
 def _oracle_macro(**kwargs):
-    _python_oracle(**_linux(kwargs))
+    # An oracle computes its answer on linux whatever the target platform.
+    if "exec_compatible_with" not in kwargs:
+        kwargs["exec_compatible_with"] = LINUX_X86_64
+    _python_oracle(**kwargs)
 
 def _proto_macro(**kwargs):
-    _python_proto(**_linux(kwargs))
+    if "exec_compatible_with" not in kwargs:
+        kwargs["exec_compatible_with"] = LINUX_X86_64
+    _python_proto(**kwargs)
 
 # Each rule and macro a BUCK file calls declares its package's doc_tree
 # (tools/build/lint/doc_tree.bzl), so no BUCK file names one.
