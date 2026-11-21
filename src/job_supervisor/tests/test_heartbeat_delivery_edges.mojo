@@ -182,14 +182,14 @@ def test_a_beat_with_no_file_descriptor_left_fails_softly() raises:
     var reporter = HttpHeartbeatReporter[NoHeartbeatAuth](
         String("http://127.0.0.1:1/beat"), NoHeartbeatAuth()
     )
-    var saved = InlineArray[UInt64, 2](fill=UInt64(0))
+    var saved = Array[UInt64, 2](fill=UInt64(0))
     # SAFETY: `saved` is a local two-word rlimit the call fills synchronously.
     var rc = external_call["getrlimit", Int32](_nofile(), saved.unsafe_ptr())
     assert_equal(rc, Int32(0), "getrlimit")
     var lowest = external_call["dup", Int32](Int32(2))
     assert_true(lowest >= Int32(0), "dup")
     _ = external_call["close", Int32](lowest)
-    var tight = InlineArray[UInt64, 2](fill=UInt64(0))
+    var tight = Array[UInt64, 2](fill=UInt64(0))
     tight[0] = UInt64(Int(lowest))
     tight[1] = saved[1]
     # SAFETY: `tight` is a local two-word rlimit the call reads synchronously.

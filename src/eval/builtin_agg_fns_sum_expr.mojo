@@ -42,7 +42,7 @@
 #   - NO UnsafePointer in any signature.
 #   - NO wildcard origins — `bo: Origin[mut=False]` threads the batch lifetime.
 #   - NO partial-move-via-take_pointee.
-#   - POD `Float64` state (no heap; slab-safe in InlineArray[Float64, N]).
+#   - POD `Float64` state (no heap; slab-safe in Array[Float64, N]).
 #   - `E` is a comptime TYPE param (zero-field for ColAtXF64/Lit/binop trees),
 #     so `var expr: E` is a POD value — no heap, Movable + Copyable.
 #

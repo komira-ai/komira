@@ -39,7 +39,7 @@
 #   * IndexCore transitively owns a Slab (via InvertedIndexBuilder), so it
 #     is MOVE-ONLY. The DocStoreBuilder it adds is all-POD List substrate. NO
 #     new heap-owning byte-slab element. SearchSink is move-only. _split_uuid is
-#     InlineArray[UInt8, 16]: no heap.
+#     Array[UInt8, 16]: no heap.
 # =============================================================================
 
 from arrow.arrow_types import ArrowType

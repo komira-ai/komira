@@ -101,14 +101,14 @@ GRAPH_JSON = r'''{
       "root": "src/metrics/src/metrics",
       "srcs": [
         {"path": "src/metrics/src/metrics/__init__.mojo", "sha256": "feec67d5922d3eb6273026bd77c58f214d2d410103460a188e482e07a8fd655f"},
-        {"path": "src/metrics/src/metrics/attr_set.mojo", "sha256": "fd51e3722211d1edd479418efe8ad16a0c12ebe078b79574e5b54d2723a59d99"},
+        {"path": "src/metrics/src/metrics/attr_set.mojo", "sha256": "e23b80ea82658e8f6442524d27c129b4ad03a72112ba62a1f53f54b7047b6fb5"},
         {"path": "src/metrics/src/metrics/explain_analyze.mojo", "sha256": "1379380e8859796de8ffbb6903da89c5d420936a3aead7e0fa8d2d99e28d764f"},
         {"path": "src/metrics/src/metrics/explain_analyze_collect.mojo", "sha256": "27e4d6d3110846ec6316f5201fdf85c956b1f51ddddd5c052bed67da9ba6ce37"},
-        {"path": "src/metrics/src/metrics/histogram.mojo", "sha256": "e5fae9981794ecf312e93b09ea9b703d57b8fcbe97e95fd0d3f26ec92c1a4ad5"},
-        {"path": "src/metrics/src/metrics/metric_point.mojo", "sha256": "82d62321c56c40794554b9e01ab412b47dfef5b91b621eb507407b70a7abaf61"},
-        {"path": "src/metrics/src/metrics/metric_sweep.mojo", "sha256": "2ef3448f2ddd3d9590b5b022c44955949ea66bfb479d7367c753a12e0499743b"},
-        {"path": "src/metrics/src/metrics/metrics_set.mojo", "sha256": "2a0f01ec5627168235f0d7f3bb33917428b2250fdc2895f6f78c941fa6b72bcf"},
-        {"path": "src/metrics/src/metrics/series_table.mojo", "sha256": "09f595b98ee0d2ad4164719cb0c3df4dce9a178da1e2870175c1a61d24b44d8c"}
+        {"path": "src/metrics/src/metrics/histogram.mojo", "sha256": "543c53a1834a8ce1c8b3498afaabfb766fbd6f6ec8e9dffdad7759bef302ee2a"},
+        {"path": "src/metrics/src/metrics/metric_point.mojo", "sha256": "76aa9747823ebfed1044f9b29760cbc9f16444e5b11cf2f4a198c385fee3f922"},
+        {"path": "src/metrics/src/metrics/metric_sweep.mojo", "sha256": "3af44ae7bc3d582e5ee1a399ff98247b1b0e33a061c3164daa219344a24819cf"},
+        {"path": "src/metrics/src/metrics/metrics_set.mojo", "sha256": "42d5efe3476637bccbc0e776b344c768106c53c3d1f2e2298195bc4d30385951"},
+        {"path": "src/metrics/src/metrics/series_table.mojo", "sha256": "ad7df467e91829d42a0fba50d94767e6b52a7abff2ac625a2f96a2ba02fe9e83"}
       ],
       "deps": ["komira-ai/atomic_alias@0.1.0#mojo1.0.0/lib", "komira-ai/clock@0.1.0#mojo1.0.0/lib", "komira-ai/containers@0.1.0#mojo1.0.0/lib", "komira-ai/hashing@0.1.0#mojo1.0.0/lib", "komira-ai/name_registry@0.1.0#mojo1.0.0/lib"],
       "natives": [
@@ -220,7 +220,7 @@ GRAPH_JSON = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/metrics/tests/test_metrics_set.mojo", "sha256": "9c03580dd239cad69fd58f5c84c98c252de0d39653599d54d9672eea407ffba4"}
+        {"path": "src/metrics/tests/test_metrics_set.mojo", "sha256": "2ffdda7c064cff6f4ad2f63782409609738313e72d4413877c1b14bc6f856f1a"}
       ],
       "deps": ["komira-ai/metrics@0.1.0#mojo1.0.0/lib", "komira-ai/fork_join@0.1.0#mojo1.0.0/lib"],
       "natives": [
@@ -410,14 +410,14 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "root": "src/metrics/src/metrics",
       "srcs": [
         {"path": "src/metrics/src/metrics/__init__.mojo", "sha256": "feec67d5922d3eb6273026bd77c58f214d2d410103460a188e482e07a8fd655f"},
-        {"path": "src/metrics/src/metrics/attr_set.mojo", "sha256": "fd51e3722211d1edd479418efe8ad16a0c12ebe078b79574e5b54d2723a59d99"},
+        {"path": "src/metrics/src/metrics/attr_set.mojo", "sha256": "e23b80ea82658e8f6442524d27c129b4ad03a72112ba62a1f53f54b7047b6fb5"},
         {"path": "src/metrics/src/metrics/explain_analyze.mojo", "sha256": "1379380e8859796de8ffbb6903da89c5d420936a3aead7e0fa8d2d99e28d764f"},
         {"path": "src/metrics/src/metrics/explain_analyze_collect.mojo", "sha256": "27e4d6d3110846ec6316f5201fdf85c956b1f51ddddd5c052bed67da9ba6ce37"},
-        {"path": "src/metrics/src/metrics/histogram.mojo", "sha256": "e5fae9981794ecf312e93b09ea9b703d57b8fcbe97e95fd0d3f26ec92c1a4ad5"},
-        {"path": "src/metrics/src/metrics/metric_point.mojo", "sha256": "82d62321c56c40794554b9e01ab412b47dfef5b91b621eb507407b70a7abaf61"},
-        {"path": "src/metrics/src/metrics/metric_sweep.mojo", "sha256": "2ef3448f2ddd3d9590b5b022c44955949ea66bfb479d7367c753a12e0499743b"},
-        {"path": "src/metrics/src/metrics/metrics_set.mojo", "sha256": "2a0f01ec5627168235f0d7f3bb33917428b2250fdc2895f6f78c941fa6b72bcf"},
-        {"path": "src/metrics/src/metrics/series_table.mojo", "sha256": "09f595b98ee0d2ad4164719cb0c3df4dce9a178da1e2870175c1a61d24b44d8c"}
+        {"path": "src/metrics/src/metrics/histogram.mojo", "sha256": "543c53a1834a8ce1c8b3498afaabfb766fbd6f6ec8e9dffdad7759bef302ee2a"},
+        {"path": "src/metrics/src/metrics/metric_point.mojo", "sha256": "76aa9747823ebfed1044f9b29760cbc9f16444e5b11cf2f4a198c385fee3f922"},
+        {"path": "src/metrics/src/metrics/metric_sweep.mojo", "sha256": "3af44ae7bc3d582e5ee1a399ff98247b1b0e33a061c3164daa219344a24819cf"},
+        {"path": "src/metrics/src/metrics/metrics_set.mojo", "sha256": "42d5efe3476637bccbc0e776b344c768106c53c3d1f2e2298195bc4d30385951"},
+        {"path": "src/metrics/src/metrics/series_table.mojo", "sha256": "ad7df467e91829d42a0fba50d94767e6b52a7abff2ac625a2f96a2ba02fe9e83"}
       ],
       "deps": ["komira-ai/atomic_alias@0.1.0#mojo1.0.0/lib", "komira-ai/clock@0.1.0#mojo1.0.0/lib", "komira-ai/containers@0.1.0#mojo1.0.0/lib", "komira-ai/hashing@0.1.0#mojo1.0.0/lib", "komira-ai/name_registry@0.1.0#mojo1.0.0/lib"],
       "natives": [
@@ -529,7 +529,7 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/metrics/tests/test_metrics_set.mojo", "sha256": "9c03580dd239cad69fd58f5c84c98c252de0d39653599d54d9672eea407ffba4"}
+        {"path": "src/metrics/tests/test_metrics_set.mojo", "sha256": "2ffdda7c064cff6f4ad2f63782409609738313e72d4413877c1b14bc6f856f1a"}
       ],
       "deps": ["komira-ai/metrics@0.1.0#mojo1.0.0/lib", "komira-ai/fork_join@0.1.0#mojo1.0.0/lib"],
       "natives": [
@@ -716,14 +716,14 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "root": "src/metrics/src/metrics",
       "srcs": [
         {"path": "src/metrics/src/metrics/__init__.mojo", "sha256": "feec67d5922d3eb6273026bd77c58f214d2d410103460a188e482e07a8fd655f"},
-        {"path": "src/metrics/src/metrics/attr_set.mojo", "sha256": "fd51e3722211d1edd479418efe8ad16a0c12ebe078b79574e5b54d2723a59d99"},
+        {"path": "src/metrics/src/metrics/attr_set.mojo", "sha256": "e23b80ea82658e8f6442524d27c129b4ad03a72112ba62a1f53f54b7047b6fb5"},
         {"path": "src/metrics/src/metrics/explain_analyze.mojo", "sha256": "1379380e8859796de8ffbb6903da89c5d420936a3aead7e0fa8d2d99e28d764f"},
         {"path": "src/metrics/src/metrics/explain_analyze_collect.mojo", "sha256": "27e4d6d3110846ec6316f5201fdf85c956b1f51ddddd5c052bed67da9ba6ce37"},
-        {"path": "src/metrics/src/metrics/histogram.mojo", "sha256": "e5fae9981794ecf312e93b09ea9b703d57b8fcbe97e95fd0d3f26ec92c1a4ad5"},
-        {"path": "src/metrics/src/metrics/metric_point.mojo", "sha256": "82d62321c56c40794554b9e01ab412b47dfef5b91b621eb507407b70a7abaf61"},
-        {"path": "src/metrics/src/metrics/metric_sweep.mojo", "sha256": "2ef3448f2ddd3d9590b5b022c44955949ea66bfb479d7367c753a12e0499743b"},
-        {"path": "src/metrics/src/metrics/metrics_set.mojo", "sha256": "2a0f01ec5627168235f0d7f3bb33917428b2250fdc2895f6f78c941fa6b72bcf"},
-        {"path": "src/metrics/src/metrics/series_table.mojo", "sha256": "09f595b98ee0d2ad4164719cb0c3df4dce9a178da1e2870175c1a61d24b44d8c"}
+        {"path": "src/metrics/src/metrics/histogram.mojo", "sha256": "543c53a1834a8ce1c8b3498afaabfb766fbd6f6ec8e9dffdad7759bef302ee2a"},
+        {"path": "src/metrics/src/metrics/metric_point.mojo", "sha256": "76aa9747823ebfed1044f9b29760cbc9f16444e5b11cf2f4a198c385fee3f922"},
+        {"path": "src/metrics/src/metrics/metric_sweep.mojo", "sha256": "3af44ae7bc3d582e5ee1a399ff98247b1b0e33a061c3164daa219344a24819cf"},
+        {"path": "src/metrics/src/metrics/metrics_set.mojo", "sha256": "42d5efe3476637bccbc0e776b344c768106c53c3d1f2e2298195bc4d30385951"},
+        {"path": "src/metrics/src/metrics/series_table.mojo", "sha256": "ad7df467e91829d42a0fba50d94767e6b52a7abff2ac625a2f96a2ba02fe9e83"}
       ],
       "deps": ["komira-ai/atomic_alias@0.1.0#mojo1.0.0/lib", "komira-ai/clock@0.1.0#mojo1.0.0/lib", "komira-ai/containers@0.1.0#mojo1.0.0/lib", "komira-ai/hashing@0.1.0#mojo1.0.0/lib", "komira-ai/name_registry@0.1.0#mojo1.0.0/lib"],
       "natives": [
@@ -835,7 +835,7 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/metrics/tests/test_metrics_set.mojo", "sha256": "9c03580dd239cad69fd58f5c84c98c252de0d39653599d54d9672eea407ffba4"}
+        {"path": "src/metrics/tests/test_metrics_set.mojo", "sha256": "2ffdda7c064cff6f4ad2f63782409609738313e72d4413877c1b14bc6f856f1a"}
       ],
       "deps": ["komira-ai/metrics@0.1.0#mojo1.0.0/lib", "komira-ai/fork_join@0.1.0#mojo1.0.0/lib"],
       "natives": [

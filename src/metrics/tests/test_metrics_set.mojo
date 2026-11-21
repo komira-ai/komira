@@ -52,7 +52,7 @@ from fork_join import ForkJoinBody, fork_join
 
 def test_counter_pod_size() raises:
     """Counter must elaborate via size_of (proves POD-shape). Exact
-    bytes: InlineArray[Int64, 64] = 512 + Atomic[Int64] = 8 → 520
+    bytes: Array[Int64, 64] = 512 + Atomic[Int64] = 8 → 520
     nominal; alignment may pad to 528.
     """
     var s = size_of[Counter]()
@@ -418,12 +418,12 @@ def test_parallelize_disjoint_counter_inc() raises:
     SAFETY (parallelize block):
       * Disjointness — worker `tid` writes only to slot `tid` via
         `inc_in_pipeline(_, worker_id=tid)`. Each per_worker slot is
-        an Int64 inside an InlineArray; slot writes are byte-disjoint.
+        an Int64 inside an Array; slot writes are byte-disjoint.
       * Liveness — each worker holds a `Pointer(to=c)` carrying `c`'s own
         origin; `c` is a local of this frame and outlives the fork-join
         (synchronous), which the compiler tracks.
       * No-realloc — Counter has no resize / append surface; the
-        InlineArray is fixed-size by construction.
+        Array is fixed-size by construction.
     """
     var c = Counter()
     var body = _IncBody(Pointer(to=c))

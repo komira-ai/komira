@@ -134,8 +134,8 @@ def _view(var message: String, wall_ms: Int64) -> LogRecordView:
     )
 
 
-def _uuid(seq: Int) -> InlineArray[UInt8, 16]:
-    var u = InlineArray[UInt8, 16](fill=UInt8(0))
+def _uuid(seq: Int) -> Array[UInt8, 16]:
+    var u = Array[UInt8, 16](fill=UInt8(0))
     u[8] = UInt8(seq)
     return u^
 

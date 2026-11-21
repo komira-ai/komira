@@ -33,7 +33,7 @@
 #   * Public-API surface is `Counter`, `Time`, `Gauge`, `MetricsSet`,
 #     `MetricsSnapshot`, `TimeScope`. No raw UnsafePointer in any
 #     signature — fields use Slab[T] / OwnedPointer[T] for indirection,
-#     and the per-worker arrays are direct `InlineArray` fields.
+#     and the per-worker arrays are direct `Array` fields.
 #   * Slab[T] is the canonical container for non-Movable Atomic-bearing
 #     element types (Slab.create_prefilled zero-fills bytes — matches
 #     Atomic's expected initial state).
@@ -89,7 +89,7 @@ struct Counter(Deinitable):
     """Per-worker int64 counter with an out-of-pipeline atomic fallback.
 
     Layout (POD aside from the trailing Atomic):
-        per_worker:      InlineArray[Int64, MAX_WORKERS=64]   # ~512 bytes
+        per_worker:      Array[Int64, MAX_WORKERS=64]   # ~512 bytes
         out_of_pipeline: Atomic[Int64]                         #     8 bytes
 
     Hot-path contract:
@@ -465,7 +465,7 @@ struct MetricsSnapshot(Copyable, Movable, Deinitable):
     POD-shaped — embedders pass it across thread boundaries safely.
     EXPLAIN ANALYZE renders directly from this.
 
-    Copyable: the entries array is `InlineArray[MetricsSnapshotEntry, _]`
+    Copyable: the entries array is `Array[MetricsSnapshotEntry, _]`
     where `MetricsSnapshotEntry` is itself Copyable POD, so the snapshot
     is bitwise-copyable. EXPLAIN ANALYZE relies on this so the
     report builder can `.copy()` snapshots into its `List[...]` storage

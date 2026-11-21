@@ -46,8 +46,8 @@ from search_http.bulk import ndjson_bulk_to_docbatch, BulkParse
 # -----------------------------------------------------------------------------
 
 
-def _uuid(seed: UInt8) -> InlineArray[UInt8, 16]:
-    var u = InlineArray[UInt8, 16](fill=0)
+def _uuid(seed: UInt8) -> Array[UInt8, 16]:
+    var u = Array[UInt8, 16](fill=0)
     for i in range(16):
         u[i] = seed + UInt8(i)
     return u^

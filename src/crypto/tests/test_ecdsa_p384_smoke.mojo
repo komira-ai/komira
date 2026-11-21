@@ -191,7 +191,7 @@ def test_signature_byte_format_384() raises:
     var sig = ecdsa_p384_sign_deterministic(
         Span[UInt8, origin_of(priv)](priv), msg,
     )
-    # The InlineArray[UInt8, 96] return type makes 96-byte length a
+    # The Array[UInt8, 96] return type makes 96-byte length a
     # compile-time invariant.
     assert_equal(96, 96, "P-384 sig is 96 bytes (compile-time)")
     # Verify the round-trip works (smoke).

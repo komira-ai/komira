@@ -342,7 +342,7 @@ trait MorselSink(Movable, Deinitable):
     Every `K.Local` field tree must be reviewed against
     an internal doc §7.11 before merge:
       * Heap-owning fields (List[T], String, OwnedPointer[V],
-        ArcPointer[V]) require an OwnedPointer wrap or InlineArray[T,N]
+        ArcPointer[V]) require an OwnedPointer wrap or Array[T,N]
         replacement.
       * No wildcard-origin pointer fields (per bug #60 closure).
       * Run `pixi run lint-unsafe-pointer*` +

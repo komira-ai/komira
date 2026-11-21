@@ -3,7 +3,7 @@
 # =============================================================================
 #
 # AggCommitPlan keeps its per-bucket thunk and slot-offset arrays as
-# `InlineArray[T, MAX_AGGS]` fields, stored inline in the plan. As
+# `Array[T, MAX_AGGS]` fields, stored inline in the plan. As
 # `List[T]` fields, each would own a separate heap buffer whose liveness
 # the compiler must chain through the plan; with a wildcard-origin pointer
 # in the commit path that chain breaks, the buffer can be freed mid-loop,
@@ -30,13 +30,13 @@ from agg_api.agg_layout import (
 
 
 # =============================================================================
-# Test 1: commit_row over 10K rows with 4 f64 aggs -- InlineArray stability
+# Test 1: commit_row over 10K rows with 4 f64 aggs -- Array stability
 # =============================================================================
 
 def test_commit_row_10k_iterations_with_4_f64_aggs() raises:
     """Runs commit_row for 10K rows against 4 f64 aggs. The f64 bucket
     stores the per-slot thunk + slot_offset -- reverting it from
-    InlineArray to List[T] enables ASAP destruction of the bucket's
+    Array to List[T] enables ASAP destruction of the bucket's
     backing heap buffer mid-loop. The test verifies byte-correct sums
     and counts after 10K iterations; a dangling bucket pointer would
     crash or produce garbage values long before this completes."""
@@ -105,7 +105,7 @@ def test_commit_row_10k_iterations_with_4_f64_aggs() raises:
 
 def test_commit_row_all_bucket_types() raises:
     """commit_row drives count / f64 / i64 / i32 buckets in parallel.
-    Reverting any bucket's storage from InlineArray to List[T] would
+    Reverting any bucket's storage from Array to List[T] would
     crash during the tight inner read loop."""
     print("test_commit_row_all_bucket_types...")
 

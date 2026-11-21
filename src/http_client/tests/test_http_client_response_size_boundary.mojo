@@ -15,7 +15,7 @@
 # inside OUR HTTP client, not the remote API.
 #
 # The suspect is the client's fixed 4096-byte read-head scratch
-# (`HttpClient._read_head_scratch`, an `InlineArray[UInt8, 4096]`): a response
+# (`HttpClient._read_head_scratch`, an `Array[UInt8, 4096]`): a response
 # whose bytes cross that boundary can be mis-framed, and the NEXT read is then
 # interpreted as a status line — which is exactly what "HTTP-version bad prefix"
 # means (the parser was handed body bytes where a status line should be).
@@ -69,7 +69,7 @@ from http_client.url import Url
 from http_core.transport.scripted import ScriptedConnector, ScriptedStream
 
 
-# The client's read-head scratch is an `InlineArray[UInt8, 4096]`. The boundary
+# The client's read-head scratch is an `Array[UInt8, 4096]`. The boundary
 # sweep below straddles it deliberately: under it, exactly on it, just past it,
 # and far past it (the ~23.9 KB shape that actually broke live).
 comptime _SCRATCH_BYTES: Int = 4096

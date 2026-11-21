@@ -24,7 +24,7 @@
 #   - NO UnsafePointer in any signature.
 #   - NO wildcard origins.
 #   - NO partial-move-via-take_pointee.
-#   - POD `Float64` state (no heap; slab-safe in `InlineArray[Float64,
+#   - POD `Float64` state (no heap; slab-safe in `Array[Float64,
 #     MAX_GROUPS]`).
 #
 # Cross-references:

@@ -21,8 +21,8 @@
 #                      regions (default 1 MiB).
 #
 # Pointer-free shape: no `List[String]`
-# fields — each string-list field is `InlineArray[String, MAX_NULL_STRINGS=8]`
-# + a paired `_n_*: Int` counter. The InlineArray cap is comfortably above
+# fields — each string-list field is `Array[String, MAX_NULL_STRINGS=8]`
+# + a paired `_n_*: Int` counter. The Array cap is comfortably above
 # pandas's 5-default + room for one site-specific token.
 # =============================================================================
 
@@ -35,7 +35,7 @@ from arrow.arrow_types import ArrowType
 
 comptime MAX_TRUE_FALSE_STRINGS: Int = 8
 
-# Per-column date_format InlineArray cap.
+# Per-column date_format Array cap.
 # Per-column date format
 # override for heterogeneous-date files (col_birth='MM/DD/YYYY' while
 # col_event='YYYY-MM-DD'). Bounded heap-owning, pointer-free shape.
@@ -71,7 +71,7 @@ comptime QUOTE_STYLE_TAG_POSIX: Int = 2
 struct CsvReadOptions(Copyable, Movable, Deinitable):
     """Read-side options for the csv chassis.
 
-    (pointer-free InlineArray[String, 8] cap on string-list
+    (pointer-free Array[String, 8] cap on string-list
     fields).
 
     Defaults mirror pandas:
@@ -92,7 +92,7 @@ struct CsvReadOptions(Copyable, Movable, Deinitable):
     var has_header: Bool
     var decimal_separator: UInt8
 
-    # Bounded heap-owning fields (pointer-free via InlineArray cap)
+    # Bounded heap-owning fields (pointer-free via Array cap)
     var null_strings: Array[String, MAX_NULL_STRINGS]
     var _n_null_strings: Int
 
@@ -122,7 +122,7 @@ struct CsvReadOptions(Copyable, Movable, Deinitable):
     # at scan time + skips parsing for non-projected columns (the scanner
     # still walks bytes to find row boundaries, but cell-bytes for skipped
     # columns are not converted to typed builders). Bounded heap-owning
-    # InlineArray per pointer-free shape.
+    # Array per pointer-free shape.
     var projection_columns: Array[String, MAX_DATE_FORMATS]
     var _n_projection_columns: Int
 
@@ -252,7 +252,7 @@ struct CsvReadOptions(Copyable, Movable, Deinitable):
         self.declared_column_types = List[ArrowType]()
 
     def copy(self) -> Self:
-        """Deep clone — the InlineArray[String, N] inner Strings are
+        """Deep clone — the Array[String, N] inner Strings are
         individually heap-owning, so each gets its own copy."""
         var out = Self.__new_uninitialized__()
         out.delimiter = self.delimiter
@@ -333,7 +333,7 @@ struct CsvReadOptions(Copyable, Movable, Deinitable):
 
         This bypasses the per-field-fill heap allocations the normal `__init__`
         runs, but the result is logically equivalent to a fresh `CsvReadOptions()`
-        with zeroed counters — caller must repopulate the InlineArray contents
+        with zeroed counters — caller must repopulate the Array contents
         before reading any of the bounded fields.
         """
         var s = Self(
@@ -450,7 +450,7 @@ struct CsvReadOptions(Copyable, Movable, Deinitable):
                 + " exceeded. Reduce per-column override count or extend "
                 + "MAX_DATE_FORMATS."
             )
-        # InlineArray[String, N] __setitem__ takes by Copyable assignment;
+        # Array[String, N] __setitem__ takes by Copyable assignment;
         # String is Copyable so the bare `=` works without `^`.
         self.per_column_date_format_columns[
             self._n_per_column_date_formats

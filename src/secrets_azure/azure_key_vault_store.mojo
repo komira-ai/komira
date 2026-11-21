@@ -678,11 +678,11 @@ def _status_hint(status: Int) -> StaticString:
 def _wipe_list(mut buf: List[UInt8]):
     """Best-effort overwrite-then-clear of a transient `List[UInt8]` that held
     secret bytes. This is defense-in-depth: the
-    AUTHORITATIVE wipe is the `SecretValue` (InlineArray + the -O3-surviving FFI
+    AUTHORITATIVE wipe is the `SecretValue` (Array + the -O3-surviving FFI
     `zeroize_inline_array`); these transients hold the bytes for only the few
     instructions between extract and the `SecretValue` copy. We overwrite each
     byte then clear (drop the heap buffer). (A plain loop may be DCE-eligible at
-    -O3, which is why the load-bearing secure wipe lives on the InlineArray-backed
+    -O3, which is why the load-bearing secure wipe lives on the Array-backed
     value, not here.)"""
     for i in range(len(buf)):
         buf[i] = UInt8(0)

@@ -9,7 +9,7 @@
 # a label form).
 #
 # Public surface:
-#   * Hkdf[H: Hash].extract(salt, ikm) -> InlineArray
+#   * Hkdf[H: Hash].extract(salt, ikm) -> Array
 #   * Hkdf[H: Hash].expand(prk, info, dst)
 #   * Hkdf[H: Hash].hkdf_expand_label(secret, label, context, dst)
 #   * Hkdf[H: Hash].derive_secret(secret, label, messages, dst)

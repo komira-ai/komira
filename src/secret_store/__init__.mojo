@@ -12,7 +12,7 @@
 #   * `SecretStore`       — a ONE-METHOD trait. `String` handle in, `SecretValue`
 #                           out, `raises` on an unknown / unresolvable ref.
 #   * `StaticSecretStore` — a scripted, network-free double for that trait.
-#   * `SecretValue`       — an `InlineArray`-backed, move-only, redacted-`Display`
+#   * `SecretValue`       — an `Array`-backed, move-only, redacted-`Display`
 #                           plaintext holder with a zeroizing destructor.
 #   * `SecretMeta`        — the catalog-facing NAMES-only record, the other half
 #                           of the SecretMeta-vs-SecretValue type firewall.

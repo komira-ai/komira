@@ -964,7 +964,7 @@ struct LastOp[dt: DType](HashAggOpDt):
 # CANNOT):
 #   - The per-group state lives in `AggSlot[A].states: List[A.StateTy]`
 #     (`stage_primitives/hash_agg.mojo`) — a GROWABLE Mojo-managed `List`, NOT a
-#     raw byte-slab and NOT a fixed InlineArray. A heap-owning `StateTy` element
+#     raw byte-slab and NOT a fixed Array. A heap-owning `StateTy` element
 #     is stale-slab-SAFE there: `List` manages element move/copy/destroy through Mojo's
 #     normal lifetime machinery; the stale-slab trap (byte-slab reinterpretation under
 #     tcmalloc reuse) does not apply to a typed `List`.
