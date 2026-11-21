@@ -3,8 +3,7 @@
 //!
 //!   size      no member over 90 MB (90,000,000 bytes; PyPI takes 100 MB a file);
 //!   external  no member is a library named in `external_needed`: those come
-//!             from another package (the Mojo runtime from Modular's), never
-//!             from this wheel;
+//!             from another package, never from this wheel;
 //!   platform  an ELF member only in a manylinux wheel;
 //!   arch      an ELF member's machine is the tag's (x86-64 or AArch64);
 //!   glibc     the highest GLIBC_ version an ELF member needs is at most the

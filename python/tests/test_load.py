@@ -8,11 +8,10 @@ its nine calls.
 
 `<dir>/libkomira/` is `//src/so:libkomira[runnable]` (the library with its
 lib/ beside it), `<dir>/fake_<case>/libkomira.so` the stand-ins of
-fake_libkomira.c, and `<dir>/two_columns.parquet` a Parquet file. The
-runtime preload is pointed at a scratch directory whose modular/lib links to
-the Mojo runtime libraries of `--runtime-dir`. A process
-holds one library, so the refusals come first (each leaves nothing loaded)
-and the real library last.
+fake_libkomira.c, and `<dir>/two_columns.parquet` a Parquet file
+(`--runtime-dir`, which the rule passes, is not read). A process holds one
+library, so the refusals come first (each leaves nothing loaded) and the real
+library last.
 """
 
 import os
@@ -23,7 +22,6 @@ import tempfile
 import komira
 from komira import KomiraError, LibraryLoadError
 from komira import _native, _runtime
-from runtime_site import runtime_site
 
 
 def refused(call):
@@ -55,8 +53,6 @@ def main(args):
     # Absolute, since the paths the rule passes are relative to where the
     # action started.
     lib_dir = os.path.abspath(args[args.index("--lib-dir") + 1])
-    runtime_dir = os.path.abspath(args[args.index("--runtime-dir") + 1])
-    search = [runtime_site(runtime_dir)]
 
     def fake(case):
         return os.path.join(lib_dir, "fake_" + case)
@@ -65,13 +61,12 @@ def main(args):
         return os.path.join(os.path.abspath(directory), "libkomira.so")
 
     def load(directory):
-        return _native.load(directory, search_path=search)
+        return _native.load(directory)
 
     # The public names, and importing the package loaded no library.
     want = [
         "KomiraError",
         "LibraryLoadError",
-        "RuntimeNotFoundError",
         "Session",
         "UnsupportedCpuError",
         "__version__",
@@ -82,41 +77,38 @@ def main(args):
     assert komira.__version__ == "0.0.0", komira.__version__
     assert _native._loaded is None
 
-    # The hooks run before the library is opened, CPU check first, and an
-    # error either raises stops the load: the real library is not mapped.
-    # The real preload loads the runtime from the search path; it runs again
-    # for the real library's load below.
+    # The hooks run before the library is opened, CPU check first, then the
+    # check of a Mojo runtime already loaded, given the lib/ beside the
+    # library; an error either raises stops the load: the real library is not
+    # mapped. The checks' own cases are cpu_test's and runtime_test's; here
+    # they are stand-ins.
     calls = []
-    real_preload = _runtime._preload_runtime_libraries
+    real_check = _runtime.check_loaded_runtime
     real_dir = os.path.join(lib_dir, "libkomira")
 
     def cpu_refuses():
         calls.append("cpu")
         raise LibraryLoadError("this CPU is refused")
 
-    def preload_refuses(*, search_path):
-        calls.append(("preload", search_path))
-        raise LibraryLoadError("no runtime")
+    def runtime_refuses(directory):
+        calls.append(("runtime", directory))
+        raise LibraryLoadError("another runtime")
 
     def cpu_ok():
         calls.append("cpu")
 
-    def preload_ok(*, search_path):
-        calls.append(("preload", search_path))
+    def runtime_ok(directory):
+        calls.append(("runtime", directory))
 
-    # The CPU check's own cases are cpu_test's; here it is a stand-in. The
-    # real preload loads the runtime from the search path.
-    assert real_preload(search_path=search) is None
-    assert _runtime._loaded_from == os.path.join(search[0], "modular", "lib"), _runtime._loaded_from
     _native._check_cpu = cpu_refuses
     assert refused(lambda: load(real_dir)) == "this CPU is refused"
     assert calls == ["cpu"], calls
     _native._check_cpu = cpu_ok
-    _runtime._preload_runtime_libraries = preload_refuses
+    _runtime.check_loaded_runtime = runtime_refuses
     calls.clear()
-    assert refused(lambda: load(real_dir)) == "no runtime"
-    assert calls == ["cpu", ("preload", search)], calls
-    _runtime._preload_runtime_libraries = preload_ok
+    assert refused(lambda: load(real_dir)) == "another runtime"
+    assert calls == ["cpu", ("runtime", os.path.join(real_dir, "lib"))], calls
+    _runtime.check_loaded_runtime = runtime_ok
 
     # With no directory the package loads its own _lib/, which only a wheel
     # holds: here it is absent, and the refusal names the file. Session() and
@@ -125,7 +117,7 @@ def main(args):
     want = "cannot load libkomira from {0}: {0}: cannot open shared object file: No such file or directory".format(own)
     calls.clear()
     assert refused(lambda: _native.load()) == want
-    assert calls == ["cpu", ("preload", None)], calls
+    assert calls == ["cpu", ("runtime", os.path.join(os.path.dirname(own), "lib"))], calls
     assert refused(komira.Session) == want
     assert refused(komira.abi_version) == want
 
@@ -153,17 +145,18 @@ def main(args):
     want = "libkomira at {} has ABI version 1.1 and no symbol komira_register_parquet".format(so(fake("no_register")))
     assert got == want, got
 
-    # None of the refusals left a library loaded: the real one loads now, the
-    # search path reaching the real preload hook. Loading the same file again,
-    # by a str or a path, or with no directory, is the same library.
-    def preload_real(*, search_path):
-        calls.append(("preload", search_path))
-        real_preload(search_path=search_path)
+    # None of the refusals left a library loaded: the real one loads now,
+    # through the real runtime check (no Mojo runtime is loaded yet, so it
+    # passes). Loading the same file again, by a str or a path, or with no
+    # directory, is the same library.
+    def runtime_real(directory):
+        calls.append(("runtime", directory))
+        real_check(directory)
 
-    _runtime._preload_runtime_libraries = preload_real
+    _runtime.check_loaded_runtime = runtime_real
     calls.clear()
     native = load(real_dir)
-    assert calls == ["cpu", ("preload", search)], calls
+    assert calls == ["cpu", ("runtime", os.path.join(real_dir, "lib"))], calls
     assert native.path == so(real_dir), native.path
     # Major 1, and a minor of at least 1, the version that added
     # komira_register_parquet; a later minor is as good.

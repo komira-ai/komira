@@ -1,4 +1,4 @@
-load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_test")
+load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_module", "zig_test")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 
 # The BXL selector of the pull request check (affected.bxl, affected.bzl) and the
@@ -37,6 +37,58 @@ zig_exe(
     busybox = "komira//tools/build/toolchains:busybox",
     zig = "komira//tools/build/toolchains:zig_next",
     visibility = ["PUBLIC"],
+)
+
+# change: writes the change of the pull request's check (pr.yml, step `the change`), the files it
+# touches and the coverage holds of both sides, against the base of its event: HEAD^1 of a pull
+# request's merge commit, a merge group's base_sha (change/change.zig says what it runs and
+# refuses). The pull request's check builds it on the farm and runs it on the runner, in the
+# checkout. Its cases run the whole selection against a fake git in a scratch directory; welded:
+# the tool is built only when they pass.
+zig_test(
+    name = "change_unit",
+    exec_compatible_with = LINUX_X86_64,
+    src = "change/change_test.zig",
+    imports = ["change/change.zig"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
+)
+
+zig_exe(
+    name = "change",
+    exec_compatible_with = LINUX_X86_64,
+    src = "change/change.zig",
+    unit_tests = [":change_unit", "komira//tools/build/toolchains:zig_next_version"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
+    visibility = ["PUBLIC"],
+)
+
+# The cases of change's executable (change/change_cli_test.zig says what each catches): the built
+# tool run with its flags, as pr.yml runs it, in a directory of each case's own with the stand-in
+# git (change/stand_in_git.zig) alone on its PATH; each checks the exit code, stderr, the files
+# written and the git commands asked. A build action.
+zig_test(
+    name = "change_cli_cases",
+    exec_compatible_with = LINUX_X86_64,
+    src = "change/change_cli_test.zig",
+    exec_tools = {
+        "CHANGE": ":change",
+        "STAND_IN_GIT": ":stand_in_git",
+    },
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
+)
+
+# What change_cli_cases run as `git`: it records what it is asked and answers from the case's file
+# (change/stand_in_git.zig). It runs nothing.
+zig_exe(
+    name = "stand_in_git",
+    exec_compatible_with = LINUX_X86_64,
+    src = "change/stand_in_git.zig",
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
+    visibility = ["//tools/build/ci:change_cli_cases"],
 )
 
 # The recorded buck2 output of assert_remote's cases, as a directory, for the
@@ -96,6 +148,16 @@ zig_test(
     imports = ["release_beta_fetch/release_beta_fetch.zig"],
     busybox = "komira//tools/build/toolchains:busybox",
     zig = "komira//tools/build/toolchains:zig_next",
+)
+
+# The same plan reader and client as a module, for //python/smoke:pypi_smoke_lib (its `Fetcher`,
+# `Got` and `Http`: https only, no redirect, a body bounded by the caller). Imported only once
+# release_beta_fetch_unit passed.
+zig_module(
+    name = "release_beta_fetch",
+    src = "release_beta_fetch/release_beta_fetch.zig",
+    unit_tests = [":release_beta_fetch_unit"],
+    visibility = ["//python/smoke:"],
 )
 
 # release_staged_verify: the three checks of the prod publish that write nothing to a registry

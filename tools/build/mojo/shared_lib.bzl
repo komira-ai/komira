@@ -52,6 +52,12 @@ load("@komira//tools/build/bench_salt:bench_salt.bzl", "salted")
 # unless the exports check and every driver passed. The same pattern as
 # mojo_library's tests.
 
+# The C++ runtime of the platform rows' `runtime_libs` (the Mojo runtime
+# libraries need them): `[runnable]` carries them, since a build worker has
+# none, and `[dist]` does not, since every host a package installs on has
+# them, as it has glibc (PEP 600 lists both as system libraries).
+HOST_CXX_RUNTIME = ["libgcc_s.so.1", "libstdc++.so.6"]
+
 _EXPORTS_DRIVER = """from std.ffi import OwnedDLHandle
 
 
@@ -235,13 +241,24 @@ def _shared_lib_impl(ctx):
         # fails the day they differ instead of shipping the wrong set.
         if row("linux-x86_64")["runtime_libs"] != row("linux-arm64")["runtime_libs"]:
             fail("{}: the linux platform rows list different runtime_libs; select the row by the target platform".format(ctx.label))
-        for name in row("linux-x86_64")["runtime_libs"]:
+        runtime_libs = row("linux-x86_64")["runtime_libs"]
+        for name in runtime_libs:
             files["lib/" + name] = tc.runtime.project(name)
         for dest, so in owner_files.items():
             if dest in files:
                 fail("{}: native owner library {} is also a Mojo runtime library".format(ctx.label, dest))
             files[dest] = so
         sub_targets["runnable"] = [DefaultInfo(default_output = ctx.actions.copied_dir(out_name + ".runnable", files))]
+
+        # The library as a language package carries it: `[runnable]` less the
+        # C++ runtime, which the host provides (a manylinux system library,
+        # like glibc). One directory, the same bytes for every package that
+        # copies it, loadable from wherever it is copied with no library path.
+        for name in HOST_CXX_RUNTIME:
+            if name not in runtime_libs:
+                fail("{}: host C++ runtime library {} is not one of the platform row's runtime_libs {}".format(ctx.label, name, runtime_libs))
+        dist = {dest: f for dest, f in files.items() if dest not in ["lib/" + n for n in HOST_CXX_RUNTIME]}
+        sub_targets["dist"] = [DefaultInfo(default_output = ctx.actions.copied_dir(out_name + ".dist", dist))]
     return [DefaultInfo(
         default_output = public,
         sub_targets = sub_targets | coverage_shared_lib(ctx, tc, _build_executable, srcs, main, _dep_closure(ctx), _c_link(ctx), link_extra, so_file),

@@ -368,14 +368,17 @@ with the package, not here; the targets here are fixtures.
 | `license_expression`, `license_files` | `License-Expression` and a `License-File` per file, the files at `.dist-info/licenses/<name>` (PEP 639); default the root's `LICENSE` and `NOTICE`. A `License ::` classifier beside the expression is refused (PEP 639 forbids the pair) |
 | `files`, `executable` | `{path in the wheel: file or directory}` (a directory adds every file under it), written 0644, or 0755 for the paths `executable` names (shared libraries) |
 | `platform` | the row of [tools/build/platforms/table.bzl](../platforms/table.bzl) the wheel is for (default `linux-x86_64`); the tag is `wheel_tag` of it |
+| `os_floor` | the floor the tag promises, when it is above the platform row's `os_floor`: a wheel carrying a vendor's library that needs a newer glibc names it (`glibc-2.35`); unset, the row's |
 | `max_glibcxx`, `max_cxxabi`, `external_needed` | the bounds and the outside libraries of the library checks below |
 
 What the rule fixes, so no BUCK file states it:
 
 - **The tag** comes from the platform row: `py3-none-manylinux_<glibc floor>_<arch>`
   for a Linux row (`x86_64`, or `aarch64` for `arm64`) and
-  `py3-none-macosx_<major>_<minor>_arm64` for macOS, with the row's `os_floor`.
-  linux-x86_64 gives `py3-none-manylinux_2_34_x86_64`. The package loads its
+  `py3-none-macosx_<major>_<minor>_arm64` for macOS, with the row's `os_floor`,
+  or the wheel's own `os_floor` when it raises the floor. linux-x86_64 gives
+  `py3-none-manylinux_2_34_x86_64`; komira's wheel sets `glibc-2.35` and is
+  `py3-none-manylinux_2_35_x86_64`. The package loads its
   library with ctypes, so it is `py3-none`. A wheel with a native library is
   never `any`. Root-Is-Purelib is false, Wheel-Version 1.0, Metadata-Version 2.4.
 - **The version** is the stamp's, the one the release set uses:
@@ -387,7 +390,8 @@ What the rule fixes, so no BUCK file states it:
   naming what is missing. This is not the `<compiler version>.post<N>` of
   [packaging/conda/README.md](../../../packaging/conda/README.md), which would
   call komira 1.0 and tie its version to the Mojo compiler's: the wheel is
-  komira's own release, and its Mojo pin is a `Requires-Dist`.
+  komira's own release, and it carries the Mojo runtime it was built with instead
+  of requiring one (it has no `Requires-Dist`).
 - **Reproducible bytes**: members sorted bytewise, then the dist-info's METADATA,
   WHEEL, licences and RECORD (sha256 in urlsafe base64 without padding, RECORD
   last); every member dated with the commit time (1980-01-01 unstamped); modes
@@ -409,9 +413,9 @@ stripped library reads the same). A refusal names its check:
 - `needed`: every `DT_NEEDED` is a member of the wheel (by file name), a system
   library of the manylinux list (libc, libm, libdl, libpthread, librt, libstdc++,
   libgcc_s, the dynamic loader), or in `external_needed`;
-- `external`: no member is a library of `external_needed`. The Mojo runtime
-  (libMSupportGlobals, libAsyncRTRuntimeGlobals, libKGENCompilerRTShared) comes
-  from Modular's package, never from the wheel;
+- `external`: no member is a library of `external_needed`, the sonames another
+  package provides. komira's wheel names none: it carries the Mojo runtime
+  (libMSupportGlobals, libAsyncRTRuntimeGlobals, libKGENCompilerRTShared);
 - `platform`: an ELF member only in a manylinux wheel;
 - `size`: no member over 90 MB (90,000,000 bytes; PyPI takes 100 MB a file).
 
