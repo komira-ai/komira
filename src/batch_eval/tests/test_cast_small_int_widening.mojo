@@ -67,7 +67,7 @@ def _check[
     var batch = _batch[src](src_at, vals, null_at)
     var col = _cast(batch, dst_at)
     assert_true(col.arrow_type == dst_at, label + ": wrong result type")
-    assert_equal(col.length, len(vals))
+    assert_equal(col.length(), len(vals))
     var out = col.as_primitive[dst]()
     for i in range(len(vals)):
         if i == null_at:
@@ -80,7 +80,7 @@ def _check[
 
 
 def test_int8_widens() raises:
-    var v = List[Scalar[DType.int8]](Int8(-128), Int8(127), Int8(0), Int8(5))
+    var v: List[Scalar[DType.int8]] = [Int8(-128), Int8(127), Int8(0), Int8(5)]
     _check[DType.int8, DType.int16](
         ArrowType.INT8, ArrowType.INT16,
         v, [Int16(-128), Int16(127), Int16(0), Int16(5)], 3,
@@ -104,9 +104,9 @@ def test_int8_widens() raises:
 
 
 def test_int16_widens() raises:
-    var v = List[Scalar[DType.int16]](
+    var v: List[Scalar[DType.int16]] = [
         Int16(-32768), Int16(32767), Int16(0), Int16(5)
-    )
+    ]
     _check[DType.int16, DType.int32](
         ArrowType.INT16, ArrowType.INT32,
         v, [Int32(-32768), Int32(32767), Int32(0), Int32(5)], 3,
@@ -126,7 +126,7 @@ def test_int16_widens() raises:
 
 
 def test_uint8_widens() raises:
-    var v = List[Scalar[DType.uint8]](UInt8(0), UInt8(255), UInt8(128), UInt8(5))
+    var v: List[Scalar[DType.uint8]] = [UInt8(0), UInt8(255), UInt8(128), UInt8(5)]
     _check[DType.uint8, DType.int16](
         ArrowType.UINT8, ArrowType.INT16,
         v, [Int16(0), Int16(255), Int16(128), Int16(5)], 3,
@@ -162,9 +162,9 @@ def test_uint8_widens() raises:
 
 
 def test_uint16_widens() raises:
-    var v = List[Scalar[DType.uint16]](
+    var v: List[Scalar[DType.uint16]] = [
         UInt16(0), UInt16(65535), UInt16(32768), UInt16(5)
-    )
+    ]
     _check[DType.uint16, DType.int32](
         ArrowType.UINT16, ArrowType.INT32,
         v, [Int32(0), Int32(65535), Int32(32768), Int32(5)], 3,
@@ -192,9 +192,9 @@ def test_uint16_widens() raises:
 
 
 def test_uint32_widens() raises:
-    var v = List[Scalar[DType.uint32]](
+    var v: List[Scalar[DType.uint32]] = [
         UInt32(0), UInt32(4294967295), UInt32(2147483648), UInt32(5)
-    )
+    ]
     _check[DType.uint32, DType.int64](
         ArrowType.UINT32, ArrowType.INT64,
         v, [Int64(0), Int64(4294967295), Int64(2147483648), Int64(5)], 3,
@@ -215,16 +215,16 @@ def test_uint32_widens() raises:
 
 
 def test_uint64_widens_to_floats() raises:
-    var v = List[Scalar[DType.uint64]](
+    var v: List[Scalar[DType.uint64]] = [
         UInt64(0), UInt64.MAX, UInt64(9223372036854775808), UInt64(5)
-    )
+    ]
     # 2^64 - 1 rounds to 2^64 in both float widths; 2^63 is exact.
     _check[DType.uint64, DType.float32](
         ArrowType.UINT64, ArrowType.FLOAT32,
         v,
         [Float32(0.0), Float32(18446744073709551616.0), Float32(9223372036854775808.0), Float32(5.0)],
         3,
-    )
+    ]
     _check[DType.uint64, DType.float64](
         ArrowType.UINT64, ArrowType.FLOAT64,
         v,
