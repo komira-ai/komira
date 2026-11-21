@@ -20,7 +20,8 @@ import tempfile
 
 import komira
 from komira import KomiraError, LibraryLoadError, UnsupportedCpuError
-from komira import _native
+from komira import _native, _runtime
+from runtime_site import runtime_site
 
 V3 = ("pni", "ssse3", "cx16", "sse4_1", "sse4_2", "popcnt", "lahf_lm")
 V3 += ("avx", "avx2", "bmi1", "bmi2", "f16c", "fma", "abm", "movbe")
@@ -49,7 +50,7 @@ def x86(path):
 
 def main(args):
     lib_dir = os.path.abspath(args[args.index("--lib-dir") + 1])
-    search = [os.path.abspath(args[args.index("--runtime-dir") + 1])]
+    search = [runtime_site(os.path.abspath(args[args.index("--runtime-dir") + 1]))]
     real = os.path.join(lib_dir, "cpuinfo_x86_64_v3.txt")
     with open(real, encoding="utf-8") as f:
         text = f.read()
@@ -191,10 +192,12 @@ def main(args):
         # Session() and abi_version() load the same way and are refused the same.
         assert cpu_error(komira.abi_version) == refusal(no_avx2, ["avx2"])
 
-        # With the cpuinfo of the x86-64-v3 CPU the same load opens the library.
+        # With the cpuinfo of the x86-64-v3 CPU the same load opens the Mojo
+        # runtime libraries, in dependency order, and then the library.
         _native._check_cpu = lambda: check(real, system="linux", machine="x86_64")
         native = _native.load(fake, search_path=search)
-        assert opened == [os.path.join(fake, "libkomira.so")], opened
+        runtime = [os.path.join(search[0], "modular", "lib", n) for n in _runtime._library_names(sys.platform)]
+        assert opened == runtime + [os.path.join(fake, "libkomira.so")], opened
         assert native.abi_version == 1003 and _native._loaded is native
     finally:
         ctypes.CDLL = cdll

@@ -30,6 +30,13 @@ class LibraryLoadError(KomiraError):
     function this package calls."""
 
 
+class RuntimeNotFoundError(LibraryLoadError):
+    """The Mojo runtime libraries libkomira needs are not installed where the
+    package looks for them, or are another version than the one it was built
+    with. The message names the missing libraries or both versions, the
+    directories searched, and the `pip install` line that fixes it."""
+
+
 class UnsupportedCpuError(LibraryLoadError):
     """The CPU lacks an instruction set extension libkomira was compiled to
     use, so the library is not opened: on Linux x86_64 it is built for
