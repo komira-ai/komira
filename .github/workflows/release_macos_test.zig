@@ -52,8 +52,11 @@ const RESULT_JOB = "release-macos-result";
 const RESULT_REASON = "the macOS build did not run";
 const SAID_RUN = "        run: '\"$RUNNER_TEMP/buck2_failure\" --log \"$RUNNER_TEMP/buck2-farm.log\" --step \"$FAILED_STEP\" --github-output \"$GITHUB_OUTPUT\" --summary-file \"$GITHUB_STEP_SUMMARY\"'";
 const SAID_IF = "        if: failure() && steps.reader.outcome == 'success' && (steps.build.outcome == 'failure' || steps.python.outcome == 'failure')";
-const SAID_OUTPUT = "      said: ${{ steps.said.outputs.message }}";
-const SAID_ENV = "          SAID: ${{ needs.release-macos.outputs.said }}";
+const REPORT_OUTPUT = "      report: ${{ steps.said.outputs.message || ";
+const REPORT_ENV = "          REPORT: ${{ needs.release-macos.outputs.report }}";
+const REPORT_SET = "(steps.build.outcome == 'failure' && 'step `build the macOS set` failed (its log says why)')";
+const REPORT_PYTHON = "(steps.python.outcome == 'failure' && 'step `build the macOS Python harness tests` failed (its log says why)')";
+const REPORT_ECHO = "              echo \"::error title=release-macos::the macOS build did not pass: ${REPORT:-";
 const GUESS = "farm-connect refuses when a repository variable is empty";
 const MAX_MINUTES = 120;
 
@@ -258,10 +261,12 @@ fn checkMacos(ar: std.mem.Allocator, text: []const u8) !?[]const u8 {
     if (mentions(res, "uses:")) return "release-macos-result uses an action: it only reads a result";
     // a failed build is reported with what the failed step said, never with a guess at the cause
     if (!has(job, SAID_RUN)) return "release-macos does not read the build's log with buck2_failure (what buck2 said would be lost)";
-    if (!has(job, "        id: said") or !has(job, SAID_OUTPUT)) return "release-macos does not pass what buck2 said to release-macos-result (outputs: said)";
+    if (!has(job, "        id: said") or !startsWithAny(job, REPORT_OUTPUT)) return "release-macos does not pass what buck2 printed to release-macos-result (outputs: report, buck2_failure's message first)";
+    if (!mentions(job, REPORT_SET) or !mentions(job, REPORT_PYTHON)) return "release-macos's report does not name a failed build step (the set, the Python harness tests)";
     if (!has(job, SAID_IF)) return "release-macos does not read the build's log exactly when a buck2 step failed and the reader was built";
-    if (!has(res, SAID_ENV)) return "release-macos-result does not report what buck2 said (needs.release-macos.outputs.said)";
-    if (!mentions(res, "needs.release-macos.outputs.failed-step")) return "release-macos-result does not name the step that failed";
+    if (!has(res, REPORT_ENV) or !startsWithAny(res, REPORT_ECHO)) return "release-macos-result does not print the build job's report (needs.release-macos.outputs.report)";
+    // the report is decided in the build job (an expression and buck2_failure), not by shell branches here
+    if (mentions(res, "if [") or mentions(res, "elif ")) return "release-macos-result branches in shell: the report is the build job's output, printed as it is";
     if (mentions(res, GUESS)) return "release-macos-result guesses at the cause of a failed build instead of reporting what the step said";
 
     // not on a pull request, and nothing publishes from it
@@ -510,11 +515,14 @@ test "each edit of the real release-macos.yml that breaks the macOS build's cont
     try expectRefused(ar, try replaced(ar, text, "linux_x86_64_properties darwin_arm64_properties darwin_macos_hosts", "linux_x86_64_properties"), "macOS set and the macOS hosts");
     // the report of a failed build: what buck2 said, the failed step, and no guess
     try expectRefused(ar, try replaced(ar, text, SAID_RUN ++ "\n", ""), "does not read the build's log with buck2_failure");
-    try expectRefused(ar, try replaced(ar, text, SAID_OUTPUT ++ "\n", ""), "does not pass what buck2 said");
+    try expectRefused(ar, try replaced(ar, text, REPORT_OUTPUT, "      report: ${{ "), "does not pass what buck2 printed");
+    try expectRefused(ar, try replaced(ar, text, " || " ++ REPORT_PYTHON, ""), "does not name a failed build step");
+    try expectRefused(ar, try replaced(ar, text, " || " ++ REPORT_SET, ""), "does not name a failed build step");
     try expectRefused(ar, try replaced(ar, text, SAID_IF, "        if: failure()"), "exactly when a buck2 step failed");
-    try expectRefused(ar, try replaced(ar, text, SAID_ENV ++ "\n", ""), "does not report what buck2 said");
-    try expectRefused(ar, try replaced(ar, text, "          FAILED_STEP: ${{ needs.release-macos.outputs.failed-step }}\n", ""), "does not name the step that failed");
-    try expectRefused(ar, try replaced(ar, text, "(that step's log says why)", "(" ++ GUESS ++ ")"), "guesses at the cause");
+    try expectRefused(ar, try replaced(ar, text, REPORT_ENV ++ "\n", ""), "does not print the build job's report");
+    try expectRefused(ar, try replaced(ar, text, REPORT_ECHO, "              echo \"::error title=release-macos::the macOS build did not pass: ${BUILD_RESULT:-"), "does not print the build job's report");
+    try expectRefused(ar, try replaced(ar, text, REPORT_ECHO, "              if [ -n \"$REPORT\" ]; then :; fi\n" ++ REPORT_ECHO), "branches in shell");
+    try expectRefused(ar, try replaced(ar, text, "(the checkout or farm-connect failed; the job's log says why)", "(" ++ GUESS ++ ")"), "guesses at the cause");
     try expectRefused(ar, try replaced(ar, text, "      - name: the buckconfig names the farm and its macOS workers\n", "      - name: no check\n"), "names the macOS workers");
 
     // the build: the platform, the target, the farm action, asserted

@@ -61,12 +61,11 @@ jobs:
       contents: read
       # for farm-connect only: the token Tailscale trusts
       id-token: write
-    # What release-macos-result reports for a failed build: the first named step of this job that
-    # failed (empty when none did: the checkout or farm-connect failed), and what buck2 said when it
-    # was a buck2 step (one line, escaped for a workflow command by buck2_failure).
+    # What release-macos-result prints for a failed build, ready as one line: buck2_failure's message
+    # when a buck2 step failed (what buck2 printed, escaped for a workflow command), else the first
+    # named step that failed; empty when none did (the checkout or farm-connect failed).
     outputs:
-      failed-step: ${{ steps.config.outcome == 'failure' && 'the buckconfig names the farm and its macOS workers' || steps.assert.outcome == 'failure' && 'build the farm assertion' || steps.reader.outcome == 'failure' && 'build the failure reader' || steps.build.outcome == 'failure' && 'build the macOS set' || steps.python.outcome == 'failure' && 'build the macOS Python harness tests' || '' }}
-      said: ${{ steps.said.outputs.message }}
+      report: ${{ steps.said.outputs.message || (steps.config.outcome == 'failure' && 'step `the buckconfig names the farm and its macOS workers` failed (its log says why)') || (steps.assert.outcome == 'failure' && 'step `build the farm assertion` failed (its log says why)') || (steps.reader.outcome == 'failure' && 'step `build the failure reader` failed (its log says why)') || (steps.build.outcome == 'failure' && 'step `build the macOS set` failed (its log says why)') || (steps.python.outcome == 'failure' && 'step `build the macOS Python harness tests` failed (its log says why)') || '' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -150,8 +149,7 @@ jobs:
       - name: the macOS build ran and passed
         env:
           BUILD_RESULT: ${{ needs.release-macos.result }}
-          FAILED_STEP: ${{ needs.release-macos.outputs.failed-step }}
-          SAID: ${{ needs.release-macos.outputs.said }}
+          REPORT: ${{ needs.release-macos.outputs.report }}
         run: |
           case "$BUILD_RESULT" in
             success) ;;
@@ -161,12 +159,6 @@ jobs:
             cancelled)
               echo "::warning title=release-macos::the macOS build was cancelled (a newer push replaces a running build)" ;;
             *)
-              if [ -n "$SAID" ]; then
-                echo "::error title=release-macos::the macOS build did not pass: $SAID"
-              elif [ -n "$FAILED_STEP" ]; then
-                echo "::error title=release-macos::the macOS build did not pass: its job ended $BUILD_RESULT at the step '$FAILED_STEP' (that step's log says why)"
-              else
-                echo "::error title=release-macos::the macOS build did not pass: its job ended $BUILD_RESULT before the buckconfig check (the checkout or farm-connect failed; the job's log says why)"
-              fi
+              echo "::error title=release-macos::the macOS build did not pass: ${REPORT:-its job ended $BUILD_RESULT before the buckconfig check (the checkout or farm-connect failed; the job's log says why)}"
               exit 1 ;;
           esac

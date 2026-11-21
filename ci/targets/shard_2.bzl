@@ -4,6 +4,7 @@
 
 TARGETS = [
     "komira//packaging/images/base:komira_base",
+    "komira//release/ci/tests:test_buck2_failure_cli",
     "komira//release/staged_set:taken",
     "komira//release:artifacts_layout_cases",
     "komira//release:native_ids_cases",
