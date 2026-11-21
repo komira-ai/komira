@@ -152,7 +152,9 @@ to every later run on the context.
 - **The route.** It is `sdk_exec.run_sql` with the session's `EngineContext`. The
   library converts the SQL text to a logical plan by parsing and binding it.
 - **Statements that are not queries.** `run_sql` refuses them
-  (`STATEMENT_NOT_A_QUERY`) until writes have their own design.
+  (`STATEMENT_NOT_A_QUERY`). The write design lifts that for `COPY ... TO` only,
+  which answers a one-row `Count` stream
+  ([credentials_and_writes.md](credentials_and_writes.md#7-writes)).
 - **The error text.** **PROPOSED:** the last error text is `<step>: <reason>`,
   where the step is the one that refused (parse, bind, optimize, lower or
   execute). That text is for people, and bindings do not parse it (§6).
@@ -163,9 +165,11 @@ The input is an authored `komira.plan.v1.WirePlanEnvelope`. These are the same
 bytes `komira_plan_render` renders, and the format the SDKs' plan builders write.
 - **Envelopes it refuses.** `plan_from_bytes` refuses an envelope that carries a
   write target (`PLAN_WIRE_WRITE_TARGET_DROPPED`) or a UDF list
-  (`PLAN_WIRE_UDFS_DROPPED`). The door keeps those refusals (-3) until writes and
-  UDFs have their own design. `plan_envelope_from_bytes` already decodes both, for
-  the door that carries them later.
+  (`PLAN_WIRE_UDFS_DROPPED`). The door keeps those refusals (-3) until each lands.
+  The write target is lifted by the write design
+  ([credentials_and_writes.md](credentials_and_writes.md#7-writes)), the UDF list
+  by the UDFs' own. `plan_envelope_from_bytes` already decodes both, for the door
+  that carries them later.
 - **The route.** It is `plan_from_bytes`, then `optimize`, `lower_for_context` and
   `run_lowered_plan`: the tail of `run_sql` after bind. **PROPOSED:** `sdk_exec`
   gets one `run_plan(mut ctx, var plan: LogicalPlan) -> SqlOutcome`, and `run_sql`
@@ -436,7 +440,8 @@ The earlier golden's 23 rows, and where each one goes:
 The earlier golden has no row for any of the items below. **None of them is
 decided here.** Each is settled by its own change:
 - session options, cancel and progress by their feature pull requests;
-- credentials by the credentials and write API design.
+- credentials, and the structured error calls `komira_last_error_code` and
+  `komira_last_error_step`, by [credentials_and_writes.md](credentials_and_writes.md).
 
 What earlier drafts of this document proposed is kept as input for those
 changes:
@@ -461,8 +466,8 @@ changes:
   - A cancelled run returns a new status code (-6) and leaves `*out` untouched.
     An incrementally read stream would return `ECANCELED`.
   - Progress is polled, never called back into the host.
-- **Credentials** (the credentials and write API design). Constraints from the
-  repository rules that design starts from:
+- **Credentials** (decided in [credentials_and_writes.md](credentials_and_writes.md)).
+  Constraints from the repository rules that design starts from:
   - Configuration comes as explicit calls. The provider-standard environment
     (`AWS_*`, `GOOGLE_*`) is the one allowed exception (rule S2).
   - No endpoint is written into the code (rule S1).

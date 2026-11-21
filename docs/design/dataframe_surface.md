@@ -539,7 +539,8 @@ package design). D4 to D18 are this design's own.
 - A verb with a Mojo builder encodes that builder's plan, plus only the nodes of the ruling that names
   the difference.
 - Nothing on the DataFrame path writes SQL text, reads an environment variable, or imports pandas or
-  polars to compute.
+  polars to compute. (The library's credential chains read the providers' own variables when a remote
+  URL is read: [credentials_and_writes.md](credentials_and_writes.md#3-the-provider-chains-and-the-only-environment-komira-reads).)
 - Every capability a skin reaches has a matrix row, and every verb names its capability in
   [dataframe_surface_verbs.md](dataframe_surface_verbs.md).
 
@@ -552,7 +553,8 @@ package design). D4 to D18 are this design's own.
 | which plans the engine runs today | [src/lowering/README.md](../../src/lowering/README.md), [src/sdk_exec/README.md](../../src/sdk_exec/README.md) |
 | the UDF verbs' `return_dtype`, null mode, code capture and workers | [optimized_plan_udfs.md](optimized_plan_udfs.md), [udf_runtime_interface.md](udf_runtime_interface.md) |
 | what each plan node returns | [query semantics](query_semantics.md) |
-| remote prefixes, credentials, catalogs and `read_table` | the object-store and catalog designs |
+| remote prefixes, credentials, and a write terminal's `compression=` and what it returns | [credentials_and_writes.md](credentials_and_writes.md) |
+| catalogs and `read_table` | the catalog designs |
 
 ## What are the limits and open questions?
 
