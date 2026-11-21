@@ -136,7 +136,7 @@ comptime PLAN_VIEW_REF: UInt8 = 13
 # plan that holds one cannot be lowered until a resolver is added.
 comptime PLAN_CSE_REF: UInt8 = 14
 # cast_to_varchar: a single-child node that wraps its input with
-# `CastToVarcharOp` (`komira_engine_operators/cast_to_varchar.mojo`). The
+# `CastToVarcharOp`. The
 # node's output_schema is the per-column STRING-typed mirror of the child
 # (synthesized at factory time). Producer: `cast_to_varchar_insert.mojo`
 # walks the plan top and inserts ONE PLAN_CAST_TO_VARCHAR above a root
