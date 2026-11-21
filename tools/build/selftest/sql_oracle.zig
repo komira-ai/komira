@@ -102,7 +102,7 @@ const REFUSALS = [_]lib.Row{
     .{
         .name = "input_dotdot",
         .target = PKG ++ "input_dotdot",
-        .text = PKG ++ "input_dotdot: input \"../staged.csv\" holds a segment that is not a plain name (^[A-Za-z0-9_][A-Za-z0-9_.-]*$)",
+        .text = PKG ++ "input_dotdot: input \"../staged.csv\" holds a segment that is not a plain name (^[A-Za-z0-9_][A-Za-z0-9_.=-]*$)",
     },
     .{
         .name = "src_not_sql",
@@ -157,7 +157,12 @@ const REFUSALS = [_]lib.Row{
     .{
         .name = "input_glob_segment",
         .target = PKG ++ "input_glob_segment",
-        .text = PKG ++ "input_glob_segment: input \"data/*.csv\" holds a segment that is not a plain name (^[A-Za-z0-9_][A-Za-z0-9_.-]*$)",
+        .text = PKG ++ "input_glob_segment: input \"data/*.csv\" holds a segment that is not a plain name (^[A-Za-z0-9_][A-Za-z0-9_.=-]*$)",
+    },
+    .{
+        .name = "input_equals_first",
+        .target = PKG ++ "input_equals_first",
+        .text = PKG ++ "input_equals_first: input \"=day/part.csv\" holds a segment that is not a plain name (^[A-Za-z0-9_][A-Za-z0-9_.=-]*$)",
     },
     .{
         .name = "dist_version_injection",

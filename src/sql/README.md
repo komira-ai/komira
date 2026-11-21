@@ -16,6 +16,13 @@ relations, joins, `SelectStmt` and the top-level `SqlStatement`, and the
 name tables that say which identifiers the grammar claims
 (`sql_agg_code`, `sql_call_is_aggregate`, `sql_name_claimed_by_grammar`).
 
+`sql.sql_tvf_options` holds what the nodes share about table functions: the reader
+kinds (`TVF_PARQUET`, `TVF_CSV`, `TVF_JSON`, `TVF_AVRO`), `TvfOptions` (the
+`all_varchar`, `header`, `delim` and `hive_partitioning` options of a `read_*` call
+and the `HIVE_PARTITIONING_*` modes), and the extension rules of the
+`FROM '<path>'` replacement scan (`_replacement_scan_kind`, `_file_stem`).
+`sql_ast` and `sql_parser` import them back, so the old import paths still work.
+
 `sql.sql_fn_table` is the scalar-function table the binder reads: one
 row per SQL function name (aliases share their row). `sql_scalar_fn_spec(name)`
 returns a `SqlFnSpec` that says which expression node the name lowers to (its
@@ -94,11 +101,16 @@ anti), subqueries (scalar, `[NOT] EXISTS`, `[NOT] IN`, the last NULL-aware),
 window functions, ORDER BY, LIMIT / OFFSET, DISTINCT and UNION ALL; and
 raises an `Error` starting `SQL bind error` or `SQL not supported`, naming
 the construct, for what it does not bind. The parquet facts a binding needs
-(the schema of a `read_parquet('path')` relation, and per-column null counts
-that let a NOT IN drop its run-time NULL checks) come from the
-`SqlParquetFooters` the caller passes (`sql.sql_bind_parquet`), so no
+(the `ParquetSource` a `read_parquet('path')` relation scans, which may be
+several files and carry Hive partition columns after the data columns, and
+per-file null counts that let a NOT IN drop its run-time NULL checks) come
+from the `SqlParquetFooters` the caller passes (`sql.sql_bind_parquet`), so no
 parquet file is opened while binding; `NoParquetFooters` serves a statement
-with no `read_parquet` relation. A `read_csv`, `read_json` or `read_avro`
+with no `read_parquet` relation. `read_parquet('path', hive_partitioning =
+true|false)` sets the mode the reader resolves the path under (no option is
+auto-detect); a column counts as NULL-free only when every file of the
+relation records no NULL and it is not a partition column.
+`SqlCatalog.add_parquet_source` registers such a resolved source as a table. A `read_csv`, `read_json` or `read_avro`
 relation gets its schema from `sql_tvf_bind`, which reads the file. The
 binder's code is split over the `sql_bind_*` modules (the FROM scope,
 operators, functions, casts and timestamps, subqueries, aggregates and
@@ -286,4 +298,82 @@ var copy = statement_from_sql(
     "COPY (SELECT k FROM t) TO 'out.csv' (FORMAT csv)", fcat, NoParquetFooters()
 )
 assert_equal(Int(copy.kind), Int(STMT_COPY))
+```
+
+A multi-file parquet relation, built in memory (no file is opened), registered in
+a catalog and read back through its schema: the files' columns, then the Hive
+partition columns.
+
+<!-- mojo-hidden from std.testing import assert_equal, assert_true, assert_false -->
+```mojo
+from arrow.arrow_types import ArrowType
+from arrow.schema import Field, SchemaBuilder
+from scan_source.parquet_source import ParquetSource
+from sql.sql_catalog import SqlCatalog, catalog_relation_schema
+from sql.sql_bind_parquet import parquet_relation_schema
+
+var psb = SchemaBuilder()
+psb.add_field(Field(String("v"), ArrowType.INT64, False))
+var pcols = List[Field]()
+pcols.append(Field(String("year"), ArrowType.INT64, False))
+var pvals = List[List[String]]()
+var row0 = List[String]()
+row0.append(String("2028"))
+var row1 = List[String]()
+row1.append(String("2029"))
+pvals.append(row0^)
+pvals.append(row1^)
+var ppaths = List[String]()
+ppaths.append(String("y=2028/a.parquet"))
+ppaths.append(String("y=2029/b.parquet"))
+var psrc = ParquetSource.partitioned(ppaths^, psb.build(), pcols^, pvals^)
+
+var rel_schema = catalog_relation_schema(psrc)
+assert_equal(rel_schema.num_columns(), 2)
+assert_equal(rel_schema.field_name(0), "v")
+assert_equal(rel_schema.field_name(1), "year")
+assert_equal(parquet_relation_schema(psrc).field_name(1), "year")
+
+var pcat = SqlCatalog()
+pcat.add_parquet_source(String("Events"), psrc^)
+assert_true(pcat.has(String("events")))
+assert_equal(pcat.schema_of(String("EVENTS")).field_name(1), "year")
+assert_false(pcat.has(String("other")))
+```
+
+The resolved relations the binder keeps, by path and `hive_partitioning` mode:
+the same path under two modes is two entries, and a path never recorded raises.
+
+<!-- mojo-hidden from std.testing import assert_equal, assert_true, assert_false -->
+```mojo
+from arrow.arrow_types import ArrowType
+from arrow.schema import Field, SchemaBuilder
+from scan_source.parquet_source import ParquetSource
+from sql.sql_bind_parquet import ParquetFacts
+from sql.sql_tvf_options import HIVE_PARTITIONING_AUTO, HIVE_PARTITIONING_OFF
+
+var fsb2 = SchemaBuilder()
+fsb2.add_field(Field(String("v"), ArrowType.INT64, False))
+var facts = ParquetFacts()
+assert_false(facts.has_relation(String("d/*.parquet"), HIVE_PARTITIONING_AUTO))
+facts.add_relation(
+    String("d/*.parquet"),
+    HIVE_PARTITIONING_AUTO,
+    ParquetSource(String("d/a.parquet"), fsb2.build()),
+)
+assert_true(facts.has_relation(String("d/*.parquet"), HIVE_PARTITIONING_AUTO))
+assert_false(facts.has_relation(String("d/*.parquet"), HIVE_PARTITIONING_OFF))
+var got = facts.source_of(String("d/*.parquet"), HIVE_PARTITIONING_AUTO)
+assert_equal(got.path, "d/a.parquet")
+
+var refused = False
+try:
+    _ = facts.source_of(String("d/*.parquet"), HIVE_PARTITIONING_OFF)
+except e:
+    refused = True
+    assert_equal(
+        String(e),
+        "SQL bind error: no parquet footer was read for 'd/*.parquet'",
+    )
+assert_true(refused)
 ```

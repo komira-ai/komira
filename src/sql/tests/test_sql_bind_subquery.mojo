@@ -33,6 +33,7 @@ from arrow.schema import Field, Schema, SchemaBuilder
 from sql.sql_token import tokenize
 from sql.sql_parser import parse_sql
 from sql.sql_catalog import SqlCatalog
+from scan_source.parquet_source import ParquetSource
 from sql.sql_bind_parquet import NoParquetFooters, SqlParquetFooters
 from sql.sql_binder import bind_statement
 
@@ -111,6 +112,11 @@ struct _Footers(SqlParquetFooters):
             return 3
         return None
 
+    def parquet_relation(
+        self, path: String, hive_partitioning: UInt8
+    ) raises -> ParquetSource:
+        return ParquetSource(String(path), self.footer_schema(path), None)
+
 
 def _got(sql: String) raises -> String:
     """The bound plan's text, or `ERR: ` and the binder's message."""
@@ -152,6 +158,11 @@ struct _FootersUk(SqlParquetFooters):
         if path == "u.parquet" and column == "k":
             return 5
         return 0
+
+    def parquet_relation(
+        self, path: String, hive_partitioning: UInt8
+    ) raises -> ParquetSource:
+        return ParquetSource(String(path), self.footer_schema(path), None)
 
 
 def _checku(sql: String, want: String) raises:

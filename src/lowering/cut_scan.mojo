@@ -2,8 +2,12 @@
 # cut_scan -- the cutter's source arm: PLAN_SCAN opens a pipeline
 # =============================================================================
 #
-# A bounded Parquet scan of one local file opens a SOURCE_PARQUET pipeline
-# whose spec carries the scan's projection and pushed filter. An in-memory scan
+# A bounded Parquet scan of one local file, or of several, opens a
+# SOURCE_PARQUET pipeline whose spec carries the scan's projection and pushed
+# filter; several files are listed in the spec. A scan with Hive partition
+# columns lists its files and their partition values too, but pushes no
+# projection or filter: both become operators, the filter first, over the full
+# schema (the files' columns, then the partition columns). An in-memory scan
 # opens a SOURCE_BATCH pipeline over a ParamTable batch handle. A CSV scan
 # (`read_csv`) opens a SOURCE_CSV pipeline whose spec carries the file's path,
 # its dialect (delimiter, header, quote style) and every column of the file
@@ -12,14 +16,16 @@
 # has a pushed filter or projection, so both become operators, the filter
 # first, over the source's full schema.
 #
-# Refused: an unbounded scan, a Parquet scan of several files, a
-# Hive-partitioned one or one on a file system other than the local one
-# (LOWERING_SCAN_NOT_TOTAL); a scan beyond the inputs' count
-# (LOWERING_INPUTS_SCAN_COUNT); a CSV scan with header=false, whose columns
-# the reader would not name as DuckDB does, and any other source
+# Refused: an unbounded scan, a Hive-partitioned scan that lists its files
+# lazily (a directory scan or a partition predicate) or a Parquet scan on a
+# file system other than the local one (LOWERING_SCAN_NOT_TOTAL); a scan
+# beyond the inputs' count (LOWERING_INPUTS_SCAN_COUNT); a CSV scan with
+# header=false, whose columns the reader would not name as DuckDB does, and
+# any other source
 # (LOWERING_UNCUTTABLE_NODE).
 # =============================================================================
 
+from arrow.schema import Field
 from containers.slab import Slab
 from lowering.cut_state import _Cutter, _Pipe, _uncuttable
 from lowering.lowered_plan import (
@@ -77,29 +83,51 @@ def _open_scan(
         )
     if sd.source.tag == SOURCE_VARIANT_PARQUET:
         ref ps = sd.source._parquet.value()
-        if len(ps.paths) != 1:
+        if ps.hive_dir_scan or Bool(ps.hive_predicate):
             raise Error(
                 String(LOWERING_SCAN_NOT_TOTAL)
-                + ": a Parquet scan of "
-                + String(len(ps.paths))
-                + " files; the segment's Parquet arm names one"
-            )
-        if (
-            len(ps.partition_cols) > 0
-            or len(ps.partition_values) > 0
-            or ps.hive_dir_scan
-            or Bool(ps.hive_predicate)
-        ):
-            raise Error(
-                String(LOWERING_SCAN_NOT_TOTAL)
-                + ": a Hive-partitioned Parquet scan; the segment's"
-                " Parquet arm carries no partition columns"
+                + ": a Hive-partitioned Parquet scan that lists its files"
+                " lazily (a directory scan or a partition predicate); the"
+                " segment's Parquet arm carries the file list"
             )
         if not ps.fs_descriptor.is_local():
             raise Error(
                 String(LOWERING_SCAN_NOT_TOTAL)
                 + ": a Parquet scan on a file system other than the local"
                 " one; the segment's Parquet arm carries no descriptor"
+            )
+        if len(ps.partition_cols) > 0:
+            # The source appends partition columns only when it decodes a
+            # plain batch and resolves a projection against the first file's
+            # footer, so neither a projection nor a filter is pushed: both
+            # become operators, the filter first, over the full schema (the
+            # files' columns, then the partition columns).
+            var pipe = _Pipe(
+                SOURCE_PARQUET,
+                SourceSpecPod.parquet_files(
+                    ps.paths.copy(),
+                    ps.partition_cols.copy(),
+                    ps.partition_values.copy(),
+                    None,
+                    None,
+                ),
+                node.output_schema.copy(),
+                idx,
+            )
+            _scan_ops(pipe, node, pushed^, proj^)
+            return pipe^
+        if len(ps.paths) != 1:
+            return _Pipe(
+                SOURCE_PARQUET,
+                SourceSpecPod.parquet_files(
+                    ps.paths.copy(),
+                    List[Field](),
+                    List[List[String]](),
+                    proj^,
+                    pushed^,
+                ),
+                node.output_schema.copy(),
+                idx,
             )
         return _Pipe(
             SOURCE_PARQUET,

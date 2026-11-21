@@ -1,72 +1,19 @@
 """Symbol prefixing of the vendored C libraries (README.md).
 
 `prefix_header` writes the header that renames every global symbol of a C
-library, read from the library's unprefixed archive with `elfsyms`.
-`prefixed_archive_check` reads the prefixed archive back and fails its build
-action unless every symbol it defines carries the prefix; its result is a
-`ValidationInfo`. Both actions run `prefix_tool` (Zig, src/), which runs
-`elfsyms`; neither runs a shell. `checked_cxx_library` is the library as other targets use
-it: the providers of the prefixed `cxx_library`, with the checks as
-dependencies, so Buck2 runs them in every build whose graph holds the
-library. `c_exe` builds `elfsyms` itself: one C file, compiled and linked
-static (musl) with the pinned zig.
-
-`c_exe` runs the pinned zig through `zig_launch` (no shell), and the source it
-compiles is copied under buck-out first (as in tools/build/lint): a source
-file's path differs between a standalone checkout and a repository mounting
-komira as a cell, and so would the action's digest.
+library, read from the library's unprefixed archive. `prefixed_archive_check`
+reads the prefixed archive back and fails its build action unless every
+symbol it defines carries the prefix; its result is a `ValidationInfo`. Both
+actions run `prefix_tool` (Zig, src/), which reads the archive itself (a
+System V archive of ELF objects or a BSD archive of Mach-O objects, with
+native_elf.zig and native_macho.zig); neither runs a shell.
+`checked_cxx_library` is the library as other targets use it: the providers
+of the prefixed `cxx_library`, with the checks as dependencies, so Buck2 runs
+them in every build whose graph holds the library.
 """
 
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
 load("@komira//tools/build/bench_salt:bench_salt.bzl", "salted")
-
-_BUSYBOX = "komira//tools/build/toolchains:busybox"
-
-def _staged(ctx, src):
-    return ctx.actions.copy_file("_staged/" + src.short_path, src)
-
-def _c_exe_impl(ctx):
-    bb = ctx.attrs.busybox[DefaultInfo].default_outputs[0]
-    zig = ctx.attrs.zig[DefaultInfo].default_outputs[0]
-    out = ctx.actions.declare_output(ctx.label.name)
-    # zig_launch (no shell) gives zig a scratch directory for its caches and
-    # HOME, and the busybox applets as PATH.
-    ctx.actions.run(
-        cmd_args(
-            ctx.attrs._zig_launch[RunInfo],
-            "zig",
-            "--busybox",
-            bb,
-            "--zig",
-            zig,
-            "--",
-            "cc",
-            "-target",
-            "x86_64-linux-musl",
-            "-O2",
-            "-static",
-            "-Wall",
-            "-Werror",
-            _staged(ctx, ctx.attrs.src),
-            "-o",
-            out.as_output(),
-        ),
-        category = "c_exe",
-    )
-    return [DefaultInfo(default_output = out), RunInfo(args = cmd_args(out))]
-
-_c_exe = rule(
-    impl = _c_exe_impl,
-    doc = "One C file built into a static x86_64 Linux (musl) executable with the pinned zig.",
-    attrs = {
-        "busybox": attrs.dep(default = _BUSYBOX),
-        "src": attrs.source(),
-        "zig": attrs.dep(default = "komira//tools/build/toolchains:zig"),
-        "_zig_launch": attrs.exec_dep(default = "komira//tools/build/mojo:zig_launch", providers = [RunInfo]),
-    },
-)
-
-c_exe = declares_docs(_c_exe)
 
 def _prefix_header_impl(ctx):
     hdr = ctx.actions.declare_output(ctx.attrs.header)
@@ -77,8 +24,6 @@ def _prefix_header_impl(ctx):
     cmd = cmd_args(
         ctx.attrs._tool[RunInfo],
         "header",
-        "--elfsyms",
-        ctx.attrs._elfsyms[RunInfo],
         "--archive",
         ctx.attrs.archive,
         "--header",
@@ -107,7 +52,6 @@ _prefix_header = rule(
         "prefix": attrs.string(),
         "strip": attrs.string(default = "", doc = "style strip: the library's own prefix, replaced by `prefix`."),
         "style": attrs.enum(["boringssl", "strip"]),
-        "_elfsyms": attrs.exec_dep(default = "komira//tools/build/native:elfsyms", providers = [RunInfo]),
         "_tool": attrs.exec_dep(default = "komira//tools/build/native:prefix_tool", providers = [RunInfo]),
     },
 )
@@ -124,8 +68,6 @@ def _check_impl(ctx):
     cmd = cmd_args(
         ctx.attrs._tool[RunInfo],
         "check",
-        "--elfsyms",
-        ctx.attrs._elfsyms[RunInfo],
         "--archive",
         ctx.attrs.archive,
         "--result",
@@ -151,7 +93,6 @@ _prefixed_archive_check = rule(
         "min_defined": attrs.int(),
         "original_names": attrs.list(attrs.source(), default = [], doc = "Files listing the unprefixed names, one per line (a prefix_header's `[symbols]`)."),
         "prefix": attrs.string(),
-        "_elfsyms": attrs.exec_dep(default = "komira//tools/build/native:elfsyms", providers = [RunInfo]),
         "_tool": attrs.exec_dep(default = "komira//tools/build/native:prefix_tool", providers = [RunInfo]),
     },
 )

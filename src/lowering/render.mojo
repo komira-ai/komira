@@ -106,6 +106,19 @@ def _segment_text(seg: SegmentDescPod) -> String:
         ref s = seg.source_spec
         out += " path=" + s.parquet_path
         out += " total=" + String(s.parquet_spec_is_total)
+        if len(s.parquet_paths) > 0:
+            out += " files=" + _names(s.parquet_paths)
+            if len(s.parquet_partition_cols) > 0:
+                var cols = List[String]()
+                for i in range(len(s.parquet_partition_cols)):
+                    cols.append(String(s.parquet_partition_cols[i].name))
+                out += " partitions=" + _names(cols)
+                out += " partition_values=["
+                for f in range(len(s.parquet_partition_values)):
+                    if f > 0:
+                        out += ", "
+                    out += _names(s.parquet_partition_values[f])
+                out += "]"
         if s.parquet_projection:
             out += " projection=" + _names(s.parquet_projection.value())
         if s.parquet_filter:
