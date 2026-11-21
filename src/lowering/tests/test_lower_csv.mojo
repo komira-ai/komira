@@ -68,7 +68,7 @@ def _csv_scan(
     has_header: Bool,
     var projection: Optional[List[String]] = None,
     var filter: Optional[Expr] = None,
-) -> LogicalPlan:
+) raises -> LogicalPlan:
     var cs = CsvSource(
         String("data/t.csv.gz"),
         _schema(),
