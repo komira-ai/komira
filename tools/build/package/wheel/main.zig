@@ -82,14 +82,11 @@ pub fn main() !void {
     var rest = std.ArrayList([]const u8).empty;
     for (argv[@min(argv.len, 2)..]) |x| try rest.append(alloc, x);
     const cmd: []const u8 = if (argv.len >= 2) argv[1] else "";
-    const result = if (std.mem.eql(u8, cmd, "write"))
-        cmdWrite(alloc, &d, rest.items)
-    else if (std.mem.eql(u8, cmd, "check"))
-        cmdCheck(alloc, &d, rest.items)
-    else if (std.mem.eql(u8, cmd, "libs"))
-        cmdLibs(alloc, &d, rest.items)
-    else
-        diag.refuse(&d, alloc, "usage: komira_wheel write|check|libs --flag value ...", .{});
+    const result = if (cli.subcommand(alloc, &d, cmd)) |c| switch (c) {
+        .write => cmdWrite(alloc, &d, rest.items),
+        .check => cmdCheck(alloc, &d, rest.items),
+        .libs => cmdLibs(alloc, &d, rest.items),
+    } else |err| err;
     result catch |err| {
         switch (err) {
             error.Refused => std.debug.print("komira_wheel: {s}\n", .{d.msg}),

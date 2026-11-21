@@ -2,7 +2,8 @@
 //! valueless one refused; `<name>=<value>` split at the first `=`; a file or
 //! a directory staged at its path with its mode, a symbolic link refused; and
 //! a whole input read from files, the stamp's version in it, the README
-//! as the description alone.
+//! as the description alone; the command names, another one refused with
+//! the usage line.
 
 const std = @import("std");
 const diag = @import("diag.zig");
@@ -159,4 +160,19 @@ test "the README is the description as it is, and a readme preface flag is unkno
     try t.expectEqualStrings("# k\n", (try cli.input(a, &d, args)).in.readme);
     try t.expectError(error.Refused, cli.parse(a, &d, &(base ++ [_][]const u8{ "--readme-preface", "p" }), &.{}));
     try t.expectEqualStrings("unknown argument --readme-preface", d.msg);
+}
+
+test "the commands are write, check and libs; another name, runtime-record among them, is refused with the usage line" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var d = diag.Diag{};
+    try t.expectEqual(cli.Command.write, try cli.subcommand(a, &d, "write"));
+    try t.expectEqual(cli.Command.check, try cli.subcommand(a, &d, "check"));
+    try t.expectEqual(cli.Command.libs, try cli.subcommand(a, &d, "libs"));
+    for ([_][]const u8{ "runtime-record", "", "Write", "libs " }) |name| {
+        d = diag.Diag{};
+        try t.expectError(error.Refused, cli.subcommand(a, &d, name));
+        try t.expectEqualStrings("usage: komira_wheel write|check|libs --flag value ...", d.msg);
+    }
 }

@@ -467,6 +467,7 @@ test "the command refuses a flag of another command, a missing flag and a malfor
     const files = try goodFiles(a);
     try t.expectEqualStrings("unknown argument --tag", try commandRefusal(a, &(good_argv ++ [_][]const u8{ "--tag", "x" }), files));
     try t.expectEqualStrings("unknown argument --bogus", try commandRefusal(a, &(good_argv ++ [_][]const u8{ "--bogus", "x" }), files));
+    try t.expectEqualStrings("unknown argument --runtime-requirement", try commandRefusal(a, &(good_argv ++ [_][]const u8{ "--runtime-requirement", "mojo-compiler==1.0.0" }), files));
     try t.expectEqualStrings("--out needs a value", try commandRefusal(a, &(good_argv ++ [_][]const u8{"--out"}), files));
     try t.expectEqualStrings("missing --runtime-lib", try commandRefusal(a, &.{ "--wheel", "w.whl", "--entry", entry, "--out", "o" }, files));
     try t.expectEqualStrings("--runtime-lib `rt/k` is not <name>=<value>", try commandRefusal(a, &.{ "--runtime-lib", "rt/k", "--wheel", "w.whl" }, files));
