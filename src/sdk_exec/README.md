@@ -33,7 +33,7 @@ do is a free function in a module of its own.
 | `engine_context` | `EngineContext(options)`: probes the host once, applies the options over the profile, starts the worker runtime. Holds the catalog, the registered tables, `footers` (a `ParquetFooters`), `host_profile` and `runtime`. A count or budget below 1 is refused with `ENGINE_OPTIONS_INVALID`. `begin_query` drops the footer cache |
 | `engine_catalog` | `register_parquet(ctx, name, path)`: the table's schema is its file's footer |
 | `engine_lower` | `lowering_inputs` (the facts of each scan, from `ctx.footers`, in the cutter's scan order; a registered table's scan is checked against its registered schema) and `lower_for_context` |
-| `engine_execute` | `run_lowered_plan(ctx, lowered)`: a `RealBuilder` over a per-run metadata cache and expression pool, the segment pool sized from the memory budget, each in-memory source of the plan (`params.batches`) as one resident batch in plan order, `run_plan` on `ctx.runtime` with the host profile's thread count; returns the result segment's batch |
+| `engine_execute` | `run_lowered_plan(ctx, lowered)`: a `RealBuilder` over a per-run metadata cache and expression pool, the segment pool sized from the memory budget, each in-memory source of the plan (`params.batches`) as one resident batch in plan order, the aggregation and sort sink data (`params.agg`, `params.sort`) in plan order, `run_plan` on `ctx.runtime` with the host profile's thread count; returns the result segment's batch |
 | `engine_sql` | `run_sql(ctx, text) -> SqlOutcome`: tokenize and parse, `bind_statement`, `optimize`, lower, run. Nothing raises: `SqlOutcome.refusal` holds the step (`parse`, `bind`, `optimize`, `lower`, `execute`) and that step's own message |
 
 **The footer cache is pinned to a query.** `parquet_footers.FooterCache`
@@ -77,8 +77,8 @@ budget, a sum outside its declared type and a pool not whole after a run (step
 `execute`); and whatever lowering, the binder or the parser refuses (a join is
 `LOWERING_UNCUTTABLE_NODE` at `lower`). Lowering given fewer scan facts than
 the plan has scans refuses by name (`LOWERING_INPUTS_SCAN_COUNT`);
-`lowering_inputs` descends only scan, filter, project, limit, aggregate and sort
-nodes and gives a facts entry per scan it reaches, and the cutter refuses any
+`lowering_inputs` descends only scan, filter, project, limit, aggregate,
+distinct and sort nodes and gives a facts entry per scan it reaches, and the cutter refuses any
 other node by name before it asks for the scans below it. `worker_count` and
 `memory_budget_bytes` have a lower bound of 1 and no upper bound. A
 cancellation token is local to a call, so cancel is not reachable from
@@ -111,6 +111,24 @@ The tests run when the package is built.
   lower; a file replaced between queries is read again; options are validated;
   contexts are created and dropped repeatedly, the segment pool whole after
   each run.
+- `test_run_sql_distinct`: SELECT DISTINCT over an INT64 and a STRING column
+  gives each value once and one NULL row (NULL and the empty string are two
+  rows), below a filter and with ORDER BY; COUNT(DISTINCT x) ignores NULL, is
+  an INT64 that is 0 for no rows and for all NULL, counts per group (the NULL
+  key and an all-NULL group included), runs beside SUM and over a STRING;
+  SELECT DISTINCT over two INT64 columns is refused at `lower` with
+  `LOWERING_SINK_UNSERVED`.
+- `test_run_sql_int_sum`: an integer `sum()` over INT64 and INT32 columns is
+  DECIMAL(38, 0) and exact past the INT64 range; an empty or all-NULL sum is
+  NULL; expressions, CASE and HAVING over the sum run.
+- `test_run_sql_multifile`: a table of several Parquet files from a directory
+  (files at any depth; a dot-name and a non-Parquet file skipped), a glob, a
+  brace glob, `read_parquet('<glob>')` and `FROM '<glob>'`; a Hive tree whose
+  keys are columns after the data columns, with filters on a key (files
+  pruned) and on a data column, GROUP BY a key, count(*), ORDER BY and LIMIT;
+  `hive_partitioning = false`; a glob with no file, a directory in SQL text and
+  files of different schemas are named refusals at their step; a replaced file
+  is read again.
 - `test_run_sql_no_from`: `SELECT 1 AS n` is one row, an INT32 column `n`
   holding 1, DuckDB's answer; a result literal is INT32 from -2147483647 to
   2147483647 and INT64 past either bound and at -2147483648 (as in DuckDB);
@@ -127,10 +145,11 @@ The tests run when the package is built.
 ## Limits
 
 The context does not yet hold a source registry, a plan cache, spill options or
-the plan validation switch. `run_sql` serves one result segment of Parquet
-scans or of the one-row relation a SELECT with no FROM reads (an integer
-literal of the result's SELECT list is INT32 when it fits, as in DuckDB; an
-integer literal anywhere else, `1 + 1` included, is still INT64); Q1 waits for the grouped sinks and the sort. The post-rewrite gate and
+the plan validation switch. `run_sql` serves the plans `lowering` cuts: Parquet scans (one file or several), the
+one-row relation a SELECT with no FROM reads (an integer literal of the
+result's SELECT list is INT32 when it fits, as in DuckDB; an integer literal
+anywhere else, `1 + 1` included, is still INT64), filter, projection, limit,
+aggregation, distinct and sort. The post-rewrite gate and
 the plan validation gate are not called from `run_sql`.
 
 `post_rewrite_gate` is a free-standing check; its call sites belong to the

@@ -24,6 +24,13 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #   oracle's DECIMAL(38,4); a join, a syntax error, an unknown table, a COPY or
 #   CTAS and a replaced file are named refusals; the footer is read once per
 #   query; contexts are created and dropped repeatedly.
+# - test_run_sql_distinct: run_sql over Parquet tables in several row groups:
+#   SELECT DISTINCT over an INT64 and a STRING column gives each value once and
+#   one NULL row (NULL and the empty string are two rows), below a filter and
+#   with ORDER BY (NULLs last); COUNT(DISTINCT x) ignores NULL, is an INT64 that
+#   is 0 for no rows and for all NULL, counts per group (the NULL key and an
+#   all-NULL group included), runs beside SUM and over a STRING; SELECT DISTINCT
+#   over two INT64 columns is refused at lower with LOWERING_SINK_UNSERVED.
 # - test_run_sql_int_sum: run_sql over INT64 and INT32 Parquet columns in several
 #   row groups: an integer sum() is declared DECIMAL(38, 0) and exact past the
 #   INT64 range (MAX and MIN rows, partials that each pass INT64, {MAX, MAX, MIN,
@@ -133,6 +140,7 @@ mojo_library(
         "tests/test_plan_validation_routes_ledger.mojo",
         "tests/test_resolved_cache_lru_eviction_stress.mojo",
         "tests/test_resolved_cache_pin_count.mojo",
+        "tests/test_run_sql_distinct.mojo",
         "tests/test_run_sql_int_sum.mojo",
         "tests/test_run_sql_multifile.mojo",
         "tests/test_run_sql_no_from.mojo",

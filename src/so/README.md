@@ -269,16 +269,18 @@ Reading it:
   `native_owners` entry the library's gate requires.
 - **glibc floor.** The highest `GLIBC_` version of libkomira and the eight owners is
   2.34 (libkomira and compression), so `manylinux_2_34` is honest for the files the package
-  carries. No `GLIBCXX_` or `CXXABI_` version is needed by them. The Mojo runtime libraries
-  are not carried; `libAsyncRTRuntimeGlobals.so` needs `GLIBC_2.35`, one above the
-  floor, and the C++ libraries `GLIBCXX_3.4.30` and `CXXABI_1.3.11`, so a host
-  needs at least glibc 2.35 for the runtime that Modular's package supplies (see
-  `docs/design/mojo_runtime_pypi_vs_conda.md`).
+  carries. No `GLIBCXX_` or `CXXABI_` version is needed by them. The Python wheel also
+  carries the three Mojo runtime libraries (through `[dist]`); `libAsyncRTRuntimeGlobals.so`
+  needs `GLIBC_2.35`, one above that floor, and `libKGENCompilerRTShared.so` needs
+  `GLIBCXX_3.4.30` and `CXXABI_1.3.11`, so the wheel is tagged `manylinux_2_35` and a host
+  needs at least glibc 2.35 (see `docs/design/mojo_runtime_pypi_vs_conda.md`).
 - **Mojo runtime.** libkomira is `DT_NEEDED` on `libKGENCompilerRTShared.so` only; that
   library in turn needs `libMSupportGlobals.so` and `libAsyncRTRuntimeGlobals.so`, the
   other two of the three, and those need `libstdc++.so.6` and `libgcc_s.so.1`. Each
   carries its own `RPATH` that includes `$ORIGIN`, so the three are found beside one
-  another; libkomira finds them through its `RUNPATH` entry `$ORIGIN/lib`.
+  another; libkomira finds them through its `RUNPATH` entry `$ORIGIN/lib`. The `[dist]`
+  directory of this target holds them in `lib/` beside the eight owners, and the Python
+  wheel copies it whole; the C++ libraries are not in it, the host provides them.
 
 The `libkomira_install` check loads libkomira from an empty prefix with `RTLD_NOW`
 and the probe measured `komira_abi_version` 1001; every library the loader mapped came from the

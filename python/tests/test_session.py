@@ -16,7 +16,6 @@ import sys
 import komira
 from komira import KomiraError
 from komira import _native
-from runtime_site import runtime_site
 
 
 def raised(call):
@@ -31,8 +30,7 @@ def main(args):
     # Absolute, since the paths the rule passes are relative to where the
     # action started.
     lib_dir = os.path.abspath(args[args.index("--lib-dir") + 1])
-    runtime_dir = os.path.abspath(args[args.index("--runtime-dir") + 1])
-    _native.load(os.path.join(lib_dir, "libkomira"), search_path=[runtime_site(runtime_dir)])
+    _native.load(os.path.join(lib_dir, "libkomira"))
     assert komira.abi_version() // 1000 == 1, komira.abi_version()
     parquet = os.path.join(lib_dir, "two_columns.parquet")
 

@@ -71,7 +71,7 @@ the surface has no spelling, and the cell stays empty by decision.
 | `topn` | `df.nlargest(n, columns)`, `df.nsmallest(n, columns)` | `lf.top_k(k, by=...)`, `lf.bottom_k(k, by=...)` | TOPN; ties at the boundary as in rules section 7 | refused at lower |
 | `topn_per_group` | `df.sort_values(o).groupby(k).head(n)` | `lf.sort(o).group_by(k).head(n)` | PARTITION_TOPN | refused at lower |
 | `limit` | `df.head(n)` | `lf.head(n)`, `lf.limit(n)`; `lf.slice(offset, n)` on an ordered frame | LIMIT, offset 0 unless `slice` | cut, with no offset and not above a sort |
-| `distinct` | `df.drop_duplicates()`, `df.drop_duplicates(subset=...)` | `lf.unique()`, `lf.unique(subset=..., keep="any")` | DISTINCT, of whole rows or of `subset` | refused at lower |
+| `distinct` | `df.drop_duplicates()`, `df.drop_duplicates(subset=...)` | `lf.unique()`, `lf.unique(subset=..., keep="any")` | DISTINCT, of whole rows or of `subset` | whole rows served by lowering for the key coverage of the grouped sinks; `subset` refused at lower |
 | `union` | `km.concat(frames)` | `kpl.concat(frames, how="vertical")` | UNION of one schema (`concat_schema_check`; rules section 8, ruling 15) | refused at lower |
 | `subquery` | - | - | neither library has a subquery inside an expression; a broadcast aggregate is a window | - |
 | `view` | `km.register_view(name, df)`, then `km.sql(...)` | `km.register_view(name, lf)`, then `km.sql(...)` | VIEW_REF | not wired |
