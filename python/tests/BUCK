@@ -318,10 +318,10 @@ _CASES = [
 
 # The clean-environment install tests of the wheel (python/BUCK,
 # wheel_install_test): the driver that installs the wheels into an empty
-# prefix and runs a test there, the two tests the installed interpreter runs
-# (the wheel alone, and the wheel beside Modular's runtime), and the serialized
-# plan the first renders (the scan plan of
-# src/so/tests/gate/gate_plan_render.mojo, as hex).
+# prefix and runs a test there, the three tests the installed interpreter runs
+# (the wheel alone, the wheel beside Modular's runtime, and the wheel after an
+# upgrade from the previous release), and the serialized plan the first renders
+# (the scan plan of src/so/tests/gate/gate_plan_render.mojo, as hex).
 [export_file(
     name = f,
     visibility = ["komira//python:"],
@@ -329,5 +329,7 @@ _CASES = [
     "wheel_install_run.py",
     "test_installed.py",
     "test_beside_modular.py",
+    "test_upgrade.py",
     "fixtures/scan_plan.hex",
+    "fixtures/previous_release_only.txt",
 ]]

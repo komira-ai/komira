@@ -1,5 +1,5 @@
 load("@komira//python:install_test.bzl", "picked_files", "wheel_install_test")
-load("@komira//tools/build/package:wheel.bzl", "wheel_file", "wheel_version")
+load("@komira//tools/build/package:wheel.bzl", "wheel_file", "wheel_file_at_stamp", "wheel_version")
 load("@komira//tools/build/platforms:table.bzl", "asset")
 load("@komira//tools/build/python:defs.bzl", "python_proto", "python_source_package")
 
@@ -305,6 +305,99 @@ _MODULAR_OTHER = ["komira//third_party/modular:mojo_compiler-1.2.0-py3-none-many
         "refuses_python_outside_requires_python",
         [":komira_wheel_requires_python_315"],
         "install: komira requires Python >=3.15; this interpreter is 3.13.16",
+    ),
+]]
+
+# ---- Upgrading from the previous release ----------------------------------
+#
+# `pip install --upgrade komira`: two releases of the wheel, the previous
+# (build number 999999998) and the current (999999999), installed in that
+# order into one empty environment, the first uninstalled before the second as
+# pip does (wheel_install_test `upgrade`), and python/tests/test_upgrade.py run
+# there: the environment holds the current release's dist-info and no other,
+# every file only the previous release had is gone, and everything the
+# clean-environment test holds of a fresh install holds. The previous release
+# is the package's files plus two it dropped since: a module and a file in the
+# runtime directory `_lib/lib/`, where a Mojo pin bump drops and renames
+# libraries. The current release is the package's files as they are. Fixed
+# build numbers, so the versions do not depend on the build's stamp.
+#
+# A Mojo runtime of another build is not part of an upgrade: the wheel carries
+# the runtime libkomira was built with, and both come out of one directory. A
+# runtime of another build that is already in the process, which is what a
+# pin bump meets in a process that imported other Mojo code, is refused by
+# name: `beside_other_mojo_loaded_first` below.
+
+_PREVIOUS_ONLY = {
+    "komira/_lib/lib/previous_release_only.txt": "komira//python/tests:fixtures/previous_release_only.txt",
+    "komira/_previous_release_only.txt": "komira//python/tests:fixtures/previous_release_only.txt",
+}
+
+wheel_file_at_stamp(
+    name = "komira_wheel_previous",
+    stamp = "999999998",
+    files = _PY_FILES | _NATIVE_FILES | _PREVIOUS_ONLY,
+    executable = sorted(_NATIVE_FILES.keys()),
+    **_WHEEL
+)
+
+wheel_file_at_stamp(
+    name = "komira_wheel_current",
+    stamp = "999999999",
+    files = _PY_FILES | _NATIVE_FILES,
+    executable = sorted(_NATIVE_FILES.keys()),
+    **_WHEEL
+)
+
+_UPGRADE_ARGS = [
+    "--version",
+    wheel_version("999999999"),
+    "--license-expression",
+    _LICENSE_EXPRESSION,
+] + [a for p in sorted(_PREVIOUS_ONLY.keys()) for a in ["--expect-removed", p]]
+
+_UPGRADE_FILES = _TEST_FILES | {"--installed-script": "komira//python/tests:test_installed.py"}
+
+[wheel_install_test(
+    name = name,
+    python = python,
+    wheels = wheels,
+    script = "komira//python/tests:test_upgrade.py",
+    args = _UPGRADE_ARGS,
+    files = _UPGRADE_FILES,
+    upgrade = upgrade,
+    expect_failure = expect,
+) for name, python, wheels, upgrade, expect in [
+    ("upgrade_test", "komira//third_party/python:cpython", [":komira_wheel_previous", ":komira_wheel_current"], True, None),
+    ("upgrade_test_py314", "komira//third_party/python:cpython314", [":komira_wheel_previous", ":komira_wheel_current"], True, None),
+    # The releases in the other order: the environment ends on the older one.
+    (
+        "refuses_downgrade",
+        "komira//third_party/python:cpython",
+        [":komira_wheel_current", ":komira_wheel_previous"],
+        True,
+        "AssertionError: the site holds komira-0.1.999999998.dist-info, the upgrade should leave only komira-0.1.999999999.dist-info",
+    ),
+    # Nothing to upgrade from: the previous release's files are not there to be
+    # removed, which the test names, so an upgrade that removes nothing is not
+    # a pass.
+    (
+        "refuses_upgrade_from_nothing",
+        "komira//third_party/python:cpython",
+        [":komira_wheel_current"],
+        True,
+        "AssertionError: the upgrade did not remove komira/_lib/lib/previous_release_only.txt, " +
+        "komira/_previous_release_only.txt: the previous release does not carry it",
+    ),
+    # A second release of an installed distribution is not an upgrade unless
+    # the installer uninstalls the first: without it, the files of both would
+    # be mixed.
+    (
+        "refuses_second_release_without_uninstall",
+        "komira//third_party/python:cpython",
+        [":komira_wheel_previous", ":komira_wheel_current"],
+        False,
+        "install: komira is already installed, and a second wheel of it is installed only with --upgrade",
     ),
 ]]
 
