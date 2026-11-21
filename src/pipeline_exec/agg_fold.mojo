@@ -12,6 +12,9 @@
 #                  float column, the double sum of its values
 #   AVG(x)         the same sum and the count; the division is at the end
 #   MIN(x), MAX(x) the least or greatest unscaled value of x, or float value
+#   COUNT(DISTINCT x)
+#                  nothing on a worker; the merge of the workers' distinct
+#                  entries (`count_distinct`) sets the count of the merged cell
 #
 # The unscaled value of an integer column is the integer, of a DECIMAL128
 # column its 128-bit integer (the column's scale is kept beside it), and of a
@@ -57,6 +60,7 @@ from arrow.schema import RecordBatch
 from byte_buffer.heap_region import HeapRegion
 from plan_expr.agg_expr import (
     AGG_COUNT,
+    AGG_COUNT_DISTINCT,
     AGG_MAX,
     AGG_MEAN,
     AGG_MIN,
@@ -105,6 +109,8 @@ def agg_name(func: UInt8) -> String:
         return "MAX"
     if func == AGG_MEAN:
         return "AVG"
+    if func == AGG_COUNT_DISTINCT:
+        return "COUNT(DISTINCT)"
     return "aggregate " + String(Int(func))
 
 

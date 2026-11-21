@@ -2,8 +2,9 @@
 komira` into a new environment gives a user (python/BUCK, wheel_install_test).
 
     <prefix>/bin/python3.<minor> -I test_installed.py --site <dir>
-        [--host-lib <lib>]... --version <v> --toolchain-mojo-version <v>
+        [--host-lib <lib>]... --version <v> --license-expression <expr>
         --abi-table <komira.tsv> --license <LICENSE> --notice <NOTICE>
+        --modular-license <LICENSE> --modular-notices <Third-Party-Notices>
         --parquet <file.parquet> --plan-hex <file.hex>
 
 Run by wheel_install_run.py, which installed the wheels into `--site` and
@@ -14,20 +15,21 @@ workers provide none, so the hermetic interpreter's copies stand in for it.
 Then, in order:
 
 - no library path is set: LD_LIBRARY_PATH and LD_PRELOAD are empty;
+- the environment holds the distribution komira and no other, and no
+  `modular/` directory: nothing of Modular's;
 - `import komira` is the package installed in `--site`, not a source tree;
 - the installed distribution is `--version`, and `komira.__version__` is it;
+- it has no `Requires-Dist`, and its `License-Expression` is the given one;
 - its `.dist-info/licenses/` holds LICENSE and NOTICE, byte for byte the
-  repository's;
-- its one `Requires-Dist` is `mojo-compiler==<v>` with <v> the version
-  `komira._runtime` loads, the Mojo of the toolchain's pin and, once the
-  library is loaded, the installed mojo-compiler's;
+  repository's, and `MODULAR_LICENSE` and `MODULAR_THIRD_PARTY_NOTICES`, byte
+  for byte the pinned compiler package's;
 - `komira.abi_version()` is the `version` line of the ABI golden;
 - `Session().register_parquet` registers the Parquet fixture, and a missing
   file raises `KomiraError` with the engine's status;
 - `komira._native.plan_render` of the serialized plan returns its text;
-- the process maps the three Mojo runtime libraries from
-  `<site>/modular/lib`, libkomira from `<site>/komira/_lib` and its native
-  owner libraries from `<site>/komira/_lib/lib`, and none from elsewhere.
+- the process maps libkomira from `<site>/komira/_lib`, and its native owner
+  libraries and the three Mojo runtime libraries from `<site>/komira/_lib/lib`,
+  and none of them from elsewhere.
 
 Any failure raises; its last traceback line is what a refusing case of
 wheel_install_test names.
@@ -35,19 +37,22 @@ wheel_install_test names.
 
 import ctypes
 import os
+import re
 import sys
 from importlib import metadata
 
-# The Mojo runtime libraries, as mojo-compiler installs them.
+# The Mojo runtime libraries the wheel carries.
 _RUNTIME = ("libMSupportGlobals.so", "libAsyncRTRuntimeGlobals.so", "libKGENCompilerRTShared.so")
 
 _VALUED = (
     "--site",
     "--version",
-    "--toolchain-mojo-version",
+    "--license-expression",
     "--abi-table",
     "--license",
     "--notice",
+    "--modular-license",
+    "--modular-notices",
     "--parquet",
     "--plan-hex",
 )
@@ -111,6 +116,13 @@ def main(argv):
 
     site = os.path.realpath(opts["site"])
 
+    # `pip install komira` installed komira and nothing else.
+    names = sorted({re.sub(r"[-_.]+", "-", d.metadata["Name"]).lower() for d in metadata.distributions(path=[site])})
+    others = [n for n in names if n != "komira"]
+    assert "komira" in names, "komira is not installed: {}".format(names)
+    assert not others, "the environment holds komira and also {}".format(", ".join(others))
+    assert not os.path.exists(os.path.join(site, "modular")), "the environment has a modular/ directory"
+
     import komira
 
     init = os.path.realpath(komira.__file__)
@@ -122,22 +134,24 @@ def main(argv):
     info = os.path.realpath(str(dist.locate_file("komira-{}.dist-info".format(opts["version"]))))
     assert os.path.dirname(info) == site, "komira's metadata is at {}, not in {}".format(info, site)
 
-    for name, want in (("LICENSE", opts["license"]), ("NOTICE", opts["notice"])):
+    licences = (
+        ("LICENSE", opts["license"]),
+        ("NOTICE", opts["notice"]),
+        ("MODULAR_LICENSE", opts["modular_license"]),
+        ("MODULAR_THIRD_PARTY_NOTICES", opts["modular_notices"]),
+    )
+    for name, want in licences:
         got = dist.read_text("licenses/" + name)
         assert got is not None, "the wheel has no .dist-info/licenses/{}".format(name)
         with open(want, encoding="utf-8") as f:
-            assert got == f.read(), ".dist-info/licenses/{} differs from the repository's {}".format(name, name)
+            assert got == f.read(), ".dist-info/licenses/{} differs from {}".format(name, want)
+    files = sorted(dist.metadata.get_all("License-File") or [])
+    assert files == sorted(n for n, _ in licences), "the wheel's License-File lines are {}".format(files)
 
-    from komira import _runtime
-
-    pins = dist.requires or []
-    assert len(pins) == 1 and pins[0].startswith("mojo-compiler=="), "the wheel's Requires-Dist is {}".format(pins)
-    pin = pins[0][len("mojo-compiler==") :]
-    versions = (pin, _runtime._MOJO_RUNTIME_VERSION, opts["toolchain_mojo_version"])
-    assert len(set(versions)) == 1, (
-        "the Mojo runtime versions differ: {} (the wheel's Requires-Dist), {} (komira._runtime) "
-        "and {} (the toolchain's pin)".format(*versions)
-    )
+    # No requirement at all, so none on a package of Modular's.
+    assert not dist.requires, "the wheel's Requires-Dist is {}".format(dist.requires)
+    expression = dist.metadata["License-Expression"]
+    assert expression == opts["license_expression"], "the wheel's License-Expression is {}".format(expression)
 
     want_abi = abi_version_of(opts["abi_table"])
     assert komira.abi_version() == want_abi, "komira.abi_version() is {}, the golden says {}".format(komira.abi_version(), want_abi)
@@ -164,21 +178,15 @@ def main(argv):
     assert 'Scan(path="orders"' in text and "path=/data/orders.orc" in text, "plan_render returned {!r}".format(text)
 
     maps = mapped_files()
-    runtime_dir = os.path.join(site, "modular", "lib")
+    lib_dir = os.path.join(site, "komira", "_lib")
+    runtime_dir = os.path.join(lib_dir, "lib")
     for name in _RUNTIME:
         paths = sorted(p for p in maps if os.path.basename(p) == name)
         assert paths and all(under(p, runtime_dir) for p in paths), "{} is mapped from {}, not from {}".format(name, paths, runtime_dir)
-    lib_dir = os.path.join(site, "komira", "_lib")
     komira_libs = sorted(p for p in maps if os.path.basename(p).startswith("libkomira"))
     assert os.path.join(lib_dir, "libkomira.so") in komira_libs, "libkomira.so is not mapped from {}: {}".format(lib_dir, komira_libs)
     owners = [p for p in komira_libs if os.path.basename(p) != "libkomira.so"]
-    assert owners and all(under(p, os.path.join(lib_dir, "lib")) for p in owners), "the native owners are mapped from {}".format(owners)
-
-    # After the load, so that a prefix without mojo-compiler fails in the
-    # runtime preload, with the error a user sees.
-    assert metadata.version("mojo-compiler") == pin, "mojo-compiler {} is installed, the wheel pins {}".format(
-        metadata.version("mojo-compiler"), pin
-    )
+    assert owners and all(under(p, runtime_dir) for p in owners), "the native owners are mapped from {}".format(owners)
 
     print("installed: komira {} in {}, libkomira ABI {}, runtime from {}".format(komira.__version__, site, want_abi, runtime_dir))
 

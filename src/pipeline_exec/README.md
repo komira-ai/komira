@@ -69,8 +69,8 @@ Import each module by name; the package root exports nothing.
   them. With no row it returns no rows under the schema the segment would have
   had.
 - `sink_agg`, `agg_fold`, `agg_output`: the ungrouped aggregation sink
-  `(SINK_AGG, KEY_DTYPE_NONE, SINK_ORIENT_COLUMNAR)`: SUM, COUNT, COUNT(*), MIN,
-  MAX and AVG. The aggregate arguments (`AggSinkData.agg_exprs`) are run by each
+  `(SINK_AGG, KEY_DTYPE_NONE, SINK_ORIENT_COLUMNAR)`: SUM, COUNT, COUNT(*),
+  COUNT(DISTINCT), MIN, MAX and AVG (`count_distinct` below). The aggregate arguments (`AggSinkData.agg_exprs`) are run by each
   worker as a projection over the morsel, under its selection mask; the state
   of a worker is one cell per aggregate, a count, one 128-bit integer and one
   double. The folds over signed integers, DECIMAL128 (the unscaled value; the
@@ -177,6 +177,23 @@ Import each module by name; the package root exports nothing.
   output at most 2 GiB of bytes. The merge is serial, as the fixed-width sink's.
   `string_harness` is the test table, with dictionary columns that are rotated
   per morsel and hold unused entries and a second copy of a string.
+- `count_distinct`: COUNT(DISTINCT x) in all three aggregation sinks, beside
+  their other aggregates. A worker keeps one `GroupTable` of (aggregate, worker
+  group, value) entries with no cells, and an `InternTable` for string values;
+  a value is one or two 64-bit cells (a signed integer or DATE32 as the integer,
+  a float by the grouped sinks' key rule so every NaN is one value and -0.0
+  equals 0.0, a DECIMAL128 as its two words, a string or a string dictionary by
+  the id of its bytes). A NULL value adds no entry, so a group whose values are
+  all NULL counts 0. `combine` moves each worker's entries under the merged
+  group of their worker group (and a string under its id in the merge's own
+  intern table); an entry new in the merged table adds one to the group's
+  count, which is written as COUNT's INT64. Any other argument type, and a type
+  that changes between morsels or workers, is refused by name. The tables are
+  charged to the worker's reservation as they grow, and the merge's to one of
+  its own, freed when the merge ends; a denial fails the query by name. With
+  no aggregate at all, the grouped sinks emit one row per distinct key: this
+  is SELECT DISTINCT, which `lowering` cuts to a `SINK_AGG` grouped by every
+  column.
 - `segment_pool`: `SegmentPool`, an atomic byte count with an optional budget
   that any number of handles share, and `WorkerReservation`, a worker's plain
   tally inside the blocks it drew (a grant is a compare-and-swap, so the count

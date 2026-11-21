@@ -6,6 +6,9 @@
 # declared type is a promise the sink keeps or refuses by name:
 #
 #   COUNT          INT64; never NULL, zero over no row
+#   COUNT(DISTINCT)
+#                  INT64 like COUNT: the number of distinct non-NULL values,
+#                  never NULL, zero over no row or only NULLs
 #   SUM            INT64 over an integer input (a sum outside the 64-bit range
 #                  is refused, not wrapped), or DECIMAL(38, 0) over an integer
 #                  input when the plan declares that (the SQL integer sum: the
@@ -39,6 +42,7 @@ from arrow.schema import Schema
 from byte_buffer.heap_region import HeapRegion
 from plan_expr.agg_expr import (
     AGG_COUNT,
+    AGG_COUNT_DISTINCT,
     AGG_MAX,
     AGG_MEAN,
     AGG_MIN,
@@ -106,7 +110,7 @@ def check_declared_type(
     produce."""
     var t = schema.field_arrow_type(idx)
     var ok = False
-    if func == AGG_COUNT:
+    if func == AGG_COUNT or func == AGG_COUNT_DISTINCT:
         ok = t == ArrowType.INT64
     elif func == AGG_SUM:
         ok = (
@@ -215,15 +219,16 @@ def agg_result_column_rows(
     to the rules of the one-row column."""
     var t = schema.field_arrow_type(idx)
     var nullable = schema.field_nullable(idx)
+    var counts = func == AGG_COUNT or func == AGG_COUNT_DISTINCT
     var nulls = List[Bool](capacity=rows)
     for r in range(rows):
         ref cell = cells[first + r * stride]
-        var is_null = cell.count == 0 and func != AGG_COUNT
+        var is_null = cell.count == 0 and not counts
         if is_null and not nullable:
             raise _null_or_value_error(label)
         nulls.append(is_null)
 
-    if func == AGG_COUNT:
+    if counts:
         var values = List[I128](capacity=rows)
         var no_nulls = List[Bool](capacity=rows)
         for r in range(rows):
