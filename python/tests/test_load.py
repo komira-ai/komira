@@ -78,11 +78,12 @@ def main(args):
     assert _native._loaded is None
 
     # The hooks run before the library is opened, CPU check first, then the
-    # runtime hook, given the directory the library is in; an error either
-    # raises stops the load: the real library is not mapped. The hooks' own
-    # cases are cpu_test's and runtime_test's; here they are stand-ins.
+    # check of a Mojo runtime already loaded, given the lib/ beside the
+    # library; an error either raises stops the load: the real library is not
+    # mapped. The checks' own cases are cpu_test's and runtime_test's; here
+    # they are stand-ins.
     calls = []
-    real_prepare = _runtime.prepare
+    real_check = _runtime.check_loaded_runtime
     real_dir = os.path.join(lib_dir, "libkomira")
 
     def cpu_refuses():
@@ -103,11 +104,11 @@ def main(args):
     assert refused(lambda: load(real_dir)) == "this CPU is refused"
     assert calls == ["cpu"], calls
     _native._check_cpu = cpu_ok
-    _runtime.prepare = runtime_refuses
+    _runtime.check_loaded_runtime = runtime_refuses
     calls.clear()
     assert refused(lambda: load(real_dir)) == "another runtime"
-    assert calls == ["cpu", ("runtime", real_dir)], calls
-    _runtime.prepare = runtime_ok
+    assert calls == ["cpu", ("runtime", os.path.join(real_dir, "lib"))], calls
+    _runtime.check_loaded_runtime = runtime_ok
 
     # With no directory the package loads its own _lib/, which only a wheel
     # holds: here it is absent, and the refusal names the file. Session() and
@@ -116,7 +117,7 @@ def main(args):
     want = "cannot load libkomira from {0}: {0}: cannot open shared object file: No such file or directory".format(own)
     calls.clear()
     assert refused(lambda: _native.load()) == want
-    assert calls == ["cpu", ("runtime", os.path.dirname(own))], calls
+    assert calls == ["cpu", ("runtime", os.path.join(os.path.dirname(own), "lib"))], calls
     assert refused(komira.Session) == want
     assert refused(komira.abi_version) == want
 
@@ -145,17 +146,17 @@ def main(args):
     assert got == want, got
 
     # None of the refusals left a library loaded: the real one loads now,
-    # through the real runtime hook (its runtime is in lib/ beside it and no
-    # other Mojo runtime is loaded yet, so it passes). Loading the same file again, by a str or a path, or with no
+    # through the real runtime check (no Mojo runtime is loaded yet, so it
+    # passes). Loading the same file again, by a str or a path, or with no
     # directory, is the same library.
     def runtime_real(directory):
         calls.append(("runtime", directory))
-        real_prepare(directory)
+        real_check(directory)
 
-    _runtime.prepare = runtime_real
+    _runtime.check_loaded_runtime = runtime_real
     calls.clear()
     native = load(real_dir)
-    assert calls == ["cpu", ("runtime", real_dir)], calls
+    assert calls == ["cpu", ("runtime", os.path.join(real_dir, "lib"))], calls
     assert native.path == so(real_dir), native.path
     # Major 1, and a minor of at least 1, the version that added
     # komira_register_parquet; a later minor is as good.

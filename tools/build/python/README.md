@@ -32,10 +32,9 @@ nothing packages them yet.
 
 The repository's own wheel is not built here: `wheel_file`
 ([package/README.md](../package/README.md#the-python-wheel)) writes it with
-the Zig tool `komira_wheel`, as `//python:komira_wheel_bundled` and
-`//python:komira_wheel_external`. A `py_test` imports
+the Zig tool `komira_wheel`, as `//python:komira_wheel`. A `py_test` imports
 staged directories, never a wheel installed the way pip installs one;
-`//python:wheel_install_test_<flavour>` ([python/install_test.bzl](../../../python/install_test.bzl))
+`//python:wheel_install_test` ([python/install_test.bzl](../../../python/install_test.bzl))
 installs that wheel, with `wheel_install.py`, into an empty virtual
 environment of the interpreter and runs a test there with no library path. Its rule and writer sit outside this package, and
 no rule kind of it names Python, so `//:python_closure` and the pull request's

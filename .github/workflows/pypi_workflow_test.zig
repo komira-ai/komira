@@ -4,14 +4,12 @@
 //! contract, or null; the cases write each defect into the real text and want it refused with its
 //! message. What the contract holds:
 //!  - the triggers: `on:` is `workflow_dispatch:` alone (no schedule, cron, push or pull request
-//!    outside a comment), with one required input, `flavour`, a choice of exactly `external` and
-//!    `bundled` whose default is `bundled`; top-level `permissions` is `{}` exactly once, and the
+//!    outside a comment) and no input; top-level `permissions` is `{}` exactly once, and the
 //!    concurrency is the group `pypi` with no run cancelled;
 //!  - the jobs are exactly build, testpypi, testpypi-smoke, pypi, pypi-smoke and result (the Linux
 //!    wheel), then build-macos-arm64, testpypi-macos-arm64, testpypi-smoke-macos-arm64,
-//!    pypi-macos-arm64, pypi-smoke-macos-arm64 and result-macos-arm64 (the macOS wheel, the bundled
-//!    flavour only), each once, and each holds its exact `if:` (main only; build-macos-arm64 also only
-//!    for the bundled flavour), runner, `needs:`, environment and permissions: the two smoke jobs of
+//!    pypi-macos-arm64, pypi-smoke-macos-arm64 and result-macos-arm64 (the macOS wheel), each once, and each holds
+//!    its exact `if:` (main only), runner, `needs:`, environment and permissions: the two smoke jobs of
 //!    the macOS wheel run on macos-15 and every other job on ubuntu-24.04;
 //!    `id-token: write` is held by build and build-macos-arm64 (for the farm only), testpypi, pypi,
 //!    testpypi-macos-arm64 and pypi-macos-arm64 (for the upload only) and by no other job;
@@ -22,9 +20,8 @@
 //!    the smoke steps, the result steps); what the macOS jobs hold beyond the job set is in
 //!    release_macos_test.zig (//:release_macos_cases);
 //!  - build has no upload step (no publish action, no legacy upload address, no twine); it builds the
-//!    wheel and the install test of the input's flavour and the driver, each with the three stamp
-//!    flags, writes the flavour and the version to the run's summary, and keeps exactly the dist and
-//!    the smoke artifacts;
+//!    wheel (//python:komira_wheel), the install test (//python:wheel_install_test) and the driver,
+//!    each with the three stamp flags, and keeps exactly the dist and the smoke artifacts;
 //!  - testpypi and pypi ask the state before the upload step, which runs for `absent` alone, with the
 //!    pinned publish action and the dist directory; testpypi names the TestPyPI upload address, pypi
 //!    none; neither skips an existing file or turns attestations off;
@@ -54,8 +51,6 @@ const JOBS = [_][]const u8{
     "result-macos-arm64",
 };
 const MAIN_ONLY = "    if: github.ref == 'refs/heads/main'";
-/// The macOS wheel is the bundled flavour: its build runs for a bundled run alone.
-const MACOS_BUILD_GATE = "    if: github.ref == 'refs/heads/main' && inputs.flavour == 'bundled'";
 
 const JobSpec = struct {
     name: []const u8,
@@ -87,7 +82,7 @@ const SPECS = [_]JobSpec{
     .{ .name = "pypi-smoke", .runs_on = UBUNTU, .gate = SMOKE_GATE_MAIN ++ "needs.pypi.outputs.state != 'differs'", .needs = "    needs: [build, pypi]", .environment = null, .perms = &SMOKE_PERMS },
     .{ .name = "result", .runs_on = UBUNTU, .gate = RESULT_GATE, .needs = "    needs: [build, testpypi, testpypi-smoke, pypi, pypi-smoke]", .environment = null, .perms = &NO_PERMS },
     // the macOS wheel: the build only asks the farm (an ubuntu runner), the smokes run on a hosted Mac
-    .{ .name = "build-macos-arm64", .runs_on = UBUNTU, .gate = MACOS_BUILD_GATE, .needs = null, .environment = "    environment: build", .perms = &BUILD_PERMS },
+    .{ .name = "build-macos-arm64", .runs_on = UBUNTU, .gate = MAIN_ONLY, .needs = null, .environment = "    environment: build", .perms = &BUILD_PERMS },
     .{ .name = "testpypi-macos-arm64", .runs_on = UBUNTU, .gate = SMOKE_GATE_MAIN ++ "needs.build-macos-arm64.outputs.version != ''", .needs = "    needs: build-macos-arm64", .environment = "    environment: testpypi", .perms = &UPLOAD_PERMS },
     .{ .name = "testpypi-smoke-macos-arm64", .runs_on = MACOS, .gate = SMOKE_GATE_MAIN ++ "needs.testpypi-macos-arm64.outputs.state != 'differs'", .needs = "    needs: [build-macos-arm64, testpypi-macos-arm64]", .environment = null, .perms = &SMOKE_PERMS },
     .{ .name = "pypi-macos-arm64", .runs_on = UBUNTU, .gate = MAIN_ONLY, .needs = "    needs: [build-macos-arm64, testpypi-smoke-macos-arm64]", .environment = "    environment: pypi", .perms = &UPLOAD_PERMS },
@@ -120,12 +115,8 @@ const DOWNLOAD_NAMES = [_][]const u8{
 
 // ---- the build job ------------------------------------------------------------------------------
 const STAMP_FLAGS = "-c komira.package_stamp=${{ steps.stamp.outputs.build_number }} -c komira.package_commit=${{ steps.stamp.outputs.source_commit }} -c komira.package_timestamp_ms=${{ steps.stamp.outputs.timestamp_ms }}";
-const BUILD_WHEEL = "          args: build " ++ STAMP_FLAGS ++ " //python:komira_wheel_${{ inputs.flavour }}[release] --out ${{ runner.temp }}/pypi/built/komira.whl";
-const BUILD_INSTALL_TEST = "          args: build " ++ STAMP_FLAGS ++ " //python:wheel_install_test_${{ inputs.flavour }}";
-const SUMMARY_STEP = "      - name: the flavour in the run's summary";
-const SUMMARY_FLAVOUR = "          FLAVOUR: ${{ inputs.flavour }}";
-const SUMMARY_VERSION = "          VERSION: ${{ steps.dist.outputs.version }}";
-const SUMMARY_RUN = "        run: 'echo \"komira $VERSION, the $FLAVOUR flavour of the wheel (python/flavour.bzl)\" >> \"$GITHUB_STEP_SUMMARY\"'";
+const BUILD_WHEEL = "          args: build " ++ STAMP_FLAGS ++ " //python:komira_wheel[release] --out ${{ runner.temp }}/pypi/built/komira.whl";
+const BUILD_INSTALL_TEST = "          args: build " ++ STAMP_FLAGS ++ " //python:wheel_install_test";
 const BUILD_DRIVER = "          args: build " ++ STAMP_FLAGS ++ " //python/smoke:pypi_smoke --out ${{ runner.temp }}/pypi/smoke/pypi_smoke";
 const BUILD_LINES = [_][]const u8{
     "      version: ${{ steps.dist.outputs.version }}",
@@ -145,10 +136,6 @@ const BUILD_LINES = [_][]const u8{
     "          path: ${{ runner.temp }}/pypi/dist",
     "          name: pypi-${{ steps.dist.outputs.version }}-smoke",
     "          path: ${{ runner.temp }}/pypi/smoke",
-    SUMMARY_STEP,
-    SUMMARY_FLAVOUR,
-    SUMMARY_VERSION,
-    SUMMARY_RUN,
 };
 const BUILD_UPLOAD_FORBIDDEN = [_][]const u8{ "pypa/gh-action-pypi-publish", "legacy/", "twine", "repository-url", "packages-dir" };
 
@@ -212,19 +199,9 @@ const RESULT_LINES = [_][]const u8{
 };
 
 // ---- the trigger ---------------------------------------------------------------------------------
-/// The lines of `on:`: the manual run and its one input. The default is `bundled`, the flavour a scheduled
-/// run publishes: flipping it is that one line here and in the workflow.
+/// The lines of `on:`: the manual run, which takes no input.
 const ON_LINES = [_][]const u8{
     "  workflow_dispatch:",
-    "    inputs:",
-    "      flavour:",
-    "        description: the wheel's flavour (python/flavour.bzl); a run publishes exactly one",
-    "        type: choice",
-    "        options:",
-    "          - external",
-    "          - bundled",
-    "        default: bundled",
-    "        required: true",
 };
 
 /// What no line outside a comment may contain, whatever the case.
@@ -412,7 +389,7 @@ fn checkFile(ar: std.mem.Allocator, text: []const u8) !?[]const u8 {
 
     var on_n: usize = 0;
     const on_lines = (try topLines(ar, text, "on:", &on_n)) orelse empty;
-    if (on_n != 1 or !onLinesHold(on_lines)) return "on: is not exactly workflow_dispatch: with the input flavour, a required choice of external and bundled whose default is bundled";
+    if (on_n != 1 or !onLinesHold(on_lines)) return "on: is not exactly workflow_dispatch: with no input";
 
     var perm_n: usize = 0;
     _ = try topLines(ar, text, "permissions: {}", &perm_n);
@@ -667,34 +644,22 @@ test "the triggers are a manual run alone: a schedule, a push or a pull request 
     try expectRefused(ar, try replaced(ar, text, "\n  workflow_dispatch:\n", "\n  workflow_dispatch:\n    inputs: {}\n"), "on: is not exactly");
 }
 
-test "the flavour: a required choice of the two, bundled the default, and the build and summary follow it" {
+test "the run takes no input: a flavour input, any input, or a build of another wheel is refused" {
     var arena = std.heap.ArenaAllocator.init(t.allocator);
     defer arena.deinit();
     const ar = arena.allocator();
     const text = try realText(ar);
-    // bundled is the default: the other choice as the default is refused
     try t.expect((try check(ar, text)) == null);
-    try expectRefused(ar, try replaced(ar, text, "        default: bundled\n", "        default: external\n"), "on: is not exactly");
-    // the input missing, not a choice, not required, without a default, or with another default
-    try expectRefused(ar, try replaced(ar, text, "  workflow_dispatch:\n    inputs:\n", "  workflow_dispatch:\n    unused:\n"), "on: is not exactly");
-    try expectRefused(ar, try replaced(ar, text, "        type: choice\n", "        type: string\n"), "on: is not exactly");
-    try expectRefused(ar, try replaced(ar, text, "        required: true\n", "        required: false\n"), "on: is not exactly");
-    try expectRefused(ar, try replaced(ar, text, "        default: bundled\n", ""), "on: is not exactly");
-    try expectRefused(ar, try replaced(ar, text, "        default: bundled\n", "        default: both\n"), "on: is not exactly");
-    // an option added, dropped or renamed
-    try expectRefused(ar, try replaced(ar, text, "          - bundled\n", "          - bundled\n          - both\n"), "on: is not exactly");
-    try expectRefused(ar, try replaced(ar, text, "          - bundled\n", ""), "on: is not exactly");
-    try expectRefused(ar, try replaced(ar, text, "          - external\n", "          - vendored\n"), "on: is not exactly");
-    // a second input
-    try expectRefused(ar, try replaced(ar, text, "        required: true\n", "        required: true\n      index:\n        type: string\n"), "on: is not exactly");
-    // the wheel or its install test of a fixed flavour, or of none: not the input's
-    try expectRefused(ar, try replaced(ar, text, "//python:komira_wheel_${{ inputs.flavour }}[release]", "//python:komira_wheel_bundled[release]"), "build: build, stamp, dist and artifacts");
-    try expectRefused(ar, try replaced(ar, text, "//python:wheel_install_test_${{ inputs.flavour }}", "//python:wheel_install_test_external"), "build: build, stamp, dist and artifacts");
-    try expectRefused(ar, try replaced(ar, text, "//python:komira_wheel_${{ inputs.flavour }}[release]", "//python:komira_wheel[release]"), "build: build, stamp, dist and artifacts");
-    // the summary step dropped, or naming something else
-    try expectRefused(ar, try replaced(ar, text, SUMMARY_STEP ++ "\n", "      - name: a summary\n"), "build: build, stamp, dist and artifacts");
-    try expectRefused(ar, try replaced(ar, text, SUMMARY_FLAVOUR ++ "\n", "          FLAVOUR: external\n"), "build: build, stamp, dist and artifacts");
-    try expectRefused(ar, try replaced(ar, text, SUMMARY_RUN ++ "\n", "        run: 'echo komira >> \"$GITHUB_STEP_SUMMARY\"'\n"), "build: build, stamp, dist and artifacts");
+    // the old flavour input, with its choice and default, is refused
+    const flavour_input = "  workflow_dispatch:\n    inputs:\n      flavour:\n        description: the wheel's flavour (python/flavour.bzl); a run publishes exactly one\n        type: choice\n        options:\n          - external\n          - bundled\n        default: bundled\n        required: true\n";
+    try expectRefused(ar, try replaced(ar, text, "  workflow_dispatch:\n", flavour_input), "on: is not exactly workflow_dispatch: with no input");
+    // any other single input
+    try expectRefused(ar, try replaced(ar, text, "  workflow_dispatch:\n", "  workflow_dispatch:\n    inputs:\n      index:\n        type: string\n"), "on: is not exactly workflow_dispatch: with no input");
+    // the wheel or its install test of a fixed flavour or of an input: not the one wheel
+    try expectRefused(ar, try replaced(ar, text, "//python:komira_wheel[release]", "//python:komira_wheel_bundled[release]"), "build: build, stamp, dist and artifacts");
+    try expectRefused(ar, try replaced(ar, text, "//python:komira_wheel[release]", "//python:komira_wheel_${{ inputs.flavour }}[release]"), "build: build, stamp, dist and artifacts");
+    try expectRefused(ar, try replaced(ar, text, "//python:wheel_install_test\n", "//python:wheel_install_test_external\n"), "build: build, stamp, dist and artifacts");
+    try expectRefused(ar, try replaced(ar, text, "//python:wheel_install_test\n", "//python:wheel_install_test_${{ inputs.flavour }}\n"), "build: build, stamp, dist and artifacts");
 }
 
 test "the workflow permissions are empty and the concurrency is one group that cancels nothing" {
@@ -757,6 +722,8 @@ test "each job's gate, needs, environment and runner are exact" {
     try expectRefused(ar, try inJob(ar, text, "pypi-macos-arm64", "    runs-on: ubuntu-24.04\n", "    runs-on: macos-15\n"), "pypi-macos-arm64: runs-on");
     try expectRefused(ar, try inJob(ar, text, "result-macos-arm64", "    runs-on: ubuntu-24.04\n", "    runs-on: macos-15\n"), "result-macos-arm64: runs-on");
     // the macOS gates and needs
+    try expectRefused(ar, try inJob(ar, text, "build-macos-arm64", MAIN_ONLY ++ "\n", MAIN_ONLY ++ " && inputs.flavour == 'bundled'\n"), "build-macos-arm64: its if:");
+    try expectRefused(ar, try inJob(ar, text, "build-macos-arm64", MAIN_ONLY ++ "\n", "\n"), "build-macos-arm64: its if:");
     try expectRefused(ar, try inJob(ar, text, "testpypi-macos-arm64", "    if: github.ref == 'refs/heads/main' && needs.build-macos-arm64.outputs.version != ''\n", MAIN_ONLY ++ "\n"), "testpypi-macos-arm64: its if:");
     try expectRefused(ar, try replaced(ar, text, "    if: github.ref == 'refs/heads/main' && needs.pypi-macos-arm64.outputs.state != 'differs'\n", "    if: needs.pypi-macos-arm64.outputs.state != 'differs'\n"), "pypi-smoke-macos-arm64: its if:");
     try expectRefused(ar, try replaced(ar, text, "    needs: [build-macos-arm64, testpypi-smoke-macos-arm64]\n", "    needs: [build-macos-arm64, testpypi-macos-arm64]\n"), "pypi-macos-arm64: its needs:");

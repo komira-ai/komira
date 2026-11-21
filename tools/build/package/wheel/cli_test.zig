@@ -1,8 +1,8 @@
 //! The command line and the files it names: flags parsed, an unknown or
 //! valueless one refused; `<name>=<value>` split at the first `=`; a file or
 //! a directory staged at its path with its mode, a symbolic link refused; and
-//! a whole input read from files, the stamp's version in it; a readme
-//! preface put before the README, an empty one refused.
+//! a whole input read from files, the stamp's version in it, the README
+//! as the description alone.
 
 const std = @import("std");
 const diag = @import("diag.zig");
@@ -135,33 +135,28 @@ test "a whole input read from flags and files, with the stamp's version" {
     try t.expectEqual(@as(usize, 1), x.in.external_needed.len);
 }
 
-test "a readme preface: its paragraph, a blank line, then the README; an empty one refused" {
+test "the README is the description as it is, and a readme preface flag is unknown" {
     var arena = std.heap.ArenaAllocator.init(t.allocator);
     defer arena.deinit();
     const a = arena.allocator();
     var d = diag.Diag{};
-    try t.expectEqualStrings("# k\n", try cli.description(a, &d, null, "# k\n"));
-    try t.expectEqualStrings("> the external flavour\n\n# k\n", try cli.description(a, &d, "> the external flavour", "# k\n"));
-    for ([_][]const u8{ "", " \n\t" }) |empty| {
-        try t.expectError(error.Refused, cli.description(a, &d, empty, "# k\n"));
-        try t.expectEqualStrings("--readme-preface is empty", d.msg);
-    }
-    // the flag reaches the input
     var tmp = t.tmpDir(.{});
     defer tmp.cleanup();
     try writeFile(tmp.dir, "README.md", "# k\n");
     const readme = try std.fs.path.join(a, &.{ try tmp.dir.realpathAlloc(a, "."), "README.md" });
-    const args = try cli.parse(a, &d, &.{
+    const base = [_][]const u8{
         "--name",               "komira",
         "--summary",            "s",
         "--readme",             readme,
-        "--readme-preface",     "This is the bundled flavour.",
         "--requires-python",    ">=3.13",
         "--license-expression", "Apache-2.0",
         "--tag",                "py3-none-manylinux_2_34_x86_64",
         "--stamp",              "0",
         "--commit",             "",
         "--timestamp-ms",       "0",
-    }, &.{});
-    try t.expectEqualStrings("This is the bundled flavour.\n\n# k\n", (try cli.input(a, &d, args)).in.readme);
+    };
+    const args = try cli.parse(a, &d, &base, &.{});
+    try t.expectEqualStrings("# k\n", (try cli.input(a, &d, args)).in.readme);
+    try t.expectError(error.Refused, cli.parse(a, &d, &(base ++ [_][]const u8{ "--readme-preface", "p" }), &.{}));
+    try t.expectEqualStrings("unknown argument --readme-preface", d.msg);
 }
