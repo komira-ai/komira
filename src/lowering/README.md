@@ -1,7 +1,7 @@
 # lowering
 
 Lowering: a bound `LogicalPlan`, a `HostProfile` and the resolved inputs go in;
-the physical plan (`physical_plan`, IR version 14) and the `ParamTable`
+the physical plan (`physical_plan`, IR version 15) and the `ParamTable`
 its segments index come out. It is pure. `lower` opens no file, reads no clock
 and no environment variable and touches no global, so equal arguments give a
 `LoweredPlan` that renders byte-equal.
@@ -13,8 +13,10 @@ and no environment variable and touches no global, so equal arguments give a
 - `lowered_plan`: `LoweringInputs` (one `ScanFacts` per scan in scan
   pre-order: the footers' statistics and the columns every row group stores
   dictionary encoded), `ParamTable`, `LoweredPlan` and the four refusal tokens.
-- `cut_walk`: the cutter. A scan opens a pipeline (`SOURCE_PARQUET`, or
-  `SOURCE_BATCH` for an in-memory scan, whose pushed filter and projection
+- `cut_walk`: the cutter. A scan opens a pipeline (`SOURCE_PARQUET`;
+  `SOURCE_BATCH` for an in-memory scan; `SOURCE_CSV` for a CSV scan, whose
+  spec carries the path, the dialect and every column of the file with the
+  type the plan bound it at; the pushed filter and projection of the last two
   become operators). A filter, a projection and a limit fuse into it. An
   aggregation or a sort ends it in a sink and opens a pipeline that reads that
   segment's output over an `E3` edge. The root is a `SINK_COLLECT` segment
@@ -45,8 +47,8 @@ shape:
   than elided on one host); a filter, projection or aggregation that carries a
   UDF, an aggregate function that is a UDF; a limit with an offset or a
   negative count; a limit above a sort (see Order); a partial or final
-  aggregation; an aggregation with a group top-k; a source other than Parquet
-  or in memory.
+  aggregation; an aggregation with a group top-k; a source other than Parquet,
+  in memory or CSV.
 - `LOWERING_SINK_UNSERVED`, naming the triple or the key: a group key of a
   type with no row (date, decimal, bool, ...), a key of several columns that
   are not all dictionary encoded strings, or a segment whose triple has no row.

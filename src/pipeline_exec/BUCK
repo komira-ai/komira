@@ -9,8 +9,9 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
 #
 # Two sets of members stand behind that seam. The fakes (`fake_support`,
 # `fake_members`, `fake_builder`, `fake_dispatch`) drive the scheduler in tests.
-# The real members are the sources `source_parquet`, `source_batch` and
-# `source_sink_output`, the operators `op_filter`, `op_project` and `op_limit`,
+# The real members are the sources `source_parquet`, `source_batch`,
+# `source_sink_output` and `source_csv` (a CSV file decoded at its bound column
+# types, served as a resident batch), the operators `op_filter`, `op_project` and `op_limit`,
 # the sinks `sink_collect`, `sink_agg` (the ungrouped aggregation, over
 # `agg_fold` and `agg_output`, drawing memory from `segment_pool`), `sink_group_agg` (the same keyed by
 # fixed-width columns, its tables charged as they grow), `sink_string_group_agg` (the same keyed by
@@ -50,6 +51,12 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
 # test_sources                    resident and sink-output sources, the Parquet
 #                                 source built from a spec: projection, glob,
 #                                 pushed filter, morsel size, refusals.
+# test_source_csv                 the CSV source built from a spec: typed, quoted
+#                                 and NULL cells, gzip by extension, a dialect,
+#                                 the declared types over inference, a header
+#                                 with no row; a plan over it end to end;
+#                                 refusals of a spec with no file, a file whose
+#                                 columns are not the bound ones, a missing file.
 # test_real_plan                  hand-built plans end to end: scan, filter,
 #                                 project and limit; a segment reading another's
 #                                 output; what the builder refuses.
@@ -113,6 +120,7 @@ mojo_library(
         "//src/byte_buffer:byte_buffer",
         "//src/containers:containers",
         "//src/column_kernels:column_kernels",
+        "//src/csv:csv",
         "//src/exec_types:exec_types",
         "//src/fs:fs",
         "//src/metrics:metrics",
@@ -121,6 +129,7 @@ mojo_library(
         "//src/op_sources:op_sources",
         "//src/operator_api:operator_api",
         "//src/parquet:parquet",
+        "//src/parquet_codec:parquet_codec",
         "//src/parquet_scan:parquet_scan",
         "//src/phase_timers:phase_timers",
         "//src/physical_plan:physical_plan",
@@ -131,6 +140,7 @@ mojo_library(
         "//src/scan_source:scan_source",
     ],
     test_deps = [
+        "//src/compression:compression",
         "//src/parquet_writer:parquet_writer",
         "//tools/build/mojo/runtime_paths:runtime_paths",
     ],
@@ -157,6 +167,7 @@ mojo_library(
         "tests/test_sort_keys.mojo",
         "tests/test_sort_plan.mojo",
         "tests/test_sort_plan_concurrent.mojo",
+        "tests/test_source_csv.mojo",
         "tests/test_sources.mojo",
         "tests/test_string_group_memory.mojo",
         "tests/test_string_keys.mojo",

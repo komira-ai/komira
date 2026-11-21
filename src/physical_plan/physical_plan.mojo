@@ -23,6 +23,7 @@ from plan_expr.partition_pred_pod import PartitionPredicatePod
 from plan_expr.fs_descriptor_pod import FsDescriptorPod
 from plan_expr.payload_narrow import PayloadNarrowSpec
 from plan_expr.null_order_policy import derived_nulls_first
+from arrow.arrow_types import ArrowType
 from arrow.schema import RecordBatch, Schema, Field
 from containers.slab import Slab
 
@@ -60,9 +61,12 @@ from containers.slab import Slab
 #   14: `SegmentDescPod.morsel_rows` — the rows per morsel the HOST chose when it
 #       lowered the segment (`host_profile.morsel_sizing_policy`),
 #       recorded so nothing downstream re-derives it. 0 = not yet lowered.
+#   15: `SOURCE_CSV` and its `SourceSpecPod.csv_*` fields — one local CSV
+#       file (or its `.gz` / `.zst` / `.lz4` form), its dialect and the column
+#       names and types the plan bound it at.
 #   Retired `MorselOp` tag values (4-13) are not reused.
 
-comptime PHYSICAL_PLAN_IR_VERSION: Int = 14
+comptime PHYSICAL_PLAN_IR_VERSION: Int = 15
 
 
 # =============================================================================
@@ -204,6 +208,7 @@ comptime SOURCE_BATCH: UInt8 = 1       # Read from in-memory RecordBatch
 comptime SOURCE_SINK_OUTPUT: UInt8 = 2 # Read from a completed sink's output
 comptime SOURCE_CONCAT: UInt8 = 3      # Concatenate N completed sinks' outputs
                                        # (the physical form of PLAN_UNION)
+comptime SOURCE_CSV: UInt8 = 4         # Read one local CSV file
 
 # MorselOp tags
 comptime OP_FILTER: UInt8 = 0          # Predicate filter (SV-based)
@@ -1116,7 +1121,7 @@ comptime KEY_DTYPE_STRING: UInt8 = 5
 
 
 struct SourceSpecPod(Movable):
-    """POD source spec — the closed 4-kind `SOURCE_*` vocabulary as an
+    """POD source spec — the closed 5-kind `SOURCE_*` vocabulary as an
     INLINE descriptor field (source symmetry: the source set is bounded and
     is NOT the growth axis a new SINK kind widens, so it stays inline, not erased).
 
@@ -1128,9 +1133,15 @@ struct SourceSpecPod(Movable):
         this reads.
       * SOURCE_CONCAT: `dep_seg_ids` = the N producer segments, concat order.
       * SOURCE_BATCH: `batch_handle_id` = index into the driver's batch table.
+      * SOURCE_CSV: `csv_path` + the dialect (`csv_delimiter`,
+        `csv_has_header`, `csv_quote_style_tag`) + the file's columns as the
+        plan bound them (`csv_column_names`, `csv_column_types`, every column
+        of the file in file order). No projection and no filter: a CSV
+        segment's projection and filter are operators.
 
     Every field is inert: `String`, `Optional[List[String]]`, `Optional[Expr]`,
-    `List[Int]`, `Int`, `Bool`. Passes the inert-IR lint.
+    `List[String]`, `List[ArrowType]`, `List[Int]`, `Int`, `UInt8`, `Bool`.
+    Passes the inert-IR lint.
 
     ⛔ THE PARQUET ARM IS LOSSY, AND `parquet_spec_is_total` IS HOW A CONSUMER
     FINDS OUT. It carries THREE of `ParquetSourceData`'s ELEVEN fields. Read that
@@ -1178,6 +1189,12 @@ struct SourceSpecPod(Movable):
     without changing this field's meaning."""
     var dep_seg_ids: List[Int]                   # SOURCE_SINK_OUTPUT (len 1) / SOURCE_CONCAT (len N)
     var batch_handle_id: Int                     # SOURCE_BATCH (-1 unused)
+    var csv_path: String                         # SOURCE_CSV
+    var csv_delimiter: UInt8                     # SOURCE_CSV (default `,`)
+    var csv_has_header: Bool                     # SOURCE_CSV (default True)
+    var csv_quote_style_tag: Int                 # SOURCE_CSV (0 RFC 4180, 1 Excel, 2 POSIX)
+    var csv_column_names: List[String]           # SOURCE_CSV, file order
+    var csv_column_types: List[ArrowType]        # SOURCE_CSV, one per name
 
     def __init__(out self):
         """Empty spec (SOURCE_SINK_OUTPUT/CONCAT default: fill dep_seg_ids)."""
@@ -1187,6 +1204,12 @@ struct SourceSpecPod(Movable):
         self.parquet_spec_is_total = False
         self.dep_seg_ids = List[Int]()
         self.batch_handle_id = -1
+        self.csv_path = String("")
+        self.csv_delimiter = UInt8(ord(","))
+        self.csv_has_header = True
+        self.csv_quote_style_tag = 0
+        self.csv_column_names = List[String]()
+        self.csv_column_types = List[ArrowType]()
 
     @staticmethod
     def parquet(
@@ -1225,6 +1248,26 @@ struct SourceSpecPod(Movable):
         s.batch_handle_id = handle_id
         return s^
 
+    @staticmethod
+    def csv(
+        var path: String,
+        delimiter: UInt8,
+        has_header: Bool,
+        quote_style_tag: Int,
+        var column_names: List[String],
+        var column_types: List[ArrowType],
+    ) -> SourceSpecPod:
+        """Mint the SOURCE_CSV arm: the file, its dialect, and every column
+        of the file in file order with the type the plan bound it at."""
+        var s = SourceSpecPod()
+        s.csv_path = path^
+        s.csv_delimiter = delimiter
+        s.csv_has_header = has_header
+        s.csv_quote_style_tag = quote_style_tag
+        s.csv_column_names = column_names^
+        s.csv_column_types = column_types^
+        return s^
+
     # PORT(1.0.0): explicit destructor breaks the non-co-inductive
     # Deinitable check on this struct's recursive self-reference.
     # Field destructors still run (verified); ownership unchanged.
@@ -1253,7 +1296,7 @@ struct SegmentDescPod(Movable):
     var seg_id: Int                     # dense id; index into the runtime's per-seg tables
 
     # ---- SOURCE (tagged POD spec) ----
-    var source_kind: UInt8              # SOURCE_PARQUET | SOURCE_BATCH | SOURCE_SINK_OUTPUT | SOURCE_CONCAT
+    var source_kind: UInt8              # SOURCE_PARQUET | SOURCE_BATCH | SOURCE_SINK_OUTPUT | SOURCE_CONCAT | SOURCE_CSV
     var source_spec: SourceSpecPod
 
     # ---- OP CHAIN (the LANDED closed tagged union; runtime-N, no comptime over N) ----
