@@ -12,14 +12,18 @@
 #             opens a pipeline whose source is that segment's output
 #             (SOURCE_SINK_OUTPUT), joined by an E3 edge.
 #
+# A PLAN_JOIN is both: its build child's pipeline ends in a SINK_HASH_BUILD
+# segment, and its probe child's pipeline stays open with an OP_JOIN_PROBE
+# fused onto it and an E3 edge to the build segment (`cut_join`).
+#
 # This module is only the dispatch on the node's tag. Each arm is its own
 # module: `cut_scan`, `cut_filter`, `cut_project`, `cut_limit`,
-# `cut_aggregate` and `cut_sort`; what they share (the open pipeline, the
+# `cut_aggregate`, `cut_sort` and `cut_join`; what they share (the open pipeline, the
 # cutter's state and the close and reopen of a breaker) is `cut_state`. The
-# filter, project, limit and aggregate arms have two halves: the first holds
-# every check that refuses the node itself and runs before the child is
-# walked; the second fuses onto, or closes, the child's pipeline. The sort arm
-# has only the second.
+# filter, project, limit, aggregate and join arms have two halves: the first
+# holds every check that refuses the node itself and runs before the child (or
+# the children) is walked; the second fuses onto, or closes, the child's
+# pipeline. The sort arm has only the second.
 #
 # The root is a SINK_COLLECT segment, unless the plan's top node is a breaker:
 # then that breaker's segment is the result and nothing is appended.
@@ -31,6 +35,7 @@
 
 from lowering.cut_aggregate import _aggregate_exprs, _close_aggregate
 from lowering.cut_filter import _filter_op, _fuse_filter
+from lowering.cut_join import join_shape, _close_join
 from lowering.cut_limit import _limit_op, _fuse_limit
 from lowering.cut_project import _project_op, _fuse_project
 from lowering.cut_scan import _open_scan
@@ -45,6 +50,7 @@ from plan_ir.logical_plan import (
     PLAN_AGGREGATE,
     PLAN_SORT,
     PLAN_LIMIT,
+    PLAN_JOIN,
 )
 from physical_plan.physical_plan import (
     SINK_COLLECT,
@@ -81,6 +87,12 @@ def _walk(
     if tag == PLAN_SORT:
         var pipe = _walk(cutter, node.sort_data_ref().child[], inputs)
         return _close_sort(cutter, node, pipe^, inputs)
+    if tag == PLAN_JOIN:
+        var shape = join_shape(node)
+        ref jd = node.join_data_ref()
+        var left = _walk(cutter, jd.left[], inputs)
+        var right = _walk(cutter, jd.right[], inputs)
+        return _close_join(cutter, node, shape^, left^, right^, inputs)
     raise _uncuttable(node, "no cutter arm for this node")
 
 

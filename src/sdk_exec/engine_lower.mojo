@@ -6,9 +6,11 @@
 # appends one scan's facts per scan from `ctx.footers`, the same cache the
 # binder read, so the plan the binder saw and the plan that is lowered read one
 # version of each file. A scan of a file registered on the context is checked
-# against its registered schema (`add_catalog_scan`). A node the cutter does
-# not cut is not descended into: the cutter refuses it by name before it asks
-# for any scan below, so no facts are read for a plan that cannot lower.
+# against its registered schema (`add_catalog_scan`). A join is descended
+# into left child first, then right, as the cutter walks it whichever side
+# builds. A node the cutter has no arm for is not descended into: the cutter
+# refuses it by name before it asks for any scan below, so no facts are read
+# for it.
 
 from host_profile.host_profile import HostProfile
 from lowering.lower import lower
@@ -21,6 +23,7 @@ from plan_ir.logical_plan import (
     LogicalPlan,
     PLAN_AGGREGATE,
     PLAN_FILTER,
+    PLAN_JOIN,
     PLAN_LIMIT,
     PLAN_PROJECT,
     PLAN_SCAN,
@@ -71,6 +74,9 @@ def _collect(
         _collect(inputs, node.aggregate_data_ref().child[], ctx)
     elif tag == PLAN_SORT:
         _collect(inputs, node.sort_data_ref().child[], ctx)
+    elif tag == PLAN_JOIN:
+        _collect(inputs, node.join_data_ref().left[], ctx)
+        _collect(inputs, node.join_data_ref().right[], ctx)
 
 
 def lowering_inputs(

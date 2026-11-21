@@ -11,6 +11,18 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #                        picks, in-memory scans, the estimates, dense
 #                        parameter indices, equal arguments rendering equal
 #                        and a different host changing only the morsel size.
+# test_lower_join_refusals
+#                        every reason an inner equi-join is refused with
+#                        LOWERING_JOIN_UNSERVED (join type, keys, residual,
+#                        hint, build side, key types, repeated output names),
+#                        a join that lowers beside each, and the refusal
+#                        coming before any scan is counted.
+# test_lower_joins       the rendered physical plan of inner equi-joins: the
+#                        build segment and the fused probe for either build
+#                        side, the projection that restores the node's columns
+#                        after a left build, a three-table chain, a join under
+#                        an aggregate, a breaker below the build side, the
+#                        estimates and the scan order.
 # test_lower_refusals    every refusal token, raised by the plan that should
 #                        raise it with the text that names why, and a plan
 #                        beside each that lowers.
@@ -51,6 +63,8 @@ mojo_library(
         "sql",
     ],
     test_srcs = [
+        "tests/test_lower_join_refusals.mojo",
+        "tests/test_lower_joins.mojo",
         "tests/test_lower_plans.mojo",
         "tests/test_lower_refusals.mojo",
         "tests/test_lower_sum_fuse.mojo",

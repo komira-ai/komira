@@ -13,6 +13,9 @@
 #   op       OP_FILTER            `FilterOp`  (`op_filter`)
 #            OP_PROJECT           `MapOp`     (`op_project`)
 #            OP_LIMIT             `LimitOp`   (`op_limit`)
+#            OP_JOIN_PROBE        `HashProbeOp` (`op_hash_probe`), over the
+#                                 index made from the rows the build segment
+#                                 it names published
 #   sink     SINK_COLLECT         `CollectSink` (`sink_collect`)
 #            SINK_AGG, key NONE   `AggSink` (`sink_agg`), from the `AggSinkData`
 #                                 the descriptor's `sink_param_id` names
@@ -24,9 +27,11 @@
 #                                 keep string dictionaries.
 #            SINK_SORT, key NONE  `SortSink` (`sink_sort`), from the `SortSinkData`
 #                                 the descriptor's `sink_param_id` names
+#            SINK_HASH_BUILD,     `CollectSink`: the build side's rows, which the
+#            key NONE             probe segment takes and indexes
 #
-# Anything else (SOURCE_CONCAT, OP_JOIN_PROBE and the other sinks) is refused
-# by name, because no member serves it yet.
+# Anything else (SOURCE_CONCAT and the other sinks) is refused by name,
+# because no member serves it yet.
 #
 # The workers of a segment each get their own operator instances, built from
 # one set of shared parts the builder keeps per operator (the predicate, the
@@ -34,7 +39,11 @@
 # the rows of all workers and an expression is registered once. The parts are
 # those of one run: `build_source`, the first call of a segment run, drops
 # the parts an earlier run of the segment left, so a plan run twice on one
-# builder spends a fresh limit each time.
+# builder spends a fresh limit each time. It also makes the part of every
+# OP_JOIN_PROBE of the segment, because it is the one call that sees the
+# published outputs: it takes the build segment's rows (the build segment must
+# be among the segment's dependencies) and indexes them once, before any
+# worker starts (`op_hash_probe.HashProbeShared`).
 #
 # The builder borrows the footer cache and the expression pool the Parquet
 # source reads from; they belong to the caller and outlive every segment run.
@@ -63,12 +72,14 @@ from physical_plan.physical_plan import (
     KEY_DTYPE_NONE,
     KEY_DTYPE_STRING,
     OP_FILTER,
+    OP_JOIN_PROBE,
     OP_LIMIT,
     OP_PROJECT,
     AggSinkData,
     SegmentDescPod,
     SINK_AGG,
     SINK_COLLECT,
+    SINK_HASH_BUILD,
     SINK_SORT,
     SortSinkData,
     SINK_ORIENT_COLUMNAR,
@@ -80,6 +91,7 @@ from physical_plan.physical_plan import (
 from plan_expr.expr_pool import ExprPool
 
 from .op_filter import FilterOp, FilterShared
+from .op_hash_probe import HashProbeOp, HashProbeShared
 from .op_limit import LimitOp, LimitShared
 from .op_project import ProjectShared
 from .op_variant import OpVariant
@@ -107,6 +119,7 @@ struct _OpParts(Movable):
     var filter: Optional[FilterShared]
     var project: Optional[ProjectShared]
     var limit: Optional[LimitShared]
+    var probe: Optional[HashProbeShared]
 
     def __init__(out self, seg_id: Int, op_index: Int):
         self.seg_id = seg_id
@@ -114,6 +127,7 @@ struct _OpParts(Movable):
         self.filter = None
         self.project = None
         self.limit = None
+        self.probe = None
 
 
 struct RealBuilder[
@@ -122,14 +136,15 @@ struct RealBuilder[
     filter_o: Origin[mut=True],
 ](SegmentBuilder):
     """Builds the real members of a segment: Parquet, batch and sink-output
-    sources; filter, project and limit operators; the collect sink."""
+    sources; filter, project, limit and join probe operators; the collect,
+    aggregation, sort and hash build sinks."""
 
     comptime Source = SourceVariant[
         LocalParquetSource[Self.cache_o, Self.pool_o, Self.filter_o],
         BatchSource,
         SinkOutputSource,
     ]
-    comptime Op = OpVariant[FilterOp, MapOp, LimitOp]
+    comptime Op = OpVariant[FilterOp, MapOp, LimitOp, HashProbeOp]
     comptime Sink = PipelineSink[CollectSink, AnyAggSink, SortSink]
 
     # The borrowed cache and pool, kept as pointers (private) because a struct
@@ -224,10 +239,35 @@ struct RealBuilder[
                 + String(Int(spec.tag))
                 + " of segment "
                 + String(desc.seg_id)
-                + " is not served (OP_FILTER, OP_PROJECT and OP_LIMIT are)"
+                + " is not served (OP_FILTER, OP_PROJECT and OP_LIMIT are,"
+                " and OP_JOIN_PROBE once its segment's source is built)"
             )
         self._parts.append(parts^)
         return len(self._parts) - 1
+
+    def _make_probe_parts(
+        mut self, ref desc: SegmentDescPod, mut published: PublishedOutputs
+    ) raises:
+        """Take the build rows of every OP_JOIN_PROBE of `desc` and index
+        them, one shared part per operator."""
+        for i in range(desc.num_ops()):
+            ref spec = desc.ops[i]
+            if spec.tag != OP_JOIN_PROBE:
+                continue
+            var build_seg = spec.probe_build_seg
+            if not _is_dep(desc, build_seg):
+                raise Error(
+                    "pipeline_exec: the join probe of segment "
+                    + String(desc.seg_id)
+                    + " reads the build side of segment "
+                    + String(build_seg)
+                    + ", which is not among its dependencies"
+                )
+            var parts = _OpParts(desc.seg_id, i)
+            parts.probe = Optional(
+                HashProbeShared(spec, published.take(build_seg))
+            )
+            self._parts.append(parts^)
 
     def build_source(
         mut self,
@@ -238,6 +278,7 @@ struct RealBuilder[
         # A segment run starts here. What the operators of an earlier run of
         # this segment shared (a limit's spent row budget) is not theirs.
         self._drop_parts_of(desc.seg_id)
+        self._make_probe_parts(desc, published)
         ref spec = desc.source_spec
         var morsel_rows = desc.morsel_rows
         if desc.source_kind == SOURCE_PARQUET:
@@ -283,11 +324,7 @@ struct RealBuilder[
                     + " segments; a SOURCE_SINK_OUTPUT reads one"
                 )
             var producer = spec.dep_seg_ids[0]
-            var is_dep = False
-            for i in range(len(desc.deps)):
-                if desc.deps[i] == producer:
-                    is_dep = True
-            if not is_dep:
+            if not _is_dep(desc, producer):
                 raise Error(
                     "pipeline_exec: segment "
                     + String(desc.seg_id)
@@ -318,6 +355,8 @@ struct RealBuilder[
             return Self.Op.first(parts.filter.value().make())
         if parts.project:
             return Self.Op.second(parts.project.value().make())
+        if parts.probe:
+            return Self.Op.fourth(parts.probe.value().make())
         return Self.Op.third(parts.limit.value().make())
 
     def build_sink(
@@ -354,8 +393,8 @@ struct RealBuilder[
         if desc.sink_orientation == SINK_ORIENT_COLUMNAR:
             if (
                 desc.sink_kind == SINK_COLLECT
-                and desc.sink_key_dtype == KEY_DTYPE_NONE
-            ):
+                or desc.sink_kind == SINK_HASH_BUILD
+            ) and desc.sink_key_dtype == KEY_DTYPE_NONE:
                 return Self.Sink.first(
                     CollectSink(self._result_schema(desc, source_schema))
                 )
@@ -423,19 +462,27 @@ struct RealBuilder[
             + " is not served; only (SINK_COLLECT, KEY_DTYPE_NONE,"
             " SINK_ORIENT_COLUMNAR), (SINK_AGG, KEY_DTYPE_NONE, I64, I32,"
             " F64 or F32, SINK_ORIENT_COLUMNAR), (SINK_AGG, KEY_DTYPE_STRING,"
-            " SINK_ORIENT_COLUMNAR or SINK_ORIENT_DICT_ENCODED) and"
-            " (SINK_SORT, KEY_DTYPE_NONE, SINK_ORIENT_COLUMNAR) are"
+            " SINK_ORIENT_COLUMNAR or SINK_ORIENT_DICT_ENCODED),"
+            " (SINK_SORT, KEY_DTYPE_NONE, SINK_ORIENT_COLUMNAR) and"
+            " (SINK_HASH_BUILD, KEY_DTYPE_NONE, SINK_ORIENT_COLUMNAR) are"
         )
 
     def _result_schema(
         mut self, ref desc: SegmentDescPod, ref source_schema: Schema
     ) -> Optional[Schema]:
         """The schema the segment's rows have: the source's, as each
-        projection of the chain reshapes it. A projection is asked by running
-        it over a batch of no rows. None when that fails."""
+        projection and join probe of the chain reshapes it. A projection is
+        asked by running it over a batch of no rows; a probe appends the build
+        side's columns. None when that fails."""
         try:
             var schema = source_schema.copy()
             for i in range(desc.num_ops()):
+                if desc.ops[i].tag == OP_JOIN_PROBE:
+                    var at = self._parts_index(desc, i)
+                    schema = self._parts[at].probe.value().output_schema(
+                        schema
+                    )
+                    continue
                 if desc.ops[i].tag != OP_PROJECT:
                     continue
                 var at = self._parts_index(desc, i)
@@ -446,3 +493,11 @@ struct RealBuilder[
             return Optional(schema^)
         except:
             return None
+
+
+def _is_dep(ref desc: SegmentDescPod, seg_id: Int) -> Bool:
+    """True when `seg_id` is among `desc`'s dependencies."""
+    for i in range(len(desc.deps)):
+        if desc.deps[i] == seg_id:
+            return True
+    return False

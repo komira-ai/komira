@@ -14,7 +14,9 @@
 # a producer is cut before its consumer. Every segment is ORDER_NONE with one
 # partition. `card_estimate_rows` is the row count of the scan's footers when
 # the host supplied one, an upper bound on the rows that reach the sink, and 0
-# otherwise; `mem_estimate_bytes` is 0 (no memory decision is recorded).
+# otherwise, and 0 for a pipeline with a join probe in it (a join can give
+# more rows than its probe side holds); `mem_estimate_bytes` is 0 (no memory
+# decision is recorded).
 # =============================================================================
 
 from arrow.schema import Schema
@@ -82,6 +84,10 @@ struct _Pipe(Movable):
     var broken_by: Int
     """The segment whose output this pipeline is, while no operator has been
     appended to it; -1 otherwise."""
+    var has_join: Bool
+    """True once a join probe is fused onto the pipeline: its rows are no
+    longer bounded by the scan's row count, and a column name may no longer
+    mean the scan's column."""
 
     def __init__(
         out self,
@@ -100,6 +106,7 @@ struct _Pipe(Movable):
         self.has_project = False
         self.sorted_input = False
         self.broken_by = -1
+        self.has_join = False
 
     def append_op(mut self, var op: MorselOp):
         self.ops.append(op^)
@@ -187,7 +194,7 @@ struct _Cutter(Movable):
         """End `pipe` in a sink and record it as the next segment."""
         var seg_id = len(self.segments)
         var card = 0
-        if pipe.scan_index >= 0:
+        if pipe.scan_index >= 0 and not pipe.has_join:
             ref stats = inputs.scans[pipe.scan_index].stats
             if stats:
                 card = stats.value().row_count

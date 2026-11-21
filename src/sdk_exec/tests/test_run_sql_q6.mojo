@@ -15,9 +15,14 @@
 #     oracle; the oracle's table has rows rejected by each conjunct alone.
 #     Catches a wrong bound for the DATE/INTERVAL or BETWEEN arithmetic, an
 #     off-by-one on any boundary, and a float or truncated sum.
-#   * test_a_join_is_refused_by_lowering: a self-join is a refusal at step
-#     `lower` with the cutter's token LOWERING_UNCUTTABLE_NODE, not a crash and
-#     not a wrong answer.
+#   * test_a_self_join_counts_the_key_pairs: a self-join on a key column with
+#     repeated and NULL keys counts every pair of equal non-NULL keys, equal to
+#     the oracle (the sum over keys of count^2) computed here from the same
+#     keys. Catches a NULL key that matches, a dropped duplicate pair, and a
+#     pair counted once.
+#   * test_a_left_join_is_refused_by_lowering: a LEFT JOIN is a refusal at step
+#     `lower` with the cutter's token LOWERING_JOIN_UNSERVED, not a crash and
+#     not a wrong answer; Q6 then runs on the same context.
 #   * test_a_syntax_error_is_refused_by_the_parser: step `parse`, "SQL syntax
 #     error".
 #   * test_an_unknown_table_and_a_missing_file_are_refused_at_bind: step
@@ -222,16 +227,86 @@ def test_q6_text_gives_the_exact_decimal() raises:
     _expect_revenue(run_sql(ctx, _q6()), o.revenue)
 
 
-def test_a_join_is_refused_by_lowering() raises:
-    var t = q6_table(50)
+def _dup_key(i: Int) -> Int:
+    return i % 7
+
+
+def _dup_key_is_null(i: Int) -> Bool:
+    return i % 11 == 10
+
+
+def _duplicated_keys(rows: Int) raises -> RecordBatch:
+    """A one-column batch l_orderkey: the key of row i is i % 7, and every 11th
+    row has a NULL key."""
+    var key = PrimitiveArray[DType.int64].allocate_nullable(rows)
+    for i in range(rows):
+        key.set(i, Int64(_dup_key(i)))
+    for i in range(rows):
+        if _dup_key_is_null(i):
+            key._set_null(i)
+    var sb = SchemaBuilder()
+    var builder = RecordBatchBuilder()
+    sb.add_field(Field("l_orderkey", ArrowType.INT64, True))
+    builder.add_column(Column.from_primitive[DType.int64](key^))
+    return builder.build(sb.build())
+
+
+def test_a_self_join_counts_the_key_pairs() raises:
+    var rows = 200
+    # The oracle: every pair of rows with equal non-NULL keys, so the sum over
+    # keys of count^2; a NULL key matches nothing.
+    var counts = List[Int]()
+    for _ in range(7):
+        counts.append(0)
+    for i in range(rows):
+        if not _dup_key_is_null(i):
+            counts[_dup_key(i)] += 1
+    var want = 0
+    for k in range(7):
+        want += counts[k] * counts[k]
+    assert_true(want > rows)
+    var path = test_tmpdir() + "/sql_join_self.parquet"
+    var bytes = write_record_batch_to_parquet_bytes(
+        _duplicated_keys(rows), max_rows_per_rg=64
+    )
+    var fh = open(path, "w")
+    fh.write_bytes(Span(bytes))
+    fh.close()
     var ctx = _new_context()
-    register_parquet(ctx, "lineitem", _write("sql_join", t))
+    register_parquet(ctx, "lineitem", path)
     var out = run_sql(
         ctx,
         "select count(*) from lineitem a join lineitem b on a.l_orderkey ="
         " b.l_orderkey",
     )
-    _expect_refusal(out, String(STEP_LOWER), "LOWERING_UNCUTTABLE_NODE")
+    if out.refusal:
+        assert_true(
+            False,
+            "refused at "
+            + out.refusal.value().step
+            + ": "
+            + out.refusal.value().reason,
+        )
+    assert_equal(len(out.batches), 1)
+    assert_equal(out.batches[0].num_rows(), 1)
+    assert_equal(
+        Int(out.batches[0].column_at(0).as_primitive[DType.int64]().get(0)),
+        want,
+    )
+
+
+def test_a_left_join_is_refused_by_lowering() raises:
+    var t = q6_table(50)
+    var o = _oracle(t)
+    var ctx = _new_context()
+    register_parquet(ctx, "lineitem", _write("sql_left_join", t))
+    var out = run_sql(
+        ctx,
+        "select count(*) from lineitem a left join lineitem b on a.l_orderkey"
+        " = b.l_orderkey",
+    )
+    _expect_refusal(out, String(STEP_LOWER), "LOWERING_JOIN_UNSERVED")
+    _expect_revenue(run_sql(ctx, _q6()), o.revenue)
 
 
 def test_a_syntax_error_is_refused_by_the_parser() raises:
@@ -444,7 +519,8 @@ def test_contexts_can_be_created_and_dropped_repeatedly() raises:
 def main() raises:
     var suite = TestSuite()
     suite.test[test_q6_text_gives_the_exact_decimal]()
-    suite.test[test_a_join_is_refused_by_lowering]()
+    suite.test[test_a_self_join_counts_the_key_pairs]()
+    suite.test[test_a_left_join_is_refused_by_lowering]()
     suite.test[test_a_syntax_error_is_refused_by_the_parser]()
     suite.test[test_an_unknown_table_and_a_missing_file_are_refused_at_bind]()
     suite.test[test_a_statement_that_is_not_a_query_is_refused]()

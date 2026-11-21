@@ -79,8 +79,9 @@ def _is_dictionary_key(
     """True when `key` is a column of the pipeline's Parquet scan that every
     row group of every pinned file stores dictionary encoded. A pipeline with
     a PROJECT in it, or one that reads a breaker's output, is never dictionary
-    encoded: the name may no longer mean the scan's column."""
-    if pipe.scan_index < 0 or pipe.has_project:
+    encoded: the name may no longer mean the scan's column. Nor is one with a
+    join probe in it."""
+    if pipe.scan_index < 0 or pipe.has_project or pipe.has_join:
         return False
     if pipe.source_kind != SOURCE_PARQUET:
         return False

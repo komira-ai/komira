@@ -63,12 +63,12 @@ it in the plan and lowering refuses the node, `LOWERING_UNCUTTABLE_NODE`; the
 door also refuses with `OPTIMIZE_UNRESOLVED_SCALAR` a plan whose optimization
 asks for a scalar to be executed first, a guard no query tested here reaches); a sink denied its memory by the
 budget, a sum outside its declared type and a pool not whole after a run (step
-`execute`); and whatever lowering, the binder or the parser refuses (a join is
-`LOWERING_UNCUTTABLE_NODE` at `lower`). A glob path and a table of several
+`execute`); and whatever lowering, the binder or the parser refuses (an INNER equi-join is served; any other join is
+`LOWERING_JOIN_UNSERVED` at `lower`). A glob path and a table of several
 files are refused by the footer package. Lowering given fewer scan facts than
 the plan has scans refuses by name (`LOWERING_INPUTS_SCAN_COUNT`);
-`lowering_inputs` descends only scan, filter, project, limit, aggregate and sort
-nodes and gives a facts entry per scan it reaches, and the cutter refuses any
+`lowering_inputs` descends only scan, filter, project, limit, aggregate, sort
+and join nodes (a join's left child, then its right) and gives a facts entry per scan it reaches, and the cutter refuses any
 other node by name before it asks for the scans below it. `worker_count` and
 `memory_budget_bytes` have a lower bound of 1 and no upper bound. A
 cancellation token is local to a call, so cancel is not reachable from
@@ -93,7 +93,7 @@ The tests run when the package is built.
   and the wiring's refusal of an unregistered token and of a handle from
   another epoch.
 - `test_run_sql_q6`: TPC-H Q6's text from `bench_corpus` over a lineitem-shaped
-  Parquet file gives the integer oracle's DECIMAL(38,4); a join, a syntax error,
+  Parquet file gives the integer oracle's DECIMAL(38,4); a join of a kind lowering does not serve, a syntax error,
   an unknown table, a missing file, CREATE TABLE AS and a replaced file are named
   refusals, as are a tiny memory budget, an INT64 sum out of range, a scalar
   subquery (refused by lowering); the context runs on after a refusal; the
