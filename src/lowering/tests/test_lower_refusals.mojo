@@ -8,7 +8,7 @@
 # detail lowers. A refused plan never produces a LoweredPlan.
 #
 # Tests, and the behaviour each asserts:
-#   test_nodes_the_cutter_does_not_cut_are_refused_by_tag: a join, union,
+#   test_nodes_the_cutter_does_not_cut_are_refused_by_tag: a join,
 #     top-n, view reference, shared-subplan reference and cast to string are
 #     each refused by their tag name.
 #   test_a_refused_node_below_a_breaker_refuses_the_whole_plan: a join under an
