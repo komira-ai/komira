@@ -101,7 +101,7 @@ sources:
 test, a manifest of this package or of a sibling, or `mopm.lock`, run `buildrules mojo sync` with the workspaces of the
 direct and dev dependencies staged, commit what it writes, and build `komira//src/trace:lib` on the farm.
 
-`:conda` is the `.conda` of the mopm package (`mojo-komira-ai.trace-0.1.0-mojo1.0.0_0.conda`). `:trace` is `:lib` as
+`:conda` is the `.conda` of the mopm package (`mojo-komira-ai.trace-0.1.0-mojo1.1.0_0.conda`). `:trace` is `:lib` as
 komira's Mojo rules take it (`mojo_adopted_library`): its `deps` are the adopted target of each package in
 `[dependencies]`, and the rule refuses a list that is not the closure `:lib` was built from. It also compiles and runs
 the README's examples above (`[tests][readme]`) against `:lib`.

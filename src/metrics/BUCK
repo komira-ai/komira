@@ -47,7 +47,7 @@ mojo_adopted_library(
 )
 
 # The mopm package is `:conda`, which `mojo_package` makes for a package that owns a native library: `mopm pack`
-# over `:lib`, the `.conda` a mopm registry serves (`mojo-komira-ai.metrics-0.1.0-mojo1.0.0_0.conda`), with the
+# over `:lib`, the `.conda` a mopm registry serves (`mojo-komira-ai.metrics-0.1.0-mojo1.1.0_0.conda`), with the
 # manifest of every path dependency of the closure staged at its repository path. It records the direct
 # dependencies of mopm.toml (`mojo-komira-ai.atomic_alias`, `mojo-komira-ai.clock`, `mojo-komira-ai.containers`,
 # `mojo-komira-ai.hashing`, `mojo-komira-ai.name_registry`, each `>=0.1,<0.2`), holds none of their files, and holds

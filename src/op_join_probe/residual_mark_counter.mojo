@@ -15,11 +15,11 @@ from std.ffi import _Global
 from std.memory import OwnedPointer, UnsafePointer, alloc
 
 
-def _init_residual_mark_fire() -> OwnedPointer[Atomic[DType.int64]]:
+def _init_residual_mark_fire() -> OwnedPointer[Atomic[Int64]]:
     """`_Global` init_fn: allocate the FIRE counter once per process (init 0)."""
-    var raw = alloc[Atomic[DType.int64]](1)
+    var raw = alloc[Atomic[Int64]](1)
     UnsafePointer(to=raw[].value).unsafe_write(Scalar[DType.int64](0))
-    return OwnedPointer[Atomic[DType.int64]](unsafe_from_raw_pointer=raw)
+    return OwnedPointer[Atomic[Int64]](unsafe_from_raw_pointer=raw)
 
 
 comptime _RM_FIRE = _Global[
@@ -45,18 +45,18 @@ def residual_mark_fire_count() raises -> Int:
     return Int(gp[][].load())
 
 
-def _init_residual_mark_build_span() -> OwnedPointer[Atomic[DType.int64]]:
+def _init_residual_mark_build_span() -> OwnedPointer[Atomic[Int64]]:
     """`_Global` init_fn: allocate the BUILD-wave span max (init 0)."""
-    var raw = alloc[Atomic[DType.int64]](1)
+    var raw = alloc[Atomic[Int64]](1)
     UnsafePointer(to=raw[].value).unsafe_write(Scalar[DType.int64](0))
-    return OwnedPointer[Atomic[DType.int64]](unsafe_from_raw_pointer=raw)
+    return OwnedPointer[Atomic[Int64]](unsafe_from_raw_pointer=raw)
 
 
-def _init_residual_mark_stream_span() -> OwnedPointer[Atomic[DType.int64]]:
+def _init_residual_mark_stream_span() -> OwnedPointer[Atomic[Int64]]:
     """`_Global` init_fn: allocate the STREAM(probe)-wave span max (init 0)."""
-    var raw = alloc[Atomic[DType.int64]](1)
+    var raw = alloc[Atomic[Int64]](1)
     UnsafePointer(to=raw[].value).unsafe_write(Scalar[DType.int64](0))
-    return OwnedPointer[Atomic[DType.int64]](unsafe_from_raw_pointer=raw)
+    return OwnedPointer[Atomic[Int64]](unsafe_from_raw_pointer=raw)
 
 
 comptime _RM_BUILD_SPAN = _Global[
@@ -82,7 +82,7 @@ def residual_mark_build_span_record(span: Int) raises:
         var cur = gp[][].load()
         if target <= cur:
             break
-        if Atomic[DType.int64].compare_exchange(
+        if Atomic[Int64].compare_exchange(
             UnsafePointer(to=gp[][].value), cur, target
         ):
             break
@@ -100,7 +100,7 @@ def residual_mark_stream_span_record(span: Int) raises:
         var cur = gp[][].load()
         if target <= cur:
             break
-        if Atomic[DType.int64].compare_exchange(
+        if Atomic[Int64].compare_exchange(
             UnsafePointer(to=gp[][].value), cur, target
         ):
             break
@@ -127,18 +127,18 @@ def residual_mark_worker_span() raises -> Int:
     return b if b >= s else s
 
 
-def _init_rm_prep_morsels() -> OwnedPointer[Atomic[DType.int64]]:
+def _init_rm_prep_morsels() -> OwnedPointer[Atomic[Int64]]:
     """`_Global` init_fn: allocate the PREPARE morsel-count max (init 0)."""
-    var raw = alloc[Atomic[DType.int64]](1)
+    var raw = alloc[Atomic[Int64]](1)
     UnsafePointer(to=raw[].value).unsafe_write(Scalar[DType.int64](0))
-    return OwnedPointer[Atomic[DType.int64]](unsafe_from_raw_pointer=raw)
+    return OwnedPointer[Atomic[Int64]](unsafe_from_raw_pointer=raw)
 
 
-def _init_rm_prep_span() -> OwnedPointer[Atomic[DType.int64]]:
+def _init_rm_prep_span() -> OwnedPointer[Atomic[Int64]]:
     """`_Global` init_fn: allocate the PREPARE worker-span max (init 0)."""
-    var raw = alloc[Atomic[DType.int64]](1)
+    var raw = alloc[Atomic[Int64]](1)
     UnsafePointer(to=raw[].value).unsafe_write(Scalar[DType.int64](0))
-    return OwnedPointer[Atomic[DType.int64]](unsafe_from_raw_pointer=raw)
+    return OwnedPointer[Atomic[Int64]](unsafe_from_raw_pointer=raw)
 
 
 comptime _RM_PREP_MORSELS = _Global[
@@ -165,7 +165,7 @@ def residual_mark_prepare_record(morsels: Int, span: Int) raises:
         var cur = gm[][].load()
         if m_target <= cur:
             break
-        if Atomic[DType.int64].compare_exchange(
+        if Atomic[Int64].compare_exchange(
             UnsafePointer(to=gm[][].value), cur, m_target
         ):
             break
@@ -176,7 +176,7 @@ def residual_mark_prepare_record(morsels: Int, span: Int) raises:
         var cur = gs[][].load()
         if s_target <= cur:
             break
-        if Atomic[DType.int64].compare_exchange(
+        if Atomic[Int64].compare_exchange(
             UnsafePointer(to=gs[][].value), cur, s_target
         ):
             break
@@ -205,14 +205,14 @@ comptime GEOM_PROBE_ROWS: Int = 1
 comptime GEOM_CAP: Int = 2
 
 
-def _init_rm_geom() -> OwnedPointer[Atomic[DType.int64]]:
+def _init_rm_geom() -> OwnedPointer[Atomic[Int64]]:
     """`_Global` init_fn: allocate the `_GEOM_N`-slot geometry array (all 0)."""
-    var raw = alloc[Atomic[DType.int64]](_GEOM_N)
+    var raw = alloc[Atomic[Int64]](_GEOM_N)
     for i in range(_GEOM_N):
         UnsafePointer(to=(raw + i)[].value).unsafe_write(
             Scalar[DType.int64](0)
         )
-    return OwnedPointer[Atomic[DType.int64]](unsafe_from_raw_pointer=raw)
+    return OwnedPointer[Atomic[Int64]](unsafe_from_raw_pointer=raw)
 
 
 comptime _RM_GEOM = _Global[

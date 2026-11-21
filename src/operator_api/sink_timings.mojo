@@ -9,7 +9,7 @@
 # 20% phase-level regression offset by a phase-level speedup elsewhere.
 #
 # This harness is intentionally minimal:
-#   * Four `Atomic[DType.uint64]` counters (one per phase).
+#   * Four `Atomic[UInt64]` counters (one per phase).
 #   * `record_*` methods `fetch_add` atomically — safe to call from any
 #     worker thread during the dispatch.
 #   * `dump()` prints the four counts to stdout; emission is guarded by
@@ -18,7 +18,7 @@
 #
 # Gap6 safety (CRITICAL — read before refactor)
 # --------------------------------------------
-# `SinkPhaseTimings` holds inline `Atomic[DType.uint64]` fields and is
+# `SinkPhaseTimings` holds inline `Atomic[UInt64]` fields and is
 # therefore NON-MOVABLE (Mojo refuses to synthesize a move ctor for
 # structs with inline Atomics — spike X1c Q6). This means the type MUST
 # NEVER be placed inside `Slab[T]`, `List[T]`, or any byte-backed container
@@ -191,7 +191,7 @@ def new_timings_owned() -> OwnedPointer[SinkPhaseTimings]:
     # the `OwnedPointer` returned adopts `raw` and frees it.
     var raw = alloc[SinkPhaseTimings](1)
     # Construct each inner Atomic in-place on the raw slot. Each
-    # `Atomic[DType.uint64]` has a `.value: Scalar[DType.uint64]` field;
+    # `Atomic[UInt64]` has a `.value: Scalar[DType.uint64]` field;
     # `init_pointee_move` on that sub-field zeroes the Atomic.
     UnsafePointer(to=raw[]._consume_ns).unsafe_bitcast[Scalar[DType.uint64]]().unsafe_write(
         Scalar[DType.uint64](0)

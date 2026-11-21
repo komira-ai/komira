@@ -125,7 +125,7 @@ it, and packs it into the package under `lib/`. The files that are not sources:
 the C file, a manifest of this package or of the sibling, run `buildrules mojo sync` with both packages staged, commit
 what it writes, and build `komira//src/async_api:lib` on the farm.
 
-`:conda` is the `.conda` of the mopm package (`mojo-komira-ai.async_api-0.1.0-mojo1.0.0_0.conda`): the `.mojoc` and
+`:conda` is the `.conda` of the mopm package (`mojo-komira-ai.async_api-0.1.0-mojo1.1.0_0.conda`): the `.mojoc` and
 `lib/libkomira_concurrency_pool_depth.a`. `:async_api` is `:lib` as komira's Mojo rules take it
 (`mojo_adopted_library`): a package that lists it in `deps` links the same archive. It also compiles and runs the README's
 examples above (`[tests][readme]`) against `:lib`. The shared library `libkomira_async_api_native.so.1`

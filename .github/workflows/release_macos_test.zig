@@ -762,7 +762,7 @@ test "the reader of pull request workflows sees each macOS line added to the rea
         "          args: build //release:mopm_darwin_libs",
         "    runs-on: macos-15",
         "          args: build komira//tools/build/mojo:act_darwin",
-        "          args: build toolchains//:mojo_compiler_1.0.0_osx-arm64",
+        "          args: build toolchains//:mojo_compiler_1.1.0_osx-arm64",
         // the analysis line's exception is that line only: a build of the set, or a target platform
         // added to it, is a macOS build
         "          args: build --config-file release/darwin_analysis.buckconfig //release:mopm_darwin_libs",

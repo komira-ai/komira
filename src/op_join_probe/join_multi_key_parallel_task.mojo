@@ -101,7 +101,7 @@ struct MultiKeyParallelProbeState[
     var builder: Pointer[MultiKeyHashJoinBuilder, Self.builder_origin]
     var probe_keys: Pointer[MultiKeyColumns, Self.probe_origin]
 
-    var morsel_counter: OwnedPointer[Atomic[DType.int64]]
+    var morsel_counter: OwnedPointer[Atomic[Int64]]
 
     def __init__(
         out self,
@@ -128,11 +128,11 @@ struct MultiKeyParallelProbeState[
         self.worker_probe = worker_probe^
         self.builder = builder
         self.probe_keys = probe_keys
-        var raw = alloc[Atomic[DType.int64]](1)
+        var raw = alloc[Atomic[Int64]](1)
         UnsafePointer(to=raw[].value).unsafe_write(
             Scalar[DType.int64](0)
         )
-        self.morsel_counter = OwnedPointer[Atomic[DType.int64]](
+        self.morsel_counter = OwnedPointer[Atomic[Int64]](
             unsafe_from_raw_pointer=raw
         )
 

@@ -169,6 +169,6 @@ This package is built with buildrules' `mojo_package` and packaged for mopm as `
 
 `:lib` is the library file and exists only once every test of `tests/` has passed. After any change to a source, a test, or a manifest of this package or of a dependency, run `buildrules mojo sync`, commit what it writes, and build `komira//src/calendar:lib` on the farm. A test file that the sync has not listed is not run: run the sync after adding one.
 
-`:conda` is buildrules' `mojo_conda` over `:lib`: the `.conda` of the mopm package (`mojo-komira-ai.calendar-0.1.0-mojo1.0.0_0.conda`), which therefore exists only once the tests have passed. Publishing it (`mopm publish`) uploads, so it is a step of a CI job that takes that file, not a build action.
+`:conda` is buildrules' `mojo_conda` over `:lib`: the `.conda` of the mopm package (`mojo-komira-ai.calendar-0.1.0-mojo1.1.0_0.conda`), which therefore exists only once the tests have passed. Publishing it (`mopm publish`) uploads, so it is a step of a CI job that takes that file, not a build action.
 
 `:calendar` is `:lib` as komira's Mojo rules take it (`mojo_adopted_library`). Its `deps` are the adopted target of each package in `[dependencies]`, and the rule refuses a list that is not the closure `:lib` was built from. It also compiles and runs the README's examples above (`[tests][readme]`) against `:lib`; the tests are not run again.

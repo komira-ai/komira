@@ -31,7 +31,7 @@
 #     phase2e0_repro1_pipeline_execution_non_movable.mojo
 #   * Spike Repro 8 -- cancel + first-error propagation via CAS
 #   * Atomic[int8] convention: semi_join.mojo:918 precedent (Mojo
-#     rejects Atomic[DType.bool] due to LLVM i1 restriction).
+#     rejects Atomic[Bool] due to LLVM i1 restriction).
 # =============================================================================
 
 from atomic_alias import AtomicI8, AtomicI32
@@ -75,9 +75,9 @@ struct PipelineExecution(
     `PipelineExecution(num_workers, num_operators)`.
 
     Atomic[int8] convention (Mojo):
-      * LLVM i1 atomic is unsupported, so `Atomic[DType.bool]` is rejected
+      * LLVM i1 atomic is unsupported, so `Atomic[Bool]` is rejected
         by the compiler.
-      * Fallback: `Atomic[DType.int8]` with `0 = false`, `1 = true`.
+      * Fallback: `Atomic[Int8]` with `0 = false`, `1 = true`.
 
     Not Movable. Caller keeps the pipeline on its stack and passes
     `mut ref` through driver functions. SegmentExecution receives the

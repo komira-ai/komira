@@ -280,7 +280,7 @@ struct _MkBuildWork(SharedChunkWork):
         # SAFETY: `hash_table` is the builder's own `List[Int]`; `Int` and
         # `Int64` are layout-identical on every supported target, so the bitcast
         # is a pure reinterpretation that lets the aligned 64-bit chain-head slot
-        # bind `Atomic[DType.int64].compare_exchange` directly. Same shape as the
+        # bind `Atomic[Int64].compare_exchange` directly. Same shape as the
         # single-key `hash_chain_parallel_build`. Origin is the borrowed
         # payload's; the pointers never leave this method.
         var ht_ptr = bp[].hash_table.value().unsafe_ptr().bitcast[

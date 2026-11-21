@@ -328,9 +328,9 @@ struct _HashScatterPartitionByState(KeepAlive, Movable):
     var sink_spec: OwnedPointer[PartitionBySinkData]
     var bucket_indices: OwnedPointer[List[List[Int]]]
     var morsel_results: OwnedPointer[Slab[Optional[RecordBatch]]]
-    var err_flag: OwnedPointer[Atomic[DType.int8]]
+    var err_flag: OwnedPointer[Atomic[Int8]]
     var err_msg: OwnedPointer[String]
-    var bucket_counter: OwnedPointer[Atomic[DType.int64]]
+    var bucket_counter: OwnedPointer[Atomic[Int64]]
     var num_buckets: Int
 
     def __init__(
@@ -349,13 +349,13 @@ struct _HashScatterPartitionByState(KeepAlive, Movable):
         # fresh heap slot, written once before the pointer is wrapped. The
         # OwnedPointer owns the slot and frees it when the state is dropped;
         # no other owner exists.
-        var fraw = alloc[Atomic[DType.int8]](1)
+        var fraw = alloc[Atomic[Int8]](1)
         UnsafePointer(to=fraw[].value).unsafe_write(Scalar[DType.int8](0))
-        self.err_flag = OwnedPointer[Atomic[DType.int8]](unsafe_from_raw_pointer=fraw)
+        self.err_flag = OwnedPointer[Atomic[Int8]](unsafe_from_raw_pointer=fraw)
         self.err_msg = OwnedPointer(String(""))
-        var craw = alloc[Atomic[DType.int64]](1)
+        var craw = alloc[Atomic[Int64]](1)
         UnsafePointer(to=craw[].value).unsafe_write(Scalar[DType.int64](0))
-        self.bucket_counter = OwnedPointer[Atomic[DType.int64]](
+        self.bucket_counter = OwnedPointer[Atomic[Int64]](
             unsafe_from_raw_pointer=craw
         )
         self.num_buckets = num_buckets

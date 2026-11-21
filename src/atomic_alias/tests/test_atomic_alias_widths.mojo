@@ -22,7 +22,7 @@
 #      against zero in their own scalar type after a `fetch_sub` below zero.
 #
 # ⛔ This test must stay green ACROSS the cutover edit. If it goes red after
-# `Atomic[DType.int64]` becomes `Atomic[Int64]`, the cutover is wrong — the two
+# `Atomic[Int64]` becomes `Atomic[Int64]`, the cutover is wrong — the two
 # spellings are the SAME TYPE (measured: identical `size_of`/`align_of` on both
 # compilers), so nothing here should move.
 # =============================================================================

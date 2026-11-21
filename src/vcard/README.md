@@ -71,7 +71,7 @@ that are not sources:
 the farm. A test file that `buildrules mojo sync` has not listed is not run: run the sync after adding one.
 
 `:conda` is buildrules' `mojo_conda` over `:lib`: the `.conda` of the mopm package
-(`mojo-komira-ai.vcard-0.1.0-mojo1.0.0_0.conda`), packed with the sibling's manifest beside its own (`members`), which
+(`mojo-komira-ai.vcard-0.1.0-mojo1.1.0_0.conda`), packed with the sibling's manifest beside its own (`members`), which
 therefore exists only once the tests have passed. Publishing it (`mopm publish`) uploads, so it is a step of a CI job
 that takes that file, not a build action. `:vcard` is `:lib` as komira's Mojo rules take it
 (`mojo_adopted_library`); it also compiles and runs the README's examples above (`[tests][readme]`) against `:lib`.

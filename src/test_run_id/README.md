@@ -93,7 +93,7 @@ with the three packages staged, commit what it writes, and build `komira//src/te
 test file that the sync has not listed is not run: run the sync after adding one.
 
 `:conda` is buildrules' `mojo_conda` over `:lib`: the `.conda` of the mopm package
-(`mojo-komira-ai.test_run_id-0.1.0-mojo1.0.0_0.conda`), packed with the siblings' manifests beside its own (`members`),
+(`mojo-komira-ai.test_run_id-0.1.0-mojo1.1.0_0.conda`), packed with the siblings' manifests beside its own (`members`),
 which therefore exists only once the tests have passed. `:conda_holds` reads it back: this package's own `.mojoc`
 and exactly the two dependencies above. Publishing it (`mopm publish`) uploads, so it is a step of a CI job that
 takes that file, not a build action.
