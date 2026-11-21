@@ -1,5 +1,9 @@
 # Getting started
 
+To use komira from Python, `pip install komira`: see
+[installing komira for Python](install.md). This page is for working on komira
+itself.
+
 A quick start: from a clone to a built library with its tests, then to a
 library of your own. For setup details, what a local build guarantees and
 troubleshooting, see [DEVELOPMENT.md](../DEVELOPMENT.md); for what is in the

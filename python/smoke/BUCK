@@ -39,8 +39,13 @@ load("@komira//tools/build/platforms:defs.bzl", "DARWIN_ARM64", "LINUX_X86_64")
 #   readme_unit    the README check: a python block equal to the example passes; one that differs by a line,
 #                  CRLF line ends, added or missing lines, no block, or a block that is not closed is refused
 #                  naming the line.
+#                  the same check holds the install page's ```text block to the expected output, and the
+#                  changelog's newest release is its first `## <version>` heading after any `## Unreleased`,
+#                  a heading that is no version refused.
 # readme_shows_quickstart runs that check on the real files: the "What works" block of python/README.md is
-# python/examples/quickstart.py byte for byte.
+# python/examples/quickstart.py byte for byte. install_page_shows_quickstart does the same for docs/install.md:
+# its python block is the quickstart, and its text block is what the quickstart prints at the changelog's newest
+# release and the ABI version of src/so/abi/komira.tsv.
 _ZIG = "komira//tools/build/toolchains:zig_next"
 _BUSYBOX = "komira//tools/build/toolchains:busybox"
 
@@ -94,12 +99,32 @@ zig_test(
     zig = _ZIG,
 )
 
+# The install page's two blocks, read from the files themselves: the python block is the quickstart, and the
+# text block is the quickstart's expected output at the newest release of the changelog and the ABI version of
+# the table (the same substitution the install step makes).
+zig_test(
+    name = "install_page_shows_quickstart",
+    exec_compatible_with = LINUX_X86_64,
+    src = "src/install_page_shows_quickstart_test.zig",
+    data = {
+        "CHANGELOG.md": "//python:CHANGELOG.md",
+        "install.md": "//:docs/install.md",
+        "komira.tsv": "//src/so:abi/komira.tsv",
+        "quickstart.expected": "//python:examples/quickstart.expected",
+        "quickstart.py": "//python:examples/quickstart.py",
+    },
+    deps = [":pypi_smoke_lib"],
+    busybox = _BUSYBOX,
+    zig = _ZIG,
+)
+
 zig_exe(
     name = "pypi_smoke",
     exec_compatible_with = LINUX_X86_64,
     src = "src/main.zig",
     deps = [":pypi_smoke_lib"],
     unit_tests = [":{}_unit".format(s) for s in _SCENARIOS] + [
+        ":install_page_shows_quickstart",
         ":readme_shows_quickstart",
         "komira//tools/build/toolchains:zig_next_version",
     ],
@@ -120,6 +145,7 @@ zig_exe(
     target = "aarch64-macos",
     deps = [":pypi_smoke_lib"],
     unit_tests = [":{}_unit".format(s) for s in _SCENARIOS] + [
+        ":install_page_shows_quickstart",
         ":readme_shows_quickstart",
         "komira//tools/build/toolchains:zig_next_version",
     ],

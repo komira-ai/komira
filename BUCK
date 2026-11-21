@@ -24,6 +24,14 @@ export_file(name = "LICENSE", visibility = ["PUBLIC"])
 # The notices the wheel carries beside LICENSE (tools/build/package/wheel.bzl).
 export_file(name = "NOTICE", visibility = ["PUBLIC"])
 
+# The install page, whose python and text blocks the smoke driver's
+# install_page_shows_quickstart test holds to the quickstart (python/smoke/BUCK).
+export_file(
+    name = "docs/install.md",
+    src = "docs/install.md",
+    visibility = ["//python/smoke:"],
+)
+
 # The files under .github/, which the root doc_tree's glob skips, at their
 # paths, for the interpreter list (//tools/build/lint:interpreter_budget).
 doc_tree(
