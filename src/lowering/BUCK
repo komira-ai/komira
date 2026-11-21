@@ -5,6 +5,11 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # entry opens no file, reads no clock and no environment variable and touches
 # no global (README.md).
 #
+# test_lower_distinct    SELECT DISTINCT cut to a SINK_AGG grouped by every
+#                        column with no aggregate: the sink row by column
+#                        type and dictionary footer, the group keys in column
+#                        order, the sort, limit, filter, distinct and
+#                        aggregate it composes with.
 # test_lower_plans       the rendered physical plan of small plans: one segment
 #                        for a filtered aggregate, two for an aggregate and a
 #                        sort, the fused operators, the sink row each group key
@@ -13,7 +18,9 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #                        and a different host changing only the morsel size.
 # test_lower_refusals    every refusal token, raised by the plan that should
 #                        raise it with the text that names why, and a plan
-#                        beside each that lowers.
+#                        beside each that lowers (a distinct over a column
+#                        list, a repeated name, no column or a column no sink
+#                        row serves included).
 # test_lower_sum_fuse    SUM(CAST(<signed integer> AS DECIMAL(38, 0))), the SQL
 #                        integer sum, is lowered to SUM(<integer>) with its
 #                        declared DECIMAL(38, 0) output kept; every other shape
@@ -51,6 +58,7 @@ mojo_library(
         "sql",
     ],
     test_srcs = [
+        "tests/test_lower_distinct.mojo",
         "tests/test_lower_plans.mojo",
         "tests/test_lower_refusals.mojo",
         "tests/test_lower_sum_fuse.mojo",
