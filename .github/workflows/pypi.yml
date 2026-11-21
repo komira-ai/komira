@@ -11,7 +11,7 @@
 # docs/design/python_package.md "The two flavours") the run builds, tests and publishes; a run publishes
 # exactly one. `external` carries no file of Modular's and requires Modular's `mojo-compiler`, which pip
 # installs from PyPI beside it; `bundled` carries the Mojo runtime libraries and requires nothing. The
-# default is `external`; changing it is the one line `default:` below. The run's summary names the
+# default is `bundled`, the flavour a scheduled run publishes; changing it is the one line `default:` below. The run's summary names the
 # flavour, and so does the first paragraph of the wheel's description on the index.
 #
 # THE JOBS, in order (a job that fails stops every job after it):
@@ -69,7 +69,7 @@ on:
         options:
           - external
           - bundled
-        default: external
+        default: bundled
         required: true
 
 permissions: {}
