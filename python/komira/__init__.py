@@ -1,0 +1,30 @@
+"""komira: SQL over local files, with libkomira, the komira query engine, in process.
+
+This is an early release: it loads libkomira and registers Parquet files on a
+`Session`; nothing runs a query yet. The public names are exactly `__all__`;
+every other module is private (docs/design/python_package.md). Importing the
+package does not load the library: the first `Session()` or `abi_version()`
+does.
+"""
+
+from importlib import metadata as _metadata
+
+from . import _native
+from ._errors import KomiraError, LibraryLoadError, UnsupportedCpuError
+from ._session import Session
+
+try:
+    __version__: str = _metadata.version("komira")
+except _metadata.PackageNotFoundError:
+    # Run from a source tree, with no installed distribution.
+    __version__ = "0.0.0"
+
+
+def abi_version() -> int:
+    """The C ABI version of the loaded libkomira, major * 1000 + minor (1001
+    is 1.1). Loads the library if no call has yet; raises `LibraryLoadError`
+    when it cannot."""
+    return _native.load().abi_version
+
+
+__all__ = ["KomiraError", "LibraryLoadError", "Session", "UnsupportedCpuError", "__version__", "abi_version"]
