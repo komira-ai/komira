@@ -15,7 +15,8 @@ local implementation:
 - Path discovery: the glob engine (`*`, `?`, `[a-z]`, POSIX classes, `**`
   across directories, and `{a,b}` brace alternation), splitting a pattern
   into the static prefix a listing can use and the residual matched
-  client-side, eager and pruned Hive-partition discovery, and the partition
+  client-side, eager and pruned Hive-partition discovery, a fixed file list
+  with constant partition columns (`ExplicitFileDiscovery`), and the partition
   value codec (`key=value` directory segments, percent-escaped, with
   `__HIVE_DEFAULT_PARTITION__` for null).
 
@@ -68,6 +69,34 @@ assert_equal(keys[1], "day")
 assert_equal(encode_partition_value("a/b c", ArrowType.STRING), "a%2Fb%20c")
 assert_equal(encode_partition_value("", ArrowType.STRING), "__HIVE_DEFAULT_PARTITION__")  # null
 assert_equal(parse_partition_value("__HIVE_DEFAULT_PARTITION__", ArrowType.STRING), "")
+```
+
+A fixed file list with constant partition columns, as a scan over several
+Parquet files uses it (values are decoded text, one row per file, one entry per
+column):
+
+<!-- mojo-hidden from std.testing import assert_equal -->
+```mojo
+from arrow.arrow_types import ArrowType
+from arrow.schema import Field
+from fs.explicit_file_discovery import ExplicitFileDiscovery
+
+var files = List[String]()
+files.append("/data/region=eu/part-0.parquet")
+files.append("/data/region=us/part-0.parquet")
+var cols = List[Field]()
+cols.append(Field("region", ArrowType.STRING, False))
+var rows = List[List[String]]()
+var eu = List[String]()
+eu.append("eu")
+var us = List[String]()
+us.append("us")
+rows.append(eu^)
+rows.append(us^)
+var disc = ExplicitFileDiscovery.from_files(files, cols, rows)
+assert_equal(disc.num_paths(), 2)
+assert_equal(disc.partition_col_name_at(0), "region")
+assert_equal(disc.partition_values_at(1).values[0], "us")
 ```
 
 The local file system, in a temporary directory the example creates: write a

@@ -5,6 +5,11 @@ package: it prints the installed version and the engine's C ABI version,
 opens a session, registers `readings.parquet` as the table `readings`, and
 closes the session. It runs from this directory.
 
+- The user test of the wheel runs it on every merge to main. The job
+  `wheel-user-test` of `.github/workflows/release.yml` (and of `pypi.yml`,
+  before any upload) `pip install`s the wheel file the build made into an
+  empty virtual environment on a fresh runner, once per supported Python
+  (`python/pythons.bzl`), and runs `quickstart.py` there as below.
 - The release smoke runs it. The jobs `testpypi-smoke` and `pypi-smoke` of
   `.github/workflows/pypi.yml` `pip install` the published wheel into an empty
   virtual environment, run `quickstart.py` there with `readings.parquet` beside
@@ -14,6 +19,11 @@ closes the session. It runs from this directory.
 - The "What works" block of [the package README](../README.md) is the same
   text as `quickstart.py`, byte for byte. The test
   `//python/smoke:readme_shows_quickstart` fails when the two differ.
+- The install page, [docs/install.md](../../docs/install.md), shows the same
+  program and what it prints: `quickstart.expected` with the version of the
+  newest release in [the changelog](../CHANGELOG.md) and the ABI version
+  filled in. The test `//python/smoke:install_page_shows_quickstart` fails
+  when either block differs.
 - `readings.parquet` is a byte copy of
   [`pyarrow_gzip_plain.parquet`](../../src/parquet_codec/tests/fixtures/parquet/pyarrow_gzip_plain.parquet),
   written by
@@ -22,6 +32,6 @@ closes the session. It runs from this directory.
   (DOUBLE, 10.5 to 50.5).
 
 A change that lands a capability, for example the call that runs a query,
-extends `quickstart.py`, the README block and `quickstart.expected` in the same
-pull request. The next step is a query over `readings.parquet` with its five
-rows asserted.
+extends `quickstart.py`, the README block, the install page's two blocks and
+`quickstart.expected` in the same pull request. The next step is a query over
+`readings.parquet` with its five rows asserted.

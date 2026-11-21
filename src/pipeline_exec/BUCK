@@ -28,6 +28,12 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
 #                                 the merge, the table limits and a denied pool.
 # test_edge_policy_and_ready_set  the edge tag and order key policies, the plan
 #                                 checks and the ready set.
+# test_float_sum_workers_concurrent
+#                                 a float SUM and AVG in ORDER_ROW_RANGE on real
+#                                 runtimes of 1, 2, 4 and 7 workers: the same bits
+#                                 as the position-order fold over Parquet and a
+#                                 resident batch, 1e16, 1, -1e16, 1 exactly 1.0,
+#                                 the cursor-grain route's refusal.
 # test_variants                   each variant slot forwards to its member.
 # test_run_segment                every row once, the end of input once per
 #                                 worker, the operator chain, combine once
@@ -54,7 +60,9 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
 #                                 gathered, the output schema of empty input.
 # test_sources                    resident and sink-output sources, the Parquet
 #                                 source built from a spec: projection, glob,
-#                                 pushed filter, morsel size, refusals.
+#                                 pushed filter, morsel size, refusals, a spec
+#                                 that lists its files and their partition
+#                                 constants.
 # test_real_concat                SOURCE_CONCAT: the producers' rows in the spec's
 #                                 order, on several workers, producers with no
 #                                 rows, operators on the concatenation, the
@@ -101,6 +109,14 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
 #                                 answers (the agg_float_ungrouped corpus) by the
 #                                 README's tolerance rule, through run_plan and
 #                                 dealt to workers; the comparison's own refusals.
+# test_sink_float_agg_positions   the sink folding by source position
+#                                 (ORDER_ROW_RANGE): one SUM and AVG, bit for bit,
+#                                 on 1 to 7 workers and every dealing; chunks of
+#                                 one morsel, two morsels at one position refused,
+#                                 no row, the pool charged per position.
+# test_sink_group_agg_keys        the grouped sink over DATE32, BOOL and DECIMAL128
+#                                 keys against a dict oracle, empty input, the
+#                                 refusals by name, decimal scale and precision.
 # test_sink_int_sum_decimal       SUM over an integer column declared DECIMAL(38, 0):
 #                                 exact past INT64 in both signs, equal to the
 #                                 DECIMAL fold of the cast form, NULL and empty,
@@ -205,6 +221,7 @@ mojo_library(
     test_srcs = [
         "tests/test_count_distinct_state.mojo",
         "tests/test_edge_policy_and_ready_set.mojo",
+        "tests/test_float_sum_workers_concurrent.mojo",
         "tests/test_group_agg_plan.mojo",
         "tests/test_op_filter.mojo",
         "tests/test_op_limit_concurrent.mojo",
@@ -225,7 +242,9 @@ mojo_library(
         "tests/test_sink_count_distinct_grouped_limits.mojo",
         "tests/test_sink_float_agg.mojo",
         "tests/test_sink_float_agg_duckdb.mojo",
+        "tests/test_sink_float_agg_positions.mojo",
         "tests/test_sink_group_agg.mojo",
+        "tests/test_sink_group_agg_keys.mojo",
         "tests/test_sink_int_sum_decimal.mojo",
         "tests/test_sink_sort.mojo",
         "tests/test_sink_string_group_agg.mojo",

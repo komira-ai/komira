@@ -1,5 +1,6 @@
 load("@komira//python:dependencies.bzl", "PROTOBUF_REQUIREMENT")
-load("@komira//third_party/python:pins.bzl", "PROTOBUF_EDGES")
+load("@komira//python:pythons.bzl", "PYTHONS")
+load("@komira//third_party/python:pins.bzl", "PROTOBUF_EDGES", "WHEELS")
 load("@komira//tools/build/mojo:download.bzl", "pinned_file")
 load("@komira//tools/build/node:defs.bzl", "c_shared_lib")
 load("@komira//tools/build/python:defs.bzl", "py_test", "python_binding_test", "python_wheel")
@@ -9,6 +10,13 @@ load("@komira//tools/build/python:defs.bzl", "py_test", "python_binding_test", "
 LIBKOMIRA = "komira//src/so:libkomira[runnable]"
 
 PARQUET = "komira//src/so:tests/fixtures/two_columns.parquet"
+
+# Every test below runs once per supported minor (python/pythons.bzl), on its
+# pinned interpreter: `<name>` on CPython 3.13 (the rules' default interpreter,
+# CPython 3.13 on macOS too), `<name>_py311`, `<name>_py312` and
+# `<name>_py314` on the others. `_ON[suffix]` is the `python` argument of a
+# minor's tests: none for 3.13.
+_ON = {p["suffix"]: ({"python": p["python"]} if p["suffix"] else {}) for p in PYTHONS}
 
 # Stand-ins for libkomira (fake_libkomira.c). The loader must refuse a library
 # of ABI major 2, of major 0 (version 0.999), one reporting -1, one without
@@ -74,13 +82,11 @@ c_shared_lib(
     out = "libkomira_fake_modes.so",
 )
 
-# Stand-ins for a Mojo runtime library (fake_runtime_lib.c), for the runtime
-# hook (komira/_runtime.py): each case's copies at `<case>/ours/` (komira's
-# `_lib/lib`), `<case>/other/` (someone else's, loaded first) and
-# `<case>/site/modular/lib/` (where Modular's package installs the runtime the
-# external flavour loads), with the SONAME `libfake_rt_<case>.so` and the
-# build id bytes given here (fake_runtime_lib.c writes the note), None for no
-# build id note.
+# Stand-ins for a Mojo runtime library (fake_runtime_lib.c), for the check of
+# a runtime already in the process (komira/_runtime.py): each case's copies at
+# `<case>/ours/` (komira's `_lib/lib`) and `<case>/other/` (someone else's),
+# with the SONAME `libfake_rt_<case>.so` and the build id bytes given here
+# (fake_runtime_lib.c writes the note), None for no build id note.
 _FAKE_RUNTIME = [
     # (case, where, build id)
     ("a", "ours", "0x0a,0x0a,0x0a,0x0a"),
@@ -91,13 +97,10 @@ _FAKE_RUNTIME = [
     ("d", "ours", "0x0e,0x0e,0x0e,0x0e"),
     ("d", "other", None),
     ("e", "other", "0x0f,0x0f,0x0f,0x0f"),
-    ("f", "site/modular/lib", "0x1f,0x1f,0x1f,0x1f"),
-    ("g", "other", "0x20,0x20,0x20,0x20"),
-    ("h", "other", "0x21,0x21,0x21,0x21"),
 ]
 
 [c_shared_lib(
-    name = "fake_rt_{}_{}".format(case, where.split("/")[0]),
+    name = "fake_rt_{}_{}".format(case, where),
     srcs = ["fake_runtime_lib.c"],
     copts = [
         "-DFAKE_MARKER={}".format(i),
@@ -107,41 +110,30 @@ _FAKE_RUNTIME = [
     out = "libfake_rt_{}.so".format(case),
 ) for i, (case, where, build_id) in enumerate(_FAKE_RUNTIME)]
 
-# The runtime hook on the stand-ins. The bundled flavour's check: nothing
-# loaded by a name, komira's own copy loaded, another copy of the same build
-# (accepted), another build and a copy without a build id (refused, naming the
-# library and both files), komira's copy missing while another is loaded
-# (refused, naming the missing file), a loaded copy that cannot be read back,
-# and nothing checked off Linux; the build id reader on the stand-ins and on
-# hand-written ELF headers (no note, other notes, a cut program header table,
-# not ELF64). The external flavour: its record read, and refused unreadable,
-# not text, malformed line by line, or without a requirement or a library;
-# Modular's runtime not installed (every absolute directory searched, a
-# relative one or a repeat skipped, the missing libraries and the install line
-# named), installed at another build or without a build id (refused by name
-# with the install line, nothing opened), installed at the record's build
-# (opened by path with RTLD_LOCAL, the needed library first, one already
-# loaded not opened again; a stand-in opened from a site directory), one that
-# cannot be opened, and one already loaded of the record's build (nothing
-# searched) or of another (refused). And which of the two `prepare` runs: the
-# check when the runtime is inside or there is no record, the external load
-# otherwise, nothing off Linux.
-python_binding_test(
-    name = "runtime_test",
+# The runtime check on the stand-ins: nothing loaded by a name, komira's own
+# copy loaded, another copy of the same build (accepted), another build and a
+# copy without a build id (refused, naming the library and both files),
+# komira's copy missing while another is loaded (refused, naming the missing
+# file), a loaded copy that cannot be read back, and nothing checked off
+# Linux; and the build id reader on the stand-ins and on hand-written ELF
+# headers (no note, other notes, a cut program header table, not ELF64).
+[python_binding_test(
+    name = "runtime_test" + p["suffix"],
     src = "test_runtime.py",
     data = {
-        "{}/{}/libfake_rt_{}.so".format(case, where, case): ":fake_rt_{}_{}".format(case, where.split("/")[0])
+        "{}/{}/libfake_rt_{}.so".format(case, where, case): ":fake_rt_{}_{}".format(case, where)
         for case, where, _ in _FAKE_RUNTIME
     },
     deps = ["//python:komira"],
-)
+    **_ON[p["suffix"]]
+) for p in PYTHONS]
 
 # Importing loads nothing; the hooks run before the library is opened; the
 # refusals of load (no library, another ABI major, a missing symbol, another
 # file once loaded); then the real library: its version and each of its nine
 # calls, with an engine refusal and its last error.
-python_binding_test(
-    name = "load_test",
+[python_binding_test(
+    name = "load_test" + p["suffix"],
     src = "test_load.py",
     data = {
         "fake_negative/libkomira.so": ":fake_negative",
@@ -153,38 +145,41 @@ python_binding_test(
         "two_columns.parquet": PARQUET,
     },
     deps = ["//python:komira"],
-)
+    **_ON[p["suffix"]]
+) for p in PYTHONS]
 
 # The CPU check before the library opens: on Linux x86_64 a cpuinfo of an
 # x86-64-v3 CPU passes, one lacking any of its flags (avx2 among them, on one
 # processor or all, or with no flags line) raises UnsupportedCpuError naming
 # them and the library is not opened, an unreadable one is a LibraryLoadError,
 # and aarch64 Linux and macOS read nothing.
-python_binding_test(
-    name = "cpu_test",
+[python_binding_test(
+    name = "cpu_test" + p["suffix"],
     src = "test_cpu.py",
     data = {
         "cpuinfo_x86_64_v3.txt": "fixtures/cpuinfo_x86_64_v3.txt",
         "fake_v1_3/libkomira.so": ":fake_v1_3",
     },
     deps = ["//python:komira"],
-)
+    **_ON[p["suffix"]]
+) for p in PYTHONS]
 
 # The public surface on the real library: abi_version(), Session,
 # register_parquet and a session's close.
-python_binding_test(
-    name = "session_test",
+[python_binding_test(
+    name = "session_test" + p["suffix"],
     src = "test_session.py",
     data = {
         "libkomira": LIBKOMIRA,
         "two_columns.parquet": PARQUET,
     },
     deps = ["//python:komira"],
-)
+    **_ON[p["suffix"]]
+) for p in PYTHONS]
 
 # Any minor of ABI 1 loads: 1.0, whose 1.1 calls raise when used, and 1.3.
-python_binding_test(
-    name = "minor0_test",
+[python_binding_test(
+    name = "minor0_test" + p["suffix"],
     src = "test_minor.py",
     args = [
         "--fake",
@@ -194,10 +189,11 @@ python_binding_test(
     ],
     data = {"fake_v1_0/libkomira.so": ":fake_v1_0"},
     deps = ["//python:komira"],
-)
+    **_ON[p["suffix"]]
+) for p in PYTHONS]
 
-python_binding_test(
-    name = "minor3_test",
+[python_binding_test(
+    name = "minor3_test" + p["suffix"],
     src = "test_minor.py",
     args = [
         "--fake",
@@ -207,59 +203,76 @@ python_binding_test(
     ],
     data = {"fake_v1_3/libkomira.so": ":fake_v1_3"},
     deps = ["//python:komira"],
-)
+    **_ON[p["suffix"]]
+) for p in PYTHONS]
 
 # The stand-in's calls: the second call's capacity is the first call's
 # length, a length that grows or shrinks between the calls, a second call
 # that fails, a last error that cannot be read or is empty or not UTF-8, the
 # call's own status, the arguments and answers of the four output calls, the
 # argument checks, and a komira_ctx_new that returns NULL.
-python_binding_test(
-    name = "two_call_test",
+[python_binding_test(
+    name = "two_call_test" + p["suffix"],
     src = "test_two_call.py",
     data = {"fake_modes/libkomira.so": ":fake_modes"},
     deps = ["//python:komira"],
-)
+    **_ON[p["suffix"]]
+) for p in PYTHONS]
 
-# The protobuf runtimes the tests below load the generated plan modules under,
-# other than third_party/python's `:protobuf` (7.36.2, the range's upper edge):
-# `:protobuf-5.29.1`, the lower edge, and `:protobuf-5.28.3`, the release below
-# the range (third_party/python/pins.bzl, PROTOBUF_EDGES).
+# The protobuf runtimes the tests below load the generated plan modules under:
+# 7.36.2, the range's upper edge (third_party/python's `:protobuf`), 5.29.1,
+# the lower edge, and 5.28.3, the release below the range
+# (third_party/python/pins.bzl, PROTOBUF_EDGES). For CPython 3.13 the edges
+# are installed here as `:protobuf-5.29.1` and `:protobuf-5.28.3`, and 7.36.2
+# is third_party/python's; for each other minor all three are installed here,
+# as `:protobuf-<version><suffix>` (`:protobuf-7.36.2_py311`). Each wheel is
+# `abi3`, one file for every minor.
+_PROTOBUF_UPPER = [w for w in WHEELS if w["name"] == "protobuf"]
+
 [pinned_file(
     name = w["file"],
     url = w["url"],
     sha256 = w["sha256"],
     size_bytes = w["size"],
-) for w in PROTOBUF_EDGES]
+) for w in PROTOBUF_EDGES + _PROTOBUF_UPPER]
 
 [python_wheel(
-    name = "protobuf-" + w["version"],
+    name = "protobuf-" + w["version"] + p["suffix"],
     distribution = w["name"],
     version = w["version"],
     wheel = ":" + w["file"],
-    python = "komira//third_party/python:cpython",
-) for w in PROTOBUF_EDGES]
+    python = p["python"],
+) for p in PYTHONS for w in PROTOBUF_EDGES + (_PROTOBUF_UPPER if p["suffix"] else [])]
 
-# One test per case: the target, the runtime it installs and the version
-# that runtime must report, which edge of the range it is, and, for a case of
-# the script's own checks, the requirement it is given instead of
-# PROTOBUF_REQUIREMENT and the error it must raise.
+# {suffix: {version: the target of that protobuf runtime for that minor}}
+_PROTOBUF = {
+    p["suffix"]: {
+        w["version"]: (":protobuf-" + w["version"] + p["suffix"]) if p["suffix"] or w in PROTOBUF_EDGES else "komira//third_party/python:protobuf"
+        for w in PROTOBUF_EDGES + _PROTOBUF_UPPER
+    }
+    for p in PYTHONS
+}
+
+# One test per case and minor: the target, the version of the runtime it
+# installs and the version that runtime must report, which edge of the range
+# it is, and, for a case of the script's own checks, the requirement it is
+# given instead of PROTOBUF_REQUIREMENT and the error it must raise.
 _CASES = [
     # The generated modules at each edge of the declared range: every plan
     # wire golden decodes (from plan_wire's own bytes and from protoc's),
     # parses from its text, and encodes to exactly protoc's bytes, which
     # plan_wire's golden test decodes; a plan built through the Python API
     # encodes to the same bytes.
-    ("plan_pb2_lower_edge", ":protobuf-5.29.1", "5.29.1", "lower", PROTOBUF_REQUIREMENT, None),
-    ("plan_pb2_upper_edge", "komira//third_party/python:protobuf", "7.36.2", "upper", PROTOBUF_REQUIREMENT, None),
+    ("plan_pb2_lower_edge", "5.29.1", "5.29.1", "lower", PROTOBUF_REQUIREMENT, None),
+    ("plan_pb2_upper_edge", "7.36.2", "7.36.2", "upper", PROTOBUF_REQUIREMENT, None),
     # The release below the range refuses the gencode when it is imported.
-    ("plan_pb2_below_range_refused", ":protobuf-5.28.3", "5.28.3", "below", PROTOBUF_REQUIREMENT, None),
+    ("plan_pb2_below_range_refused", "5.28.3", "5.28.3", "below", PROTOBUF_REQUIREMENT, None),
     # The script's checks of the range: a requirement the runtime is outside
     # of, one whose lower bound is not the gencode's version, and a target
     # naming another runtime than the one it installs.
     (
         "refuses_runtime_outside_range",
-        "komira//third_party/python:protobuf",
+        "7.36.2",
         "7.36.2",
         "upper",
         "protobuf>=5.29.1,<7",
@@ -267,7 +280,7 @@ _CASES = [
     ),
     (
         "refuses_lower_bound_not_gencode",
-        "komira//third_party/python:protobuf",
+        "7.36.2",
         "7.36.2",
         "upper",
         "protobuf>=5.28.0,<8",
@@ -275,7 +288,7 @@ _CASES = [
     ),
     (
         "refuses_other_runtime",
-        ":protobuf-5.29.1",
+        "5.29.1",
         "7.36.2",
         "upper",
         PROTOBUF_REQUIREMENT,
@@ -284,13 +297,13 @@ _CASES = [
 ]
 
 [py_test(
-    name = name,
+    name = name + p["suffix"],
     src = "test_plan_pb2.py",
     srcs = [
         "komira//python:plan_pb2[plan_pb2]",
         "komira//python:plan_pb2[plan_vocabulary_pb2]",
     ],
-    deps = [protobuf],
+    deps = [_PROTOBUF[p["suffix"]][runtime]],
     args = [
         "--golden",
         "$(location komira//src/plan_wire:golden_fixtures)",
@@ -302,7 +315,8 @@ _CASES = [
         edge,
     ],
     expect_error = expect_error,
-) for name, protobuf, version, edge, requirement, expect_error in _CASES]
+    **_ON[p["suffix"]]
+) for p in PYTHONS for name, runtime, version, edge, requirement, expect_error in _CASES]
 
 # The private plan node tree both DataFrame skins build (komira._ops), with no
 # library: each verb's tree equals a hand-written one, and each refusal raises
@@ -321,10 +335,11 @@ _CASES = [
 # - ops_no_sql_test: no node, verb or module of komira._ops renders SQL text,
 #   with cases that show each check fails when one does.
 [py_test(
-    name = "ops_{}_test".format(area),
+    name = "ops_{}_test{}".format(area, p["suffix"]),
     src = "test_ops_{}.py".format(area),
     deps = ["//python:komira"],
-) for area in [
+    **_ON[p["suffix"]]
+) for p in PYTHONS for area in [
     "expr",
     "walk",
     "rel",

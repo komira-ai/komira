@@ -25,6 +25,10 @@
 #     matching row are left out when the source is built (read from the scan's
 #     prune counters).
 #   * A glob that matches no file is refused, and the message names the glob.
+#   * A spec that lists its files reads exactly those files, in that order,
+#     and appends each file's constant partition columns after the data
+#     columns (an empty value reads as NULL); a listed-files spec without
+#     partition columns applies its projection across the files.
 #   * A Parquet file with no row, written as one empty batch and as a list of
 #     one empty batch (whatever row groups the writer emits for it), comes
 #     back as no rows under the three-column schema, with no error.
@@ -40,7 +44,8 @@ from std.testing import (
     assert_true,
 )
 
-from arrow.schema import RecordBatch
+from arrow.arrow_types import ArrowType
+from arrow.schema import Field, RecordBatch
 from containers.slab import Slab
 from morsel.morsel import Morsel
 from morsel.morsel_source import MorselSourceImpl
@@ -59,7 +64,9 @@ from pipeline_exec.plan_harness import (
     b_is_null,
     column_names,
     int64_column,
+    null_column,
     sample_batch,
+    string_column,
 )
 from pipeline_exec.source_batch import BatchSource
 from pipeline_exec.source_parquet import build_parquet_source
@@ -332,6 +339,139 @@ def test_a_glob_reads_every_file_it_matches() raises:
     )
     assert_equal(src.num_files(), 2)
     _expect(_column(_drain(src), 0), _range(0, 50))
+
+
+def _partition_cols() -> List[Field]:
+    var cols = List[Field]()
+    cols.append(Field("n", ArrowType.INT64, False))
+    cols.append(Field("region", ArrowType.STRING, False))
+    return cols^
+
+
+def _partition_row(n: String, region: String) -> List[String]:
+    var row = List[String]()
+    row.append(n.copy())
+    row.append(region.copy())
+    return row^
+
+
+def test_a_listed_files_spec_reads_every_file_and_appends_the_partition_constants() raises:
+    var low = _write("listed_low", 0, 30, 15)
+    var high = _write("listed_high", 30, 20, 20)
+    var paths = List[String]()
+    paths.append(high.copy())
+    paths.append(low.copy())
+    var values = List[List[String]]()
+    values.append(_partition_row("8", "us"))
+    values.append(_partition_row("7", "eu"))
+    var cache = ParquetMetadataCache()
+    var pool = ExprPool()
+    var nf = 0
+    var spec = SourceSpecPod.parquet_files(
+        paths^, _partition_cols(), values^, None, None
+    )
+    var src = build_parquet_source[origin_of(cache), origin_of(pool), origin_of(nf)](
+        spec, 0, NW, cache, pool
+    )
+    assert_equal(src.num_files(), 2)
+    var schema = src.output_schema()
+    assert_equal(schema.num_columns(), 5)
+    assert_equal(schema.field_name(3), "n")
+    assert_equal(schema.field_name(4), "region")
+    var morsels = _drain(src)
+    var order = _in_position_order(morsels)
+    var rows = 0
+    var sum_a = 0
+    for k in range(len(order)):
+        ref batch = morsels[order[k]].batch
+        var a = int64_column(batch, 0)
+        var n = int64_column(batch, 3)
+        var region = string_column(batch, 4)
+        for i in range(batch.num_rows()):
+            if a[i] < 30:
+                assert_equal(n[i], 7)
+                assert_equal(region[i], "eu")
+            else:
+                assert_equal(n[i], 8)
+                assert_equal(region[i], "us")
+            sum_a += a[i]
+        rows += batch.num_rows()
+    assert_equal(rows, 50)
+    assert_equal(sum_a, 49 * 50 // 2)
+
+
+def test_an_empty_partition_value_reads_as_null() raises:
+    var path = _write("listed_null", 0, 10, 10)
+    var paths = List[String]()
+    paths.append(path.copy())
+    var values = List[List[String]]()
+    values.append(_partition_row("", "eu"))
+    var cache = ParquetMetadataCache()
+    var pool = ExprPool()
+    var nf = 0
+    var spec = SourceSpecPod.parquet_files(
+        paths^, _partition_cols(), values^, None, None
+    )
+    var src = build_parquet_source[origin_of(cache), origin_of(pool), origin_of(nf)](
+        spec, 0, NW, cache, pool
+    )
+    var morsels = _drain(src)
+    var rows = 0
+    for k in range(len(morsels)):
+        ref batch = morsels[k].batch
+        var is_null = null_column(batch, 3)
+        for i in range(batch.num_rows()):
+            assert_true(is_null[i])
+            assert_false(batch.column_at(4).is_null_at(i))
+        rows += batch.num_rows()
+    assert_equal(rows, 10)
+
+
+def test_a_listed_files_spec_without_partition_columns_applies_its_projection() raises:
+    var first = _write("listed_proj_1", 0, 30, 15)
+    var second = _write("listed_proj_2", 30, 20, 20)
+    var paths = List[String]()
+    paths.append(first.copy())
+    paths.append(second.copy())
+    var cache = ParquetMetadataCache()
+    var pool = ExprPool()
+    var nf = 0
+    var spec = SourceSpecPod.parquet_files(
+        paths^,
+        List[Field](),
+        List[List[String]](),
+        Optional(_names("s", "a")),
+        None,
+    )
+    var src = build_parquet_source[origin_of(cache), origin_of(pool), origin_of(nf)](
+        spec, 0, NW, cache, pool
+    )
+    assert_equal(src.num_files(), 2)
+    assert_equal(src.output_schema().num_columns(), 2)
+    var morsels = _drain(src)
+    var first_morsel = _in_position_order(morsels)[0]
+    var names = column_names(morsels[first_morsel].batch)
+    assert_equal(names[0], "s")
+    assert_equal(names[1], "a")
+    _expect(_column(morsels, 1), _range(0, 50))
+
+
+def test_a_listed_files_spec_reads_only_the_files_it_lists() raises:
+    _ = _write("listed_only_a", 0, 10, 10)
+    _ = _write("listed_only_b", 10, 10, 10)
+    var paths = List[String]()
+    paths.append(test_tmpdir() + "/listed_only_a.parquet")
+    var cache = ParquetMetadataCache()
+    var pool = ExprPool()
+    var nf = 0
+    var spec = SourceSpecPod.parquet_files(
+        paths^, List[Field](), List[List[String]](), None, None
+    )
+    var src = build_parquet_source[origin_of(cache), origin_of(pool), origin_of(nf)](
+        spec, 0, NW, cache, pool
+    )
+    assert_equal(src.num_files(), 1)
+    _expect(_column(_drain(src), 0), _range(0, 10))
 
 
 def test_the_filter_of_the_spec_is_applied_by_the_scan() raises:

@@ -1,5 +1,5 @@
 //! The cases of the install step (install.zig) with a command runner in memory: the commands it runs, in order
-//! and exactly, for each index, how each failing step is reported, that only the install of komira is tried
+//! and exactly, for each index and for a dist directory, how each failing step is reported, that only the install of komira is tried
 //! again, and that the example's output is held to the expected file with the version and the ABI version put in.
 const std = @import("std");
 const lib = @import("pypi_smoke_lib");
@@ -19,6 +19,10 @@ const Scene = struct {
     opts: lib.install.Options,
 
     fn init(a: Alloc, index: lib.common.Index) !*Scene {
+        return initSource(a, .{ .index = index });
+    }
+
+    fn initSource(a: Alloc, source: lib.install.Source) !*Scene {
         const s = try a.create(Scene);
         s.tmp = t.tmpDir(.{});
         try s.tmp.dir.makePath("in");
@@ -30,7 +34,7 @@ const Scene = struct {
         const data = try a.alloc([]const u8, 1);
         data[0] = try h.path(a, &s.tmp, "in/readings.parquet");
         s.opts = .{
-            .index = index,
+            .source = source,
             .python = "/py/python3.13",
             .example = try h.path(a, &s.tmp, "in/quickstart.py"),
             .expect = try h.path(a, &s.tmp, "in/quickstart.expected"),
@@ -135,6 +139,68 @@ test "pypi: komira comes from PyPI plainly, with its dependencies" {
         "W/venv/bin/python -I -c " ++ PROBE,
         "W/venv/bin/python -I quickstart.py",
     }, &fake);
+}
+
+test "dist: the requirements come from PyPI first, then komira alone from the dist directory with no index and no dependencies" {
+    var ar = std.heap.ArenaAllocator.init(t.allocator);
+    defer ar.deinit();
+    const a = ar.allocator();
+    const s = try Scene.initSource(a, .{ .dist = "/runner/wheel/dist" });
+    defer s.tmp.cleanup();
+    var fake = s.runner(a, &.{});
+    var log = h.sink(a);
+    var why: []const u8 = "";
+    try runWith(a, &why, &fake, s, .{}, &log.writer);
+    try expectCalls(&.{
+        "/py/python3.13 -m venv W/venv",
+        PIP ++ FLAGS ++ " --index-url https://pypi.org/simple/ mojo-compiler==1.0.0",
+        PIP ++ FLAGS ++ " --no-deps --no-index --find-links /runner/wheel/dist komira==0.1.7",
+        PIP ++ " check",
+        PIP ++ " show komira",
+        PIP ++ " freeze",
+        "W/venv/bin/python -I -c " ++ PROBE,
+        "W/venv/bin/python -I quickstart.py",
+    }, &fake);
+    try t.expectEqualStrings(try std.fmt.allocPrint(a, "{s}/run", .{s.work}), fake.cwds.items[7]);
+}
+
+test "dist: a wheel without requirements reads no index at all" {
+    var ar = std.heap.ArenaAllocator.init(t.allocator);
+    defer ar.deinit();
+    const a = ar.allocator();
+    const s = try Scene.initSource(a, .{ .dist = "/runner/wheel/dist" });
+    defer s.tmp.cleanup();
+    var fake = s.runner(a, &.{});
+    var log = h.sink(a);
+    var why: []const u8 = "";
+    try runWith(a, &why, &fake, s, .{ .requires_dist = &.{} }, &log.writer);
+    try expectCalls(&.{
+        "/py/python3.13 -m venv W/venv",
+        PIP ++ FLAGS ++ " --no-deps --no-index --find-links /runner/wheel/dist komira==0.1.7",
+        PIP ++ " check",
+        PIP ++ " show komira",
+        PIP ++ " freeze",
+        "W/venv/bin/python -I -c " ++ PROBE,
+        "W/venv/bin/python -I quickstart.py",
+    }, &fake);
+    for (fake.calls.items) |c| try t.expect(std.mem.indexOf(u8, c, "--index-url") == null);
+}
+
+test "dist: a wheel that does not install is refused with pip's stderr, and the example never runs" {
+    var ar = std.heap.ArenaAllocator.init(t.allocator);
+    defer ar.deinit();
+    const a = ar.allocator();
+    const s = try Scene.initSource(a, .{ .dist = "/runner/wheel/dist" });
+    defer s.tmp.cleanup();
+    s.opts.attempts = 1;
+    const rules = [_]h.Rule{.{ .contains = "--find-links", .code = 1, .stderr = "ERROR: komira-0.1.7-py3-none-manylinux_2_34_x86_64.whl is not a supported wheel on this platform.\n" }};
+    var fake = s.runner(a, &rules);
+    var log = h.sink(a);
+    var why: []const u8 = "";
+    try t.expectError(error.Refused, runWith(a, &why, &fake, s, .{ .requires_dist = &.{} }, &log.writer));
+    try t.expectEqualStrings(try std.fmt.allocPrint(a, "install komira: `{s}/venv/bin/python -m pip --isolated --disable-pip-version-check install --no-cache-dir --only-binary=:all: --no-deps --no-index --find-links /runner/wheel/dist komira==0.1.7` exited with 1; last lines of stderr:\nERROR: komira-0.1.7-py3-none-manylinux_2_34_x86_64.whl is not a supported wheel on this platform.", .{s.work}), why);
+    // the venv and the one install; nothing after the install runs
+    try t.expectEqual(@as(usize, 2), fake.calls.items.len);
 }
 
 test "the example and its data are copied into the run directory under their base names" {

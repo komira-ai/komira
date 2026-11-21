@@ -6,7 +6,8 @@ Every wheel of WHEELS and PROTOBUF_EDGES is a binary
 wheel for CPython 3.13 on manylinux x86_64 (glibc 2.28 or older) or a
 pure-Python one, and every wheel of WHEELS_314 one for CPython 3.14 (`cp314`)
 or free-threaded 3.14 (`cp314t`), or a pure-Python one; there is no source
-distribution. `license` is the SPDX expression of the
+distribution. CPython 3.10, 3.11 and 3.12 (PYTHON_310, PYTHON_311,
+PYTHON_312) have no closure here. `license` is the SPDX expression of the
 distribution as recorded in README.md (Licences); `deps` are the
 distributions it requires on linux, by `name`.
 """
@@ -24,7 +25,8 @@ PYTHON = {
 # CPython 3.14 from the same python-build-standalone release, with the GIL
 # and free-threaded (`3.14t`, whose interpreter is `bin/python3.14t`), each
 # with a closure of its own (WHEELS_314). Test-only, for measurements of
-# Python user-defined functions; the 3.13 pin above stays every other test's
+# Python user-defined functions and, with the GIL, for the Python package's
+# tests (python/pythons.bzl); the 3.13 pin above stays every other test's
 # interpreter.
 PYTHON_314 = {
     "abi": "cp314",
@@ -36,6 +38,50 @@ PYTHON_314 = {
     "size": 36299485,
     "url": "https://github.com/astral-sh/python-build-standalone/releases/download/20261003/cpython-3.14.8%2B20261003-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz",
     "version": "3.14.8",
+}
+
+# CPython 3.11 and 3.12 from the same python-build-standalone release, with
+# the GIL: the oldest minors the Python package supports
+# (python/pythons.bzl), on which its tests and its wheel's install test run.
+# Their closures are the wheels those tests install (python/tests/BUCK); no
+# wheel here is for them.
+PYTHON_311 = {
+    "abi": "cp311",
+    "archive": "cpython-3.11.17-20261003-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz",
+    "freethreaded": False,
+    "license": "PSF-2.0",
+    "name": "cpython311",
+    "sha256": "aadcba18994cb8f9ee752aceb31d61e04f75b5d900d76fb575c6fbfabadec434",
+    "size": 30785899,
+    "url": "https://github.com/astral-sh/python-build-standalone/releases/download/20261003/cpython-3.11.17%2B20261003-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz",
+    "version": "3.11.17",
+}
+
+PYTHON_312 = {
+    "abi": "cp312",
+    "archive": "cpython-3.12.15-20261003-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz",
+    "freethreaded": False,
+    "license": "PSF-2.0",
+    "name": "cpython312",
+    "sha256": "731af898886c5f821890dc901eca3c651cca8e51fa7308c159d12a1194aeac91",
+    "size": 34285590,
+    "url": "https://github.com/astral-sh/python-build-standalone/releases/download/20261003/cpython-3.12.15%2B20261003-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz",
+    "version": "3.12.15",
+}
+
+# CPython 3.10, the minor below the package's Requires-Python: one install
+# test (python/BUCK, `refuses_python_outside_requires_python`) runs it to show
+# that the wheel is refused there. Nothing else runs it.
+PYTHON_310 = {
+    "abi": "cp310",
+    "archive": "cpython-3.10.22-20261003-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz",
+    "freethreaded": False,
+    "license": "PSF-2.0",
+    "name": "cpython310",
+    "sha256": "d34d8c8df51eefaf23d1f19ca8b383d5bf6fc91579e370d0b8af7968ad97f8f0",
+    "size": 29308448,
+    "url": "https://github.com/astral-sh/python-build-standalone/releases/download/20261003/cpython-3.10.22%2B20261003-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz",
+    "version": "3.10.22",
 }
 
 PYTHON_314T = {

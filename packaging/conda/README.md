@@ -439,7 +439,7 @@ The rule is `wheel_file`
   check that reads it back and refuses an unstamped one; built reproducibly.
 - **not a member of the release set.** The wheel is published by the PyPI
   workflow from its own target; the release set stays CONDA only.
-- **licence metadata (PEP 639)**: the bundled wheel's `METADATA` carries
+- **licence metadata (PEP 639)**: the wheel's `METADATA` carries
 
   ```
   License-Expression: Apache-2.0 AND LicenseRef-Modular-Proprietary
@@ -450,10 +450,7 @@ The rule is `wheel_file`
   ```
 
   and no `Requires-Dist`: the wheel carries the three Mojo runtime libraries
-  itself (`//src/so:libkomira[dist]`, python/BUCK). The external wheel
-  (python/flavour.bzl) carries `License-Expression: Apache-2.0`, `LICENSE` and
-  `NOTICE` only, and `Requires-Dist: mojo-compiler==<the toolchain's Mojo>`:
-  it carries none of Modular's files. `LICENSE` and `NOTICE` are
+  itself (`//src/so:libkomira[dist]`, python/BUCK). `LICENSE` and `NOTICE` are
   the repository root's, byte for byte; `MODULAR_LICENSE` and
   `MODULAR_THIRD_PARTY_NOTICES` are the pinned `mojo-compiler` conda package's
   `info/licenses/LICENSE` and `info/licenses/Third-Party-Notices`, unmodified

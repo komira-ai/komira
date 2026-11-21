@@ -1,8 +1,10 @@
 //! The cases of prefix.zig: the names a header renames, the header of each
-//! style, and the check's verdicts and messages.
+//! style, and the check's verdicts and messages, on symbol values (cli_test.zig
+//! reads the same rules off the committed ELF and Mach-O archives).
 
 const std = @import("std");
 const P = @import("prefix.zig");
+const objects = @import("native_objects");
 
 const eqs = std.testing.expectEqualStrings;
 const expect = std.testing.expect;
@@ -26,29 +28,29 @@ fn expectFail(r: anytype, want: []const u8) !void {
 test "names: sorted by bytes as LC_ALL=C sort -u sorts, each once, extras merged in" {
     // Upper case (0x41..) sorts before `_` (0x5f), which sorts before lower
     // case; a name that is the start of another sorts first.
-    const got = try P.symbols("b\nB\n_a\na_\nab\nA\nb\n", &.{ "a", "B" }, "lib.a", 1);
+    const got = try P.symbols(P.lines("b\nB\n_a\na_\nab\nA\nb\n"), &.{ "a", "B" }, "lib.a", 1);
     try strs(&.{ "A", "B", "_a", "a", "a_", "ab", "b" }, got);
     // The archive's own order never shows: reversed input, the same list.
-    try strs(got, try P.symbols("b\nab\na_\n_a\nB\nA\n", &.{"a"}, "lib.a", 1));
+    try strs(got, try P.symbols(P.lines("b\nab\na_\n_a\nB\nA\n"), &.{"a"}, "lib.a", 1));
 }
 
 test "names: read_symbols.go's skip list and __umodti3 are never renamed" {
-    const armap = "_ZN6snappy8CompressEv\n__x86.get_pc_thunk.bx\n__real@4000\n_Zfoo\nsdallocx\n__umodti3\nsscanf\nvsnprintf\n" ++
+    const names = "_ZN6snappy8CompressEv\n__x86.get_pc_thunk.bx\n__real@4000\n_Zfoo\nsdallocx\n__umodti3\nsscanf\nvsnprintf\n" ++
         "_vscprintf\n_vscprintf_l\n_vsscanf_l\n_xmm\n__local_stdio_printf_options\n__local_stdio_scanf_options\n" ++
         // near misses: renamed
         "_Y\nsscanf_x\nx_sdallocx\n__x86.get_pc_thunk\n__real\n";
-    try strs(&.{ "_Y", "__real", "__x86.get_pc_thunk", "sscanf_x", "x_sdallocx" }, try P.symbols(armap, &.{}, "lib.a", 1));
+    try strs(&.{ "_Y", "__real", "__x86.get_pc_thunk", "sscanf_x", "x_sdallocx" }, try P.symbols(P.lines(names), &.{}, "lib.a", 1));
 }
 
 test "names: fewer than min is refused, naming the count and the archive" {
-    try strs(&.{ "a", "b" }, try P.symbols("a\nb\n__umodti3\n", &.{}, "/x/lib.a", 2));
-    try expectFail(P.symbols("a\nb\n__umodti3\n", &.{}, "/x/lib.a", 3), "prefix_header: only 2 names read from /x/lib.a (at least 3 expected)");
-    try expectFail(P.symbols("", &.{}, "/x/lib.a", 1), "prefix_header: only 0 names read from /x/lib.a (at least 1 expected)");
+    try strs(&.{ "a", "b" }, try P.symbols(P.lines("a\nb\n__umodti3\n"), &.{}, "/x/lib.a", 2));
+    try expectFail(P.symbols(P.lines("a\nb\n__umodti3\n"), &.{}, "/x/lib.a", 3), "prefix_header: only 2 names read from /x/lib.a (at least 3 expected)");
+    try expectFail(P.symbols(P.lines(""), &.{}, "/x/lib.a", 1), "prefix_header: only 0 names read from /x/lib.a (at least 1 expected)");
 }
 
 test "names: an empty name is refused" {
-    try expectFail(P.symbols("a\n\nb\n", &.{}, "/x/lib.a", 1), "prefix_header: an empty name read from /x/lib.a");
-    try expectFail(P.symbols("a\n", &.{""}, "/x/lib.a", 1), "prefix_header: an empty name read from /x/lib.a");
+    try expectFail(P.symbols(P.lines("a\n\nb\n"), &.{}, "/x/lib.a", 1), "prefix_header: an empty name read from /x/lib.a");
+    try expectFail(P.symbols(P.lines("a\n"), &.{""}, "/x/lib.a", 1), "prefix_header: an empty name read from /x/lib.a");
 }
 
 test "names: the symbols file is one name per line" {
@@ -73,7 +75,7 @@ test "header: boringssl style, byte for byte" {
         \\#endif
         \\
     ;
-    const names = try P.symbols("komira_x\nAES_CMAC\n__umodti3\n", &.{"OPENSSL_memory_alloc"}, "lib.a", 3);
+    const names = try P.symbols(P.lines("komira_x\nAES_CMAC\n__umodti3\n"), &.{"OPENSSL_memory_alloc"}, "lib.a", 3);
     try eqs(want, try P.header(.boringssl, "awslc", "", names));
 }
 
@@ -90,7 +92,7 @@ test "header: strip style, byte for byte; every name renamed once to start with 
         \\#endif
         \\
     ;
-    const names = try P.symbols("s2n_init\nS2N_X\ns2n_\nkomira_s2n_y\n", &.{}, "lib.a", 4);
+    const names = try P.symbols(P.lines("s2n_init\nS2N_X\ns2n_\nkomira_s2n_y\n"), &.{}, "lib.a", 4);
     try eqs(want, try P.header(.strip, "komira_s2n_", "s2n_", names));
 }
 
@@ -115,28 +117,46 @@ test "header: a strip header needs a strip; prefix and strip are identifiers" {
     try expectFail(P.header(.strip, "k_", "s2n-", &.{"a"}), "prefix_tool: strip s2n-: only letters, digits and _ may be in it");
 }
 
-const symtab =
-    \\DEF GLOBAL FUNC DEFAULT komira_s2n_init
-    \\DEF GLOBAL OBJECT DEFAULT komira_s2n_x
-    \\DEF WEAK FUNC DEFAULT komira_s2n_init
-    \\UND GLOBAL NOTYPE DEFAULT memcpy
-    \\UND WEAK NOTYPE DEFAULT komira_s2n_hook
-    \\UND GLOBAL NOTYPE DEFAULT komira_awslc_SHA256
-    \\
-;
+fn sym(name: []const u8, defined: bool, bind: objects.Bind, vis: objects.Vis) P.Sym {
+    return .{ .name = name, .defined = defined, .bind = bind, .vis = vis };
+}
 
-test "symtab: DEF, UND and weak UND names, sorted, each once" {
-    const s = try P.readSymtab(symtab ++ "DEF\tGLOBAL  FUNC DEFAULT   _Zab\nUND GLOBAL NOTYPE DEFAULT\n");
-    try strs(&.{ "_Zab", "komira_s2n_init", "komira_s2n_x" }, s.def);
-    try strs(&.{ "", "komira_awslc_SHA256", "komira_s2n_hook", "memcpy" }, s.und);
+fn def(name: []const u8) P.Sym {
+    return sym(name, true, .global, .default);
+}
+
+fn und(name: []const u8) P.Sym {
+    return sym(name, false, .global, .default);
+}
+
+/// The symbols of a small prefixed archive: two prefixed definitions (one of
+/// them also weak), a plain undefined libc name, a prefixed weak hook, and a
+/// reference to another prefixed library.
+const symtab = [_]P.Sym{
+    def("komira_s2n_init"),
+    def("komira_s2n_x"),
+    sym("komira_s2n_init", true, .weak, .default),
+    und("memcpy"),
+    sym("komira_s2n_hook", false, .weak, .default),
+    und("komira_awslc_SHA256"),
+};
+
+/// `symtab` and `more`.
+fn with(more: []const P.Sym) []const P.Sym {
+    return std.mem.concat(P.a(), P.Sym, &.{ &symtab, more }) catch unreachable;
+}
+
+test "symtab: DEF, UND and weak UND names, sorted, each once; locals in none" {
+    const s = P.symtabOf(with(&.{ def("_Zab"), sym("komira_s2n_local", true, .local, .default), sym("ltmp0", false, .local, .default), sym("komira_s2n_h", true, .global, .hidden) }));
+    try strs(&.{ "_Zab", "komira_s2n_h", "komira_s2n_init", "komira_s2n_x" }, s.def);
+    try strs(&.{ "komira_awslc_SHA256", "komira_s2n_hook", "memcpy" }, s.und);
     try strs(&.{"komira_s2n_hook"}, s.weak_und);
 }
 
-test "symtab: a line it does not understand is refused" {
-    try expectFail(P.readSymtab("DEF GLOBAL FUNC\n"), "archive_check: symtab line 1 is not DEF|UND <bind> <type> <visibility> <name>: DEF GLOBAL FUNC");
-    try expectFail(P.readSymtab(symtab ++ "SYM GLOBAL FUNC DEFAULT x\n"), "archive_check: symtab line 7 is not DEF|UND <bind> <type> <visibility> <name>: SYM GLOBAL FUNC DEFAULT x");
-    try expectFail(P.readSymtab("\n"), "archive_check: symtab line 1 is not DEF|UND <bind> <type> <visibility> <name>: ");
-    try expectFail(P.readSymtab("DEF GLOBAL FUNC DEFAULT x y\n"), "archive_check: symtab line 1 has more than 5 fields: DEF GLOBAL FUNC DEFAULT x y");
+test "names: an archive's symbol table is its defined non-local names, hidden and weak ones included" {
+    const got = P.definedNames(with(&.{ sym("h", true, .global, .hidden), sym("loc", true, .local, .default), sym("u", true, .unique, .default), sym("w", false, .weak, .default) }));
+    try strs(&.{ "komira_s2n_init", "komira_s2n_x", "komira_s2n_init", "h", "u" }, got);
+    try strs(&.{}, P.definedNames(&.{}));
 }
 
 test "allow: a whole name, or a beginning followed by *" {
@@ -162,51 +182,51 @@ test "common: the names in both lists" {
 }
 
 test "check: green, its message and result byte for byte" {
-    const v = try P.check(symtab, &.{ "s2n_init\nmemcpy_not\n", "SHA256\ns2n_init\n" }, "/x/lib.a", "komira_s2n_", 2, &.{});
+    const v = try P.check(&symtab, &.{ "s2n_init\nmemcpy_not\n", "SHA256\ns2n_init\n" }, "/x/lib.a", "komira_s2n_", 2, &.{});
     try expect(!v.red);
     try eqs("", v.stderr);
     const m = "2 defined symbols start with komira_s2n_, 2 defined in all (the rest allowed); 1 weak undefined, each prefixed or allowed; no undefined reference among 3 unprefixed names";
     try eqs("archive_check GREEN: " ++ m ++ " (allowed without the prefix: -)\n", v.stdout);
     try eqs("{\"version\": 1, \"data\": {\"status\": \"success\", \"message\": \"" ++ m ++ "\"}}\n", v.result);
-    const w = try P.check(symtab ++ "DEF GLOBAL FUNC DEFAULT __umodti3\n", &.{}, "/x/lib.a", "komira_s2n_", 2, &.{ "__umodti3", "_Z*" });
+    const w = try P.check(with(&.{ def("__umodti3") }), &.{}, "/x/lib.a", "komira_s2n_", 2, &.{ "__umodti3", "_Z*" });
     try expect(!w.red);
     try eqs("archive_check GREEN: 2 defined symbols start with komira_s2n_, 3 defined in all (the rest allowed); 1 weak undefined, each prefixed or allowed; no undefined reference among 0 unprefixed names (allowed without the prefix: __umodti3|_Z*)\n", w.stdout);
 }
 
 test "check: a defined symbol without the prefix is red, by name" {
-    const v = try P.check(symtab ++ "DEF GLOBAL FUNC DEFAULT s2n_leak\nDEF GLOBAL FUNC DEFAULT _Zok\n", &.{}, "/x/lib.a", "komira_s2n_", 2, &.{"_Z*"});
+    const v = try P.check(with(&.{ def("s2n_leak"), def("_Zok") }), &.{}, "/x/lib.a", "komira_s2n_", 2, &.{"_Z*"});
     try expect(v.red);
     try eqs("archive_check RED: 1 defined symbols without the prefix komira_s2n_ in /x/lib.a:\n  s2n_leak\n", v.stderr);
     try eqs("", v.result);
     // Without the allow, the C++ name is red too.
-    const w = try P.check(symtab ++ "DEF GLOBAL FUNC DEFAULT _Zok\n", &.{}, "/x/lib.a", "komira_s2n_", 2, &.{});
+    const w = try P.check(with(&.{ def("_Zok") }), &.{}, "/x/lib.a", "komira_s2n_", 2, &.{});
     try eqs("archive_check RED: 1 defined symbols without the prefix komira_s2n_ in /x/lib.a:\n  _Zok\n", w.stderr);
 }
 
 test "check: a weak undefined hook without the prefix is red; a plain undefined one is not" {
-    const v = try P.check(symtab ++ "UND WEAK NOTYPE DEFAULT OPENSSL_memory_alloc\n", &.{}, "/x/lib.a", "komira_s2n_", 2, &.{});
+    const v = try P.check(with(&.{ sym("OPENSSL_memory_alloc", false, .weak, .default) }), &.{}, "/x/lib.a", "komira_s2n_", 2, &.{});
     try expect(v.red);
     try eqs("archive_check RED: 1 weak undefined symbols without the prefix komira_s2n_ in /x/lib.a:\n  OPENSSL_memory_alloc\n", v.stderr);
-    try expect(!(try P.check(symtab, &.{}, "/x/lib.a", "komira_s2n_", 2, &.{})).red);
+    try expect(!(try P.check(&symtab, &.{}, "/x/lib.a", "komira_s2n_", 2, &.{})).red);
 }
 
 test "check: an undefined reference to an original name is red" {
-    const v = try P.check(symtab ++ "UND GLOBAL NOTYPE DEFAULT s2n_init\nUND GLOBAL NOTYPE DEFAULT SHA256\n", &.{ "s2n_init\n", "SHA256\nother\n" }, "/x/lib.a", "komira_s2n_", 2, &.{});
+    const v = try P.check(with(&.{ und("s2n_init"), und("SHA256") }), &.{ "s2n_init\n", "SHA256\nother\n" }, "/x/lib.a", "komira_s2n_", 2, &.{});
     try expect(v.red);
     try eqs("archive_check RED: 2 undefined references to the library's own unprefixed names in /x/lib.a:\n  SHA256\n  s2n_init\n", v.stderr);
 }
 
 test "check: fewer than min prefixed definitions is red, after the other findings" {
-    const v = try P.check(symtab ++ "DEF GLOBAL FUNC DEFAULT bad\n", &.{}, "/x/lib.a", "komira_s2n_", 3, &.{});
+    const v = try P.check(with(&.{ def("bad") }), &.{}, "/x/lib.a", "komira_s2n_", 3, &.{});
     try expect(v.red);
     try eqs("archive_check RED: 1 defined symbols without the prefix komira_s2n_ in /x/lib.a:\n  bad\n" ++
         "archive_check RED: only 2 defined symbols start with komira_s2n_ in /x/lib.a (at least 3 expected)\n", v.stderr);
-    try expect(!(try P.check(symtab, &.{}, "/x/lib.a", "komira_s2n_", 2, &.{})).red);
+    try expect(!(try P.check(&symtab, &.{}, "/x/lib.a", "komira_s2n_", 2, &.{})).red);
 }
 
 test "check: a red finding counts every name and lists the first 50" {
-    var t = std.ArrayList(u8).empty;
-    for (0..60) |i| t.writer(P.a()).print("DEF GLOBAL FUNC DEFAULT bad{d:0>2}\n", .{i}) catch unreachable;
+    var t = std.ArrayList(P.Sym).empty;
+    for (0..60) |i| t.append(P.a(), def(P.fmt("bad{d:0>2}", .{i}))) catch unreachable;
     const v = try P.check(t.items, &.{}, "/x/lib.a", "komira_", 0, &.{});
     try expect(v.red);
     try expect(std.mem.startsWith(u8, v.stderr, "archive_check RED: 60 defined symbols without the prefix komira_ in /x/lib.a:\n  bad00\n"));
@@ -215,22 +235,22 @@ test "check: a red finding counts every name and lists the first 50" {
 }
 
 test "check: refuses a bad prefix or allow before reading" {
-    try expectFail(P.check(symtab, &.{}, "/x/lib.a", "", 0, &.{}), "prefix_tool: prefix is empty");
-    try expectFail(P.check(symtab, &.{}, "/x/lib.a", "k_", 0, &.{"_Z.*"}), "prefix_tool: allow _Z.*: a name, or a name's beginning followed by *");
+    try expectFail(P.check(&symtab, &.{}, "/x/lib.a", "", 0, &.{}), "prefix_tool: prefix is empty");
+    try expectFail(P.check(&symtab, &.{}, "/x/lib.a", "k_", 0, &.{"_Z.*"}), "prefix_tool: allow _Z.*: a name, or a name's beginning followed by *");
 }
 
 test "check: the prefix is matched whole: a name missing its last byte is red" {
-    const v = try P.check(symtab ++ "DEF GLOBAL FUNC DEFAULT komira_s2ninit\n", &.{}, "/x/lib.a", "komira_s2n_", 2, &.{});
+    const v = try P.check(with(&.{ def("komira_s2ninit") }), &.{}, "/x/lib.a", "komira_s2n_", 2, &.{});
     try expect(v.red);
     try eqs("archive_check RED: 1 defined symbols without the prefix komira_s2n_ in /x/lib.a:\n  komira_s2ninit\n", v.stderr);
     // Allowed, it is still not counted toward min.
-    const w = try P.check("DEF GLOBAL FUNC DEFAULT komira_s2ninit\n", &.{}, "/x/lib.a", "komira_s2n_", 1, &.{"komira_s2ninit"});
+    const w = try P.check(&.{def("komira_s2ninit")}, &.{}, "/x/lib.a", "komira_s2n_", 1, &.{"komira_s2ninit"});
     try expect(w.red);
     try eqs("archive_check RED: only 0 defined symbols start with komira_s2n_ in /x/lib.a (at least 1 expected)\n", w.stderr);
 }
 
 test "check: an archive with no symbols is red" {
-    const v = try P.check("", &.{}, "/x/lib.a", "komira_s2n_", 1, &.{});
+    const v = try P.check(&.{}, &.{}, "/x/lib.a", "komira_s2n_", 1, &.{});
     try expect(v.red);
     try eqs("archive_check RED: only 0 defined symbols start with komira_s2n_ in /x/lib.a (at least 1 expected)\n", v.stderr);
 }
