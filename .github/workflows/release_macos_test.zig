@@ -350,8 +350,9 @@ fn runsOnPullRequest(text: []const u8) bool {
 const MACOS_JOBS = [_][]const u8{ "build-macos-arm64", "testpypi-macos-arm64", "testpypi-smoke-macos-arm64", "pypi-macos-arm64", "pypi-smoke-macos-arm64", "result-macos-arm64" };
 const LINUX_JOBS = [_][]const u8{ "build", "testpypi", "testpypi-smoke", "pypi", "pypi-smoke", "result" };
 const PYPI_MACOS_BUILD = "build-macos-arm64";
-/// The macOS wheel is the bundled flavour: its build runs for a bundled run alone.
-const PYPI_MACOS_BUILD_GATE = "    if: github.ref == 'refs/heads/main' && inputs.flavour == 'bundled'";
+/// The macOS wheel is the bundled flavour: its build runs for a bundled run alone, a scheduled run
+/// (which has no inputs and so takes the default, bundled) included.
+const PYPI_MACOS_BUILD_GATE = "    if: github.ref == 'refs/heads/main' && (inputs.flavour || 'bundled') == 'bundled'";
 const PRESENT_GATE = "        if: steps.testpypi_file.outputs.present != 'true' || steps.pypi_file.outputs.present != 'true'";
 const PRESENT_TESTPYPI_ID = "        id: testpypi_file";
 const PRESENT_PYPI_ID = "        id: pypi_file";
@@ -438,7 +439,7 @@ fn checkPypiMacos(ar: std.mem.Allocator, text: []const u8) !?[]const u8 {
     if (!has(job, "    runs-on: ubuntu-24.04")) return "build-macos-arm64 does not run on ubuntu-24.04 (a hosted macOS runner is not the farm's Macs)";
     if (mentions(job, "runs-on: macos") or mentions(job, "runs-on: [")) return "build-macos-arm64 names a hosted macOS runner";
     if (!has(job, "    environment: build")) return "build-macos-arm64 is not in the environment build";
-    if (!has(job, PYPI_MACOS_BUILD_GATE)) return "build-macos-arm64 does not run for the bundled flavour alone (if: main and inputs.flavour == bundled)";
+    if (!has(job, PYPI_MACOS_BUILD_GATE)) return "build-macos-arm64 does not run for the bundled flavour alone (if: main and (inputs.flavour || 'bundled') == 'bundled')";
     if (startsWithAny(job, "    needs:")) return "build-macos-arm64 has needs: it waits on another job";
     const connect_at = lineAt(job, FARM_CONNECT) orelse return "build-macos-arm64 does not join the farm";
     if (!has(job, QOS)) return "build-macos-arm64 does not pass farm-qos: batch";
@@ -500,7 +501,7 @@ fn checkPypiMacos(ar: std.mem.Allocator, text: []const u8) !?[]const u8 {
     if (!has(job, "      version: ${{ steps.dist.outputs.version }}")) return "build-macos-arm64 does not publish the version of its dist step as its output";
     var rn: usize = 0;
     const result = (try jobLines(ar, text, "result-macos-arm64", &rn)).?;
-    if (!has(result, "        if: inputs.flavour != 'bundled'") or !mentions(result, "the external flavour has no macOS wheel yet")) return "result-macos-arm64 does not print a notice for a run that is not the bundled flavour";
+    if (!has(result, "        if: (inputs.flavour || 'bundled') != 'bundled'") or !mentions(result, "the external flavour has no macOS wheel yet")) return "result-macos-arm64 does not print a notice for a run that is not the bundled flavour";
     return null;
 }
 
@@ -859,8 +860,9 @@ test "an edit of the real pypi.yml that moves the macOS build off the farm's con
     // a hosted macOS runner is refused for the build; the Macs are the farm's workers
     try expectRefusedPypi(ar, try inJob(ar, text, "build-macos-arm64", "    runs-on: ubuntu-24.04\n", "    runs-on: macos-15\n"), "build-macos-arm64 does not run on ubuntu-24.04");
     try expectRefusedPypi(ar, try inJob(ar, text, "build-macos-arm64", "    environment: build\n", ""), "not in the environment build");
-    try expectRefusedPypi(ar, try inJob(ar, text, "build-macos-arm64", " && inputs.flavour == 'bundled'", ""), "does not run for the bundled flavour alone (if: main and inputs.flavour == bundled)");
-    try expectRefusedPypi(ar, try inJob(ar, text, "result-macos-arm64", "        if: inputs.flavour != 'bundled'\n", ""), "does not print a notice for a run that is not the bundled flavour");
+    try expectRefusedPypi(ar, try inJob(ar, text, "build-macos-arm64", " && (inputs.flavour || 'bundled') == 'bundled'", ""), "does not run for the bundled flavour alone (if: main and (inputs.flavour || 'bundled') == 'bundled')");
+    try expectRefusedPypi(ar, try inJob(ar, text, "build-macos-arm64", " && (inputs.flavour || 'bundled') == 'bundled'", " && inputs.flavour == 'bundled'"), "does not run for the bundled flavour alone");
+    try expectRefusedPypi(ar, try inJob(ar, text, "result-macos-arm64", "        if: (inputs.flavour || 'bundled') != 'bundled'\n", ""), "does not print a notice for a run that is not the bundled flavour");
     // the farm connection: the macOS worker set and hosts, batch priority, tls as every caller passes it
     try expectRefusedPypi(ar, try inJob(ar, text, "build-macos-arm64", DARWIN_PROPS ++ "\n", ""), "darwin-properties");
     try expectRefusedPypi(ar, try inJob(ar, text, "build-macos-arm64", DARWIN_HOSTS ++ "\n", ""), "darwin-macos-hosts");
