@@ -457,8 +457,8 @@ _UPGRADE_VERSION = wheel_version("999999999")
 
 _UPGRADE_FILES = _TEST_FILES | {"--installed-script": "komira//python/tests:test_installed.py"}
 
-def _upgrade_args(flavour):
-    return [
+_UPGRADE_ARGS = {
+    flavour: [
         "--version",
         _UPGRADE_VERSION,
         "--flavour",
@@ -468,16 +468,22 @@ def _upgrade_args(flavour):
         "--toolchain-mojo-version",
         _TOOLCHAIN_MOJO,
     ] + [a for p in sorted(_PREVIOUS_ONLY.keys()) for a in ["--expect-removed", p]]
+    for flavour in FLAVOURS
+}
 
-def _releases(flavour, order = ("previous", "current")):
-    return [":komira_wheel_{}_{}".format(flavour, r) for r in order] + _BESIDE[flavour]
+# The releases of `flavour` in the order given, with what its install brings.
+_RELEASES = {
+    (flavour, order): [":komira_wheel_{}_{}".format(flavour, r) for r in order.split(",")] + _BESIDE[flavour]
+    for flavour in FLAVOURS
+    for order in ["previous,current", "current,previous", "current"]
+}
 
 [wheel_install_test(
     name = "upgrade_test_" + flavour + suffix,
     python = python,
-    wheels = _releases(flavour),
+    wheels = _RELEASES[(flavour, "previous,current")],
     script = "komira//python/tests:test_upgrade.py",
-    args = _upgrade_args(flavour),
+    args = _UPGRADE_ARGS[flavour],
     files = _UPGRADE_FILES,
     upgrade = True,
 ) for flavour in FLAVOURS for suffix, python in [
@@ -490,7 +496,7 @@ def _releases(flavour, order = ("previous", "current")):
     python = "komira//third_party/python:cpython",
     wheels = wheels,
     script = "komira//python/tests:test_upgrade.py",
-    args = _upgrade_args("bundled"),
+    args = _UPGRADE_ARGS["bundled"],
     files = _UPGRADE_FILES,
     upgrade = upgrade,
     expect_failure = expect,
@@ -498,7 +504,7 @@ def _releases(flavour, order = ("previous", "current")):
     # The releases in the other order: the environment ends on the older one.
     (
         "refuses_downgrade",
-        _releases("bundled", ("current", "previous")),
+        _RELEASES[("bundled", "current,previous")],
         True,
         "AssertionError: the site holds komira-0.1.999999998.dist-info, the upgrade should leave only komira-0.1.999999999.dist-info",
     ),
@@ -507,7 +513,7 @@ def _releases(flavour, order = ("previous", "current")):
     # a pass.
     (
         "refuses_upgrade_from_nothing",
-        _releases("bundled", ("current",)),
+        _RELEASES[("bundled", "current")],
         True,
         "AssertionError: the upgrade did not remove komira/_lib/lib/previous_release_only.txt, " +
         "komira/_previous_release_only.txt: the previous release does not carry it",
@@ -517,7 +523,7 @@ def _releases(flavour, order = ("previous", "current")):
     # be mixed.
     (
         "refuses_second_release_without_uninstall",
-        _releases("bundled"),
+        _RELEASES[("bundled", "previous,current")],
         False,
         "install: komira is already installed, and a second wheel of it is installed only with --upgrade",
     ),
