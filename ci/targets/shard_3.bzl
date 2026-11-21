@@ -7,8 +7,6 @@ TARGETS = [
     "komira//python:beside_modular_loaded_first",
     "komira//python:beside_other_mojo_loaded_after",
     "komira//python:beside_other_mojo_loaded_first",
-    "komira//python:komira_wheel_current",
-    "komira//python:komira_wheel_previous",
     "komira//python:refuses_downgrade",
     "komira//python:refuses_missing_libkomira",
     "komira//python:refuses_missing_runtime_library",
