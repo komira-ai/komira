@@ -649,12 +649,13 @@ no link name; the packer writes one only for a versioned SONAME). `conda_package
 library as `shared_lib`, and the plain `so_conda` is the same package without it: a release
 declares one of the two. The package's requirements are the usual ones: the platform guard, `__glibc`
 at the table's floor, `mojo-compiler` at the pin, and the Mojo dependencies of the library. The Mojo
-runtime the library is `NEEDED` on (`libKGENCompilerRTShared.so`, and what it loads) is not bundled: it
-comes from the `mojo-compiler` requirement, which installs it in `lib/` beside the library. The Python
-wheel, when it is built, does not carry it either: it depends on the `mojo-compiler` package of PyPI,
-which installs it in `site-packages/modular/lib/`
-([mojo_runtime_pypi_vs_conda.md](mojo_runtime_pypi_vs_conda.md)), and the repository's `NOTICE`, one
-of the wheel's two licence files, says so (see
+runtime the library is `NEEDED` on (`libKGENCompilerRTShared.so`, and what it loads) is not bundled
+in the conda package: it comes from the `mojo-compiler` requirement, which installs it in `lib/` beside
+the library. The Python wheel carries it: the wheel holds the `[dist]` directory of the library
+(`//src/so:libkomira[dist]`, the runtime included, taken from the toolchain's pinned `mojo-compiler`)
+in `komira/_lib/`, and depends on no other distribution
+([mojo_runtime_pypi_vs_conda.md](mojo_runtime_pypi_vs_conda.md)). The package's two licence files
+are in the wheel's `.dist-info/licenses/`, and the repository's `NOTICE` says so (see
 [packaging/conda/README.md](../../packaging/conda/README.md), "A Python wheel rule"). Whether an npm
 tarball carries it is not decided. For that layout the library's run path is `$ORIGIN/lib:$ORIGIN` (the gate stages the runtime
 in a `lib/` beside it, an install has it beside the library). `conda_install_check`

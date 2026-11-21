@@ -1,30 +1,67 @@
+load("@komira//tools/build/mojo:archive.bzl", "archive_files")
 load("@komira//tools/build/mojo:download.bzl", "pinned_file")
+load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
+load("@komira//tools/build/platforms:table.bzl", "asset", "pinned_kwargs")
 
-# Modular's own published wheels of the Mojo runtime, from PyPI: the package
-# the komira wheel requires (python/BUCK, `Requires-Dist:
-# mojo-compiler==1.0.0`) and the one that package requires in turn
-# (`mojo-compiler-mojo-libs==1.0.0`). The compiler wheel installs the three
-# runtime libraries libkomira needs at load time in
-# `<site-packages>/modular/lib/`; what the wheels hold, and how their libraries
-# compare with the conda package the toolchain pins, is
-# docs/design/mojo_runtime_pypi_vs_conda.md.
+# ---- The licence of the Mojo runtime the wheel carries ------------------------
+#
+# The komira wheel carries the three Mojo runtime libraries of the toolchain's
+# pinned compiler package (`//src/so:libkomira[dist]`). That package's licence
+# texts are its `info/licenses/LICENSE` (the Modular Community License Terms;
+# the package's metadata says `LicenseRef-Modular-Proprietary`) and
+# `info/licenses/Third-Party-Notices`. They are taken out of the same pinned
+# download, unmodified, here: the `.conda` file is a zip whose
+# `info-<name>-<version>-<build>.tar.zst` member holds them. The wheel carries
+# both in `.dist-info/licenses/` (python/BUCK), and NOTICE says which files
+# they cover. A new compiler pin brings its own texts; its info member's name
+# is read from the pin's URL.
+
+pinned_file(**pinned_kwargs("linux-x86_64", "mojo_compiler", visibility = ["komira//python:"]))
+
+# `https://.../mojo-compiler-1.0.0-release.conda` -> `info-mojo-compiler-1.0.0-release.tar.zst`.
+_INFO_MEMBER = "info-" + asset("linux-x86_64", "mojo_compiler")["url"].split("/")[-1][:-len(".conda")] + ".tar.zst"
+
+archive_files(
+    name = "mojo_compiler_info",
+    exec_compatible_with = LINUX_X86_64,
+    archive = ":" + asset("linux-x86_64", "mojo_compiler")["name"],
+    files = [_INFO_MEMBER],
+)
+
+archive_files(
+    name = "mojo_compiler_licenses",
+    exec_compatible_with = LINUX_X86_64,
+    archive = ":mojo_compiler_info[{}]".format(_INFO_MEMBER),
+    files = [
+        "info/licenses/LICENSE",
+        "info/licenses/Third-Party-Notices",
+    ],
+    visibility = ["komira//python:"],
+)
+
+# ---- Modular's own wheels, for the tests beside them --------------------------
+#
+# Modular's published wheels of the Mojo compiler, from PyPI. komira requires
+# none of them and carries none of their files; they are test data of the
+# Python package's install tests that put Modular's runtime in the same
+# process as komira's (python/BUCK, the `beside_modular` targets):
+#
+# - 1.0.0, the version of the toolchain's pin, and the wheel it requires
+#   (`mojo-compiler-mojo-libs==1.0.0`): the same runtime as komira's, in
+#   `<site-packages>/modular/lib/` (docs/design/mojo_runtime_pypi_vs_conda.md);
+# - 1.2.0, another version, whose runtime is not komira's.
 #
 # Plain downloads, fetched at build time and checked against the sha256 and
-# size PyPI publishes for each file (https://pypi.org/pypi/<name>/1.0.0/json).
-# Nothing of them is committed, shipped or redistributed: the komira wheel
-# names them as a dependency and never carries them. They are test data of the
-# clean-environment install test of the Python package
-# (python/BUCK, wheel_install_test) only. They are not Python targets (no
+# size PyPI publishes for each file (https://pypi.org/pypi/<name>/<version>/json).
+# Nothing of them is committed or shipped. They are not Python targets (no
 # Python rule kind, no `.py` file, nothing under third_party/python), so the
-# graph check //:python_closure finds nothing here.
+# graph check //:python_closure finds nothing here. Their licence is
+# Modular's (`LicenseRef-MAX-Platform-Software-License` in the compiler
+# wheel's METADATA).
 #
-# Their licence is Modular's (`LicenseRef-MAX-Platform-Software-License` in
-# the compiler wheel's METADATA); a user installs them from PyPI under it.
-#
-# A newer Mojo is a new pair here at the version of the toolchain's pin
-# (tools/build/platforms/table.bzl, `mojo_compiler`), with
-# `_MOJO_RUNTIME_VERSION` of python/komira/_runtime.py and the wheel's
-# Requires-Dist; wheel_install_test fails while the four disagree.
+# A newer toolchain pin is a new 1.0.0 pair here at its version: the
+# beside_modular tests fail while the toolchain's Mojo and the installed
+# mojo-compiler differ.
 
 pinned_file(
     name = "mojo_compiler-1.0.0-py3-none-manylinux_2_34_x86_64.whl",
@@ -39,5 +76,13 @@ pinned_file(
     url = "https://files.pythonhosted.org/packages/54/99/ea401ff1db56a4af8607283b95627e01b986fc67f510715b07f100118105/mojo_compiler_mojo_libs-1.0.0-py3-none-any.whl",
     sha256 = "20a92e37ecbd19e2dbb1a525612a8de4c9f266f5536def55c5e2b0786320e8b3",
     size_bytes = 3187048,
+    visibility = ["komira//python:"],
+)
+
+pinned_file(
+    name = "mojo_compiler-1.2.0-py3-none-manylinux_2_34_x86_64.whl",
+    url = "https://files.pythonhosted.org/packages/54/8b/2758e8a2207793613d386f41e36f2bfd28837b157a659518c7b7474f7eb3/mojo_compiler-1.2.0-py3-none-manylinux_2_34_x86_64.whl",
+    sha256 = "3ee34a3b26c6cccaa9523a0e8db8f67bea954497d782d97c9e61c3c4ecbdac7b",
+    size_bytes = 81774875,
     visibility = ["komira//python:"],
 )

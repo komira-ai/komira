@@ -6,7 +6,8 @@
 //! usage: archive_files <archive> <prefix> <substitutions> [--tree <dir>]
 //!            (file|template <path under prefix> <out>)...
 //!
-//! The archive (`.tar.gz`, `.tgz`, `.tar` or `.zip`; the name says which) is
+//! The archive (`.tar.gz`, `.tgz`, `.tar`, `.tar.zst`, `.zip`, or `.conda`,
+//! which is a zip of `.tar.zst` members; the name says which) is
 //! extracted into a scratch directory, and each triple takes <path under prefix>
 //! from `<prefix>/` there to <out> (under <dir> after `--tree <dir>`; the
 //! directories of <out> are made): `file` copies it (executable when the
@@ -60,13 +61,29 @@ pub fn substitute(a: std.mem.Allocator, text: []const u8, pairs: []const Pair) !
     return out.toOwnedSlice(a);
 }
 
-pub const Kind = enum { tar_gz, tar, zip };
+pub const Kind = enum { tar_gz, tar, tar_zst, zip };
 
 pub fn kindOf(archive: []const u8) ?Kind {
     if (std.mem.endsWith(u8, archive, ".tar.gz") or std.mem.endsWith(u8, archive, ".tgz")) return .tar_gz;
     if (std.mem.endsWith(u8, archive, ".tar")) return .tar;
-    if (std.mem.endsWith(u8, archive, ".zip")) return .zip;
+    if (std.mem.endsWith(u8, archive, ".tar.zst")) return .tar_zst;
+    if (std.mem.endsWith(u8, archive, ".zip") or std.mem.endsWith(u8, archive, ".conda")) return .zip;
     return null;
+}
+
+/// The largest zstd window a frame may use: a conda package's members use
+/// windows of up to 128 MiB (the decoder refuses a frame whose window does
+/// not fit).
+pub const zstd_window_len: u32 = 1 << 27;
+
+/// The bytes of the zstd stream `data`, decoded whole into memory: the tar
+/// reader then reads a fixed buffer, never this release's zstd reader, whose
+/// discard asserts on the padding the tar reader skips.
+pub fn zstdDecode(a: std.mem.Allocator, data: []const u8) ![]u8 {
+    const window = try a.alloc(u8, zstd_window_len + std.compress.zstd.block_size_max);
+    var zin: std.Io.Reader = .fixed(data);
+    var dz = std.compress.zstd.Decompress.init(&zin, window, .{ .window_len = zstd_window_len });
+    return dz.reader.allocRemaining(a, .limited(1 << 31)) catch |e| return if (e == error.ReadFailed) (dz.err orelse e) else e;
 }
 
 pub const Escapes = error{PathEscapes};
@@ -212,6 +229,12 @@ fn extractArchive(a: std.mem.Allocator, xd: std.fs.Dir, archive: []const u8, kin
             var rbuf: [64 * 1024]u8 = undefined;
             var fr = file.reader(&rbuf);
             extractTar(xd, &fr.interface) catch |e| die("cannot extract {s}: {s}", .{ archive, @errorName(e) });
+        },
+        .tar_zst => {
+            const z = file.readToEndAlloc(a, 1 << 31) catch |e| die("cannot read {s}: {s}", .{ archive, @errorName(e) });
+            const tar_bytes = zstdDecode(a, z) catch |e| die("cannot extract {s}: {s}", .{ archive, @errorName(e) });
+            var tar_in: std.Io.Reader = .fixed(tar_bytes);
+            extractTar(xd, &tar_in) catch |e| die("cannot extract {s}: {s}", .{ archive, @errorName(e) });
         },
         .zip => {
             const bytes = file.readToEndAlloc(a, 1 << 31) catch |e| die("cannot read {s}: {s}", .{ archive, @errorName(e) });

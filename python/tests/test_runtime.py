@@ -1,202 +1,146 @@
-"""The Mojo runtime preload, `_runtime._preload_runtime_libraries`, on
-stand-in directories: a missing library, another `mojo-compiler` version, a
-library that cannot be opened, and the three libraries present, opened in
-dependency order with RTLD_GLOBAL, after a failure part way as well.
+"""The check of a Mojo runtime already in the process (komira/_runtime.py), on
+stand-in libraries, and the GNU build id reader it compares files with.
 
-    test_runtime.py --msupport <so> --asyncrt <so> --kgen <so> --consumer <so>
+    test_runtime.py --lib-dir <dir> --runtime-dir <dir>
 
-Each `<so>` is a build of fake_mojo_runtime.c: the three runtime libraries,
-each needing the ones before it, and a consumer needing the third, as
-libkomira does. The script copies them under the runtime's file names into
-`<dir>/modular/lib/` of scratch directories. A process holds one runtime, so
-every refusal comes first and the load last.
+`<dir>/<case>/ours/` and `<dir>/<case>/other/` hold stand-ins of
+fake_runtime_lib.c (tests/BUCK) with the SONAME `libfake_rt_<case>.so` and the
+build id of their target: `ours` plays komira's `_lib/lib`, `other` a runtime
+loaded by someone else. Each case has its own SONAME, since a library is never
+unloaded: a case loads its copy by path with ctypes, then runs the check.
+`--runtime-dir`, which the rule passes, is not read.
 """
 
 import ctypes
 import os
-import shutil
+import struct
 import sys
 import tempfile
 
-import komira
-from komira import KomiraError, LibraryLoadError, RuntimeNotFoundError
+from komira import LibraryLoadError
 from komira import _runtime
 
-NAMES = ("libMSupportGlobals.so", "libAsyncRTRuntimeGlobals.so", "libKGENCompilerRTShared.so")
-INSTALL = "install it with: pip install mojo-compiler==1.0.0"
+
+def name(case):
+    return "libfake_rt_{}.so".format(case)
 
 
-def raised(call):
+def refused(call):
     try:
         call()
-    except Exception as e:  # each caller checks the exact type
-        return e
-    raise AssertionError("the call raised nothing")
+    except LibraryLoadError as e:
+        assert type(e) is LibraryLoadError, repr(e)
+        assert e.status is None, e.status
+        return str(e)
+    raise AssertionError("the check did not refuse")
 
 
-def site(scratch, name, libs, version=None):
-    """`<scratch>/<name>`, whose modular/lib holds `libs` ({file name: source
-    path, or bytes to write}) and, with `version`, the metadata of a
-    `mojo-compiler` of that version."""
-    directory = os.path.join(scratch, name)
-    libdir = os.path.join(directory, "modular", "lib")
-    os.makedirs(libdir)
-    for file_name, source in libs.items():
-        target = os.path.join(libdir, file_name)
-        if isinstance(source, bytes):
-            with open(target, "wb") as f:
-                f.write(source)
-        else:
-            shutil.copyfile(source, target)
-    if version is not None:
-        info = os.path.join(directory, "mojo_compiler-{}.dist-info".format(version))
-        os.makedirs(info)
-        with open(os.path.join(info, "METADATA"), "w", encoding="utf-8") as f:
-            f.write("Metadata-Version: 2.1\nName: mojo-compiler\nVersion: {}\n".format(version))
-    return directory
+def elf_with_notes(notes, *, phnum=None):
+    """A 64-bit little-endian ELF header, a PT_LOAD and a PT_NOTE program
+    header, and the notes [(owner, type, desc)] the PT_NOTE covers."""
+    body = b""
+    for owner, kind, desc in notes:
+        pad = lambda b: b + b"\0" * (-len(b) % 4)
+        body += struct.pack("<III", len(owner), len(desc), kind) + pad(owner) + pad(desc)
+    phoff, phentsize = 64, 56
+    count = 2 if phnum is None else phnum
+    notes_at = phoff + 2 * phentsize
+    head = b"\x7fELF\x02\x01\x01" + b"\0" * 9
+    head += struct.pack("<HHIQQQIHHHHHH", 3, 62, 1, 0, phoff, 0, 0, 64, phentsize, count, 0, 0, 0)
+    load = struct.pack("<IIQQQQQQ", 1, 5, 0, 0, 0, 0, 0, 0x1000)
+    note = struct.pack("<IIQQQQQQ", 4, 4, notes_at, 0, 0, len(body), len(body), 4)
+    return head + load + note + body
 
 
-def lib(directory):
-    return os.path.join(directory, "modular", "lib")
-
-
-def preload(search_path, **kwargs):
-    return _runtime._preload_runtime_libraries(search_path=search_path, **kwargs)
+def write(directory, base, data):
+    path = os.path.join(directory, base)
+    with open(path, "wb") as f:
+        f.write(data)
+    return path
 
 
 def main(args):
-    def arg(name):
-        return os.path.abspath(args[args.index(name) + 1])
-
-    fakes = dict(zip(NAMES, (arg("--msupport"), arg("--asyncrt"), arg("--kgen"))))
-    consumer = arg("--consumer")
+    lib_dir = os.path.abspath(args[args.index("--lib-dir") + 1])
     scratch = tempfile.mkdtemp()
 
-    # The error is public and a LibraryLoadError; the pinned version.
-    assert "RuntimeNotFoundError" in komira.__all__ and komira.RuntimeNotFoundError is RuntimeNotFoundError
-    assert issubclass(RuntimeNotFoundError, LibraryLoadError) and issubclass(RuntimeNotFoundError, KomiraError)
-    assert _runtime._MOJO_RUNTIME_VERSION == "1.0.0", _runtime._MOJO_RUNTIME_VERSION
+    def ours(case):
+        return os.path.join(lib_dir, case, "ours")
 
-    # The file names, in the order they are opened, on Linux and on macOS.
-    assert _runtime._library_names("linux") == NAMES, _runtime._library_names("linux")
-    want = ("libMSupportGlobals.dylib", "libAsyncRTRuntimeGlobals.dylib", "libKGENCompilerRTShared.dylib")
-    assert _runtime._library_names("darwin") == want, _runtime._library_names("darwin")
+    def other(case):
+        return os.path.join(lib_dir, case, "other")
 
-    # The stand-ins hold the order: libKGENCompilerRTShared opened before the
-    # two it needs is refused by the loader, and leaves nothing open.
-    e = raised(lambda: ctypes.CDLL(fakes[NAMES[2]], mode=ctypes.RTLD_GLOBAL))
-    assert type(e) is OSError and str(e).startswith(fakes[NAMES[2]] + ": undefined symbol: fake_"), str(e)
+    def check(case, **kw):
+        return _runtime.check_loaded_runtime(ours(case), names=[name(case)], platform="linux", **kw)
 
-    none = site(scratch, "none", {})
-    partial = site(scratch, "partial", {NAMES[0]: fakes[NAMES[0]], NAMES[2]: fakes[NAMES[2]]})
-    present = site(scratch, "present", fakes, version="1.0.0")
-    unversioned = site(scratch, "unversioned", fakes)
-    newer = site(scratch, "newer", fakes, version="1.2.0")
-    two = site(scratch, "two", fakes, version="1.0.0")
-    os.makedirs(os.path.join(two, "mojo_compiler-0.9.0.dist-info"))
-    with open(os.path.join(two, "mojo_compiler-0.9.0.dist-info", "METADATA"), "w", encoding="utf-8") as f:
-        f.write("Metadata-Version: 2.1\nName: mojo-compiler\nVersion: 0.9.0\n")
-    bad = site(scratch, "bad", dict(fakes, **{NAMES[0]: b"this is not a shared library\n" * 4}))
-
-    def not_found(search_path, **kwargs):
-        e = raised(lambda: preload(search_path, **kwargs))
-        assert type(e) is RuntimeNotFoundError and e.status is None, repr(e)
-        assert _runtime._loaded_from is None, "a refused preload left a runtime loaded"
-        return str(e)
-
-    # Missing. No directory at all; a directory with no modular/lib; one
-    # holding two of the three, which names the third; relative entries (the
-    # working directory) and repeats are not searched or listed twice.
-    got = not_found([])
-    want = "the Mojo runtime 1.0.0 is not installed: {} not found (searched no absolute directory); {}".format(
-        ", ".join(NAMES), INSTALL
-    )
-    assert got == want, got
-    got = not_found(["", "relative", none, none + os.sep, partial])
-    want = "the Mojo runtime 1.0.0 is not installed: {} not found (searched {}, {}); {}".format(
-        NAMES[1], lib(none), lib(partial), INSTALL
-    )
-    assert got == want, got
-
-    # With no search path the hook searches sys.path.
-    saved = sys.path[:]
+    # The build id reader: the stand-ins' ids as their targets set them; none
+    # for a library linked without one, a file that is not a 64-bit
+    # little-endian ELF, a program header table past the end of the file, and
+    # notes that are not a GNU build id; the build id after another note; an
+    # unreadable file raises.
+    assert _runtime.build_id(os.path.join(ours("b"), name("b"))) == bytes.fromhex("0b0b0b0b"), "the build id of b"
+    assert _runtime.build_id(os.path.join(other("d"), name("d"))) is None, "d/other has no build id"
+    assert _runtime.build_id(write(scratch, "text", b"not an ELF file at all, but long enough" * 4)) is None
+    assert _runtime.build_id(write(scratch, "elf32", b"\x7fELF\x01\x01" + b"\0" * 58)) is None
+    assert _runtime.build_id(write(scratch, "short", b"\x7fELF\x02\x01")) is None
+    assert _runtime.build_id(write(scratch, "cut", elf_with_notes([], phnum=9))) is None
+    no_id = [(b"GNU\0", 5, b"\x01\x02\x03\x04"), (b"Go\0\0", 3, b"go-build-id")]
+    assert _runtime.build_id(write(scratch, "no_id", elf_with_notes(no_id))) is None
+    with_id = no_id + [(b"GNU\0", 3, b"\xaa\xbb\xcc")]
+    assert _runtime.build_id(write(scratch, "with_id", elf_with_notes(with_id))) == b"\xaa\xbb\xcc"
     try:
-        sys.path[:] = ["", none]
-        got = not_found(None)
-    finally:
-        sys.path[:] = saved
-    want = "the Mojo runtime 1.0.0 is not installed: {} not found (searched {}); {}".format(
-        ", ".join(NAMES), lib(none), INSTALL
-    )
-    assert got == want, got
+        _runtime.build_id(os.path.join(scratch, "absent"))
+    except FileNotFoundError:
+        pass
+    else:
+        raise AssertionError("an absent file has a build id")
 
-    # On macOS the names are .dylib: a directory of .so files holds none.
-    got = not_found([present], platform="darwin")
-    want = "the Mojo runtime 1.0.0 is not installed: {} not found (searched {}); {}".format(
-        "libMSupportGlobals.dylib, libAsyncRTRuntimeGlobals.dylib, libKGENCompilerRTShared.dylib", lib(present), INSTALL
-    )
-    assert got == want, got
+    # Nothing loaded by that name: nothing to check, and NOLOAD opened nothing.
+    assert _runtime.loaded_directory(name("none")) is None
+    assert check("none") is None
+    assert _runtime.loaded_directory(name("none")) is None
 
-    # Wrong version. The first complete directory is the runtime: one whose
-    # mojo-compiler is another version is refused, and a good directory after
-    # it on the path is not tried. Two versions installed in one directory
-    # are named both.
-    got = not_found([partial, newer, present])
-    want = "the Mojo runtime in {} is mojo-compiler 1.2.0; komira needs 1.0.0: {}".format(lib(newer), INSTALL)
-    assert got == want, got
-    got = not_found([two])
-    want = "the Mojo runtime in {} is mojo-compiler 0.9.0 and 1.0.0; komira needs 1.0.0: {}".format(lib(two), INSTALL)
-    assert got == want, got
+    # Not Linux: nothing is checked, even with a refusing runtime in place.
+    assert _runtime.check_loaded_runtime(ours("c"), names=[name("c")], platform="darwin") is None
 
-    # The pinned version, and no mojo-compiler metadata at all, pass the check.
-    assert _runtime._check_version(present, lib(present)) is None
-    assert _runtime._check_version(unversioned, lib(unversioned)) is None
+    # Komira's own copy is loaded: the same file, accepted.
+    ctypes.CDLL(os.path.join(ours("a"), name("a")))
+    assert os.path.realpath(_runtime.loaded_directory(name("a"))) == os.path.realpath(ours("a"))
+    assert check("a") is None
 
-    # A library that is found but is not one is a LibraryLoadError with the
-    # loader's reason, and nothing is loaded.
-    path = os.path.join(lib(bad), NAMES[0])
-    e = raised(lambda: preload([bad]))
-    assert type(e) is LibraryLoadError and e.status is None, repr(e)
-    assert str(e) == "cannot load the Mojo runtime library {0}: {0}: invalid ELF header".format(path), str(e)
-    assert _runtime._loaded_from is None
+    # Another copy of the same build (another file, the same build id), as
+    # Modular's mojo-compiler of komira's version is: accepted.
+    ctypes.CDLL(os.path.join(other("b"), name("b")))
+    assert os.path.realpath(_runtime.loaded_directory(name("b"))) == os.path.realpath(other("b"))
+    assert check("b") is None
 
-    # A failure after the first library opened: the directory is held, so
-    # another one is refused, and a retry opens the three again rather than
-    # reporting a runtime it never finished loading.
-    kgen = os.path.join(lib(present), NAMES[2])
-    with open(kgen, "wb") as f:
-        f.write(b"this is not a shared library\n" * 4)
-    e = raised(lambda: preload([none, partial, present]))
-    assert type(e) is LibraryLoadError, repr(e)
-    assert str(e) == "cannot load the Mojo runtime library {0}: {0}: invalid ELF header".format(kgen), str(e)
-    assert _runtime._loaded_from == lib(present) and not _runtime._loaded_all
-    e = raised(lambda: preload([unversioned]))
-    want = "the Mojo runtime is already loaded from {}; it cannot also be loaded from {}".format(
-        lib(present), lib(unversioned)
-    )
-    assert type(e) is LibraryLoadError and str(e) == want, repr(e)
-    e = raised(lambda: preload([present]))
-    assert type(e) is LibraryLoadError, repr(e)
-    assert str(e) == "cannot load the Mojo runtime library {0}: {0}: invalid ELF header".format(kgen), str(e)
-    shutil.copyfile(fakes[NAMES[2]], kgen)
+    # Another build, and a copy without a build id: refused, naming the
+    # library, where it is loaded from and komira's copy.
+    for case in ("c", "d"):
+        ctypes.CDLL(os.path.join(other(case), name(case)))
+        there = _runtime.loaded_directory(name(case))
+        assert os.path.realpath(there) == os.path.realpath(other(case)), there
+        want = (
+            "the Mojo runtime library {} is already loaded from {}, and it is another build than komira's "
+            "({}): a process holds one Mojo runtime, so komira cannot be loaded beside Mojo code built "
+            "with another Mojo version".format(name(case), there, os.path.join(ours(case), name(case)))
+        )
+        got = refused(lambda: check(case))
+        assert got == want, got
 
-    # Present: the three open in dependency order (any other order is refused
-    # by the stand-ins, above) and with RTLD_GLOBAL, so the consumer, opened
-    # with ctypes' default RTLD_LOCAL, finds libKGENCompilerRTShared's symbol.
-    assert preload([none, partial, present]) is None
-    assert _runtime._loaded_from == lib(present) and _runtime._loaded_all, _runtime._loaded_from
-    ctypes.CDLL(consumer)
+    # Komira's copy is missing (a damaged install) while another is loaded:
+    # refused, naming the missing file.
+    ctypes.CDLL(os.path.join(other("e"), name("e")))
+    absent = os.path.join(ours("e"), name("e"))
+    got = refused(lambda: check("e"))
+    assert got == "cannot read the Mojo runtime library {}: No such file or directory".format(absent), got
 
-    # The same directory again opens nothing new; another one is refused.
-    assert preload([present]) is None
-    e = raised(lambda: preload([unversioned]))
-    assert type(e) is LibraryLoadError, repr(e)
-    want = "the Mojo runtime is already loaded from {}; it cannot also be loaded from {}".format(
-        lib(present), lib(unversioned)
-    )
-    assert str(e) == want, str(e)
-    assert _runtime._loaded_from == lib(present)
-    print("runtime: stand-in Mojo runtime loaded from {}".format(lib(present)))
+    # The loaded file cannot be read back (it was removed after it was
+    # loaded): its build id is not known, so it is refused.
+    gone = os.path.join(scratch, "gone")
+    got = refused(lambda: check("b", find=lambda n: gone))
+    assert got.startswith("the Mojo runtime library {} is already loaded from {}, ".format(name("b"), gone)), got
+
+    print("runtime: the check accepts komira's copy and a copy of its build, and refuses every other")
 
 
 if __name__ == "__main__":

@@ -1,6 +1,6 @@
 //! Unit tests of archive_files.zig: the substitutions (literal, in order, per
 //! line, sed's treatment of the last newline), the archive kinds, extraction of
-//! tar, tar.gz and zip (executable bits, links, an escaping member), over
+//! tar, tar.gz, tar.zst and zip (executable bits, links, an escaping member), over
 //! archives built in memory. The whole tool is run by every third_party
 //! `archive_files` target.
 const std = @import("std");
@@ -73,6 +73,29 @@ pub fn tar(a: std.mem.Allocator, entries: []const Entry) ![]u8 {
 }
 
 /// A gzip stream of `bytes` in stored (uncompressed) deflate blocks.
+/// `bytes` as one zstd frame of raw blocks (no compression, the content size
+/// stated, a 128 KiB window): valid zstd with no encoder.
+pub fn zstdRaw(a: std.mem.Allocator, bytes: []const u8) ![]u8 {
+    var out = std.ArrayList(u8).empty;
+    // Magic, a descriptor with an 8-byte content size and a window byte, then
+    // the size.
+    try out.appendSlice(a, &.{ 0x28, 0xB5, 0x2F, 0xFD, 0xC0, 0x38 });
+    var fcs: [8]u8 = undefined;
+    std.mem.writeInt(u64, &fcs, bytes.len, .little);
+    try out.appendSlice(a, &fcs);
+    var at: usize = 0;
+    while (true) {
+        const n = @min(128 * 1024, bytes.len - at);
+        const last = at + n == bytes.len;
+        const hdr: u32 = (@as(u32, @intCast(n)) << 3) | @intFromBool(last); // block type 0: raw
+        try out.appendSlice(a, &.{ @truncate(hdr), @truncate(hdr >> 8), @truncate(hdr >> 16) });
+        try out.appendSlice(a, bytes[at .. at + n]);
+        at += n;
+        if (last) break;
+    }
+    return out.toOwnedSlice(a);
+}
+
 pub fn gzip(a: std.mem.Allocator, bytes: []const u8) ![]u8 {
     var out = std.ArrayList(u8).empty;
     try out.appendSlice(a, &.{ 0x1f, 0x8b, 8, 0, 0, 0, 0, 0, 0, 3 });
@@ -235,6 +258,9 @@ test "kindOf: by the name's ending" {
     try t.expect(A.kindOf("a.tgz").? == .tar_gz);
     try t.expect(A.kindOf("a.tar").? == .tar);
     try t.expect(A.kindOf("a.zip").? == .zip);
+    try t.expect(A.kindOf("x/info-p-1.0-0.tar.zst").? == .tar_zst);
+    try t.expect(A.kindOf("mojo_compiler_1.0.0_linux-64.conda").? == .zip);
+    try t.expect(A.kindOf("a.zst") == null);
     try t.expect(A.kindOf("a.tar.xz") == null);
     try t.expect(A.kindOf("a.gz") == null);
     try t.expect(A.kindOf("a") == null);
@@ -292,6 +318,28 @@ test "extractTar: a member that escapes is refused, and a gzip stream reads as t
     try extractFrom(tmp.dir, plain.written());
     var buf: [8]u8 = undefined;
     try t.expectEqualStrings("gz", try tmp.dir.readFile("p/f", &buf));
+}
+
+test "zstdDecode: a tar.zst decodes to the tar, which extracts; a stream that is not zstd is refused" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var tmp = t.tmpDir(.{ .iterate = true });
+    defer tmp.cleanup();
+    const plain = try tar(a, &.{
+        .{ .name = "info/", .kind = '5', .mode = 0o755 },
+        .{ .name = "info/licenses/LICENSE", .data = "the licence\n" },
+    });
+    const decoded = try A.zstdDecode(a, try zstdRaw(a, plain));
+    try t.expectEqualSlices(u8, plain, decoded);
+    try extractFrom(tmp.dir, decoded);
+    var buf: [32]u8 = undefined;
+    try t.expectEqualStrings("the licence\n", try tmp.dir.readFile("info/licenses/LICENSE", &buf));
+    // A frame of more than one block decodes whole.
+    const big = try a.alloc(u8, 300 * 1024);
+    for (big, 0..) |*b, i| b.* = @truncate(i *% 7);
+    try t.expectEqualSlices(u8, big, try A.zstdDecode(a, try zstdRaw(a, big)));
+    if (A.zstdDecode(a, "not zstd at all")) |_| return error.TestExpectedError else |_| {}
 }
 
 test "extractZip: stored and deflated entries, directories, and the executable bit from the unix mode" {
