@@ -4,8 +4,9 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # the derived row schema, statement-scoped CTE bindings, Parquet read options,
 # the plan validator, table display, select/with_columns aggregate lowering,
 # the filter refusals, join helpers, the row UDF chains and the alias, concat,
-# drop_nulls, rename and with_columns plan builders; and the plan-time Parquet
-# footer reads (row count and Arrow schema, through parquet).
+# drop_nulls, rename and with_columns plan builders; the plan-time Parquet
+# footer reads (row count and Arrow schema, through parquet); and the rule that
+# puts one cast-to-string node above a plan a text sink writes.
 #
 # deps is the full transitive closure, the deps of udf (row_udf_chain's
 # row UDF types) included; op_agg_state and what it needs
@@ -53,6 +54,7 @@ mojo_library(
         "tests/test_agg_output_naming_direct.mojo",
         "tests/test_auto_schema.mojo",
         "tests/test_auto_schema_direct.mojo",
+        "tests/test_cast_to_varchar_insert.mojo",
         "tests/test_cte_binding_direct.mojo",
         "tests/test_dataframe_builders_direct.mojo",
         "tests/test_display_stats.mojo",
