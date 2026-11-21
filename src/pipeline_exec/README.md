@@ -72,24 +72,57 @@ Import each module by name; the package root exports nothing.
   `(SINK_AGG, KEY_DTYPE_NONE, SINK_ORIENT_COLUMNAR)`: SUM, COUNT, COUNT(*),
   COUNT(DISTINCT), MIN, MAX and AVG (`count_distinct` below). The aggregate arguments (`AggSinkData.agg_exprs`) are run by each
   worker as a projection over the morsel, under its selection mask; the state
-  of a worker is one cell per aggregate, a count and one 128-bit integer. The
-  folds are exact integer folds over signed integers, DECIMAL128 (the
-  unscaled value; the scale rides beside it) and, for MIN and MAX, DATE32, so
-  the merge in worker order does not depend on the schedule. No float is
-  folded: a float input is refused by name. SUM over a decimal is a DECIMAL128 of
-  the input's scale in the declared precision, over an integer an INT64 (or
-  the DECIMAL(38, 0) a plan declares for the SQL integer sum); a sum
-  that leaves 128 bits, has more digits than the declared precision, or leaves
-  INT64 is refused rather than wrapped. AVG is a DOUBLE: one conversion of the
-  exact sum (`decimal_to_float64` for a decimal) divided by the count. Over no
-  non-NULL row SUM, MIN, MAX and AVG are NULL and COUNT is zero, in one row of
-  the declared schema. `AggSinkData.presorted` and `estimated_groups` belong to
-  grouped sinks and are ignored.
+  of a worker is one cell per aggregate, a count, one 128-bit integer and one
+  double. The folds over signed integers, DECIMAL128 (the unscaled value; the
+  scale rides beside it) and, for MIN and MAX, DATE32 are exact integer
+  folds, so the merge in worker order does not depend on the schedule. SUM
+  over a decimal is a DECIMAL128 of the input's scale in the declared
+  precision, over an integer an INT64 (or the DECIMAL(38, 0) a plan declares
+  for the SQL integer sum); a sum that leaves 128 bits, has more digits than
+  the declared precision, or leaves INT64 is refused rather than wrapped. AVG
+  is a DOUBLE: one conversion of the exact sum (`decimal_to_float64` for a
+  decimal) divided by the count. Over no non-NULL row SUM, MIN, MAX and AVG
+  are NULL and COUNT is zero, in one row of the declared schema.
+  `AggSinkData.presorted` and `estimated_groups` belong to grouped sinks and
+  are ignored.
+
+  FLOAT32 and FLOAT64 arguments fold into the double, as DuckDB's `sum`,
+  `avg`, `min` and `max` of a DOUBLE do (a FLOAT is widened first, exactly).
+  SUM is a FLOAT64: the values added from +0.0 in row order within a worker,
+  then the workers' sums added in worker order, with no overflow refused (a
+  sum past the double range is an infinity, +inf plus -inf and any NaN give
+  NaN); AVG is that sum divided by the count; MIN and MAX keep the input's
+  type and use DuckDB's order, NaN above +inf (query_semantics 2.7). The
+  tolerance rule, which `tests/test_sink_float_agg_duckdb.mojo` holds the
+  sink to against the pinned DuckDB:
+
+  - MIN, MAX, COUNT and NULL are exact: MIN and MAX return one of the input
+    values, the same one DuckDB returns, except that which of -0.0 and 0.0 a
+    tie keeps depends on the order the rows are met.
+  - NaN matches any NaN (its sign and payload are not part of the answer),
+    and +inf and -inf match only themselves.
+  - A finite SUM or AVG is within 1e-9 relative of DuckDB's:
+    `|got - want| <= 1e-9 * max(|got|, |want|)`, whenever the sum is well
+    conditioned. Both are double sums in an order the schedule picks
+    (query_semantics 2.10), and a sum of `n` values in any order is within
+    about `(n - 1) * 2^-53 * sum(|x|)` of the exact one, so the two answers are
+    within `(n - 1) * 2^-52 * sum(|x|)` of each other: the rule holds while
+    that is at most `1e-9 * |sum(x)|`, for 4096 values while `sum(|x|)` is
+    at most about 1,100 times `|sum(x)|`. A cancelling sum past that bound, and
+    a sum whose partial sums leave the double range in one order but not in
+    another, can differ by more; DuckDB's own answer to such a sum changes with
+    its thread count too.
+
+  A worker's sum is not compensated (DuckDB's `sum` is not; its `fsum` is)
+  and a segment records no row order, so a float SUM or AVG is not the same
+  bits on every worker count; `lowering` cuts it with `ORDER_NONE` for that
+  reason.
 - `sink_group_agg`, `group_table`, `group_keys`, `sink_agg_any`: the grouped
   aggregation sinks `(SINK_AGG, KEY_DTYPE_I64 | I32 | F64 | F32,
   SINK_ORIENT_COLUMNAR)`, over one or more keys that are integer columns (the
   I64 and I32 rows) or float columns (F64 and F32), with the aggregates and the
-  exact folds of the ungrouped sink (`agg_fold`, `agg_output`). The output
+  exact folds of the ungrouped sink (`agg_fold`, `agg_output`); an aggregate
+  of a float argument (not a float key) is refused by name. The output
   schema lists the key columns, in the input's types, then the aggregates. Each
   worker folds into a hash table of its own (`group_table`: a 64-bit cell and a
   NULL flag per key, a count and a 128-bit integer per aggregate); a NULL key is
@@ -259,6 +292,11 @@ the raise fails the query through the first-error slot.
   with a selection mask is materialized (fully copied) before the predicate is
   evaluated. Whether a mask-aware evaluation is worth it is for slice 3 to
   measure.
+- **Float aggregate arguments are folded by the ungrouped sink only.** The
+  grouped sinks read each argument into 128-bit values per row
+  (`agg_fold.widen_column`) and refuse a FLOAT32 or FLOAT64 argument by name;
+  a float key is served. The last bits of a float SUM or AVG depend on which
+  worker folded which rows (the tolerance rule above).
 - **The collect sink holds every chunk until `take_output`.** Chunks stay in the
   worker slots, then in the merged list, and `take_output` concatenates them
   into the output batch, so a segment's peak memory is about twice its output.
