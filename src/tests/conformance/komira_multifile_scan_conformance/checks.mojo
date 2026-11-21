@@ -63,7 +63,9 @@ def _answers() raises -> _Answers:
         if line.byte_length() == 0:
             continue
         var parts = line.split("\t")
-        assert_equal(len(parts), 4, "answers.tsv row: " + line)
+        # `parts` borrows `line`: the message takes a copy, so `line` stays
+        # whole for the reads below.
+        assert_equal(len(parts), 4, "answers.tsv row: " + line.copy())
         out.block.append(String(parts[0]))
         out.query.append(String(parts[1]))
         out.line.append(String(parts[3]))
