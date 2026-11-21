@@ -176,7 +176,7 @@ test "present fails on an index error and appends no line" {
         .{ .url = JSON_URL, .got = .{ .body = @constCast("<html>maintenance</html>") } },
     };
     const why = [_][]const u8{ "GET " ++ JSON_URL ++ ": HTTP 500", "GET " ++ JSON_URL ++ ": ConnectionRefused", "GET " ++ JSON_URL ++ ": the answer is not the JSON of a release (" };
-    for (bad, why) |route, want| {
+    inline for (bad, why) |route, want| {
         var tmp = t.tmpDir(.{});
         defer tmp.cleanup();
         try tmp.dir.writeFile(.{ .sub_path = "name.txt", .data = MAC_FILE ++ "\n" });

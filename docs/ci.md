@@ -758,7 +758,7 @@ holds `build` and `build-macos-arm64` to `farm-qos: batch`.
 result, no macOS job `needs` a Linux job or reads its result, and no Linux job names macOS: a red macOS chain
 never holds the Linux release, and a red Linux chain never holds the macOS wheel. Both chains build the same
 commit, so they carry the same stamp and the same version (`0.1.<N>`); the Linux file is
-`komira-0.1.<N>-py3-none-manylinux_2_34_x86_64.whl` and the macOS file
+`komira-0.1.<N>-py3-none-manylinux_2_35_x86_64.whl` and the macOS file
 `komira-0.1.<N>-py3-none-macosx_11_0_arm64.whl` (the platform `darwin-arm64`, whose floor is macOS 11.0), two files
 of one release. The macOS chain has its own artifacts (`pypi-<version>-macos-arm64-dist` and
 `...-macos-arm64-smoke`), so the two dist directories never mix and each upload sends one wheel. A Mac
@@ -789,7 +789,7 @@ log) and 2 for a usage error.
 | `verify` | `--index <testpypi\|pypi> --dist <dir> [--attempts <1..20>] [--delay <0..300>]` | asks the index for the file it serves and compares it with the built one (below). A refused attempt is tried again up to `--attempts` times (default 5), `--delay` seconds apart (default 30), because an index can lag an upload. |
 | `install` | `--index <testpypi\|pypi> --dist <dir> --python <exe> --example <quickstart.py> --expect <quickstart.expected> --data <file>... --abi-table <komira.tsv> --work <dir> [--attempts <n>] [--delay <s>]` | installs the published wheel into an empty environment and runs the example (below). `--attempts` and `--delay` as for `verify`, for the install of `komira` only. |
 
-**The three index states.** `state` asks the index about the one file of the build, `komira-0.1.<N>-py3-none-manylinux_2_34_x86_64.whl`
+**The three index states.** `state` asks the index about the one file of the build, `komira-0.1.<N>-py3-none-manylinux_2_35_x86_64.whl`
 (`<N>` is the stamp's build number), or `komira-0.1.<N>-py3-none-macosx_11_0_arm64.whl` in the macOS chain:
 
 - `absent`: the index has no such file (the version may exist with another file, another platform's wheel).

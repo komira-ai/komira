@@ -115,7 +115,7 @@ fn checkMachO(alloc: Alloc, d: *Diag, p: Policy, m: Member, names: []const []con
     if (info.cputype != macho.CPU_TYPE_ARM64) return refuse(d, alloc, "arch: {s} is a Mach-O file for CPU type {x}, not arm64", .{ m.name, info.cputype });
     const minos = info.minos orelse return refuse(d, alloc, "minos: {s} states no minimum macOS version (no LC_BUILD_VERSION or LC_VERSION_MIN_MACOSX)", .{m.name});
     const minos_text = try macho.versionText(alloc, minos);
-    if ((diag.compareVersions(minos_text, tag_macos) orelse .gt) == .gt)
+    if ((diag.compareVersions(minos_text, tag_macos) orelse unreachable) == .gt)
         return refuse(d, alloc, "minos: {s} needs macOS {s}, newer than the tag's macOS {s}", .{ m.name, minos_text, tag_macos });
     if (info.install_name) |n| {
         const file = if (std.mem.startsWith(u8, n, "@rpath/")) n["@rpath/".len..] else "";

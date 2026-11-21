@@ -5,7 +5,7 @@
 # gets it and that the quickstart (python/examples/quickstart.py) prints what
 # python/examples/quickstart.expected says, and only then uploads the same bytes to PyPI and proves the
 # same there. The version is 0.1.<N>, N the build number of `release_json stamp`, so a code commit is a
-# new version; the Linux wheel is komira-0.1.<N>-py3-none-manylinux_2_34_x86_64.whl.
+# new version; the Linux wheel is komira-0.1.<N>-py3-none-manylinux_2_35_x86_64.whl.
 #
 # THE JOBS of the Linux wheel, in order (a job that fails stops every job after it):
 #   `build`           on the farm: builds the stamped wheel (//python:komira_wheel), runs the install

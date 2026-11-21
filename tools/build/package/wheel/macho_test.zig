@@ -144,6 +144,31 @@ test "a dylib command too short to hold its string offset is refused" {
     try t.expectEqualStrings("libx.dylib: a malformed Mach-O file (a dylib command shorter than 24 bytes)", try refusal(a, short));
 }
 
+test "a load, run path or version command too short for its fields is refused, each by its kind" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    // Each fixture's first command is at 32, its cmdsize at 36.
+    const load = try a.dupe(u8, try fixture.machO(a, .{ .loads = &.{"@rpath/a.dylib"}, .no_version = true }));
+    put32(load, 36, 16);
+    try t.expectEqualStrings("libx.dylib: a malformed Mach-O file (a dylib command shorter than 24 bytes)", try refusal(a, load));
+    const rpath = try a.dupe(u8, try fixture.machO(a, .{ .rpaths = &.{"@loader_path"}, .no_version = true }));
+    put32(rpath, 36, 8);
+    try t.expectEqualStrings("libx.dylib: a malformed Mach-O file (an LC_RPATH shorter than 12 bytes)", try refusal(a, rpath));
+    const version = try a.dupe(u8, try fixture.machO(a, .{ .version_min = true }));
+    put32(version, 36, 8);
+    try t.expectEqualStrings("libx.dylib: a malformed Mach-O file (a version command shorter than 16 bytes)", try refusal(a, version));
+}
+
+test "a dylib with two install names is refused" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    // The second LC_ID_DYLIB is written as the kind of the one load.
+    const two = try fixture.machO(a, .{ .install_name = "@rpath/a.dylib", .loads = &.{"@rpath/b.dylib"}, .load_kinds = &.{0xd} });
+    try t.expectEqualStrings("libx.dylib: a malformed Mach-O file (two LC_ID_DYLIB commands)", try refusal(a, two));
+}
+
 test "two minimum-OS commands, and a build version for another platform, are refused" {
     var arena = std.heap.ArenaAllocator.init(t.allocator);
     defer arena.deinit();

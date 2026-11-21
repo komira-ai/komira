@@ -87,8 +87,9 @@ const Reader = struct {
         return refuse(r.d, r.alloc, "{s}: a malformed Mach-O file ({s})", .{ r.name, what });
     }
 
-    fn int(r: Reader, at: usize) Refused!u32 {
-        if (at > r.b.len or r.b.len - at < 4) return r.bad("an offset past the end of the file");
+    /// The u32 at `at`; every caller has bounded `at + 4` by the header or
+    /// its command's size first.
+    fn int(r: Reader, at: usize) u32 {
         return std.mem.readInt(u32, r.b[at..][0..4], .little);
     }
 
@@ -108,9 +109,9 @@ pub fn read(alloc: Alloc, d: *Diag, name: []const u8, data: []const u8) Refused!
     if (isFat(data)) return refuse(d, alloc, "{s}: a universal (fat) Mach-O file: a macosx arm64 wheel carries thin arm64 files", .{name});
     if (!isThin(data)) return r.bad("no 64-bit little-endian Mach-O magic");
     if (data.len < 32) return r.bad("a header shorter than 32 bytes");
-    var out = Info{ .cputype = try r.int(4), .filetype = try r.int(12) };
-    const ncmds = try r.int(16);
-    const sizeofcmds = try r.int(20);
+    var out = Info{ .cputype = r.int(4), .filetype = r.int(12) };
+    const ncmds = r.int(16);
+    const sizeofcmds = r.int(20);
     if (sizeofcmds > data.len - 32) return r.bad("load commands past the end of the file");
     const end: usize = 32 + sizeofcmds;
 
@@ -120,31 +121,31 @@ pub fn read(alloc: Alloc, d: *Diag, name: []const u8, data: []const u8) Refused!
     var i: u32 = 0;
     while (i < ncmds) : (i += 1) {
         if (end - at < 8) return r.bad("a load command outside sizeofcmds");
-        const cmd = try r.int(at);
-        const size = try r.int(at + 4);
+        const cmd = r.int(at);
+        const size = r.int(at + 4);
         if (size < 8 or size > end - at) return r.bad("a load command outside sizeofcmds");
         switch (cmd) {
             LC_LOAD_DYLIB, LC_LOAD_WEAK_DYLIB, LC_REEXPORT_DYLIB, LC_LAZY_LOAD_DYLIB, LC_LOAD_UPWARD_DYLIB => {
                 if (size < 24) return r.bad("a dylib command shorter than 24 bytes");
-                try loads.append(alloc, try r.str(at, size, try r.int(at + 8)));
+                try loads.append(alloc, try r.str(at, size, r.int(at + 8)));
             },
             LC_ID_DYLIB => {
                 if (size < 24) return r.bad("a dylib command shorter than 24 bytes");
                 if (out.install_name != null) return r.bad("two LC_ID_DYLIB commands");
-                out.install_name = try r.str(at, size, try r.int(at + 8));
+                out.install_name = try r.str(at, size, r.int(at + 8));
             },
             LC_RPATH => {
                 if (size < 12) return r.bad("an LC_RPATH shorter than 12 bytes");
-                try rpaths.append(alloc, try r.str(at, size, try r.int(at + 8)));
+                try rpaths.append(alloc, try r.str(at, size, r.int(at + 8)));
             },
             LC_BUILD_VERSION, LC_VERSION_MIN_MACOSX => {
                 if (size < 16) return r.bad("a version command shorter than 16 bytes");
                 if (out.minos != null) return r.bad("two minimum-OS version commands");
                 if (cmd == LC_BUILD_VERSION) {
-                    if (try r.int(at + 8) != PLATFORM_MACOS) return r.bad("an LC_BUILD_VERSION for a platform other than macOS");
-                    out.minos = try r.int(at + 12);
+                    if (r.int(at + 8) != PLATFORM_MACOS) return r.bad("an LC_BUILD_VERSION for a platform other than macOS");
+                    out.minos = r.int(at + 12);
                 } else {
-                    out.minos = try r.int(at + 8);
+                    out.minos = r.int(at + 8);
                 }
             },
             else => {},

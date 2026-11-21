@@ -219,7 +219,10 @@ def macos_version():
     when it is not macOS."""
     text = platform.mac_ver()[0]
     m = re.match(r"(\d+)\.(\d+)", text) or re.fullmatch(r"(\d+)()", text)
-    return (int(m.group(1)), int(m.group(2) or 0)) if m else (0, 0)
+    version = (int(m.group(1)), int(m.group(2) or 0)) if m else (0, 0)
+    # An interpreter built against an SDK older than macOS 11 is told 10.16
+    # on every macOS 11 or newer: it means at least 11.0.
+    return (11, 0) if version == (10, 16) else version
 
 
 def installed(site):
