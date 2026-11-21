@@ -100,7 +100,7 @@ def hll_registers_to_key_value(registers: Span[UInt8, _]) raises -> KeyValue:
             + String(len(registers))
         )
     var alphabet = String(_REGISTER_ALPHABET)
-    var text = String(capacity_bytes=HLL_REGISTER_COUNT)
+    var text = String(capacity=HLL_REGISTER_COUNT)
     for i in range(HLL_REGISTER_COUNT):
         var r = Int(registers[i])
         if r > HLL_MAX_REGISTER:
