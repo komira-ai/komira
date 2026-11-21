@@ -58,16 +58,10 @@ zig_test(
     visibility = ["//release/ci:"],
 )
 
-# The command line of release/ci/buck2_failure.zig, run as the built program (BUCK2_FAILURE) the way
-# release-macos.yml runs it: exit status, stderr and the files it appends to, compared whole (the
-# header of test_buck2_failure_cli.zig says what each case holds). A zig_test of its own, not one of
-# the program's unit_tests, because it runs the program those gate.
-zig_test(
-    name = "test_buck2_failure_cli",
-    exec_compatible_with = LINUX_X86_64,
-    src = "test_buck2_failure_cli.zig",
-    imports = ["fixtures/buck2_failure/analysis_failed.log"],
-    exec_tools = {"BUCK2_FAILURE": "//release/ci:buck2_failure"},
-    busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig_next",
+# The real failed log, also the data of //release/ci:test_buck2_failure_cli (the command line of
+# buck2_failure, run as the built program).
+export_file(
+    name = "buck2_failure_analysis_log",
+    src = "fixtures/buck2_failure/analysis_failed.log",
+    visibility = ["//release/ci:"],
 )

@@ -1,7 +1,9 @@
 //! The command line of release/ci/buck2_failure.zig, run as the built program (BUCK2_FAILURE, an
-//! exec tool of the zig_test //release/ci/tests:test_buck2_failure_cli) the way release-macos.yml's
-//! step "what the build said" runs it: its exit status, its stderr and the files it writes, compared
-//! whole. Each case works in a directory of its own under KOMIRA_TEST_WORK.
+//! exec tool of the zig_test //release/ci:test_buck2_failure_cli) the way release-macos.yml's step
+//! "what the build said" runs it: its exit status, its stderr and the files it writes, compared
+//! whole. The real failed log (release/ci/tests/fixtures/buck2_failure/analysis_failed.log) is the
+//! test's data, KOMIRA_TEST_WORK/analysis_failed.log; each case works in a directory of its own
+//! under KOMIRA_TEST_WORK.
 //!
 //! What each case holds:
 //! - the real failed log: exit 0; one `message=` line is appended after what $GITHUB_OUTPUT already
@@ -13,8 +15,6 @@
 //! - an output file that cannot be opened: exit 2 and stderr names the file and the error.
 const std = @import("std");
 const t = std.testing;
-
-const ANALYSIS_LOG = @embedFile("fixtures/buck2_failure/analysis_failed.log");
 
 const MESSAGE_LINE = "message=step `build the macOS set` failed; buck2's output ends:%0A" ++
     "Error running analysis for `komira//release:mopm_darwin_libs (komira//tools/build/platforms:darwin-arm64#7fd7ccfd5d5f8024)`%0A" ++
@@ -46,6 +46,11 @@ fn caseDir(ar: std.mem.Allocator) ![]const u8 {
     const dir = try std.fmt.allocPrint(ar, "{s}/cli{d}", .{ work, case_no });
     try std.fs.cwd().makePath(dir);
     return dir;
+}
+
+/// The path of the real failed log, the test's data.
+fn analysisLog(ar: std.mem.Allocator) ![]const u8 {
+    return std.fs.path.join(ar, &.{ try std.process.getEnvVarOwned(ar, "KOMIRA_TEST_WORK"), "analysis_failed.log" });
 }
 
 fn inDir(ar: std.mem.Allocator, dir: []const u8, name: []const u8) ![]const u8 {
@@ -83,10 +88,9 @@ test "the real failed log: exit 0, the message line and the summary appended to 
     defer arena.deinit();
     const ar = arena.allocator();
     const dir = try caseDir(ar);
-    const log = try inDir(ar, dir, "buck2-farm.log");
+    const log = try analysisLog(ar);
     const out = try inDir(ar, dir, "github_output");
     const summary = try inDir(ar, dir, "summary.md");
-    try writeFile(log, ANALYSIS_LOG);
     try writeFile(out, "path=/x/assert_remote\n");
     try writeFile(summary, "release-macos FAILED on the commit.\n");
     const r = try run(ar, &.{ "--log", log, "--step", "build the macOS set", "--github-output", out, "--summary-file", summary });
@@ -115,10 +119,9 @@ test "a missing flag: exit 2, the reason and the usage on stderr, no file writte
     defer arena.deinit();
     const ar = arena.allocator();
     const dir = try caseDir(ar);
-    const log = try inDir(ar, dir, "buck2-farm.log");
+    const log = try analysisLog(ar);
     const out = try inDir(ar, dir, "github_output");
     const summary = try inDir(ar, dir, "summary.md");
-    try writeFile(log, ANALYSIS_LOG);
     const r = try run(ar, &.{ "--log", log, "--github-output", out, "--summary-file", summary });
     try t.expectEqual(@as(u8, 2), r.code);
     try t.expectEqualStrings("buck2_failure: --step is required\n" ++ USAGE, r.stderr);

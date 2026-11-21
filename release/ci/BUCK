@@ -6,7 +6,7 @@
 # docs/ci.md, "release.yml"), built behind //release/ci/tests:test_release the
 # same way. buck2_failure is release-macos.yml's: it reads a failed buck2
 # step's log and says what buck2 said.
-load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_module")
+load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_module", "zig_test")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 
 # Built with zig 0.15.2 (`:zig_next`); the executable is built behind the check
@@ -100,4 +100,20 @@ zig_exe(
     busybox = "komira//tools/build/toolchains:busybox",
     zig = _ZIG,
     visibility = ["PUBLIC"],
+)
+
+# The command line of buck2_failure, run as the built program (BUCK2_FAILURE) the way
+# release-macos.yml runs it: exit status, stderr and the files it appends to, compared whole
+# (buck2_failure/cli_test.zig says what each case holds). A zig_test of its own, not one of the
+# program's unit_tests, because it runs the program those gate; in this package rather than in
+# release/ci/tests, whose package the aggregate leaves out (EXCLUDED of tools/build/ci/rules.bzl),
+# so that the pull request check builds it.
+zig_test(
+    name = "test_buck2_failure_cli",
+    exec_compatible_with = LINUX_X86_64,
+    src = "buck2_failure/cli_test.zig",
+    data = {"analysis_failed.log": "//release/ci/tests:buck2_failure_analysis_log"},
+    exec_tools = {"BUCK2_FAILURE": ":buck2_failure"},
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = _ZIG,
 )
