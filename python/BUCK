@@ -268,3 +268,17 @@ _LOAD_ERROR = "komira._errors.LibraryLoadError: cannot load libkomira from <site
         "AssertionError: the Mojo runtime versions differ: 1.0.0 (the wheel's Requires-Dist), 1.0.0 (komira._runtime) and 0.0.1 (the toolchain's pin)",
     ),
 ]]
+
+# The files the smoke driver's `readme_shows_quickstart` test reads
+# (python/smoke/BUCK): the README and the quickstart it shows.
+export_file(
+    name = "README.md",
+    src = "README.md",
+    visibility = ["//python/smoke:"],
+)
+
+export_file(
+    name = "examples/quickstart.py",
+    src = "examples/quickstart.py",
+    visibility = ["//python/smoke:"],
+)
