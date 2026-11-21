@@ -21,6 +21,9 @@ load("//tests:surface_capability_matrix.bzl", "CAPABILITIES", "MATRIX", "NOT_CAP
 # The licence text every published package carries (tools/build/package/conda.bzl).
 export_file(name = "LICENSE", visibility = ["PUBLIC"])
 
+# The notices the wheel carries beside LICENSE (tools/build/package/wheel.bzl).
+export_file(name = "NOTICE", visibility = ["PUBLIC"])
+
 # The files under .github/, which the root doc_tree's glob skips, at their
 # paths, for the interpreter list (//tools/build/lint:interpreter_budget).
 doc_tree(
