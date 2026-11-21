@@ -112,24 +112,15 @@ zig_test(
 # The cases of the mopm jobs of release.yml: the continuous prod publish (each prod job's
 # gate, needs, environment and permissions, the commands), no beta job, no schedule, the
 # release-main concurrency group, no secret and the version of every run
-# (.github/workflows/release_workflow_test.zig says what each catches); and of its user test of
-# the Python wheel (.github/workflows/release_wheel_test.zig): the wheel built as pypi.yml
-# builds it, installed from the file on a fresh runner per supported Python
-# (//python:supported_pythons, from python/pythons.bzl; the job of wheel_user_test_job.zig), no upload to an index, and,
-# played from the file, a failed user test is a red run that holds back no other job. A build
+# (.github/workflows/release_workflow_test.zig says what each catches), and no wheel stage (no
+# wheel job, no setup-python, no wheel target, no smoke driver: pypi.yml tests the wheel). A build
 # action.
 zig_test(
     name = "release_workflow_cases",
     exec_compatible_with = LINUX_X86_64,
     src = ".github/workflows/release_workflow_test.zig",
-    imports = [
-        ".github/workflows/pypi_workflow_text.zig",
-        ".github/workflows/release_wheel_test.zig",
-        ".github/workflows/wheel_user_test_job.zig",
-    ],
     data = {
         "workflows/release.yml": ".github/workflows/release.yml",
-        "workflows/pypi.yml": ".github/workflows/pypi.yml",
         "packages.bzl": "//release/readme_e2e:packages.bzl",
         "ci.md": "docs/ci.md",
     },
@@ -154,30 +145,32 @@ zig_test(
     zig = "komira//tools/build/toolchains:zig_next",
 )
 
-# The cases of pypi.yml, the publish of the Python package (.github/workflows/pypi_workflow_test.zig
-# says what each catches): one daily schedule and a manual run, every read of the flavour with the
-# fallback a scheduled run takes, no secret and no token, no upload step in the build job, the identity (`id-token`) in the build jobs and the upload jobs alone, the thirteen
-# jobs of the Linux and the macOS wheel with the exact runner, gate, needs and environment of
-# each (the user test of the wheel file, the job of wheel_user_test_job.zig, before the first
-# upload), the upload only for the state `absent` on a pinned action with its defaults, the smoke
-# jobs and the user test one job per supported Python of the build's matrix (written from
-# //python:supported_pythons) and the only ones that set up Python, every action pinned to a
-# commit, and the Linux result job; and a run played from the file's text for each state of the
-# indexes (pypi_workflow_run.zig: an unchanged main is green with the notice `already
-# published`, a documentation-only commit runs the user test and is green with the notice of
-# differing bytes, a wheel that failed its user test is uploaded nowhere). The macOS jobs' further contract is in
-# //:release_macos_cases. A build action.
+# The cases of pypi.yml, the publish of the Python package (.github/workflows/pypi_workflow_contract.zig
+# says what the contract of its text holds, pypi_workflow_test.zig writes each defect into the real text,
+# pypi_workflow_run.zig plays runs of it): a push to main of code with release.yml's paths-ignore, one
+# daily schedule and a manual run, one concurrency group per half that cancels no run, the nineteen jobs
+# of the two halves (the TestPyPI half on a push, the promotion to PyPI otherwise) of the Linux and the
+# macOS wheel with the exact gate, runner, needs, environment and permissions of each, the identity in
+# the build and upload jobs alone, the farm in the build jobs alone, the record saved only after every
+# TestPyPI smoke passed and restored by the promotion alone, the size of the project printed on both
+# indexes, and every action pinned; and runs played from the file for each event and each answer of the
+# indexes (a push uploads to TestPyPI and never to PyPI, a push of documentation starts no run, the
+# promotion uploads the newest version that passed and names a newer one that did not, a version on PyPI
+# is not uploaded again, two waiting pushes leave the newer, a failed job is a red run naming it). The
+# macOS jobs' further contract is in //:release_macos_cases. A build action.
 zig_test(
     name = "pypi_workflow_cases",
     exec_compatible_with = LINUX_X86_64,
     src = ".github/workflows/pypi_workflow_test.zig",
     imports = [
+        ".github/workflows/pypi_workflow_contract.zig",
         ".github/workflows/pypi_workflow_run.zig",
         ".github/workflows/pypi_workflow_text.zig",
         ".github/workflows/wheel_user_test_job.zig",
     ],
     data = {
         "workflows/pypi.yml": ".github/workflows/pypi.yml",
+        "workflows/release.yml": ".github/workflows/release.yml",
     },
     busybox = "komira//tools/build/toolchains:busybox",
     zig = "komira//tools/build/toolchains:zig_next",

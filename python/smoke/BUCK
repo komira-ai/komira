@@ -2,14 +2,18 @@ load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_module", "zig_te
 load("@komira//tools/build/platforms:defs.bzl", "DARWIN_ARM64", "LINUX_X86_64")
 
 # pypi_smoke: the driver of .github/workflows/pypi.yml (docs/ci.md, "pypi.yml: publishing the Python
-# package") and of the user test of the wheel file in release.yml (docs/ci.md, "The user test of the
-# wheel"). It names the wheel the build made as an index will (`dist`), says whether TestPyPI or PyPI
+# package"): its push run (the user test of the wheel file, the upload to TestPyPI and the smoke of what
+# TestPyPI serves, on every merge that changes code) and its promotion run (the file that passed, from
+# TestPyPI to PyPI). It names the wheel the build made as an index will and writes the record of its bytes
+# (`dist`), says whether TestPyPI or PyPI
 # already holds it (`state`), says before anything is built whether a release lists a file of a given name
 # (`present`), and after an upload checks what the index serves (`verify`) and what
 # `pip install` makes of it in an empty environment (`install`), from an index or, before any upload, from
 # the dist directory itself (`install --index dist`); `matrix` turns the list of supported Pythons
 # the build writes for a platform (//python:supported_pythons[<platform>], from python/pythons.bzl) into the
-# jobs of a workflow that installs the wheel once per Python. src/cli.zig says what each command does;
+# jobs of a workflow that installs the wheel once per Python; `storage` sums what a project's files take on an
+# index against its per-project limit; `promote` holds a record to both indexes and downloads the recorded
+# file from TestPyPI. src/cli.zig says what each command does;
 # src/main.zig only forwards to the library (pypi_smoke_lib).
 #
 # Each scenario of its cases is its own test, on wheels made in memory, an index and a file host in memory
@@ -20,7 +24,8 @@ load("@komira//tools/build/platforms:defs.bzl", "DARWIN_ARM64", "LINUX_X86_64")
 #                  index names it (a name normalised, a requirement list kept in order), and a wheel with two
 #                  dist-info directories, no or two Tag lines, a dist-info directory its metadata does not
 #                  make, a version or tag a file name cannot hold, or bytes that are no zip is refused by
-#                  defect; the dist directory holds that one file alone, and a non-empty --out is refused;
+#                  defect; the dist directory holds that one file alone, a non-empty --out is refused, and --record holds
+#                  one line, the file name, sha256 and size (an unwritable record path refused, nothing appended);
 #   index_unit     the state step: absent (no release, or other files only), the same bytes, other bytes, and
 #                  an HTTP 500, a transport error or an answer that is no release's JSON refused; the present
 #                  step: a file name is absent on a 404 and when the release lists another platform's file
@@ -37,6 +42,20 @@ load("@komira//tools/build/platforms:defs.bzl", "DARWIN_ARM64", "LINUX_X86_64")
 #                  held to komira alone and a `modular` package refused (also when the probe or freeze fails),
 #                  the example's output held to the expected file with the version and the ABI version put in,
 #                  a malformed ABI table or a work directory that is not empty refused before any command;
+#   storage_unit   the storage step: an unknown project holds zero; the sum over every file of every release with
+#                  the exact bullet and outputs; a release that lists no file is not a version; exactly at the
+#                  threshold is not over and one byte more is (the error line, the bullet's ending and
+#                  over=true, still exit 0); an HTTP 500, a transport error, a too-long answer and a body that
+#                  is no project JSON with an integer size on each file refused with nothing appended; each
+#                  flag error exit 2 before any request;
+#   promote_unit   the promote step: the record (one line, name, 64 lowercase hex, size above 0; a malformed one
+#                  refused naming the file before any request), the download held to TestPyPI's listing (sha256,
+#                  size, the file host), to the record's bytes and to a wheel of the recorded name, the newer
+#                  TestPyPI versions of the same tag named as skipped oldest first (numeric order; another
+#                  tag's and a non-numeric version left out, the latter with its log line), PyPI's newer
+#                  version of the same tag refused (equal, older, none and another tag's accepted), a
+#                  non-empty --out, a TestPyPI without the project and an HTTP 500 on each request refused,
+#                  each with nothing appended and nothing written to --out;
 #   cli_unit       the command line: exit 0, 1 and 2, the output file appended to (`present` appends one line,
 #                  and none when the name file or the index is refused), the failure line and the
 #                  one-line error annotation, and each flag refused by name (unknown, valueless, repeated, out
@@ -68,7 +87,10 @@ _SRCS = [
     "src/install.zig",
     "src/matrix.zig",
     "src/meta.zig",
+    "src/project.zig",
+    "src/promote.zig",
     "src/readme.zig",
+    "src/storage.zig",
 ]
 
 # What the driver does, as a module its command and its cases import. It reads the same client as
@@ -83,7 +105,7 @@ zig_module(
     ],
 )
 
-_SCENARIOS = ["meta", "index", "install", "cli", "readme", "matrix"]
+_SCENARIOS = ["meta", "index", "install", "cli", "readme", "matrix", "storage", "promote"]
 
 [
     zig_test(

@@ -54,7 +54,7 @@ test "dist writes the named wheel alone into the output directory and appends ve
     const out_dir = try h.path(a, &tmp, "dist");
     var fake = h.Fake{ .alloc = a, .routes = &.{} };
     var runner = h.FakeRunner{ .alloc = a, .work = "" };
-    const r = try exec(a, &.{ "dist", "--wheel", try h.path(a, &tmp, "komira.whl"), "--out", out_dir, "--github-output", try h.path(a, &tmp, "gh.txt") }, &fake, &runner);
+    const r = try exec(a, &.{ "dist", "--wheel", try h.path(a, &tmp, "komira.whl"), "--out", out_dir, "--record", try h.path(a, &tmp, "record.txt"), "--github-output", try h.path(a, &tmp, "gh.txt") }, &fake, &runner);
     try t.expectEqual(@as(u8, 0), r.code);
     try t.expectEqualStrings("", r.err);
     const hex = try h.hex(a, bytes);
@@ -62,6 +62,49 @@ test "dist writes the named wheel alone into the output directory and appends ve
     try t.expectEqualStrings(try std.fmt.allocPrint(a, "earlier=1\nversion=0.1.7\nfilename=" ++ FILE ++ "\nsha256={s}\n", .{hex}), try h.readAll(a, &tmp, "gh.txt"));
     try t.expectEqualSlices(u8, bytes, try h.readAll(a, &tmp, "dist/" ++ FILE));
     try t.expectEqual(@as(usize, 0), fake.urls.items.len);
+}
+
+test "dist --record holds exactly one line: file name, lowercase sha256 and size in bytes, replacing an earlier file" {
+    var ar = std.heap.ArenaAllocator.init(t.allocator);
+    defer ar.deinit();
+    const a = ar.allocator();
+    var tmp = t.tmpDir(.{});
+    defer tmp.cleanup();
+    const bytes = try h.makeWheel(a, .{});
+    try tmp.dir.writeFile(.{ .sub_path = "komira.whl", .data = bytes });
+    try tmp.dir.writeFile(.{ .sub_path = "record.txt", .data = "an earlier record that is much longer than the new one, to be truncated away entirely\nsecond line\n" });
+    var fake = h.Fake{ .alloc = a, .routes = &.{} };
+    var runner = h.FakeRunner{ .alloc = a, .work = "" };
+    const r = try exec(a, &.{ "dist", "--wheel", try h.path(a, &tmp, "komira.whl"), "--out", try h.path(a, &tmp, "dist"), "--record", try h.path(a, &tmp, "record.txt"), "--github-output", try h.path(a, &tmp, "gh.txt") }, &fake, &runner);
+    try t.expectEqual(@as(u8, 0), r.code);
+    try t.expectEqualStrings(try std.fmt.allocPrint(a, FILE ++ " {s} {d}\n", .{ try h.hex(a, bytes), bytes.len }), try h.readAll(a, &tmp, "record.txt"));
+}
+
+test "dist refuses a record path that cannot be written, naming it, and appends nothing to the output file" {
+    var ar = std.heap.ArenaAllocator.init(t.allocator);
+    defer ar.deinit();
+    const a = ar.allocator();
+    var tmp = t.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.writeFile(.{ .sub_path = "komira.whl", .data = try h.makeWheel(a, .{}) });
+    const record = try h.path(a, &tmp, "no-such-dir/record.txt");
+    var fake = h.Fake{ .alloc = a, .routes = &.{} };
+    var runner = h.FakeRunner{ .alloc = a, .work = "" };
+    const r = try exec(a, &.{ "dist", "--wheel", try h.path(a, &tmp, "komira.whl"), "--out", try h.path(a, &tmp, "dist"), "--record", record, "--github-output", try h.path(a, &tmp, "gh.txt") }, &fake, &runner);
+    try t.expectEqual(@as(u8, 1), r.code);
+    try t.expectEqualStrings(try std.fmt.allocPrint(a, "pypi_smoke: FAILED: cannot write --record {s}: FileNotFound\n", .{record}), r.err);
+    try t.expectError(error.FileNotFound, tmp.dir.access("gh.txt", .{}));
+}
+
+test "dist without --record is a usage error" {
+    var ar = std.heap.ArenaAllocator.init(t.allocator);
+    defer ar.deinit();
+    const a = ar.allocator();
+    var fake = h.Fake{ .alloc = a, .routes = &.{} };
+    var runner = h.FakeRunner{ .alloc = a, .work = "" };
+    const r = try exec(a, &.{ "dist", "--wheel", "/w", "--out", "/o", "--github-output", "/g" }, &fake, &runner);
+    try t.expectEqual(@as(u8, 2), r.code);
+    try t.expectEqualStrings(USAGE, r.err);
 }
 
 test "dist refuses an output directory that is not empty, with exit 1, the failure line and the error annotation" {
@@ -76,7 +119,7 @@ test "dist refuses an output directory that is not empty, with exit 1, the failu
     const out_dir = try h.path(a, &tmp, "dist");
     var fake = h.Fake{ .alloc = a, .routes = &.{} };
     var runner = h.FakeRunner{ .alloc = a, .work = "" };
-    const r = try exec(a, &.{ "dist", "--wheel", try h.path(a, &tmp, "komira.whl"), "--out", out_dir, "--github-output", try h.path(a, &tmp, "gh.txt") }, &fake, &runner);
+    const r = try exec(a, &.{ "dist", "--wheel", try h.path(a, &tmp, "komira.whl"), "--out", out_dir, "--record", try h.path(a, &tmp, "record.txt"), "--github-output", try h.path(a, &tmp, "gh.txt") }, &fake, &runner);
     try t.expectEqual(@as(u8, 1), r.code);
     try t.expectEqualStrings(try std.fmt.allocPrint(a, "pypi_smoke: FAILED: --out {s} is not empty\n", .{out_dir}), r.err);
     try t.expectEqualStrings(try std.fmt.allocPrint(a, "::error title=pypi::--out {s} is not empty\n", .{out_dir}), r.out);
@@ -89,7 +132,7 @@ test "the error annotation is one line with percent signs escaped" {
     const a = ar.allocator();
     var fake = h.Fake{ .alloc = a, .routes = &.{} };
     var runner = h.FakeRunner{ .alloc = a, .work = "" };
-    const r = try exec(a, &.{ "dist", "--wheel", "/no/such%20dir/komira.whl", "--out", "/o", "--github-output", "/g" }, &fake, &runner);
+    const r = try exec(a, &.{ "dist", "--wheel", "/no/such%20dir/komira.whl", "--out", "/o", "--record", "/r", "--github-output", "/g" }, &fake, &runner);
     try t.expectEqual(@as(u8, 1), r.code);
     try t.expectEqualStrings("pypi_smoke: FAILED: cannot read /no/such%20dir/komira.whl: FileNotFound\n", r.err);
     try t.expectEqualStrings("::error title=pypi::cannot read /no/such%2520dir/komira.whl: FileNotFound\n", r.out);
