@@ -27,6 +27,7 @@ from parquet.table_stats import collect_table_stats
 from plan_expr.scalar_value import ScalarValue
 from plan_stats.table_stats import TableStats
 from scan_source.parquet_source import ParquetSource
+from scan_source.source_variant import SOURCE_VARIANT_PARQUET
 from sql.sql_catalog import SqlCatalog
 
 from parquet_footers.footer_cache import FooterCache, footer_error
@@ -34,6 +35,7 @@ from parquet_footers.parquet_footers import (
     CHANGED_REASON,
     ParquetFooters,
     check_catalog_table,
+    check_registered_schema,
 )
 
 
@@ -49,15 +51,10 @@ def _file_stats(
 
 
 def _scalar_lt(a: ScalarValue, b: ScalarValue) -> Bool:
-    """Numeric a < b over the integer and float bounds a footer gives."""
-    var af = a.dtype == DType.float64 or a.dtype == DType.float32
-    var bf = b.dtype == DType.float64 or b.dtype == DType.float32
-    if af and bf:
+    """a < b for two bounds of one column, so of one type: a float column's
+    bounds compare as floats, any other's as integers."""
+    if a.dtype == DType.float64 or a.dtype == DType.float32:
         return a.float_val < b.float_val
-    if af:
-        return a.float_val < Float64(b.int_val)
-    if bf:
-        return Float64(a.int_val) < b.float_val
     return a.int_val < b.int_val
 
 
@@ -146,6 +143,34 @@ def add_read_parquet_scan(
     schema is the footer's own."""
     var schema = footers.footer_schema(path)
     add_parquet_scan(inputs, footers, path, schema)
+
+
+def add_catalog_table_scan(
+    mut inputs: LoweringInputs,
+    catalog: SqlCatalog,
+    table: String,
+    footers: ParquetFooters,
+    source: ParquetSource,
+) raises:
+    """Append the facts of the next scan, a scan of the files of `source`,
+    which are some of the files of the Parquet table `table` (the optimizer's
+    partition pruning can leave a subset). Only those files are checked against
+    the table's schema and folded, so a file the scan does not read cannot
+    refuse it or widen its facts.
+
+    Raises:
+        Error naming the table and file when a schema disagrees, the table is
+        not a Parquet table, or a footer does not read.
+    """
+    var t = catalog.table_of(table)
+    if t.source.tag != SOURCE_VARIANT_PARQUET:
+        raise Error("parquet table '" + table + "': the table is not a Parquet table")
+    var expected = t.source._parquet.value().schema()
+    for i in range(len(source.paths)):
+        check_registered_schema(
+            table, String(source.paths[i]), expected, footers
+        )
+    add_parquet_files_scan(inputs, footers, source)
 
 
 def add_catalog_scan(

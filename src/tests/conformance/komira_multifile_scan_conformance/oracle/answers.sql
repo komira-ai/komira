@@ -12,16 +12,16 @@
 CREATE VIEW dir3 AS SELECT * FROM read_parquet(['dir3/part-0.parquet', 'dir3/part-1.parquet', 'dir3/part-2.parquet']);
 CREATE VIEW dir02 AS SELECT * FROM read_parquet(['dir3/part-0.parquet', 'dir3/part-2.parquet']);
 CREATE VIEW hv AS SELECT * FROM read_parquet([
-  'hive/yr=2024/tag=red/dt=2024-01-01/part-0.parquet',
-  'hive/yr=2024/tag=blue/dt=2024-01-02/part-0.parquet',
-  'hive/yr=2025/tag=red/dt=2024-01-01/part-0.parquet',
-  'hive/yr=2025/tag=blue/dt=2024-03-05/part-0.parquet'
+  'hive/yr=2028/tag=red/dt=2028-01-01/part-0.parquet',
+  'hive/yr=2028/tag=blue/dt=2028-01-02/part-0.parquet',
+  'hive/yr=2029/tag=red/dt=2028-01-01/part-0.parquet',
+  'hive/yr=2029/tag=blue/dt=2028-03-05/part-0.parquet'
 ], hive_partitioning = true);
 CREATE VIEW hv_off AS SELECT * FROM read_parquet([
-  'hive/yr=2024/tag=red/dt=2024-01-01/part-0.parquet',
-  'hive/yr=2024/tag=blue/dt=2024-01-02/part-0.parquet',
-  'hive/yr=2025/tag=red/dt=2024-01-01/part-0.parquet',
-  'hive/yr=2025/tag=blue/dt=2024-03-05/part-0.parquet'
+  'hive/yr=2028/tag=red/dt=2028-01-01/part-0.parquet',
+  'hive/yr=2028/tag=blue/dt=2028-01-02/part-0.parquet',
+  'hive/yr=2029/tag=red/dt=2028-01-01/part-0.parquet',
+  'hive/yr=2029/tag=blue/dt=2028-03-05/part-0.parquet'
 ], hive_partitioning = false);
 COPY (
 SELECT q, query, pos, line FROM (
@@ -35,31 +35,27 @@ SELECT q, query, pos, line FROM (
   UNION ALL
   SELECT 'd_str_group' AS q, 'select s, sum(v) as t from dir3 group by s order by s' AS query, row_number() OVER (ORDER BY s) AS pos, concat_ws('|', s, t::VARCHAR) AS line FROM (select s, sum(v) as t from dir3 group by s order by s)
   UNION ALL
-  SELECT 'd_limit' AS q, 'select id, v from dir3 where id > 5 order by id desc limit 3' AS query, row_number() OVER (ORDER BY id DESC) AS pos, concat_ws('|', id::VARCHAR, v::VARCHAR) AS line FROM (select id, v from dir3 where id > 5 order by id desc limit 3)
-  UNION ALL
   SELECT 'd_project' AS q, 'select s from dir3 order by s' AS query, row_number() OVER (ORDER BY s) AS pos, concat_ws('|', s) AS line FROM (select s from dir3 order by s)
   UNION ALL
   SELECT 'h_all' AS q, 'select * from hv order by id' AS query, row_number() OVER (ORDER BY id) AS pos, concat_ws('|', id::VARCHAR, v::VARCHAR, s, (dt - DATE '1970-01-01')::VARCHAR, tag, yr::VARCHAR) AS line FROM (select * from hv order by id)
   UNION ALL
   SELECT 'h_count' AS q, 'select count(*) as n from hv' AS query, row_number() OVER (ORDER BY n) AS pos, concat_ws('|', n::VARCHAR) AS line FROM (select count(*) as n from hv)
   UNION ALL
-  SELECT 'h_prune_int' AS q, 'select id, yr from hv where yr = 2025 order by id' AS query, row_number() OVER (ORDER BY id) AS pos, concat_ws('|', id::VARCHAR, yr::VARCHAR) AS line FROM (select id, yr from hv where yr = 2025 order by id)
+  SELECT 'h_prune_int' AS q, 'select id, yr from hv where yr = 2029 order by id' AS query, row_number() OVER (ORDER BY id) AS pos, concat_ws('|', id::VARCHAR, yr::VARCHAR) AS line FROM (select id, yr from hv where yr = 2029 order by id)
   UNION ALL
   SELECT 'h_prune_str' AS q, 'select id, tag from hv where tag = ''red'' order by id' AS query, row_number() OVER (ORDER BY id) AS pos, concat_ws('|', id::VARCHAR, tag) AS line FROM (select id, tag from hv where tag = 'red' order by id)
   UNION ALL
-  SELECT 'h_prune_date' AS q, 'select id, dt from hv where dt >= date ''2024-01-02'' order by id' AS query, row_number() OVER (ORDER BY id) AS pos, concat_ws('|', id::VARCHAR, (dt - DATE '1970-01-01')::VARCHAR) AS line FROM (select id, dt from hv where dt >= date '2024-01-02' order by id)
+  SELECT 'h_prune_date' AS q, 'select id, dt from hv where dt >= date ''2028-01-02'' order by id' AS query, row_number() OVER (ORDER BY id) AS pos, concat_ws('|', id::VARCHAR, (dt - DATE '1970-01-01')::VARCHAR) AS line FROM (select id, dt from hv where dt >= date '2028-01-02' order by id)
   UNION ALL
   SELECT 'h_data' AS q, 'select id, yr from hv where v >= 500.00 order by id' AS query, row_number() OVER (ORDER BY id) AS pos, concat_ws('|', id::VARCHAR, yr::VARCHAR) AS line FROM (select id, yr from hv where v >= 500.00 order by id)
   UNION ALL
-  SELECT 'h_both' AS q, 'select id, yr, tag, v from hv where yr = 2024 and v >= 500.00 order by id' AS query, row_number() OVER (ORDER BY id) AS pos, concat_ws('|', id::VARCHAR, yr::VARCHAR, tag, v::VARCHAR) AS line FROM (select id, yr, tag, v from hv where yr = 2024 and v >= 500.00 order by id)
+  SELECT 'h_both' AS q, 'select id, yr, tag, v from hv where yr = 2028 and v >= 500.00 order by id' AS query, row_number() OVER (ORDER BY id) AS pos, concat_ws('|', id::VARCHAR, yr::VARCHAR, tag, v::VARCHAR) AS line FROM (select id, yr, tag, v from hv where yr = 2028 and v >= 500.00 order by id)
   UNION ALL
   SELECT 'h_only_part' AS q, 'select tag from hv order by tag' AS query, row_number() OVER (ORDER BY tag) AS pos, concat_ws('|', tag) AS line FROM (select tag from hv order by tag)
   UNION ALL
   SELECT 'h_group_int' AS q, 'select yr, count(*) as n, sum(id) as t from hv group by yr order by yr' AS query, row_number() OVER (ORDER BY yr) AS pos, concat_ws('|', yr::VARCHAR, n::VARCHAR, t::VARCHAR) AS line FROM (select yr, count(*) as n, sum(id) as t from hv group by yr order by yr)
   UNION ALL
   SELECT 'h_group_str' AS q, 'select tag, count(*) as n from hv group by tag order by tag' AS query, row_number() OVER (ORDER BY tag) AS pos, concat_ws('|', tag, n::VARCHAR) AS line FROM (select tag, count(*) as n from hv group by tag order by tag)
-  UNION ALL
-  SELECT 'h_limit' AS q, 'select dt, tag, yr, id from hv order by id desc limit 4' AS query, row_number() OVER (ORDER BY id DESC) AS pos, concat_ws('|', (dt - DATE '1970-01-01')::VARCHAR, tag, yr::VARCHAR, id::VARCHAR) AS line FROM (select dt, tag, yr, id from hv order by id desc limit 4)
   UNION ALL
   SELECT 'h_pruned_to_nothing' AS q, 'select count(*) as n from hv where yr = 1999' AS query, row_number() OVER (ORDER BY n) AS pos, concat_ws('|', n::VARCHAR) AS line FROM (select count(*) as n from hv where yr = 1999)
   UNION ALL

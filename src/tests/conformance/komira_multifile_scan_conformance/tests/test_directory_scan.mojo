@@ -7,7 +7,7 @@
 #     dir3/ (three files of ten rows) gives SELECT * the names, order and types
 #     of DuckDB's read of the three files, and each d_* query of answers.tsv
 #     (SELECT *, count(*), GROUP BY an integer and a string key, a filter, a
-#     projection, ORDER BY, LIMIT) answers DuckDB's rows.
+#     projection, ORDER BY) answers DuckDB's rows.
 
 from std.testing import TestSuite
 

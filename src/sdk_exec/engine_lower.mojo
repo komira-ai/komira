@@ -6,10 +6,9 @@
 # appends one scan's facts per scan from `ctx.footers`, the same cache the
 # binder read, so the plan the binder saw and the plan that is lowered read one
 # version of each file. A scan of a file registered on the context is checked
-# against its registered schema (`add_catalog_scan`), whether the table is one
-# file or several (the scan may hold a subset of the table's files after
-# partition pruning); any other Parquet scan reads the facts of each of its
-# files (`add_parquet_files_scan`). A node the cutter does
+# against its registered schema (`add_catalog_table_scan`), for the files the scan holds only (a subset of
+# the table's files after partition pruning); any other Parquet scan reads the
+# facts of each of its files (`add_parquet_files_scan`). A node the cutter does
 # not cut is not descended into: the cutter refuses it by name before it asks
 # for any scan below, so no facts are read for a plan that cannot lower.
 
@@ -17,7 +16,7 @@ from host_profile.host_profile import HostProfile
 from lowering.lower import lower
 from lowering.lowered_plan import LoweredPlan, LoweringInputs
 from parquet_footers.lowering_facts import (
-    add_catalog_scan,
+    add_catalog_table_scan,
     add_parquet_files_scan,
 )
 from plan_ir.logical_plan import (
@@ -67,7 +66,7 @@ def _add_scan_facts(
         ref ps = sd.source._parquet.value()
         var table = _table_of_paths(ps.paths, ctx)
         if table.byte_length() > 0:
-            add_catalog_scan(inputs, ctx.catalog, table, ctx.footers)
+            add_catalog_table_scan(inputs, ctx.catalog, table, ctx.footers, ps)
         else:
             add_parquet_files_scan(inputs, ctx.footers, ps)
         return

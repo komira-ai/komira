@@ -42,6 +42,9 @@
 # calendar date), else TIMESTAMP (`YYYY-MM-DD HH:MM:SS`), else BIGINT (an
 # optional `-` and ASCII digits that fit Int64), else VARCHAR; a later value
 # that does not parse as the current type makes the column VARCHAR for good.
+# A column holding both a DATE value and a TIMESTAMP value is refused as
+# `HIVE_PARTITION_VALUE_UNSUPPORTED` (DuckDB casts a date to a timestamp; the
+# engine does not guess which type it settles on).
 # A value DuckDB's cast might read as a date, timestamp or integer but those
 # strict forms do not (surrounding white space, a leading `+` before a digit,
 # a `T` separator, fractional seconds, one-digit month or day, `/` or `.` as a
@@ -215,8 +218,6 @@ def _guessable_but_not_strict(v: String) -> Bool:
     date nor a strict timestamp."""
     var bs = v.as_bytes()
     var n = len(bs)
-    if n == 0:
-        return False
     if _is_space(bs[0]) or _is_space(bs[n - 1]):
         var blank = True
         for i in range(n):
@@ -254,14 +255,9 @@ def _guessable_but_not_strict(v: String) -> Bool:
 
 def _under_hidden_name(path: String, root: String) -> Bool:
     """`path`, below `root` (which ends in `/`), has a component that starts
-    with `.`. A path outside `root` has none."""
+    with `.`. The caller guarantees `path` starts with `root`."""
     var bs = path.as_bytes()
     var rb = root.as_bytes()
-    if len(bs) < len(rb):
-        return False
-    for i in range(len(rb)):
-        if bs[i] != rb[i]:
-            return False
     var at_start = True
     for i in range(len(rb), len(bs)):
         if at_start and bs[i] == UInt8(ord(".")):
@@ -563,6 +559,22 @@ def _hive_columns(
         var kind = -1
         for f in range(len(files)):
             var seen = _classify(table[f][c])
+            if (
+                kind >= 0
+                and kind != seen
+                and (kind == _TYPE_DATE or kind == _TYPE_TIMESTAMP)
+                and (seen == _TYPE_DATE or seen == _TYPE_TIMESTAMP)
+            ):
+                raise Error(
+                    HIVE_PARTITION_VALUE_UNSUPPORTED
+                    + ": the partition key '"
+                    + names[c]
+                    + "' holds both dates and timestamps ('"
+                    + table[f][c]
+                    + "' in '"
+                    + files[f]
+                    + "'), which is not read yet"
+                )
             if kind < 0:
                 kind = seen
             elif kind != _TYPE_VARCHAR and seen != kind:

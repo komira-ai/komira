@@ -32,6 +32,9 @@
 #     NULL in any case, the Hive default partition, a bad percent escape, a
 #     repeated key, and values DuckDB may read as dates, timestamps or integers
 #     are `HIVE_PARTITION_VALUE_UNSUPPORTED`.
+#   * test_a_column_of_dates_and_timestamps_is_refused: a partition column with
+#     a DATE value and a TIMESTAMP value, in either order, is
+#     `HIVE_PARTITION_VALUE_UNSUPPORTED`.
 #   * test_hive_modes: OFF has no partition columns; AUTO with differing key sets
 #     has none; ON refuses the differing file with `HIVE_PARTITION_LAYOUT_MISMATCH`;
 #     ON with no key in the first file has none.
@@ -49,6 +52,12 @@
 #     null count 4, f min -50 and max 102, and no bounds for a string column over three
 #     files; one file gives the facts of `add_parquet_scan`; a replaced second
 #     file is refused naming it.
+#   * test_a_scan_of_some_files_of_a_table_checks_and_folds_only_those: a scan
+#     of one file of a table gets that file's facts even when another file of
+#     the table was replaced; a scan of the replaced file is refused naming it.
+#   * test_folding_unknown_nulls_distinct_counts_and_missing_bounds: folding
+#     hand-built statistics makes the null count unknown when either side's is,
+#     keeps the largest distinct count, and drops a bound that either side lacks.
 # =============================================================================
 
 from std.os import makedirs
@@ -65,7 +74,9 @@ from lowering.lowered_plan import LoweringInputs
 from parquet_api.types import CompressionCodec
 from parquet_footers.lowering_facts import (
     add_catalog_scan,
+    add_catalog_table_scan,
     add_parquet_files_scan,
+    _fold_into,
     add_parquet_scan,
 )
 from parquet_footers.parquet_files import (
@@ -84,6 +95,7 @@ from parquet_footers.parquet_footers import (
 )
 from parquet_writer import write_record_batch_to_parquet_bytes
 from plan_expr.scalar_value import ScalarValue
+from plan_stats.table_stats import ColumnStats, TableStats
 from runtime_paths import test_tmpdir
 from scan_source.parquet_source import ParquetSource
 from sql.sql_ast import (
@@ -321,12 +333,12 @@ def test_files_with_different_schemas_are_refused_by_name() raises:
 
 def test_hive_columns_follow_the_data_columns_ordered_by_key() raises:
     var root = _root("hive_order")
-    var dirs = _dirs("year=2024/m=1", "year=2024/m=2", "year=2023/m=1")
+    var dirs = _dirs("year=2028/m=1", "year=2028/m=2", "year=2027/m=1")
     var src = _one_dir_each(root, dirs)
     assert_equal(len(src.paths), 3)
-    assert_equal(src.paths[0], root + "/year=2023/m=1/f.parquet")
-    assert_equal(src.paths[1], root + "/year=2024/m=1/f.parquet")
-    assert_equal(src.paths[2], root + "/year=2024/m=2/f.parquet")
+    assert_equal(src.paths[0], root + "/year=2027/m=1/f.parquet")
+    assert_equal(src.paths[1], root + "/year=2028/m=1/f.parquet")
+    assert_equal(src.paths[2], root + "/year=2028/m=2/f.parquet")
     assert_equal(src.schema().num_columns(), 4)
     assert_equal(len(src.partition_cols), 2)
     assert_equal(src.partition_cols[0].name, "m")
@@ -336,11 +348,11 @@ def test_hive_columns_follow_the_data_columns_ordered_by_key() raises:
         assert_false(src.partition_cols[c].nullable)
     assert_equal(len(src.partition_values), 3)
     assert_equal(src.partition_values[0][0], "1")
-    assert_equal(src.partition_values[0][1], "2023")
+    assert_equal(src.partition_values[0][1], "2027")
     assert_equal(src.partition_values[1][0], "1")
-    assert_equal(src.partition_values[1][1], "2024")
+    assert_equal(src.partition_values[1][1], "2028")
     assert_equal(src.partition_values[2][0], "2")
-    assert_equal(src.partition_values[2][1], "2024")
+    assert_equal(src.partition_values[2][1], "2028")
 
 
 def _single_type(case: String, dirs: List[String]) raises -> ArrowType:
@@ -354,11 +366,11 @@ def _single_type(case: String, dirs: List[String]) raises -> ArrowType:
 
 def test_hive_column_types_follow_the_first_value_and_fall_back_to_varchar() raises:
     assert_true(
-        _single_type("date", _dirs("k=2024-01-02", "k=2024-02-29"))
+        _single_type("date", _dirs("k=2028-01-02", "k=2028-02-29"))
         == ArrowType.DATE32
     )
     assert_true(
-        _single_type("ts", _dirs("k=2024-01-02 03:04:05", "k=2023-12-31 23:59:59"))
+        _single_type("ts", _dirs("k=2028-01-02 03:04:05", "k=2027-12-31 23:59:59"))
         == ArrowType.TIMESTAMP_US
     )
     assert_true(
@@ -372,17 +384,22 @@ def test_hive_column_types_follow_the_first_value_and_fall_back_to_varchar() rai
     assert_true(_single_type("str", _dirs("k=abc", "k=1")) == ArrowType.STRING)
     assert_true(_single_type("int_then_text", _dirs("k=1", "k=x")) == ArrowType.STRING)
     assert_true(
-        _single_type("date_then_int", _dirs("k=2024-01-02", "k=5"))
+        _single_type("date_then_int", _dirs("k=2028-01-02", "k=5"))
         == ArrowType.STRING
     )
     assert_true(
-        _single_type("date_then_bad", _dirs("k=2024-01-02", "k=abc"))
+        _single_type("date_then_bad", _dirs("k=2028-01-02", "k=abc"))
         == ArrowType.STRING
     )
     assert_true(_single_type("big", _dirs("k=9223372036854775808")) == ArrowType.STRING)
     assert_true(_single_type("negbig", _dirs("k=-9223372036854775809")) == ArrowType.STRING)
     assert_true(_single_type("longint", _dirs("k=12345678901234567890123")) == ArrowType.STRING)
     assert_true(_single_type("dash", _dirs("k=-")) == ArrowType.STRING)
+    assert_true(
+        _single_type("below_limit", _dirs("k=1000000000000000000"))
+        == ArrowType.INT64
+    )
+    assert_true(_single_type("digit_odd", _dirs("k=1x-2")) == ArrowType.STRING)
     assert_true(_single_type("float", _dirs("k=1.5")) == ArrowType.STRING)
     assert_true(_single_type("mixed", _dirs("k=v1-2")) == ArrowType.STRING)
     assert_true(_single_type("blank", _dirs("k= ")) == ArrowType.STRING)
@@ -410,14 +427,18 @@ def test_hive_values_that_may_be_cast_differently_are_refused() raises:
     bad.append("k=%205")
     bad.append("k=5%20")
     bad.append("k=+5")
-    bad.append("k=2024-1-1")
-    bad.append("k=2024-02-30")
-    bad.append("k=2024-01-01T00:00:00")
-    bad.append("k=2024-01-01 24:00:00")
-    bad.append("k=2024-01-01 00:00:00.5")
-    bad.append("k=2024%2F01%2F01")
+    bad.append("k=2028-1-1")
+    bad.append("k=2028-02-30")
+    bad.append("k=2028-01-01T00:00:00")
+    bad.append("k=2028-01-01 24:00:00")
+    bad.append("k=2028-01-01 00:00:00.5")
+    bad.append("k=2028%2F01%2F01")
     bad.append("k=1:2")
     bad.append("a=1/a=2")
+    bad.append("k=2028-13-01")
+    bad.append("k=2028-0a-01")
+    bad.append("k=2028-01-01 aa:00:00")
+    bad.append("k=2028-01-01 00-00-00")
     for i in range(len(bad)):
         var root = _root("bad_" + String(i))
         _ = _write(root + "/" + bad[i], "f.parquet", 2, 0)
@@ -431,6 +452,22 @@ def test_hive_values_that_may_be_cast_differently_are_refused() raises:
     _ = _write(off_root + "/k=NULL", "f.parquet", 2, 0)
     assert_equal(
         _refusal(off_root + "/**/*.parquet", HIVE_PARTITIONING_OFF), ""
+    )
+
+
+def test_a_column_of_dates_and_timestamps_is_refused() raises:
+    var first = _root("date_ts_a")
+    _ = _write(first + "/dt=2028-01-01 10:00:00", "f.parquet", 2, 0)
+    _ = _write(first + "/dt=2028-01-02", "f.parquet", 2, 0)
+    var text = _refusal(first + "/**/*.parquet")
+    assert_true(text.startswith(HIVE_PARTITION_VALUE_UNSUPPORTED + ": "))
+    assert_true(text.find("holds both dates and timestamps") >= 0)
+    var second = _root("date_ts_b")
+    _ = _write(second + "/dt=2028-01-01", "f.parquet", 2, 0)
+    _ = _write(second + "/dt=2028-01-02 10:00:00", "f.parquet", 2, 0)
+    assert_true(
+        _refusal(second + "/**/*.parquet").find("holds both dates and timestamps")
+        >= 0
     )
 
 
@@ -573,6 +610,27 @@ def test_a_disagreeing_second_file_is_refused_by_name() raises:
     assert_equal(len(inputs.scans), 0)
 
 
+def test_a_scan_of_some_files_of_a_table_checks_and_folds_only_those() raises:
+    var dir = _root("subset_scan")
+    var a = _write(dir, "a.parquet", 4, 0)
+    var b = _write(dir, "b.parquet", 6, 10)
+    var footers = ParquetFooters()
+    var catalog = SqlCatalog()
+    register_parquet_table(catalog, "t", dir + "/*.parquet", footers)
+    var only_a = footers.parquet_relation(a, HIVE_PARTITIONING_AUTO)
+    var only_b = footers.parquet_relation(b, HIVE_PARTITIONING_AUTO)
+    _ = _write(dir, "b.parquet", 7, 10, _RENAMED)
+    var inputs = LoweringInputs()
+    add_catalog_table_scan(inputs, catalog, "t", footers, only_a)
+    assert_equal(len(inputs.scans), 1)
+    assert_equal(inputs.scans[0].stats.value().row_count, 4)
+    with assert_raises(contains="replaced after its footer was read"):
+        add_catalog_table_scan(inputs, catalog, "t", footers, only_b)
+    assert_equal(len(inputs.scans), 1)
+    with assert_raises(contains="unknown table 'missing'"):
+        add_catalog_table_scan(inputs, SqlCatalog(), "missing", footers, only_a)
+
+
 def test_facts_fold_over_every_file() raises:
     var dir = _root("facts")
     _ = _write(dir, "a.parquet", 10, 0)
@@ -619,6 +677,54 @@ def test_facts_fold_over_every_file() raises:
     with assert_raises(contains=c):
         add_parquet_files_scan(refused, footers, src)
     assert_equal(len(refused.scans), 0)
+
+
+def _one_column(
+    rows: Int,
+    var nulls: Optional[Int],
+    var distinct: Optional[Int],
+    var lo: Optional[ScalarValue],
+    var hi: Optional[ScalarValue],
+) -> TableStats:
+    var names = List[String]()
+    names.append("c")
+    var cols = List[ColumnStats]()
+    cols.append(ColumnStats(distinct^, lo^, hi^, nulls^))
+    return TableStats(rows, names^, cols^)
+
+
+def test_folding_unknown_nulls_distinct_counts_and_missing_bounds() raises:
+    var total = _one_column(
+        4, Optional[Int](1), None, ScalarValue.from_int64(5), ScalarValue.from_int64(9)
+    )
+    _fold_into(
+        total,
+        _one_column(
+            6, None, Optional[Int](3), ScalarValue.from_int64(2), ScalarValue.from_int64(7)
+        ),
+    )
+    assert_equal(total.row_count, 10)
+    assert_false(Bool(total.column_stats[0].null_count))
+    assert_equal(total.column_stats[0].distinct_count.value(), 3)
+    assert_true(total.column_stats[0].min_value.value() == ScalarValue.from_int64(2))
+    assert_true(total.column_stats[0].max_value.value() == ScalarValue.from_int64(9))
+    _fold_into(
+        total,
+        _one_column(
+            1, Optional[Int](0), Optional[Int](7), ScalarValue.from_int64(0), ScalarValue.from_int64(1)
+        ),
+    )
+    assert_equal(total.column_stats[0].distinct_count.value(), 7)
+    _fold_into(
+        total,
+        _one_column(
+            1, Optional[Int](0), Optional[Int](2), ScalarValue.from_int64(0), ScalarValue.from_int64(1)
+        ),
+    )
+    assert_equal(total.column_stats[0].distinct_count.value(), 7)
+    _fold_into(total, _one_column(1, Optional[Int](0), None, None, None))
+    assert_false(Bool(total.column_stats[0].min_value))
+    assert_false(Bool(total.column_stats[0].max_value))
 
 
 def main() raises:

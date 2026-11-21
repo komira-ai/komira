@@ -86,7 +86,7 @@ _NAME = "^[A-Za-z0-9_][A-Za-z0-9_.-]*$"
 _OUTPUT_FORMATS = [".parquet", ".csv", ".tsv"]
 
 # An input path's segment may also hold `=`, after its first character, so an
-# input can sit in a Hive layout (`day=2024-01-01/part-0.parquet`). `=` is no
+# input can sit in a Hive layout (`day=2028-01-01/part-0.parquet`). `=` is no
 # glob character, so DuckDB's allowed_paths and the existence check still match
 # it literally. Outputs keep _NAME.
 _INPUT_SEGMENT = "^[A-Za-z0-9_][A-Za-z0-9_.=-]*$"

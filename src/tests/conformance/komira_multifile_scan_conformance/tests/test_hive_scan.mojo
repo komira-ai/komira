@@ -10,7 +10,7 @@
 #     (a filter on an integer, a string and a date partition column, which
 #     prunes files; a filter on a data column; both; a partition column alone;
 #     GROUP BY an integer and a string partition column; count(*); ORDER BY;
-#     LIMIT; a filter that prunes every file) answers DuckDB's rows.
+#     a filter that prunes every file) answers DuckDB's rows.
 #     It also holds SELECT * to DuckDB's names, order and types: id, v, s, then
 #     dt, tag, yr (DATE, VARCHAR, BIGINT), the partition columns after the data
 #     columns in key order.

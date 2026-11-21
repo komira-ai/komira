@@ -14,7 +14,7 @@ load("@komira//tools/build/sql:defs.bzl", "sql_oracle")
 #
 #   test_directory_scan        a directory registered with register_parquet:
 #                              SELECT *, filters, count(*), GROUP BY, ORDER BY
-#                              and LIMIT answer DuckDB's rows, names and types
+#                              answer DuckDB's rows, names and types
 #   test_hive_scan             a glob over a Hive tree registered with
 #                              register_parquet: columns, types and order of
 #                              the partition columns, filters on a partition
@@ -47,10 +47,10 @@ sql_oracle(
         "dir3/part-0.parquet": ":files[dir3_0.parquet]",
         "dir3/part-1.parquet": ":files[dir3_1.parquet]",
         "dir3/part-2.parquet": ":files[dir3_2.parquet]",
-        "hive/yr=2024/tag=red/dt=2024-01-01/part-0.parquet": ":files[hive_0.parquet]",
-        "hive/yr=2024/tag=blue/dt=2024-01-02/part-0.parquet": ":files[hive_1.parquet]",
-        "hive/yr=2025/tag=red/dt=2024-01-01/part-0.parquet": ":files[hive_2.parquet]",
-        "hive/yr=2025/tag=blue/dt=2024-03-05/part-0.parquet": ":files[hive_3.parquet]",
+        "hive/yr=2028/tag=red/dt=2028-01-01/part-0.parquet": ":files[hive_0.parquet]",
+        "hive/yr=2028/tag=blue/dt=2028-01-02/part-0.parquet": ":files[hive_1.parquet]",
+        "hive/yr=2029/tag=red/dt=2028-01-01/part-0.parquet": ":files[hive_2.parquet]",
+        "hive/yr=2029/tag=blue/dt=2028-03-05/part-0.parquet": ":files[hive_3.parquet]",
     },
     outputs = ["answers.tsv"],
 )
@@ -149,20 +149,20 @@ mojo_library(
             "answers.tsv": ":answers[answers.tsv]",
         },
         "tests/test_hive_scan.mojo": {
-            "hive/yr=2024/tag=red/dt=2024-01-01/part-0.parquet": ":files[hive_0.parquet]",
-            "hive/yr=2024/tag=blue/dt=2024-01-02/part-0.parquet": ":files[hive_1.parquet]",
-            "hive/yr=2025/tag=red/dt=2024-01-01/part-0.parquet": ":files[hive_2.parquet]",
-            "hive/yr=2025/tag=blue/dt=2024-03-05/part-0.parquet": ":files[hive_3.parquet]",
+            "hive/yr=2028/tag=red/dt=2028-01-01/part-0.parquet": ":files[hive_0.parquet]",
+            "hive/yr=2028/tag=blue/dt=2028-01-02/part-0.parquet": ":files[hive_1.parquet]",
+            "hive/yr=2029/tag=red/dt=2028-01-01/part-0.parquet": ":files[hive_2.parquet]",
+            "hive/yr=2029/tag=blue/dt=2028-03-05/part-0.parquet": ":files[hive_3.parquet]",
             "answers.tsv": ":answers[answers.tsv]",
         },
         "tests/test_sql_globs.mojo": {
             "dir3/part-0.parquet": ":files[dir3_0.parquet]",
             "dir3/part-1.parquet": ":files[dir3_1.parquet]",
             "dir3/part-2.parquet": ":files[dir3_2.parquet]",
-            "hive/yr=2024/tag=red/dt=2024-01-01/part-0.parquet": ":files[hive_0.parquet]",
-            "hive/yr=2024/tag=blue/dt=2024-01-02/part-0.parquet": ":files[hive_1.parquet]",
-            "hive/yr=2025/tag=red/dt=2024-01-01/part-0.parquet": ":files[hive_2.parquet]",
-            "hive/yr=2025/tag=blue/dt=2024-03-05/part-0.parquet": ":files[hive_3.parquet]",
+            "hive/yr=2028/tag=red/dt=2028-01-01/part-0.parquet": ":files[hive_0.parquet]",
+            "hive/yr=2028/tag=blue/dt=2028-01-02/part-0.parquet": ":files[hive_1.parquet]",
+            "hive/yr=2029/tag=red/dt=2028-01-01/part-0.parquet": ":files[hive_2.parquet]",
+            "hive/yr=2029/tag=blue/dt=2028-03-05/part-0.parquet": ":files[hive_3.parquet]",
             "answers.tsv": ":answers[answers.tsv]",
         },
     },

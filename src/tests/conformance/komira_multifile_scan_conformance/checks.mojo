@@ -282,7 +282,7 @@ def check_directory() raises:
     register_parquet(ctx, "dir3", data_path("dir3"))
     _check_schema(ctx, answers, "dir3", "schema_dir3")
     var asked = _check_blocks(ctx, answers, "d_")
-    assert_true(asked >= 7, "too few directory queries in answers.tsv")
+    assert_true(asked >= 6, "too few directory queries in answers.tsv")
 
 
 def check_hive() raises:

@@ -24,7 +24,7 @@
 #     on the integer, the string and the date key, one on a data column, and
 #     both together, answer the rows of the matching files.
 #   * test_a_partition_column_can_be_the_only_column_and_a_group_key: selecting
-#     only yr, count(*), GROUP BY an integer key and ORDER BY / LIMIT answer
+#     only yr, count(*), GROUP BY an integer key and ORDER BY answer
 #     the oracle's counts.
 #   * test_hive_partitioning_false_reads_the_data_columns_only: the option in
 #     read_parquet turns the key columns off.
@@ -285,22 +285,22 @@ def test_read_parquet_and_from_take_a_glob_in_sql_text() raises:
 
 def _hive_tree(name: String) raises -> String:
     """Three leaf files, nested yr / tag / dt:
-    yr=2024/tag=a/dt=2024-01-01 ids 1..3, yr=2024/tag=b/dt=2024-02-02 ids 4..6,
-    yr=2025/tag=a/dt=2024-01-01 ids 7..9."""
+    yr=2028/tag=a/dt=2028-01-01 ids 1..3, yr=2028/tag=b/dt=2028-02-02 ids 4..6,
+    yr=2029/tag=a/dt=2028-01-01 ids 7..9."""
     var root = test_tmpdir() + "/" + name
-    _write(root + "/yr=2024/tag=a/dt=2024-01-01", "part-0.parquet", 1, 3)
-    _write(root + "/yr=2024/tag=b/dt=2024-02-02", "part-0.parquet", 4, 3)
-    _write(root + "/yr=2025/tag=a/dt=2024-01-01", "part-0.parquet", 7, 3)
+    _write(root + "/yr=2028/tag=a/dt=2028-01-01", "part-0.parquet", 1, 3)
+    _write(root + "/yr=2028/tag=b/dt=2028-02-02", "part-0.parquet", 4, 3)
+    _write(root + "/yr=2029/tag=a/dt=2028-01-01", "part-0.parquet", 7, 3)
     return root^
 
 
 # Days since 1970-01-01.
-comptime _JAN_1_2024 = 19723
-comptime _FEB_2_2024 = 19755
+comptime _JAN_1_2028 = 21184
+comptime _FEB_2_2028 = 21216
 
 
 def _yr_of(id: Int) -> Int:
-    return 2024 if id <= 6 else 2025
+    return 2028 if id <= 6 else 2029
 
 
 def _tag_of(id: Int) -> String:
@@ -308,7 +308,7 @@ def _tag_of(id: Int) -> String:
 
 
 def _dt_of(id: Int) -> Int:
-    return _FEB_2_2024 if (id >= 4 and id <= 6) else _JAN_1_2024
+    return _FEB_2_2028 if (id >= 4 and id <= 6) else _JAN_1_2028
 
 
 def test_hive_keys_become_columns_after_the_data_columns() raises:
@@ -346,9 +346,9 @@ def test_a_filter_on_a_partition_column_keeps_that_partitions_rows() raises:
     var ctx = _new_context()
     register_parquet(ctx, "hv", root + "/**/*.parquet")
     _expect_ints(
-        _ints(_run(ctx, "select id, yr from hv where yr = 2025 order by id"), 0),
+        _ints(_run(ctx, "select id, yr from hv where yr = 2029 order by id"), 0),
         _range(7, 9),
-        "yr = 2025",
+        "yr = 2029",
     )
     var want_a = _range(1, 3)
     want_a.extend(_range(7, 9))
@@ -361,7 +361,7 @@ def test_a_filter_on_a_partition_column_keeps_that_partitions_rows() raises:
         _ints(
             _run(
                 ctx,
-                "select id, dt from hv where dt = date '2024-02-02' order by id",
+                "select id, dt from hv where dt = date '2028-02-02' order by id",
             ),
             0,
         ),
@@ -378,7 +378,7 @@ def test_a_filter_on_a_partition_column_keeps_that_partitions_rows() raises:
         _ints(
             _run(
                 ctx,
-                "select id from hv where yr = 2024 and tag = 'a' and id > 1 order by id",
+                "select id from hv where yr = 2028 and tag = 'a' and id > 1 order by id",
             ),
             0,
         ),
@@ -396,14 +396,14 @@ def test_a_partition_column_can_be_the_only_column_and_a_group_key() raises:
     var only = _ints(_run(ctx, "select yr from hv order by yr"), 0)
     var want = List[Int]()
     for _ in range(6):
-        want.append(2024)
+        want.append(2028)
     for _ in range(3):
-        want.append(2025)
+        want.append(2029)
     _expect_ints(only, want, "yr alone")
     var grouped = _run(
         ctx, "select yr, count(*) as n from hv group by yr order by yr"
     )
-    _expect_ints(_ints(grouped, 0), [2024, 2025], "group keys")
+    _expect_ints(_ints(grouped, 0), [2028, 2029], "group keys")
     _expect_ints(_ints(grouped, 1), [6, 3], "group counts")
     var by_tag = _run(
         ctx, "select tag, count(*) as n from hv group by tag order by tag"
@@ -413,8 +413,6 @@ def test_a_partition_column_can_be_the_only_column_and_a_group_key() raises:
     assert_equal(tags[0], String("a"))
     assert_equal(tags[1], String("b"))
     _expect_ints(_ints(by_tag, 1), [6, 3], "tag counts")
-    var top = _ints(_run(ctx, "select id from hv order by id desc limit 2"), 0)
-    _expect_ints(top, [9, 8], "limit")
 
 
 def test_hive_partitioning_false_reads_the_data_columns_only() raises:

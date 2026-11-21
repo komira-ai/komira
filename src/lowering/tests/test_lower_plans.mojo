@@ -474,13 +474,15 @@ def test_a_scan_of_several_files_lowers_to_a_source_that_lists_them_and_pushes_p
     var text = render_lowered_plan(lp)
     var line = "  source: SOURCE_PARQUET path=a/lineitem.parquet total=True files=[a/lineitem.parquet, b/lineitem.parquet] projection=[qty, price] filter="
     assert_true(line + String(_ship_le(100)) + "\n" in text, text)
-    assert_false("partitions=" in text)
+    assert_false(" partitions=[" in text)
+    assert_false(" partition_values=" in text)
 
 
 def test_a_plain_single_file_scan_renders_no_file_list() raises:
     var text = render_lowered_plan(_lowered(_scan(), _one_scan()))
     assert_true("files=" not in text, text)
-    assert_true("partitions=" not in text, text)
+    assert_true(" partitions=[" not in text, text)
+    assert_true(" partition_values=" not in text, text)
     assert_equal(len(_lowered(_scan(), _one_scan()).segments[0].source_spec.parquet_paths), 0)
 
 
