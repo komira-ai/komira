@@ -83,6 +83,7 @@ python_dist(
     act = "komira//tools/build/python_act:python_act_darwin",
     archive = ":" + PYTHON_MACOS["archive"],
     exec_compatible_with = DARWIN_ARM64,
+    target_compatible_with = DARWIN_ARM64,  # komira-limit:darwin-python-dist
     version = PYTHON_MACOS["version"],
     visibility = _TEST_ONLY,
 )

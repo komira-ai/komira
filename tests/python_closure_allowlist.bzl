@@ -50,7 +50,6 @@ PYTHON_CEILING = [
     "target komira//third_party/python:cpython-3.14.8-20261003-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz",
     "target komira//third_party/python:cpython314",
     "target komira//third_party/python:cpython314t",
-    "target komira//third_party/python:cpython_macos",
     "target komira//third_party/python:duckdb",
     "target komira//third_party/python:duckdb-1.5.6-cp313-cp313-macosx_11_0_arm64.whl",
     "target komira//third_party/python:duckdb-1.5.6-cp313-cp313-manylinux_2_26_x86_64.manylinux_2_28_x86_64.whl",
