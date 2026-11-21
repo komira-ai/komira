@@ -233,14 +233,15 @@ test "a macOS wheel passes, and with a dylib needing a newer macOS than its tag 
     const in = try fixture.macosInput(a);
     const bytes = try wheel.build(a, &d, in, try dateOf(a));
     try check.check(a, &d, in, try stamped(a), mac_name, bytes, true, bytes);
-    const ms = try zip.read(a, &d, bytes);
+    const read = try zip.read(a, &d, bytes);
+    const ms = try a.alloc(zip.Member, read.len);
+    for (read, ms) |m, *o| o.* = .{ .name = m.name, .data = m.data, .mode = m.mode };
     const w = index(ms, "/WHEEL");
     try t.expectEqualStrings("Wheel-Version: 1.0\nGenerator: komira_wheel\nRoot-Is-Purelib: false\nTag: py3-none-macosx_11_0_arm64\n", ms[w].data);
 
     // The input still says what the good dylib is; the wheel holds one that
     // needs macOS 13.0, as if the writer had not held it.
-    const swapped = try a.alloc(zip.Member, ms.len);
-    for (ms, swapped) |m, *o| o.* = .{ .name = m.name, .data = m.data, .mode = m.mode };
+    const swapped = try a.dupe(zip.Member, ms);
     swapped[index(ms, "/libkomira.dylib")].data = try fixture.machO(a, .{ .install_name = "@rpath/libkomira.dylib", .minos = fixture.macosVersion(13, 0, 0) });
     var in_new = in;
     const files = try a.dupe(wheel.File, in.files);
