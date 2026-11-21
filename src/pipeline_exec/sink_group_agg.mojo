@@ -4,8 +4,10 @@
 #
 # The grouped aggregation sink over fixed-width keys: GROUP BY one or more
 # integer columns (rows I64 and I32) or float columns (rows F64 and F32), with
-# SUM, COUNT, COUNT(*), MIN, MAX and AVG, the aggregates and their exact
-# folds being those of the ungrouped sink (`agg_fold`).
+# SUM, COUNT, COUNT(*), COUNT(DISTINCT), MIN, MAX and AVG, the aggregates and
+# their exact folds being those of the ungrouped sink (`agg_fold`,
+# `count_distinct`). With no aggregate the output is one row per distinct key,
+# which is how `lowering` cuts SELECT DISTINCT.
 #
 # The plan's group-by expressions and aggregate arguments are registered once
 # and run by each worker as one projection (`MapOp`) over every morsel, under
@@ -19,8 +21,10 @@
 # the workers joined, merges the tables into one in worker order with
 # `merge_cell`, so the exact-overflow rule of the ungrouped sink holds per
 # group, and a sum that overflows only when the workers' partials are added is
-# refused there. The order of the output groups is unspecified: a plan that
-# needs an order sorts.
+# refused there. A COUNT(DISTINCT) keeps a worker's (group, value) entries
+# apart from the cells; `combine` moves them under the merged group of their
+# worker group, and an entry new there adds one to the group's count. The
+# order of the output groups is unspecified: a plan that needs an order sorts.
 #
 # Memory is charged as the tables grow, not once: every doubling of a table's
 # capacity is charged to the worker's reservation before it is made
@@ -64,6 +68,7 @@ from physical_plan.physical_plan import (
 )
 from plan_expr.agg_expr import (
     AGG_COUNT,
+    AGG_COUNT_DISTINCT,
     AGG_MAX,
     AGG_MEAN,
     AGG_MIN,
@@ -74,6 +79,13 @@ from plan_expr.expr_pool import ExprPool
 
 from .agg_fold import WideColumn, agg_name, fold_wide, merge_cell, widen_column
 from .agg_output import agg_result_column_rows, check_declared_type
+from .count_distinct import (
+    DistinctColumn,
+    DistinctMerge,
+    DistinctSlot,
+    admit_distinct,
+    read_distinct_column,
+)
 from .group_keys import (
     KeyColumn,
     is_float_key_type,
@@ -89,6 +101,7 @@ struct _GroupSlot(Movable):
     var table: GroupTable
     var map: Optional[MapOp]
     var reservation: WorkerReservation
+    var distinct: DistinctSlot
     var key_arrows: List[ArrowType]
     var scratch_cells: List[Int64]
     var scratch_nulls: List[UInt8]
@@ -104,6 +117,7 @@ struct _GroupSlot(Movable):
         self.table = GroupTable(nk, na, max_groups)
         self.map = None
         self.reservation = reservation^
+        self.distinct = DistinctSlot(na)
         self.key_arrows = List[ArrowType]()
         self.scratch_cells = List[Int64]()
         self.scratch_nulls = List[UInt8]()
@@ -118,6 +132,7 @@ struct GroupAggSink(MorselSinkImpl):
     """Folds the morsels of a segment into one row of aggregates per group."""
 
     var _seg_id: Int
+    var _where: String
     var _floats: Bool
     var _nk: Int
     var _max_groups: Int
@@ -170,6 +185,7 @@ struct GroupAggSink(MorselSinkImpl):
                 + " aggregates"
             )
         self._seg_id = seg_id
+        self._where = where_
         self._floats = key_dtype == KEY_DTYPE_F64 or key_dtype == KEY_DTYPE_F32
         self._nk = nk
         self._max_groups = max_groups
@@ -205,6 +221,7 @@ struct GroupAggSink(MorselSinkImpl):
             if (
                 func != AGG_SUM
                 and func != AGG_COUNT
+                and func != AGG_COUNT_DISTINCT
                 and func != AGG_MIN
                 and func != AGG_MAX
                 and func != AGG_MEAN
@@ -213,7 +230,7 @@ struct GroupAggSink(MorselSinkImpl):
                     where_
                     + " does not serve aggregate tag "
                     + String(Int(func))
-                    + " (SUM, COUNT, MIN, MAX and AVG are)"
+                    + " (SUM, COUNT, COUNT(DISTINCT), MIN, MAX and AVG are)"
                 )
             var label = (
                 agg_name(func) + " (output column " + String(nk + i) + ")"
@@ -327,7 +344,25 @@ struct GroupAggSink(MorselSinkImpl):
                 )
             keys.append(kc^)
         var args = List[WideColumn]()
+        var distinct_args = List[DistinctColumn]()
         for i in range(na):
+            if self._funcs[i] == AGG_COUNT_DISTINCT:
+                args.append(WideColumn())
+                distinct_args.append(
+                    read_distinct_column(
+                        slot.distinct,
+                        i,
+                        dense,
+                        self._arg_col[i],
+                        selected,
+                        self._where,
+                        self._labels[i],
+                        self._pool,
+                        slot.reservation,
+                    )
+                )
+                continue
+            distinct_args.append(DistinctColumn())
             if self._arg_col[i] < 0:
                 args.append(WideColumn())
             else:
@@ -357,7 +392,18 @@ struct GroupAggSink(MorselSinkImpl):
                     slot.table.too_many, slot.table.denied_bytes
                 )
             for i in range(na):
-                if self._arg_col[i] < 0:
+                if self._funcs[i] == AGG_COUNT_DISTINCT:
+                    admit_distinct(
+                        slot.distinct,
+                        i,
+                        g,
+                        distinct_args[i],
+                        r,
+                        self._where,
+                        self._pool,
+                        slot.reservation,
+                    )
+                elif self._arg_col[i] < 0:
                     slot.table.cells[g * na + i].count += 1
                 else:
                     fold_wide(
@@ -376,6 +422,7 @@ struct GroupAggSink(MorselSinkImpl):
         for _ in range(nk):
             scratch_cells.append(0)
             scratch_nulls.append(0)
+        var distinct = DistinctMerge(na, WorkerReservation(self._pool.share()))
         for w in range(len(self._slots)):
             ref slot = self._slots[w][]
             for k in range(nk):
@@ -392,6 +439,8 @@ struct GroupAggSink(MorselSinkImpl):
                         " workers"
                     )
             ref t = slot.table
+            # The merged group of each of this worker's groups.
+            var group_map = List[Int](capacity=t.n)
             for g in range(t.n):
                 for k in range(nk):
                     scratch_cells[k] = t.keys[g * nk + k]
@@ -406,6 +455,7 @@ struct GroupAggSink(MorselSinkImpl):
                     raise self._refused(
                         self._merged.too_many, self._merged.denied_bytes
                     )
+                group_map.append(mg)
                 for i in range(na):
                     merge_cell(
                         self._merged.cells[mg * na + i],
@@ -413,9 +463,20 @@ struct GroupAggSink(MorselSinkImpl):
                         self._funcs[i],
                         self._labels[i],
                     )
-            # This worker is merged: free its table and return its memory.
+            distinct.merge_worker(
+                slot.distinct,
+                group_map,
+                self._merged.cells,
+                na,
+                self._where,
+                self._labels,
+                self._pool,
+            )
+            # This worker is merged: free its tables and return its memory.
             slot.table = GroupTable(nk, na, self._max_groups)
+            slot.distinct = DistinctSlot(na)
             slot.reservation.give_back_all()
+        distinct.finish()
         self._combined = True
 
     def finalize(mut self) raises:

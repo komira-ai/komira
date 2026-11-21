@@ -11,6 +11,8 @@ Attributes:
     distribution        the name (`pip install <it>`), in normalised form
     summary, readme     METADATA's Summary, and its body (Markdown:
                         Description-Content-Type text/markdown)
+    readme_preface      a paragraph put before the readme in the body, with a
+                        blank line after it (unset: the readme alone)
     requires_python     Requires-Python
     requires_dist       Requires-Dist lines, in order
     classifiers         Classifier lines; a `License ::` one is refused beside
@@ -111,6 +113,8 @@ def _flags(ctx, tag, files, readme, licenses):
         "--timestamp-ms",
         ctx.attrs.timestamp_ms,
     ]
+    if ctx.attrs.readme_preface != None:
+        out += ["--readme-preface", ctx.attrs.readme_preface]
     out += [["--requires-dist", r] for r in ctx.attrs.requires_dist]
     out += [["--classifier", c] for c in ctx.attrs.classifiers]
     out += [["--project-url", "{}={}".format(k, v)] for k, v in sorted(ctx.attrs.project_urls.items())]
@@ -240,6 +244,7 @@ _wheel_file = rule(
         "platform": attrs.string(default = "linux-x86_64"),
         "project_urls": attrs.dict(attrs.string(), attrs.string(), default = {}),
         "readme": attrs.source(),
+        "readme_preface": attrs.option(attrs.string(), default = None),
         "requires_dist": attrs.list(attrs.string(), default = []),
         "requires_python": attrs.string(),
         "stamp": attrs.string(),
