@@ -54,7 +54,7 @@ comptime _LZMA_BUF_ERROR: Int32 = 10
 
 @always_inline
 def _ptr(
-    s: Span[UInt8, _], ref scratch: InlineArray[UInt8, 1]
+    s: Span[UInt8, _], ref scratch: Array[UInt8, 1]
 ) -> UnsafePointer[UInt8, MutUntrackedOrigin]:
     """The address liblzma uses for `s`: the Span's own, or `scratch` when
     `s` is empty (an empty Span may carry a null pointer)."""
@@ -103,8 +103,8 @@ def xz_compress_into[
     """
     var n = len(src)
     var cap = len(dst)
-    var src_scratch = InlineArray[UInt8, 1](fill=UInt8(0))
-    var dst_scratch = InlineArray[UInt8, 1](fill=UInt8(0))
+    var src_scratch = Array[UInt8, 1](fill=UInt8(0))
+    var dst_scratch = Array[UInt8, 1](fill=UInt8(0))
     var out_pos = UInt64(0)
     var handle_ptr = _lzma_handle()
     # SAFETY: liblzma reads `n` bytes at the source address and writes at
@@ -151,8 +151,8 @@ def xz_decompress_into[
     """
     var n = len(src)
     var cap = len(dst)
-    var src_scratch = InlineArray[UInt8, 1](fill=UInt8(0))
-    var dst_scratch = InlineArray[UInt8, 1](fill=UInt8(0))
+    var src_scratch = Array[UInt8, 1](fill=UInt8(0))
+    var dst_scratch = Array[UInt8, 1](fill=UInt8(0))
     var limit = memlimit
     var in_pos = UInt64(0)
     var out_pos = UInt64(0)

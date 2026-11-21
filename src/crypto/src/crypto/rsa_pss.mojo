@@ -65,7 +65,7 @@ struct RsaPublicKey[N_LIMBS: Int](Copyable, Movable, Deinitable):
     common TLS cert sizes).
 
     # Why NOT `ImplicitlyCopyable` (Mojo 1.0.0)
-    Under 1.0.0 `InlineArray` is no longer `ImplicitlyCopyable`, so a struct
+    Under 1.0.0 `Array` is no longer `ImplicitlyCopyable`, so a struct
     holding one CANNOT be either -- and the conformance cannot be hand-written
     around. MEASURED: `__copyinit__`, `__copy__`, a `copy()` method and a
     `__init__(out self, other: Self)` were each tried, and all four failed with
@@ -189,7 +189,7 @@ def rsa_public_key_from_bytes[N_LIMBS: Int](
 # RsaPublicKey — REJECTED because that's a public ABI change for zero
 # performance benefit.
 #
-# Mojo's InlineArray[T, N] requires N at type level, and `@parameter if`
+# Mojo's Array[T, N] requires N at type level, and `@parameter if`
 # branches inside a function parametric on a separate N don't narrow the
 # parametric N to the literal in the branch. So we keep the loop body
 # inline at each `if N_LIMBS == K:` branch site rather than factoring it
@@ -281,11 +281,11 @@ def rsa_pss_verify[N_LIMBS: Int, H: Hash](
     var md_kind = _md_kind_for_hash[H]()
 
     # Encode modulus -> BE bytes inline at each N_LIMBS branch (Mojo's
-    # InlineArray requires the size at type level, and `@parameter if`
+    # Array requires the size at type level, and `@parameter if`
     # branches inside a function parametric on a separate N don't narrow
     # the parametric N to the literal in the branch — so we cannot
     # factor the encode loop into a helper that takes `n_limbs:
-    # InlineArray[UInt64, K]` from inside an `if N_LIMBS == K:` branch).
+    # Array[UInt64, K]` from inside an `if N_LIMBS == K:` branch).
     comptime if N_LIMBS == 32:
         var n_be = Array[UInt8, 256](fill=UInt8(0))
         for i in range(32):

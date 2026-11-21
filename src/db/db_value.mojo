@@ -22,7 +22,7 @@
 
 #
 # Encapsulation: every public surface here takes / returns String /
-# typed scalars / InlineArray / List — ZERO UnsafePointer crosses any boundary.
+# typed scalars / Array / List — ZERO UnsafePointer crosses any boundary.
 # =============================================================================
 
 from db.timestamptz import Timestamptz
@@ -112,7 +112,7 @@ struct DbColumn(Movable, Copyable):
 # canonical value; `is_null` flags a NULL. Typed constructors mirror the
 # generated `to_row()` cascade:
 #
-#   DbValue.uuid(InlineArray[UInt8,16])  — 16 raw bytes, carried as canonical hex
+#   DbValue.uuid(Array[UInt8,16])  — 16 raw bytes, carried as canonical hex
 #   DbValue.text(String)                 — UTF-8 text
 #   DbValue.int4(Int32) / int8(Int64)    — decimal ASCII
 #   DbValue.float8(Float64)/float4(Float32)

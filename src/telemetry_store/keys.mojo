@@ -53,7 +53,7 @@
 # near-nothing and would need a LIST to enumerate, the thing rule 1 forbids.
 #
 # NO POINTER CROSSES A MODULE BOUNDARY: every surface here is String / Int64 /
-# List[String] / InlineArray by value.
+# List[String] / Array by value.
 # =============================================================================
 
 
@@ -147,7 +147,7 @@ def _zero_pad(v: Int64, width: Int) raises -> String:
 comptime _HEX_DIGITS: String = "0123456789abcdef"
 
 
-def uuid_hex(u: InlineArray[UInt8, 16]) -> String:
+def uuid_hex(u: Array[UInt8, 16]) -> String:
     """Lowercase 32-hex-char rendering of a 16-byte segment uuid. Fixed width,
     so the basename `<start_ms:020d>-<uuid>` is fixed width and therefore
     lexicographically time-ordered."""
@@ -318,7 +318,7 @@ def telemetry_data_key(
     dataset: String,
     day: String,
     start_ms: Int64,
-    segment_uuid: InlineArray[UInt8, 16],
+    segment_uuid: Array[UInt8, 16],
 ) raises -> String:
     """The BASE artifact's key. `<start_ms:020d>` first so a single-level LIST of
     `…/data/` comes back in time order on both conformers."""

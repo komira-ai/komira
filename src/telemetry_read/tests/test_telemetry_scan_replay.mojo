@@ -63,8 +63,8 @@ comptime _DAY: Int64 = 86_400_000_000_000
 # ---------------------------------------------------------------------------
 
 
-def _uuid16(seed: Int) -> InlineArray[UInt8, 16]:
-    var u = InlineArray[UInt8, 16](fill=UInt8(0))
+def _uuid16(seed: Int) -> Array[UInt8, 16]:
+    var u = Array[UInt8, 16](fill=UInt8(0))
     for i in range(16):
         u[i] = UInt8((seed * 37 + i * 11) % 256)
     return u^

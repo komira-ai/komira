@@ -369,7 +369,7 @@ struct DeltaDecoder(Movable):
 
                 # Snapshot the bit-width bytes via an origin-tied view,
                 # then advance. We read the values IMMEDIATELY into an
-                # InlineArray so the view can be dropped before advance.
+                # Array so the view can be dropped before advance.
                 # SAFETY: bounds-checked (remaining() >= miniblock_count).
                 var bw_snapshot_view = self.reader.current_view()
                 var bw_snap_ptr = bw_snapshot_view._unsafe_ptr()

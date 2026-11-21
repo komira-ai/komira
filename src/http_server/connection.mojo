@@ -118,7 +118,7 @@ struct ConnEntry(Movable, Deinitable):
     var _state: UInt8
     # Growable pending-write tail. List[UInt8] is Movable (keeps ConnEntry
     # Movable) and OWNS its bytes, so it correctly outlives the reactor
-    # park between EPOLLOUT events. Unlike the prior fixed 1KB InlineArray,
+    # park between EPOLLOUT events. Unlike the prior fixed 1KB Array,
     # this holds an arbitrarily large unsent tail so big responses flush
     # across multiple writable events instead of dropping the connection.
     var _pending_buf: List[UInt8]

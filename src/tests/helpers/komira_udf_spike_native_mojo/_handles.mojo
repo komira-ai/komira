@@ -101,7 +101,7 @@ def _release(host: Void, n: Int):
     h[].mem_release(h[].host_data, Int64(n))
 
 
-def _box[T: Movable & ImplicitlyDestructible](host: Void, var v: T) -> Void:
+def _box[T: Movable & Deinitable](host: Void, var v: T) -> Void:
     # SAFETY: a heap slot of this library, untracked because the host holds
     # it across calls; written before the pointer leaves, freed by _unbox.
     _reserve(host, size_of[T]())
@@ -110,7 +110,7 @@ def _box[T: Movable & ImplicitlyDestructible](host: Void, var v: T) -> Void:
     return p.bitcast[NoneType]()
 
 
-def _unbox[T: Movable & ImplicitlyDestructible](host: Void, p: Void):
+def _unbox[T: Movable & Deinitable](host: Void, p: Void):
     # SAFETY: `p` came from _box[T] and is freed once, by its close entry.
     var q = p.bitcast[T]()
     q.destroy_pointee()

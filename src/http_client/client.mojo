@@ -447,20 +447,20 @@ struct HttpClient[C: Connector](HttpService, Movable, Deinitable):
     # _drive_read_head per-request `var scratch = List[UInt8]()` +
     # 4096-iter zero-init was 35.48% self-time = 98 µs/iter on
     # hc01-loopback. Hoisting the buffer
-    # to a per-HttpClient `Optional[OwnedPointer[InlineArray[UInt8,
+    # to a per-HttpClient `Optional[OwnedPointer[Array[UInt8,
     # 4096]]]` eliminates per-request alloc.
     #
     # Design choices:
     # - `Optional` for lazy-init — a fresh HttpClient that never sends
     #   pays zero cost.
-    # - `OwnedPointer[InlineArray]` (not raw `InlineArray`) keeps the
+    # - `OwnedPointer[Array]` (not raw `Array`) keeps the
     #   HttpClient struct itself small (8-byte handle, not 4 KB inline).
     #   Future cross-call-frame moves of HttpClient memcpy 8 bytes,
     #   not 4 KB. The prior attempt's per-OutboundDriver inline field
     #   regressed by +34 µs/iter exactly because of 4 KB Movable-move
     #   memcpy ( revert).
     # - `Span[UInt8, _]` is threaded through the dispatch path; the
-    #   InlineArray is reached as `self._read_head_scratch.value()[]`
+    #   Array is reached as `self._read_head_scratch.value()[]`
     #   and Spanned over via `Span[UInt8](self._read_head_scratch.value()[])`.
     var _read_head_scratch: Optional[OwnedPointer[Array[UInt8, 4096]]]
     #
@@ -780,7 +780,7 @@ struct HttpClient[C: Connector](HttpService, Movable, Deinitable):
         """Lazy-init the per-client read-head scratch buffer.
         Idempotent: a no-op if already init. After this returns,
         `read_head_scratch_is_init() == True`. The 4 KB
-        `InlineArray[UInt8, 4096]` is heap-once-allocated via
+        `Array[UInt8, 4096]` is heap-once-allocated via
         OwnedPointer."""
         if not self._read_head_scratch.__bool__():
             var arr = Array[UInt8, 4096](fill=UInt8(0))
@@ -3138,7 +3138,7 @@ def _run_one_request_buffered_h1[
     `scratch` is a
     caller-owned 4 KB+ byte span passed down to OutboundDriver. The hot
     path (`HttpClient._dispatch_pooled_buffered`) sources this from a
-    per-HttpClient long-lived InlineArray-backed scratch (zero alloc
+    per-HttpClient long-lived Array-backed scratch (zero alloc
     per request). Non-hot callers (`_run_one_request_buffered_with_dispatch`)
     allocate a local List once per call.
 

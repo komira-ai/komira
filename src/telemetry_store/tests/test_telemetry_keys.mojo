@@ -50,12 +50,12 @@ from telemetry_store.keys import (
 )
 
 
-def _uuid(fill: UInt8) -> InlineArray[UInt8, 16]:
-    return InlineArray[UInt8, 16](fill=fill)
+def _uuid(fill: UInt8) -> Array[UInt8, 16]:
+    return Array[UInt8, 16](fill=fill)
 
 
-def _uuid_counting() -> InlineArray[UInt8, 16]:
-    var u = InlineArray[UInt8, 16](fill=UInt8(0))
+def _uuid_counting() -> Array[UInt8, 16]:
+    var u = Array[UInt8, 16](fill=UInt8(0))
     for i in range(16):
         u[i] = UInt8(i)
     return u^

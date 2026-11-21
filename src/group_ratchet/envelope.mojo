@@ -29,7 +29,7 @@
 # ENCAPSULATION + gap6 (safety gate): ZERO UnsafePointer in any signature;
 # ZERO wildcard origins (Spans are origin_of(local)); ZERO unsafe_from_address;
 # ZERO take_pointee. gap6 N/A: MessageEnvelope carries owned List[UInt8] +
-# InlineArray fields and is a STACK value — never a byte-Slab element under a
+# Array fields and is a STACK value — never a byte-Slab element under a
 # wildcard cast. The ciphertext is NOT secret (it is the wire form); no zeroize
 # needed. def-based. Mojo 1.0.0b1.
 # =============================================================================
@@ -60,21 +60,21 @@ struct MessageEnvelope(Copyable, Movable, Deinitable):
                             Length = plaintext_len + 16. NOT secret (wire form).
       sig                 — 64-byte Ed25519 signature over the signed region.
 
-    POD-of-owned (InlineArray + List[UInt8] + scalar) stack value (gap6 N/A).
+    POD-of-owned (Array + List[UInt8] + scalar) stack value (gap6 N/A).
     Copyable so the codec / test harness can pass it by value freely; nothing
     here is secret."""
 
-    var session_id: InlineArray[UInt8, SESSION_ID_SIZE]
+    var session_id: Array[UInt8, SESSION_ID_SIZE]
     var index: UInt32
     var ciphertext_then_tag: List[UInt8]
-    var sig: InlineArray[UInt8, ED25519_SIG_SIZE]
+    var sig: Array[UInt8, ED25519_SIG_SIZE]
 
     def __init__(
         out self,
-        session_id: InlineArray[UInt8, SESSION_ID_SIZE],
+        session_id: Array[UInt8, SESSION_ID_SIZE],
         index: UInt32,
         var ciphertext_then_tag: List[UInt8],
-        sig: InlineArray[UInt8, ED25519_SIG_SIZE],
+        sig: Array[UInt8, ED25519_SIG_SIZE],
     ):
         self.session_id = session_id.copy()
         self.index = index
@@ -89,7 +89,7 @@ struct MessageEnvelope(Copyable, Movable, Deinitable):
 
 
 def envelope_signed_region(
-    session_id: InlineArray[UInt8, SESSION_ID_SIZE],
+    session_id: Array[UInt8, SESSION_ID_SIZE],
     index: UInt32,
     ciphertext_then_tag: List[UInt8],
 ) -> List[UInt8]:
@@ -183,7 +183,7 @@ def decode_envelope(body: List[UInt8]) raises -> MessageEnvelope:
     var off = 1
     if off + SESSION_ID_SIZE > len(body):
         raise Error("envelope: truncated session_id")
-    var session_id = InlineArray[UInt8, SESSION_ID_SIZE](fill=UInt8(0))
+    var session_id = Array[UInt8, SESSION_ID_SIZE](fill=UInt8(0))
     for i in range(SESSION_ID_SIZE):
         session_id[i] = body[off + i]
     off += SESSION_ID_SIZE
@@ -203,7 +203,7 @@ def decode_envelope(body: List[UInt8]) raises -> MessageEnvelope:
 
     if off + ED25519_SIG_SIZE > len(body):
         raise Error("envelope: truncated signature")
-    var sig = InlineArray[UInt8, ED25519_SIG_SIZE](fill=UInt8(0))
+    var sig = Array[UInt8, ED25519_SIG_SIZE](fill=UInt8(0))
     for i in range(ED25519_SIG_SIZE):
         sig[i] = body[off + i]
 

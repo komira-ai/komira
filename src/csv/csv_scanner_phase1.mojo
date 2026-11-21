@@ -90,7 +90,7 @@ struct CellRange(Copyable, Movable, ImplicitlyCopyable, Deinitable):
 struct Row(Copyable, Movable, Deinitable):
     """One CSV record: an ordered list of CellRange entries.
 
-    Wraps `List[CellRange]` rather than a fixed InlineArray because the
+    Wraps `List[CellRange]` rather than a fixed Array because the
     column count is data-driven. The scanners emit each record's cells as
     they find them and do not compare field counts: a `Row` may hold fewer or
     more cells than the header. The readers (`read_csv_bytes_to_batch`,

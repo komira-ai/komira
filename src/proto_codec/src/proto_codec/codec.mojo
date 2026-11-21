@@ -58,7 +58,7 @@ def encode_json[T: Serializable](msg: T) raises -> String:
     """Encode `msg` to a proto3-canonical-JSON string."""
     var enc = JsonEncoder()
     comptime if conforms_to(T, Proto3JsonWkt):
-        trait_downcast[Proto3JsonWkt](msg).write_proto3_json(enc.buf)
+        msg.write_proto3_json(enc.buf)
     else:
         msg.encode[JsonEncoder](enc)
         enc.finish()

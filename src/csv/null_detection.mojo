@@ -3,7 +3,7 @@
 # =============================================================================
 #
 # Tests whether a cell byte-span matches any of the configured null tokens.
-# The token set lives in `CsvReadOptions.null_strings` (InlineArray[String, 8]
+# The token set lives in `CsvReadOptions.null_strings` (Array[String, 8]
 # + `_n_null_strings: Int` counter — no pointer fields).
 #
 # Default tokens: `["", "NULL", "NA", "NaN", "null"]` (pandas-parity).

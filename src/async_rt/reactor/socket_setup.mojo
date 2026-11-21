@@ -9,14 +9,14 @@
 #   - socket_tcp_nonblocking() raises -> Int32           # AF_INET + SOCK_STREAM + non-blocking
 #   - bind_inet(fd, ip_be, port_host) raises             # bind to ip:port
 #   - listen_socket(fd, backlog) raises
-#   - sockaddr_in_bytes(ip_be, port_host) -> InlineArray[UInt8, 16]
+#   - sockaddr_in_bytes(ip_be, port_host) -> Array[UInt8, 16]
 #   - inet_loopback_be() -> UInt32                       # 127.0.0.1 in network byte order
 #   - inet_any_be() -> UInt32                            # 0.0.0.0 (INADDR_ANY) — bind all interfaces
 #   - set_so_sndbuf(fd, bytes) raises / so_sndbuf(fd) raises -> Int32
 #   - set_so_rcvbuf(fd, bytes) raises / so_rcvbuf(fd) raises -> Int32
 #
 # Pointer discipline:
-#   - All public functions return typed scalars / InlineArray.
+#   - All public functions return typed scalars / Array.
 #   - UnsafePointer is INTERNAL TO THIS MODULE — confined to the FFI
 #     thunks below.
 #   - NO wildcard origins on the public surface.
@@ -176,7 +176,7 @@ def inet_any_be() -> UInt32:
 
 
 def sockaddr_in_bytes(ip_be: UInt32, port_host: UInt16) -> Array[UInt8, 16]:
-    """Build a struct sockaddr_in (AF_INET) as a 16-byte InlineArray.
+    """Build a struct sockaddr_in (AF_INET) as a 16-byte Array.
 
     Layout (POSIX, host byte order for the family field on Linux but
     network byte order for sin_port and sin_addr):
@@ -189,7 +189,7 @@ def sockaddr_in_bytes(ip_be: UInt32, port_host: UInt16) -> Array[UInt8, 16]:
       [4:8]   sin_addr     = IPv4 address in network byte order
       [8:16]  sin_zero     = 8 bytes of zero padding
 
-    The InlineArray return type makes the buffer stack-local; the caller
+    The Array return type makes the buffer stack-local; the caller
     builds a Span over it and passes to bind/connect FFI.
     """
     var buf = Array[UInt8, 16](fill=UInt8(0))

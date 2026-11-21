@@ -55,7 +55,7 @@
 #     Slab[T].create(capacity), Slab[T](capacity) or
 #     Slab[T].with_capacity(n).
 #   - Zero-cap default -> Slab[T]().
-#   - Compile-time-N fixed arrays -> stdlib InlineArray[T, N] directly.
+#   - Compile-time-N fixed arrays -> stdlib Array[T, N] directly.
 #
 # Slot init:
 #   init_slot[init_fn] takes a comptime function `def () thin -> T` and

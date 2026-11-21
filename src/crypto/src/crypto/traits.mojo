@@ -49,7 +49,7 @@ Conformers:
 
 The block size and output size are comptime-known so callers can
 
-stack-allocate output buffers (InlineArray[UInt8, H.OUTPUT_SIZE]) and
+stack-allocate output buffers (Array[UInt8, H.OUTPUT_SIZE]) and
 
 stage SIMD body work against the known constants.
 
@@ -159,7 +159,7 @@ trait Aead(Movable, Deinitable):
     def __init__(out self, key: Array[UInt8, Self.KEY_SIZE]):
         """Construct from a comptime-fixed-size key.
 
-        InlineArray takes the key by value (stack-allocated); the
+        Array takes the key by value (stack-allocated); the
         conformer's body MUST zero the input on drop via
         `zeroize_inline_array[Self.KEY_SIZE]`.
         """
@@ -250,7 +250,7 @@ trait KeySchedule(Movable, Deinitable):
 
     A conformer (e.g. `KeyScheduleImpl[H: Hash]`) is comptime-parametric
     on the negotiated hash (Sha256 / Sha384), stack-allocates secret
-    buffers as `InlineArray[UInt8, H.OUTPUT_SIZE]`, and instantiates HKDF
+    buffers as `Array[UInt8, H.OUTPUT_SIZE]`, and instantiates HKDF
     + HKDF-Expand-Label internally.
 
     Output buffers (derive_*_traffic_secret + derive_*_master_secret):

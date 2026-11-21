@@ -50,7 +50,7 @@ retention) also carry this tag; no plan reaches them."""
 
 comptime AGG_LARGEST_K: UInt8 = 11
 """Top-K-largest values per group. K is hardcoded to 2. Per-group state is
-`LargestKState` (24 bytes: Int32 count + Int32 pad + InlineArray[Float64, 2]
+`LargestKState` (24 bytes: Int32 count + Int32 pad + Array[Float64, 2]
 min-heap) — no heap-owning fields, so no stale-pointer hazard. Output is a
 single Float64 per group (the largest of the top-K, i.e. the heap max).
 Generalizing K is deferred until a consumer needs it."""
@@ -668,7 +668,7 @@ Sized to cover:
   - 3-4 inputs: future UDAFs (linear regression, weighted variants)
 
 Stored as 4 named `Optional[Expr]` fields (`_child0` .. `_child3`)
-because Mojo's `InlineArray[ElementType, N]` requires
+because Mojo's `Array[ElementType, N]` requires
 `ElementType: Copyable`, and `Optional[Expr]` is only Movable
 (`Expr` itself is only Movable due to `OwnedPointer[Expr]` recursive
 fields). The named-field shape preserves no-heap-allocation semantics —

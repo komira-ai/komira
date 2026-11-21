@@ -407,7 +407,7 @@ def _publish_raw_split(inner: Inner, key: String, bytes: List[UInt8]) raises:
     var meta = SearchMetastore[Inner](manifest^, String("docs"))
     _ = meta.publish(
         make_split_summary(
-            InlineArray[UInt8, 16](fill=UInt8(9)),
+            Array[UInt8, 16](fill=UInt8(9)),
             Int64(1),
             Int64(len(bytes)),
             Int64(0),
@@ -550,7 +550,7 @@ def _publish_l0_split(inner: Inner, messages: List[String]) raises:
     var batch = rb.build(_l0_schema())
     var seg = L0SegmentBuilder(_l0_schema())
     seg.add_batch(batch^)
-    var uuid = InlineArray[UInt8, 16](fill=UInt8(7))
+    var uuid = Array[UInt8, 16](fill=UInt8(7))
     var bytes = seg.serialize_split_bytes(String("message"), uuid)
     var key = String("data/logs/splits/07070707070707070707070707070707.split")
     _ = inner.put(Path.parse(key), bytes)

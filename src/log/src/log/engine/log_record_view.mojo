@@ -21,7 +21,7 @@
 #     consumer never touches the arena.
 #
 # NOTE THIS IS NOT THE POD ON-RING RECORD. `LogEventRecord` (log_event_record.mojo)
-# is the fixed-stride ring element (every field a scalar / InlineArray).
+# is the fixed-stride ring element (every field a scalar / Array).
 # `LogRecordView` is the DECODED, owned, heap-carrying value — it is NEVER stored
 # in a byte-slab; it lives only in a function-local `List[LogRecordView]` the drain
 # returns and the consumer immediately transposes + drops.
