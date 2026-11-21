@@ -569,11 +569,13 @@ def test_what_the_sink_refuses_when_it_is_built() raises:
         "has no aggregate"
         in _built_with(ungrouped_agg_data(Slab[AggExpr](), Schema()))
     )
-    # An output type the aggregate cannot produce.
+    # An output type the aggregate cannot produce (a SUM is never FLOAT32;
+    # FLOAT64 is the SUM of a float column, refused over this integer column
+    # when the output is built, test_sink_float_agg).
     assert_true(
         "cannot produce the declared output type"
         in _built_with(
-            ungrouped_agg_data(agg_list(_agg(AGG_SUM, "b")), _one_field(ArrowType.FLOAT64))
+            ungrouped_agg_data(agg_list(_agg(AGG_SUM, "b")), _one_field(ArrowType.FLOAT32))
         )
     )
     assert_true(

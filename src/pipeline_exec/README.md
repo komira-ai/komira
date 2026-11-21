@@ -41,8 +41,8 @@ Import each module by name; the package root exports nothing.
   holds one of three member types, fixed where the variant is named, and a tag;
   its trait methods test the tag and call the member. `unused_members` fills
   the slots a list leaves empty with members that refuse to run.
-- `source_parquet`, `source_batch`, `source_sink_output`: the sources of a
-  plan. `build_parquet_source` makes a `parquet_scan` `ParquetSource` on
+- `source_parquet`, `source_batch`, `source_sink_output`, `source_csv`: the
+  sources of a plan. `build_parquet_source` makes a `parquet_scan` `ParquetSource` on
   the local file system from the Parquet arm of a `SourceSpecPod`: it refuses a
   spec that is not total, resolves the projection names through the footer of
   the first file the path lists (a path may be a file, a directory or a glob),
@@ -51,7 +51,13 @@ Import each module by name; the package root exports nothing.
   row-group statistics are checked against. The source borrows the caller's
   footer cache and expression pool. `BatchSource` serves a copy of a resident
   batch and `SinkOutputSource` the batch a finished segment published, each as
-  morsels claimed from one shared cursor.
+  morsels claimed from one shared cursor. `build_csv_source` reads the file
+  of the CSV arm of a `SourceSpecPod` (a `.csv.gz`, `.csv.zst` or `.csv.lz4`
+  decompressed by its extension), decodes it with the spec's dialect at the
+  column types the plan bound it at (no second inference), refuses a file whose
+  column names are not the bound ones (`CSV_SOURCE_SCHEMA_MISMATCH`) and serves
+  the decoded file as a `BatchSource`; the whole file is decoded before the
+  first morsel.
 - `op_filter`, `op_project`, `op_limit`: the operators. A filter evaluates its
   predicate and records the rows it keeps as the batch's selection mask instead
   of gathering them; all rows kept leaves no mask, none kept is FILTERED_EMPTY,
@@ -72,24 +78,57 @@ Import each module by name; the package root exports nothing.
   `(SINK_AGG, KEY_DTYPE_NONE, SINK_ORIENT_COLUMNAR)`: SUM, COUNT, COUNT(*),
   COUNT(DISTINCT), MIN, MAX and AVG (`count_distinct` below). The aggregate arguments (`AggSinkData.agg_exprs`) are run by each
   worker as a projection over the morsel, under its selection mask; the state
-  of a worker is one cell per aggregate, a count and one 128-bit integer. The
-  folds are exact integer folds over signed integers, DECIMAL128 (the
-  unscaled value; the scale rides beside it) and, for MIN and MAX, DATE32, so
-  the merge in worker order does not depend on the schedule. No float is
-  folded: a float input is refused by name. SUM over a decimal is a DECIMAL128 of
-  the input's scale in the declared precision, over an integer an INT64 (or
-  the DECIMAL(38, 0) a plan declares for the SQL integer sum); a sum
-  that leaves 128 bits, has more digits than the declared precision, or leaves
-  INT64 is refused rather than wrapped. AVG is a DOUBLE: one conversion of the
-  exact sum (`decimal_to_float64` for a decimal) divided by the count. Over no
-  non-NULL row SUM, MIN, MAX and AVG are NULL and COUNT is zero, in one row of
-  the declared schema. `AggSinkData.presorted` and `estimated_groups` belong to
-  grouped sinks and are ignored.
+  of a worker is one cell per aggregate, a count, one 128-bit integer and one
+  double. The folds over signed integers, DECIMAL128 (the unscaled value; the
+  scale rides beside it) and, for MIN and MAX, DATE32 are exact integer
+  folds, so the merge in worker order does not depend on the schedule. SUM
+  over a decimal is a DECIMAL128 of the input's scale in the declared
+  precision, over an integer an INT64 (or the DECIMAL(38, 0) a plan declares
+  for the SQL integer sum); a sum that leaves 128 bits, has more digits than
+  the declared precision, or leaves INT64 is refused rather than wrapped. AVG
+  is a DOUBLE: one conversion of the exact sum (`decimal_to_float64` for a
+  decimal) divided by the count. Over no non-NULL row SUM, MIN, MAX and AVG
+  are NULL and COUNT is zero, in one row of the declared schema.
+  `AggSinkData.presorted` and `estimated_groups` belong to grouped sinks and
+  are ignored.
+
+  FLOAT32 and FLOAT64 arguments fold into the double, as DuckDB's `sum`,
+  `avg`, `min` and `max` of a DOUBLE do (a FLOAT is widened first, exactly).
+  SUM is a FLOAT64: the values added from +0.0 in row order within a worker,
+  then the workers' sums added in worker order, with no overflow refused (a
+  sum past the double range is an infinity, +inf plus -inf and any NaN give
+  NaN); AVG is that sum divided by the count; MIN and MAX keep the input's
+  type and use DuckDB's order, NaN above +inf (query_semantics 2.7). The
+  tolerance rule, which `tests/test_sink_float_agg_duckdb.mojo` holds the
+  sink to against the pinned DuckDB:
+
+  - MIN, MAX, COUNT and NULL are exact: MIN and MAX return one of the input
+    values, the same one DuckDB returns, except that which of -0.0 and 0.0 a
+    tie keeps depends on the order the rows are met.
+  - NaN matches any NaN (its sign and payload are not part of the answer),
+    and +inf and -inf match only themselves.
+  - A finite SUM or AVG is within 1e-9 relative of DuckDB's:
+    `|got - want| <= 1e-9 * max(|got|, |want|)`, whenever the sum is well
+    conditioned. Both are double sums in an order the schedule picks
+    (query_semantics 2.10), and a sum of `n` values in any order is within
+    about `(n - 1) * 2^-53 * sum(|x|)` of the exact one, so the two answers are
+    within `(n - 1) * 2^-52 * sum(|x|)` of each other: the rule holds while
+    that is at most `1e-9 * |sum(x)|`, for 4096 values while `sum(|x|)` is
+    at most about 1,100 times `|sum(x)|`. A cancelling sum past that bound, and
+    a sum whose partial sums leave the double range in one order but not in
+    another, can differ by more; DuckDB's own answer to such a sum changes with
+    its thread count too.
+
+  A worker's sum is not compensated (DuckDB's `sum` is not; its `fsum` is)
+  and a segment records no row order, so a float SUM or AVG is not the same
+  bits on every worker count; `lowering` cuts it with `ORDER_NONE` for that
+  reason.
 - `sink_group_agg`, `group_table`, `group_keys`, `sink_agg_any`: the grouped
   aggregation sinks `(SINK_AGG, KEY_DTYPE_I64 | I32 | F64 | F32,
   SINK_ORIENT_COLUMNAR)`, over one or more keys that are integer columns (the
   I64 and I32 rows) or float columns (F64 and F32), with the aggregates and the
-  exact folds of the ungrouped sink (`agg_fold`, `agg_output`). The output
+  exact folds of the ungrouped sink (`agg_fold`, `agg_output`); an aggregate
+  of a float argument (not a float key) is refused by name. The output
   schema lists the key columns, in the input's types, then the aggregates. Each
   worker folds into a hash table of its own (`group_table`: a 64-bit cell and a
   NULL flag per key, a count and a 128-bit integer per aggregate); a NULL key is
@@ -192,7 +231,7 @@ Import each module by name; the package root exports nothing.
   memory on a synthetic workload and checks each layout's counts; its numbers and what
   they decided are in `docs/design/lowering_and_pipeline.md` (section 4.3).
 - `real_builder`: `RealBuilder`, the `SegmentBuilder` over these members. It
-  serves SOURCE_PARQUET, SOURCE_BATCH, SOURCE_SINK_OUTPUT, OP_FILTER,
+  serves SOURCE_PARQUET, SOURCE_BATCH, SOURCE_SINK_OUTPUT, SOURCE_CSV, OP_FILTER,
   OP_PROJECT, OP_LIMIT and the sinks `(SINK_COLLECT, KEY_DTYPE_NONE,
   SINK_ORIENT_COLUMNAR)`, `(SINK_AGG, KEY_DTYPE_NONE, SINK_ORIENT_COLUMNAR)`,
   the grouped rows I64, I32, F64 and F32, `(SINK_AGG, KEY_DTYPE_STRING,
@@ -206,7 +245,7 @@ Import each module by name; the package root exports nothing.
   chain's projections over a batch of no rows. Three origins name the borrows of
   the Parquet source (the footer cache, the expression pool, an absent dynamic
   filter).
-- `plan_harness`: segment descriptors for the three sources with an operator
+- `plan_harness`: segment descriptors for the four sources with an operator
   chain and a collect sink (`with_agg_sink` turns one into an aggregation),
   `project_columns`, and a sample table with readers, for plans written by hand
   (`with_group_sink`, `with_string_group_sink` and `grouped_agg_data` for the
@@ -259,6 +298,11 @@ the raise fails the query through the first-error slot.
   with a selection mask is materialized (fully copied) before the predicate is
   evaluated. Whether a mask-aware evaluation is worth it is for slice 3 to
   measure.
+- **Float aggregate arguments are folded by the ungrouped sink only.** The
+  grouped sinks read each argument into 128-bit values per row
+  (`agg_fold.widen_column`) and refuse a FLOAT32 or FLOAT64 argument by name;
+  a float key is served. The last bits of a float SUM or AVG depend on which
+  worker folded which rows (the tolerance rule above).
 - **The collect sink holds every chunk until `take_output`.** Chunks stay in the
   worker slots, then in the merged list, and `take_output` concatenates them
   into the output batch, so a segment's peak memory is about twice its output.
@@ -305,4 +349,50 @@ var out = run_plan(descs, builder, dispatch, 2, CancellationToken.new())
 assert_false(out.has(0))  # the consumer took it
 var counted = batch_values(out.take(1))
 assert_equal(counted[0], Int64(12))
+```
+
+A SOURCE_CSV spec through `source_csv` and `plan_harness`; reading a file is
+in the welded tests (`test_source_csv`):
+
+```mojo
+from std.testing import assert_equal, assert_true
+
+from arrow.arrow_types import ArrowType
+from physical_plan.csv_source_spec import CsvSourceSpec
+from physical_plan.physical_plan import SOURCE_CSV, SourceSpecPod
+from pipeline_exec.plan_harness import csv_segment
+from pipeline_exec.source_csv import (
+    build_csv_source,
+    csv_read_options,
+    read_csv_spec,
+)
+
+var names = List[String]()
+names.append("code")
+var types = List[ArrowType]()
+types.append(ArrowType.STRING)
+var spec = SourceSpecPod.csv(
+    CsvSourceSpec("codes.csv", UInt8(ord(";")), True, 0, names^, types^)
+)
+# The reader gets the spec's dialect and parses each column at its bound
+# type, so a cell `0001` of this column stays the string `0001`.
+var options = csv_read_options(spec)
+assert_equal(Int(options.delimiter), ord(";"))
+assert_true(options.declared_column_types[0] == ArrowType.STRING)
+# A segment that reads the file and collects (plan_harness).
+var seg = csv_segment(0, spec^)
+assert_equal(seg.source_kind, SOURCE_CSV)
+# A spec that names no file is refused before anything is read.
+var refused = String("")
+try:
+    _ = read_csv_spec(SourceSpecPod())
+except e:
+    refused = String(e)
+assert_equal(refused, "pipeline_exec: a SOURCE_CSV spec names no file")
+refused = String("")
+try:
+    _ = build_csv_source(SourceSpecPod(), 1024)
+except e:
+    refused = String(e)
+assert_equal(refused, "pipeline_exec: a SOURCE_CSV spec names no file")
 ```

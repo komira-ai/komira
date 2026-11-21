@@ -65,10 +65,32 @@ Sub-targets:
     [release]        the wheel, copied only after [release_check] passed: what
                      a publisher reads, and nothing else
     [release_check]  [check] with a stamped wheel required
+
+`wheel_libs_check(name, wheel, entry, runtime_libs, runtime_licenses,
+runtime_dists, runtime_requirement = None, expect_refusal = None)` reads a finished wheel alone
+(`komira_wheel libs`, wheel/libs.zig) and refuses it unless the libraries in
+it load from it as an install would load them: from the library `entry` (a
+member path), each DT_NEEDED a manylinux system library, a library already
+loaded or a member its run path reaches, every run path entry
+`$ORIGIN`-relative and inside the import package, every ELF member loaded,
+and each of `runtime_libs` (the Mojo runtime) carried once with the bytes of
+the toolchain's copy, its licence files `runtime_licenses` in
+`.dist-info/licenses/` and named by METADATA, and no Requires-Dist of a
+distribution in `runtime_dists`. With `runtime_requirement` the wheel is the
+external flavour instead: no member has a runtime library's name or bytes,
+those names are left to the requirement, none of the licence files is in it,
+and its Requires-Dist holds the requirement and no other line of
+`runtime_dists`. Beside the wheel it reads only those names and
+the toolchain's runtime libraries, nothing else the rule that wrote the wheel
+was given. The output, `<name>.libs`, lists the libraries `entry` loads, in
+load order; with `expect_refusal`, it exists only if the wheel is refused with
+exactly that line (and says `refused: <line>`). Building the target is running
+the check.
 """
 
 load("@komira//tools/build/bench_salt:bench_salt.bzl", "salted")
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
+load("@komira//tools/build/mojo:providers.bzl", "MojoToolchainInfo")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load("@komira//tools/build/platforms:table.bzl", "row")
 load(":conda.bzl", "TEST_COMMIT", "TEST_STAMP", "TEST_TIMESTAMP_MS")
@@ -294,8 +316,23 @@ def _wheel_file_test_stamped_macro(**kwargs):
         **kwargs
     )
 
+def _wheel_file_at_stamp_macro(stamp, **kwargs):
+    # The test commit and commit time with the build number `stamp`, so one
+    # build holds wheels of several versions (an upgrade test's previous and
+    # current release). The stamp is a positive number without leading zeros,
+    # which the tool checks. Not a release: no -c komira.package_* reaches it.
+    _wheel_file(
+        stamp = stamp,
+        commit = TEST_COMMIT,
+        timestamp_ms = TEST_TIMESTAMP_MS,
+        check_release = True,
+        exec_compatible_with = LINUX_X86_64,
+        **kwargs
+    )
+
 wheel_file = declares_docs(_wheel_file_macro)
 wheel_file_test_stamped = declares_docs(_wheel_file_test_stamped_macro)
+wheel_file_at_stamp = declares_docs(_wheel_file_at_stamp_macro)
 
 def _wheel_tag_cases_impl(ctx):
     # Each row's tag, against the tag written out (not derived) in `cases`.
@@ -325,3 +362,42 @@ _wheel_tag_cases = rule(
 )
 
 wheel_tag_cases = declares_docs(_wheel_tag_cases)
+
+def _wheel_libs_check_impl(ctx):
+    tc = ctx.attrs.toolchain[MojoToolchainInfo]
+    out = ctx.actions.declare_output(ctx.label.name + ".libs")
+    cmd = cmd_args(ctx.attrs._wheel[RunInfo], "libs", "--wheel", ctx.attrs.wheel, "--entry", ctx.attrs.entry)
+    for name in ctx.attrs.runtime_libs:
+        cmd.add("--runtime-lib", cmd_args(tc.runtime.project(name), format = name + "={}"))
+    for name in ctx.attrs.runtime_licenses:
+        cmd.add("--runtime-license", name)
+    for name in ctx.attrs.runtime_dists:
+        cmd.add("--runtime-dist", name)
+    if ctx.attrs.runtime_requirement != None:
+        cmd.add("--runtime-requirement", ctx.attrs.runtime_requirement)
+    if ctx.attrs.expect_refusal != None:
+        cmd.add("--expect-refusal", ctx.attrs.expect_refusal)
+    cmd.add("--out", out.as_output())
+    ctx.actions.run(cmd, env = salted(), category = "wheel_libs")
+    return [DefaultInfo(default_output = out)]
+
+_wheel_libs_check = rule(
+    impl = _wheel_libs_check_impl,
+    doc = "Reads the finished wheel `wheel` alone with `komira_wheel libs` (wheel/libs.zig): the libraries the member `entry` loads, through each one's run path, must all be in the wheel and be every ELF member, each of `runtime_libs` carried once with the toolchain's bytes and its `runtime_licenses` in the dist-info, and no Requires-Dist names one of `runtime_dists`; with `runtime_requirement`, none of the runtime or its licences carried and that requirement required instead. The output lists the loaded libraries; with `expect_refusal`, it exists only if the wheel is refused with exactly that line.",
+    attrs = {
+        "entry": attrs.string(),
+        "expect_refusal": attrs.option(attrs.string(), default = None),
+        "runtime_dists": attrs.list(attrs.string(), default = []),
+        "runtime_libs": attrs.list(attrs.string()),
+        "runtime_licenses": attrs.list(attrs.string(), default = []),
+        "runtime_requirement": attrs.option(attrs.string(), default = None),
+        "toolchain": attrs.toolchain_dep(default = "toolchains//:mojo", providers = [MojoToolchainInfo]),
+        "wheel": attrs.source(),
+        "_wheel": attrs.exec_dep(default = "komira//tools/build/package:komira_wheel", providers = [RunInfo]),
+    },
+)
+
+def _wheel_libs_check_macro(**kwargs):
+    _wheel_libs_check(exec_compatible_with = LINUX_X86_64, **kwargs)
+
+wheel_libs_check = declares_docs(_wheel_libs_check_macro)

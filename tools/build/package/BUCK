@@ -118,12 +118,25 @@ zig_module(
 #   wheel_record_unit  the runtime record (`runtime-record`): the GNU build id
 #                      read from a note segment, a library without one or
 #                      that reads outside itself refused, and the record's
-#                      lines in the order given.
+#                      lines in the order given;
+#   wheel_libs_unit    the finished wheel read alone (`komira_wheel libs`):
+#                      komira's layout passes with its libraries in the
+#                      loader's order, and a second or foreign or missing Mojo
+#                      runtime library, a run path that misses, is absolute or
+#                      leaves the package, an unresolved or path DT_NEEDED, a
+#                      library nothing loads, a member outside the package, a
+#                      missing runtime licence and a Requires-Dist of the
+#                      runtime are each refused by their exact message, as are
+#                      the command's flags and an expected refusal that differs;
+#                      the external flavour's layout passes, and a runtime
+#                      library in it by name or bytes, a runtime licence and a
+#                      missing or other requirement are refused.
 _WHEEL_SRCS = [
     "wheel/check.zig",
     "wheel/cli.zig",
     "wheel/diag.zig",
     "wheel/elf.zig",
+    "wheel/libs.zig",
     "wheel/macho.zig",
     "wheel/policy.zig",
     "wheel/record.zig",
@@ -133,7 +146,7 @@ _WHEEL_SRCS = [
     "wheel/zip.zig",
 ]
 
-_WHEEL_SCENARIOS = ["build", "check", "cli", "elf", "macho", "policy", "record", "zip"]
+_WHEEL_SCENARIOS = ["build", "check", "cli", "elf", "libs", "macho", "policy", "record", "zip"]
 
 [
     zig_test(

@@ -5,7 +5,7 @@
 //! message. What the contract holds:
 //!  - the triggers: `on:` is `workflow_dispatch:` alone (no schedule, cron, push or pull request
 //!    outside a comment), with one required input, `flavour`, a choice of exactly `external` and
-//!    `bundled` whose default is one of them; top-level `permissions` is `{}` exactly once, and the
+//!    `bundled` whose default is `bundled`; top-level `permissions` is `{}` exactly once, and the
 //!    concurrency is the group `pypi` with no run cancelled;
 //!  - the jobs are exactly build, testpypi, testpypi-smoke, pypi, pypi-smoke and result (the Linux
 //!    wheel), then build-macos-arm64, testpypi-macos-arm64, testpypi-smoke-macos-arm64,
@@ -212,9 +212,9 @@ const RESULT_LINES = [_][]const u8{
 };
 
 // ---- the trigger ---------------------------------------------------------------------------------
-/// The lines of `on:`: the manual run and its one input. `null` is the default's line, which is one of
-/// `FLAVOUR_DEFAULTS`: flipping the default is that one line.
-const ON_LINES = [_]?[]const u8{
+/// The lines of `on:`: the manual run and its one input. The default is `bundled`, the flavour a scheduled
+/// run publishes: flipping it is that one line here and in the workflow.
+const ON_LINES = [_][]const u8{
     "  workflow_dispatch:",
     "    inputs:",
     "      flavour:",
@@ -223,10 +223,9 @@ const ON_LINES = [_]?[]const u8{
     "        options:",
     "          - external",
     "          - bundled",
-    null,
+    "        default: bundled",
     "        required: true",
 };
-const FLAVOUR_DEFAULTS = [_][]const u8{ "        default: external", "        default: bundled" };
 
 /// What no line outside a comment may contain, whatever the case.
 const FORBIDDEN = [_][]const u8{ "secrets", "password", "api-token", "pypi_token", "curl", "wget", "jq ", "twine", "continue-on-error", "pull_request_target" };
@@ -378,9 +377,7 @@ fn isHex40(s: []const u8) bool {
 fn onLinesHold(lines: []const []const u8) bool {
     if (lines.len != ON_LINES.len) return false;
     for (ON_LINES, lines) |want, got| {
-        if (want) |w| {
-            if (!std.mem.eql(u8, w, got)) return false;
-        } else if (!has(&FLAVOUR_DEFAULTS, got)) return false;
+        if (!std.mem.eql(u8, want, got)) return false;
     }
     return true;
 }
@@ -415,7 +412,7 @@ fn checkFile(ar: std.mem.Allocator, text: []const u8) !?[]const u8 {
 
     var on_n: usize = 0;
     const on_lines = (try topLines(ar, text, "on:", &on_n)) orelse empty;
-    if (on_n != 1 or !onLinesHold(on_lines)) return "on: is not exactly workflow_dispatch: with the input flavour, a required choice of external and bundled whose default is one of them";
+    if (on_n != 1 or !onLinesHold(on_lines)) return "on: is not exactly workflow_dispatch: with the input flavour, a required choice of external and bundled whose default is bundled";
 
     var perm_n: usize = 0;
     _ = try topLines(ar, text, "permissions: {}", &perm_n);
@@ -670,19 +667,20 @@ test "the triggers are a manual run alone: a schedule, a push or a pull request 
     try expectRefused(ar, try replaced(ar, text, "\n  workflow_dispatch:\n", "\n  workflow_dispatch:\n    inputs: {}\n"), "on: is not exactly");
 }
 
-test "the flavour: a required choice of the two, either the default, and the build and summary follow it" {
+test "the flavour: a required choice of the two, bundled the default, and the build and summary follow it" {
     var arena = std.heap.ArenaAllocator.init(t.allocator);
     defer arena.deinit();
     const ar = arena.allocator();
     const text = try realText(ar);
-    // either flavour is the default; flipping it is one line
-    try t.expect((try check(ar, try replaced(ar, text, "        default: external\n", "        default: bundled\n"))) == null);
+    // bundled is the default: the other choice as the default is refused
+    try t.expect((try check(ar, text)) == null);
+    try expectRefused(ar, try replaced(ar, text, "        default: bundled\n", "        default: external\n"), "on: is not exactly");
     // the input missing, not a choice, not required, without a default, or with another default
     try expectRefused(ar, try replaced(ar, text, "  workflow_dispatch:\n    inputs:\n", "  workflow_dispatch:\n    unused:\n"), "on: is not exactly");
     try expectRefused(ar, try replaced(ar, text, "        type: choice\n", "        type: string\n"), "on: is not exactly");
     try expectRefused(ar, try replaced(ar, text, "        required: true\n", "        required: false\n"), "on: is not exactly");
-    try expectRefused(ar, try replaced(ar, text, "        default: external\n", ""), "on: is not exactly");
-    try expectRefused(ar, try replaced(ar, text, "        default: external\n", "        default: both\n"), "on: is not exactly");
+    try expectRefused(ar, try replaced(ar, text, "        default: bundled\n", ""), "on: is not exactly");
+    try expectRefused(ar, try replaced(ar, text, "        default: bundled\n", "        default: both\n"), "on: is not exactly");
     // an option added, dropped or renamed
     try expectRefused(ar, try replaced(ar, text, "          - bundled\n", "          - bundled\n          - both\n"), "on: is not exactly");
     try expectRefused(ar, try replaced(ar, text, "          - bundled\n", ""), "on: is not exactly");
