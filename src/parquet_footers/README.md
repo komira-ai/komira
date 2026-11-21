@@ -68,6 +68,80 @@ maximum the largest (unknown if any file's is), and the distinct count is the
 largest of the files' lower bounds. The file list is fixed when the table is
 registered; each query reads the footers again and checks every file.
 
+Refusals read as values: a glob that matches nothing, and a directory where
+SQL does not allow one, in an empty temporary directory the example creates:
+
+<!-- mojo-hidden from std.testing import assert_equal, assert_true -->
+```mojo
+from std.tempfile import mkdtemp
+from parquet_footers.parquet_files import resolve_parquet_source
+from parquet_footers.parquet_footers import ParquetFooters
+from sql.sql_ast import HIVE_PARTITIONING_OFF
+
+var footers = ParquetFooters()
+var root = mkdtemp(prefix="komira_footers_readme_")
+
+var no_match = String()
+try:
+    _ = resolve_parquet_source(footers, root + "/*.parquet", HIVE_PARTITIONING_OFF, False)
+except e:
+    no_match = String(e)
+assert_equal(no_match, "PARQUET_GLOB_NO_MATCH: no file matches '" + root + "/*.parquet'")
+
+# `ParquetFooters.parquet_relation` is the same call with directories refused.
+var is_dir = String()
+try:
+    _ = footers.parquet_relation(root, HIVE_PARTITIONING_OFF)
+except e:
+    is_dir = String(e)
+assert_true(is_dir.startswith("PARQUET_PATH_IS_DIRECTORY: "))
+
+# Registration allows a directory; one with no `.parquet` file matches nothing.
+var empty_dir = String()
+try:
+    _ = resolve_parquet_source(footers, root, HIVE_PARTITIONING_OFF, True)
+except e:
+    empty_dir = String(e)
+assert_equal(empty_dir, "PARQUET_GLOB_NO_MATCH: the directory '" + root + "' holds no .parquet file")
+```
+
+The facts of a scan are appended only when every footer reads. A source naming
+a file that does not exist is refused naming the file and adds no scan, and a
+table the catalog does not hold is refused by name:
+
+<!-- mojo-hidden from std.testing import assert_equal, assert_true -->
+```mojo
+from std.tempfile import mkdtemp
+from arrow.arrow_types import ArrowType
+from arrow.schema import Field, Schema
+from lowering.lowered_plan import LoweringInputs
+from parquet_footers.lowering_facts import add_catalog_table_scan, add_parquet_files_scan
+from parquet_footers.parquet_footers import ParquetFooters
+from scan_source.parquet_source import ParquetSource
+from sql.sql_catalog import SqlCatalog
+
+var footers = ParquetFooters()
+var inputs = LoweringInputs()
+var absent = mkdtemp(prefix="komira_footers_readme_") + "/absent.parquet"
+var source = ParquetSource(absent.copy(), Schema.from_fields_1(Field("x", ArrowType.INT64, False)))
+
+var no_file = String()
+try:
+    add_parquet_files_scan(inputs, footers, source)
+except e:
+    no_file = String(e)
+assert_true(no_file.find(absent) >= 0)  # the error names the file
+assert_equal(len(inputs.scans), 0)  # and no scan was added
+
+var no_table = String()
+try:
+    add_catalog_table_scan(inputs, SqlCatalog(), "nope", footers, source)
+except e:
+    no_table = String(e)
+assert_equal(no_table, "SQL bind error: unknown table 'nope'")
+assert_equal(len(inputs.scans), 0)
+```
+
 ## Why a package of its own
 
 The design puts `ParquetFooters` and the footer cache in `sdk_exec`

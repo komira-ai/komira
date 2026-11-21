@@ -37,11 +37,13 @@ from .sql_token import (
 )
 from .sql_fn_table import CAST_DESUGAR_NAME as _CAST_DESUGAR_NAME, TRY_CAST_DESUGAR_NAME as _TRY_CAST_DESUGAR_NAME
 from .sql_fn_table import POSITION_IN_DESUGAR_NAME as _POSITION_IN_DESUGAR_NAME
+from .sql_tvf_options import (
+    TVF_PARQUET, TVF_CSV, TVF_JSON, TVF_AVRO,
+    hive_partitioning_value, _replacement_scan_kind, _file_stem,
+)
 from .sql_ast import (
     SqlExpr, SelectItem, OrderKey, SelectStmt, FromRelation, CteDef, SubqueryDef,
     JoinClause, SqlWindowData, SqlStatement, TvfOptions, FROM_LESS_RELATION,
-    HIVE_PARTITIONING_ON, HIVE_PARTITIONING_OFF,
-    TVF_PARQUET, TVF_CSV, TVF_JSON, TVF_AVRO,
     SX_COLUMN, SX_STAR, SX_UNARY, SX_BOOL, SX_AGG, SX_CALL, SX_BINARY,
     SXUN_NOT, SXUN_IS_NULL, SXUN_IS_NOT_NULL, SXUN_NEGATE, SXUN_ABS, SXLIKE_LIKE, SXLIKE_ILIKE,
     JK_CROSS, JK_LEFT, JK_RIGHT, JK_FULL, JK_SEMI, JK_ANTI,
@@ -1309,10 +1311,9 @@ struct _Parser(Movable):
                     self._refuse_option_for_kind(
                         fname, key, kind, "read_parquet"
                     )
-                if self._tvf_bool_arg(fname, key):
-                    opts.hive_partitioning = HIVE_PARTITIONING_ON
-                else:
-                    opts.hive_partitioning = HIVE_PARTITIONING_OFF
+                opts.hive_partitioning = hive_partitioning_value(
+                    self._tvf_bool_arg(fname, key)
+                )
             elif key == "format":
                 if kind != TVF_JSON:
                     raise Error(
@@ -3247,42 +3248,6 @@ struct _Parser(Movable):
             "SQL syntax error: expected a frame bound (UNBOUNDED PRECEDING/FOLLOWING,"
             + " CURRENT ROW, or `<n> PRECEDING/FOLLOWING`)"
         )
-
-
-def _replacement_scan_kind(path: String) raises -> UInt8:
-    """The TVF kind a `FROM '<path>'` replacement scan reads, by extension —
-    or a refusal naming the extension. See `_Parser._parse_replacement_scan`."""
-    var low = path.lower()
-    if low.endswith(".parquet"):
-        return TVF_PARQUET
-    if low.endswith(".csv"):
-        return TVF_CSV
-    if low.endswith(".json") or low.endswith(".jsonl") or low.endswith(".ndjson"):
-        return TVF_JSON
-    raise Error(
-        "SQL not supported: a replacement scan of `'" + path + "'` — this door"
-        " maps a FROM-clause file path by its extension (.parquet, .csv, .json,"
-        " .jsonl, .ndjson) and this one is none of them. Spell the reader"
-        " explicitly (`read_parquet(...)` / `read_csv(...)` / `read_json(...)`)."
-        " (DuckDB also sniffs `.tsv` and compressed suffixes; reading those as a"
-        " plain comma-separated file would answer a different table.)"
-    )
-
-
-def _file_stem(path: String) -> String:
-    """`dir/t1.parquet` -> `t1`: the name DuckDB gives a replacement-scan
-    relation (MEASURED v1.5.3, `SELECT t1.k FROM 'rs/t1.parquet'`). Byte
-    scan: `/` and `.` are ASCII, so a byte index is a character boundary."""
-    var b = path.as_bytes()
-    var start = 0
-    for i in range(len(b)):
-        if b[i] == UInt8(ord("/")):
-            start = i + 1
-    var stop = len(b)
-    for i in range(start + 1, len(b)):
-        if b[i] == UInt8(ord(".")):
-            stop = i
-    return String(unsafe_from_utf8=b[start:stop]).lower()
 
 
 def _and_into(var acc: Optional[SqlExpr], var p: SqlExpr) -> Optional[SqlExpr]:

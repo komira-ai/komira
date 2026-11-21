@@ -41,14 +41,10 @@ class Session:
         return self._ctx is None
 
     def register_parquet(self, name: str, path: str | os.PathLike[str]) -> None:
-        """Registers the Parquet files at `path` as the table `name`.
+        """Registers the local Parquet file at `path` as the table `name`.
 
-        `path` is a file, a glob (`*`, `?`, `[...]`, `{a,b}`, one `**`) or a
-        directory (every `.parquet` file under it). The files are listed once,
-        at registration, and every footer is read now; Hive `key=value`
-        directories become columns after the data columns. No match, differing
-        schemas or an unreadable file raises `KomiraError` with the engine's
-        message. A relative `path` is resolved
+        The file's footer is read now; a missing or unreadable file raises
+        `KomiraError` with the engine's message. A relative `path` is resolved
         against the working directory and `~` is expanded. Registering a name
         again replaces it. Nothing can query the table yet in this release.
         """

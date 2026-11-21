@@ -255,7 +255,7 @@ class Native:
         return text.decode("utf-8", "replace")
 
     def register_parquet(self, ctx: int, name: str, path: str | os.PathLike[str]) -> None:
-        """Registers the Parquet files at `path` (a file, a glob or a directory) in the context as the table `name`."""
+        """Registers the Parquet file at `path` in the context as the table `name`."""
         op = "komira_register_parquet"
         fn = self._fn(op)
         self._check(op, ctx, fn(ctx, _c_string("name", name), _c_path(path)))
