@@ -4,7 +4,8 @@ Licensed under the Apache License, Version 2.0 (see LICENSE).
 This file records third-party material that text committed to this repository
 is derived from, the third-party code compiled into the native files of the
 Python wheel, and, in its last section, the third-party runtime that the
-wheel carries and the conda packages built from this repository depend on.
+bundled flavour of the wheel carries and its external flavour and the conda
+packages built from this repository depend on.
 Material that
 is only built or tested against (the C and C++ libraries of third_party/, the
 toolchains) is fetched from pinned archives at build time and is not
@@ -61,8 +62,8 @@ Third-party code inside the native files
 Two of the native owner libraries that libkomira links, and that the wheel
 carries, hold third-party code compiled in (docs/design/wheel_licence_audit.md
 lists every native file of the wheel). The other native files are komira's own
-code, except the three Mojo runtime libraries, which are Modular's (the last
-section). Redistributed here in binary form, with the notices their licenses
+code, except the three Mojo runtime libraries the bundled flavour carries,
+which are Modular's (the last section). Redistributed here in binary form, with the notices their licenses
 require.
 
 1. snappy 1.3.1, statically linked into `libkomira_compression_native.so.1`.
@@ -143,8 +144,8 @@ libraries libz, liblz4, libzstd, libbz2 and liblzma, which komira opens by name
 from the host when a file uses that codec. The libraries it does not carry
 include no aws-lc, s2n-tls or other TLS library: none is linked.
 
-The Mojo runtime: Modular's libraries, carried in the wheel
------------------------------------------------------------
+The Mojo runtime: Modular's libraries, carried in the bundled wheel
+-------------------------------------------------------------------
 
 komira's libraries, the shared library libkomira among them, are compiled
 by Modular's Mojo compiler and need the Mojo runtime libraries when they are
@@ -153,11 +154,22 @@ libMSupportGlobals; .so on Linux, .dylib on macOS). These libraries are
 Modular's, are not part of this repository, and are not covered by its
 Apache License grant.
 
-The Python wheel `komira` carries these three files, unmodified, at
+The Python wheel `komira` is built in two flavours (python/flavour.bzl), and a
+release publishes one of them.
+
+The bundled flavour carries these three files, unmodified, at
 `komira/_lib/lib/`: libKGENCompilerRTShared.so, libAsyncRTRuntimeGlobals.so
 and libMSupportGlobals.so, taken from the Mojo compiler package that compiled
 libkomira (Modular's conda package `mojo-compiler` 1.0.0, pinned by sha256 in
 tools/build/platforms/table.bzl). It carries no other file of Modular's.
+
+The external flavour carries none of them and no other file of Modular's. It
+declares a dependency on Modular's PyPI package `mojo-compiler` at the
+compiler version libkomira was built with, which the user's package installer
+fetches from PyPI under the licence that package declares, and it loads the
+three libraries from where that package installs them. Its
+License-Expression is `Apache-2.0`, and it carries LICENSE and this file
+only. The paragraph below is about the bundled flavour.
 
 The licence those files are distributed under is the one their package
 states. That package's metadata declares `LicenseRef-Modular-Proprietary`,
@@ -167,7 +179,7 @@ components of Modular's software. Neither file, nor the three libraries,
 states the Apache License: Modular's statement that Mojo is licensed under
 the Apache License v2.0 with LLVM Exceptions is made for the source code it
 publishes, and the package of these binary files does not repeat it. The
-wheel carries both files, unmodified, as `.dist-info/licenses/MODULAR_LICENSE`
+bundled wheel carries both files, unmodified, as `.dist-info/licenses/MODULAR_LICENSE`
 and `.dist-info/licenses/MODULAR_THIRD_PARTY_NOTICES`, and its
 License-Expression is `Apache-2.0 AND LicenseRef-Modular-Proprietary`: komira's
 own files under the first, the three Mojo runtime libraries under the second.

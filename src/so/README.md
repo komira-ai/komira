@@ -175,9 +175,10 @@ NULL context (-1), a NULL input (-2 with a last error), a bad file or plan (-3
 with the message as the last error) and, for the four calls with an output, the
 two-call protocol; a good call after a refusal leaves no error.
 `exports_exact` makes the nine names above the whole dynamic symbol table.
-The eight C owners in the library's closure (async, async_api, compression, fs,
+On Linux the eight C owners in the library's closure (async, async_api, compression, fs,
 libc, metrics, parquet_codec, scan_source) are linked as their own shared libraries
-(`native_owners`), not embedded. The thirteenth driver, `gate_native_owners`,
+(`native_owners`), not embedded; on macOS arm64 there are none, and the C archives are linked
+statically into `libkomira.dylib`. On Linux the thirteenth driver, `gate_native_owners`,
 reads the `DT_NEEDED` entries of the library's ELF dynamic section and requires
 the SONAME of each of the eight (`libkomira_<owner>_native.so.1`); an owner
 dropped from `native_owners` leaves its C embedded, and that driver fails.
@@ -269,8 +270,9 @@ Reading it:
   `native_owners` entry the library's gate requires.
 - **glibc floor.** The highest `GLIBC_` version of libkomira and the eight owners is
   2.34 (libkomira and compression), so `manylinux_2_34` is honest for the files the package
-  carries. No `GLIBCXX_` or `CXXABI_` version is needed by them. The Python wheel also
-  carries the three Mojo runtime libraries (through `[dist]`); `libAsyncRTRuntimeGlobals.so`
+  carries. No `GLIBCXX_` or `CXXABI_` version is needed by them. The Python wheel's bundled
+  flavour also carries the three Mojo runtime libraries (through `[dist]`), and its external
+  flavour loads them, so both are tagged alike; `libAsyncRTRuntimeGlobals.so`
   needs `GLIBC_2.35`, one above that floor, and `libKGENCompilerRTShared.so` needs
   `GLIBCXX_3.4.30` and `CXXABI_1.3.11`, so the wheel is tagged `manylinux_2_35` and a host
   needs at least glibc 2.35 (see `docs/design/mojo_runtime_pypi_vs_conda.md`).
