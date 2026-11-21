@@ -231,8 +231,8 @@ def test_dates_are_day_numbers_from_the_epoch() raises:
         _ = _canon("d:date32", "d\n1900-02-29\n")
     with assert_raises(contains="'2026-13-01' is not a day of the calendar"):
         _ = _canon("d:date32", "d\n2026-13-01\n")
-    with assert_raises(contains="'2026-04-31' is not a day of the calendar"):
-        _ = _canon("d:date32", "d\n2026-04-31\n")
+    with assert_raises(contains="'2027-04-31' is not a day of the calendar"):
+        _ = _canon("d:date32", "d\n2027-04-31\n")
     with assert_raises(contains="'2026-09-00' is not a day of the calendar"):
         _ = _canon("d:date32", "d\n2026-09-00\n")
     with assert_raises(contains="'0044-03-15 (BC)' is not a date YYYY-MM-DD"):
