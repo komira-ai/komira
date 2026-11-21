@@ -35,6 +35,7 @@ python/tests/test_ops_verbs.py	the Python package's tests: the SDK surface is te
 python/tests/test_ops_walk.py	the Python package's tests: the SDK surface is tested in Python
 python/tests/test_plan_pb2.py	SDK test: the Python package's generated plan modules are tested in Python, under the protobuf runtimes users install
 python/tests/test_runtime.py	the Python package's tests: the SDK surface is tested in Python
+python/tests/test_upgrade.py	the Python package's tests: the wheel upgraded from its previous release is tested in Python, by the interpreter it is installed for
 python/tests/test_session.py	the Python package's tests: the SDK surface is tested in Python
 python/tests/test_two_call.py	the Python package's tests: the SDK surface is tested in Python
 python/tests/wheel_install_run.py	the Python package's tests: installs the wheel into an empty environment of the pinned interpreter that runs it (python/install_test.bzl), as that interpreter's own installer does
