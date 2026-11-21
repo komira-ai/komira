@@ -190,18 +190,39 @@ ignores instance names, such as bazel-remote without
 The local action
 [`.github/actions/buck2-farm`](../.github/actions/buck2-farm/action.yml) runs
 one `./buck2` command (build, test or bxl) and fails its step unless buck2
-succeeded and no action ran locally. It is two lines: buck2's output is tee'd to
-a file, and the built tool `//tools/build/ci:assert_remote`
-([`assert_remote.zig`](../tools/build/ci/assert_remote/assert_remote.zig)) reads
-the file. The tool fails when a `Commands:` summary line says `local:` anything
+succeeded and no action ran locally. It is two lines, both the built tool
+`//tools/build/ci:assert_remote`
+([`assert_remote.zig`](../tools/build/ci/assert_remote/assert_remote.zig)): the
+first, `assert_remote run`, runs buck2 with its output copied to the job log
+and to a file, and the second reads the file.
+
+When the connection between the runner and the farm is cut, buck2 fails every
+action in flight at once, each with its own `Error:` line holding
+`RE channel error: code:`. `assert_remote run`
+([`farm_retry.zig`](../tools/build/ci/assert_remote/farm_retry.zig)) then runs
+the same command once more, when every failure in the output is such a cut:
+each failed action (`Action failed:`) or test (`✗ Fail:`) has that line among
+buck2's own lines before its output, no test timed out or was fatal, and no
+other error stands outside them. A log that mixes a real failure with cuts, a
+test whose output only quotes the phrase, and a subcommand other than build,
+test or bxl are never run again. The first output is kept beside the log as
+`buck2-farm.first.log`, the job summary gets one line saying the step ran
+again after a cut connection, and the second run is final: when it is cut too,
+the step fails saying so. There is never a third run. The release workflows'
+publish and upload steps are not buck2-farm steps, so this never runs one of
+them twice; a publish cut half way stays a failed step.
+
+The tool step fails when a `Commands:` summary line says `local:` anything
 but `0`, when the log ends a failed run (`BUILD FAILED`, `BXL FAILED`), or when
 there is no summary line although the run used the network. A run that executed
 no action (everything cached, or a query-only bxl script) prints no summary line
 at all, only `Network: up 0B  down 0B`, and passes on that line. `build` and
-`bxl` print the same summary. The caller builds the tool first and passes its
-path as `assert-remote`. The cases are recorded buck2 output
-(`//tools/build/ci:assert_remote_unit`) and the action's own two lines run over
-it (`//:buck2_farm_cases`).
+`bxl` print the same summary. The caller builds the tool first, on the farm, and passes
+its path as `assert-remote`; that build is the one buck2 command of a job that
+does not go through the action (it builds the tool that would run it again), so
+a cut during it still fails its step. The cases are recorded buck2 output
+(`//tools/build/ci:assert_remote_unit`, `//tools/build/ci:farm_retry_unit`) and
+the action's own two lines run over it (`//:buck2_farm_cases`).
 
 ## Pull requests from forks
 

@@ -4,23 +4,32 @@
 //! The action's own bytes are the subject. The test reads action.yml (the
 //! zig_test's `data`, under KOMIRA_TEST_WORK) and checks its shape, then runs
 //! its two `run:` lines the way a runner does (`sh -e -o pipefail -c`, with
-//! the busybox sh), each with its `env:` filled from the case. `./buck2` of a
-//! case is `stand_in_buck2` (//tools/build/ci:assert_remote), which prints a
-//! recorded buck2 output (the tool's fixtures,
-//! //tools/build/ci:assert_remote_fixtures) and exits 0, or 1 when told to, so
-//! a case chooses what buck2 printed and whether it then failed. The built
-//! tool is the real one (`ASSERT_REMOTE`, an exec tool).
+//! the busybox sh), each with its `env:` filled from the case and
+//! GITHUB_STEP_SUMMARY a file of the case. `./buck2` of a case is
+//! `stand_in_buck2` (//tools/build/ci:stand_in_buck2), which plays one
+//! recorded buck2 output per call (the tool's fixtures,
+//! //tools/build/ci:assert_remote_fixtures, or a log the case derived from
+//! one) and exits as the case says, so a case chooses what each run printed
+//! and how it ended, and counts the runs. The built tool is the real one
+//! (`ASSERT_REMOTE`, an exec tool).
 //!
-//! What the cases catch, each a defect action.yml could have:
-//!  - the step's shell is not `bash` (a runner's `sh` has no pipefail, so a
-//!    failing buck2 piped to tee would pass), a run line with logic added
-//!    (`|| true`, a second command), a `${{ }}` in a run line (script
-//!    injection), the tool step dropped or its log differing from the
-//!    pipeline's;
+//! What the cases catch, each a defect action.yml or the tool could have:
+//!  - the step's shell is not `bash`, a run line with logic added (`|| true`,
+//!    a second command), a `${{ }}` in a run line (script injection), the
+//!    tool step dropped or its log differing from the first step's;
 //!  - run end to end: a good remote build passes; an action run locally,
 //!    a summary missing beside network traffic, and a failed run all fail
 //!    the job; a buck2 that fails after printing a good summary fails the
-//!    first step; a fully cached run, which prints no summary, passes.
+//!    first step, run once; a fully cached run, which prints no summary, passes;
+//!  - a cut connection to the farm: a cut, then a pass, is green after two
+//!    runs (a build and a test step), the job summary says so and the first
+//!    log is kept; a cut twice is red after two runs, never three, and says
+//!    the second was cut too; a cut then a real failure is red and names that
+//!    failure; a compile error, a build with a compile error beside cuts, a
+//!    test failure beside a cut and a test whose output prints the cut line
+//!    are red after one run, with no first log and nothing in the summary; a
+//!    subcommand other than build, test or bxl is never run again; a second
+//!    run that ran an action locally is refused by the tool step.
 
 const std = @import("std");
 const t = std.testing;
@@ -68,7 +77,7 @@ fn loadSteps(ar: std.mem.Allocator) ![]Step {
 
 // ---- the shape ---------------------------------------------------------------
 
-test "the two steps are the invocation and the tool, each in bash" {
+test "the two steps are the tool running buck2 and the tool reading its log, each in bash" {
     var arena = std.heap.ArenaAllocator.init(t.allocator);
     defer arena.deinit();
     const steps = try loadSteps(arena.allocator());
@@ -76,15 +85,16 @@ test "the two steps are the invocation and the tool, each in bash" {
     // bash, never sh: a runner's bash is `bash -eo pipefail`, its sh is `sh -e`
     try t.expectEqualStrings("bash", steps[0].shell);
     try t.expectEqualStrings("bash", steps[1].shell);
-    try t.expectEqualStrings("./buck2 $BUCK2_ARGS 2>&1 | tee \"$BUCK2_LOG\"", steps[0].run);
+    try t.expectEqualStrings("\"$ASSERT_REMOTE\" run --log \"$BUCK2_LOG\" --summary \"$GITHUB_STEP_SUMMARY\" -- ./buck2 $BUCK2_ARGS", steps[0].run);
     try t.expectEqualStrings("\"$ASSERT_REMOTE\" \"$BUCK2_LOG\"", steps[1].run);
 }
 
-test "the inputs reach the steps through env, and both steps name the same log" {
+test "the inputs reach the steps through env, and both steps name the same log and tool" {
     var arena = std.heap.ArenaAllocator.init(t.allocator);
     defer arena.deinit();
     const steps = try loadSteps(arena.allocator());
     try t.expectEqualStrings("${{ inputs.args }}", steps[0].env_args);
+    try t.expectEqualStrings("${{ inputs.assert-remote }}", steps[0].tool);
     try t.expectEqualStrings("${{ inputs.assert-remote }}", steps[1].tool);
     try t.expectEqualStrings("${{ runner.temp }}/buck2-farm.log", steps[0].log);
     try t.expectEqualStrings(steps[0].log, steps[1].log);
@@ -150,6 +160,7 @@ fn runLine(ar: std.mem.Allocator, dir: []const u8, line: []const u8, env: *std.p
         .argv = &.{ "sh", "-e", "-o", "pipefail", "-c", line },
         .cwd = dir,
         .env_map = env,
+        .max_output_bytes = 1 << 22,
     });
     const code: u8 = switch (r.term) {
         .Exited => |c| c,
@@ -169,19 +180,52 @@ fn recorded(ar: std.mem.Allocator, name: []const u8) ![]u8 {
     return std.fs.cwd().readFileAlloc(ar, path, 1 << 20);
 }
 
-const Which = union(enum) {
-    /// A recorded log by file name, optionally with a buck2 that then fails.
-    fixture: []const u8,
-    fixture_then_fail: []const u8,
-    /// A log made by the case (a recorded one with a line changed).
-    derived: []const u8,
+/// One call of the stand-in buck2: what it prints and how it exits.
+const Run = struct {
+    log: union(enum) {
+        /// A recorded log, by file name.
+        fixture: []const u8,
+        /// A log the case made (a recorded one with lines changed).
+        text: []const u8,
+    },
+    code: u8 = 0,
+};
+
+fn fixture(name: []const u8, code: u8) Run {
+    return .{ .log = .{ .fixture = name }, .code = code };
+}
+
+fn derived(log: []const u8, code: u8) Run {
+    return .{ .log = .{ .text = log }, .code = code };
+}
+
+const Case = struct {
+    /// The exit code of the step that ended the case.
+    code: u8,
+    /// That step, 1 (the tool running buck2) or 2 (the tool reading the log).
+    step: u8,
+    /// What step 1 printed, and step 2 if it ran.
+    out1: []const u8,
+    out2: []const u8,
+    /// How many times buck2 ran.
+    runs: usize,
+    dir: []const u8,
+
+    /// The file `name` of the case's directory, or null if there is none.
+    fn file(c: Case, ar: std.mem.Allocator, name: []const u8) !?[]const u8 {
+        const path = try std.fs.path.join(ar, &.{ c.dir, name });
+        return std.fs.cwd().readFileAlloc(ar, path, 1 << 22) catch |e| switch (e) {
+            error.FileNotFound => null,
+            else => e,
+        };
+    }
 };
 
 /// Runs the action's two steps in a directory of the case's own, with
-/// `./buck2` the stand-in: step 1, and step 2 only if step 1 passed (as a
-/// runner skips the later steps of a failed job). The output starts with the
-/// step that produced it.
-fn runCase(ar: std.mem.Allocator, which: Which) !Outcome {
+/// `./buck2` the stand-in playing `runs` for `./buck2 <subcommand>`: step 1,
+/// and step 2 only if step 1 passed (as a runner skips the later steps of a
+/// failed job).
+fn runCase(ar: std.mem.Allocator, subcommand: []const u8, runs: []const Run) !Case {
     const steps = try loadSteps(ar);
     const w = try workDir(ar);
     case_no += 1;
@@ -192,59 +236,77 @@ fn runCase(ar: std.mem.Allocator, which: Which) !Outcome {
     var f = try std.fs.cwd().openFile(buck2, .{});
     try f.chmod(0o755);
     f.close();
-    var args: []const u8 = undefined;
-    switch (which) {
-        .fixture => |n| args = try std.fmt.allocPrint(ar, "{s}/fixtures/{s}", .{ w, n }),
-        .fixture_then_fail => |n| args = try std.fmt.allocPrint(ar, "{s}/fixtures/{s} --fail", .{ w, n }),
-        .derived => |text| {
-            const p = try std.fs.path.join(ar, &.{ dir, "derived.log" });
-            try std.fs.cwd().writeFile(.{ .sub_path = p, .data = text });
-            args = p;
-        },
+    var args = std.ArrayList(u8).empty;
+    try args.appendSlice(ar, subcommand);
+    for (runs, 0..) |r, i| {
+        const path = switch (r.log) {
+            .fixture => |n| try std.fmt.allocPrint(ar, "{s}/fixtures/{s}", .{ w, n }),
+            .text => |log| p: {
+                const p = try std.fmt.allocPrint(ar, "{s}/derived{d}.log", .{ dir, i });
+                try std.fs.cwd().writeFile(.{ .sub_path = p, .data = log });
+                break :p p;
+            },
+        };
+        try args.print(ar, " {s}@{d}", .{ path, r.code });
     }
     var env = std.process.EnvMap.init(ar);
     try env.put("PATH", try std.process.getEnvVarOwned(ar, "PATH"));
-    try env.put("BUCK2_ARGS", args);
+    try env.put("BUCK2_ARGS", args.items);
     try env.put("BUCK2_LOG", try std.fs.path.join(ar, &.{ dir, "buck2-farm.log" }));
+    try env.put("GITHUB_STEP_SUMMARY", try std.fs.path.join(ar, &.{ dir, "summary.md" }));
     try env.put("ASSERT_REMOTE", try std.process.getEnvVarOwned(ar, "ASSERT_REMOTE"));
     const first = try runLine(ar, dir, steps[0].run, &env);
-    if (first.code != 0) return .{ .code = first.code, .out = try std.fmt.allocPrint(ar, "step 1: {s}", .{first.out}) };
+    var c: Case = .{ .code = first.code, .step = 1, .out1 = first.out, .out2 = "", .runs = 0, .dir = dir };
+    const calls = (try c.file(ar, "stand_in_buck2.calls")) orelse "";
+    c.runs = std.mem.count(u8, calls, "\n");
+    if (first.code != 0) return c;
     const second = try runLine(ar, dir, steps[1].run, &env);
-    return .{ .code = second.code, .out = try std.fmt.allocPrint(ar, "step 2: {s}", .{second.out}) };
+    c.code = second.code;
+    c.step = 2;
+    c.out2 = second.out;
+    return c;
 }
 
-fn expectPasses(which: Which) !void {
+fn has(out: []const u8, part: []const u8) bool {
+    return std.mem.indexOf(u8, out, part) != null;
+}
+
+fn show(c: Case) void {
+    std.debug.print("step {d}, code {d}, {d} run(s)\nstep 1:\n{s}\nstep 2:\n{s}\n", .{ c.step, c.code, c.runs, c.out1, c.out2 });
+}
+
+fn expectPasses(runs: []const Run) !void {
     var arena = std.heap.ArenaAllocator.init(t.allocator);
     defer arena.deinit();
-    const o = try runCase(arena.allocator(), which);
-    if (o.code != 0) std.debug.print("{s}\n", .{o.out});
-    try t.expectEqual(@as(u8, 0), o.code);
+    const c = try runCase(arena.allocator(), "build", runs);
+    errdefer show(c);
+    try t.expectEqual(@as(u8, 2), c.step);
+    try t.expectEqual(@as(u8, 0), c.code);
     // the tool step ran, and said so
-    try t.expect(std.mem.startsWith(u8, o.out, "step 2: assert_remote: ok"));
+    try t.expect(std.mem.startsWith(u8, c.out2, "assert_remote: ok"));
 }
 
 test "a build the farm ran passes both steps" {
-    try expectPasses(.{ .fixture = "build_remote.log" });
+    try expectPasses(&.{fixture("build_remote.log", 0)});
 }
 
 test "a bxl run the farm ran passes" {
-    try expectPasses(.{ .fixture = "bxl_remote.log" });
+    try expectPasses(&.{fixture("bxl_remote.log", 0)});
 }
 
 test "a fully cached run, which prints no summary, passes" {
-    try expectPasses(.{ .fixture = "build_cached.log" });
+    try expectPasses(&.{fixture("build_cached.log", 0)});
 }
 
 /// The case must fail in step 2 (the tool) with `message` in what it printed.
-fn expectToolRefuses(which: Which, message: []const u8) !void {
+fn expectToolRefuses(runs: []const Run, message: []const u8) !void {
     var arena = std.heap.ArenaAllocator.init(t.allocator);
     defer arena.deinit();
-    const o = try runCase(arena.allocator(), which);
-    if (o.code == 0 or !std.mem.startsWith(u8, o.out, "step 2: ") or std.mem.indexOf(u8, o.out, message) == null) {
-        std.debug.print("code {d}: {s}\n", .{ o.code, o.out });
-        return error.TestUnexpectedResult;
-    }
-    try t.expectEqual(@as(u8, 1), o.code);
+    const c = try runCase(arena.allocator(), "build", runs);
+    errdefer show(c);
+    try t.expectEqual(@as(u8, 2), c.step);
+    try t.expectEqual(@as(u8, 1), c.code);
+    try t.expect(has(c.out2, message));
 }
 
 test "a local action fails the job at the tool step and names the count" {
@@ -252,7 +314,7 @@ test "a local action fails the job at the tool step and names the count" {
     defer arena.deinit();
     const a = arena.allocator();
     const log = try std.mem.replaceOwned(u8, a, try recorded(a, "build_remote.log"), "local: 0)", "local: 3)");
-    try expectToolRefuses(.{ .derived = log }, "3 action(s) ran locally");
+    try expectToolRefuses(&.{derived(log, 0)}, "3 action(s) ran locally");
 }
 
 test "a log with no summary beside network traffic fails the job" {
@@ -260,19 +322,186 @@ test "a log with no summary beside network traffic fails the job" {
     defer arena.deinit();
     const a = arena.allocator();
     const log = try std.mem.replaceOwned(u8, a, try recorded(a, "build_remote.log"), "Commands:", "Actions:");
-    try expectToolRefuses(.{ .derived = log }, "no `Commands:` summary line");
+    try expectToolRefuses(&.{derived(log, 0)}, "no `Commands:` summary line");
 }
 
 test "a failed run that exited 0 fails the job" {
-    try expectToolRefuses(.{ .fixture = "build_failed_unknown_target.log" }, "BUILD FAILED");
+    try expectToolRefuses(&.{fixture("build_failed_unknown_target.log", 0)}, "BUILD FAILED");
 }
 
-test "a buck2 that exits non-zero after a good summary fails the first step" {
+test "a buck2 that exits non-zero after a good summary fails the first step, run once" {
     var arena = std.heap.ArenaAllocator.init(t.allocator);
     defer arena.deinit();
-    const o = try runCase(arena.allocator(), .{ .fixture_then_fail = "build_remote.log" });
-    try t.expectEqual(@as(u8, 1), o.code);
-    try t.expect(std.mem.startsWith(u8, o.out, "step 1: "));
-    // the good summary was printed (and tee'd), so only pipefail made it fail
-    try t.expect(std.mem.indexOf(u8, o.out, "local: 0)") != null);
+    const c = try runCase(arena.allocator(), "build", &.{ fixture("build_remote.log", 1), fixture("build_remote.log", 0) });
+    errdefer show(c);
+    try t.expectEqual(@as(u8, 1), c.step);
+    try t.expectEqual(@as(u8, 1), c.code);
+    try t.expectEqual(@as(usize, 1), c.runs);
+    // the good summary was printed (and copied to the job log), so only the exit code made it fail
+    try t.expect(has(c.out1, "local: 0)"));
+    try t.expect(has(c.out1, "buck2-farm: not run again: no failed action or test in the log"));
+}
+
+// ---- a cut connection to the farm ------------------------------------------------
+
+const summary_line = "buck2-farm: `build` ran again after a cut connection to the farm (buck2's `RE channel error` in each of 4 failed block(s)); the first run's log is buck2-farm.first.log\n";
+
+/// The lines of `log` from the first holding `marker` to the empty line after it.
+fn firstBlock(log: []const u8, marker: []const u8) ![]const u8 {
+    const at = std.mem.indexOf(u8, log, marker) orelse return error.NoSuchBlock;
+    const start = (std.mem.lastIndexOfScalar(u8, log[0..at], '\n') orelse return error.NoSuchBlock) + 1;
+    const end = std.mem.indexOfPos(u8, log, start, "\n\n") orelse return error.NoSuchBlock;
+    return log[start .. end + 2];
+}
+
+/// `log` without each block whose first line holds `marker`.
+fn dropBlocks(a: std.mem.Allocator, log: []const u8, marker: []const u8) ![]u8 {
+    var out = std.ArrayList(u8).empty;
+    var dropping = false;
+    var it = std.mem.splitScalar(u8, log, '\n');
+    var first = true;
+    while (it.next()) |l| {
+        if (has(l, marker)) dropping = true;
+        if (dropping) {
+            if (l.len == 0) dropping = false;
+            continue;
+        }
+        if (!first) try out.append(a, '\n');
+        first = false;
+        try out.appendSlice(a, l);
+    }
+    return out.toOwnedSlice(a);
+}
+
+/// The recorded build with a compile error and cuts, without its cuts: a compile error alone.
+fn compileError(a: std.mem.Allocator) ![]u8 {
+    const log = try dropBlocks(a, try recorded(a, "build_cut_and_compile_error.log"), "Action failed: komira//tools/build/proto-codegen");
+    try t.expect(!has(log, "RE channel error"));
+    return log;
+}
+
+/// The recorded test failure with one recorded cut block before it.
+fn testFailureAndCut(a: std.mem.Allocator) ![]u8 {
+    const cut = try firstBlock(try recorded(a, "build_cut.log"), "Action failed: ");
+    const failed = try recorded(a, "test_failed.log");
+    const at = std.mem.indexOf(u8, failed, "[2026-10-25T13:04:11.131+00:00] \xe2\x9c\x97 Fail:") orelse return error.NoFail;
+    return std.mem.concat(a, u8, &.{ failed[0..at], cut, failed[at..] });
+}
+
+test "a cut, then a pass: green after two runs, the job summary says so, and the first log is kept" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const c = try runCase(a, "build", &.{ fixture("build_cut.log", 2), fixture("build_remote.log", 0) });
+    errdefer show(c);
+    try t.expectEqual(@as(u8, 2), c.step);
+    try t.expectEqual(@as(u8, 0), c.code);
+    try t.expectEqual(@as(usize, 2), c.runs);
+    try t.expectEqualStrings(summary_line, (try c.file(a, "summary.md")).?);
+    try t.expect(has(c.out1, summary_line));
+    try t.expect(has(c.out1, "buck2-farm: the second run passed\n"));
+    // both runs reached the job log; the first is kept whole, the tool step read the second
+    try t.expect(has(c.out1, "RE channel error: code: "));
+    try t.expectEqualStrings(try recorded(a, "build_cut.log"), (try c.file(a, "buck2-farm.first.log")).?);
+    try t.expectEqualStrings(try recorded(a, "build_remote.log"), (try c.file(a, "buck2-farm.log")).?);
+    try t.expect(std.mem.startsWith(u8, c.out2, "assert_remote: ok"));
+}
+
+test "a test step cut, then a pass: green after two runs" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const cut = try firstBlock(try recorded(a, "build_cut.log"), "Action failed: ");
+    const log = try std.mem.concat(a, u8, &.{ cut, "Tests finished: Pass 3. Fail 0. Timeout 0. Fatal 0. Skip 0. Omit 0. Infra Failure 0. Build failure 1\n1 BUILDS FAILED\n" });
+    const c = try runCase(a, "test", &.{ derived(log, 2), fixture("test_cached_remote.log", 0) });
+    errdefer show(c);
+    try t.expectEqual(@as(u8, 2), c.step);
+    try t.expectEqual(@as(u8, 0), c.code);
+    try t.expectEqual(@as(usize, 2), c.runs);
+    try t.expectEqualStrings("buck2-farm: `test` ran again after a cut connection to the farm (buck2's `RE channel error` in each of 1 failed block(s)); the first run's log is buck2-farm.first.log\n", (try c.file(a, "summary.md")).?);
+}
+
+test "a cut twice: red after two runs, never a third, saying the second run was cut too" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const c = try runCase(a, "build", &.{ fixture("build_cut.log", 2), fixture("build_cut.log", 2), fixture("build_remote.log", 0) });
+    errdefer show(c);
+    try t.expectEqual(@as(u8, 1), c.step);
+    try t.expectEqual(@as(u8, 2), c.code); // buck2's own exit code
+    try t.expectEqual(@as(usize, 2), c.runs);
+    try t.expect(std.mem.endsWith(u8, c.out1, "buck2-farm: FAILED: the second run was cut too: the connection to the farm was cut again (buck2's `RE channel error`); not run a third time\n"));
+    try t.expectEqualStrings(summary_line, (try c.file(a, "summary.md")).?);
+    try t.expect((try c.file(a, "buck2-farm.first.log")) != null);
+}
+
+test "a cut, then a real failure: red, naming the failure of the second run" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const c = try runCase(a, "build", &.{ fixture("build_cut.log", 2), derived(try compileError(a), 3) });
+    errdefer show(c);
+    try t.expectEqual(@as(u8, 1), c.step);
+    try t.expectEqual(@as(u8, 3), c.code);
+    try t.expectEqual(@as(usize, 2), c.runs);
+    try t.expect(std.mem.endsWith(u8, c.out1, "buck2-farm: FAILED: the second run failed: a failure that is not a cut connection: [2026-11-21T13:40:17.627+00:00] Action failed: komira//tools/build/examples/cshim:add (komira//tools/build/platforms:linux-x86_64#03cc1a891c89e4be) (c_compile add_files/add.c (pic))\n"));
+}
+
+/// The case must fail in step 1 after one run, with buck2's exit code and
+/// `why` after `not run again: `, keeping no first log and writing no summary.
+fn expectNotRunAgain(subcommand: []const u8, first: Run, why: []const u8) !void {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const c = try runCase(a, subcommand, &.{ first, fixture("build_remote.log", 0) });
+    errdefer show(c);
+    try t.expectEqual(@as(u8, 1), c.step);
+    try t.expectEqual(first.code, c.code);
+    try t.expectEqual(@as(usize, 1), c.runs);
+    const want = try std.fmt.allocPrint(a, "buck2-farm: not run again: {s}\n", .{why});
+    try t.expect(std.mem.endsWith(u8, c.out1, want));
+    try t.expect((try c.file(a, "buck2-farm.first.log")) == null);
+    try t.expect((try c.file(a, "summary.md")) == null);
+}
+
+test "a compile error is not run again" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    try expectNotRunAgain("build", derived(try compileError(arena.allocator()), 3), "a failure that is not a cut connection: [2026-11-21T13:40:17.627+00:00] Action failed: komira//tools/build/examples/cshim:add (komira//tools/build/platforms:linux-x86_64#03cc1a891c89e4be) (c_compile add_files/add.c (pic))");
+}
+
+test "a build with a compile error beside cuts is red after one run" {
+    try expectNotRunAgain("build", fixture("build_cut_and_compile_error.log", 3), "a failure that is not a cut connection: [2026-11-21T13:40:17.627+00:00] Action failed: komira//tools/build/examples/cshim:add (komira//tools/build/platforms:linux-x86_64#03cc1a891c89e4be) (c_compile add_files/add.c (pic))");
+}
+
+test "one real test failure and one cut: red after one run" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    try expectNotRunAgain("test", derived(try testFailureAndCut(arena.allocator()), 32), "a failure that is not a cut connection: [2026-10-25T13:04:11.131+00:00] \xe2\x9c\x97 Fail: komira//src/komira_proto_codec:test_float32_json_binades (9:00.5s)");
+}
+
+test "a failed test whose output prints buck2's cut line is not run again" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const cut_line = "[2026-10-25T13:04:11.131+00:00] Error: (Error was returned on the stream by RE: RE channel error: code: 'Unknown error', message: \"h2 protocol error\", source: None)\n";
+    const log = try std.mem.replaceOwned(u8, a, try recorded(a, "test_failed.log"), "[2026-10-25T13:04:11.131+00:00] GATED TEST FAILED", cut_line ++ "[2026-10-25T13:04:11.131+00:00] GATED TEST FAILED");
+    try expectNotRunAgain("test", derived(log, 32), "a failure that is not a cut connection: [2026-10-25T13:04:11.131+00:00] \xe2\x9c\x97 Fail: komira//src/komira_proto_codec:test_float32_json_binades (9:00.5s)");
+}
+
+test "a subcommand other than build, test or bxl is never run again, even after a cut" {
+    try expectNotRunAgain("run", fixture("build_cut.log", 2), "`run` is not build, test or bxl");
+}
+
+test "a second run that ran an action locally is refused at the tool step" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const local = try std.mem.replaceOwned(u8, a, try recorded(a, "build_remote.log"), "local: 0)", "local: 3)");
+    const c = try runCase(a, "build", &.{ fixture("build_cut.log", 2), derived(local, 0) });
+    errdefer show(c);
+    try t.expectEqual(@as(usize, 2), c.runs);
+    try t.expectEqual(@as(u8, 2), c.step);
+    try t.expectEqual(@as(u8, 1), c.code);
+    try t.expect(has(c.out2, "3 action(s) ran locally"));
 }
