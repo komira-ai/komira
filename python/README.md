@@ -95,8 +95,9 @@ The package's layout and API are designed in
 | `komira/_runtime.py` | `_preload_runtime_libraries(*, search_path=None)`, called before libkomira is opened: it opens the three Mojo runtime libraries of `mojo-compiler` |
 | `komira/_session.py` | `Session` |
 | `komira/py.typed` | the PEP 561 marker |
-| `BUCK` | `:komira`, the package's files as the directory its tests import from |
-| `tests/` | the tests (`python_binding_test`, and the `py_test` of the runtime preload), `fake_libkomira.c` and `fake_mojo_runtime.c`, the stand-in libraries they load, and `runtime_site.py`, the runtime laid out as `mojo-compiler` installs it |
+| `BUCK` | `:komira`, the package's files as the directory its tests import from; `:komira_wheel`, the wheel; and `:wheel_install_test`, the wheel installed into an empty environment |
+| `install_test.bzl` | the rules of the wheel's files and of the install test |
+| `tests/` | the tests (`python_binding_test`, and the `py_test` of the runtime preload), `fake_libkomira.c` and `fake_mojo_runtime.c`, the stand-in libraries they load, `runtime_site.py`, the runtime laid out as `mojo-compiler` installs it, and `test_installed.py` and `wheel_install_run.py`, the install test and its driver |
 
 How the loader behaves:
 
@@ -161,3 +162,26 @@ The tests run on Linux x86_64 as build actions, with
 | `two_call_test` | the error path, the two-call protocol and the arguments of each call, on a stand-in |
 | `runtime_test` | the runtime preload on stand-in directories: missing, wrong version, not loadable, present |
 | `cpu_test` | the CPU check on cpuinfo files written from `tests/fixtures/cpuinfo_x86_64_v3.txt`, and that a refused CPU never opens the library |
+
+The wheel is `./buck2 build //python:komira_wheel`: the package, libkomira at
+`komira/_lib/libkomira.so` and its native owner libraries at
+`komira/_lib/lib/`, requiring `mojo-compiler==1.0.0` and nothing else.
+`./buck2 build //python:wheel_install_test` (and `:wheel_install_test_py314`
+on CPython 3.14) installs it with Modular's two wheels into an empty virtual
+environment, the way a wheel is installed for the other tests (no pip, no
+network), and runs `tests/test_installed.py` there in isolated mode, from an
+empty directory, with no library path set. That test holds:
+
+| what | how |
+|---|---|
+| the installed package | `komira` imports from the environment, at the wheel's version, with `LICENSE` and `NOTICE` in `.dist-info/licenses/` |
+| the runtime pin | the one `Requires-Dist`, `komira._runtime`, the toolchain's Mojo and the installed `mojo-compiler` are one version |
+| the library | `abi_version()` is the version of `src/so/abi/komira.tsv`; a Parquet file registers, a missing one raises `KomiraError`; a serialized plan renders |
+| where it loaded from | `/proc/self/maps` lists the three Mojo runtime libraries from `<site-packages>/modular/lib`, libkomira and its owners from `komira/_lib` |
+
+Each `//python:refuses_*` target runs the same install and test on one broken
+case and passes only if it fails with the line it names: no `libkomira.so` in
+the wheel, owner libraries off libkomira's run path, no `mojo-compiler`
+installed, a wheel tagged for another platform, an unmet requirement, a
+`Requires-Python` the interpreter is outside of, and a toolchain Mojo other
+than the pin.

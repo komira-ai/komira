@@ -1,0 +1,43 @@
+load("@komira//tools/build/mojo:download.bzl", "pinned_file")
+
+# Modular's own published wheels of the Mojo runtime, from PyPI: the package
+# the komira wheel requires (python/BUCK, `Requires-Dist:
+# mojo-compiler==1.0.0`) and the one that package requires in turn
+# (`mojo-compiler-mojo-libs==1.0.0`). The compiler wheel installs the three
+# runtime libraries libkomira needs at load time in
+# `<site-packages>/modular/lib/`; what the wheels hold, and how their libraries
+# compare with the conda package the toolchain pins, is
+# docs/design/mojo_runtime_pypi_vs_conda.md.
+#
+# Plain downloads, fetched at build time and checked against the sha256 and
+# size PyPI publishes for each file (https://pypi.org/pypi/<name>/1.0.0/json).
+# Nothing of them is committed, shipped or redistributed: the komira wheel
+# names them as a dependency and never carries them. They are test data of the
+# clean-environment install test of the Python package
+# (python/BUCK, wheel_install_test) only. They are not Python targets (no
+# Python rule kind, no `.py` file, nothing under third_party/python), so the
+# graph check //:python_closure finds nothing here.
+#
+# Their licence is Modular's (`LicenseRef-MAX-Platform-Software-License` in
+# the compiler wheel's METADATA); a user installs them from PyPI under it.
+#
+# A newer Mojo is a new pair here at the version of the toolchain's pin
+# (tools/build/platforms/table.bzl, `mojo_compiler`), with
+# `_MOJO_RUNTIME_VERSION` of python/komira/_runtime.py and the wheel's
+# Requires-Dist; wheel_install_test fails while the four disagree.
+
+pinned_file(
+    name = "mojo_compiler-1.0.0-py3-none-manylinux_2_34_x86_64.whl",
+    url = "https://files.pythonhosted.org/packages/f0/5f/f38fefe327d1c81e28def69c4a52ae4f75e389cb6e613a2c04ca8d68d582/mojo_compiler-1.0.0-py3-none-manylinux_2_34_x86_64.whl",
+    sha256 = "e9e60f9638e69ca0f4be7292468523fc98a143f58dbf9024f60ed68b874a867e",
+    size_bytes = 79142588,
+    visibility = ["komira//python:"],
+)
+
+pinned_file(
+    name = "mojo_compiler_mojo_libs-1.0.0-py3-none-any.whl",
+    url = "https://files.pythonhosted.org/packages/54/99/ea401ff1db56a4af8607283b95627e01b986fc67f510715b07f100118105/mojo_compiler_mojo_libs-1.0.0-py3-none-any.whl",
+    sha256 = "20a92e37ecbd19e2dbb1a525612a8de4c9f266f5536def55c5e2b0786320e8b3",
+    size_bytes = 3187048,
+    visibility = ["komira//python:"],
+)
