@@ -16,8 +16,8 @@
 //! A static executable: no shell, no PATH, no network, no clock. Exit status 2
 //! on any refusal, with its reason. This file only forwards; the sections are
 //! cli.zig (flags and files), stamp.zig (version), tag.zig, wheel.zig (the
-//! wheel), policy.zig and elf.zig (what its libraries need), zip.zig and
-//! check.zig, and record.zig.
+//! wheel), policy.zig, elf.zig and macho.zig (what its libraries need), zip.zig,
+//! check.zig and record.zig.
 
 const std = @import("std");
 const diag = @import("diag.zig");
