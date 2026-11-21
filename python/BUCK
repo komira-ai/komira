@@ -13,7 +13,7 @@ load(
     "runtime_record",
 )
 load("@komira//python:install_test.bzl", "picked_files", "wheel_install_test")
-load("@komira//tools/build/package:wheel.bzl", "wheel_file", "wheel_version")
+load("@komira//tools/build/package:wheel.bzl", "wheel_file", "wheel_libs_check", "wheel_version")
 load("@komira//tools/build/platforms:defs.bzl", "DARWIN_ARM64")
 load("@komira//tools/build/python:defs.bzl", "python_proto", "python_source_package")
 
@@ -136,6 +136,8 @@ _SHARED_METADATA = {
     "classifiers": ["Development Status :: 2 - Pre-Alpha"],
     "distribution": "komira",
     "project_urls": {
+        "Changelog": "https://github.com/komira-ai/komira/blob/main/python/CHANGELOG.md",
+        "Documentation": "https://github.com/komira-ai/komira/blob/main/docs/install.md",
         "Issues": "https://github.com/komira-ai/komira/issues",
         "Source": "https://github.com/komira-ai/komira",
     },
@@ -467,6 +469,146 @@ _NOT_INSTALLED = (
     ),
 ]]
 
+# ---- The libraries of the finished wheel -------------------------------------
+#
+# Each flavour's wheel read back from its bytes alone, by a second reader that
+# knows none of the rule's inputs but these names and the toolchain's runtime
+# libraries (`wheel_libs_check`, tools/build/package/README.md, "The Python
+# wheel"): from komira/_lib/libkomira.so, the library _native.load opens,
+# every DT_NEEDED is a manylinux system library or a member its run path
+# reaches, every run path entry stays under `$ORIGIN` inside komira/, and
+# every shared library in the wheel is one libkomira loads. The bundled wheel
+# carries the three Mojo runtime libraries once each, with the bytes of the
+# toolchain's runtime and with their licence texts, and requires no
+# distribution of Modular's; the external wheel carries no file named as a
+# runtime library or byte-equal to one and no licence text of theirs, leaves
+# their names to its requirement, and requires exactly that. The output lists
+# the libraries in the loader's order.
+_LIBS_CHECK = {
+    "entry": "komira/_lib/libkomira.so",
+    "runtime_dists": ["mojo", "mojo-compiler", "mojo-compiler-mojo-libs"],
+    "runtime_libs": RUNTIME,
+    "runtime_licenses": sorted(MODULAR_LICENSE_FILES.keys()),
+}
+
+_LIBS_REQUIREMENT = {
+    "bundled": None,
+    "external": requirement(_PLATFORM),
+}
+
+[wheel_libs_check(
+    name = "wheel_libs_" + flavour,
+    wheel = ":komira_wheel_" + flavour,
+    runtime_requirement = _LIBS_REQUIREMENT[flavour],
+    **_LIBS_CHECK
+) for flavour in FLAVOURS]
+
+# A second libKGENCompilerRTShared.so beside libkomira in the bundled wheel,
+# the copy a bundling step would leave: every NEEDED name is a member, so the
+# wheel rule writes it.
+_SECOND_RUNTIME = {"komira/_lib": DIST, "komira/_lib/libKGENCompilerRTShared.so": ":dist_files[libKGENCompilerRTShared.so]"}
+
+wheel_file(
+    name = "komira_wheel_second_runtime",
+    files = _PY_FILES | _SECOND_RUNTIME,
+    executable = sorted(_SECOND_RUNTIME.keys()),
+    **_BUNDLED
+)
+
+# The external wheel with libKGENCompilerRTShared.so bundled into it. The
+# wheel rule refuses a member that `external_needed` names, so the library is
+# taken off that list: libkomira's NEEDED entry is then a member, and the rule
+# writes it.
+_EXTERNAL = flavour_attrs("external", _PLATFORM, ":dist_files", ":mojo_runtime_record")
+
+_EXTERNAL_META = {k: v for k, v in _EXTERNAL.items() if k not in ("files", "executable", "external_needed")}
+
+_KGEN = {"komira/_lib/lib/libKGENCompilerRTShared.so": ":dist_files[libKGENCompilerRTShared.so]"}
+
+wheel_file(
+    name = "komira_wheel_external_with_runtime",
+    files = _PY_FILES | _EXTERNAL["files"] | _KGEN,
+    executable = sorted(_EXTERNAL["executable"] + _KGEN.keys()),
+    external_needed = [n for n in _EXTERNAL["external_needed"] if n != "libKGENCompilerRTShared.so"],
+    **(_WHEEL | _EXTERNAL_META)
+)
+
+# The external wheel without its requirement: the wheel rule writes it, and
+# nothing would install the runtime it loads.
+wheel_file(
+    name = "komira_wheel_external_without_requirement",
+    files = _PY_FILES | _EXTERNAL["files"],
+    executable = _EXTERNAL["executable"],
+    external_needed = _EXTERNAL["external_needed"],
+    **(_WHEEL | _EXTERNAL_META | {"requires_dist": []})
+)
+
+# Each wheel the check refuses, read as the flavour named, with its exact line.
+[wheel_libs_check(
+    name = name,
+    wheel = wheel,
+    runtime_requirement = _LIBS_REQUIREMENT[flavour],
+    expect_refusal = line,
+    **_LIBS_CHECK
+) for name, wheel, flavour, line in [
+    (
+        "wheel_libs_refuses_second_runtime",
+        ":komira_wheel_second_runtime",
+        "bundled",
+        "runtime: the wheel carries libKGENCompilerRTShared.so 2 times (komira/_lib/lib/libKGENCompilerRTShared.so, " +
+        "komira/_lib/libKGENCompilerRTShared.so), and a process holds one Mojo runtime",
+    ),
+    # libkomira's run path does not reach the owners where this wheel puts them.
+    (
+        "wheel_libs_refuses_owners_off_run_path",
+        ":komira_wheel_misplaced_owners",
+        "bundled",
+        "needed: komira/_lib/libkomira.so needs libkomira_async_rt_native.so.1, which its run path `$ORIGIN/lib:$ORIGIN` " +
+        "does not reach in the wheel (the wheel has it at komira/_lib/misplaced/libkomira_async_rt_native.so.1)",
+    ),
+    (
+        "wheel_libs_refuses_missing_runtime_library",
+        ":komira_wheel_without_runtime_library",
+        "bundled",
+        "runtime: the wheel carries no libMSupportGlobals.so",
+    ),
+    (
+        "wheel_libs_refuses_missing_libkomira",
+        ":komira_wheel_without_libkomira",
+        "bundled",
+        "entry: the wheel has no komira/_lib/libkomira.so",
+    ),
+    (
+        "wheel_libs_refuses_external_with_runtime",
+        ":komira_wheel_external_with_runtime",
+        "external",
+        "runtime: the external wheel carries komira/_lib/lib/libKGENCompilerRTShared.so, a Mojo runtime library it leaves to " +
+        requirement(_PLATFORM),
+    ),
+    (
+        "wheel_libs_refuses_external_without_requirement",
+        ":komira_wheel_external_without_requirement",
+        "external",
+        "requires: METADATA does not require {}, which installs the Mojo runtime the external wheel loads".format(requirement(_PLATFORM)),
+    ),
+    # Each flavour's wheel read as the other: the bundled wheel carries the
+    # runtime the external flavour leaves to its requirement, and the external
+    # wheel carries none of the runtime the bundled flavour must.
+    (
+        "wheel_libs_refuses_bundled_as_external",
+        ":komira_wheel_bundled",
+        "external",
+        "runtime: the external wheel carries komira/_lib/lib/libKGENCompilerRTShared.so, a Mojo runtime library it leaves to " +
+        requirement(_PLATFORM),
+    ),
+    (
+        "wheel_libs_refuses_external_as_bundled",
+        ":komira_wheel_external",
+        "bundled",
+        "runtime: the wheel carries no libKGENCompilerRTShared.so",
+    ),
+]]
+
 # ---- Upgrading from the previous release ----------------------------------
 #
 # `pip install --upgrade komira`, of each flavour: two releases of the wheel,
@@ -677,8 +819,9 @@ _BESIDE_FILES = {"--parquet": "komira//src/so:tests/fixtures/two_columns.parquet
     ),
 ]]
 
-# The files the smoke driver's `readme_shows_quickstart` test reads
-# (python/smoke/BUCK): the README and the quickstart it shows.
+# The files the smoke driver's `readme_shows_quickstart` and
+# `install_page_shows_quickstart` tests read (python/smoke/BUCK): the README,
+# the quickstart it shows, what the quickstart prints and the changelog.
 export_file(
     name = "README.md",
     src = "README.md",
@@ -688,5 +831,17 @@ export_file(
 export_file(
     name = "examples/quickstart.py",
     src = "examples/quickstart.py",
+    visibility = ["//python/smoke:"],
+)
+
+export_file(
+    name = "examples/quickstart.expected",
+    src = "examples/quickstart.expected",
+    visibility = ["//python/smoke:"],
+)
+
+export_file(
+    name = "CHANGELOG.md",
+    src = "CHANGELOG.md",
     visibility = ["//python/smoke:"],
 )

@@ -5,8 +5,9 @@
 # What a test, or a measurement before the binder exists, needs to run a plan
 # it wrote by hand through `run_plan` and `RealBuilder`:
 #
-#   * segment descriptors for the three sources with an operator chain and a
-#     collect sink (`parquet_segment`, `batch_segment`, `output_segment`);
+#   * segment descriptors for the four sources with an operator chain and a
+#     collect sink (`parquet_segment`, `batch_segment`, `output_segment`,
+#     `csv_segment`);
 #   * the operators of the chain (`op_filter`, `op_project`, `op_limit`);
 #   * a sample batch and readers for what comes out of a plan.
 #
@@ -47,6 +48,7 @@ from physical_plan.physical_plan import (
     SINK_ORIENT_DICT_ENCODED,
     SINK_SORT,
     SOURCE_BATCH,
+    SOURCE_CSV,
     SOURCE_PARQUET,
     SOURCE_SINK_OUTPUT,
     SourceSpecPod,
@@ -113,6 +115,24 @@ def batch_segment(
         seg_id,
         SOURCE_BATCH,
         SourceSpecPod.batch(handle),
+        ops^,
+        morsel_rows,
+        List[Int](),
+        List[UInt8](),
+    )
+
+
+def csv_segment(
+    seg_id: Int,
+    var spec: SourceSpecPod,
+    var ops: Slab[MorselOp] = Slab[MorselOp](),
+    morsel_rows: Int = 0,
+) -> SegmentDescPod:
+    """A segment that reads the CSV file `spec` names and collects."""
+    return _segment(
+        seg_id,
+        SOURCE_CSV,
+        spec^,
         ops^,
         morsel_rows,
         List[Int](),

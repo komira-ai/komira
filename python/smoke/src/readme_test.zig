@@ -76,3 +76,73 @@ test "an example that does not end with a line feed is refused" {
     try t.expectEqualStrings(HEAD ++ "the example does not end with a line feed", try refusal(a, "```python\nx\n```\n", "x"));
     try t.expectEqualStrings(HEAD ++ "the example does not end with a line feed", try refusal(a, "```python\n```\n", ""));
 }
+
+const PAGE_HEAD = "docs/install.md shows no ```text block equal to python/examples/quickstart.expected: ";
+const OUTPUT = "0.1.7\n1001\nregistered readings\nTrue\n";
+
+fn pageRefusal(a: std.mem.Allocator, page: []const u8, want: []const u8) ![]const u8 {
+    return (try lib.readme.docShowsBlock(a, lib.readme.install_page_output, page, want)) orelse error.TestExpectedRefusal;
+}
+
+test "the install page's output block passes when equal, and is named by page, fence and file when not" {
+    var ar = std.heap.ArenaAllocator.init(t.allocator);
+    defer ar.deinit();
+    const a = ar.allocator();
+    try t.expect((try lib.readme.docShowsBlock(a, lib.readme.install_page_output, "# Install\n\n```text\n" ++ OUTPUT ++ "```\n", OUTPUT)) == null);
+    try t.expectEqualStrings(PAGE_HEAD ++ "line 2 of the closest block reads '1000', the expected output's reads '1001'", try pageRefusal(a, "```text\n0.1.7\n1000\nregistered readings\nTrue\n```\n", OUTPUT));
+    try t.expectEqualStrings(PAGE_HEAD ++ "line 5 of the closest block reads '(the page ends)', the expected output's reads '(the expected output ends)'", try pageRefusal(a, "```text\n" ++ OUTPUT, OUTPUT));
+    try t.expectEqualStrings(PAGE_HEAD ++ "the expected output does not end with a line feed", try pageRefusal(a, "```text\n```\n", "True"));
+}
+
+test "a python block does not stand for the output block, nor a text block for the example" {
+    var ar = std.heap.ArenaAllocator.init(t.allocator);
+    defer ar.deinit();
+    const a = ar.allocator();
+    try t.expectEqualStrings(PAGE_HEAD ++ "the page has no line that is exactly ```text", try pageRefusal(a, "```python\n" ++ OUTPUT ++ "```\n", OUTPUT));
+    try t.expectEqualStrings(
+        "docs/install.md shows no ```python block equal to python/examples/quickstart.py: the page has no line that is exactly ```python",
+        (try lib.readme.docShowsBlock(a, lib.readme.install_page_example, "```text\n" ++ EXAMPLE ++ "```\n", EXAMPLE)).?,
+    );
+}
+
+fn newest(a: std.mem.Allocator, text: []const u8) ![]const u8 {
+    var why: []const u8 = "";
+    return lib.readme.newestRelease(a, &why, "python/CHANGELOG.md", text) catch |e| switch (e) {
+        error.Refused => return why,
+        else => return e,
+    };
+}
+
+test "the newest release is the first version heading, after an Unreleased one" {
+    var ar = std.heap.ArenaAllocator.init(t.allocator);
+    defer ar.deinit();
+    const a = ar.allocator();
+    try t.expectEqualStrings("0.1.1600", try newest(a, "# Changelog\n\n## 0.1.1600\n\n- more\n\n## 0.1.1512\n"));
+    try t.expectEqualStrings("0.1.1600", try newest(a, "# Changelog\n\n## Unreleased\n\n- next\n\n## 0.1.1600\n"));
+    try t.expectEqualStrings("0.1.1512", try newest(a, "## 0.1.1512"));
+}
+
+test "a changelog with no release, or whose newest heading is no version, is refused" {
+    var ar = std.heap.ArenaAllocator.init(t.allocator);
+    defer ar.deinit();
+    const a = ar.allocator();
+    try t.expectEqualStrings("python/CHANGELOG.md lists no release: no heading `## <version>`", try newest(a, "# Changelog\n\n## Unreleased\n\n- next\n"));
+    try t.expectEqualStrings("python/CHANGELOG.md lists no release: no heading `## <version>`", try newest(a, ""));
+    try t.expectEqualStrings("python/CHANGELOG.md lists no release: no heading `## <version>`", try newest(a, "### 0.1.1\n"));
+    const bad = [_][]const u8{ "## v0.1.1", "## 0.1.1 (first)", "## 1", "## 0..1", "## 0.1.", "## ", "## 0.1.1\r" };
+    for (bad) |heading| {
+        const want = try std.fmt.allocPrint(a, "python/CHANGELOG.md: the newest release's heading is '{s}', not `## <version>` (numbers joined by dots)", .{heading});
+        try t.expectEqualStrings(want, try newest(a, try std.fmt.allocPrint(a, "# Changelog\n\n{s}\n\n## 0.1.1\n", .{heading})));
+    }
+}
+
+test "an output block that shows another release's version or another ABI version is refused" {
+    var ar = std.heap.ArenaAllocator.init(t.allocator);
+    defer ar.deinit();
+    const a = ar.allocator();
+    const expected = "<version>\n<abi_version>\nregistered readings\nTrue\n";
+    const page = "```text\n0.1.1512\n1001\nregistered readings\nTrue\n```\n";
+    try t.expect((try lib.readme.docShowsBlock(a, lib.readme.install_page_output, page, try lib.install.expectedText(a, expected, "0.1.1512", 1001))) == null);
+    try t.expectEqualStrings(PAGE_HEAD ++ "line 1 of the closest block reads '0.1.1512', the expected output's reads '0.1.1600'", try pageRefusal(a, page, try lib.install.expectedText(a, expected, "0.1.1600", 1001)));
+    try t.expectEqualStrings(PAGE_HEAD ++ "line 2 of the closest block reads '1001', the expected output's reads '1002'", try pageRefusal(a, page, try lib.install.expectedText(a, expected, "0.1.1512", 1002)));
+}

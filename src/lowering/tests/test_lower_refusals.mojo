@@ -64,6 +64,7 @@ from plan_ir.logical_plan import (
     AggExprArray,
     SOURCE_PARQUET,
     SOURCE_CSV,
+    SOURCE_NDJSON,
     SOURCE_KIND_UNSET,
     JOIN_INNER,
     PLAN_JOIN,
@@ -192,9 +193,12 @@ def test_a_partial_aggregate_is_refused_and_a_single_one_is_cut() raises:
     assert_equal(_message(_count_by(_scan(), List[String](), AGG_MODE_SINGLE), _inputs()), "")
 
 
-def test_a_source_other_than_parquet_or_memory_is_refused() raises:
+def test_a_source_other_than_parquet_memory_or_csv_is_refused() raises:
+    var json = LogicalPlan.scan(String("t.jsonl"), SOURCE_NDJSON, _schema())
+    _refused_with(_message(json, _inputs()), LOWERING_UNCUTTABLE_NODE, "json")
+    # The same scan of a CSV file lowers.
     var csv = LogicalPlan.scan(String("t.csv"), SOURCE_CSV, _schema())
-    _refused_with(_message(csv, _inputs()), LOWERING_UNCUTTABLE_NODE, "csv")
+    assert_equal(_message(csv, _inputs()), "")
 
 
 def _parquet_scan(var source: ParquetSource) raises -> LogicalPlan:

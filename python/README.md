@@ -53,6 +53,12 @@ Both flavours have the same name, version scheme, tag and Python API.
 `pip show komira` tells them apart: only the external one lists
 `Requires: mojo-compiler`.
 
+The install page,
+[docs/install.md](https://github.com/komira-ai/komira/blob/main/docs/install.md),
+says what each requirement means and what to do when the install or the first
+load fails. What each release changed is in the
+[changelog](https://github.com/komira-ai/komira/blob/main/python/CHANGELOG.md).
+
 ## What works
 
 ```python

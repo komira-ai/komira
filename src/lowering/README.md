@@ -1,7 +1,7 @@
 # lowering
 
 Lowering: a bound `LogicalPlan`, a `HostProfile` and the resolved inputs go in;
-the physical plan (`physical_plan`, IR version 14) and the `ParamTable`
+the physical plan (`physical_plan`, IR version 15) and the `ParamTable`
 its segments index come out. It is pure. `lower` opens no file, reads no clock
 and no environment variable and touches no global, so equal arguments give a
 `LoweredPlan` that renders byte-equal.
@@ -13,8 +13,10 @@ and no environment variable and touches no global, so equal arguments give a
 - `lowered_plan`: `LoweringInputs` (one `ScanFacts` per scan in scan
   pre-order: the footers' statistics and the columns every row group stores
   dictionary encoded), `ParamTable`, `LoweredPlan` and the four refusal tokens.
-- `cut_walk`: the cutter. A scan opens a pipeline (`SOURCE_PARQUET`, or
-  `SOURCE_BATCH` for an in-memory scan, whose pushed filter and projection
+- `cut_walk`: the cutter. A scan opens a pipeline (`SOURCE_PARQUET`;
+  `SOURCE_BATCH` for an in-memory scan; `SOURCE_CSV` for a CSV scan, whose
+  spec carries the path, the dialect and every column of the file with the
+  type the plan bound it at; the pushed filter and projection of the last two
   become operators). A filter, a projection and a limit fuse into it. An
   aggregation, a distinct or a sort ends it in a sink and opens a pipeline
   that reads that segment's output over an `E3` edge. A distinct is a
@@ -51,7 +53,9 @@ shape:
   negative count; a limit above a sort (see Order); a partial or final
   aggregation; an aggregation with a group top-k; a distinct over an explicit
   column list, over no column or over two columns of one name; a source other
-  than Parquet or in memory.
+  than Parquet, in memory or CSV; a CSV scan with `header=false` (the reader
+  would name its columns `col_0`, `col_1`, ..., where DuckDB names them
+  `column0`, `column1`, ...).
 - `LOWERING_SINK_UNSERVED`, naming the triple or the key: a group key of a
   type with no row (an 8- or 16-bit integer, a timestamp, a binary, ...), a
   key of several columns that are not all dictionary encoded strings (a
@@ -72,16 +76,22 @@ sink. `card_estimate_rows` is the row count of the scan's footers when the host
 supplied statistics, an upper bound on the rows that reach the sink, and 0
 otherwise. `mem_estimate_bytes` is 0, and `AggSinkData.estimated_groups` is 0:
 no memory decision is recorded, and no statistic a producer recorded in the
-plan is read. Every segment is `ORDER_NONE` with one partition. Whether an integer key's
+plan is read. Every segment has one partition, and its order key is the one
+the Order section names. Whether an integer key's
 aggregation is dense or partitioned is not a field of the IR and is not
 recorded here. The payload narrowing rule of `lowering_rules` has no
 consumer without a join and is not called.
 
 ## Order
 
-No segment records an order. A float `SUM` or `AVG` is cut with `ORDER_NONE`,
-so its result is not bit-reproducible across worker counts until a segment can
-carry `ORDER_ROW_RANGE`. A sort's output keeps the sort's order through filters,
+An aggregation with no group key and a `SUM` or `AVG` whose argument is
+`FLOAT32` or `FLOAT64` in the child's schema is cut with `ORDER_ROW_RANGE`: the
+engine's ungrouped sink then folds each source position on its own and adds
+the positions' sums in position order, so the double sum is the same bits on
+every worker count and schedule of one lowered plan (`pipeline_exec`). Every
+other segment is `ORDER_NONE`: an integer, `DECIMAL`, `COUNT`, `MIN` or `MAX`
+fold is exact in any order, and the grouped sinks fold no float argument. A
+sort's output keeps the sort's order through filters,
 projections and the final collect only as far as the engine's sink-output
 source keeps it; lowering does not state more. A limit above a sort is
 refused, because the rows it keeps would depend on that order, and a limit
