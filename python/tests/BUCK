@@ -93,6 +93,21 @@ python_binding_test(
     deps = ["//python:komira"],
 )
 
+# The CPU check before the library opens: on Linux x86_64 a cpuinfo of an
+# x86-64-v3 CPU passes, one lacking any of its flags (avx2 among them, on one
+# processor or all, or with no flags line) raises UnsupportedCpuError naming
+# them and the library is not opened, an unreadable one is a LibraryLoadError,
+# and aarch64 Linux and macOS read nothing.
+python_binding_test(
+    name = "cpu_test",
+    src = "test_cpu.py",
+    data = {
+        "cpuinfo_x86_64_v3.txt": "fixtures/cpuinfo_x86_64_v3.txt",
+        "fake_v1_3/libkomira.so": ":fake_v1_3",
+    },
+    deps = ["//python:komira"],
+)
+
 # The public surface on the real library: abi_version(), Session,
 # register_parquet and a session's close.
 python_binding_test(
