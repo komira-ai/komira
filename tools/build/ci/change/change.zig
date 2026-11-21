@@ -17,7 +17,8 @@
 //!     neither side holds any).
 //! Both files are written only when every git command succeeded.
 //!
-//! Exit 0: written. Exit 1: refused (the reason is on stderr as a `::error::` line). Exit 2: usage.
+//! Exit 0: written. Exit 1: refused (the reason is on stderr as a `::error::` line). Exit 2: usage, or an
+//! output directory that cannot be opened. git's own stderr is passed through.
 const std = @import("std");
 
 pub const Event = enum { pull_request, merge_group };
@@ -181,7 +182,11 @@ pub fn main() !u8 {
         try err.interface.flush();
         return 2;
     };
-    var out = try std.fs.cwd().openDir(opts.out, .{});
+    var out = std.fs.cwd().openDir(opts.out, .{}) catch {
+        try err.interface.print("::error::the output directory {s} cannot be opened\n", .{opts.out});
+        try err.interface.flush();
+        return 2;
+    };
     defer out.close();
     var real = Real{ .a = a };
     run(a, .{ .ctx = &real, .runFn = Real.runFn }, opts, out) catch |e| {

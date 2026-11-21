@@ -64,6 +64,33 @@ zig_exe(
     visibility = ["PUBLIC"],
 )
 
+# The cases of change's executable (change/change_cli_test.zig says what each catches): the built
+# tool run with its flags, as pr.yml runs it, in a directory of each case's own with the stand-in
+# git (change/stand_in_git.zig) alone on its PATH; each checks the exit code, stderr, the files
+# written and the git commands asked. A build action.
+zig_test(
+    name = "change_cli_cases",
+    exec_compatible_with = LINUX_X86_64,
+    src = "change/change_cli_test.zig",
+    exec_tools = {
+        "CHANGE": ":change",
+        "STAND_IN_GIT": ":stand_in_git",
+    },
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
+)
+
+# What change_cli_cases run as `git`: it records what it is asked and answers from the case's file
+# (change/stand_in_git.zig). It runs nothing.
+zig_exe(
+    name = "stand_in_git",
+    exec_compatible_with = LINUX_X86_64,
+    src = "change/stand_in_git.zig",
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
+    visibility = ["//tools/build/ci:change_cli_cases"],
+)
+
 # The recorded buck2 output of assert_remote's cases, as a directory, for the
 # cases of the CI action that runs it (//:buck2_farm_cases).
 export_file(
