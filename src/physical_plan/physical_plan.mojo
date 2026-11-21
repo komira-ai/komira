@@ -675,6 +675,11 @@ comptime KEY_DTYPE_STRING: UInt8 = 5
 comptime KEY_DTYPE_DATE32: UInt8 = 6
 comptime KEY_DTYPE_BOOL: UInt8 = 7
 comptime KEY_DTYPE_DECIMAL128: UInt8 = 8
+# A group key of two or more columns whose types are not all one family, or
+# whose strings are not all dictionary encoded: each column keeps its own type
+# (a STRING, or any type a fixed-width row above keys), so the key block is a
+# row of cells laid out column by column. Added after 8 without renumbering.
+comptime KEY_DTYPE_COMPOSITE: UInt8 = 9
 
 
 struct SourceSpecPod(Movable):
