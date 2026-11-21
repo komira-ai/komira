@@ -132,6 +132,18 @@ _WHEEL_SCENARIOS = ["build", "check", "cli", "elf", "policy", "zip"]
     for scenario in _WHEEL_SCENARIOS
 ]
 
+# The wheel zip (wheel/zip.zig) as a module, for //python/smoke:pypi_smoke_lib: the driver reads a wheel
+# this writer wrote, in the build's output and as an index serves it, and writes wheels for its cases.
+# Imported only once wheel_zip_unit passed.
+zig_module(
+    name = "wheel_zip",
+    src = "wheel/zip.zig",
+    imports = ["wheel/diag.zig"],
+    deps = [":pack_deflate"],
+    unit_tests = [":wheel_zip_unit"],
+    visibility = ["//python/smoke:"],
+)
+
 zig_exe(
     name = "komira_wheel",
     exec_compatible_with = LINUX_X86_64,

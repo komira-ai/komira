@@ -15,6 +15,7 @@ TARGETS = [
     "komira//:pointer_lint",
     "komira//:pr_workflow_cases",
     "komira//:public_boundary",
+    "komira//:pypi_workflow_cases",
     "komira//:python_closure",
     "komira//:readme_api_coverage",
     "komira//:readme_e2e_complete",

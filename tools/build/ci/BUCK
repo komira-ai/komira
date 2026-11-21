@@ -1,4 +1,4 @@
-load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_test")
+load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_module", "zig_test")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 
 # The BXL selector of the pull request check (affected.bxl, affected.bzl) and the
@@ -148,6 +148,16 @@ zig_test(
     imports = ["release_beta_fetch/release_beta_fetch.zig"],
     busybox = "komira//tools/build/toolchains:busybox",
     zig = "komira//tools/build/toolchains:zig_next",
+)
+
+# The same plan reader and client as a module, for //python/smoke:pypi_smoke_lib (its `Fetcher`,
+# `Got` and `Http`: https only, no redirect, a body bounded by the caller). Imported only once
+# release_beta_fetch_unit passed.
+zig_module(
+    name = "release_beta_fetch",
+    src = "release_beta_fetch/release_beta_fetch.zig",
+    unit_tests = [":release_beta_fetch_unit"],
+    visibility = ["//python/smoke:"],
 )
 
 # release_staged_verify: the three checks of the prod publish that write nothing to a registry

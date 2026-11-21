@@ -1,0 +1,187 @@
+"""The installed komira wheel, run from an empty prefix: what `pip install
+komira` into a new environment gives a user (python/BUCK, wheel_install_test).
+
+    <prefix>/bin/python3.<minor> -I test_installed.py --site <dir>
+        [--host-lib <lib>]... --version <v> --toolchain-mojo-version <v>
+        --abi-table <komira.tsv> --license <LICENSE> --notice <NOTICE>
+        --parquet <file.parquet> --plan-hex <file.hex>
+
+Run by wheel_install_run.py, which installed the wheels into `--site` and
+starts this from an empty working directory outside the checkout. Each
+`--host-lib` is opened by path first: the C++ runtime (libstdc++, libgcc_s)
+that the Mojo runtime libraries need and a user's system provides; the build
+workers provide none, so the hermetic interpreter's copies stand in for it.
+Then, in order:
+
+- no library path is set: LD_LIBRARY_PATH and LD_PRELOAD are empty;
+- `import komira` is the package installed in `--site`, not a source tree;
+- the installed distribution is `--version`, and `komira.__version__` is it;
+- its `.dist-info/licenses/` holds LICENSE and NOTICE, byte for byte the
+  repository's;
+- its one `Requires-Dist` is `mojo-compiler==<v>` with <v> the version
+  `komira._runtime` loads, the Mojo of the toolchain's pin and, once the
+  library is loaded, the installed mojo-compiler's;
+- `komira.abi_version()` is the `version` line of the ABI golden;
+- `Session().register_parquet` registers the Parquet fixture, and a missing
+  file raises `KomiraError` with the engine's status;
+- `komira._native.plan_render` of the serialized plan returns its text;
+- the process maps the three Mojo runtime libraries from
+  `<site>/modular/lib`, libkomira from `<site>/komira/_lib` and its native
+  owner libraries from `<site>/komira/_lib/lib`, and none from elsewhere.
+
+Any failure raises; its last traceback line is what a refusing case of
+wheel_install_test names.
+"""
+
+import ctypes
+import os
+import sys
+from importlib import metadata
+
+# The Mojo runtime libraries, as mojo-compiler installs them.
+_RUNTIME = ("libMSupportGlobals.so", "libAsyncRTRuntimeGlobals.so", "libKGENCompilerRTShared.so")
+
+_VALUED = (
+    "--site",
+    "--version",
+    "--toolchain-mojo-version",
+    "--abi-table",
+    "--license",
+    "--notice",
+    "--parquet",
+    "--plan-hex",
+)
+
+
+def parse(argv):
+    opts = {"host_lib": []}
+    i = 0
+    while i < len(argv):
+        flag = argv[i]
+        if i + 1 >= len(argv):
+            raise SystemExit("test_installed: flag {} needs a value".format(flag))
+        value = argv[i + 1]
+        if flag == "--host-lib":
+            opts["host_lib"].append(value)
+        elif flag in _VALUED:
+            opts[flag[2:].replace("-", "_")] = value
+        else:
+            raise SystemExit("test_installed: unknown flag {}".format(flag))
+        i += 2
+    for flag in _VALUED:
+        if flag[2:].replace("-", "_") not in opts:
+            raise SystemExit("test_installed: {} is required".format(flag))
+    return opts
+
+
+def abi_version_of(table):
+    """major * 1000 + minor of the `version` line of the ABI golden."""
+    with open(table, encoding="utf-8") as f:
+        for line in f:
+            key, _, value = line.rstrip("\n").partition("\t")
+            if key == "version":
+                major, minor = value.split(".")
+                return int(major) * 1000 + int(minor)
+    raise AssertionError("{} has no version line".format(table))
+
+
+def mapped_files():
+    """The path of every file the process maps (/proc/self/maps)."""
+    out = set()
+    with open("/proc/self/maps", encoding="utf-8") as f:
+        for line in f:
+            fields = line.split(None, 5)
+            if len(fields) == 6 and fields[5].startswith("/"):
+                out.add(fields[5].rstrip("\n"))
+    return out
+
+
+def under(path, directory):
+    return os.path.dirname(path) == os.path.realpath(directory)
+
+
+def main(argv):
+    opts = parse(argv)
+    for lib in opts["host_lib"]:
+        ctypes.CDLL(lib, mode=ctypes.RTLD_GLOBAL)
+
+    for name in ("LD_LIBRARY_PATH", "LD_PRELOAD"):
+        assert os.environ.get(name, "") == "", "{} is set: {}".format(name, os.environ[name])
+    assert os.listdir(os.getcwd()) == [], "the working directory is not empty: {}".format(os.listdir(os.getcwd()))
+
+    site = os.path.realpath(opts["site"])
+
+    import komira
+
+    init = os.path.realpath(komira.__file__)
+    assert init == os.path.join(site, "komira", "__init__.py"), "komira was imported from {}, not from {}".format(init, site)
+
+    dist = metadata.distribution("komira")
+    assert dist.version == opts["version"], "the installed komira is {}, the wheel is {}".format(dist.version, opts["version"])
+    assert komira.__version__ == opts["version"], "komira.__version__ is {}, the wheel is {}".format(komira.__version__, opts["version"])
+    info = os.path.realpath(str(dist.locate_file("komira-{}.dist-info".format(opts["version"]))))
+    assert os.path.dirname(info) == site, "komira's metadata is at {}, not in {}".format(info, site)
+
+    for name, want in (("LICENSE", opts["license"]), ("NOTICE", opts["notice"])):
+        got = dist.read_text("licenses/" + name)
+        assert got is not None, "the wheel has no .dist-info/licenses/{}".format(name)
+        with open(want, encoding="utf-8") as f:
+            assert got == f.read(), ".dist-info/licenses/{} differs from the repository's {}".format(name, name)
+
+    from komira import _runtime
+
+    pins = dist.requires or []
+    assert len(pins) == 1 and pins[0].startswith("mojo-compiler=="), "the wheel's Requires-Dist is {}".format(pins)
+    pin = pins[0][len("mojo-compiler==") :]
+    versions = (pin, _runtime._MOJO_RUNTIME_VERSION, opts["toolchain_mojo_version"])
+    assert len(set(versions)) == 1, (
+        "the Mojo runtime versions differ: {} (the wheel's Requires-Dist), {} (komira._runtime) "
+        "and {} (the toolchain's pin)".format(*versions)
+    )
+
+    want_abi = abi_version_of(opts["abi_table"])
+    assert komira.abi_version() == want_abi, "komira.abi_version() is {}, the golden says {}".format(komira.abi_version(), want_abi)
+
+    with komira.Session() as s:
+        assert s.register_parquet("two_columns", opts["parquet"]) is None
+        missing = os.path.join(os.getcwd(), "missing.parquet")
+        try:
+            s.register_parquet("missing", missing)
+        except komira.KomiraError as e:
+            assert e.status == -3, "a missing file raised status {}, not -3: {}".format(e.status, e)
+            assert str(e), "a missing file raised KomiraError with no message"
+        else:
+            raise AssertionError("register_parquet of {} did not raise".format(missing))
+
+    with open(opts["plan_hex"], encoding="utf-8") as f:
+        plan = bytes.fromhex(f.read().strip())
+    native = komira._native.load()
+    ctx = native.ctx_new()
+    try:
+        text = native.plan_render(ctx, plan)
+    finally:
+        native.ctx_free(ctx)
+    assert 'Scan(path="orders"' in text and "path=/data/orders.orc" in text, "plan_render returned {!r}".format(text)
+
+    maps = mapped_files()
+    runtime_dir = os.path.join(site, "modular", "lib")
+    for name in _RUNTIME:
+        paths = sorted(p for p in maps if os.path.basename(p) == name)
+        assert paths and all(under(p, runtime_dir) for p in paths), "{} is mapped from {}, not from {}".format(name, paths, runtime_dir)
+    lib_dir = os.path.join(site, "komira", "_lib")
+    komira_libs = sorted(p for p in maps if os.path.basename(p).startswith("libkomira"))
+    assert os.path.join(lib_dir, "libkomira.so") in komira_libs, "libkomira.so is not mapped from {}: {}".format(lib_dir, komira_libs)
+    owners = [p for p in komira_libs if os.path.basename(p) != "libkomira.so"]
+    assert owners and all(under(p, os.path.join(lib_dir, "lib")) for p in owners), "the native owners are mapped from {}".format(owners)
+
+    # After the load, so that a prefix without mojo-compiler fails in the
+    # runtime preload, with the error a user sees.
+    assert metadata.version("mojo-compiler") == pin, "mojo-compiler {} is installed, the wheel pins {}".format(
+        metadata.version("mojo-compiler"), pin
+    )
+
+    print("installed: komira {} in {}, libkomira ABI {}, runtime from {}".format(komira.__version__, site, want_abi, runtime_dir))
+
+
+if __name__ == "__main__":
+    main(sys.argv[1:])

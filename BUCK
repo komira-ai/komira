@@ -135,6 +135,23 @@ zig_test(
     zig = "komira//tools/build/toolchains:zig_next",
 )
 
+# The cases of pypi.yml, the publish of the Python package (.github/workflows/pypi_workflow_test.zig
+# says what each catches): a manual trigger alone, no secret and no token, no upload step in the
+# build job, the identity (`id-token`) in build, testpypi and pypi alone, the order build,
+# testpypi, smoke, pypi, smoke with the exact gate and environment of each, the upload only for
+# the state `absent` on a pinned action with its defaults, Python 3.13 set up in the smoke jobs
+# alone, every action pinned to a commit, and the result job. A build action.
+zig_test(
+    name = "pypi_workflow_cases",
+    exec_compatible_with = LINUX_X86_64,
+    src = ".github/workflows/pypi_workflow_test.zig",
+    data = {
+        "workflows/pypi.yml": ".github/workflows/pypi.yml",
+    },
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
+)
+
 # The cases of the macOS build of the release (.github/workflows/release_macos_test.zig says
 # what each catches): the workflow release-macos.yml builds the macOS set on the farm, in a
 # concurrency group of its own, and release.yml holds no macOS job; the build
