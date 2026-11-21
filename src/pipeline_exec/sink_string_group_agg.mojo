@@ -3,8 +3,9 @@
 # =============================================================================
 #
 # The grouped aggregation sink over string keys: GROUP BY one or more STRING
-# columns, with SUM, COUNT, COUNT(*), MIN, MAX and AVG exactly as the fixed-width
-# sink (`sink_group_agg`) serves them: the same `GroupTable`, the same exact
+# columns, with SUM, COUNT, COUNT(*), COUNT(DISTINCT), MIN, MAX and AVG exactly
+# as the fixed-width sink (`sink_group_agg`) serves them (with no aggregate, one
+# row per distinct key: SELECT DISTINCT): the same `GroupTable`, the same exact
 # folds (`agg_fold`), the same merge rule, the same refusals and the same
 # charging of the segment pool. What differs is the key.
 #
@@ -89,6 +90,7 @@ from operator_api.map_op import MapOp
 from physical_plan.physical_plan import AggSinkData
 from plan_expr.agg_expr import (
     AGG_COUNT,
+    AGG_COUNT_DISTINCT,
     AGG_MAX,
     AGG_MEAN,
     AGG_MIN,
@@ -99,6 +101,13 @@ from plan_expr.expr_pool import ExprPool
 
 from .agg_fold import WideColumn, agg_name, fold_wide, merge_cell, widen_column
 from .agg_output import agg_result_column_rows, check_declared_type
+from .count_distinct import (
+    DistinctColumn,
+    DistinctMerge,
+    DistinctSlot,
+    admit_distinct,
+    read_distinct_column,
+)
 from .group_table import GroupTable, MAX_GROUP_CAPACITY, mix64
 from .segment_pool import SegmentPool, WorkerReservation
 from .string_keys import (
@@ -116,6 +125,7 @@ struct _StringSlot(Movable):
     var intern: InternTable
     var map: Optional[MapOp]
     var reservation: WorkerReservation
+    var distinct: DistinctSlot
     var scratch_cells: List[Int64]
     var scratch_nulls: List[UInt8]
     var started: Bool
@@ -132,6 +142,7 @@ struct _StringSlot(Movable):
         self.intern = InternTable(max_strings)
         self.map = None
         self.reservation = reservation^
+        self.distinct = DistinctSlot(na)
         self.scratch_cells = List[Int64]()
         self.scratch_nulls = List[UInt8]()
         for _ in range(nk):
@@ -145,6 +156,7 @@ struct StringGroupAggSink(MorselSinkImpl):
     string keys."""
 
     var _seg_id: Int
+    var _where: String
     var _by_code: Bool
     var _nk: Int
     var _max_groups: Int
@@ -200,6 +212,7 @@ struct StringGroupAggSink(MorselSinkImpl):
                 + " aggregates"
             )
         self._seg_id = seg_id
+        self._where = where_
         self._by_code = by_code
         self._nk = nk
         self._max_groups = max_groups
@@ -234,6 +247,7 @@ struct StringGroupAggSink(MorselSinkImpl):
             if (
                 func != AGG_SUM
                 and func != AGG_COUNT
+                and func != AGG_COUNT_DISTINCT
                 and func != AGG_MIN
                 and func != AGG_MAX
                 and func != AGG_MEAN
@@ -242,7 +256,7 @@ struct StringGroupAggSink(MorselSinkImpl):
                     where_
                     + " does not serve aggregate tag "
                     + String(Int(func))
-                    + " (SUM, COUNT, MIN, MAX and AVG are)"
+                    + " (SUM, COUNT, COUNT(DISTINCT), MIN, MAX and AVG are)"
                 )
             var label = (
                 agg_name(func) + " (output column " + String(nk + i) + ")"
@@ -365,7 +379,25 @@ struct StringGroupAggSink(MorselSinkImpl):
                 )
             keys.append(rows^)
         var args = List[WideColumn]()
+        var distinct_args = List[DistinctColumn]()
         for i in range(na):
+            if self._funcs[i] == AGG_COUNT_DISTINCT:
+                args.append(WideColumn())
+                distinct_args.append(
+                    read_distinct_column(
+                        slot.distinct,
+                        i,
+                        dense,
+                        self._arg_col[i],
+                        selected,
+                        self._where,
+                        self._labels[i],
+                        self._pool,
+                        slot.reservation,
+                    )
+                )
+                continue
+            distinct_args.append(DistinctColumn())
             if self._arg_col[i] < 0:
                 args.append(WideColumn())
             else:
@@ -398,7 +430,18 @@ struct StringGroupAggSink(MorselSinkImpl):
                     slot.table.denied_bytes,
                 )
             for i in range(na):
-                if self._arg_col[i] < 0:
+                if self._funcs[i] == AGG_COUNT_DISTINCT:
+                    admit_distinct(
+                        slot.distinct,
+                        i,
+                        g,
+                        distinct_args[i],
+                        r,
+                        self._where,
+                        self._pool,
+                        slot.reservation,
+                    )
+                elif self._arg_col[i] < 0:
                     slot.table.cells[g * na + i].count += 1
                 else:
                     fold_wide(
@@ -417,9 +460,12 @@ struct StringGroupAggSink(MorselSinkImpl):
         for _ in range(nk):
             scratch_cells.append(0)
             scratch_nulls.append(0)
+        var distinct = DistinctMerge(na, WorkerReservation(self._pool.share()))
         for w in range(len(self._slots)):
             ref slot = self._slots[w][]
             ref t = slot.table
+            # The merged group of each of this worker's groups.
+            var group_map = List[Int](capacity=t.n)
             # The merge id of each string of this worker, -1 until a group
             # uses it.
             # Drawn from the pool before it is made, given back after.
@@ -462,6 +508,7 @@ struct StringGroupAggSink(MorselSinkImpl):
                         "groups",
                         self._merged.denied_bytes,
                     )
+                group_map.append(mg)
                 for i in range(na):
                     merge_cell(
                         self._merged.cells[mg * na + i],
@@ -470,10 +517,21 @@ struct StringGroupAggSink(MorselSinkImpl):
                         self._labels[i],
                     )
             self._merge_reservation.release(remap_bytes)
+            distinct.merge_worker(
+                slot.distinct,
+                group_map,
+                self._merged.cells,
+                na,
+                self._where,
+                self._labels,
+                self._pool,
+            )
             # This worker is merged: free its tables and return its memory.
             slot.table = GroupTable(nk, na, self._max_groups)
             slot.intern = InternTable(self._max_strings)
+            slot.distinct = DistinctSlot(na)
             slot.reservation.give_back_all()
+        distinct.finish()
         self._combined = True
 
     def finalize(mut self) raises:

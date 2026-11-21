@@ -34,7 +34,7 @@ do is a free function in a module of its own.
 | `engine_context` | `EngineContext(options)`: probes the host once, applies the options over the profile, starts the worker runtime. Holds the catalog, the registered tables, `footers` (a `ParquetFooters`), `host_profile` and `runtime`. A count or budget below 1 is refused with `ENGINE_OPTIONS_INVALID`. `begin_query` drops the footer cache |
 | `engine_catalog` | `register_parquet(ctx, name, path)`: the table's schema is its file's footer |
 | `engine_lower` | `lowering_inputs` (the facts of each scan, from `ctx.footers`, in the cutter's scan order; a registered table's scan is checked against its registered schema) and `lower_for_context` |
-| `engine_execute` | `run_lowered_plan(ctx, lowered)`: a `RealBuilder` over a per-run metadata cache and expression pool, the segment pool sized from the memory budget, each in-memory source of the plan (`params.batches`) as one resident batch in plan order, `run_plan` on `ctx.runtime` with the host profile's thread count; returns the result segment's batch |
+| `engine_execute` | `run_lowered_plan(ctx, lowered)`: a `RealBuilder` over a per-run metadata cache and expression pool, the segment pool sized from the memory budget, each in-memory source of the plan (`params.batches`) as one resident batch in plan order, the aggregation and sort sink data (`params.agg`, `params.sort`) in plan order, `run_plan` on `ctx.runtime` with the host profile's thread count; returns the result segment's batch |
 | `engine_sql` | `run_sql(ctx, text) -> SqlOutcome`: tokenize and parse, `bind_statement`, `optimize`, lower, run. Nothing raises: `SqlOutcome.refusal` holds the step (`parse`, `bind`, `optimize`, `lower`, `execute`) and that step's own message |
 | `arrow_result` | `arrow_result(outcome) -> ArrowResult`: the batches of a `SqlOutcome` and their schema, each batch's selection mask applied, checked to cross the Arrow C Stream Interface whole (`arrow_ipc.c_data_stream_check`). Raises with the step and message of a refusal, for an outcome with no batch, and naming a column the export cannot carry |
 
@@ -69,8 +69,8 @@ budget, a sum outside its declared type and a pool not whole after a run (step
 `LOWERING_UNCUTTABLE_NODE` at `lower`). A glob path and a table of several
 files are refused by the footer package. Lowering given fewer scan facts than
 the plan has scans refuses by name (`LOWERING_INPUTS_SCAN_COUNT`);
-`lowering_inputs` descends only scan, filter, project, limit, aggregate and sort
-nodes and gives a facts entry per scan it reaches, and the cutter refuses any
+`lowering_inputs` descends only scan, filter, project, limit, aggregate,
+distinct and sort nodes and gives a facts entry per scan it reaches, and the cutter refuses any
 other node by name before it asks for the scans below it. `worker_count` and
 `memory_budget_bytes` have a lower bound of 1 and no upper bound. A
 cancellation token is local to a call, so cancel is not reachable from
