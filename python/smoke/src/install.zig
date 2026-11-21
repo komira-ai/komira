@@ -5,7 +5,10 @@
 //!     (`--only-binary=:all:`), so that nothing but komira comes from TestPyPI, then
 //!     `komira==<version>` from TestPyPI with `--no-deps`; from PyPI: `komira==<version>` plainly. The komira
 //!     install is repeated like `verify` (an index lags an upload); the requirements are not.
-//!  2. `pip check` must exit 0, and `pip show komira` must report the version that was published.
+//!  2. `pip check` must exit 0, `pip show komira` must report the version that was published, and the
+//!     environment must hold nothing else: `pip freeze` lists komira alone (no `mojo-compiler`, no other
+//!     distribution) and no `modular` package is importable (the wheel carries the Mojo
+//!     runtime itself).
 //!  3. The example and its data files are copied (by base name) into `<work>/run` and the example is run there
 //!     by `<work>/venv/bin/python -I`. It must exit 0 and print exactly the text of the expected file, in which
 //!     `<version>` is the published version and `<abi_version>` is the engine's C ABI version, taken from the
@@ -140,6 +143,9 @@ fn stageRun(a: Allocator, why: *[]const u8, opts: Options, run_dir: []const u8) 
     }
 }
 
+/// Prints `none`, or where a package named `modular` would be imported from.
+const modular_probe = "import importlib.util as u; s = u.find_spec('modular'); print(list(s.submodule_search_locations or [s.origin]) if s else 'none')";
+
 /// The version `pip show` printed.
 fn shownVersion(text: []const u8) ?[]const u8 {
     var it = std.mem.splitScalar(u8, text, '\n');
@@ -195,6 +201,14 @@ pub fn run(a: Allocator, why: *[]const u8, runner: Runner, opts: Options, wheel:
     const installed = shownVersion(shown.stdout) orelse "(none)";
     if (!std.mem.eql(u8, installed, wheel.version))
         return refuse(a, why, "pip show {s} reports version {s}, not {s}", .{ wheel.name, installed, wheel.version });
+
+    const frozen = try step(a, why, runner, "list the installed distributions", try join(a, &pip, &.{"freeze"}), opts.work, log);
+    const only = try std.fmt.allocPrint(a, "{s}=={s}\n", .{ wheel.name, wheel.version });
+    if (!std.mem.eql(u8, frozen.stdout, only))
+        return refuse(a, why, "the environment holds other distributions than {s}\nexpected:\n{s}installed:\n{s}", .{ wheel.name, only, frozen.stdout });
+    const probe = try step(a, why, runner, "look for a modular package", &.{ venv_python, "-I", "-c", modular_probe }, opts.work, log);
+    if (!std.mem.eql(u8, probe.stdout, "none\n"))
+        return refuse(a, why, "a modular package is importable in the environment: {s}", .{std.mem.trimRight(u8, probe.stdout, "\n")});
 
     const example = std.fs.path.basename(opts.example);
     const ran = try step(a, why, runner, "run the example", &.{ venv_python, "-I", example }, run_dir, log);
