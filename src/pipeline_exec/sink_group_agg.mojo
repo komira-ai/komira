@@ -20,11 +20,11 @@
 # Each worker folds its rows into a `GroupTable` of its own slot (`group_table`;
 # key cells in `group_keys`). A NULL key is a group of its own; equal floats,
 # every NaN, and 0.0 with -0.0, are one group; decimals of one column are
-# equal when their unscaled values are, the scale being the declared one. `combine`, which runs once after
-# the workers joined, merges the tables into one in worker order with
-# `merge_cell`, so the exact-overflow rule of the ungrouped sink holds per
-# group, and a sum that overflows only when the workers' partials are added is
-# refused there. The order of the output groups is unspecified: a plan that
+# equal when their unscaled values are, the scale being the declared one.
+# `combine`, which runs once after the workers joined, merges the tables into
+# one in worker order with `merge_cell`, so the exact-overflow rule of the
+# ungrouped sink holds per group, and a sum that overflows only when the
+# workers' partials are added is refused there. The order of the output groups is unspecified: a plan that
 # needs an order sorts.
 #
 # Memory is charged as the tables grow, not once: every doubling of a table's
