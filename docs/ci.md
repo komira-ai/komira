@@ -721,14 +721,14 @@ a redirect.
 [`.github/workflows/pypi.yml`](../.github/workflows/pypi.yml) builds the `komira` wheel
 ([python/README.md](../python/README.md)), uploads it to TestPyPI, installs it from there on a fresh runner
 and runs the quickstart, and only then does the same on PyPI. The macOS arm64 wheel of the same name
-and version is published by six more jobs of the same file, a chain of their own (below), for the `bundled` flavour only: the macOS wheel carries the Mojo runtime, and the `external` flavour has no macOS runtime record, loader branch or Modular wheel yet, so an `external` run (the default) publishes no macOS wheel and a run publishes exactly one flavour on every platform it publishes. It is written by hand. It is run by hand:
+and version is published by six more jobs of the same file, a chain of their own (below), for the `bundled` flavour only: the macOS wheel carries the Mojo runtime, and the `external` flavour has no macOS runtime record, loader branch or Modular wheel yet, so an `external` run publishes no macOS wheel (the default is `bundled`) and a run publishes exactly one flavour on every platform it publishes. It is written by hand. It is run by hand:
 the only trigger is `workflow_dispatch`, on `main` (every job has
 `if: github.ref == 'refs/heads/main'`). A daily schedule is added after the first release is verified. A
 pull request never starts it.
 
 | job | environment | permissions | what it does |
 |---|---|---|---|
-| `build` | `build` | `contents: read`, `id-token: write` (the tailnet only) | on the farm ([farm-connect](#how-it-reaches-the-farm), `farm-qos: batch`): builds `//release/ci:release_json` and takes the stamp (`release_json stamp`); builds the wheel and the install test of the run's `flavour` input (`//python:komira_wheel_<flavour>[release]` and `//python:wheel_install_test_<flavour>`; `external` by default, `bundled` the other choice, docs/design/python_package.md "The two flavours") with the three stamp flags (`-c komira.package_stamp`, `komira.package_commit`, `komira.package_timestamp_ms`) and `//python/smoke:pypi_smoke`; runs `pypi_smoke dist`, which makes the dist directory, and writes the flavour and the version to the run's summary. It keeps two workflow artifacts, `pypi-<version>-dist` (the wheel) and `pypi-<version>-smoke` (the driver), for 14 days. It has no upload step and holds no index identity. |
+| `build` | `build` | `contents: read`, `id-token: write` (the tailnet only) | on the farm ([farm-connect](#how-it-reaches-the-farm), `farm-qos: batch`): builds `//release/ci:release_json` and takes the stamp (`release_json stamp`); builds the wheel and the install test of the run's `flavour` input (`//python:komira_wheel_<flavour>[release]` and `//python:wheel_install_test_<flavour>`; `bundled` by default, `external` the other choice, docs/design/python_package.md "The two flavours") with the three stamp flags (`-c komira.package_stamp`, `komira.package_commit`, `komira.package_timestamp_ms`) and `//python/smoke:pypi_smoke`; runs `pypi_smoke dist`, which makes the dist directory, and writes the flavour and the version to the run's summary. It keeps two workflow artifacts, `pypi-<version>-dist` (the wheel) and `pypi-<version>-smoke` (the driver), for 14 days. It has no upload step and holds no index identity. |
 | `testpypi` | `testpypi` | `id-token: write` | no farm, no checkout, no buck2. Downloads the two artifacts, runs `pypi_smoke state --index testpypi`, and uploads the wheel to TestPyPI only when the state is `absent`. |
 | `testpypi-smoke` | none | `contents: read` | `pypi_smoke verify --index testpypi`, then `pypi_smoke install --index testpypi`, on a runner with the Python `actions/setup-python` gives (3.13). Skipped when the state is `differs`. |
 | `pypi` | `pypi` | `id-token: write` | after `testpypi-smoke`: the same as `testpypi` for PyPI. |
@@ -815,7 +815,9 @@ log) and 2 for a usage error.
    the real PyPI (`--only-binary=:all:`), then `komira==<version>` with `--no-deps` from TestPyPI alone, so
    nothing but `komira` comes from TestPyPI. For PyPI, `komira==<version>` is one install from PyPI. Every pip
    runs `--isolated`, without a cache. Then `pip check` must pass, `pip show komira` must report the version,
-   and the quickstart runs with `python -I` in a directory holding only the example and its data file: it
+   `pip freeze` must list `komira==<version>` and nothing else (the wheel carries the Mojo runtime, so no
+   `mojo-compiler` and no other distribution is installed), no package named `modular` may be importable, and
+   the quickstart runs with `python -I` in a directory holding only the example and its data file: it
    must exit 0 and print what `python/examples/quickstart.expected` says, compared exactly, with `<version>`
    replaced by the version and `<abi_version>` by the ABI version of the `--abi-table` file
    (`src/so/abi/komira.tsv`: `major * 1000 + minor`, so `1.1` is 1001). A failed step names the command, its exit

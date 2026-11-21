@@ -9,6 +9,7 @@ const Alloc = std.mem.Allocator;
 
 const PIP = "W/venv/bin/python -m pip --isolated --disable-pip-version-check";
 const FLAGS = " install --no-cache-dir --only-binary=:all:";
+const PROBE = "import importlib.util as u; s = u.find_spec('modular'); print(list(s.submodule_search_locations or [s.origin]) if s else 'none')";
 const EXPECTED = "0.1.7\n1001\nregistered readings\nTrue\n";
 
 /// The scratch directory a case runs in: the example, its data, the expected file and the ABI table.
@@ -73,10 +74,12 @@ test "testpypi: the requirements come from PyPI first, then komira alone from Te
         PIP ++ FLAGS ++ " --no-deps --index-url https://test.pypi.org/simple/ komira==0.1.7",
         PIP ++ " check",
         PIP ++ " show komira",
+        PIP ++ " freeze",
+        "W/venv/bin/python -I -c " ++ PROBE,
         "W/venv/bin/python -I quickstart.py",
     }, &fake);
     try t.expectEqualStrings(s.work, fake.cwds.items[0]);
-    try t.expectEqualStrings(try std.fmt.allocPrint(a, "{s}/run", .{s.work}), fake.cwds.items[5]);
+    try t.expectEqualStrings(try std.fmt.allocPrint(a, "{s}/run", .{s.work}), fake.cwds.items[7]);
 }
 
 test "testpypi: a wheel without requirements installs no requirements" {
@@ -94,6 +97,8 @@ test "testpypi: a wheel without requirements installs no requirements" {
         PIP ++ FLAGS ++ " --no-deps --index-url https://test.pypi.org/simple/ komira==0.1.7",
         PIP ++ " check",
         PIP ++ " show komira",
+        PIP ++ " freeze",
+        "W/venv/bin/python -I -c " ++ PROBE,
         "W/venv/bin/python -I quickstart.py",
     }, &fake);
 }
@@ -126,6 +131,8 @@ test "pypi: komira comes from PyPI plainly, with its dependencies" {
         PIP ++ FLAGS ++ " --index-url https://pypi.org/simple/ komira==0.1.7",
         PIP ++ " check",
         PIP ++ " show komira",
+        PIP ++ " freeze",
+        "W/venv/bin/python -I -c " ++ PROBE,
         "W/venv/bin/python -I quickstart.py",
     }, &fake);
 }
@@ -214,7 +221,7 @@ test "an install of komira that fails once and then succeeds goes on to the chec
     var log = h.sink(a);
     var why: []const u8 = "";
     try runWith(a, &why, &fake, s, .{}, &log.writer);
-    try t.expectEqual(@as(usize, 7), fake.calls.items.len);
+    try t.expectEqual(@as(usize, 9), fake.calls.items.len);
     try t.expectEqualStrings(PIP ++ " check", fake.calls.items[4]);
     try t.expect(std.mem.indexOf(u8, log.written(), "attempt 1 of 3 failed, trying again: install komira: ") != null);
     try t.expect(std.mem.indexOf(u8, log.written(), "attempt 2 of 3") == null);
@@ -402,4 +409,77 @@ test "a data file that does not exist is refused naming it" {
     var why: []const u8 = "";
     try t.expectError(error.Refused, runWith(a, &why, &fake, s, .{}, &log.writer));
     try t.expectEqualStrings(try std.fmt.allocPrint(a, "cannot copy {s} to {s}/run/absent.parquet: FileNotFound", .{ missing, s.work }), why);
+}
+
+test "an environment that holds a distribution besides komira is refused, naming what is installed" {
+    var ar = std.heap.ArenaAllocator.init(t.allocator);
+    defer ar.deinit();
+    const a = ar.allocator();
+    const s = try Scene.init(a, lib.common.testpypi);
+    defer s.tmp.cleanup();
+    const rules = [_]h.Rule{.{ .contains = " freeze", .code = 0, .stdout = "komira==0.1.7\nmojo-compiler==1.0.0\n" }};
+    var fake = s.runner(a, &rules);
+    var log = h.sink(a);
+    var why: []const u8 = "";
+    try t.expectError(error.Refused, runWith(a, &why, &fake, s, .{ .requires_dist = &.{} }, &log.writer));
+    try t.expectEqualStrings("the environment holds other distributions than komira\nexpected:\nkomira==0.1.7\ninstalled:\nkomira==0.1.7\nmojo-compiler==1.0.0\n", why);
+    try t.expectEqual(@as(usize, 5), fake.calls.items.len);
+}
+
+test "an environment without komira in pip freeze is refused" {
+    var ar = std.heap.ArenaAllocator.init(t.allocator);
+    defer ar.deinit();
+    const a = ar.allocator();
+    const s = try Scene.init(a, lib.common.pypi);
+    defer s.tmp.cleanup();
+    const rules = [_]h.Rule{.{ .contains = " freeze", .code = 0, .stdout = "" }};
+    var fake = s.runner(a, &rules);
+    var log = h.sink(a);
+    var why: []const u8 = "";
+    try t.expectError(error.Refused, runWith(a, &why, &fake, s, .{}, &log.writer));
+    try t.expectEqualStrings("the environment holds other distributions than komira\nexpected:\nkomira==0.1.7\ninstalled:\n", why);
+}
+
+test "a pip freeze that fails is refused with its command" {
+    var ar = std.heap.ArenaAllocator.init(t.allocator);
+    defer ar.deinit();
+    const a = ar.allocator();
+    const s = try Scene.init(a, lib.common.pypi);
+    defer s.tmp.cleanup();
+    const rules = [_]h.Rule{.{ .contains = " freeze", .code = 2, .stderr = "boom\n" }};
+    var fake = s.runner(a, &rules);
+    var log = h.sink(a);
+    var why: []const u8 = "";
+    try t.expectError(error.Refused, runWith(a, &why, &fake, s, .{}, &log.writer));
+    try t.expect(std.mem.startsWith(u8, why, "list the installed distributions: `"));
+    try t.expect(std.mem.endsWith(u8, why, "exited with 2; last lines of stderr:\nboom"));
+}
+
+test "an importable modular package is refused, naming where it is" {
+    var ar = std.heap.ArenaAllocator.init(t.allocator);
+    defer ar.deinit();
+    const a = ar.allocator();
+    const s = try Scene.init(a, lib.common.pypi);
+    defer s.tmp.cleanup();
+    const rules = [_]h.Rule{.{ .contains = "find_spec", .code = 0, .stdout = "['/venv/lib/python3.13/site-packages/modular']\n" }};
+    var fake = s.runner(a, &rules);
+    var log = h.sink(a);
+    var why: []const u8 = "";
+    try t.expectError(error.Refused, runWith(a, &why, &fake, s, .{}, &log.writer));
+    try t.expectEqualStrings("a modular package is importable in the environment: ['/venv/lib/python3.13/site-packages/modular']", why);
+    try t.expectEqual(@as(usize, 6), fake.calls.items.len);
+}
+
+test "a modular probe that fails to run is refused with its command" {
+    var ar = std.heap.ArenaAllocator.init(t.allocator);
+    defer ar.deinit();
+    const a = ar.allocator();
+    const s = try Scene.init(a, lib.common.pypi);
+    defer s.tmp.cleanup();
+    const rules = [_]h.Rule{.{ .contains = "find_spec", .code = 1, .stderr = "SyntaxError\n" }};
+    var fake = s.runner(a, &rules);
+    var log = h.sink(a);
+    var why: []const u8 = "";
+    try t.expectError(error.Refused, runWith(a, &why, &fake, s, .{}, &log.writer));
+    try t.expect(std.mem.startsWith(u8, why, "look for a modular package: `"));
 }
