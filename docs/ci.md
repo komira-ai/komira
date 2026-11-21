@@ -209,7 +209,8 @@ build describes, so running a stranger's build would be running its code on the
 farm's workers. Therefore:
 
 - The job `check` of `pr.yml` is **skipped** for a fork's pull request:
-  `if: github.event.pull_request.head.repo.full_name == github.repository`.
+  `if: github.event_name == 'merge_group' || github.event.pull_request.head.repo.full_name == github.repository`
+  (the first term is for the [merge queue](#the-merge-queue), whose groups always run).
   No other job or workflow runs for it, so a fork's pull request has no check at all; the
   repository's only merger reads the change and runs the farm build from a
   branch of this repository.
@@ -220,7 +221,8 @@ farm's workers. Therefore:
   `tools/` and every `BUCK` and `.bzl` file included, before pushing it to a
   branch: the workflow, the rules and the lint scripts all run from that
   branch's tree, and anyone who can push a branch can run code on the farm.
-- The workflows use `pull_request` only. There is no `pull_request_target`
+- The workflows use `pull_request` (and `pr.yml` also `merge_group`, which runs
+  only what a maintainer queued). There is no `pull_request_target`
   workflow here, on purpose: it runs with the base repository's token, and
   checking the fork's code out under it, then joining the tailnet, would hand
   the farm to the code.
@@ -818,9 +820,10 @@ shipping, never the library or its dependents) and is the CEO's decision. Detail
 
 ## main_red.yml: the main red alert
 
-There is no merge queue: pull requests are checked one at a time and merged
-into `main`, and the release run of `release.yml` builds each push to `main`. Two
-changes that are each green can still break `main` together. The rule is
+Pull requests reach `main` through the [merge queue](#the-merge-queue), which
+checks each one on top of the ones ahead of it, and the release run of
+`release.yml` builds each push to `main`. The queue's check builds what the
+change affects, not the release set, so `main` can still go red. The rule is
 **fix forward or revert within the hour**: when the release run of `main`
 fails, the author of a culprit pull request lands a fix, or reverts the
 pull request, within an hour of the alert, before anything else merges on
