@@ -100,7 +100,6 @@ TARGETS = [
     "komira//tools/build/ci/fixture/platforms:linux_arm64",
     "komira//tools/build/ci/fixture/platforms:macos_x86_64",
     "komira//tools/build/ci:lock_graphs",
-    "komira//tools/build/ci:release_beta_fetch_unit",
     "komira//tools/build/ci:release_beta_version",
     "komira//tools/build/ci:release_staged_verify",
     "komira//tools/build/lint/tool:lint_unit_doc_links",
