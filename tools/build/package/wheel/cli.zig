@@ -3,7 +3,7 @@
 //! forwards.
 //!
 //! Flags are `--flag value` pairs. A command takes:
-//!   --name N --summary S --readme <file> --requires-python R
+//!   --name N --summary S --readme <file> [--readme-preface <text>] --requires-python R
 //!   [--requires-dist R]... [--classifier C]... [--project-url <label>=<url>]...
 //!   --license-expression E [--license-file <name>=<file>]...
 //!   [--file <path>=<file or dir>]... [--exec-file <path>=<file or dir>]...
@@ -13,7 +13,9 @@
 //! `--require-stamped true|false`, `[--twin <wheel>]` and `--out <marker>`.
 //! A `--file` or `--exec-file` naming a directory adds each file under it,
 //! at `<path>/<its path in the directory>`; an `--exec-file` is mode 0755
-//! (a shared library), a `--file` 0644.
+//! (a shared library), a `--file` 0644. A `--readme-preface` is the first
+//! paragraph of the description: METADATA's body is it, a blank line, then
+//! the README.
 
 const std = @import("std");
 const diag = @import("diag.zig");
@@ -47,22 +49,47 @@ pub const Args = struct {
 };
 
 pub const common_flags = [_][]const u8{
-    "--name",          "--summary",           "--readme",       "--requires-python", "--requires-dist",
-    "--classifier",    "--project-url",       "--license-expression", "--license-file", "--file",
-    "--exec-file",     "--tag",               "--max-glibcxx",  "--max-cxxabi",       "--external-needed",
-    "--stamp",         "--commit",            "--timestamp-ms",
+    "--name",
+    "--summary",
+    "--readme",
+    "--requires-python",
+    "--requires-dist",
+    "--classifier",
+    "--project-url",
+    "--license-expression",
+    "--license-file",
+    "--file",
+    "--exec-file",
+    "--tag",
+    "--max-glibcxx",
+    "--max-cxxabi",
+    "--external-needed",
+    "--stamp",
+    "--commit",
+    "--timestamp-ms",
+    "--readme-preface",
 };
 
 /// `argv` (after the command) as pairs, every flag in `common_flags` or
 /// `extra`.
 pub fn parse(alloc: Alloc, d: *Diag, argv: []const []const u8, extra: []const []const u8) Refused!Args {
+    return pairsOf(alloc, d, argv, &common_flags, extra);
+}
+
+/// `argv` as pairs, every flag in `flags`: a command that takes none of the
+/// wheel's flags (`runtime-record`).
+pub fn parseOnly(alloc: Alloc, d: *Diag, argv: []const []const u8, flags: []const []const u8) Refused!Args {
+    return pairsOf(alloc, d, argv, &.{}, flags);
+}
+
+fn pairsOf(alloc: Alloc, d: *Diag, argv: []const []const u8, base: []const []const u8, extra: []const []const u8) Refused!Args {
     if (argv.len % 2 != 0) return refuse(d, alloc, "{s} needs a value", .{argv[argv.len - 1]});
     var pairs = std.ArrayList([2][]const u8).empty;
     var i: usize = 0;
     while (i < argv.len) : (i += 2) {
         const k = argv[i];
         var known = false;
-        for (common_flags) |f| known = known or std.mem.eql(u8, f, k);
+        for (base) |f| known = known or std.mem.eql(u8, f, k);
         for (extra) |f| known = known or std.mem.eql(u8, f, k);
         if (!known) return refuse(d, alloc, "unknown argument {s}", .{k});
         try pairs.append(alloc, .{ k, argv[i + 1] });
@@ -113,6 +140,14 @@ pub fn flagBool(alloc: Alloc, d: *Diag, flag: []const u8, v: []const u8) Refused
     return refuse(d, alloc, "{s} is `{s}`, not true or false", .{ flag, v });
 }
 
+/// METADATA's body: the README, after `preface` and a blank line when there
+/// is one. An empty preface is refused: the flag is left out instead.
+pub fn description(alloc: Alloc, d: *Diag, preface: ?[]const u8, readme: []const u8) Refused![]const u8 {
+    const p = preface orelse return readme;
+    if (std.mem.trim(u8, p, " \t\r\n").len == 0) return refuse(d, alloc, "--readme-preface is empty", .{});
+    return std.fmt.allocPrint(alloc, "{s}\n\n{s}", .{ p, readme });
+}
+
 /// The wheel's input and stamp, from `a`.
 pub fn input(alloc: Alloc, d: *Diag, a: Args) Refused!struct { in: wheel.Input, stamp: stamp_mod.Stamp } {
     const st = try stamp_mod.of(alloc, d, try a.one(alloc, d, "--stamp"), try a.one(alloc, d, "--commit"), try a.one(alloc, d, "--timestamp-ms"));
@@ -139,7 +174,7 @@ pub fn input(alloc: Alloc, d: *Diag, a: Args) Refused!struct { in: wheel.Input, 
         .name = try a.one(alloc, d, "--name"),
         .version = st.version,
         .summary = try a.one(alloc, d, "--summary"),
-        .readme = try readFile(alloc, d, try a.one(alloc, d, "--readme")),
+        .readme = try description(alloc, d, try a.opt(alloc, d, "--readme-preface"), try readFile(alloc, d, try a.one(alloc, d, "--readme"))),
         .requires_python = try a.one(alloc, d, "--requires-python"),
         .requires_dist = try a.all(alloc, "--requires-dist"),
         .classifiers = try a.all(alloc, "--classifier"),

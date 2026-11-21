@@ -6,19 +6,24 @@
 //!   komira_wheel write <flags> --out <wheel>
 //!   komira_wheel check <flags> --wheel <wheel> --require-stamped true|false
 //!       [--twin <wheel>] --out <marker>
+//!   komira_wheel runtime-record --requirement <r> --library <file>...
+//!       --out <record>
 //! cli.zig lists the flags. `write` refuses to write a wheel policy.zig
-//! refuses; `check` writes `ok` to --out only if check.zig refuses nothing.
+//! refuses; `check` writes `ok` to --out only if check.zig refuses nothing;
+//! `runtime-record` writes the record of the libraries' build ids
+//! (record.zig), each named by its file name.
 //!
 //! A static executable: no shell, no PATH, no network, no clock. Exit status 2
 //! on any refusal, with its reason. This file only forwards; the sections are
 //! cli.zig (flags and files), stamp.zig (version), tag.zig, wheel.zig (the
 //! wheel), policy.zig and elf.zig (what its libraries need), zip.zig and
-//! check.zig.
+//! check.zig, and record.zig.
 
 const std = @import("std");
 const diag = @import("diag.zig");
 const cli = @import("cli.zig");
 const check = @import("check.zig");
+const record = @import("record.zig");
 const wheel = @import("wheel.zig");
 const zip = @import("zip.zig");
 const Alloc = std.mem.Allocator;
@@ -50,6 +55,11 @@ fn cmdCheck(alloc: Alloc, d: *diag.Diag, argv: []const []const u8) diag.Refused!
     try writeOut(alloc, d, try a.one(alloc, d, "--out"), "ok\n");
 }
 
+fn cmdRecord(alloc: Alloc, d: *diag.Diag, argv: []const []const u8) diag.Refused!void {
+    const r = try record.command(alloc, d, argv);
+    try writeOut(alloc, d, r.out, r.text);
+}
+
 pub fn main() !void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
@@ -63,8 +73,10 @@ pub fn main() !void {
         cmdWrite(alloc, &d, rest.items)
     else if (std.mem.eql(u8, cmd, "check"))
         cmdCheck(alloc, &d, rest.items)
+    else if (std.mem.eql(u8, cmd, "runtime-record"))
+        cmdRecord(alloc, &d, rest.items)
     else
-        diag.refuse(&d, alloc, "usage: komira_wheel write|check --flag value ...", .{});
+        diag.refuse(&d, alloc, "usage: komira_wheel write|check|runtime-record --flag value ...", .{});
     result catch |err| {
         switch (err) {
             error.Refused => std.debug.print("komira_wheel: {s}\n", .{d.msg}),
