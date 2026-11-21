@@ -422,6 +422,43 @@ stripped library reads the same). A refusal names its check:
 Mach-O libraries of a macOS wheel are not read yet: they come with the macOS
 wheel.
 
+`wheel_libs_check` (also [`wheel.bzl`](wheel.bzl)) is a second reader of a
+finished wheel: `komira_wheel libs` ([`wheel/libs.zig`](wheel/libs.zig)) reads
+the wheel's bytes, a few names (the entry library, the Mojo runtime's file
+names, its licence files and the distributions that carry it) and the
+toolchain's copies of the runtime libraries, and nothing else the rule that
+wrote the wheel was given. It reads the zip as `zip.zig` reads it, so the wheel
+is one this writer wrote: the build's, or the same bytes as an index serves them
+after an upload. Where `needed` above asks only that a name be a member somewhere, this
+check walks the libraries as the loader would load them from an install: from
+the entry library, each DT_NEEDED is a manylinux system library, a library
+already loaded, or the member at one of the needing library's own run path
+entries with `$ORIGIN` its directory. A refusal names its check:
+
+- `path`: every member is a relative path of plain components (no `/` first,
+  no `\`, no empty, `.` or `..` part);
+- `layout`: every member is under the import package (the entry's top
+  directory) or the one `.dist-info`, so no `modular/` beside it;
+- `entry`: the entry is a member and an ELF file;
+- `runtime`: each Mojo runtime library is in the wheel exactly once, with the
+  bytes of the toolchain's runtime: a second copy, one of another build, or none
+  is refused;
+- `runpath`: every run path entry of a loaded library is `$ORIGIN`-relative and
+  stays inside the import package;
+- `needed`: every DT_NEEDED of a loaded library resolves as above (a name holding
+  `/`, which the loader opens as a path, is refused), and a refusal says where
+  in the wheel the library is when the run path misses it;
+- `stray`: every ELF member is one the entry loads;
+- `licence`: each runtime licence file is a non-empty `.dist-info/licenses/`
+  member and a `License-File` of METADATA;
+- `requires`: no Requires-Dist names a distribution that carries the runtime.
+
+The output lists the loaded libraries in load order; with `expect_refusal` the
+target builds only while the wheel is refused with exactly that line.
+python/BUCK runs it on `komira_wheel` (`:wheel_libs`) and on four wheels it
+refuses: a second libKGENCompilerRTShared.so beside libkomira, the owners off
+libkomira's run path, a runtime library missing, and libkomira missing.
+
 Sub-targets: `[default]` is the wheel, copied only after `[check]` passed;
 `[check]` reads it back ([`wheel/check.zig`](wheel/check.zig)). That covers the
 name, every member's date, the members exactly (bytes and modes), RECORD's hashes
@@ -432,9 +469,9 @@ publisher reads `[release]` and nothing else. `wheel_file_test_stamped` gives
 conda.bzl's test stamp (and its default output waits for `[release]` too).
 
 The tests: the Zig scenarios `:wheel_zip_unit`, `:wheel_elf_unit`,
-`:wheel_policy_unit`, `:wheel_build_unit`, `:wheel_check_unit` and
-`:wheel_cli_unit` in [`BUCK`](BUCK), on synthetic files and ELF libraries
-([`wheel/testing.zig`](wheel/testing.zig)). The rule on fixtures: `:wheel_fixture`
+`:wheel_policy_unit`, `:wheel_build_unit`, `:wheel_check_unit`,
+`:wheel_cli_unit` and `:wheel_libs_unit` in [`BUCK`](BUCK), on synthetic files
+and ELF libraries ([`wheel/testing.zig`](wheel/testing.zig)). The rule on fixtures: `:wheel_fixture`
 (a linux-x86_64 wheel holding the example Mojo shared library `plain`, with the
 Mojo runtime as `external_needed`), `:wheel_fixture_aarch64_tag` and
 `:wheel_fixture_macosx_tag` (the linux-arm64 and darwin-arm64 rows' tags; built on

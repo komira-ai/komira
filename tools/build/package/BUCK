@@ -104,12 +104,22 @@ zig_module(
 #   wheel_check_unit   the read-back check: the builder's wheel passes, and
 #                      each defect is refused by its check's name;
 #   wheel_cli_unit     the command line: flags, <name>=<value>, files and
-#                      directories staged with their modes, a link refused.
+#                      directories staged with their modes, a link refused;
+#   wheel_libs_unit    the finished wheel read alone (`komira_wheel libs`):
+#                      komira's layout passes with its libraries in the
+#                      loader's order, and a second or foreign or missing Mojo
+#                      runtime library, a run path that misses, is absolute or
+#                      leaves the package, an unresolved or path DT_NEEDED, a
+#                      library nothing loads, a member outside the package, a
+#                      missing runtime licence and a Requires-Dist of the
+#                      runtime are each refused by their exact message, as are
+#                      the command's flags and an expected refusal that differs.
 _WHEEL_SRCS = [
     "wheel/check.zig",
     "wheel/cli.zig",
     "wheel/diag.zig",
     "wheel/elf.zig",
+    "wheel/libs.zig",
     "wheel/policy.zig",
     "wheel/stamp.zig",
     "wheel/tag.zig",
@@ -117,7 +127,7 @@ _WHEEL_SRCS = [
     "wheel/zip.zig",
 ]
 
-_WHEEL_SCENARIOS = ["build", "check", "cli", "elf", "policy", "zip"]
+_WHEEL_SCENARIOS = ["build", "check", "cli", "elf", "libs", "policy", "zip"]
 
 [
     zig_test(

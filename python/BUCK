@@ -1,5 +1,5 @@
 load("@komira//python:install_test.bzl", "picked_files", "wheel_install_test")
-load("@komira//tools/build/package:wheel.bzl", "wheel_file", "wheel_version")
+load("@komira//tools/build/package:wheel.bzl", "wheel_file", "wheel_libs_check", "wheel_version")
 load("@komira//tools/build/platforms:table.bzl", "asset")
 load("@komira//tools/build/python:defs.bzl", "python_proto", "python_source_package")
 
@@ -305,6 +305,76 @@ _MODULAR_OTHER = ["komira//third_party/modular:mojo_compiler-1.2.0-py3-none-many
         "refuses_python_outside_requires_python",
         [":komira_wheel_requires_python_315"],
         "install: komira requires Python >=3.15; this interpreter is 3.13.16",
+    ),
+]]
+
+# ---- The libraries of the finished wheel -------------------------------------
+#
+# The wheel read back from its bytes alone, by a second reader that knows none
+# of the rule's inputs (`wheel_libs_check`, tools/build/package/README.md, "The
+# Python wheel"): from komira/_lib/libkomira.so, the library _native.load
+# opens, every DT_NEEDED is a manylinux system library or a member its run path
+# reaches, every run path entry stays under `$ORIGIN` inside komira/, every
+# shared library in the wheel is one libkomira loads, the three Mojo runtime
+# libraries are carried once each with the bytes of the toolchain's runtime and
+# with their licence texts, and no Requires-Dist names a distribution of
+# Modular's that carries the runtime. The output lists the libraries in the
+# loader's order. It reads nothing else of the rule's inputs, so the same
+# command can read the bytes an index serves after an upload.
+_LIBS_CHECK = {
+    "entry": "komira/_lib/libkomira.so",
+    "runtime_dists": ["mojo", "mojo-compiler", "mojo-compiler-mojo-libs"],
+    "runtime_libs": _RUNTIME,
+    "runtime_licenses": ["MODULAR_LICENSE", "MODULAR_THIRD_PARTY_NOTICES"],
+}
+
+wheel_libs_check(
+    name = "wheel_libs",
+    wheel = ":komira_wheel",
+    **_LIBS_CHECK
+)
+
+# A second libKGENCompilerRTShared.so beside libkomira, the copy of the same
+# runtime library that a bundling step would leave: every NEEDED name is a
+# member, so the wheel rule writes it.
+_SECOND_RUNTIME = {"komira/_lib/libKGENCompilerRTShared.so": ":dist_files[libKGENCompilerRTShared.so]"}
+
+wheel_file(
+    name = "komira_wheel_second_runtime",
+    files = _PY_FILES | _NATIVE_FILES | _SECOND_RUNTIME,
+    executable = sorted(_NATIVE_FILES.keys() + _SECOND_RUNTIME.keys()),
+    **_WHEEL
+)
+
+# Each wheel the check refuses, with its exact line.
+[wheel_libs_check(
+    name = name,
+    wheel = wheel,
+    expect_refusal = line,
+    **_LIBS_CHECK
+) for name, wheel, line in [
+    (
+        "wheel_libs_refuses_second_runtime",
+        ":komira_wheel_second_runtime",
+        "runtime: the wheel carries libKGENCompilerRTShared.so 2 times (komira/_lib/lib/libKGENCompilerRTShared.so, " +
+        "komira/_lib/libKGENCompilerRTShared.so), and a process holds one Mojo runtime",
+    ),
+    # libkomira's run path does not reach the owners where this wheel puts them.
+    (
+        "wheel_libs_refuses_owners_off_run_path",
+        ":komira_wheel_misplaced_owners",
+        "needed: komira/_lib/libkomira.so needs libkomira_async_rt_native.so.1, which its run path `$ORIGIN/lib:$ORIGIN` " +
+        "does not reach in the wheel (the wheel has it at komira/_lib/misplaced/libkomira_async_rt_native.so.1)",
+    ),
+    (
+        "wheel_libs_refuses_missing_runtime_library",
+        ":komira_wheel_without_runtime_library",
+        "runtime: the wheel carries no libMSupportGlobals.so",
+    ),
+    (
+        "wheel_libs_refuses_missing_libkomira",
+        ":komira_wheel_without_libkomira",
+        "entry: the wheel has no komira/_lib/libkomira.so",
     ),
 ]]
 
