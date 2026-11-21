@@ -224,7 +224,7 @@ def test_uint64_widens_to_floats() raises:
         v,
         [Float32(0.0), Float32(18446744073709551616.0), Float32(9223372036854775808.0), Float32(5.0)],
         3,
-    ]
+    )
     _check[DType.uint64, DType.float64](
         ArrowType.UINT64, ArrowType.FLOAT64,
         v,
