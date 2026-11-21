@@ -1,7 +1,7 @@
 # lowering
 
 Lowering: a bound `LogicalPlan`, a `HostProfile` and the resolved inputs go in;
-the physical plan (`physical_plan`, IR version 15) and the `ParamTable`
+the physical plan (`physical_plan`, IR version 16) and the `ParamTable`
 its segments index come out. It is pure. `lower` opens no file, reads no clock
 and no environment variable and touches no global, so equal arguments give a
 `LoweredPlan` that renders byte-equal.
@@ -15,14 +15,15 @@ and no environment variable and touches no global, so equal arguments give a
   dictionary encoded), `ParamTable`, `LoweredPlan` and the four refusal tokens.
 - `cut_walk`: the cutter. A scan opens a pipeline (`SOURCE_PARQUET`, whose
   spec lists the files when there are several; `SOURCE_BATCH` for an in-memory
-  scan, whose pushed filter and projection become operators; a Parquet scan
-  with Hive partition columns also runs its filter and projection as
-  operators, over the files' columns followed by the partition columns). A
-  filter, a projection and a limit fuse into it. An aggregation, a distinct or
-  a sort ends it in a sink and opens a pipeline that reads that segment's
-  output over an `E3` edge. A distinct is a `SINK_AGG` grouped by every
-  column, in order, with no aggregate, so its sink row is the one an
-  aggregation with those group keys gets. The root is a `SINK_COLLECT` segment
+  scan; `SOURCE_CSV` for a CSV scan, whose spec carries the path, the dialect
+  and every column of the file with the type the plan bound it at; the pushed
+  filter and projection of the last two become operators, and so do those of
+  a Parquet scan with Hive partition columns, over the files' columns followed
+  by the partition columns). A filter, a projection and a limit fuse into it.
+  An aggregation, a distinct or a sort ends it in a sink and opens a pipeline
+  that reads that segment's output over an `E3` edge. A distinct is a
+  `SINK_AGG` grouped by every column, in order, with no aggregate, so its
+  sink row is the one an aggregation with those group keys gets. The root is a `SINK_COLLECT` segment
   unless the top node is a breaker, which is then the result. `cut_walk` is
   only the dispatch on the node's tag; each arm is its own module (`cut_scan`,
   `cut_filter`, `cut_project`, `cut_limit`, `cut_aggregate`, `cut_distinct`,
@@ -53,7 +54,9 @@ shape:
   negative count; a limit above a sort (see Order); a partial or final
   aggregation; an aggregation with a group top-k; a distinct over an explicit
   column list, over no column or over two columns of one name; a source other
-  than Parquet or in memory.
+  than Parquet, in memory or CSV; a CSV scan with `header=false` (the reader
+  would name its columns `col_0`, `col_1`, ..., where DuckDB names them
+  `column0`, `column1`, ...).
 - `LOWERING_SINK_UNSERVED`, naming the triple or the key: a group key of a
   type with no row (date, decimal, bool, ...), a key of several columns that
   are not all dictionary encoded strings (a distinct's columns are its group

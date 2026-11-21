@@ -13,7 +13,7 @@ load(
     "runtime_record",
 )
 load("@komira//python:install_test.bzl", "picked_files", "wheel_install_test")
-load("@komira//tools/build/package:wheel.bzl", "wheel_file", "wheel_version")
+load("@komira//tools/build/package:wheel.bzl", "wheel_file", "wheel_libs_check", "wheel_version")
 load("@komira//tools/build/platforms:defs.bzl", "DARWIN_ARM64")
 load("@komira//tools/build/python:defs.bzl", "python_proto", "python_source_package")
 
@@ -464,6 +464,258 @@ _NOT_INSTALLED = (
         "bundled",
         True,
         "AssertionError: the wheel's Requires-Dist is ['{}'], the bundled flavour's is []".format(requirement(_PLATFORM)),
+    ),
+]]
+
+# ---- The libraries of the finished wheel -------------------------------------
+#
+# Each flavour's wheel read back from its bytes alone, by a second reader that
+# knows none of the rule's inputs but these names and the toolchain's runtime
+# libraries (`wheel_libs_check`, tools/build/package/README.md, "The Python
+# wheel"): from komira/_lib/libkomira.so, the library _native.load opens,
+# every DT_NEEDED is a manylinux system library or a member its run path
+# reaches, every run path entry stays under `$ORIGIN` inside komira/, and
+# every shared library in the wheel is one libkomira loads. The bundled wheel
+# carries the three Mojo runtime libraries once each, with the bytes of the
+# toolchain's runtime and with their licence texts, and requires no
+# distribution of Modular's; the external wheel carries no file named as a
+# runtime library or byte-equal to one and no licence text of theirs, leaves
+# their names to its requirement, and requires exactly that. The output lists
+# the libraries in the loader's order.
+_LIBS_CHECK = {
+    "entry": "komira/_lib/libkomira.so",
+    "runtime_dists": ["mojo", "mojo-compiler", "mojo-compiler-mojo-libs"],
+    "runtime_libs": RUNTIME,
+    "runtime_licenses": sorted(MODULAR_LICENSE_FILES.keys()),
+}
+
+_LIBS_REQUIREMENT = {
+    "bundled": None,
+    "external": requirement(_PLATFORM),
+}
+
+[wheel_libs_check(
+    name = "wheel_libs_" + flavour,
+    wheel = ":komira_wheel_" + flavour,
+    runtime_requirement = _LIBS_REQUIREMENT[flavour],
+    **_LIBS_CHECK
+) for flavour in FLAVOURS]
+
+# A second libKGENCompilerRTShared.so beside libkomira in the bundled wheel,
+# the copy a bundling step would leave: every NEEDED name is a member, so the
+# wheel rule writes it.
+_SECOND_RUNTIME = {"komira/_lib": DIST, "komira/_lib/libKGENCompilerRTShared.so": ":dist_files[libKGENCompilerRTShared.so]"}
+
+wheel_file(
+    name = "komira_wheel_second_runtime",
+    files = _PY_FILES | _SECOND_RUNTIME,
+    executable = sorted(_SECOND_RUNTIME.keys()),
+    **_BUNDLED
+)
+
+# The external wheel with libKGENCompilerRTShared.so bundled into it. The
+# wheel rule refuses a member that `external_needed` names, so the library is
+# taken off that list: libkomira's NEEDED entry is then a member, and the rule
+# writes it.
+_EXTERNAL = flavour_attrs("external", _PLATFORM, ":dist_files", ":mojo_runtime_record")
+
+_EXTERNAL_META = {k: v for k, v in _EXTERNAL.items() if k not in ("files", "executable", "external_needed")}
+
+_KGEN = {"komira/_lib/lib/libKGENCompilerRTShared.so": ":dist_files[libKGENCompilerRTShared.so]"}
+
+wheel_file(
+    name = "komira_wheel_external_with_runtime",
+    files = _PY_FILES | _EXTERNAL["files"] | _KGEN,
+    executable = sorted(_EXTERNAL["executable"] + _KGEN.keys()),
+    external_needed = [n for n in _EXTERNAL["external_needed"] if n != "libKGENCompilerRTShared.so"],
+    **(_WHEEL | _EXTERNAL_META)
+)
+
+# The external wheel without its requirement: the wheel rule writes it, and
+# nothing would install the runtime it loads.
+wheel_file(
+    name = "komira_wheel_external_without_requirement",
+    files = _PY_FILES | _EXTERNAL["files"],
+    executable = _EXTERNAL["executable"],
+    external_needed = _EXTERNAL["external_needed"],
+    **(_WHEEL | _EXTERNAL_META | {"requires_dist": []})
+)
+
+# Each wheel the check refuses, read as the flavour named, with its exact line.
+[wheel_libs_check(
+    name = name,
+    wheel = wheel,
+    runtime_requirement = _LIBS_REQUIREMENT[flavour],
+    expect_refusal = line,
+    **_LIBS_CHECK
+) for name, wheel, flavour, line in [
+    (
+        "wheel_libs_refuses_second_runtime",
+        ":komira_wheel_second_runtime",
+        "bundled",
+        "runtime: the wheel carries libKGENCompilerRTShared.so 2 times (komira/_lib/lib/libKGENCompilerRTShared.so, " +
+        "komira/_lib/libKGENCompilerRTShared.so), and a process holds one Mojo runtime",
+    ),
+    # libkomira's run path does not reach the owners where this wheel puts them.
+    (
+        "wheel_libs_refuses_owners_off_run_path",
+        ":komira_wheel_misplaced_owners",
+        "bundled",
+        "needed: komira/_lib/libkomira.so needs libkomira_async_rt_native.so.1, which its run path `$ORIGIN/lib:$ORIGIN` " +
+        "does not reach in the wheel (the wheel has it at komira/_lib/misplaced/libkomira_async_rt_native.so.1)",
+    ),
+    (
+        "wheel_libs_refuses_missing_runtime_library",
+        ":komira_wheel_without_runtime_library",
+        "bundled",
+        "runtime: the wheel carries no libMSupportGlobals.so",
+    ),
+    (
+        "wheel_libs_refuses_missing_libkomira",
+        ":komira_wheel_without_libkomira",
+        "bundled",
+        "entry: the wheel has no komira/_lib/libkomira.so",
+    ),
+    (
+        "wheel_libs_refuses_external_with_runtime",
+        ":komira_wheel_external_with_runtime",
+        "external",
+        "runtime: the external wheel carries komira/_lib/lib/libKGENCompilerRTShared.so, a Mojo runtime library it leaves to " +
+        requirement(_PLATFORM),
+    ),
+    (
+        "wheel_libs_refuses_external_without_requirement",
+        ":komira_wheel_external_without_requirement",
+        "external",
+        "requires: METADATA does not require {}, which installs the Mojo runtime the external wheel loads".format(requirement(_PLATFORM)),
+    ),
+    # Each flavour's wheel read as the other: the bundled wheel carries the
+    # runtime the external flavour leaves to its requirement, and the external
+    # wheel carries none of the runtime the bundled flavour must.
+    (
+        "wheel_libs_refuses_bundled_as_external",
+        ":komira_wheel_bundled",
+        "external",
+        "runtime: the external wheel carries komira/_lib/lib/libKGENCompilerRTShared.so, a Mojo runtime library it leaves to " +
+        requirement(_PLATFORM),
+    ),
+    (
+        "wheel_libs_refuses_external_as_bundled",
+        ":komira_wheel_external",
+        "bundled",
+        "runtime: the wheel carries no libKGENCompilerRTShared.so",
+    ),
+]]
+
+# ---- Upgrading from the previous release ----------------------------------
+#
+# `pip install --upgrade komira`, of each flavour: two releases of the wheel,
+# the previous (build number 999999998) and the current (999999999), installed
+# in that order into one empty environment, the first uninstalled before the
+# second as pip does (wheel_install_test `upgrade`; the external flavour's
+# Modular wheels beside them), and python/tests/test_upgrade.py run there: the
+# environment holds the current release's dist-info and no other, every file
+# only the previous release had is gone, and everything the clean-environment
+# test holds of a fresh install of that flavour holds. The previous release is
+# the package's files plus two it dropped since: a module and a file in
+# `_lib/lib/`, where a Mojo pin bump drops and renames libraries. The current
+# release is the package's files as they are. Fixed build numbers, so the
+# versions do not depend on the build's stamp.
+#
+# A Mojo runtime of another build is not part of an upgrade: the bundled wheel
+# carries the runtime libkomira was built with, both from one directory, and
+# the external wheel holds the installed runtime to the build ids it records.
+# A runtime of another build that is already in the process is refused by
+# name: `beside_other_mojo_loaded_first`, `refuses_external_beside_other_mojo`.
+
+_PREVIOUS_ONLY = {
+    "komira/_lib/lib/previous_release_only.txt": "komira//python/tests:fixtures/previous_release_only.txt",
+    "komira/_previous_release_only.txt": "komira//python/tests:fixtures/previous_release_only.txt",
+}
+
+[komira_wheel(
+    name = "komira_wheel_{}_{}".format(flavour, release),
+    flavour = flavour,
+    dist_files = ":dist_files",
+    record = ":mojo_runtime_record",
+    files = _PY_FILES | (_PREVIOUS_ONLY if release == "previous" else {}),
+    stamp = stamp,
+    **_WHEEL
+) for flavour in FLAVOURS for release, stamp in [("previous", "999999998"), ("current", "999999999")]]
+
+_UPGRADE_VERSION = wheel_version("999999999")
+
+_UPGRADE_FILES = _TEST_FILES | {"--installed-script": "komira//python/tests:test_installed.py"}
+
+_UPGRADE_ARGS = {
+    flavour: [
+        "--version",
+        _UPGRADE_VERSION,
+        "--flavour",
+        flavour,
+        "--license-expression",
+        LICENSE_EXPRESSIONS[flavour],
+        "--toolchain-mojo-version",
+        _TOOLCHAIN_MOJO,
+    ] + [a for p in sorted(_PREVIOUS_ONLY.keys()) for a in ["--expect-removed", p]]
+    for flavour in FLAVOURS
+}
+
+# The releases of `flavour` in the order given, with what its install brings.
+_RELEASES = {
+    (flavour, order): [":komira_wheel_{}_{}".format(flavour, r) for r in order.split(",")] + _BESIDE[flavour]
+    for flavour in FLAVOURS
+    for order in ["previous,current", "current,previous", "current"]
+}
+
+[wheel_install_test(
+    name = "upgrade_test_" + flavour + suffix,
+    python = python,
+    wheels = _RELEASES[(flavour, "previous,current")],
+    script = "komira//python/tests:test_upgrade.py",
+    args = _UPGRADE_ARGS[flavour],
+    files = _UPGRADE_FILES,
+    upgrade = True,
+) for flavour in FLAVOURS for suffix, python in [
+    ("", "komira//third_party/python:cpython"),
+    ("_py314", "komira//third_party/python:cpython314"),
+]]
+
+[wheel_install_test(
+    name = name,
+    python = "komira//third_party/python:cpython",
+    wheels = wheels,
+    script = "komira//python/tests:test_upgrade.py",
+    args = _UPGRADE_ARGS["bundled"],
+    files = _UPGRADE_FILES,
+    upgrade = upgrade,
+    expect_failure = expect,
+) for name, wheels, upgrade, expect in [
+    # The releases in the other order: the environment ends on the older one.
+    (
+        "refuses_downgrade",
+        _RELEASES[("bundled", "current,previous")],
+        True,
+        "AssertionError: the site holds komira-0.1.999999998.dist-info, the upgrade should leave only komira-0.1.999999999.dist-info",
+    ),
+    # Nothing to upgrade from: the previous release's files are not there to be
+    # removed, which the test names, so an upgrade that removes nothing is not
+    # a pass.
+    (
+        "refuses_upgrade_from_nothing",
+        _RELEASES[("bundled", "current")],
+        True,
+        "AssertionError: the upgrade did not remove komira/_lib/lib/previous_release_only.txt, " +
+        "komira/_previous_release_only.txt: the previous release does not carry it",
+    ),
+    # A second release of an installed distribution is not an upgrade unless
+    # the installer uninstalls the first: without it, the files of both would
+    # be mixed.
+    (
+        "refuses_second_release_without_uninstall",
+        _RELEASES[("bundled", "previous,current")],
+        False,
+        "install: komira is already installed, and a second wheel of it is installed only with --upgrade",
     ),
 ]]
 

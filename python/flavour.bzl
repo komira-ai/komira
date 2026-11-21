@@ -24,11 +24,12 @@ The loader (komira/_runtime.py) uses the runtime inside the package when it
 is there and finds Modular's installed one otherwise. The wheel's description
 starts with a paragraph that names its flavour (`PREFACE`).
 
-`komira_wheel(name, flavour, platform, dist_files, record, **kwargs)` is
+`komira_wheel(name, flavour, platform, dist_files, record, stamp, **kwargs)` is
 `wheel_file` with the attributes of `flavour` added to `kwargs`: `dist_files`
 is the `picked_files` target of the `[dist]` directory (libkomira, its owners
-and the runtime, by file name) and `record` the `runtime_record` target.
-Another flavour fails analysis.
+and the runtime, by file name) and `record` the `runtime_record` target. With
+`stamp` (a build number) it is `wheel_file_at_stamp` instead, for the wheels of
+an upgrade test. Another flavour fails analysis.
 
 `runtime_record(name, libraries, requirement)` writes `<name>.tsv`, the
 record of the libraries' GNU build ids and the requirement that installs them
@@ -36,7 +37,7 @@ record of the libraries' GNU build ids and the requirement that installs them
 """
 
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
-load("@komira//tools/build/package:wheel.bzl", "wheel_file")
+load("@komira//tools/build/package:wheel.bzl", "wheel_file", "wheel_file_at_stamp")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load("@komira//tools/build/platforms:table.bzl", "asset")
 
@@ -139,10 +140,12 @@ def flavour_attrs(flavour, platform, dist_files, record):
         }
     fail("flavour `{}` is not one of {}".format(flavour, ", ".join(FLAVOURS)))
 
-def _komira_wheel_macro(name, flavour, platform, dist_files, record, files = {}, **kwargs):
+def _komira_wheel_macro(name, flavour, platform, dist_files, record, files = {}, stamp = None, **kwargs):
     attrs = flavour_attrs(flavour, platform, dist_files, record)
     native = attrs.pop("files")
-    wheel_file(
+    if stamp != None:
+        kwargs["stamp"] = stamp
+    (wheel_file if stamp == None else wheel_file_at_stamp)(
         name = name,
         platform = platform,
         files = files | native,

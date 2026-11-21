@@ -41,7 +41,9 @@ _WRITE = read_config("komira_sql_conformance", "write", "false") == "true"
         **({} if _WRITE else {"expected.tsv": "cases/" + case + ".tsv"})
     ),
     outputs = ["answer.tsv"],
-    visibility = ["//src/tests/..."],
+    # pipeline_exec's test_sink_float_agg_duckdb reads the answers of the
+    # agg_float_ungrouped corpus.
+    visibility = ["//src/tests/...", "//src/pipeline_exec/..."],
 ) for case in _CASES]
 
 # Each corpus's answers as one directory, <case>.tsv each: what

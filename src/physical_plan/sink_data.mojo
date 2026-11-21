@@ -1,22 +1,20 @@
 # =============================================================================
-# sink_data -- the per-sink configuration structs
+# sink_data -- the sink payloads a segment's `sink_param_id` names
 # =============================================================================
 #
-# Split out of `physical_plan.mojo` (rule M15, files under 1000 lines):
-# `AggSinkData`, `SortSinkData`, `TopNSinkData`, `PartitionBySinkData`,
-# `PartitionTopNSinkData`, `AsofJoinSinkData`, `HashBuildSinkData`,
-# `SMJBuildSinkData` and `is_explicit_nulls_first_request`.
-# `physical_plan.mojo` imports every name here, so
-# `from physical_plan.physical_plan import SortSinkData` still resolves. These
-# structs are INERT data, like the rest of the IR (see `physical_plan.mojo`).
+# The `*SinkData` structs of the PhysicalPlan IR (aggregation, sort, top-n,
+# partition-by, partition top-n, as-of join, hash build and sort-merge-join
+# build) and `is_explicit_nulls_first_request`, moved out of `physical_plan`
+# unchanged so that file stays under 1000 lines. `physical_plan` imports every
+# name here, so `from physical_plan.physical_plan import AggSinkData` still
+# resolves; `PHYSICAL_PLAN_IR_VERSION` and its bump policy cover these structs
+# as before. Inert data, like the rest of the IR.
 # =============================================================================
 
-from plan_ir.logical_plan import ExprArray, AggExprArray, AsofTolerance
-from plan_expr.partition_expr import PartitionExpr
+from arrow.schema import RecordBatch, Schema
 from plan_expr.null_order_policy import derived_nulls_first
-from arrow.schema import RecordBatch, Schema, Field
-
-
+from plan_expr.partition_expr import PartitionExpr
+from plan_ir.logical_plan import ExprArray, AggExprArray, AsofTolerance
 
 # =============================================================================
 # AggSinkData -- configuration for aggregation sink

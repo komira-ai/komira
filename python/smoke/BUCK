@@ -28,7 +28,8 @@ load("@komira//tools/build/platforms:defs.bzl", "DARWIN_ARM64", "LINUX_X86_64")
 #                  (refused after the last attempt);
 #   install_unit   the install step: the exact commands for TestPyPI (requirements from PyPI first, then
 #                  komira alone with --no-deps) and for PyPI, each failing step named with its command, status
-#                  and stderr, only the komira install tried again, `pip check` and the installed version held,
+#                  and stderr, only the komira install tried again, `pip check` and the installed version held, `pip freeze`
+#                  held to komira alone and a `modular` package refused (also when the probe or freeze fails),
 #                  the example's output held to the expected file with the version and the ABI version put in,
 #                  a malformed ABI table or a work directory that is not empty refused before any command;
 #   cli_unit       the command line: exit 0, 1 and 2, the output file appended to (`present` appends one line,

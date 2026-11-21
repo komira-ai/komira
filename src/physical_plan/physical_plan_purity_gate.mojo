@@ -15,7 +15,7 @@
 #
 #     CutResult.segments : List[SegmentDescPod]                 segment_cutter.mojo
 #       -> SegmentDescPod.ops : Slab[MorselOp]                  physical_plan.mojo
-#          (and .source_spec : SourceSpecPod                    source_spec.mojo)
+#          (and .source_spec : SourceSpecPod)
 #       -> MorselOp.filter_predicate / .project_exprs / .probe_residual
 #          (and SourceSpecPod.parquet_filter)     : Optional[Expr] / ExprArray
 #       -> Expr._corr_subq : Optional[OwnedPointer[CorrelatedSubqueryData]]
@@ -421,7 +421,7 @@ def assert_physical_plan_carries_no_logical_plan(
       * `ops[i].project_exprs`         — OP_PROJECT (an ExprArray, all of it)
       * `ops[i].probe_residual`        — OP_JOIN_PROBE's non-equi residual
     These are EVERY `Expr`-typed field reachable from `SegmentDescPod`; a
-    field added to `physical_plan.mojo` or `source_spec.mojo` must be added here.
+    field added to `physical_plan.mojo` must be added here.
     """
     if len(segments) == 0:
         raise Error(

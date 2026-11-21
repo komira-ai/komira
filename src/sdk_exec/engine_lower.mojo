@@ -71,7 +71,7 @@ def _add_scan_facts(
         else:
             add_parquet_files_scan(inputs, ctx.footers, ps)
         return
-    # An in-memory scan: no facts here; the cutter serves it.
+    # An in-memory or CSV scan: no facts here; the cutter serves both.
     inputs.add_scan()
 
 

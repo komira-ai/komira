@@ -16,6 +16,7 @@ from physical_plan.physical_plan import (
     SOURCE_BATCH,
     SOURCE_SINK_OUTPUT,
     SOURCE_CONCAT,
+    SOURCE_CSV,
     OP_FILTER,
     OP_PROJECT,
     OP_LIMIT,
@@ -40,6 +41,8 @@ def _source_name(kind: UInt8) -> String:
         return "SOURCE_SINK_OUTPUT"
     if kind == SOURCE_CONCAT:
         return "SOURCE_CONCAT"
+    if kind == SOURCE_CSV:
+        return "SOURCE_CSV"
     return "SOURCE_" + String(Int(kind))
 
 
@@ -122,6 +125,18 @@ def _segment_text(seg: SegmentDescPod) -> String:
             out += " filter=" + String(s.parquet_filter.value())
     elif seg.source_kind == SOURCE_BATCH:
         out += " batch=" + String(seg.source_spec.batch_handle_id)
+    elif seg.source_kind == SOURCE_CSV:
+        ref s = seg.source_spec
+        out += " path=" + s.csv_spec.path
+        out += " delimiter=" + String(Int(s.csv_spec.delimiter))
+        out += " header=" + String(s.csv_spec.has_header)
+        out += " quote_style=" + String(s.csv_spec.quote_style_tag)
+        out += " columns=["
+        for i in range(len(s.csv_spec.column_names)):
+            if i > 0:
+                out += ", "
+            out += s.csv_spec.column_names[i] + ":" + String(s.csv_spec.column_types[i])
+        out += "]"
     else:
         out += " from="
         for i in range(len(seg.source_spec.dep_seg_ids)):
