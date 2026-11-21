@@ -870,6 +870,7 @@ test "an edit of the real pypi.yml that moves the macOS build off the farm's con
     try expectRefusedPypi(ar, try inJob(ar, text, "build-macos-arm64", "    environment: build\n", ""), "not in the environment build");
     try expectRefusedPypi(ar, try inJob(ar, text, "build-macos-arm64", "    if: github.ref == 'refs/heads/main'\n", "    if: github.ref == 'refs/heads/main' && inputs.flavour == 'bundled'\n"), "does not run on main alone");
     try expectRefusedPypi(ar, try inJob(ar, text, "build-macos-arm64", "    if: github.ref == 'refs/heads/main'\n", "    if: always()\n"), "does not run on main alone");
+    try expectRefusedPypi(ar, try inJob(ar, text, "build-macos-arm64", "    if: github.ref == 'refs/heads/main'\n", "    if: github.ref == 'refs/heads/main' && (inputs.flavour || 'bundled') == 'bundled'\n"), "does not run on main alone");
     try expectRefusedPypi(ar, try inJob(ar, text, "result-macos-arm64", "        if: needs.build-macos-arm64.result != 'success'\n", "        if: inputs.flavour == 'bundled' && needs.build-macos-arm64.result != 'success'\n"), "does not fail a run whose macOS build did not succeed");
     try expectRefusedPypi(ar, try inJob(ar, text, "pypi-macos-arm64", "    environment: pypi\n", "    environment: pypi\n    env:\n      FLAVOUR: ${{ inputs.flavour }}\n"), "reads a run input");
     // the farm connection: the macOS worker set and hosts, batch priority, tls as every caller passes it
