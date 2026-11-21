@@ -15,7 +15,10 @@ python_binding_test(
     src = "hello_test.py",
     libs = [],
     deps = ["komira//third_party/python:pyarrow"],
-    expect_error = "FileNotFoundError: the lib dir has no plain.so: ",
+    expect_error = select({
+        "prelude//os/constraints:macos": "FileNotFoundError: the lib dir has no plain.dylib: ",
+        "DEFAULT": "FileNotFoundError: the lib dir has no plain.so: ",
+    }),
 )
 
 # A wrong expectation of the library's answer: the call is checked.
