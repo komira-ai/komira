@@ -155,8 +155,27 @@ Mojo library calls) and the owners whose C its own archives call
    loaded"). The linked README programs cannot be read for this: `mojo
    build` strips their symbol tables.
 
+`native_so` reads Mach-O as well as ELF, by each file's magic: a `.dylib`,
+Mach-O objects, and BSD-layout archives of them (`#1/<n>` long names, a
+`__.SYMDEF` symbol table member), in
+[`native_macho.zig`](native_macho.zig). Only thin arm64 is read. A C name
+loses the `_` Mach-O prepends, an owner is named by its install name, and
+`native_so exports --format macho` writes the exported symbols list ld64
+takes in place of the version script (check 1 reads it back). Checks 4 to 7
+hold a Mach-O library to the same properties through its load commands; no
+rule links one yet:
+
+| check | fails when (Mach-O) |
+|---|---|
+| 4 | the install name (`LC_ID_DYLIB`) differs; a loaded dylib is neither `/usr/lib/libSystem.B.dylib`, `/usr/lib/libc++.1.dylib` nor a declared owner; a declared owner is not loaded; a dylib is loaded by a command other than `LC_LOAD_DYLIB` (a re-export would pass the loaded library's API on as this one's); libSystem is not loaded though the library has a strong undefined symbol outside `komira_`; `LC_RPATH` is not exactly `@loader_path` when an owner is declared, or present when none is |
+| 5 | no `LC_BUILD_VERSION` (or `LC_VERSION_MIN_MACOSX`), a platform other than macOS, or a minimum macOS version above the floor (the row's `os_floor` version, `11.0`) |
+| 6 | `MH_TWOLEVEL` is clear or `MH_FORCE_FLAT` set (a flat namespace), or an exported definition is weak: ld64 has no `-Bsymbolic`, and these are the ways a name the library defines could bind to another image's copy |
+| 7 | any undefined symbol, `komira_` included, is bound to flat lookup, the main executable or the library itself; a strong undefined symbol is neither `komira_` nor bound by its two-level ordinal to libSystem or libc++; or the weak undefined symbols differ from `weak_undefined` |
+
 `[dynsym]` is `native_so dynsym`: the dynamic section, the versions needed
-and every dynamic symbol with its version. The unit tests
+and every dynamic symbol with its version (for a Mach-O library: its install
+name, loaded dylibs, `LC_RPATH`, header flags, minimum OS version and
+symbols, each undefined one with the dylib it binds to). The unit tests
 ([`native_so_test.zig`](native_so_test.zig), `:native_so_unit`, which
 `:native_so` waits for) show each check green on a library shaped as
 crypto's is and red on its defect;
@@ -164,6 +183,10 @@ crypto's is and red on its defect;
 byte by byte, with every dynamic tag and version section the reader keeps
 (several NEEDED and run path entries among them), and checks what the
 reader reads from it.
+[`native_macho_test.zig`](native_macho_test.zig) does the same for Mach-O: a
+dylib, an object and a BSD archive built byte by byte, every malformed input
+refused with its reason, and each check green on an owner-shaped `.dylib`
+and red on its defect.
 
 Each owner of the design's table has its `<library>_native` target in its
 own BUCK file: crypto, http_core (`NEEDED` crypto's),
@@ -180,3 +203,11 @@ file at lib/ with a `lib_files` row
 ([packaging/conda/README.md](../../../packaging/conda/README.md), "A library's
 native code in its package"). Those two libraries are built and checked, but
 no package ships them yet.
+
+## so_report
+
+`so_report` (`so_report.zig`, tests in `so_report_test.zig`) reads a library's ELF
+file and the libraries it needs and writes a markdown table: size, SONAME, RUNPATH, RPATH
+and `DT_NEEDED` of each, the highest `GLIBC_`, `GLIBCXX_` and `CXXABI_` version each
+requires, and which native owners the target reaches. It is built behind its unit tests and
+run by `komira//tools/build/package/libkomira:libkomira_elf_report`.
