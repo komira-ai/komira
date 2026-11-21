@@ -17,6 +17,7 @@ this page says about the pins.
 | target | what |
 |---|---|
 | `:cpython` | CPython 3.13.16, python-build-standalone release 20261003, `x86_64-unknown-linux-gnu-install_only_stripped` |
+| `:cpython_macos` | CPython 3.13.16, the same release, `aarch64-apple-darwin-install_only_stripped`, for a target configured for macOS ([macOS arm64](#macos-arm64)) |
 | `:native_libs` | `libgcc_s.so.1`, `libstdc++.so.6` (GCC 15.3) and `libz.so.1` (zlib 1.3.1), unpacked from the conda-forge packages the [platform table](../../tools/build/platforms/table.bzl) pins for the toolchains; `py_test` loads them before a script runs |
 | `:<distribution>` | one wheel installed, e.g. `:pyarrow`; its `deps` are the distributions it requires on linux |
 | `:cpython314`, `:cpython314t` | CPython 3.14.8 from the same release, with the GIL (`install_only_stripped`) and free-threaded (`freethreaded-install_only_stripped`, interpreter `bin/python3.14t`), for measurements of Python user-defined functions ([CPython 3.14](#cpython-314)) |
@@ -51,6 +52,24 @@ so a zone is never read from the worker.
 Not in the closure yet, each for the change that brings its consumer: the
 Google Cloud Storage testbench, kafka-python and opensearch-py (service
 drivers), and anything they require.
+
+## macOS arm64
+
+`PYTHON_MACOS` pins the macOS arm64 build of the same CPython, and
+`MACOS_WHEELS` the macOS file of every distribution of the closure that has a
+binary build: the same versions as the linux wheels, tagged
+`macosx_<floor>_arm64` (`universal2` for grpcio and protobuf, which publish no
+arm64-only wheel), floor 12.0 at most, so every wheel loads on the toolchain's
+macOS floor or the one above it that the tag names. The pure-Python wheels
+(polars, python-dateutil, six, typing-extensions, tzdata) are the same files.
+`:<distribution>` is the one target for both platforms: configured for macOS it
+installs the macOS file with `:cpython_macos`, otherwise the linux file with
+`:cpython`, so a `py_test`'s `deps` do not change. The macOS interpreter loads
+only the operating system's libraries, so there is no `native_libs` for it.
+Only the 3.13 closure has a macOS build: the 3.14 closures and the protobuf
+edges stay linux-only. Nothing here is built in a pull request; the macOS
+harness is built by the release workflow
+([tools/build/python](../../tools/build/python/README.md#macos-arm64)).
 
 ## protobuf
 
