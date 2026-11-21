@@ -18,7 +18,12 @@ and no environment variable and touches no global, so equal arguments give a
   become operators). A filter, a projection and a limit fuse into it. An
   aggregation or a sort ends it in a sink and opens a pipeline that reads that
   segment's output over an `E3` edge. The root is a `SINK_COLLECT` segment
-  unless the top node is a breaker, which is then the result.
+  unless the top node is a breaker, which is then the result. `cut_walk` is
+  only the dispatch on the node's tag; each arm is its own module (`cut_scan`,
+  `cut_filter`, `cut_project`, `cut_limit`, `cut_aggregate`, `cut_sort`), and
+  `cut_state` holds what they share: the open pipeline, the cutter's segments
+  and ParamTable, and the close and reopen of a breaker. A new node kind is a
+  new arm module and one branch in `cut_walk`.
 - `sum_fuse`: SUM(CAST(e AS DECIMAL(38, 0))) over a signed integer `e`, the
   SQL integer sum, is put into a sink's data as SUM(e); the node's declared
   output stays DECIMAL(38, 0) and the sink writes its 128-bit total there.
