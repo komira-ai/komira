@@ -1,7 +1,10 @@
 //! komira_wheel libs: a finished wheel read from its bytes alone, and refused
 //! unless the libraries in it load the way an install of it would load them:
-//! from the wheel, through each library's own run path, with one copy of the
-//! Mojo runtime and nothing else beside it. It reads the wheel, the few names
+//! from the wheel, through each library's own run path, with the Mojo runtime
+//! as its flavour gives it and nothing else beside it. A wheel is bundled
+//! (it carries the runtime) or, with `Policy.requirement` set, external (it
+//! carries none of it and requires the distribution that installs it). It
+//! reads the wheel, the few names
 //! of `Policy` and the toolchain's copies of the runtime libraries, and no
 //! other input of the rule that wrote the wheel. The zip is read as zip.zig
 //! reads it (a zip that writer wrote: the build's wheel, or the same bytes as
@@ -15,22 +18,27 @@
 //!            top-level directory, so no `modular/` beside the package;
 //!   entry    the entry library (the one the package opens) is a member and an
 //!            ELF file;
-//!   runtime  each Mojo runtime library is in the wheel exactly once, with the
-//!            toolchain's bytes: a process holds one Mojo runtime;
+//!   runtime  bundled: each Mojo runtime library is in the wheel exactly once,
+//!            with the toolchain's bytes (a process holds one Mojo runtime);
+//!            external: no member has a runtime library's file name or bytes;
 //!   runpath  every run path entry of a library the entry loads is `$ORIGIN`
 //!            or under it, and stays inside the import package once `$ORIGIN`
 //!            is the library's own directory;
 //!   needed   every DT_NEEDED of a library the entry loads is a manylinux
 //!            system library (policy.zig's list), a library already loaded,
 //!            or a member at `<run path entry>/<name>` for one of that
-//!            library's run path entries, tried in order; a name holding `/`
-//!            (opened as a path, not looked up) is refused;
+//!            library's run path entries, tried in order, or (external) a
+//!            runtime library, which the requirement installs; a name holding
+//!            `/` (opened as a path, not looked up) is refused;
 //!   stray    every ELF member is loaded from the entry: a library nothing
 //!            loads is refused;
-//!   licence  each licence file of the runtime is a non-empty member of
-//!            `.dist-info/licenses/` and a `License-File` of METADATA;
-//!   requires no Requires-Dist of METADATA names a distribution of the runtime
-//!            (a second copy of it).
+//!   licence  bundled: each licence file of the runtime is a non-empty member
+//!            of `.dist-info/licenses/` and a `License-File` of METADATA;
+//!            external: none of them is a member (it carries nothing of the
+//!            runtime's);
+//!   requires bundled: no Requires-Dist of METADATA names a distribution of
+//!            the runtime (a second copy of it); external: the requirement is
+//!            a Requires-Dist, and no other line names such a distribution.
 //!
 //! The walk is the loader's (ld.so(8)): breadth first from the entry, each
 //! DT_NEEDED looked up among the libraries already loaded by file name (the
@@ -59,13 +67,17 @@ pub const Policy = struct {
     /// (`komira/_lib/libkomira.so`). Its first component is the import
     /// package.
     entry: []const u8,
-    /// The Mojo runtime libraries, each carried once.
+    /// The Mojo runtime libraries: carried once each by a bundled wheel, never
+    /// by an external one.
     runtime: []const Runtime,
     /// The names of the runtime's licence files under `.dist-info/licenses/`.
     runtime_licenses: []const []const u8,
-    /// Distributions that carry the runtime (normalised names): none may be
-    /// required.
+    /// Distributions that carry the runtime (normalised names): a bundled
+    /// wheel requires none of them.
     runtime_dists: []const []const u8,
+    /// The external flavour: the Requires-Dist line that installs the
+    /// runtime (`mojo-compiler==1.0.0`). Null for a bundled wheel.
+    requirement: ?[]const u8 = null,
 };
 
 fn has(list: []const []const u8, s: []const u8) bool {
@@ -171,22 +183,33 @@ pub fn check(alloc: Alloc, d: *Diag, p: Policy, members: []const policy.Member) 
     const entry = find(members, p.entry) orelse return refuse(d, alloc, "entry: the wheel has no {s}", .{p.entry});
     if (!elf.isElf(entry.data)) return refuse(d, alloc, "entry: {s} is not an ELF file", .{p.entry});
 
-    for (p.runtime) |r| {
-        var count: usize = 0;
-        var only: []const u8 = "";
-        for (members) |m| {
-            if (!std.mem.eql(u8, diag.baseName(m.name), r.name)) continue;
-            count += 1;
-            only = m.data;
+    if (p.requirement) |req| {
+        for (p.runtime) |r| {
+            for (members) |m| {
+                if (std.mem.eql(u8, diag.baseName(m.name), r.name))
+                    return refuse(d, alloc, "runtime: the external wheel carries {s}, a Mojo runtime library it leaves to {s}", .{ m.name, req });
+                if (std.mem.eql(u8, m.data, r.data))
+                    return refuse(d, alloc, "runtime: the external wheel carries {s}, the bytes of {s}, a Mojo runtime library it leaves to {s}", .{ m.name, r.name, req });
+            }
         }
-        if (count == 0) return refuse(d, alloc, "runtime: the wheel carries no {s}", .{r.name});
-        if (count > 1) return refuse(d, alloc, "runtime: the wheel carries {s} {d} times ({s}), and a process holds one Mojo runtime", .{ r.name, count, try wherever(alloc, members, r.name) });
-        if (!std.mem.eql(u8, only, r.data)) {
-            var got: [32]u8 = undefined;
-            var want: [32]u8 = undefined;
-            std.crypto.hash.sha2.Sha256.hash(only, &got, .{});
-            std.crypto.hash.sha2.Sha256.hash(r.data, &want, .{});
-            return refuse(d, alloc, "runtime: {s} is not the toolchain's (sha256 {s}, the toolchain's {s})", .{ try wherever(alloc, members, r.name), &std.fmt.bytesToHex(got, .lower), &std.fmt.bytesToHex(want, .lower) });
+    } else {
+        for (p.runtime) |r| {
+            var count: usize = 0;
+            var only: []const u8 = "";
+            for (members) |m| {
+                if (!std.mem.eql(u8, diag.baseName(m.name), r.name)) continue;
+                count += 1;
+                only = m.data;
+            }
+            if (count == 0) return refuse(d, alloc, "runtime: the wheel carries no {s}", .{r.name});
+            if (count > 1) return refuse(d, alloc, "runtime: the wheel carries {s} {d} times ({s}), and a process holds one Mojo runtime", .{ r.name, count, try wherever(alloc, members, r.name) });
+            if (!std.mem.eql(u8, only, r.data)) {
+                var got: [32]u8 = undefined;
+                var want: [32]u8 = undefined;
+                std.crypto.hash.sha2.Sha256.hash(only, &got, .{});
+                std.crypto.hash.sha2.Sha256.hash(r.data, &want, .{});
+                return refuse(d, alloc, "runtime: {s} is not the toolchain's (sha256 {s}, the toolchain's {s})", .{ try wherever(alloc, members, r.name), &std.fmt.bytesToHex(got, .lower), &std.fmt.bytesToHex(want, .lower) });
+            }
         }
     }
 
@@ -211,6 +234,9 @@ pub fn check(alloc: Alloc, d: *Diag, p: Policy, members: []const policy.Member) 
             if (std.mem.indexOfScalar(u8, n, '/') != null)
                 return refuse(d, alloc, "needed: {s} needs `{s}`, a path the loader opens as it is, not from the wheel", .{ path, n });
             if (has(&policy.system_libs, n)) continue;
+            if (p.requirement != null) {
+                for (p.runtime) |r| if (std.mem.eql(u8, r.name, n)) continue :next;
+            }
             for (loaded.items) |l| if (std.mem.eql(u8, diag.baseName(l), n)) continue :next;
             for (dirs.items) |dr| {
                 const cand = try std.fmt.allocPrint(alloc, "{s}/{s}", .{ dr, n });
@@ -239,37 +265,47 @@ pub fn check(alloc: Alloc, d: *Diag, p: Policy, members: []const policy.Member) 
     const listed = try check_mod.headerValues(alloc, metadata.data, "License-File");
     for (p.runtime_licenses) |name| {
         const at = try std.fmt.allocPrint(alloc, "{s}/licenses/{s}", .{ info, name });
+        if (p.requirement != null) {
+            if (find(members, at) != null) return refuse(d, alloc, "licence: the external wheel carries {s}, a licence of the runtime it does not carry", .{at});
+            continue;
+        }
         const m = find(members, at) orelse return refuse(d, alloc, "licence: the wheel carries the Mojo runtime and no {s}", .{at});
         if (m.data.len == 0) return refuse(d, alloc, "licence: {s} is empty", .{at});
         if (!has(listed, name)) return refuse(d, alloc, "licence: METADATA has no `License-File: {s}`", .{name});
     }
 
-    for (try check_mod.headerValues(alloc, metadata.data, "Requires-Dist")) |req| {
+    const reqs = try check_mod.headerValues(alloc, metadata.data, "Requires-Dist");
+    for (reqs) |req| {
         var end: usize = 0;
         while (end < req.len and (std.ascii.isAlphanumeric(req[end]) or req[end] == '-' or req[end] == '_' or req[end] == '.')) end += 1;
         const name = try normalise(alloc, req[0..end]);
-        if (has(p.runtime_dists, name))
+        if (!has(p.runtime_dists, name)) continue;
+        const want = p.requirement orelse
             return refuse(d, alloc, "requires: METADATA requires {s} (`Requires-Dist: {s}`), which carries a second Mojo runtime", .{ name, req });
+        if (!std.mem.eql(u8, req, want))
+            return refuse(d, alloc, "requires: METADATA requires {s} (`Requires-Dist: {s}`), and the external wheel's runtime is {s}", .{ name, req, want });
+    }
+    if (p.requirement) |want| {
+        if (!has(reqs, want))
+            return refuse(d, alloc, "requires: METADATA does not require {s}, which installs the Mojo runtime the external wheel loads", .{want});
     }
     return loaded.toOwnedSlice(alloc);
 }
 
-pub const flags = [_][]const u8{ "--wheel", "--entry", "--runtime-lib", "--runtime-license", "--runtime-dist", "--expect-refusal", "--out" };
+pub const flags = [_][]const u8{ "--wheel", "--entry", "--runtime-lib", "--runtime-license", "--runtime-dist", "--runtime-requirement", "--expect-refusal", "--out" };
 
 /// What `komira_wheel libs` writes: the marker, and the path it goes to.
 pub const Result = struct { out: []const u8, marker: []const u8 };
 
 /// `komira_wheel libs <argv>`: the flags (main.zig's usage) parsed, the files
 /// they name read with `files.read(alloc, d, path)`, the wheel checked; the
-/// marker lists the libraries the entry loads, one member path a line. With
+/// marker lists the libraries the entry loads, one member path a line.
+/// `--runtime-requirement` makes the wheel external (`Policy.requirement`). With
 /// `--expect-refusal TEXT` the run is a negative case: it ends ok, with the
 /// marker `refused: TEXT`, only if the check refuses the wheel with exactly
 /// TEXT, and is refused itself if the wheel passes or is refused otherwise.
 pub fn command(alloc: Alloc, d: *Diag, argv: []const []const u8, files: anytype) Refused!Result {
-    const a = try cli.parse(alloc, d, argv, &flags);
-    for (a.pairs) |kv| {
-        if (!has(&flags, kv[0])) return refuse(d, alloc, "unknown argument {s}", .{kv[0]});
-    }
+    const a = try cli.parseOnly(alloc, d, argv, &flags);
     var runtime = std.ArrayList(Runtime).empty;
     for (try a.all(alloc, "--runtime-lib")) |r| {
         const kv = try cli.named(alloc, d, r, "--runtime-lib");
@@ -281,6 +317,7 @@ pub fn command(alloc: Alloc, d: *Diag, argv: []const []const u8, files: anytype)
         .runtime = runtime.items,
         .runtime_licenses = try a.all(alloc, "--runtime-license"),
         .runtime_dists = try a.all(alloc, "--runtime-dist"),
+        .requirement = try a.opt(alloc, d, "--runtime-requirement"),
     };
     const out = try a.one(alloc, d, "--out");
     const expect = try a.opt(alloc, d, "--expect-refusal");

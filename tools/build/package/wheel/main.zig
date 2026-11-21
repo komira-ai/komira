@@ -8,27 +8,32 @@
 //!       [--twin <wheel>] --out <marker>
 //!   komira_wheel libs --wheel <wheel> --entry <member path>
 //!       --runtime-lib <name>=<file>... [--runtime-license <name>]...
-//!       [--runtime-dist <distribution>]... [--expect-refusal <text>]
-//!       --out <marker>
+//!       [--runtime-dist <distribution>]... [--runtime-requirement <req>]
+//!       [--expect-refusal <text>] --out <marker>
+//!   komira_wheel runtime-record --requirement <r> --library <file>...
+//!       --out <record>
 //! cli.zig lists the flags of `write` and `check`. `write` refuses to write a
 //! wheel policy.zig refuses; `check` writes `ok` to --out only if check.zig
-//! refuses nothing. `libs` reads the wheel alone (libs.zig): --out gets the
-//! libraries the entry loads, in load order, one member path a line, only if
-//! libs.zig refuses nothing (with --expect-refusal, `refused: <text>` only if
-//! it refuses the wheel with exactly that text); each `--runtime-lib` file is
-//! the toolchain's copy of that Mojo runtime library.
+//! refuses nothing; `runtime-record` writes the record of the libraries'
+//! build ids (record.zig), each named by its file name. `libs` reads the wheel
+//! alone (libs.zig): --out gets the libraries the entry loads, in load order,
+//! one member path a line, only if libs.zig refuses nothing (with
+//! --expect-refusal, `refused: <text>` only if it refuses the wheel with
+//! exactly that text); each `--runtime-lib` file is the toolchain's copy of
+//! that Mojo runtime library.
 //!
 //! A static executable: no shell, no PATH, no network, no clock. Exit status 2
 //! on any refusal, with its reason. This file only forwards; the sections are
 //! cli.zig (flags and files), stamp.zig (version), tag.zig, wheel.zig (the
 //! wheel), policy.zig and elf.zig (what its libraries need), zip.zig,
-//! check.zig and libs.zig.
+//! check.zig, record.zig and libs.zig.
 
 const std = @import("std");
 const diag = @import("diag.zig");
 const cli = @import("cli.zig");
 const check = @import("check.zig");
 const libs = @import("libs.zig");
+const record = @import("record.zig");
 const wheel = @import("wheel.zig");
 const zip = @import("zip.zig");
 const Alloc = std.mem.Allocator;
@@ -72,6 +77,11 @@ fn cmdLibs(alloc: Alloc, d: *diag.Diag, argv: []const []const u8) diag.Refused!v
     try writeOut(alloc, d, r.out, r.marker);
 }
 
+fn cmdRecord(alloc: Alloc, d: *diag.Diag, argv: []const []const u8) diag.Refused!void {
+    const r = try record.command(alloc, d, argv);
+    try writeOut(alloc, d, r.out, r.text);
+}
+
 pub fn main() !void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
@@ -85,10 +95,12 @@ pub fn main() !void {
         cmdWrite(alloc, &d, rest.items)
     else if (std.mem.eql(u8, cmd, "check"))
         cmdCheck(alloc, &d, rest.items)
+    else if (std.mem.eql(u8, cmd, "runtime-record"))
+        cmdRecord(alloc, &d, rest.items)
     else if (std.mem.eql(u8, cmd, "libs"))
         cmdLibs(alloc, &d, rest.items)
     else
-        diag.refuse(&d, alloc, "usage: komira_wheel write|check|libs --flag value ...", .{});
+        diag.refuse(&d, alloc, "usage: komira_wheel write|check|runtime-record|libs --flag value ...", .{});
     result catch |err| {
         switch (err) {
             error.Refused => std.debug.print("komira_wheel: {s}\n", .{d.msg}),

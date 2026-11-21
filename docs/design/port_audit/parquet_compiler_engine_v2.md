@@ -56,7 +56,7 @@ Part of the [port audit](../port_audit.md). Each row is one non-test source file
 
 ### Extended aggregates (CORR, MEDIAN and kin) in pipeline_exec
 - Earlier files: komira_parquet/materialize_parquet_extended_agg_sink.mojo
-- Missing: pipeline_exec ungrouped and grouped sinks serve SUM, COUNT, COUNT(*), MIN, MAX, AVG only. Closest code is src/op_agg_slab (SlabHashAggSinkStructCorr) and src/op_agg_distinct, not wired to lowering. The earlier LARGEST_K itself is a benchmark shape and is dropped; the DuckDB-equal functions (corr, median and similar) are what is needed.
+- Missing: pipeline_exec ungrouped and grouped sinks serve SUM, COUNT, COUNT(*), MIN, MAX, AVG and COUNT(DISTINCT) only. Closest code is src/op_agg_slab (SlabHashAggSinkStructCorr), not wired to lowering. The earlier LARGEST_K itself is a benchmark shape and is dropped; the DuckDB-equal functions (corr, median and similar) are what is needed.
 - Why: SQL function breadth equal to DuckDB for data-analysis queries.
 - Task: pysdk-engine-extended-aggregates
 

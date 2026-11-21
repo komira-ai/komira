@@ -13,7 +13,10 @@
 //! directory beside the package, two or no dist-info directories, a missing
 //! entry, a missing or empty runtime licence or one METADATA does not name,
 //! and a Requires-Dist of the runtime's own distribution; and the command
-//! line's flags.
+//! line's flags. The external flavour's layout (libkomira and its owner, the
+//! runtime record, no runtime library and no licence of the runtime's, and
+//! the requirement) passes; a runtime library in it by name or by bytes, a
+//! runtime licence, no requirement and another requirement are refused.
 
 const std = @import("std");
 const diag = @import("diag.zig");
@@ -521,5 +524,103 @@ test "an expected refusal ends ok only on exactly that refusal" {
     try t.expectEqualStrings(
         "--expect-refusal is given 2 times",
         try commandRefusal(a, &(good_argv ++ [_][]const u8{ "--expect-refusal", why, "--expect-refusal", why }), good),
+    );
+}
+
+const requirement = "mojo-compiler==1.0.0";
+
+/// The external flavour: no runtime library, no licence of the runtime's,
+/// the runtime record, and the requirement that installs the runtime.
+fn externalMembers(a: Alloc) !std.ArrayList(policy.Member) {
+    var ms = try goodMembers(a);
+    drop(&ms, kgen);
+    drop(&ms, asyncrt);
+    drop(&ms, msupport);
+    drop(&ms, info ++ "/licenses/MODULAR_LICENSE");
+    drop(&ms, info ++ "/licenses/MODULAR_THIRD_PARTY_NOTICES");
+    try ms.append(a, .{ .name = "komira/_lib/mojo_runtime.tsv", .data = "requirement\tmojo-compiler==1.0.0\n" });
+    set(&ms, info ++ "/METADATA", "Metadata-Version: 2.4\nName: komira\nLicense-File: LICENSE\nRequires-Dist: " ++ requirement ++ "\n\n# komira\n");
+    return ms;
+}
+
+fn externalPolicy(a: Alloc) !libs.Policy {
+    var p = try goodPolicy(a);
+    p.requirement = requirement;
+    return p;
+}
+
+test "the external flavour passes, the runtime left to its requirement" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var d = diag.Diag{};
+    const loaded = try libs.check(a, &d, try externalPolicy(a), (try externalMembers(a)).items);
+    try t.expectEqual(@as(usize, 2), loaded.len);
+    try t.expectEqualStrings(entry, loaded[0]);
+    try t.expectEqualStrings(owner, loaded[1]);
+}
+
+test "an external wheel carrying a runtime library, by name or by bytes, is refused" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var named = try externalMembers(a);
+    try named.append(a, .{ .name = kgen, .data = try Lib.kgenLib(a) });
+    try t.expectEqualStrings(
+        "runtime: the external wheel carries komira/_lib/lib/libKGENCompilerRTShared.so, a Mojo runtime library it leaves to mojo-compiler==1.0.0",
+        try refusal(a, try externalPolicy(a), named.items),
+    );
+    var renamed = try externalMembers(a);
+    try renamed.append(a, .{ .name = "komira/_lib/lib/libsupport_copy.so", .data = try Lib.msupportLib(a) });
+    try t.expectEqualStrings(
+        "runtime: the external wheel carries komira/_lib/lib/libsupport_copy.so, the bytes of libMSupportGlobals.so, a Mojo runtime library it leaves to mojo-compiler==1.0.0",
+        try refusal(a, try externalPolicy(a), renamed.items),
+    );
+}
+
+test "an external wheel carrying a licence of the runtime is refused" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var ms = try externalMembers(a);
+    try ms.append(a, .{ .name = info ++ "/licenses/MODULAR_LICENSE", .data = "Modular Community License Terms\n" });
+    try t.expectEqualStrings(
+        "licence: the external wheel carries komira-0.1.57.dist-info/licenses/MODULAR_LICENSE, a licence of the runtime it does not carry",
+        try refusal(a, try externalPolicy(a), ms.items),
+    );
+}
+
+test "an external wheel without its requirement, or with another, is refused" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var none = try externalMembers(a);
+    set(&none, info ++ "/METADATA", "Metadata-Version: 2.4\nRequires-Dist: pyarrow>=14\n\nRequires-Dist: " ++ requirement ++ "\n");
+    try t.expectEqualStrings(
+        "requires: METADATA does not require mojo-compiler==1.0.0, which installs the Mojo runtime the external wheel loads",
+        try refusal(a, try externalPolicy(a), none.items),
+    );
+    var other = try externalMembers(a);
+    set(&other, info ++ "/METADATA", "Metadata-Version: 2.4\nRequires-Dist: mojo-compiler==1.2.0\nRequires-Dist: " ++ requirement ++ "\n");
+    try t.expectEqualStrings(
+        "requires: METADATA requires mojo-compiler (`Requires-Dist: mojo-compiler==1.2.0`), and the external wheel's runtime is mojo-compiler==1.0.0",
+        try refusal(a, try externalPolicy(a), other.items),
+    );
+}
+
+test "the command reads --runtime-requirement as the external flavour" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const good = try goodFiles(a);
+    const ext = try a.dupe([2][]const u8, good.files);
+    ext[0] = .{ "w.whl", try wheelBytes(a, (try externalMembers(a)).items) };
+    var d = diag.Diag{};
+    const r = try libs.command(a, &d, &(good_argv ++ [_][]const u8{ "--runtime-requirement", requirement }), Mem{ .files = ext });
+    try t.expectEqualStrings(entry ++ "\n" ++ owner ++ "\n", r.marker);
+    // The bundled wheel, read as external, carries the runtime.
+    try t.expectEqualStrings(
+        "runtime: the external wheel carries komira/_lib/lib/libAsyncRTRuntimeGlobals.so, a Mojo runtime library it leaves to mojo-compiler==1.0.0",
+        try commandRefusal(a, &(good_argv ++ [_][]const u8{ "--runtime-requirement", requirement }), good),
     );
 }
