@@ -2,6 +2,9 @@
 //! (`<json base><name>/<version>/json`, whose `urls` list the files of the release with their `size`,
 //! `digests.sha256`, `url` and `yanked`).
 //!
+//! `hasFile` is what `present` asks before anything is built: does the release list a file of exactly that name,
+//! whatever its bytes (the release of the same version may hold another platform's wheel only).
+//!
 //! `lookup` is what `state` asks before an upload: is our wheel's file on the index, and with the same bytes.
 //! One GET; before an upload there is nothing to wait for. `verify` is what the smoke asks after one: the
 //! index lists our file with our sha256 and size, serves it from its file host, and the bytes it serves are the
@@ -35,9 +38,9 @@ const Url = struct {
 };
 const Release = struct { urls: []const Url };
 
-/// The files of the release the wheel belongs to; null when the index has no such release (HTTP 404).
-fn releaseFiles(a: Allocator, why: *[]const u8, fetcher: rbf.Fetcher, idx: common.Index, wheel: meta.Wheel) Error!?[]const Url {
-    const url = try std.fmt.allocPrint(a, "{s}{s}/{s}/json", .{ idx.json_base, wheel.name, wheel.version });
+/// The files of release `version` of `name`; null when the index has no such release (HTTP 404).
+fn releaseFiles(a: Allocator, why: *[]const u8, fetcher: rbf.Fetcher, idx: common.Index, name: []const u8, version: []const u8) Error!?[]const Url {
+    const url = try std.fmt.allocPrint(a, "{s}{s}/{s}/json", .{ idx.json_base, name, version });
     switch (fetcher.get(a, url, max_json_bytes)) {
         .body => |body| {
             const release = std.json.parseFromSliceLeaky(Release, a, body, .{ .ignore_unknown_fields = true }) catch |e| switch (e) {
@@ -63,10 +66,17 @@ fn entryOf(urls: []const Url, file_name: []const u8) ?Url {
 
 /// Whether the index holds our file, and with our bytes.
 pub fn lookup(a: Allocator, why: *[]const u8, fetcher: rbf.Fetcher, idx: common.Index, wheel: meta.Wheel) Error!Found {
-    const urls = (try releaseFiles(a, why, fetcher, idx, wheel)) orelse return .{ .state = .absent };
+    const urls = (try releaseFiles(a, why, fetcher, idx, wheel.name, wheel.version)) orelse return .{ .state = .absent };
     const entry = entryOf(urls, wheel.file_name) orelse return .{ .state = .absent };
     const state: State = if (std.mem.eql(u8, entry.digests.sha256, &wheel.sha256)) .same else .differs;
     return .{ .state = state, .theirs = entry.digests.sha256 };
+}
+
+/// Whether release `file.version` of `file.name` lists a file named exactly `file_name`: no release, or a
+/// release with the files of another platform only, is false. The bytes are not looked at.
+pub fn hasFile(a: Allocator, why: *[]const u8, fetcher: rbf.Fetcher, idx: common.Index, file: meta.FileName, file_name: []const u8) Error!bool {
+    const urls = (try releaseFiles(a, why, fetcher, idx, file.name, file.version)) orelse return false;
+    return entryOf(urls, file_name) != null;
 }
 
 /// The one line of the GitHub log that says what `state` found and what the run does about it.
@@ -82,7 +92,7 @@ pub const Report = struct { sha256: [64]u8, size: usize };
 
 /// One attempt of `verify`.
 fn verifyOnce(a: Allocator, why: *[]const u8, fetcher: rbf.Fetcher, idx: common.Index, built: meta.Wheel) !void {
-    const urls = (try releaseFiles(a, why, fetcher, idx, built)) orelse
+    const urls = (try releaseFiles(a, why, fetcher, idx, built.name, built.version)) orelse
         return refuse(a, why, "{s} is not on {s} yet", .{ built.file_name, idx.name });
     const entry = entryOf(urls, built.file_name) orelse
         return refuse(a, why, "{s} is not on {s} yet", .{ built.file_name, idx.name });

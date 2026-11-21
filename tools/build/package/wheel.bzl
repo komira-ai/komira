@@ -11,6 +11,8 @@ Attributes:
     distribution        the name (`pip install <it>`), in normalised form
     summary, readme     METADATA's Summary, and its body (Markdown:
                         Description-Content-Type text/markdown)
+    readme_preface      a paragraph put before the readme in the body, with a
+                        blank line after it (unset: the readme alone)
     requires_python     Requires-Python
     requires_dist       Requires-Dist lines, in order
     classifiers         Classifier lines; a `License ::` one is refused beside
@@ -31,12 +33,19 @@ Attributes:
                         row's `os_floor` (the floor of what the repository
                         links): a wheel carrying a vendor's library that needs
                         a newer glibc names it (`glibc-2.35`); unset, the
-                        row's
+                        row's. For a macOS wheel it is the macOS the tag
+                        promises (`macos-11.0` is `macosx_11_0`), the most a
+                        Mach-O member's minimum macOS may be
     max_glibcxx, max_cxxabi
                         the highest GLIBCXX_ and CXXABI_ versions a library
-                        may need (unset: none may)
+                        may need (unset: none may); they bound ELF libraries
+                        only, a macOS wheel's Mach-O libraries have no such
+                        versions and the attributes stay unset
     external_needed     sonames a library may need that another package
-                        provides; none of them may be in the wheel
+                        provides; none of them may be in the wheel. For a
+                        macOS wheel, the file names of libraries a Mach-O
+                        library may load as `@rpath/<file>` from another
+                        package
 
 The VERSION is the stamp's (wheel/stamp.zig): `-c komira.package_stamp=<N>`
 with `-c komira.package_commit` and `-c komira.package_timestamp_ms` gives
@@ -48,6 +57,9 @@ Sub-targets:
     [default]        the wheel, copied only after [check] passed
     [check]          the marker of `komira_wheel check`: the wheel read back
                      (wheel/check.zig), and byte-equal to [twin]
+    [file_name]      one line, the wheel's file name
+                     (`<dist>-<version>-<tag>.whl`), written at analysis: no
+                     input of the wheel is built for it
     [twin]           the same wheel written by a second action, from the same
                      inputs staged at another path
     [release]        the wheel, copied only after [release_check] passed: what
@@ -111,6 +123,8 @@ def _flags(ctx, tag, files, readme, licenses):
         "--timestamp-ms",
         ctx.attrs.timestamp_ms,
     ]
+    if ctx.attrs.readme_preface != None:
+        out += ["--readme-preface", ctx.attrs.readme_preface]
     out += [["--requires-dist", r] for r in ctx.attrs.requires_dist]
     out += [["--classifier", c] for c in ctx.attrs.classifiers]
     out += [["--project-url", "{}={}".format(k, v)] for k, v in sorted(ctx.attrs.project_urls.items())]
@@ -205,11 +219,17 @@ def _wheel_file_impl(ctx):
 
     whl = gated_copy("out", checked)
     rel = gated_copy("release", release_checked)
+
+    # The file name alone, written at analysis: what an index lists the wheel
+    # as, known before anything is built (pypi.yml asks the index for it
+    # before building a wheel whose build is costly).
+    file_name = ctx.actions.write(ctx.label.name + ".file_name", name + "\n")
     return [DefaultInfo(
         default_output = whl,
         other_outputs = [rel] if ctx.attrs.check_release else [],
         sub_targets = {
             "check": [DefaultInfo(default_output = checked)],
+            "file_name": [DefaultInfo(default_output = file_name)],
             "release": [DefaultInfo(default_output = rel)],
             "release_check": [DefaultInfo(default_output = release_checked)],
             "twin": [DefaultInfo(default_output = twin.project(name))],
@@ -240,6 +260,7 @@ _wheel_file = rule(
         "platform": attrs.string(default = "linux-x86_64"),
         "project_urls": attrs.dict(attrs.string(), attrs.string(), default = {}),
         "readme": attrs.source(),
+        "readme_preface": attrs.option(attrs.string(), default = None),
         "requires_dist": attrs.list(attrs.string(), default = []),
         "requires_python": attrs.string(),
         "stamp": attrs.string(),
@@ -273,8 +294,23 @@ def _wheel_file_test_stamped_macro(**kwargs):
         **kwargs
     )
 
+def _wheel_file_at_stamp_macro(stamp, **kwargs):
+    # The test commit and commit time with the build number `stamp`, so one
+    # build holds wheels of several versions (an upgrade test's previous and
+    # current release). The stamp is a positive number without leading zeros,
+    # which the tool checks. Not a release: no -c komira.package_* reaches it.
+    _wheel_file(
+        stamp = stamp,
+        commit = TEST_COMMIT,
+        timestamp_ms = TEST_TIMESTAMP_MS,
+        check_release = True,
+        exec_compatible_with = LINUX_X86_64,
+        **kwargs
+    )
+
 wheel_file = declares_docs(_wheel_file_macro)
 wheel_file_test_stamped = declares_docs(_wheel_file_test_stamped_macro)
+wheel_file_at_stamp = declares_docs(_wheel_file_at_stamp_macro)
 
 def _wheel_tag_cases_impl(ctx):
     # Each row's tag, against the tag written out (not derived) in `cases`.

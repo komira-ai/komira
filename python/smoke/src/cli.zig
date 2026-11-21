@@ -2,12 +2,16 @@
 //!
 //!   pypi_smoke dist --wheel <file.whl> --out <dir> --github-output <file>
 //!   pypi_smoke state --index <testpypi|pypi> --dist <dir> --github-output <file>
+//!   pypi_smoke present --index <testpypi|pypi> --name-file <path> --github-output <file>
 //!   pypi_smoke verify --index <testpypi|pypi> --dist <dir> [--attempts <n>] [--delay <seconds>]
 //!   pypi_smoke install --index <testpypi|pypi> --dist <dir> --python <exe> --example <file> --expect <file>
 //!                      --data <file>... --abi-table <file> --work <dir> [--attempts <n>] [--delay <seconds>]
 //!
 //! `dist` names the wheel the build made as the index will (meta.zig) and puts it alone in a directory; `state`
-//! says whether an index already holds that file (index.zig `lookup`); `verify` and `install` are the smoke
+//! says whether an index already holds that file (index.zig `lookup`); `present` says, from a file holding the
+//! one-line name of a wheel (`<name>-<version>-<tag>.whl`) and before anything is built, whether the index's
+//! release lists a file of exactly that name (index.zig `hasFile`) and appends `present=true` or
+//! `present=false`; `verify` and `install` are the smoke
 //! (index.zig `verify`, install.zig). Every step prints `pypi_smoke: ...`; a refusal prints
 //! `pypi_smoke: FAILED: <why>` on stderr and `::error title=pypi::<why on one line>` on stdout for the GitHub
 //! log; the exit status is 0 when the step held, 1 when it refused or failed, 2 for a usage error. Outputs for
@@ -30,6 +34,7 @@ pub const Deps = struct {
 pub const usage =
     \\usage: pypi_smoke dist --wheel <file.whl> --out <dir> --github-output <file>
     \\       pypi_smoke state --index <testpypi|pypi> --dist <dir> --github-output <file>
+    \\       pypi_smoke present --index <testpypi|pypi> --name-file <path> --github-output <file>
     \\       pypi_smoke verify --index <testpypi|pypi> --dist <dir> [--attempts <n>] [--delay <seconds>]
     \\       pypi_smoke install --index <testpypi|pypi> --dist <dir> --python <exe> --example <file> --expect <file>
     \\                          --data <file>... --abi-table <file> --work <dir> [--attempts <n>] [--delay <seconds>]
@@ -176,6 +181,23 @@ fn cmdState(a: Allocator, args: []const []const u8, deps: Deps, out: *std.Io.Wri
     return 0;
 }
 
+fn cmdPresent(a: Allocator, args: []const []const u8, deps: Deps, out: *std.Io.Writer, err: *std.Io.Writer) !u8 {
+    const names = [_][]const u8{ "--index", "--name-file", "--github-output" };
+    const p = (try parseFlags(a, args, &names, 3, null, err)) orelse return 2;
+    const idx = (try indexOf(err, p.get(0))) orelse return 2;
+    const text = std.fs.cwd().readFileAlloc(a, p.get(1), 4096) catch |e|
+        return failedText(a, out, err, "cannot read --name-file {s}: {s}", .{ p.get(1), @errorName(e) });
+    var why: []const u8 = "";
+    const file = meta.parseFileName(a, &why, text) catch |e| return failed(a, out, err, e, why);
+    const file_name = std.mem.trimRight(u8, text, "\n");
+    const there = index.hasFile(a, &why, deps.fetcher, idx, file, file_name) catch |e| return failed(a, out, err, e, why);
+    common.appendFile(p.get(2), if (there) "present=true\n" else "present=false\n") catch |e|
+        return failedText(a, out, err, "cannot write --github-output {s}: {s}", .{ p.get(2), @errorName(e) });
+    try out.print("::notice title=pypi::{s} is {s}{s}{s}\n", .{ file_name, if (there) "on " else "not on ", idx.name, if (there) " already" else "" });
+    try out.flush();
+    return 0;
+}
+
 fn cmdVerify(a: Allocator, args: []const []const u8, deps: Deps, out: *std.Io.Writer, err: *std.Io.Writer) !u8 {
     const names = [_][]const u8{ "--index", "--dist", "--attempts", "--delay" };
     const p = (try parseFlags(a, args, &names, 2, null, err)) orelse return 2;
@@ -219,6 +241,7 @@ pub fn run(a: Allocator, args: []const []const u8, deps: Deps, out: *std.Io.Writ
         const rest = args[1..];
         if (std.mem.eql(u8, args[0], "dist")) return cmdDist(a, rest, out, err);
         if (std.mem.eql(u8, args[0], "state")) return cmdState(a, rest, deps, out, err);
+        if (std.mem.eql(u8, args[0], "present")) return cmdPresent(a, rest, deps, out, err);
         if (std.mem.eql(u8, args[0], "verify")) return cmdVerify(a, rest, deps, out, err);
         if (std.mem.eql(u8, args[0], "install")) return cmdInstall(a, rest, deps, out, err);
     }
