@@ -22,7 +22,9 @@
 #                                 folds by source position when the segment
 #                                 is ORDER_ROW_RANGE
 #            SINK_AGG, key I64,   `GroupAggSink` (`sink_group_agg`), from the
-#            I32, F64 or F32      same kind of data; both behind `AnyAggSink`
+#            I32, F64, F32,       same kind of data; both behind `AnyAggSink`
+#            DATE32, BOOL or
+#            DECIMAL128
 #            SINK_AGG, key STRING `StringGroupAggSink` (`sink_string_group_agg`)
 #            (DICT_ENCODED or     from that data too, behind `AnyAggSink`. A
 #            COLUMNAR)            DICT_ENCODED sink makes its Parquet source
@@ -71,6 +73,9 @@ from operator_api.map_op import MapOp
 from parquet.runtime_footer_cache import ParquetMetadataCache
 from parquet_scan.cursor_grain_feed import cursor_grain_enabled
 from physical_plan.physical_plan import (
+    KEY_DTYPE_BOOL,
+    KEY_DTYPE_DATE32,
+    KEY_DTYPE_DECIMAL128,
     KEY_DTYPE_F32,
     KEY_DTYPE_F64,
     KEY_DTYPE_I32,
@@ -394,6 +399,9 @@ struct RealBuilder[
                 or key == KEY_DTYPE_I32
                 or key == KEY_DTYPE_F64
                 or key == KEY_DTYPE_F32
+                or key == KEY_DTYPE_DATE32
+                or key == KEY_DTYPE_BOOL
+                or key == KEY_DTYPE_DECIMAL128
             )
             if desc.sink_kind == SINK_AGG and (key == KEY_DTYPE_NONE or keyed):
                 var id = desc.sink_param_id
@@ -454,7 +462,8 @@ struct RealBuilder[
             + String(desc.seg_id)
             + " is not served; only (SINK_COLLECT, KEY_DTYPE_NONE,"
             " SINK_ORIENT_COLUMNAR), (SINK_AGG, KEY_DTYPE_NONE, I64, I32,"
-            " F64 or F32, SINK_ORIENT_COLUMNAR), (SINK_AGG, KEY_DTYPE_STRING,"
+            " F64, F32, DATE32, BOOL or DECIMAL128, SINK_ORIENT_COLUMNAR),"
+            " (SINK_AGG, KEY_DTYPE_STRING,"
             " SINK_ORIENT_COLUMNAR or SINK_ORIENT_DICT_ENCODED) and"
             " (SINK_SORT, KEY_DTYPE_NONE, SINK_ORIENT_COLUMNAR) are"
         )

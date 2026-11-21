@@ -315,7 +315,7 @@ def test_project_over_an_aggregate_reads_the_aggregate_output() raises:
 # =============================================================================
 
 
-def _key_schema() -> Schema:
+def _key_schema() raises -> Schema:
     var sb = SchemaBuilder()
     sb.add_field(Field("i64", ArrowType.INT64, False))
     sb.add_field(Field("i32", ArrowType.INT32, False))
@@ -323,10 +323,13 @@ def _key_schema() -> Schema:
     sb.add_field(Field("f32", ArrowType.FLOAT32, False))
     sb.add_field(Field("s", ArrowType.STRING, False))
     sb.add_field(Field("t", ArrowType.STRING, False))
+    sb.add_field(Field("d32", ArrowType.DATE32, False))
+    sb.add_field(Field("flag", ArrowType.BOOL, False))
+    sb.add_field(Field.decimal128("dec", 18, 4, False))
     return sb.build()
 
 
-def _count_by(keys: List[String]) -> LogicalPlan:
+def _count_by(keys: List[String]) raises -> LogicalPlan:
     var aggs = AggExprArray()
     aggs.append(AggExpr(AGG_COUNT, Optional[Expr](), Optional[String]("n")))
     return LogicalPlan.aggregate(
@@ -348,6 +351,9 @@ def test_each_group_key_type_picks_its_sink_row() raises:
     assert_equal(_sink_of(_count_by(_names("i32")), List[String]()), "(SINK_AGG, I32, COLUMNAR)")
     assert_equal(_sink_of(_count_by(_names("f64")), List[String]()), "(SINK_AGG, F64, COLUMNAR)")
     assert_equal(_sink_of(_count_by(_names("f32")), List[String]()), "(SINK_AGG, F32, COLUMNAR)")
+    assert_equal(_sink_of(_count_by(_names("d32")), List[String]()), "(SINK_AGG, DATE32, COLUMNAR)")
+    assert_equal(_sink_of(_count_by(_names("flag")), List[String]()), "(SINK_AGG, BOOL, COLUMNAR)")
+    assert_equal(_sink_of(_count_by(_names("dec")), List[String]()), "(SINK_AGG, DECIMAL128, COLUMNAR)")
 
 
 def test_a_string_key_is_dictionary_encoded_only_when_the_footers_say_so() raises:

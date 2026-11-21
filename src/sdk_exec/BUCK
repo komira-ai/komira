@@ -75,6 +75,13 @@ _CSV_TEST_DATA.update({c + ".tsv": ":csv_oracle[" + c + ".tsv]" for c in _CSV_CA
 #   that adds each row group from +0.0 in row order and the row groups in file
 #   order (exact 1.0 / 0.25 for 1e16, 1, -1e16, 1; mixed magnitudes with NULLs;
 #   under a WHERE), and an integer sum beside them stays an exact DECIMAL(38, 0).
+# - test_run_sql_group_keys: run_sql over a Parquet table of DATE32, BOOL,
+#   DECIMAL(12, 2), DECIMAL(30, 4) and INT64 columns in several row groups:
+#   GROUP BY one DATE32, BOOL or DECIMAL column equals an oracle computed in
+#   the test (the NULL key is one group; count(*), count(v), sum(v); decimal
+#   keys past INT64 exact), min/max of dates and sum of decimals run under a
+#   BOOL key, a filter before the grouping, an all-NULL key is one group, and a
+#   multi-column key that is not all strings is refused at `lower`.
 # - test_run_sql_int_sum: run_sql over INT64 and INT32 Parquet columns in several
 #   row groups: an integer sum() is declared DECIMAL(38, 0) and exact past the
 #   INT64 range (MAX and MIN rows, partials that each pass INT64, {MAX, MAX, MIN,
@@ -184,6 +191,7 @@ mojo_library(
         "tests/test_run_sql_csv.mojo",
         "tests/test_run_sql_distinct.mojo",
         "tests/test_run_sql_float_sum_workers.mojo",
+        "tests/test_run_sql_group_keys.mojo",
         "tests/test_run_sql_int_sum.mojo",
         "tests/test_run_sql_no_from.mojo",
         "tests/test_run_sql_q6.mojo",

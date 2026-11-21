@@ -2,8 +2,9 @@
 # group_table -- the hash table of one worker of the grouped aggregation sink
 # =============================================================================
 #
-# Open addressing over groups kept in insertion order. A group is its key (one
-# 64-bit cell and one NULL flag per key column) and one `AggCell` per aggregate
+# Open addressing over groups kept in insertion order. A group is its key
+# (64-bit cells, each with a NULL flag; `group_keys` says how many cells a key
+# column takes) and one `AggCell` per aggregate
 # (`agg_fold`: a count and an exact 128-bit integer). Two keys are the same
 # group when every cell and every flag agrees, so NULL is a key value of its
 # own: all rows whose key is NULL form one group, and a NULL is never equal to
