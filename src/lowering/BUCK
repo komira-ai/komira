@@ -10,6 +10,11 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #                        type and dictionary footer, the group keys in column
 #                        order, the sort, limit, filter, distinct and
 #                        aggregate it composes with.
+# test_lower_names       the names a render and a refusal print for every
+#                        source, edge, order, operator and sink tag and for a
+#                        tag with no name, and the two group keys (over an
+#                        in-memory scan, an alias of a column) that are never
+#                        dictionary encoded.
 # test_lower_plans       the rendered physical plan of small plans: one segment
 #                        for a filtered aggregate, two for an aggregate and a
 #                        sort, the fused operators, the sink row each group key
@@ -59,6 +64,7 @@ mojo_library(
     ],
     test_srcs = [
         "tests/test_lower_distinct.mojo",
+        "tests/test_lower_names.mojo",
         "tests/test_lower_plans.mojo",
         "tests/test_lower_refusals.mojo",
         "tests/test_lower_sum_fuse.mojo",
