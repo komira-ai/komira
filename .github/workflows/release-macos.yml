@@ -6,9 +6,10 @@
 # runner and only asks the farm). The macOS workers are few and the Linux ones many, so this build is in
 # the release and never in a pull request's check: this workflow has no pull_request,
 # pull_request_target or merge_group trigger, and pr.yml and every workflow that runs on a pull request
-# hold no macOS platform and no macOS worker set (//:release_macos_cases says so). What fails before
-# anything is built is found earlier: pr.yml's last step configures and analyses the same set for
-# darwin-arm64 on its Linux runner, running no action (release/darwin_analysis.bxl).
+# hold no macOS worker set and build nothing for macOS (//:release_macos_cases says so). The one
+# exception is analysis, not a build: pr.yml's last step configures and analyses the same set for
+# darwin-arm64 on its Linux runner, running no action (release/darwin_analysis.bxl), so what fails
+# before anything is built is found in the pull request that causes it.
 #
 # ITS OWN WORKFLOW, so it cannot slow a release. release.yml is one concurrency group in which a running
 # release is never cancelled; a macOS job inside it that stalled for 90 minutes would hold the next

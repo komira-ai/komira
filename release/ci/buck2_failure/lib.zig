@@ -140,7 +140,7 @@ pub fn message(a: std.mem.Allocator, step: []const u8, block: []const []const u8
         return std.fmt.allocPrint(a, "step `{s}` failed and wrote no buck2 output", .{step});
     }
     const body = try std.mem.join(a, "\n", block);
-    return std.fmt.allocPrint(a, "step `{s}` failed; buck2 said:\n{s}", .{ step, body });
+    return std.fmt.allocPrint(a, "step `{s}` failed; buck2's output ends:\n{s}", .{ step, body });
 }
 
 /// `text` as GitHub's workflow-command data: `%` as `%25`, CR as `%0D`, LF

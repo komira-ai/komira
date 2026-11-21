@@ -27,7 +27,7 @@ fn fail(comptime fmt: []const u8, args: anytype) noreturn {
 }
 
 fn appendFile(path: []const u8, text: []const u8) void {
-    var f = std.fs.cwd().createFile(path, .{ .truncate = false }) catch |e| fail("cannot open {s}: {s}", .{ path, @errorName(e) });
+    const f = std.fs.cwd().createFile(path, .{ .truncate = false }) catch |e| fail("cannot open {s}: {s}", .{ path, @errorName(e) });
     defer f.close();
     f.seekFromEnd(0) catch |e| fail("cannot write {s}: {s}", .{ path, @errorName(e) });
     f.writeAll(text) catch |e| fail("cannot write {s}: {s}", .{ path, @errorName(e) });

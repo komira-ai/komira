@@ -65,7 +65,7 @@ test "analysis failure: exact message, output line and summary" {
     }, block);
     const msg = try lib.message(a, "build the macOS set", block);
     try t.expectEqualStrings(
-        "step `build the macOS set` failed; buck2 said:\n" ++
+        "step `build the macOS set` failed; buck2's output ends:\n" ++
             "Error running analysis for `komira//release:mopm_darwin_libs (komira//tools/build/platforms:darwin-arm64#7fd7ccfd5d5f8024)`\n" ++
             "Caused by:\n" ++
             "komira//release:mopm_darwin_libs (komira//tools/build/platforms:darwin-arm64#7fd7ccfd5d5f8024) does not pass compatibility check (will be error in future) because its transitive dep toolchains//:mojo_proto\n" ++
@@ -73,7 +73,7 @@ test "analysis failure: exact message, output line and summary" {
         msg,
     );
     try t.expectEqualStrings(
-        "message=step `build the macOS set` failed; buck2 said:%0A" ++
+        "message=step `build the macOS set` failed; buck2's output ends:%0A" ++
             "Error running analysis for `komira//release:mopm_darwin_libs (komira//tools/build/platforms:darwin-arm64#7fd7ccfd5d5f8024)`%0A" ++
             "Caused by:%0A" ++
             "komira//release:mopm_darwin_libs (komira//tools/build/platforms:darwin-arm64#7fd7ccfd5d5f8024) does not pass compatibility check (will be error in future) because its transitive dep toolchains//:mojo_proto%0A" ++
@@ -278,7 +278,7 @@ test "a message with %0A in a log line is escaped once, on one output line" {
     const a = ar.allocator();
     const msg = try lib.message(a, "s", try blockOf(a, "BUILD FAILED\nsaw %0A in a name\n"));
     const line = try lib.outputLine(a, msg);
-    try t.expectEqualStrings("message=step `s` failed; buck2 said:%0Asaw %250A in a name\n", line);
+    try t.expectEqualStrings("message=step `s` failed; buck2's output ends:%0Asaw %250A in a name\n", line);
     try t.expectEqual(@as(usize, 1), std.mem.count(u8, line, "\n"));
 }
 
