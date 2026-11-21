@@ -158,3 +158,10 @@ package:
   README (`komira_pack conda-check`,
   [package/README.md](../../tools/build/package/README.md)), which no Python
   file can become.
+
+The repository does write a wheel of its own: `wheel_file`
+([package/README.md](../../tools/build/package/README.md#the-python-wheel))
+packs the files its target names, and its writer is a Zig tool that uses
+nothing here. The pinned wheels and interpreters above are still never in it,
+or in any other published package: `_TEST_ONLY` keeps them out of every
+target that is not a test.
