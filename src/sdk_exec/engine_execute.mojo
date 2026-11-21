@@ -28,7 +28,7 @@ from phase_timers.phase_timers import (
     pt_now,
     pt_record,
 )
-from physical_plan.physical_plan import AggSinkData
+from physical_plan.physical_plan import AggSinkData, SortSinkData
 from pipeline_exec.real_builder import RealBuilder
 from pipeline_exec.run_plan import run_plan
 from plan_expr.expr_pool import ExprPool
@@ -79,6 +79,14 @@ def run_lowered_plan(
         reversed_sinks.append(lowered.params.agg.pop())
     while len(reversed_sinks) > 0:
         _ = builder.add_agg_sink(reversed_sinks.pop())
+    # The same for the sort sinks, which SINK_SORT segments index apart from
+    # the aggregation sinks: without them a plan with an ORDER BY names sort
+    # sink data the builder does not hold.
+    var reversed_sorts = List[SortSinkData]()
+    while len(lowered.params.sort) > 0:
+        reversed_sorts.append(lowered.params.sort.pop())
+    while len(reversed_sorts) > 0:
+        _ = builder.add_sort_sink(reversed_sorts.pop())
     var token = CancellationToken.new()
     ref dispatch = ctx.runtime.dispatcher()
     pt_record[PH_EXEC_SETUP](t_setup)

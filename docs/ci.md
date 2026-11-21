@@ -344,12 +344,27 @@ instead.
 
 - **Not in a pull request.** `pr.yml` (and `coverage.yml`, the other workflow that
   runs on a pull request) pass no macOS worker set to the farm connection and name
-  no darwin platform or runner, and `//ci:pr` is built for the client's own platform
+  no darwin platform or runner (beyond the analysis below, which builds nothing), and
+  `//ci:pr` is built for the client's own platform
   only: none of the targets it reaches has a macOS execution platform. A
   `cquery` of `attrregexfilter(exec_compatible_with, "macos", deps(//ci:pr))` is
   empty, and the same query for `--target-platforms
   komira//tools/build/platforms:darwin-arm64` over a library is not.
   `//:release_macos_cases` holds the workflows and the shards of `ci/targets/` to it.
+- **Analysed in every pull request, built in none.** What fails before anything is built
+  (a target of the set's closure incompatible with darwin-arm64, a toolchain with no
+  execution platform, a rule that fails at analysis) is found in the pull request that
+  causes it: the last buck2 step of `pr.yml` runs
+  `bxl --config-file release/darwin_analysis.buckconfig komira//release/darwin_analysis.bxl:check`,
+  which configures `//release:mopm_darwin_libs` for darwin-arm64 and analyses it, with its
+  whole closure, as the release's build would. Configuring and analysing run no action, so
+  nothing is built for macOS and no macOS worker is asked for anything; the config file
+  registers the macOS execution platform with a property set that names no worker, which
+  configuration needs and nothing uses. The step fails with buck2's own message, naming the
+  target and the dependency. A failure that only a build shows (a compile, a welded test)
+  is still seen first by `release-macos.yml`. `//:release_macos_cases` holds that this
+  step is in `pr.yml` once, through the `buck2-farm` action with its assertion, and that it
+  is the only line of a pull request workflow that names the macOS set.
 - **On the farm's Macs, not a hosted runner.** The job runs on the same ubuntu
   runner as the others and asks the farm: `farm-connect` with the macOS worker set
   and hosts (the repository variables above), then
@@ -385,9 +400,13 @@ instead.
   `release-macos-result` (`needs: release-macos`, `if: always()`), fails with "the macOS build
   did not run" when the build job was skipped, and with "did not pass" when it failed, so the
   run list, the commit status and the badge never read green for a Mac build that did not
-  pass. The farm connection refuses when a repository variable is empty (for the macOS
-  set, `FARM_DARWIN_ARM64_PROPERTIES` and `FARM_DARWIN_MACOS_HOSTS` go together), and that is a
-  failed run too. The set has not yet been measured on the macOS workers, and the publish must
+  pass. Its message says what happened rather than guessing: when a buck2 step failed (the build
+  of the set, or of the Python harness tests), `//release/ci:buck2_failure` (built before them)
+  reads that step's buck2 output and the message is buck2's own lines after `BUILD FAILED`
+  (also written to the run's summary);
+  when an earlier step failed, the message names it. The farm connection refuses when a
+  repository variable is empty (for the macOS set, `FARM_DARWIN_ARM64_PROPERTIES` and
+  `FARM_DARWIN_MACOS_HOSTS` go together), and that is a failed run too. The set has not yet been measured on the macOS workers, and the publish must
   not wait on a platform the release does not ship. When the set is green over several runs,
   move the job back into `release.yml` as a `needs` of `prod-commit` (or keep the workflow
   and have the publish wait on it).
@@ -697,7 +716,7 @@ pull request never starts it.
 
 | job | environment | permissions | what it does |
 |---|---|---|---|
-| `build` | `build` | `contents: read`, `id-token: write` (the tailnet only) | on the farm ([farm-connect](#how-it-reaches-the-farm), `farm-qos: batch`): builds `//release/ci:release_json` and takes the stamp (`release_json stamp`); builds `//python:komira_wheel[release]` and `//python:wheel_install_test` with the three stamp flags (`-c komira.package_stamp`, `komira.package_commit`, `komira.package_timestamp_ms`) and `//python/smoke:pypi_smoke`; runs `pypi_smoke dist`, which makes the dist directory. It keeps two workflow artifacts, `pypi-<version>-dist` (the wheel) and `pypi-<version>-smoke` (the driver), for 14 days. It has no upload step and holds no index identity. |
+| `build` | `build` | `contents: read`, `id-token: write` (the tailnet only) | on the farm ([farm-connect](#how-it-reaches-the-farm), `farm-qos: batch`): builds `//release/ci:release_json` and takes the stamp (`release_json stamp`); builds the wheel and the install test of the run's `flavour` input (`//python:komira_wheel_<flavour>[release]` and `//python:wheel_install_test_<flavour>`; `external` by default, `bundled` the other choice, docs/design/python_package.md "The two flavours") with the three stamp flags (`-c komira.package_stamp`, `komira.package_commit`, `komira.package_timestamp_ms`) and `//python/smoke:pypi_smoke`; runs `pypi_smoke dist`, which makes the dist directory, and writes the flavour and the version to the run's summary. It keeps two workflow artifacts, `pypi-<version>-dist` (the wheel) and `pypi-<version>-smoke` (the driver), for 14 days. It has no upload step and holds no index identity. |
 | `testpypi` | `testpypi` | `id-token: write` | no farm, no checkout, no buck2. Downloads the two artifacts, runs `pypi_smoke state --index testpypi`, and uploads the wheel to TestPyPI only when the state is `absent`. |
 | `testpypi-smoke` | none | `contents: read` | `pypi_smoke verify --index testpypi`, then `pypi_smoke install --index testpypi`, on a runner with the Python `actions/setup-python` gives (3.13). Skipped when the state is `differs`. |
 | `pypi` | `pypi` | `id-token: write` | after `testpypi-smoke`: the same as `testpypi` for PyPI. |
@@ -731,7 +750,7 @@ log) and 2 for a usage error.
 | `verify` | `--index <testpypi\|pypi> --dist <dir> [--attempts <1..20>] [--delay <0..300>]` | asks the index for the file it serves and compares it with the built one (below). A refused attempt is tried again up to `--attempts` times (default 5), `--delay` seconds apart (default 30), because an index can lag an upload. |
 | `install` | `--index <testpypi\|pypi> --dist <dir> --python <exe> --example <quickstart.py> --expect <quickstart.expected> --data <file>... --abi-table <komira.tsv> --work <dir> [--attempts <n>] [--delay <s>]` | installs the published wheel into an empty environment and runs the example (below). `--attempts` and `--delay` as for `verify`, for the install of `komira` only. |
 
-**The three index states.** `state` asks the index about the one file of the build, `komira-0.1.<N>-py3-none-manylinux_2_34_x86_64.whl`
+**The three index states.** `state` asks the index about the one file of the build, `komira-0.1.<N>-py3-none-manylinux_2_35_x86_64.whl`
 (`<N>` is the stamp's build number):
 
 - `absent`: the index has no such file (the version may exist with another file, another platform's wheel).
@@ -774,7 +793,7 @@ asserts no query result: the call that runs a query has not landed. The README's
 is the same text, held byte for byte by `//python/smoke:readme_shows_quickstart`.
 
 **What ran where.** The build, the stamp and the wheel's own install test
-(`//python:wheel_install_test`, which installs the wheel into an empty environment and loads `libkomira`) run on the
+(`//python:wheel_install_test_<flavour>`, which installs the wheel, and for `external` Modular's `mojo-compiler` it requires, into an empty environment and loads `libkomira`) run on the
 farm, in `build`, before any upload, on the same bytes that are uploaded. `state`, the upload, `verify` and
 `install` run on GitHub-hosted runners, in the later jobs. The index checks and the install from an index
 run on a runner only, because a farm action has no network.
