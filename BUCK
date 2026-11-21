@@ -147,8 +147,9 @@ zig_test(
 # says what each catches): one daily schedule and a manual run, every read of the flavour with the
 # fallback a scheduled run takes, no secret and no token, no upload step in the build job, the identity (`id-token`) in the build jobs and the upload jobs alone, the twelve
 # jobs of the Linux and the macOS wheel with the exact runner, gate, needs and environment of
-# each, the upload only for the state `absent` on a pinned action with its defaults, Python 3.13
-# set up in the smoke jobs alone, every action pinned to a commit, and the Linux result job; and
+# each, the upload only for the state `absent` on a pinned action with its defaults, the smoke
+# jobs one per supported Python of the build's list (//python:supported_pythons) and the only ones
+# that set up Python, every action pinned to a commit, and the Linux result job; and
 # a run played from the file's text for each state of the indexes (pypi_workflow_run.zig: an
 # unchanged main is green with the notice `already published`, a documentation-only commit green
 # with the notice of differing bytes). The macOS jobs' further contract is in

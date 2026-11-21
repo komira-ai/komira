@@ -19,7 +19,8 @@ What it needs:
   BMI2, FMA: Intel Haswell, AMD Excavator or newer), or **macOS 11 or newer
   on Apple silicon** (arm64). A wheel for Linux on arm64 comes in a later
   release.
-- **Python 3.13 or newer.**
+- **CPython 3.11, 3.12, 3.13 or 3.14.** One wheel serves all four, and each
+  is tested (Supported Pythons, below).
 - **On Linux, the system C++ runtime, `libstdc++`.** Most systems have it. A
   minimal container image may need the `libstdc++6` package (Debian, Ubuntu)
   or `libstdc++` (Fedora, RHEL). macOS has its own C++ runtime.
@@ -118,8 +119,33 @@ The package's layout and API are designed in
 | `komira/_session.py` | `Session` |
 | `komira/py.typed` | the PEP 561 marker |
 | `BUCK` | `:komira`, the package's files as the directory its tests import from; `:komira_wheel`, the wheel; `:komira_wheel_macos_arm64`, the macOS wheel; `:wheel_install_test` and `:wheel_install_test_macos_arm64`, each installed into an empty environment; and the `refuses_*` and `beside_*` targets |
-| `install_test.bzl` | the rules of the wheel's files and of the install test |
+| `install_test.bzl` | the rules of the wheel's files and of the install test, and `python_versions`, the supported Pythons as JSON for the workflows |
+| `pythons.bzl` | the supported Pythons, the one list of them (Supported Pythons, below) |
 | `tests/` | the tests (`python_binding_test`), `fake_libkomira.c` and `fake_runtime_lib.c`, the stand-in libraries they load, `test_installed.py` and `wheel_install_run.py`, the install test and its driver, and `test_beside_modular.py`, the tests of komira loaded beside Modular's runtime |
+
+### Supported Pythons
+
+`pythons.bzl` lists the CPython minors the package supports, oldest first:
+3.11, 3.12, 3.13 and 3.14. Each entry names the interpreter pinned for the
+farm's tests (`third_party/python`) and the exact version a GitHub-hosted
+runner installs with `actions/setup-python` on Linux x86_64 (the pinned
+version) and on macOS arm64. Everything else is read from it:
+
+- the wheel's `Requires-Python` (`>=` the oldest minor) and its
+  `Programming Language :: Python` classifiers;
+- the package's tests (`tests/BUCK`) and the wheel's install and upgrade tests
+  (`BUCK`), one target per minor: `<name>` on CPython 3.13, `<name>_py311`,
+  `<name>_py312` and `<name>_py314` on the others;
+- `//python:supported_pythons[linux-x86_64]` and `[macos-arm64]`, the exact
+  versions as JSON lists, which the release workflow's smoke jobs read to run
+  one job per version.
+
+Adding a minor is a line in `pythons.bzl` and its interpreter's pin in
+`third_party/python/pins.bzl`. The one wheel, tagged `py3-none`, serves every
+minor. On macOS, `actions/setup-python` has no build of the newer patch
+releases of 3.11 and 3.12 (they are released as source alone), so the macOS
+jobs install 3.11.9 and 3.12.10. The farm's macOS tests run CPython 3.13
+alone.
 
 How the loader behaves:
 
@@ -216,8 +242,8 @@ built and tested only in the release workflow (`.github/workflows/pypi.yml`),
 never in a pull request, and a run publishes it only from main. After the upload, a GitHub-hosted macOS runner installs it from the
 index and runs the smoke test.
 
-`./buck2 build //python:wheel_install_test` (and `:wheel_install_test_py314` on
-CPython 3.14) installs the wheel alone into an empty virtual environment, the
+`./buck2 build //python:wheel_install_test` (CPython 3.13; `:wheel_install_test_py311`,
+`_py312` and `_py314` on the other supported Pythons) installs the wheel alone into an empty virtual environment, the
 way a wheel is installed for the other tests (no pip, no network), and runs
 `tests/test_installed.py` there in isolated mode, from an empty directory, with
 no library path set. `//python:wheel_install_test_macos_arm64` runs the test on
@@ -239,10 +265,11 @@ path (`refuses_owners_off_run_path`), a Mojo runtime library missing from the
 wheel (`refuses_missing_runtime_library`), a wheel tagged for another platform
 (`refuses_wheel_of_another_platform`), another distribution installed with the
 wheel (`refuses_other_distribution`), an unmet requirement
-(`refuses_unmet_requirement`), a `Requires-Python` the interpreter is
-outside of (`refuses_python_outside_requires_python`).
+(`refuses_unmet_requirement`), and CPython 3.10, which the wheel's
+`Requires-Python` (`>=3.11`) leaves out
+(`refuses_python_outside_requires_python`).
 
-`//python:upgrade_test` (and `:upgrade_test_py314`) installs two releases of
+`//python:upgrade_test` (and `_py311`, `_py312` and `_py314`) installs two releases of
 the wheel one after the other into one environment, the way pip does, and
 holds the result to what the install test holds of a fresh install, plus that
 every file only the older release had is gone. Its refusals are a downgrade

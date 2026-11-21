@@ -23,12 +23,16 @@
 //!    release_macos_test.zig (//:release_macos_cases);
 //!  - build has no upload step (no publish action, no legacy upload address, no twine); it builds the
 //!    wheel (//python:komira_wheel), the install test (//python:wheel_install_test) and the driver,
-//!    each with the three stamp flags, and keeps exactly the dist and the smoke artifacts;
+//!    each with the three stamp flags, and keeps exactly the dist and the smoke artifacts; it builds
+//!    the list of the supported Pythons (//python:supported_pythons[linux-x86_64]) and publishes it
+//!    as its output `pythons`;
 //!  - testpypi and pypi ask the state before the upload step, which runs for `absent` alone, with the
 //!    pinned publish action and the dist directory; testpypi names the TestPyPI upload address, pypi
 //!    none; neither skips an existing file or turns attestations off;
 //!  - the smoke jobs verify, then install, each with 5 attempts 30 seconds apart, on the pinned
-//!    setup-python with Python 3.13; setup-python is in the four smoke jobs alone;
+//!    setup-python; each is one job per supported Python, a matrix of build's output `pythons` that
+//!    runs every job to the end (`fail-fast: false`), and sets up `${{ matrix.python }}`;
+//!    setup-python is in the four smoke jobs alone;
 //!  - every `uses:` that is not local names a commit: owner/repo@<40 lowercase hex>;
 //!  - no line outside a comment holds a secret, a password, an API token, curl, wget, jq, twine,
 //!    continue-on-error or pull_request_target, and no `run:` line holds a `${{ }}` expression;
@@ -136,6 +140,10 @@ const BUILD_INSTALL_TEST = "          args: build " ++ STAMP_FLAGS ++ " //python
 const BUILD_DRIVER = "          args: build " ++ STAMP_FLAGS ++ " //python/smoke:pypi_smoke --out ${{ runner.temp }}/pypi/smoke/pypi_smoke";
 const BUILD_LINES = [_][]const u8{
     "      version: ${{ steps.dist.outputs.version }}",
+    "      pythons: ${{ steps.pythons.outputs.pythons }}",
+    "          args: build //python:supported_pythons[linux-x86_64] --out ${{ runner.temp }}/pypi/pythons.json",
+    "        id: pythons",
+    "        run: echo \"pythons=$(cat \"$RUNNER_TEMP/pypi/pythons.json\")\" >> \"$GITHUB_OUTPUT\"",
     "          fetch-depth: 0",
     FARM_CONNECT,
     FARM_QOS,
@@ -185,7 +193,14 @@ fn indexSpec(comptime idx: []const u8, comptime title: []const u8, comptime repo
 const TESTPYPI = indexSpec("testpypi", "TestPyPI", "          repository-url: https://test.pypi.org/legacy/");
 const PYPI = indexSpec("pypi", "PyPI", null);
 const STATE_OUTPUT = "      state: ${{ steps.state.outputs.state }}";
-const PYTHON_VERSION = "          python-version: '3.13'";
+const PYTHON_VERSION = "          python-version: ${{ matrix.python }}";
+// one job per supported Python: the list the build job made, every job run to the end
+const SMOKE_MATRIX = [_][]const u8{
+    "    strategy:",
+    "      fail-fast: false",
+    "      matrix:",
+    "        python: ${{ fromJSON(needs.build.outputs.pythons) }}",
+};
 const PYTHON_ENV = "          PYTHON: ${{ steps.python.outputs.python-path }}";
 
 // ---- the result job -----------------------------------------------------------------------------
@@ -448,6 +463,10 @@ fn checkSmoke(ar: std.mem.Allocator, job: []const []const u8, ix: Index, name: [
         if (!has(job, l)) return try missingLine(ar, name, "verify, set up Python and install", l);
     }
     if (countMentions(job, "setup-python") != 1) return try std.fmt.allocPrint(ar, "{s}: it does not set up Python exactly once", .{name});
+    for (SMOKE_MATRIX) |l| {
+        if (!has(job, l)) return try missingLine(ar, name, "one job per supported Python", l);
+    }
+    if (countPrefix(job, "    strategy:") != 1 or countPrefix(job, "        python:") != 1 or countMentions(job, "matrix.python") != 1) return try std.fmt.allocPrint(ar, "{s}: it is not one matrix of the supported Pythons, set up once", .{name});
     if (mentions(job, "gh-action-pypi-publish")) return try std.fmt.allocPrint(ar, "{s}: has an upload step", .{name});
     const verify_at = lineAt(job, ix.verify_run).?;
     const setup_at = lineAt(job, SETUP_PYTHON).?;
@@ -733,6 +752,11 @@ test "build builds the wheel, the install test and the driver from one stamp, an
     // the stamp from another source, the version not published as an output
     try expectRefused(ar, try replaced(ar, text, "stamp --revision \"$GITHUB_SHA\"", "stamp --revision HEAD"), "build: build, stamp, dist and artifacts");
     try expectRefused(ar, try replaced(ar, text, "      version: ${{ steps.dist.outputs.version }}\n", "      version: 0.1.0\n"), "build: build, stamp, dist and artifacts");
+    // the list of the supported Pythons: not built, built for another platform, or not published
+    try expectRefused(ar, try replaced(ar, text, "//python:supported_pythons[linux-x86_64] --out ${{ runner.temp }}/pypi/pythons.json", "//python:supported_pythons[macos-arm64] --out ${{ runner.temp }}/pypi/pythons.json"), "build: build, stamp, dist and artifacts");
+    try expectRefused(ar, try inJob(ar, text, "build", "      pythons: ${{ steps.pythons.outputs.pythons }}\n", ""), "build: build, stamp, dist and artifacts");
+    try expectRefused(ar, try inJob(ar, text, "build", "        id: pythons\n", ""), "build: build, stamp, dist and artifacts");
+    try expectRefused(ar, try inJob(ar, text, "build", "pythons=$(cat \"$RUNNER_TEMP/pypi/pythons.json\")", "pythons=[\"3.13.16\"]"), "build: build, stamp, dist and artifacts");
     // a third artifact, an artifact that may be empty, a shorter life
     try expectRefused(ar, try inJob(ar, text, "build", "      - name: Stop buck2\n", UPLOAD ++ "\n        with:\n          name: extra\n          path: ${{ runner.temp }}/pypi\n          if-no-files-found: error\n          retention-days: 14\n      - name: Stop buck2\n"), "build: it does not keep exactly");
     try expectRefused(ar, try inJob(ar, text, "build", "          if-no-files-found: error\n", "          if-no-files-found: warn\n"), "build: it does not keep exactly");
@@ -772,7 +796,7 @@ test "an upload job asks the state first, uploads for absent alone with the pinn
     try expectRefused(ar, try inJob(ar, text, "testpypi", "    steps:\n", "    steps:\n" ++ CHECKOUT ++ "\n"), "testpypi: checks out");
 }
 
-test "a smoke job verifies, then sets up Python 3.13, then installs, five attempts thirty seconds apart" {
+test "a smoke job verifies, then sets up one supported Python of the build's list, then installs, five attempts thirty seconds apart" {
     var arena = std.heap.ArenaAllocator.init(t.allocator);
     defer arena.deinit();
     const ar = arena.allocator();
@@ -789,8 +813,19 @@ test "a smoke job verifies, then sets up Python 3.13, then installs, five attemp
     // the install runs the example the checkout holds, with the interpreter setup-python made
     try expectRefused(ar, try inJob(ar, text, "testpypi-smoke", "--python \"$PYTHON\"", "--python python3"), "testpypi-smoke: verify, set up Python and install");
     try expectRefused(ar, try inJob(ar, text, "testpypi-smoke", "--expect python/examples/quickstart.expected ", ""), "testpypi-smoke: verify, set up Python and install");
-    // Python 3.13 on the pinned action, once
-    try expectRefused(ar, try inJob(ar, text, "testpypi-smoke", PYTHON_VERSION, "          python-version: '3.12'"), "testpypi-smoke: verify, set up Python and install");
+    // the matrix's Python on the pinned action, once
+    try expectRefused(ar, try inJob(ar, text, "testpypi-smoke", PYTHON_VERSION, "          python-version: '3.13'"), "testpypi-smoke: verify, set up Python and install");
+    try expectRefused(ar, try inJob(ar, text, "pypi-smoke", PYTHON_VERSION, "          python-version: ${{ matrix.version }}"), "pypi-smoke: verify, set up Python and install");
+    // one job per Python of the build's list, each run to the end: a list written here, a list of
+    // another job, a first failure that cancels the others, or no matrix at all
+    const list_line = "        python: ${{ fromJSON(needs.build.outputs.pythons) }}\n";
+    try expectRefused(ar, try inJob(ar, text, "testpypi-smoke", list_line, "        python: ['3.13.16']\n"), "testpypi-smoke: one job per supported Python");
+    try expectRefused(ar, try inJob(ar, text, "pypi-smoke", list_line, "        python: ${{ fromJSON(needs.pypi.outputs.pythons) }}\n"), "pypi-smoke: one job per supported Python");
+    try expectRefused(ar, try inJob(ar, text, "testpypi-smoke", "      fail-fast: false\n", ""), "testpypi-smoke: one job per supported Python");
+    try expectRefused(ar, try inJob(ar, text, "pypi-smoke", "      fail-fast: false\n", "      fail-fast: true\n"), "pypi-smoke: one job per supported Python");
+    try expectRefused(ar, try inJob(ar, text, "pypi-smoke", "    strategy:\n      fail-fast: false\n      matrix:\n" ++ list_line, ""), "pypi-smoke: one job per supported Python");
+    // a second Python list beside the first: the job would not be one per supported Python
+    try expectRefused(ar, try inJob(ar, text, "testpypi-smoke", list_line, list_line ++ "        python: ['3.10.22']\n"), "testpypi-smoke: it is not one matrix of the supported Pythons, set up once");
     try expectRefused(ar, try inJob(ar, text, "pypi-smoke", SETUP_PYTHON, "      - uses: actions/setup-python@v7"), "an action is not pinned");
     try expectRefused(ar, try inJob(ar, text, "pypi-smoke", SETUP_PYTHON ++ "\n", SETUP_PYTHON ++ "\n        with:\n          python-version: '3.13'\n" ++ SETUP_PYTHON ++ "\n"), "pypi-smoke: it does not set up Python exactly once");
     // the smoke jobs read the repository's example and download what the build kept
