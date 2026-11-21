@@ -1,13 +1,12 @@
-//! pypi_smoke: the jobs of the user test of the wheel (`matrix`), from the one list of the Pythons and platforms
-//! the package is tested on after every merge, python/supported_pythons.tsv.
+//! pypi_smoke: the jobs of a workflow that installs the wheel once per supported Python (`matrix`), from the one
+//! list of the supported Pythons, python/pythons.bzl, as the build writes it for one platform: the JSON list of the
+//! sub-target `//python:supported_pythons[<platform>]`, the exact versions actions/setup-python installs there,
+//! oldest first (`["3.11.17","3.12.15","3.13.16","3.14.8"]`).
 //!
-//! The list has one row per pair, `<platform><TAB><python>`; a line that starts with `#` and an empty line are
-//! skipped. The platform is one whose wheel a workflow builds and installs on every merge (`platforms` below
-//! says which, and the hosted runner its job runs on); the Python is a CPython version as actions/setup-python
-//! spells it, `3.<minor>`. A row that is not two fields, a platform not in `platforms`, a Python that is not
-//! `3.<minor>` and a row given twice are refused, each naming its line. `matrix` keeps the rows of one platform,
-//! in file order, and writes them as the `include` list of a GitHub job matrix; a platform with no row is refused,
-//! because a job matrix with no entry is no job at all.
+//! A list that is not a JSON list of strings, a version that is not `3.<minor>.<micro>`, a minor named twice or
+//! out of order, and an empty list (a job matrix with no entry is no job at all) are refused. `json` writes the
+//! versions as the `include` list of a GitHub job matrix, each with the platform and the hosted runner of its jobs
+//! (`platforms` below).
 const std = @import("std");
 const common = @import("common.zig");
 
@@ -15,16 +14,17 @@ const Allocator = common.Allocator;
 const Error = common.Error;
 const refuse = common.refuse;
 
-/// A platform whose wheel is built and installed on every merge, and the GitHub-hosted runner of its job.
+/// A platform whose wheel a workflow installs on a hosted runner, and that runner.
 pub const Platform = struct {
     name: []const u8,
     runner: []const u8,
 };
 
-/// The platforms a row may name. release.yml builds the Linux x86_64 wheel on every merge; a platform joins this
-/// table in the change that builds its wheel on every merge too.
+/// The platforms a matrix may be written for: the Linux x86_64 wheel's jobs (the user test of release.yml and
+/// pypi.yml, and pypi.yml's Linux smoke jobs) and the macOS arm64 wheel's (pypi.yml's macOS smoke jobs).
 pub const platforms = [_]Platform{
     .{ .name = "linux-x86_64", .runner = "ubuntu-24.04" },
+    .{ .name = "macos-arm64", .runner = "macos-15" },
 };
 
 pub fn platformNamed(name: []const u8) ?Platform {
@@ -39,68 +39,51 @@ pub fn platformNames(a: Allocator) Error![]const u8 {
     return std.mem.join(a, ", ", &names);
 }
 
-/// One row of the list.
-pub const Row = struct {
-    platform: Platform,
-    python: []const u8,
-    /// The row's line in the file, from 1.
-    line: usize,
-};
-
-/// Whether `v` is `3.<minor>`: a minor of one to three digits without a leading zero.
-fn isPython(v: []const u8) bool {
-    if (!std.mem.startsWith(u8, v, "3.")) return false;
-    const minor = v[2..];
-    if (minor.len == 0 or minor.len > 3 or (minor.len > 1 and minor[0] == '0')) return false;
-    for (minor) |c| if (c < '0' or c > '9') return false;
-    return true;
+/// A number of one to three digits without a leading zero.
+fn number(s: []const u8) ?u32 {
+    if (s.len == 0 or s.len > 3 or (s.len > 1 and s[0] == '0')) return null;
+    for (s) |c| if (c < '0' or c > '9') return null;
+    return std.fmt.parseInt(u32, s, 10) catch null;
 }
 
-/// The rows of the list `text` (the file at `path`), in file order.
-pub fn parse(a: Allocator, why: *[]const u8, path: []const u8, text: []const u8) Error![]Row {
-    var rows = std.ArrayList(Row).empty;
-    var it = std.mem.splitScalar(u8, text, '\n');
-    var n: usize = 0;
-    while (it.next()) |line| {
-        n += 1;
-        if (line.len == 0 or line[0] == '#') continue;
-        var fields = std.mem.splitScalar(u8, line, '\t');
-        const platform = fields.next().?;
-        const python = fields.next() orelse
-            return refuse(a, why, "line {d} of {s} is '{s}', not `<platform><TAB><python>`", .{ n, path, line });
-        if (fields.next() != null)
-            return refuse(a, why, "line {d} of {s} is '{s}', not `<platform><TAB><python>`", .{ n, path, line });
-        const p = platformNamed(platform) orelse
-            return refuse(a, why, "line {d} of {s} names the platform '{s}', whose wheel no workflow builds and installs on every merge (the platforms: {s})", .{ n, path, platform, try platformNames(a) });
-        if (!isPython(python))
-            return refuse(a, why, "line {d} of {s} names the Python '{s}', not `3.<minor>`", .{ n, path, python });
-        for (rows.items) |r| {
-            if (std.mem.eql(u8, r.platform.name, p.name) and std.mem.eql(u8, r.python, python))
-                return refuse(a, why, "line {d} of {s} repeats line {d} ({s}, Python {s})", .{ n, path, r.line, p.name, python });
-        }
-        try rows.append(a, .{ .platform = p, .python = python, .line = n });
+/// The minor of `v` if `v` is `3.<minor>.<micro>`, else null.
+fn minorOf(v: []const u8) ?u32 {
+    var it = std.mem.splitScalar(u8, v, '.');
+    const major = it.next().?;
+    if (!std.mem.eql(u8, major, "3")) return null;
+    const minor = number(it.next() orelse return null) orelse return null;
+    _ = number(it.next() orelse return null) orelse return null;
+    if (it.next() != null) return null;
+    return minor;
+}
+
+/// The versions of the list `text` (the file at `path`), in file order.
+pub fn parse(a: Allocator, why: *[]const u8, path: []const u8, text: []const u8) Error![]const []const u8 {
+    const parsed = std.json.parseFromSlice([]const []const u8, a, text, .{}) catch |e| switch (e) {
+        error.OutOfMemory => return error.OutOfMemory,
+        else => return refuse(a, why, "{s} is not a JSON list of strings", .{path}),
+    };
+    const vs = parsed.value;
+    if (vs.len == 0) return refuse(a, why, "{s} names no Python: its jobs would be none", .{path});
+    var prev: ?u32 = null;
+    for (vs, 0..) |v, i| {
+        const minor = minorOf(v) orelse
+            return refuse(a, why, "entry {d} of {s} is '{s}', not `3.<minor>.<micro>`", .{ i + 1, path, v });
+        if (prev) |p| if (minor <= p)
+            return refuse(a, why, "entry {d} of {s} is '{s}', after '{s}': each minor once, oldest first", .{ i + 1, path, v, vs[i - 1] });
+        prev = minor;
     }
-    return rows.toOwnedSlice(a);
+    return vs;
 }
 
-/// The rows of `platform`, in file order; none is a refusal.
-pub fn forPlatform(a: Allocator, why: *[]const u8, path: []const u8, rows: []const Row, platform: Platform) Error![]const Row {
-    var out = std.ArrayList(Row).empty;
-    for (rows) |r| {
-        if (std.mem.eql(u8, r.platform.name, platform.name)) try out.append(a, r);
-    }
-    if (out.items.len == 0)
-        return refuse(a, why, "{s} has no row for the platform {s}: its user test would have no job", .{ path, platform.name });
-    return out.toOwnedSlice(a);
-}
-
-/// The job matrix of `rows` as one line of JSON: `{"include":[{"platform":...,"python":...,"runner":...},...]}`.
-/// Every value is a platform name, a runner of `platforms` or a checked `3.<minor>`, so none needs escaping.
-pub fn json(a: Allocator, rows: []const Row) Error![]const u8 {
+/// The job matrix of `versions` on `platform` as one line of JSON:
+/// `{"include":[{"platform":...,"python":...,"runner":...},...]}`. Every value is a platform name, a runner of
+/// `platforms` or a checked `3.<minor>.<micro>`, so none needs escaping.
+pub fn json(a: Allocator, platform: Platform, versions: []const []const u8) Error![]const u8 {
     var w = std.Io.Writer.Allocating.init(a);
     w.writer.writeAll("{\"include\":[") catch return error.OutOfMemory;
-    for (rows, 0..) |r, i| {
-        w.writer.print("{s}{{\"platform\":\"{s}\",\"python\":\"{s}\",\"runner\":\"{s}\"}}", .{ if (i == 0) "" else ",", r.platform.name, r.python, r.platform.runner }) catch return error.OutOfMemory;
+    for (versions, 0..) |v, i| {
+        w.writer.print("{s}{{\"platform\":\"{s}\",\"python\":\"{s}\",\"runner\":\"{s}\"}}", .{ if (i == 0) "" else ",", platform.name, v, platform.runner }) catch return error.OutOfMemory;
     }
     w.writer.writeAll("]}") catch return error.OutOfMemory;
     return w.written();

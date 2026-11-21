@@ -465,11 +465,11 @@ test "install --index dist refuses a dist directory that is not one wheel, befor
 // ---- matrix -----------------------------------------------------------------------------
 
 fn matrixOf(a: Alloc, tmp: *t.TmpDir, list: ?[]const u8) !Result {
-    if (list) |text| try tmp.dir.writeFile(.{ .sub_path = "supported.tsv", .data = text });
+    if (list) |text| try tmp.dir.writeFile(.{ .sub_path = "pythons.json", .data = text });
     try tmp.dir.writeFile(.{ .sub_path = "gh.txt", .data = "earlier=1\n" });
     var fake = h.Fake{ .alloc = a, .routes = &.{} };
     var runner = h.FakeRunner{ .alloc = a, .work = "" };
-    return exec(a, &.{ "matrix", "--supported", try h.path(a, tmp, "supported.tsv"), "--platform", "linux-x86_64", "--github-output", try h.path(a, tmp, "gh.txt") }, &fake, &runner);
+    return exec(a, &.{ "matrix", "--pythons", try h.path(a, tmp, "pythons.json"), "--platform", "linux-x86_64", "--github-output", try h.path(a, tmp, "gh.txt") }, &fake, &runner);
 }
 
 test "matrix appends the job matrix of the platform as one line and prints the Pythons it runs" {
@@ -478,21 +478,22 @@ test "matrix appends the job matrix of the platform as one line and prints the P
     const a = ar.allocator();
     var tmp = t.tmpDir(.{});
     defer tmp.cleanup();
-    const r = try matrixOf(a, &tmp, "# platform\tpython\nlinux-x86_64\t3.13\nlinux-x86_64\t3.14\n");
+    const r = try matrixOf(a, &tmp, "[\"3.13.16\",\"3.14.8\"]");
     try t.expectEqual(@as(u8, 0), r.code);
     try t.expectEqualStrings("", r.err);
-    try t.expectEqualStrings("pypi_smoke: the user test of the linux-x86_64 wheel runs on ubuntu-24.04 with Python 3.13, 3.14\n", r.out);
-    try t.expectEqualStrings("earlier=1\nmatrix={\"include\":[{\"platform\":\"linux-x86_64\",\"python\":\"3.13\",\"runner\":\"ubuntu-24.04\"},{\"platform\":\"linux-x86_64\",\"python\":\"3.14\",\"runner\":\"ubuntu-24.04\"}]}\n", try h.readAll(a, &tmp, "gh.txt"));
+    try t.expectEqualStrings("pypi_smoke: the jobs of the linux-x86_64 wheel run on ubuntu-24.04 with Python 3.13.16, 3.14.8\n", r.out);
+    try t.expectEqualStrings("earlier=1\nmatrix={\"include\":[{\"platform\":\"linux-x86_64\",\"python\":\"3.13.16\",\"runner\":\"ubuntu-24.04\"},{\"platform\":\"linux-x86_64\",\"python\":\"3.14.8\",\"runner\":\"ubuntu-24.04\"}]}\n", try h.readAll(a, &tmp, "gh.txt"));
 }
 
-test "matrix refuses a malformed list, a list with no row for the platform and a list it cannot read, and appends nothing" {
+test "matrix refuses a malformed list, an empty list and a list it cannot read, and appends nothing" {
     var ar = std.heap.ArenaAllocator.init(t.allocator);
     defer ar.deinit();
     const a = ar.allocator();
     const Case = struct { list: ?[]const u8, why: []const u8 };
     const cases = [_]Case{
-        .{ .list = "linux-x86_64\t3.13\nlinux-x86_64\tpy3\n", .why = "line 2 of {s} names the Python 'py3', not `3.<minor>`" },
-        .{ .list = "# nothing yet\n", .why = "{s} has no row for the platform linux-x86_64: its user test would have no job" },
+        .{ .list = "[\"3.13.16\",\"py3\"]", .why = "entry 2 of {s} is 'py3', not `3.<minor>.<micro>`" },
+        .{ .list = "[]", .why = "{s} names no Python: its jobs would be none" },
+        .{ .list = "linux-x86_64\t3.13\n", .why = "{s} is not a JSON list of strings" },
         .{ .list = null, .why = "cannot read {s}: FileNotFound" },
     };
     inline for (cases) |c| {
@@ -500,7 +501,7 @@ test "matrix refuses a malformed list, a list with no row for the platform and a
         defer tmp.cleanup();
         const r = try matrixOf(a, &tmp, c.list);
         try t.expectEqual(@as(u8, 1), r.code);
-        const why = try std.fmt.allocPrint(a, c.why, .{try h.path(a, &tmp, "supported.tsv")});
+        const why = try std.fmt.allocPrint(a, c.why, .{try h.path(a, &tmp, "pythons.json")});
         try t.expectEqualStrings(try std.fmt.allocPrint(a, "pypi_smoke: FAILED: {s}\n", .{why}), r.err);
         try t.expectEqualStrings(try std.fmt.allocPrint(a, "::error title=pypi::{s}\n", .{why}), r.out);
         try t.expectEqualStrings("earlier=1\n", try h.readAll(a, &tmp, "gh.txt"));
@@ -513,11 +514,11 @@ test "matrix fails when the output file cannot be written" {
     const a = ar.allocator();
     var tmp = t.tmpDir(.{});
     defer tmp.cleanup();
-    try tmp.dir.writeFile(.{ .sub_path = "supported.tsv", .data = "linux-x86_64\t3.13\n" });
+    try tmp.dir.writeFile(.{ .sub_path = "pythons.json", .data = "[\"3.13.16\"]" });
     const gh = try h.path(a, &tmp, "no/such/dir/gh.txt");
     var fake = h.Fake{ .alloc = a, .routes = &.{} };
     var runner = h.FakeRunner{ .alloc = a, .work = "" };
-    const r = try exec(a, &.{ "matrix", "--supported", try h.path(a, &tmp, "supported.tsv"), "--platform", "linux-x86_64", "--github-output", gh }, &fake, &runner);
+    const r = try exec(a, &.{ "matrix", "--pythons", try h.path(a, &tmp, "pythons.json"), "--platform", "linux-x86_64", "--github-output", gh }, &fake, &runner);
     try t.expectEqual(@as(u8, 1), r.code);
     try t.expectEqualStrings(try std.fmt.allocPrint(a, "pypi_smoke: FAILED: cannot write --github-output {s}: FileNotFound\n", .{gh}), r.err);
 }
@@ -553,9 +554,10 @@ test "a usage error is exit 2 with its message, and reaches neither the index no
         .{ .args = &.{ "install", "--index", "dist", "--dist", "d", "--python", "p", "--example", "e", "--expect", "x", "--data", "f", "--abi-table", "t", "--work", "w", "--delay", "0" }, .want = "pypi_smoke: --attempts and --delay are for an index; --index dist installs once\n" },
         .{ .args = &.{ "state", "--index", "dist", "--dist", "d", "--github-output", "g" }, .want = "pypi_smoke: --index is testpypi or pypi\n" },
         .{ .args = &.{ "verify", "--index", "dist", "--dist", "d" }, .want = "pypi_smoke: --index is testpypi or pypi\n" },
-        .{ .args = &.{ "matrix", "--supported", "s", "--platform", "linux-x86_64" }, .want = USAGE },
-        .{ .args = &.{ "matrix", "--supported", "s", "--platform", "macos-arm64", "--github-output", "g" }, .want = "pypi_smoke: --platform is one of linux-x86_64\n" },
-        .{ .args = &.{ "matrix", "--supported", "s", "--platform", "linux-x86_64", "--github-output", "g", "--python", "3.13" }, .want = "pypi_smoke: unknown argument --python\n" ++ USAGE },
+        .{ .args = &.{ "matrix", "--pythons", "s", "--platform", "linux-x86_64" }, .want = USAGE },
+        .{ .args = &.{ "matrix", "--pythons", "s", "--platform", "windows-x86_64", "--github-output", "g" }, .want = "pypi_smoke: --platform is one of linux-x86_64, macos-arm64\n" },
+        .{ .args = &.{ "matrix", "--pythons", "s", "--platform", "linux-x86_64", "--github-output", "g", "--python", "3.13" }, .want = "pypi_smoke: unknown argument --python\n" ++ USAGE },
+        .{ .args = &.{ "matrix", "--supported", "s", "--platform", "linux-x86_64", "--github-output", "g" }, .want = "pypi_smoke: unknown argument --supported\n" ++ USAGE },
         .{ .args = &.{ "install", "--index", "pypi", "--dist", "d", "--python", "p", "--example", "e", "--expect", "x", "--abi-table", "t", "--work", "w" }, .want = USAGE },
         .{ .args = &.{ "install", "--index", "pypi", "--dist", "d", "--python", "p", "--example", "e", "--expect", "x", "--abi-table", "t", "--work", "w", "--data" }, .want = "pypi_smoke: --data needs one value\n" },
     };

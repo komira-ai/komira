@@ -114,8 +114,8 @@ zig_test(
 # release-main concurrency group, no secret and the version of every run
 # (.github/workflows/release_workflow_test.zig says what each catches); and of its user test of
 # the Python wheel (.github/workflows/release_wheel_test.zig): the wheel built as pypi.yml
-# builds it, installed from the file on a fresh runner per Python of
-# python/supported_pythons.tsv (the job of wheel_user_test_job.zig), no upload to an index, and,
+# builds it, installed from the file on a fresh runner per supported Python
+# (//python:supported_pythons, from python/pythons.bzl; the job of wheel_user_test_job.zig), no upload to an index, and,
 # played from the file, a failed user test is a red run that holds back no other job. A build
 # action.
 zig_test(
@@ -159,10 +159,11 @@ zig_test(
 # fallback a scheduled run takes, no secret and no token, no upload step in the build job, the identity (`id-token`) in the build jobs and the upload jobs alone, the thirteen
 # jobs of the Linux and the macOS wheel with the exact runner, gate, needs and environment of
 # each (the user test of the wheel file, the job of wheel_user_test_job.zig, before the first
-# upload), the upload only for the state `absent` on a pinned action with its defaults, Python 3.13
-# set up in the smoke jobs alone (the user test sets up its matrix's Python), every action pinned
-# to a commit, and the Linux result job; and a run played from the file's text for each state of
-# the indexes (pypi_workflow_run.zig: an unchanged main is green with the notice `already
+# upload), the upload only for the state `absent` on a pinned action with its defaults, the smoke
+# jobs and the user test one job per supported Python of the build's matrix (written from
+# //python:supported_pythons) and the only ones that set up Python, every action pinned to a
+# commit, and the Linux result job; and a run played from the file's text for each state of the
+# indexes (pypi_workflow_run.zig: an unchanged main is green with the notice `already
 # published`, a documentation-only commit runs the user test and is green with the notice of
 # differing bytes, a wheel that failed its user test is uploaded nowhere). The macOS jobs' further contract is in
 # //:release_macos_cases. A build action.

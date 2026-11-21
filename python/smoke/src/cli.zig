@@ -8,7 +8,7 @@
 //!   pypi_smoke verify --index <testpypi|pypi> --dist <dir> [--attempts <n>] [--delay <seconds>]
 //!   pypi_smoke install --index <testpypi|pypi|dist> --dist <dir> --python <exe> --example <file> --expect <file>
 //!                      --data <file>... --abi-table <file> --work <dir> [--attempts <n>] [--delay <seconds>]
-//!   pypi_smoke matrix --supported <file> --platform <name> --github-output <file>
+//!   pypi_smoke matrix --pythons <file> --platform <name> --github-output <file>
 //!
 //! `dist` names the wheel the build made as the index will (meta.zig) and puts it alone in a directory; `state`
 //! says whether an index already holds that file (index.zig `lookup`); `present` says, from a file holding the
@@ -17,7 +17,8 @@
 //! `present=false`; `verify` and `install` are the smoke
 //! (index.zig `verify`, install.zig); `install --index dist` installs the wheel of the dist directory itself, with
 //! no index and one attempt (a directory does not lag: `--attempts` and `--delay` are refused with it); `matrix`
-//! reads the list of supported Pythons (matrix.zig) and appends `matrix=<the job matrix of the platform as JSON>`. Every step prints `pypi_smoke: ...`; a refusal prints
+//! reads the list of supported Pythons the build wrote for a platform (`//python:supported_pythons[<platform>]`,
+//! matrix.zig) and appends `matrix=<the job matrix of the platform as JSON>`. Every step prints `pypi_smoke: ...`; a refusal prints
 //! `pypi_smoke: FAILED: <why>` on stderr and `::error title=pypi::<why on one line>` on stdout for the GitHub
 //! log; the exit status is 0 when the step held, 1 when it refused or failed, 2 for a usage error. Outputs for
 //! later steps are appended to the file `--github-output` names. Everything is a flag; no environment is read.
@@ -44,7 +45,7 @@ pub const usage =
     \\       pypi_smoke verify --index <testpypi|pypi> --dist <dir> [--attempts <n>] [--delay <seconds>]
     \\       pypi_smoke install --index <testpypi|pypi|dist> --dist <dir> --python <exe> --example <file> --expect <file>
     \\                          --data <file>... --abi-table <file> --work <dir> [--attempts <n>] [--delay <seconds>]
-    \\       pypi_smoke matrix --supported <file> --platform <name> --github-output <file>
+    \\       pypi_smoke matrix --pythons <file> --platform <name> --github-output <file>
     \\
 ;
 
@@ -262,7 +263,7 @@ fn cmdInstall(a: Allocator, args: []const []const u8, deps: Deps, out: *std.Io.W
 }
 
 fn cmdMatrix(a: Allocator, args: []const []const u8, out: *std.Io.Writer, err: *std.Io.Writer) !u8 {
-    const names = [_][]const u8{ "--supported", "--platform", "--github-output" };
+    const names = [_][]const u8{ "--pythons", "--platform", "--github-output" };
     const p = (try parseFlags(a, args, &names, 3, null, err)) orelse return 2;
     const platform = matrix.platformNamed(p.get(1)) orelse {
         try err.print("pypi_smoke: --platform is one of {s}\n", .{try matrix.platformNames(a)});
@@ -271,14 +272,11 @@ fn cmdMatrix(a: Allocator, args: []const []const u8, out: *std.Io.Writer, err: *
     };
     var why: []const u8 = "";
     const text = meta.readFile(a, &why, p.get(0), 1 << 20) catch |e| return failed(a, out, err, e, why);
-    const rows = matrix.parse(a, &why, p.get(0), text) catch |e| return failed(a, out, err, e, why);
-    const own = matrix.forPlatform(a, &why, p.get(0), rows, platform) catch |e| return failed(a, out, err, e, why);
-    const line = try std.fmt.allocPrint(a, "matrix={s}\n", .{try matrix.json(a, own)});
+    const versions = matrix.parse(a, &why, p.get(0), text) catch |e| return failed(a, out, err, e, why);
+    const line = try std.fmt.allocPrint(a, "matrix={s}\n", .{try matrix.json(a, platform, versions)});
     common.appendFile(p.get(2), line) catch |e|
         return failedText(a, out, err, "cannot write --github-output {s}: {s}", .{ p.get(2), @errorName(e) });
-    var pythons = std.ArrayList([]const u8).empty;
-    for (own) |r| try pythons.append(a, r.python);
-    try out.print("pypi_smoke: the user test of the {s} wheel runs on {s} with Python {s}\n", .{ platform.name, platform.runner, try std.mem.join(a, ", ", pythons.items) });
+    try out.print("pypi_smoke: the jobs of the {s} wheel run on {s} with Python {s}\n", .{ platform.name, platform.runner, try std.mem.join(a, ", ", versions) });
     try out.flush();
     return 0;
 }

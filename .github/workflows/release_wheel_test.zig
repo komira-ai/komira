@@ -4,7 +4,8 @@
 //!  - `wheel` builds on the farm the wheel pypi.yml publishes, as pypi.yml's `build` builds it: the target
 //!    //python:komira_wheel[release] and the three stamp flags of `release_json stamp` of the run's commit are
 //!    the same text in both files, then the install test and the driver with the same flags; it writes the
-//!    test job's matrix from python/supported_pythons.tsv for linux-x86_64 and keeps the dist directory and the
+//!    test job's matrix for linux-x86_64 from the list of the supported Pythons it builds
+//!    (//python:supported_pythons[linux-x86_64], python/pythons.bzl), and keeps the dist directory and the
 //!    driver with the quickstart files as `wheel-<sha>-dist` and `wheel-<sha>-smoke`; it runs on
 //!    ubuntu-24.04 in the environment `build` with `contents: read` and the `id-token: write` of farm-connect,
 //!    at the batch class, with no `needs:` and no `if:` (every run of the workflow builds it);
@@ -48,7 +49,8 @@ const BUILD_LINES = [_][]const u8{
     "        run: '\"$RUNNER_TEMP/wheel/smoke/pypi_smoke\" dist --wheel \"$RUNNER_TEMP/wheel/built/komira.whl\" --out \"$RUNNER_TEMP/wheel/dist\" --github-output \"$GITHUB_OUTPUT\"'",
     "        run: cp python/examples/quickstart.py python/examples/quickstart.expected python/examples/readings.parquet src/so/abi/komira.tsv \"$RUNNER_TEMP/wheel/smoke/\"",
     "        id: matrix",
-    "        run: '\"$RUNNER_TEMP/wheel/smoke/pypi_smoke\" matrix --supported python/supported_pythons.tsv --platform linux-x86_64 --github-output \"$GITHUB_OUTPUT\"'",
+    "          args: build //python:supported_pythons[linux-x86_64] --out ${{ runner.temp }}/wheel/pythons.json",
+    "        run: '\"$RUNNER_TEMP/wheel/smoke/pypi_smoke\" matrix --pythons \"$RUNNER_TEMP/wheel/pythons.json\" --platform linux-x86_64 --github-output \"$GITHUB_OUTPUT\"'",
     "          name: wheel-${{ github.sha }}-dist",
     "          path: ${{ runner.temp }}/wheel/dist",
     "          name: wheel-${{ github.sha }}-smoke",
@@ -347,6 +349,9 @@ test "each defect of the wheel jobs of release.yml is refused with its message" 
     // no install test, no matrix from the list, the files of the quickstart not beside the driver
     try expectRefused(ar, try inJob(ar, rel, BUILD_JOB, " //python:wheel_install_test\n", " //python:komira_wheel\n"), pypi, "the line `args: build -c komira.package_stamp=${{ steps.stamp.outputs.build_number }} -c komira.package_commit=${{ steps.stamp.outputs.source_commit }} -c komira.package_timestamp_ms=${{ steps.stamp.outputs.timestamp_ms }} //python:wheel_install_test` is missing");
     try expectRefused(ar, try inJob(ar, rel, BUILD_JOB, "--platform linux-x86_64", "--platform macos-arm64"), pypi, "--platform linux-x86_64");
+    // the matrix from another list than the one built from python/pythons.bzl, or from the macOS one
+    try expectRefused(ar, try inJob(ar, rel, BUILD_JOB, "matrix --pythons \"$RUNNER_TEMP/wheel/pythons.json\"", "matrix --pythons python/pythons.json"), pypi, "matrix --pythons");
+    try expectRefused(ar, try inJob(ar, rel, BUILD_JOB, "//python:supported_pythons[linux-x86_64]", "//python:supported_pythons[macos-arm64]"), pypi, "the line `args: build //python:supported_pythons[linux-x86_64]");
     try expectRefused(ar, try inJob(ar, rel, BUILD_JOB, " src/so/abi/komira.tsv \"$RUNNER_TEMP/wheel/smoke/\"", " \"$RUNNER_TEMP/wheel/smoke/\""), pypi, "the line `run: cp python/examples/quickstart.py");
     // an upload to an index from release.yml
     try expectRefused(ar, try inJob(ar, rel, BUILD_JOB, "      - name: Stop buck2\n", "      - uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3\n      - name: Stop buck2\n"), pypi, "names \"gh-action-pypi-publish\"");

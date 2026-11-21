@@ -8,7 +8,8 @@ load("@komira//tools/build/platforms:defs.bzl", "DARWIN_ARM64", "LINUX_X86_64")
 # (`present`), and after an upload checks what the index serves (`verify`) and what
 # `pip install` makes of it in an empty environment (`install`), from an index or, before any upload, from
 # the dist directory itself (`install --index dist`); `matrix` turns the list of supported Pythons
-# (python/supported_pythons.tsv) into the jobs of the user test. src/cli.zig says what each command does;
+# the build writes for a platform (//python:supported_pythons[<platform>], from python/pythons.bzl) into the
+# jobs of a workflow that installs the wheel once per Python. src/cli.zig says what each command does;
 # src/main.zig only forwards to the library (pypi_smoke_lib).
 #
 # Each scenario of its cases is its own test, on wheels made in memory, an index and a file host in memory
@@ -48,14 +49,15 @@ load("@komira//tools/build/platforms:defs.bzl", "DARWIN_ARM64", "LINUX_X86_64")
 #                  the same check holds the install page's ```text block to the expected output, and the
 #                  changelog's newest release is its first `## <version>` heading after any `## Unreleased`,
 #                  a heading that is no version refused;
-#   matrix_unit    the list of supported Pythons: rows in file order, comments and empty lines skipped, the job
-#                  matrix as one line of JSON; a row that is not two fields, a platform whose wheel is not
-#                  built on every merge, a Python that is not `3.<minor>` (a CRLF line end included) and a
-#                  repeated row refused naming the line; a list with no row for the platform refused.
+#   matrix_unit    the list of supported Pythons as `matrix` reads it: a JSON list of exact versions gives the
+#                  job matrix of a platform as one line of JSON, with its runner; text that is not a JSON list of
+#                  strings, a version that is not `3.<minor>.<micro>`, a minor twice or out of order, and an empty
+#                  list refused, each naming the file and the entry.
 # readme_shows_quickstart runs that check on the real files: the "What works" block of python/README.md is
 # python/examples/quickstart.py byte for byte. install_page_shows_quickstart does the same for docs/install.md:
 # its python block is the quickstart, and its text block is what the quickstart prints at the changelog's newest
-# release and the ABI version of src/so/abi/komira.tsv. supported_pythons_list reads python/supported_pythons.tsv.
+# release and the ABI version of src/so/abi/komira.tsv. supported_pythons_lists reads the two lists of
+# //python:supported_pythons.
 _ZIG = "komira//tools/build/toolchains:zig_next"
 _BUSYBOX = "komira//tools/build/toolchains:busybox"
 
@@ -129,14 +131,17 @@ zig_test(
     zig = _ZIG,
 )
 
-# The list of the Pythons and platforms of the wheel's user test, read from the file itself (exported by
-# python/BUCK): every row parses and every platform built on every merge has a row.
+# The supported Pythons as the workflows' jobs read them: the two JSON lists of //python:supported_pythons are
+# each exactly the versions src/supported_pythons_test.zig writes out, naming the same minors once each, oldest
+# first, and `matrix` (matrix.zig) takes each for its platform; each defect of a list, written into a copy, is
+# refused with its message.
 zig_test(
-    name = "supported_pythons_list",
+    name = "supported_pythons_lists",
     exec_compatible_with = LINUX_X86_64,
-    src = "src/supported_pythons_list_test.zig",
+    src = "src/supported_pythons_test.zig",
     data = {
-        "supported_pythons.tsv": "//python:supported_pythons.tsv",
+        "linux-x86_64.json": "//python:supported_pythons[linux-x86_64]",
+        "macos-arm64.json": "//python:supported_pythons[macos-arm64]",
     },
     deps = [":pypi_smoke_lib"],
     busybox = _BUSYBOX,
@@ -151,7 +156,7 @@ zig_exe(
     unit_tests = [":{}_unit".format(s) for s in _SCENARIOS] + [
         ":install_page_shows_quickstart",
         ":readme_shows_quickstart",
-        ":supported_pythons_list",
+        ":supported_pythons_lists",
         "komira//tools/build/toolchains:zig_next_version",
     ],
     busybox = _BUSYBOX,
@@ -173,7 +178,7 @@ zig_exe(
     unit_tests = [":{}_unit".format(s) for s in _SCENARIOS] + [
         ":install_page_shows_quickstart",
         ":readme_shows_quickstart",
-        ":supported_pythons_list",
+        ":supported_pythons_lists",
         "komira//tools/build/toolchains:zig_next_version",
     ],
     busybox = _BUSYBOX,

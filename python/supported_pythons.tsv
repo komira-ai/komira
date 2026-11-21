@@ -1,5 +1,0 @@
-# The Pythons and platforms the komira wheel is installed on as a user installs it, after every merge to main
-# (the job wheel-user-test of .github/workflows/release.yml) and before the daily upload (the same job of
-# .github/workflows/pypi.yml): one job per row. A row is <platform><TAB><python>; python/smoke/src/matrix.zig
-# reads the list and says which platforms a row may name. Adding a Python is adding its row.
-linux-x86_64	3.13

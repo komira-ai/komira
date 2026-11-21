@@ -15,8 +15,10 @@
 #                     test on those bytes (//python:wheel_install_test), builds the smoke driver
 #                     (//python/smoke:pypi_smoke) and names the dist directory; keeps the dist directory
 #                     and the driver (with the quickstart, its expected output, its data and the ABI
-#                     table) as two workflow artifacts, and writes the matrix of `wheel-user-test` from
-#                     python/supported_pythons.tsv. It holds no upload step.
+#                     table) as two workflow artifacts, and writes the job matrix of `wheel-user-test`
+#                     and the smoke jobs (its output `matrix`, one job per supported Python) from
+#                     //python:supported_pythons[linux-x86_64], the exact versions python/pythons.bzl
+#                     gives for Linux x86_64. It holds no upload step.
 #   `wheel-user-test` the user test of the wheel file, the same job release.yml runs on every merge: one
 #                     job per Python of the list, on a fresh runner with no checkout, `pip install`s the
 #                     built wheel from the dist directory alone into an empty environment and runs the
@@ -26,8 +28,9 @@
 #                     for `absent`, uploads the dist directory with trusted publishing.
 #   `testpypi-smoke`  (not for `differs`) on a fresh runner: the driver `verify`s that TestPyPI serves
 #                     the wheel as built (sha256, size, METADATA), then `install`s it with pip from
-#                     TestPyPI into an empty environment on the Python a user has (actions/setup-python
-#                     3.13) and runs the quickstart.
+#                     TestPyPI into an empty environment on the Python a user has and runs the
+#                     quickstart: one job per supported Python (python/pythons.bzl), each installed by
+#                     actions/setup-python at its exact version.
 #   `pypi`            the same as `testpypi` for PyPI; it needs `testpypi-smoke`, so a wheel that did not
 #                     install from TestPyPI is never sent to PyPI.
 #   `pypi-smoke`      (not for `differs`) the same as `testpypi-smoke` against PyPI.
@@ -48,11 +51,13 @@
 #                                present`), and only when one does not builds the wheel, its install
 #                                test and the macOS driver on the Macs, and keeps the dist directory
 #                                and the drivers as two artifacts. A daily run with no new code builds
-#                                nothing on the Macs; its output `version` is then empty.
+#                                nothing on the Macs; its output `version` is then empty. Its output
+#                                `matrix`, the macOS smoke jobs' matrix of the supported Pythons
+#                                (//python:supported_pythons[macos-arm64]), is written on every run.
 #   `testpypi-macos-arm64`       like `testpypi`, for the macOS dist; it runs only when the build made a
 #                                wheel.
-#   `testpypi-smoke-macos-arm64` like `testpypi-smoke`, on the GitHub-hosted runner macos-15 (Apple
-#                                silicon) with the macOS driver.
+#   `testpypi-smoke-macos-arm64` like `testpypi-smoke`, one job per supported Python, on the
+#                                GitHub-hosted runner macos-15 (Apple silicon) with the macOS driver.
 #   `pypi-macos-arm64`           like `pypi`, after the macOS smoke on TestPyPI.
 #   `pypi-smoke-macos-arm64`     like `pypi-smoke`, on macos-15.
 #   `result-macos-arm64`         the verdict of the macOS chain, as `result` is the Linux chain's.
@@ -89,12 +94,13 @@
 # built, and `pip install komira==<version>` into an empty environment (the dependencies from the
 # real PyPI, komira from the index under test, nothing else) gives a package that imports, reports its
 # version and the engine's ABI version, and registers a Parquet file in a session and closes it: on
-# Linux x86_64 on CPython 3.13, and, in the macOS smoke jobs, on macOS arm64 on CPython 3.13 on a
-# hosted macOS runner.
+# Linux x86_64, and, in the macOS smoke jobs, on macOS arm64 on a hosted macOS runner, each on every
+# supported CPython (3.11, 3.12, 3.13 and 3.14; python/pythons.bzl holds the exact versions).
 # `wheel-user-test` proves the same of the wheel file before any upload, with pip reading no index for
-# komira, on every Python of python/supported_pythons.tsv.
+# komira, on every supported Python on Linux x86_64.
 # WHAT IT DOES NOT PROVE: any query result (the call that runs a query has not landed), a platform
-# other than Linux x86_64 and macOS arm64, a macOS older than the runner's, or a Python other than 3.13.
+# other than Linux x86_64 and macOS arm64, a macOS older than the runner's, or a patch release of a
+# supported Python other than the one its job installs.
 name: pypi
 
 on:
@@ -184,6 +190,13 @@ jobs:
         with:
           args: build -c komira.package_stamp=${{ steps.stamp.outputs.build_number }} -c komira.package_commit=${{ steps.stamp.outputs.source_commit }} -c komira.package_timestamp_ms=${{ steps.stamp.outputs.timestamp_ms }} //python/smoke:pypi_smoke --out ${{ runner.temp }}/pypi/smoke/pypi_smoke
           assert-remote: ${{ steps.assert.outputs.path }}
+      # The supported Pythons: the exact versions python/pythons.bzl gives for Linux x86_64, as a
+      # JSON list, which the matrix step below reads.
+      - name: build the list of the supported Pythons
+        uses: ./.github/actions/buck2-farm
+        with:
+          args: build //python:supported_pythons[linux-x86_64] --out ${{ runner.temp }}/pypi/pythons.json
+          assert-remote: ${{ steps.assert.outputs.path }}
       # The directory the upload sends: the wheel under its file name, read from the wheel itself. The
       # version is the output the later jobs name their artifacts with.
       - name: the dist directory
@@ -192,10 +205,10 @@ jobs:
       # What `wheel-user-test` runs and holds the output to, beside the driver: that job has no checkout.
       - name: the quickstart, its expected output, its data and the ABI table
         run: cp python/examples/quickstart.py python/examples/quickstart.expected python/examples/readings.parquet src/so/abi/komira.tsv "$RUNNER_TEMP/pypi/smoke/"
-      # One entry of `wheel-user-test` per row of the Linux x86_64 wheel in python/supported_pythons.tsv.
-      - name: the Pythons of the user test
+      # One entry of `wheel-user-test` and of each Linux smoke job per supported Python.
+      - name: the Pythons of the user test and the smoke
         id: matrix
-        run: '"$RUNNER_TEMP/pypi/smoke/pypi_smoke" matrix --supported python/supported_pythons.tsv --platform linux-x86_64 --github-output "$GITHUB_OUTPUT"'
+        run: '"$RUNNER_TEMP/pypi/smoke/pypi_smoke" matrix --pythons "$RUNNER_TEMP/pypi/pythons.json" --platform linux-x86_64 --github-output "$GITHUB_OUTPUT"'
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: pypi-${{ steps.dist.outputs.version }}-dist
@@ -213,8 +226,8 @@ jobs:
         run: ./buck2 kill || true
 
   # The user test of the wheel file, before any upload: the same job as release.yml's
-  # `wheel-user-test`, on the bytes this run built and will upload. One job per Python of
-  # python/supported_pythons.tsv, each on a fresh hosted runner with no checkout: pip installs the
+  # `wheel-user-test`, on the bytes this run built and will upload. One job per supported Python
+  # (build's output `matrix`, from python/pythons.bzl), each on a fresh hosted runner with no checkout: pip installs the
   # wheel from the dist directory alone into an empty environment, and the quickstart must print
   # what python/examples/quickstart.expected says. `testpypi` needs it, so a wheel that failed it
   # is never uploaded. No identity, no permission.
@@ -294,6 +307,10 @@ jobs:
     if: github.ref == 'refs/heads/main' && needs.testpypi.outputs.state != 'differs'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    # one job per supported Python; each runs to the end whatever the others do
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.build.outputs.matrix) }}
     permissions:
       contents: read
     steps:
@@ -317,7 +334,7 @@ jobs:
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         id: python
         with:
-          python-version: '3.13'
+          python-version: ${{ matrix.python }}
       - name: pip installs komira from TestPyPI and the quickstart prints what it should
         env:
           PYTHON: ${{ steps.python.outputs.python-path }}
@@ -364,6 +381,10 @@ jobs:
     if: github.ref == 'refs/heads/main' && needs.pypi.outputs.state != 'differs'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    # one job per supported Python; each runs to the end whatever the others do
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.build.outputs.matrix) }}
     permissions:
       contents: read
     steps:
@@ -387,7 +408,7 @@ jobs:
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         id: python
         with:
-          python-version: '3.13'
+          python-version: ${{ matrix.python }}
       - name: pip installs komira from PyPI and the quickstart prints what it should
         env:
           PYTHON: ${{ steps.python.outputs.python-path }}
@@ -453,6 +474,7 @@ jobs:
       id-token: write
     outputs:
       version: ${{ steps.dist.outputs.version }}
+      matrix: ${{ steps.matrix.outputs.matrix }}
     steps:
       # The commit the run started on, with the full history: the stamp is
       # derived from git and refuses a shallow clone.
@@ -498,6 +520,17 @@ jobs:
         with:
           args: build -c komira.package_stamp=${{ steps.stamp.outputs.build_number }} -c komira.package_commit=${{ steps.stamp.outputs.source_commit }} -c komira.package_timestamp_ms=${{ steps.stamp.outputs.timestamp_ms }} //python/smoke:pypi_smoke --out ${{ runner.temp }}/pypi-macos-arm64/smoke/pypi_smoke
           assert-remote: ${{ steps.assert.outputs.path }}
+      # The Pythons the macOS smoke jobs install, one job each: the exact versions python/pythons.bzl
+      # gives for macOS arm64 (a Linux build of a list), written by the Linux driver as the job matrix,
+      # the job's output `matrix`, on every run.
+      - name: build the list of the supported Pythons
+        uses: ./.github/actions/buck2-farm
+        with:
+          args: build //python:supported_pythons[macos-arm64] --out ${{ runner.temp }}/pypi-macos-arm64/pythons.json
+          assert-remote: ${{ steps.assert.outputs.path }}
+      - name: the Pythons of the macOS smoke
+        id: matrix
+        run: '"$RUNNER_TEMP/pypi-macos-arm64/smoke/pypi_smoke" matrix --pythons "$RUNNER_TEMP/pypi-macos-arm64/pythons.json" --platform macos-arm64 --github-output "$GITHUB_OUTPUT"'
       # The wheel's file name, written at analysis, without building the wheel.
       - name: build the file name of the macOS wheel
         uses: ./.github/actions/buck2-farm
@@ -601,6 +634,10 @@ jobs:
     if: github.ref == 'refs/heads/main' && needs.testpypi-macos-arm64.outputs.state != 'differs'
     runs-on: macos-15
     timeout-minutes: 30
+    # one job per supported Python; each runs to the end whatever the others do
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.build-macos-arm64.outputs.matrix) }}
     permissions:
       contents: read
     steps:
@@ -624,7 +661,7 @@ jobs:
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         id: python
         with:
-          python-version: '3.13'
+          python-version: ${{ matrix.python }}
       - name: pip installs komira from TestPyPI on macOS and the quickstart prints what it should
         env:
           PYTHON: ${{ steps.python.outputs.python-path }}
@@ -671,6 +708,10 @@ jobs:
     if: github.ref == 'refs/heads/main' && needs.pypi-macos-arm64.outputs.state != 'differs'
     runs-on: macos-15
     timeout-minutes: 30
+    # one job per supported Python; each runs to the end whatever the others do
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.build-macos-arm64.outputs.matrix) }}
     permissions:
       contents: read
     steps:
@@ -694,7 +735,7 @@ jobs:
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         id: python
         with:
-          python-version: '3.13'
+          python-version: ${{ matrix.python }}
       - name: pip installs komira from PyPI on macOS and the quickstart prints what it should
         env:
           PYTHON: ${{ steps.python.outputs.python-path }}
