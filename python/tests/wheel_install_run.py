@@ -244,7 +244,7 @@ def check_installed(dists, python_version, skip_requirements):
 def make_prefix(prefix, minor):
     """An empty virtual environment of this interpreter at `prefix`; returns
     (its interpreter, its site directory)."""
-    exe = os.path.abspath(sys.executable)
+    exe = os.path.realpath(sys.executable)
     os.makedirs(os.path.join(prefix, "bin"))
     site = os.path.join(prefix, "lib", "python3.{}".format(minor), "site-packages")
     os.makedirs(site)
