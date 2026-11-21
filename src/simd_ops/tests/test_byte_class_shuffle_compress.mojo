@@ -13,6 +13,7 @@
 #   F3  byte_find_in_set_u8x16 — nibble-LUT find-in-set.
 #   B1  append_set_positions_u16/32/64 — set-bit enumeration.
 #   B2  popcount / first_set_bit.
+#   B3  bmi2_pext / bmi2_pdep u32 and u64 — against a bit-by-bit model.
 #   X1  compress_u8x32 — mask-driven compress.
 #   X2  compress_with_count_u8x32 — count return.
 #   X3  expand_via_shuffle_u8x32 — carve-out composite.
@@ -37,6 +38,8 @@ from simd_ops.byte_class.bitmask_to_positions import (
     append_set_positions_u16, append_set_positions_u32,
     append_set_positions_u64, popcount_u32, popcount_u64,
     first_set_bit_u32, first_set_bit_u64,
+    bmi2_pext_u32_x86, bmi2_pext_u64_x86,
+    bmi2_pdep_u32_x86, bmi2_pdep_u64_x86,
 )
 from simd_ops.byte_class.compress_expand import (
     compress_u8x32, compress_with_count_u8x32,
@@ -297,6 +300,82 @@ def test_popcount_first_set() raises:
 
 
 # =============================================================================
+# B3 — bmi2_pext / bmi2_pdep.
+# =============================================================================
+
+def _pext_model(src: UInt64, mask: UInt64) -> UInt64:
+    # Bit k of the result is the bit of `src` at the k-th set bit of `mask`.
+    var out = UInt64(0)
+    var k = UInt64(0)
+    for i in range(64):
+        var bit = UInt64(1) << UInt64(i)
+        if mask & bit != 0:
+            if src & bit != 0:
+                out |= UInt64(1) << k
+            k += 1
+    return out
+
+
+def _pdep_model(src: UInt64, mask: UInt64) -> UInt64:
+    # The bit at the k-th set bit of `mask` is bit k of `src`; every other bit is 0.
+    var out = UInt64(0)
+    var k = UInt64(0)
+    for i in range(64):
+        var bit = UInt64(1) << UInt64(i)
+        if mask & bit != 0:
+            if src & (UInt64(1) << k) != 0:
+                out |= bit
+            k += 1
+    return out
+
+
+def test_bmi2_pext_pdep() raises:
+    comptime if CompilationTarget.is_x86() and CompilationTarget._has_feature[
+        "bmi2"
+    ]():
+        # Exact values first: a scattered mask, then the model over the masks
+        # that bound the instruction (none, all, scattered, top and bottom bit).
+        assert_equal(bmi2_pext_u32_x86(UInt32(0xF0F0), UInt32(0x8181)), UInt32(0b1010))
+        assert_equal(bmi2_pdep_u32_x86(UInt32(0b1010), UInt32(0x8181)), UInt32(0x8080))
+        assert_equal(
+            bmi2_pext_u64_x86(UInt64(0xFFFF000000000001), UInt64(0x8000000000000001)),
+            UInt64(0b11),
+        )
+        assert_equal(
+            bmi2_pdep_u64_x86(UInt64(0b11), UInt64(0x8000000000000001)),
+            UInt64(0x8000000000000001),
+        )
+        var srcs: List[UInt64] = [
+            UInt64(0), UInt64(0xFFFFFFFFFFFFFFFF), UInt64(0x0123456789ABCDEF),
+            UInt64(0xF0F0F0F00F0F0F0F),
+        ]
+        var masks: List[UInt64] = [
+            UInt64(0), UInt64(0xFFFFFFFFFFFFFFFF), UInt64(0x8000000000000001),
+            UInt64(0x00FF00FF00FF00FF), UInt64(0xA5A5A5A5A5A5A5A5),
+        ]
+        for si in range(len(srcs)):
+            for mi in range(len(masks)):
+                var src = srcs[si]
+                var mask = masks[mi]
+                assert_equal(bmi2_pext_u64_x86(src, mask), _pext_model(src, mask))
+                assert_equal(bmi2_pdep_u64_x86(src, mask), _pdep_model(src, mask))
+                # pdep undoes pext on the mask's bits.
+                assert_equal(bmi2_pdep_u64_x86(bmi2_pext_u64_x86(src, mask), mask), src & mask)
+                var s32 = UInt32(src & UInt64(0xFFFFFFFF))
+                var m32 = UInt32(mask & UInt64(0xFFFFFFFF))
+                assert_equal(
+                    UInt64(bmi2_pext_u32_x86(s32, m32)),
+                    _pext_model(UInt64(s32), UInt64(m32)),
+                )
+                assert_equal(
+                    UInt64(bmi2_pdep_u32_x86(s32, m32)),
+                    _pdep_model(UInt64(s32), UInt64(m32)),
+                )
+    else:
+        print("test_bmi2_pext_pdep: not run: the target has no x86 BMI2, the only place pext and pdep exist")
+
+
+# =============================================================================
 # X1 — compress_u8x32.
 # =============================================================================
 
@@ -487,6 +566,7 @@ def main() raises -> None:
     test_append_set_positions_u16()
     test_append_set_positions_u64()
     test_popcount_first_set()
+    test_bmi2_pext_pdep()
     test_compress_u8x32()
     test_compress_with_count()
     test_expand_via_shuffle()

@@ -35,7 +35,7 @@
 
 from std.bit import count_trailing_zeros, pop_count
 from std.sys.info import CompilationTarget
-from std.sys.intrinsics import llvm_intrinsic
+from std.sys._assembly import inlined_assembly
 
 
 # =============================================================================
@@ -103,6 +103,12 @@ def append_set_positions_u64(
 # the compress-store kernel (see compress_expand.mojo) than in the
 # position enumeration above, but the wrapper here exposes BMI2 PEXT
 # for any consumer that wants the primitive.
+#
+# The four wrappers are inline `pext`/`pdep` in LLVM's default AT&T order,
+# `pext mask, src, dst` (Intel `PEXT dst, src, mask`): the compiler finds no
+# LLVM intrinsic named `llvm.x86.bmi.pext.32` (nor the pdep and 64-bit ones),
+# so the instruction is written out. test_byte_class_shuffle_compress.mojo
+# (B3) holds each against a bit-by-bit model, so a swapped operand fails it.
 
 @always_inline
 def bmi2_pext_u32_x86(src: UInt32, mask: UInt32) -> UInt32:
@@ -111,19 +117,20 @@ def bmi2_pext_u32_x86(src: UInt32, mask: UInt32) -> UInt32:
     Result bit k = bit at position `pos_of_kth_set_bit(mask)` in `src`,
     for k = 0..popcount(mask)-1.  Result bits beyond popcount are 0.
 
-    Used by the CSV scanner for the compact-positions-to-low-bits operation
-    after a byte-class scan.
-
     x86 BMI2 ONLY — caller must gate via
     `comptime if CompilationTarget.is_x86() and HAS_BMI2`.
     """
-    return llvm_intrinsic["llvm.x86.bmi.pext.32", UInt32](src, mask)
+    return inlined_assembly[
+        "pextl $2, $1, $0", UInt32, constraints="=r,r,r", has_side_effect=False
+    ](src, mask)
 
 
 @always_inline
 def bmi2_pext_u64_x86(src: UInt64, mask: UInt64) -> UInt64:
     """The x86 BMI2 `pext` — 64-bit form."""
-    return llvm_intrinsic["llvm.x86.bmi.pext.64", UInt64](src, mask)
+    return inlined_assembly[
+        "pextq $2, $1, $0", UInt64, constraints="=r,r,r", has_side_effect=False
+    ](src, mask)
 
 
 # =============================================================================
@@ -138,13 +145,17 @@ def bmi2_pdep_u32_x86(src: UInt32, mask: UInt32) -> UInt32:
     for k = 0..popcount(mask)-1.  All other bits are 0.
 
     Inverse of `pext`."""
-    return llvm_intrinsic["llvm.x86.bmi.pdep.32", UInt32](src, mask)
+    return inlined_assembly[
+        "pdepl $2, $1, $0", UInt32, constraints="=r,r,r", has_side_effect=False
+    ](src, mask)
 
 
 @always_inline
 def bmi2_pdep_u64_x86(src: UInt64, mask: UInt64) -> UInt64:
     """The x86 BMI2 `pdep` — 64-bit form."""
-    return llvm_intrinsic["llvm.x86.bmi.pdep.64", UInt64](src, mask)
+    return inlined_assembly[
+        "pdepq $2, $1, $0", UInt64, constraints="=r,r,r", has_side_effect=False
+    ](src, mask)
 
 
 # =============================================================================
