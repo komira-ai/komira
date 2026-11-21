@@ -14,6 +14,7 @@ Nothing is compiled on the runner.
 | pull request from a branch of this repository | `pr / check`; and `coverage`, informational, not required ([below](#coverageyml-the-pull-requests-coverage-not-a-gate)) |
 | pull request from a fork | nothing: no farm job runs ([below](#pull-requests-from-forks)) |
 | manual (`workflow_dispatch`) | [`release.yml`](#releaseyml-the-release), on the chosen ref, with a reason |
+| manual (`workflow_dispatch`), on `main` | [`pypi.yml`](#pypiyml-publishing-the-python-package): builds the `komira` wheel on the farm, uploads it to TestPyPI, installs it from there and runs the quickstart, then does the same on PyPI |
 | weekly (schedule) and manual | [`kpin-update.yml`](../tools/build/kpin/README.md#the-weekly-update): updates the pins and opens one pull request; no farm, and its pull request does not start `pr / check` by itself. A manual run with `real_hosts` instead checks kpin against the real registries |
 
 There is no separate static or lint job, and no other pull request check
@@ -133,7 +134,7 @@ buckconfig written whole. It also reads every workflow and holds each step
 that uses the action to `tls: ${{ vars.FARM_TLS || 'false' }}` under its
 `with:`: a caller that dropped `tls` would connect in plain text whatever
 `FARM_TLS` says.
-It holds `farm-qos` to `batch` on every step of `release.yml` and to
+It holds `farm-qos` to `batch` on every step of `release.yml` and `pypi.yml` and to
 absent on every step of any other workflow.
 
 A job that calls it needs `permissions: id-token: write` (to ask GitHub for the
@@ -165,7 +166,7 @@ farm's port does not answer.
 **Priority.** A farm that queues by priority class runs a `ci` action before a
 `batch` one. The action takes an optional `farm-qos` (`ci` or `batch`) and, when
 it is set, writes the request header `x-kbf-qos` as buck2's `http_headers`.
-Every job of `release.yml` passes `batch`, so the release work that a push to
+Every job of `release.yml` passes `batch`, and so does the job `build` of `pypi.yml`, so the release work that a push to
 `main` starts waits behind the pull-request checks when the farm is full; no
 other workflow passes it, so they stay at `ci`. The class is not a platform
 property: it is not part of an action's digest, so a release build and a pull
@@ -679,6 +680,133 @@ built as a program of its own (the beta job that ran it is gone); its cases
 (`//tools/build/ci:release_beta_fetch_unit`) run against a registry in memory and a socket on
 loopback, and cover a changed byte, another size, a missing package, an index of another stage, and
 a redirect.
+
+## pypi.yml: publishing the Python package
+
+[`.github/workflows/pypi.yml`](../.github/workflows/pypi.yml) builds the `komira` wheel
+([python/README.md](../python/README.md)), uploads it to TestPyPI, installs it from there on a fresh runner
+and runs the quickstart, and only then does the same on PyPI. It is written by hand. It is run by hand:
+the only trigger is `workflow_dispatch`, on `main` (every job has
+`if: github.ref == 'refs/heads/main'`). A daily schedule is added after the first release is verified. A
+pull request never starts it.
+
+| job | environment | permissions | what it does |
+|---|---|---|---|
+| `build` | `build` | `contents: read`, `id-token: write` (the tailnet only) | on the farm ([farm-connect](#how-it-reaches-the-farm), `farm-qos: batch`): builds `//release/ci:release_json` and takes the stamp (`release_json stamp`); builds `//python:komira_wheel[release]` and `//python:wheel_install_test` with the three stamp flags (`-c komira.package_stamp`, `komira.package_commit`, `komira.package_timestamp_ms`) and `//python/smoke:pypi_smoke`; runs `pypi_smoke dist`, which makes the dist directory. It keeps two workflow artifacts, `pypi-<version>-dist` (the wheel) and `pypi-<version>-smoke` (the driver), for 14 days. It has no upload step and holds no index identity. |
+| `testpypi` | `testpypi` | `id-token: write` | no farm, no checkout, no buck2. Downloads the two artifacts, runs `pypi_smoke state --index testpypi`, and uploads the wheel to TestPyPI only when the state is `absent`. |
+| `testpypi-smoke` | none | `contents: read` | `pypi_smoke verify --index testpypi`, then `pypi_smoke install --index testpypi`, on a runner with the Python `actions/setup-python` gives (3.13). Skipped when the state is `differs`. |
+| `pypi` | `pypi` | `id-token: write` | after `testpypi-smoke`: the same as `testpypi` for PyPI. |
+| `pypi-smoke` | none | `contents: read` | the same as `testpypi-smoke` for PyPI. Skipped when the state is `differs`. |
+| `result` | none | none | fails the run, naming the job, when `build`, `testpypi`, `testpypi-smoke`, `pypi` or `pypi-smoke` did not succeed, and prints a notice when the bytes differ at the same version (below). |
+
+**Why its own file.** PyPI's trusted publishing binds a publisher to a workflow file name and an
+environment. `release.yml` holds no publishing credential, and this file is the one that does, so the
+credential is reachable from this file only. A job's index identity is the OIDC token of its environment:
+only `testpypi` and `pypi` hold a token an index trusts, and only for their own index. `build` names the
+environment `build`, which no index trusts, and has no upload step. `//:pypi_workflow_cases` pins the job
+set, each job's `if:`, `needs`, environment and permissions, that `id-token` is on no other job, that the
+publish action appears only in `testpypi` and `pypi`, that `setup-python` appears only in the two smoke jobs,
+that every action is pinned to a commit, and that no secret, `curl`, `jq`, `twine` or `continue-on-error`
+is anywhere in the file. `//:farm_connect_cases` holds `build` to `farm-qos: batch`.
+
+**One run at a time.** The workflow is in the concurrency group `pypi` with `cancel-in-progress: false`: a
+running publish is never cancelled, and a second run waits.
+
+**The driver.** Every step that does more than start a program is
+`//python/smoke:pypi_smoke`, a Zig program built by `build` and carried to the later
+jobs as an artifact, so no workflow step holds shell logic. It takes flags only. `--index` is `testpypi`
+(TestPyPI) or `pypi` (PyPI); any other value is a usage error. The exit status is 0 for success, 1 for a
+refusal or a failure (the last line printed is `pypi_smoke: FAILED: <why>`, and an `::error` line for the
+log) and 2 for a usage error.
+
+| subcommand | flags | what it does |
+|---|---|---|
+| `dist` | `--wheel <file.whl> --out <dir> --github-output <file>` | reads the wheel: exactly one `*.dist-info` directory holding `METADATA` and `WHEEL`, one `Name` and one `Version` in `METADATA`, one `Tag` in `WHEEL`. The file name is `<name>-<version>-<tag>.whl` with the name normalized (each run of `-`, `_` or `.` becomes `_`, lowercase), and the dist-info directory must agree. Writes the same bytes under that name into `--out` (which must not exist or be empty) and appends `version`, `filename` and `sha256` to the GitHub output file. |
+| `state` | `--index <testpypi\|pypi> --dist <dir> --github-output <file>` | `--dist` holds exactly one wheel and nothing else. One request for the version's JSON on the index, no retry. Appends `state=absent`, `same` or `differs` (below). Any other answer than a 404 or a 200 with the expected shape fails. |
+| `verify` | `--index <testpypi\|pypi> --dist <dir> [--attempts <1..20>] [--delay <0..300>]` | asks the index for the file it serves and compares it with the built one (below). A refused attempt is tried again up to `--attempts` times (default 5), `--delay` seconds apart (default 30), because an index can lag an upload. |
+| `install` | `--index <testpypi\|pypi> --dist <dir> --python <exe> --example <quickstart.py> --expect <quickstart.expected> --data <file>... --abi-table <komira.tsv> --work <dir> [--attempts <n>] [--delay <s>]` | installs the published wheel into an empty environment and runs the example (below). `--attempts` and `--delay` as for `verify`, for the install of `komira` only. |
+
+**The three index states.** `state` asks the index about the one file of the build, `komira-0.1.<N>-py3-none-manylinux_2_34_x86_64.whl`
+(`<N>` is the stamp's build number):
+
+- `absent`: the index has no such file (the version may exist with another file, another platform's wheel).
+  The job uploads it, by trusted publishing, with the publish action's defaults
+  (`skip-existing` off, attestations on). `testpypi` sets the action's `repository-url` to TestPyPI's upload
+  endpoint; `pypi` sets none, the action's default being PyPI.
+- `same`: the index has the file with the same sha256. Nothing is uploaded, a notice says so, and the smoke
+  runs: a run that was cut short after the upload finishes the checks.
+- `differs`: the index has the file with another sha256. Nothing is uploaded and the smoke does not run; the
+  run ends green with a notice ([below](#the-version-and-documentation-only-commits)).
+
+**What the smoke proves.** Two checks per index, on a runner that is not the farm, after the upload:
+
+1. `verify`: the file the index serves is the file that was built. The index's JSON for the version names the
+   file with its sha256, its size and its URL. The sha256 and size must be the built wheel's, the URL must
+   be on the index's file host (`test-files.pythonhosted.org` or `files.pythonhosted.org`), and the bytes
+   that URL serves are downloaded and hashed again, so a wheel changed after the index recorded it fails.
+   Then the `METADATA` of the served bytes and of the built wheel are compared on `Name`, `Version`,
+   `Requires-Python` and the full ordered list of `Requires-Dist`, and `Name` and `Version` must agree with
+   the file name. Every difference of an attempt is listed, not only the first.
+2. `install`: a user's install works. `actions/setup-python` gives CPython 3.13 and `pypi_smoke` makes an empty
+   virtual environment with it. For TestPyPI, the wheel's `Requires-Dist` requirements are installed first from
+   the real PyPI (`--only-binary=:all:`), then `komira==<version>` with `--no-deps` from TestPyPI alone, so
+   nothing but `komira` comes from TestPyPI. For PyPI, `komira==<version>` is one install from PyPI. Every pip
+   runs `--isolated`, without a cache. Then `pip check` must pass, `pip show komira` must report the version,
+   and the quickstart runs with `python -I` in a directory holding only the example and its data file: it
+   must exit 0 and print what `python/examples/quickstart.expected` says, compared exactly, with `<version>`
+   replaced by the version and `<abi_version>` by the ABI version of the `--abi-table` file
+   (`src/so/abi/komira.tsv`: `major * 1000 + minor`, so `1.1` is 1001). A failed step names the command, its exit
+   status and the last lines of its stderr.
+
+The smoke of TestPyPI is the release gate: the `pypi` job `needs` `testpypi-smoke`, so a wheel that does
+not install and run from TestPyPI is never uploaded to PyPI.
+
+The quickstart is [`python/examples/quickstart.py`](../python/examples/README.md). Today it asserts the
+version, the engine's C ABI version, and that a `Session` registers `readings.parquet` and closes. It
+asserts no query result: the call that runs a query has not landed. The README's block under "What works"
+is the same text, held byte for byte by `//python/smoke:readme_shows_quickstart`.
+
+**What ran where.** The build, the stamp and the wheel's own install test
+(`//python:wheel_install_test`, which installs the wheel into an empty environment and loads `libkomira`) run on the
+farm, in `build`, before any upload, on the same bytes that are uploaded. `state`, the upload, `verify` and
+`install` run on GitHub-hosted runners, in the later jobs. The index checks and the install from an index
+run on a runner only, because a farm action has no network.
+
+**What it does not prove.** It does not run a query (none exists yet). It tests one wheel, linux x86_64,
+one CPython (3.13) and one install route (`pip`). Wheels for arm64 Linux and for other platforms come later,
+each with its own smoke. A change to the driver is tested by `//python/smoke:pypi_smoke`'s cases, which
+use a fake index and a fake runner and make no network request; the live indexes are reached only by a run
+of this workflow.
+
+### Owner steps before the first run
+
+These are done once, in GitHub and on the indexes, outside this repository:
+
+1. In the repository's Settings > Environments, create `testpypi` and `pypi`, each restricted to the
+   branch `main` (deployment branches: selected branches, `main` only). Required reviewers on `pypi` are
+   optional: they hold the run before the PyPI upload. The environment `build` already exists.
+2. On test.pypi.org and on pypi.org, add a pending trusted publisher (Your account > Publishing): project
+   `komira`, owner `komira-ai`, repository `komira`, workflow `pypi.yml`, environment `testpypi` on
+   TestPyPI and `pypi` on PyPI.
+3. Run the workflow on `main` (Actions > pypi > Run workflow). The first run creates the project on each
+   index.
+
+### Yanking a bad release
+
+A release is never deleted, by the workflow or by hand: an index does not let a file name be uploaded again,
+even after its file is deleted, so a deleted release leaves a version that can never be fixed in place. A bad
+release is yanked by the PyPI project's owner: in the project's release settings on pypi.org, on the version,
+Yank, with a reason. A yanked version stays installable by `==` and is skipped by a plain
+`pip install komira`. The next version is the next run on a commit that changes code.
+
+### The version and documentation-only commits
+
+The version is `0.1.<N>`, with `<N>` from `release_json stamp`, which does not count commits that touch only
+documentation (`docs`, `*.md`, `.github`). A change to `python/README.md`, which is the package's description and
+so is in the wheel's `METADATA`, therefore builds a wheel with the same version and different bytes. When the
+index already holds the version's file, `state` says `differs` on it: nothing is uploaded, the smoke does not
+run, and the run is green with a notice that says the version's bytes differ. The fix reaches the index with
+the next commit that changes code, which has the next version.
 
 ## pr.yml: the pull request's check
 
