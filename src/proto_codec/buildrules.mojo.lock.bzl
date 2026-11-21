@@ -62,11 +62,11 @@ GRAPH_JSON = r'''{
       "root": "src/proto_codec/src/proto_codec",
       "srcs": [
         {"path": "src/proto_codec/src/proto_codec/__init__.mojo", "sha256": "b3b82f7d2dcb525bcb71ce4e92a6c1e9115a70e3ed7ce8c213c04ca8412fb56c"},
-        {"path": "src/proto_codec/src/proto_codec/codec.mojo", "sha256": "c8b052d741e94f28b0b84256f9503dcc7d3a2862f40bf8ddd4b3b57baad5aec7"},
+        {"path": "src/proto_codec/src/proto_codec/codec.mojo", "sha256": "cb7675318e2d86c7a59bd236a5dbc8c37d40eb23922521fc31734aaeab88ef75"},
         {"path": "src/proto_codec/src/proto_codec/float32_bignum.mojo", "sha256": "0babce5b4f1cfc765df4a17992b6189b52c1c7717e2c57843d641b4c8d300630"},
         {"path": "src/proto_codec/src/proto_codec/float32_parse.mojo", "sha256": "a88f0555b1b4a72cb050ddcb54265375571fe2d0b050f96e4519f731445db90a"},
         {"path": "src/proto_codec/src/proto_codec/float64_parse.mojo", "sha256": "27ba6850014ddbf5d75169da7e0da3e95eb9c683003bfe631a59daaded88b10e"},
-        {"path": "src/proto_codec/src/proto_codec/proto3_json.mojo", "sha256": "ed4e8eb1aba7e7473126b471757e2ee08a4b1434031411423f71489266465bad"},
+        {"path": "src/proto_codec/src/proto_codec/proto3_json.mojo", "sha256": "81621cbabc64417e4573c5d0123af6b5d08249e43afab9907258ee6f4db12a0e"},
         {"path": "src/proto_codec/src/proto_codec/proto3_json_float.mojo", "sha256": "e7b97b4079bc9d3f64af22ec917946de54baa741652c26786700afdb0394d1a8"},
         {"path": "src/proto_codec/src/proto_codec/proto_binary.mojo", "sha256": "40cdfb43007f36ed8b40bc91b8343a1d247e50d1b6c1ab72d01f7cba2f5e71ee"},
         {"path": "src/proto_codec/src/proto_codec/wire_format.mojo", "sha256": "b72d8e7d27736b0bc02e3404fd830dff6ee0c35fabc95c9c4bd52d081a6a1a8d"}
@@ -506,11 +506,11 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "root": "src/proto_codec/src/proto_codec",
       "srcs": [
         {"path": "src/proto_codec/src/proto_codec/__init__.mojo", "sha256": "b3b82f7d2dcb525bcb71ce4e92a6c1e9115a70e3ed7ce8c213c04ca8412fb56c"},
-        {"path": "src/proto_codec/src/proto_codec/codec.mojo", "sha256": "c8b052d741e94f28b0b84256f9503dcc7d3a2862f40bf8ddd4b3b57baad5aec7"},
+        {"path": "src/proto_codec/src/proto_codec/codec.mojo", "sha256": "cb7675318e2d86c7a59bd236a5dbc8c37d40eb23922521fc31734aaeab88ef75"},
         {"path": "src/proto_codec/src/proto_codec/float32_bignum.mojo", "sha256": "0babce5b4f1cfc765df4a17992b6189b52c1c7717e2c57843d641b4c8d300630"},
         {"path": "src/proto_codec/src/proto_codec/float32_parse.mojo", "sha256": "a88f0555b1b4a72cb050ddcb54265375571fe2d0b050f96e4519f731445db90a"},
         {"path": "src/proto_codec/src/proto_codec/float64_parse.mojo", "sha256": "27ba6850014ddbf5d75169da7e0da3e95eb9c683003bfe631a59daaded88b10e"},
-        {"path": "src/proto_codec/src/proto_codec/proto3_json.mojo", "sha256": "ed4e8eb1aba7e7473126b471757e2ee08a4b1434031411423f71489266465bad"},
+        {"path": "src/proto_codec/src/proto_codec/proto3_json.mojo", "sha256": "81621cbabc64417e4573c5d0123af6b5d08249e43afab9907258ee6f4db12a0e"},
         {"path": "src/proto_codec/src/proto_codec/proto3_json_float.mojo", "sha256": "e7b97b4079bc9d3f64af22ec917946de54baa741652c26786700afdb0394d1a8"},
         {"path": "src/proto_codec/src/proto_codec/proto_binary.mojo", "sha256": "40cdfb43007f36ed8b40bc91b8343a1d247e50d1b6c1ab72d01f7cba2f5e71ee"},
         {"path": "src/proto_codec/src/proto_codec/wire_format.mojo", "sha256": "b72d8e7d27736b0bc02e3404fd830dff6ee0c35fabc95c9c4bd52d081a6a1a8d"}
@@ -947,11 +947,11 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "root": "src/proto_codec/src/proto_codec",
       "srcs": [
         {"path": "src/proto_codec/src/proto_codec/__init__.mojo", "sha256": "b3b82f7d2dcb525bcb71ce4e92a6c1e9115a70e3ed7ce8c213c04ca8412fb56c"},
-        {"path": "src/proto_codec/src/proto_codec/codec.mojo", "sha256": "c8b052d741e94f28b0b84256f9503dcc7d3a2862f40bf8ddd4b3b57baad5aec7"},
+        {"path": "src/proto_codec/src/proto_codec/codec.mojo", "sha256": "cb7675318e2d86c7a59bd236a5dbc8c37d40eb23922521fc31734aaeab88ef75"},
         {"path": "src/proto_codec/src/proto_codec/float32_bignum.mojo", "sha256": "0babce5b4f1cfc765df4a17992b6189b52c1c7717e2c57843d641b4c8d300630"},
         {"path": "src/proto_codec/src/proto_codec/float32_parse.mojo", "sha256": "a88f0555b1b4a72cb050ddcb54265375571fe2d0b050f96e4519f731445db90a"},
         {"path": "src/proto_codec/src/proto_codec/float64_parse.mojo", "sha256": "27ba6850014ddbf5d75169da7e0da3e95eb9c683003bfe631a59daaded88b10e"},
-        {"path": "src/proto_codec/src/proto_codec/proto3_json.mojo", "sha256": "ed4e8eb1aba7e7473126b471757e2ee08a4b1434031411423f71489266465bad"},
+        {"path": "src/proto_codec/src/proto_codec/proto3_json.mojo", "sha256": "81621cbabc64417e4573c5d0123af6b5d08249e43afab9907258ee6f4db12a0e"},
         {"path": "src/proto_codec/src/proto_codec/proto3_json_float.mojo", "sha256": "e7b97b4079bc9d3f64af22ec917946de54baa741652c26786700afdb0394d1a8"},
         {"path": "src/proto_codec/src/proto_codec/proto_binary.mojo", "sha256": "40cdfb43007f36ed8b40bc91b8343a1d247e50d1b6c1ab72d01f7cba2f5e71ee"},
         {"path": "src/proto_codec/src/proto_codec/wire_format.mojo", "sha256": "b72d8e7d27736b0bc02e3404fd830dff6ee0c35fabc95c9c4bd52d081a6a1a8d"}
