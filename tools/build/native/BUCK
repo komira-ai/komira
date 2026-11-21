@@ -57,10 +57,13 @@ zig_exe(
 
 # so_report: the ELF record of libkomira and what it loads (so_report.zig),
 # as a markdown table. Its tests read built shared objects and values.
+# native_elf.zig imports native_macho.zig (it hands Mach-O bytes there), so the
+# Mach-O reader is an input here too.
 _SO_REPORT = [
     "native_elf.zig",
     "native_elf_test.zig",
     "native_checks.zig",
+    "native_macho.zig",
     "so_report_test.zig",
 ]
 
