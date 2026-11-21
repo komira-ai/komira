@@ -39,6 +39,7 @@ from plan_ir.logical_plan import (
 from sql.sql_token import tokenize
 from sql.sql_parser import parse_sql
 from sql.sql_catalog import SqlCatalog
+from scan_source.parquet_source import ParquetSource
 from sql.sql_bind_parquet import SqlParquetFooters
 from sql.sql_binder import bind_statement
 
@@ -89,6 +90,11 @@ struct _FootersUk(SqlParquetFooters):
         if path == "u.parquet" and column == "k":
             return 5
         return 0
+
+    def parquet_relation(
+        self, path: String, hive_partitioning: UInt8
+    ) raises -> ParquetSource:
+        return ParquetSource(String(path), self.footer_schema(path), None)
 
 
 def _plan(sql: String) raises -> LogicalPlan:
