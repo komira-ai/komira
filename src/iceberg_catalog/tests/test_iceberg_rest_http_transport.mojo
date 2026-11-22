@@ -12,6 +12,9 @@
 #     the HTTP client writes header names in lower case;
 #   * every request header reaches the wire, Accept and Authorization by
 #     value (a transport that dropped the header loop, or one header, differs);
+#   * a POST starts its request line with `POST <path>`, sends Content-Type
+#     and Idempotency-Key on the wire and the body bytes exactly (a connector
+#     built with echo_body also echoes the request body after a marker line);
 #   * the response status and body are returned as received, and a non-200
 #     status is returned, not raised (the client maps it, not the transport);
 #   * the URL scheme follows the connector: `https` over a TLS connector,
@@ -75,6 +78,24 @@ def _head_of(written: List[UInt8]) -> String:
     return head.replace("\r\n", " | ")
 
 
+comptime _BODY_MARKER: String = "\n--BODY--\n"
+
+
+def _body_of(written: List[UInt8]) -> String:
+    """The bytes after the blank line that ends the request head ("" when the
+    request has no body)."""
+    var n = len(written)
+    for i in range(n - 3):
+        if (
+            written[i] == UInt8(13)
+            and written[i + 1] == UInt8(10)
+            and written[i + 2] == UInt8(13)
+            and written[i + 3] == UInt8(10)
+        ):
+            return String(unsafe_from_utf8=Span(written)[i + 4 : n])
+    return String("")
+
+
 def _response(status: Int, var body: String) -> List[UInt8]:
     var text = (
         String("HTTP/1.1 ")
@@ -94,12 +115,14 @@ struct _EchoStream(IoStream, Movable, Deinitable):
     var _written: List[UInt8]
     var _answer: ScriptedStream
     var _answered: Bool
+    var _echo_body: Bool
 
-    def __init__(out self, status: Int):
+    def __init__(out self, status: Int, echo_body: Bool = False):
         self._status = status
         self._written = List[UInt8]()
         self._answer = ScriptedStream()
         self._answered = False
+        self._echo_body = echo_body
 
     def try_read[
         RT: Runtime, o: Origin[mut=True],
@@ -110,8 +133,11 @@ struct _EchoStream(IoStream, Movable, Deinitable):
     ) raises -> StreamIo:
         if not self._answered:
             self._answered = True
+            var echo = _head_of(self._written)
+            if self._echo_body:
+                echo += _BODY_MARKER + _body_of(self._written)
             self._answer = ScriptedStream.from_read_script(
-                _response(self._status, _head_of(self._written))
+                _response(self._status, echo^)
             )
         return self._answer.try_read[RT, o](reactor, dst)
 
@@ -141,10 +167,12 @@ struct _EchoConnector(Connector, Movable, Deinitable):
 
     var _status: Int
     var _tls: Bool
+    var _echo_body: Bool
 
-    def __init__(out self, status: Int, tls: Bool):
+    def __init__(out self, status: Int, tls: Bool, echo_body: Bool = False):
         self._status = status
         self._tls = tls
+        self._echo_body = echo_body
 
     def connect[RT: Runtime](
         mut self,
@@ -154,7 +182,7 @@ struct _EchoConnector(Connector, Movable, Deinitable):
     ) raises -> _EchoStream:
         _ = ip_be
         _ = port
-        return _EchoStream(self._status)
+        return _EchoStream(self._status, self._echo_body)
 
     def transport_kind(self) -> UInt8:
         return TRANSPORT_KIND_KERNEL_TCP
@@ -180,6 +208,14 @@ def _echo_404_tls() raises -> _EchoConnector:
 
 def _echo_503_plain() raises -> _EchoConnector:
     return _EchoConnector(503, False)
+
+
+def _echo_body_200_plain() raises -> _EchoConnector:
+    return _EchoConnector(200, False, True)
+
+
+def _echo_body_200_tls() raises -> _EchoConnector:
+    return _EchoConnector(200, True, True)
 
 
 def _refusing() raises -> _EchoConnector:
@@ -220,7 +256,7 @@ def _assert_echoed_request(body: String, path: String, host: String) raises:
 
 def test_plaintext_get_sends_path_headers_and_returns_body() raises:
     var tr = HttpIcebergRestTransport[_EchoConnector](_echo_200_plain)
-    var resp = tr.get(_request(String("/v1/p/namespaces/db/tables/t"), 8181))
+    var resp = tr.send(_request(String("/v1/p/namespaces/db/tables/t"), 8181))
     assert_equal(resp.status, 200)
     _assert_echoed_request(
         resp.body, String("/v1/p/namespaces/db/tables/t"), String("192.0.2.1:8181")
@@ -232,7 +268,7 @@ def test_tls_get_uses_https() raises:
     # call succeeds is the scheme proof. Port 443 is https's default, so the
     # Host header carries no port.
     var tr = HttpIcebergRestTransport[_EchoConnector](_echo_200_tls)
-    var resp = tr.get(_request(String("/v1/config"), 443))
+    var resp = tr.send(_request(String("/v1/config"), 443))
     assert_equal(resp.status, 200)
     _assert_echoed_request(resp.body, String("/v1/config"), String("192.0.2.1"))
     assert_true(not _has(resp.body, String("192.0.2.1:")), resp.body)
@@ -240,22 +276,92 @@ def test_tls_get_uses_https() raises:
 
 def test_non_200_is_returned_not_raised() raises:
     var tls = HttpIcebergRestTransport[_EchoConnector](_echo_404_tls)
-    var r404 = tls.get(_request(String("/v1/config"), 9443))
+    var r404 = tls.send(_request(String("/v1/config"), 9443))
     assert_equal(r404.status, 404)
     assert_true(r404.body.startswith(String("GET /v1/config HTTP/1.1 | ")))
     var plain = HttpIcebergRestTransport[_EchoConnector](_echo_503_plain)
-    var r503 = plain.get(_request(String("/v1/x"), 80))
+    var r503 = plain.send(_request(String("/v1/x"), 80))
     assert_equal(r503.status, 503)
     assert_true(_has(r503.body, String(" | Host: 192.0.2.1")), r503.body)
     assert_true(not _has(r503.body, String("192.0.2.1:")), r503.body)
+
+
+def _post_request(
+    path: String, port: UInt16, var body: String
+) -> IcebergRestRequest:
+    var names = List[String]()
+    var values = List[String]()
+    names.append(String("Accept"))
+    values.append(String("application/json"))
+    names.append(String("Content-Type"))
+    values.append(String("application/json"))
+    names.append(String("Idempotency-Key"))
+    values.append(String("key-0001"))
+    return IcebergRestRequest.post(
+        String(_HOST), port, path, names^, values^, body^
+    )
+
+
+def test_plaintext_post_sends_request_line_headers_and_exact_body() raises:
+    # The body has a multi-byte character, quotes and a blank line, so a
+    # transport that re-encoded, trimmed or truncated it differs.
+    var body = String('{"name":"té","note":"a\r\n\r\nb"}')
+    var tr = HttpIcebergRestTransport[_EchoConnector](_echo_body_200_plain)
+    var resp = tr.send(
+        _post_request(String("/v1/p/namespaces/db/tables/t"), 8181, body.copy())
+    )
+    assert_equal(resp.status, 200)
+    assert_true(
+        resp.body.startswith(
+            String("POST /v1/p/namespaces/db/tables/t HTTP/1.1 | ")
+        ),
+        resp.body,
+    )
+    assert_true(_has(resp.body, String(" | Host: 192.0.2.1:8181")), resp.body)
+    assert_true(
+        _has(resp.body, String(" | content-type: application/json")), resp.body
+    )
+    assert_true(
+        _has(resp.body, String(" | idempotency-key: key-0001")), resp.body
+    )
+    assert_true(resp.body.endswith(_BODY_MARKER + body), resp.body)
+    # The body is echoed once, right after the head.
+    assert_equal(
+        resp.body.byte_length(),
+        resp.body.find(_BODY_MARKER)
+        + _BODY_MARKER.byte_length()
+        + body.byte_length(),
+    )
+
+
+def test_tls_post_uses_https_and_sends_the_body() raises:
+    var tr = HttpIcebergRestTransport[_EchoConnector](_echo_body_200_tls)
+    var resp = tr.send(
+        _post_request(String("/v1/namespaces/db/tables"), 443, String("{}"))
+    )
+    assert_equal(resp.status, 200)
+    assert_true(
+        resp.body.startswith(
+            String("POST /v1/namespaces/db/tables HTTP/1.1 | ")
+        ),
+        resp.body,
+    )
+    assert_true(resp.body.endswith(_BODY_MARKER + String("{}")), resp.body)
+
+
+def test_get_sends_no_body() raises:
+    var tr = HttpIcebergRestTransport[_EchoConnector](_echo_body_200_plain)
+    var resp = tr.send(_request(String("/v1/config"), 8181))
+    assert_true(resp.body.startswith(String("GET /v1/config HTTP/1.1 | ")))
+    assert_true(resp.body.endswith(_BODY_MARKER), resp.body)
 
 
 def test_each_call_dials_a_fresh_connector() raises:
     # Two GETs through one transport: the echo stream answers once, so a
     # transport that reused one stream would read nothing on the second.
     var tr = HttpIcebergRestTransport[_EchoConnector](_echo_200_plain)
-    var a = tr.get(_request(String("/v1/a"), 8181))
-    var b = tr.get(_request(String("/v1/b"), 8181))
+    var a = tr.send(_request(String("/v1/a"), 8181))
+    var b = tr.send(_request(String("/v1/b"), 8181))
     assert_true(a.body.startswith(String("GET /v1/a ")), a.body)
     assert_true(b.body.startswith(String("GET /v1/b ")), b.body)
 
@@ -264,7 +370,7 @@ def test_connector_factory_failure_propagates() raises:
     var tr = HttpIcebergRestTransport[_EchoConnector](_refusing)
     var msg = String("")
     try:
-        var _r = tr.get(_request(String("/v1/config"), 8181))
+        var _r = tr.send(_request(String("/v1/config"), 8181))
     except e:
         msg = String(e)
     assert_equal(msg, String("connector setup failed"))
@@ -294,7 +400,7 @@ def test_clocked_connector_factory_failure_propagates() raises:
     )
     var msg = String("")
     try:
-        var _r = tr.get(_request(String("/v1/config"), 8181))
+        var _r = tr.send(_request(String("/v1/config"), 8181))
     except e:
         msg = String(e)
     assert_equal(msg, String("clocked connector setup failed"))
@@ -315,7 +421,7 @@ def test_request_timeout_bounds_a_stalled_peer() raises:
     )
     var msg = String("")
     try:
-        var _r = tr.get(_request(String("/v1/config"), 8181))
+        var _r = tr.send(_request(String("/v1/config"), 8181))
     except e:
         msg = String(e)
     assert_true(_has(msg, String("TIMEOUT")), msg)
@@ -331,6 +437,9 @@ def main() raises:
     test_plaintext_get_sends_path_headers_and_returns_body()
     test_tls_get_uses_https()
     test_non_200_is_returned_not_raised()
+    test_plaintext_post_sends_request_line_headers_and_exact_body()
+    test_tls_post_uses_https_and_sends_the_body()
+    test_get_sends_no_body()
     test_each_call_dials_a_fresh_connector()
     test_connector_factory_failure_propagates()
     test_clocked_connector_factory_failure_propagates()
