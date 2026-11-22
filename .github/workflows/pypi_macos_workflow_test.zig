@@ -115,6 +115,10 @@ test "each macOS job is in its half, with its needs, environment, runner and per
     // the record waits for every smoke job, the PyPI smoke for the upload
     try expectRefused(ar, x, try inJob(ar, text, "testpypi-passed-macos-arm64", "    needs: [build-macos-arm64, testpypi-smoke-macos-arm64]\n", "    needs: [build-macos-arm64, testpypi-macos-arm64]\n"), "testpypi-passed-macos-arm64: its needs:");
     try expectRefused(ar, x, try inJob(ar, text, "pypi-smoke-macos-arm64", "    needs: [promote-macos-arm64, pypi-macos-arm64]\n", "    needs: promote-macos-arm64\n"), "pypi-smoke-macos-arm64: its needs:");
+    try expectRefused(ar, x, try inJob(ar, text, "testpypi-smoke-macos-arm64", "    needs: [build-macos-arm64, testpypi-macos-arm64]\n", "    needs: build-macos-arm64\n"), "testpypi-smoke-macos-arm64: its needs:");
+    // a verdict that does not need the record, or the PyPI smoke, would end green without it
+    try expectRefused(ar, x, try inJob(ar, text, "result-testpypi-macos-arm64", "    needs: [build-macos-arm64, testpypi-macos-arm64, testpypi-smoke-macos-arm64, testpypi-passed-macos-arm64]\n", "    needs: [build-macos-arm64, testpypi-macos-arm64, testpypi-smoke-macos-arm64]\n"), "result-testpypi-macos-arm64: its needs:");
+    try expectRefused(ar, x, try inJob(ar, text, "result-pypi-macos-arm64", "    needs: [promote-macos-arm64, pypi-macos-arm64, pypi-smoke-macos-arm64]\n", "    needs: [promote-macos-arm64, pypi-macos-arm64]\n"), "result-pypi-macos-arm64: its needs:");
     // the environment each index trusts, and none on the promote job
     try expectRefused(ar, x, try inJob(ar, text, "testpypi-macos-arm64", "    environment: testpypi\n", "    environment: build\n"), "testpypi-macos-arm64: its environment");
     try expectRefused(ar, x, try inJob(ar, text, "pypi-macos-arm64", "    environment: pypi\n", ""), "pypi-macos-arm64: its environment");
@@ -170,7 +174,7 @@ test "the macOS jobs after the build hold their outputs and steps exactly: each 
     // the smokes: the Linux driver on the Mac, the quickstart of a checkout
     try expectRefused(ar, x, try inJob(ar, text, "pypi-smoke-macos-arm64", "smoke/pypi_smoke_macos_arm64\" verify", "smoke/pypi_smoke\" verify"), "pypi-smoke-macos-arm64" ++ exact);
     try expectRefused(ar, x, try inJob(ar, text, "testpypi-smoke-macos-arm64", "--example \"$RUNNER_TEMP/pypi-macos-arm64/smoke/quickstart.py\"", "--example python/examples/quickstart.py"), "testpypi-smoke-macos-arm64" ++ exact);
-    // the verdicts: an error that ends the run green, a step appended
+    // the verdicts: an error that ends the run green, a step inserted
     try expectRefused(ar, x, try inJob(ar, text, "result-pypi-macos-arm64", "(pypi-smoke-macos-arm64 $PYPI_SMOKE)\" && exit 1'", "(pypi-smoke-macos-arm64 $PYPI_SMOKE)\"'"), "result-pypi-macos-arm64" ++ exact);
     try expectRefused(ar, x, try inJob(ar, text, "result-testpypi-macos-arm64", "          PASSED: ${{ needs.testpypi-passed-macos-arm64.result }}\n", "          PASSED: ${{ needs.testpypi-passed-macos-arm64.result }}\n      - name: one more\n        run: echo done\n"), "result-testpypi-macos-arm64" ++ exact);
 }
