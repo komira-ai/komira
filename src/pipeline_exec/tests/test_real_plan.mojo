@@ -377,9 +377,9 @@ def test_what_the_builder_does_not_serve_is_refused_by_name() raises:
         _ = run_plan(_one(concat^), builder, dispatch, 1, CancellationToken.new())
 
     # Every operator tag of the IR is served; a tag outside it is not.
-    var unknown = batch_segment(0, handle, chain(MorselOp(tag=14)))
+    var unknown_op = batch_segment(0, handle, chain(MorselOp(tag=14)))
     with assert_raises(contains="operator tag 14 of segment 0 is not served"):
-        _ = run_plan(_one(unknown^), builder, dispatch, 1, CancellationToken.new())
+        _ = run_plan(_one(unknown_op^), builder, dispatch, 1, CancellationToken.new())
 
     # A join probe whose build segment is not among its dependencies.
     var probe = batch_segment(

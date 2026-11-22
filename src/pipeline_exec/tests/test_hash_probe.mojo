@@ -118,7 +118,7 @@ def _keys_batch(
     return rb.build(sb.build())
 
 
-def _float_payload_batch() -> RecordBatch:
+def _float_payload_batch() raises -> RecordBatch:
     """One row: INT64 key `k` = 1 and a FLOAT64 payload `v` = 0.5."""
     var k = PrimitiveArray[DType.int64].allocate(1)
     k.set(0, Int64(1))
