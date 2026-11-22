@@ -1,5 +1,10 @@
 """The rules of the Python package's wheel and its clean-environment install
-test (python/BUCK): `picked_files` and `wheel_install_test`.
+test (python/BUCK): `picked_files`, `wheel_install_test` and `python_versions`.
+
+`python_versions(name, versions)` writes, for each platform of `versions`
+({platform: [version]}), the sub-target `:<name>[<platform>]`: a JSON list of
+that platform's versions, in the order given (`["3.11.17", "3.12.15"]`). It is
+how a workflow's job matrix reads the supported Pythons (python/pythons.bzl).
 
 `picked_files(name, dir, paths)` names files of a directory another target
 builds, one sub-target each, by file name: `:<name>[libkomira.so]`. The wheel
@@ -111,11 +116,30 @@ _wheel_install_test = rule(
     },
 )
 
+def _python_versions_impl(ctx):
+    subs = {}
+    for platform, versions in sorted(ctx.attrs.versions.items()):
+        f = ctx.actions.write_json(platform + ".json", versions)
+        subs[platform] = [DefaultInfo(default_output = f)]
+    return [DefaultInfo(default_outputs = [s[0].default_outputs[0] for s in subs.values()], sub_targets = subs)]
+
+_python_versions = rule(
+    impl = _python_versions_impl,
+    doc = "For each platform of `versions`, the sub-target `[<platform>]`: a JSON list of its versions, in the order given (python/pythons.bzl, HOSTED).",
+    attrs = {
+        "versions": attrs.dict(attrs.string(), attrs.list(attrs.string())),
+    },
+)
+
 def _picked_files_macro(**kwargs):
     _picked_files(**kwargs)
 
 def _wheel_install_test_macro(exec_compatible_with = LINUX_X86_64, **kwargs):
     _wheel_install_test(exec_compatible_with = exec_compatible_with, **kwargs)
 
+def _python_versions_macro(**kwargs):
+    _python_versions(**kwargs)
+
 picked_files = declares_docs(_picked_files_macro)
+python_versions = declares_docs(_python_versions_macro)
 wheel_install_test = declares_docs(_wheel_install_test_macro)

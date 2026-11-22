@@ -1,4 +1,4 @@
-//! The cases of the command line (cli.zig): each command's exit status (0 when it held, 1 when it refused or
+//! The cases of the command line (cli.zig), `install --index dist` and `matrix` among them: each command's exit status (0 when it held, 1 when it refused or
 //! failed, 2 for a usage error), what it prints and what it appends to the GitHub output file, the flags it
 //! refuses by name (unknown, valueless, repeated, out of range), and that a usage error reaches neither the
 //! index nor a command.
@@ -54,7 +54,7 @@ test "dist writes the named wheel alone into the output directory and appends ve
     const out_dir = try h.path(a, &tmp, "dist");
     var fake = h.Fake{ .alloc = a, .routes = &.{} };
     var runner = h.FakeRunner{ .alloc = a, .work = "" };
-    const r = try exec(a, &.{ "dist", "--wheel", try h.path(a, &tmp, "komira.whl"), "--out", out_dir, "--github-output", try h.path(a, &tmp, "gh.txt") }, &fake, &runner);
+    const r = try exec(a, &.{ "dist", "--wheel", try h.path(a, &tmp, "komira.whl"), "--out", out_dir, "--record", try h.path(a, &tmp, "record.txt"), "--github-output", try h.path(a, &tmp, "gh.txt") }, &fake, &runner);
     try t.expectEqual(@as(u8, 0), r.code);
     try t.expectEqualStrings("", r.err);
     const hex = try h.hex(a, bytes);
@@ -62,6 +62,49 @@ test "dist writes the named wheel alone into the output directory and appends ve
     try t.expectEqualStrings(try std.fmt.allocPrint(a, "earlier=1\nversion=0.1.7\nfilename=" ++ FILE ++ "\nsha256={s}\n", .{hex}), try h.readAll(a, &tmp, "gh.txt"));
     try t.expectEqualSlices(u8, bytes, try h.readAll(a, &tmp, "dist/" ++ FILE));
     try t.expectEqual(@as(usize, 0), fake.urls.items.len);
+}
+
+test "dist --record holds exactly one line: file name, lowercase sha256 and size in bytes, replacing an earlier file" {
+    var ar = std.heap.ArenaAllocator.init(t.allocator);
+    defer ar.deinit();
+    const a = ar.allocator();
+    var tmp = t.tmpDir(.{});
+    defer tmp.cleanup();
+    const bytes = try h.makeWheel(a, .{});
+    try tmp.dir.writeFile(.{ .sub_path = "komira.whl", .data = bytes });
+    try tmp.dir.writeFile(.{ .sub_path = "record.txt", .data = "an earlier record that is much longer than the new one, to be truncated away entirely\nsecond line\n" });
+    var fake = h.Fake{ .alloc = a, .routes = &.{} };
+    var runner = h.FakeRunner{ .alloc = a, .work = "" };
+    const r = try exec(a, &.{ "dist", "--wheel", try h.path(a, &tmp, "komira.whl"), "--out", try h.path(a, &tmp, "dist"), "--record", try h.path(a, &tmp, "record.txt"), "--github-output", try h.path(a, &tmp, "gh.txt") }, &fake, &runner);
+    try t.expectEqual(@as(u8, 0), r.code);
+    try t.expectEqualStrings(try std.fmt.allocPrint(a, FILE ++ " {s} {d}\n", .{ try h.hex(a, bytes), bytes.len }), try h.readAll(a, &tmp, "record.txt"));
+}
+
+test "dist refuses a record path that cannot be written, naming it, and appends nothing to the output file" {
+    var ar = std.heap.ArenaAllocator.init(t.allocator);
+    defer ar.deinit();
+    const a = ar.allocator();
+    var tmp = t.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.writeFile(.{ .sub_path = "komira.whl", .data = try h.makeWheel(a, .{}) });
+    const record = try h.path(a, &tmp, "no-such-dir/record.txt");
+    var fake = h.Fake{ .alloc = a, .routes = &.{} };
+    var runner = h.FakeRunner{ .alloc = a, .work = "" };
+    const r = try exec(a, &.{ "dist", "--wheel", try h.path(a, &tmp, "komira.whl"), "--out", try h.path(a, &tmp, "dist"), "--record", record, "--github-output", try h.path(a, &tmp, "gh.txt") }, &fake, &runner);
+    try t.expectEqual(@as(u8, 1), r.code);
+    try t.expectEqualStrings(try std.fmt.allocPrint(a, "pypi_smoke: FAILED: cannot write --record {s}: FileNotFound\n", .{record}), r.err);
+    try t.expectError(error.FileNotFound, tmp.dir.access("gh.txt", .{}));
+}
+
+test "dist without --record is a usage error" {
+    var ar = std.heap.ArenaAllocator.init(t.allocator);
+    defer ar.deinit();
+    const a = ar.allocator();
+    var fake = h.Fake{ .alloc = a, .routes = &.{} };
+    var runner = h.FakeRunner{ .alloc = a, .work = "" };
+    const r = try exec(a, &.{ "dist", "--wheel", "/w", "--out", "/o", "--github-output", "/g" }, &fake, &runner);
+    try t.expectEqual(@as(u8, 2), r.code);
+    try t.expectEqualStrings(USAGE, r.err);
 }
 
 test "dist refuses an output directory that is not empty, with exit 1, the failure line and the error annotation" {
@@ -76,7 +119,7 @@ test "dist refuses an output directory that is not empty, with exit 1, the failu
     const out_dir = try h.path(a, &tmp, "dist");
     var fake = h.Fake{ .alloc = a, .routes = &.{} };
     var runner = h.FakeRunner{ .alloc = a, .work = "" };
-    const r = try exec(a, &.{ "dist", "--wheel", try h.path(a, &tmp, "komira.whl"), "--out", out_dir, "--github-output", try h.path(a, &tmp, "gh.txt") }, &fake, &runner);
+    const r = try exec(a, &.{ "dist", "--wheel", try h.path(a, &tmp, "komira.whl"), "--out", out_dir, "--record", try h.path(a, &tmp, "record.txt"), "--github-output", try h.path(a, &tmp, "gh.txt") }, &fake, &runner);
     try t.expectEqual(@as(u8, 1), r.code);
     try t.expectEqualStrings(try std.fmt.allocPrint(a, "pypi_smoke: FAILED: --out {s} is not empty\n", .{out_dir}), r.err);
     try t.expectEqualStrings(try std.fmt.allocPrint(a, "::error title=pypi::--out {s} is not empty\n", .{out_dir}), r.out);
@@ -89,7 +132,7 @@ test "the error annotation is one line with percent signs escaped" {
     const a = ar.allocator();
     var fake = h.Fake{ .alloc = a, .routes = &.{} };
     var runner = h.FakeRunner{ .alloc = a, .work = "" };
-    const r = try exec(a, &.{ "dist", "--wheel", "/no/such%20dir/komira.whl", "--out", "/o", "--github-output", "/g" }, &fake, &runner);
+    const r = try exec(a, &.{ "dist", "--wheel", "/no/such%20dir/komira.whl", "--out", "/o", "--record", "/r", "--github-output", "/g" }, &fake, &runner);
     try t.expectEqual(@as(u8, 1), r.code);
     try t.expectEqualStrings("pypi_smoke: FAILED: cannot read /no/such%20dir/komira.whl: FileNotFound\n", r.err);
     try t.expectEqualStrings("::error title=pypi::cannot read /no/such%2520dir/komira.whl: FileNotFound\n", r.out);
@@ -369,6 +412,160 @@ test "install fails with exit 1 and the step's failure when a command fails" {
     try t.expect(std.mem.endsWith(u8, r.out, try std.fmt.allocPrint(a, "::error title=pypi::create the virtual environment: `/py/python3.13 -m venv {s}/venv` exited with 3; last lines of stderr: | no venv module\n", .{work})));
 }
 
+/// A scratch directory with the example, its data, the expected file and the ABI table under `in/`.
+fn withInputs(tmp: *t.TmpDir) !void {
+    try tmp.dir.makePath("in");
+    try tmp.dir.writeFile(.{ .sub_path = "in/quickstart.py", .data = "print('x')\n" });
+    try tmp.dir.writeFile(.{ .sub_path = "in/readings.parquet", .data = "PAR1" });
+    try tmp.dir.writeFile(.{ .sub_path = "in/quickstart.expected", .data = "<version>\n<abi_version>\nregistered readings\nTrue\n" });
+    try tmp.dir.writeFile(.{ .sub_path = "in/komira.tsv", .data = "version\t1.1\n" });
+}
+
+fn installFromDist(a: Alloc, tmp: *t.TmpDir, dist: []const u8, work: []const u8, fake: *h.Fake, runner: *h.FakeRunner) !Result {
+    return exec(a, &.{
+        "install",
+        "--index",
+        "dist",
+        "--dist",
+        dist,
+        "--python",
+        "/py/python3.13",
+        "--example",
+        try h.path(a, tmp, "in/quickstart.py"),
+        "--expect",
+        try h.path(a, tmp, "in/quickstart.expected"),
+        "--data",
+        try h.path(a, tmp, "in/readings.parquet"),
+        "--abi-table",
+        try h.path(a, tmp, "in/komira.tsv"),
+        "--work",
+        work,
+    }, fake, runner);
+}
+
+test "install --index dist installs the wheel from the directory's absolute path with no index, and says so" {
+    var ar = std.heap.ArenaAllocator.init(t.allocator);
+    defer ar.deinit();
+    const a = ar.allocator();
+    var tmp = t.tmpDir(.{});
+    defer tmp.cleanup();
+    _ = try withDist(a, &tmp, try h.makeWheel(a, .{}));
+    try withInputs(&tmp);
+    const work = try h.path(a, &tmp, "work");
+    const dist = try h.path(a, &tmp, "dist");
+    var fake = h.Fake{ .alloc = a, .routes = &.{} };
+    var runner = h.FakeRunner{ .alloc = a, .work = work };
+    // the directory given with a `..` in it: pip, run in the work directory, is given the resolved path
+    const r = try installFromDist(a, &tmp, try std.fs.path.join(a, &.{ try h.path(a, &tmp, "in"), "..", "dist" }), work, &fake, &runner);
+    try t.expectEqual(@as(u8, 0), r.code);
+    try t.expectEqualStrings("", r.err);
+    try t.expect(std.mem.endsWith(u8, r.out, try std.fmt.allocPrint(a, "pypi_smoke: pip installed komira==0.1.7 from the dist directory {s} into an empty environment and {s} printed what {s} says\n", .{ dist, try h.path(a, &tmp, "in/quickstart.py"), try h.path(a, &tmp, "in/quickstart.expected") })));
+    try t.expectEqual(@as(usize, 8), runner.calls.items.len);
+    try t.expect(std.mem.endsWith(u8, runner.calls.items[2], try std.fmt.allocPrint(a, " --no-deps --no-index --find-links {s} komira==0.1.7", .{dist})));
+    // the index of a dist directory is no index: nothing is asked of TestPyPI or PyPI
+    try t.expectEqual(@as(usize, 0), fake.urls.items.len);
+}
+
+test "install --index dist tries the install once: a failure is exit 1 with the step, even where a second try would pass" {
+    var ar = std.heap.ArenaAllocator.init(t.allocator);
+    defer ar.deinit();
+    const a = ar.allocator();
+    var tmp = t.tmpDir(.{});
+    defer tmp.cleanup();
+    const dist = try withDist(a, &tmp, try h.makeWheel(a, .{ .requires_dist = &.{} }));
+    try withInputs(&tmp);
+    const work = try h.path(a, &tmp, "work");
+    const rules = [_]h.Rule{.{ .contains = "--find-links", .code = 1, .stderr = "ERROR: Could not find a version that satisfies the requirement komira==0.1.7\n", .times = 1 }};
+    var fake = h.Fake{ .alloc = a, .routes = &.{} };
+    var runner = h.FakeRunner{ .alloc = a, .work = work, .rules = &rules };
+    const r = try installFromDist(a, &tmp, dist, work, &fake, &runner);
+    try t.expectEqual(@as(u8, 1), r.code);
+    // the venv and one install of komira
+    try t.expectEqual(@as(usize, 2), runner.calls.items.len);
+    try t.expect(std.mem.startsWith(u8, r.err, "pypi_smoke: FAILED: install komira: `"));
+    try t.expect(std.mem.endsWith(u8, r.err, "` exited with 1; last lines of stderr:\nERROR: Could not find a version that satisfies the requirement komira==0.1.7\n"));
+    try t.expect(std.mem.indexOf(u8, r.out, "trying again") == null);
+}
+
+test "install --index dist refuses a dist directory that is not one wheel, before any command" {
+    var ar = std.heap.ArenaAllocator.init(t.allocator);
+    defer ar.deinit();
+    const a = ar.allocator();
+    var tmp = t.tmpDir(.{});
+    defer tmp.cleanup();
+    const dist = try withDist(a, &tmp, try h.makeWheel(a, .{}));
+    try tmp.dir.writeFile(.{ .sub_path = "dist/notes.txt", .data = "x" });
+    try withInputs(&tmp);
+    const work = try h.path(a, &tmp, "work");
+    var fake = h.Fake{ .alloc = a, .routes = &.{} };
+    var runner = h.FakeRunner{ .alloc = a, .work = work };
+    const r = try installFromDist(a, &tmp, dist, work, &fake, &runner);
+    try t.expectEqual(@as(u8, 1), r.code);
+    try t.expectEqualStrings(try std.fmt.allocPrint(a, "pypi_smoke: FAILED: --dist {s} holds notes.txt; one .whl file and nothing else is wanted\n", .{dist}), r.err);
+    try t.expectEqual(@as(usize, 0), runner.calls.items.len);
+}
+
+// ---- matrix -----------------------------------------------------------------------------
+
+fn matrixOf(a: Alloc, tmp: *t.TmpDir, list: ?[]const u8) !Result {
+    if (list) |text| try tmp.dir.writeFile(.{ .sub_path = "pythons.json", .data = text });
+    try tmp.dir.writeFile(.{ .sub_path = "gh.txt", .data = "earlier=1\n" });
+    var fake = h.Fake{ .alloc = a, .routes = &.{} };
+    var runner = h.FakeRunner{ .alloc = a, .work = "" };
+    return exec(a, &.{ "matrix", "--pythons", try h.path(a, tmp, "pythons.json"), "--platform", "linux-x86_64", "--github-output", try h.path(a, tmp, "gh.txt") }, &fake, &runner);
+}
+
+test "matrix appends the job matrix of the platform as one line and prints the Pythons it runs" {
+    var ar = std.heap.ArenaAllocator.init(t.allocator);
+    defer ar.deinit();
+    const a = ar.allocator();
+    var tmp = t.tmpDir(.{});
+    defer tmp.cleanup();
+    const r = try matrixOf(a, &tmp, "[\"3.13.16\",\"3.14.8\"]");
+    try t.expectEqual(@as(u8, 0), r.code);
+    try t.expectEqualStrings("", r.err);
+    try t.expectEqualStrings("pypi_smoke: the jobs of the linux-x86_64 wheel run on ubuntu-24.04 with Python 3.13.16, 3.14.8\n", r.out);
+    try t.expectEqualStrings("earlier=1\nmatrix={\"include\":[{\"platform\":\"linux-x86_64\",\"python\":\"3.13.16\",\"runner\":\"ubuntu-24.04\"},{\"platform\":\"linux-x86_64\",\"python\":\"3.14.8\",\"runner\":\"ubuntu-24.04\"}]}\n", try h.readAll(a, &tmp, "gh.txt"));
+}
+
+test "matrix refuses a malformed list, an empty list and a list it cannot read, and appends nothing" {
+    var ar = std.heap.ArenaAllocator.init(t.allocator);
+    defer ar.deinit();
+    const a = ar.allocator();
+    const Case = struct { list: ?[]const u8, why: []const u8 };
+    const cases = [_]Case{
+        .{ .list = "[\"3.13.16\",\"py3\"]", .why = "entry 2 of {s} is 'py3', not `3.<minor>.<micro>`" },
+        .{ .list = "[]", .why = "{s} names no Python: its jobs would be none" },
+        .{ .list = "linux-x86_64\t3.13\n", .why = "{s} is not a JSON list of strings" },
+        .{ .list = null, .why = "cannot read {s}: FileNotFound" },
+    };
+    inline for (cases) |c| {
+        var tmp = t.tmpDir(.{});
+        defer tmp.cleanup();
+        const r = try matrixOf(a, &tmp, c.list);
+        try t.expectEqual(@as(u8, 1), r.code);
+        const why = try std.fmt.allocPrint(a, c.why, .{try h.path(a, &tmp, "pythons.json")});
+        try t.expectEqualStrings(try std.fmt.allocPrint(a, "pypi_smoke: FAILED: {s}\n", .{why}), r.err);
+        try t.expectEqualStrings(try std.fmt.allocPrint(a, "::error title=pypi::{s}\n", .{why}), r.out);
+        try t.expectEqualStrings("earlier=1\n", try h.readAll(a, &tmp, "gh.txt"));
+    }
+}
+
+test "matrix fails when the output file cannot be written" {
+    var ar = std.heap.ArenaAllocator.init(t.allocator);
+    defer ar.deinit();
+    const a = ar.allocator();
+    var tmp = t.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.writeFile(.{ .sub_path = "pythons.json", .data = "[\"3.13.16\"]" });
+    const gh = try h.path(a, &tmp, "no/such/dir/gh.txt");
+    var fake = h.Fake{ .alloc = a, .routes = &.{} };
+    var runner = h.FakeRunner{ .alloc = a, .work = "" };
+    const r = try exec(a, &.{ "matrix", "--pythons", try h.path(a, &tmp, "pythons.json"), "--platform", "linux-x86_64", "--github-output", gh }, &fake, &runner);
+    try t.expectEqual(@as(u8, 1), r.code);
+    try t.expectEqualStrings(try std.fmt.allocPrint(a, "pypi_smoke: FAILED: cannot write --github-output {s}: FileNotFound\n", .{gh}), r.err);
+}
+
 // ---- usage ------------------------------------------------------------------------------
 
 test "a usage error is exit 2 with its message, and reaches neither the index nor a command" {
@@ -395,7 +592,15 @@ test "a usage error is exit 2 with its message, and reaches neither the index no
         .{ .args = &.{ "verify", "--index", "testpypi", "--dist", "d", "--delay", "-1" }, .want = "pypi_smoke: --delay is a number of seconds from 0 to 300\n" },
         .{ .args = &.{ "verify", "--index", "npm", "--dist", "d" }, .want = "pypi_smoke: --index is testpypi or pypi\n" },
         .{ .args = &.{ "state", "--index", "", "--dist", "d", "--github-output", "g" }, .want = "pypi_smoke: --index is testpypi or pypi\n" },
-        .{ .args = &.{ "install", "--index", "pip", "--dist", "d", "--python", "p", "--example", "e", "--expect", "x", "--data", "f", "--abi-table", "t", "--work", "w" }, .want = "pypi_smoke: --index is testpypi or pypi\n" },
+        .{ .args = &.{ "install", "--index", "pip", "--dist", "d", "--python", "p", "--example", "e", "--expect", "x", "--data", "f", "--abi-table", "t", "--work", "w" }, .want = "pypi_smoke: --index is testpypi, pypi or dist\n" },
+        .{ .args = &.{ "install", "--index", "dist", "--dist", "d", "--python", "p", "--example", "e", "--expect", "x", "--data", "f", "--abi-table", "t", "--work", "w", "--attempts", "2" }, .want = "pypi_smoke: --attempts and --delay are for an index; --index dist installs once\n" },
+        .{ .args = &.{ "install", "--index", "dist", "--dist", "d", "--python", "p", "--example", "e", "--expect", "x", "--data", "f", "--abi-table", "t", "--work", "w", "--delay", "0" }, .want = "pypi_smoke: --attempts and --delay are for an index; --index dist installs once\n" },
+        .{ .args = &.{ "state", "--index", "dist", "--dist", "d", "--github-output", "g" }, .want = "pypi_smoke: --index is testpypi or pypi\n" },
+        .{ .args = &.{ "verify", "--index", "dist", "--dist", "d" }, .want = "pypi_smoke: --index is testpypi or pypi\n" },
+        .{ .args = &.{ "matrix", "--pythons", "s", "--platform", "linux-x86_64" }, .want = USAGE },
+        .{ .args = &.{ "matrix", "--pythons", "s", "--platform", "windows-x86_64", "--github-output", "g" }, .want = "pypi_smoke: --platform is one of linux-x86_64, macos-arm64\n" },
+        .{ .args = &.{ "matrix", "--pythons", "s", "--platform", "linux-x86_64", "--github-output", "g", "--python", "3.13" }, .want = "pypi_smoke: unknown argument --python\n" ++ USAGE },
+        .{ .args = &.{ "matrix", "--supported", "s", "--platform", "linux-x86_64", "--github-output", "g" }, .want = "pypi_smoke: unknown argument --supported\n" ++ USAGE },
         .{ .args = &.{ "install", "--index", "pypi", "--dist", "d", "--python", "p", "--example", "e", "--expect", "x", "--abi-table", "t", "--work", "w" }, .want = USAGE },
         .{ .args = &.{ "install", "--index", "pypi", "--dist", "d", "--python", "p", "--example", "e", "--expect", "x", "--abi-table", "t", "--work", "w", "--data" }, .want = "pypi_smoke: --data needs one value\n" },
     };

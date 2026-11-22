@@ -1,7 +1,7 @@
 # lowering
 
 Lowering: a bound `LogicalPlan`, a `HostProfile` and the resolved inputs go in;
-the physical plan (`physical_plan`, IR version 15) and the `ParamTable`
+the physical plan (`physical_plan`, IR version 16) and the `ParamTable`
 its segments index come out. It is pure. `lower` opens no file, reads no clock
 and no environment variable and touches no global, so equal arguments give a
 `LoweredPlan` that renders byte-equal.
@@ -13,19 +13,26 @@ and no environment variable and touches no global, so equal arguments give a
 - `lowered_plan`: `LoweringInputs` (one `ScanFacts` per scan in scan
   pre-order: the footers' statistics and the columns every row group stores
   dictionary encoded), `ParamTable`, `LoweredPlan` and the four refusal tokens.
-- `cut_walk`: the cutter. A scan opens a pipeline (`SOURCE_PARQUET`;
-  `SOURCE_BATCH` for an in-memory scan; `SOURCE_CSV` for a CSV scan, whose
-  spec carries the path, the dialect and every column of the file with the
-  type the plan bound it at; the pushed filter and projection of the last two
-  become operators). A filter, a projection and a limit fuse into it. An
-  aggregation, a distinct or a sort ends it in a sink and opens a pipeline
+- `cut_walk`: the cutter. A scan opens a pipeline (`SOURCE_PARQUET`, whose
+  spec lists the files when there are several; `SOURCE_BATCH` for an in-memory
+  scan; `SOURCE_CSV` for a CSV scan, whose spec carries the path, the dialect
+  and every column of the file with the type the plan bound it at; the pushed
+  filter and projection of the last two become operators, and so do those of
+  a Parquet scan with Hive partition columns, over the files' columns followed
+  by the partition columns). A filter, a projection and a limit fuse into it.
+  An aggregation, a distinct or a sort ends it in a sink and opens a pipeline
   that reads that segment's output over an `E3` edge. A distinct is a
   `SINK_AGG` grouped by every column, in order, with no aggregate, so its
-  sink row is the one an aggregation with those group keys gets. The root is a `SINK_COLLECT` segment
-  unless the top node is a breaker, which is then the result. `cut_walk` is
-  only the dispatch on the node's tag; each arm is its own module (`cut_scan`,
-  `cut_filter`, `cut_project`, `cut_limit`, `cut_aggregate`, `cut_distinct`,
-  `cut_sort`), and
+  sink row is the one an aggregation with those group keys gets. A union
+  (`UNION ALL`) ends each branch in a segment of its own (a `SINK_COLLECT`
+  segment, or the branch's aggregation, distinct or sort segment when nothing
+  is fused after it) and opens a pipeline whose source is `SOURCE_CONCAT` over
+  those segments in branch order, with an `E3` edge to each; what stands above
+  the union fuses onto or closes that pipeline. The root is a `SINK_COLLECT`
+  segment unless the top node is a breaker, which is then the result.
+  `cut_walk` is only the dispatch on the node's tag; each arm is its own
+  module (`cut_scan`, `cut_filter`, `cut_project`, `cut_limit`,
+  `cut_aggregate`, `cut_distinct`, `cut_sort`, `cut_union`), and
   `cut_state` holds what they share: the open pipeline, the cutter's segments
   and ParamTable, and the close and reopen of a breaker. A new node kind is a
   new arm module and one branch in `cut_walk`.
@@ -45,7 +52,7 @@ and no environment variable and touches no global, so equal arguments give a
 Lowering refuses by name and never replaces what it cannot lower with another
 shape:
 
-- `LOWERING_UNCUTTABLE_NODE`, naming the node: a join, union, top-n,
+- `LOWERING_UNCUTTABLE_NODE`, naming the node: a join, top-n,
   window, view or shared-subplan reference, cast to string or exchange node
   (the cutter has no arm for any of them, so an exchange is refused rather
   than elided on one host); a filter, projection or aggregation that carries a
@@ -55,18 +62,22 @@ shape:
   column list, over no column or over two columns of one name; a source other
   than Parquet, in memory or CSV; a CSV scan with `header=false` (the reader
   would name its columns `col_0`, `col_1`, ..., where DuckDB names them
-  `column0`, `column1`, ...).
+  `column0`, `column1`, ...); a union with no branch, or with a branch whose
+  schema is not the union's (column count, and per column the name, Arrow
+  type, decimal precision and scale and timezone; the concatenation reads
+  every branch by position in the union's layout, so the producer casts and
+  renames the branches first).
 - `LOWERING_SINK_UNSERVED`, naming the triple or the key: a group key of a
   type with no row (an 8- or 16-bit integer, a timestamp, a binary, ...), a
   key of several columns that are not all dictionary encoded strings (a
   distinct's columns are its group keys, so a distinct over several columns is
   served only when they are), or a segment whose triple has no row.
-- `LOWERING_SCAN_NOT_TOTAL`: a Parquet scan of several files, a Hive
-  partitioned scan (partition columns or values, a directory scan or a
-  partition predicate), a scan on a file system other than the local one, or a
-  scan marked unbounded. The segment's Parquet arm names one file and carries
-  no partition columns, predicate or file system descriptor, and its sources
-  read a bounded input. The scan's display name is not part of the segment.
+- `LOWERING_SCAN_NOT_TOTAL`: a Hive partitioned scan that lists its files
+  lazily (a directory scan or a partition predicate), a scan on a file system
+  other than the local one, or a scan marked unbounded. The segment's Parquet
+  arm carries the file list and the partition columns' constants, but no
+  predicate or file system descriptor, and its sources read a bounded input.
+  The scan's display name is not part of the segment.
 - `LOWERING_INPUTS_SCAN_COUNT`: the inputs do not hold one entry per scan.
 
 ## What a segment records

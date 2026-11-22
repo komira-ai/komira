@@ -67,6 +67,7 @@ TARGETS = [
     "komira//src/sdk_exec:sdk_exec_conda",
     "komira//src/smtp_server:smtp_server_conda",
     "komira//src/tests/conformance/komira_json_conformance:komira_json_conformance",
+    "komira//src/tests/conformance/komira_multifile_scan_conformance:komira_multifile_scan_conformance",
     "komira//src/tests/e2e/komira_shuffle_e2e:komira_shuffle_e2e_conda",
     "komira//src/tests/e2e/komira_shuffle_e2e:test_shuffle_dead_map_replay",
     "komira//src/tests/e2e/komira_shuffle_e2e:test_shuffle_dead_reducer_reread",

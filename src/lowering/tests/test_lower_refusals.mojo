@@ -8,7 +8,7 @@
 # detail lowers. A refused plan never produces a LoweredPlan.
 #
 # Tests, and the behaviour each asserts:
-#   test_nodes_the_cutter_does_not_cut_are_refused_by_tag: a join, union,
+#   test_nodes_the_cutter_does_not_cut_are_refused_by_tag: a join,
 #     top-n, view reference, shared-subplan reference and cast to string are
 #     each refused by their tag name.
 #   test_a_refused_node_below_a_breaker_refuses_the_whole_plan: a join under an
@@ -68,7 +68,6 @@ from plan_ir.logical_plan import (
     SOURCE_KIND_UNSET,
     JOIN_INNER,
     PLAN_JOIN,
-    PLAN_UNION,
     PLAN_DISTINCT,
     PLAN_TOPN,
     PLAN_VIEW_REF,
@@ -155,11 +154,6 @@ def test_nodes_the_cutter_does_not_cut_are_refused_by_tag() raises:
     var join = LogicalPlan.join(_scan(), _scan(), _names("k"), _names("k"), JOIN_INNER)
     _refused_with(_message(join, _inputs(2)), LOWERING_UNCUTTABLE_NODE, plan_tag_name(PLAN_JOIN))
 
-    var children = List[OwnedPointer[LogicalPlan]]()
-    children.append(OwnedPointer(_scan()))
-    children.append(OwnedPointer(_scan()))
-    var union = LogicalPlan.union(children^, _schema())
-    _refused_with(_message(union, _inputs(2)), LOWERING_UNCUTTABLE_NODE, plan_tag_name(PLAN_UNION))
 
     var topn = LogicalPlan.topn(_names("k"), _bools(False), 5, _scan())
     _refused_with(_message(topn, _inputs()), LOWERING_UNCUTTABLE_NODE, plan_tag_name(PLAN_TOPN))
@@ -206,23 +200,6 @@ def _parquet_scan(var source: ParquetSource) raises -> LogicalPlan:
 
 
 def test_a_parquet_scan_the_segment_arm_cannot_carry_is_refused() raises:
-    var two = List[String]()
-    two.append("a.parquet")
-    two.append("b.parquet")
-    var multi = _parquet_scan(
-        ParquetSource.partitioned(two^, _schema(), List[Field](), List[List[String]]())
-    )
-    _refused_with(_message(multi, _inputs()), LOWERING_SCAN_NOT_TOTAL, "2 files")
-
-    var one = List[String]()
-    one.append("a.parquet")
-    var cols = List[Field]()
-    cols.append(Field("dt", ArrowType.STRING, False))
-    var values = List[List[String]]()
-    values.append(_names("2026-10-01"))
-    var hive = _parquet_scan(ParquetSource.partitioned(one^, _schema(), cols^, values^))
-    _refused_with(_message(hive, _inputs()), LOWERING_SCAN_NOT_TOTAL, "Hive")
-
     var remote = _parquet_scan(
         ParquetSource(String("a.parquet"), _schema()).with_fs_descriptor(
             FsDescriptorPod.cloud(FS_SCHEME_S3, String("bucket"), 3)
@@ -231,6 +208,36 @@ def test_a_parquet_scan_the_segment_arm_cannot_carry_is_refused() raises:
     _refused_with(_message(remote, _inputs()), LOWERING_SCAN_NOT_TOTAL, "local")
 
     # One local file lowers.
+    assert_equal(_message(_parquet_scan(ParquetSource(String("a.parquet"), _schema())), _inputs()), "")
+
+
+def test_a_scan_of_several_files_lowers() raises:
+    var two = List[String]()
+    two.append("a.parquet")
+    two.append("b.parquet")
+    var multi = _parquet_scan(
+        ParquetSource.partitioned(two^, _schema(), List[Field](), List[List[String]]())
+    )
+    assert_equal(_message(multi, _inputs()), "")
+
+
+def test_a_hive_partitioned_scan_lowers() raises:
+    var two = List[String]()
+    two.append("dt=2026-10-01/a.parquet")
+    two.append("dt=2026-10-02/b.parquet")
+    var cols = List[Field]()
+    cols.append(Field("dt", ArrowType.STRING, False))
+    var values = List[List[String]]()
+    values.append(_names("2026-10-01"))
+    values.append(_names("2026-10-02"))
+    var hive = _parquet_scan(ParquetSource.partitioned(two^, _schema(), cols^, values^))
+    assert_equal(_message(hive, _inputs()), "")
+
+
+def test_a_hive_directory_scan_is_refused_and_a_plain_scan_lowers() raises:
+    var source = ParquetSource(String("a.parquet"), _schema())
+    source.hive_dir_scan = True
+    _refused_with(_message(_parquet_scan(source^), _inputs()), LOWERING_SCAN_NOT_TOTAL, "lazily")
     assert_equal(_message(_parquet_scan(ParquetSource(String("a.parquet"), _schema())), _inputs()), "")
 
 
@@ -474,7 +481,7 @@ def test_an_unbounded_scan_is_refused_and_a_bounded_one_is_cut() raises:
 def test_a_parquet_scan_with_a_partition_predicate_is_refused() raises:
     var source = ParquetSource(String("a.parquet"), _schema())
     source.hive_predicate = Optional(PartitionPredicatePod.empty())
-    _refused_with(_message(_parquet_scan(source^), _inputs()), LOWERING_SCAN_NOT_TOTAL, "Hive")
+    _refused_with(_message(_parquet_scan(source^), _inputs()), LOWERING_SCAN_NOT_TOTAL, "lazily")
     assert_equal(_message(_parquet_scan(ParquetSource(String("a.parquet"), _schema())), _inputs()), "")
 
 

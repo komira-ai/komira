@@ -4,6 +4,7 @@ on Linux x86_64 and, for the macOS wheel, on macOS arm64).
 
     <prefix>/bin/python3.<minor> -I test_installed.py --site <dir>
         [--host-lib <lib>]... --version <v> --license-expression <expr>
+        --requires-python <spec> --classifier <classifier>...
         --abi-table <komira.tsv> --license <LICENSE> --notice <NOTICE>
         --modular-license <LICENSE> --modular-notices <Third-Party-Notices>
         --parquet <file.parquet> --plan-hex <file.hex>
@@ -22,8 +23,10 @@ Then, in order:
   `modular/` directory: nothing of Modular's;
 - `import komira` is the package installed in `--site`, not a source tree;
 - the installed distribution is `--version`, and `komira.__version__` is it;
-- its metadata has no `Requires-Dist`, and its `License-Expression` is the
-  given one; `.dist-info/licenses/` holds LICENSE and NOTICE, byte for byte the
+- its metadata has no `Requires-Dist`, its `License-Expression` is the
+  given one, its `Requires-Python` is `--requires-python`, and its
+  `Classifier` lines are the `--classifier` values, in that order and no
+  other; `.dist-info/licenses/` holds LICENSE and NOTICE, byte for byte the
   repository's, and `MODULAR_LICENSE` and `MODULAR_THIRD_PARTY_NOTICES`, byte
   for byte the pinned compiler package's, and no other; its description is
   README.md, which starts with the line `# komira`;
@@ -80,19 +83,20 @@ _VALUED = (
     "--modular-notices",
     "--parquet",
     "--plan-hex",
+    "--requires-python",
 )
 
 
 def parse(argv):
-    opts = {"host_lib": []}
+    opts = {"host_lib": [], "classifier": []}
     i = 0
     while i < len(argv):
         flag = argv[i]
         if i + 1 >= len(argv):
             raise SystemExit("test_installed: flag {} needs a value".format(flag))
         value = argv[i + 1]
-        if flag == "--host-lib":
-            opts["host_lib"].append(value)
+        if flag in ("--host-lib", "--classifier"):
+            opts[flag[2:].replace("-", "_")].append(value)
         elif flag in _VALUED:
             opts[flag[2:].replace("-", "_")] = value
         else:
@@ -101,6 +105,8 @@ def parse(argv):
     for flag in _VALUED:
         if flag[2:].replace("-", "_") not in opts:
             raise SystemExit("test_installed: {} is required".format(flag))
+    if not opts["classifier"]:
+        raise SystemExit("test_installed: --classifier is required at least once")
     return opts
 
 
@@ -149,10 +155,15 @@ def under(path, directory):
 
 
 def check_metadata(dist, opts):
-    """The installed distribution's metadata: no requirement, the licence
-    expression and files, and the description."""
+    """The installed distribution's metadata: no requirement, the Pythons it
+    claims, the licence expression and files, and the description."""
     got = list(dist.requires or [])
     assert not got, "the wheel's Requires-Dist is {}".format(got)
+
+    requires_python = dist.metadata["Requires-Python"]
+    assert requires_python == opts["requires_python"], "the wheel's Requires-Python is {}, not {}".format(requires_python, opts["requires_python"])
+    classifiers = dist.metadata.get_all("Classifier") or []
+    assert classifiers == opts["classifier"], "the wheel's Classifier lines are {}, not {}".format(classifiers, opts["classifier"])
 
     expression = dist.metadata["License-Expression"]
     assert expression == opts["license_expression"], "the wheel's License-Expression is {}".format(expression)

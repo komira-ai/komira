@@ -430,8 +430,9 @@ def _bind_projection(stmt: SelectStmt, schema: Schema, scope: BindScope, var chi
     """The SELECT list as a Project, WIDENED by any ORDER BY column the list
     does not already produce.
 
-    With `result_int_literals` (the list is the query's result: not a CTE, a
-    subquery or a UNION ALL branch) a bare integer literal item that fits
+    With `result_int_literals` (the list is the query's result or a UNION ALL
+    branch, whose common type is folded afterwards; not a CTE or a subquery)
+    a bare integer literal item that fits
     INT32 is an INT32 column, as in DuckDB (`_result_int_literal`).
 
     Widen, sort, prune (the SELECT binder prunes): `LogicalPlan.sort`

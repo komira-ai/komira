@@ -9,8 +9,8 @@ and the file utilities every action uses are pinned downloads.
 > arm64 are being added: a Mac will build on its own, with no build service.
 > Until then, on a Mac you can install and run `./buck2` and read the code.
 
-**To use komira from Python:** `pip install komira` (Linux x86_64, Python 3.13
-or newer). It loads the engine and registers Parquet files; it runs no query
+**To use komira from Python:** `pip install komira` (Linux x86_64, CPython
+3.11 to 3.14). It loads the engine and registers Parquet files; it runs no query
 yet. See [installing komira for Python](docs/install.md) and the
 [changelog](python/CHANGELOG.md).
 

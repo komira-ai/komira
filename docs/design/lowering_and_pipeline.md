@@ -12,7 +12,7 @@ on [the optimized plan](optimized_plan.md) (§5.3, the closed list of host-local
 them. It does not describe streaming, which [plan models](plan_models.md) §4.3 covers over the same physical plan.
 
 **Where the code and the docs disagree today.**
-[Plan models](plan_models.md) §4.1 describes the physical IR as version 13 in `plan_ir`; the code is version 14
+[Plan models](plan_models.md) §4.1 describes the physical IR as version 13 in `plan_ir`; the code is version 16
 in `physical_plan`. That section is stale on this point and is corrected in the same change as this document's
 slice 1. The same section declares `lower(segment, host_profile, resolved_inputs)`; §2.1 below says how this document's
 entry relates to it. [The architecture](../architecture.md) names the lowering layer `komira_compiler`; no such
@@ -41,7 +41,7 @@ Parquet files, so they cannot run until the middle exists.
 | Parse | `sql`: `tokenize`, `parse_sql`, `SqlCatalog` | none |
 | Bind | open draft, komira#1216: `bind_statement(stmt, catalog, footers)` returns a `BoundStatement` holding a `LogicalPlan`; footers come from a caller-supplied `SqlParquetFooters` | the caller (§6.2) |
 | Optimize | `optimizer.optimizer_driver.optimize` | called, not changed (§6.1) |
-| **Lower** | `physical_plan` holds the IR (`SegmentDescPod`, version 14); `lowering_rules` holds one rule (`derive_payload_narrow`); `engine_runtime.record_segment_morsel_rows` sizes morsels; **no function produces segments from a plan** | §2, new `lowering` |
+| **Lower** | `physical_plan` holds the IR (`SegmentDescPod`, version 16); `lowering_rules` holds one rule (`derive_payload_narrow`); `engine_runtime.record_segment_morsel_rows` sizes morsels; **no function produces segments from a plan** | §2, new `lowering` |
 | **Drive** | `morsel` holds the source, operator and sink traits and `PipelineExecution`; `engine_runtime` holds the segment execution context; `async_api.ParallelDispatch` holds the fork-join surface; **no function runs a segment** | §3, new `pipeline_exec` |
 | **Sinks a SQL plan can pick at run time** | `op_agg_hash` holds the table kernels (`FlatHashAggregator`, `AggCommitPlan`); the typed stage tables of the open operator pull requests are compile-time typed | §4 |
 | **Session state** | `sdk_exec` holds twelve leaf modules; its README says the context is not there | §5 |
@@ -125,7 +125,7 @@ here. The cutter's output is complete or `lower` raises.
 
 ### 2.2 The target IR (D1)
 
-**Recommended: the first slices lower to the IR that exists, `physical_plan` version 14**, behind the `lower`
+**Recommended: the first slices lower to the IR that exists, `physical_plan` version 16**, behind the `lower`
 signature above, and the self-contained IR of [plan models](plan_models.md) §4.2 becomes its own later design and
 slice. This is the alternative that [plan models](plan_models.md) D7 rejected ("port as is and fix later", because side
 tables in the IR block the wire form). It is recommended here only with a stated exit (below) and because the
@@ -224,10 +224,10 @@ partition id order: it fixes the output order and says nothing about the float r
 first slices set `ORDER_NONE` only; step 9 sets `ORDER_ROW_RANGE` on the ungrouped float case. What `ORDER_ROW_RANGE`
 asks of the driver is in §3.3 and open point O1, and what step 9 built is after the table of §7.3.
 
-**What the cutter refuses.** An `ASOF` join (`SINK_ASOF_JOIN`), a union, a sort-merge join (`SINK_SMJ_BUILD`), the IR's `SOURCE_CONCAT` and
+**What the cutter refuses.** An `ASOF` join (`SINK_ASOF_JOIN`), a sort-merge join (`SINK_SMJ_BUILD`), the IR's
 `SINK_JOIN_PROBE` (a second, sink-form probe the cutter does not emit; the probe is `OP_JOIN_PROBE`, §3.6), a view reference, a shared-subplan reference (`PLAN_CSE_REF`) and
-a cast to string in a pipeline's spine are not cut yet: the IR has the tags, the cutter does not emit them, and "a union is refused" means the cutter does not
-produce a `SOURCE_CONCAT` for it. The cutter raises a named refusal
+a cast to string in a pipeline's spine are not cut yet: the IR has the tags and the cutter does not emit them. A union is cut: each branch ends in a
+segment of its own and the union's pipeline reads their outputs through a `SOURCE_CONCAT` in branch order (src/lowering/README.md). The cutter raises a named refusal
 (`LOWERING_UNCUTTABLE_NODE`, naming the node tag), and does not produce a segment that reads "some batch". A resident
 batch standing in for a subtree discards the subtree's meaning and gives a well-formed plan that computes something
 else; "not yet cut" must stay visible as a refusal. The same holds for a plan with an `EXCHANGE` node when there is one
@@ -827,12 +827,14 @@ first rejects.
 
 `read_parquet('path')` binds off the file's own footer, as `sql_tvf_bind` documents. The binder takes that footer
 through the `SqlParquetFooters` trait, which a caller implements (`footer_schema(path)`, `column_null_count(path,
-column)`). The engine supplies one, `ParquetFooters`. It lives in `parquet_footers`, a package of its own, because `EngineContext` (which would hold it in `sdk_exec`) is not written yet; the context will hold the package's `FooterCache`:
+column)`, `parquet_relation(path, hive_partitioning)`). The engine supplies one, `ParquetFooters`. It lives in `parquet_footers`, a package of its own, because `EngineContext` (which would hold it in `sdk_exec`) is not written yet; the context will hold the package's `FooterCache`:
 
-- `footer_schema` reads the footer of one file through the `FooterCache` (built: a file; a glob is refused by name;
-  planned: the footers of a glob's files unioned by name). The cache is `parquet_footers`' own, which never
+- `footer_schema` reads the footer of one file through the `FooterCache` (a glob is refused by name there). The cache is `parquet_footers`' own, which never
   re-reads a held footer; it is not `parquet.ParquetMetadataCache`'s revalidating surface, which would let bind
   and lowering see two versions of one file;
+- `parquet_relation` is what a `read_parquet(path)` relation scans: the files a file or glob names (a directory too, when a table is registered)
+  (`resolve_parquet_source`), each required to have the first file's schema, with Hive partition columns after the
+  data columns;
 - `column_null_count` sums a column's null counts over the row groups, and returns `None` when any row group records
   none, as the trait asks.
 
@@ -1010,7 +1012,7 @@ that no test reaches is a defect of the tests.
 |---|---|---|
 | Plan IR, expressions, wire | `plan_ir`, `plan_expr`, `plan_wire` | none |
 | Optimizer | `optimizer` and its driver | the shared-subplan and scan-dedup passes, in the optimizer (D5) |
-| Physical IR | `physical_plan`, version 14, with driver-table indices | the self-contained IR (§2.2) |
+| Physical IR | `physical_plan`, version 16, with driver-table indices | the self-contained IR (§2.2) |
 | Host rules, morsel sizing | `derive_payload_narrow`; `record_segment_morsel_rows` and `HostProfile` in `engine_runtime` | the other host-local rules; `host_profile` and `host_detect` (D9, §2.5) |
 | **Lowering** | none | `lowering` (§2) |
 | **Driver** | traits, `PipelineExecution`, segment execution context, `ParallelDispatch` | `pipeline_exec` (§3) |
@@ -1026,7 +1028,7 @@ recommendation each.
 
 | # | Question | Recommended | Alternative | Why |
 |---|---|---|---|---|
-| D1 | Which IR do the first slices lower to | The existing `physical_plan` version 14, with a `ParamTable` owned by the `LoweredPlan`, behind the final `lower(plan, host_profile, inputs)` signature; the self-contained IR is a later, separate design and slice (§2.2) | Build the self-contained IR first, so no query runs until it exists | The six changes the self-contained IR needs do not change the cut, the driver or the signature, so they can follow; the refusal gates (a non-total Parquet arm, an uncuttable node) keep the interim IR honest. This is the alternative [plan models](plan_models.md) D7 rejected ("port as is and fix later"), taken with an exit condition (no consumer outside `pipeline_exec` and no serialization until the self-contained IR lands, §2.2) and with the `ParamTable` as the single place the side tables live; a deviation in time, not in direction. The cost: a `ParamTable` wire form is one more item of the later slice. |
+| D1 | Which IR do the first slices lower to | The existing `physical_plan` version 16, with a `ParamTable` owned by the `LoweredPlan`, behind the final `lower(plan, host_profile, inputs)` signature; the self-contained IR is a later, separate design and slice (§2.2) | Build the self-contained IR first, so no query runs until it exists | The six changes the self-contained IR needs do not change the cut, the driver or the signature, so they can follow; the refusal gates (a non-total Parquet arm, an uncuttable node) keep the interim IR honest. This is the alternative [plan models](plan_models.md) D7 rejected ("port as is and fix later"), taken with an exit condition (no consumer outside `pipeline_exec` and no serialization until the self-contained IR lands, §2.2) and with the `ParamTable` as the single place the side tables live; a deviation in time, not in direction. The cost: a `ParamTable` wire form is one more item of the later slice. |
 | D2 | Which packages | New `lowering` (pure, no operator, no I/O) and new `pipeline_exec`; the context stays in `sdk_exec`; the `komira_compiler` row of [the architecture](../architecture.md) points here | One `komira_engine` for lowering, driver and context; or reuse the name `komira_compiler` | Purity is a property of a dependency list, and a package that also drives execution cannot show it; the name `komira_compiler` names nothing on `main`, and what it once covered is in `batch_eval` and `optimizer`. The costs: two packages to review, and `sdk_exec` gains a heavier dependency closure, which splitting its leaves from the context can undo if it matters. |
 | D3 | How a runtime plan selects a sink | A closed registry of untyped sinks selected by `(sink_kind, sink_key_dtype, sink_orientation)`, an `if` ladder with one module per row returning a closed variant, no erased box, no function pointer (§4.2) | Port the erased state box and thunk table, with a rule exception for `MutExternalOrigin`; or enumerate typed `HashAggTable` combinations | A closed variant keeps every pointer rule. The enumeration is unbounded for runtime key and aggregate types, and one module naming every sink is a very large translation unit, which the file-size rule exists to avoid. |
 | D4 | Who owns the untyped aggregation sinks, and at what size | Slices 3 to 6 here, over `op_agg_hash`, behind a farm spike for the dictionary route; if the sinks pass about 8,000 lines, they move to their own package; and tell the owners of the operator pull requests that those do not cover SQL aggregation | Port the earlier engine's untyped aggregation family (several times the size of the kernels it wraps) | The kernels are the runtime-spec layer already on `main`; what is missing is a thin driver, and measuring before writing the dictionary path is cheaper than rewriting it. |

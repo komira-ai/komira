@@ -1,4 +1,4 @@
-# The release build of komira's conda packages, and the continuous prod publish of its mopm
+# The release build of komira's conda packages and the continuous prod publish of its mopm
 # packages (docs/ci.md, "release.yml").
 #
 # komira publishes its conda release set to NO channel for now, and publishing will move to mopm
@@ -63,6 +63,9 @@
 #                   These jobs need a mopm that has `--no-commit` and `--abort`
 #                   (0.0.66 and later) and a registry whose prod CI identity may
 #                   act for the package owner; docs/ci.md, "The prod publish".
+#
+# NO WHEEL HERE. The Python wheel is built and installed as a user installs it by pypi.yml on every
+# push (docs/ci.md, "pypi.yml: publishing the Python package"), so this file holds no wheel job.
 #
 # It runs named Buck2 targets on the farm, through the buck2-farm action
 # (.github/actions/buck2-farm), which fails a step unless buck2 succeeded and

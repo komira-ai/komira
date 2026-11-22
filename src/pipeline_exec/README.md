@@ -47,7 +47,10 @@ Import each module by name; the package root exports nothing.
   sources of a plan. `build_parquet_source` makes a `parquet_scan` `ParquetSource` on
   the local file system from the Parquet arm of a `SourceSpecPod`: it refuses a
   spec that is not total, resolves the projection names through the footer of
-  the first file the path lists (a path may be a file, a directory or a glob),
+  the first file the path lists (a path may be a file, a directory or a glob;
+  a spec that lists its files, `parquet_paths`, reads exactly those files in
+  that order and appends their constant partition columns after the data
+  columns),
   and installs the filter as the decode filter (every conjunct is applied; a row
   whose predicate is UNKNOWN is dropped) and as the pushed predicate that
   row-group statistics are checked against. The source borrows the caller's
@@ -254,7 +257,12 @@ Import each module by name; the package root exports nothing.
   memory on a synthetic workload and checks each layout's counts; its numbers and what
   they decided are in `docs/design/lowering_and_pipeline.md` (section 4.3).
 - `real_builder`: `RealBuilder`, the `SegmentBuilder` over these members. It
-  serves SOURCE_PARQUET, SOURCE_BATCH, SOURCE_SINK_OUTPUT, SOURCE_CSV, OP_FILTER,
+  serves SOURCE_PARQUET, SOURCE_BATCH, SOURCE_SINK_OUTPUT, SOURCE_CSV,
+  SOURCE_CONCAT (a UNION ALL: it takes the output of every producer the spec
+  names, after checking each is a dependency, and concatenates them in the
+  spec's order into one batch it serves as a `SinkOutputSource`, with each
+  column nullable when any producer's is; a concatenation of no segment is
+  refused), OP_FILTER,
   OP_PROJECT, OP_LIMIT and the sinks `(SINK_COLLECT, KEY_DTYPE_NONE,
   SINK_ORIENT_COLUMNAR)`, `(SINK_AGG, KEY_DTYPE_NONE, SINK_ORIENT_COLUMNAR)`,
   the grouped rows I64, I32, F64, F32, DATE32, BOOL and DECIMAL128,
