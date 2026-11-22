@@ -11,7 +11,7 @@ Status: design, not built. This document makes buildable the first slice of the 
 
 Statements marked *(inferred)* are reasoning, not something read in code or in a specification. Statements marked *(to confirm)* are behaviour of a third-party catalog or engine, or of Iceberg Java beyond the specification, that this document has not checked. The REST protocol facts come from the Iceberg REST OpenAPI ([rest-catalog-open-api.yaml](https://github.com/apache/iceberg/blob/main/open-api/rest-catalog-open-api.yaml)) and the table facts from the [Iceberg table spec](https://iceberg.apache.org/spec/).
 
-## Two questions for the maintainers
+## Two questions for the owner
 
 Each has a recommendation in one line. The rest of the document is written to it.
 
@@ -78,8 +78,8 @@ s.sql("CREATE TABLE lake.sales.orders AS SELECT * FROM read_parquet('s3://raw/or
 s.sql("INSERT INTO lake.sales.orders SELECT * FROM read_parquet('s3://raw/orders-late/*.parquet')")
 s.sql("SELECT region, sum(amount) FROM lake.sales.orders WHERE order_date >= DATE '2026-10-01' GROUP BY region")
 
-orders = komira.read_table(lake, "sales.orders")            # as_of=<snapshot id> for time travel
-orders.filter(orders.region == "emea").to_arrow()
+sales = komira.read_table(lake, "sales.orders")             # as_of=<snapshot id> for time travel
+sales.filter(sales.region == "emea").to_arrow()
 ```
 
 **How a catalog reaches a statement.** The Mojo SQL front end cannot turn a table name into a source by itself, so the user supplies the mapping:
@@ -100,6 +100,7 @@ What this document adds to that model is only what is specific to Iceberg:
   - Nothing is sent to the catalog until the first statement that binds it names one of its tables.
 - **SQL names** are `catalog.namespace.table`, the three-part form DuckDB's Iceberg extension accepts after its `ATTACH ... (TYPE iceberg)`. A DuckDB script therefore ports by replacing its `ATTACH` line with a binding of the same name *(to confirm the forms against the pinned DuckDB and its Iceberg extension)*.
   - A first part with no binding fails with the binding model's `BIND_NAME_UNBOUND`, whose message lists the bound names. A first part bound to something other than a catalog fails with `BIND_NOT_A_CATALOG`.
+  - Two parts (`lake.orders`): the binding model binds `lake` as the catalog, as it does for any qualified name, and this design then refuses the statement with `ICEBERG_NAMESPACE_REQUIRED`, naming the table, because an Iceberg REST table always lives in a namespace. komira does not guess a default namespace. *(DuckDB reads `lake.orders` on an attached catalog as `lake.main.orders`; to confirm against the pinned DuckDB. A catalog with a `main` namespace is reached by writing `lake.main.orders`.)*
   - Four or more parts (`catalog.a.b.table`) name a multi-level namespace. This is an EXTENSION over DuckDB. A catalog with one-level namespaces answers with its own error, which is quoted.
   - Namespace and table names are sent as written: unquoted identifiers keep their spelling, as DuckDB keeps it. The catalog's own case rule decides the lookup, and komira does not retry in another case.
   - A column list (`INSERT INTO t (a, b)`) matches table columns case-insensitively, as DuckDB does. Two table columns that differ only in case make the statement fail with `ICEBERG_COLUMN_AMBIGUOUS`.
@@ -261,20 +262,22 @@ Data files go to the table's location, with credentials chosen in this order:
 - by `GET .../tables/{table}/credentials`, where the server lists that endpoint;
 - else by reloading the table.
 
-A staged create has no table to reload. If its credentials expire and the server does not list the credentials endpoint, the statement fails with `ICEBERG_CREDENTIALS_EXPIRED` before the commit.
+**A staged create's vended credentials cannot be renewed.** The table does not exist until the commit, so neither the credentials endpoint nor a load answers for it. A write that outlives them fails with `ICEBERG_CREDENTIALS_EXPIRED` before the commit, naming the staged create and saying to bind a scope that covers the table's location. That scope's credential is renewed by its own provider, and `data_access` names it. This applies only where the vended credentials are used, which is in one process: on several hosts a staged create writes with `data_access` alone (below). The files written so far are deleted by the [Cleanup](#cleanup) rules.
 
 **In a plan that spans hosts**, nothing is handed from one host to another, and the committer hands no credentials out. This is the binding model's rule that a host gets a value only by resolving a name the plan carries:
 
 - **Catalog requests.** A host that talks to the catalog resolves the catalog's credential name (`IcebergTableRef.catalog.access.credential`) through the same resolver as every other source: the session locally; on a job manager, the customer's secret store by that name, or the run's identity for `ambient`.
-- **Vended data-file credentials.** Each host loads them itself, from the catalog, under the catalog's credential name: by `GET .../tables/{table}/credentials` where the server lists it, else by loading the table. It renews them the same way, before they expire, against its own clock.
+- **Vended data-file credentials.** Each host loads them itself, from the catalog, under the catalog's credential name: by `GET .../tables/{table}/credentials` where the server lists that endpoint, else by loading the table (a load response vends them too). It renews them the same way, before they expire, against its own clock.
 - **The fallback scope.** Where the catalog vends nothing, each host resolves the credential name in `IcebergTableRef.catalog.data_access`, as for any file source.
 - **A staged `CREATE TABLE ... AS` across hosts** writes a table that does not exist yet, so a host has nothing to load and no credentials endpoint to call. The binding model answers this (`credentials_and_writes.md`, decision 5):
   - The coordinator, which runs the stage-create, learns the staged location from its response. Before it cuts the hosts' segments, it fills `data_access` with the scope covering that location, and each segment carries the location its sink writes under.
-  - When the catalog only vends and no scope covers that location, the coordinator adds one run-scoped name to the run's resolver, `vended.<statement id>`, holding the staged create's vended credentials, and puts it in each host's segment as `data_access.credential`. Each segment's header lists it. The name exists only for that run, and a client-submitted plan that names a `vended.` credential is refused on decode.
-  - Hosts resolve either name through the same resolver as any other. `ICEBERG_LOCATION_REFUSED` bounds where they write with it.
+  - **When no scope covers that location, the staged create is refused** with `ICEBERG_STAGED_CREATE_NO_SCOPE` before any file is written, and the message says to bind a scope over the table's location.
+  - The staged create's vended credentials stay with the party that ran the stage-create, for its own writes. No other party receives them, so no host's write depends on a value that nobody could renew.
+  - Hosts resolve `data_access` through the same resolver as any other name. `ICEBERG_LOCATION_REFUSED` bounds where they write with it.
+  - A vend-only catalog can still be written by a staged create in one process, and by appends on several hosts, which load the existing table's credentials themselves.
   - In the first slice there is one process, which is the committer and the only writer, and it uses the staged create's vended credentials directly.
 
-**Caches.** A loaded table, its pin and its vended credentials are cached under the binding model's identity of a read, `(location, credential name, credential generation, endpoint, region, addressing)`, where a catalog table's location is the catalog's `uri` and `warehouse` and the table's namespace and name. A session-local name and a credential's value are never part of a key. A cache on a job manager's hosts that serves several runs keys on the resolved principal instead, as that model requires.
+**Caches.** A loaded table, its pin and its vended credentials are cached under the binding model's identity of a read, `(location, credential name, credential generation, endpoint, region, addressing, signing service)`, where a catalog table's location is the catalog's `uri` and `warehouse` and the table's namespace and name. A table file read with vended credentials has `vended(<catalog credential name>, <its generation>, <table uuid>)` as its credential part, so a refresh of the vended value keeps the identity, and a new catalog generation or another table does not. A session-local name and a credential's value are never part of a key. A cache on a job manager's hosts that serves several runs keys on the resolved principal instead, as that model requires.
 
 **Catalog credentials and signing.**
 
@@ -543,14 +546,12 @@ This takes `plan_models.md` §2.2.6 and gives the arm the fields a batch write n
 message WireWriteTarget {
   oneof destination {
     string          path    = 1;   // existing (COPY TO); moved into the oneof, same number
-    WireIcebergSink iceberg = 10;
+    WireIcebergSink iceberg = 10;  // the Iceberg design; its table's catalog carries its own access
     // held: 11 topic, 12 delivery, 13 late_rows (plan_models.md §2.2.6)
   }
-  WriteFormat      format = 2;     // path only; must be the default with `iceberg`
-  WriteCompression codec  = 3;     // path only; must be the default with `iceberg`
-  WireSourceAccess access = 4;     // credentials_and_writes.md: path only, the destination's credential
-                                   // name and store settings; absent = a local destination;
-                                   // must be absent with `iceberg`
+  WriteFormat      format = 2;     // path only; must be the default with iceberg
+  WriteCompression codec  = 3;     // path only; must be the default with iceberg
+  WireSourceAccess access = 4;     // path only; absent = a local destination; must be absent with iceberg
 }
 
 message IcebergTableRef {          // moves here from optimized_plan_sources.md §15.3.1
@@ -587,7 +588,7 @@ enum IcebergWriteModeWire {
 - a target with no destination;
 - an empty `path`;
 - an absent `catalog`, an empty `catalog.uri`, or an empty `name`;
-- a `catalog.access` or `catalog.data_access` the binding model's decoder refuses: a credential name outside its grammar, a `vended.` name in a client-submitted plan, or a `uri` or endpoint with user information, a query or a fragment;
+- a `catalog.access` or `catalog.data_access` the binding model's decoder refuses: a credential name outside its grammar, or a `uri` or endpoint with user information, a query or a fragment;
 - `access` set beside `iceberg`;
 - mode `UNSPECIFIED`;
 - `if_not_exists` outside `CREATE`;
@@ -602,7 +603,7 @@ enum IcebergWriteModeWire {
 
 The party that commits decodes the body, and derives them from it ([Who commits](#who-commits)). A header copy would be a duplicate that a scheduler, which never decodes the body, could not check. The commit id and every credential value are not on the wire either ([Commit semantics](#commit-semantics)). The credential names are, in the body and in `DeclaredNeeds.credentials`, as the binding model requires: the catalog's (`IcebergTableRef.catalog.access`) and the table files' (`IcebergTableRef.catalog.data_access`).
 
-**How `access = 4` and the Iceberg arm fit together.** There is one `WireWriteTarget`, written the same in both designs: this document's `oneof destination { path = 1; iceberg = 10 }`, `format = 2` and `codec = 3`, plus the binding model's `WireSourceAccess access = 4`. `access` belongs to a `path` destination only, and the decoder refuses it beside `iceberg`. An Iceberg write takes every credential name from its table's catalog: `catalog.access` for the catalog's API and `catalog.data_access` for the table's files. That keeps the names in one place for a scan and a write of the same table, because a scan has no write target. The Iceberg arm requires at least version 6 (below). A `path` write with `access` follows the binding model's own version rule. The two cannot meet in one target, and a plan whose sources and target raise the version for different reasons declares the larger minimum.
+**How `access = 4` and the Iceberg arm fit together.** There is one `WireWriteTarget`, written the same in both designs: this document's `oneof destination { path = 1; iceberg = 10 }`, `format = 2` and `codec = 3`, plus the binding model's `WireSourceAccess access = 4`. `access` belongs to a `path` destination only, and the decoder refuses it beside `iceberg`. An Iceberg write takes every credential name from its table's catalog: `catalog.access` for the catalog's API and `catalog.data_access` for the table's files. That keeps the names in one place for a scan and a write of the same table, because a scan has no write target. Both designs raise the envelope to the same version, 6, by the rule below.
 
 **`IcebergTableRef.catalog` is re-typed, not renumbered.** `IcebergTableRef` has never shipped: it exists only in `optimized_plan_sources.md` §15.3.1. Re-typing field 1 from a name to a `WireIcebergCatalog` therefore breaks no plan anyone wrote (rule B8 applies to shipped formats).
 
@@ -611,13 +612,13 @@ The party that commits decodes the body, and derives them from it ([Who commits]
 - `path` returns the rows it wrote;
 - `iceberg` returns one row, `Count BIGINT`, matching what DuckDB returns for the statement.
 
-**Version.** An envelope whose write target is the Iceberg arm declares **format version 6**, and the accepted set becomes `{4, 5, 6}`. The existing rules carry over by arm:
+**Version.** One number serves both designs. An envelope declares **format version 6** when it carries any `WireSourceAccess`, or the Iceberg write arm. A `WireSourceAccess` is carried by a file source's or a scan binding's `access`, by `WireWriteTarget.access`, and by every `IcebergTableRef`, whose catalog holds one. So a scan-only Iceberg plan declares 6, a `COPY ... TO 's3://...'` declares 6, and an Iceberg write declares 6. The accepted set becomes `{4, 5, 6}`. The existing rules carry over:
 
-- A decoder refuses an *understated* version: the Iceberg arm with a declared version below 6, as it refuses a write target below 5 today.
+- A decoder refuses an *understated* version: any of those fields with a declared version below 6, as it refuses a write target below 5 today.
 - An *overstated* version stays accepted, as today (`plan_wire_admit.mojo`, "IT IS NOT SYMMETRIC, DELIBERATELY").
-- A reader that speaks only `{4, 5}` refuses version 6 by name, before it reaches field 10.
+- A reader that speaks only `{4, 5}` refuses version 6 by name, before it reaches any of those fields, so it never runs a remote or catalog source as if it were local.
 
-`_envelope_version_for` derives the version from the arm, and the minimum-version constant becomes per arm.
+`_envelope_version_for` derives the version from the fields present, and the minimum-version constant becomes per feature.
 
 **`OptimizedPlan`.** Its header carries the same `write_target` (`optimized_plan.md`), so a scheduler authorizes the write from `iceberg.table` without decoding the body. `OptimizedPlan` has its own `format_version`. A plan with the Iceberg arm declares the first `OptimizedPlan` version that includes the arm, which is assigned when `OptimizedPlan` is first released. The header's validity rule for `write_target` gains the decoder rules above, and the digest binds the arm as it binds `path`.
 
@@ -641,6 +642,7 @@ Every error message starts with its token, and the Python layer maps each `ICEBE
 | `SQL_STATEMENT_UNSUPPORTED` | `sql` | a statement or clause outside the first slice, named |
 | `BIND_NAME_UNBOUND`, `BIND_NOT_A_CATALOG` | binder (the binding model's codes) | a qualified name whose first part has no binding, or is bound to something other than a catalog |
 | `ICEBERG_COLUMN_AMBIGUOUS` | binder | an insert column list that matches two table columns differing only in case |
+| `ICEBERG_NAMESPACE_REQUIRED` | binder | a two-part name (`lake.orders`), which names no namespace |
 | `ICEBERG_NAMESPACE_NOT_FOUND` | `iceberg_catalog` | 404 with `NoSuchNamespaceException` |
 | `ICEBERG_TABLE_NOT_FOUND` | `iceberg_catalog` | 404 with `NoSuchTableException`, or any other 404 on a table path |
 | `ICEBERG_TABLE_ALREADY_EXISTS` | `iceberg_catalog`, binder | the name exists at bind time, or a 409 on the create POST or on a staged create's commit |
@@ -650,6 +652,7 @@ Every error message starts with its token, and the Python layer maps each `ICEBE
 | `ICEBERG_CATALOG_ENDPOINT_UNSUPPORTED` | `iceberg_catalog` | the server's `endpoints` list lacks one this statement needs |
 | `ICEBERG_CATALOG_UNAVAILABLE` | `iceberg_catalog` | a config, load or create request, or a token request, still failing with 503, a 5xx or a transport error at the end of the budget |
 | `ICEBERG_CREDENTIALS_EXPIRED` | `iceberg_catalog` | vended credentials expired with no route to renew them |
+| `ICEBERG_STAGED_CREATE_NO_SCOPE` | coordinator | a staged create in a plan that spans hosts, when no bound scope covers the location the stage-create returned; before any file is written |
 | `ICEBERG_LOCATION_REFUSED` | committer | a data or metadata path outside the table's location and the vended prefixes, or a scheme with no store |
 | `ICEBERG_COMMIT_CONFLICT` | committer | a 409 that ends the statement: the budget is spent, the plan read its target, or a replace's ids moved |
 | `ICEBERG_COMMIT_STATE_UNKNOWN` | committer | the outcome could not be determined, including a tainted statement that a 409 ends; names the snapshot id, the commit id and the manifest list |
@@ -669,7 +672,7 @@ Every error message starts with its token, and the Python layer maps each `ICEBE
 | `iceberg_catalog` | `IcebergRestRequest` gains `method` and `body`, and the transport's `get` becomes `send`; the scripted transport records the method, the body and every header; the top-level config fields; `create_table`, `commit_table(requirements, updates, idempotency_key)` and `credentials` on `IcebergRestCatalog`; typed `TableRequirement` and `TableUpdate` values with their JSON; the committer of [Commit semantics](#commit-semantics); the bearer and OAuth2 client-credentials providers and SigV4 request signing, each built from a credential the session's resolver returned for the catalog's credential name; the error tokens. It depends on `iceberg` (for the schema, spec and snapshot types) and `aws_core` (for signing). `iceberg` does not depend on it, so HTTP stays out of the format package |
 | `parquet_api`, `parquet` | `SchemaElement.field_id`, written and read; on read, columns bind by field id, falling back to `schema.name-mapping.default`, then to names |
 | `parquet_writer` | narrow and unsigned integer widening; BINARY, FIXED_LEN_BYTE_ARRAY and UUID columns; timestamp and time annotations; decimal at the minimum width; a byte-based row-group cut; per-column metrics returned beside the bytes |
-| `sql` | three-part and longer names; `INSERT INTO ... SELECT` and `VALUES`; `CREATE TABLE <name> (<columns>)`; qualified names in `CREATE [OR REPLACE] TABLE [IF NOT EXISTS] ... AS`; `SQL_STATEMENT_UNSUPPORTED` for the statements outside the slice; binder resolution of `catalog.ns.table` through the statement's bindings (the binding model's `(statement, bindings)` input) to the `komira.iceberg.table` kind, with the catalog's `WireIcebergCatalog`, its `data_access` set from the covering scope, in the plan |
+| `sql` | qualified names of two or more parts (two parts refused with `ICEBERG_NAMESPACE_REQUIRED`); `INSERT INTO ... SELECT` and `VALUES`; `CREATE TABLE <name> (<columns>)`; qualified names in `CREATE [OR REPLACE] TABLE [IF NOT EXISTS] ... AS`; `SQL_STATEMENT_UNSUPPORTED` for the statements outside the slice; binder resolution of `catalog.ns.table` through the statement's bindings (the binding model's `(statement, bindings)` input) to the `komira.iceberg.table` kind, with the catalog's `WireIcebergCatalog`, its `data_access` set from the covering scope, in the plan |
 | `arrow`, `plan_proto`, `plan_wire` | `WriteTarget` gains the Iceberg form; the wire arm, enum and version above, with goldens; `IcebergTableRef` moves into `plan.proto` with field 1 re-typed to the binding model's `WireIcebergCatalog` |
 | `lowering`, `pipeline_exec`, `sdk_exec` | the Iceberg file sink arm, in its own file per the lowering split, after lowering's writes slice; the scan planner for `komira.iceberg.table`; `run_sql` serves the write statements |
 | `so` (C ABI), the Python package | nothing of its own for declaring or binding: `komira.iceberg`, the credential classes, `komira.SigV4`, `bind` and `sql(**sources)` are the binding model's, encoded as its `WireBoundSource`. This document adds `read_table` and the `ICEBERG_*` exception classes |
@@ -754,6 +757,7 @@ A loopback variant serves the same logic over `http_server`, for the HTTP transp
   - success deletes the superseded manifest lists.
 - **Refusals, one case per token.** Each token of [Errors](#errors) that the cases above do not raise gets its own case, asserted by exact message:
   - `BIND_NAME_UNBOUND` and `BIND_NOT_A_CATALOG` on a qualified name, `ICEBERG_COLUMN_AMBIGUOUS`;
+  - `ICEBERG_NAMESPACE_REQUIRED` for `lake.orders`, before any request reaches the test catalog;
   - `ICEBERG_NAMESPACE_NOT_FOUND` and `ICEBERG_TABLE_NOT_FOUND` from the two 404 bodies;
   - `ICEBERG_CATALOG_REJECTED` from a stage-create 400;
   - `ICEBERG_CATALOG_ENDPOINT_UNSUPPORTED` from an `endpoints` list without the commit route;
@@ -795,8 +799,8 @@ A loopback variant serves the same logic over `http_server`, for the HTTP transp
   - The same statement with `cat` unbound fails with `BIND_NAME_UNBOUND`, before any request reaches the test catalog; with `cat` bound to a file source it fails with `BIND_NOT_A_CATALOG`.
   - Two hosts of a fake multi-host run each load the table's vended credentials from the test catalog under `lake-etl`, and the test catalog records one credentials request per host; nothing passes between them.
   - A catalog that vends nothing plans a scan whose `IcebergTableRef.catalog.data_access` names the covering scope's credential.
-  - A staged `CREATE TABLE ... AS` on two fake hosts writes each host's files under the staged location through `data_access`. With a vend-only catalog, it does so through the run-scoped `vended.<statement id>` name, which the fake resolver drops at the run's end.
-  - The decoder refuses a `WireWriteTarget` with both `iceberg` and `access`, and a client-submitted plan naming a `vended.` credential.
+  - A staged `CREATE TABLE ... AS` on two fake hosts writes each host's files under the staged location through `data_access`. With no scope covering that location, it fails with `ICEBERG_STAGED_CREATE_NO_SCOPE`, and the test store holds no file.
+  - The decoder refuses a `WireWriteTarget` with both `iceberg` and `access`.
   - Two loads of one table under two credential names, or two generations of one name, are two cache entries.
   - The binding rules themselves (per call, on the session, and which wins) are tested with the binding model in `credentials_and_writes.md`, not here.
 - **Writes.**
@@ -816,7 +820,8 @@ A loopback variant serves the same logic over `http_server`, for the HTTP transp
 - **Wire.**
   - Goldens for each mode.
   - The decoder refusals above, one case each.
-  - An understated version is refused, and an overstated one accepted.
+  - An understated version is refused, and an overstated one accepted. A scan-only Iceberg plan declaring 5 is refused, and the same plan declaring 6 is accepted.
+  - A staged create in one process whose vended credentials expire before the commit fails with `ICEBERG_CREDENTIALS_EXPIRED` and leaves no file behind.
   - The previous release's decoder refuses a version-6 envelope by name.
   - The new decoder still reads every version-4 and version-5 golden (rule B8).
 
@@ -881,7 +886,7 @@ These change in the pull request that lands the matching step, except the first,
 - **`storage_stack.md`, "never equality deletes".** `cdc_ingest` writes them through the file-based writer. That is not a contradiction on this path, which writes none. Moving `cdc_ingest` onto the committer has to retire them.
 - **`plan_models.md` §2.2.6.** It sketches `WireIcebergSink` with APPEND and UPSERT only. This document fills in the batch fields, and holds number 4 of the mode enum for UPSERT and numbers 11 to 13 of the target for streaming.
 - **`optimized_plan_sources.md` §15.3.1.** `IcebergTableRef` moves to `plan.proto`, because `plan.proto` cannot import `optimized_plan.proto`, and its field 1 becomes the binding model's `WireIcebergCatalog` (uri, warehouse, credential name and signing) in place of a catalog name that "the deployment, or the session that attached it" maps. A session-local name never reaches the wire.
-- **`optimized_plan_sources.md` §15.4.1, and `DataScope` in §15's needs.** The kind's `catalog` STR param, `WireScanBinding.table_catalog` and `DataScope.catalog` hold a catalog name today. Under the binding model they carry the catalog's `uri` and `warehouse` (and the credential name where a header needs it), never a session-local name.
+- **`optimized_plan_sources.md` §15.4.1, and `DataScope` in §15's needs.** A scan carries its catalog once, in `IcebergTableRef.catalog`. The kind's `catalog` STR param and `WireScanBinding.table_catalog` (both designed, never shipped) are dropped for Iceberg scans. `DataScope.catalog`, which a scheduler reads from the header without the body, is derived from the ref (its `uri` and `warehouse`), and admission checks it against the body, as it checks `DeclaredNeeds.credentials`. None of them ever holds a session-local name.
 - **`optimized_plan_sources.md` §15.9.** `read_table` takes the held catalog source, not `km.catalog("lake")`, in each SDK's example. Its `as_of=` takes a snapshot id. The timestamp form maps to `as_of_timestamp_ms` and comes later.
 - **`plan.proto`.** The `WireWriteTarget` comments change: "COPY ... and nothing else" and "NO CTAS ARM" (see [The plan wire](#the-plan-wire)), and "PRESENT = write them there, and also return them" becomes per arm.
 - **`optimized_plan.md`.** The `write_target` header rule gains the Iceberg arm's decoder rules.
