@@ -19,7 +19,8 @@
 #     references take no facts of their own.
 #   * In a join the right child is walked first, as the producer visits it:
 #     a self-join cuts the right scan and recuts it on the left, each child's
-#     scans keep their facts, and a shared join is cut once.
+#     scans keep their facts (under a left child of every kind the cutter
+#     cuts, a nested join included), and a shared join is cut once.
 #   * References under every node kind the cutter cuts are found; a shared
 #     subtree holding a reference, and a second inline subtree of a named hash,
 #     are cut as the rules say.
@@ -213,6 +214,37 @@ def _inner_join(var left: LogicalPlan, var right: LogicalPlan) -> LogicalPlan:
         left^, right^, _keys("k"), _keys("k"), JOIN_INNER, JOIN_ALGO_AUTO,
         None, JOIN_BUILD_SIDE_RIGHT,
     )
+
+
+def _join_on(
+    var left: LogicalPlan, var right: LogicalPlan, lk: String, rk: String
+) -> LogicalPlan:
+    """left JOIN right ON lk = rk, the right child building."""
+    return LogicalPlan.join(
+        left^, right^, _keys(lk), _keys(rk), JOIN_INNER, JOIN_ALGO_AUTO,
+        None, JOIN_BUILD_SIDE_RIGHT,
+    )
+
+
+def _expect_parquet_cards(
+    lp: LoweredPlan, paths: List[String], rows: List[Int]
+) raises:
+    """Every segment that reads `paths[i]` estimates `rows[i]` rows: the facts
+    of that scan, and no other's, reached it. Each path is read at least
+    once."""
+    for i in range(len(paths)):
+        var seen = 0
+        for s in range(len(lp.segments)):
+            ref seg = lp.segments[s]
+            if (
+                seg.source_kind == SEG_SOURCE_PARQUET
+                and seg.source_spec.parquet_path == paths[i]
+            ):
+                seen += 1
+                assert_equal(
+                    seg.card_estimate_rows, rows[i], paths[i] + " in segment " + String(s)
+                )
+        assert_true(seen > 0, paths[i] + " is read by no segment")
 
 
 def _ids(a: Int, b: Int) -> List[Int]:
@@ -609,6 +641,62 @@ def test_a_join_keeps_each_scans_facts_when_its_right_child_is_walked_first() ra
     assert_equal(lp.segments[2].sink_kind, SINK_HASH_BUILD)
     assert_equal(lp.segments[3].source_spec.parquet_path, "b.parquet")
     assert_equal(lp.segments[3].deps[0], 2)
+
+
+def test_a_left_child_of_every_cut_kind_keeps_its_scans_facts() raises:
+    # Left: a union of a filter, a projection, a limit, a sort and a distinct,
+    # each over its own file (scans 0 to 4). Right: X UNION ALL ref(X) (scan
+    # 5). The right child is walked first, from scan 5.
+    var exprs = ExprArray()
+    exprs.append(Expr.col_ref("k"))
+    exprs.append(Expr.col_ref("s"))
+    var branches = List[LogicalPlan]()
+    branches.append(LogicalPlan.filter(_k_gt(0), _scan("l0.parquet")))
+    branches.append(LogicalPlan.project(exprs^, _scan("l1.parquet")))
+    branches.append(LogicalPlan.limit(3, _scan("l2.parquet")))
+    branches.append(_sorted(_scan("l3.parquet")))
+    branches.append(LogicalPlan.distinct(None, _scan("l4.parquet")))
+    var x = _scan("x.parquet")
+    var plan = _inner_join(_union(branches^), _union(_two(x.copy(), _ref_to(x))))
+    var inputs = LoweringInputs()
+    var paths = List[String]()
+    var rows = List[Int]()
+    for i in range(5):
+        paths.append("l" + String(i) + ".parquet")
+        rows.append(i + 1)
+        inputs.add_scan(Optional[TableStats](_stats(i + 1)))
+    paths.append("x.parquet")
+    rows.append(99)
+    inputs.add_scan(Optional[TableStats](_stats(99)))
+    var lp = _lowered(plan, inputs)
+    _expect_parquet_cards(lp, paths, rows)
+
+
+def test_a_left_child_with_an_aggregation_and_a_join_keeps_its_scans_facts() raises:
+    # Left: count by k over l0 (scan 0) JOIN l1 (scan 1, columns j and t) on
+    # k = j. Right: X UNION ALL ref(X) (scan 2). Both joins walk their right
+    # child first.
+    var sb = SchemaBuilder()
+    sb.add_field(Field("j", ArrowType.INT64, False))
+    sb.add_field(Field("t", ArrowType.STRING, False))
+    var l1 = LogicalPlan.scan("l1.parquet", SOURCE_PARQUET, sb.build())
+    var left = _join_on(_count_by(_scan("l0.parquet")), l1^, "k", "j")
+    var x = _scan("x.parquet")
+    var plan = _inner_join(left^, _union(_two(x.copy(), _ref_to(x))))
+    var inputs = LoweringInputs()
+    inputs.add_scan(Optional[TableStats](_stats(10)))
+    inputs.add_scan(Optional[TableStats](_stats(20)))
+    inputs.add_scan(Optional[TableStats](_stats(99)))
+    var lp = _lowered(plan, inputs)
+    var paths = List[String]()
+    paths.append("l0.parquet")
+    paths.append("l1.parquet")
+    paths.append("x.parquet")
+    var rows = List[Int]()
+    rows.append(10)
+    rows.append(20)
+    rows.append(99)
+    _expect_parquet_cards(lp, paths, rows)
 
 
 def test_a_shared_join_is_cut_once() raises:

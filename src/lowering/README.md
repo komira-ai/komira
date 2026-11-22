@@ -139,7 +139,11 @@ called: the build segment of a join collects its rows whole.
 The build side is the one the plan records (`JoinData.build_side`). Lowering
 never chooses or swaps it: RIGHT builds the right child, LEFT the left child,
 and UNSET builds the right child. The left child is walked first, then the
-right, so scans are met in pre-order whichever side builds. The probe emits
+right, so scans are met in pre-order whichever side builds; in a plan that
+holds a shared-subplan reference the right child is walked first, as the
+reference's producer visits a join, with the scan count set for each child,
+so the scans keep their pre-order indices and the right child's segments take
+the lower ids. The probe emits
 its own columns and then the build columns. When the left child builds, a
 projection fused after the probe restores the node's column order. Several
 joins on one probe pipeline each add their own build segment. A join, like a
