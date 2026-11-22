@@ -6,7 +6,9 @@
 # Every case checks that the message starts with LOWERING_JOIN_UNSERVED and
 # says why, and that a join differing only in the refused detail lowers.
 #
-#   test_a_join_type_other_than_inner_is_refused
+#   test_every_join_type_the_ir_defines_lowers_and_an_undefined_one_is_refused
+#   test_a_semi_or_anti_join_that_builds_its_left_side_is_refused
+#   test_a_cross_join_that_names_a_key_is_refused
 #   test_a_join_with_no_equi_key_is_refused
 #   test_key_lists_of_different_lengths_are_refused
 #   test_more_than_eight_keys_are_refused_and_eight_are_cut
@@ -123,15 +125,52 @@ def _join_of_type(join_type: UInt8) -> LogicalPlan:
     return LogicalPlan.join(_left(), _right(), _names("k"), _names("k2"), join_type)
 
 
-def test_a_join_type_other_than_inner_is_refused() raises:
-    _refused_with(_message(_join_of_type(JOIN_LEFT), _inputs()), "a LEFT join")
-    _refused_with(_message(_join_of_type(JOIN_RIGHT), _inputs()), "a RIGHT join")
-    _refused_with(_message(_join_of_type(JOIN_FULL), _inputs()), "a FULL join")
-    _refused_with(_message(_join_of_type(JOIN_SEMI), _inputs()), "a SEMI join")
-    _refused_with(_message(_join_of_type(JOIN_ANTI), _inputs()), "a ANTI join")
-    _refused_with(_message(_join_of_type(JOIN_CROSS), _inputs()), "a CROSS join")
-    _refused_with(_message(_join_of_type(UInt8(9)), _inputs()), "a type 9 join")
+def _cross() -> LogicalPlan:
+    return LogicalPlan.join(_left(), _right(), _names(), _names(), JOIN_CROSS)
+
+
+def test_every_join_type_the_ir_defines_lowers_and_an_undefined_one_is_refused() raises:
     assert_equal(_message(_join_of_type(JOIN_INNER), _inputs()), "")
+    assert_equal(_message(_join_of_type(JOIN_LEFT), _inputs()), "")
+    assert_equal(_message(_join_of_type(JOIN_RIGHT), _inputs()), "")
+    assert_equal(_message(_join_of_type(JOIN_FULL), _inputs()), "")
+    assert_equal(_message(_join_of_type(JOIN_SEMI), _inputs()), "")
+    assert_equal(_message(_join_of_type(JOIN_ANTI), _inputs()), "")
+    assert_equal(_message(_cross(), _inputs()), "")
+    _refused_with(_message(_join_of_type(UInt8(9)), _inputs()), "a type 9 join")
+    _refused_with(
+        _message(_join_of_type(UInt8(9)), _inputs()), ") is not served by the hash join"
+    )
+
+
+def _join_building(join_type: UInt8, side: UInt8) -> LogicalPlan:
+    return LogicalPlan.join(
+        _left(), _right(), _names("k"), _names("k2"), join_type, JOIN_ALGO_AUTO, None, side
+    )
+
+
+def test_a_semi_or_anti_join_that_builds_its_left_side_is_refused() raises:
+    _refused_with(
+        _message(_join_building(JOIN_SEMI, JOIN_BUILD_SIDE_LEFT), _inputs()),
+        "a SEMI join that builds its left side",
+    )
+    _refused_with(
+        _message(_join_building(JOIN_ANTI, JOIN_BUILD_SIDE_LEFT), _inputs()),
+        "a ANTI join that builds its left side",
+    )
+    # The same joins building the right child, or with no recorded side, lower;
+    # so does an outer join that builds its left child.
+    assert_equal(_message(_join_building(JOIN_SEMI, JOIN_BUILD_SIDE_RIGHT), _inputs()), "")
+    assert_equal(_message(_join_building(JOIN_ANTI, JOIN_BUILD_SIDE_UNSET), _inputs()), "")
+    assert_equal(_message(_join_building(JOIN_LEFT, JOIN_BUILD_SIDE_LEFT), _inputs()), "")
+
+
+def test_a_cross_join_that_names_a_key_is_refused() raises:
+    var keyed = LogicalPlan.join(_left(), _right(), _names("k"), _names("k2"), JOIN_CROSS)
+    _refused_with(_message(keyed, _inputs()), "a CROSS join that names a key")
+    var one_side = LogicalPlan.join(_left(), _right(), _names("k"), _names(), JOIN_CROSS)
+    _refused_with(_message(one_side, _inputs()), "a CROSS join that names a key")
+    assert_equal(_message(_cross(), _inputs()), "")
 
 
 def test_a_join_with_no_equi_key_is_refused() raises:
@@ -256,7 +295,7 @@ def test_an_output_naming_a_column_twice_is_refused() raises:
 
 def test_a_join_is_refused_before_any_scan_is_counted() raises:
     # No scan facts at all: the refusal is the join's, not the scan count's.
-    _refused_with(_message(_join_of_type(JOIN_LEFT), _inputs(0)), "a LEFT join")
+    _refused_with(_message(_join_of_type(UInt8(9)), _inputs(0)), "a type 9 join")
     var message = _message(_join_of_type(JOIN_INNER), _inputs(0))
     assert_true(message.startswith(String(LOWERING_INPUTS_SCAN_COUNT) + ": "), message)
 

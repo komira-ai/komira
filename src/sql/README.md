@@ -41,7 +41,11 @@ subquery body (scalar, `[NOT] EXISTS`, `[NOT] IN (SELECT ...)`, a derived
 table, a `UNION ALL` branch) is parked in the statement's flat `subqueries`
 table, and the expression node holds its index. Input the grammar has no
 production for raises an `Error` that names it (`SQL syntax error` or
-`SQL not supported`) instead of being read as something else.
+`SQL not supported`) instead of being read as something else. The ON of an
+INNER (or bare) `JOIN` is folded into WHERE; a RIGHT or FULL join later in
+the same FROM is therefore refused by name (`INNER_ON_BEFORE_OUTER_REFUSAL`),
+because the folded predicate would drop the rows that join pads with NULL. A
+LEFT, SEMI or ANTI join after it keeps the same answer and is parsed.
 
 A `COPY ... TO` with no `FORMAT` takes its format from the destination's
 extension, as DuckDB does (`sql.sql_copy_format`): `.parquet`, `.csv`, and

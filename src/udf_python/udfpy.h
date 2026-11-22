@@ -15,7 +15,16 @@
  *
  * Locking: one mutex, rt->zy_mu, guards the generations, the control
  * channel, the counters and the registry of contexts. A context is used by
- * one engine thread at a time and holds no lock during a call.
+ * one engine thread at a time and holds no lock during a call. Two flags are
+ * written under zy_mu and read without it, with atomic loads, by the check a
+ * context makes before each request: a generation's `dead` and a context's
+ * `exit_known`.
+ *
+ * Supervision (design section 5): the library learns of a worker's end from
+ * end of file on its socket and names the end from the zygote's EXIT report,
+ * which it waits for under zy_mu (udfpy_await_exit). It stops a worker by
+ * force only through the worker's pidfd, grace_ms after it stored the call's
+ * id in the cancel word.
  */
 #ifndef UDFPY_H
 #define UDFPY_H
@@ -102,11 +111,15 @@ void udfpy_out_column(struct ArrowDeviceArray* out, struct ArrowArray* col);
 
 /* ---- wire.c: framing, errors, trace --------------------------------------- */
 
+#define UDFPY_MSG_FDS 4
+
 typedef struct udfpy_msg {
   uint32_t op, flags;
   uint64_t request_id;
   uint8_t* payload; /* malloc'd, UDFPY_ALIGN-aligned; NULL when len is 0 */
   size_t len;
+  int fds[UDFPY_MSG_FDS]; /* descriptors that came with it (close-on-exec), owned */
+  int nfds;
 } udfpy_msg;
 
 /* One request: header, 64-byte head, body, in one sendmsg, with `nfds`
@@ -114,9 +127,11 @@ typedef struct udfpy_msg {
 int udfpy_send(int sock, uint32_t op, uint64_t request_id, uint32_t flags, uint64_t handle, int64_t deadline_left,
                int64_t call_id, const uint8_t* body, size_t body_len, const int* fds, int nfds);
 
-/* One message. 0; -1 at end of file or on an error; -2 when the header
- * breaks the framing (`why` set). */
+/* One message, with up to UDFPY_MSG_FDS descriptors sent with it (more are
+ * closed). 0; -1 at end of file or on an error; -2 when the header breaks the
+ * framing (`why` set). On -1 and -2 nothing is left to free. */
 int udfpy_recv(int sock, udfpy_msg* m, const char** why);
+/* Free the payload and close the descriptors the message still owns. */
 void udfpy_msg_free(udfpy_msg* m);
 
 /* The status of an ERROR message, its strings moved into `err`; 0 for OK. */
@@ -128,6 +143,10 @@ int32_t udfpy_fail(komira_udf_error* e, int32_t code, int64_t row, const char* f
 void udfpy_error_move(komira_udf_error* to, komira_udf_error* from);
 const char* udfpy_status_name(int32_t code);
 int64_t udfpy_mono_ns(void);
+/* How a process ended, as text: "signal 6 (SIGABRT)", "exit status 3", or
+ * "an unknown status" (how 0 with a negative value). `how` is 0 for an
+ * exit, 1 for a signal, as in the zygote's EXIT report. */
+void udfpy_how_text(int how, int value, char* out, size_t n);
 
 /* ---- the runtime ------------------------------------------------------------ */
 
@@ -141,7 +160,7 @@ typedef struct udfpy_options {
   const char* scratch;
   const char* sys_path[UDFPY_MAX_SYS_PATH];
   int n_sys_path;
-  int64_t grace_ms; /* kept; unused in this build */
+  int64_t grace_ms; /* the forced stop's grace period; default 2000 */
   const char* trace;
 } udfpy_options;
 
@@ -153,7 +172,8 @@ typedef struct udfpy_gen {
   uint64_t next_request;
   uint32_t loads; /* LOADs the zygote answered OK */
   int open_ctx;
-  int helloed, retired, dead, shut;
+  int helloed, retired, shut;
+  int dead; /* the control socket ended; atomic loads outside zy_mu */
   int exit_how; /* 0 exited, 1 signalled; valid once reaped */
   int exit_value;
   int reaped;
@@ -173,7 +193,12 @@ typedef struct komira_udf_rt {
   uint64_t next_udf, next_ctx;
   komira_udf_context_t** ctxs; /* open contexts, for EXIT messages */
   int n_ctxs, cap_ctxs;
+  int forked;                    /* set in a fork of the engine's process: every entry is refused */
+  struct komira_udf_rt* next_rt; /* the list the fork handler walks (runtime.c) */
 } udfpy_rt;
+
+/* Why every context of a runtime is lost in a fork of the engine's process. */
+#define UDFPY_FORKED_WHY "this process is a fork of the process that owns the runtime's zygote and workers"
 
 typedef struct komira_udf_udf {
   udfpy_rt* rt;
@@ -193,12 +218,16 @@ struct komira_udf_context {
   uint32_t slot;
   uint32_t fork_seq;
   pid_t pid;
+  int pidfd; /* the worker's, from the FORK reply: the only way the library signals it */
   int sock;
   volatile int64_t* word; /* the cancel word, shared with the worker */
   uint64_t next_request;
   int lost;
-  char lost_why[160];
-  int exit_known, exit_how, exit_value; /* from EXIT, under zy_mu */
+  char lost_why[200]; /* why, after "the worker (pid N) is gone: " */
+  int killing;        /* the library sent SIGKILL during the current call */
+  int kill_deadline;  /* what that stop answered: 1 the deadline, 0 the cancel flag */
+  int exit_how, exit_value; /* from EXIT, under zy_mu, before exit_known */
+  int exit_known;           /* atomic loads outside zy_mu */
 };
 
 typedef struct komira_udf_instance {
@@ -227,6 +256,12 @@ int32_t udfpy_ctl_request(udfpy_rt* rt, udfpy_gen* g, uint32_t op, uint32_t flag
 void udfpy_gen_retire(udfpy_rt* rt, udfpy_gen* g);
 void udfpy_gen_shutdown(udfpy_rt* rt, udfpy_gen* g);
 void udfpy_gens_free(udfpy_rt* rt);
+/* Read what the zygote sent while no request was pending (EXIT reports, or
+ * the end of its socket, which retires the generation). */
+void udfpy_ctl_drain(udfpy_rt* rt, udfpy_gen* g);
+/* Read the control channel until `c`'s EXIT report is recorded or the
+ * zygote's socket ends. Called once `c`'s worker is known to have ended. */
+void udfpy_await_exit(udfpy_rt* rt, komira_udf_context_t* c);
 
 /* ---- worker.c --------------------------------------------------------------- */
 

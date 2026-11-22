@@ -47,7 +47,6 @@ from plan_ir.logical_plan import (
     ExprArray,
     AggExprArray,
     SOURCE_PARQUET,
-    JOIN_LEFT,
     PLAN_UNION,
     plan_tag_name,
 )
@@ -385,12 +384,12 @@ def test_a_refused_node_in_a_branch_refuses_the_whole_union() raises:
     var keys = List[String]()
     keys.append("k")
     var join = LogicalPlan.join(
-        _scan("a.parquet"), _scan("b.parquet"), keys.copy(), keys.copy(), JOIN_LEFT
+        _scan("a.parquet"), _scan("b.parquet"), keys.copy(), keys.copy(), UInt8(9)
     )
     var schema = join.output_schema.copy()
     var plan = _union_as(join^, _scan_of("c.parquet", schema), schema)
     _refused_with(
-        _message(plan, _inputs(3)), LOWERING_JOIN_UNSERVED, "a LEFT join"
+        _message(plan, _inputs(3)), LOWERING_JOIN_UNSERVED, "a type 9 join"
     )
 
 

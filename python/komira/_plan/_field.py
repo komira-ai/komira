@@ -9,7 +9,9 @@ and the slots a column reference carries over.
 
 An input schema is a sequence of `WireField`, the columns an expression may
 name; the first column of a name is the one a reference reads, as in the
-engine.
+engine. A join residual reads two inputs, and each of its column references
+names its side: `sided_columns` keys the columns of both by side and name, and
+a sided reference is looked up by both.
 """
 
 from __future__ import annotations
@@ -51,6 +53,7 @@ __all__ = [
     "expr_field",
     "field_of",
     "promotes",
+    "sided_columns",
 ]
 
 _BOOL = arrow_id("bool")
@@ -100,12 +103,35 @@ def columns_of(schema: Iterable[pb.WireField]) -> dict[str, pb.WireField]:
     return columns
 
 
-def check_columns(node: Node, columns: dict[str, pb.WireField]) -> None:
+def sided_columns(
+    left: Iterable[pb.WireField], right: Iterable[pb.WireField]
+) -> dict[object, pb.WireField]:
+    """The columns of a join's two inputs, keyed `(side, name)`, the first of
+    each name on each side: what a residual, whose references each name a
+    side, is typed over."""
+    columns: dict[object, pb.WireField] = {}
+    for side, schema in (("left", left), ("right", right)):
+        for name, column in columns_of(schema).items():
+            columns[(side, name)] = column
+    return columns
+
+
+def _key(ref: ColRef, columns: dict) -> object:
+    """The key a reference is looked up by: its side and name over the
+    columns of a join's two inputs, its name otherwise."""
+    sided = (ref.side, ref.name)
+    return sided if sided in columns else ref.name
+
+
+def check_columns(node: Node, columns: dict) -> None:
     """Raise the `KeyError` of `unknown_column` for the first column the
     expression names that the schema does not have."""
     for ref in column_refs(node):
-        if ref.name not in columns:
-            raise unknown_column(ref.name, tuple(columns))
+        if _key(ref, columns) not in columns:
+            names = tuple(k[1] for k in columns if isinstance(k, tuple) and k[0] == ref.side)
+            if not names:
+                names = tuple(k for k in columns if not isinstance(k, tuple))
+            raise unknown_column(ref.name, names)
 
 
 def cast_parts(node: Cast) -> tuple[int, int, int, int]:
@@ -294,7 +320,7 @@ def field_of(node: Node, columns: dict[str, pb.WireField]) -> pb.WireField:
     """The field of `node` over `columns`, whose names `check_columns` has
     found in it."""
     if isinstance(node, ColRef):
-        return _carry(columns[node.name], node.name)
+        return _carry(columns[_key(node, columns)], node.name)
     if isinstance(node, Alias):
         f = field_of(node.child, columns)
         f.name = node.name

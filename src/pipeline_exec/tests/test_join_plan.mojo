@@ -26,7 +26,7 @@
 #     NULL keys give no row, and the result batch still has the join's schema:
 #     the probe columns, then the build columns.
 #   * A probe whose build segment is not among its dependencies is refused by
-#     name, and so is a probe the operator does not serve (a LEFT join).
+#     name, and so is a probe the operator does not serve (a join type 9).
 #   * The same plan run twice on one builder gives the same rows, and the
 #     segment pool holds nothing after each run.
 
@@ -76,7 +76,6 @@ from pipeline_exec.segment_builder import SegmentBuilder
 from plan_expr.expr import BIN_AND, BIN_GE, BIN_GT, BIN_LT, Expr
 from plan_expr.expr_pool import ExprPool
 from plan_expr.scalar_value import ScalarValue
-from plan_ir.logical_plan import JOIN_LEFT
 from runtime_paths import test_tmpdir
 
 
@@ -651,14 +650,14 @@ def test_a_probe_the_operator_does_not_serve_fails_the_plan_by_name() raises:
     var orders = builder.add_resident(orders_batch(0, 10))
     var ops = chain(
         MorselOp.join_probe(
-            0, key_names("o_custkey"), key_names("c_custkey"), JOIN_LEFT
+            0, key_names("o_custkey"), key_names("c_custkey"), UInt8(9)
         )
     )
     var descs = _two(
         build_segment(0, customers),
         with_build_dep(batch_segment(1, orders, ops^), 0),
     )
-    with assert_raises(contains="OP_JOIN_PROBE refuses join type 1"):
+    with assert_raises(contains="OP_JOIN_PROBE refuses join type 9"):
         _ = _run(descs, builder, 2)
 
 
