@@ -123,11 +123,11 @@ linux-arm64 and macos-arm64 it is **NOT RUN**. What the files support (INFERRED)
 The checks of the wheel on linux-x86_64 are `//python:wheel_install_test` (python/BUCK). It installs the wheel alone into an empty
 virtual environment (no `modular/` directory, no other distribution, no `Requires-Dist`), loads
 libkomira there with no library path, and requires the three runtime libraries to be mapped from
-`<site-packages>/komira/_lib/lib`. The PyPI wheels
-(`mojo_compiler-1.0.0-py3-none-manylinux_2_34_x86_64.whl`,
-`mojo_compiler_mojo_libs-1.0.0-py3-none-any.whl`, pinned in `third_party/modular`) are installed by the
-`beside_*` tests of the wheel, and that the PyPI 1.0.0 libraries carry the build
-ids of the conda pin (below) is what lets the runtime check accept them. linux-arm64 and macos-arm64 have no such check yet.
+`<site-packages>/komira/_lib/lib`. The PyPI wheels (`mojo_compiler-<v>-py3-none-manylinux_2_34_x86_64.whl`
+and `mojo_compiler_mojo_libs-<v>-py3-none-any.whl` for 1.0.0, 1.1.0 and 1.2.0, pinned in
+`third_party/modular/pins.bzl`) are installed by the `beside_*` tests of the wheel, the pair at the
+toolchain's Mojo and one compiler wheel at another version, and that the PyPI libraries carry the build
+ids of the conda pin of the same version (below) is what lets the runtime check accept them. linux-arm64 and macos-arm64 have no such check yet.
 
 ## Two copies in one process
 
@@ -164,8 +164,22 @@ The four orders, each held by a test in `python/tests/test_beside_modular.py`:
 | 1.2.0 | Modular's first | the check refuses by name: another build is already loaded | `//python:beside_other_mojo_loaded_first` |
 | 1.2.0 | komira first | Modular's KGEN fails with the loader's `undefined symbol` (for example `_ZN1M7AsyncRT19getVirtualCpuTargetB5cxx11Ev`); komira keeps working | `//python:beside_other_mojo_loaded_after` |
 
+The table is the toolchain at 1.0.0. The tests take the toolchain's version from its pin and the other
+version from `third_party/modular/pins.bzl` (the newest other one), so a pin move moves them. At 1.2.0
+(MEASURED, from the files alone, with `readelf -n` and `nm -D`; nothing was loaded): the three libraries
+of the conda `mojo-compiler` 1.2.0 package and of the PyPI 1.2.0 wheel have the same build ids, as at
+1.0.0. Every `libKGENCompilerRTShared` is linked `BIND_NOW`. The `M::` symbols an older
+`libKGENCompilerRTShared` (1.0.0 or 1.1.0) needs from the two other libraries are all defined by the
+newer ones, while 1.1.0's needs one that 1.0.0 lacks (`_ZN1M7Globals24getProfilingRangeGlobalsEv`) and
+1.2.0's needs two more that 1.1.0 lacks (the `AsyncRT` `VirtualCpuTarget` pair). So at 1.2.0 the fourth
+row, with Modular's 1.1.0 after komira, changes (INFERRED from those symbols and the loader rule above):
+Modular's KGEN loads as a second copy bound to komira's 1.2.0 AsyncRT and MSupport, and komira keeps
+working. `//python:beside_other_mojo_loaded_after` holds each direction: `undefined symbol` when
+Modular's version is the newer, a second KGEN on komira's two others when it is the older.
+
 `//python:refuses_modular_unlike_toolchain` holds the first two rows to Modular's runtime at the
-toolchain's Mojo: it fails when the toolchain pin moves and the PyPI wheels pinned here do not.
+toolchain's Mojo, and `//python:refuses_other_mojo_at_toolchain` the last two to another version: a
+row of `pins.bzl` whose wheels are another version's fails them.
 Without the check, the third
 row would bind libkomira silently to the 1.2.0 runtime, whose symbol names are a superset
 (INFERRED). The fourth row cannot be made safe: a process holds one Mojo runtime version.
