@@ -10,5 +10,5 @@ COPY (SELECT * FROM read_csv('typed.csv')) TO 'typed_zstd.parquet' (FORMAT parqu
 COPY (SELECT * FROM read_csv('nulls.csv')) TO 'nulls_gzip.parquet' (COMPRESSION gzip);
 COPY (SELECT * FROM read_csv('nulls.csv')) TO 'nulls_lz4.parquet' (COMPRESSION lz4_raw);
 COPY (SELECT * FROM read_csv('quoted.csv')) TO 'quoted_uncompressed.parquet' (COMPRESSION uncompressed);
-COPY (SELECT name, count(*) AS n, min(price) AS low, max(day) AS last_day FROM read_csv('typed.csv') GROUP BY name) TO 'grouped_snappy.parquet' (COMPRESSION snappy);
+COPY (SELECT name, count(*) AS n, min(qty) AS low, max(day) AS last_day FROM read_csv('typed.csv') GROUP BY name) TO 'grouped_snappy.parquet' (COMPRESSION snappy);
 COPY (SELECT * FROM read_csv('typed.csv') WHERE qty < 0) TO 'empty.parquet';
