@@ -21,7 +21,7 @@ pub const Platform = struct {
 };
 
 /// The platforms a matrix may be written for: the Linux x86_64 wheel's jobs (pypi.yml's user test and Linux
-/// smoke jobs) and the macOS arm64 wheel's (pypi.yml's macOS smoke jobs).
+/// smoke jobs) and the macOS arm64 wheel's (pypi-macos-arm64.yml's smoke jobs).
 pub const platforms = [_]Platform{
     .{ .name = "linux-x86_64", .runner = "ubuntu-24.04" },
     .{ .name = "macos-arm64", .runner = "macos-15" },
