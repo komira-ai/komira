@@ -1406,8 +1406,8 @@ struct CseRefData(Movable):
 
     Fields:
         canonical_hash: the `structural_hash()` of the canonical
-            occurrence's subtree. A consumer would key a
-            hash->result table on this; no consumer exists in this tree yet.
+            occurrence's subtree. Lowering (`lowering.cut_shared`) keys
+            the segment it cut the canonical occurrence into on this.
             The `LogicalPlan`'s own
             `structural_hash()` is special-cased to return THIS value (so
             a CSE'd plan and a manually-deduplicated plan that references
