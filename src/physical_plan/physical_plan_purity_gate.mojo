@@ -142,6 +142,7 @@ comptime SITE_SOURCE_PARQUET_FILTER: StaticString = "source_spec.parquet_filter"
 comptime SITE_OP_FILTER_PREDICATE: StaticString = "ops[i].filter_predicate"
 comptime SITE_OP_PROJECT_EXPRS: StaticString = "ops[i].project_exprs"
 comptime SITE_OP_PROBE_RESIDUAL: StaticString = "ops[i].probe_residual"
+comptime SITE_OP_UDF_ARGS: StaticString = "ops[i].udf.args"
 
 
 # =============================================================================
@@ -415,11 +416,12 @@ def assert_physical_plan_carries_no_logical_plan(
     whose non-vacuity depends on a SIBLING gate still being called first is a
     gate that goes vacuous the day that sibling moves.
 
-    THE FOUR SITES, enumerated because they are the whole coverage claim:
+    THE FIVE SITES, enumerated because they are the whole coverage claim:
       * `source_spec.parquet_filter`   — the pushed decode filter
       * `ops[i].filter_predicate`      — OP_FILTER
       * `ops[i].project_exprs`         — OP_PROJECT (an ExprArray, all of it)
       * `ops[i].probe_residual`        — OP_JOIN_PROBE's non-equi residual
+      * `ops[i].udf.args`              — OP_UDF_APPLY's arguments, each one
     These are EVERY `Expr`-typed field reachable from `SegmentDescPod`; a
     field added to `physical_plan.mojo` must be added here.
     """
@@ -469,5 +471,11 @@ def assert_physical_plan_carries_no_logical_plan(
                 sites += 1
                 if expr_carries_correlated_subquery(op.probe_residual.value()):
                     _refuse(seg.seg_id, i, k, SITE_OP_PROBE_RESIDUAL)
+            if op.udf:
+                ref args = op.udf.value().args
+                for e in range(len(args)):
+                    sites += 1
+                    if expr_carries_correlated_subquery(args[e]):
+                        _refuse(seg.seg_id, i, k, SITE_OP_UDF_ARGS)
 
     return sites

@@ -236,7 +236,11 @@ batch standing in for a subtree discards the subtree's meaning and gives a well-
 else; "not yet cut" must stay visible as a refusal. The same holds for a plan with an `EXCHANGE` node when there is one
 host: the cutter elides the exchange ([the optimized plan](optimized_plan.md) §8.2) once the exchange slice exists;
 slice 1b has no arm for `EXCHANGE` and refuses it by name, which is safe and is the only divergence from this
-paragraph. A plan with a `STEP` or `MAP_BATCHES` (a UDF) is refused until the UDF slice exists. A limit above a sort is
+paragraph. A `STEP` is cut as a `SOURCE_UDF_STEP` source, an ungrouped `MAP_BATCHES` as an `OP_UDF_FRAME` operator over its read
+set, and a projection column that is wholly a `UdfRef` call (`EXPR_UDF_APPLY`) as an `OP_UDF_APPLY` before the projection (IR
+version 17); a read outside a `ROW` or frame function's declared read set is refused (`LOWERING_UDF_UNDECLARED_READ`), and a
+grouped frame or a call anywhere else is refused by name (`LOWERING_UDF_UNSERVED`, src/lowering/README.md). No driver runs
+those kinds yet. A limit above a sort is
 refused too (`LOWERING_UNCUTTABLE_NODE`): no segment records an order before the order slice, so the rows such a limit
 keeps are not defined. An ungrouped float `SUM` or `AVG` is cut with `ORDER_ROW_RANGE` since step 9 of §7.3, and is
 bit-reproducible across worker counts; a grouped one is not served yet.

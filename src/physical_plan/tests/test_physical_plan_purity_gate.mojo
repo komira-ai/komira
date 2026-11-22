@@ -427,7 +427,8 @@ def test_walker_says_no_to_an_ordinary_expression_tree() raises:
 
 
 # ===========================================================================
-# THE DOOR — the four expression sites a `SegmentDescPod` reaches.
+# THE DOOR — four of the expression sites a `SegmentDescPod` reaches; the
+# fifth, `ops[i].udf.args`, is held by test_udf_call_spec.
 # ===========================================================================
 
 
