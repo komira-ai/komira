@@ -52,23 +52,22 @@ def gt(x, v):
     return Compare("gt", x, Lit(v))
 
 
-# Every Python type a literal can hold, each under its own name.
+# Every kind of literal the engine can project, each under its own name. A
+# uint64, binary, time-of-day or interval literal is not here: plan_wire's
+# reader refuses to project one (the engine has no way to materialize it), so
+# test_plan_expr.py holds their encoding instead.
 LITERALS = [
     Alias(Lit(42), "l_int"),
     Alias(Lit(-7), "l_neg"),
-    Alias(Lit(2**63 + 5), "l_uint"),
     Alias(Lit(2.5), "l_float"),
     Alias(Lit(True), "l_true"),
     Alias(Lit(False), "l_false"),
     Alias(Lit("text"), "l_str"),
     Alias(Lit(""), "l_empty"),
-    Alias(Lit(b"raw"), "l_bytes"),
     Alias(Lit(decimal.Decimal("-1234.50")), "l_dec"),
     Alias(Lit(decimal.Decimal("12345678901234567890.5")), "l_bigdec"),
     Alias(Lit(datetime.date(2024, 2, 29)), "l_date"),
     Alias(Lit(datetime.datetime(2024, 2, 29, 12, 30, 15, 250)), "l_ts"),
-    Alias(Lit(datetime.time(23, 59, 58, 123456)), "l_time"),
-    Alias(Lit(datetime.timedelta(days=3, seconds=5, microseconds=7)), "l_iv"),
     Alias(Lit(None), "l_null"),
 ]
 
@@ -96,7 +95,7 @@ OPERATORS = [
     Alias(Arith("div", A, D), "dec_div_int"),
     Alias(Arith("add", IV, IV), "iv_add"),
     Alias(BoolOp("and", gt(A, 1), Unary("is_null", B)), "bool_and"),
-    Alias(BoolOp("or", Compare("lt", A, Lit(0)), Lit(None)), "bool_or"),
+    Alias(BoolOp("or", Compare("lt", A, Lit(0)), Lit(True)), "bool_or"),
     Alias(Unary("not", gt(A, 1)), "un_not"),
     Alias(Unary("negate", A), "un_neg"),
     Alias(Unary("is_null", B), "un_is_null"),

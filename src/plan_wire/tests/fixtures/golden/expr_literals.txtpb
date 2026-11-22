@@ -15,12 +15,6 @@ plan {
       dict_index_type_id: 4
     }
     fields {
-      name: "l_uint"
-      arrow_type_id: 9
-      dtype_code: _DT_UINT64
-      dict_index_type_id: 4
-    }
-    fields {
       name: "l_float"
       arrow_type_id: 12
       dtype_code: _DT_FLOAT64
@@ -49,10 +43,6 @@ plan {
       dict_index_type_id: 4
     }
     fields {
-      name: "l_bytes"
-      dict_index_type_id: 4
-    }
-    fields {
       name: "l_dec"
       arrow_type_id: 18
       decimal_precision: 6
@@ -75,14 +65,6 @@ plan {
       name: "l_ts"
       arrow_type_id: 24
       dtype_code: _DT_INT64
-      dict_index_type_id: 4
-    }
-    fields {
-      name: "l_time"
-      dict_index_type_id: 4
-    }
-    fields {
-      name: "l_iv"
       dict_index_type_id: 4
     }
     fields {
@@ -117,19 +99,6 @@ plan {
           }
         }
         name: "l_neg"
-      }
-    }
-    exprs {
-      alias {
-        child {
-          literal {
-            dtype_code: _DT_UINT64
-            int_val: -9223372036854775803
-            kind: SCALAR_KIND_DTYPE
-            time_unit: SCALAR_TIME_UNIT_MICRO
-          }
-        }
-        name: "l_uint"
       }
     }
     exprs {
@@ -197,18 +166,6 @@ plan {
       alias {
         child {
           literal {
-            string_val: "raw"
-            kind: SCALAR_KIND_BINARY
-            time_unit: SCALAR_TIME_UNIT_MICRO
-          }
-        }
-        name: "l_bytes"
-      }
-    }
-    exprs {
-      alias {
-        child {
-          literal {
             kind: SCALAR_KIND_DECIMAL128
             dec128_high: -1
             dec128_low: -123450
@@ -257,31 +214,6 @@ plan {
           }
         }
         name: "l_ts"
-      }
-    }
-    exprs {
-      alias {
-        child {
-          literal {
-            int_val: 86398123456
-            kind: SCALAR_KIND_TIME
-            time_unit: SCALAR_TIME_UNIT_MICRO
-          }
-        }
-        name: "l_time"
-      }
-    }
-    exprs {
-      alias {
-        child {
-          literal {
-            kind: SCALAR_KIND_INTERVAL
-            iv_days: 3
-            iv_nanos: 5000007000
-            time_unit: SCALAR_TIME_UNIT_MICRO
-          }
-        }
-        name: "l_iv"
       }
     }
     exprs {

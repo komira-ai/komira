@@ -5,8 +5,9 @@
 # Freezes the bytes of three projections over one wide scan, built with the
 # engine's own expression factories:
 #
-#   expr_literals   one literal of every kind a scalar value can hold, each
-#                   under its own alias.
+#   expr_literals   one literal of every kind the engine can project, each
+#                   under its own alias (plan_wire's reader refuses to project
+#                   a uint64, binary, time-of-day or interval literal).
 #   expr_operators  comparisons, arithmetic over every numeric result type,
 #                   the boolean and unary operators, and three bare column
 #                   references.
@@ -404,18 +405,11 @@ def _expr_literals() raises -> LogicalPlan:
     var xs = ExprArray()
     xs.append(_named("l_int", _int(42)))
     xs.append(_named("l_neg", _int(-7)))
-    xs.append(
-        _named(
-            "l_uint",
-            _lit(ScalarValue.from_uint64(UInt64(9223372036854775813))),
-        )
-    )
     xs.append(_named("l_float", _flt(2.5)))
     xs.append(_named("l_true", _lit(ScalarValue.from_bool(True))))
     xs.append(_named("l_false", _lit(ScalarValue.from_bool(False))))
     xs.append(_named("l_str", _str("text")))
     xs.append(_named("l_empty", _str("")))
-    xs.append(_named("l_bytes", _lit(ScalarValue.from_binary("raw"))))
     xs.append(
         _named(
             "l_dec", _lit(ScalarValue.decimal128(Int64(-1), Int64(-123450), 6, 2))
@@ -436,19 +430,6 @@ def _expr_literals() raises -> LogicalPlan:
         _named(
             "l_ts",
             _lit(ScalarValue.timestamp_micros(Int64(1709209815000250))),
-        )
-    )
-    xs.append(
-        _named("l_time", _lit(ScalarValue.time_of_day(Int64(86398123456))))
-    )
-    xs.append(
-        _named(
-            "l_iv",
-            _lit(
-                ScalarValue.interval_month_day_nano(
-                    Int32(0), Int32(3), Int64(5000007000)
-                )
-            ),
         )
     )
     xs.append(_named("l_null", _lit(ScalarValue.null(DType.int64))))
@@ -510,7 +491,7 @@ def _expr_operators() raises -> LogicalPlan:
             _bin(
                 BIN_OR,
                 _bin(BIN_LT, _col("a"), _int(0)),
-                _lit(ScalarValue.null(DType.int64)),
+                _lit(ScalarValue.from_bool(True)),
             ),
         )
     )

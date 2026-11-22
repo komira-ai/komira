@@ -710,8 +710,9 @@ plan {
             }
             right {
               literal {
+                dtype_code: _DT_BOOL
+                bool_val: true
                 kind: SCALAR_KIND_DTYPE
-                null_dtype_code: _DT_INT64
                 time_unit: SCALAR_TIME_UNIT_MICRO
               }
             }
