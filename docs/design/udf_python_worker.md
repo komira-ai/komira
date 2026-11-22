@@ -6,18 +6,6 @@ Status: proposed, not built. This is the build design of the `komira/python` run
 document points here. Its runtime-specific conformance cases are in
 [the conformance corpus](udf_runtime_conformance.md#cases-of-the-komirapython-runtime).
 
-> **Open question, a product decision: must a frame UDF name its columns?** Every UDF now carries in the plan the list of
-> columns it reads (§6.1). A row UDF must say which fields it reads, or the SDK finds them by reading the function, or
-> it is refused. A frame UDF (a function that takes a whole table, `map_batches` over a frame) gets a default: if the
-> user does not pass `columns=[...]` or annotate the parameter, the SDK writes every column of the table at that
-> point of the plan. The list is explicit, but it is the whole table, so a frame UDF that reads 2 of 100 columns
-> still makes the engine read all 100. The choice: keep that default, or require `columns=[...]` (or an annotation)
-> on every frame UDF, as for a row UDF that cannot be read. **Recommendation: require it.** It keeps one rule for
-> every UDF, and a user whose function really uses the whole table writes so in one line (`columns=list(df.columns)`).
-> The cost is one more argument on frame UDFs. The documents describe the default today; requiring it changes one
-> sentence in §6.1, the producer rule in `optimized_plan_udfs.md` §10.2, and one refusal at capture
-> (`UDF_READ_SET_REQUIRED` for frames too).
-
 Citations are to komira `main` as of 2026-11-20. Section numbers without a file name are this document's; `IF §x` is
 `udf_runtime_interface.md`; as in the interface document, `§7.x` is `optimized_plan.md`, `§10.1` to `§10.9` are
 `optimized_plan_udfs.md`, and `§10.10` to `§10.14` are `optimized_plan_udf_runtime.md`. Statements marked *(inferred)* are a reading, not a fact taken from the code.
@@ -52,9 +40,9 @@ that needs a later one is refused by name (`OPTIMIZED_UDF_KIND_UNSUPPORTED`, IF 
 | Stage | What lands | Done when (cases of the conformance corpus) |
 |---|---|---|
 | P0 | The ABI headers leave the test tree: `komira_udf_runtime.h` and `komira_udf_wire.h` move from `src/tests/helpers/komira_udf_spike_abi/` to `src/udf_abi/`, with the Mojo mirror and the harness (IF §9 S1-S2); the header gains the runtime options and `ERR_BAD_OPTION` (§2.2) | The prototype's welded tests pass against the moved headers |
-| P1 | The library and the zygote: spawn, `HELLO`, `LOAD`, `FORK`, one worker per context, `SCALAR` and `MAP_BATCHES_COLUMN` with the `VALUES` and `ARROW` batch formats, `ERR_RAISED` with the user's trace, `validate` over the descriptor | Z1-Z16 and Z18-Z19: a UDF runs in a process whose pid is neither the engine's nor the zygote's, with correct rows |
+| P1 | The library and the zygote: spawn, `HELLO`, `LOAD`, `FORK`, one worker per context, `SCALAR` and `MAP_BATCHES_COLUMN` with the `VALUES` and `ARROW` batch formats, `ERR_RAISED` with the user's trace, `validate` over the descriptor | Z1-Z15 and Z17-Z18: a UDF runs in a process whose pid is neither the engine's nor the zygote's, with correct rows |
 | P2 | Supervision: exit reports, cancel, deadlines, forced stops, crash attribution, the ends of the zygote and the engine (§5) | S1-S13: an aborting UDF gives `UDF_WORKER_CRASHED` naming the signal and the session survives; `describe` reports `CONTAINS_CRASHES` and `FORCED_STOP` |
-| P3 | `ROW` with the row proxy and the read set; frames, `STEP`, plain and mergeable aggregates; the nested-call rule (IF §4.3) | Z17, and the shared corpus with Python fixtures |
+| P3 | `ROW` with the row proxy and the read set; frames, `STEP`, plain and mergeable aggregates; the nested-call rule (IF §4.3) | Z16, and the shared corpus with Python fixtures |
 | P4 | The `PANDAS`, `NUMPY` and `POLARS` batch formats and the types beyond numerics (IF §6.2's table) | The round trip of every type in the mapping table |
 | Later | Shared-memory slot heaps for payloads (§4.4) | A measurement shows the socket copy matters |
 
@@ -478,22 +466,22 @@ lives:
 | `UdfRef.read_set` (the plan) | The fields the function reads | The columns the function receives, a grouped frame's `group_by` columns included |
 | `UdfRef.arg_types` (the plan) | The same names, same order, with their types | The same |
 | Descriptor `arg_types` | Empty | Empty |
-| Descriptor `recorded_fields.fields` | The read set as capture found it (`columns=`, annotation or scan) | The read set as capture found it (`columns=`, annotation or the default) |
+| Descriptor `recorded_fields.fields` | The read set as capture found it (`columns=`, annotation or scan) | The read set as capture found it (`columns=` or annotation) |
 | Descriptor `recorded_fields.key_fields` | Empty | The `group_by` columns capture added because `fields` lacks them |
 
 `fields` and `key_fields` are disjoint, and their union is the read set. Each part has a duty:
 
 - **The producer supplies it.** `ROW`: `columns=[...]`, else an annotation of the row parameter (`TypedDict`,
   dataclass), else the SDK's static scan of the function's bytecode for attribute and subscript reads on the row
-  parameter. `MAP_BATCHES_FRAME`: `columns=[...]` or an annotation of the frame parameter, else the input frame's
-  columns at that point of the plan, which the producer knows from the schema; a grouped frame's read set contains
-  its `group_by` columns (`OPTIMIZED_UDF_READ_SET_GROUP_KEY`). The schema is always known there: the frame's `arg_types` carry each column's
-  Arrow type, so the plan cannot be built without the child's output schema, and a child whose schema the producer
-  cannot bind is refused by the plan builder's own binding, before capture. The user narrows a frame with `columns=`; there is no
-  static scan for frames.
+  parameter. `MAP_BATCHES_FRAME`: `columns=[...]` or an annotation of the frame parameter (`TypedDict`,
+  dataclass), and nothing else: there is no default and no static scan for frames. The SDK adds a grouped frame's
+  `group_by` columns to the declared set (recorded in `key_fields` when the declaration lacks them), and the read set
+  contains them (`OPTIMIZED_UDF_READ_SET_GROUP_KEY`). A user whose function really uses the whole input lists it
+  (`columns=list(df.columns)`).
 - **Capture refuses** a `ROW` function whose reads neither `columns=` nor an annotation bounds and the scan cannot
-  bound, with `UDF_READ_SET_REQUIRED` naming the function and `columns=[...]`. It never falls back to every input
-  column.
+  bound, and a frame function with neither `columns=` nor an annotation, with `UDF_READ_SET_REQUIRED` naming the
+  function and the argument to give, `columns=[...]`. For either kind the SDK never lists every input column as a
+  stand-in.
 - **Admission refuses** a `ROW` or `MAP_BATCHES_FRAME` `UdfRef` whose `read_set` is unset, with
   `OPTIMIZED_UDF_READ_SET_REQUIRED` naming the UDF's index.
 - **The engine passes only those columns:** only they stay live, down to the scan, and a frame node needs from its
@@ -565,25 +553,18 @@ from them, and none of them ships:
   from the user's environment, which only the user's interpreter sees; a `VALUE` pickled by the producer's
   `cloudpickle` must be loaded by the same `cloudpickle` and interpreter minor; and `pyarrow` is a C extension built
   for that interpreter. A bundled interpreter would see none of the user's packages.
-- Fork on macOS is decided (below).
 - Workers end with their zygote: `PR_SET_PDEATHSIG` on Linux, a watcher thread on macOS; the zygote kills its workers
   at end of file (§5.4).
 - The descriptor message, its canonical bytes and what `validate` compares (§6), and the read set's duties (§6.1).
 - A local run admits against `code_root` and the session's `sys_path`, without image checks (§7).
 
-**macOS fork.** On macOS, a child forked from a process that has loaded Apple's system frameworks (numpy uses the
-Accelerate math framework) can crash or hang when it calls into them, because those frameworks are not made to
-survive a fork without exec. This is a known macOS limit, which is why CPython itself stopped using fork by default
-for `multiprocessing` on macOS, in Python 3.8. It only touches people running Python UDFs locally on a Mac, since
-hosts run Linux. Case Z9 of the conformance corpus is the single check, run in the macOS release build. If Z9 fails
-on `macos-arm64`, the macOS wheel ships without Python UDFs: `describe` reports no shapes and a plan with a Python
-UDF is refused by name (`OPTIMIZED_UDF_KIND_UNSUPPORTED`). There is no second mode and no further work.
+**macOS.** Workers fork from the zygote on macOS as on Linux. CPython's own multiprocessing spawns instead of forking there by default, because some system frameworks are not safe across a fork; no failing run of a worker forked from this zygote is known, so the runtime does nothing different on macOS.
 
 ## 10. What the next work needs from this design
 
 | Work | Uses |
 |---|---|
-| The zygote and workers (P1) | §2, §3, §4, §6, §7; cases Z1-Z16, Z18, Z19 |
+| The zygote and workers (P1) | §2, §3, §4, §6, §7; cases Z1-Z15, Z17, Z18 |
 | Worker supervision (P2) | §5; cases S1-S13. Supervision is the zygote's `EXIT` report and the library's own kill, not `src/supervisor` (§5.1) |
 | Lowering the UDF plan nodes | Only the C ABI (IF §3.3, §4); nothing of this document |
 | The Python `@udf` decorator | §6 (the descriptor it writes), §7 (where it writes code objects), IF §6.1 |
@@ -619,13 +600,14 @@ No code changes in this pull request. The work, each item a brief of its own:
      a declaration;
    - for a `ROW`, the static scan of the function's bytecode, and `UDF_READ_SET_REQUIRED` naming `columns=[...]` when
      nothing bounds the reads;
-   - for a frame, the default: the input frame's columns at that point of the plan, plus the `group_by` columns;
+   - for a frame, `columns=` or the annotation, else `UDF_READ_SET_REQUIRED` naming `columns=[...]`; the `group_by`
+     columns added;
    - `read_set` and `arg_types` written on every `ROW` and frame `UdfRef`, and `recorded_fields` in every `ROW` and
      frame descriptor (§6);
    - the error table (`_errors.py`): `UDF_READ_SET_REQUIRED` from capture, and `OPTIMIZED_UDF_READ_SET_REQUIRED` from
      admission, each with its message and fix-it.
 5. **The TypeScript SDK's producer** (`node/`, when its UDF verbs land): the same `columns` value on every `ROW` and
-   frame verb and the same frame default. It has no static scan at first (a TypeScript function keeps no types at run
+   frame verb; a frame verb without `columns` is refused too. It has no static scan at first (a TypeScript function keeps no types at run
    time, and its source is not read), so a `ROW` verb without `columns` is refused at capture with
    `UDF_READ_SET_REQUIRED`. Its error table gains both tokens.
 6. **The `komira/python` runtime (this document):** `validate` refuses an absent `recorded_fields`; the worker maps

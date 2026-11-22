@@ -154,15 +154,16 @@ the input columns the function reads (`udf_runtime_interface.md` §3.1). It is *
 - **The producer determines it when the plan is built, never a host** (`udf_runtime_interface.md` §6.1 item 6), from
   the first of: (1) an explicit declaration, `columns=[...]` on the verb or, in Python, a `TypedDict` or dataclass
   annotation on a `ROW` function's row parameter or a frame function's input parameter (given together, the two must
-  name the same set, else `UDF_READ_SET_INVALID`; never merged); (2) for a `ROW`, the SDK's static scan of field
-  accesses, counting every branch, taken or not; (3) for a `MAP_BATCHES_FRAME`, the input frame's columns at that point
-  of the plan, which the producer knows from the schema, in the canonical order; the user narrows it with `columns=[...]`
-  (the SDK's diagnostic suggests it when the frame reads few of many columns; a frame has no static-scan requirement). The schema is always known there: a frame's `arg_types` carry each column's Arrow type, so a plan with a frame UDF cannot be built without its child's output schema, and a child whose schema the producer cannot bind is refused by the plan builder's own binding, before capture.
+  name the same set, else `UDF_READ_SET_INVALID`; never merged); (2) for a `ROW` only, the SDK's static scan of field
+  accesses, counting every branch, taken or not. A `MAP_BATCHES_FRAME` has only (1), no default and no static scan: a
+  frame function with neither `columns=[...]` nor an annotation is refused at capture, on the user's machine, with
+  `UDF_READ_SET_REQUIRED`, naming the function and the argument to give, `columns=[...]`. A user whose function uses
+  the whole input lists it (`columns=list(df.columns)`).
   For a `ROW`, iterating, converting, unpacking or passing on the whole row, or a name the scan cannot
   resolve (a computed `getattr`, `r[var]`), bounds nothing, and the function is refused at capture, on the
-  user's machine, with `UDF_READ_SET_REQUIRED`, naming the function and the argument to give, `columns=[...]`. A `ROW`
-  never lists every column as a stand-in for "unknown". A declared or literal name the input lacks is refused on the user's machine, even on a branch not taken
-  (`UDF_READ_SET_COLUMN_UNKNOWN`). For a grouped frame the SDK adds the `group_by` columns. A local run never adds to
+  user's machine, with `UDF_READ_SET_REQUIRED`, naming the function and the argument to give, `columns=[...]`. For
+  every UDF that receives rows or a frame, the SDK never lists every input column as a stand-in for "unknown". A declared or literal name the input lacks is refused on the user's machine, even on a branch not taken
+  (`UDF_READ_SET_COLUMN_UNKNOWN`). For a grouped frame the SDK adds the `group_by` columns to the declared set (recorded in the descriptor's `key_fields` when the declaration lacks them). A local run never adds to
   the read set: a field read only on a branch it happened to take would hide a scan defect.
 - **The runtime hands over those columns only.** For a `ROW`, a lazy row view over the argument struct's children: a
   read of any other field fails the batch with `UDF_FIELD_NOT_DECLARED`, naming the field, the read set and the row,
@@ -709,7 +710,7 @@ the read set's columns stay live, down to the scan's `projection`. A
 `MAP_BATCHES_FRAME` node needs from its child only the read set, which contains its `group_by`
 columns. An empty read set keeps no column live: the scan still delivers
 the row count. The optimizer never reads `code` and never widens, narrows or invents a read set; no host re-derives
-it. A `ROW` or frame UDF whose read set names 2 columns of a 100-column table keeps 2 columns live, and a frame captured without `columns=[...]` has the input frame's columns as its read set
+it. A `ROW` or frame UDF whose read set names 2 columns of a 100-column table keeps 2 columns live
 (§9.4 holds a plan case for each); a `ROW` or frame with no read set is refused, because it would keep 100.
 
 **An `AGGREGATE` UDF is treated as an aggregate measure.** A predicate on the group keys may move below the
