@@ -172,12 +172,18 @@ def engine_fork(e):
     inst = e.instance("zygote_pid")
     inst.call_ok([ints(0)])
     zygote, workers = e.pids()
+    spec = e.env.bundle_spec({"fix.py": e.source}, "fix:zygote_pid")
     r, w = os.pipe()
     pid = os.fork()
     if pid == 0:
         os.close(r)
         try:
-            os.write(w, json.dumps(outcome(inst.call([ints(0)]))).encode())
+            call = outcome(inst.call([ints(0)]))
+            status, udf, err = e.rt.load(spec)
+            load = {"status": status, "udf": udf is not None, "message": err.message if err else None}
+            status, ctx, err = e.rt.open_context()
+            opened = {"status": status, "ctx": ctx is not None, "message": err.message if err else None}
+            os.write(w, json.dumps({"call": call, "load": load, "open_context": opened}).encode())
         finally:
             os._exit(0)
     os.close(w)
@@ -288,10 +294,14 @@ def a_fork_of_the_engine_cannot_reach_the_runtime_and_leaves_the_parent_working(
     try:
         got = child.read()
         (worker,) = got["workers"]
+        forked_why = "this process is a fork of the process that owns the runtime's zygote and workers"
         assert got["in_fork"] == {
-            "status": h.ERR_INSTANCE_LOST, "values": None,
-            "message": "the worker (pid %d) is gone: this process is a fork of the process that owns the "
-                       "runtime's zygote and workers; no user code ran" % worker,
+            "call": {
+                "status": h.ERR_INSTANCE_LOST, "values": None,
+                "message": "the worker (pid %d) is gone: %s; no user code ran" % (worker, forked_why),
+            },
+            "load": {"status": h.ERR_INSTANCE_LOST, "udf": False, "message": "komira/python: " + forked_why},
+            "open_context": {"status": h.ERR_INSTANCE_LOST, "ctx": False, "message": "komira/python: " + forked_why},
         }, got
         assert got["in_parent"] == {"status": h.OK, "message": None, "values": [got["zygote"]]}, got
         pidfd = os.pidfd_open(got["zygote"])

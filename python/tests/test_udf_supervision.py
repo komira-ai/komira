@@ -257,7 +257,7 @@ def a_cancel_lands_between_rows_of_a_long_loop_and_the_worker_stays(env):
     assert env.trace.events("sigkill") == [] and exits(env) == []
 
 
-def stopped_by_force(env, f, inst, fire, why, **call):
+def stopped_by_force(env, f, inst, fire, why, grace_ms=GRACE_MS, **call):
     """Run a call of `spin`; once it spins, fire() the cancel or the deadline, wait for
     the runtime's cancel_word line, then move the host clock past the grace period."""
     call_id = inst.next_call
@@ -266,7 +266,7 @@ def stopped_by_force(env, f, inst, fire, why, **call):
         fire()
         until(lambda: any(e["call"] == str(call_id) and e["why"] == why for e in env.trace.events("cancel_word")))
         (word,) = [e for e in env.trace.events("cancel_word") if e["call"] == str(call_id)]
-        f.rt.state.now_value = int(word["now"]) + GRACE_MS * 1_000_000
+        f.rt.state.now_value = int(word["now"]) + grace_ms * 1_000_000
 
     join = f.during_call(act)
     try:
@@ -307,6 +307,19 @@ def a_call_that_ignores_its_deadline_is_stopped_by_force_after_the_grace_period(
     refused(inst.call([ints(0)]), h.ERR_INSTANCE_LOST,
             "the worker (pid %d) is gone: it was stopped with SIGKILL during an earlier call; "
             "no user code ran" % worker)
+
+
+def without_the_option_the_grace_period_is_two_seconds_of_the_host_clock(env):
+    f = Fixtures(env, batch_format=h.ARROW, shape=h.SHAPE_MAP_BATCHES_COLUMN)
+    _, inst = f.instance("spin")
+    worker = forked(env, 1)
+    r, call_id = stopped_by_force(env, f, inst, lambda: setattr(inst.cancel, "value", 1), "cancel", grace_ms=2000)
+    refused(r, h.ERR_KILLED, "the worker (pid %d) did not stop within grace_ms=2000 after the cancel and was "
+            "stopped with SIGKILL" % worker)
+    assert kill_lines(env) == [("1", str(worker), str(call_id), "cancel")], env.trace.events("sigkill")
+    (word,) = env.trace.events("cancel_word")
+    (kill,) = env.trace.events("sigkill")
+    assert int(kill["now"]) - int(word["now"]) == 2000 * 1_000_000, (word, kill)
 
 
 def a_memory_error_ends_the_worker_after_its_answer(env):
