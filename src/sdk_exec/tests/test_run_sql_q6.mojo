@@ -45,7 +45,8 @@
 #     three INT64 values of 2^62 is the DECIMAL(38, 0) 3 * 2^62, and Q6 then
 #     runs on the same context.
 #   * test_a_scalar_subquery_is_refused_by_lowering: the optimizer leaves the
-#     subquery in the plan, so it is LOWERING_UNCUTTABLE_NODE at `lower`, and
+#     subquery in the plan as a CROSS join against its one-row aggregate, so it
+#     is LOWERING_JOIN_UNSERVED, naming the CROSS join, at `lower`, and
 #     Q6 then runs on the same context.
 #   * test_a_refusal_leaves_the_context_usable: a bind and a parse refusal, then
 #     Q6 gives the oracle.
@@ -471,7 +472,12 @@ def test_a_scalar_subquery_is_refused_by_lowering() raises:
         "select count(*) from lineitem where l_quantity < (select"
         " max(l_quantity) from lineitem)",
     )
-    _expect_refusal(out, String(STEP_LOWER), "LOWERING_UNCUTTABLE_NODE")
+    _expect_refusal(
+        out,
+        String(STEP_LOWER),
+        "LOWERING_JOIN_UNSERVED: Join (a CROSS join) is not served by the INNER"
+        " hash join",
+    )
     _expect_revenue(run_sql(ctx, _q6()), o.revenue)
 
 

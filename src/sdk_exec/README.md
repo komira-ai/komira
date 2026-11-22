@@ -71,7 +71,8 @@ package lists (`HIVE_PARTITION_*`).
 
 **Refused here, by name.** A statement that is not a query
 (`STATEMENT_NOT_A_QUERY`, step `bind`); a scalar subquery (the optimizer keeps
-it in the plan and lowering refuses the node, `LOWERING_UNCUTTABLE_NODE`; the
+it in the plan as a CROSS join, which lowering refuses with
+`LOWERING_JOIN_UNSERVED`; the
 door also refuses with `OPTIMIZE_UNRESOLVED_SCALAR` a plan whose optimization
 asks for a scalar to be executed first, a guard no query tested here reaches); a sink denied its memory by the
 budget, a sum outside its declared type and a pool not whole after a run (step
