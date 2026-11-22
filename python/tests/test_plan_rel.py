@@ -179,18 +179,21 @@ def binding_scan(fmt, variant, orientation=vocab.SOURCE_KIND_ROW):
 
 
 def test_each_format_reads_its_own_binding_variants():
-    for fmt, variant in [
-        ("csv", "CSV"),
-        ("json", "JSON"),
-        ("ndjson", "JSON"),
-        ("orc", "ORC"),
-        ("avro", "AVRO"),
-        ("arrow", "ARROW_UNCOMPRESSED"),
-        ("arrow", "ARROW_LZ4_FRAME"),
-        ("arrow", "ARROW_ZSTD"),
+    row, columnar = vocab.SOURCE_KIND_ROW, vocab.SOURCE_KIND_COLUMNAR
+    for fmt, variant, layout in [
+        ("csv", "CSV", row),
+        ("json", "JSON", row),
+        ("ndjson", "JSON", row),
+        ("orc", "ORC", columnar),
+        ("avro", "AVRO", row),
+        ("arrow", "ARROW_UNCOMPRESSED", columnar),
+        ("arrow", "ARROW_LZ4_FRAME", columnar),
+        ("arrow", "ARROW_ZSTD", columnar),
     ]:
-        node, sources = binding_scan(fmt, getattr(vocab, "SOURCE_VARIANT_" + variant))
-        assert root(node, sources).scan.source.binding.variant_tag == getattr(vocab, "SOURCE_VARIANT_" + variant)
+        node, sources = binding_scan(fmt, getattr(vocab, "SOURCE_VARIANT_" + variant), layout)
+        scan = root(node, sources).scan
+        assert scan.source.binding.variant_tag == getattr(vocab, "SOURCE_VARIANT_" + variant), fmt
+        assert scan.source_kind == layout, fmt
 
 
 def test_a_binding_of_another_format_is_refused():
