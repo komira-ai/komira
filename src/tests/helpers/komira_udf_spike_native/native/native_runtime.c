@@ -688,7 +688,7 @@ static const komira_udf_runtime TABLE = {
 
 const komira_udf_runtime* komira_udf_native_rt_init_v1(const komira_udf_host* host, komira_udf_rt** rt,
                                                        komira_udf_error* e) {
-  if (host == NULL || host->struct_size < sizeof(komira_udf_host) || host->abi_major != KOMIRA_UDF_ABI_MAJOR) {
+  if (host == NULL || host->struct_size < offsetof(komira_udf_host, n_options) || host->abi_major != KOMIRA_UDF_ABI_MAJOR) {
     fail(e, KOMIRA_UDF_ERR_ABI, "this runtime speaks ABI major 1");
     return NULL;
   }
