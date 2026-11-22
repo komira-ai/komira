@@ -21,8 +21,9 @@ Import each module by name; the package root exports nothing.
   owes once every worker has finished: the build rows a RIGHT or FULL join
   probe found no partner for) is asked of the builder (`op_tail`) and pushed on
   the calling thread through the operators after it and into the sink as worker
-  0, at a partition position after every source position; a spent limit ends
-  the tails, and a cancel during them is raised after them.
+  0, at a partition position after every source position; a spent limit
+  after an operator ends that operator's tail (the tails of operators after
+  the limit still run), and a cancel during them is raised after them.
 - `segment_task`: `SegmentRun`, the state the workers share, and `SegmentTask`,
   the worker body. A worker reads the cancel flag and the token at every morsel
   boundary, claims a morsel (`None` at the end of input, never asked again by

@@ -49,6 +49,9 @@
 #   test_the_tail_of_a_right_probe_is_probed_by_the_next_right_probe
 #       Two probes in one chain give the oracle's rows: the first probe's tail
 #       rows are probed by the second, whose tail follows.
+#   test_a_spent_limit_between_two_right_probes_keeps_the_later_tail
+#       RIGHT probe, LIMIT 0, RIGHT probe: the limit ends the first probe's
+#       tail, and the second probe still emits every one of its build rows.
 #   test_a_cross_join_that_names_a_key_is_refused_by_name
 #       A CROSS probe with keys fails the plan with the operator's refusal.
 
@@ -861,6 +864,61 @@ def test_the_tail_of_a_right_probe_is_probed_by_the_next_right_probe() raises:
                 + String(workers[w]),
             )
             assert_equal(builder.pool_granted(), 0)
+
+
+def test_a_spent_limit_between_two_right_probes_keeps_the_later_tail() raises:
+    var cache = ParquetMetadataCache()
+    var pool = ExprPool()
+    var nf = 0
+    var builder = RealBuilder[origin_of(cache), origin_of(pool), origin_of(nf)](
+        cache, pool
+    )
+    var customers = builder.add_resident(customer_batch(25))
+    var nations = builder.add_resident(nation_batch(4))
+    var orders = builder.add_resident(orders_batch(0, 6))
+    # No row passes LIMIT 0, so the second probe sees none: its output is its
+    # tail, every nation row with NULL columns before it.
+    var first = oracle_join_kind(
+        JOIN_RIGHT,
+        table_of(orders_batch(0, 6)),
+        table_of(customer_batch(25)),
+        key_names("o_custkey"),
+        key_names("c_custkey"),
+    )
+    var none = List[Bool](length=first.num_rows(), fill=False)
+    var second = oracle_join_kind(
+        JOIN_RIGHT,
+        keep_rows(first, none),
+        table_of(nation_batch(4)),
+        key_names("c_nation"),
+        key_names("n_nationkey"),
+    )
+    var want = sorted_rows(second)
+    assert_equal(len(want), 4)
+    var workers = _counts()
+    for w in range(len(workers)):
+        var ops = chain(
+            MorselOp.join_probe(
+                0, key_names("o_custkey"), key_names("c_custkey"), JOIN_RIGHT
+            ),
+            MorselOp.limit(0),
+            MorselOp.join_probe(
+                1, key_names("c_nation"), key_names("n_nationkey"), JOIN_RIGHT
+            ),
+        )
+        var probe = with_build_dep(
+            with_build_dep(batch_segment(2, orders, ops^, 4), 0), 1
+        )
+        var descs = _three(
+            build_segment(0, customers), build_segment(1, nations), probe^
+        )
+        var out = _run(descs, builder, workers[w])
+        var batch = out.take(2)
+        _expect_names(batch, second.names)
+        expect_rows(
+            rows_of(batch), want, "workers " + String(workers[w])
+        )
+        assert_equal(builder.pool_granted(), 0)
 
 
 # ---- what the operator refuses ---------------------------------------------------------------

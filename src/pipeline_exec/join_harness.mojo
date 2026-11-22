@@ -2,7 +2,7 @@
 # join_harness -- join plans by hand, small tables to join, and the oracle
 # =============================================================================
 #
-# What a test needs to run an inner equi join through `run_plan` and
+# What a test needs to run a join of any kind through `run_plan` and
 # `RealBuilder`, or through `HashProbeOp` alone:
 #
 #   * segment descriptors: `build_segment` (a resident batch collected for a

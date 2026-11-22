@@ -16,8 +16,9 @@
 #      the calling thread, through the operators after that one and into the
 #      sink as worker 0, as a morsel at a position after every source
 #      position (`TAIL_PARTITION_BASE` plus the operator's index, and the
-#      batch's index), so a sink that orders by position puts it last. A
-#      later operator that reports FINISHED (a spent limit) ends the tails.
+#      batch's index), so a sink that orders by position puts it last. An
+#      operator after it that reports FINISHED (a spent limit) ends that
+#      operator's tail; the tails of operators after the limit still run.
 #      A cancellation by the caller, before or during the tails, is raised
 #      after them, and the segment never combines.
 #   6. Combine runs once on the calling thread, then finalize, then the output
@@ -146,14 +147,15 @@ def _push_tails[
     ref source_schema: Schema,
 ) raises:
     """Step 5 of the header: push each operator's tail through the operators
-    after it and into the sink, as worker 0. Stops when a push reports that
-    the worker must stop (a FINISHED operator, or a cancel the caller then
-    raises)."""
+    after it and into the sink, as worker 0. A push that reports the worker
+    must stop (a FINISHED operator after this one, or a cancel the caller then
+    raises) ends this operator's tail; the next operator's tail is still
+    pushed, since it enters the chain after the operator that finished."""
     for i in range(run.n_ops):
         var tail = builder.op_tail(desc, i, source_schema)
         var c = 0
         while len(tail) > 0:
             var m = Morsel(tail.pop(0), 0, TAIL_PARTITION_BASE + i, c)
             if _push(run, 0, i + 1, m^):
-                return
+                break
             c += 1
