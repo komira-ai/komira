@@ -81,6 +81,11 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
 #                                 rows, operators on the concatenation, the
 #                                 nullability of any producer kept, and a
 #                                 producer outside the dependencies refused.
+# test_real_shared_output         one producer read by several segments (a
+#                                 shared subplan): two readers, a concatenation
+#                                 naming it twice, a reader beside a
+#                                 concatenation; the published outputs' copy for
+#                                 every reader but the last.
 # test_source_csv                 the CSV source built from a spec: typed, quoted
 #                                 and NULL cells, gzip by extension, a dialect,
 #                                 the declared types over inference, a header
@@ -264,6 +269,7 @@ mojo_library(
         "tests/test_real_concat.mojo",
         "tests/test_real_plan.mojo",
         "tests/test_real_plan_concurrent.mojo",
+        "tests/test_real_shared_output.mojo",
         "tests/test_remote_parquet_source.mojo",
         "tests/test_run_plan.mojo",
         "tests/test_run_segment_concurrent.mojo",

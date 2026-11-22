@@ -3,7 +3,8 @@
 # =============================================================================
 #
 # In order: tokenize and parse; bind against the context's catalog and footers;
-# optimize; lower with inputs from the same footers; run. A step that refuses
+# optimize, then hold each subtree the optimized plan repeats once
+# (`optimize_for_run`); lower with inputs from the same footers; run. A step that refuses
 # ends the call, and the outcome says which step and the step's own message
 # unchanged; the door retries nothing and keeps no second route. Nothing here
 # raises: a failure of any step is a value.
@@ -28,6 +29,8 @@ from arrow.schema import RecordBatch
 from optimizer.optimizer_config import OptimizerConfig
 from optimizer.optimizer_driver import optimize
 from optimizer.optimizer_scalar_deps import ScalarDepTable
+from optimizer.plan_cse import plan_cse_eliminate
+from plan_ir.logical_plan import LogicalPlan
 from phase_timers.phase_timers import (
     PH_BIND,
     PH_LOWER,
@@ -96,6 +99,27 @@ struct SqlOutcome(Movable):
         return not self.refusal
 
 
+def optimize_for_run(var plan: LogicalPlan) raises -> LogicalPlan:
+    """The plan `run_sql` lowers for the bound `plan`: `optimize`, then each
+    subtree the optimized plan repeats held once and every later occurrence a
+    reference to it (`plan_cse_eliminate`: a CTE the query reads twice, two
+    equal UNION ALL branches), which lowering cuts once
+    (`lowering.cut_shared`).
+
+    Raises:
+        OPTIMIZE_UNRESOLVED_SCALAR when the plan needs a scalar subquery
+        executed first; an optimizer pass's own error otherwise.
+    """
+    var deps = ScalarDepTable()
+    var optimized = optimize(plan^, OptimizerConfig(), deps)
+    if deps.has_requests():
+        raise Error(
+            String(OPTIMIZE_UNRESOLVED_SCALAR)
+            + ": the plan needs a scalar subquery executed first"
+        )
+    return plan_cse_eliminate(optimized^)
+
+
 def run_sql(mut ctx: EngineContext, text: String) -> SqlOutcome:
     """Run the SQL query `text` against `ctx`, reading the local file system
     only (`run_sql_with` and `LocalOnlyScanFs`)."""
@@ -122,15 +146,9 @@ def run_sql_with[
         # `sql.sql_frontend`'s STATEMENT_NOT_A_QUERY, at step `bind`.
         var plan = query_plan(bound^)
         step = String(STEP_OPTIMIZE)
-        var deps = ScalarDepTable()
         var t_optimize = pt_now()
-        var optimized = optimize(plan^, OptimizerConfig(), deps)
+        var optimized = optimize_for_run(plan^)
         pt_record[PH_OPTIMIZE](t_optimize)
-        if deps.has_requests():
-            raise Error(
-                String(OPTIMIZE_UNRESOLVED_SCALAR)
-                + ": the plan needs a scalar subquery executed first"
-            )
         step = String(STEP_LOWER)
         var t_lower = pt_now()
         var lowered = lower_for_context(optimized, ctx)

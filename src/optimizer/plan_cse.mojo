@@ -51,11 +51,13 @@
 #
 # SCOPE. A reference only names a hash. Whoever consumes the rewritten plan
 # resolves it to the canonical result, and must reach the canonical occurrence
-# before any reference to it. NO CONSUMER EXISTS IN THIS TREE YET: nothing
-# resolves a `PLAN_CSE_REF`, so a plan this pass has rewritten cannot be
-# lowered until one does. This pass is not part of `optimizer_driver`'s fixed
-# order, so `optimize` never produces a reference; a caller that can consume
-# one calls this pass on the optimized plan.
+# before any reference to it. The consumer is lowering (`lowering.cut_shared`),
+# which cuts the canonical occurrence once and has every reference read it;
+# in a plan that holds a reference its cutter walks in this same order (a
+# union's branches in order, a join's right child first), so it reaches the
+# canonical occurrence first. This pass is not part of
+# `optimizer_driver`'s fixed order, so `optimize` never produces a reference;
+# `sdk_exec.engine_sql.optimize_for_run` calls it on the optimized plan.
 #
 # COST. Analysis is linear in the plan apart from the hashes: each
 # scan-bearing node costs one render of its subtree, so a deep chain of

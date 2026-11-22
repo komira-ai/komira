@@ -18,7 +18,9 @@
 # facts of a refused join's scans are read before the refusal. Any other node
 # the cutter does not cut is not descended into: the cutter refuses it by name
 # before it asks for any scan below, so no facts are read for a plan that
-# cannot lower.
+# cannot lower. A shared-subplan reference (PLAN_CSE_REF) is a leaf with no
+# scan: the cutter reads the scans of the subplan it names where the canonical
+# subtree stands.
 
 from host_profile.host_profile import HostProfile
 from lowering.lower import lower

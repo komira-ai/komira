@@ -23,7 +23,9 @@
 #   * test_one_key_in_two_buckets_is_two_objects: a UNION ALL of the key
 #     `t/a.parquet` of bucket `lake` and of bucket `other` (different rows)
 #     answers both objects' rows, as the two local files do: the run's footer
-#     cache keeps the two apart.
+#     cache keeps the two apart, and so does the optimizer's shared-subtree
+#     rewrite (the two scans render their stores, so they are not one
+#     subtree).
 #   * test_a_missing_object_is_refused_at_execute_naming_it: a key the bucket
 #     lacks is the store's NOT_FOUND error, naming the object's URL.
 #   * test_a_refused_read_is_refused_at_execute_naming_it: an object the store

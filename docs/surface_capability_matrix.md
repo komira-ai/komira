@@ -131,7 +131,7 @@ The constants that are no capability:
 
 | Identifiers | Why |
 |---|---|
-| `PLAN_CSE_REF` | made only by the optimizer's common-subexpression rewrite; no surface builds it |
+| `PLAN_CSE_REF` | made only by the optimizer's common-subexpression rewrite (`plan_cse`, which `run_sql` applies after `optimize`); no surface builds it |
 | `PLAN_CAST_TO_VARCHAR` | inserted above a text sink by a rewrite; no surface builds it |
 | `PLAN_EXCHANGE` | an optimized plan's data exchange between hosts; no surface builds it, and nothing in this tree places or lowers it yet |
 | `PLAN_MAP_BATCHES` | a user function over batches or groups of its child, named by its `UdfRef`; made only by the plan-wire decoder, so no surface builds it, and nothing in this tree lowers or runs it yet |
