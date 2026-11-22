@@ -31,12 +31,12 @@ The query is passed whole (`QuerySpec`: suite, id, dataset, text, `ORDER BY` key
 `KomiraArm` (`komira_arm.mojo`) is the komira engine through `sdk_exec`:
 
 - `prepare` builds an `EngineContext` with `EngineOptions(worker_count = threads, memory_budget_bytes = memory_limit_bytes)` and registers every table as a Parquet table. A table the engine cannot register is a raise that names it (the run ends). Preparing again first closes the context it holds.
-- `run` hands `query.text` to `run_sql`. Batches are the answer: the typed rows when `materialize`, the row count alone otherwise (the result is still executed in full). A refusal is `UNSUPPORTED:<step>.<CODE>` in the result, for example `UNSUPPORTED:lower.LOWERING_UNCUTTABLE_NODE` (a join today): the step that refused and the code that starts the engine's message; a message with no code gives the step alone (`parse`). The token never holds the engine's text because the result refuses a token with a path in it; the whole message is in the arm's `last_refusal`. A result column type the conversion does not map is a refusal `UNSUPPORTED:result_type_unsupported`, never a wrong value.
+- `run` hands `query.text` to `run_sql`. Batches are the answer: the typed rows when `materialize`, the row count alone otherwise (the result is still executed in full). A refusal is `UNSUPPORTED:<step>.<CODE>` in the result, for example `UNSUPPORTED:lower.LOWERING_JOIN_UNSERVED` (a LEFT JOIN today): the step that refused and the code that starts the engine's message; a message with no code gives the step alone (`parse`). The token never holds the engine's text because the result refuses a token with a path in it; the whole message is in the arm's `last_refusal`. A result column type the conversion does not map is a refusal `UNSUPPORTED:result_type_unsupported`, never a wrong value.
 - A refusal from `run_sql` is recorded by what it means (`outcome_of_refusal`), because the engine reports every failure as a refusal naming a step:
 
 | the engine's refusal | recorded as |
 |---|---|
-| any `parse` refusal; a lowering refusal (`LOWERING_*`, a join today); `EXECUTE_UNSUPPORTED_*`; `OPTIMIZE_UNRESOLVED_SCALAR`; `STATEMENT_NOT_A_QUERY`; a binder message starting `SQL not supported` | `UNSUPPORTED:<token>`: unserved, not a failure |
+| any `parse` refusal; a lowering refusal (`LOWERING_*`, a LEFT JOIN today); `EXECUTE_UNSUPPORTED_*`; `OPTIMIZE_UNRESOLVED_SCALAR`; `STATEMENT_NOT_A_QUERY`; a binder message starting `SQL not supported` | `UNSUPPORTED:<token>`: unserved, not a failure |
 | any other refusal at `bind` (unknown column or table, a type error) | `BIND_FAIL` |
 | any other refusal at `optimize`, `lower` or `execute` (an INT64 sum out of range, a memory budget denied, a pool not whole) | `EXEC_FAIL` |
 

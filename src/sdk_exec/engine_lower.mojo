@@ -12,9 +12,13 @@
 # (`add_parquet_files_scan`). A scan of a remote store (an S3 bucket) has no
 # facts here: the context's footers read the local file system only, so its
 # segment records no row estimate, and its footers are first read when the
-# engine runs it. A node the cutter does
-# not cut is not descended into: the cutter refuses it by name before it asks
-# for any scan below, so no facts are read for a plan that cannot lower.
+# engine runs it. A join is descended
+# into left child first, then right, as the cutter walks it whichever side
+# builds; every join is, the ones the cutter then refuses included, so the
+# facts of a refused join's scans are read before the refusal. Any other node
+# the cutter does not cut is not descended into: the cutter refuses it by name
+# before it asks for any scan below, so no facts are read for a plan that
+# cannot lower.
 
 from host_profile.host_profile import HostProfile
 from lowering.lower import lower
@@ -28,6 +32,7 @@ from plan_ir.logical_plan import (
     PLAN_AGGREGATE,
     PLAN_DISTINCT,
     PLAN_FILTER,
+    PLAN_JOIN,
     PLAN_LIMIT,
     PLAN_PROJECT,
     PLAN_SCAN,
@@ -103,6 +108,9 @@ def _collect(
         _collect(inputs, node.distinct_data_ref().child[], ctx)
     elif tag == PLAN_SORT:
         _collect(inputs, node.sort_data_ref().child[], ctx)
+    elif tag == PLAN_JOIN:
+        _collect(inputs, node.join_data_ref().left[], ctx)
+        _collect(inputs, node.join_data_ref().right[], ctx)
     elif tag == PLAN_UNION:
         # Branch order is the cutter's order.
         ref ud = node.union_data_ref()

@@ -92,8 +92,9 @@ _MIXED_TEST_DATA.update({c + ".tsv": ":group_keys_mixed_oracle[" + c + ".tsv]" f
 #   the consumer is called.
 # - test_run_sql_q6: run_sql over an EngineContext. TPC-H Q6's text from
 #   bench_corpus over a lineitem-shaped Parquet file gives the integer
-#   oracle's DECIMAL(38,4); a join, a syntax error, an unknown table, a COPY or
-#   CTAS and a replaced file are named refusals; the footer is read once per
+#   oracle's DECIMAL(38,4); a self-join counts the key pairs of the oracle; a
+#   LEFT JOIN, a syntax error, an unknown table, a COPY or CTAS and a replaced
+#   file are named refusals; the footer is read once per
 #   query; contexts are created and dropped repeatedly.
 # - test_run_sql_distinct: run_sql over Parquet tables in several row groups:
 #   SELECT DISTINCT over an INT64 and a STRING column gives each value once and
@@ -123,6 +124,13 @@ _MIXED_TEST_DATA.update({c + ".tsv": ":group_keys_mixed_oracle[" + c + ".tsv]" f
 #   empty string, under a WHERE and a HAVING, with count(DISTINCT), SELECT
 #   DISTINCT over three columns, an all-NULL key and no row, on one and three
 #   workers; every case is run.
+# - test_run_sql_joins: run_sql over six TPC-H-typed Parquet tables (INT32 and
+#   INT64 keys with NULLs and unmatched keys, DECIMAL(15,2) money, DATE32): the
+#   shapes of Q3, Q5 (a six-table join on two keys) and Q10 as comma joins in
+#   WHERE, with a revenue sum by one column, and their count(*), equal an oracle
+#   computed row by row in the test; JOIN ... ON counts the key pairs over
+#   INT32, INT64 and mixed keys; the unedited Q3 text is a named LOWERING_
+#   refusal at step lower.
 # - test_run_sql_int_sum: run_sql over INT64 and INT32 Parquet columns in several
 #   row groups: an integer sum() is declared DECIMAL(38, 0) and exact past the
 #   INT64 range (MAX and MIN rows, partials that each pass INT64, {MAX, MAX, MIN,
@@ -258,6 +266,7 @@ mojo_library(
         "tests/test_run_sql_group_keys.mojo",
         "tests/test_run_sql_group_keys_mixed.mojo",
         "tests/test_run_sql_int_sum.mojo",
+        "tests/test_run_sql_joins.mojo",
         "tests/test_run_sql_multifile.mojo",
         "tests/test_run_sql_s3.mojo",
         "tests/test_run_sql_no_from.mojo",

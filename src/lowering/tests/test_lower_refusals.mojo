@@ -8,10 +8,10 @@
 # detail lowers. A refused plan never produces a LoweredPlan.
 #
 # Tests, and the behaviour each asserts:
-#   test_nodes_the_cutter_does_not_cut_are_refused_by_tag: a join,
+#   test_nodes_the_cutter_does_not_cut_are_refused_by_tag: a
 #     top-n, view reference, shared-subplan reference and cast to string are
 #     each refused by their tag name.
-#   test_a_refused_node_below_a_breaker_refuses_the_whole_plan: a join under an
+#   test_a_refused_node_below_a_breaker_refuses_the_whole_plan: a top-n under an
 #     aggregate refuses the plan; the aggregate over a scan lowers.
 #   test_a_distinct_over_a_column_list_is_refused_and_one_over_the_row_is_cut:
 #     a distinct that names columns is refused with the exact text; the same
@@ -50,6 +50,7 @@ from lowering.lowered_plan import (
     LOWERING_SINK_UNSERVED,
     LOWERING_SCAN_NOT_TOTAL,
     LOWERING_INPUTS_SCAN_COUNT,
+    LOWERING_JOIN_UNSERVED,
 )
 from plan_expr.agg_expr import AggExpr, AGG_COUNT, AGG_UDF
 from plan_expr.partition_expr import PartitionExpr
@@ -78,8 +79,6 @@ from plan_ir.logical_plan import (
     SOURCE_CSV,
     SOURCE_NDJSON,
     SOURCE_KIND_UNSET,
-    JOIN_INNER,
-    PLAN_JOIN,
     PLAN_DISTINCT,
     PLAN_TOPN,
     PLAN_VIEW_REF,
@@ -163,10 +162,6 @@ def _refused_with(message: String, token: String, why: String) raises:
 
 
 def test_nodes_the_cutter_does_not_cut_are_refused_by_tag() raises:
-    var join = LogicalPlan.join(_scan(), _scan(), _names("k"), _names("k"), JOIN_INNER)
-    _refused_with(_message(join, _inputs(2)), LOWERING_UNCUTTABLE_NODE, plan_tag_name(PLAN_JOIN))
-
-
     var topn = LogicalPlan.topn(_names("k"), _bools(False), 5, _scan())
     _refused_with(_message(topn, _inputs()), LOWERING_UNCUTTABLE_NODE, plan_tag_name(PLAN_TOPN))
 
@@ -181,9 +176,9 @@ def test_nodes_the_cutter_does_not_cut_are_refused_by_tag() raises:
 
 
 def test_a_refused_node_below_a_breaker_refuses_the_whole_plan() raises:
-    var join = LogicalPlan.join(_scan(), _scan(), _names("k"), _names("k"), JOIN_INNER)
-    var plan = _count_by(join^, List[String]())
-    _refused_with(_message(plan, _inputs(2)), LOWERING_UNCUTTABLE_NODE, plan_tag_name(PLAN_JOIN))
+    var topn = LogicalPlan.topn(_names("k"), _bools(False), 5, _scan())
+    var plan = _count_by(topn^, List[String]())
+    _refused_with(_message(plan, _inputs()), LOWERING_UNCUTTABLE_NODE, plan_tag_name(PLAN_TOPN))
     # The same aggregate over a scan lowers.
     assert_equal(_message(_count_by(_scan(), List[String]()), _inputs()), "")
 
@@ -524,12 +519,13 @@ def test_inputs_must_hold_one_entry_per_scan() raises:
     assert_equal(_message(_scan(), _inputs(1)), "")
 
 
-def test_the_refusal_tokens_are_four_distinct_names() raises:
+def test_the_refusal_tokens_are_five_distinct_names() raises:
     var tokens = List[String]()
     tokens.append(String(LOWERING_UNCUTTABLE_NODE))
     tokens.append(String(LOWERING_SINK_UNSERVED))
     tokens.append(String(LOWERING_SCAN_NOT_TOTAL))
     tokens.append(String(LOWERING_INPUTS_SCAN_COUNT))
+    tokens.append(String(LOWERING_JOIN_UNSERVED))
     for i in range(len(tokens)):
         for j in range(i + 1, len(tokens)):
             assert_true(tokens[i] != tokens[j])
