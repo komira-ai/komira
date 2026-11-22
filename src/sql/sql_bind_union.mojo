@@ -303,10 +303,7 @@ def _union_merge_schema(
 
 
 def _union_conform_branch(
-    var plan: LogicalPlan,
-    out_schema: Schema,
-    branch: Int,
-    op: String = "UNION ALL",
+    var plan: LogicalPlan, out_schema: Schema, branch: Int
 ) raises -> LogicalPlan:
     """A branch plan whose column names and types are the union's: `plan`
     itself when it already is; else, when the branch ends in a projection (its
@@ -344,7 +341,7 @@ def _union_conform_branch(
         for j in range(i + 1, n):
             if plan.output_schema.field_name(i) == plan.output_schema.field_name(j):
                 raise Error(
-                    "SQL not supported: " + op + " branch " + String(branch)
+                    "SQL not supported: UNION ALL branch " + String(branch)
                     + " has two columns named `"
                     + String(plan.output_schema.field_name(i)) + "` and needs"
                     " its columns renamed or cast to match the other branches."

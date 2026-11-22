@@ -218,8 +218,10 @@ def _bind_set_pair(
                     " second would be read as the first. Give the two columns"
                     " distinct aliases."
                 )
-    var l = _union_conform_branch(left^, schema, left_first, op)
-    var r = _union_conform_branch(right^, schema, right_first, op)
+    # The names are unique (checked above), so the conform's refusal of a
+    # branch with two columns of one name cannot fire here.
+    var l = _union_conform_branch(left^, schema, left_first)
+    var r = _union_conform_branch(right^, schema, right_first)
     var children = List[OwnedPointer[LogicalPlan]]()
     children.append(OwnedPointer(_tag_side(l^, schema, 0)))
     children.append(OwnedPointer(_tag_side(r^, schema, 1)))
